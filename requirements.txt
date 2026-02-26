@@ -1,11 +1,9 @@
-# Web uygulaması (erp_web) bağımlılıkları — Render repo kökünden build alırsa bu kullanılır.
-flask==3.0.3
-Flask-Login==0.6.3
-flask-session==0.8.0
-werkzeug==3.0.3
-psycopg2-binary==2.9.9
-python-dotenv==1.0.1
-gunicorn==22.0.0
-openpyxl==3.1.2
-pandas==2.2.0
-supabase==2.4.6
+flask
+flask-login
+gunicorn
+pandas
+openpyxl
+supabase
+python-dotenv
+psycopg2-binary
+werkzeug
