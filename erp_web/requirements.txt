@@ -1,5 +1,18 @@
+<<<<<<< HEAD
 flask
 flask-compress
 gunicorn
 pandas
 openpyxl
+=======
+flask==3.0.3
+Flask-Login==0.6.3
+flask-session==0.8.0
+werkzeug==3.0.3
+psycopg2-binary==2.9.9
+python-dotenv==1.0.1
+gunicorn==22.0.0
+openpyxl==3.1.2
+pandas==2.2.0
+supabase==2.4.6
+>>>>>>> 0e0917348e0f2349358cb9b44b5676a1128cbd0c
