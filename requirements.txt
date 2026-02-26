@@ -7,3 +7,4 @@
 # Bu yüzden pip ile kurulacak harici bir paket gerekmiyor.
 # İleride yeni kütüphaneler eklersek, buraya satır satır ekleyeceğiz; örnek:
 # requests==2.32.3
+pandas
