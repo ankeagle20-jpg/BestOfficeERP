@@ -1,0 +1,181 @@
+{% extends "layout.html" %}
+
+{% block page_title %}Kira Senaryo Hesaplama{% endblock %}
+
+{% block content %}
+<style>
+.kira-header {
+    background: #0f2537;
+    padding: 12px 16px;
+    margin: -10px -10px 10px -10px;
+}
+.kira-header h2 {
+    color: #4fc3f7;
+    margin: 0;
+    font-size: 16px;
+}
+.musteri-select {
+    background: #1e3a50;
+    padding: 12px;
+    margin-bottom: 12px;
+    border-radius: 4px;
+}
+.musteri-select h3 {
+    color: #4fc3f7;
+    font-size: 14px;
+    margin: 0 0 10px 0;
+}
+.musteri-select select {
+    width: 100%;
+    background: #2d4060;
+    border: 1px solid #3d5070;
+    color: #e0f7fa;
+    padding: 8px 12px;
+    border-radius: 3px;
+    font-size: 14px;
+}
+.ayarlar-panel {
+    background: #1e3a50;
+    padding: 12px;
+    margin-bottom: 12px;
+    border-radius: 4px;
+}
+.ayarlar-panel h3 {
+    color: #4fc3f7;
+    font-size: 14px;
+    margin: 0 0 10px 0;
+}
+.ayarlar-grid {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 10px;
+}
+.ayar-item label {
+    display: block;
+    color: #90a4ae;
+    font-size: 11px;
+    margin-bottom: 4px;
+}
+.ayar-item input {
+    width: 100%;
+    background: #2d4060;
+    border: 1px solid #3d5070;
+    color: #e0f7fa;
+    padding: 6px 8px;
+    border-radius: 3px;
+    font-size: 12px;
+    text-align: right;
+}
+.sonuc-panel {
+    background: #1e3a50;
+    padding: 12px;
+    border-radius: 4px;
+}
+.sonuc-panel h3 {
+    color: #4fc3f7;
+    font-size: 14px;
+    margin: 0 0 10px 0;
+}
+.sonuc-table {
+    width: 100%;
+    background: #243447;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+.sonuc-table th {
+    background: #0097a7;
+    color: white;
+    padding: 8px 6px;
+    text-align: center;
+    font-size: 11px;
+}
+.sonuc-table td {
+    padding: 6px 8px;
+    border-bottom: 1px solid #2d4060;
+    text-align: right;
+    color: #e0f7fa;
+}
+.sonuc-table td:first-child {
+    text-align: center;
+}
+</style>
+
+<div class="kira-header">
+    <h2>📈 Kira Artış Senaryo Hesaplama</h2>
+</div>
+
+<!-- Müşteri Seçimi -->
+<div class="musteri-select">
+    <h3>1️⃣ Müşteri Seçin</h3>
+    <select id="musteri-sec" onchange="musteriSec()">
+        <option value="">— Müşteri Seçin —</option>
+        {% for m in musteriler %}
+        <option value="{{ m.id }}">{{ m.name }}</option>
+        {% endfor %}
+    </select>
+</div>
+
+<!-- Senaryo Ayarları -->
+<div class="ayarlar-panel">
+    <h3>2️⃣ Senaryo Ayarları</h3>
+    <div class="ayarlar-grid">
+        {% for ay in ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'] %}
+        <div class="ayar-item">
+            <label>{{ ay }} (%):</label>
+            <input type="text" placeholder="0,00" id="oran-{{ loop.index }}">
+        </div>
+        {% endfor %}
+    </div>
+    <div style="margin-top: 12px; text-align: center;">
+        <button onclick="hesapla()" style="background: #00bcd4; color: white; border: none; padding: 10px 30px; border-radius: 3px; cursor: pointer; font-weight: bold; font-size: 14px;">
+            🧮 HESAPLA
+        </button>
+    </div>
+</div>
+
+<!-- Sonuçlar -->
+<div class="sonuc-panel">
+    <h3>3️⃣ Hesaplama Sonuçları</h3>
+    <p style="color: #90a4ae; font-size: 13px; margin-bottom: 10px;">
+        Henüz hesaplama yapılmadı. Yukarıdan müşteri seçin ve HESAPLA butonuna basın.
+    </p>
+    <table class="sonuc-table">
+        <thead>
+            <tr>
+                <th>Ay</th>
+                <th>Artış Oranı (%)</th>
+                <th>Önceki Kira (₺)</th>
+                <th>Artış (₺)</th>
+                <th>Yeni Kira (₺)</th>
+            </tr>
+        </thead>
+        <tbody id="sonuc-tbody">
+            <tr>
+                <td colspan="5" style="text-align: center; padding: 20px; color: #6b7280;">
+                    Sonuçlar burada görünecek
+                </td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+
+<script>
+function musteriSec() {
+    const musteriId = document.getElementById('musteri-sec').value;
+    if(musteriId) {
+        console.log('Seçili müşteri ID:', musteriId);
+        // TODO: Müşteri bilgilerini yükle
+    }
+}
+
+function hesapla() {
+    const musteriId = document.getElementById('musteri-sec').value;
+    if(!musteriId) {
+        alert('⚠️ Lütfen önce bir müşteri seçin!');
+        return;
+    }
+    alert('Hesaplama yapılıyor...');
+    // TODO: Backend'e istek at, sonuçları göster
+}
+</script>
+{% endblock %}

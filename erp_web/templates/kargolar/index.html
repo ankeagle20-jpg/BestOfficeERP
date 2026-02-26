@@ -1,0 +1,184 @@
+{% extends "layout.html" %}
+
+{% block page_title %}Kargolar{% endblock %}
+
+{% block content %}
+<style>
+.kargo-toolbar {
+    background: #1e3a50;
+    padding: 10px 12px;
+    margin: -10px -10px 10px -10px;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+.kargo-toolbar input {
+    background: #2d4060;
+    border: 1px solid #3d5070;
+    color: #e0f7fa;
+    padding: 6px 10px;
+    border-radius: 3px;
+    font-size: 13px;
+    width: 200px;
+}
+.kargo-toolbar select {
+    background: #2d4060;
+    border: 1px solid #3d5070;
+    color: #e0f7fa;
+    padding: 6px 10px;
+    border-radius: 3px;
+    font-size: 13px;
+}
+.kargo-toolbar button {
+    background: #00bcd4;
+    color: white;
+    border: none;
+    padding: 7px 14px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: bold;
+}
+.kargo-ozet {
+    background: #0f2537;
+    padding: 10px 12px;
+    margin-bottom: 10px;
+    border-radius: 4px;
+    display: flex;
+    gap: 20px;
+    color: #4fc3f7;
+    font-size: 13px;
+    font-weight: bold;
+}
+.kargo-table {
+    width: 100%;
+    background: #243447;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+.kargo-table th {
+    background: #0097a7;
+    color: white;
+    padding: 8px 6px;
+    text-align: center;
+    font-weight: bold;
+    font-size: 11px;
+}
+.kargo-table td {
+    padding: 6px 8px;
+    border-bottom: 1px solid #2d4060;
+    text-align: center;
+    color: #e0f7fa;
+}
+.kargo-table tr:hover {
+    background: #2d4060;
+    cursor: pointer;
+}
+.durum-badge {
+    padding: 4px 8px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: bold;
+}
+.durum-beklemede {
+    background: #fff176;
+    color: #000;
+}
+.durum-gonderildi {
+    background: #4fc3f7;
+    color: #000;
+}
+.durum-teslim {
+    background: #69f0ae;
+    color: #000;
+}
+</style>
+
+<div class="card-erp">
+    <h2>📦 Kargolar</h2>
+    
+    <!-- Toolbar -->
+    <div class="kargo-toolbar">
+        <input type="text" id="musteri-ara" placeholder="Müşteri:" style="width: 150px;">
+        <select id="durum-filtre">
+            <option value="">Durum: Tümü</option>
+            <option>beklemede</option>
+            <option>gonderildi</option>
+            <option>teslim</option>
+        </select>
+        <button onclick="listele()">Listele</button>
+        <button onclick="yenile()">↺ Yenile</button>
+    </div>
+    
+    <!-- Özet -->
+    <div class="kargo-ozet">
+        <span>Toplam: {{ kargolar|length }}</span>
+        <span>Tahsilat bekleyen: 0,00 TL</span>
+        <span>Toplam ödeme: 0,00 TL</span>
+    </div>
+    
+    <!-- Tablo -->
+    {% if kargolar %}
+    <div style="overflow-x: auto; max-height: 600px; overflow-y: auto;">
+        <table class="kargo-table">
+            <thead>
+                <tr>
+                    <th>Tarih</th>
+                    <th>Müşteri</th>
+                    <th>Kargo Firması</th>
+                    <th>Teslim Alan</th>
+                    <th>Takip No</th>
+                    <th>Ödeme (TL)</th>
+                    <th>Ödeme Durumu</th>
+                    <th>WhatsApp</th>
+                    <th>Resim</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for k in kargolar %}
+                <tr onclick="selectKargo({{ k.id }})">
+                    <td>{{ k.tarih or k.created_at[:10] or '—' }}</td>
+                    <td style="text-align: left;">{{ k.musteri_adi or '—' }}</td>
+                    <td>{{ k.kargo_firmasi or '—' }}</td>
+                    <td>{{ k.teslim_alan or '—' }}</td>
+                    <td><strong>{{ k.takip_no or '—' }}</strong></td>
+                    <td style="text-align: right;">{{ '%.2f'|format(k.odeme_tutari or 0) }}</td>
+                    <td>
+                        {% if k.odeme_durumu == 'odendi' %}
+                        <span class="durum-badge durum-teslim">Ödendi</span>
+                        {% else %}
+                        <span class="durum-badge durum-beklemede">Ödenmedi</span>
+                        {% endif %}
+                    </td>
+                    <td>—</td>
+                    <td>—</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div style="text-align: center; padding: 40px; color: #6b7280;">
+        <p style="font-size: 16px; margin-bottom: 10px;">ℹ️ Henüz kargo kaydı yok.</p>
+        <button onclick="location.href='{{ url_for('kargolar.yeni') }}'" style="background: #00bcd4; color: white; border: none; padding: 10px 20px; border-radius: 3px; cursor: pointer;">
+            + Yeni Kargo
+        </button>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+function selectKargo(id) {
+    console.log('Seçili kargo:', id);
+    // TODO: Detay sayfasına git veya modal aç
+}
+
+function listele() {
+    alert('Filtreleme özelliği yakında!');
+}
+
+function yenile() {
+    location.reload();
+}
+</script>
+{% endblock %}

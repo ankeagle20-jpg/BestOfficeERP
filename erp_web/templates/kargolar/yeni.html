@@ -1,0 +1,44 @@
+{% extends "layout.html" %}
+
+{% block page_title %}Yeni Kargo{% endblock %}
+
+{% block content %}
+<h2>➕ Yeni Kargo Oluştur</h2>
+
+<div class="card-erp" style="max-width: 500px;">
+  <form method="POST">
+    <div class="form-erp">
+      <label>Takip Numarası *</label>
+      <input type="text" name="tracking_no" required placeholder="Örn: TRK123456">
+    </div>
+
+    <div class="form-erp">
+      <label>Müşteri *</label>
+      <select name="musteri_id" required>
+        <option value="">-- Müşteri Seç --</option>
+        {% for musteri in musteriler %}
+        <option value="{{ musteri.id }}">{{ musteri.ad }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="form-erp">
+      <label>Durum *</label>
+      <select name="status" required>
+        <option value="hazirlanıyor">Hazırlanıyor</option>
+        <option value="gonderildi">Gönderildi</option>
+        <option value="teslim">Teslim Edildi</option>
+      </select>
+    </div>
+
+    <div style="display: flex; gap: 10px;">
+      <button type="submit" class="btn-erp">
+        <i class="fa fa-save"></i> Oluştur
+      </button>
+      <a href="{{ url_for('kargolar.index') }}" class="btn-outline-erp">
+        <i class="fa fa-arrow-left"></i> Geri
+      </a>
+    </div>
+  </form>
+</div>
+{% endblock %}

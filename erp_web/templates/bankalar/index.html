@@ -1,0 +1,491 @@
+{% extends "layout.html" %}
+{% block page_title %}Bankalar{% endblock %}
+{% block extra_head %}
+<style>
+.banka-header { background: #0f2537; padding: 12px 16px; margin: -10px -10px 10px -10px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+.banka-header h2 { color: #4fc3f7; margin: 0; font-size: 16px; }
+.banka-filters { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.banka-filters select, .banka-filters input { background: #2d4060; border: 1px solid #3d5070; color: #e0f7fa; padding: 6px 10px; border-radius: 3px; font-size: 13px; }
+.ozet-bar { background: #1e3a50; padding: 10px 12px; margin-bottom: 10px; border-radius: 4px; display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
+.ozet-item { font-size: 14px; font-weight: bold; }
+.ozet-item.toplam { color: #b0bec5; }
+.ozet-item.eslesti { color: #69f0ae; }
+.ozet-item.bekleyen { color: #fff176; }
+.ozet-item.masraflar { color: #ff8a65; }
+.banka-layout { display: grid; grid-template-columns: 1fr 320px; gap: 16px; }
+.banka-table-wrap { background: #1e3a50; padding: 12px; border-radius: 4px; overflow: auto; max-height: 70vh; }
+.banka-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.banka-table th { background: #0097a7; color: white; padding: 8px 6px; text-align: left; font-size: 11px; position: sticky; top: 0; }
+.banka-table td { padding: 6px 8px; border-bottom: 1px solid #2d4060; color: #e0f7fa; }
+.banka-table tr:hover { background: #2d4060; }
+.banka-table tr.selected { background: #1e5a7a; }
+.banka-table tr { cursor: pointer; }
+.banka-table .tutar-poz { color: #69f0ae; }
+.banka-table .tutar-neg { color: #ff8a65; }
+.eslestirme-panel { background: #1e3a50; padding: 14px; border-radius: 4px; }
+.eslestirme-panel h3 { color: #4fc3f7; font-size: 14px; margin: 0 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #2d4060; }
+.eslestirme-panel input { width: 100%; background: #2d4060; border: 1px solid #3d5070; color: #e0f7fa; padding: 8px 10px; border-radius: 3px; margin-bottom: 8px; font-size: 13px; }
+.musteri-list { max-height: 220px; overflow-y: auto; background: #243447; border-radius: 3px; margin-bottom: 10px; }
+.musteri-list div { padding: 8px 10px; border-bottom: 1px solid #2d4060; cursor: pointer; font-size: 12px; }
+.musteri-list div:hover { background: #2d4060; }
+.btn-erp { background: #0097a7; color: white; border: none; padding: 8px 14px; border-radius: 3px; cursor: pointer; font-size: 13px; }
+.btn-erp:hover { background: #00acc1; }
+.btn-erp.secondary { background: #546e7a; }
+.btn-erp.secondary:hover { background: #607d8b; }
+.btn-erp.danger { background: #e74c3c; }
+.btn-erp.danger:hover { background: #c0392b; }
+#secilen-hareket { padding: 8px; background: #0f2537; border-radius: 3px; font-size: 12px; margin-bottom: 10px; min-height: 40px; color: #b0bec5; }
+input[type="file"] { font-size: 12px; color: #e0f7fa; }
+.rapor-panel { background: #1e3a50; padding: 14px; border-radius: 4px; margin-top: 16px; }
+.rapor-panel h3 { color: #4fc3f7; font-size: 14px; margin: 0 0 10px 0; }
+.rapor-filtre { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+.rapor-filtre select { background: #2d4060; border: 1px solid #3d5070; color: #e0f7fa; padding: 6px 10px; border-radius: 3px; }
+.rapor-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
+.rapor-table th { background: #0097a7; color: white; padding: 6px 8px; text-align: left; }
+.rapor-table td { padding: 6px 8px; border-bottom: 1px solid #2d4060; color: #e0f7fa; }
+.admin-panel { background: #1e3a50; padding: 14px; border-radius: 4px; margin-top: 16px; border: 1px solid #2d4060; }
+.admin-panel h3 { color: #ff8a65; font-size: 14px; margin: 0 0 10px 0; }
+.hesap-form .frm { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; margin-bottom: 10px; }
+.hesap-form label { color: #b0bec5; font-size: 12px; }
+.hesap-form input, .hesap-form select { background: #2d4060; border: 1px solid #3d5070; color: #e0f7fa; padding: 6px 8px; border-radius: 3px; }
+.hesap-list { max-height: 200px; overflow-y: auto; margin-bottom: 10px; }
+.hesap-list tr { cursor: pointer; }
+.hesap-list tr:hover { background: #2d4060; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="banka-header">
+    <h2>🏦 Banka Hareketleri</h2>
+    <div class="banka-filters">
+        <label>Hesap:</label>
+        <select id="filter-hesap">
+            <option value="">— Tümü —</option>
+        </select>
+        <label>Durum:</label>
+        <select id="filter-durum">
+            <option value="tumu">Tümü</option>
+            <option value="bekleyen">Bekleyen</option>
+            <option value="eslesti">Eşleşti</option>
+            <option value="gider">Gider</option>
+        </select>
+        <button type="button" id="btn-listele" class="btn-erp">Listele</button>
+        <span style="margin-left:8px;">Ekstre:</span>
+        <input type="file" id="file-ekstre" accept=".csv,.txt,.xlsx,.xls" style="max-width:140px;">
+        <select id="ekstre-hesap">
+            <option value="">Hesap seçin</option>
+        </select>
+        <button type="button" id="btn-ekstre-yukle" class="btn-erp secondary">Ekstre Yükle</button>
+        <button type="button" id="btn-oto-eslestir" class="btn-erp">Oto Eşleştir</button>
+    </div>
+</div>
+
+<div class="ozet-bar">
+    <span class="ozet-item toplam" id="ozet-toplam">Toplam: 0</span>
+    <span class="ozet-item eslesti" id="ozet-eslesti">Eşleşti: 0</span>
+    <span class="ozet-item bekleyen" id="ozet-bekleyen">Bekleyen: 0,00 ₺</span>
+    <span class="ozet-item masraflar" id="ozet-masraflar">Masraflar: 0,00 ₺</span>
+</div>
+
+<div class="banka-layout">
+    <div class="banka-table-wrap">
+        <table class="banka-table">
+            <thead>
+                <tr>
+                    <th>Tarih</th>
+                    <th>Açıklama</th>
+                    <th>Gönderen</th>
+                    <th>Tutar (₺)</th>
+                    <th>Tip</th>
+                    <th>Durum</th>
+                    <th>Müşteri</th>
+                </tr>
+            </thead>
+            <tbody id="hareket-tbody">
+                <tr><td colspan="7" style="text-align:center;padding:24px;color:#6b7280;">Hesap seçip Listele ile yükleyin veya Ekstre Yükle ile aktarın.</td></tr>
+            </tbody>
+        </table>
+    </div>
+    <div class="eslestirme-panel">
+        <h3>Eşleştirme</h3>
+        <div id="secilen-hareket">Seçili hareket: —</div>
+        <label>Müşteri Ara:</label>
+        <input type="text" id="musteri-ara" placeholder="Müşteri adı yazın...">
+        <div class="musteri-list" id="musteri-list"></div>
+        <button type="button" id="btn-eslestir" class="btn-erp" style="width:100%;margin-bottom:8px;">✓ Eşleştir + Tahsilatı Aktar</button>
+        <button type="button" id="btn-iptal" class="btn-erp danger" style="width:100%;">Eşleştirmeyi İptal Et</button>
+        <p style="font-size:11px;color:#6b7280;margin-top:12px;">CSV veya Excel (.xlsx): tarih, aciklama, gonderici, tutar, tip</p>
+    </div>
+</div>
+
+<div class="rapor-panel">
+    <h3>📊 Masraf Raporu (hesap / dönem)</h3>
+    <div class="rapor-filtre">
+        <label>Yıl:</label>
+        <select id="rapor-yil"></select>
+        <label>Ay:</label>
+        <select id="rapor-ay">
+            <option value="">Tümü</option>
+            <option value="1">Ocak</option><option value="2">Şubat</option><option value="3">Mart</option>
+            <option value="4">Nisan</option><option value="5">Mayıs</option><option value="6">Haziran</option>
+            <option value="7">Temmuz</option><option value="8">Ağustos</option><option value="9">Eylül</option>
+            <option value="10">Ekim</option><option value="11">Kasım</option><option value="12">Aralık</option>
+        </select>
+        <label>Hesap:</label>
+        <select id="rapor-hesap">
+            <option value="">Tümü</option>
+        </select>
+        <button type="button" id="btn-rapor-goster" class="btn-erp">Göster</button>
+    </div>
+    <div style="margin-bottom:6px;font-weight:bold;color:#ff8a65;" id="rapor-ozet">Toplam: 0,00 ₺ (0 kayıt)</div>
+    <table class="rapor-table" id="rapor-table">
+        <thead><tr><th>Tarih</th><th>Açıklama</th><th>Gönderen</th><th>Banka</th><th>Tutar (₺)</th></tr></thead>
+        <tbody id="rapor-tbody"></tbody>
+    </table>
+</div>
+
+{% if current_user.role == 'admin' %}
+<div class="admin-panel">
+    <h3>🔐 Banka Hesapları Yönetimi (Admin)</h3>
+    <div class="hesap-form">
+        <input type="hidden" id="hesap-id" value="">
+        <div class="frm">
+            <div><label>Banka adı *</label><input type="text" id="hesap-banka-adi" placeholder="Örn: Akbank"></div>
+            <div><label>Hesap adı</label><input type="text" id="hesap-hesap-adi" placeholder="Örn: Vadesiz"></div>
+            <div><label>Hesap no</label><input type="text" id="hesap-hesap-no" placeholder=""></div>
+            <div><label>IBAN</label><input type="text" id="hesap-iban" placeholder=""></div>
+            <div><label>Aktif</label><select id="hesap-aktif"><option value="1">Evet</option><option value="0">Hayır</option></select></div>
+            <div style="align-self:end;"><button type="button" id="btn-hesap-kaydet" class="btn-erp">Kaydet</button></div>
+        </div>
+        <table class="rapor-table hesap-list">
+            <thead><tr><th>Banka</th><th>Hesap</th><th>Hesap no</th><th>Durum</th></tr></thead>
+            <tbody id="hesap-tbody"></tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+<script>
+const API_HESAPLAR = "{{ url_for('banka.api_hesaplar') }}";
+const API_OZET = "{{ url_for('banka.api_ozet') }}";
+const API_HAREKETLER = "{{ url_for('banka.api_hareketler') }}";
+const API_MUSTERI_ARA = "{{ url_for('banka.api_musteri_ara') }}";
+const API_EKSTRE_YUKLE = "{{ url_for('banka.api_ekstre_yukle') }}";
+const API_OTO_ESLESTIR = "{{ url_for('banka.api_oto_eslestir') }}";
+const API_ESLESTIR = "{{ url_for('banka.api_eslestir') }}";
+const API_ESLESTIRME_IPTAL = "{{ url_for('banka.api_eslestirme_iptal') }}";
+const API_MASRAFLAR_RAPORU = "{{ url_for('banka.api_masraflar_raporu') }}";
+const API_HESAPLAR_TUMU = "{{ url_for('banka.api_hesaplar_tumu') }}";
+const API_HESAP_KAYDET = "{{ url_for('banka.api_hesap_kaydet') }}";
+const IS_ADMIN = {{ 'true' if current_user.role == 'admin' else 'false' }};
+
+let secilenHareketId = null;
+let secilenMusteriId = null;
+let musterilerCache = [];
+
+function formatTutar(n) {
+  return (Number(n) || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function formatTarih(s) {
+  if (!s) return '—';
+  const x = String(s).split('T')[0];
+  const p = x.split('-');
+  if (p.length === 3) return p[2] + '.' + p[1] + '.' + p[0];
+  return x;
+}
+
+async function hesaplariYukle() {
+  const res = await fetch(API_HESAPLAR);
+  const list = await res.json();
+  const sel = document.getElementById('filter-hesap');
+  const sel2 = document.getElementById('ekstre-hesap');
+  sel.innerHTML = '<option value="">— Tümü —</option>';
+  sel2.innerHTML = '<option value="">Hesap seçin</option>';
+  (list || []).forEach(h => {
+    const o = document.createElement('option');
+    o.value = h.id;
+    o.textContent = (h.banka_adi || '') + ' — ' + (h.hesap_adi || h.banka_adi || '');
+    sel.appendChild(o);
+    const o2 = o.cloneNode(true);
+    sel2.appendChild(o2);
+  });
+  const raporHesap = document.getElementById('rapor-hesap');
+  if (raporHesap) {
+    while (raporHesap.options.length > 1) raporHesap.remove(1);
+    (list || []).forEach(h => {
+      const o3 = document.createElement('option');
+      o3.value = h.id;
+      o3.textContent = (h.banka_adi || '') + ' — ' + (h.hesap_adi || h.banka_adi || '');
+      raporHesap.appendChild(o3);
+    });
+  }
+  const y = new Date().getFullYear();
+  const raporYil = document.getElementById('rapor-yil');
+  if (raporYil && raporYil.options.length === 0) {
+    for (let i = y; i >= y - 5; i--) { const o = document.createElement('option'); o.value = i; o.textContent = i; raporYil.appendChild(o); }
+  }
+}
+
+async function ozetYukle() {
+  const hesap = document.getElementById('filter-hesap').value;
+  let url = API_OZET;
+  if (hesap) url += '?hesap_id=' + encodeURIComponent(hesap);
+  const res = await fetch(url);
+  const j = await res.json();
+  document.getElementById('ozet-toplam').textContent = 'Toplam: ' + (j.toplam || 0);
+  document.getElementById('ozet-eslesti').textContent = 'Eşleşti: ' + (j.eslesti || 0);
+  document.getElementById('ozet-bekleyen').textContent = 'Bekleyen: ' + formatTutar(j.bekleyen_tutar) + ' ₺';
+  document.getElementById('ozet-masraflar').textContent = 'Masraflar: ' + formatTutar(j.masraflar_tutar) + ' ₺';
+}
+
+async function hareketleriYukle() {
+  const hesap = document.getElementById('filter-hesap').value;
+  const durum = document.getElementById('filter-durum').value;
+  let url = API_HAREKETLER + '?durum=' + encodeURIComponent(durum);
+  if (hesap) url += '&hesap_id=' + encodeURIComponent(hesap);
+  const res = await fetch(url);
+  const rows = await res.json();
+  const tbody = document.getElementById('hareket-tbody');
+  tbody.innerHTML = '';
+  if (!rows || rows.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:#6b7280;">Kayıt yok.</td></tr>';
+    return;
+  }
+  rows.forEach(r => {
+    const tr = document.createElement('tr');
+    const tutar = Number(r.tutar) || 0;
+    const tutarClass = tutar >= 0 ? 'tutar-poz' : 'tutar-neg';
+    tr.innerHTML = '<td>' + formatTarih(r.hareket_tarihi) + '</td><td>' + (r.aciklama || '—') + '</td><td>' + (r.gonderici || '—') + '</td><td class="' + tutarClass + '">' + formatTutar(tutar) + '</td><td>' + (r.tip || '—') + '</td><td>' + (r.durum || '—') + '</td><td>' + (r.musteri_adi || '—') + '</td>';
+    tr.dataset.id = r.id;
+    tr.dataset.tutar = tutar;
+    tr.dataset.durum = r.durum || '';
+    tr.onclick = () => selectHareket(r);
+    tbody.appendChild(tr);
+  });
+}
+
+function selectHareket(r) {
+  document.querySelectorAll('.banka-table tbody tr').forEach(tr => tr.classList.remove('selected'));
+  const row = document.querySelector('.banka-table tbody tr[data-id="' + r.id + '"]');
+  if (row) row.classList.add('selected');
+  secilenHareketId = r.id;
+  secilenMusteriId = null;
+  const txt = r.durum === 'eslesti' ? (r.musteri_adi || '') + ' — ' + formatTutar(r.tutar) + ' ₺' : formatTarih(r.hareket_tarihi) + ' | ' + (r.gonderici || r.aciklama || '') + ' | ' + formatTutar(r.tutar) + ' ₺';
+  document.getElementById('secilen-hareket').textContent = 'Seçili hareket: ' + txt;
+  document.getElementById('musteri-ara').value = '';
+  document.getElementById('musteri-list').innerHTML = '';
+}
+
+let aramaTimer = null;
+document.getElementById('musteri-ara').oninput = function() {
+  clearTimeout(aramaTimer);
+  const q = this.value.trim();
+  const listEl = document.getElementById('musteri-list');
+  if (q.length < 2) {
+    listEl.innerHTML = '';
+    return;
+  }
+  aramaTimer = setTimeout(async () => {
+    const res = await fetch(API_MUSTERI_ARA + '?q=' + encodeURIComponent(q));
+    const list = await res.json();
+    listEl.innerHTML = '';
+    (list || []).forEach(m => {
+      const div = document.createElement('div');
+      div.textContent = m.name || '';
+      div.onclick = () => {
+        secilenMusteriId = m.id;
+        listEl.querySelectorAll('div').forEach(d => d.style.background = '');
+        div.style.background = '#1e5a7a';
+      };
+      listEl.appendChild(div);
+    });
+  }, 200);
+};
+
+document.getElementById('btn-listele').onclick = function() {
+  hareketleriYukle();
+  ozetYukle();
+};
+
+document.getElementById('btn-ekstre-yukle').onclick = async function() {
+  const file = document.getElementById('file-ekstre').files[0];
+  const hesapId = document.getElementById('ekstre-hesap').value;
+  if (!hesapId) {
+    alert('Ekstre yüklemek için hesap seçin.');
+    return;
+  }
+  if (!file) {
+    alert('Dosya seçin (CSV: tarih;aciklama;gonderici;tutar;tip).');
+    return;
+  }
+  const fd = new FormData();
+  fd.append('file', file);
+  fd.append('banka_hesap_id', hesapId);
+  const res = await fetch(API_EKSTRE_YUKLE, { method: 'POST', body: fd });
+  const j = await res.json();
+  if (j.ok) {
+    alert('Eklenen satır: ' + (j.eklenen || 0));
+    document.getElementById('file-ekstre').value = '';
+    hareketleriYukle();
+    ozetYukle();
+  } else {
+    alert('Hata: ' + (j.mesaj || 'Bilinmeyen'));
+  }
+};
+
+document.getElementById('btn-oto-eslestir').onclick = async function() {
+  const hesap = document.getElementById('filter-hesap').value;
+  const res = await fetch(API_OTO_ESLESTIR, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(hesap ? { hesap_id: parseInt(hesap) } : {}),
+  });
+  const j = await res.json();
+  if (j.ok) {
+    alert('Otomatik eşleşen: ' + (j.eslesti || 0) + ' hareket.');
+    hareketleriYukle();
+    ozetYukle();
+  } else {
+    alert('Hata: ' + (j.mesaj || 'Bilinmeyen'));
+  }
+};
+
+document.getElementById('btn-eslestir').onclick = async function() {
+  if (!secilenHareketId) {
+    alert('Önce listeden bir hareket seçin.');
+    return;
+  }
+  if (!secilenMusteriId) {
+    alert('Müşteri ara ve listeden bir müşteri seçin.');
+    return;
+  }
+  const res = await fetch(API_ESLESTIR, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ hareket_id: secilenHareketId, musteri_id: secilenMusteriId }),
+  });
+  const j = await res.json();
+  if (j.ok) {
+    alert('Eşleştirme ve tahsilat kaydı oluşturuldu.');
+    hareketleriYukle();
+    ozetYukle();
+    document.getElementById('secilen-hareket').textContent = 'Seçili hareket: —';
+    secilenHareketId = null;
+    secilenMusteriId = null;
+  } else {
+    alert('Hata: ' + (j.mesaj || 'Bilinmeyen'));
+  }
+};
+
+document.getElementById('btn-iptal').onclick = async function() {
+  if (!secilenHareketId) {
+    alert('Önce eşleşmiş bir hareket seçin.');
+    return;
+  }
+  const res = await fetch(API_ESLESTIRME_IPTAL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ hareket_id: secilenHareketId }),
+  });
+  const j = await res.json();
+  if (j.ok) {
+    alert('Eşleştirme iptal edildi.');
+    hareketleriYukle();
+    ozetYukle();
+    document.getElementById('secilen-hareket').textContent = 'Seçili hareket: —';
+    secilenHareketId = null;
+  } else {
+    alert('Hata: ' + (j.mesaj || 'Bilinmeyen'));
+  }
+};
+
+async function raporYukle() {
+  const yil = document.getElementById('rapor-yil').value;
+  const ay = document.getElementById('rapor-ay').value;
+  const hesap = document.getElementById('rapor-hesap').value;
+  let url = API_MASRAFLAR_RAPORU;
+  const params = [];
+  if (yil) params.push('yil=' + encodeURIComponent(yil));
+  if (ay) params.push('ay=' + encodeURIComponent(ay));
+  if (hesap) params.push('hesap_id=' + encodeURIComponent(hesap));
+  if (params.length) url += '?' + params.join('&');
+  const res = await fetch(url);
+  const j = await res.json();
+  document.getElementById('rapor-ozet').textContent = 'Toplam: ' + formatTutar(j.toplam || 0) + ' ₺ (' + (j.adet || 0) + ' kayıt)';
+  const tbody = document.getElementById('rapor-tbody');
+  tbody.innerHTML = '';
+  (j.satirlar || []).forEach(r => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td>' + formatTarih(r.hareket_tarihi) + '</td><td>' + (r.aciklama || '—') + '</td><td>' + (r.gonderici || '—') + '</td><td>' + (r.banka_adi || '—') + '</td><td class="tutar-neg">' + formatTutar(Math.abs(Number(r.tutar) || 0)) + '</td>';
+    tbody.appendChild(tr);
+  });
+}
+
+document.getElementById('btn-rapor-goster').onclick = function() { raporYukle(); };
+
+async function hesaplariTumuYukle() {
+  if (!IS_ADMIN) return;
+  const res = await fetch(API_HESAPLAR_TUMU);
+  const list = await res.json();
+  const tbody = document.getElementById('hesap-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+  (list || []).forEach(h => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td>' + (h.banka_adi || '') + '</td><td>' + (h.hesap_adi || '—') + '</td><td>' + (h.hesap_no || '—') + '</td><td>' + (h.is_active ? 'Aktif' : 'Pasif') + '</td>';
+    tr.dataset.id = h.id;
+    tr.onclick = () => {
+      document.getElementById('hesap-id').value = h.id;
+      document.getElementById('hesap-banka-adi').value = h.banka_adi || '';
+      document.getElementById('hesap-hesap-adi').value = h.hesap_adi || '';
+      document.getElementById('hesap-hesap-no').value = h.hesap_no || '';
+      document.getElementById('hesap-iban').value = h.iban || '';
+      document.getElementById('hesap-aktif').value = h.is_active ? '1' : '0';
+      tbody.querySelectorAll('tr').forEach(r => r.style.background = '');
+      tr.style.background = '#1e5a7a';
+    };
+    tbody.appendChild(tr);
+  });
+}
+
+const btnHesapKaydet = document.getElementById('btn-hesap-kaydet');
+if (btnHesapKaydet) {
+  btnHesapKaydet.onclick = async function() {
+    const id = document.getElementById('hesap-id').value;
+    const banka_adi = document.getElementById('hesap-banka-adi').value.trim();
+    if (!banka_adi) { alert('Banka adı zorunludur.'); return; }
+    const payload = {
+      banka_adi: banka_adi,
+      hesap_adi: document.getElementById('hesap-hesap-adi').value.trim(),
+      hesap_no: document.getElementById('hesap-hesap-no').value.trim(),
+      iban: document.getElementById('hesap-iban').value.trim(),
+      is_active: document.getElementById('hesap-aktif').value === '1',
+    };
+    if (id) payload.id = id;
+    const res = await fetch(API_HESAP_KAYDET, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    const j = await res.json();
+    if (j.ok) {
+      alert('Kaydedildi.');
+      document.getElementById('hesap-id').value = '';
+      document.getElementById('hesap-banka-adi').value = '';
+      document.getElementById('hesap-hesap-adi').value = '';
+      document.getElementById('hesap-hesap-no').value = '';
+      document.getElementById('hesap-iban').value = '';
+      document.getElementById('hesap-aktif').value = '1';
+      hesaplariYukle();
+      hesaplariTumuYukle();
+    } else {
+      alert('Hata: ' + (j.mesaj || 'Bilinmeyen'));
+    }
+  };
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  hesaplariYukle();
+  ozetYukle();
+  hareketleriYukle();
+  raporYukle();
+  if (IS_ADMIN) hesaplariTumuYukle();
+});
+</script>
+{% endblock %}

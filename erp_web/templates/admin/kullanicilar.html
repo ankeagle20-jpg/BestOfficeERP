@@ -1,0 +1,139 @@
+{% extends "layout.html" %}
+{% block title %}Kullanıcı Yönetimi{% endblock %}
+{% block page_title %}👑 Kullanıcı Yönetimi{% endblock %}
+
+{% block topbar_actions %}
+  <button class="btn-erp btn-erp-sm" onclick="document.getElementById('modal-ekle').style.display='flex'">
+    ➕ Yeni Kullanıcı
+  </button>
+{% endblock %}
+
+{% block content %}
+<div class="card-erp">
+  <table class="table-erp">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Kullanıcı Adı</th>
+        <th>E-posta</th>
+        <th>Rol</th>
+        <th>Son Giriş</th>
+        <th>Durum</th>
+        <th>İşlem</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for u in kullanicilar %}
+      <tr>
+        <td style="color:#555;">{{ u.id }}</td>
+        <td><strong>{{ u.username }}</strong></td>
+        <td style="color:#888;">{{ u.email or '—' }}</td>
+        <td>
+          <span class="badge-{{ u.rol }}">{{ roller[u.rol].label if u.rol in roller else u.rol }}</span>
+        </td>
+        <td style="color:#888;font-size:.8rem;">
+          {{ u.son_giris.strftime('%d.%m.%Y %H:%M') if u.son_giris else '—' }}
+        </td>
+        <td>
+          {% if u.aktif %}
+            <span style="color:#69f0ae;">● Aktif</span>
+          {% else %}
+            <span style="color:#555;">● Pasif</span>
+          {% endif %}
+        </td>
+        <td style="display:flex;gap:6px;">
+          <!-- Rol değiştir -->
+          <form method="POST" action="{{ url_for('admin.rol_degistir', uid=u.id) }}"
+                style="display:inline;">
+            <select name="rol" onchange="this.form.submit()"
+              style="background:#0a1929;border:1px solid #1e3a5f;color:#e0f7fa;
+                     padding:3px 6px;border-radius:4px;font-size:.78rem;">
+              {% for rol_id, rol_info in roller.items() %}
+              <option value="{{ rol_id }}" {{ 'selected' if u.rol==rol_id }}>
+                {{ rol_info.label }}
+              </option>
+              {% endfor %}
+            </select>
+          </form>
+          <!-- Şifre sıfırla -->
+          <button class="btn-erp btn-erp-sm btn-outline-erp"
+                  onclick="sifirla({{ u.id }}, '{{ u.username }}')">
+            🔑
+          </button>
+          <!-- Sil -->
+          {% if u.id != current_user.id %}
+          <form method="POST"
+                action="{{ url_for('admin.kullanici_sil_route', uid=u.id) }}"
+                onsubmit="return confirm('{{ u.username }} silinsin mi?')"
+                style="display:inline;">
+            <button type="submit" class="btn-erp btn-erp-sm btn-danger-erp">🗑</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="7" style="text-align:center;color:#555;">Kullanıcı yok.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Modal: Yeni Kullanıcı -->
+<div id="modal-ekle" style="display:none;position:fixed;inset:0;background:#000a;
+     z-index:999;align-items:center;justify-content:center;">
+  <div style="background:#12243a;border:1px solid #1e3a5f;border-radius:10px;
+              padding:28px;width:380px;">
+    <h5 style="color:#4fc3f7;margin-bottom:18px;">➕ Yeni Kullanıcı Ekle</h5>
+    <form class="form-erp" method="POST" action="{{ url_for('admin.kullanici_ekle') }}">
+      <label>Kullanıcı Adı *</label>
+      <input type="text" name="username" required>
+      <label>E-posta</label>
+      <input type="email" name="email">
+      <label>Şifre * (min. 6 karakter)</label>
+      <input type="password" name="password" required minlength="6">
+      <label>Rol</label>
+      <select name="rol">
+        {% for rol_id, rol_info in roller.items() %}
+        <option value="{{ rol_id }}">{{ rol_info.label }}</option>
+        {% endfor %}
+      </select>
+      <div style="display:flex;gap:8px;margin-top:8px;">
+        <button type="submit" class="btn-erp" style="flex:1;">✓ Oluştur</button>
+        <button type="button" class="btn-outline-erp"
+                onclick="document.getElementById('modal-ekle').style.display='none'"
+                style="flex:1;">İptal</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Modal: Şifre Sıfırla -->
+<div id="modal-sifre" style="display:none;position:fixed;inset:0;background:#000a;
+     z-index:999;align-items:center;justify-content:center;">
+  <div style="background:#12243a;border:1px solid #1e3a5f;border-radius:10px;
+              padding:28px;width:340px;">
+    <h5 style="color:#4fc3f7;margin-bottom:18px;">🔑 Şifre Sıfırla</h5>
+    <form class="form-erp" method="POST" id="form-sifre">
+      <label id="sifre-label">Yeni şifre:</label>
+      <input type="password" name="yeni_sifre" required minlength="6">
+      <div style="display:flex;gap:8px;margin-top:8px;">
+        <button type="submit" class="btn-erp" style="flex:1;">✓ Güncelle</button>
+        <button type="button" class="btn-outline-erp"
+                onclick="document.getElementById('modal-sifre').style.display='none'"
+                style="flex:1;">İptal</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function sifirla(uid, username) {
+  document.getElementById('form-sifre').action = '/admin/kullanici/' + uid + '/sifre';
+  document.getElementById('sifre-label').textContent = username + ' için yeni şifre:';
+  document.getElementById('modal-sifre').style.display = 'flex';
+}
+</script>
+{% endblock %}

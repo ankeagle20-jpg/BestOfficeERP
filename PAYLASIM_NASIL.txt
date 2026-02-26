@@ -1,0 +1,54 @@
+================================================================================
+  OFİSBİR ERP — AYNI VERİTABANI, HERKES AYNI VERİYİ GÖRSÜN (EN BASİT YOL)
+================================================================================
+
+Aynı veritabanını kullanacaksınız; girilen müşteri, fatura, tahsilat vb.
+kaç kişi kullanıyorsa herkes görebilsin istiyorsanız:
+
+  → .env PAYLAŞMAYA GEREK YOK.
+  → Programı SADECE SEN çalıştırıyorsun.
+  → Herkese sadece LINK + KULLANICI ADI / ŞİFRE veriyorsun.
+
+--------------------------------------------------------------------------------
+ADIM ADIM (SEN)
+--------------------------------------------------------------------------------
+
+1) Kendi bilgisayarında "Calistir_Web.bat"a çift tıkla.
+   (Python kurulu olmalı, .env erp_web klasöründe olmalı.)
+
+2) Açılan siyah pencerede "Erişim linki" yazacak; örneğin:
+   http://192.168.1.50:5000
+   Bu linki kopyala.
+
+3) Admin ile giriş yap → Admin → Kullanıcılar → yeni kullanıcı ekle.
+   Her çalışma arkadaşına bir kullanıcı adı ve şifre ver.
+
+4) WhatsApp (veya istediğin kanal) ile herkese şunu yaz:
+   "Programa bu linkten gir: [LINK]
+    Kullanıcı adı: xxx
+    Şifre: xxx"
+
+--------------------------------------------------------------------------------
+KARŞI TARAF (ARKADAŞLARIN / ÇALIŞANLAR)
+--------------------------------------------------------------------------------
+
+• Sadece tarayıcıyı açıp verdiğin linke girerler.
+• Kullanıcı adı ve şifreyi yazıp giriş yaparlar.
+• Python kurmaları, proje indirmeleri, .env falan YOK. Sadece link + giriş.
+
+--------------------------------------------------------------------------------
+ÖNEMLİ
+--------------------------------------------------------------------------------
+
+• Senin bilgisayarın AÇIK ve program (Calistir_Web.bat) ÇALIŞIYOR olmalı.
+  Kapattığın anda diğerleri siteye giremez.
+
+• Aynı WiFi / ağdaysanız (aynı ofis, ev): Verdiğin link (http://SENIN_IP:5000)
+  çalışır. Farklı yerlerdeyseniz (farklı şehir): İnternetten erişim için
+  sunucuya koyman veya ngrok gibi tünel kullanman gerekir (ayrı konu).
+
+• Veritabanı (Supabase) sadece senin bilgisayarındaki programda bağlı;
+  .env’i kimseyle paylaşmıyorsun. Herkes aynı veriyi görür çünkü hepsi
+  aynı sunucuya (senin açtığın programa) bağlanıyor.
+
+================================================================================

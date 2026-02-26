@@ -1,0 +1,114 @@
+{% extends "layout.html" %}
+
+{% block page_title %}Müşteriler - Grid{% endblock %}
+
+{% block extra_head %}
+  <link href="https://unpkg.com/tabulator-tables@5.4.4/dist/css/tabulator_midnight.min.css" rel="stylesheet">
+{% endblock %}
+
+{% block content %}
+<div style="padding:10px;">
+  <div class="d-flex gap-2 mb-2">
+    <a href="{{ url_for('musteriler.import_excel') }}" class="btn-erp btn-erp-sm">📂 Excel'den İçeri Aktar</a>
+    <button class="btn-erp btn-erp-sm" onclick="table.replaceData()">↺ Yenile</button>
+  </div>
+
+  <div id="customer-table" style="height:520px;"></div>
+
+  <div class="detaj-panel" style="margin-top:12px;">
+    <h3>👤 Müşteri Detayları</h3>
+    <div id="detail-area">Seçili müşteri yok.</div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+  <script src="https://unpkg.com/tabulator-tables@5.4.4/dist/js/tabulator.min.js"></script>
+  <script>
+    // fetch rent progression data and build dynamic year columns
+    fetch("{{ url_for('musteriler.api_rent_progression') }}")
+      .then(r => r.json())
+      .then(payload => {
+        const rows = payload.rows || [];
+        const years = payload.years || [];
+
+        // prepare columns
+        const cols = [
+          {title:"Ad / Ünvan", field:"name", headerFilter:"input", widthGrow:2},
+          {title:"Vergi No", field:"tax_number", width:120},
+        ];
+
+        years.forEach(y => {
+          cols.push({title: String(y), field: "y_" + y, hozAlign:"right", formatter:"money", formatterParams:{decimal:",", thousand:"."}});
+        });
+
+        cols.push({title:"İlk Kira (₺)", field:"ilk_kira_bedeli", hozAlign:"right", formatter:"money", formatterParams:{decimal:",", thousand:"."}});
+        cols.push({title:"Güncel Kira (₺)", field:"current_rent", hozAlign:"right", formatter:"money", formatterParams:{decimal:",", thousand:"."}});
+
+        // flatten rows to include y_YYYY fields
+        const data = rows.map(r => {
+          const item = {
+            id: r.id,
+            name: r.name,
+            tax_number: r.tax_number || "",
+            ilk_kira_bedeli: r.ilk_kira_bedeli || 0,
+            current_rent: r.current_rent || 0
+          };
+          const yrs = r.years || {};
+          years.forEach(y => {
+            item["y_" + y] = yrs[y] || 0;
+          });
+          return item;
+        });
+
+        const table = new Tabulator("#customer-table", {
+          data: data,
+          layout: "fitColumns",
+          height: "520px",
+          selectable: 1,
+          placeholder: "Kayıt yok",
+          pagination: "local",
+          paginationSize: 25,
+          movableColumns: true,
+          rowHeight: 30,
+          columns: cols,
+        });
+
+        table.on("rowClick", function(e, row){
+          const data = row.getData();
+          document.getElementById("detail-area").innerHTML = `
+            <div><strong>${data.name}</strong></div>
+            <div>Vergi No: ${data.tax_number || '—'}</div>
+            <div>İlk Kira: ${data.ilk_kira_bedeli || '—'}</div>
+            <div>Güncel Kira: ${data.current_rent || '—'}</div>
+          `;
+        });
+
+      })
+      .catch(err => {
+        console.error('rent_progression error', err);
+        // fallback to simple table if error
+        const table = new Tabulator("#customer-table", {
+          ajaxURL: "{{ url_for('musteriler.api_list_full') }}",
+      layout: "fitColumns",
+      height: "520px",
+      selectable: 1,
+      placeholder: "Kayıt yok",
+      pagination: "local",
+      paginationSize: 25,
+      movableColumns: true,
+      rowHeight: 30,
+      columns: [
+        {title:"Ad / Ünvan", field:"name", headerFilter:"input", widthGrow:2},
+        {title:"E-posta", field:"email", headerFilter:"input", widthGrow:1},
+        {title:"Telefon", field:"phone", headerFilter:"input", widthGrow:1},
+        {title:"Adres", field:"address", headerFilter:"input", widthGrow:2},
+        {title:"Ofis Kodu", field:"office_code", width:120},
+        {title:"Oluşturulma", field:"created_at", formatter:"datetime", width:140},
+      ],
+    });
+
+      });
+  </script>
+{% endblock %}
+

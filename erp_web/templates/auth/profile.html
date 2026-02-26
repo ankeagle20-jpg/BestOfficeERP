@@ -1,0 +1,26 @@
+{% extends "layout.html" %}
+{% block title %}Profil{% endblock %}
+{% block page_title %}Hesap - Profil{% endblock %}
+
+{% block content %}
+<div class="card-erp" style="max-width:520px;margin:0 auto;">
+  <h3 style="color:var(--accent);margin-bottom:12px;">Hesap Ayarları</h3>
+  <form class="form-erp" method="POST">
+    <label>Kullanıcı Adı</label>
+    <input type="text" value="{{ current_user.username }}" disabled>
+
+    <label>Yeni Şifre</label>
+    <input type="password" name="new_password" required minlength="6">
+    <label>Yeni Şifre (Tekrar)</label>
+    <input type="password" name="confirm_password" required minlength="6">
+    <label>Mevcut Şifre (Onay için)</label>
+    <input type="password" name="current_password" required minlength="1">
+
+    <div style="display:flex;gap:8px;margin-top:12px;">
+      <button type="submit" class="btn-erp">Şifre Değiştir</button>
+      <a href="{{ url_for('index') }}" class="btn-outline-erp" style="text-decoration:none;">İptal</a>
+    </div>
+  </form>
+</div>
+{% endblock %}
+

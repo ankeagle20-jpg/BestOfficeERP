@@ -1,0 +1,14 @@
+python3 -c "
+import sqlite3
+conn = sqlite3.connect('bestoffice_erp.db')
+cur = conn.cursor()
+cur.execute(\"SELECT name FROM sqlite_master WHERE type='table'\")
+tablolar = [r[0] for r in cur.fetchall()]
+for t in tablolar:
+    cur.execute(f'SELECT COUNT(*) FROM {t}')
+    n = cur.fetchone()[0]
+    cur.execute(f'PRAGMA table_info({t})')
+    cols = [c[1] for c in cur.fetchall()]
+    print(f'{t}: {n} satır — {cols}')
+conn.close()
+"

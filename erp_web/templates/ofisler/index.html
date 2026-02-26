@@ -1,0 +1,246 @@
+{% extends "layout.html" %}
+
+{% block page_title %}Ofis Yönetimi{% endblock %}
+
+{% block content %}
+<style>
+.ofis-header {
+    background: #0f2537;
+    padding: 12px 16px;
+    margin: -10px -10px 10px -10px;
+    border-radius: 4px 4px 0 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.ofis-header h2 {
+    color: #4fc3f7;
+    margin: 0;
+    font-size: 16px;
+    font-weight: bold;
+}
+.ofis-buttons button {
+    background: #00bcd4;
+    color: white;
+    border: none;
+    padding: 7px 14px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 13px;
+    margin-left: 6px;
+}
+.filtre-bar {
+    background: #1e3a50;
+    padding: 10px 12px;
+    margin-bottom: 10px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.filtre-bar label {
+    color: #b0bec5;
+    font-size: 13px;
+}
+.filtre-bar select {
+    background: #2d4060;
+    border: 1px solid #3d5070;
+    color: #e0f7fa;
+    padding: 6px 10px;
+    border-radius: 3px;
+    font-size: 13px;
+}
+.ozet-kartlar {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-bottom: 12px;
+}
+.ozet-kart {
+    background: #1a6b2a;
+    padding: 12px;
+    border-radius: 4px;
+    text-align: center;
+}
+.ozet-kart.sanal {
+    background: #6b1a5a;
+}
+.ozet-kart.paylasimli {
+    background: #1a3a6b;
+}
+.ozet-kart h3 {
+    color: white;
+    font-size: 14px;
+    margin: 0 0 8px 0;
+}
+.ozet-kart .istatistik {
+    color: #d0f0ff;
+    font-size: 13px;
+}
+.ofis-table {
+    width: 100%;
+    background: #243447;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+.ofis-table th {
+    background: #0097a7;
+    color: white;
+    padding: 8px 6px;
+    text-align: center;
+    font-weight: bold;
+    font-size: 11px;
+}
+.ofis-table td {
+    padding: 6px 8px;
+    border-bottom: 1px solid #2d4060;
+    text-align: center;
+    color: #e0f7fa;
+}
+.ofis-table td:first-child {
+    text-align: left;
+}
+.ofis-table tr:hover {
+    background: #2d4060;
+    cursor: pointer;
+}
+.durum-dolu {
+    color: #e74c3c;
+    font-weight: bold;
+}
+.durum-bos {
+    color: #2ecc71;
+    font-weight: bold;
+}
+.detay-form {
+    background: #1e3a50;
+    padding: 12px;
+    margin-top: 10px;
+    border-radius: 4px;
+}
+.detay-form h3 {
+    color: #4fc3f7;
+    font-size: 14px;
+    margin: 0 0 10px 0;
+    padding-bottom: 6px;
+    border-bottom: 1px solid #2d4060;
+}
+</style>
+
+<div class="ofis-header">
+    <h2>🏢 Ofis Yönetimi</h2>
+    <div class="ofis-buttons">
+        <button onclick="location.reload()">↺ Yenile</button>
+        <button onclick="location.href='{{ url_for('ofisler.yeni') }}'">➕ Yeni Ofis</button>
+    </div>
+</div>
+
+<!-- Filtre Çubuğu -->
+<form method="GET" class="filtre-bar">
+    <label>Tür:</label>
+    <select name="tur" onchange="this.form.submit()">
+        <option value="">Tümü</option>
+        <option value="Hazır Ofis" {% if tur == 'Hazır Ofis' %}selected{% endif %}>Hazır Ofis</option>
+        <option value="Paylaşımlı" {% if tur == 'Paylaşımlı' %}selected{% endif %}>Paylaşımlı</option>
+        <option value="Sanal" {% if tur == 'Sanal' %}selected{% endif %}>Sanal</option>
+    </select>
+    
+    <label>Durum:</label>
+    <select name="durum" onchange="this.form.submit()">
+        <option value="">Tümü</option>
+        <option value="bos" {% if durum == 'bos' %}selected{% endif %}>Boş</option>
+        <option value="dolu" {% if durum == 'dolu' %}selected{% endif %}>Dolu</option>
+    </select>
+    
+    <label>Aktif:</label>
+    <select name="aktif" onchange="this.form.submit()">
+        <option value="">Tümü</option>
+        <option value="true" {% if aktif == 'true' %}selected{% endif %}>Aktif</option>
+        <option value="false" {% if aktif == 'false' %}selected{% endif %}>Pasif</option>
+    </select>
+</form>
+
+<!-- Özet Kartlar -->
+<div class="ozet-kartlar">
+    <div class="ozet-kart">
+        <h3>🏢 Hazır Ofis</h3>
+        <div class="istatistik">
+            Toplam: {{ istatistikler.hazir.toplam }} | 
+            Dolu: {{ istatistikler.hazir.dolu }} | 
+            Boş: {{ istatistikler.hazir.toplam - istatistikler.hazir.dolu }}
+        </div>
+    </div>
+    <div class="ozet-kart paylasimli">
+        <h3>🪑 Paylaşımlı</h3>
+        <div class="istatistik">
+            Toplam: {{ istatistikler.paylasimli.toplam }} | 
+            Dolu: {{ istatistikler.paylasimli.dolu }} | 
+            Boş: {{ istatistikler.paylasimli.toplam - istatistikler.paylasimli.dolu }}
+        </div>
+    </div>
+    <div class="ozet-kart sanal">
+        <h3>🌐 Sanal Ofis</h3>
+        <div class="istatistik">
+            Toplam: {{ istatistikler.sanal.toplam }} | 
+            Dolu: {{ istatistikler.sanal.dolu }} | 
+            Boş: {{ istatistikler.sanal.toplam - istatistikler.sanal.dolu }}
+        </div>
+    </div>
+</div>
+
+<!-- Ofis Tablosu -->
+<div style="overflow-x: auto; max-height: 450px; overflow-y: auto;">
+    <table class="ofis-table">
+        <thead>
+            <tr>
+                <th>Kod</th>
+                <th>Tür</th>
+                <th>No</th>
+                <th>Aylık Kira (₺)</th>
+                <th>Durum</th>
+                <th>Aktif/Pasif</th>
+                <th>Müşteri</th>
+                <th>Not</th>
+                <th>İşlem</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% if ofisler %}
+                {% for o in ofisler %}
+                <tr onclick="selectOfis('{{ o.code }}')">
+                    <td><strong>{{ o.code }}</strong></td>
+                    <td>{{ o.type }}</td>
+                    <td>{{ o.unit_no or '—' }}</td>
+                    <td style="text-align: right;">{{ '%.2f'|format(o.monthly_price or 0) }}</td>
+                    <td class="{% if o.status == 'dolu' %}durum-dolu{% else %}durum-bos{% endif %}">
+                        {% if o.status == 'dolu' %}✅ Dolu{% else %}🟢 Boş{% endif %}
+                    </td>
+                    <td>{% if o.is_active %}🟢 Aktif{% else %}🔴 Pasif{% endif %}</td>
+                    <td>{{ o.musteri_adi or '—' }}</td>
+                    <td>{{ o.notes or '' }}</td>
+                    <td>
+                        {% if o.status == 'dolu' %}
+                        <form method="POST" action="{{ url_for('ofisler.bosalt', ofis_id=o.id) }}" style="display: inline;">
+                            <button type="submit" style="background: #00897b; color: white; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer; font-size: 11px;">🔓 Boşalt</button>
+                        </form>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            {% else %}
+                <tr>
+                    <td colspan="9" style="text-align: center; padding: 20px; color: #6b7280;">
+                        Ofis bulunamadı
+                    </td>
+                </tr>
+            {% endif %}
+        </tbody>
+    </table>
+</div>
+
+<script>
+function selectOfis(kod) {
+    console.log('Seçili ofis:', kod);
+}
+</script>
+{% endblock %}

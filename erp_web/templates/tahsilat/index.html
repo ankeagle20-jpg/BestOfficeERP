@@ -1,0 +1,342 @@
+{% extends "layout.html" %}
+
+{% block page_title %}Tahsilat{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/themes/dark.css">
+{% endblock %}
+
+{% block content %}
+<style>
+.tahsilat-header { background: #0f2537; padding: 12px 16px; margin: -10px -10px 10px -10px; display: flex; align-items: center; justify-content: space-between; }
+.tahsilat-header h2 { color: #4fc3f7; margin: 0; font-size: 16px; }
+.ozet-bar { background: #1e3a50; padding: 10px 12px; margin-bottom: 10px; border-radius: 4px; display: flex; align-items: center; gap: 20px; }
+.ozet-item { font-size: 14px; font-weight: bold; }
+.ozet-item.nakit { color: #2ecc71; }
+.ozet-item.banka { color: #3498db; }
+.ozet-item.toplam { color: #f59e0b; }
+.tahsilat-container { display: grid; grid-template-columns: 480px 1fr; gap: 12px; }
+.borclu-panel { background: #1e3a50; padding: 12px; border-radius: 4px; }
+.borclu-panel h3 { color: #4fc3f7; font-size: 14px; margin: 0 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #2d4060; }
+.borclu-table { width: 100%; background: #243447; border-collapse: collapse; font-size: 11px; }
+.borclu-table th { background: #0097a7; color: white; padding: 6px 4px; text-align: left; font-size: 10px; }
+.borclu-table td { padding: 5px 6px; border-bottom: 1px solid #2d4060; color: #e0f7fa; }
+.borclu-table tr:hover { background: #2d4060; cursor: pointer; }
+.form-panel { background: #1e3a50; padding: 12px; border-radius: 4px; }
+.form-panel h3 { color: #4fc3f7; font-size: 14px; margin: 0 0 10px 0; }
+.form-row { display: flex; gap: 12px; margin-bottom: 8px; }
+.form-group { flex: 1; display: flex; align-items: center; gap: 8px; }
+.form-group label { color: #b0bec5; font-size: 13px; min-width: 90px; }
+.form-group input, .form-group select { flex: 1; background: #2d4060; border: 1px solid #3d5070; color: #e0f7fa; padding: 6px 10px; border-radius: 3px; font-size: 13px; }
+input.error { border-color: #e74c3c !important; }
+.tahsilat-table { width: 100%; background: #243447; border-collapse: collapse; font-size: 12px; margin-top: 10px; }
+.tahsilat-table th { background: #0097a7; color: white; padding: 8px 6px; text-align: center; font-size: 11px; }
+.tahsilat-table td { padding: 6px 8px; border-bottom: 1px solid #2d4060; text-align: center; color: #e0f7fa; }
+.tahsilat-table tr:hover { background: #2d4060; }
+.btn-sil { background: #e74c3c; color: white; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer; font-size: 11px; }
+</style>
+
+<div class="tahsilat-header">
+    <h2>💰 Tahsilat</h2>
+    <div>
+        <label style="color: #b0bec5;">Başlangıç:</label>
+        <input type="text" id="filter-baslangic" value="" placeholder="GG.AA.YYYY" style="width: 110px; background: #2d4060; border: 1px solid #3d5070; color: #e0f7fa; padding: 4px 8px; margin: 0 6px;">
+        <label style="color: #b0bec5;">Bitiş:</label>
+        <input type="text" id="filter-bitis" value="" placeholder="GG.AA.YYYY" style="width: 110px; background: #2d4060; border: 1px solid #3d5070; color: #e0f7fa; padding: 4px 8px; margin: 0 6px;">
+        <button type="button" id="btn-filtrele" style="background: #00bcd4; color: white; border: none; padding: 6px 12px; border-radius: 3px; margin: 0 4px;">🔍 Filtrele</button>
+        <button type="button" id="btn-bugun" style="background: #6b7280; color: white; border: none; padding: 6px 12px; border-radius: 3px;">↺ Bugün</button>
+    </div>
+</div>
+
+<div class="ozet-bar">
+    <span class="ozet-item nakit" id="ozet-nakit">💵 Nakit: 0,00 ₺</span>
+    <span class="ozet-item banka" id="ozet-banka">🏦 Banka: 0,00 ₺</span>
+    <span class="ozet-item toplam" id="ozet-toplam">📊 Toplam: 0,00 ₺</span>
+</div>
+
+<div class="tahsilat-container">
+    <div class="borclu-panel">
+        <h3>⚠️ Borçlu Müşteriler</h3>
+        <div style="margin-bottom: 8px;">
+            <input type="text" id="search-borclu" placeholder="🔍 Ara..." style="width: 100%; background: #2d4060; border: 1px solid #3d5070; color: #e0f7fa; padding: 6px 10px; border-radius: 3px; font-size: 13px;">
+        </div>
+        <div style="max-height: 550px; overflow-y: auto;">
+            <table class="borclu-table">
+                <thead>
+                    <tr><th>Müşteri</th><th>Bu Ay (₺)</th><th>Toplam Borç (₺)</th><th>Son Tahsilat</th></tr>
+                </thead>
+                <tbody id="borclu-tbody"></tbody>
+            </table>
+        </div>
+        <div id="borclu-ozet" style="margin-top: 8px; padding: 8px; background: #0f2537; border-radius: 3px; font-size: 12px; color: #4fc3f7; font-weight: bold;">0 borçlu müşteri</div>
+    </div>
+
+    <div>
+        <div class="form-panel">
+            <h3>Yeni Tahsilat Girişi</h3>
+            <div id="selected-customer-bar" style="margin-bottom: 10px; padding: 8px; background: #0f2537; border-radius: 3px;">
+                <span style="color: #4fc3f7; font-weight: bold; font-size: 14px;">Müşteri: — Sol listeden seçin —</span>
+            </div>
+            <input type="hidden" id="tahsilat-musteri-id" value="">
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Tarih: <span style="color:#e74c3c">*</span></label>
+                    <input type="text" id="tahsilat-tarih" name="tarih" required placeholder="GG.AA.YYYY" style="flex:1;">
+                </div>
+                <div class="form-group">
+                    <label>Tutar (₺): <span style="color:#e74c3c">*</span></label>
+                    <input type="text" id="tahsilat-tutar" name="tutar" placeholder="0,00" style="text-align: right;" required>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Fatura (opsiyonel):</label>
+                    <select id="tahsilat-fatura" name="fatura_id">
+                        <option value="">— Fatura seçmeyin —</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Ödeme: <span style="color:#e74c3c">*</span></label>
+                    <label style="min-width:auto;"><input type="radio" name="odeme" value="nakit" checked> 💵 Nakit</label>
+                    <label style="min-width:auto;"><input type="radio" name="odeme" value="banka"> 🏦 Banka</label>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Açıklama:</label>
+                    <input type="text" id="tahsilat-aciklama" name="aciklama" placeholder="Açıklama giriniz...">
+                </div>
+            </div>
+            <div style="margin-top: 10px;">
+                <button type="button" id="btn-tahsilat-kaydet" class="btn-erp" style="margin-right: 6px;">💾 Tahsilat Kaydet</button>
+                <button type="button" id="btn-temizle" style="background: #6b7280; color: white; border: none; padding: 8px 16px; border-radius: 3px; cursor: pointer;">✖ Temizle</button>
+            </div>
+        </div>
+
+        <div class="form-panel" style="margin-top: 12px;">
+            <h3>Tahsilat Kayıtları</h3>
+            <div style="max-height: 300px; overflow-y: auto;">
+                <table class="tahsilat-table">
+                    <thead>
+                        <tr>
+                            <th>Tarih</th>
+                            <th>Müşteri</th>
+                            <th>Tutar (₺)</th>
+                            <th>Ödeme</th>
+                            <th>Açıklama</th>
+                            {% if current_user.role == 'admin' %}<th>İşlem</th>{% endif %}
+                        </tr>
+                    </thead>
+                    <tbody id="tahsilat-tbody">
+                        <tr><td colspan="{% if current_user.role == 'admin' %}6{% else %}5{% endif %}" style="text-align: center; padding: 20px; color: #6b7280;">Kayıt yok.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/tr.js"></script>
+<script>
+const API_BORCULAR = "{{ url_for('tahsilat.api_borclular') }}";
+const API_OZET = "{{ url_for('tahsilat.api_ozet') }}";
+const API_TAHSILAT_SAVE = "{{ url_for('tahsilat.api_tahsilat_save') }}";
+const API_TAHSILAT_LIST = "{{ url_for('tahsilat.api_tahsilat_list') }}";
+const API_TAHSILAT_DELETE = "{{ url_for('tahsilat.api_tahsilat_delete') }}";
+const API_FATURALAR_ODENMEMIS = "{{ url_for('tahsilat.api_faturalar_odenmemis') }}";
+const CAN_DELETE = {{ 'true' if current_user.role == 'admin' else 'false' }};
+
+let selectedCustomerId = null;
+let filterBaslangic = null;
+let filterBitis = null;
+
+function formatDate(d) {
+  if (!d) return '';
+  const x = typeof d === 'string' ? d.split('T')[0] : d;
+  const parts = x.split('-');
+  if (parts.length === 3) return parts[2] + '.' + parts[1] + '.' + parts[0];
+  return x;
+}
+
+function parseTutar(s) {
+  if (!s || !String(s).trim()) return 0;
+  const n = parseFloat(String(s).replace(',', '.').replace(/\s/g, ''));
+  return isNaN(n) ? 0 : n;
+}
+
+function formatTutar(n) {
+  return (Number(n) || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// Flatpickr
+function initFlatpickr() {
+  const opts = { dateFormat: 'd.m.Y', locale: 'tr', allowInput: true };
+  flatpickr('#tahsilat-tarih', opts);
+  flatpickr('#filter-baslangic', opts);
+  flatpickr('#filter-bitis', opts);
+}
+
+async function loadOzet() {
+  const bas = document.getElementById('filter-baslangic').value || '';
+  const bit = document.getElementById('filter-bitis').value || '';
+  const url = API_OZET + (bas ? '?baslangic=' + encodeURIComponent(bas) : '') + (bit ? (bas ? '&' : '?') + 'bitis=' + encodeURIComponent(bit) : '');
+  const res = await fetch(url);
+  const j = await res.json();
+  document.getElementById('ozet-nakit').textContent = '💵 Nakit: ' + formatTutar(j.nakit) + ' ₺';
+  document.getElementById('ozet-banka').textContent = '🏦 Banka: ' + formatTutar(j.banka) + ' ₺';
+  document.getElementById('ozet-toplam').textContent = '📊 Toplam: ' + formatTutar(j.toplam) + ' ₺';
+}
+
+async function loadBorclular() {
+  const res = await fetch(API_BORCULAR);
+  const rows = await res.json();
+  const tbody = document.getElementById('borclu-tbody');
+  const q = (document.getElementById('search-borclu').value || '').toLowerCase();
+  const filtered = q ? rows.filter(r => (r.name || '').toLowerCase().includes(q)) : rows;
+  tbody.innerHTML = '';
+  let buAyToplam = 0, toplamBorç = 0;
+  filtered.forEach(r => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td>' + (r.name || '') + '</td><td style="text-align:right;">' + formatTutar(r.this_month) + '</td><td style="text-align:right;">' + formatTutar(r.total_due) + '</td><td style="font-size:10px;">' + (r.last_payment ? formatDate(r.last_payment) : '—') + '</td>';
+    tr.onclick = () => selectMusteri(r.id, r.name);
+    tbody.appendChild(tr);
+    toplamBorç += Number(r.total_due) || 0;
+  });
+  document.getElementById('borclu-ozet').textContent = filtered.length + ' borçlu müşteri | Toplam: ' + formatTutar(toplamBorç) + ' ₺';
+}
+
+async function selectMusteri(id, name) {
+  selectedCustomerId = id;
+  document.getElementById('tahsilat-musteri-id').value = id;
+  document.getElementById('selected-customer-bar').innerHTML = '<span style="color:#4fc3f7;font-weight:bold;font-size:14px;">Müşteri: ' + (name || '') + '</span>';
+  const res = await fetch(API_FATURALAR_ODENMEMIS + '?musteri_id=' + id);
+  const faturalar = await res.json();
+  const sel = document.getElementById('tahsilat-fatura');
+  sel.innerHTML = '<option value="">— Fatura seçmeyin —</option>';
+  faturalar.forEach(f => {
+    const opt = document.createElement('option');
+    opt.value = f.id;
+    opt.textContent = (f.fatura_no || '') + ' - ' + formatTutar(f.toplam) + ' ₺';
+    sel.appendChild(opt);
+  });
+  loadTahsilatList(id);
+}
+
+function validateForm() {
+  let ok = true;
+  document.getElementById('tahsilat-tarih').classList.remove('error');
+  document.getElementById('tahsilat-tutar').classList.remove('error');
+  if (!selectedCustomerId) {
+    alert('Lütfen sol listeden bir müşteri seçin.');
+    return false;
+  }
+  const tarih = document.getElementById('tahsilat-tarih').value.trim();
+  if (!tarih) {
+    document.getElementById('tahsilat-tarih').classList.add('error');
+    alert('Tarih zorunludur.');
+    return false;
+  }
+  const tutar = parseTutar(document.getElementById('tahsilat-tutar').value);
+  if (tutar <= 0) {
+    document.getElementById('tahsilat-tutar').classList.add('error');
+    alert('Tutar 0\'dan büyük olmalı ve geçerli bir sayı olmalıdır.');
+    return false;
+  }
+  return true;
+}
+
+async function saveTahsilat() {
+  if (!validateForm()) return;
+  const tarihRaw = document.getElementById('tahsilat-tarih').value.trim();
+  const tarih = tarihRaw.includes('.') ? tarihRaw.split('.').reverse().join('-') : tarihRaw;
+  const tutar = parseTutar(document.getElementById('tahsilat-tutar').value);
+  const odeme = document.querySelector('input[name="odeme"]:checked').value;
+  const aciklama = document.getElementById('tahsilat-aciklama').value.trim();
+  const fatura_id = document.getElementById('tahsilat-fatura').value || null;
+  const payload = { musteri_id: selectedCustomerId, tutar, odeme, aciklama, tarih, fatura_id };
+  const res = await fetch(API_TAHSILAT_SAVE, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  const j = await res.json();
+  if (j.ok) {
+    alert('Tahsilat kaydedildi.');
+    loadBorclular();
+    loadOzet();
+    loadTahsilatList(selectedCustomerId);
+    document.getElementById('tahsilat-tutar').value = '';
+    document.getElementById('tahsilat-aciklama').value = '';
+    document.getElementById('tahsilat-fatura').value = '';
+  } else {
+    alert('Hata: ' + (j.mesaj || 'Kaydetme başarısız'));
+  }
+}
+
+async function loadTahsilatList(musteriId) {
+  let url = API_TAHSILAT_LIST;
+  if (musteriId) url += '?musteri_id=' + musteriId;
+  const bas = document.getElementById('filter-baslangic').value;
+  const bit = document.getElementById('filter-bitis').value;
+  if (bas) url += (url.includes('?') ? '&' : '?') + 'baslangic=' + encodeURIComponent(bas);
+  if (bit) url += (url.includes('?') ? '&' : '?') + 'bitis=' + encodeURIComponent(bit);
+  const res = await fetch(url);
+  const rows = await res.json();
+  const tbody = document.getElementById('tahsilat-tbody');
+  tbody.innerHTML = '';
+  const colCount = CAN_DELETE ? 6 : 5;
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="' + colCount + '" style="text-align:center;padding:20px;color:#6b7280;">Kayıt bulunamadı.</td></tr>';
+    return;
+  }
+  rows.forEach(r => {
+    const tr = document.createElement('tr');
+    let html = '<td>' + formatDate(r.tahsilat_tarihi) + '</td><td>' + (r.musteri_adi || r.musteri_id || '—') + '</td><td style="text-align:right;">' + formatTutar(r.tutar) + '</td><td>' + (r.odeme_turu || '—') + '</td><td>' + (r.aciklama || '') + '</td>';
+    if (CAN_DELETE) html += '<td><button type="button" class="btn-sil" data-id="' + r.id + '">🗑 Sil</button></td>';
+    tr.innerHTML = html;
+    if (CAN_DELETE) tr.querySelector('.btn-sil').onclick = () => deleteTahsilat(r.id);
+    tbody.appendChild(tr);
+  });
+}
+
+async function deleteTahsilat(id) {
+  if (!confirm('Bu tahsilat kaydını silmek istediğinize emin misiniz?')) return;
+  const res = await fetch(API_TAHSILAT_DELETE, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tahsilat_id: id }) });
+  const j = await res.json();
+  if (j.ok) {
+    loadBorclular();
+    loadOzet();
+    loadTahsilatList(selectedCustomerId);
+  } else {
+    alert('Hata: ' + (j.mesaj || 'Silinemedi'));
+  }
+}
+
+function setBugun() {
+  const d = new Date();
+  const s = ('0' + d.getDate()).slice(-2) + '.' + ('0' + (d.getMonth() + 1)).slice(-2) + '.' + d.getFullYear();
+  document.getElementById('filter-baslangic').value = s;
+  document.getElementById('filter-bitis').value = s;
+  filterBaslangic = filterBitis = s;
+  loadOzet();
+  loadTahsilatList(selectedCustomerId);
+}
+
+document.getElementById('btn-tahsilat-kaydet').onclick = saveTahsilat;
+document.getElementById('btn-filtrele').onclick = function() { loadOzet(); loadTahsilatList(selectedCustomerId); };
+document.getElementById('btn-bugun').onclick = setBugun;
+document.getElementById('btn-temizle').onclick = function() {
+  document.getElementById('tahsilat-tutar').value = '';
+  document.getElementById('tahsilat-aciklama').value = '';
+  document.getElementById('tahsilat-fatura').value = '';
+};
+document.getElementById('search-borclu').oninput = loadBorclular;
+
+document.addEventListener('DOMContentLoaded', function() {
+  initFlatpickr();
+  setBugun();
+  loadBorclular();
+  loadOzet();
+});
+</script>
+{% endblock %}

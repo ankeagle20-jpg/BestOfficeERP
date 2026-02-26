@@ -1,0 +1,167 @@
+{% extends "layout.html" %}
+
+{% block page_title %}TÜFE Oranları{% endblock %}
+
+{% block content %}
+<style>
+.tufe-header {
+    background: #0f2537;
+    padding: 12px 16px;
+    margin: -10px -10px 10px -10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.tufe-header h2 {
+    color: #4fc3f7;
+    margin: 0;
+    font-size: 16px;
+}
+.tufe-buttons {
+    display: flex;
+    gap: 8px;
+}
+.tufe-buttons button {
+    background: #00bcd4;
+    color: white;
+    border: none;
+    padding: 7px 14px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: bold;
+}
+.tufe-buttons button:hover {
+    background: #0097a7;
+}
+.yil-selector {
+    background: #1e3a50;
+    padding: 10px 12px;
+    margin-bottom: 12px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.yil-selector label {
+    color: #b0bec5;
+    font-size: 13px;
+    font-weight: bold;
+}
+.yil-selector input {
+    background: #2d4060;
+    border: 1px solid #3d5070;
+    color: #e0f7fa;
+    padding: 6px 12px;
+    border-radius: 3px;
+    font-size: 15px;
+    width: 80px;
+    text-align: center;
+    font-weight: bold;
+}
+.aylar-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+}
+.ay-kart {
+    background: #1e3a50;
+    padding: 16px;
+    border-radius: 6px;
+    border: 2px solid #2d4060;
+}
+.ay-kart h3 {
+    color: #4fc3f7;
+    font-size: 14px;
+    margin: 0 0 12px 0;
+    text-align: center;
+    font-weight: bold;
+}
+.ay-kart .input-group {
+    margin-bottom: 8px;
+}
+.ay-kart .input-group label {
+    display: block;
+    color: #90a4ae;
+    font-size: 11px;
+    margin-bottom: 4px;
+}
+.ay-kart .input-group input {
+    width: 100%;
+    background: #2d4060;
+    border: 1px solid #3d5070;
+    color: #e0f7fa;
+    padding: 8px 10px;
+    border-radius: 3px;
+    font-size: 14px;
+    text-align: center;
+    font-weight: bold;
+}
+.ay-kart.veri-var {
+    background: #1a4d2e;
+    border-color: #27ae60;
+}
+.ay-kart.veri-yok {
+    background: #3d2d1e;
+    border-color: #f39c12;
+}
+</style>
+
+<div class="tufe-header">
+    <h2>📊 TÜFE Oranları</h2>
+    <div class="tufe-buttons">
+        <button onclick="yukle()">↺ Yükle</button>
+        <button onclick="kaydet()">💾 Kaydet</button>
+        <button onclick="sil()">🗑 Sil</button>
+        <button onclick="excelAktar()">📊 Excel'den Aktar</button>
+        <button onclick="tcmbCek()" style="background: #e74c3c;">🌐 TCMB'den Çek</button>
+    </div>
+</div>
+
+<!-- Yıl Seçici -->
+<div class="yil-selector">
+    <label>Yıl:</label>
+    <input type="number" value="2026" id="tufe-yil" min="2000" max="2100">
+    <button style="background: #00bcd4; color: white; border: none; padding: 6px 12px; border-radius: 3px; cursor: pointer;" onclick="yilDegistir()">
+        ▶ Göster
+    </button>
+</div>
+
+<!-- Aylar Grid -->
+<div class="aylar-grid">
+    {% set aylar = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'] %}
+    
+    {% for ay in aylar %}
+    <div class="ay-kart {% if loop.index <= 2 %}veri-var{% else %}veri-yok{% endif %}">
+        <h3>{{ ay }} (%)</h3>
+        <div class="input-group">
+            <input type="text" placeholder="—" value="{% if loop.index == 1 %}30.65{% elif loop.index == 2 %}33.98{% endif %}" id="ay-{{ loop.index }}">
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<script>
+function yukle() {
+    alert('TÜFE verileri yükleniyor...');
+}
+function kaydet() {
+    alert('TÜFE verileri kaydediliyor...');
+}
+function sil() {
+    if(confirm('Seçili yılın tüm verileri silinecek. Emin misiniz?')) {
+        alert('Veriler silindi!');
+    }
+}
+function excelAktar() {
+    alert('Excel aktarma özelliği yakında!');
+}
+function tcmbCek() {
+    alert('TCMB\'den otomatik veri çekiliyor...');
+}
+function yilDegistir() {
+    const yil = document.getElementById('tufe-yil').value;
+    alert('Yıl ' + yil + ' için veriler yükleniyor...');
+}
+</script>
+{% endblock %}

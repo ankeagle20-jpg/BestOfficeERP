@@ -1,0 +1,21 @@
+{% extends "layout.html" %}
+
+{% block page_title %}Müşteri Aktar - Excel{% endblock %}
+
+{% block content %}
+<div class="card-erp" style="max-width:700px;margin:20px auto;">
+  <h3>Excel'den Müşteri Aktar</h3>
+  <p>Kolon isimleri: Ad/Unvan, E-posta, Telefon, Adres, Vergi No</p>
+
+  <form method="post" enctype="multipart/form-data">
+    <div style="margin-bottom:10px;">
+      <input type="file" name="file" accept=".xlsx,.xls" required>
+    </div>
+    <div>
+      <button class="btn-erp" type="submit">📂 İçe Aktar</button>
+      <a href="{{ url_for('musteriler.index') }}" class="btn-erp btn-erp-sm" style="background:#6b7280;">Geri</a>
+    </div>
+  </form>
+</div>
+{% endblock %}
+

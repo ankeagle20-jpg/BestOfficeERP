@@ -1,0 +1,169 @@
+{% extends "layout.html" %}
+
+{% block page_title %}Müşteriler - Grid{% endblock %}
+
+{% block content %}
+<style>
+.musteri-toolbar {
+    background: #1e3a50;
+    padding: 10px 12px;
+    margin: -10px -10px 10px -10px;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+.musteri-toolbar button {
+    background: #00bcd4;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: bold;
+}
+.musteri-toolbar button:hover {
+    background: #0097a7;
+}
+.musteri-grid {
+    width: 100%;
+    background: #243447;
+    border-collapse: collapse;
+    font-size: 11px;
+}
+.musteri-grid th {
+    background: #0097a7;
+    color: white;
+    padding: 8px 6px;
+    text-align: center;
+    font-weight: bold;
+    font-size: 10px;
+    border-right: 1px solid #006064;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+.musteri-grid td {
+    padding: 5px 6px;
+    border-bottom: 1px solid #2d4060;
+    border-right: 1px solid #2d4060;
+    text-align: right;
+    color: #e0f7fa;
+}
+.musteri-grid td:nth-child(1),
+.musteri-grid td:nth-child(2) {
+    text-align: left;
+}
+.musteri-grid tr:hover {
+    background: #2d4060;
+    cursor: pointer;
+}
+.musteri-grid tr.selected {
+    background: #00695c;
+}
+.kira-cell {
+    min-width: 70px;
+}
+.detay-panel {
+    background: #1e3a50;
+    padding: 12px;
+    margin-top: 10px;
+    border-radius: 4px;
+}
+.detay-panel h3 {
+    color: #4fc3f7;
+    font-size: 14px;
+    margin: 0 0 10px 0;
+    padding-bottom: 6px;
+    border-bottom: 1px solid #2d4060;
+}
+.secili-info {
+    padding: 8px;
+    background: #0f2537;
+    border-radius: 3px;
+    color: #90a4ae;
+    font-size: 12px;
+    margin-bottom: 10px;
+}
+</style>
+
+<div class="card-erp">
+    <h2>Müşteriler - Grid</h2>
+    
+    <!-- Toolbar -->
+    <div class="musteri-toolbar">
+        <button onclick="excelIceriAktar()">📂 Excel'den İçeri Aktar</button>
+        <button onclick="yenile()">↺ Yenile</button>
+    </div>
+    
+    <!-- Grid Tablosu -->
+    <div style="overflow-x: auto; overflow-y: auto; max-height: 500px;">
+        <table class="musteri-grid">
+            <thead>
+                <tr>
+                    <th style="min-width: 200px;">Ad / Ünvan</th>
+                    <th style="min-width: 120px;">Vergi No</th>
+                    <th>2021</th>
+                    <th>2022</th>
+                    <th>2023</th>
+                    <th>2024</th>
+                    <th>2025</th>
+                    <th>2026</th>
+                    <th style="min-width: 100px;">İlk Kira (₺)</th>
+                    <th style="min-width: 100px;">Güncel Kira (₺)</th>
+                </tr>
+            </thead>
+            <tbody id="musteri-tbody">
+                {% for m in faturalar %}
+                <tr onclick="selectMusteri({{ m.id }}, this)" data-id="{{ m.id }}">
+                    <td>{{ m.name }}</td>
+                    <td>{{ m.tax_number or '—' }}</td>
+                    <td class="kira-cell">{{ '%.2f'|format(m.kira_2021 or 0) }}</td>
+                    <td class="kira-cell">{{ '%.2f'|format(m.kira_2022 or 0) }}</td>
+                    <td class="kira-cell">{{ '%.2f'|format(m.kira_2023 or 0) }}</td>
+                    <td class="kira-cell">{{ '%.2f'|format(m.kira_2024 or 0) }}</td>
+                    <td class="kira-cell">{{ '%.2f'|format(m.kira_2025 or 0) }}</td>
+                    <td class="kira-cell">{{ '%.2f'|format(m.kira_2026 or 0) }}</td>
+                    <td class="kira-cell">{{ '%.2f'|format(m.ilk_kira or 0) }}</td>
+                    <td class="kira-cell" style="font-weight: bold;">{{ '%.2f'|format(m.guncel_kira or 0) }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Müşteri Detayları -->
+<div class="detay-panel">
+    <h3>👤 Müşteri Detayları</h3>
+    <div class="secili-info" id="secili-info">
+        Seçili müşteri yok.
+    </div>
+</div>
+
+<script>
+let selectedId = null;
+
+function selectMusteri(id, row) {
+    // Önceki seçimi kaldır
+    document.querySelectorAll('.musteri-grid tr').forEach(r => r.classList.remove('selected'));
+    
+    // Yeni seçim
+    row.classList.add('selected');
+    selectedId = id;
+    
+    // Detay panelini güncelle
+    const name = row.cells[0].textContent;
+    const vergiNo = row.cells[1].textContent;
+    document.getElementById('secili-info').innerHTML = `<strong>${name}</strong> - Vergi No: ${vergiNo}`;
+}
+
+function excelIceriAktar() {
+    alert('Excel içeri aktarma özelliği yakında!');
+}
+
+function yenile() {
+    location.reload();
+}
+</script>
+{% endblock %}
