@@ -1,7 +1,7 @@
 """
 Bankalar: hesap dökümü, ekstre yükleme, tahsilat eşleştirme, masraf takibi.
 """
-from flask import Blueprint, render_template, request, jsonify
+from flask import Blueprint, render_template, request, jsonify, redirect, url_for
 from auth import giris_gerekli, admin_gerekli
 from db import fetch_all, fetch_one, execute, execute_returning
 from datetime import datetime, date
@@ -24,6 +24,13 @@ def _parse_date(s):
 @giris_gerekli
 def index():
     return render_template("bankalar/index.html")
+
+
+@bp.route("/yeni")
+@giris_gerekli
+def yeni():
+    """Yeni hesap sayfasına yönlendir (aynı index, form temiz)."""
+    return redirect(url_for("banka.index"))
 
 
 @bp.route("/api/hesaplar")

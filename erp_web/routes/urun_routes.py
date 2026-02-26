@@ -1,7 +1,7 @@
 """
 Ürünler: ürün listesi, ekleme/güncelleme/silme, ürün çoğalt, otomatik stok kodu.
 """
-from flask import Blueprint, render_template, request, jsonify
+from flask import Blueprint, render_template, request, jsonify, redirect, url_for
 from auth import giris_gerekli, admin_gerekli
 from db import fetch_all, fetch_one, execute, execute_returning
 
@@ -12,6 +12,13 @@ bp = Blueprint("urunler", __name__)
 @giris_gerekli
 def index():
     return render_template("urunler/index.html")
+
+
+@bp.route("/yeni")
+@giris_gerekli
+def yeni():
+    """Yeni ürün sayfasına yönlendir (aynı index, form temiz)."""
+    return redirect(url_for("urunler.index"))
 
 
 @bp.route("/api/list")
