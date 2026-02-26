@@ -1,4 +1,22 @@
-# Render Configuration
-
-# The command to start your application
-startCommand: "gunicorn -w 4 -b 0.0.0.0:$PORT app:app"
+# Render Blueprint
+services:
+  - type: web
+    name: bestoffice-erp
+    runtime: python
+    plan: free
+    rootDir: erp_web
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn -w 4 -b 0.0.0.0:$PORT app:app
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DB_HOST
+        sync: false
+      - key: DB_PORT
+        value: "5432"
+      - key: DB_NAME
+        value: postgres
+      - key: DB_USER
+        value: postgres
+      - key: DB_PASSWORD
+        sync: false
