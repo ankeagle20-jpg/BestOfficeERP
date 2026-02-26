@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}{{ app_name }}{% endblock %}</title>
+  <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.3/css/bootstrap.min.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
   <style>
@@ -21,24 +22,37 @@
     }
     * { box-sizing: border-box; }
     body { background: var(--bg-dark); color: var(--text);
-           font-family: 'Segoe UI', sans-serif; margin: 0; min-height: 100vh; }
+           font-family: 'Segoe UI', sans-serif; margin: 0; padding-top: 4px; min-height: 100vh; }
 
-    /* Yatay üst bar (logo + menü + kullanıcı) */
+    /* Üst bar: 1. satır logo + kullanıcı, 2. satır menü başlıkları */
     .app-header {
       position: sticky; top: 0; z-index: 100;
+      width: 100%;
       background: var(--bg-sidebar);
       border-bottom: 1px solid var(--border);
-      display: flex; align-items: center; flex-wrap: wrap;
+      display: flex;
+      flex-direction: column;
+      padding: 0;
+    }
+    .app-header-row1 {
+      display: flex; align-items: center; justify-content: space-between;
       padding: 0 8px 0 0;
-      min-height: 52px;
+      min-height: 44px;
     }
     .app-logo {
-      padding: 12px 20px;
+      padding: 10px 20px;
       font-size: 1.1rem; font-weight: 700; color: var(--accent);
       border-right: 1px solid var(--border);
       white-space: nowrap;
+      flex-shrink: 0;
     }
     .app-logo span { color: var(--text-muted); font-size: 0.7rem; font-weight: 400; display: block; }
+    .app-header-row2 {
+      display: flex; align-items: center;
+      min-height: 44px;
+      border-top: 1px solid var(--border);
+      padding: 0 8px 0 0;
+    }
     .app-nav {
       display: flex; align-items: center; flex: 1;
       overflow-x: auto; overflow-y: hidden;
@@ -47,17 +61,23 @@
     }
     .app-nav a {
       display: inline-flex; align-items: center; gap: 6px;
-      padding: 14px 14px;
+      padding: 12px 14px;
       color: var(--text-muted);
       text-decoration: none;
       font-size: 0.85rem;
       white-space: nowrap;
       border-bottom: 3px solid transparent;
-      transition: color .1s ease, background .1s ease, border-color .1s ease;
+      cursor: pointer;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      transition: none;
     }
     .app-nav a:hover {
       color: var(--accent);
-      background: rgba(79, 195, 247, 0.06);
+      background: rgba(79, 195, 247, 0.08);
+    }
+    .app-nav a:active {
+      background: rgba(79, 195, 247, 0.12);
     }
     .app-nav a.active {
       color: var(--accent);
@@ -76,22 +96,12 @@
 
     /* Ana içerik - tam genişlik */
     .main-content { min-height: 100vh; width: 100%; }
-    .topbar {
-      background: var(--bg-card);
-      border-bottom: 1px solid var(--border);
-      padding: 10px 24px;
-      display: flex; align-items: center;
-      justify-content: space-between;
-      position: sticky; top: 52px;
-      z-index: 50;
-    }
-    .topbar-title { font-size: 1rem; font-weight: 600; color: var(--text); }
-    .page-content { padding: 24px; }
+    .page-content { padding: 16px 20px; padding-top: 10px; }
 
     /* Kartlar */
     .card-erp {
       background: var(--bg-card); border: 1px solid var(--border);
-      border-radius: 8px; padding: 20px; margin-bottom: 16px;
+      border-radius: 8px; padding: 16px; margin-bottom: 12px;
     }
     .card-erp .card-title {
       font-size: 0.78rem; color: var(--text-muted); text-transform: uppercase;
@@ -178,46 +188,42 @@
 </head>
 <body>
 
-<!-- Yatay üst menü -->
+<!-- Üst menü: 1. satır logo + kullanıcı, 2. satır menü başlıkları -->
 <header class="app-header">
-  <div class="app-logo">
-    <i class="fa fa-building"></i> {{ app_name }}
-    <span>v{{ version }}</span>
+  <div class="app-header-row1">
+    <div class="app-logo">
+      <i class="fa fa-building"></i> {{ app_name }}
+      <span>v{{ version }}</span>
+    </div>
+    <div class="app-user">
+      <span><i class="fa fa-user fa-fw"></i> {{ current_user.username }}</span>
+      <span class="badge-admin">{{ current_user.rol_bilgi.label }}</span>
+      <a href="{{ url_for('auth.profile') }}" title="Profil"><i class="fa fa-user-cog fa-fw"></i></a>
+      <a href="{{ url_for('auth.logout') }}"><i class="fa fa-sign-out-alt fa-fw"></i> Çıkış</a>
+    </div>
   </div>
-  <nav class="app-nav">
-    <a href="{{ url_for('index') }}"
-       class="{% if request.endpoint == 'index' %}active{% endif %}">
-      <i class="fa fa-th-large fa-fw"></i>
-      <span>Dashboard</span>
-    </a>
-    {% for item in menu_items %}
-    <a href="{{ item.url }}"
-       class="{% if request.blueprint == item.id %}active{% endif %}">
-      <i class="fa fa-folder fa-fw"></i>
-      <span>{{ item.label }}</span>
-    </a>
-    {% endfor %}
-  </nav>
-  <div class="app-user">
-    <span><i class="fa fa-user fa-fw"></i> {{ current_user.username }}</span>
-    <span class="badge-admin">{{ current_user.rol_bilgi.label }}</span>
-    <a href="{{ url_for('auth.profile') }}" title="Profil"><i class="fa fa-user-cog fa-fw"></i></a>
-    <a href="{{ url_for('auth.logout') }}"><i class="fa fa-sign-out-alt fa-fw"></i> Çıkış</a>
+  <div class="app-header-row2">
+    <nav class="app-nav">
+      <a href="{{ url_for('index') }}"
+         class="{% if request.endpoint == 'index' %}active{% endif %}">
+        <i class="fa fa-th-large fa-fw"></i>
+        <span>Dashboard</span>
+      </a>
+      {% for item in menu_items %}
+      <a href="{{ item.url }}"
+         class="{% if item.endpoint and request.endpoint == item.endpoint %}active{% endif %}">
+        <i class="fa fa-folder fa-fw"></i>
+        <span>{{ item.label }}</span>
+      </a>
+      {% endfor %}
+    </nav>
   </div>
 </header>
 
 <!-- Ana içerik -->
 <div class="main-content">
-  <!-- Üst bar -->
-  <div class="topbar">
-    <div class="topbar-title">
-      {% block page_title %}{{ app_name }}{% endblock %}
-    </div>
-    <div>{% block topbar_actions %}{% endblock %}</div>
-  </div>
-
   <!-- Flash mesajlar -->
-  <div class="px-4 pt-3">
+  <div class="px-3 pt-2">
     {% for cat, msg in get_flashed_messages(with_categories=True) %}
     <div class="alert-erp alert-{{ cat }}">
       {{ msg }}

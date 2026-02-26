@@ -1,17 +1,6 @@
 @echo off
-REM run_ofisbir.bat - Masaüstü kısayolu: Yerel sunucuyu başlatır ve tarayıcıyı açar (eski masaüstü)
-cd /d "%~dp0.."
-
-REM Sunucuyu yeni bir pencerede başlat (erp_web klasöründe app veya kökte run.py)
-if exist "erp_web\app.py" (
-  start "Ofisbir Server" cmd /k "cd /d \"%~dp0..\erp_web\" && python app.py"
-) else (
-  start "Ofisbir Server" cmd /k "cd /d \"%~dp0..\" && python run.py"
-)
-
-REM Kısa bekleme, sonra tarayıcıyı yerelde aç
-timeout /t 2 /nobreak > nul
-set ERP_URL=http://127.0.0.1:5000
+REM Buluttaki ERP'yi açar (sunucu çalıştırmaz)
+set ERP_URL=https://bestofficeerp.onrender.com
 if exist "%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe" (
   start "" "%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe" --new-window "%ERP_URL%"
 ) else if exist "%ProgramFiles%\Google\Chrome\Application\chrome.exe" (

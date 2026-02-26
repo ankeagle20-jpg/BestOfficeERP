@@ -1,429 +1,260 @@
 {% extends "layout.html" %}
-{% block page_title %}Personel Devam Takip{% endblock %}
-{% block extra_head %}
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/themes/dark.css">
-{% endblock %}
+
+{% block page_title %}Personel{% endblock %}
+
 {% block content %}
 <style>
-.personel-header { background: #0f2537; padding: 12px 16px; margin: -10px -10px 10px -10px; display: flex; align-items: center; justify-content: space-between; }
-.personel-header h2 { color: #4fc3f7; margin: 0; font-size: 16px; }
-.personel-tabs { display: flex; gap: 0; margin-bottom: 10px; border-bottom: 1px solid #2d4060; }
-.personel-tabs a { padding: 10px 18px; color: #90a4ae; text-decoration: none; font-size: 13px; font-weight: bold; border-bottom: 3px solid transparent; }
-.personel-tabs a:hover { color: #4fc3f7; }
-.personel-tabs a.active { color: #4fc3f7; border-bottom-color: #4fc3f7; }
-.tab-pane { display: none; }
-.tab-pane.active { display: block; }
-.panel { background: #1e3a50; padding: 12px; border-radius: 4px; margin-bottom: 12px; }
-.panel h4 { color: #4fc3f7; font-size: 13px; margin: 0 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #2d4060; }
-.tbl { width: 100%; background: #243447; border-collapse: collapse; font-size: 12px; }
-.tbl th { background: #0097a7; color: white; padding: 8px 6px; text-align: center; font-size: 11px; }
-.tbl td { padding: 6px 8px; border-bottom: 1px solid #2d4060; color: #e0f7fa; }
-.tbl td:first-child { text-align: left; }
-.tbl tr:hover { background: #2d4060; }
-.frm-row { display: flex; gap: 10px; margin-bottom: 8px; align-items: center; }
-.frm-row label { color: #b0bec5; font-size: 12px; min-width: 100px; }
-.frm-row input, .frm-row select { background: #2d4060; border: 1px solid #3d5070; color: #e0f7fa; padding: 6px 10px; border-radius: 3px; font-size: 12px; }
-.btn-p { background: #00bcd4; color: white; border: none; padding: 8px 14px; border-radius: 3px; cursor: pointer; font-size: 12px; }
-.btn-p:hover { background: #0097a7; }
-.btn-s { background: #6b7280; color: white; border: none; padding: 8px 14px; border-radius: 3px; cursor: pointer; font-size: 12px; }
-.grid2 { display: grid; grid-template-columns: 1fr 400px; gap: 12px; }
-.wifi-off { color: #e74c3c; font-size: 12px; }
-.izin-kart { background: #0f2537; padding: 10px; border-radius: 4px; display: inline-block; margin-right: 10px; margin-bottom: 8px; }
-.izin-kart .val { font-size: 18px; font-weight: bold; color: #69f0ae; }
+.personel-header {
+    background: #0f2537;
+    padding: 12px;
+    margin: -10px -10px 10px -10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.personel-header h2 {
+    color: #4fc3f7;
+    margin: 0;
+    font-size: 16px;
+}
+.personel-buttons button {
+    background: #00bcd4;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 13px;
+    margin-left: 8px;
+}
+.personel-grid {
+    width: 100%;
+    background: #243447;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+.personel-grid th {
+    background: #0097a7;
+    color: white;
+    padding: 8px;
+    text-align: left;
+    font-size: 11px;
+}
+.personel-grid td {
+    padding: 8px;
+    border-bottom: 1px solid #2d4060;
+    color: #e0f7fa;
+}
+.personel-grid tr:hover {
+    background: #2d4060;
+    cursor: pointer;
+}
+.pere-box { background: #12243a; border: 1px solid #1e3a5f; border-radius: 8px; padding: 14px; margin-bottom: 12px; }
+.btn-pere { background: #00bcd4; color: #000; border: none; padding: 8px 14px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 600; margin-right: 6px; margin-bottom: 6px; }
+.btn-pere:hover { background: #29b6f6; }
+.btn-pere.secondary { background: #546e7a; color: #fff; }
+.btn-pere.danger { background: #ef5350; color: #fff; }
+@media (max-width: 900px) { .personel-page { grid-template-columns: 1fr !important; } }
 </style>
 
 <div class="personel-header">
-    <h2>👥 Personel Devam Takip</h2>
-    <div>
-        <label style="color:#b0bec5;">Tarih:</label>
-        <input type="text" id="filter-tarih" placeholder="GG.AA.YYYY" style="width:110px;background:#2d4060;border:1px solid #3d5070;color:#e0f7fa;padding:6px 10px;margin:0 6px;border-radius:3px;">
-        <button type="button" id="btn-bugun" class="btn-s">↺ Bugün</button>
+    <h2>👥 Personel Devam Takip & Yönetim</h2>
+    <div class="personel-buttons">
+        <button onclick="yeniPersonel()">➕ Yeni Personel</button>
+        <button onclick="yenile()">↺ Yenile</button>
     </div>
 </div>
 
-<div class="personel-tabs">
-    <a href="#" id="tab-devam" class="active">Devam</a>
-    <a href="#" id="tab-izin">İzin Yönetimi</a>
-    <a href="#" id="tab-personel">Personel Yönetimi</a>
-</div>
-
-<!-- Devam -->
-<div id="pane-devam" class="tab-pane active">
-    <div class="grid2">
-        <div>
-            <div class="panel">
-                <h4>Günlük Devam Listesi</h4>
-                <div style="max-height:320px;overflow-y:auto;">
-                    <table class="tbl"><thead><tr><th>Personel</th><th>Giriş</th><th>Çıkış</th><th>Durum</th><th>Geç (dk)</th></tr></thead><tbody id="devam-tbody"></tbody></table>
-                </div>
-            </div>
-            <div class="panel">
-                <h4>Aylık Özet</h4>
-                <div class="frm-row">
-                    <label>Yıl:</label><select id="aylik-yil" style="width:80px;"></select>
-                    <label>Ay:</label><select id="aylik-ay" style="width:100px;"></select>
-                    <button type="button" id="btn-aylik-goster" class="btn-p">Göster</button>
-                </div>
-                <div style="max-height:200px;overflow-y:auto;">
-                    <table class="tbl"><thead><tr><th>Personel</th><th>Toplam Gün</th><th>Geç Sayısı</th><th>Ort. Geç (dk)</th></tr></thead><tbody id="aylik-tbody"></tbody></table>
-                </div>
-            </div>
-        </div>
-        <div>
-            <div class="panel">
-                <h4>WiFi Takibi</h4>
-                <p class="wifi-off">● WiFi Takip Kapalı — Web sürümünde otomatik takip için masaüstü uygulaması veya yerel bir servis kullanılabilir.</p>
-            </div>
-            <div class="panel">
-                <h4>Manuel Düzeltme</h4>
-                <div class="frm-row"><label>Personel:</label><select id="manuel-personel" style="flex:1;"></select></div>
-                <div class="frm-row"><label>Giriş:</label><input type="text" id="manuel-giris" placeholder="09:00" style="width:80px;"></div>
-                <div class="frm-row"><label>Çıkış:</label><input type="text" id="manuel-cikis" placeholder="18:00" style="width:80px;"></div>
-                <button type="button" id="btn-manuel-kaydet" class="btn-p">Kaydet</button>
-            </div>
-        </div>
+<div class="personel-page" style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+  <div class="pere-box" style="background:#12243a; border:1px solid #1e3a5f; border-radius:8px; padding:14px;">
+    <h3 style="color:#4fc3f7; margin:0 0 10px 0; font-size:14px;">Personel Yönetimi</h3>
+    <input type="hidden" id="fPersonelId" />
+    <label style="display:block; color:#888; font-size:12px;">Ad Soyad</label>
+    <input type="text" id="fAdSoyad" style="width:100%; background:#0a1929; border:1px solid #1e3a5f; color:#e0f7fa; padding:6px 10px; margin-bottom:10px; border-radius:4px;" placeholder="Ad Soyad" />
+    <label style="display:block; color:#888; font-size:12px;">Mesai Başlangıç</label>
+    <input type="time" id="fMesai" value="09:00" style="width:100%; background:#0a1929; border:1px solid #1e3a5f; color:#e0f7fa; padding:6px; margin-bottom:10px; border-radius:4px;" />
+    <label style="display:block; color:#888; font-size:12px;">Durum</label>
+    <select id="fAktif" style="width:100%; background:#0a1929; border:1px solid #1e3a5f; color:#e0f7fa; padding:6px; margin-bottom:10px; border-radius:4px;"><option value="1">Aktif</option><option value="0">Pasif</option></select>
+    <label style="display:block; color:#888; font-size:12px;">MAC Adres</label>
+    <input type="text" id="fMac" placeholder="AA:BB:CC:DD:EE:FF" style="width:100%; background:#0a1929; border:1px solid #1e3a5f; color:#e0f7fa; padding:6px; margin-bottom:10px; border-radius:4px;" />
+    <label style="display:block; color:#888; font-size:12px;">Not</label>
+    <textarea id="fNotlar" placeholder="Not / Değerlendirme" style="width:100%; min-height:50px; background:#0a1929; border:1px solid #1e3a5f; color:#e0f7fa; padding:6px; margin-bottom:10px; border-radius:4px;"></textarea>
+    <div style="margin-bottom:10px;">
+      <button type="button" class="btn-pere" onclick="personelKaydet()">+ Ekle / Güncelle</button>
+      <button type="button" class="btn-pere secondary" onclick="personelAktifYap()">Aktif Yap</button>
+      <button type="button" class="btn-pere danger" onclick="personelPasifeAl()">Pasife Al</button>
+      <button type="button" class="btn-pere secondary" onclick="formTemizle()">Temizle</button>
     </div>
-</div>
-
-<!-- İzin Yönetimi -->
-<div id="pane-izin" class="tab-pane">
-    <div class="grid2">
-        <div>
-            <div class="panel">
-                <h4>İzin Hakları / Kullanım</h4>
-                <div class="frm-row"><label>Personel:</label><select id="izin-personel" style="flex:1;"></select></div>
-                <div class="frm-row"><label>Yıl:</label><select id="izin-yil" style="width:90px;"></select></div>
-                <div style="margin-bottom:10px;">
-                    <span class="izin-kart"><span class="label">Hak</span><br><span class="val" id="izin-hak">—</span></span>
-                    <span class="izin-kart"><span class="label">Kullanılan</span><br><span class="val" id="izin-kullanilan">—</span></span>
-                    <span class="izin-kart"><span class="label">Kalan</span><br><span class="val" id="izin-kalan">—</span></span>
-                </div>
-                <div class="frm-row">
-                    <label>Geç kesinti:</label>
-                    <label><input type="radio" name="gec_kesinti" value="izin" checked> İzinden düş</label>
-                    <label><input type="radio" name="gec_kesinti" value="maas"> Maaştan düş</label>
-                </div>
-                <button type="button" id="btn-izin-ozet" class="btn-s">Özeti Güncelle</button>
-            </div>
-            <div class="panel">
-                <h4>İzin Formu (Yeni İzin Girişi)</h4>
-                <div class="frm-row"><label>İzin türü:</label><select id="izin-turu" style="flex:1;"><option value="Yıllık Ücretli İzin">Yıllık Ücretli İzin</option><option value="Sağlık / Rapor">Sağlık / Rapor</option><option value="Ücretsiz İzin">Ücretsiz İzin</option><option value="Mazeret İzni">Mazeret İzni</option><option value="Yarım Gün İzin">Yarım Gün İzin</option></select></div>
-                <div class="frm-row"><label>Başlangıç:</label><input type="text" id="izin-bas" placeholder="GG.AA.YYYY"></div>
-                <div class="frm-row"><label>Bitiş:</label><input type="text" id="izin-bit" placeholder="GG.AA.YYYY"></div>
-                <div class="frm-row"><label>Açıklama:</label><input type="text" id="izin-aciklama" placeholder="Opsiyonel"></div>
-                <button type="button" id="btn-izin-kaydet" class="btn-p">İzin Kaydet</button>
-            </div>
-            <div class="panel">
-                <h4>Kullanılan İzinler</h4>
-                <div style="max-height:200px;overflow-y:auto;"><table class="tbl"><thead><tr><th>Tür</th><th>Başlangıç</th><th>Bitiş</th><th>Gün</th><th></th></tr></thead><tbody id="izin-list-tbody"></tbody></table></div>
-            </div>
-        </div>
-        <div>
-            <div class="panel">
-                <h4>Geç Kalma Listesi (Seçili Personel)</h4>
-                <div style="max-height:300px;overflow-y:auto;"><table class="tbl"><thead><tr><th>Tarih</th><th>Giriş</th><th>Geç (dk)</th></tr></thead><tbody id="gec-tbody"></tbody></table></div>
-            </div>
-        </div>
+    <div style="margin-bottom:8px;"><span style="color:#888; font-size:12px;">Göster:</span>
+      <label style="margin-left:10px;"><input type="radio" name="filtre" value="tumu" /> Tümü</label>
+      <label style="margin-left:8px;"><input type="radio" name="filtre" value="aktif" checked /> Aktif</label>
+      <label style="margin-left:8px;"><input type="radio" name="filtre" value="pasif" /> Pasif</label>
     </div>
-</div>
-
-<!-- Personel Yönetimi -->
-<div id="pane-personel" class="tab-pane">
-    <div class="grid2">
-        <div>
-            <div class="panel">
-                <h4>Personel Listesi</h4>
-                <div class="frm-row"><label>Göster:</label><label><input type="radio" name="filtre-p" value="tumu"> Tümü</label><label><input type="radio" name="filtre-p" value="aktif" checked> Aktif</label><label><input type="radio" name="filtre-p" value="pasif"> Pasif</label></div>
-                <div style="max-height:400px;overflow-y:auto;"><table class="tbl"><thead><tr><th>Personel Adı</th><th>Mesai</th><th>Durum</th><th>Not</th></tr></thead><tbody id="personel-tbody"></tbody></table></div>
-            </div>
-        </div>
-        <div>
-            <div class="panel">
-                <h4>Personel Ekle / Güncelle</h4>
-                <input type="hidden" id="personel-id" value="">
-                <div class="frm-row"><label>Ad Soyad *</label><input type="text" id="personel-ad" required></div>
-                <div class="frm-row"><label>Mesai (giriş)</label><input type="text" id="personel-mesai" placeholder="09:00" style="width:80px;"></div>
-                <div class="frm-row"><label>Durum</label><select id="personel-durum"><option value="1">Aktif</option><option value="0">Pasif</option></select></div>
-                <div class="frm-row"><label>MAC Adres</label><input type="text" id="personel-mac" placeholder="AA:BB:CC:DD:EE:FF"></div>
-                <div class="frm-row"><label>Pozisyon</label><input type="text" id="personel-pozisyon"></div>
-                <div class="frm-row"><label>Telefon</label><input type="text" id="personel-telefon"></div>
-                <div class="frm-row"><label>E-posta</label><input type="email" id="personel-email"></div>
-                <div class="frm-row"><label>Not</label><input type="text" id="personel-not"></div>
-                <div style="margin-top:10px;">
-                    <button type="button" id="btn-personel-kaydet" class="btn-p">Ekle / Güncelle</button>
-                    <button type="button" id="btn-personel-temizle" class="btn-s">Temizle</button>
-                </div>
-            </div>
-            <div class="panel">
-                <h4>İzin Bilgisi (Seçili personel)</h4>
-                <div class="frm-row"><label>İşe başlama</label><input type="text" id="bilgi-ise-baslama" placeholder="GG.AA.YYYY"></div>
-                <div class="frm-row"><label>Yıllık izin hakkı</label><input type="number" id="bilgi-yillik-izin" value="14" min="0" style="width:70px;"></div>
-                <div class="frm-row"><label>Manuel ek gün</label><input type="number" id="bilgi-manuel-izin" value="0" min="0" style="width:70px;"></div>
-                <div class="frm-row"><label>Ünvan</label><input type="text" id="bilgi-unvan"></div>
-                <div class="frm-row"><label>Departman</label><input type="text" id="bilgi-departman"></div>
-                <button type="button" id="btn-bilgi-kaydet" class="btn-p">Kaydet</button>
-            </div>
-            <div class="panel">
-                <h4>Yetki Alanları</h4>
-                <p style="font-size:11px;color:#90a4ae;">Personel seçip aşağıdaki modüllere erişim verebilirsiniz.</p>
-                <div id="yetki-listesi"></div>
-                <button type="button" id="btn-yetki-kaydet" class="btn-s" style="margin-top:8px;">Yetkileri Kaydet</button>
-            </div>
-        </div>
+    <div style="overflow:auto; max-height:280px;">
+      <table class="personel-grid" id="personelListeTbl">
+        <thead><tr><th>Personel Adı</th><th>Mesai</th><th>Durum</th><th>Not</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
     </div>
+  </div>
+  <div class="pere-box" style="background:#12243a; border:1px solid #1e3a5f; border-radius:8px; padding:14px;">
+    <h3 style="color:#4fc3f7; margin:0 0 10px 0; font-size:14px;">Günlük Devam Listesi</h3>
+    <div style="margin-bottom:10px;">
+      <input type="date" id="devamTarih" style="margin-right:8px; padding:6px; background:#0a1929; border:1px solid #1e3a5f; color:#e0f7fa; border-radius:4px;" />
+      <button type="button" class="btn-pere" onclick="devamBugun()">Bugün</button>
+      <button type="button" class="btn-pere secondary" onclick="devamYenile()">Yenile</button>
+    </div>
+    <div style="overflow:auto; max-height:200px; margin-bottom:12px;">
+      <table class="personel-grid" id="gunlukDevamTbl">
+        <thead><tr><th>Personel</th><th>Giriş</th><th>Çıkış</th><th>Durum</th><th>Geç (dk)</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <h3 style="color:#4fc3f7; margin:10px 0 8px 0; font-size:13px;">Manuel Düzeltme</h3>
+    <select id="devamPersonel" style="width:100%; margin-bottom:8px; padding:6px; background:#0a1929; border:1px solid #1e3a5f; color:#e0f7fa;"></select>
+    <input type="time" id="devamGiris" style="width:48%; margin-right:4%; padding:6px; margin-bottom:8px;" />
+    <input type="time" id="devamCikis" style="width:48%; padding:6px; margin-bottom:8px;" />
+    <button type="button" class="btn-pere" onclick="devamKaydet()">Kaydet</button>
+    <h3 style="color:#4fc3f7; margin:14px 0 8px 0; font-size:13px;">Aylık Özet</h3>
+    <div style="margin-bottom:8px;">
+      <input type="number" id="aylikYil" min="2020" max="2030" style="width:70px; padding:6px; margin-right:6px;" />
+      <select id="aylikAy" style="width:60px; padding:6px; margin-right:6px;"></select>
+      <button type="button" class="btn-pere" onclick="aylikYenile()">Göster</button>
+    </div>
+    <div style="overflow:auto; max-height:180px;">
+      <table class="personel-grid" id="aylikOzetTbl">
+        <thead><tr><th>Personel</th><th>Toplam Gün</th><th>Geç Sayısı</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
-<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/tr.js"></script>
 <script>
-const BASE = "{{ url_for('personel.index') }}";
-const API_LIST = "{{ url_for('personel.api_list') }}";
-const API_DEVAM_GUNLUK = "{{ url_for('personel.api_devam_gunluk') }}";
-const API_DEVAM_AYLIK = "{{ url_for('personel.api_devam_aylik') }}";
-const API_DEVAM_KAYDET = "{{ url_for('personel.api_devam_kaydet') }}";
-const API_PERSONEL_KAYDET = "{{ url_for('personel.api_personel_kaydet') }}";
-const API_PERSONEL_BILGI = "{{ url_for('personel.api_personel_bilgi') }}";
-const API_IZIN_LIST = "{{ url_for('personel.api_izin_list') }}";
-const API_IZIN_OZET = "{{ url_for('personel.api_izin_ozet') }}";
-const API_IZIN_KAYDET = "{{ url_for('personel.api_izin_kaydet') }}";
-const API_IZIN_SIL = "{{ url_for('personel.api_izin_sil') }}";
-const API_GEC_LIST = "{{ url_for('personel.api_gec_list') }}";
-const API_YETKI_GET = "{{ url_for('personel.api_yetki_get') }}";
-const API_YETKI_KAYDET = "{{ url_for('personel.api_yetki_kaydet') }}";
+var API_LIST = "{{ url_for('personel.api_list') }}";
+var API_KAYDET = "{{ url_for('personel.api_personel_kaydet') }}";
+var API_DEVAM_GUNLUK = "{{ url_for('personel.api_devam_gunluk') }}";
+var API_DEVAM_AYLIK = "{{ url_for('personel.api_devam_aylik') }}";
+var API_DEVAM_KAYDET = "{{ url_for('personel.api_devam_kaydet') }}";
 
-const AYLAR = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"];
-let seciliTarih = null;
-let seciliPersonelId = null;
+function getFiltre() { var r = document.querySelector('input[name="filtre"]:checked'); return r ? r.value : 'aktif'; }
 
-function bugunStr() {
-  const d = new Date();
-  return ('0'+d.getDate()).slice(-2) + '.' + ('0'+(d.getMonth()+1)).slice(-2) + '.' + d.getFullYear();
-}
+function yeniPersonel() { formTemizle(); document.getElementById('fAdSoyad').focus(); }
 
-function tarihToIso(str) {
-  if (!str) return null;
-  const p = String(str).trim().split('.');
-  if (p.length === 3) return p[2] + '-' + p[1] + '-' + p[0];
-  return str;
-}
+function yenile() { personelListeYukle(); devamYenile(); aylikYenile(); }
 
-async function devamGunlukYukle() {
-  const t = document.getElementById('filter-tarih').value.trim() || bugunStr();
-  const iso = tarihToIso(t) || new Date().toISOString().slice(0,10);
-  const res = await fetch(API_DEVAM_GUNLUK + '?tarih=' + encodeURIComponent(iso));
-  const rows = await res.json();
-  const tbody = document.getElementById('devam-tbody');
-  tbody.innerHTML = '';
-  if (!rows.length) { tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#6b7280;">Kayıt yok.</td></tr>'; return; }
-  rows.forEach(r => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = '<td>'+ (r.ad_soyad||'') +'</td><td>'+ (r.giris_saati||'—') +'</td><td>'+ (r.cikis_saati||'—') +'</td><td>'+ (r.durum||'') +'</td><td>'+ (r.gec_dakika||0) +'</td>';
-    tbody.appendChild(tr);
-  });
-}
-
-async function devamAylikYukle() {
-  const yil = document.getElementById('aylik-yil').value;
-  const ay = document.getElementById('aylik-ay').value;
-  if (!yil || !ay) return;
-  const res = await fetch(API_DEVAM_AYLIK + '?yil='+yil+'&ay='+ay);
-  const rows = await res.json();
-  const tbody = document.getElementById('aylik-tbody');
-  tbody.innerHTML = '';
-  if (!rows.length) { tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#6b7280;">Kayıt yok.</td></tr>'; return; }
-  rows.forEach(r => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = '<td>'+ (r.ad_soyad||'') +'</td><td>'+ (r.toplam_gun||0) +'</td><td>'+ (r.gec_sayisi||0) +'</td><td>'+ (r.ort_gec_dk||0) +'</td>';
-    tbody.appendChild(tr);
-  });
-}
-
-async function personelListeYukle(filtre) {
-  const res = await fetch(API_LIST + (filtre ? '?filtre='+filtre : ''));
-  const rows = await res.json();
-  const sel = document.getElementById('manuel-personel');
-  const sel2 = document.getElementById('izin-personel');
-  sel.innerHTML = '<option value="">— Seçin —</option>';
-  sel2.innerHTML = '<option value="">— Seçin —</option>';
-  rows.forEach(r => {
-    const o = document.createElement('option'); o.value = r.id; o.textContent = r.ad_soyad; sel.appendChild(o);
-    const o2 = document.createElement('option'); o2.value = r.id; o2.textContent = r.ad_soyad; sel2.appendChild(o2);
-  });
-  const tbody = document.getElementById('personel-tbody');
-  tbody.innerHTML = '';
-  rows.forEach(r => {
-    const tr = document.createElement('tr');
-    tr.dataset.id = r.id;
-    tr.innerHTML = '<td>'+ (r.ad_soyad||'') +'</td><td>'+ (r.mesai_baslangic||'09:00') +'</td><td>'+ (r.is_active ? 'Aktif' : 'Pasif') +'</td><td>'+ (r.notlar||'') +'</td>';
-    tr.onclick = () => personelSec(r);
-    tbody.appendChild(tr);
-  });
-}
-
-function personelSec(r) {
-  seciliPersonelId = r.id;
-  document.getElementById('personel-id').value = r.id;
-  document.getElementById('personel-ad').value = r.ad_soyad || '';
-  document.getElementById('personel-mesai').value = r.mesai_baslangic || '09:00';
-  document.getElementById('personel-durum').value = r.is_active ? '1' : '0';
-  document.getElementById('personel-mac').value = r.mac_adres || '';
-  document.getElementById('personel-pozisyon').value = r.pozisyon || '';
-  document.getElementById('personel-telefon').value = r.telefon || '';
-  document.getElementById('personel-email').value = r.email || '';
-  document.getElementById('personel-not').value = r.notlar || '';
-  document.querySelectorAll('#personel-tbody tr').forEach(tr => tr.style.background = tr.dataset.id == r.id ? '#00695c' : '');
-  bilgiYukle(r.id);
-  izinOzetYukle(r.id);
-  gecListYukle(r.id);
-  yetkiYukle(r.id);
-}
-
-function isoToTr(s) {
-  if (!s || s.length < 10) return '';
-  const p = String(s).split('T')[0].split('-');
-  if (p.length === 3) return p[2] + '.' + p[1] + '.' + p[0];
-  return s;
-}
-async function bilgiYukle(pid) {
-  const res = await fetch(API_PERSONEL_BILGI + '?personel_id='+pid);
-  const d = await res.json();
-  document.getElementById('bilgi-ise-baslama').value = isoToTr(d.ise_baslama_tarihi) || '';
-  document.getElementById('bilgi-yillik-izin').value = d.yillik_izin_hakki || 14;
-  document.getElementById('bilgi-manuel-izin').value = d.manuel_izin_gun || 0;
-  document.getElementById('bilgi-unvan').value = d.unvan || '';
-  document.getElementById('bilgi-departman').value = d.departman || '';
-  const rad = document.querySelector('input[name="gec_kesinti"][value="'+ (d.gec_kesinti_tipi||'izin') +'"]');
-  if (rad) rad.checked = true;
-}
-
-async function izinOzetYukle(pid) {
-  const yil = document.getElementById('izin-yil').value || new Date().getFullYear();
-  const res = await fetch(API_IZIN_OZET + '?personel_id='+pid+'&yil='+yil);
-  const d = await res.json();
-  document.getElementById('izin-hak').textContent = (d.toplam_hak!=null ? d.toplam_hak : d.hak) + ' gün';
-  document.getElementById('izin-kullanilan').textContent = (d.kullanilan||0) + ' gün';
-  document.getElementById('izin-kalan').textContent = (d.kalan != null ? Math.round(d.kalan) : '—') + ' gün';
-}
-
-async function izinListYukle(pid) {
-  const yil = document.getElementById('izin-yil').value || new Date().getFullYear();
-  const res = await fetch(API_IZIN_LIST + '?personel_id='+pid+'&yil='+yil);
-  const rows = await res.json();
-  const tbody = document.getElementById('izin-list-tbody');
-  tbody.innerHTML = '';
-  rows.forEach(r => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = '<td>'+ (r.izin_turu||'') +'</td><td>'+ (r.baslangic_tarihi||'') +'</td><td>'+ (r.bitis_tarihi||'') +'</td><td>'+ (r.gun_sayisi||0) +'</td><td><button type="button" class="btn-s" data-id="'+r.id+'">Sil</button></td>';
-    tr.querySelector('button').onclick = () => izinSil(r.id);
-    tbody.appendChild(tr);
-  });
-}
-
-async function izinSil(id) {
-  if (!confirm('Bu izin kaydını silmek istediğinize emin misiniz?')) return;
-  await fetch(API_IZIN_SIL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ izin_id: id }) });
-  if (seciliPersonelId) { izinListYukle(seciliPersonelId); izinOzetYukle(seciliPersonelId); }
-}
-
-async function gecListYukle(pid) {
-  const res = await fetch(API_GEC_LIST + '?personel_id='+pid);
-  const rows = await res.json();
-  const tbody = document.getElementById('gec-tbody');
-  tbody.innerHTML = '';
-  rows.forEach(r => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = '<td>'+ (r.tarih||'') +'</td><td>'+ (r.giris_saati||'') +'</td><td>'+ (r.gec_dakika||0) +'</td>';
-    tbody.appendChild(tr);
-  });
-}
-
-function yetkiYukle(pid) {
-  fetch(API_YETKI_GET + '?personel_id='+pid).then(r=>r.json()).then(rows => {
-    const div = document.getElementById('yetki-listesi');
-    const moduller = ['musteriler','ofisler','faturalar','tahsilat','kargolar','kira','tufe','personel'];
-    div.innerHTML = '';
-    moduller.forEach(m => {
-      const r = rows.find(x => x.modul === m);
-      const label = document.createElement('label');
-      label.style.display = 'block';
-      label.innerHTML = '<input type="checkbox" data-modul="'+m+'" '+(r ? 'checked' : '')+'> '+m;
-      div.appendChild(label);
+function personelListeYukle() {
+  fetch(API_LIST + '?filtre=' + getFiltre()).then(r => r.json()).then(arr => {
+    var tbody = document.querySelector('#personelListeTbl tbody');
+    tbody.innerHTML = '';
+    arr.forEach(function(p) {
+      var tr = document.createElement('tr');
+      tr.innerHTML = '<td><strong>' + (p.ad_soyad || '') + '</strong></td><td>' + (p.mesai_baslangic || '09:00') + '</td><td>' + (p.is_active ? 'Aktif' : 'Pasif') + '</td><td>' + (p.notlar || '').substring(0, 25) + '</td><td><button class="personel-buttons button" style="padding:4px 8px; font-size:11px;" onclick="duzenle(' + p.id + ')">Düzenle</button></td>';
+      tbody.appendChild(tr);
     });
+    if (arr.length === 0) tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:#888;">Kayıt yok</td></tr>';
   });
 }
 
-document.getElementById('btn-bugun').onclick = function() { document.getElementById('filter-tarih').value = bugunStr(); devamGunlukYukle(); };
-document.getElementById('btn-aylik-goster').onclick = devamAylikYukle;
-document.getElementById('btn-manuel-kaydet').onclick = async function() {
-  const pid = document.getElementById('manuel-personel').value;
-  const tarih = document.getElementById('filter-tarih').value || bugunStr();
-  const giris = document.getElementById('manuel-giris').value.trim();
-  const cikis = document.getElementById('manuel-cikis').value.trim();
-  if (!pid) { alert('Personel seçin.'); return; }
-  const iso = tarihToIso(tarih);
-  await fetch(API_DEVAM_KAYDET, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ personel_id: pid, tarih: iso, giris_saati: giris || null, cikis_saati: cikis || null }) });
-  devamGunlukYukle();
-};
+function duzenle(id) {
+  fetch(API_LIST + '?filtre=tumu').then(r => r.json()).then(arr => {
+    var p = arr.find(function(x){ return x.id === id; });
+    if (!p) return;
+    document.getElementById('fPersonelId').value = p.id;
+    document.getElementById('fAdSoyad').value = p.ad_soyad || '';
+    document.getElementById('fMesai').value = (p.mesai_baslangic || '09:00').substring(0,5);
+    document.getElementById('fAktif').value = p.is_active ? '1' : '0';
+    document.getElementById('fMac').value = p.mac_adres || '';
+    document.getElementById('fNotlar').value = p.notlar || '';
+    document.getElementById('fAdSoyad').focus();
+  });
+}
 
-document.getElementById('tab-devam').onclick = function(e){ e.preventDefault(); document.querySelectorAll('.personel-tabs a').forEach(a=>a.classList.remove('active')); document.querySelectorAll('.tab-pane').forEach(p=>p.classList.remove('active')); this.classList.add('active'); document.getElementById('pane-devam').classList.add('active'); };
-document.getElementById('tab-izin').onclick = function(e){ e.preventDefault(); document.querySelectorAll('.personel-tabs a').forEach(a=>a.classList.remove('active')); document.querySelectorAll('.tab-pane').forEach(p=>p.classList.remove('active')); this.classList.add('active'); document.getElementById('pane-izin').classList.add('active'); personelListeYukle('aktif'); };
-document.getElementById('tab-personel').onclick = function(e){ e.preventDefault(); document.querySelectorAll('.personel-tabs a').forEach(a=>a.classList.remove('active')); document.querySelectorAll('.tab-pane').forEach(p=>p.classList.remove('active')); this.classList.add('active'); document.getElementById('pane-personel').classList.add('active'); personelListeYukle(document.querySelector('input[name="filtre-p"]:checked').value); };
+function formTemizle() {
+  document.getElementById('fPersonelId').value = '';
+  document.getElementById('fAdSoyad').value = '';
+  document.getElementById('fMesai').value = '09:00';
+  document.getElementById('fAktif').value = '1';
+  document.getElementById('fMac').value = '';
+  document.getElementById('fNotlar').value = '';
+}
 
-document.querySelectorAll('input[name="filtre-p"]').forEach(inp => inp.onchange = function() { personelListeYukle(this.value); });
+function personelKaydet() {
+  var id = document.getElementById('fPersonelId').value;
+  var ad_soyad = document.getElementById('fAdSoyad').value.trim();
+  if (!ad_soyad) { alert('Ad soyad zorunlu'); return; }
+  var payload = { ad_soyad: ad_soyad, pozisyon: '', telefon: '', email: '', mesai_baslangic: document.getElementById('fMesai').value || '09:00', is_active: document.getElementById('fAktif').value === '1', mac_adres: document.getElementById('fMac').value.trim(), notlar: document.getElementById('fNotlar').value.trim() };
+  if (id) payload.id = parseInt(id, 10);
+  fetch(API_KAYDET, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+    .then(r => r.json()).then(function(d) { if (d.ok) { personelListeYukle(); if (!id) formTemizle(); } else alert(d.mesaj || 'Hata'); }).catch(function(e) { alert('Hata: ' + e); });
+}
 
-document.getElementById('btn-personel-kaydet').onclick = async function() {
-  const ad = document.getElementById('personel-ad').value.trim();
-  if (!ad) { alert('Ad soyad zorunlu.'); return; }
-  const id = document.getElementById('personel-id').value;
-  const payload = { ad_soyad: ad, mesai_baslangic: document.getElementById('personel-mesai').value || '09:00', mac_adres: document.getElementById('personel-mac').value, notlar: document.getElementById('personel-not').value, pozisyon: document.getElementById('personel-pozisyon').value, telefon: document.getElementById('personel-telefon').value, email: document.getElementById('personel-email').value, is_active: document.getElementById('personel-durum').value === '1' };
-  if (id) payload.id = id;
-  await fetch(API_PERSONEL_KAYDET, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-  personelListeYukle(document.querySelector('input[name="filtre-p"]:checked').value);
-  document.getElementById('btn-personel-temizle').click();
-};
-document.getElementById('btn-personel-temizle').onclick = function() { seciliPersonelId = null; document.getElementById('personel-id').value = ''; document.getElementById('personel-ad').value = ''; document.getElementById('personel-mesai').value = '09:00'; document.getElementById('personel-durum').value = '1'; document.getElementById('personel-mac').value = ''; document.getElementById('personel-pozisyon').value = ''; document.getElementById('personel-telefon').value = ''; document.getElementById('personel-email').value = ''; document.getElementById('personel-not').value = ''; document.querySelectorAll('#personel-tbody tr').forEach(tr => tr.style.background = ''); };
+function personelAktifYap() {
+  var id = document.getElementById('fPersonelId').value;
+  if (!id) { alert('Önce personel seçin'); return; }
+  fetch(API_KAYDET, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: parseInt(id,10), ad_soyad: document.getElementById('fAdSoyad').value.trim(), pozisyon: '', telefon: '', email: '', mesai_baslangic: document.getElementById('fMesai').value || '09:00', mac_adres: document.getElementById('fMac').value, notlar: document.getElementById('fNotlar').value, is_active: true }) })
+    .then(r => r.json()).then(function(d) { if (d.ok) { personelListeYukle(); document.getElementById('fAktif').value = '1'; } });
+}
 
-document.getElementById('btn-bilgi-kaydet').onclick = async function() {
-  if (!seciliPersonelId) { alert('Önce personel seçin.'); return; }
-  const payload = { personel_id: seciliPersonelId, ise_baslama_tarihi: document.getElementById('bilgi-ise-baslama').value, yillik_izin_hakki: document.getElementById('bilgi-yillik-izin').value, manuel_izin_gun: document.getElementById('bilgi-manuel-izin').value, unvan: document.getElementById('bilgi-unvan').value, departman: document.getElementById('bilgi-departman').value, gec_kesinti_tipi: document.querySelector('input[name="gec_kesinti"]:checked').value };
-  await fetch(API_PERSONEL_BILGI, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-  izinOzetYukle(seciliPersonelId);
-};
+function personelPasifeAl() {
+  var id = document.getElementById('fPersonelId').value;
+  if (!id) { alert('Önce personel seçin'); return; }
+  if (!confirm('Pasife alınsın mı?')) return;
+  fetch(API_KAYDET, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: parseInt(id,10), ad_soyad: document.getElementById('fAdSoyad').value.trim(), pozisyon: '', telefon: '', email: '', mesai_baslangic: document.getElementById('fMesai').value || '09:00', mac_adres: document.getElementById('fMac').value, notlar: document.getElementById('fNotlar').value, is_active: false }) })
+    .then(r => r.json()).then(function(d) { if (d.ok) { personelListeYukle(); formTemizle(); } });
+}
 
-document.getElementById('izin-personel').onchange = function() { seciliPersonelId = this.value; if (this.value) { bilgiYukle(this.value); izinOzetYukle(this.value); izinListYukle(this.value); gecListYukle(this.value); yetkiYukle(this.value); } };
-document.getElementById('izin-yil').onchange = function() { if (seciliPersonelId) { izinOzetYukle(seciliPersonelId); izinListYukle(seciliPersonelId); } };
-document.getElementById('btn-izin-ozet').onclick = function() { if (seciliPersonelId) { izinOzetYukle(seciliPersonelId); izinListYukle(seciliPersonelId); } };
+function devamBugun() {
+  var d = new Date();
+  document.getElementById('devamTarih').value = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+  devamYenile();
+}
 
-document.getElementById('btn-izin-kaydet').onclick = async function() {
-  if (!seciliPersonelId) { alert('Personel seçin.'); return; }
-  const bas = document.getElementById('izin-bas').value.trim();
-  const bit = document.getElementById('izin-bit').value.trim();
-  if (!bas || !bit) { alert('Başlangıç ve bitiş tarihi girin.'); return; }
-  await fetch(API_IZIN_KAYDET, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ personel_id: seciliPersonelId, izin_turu: document.getElementById('izin-turu').value, baslangic_tarihi: tarihToIso(bas) || bas, bitis_tarihi: tarihToIso(bit) || bit, aciklama: document.getElementById('izin-aciklama').value }) });
-  izinListYukle(seciliPersonelId); izinOzetYukle(seciliPersonelId);
-  document.getElementById('izin-bas').value = ''; document.getElementById('izin-bit').value = ''; document.getElementById('izin-aciklama').value = '';
-};
+function devamYenile() {
+  var tarih = document.getElementById('devamTarih').value;
+  fetch(API_DEVAM_GUNLUK + (tarih ? '?tarih=' + tarih : '')).then(r => r.json()).then(arr => {
+    var tbody = document.querySelector('#gunlukDevamTbl tbody');
+    tbody.innerHTML = '';
+    arr.forEach(function(r) { var tr = document.createElement('tr'); tr.innerHTML = '<td>' + (r.ad_soyad || '') + '</td><td>' + (r.giris_saati || '—') + '</td><td>' + (r.cikis_saati || '—') + '</td><td>' + (r.durum || '') + '</td><td>' + (r.gec_dakika || 0) + '</td>'; tbody.appendChild(tr); });
+    if (arr.length === 0) tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:#888;">Kayıt yok</td></tr>';
+  });
+  fetch(API_LIST + '?filtre=aktif').then(r => r.json()).then(arr => {
+    var sel = document.getElementById('devamPersonel');
+    sel.innerHTML = '<option value="">— Seçin —</option>';
+    arr.forEach(function(p) { var o = document.createElement('option'); o.value = p.id; o.textContent = p.ad_soyad; sel.appendChild(o); });
+  });
+}
 
-document.getElementById('btn-yetki-kaydet').onclick = async function() {
-  if (!seciliPersonelId) { alert('Personel seçin.'); return; }
-  const yetkiler = [];
-  document.getElementById('yetki-listesi').querySelectorAll('input[type=checkbox]:checked').forEach(cb => yetkiler.push({ modul: cb.dataset.modul, yetki: 'goruntuleme' }));
-  await fetch(API_YETKI_KAYDET, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ personel_id: seciliPersonelId, yetkiler }) });
-};
+function devamKaydet() {
+  var personel_id = document.getElementById('devamPersonel').value;
+  var tarih = document.getElementById('devamTarih').value;
+  if (!personel_id || !tarih) { alert('Personel ve tarih seçin'); return; }
+  fetch(API_DEVAM_KAYDET, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ personel_id: parseInt(personel_id,10), tarih: tarih, giris_saati: document.getElementById('devamGiris').value || null, cikis_saati: document.getElementById('devamCikis').value || null }) })
+    .then(r => r.json()).then(function(d) { if (d.ok) devamYenile(); else alert(d.mesaj || 'Hata'); });
+}
+
+function aylikYenile() {
+  var yil = document.getElementById('aylikYil').value || new Date().getFullYear();
+  var ay = document.getElementById('aylikAy').value || new Date().getMonth() + 1;
+  fetch(API_DEVAM_AYLIK + '?yil=' + yil + '&ay=' + ay).then(r => r.json()).then(arr => {
+    var tbody = document.querySelector('#aylikOzetTbl tbody');
+    tbody.innerHTML = '';
+    arr.forEach(function(r) { var tr = document.createElement('tr'); tr.innerHTML = '<td>' + (r.ad_soyad || '') + '</td><td>' + (r.toplam_gun || 0) + '</td><td>' + (r.gec_sayisi || 0) + '</td>'; tbody.appendChild(tr); });
+    if (arr.length === 0) tbody.innerHTML = '<tr><td colspan="3" style="text-align:center; color:#888;">Kayıt yok</td></tr>';
+  });
+}
 
 document.addEventListener('DOMContentLoaded', function() {
-  flatpickr('#filter-tarih', { dateFormat: 'd.m.Y', locale: 'tr', defaultDate: 'today' });
-  document.getElementById('filter-tarih').addEventListener('change', function() { devamGunlukYukle(); });
-  flatpickr('#izin-bas', { dateFormat: 'd.m.Y', locale: 'tr' });
-  flatpickr('#izin-bit', { dateFormat: 'd.m.Y', locale: 'tr' });
-  flatpickr('#bilgi-ise-baslama', { dateFormat: 'd.m.Y', locale: 'tr' });
-  const y = new Date().getFullYear();
-  for (let i = y; i >= y - 5; i--) { const o = document.createElement('option'); o.value = i; o.textContent = i; document.getElementById('aylik-yil').appendChild(o); document.getElementById('izin-yil').appendChild(o.cloneNode(true)); }
-  AYLAR.forEach((a,i) => { const o = document.createElement('option'); o.value = i+1; o.textContent = a; if (i+1 === new Date().getMonth()+1) o.selected = true; document.getElementById('aylik-ay').appendChild(o); });
-  document.getElementById('filter-tarih').value = bugunStr();
-  devamGunlukYukle();
-  personelListeYukle('aktif');
+  var d = new Date();
+  document.getElementById('devamTarih').value = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+  document.getElementById('aylikYil').value = d.getFullYear();
+  var aySel = document.getElementById('aylikAy');
+  for (var i = 1; i <= 12; i++) { var o = document.createElement('option'); o.value = i; o.textContent = i; aySel.appendChild(o); }
+  aySel.value = d.getMonth() + 1;
+  personelListeYukle();
+  devamYenile();
+  aylikYenile();
+  document.querySelectorAll('input[name="filtre"]').forEach(function(el) { el.addEventListener('change', personelListeYukle); });
 });
 </script>
 {% endblock %}

@@ -1,0 +1,22 @@
+============================================
+  UPTIMEROBOT — KOPYALA YAPIŞTIR
+============================================
+
+1) Tarayıcıda aç:
+   https://uptimerobot.com/signUp
+
+2) Hesap aç (e-posta + şifre), giriş yap.
+
+3) "Add New Monitor" tıkla. Şunları yapıştır:
+
+   Friendly Name:
+   BestOffice ERP
+
+   URL:
+   https://bestofficeerp.onrender.com
+
+   Monitoring Interval: 5 minutes
+
+4) "Create Monitor" tıkla. Bitti.
+
+============================================

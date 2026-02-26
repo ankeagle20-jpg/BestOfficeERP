@@ -1,7 +1,8 @@
-# Render Blueprint
+# Render Blueprint — Bulut linki: https://bestofficeerp.onrender.com
+# Bu PC açık kalmasa da çalışır; link her yerden açılır.
 services:
   - type: web
-    name: bestoffice-erp
+    name: bestofficeerp
     runtime: python
     plan: free
     rootDir: erp_web

@@ -1,0 +1,21 @@
+============================================
+  BESTOFFICE ERP — BULUT LİNKİ
+============================================
+
+Adres çubuğunda "bestofficeerp" görünsün istiyorsan
+BULUT linkini aç (127.0.0.1 = yerel, adres hep localhost kalır).
+
+Link: https://bestofficeerp.onrender.com
+
+(Eğer Render'da servis adı "bestoffice-erp" ise link:
+ https://bestoffice-erp.onrender.com olur.
+ Linki bestofficeerp yapmak için: Render Dashboard
+ → Service → Settings → Name: bestofficeerp yaz → Save)
+
+• Bu linki HER YERDEN açabilirsin (her PC, telefon).
+• Bu bilgisayarın AÇIK KALMASI GEREKMEZ — ERP tamamen bulutta çalışır.
+• Sadece internet yeterli.
+
+Masaüstünden açmak için: scripts\ac_bulut.bat çift tıkla.
+
+Detay: erp_web\BULUT_LINK.md

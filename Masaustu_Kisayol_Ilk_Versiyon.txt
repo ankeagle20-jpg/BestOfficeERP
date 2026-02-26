@@ -1,0 +1,28 @@
+===============================================
+  ILK / YEREL VERSIYONA NASIL ULAŞILIR
+===============================================
+
+"BestOffice_Baslat - Kısayol" masaüstü kısayolunun
+YEREL (ilk) versiyonu açması için:
+
+1) Masaüstündeki "BestOffice_Baslat - Kısayol"a SAĞ TIK
+2) "Özellikler" (Properties) seç
+3) "Hedef" (Target) kutusuna ŞUNU yaz (tırnaklar olmadan):
+
+   C:\Users\Dell\Desktop\BestOfficeERP\BestOffice_Baslat.bat
+
+4) "Başlangıç yeri" (Start in) kutusuna:
+
+   C:\Users\Dell\Desktop\BestOfficeERP
+
+5) "Uygula" → "Tamam"
+
+Bundan sonra kısayola çift tıklayınca:
+- Yerel sunucu penceresi açılır
+- Tarayıcı http://127.0.0.1:5000 adresinde açılır (ilk/desktop versiyon)
+- BULUT adresi (render.com) AÇILMAZ.
+
+Not: Eğer kısayol bir .url veya internet adresi ise,
+     onu silip YENİ bir kısayol oluşturun:
+     BestOffice_Baslat.bat dosyasına sağ tık → "Kısayol oluştur"
+     → Oluşan kısayolu masaüstüne taşıyın.

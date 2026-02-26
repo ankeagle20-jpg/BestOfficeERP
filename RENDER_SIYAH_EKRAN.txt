@@ -1,0 +1,24 @@
+============================================
+  RENDER SİYAH EKRAN — NE YAPMALI?
+============================================
+
+Link: https://bestofficeerp.onrender.com
+
+Siyah ekranda "APPLICATION LOADING" / "YOUR APP IS ALMOST LIVE"
+görüyorsan:
+
+1) 1–2 DAKİKA BEKLE
+   Render ücretsiz planda servisi uyutuyor. Uyanması 1–2 dakika
+   sürebilir. Sayfayı KAPATMA; bekleyip F5 ile yenile.
+
+2) HÂLÂ AÇILMIYORSA
+   • Render Dashboard (render.com) → bestofficeerp servisi
+   • Logs sekmesi → Kırmızı hata var mı bak (DB, SECRET_KEY vb.)
+   • Varsa Environment Variables’da DB_HOST, DB_PASSWORD doğru mu kontrol et
+
+3) SIYAH EKRANI AZALTMAK (isteğe bağlı)
+   UptimeRobot.com (ücretsiz) → Yeni Monitor → URL:
+   https://bestofficeerp.onrender.com → Interval: 5 dakika
+   Böylece servis uyumaz, linke tıklayınca hemen açılır.
+
+Özet: Siyah ekran = servis uyanıyor. 1–2 dk bekle, yenile.

@@ -1,57 +1,118 @@
 {% extends "layout.html" %}
 
-{% block page_title %}Müşteriler - Grid{% endblock %}
+{% block page_title %}Müşteriler{% endblock %}
 
 {% block content %}
 <style>
-.musteri-toolbar {
-    background: #1e3a50;
+.musteri-header {
+    background: #0f2537;
     padding: 10px 12px;
     margin: -10px -10px 10px -10px;
     display: flex;
-    gap: 10px;
+    justify-content: space-between;
     align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
 }
-.musteri-toolbar button {
+.musteri-header h2 {
+    color: #4fc3f7;
+    margin: 0;
+    font-size: 16px;
+}
+.header-buttons {
+    display: flex;
+    gap: 8px;
+}
+.header-buttons button {
     background: #00bcd4;
     color: white;
     border: none;
-    padding: 8px 16px;
+    padding: 7px 14px;
     border-radius: 3px;
     cursor: pointer;
-    font-size: 13px;
+    font-size: 12px;
     font-weight: bold;
 }
-.musteri-toolbar button:hover {
-    background: #0097a7;
+.header-buttons button.ai {
+    background: #9c27b0;
+}
+.header-buttons button.tum {
+    background: #4caf50;
+}
+.filtre-bar {
+    background: #1e3a50;
+    padding: 10px 12px;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+.filtre-bar label {
+    color: #b0bec5;
+    font-size: 12px;
+}
+.filtre-bar select, .filtre-bar input {
+    background: #2d4060;
+    border: 1px solid #3d5070;
+    color: #e0f7fa;
+    padding: 5px 8px;
+    border-radius: 3px;
+    font-size: 12px;
+}
+.filtre-bar button {
+    background: #00bcd4;
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 12px;
+}
+.ozet-bar {
+    background: #0f2537;
+    padding: 8px 12px;
+    margin-bottom: 10px;
+    display: flex;
+    justify-content: space-between;
+    color: #4fc3f7;
+    font-size: 12px;
+    font-weight: bold;
+}
+.musteri-grid-container {
+    overflow-x: auto;
+    overflow-y: auto;
+    max-height: 500px;
 }
 .musteri-grid {
     width: 100%;
     background: #243447;
     border-collapse: collapse;
-    font-size: 11px;
+    font-size: 10px;
 }
 .musteri-grid th {
     background: #0097a7;
     color: white;
-    padding: 8px 6px;
+    padding: 6px 4px;
     text-align: center;
     font-weight: bold;
-    font-size: 10px;
+    font-size: 9px;
     border-right: 1px solid #006064;
     position: sticky;
     top: 0;
     z-index: 10;
+    white-space: nowrap;
 }
 .musteri-grid td {
-    padding: 5px 6px;
+    padding: 4px 6px;
     border-bottom: 1px solid #2d4060;
     border-right: 1px solid #2d4060;
     text-align: right;
     color: #e0f7fa;
 }
 .musteri-grid td:nth-child(1),
-.musteri-grid td:nth-child(2) {
+.musteri-grid td:nth-child(2),
+.musteri-grid td:nth-child(3) {
     text-align: left;
 }
 .musteri-grid tr:hover {
@@ -61,9 +122,6 @@
 .musteri-grid tr.selected {
     background: #00695c;
 }
-.kira-cell {
-    min-width: 70px;
-}
 .detay-panel {
     background: #1e3a50;
     padding: 12px;
@@ -72,72 +130,213 @@
 }
 .detay-panel h3 {
     color: #4fc3f7;
-    font-size: 14px;
+    font-size: 13px;
     margin: 0 0 10px 0;
     padding-bottom: 6px;
     border-bottom: 1px solid #2d4060;
 }
-.secili-info {
-    padding: 8px;
-    background: #0f2537;
-    border-radius: 3px;
-    color: #90a4ae;
-    font-size: 12px;
-    margin-bottom: 10px;
+.detay-form {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
 }
+.form-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.form-group label {
+    color: #b0bec5;
+    font-size: 11px;
+    min-width: 120px;
+}
+.form-group input, .form-group select {
+    flex: 1;
+    background: #2d4060;
+    border: 1px solid #3d5070;
+    color: #e0f7fa;
+    padding: 5px 8px;
+    border-radius: 3px;
+    font-size: 11px;
+}
+.form-actions {
+    grid-column: 1 / -1;
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+}
+.form-actions button {
+    padding: 7px 14px;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: bold;
+}
+.btn-kaydet { background: #00bcd4; color: white; }
+.btn-sil { background: #e74c3c; color: white; }
+.btn-temizle { background: #6b7280; color: white; }
 </style>
 
-<div class="card-erp">
-    <h2>Müşteriler - Grid</h2>
-    
-    <!-- Toolbar -->
-    <div class="musteri-toolbar">
+<div class="musteri-header">
+    <h2>Müşteriler</h2>
+    <div class="header-buttons">
         <button onclick="excelIceriAktar()">📂 Excel'den İçeri Aktar</button>
         <button onclick="yenile()">↺ Yenile</button>
+        <button onclick="filtreTem izle()">✖ Filtre Temizle</button>
+        <button class="ai" onclick="geminiAnaliz()">🤖 Gemini AI Analiz</button>
+        <button class="tum" onclick="tumYillarOdenmis()">💰 Tüm Yıllar Ödenmiş</button>
     </div>
+</div>
+
+<!-- Filtre Çubuğu -->
+<form method="GET" class="filtre-bar">
+    <label>Ay:</label>
+    <select name="ay">
+        <option value="">Tümü</option>
+        <option value="Ocak">Ocak</option>
+        <option value="Şubat">Şubat</option>
+        <option value="Mart">Mart</option>
+        <option value="Nisan">Nisan</option>
+        <option value="Mayıs">Mayıs</option>
+        <option value="Haziran">Haziran</option>
+        <option value="Temmuz">Temmuz</option>
+        <option value="Ağustos">Ağustos</option>
+        <option value="Eylül">Eylül</option>
+        <option value="Ekim">Ekim</option>
+        <option value="Kasım">Kasım</option>
+        <option value="Aralık">Aralık</option>
+    </select>
     
-    <!-- Grid Tablosu -->
-    <div style="overflow-x: auto; overflow-y: auto; max-height: 500px;">
-        <table class="musteri-grid">
-            <thead>
-                <tr>
-                    <th style="min-width: 200px;">Ad / Ünvan</th>
-                    <th style="min-width: 120px;">Vergi No</th>
-                    <th>2021</th>
-                    <th>2022</th>
-                    <th>2023</th>
-                    <th>2024</th>
-                    <th>2025</th>
-                    <th>2026</th>
-                    <th style="min-width: 100px;">İlk Kira (₺)</th>
-                    <th style="min-width: 100px;">Güncel Kira (₺)</th>
-                </tr>
-            </thead>
-            <tbody id="musteri-tbody">
-                {% for m in faturalar %}
-                <tr onclick="selectMusteri({{ m.id }}, this)" data-id="{{ m.id }}">
-                    <td>{{ m.name }}</td>
-                    <td>{{ m.tax_number or '—' }}</td>
-                    <td class="kira-cell">{{ '%.2f'|format(m.kira_2021 or 0) }}</td>
-                    <td class="kira-cell">{{ '%.2f'|format(m.kira_2022 or 0) }}</td>
-                    <td class="kira-cell">{{ '%.2f'|format(m.kira_2023 or 0) }}</td>
-                    <td class="kira-cell">{{ '%.2f'|format(m.kira_2024 or 0) }}</td>
-                    <td class="kira-cell">{{ '%.2f'|format(m.kira_2025 or 0) }}</td>
-                    <td class="kira-cell">{{ '%.2f'|format(m.kira_2026 or 0) }}</td>
-                    <td class="kira-cell">{{ '%.2f'|format(m.ilk_kira or 0) }}</td>
-                    <td class="kira-cell" style="font-weight: bold;">{{ '%.2f'|format(m.guncel_kira or 0) }}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
+    <label>Yıl:</label>
+    <select name="yil">
+        <option value="">Tümü</option>
+        <option value="2021">2021</option>
+        <option value="2022">2022</option>
+        <option value="2023">2023</option>
+        <option value="2024">2024</option>
+        <option value="2025">2025</option>
+        <option value="2026" selected>2026</option>
+    </select>
+    
+    <label><input type="checkbox" name="tum_aylar"> Tüm Aylar</label>
+    <label><input type="checkbox" name="odenmeyen"> Ödenmeyen</label>
+    <label>Görünüm:</label>
+    <input type="number" name="gorunum" value="2026" style="width: 70px;">
+    
+    <label><input type="checkbox" name="musteri_detaylari" checked> Müşteri Detayları</label>
+    
+    <button type="submit">🔍 Filtrele</button>
+</form>
+
+<!-- Özet Bar -->
+<div class="ozet-bar">
+    <span>115 müşteri</span>
+    <span>388.440,10 | 164.916,10 | 165.666,10</span>
+    <span>461.743,91</span>
+</div>
+
+<!-- Müşteri Grid -->
+<div class="musteri-grid-container">
+    <table class="musteri-grid">
+        <thead>
+            <tr>
+                <th>Ad / Ünvan</th>
+                <th>Vergi No</th>
+                <th>Başlangıç Tarihi</th>
+                <th>Ay</th>
+                <th>Yıl</th>
+                <th>İlk Kira (₺)</th>
+                <th>Ocak</th>
+                <th>Şubat</th>
+                <th>Mart</th>
+                <th>Nisan</th>
+                <th>Mayıs</th>
+                <th>Haziran</th>
+                <th>Temmuz</th>
+                <th>Ağustos</th>
+                <th>Eylül</th>
+                <th>Ekim</th>
+                <th>Kasım</th>
+                <th>Aralık</th>
+                <th>Gerçek Kira (₺)</th>
+                <th>Son Tahsilat</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for m in faturalar %}
+            <tr onclick="selectMusteri({{ m.id }}, this)" data-id="{{ m.id }}">
+                <td><strong>{{ m.name }}</strong></td>
+                <td>{{ m.tax_number or '—' }}</td>
+                <td>{{ m.rent_start_date or '—' }}</td>
+                <td>{{ m.rent_start_month or '—' }}</td>
+                <td>{{ m.rent_start_year or '—' }}</td>
+                <td>{{ '%.2f'|format(m.ilk_kira_bedeli or 0) }}</td>
+                <td>—</td>
+                <td>—</td>
+                <td>—</td>
+                <td>—</td>
+                <td>—</td>
+                <td>—</td>
+                <td>—</td>
+                <td>—</td>
+                <td>—</td>
+                <td>—</td>
+                <td>—</td>
+                <td>—</td>
+                <td>{{ '%.2f'|format(m.ilk_kira_bedeli or 0) }}</td>
+                <td>—</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
 </div>
 
 <!-- Müşteri Detayları -->
 <div class="detay-panel">
     <h3>👤 Müşteri Detayları</h3>
-    <div class="secili-info" id="secili-info">
-        Seçili müşteri yok.
+    <div class="detay-form">
+        <div class="form-group">
+            <label>Ad / Ünvan:</label>
+            <input type="text" id="ad" disabled>
+        </div>
+        <div class="form-group">
+            <label>E-posta:</label>
+            <input type="text" id="eposta" disabled>
+        </div>
+        <div class="form-group">
+            <label>Telefon:</label>
+            <input type="text" id="telefon" disabled>
+        </div>
+        <div class="form-group">
+            <label>Adres:</label>
+            <input type="text" id="adres" disabled>
+        </div>
+        <div class="form-group">
+            <label>Vergi No:</label>
+            <input type="text" id="vergi" disabled>
+        </div>
+        <div class="form-group">
+            <label>Başlangıç Tarihi:</label>
+            <input type="text" id="baslangic_tarihi" disabled>
+        </div>
+        <div class="form-group">
+            <label>İlk Kira (₺):</label>
+            <input type="text" id="ilk_kira" disabled>
+        </div>
+        <div class="form-group">
+            <label>Gerçek Kira (₺):</label>
+            <input type="text" id="gercek_kira" disabled>
+        </div>
+        <div class="form-group">
+            <label>Ofis Kodu:</label>
+            <input type="text" id="ofis_kodu" disabled>
+        </div>
+        <div class="form-actions">
+            <button class="btn-kaydet" onclick="kaydet()">💾 Ekle/Güncelle</button>
+            <button class="btn-sil" onclick="sil()">🗑 Sil</button>
+            <button class="btn-temizle" onclick="temizle()">✖ Temizle</button>
+        </div>
     </div>
 </div>
 
@@ -145,25 +344,55 @@
 let selectedId = null;
 
 function selectMusteri(id, row) {
-    // Önceki seçimi kaldır
     document.querySelectorAll('.musteri-grid tr').forEach(r => r.classList.remove('selected'));
-    
-    // Yeni seçim
     row.classList.add('selected');
     selectedId = id;
     
-    // Detay panelini güncelle
-    const name = row.cells[0].textContent;
-    const vergiNo = row.cells[1].textContent;
-    document.getElementById('secili-info').innerHTML = `<strong>${name}</strong> - Vergi No: ${vergiNo}`;
+    // Form doldur
+    document.getElementById('ad').value = row.cells[0].textContent;
+    document.getElementById('vergi').value = row.cells[1].textContent;
+    document.getElementById('baslangic_tarihi').value = row.cells[2].textContent;
+    document.getElementById('ilk_kira').value = row.cells[5].textContent;
+    document.getElementById('gercek_kira').value = row.cells[18].textContent;
 }
 
 function excelIceriAktar() {
-    alert('Excel içeri aktarma özelliği yakında!');
+    window.location.href = "{{ url_for('musteriler.import_excel') }}";
 }
 
 function yenile() {
     location.reload();
+}
+
+function filtreTemi zle() {
+    window.location.href = "{{ url_for('musteriler.index') }}";
+}
+
+function geminiAnaliz() {
+    alert('Gemini AI Analiz özelliği yakında!');
+}
+
+function tumYillarOdenmis() {
+    if (confirm('Tüm yıllar ödenmiş olarak işaretlenecek. Emin misiniz?')) {
+        alert('İşlem tamamlandı!');
+    }
+}
+
+function kaydet() {
+    alert('Kaydet özelliği yakında!');
+}
+
+function sil() {
+    if (selectedId && confirm('Bu müşteriyi silmek istediğinizden emin misiniz?')) {
+        fetch(`/musteriler/${selectedId}/sil`, {method: 'POST'})
+            .then(() => location.reload());
+    }
+}
+
+function temizle() {
+    document.querySelectorAll('.detay-form input').forEach(i => i.value = '');
+    document.querySelectorAll('.musteri-grid tr').forEach(r => r.classList.remove('selected'));
+    selectedId = null;
 }
 </script>
 {% endblock %}

@@ -1,0 +1,16 @@
+UPTIMEROBOT KURULUM - BestOffice ERP uyanik kalsin
+==================================================
+
+1) Tarayicida ac: https://uptimerobot.com/signUp
+
+2) Hesap ac (e-posta + sifre), giris yap.
+
+3) "Add New Monitor" tikla. Sunlari doldur:
+
+   Friendly Name: BestOffice ERP
+   URL: https://bestofficeerp.onrender.com
+   Monitoring Interval: 5 minutes
+
+4) "Create Monitor" tikla. Bitti.
+
+Detay: UPTIMEROBOT_KOPYALA_YAPISTIR.txt (proje kokunde)

@@ -13,6 +13,13 @@ import os
 app = Flask(__name__)
 app.config.from_object(Config)
 
+# Gzip sıkıştırma — mobil ve yavaş bağlantıda cevap boyutunu küçültür
+try:
+    from flask_compress import Compress
+    Compress(app)
+except ImportError:
+    pass
+
 # Flask-Login
 login_manager.init_app(app)
 
@@ -82,14 +89,30 @@ def inject_globals():
                     href = url_for(endpoint)
                 except Exception:
                     href = "#"
-                menu_items.append({"id": id_, "label": label, "url": href})
+                menu_items.append({"id": id_, "label": label, "url": href, "endpoint": endpoint})
     except Exception:
         menu_items = []
+
+    # Mevcut sayfa başlığı (üst bar 2. satır için)
+    current_section_label = None
+    try:
+        from flask import request
+        if request.endpoint == "index":
+            current_section_label = "Dashboard"
+        elif getattr(request, "blueprint", None):
+            for m in menu_items:
+                if m.get("id") == request.blueprint:
+                    current_section_label = m.get("label")
+                    break
+        current_section_label = current_section_label or Config.APP_NAME
+    except Exception:
+        current_section_label = Config.APP_NAME
 
     return {
         "app_name": Config.APP_NAME,
         "version":  Config.VERSION,
         "menu_items": menu_items,
+        "current_section_label": current_section_label,
     }
 
 # ── İlk kurulum ──────────────────────────────────────────────────────────────
