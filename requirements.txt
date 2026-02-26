@@ -1,10 +1,6 @@
-# BestOfficeERP - Python bağımlılıkları
-# -------------------------------------------------
-# Bu proje şu anda SADECE Python standart kütüphanelerini kullanıyor:
-# - tkinter (arayüz)
-# - sqlite3 (veritabanı)
-#
-# Bu yüzden pip ile kurulacak harici bir paket gerekmiyor.
-# İleride yeni kütüphaneler eklersek, buraya satır satır ekleyeceğiz; örnek:
-# requests==2.32.3
+flask
+gunicorn
 pandas
+openpyxl
+supabase
+python-dotenv
