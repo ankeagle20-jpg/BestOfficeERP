@@ -49,24 +49,25 @@ class User:
             menu = [
                 {"id": "admin", "label": "Yönetim", "url": "admin.index"},
                 {"id": "musteriler", "label": "Müşteriler", "url": "musteriler.index"},
-                {"id": "giris", "label": "Giriş", "url": "musteriler.giris"},
+                {"id": "giris", "label": "Giriş", "url": "giris.index"},
                 {"id": "ofisler", "label": "Ofisler", "url": "ofisler.index"},
                 {"id": "personel", "label": "Personel", "url": "personel.index"},
                 {"id": "urunler", "label": "Ürünler", "url": "urunler.index"},
                 {"id": "faturalar", "label": "Faturalar", "url": "faturalar.index"},
                 {"id": "tahsilat", "label": "Tahsilat", "url": "tahsilat.index"},
                 {"id": "kargolar", "label": "Kargolar", "url": "kargolar.index"},
-                {"id": "bankalar", "label": "Bankalar", "url": "banka.index"},
+                {"id": "bankalar", "label": "Bankalar", "url": "bankalar.index"},
                 {"id": "kira", "label": "Kira", "url": "kira.index"},
                 {"id": "tufe", "label": "TÜFE", "url": "tufe.index"},
             ]
         elif self.role == "muhasebe":
             # Muhasebe mali konuları görebilir
             menu = [
+                {"id": "musteriler", "label": "Müşteriler", "url": "musteriler.index"},
                 {"id": "faturalar", "label": "Faturalar", "url": "faturalar.index"},
                 {"id": "urunler", "label": "Ürünler", "url": "urunler.index"},
                 {"id": "tahsilat", "label": "Tahsilat", "url": "tahsilat.index"},
-                {"id": "bankalar", "label": "Bankalar", "url": "banka.index"},
+                {"id": "bankalar", "label": "Bankalar", "url": "bankalar.index"},
                 {"id": "kira", "label": "Kira", "url": "kira.index"},
                 {"id": "tufe", "label": "TÜFE", "url": "tufe.index"},
             ]
@@ -74,18 +75,17 @@ class User:
             # Personel müşteri ve fatura görebilir
             menu = [
                 {"id": "musteriler", "label": "Müşteriler", "url": "musteriler.index"},
-                {"id": "giris", "label": "Giriş", "url": "musteriler.giris"},
                 {"id": "ofisler", "label": "Ofisler", "url": "ofisler.index"},
                 {"id": "personel", "label": "Personel", "url": "personel.index"},
                 {"id": "urunler", "label": "Ürünler", "url": "urunler.index"},
                 {"id": "faturalar", "label": "Faturalar", "url": "faturalar.index"},
                 {"id": "tahsilat", "label": "Tahsilat", "url": "tahsilat.index"},
-                {"id": "bankalar", "label": "Bankalar", "url": "banka.index"},
+                {"id": "bankalar", "label": "Bankalar", "url": "bankalar.index"},
             ]
         else:  # misafir
             # Misafir sadece fatura görebilir
             menu = [
-                {"id": "faturalar", "label": "Faturalar", "url": "fatura.index"},
+                {"id": "faturalar", "label": "Faturalar", "url": "faturalar.index"},
             ]
         
         return menu
@@ -220,6 +220,90 @@ def kullanici_olustur(username, password, full_name, role="personel"):
     except Exception as e:
         return {"ok": False, "mesaj": f"❌ Hata: {e}"}
 
+# ── Yetkilendirme decoratorları ──────────────────────────────────────────────
+
+def admin_gerekli(f):
+    """Sadece admin rolündeki kullanıcılar erişebilir."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not current_user.is_authenticated:
+            flash("Bu sayfaya erişmek için giriş yapmalısınız.", "warning")
+            return redirect(url_for("auth.login"))
+        return f(*args, **kwargs)
+    return decorated_function
+
+def muhasebe_gerekli(f):
+    """Admin veya muhasebe rolü gereklidir."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not current_user.is_authenticated:
+            flash("Bu sayfaya erişmek için giriş yapmalısınız.", "warning")
+            return redirect(url_for("auth.login"))
+        return f(*args, **kwargs)
+    return decorated_function
+
+def giris_gerekli(f):
+    """Giriş yapmış herhangi bir kullanıcı erişebilir."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not current_user.is_authenticated:
+            flash("Bu sayfaya erişmek için giriş yapmalısınız.", "warning")
+            return redirect(url_for("auth.login"))
+        return f(*args, **kwargs)
+    return decorated_function
+
+def yetki_gerekli(*izinli_roller):
+    """Belirtilen rollerden birine sahip kullanıcılar erişebilir."""
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            if not current_user.is_authenticated:
+                flash("Bu sayfaya erişmek için giriş yapmalısınız.", "warning")
+                return redirect(url_for("auth.login"))
+            return f(*args, **kwargs)
+        return decorated_function
+    return decorator
+# ── Şifre değiştirme ─────────────────────────────────────────────────────────
+def sifre_degistir(user_id, yeni_sifre):
+    """
+    Kullanıcının şifresini değiştirir.
+    
+    Args:
+        user_id (int): Kullanıcı ID
+        yeni_sifre (str): Yeni şifre
+    
+    Returns:
+        dict: {"ok": True/False, "mesaj": "..."}
+    """
+    try:
+        hashed = generate_password_hash(yeni_sifre)
+        conn = psycopg2.connect(Config.SUPABASE_DB_URL)
+        cur = conn.cursor()
+        cur.execute("UPDATE users SET password_hash = %s WHERE id = %s", (hashed, user_id))
+        conn.commit()
+        cur.close()
+        conn.close()
+        
+        return {"ok": True, "mesaj": "✅ Şifre değiştirildi"}
+    except Exception as e:
+        return {"ok": False, "mesaj": f"❌ Hata: {e}"}
+
+
+# ── Tüm kullanıcıları getir ──────────────────────────────────────────────────
+def tum_kullanicilar():
+    """
+    Tüm kullanıcıları döner.
+    
+    Returns:
+        list: Kullanıcı listesi
+    """
+    try:
+        return fetch_all("SELECT id, username, full_name, role, is_active FROM users ORDER BY username")
+    except Exception as e:
+        print(f"❌ tum_kullanicilar hatası: {e}")
+        return []
+
+
 # ── Kullanıcı güncelleme ─────────────────────────────────────────────────────
 def kullanici_guncelle(user_id, username=None, password=None, full_name=None, role=None, is_active=None):
     """
@@ -278,6 +362,7 @@ def kullanici_guncelle(user_id, username=None, password=None, full_name=None, ro
     except Exception as e:
         return {"ok": False, "mesaj": f"❌ Hata: {e}"}
 
+
 # ── Kullanıcı silme ──────────────────────────────────────────────────────────
 def kullanici_sil(user_id):
     """
@@ -301,89 +386,3 @@ def kullanici_sil(user_id):
         
     except Exception as e:
         return {"ok": False, "mesaj": f"❌ Hata: {e}"}
-
-# ── Şifre değiştirme ─────────────────────────────────────────────────────────
-def sifre_degistir(user_id, yeni_sifre):
-    """
-    Kullanıcının şifresini değiştirir.
-    
-    Args:
-        user_id (int): Kullanıcı ID
-        yeni_sifre (str): Yeni şifre
-    
-    Returns:
-        dict: {"ok": True/False, "mesaj": "..."}
-    """
-    try:
-        hashed = generate_password_hash(yeni_sifre)
-        conn = psycopg2.connect(Config.SUPABASE_DB_URL)
-        cur = conn.cursor()
-        cur.execute("UPDATE users SET password_hash = %s WHERE id = %s", (hashed, user_id))
-        conn.commit()
-        cur.close()
-        conn.close()
-        
-        return {"ok": True, "mesaj": "✅ Şifre değiştirildi"}
-    except Exception as e:
-        return {"ok": False, "mesaj": f"❌ Hata: {e}"}
-
-# ── Tüm kullanıcıları getir ──────────────────────────────────────────────────
-def tum_kullanicilar():
-    """
-    Tüm kullanıcıları döner.
-    
-    Returns:
-        list: Kullanıcı listesi
-    """
-    try:
-        return fetch_all("SELECT id, username, full_name, role, is_active FROM users ORDER BY username")
-    except Exception as e:
-        print(f"❌ tum_kullanicilar hatası: {e}")
-        return []
-
-# ── Yetkilendirme decoratorları ──────────────────────────────────────────────
-
-def admin_gerekli(f):
-    """Sadece admin rolündeki kullanıcılar erişebilir."""
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        # TEMPORARY CHANGE FOR TESTING: allow any authenticated user
-        if not current_user.is_authenticated:
-            flash("Bu sayfaya erişmek için giriş yapmalısınız.", "warning")
-            return redirect(url_for("auth.login"))
-        return f(*args, **kwargs)
-    return decorated_function
-
-def muhasebe_gerekli(f):
-    """Admin veya muhasebe rolü gereklidir."""
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        # TEMPORARY CHANGE FOR TESTING: allow any authenticated user
-        if not current_user.is_authenticated:
-            flash("Bu sayfaya erişmek için giriş yapmalısınız.", "warning")
-            return redirect(url_for("auth.login"))
-        return f(*args, **kwargs)
-    return decorated_function
-
-def giris_gerekli(f):
-    """Giriş yapmış herhangi bir kullanıcı erişebilir."""
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if not current_user.is_authenticated:
-            flash("Bu sayfaya erişmek için giriş yapmalısınız.", "warning")
-            return redirect(url_for("auth.login"))
-        return f(*args, **kwargs)
-    return decorated_function
-
-def yetki_gerekli(*izinli_roller):
-    """Belirtilen rollerden birine sahip kullanıcılar erişebilir."""
-    def decorator(f):
-        @wraps(f)
-        def decorated_function(*args, **kwargs):
-            # TEMPORARY CHANGE FOR TESTING: allow any authenticated user
-            if not current_user.is_authenticated:
-                flash("Bu sayfaya erişmek için giriş yapmalısınız.", "warning")
-                return redirect(url_for("auth.login"))
-            return f(*args, **kwargs)
-        return decorated_function
-    return decorator

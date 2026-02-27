@@ -131,10 +131,12 @@ input.error { border-color: #e74c3c !important; }
             <h4>Yetkili</h4>
             <div class="giris-row"><label>Yetkili Ad Soyad *</label><input type="text" id="yetkili_adsoyad" required></div>
             <div class="giris-row"><label>Yetkili T.C. Kimlik No *</label><input type="text" id="yetkili_tcno" maxlength="12" placeholder="11=TC / 12=Yab"></div>
+            <div class="giris-row"><label>Doğum Tarihi</label><input type="text" id="yetkili_dogum" placeholder="GG.AA.YYYY"></div>
             <div class="giris-row"><label>Yetkili Cep Telefonu</label><input type="text" id="yetkili_tel" placeholder="5XX XXX XX XX"></div>
             <div class="giris-row"><label>Yetkili Cep Tel 2</label><input type="text" id="yetkili_tel2"></div>
             <div class="giris-row"><label>Yetkili E-posta</label><input type="email" id="yetkili_email"></div>
             <div class="giris-row"><label>E-posta (şirket)</label><input type="email" id="email"></div>
+            <div class="giris-row"><label>İkamet Adresi</label><textarea id="yetkili_ikametgah" rows="2"></textarea></div>
         </div>
 
         <div class="giris-section">
@@ -143,6 +145,8 @@ input.error { border-color: #e74c3c !important; }
                 <select id="hizmet_turu"><option value="Sanal Ofis">Sanal Ofis</option><option value="Hazır Ofis">Hazır Ofis</option><option value="Paylaşımlı Masa">Paylaşımlı Masa</option></select>
             </div>
             <div class="giris-row"><label>Aylık Kira (₺)</label><input type="text" id="aylik_kira" placeholder="0,00"></div>
+            <div class="giris-row"><label>Yıllık Kira (₺)</label><input type="text" id="yillik_kira" placeholder="0,00"></div>
+            <div class="giris-row"><label>Sözleşme No</label><input type="text" id="sozlesme_no" placeholder="Otomatik" readonly></div>
             <div class="giris-row"><label>Sözleşme Başlangıç</label><input type="text" id="sozlesme_tarihi" placeholder="GG.AA.YYYY"></div>
             <div class="giris-row"><label>Sözleşme Bitiş</label><input type="text" id="sozlesme_bitis" placeholder="GG.AA.YYYY"></div>
         </div>
@@ -264,6 +268,7 @@ const API_KYC_KAYDET = "{{ url_for('musteriler.api_kyc_kaydet') }}";
 const API_TCMB_CEK = "{{ url_for('tufe.tcmb_cek') }}";
 const API_KIRA_HESAPLA = "{{ url_for('kira.hesapla') }}";
 const API_KIRA_EXCEL = "{{ url_for('kira.excel_cikti') }}";
+const API_SOZLESME = "{{ url_for('musteriler.api_kyc_sozlesme') }}";
 
 let selectedMusteriId = null;
 let aramaTimer = null;
@@ -313,12 +318,16 @@ function formdanVeri() {
     sube_merkez: (document.getElementById("sube_merkez") || {}).value,
     yetkili_adsoyad: (document.getElementById("yetkili_adsoyad") || {}).value,
     yetkili_tcno: (document.getElementById("yetkili_tcno") || {}).value,
+    yetkili_dogum: (document.getElementById("yetkili_dogum") || {}).value,
     yetkili_tel: (document.getElementById("yetkili_tel") || {}).value,
     yetkili_tel2: (document.getElementById("yetkili_tel2") || {}).value,
     yetkili_email: (document.getElementById("yetkili_email") || {}).value,
+    yetkili_ikametgah: (document.getElementById("yetkili_ikametgah") || {}).value,
     email: (document.getElementById("email") || {}).value,
     hizmet_turu: (document.getElementById("hizmet_turu") || {}).value,
     aylik_kira: (document.getElementById("aylik_kira") || {}).value,
+    yillik_kira: (document.getElementById("yillik_kira") || {}).value,
+    sozlesme_no: (document.getElementById("sozlesme_no") || {}).value,
     sozlesme_tarihi: (document.getElementById("sozlesme_tarihi") || {}).value,
     sozlesme_bitis: (document.getElementById("sozlesme_bitis") || {}).value,
     notlar: (document.getElementById("notlar") || {}).value,
@@ -343,12 +352,16 @@ function formuDoldur(data) {
   set("sube_merkez", data.sube_merkez || "Merkez");
   set("yetkili_adsoyad", data.yetkili_adsoyad);
   set("yetkili_tcno", data.yetkili_tcno);
+  set("yetkili_dogum", parseDateStr(data.yetkili_dogum));
   set("yetkili_tel", data.yetkili_tel);
   set("yetkili_tel2", data.yetkili_tel2);
   set("yetkili_email", data.yetkili_email || data.email);
   set("email", data.email);
+  set("yetkili_ikametgah", data.yetkili_ikametgah);
   set("hizmet_turu", data.hizmet_turu || "Sanal Ofis");
   set("aylik_kira", data.aylik_kira);
+  set("yillik_kira", data.yillik_kira);
+  set("sozlesme_no", data.sozlesme_no);
   set("sozlesme_tarihi", parseDateStr(data.sozlesme_tarihi));
   set("sozlesme_bitis", parseDateStr(data.sozlesme_bitis));
   set("notlar", data.notlar);
@@ -359,7 +372,14 @@ function formuDoldur(data) {
   setCheck("evrak_kimlik_fotokopi", data.evrak_kimlik_fotokopi);
   setCheck("evrak_ikametgah", data.evrak_ikametgah);
   setCheck("evrak_kase", data.evrak_kase);
-  if (data.sozlesme_no) document.getElementById("sozlesme-durum").textContent = "Sözleşme No: " + data.sozlesme_no;
+  const sozBox = document.getElementById("sozlesme-durum");
+  const sozNo = data.sozlesme_no || "";
+  const sozTarih = parseDateStr(data.sozlesme_tarihi);
+  if (sozNo || sozTarih) {
+    sozBox.textContent = "Sözleşme No: " + (sozNo || "—") + (sozTarih ? " | Tarih: " + sozTarih : "");
+  } else {
+    sozBox.textContent = "Henüz sözleşme oluşturulmadı.";
+  }
   ilerlemeHesapla();
 }
 
@@ -440,7 +460,7 @@ async function kaydet() {
 
 function initFlatpickr() {
   const opt = { dateFormat: "d.m.Y", locale: "tr", allowInput: true };
-  ["kurulus_tarihi", "sozlesme_tarihi", "sozlesme_bitis"].forEach(id => {
+  ["kurulus_tarihi", "sozlesme_tarihi", "sozlesme_bitis", "yetkili_dogum"].forEach(id => {
     const el = document.getElementById(id);
     if (el) flatpickr(el, opt);
   });
@@ -458,7 +478,19 @@ document.querySelectorAll(".giris-row input, .giris-row select, .giris-row texta
 });
 document.getElementById("btn-kaydet").onclick = kaydet;
 document.getElementById("btn-temizle").onclick = formTemizle;
-document.getElementById("btn-sozlesme").onclick = function() { alert("Sözleşme oluşturma (Word) web sürümünde yakında eklenecek."); };
+document.getElementById("btn-sozlesme").onclick = async function() {
+  if (!selectedMusteriId) {
+    alert("Önce soldan bir müşteri seçin veya kaydedin.");
+    return;
+  }
+  await kaydet();
+  if (!selectedMusteriId) {
+    alert("Müşteri kaydı bulunamadı. Lütfen önce Kaydet deyin.");
+    return;
+  }
+  const url = API_SOZLESME + "?musteri_id=" + encodeURIComponent(selectedMusteriId);
+  window.location.href = url;
+};
 document.getElementById("btn-yazdir").onclick = function() { window.print(); };
 
 // ── Sekmeler ──

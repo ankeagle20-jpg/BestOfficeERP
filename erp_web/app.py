@@ -35,6 +35,7 @@ from routes.tahsilat_routes import bp as tahsilat_bp
 from routes.ofis_routes    import bp as ofis_bp
 from routes.personel_routes import bp as personel_bp
 from routes.banka_routes    import bp as banka_bp
+from routes.giris_routes    import bp as giris_bp
 from routes.urun_routes     import bp as urun_bp
 
 app.register_blueprint(auth_bp)
@@ -49,6 +50,7 @@ app.register_blueprint(ofis_bp,    url_prefix="/ofisler")
 app.register_blueprint(personel_bp, url_prefix="/personel")
 app.register_blueprint(banka_bp, url_prefix="/bankalar")
 app.register_blueprint(urun_bp, url_prefix="/urunler")
+app.register_blueprint(giris_bp, url_prefix="/giris")
 
 # ── Ana sayfa ────────────────────────────────────────────────────────────────
 @app.route("/")

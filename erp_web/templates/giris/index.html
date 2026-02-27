@@ -1,0 +1,560 @@
+{% extends "layout.html" %}
+
+{% block page_title %}Giriş / Müşteri Kaydı{% endblock %}
+
+{% block content %}
+<style>
+.giris-container {
+    display: grid;
+    grid-template-columns: 1fr 1.2fr;
+    gap: 15px;
+}
+.giris-header {
+    background: #0f2537;
+    padding: 10px 12px;
+    margin: -10px -10px 10px -10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.giris-header h2 {
+    color: #4fc3f7;
+    margin: 0;
+    font-size: 16px;
+}
+.giris-buttons button {
+    background: #00bcd4;
+    color: white;
+    border: none;
+    padding: 7px 14px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 12px;
+    margin-left: 6px;
+}
+.musteri-liste {
+    background: #1e3a50;
+    padding: 12px;
+    border-radius: 4px;
+}
+.musteri-liste h3 {
+    color: #4fc3f7;
+    font-size: 14px;
+    margin: 0 0 10px 0;
+    padding-bottom: 6px;
+    border-bottom: 1px solid #2d4060;
+}
+.arama-box {
+    margin-bottom: 10px;
+}
+.arama-box input {
+    width: 100%;
+    background: #2d4060;
+    border: 1px solid #3d5070;
+    color: #e0f7fa;
+    padding: 8px 12px;
+    border-radius: 3px;
+    font-size: 13px;
+}
+.arama-box button {
+    width: 100%;
+    background: #00695c;
+    color: white;
+    border: none;
+    padding: 8px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 12px;
+    margin-top: 6px;
+}
+.musteri-liste-items {
+    max-height: 450px;
+    overflow-y: auto;
+    background: #0f2537;
+    border-radius: 3px;
+}
+.musteri-item {
+    padding: 10px;
+    border-bottom: 1px solid #2d4060;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+.musteri-item:hover {
+    background: #2d4060;
+}
+.musteri-item.selected {
+    background: #00695c;
+}
+.musteri-item .name {
+    color: #4fc3f7;
+    font-weight: bold;
+    font-size: 13px;
+}
+.musteri-item .vergi {
+    color: #90a4ae;
+    font-size: 11px;
+    margin-top: 2px;
+}
+.musteri-form {
+    background: #1e3a50;
+    padding: 12px;
+    border-radius: 4px;
+}
+.musteri-form h3 {
+    color: #4fc3f7;
+    font-size: 14px;
+    margin: 0 0 10px 0;
+    padding-bottom: 6px;
+    border-bottom: 1px solid #2d4060;
+}
+.tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 12px;
+    border-bottom: 2px solid #2d4060;
+}
+.tab {
+    padding: 8px 16px;
+    background: transparent;
+    border: none;
+    color: #90a4ae;
+    cursor: pointer;
+    font-size: 12px;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+}
+.tab.active {
+    color: #4fc3f7;
+    border-bottom-color: #4fc3f7;
+    background: rgba(79, 195, 247, 0.1);
+}
+.tab-content {
+    display: none;
+}
+.tab-content.active {
+    display: block;
+}
+.form-grid {
+    display: grid;
+    grid-template-columns: 140px 1fr;
+    gap: 8px 12px;
+    align-items: center;
+}
+.form-grid label {
+    color: #b0bec5;
+    font-size: 12px;
+    text-align: right;
+}
+.form-grid input, .form-grid select, .form-grid textarea {
+    background: #2d4060;
+    border: 1px solid #3d5070;
+    color: #e0f7fa;
+    padding: 6px 10px;
+    border-radius: 3px;
+    font-size: 12px;
+}
+.form-grid textarea {
+    resize: vertical;
+    min-height: 60px;
+}
+.form-section {
+    margin-bottom: 15px;
+}
+.form-section h4 {
+    color: #4fc3f7;
+    font-size: 13px;
+    margin: 0 0 8px 0;
+}
+.evrak-belgeler {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+}
+.evrak-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: #b0bec5;
+}
+.evrak-item input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+}
+.dosyalar {
+    padding: 8px;
+    background: #0f2537;
+    border-radius: 3px;
+    min-height: 80px;
+    color: #6b7280;
+    font-size: 11px;
+    text-align: center;
+}
+.form-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid #2d4060;
+}
+.form-actions button {
+    flex: 1;
+    padding: 10px;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: bold;
+}
+.btn-kaydet { background: #00bcd4; color: white; }
+.btn-sil { background: #e74c3c; color: white; }
+.btn-temizle { background: #6b7280; color: white; }
+.sozlesme-durum {
+    margin-top: 10px;
+    padding: 10px;
+    background: #0f2537;
+    border-radius: 3px;
+}
+.sozlesme-durum p {
+    margin: 0;
+    color: #6b7280;
+    font-size: 12px;
+}
+@media (max-width: 1024px) {
+    .giris-container {
+        grid-template-columns: 1fr;
+    }
+}
+</style>
+
+<div class="giris-header">
+    <h2>📋 Giriş / Müşteri Kaydı</h2>
+    <div class="giris-buttons">
+        <button onclick="location.href='{{ url_for('giris.index') }}'">↺ Yenile</button>
+    </div>
+</div>
+
+<div class="giris-container">
+    <!-- Sol: Müşteri Listesi -->
+    <div class="musteri-liste">
+        <h3>Müşteri Listesi</h3>
+        
+        <div class="arama-box">
+            <input type="text" id="arama-input" placeholder="Müşteri adı veya vergi no ara..." onkeyup="musteriAra()">
+            <button onclick="temizle()">✖ Temizle</button>
+        </div>
+        
+        <div class="musteri-liste-items" id="musteri-liste">
+            <div style="padding: 20px; text-align: center; color: #6b7280; font-size: 12px;">
+                Müşteri arayın veya yeni kayıt oluşturun
+            </div>
+        </div>
+    </div>
+    
+    <!-- Sağ: Müşteri Formu -->
+    <div class="musteri-form">
+        <h3>Müşteri Ekle / Güncelle</h3>
+        
+        <!-- Sekmeler -->
+        <div class="tabs">
+            <button class="tab active" onclick="switchTab(0)">Müşteri Ekle</button>
+            <button class="tab" onclick="switchTab(1)">Kira Senaryo</button>
+        </div>
+        
+        <!-- Sekme 1: Müşteri Ekle -->
+        <div class="tab-content active" id="tab-0">
+            <form id="musteri-form" onsubmit="kaydet(event)">
+                <input type="hidden" id="musteri-id">
+                
+                <!-- Şirket Bilgileri -->
+                <div class="form-section">
+                    <h4>Şirket Bilgileri</h4>
+                    <div class="form-grid">
+                        <label>Şirket Ünvanı *</label>
+                        <input type="text" id="name" required>
+                        
+                        <label>Vergi Numarası *</label>
+                        <input type="text" id="tax_number" required>
+                        
+                        <label>Vergi Dairesi</label>
+                        <input type="text" id="vergi_dairesi">
+                        
+                        <label>MERSİS Numarası</label>
+                        <input type="text" id="mersis">
+                        
+                        <label>Ticaret Sicil No</label>
+                        <input type="text" id="ticaret_sicil">
+                        
+                        <label>Kuruluş Tarihi</label>
+                        <input type="date" id="kurulus_tarihi">
+                        
+                        <label>Faaliyet Konusu</label>
+                        <input type="text" id="faaliyet">
+                        
+                        <label>NACE Kodu</label>
+                        <input type="text" id="nace">
+                    </div>
+                </div>
+                
+                <!-- Adres -->
+                <div class="form-section">
+                    <h4>Adres</h4>
+                    <div class="form-grid">
+                        <label>Önceki Adres</label>
+                        <input type="text" id="onceki_adres">
+                        
+                        <label>Şu Anki Adres *</label>
+                        <textarea id="address" required></textarea>
+                        
+                        <label>Şube / Merkez</label>
+                        <select id="sube_merkez">
+                            <option>Merkez</option>
+                            <option>Şube</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <!-- Yetkili -->
+                <div class="form-section">
+                    <h4>Yetkili Bilgileri</h4>
+                    <div class="form-grid">
+                        <label>Yetkili Ad Soyad *</label>
+                        <input type="text" id="yetkili_ad" required>
+                        
+                        <label>Telefon</label>
+                        <input type="text" id="phone">
+                        
+                        <label>E-posta</label>
+                        <input type="email" id="email">
+                    </div>
+                </div>
+                
+                <!-- Evrak ve Belgeler -->
+                <div class="form-section">
+                    <h4>Evrak ve Belgeler</h4>
+                    <div class="evrak-belgeler">
+                        <div class="evrak-item">
+                            <input type="checkbox" id="ev_imza_sirküleri">
+                            <label for="ev_imza_sirküleri">İmza Sirküleri</label>
+                        </div>
+                        <div class="evrak-item">
+                            <input type="checkbox" id="ev_vergi_levhasi">
+                            <label for="ev_vergi_levhasi">Vergi Levhası</label>
+                        </div>
+                        <div class="evrak-item">
+                            <input type="checkbox" id="ev_ticaret_sicil">
+                            <label for="ev_ticaret_sicil">Ticaret Sicil</label>
+                        </div>
+                        <div class="evrak-item">
+                            <input type="checkbox" id="ev_faaliyet_belgesi">
+                            <label for="ev_faaliyet_belgesi">Faaliyet Belgesi</label>
+                        </div>
+                        <div class="evrak-item">
+                            <input type="checkbox" id="ev_ikametgah">
+                            <label for="ev_ikametgah">İkametgâh</label>
+                        </div>
+                        <div class="evrak-item">
+                            <input type="checkbox" id="ev_kase_ornegi">
+                            <label for="ev_kase_ornegi">Kaşe Örneği</label>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Yüklenen Dosyalar -->
+                <div class="form-section">
+                    <h4>Yüklenen Dosyalar</h4>
+                    <div class="dosyalar">
+                        Dosya yükleme yakında eklenecek
+                    </div>
+                </div>
+                
+                <!-- Notlar -->
+                <div class="form-grid">
+                    <label>Notlar</label>
+                    <textarea id="notes" rows="3"></textarea>
+                </div>
+                
+                <!-- Sözleşme Durumu -->
+                <div class="sozlesme-durum">
+                    <p>Henüz sözleşme oluşturulmadı.</p>
+                </div>
+                
+                <!-- Butonlar -->
+                <div class="form-actions">
+                    <button type="submit" class="btn-kaydet">💾 Kaydet</button>
+                    <button type="button" class="btn-sil" onclick="sil()">🗑 Sil</button>
+                    <button type="button" class="btn-temizle" onclick="temizleForm()">✖ Temizle</button>
+                </div>
+            </form>
+        </div>
+        
+        <!-- Sekme 2: Kira Senaryo -->
+        <div class="tab-content" id="tab-1">
+            <p style="color: #6b7280; text-align: center; padding: 40px;">
+                Kira senaryo hesaplama özelliği yakında eklenecek
+            </p>
+        </div>
+    </div>
+</div>
+
+<script>
+let selectedId = null;
+let musteriler = [];
+
+// Sekme değiştirme
+function switchTab(index) {
+    document.querySelectorAll('.tab').forEach((t, i) => {
+        if (i === index) {
+            t.classList.add('active');
+        } else {
+            t.classList.remove('active');
+        }
+    });
+    
+    document.querySelectorAll('.tab-content').forEach((c, i) => {
+        if (i === index) {
+            c.classList.add('active');
+        } else {
+            c.classList.remove('active');
+        }
+    });
+}
+
+// Müşteri ara
+async function musteriAra() {
+    const arama = document.getElementById('arama-input').value.trim();
+    
+    try {
+        const response = await fetch(`/giris/api/musteriler?q=${encodeURIComponent(arama)}`);
+        musteriler = await response.json();
+        
+        const liste = document.getElementById('musteri-liste');
+        
+        if (musteriler.length === 0) {
+            liste.innerHTML = '<div style="padding: 20px; text-align: center; color: #6b7280; font-size: 12px;">Müşteri bulunamadı</div>';
+            return;
+        }
+        
+        liste.innerHTML = musteriler.map(m => `
+            <div class="musteri-item" onclick="selectMusteri(${m.id})">
+                <div class="name">${m.name}</div>
+                <div class="vergi">${m.tax_number || 'Vergi no yok'}</div>
+            </div>
+        `).join('');
+        
+    } catch (error) {
+        console.error('Hata:', error);
+    }
+}
+
+// Müşteri seç
+function selectMusteri(id) {
+    const musteri = musteriler.find(m => m.id === id);
+    if (!musteri) return;
+    
+    selectedId = id;
+    
+    // Seçili göster
+    document.querySelectorAll('.musteri-item').forEach(item => {
+        item.classList.remove('selected');
+    });
+    event.currentTarget.classList.add('selected');
+    
+    // Formu doldur
+    document.getElementById('musteri-id').value = musteri.id;
+    document.getElementById('name').value = musteri.name || '';
+    document.getElementById('tax_number').value = musteri.tax_number || '';
+    document.getElementById('phone').value = musteri.phone || '';
+    document.getElementById('email').value = musteri.email || '';
+    document.getElementById('address').value = musteri.address || '';
+    document.getElementById('notes').value = musteri.notes || '';
+}
+
+// Kaydet
+async function kaydet(event) {
+    event.preventDefault();
+    
+    const data = {
+        id: document.getElementById('musteri-id').value || null,
+        name: document.getElementById('name').value,
+        tax_number: document.getElementById('tax_number').value,
+        phone: document.getElementById('phone').value,
+        email: document.getElementById('email').value,
+        address: document.getElementById('address').value,
+        notes: document.getElementById('notes').value
+    };
+    
+    try {
+        const response = await fetch('/giris/kaydet', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data)
+        });
+        
+        const result = await response.json();
+        
+        if (result.ok) {
+            alert(result.mesaj);
+            musteriAra();
+            if (result.id) {
+                selectedId = result.id;
+            }
+        } else {
+            alert(result.mesaj);
+        }
+        
+    } catch (error) {
+        alert('❌ Hata: ' + error.message);
+    }
+}
+
+// Sil
+async function sil() {
+    if (!selectedId) {
+        alert('Lütfen silinecek müşteriyi seçin!');
+        return;
+    }
+    
+    if (!confirm('Bu müşteriyi silmek istediğinizden emin misiniz?')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/giris/sil/${selectedId}`, {method: 'POST'});
+        const result = await response.json();
+        
+        if (result.ok) {
+            alert(result.mesaj);
+            temizleForm();
+            musteriAra();
+        } else {
+            alert(result.mesaj);
+        }
+        
+    } catch (error) {
+        alert('❌ Hata: ' + error.message);
+    }
+}
+
+// Temizle
+function temizle() {
+    document.getElementById('arama-input').value = '';
+    document.getElementById('musteri-liste').innerHTML = '<div style="padding: 20px; text-align: center; color: #6b7280; font-size: 12px;">Müşteri arayın</div>';
+    temizleForm();
+}
+
+function temizleForm() {
+    document.getElementById('musteri-form').reset();
+    document.getElementById('musteri-id').value = '';
+    selectedId = null;
+    document.querySelectorAll('.musteri-item').forEach(item => {
+        item.classList.remove('selected');
+    });
+}
+
+// Sayfa yüklendiğinde
+document.addEventListener('DOMContentLoaded', () => {
+    musteriAra();
+});
+</script>
+{% endblock %}

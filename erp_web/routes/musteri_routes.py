@@ -1,9 +1,11 @@
-from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify
+from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, send_file
 from auth import yetki_gerekli, giris_gerekli
 from db import fetch_all, fetch_one, execute, execute_returning
 import pandas as pd
 from io import BytesIO
-from datetime import date
+from datetime import date, datetime
+from docx import Document
+import os
 
 # helper month names (Turkish)
 MONTHS_TR = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"]
@@ -374,6 +376,227 @@ def api_kyc_kaydet():
         return jsonify({"ok": True, "kyc_id": kyc_id})
     except Exception as e:
         return jsonify({"ok": False, "mesaj": str(e)}), 400
+
+
+@bp.route("/api/kyc/sozlesme")
+@giris_gerekli
+def api_kyc_sozlesme():
+    """
+    Seçili müşteri için KYC bilgileriyle Word sözleşmesi üret ve indir.
+    Aynı müşteride tekrar çağrıldığında aynı sözleşme numarasını (yıl bazlı artan) kullanır.
+    """
+    musteri_id = request.args.get("musteri_id")
+    if not musteri_id:
+        flash("Müşteri seçilmedi.", "danger")
+        return redirect(url_for("musteriler.giris"))
+
+    kyc = fetch_one(
+        "SELECT * FROM musteri_kyc WHERE musteri_id = %s ORDER BY id DESC LIMIT 1",
+        (musteri_id,),
+    )
+    if not kyc:
+        flash("Bu müşteri için KYC bilgisi bulunamadı. Önce Kaydet yapın.", "danger")
+        return redirect(url_for("musteriler.giris"))
+
+    # Sözleşme tarihi ve numarası
+    soz_tarih = kyc.get("sozlesme_tarihi") or date.today()
+    if isinstance(soz_tarih, str):
+        try:
+            soz_tarih = datetime.strptime(soz_tarih[:10], "%Y-%m-%d").date()
+        except Exception:
+            soz_tarih = date.today()
+    yil = soz_tarih.year
+    soz_no = (kyc.get("sozlesme_no") or "").strip()
+
+    if not soz_no:
+        # O yıla ait son sözleşme numarasını bul → bir artır
+        like_pattern = f"SZL-{yil}-%"
+        last = fetch_one(
+            "SELECT sozlesme_no FROM musteri_kyc WHERE sozlesme_no LIKE %s ORDER BY sozlesme_no DESC LIMIT 1",
+            (like_pattern,),
+        )
+        next_seq = 1
+        if last and last.get("sozlesme_no"):
+            try:
+                parca = str(last["sozlesme_no"]).split("-")[-1]
+                next_seq = int(parca) + 1
+            except Exception:
+                next_seq = 1
+        soz_no = f"SZL-{yil}-{next_seq:04d}"
+        execute(
+            "UPDATE musteri_kyc SET sozlesme_no=%s, sozlesme_tarihi=%s WHERE id=%s",
+            (soz_no, soz_tarih, kyc["id"]),
+        )
+
+    # Sözleşme metni için kullanılacak bilgiler
+    unvan = kyc.get("sirket_unvani") or kyc.get("unvan") or ""
+    vergi_no = kyc.get("vergi_no") or ""
+    vergi_dairesi = kyc.get("vergi_dairesi") or ""
+    mersis_no = kyc.get("mersis_no") or "......................................................."
+    ticaret_sicil_no = kyc.get("ticaret_sicil_no") or "......................................................."
+    faaliyet_konusu = kyc.get("faaliyet_konusu") or "......................................................."
+    merkez_adresi = kyc.get("yeni_adres") or kyc.get("eski_adres") or ""
+
+    yet_ad = kyc.get("yetkili_adsoyad") or ""
+    yet_tc = kyc.get("yetkili_tcno") or ""
+    yet_dogum = ""
+    yd = kyc.get("yetkili_dogum")
+    if yd:
+        if hasattr(yd, "strftime"):
+            yet_dogum = yd.strftime("%d.%m.%Y")
+        else:
+            try:
+                yet_dogum = datetime.strptime(str(yd)[:10], "%Y-%m-%d").strftime("%d.%m.%Y")
+            except Exception:
+                yet_dogum = str(yd)
+    yet_ikamet = kyc.get("yetkili_ikametgah") or "......................................................."
+    yet_tel = kyc.get("yetkili_tel") or ""
+    yet_tel2 = kyc.get("yetkili_tel2") or ""
+    yet_email = kyc.get("yetkili_email") or kyc.get("email") or ""
+
+    hizmet_turu = (kyc.get("hizmet_turu") or "Sanal Ofis").upper()
+    aylik = float(kyc.get("aylik_kira") or 0)
+    yillik = float(kyc.get("yillik_kira") or 0)
+    if not yillik and aylik:
+        yillik = aylik * 12
+
+    def tl_fmt(v):
+        return f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+    doc = Document()
+
+    baslik = doc.add_heading("HAZIR OFİS / SANAL OFİS\nADRES KULLANIM VE HİZMET SÖZLEŞMESİ", level=0)
+    baslik.alignment = 1  # center
+
+    doc.add_paragraph(f"Sözleşme No: {soz_no}  |  Tarih: {soz_tarih.strftime('%d.%m.%Y')}")
+
+    doc.add_heading("MADDE 1 – TARAFLAR", level=1)
+    doc.add_paragraph(
+        "Hizmet Veren:\n"
+        "Ofisbir Ofis ve Danışmanlık Hizmetleri A.Ş.\n"
+        "Adres: Kavaklıdere Mah. Esat Caddesi No:12 İç Kapı No:1 Çankaya/Ankara\n"
+        "Vergi No: 6340871926\n"
+        '(İşbu sözleşmede "OFİSBİR" olarak anılacaktır.)\n'
+    )
+    doc.add_paragraph(
+        "HİZMET ALAN (ŞİRKET BİLGİLERİ)\n"
+        f"Unvan: {unvan}\n"
+        f"Vergi No: {vergi_no}\n"
+        f"Vergi Dairesi: {vergi_dairesi}\n"
+        f"MERSİS No: {mersis_no}\n"
+        f"Ticaret Sicil No: {ticaret_sicil_no}\n"
+        f"Faaliyet Konusu: {faaliyet_konusu}\n"
+        f"Merkez Adresi: {merkez_adresi}\n\n"
+        "YETKİLİ KİŞİ BİLGİLERİ\n"
+        f"Ad Soyad: {yet_ad}\n"
+        f"T.C. Kimlik No: {yet_tc}\n"
+        f"Doğum Tarihi: {yet_dogum or '.......................................................'}\n"
+        f"İkamet Adresi: {yet_ikamet}\n"
+        f"Cep Telefonu: {yet_tel}\n"
+        f"Cep Telefonu 2: {yet_tel2 or '.......................................................'}\n"
+        f"E-Posta: {yet_email or '.......................................................'}\n"
+        "Islak İmza: .......................................................\n\n"
+        "ORTAKLIK BİLGİLERİ\n"
+        "Ortak 1 Ad Soyad / Unvan: .......................................................\n"
+        "Pay Oranı (%): .......................................................\n\n"
+        "Ortak 2 Ad Soyad / Unvan: .......................................................\n"
+        "Pay Oranı (%): .......................................................\n\n"
+        "Ortak 3 Ad Soyad / Unvan: .......................................................\n"
+        "Pay Oranı (%): .......................................................\n\n"
+        "Yabancı Ortak Varsa:\n"
+        "Ad Soyad: .......................................................\n"
+        "Uyruğu: .......................................................\n"
+        "Pasaport No: .......................................................\n\n"
+        '(İşbu sözleşmede "MÜŞTERİ" olarak anılacaktır.)\n'
+        "Müşteri adına imza atan yetkili, şirket ile birlikte müştereken ve müteselsilen sorumludur.\n"
+    )
+
+    doc.add_heading("MADDE 2 – HİZMET TÜRÜ", level=1)
+    sanal_sec = "☑" if "SANAL" in hizmet_turu else "☐"
+    hazir_sec = "☑" if "HAZIR" in hizmet_turu else "☐"
+    doc.add_paragraph(
+        "Taraflar aşağıdaki hizmet türlerinden birini seçmiştir:\n"
+        f"{sanal_sec} SANAL OFİS HİZMETİ\n"
+        f"{hazir_sec} HAZIR OFİS HİZMETİ\n"
+        "(Seçilen hizmet türü sözleşmenin ayrılmaz parçasıdır.)\n"
+    )
+
+    doc.add_heading("BÖLÜM A – SANAL OFİS HİZMETİ", level=1)
+    doc.add_heading("MADDE 3A – KAPSAM", level=2)
+    doc.add_paragraph(
+        "Sanal ofis hizmeti; yasal adres tahsisi, posta/kargo/tebligat teslim alma ve sekreterya "
+        "bilgilendirme hizmetlerini kapsar.\n"
+        "Bu sözleşme kira sözleşmesi değildir. Taşınmaz üzerinde kiracılık hakkı doğurmaz. Ancak "
+        "MÜŞTERİ'ye sözleşme süresince yasal adres kullanım hakkı verir.\n"
+        "İşbu sözleşme kapsamında MÜŞTERİ'ye yasal adres kullanım hakkı verilmiş olup, bu adres "
+        "vergi mevzuatı çerçevesinde işyeri adresi olarak bildirilebilir.\n"
+    )
+    doc.add_heading("MADDE 4A – Fiziki Kullanım", level=2)
+    doc.add_paragraph(
+        "Sanal ofis müşterisi sürekli masa veya oda kullanım hakkına sahip değildir. "
+        "Ofise eşya bırakamaz ve ticari mal bulunduramaz.\n"
+    )
+    doc.add_heading("MADDE 5A – Haciz Güvencesi", level=2)
+    doc.add_paragraph(
+        "MÜŞTERİ, ofis adresinde kendisine ait mal bulunmadığını, ofisteki tüm demirbaşların "
+        "OFİSBİR'e ait olduğunu ve haciz halinde OFİSBİR'in üçüncü kişi olduğunu kabul eder.\n"
+        "Haciz bildirgesi gelmesi halinde sözleşme kendiliğinden feshedilir.\n"
+    )
+
+    doc.add_heading("ORTAK HÜKÜMLER", level=1)
+    doc.add_heading("MADDE 6 – HİZMET BEDELİ", level=2)
+    doc.add_paragraph(
+        f"Yıllık Hizmet Bedeli: {tl_fmt(yillik)} TL + KDV\n"
+        f"Aylık Hizmet Bedeli: {tl_fmt(aylik)} TL + KDV\n\n"
+        "Ödemeler aylık olarak OFİSBİR'in bildirdiği banka hesabına yapılacaktır.\n"
+        "İki aylık ödeme gecikmesi halinde sözleşme tek taraflı feshedilebilir.\n"
+    )
+
+    doc.add_heading("MADDE 7 – ERKEN FESİH", level=2)
+    doc.add_paragraph(
+        "MÜŞTERİ, sözleşme süresi dolmadan ayrılmak isterse yazılı bildirim yapmak kaydıyla "
+        "sözleşmesini feshedebilir.\n"
+        "Erken fesih halinde 2 (iki) aylık hizmet bedeli tutarında erken fesih bedeli ödemeyi kabul eder.\n"
+        "Bu bedel makul cezai şart niteliğindedir.\n"
+    )
+
+    doc.add_heading("MADDE 8 – OTOMATİK YENİLEME", level=2)
+    doc.add_paragraph(
+        "Sözleşme bitiminden 15 gün önce yazılı fesih yapılmazsa 1 yıl süreyle aynı şartlarla yenilenir.\n"
+    )
+
+    doc.add_heading("MADDE 9 – MÜTESELSİL SORUMLULUK", level=2)
+    doc.add_paragraph(
+        "Şirket yetkilisi işbu sözleşmeden doğan borçlardan şirket ile birlikte müştereken ve "
+        "müteselsilen sorumludur.\n"
+    )
+
+    doc.add_heading("MADDE 10 – YETKİLİ MAHKEME", level=2)
+    doc.add_paragraph(
+        "İşbu sözleşmeden doğacak uyuşmazlıklarda Ankara Mahkemeleri ve İcra Daireleri yetkilidir.\n"
+    )
+
+    doc.add_heading("MADDE 11 – YÜRÜRLÜK", level=2)
+    doc.add_paragraph(
+        f"İşbu sözleşme {soz_tarih.strftime('%d.%m.%Y')} tarihinde iki nüsha olarak düzenlenmiş ve "
+        "imza altına alınmıştır.\n"
+    )
+
+    doc.add_paragraph("\nOFİSBİR\t\tMÜŞTERİ\t\tYetkili (Müteselsil Sorumlu)\n\n\n")
+    doc.add_paragraph("İmza:\t\tİmza:\t\tİmza:\n")
+    doc.add_paragraph(f"Sözleşme No: {soz_no}  |  {soz_tarih.strftime('%d.%m.%Y')}")
+
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    out_dir = os.path.join(base_dir, "uploads", "sozlesmeler")
+    os.makedirs(out_dir, exist_ok=True)
+
+    safe_unvan = (unvan or "Musteri").replace("/", "-").replace("\\", "-").strip()
+    filename = f"Sozlesme_{soz_no}_{safe_unvan[:40].replace(' ', '_')}.docx"
+    filepath = os.path.join(out_dir, filename)
+
+    doc.save(filepath)
+
+    return send_file(filepath, as_attachment=True, download_name=filename)
 
 
 @bp.route("/api/rent_progression")
