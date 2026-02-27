@@ -208,9 +208,33 @@ def api_kyc_getir():
     musteri_id = request.args.get("musteri_id")
     if not musteri_id:
         return jsonify(None)
-    row = fetch_one("SELECT * FROM musteri_kyc WHERE musteri_id = %s ORDER BY id DESC LIMIT 1", (musteri_id,))
+    row = fetch_one(
+        "SELECT * FROM musteri_kyc WHERE musteri_id = %s ORDER BY id DESC LIMIT 1",
+        (musteri_id,),
+    )
+
+    # Eğer henüz KYC kaydı yoksa, en azından customers tablosundaki temel bilgileri döndür
     if not row:
-        return jsonify(None)
+        cust = fetch_one(
+            "SELECT id, name, email, phone, address, tax_number FROM customers WHERE id = %s",
+            (musteri_id,),
+        )
+        if not cust:
+            return jsonify(None)
+        # frontend'deki formu doldurmak için alan isimlerini eşleştir
+        return jsonify(
+            {
+                "musteri_id": cust.get("id"),
+                "sirket_unvani": cust.get("name"),
+                "unvan": cust.get("name"),
+                "email": cust.get("email"),
+                "yetkili_email": cust.get("email"),
+                "yetkili_tel": cust.get("phone"),
+                "yeni_adres": cust.get("address"),
+                "vergi_no": cust.get("tax_number"),
+            }
+        )
+
     # Tarih ve sayısal alanları JSON uyumlu yap
     out = dict(row)
     for k in list(out.keys()):

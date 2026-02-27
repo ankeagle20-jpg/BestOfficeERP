@@ -2,7 +2,10 @@
 <html lang="tr">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#0a1929">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>{% block title %}{{ app_name }}{% endblock %}</title>
   <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.3/css/bootstrap.min.css">
@@ -21,8 +24,10 @@
       --border:     #1e3a5f;
     }
     * { box-sizing: border-box; }
+    html { -webkit-text-size-adjust: 100%; }
     body { background: var(--bg-dark); color: var(--text);
-           font-family: 'Segoe UI', sans-serif; margin: 0; padding-top: 4px; min-height: 100vh; }
+           font-family: 'Segoe UI', sans-serif; margin: 0; padding-top: 4px; min-height: 100vh;
+           -webkit-overflow-scrolling: touch; overflow-x: hidden; }
 
     /* Üst bar: 1. satır logo + kullanıcı, 2. satır menü başlıkları */
     .app-header {
@@ -33,6 +38,8 @@
       display: flex;
       flex-direction: column;
       padding: 0;
+      padding-left: env(safe-area-inset-left);
+      padding-right: env(safe-area-inset-right);
     }
     .app-header-row1 {
       display: flex; align-items: center; justify-content: space-between;
@@ -53,6 +60,18 @@
       border-top: 1px solid var(--border);
       padding: 0 8px 0 0;
     }
+    .nav-accordion-header {
+      display: none;
+    }
+    .nav-toggle {
+      display: none;
+      align-items: center; justify-content: center;
+      width: 44px; height: 44px;
+      background: transparent; border: none;
+      color: var(--text-muted); font-size: 1.2rem;
+      cursor: pointer; -webkit-tap-highlight-color: transparent;
+    }
+    .nav-toggle:hover { color: var(--accent); }
     .app-nav {
       display: flex; align-items: center; flex: 1;
       overflow-x: auto; overflow-y: hidden;
@@ -62,6 +81,7 @@
     .app-nav a {
       display: inline-flex; align-items: center; gap: 6px;
       padding: 12px 14px;
+      min-height: 44px; min-width: 44px;
       color: var(--text-muted);
       text-decoration: none;
       font-size: 0.85rem;
@@ -96,7 +116,9 @@
 
     /* Ana içerik - tam genişlik */
     .main-content { min-height: 100vh; width: 100%; }
-    .page-content { padding: 16px 20px; padding-top: 10px; }
+    .page-content { padding: 16px 20px; padding-top: 10px;
+      padding-left: calc(20px + env(safe-area-inset-left));
+      padding-right: calc(20px + env(safe-area-inset-right)); }
 
     /* Kartlar */
     .card-erp {
@@ -178,10 +200,85 @@
     .alert-warning  { background: #3a2e00; color: var(--yellow);
                       border: 1px solid #6a5000; }
 
-    /* Responsive - yatay menü dar ekranda kaydırılabilir */
+    /* Mobil: akordiyon menü (başlıklar isimleriyle, logo altında) */
     @media (max-width: 768px) {
-      .app-nav a span { display: none; }
-      .app-nav a { padding: 14px 10px; }
+      body { padding-top: 0; }
+      .app-header-row1 { min-height: 48px; padding: 0 4px 0 0; }
+      .app-logo { padding: 10px 12px; font-size: 1rem; }
+      .app-logo span { font-size: 0.65rem; }
+      .app-user { padding: 6px 8px; gap: 6px; font-size: 0.75rem; }
+      .app-user span:first-of-type { max-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      /* Row2: akordiyon – tek satırda "Menü" butonu, açılınca liste */
+      .app-header-row2 {
+        flex-direction: column;
+        align-items: stretch;
+        min-height: 0;
+        padding: 0;
+        border-top: 1px solid var(--border);
+      }
+      .nav-toggle { display: none; }
+      .nav-accordion-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        min-height: 48px;
+        padding: 0 14px;
+        background: var(--bg-card);
+        border: none;
+        border-bottom: 1px solid var(--border);
+        width: 100%;
+        color: var(--text);
+        font-size: 1rem;
+        font-weight: 600;
+        cursor: pointer;
+        -webkit-tap-highlight-color: transparent;
+        text-align: left;
+      }
+      .nav-accordion-header:hover { background: rgba(79, 195, 247, 0.1); color: var(--accent); }
+      .nav-accordion-header i { color: var(--text-muted); margin-left: 8px; transition: transform 0.2s; }
+      .app-header-row2.is-open .nav-accordion-header i { transform: rotate(180deg); color: var(--accent); }
+      .app-nav {
+        display: none;
+        flex-direction: column;
+        padding: 0;
+        gap: 0;
+        overflow: visible;
+        background: var(--bg-sidebar);
+        border-bottom: 1px solid var(--border);
+      }
+      .app-header-row2.is-open .app-nav { display: flex; }
+      .app-nav a {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 14px 16px;
+        min-height: 48px;
+        min-width: 0;
+        width: 100%;
+        border-bottom: 1px solid var(--border);
+        border-left: 3px solid transparent;
+        font-size: 0.95rem;
+      }
+      .app-nav a:last-child { border-bottom: none; }
+      .app-nav a span { display: inline; }
+      .app-nav a i { width: 22px; text-align: center; flex-shrink: 0; }
+      .app-nav a.active { border-left-color: var(--accent); border-bottom-color: var(--border); }
+      .page-content { padding: 12px 10px; padding-top: 8px;
+        padding-left: calc(10px + env(safe-area-inset-left));
+        padding-right: calc(10px + env(safe-area-inset-right)); }
+      .card-erp { padding: 12px; margin-bottom: 10px; }
+      .btn-erp, .btn-erp-sm { min-height: 44px; padding: 10px 14px; }
+      .form-erp input, .form-erp select, .form-erp textarea { padding: 10px 12px; font-size: 16px; }
+      .table-erp th, .table-erp td { padding: 8px 10px; font-size: 0.8rem; }
+    }
+    @media (max-width: 480px) {
+      .app-logo { font-size: 0.9rem; }
+      .app-user span:first-of-type { max-width: 40px; }
+      .badge-admin { font-size: 0.65rem; padding: 2px 6px; }
+    }
+    .mobile-scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    @media (max-width: 768px) {
+      .page-content div:has(> table) { overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; }
     }
   </style>
   {% block extra_head %}{% endblock %}
@@ -202,8 +299,12 @@
       <a href="{{ url_for('auth.logout') }}"><i class="fa fa-sign-out-alt fa-fw"></i> Çıkış</a>
     </div>
   </div>
-  <div class="app-header-row2">
-    <nav class="app-nav">
+  <div class="app-header-row2" id="headerRow2">
+    <button type="button" class="nav-accordion-header" id="navAccordionBtn" aria-label="Menüyü aç/kapat" aria-expanded="false">
+      <span>Menü</span>
+      <i class="fa fa-chevron-down"></i>
+    </button>
+    <nav class="app-nav" id="appNav">
       <a href="{{ url_for('index') }}"
          class="{% if request.endpoint == 'index' %}active{% endif %}">
         <i class="fa fa-th-large fa-fw"></i>
@@ -238,6 +339,18 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.3/js/bootstrap.bundle.min.js"></script>
+<script>
+(function(){
+  var btn = document.getElementById('navAccordionBtn');
+  var row = document.getElementById('headerRow2');
+  if (btn && row) {
+    btn.addEventListener('click', function(){
+      var open = row.classList.toggle('is-open');
+      btn.setAttribute('aria-expanded', open);
+    });
+  }
+})();
+</script>
 {% block extra_js %}{% endblock %}
 </body>
 </html>

@@ -24,6 +24,9 @@ input.error { border-color: #e74c3c !important; }
 .bagla-box { background: #0f2537; padding: 8px; border-radius: 4px; margin-bottom: 10px; }
 .bagla-box input { width: 100%; margin-bottom: 6px; }
 .musteri-list { max-height: 120px; overflow-y: auto; border: 1px solid #2d4060; border-radius: 3px; background: #243447; }
+.bagla-box.musteri-secili .musteri-list { display: none; }
+.secili-musteri-bar { min-height: 28px; }
+.bagla-box.musteri-secili .secili-musteri-bar #secili-bar { color: #e0f7fa; font-weight: 600; }
 .musteri-list div { padding: 6px 8px; cursor: pointer; font-size: 12px; color: #e0f7fa; border-bottom: 1px solid #2d4060; }
 .musteri-list div:hover { background: #2d4060; }
 .musteri-list div.selected { background: #00695c; color: #fff; }
@@ -88,9 +91,11 @@ input.error { border-color: #e74c3c !important; }
         <div class="bagla-box">
             <label class="d-block mb-1" style="color:#4fc3f7;font-size:12px;">Mevcut Müşteriye Bağla (opsiyonel)</label>
             <input type="text" id="ara-musteri" placeholder="Ara..." style="margin-bottom:6px;">
-            <div id="secili-bar" style="font-size:12px;color:#90a4ae;">Seçilmedi</div>
-            <button type="button" id="btn-temizle-sec" style="background:transparent;color:#ff8a65;border:none;cursor:pointer;font-size:11px;">✕ Temizle</button>
             <div class="musteri-list" id="musteri-listesi"></div>
+            <div class="secili-musteri-bar" style="margin-top:8px;padding-top:8px;border-top:1px solid #2d4060;">
+                <span id="secili-bar" style="font-size:12px;color:#90a4ae;">Seçilmedi</span>
+                <button type="button" id="btn-temizle-sec" style="background:transparent;color:#ff8a65;border:none;cursor:pointer;font-size:11px;margin-left:8px;">✕ Temizle</button>
+            </div>
         </div>
 
         <div class="giris-section">
@@ -378,6 +383,7 @@ async function secMusteri(id, name) {
   selectedMusteriId = id;
   document.getElementById("secili-bar").textContent = "✓ " + name;
   document.querySelectorAll("#musteri-listesi div").forEach(d => { d.classList.toggle("selected", d.dataset.id == id); });
+  document.querySelector(".bagla-box").classList.add("musteri-secili");
   const res = await fetch(API_KYC_GETIR + "?musteri_id=" + id);
   const data = await res.json();
   formuDoldur(data);
@@ -387,6 +393,7 @@ function temizleSec() {
   selectedMusteriId = null;
   document.getElementById("secili-bar").textContent = "Seçilmedi";
   document.querySelectorAll("#musteri-listesi div").forEach(d => d.classList.remove("selected"));
+  document.querySelector(".bagla-box").classList.remove("musteri-secili");
   formTemizle();
 }
 
@@ -440,6 +447,7 @@ function initFlatpickr() {
 }
 
 document.getElementById("ara-musteri").oninput = function() {
+  document.querySelector(".bagla-box").classList.remove("musteri-secili");
   clearTimeout(aramaTimer);
   aramaTimer = setTimeout(musteriAra, 200);
 };
