@@ -21,12 +21,16 @@
 .giris-row input, .giris-row select, .giris-row textarea { flex: 1; background: #2d4060; border: 1px solid #3d5070; color: #e0f7fa; padding: 6px 8px; border-radius: 3px; font-size: 12px; }
 .giris-row textarea { min-height: 60px; resize: vertical; }
 input.error { border-color: #e74c3c !important; }
-.bagla-box { background: #0f2537; padding: 8px; border-radius: 4px; margin-bottom: 10px; }
+.bagla-box { background: #0f2537; padding: 8px; border-radius: 4px; margin-bottom: 10px; display: flex; flex-direction: column; }
 .bagla-box input { width: 100%; margin-bottom: 6px; }
 .musteri-list { max-height: 120px; overflow-y: auto; border: 1px solid #2d4060; border-radius: 3px; background: #243447; }
-.bagla-box.musteri-secili .musteri-list { display: none; }
 .secili-musteri-bar { min-height: 28px; }
 .bagla-box.musteri-secili .secili-musteri-bar #secili-bar { color: #e0f7fa; font-weight: 600; }
+.secili-musteri-bilgiler { display: none; margin-top: 8px; background: #1e3a50; border: 1px solid #2d4060; border-radius: 4px; padding: 10px; font-size: 12px; }
+.secili-musteri-bilgiler .sm-baslik { color: #4fc3f7; font-weight: 700; font-size: 13px; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid #2d4060; }
+.secili-musteri-bilgiler .sm-satir { display: flex; gap: 8px; margin-bottom: 4px; }
+.secili-musteri-bilgiler .sm-etiket { color: #90a4ae; min-width: 70px; }
+.secili-musteri-bilgiler .sm-deger { color: #e0f7fa; }
 .musteri-list div { padding: 6px 8px; cursor: pointer; font-size: 12px; color: #e0f7fa; border-bottom: 1px solid #2d4060; }
 .musteri-list div:hover { background: #2d4060; }
 .musteri-list div.selected { background: #00695c; color: #fff; }
@@ -92,9 +96,13 @@ input.error { border-color: #e74c3c !important; }
             <label class="d-block mb-1" style="color:#4fc3f7;font-size:12px;">Mevcut Müşteriye Bağla (opsiyonel)</label>
             <input type="text" id="ara-musteri" placeholder="Ara..." style="margin-bottom:6px;">
             <div class="musteri-list" id="musteri-listesi"></div>
+            <div class="secili-musteri-bilgiler" id="secili-musteri-bilgiler">
+                <div class="sm-baslik" id="secili-musteri-adi"></div>
+                <div id="secili-musteri-detay"></div>
+                <button type="button" id="btn-temizle-sec" style="background:transparent;color:#ff8a65;border:none;cursor:pointer;font-size:11px;margin-top:6px;">✕ Seçimi Temizle</button>
+            </div>
             <div class="secili-musteri-bar" style="margin-top:8px;padding-top:8px;border-top:1px solid #2d4060;">
                 <span id="secili-bar" style="font-size:12px;color:#90a4ae;">Seçilmedi</span>
-                <button type="button" id="btn-temizle-sec" style="background:transparent;color:#ff8a65;border:none;cursor:pointer;font-size:11px;margin-left:8px;">✕ Temizle</button>
             </div>
         </div>
 
@@ -407,6 +415,32 @@ async function secMusteri(id, name) {
   const res = await fetch(API_KYC_GETIR + "?musteri_id=" + id);
   const data = await res.json();
   formuDoldur(data);
+
+  // Seçili müşteri bilgi kartını listanın altında göster
+  const kart = document.getElementById("secili-musteri-bilgiler");
+  document.getElementById("secili-musteri-adi").textContent = name;
+  const detaylar = [
+    { etiket: "Telefon", deger: data.yetkili_tel || data.tel || "" },
+    { etiket: "E-posta", deger: data.yetkili_email || data.email || "" },
+    { etiket: "Adres", deger: data.yeni_adres || data.adres || "" },
+    { etiket: "Vergi No", deger: data.vergi_no || "" },
+  ].filter(d => d.deger);
+  const detayDiv = document.getElementById("secili-musteri-detay");
+  detayDiv.innerHTML = "";
+  detaylar.forEach(d => {
+    const satir = document.createElement("div");
+    satir.className = "sm-satir";
+    const etiket = document.createElement("span");
+    etiket.className = "sm-etiket";
+    etiket.textContent = d.etiket + ":";
+    const deger = document.createElement("span");
+    deger.className = "sm-deger";
+    deger.textContent = d.deger;
+    satir.appendChild(etiket);
+    satir.appendChild(deger);
+    detayDiv.appendChild(satir);
+  });
+  kart.style.display = "block";
 }
 
 function temizleSec() {
@@ -414,6 +448,7 @@ function temizleSec() {
   document.getElementById("secili-bar").textContent = "Seçilmedi";
   document.querySelectorAll("#musteri-listesi div").forEach(d => d.classList.remove("selected"));
   document.querySelector(".bagla-box").classList.remove("musteri-secili");
+  document.getElementById("secili-musteri-bilgiler").style.display = "none";
   formTemizle();
 }
 
@@ -468,6 +503,7 @@ function initFlatpickr() {
 
 document.getElementById("ara-musteri").oninput = function() {
   document.querySelector(".bagla-box").classList.remove("musteri-secili");
+  document.getElementById("secili-musteri-bilgiler").style.display = "none";
   clearTimeout(aramaTimer);
   aramaTimer = setTimeout(musteriAra, 200);
 };
