@@ -1,0 +1,676 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tahsilatlar</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #0a1929;
+            color: #e0f7fa;
+            padding: 15px;
+        }
+        .header-bar {
+            background: #1e3a50;
+            padding: 12px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .header-bar h3 {
+            color: #4fc3f7;
+            font-size: 16px;
+            margin: 0;
+        }
+        .header-bar button {
+            background: #4caf50;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .header-bar button:hover {
+            background: #388e3c;
+        }
+        .filter-bar {
+            background: #1e3a50;
+            padding: 12px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .filter-bar label {
+            color: #90a4ae;
+            font-size: 13px;
+            font-weight: 600;
+        }
+        .filter-bar select {
+            background: #2d4060;
+            border: 1px solid #3d5070;
+            color: #e0f7fa;
+            padding: 6px 10px;
+            border-radius: 3px;
+            font-size: 13px;
+        }
+        .filter-bar button {
+            background: #00bcd4;
+            color: white;
+            border: none;
+            padding: 6px 14px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+        }
+        .filter-bar button:hover {
+            background: #0097a7;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            margin-bottom: 15px;
+        }
+        .stat-card {
+            background: #1e3a50;
+            padding: 12px;
+            border-radius: 4px;
+            border-left: 3px solid #4caf50;
+        }
+        .stat-card h4 {
+            color: #90a4ae;
+            font-size: 11px;
+            margin-bottom: 6px;
+            text-transform: uppercase;
+        }
+        .stat-card .value {
+            color: #4caf50;
+            font-size: 20px;
+            font-weight: bold;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: #1e3a50;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        thead {
+            background: #0f2537;
+        }
+        th {
+            color: #4fc3f7;
+            padding: 12px;
+            text-align: left;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        td {
+            padding: 10px 12px;
+            border-bottom: 1px solid #2d4060;
+            font-size: 13px;
+        }
+        tr:hover td {
+            background: rgba(79, 195, 247, 0.05);
+        }
+        .badge {
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        .badge-nakit {
+            background: rgba(76, 175, 80, 0.2);
+            color: #4caf50;
+        }
+        .badge-havale {
+            background: rgba(79, 195, 247, 0.2);
+            color: #4fc3f7;
+        }
+        .badge-kart {
+            background: rgba(255, 152, 0, 0.2);
+            color: #ff9800;
+        }
+        .badge-cek {
+            background: rgba(126, 87, 194, 0.2);
+            color: #b39ddb;
+        }
+        .modal {
+            position: fixed; left: 0; top: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.6); z-index: 9999;
+            display: flex; align-items: center; justify-content: center;
+            padding: 15px;
+        }
+        .modal-icerik {
+            background: #1e3a50;
+            border-radius: 8px;
+            width: 100%;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+        .modal-baslik {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 12px 16px;
+            background: #0f2537;
+            border-radius: 8px 8px 0 0;
+        }
+        .modal-baslik h3 { margin: 0; color: #4fc3f7; font-size: 15px; }
+        .modal-kapat {
+            background: none; border: none; color: #90a4ae;
+            font-size: 22px; cursor: pointer; line-height: 1;
+        }
+        .modal-kapat:hover { color: #fff; }
+        .form-grup { padding: 8px 16px; }
+        .form-grup label { display: block; color: #90a4ae; font-size: 12px; margin-bottom: 4px; }
+        .form-grup input, .form-grup select, .form-grup textarea {
+            width: 100%; padding: 8px 10px;
+            background: #2d4060; border: 1px solid #3d5070;
+            color: #e0f7fa; border-radius: 4px; font-size: 13px;
+        }
+        .form-grup textarea { resize: vertical; min-height: 50px; }
+        .zorunlu { color: #ff9800; }
+        .musteri-dropdown {
+            max-height: 180px; overflow-y: auto;
+            background: #0f2537; border: 1px solid #3d5070;
+            border-radius: 4px; margin-top: 4px;
+        }
+        .musteri-dropdown div {
+            padding: 8px 12px; cursor: pointer;
+            border-bottom: 1px solid #2d4060;
+        }
+        .musteri-dropdown div:hover { background: #2d4060; }
+        .secilen-ad { color: #4fc3f7; font-size: 13px; padding: 4px 0; }
+        .modal-aksiyon {
+            display: flex; gap: 10px; justify-content: flex-end;
+            padding: 12px 16px; border-top: 1px solid #2d4060;
+        }
+        .btn-iptal {
+            background: #546e7a; color: white; border: none;
+            padding: 8px 16px; border-radius: 4px; cursor: pointer;
+        }
+        .btn-kaydet {
+            background: #4caf50; color: white; border: none;
+            padding: 8px 16px; border-radius: 4px; cursor: pointer;
+            display: flex; align-items: center; gap: 6px;
+        }
+        .btn-kaydet:hover { background: #388e3c; }
+        .btn-yazdir {
+            background: #00bcd4; color: white; border: none;
+            padding: 4px 10px; border-radius: 3px; cursor: pointer;
+            font-size: 11px; text-decoration: none; display: inline-flex;
+            align-items: center; gap: 4px;
+        }
+        .btn-yazdir:hover { background: #0097a7; color: white; }
+        .btn-onizle { background: #7e57c2; color: white; border: none; padding: 8px 14px; border-radius: 4px; cursor: pointer; font-size: 12px; display: inline-flex; align-items: center; gap: 6px; }
+        .btn-onizle:hover { background: #5e35b1; color: white; }
+        .btn-yazdir-form { background: #00bcd4; color: white; border: none; padding: 8px 14px; border-radius: 4px; cursor: pointer; font-size: 12px; display: inline-flex; align-items: center; gap: 6px; }
+        .btn-yazdir-form:hover { background: #0097a7; color: white; }
+        .btn-pdf { background: #e91e63; color: white; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer; font-size: 11px; text-decoration: none; display: inline-flex; align-items: center; gap: 3px; margin-right: 4px; }
+        .btn-pdf:hover { color: white; background: #c2185b; }
+        .btn-islem-onizle { background: #7e57c2; color: white; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer; font-size: 11px; display: inline-flex; align-items: center; gap: 3px; margin-right: 4px; }
+        .btn-islem-onizle:hover { color: white; background: #5e35b1; }
+        .cek-tablo { border-collapse: collapse; background: #0f2537; }
+        .cek-tablo th, .cek-tablo td { border: 1px solid #2d4060; padding: 4px 6px; text-align: left; }
+        .cek-tablo th { background: #1e3a50; color: #4fc3f7; font-size: 10px; }
+        .cek-tablo input { width: 100%; max-width: 70px; padding: 2px 4px; background: #2d4060; border: 1px solid #3d5070; color: #e0f7fa; font-size: 10px; }
+    </style>
+</head>
+<body>
+    <div class="header-bar">
+        <h3><i class="fa fa-money-bill-wave"></i> Tahsilatlar</h3>
+        <button onclick="tahsilatModalAc()">
+            <i class="fa fa-plus"></i> Yeni Tahsilat
+        </button>
+    </div>
+
+    <!-- Yeni Tahsilat Modal -->
+    <div id="tahsilat-modal" class="modal" style="display:none;">
+        <div class="modal-icerik" style="max-width:480px;">
+            <div class="modal-baslik">
+                <h3><i class="fa fa-receipt"></i> Yeni Tahsilat Makbuzu</h3>
+                <button type="button" class="modal-kapat" onclick="tahsilatModalKapat()">&times;</button>
+            </div>
+            <form id="tahsilat-form" onsubmit="return tahsilatKaydet(event)">
+                <div class="form-grup">
+                    <label>Müşteri <span class="zorunlu">*</span></label>
+                    <input type="text" id="tahsilat-musteri-ara" placeholder="Müşteri ara, seçin..." autocomplete="off">
+                    <input type="hidden" id="tahsilat-musteri-id" name="musteri_id">
+                    <div id="tahsilat-musteri-listesi" class="musteri-dropdown" style="display:none;"></div>
+                    <span id="tahsilat-musteri-secilen" class="secilen-ad" style="display:none;"></span>
+                </div>
+                <div class="form-grup">
+                    <label>Tutar (TL) <span class="zorunlu">*</span></label>
+                    <input type="text" id="tahsilat-tutar" name="tutar" placeholder="0,00" required>
+                </div>
+                <div class="form-grup">
+                    <label>Ödeme Türü</label>
+                    <select id="tahsilat-odeme-turu" name="odeme_turu" onchange="tahsilatOdemeTuruDegisti()">
+                        <option value="nakit">Nakit</option>
+                        <option value="havale">Havale/EFT</option>
+                        <option value="kredi_karti">Kredi Kartı</option>
+                        <option value="cek">Çek</option>
+                    </select>
+                </div>
+                <div id="tahsilat-havale-banka-grup" class="form-grup" style="display:none;">
+                    <label>Havale yapılan banka/hesap</label>
+                    <select id="tahsilat-havale-banka" name="havale_banka">
+                        <option value="">— Seçiniz —</option>
+                    </select>
+                </div>
+                <div id="tahsilat-cek-grup" class="form-grup" style="display:none;">
+                    <label>Çek bilgileri</label>
+                    <div class="cek-tablo-wrap" style="max-height:220px; overflow:auto;">
+                        <table class="cek-tablo" style="width:100%; font-size:11px;">
+                            <thead>
+                                <tr>
+                                    <th>Sıra</th>
+                                    <th>Çek No</th>
+                                    <th>Hesap No</th>
+                                    <th>Banka</th>
+                                    <th>Şube</th>
+                                    <th>Vade</th>
+                                    <th>Tutar</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody id="tahsilat-cek-tbody"></tbody>
+                        </table>
+                    </div>
+                    <button type="button" class="btn-cek-ekle" onclick="cekSatirEkle()" style="margin-top:6px; background:#7e57c2; color:white; border:none; padding:6px 12px; border-radius:4px; cursor:pointer; font-size:11px;"><i class="fa fa-plus"></i> Çek satırı ekle</button>
+                </div>
+                <div class="form-grup">
+                    <label>Tarih</label>
+                    <input type="date" id="tahsilat-tarih" name="tahsilat_tarihi">
+                </div>
+                <div class="form-grup">
+                    <label>Açıklama</label>
+                    <textarea id="tahsilat-aciklama" name="aciklama" rows="2" placeholder="Örn: 2026 Mart ayı kira bedeli"></textarea>
+                </div>
+                <div class="modal-aksiyon" style="flex-wrap: wrap; gap: 8px;">
+                    <button type="button" class="btn-iptal" onclick="tahsilatModalKapat()">İptal</button>
+                    <button type="button" class="btn-onizle" onclick="tahsilatFormOnizle(); return false;"><i class="fa fa-eye"></i> Önizle</button>
+                    <button type="button" class="btn-yazdir-form" onclick="tahsilatFormYazdir(); return false;"><i class="fa fa-print"></i> Yazdır</button>
+                    <button type="submit" class="btn-kaydet"><i class="fa fa-check"></i> Kaydet ve Makbuz Oluştur</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- PDF Önizleme modal (liste satırı için) -->
+    <div id="pdf-onizle-modal" class="modal" style="display:none;">
+        <div class="modal-icerik" style="max-width: 90%; width: 600px; height: 85vh;">
+            <div class="modal-baslik">
+                <h3><i class="fa fa-file-pdf"></i> Makbuz Önizleme</h3>
+                <button type="button" class="modal-kapat" onclick="pdfOnizleModalKapat()">&times;</button>
+            </div>
+            <iframe id="pdf-onizle-iframe" style="width:100%; height:calc(85vh - 50px); border:none; background:#fff;"></iframe>
+        </div>
+    </div>
+    
+    <div class="filter-bar">
+        <label>Yıl:</label>
+        <select id="yil">
+            <option selected>{{ yil }}</option>
+            <option>2026</option>
+            <option>2025</option>
+            <option>2024</option>
+        </select>
+        
+        <label>Ay:</label>
+        <select id="ay">
+            <option value="">Tümü</option>
+            <option>Ocak</option>
+            <option>Şubat</option>
+            <option>Mart</option>
+            <option>Nisan</option>
+            <option>Mayıs</option>
+            <option>Haziran</option>
+            <option>Temmuz</option>
+            <option>Ağustos</option>
+            <option>Eylül</option>
+            <option>Ekim</option>
+            <option>Kasım</option>
+            <option>Aralık</option>
+        </select>
+        
+        <button onclick="filtrele()">
+            <i class="fa fa-filter"></i> Filtrele
+        </button>
+    </div>
+    
+    <div class="stats">
+        <div class="stat-card">
+            <h4>Toplam Tahsilat</h4>
+            <div class="value">{{ toplam|default(0)|round(2) }} TL</div>
+        </div>
+        <div class="stat-card" style="border-left-color: #4fc3f7;">
+            <h4>Tahsilat Sayısı</h4>
+            <div class="value" style="color: #4fc3f7;">{{ tahsilatlar|length }}</div>
+        </div>
+        <div class="stat-card" style="border-left-color: #ff9800;">
+            <h4>Ortalama Tutar</h4>
+            <div class="value" style="color: #ff9800;">
+                {% if tahsilatlar|length > 0 %}
+                    {{ (toplam / tahsilatlar|length)|round(2) }}
+                {% else %}
+                    0.00
+                {% endif %}
+                TL
+            </div>
+        </div>
+    </div>
+    
+    <table>
+        <thead>
+            <tr>
+                <th>Makbuz No</th>
+                <th>Tarih</th>
+                <th>Müşteri</th>
+                <th>Fatura No</th>
+                <th>Tutar</th>
+                <th>Ödeme Türü</th>
+                <th>Açıklama</th>
+                <th>İşlem</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% if tahsilatlar %}
+                {% for t in tahsilatlar %}
+                <tr>
+                    <td>{{ t.makbuz_no or '-' }}</td>
+                    <td>{% if t.tahsilat_tarihi %}{% if t.tahsilat_tarihi is string and t.tahsilat_tarihi|length >= 10 %}{{ t.tahsilat_tarihi[8:10] }}.{{ t.tahsilat_tarihi[5:7] }}.{{ t.tahsilat_tarihi[0:4] }}{% elif t.tahsilat_tarihi is string %}{{ t.tahsilat_tarihi }}{% else %}{{ t.tahsilat_tarihi.strftime('%d.%m.%Y') }}{% endif %}{% else %}-{% endif %}</td>
+                    <td>{{ t.musteri_adi or 'Bilinmiyor' }}</td>
+                    <td>{{ t.fatura_no or '-' }}</td>
+                    <td><strong>{{ t.tutar|round(2) }} TL</strong></td>
+                    <td>
+                        <span class="badge badge-{{ (t.odeme_turu or 'nakit')|lower }}">
+                            {{ t.odeme_turu or 'Nakit' }}
+                        </span>
+                    </td>
+                    <td>{{ t.aciklama or '-' }}</td>
+                    <td>
+                        <a href="/faturalar/tahsilat-pdf/{{ t.id }}?indir=1" class="btn-pdf" title="PDF indir" download><i class="fa fa-file-pdf"></i> PDF</a>
+                        <a href="/faturalar/tahsilat-pdf/{{ t.id }}" target="_blank" class="btn-yazdir" title="Yazdır"><i class="fa fa-print"></i> Yazdır</a>
+                        <button type="button" class="btn-islem-onizle" title="Önizle" onclick="pdfOnizleAc({{ t.id }})"><i class="fa fa-eye"></i> Önizle</button>
+                        <button type="button" style="background: #4fc3f7; color: white; border: none; padding: 4px 10px; border-radius: 3px; cursor: pointer; font-size: 11px;" title="Düzenle"><i class="fa fa-edit"></i></button>
+                        <button type="button" style="background: #f44336; color: white; border: none; padding: 4px 10px; border-radius: 3px; cursor: pointer; font-size: 11px; margin-left: 4px;" title="Sil"><i class="fa fa-trash"></i></button>
+                    </td>
+                </tr>
+                {% endfor %}
+            {% else %}
+                <tr>
+                    <td colspan="8" style="text-align: center; color: #90a4ae; padding: 30px;">
+                        Tahsilat bulunamadı
+                    </td>
+                </tr>
+            {% endif %}
+        </tbody>
+    </table>
+    
+    <script>
+    const API_MUSTERILER = '/faturalar/api/musteriler';
+    const API_TAHSILAT_EKLE = '/faturalar/tahsilat-ekle';
+    const API_TAHSILAT_ONIZLE = '/faturalar/tahsilat-makbuz-onizle';
+    const API_BANKA_HESAPLAR = '/faturalar/api/banka-hesaplar';
+
+    function filtrele() {
+        const yil = document.getElementById('yil').value;
+        const ay = document.getElementById('ay').value;
+        let url = '/faturalar/tahsilatlar?yil=' + yil;
+        if (ay) url += '&ay=' + encodeURIComponent(ay);
+        window.location.href = url;
+    }
+
+    function tahsilatModalAc() {
+        document.getElementById('tahsilat-modal').style.display = 'flex';
+        document.getElementById('tahsilat-tarih').value = new Date().toISOString().slice(0, 10);
+        document.getElementById('tahsilat-musteri-id').value = '';
+        document.getElementById('tahsilat-musteri-ara').value = '';
+        document.getElementById('tahsilat-musteri-secilen').style.display = 'none';
+        document.getElementById('tahsilat-musteri-listesi').style.display = 'none';
+        document.getElementById('tahsilat-tutar').value = '';
+        document.getElementById('tahsilat-aciklama').value = '';
+        document.getElementById('tahsilat-havale-banka').value = '';
+        document.getElementById('tahsilat-cek-tbody').innerHTML = '';
+        tahsilatOdemeTuruDegisti();
+        fetch(API_BANKA_HESAPLAR).then(r => r.json()).then(arr => {
+            const sel = document.getElementById('tahsilat-havale-banka');
+            sel.innerHTML = '<option value="">— Seçiniz —</option>' + arr.map(b => {
+                const val = (b.banka_adi || '') + ' - ' + (b.hesap_adi || '') + (b.iban ? ' (' + b.iban + ')' : '');
+                return '<option value="' + (val || '').replace(/"/g, '&quot;') + '">' + (b.label || val || '—') + '</option>';
+            }).join('');
+        }).catch(() => {});
+    }
+
+    function tahsilatOdemeTuruDegisti() {
+        const tur = (document.getElementById('tahsilat-odeme-turu').value || '').toLowerCase();
+        document.getElementById('tahsilat-havale-banka-grup').style.display = (tur === 'havale' || tur === 'eft' || tur === 'banka') ? 'block' : 'none';
+        document.getElementById('tahsilat-cek-grup').style.display = tur === 'cek' ? 'block' : 'none';
+      }
+
+    var cekSatirSayaci = 0;
+    function cekSatirEkle() {
+        const tbody = document.getElementById('tahsilat-cek-tbody');
+        const id = 'cek_' + (++cekSatirSayaci);
+        const tr = document.createElement('tr');
+        tr.dataset.id = id;
+        tr.innerHTML = '<td>' + (tbody.children.length + 1) + '</td>' +
+            '<td><input type="text" name="cek_no" placeholder="Çek no"></td>' +
+            '<td><input type="text" name="hesap_no" placeholder="Hesap"></td>' +
+            '<td><input type="text" name="banka" placeholder="Banka"></td>' +
+            '<td><input type="text" name="sube" placeholder="Şube"></td>' +
+            '<td><input type="text" name="vade" placeholder="GG.AA.YYYY"></td>' +
+            '<td><input type="text" name="tutar" placeholder="0,00"></td>' +
+            '<td><button type="button" onclick="cekSatirSil(this)" style="background:#f44336; color:white; border:none; padding:2px 6px; cursor:pointer; border-radius:2px;">×</button></td>';
+        tbody.appendChild(tr);
+      }
+    function cekSatirSil(btn) {
+        btn.closest('tr').remove();
+        document.getElementById('tahsilat-cek-tbody').querySelectorAll('tr').forEach((tr, i) => { tr.cells[0].textContent = i + 1; });
+      }
+    function cekDetayTopla() {
+        const rows = [];
+        document.getElementById('tahsilat-cek-tbody').querySelectorAll('tr').forEach(tr => {
+            const cek_no = (tr.querySelector('input[name="cek_no"]') || {}).value || '';
+            const hesap_no = (tr.querySelector('input[name="hesap_no"]') || {}).value || '';
+            const banka = (tr.querySelector('input[name="banka"]') || {}).value || '';
+            const sube = (tr.querySelector('input[name="sube"]') || {}).value || '';
+            const vade = (tr.querySelector('input[name="vade"]') || {}).value || '';
+            const tutarStr = (tr.querySelector('input[name="tutar"]') || {}).value || '';
+            const tutar = parseFloat(String(tutarStr).replace(',', '.')) || 0;
+            rows.push({ cek_no, hesap_no, banka, sube, vade, tutar: tutar });
+        });
+        return rows;
+    }
+
+    function tahsilatModalKapat() {
+        document.getElementById('tahsilat-modal').style.display = 'none';
+    }
+
+    let musteriAramaZamanlayici;
+    document.addEventListener('DOMContentLoaded', function() {
+        const ara = document.getElementById('tahsilat-musteri-ara');
+        if (ara) {
+            ara.addEventListener('focus', function() {
+                if (!this.value) musteriListesiGetir('');
+                document.getElementById('tahsilat-musteri-listesi').style.display = 'block';
+            });
+            ara.addEventListener('input', function() {
+                clearTimeout(musteriAramaZamanlayici);
+                musteriAramaZamanlayici = setTimeout(function() {
+                    musteriListesiGetir(ara.value);
+                }, 250);
+            });
+        }
+        document.addEventListener('click', function(e) {
+            const list = document.getElementById('tahsilat-musteri-listesi');
+            const ara = document.getElementById('tahsilat-musteri-ara');
+            if (list && !list.contains(e.target) && e.target !== ara) list.style.display = 'none';
+        });
+    });
+
+    function musteriListesiGetir(q) {
+        const url = q ? API_MUSTERILER + '?q=' + encodeURIComponent(q) : API_MUSTERILER;
+        fetch(url)
+            .then(r => r.json())
+            .then(arr => {
+                const list = document.getElementById('tahsilat-musteri-listesi');
+                list.innerHTML = arr.length ? arr.map(m => 
+                    '<div data-id="' + m.id + '" data-name="' + (m.name || '').replace(/"/g, '&quot;') + '">' + (m.name || '—') + '</div>'
+                ).join('') : '<div style="padding:10px;color:#90a4ae;">Müşteri bulunamadı</div>';
+                list.querySelectorAll('div[data-id]').forEach(el => {
+                    el.onclick = function() {
+                        document.getElementById('tahsilat-musteri-id').value = this.getAttribute('data-id');
+                        document.getElementById('tahsilat-musteri-ara').value = '';
+                        document.getElementById('tahsilat-musteri-secilen').textContent = this.getAttribute('data-name');
+                        document.getElementById('tahsilat-musteri-secilen').style.display = 'block';
+                        list.style.display = 'none';
+                    };
+                });
+            })
+            .catch(() => { document.getElementById('tahsilat-musteri-listesi').innerHTML = '<div style="padding:10px;color:#f44336;">Yüklenemedi</div>'; });
+    }
+
+    function tahsilatFormPayload() {
+        const musteriId = document.getElementById('tahsilat-musteri-id').value;
+        const musteriAdi = (document.getElementById('tahsilat-musteri-secilen').textContent || '').trim();
+        const tutarStr = (document.getElementById('tahsilat-tutar').value || '').replace(',', '.');
+        let tutar = parseFloat(tutarStr);
+        const odemeTuru = document.getElementById('tahsilat-odeme-turu').value;
+        const cekList = cekDetayTopla();
+        if (odemeTuru === 'cek' && cekList.length) {
+            tutar = cekList.reduce((s, r) => s + (r.tutar || 0), 0);
+        }
+        return {
+            musteri_id: musteriId ? parseInt(musteriId, 10) : null,
+            musteri_adi: musteriAdi,
+            tutar: isNaN(tutar) ? 0 : tutar,
+            odeme_turu: odemeTuru,
+            tahsilat_tarihi: document.getElementById('tahsilat-tarih').value,
+            aciklama: document.getElementById('tahsilat-aciklama').value,
+            havale_banka: document.getElementById('tahsilat-havale-banka').value || '',
+            cek_detay: cekList
+        };
+    }
+
+    function tahsilatFormOnizle() {
+        const payload = tahsilatFormPayload();
+        if (!payload.musteri_id && !payload.musteri_adi) {
+            alert('Lütfen müşteri seçiniz.');
+            return;
+        }
+        if (payload.tutar <= 0 && !(payload.odeme_turu === 'cek' && (payload.cek_detay || []).length > 0)) {
+            alert('Geçerli bir tutar giriniz veya çek satırları ekleyiniz.');
+            return;
+        }
+        fetch(API_TAHSILAT_ONIZLE, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        })
+        .then(r => r.blob())
+        .then(blob => {
+            const url = URL.createObjectURL(blob);
+            window.open(url, '_blank', 'noopener');
+        })
+        .catch(() => alert('Önizleme alınamadı.'));
+    }
+
+    function tahsilatFormYazdir() {
+        const payload = tahsilatFormPayload();
+        if (!payload.musteri_id && !payload.musteri_adi) {
+            alert('Lütfen müşteri seçiniz.');
+            return;
+        }
+        if (payload.tutar <= 0) {
+            alert('Geçerli bir tutar giriniz.');
+            return;
+        }
+        fetch(API_TAHSILAT_ONIZLE, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        })
+        .then(r => r.blob())
+        .then(blob => {
+            const url = URL.createObjectURL(blob);
+            const w = window.open(url, '_blank', 'noopener');
+            if (w) w.focus();
+        })
+        .catch(() => alert('PDF açılamadı.'));
+    }
+
+    function pdfOnizleAc(tahsilatId) {
+        document.getElementById('pdf-onizle-iframe').src = '/faturalar/tahsilat-pdf/' + tahsilatId;
+        document.getElementById('pdf-onizle-modal').style.display = 'flex';
+    }
+
+    function pdfOnizleModalKapat() {
+        document.getElementById('pdf-onizle-iframe').src = 'about:blank';
+        document.getElementById('pdf-onizle-modal').style.display = 'none';
+    }
+
+    function tahsilatKaydet(e) {
+        e.preventDefault();
+        const musteriId = document.getElementById('tahsilat-musteri-id').value;
+        if (!musteriId) {
+            alert('Lütfen müşteri seçiniz.');
+            return false;
+        }
+        const payload = tahsilatFormPayload();
+        payload.musteri_id = parseInt(musteriId, 10);
+        const odemeTuru = document.getElementById('tahsilat-odeme-turu').value;
+        if (odemeTuru === 'cek') {
+            if (cekDetayTopla().length === 0) {
+                alert('Çek ile ödeme için en az bir çek satırı ekleyiniz.');
+                return false;
+            }
+            if (payload.tutar <= 0) {
+                alert('Çek tutarlarını giriniz.');
+                return false;
+            }
+        } else if (payload.tutar <= 0) {
+            alert('Geçerli bir tutar giriniz.');
+            return false;
+        }
+        fetch(API_TAHSILAT_EKLE, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.ok) {
+                alert(data.mesaj || 'Tahsilat eklendi.');
+                tahsilatModalKapat();
+                window.location.reload();
+            } else {
+                alert(data.mesaj || 'Kayıt yapılamadı.');
+            }
+        })
+        .catch(err => {
+            alert('İstek gönderilemedi: ' + err.message);
+        });
+        return false;
+    }
+    </script>
+</body>
+</html>

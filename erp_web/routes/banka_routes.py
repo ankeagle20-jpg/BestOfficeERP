@@ -295,7 +295,7 @@ def api_oto_eslestir():
                     else:
                         tarih = _parse_date(str(tarih)[:10]) or date.today()
                     row = execute_returning(
-                        """INSERT INTO tahsilatlar (musteri_id, tutar, odeme_turu, aciklama, tahsilat_tarihi)
+                        """INSERT INTO tahsilatlar (customer_id, tutar, odeme_turu, aciklama, tahsilat_tarihi)
                            VALUES (%s, %s, 'banka', %s, %s) RETURNING id""",
                         (m["id"], float(h.get("tutar") or 0), "Banka eşleşme: " + (h.get("aciklama") or "")[:100], tarih),
                     )
@@ -338,7 +338,7 @@ def api_eslestir():
             tarih = _parse_date(str(tarih)[:10]) or date.today()
         aciklama = "Banka eşleşme: " + (h.get("aciklama") or "")[:100]
         row = execute_returning(
-            """INSERT INTO tahsilatlar (musteri_id, tutar, odeme_turu, aciklama, tahsilat_tarihi)
+            """INSERT INTO tahsilatlar (customer_id, tutar, odeme_turu, aciklama, tahsilat_tarihi)
                VALUES (%s, %s, 'banka', %s, %s) RETURNING id""",
             (musteri_id, tutar, aciklama, tarih),
         )

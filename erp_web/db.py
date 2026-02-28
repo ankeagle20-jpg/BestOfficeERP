@@ -169,11 +169,11 @@ CREATE TABLE IF NOT EXISTS urunler (
 -- TÜFE
 CREATE TABLE IF NOT EXISTS tufe_verileri (
     id          SERIAL PRIMARY KEY,
-    yil         INTEGER NOT NULL,
-    ay          TEXT NOT NULL,
+    year        INTEGER NOT NULL,
+    month       TEXT NOT NULL,
     oran        NUMERIC(8,4) NOT NULL,
     created_at  TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE(yil, ay)
+    UNIQUE(year, month)
 );
 
 -- Banka Hesaplar
@@ -201,6 +201,15 @@ CREATE TABLE IF NOT EXISTS personel (
     is_active        BOOLEAN DEFAULT TRUE,
     created_at       TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Sözleşmeler (sözleşme numarası takibi)
+CREATE TABLE IF NOT EXISTS sozlesmeler (
+    id           SERIAL PRIMARY KEY,
+    musteri_id   INTEGER REFERENCES customers(id) ON DELETE CASCADE,
+    sozlesme_no  TEXT UNIQUE NOT NULL,
+    hizmet_turu  TEXT,
+    created_at   TIMESTAMPTZ DEFAULT NOW()
+);
 """
 
 
@@ -208,4 +217,38 @@ def init_schema():
     """Tüm tabloları Supabase'de oluştur."""
     with db() as conn:
         conn.cursor().execute(SCHEMA_SQL)
+        ensure_customers_notes()
+        ensure_tahsilatlar_columns()
     print("✅ Supabase şema oluşturuldu.")
+
+
+def ensure_customers_notes():
+    """Customers tablosuna notes sütunu ekle."""
+    try:
+        execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS notes TEXT")
+    except Exception as e:
+        print(f"Notes sütunu zaten var veya hata: {e}")
+
+
+def ensure_tahsilatlar_columns():
+    """tahsilatlar tablosunda musteri_id / fatura_id yoksa ekle (eski şemalar için)."""
+    try:
+        execute("ALTER TABLE tahsilatlar ADD COLUMN IF NOT EXISTS musteri_id INTEGER REFERENCES customers(id)")
+    except Exception as e:
+        print(f"tahsilatlar.musteri_id: {e}")
+    try:
+        execute("ALTER TABLE tahsilatlar ADD COLUMN IF NOT EXISTS fatura_id INTEGER REFERENCES faturalar(id)")
+    except Exception as e:
+        print(f"tahsilatlar.fatura_id: {e}")
+    try:
+        execute("ALTER TABLE tahsilatlar ADD COLUMN IF NOT EXISTS makbuz_no TEXT")
+    except Exception as e:
+        print(f"tahsilatlar.makbuz_no: {e}")
+    try:
+        execute("ALTER TABLE tahsilatlar ADD COLUMN IF NOT EXISTS cek_detay TEXT")
+    except Exception as e:
+        print(f"tahsilatlar.cek_detay: {e}")
+    try:
+        execute("ALTER TABLE tahsilatlar ADD COLUMN IF NOT EXISTS havale_banka TEXT")
+    except Exception as e:
+        print(f"tahsilatlar.havale_banka: {e}")

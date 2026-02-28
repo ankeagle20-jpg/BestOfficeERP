@@ -32,6 +32,40 @@
     font-size: 12px;
     margin-left: 6px;
 }
+.completion-bar {
+    background: #1e3a50;
+    padding: 10px 12px;
+    margin-bottom: 10px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.completion-bar label {
+    color: #b0bec5;
+    font-size: 13px;
+    font-weight: bold;
+}
+.progress-bar {
+    flex: 1;
+    background: #2d4060;
+    height: 20px;
+    border-radius: 10px;
+    overflow: hidden;
+    position: relative;
+}
+.progress-fill {
+    background: linear-gradient(90deg, #00bcd4, #00e676);
+    height: 100%;
+    width: 0%;
+    transition: width 0.3s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 11px;
+    font-weight: bold;
+}
 .musteri-liste {
     background: #1e3a50;
     padding: 12px;
@@ -99,6 +133,8 @@
     background: #1e3a50;
     padding: 12px;
     border-radius: 4px;
+    max-height: 700px;
+    overflow-y: auto;
 }
 .musteri-form h3 {
     color: #4fc3f7;
@@ -145,6 +181,10 @@
     font-size: 12px;
     text-align: right;
 }
+.form-grid label.required::after {
+    content: " *";
+    color: #ff5252;
+}
 .form-grid input, .form-grid select, .form-grid textarea {
     background: #2d4060;
     border: 1px solid #3d5070;
@@ -152,6 +192,10 @@
     padding: 6px 10px;
     border-radius: 3px;
     font-size: 12px;
+}
+.form-grid input:focus, .form-grid select:focus, .form-grid textarea:focus {
+    border-color: #00bcd4;
+    outline: none;
 }
 .form-grid textarea {
     resize: vertical;
@@ -182,13 +226,57 @@
     height: 16px;
 }
 .dosyalar {
-    padding: 8px;
+    padding: 12px;
     background: #0f2537;
     border-radius: 3px;
-    min-height: 80px;
-    color: #6b7280;
-    font-size: 11px;
+    min-height: 100px;
+}
+.dosya-yukle-box {
+    border: 2px dashed #3d5070;
+    padding: 20px;
     text-align: center;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+.dosya-yukle-box:hover {
+    border-color: #00bcd4;
+    background: rgba(0, 188, 212, 0.05);
+}
+.dosya-yukle-box i {
+    font-size: 32px;
+    color: #00bcd4;
+    margin-bottom: 8px;
+}
+.dosya-yukle-box p {
+    color: #90a4ae;
+    font-size: 12px;
+    margin: 4px 0;
+}
+.dosya-liste {
+    margin-top: 12px;
+}
+.dosya-item {
+    background: #2d4060;
+    padding: 8px 12px;
+    border-radius: 3px;
+    margin-bottom: 6px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.dosya-item span {
+    color: #e0f7fa;
+    font-size: 11px;
+}
+.dosya-item button {
+    background: #e74c3c;
+    color: white;
+    border: none;
+    padding: 4px 8px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 10px;
 }
 .form-actions {
     display: flex;
@@ -207,6 +295,8 @@
     font-weight: bold;
 }
 .btn-kaydet { background: #00bcd4; color: white; }
+.btn-sozlesme { background: #9c27b0; color: white; }
+.btn-yazdir { background: #ff9800; color: white; }
 .btn-sil { background: #e74c3c; color: white; }
 .btn-temizle { background: #6b7280; color: white; }
 .sozlesme-durum {
@@ -220,6 +310,12 @@
     color: #6b7280;
     font-size: 12px;
 }
+.sozlesme-durum.var {
+    background: #1a4d2e;
+}
+.sozlesme-durum.var p {
+    color: #4caf50;
+}
 @media (max-width: 1024px) {
     .giris-container {
         grid-template-columns: 1fr;
@@ -230,7 +326,16 @@
 <div class="giris-header">
     <h2>📋 Giriş / Müşteri Kaydı</h2>
     <div class="giris-buttons">
-        <button onclick="location.href='{{ url_for('giris.index') }}'">↺ Yenile</button>
+        <button onclick="yeniMusteri()" style="background: #4caf50;">➕ Yeni Müşteri</button>
+        <button onclick="location.reload()">↺ Yenile</button>
+    </div>
+</div>
+
+<!-- Tamamlanma Çubuğu -->
+<div class="completion-bar">
+    <label>Tamamlanma:</label>
+    <div class="progress-bar">
+        <div class="progress-fill" id="completion-fill">0%</div>
     </div>
 </div>
 
@@ -250,8 +355,7 @@
             </div>
         </div>
     </div>
-    
-    <!-- Sağ: Müşteri Formu -->
+<!-- Sağ: Müşteri Formu -->
     <div class="musteri-form">
         <h3>Müşteri Ekle / Güncelle</h3>
         
@@ -259,6 +363,7 @@
         <div class="tabs">
             <button class="tab active" onclick="switchTab(0)">Müşteri Ekle</button>
             <button class="tab" onclick="switchTab(1)">Kira Senaryo</button>
+            <button class="tab" onclick="switchTab(2)">Kira Bildirgesi</button>
         </div>
         
         <!-- Sekme 1: Müşteri Ekle -->
@@ -270,29 +375,29 @@
                 <div class="form-section">
                     <h4>Şirket Bilgileri</h4>
                     <div class="form-grid">
-                        <label>Şirket Ünvanı *</label>
-                        <input type="text" id="name" required>
+                        <label class="required">Şirket Ünvanı</label>
+                        <input type="text" id="name" required onchange="hesaplaYuzde()">
                         
-                        <label>Vergi Numarası *</label>
-                        <input type="text" id="tax_number" required>
+                        <label class="required">Vergi Numarası</label>
+                        <input type="text" id="tax_number" required onchange="hesaplaYuzde()">
                         
                         <label>Vergi Dairesi</label>
-                        <input type="text" id="vergi_dairesi">
+                        <input type="text" id="vergi_dairesi" onchange="hesaplaYuzde()">
                         
                         <label>MERSİS Numarası</label>
-                        <input type="text" id="mersis">
+                        <input type="text" id="mersis" onchange="hesaplaYuzde()">
                         
                         <label>Ticaret Sicil No</label>
-                        <input type="text" id="ticaret_sicil">
+                        <input type="text" id="ticaret_sicil" onchange="hesaplaYuzde()">
                         
                         <label>Kuruluş Tarihi</label>
-                        <input type="date" id="kurulus_tarihi">
+                        <input type="date" id="kurulus_tarihi" onchange="hesaplaYuzde()">
                         
                         <label>Faaliyet Konusu</label>
-                        <input type="text" id="faaliyet">
+                        <input type="text" id="faaliyet" onchange="hesaplaYuzde()">
                         
                         <label>NACE Kodu</label>
-                        <input type="text" id="nace">
+                        <input type="text" id="nace" onchange="hesaplaYuzde()">
                     </div>
                 </div>
                 
@@ -301,13 +406,13 @@
                     <h4>Adres</h4>
                     <div class="form-grid">
                         <label>Önceki Adres</label>
-                        <input type="text" id="onceki_adres">
+                        <input type="text" id="onceki_adres" onchange="hesaplaYuzde()">
                         
-                        <label>Şu Anki Adres *</label>
-                        <textarea id="address" required></textarea>
+                        <label class="required">Şu Anki Adres</label>
+                        <textarea id="address" required onchange="hesaplaYuzde()"></textarea>
                         
                         <label>Şube / Merkez</label>
-                        <select id="sube_merkez">
+                        <select id="sube_merkez" onchange="hesaplaYuzde()">
                             <option>Merkez</option>
                             <option>Şube</option>
                         </select>
@@ -318,14 +423,45 @@
                 <div class="form-section">
                     <h4>Yetkili Bilgileri</h4>
                     <div class="form-grid">
-                        <label>Yetkili Ad Soyad *</label>
-                        <input type="text" id="yetkili_ad" required>
+                        <label class="required">Yetkili Ad Soyad</label>
+                        <input type="text" id="yetkili_ad" required onchange="hesaplaYuzde()">
                         
-                        <label>Telefon</label>
-                        <input type="text" id="phone">
+                        <label>Yetkili T.C. Kimlik No</label>
+                        <input type="text" id="yetkili_tc" placeholder="11=TC / 12=Yab" onchange="hesaplaYuzde()">
                         
-                        <label>E-posta</label>
-                        <input type="email" id="email">
+                        <label>Yetkili Cep Telefon</label>
+                        <input type="text" id="phone" placeholder="5XX XXX XX XX" onchange="hesaplaYuzde()">
+                        
+                        <label>Yetkili Cep Tel 2</label>
+                        <input type="text" id="phone2" onchange="hesaplaYuzde()">
+                        
+                        <label>Yetkili E-posta</label>
+                        <input type="email" id="email" onchange="hesaplaYuzde()">
+                        
+                        <label>E-posta (şirket)</label>
+                        <input type="email" id="email_sirket" onchange="hesaplaYuzde()">
+                    </div>
+                </div>
+                
+                <!-- Sözleşme -->
+                <div class="form-section">
+                    <h4>Sözleşme</h4>
+                    <div class="form-grid">
+                        <label>Hizmet Türü</label>
+                        <select id="hizmet_turu" onchange="hesaplaYuzde()">
+                            <option>Sanal Ofis</option>
+                            <option>Hazır Ofis</option>
+                            <option>Paylaşımlı Ofis</option>
+                        </select>
+                        
+                        <label>Aylık Kira (₺)</label>
+                        <input type="number" step="0.01" id="aylik_kira" value="0.00" onchange="hesaplaYuzde()">
+                        
+                        <label>Sözleşme Başlangıç</label>
+                        <input type="date" id="sozlesme_baslangic" onchange="hesaplaYuzde()">
+                        
+                        <label>Sözleşme Bitiş</label>
+                        <input type="date" id="sozlesme_bitis" onchange="hesaplaYuzde()">
                     </div>
                 </div>
                 
@@ -334,27 +470,27 @@
                     <h4>Evrak ve Belgeler</h4>
                     <div class="evrak-belgeler">
                         <div class="evrak-item">
-                            <input type="checkbox" id="ev_imza_sirküleri">
+                            <input type="checkbox" id="ev_imza_sirküleri" onchange="hesaplaYuzde()">
                             <label for="ev_imza_sirküleri">İmza Sirküleri</label>
                         </div>
                         <div class="evrak-item">
-                            <input type="checkbox" id="ev_vergi_levhasi">
+                            <input type="checkbox" id="ev_vergi_levhasi" onchange="hesaplaYuzde()">
                             <label for="ev_vergi_levhasi">Vergi Levhası</label>
                         </div>
                         <div class="evrak-item">
-                            <input type="checkbox" id="ev_ticaret_sicil">
+                            <input type="checkbox" id="ev_ticaret_sicil" onchange="hesaplaYuzde()">
                             <label for="ev_ticaret_sicil">Ticaret Sicil</label>
                         </div>
                         <div class="evrak-item">
-                            <input type="checkbox" id="ev_faaliyet_belgesi">
+                            <input type="checkbox" id="ev_faaliyet_belgesi" onchange="hesaplaYuzde()">
                             <label for="ev_faaliyet_belgesi">Faaliyet Belgesi</label>
                         </div>
                         <div class="evrak-item">
-                            <input type="checkbox" id="ev_ikametgah">
+                            <input type="checkbox" id="ev_ikametgah" onchange="hesaplaYuzde()">
                             <label for="ev_ikametgah">İkametgâh</label>
                         </div>
                         <div class="evrak-item">
-                            <input type="checkbox" id="ev_kase_ornegi">
+                            <input type="checkbox" id="ev_kase_ornegi" onchange="hesaplaYuzde()">
                             <label for="ev_kase_ornegi">Kaşe Örneği</label>
                         </div>
                     </div>
@@ -364,24 +500,32 @@
                 <div class="form-section">
                     <h4>Yüklenen Dosyalar</h4>
                     <div class="dosyalar">
-                        Dosya yükleme yakında eklenecek
+                        <div class="dosya-yukle-box" onclick="document.getElementById('file-input').click()">
+                            <i class="fa fa-cloud-upload-alt"></i>
+                            <p><strong>Dosya Yükle</strong></p>
+                            <p>PNG, JPG, PDF, DOCX (Max 10MB)</p>
+                        </div>
+                        <input type="file" id="file-input" style="display:none" accept=".png,.jpg,.jpeg,.pdf,.docx" onchange="dosyaYukle()">
+                        <div class="dosya-liste" id="dosya-liste"></div>
                     </div>
                 </div>
                 
                 <!-- Notlar -->
                 <div class="form-grid">
                     <label>Notlar</label>
-                    <textarea id="notes" rows="3"></textarea>
+                    <textarea id="notes" rows="3" onchange="hesaplaYuzde()"></textarea>
                 </div>
                 
                 <!-- Sözleşme Durumu -->
-                <div class="sozlesme-durum">
+                <div class="sozlesme-durum" id="sozlesme-durum">
                     <p>Henüz sözleşme oluşturulmadı.</p>
                 </div>
                 
                 <!-- Butonlar -->
                 <div class="form-actions">
                     <button type="submit" class="btn-kaydet">💾 Kaydet</button>
+                    <button type="button" class="btn-sozlesme" onclick="sozlesmeOlustur()">📄 Sözleşme Oluştur</button>
+                    <button type="button" class="btn-yazdir" onclick="yazdir()">🖨 Yazdır</button>
                     <button type="button" class="btn-sil" onclick="sil()">🗑 Sil</button>
                     <button type="button" class="btn-temizle" onclick="temizleForm()">✖ Temizle</button>
                 </div>
@@ -389,17 +533,119 @@
         </div>
         
         <!-- Sekme 2: Kira Senaryo -->
-        <div class="tab-content" id="tab-1">
-            <p style="color: #6b7280; text-align: center; padding: 40px;">
-                Kira senaryo hesaplama özelliği yakında eklenecek
-            </p>
+<div class="tab-content" id="tab-1">
+    <div style="background: #1e3a50; padding: 15px; border-radius: 4px;">
+        <h4 style="color: #4fc3f7; margin: 0 0 15px 0;">Kira Senaryo Hesaplama</h4>
+        
+        <div class="form-grid">
+            <label>Müşteri İsmi</label>
+            <input type="text" id="senaryo_musteri_ismi" placeholder="Müşteri adı girebilirsiniz (opsiyonel)">
+
+            <label class="required">Başlangıç Kira (₺)</label>
+            <input type="number" step="0.01" id="senaryo_baslangic_kira" placeholder="Örn: 5000">
+            
+            <label class="required">Başlangıç Tarihi</label>
+            <input type="date" id="senaryo_baslangic_tarih">
+            
+            <label class="required">Kaç Yıl?</label>
+            <input type="number" id="senaryo_yil_sayisi" value="5" min="1" max="10">
+            
+
+        </div>
+        
+        <div style="margin-top: 15px; text-align: center;">
+            <button onclick="kiraSenaryo()" style="background: #00bcd4; color: white; border: none; padding: 10px 30px; border-radius: 3px; cursor: pointer; font-size: 13px; font-weight: bold;">
+                📊 Hesapla
+            </button>
+            <button onclick="senaryoTemizle()" style="background: #6b7280; color: white; border: none; padding: 10px 30px; border-radius: 3px; cursor: pointer; font-size: 13px; font-weight: bold; margin-left: 8px;">
+                ✖ Temizle
+            </button>
+            <button onclick="tufeVerileri()" style="background: #9c27b0; color: white; border: none; padding: 10px 30px; border-radius: 3px; cursor: pointer; font-size: 13px; font-weight: bold; margin-left: 8px;">
+                📊 TCMB TÜFE Verileri
+            </button>
+            <button onclick="excelIndir()" style="background: #4caf50; color: white; border: none; padding: 10px 30px; border-radius: 3px; cursor: pointer; font-size: 13px; font-weight: bold; margin-left: 8px;">
+                📥 Excel İndir
+            </button>
+        </div>
+        
+        <!-- Sonuç Tablosu -->
+        <div id="senaryo-sonuc" style="margin-top: 20px; display: none;">
+            <h4 style="color: #4fc3f7; margin: 15px 0 10px 0;">Kira Projeksiyonu</h4>
+            <div style="overflow-x: auto;">
+                <table style="width: 100%; border-collapse: collapse; background: #0f2537; border-radius: 3px;">
+                    <thead>
+                        <tr style="background: #0097a7; color: white;">
+                            <th style="padding: 8px; text-align: left; font-size: 11px;">Yıl</th>
+                            <th style="padding: 8px; text-align: right; font-size: 11px;">Aylık Kira</th>
+                            <th style="padding: 8px; text-align: right; font-size: 11px;">Yıllık Toplam</th>
+                            <th style="padding: 8px; text-align: right; font-size: 11px;">Artış %</th>
+                            <th style="padding: 8px; text-align: right; font-size: 11px;">Artış Tutar</th>
+                        </tr>
+                    </thead>
+                    <tbody id="senaryo-tablo">
+                    </tbody>
+                </table>
+            </div>
+            
+            <div style="margin-top: 15px; padding: 12px; background: #0f2537; border-radius: 3px; border-left: 3px solid #4caf50;">
+                <p style="margin: 0; color: #4caf50; font-weight: bold; font-size: 13px;">
+                    Toplam Kira Geliri (<span id="senaryo-toplam-yil"></span> Yıl): 
+                    <span id="senaryo-toplam-tutar"></span> TL
+                </p>
+            </div>
         </div>
     </div>
 </div>
 
+        <!-- Sekme 3: Kira Bildirgesi -->
+        <div class="tab-content" id="tab-2">
+            <div style="background: #1e3a50; padding: 15px; border-radius: 4px;">
+                <h4 style="color: #4fc3f7; margin: 0 0 15px 0;">Kira Bildirgesi Oluştur</h4>
+                <p style="color: #90a4ae; font-size: 12px; margin-bottom: 15px;">Müşteriyi aşağıdaki listeden seçin veya manuel yazın. Yeni kira tutarı ile bildirge PDF'i oluşturup önizleyebilir, yazdırabilir veya WhatsApp ile gönderebilirsiniz.</p>
+                <div class="form-grid">
+                    <label>Müşteri</label>
+                    <div style="grid-column: 2;">
+                        <input type="text" id="bildirge_musteri_adi" placeholder="Müşteri adını yazın veya aşağıdan seçin" style="width: 100%; margin-bottom: 6px;">
+                        <button type="button" onclick="bildirgeMusteriListeToggle()" style="background: #0f2537; color: #4fc3f7; border: 1px solid #2d4060; padding: 6px 12px; border-radius: 3px; cursor: pointer; font-size: 12px;">📋 Listeden Seç</button>
+                        <div id="bildirge_musteri_liste" style="display: none; max-height: 200px; overflow-y: auto; background: #0f2537; border: 1px solid #2d4060; border-radius: 4px; margin-top: 6px;">
+                            <div style="padding: 8px; color: #90a4ae; font-size: 11px;">Yükleniyor...</div>
+                        </div>
+                    </div>
+                    <label>Sözleşme Tarihi</label>
+                    <input type="date" id="bildirge_sozlesme_tarihi" placeholder="Sözleşme başlangıç">
+                    <label class="required">Yeni Kira Geçerlilik Tarihi</label>
+                    <input type="date" id="bildirge_gecerlilik_tarihi" required>
+                    <label class="required">Aylık Kira (KDV hariç, TL)</label>
+                    <input type="number" step="0.01" id="bildirge_kira_net" placeholder="Örn: 528">
+                    <label>KDV Oranı (%)</label>
+                    <input type="number" id="bildirge_kdv_oran" value="20" min="0" max="100" step="0.01">
+                    <label>Hizmet türü</label>
+                    <select id="bildirge_hizmet_turu" style="width: 100%;">
+                        <option value="sanal_ofis">Sanal Ofis</option>
+                        <option value="hazir_ofis">Hazır Ofis</option>
+                        <option value="paylasimli_ofis">Paylaşımlı Ofis</option>
+                        <option value="oda">Oda</option>
+                    </select>
+                </div>
+                <div style="margin-top: 15px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
+                    <button type="button" onclick="kiraBildirgesiOnizle()" style="background: #7e57c2; color: white; border: none; padding: 10px 20px; border-radius: 3px; cursor: pointer; font-size: 13px;">
+                        👁 Önizle
+                    </button>
+                    <button type="button" onclick="kiraBildirgesiYazdir()" style="background: #00bcd4; color: white; border: none; padding: 10px 20px; border-radius: 3px; cursor: pointer; font-size: 13px;">
+                        🖨 Yazdır
+                    </button>
+                    <button type="button" onclick="kiraBildirgesiWhatsApp()" style="background: #25d366; color: white; border: none; padding: 10px 20px; border-radius: 3px; cursor: pointer; font-size: 13px;">
+                        📱 WhatsApp'tan Gönder
+                    </button>
+                </div>
+            </div>
+        </div>
+   </div>
+</div>
 <script>
 let selectedId = null;
 let musteriler = [];
+let yukluDosyalar = [];
 
 // Sekme değiştirme
 function switchTab(index) {
@@ -418,6 +664,64 @@ function switchTab(index) {
             c.classList.remove('active');
         }
     });
+    // Kira Bildirgesi sekmesine geçince müşteri ve sözleşme tarihini formdan al
+    if (index === 2) {
+        const ad = document.getElementById('name');
+        const soz = document.getElementById('sozlesme_baslangic');
+        if (document.getElementById('bildirge_musteri_adi')) document.getElementById('bildirge_musteri_adi').value = ad ? ad.value : '';
+        if (document.getElementById('bildirge_sozlesme_tarihi')) document.getElementById('bildirge_sozlesme_tarihi').value = soz ? soz.value : '';
+    }
+}
+
+// Tamamlanma yüzdesini hesapla
+function hesaplaYuzde() {
+    const zorunluAlanlar = [
+        'name', 'tax_number', 'address', 'yetkili_ad'
+    ];
+    
+    const opsiyonelAlanlar = [
+        'vergi_dairesi', 'mersis', 'ticaret_sicil', 'kurulus_tarihi',
+        'faaliyet', 'nace', 'onceki_adres', 'sube_merkez',
+        'yetkili_tc', 'phone', 'phone2', 'email', 'email_sirket',
+        'hizmet_turu', 'aylik_kira', 'sozlesme_baslangic', 'sozlesme_bitis',
+        'ev_imza_sirküleri', 'ev_vergi_levhasi', 'ev_ticaret_sicil',
+        'ev_faaliyet_belgesi', 'ev_ikametgah', 'ev_kase_ornegi'
+    ];
+    
+    let doluZorunlu = 0;
+    let doluOpsiyonel = 0;
+    
+    // Zorunlu alanları kontrol et
+    zorunluAlanlar.forEach(id => {
+        const elem = document.getElementById(id);
+        if (elem && elem.value.trim() !== '') {
+            doluZorunlu++;
+        }
+    });
+    
+    // Opsiyonel alanları kontrol et
+    opsiyonelAlanlar.forEach(id => {
+        const elem = document.getElementById(id);
+        if (elem) {
+            if (elem.type === 'checkbox') {
+                if (elem.checked) doluOpsiyonel++;
+            } else if (elem.value && elem.value.trim() !== '') {
+                doluOpsiyonel++;
+            }
+        }
+    });
+    
+    // Yüzde hesapla (zorunlu %60, opsiyonel %40)
+    const zorunluYuzde = (doluZorunlu / zorunluAlanlar.length) * 60;
+    const opsiyonelYuzde = (doluOpsiyonel / opsiyonelAlanlar.length) * 40;
+    const toplamYuzde = Math.round(zorunluYuzde + opsiyonelYuzde);
+    
+    // Progress bar güncelle
+    const fill = document.getElementById('completion-fill');
+    fill.style.width = toplamYuzde + '%';
+    fill.textContent = toplamYuzde + '%';
+    
+    return toplamYuzde;
 }
 
 // Müşteri ara
@@ -468,6 +772,9 @@ function selectMusteri(id) {
     document.getElementById('email').value = musteri.email || '';
     document.getElementById('address').value = musteri.address || '';
     document.getElementById('notes').value = musteri.notes || '';
+    
+    // Yüzde hesapla
+    hesaplaYuzde();
 }
 
 // Kaydet
@@ -498,6 +805,7 @@ async function kaydet(event) {
             musteriAra();
             if (result.id) {
                 selectedId = result.id;
+                document.getElementById('musteri-id').value = result.id;
             }
         } else {
             alert(result.mesaj);
@@ -506,6 +814,91 @@ async function kaydet(event) {
     } catch (error) {
         alert('❌ Hata: ' + error.message);
     }
+}
+
+// Dosya yükle
+async function dosyaYukle() {
+    if (!selectedId) {
+        alert('Lütfen önce müşteri seçin veya kaydedin!');
+        return;
+    }
+    
+    const fileInput = document.getElementById('file-input');
+    const file = fileInput.files[0];
+    
+    if (!file) return;
+    
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    try {
+        const response = await fetch(`/giris/resim-yukle/${selectedId}`, {
+            method: 'POST',
+            body: formData
+        });
+        
+        const result = await response.json();
+        
+        if (result.ok) {
+            alert(result.mesaj);
+            yukluDosyalar.push(result.filename);
+            dosyaListesiGuncelle();
+        } else {
+            alert(result.mesaj);
+        }
+        
+    } catch (error) {
+        alert('❌ Hata: ' + error.message);
+    }
+    
+    fileInput.value = '';
+}
+
+// Dosya listesini güncelle
+function dosyaListesiGuncelle() {
+    const liste = document.getElementById('dosya-liste');
+    
+    if (yukluDosyalar.length === 0) {
+        liste.innerHTML = '';
+        return;
+    }
+    
+    liste.innerHTML = yukluDosyalar.map((dosya, index) => `
+        <div class="dosya-item">
+            <span>${dosya}</span>
+            <button onclick="dosyaSil(${index})">🗑</button>
+        </div>
+    `).join('');
+}
+
+// Dosya sil
+function dosyaSil(index) {
+    if (confirm('Bu dosyayı silmek istediğinizden emin misiniz?')) {
+        yukluDosyalar.splice(index, 1);
+        dosyaListesiGuncelle();
+    }
+}
+
+// Sözleşme oluştur
+async function sozlesmeOlustur() {
+    if (!selectedId) {
+        alert('Lütfen önce bir müşteri seçin!');
+        return;
+    }
+    const turSelect = document.getElementById('hizmet_turu');
+    const tur = turSelect ? turSelect.value : '';
+    const encoded = encodeURIComponent(tur);
+    window.open(`/giris/sozlesme-olustur/${selectedId}?tur=${encoded}`, '_blank');
+}
+
+// Yazdır
+function yazdir() {
+    if (!selectedId) {
+        alert('Lütfen önce bir müşteri seçin!');
+        return;
+    }
+    
+    window.print();
 }
 
 // Sil
@@ -547,14 +940,340 @@ function temizleForm() {
     document.getElementById('musteri-form').reset();
     document.getElementById('musteri-id').value = '';
     selectedId = null;
+    yukluDosyalar = [];
     document.querySelectorAll('.musteri-item').forEach(item => {
         item.classList.remove('selected');
     });
+    dosyaListesiGuncelle();
+    hesaplaYuzde();
+}
+// Yeni müşteri formu aç
+function yeniMusteri() {
+    temizleForm();
+    alert('Yeni müşteri formu temizlendi. Bilgileri doldurun ve Kaydet butonuna basın.');
 }
 
 // Sayfa yüklendiğinde
 document.addEventListener('DOMContentLoaded', () => {
     musteriAra();
+    hesaplaYuzde();
 });
+// Kira Senaryo Hesaplama (Basit - Her yıl aynı ay TÜFE'si)
+async function kiraSenaryo() {
+    const baslangicKira = parseFloat(document.getElementById('senaryo_baslangic_kira').value);
+    const baslangicTarih = document.getElementById('senaryo_baslangic_tarih').value;
+    const yilSayisi = parseInt(document.getElementById('senaryo_yil_sayisi').value);
+    
+    if (!baslangicKira || !baslangicTarih || !yilSayisi) {
+        alert('Lütfen tüm zorunlu alanları doldurun!');
+        return;
+    }
+    
+    try {
+        // TÜFE verilerini getir
+        const tufeResponse = await fetch('/giris/api/tufe-verileri');
+        const tufeVerileri = await tufeResponse.json();
+        
+        if (tufeVerileri.error) {
+            alert('❌ TÜFE verileri alınamadı!');
+            return;
+        }
+        
+        // Ay adından ay numarasına çevirme
+        const ayMap = {
+            'Ocak': 1, 'Şubat': 2, 'Mart': 3, 'Nisan': 4, 'Mayıs': 5, 'Haziran': 6,
+            'Temmuz': 7, 'Ağustos': 8, 'Eylül': 9, 'Ekim': 10, 'Kasım': 11, 'Aralık': 12
+        };
+        
+        // TÜFE verilerini organize et: {2022: {Mart: 68.5, ...}}
+        const tufeListe = {};
+        tufeVerileri.forEach(v => {
+            if (!tufeListe[v.yil]) tufeListe[v.yil] = {};
+            tufeListe[v.yil][v.ay] = v.oran;
+        });
+        
+        // Başlangıç tarihini parse et
+        const baslangic = new Date(baslangicTarih);
+        const baslangicYil = baslangic.getFullYear();
+        const baslangicAy = baslangic.getMonth() + 1; // 0-11 → 1-12
+        
+        // Sözleşme ayı adı
+        const sozlesmeAyAdi = Object.keys(ayMap).find(key => ayMap[key] === baslangicAy);
+        
+        // Şu anki tarih
+        const bugun = new Date();
+        const suAnkiYil = bugun.getFullYear();
+        const suAnkiAy = bugun.getMonth() + 1;
+        
+        let tablo = '';
+        let toplamYilliklar = 0;
+        let toplamArtislar = 0;
+        let mevcutKira = baslangicKira;
+        
+        for (let i = 0; i < yilSayisi; i++) {
+            const yil = baslangicYil + i;
+            
+            // Bu yılın sözleşme ayı geldi mi kontrol et
+            if (yil === suAnkiYil && suAnkiAy < baslangicAy) {
+                // Henüz sözleşme ayı gelmedi, hesaplama yapma!
+                break;
+            } else if (yil > suAnkiYil) {
+                // Gelecek yıl, hesaplama yapma!
+                break;
+            }
+            
+            const yillikToplam = mevcutKira * 12;
+            toplamYilliklar += yillikToplam;
+            
+            // İlk yıl artış yok
+            let artisOran = 0;
+            let artisTutar = 0;
+            
+            if (i > 0) {
+                let tufeOran = 0;
+                if (tufeListe[yil] && tufeListe[yil][sozlesmeAyAdi]) {
+                    tufeOran = tufeListe[yil][sozlesmeAyAdi] / 100;
+                }
+                
+                const eskiKira = mevcutKira / (1 + tufeOran);
+                artisOran = tufeOran * 100;
+                artisTutar = mevcutKira - eskiKira;
+                toplamArtislar += artisTutar;
+            }
+            
+            tablo += `
+                <tr style="border-bottom: 1px solid #2d4060;">
+                    <td style="padding: 8px; color: #e0f7fa; font-size: 11px;">${yil}</td>
+                    <td style="padding: 8px; text-align: right; color: #e0f7fa; font-size: 11px;">${mevcutKira.toLocaleString('tr-TR', {minimumFractionDigits: 2})} TL</td>
+                    <td style="padding: 8px; text-align: right; color: #4fc3f7; font-weight: bold; font-size: 11px;">${yillikToplam.toLocaleString('tr-TR', {minimumFractionDigits: 2})} TL</td>
+                    <td style="padding: 8px; text-align: right; color: #ff9800; font-size: 11px;">${artisOran.toFixed(2)}%</td>
+                    <td style="padding: 8px; text-align: right; color: #4caf50; font-size: 11px;">${artisTutar.toLocaleString('tr-TR', {minimumFractionDigits: 2})} TL</td>
+                </tr>
+            `;
+            
+            if (i < yilSayisi - 1) {
+                let tufeOran = 0;
+                if (tufeListe[yil] && tufeListe[yil][sozlesmeAyAdi]) {
+                    tufeOran = tufeListe[yil][sozlesmeAyAdi] / 100;
+                    mevcutKira = mevcutKira * (1 + tufeOran);
+                }
+            }
+        }
+        
+        // Toplam satırı
+        tablo += `
+            <tr style="background: #0097a7; font-weight: bold;">
+                <td style="padding: 8px; color: white; font-size: 11px;">TOPLAM</td>
+                <td style="padding: 8px; text-align: right; color: white; font-size: 11px;">-</td>
+                <td style="padding: 8px; text-align: right; color: white; font-size: 11px;">${toplamYilliklar.toLocaleString('tr-TR', {minimumFractionDigits: 2})} TL</td>
+                <td style="padding: 8px; text-align: right; color: white; font-size: 11px;">-</td>
+                <td style="padding: 8px; text-align: right; color: white; font-size: 11px;">${toplamArtislar.toLocaleString('tr-TR', {minimumFractionDigits: 2})} TL</td>
+            </tr>
+        `;
+        
+        document.getElementById('senaryo-tablo').innerHTML = tablo;
+        document.getElementById('senaryo-toplam-yil').textContent = yilSayisi;
+        document.getElementById('senaryo-toplam-tutar').textContent = toplamYilliklar.toLocaleString('tr-TR', {minimumFractionDigits: 2});
+        document.getElementById('senaryo-sonuc').style.display = 'block';
+        
+    } catch (error) {
+        alert('❌ Hata: ' + error.message);
+    }
+}
+// Senaryo Temizle
+function senaryoTemizle() {
+    document.getElementById('senaryo_baslangic_kira').value = '';
+    document.getElementById('senaryo_baslangic_tarih').value = '';
+    document.getElementById('senaryo_yil_sayisi').value = '5';
+    document.getElementById('senaryo_tufe').value = '65.0';
+    document.getElementById('senaryo-sonuc').style.display = 'none';
+}
+// TCMB TÜFE Verileri Göster
+async function tufeVerileri() {
+    try {
+        const response = await fetch('/giris/api/tufe-verileri');
+        const veriler = await response.json();
+        
+        if (veriler.error) {
+            alert('❌ Hata: ' + veriler.error);
+            return;
+        }
+        
+        let html = '<div style="background: #0f2537; padding: 15px; border-radius: 4px; max-height: 400px; overflow-y: auto;">';
+        html += '<h4 style="color: #4fc3f7; margin: 0 0 10px 0;">TCMB TÜFE Verileri (Son 60 Ay)</h4>';
+        html += '<table style="width: 100%; border-collapse: collapse;">';
+        html += '<thead><tr style="background: #0097a7; color: white;">';
+        html += '<th style="padding: 8px; text-align: left;">Yıl</th>';
+        html += '<th style="padding: 8px; text-align: left;">Ay</th>';
+        html += '<th style="padding: 8px; text-align: right;">TÜFE (%)</th>';
+        html += '</tr></thead><tbody>';
+        
+        veriler.forEach(v => {
+            html += `<tr style="border-bottom: 1px solid #2d4060;">
+                <td style="padding: 8px; color: #e0f7fa;">${v.yil}</td>
+                <td style="padding: 8px; color: #e0f7fa;">${v.ay}</td>
+                <td style="padding: 8px; text-align: right; color: #4fc3f7; font-weight: bold;">${v.oran.toFixed(2)}%</td>
+            </tr>`;
+        });
+        
+        html += '</tbody></table></div>';
+        
+        const modal = document.createElement('div');
+        modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 9999; display: flex; align-items: center; justify-content: center;';
+        modal.innerHTML = `
+            <div style="background: #1e3a50; padding: 20px; border-radius: 8px; max-width: 600px; width: 90%;">
+                ${html}
+                <button onclick="this.closest('div[style*=fixed]').remove()" style="margin-top: 15px; background: #6b7280; color: white; border: none; padding: 10px 30px; border-radius: 3px; cursor: pointer; width: 100%;">
+                    Kapat
+                </button>
+            </div>
+        `;
+        document.body.appendChild(modal);
+        
+    } catch (error) {
+        alert('❌ Hata: ' + error.message);
+    }
+}
+
+// Excel İndir
+async function excelIndir() {
+    const baslangicKira = document.getElementById('senaryo_baslangic_kira').value;
+    const baslangicTarih = document.getElementById('senaryo_baslangic_tarih').value;
+    const yilSayisi = document.getElementById('senaryo_yil_sayisi').value;
+    const tufeOran = 65; // Varsayılan TÜFE (Excel için)
+    
+    if (!baslangicKira || !baslangicTarih || !yilSayisi) {
+        alert('Lütfen önce hesaplama yapın!');
+        return;
+    }
+    
+    try {
+        const response = await fetch('/giris/api/kira-senaryo-excel', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                baslangic_kira: baslangicKira,
+                baslangic_tarih: baslangicTarih,
+                yil_sayisi: yilSayisi,
+                tufe_oran: tufeOran
+            })
+        });
+        
+        if (response.ok) {
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `Kira_Senaryo_${new Date().getTime()}.xlsx`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+        } else {
+            alert('❌ Excel oluşturulamadı!');
+        }
+        
+    } catch (error) {
+        alert('❌ Hata: ' + error.message);
+    }
+}
+
+// ── Kira Bildirgesi ──
+function bildirgeMusteriListeToggle() {
+    const el = document.getElementById('bildirge_musteri_liste');
+    if (el.style.display === 'none') {
+        el.style.display = 'block';
+        el.innerHTML = '<div style="padding:8px;color:#90a4ae;font-size:11px;">Yükleniyor...</div>';
+        fetch('/giris/api/musteriler')
+            .then(r => r.json())
+            .then(arr => {
+                if (!arr.length) {
+                    el.innerHTML = '<div style="padding:8px;color:#90a4ae;">Müşteri bulunamadı.</div>';
+                    return;
+                }
+                el.innerHTML = arr.map(m => '<div class="bildirge-musteri-item" style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #2d4060;" data-name="' + (m.name || '').replace(/"/g, '&quot;') + '">' + (m.name || '—') + '</div>').join('');
+                el.querySelectorAll('.bildirge-musteri-item').forEach(item => {
+                    item.onclick = function() {
+                        document.getElementById('bildirge_musteri_adi').value = this.getAttribute('data-name') || this.textContent;
+                        el.style.display = 'none';
+                    };
+                });
+            })
+            .catch(() => { el.innerHTML = '<div style="padding:8px;color:#f44336;">Yüklenemedi.</div>'; });
+    } else {
+        el.style.display = 'none';
+    }
+}
+document.addEventListener('click', function(e) {
+    const list = document.getElementById('bildirge_musteri_liste');
+    if (!list || list.style.display === 'none') return;
+    if (list.contains(e.target)) return;
+    if (e.target.id === 'bildirge_musteri_adi' || e.target.closest('button[onclick*="bildirgeMusteriListeToggle"]')) return;
+    list.style.display = 'none';
+});
+function kiraBildirgesiPayload() {
+    const gecerlilik = document.getElementById('bildirge_gecerlilik_tarihi').value;
+    const kiraNet = parseFloat((document.getElementById('bildirge_kira_net').value || '').replace(',', '.')) || 0;
+    const kdv = parseFloat((document.getElementById('bildirge_kdv_oran').value || '20').replace(',', '.')) || 20;
+    const hizmetTuru = (document.getElementById('bildirge_hizmet_turu') || {}).value || 'sanal_ofis';
+    return {
+        musteri_adi: (document.getElementById('bildirge_musteri_adi').value || '').trim() || 'Değerli Kiracımız',
+        sozlesme_tarihi: document.getElementById('bildirge_sozlesme_tarihi').value || '',
+        gecerlilik_tarihi: gecerlilik,
+        kira_net: kiraNet,
+        kdv_oran: kdv,
+        hizmet_turu: hizmetTuru
+    };
+}
+async function kiraBildirgesiPdfBlob() {
+    const payload = kiraBildirgesiPayload();
+    if (!payload.gecerlilik_tarihi) {
+        alert('Lütfen yeni kira geçerlilik tarihini giriniz.');
+        return null;
+    }
+    if (payload.kira_net <= 0) {
+        alert('Lütfen aylık kira tutarını giriniz.');
+        return null;
+    }
+    const response = await fetch('/giris/kira-bildirgesi-pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+    if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        alert(err.mesaj || 'PDF oluşturulamadı.');
+        return null;
+    }
+    return await response.blob();
+}
+async function kiraBildirgesiOnizle() {
+    const blob = await kiraBildirgesiPdfBlob();
+    if (blob) {
+        const url = URL.createObjectURL(blob);
+        window.open(url, '_blank', 'noopener');
+    }
+}
+async function kiraBildirgesiYazdir() {
+    const blob = await kiraBildirgesiPdfBlob();
+    if (blob) {
+        const url = URL.createObjectURL(blob);
+        const w = window.open(url, '_blank', 'noopener');
+        if (w) w.focus();
+    }
+}
+async function kiraBildirgesiWhatsApp() {
+    const blob = await kiraBildirgesiPdfBlob();
+    if (!blob) return;
+    const payload = kiraBildirgesiPayload();
+    const tel = (document.getElementById('phone').value || '').replace(/\D/g, '');
+    const num = tel.startsWith('0') ? '90' + tel.slice(1) : (tel ? '90' + tel : '');
+    const metin = encodeURIComponent(
+        'Sayın ' + (payload.musteri_adi || 'Kiracımız') + ',\n\n' +
+        'Kira bildirgemiz ekte yer almaktadır. İncelemenizi rica ederiz.\n\nİyi günler dileriz.\nBESTOFFICE'
+    );
+    const url = num ? `https://wa.me/${num}?text=${metin}` : `https://wa.me/?text=${metin}`;
+    window.open(url, '_blank', 'noopener');
+}
 </script>
 {% endblock %}

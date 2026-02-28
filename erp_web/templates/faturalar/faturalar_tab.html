@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Faturalar</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #0a1929;
+            color: #e0f7fa;
+            padding: 15px;
+        }
+        .filter-bar {
+            background: #1e3a50;
+            padding: 12px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .filter-bar label {
+            color: #90a4ae;
+            font-size: 13px;
+            font-weight: 600;
+        }
+        .filter-bar select,
+        .filter-bar input {
+            background: #2d4060;
+            border: 1px solid #3d5070;
+            color: #e0f7fa;
+            padding: 6px 10px;
+            border-radius: 3px;
+            font-size: 13px;
+        }
+        .filter-bar button {
+            background: #00bcd4;
+            color: white;
+            border: none;
+            padding: 6px 14px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+        }
+        .filter-bar button:hover {
+            background: #0097a7;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            margin-bottom: 15px;
+        }
+        .stat-card {
+            background: #1e3a50;
+            padding: 12px;
+            border-radius: 4px;
+            border-left: 3px solid #00bcd4;
+        }
+        .stat-card h4 {
+            color: #90a4ae;
+            font-size: 11px;
+            margin-bottom: 6px;
+            text-transform: uppercase;
+        }
+        .stat-card .value {
+            color: #4fc3f7;
+            font-size: 20px;
+            font-weight: bold;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: #1e3a50;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        thead {
+            background: #0f2537;
+        }
+        th {
+            color: #4fc3f7;
+            padding: 12px;
+            text-align: left;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        td {
+            padding: 10px 12px;
+            border-bottom: 1px solid #2d4060;
+            font-size: 13px;
+        }
+        tr:hover td {
+            background: rgba(79, 195, 247, 0.05);
+        }
+        .badge {
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        .badge-odendi {
+            background: rgba(76, 175, 80, 0.2);
+            color: #4caf50;
+        }
+        .badge-odenmedi {
+            background: rgba(244, 67, 54, 0.2);
+            color: #f44336;
+        }
+    </style>
+</head>
+<body>
+    <div class="filter-bar">
+        <label>Yıl:</label>
+        <select id="yil">
+            <option>2026</option>
+            <option>2025</option>
+            <option>2024</option>
+        </select>
+        
+        <label>Ay:</label>
+        <select id="ay">
+            <option value="">Tümü</option>
+            <option>Ocak</option>
+            <option>Şubat</option>
+            <option>Mart</option>
+        </select>
+        
+        <label>Ofis:</label>
+        <select id="ofis">
+            <option value="">Tümü</option>
+        </select>
+        
+        <button onclick="filtrele()">
+            <i class="fa fa-filter"></i> Filtrele
+        </button>
+    </div>
+    
+    <div class="stats">
+        <div class="stat-card">
+            <h4>Toplam Tutar</h4>
+            <div class="value">{{ toplam_tutar|default(0)|round(2) }} TL</div>
+        </div>
+        <div class="stat-card">
+            <h4>Ödenen</h4>
+            <div class="value" style="color: #4caf50;">{{ toplam_odenen|default(0)|round(2) }} TL</div>
+        </div>
+        <div class="stat-card">
+            <h4>Kalan</h4>
+            <div class="value" style="color: #f44336;">{{ toplam_kalan|default(0)|round(2) }} TL</div>
+        </div>
+    </div>
+    
+    <table>
+        <thead>
+            <tr>
+                <th>Fatura No</th>
+                <th>Müşteri</th>
+                <th>Ofis</th>
+                <th>Tutar</th>
+                <th>Durum</th>
+                <th>İşlem</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% if faturalar %}
+                {% for f in faturalar %}
+                <tr>
+                    <td>{{ f.fatura_no }}</td>
+                    <td>{{ f.musteri_adi }}</td>
+                    <td>{{ f.ofis_kodu }}</td>
+                    <td>{{ f.toplam|round(2) }} TL</td>
+                    <td>
+                        <span class="badge badge-{{ 'odendi' if f.durum == 'odendi' else 'odenmedi' }}">
+                            {{ f.durum }}
+                        </span>
+                    </td>
+                    <td>
+                        <button style="background: #4fc3f7; color: white; border: none; padding: 4px 10px; border-radius: 3px; cursor: pointer; font-size: 11px;">
+                            <i class="fa fa-eye"></i>
+                        </button>
+                    </td>
+                </tr>
+                {% endfor %}
+            {% else %}
+                <tr>
+                    <td colspan="6" style="text-align: center; color: #90a4ae; padding: 30px;">
+                        Fatura bulunamadı
+                    </td>
+                </tr>
+            {% endif %}
+        </tbody>
+    </table>
+    
+    <script>
+    function filtrele() {
+        const yil = document.getElementById('yil').value;
+        const ay = document.getElementById('ay').value;
+        const ofis = document.getElementById('ofis').value;
+        
+        let url = '/faturalar/faturalar?yil=' + yil;
+        if (ay) url += '&ay=' + encodeURIComponent(ay);
+        if (ofis) url += '&ofis=' + encodeURIComponent(ofis);
+        
+        window.location.href = url;
+    }
+    </script>
+</body>
+</html>

@@ -30,9 +30,16 @@
     cursor: pointer;
     font-size: 13px;
     font-weight: bold;
+    transition: background 0.2s;
 }
 .tufe-buttons button:hover {
     background: #0097a7;
+}
+.tufe-buttons button.danger {
+    background: #546e7a;
+}
+.tufe-buttons button.danger:hover {
+    background: #37474f;
 }
 .yil-selector {
     background: #1e3a50;
@@ -59,51 +66,75 @@
     text-align: center;
     font-weight: bold;
 }
+.yil-selector button {
+    background: #00bcd4;
+    color: white;
+    border: none;
+    padding: 6px 14px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: bold;
+}
 .aylar-grid {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 12px;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 8px;
 }
 .ay-kart {
     background: #1e3a50;
-    padding: 16px;
-    border-radius: 6px;
-    border: 2px solid #2d4060;
+    padding: 10px;
+    border-radius: 3px;
+    border: 1px solid #2d4060;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    transition: all 0.2s;
+}
+.ay-kart:hover {
+    border-color: #00bcd4;
 }
 .ay-kart h3 {
-    color: #4fc3f7;
-    font-size: 14px;
-    margin: 0 0 12px 0;
-    text-align: center;
-    font-weight: bold;
-}
-.ay-kart .input-group {
-    margin-bottom: 8px;
-}
-.ay-kart .input-group label {
-    display: block;
     color: #90a4ae;
-    font-size: 11px;
-    margin-bottom: 4px;
+    font-size: 10px;
+    margin: 0 0 6px 0;
+    text-align: center;
+    font-weight: 600;
+    text-transform: uppercase;
 }
-.ay-kart .input-group input {
+.ay-kart input {
     width: 100%;
     background: #2d4060;
     border: 1px solid #3d5070;
-    color: #e0f7fa;
-    padding: 8px 10px;
+    color: #00bcd4;
+    padding: 4px 6px;
     border-radius: 3px;
     font-size: 14px;
     text-align: center;
     font-weight: bold;
+    font-family: 'Courier New', monospace;
+}
+.ay-kart input:focus {
+    border-color: #00bcd4;
+    outline: none;
 }
 .ay-kart.veri-var {
-    background: #1a4d2e;
-    border-color: #27ae60;
+    background: #1a3a4a;
+    border-color: #0097a7;
 }
 .ay-kart.veri-yok {
-    background: #3d2d1e;
-    border-color: #f39c12;
+    background: #1e3a50;
+    border-color: #37474f;
+}
+@media (max-width: 1024px) {
+    .aylar-grid {
+        grid-template-columns: repeat(4, 1fr);
+    }
+}
+@media (max-width: 768px) {
+    .aylar-grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
 }
 </style>
 
@@ -112,56 +143,95 @@
     <div class="tufe-buttons">
         <button onclick="yukle()">↺ Yükle</button>
         <button onclick="kaydet()">💾 Kaydet</button>
-        <button onclick="sil()">🗑 Sil</button>
-        <button onclick="excelAktar()">📊 Excel'den Aktar</button>
-        <button onclick="tcmbCek()" style="background: #e74c3c;">🌐 TCMB'den Çek</button>
+        <button onclick="sil()" class="danger">🗑 Sil</button>
+        <button onclick="tcmbCek()">🌐 TCMB'den Çek</button>
     </div>
 </div>
 
 <!-- Yıl Seçici -->
-<div class="yil-selector">
-    <label>Yıl:</label>
-    <input type="number" value="2026" id="tufe-yil" min="2000" max="2100">
-    <button style="background: #00bcd4; color: white; border: none; padding: 6px 12px; border-radius: 3px; cursor: pointer;" onclick="yilDegistir()">
-        ▶ Göster
-    </button>
-</div>
-
-<!-- Aylar Grid -->
-<div class="aylar-grid">
-    {% set aylar = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'] %}
-    
-    {% for ay in aylar %}
-    <div class="ay-kart {% if loop.index <= 2 %}veri-var{% else %}veri-yok{% endif %}">
-        <h3>{{ ay }} (%)</h3>
-        <div class="input-group">
-            <input type="text" placeholder="—" value="{% if loop.index == 1 %}30.65{% elif loop.index == 2 %}33.98{% endif %}" id="ay-{{ loop.index }}">
-        </div>
+<form id="tufe-form" method="post" action="{{ url_for('tufe.kaydet') }}">
+    <div class="yil-selector">
+        <label>Yıl:</label>
+        <input type="number" name="yil" value="{{ yil }}" id="tufe-yil" min="2000" max="2100">
+        <button type="button" onclick="yilDegistir()">▶ Göster</button>
     </div>
-    {% endfor %}
-</div>
+
+    <!-- Aylar Grid (6 sütun x 2 satır) -->
+    <div class="aylar-grid">
+        {% for ay in aylar %}
+        {% set oran = data.get(ay) %}
+        <div class="ay-kart {% if oran is not none %}veri-var{% else %}veri-yok{% endif %}">
+            <h3>{{ ay }}</h3>
+            <input type="text"
+                   name="ay_{{ loop.index }}"
+                   id="ay_{{ loop.index }}"
+                   placeholder="—"
+                   value="{% if oran is not none %}{{ '%.2f'|format(oran) }}{% endif %}">
+        </div>
+        {% endfor %}
+    </div>
+</form>
 
 <script>
-function yukle() {
-    alert('TÜFE verileri yükleniyor...');
-}
-function kaydet() {
-    alert('TÜFE verileri kaydediliyor...');
-}
-function sil() {
-    if(confirm('Seçili yılın tüm verileri silinecek. Emin misiniz?')) {
-        alert('Veriler silindi!');
-    }
-}
-function excelAktar() {
-    alert('Excel aktarma özelliği yakında!');
-}
-function tcmbCek() {
-    alert('TCMB\'den otomatik veri çekiliyor...');
-}
+const TUFE_INDEX_URL = "{{ url_for('tufe.index') }}";
+const TUFE_KAYDET_URL = "{{ url_for('tufe.kaydet') }}";
+const TUFE_SIL_URL = "{{ url_for('tufe.sil') }}";
+const TUFE_TCMB_URL = "{{ url_for('tufe.tcmb_cek') }}";
+
 function yilDegistir() {
     const yil = document.getElementById('tufe-yil').value;
-    alert('Yıl ' + yil + ' için veriler yükleniyor...');
+    window.location.href = TUFE_INDEX_URL + "?yil=" + encodeURIComponent(yil);
+}
+
+function yukle() {
+    yilDegistir();
+}
+
+function kaydet() {
+    document.getElementById('tufe-form').submit();
+}
+
+async function tcmbCek() {
+    if (!confirm('TCMB\'den güncel verileri çekmek istiyor musunuz?')) return;
+    
+    try {
+        const res = await fetch(TUFE_TCMB_URL);
+        const j = await res.json();
+        
+        if (j.ok) {
+            alert("✅ TCMB verileri güncellendi: " + (j.guncellenen || 0) + " satır.");
+            yilDegistir();
+        } else {
+            alert("❌ Hata: " + (j.hata || "TCMB verileri çekilemedi."));
+        }
+    } catch (e) {
+        alert("❌ Bağlantı hatası: " + e.message);
+    }
+}
+
+async function sil() {
+    const yil = document.getElementById('tufe-yil').value;
+    if (!confirm(yil + " yılı verilerini silmek istiyor musunuz?")) return;
+    
+    const fd = new FormData();
+    fd.append("yil", yil);
+    
+    // Değer girilmiş ayları sil
+    const aylar = {{ aylar|tojson }};
+    for (let i = 1; i <= 12; i++) {
+        const inp = document.getElementById("ay_" + i);
+        if (inp && inp.value.trim()) {
+            fd.append("aylar", aylar[i-1]);
+        }
+    }
+    
+    try {
+        await fetch(TUFE_SIL_URL, { method: "POST", body: fd });
+        alert("✅ Veriler silindi!");
+        yilDegistir();
+    } catch (e) {
+        alert("❌ Silme hatası: " + e.message);
+    }
 }
 </script>
 {% endblock %}

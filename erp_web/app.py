@@ -27,7 +27,7 @@ login_manager.init_app(app)
 from routes.auth_routes    import bp as auth_bp
 from routes.admin_routes   import bp as admin_bp
 from routes.musteri_routes import bp as musteri_bp
-from routes.fatura_routes  import bp as fatura_bp
+from routes.faturalar_routes import bp as faturalar_bp
 from routes.kargo_routes   import bp as kargo_bp
 from routes.kira_routes    import bp as kira_bp
 from routes.tufe_routes    import bp as tufe_bp
@@ -41,7 +41,7 @@ from routes.urun_routes     import bp as urun_bp
 app.register_blueprint(auth_bp)
 app.register_blueprint(admin_bp,   url_prefix="/admin")
 app.register_blueprint(musteri_bp, url_prefix="/musteriler")
-app.register_blueprint(fatura_bp,  url_prefix="/faturalar")
+app.register_blueprint(faturalar_bp,  url_prefix="/faturalar")
 app.register_blueprint(kargo_bp,   url_prefix="/kargolar")
 app.register_blueprint(kira_bp,    url_prefix="/kira")
 app.register_blueprint(tufe_bp,    url_prefix="/tufe")

@@ -14,8 +14,9 @@ AYLAR = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran",
 def index():
     yil = int(request.args.get("yil", date.today().year))
     rows = fetch_all(
-        "SELECT month, oran FROM tufe_verileri WHERE year=%s ORDER BY month", (yil,))
-    data = {r["month"]: r["oran"] for r in rows}
+        "SELECT month, oran FROM tufe_verileri WHERE year=%s ORDER BY month", (yil,)
+    )
+    data = {r["month"]: float(r["oran"]) for r in rows}
     bugun = date.today()
     return render_template("tufe/index.html",
                            yil=yil, data=data, aylar=AYLAR,
@@ -43,7 +44,8 @@ def kaydet():
                 """INSERT INTO tufe_verileri (year, month, oran)
                    VALUES (%s,%s,%s)
                    ON CONFLICT (year,month) DO UPDATE SET oran=EXCLUDED.oran""",
-                (yil, ay_adi, oran))
+                (yil, ay_adi, oran),
+            )
             kaydedilen += 1
         except:
             pass
@@ -68,24 +70,33 @@ def tcmb_cek():
     """TCMB'den TÜFE verilerini çek ve DB'ye kaydet."""
     try:
         import urllib.request, re
-        url = ("https://www.tcmb.gov.tr/wps/wcm/connect/TR/TCMB+TR/"
-               "Main+Menu/Istatistikler/Enflasyon+Verileri/Tuketici+Fiyatlari")
-        req = urllib.request.Request(url, headers={"User-Agent":"Mozilla/5.0"})
-        html = urllib.request.urlopen(req, timeout=12).read().decode("utf-8","ignore")
+        url = (
+            "https://www.tcmb.gov.tr/wps/wcm/connect/TR/TCMB+TR/"
+            "Main+Menu/Istatistikler/Enflasyon+Verileri/Tuketici+Fiyatlari"
+        )
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        html = urllib.request.urlopen(req, timeout=12).read().decode(
+            "utf-8", "ignore"
+        )
         pattern = r"\|\s*(\d{2})-(\d{4})\s*\|\s*([\d.]+)\s*\|"
         matches = re.findall(pattern, html)
         say = 0
         bugun = date.today()
         for ay_s, yil_s, oran_s in matches:
-            ay = int(ay_s); yil = int(yil_s); oran = float(oran_s)
-            if yil > bugun.year: continue
-            if yil == bugun.year and ay > bugun.month: continue
+            ay = int(ay_s)
+            yil = int(yil_s)
+            oran = float(oran_s)
+            if yil > bugun.year:
+                continue
+            if yil == bugun.year and ay > bugun.month:
+                continue
             ay_adi = AYLAR[ay - 1]
             execute(
                 """INSERT INTO tufe_verileri (year, month, oran)
                    VALUES (%s,%s,%s)
                    ON CONFLICT (year,month) DO UPDATE SET oran=EXCLUDED.oran""",
-                (yil, ay_adi, oran))
+                (yil, ay_adi, oran),
+            )
             say += 1
         return jsonify({"ok": True, "guncellenen": say})
     except Exception as e:

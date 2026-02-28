@@ -126,7 +126,7 @@ def api_tahsilat_save():
                 fatura_id = None
 
         row = execute_returning(
-            """INSERT INTO tahsilatlar (musteri_id, fatura_id, tutar, odeme_turu, aciklama, tahsilat_tarihi)
+            """INSERT INTO tahsilatlar (customer_id, fatura_id, tutar, odeme_turu, aciklama, tahsilat_tarihi)
                VALUES (%s, %s, %s, %s, %s, %s) RETURNING id""",
             (musteri_id, fatura_id, tutar, odeme, aciklama, tarih)
         )
