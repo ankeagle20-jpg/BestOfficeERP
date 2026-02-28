@@ -3,6 +3,21 @@
 {% block page_title %}Müşteriler{% endblock %}
 
 {% block content %}
+{% if import_sonuc == 'ok' or import_sonuc == 'uyari' %}
+<div class="import-sonuc-banner {{ 'import-sonuc-ok' if import_sonuc == 'ok' else 'import-sonuc-uyari' }}" id="importSonucBanner">
+  <div class="import-sonuc-inner">
+    {% if import_sonuc == 'ok' %}
+    <span class="import-sonuc-icon">✓</span>
+    <strong>Excel aktarımı tamamlandı.</strong> {{ imported }} müşteri başarıyla içe aktarıldı.
+    {% else %}
+    <span class="import-sonuc-icon">⚠</span>
+    <strong>Excel aktarımı tamamlandı.</strong> {{ imported }} müşteri aktarıldı. {{ import_hatalar }} satırda hata oluştu.
+    {% endif %}
+  </div>
+  <button type="button" class="import-sonuc-kapat" onclick="document.getElementById('importSonucBanner').remove()" aria-label="Kapat">×</button>
+</div>
+<style>.import-sonuc-banner{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;margin:-10px -10px 16px -10px;border-radius:0 0 8px 8px;font-size:15px;}.import-sonuc-ok{background:rgba(34,197,94,0.25);border:1px solid #22c55e;color:#22c55e;}.import-sonuc-uyari{background:rgba(234,179,8,0.2);border:1px solid #eab308;color:#eab308;}.import-sonuc-inner{display:flex;align-items:center;gap:10px;}.import-sonuc-icon{font-size:22px;font-weight:bold;}.import-sonuc-kapat{background:transparent;border:none;color:inherit;font-size:24px;cursor:pointer;opacity:0.9;padding:0 6px;line-height:1;}.import-sonuc-kapat:hover{opacity:1;}</style>
+{% endif %}
 <style>
 .musteri-header {
     background: #0f2537;

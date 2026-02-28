@@ -63,6 +63,25 @@ def _mobile_dashboard_data():
     r = fetch_one("SELECT COUNT(*) as n FROM kargolar WHERE (tarih::date) = %s", (bugun,))
     bugun_kargo = (r.get("n") or 0) if r else 0
 
+    # Boş ofis sayısı
+    try:
+        r = fetch_one("SELECT COUNT(*) as n FROM offices WHERE COALESCE(status,'') = 'bos' AND COALESCE(is_active, true) = true")
+        bos_ofis_say = (r.get("n") or 0) if r else 0
+    except Exception:
+        bos_ofis_say = 0
+    # Yayında ilan sayısı (office_rentals)
+    try:
+        r = fetch_one("SELECT COUNT(*) as n FROM office_rentals WHERE COALESCE(status,'') NOT IN ('','taslak')")
+        yayinda_ilan = (r.get("n") or 0) if r else 0
+    except Exception:
+        yayinda_ilan = 0
+    # Bugün yapılan ödeme sayısı (tahsilat adedi)
+    try:
+        r = fetch_one("SELECT COUNT(*) as n FROM tahsilatlar WHERE (tahsilat_tarihi::date) = %s", (bugun,))
+        bugun_odeme_say = (r.get("n") or 0) if r else 0
+    except Exception:
+        bugun_odeme_say = 0
+
     # Kritik liste: 30+ gün geciken müşteriler (ad, toplam alacak, geciken gün)
     kritik_list = fetch_all("""
         SELECT f.musteri_id, c.name as musteri_adi, c.phone, c.office_code,
@@ -91,6 +110,9 @@ def _mobile_dashboard_data():
         "toplam_geciken": toplam_geciken,
         "kritik_say": kritik_say,
         "bugun_kargo": bugun_kargo,
+        "bos_ofis_say": bos_ofis_say,
+        "yayinda_ilan": yayinda_ilan,
+        "bugun_odeme_say": bugun_odeme_say,
         "kritik_list": kritik_list or [],
         "strip": _mobile_kritik_strip(),
     }
@@ -213,6 +235,7 @@ def _mobile_tahsilat_data():
         "bugun_list": bugun_list or [],
         "yedi_list": yedi_list or [],
         "otuz_list": otuz_list or [],
+        "otuz_count": len(otuz_list or []),
     }
 
 
@@ -283,16 +306,31 @@ def _mobile_yonetim_data():
         sozlesme_alarm = (r.get("n") or 0) if r else 0
     except Exception:
         sozlesme_alarm = 0
+    try:
+        r = fetch_one("SELECT COUNT(*) as n FROM kargolar WHERE (tarih::date) = %s", (bugun,))
+        bugun_kargo = (r.get("n") or 0) if r else 0
+    except Exception:
+        bugun_kargo = 0
     return {
         "gunluk_ciro": gunluk_ciro,
         "aylik_ciro": aylik_ciro,
         "geciken_toplam": geciken_toplam,
         "doluluk": doluluk,
         "sozlesme_alarm": sozlesme_alarm,
+        "bugun_kargo": bugun_kargo,
     }
 
 
 # ── Sayfalar ─────────────────────────────────────────────────────────────────
+
+def _bugun_tarih_gun():
+    """Türkçe tarih ve gün adı."""
+    from datetime import datetime
+    gunler = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
+    aylar = ["", "Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"]
+    b = _bugun()
+    return f"{b.day} {aylar[b.month]} {b.year}", gunler[b.weekday()]
+
 
 @bp.route("/")
 @bp.route("/dashboard")
@@ -300,16 +338,22 @@ def _mobile_yonetim_data():
 def dashboard():
     strip = _mobile_kritik_strip()
     data = _mobile_dashboard_data()
-    return render_template("mobile/dashboard.html", **data, strip=strip)
+    bugun_tarih, bugun_gun = _bugun_tarih_gun()
+    return render_template("mobile/dashboard.html", **data, strip=strip, bugun_tarih=bugun_tarih, bugun_gun=bugun_gun)
 
 
 @bp.route("/musteriler")
 @giris_gerekli
 def musteriler():
     arama = (request.args.get("q") or "").strip()
+    filtre = (request.args.get("filtre") or "tamam").strip().lower()
     liste = _mobile_musteri_list(arama)
+    if filtre == "kritik":
+        liste = [m for m in liste if m.get("risk") == "kritik"]
+    elif filtre == "bugun":
+        liste = [m for m in liste if m.get("geciken_gun", 0) <= 30 and (m.get("geciken_gun", 0) > 0 or m.get("toplam_alacak", 0) > 0)]
     strip = _mobile_kritik_strip()
-    return render_template("mobile/musteriler.html", liste=liste, arama=arama, strip=strip)
+    return render_template("mobile/musteriler.html", liste=liste, arama=arama, filtre=filtre, strip=strip)
 
 
 @bp.route("/musteriler/<int:mid>")

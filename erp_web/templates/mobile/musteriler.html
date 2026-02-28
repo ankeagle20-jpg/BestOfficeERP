@@ -1,10 +1,15 @@
 {% extends "mobile/base.html" %}
-{% block page_title %}Müşteriler{% endblock %}
 {% block search %}
 <div class="search-wrap">
-    <form method="get" action="{{ url_for('mobile.musteriler') }}">
-        <input type="search" name="q" value="{{ arama }}" placeholder="Müşteri ara..." autocomplete="off">
+    <form method="get" action="{{ url_for('mobile.musteriler') }}" id="f-musteri">
+        <input type="search" name="q" value="{{ arama }}" placeholder="Müşteri Ara..." autocomplete="off">
+        <input type="hidden" name="filtre" value="{{ filtre }}">
     </form>
+</div>
+<div class="filter-tabs">
+    <a href="{{ url_for('mobile.musteriler', q=arama, filtre='tamam') }}" class="{{ 'active' if filtre == 'tamam' else '' }}">Tamam</a>
+    <a href="{{ url_for('mobile.musteriler', q=arama, filtre='bugun') }}" class="{{ 'active' if filtre == 'bugun' else '' }}">Bugün/Yakın</a>
+    <a href="{{ url_for('mobile.musteriler', q=arama, filtre='kritik') }}" class="{{ 'active' if filtre == 'kritik' else '' }}">Kritik</a>
 </div>
 {% endblock %}
 {% block content %}
@@ -13,17 +18,17 @@
     <a href="{{ url_for('mobile.musteri_detay', mid=m.id) }}" style="flex:1; min-width:0; text-decoration:none; color:inherit;">
         <span class="risk-dot {{ m.risk }}"></span>
         <strong>{{ m.name }}</strong><br>
-        <span style="font-size:12px; color:#90a4ae;">{{ m.hizmet_turu }} · {{ m.office_code or '—' }}{% if m.geciken_gun %} · {{ m.geciken_gun }} gün{% endif %}</span>
-        {% if m.toplam_alacak > 0 %}<br><span style="color:#ef4444; font-size:12px;">₺ {{ "{:,.0f}".format(m.toplam_alacak).replace(",", " ") }}</span>{% endif %}
+        <span style="font-size:12px; color:var(--muted);">{{ m.hizmet_turu }} · {{ m.office_code or '—' }}{% if m.geciken_gun %} · {{ m.geciken_gun }} gün gecikmiş{% endif %}</span>
+        {% if m.toplam_alacak > 0 %}<br><span style="color:var(--neon-red); font-size:12px;">₺ {{ "{:,.0f}".format(m.toplam_alacak).replace(",", " ") }}</span>{% endif %}
     </a>
     <div class="swipe-actions">
-        <a href="https://wa.me/90{{ m.phone|replace(' ','')|replace('-','')|replace('(','')|replace(')','') }}" class="btn btn-green" style="padding:8px 10px; font-size:11px;"><i class="fa fa-whatsapp"></i></a>
-        <a href="/faturalar/?musteri={{ m.id }}" class="btn btn-red" style="padding:8px 10px; font-size:11px;"><i class="fa fa-wallet"></i></a>
-        <a href="/kargolar/yeni?musteri={{ m.id }}" class="btn btn-orange" style="padding:8px 10px; font-size:11px;"><i class="fa fa-box"></i></a>
+        <a href="tel:{{ m.phone|replace(' ','')|replace('-','')|replace('(','')|replace(')','') }}" class="btn btn-gray" style="padding:8px 10px; font-size:11px;"><i class="fa fa-phone"></i> Ara</a>
+        <a href="https://wa.me/90{{ m.phone|replace(' ','')|replace('-','')|replace('(','')|replace(')','') }}" class="btn btn-green" style="padding:8px 10px; font-size:11px;"><i class="fa fa-whatsapp"></i> WhatsApp</a>
+        <a href="/faturalar/?musteri={{ m.id }}" class="btn btn-green" style="padding:8px 10px; font-size:11px;"><i class="fa fa-wallet"></i> Ödeme Al</a>
     </div>
 </div>
 {% endfor %}
 {% if not liste %}
-<p style="color:#90a4ae; text-align:center; padding:24px;">Müşteri bulunamadı.</p>
+<p style="color:var(--muted); text-align:center; padding:24px;">Müşteri bulunamadı.</p>
 {% endif %}
 {% endblock %}

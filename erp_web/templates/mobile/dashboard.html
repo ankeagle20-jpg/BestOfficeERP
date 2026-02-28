@@ -1,56 +1,142 @@
 {% extends "mobile/base.html" %}
+{% block extra_css %}
+<style>
+    .welcome { margin-bottom: 14px; }
+    .welcome h1 { font-size: 20px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
+    .welcome .date { font-size: 13px; color: var(--muted); }
+    .kritik-bar { background: linear-gradient(135deg, #7f1d1d 0%, #991b1b 100%); border-radius: 12px; padding: 14px 16px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; box-shadow: 0 0 20px rgba(239,68,68,0.25); border: 1px solid rgba(239,68,68,0.4); }
+    .kritik-bar .text { color: #fff; font-size: 14px; font-weight: 600; }
+    .kritik-bar .text span { color: #fecaca; }
+    .kritik-bar .btn { background: #fff; color: var(--neon-red); padding: 10px 16px; border-radius: 8px; font-weight: 700; font-size: 13px; text-decoration: none; white-space: nowrap; }
+    .finans-scroll { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 8px; margin-bottom: 16px; -webkit-overflow-scrolling: touch; }
+    .finans-scroll::-webkit-scrollbar { height: 4px; }
+    .finans-card { min-width: 140px; border-radius: 12px; padding: 14px; border: 1px solid; }
+    .finans-card.tahsilat { background: rgba(34,197,94,0.12); border-color: rgba(34,197,94,0.4); box-shadow: 0 0 16px rgba(34,197,94,0.2); }
+    .finans-card.tahsilat .label { color: var(--muted); font-size: 11px; }
+    .finans-card.tahsilat .val { color: var(--neon-green); font-size: 18px; font-weight: 700; }
+    .finans-card.geciken { background: rgba(239,68,68,0.12); border-color: rgba(239,68,68,0.4); box-shadow: 0 0 16px rgba(239,68,68,0.2); }
+    .finans-card.geciken .label { color: var(--muted); font-size: 11px; }
+    .finans-card.geciken .val { color: var(--neon-red); font-size: 18px; font-weight: 700; }
+    .finans-card.kritik { background: rgba(249,115,22,0.12); border-color: rgba(249,115,22,0.4); box-shadow: 0 0 16px rgba(249,115,22,0.2); }
+    .finans-card.kritik .label { color: var(--muted); font-size: 11px; }
+    .finans-card.kritik .val { color: var(--neon-orange); font-size: 18px; font-weight: 700; }
+    .finans-card.kargo { background: rgba(79,195,247,0.12); border-color: rgba(79,195,247,0.4); box-shadow: 0 0 16px rgba(79,195,247,0.2); }
+    .finans-card.kargo .label { color: var(--muted); font-size: 11px; }
+    .finans-card.kargo .val { color: var(--neon-blue); font-size: 18px; font-weight: 700; }
+    .section-title { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 12px; }
+    .section-title i { color: var(--neon-yellow); }
+    .hizli-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 18px; }
+    .hizli-tile { display: flex; align-items: center; justify-content: space-between; padding: 14px; border-radius: 12px; text-decoration: none; color: var(--text); border: 1px solid var(--border); transition: all 0.2s; }
+    .hizli-tile .left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .hizli-tile .left i { font-size: 20px; flex-shrink: 0; }
+    .hizli-tile .left span { font-size: 13px; font-weight: 600; }
+    .hizli-tile .right { color: var(--muted); font-size: 14px; }
+    .hizli-tile.tile-dash { background: rgba(79,195,247,0.1); border-color: rgba(79,195,247,0.35); }
+    .hizli-tile.tile-dash .left i { color: var(--neon-blue); }
+    .hizli-tile.tile-ilan { background: rgba(34,197,94,0.1); border-color: rgba(34,197,94,0.35); }
+    .hizli-tile.tile-ilan .left i { color: var(--neon-green); }
+    .hizli-tile.tile-musteri { background: rgba(79,195,247,0.1); border-color: rgba(79,195,247,0.35); }
+    .hizli-tile.tile-musteri .left i { color: var(--neon-blue); }
+    .hizli-tile.tile-tahsilat { background: rgba(234,179,8,0.12); border-color: rgba(234,179,8,0.35); }
+    .hizli-tile.tile-tahsilat .left i { color: var(--neon-yellow); }
+    .hizli-tile.tile-operasyon { background: rgba(168,85,247,0.1); border-color: rgba(168,85,247,0.35); }
+    .hizli-tile.tile-operasyon .left i { color: var(--neon-purple); }
+    .hizli-tile.tile-yonetim { background: rgba(239,68,68,0.1); border-color: rgba(239,68,68,0.35); }
+    .hizli-tile.tile-yonetim .left i { color: var(--neon-red); }
+    .aktif-wrap { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+    .aktif-wrap .canli { font-size: 11px; color: var(--neon-green); font-weight: 600; }
+    .aktif-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 18px; }
+    .aktif-kart { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 12px; text-align: center; }
+    .aktif-kart .num { font-size: 18px; font-weight: 700; color: var(--text); }
+    .aktif-kart .lbl { font-size: 10px; color: var(--muted); margin-top: 4px; }
+    .aktif-kart i { font-size: 16px; color: var(--muted); margin-bottom: 4px; }
+    .kritik-list-title { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+    .kritik-list-title a { font-size: 12px; color: var(--neon-blue); text-decoration: none; }
+    .list-item .avatar-wrap { width: 40px; height: 40px; border-radius: 50%; background: var(--border); display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 16px; color: var(--muted); }
+    .list-item .body { flex: 1; min-width: 0; }
+    .list-item .body .name { font-weight: 700; font-size: 14px; }
+    .list-item .body .sub { font-size: 12px; color: var(--muted); }
+    .list-item .tutar { font-weight: 700; color: var(--neon-red); font-size: 14px; white-space: nowrap; }
+</style>
+{% endblock %}
 {% block content %}
-<!-- Hızlı aksiyon grid (görseldeki gibi) -->
-<div class="action-grid">
-    <a href="{{ url_for('mobile.musteriler') }}" class="action-tile"><i class="fa fa-users"></i><span>Müşteriler</span></a>
-    <a href="{{ url_for('mobile.tahsilat') }}" class="action-tile"><i class="fa fa-wallet"></i><span>Tahsilat</span></a>
-    <a href="/faturalar/" class="action-tile"><i class="fa fa-money-bill-wave"></i><span>Ödeme İşle</span></a>
-    <a href="{{ url_for('mobile.operasyon') }}" class="action-tile"><i class="fa fa-box"></i><span>Kargo / Operasyon</span></a>
-    <a href="{{ url_for('mobile.yonetim') }}" class="action-tile"><i class="fa fa-chart-line"></i><span>Raporlar</span></a>
-    <a href="{{ url_for('mobile.ilan_robotu') }}" class="action-tile"><i class="fa fa-bullhorn"></i><span>İlan Robotu</span></a>
+<div class="welcome">
+    <h1>Hoş Geldin, Sekreter 👋</h1>
+    <p class="date">{{ bugun_tarih }} — {{ bugun_gun }}</p>
 </div>
 
-<div class="card-grid" style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:16px;">
-    <div class="card">
-        <h3>Bugün Beklenen Tahsilat</h3>
-        <div style="font-size:20px; font-weight:700; color:#4fc3f7;">₺ {{ "{:,.0f}".format(bugun_tahsilat).replace(",", " ") }}</div>
+{% if strip and (strip.kritik_say or 0) > 0 %}
+<div class="kritik-bar" id="kritik">
+    <span class="text">{{ strip.kritik_say }} kritik müşteri — Toplam <span>₺ {{ "{:,.0f}".format(strip.kritik_toplam or 0).replace(",", " ") }}</span></span>
+    <a href="{{ url_for('mobile.tahsilat') }}?filtre=kritik" class="btn">Hemen Tahsilat</a>
+</div>
+{% endif %}
+
+<div class="finans-scroll">
+    <div class="finans-card tahsilat">
+        <div class="label">Bugün Tahsilat</div>
+        <div class="val">₺ {{ "{:,.0f}".format(bugun_tahsilat).replace(",", " ") }}</div>
     </div>
-    <div class="card">
-        <h3>Toplam Geciken</h3>
-        <div style="font-size:20px; font-weight:700; color:#ef4444;">₺ {{ "{:,.0f}".format(toplam_geciken).replace(",", " ") }}</div>
+    <div class="finans-card geciken">
+        <div class="label">Toplam Geciken</div>
+        <div class="val">₺ {{ "{:,.0f}".format(toplam_geciken).replace(",", " ") }}</div>
     </div>
-    <div class="card">
-        <h3>Kritik Müşteri</h3>
-        <div style="font-size:20px; font-weight:700;">{{ kritik_say }}</div>
+    <div class="finans-card kritik">
+        <div class="label">Kritik Müşteri</div>
+        <div class="val">{{ kritik_say }}</div>
     </div>
-    <div class="card">
-        <h3>Bugün Gelen Kargo</h3>
-        <div style="font-size:20px; font-weight:700;">{{ bugun_kargo }}</div>
+    <div class="finans-card kargo">
+        <div class="label">Bugün Kargo</div>
+        <div class="val">{{ bugun_kargo }}</div>
     </div>
 </div>
 
-<div class="card" id="kritik">
-    <h3>🔴 Kritik Gecikenler</h3>
+<div class="section-title"><i class="fa fa-bolt"></i> HIZLI ERİŞİM</div>
+<div class="hizli-grid">
+    <a href="{{ url_for('mobile.dashboard') }}" class="hizli-tile tile-dash"><div class="left"><i class="fa fa-th-large"></i><span>Dashboard</span></div><div class="right"><i class="fa fa-chevron-right"></i></div></a>
+    <a href="{{ url_for('mobile.ilan_robotu') }}" class="hizli-tile tile-ilan"><div class="left"><i class="fa fa-plus"></i><span>İlan Ver</span></div><div class="right"><i class="fa fa-chevron-right"></i></div></a>
+    <a href="{{ url_for('mobile.musteriler') }}" class="hizli-tile tile-musteri"><div class="left"><i class="fa fa-users"></i><span>Müşteriler</span></div><div class="right"><i class="fa fa-chevron-right"></i></div></a>
+    <a href="{{ url_for('mobile.tahsilat') }}" class="hizli-tile tile-tahsilat"><div class="left"><i class="fa fa-wallet"></i><span>Tahsilat</span></div><div class="right"><i class="fa fa-chevron-right"></i></div></a>
+    <a href="{{ url_for('mobile.operasyon') }}" class="hizli-tile tile-operasyon"><div class="left"><i class="fa fa-box"></i><span>Operasyon</span></div><div class="right"><i class="fa fa-chevron-right"></i></div></a>
+    <a href="{{ url_for('mobile.yonetim') }}" class="hizli-tile tile-yonetim"><div class="left"><i class="fa fa-chart-pie"></i><span>Yönetim</span></div><div class="right"><i class="fa fa-chevron-right"></i></div></a>
+</div>
+
+<div class="aktif-wrap">
+    <div class="section-title" style="margin-bottom:0;"><i class="fa fa-bolt"></i> AKTİF DURUM</div>
+    <span class="canli">✓ CANLI</span>
+</div>
+<div class="aktif-grid">
+    <div class="aktif-kart"><i class="fa fa-folder-open"></i><div class="num">{{ bos_ofis_say|default(0) }}</div><div class="lbl">Boş Ofis</div></div>
+    <div class="aktif-kart"><i class="fa fa-box"></i><div class="num">{{ bugun_kargo }}</div><div class="lbl">Gelen Kargo</div></div>
+    <div class="aktif-kart"><i class="fa fa-home"></i><div class="num">{{ yayinda_ilan|default(0) }}</div><div class="lbl">Yayında İlan</div></div>
+    <div class="aktif-kart"><i class="fa fa-lira-sign"></i><div class="num">{{ bugun_odeme_say|default(0) }}</div><div class="lbl">Bugün Ödeme</div></div>
+</div>
+
+<div class="card" id="kritik-list">
+    <div class="kritik-list-title">
+        <h3 style="margin:0; font-size:13px; color:var(--neon-red);">Kritik Gecikenler</h3>
+        <a href="{{ url_for('mobile.tahsilat') }}?filtre=kritik">Tüm Kritikleri Gör &gt;</a>
+    </div>
     {% if kritik_list %}
     <div style="max-height:50vh; overflow-y:auto;">
         {% for r in kritik_list %}
-        <a href="{{ url_for('mobile.musteri_detay', mid=r.musteri_id) }}" style="text-decoration:none; color:inherit;">
-            <div class="list-item kritik" style="margin-bottom:8px;">
-                <div>
-                    <strong>{{ r.musteri_adi }}</strong><br>
-                    <span style="font-size:12px; color:#90a4ae;">{{ r.office_code or '—' }} · {{ r.geciken_gun }} gün gecikme</span>
-                </div>
-                <div style="font-weight:700; color:#ef4444;">₺ {{ "{:,.0f}".format(r.toplam_alacak).replace(",", " ") }}</div>
-                <div class="swipe-actions" style="width:100%; margin-top:8px;">
+        <div class="list-item kritik" style="display:flex; align-items:flex-start; gap:10px;">
+            <div class="avatar-wrap"><i class="fa fa-building"></i></div>
+            <div class="body" style="flex:1; min-width:0;">
+                <a href="{{ url_for('mobile.musteri_detay', mid=r.musteri_id) }}" style="color:inherit; text-decoration:none;"><div class="name">{{ r.musteri_adi }}</div></a>
+                <div class="sub">{{ r.office_code or '—' }} · {{ r.geciken_gun }} gün gecikmiş</div>
+                <div class="swipe-actions" style="margin-top:8px;">
+                    <a href="tel:{{ r.phone|replace(' ','')|replace('-','')|replace('(','')|replace(')','') }}" class="btn btn-gray" style="padding:6px 10px; font-size:11px;"><i class="fa fa-phone"></i> Ara</a>
                     <a href="https://wa.me/90{{ r.phone|replace(' ','')|replace('-','')|replace('(','')|replace(')','') }}" class="btn btn-green" style="padding:6px 10px; font-size:11px;"><i class="fa fa-whatsapp"></i> WhatsApp</a>
-                    <a href="/faturalar/?musteri={{ r.musteri_id }}" class="btn btn-red" style="padding:6px 10px; font-size:11px;"><i class="fa fa-wallet"></i> Ödeme Al</a>
+                    <a href="/faturalar/?musteri={{ r.musteri_id }}" class="btn btn-green" style="padding:6px 10px; font-size:11px;"><i class="fa fa-wallet"></i> Ödeme Al</a>
                 </div>
             </div>
-        </a>
+            <div class="tutar">₺ {{ "{:,.0f}".format(r.toplam_alacak).replace(",", " ") }}</div>
+        </div>
         {% endfor %}
     </div>
     {% else %}
-    <p style="color:#90a4ae; font-size:14px;">Kritik gecikme yok.</p>
+    <p style="color:var(--muted); font-size:14px;">Kritik gecikme yok.</p>
     {% endif %}
 </div>
 {% endblock %}

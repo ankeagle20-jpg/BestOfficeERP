@@ -1,22 +1,61 @@
 {% extends "mobile/base.html" %}
-{% block page_title %}Tahsilat{% endblock %}
+{% block extra_css %}
+<style>
+    .tahsilat-filtre { display: flex; gap: 10px; margin-bottom: 14px; }
+    .tahsilat-filtre a { flex: 1; padding: 12px; border-radius: 10px; text-align: center; font-size: 13px; font-weight: 600; text-decoration: none; border: 1px solid var(--border); background: var(--card); color: var(--muted); }
+    .tahsilat-filtre a.active { background: rgba(79,195,247,0.15); border-color: var(--neon-blue); color: var(--neon-blue); }
+    .tahsilat-filtre a.kritik-btn { background: rgba(239,68,68,0.15); border-color: var(--neon-red); color: var(--neon-red); position: relative; }
+    .tahsilat-filtre a.kritik-btn .badge { position: absolute; top: -4px; right: -4px; background: var(--neon-red); color: #fff; font-size: 10px; min-width: 18px; height: 18px; border-radius: 9px; display: flex; align-items: center; justify-content: center; }
+</style>
+{% endblock %}
 {% block content %}
+<div class="tahsilat-filtre">
+    <a href="{{ url_for('mobile.tahsilat') }}" class="{{ 'active' if not request.args.get('filtre') else '' }}">Bugün Tahsilat</a>
+    <a href="{{ url_for('mobile.tahsilat', filtre='kritik') }}" class="kritik-btn {{ 'active' if request.args.get('filtre') == 'kritik' else '' }}">30+ Kritik {% if otuz_count %}<span class="badge">{{ otuz_count }}</span>{% endif %}</a>
+</div>
+
+{% if request.args.get('filtre') == 'kritik' %}
 <div class="card">
-    <h3>Bugün Tahsil Edilecekler</h3>
-    {% if bugun_list %}
-    {% for r in bugun_list %}
-    <div class="list-item dikkat" style="margin-bottom:8px;">
-        <div><strong>{{ r.musteri_adi }}</strong><br><span style="font-size:12px;">{{ r.office_code or '—' }}</span></div>
-        <div style="font-weight:700;">₺ {{ "{:,.0f}".format(r.toplam).replace(",", " ") }}</div>
-        <div class="swipe-actions" style="width:100%; margin-top:8px;">
-            <a href="{{ url_for('mobile.musteri_detay', mid=r.musteri_id) }}" class="btn btn-blue" style="padding:6px 10px; font-size:11px;"><i class="fa fa-search"></i> Ara</a>
-            <a href="https://wa.me/90{{ r.phone|replace(' ','')|replace('-','')|replace('(','')|replace(')','') }}" class="btn btn-green" style="padding:6px 10px; font-size:11px;"><i class="fa fa-whatsapp"></i></a>
-            <a href="/faturalar/?musteri={{ r.musteri_id }}" class="btn btn-red" style="padding:6px 10px; font-size:11px;"><i class="fa fa-wallet"></i> Ödeme</a>
+    <h3>30+ Kritik</h3>
+    {% if otuz_list %}
+    {% for r in otuz_list %}
+    <div class="list-item kritik" style="margin-bottom:8px;">
+        <div class="body" style="flex:1;">
+            <div class="name">{{ r.musteri_adi }}</div>
+            <div style="font-size:12px; color:var(--muted);">{{ r.office_code or '—' }} · {{ r.geciken_gun }} gün gecikme</div>
+            <div class="swipe-actions" style="margin-top:8px;">
+                <a href="tel:{{ r.phone|replace(' ','')|replace('-','')|replace('(','')|replace(')','') }}" class="btn btn-gray" style="padding:6px 10px; font-size:11px;"><i class="fa fa-phone"></i> Ara</a>
+                <a href="https://wa.me/90{{ r.phone|replace(' ','')|replace('-','')|replace('(','')|replace(')','') }}" class="btn btn-green" style="padding:6px 10px; font-size:11px;"><i class="fa fa-whatsapp"></i> WhatsApp</a>
+                <a href="/faturalar/?musteri={{ r.musteri_id }}" class="btn btn-green" style="padding:6px 10px; font-size:11px;"><i class="fa fa-wallet"></i> Ödeme Al</a>
+            </div>
         </div>
+        <div style="font-weight:700; color:var(--neon-red); white-space:nowrap;">₺ {{ "{:,.0f}".format(r.toplam).replace(",", " ") }}</div>
     </div>
     {% endfor %}
     {% else %}
-    <p style="color:#90a4ae;">Bugün vadesi gelen yok.</p>
+    <p style="color:var(--muted);">30+ kritik yok.</p>
+    {% endif %}
+</div>
+{% else %}
+<div class="card">
+    <h3>Bugün Tahsilat Beklenen</h3>
+    {% if bugun_list %}
+    {% for r in bugun_list %}
+    <div class="list-item dikkat" style="margin-bottom:8px;">
+        <div class="body" style="flex:1;">
+            <div class="name">{{ r.musteri_adi }}</div>
+            <span style="font-size:12px; color:var(--muted);">{{ r.office_code or '—' }}</span>
+            <div class="swipe-actions" style="margin-top:8px;">
+                <a href="tel:{{ r.phone|replace(' ','')|replace('-','')|replace('(','')|replace(')','') }}" class="btn btn-gray" style="padding:6px 10px; font-size:11px;"><i class="fa fa-phone"></i> Ara</a>
+                <a href="https://wa.me/90{{ r.phone|replace(' ','')|replace('-','')|replace('(','')|replace(')','') }}" class="btn btn-green" style="padding:6px 10px; font-size:11px;"><i class="fa fa-whatsapp"></i> WhatsApp</a>
+                <a href="/faturalar/?musteri={{ r.musteri_id }}" class="btn btn-green" style="padding:6px 10px; font-size:11px;"><i class="fa fa-wallet"></i> Ödeme Al</a>
+            </div>
+        </div>
+        <div style="font-weight:700;">₺ {{ "{:,.0f}".format(r.toplam).replace(",", " ") }}</div>
+    </div>
+    {% endfor %}
+    {% else %}
+    <p style="color:var(--muted);">Bugün vadesi gelen yok.</p>
     {% endif %}
 </div>
 
@@ -25,36 +64,21 @@
     {% if yedi_list %}
     {% for r in yedi_list %}
     <div class="list-item dikkat" style="margin-bottom:8px;">
-        <div><strong>{{ r.musteri_adi }}</strong><br><span style="font-size:12px;">{{ r.geciken_gun }} gün · {{ r.office_code or '—' }}</span></div>
-        <div style="font-weight:700; color:#eab308;">₺ {{ "{:,.0f}".format(r.toplam).replace(",", " ") }}</div>
-        <div class="swipe-actions" style="width:100%; margin-top:8px;">
-            <a href="{{ url_for('mobile.musteri_detay', mid=r.musteri_id) }}" class="btn btn-blue" style="padding:6px 10px; font-size:11px;">Ara</a>
-            <a href="https://wa.me/90{{ r.phone|replace(' ','')|replace('-','')|replace('(','')|replace(')','') }}" class="btn btn-green" style="padding:6px 10px; font-size:11px;">WhatsApp</a>
-            <a href="/faturalar/?musteri={{ r.musteri_id }}" class="btn btn-red" style="padding:6px 10px; font-size:11px;">Ödeme</a>
+        <div class="body" style="flex:1;">
+            <div class="name">{{ r.musteri_adi }}</div>
+            <span style="font-size:12px; color:var(--muted);">{{ r.geciken_gun }} gün · {{ r.office_code or '—' }}</span>
+            <div class="swipe-actions" style="margin-top:8px;">
+                <a href="tel:{{ r.phone|replace(' ','')|replace('-','')|replace('(','')|replace(')','') }}" class="btn btn-gray" style="padding:6px 10px; font-size:11px;">Ara</a>
+                <a href="https://wa.me/90{{ r.phone|replace(' ','')|replace('-','')|replace('(','')|replace(')','') }}" class="btn btn-green" style="padding:6px 10px; font-size:11px;">WhatsApp</a>
+                <a href="/faturalar/?musteri={{ r.musteri_id }}" class="btn btn-green" style="padding:6px 10px; font-size:11px;">Ödeme Al</a>
+            </div>
         </div>
+        <div style="font-weight:700; color:var(--neon-yellow);">₺ {{ "{:,.0f}".format(r.toplam).replace(",", " ") }}</div>
     </div>
     {% endfor %}
     {% else %}
-    <p style="color:#90a4ae;">7+ gün geciken yok.</p>
+    <p style="color:var(--muted);">7+ gün geciken yok.</p>
     {% endif %}
 </div>
-
-<div class="card">
-    <h3>30+ Kritik</h3>
-    {% if otuz_list %}
-    {% for r in otuz_list %}
-    <div class="list-item kritik" style="margin-bottom:8px;">
-        <div><strong>{{ r.musteri_adi }}</strong><br><span style="font-size:12px;">{{ r.geciken_gun }} gün gecikme</span></div>
-        <div style="font-weight:700; color:#ef4444;">₺ {{ "{:,.0f}".format(r.toplam).replace(",", " ") }}</div>
-        <div class="swipe-actions" style="width:100%; margin-top:8px;">
-            <a href="{{ url_for('mobile.musteri_detay', mid=r.musteri_id) }}" class="btn btn-blue" style="padding:6px 10px; font-size:11px;">Ara</a>
-            <a href="https://wa.me/90{{ r.phone|replace(' ','')|replace('-','')|replace('(','')|replace(')','') }}" class="btn btn-green" style="padding:6px 10px; font-size:11px;">WhatsApp</a>
-            <a href="/faturalar/?musteri={{ r.musteri_id }}" class="btn btn-red" style="padding:6px 10px; font-size:11px;">Ödeme</a>
-        </div>
-    </div>
-    {% endfor %}
-    {% else %}
-    <p style="color:#90a4ae;">30+ kritik yok.</p>
-    {% endif %}
-</div>
+{% endif %}
 {% endblock %}

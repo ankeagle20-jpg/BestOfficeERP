@@ -48,9 +48,18 @@ def index():
     else:
         musteriler = fetch_all("SELECT * FROM customers ORDER BY name")
     
-    return render_template("musteriler/index.html",
-                           faturalar=musteriler, arama=arama,
-                           tum_yillar_odenmis=tum_yillar_odenmis)
+    import_sonuc = request.args.get("import_sonuc")
+    imported = request.args.get("imported", type=int)
+    import_hatalar = request.args.get("import_hatalar", type=int) or 0
+    return render_template(
+        "musteriler/index.html",
+        faturalar=musteriler,
+        arama=arama,
+        tum_yillar_odenmis=tum_yillar_odenmis,
+        import_sonuc=import_sonuc,
+        imported=imported or 0,
+        import_hatalar=import_hatalar,
+    )
 
 
 def _komuta_merkezi_data(mid):
@@ -518,65 +527,124 @@ def ekle():
 def import_excel():
     """Excel'den müşteri içeri aktar"""
     if request.method == "POST":
-        f = request.files.get("file")
-        if not f:
-            flash("Lütfen bir Excel dosyası seçin.", "warning")
-            return redirect(request.url)
         try:
-            df = pd.read_excel(BytesIO(f.read()), engine="openpyxl", header=0)
+            f = request.files.get("file")
+            if not f or not f.filename:
+                flash("Lütfen bir Excel dosyası seçin.", "warning")
+                return redirect(request.url)
+            raw = f.read()
+            if not raw:
+                flash("Dosya boş veya okunamadı.", "danger")
+                return redirect(request.url)
+            try:
+                fn = (f.filename or "").lower()
+                if fn.endswith(".xls") and not fn.endswith(".xlsx"):
+                    try:
+                        df = pd.read_excel(BytesIO(raw), header=0)
+                    except Exception:
+                        flash("Eski .xls formatı desteklenmiyor. Dosyayı .xlsx olarak kaydedip tekrar deneyin.", "danger")
+                        return redirect(request.url)
+                else:
+                    df = pd.read_excel(BytesIO(raw), engine="openpyxl", header=0)
+            except ImportError:
+                flash("Excel desteği için openpyxl yüklü değil. Kurulum: pip install openpyxl", "danger")
+                return redirect(request.url)
+            except Exception as e:
+                flash(f"Excel okunamadı: {e}", "danger")
+                return redirect(request.url)
+
+            if df.empty or len(df) == 0:
+                flash("Excel dosyasında veri satırı yok.", "warning")
+                return redirect(request.url)
+
+            cols = []
+            for i, c in enumerate(df.columns):
+                s = (str(c).strip().lower() if c is not None else "") or f"unnamed_{i}"
+                cols.append(s)
+            df.columns = cols
+
+            def find_col(keys):
+                for k in keys:
+                    for col in df.columns:
+                        if k in col:
+                            return col
+                return None
+
+            name_col = find_col([
+                "ad", "name", "ünvan", "unvan", "firma", "müşteri", "musteri", "adı", "adi",
+                "cari", "baslik", "başlık", "musteri adi", "müşteri adı"
+            ])
+            email_col = find_col(["email", "e-posta", "eposta", "mail"])
+            phone_col = find_col(["telefon", "phone", "tel", "gsm", "cep"])
+            addr_col = find_col(["adres", "address"])
+            tax_col = find_col(["vergi", "tax", "vkn", "tckn", "vergi no", "vergino"])
+
+            if not name_col:
+                flash("Excel'de müşteri adı sütunu bulunamadı. Sütunlardan biri şunlardan biri olmalı: Ad, Unvan, Firma, Name, Müşteri Adı.", "danger")
+                return redirect(request.url)
+
+            def _cell(row, col):
+                if not col:
+                    return None
+                v = row.get(col)
+                if v is None:
+                    return None
+                try:
+                    if pd.isna(v):
+                        return None
+                except (TypeError, ValueError):
+                    pass
+                s = str(v).strip()
+                if not s or s.lower() == "nan":
+                    return None
+                return s
+
+            inserted = 0
+            errors = []
+            for idx, row in df.iterrows():
+                name = _cell(row, name_col)
+                if not name:
+                    continue
+                email = _cell(row, email_col)
+                phone = _cell(row, phone_col)
+                address = _cell(row, addr_col)
+                tax = _cell(row, tax_col)
+
+                try:
+                    if tax:
+                        existing = fetch_one("SELECT id FROM customers WHERE tax_number = %s", (tax,))
+                    else:
+                        existing = None
+
+                    if existing:
+                        execute(
+                            "UPDATE customers SET name=%s,email=%s,phone=%s,address=%s WHERE id=%s",
+                            (name, email or None, phone or None, address or None, existing["id"])
+                        )
+                    else:
+                        execute(
+                            "INSERT INTO customers (name, email, phone, address, tax_number) VALUES (%s,%s,%s,%s,%s)",
+                            (name, email or None, phone or None, address or None, tax or None)
+                        )
+                    inserted += 1
+                except Exception as e:
+                    errors.append(f"Satır {idx + 2}: {name[:30]} — {e}")
+
+            if errors:
+                flash(
+                    f"Excel aktarımı tamamlandı: {inserted} müşteri aktarıldı. {len(errors)} satırda hata oluştu. Detay: " + "; ".join(errors[:3]) + ("..." if len(errors) > 3 else ""),
+                    "warning",
+                )
+                return redirect(
+                    url_for("musteriler.index", import_sonuc="uyari", imported=inserted, import_hatalar=len(errors))
+                )
+            flash(f"Excel aktarımı başarılı: {inserted} müşteri içe aktarıldı.", "success")
+            return redirect(
+                url_for("musteriler.index", import_sonuc="ok", imported=inserted, import_hatalar=0)
+            )
         except Exception as e:
-            flash(f"Excel okunamadı: {e}", "danger")
+            flash(f"Aktarım sırasında hata oluştu: {e}", "danger")
             return redirect(request.url)
-
-        # normalize columns
-        df.columns = [str(c).strip().lower() for c in df.columns]
-        def find_col(keys):
-            for k in keys:
-                for col in df.columns:
-                    if k in col:
-                        return col
-            return None
-
-        name_col = find_col(["ad", "name", "ünvan", "unvan"])
-        email_col = find_col(["email", "e-posta", "eposta", "mail"])
-        phone_col = find_col(["telefon", "phone", "tel"])
-        addr_col = find_col(["adres", "address"])
-        tax_col = find_col(["vergi", "tax", "vkn", "tckn"])
-
-        if not name_col:
-            flash("Excel'de müşteri adı sütunu bulunamadı.", "danger")
-            return redirect(request.url)
-
-        inserted = 0
-        for _, row in df.iterrows():
-            name = str(row.get(name_col) or "").strip()
-            if not name:
-                continue
-            email = str(row.get(email_col) or "").strip() if email_col else None
-            phone = str(row.get(phone_col) or "").strip() if phone_col else None
-            address = str(row.get(addr_col) or "").strip() if addr_col else None
-            tax = str(row.get(tax_col) or "").strip() if tax_col else None
-
-            # upsert by tax_number if available, else insert new
-            if tax:
-                existing = fetch_one("SELECT id FROM customers WHERE tax_number = %s", (tax,))
-            else:
-                existing = None
-
-            if existing:
-                execute(
-                    "UPDATE customers SET name=%s,email=%s,phone=%s,address=%s WHERE id=%s",
-                    (name, email, phone, address, existing["id"])
-                )
-            else:
-                execute(
-                    "INSERT INTO customers (name, email, phone, address, tax_number) VALUES (%s,%s,%s,%s,%s)",
-                    (name, email, phone, address, tax)
-                )
-            inserted += 1
-
-        flash(f"Excel'den {inserted} müşteri işlendi.", "success")
-        return redirect(url_for("musteriler.index"))
 
     return render_template("musteriler/import.html")
 

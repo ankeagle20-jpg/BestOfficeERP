@@ -1,8 +1,14 @@
 {% extends "mobile/base.html" %}
-{% block page_title %}Operasyon{% endblock %}
+{% block extra_css %}
+<style>
+    .section-title { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+    .section-title i { color: var(--neon-yellow); }
+</style>
+{% endblock %}
 {% block content %}
 <a href="/kargolar/yeni" class="btn btn-orange btn-block" style="margin-bottom:14px;"><i class="fa fa-plus"></i> Kargo Kaydı Ekle</a>
 
+<div class="section-title"><i class="fa fa-bolt"></i> Gelen Kargo</div>
 <div class="card">
     <h3>Bugün Gelen Kargolar</h3>
     {% if kargolar_bugun %}
@@ -17,6 +23,7 @@
     {% endif %}
 </div>
 
+<div class="section-title"><i class="fa fa-bolt"></i> Teslim Bekleyenler</div>
 <div class="card">
     <h3>Teslim Bekleyenler</h3>
     {% if teslim_bekleyen %}
@@ -31,6 +38,7 @@
     {% endif %}
 </div>
 
+<div class="section-title"><i class="fa fa-bolt"></i> Boş Ofisler</div>
 <div class="card">
     <h3>Boş Ofisler</h3>
     {% if bos_ofisler %}
