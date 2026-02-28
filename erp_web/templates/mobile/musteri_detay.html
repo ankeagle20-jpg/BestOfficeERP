@@ -1,0 +1,84 @@
+{% extends "mobile/base.html" %}
+{% block page_title %}{{ musteri.name }}{% endblock %}
+{% block header %}
+<div class="page-header" style="justify-content:space-between;">
+    <a href="{{ url_for('mobile.musteriler') }}" style="color:#4fc3f7; text-decoration:none; font-size:14px;"><i class="fa fa-arrow-left"></i> Liste</a>
+    <h1 style="font-size:16px;">{{ musteri.name or '—' }}</h1>
+    <span style="width:60px;"></span>
+</div>
+{% endblock %}
+{% block content %}
+<div class="tabs">
+    <a href="#odeme" class="active" data-tab="odeme">Ödeme Takvimi</a>
+    <a href="#kargo" data-tab="kargo">Kargo</a>
+    <a href="#dosya" data-tab="dosya">Dosyalar</a>
+    <a href="#sozlesme" data-tab="sozlesme">Sözleşme</a>
+</div>
+
+<div id="panel-odeme" class="tab-panel">
+    <div class="card">
+        <h3>Toplam Alacak</h3>
+        <div style="font-size:20px; font-weight:700; color:#ef4444;">₺ {{ "{:,.2f}".format(toplam_borc).replace(",", " ") }}</div>
+    </div>
+    <div class="card">
+        <h3>12 Ay</h3>
+        <div style="display:grid; grid-template-columns: repeat(6, 1fr); gap:6px;">
+            {% for a in aylik_detay %}
+            <div style="padding:8px; text-align:center; border-radius:6px; font-size:11px; background:{% if a.durum == 'odendi' %}#22c55e{% elif a.durum == 'gecikti' %}#ef4444{% elif a.durum == 'bugun_yakin' %}#eab308{% else %}#546e7a{% endif %}; color:#fff;">
+                {{ a.ay_adi[:2] }}<br>{{ "%.0f"|format(a.tutar) }}₺
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    <a href="/faturalar/?musteri={{ musteri.id }}" class="btn btn-red btn-block" style="margin-top:10px;"><i class="fa fa-wallet"></i> Ödeme İşle</a>
+</div>
+
+<div id="panel-kargo" class="tab-panel" style="display:none;">
+    <div class="card">
+        {% if kargolar %}
+        {% for k in kargolar %}
+        <div class="list-item" style="margin-bottom:8px;">
+            <div><strong>{{ k.tarih }}</strong> {{ k.barkod_takip }}</div>
+            <div style="font-size:12px; color:#90a4ae;">{{ k.teslim_durum }}{% if k.saat %} — {{ k.saat }}{% endif %}</div>
+        </div>
+        {% endfor %}
+        {% else %}
+        <p style="color:#90a4ae;">Kargo kaydı yok.</p>
+        {% endif %}
+        <a href="/kargolar/yeni?musteri={{ musteri.id }}" class="btn btn-orange btn-block" style="margin-top:10px;"><i class="fa fa-box"></i> Kargo Ekle</a>
+    </div>
+</div>
+
+<div id="panel-dosya" class="tab-panel" style="display:none;">
+    <div class="card">
+        <a href="/giris/?mid={{ musteri.id }}" class="btn btn-blue btn-block"><i class="fa fa-folder"></i> Dosyalar / Giriş</a>
+    </div>
+</div>
+
+<div id="panel-sozlesme" class="tab-panel" style="display:none;">
+    <div class="card">
+        <h3>Sözleşme Bitiş</h3>
+        <p style="font-size:18px; font-weight:700;">{{ sozlesme_bitis_str }}{% if kalan_gun is not none %} — {{ kalan_gun }} gün{% endif %}</p>
+        <p style="font-size:12px; color:#90a4ae;">TÜFE: %{{ "%.0f"|format(tufe_oran) }}{% if artis_sonrasi_kira %} · Artış sonrası: ₺ {{ "{:,.0f}".format(artis_sonrasi_kira).replace(",", " ") }}{% endif %}</p>
+        <a href="/giris/?mid={{ musteri.id }}" class="btn btn-blue btn-block" style="margin-top:10px;">Yenileme</a>
+    </div>
+</div>
+
+<script>
+(function(){
+    var tabs = document.querySelectorAll('.tabs a');
+    var panels = document.querySelectorAll('.tab-panel');
+    tabs.forEach(function(t){
+        t.addEventListener('click', function(e){
+            e.preventDefault();
+            var id = this.getAttribute('data-tab');
+            tabs.forEach(function(x){ x.classList.remove('active'); });
+            panels.forEach(function(p){ p.style.display = 'none'; });
+            this.classList.add('active');
+            var panel = document.getElementById('panel-' + id);
+            if(panel) panel.style.display = 'block';
+        });
+    });
+})();
+</script>
+{% endblock %}

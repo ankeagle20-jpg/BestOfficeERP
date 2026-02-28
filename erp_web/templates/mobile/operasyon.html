@@ -1,0 +1,46 @@
+{% extends "mobile/base.html" %}
+{% block page_title %}Operasyon{% endblock %}
+{% block content %}
+<a href="/kargolar/yeni" class="btn btn-orange btn-block" style="margin-bottom:14px;"><i class="fa fa-plus"></i> Kargo Kaydı Ekle</a>
+
+<div class="card">
+    <h3>Bugün Gelen Kargolar</h3>
+    {% if kargolar_bugun %}
+    {% for k in kargolar_bugun %}
+    <div class="list-item" style="margin-bottom:8px;">
+        <div><strong>{{ k.musteri_adi or '—' }}</strong><br><span style="font-size:12px;">{{ k.takip_no or '—' }}</span></div>
+        <div style="font-size:12px;">{{ 'Teslim' if k.teslim_alan else 'Bekliyor' }}</div>
+    </div>
+    {% endfor %}
+    {% else %}
+    <p style="color:#90a4ae;">Bugün kargo yok.</p>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h3>Teslim Bekleyenler</h3>
+    {% if teslim_bekleyen %}
+    {% for k in teslim_bekleyen %}
+    <div class="list-item dikkat" style="margin-bottom:8px;">
+        <div><strong>{{ k.musteri_adi or '—' }}</strong><br><span style="font-size:12px;">{{ k.takip_no or '—' }} · {{ k.tarih }}</span></div>
+        <a href="/kargolar/{{ k.id }}" class="btn btn-green" style="padding:6px 10px; font-size:11px;">Teslim Al</a>
+    </div>
+    {% endfor %}
+    {% else %}
+    <p style="color:#90a4ae;">Teslim bekleyen yok.</p>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h3>Boş Ofisler</h3>
+    {% if bos_ofisler %}
+    {% for o in bos_ofisler %}
+    <div class="list-item stabil" style="margin-bottom:6px;">
+        <strong>{{ o.code }}</strong> — {{ o.type or '—' }}
+    </div>
+    {% endfor %}
+    {% else %}
+    <p style="color:#90a4ae;">Boş ofis yok.</p>
+    {% endif %}
+</div>
+{% endblock %}

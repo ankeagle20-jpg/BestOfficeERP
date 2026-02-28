@@ -236,23 +236,23 @@
         </div>
         
         <nav class="nav">
+            <a href="/dashboard/" class="{% if request.path.startswith('/dashboard') %}active{% endif %}">
+                <i class="fa fa-tachometer-alt"></i> Dashboard
+            </a>
             <a href="/musteriler/" class="{% if request.path.startswith('/musteriler') %}active{% endif %}">
                 <i class="fa fa-users"></i> Müşteriler
             </a>
-            <a href="/giris/" class="{% if request.path.startswith('/giris') %}active{% endif %}">
-                <i class="fa fa-user-plus"></i> Giriş
+            <a href="/faturalar/" class="{% if request.path.startswith('/faturalar') %}active{% endif %}">
+                <i class="fa fa-chart-line"></i> Finans
             </a>
             <a href="/ofisler/" class="{% if request.path.startswith('/ofisler') %}active{% endif %}">
                 <i class="fa fa-building"></i> Ofisler
             </a>
-            <a href="/personel/" class="{% if request.path.startswith('/personel') %}active{% endif %}">
-                <i class="fa fa-user-tie"></i> Personel
-            </a>
             <a href="/urunler/" class="{% if request.path.startswith('/urunler') %}active{% endif %}">
                 <i class="fa fa-box"></i> Ürünler
             </a>
-            <a href="/faturalar/" class="{% if request.path.startswith('/faturalar') %}active{% endif %}">
-                <i class="fa fa-chart-line"></i> Finans
+            <a href="/kira/" class="{% if request.path.startswith('/kira') %}active{% endif %}">
+                <i class="fa fa-home"></i> Kira
             </a>
             <a href="/kargolar/" class="{% if request.path.startswith('/kargolar') %}active{% endif %}">
                 <i class="fa fa-truck"></i> Kargolar
@@ -260,14 +260,23 @@
             <a href="/bankalar/" class="{% if request.path.startswith('/bankalar') %}active{% endif %}">
                 <i class="fa fa-university"></i> Bankalar
             </a>
-            <a href="/kira/" class="{% if request.path.startswith('/kira') %}active{% endif %}">
-                <i class="fa fa-home"></i> Kira
-            </a>
             <a href="/tufe/" class="{% if request.path.startswith('/tufe') %}active{% endif %}">
                 <i class="fa fa-chart-line"></i> TÜFE
             </a>
-            <a href="/yonetim" class="{% if request.path.startswith('/yonetim') %}active{% endif %}">
+            <a href="/personel/" class="{% if request.path.startswith('/personel') %}active{% endif %}">
+                <i class="fa fa-user-tie"></i> Personel
+            </a>
+            <a href="/ilan-robotu/" class="{% if request.path.startswith('/ilan-robotu') %}active{% endif %}">
+                <i class="fa fa-bullhorn"></i> İlan Robotu
+            </a>
+            <a href="/giris/" class="{% if request.path.startswith('/giris') %}active{% endif %}">
+                <i class="fa fa-user-plus"></i> Giriş
+            </a>
+            <a href="/admin/" class="{% if request.path.startswith('/admin') %}active{% endif %}">
                 <i class="fa fa-folder"></i> Yönetim
+            </a>
+            <a href="/m/" target="_blank" title="Mobil sürüm">
+                <i class="fa fa-mobile-alt"></i> Mobil
             </a>
         </nav>
     </header>

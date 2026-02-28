@@ -176,14 +176,141 @@
 .btn-kaydet { background: #00bcd4; color: white; }
 .btn-sil { background: #e74c3c; color: white; }
 .btn-temizle { background: #6b7280; color: white; }
+
+/* Müşteri detay popup — büyük sayfa görünümü */
+.musteri-popup-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.82);
+    z-index: 9998;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 24px;
+    overflow-y: auto;
+}
+.musteri-popup-overlay.show { display: flex; }
+.musteri-popup {
+    background: #0f2537;
+    border: 1px solid #2d4060;
+    border-radius: 10px;
+    max-width: 960px;
+    width: 100%;
+    min-height: 85vh;
+    max-height: none;
+    overflow-y: auto;
+    box-shadow: 0 12px 48px rgba(0,0,0,0.6);
+    margin-bottom: 40px;
+}
+.musteri-popup-header {
+    padding: 20px 24px;
+    border-bottom: 1px solid #2d4060;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+.musteri-popup-header h3 { color: #4fc3f7; margin: 0; font-size: 22px; font-weight: 700; }
+.musteri-popup-header .popup-close { background: #546e7a; color: #fff; border: none; padding: 10px 18px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: bold; }
+.musteri-popup-header .popup-close:hover { background: #607d8b; }
+.musteri-popup-badges { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+.musteri-popup-badges span { padding: 6px 12px; border-radius: 6px; font-size: 13px; font-weight: bold; }
+.badge-tam { background: #22c55e; color: #fff; }
+.badge-yakin { background: #eab308; color: #000; }
+.badge-kritik { background: #ef4444; color: #fff; }
+.badge-kargo { background: #f97316; color: #fff; }
+.badge-sozlesme-ok { background: #22c55e; color: #fff; }
+.badge-sozlesme-yakin { background: #ef4444; color: #fff; }
+.musteri-popup-body { padding: 24px; font-size: 15px; }
+.musteri-popup-section { margin-bottom: 24px; }
+.musteri-popup-section h4 { color: #4fc3f7; font-size: 15px; margin: 0 0 12px 0; padding-bottom: 8px; border-bottom: 1px solid #2d4060; font-weight: 600; }
+.popup-two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+@media (max-width: 700px) { .popup-two-col { grid-template-columns: 1fr; } }
+.popup-bilgi-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px 20px; font-size: 14px; }
+.popup-bilgi-grid label { color: #78909c; font-size: 13px; }
+.popup-bilgi-grid span { color: #e0f7fa; }
+.popup-bilgi-grid.full-width { grid-template-columns: 1fr; }
+.popup-grid-12 { display: grid; grid-template-columns: repeat(12, 1fr); gap: 8px; margin-bottom: 12px; }
+.popup-ay-kutu { height: 44px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 11px; color: #fff; font-weight: bold; min-width: 0; }
+.popup-ay-kutu.odendi { background: #22c55e; }
+.popup-ay-kutu.gecikti { background: #ef4444; }
+.popup-ay-kutu.bugun_yakin { background: #eab308; color: #000; }
+.popup-ay-kutu.gelecek { background: #546e7a; }
+.popup-ay-legend { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 10px; font-size: 12px; color: #b0bec5; }
+.popup-ay-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.popup-ay-legend .dot { width: 14px; height: 14px; border-radius: 3px; }
+.popup-alacak { font-size: 20px; font-weight: bold; }
+.popup-alacak.kirmizi { color: #ef4444; }
+.popup-sozlesme-box { padding: 12px 16px; background: #1e3a50; border-radius: 6px; font-size: 15px; }
+.popup-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+.popup-actions a, .popup-actions button { padding: 12px 18px; border-radius: 6px; font-size: 14px; font-weight: bold; text-decoration: none; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; color: #fff; }
+.popup-actions a:hover, .popup-actions button:hover { opacity: 0.9; }
+.popup-actions .btn-whatsapp { background: #22c55e; }
+.popup-actions .btn-odeme { background: #ef4444; }
+.popup-actions .btn-kargo { background: #f97316; }
+.popup-actions .btn-dosya { background: #3b82f6; }
+.popup-actions .btn-detay { background: #6366f1; }
+.popup-kargo-table, .popup-fatura-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.popup-kargo-table th, .popup-fatura-table th { background: #1e3a50; color: #4fc3f7; padding: 10px 12px; text-align: left; font-size: 13px; }
+.popup-kargo-table td, .popup-fatura-table td { padding: 10px 12px; border-bottom: 1px solid #2d4060; color: #e0f7fa; }
+.popup-kargo-table tr:hover, .popup-fatura-table tr:hover { background: rgba(255,255,255,0.04); }
+.popup-notes { padding: 12px 16px; background: #1e3a50; border-radius: 6px; color: #b0bec5; font-size: 14px; line-height: 1.5; white-space: pre-wrap; }
+.popup-empty { color: #78909c; font-size: 14px; padding: 16px; }
+
+/* Müşteri arama (başlık yanı) */
+.musteri-ara-input {
+    width: 220px;
+    padding: 8px 12px;
+    background: #1e3a50;
+    border: 1px solid #3d5070;
+    border-radius: 6px;
+    color: #e0f7fa;
+    font-size: 14px;
+}
+.musteri-ara-input::placeholder { color: #78909c; }
+.musteri-ara-input:focus { outline: none; border-color: #4fc3f7; }
+.musteri-ara-dropdown {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    margin-top: 4px;
+    min-width: 280px;
+    max-height: 280px;
+    overflow-y: auto;
+    background: #1e3a50;
+    border: 1px solid #2d4060;
+    border-radius: 6px;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+    z-index: 100;
+}
+.musteri-ara-dropdown.show { display: block; }
+.musteri-ara-item {
+    padding: 10px 12px;
+    color: #e0f7fa;
+    font-size: 13px;
+    cursor: pointer;
+    border-bottom: 1px solid #2d4060;
+}
+.musteri-ara-item:hover { background: #2d4060; }
+.musteri-ara-item:last-child { border-bottom: none; }
+.musteri-ara-bos { padding: 12px; color: #78909c; font-size: 13px; }
 </style>
 
 <div class="musteri-header">
-    <h2>Müşteriler</h2>
+    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+        <h2 style="margin:0;">Müşteriler</h2>
+        <div class="musteri-ara-wrap" style="position:relative;">
+            <input type="text" id="musteriAraInput" class="musteri-ara-input" placeholder="🔍 Müşteri adı ile ara..." autocomplete="off">
+            <div class="musteri-ara-dropdown" id="musteriAraDropdown"></div>
+        </div>
+    </div>
     <div class="header-buttons">
         <button onclick="excelIceriAktar()">📂 Excel'den İçeri Aktar</button>
+        <button onclick="excelDisAktar()">📤 Excel Dışa Aktar</button>
         <button onclick="yenile()">↺ Yenile</button>
-        <button onclick="filtreTem izle()">✖ Filtre Temizle</button>
+        <button onclick="filtreTemizle()">✖ Filtre Temizle</button>
         <button class="ai" onclick="geminiAnaliz()">🤖 Gemini AI Analiz</button>
         <button class="tum" onclick="tumYillarOdenmis()">💰 Tüm Yıllar Ödenmiş</button>
     </div>
@@ -231,7 +358,7 @@
 
 <!-- Özet Bar -->
 <div class="ozet-bar">
-    <span>115 müşteri</span>
+    <span>{{ faturalar|length }} müşteri{% if tum_yillar_odenmis %} <em>(Tüm yıllar ödenmiş)</em>{% endif %}</span>
     <span>388.440,10 | 164.916,10 | 165.666,10</span>
     <span>461.743,91</span>
 </div>
@@ -265,7 +392,7 @@
         </thead>
         <tbody>
             {% for m in faturalar %}
-            <tr onclick="selectMusteri({{ m.id }}, this)" data-id="{{ m.id }}">
+            <tr onclick="selectMusteri({{ m.id }}, this); window.location.href='{{ url_for('musteriler.detay', mid=m.id) }}';" data-id="{{ m.id }}" style="cursor:pointer;">
                 <td><strong>{{ m.name }}</strong></td>
                 <td>{{ m.tax_number or '—' }}</td>
                 <td>{{ m.rent_start_date or '—' }}</td>
@@ -340,8 +467,228 @@
     </div>
 </div>
 
+<!-- Müşteri detay popup (büyük sayfa görünümü) -->
+<div class="musteri-popup-overlay" id="musteriPopupOverlay" onclick="if(event.target===this) closeMusteriPopup()">
+    <div class="musteri-popup" onclick="event.stopPropagation()">
+        <div class="musteri-popup-header">
+            <div>
+                <h3 id="popupMusteriAdi">—</h3>
+                <div class="musteri-popup-badges" id="popupBadges"></div>
+            </div>
+            <button type="button" class="popup-close" onclick="closeMusteriPopup()">✖ Kapat</button>
+        </div>
+        <div class="musteri-popup-body">
+            <div class="popup-two-col">
+                <div class="musteri-popup-section">
+                    <h4>İletişim &amp; Bilgiler</h4>
+                    <div class="popup-bilgi-grid" id="popupBilgi"></div>
+                    <div class="popup-bilgi-grid full-width" id="popupAdres" style="margin-top:10px;"></div>
+                </div>
+                <div class="musteri-popup-section">
+                    <h4>Özet</h4>
+                    <p style="margin:0 0 10px 0;"><strong>Hizmet türü:</strong> <span id="popupHizmetTuru">—</span></p>
+                    <p style="margin:0 0 10px 0;"><strong>Toplam Alacak:</strong> <span class="popup-alacak" id="popupAlacak">0 ₺</span></p>
+                    <p style="margin:0;"><strong>Sözleşme Bitiş:</strong> <span id="popupSozlesme" style="font-size:15px;"></span></p>
+                </div>
+            </div>
+            <div class="musteri-popup-section">
+                <h4>12 Aylık Ödeme (Ocak – Aralık)</h4>
+                <div class="popup-grid-12" id="popupAylik"></div>
+                <div class="popup-ay-legend">
+                    <span><span class="dot" style="background:#22c55e;"></span> Ödendi</span>
+                    <span><span class="dot" style="background:#ef4444;"></span> Vadesi geçti</span>
+                    <span><span class="dot" style="background:#eab308;"></span> Vade bugün / 1–7 gün</span>
+                    <span><span class="dot" style="background:#546e7a;"></span> Gelecek vade</span>
+                </div>
+            </div>
+            <div class="musteri-popup-section">
+                <h4>Son Faturalar / Tahsilat</h4>
+                <div id="popupFaturalar"></div>
+                <p style="margin-top:10px;"><a href="#" id="popupTahsilatLink" style="color:#4fc3f7;">Tahsilat listesi ve hesap ekstresi →</a></p>
+            </div>
+            <div class="musteri-popup-section">
+                <h4>Kargo Geçmişi / Son Durum</h4>
+                <div id="popupKargoListe"></div>
+            </div>
+            <div class="musteri-popup-section" id="popupNotlarSection" style="display:none;">
+                <h4>Notlar</h4>
+                <div class="popup-notes" id="popupNotlar"></div>
+            </div>
+            <div class="musteri-popup-section">
+                <h4>İşlemler</h4>
+                <div class="popup-actions" id="popupActions"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- WhatsApp metin modal -->
+<div id="whatsappPopupModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;align-items:center;justify-content:center;padding:20px;flex-direction:column;">
+    <div style="background:#1e3a50;border-radius:8px;padding:20px;max-width:440px;width:100%;border:1px solid #3d5070;">
+        <h3 style="color:#4fc3f7;margin-bottom:10px;">WhatsApp metni</h3>
+        <textarea id="whatsappMetinArea" readonly style="width:100%;min-height:100px;background:#0a1929;color:#e0f7fa;border:1px solid #2d4060;border-radius:6px;padding:10px;font-size:14px;resize:vertical;"></textarea>
+        <div style="margin-top:12px;display:flex;gap:8px;">
+            <button type="button" class="popup-actions btn-whatsapp" onclick="navigator.clipboard.writeText(document.getElementById('whatsappMetinArea').value); alert('Kopyalandı!');">Kopyala</button>
+            <button type="button" class="popup-close" onclick="document.getElementById('whatsappPopupModal').style.display='none';">Kapat</button>
+        </div>
+    </div>
+</div>
+
 <script>
 let selectedId = null;
+let musteriAraTimer = null;
+const AYLAR_POPUP = ['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
+
+(function() {
+    var inp = document.getElementById('musteriAraInput');
+    var dd = document.getElementById('musteriAraDropdown');
+    if (!inp || !dd) return;
+    inp.addEventListener('input', function() {
+        clearTimeout(musteriAraTimer);
+        var q = this.value.trim();
+        if (q.length < 1) { dd.classList.remove('show'); dd.innerHTML = ''; return; }
+        musteriAraTimer = setTimeout(function() {
+            fetch('/musteriler/api/ara?q=' + encodeURIComponent(q))
+                .then(function(r) { return r.json(); })
+                .then(function(list) {
+                    if (!list || list.length === 0) {
+                        dd.innerHTML = '<div class="musteri-ara-bos">Sonuç yok</div>';
+                    } else {
+                        dd.innerHTML = list.map(function(m) {
+                            return '<div class="musteri-ara-item" data-id="' + m.id + '">' + (m.name || '—') + '</div>';
+                        }).join('');
+                        dd.querySelectorAll('.musteri-ara-item').forEach(function(el) {
+                            el.addEventListener('click', function() {
+                                var id = parseInt(el.getAttribute('data-id'), 10);
+                                window.location.href = '/musteriler/' + id;
+                            });
+                        });
+                    }
+                    dd.classList.add('show');
+                })
+                .catch(function() {
+                    dd.innerHTML = '<div class="musteri-ara-bos">Arama yapılamadı</div>';
+                    dd.classList.add('show');
+                });
+        }, 300);
+    });
+    inp.addEventListener('focus', function() {
+        if (this.value.trim().length >= 1 && dd.innerHTML) dd.classList.add('show');
+    });
+    document.addEventListener('click', function(e) {
+        if (!inp.contains(e.target) && !dd.contains(e.target)) dd.classList.remove('show');
+    });
+})();
+
+function openMusteriPopup(mid) {
+    const overlay = document.getElementById('musteriPopupOverlay');
+    overlay.classList.add('show');
+    document.getElementById('popupMusteriAdi').textContent = 'Yükleniyor…';
+    document.getElementById('popupBadges').innerHTML = '';
+    document.getElementById('popupBilgi').innerHTML = '';
+    document.getElementById('popupAdres').innerHTML = '';
+    document.getElementById('popupHizmetTuru').textContent = '—';
+    document.getElementById('popupAylik').innerHTML = '';
+    document.getElementById('popupAlacak').textContent = '0 ₺';
+    document.getElementById('popupSozlesme').textContent = '—';
+    document.getElementById('popupFaturalar').innerHTML = '';
+    document.getElementById('popupTahsilatLink').href = '/musteriler/' + mid;
+    document.getElementById('popupKargoListe').innerHTML = '';
+    document.getElementById('popupNotlarSection').style.display = 'none';
+    document.getElementById('popupNotlar').textContent = '';
+    document.getElementById('popupActions').innerHTML = '';
+    fetch('/musteriler/' + mid + '/api/popup')
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            if (!d.ok) { document.getElementById('popupMusteriAdi').textContent = d.mesaj || 'Hata'; return; }
+            const m = d.musteri;
+            document.getElementById('popupMusteriAdi').textContent = m.name || '—';
+            var badges = [];
+            if (d.odeme_durumu === 'tam') badges.push('<span class="badge-tam">Ödemesi Tam</span>');
+            else if (d.odeme_durumu === 'yakin') badges.push('<span class="badge-yakin">Yakın Gecikme</span>');
+            else if (d.odeme_durumu === 'kritik') badges.push('<span class="badge-kritik">Kritik Gecikme</span>');
+            if (d.kargo_bekleyen) badges.push('<span class="badge-kargo">Kargosu Bekleyen</span>');
+            if (d.sozlesme_yakin) badges.push('<span class="badge-sozlesme-yakin">Sözleşme Bitiş Yakın</span>');
+            else if (d.sozlesme_bitis_str && d.sozlesme_bitis_str !== '—') badges.push('<span class="badge-sozlesme-ok">Sözleşme</span>');
+            document.getElementById('popupBadges').innerHTML = badges.join('');
+            document.getElementById('popupBilgi').innerHTML =
+                '<label>Telefon</label><span>' + (m.phone || '—') + '</span>' +
+                '<label>E-posta</label><span>' + (m.email || '—') + '</span>' +
+                '<label>Vergi No</label><span>' + (m.tax_number || '—') + '</span>' +
+                '<label>Ofis Kodu</label><span>' + (m.office_code || '—') + '</span>';
+            if (m.address && m.address !== '—') {
+                document.getElementById('popupAdres').innerHTML = '<label>Adres</label><span>' + (m.address || '—') + '</span>';
+            } else {
+                document.getElementById('popupAdres').innerHTML = '';
+            }
+            document.getElementById('popupHizmetTuru').textContent = d.hizmet_turu || '—';
+            var ayHtml = '';
+            for (var i = 0; i < 12; i++) {
+                var durum = (d.aylik_durum && d.aylik_durum[i]) ? d.aylik_durum[i] : 'gelecek';
+                ayHtml += '<span class="popup-ay-kutu ' + durum + '" title="' + AYLAR_POPUP[i] + '">' + AYLAR_POPUP[i].substring(0,2) + '</span>';
+            }
+            document.getElementById('popupAylik').innerHTML = ayHtml;
+            var alacak = Number(d.toplam_alacak || 0);
+            var alacakEl = document.getElementById('popupAlacak');
+            alacakEl.textContent = alacak.toLocaleString('tr-TR', {minimumFractionDigits: 2}) + ' ₺';
+            alacakEl.className = 'popup-alacak' + (alacak > 0 ? ' kirmizi' : '');
+            document.getElementById('popupSozlesme').textContent = d.sozlesme_bitis_str || '—';
+            document.getElementById('popupSozlesme').style.color = d.sozlesme_yakin ? '#ef4444' : '#22c55e';
+            var faturalar = d.faturalar || [];
+            if (faturalar.length === 0) {
+                document.getElementById('popupFaturalar').innerHTML = '<p style="color:#78909c;font-size:14px;">Fatura kaydı yok.</p>';
+            } else {
+                var ftbl = '<table class="popup-fatura-table"><thead><tr><th>Fatura No</th><th>Toplam</th><th>Fatura Tarihi</th><th>Vade</th><th>Durum</th></tr></thead><tbody>';
+                faturalar.forEach(function(f) {
+                    ftbl += '<tr><td>' + (f.fatura_no || '—') + '</td><td>' + (f.toplam != null ? Number(f.toplam).toLocaleString('tr-TR', {minimumFractionDigits: 2}) + ' ₺' : '—') + '</td><td>' + (f.fatura_tarihi || '—') + '</td><td>' + (f.vade_tarihi || '—') + '</td><td>' + (f.durum || '—') + '</td></tr>';
+                });
+                ftbl += '</tbody></table>';
+                document.getElementById('popupFaturalar').innerHTML = ftbl;
+            }
+            document.getElementById('popupTahsilatLink').href = '/musteriler/' + mid;
+            if (m.notes && m.notes !== '—') {
+                document.getElementById('popupNotlarSection').style.display = 'block';
+                document.getElementById('popupNotlar').textContent = m.notes;
+            } else {
+                document.getElementById('popupNotlarSection').style.display = 'none';
+            }
+            var kargoList = d.kargolar || [];
+            if (kargoList.length === 0) {
+                document.getElementById('popupKargoListe').innerHTML = '<p style="color:#78909c;font-size:13px;">Kargo kaydı yok.</p>';
+            } else {
+                var tbl = '<table class="popup-kargo-table"><thead><tr><th>Tarih</th><th>Takip No</th><th>Teslim Alan</th><th>Saat</th><th>Durum</th></tr></thead><tbody>';
+                kargoList.forEach(function(k) {
+                    tbl += '<tr><td>' + (k.tarih || '—') + '</td><td>' + (k.takip_no || '—') + '</td><td>' + (k.teslim_alan || '—') + '</td><td>' + (k.saat || '—') + '</td><td>' + (k.durum || '—') + '</td></tr>';
+                });
+                tbl += '</tbody></table>';
+                document.getElementById('popupKargoListe').innerHTML = tbl;
+            }
+            var actions = '<a href="/faturalar/?musteri=' + mid + '" class="btn-odeme">💳 Ödeme İşle</a>' +
+                '<a href="/kargolar/yeni?musteri=' + mid + '" class="btn-kargo">📦 Kargo Ekle / Teslim Al</a>' +
+                '<a href="/giris/?mid=' + mid + '" class="btn-dosya">📁 Dosyalar</a>' +
+                '<a href="/musteriler/' + mid + '" class="btn-detay">🔗 Detay Sayfası</a>' +
+                '<button type="button" class="btn-whatsapp" onclick="openWhatsAppMetin(' + mid + ',' + alacak + ',' + (d.geciken_gun || 0) + ')">📱 WhatsApp Hatırlat</button>';
+            document.getElementById('popupActions').innerHTML = actions;
+        })
+        .catch(function() {
+            document.getElementById('popupMusteriAdi').textContent = 'Yüklenemedi';
+        });
+}
+
+function closeMusteriPopup() {
+    document.getElementById('musteriPopupOverlay').classList.remove('show');
+}
+
+function openWhatsAppMetin(mid, toplamAlacak, gecikenGun) {
+    fetch('/dashboard/api/whatsapp-metin?musteri_id=' + mid + '&toplam_alacak=' + (toplamAlacak || 0) + '&geciken_gun=' + (gecikenGun || 0))
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            if (d.ok && d.metin) {
+                document.getElementById('whatsappMetinArea').value = d.metin;
+                document.getElementById('whatsappPopupModal').style.display = 'flex';
+            }
+        });
+}
 
 function selectMusteri(id, row) {
     document.querySelectorAll('.musteri-grid tr').forEach(r => r.classList.remove('selected'));
@@ -360,22 +707,24 @@ function excelIceriAktar() {
     window.location.href = "{{ url_for('musteriler.import_excel') }}";
 }
 
+function excelDisAktar() {
+    window.location.href = "{{ url_for('musteriler.export_excel') }}";
+}
+
 function yenile() {
     location.reload();
 }
 
-function filtreTemi zle() {
+function filtreTemizle() {
     window.location.href = "{{ url_for('musteriler.index') }}";
 }
 
 function geminiAnaliz() {
-    alert('Gemini AI Analiz özelliği yakında!');
+    window.location.href = "{{ url_for('musteriler.gemini_analiz') }}";
 }
 
 function tumYillarOdenmis() {
-    if (confirm('Tüm yıllar ödenmiş olarak işaretlenecek. Emin misiniz?')) {
-        alert('İşlem tamamlandı!');
-    }
+    window.location.href = "{{ url_for('musteriler.index', tum_yillar_odenmis=1) }}";
 }
 
 function kaydet() {

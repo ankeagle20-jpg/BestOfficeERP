@@ -3,9 +3,21 @@ from auth import yetki_gerekli, giris_gerekli
 from db import fetch_all, fetch_one, execute, execute_returning
 import pandas as pd
 from io import BytesIO
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from docx import Document
 import os
+import sys
+
+# Web kökü (gemini_helper import için)
+_web_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _web_root not in sys.path:
+    sys.path.insert(0, _web_root)
+try:
+    from gemini_helper import analiz_yap as gemini_analiz_yap, GEMINI_AVAILABLE
+except ImportError:
+    GEMINI_AVAILABLE = False
+    def gemini_analiz_yap(*args, **kwargs):
+        return False, "Gemini modülü yüklenemedi."
 
 # helper month names (Turkish)
 MONTHS_TR = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"]
@@ -18,7 +30,18 @@ bp = Blueprint("musteriler", __name__)
 def index():
     """Müşteriler grid görünümü - desktop gibi"""
     arama = request.args.get("q", "").strip()
-    if arama:
+    tum_yillar_odenmis = request.args.get("tum_yillar_odenmis") == "1"
+    if tum_yillar_odenmis:
+        # Sadece tüm faturaları ödenmiş müşteriler (ödeneği kalmamış)
+        musteriler = fetch_all("""
+            SELECT c.* FROM customers c
+            WHERE NOT EXISTS (
+                SELECT 1 FROM faturalar f
+                WHERE f.musteri_id = c.id AND (f.durum IS NULL OR f.durum != 'odendi')
+            )
+            ORDER BY c.name
+        """)
+    elif arama:
         musteriler = fetch_all(
             "SELECT * FROM customers WHERE name ILIKE %s ORDER BY name",
             (f"%{arama}%",))
@@ -26,23 +49,443 @@ def index():
         musteriler = fetch_all("SELECT * FROM customers ORDER BY name")
     
     return render_template("musteriler/index.html",
-                           faturalar=musteriler, arama=arama)
+                           faturalar=musteriler, arama=arama,
+                           tum_yillar_odenmis=tum_yillar_odenmis)
+
+
+def _komuta_merkezi_data(mid):
+    """Müşteri komuta merkezi için tüm veriyi topla: hero, risk, 12 ay, kargo, TÜFE, WhatsApp metni."""
+    bugun = date.today()
+    musteri = fetch_one("SELECT * FROM customers WHERE id=%s", (mid,))
+    if not musteri:
+        return None
+    kyc = fetch_one(
+        "SELECT sozlesme_tarihi, sozlesme_bitis, hizmet_turu, aylik_kira FROM musteri_kyc WHERE musteri_id=%s ORDER BY id DESC LIMIT 1",
+        (mid,),
+    )
+    sozlesme_baslangic = kyc.get("sozlesme_tarihi") if kyc else None
+    sozlesme_bitis = kyc.get("sozlesme_bitis") if kyc else None
+    sozlesme_bas_str = _tarih_str(sozlesme_baslangic)
+    sozlesme_bitis_str = _tarih_str(sozlesme_bitis)
+    kalan_gun = None
+    if sozlesme_bitis:
+        d = sozlesme_bitis if hasattr(sozlesme_bitis, "year") else _parse_date_str(str(sozlesme_bitis)[:10])
+        if d:
+            kalan_gun = (d - bugun).days
+
+    # Tahsilat: toplam ödenen, son ödeme tarihi (musteri_id veya customer_id)
+    tah = fetch_one(
+        """SELECT COALESCE(SUM(tutar), 0) as toplam_odenen,
+                  MAX(tahsilat_tarihi) as son_odeme_tarihi
+           FROM tahsilatlar WHERE musteri_id = %s OR customer_id = %s""",
+        (mid, mid),
+    )
+    toplam_odenen = float(tah.get("toplam_odenen") or 0)
+    son_odeme_tarihi = tah.get("son_odeme_tarihi")
+    son_odeme_str = _tarih_str(son_odeme_tarihi) or "—"
+
+    # Faturalar: toplam borç, gecikme, bu ayki borç (bu ay vadesi gelen ödenmemiş)
+    faturalar_odenmemis = fetch_all("""
+        SELECT id, COALESCE(toplam, tutar) as toplam, vade_tarihi, fatura_no
+        FROM faturalar WHERE musteri_id=%s AND COALESCE(durum,'') != 'odendi'
+    """, (mid,))
+    toplam_borc = sum(float(f.get("toplam") or 0) for f in (faturalar_odenmemis or []))
+    geciken_gun = 0
+    bu_ay = bugun.month
+    bu_yil = bugun.year
+    bu_ayki_borc = 0
+    for f in (faturalar_odenmemis or []):
+        vd = _parse_vade(f.get("vade_tarihi"))
+        if vd and vd < bugun:
+            geciken_gun = max(geciken_gun, (bugun - vd).days)
+        if vd and vd.month == bu_ay and vd.year == bu_yil:
+            bu_ayki_borc += float(f.get("toplam") or 0)
+
+    # Risk: son 6 ay gecikme sayısı, ortalama gecikme, puan
+    alti_ay_once = bugun - timedelta(days=180)
+    faturalar_son6 = fetch_all("""
+        SELECT vade_tarihi, durum FROM faturalar
+        WHERE musteri_id=%s AND vade_tarihi IS NOT NULL AND (vade_tarihi::date) >= %s
+        ORDER BY vade_tarihi
+    """, (mid, alti_ay_once))
+    gecikme_sayisi_6ay = 0
+    gecikme_gunleri = []
+    for f in (faturalar_son6 or []):
+        vd = _parse_vade(f.get("vade_tarihi"))
+        if not vd:
+            continue
+        if (f.get("durum") or "").lower() != "odendi":
+            if vd < bugun:
+                gecikme_sayisi_6ay += 1
+                gecikme_gunleri.append((bugun - vd).days)
+    ortalama_gecikme = int(sum(gecikme_gunleri) / len(gecikme_gunleri)) if gecikme_gunleri else 0
+    # Risk puanı 0-100: yüksek = iyi (az risk)
+    risk_puan = max(0, min(100, 100 - gecikme_sayisi_6ay * 15 - ortalama_gecikme * 2))
+    if risk_puan >= 70:
+        risk_durum = "stabil"
+        risk_aksiyon = "Şu an için bir aksiyona gerek yok."
+    elif risk_puan >= 40:
+        risk_durum = "dikkat"
+        risk_aksiyon = "Hatırlatma mesajı gönderin."
+    else:
+        risk_durum = "kritik"
+        risk_aksiyon = "Hukuki uyarı ve takip önerilir."
+
+    # 12 aylık detay: her ay için tutar, ödeme tarihi, gecikme günü, durum
+    tum_faturalar = fetch_all("""
+        SELECT id, COALESCE(toplam, tutar) as toplam, vade_tarihi, durum
+        FROM faturalar WHERE musteri_id=%s AND vade_tarihi IS NOT NULL
+        ORDER BY vade_tarihi
+    """, (mid,))
+    # Tahsilatları fatura_id'ye göre al (son tahsilat tarihi)
+    tahsilatlar = fetch_all(
+        "SELECT fatura_id, tahsilat_tarihi FROM tahsilatlar WHERE musteri_id=%s OR customer_id=%s ORDER BY tahsilat_tarihi DESC",
+        (mid, mid),
+    )
+    fatura_odeme = {}
+    for t in (tahsilatlar or []):
+        fid = t.get("fatura_id")
+        if fid and fid not in fatura_odeme:
+            fatura_odeme[fid] = t.get("tahsilat_tarihi")
+    aylik_detay = []
+    cari_yil = bugun.year
+    for ay in range(1, 13):
+        ay_faturalar = [f for f in (tum_faturalar or []) if _parse_vade(f.get("vade_tarihi")) and _parse_vade(f.get("vade_tarihi")).month == ay and _parse_vade(f.get("vade_tarihi")).year == cari_yil]
+        if not ay_faturalar:
+            aylik_detay.append({"ay_adi": MONTHS_TR[ay - 1], "tutar": 0, "odeme_tarihi": None, "gecikme_gun": None, "durum": "gelecek", "fatura_id": None})
+            continue
+        f = ay_faturalar[0]
+        vd = _parse_vade(f.get("vade_tarihi"))
+        tutar = float(f.get("toplam") or 0)
+        odendi = (f.get("durum") or "").lower() == "odendi"
+        odeme_tarihi = fatura_odeme.get(f.get("id")) if odendi else None
+        gecikme_gun = (bugun - vd).days if vd and not odendi and vd < bugun else None
+        if odendi:
+            durum = "odendi"
+        elif vd and vd < bugun:
+            durum = "gecikti"
+        elif vd and (vd == bugun or (vd - bugun).days <= 7):
+            durum = "bugun_yakin"
+        else:
+            durum = "gelecek"
+        aylik_detay.append({
+            "ay_adi": MONTHS_TR[ay - 1],
+            "tutar": tutar,
+            "odeme_tarihi": odeme_tarihi,
+            "odeme_tarihi_str": _tarih_str(odeme_tarihi) if odeme_tarihi else "—",
+            "gecikme_gun": gecikme_gun,
+            "durum": durum,
+            "fatura_id": f.get("id"),
+        })
+
+    # Son 6 ay tahsilat toplamı (grafik için)
+    son_6_ay_chart = []
+    for i in range(5, -1, -1):
+        d = bugun - timedelta(days=30 * i)
+        ay_bas = d.replace(day=1)
+        if i == 0:
+            ay_son = bugun
+        else:
+            nxt = ay_bas.month % 12 + 1
+            y = ay_bas.year + (1 if nxt == 1 else 0)
+            ay_son = date(y, nxt, 1) - timedelta(days=1)
+        row = fetch_one(
+            """SELECT COALESCE(SUM(tutar), 0) as t FROM tahsilatlar
+               WHERE (musteri_id = %s OR customer_id = %s) AND (tahsilat_tarihi::date) >= %s AND (tahsilat_tarihi::date) <= %s""",
+            (mid, mid, ay_bas, ay_son),
+        )
+        son_6_ay_chart.append({"ay": MONTHS_TR[ay_bas.month - 1][:3], "tutar": float(row.get("t") or 0)})
+
+    # Kargolar timeline
+    kargolar_raw = fetch_all(
+        "SELECT id, tarih, takip_no, kargo_firmasi, teslim_alan, notlar, created_at FROM kargolar WHERE musteri_id=%s ORDER BY created_at DESC LIMIT 30",
+        (mid,),
+    )
+    kargolar = []
+    for k in (kargolar_raw or []):
+        teslim = (k.get("teslim_alan") or "").strip()
+        durum = "Teslim alındı" if teslim else "Bekliyor"
+        created = k.get("created_at")
+        saat_str = created.strftime("%H:%M") if hasattr(created, "strftime") else (str(created)[11:16] if created else "—")
+        kargolar.append({
+            "id": k.get("id"),
+            "tarih": _tarih_str(k.get("tarih")) or "—",
+            "barkod_takip": k.get("takip_no") or "—",
+            "notlar": k.get("notlar") or "—",
+            "teslim_durum": durum,
+            "saat": saat_str,
+            "kargo_firmasi": k.get("kargo_firmasi") or "—",
+        })
+
+    # TÜFE: sözleşme bitiş yılı için son oran
+    tufe_oran = 0
+    artis_sonrasi_kira = None
+    aylik_kira = float(kyc.get("aylik_kira") or 0) if kyc else 0
+    if sozlesme_bitis and aylik_kira > 0:
+        yil = sozlesme_bitis.year if hasattr(sozlesme_bitis, "year") else int(str(sozlesme_bitis)[:4])
+        r = fetch_one("SELECT oran FROM tufe_verileri WHERE year = %s ORDER BY month DESC LIMIT 1", (yil,))
+        tufe_oran = float(r.get("oran") or 0) if r else 0
+        artis_sonrasi_kira = round(aylik_kira * (1 + tufe_oran / 100), 2)
+
+    # WhatsApp metni (gecikme gününe göre)
+    if geciken_gun <= 0:
+        whatsapp_metin = f"Sayın {musteri.get('name') or 'Müşteri'}, {musteri.get('office_code') or ''} numaralı ofisinizle ilgili herhangi bir kira gecikmesi söz konusu değildir. Teşekkür ederiz."
+    elif geciken_gun <= 7:
+        whatsapp_metin = f"Merhaba, unutkanlık olmuş olabilir; ödeme hatırlatması yapıyoruz. Lütfen kalan tutarı ({toplam_borc:,.2f} ₺) zamanında ödeyiniz."
+    elif geciken_gun <= 30:
+        whatsapp_metin = f"Merhaba, hizmet devamı için ödemenizin yapılması gerekmektedir. Lütfen kalan tutarı {toplam_borc:,.2f} ₺ ödeyiniz."
+    else:
+        whatsapp_metin = f"Ödeme yapılmadığı takdirde hukuki işlem başlatılacaktır. Lütfen derhal {toplam_borc:,.2f} ₺ tutarındaki bakiyeyi ödeyiniz."
+
+    # Ödeme durumu rozeti
+    if geciken_gun > 30:
+        odeme_rozet = "kritik"
+    elif geciken_gun > 0 or toplam_borc > 0:
+        odeme_rozet = "dikkat"
+    else:
+        odeme_rozet = "stabil"
+
+    return {
+        "musteri": musteri,
+        "kyc": kyc,
+        "sozlesme_bas_str": sozlesme_bas_str or "—",
+        "sozlesme_bitis_str": sozlesme_bitis_str or "—",
+        "kalan_gun": kalan_gun,
+        "toplam_odenen": toplam_odenen,
+        "toplam_borc": toplam_borc,
+        "bu_ayki_borc": bu_ayki_borc,
+        "son_odeme_str": son_odeme_str,
+        "geciken_gun": geciken_gun,
+        "risk_gecikme_sayisi_6ay": gecikme_sayisi_6ay,
+        "risk_ortalama_gecikme": ortalama_gecikme,
+        "risk_puan": risk_puan,
+        "risk_durum": risk_durum,
+        "risk_aksiyon": risk_aksiyon,
+        "aylik_detay": aylik_detay,
+        "son_6_ay_chart": son_6_ay_chart,
+        "kargolar": kargolar,
+        "tufe_oran": tufe_oran,
+        "artis_sonrasi_kira": artis_sonrasi_kira,
+        "aylik_kira": aylik_kira,
+        "whatsapp_metin": whatsapp_metin,
+        "odeme_rozet": odeme_rozet,
+        "hizmet_turu": (kyc.get("hizmet_turu") or "—") if kyc else "—",
+    }
+
+
+def _tarih_str(d):
+    """date veya string -> dd.mm.yyyy"""
+    if not d:
+        return None
+    if hasattr(d, "strftime"):
+        return d.strftime("%d.%m.%Y")
+    s = str(d)[:10]
+    return s[8:10] + "." + s[5:7] + "." + s[0:4] if len(s) >= 10 else s
+
+
+def _parse_date_str(s):
+    try:
+        parts = str(s)[:10].split("-")
+        if len(parts) == 3:
+            return date(int(parts[0]), int(parts[1]), int(parts[2]))
+    except Exception:
+        pass
+    return None
 
 
 @bp.route("/<int:mid>")
 @giris_gerekli
 def detay(mid):
-    """Müşteri detay sayfası"""
-    musteri = fetch_one("SELECT * FROM customers WHERE id=%s", (mid,))
-    if not musteri:
+    """Müşteri detay sayfası - Komuta Merkezi (tam ekran)."""
+    data = _komuta_merkezi_data(mid)
+    if not data:
         flash("Müşteri bulunamadı.", "danger")
         return redirect(url_for("musteriler.index"))
     faturalar = fetch_all(
         "SELECT * FROM faturalar WHERE musteri_id=%s ORDER BY fatura_tarihi DESC", (mid,))
-    kargolar = fetch_all(
-        "SELECT * FROM kargolar WHERE musteri_id=%s ORDER BY created_at DESC LIMIT 20", (mid,))
-    return render_template("musteriler/detay.html",
-                           musteri=musteri, faturalar=faturalar, kargolar=kargolar)
+    data["faturalar"] = faturalar
+    return render_template("musteriler/detay.html", **data)
+
+
+def _parse_vade(v):
+    """vade_tarihi (date veya text) -> date veya None."""
+    if not v:
+        return None
+    if hasattr(v, "year"):
+        return v
+    try:
+        s = str(v)[:10]
+        return date(*[int(x) for x in s.split("-")])
+    except Exception:
+        return None
+
+
+@bp.route("/api/ara")
+@giris_gerekli
+def api_ara():
+    """İsme göre müşteri ara (autocomplete). ?q= ile sorgu."""
+    q = (request.args.get("q") or "").strip()
+    if not q or len(q) < 1:
+        return jsonify([])
+    rows = fetch_all(
+        "SELECT id, name FROM customers WHERE name ILIKE %s ORDER BY name LIMIT 25",
+        (f"%{q}%",),
+    )
+    return jsonify(rows or [])
+
+
+@bp.route("/<int:mid>/api/popup")
+@giris_gerekli
+def api_popup(mid):
+    """Tek müşteri için detay popup verisi: ödeme durumu, 12 ay grid, kargo geçmişi, sözleşme bitiş."""
+    musteri = fetch_one("SELECT * FROM customers WHERE id=%s", (mid,))
+    if not musteri:
+        return jsonify({"ok": False, "mesaj": "Müşteri bulunamadı."}), 404
+    bugun = date.today()
+
+    # KYC / sözleşme bitiş
+    kyc = fetch_one(
+        "SELECT sozlesme_bitis, hizmet_turu FROM musteri_kyc WHERE musteri_id=%s ORDER BY id DESC LIMIT 1",
+        (mid,),
+    )
+    sozlesme_bitis = kyc.get("sozlesme_bitis") if kyc else None
+    sozlesme_str = ""
+    sozlesme_yakin = False  # 1 ay kala kırmızı
+    if sozlesme_bitis:
+        if hasattr(sozlesme_bitis, "strftime"):
+            sozlesme_str = sozlesme_bitis.strftime("%d.%m.%Y")
+            d = sozlesme_bitis
+        else:
+            sozlesme_str = str(sozlesme_bitis)[:10]
+            try:
+                d = date(*[int(x) for x in str(sozlesme_bitis)[:10].split("-")])
+            except Exception:
+                d = None
+        if d and bugun <= d <= bugun + timedelta(days=31):
+            sozlesme_yakin = True
+
+    # Ödenmemiş faturalar
+    faturalar_odenmemis = fetch_all("""
+        SELECT id, COALESCE(toplam, tutar) as toplam, vade_tarihi, durum
+        FROM faturalar WHERE musteri_id=%s AND COALESCE(durum,'') != 'odendi' AND vade_tarihi IS NOT NULL
+    """, (mid,))
+    toplam_alacak = sum(float(f.get("toplam") or 0) for f in (faturalar_odenmemis or []))
+    geciken_gun = 0
+    for f in (faturalar_odenmemis or []):
+        vd = _parse_vade(f.get("vade_tarihi"))
+        if vd and vd < bugun:
+            geciken_gun = max(geciken_gun, (bugun - vd).days)
+    if geciken_gun > 30:
+        odeme_durumu = "kritik"
+    elif geciken_gun > 0 or (faturalar_odenmemis and len(faturalar_odenmemis) > 0):
+        odeme_durumu = "yakin"
+    else:
+        odeme_durumu = "tam"
+
+    # Tüm faturalar (12 ay grid)
+    tum_faturalar = fetch_all("""
+        SELECT COALESCE(toplam, tutar) as toplam, vade_tarihi, durum
+        FROM faturalar WHERE musteri_id=%s AND vade_tarihi IS NOT NULL
+    """, (mid,))
+    fat_ay = {}
+    for f in (tum_faturalar or []):
+        vd = _parse_vade(f.get("vade_tarihi"))
+        if not vd:
+            continue
+        ay = vd.month
+        if ay not in fat_ay:
+            fat_ay[ay] = []
+        fat_ay[ay].append(f)
+    aylik_durum = []
+    for ay in range(1, 13):
+        durum = "gelecek"
+        for f in fat_ay.get(ay, []):
+            vd = _parse_vade(f.get("vade_tarihi"))
+            if not vd:
+                continue
+            if (f.get("durum") or "").lower() == "odendi":
+                durum = "odendi"
+                break
+            if vd < bugun:
+                durum = "gecikti"
+                break
+            if vd == bugun or (vd - bugun).days <= 7:
+                durum = "bugun_yakin"
+                break
+            durum = "gelecek"
+            break
+        aylik_durum.append(durum)
+
+    # Kargolar (geçmiş + son durum)
+    kargolar_raw = fetch_all(
+        "SELECT id, tarih, takip_no, kargo_firmasi, teslim_alan, notlar, created_at FROM kargolar WHERE musteri_id=%s ORDER BY created_at DESC LIMIT 30",
+        (mid,),
+    )
+    kargolar = []
+    for k in (kargolar_raw or []):
+        teslim = (k.get("teslim_alan") or "").strip()
+        durum = "Teslim" if teslim else "Bekliyor"
+        created = k.get("created_at")
+        saat_str = created.strftime("%H:%M") if hasattr(created, "strftime") else (str(created)[11:16] if created else "—")
+        tarih_str = k.get("tarih")
+        if hasattr(tarih_str, "strftime"):
+            tarih_str = tarih_str.strftime("%d.%m.%Y")
+        else:
+            tarih_str = str(tarih_str)[:10] if tarih_str else "—"
+        kargolar.append({
+            "id": k.get("id"),
+            "tarih": tarih_str,
+            "takip_no": k.get("takip_no") or "—",
+            "teslim_alan": teslim or "—",
+            "durum": durum,
+            "saat": saat_str,
+            "kargo_firmasi": k.get("kargo_firmasi") or "—",
+        })
+    kargo_bekleyen = any((k.get("durum") or "") == "Bekliyor" for k in kargolar)
+    son_kargo_durum = kargolar[0]["durum"] if kargolar else "—"
+
+    # Son faturalar (tahsilat / ekstre için)
+    faturalar_list = fetch_all("""
+        SELECT id, fatura_no, COALESCE(toplam, tutar) as toplam, fatura_tarihi, vade_tarihi, durum
+        FROM faturalar WHERE musteri_id=%s ORDER BY COALESCE(vade_tarihi, fatura_tarihi) DESC NULLS LAST LIMIT 15
+    """, (mid,))
+    faturalar_json = []
+    for f in (faturalar_list or []):
+        vt = f.get("vade_tarihi")
+        ft = f.get("fatura_tarihi")
+        faturalar_json.append({
+            "id": f.get("id"),
+            "fatura_no": f.get("fatura_no") or "—",
+            "toplam": float(f.get("toplam") or 0),
+            "fatura_tarihi": ft.strftime("%d.%m.%Y") if hasattr(ft, "strftime") else (str(ft)[:10] if ft else "—"),
+            "vade_tarihi": vt.strftime("%d.%m.%Y") if hasattr(vt, "strftime") else (str(vt)[:10] if vt else "—"),
+            "durum": (f.get("durum") or "—"),
+        })
+
+    return jsonify({
+        "ok": True,
+        "musteri": {
+            "id": musteri["id"],
+            "name": musteri.get("name") or "—",
+            "phone": musteri.get("phone") or "—",
+            "email": musteri.get("email") or "—",
+            "tax_number": musteri.get("tax_number") or "—",
+            "address": musteri.get("address") or "—",
+            "office_code": musteri.get("office_code") or "—",
+            "notes": musteri.get("notes") or "—",
+        },
+        "faturalar": faturalar_json,
+        "odeme_durumu": odeme_durumu,
+        "toplam_alacak": round(toplam_alacak, 2),
+        "geciken_gun": geciken_gun,
+        "aylik_durum": aylik_durum,
+        "sozlesme_bitis_str": sozlesme_str or "—",
+        "sozlesme_yakin": sozlesme_yakin,
+        "hizmet_turu": (kyc.get("hizmet_turu") or "—") if kyc else "—",
+        "kargo_bekleyen": kargo_bekleyen,
+        "son_kargo_durum": son_kargo_durum,
+        "kargolar": kargolar,
+    })
 
 
 @bp.route("/giris", methods=["GET"])
@@ -136,6 +579,104 @@ def import_excel():
         return redirect(url_for("musteriler.index"))
 
     return render_template("musteriler/import.html")
+
+
+@bp.route("/export")
+@giris_gerekli
+def export_excel():
+    """Müşteri listesini Excel olarak dışa aktar"""
+    tum_yillar_odenmis = request.args.get("tum_yillar_odenmis") == "1"
+    if tum_yillar_odenmis:
+        rows = fetch_all("""
+            SELECT c.* FROM customers c
+            WHERE NOT EXISTS (
+                SELECT 1 FROM faturalar f
+                WHERE f.musteri_id = c.id AND (f.durum IS NULL OR f.durum != 'odendi')
+            )
+            ORDER BY c.name
+        """)
+    else:
+        rows = fetch_all("SELECT * FROM customers ORDER BY name")
+    if not rows:
+        flash("Dışa aktarılacak müşteri yok.", "warning")
+        return redirect(url_for("musteriler.index"))
+    df = pd.DataFrame(rows)
+    for col in list(df.columns):
+        try:
+            df[col] = df[col].apply(
+                lambda x: x.isoformat()[:10] if hasattr(x, "isoformat") and x is not None else (x if x is not None else "")
+            )
+        except Exception:
+            pass
+    buf = BytesIO()
+    df.to_excel(buf, index=False, engine="openpyxl")
+    buf.seek(0)
+    return send_file(
+        buf,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name=f"musteriler_{date.today().isoformat()}.xlsx",
+    )
+
+
+@bp.route("/gemini-analiz")
+@giris_gerekli
+def gemini_analiz():
+    """Gemini AI Analiz sayfası"""
+    return render_template("musteriler/gemini_analiz.html", gemini_available=GEMINI_AVAILABLE)
+
+
+def _musteri_ozet_metni():
+    """Müşteri verilerinden analiz için kısa özet metni üretir."""
+    toplam = fetch_one("SELECT COUNT(*) AS n FROM customers")
+    n = (toplam or {}).get("n") or 0
+    kira = fetch_one(
+        "SELECT COUNT(*) AS n, COALESCE(SUM(ilk_kira_bedeli), 0) AS toplam FROM customers WHERE ilk_kira_bedeli IS NOT NULL"
+    )
+    kira_n = (kira or {}).get("n") or 0
+    kira_toplam = float((kira or {}).get("toplam") or 0)
+    odendi = fetch_one(
+        "SELECT COUNT(DISTINCT musteri_id) AS n FROM faturalar WHERE durum = %s",
+        ("odendi",),
+    )
+    odenen_musteri = (odendi or {}).get("n") or 0
+    bekleyen = fetch_one(
+        "SELECT COUNT(DISTINCT musteri_id) AS n FROM faturalar WHERE durum IS NULL OR durum != %s",
+        ("odendi",),
+    )
+    bekleyen_musteri = (bekleyen or {}).get("n") or 0
+    son_5 = fetch_all(
+        "SELECT name, ilk_kira_bedeli, rent_start_date FROM customers ORDER BY id DESC LIMIT 5"
+    )
+    satirlar = [
+        f"Toplam müşteri sayısı: {n}",
+        f"Kira bedeli girilmiş müşteri: {kira_n}, toplam aylık kira (ilk bedel): {kira_toplam:,.2f} TL",
+        f"Faturası ödenmiş müşteri sayısı: {odenen_musteri}",
+        f"Ödenmemiş fatura olan müşteri sayısı: {bekleyen_musteri}",
+        "",
+        "Son eklenen 5 müşteri (ad, ilk kira, başlangıç tarihi):",
+    ]
+    for m in (son_5 or []):
+        ad = (m.get("name") or "").strip() or "—"
+        k = m.get("ilk_kira_bedeli")
+        k_str = f"{float(k):,.2f} TL" if k is not None else "—"
+        t = m.get("rent_start_date")
+        t_str = str(t)[:10] if t else "—"
+        satirlar.append(f"  - {ad} | {k_str} | {t_str}")
+    return "\n".join(satirlar)
+
+
+@bp.route("/api/gemini-analiz", methods=["POST"])
+@giris_gerekli
+def api_gemini_analiz():
+    """Müşteri verisi özeti + isteğe bağlı kullanıcı sorusu ile Gemini'den analiz alır."""
+    data = request.get_json(silent=True) or request.form
+    soru = (data.get("soru") or data.get("prompt") or "").strip()
+    context = _musteri_ozet_metni()
+    ok, metin = gemini_analiz_yap(context, soru)
+    if ok:
+        return jsonify({"ok": True, "metin": metin})
+    return jsonify({"ok": False, "hata": metin}), 400
 
 
 @bp.route("/<int:mid>/duzenle", methods=["GET", "POST"])

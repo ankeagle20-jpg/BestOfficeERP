@@ -1,0 +1,56 @@
+{% extends "mobile/base.html" %}
+{% block content %}
+<!-- Hızlı aksiyon grid (görseldeki gibi) -->
+<div class="action-grid">
+    <a href="{{ url_for('mobile.musteriler') }}" class="action-tile"><i class="fa fa-users"></i><span>Müşteriler</span></a>
+    <a href="{{ url_for('mobile.tahsilat') }}" class="action-tile"><i class="fa fa-wallet"></i><span>Tahsilat</span></a>
+    <a href="/faturalar/" class="action-tile"><i class="fa fa-money-bill-wave"></i><span>Ödeme İşle</span></a>
+    <a href="{{ url_for('mobile.operasyon') }}" class="action-tile"><i class="fa fa-box"></i><span>Kargo / Operasyon</span></a>
+    <a href="{{ url_for('mobile.yonetim') }}" class="action-tile"><i class="fa fa-chart-line"></i><span>Raporlar</span></a>
+    <a href="{{ url_for('mobile.ilan_robotu') }}" class="action-tile"><i class="fa fa-bullhorn"></i><span>İlan Robotu</span></a>
+</div>
+
+<div class="card-grid" style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:16px;">
+    <div class="card">
+        <h3>Bugün Beklenen Tahsilat</h3>
+        <div style="font-size:20px; font-weight:700; color:#4fc3f7;">₺ {{ "{:,.0f}".format(bugun_tahsilat).replace(",", " ") }}</div>
+    </div>
+    <div class="card">
+        <h3>Toplam Geciken</h3>
+        <div style="font-size:20px; font-weight:700; color:#ef4444;">₺ {{ "{:,.0f}".format(toplam_geciken).replace(",", " ") }}</div>
+    </div>
+    <div class="card">
+        <h3>Kritik Müşteri</h3>
+        <div style="font-size:20px; font-weight:700;">{{ kritik_say }}</div>
+    </div>
+    <div class="card">
+        <h3>Bugün Gelen Kargo</h3>
+        <div style="font-size:20px; font-weight:700;">{{ bugun_kargo }}</div>
+    </div>
+</div>
+
+<div class="card" id="kritik">
+    <h3>🔴 Kritik Gecikenler</h3>
+    {% if kritik_list %}
+    <div style="max-height:50vh; overflow-y:auto;">
+        {% for r in kritik_list %}
+        <a href="{{ url_for('mobile.musteri_detay', mid=r.musteri_id) }}" style="text-decoration:none; color:inherit;">
+            <div class="list-item kritik" style="margin-bottom:8px;">
+                <div>
+                    <strong>{{ r.musteri_adi }}</strong><br>
+                    <span style="font-size:12px; color:#90a4ae;">{{ r.office_code or '—' }} · {{ r.geciken_gun }} gün gecikme</span>
+                </div>
+                <div style="font-weight:700; color:#ef4444;">₺ {{ "{:,.0f}".format(r.toplam_alacak).replace(",", " ") }}</div>
+                <div class="swipe-actions" style="width:100%; margin-top:8px;">
+                    <a href="https://wa.me/90{{ r.phone|replace(' ','')|replace('-','')|replace('(','')|replace(')','') }}" class="btn btn-green" style="padding:6px 10px; font-size:11px;"><i class="fa fa-whatsapp"></i> WhatsApp</a>
+                    <a href="/faturalar/?musteri={{ r.musteri_id }}" class="btn btn-red" style="padding:6px 10px; font-size:11px;"><i class="fa fa-wallet"></i> Ödeme Al</a>
+                </div>
+            </div>
+        </a>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p style="color:#90a4ae; font-size:14px;">Kritik gecikme yok.</p>
+    {% endif %}
+</div>
+{% endblock %}

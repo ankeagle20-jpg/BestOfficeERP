@@ -210,6 +210,35 @@ CREATE TABLE IF NOT EXISTS sozlesmeler (
     hizmet_turu  TEXT,
     created_at   TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Ofisbir İlan Robotu: hazır/sanal ofis ilanları
+CREATE TABLE IF NOT EXISTS office_rentals (
+    id                    SERIAL PRIMARY KEY,
+    ofis_turu             TEXT NOT NULL,
+    baslik                TEXT,
+    il                    TEXT,
+    ilce                  TEXT,
+    adres                 TEXT,
+    aylik_fiyat           NUMERIC(12,2) DEFAULT 0,
+    para_birimi            TEXT DEFAULT 'TRY',
+    yasal_adres           BOOLEAN DEFAULT FALSE,
+    sekreterya_karsilama   BOOLEAN DEFAULT FALSE,
+    posta_takibi          BOOLEAN DEFAULT FALSE,
+    toplanti_odasi        BOOLEAN DEFAULT FALSE,
+    sinirsiz_cay_kahve    BOOLEAN DEFAULT FALSE,
+    fiber_internet        BOOLEAN DEFAULT FALSE,
+    numara_0850_tahsisi   BOOLEAN DEFAULT FALSE,
+    anlik_bildirim_sistemi BOOLEAN DEFAULT FALSE,
+    misafir_agirlama      BOOLEAN DEFAULT FALSE,
+    mutfak_erisimi        BOOLEAN DEFAULT FALSE,
+    temizlik_hizmeti      BOOLEAN DEFAULT FALSE,
+    aciklama              TEXT,
+    aciklama_ai           TEXT,
+    eids_yetki_no         TEXT,
+    status                TEXT DEFAULT 'taslak',
+    created_at            TIMESTAMPTZ DEFAULT NOW(),
+    updated_at            TIMESTAMPTZ DEFAULT NOW()
+);
 """
 
 
@@ -219,7 +248,59 @@ def init_schema():
         conn.cursor().execute(SCHEMA_SQL)
         ensure_customers_notes()
         ensure_tahsilatlar_columns()
+        ensure_kargolar_durum()
+        ensure_faturalar_amount_columns()
+        ensure_office_rentals()
     print("✅ Supabase şema oluşturuldu.")
+
+
+def ensure_office_rentals():
+    """office_rentals tablosu yoksa oluştur (migration)."""
+    try:
+        execute("""
+            CREATE TABLE IF NOT EXISTS office_rentals (
+                id                    SERIAL PRIMARY KEY,
+                ofis_turu             TEXT NOT NULL,
+                baslik                TEXT,
+                il                    TEXT,
+                ilce                  TEXT,
+                adres                 TEXT,
+                aylik_fiyat           NUMERIC(12,2) DEFAULT 0,
+                para_birimi           TEXT DEFAULT 'TRY',
+                yasal_adres           BOOLEAN DEFAULT FALSE,
+                sekreterya_karsilama  BOOLEAN DEFAULT FALSE,
+                posta_takibi          BOOLEAN DEFAULT FALSE,
+                toplanti_odasi        BOOLEAN DEFAULT FALSE,
+                sinirsiz_cay_kahve    BOOLEAN DEFAULT FALSE,
+                fiber_internet        BOOLEAN DEFAULT FALSE,
+                numara_0850_tahsisi   BOOLEAN DEFAULT FALSE,
+                anlik_bildirim_sistemi BOOLEAN DEFAULT FALSE,
+                misafir_agirlama      BOOLEAN DEFAULT FALSE,
+                mutfak_erisimi        BOOLEAN DEFAULT FALSE,
+                temizlik_hizmeti      BOOLEAN DEFAULT FALSE,
+                aciklama              TEXT,
+                aciklama_ai           TEXT,
+                eids_yetki_no         TEXT,
+                status                TEXT DEFAULT 'taslak',
+                created_at            TIMESTAMPTZ DEFAULT NOW(),
+                updated_at            TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        _ensure_office_rentals_extra_columns()
+    except Exception as e:
+        print(f"office_rentals: {e}")
+
+
+def _ensure_office_rentals_extra_columns():
+    """office_rentals'a yeni hizmet sütunlarını ekle (migration)."""
+    for col in (
+        "sinirsiz_cay_kahve", "fiber_internet", "numara_0850_tahsisi",
+        "anlik_bildirim_sistemi", "misafir_agirlama", "mutfak_erisimi", "temizlik_hizmeti"
+    ):
+        try:
+            execute(f"ALTER TABLE office_rentals ADD COLUMN IF NOT EXISTS {col} BOOLEAN DEFAULT FALSE")
+        except Exception as e:
+            print(f"office_rentals.{col}: {e}")
 
 
 def ensure_customers_notes():
@@ -252,3 +333,27 @@ def ensure_tahsilatlar_columns():
         execute("ALTER TABLE tahsilatlar ADD COLUMN IF NOT EXISTS havale_banka TEXT")
     except Exception as e:
         print(f"tahsilatlar.havale_banka: {e}")
+    try:
+        execute("ALTER TABLE tahsilatlar ADD COLUMN IF NOT EXISTS customer_id INTEGER REFERENCES customers(id)")
+    except Exception as e:
+        print(f"tahsilatlar.customer_id: {e}")
+
+
+def ensure_kargolar_durum():
+    """kargolar tablosuna durum sütunu ekle (beklemede / teslim_alindi)."""
+    try:
+        execute("ALTER TABLE kargolar ADD COLUMN IF NOT EXISTS durum TEXT DEFAULT 'beklemede'")
+    except Exception as e:
+        print(f"kargolar.durum: {e}")
+
+
+def ensure_faturalar_amount_columns():
+    """faturalar tablosunda tutar/toplam yoksa ekle (farklı şemalarda sadece biri olabilir)."""
+    try:
+        execute("ALTER TABLE faturalar ADD COLUMN IF NOT EXISTS tutar NUMERIC(12,2) DEFAULT 0")
+    except Exception as e:
+        print(f"faturalar.tutar: {e}")
+    try:
+        execute("ALTER TABLE faturalar ADD COLUMN IF NOT EXISTS toplam NUMERIC(12,2) DEFAULT 0")
+    except Exception as e:
+        print(f"faturalar.toplam: {e}")

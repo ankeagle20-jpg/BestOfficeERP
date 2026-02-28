@@ -1,0 +1,355 @@
+{% extends "layout.html" %}
+{% block page_title %}Komuta Merkezi — {{ musteri.name }}{% endblock %}
+
+{% block extra_head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+/* 15" tek ekran - alta üste gitmeden hepsi görünsün (üst bar ~120px) */
+.komuta-wrap { height: calc(100vh - 120px); max-height: calc(100vh - 120px); background: #0a1929; color: #e0f7fa; display: flex; flex-direction: column; overflow: hidden; margin: -20px -20px 0 -20px; padding: 0; }
+.komuta-sticky { flex-shrink: 0; z-index: 100; background: #0a1929; border-bottom: 1px solid #1e3a50; padding: 6px 14px; display: flex; align-items: center; justify-content: space-between; }
+.komuta-sticky a { color: #4fc3f7; text-decoration: none; font-size: 12px; }
+.komuta-sticky a:hover { text-decoration: underline; }
+.komuta-hero { flex-shrink: 0; display: grid; grid-template-columns: 1fr auto; gap: 16px; align-items: center; padding: 8px 16px; background: #0f2537; border-bottom: 1px solid #1e3a50; }
+.komuta-hero-sol { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.komuta-hero-sol h1 { font-size: 18px; font-weight: 700; color: #fff; margin: 0; }
+.komuta-hero-sol .ofis-badge { background: #22c55e; color: #fff; padding: 4px 10px; border-radius: 4px; font-size: 12px; font-weight: 600; }
+.komuta-hero-sol .meta { color: #90a4ae; font-size: 11px; }
+.komuta-hero-sol .kalan { color: #4fc3f7; font-size: 11px; }
+.komuta-rozet { display: inline-flex; align-items: center; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+.komuta-rozet.stabil { background: rgba(34,197,94,0.25); color: #22c55e; }
+.komuta-rozet.dikkat { background: rgba(234,179,8,0.25); color: #eab308; }
+.komuta-rozet.kritik { background: rgba(239,68,68,0.25); color: #ef4444; }
+.komuta-hero-sag { display: flex; gap: 10px; flex-wrap: wrap; }
+.komuta-mini-kart { background: #1e3a50; border-radius: 4px; padding: 6px 10px; min-width: 90px; border: 1px solid #2d4060; }
+.komuta-mini-kart .label { font-size: 9px; color: #78909c; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 2px; }
+.komuta-mini-kart .value { font-size: 13px; font-weight: 700; color: #e0f7fa; }
+.komuta-mini-kart .value.kirmizi { color: #ef4444; }
+.komuta-mini-kart .value.yesil { color: #22c55e; }
+.komuta-main { flex: 1; min-height: 0; display: grid; grid-template-columns: 1.15fr 1fr 1fr; gap: 10px; padding: 10px 14px; overflow: hidden; }
+.komuta-main-col { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow: hidden; }
+.komuta-card { background: #1e3a50; border-radius: 6px; padding: 10px 12px; border: 1px solid #2d4060; flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.komuta-card h3 { color: #4fc3f7; font-size: 12px; margin: 0 0 8px 0; padding-bottom: 6px; border-bottom: 1px solid #2d4060; flex-shrink: 0; }
+.komuta-card .card-inner { flex: 1; min-height: 0; overflow: auto; }
+.ay-grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 4px; margin-bottom: 6px; }
+.ay-cell { border-radius: 4px; padding: 4px 2px; text-align: center; cursor: pointer; min-height: 42px; display: flex; flex-direction: column; justify-content: center; align-items: center; font-size: 9px; }
+.ay-cell:hover { filter: brightness(1.1); }
+.ay-cell .ay-adi { font-weight: 600; color: rgba(255,255,255,0.95); margin-bottom: 1px; }
+.ay-cell .tutar { font-size: 10px; font-weight: 700; }
+.ay-cell .ek { font-size: 8px; color: rgba(255,255,255,0.75); }
+.ay-cell.odendi { background: #22c55e; color: #fff; }
+.ay-cell.gecikti { background: #ef4444; color: #fff; }
+.ay-cell.bugun_yakin { background: #eab308; color: #1a1a1a; }
+.ay-cell.gelecek { background: #546e7a; color: #fff; }
+.ay-legend { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; font-size: 9px; color: #90a4ae; }
+.ay-legend span { display: inline-flex; align-items: center; gap: 4px; }
+.ay-legend .dot { width: 8px; height: 8px; border-radius: 2px; }
+.chart-wrap { height: 72px; flex-shrink: 0; margin-top: 4px; }
+.risk-score { font-size: 28px; font-weight: 800; color: #4fc3f7; text-align: center; margin: 4px 0; line-height: 1; }
+.risk-bar { height: 8px; background: #2d4060; border-radius: 4px; overflow: hidden; margin: 6px 0; }
+.risk-bar .seg.green { height: 100%; background: #22c55e; }
+.risk-metrics { font-size: 10px; color: #b0bec5; margin: 2px 0; }
+.risk-aksiyon { padding: 6px 8px; border-radius: 4px; font-size: 10px; margin-top: 6px; }
+.risk-aksiyon.stabil { background: rgba(34,197,94,0.15); color: #22c55e; }
+.risk-aksiyon.dikkat { background: rgba(234,179,8,0.15); color: #eab308; }
+.risk-aksiyon.kritik { background: rgba(239,68,68,0.15); color: #ef4444; }
+.whatsapp-panel textarea { width: 100%; min-height: 44px; max-height: 60px; background: #0a1929; border: 1px solid #2d4060; color: #e0f7fa; border-radius: 4px; padding: 6px 8px; font-size: 11px; resize: none; margin-bottom: 6px; }
+.whatsapp-panel .btn-send { background: #22c55e; color: #fff; border: none; padding: 6px 12px; border-radius: 4px; font-size: 11px; font-weight: 600; cursor: pointer; }
+.whatsapp-panel .btn-send:hover { background: #16a34a; }
+.kargo-timeline { list-style: none; padding: 0; margin: 0; font-size: 10px; }
+.kargo-timeline li { padding: 5px 8px; border-left: 2px solid #2d4060; margin-left: 4px; margin-bottom: 4px; background: rgba(0,0,0,0.15); border-radius: 0 4px 4px 0; }
+.kargo-timeline li .k-tarih { font-weight: 600; color: #4fc3f7; }
+.kargo-timeline li .k-barkod { color: #90a4ae; font-size: 9px; }
+.kargo-timeline li .k-not, .kargo-timeline li .k-durum { font-size: 9px; margin-top: 2px; }
+.kargo-timeline li .k-durum.teslim { color: #22c55e; }
+.kargo-timeline li .k-durum.bekliyor { color: #eab308; }
+.dosya-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.dosya-kart { background: #0f2537; border-radius: 4px; padding: 8px; text-align: center; border: 1px solid #2d4060; cursor: pointer; transition: background 0.2s; text-decoration: none; color: inherit; }
+.dosya-kart:hover { background: #1e3a50; }
+.dosya-kart .icon { font-size: 16px; color: #4fc3f7; margin-bottom: 4px; }
+.dosya-kart .name { font-size: 10px; color: #e0f7fa; }
+.dosya-kart .link { font-size: 9px; color: #22c55e; margin-top: 2px; }
+.soz-kalan { font-size: 14px; font-weight: 700; color: #4fc3f7; margin: 4px 0; }
+.soz-detay { font-size: 10px; color: #b0bec5; margin: 2px 0; }
+.soz-btn { display: inline-block; background: #4fc3f7; color: #0a1929; padding: 5px 10px; border-radius: 4px; text-decoration: none; font-weight: 600; margin-top: 6px; font-size: 10px; }
+.soz-btn:hover { background: #29b6f6; color: #0a1929; }
+.komuta-actions { flex-shrink: 0; padding: 6px 14px; border-top: 1px solid #1e3a50; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.komuta-actions a, .komuta-actions button { padding: 6px 12px; border-radius: 4px; font-size: 11px; font-weight: 600; text-decoration: none; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
+.komuta-actions .btn-odeme { background: #ef4444; color: #fff; }
+.komuta-actions .btn-odeme:hover { background: #dc2626; color: #fff; }
+.komuta-actions .btn-whatsapp { background: #22c55e; color: #fff; }
+.komuta-actions .btn-whatsapp:hover { background: #16a34a; color: #fff; }
+.komuta-actions .btn-kargo { background: #f97316; color: #fff; }
+.komuta-actions .btn-kargo:hover { background: #ea580c; color: #fff; }
+.komuta-actions .btn-dosya { background: #3b82f6; color: #fff; }
+.komuta-actions .btn-dosya:hover { background: #2563eb; color: #fff; }
+.toast-holder { position: fixed; bottom: 12px; right: 12px; z-index: 9999; }
+.toast { background: #1e3a50; color: #e0f7fa; padding: 8px 14px; border-radius: 4px; box-shadow: 0 2px 12px rgba(0,0,0,0.4); border-left: 3px solid #22c55e; font-size: 11px; animation: slideIn 0.3s ease; }
+.toast.error { border-left-color: #ef4444; }
+@keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+.odal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 9000; display: none; align-items: center; justify-content: center; padding: 20px; }
+.odal-overlay.show { display: flex; }
+.odal { background: #1e3a50; border-radius: 8px; padding: 16px; max-width: 380px; width: 100%; border: 1px solid #2d4060; }
+.odal h4 { color: #4fc3f7; margin: 0 0 10px 0; font-size: 14px; }
+.odal a.btn { display: inline-block; background: #22c55e; color: #fff; padding: 8px 14px; border-radius: 4px; text-decoration: none; font-weight: 600; margin-top: 8px; font-size: 12px; }
+.odal a.btn:hover { color: #fff; }
+@media (max-width: 1024px) { .komuta-main { grid-template-columns: 1fr; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="komuta-wrap">
+  <div class="komuta-sticky">
+    <div>
+      <a href="{{ url_for('musteriler.index') }}">← Müşteriler</a>
+      <span style="color:#546e7a; margin-left:12px;">|</span>
+      <span style="color:#90a4ae; margin-left:12px; font-size:14px;">Müşteri Operasyon Komuta Merkezi</span>
+    </div>
+    <div style="display:flex; gap:10px; align-items:center;">
+      <a href="/faturalar/?musteri={{ musteri.id }}">Finans</a>
+      <a href="/kargolar/yeni?musteri={{ musteri.id }}">Kargo Ekle</a>
+      <a href="/giris/?mid={{ musteri.id }}">Dosyalar</a>
+      <a href="/dashboard/">Dashboard</a>
+    </div>
+  </div>
+
+  <!-- Hero -->
+  <div class="komuta-hero">
+    <div class="komuta-hero-sol">
+      <h1>{{ musteri.name or '—' }}</h1>
+      <span class="ofis-badge">{{ hizmet_turu }} — {{ musteri.office_code or '—' }}</span>
+      <div class="meta">Sözleşme: {{ sozlesme_bas_str }} – {{ sozlesme_bitis_str }}</div>
+      <div class="kalan">
+        {% if kalan_gun is not none %}
+          <i class="fa fa-calendar"></i> {{ sozlesme_bitis_str }} — <strong>{{ kalan_gun }} gün</strong> kaldı
+        {% else %}
+          Sözleşme bitiş tarihi belirtilmemiş
+        {% endif %}
+      </div>
+      <div class="komuta-rozet {{ odeme_rozet }}">
+        {% if odeme_rozet == 'stabil' %}🟢 Ödendi Tam{% endif %}
+        {% if odeme_rozet == 'dikkat' %}🟡 Dikkat{% endif %}
+        {% if odeme_rozet == 'kritik' %}🔴 Kritik{% endif %}
+      </div>
+    </div>
+    <div class="komuta-hero-sag">
+      <div class="komuta-mini-kart">
+        <div class="label">Toplam Ödenen</div>
+        <div class="value yesil">₺ {{ "{:,.2f}".format(toplam_odenen).replace(",", " ") }}</div>
+      </div>
+      <div class="komuta-mini-kart">
+        <div class="label">Toplam Borç</div>
+        <div class="value {{ 'kirmizi' if toplam_borc > 0 else '' }}">₺ {{ "{:,.2f}".format(toplam_borc).replace(",", " ") }}</div>
+      </div>
+      <div class="komuta-mini-kart">
+        <div class="label">Bu Ayki Borç</div>
+        <div class="value {{ 'kirmizi' if bu_ayki_borc > 0 else '' }}">₺ {{ "{:,.2f}".format(bu_ayki_borc).replace(",", " ") }}</div>
+      </div>
+      <div class="komuta-mini-kart">
+        <div class="label">Son Ödeme Tarihi</div>
+        <div class="value">{{ son_odeme_str }}</div>
+      </div>
+      <div class="komuta-mini-kart">
+        <div class="label">Gecikme (gün)</div>
+        <div class="value {{ 'kirmizi' if geciken_gun > 0 else 'yesil' }}">{{ geciken_gun if geciken_gun else '0' }}</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="komuta-main">
+    <!-- Sol: 12 Aylık + Grafik + WhatsApp -->
+    <div class="komuta-main-col">
+      <div class="komuta-card">
+        <h3>12 Aylık Ödeme Durumu</h3>
+        <div class="card-inner">
+          <div class="ay-grid" id="ayGrid">
+            {% for a in aylik_detay %}
+            <div class="ay-cell {{ a.durum }}" data-fatura-id="{{ a.fatura_id or '' }}" data-ay="{{ a.ay_adi }}" data-durum="{{ a.durum }}" title="{{ a.ay_adi }}: {{ a.tutar }} ₺ — {{ a.odeme_tarihi_str }}{% if a.gecikme_gun is not none %} ({{ a.gecikme_gun }} gün gecikme){% endif %}">
+              <span class="ay-adi">{{ a.ay_adi[:2] }}</span>
+              <span class="tutar">{% if a.tutar %}{{ "%.0f"|format(a.tutar) }} ₺{% else %}—{% endif %}</span>
+              <span class="ek">{% if a.odeme_tarihi_str and a.odeme_tarihi_str != '—' %}{{ a.odeme_tarihi_str }}{% elif a.gecikme_gun is not none %}{{ a.gecikme_gun }} gün{% else %}—{% endif %}</span>
+            </div>
+            {% endfor %}
+          </div>
+          <div class="ay-legend">
+            <span><span class="dot" style="background:#22c55e;"></span> Ödenmiş</span>
+            <span><span class="dot" style="background:#ef4444;"></span> Vadesi geçmiş</span>
+            <span><span class="dot" style="background:#eab308;"></span> Vade yakın</span>
+            <span><span class="dot" style="background:#546e7a;"></span> Vadesi gelmemiş</span>
+          </div>
+          <div style="color:#90a4ae; font-size:10px; margin-top:4px;">Son 6 Ay Ödeme Performansı</div>
+          <div class="chart-wrap"><canvas id="chart6ay"></canvas></div>
+        </div>
+      </div>
+      <div class="komuta-card whatsapp-panel">
+        <h3>Akıllı Hatırlatma Paneli</h3>
+        <div class="card-inner">
+          <textarea id="whatsappMetin" rows="2">{{ whatsapp_metin }}</textarea>
+          <button type="button" class="btn-send" id="btnWhatsAppSend"><i class="fa fa-whatsapp"></i> Gönder</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Orta: Risk + Kargo -->
+    <div class="komuta-main-col">
+      <div class="komuta-card">
+        <h3>Risk Analizi</h3>
+        <div class="card-inner">
+          <div class="risk-score" id="riskScore">{{ risk_puan }}</div>
+          <div class="risk-bar" id="riskBar">
+            <div class="seg green" style="width:{{ risk_puan }}%;"></div>
+          </div>
+          <div class="risk-metrics">Son 6 ay gecikme sayısı: <strong>{{ risk_gecikme_sayisi_6ay }}</strong></div>
+          <div class="risk-metrics">Ortalama gecikme süresi: <strong>{{ risk_ortalama_gecikme }}</strong> gün</div>
+          <div class="risk-aksiyon {{ risk_durum }}">Önerilen aksiyon: {{ risk_aksiyon }}</div>
+        </div>
+      </div>
+      <div class="komuta-card">
+        <h3>Kargo Geçmişi</h3>
+        <div class="card-inner">
+          {% if kargolar %}
+          <ul class="kargo-timeline">
+            {% for k in kargolar %}
+            <li>
+              <span class="k-tarih">{{ k.tarih }}</span> <span class="k-barkod">{{ k.barkod_takip }}</span>
+              <div class="k-not">{{ k.notlar }}</div>
+              <div class="k-durum {{ 'teslim' if k.teslim_durum == 'Teslim alındı' else 'bekliyor' }}">{{ k.teslim_durum }}{% if k.saat %} — {{ k.saat }}{% endif %}</div>
+            </li>
+            {% endfor %}
+          </ul>
+          {% else %}
+          <p style="color:#78909c; font-size:10px;">Kargo kaydı yok.</p>
+          {% endif %}
+          <a href="/kargolar/yeni?musteri={{ musteri.id }}" class="soz-btn">+ Kargo Ekle</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sağ: Dosyalar + Sözleşme -->
+    <div class="komuta-main-col">
+      <div class="komuta-card">
+        <h3>Müşteri Dosyaları</h3>
+        <div class="card-inner">
+          <div class="dosya-grid">
+            <a href="/giris/?mid={{ musteri.id }}" class="dosya-kart" title="Görüntüle">
+              <div class="icon"><i class="fa fa-file-contract"></i></div>
+              <div class="name">Kira Sözleşmesi</div>
+              <div class="link">Görüntüle</div>
+            </a>
+            <a href="/giris/?mid={{ musteri.id }}" class="dosya-kart">
+              <div class="icon"><i class="fa fa-id-card"></i></div>
+              <div class="name">Kimlik</div>
+              <div class="link">Görüntüle</div>
+            </a>
+            <a href="/giris/?mid={{ musteri.id }}" class="dosya-kart">
+              <div class="icon"><i class="fa fa-signature"></i></div>
+              <div class="name">İmza Sirküleri</div>
+              <div class="link">Görüntüle</div>
+            </a>
+            <a href="/giris/?mid={{ musteri.id }}" class="dosya-kart">
+              <div class="icon"><i class="fa fa-folder-open"></i></div>
+              <div class="name">Ek Belgeler</div>
+              <div class="link">Görüntüle</div>
+            </a>
+          </div>
+        </div>
+      </div>
+      <div class="komuta-card">
+        <h3>Sözleşme Bitiş</h3>
+        <div class="card-inner">
+          <div class="soz-kalan">{% if kalan_gun is not none %}{{ sozlesme_bitis_str }} — {{ kalan_gun }} gün{% else %}{{ sozlesme_bitis_str }}{% endif %}</div>
+          <div class="soz-detay">TÜFE artışı: %{{ "%.0f"|format(tufe_oran) }}</div>
+          {% if artis_sonrasi_kira %}
+          <div class="soz-detay">Artış sonrası aylık kira: ₺ {{ "{:,.2f}".format(artis_sonrasi_kira).replace(",", " ") }}</div>
+          {% endif %}
+          <a href="/giris/?mid={{ musteri.id }}" class="soz-btn">Yenileme / Düzenle</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="komuta-actions">
+    <a href="/faturalar/?musteri={{ musteri.id }}" class="btn-odeme"><i class="fa fa-wallet"></i> Ödeme İşle</a>
+    <button type="button" class="btn-whatsapp" id="btnWhatsAppBottom"><i class="fa fa-whatsapp"></i> WhatsApp Hatırlat</button>
+    <a href="/kargolar/yeni?musteri={{ musteri.id }}" class="btn-kargo"><i class="fa fa-box"></i> Kargo Ekle / Teslim Al</a>
+    <a href="/giris/?mid={{ musteri.id }}" class="btn-dosya"><i class="fa fa-folder"></i> Dosyalar</a>
+  </div>
+</div>
+
+<div class="toast-holder" id="toastHolder"></div>
+
+<!-- Modal: Ödeme Al (kırmızı hücre tıklanınca) -->
+<div class="odal-overlay" id="odalOverlay">
+  <div class="odal">
+    <h4 id="odalTitle">Ödeme İşle</h4>
+    <p id="odalMesaj" style="color:#b0bec5; font-size:14px;"></p>
+    <a href="/faturalar/?musteri={{ musteri.id }}" class="btn" id="odalLink">Ödeme sayfasına git →</a>
+    <button type="button" style="background:#546e7a; color:#fff; border:none; padding:10px 18px; border-radius:6px; margin-left:8px; cursor:pointer;" onclick="document.getElementById('odalOverlay').classList.remove('show')">Kapat</button>
+  </div>
+</div>
+
+<script>
+(function() {
+  var chartData = {{ son_6_ay_chart | tojson }};
+  var ctx = document.getElementById('chart6ay');
+  if (ctx && chartData && chartData.length) {
+    new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: chartData.map(function(d) { return d.ay; }),
+        datasets: [{
+          label: 'Tahsilat (₺)',
+          data: chartData.map(function(d) { return d.tutar; }),
+          backgroundColor: 'rgba(34, 197, 94, 0.8)',
+          borderColor: '#22c55e',
+          borderWidth: 1
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          y: { beginAtZero: true, grid: { color: '#2d4060' }, ticks: { color: '#90a4ae' } },
+          x: { grid: { display: false }, ticks: { color: '#90a4ae' } }
+        }
+      }
+    });
+  }
+
+  function toast(msg, isError) {
+    var h = document.getElementById('toastHolder');
+    var d = document.createElement('div');
+    d.className = 'toast' + (isError ? ' error' : '');
+    d.textContent = msg;
+    h.appendChild(d);
+    setTimeout(function() { d.remove(); }, 3500);
+  }
+
+  document.querySelectorAll('.ay-cell.gecikti').forEach(function(cell) {
+    cell.addEventListener('click', function() {
+      var ay = this.getAttribute('data-ay');
+      var fid = this.getAttribute('data-fatura-id');
+      document.getElementById('odalTitle').textContent = 'Ödeme Al — ' + ay;
+      document.getElementById('odalMesaj').textContent = 'Bu ay için ödeme işlemini tahsilat sayfasından yapabilirsiniz.';
+      document.getElementById('odalLink').href = '/faturalar/?musteri={{ musteri.id }}' + (fid ? '&fatura_id=' + fid : '');
+      document.getElementById('odalOverlay').classList.add('show');
+      toast('Ödeme sayfasına yönlendiriliyorsunuz.');
+    });
+  });
+
+  function openWhatsApp() {
+    var metin = document.getElementById('whatsappMetin').value;
+    if (!metin.trim()) { toast('Mesaj boş.', true); return; }
+    var tel = '{{ musteri.phone or "" }}'.replace(/\D/g, '');
+    var url = 'https://wa.me/90' + (tel || '0') + '?text=' + encodeURIComponent(metin);
+    window.open(url, '_blank');
+    try { navigator.clipboard.writeText(metin); toast('Mesaj kopyalandı. WhatsApp açıldı.'); } catch(e) { toast('WhatsApp açıldı.'); }
+  }
+  document.getElementById('btnWhatsAppSend').addEventListener('click', openWhatsApp);
+  document.getElementById('btnWhatsAppBottom').addEventListener('click', function() {
+    document.getElementById('whatsappMetin').focus();
+    openWhatsApp();
+  });
+})();
+</script>
+{% endblock %}

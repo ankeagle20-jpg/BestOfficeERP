@@ -1,0 +1,288 @@
+{% extends "layout.html" %}
+
+{% block page_title %}Ofisbir İlan Robotu{% endblock %}
+
+{% block content %}
+<style>
+.ilan-wrap { max-width: 820px; margin: 0 auto; }
+.ilan-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
+.ilan-header h2 { color: #4fc3f7; margin: 0; font-size: 18px; }
+.ilan-card { background: #1e3a50; border-radius: 6px; padding: 16px; margin-bottom: 14px; }
+.ilan-card label { display: block; color: #b0bec5; font-size: 12px; margin-bottom: 6px; }
+.ilan-card input[type="text"], .ilan-card input[type="number"], .ilan-card select, .ilan-card textarea {
+  width: 100%; background: #2d4060; border: 1px solid #3d5070; color: #e0f7fa; padding: 8px 10px; border-radius: 4px; font-size: 13px; box-sizing: border-box;
+}
+.ilan-card textarea { min-height: 100px; resize: vertical; }
+.ilan-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.ilan-row.tek { grid-template-columns: 1fr; }
+.ilan-check { display: flex; flex-wrap: wrap; gap: 14px; margin: 10px 0; }
+.ilan-check label { display: flex; align-items: center; gap: 6px; margin: 0; cursor: pointer; color: #e0f7fa; font-size: 13px; }
+.ilan-check input[type="checkbox"] { width: auto; }
+.btn-ai { background: #9c27b0; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: bold; }
+.btn-ai:hover { background: #7b1fa2; }
+.btn-ai:disabled { opacity: 0.6; cursor: not-allowed; }
+.btn-kaydet { background: #00bcd4; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: bold; }
+.btn-kaydet:hover { background: #0097a7; }
+.btn-yayinla { background: #2e7d32; color: white; border: none; padding: 10px 16px; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: bold; }
+.btn-yayinla:hover { background: #1b5e20; }
+.btn-yayinla:disabled { opacity: 0.6; cursor: not-allowed; }
+.ilan-list { margin-top: 20px; }
+.ilan-list table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.ilan-list th { background: #0097a7; color: white; padding: 8px 10px; text-align: left; }
+.ilan-list td { padding: 8px 10px; border-bottom: 1px solid #2d4060; color: #e0f7fa; }
+.ilan-list tr:hover { background: #2d4060; }
+.eids-note { color: #ffcc80; font-size: 11px; margin-top: 4px; }
+</style>
+
+<div class="ilan-wrap">
+  <div class="ilan-header">
+    <h2>🏢 Ofisbir İlan Robotu</h2>
+    <span style="color:#81d4fa;font-size:12px;">Hazır / Sanal Ofis ilanı oluştur</span>
+  </div>
+
+  <form method="post" action="{{ url_for('ilan_robotu.kaydet') }}" id="form-ilan">
+    <input type="hidden" name="id" id="edit-id" value="">
+    <div class="ilan-card">
+      <label>Ofis türü *</label>
+      <select name="ofis_turu" id="ofis_turu" required>
+        <option value="">Seçin</option>
+        {% for t in ofis_turleri %}
+        <option value="{{ t }}">{{ t }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="ilan-card">
+      <label>Başlık</label>
+      <input type="text" name="baslik" id="baslik" placeholder="Örn: Çankaya’da Prestijli Sanal Ofis">
+    </div>
+    <div class="ilan-card">
+      <label>Lokasyon</label>
+      <div class="ilan-row">
+        <div><label for="il" style="margin-bottom:4px;">İl</label><input type="text" name="il" id="il" placeholder="Ankara"></div>
+        <div><label for="ilce" style="margin-bottom:4px;">İlçe</label><input type="text" name="ilce" id="ilce" placeholder="Çankaya"></div>
+      </div>
+      <label for="adres" style="margin-top:10px;">Adres</label>
+      <input type="text" name="adres" id="adres" placeholder="Semt / tam adres">
+    </div>
+    <div class="ilan-card">
+      <label>Fiyat (aylık)</label>
+      <div class="ilan-row" style="grid-template-columns: 1fr auto;">
+        <input type="text" name="aylik_fiyat" id="aylik_fiyat" placeholder="Örn: 1500">
+        <select name="para_birimi" style="width:80px;"><option value="TRY">₺</option></select>
+      </div>
+    </div>
+    <div class="ilan-card">
+      <label>Dahil hizmetler</label>
+      <div class="ilan-check">
+        <label><input type="checkbox" name="yasal_adres" value="1" id="yasal_adres"> Yasal Adres</label>
+        <label><input type="checkbox" name="sekreterya_karsilama" value="1" id="sekreterya_karsilama"> Sekreterya Karşılama</label>
+        <label><input type="checkbox" name="posta_takibi" value="1" id="posta_takibi"> Posta Takibi</label>
+        <label><input type="checkbox" name="toplanti_odasi" value="1" id="toplanti_odasi"> Toplantı Odası Kullanımı</label>
+      </div>
+    </div>
+    <div class="ilan-card">
+      <label>Hizmete Dahil Ücretsiz Özellikler</label>
+      <div class="ilan-check">
+        <label><input type="checkbox" name="sinirsiz_cay_kahve" value="1" id="sinirsiz_cay_kahve"> Sınırsız Çay-Kahve</label>
+        <label><input type="checkbox" name="fiber_internet" value="1" id="fiber_internet"> Fiber İnternet</label>
+        <label><input type="checkbox" name="numara_0850_tahsisi" value="1" id="numara_0850_tahsisi"> 0850'li Numara Tahsisi</label>
+        <label><input type="checkbox" name="anlik_bildirim_sistemi" value="1" id="anlik_bildirim_sistemi"> Anlık Bildirim Sistemi</label>
+        <label><input type="checkbox" name="misafir_agirlama" value="1" id="misafir_agirlama"> Misafir Ağırlama</label>
+        <label><input type="checkbox" name="mutfak_erisimi" value="1" id="mutfak_erisimi"> Mutfak Erişimi</label>
+        <label><input type="checkbox" name="temizlik_hizmeti" value="1" id="temizlik_hizmeti"> Temizlik Hizmeti</label>
+      </div>
+    </div>
+    <div class="ilan-card">
+      <label>EİDS yetki no (15 Şubat 2026 sonrası zorunlu)</label>
+      <input type="text" name="eids_yetki_no" id="eids_yetki_no" placeholder="e-Devlet ilan verme yetki numarası">
+      <p class="eids-note">Mülk sahibinin e-Devlet üzerinden Ofisbir’e verdiği ilan verme yetki numarası.</p>
+    </div>
+    <div class="ilan-card">
+      <label>İlan açıklaması (AI ile üret veya elle yaz)</label>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+        <button type="button" class="btn-ai" id="btn-ai">🤖 Gemini ile metin üret</button>
+        <span id="ai-durum" style="font-size:12px;color:#81d4fa;"></span>
+      </div>
+      <textarea name="aciklama" id="aciklama" placeholder="İlan metni buraya…"></textarea>
+      <input type="hidden" name="aciklama_ai" id="aciklama_ai" value="">
+    </div>
+    <div class="ilan-card">
+      <label>Resim yolları (isteğe bağlı, virgülle ayırın)</label>
+      <input type="text" name="resim_yollari" id="resim_yollari" placeholder="C:\resim1.jpg, C:\resim2.jpg">
+    </div>
+    <div class="ilan-card">
+      <button type="submit" class="btn-kaydet">💾 Taslağı kaydet</button>
+    </div>
+    <div class="ilan-card" style="border:1px solid #4fc3f7;">
+      <label>İlan sitelerine otomatik yükle (Selenium robotu)</label>
+      <p style="color:#b0bec5;font-size:12px;margin-bottom:10px;">Önce taslağı kaydedin veya formu doldurun. Butona basınca tarayıcı açılır; giriş bilgileriniz .env dosyasında tanımlı olmalı.</p>
+      <div style="display:flex;flex-wrap:wrap;gap:10px;">
+        <button type="button" class="btn-yayinla" id="btn-yayinla-sahibinden">📤 Sahibinden – Şimdi Yayınla</button>
+        <button type="button" class="btn-yayinla" id="btn-yayinla-hepsiemlak">📤 Hepsiemlak – Şimdi Yayınla</button>
+      </div>
+      <span id="yayinla-durum" style="font-size:12px;color:#81d4fa;display:block;margin-top:8px;"></span>
+    </div>
+  </form>
+
+  <div class="ilan-card ilan-list">
+    <label>Son ilanlar</label>
+    <table>
+      <thead>
+        <tr><th>Başlık</th><th>Tür</th><th>Lokasyon</th><th>Fiyat</th><th>Durum</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for i in ilanlar %}
+        <tr data-id="{{ i.id }}" data-ofis-turu="{{ i.ofis_turu or '' }}" data-baslik="{{ (i.baslik or '')|e }}"
+            data-il="{{ i.il or '' }}" data-ilce="{{ i.ilce or '' }}" data-adres="{{ (i.adres or '')|e }}"
+            data-fiyat="{{ i.aylik_fiyat or '' }}" data-eids="{{ i.eids_yetki_no or '' }}"
+            data-aciklama="{{ ((i.aciklama or i.aciklama_ai or '')[:2000])|e }}"
+            data-yasal="{{ 1 if i.yasal_adres else 0 }}" data-sekreterya="{{ 1 if i.sekreterya_karsilama else 0 }}"
+            data-posta="{{ 1 if i.posta_takibi else 0 }}" data-toplanti="{{ 1 if i.toplanti_odasi else 0 }}"
+            data-sinirsiz-cay="{{ 1 if i.sinirsiz_cay_kahve else 0 }}" data-fiber="{{ 1 if i.fiber_internet else 0 }}"
+            data-numara0850="{{ 1 if i.numara_0850_tahsisi else 0 }}" data-anlik-bildirim="{{ 1 if i.anlik_bildirim_sistemi else 0 }}"
+            data-misafir="{{ 1 if i.misafir_agirlama else 0 }}" data-mutfak="{{ 1 if i.mutfak_erisimi else 0 }}" data-temizlik="{{ 1 if i.temizlik_hizmeti else 0 }}">
+          <td>{{ i.baslik or '—' }}</td>
+          <td>{{ i.ofis_turu }}</td>
+          <td>{{ i.il or '—' }} {{ i.ilce or '' }}</td>
+          <td>{{ '%.0f'|format(i.aylik_fiyat or 0) }} ₺</td>
+          <td>{{ i.status or 'taslak' }}</td>
+          <td>
+            <a href="#" class="btn-duzenle" style="color:#4fc3f7;">Düzenle</a>
+            <form method="post" action="{{ url_for('ilan_robotu.sil', rid=i.id) }}" style="display:inline;" onsubmit="return confirm('Silmek istediğinize emin misiniz?');">
+              <button type="submit" style="background:none;border:none;color:#f48fb1;cursor:pointer;font-size:12px;">Sil</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+        {% if not ilanlar %}
+        <tr><td colspan="6" style="color:#78909c;">Henüz ilan yok.</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const API_AI = "{{ url_for('ilan_robotu.api_ai_metin') }}";
+const API_YAYINLA_SAHIBINDEN = "{{ url_for('ilan_robotu.yayinla', platform='sahibinden') }}";
+const API_YAYINLA_HEPSIEMLAK = "{{ url_for('ilan_robotu.yayinla', platform='hepsiemlak') }}";
+const geminiAvailable = {{ 'true' if gemini_available else 'false' }};
+
+function yayinlaGonder(platform) {
+  var durum = document.getElementById('yayinla-durum');
+  var btn = document.getElementById('btn-yayinla-' + platform);
+  if (btn) btn.disabled = true;
+  durum.textContent = 'Robot başlatılıyor…';
+  var ilanId = document.getElementById('edit-id').value;
+  var body = {};
+  if (ilanId) {
+    body.ilan_id = parseInt(ilanId, 10);
+  } else {
+    body.baslik = document.getElementById('baslik').value;
+    body.fiyat = document.getElementById('aylik_fiyat').value;
+    body.eids_no = document.getElementById('eids_yetki_no').value;
+    body.aciklama = document.getElementById('aciklama').value;
+    var resimStr = document.getElementById('resim_yollari').value;
+    body.resim_yollari = resimStr ? resimStr.split(',').map(function(s) { return s.trim(); }).filter(Boolean) : [];
+  }
+  var url = platform === 'sahibinden' ? API_YAYINLA_SAHIBINDEN : API_YAYINLA_HEPSIEMLAK;
+  fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  })
+  .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, status: r.status, d: d }; }); })
+  .then(function(o) {
+    if (o.ok || o.status === 202) {
+      durum.textContent = o.d.mesaj || 'Yayınlama başlatıldı. Tarayıcı açılacak.';
+    } else {
+      durum.textContent = o.d.mesaj || 'İstek başarısız.';
+    }
+  })
+  .catch(function(e) {
+    durum.textContent = 'Bağlantı hatası.';
+  })
+  .finally(function() {
+    if (btn) btn.disabled = false;
+  });
+}
+
+document.getElementById('btn-yayinla-sahibinden').addEventListener('click', function() { yayinlaGonder('sahibinden'); });
+document.getElementById('btn-yayinla-hepsiemlak').addEventListener('click', function() { yayinlaGonder('hepsiemlak'); });
+
+document.querySelectorAll('.btn-duzenle').forEach(function(a) {
+  a.addEventListener('click', function(e) {
+    e.preventDefault();
+    var tr = this.closest('tr');
+    if (!tr) return;
+    document.getElementById('edit-id').value = tr.dataset.id || '';
+    document.getElementById('ofis_turu').value = tr.dataset.ofisTuru || '';
+    document.getElementById('baslik').value = tr.dataset.baslik || '';
+    document.getElementById('il').value = tr.dataset.il || '';
+    document.getElementById('ilce').value = tr.dataset.ilce || '';
+    document.getElementById('adres').value = tr.dataset.adres || '';
+    document.getElementById('aylik_fiyat').value = tr.dataset.fiyat || '';
+    document.getElementById('eids_yetki_no').value = tr.dataset.eids || '';
+    document.getElementById('aciklama').value = tr.dataset.aciklama || '';
+    document.getElementById('yasal_adres').checked = tr.dataset.yasal === '1';
+    document.getElementById('sekreterya_karsilama').checked = tr.dataset.sekreterya === '1';
+    document.getElementById('posta_takibi').checked = tr.dataset.posta === '1';
+    document.getElementById('toplanti_odasi').checked = tr.dataset.toplanti === '1';
+    document.getElementById('sinirsiz_cay_kahve').checked = tr.dataset.sinirsizCay === '1';
+    document.getElementById('fiber_internet').checked = tr.dataset.fiber === '1';
+    document.getElementById('numara_0850_tahsisi').checked = tr.dataset.numara0850 === '1';
+    document.getElementById('anlik_bildirim_sistemi').checked = tr.dataset.anlikBildirim === '1';
+    document.getElementById('misafir_agirlama').checked = tr.dataset.misafir === '1';
+    document.getElementById('mutfak_erisimi').checked = tr.dataset.mutfak === '1';
+    document.getElementById('temizlik_hizmeti').checked = tr.dataset.temizlik === '1';
+    document.querySelector('.btn-kaydet').textContent = '💾 Güncelle';
+    window.scrollTo(0, 0);
+  });
+});
+
+document.getElementById('btn-ai').addEventListener('click', function() {
+  if (!geminiAvailable) {
+    document.getElementById('ai-durum').textContent = 'Gemini API key gerekli (.env)';
+    return;
+  }
+  const durum = document.getElementById('ai-durum');
+  durum.textContent = 'Üretiliyor…';
+  this.disabled = true;
+  fetch(API_AI, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      ofis_turu: document.getElementById('ofis_turu').value,
+      baslik: document.getElementById('baslik').value,
+      il: document.getElementById('il').value,
+      ilce: document.getElementById('ilce').value,
+      adres: document.getElementById('adres').value,
+      aylik_fiyat: document.getElementById('aylik_fiyat').value,
+      yasal_adres: document.getElementById('yasal_adres').checked,
+      sekreterya_karsilama: document.getElementById('sekreterya_karsilama').checked,
+      posta_takibi: document.getElementById('posta_takibi').checked,
+      toplanti_odasi: document.getElementById('toplanti_odasi').checked,
+      sinirsiz_cay_kahve: document.getElementById('sinirsiz_cay_kahve').checked,
+      fiber_internet: document.getElementById('fiber_internet').checked,
+      numara_0850_tahsisi: document.getElementById('numara_0850_tahsisi').checked,
+      anlik_bildirim_sistemi: document.getElementById('anlik_bildirim_sistemi').checked,
+      misafir_agirlama: document.getElementById('misafir_agirlama').checked,
+      mutfak_erisimi: document.getElementById('mutfak_erisimi').checked,
+      temizlik_hizmeti: document.getElementById('temizlik_hizmeti').checked
+    })
+  })
+  .then(r => r.json())
+  .then(d => {
+    if (d.ok && d.metin) {
+      document.getElementById('aciklama').value = d.metin;
+      document.getElementById('aciklama_ai').value = d.metin;
+      durum.textContent = 'Metin oluşturuldu.';
+    } else {
+      durum.textContent = d.hata || 'Hata oluştu.';
+    }
+  })
+  .catch(e => { durum.textContent = 'Bağlantı hatası.'; })
+  .finally(() => { document.getElementById('btn-ai').disabled = false; });
+});
+</script>
+{% endblock %}

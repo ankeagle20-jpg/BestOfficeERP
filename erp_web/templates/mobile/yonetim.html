@@ -1,0 +1,25 @@
+{% extends "mobile/base.html" %}
+{% block page_title %}Yönetim{% endblock %}
+{% block content %}
+<div class="card">
+    <h3>Günlük Ciro</h3>
+    <div style="font-size:22px; font-weight:700; color:#22c55e;">₺ {{ "{:,.0f}".format(gunluk_ciro).replace(",", " ") }}</div>
+</div>
+<div class="card">
+    <h3>Aylık Ciro</h3>
+    <div style="font-size:22px; font-weight:700; color:#4fc3f7;">₺ {{ "{:,.0f}".format(aylik_ciro).replace(",", " ") }}</div>
+</div>
+<div class="card">
+    <h3>Geciken Toplam</h3>
+    <div style="font-size:22px; font-weight:700; color:#ef4444;">₺ {{ "{:,.0f}".format(geciken_toplam).replace(",", " ") }}</div>
+</div>
+<div class="card">
+    <h3>Doluluk Oranı</h3>
+    <div style="font-size:22px; font-weight:700;">%{{ doluluk }}</div>
+</div>
+<div class="card">
+    <h3>Sözleşme Bitiş Alarmı (30 gün)</h3>
+    <div style="font-size:22px; font-weight:700;">{{ sozlesme_alarm }} müşteri</div>
+</div>
+<p style="color:#90a4ae; font-size:12px; text-align:center; margin-top:12px;">Derin raporlar masaüstünde.</p>
+{% endblock %}

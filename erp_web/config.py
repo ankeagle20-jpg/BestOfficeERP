@@ -30,3 +30,6 @@ class Config:
     APP_NAME = "OFİSBİR ERP"
     VERSION = "2.0.0"
     DEBUG = os.environ.get("DEBUG", "false").lower() == "true"
+
+    # Gemini AI (opsiyonel; .env içinde GEMINI_API_KEY=...)
+    GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()

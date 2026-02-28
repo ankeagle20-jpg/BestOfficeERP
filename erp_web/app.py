@@ -37,8 +37,17 @@ from routes.personel_routes import bp as personel_bp
 from routes.banka_routes    import bp as banka_bp
 from routes.giris_routes    import bp as giris_bp
 from routes.urun_routes     import bp as urun_bp
+from routes.dashboard_routes import bp as dashboard_bp
+from routes.mobile_routes import bp as mobile_bp
+try:
+    from routes.ilan_robotu_routes import bp as ilan_robotu_bp
+except Exception as e:
+    ilan_robotu_bp = None
+    print("⚠ İlan Robotu blueprint yüklenemedi:", e)
 
 app.register_blueprint(auth_bp)
+app.register_blueprint(dashboard_bp, url_prefix="/dashboard")
+app.register_blueprint(mobile_bp)
 app.register_blueprint(admin_bp,   url_prefix="/admin")
 app.register_blueprint(musteri_bp, url_prefix="/musteriler")
 app.register_blueprint(faturalar_bp,  url_prefix="/faturalar")
@@ -51,13 +60,15 @@ app.register_blueprint(personel_bp, url_prefix="/personel")
 app.register_blueprint(banka_bp, url_prefix="/bankalar")
 app.register_blueprint(urun_bp, url_prefix="/urunler")
 app.register_blueprint(giris_bp, url_prefix="/giris")
+if ilan_robotu_bp is not None:
+    app.register_blueprint(ilan_robotu_bp, url_prefix="/ilan-robotu")
 
 # ── Ana sayfa ────────────────────────────────────────────────────────────────
 @app.route("/")
 @login_required
 def index():
-    """Redirect to customers page for quicker access."""
-    return redirect(url_for("musteriler.index"))
+    """Sekreterya Dashboard — tek ekranda tüm operasyonlar."""
+    return redirect(url_for("dashboard.index"))
 
 # ── Hata sayfaları ───────────────────────────────────────────────────────────
 @app.errorhandler(403)
@@ -99,7 +110,7 @@ def inject_globals():
     current_section_label = None
     try:
         from flask import request
-        if request.endpoint == "index":
+        if request.endpoint == "index" or (getattr(request, "blueprint", None) == "dashboard"):
             current_section_label = "Dashboard"
         elif getattr(request, "blueprint", None):
             for m in menu_items:

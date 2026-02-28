@@ -45,42 +45,48 @@ class User:
         menu = []
         
         if self.role == "admin":
-            # Admin tüm menüleri görebilir
+            # Admin tüm menüleri görebilir (sıra: görsel menü ile uyumlu)
             menu = [
-                {"id": "admin", "label": "Yönetim", "url": "admin.index"},
                 {"id": "musteriler", "label": "Müşteriler", "url": "musteriler.index"},
-                {"id": "giris", "label": "Giriş", "url": "giris.index"},
+                {"id": "faturalar", "label": "Finans", "url": "faturalar.index"},
                 {"id": "ofisler", "label": "Ofisler", "url": "ofisler.index"},
-                {"id": "personel", "label": "Personel", "url": "personel.index"},
                 {"id": "urunler", "label": "Ürünler", "url": "urunler.index"},
-                {"id": "faturalar", "label": "Faturalar", "url": "faturalar.index"},
-                {"id": "tahsilat", "label": "Tahsilat", "url": "tahsilat.index"},
+                {"id": "kira", "label": "Kira", "url": "kira.index"},
                 {"id": "kargolar", "label": "Kargolar", "url": "kargolar.index"},
                 {"id": "bankalar", "label": "Bankalar", "url": "bankalar.index"},
-                {"id": "kira", "label": "Kira", "url": "kira.index"},
                 {"id": "tufe", "label": "TÜFE", "url": "tufe.index"},
+                {"id": "personel", "label": "Personel", "url": "personel.index"},
+                {"id": "ilan_robotu", "label": "İlan Robotu", "url": "ilan_robotu.index"},
+                {"id": "giris", "label": "Giriş", "url": "giris.index"},
+                {"id": "admin", "label": "Yönetim", "url": "admin.index"},
             ]
         elif self.role == "muhasebe":
-            # Muhasebe mali konuları görebilir
+            # Muhasebe mali konuları görebilir (aynı sıra)
             menu = [
                 {"id": "musteriler", "label": "Müşteriler", "url": "musteriler.index"},
-                {"id": "faturalar", "label": "Faturalar", "url": "faturalar.index"},
+                {"id": "faturalar", "label": "Finans", "url": "faturalar.index"},
+                {"id": "ofisler", "label": "Ofisler", "url": "ofisler.index"},
                 {"id": "urunler", "label": "Ürünler", "url": "urunler.index"},
-                {"id": "tahsilat", "label": "Tahsilat", "url": "tahsilat.index"},
-                {"id": "bankalar", "label": "Bankalar", "url": "bankalar.index"},
                 {"id": "kira", "label": "Kira", "url": "kira.index"},
+                {"id": "kargolar", "label": "Kargolar", "url": "kargolar.index"},
+                {"id": "bankalar", "label": "Bankalar", "url": "bankalar.index"},
                 {"id": "tufe", "label": "TÜFE", "url": "tufe.index"},
+                {"id": "ilan_robotu", "label": "İlan Robotu", "url": "ilan_robotu.index"},
+                {"id": "giris", "label": "Giriş", "url": "giris.index"},
             ]
         elif self.role == "personel":
-            # Personel müşteri ve fatura görebilir
+            # Personel müşteri ve fatura görebilir (aynı sıra)
             menu = [
                 {"id": "musteriler", "label": "Müşteriler", "url": "musteriler.index"},
+                {"id": "faturalar", "label": "Finans", "url": "faturalar.index"},
                 {"id": "ofisler", "label": "Ofisler", "url": "ofisler.index"},
-                {"id": "personel", "label": "Personel", "url": "personel.index"},
                 {"id": "urunler", "label": "Ürünler", "url": "urunler.index"},
-                {"id": "faturalar", "label": "Faturalar", "url": "faturalar.index"},
-                {"id": "tahsilat", "label": "Tahsilat", "url": "tahsilat.index"},
+                {"id": "kira", "label": "Kira", "url": "kira.index"},
+                {"id": "kargolar", "label": "Kargolar", "url": "kargolar.index"},
                 {"id": "bankalar", "label": "Bankalar", "url": "bankalar.index"},
+                {"id": "personel", "label": "Personel", "url": "personel.index"},
+                {"id": "ilan_robotu", "label": "İlan Robotu", "url": "ilan_robotu.index"},
+                {"id": "giris", "label": "Giriş", "url": "giris.index"},
             ]
         else:  # misafir
             # Misafir sadece fatura görebilir

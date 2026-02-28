@@ -1,0 +1,60 @@
+{% extends "mobile/base.html" %}
+{% block page_title %}Tahsilat{% endblock %}
+{% block content %}
+<div class="card">
+    <h3>Bugün Tahsil Edilecekler</h3>
+    {% if bugun_list %}
+    {% for r in bugun_list %}
+    <div class="list-item dikkat" style="margin-bottom:8px;">
+        <div><strong>{{ r.musteri_adi }}</strong><br><span style="font-size:12px;">{{ r.office_code or '—' }}</span></div>
+        <div style="font-weight:700;">₺ {{ "{:,.0f}".format(r.toplam).replace(",", " ") }}</div>
+        <div class="swipe-actions" style="width:100%; margin-top:8px;">
+            <a href="{{ url_for('mobile.musteri_detay', mid=r.musteri_id) }}" class="btn btn-blue" style="padding:6px 10px; font-size:11px;"><i class="fa fa-search"></i> Ara</a>
+            <a href="https://wa.me/90{{ r.phone|replace(' ','')|replace('-','')|replace('(','')|replace(')','') }}" class="btn btn-green" style="padding:6px 10px; font-size:11px;"><i class="fa fa-whatsapp"></i></a>
+            <a href="/faturalar/?musteri={{ r.musteri_id }}" class="btn btn-red" style="padding:6px 10px; font-size:11px;"><i class="fa fa-wallet"></i> Ödeme</a>
+        </div>
+    </div>
+    {% endfor %}
+    {% else %}
+    <p style="color:#90a4ae;">Bugün vadesi gelen yok.</p>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h3>7+ Gün Gecikenler</h3>
+    {% if yedi_list %}
+    {% for r in yedi_list %}
+    <div class="list-item dikkat" style="margin-bottom:8px;">
+        <div><strong>{{ r.musteri_adi }}</strong><br><span style="font-size:12px;">{{ r.geciken_gun }} gün · {{ r.office_code or '—' }}</span></div>
+        <div style="font-weight:700; color:#eab308;">₺ {{ "{:,.0f}".format(r.toplam).replace(",", " ") }}</div>
+        <div class="swipe-actions" style="width:100%; margin-top:8px;">
+            <a href="{{ url_for('mobile.musteri_detay', mid=r.musteri_id) }}" class="btn btn-blue" style="padding:6px 10px; font-size:11px;">Ara</a>
+            <a href="https://wa.me/90{{ r.phone|replace(' ','')|replace('-','')|replace('(','')|replace(')','') }}" class="btn btn-green" style="padding:6px 10px; font-size:11px;">WhatsApp</a>
+            <a href="/faturalar/?musteri={{ r.musteri_id }}" class="btn btn-red" style="padding:6px 10px; font-size:11px;">Ödeme</a>
+        </div>
+    </div>
+    {% endfor %}
+    {% else %}
+    <p style="color:#90a4ae;">7+ gün geciken yok.</p>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h3>30+ Kritik</h3>
+    {% if otuz_list %}
+    {% for r in otuz_list %}
+    <div class="list-item kritik" style="margin-bottom:8px;">
+        <div><strong>{{ r.musteri_adi }}</strong><br><span style="font-size:12px;">{{ r.geciken_gun }} gün gecikme</span></div>
+        <div style="font-weight:700; color:#ef4444;">₺ {{ "{:,.0f}".format(r.toplam).replace(",", " ") }}</div>
+        <div class="swipe-actions" style="width:100%; margin-top:8px;">
+            <a href="{{ url_for('mobile.musteri_detay', mid=r.musteri_id) }}" class="btn btn-blue" style="padding:6px 10px; font-size:11px;">Ara</a>
+            <a href="https://wa.me/90{{ r.phone|replace(' ','')|replace('-','')|replace('(','')|replace(')','') }}" class="btn btn-green" style="padding:6px 10px; font-size:11px;">WhatsApp</a>
+            <a href="/faturalar/?musteri={{ r.musteri_id }}" class="btn btn-red" style="padding:6px 10px; font-size:11px;">Ödeme</a>
+        </div>
+    </div>
+    {% endfor %}
+    {% else %}
+    <p style="color:#90a4ae;">30+ kritik yok.</p>
+    {% endif %}
+</div>
+{% endblock %}

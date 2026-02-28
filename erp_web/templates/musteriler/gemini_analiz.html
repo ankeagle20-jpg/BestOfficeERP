@@ -1,0 +1,104 @@
+{% extends "layout.html" %}
+
+{% block page_title %}Gemini AI Analiz - Müşteriler{% endblock %}
+
+{% block content %}
+<style>
+.gemini-wrap { max-width: 720px; margin: 0 auto; }
+.gemini-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
+.gemini-header h2 { color: #4fc3f7; margin: 0; font-size: 18px; }
+.gemini-badge { font-size: 11px; padding: 4px 8px; border-radius: 4px; }
+.gemini-badge.on { background: #2e7d32; color: #fff; }
+.gemini-badge.off { background: #5c6bc0; color: #e8eaf6; }
+.gemini-card { background: #1e3a50; border-radius: 6px; padding: 16px; margin-bottom: 12px; }
+.gemini-card label { display: block; color: #b0bec5; font-size: 12px; margin-bottom: 6px; }
+.gemini-card textarea { width: 100%; min-height: 80px; background: #2d4060; border: 1px solid #3d5070; color: #e0f7fa; padding: 10px; border-radius: 4px; font-size: 13px; resize: vertical; box-sizing: border-box; }
+.gemini-actions { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+.gemini-btn { background: #9c27b0; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: bold; }
+.gemini-btn:hover { background: #7b1fa2; }
+.gemini-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.gemini-result { background: #0f2537; border: 1px solid #2d4060; border-radius: 6px; padding: 14px; margin-top: 12px; white-space: pre-wrap; color: #e0f7fa; font-size: 13px; line-height: 1.5; min-height: 60px; }
+.gemini-result.error { border-color: #c62828; color: #ffcdd2; }
+.gemini-result.loading { color: #81d4fa; }
+.gemini-back { color: #81d4fa; text-decoration: none; font-size: 13px; }
+.gemini-back:hover { text-decoration: underline; }
+</style>
+
+<div class="gemini-wrap">
+  <div class="gemini-header">
+    <h2>🤖 Gemini AI Analiz</h2>
+    <span class="gemini-badge {{ 'on' if gemini_available else 'off' }}">
+      {{ 'API bağlı' if gemini_available else 'API key gerekli' }}
+    </span>
+  </div>
+
+  {% if not gemini_available %}
+  <div class="gemini-card">
+    <p style="color:#ffcc80; margin:0 0 8px 0;">Gemini’yi açmak için:</p>
+    <ol style="color:#e0f7fa; margin:0; padding-left:20px; font-size:13px; line-height:1.6;">
+      <li><strong>Ücretsiz API anahtarı alın:</strong> <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" style="color:#4fc3f7;">aistudio.google.com/apikey</a></li>
+      <li><strong>Projede</strong> <code>erp_web\.env</code> dosyasını açın (yoksa <code>.env.example</code>’ı kopyalayıp <code>.env</code> yapın).</li>
+      <li>İçine şu satırı ekleyin: <code style="background:#0f2537;padding:2px 6px;">GEMINI_API_KEY=buraya_anahtarinizi_yapistirin</code></li>
+      <li>Uygulamayı yeniden başlatıp bu sayfayı tekrar açın.</li>
+    </ol>
+  </div>
+  {% endif %}
+
+  <div class="gemini-card">
+    <label for="soru">Soru (isteğe bağlı — boş bırakırsanız genel özet/analiz yapılır)</label>
+    <textarea id="soru" placeholder="Örn: Ödenmeyen faturaları nasıl azaltabiliriz? En yüksek kira getiren 3 müşteri kim?"></textarea>
+    <div class="gemini-actions">
+      <button type="button" class="gemini-btn" id="btn-analiz">Analiz et</button>
+      <a href="{{ url_for('musteriler.index') }}" class="gemini-back">← Müşterilere dön</a>
+    </div>
+  </div>
+
+  <div class="gemini-card">
+    <label>Sonuç</label>
+    <div class="gemini-result" id="sonuc">Analiz et butonuna tıklayın.</div>
+  </div>
+</div>
+
+<script>
+(function() {
+  const sonucEl = document.getElementById('sonuc');
+  const btn = document.getElementById('btn-analiz');
+  const soruEl = document.getElementById('soru');
+  const geminiAvailable = {{ 'true' if gemini_available else 'false' }};
+
+  function setSonuc(html, isError, isLoading) {
+    sonucEl.className = 'gemini-result' + (isError ? ' error' : '') + (isLoading ? ' loading' : '');
+    sonucEl.innerHTML = html;
+  }
+
+  btn.addEventListener('click', function() {
+    if (!geminiAvailable) {
+      setSonuc('API anahtarı tanımlı değil. .env dosyasına GEMINI_API_KEY ekleyin.', true);
+      return;
+    }
+    setSonuc('İstek gönderiliyor…', false, true);
+    btn.disabled = true;
+
+    fetch("{{ url_for('musteriler.api_gemini_analiz') }}", {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+      body: JSON.stringify({ soru: soruEl.value.trim() })
+    })
+      .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+      .then(function({ ok, data }) {
+        if (ok && data.metin) {
+          setSonuc(data.metin.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>'), false);
+        } else {
+          setSonuc((data.hata || data.mesaj || 'Bilinmeyen hata').replace(/</g, '&lt;').replace(/>/g, '&gt;'), true);
+        }
+      })
+      .catch(function(e) {
+        setSonuc('Bağlantı hatası: ' + (e.message || 'Tekrar deneyin.'), true);
+      })
+      .finally(function() {
+        btn.disabled = false;
+      });
+  });
+})();
+</script>
+{% endblock %}
