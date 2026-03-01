@@ -19,7 +19,15 @@ def login():
         
         if user:
             flash(f"Hoş geldiniz, {user.full_name}!", "success")
-            return redirect(request.args.get("next") or url_for("index"))
+            # next: GET'ten veya form POST'tan (mobilde giriş sonrası /m/dashboard'a dönmek için)
+            next_url = (request.args.get("next") or request.form.get("next") or "").strip()
+            # Sadece güvenli (relative) next kabul et; açık yönlendirme engelle
+            if next_url and not next_url.startswith("//") and next_url.startswith("/"):
+                from urllib.parse import urlparse
+                p = urlparse(next_url)
+                if not p.netloc:
+                    return redirect(next_url)
+            return redirect(url_for("index"))
         else:
             flash("Kullanıcı adı veya şifre hatalı!", "danger")
     

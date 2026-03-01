@@ -164,9 +164,11 @@ def ilk_kurulum():
     except Exception as e:
         print(f"Warning - setup error: {e}")
 
+# Uygulama yüklendiğinde (gunicorn/Render dahil) şema ve admin kontrolü
+ilk_kurulum()
+
 # ── Uygulamayı başlat ────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    ilk_kurulum()
     # Enable debug for local troubleshooting
     app.debug = True
     app.run(debug=True, host="0.0.0.0", port=5000)

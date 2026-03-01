@@ -5,7 +5,7 @@ Flask-Login + Supabase PostgreSQL
 from flask_login import LoginManager, UserMixin, login_user, current_user
 from werkzeug.security import check_password_hash, generate_password_hash
 from functools import wraps
-from flask import abort, flash, redirect, url_for
+from flask import abort, flash, redirect, request, url_for
 from db import fetch_one, fetch_all
 import psycopg2
 from config import Config
@@ -254,7 +254,10 @@ def giris_gerekli(f):
     def decorated_function(*args, **kwargs):
         if not current_user.is_authenticated:
             flash("Bu sayfaya erişmek için giriş yapmalısınız.", "warning")
-            return redirect(url_for("auth.login"))
+            next_url = request.path
+            if request.query_string:
+                next_url = next_url + "?" + request.query_string.decode("utf-8", errors="replace")
+            return redirect(url_for("auth.login", next=next_url))
         return f(*args, **kwargs)
     return decorated_function
 

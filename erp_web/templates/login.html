@@ -88,6 +88,9 @@
     {% endfor %}
 
     <form method="POST" action="{{ url_for('auth.login') }}">
+      {% if request.args.get('next') %}
+      <input type="hidden" name="next" value="{{ request.args.get('next') }}">
+      {% endif %}
       <label>Kullanıcı Adı</label>
       <input type="text" name="username" autofocus autocomplete="username"
              placeholder="kullanici_adi" required>
