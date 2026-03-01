@@ -312,7 +312,12 @@ def list_full():
 @giris_gerekli
 def index():
     """Müşteri Fintech Komuta Paneli — analiz dashboard + müşteri listesi drawer."""
-    data = _fintech_dashboard_data()
+    try:
+        data = _fintech_dashboard_data()
+    except Exception as e:
+        print(f"Fintech dashboard error: {e}")
+        data = {}
+        
     import_sonuc = request.args.get("import_sonuc")
     imported = request.args.get("imported", type=int)
     import_hatalar = request.args.get("import_hatalar", type=int) or 0
