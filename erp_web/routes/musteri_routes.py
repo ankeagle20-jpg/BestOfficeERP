@@ -336,14 +336,16 @@ def list_full():
 @bp.route("/")
 @giris_gerekli
 def index():
-    data = _fintech_dashboard_data()
+    """Müşteri Fintech Komuta Paneli — ana sayfa."""
+    try:
+        data = _fintech_dashboard_data()
+    except Exception as e:
+        print(f"Fintech dashboard error (index): {e}")
+        data = _fintech_defaults()
     import_sonuc = request.args.get("import_sonuc")
     imported = request.args.get("imported", type=int)
     import_hatalar = request.args.get("import_hatalar", type=int) or 0
     bugun = date.today()
-    now_year = bugun.year
-    now_month = bugun.month
-    MONTHS_TR = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"]
     return render_template(
         "musteriler/fintech.html",
         **data,
@@ -351,8 +353,8 @@ def index():
         imported=imported or 0,
         import_hatalar=import_hatalar,
         bugun=bugun,
-        now_year=now_year,
-        now_month=now_month,
+        now_year=bugun.year,
+        now_month=bugun.month,
         MONTHS_TR=MONTHS_TR,
     )
 
