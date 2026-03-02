@@ -428,6 +428,7 @@
       <a href="{{ url_for('musteriler.list_full') }}" class="ops-btn ops-teal"><span class="icon"><i class="fa fa-list"></i></span><span class="label">Müşteri Listesi</span><span class="badge">{{ musteriler|length }}</span></a>
       <a href="#" id="btn-fintech-musteri-ekle" class="analiz-btn blue" role="button"><i class="fa fa-plus"></i><span class="analiz-btn-text">+ Müşteri Ekle</span></a>
       <a href="{{ url_for('musteriler.list_full', filtre='risk') }}" class="analiz-btn red"><i class="fa fa-cube"></i><span class="analiz-btn-text">Risk Analizi</span></a>
+      <a href="{{ url_for('musteriler.list_full', filtre='kefillik') }}" class="analiz-btn blue"><i class="fa fa-users"></i><span class="analiz-btn-text">Kefillik Analizi</span></a>
       <a href="{{ url_for('tufe.index') }}" class="analiz-btn orange"><i class="fa fa-chart-line"></i><span class="analiz-btn-text">TÜFE Simülasyonu</span></a>
       <a href="{{ url_for('musteriler.list_full', filtre='whatsapp') }}" class="analiz-btn green"><i class="fa fa-whatsapp"></i><span class="analiz-btn-text">WhatsApp Toplu Gönder</span></a>
       <a href="{{ url_for('musteriler.export_excel') }}" class="analiz-btn cyan"><i class="fa fa-file-excel"></i><span class="analiz-btn-text">Excel</span></a>

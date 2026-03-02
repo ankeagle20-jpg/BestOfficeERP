@@ -337,9 +337,11 @@ def list_full():
 @giris_gerekli
 def index():
     """Müşteri Fintech Komuta Paneli — ana sayfa."""
+    import traceback
     try:
         data = _fintech_dashboard_data()
     except Exception as e:
+        traceback.print_exc()
         print(f"Fintech dashboard error (index): {e}")
         data = _fintech_defaults()
     import_sonuc = request.args.get("import_sonuc")
@@ -347,27 +349,34 @@ def index():
     import_hatalar = request.args.get("import_hatalar", type=int) or 0
     bugun = date.today()
     MONTHS_TR = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"]
-    return render_template(
-        "musteriler/fintech.html",
-        **data,
-        import_sonuc=import_sonuc,
-        imported=imported or 0,
-        import_hatalar=import_hatalar,
-        bugun=bugun,
-        now_year=bugun.year,
-        now_month=bugun.month,
-        MONTHS_TR=MONTHS_TR,
-    )
+    try:
+        return render_template(
+            "musteriler/fintech.html",
+            **data,
+            import_sonuc=import_sonuc,
+            imported=imported or 0,
+            import_hatalar=import_hatalar,
+            bugun=bugun,
+            now_year=bugun.year,
+            now_month=bugun.month,
+            MONTHS_TR=MONTHS_TR,
+        )
+    except Exception as e:
+        traceback.print_exc()
+        print(f"Fintech template render error (index): {e}")
+        raise
 
 
 @bp.route("/ozet")
 @giris_gerekli
 def ozet():
     """Müşteri özet / Fintech komuta paneli — KPI kartları + sağ panel drawer."""
+    import traceback
     try:
         data = _fintech_dashboard_data()
     except Exception as e:
-        print(f"Fintech dashboard error: {e}")
+        traceback.print_exc()
+        print(f"Fintech dashboard error (ozet): {e}")
         data = _fintech_defaults()
     import_sonuc = request.args.get("import_sonuc")
     imported = request.args.get("imported", type=int)
@@ -388,7 +397,7 @@ def ozet():
 def _fintech_defaults():
     """Fintech sayfası için varsayılan veri (hata durumunda şablon kırılmasın)."""
     return {
-        "kpi": {"toplam_musteri": 0, "aktif_musteri": 0, "kritik_musteri": 0, "toplam_aylik_tahakkuk": 0, "toplam_gecikme": 0, "tahsilat_orani": 0, "ortalama_kira": 0},
+        "kpi": {"toplam_musteri": 0, "aktif_musteri": 0, "kritik_musteri": 0, "toplam_aylik_tahakkuk": 0, "toplam_gecikme": 0, "tahsilat_orani": 100, "ortalama_kira": 0},
         "tahsilat_trend": [],
         "gecikme_dagilimi": [{"label": "0-7 Gün", "tutar": 0}, {"label": "7-30 Gün", "tutar": 0}, {"label": "30+ Gün", "tutar": 0}],
         "genel_risk_puan": 100,
@@ -399,6 +408,7 @@ def _fintech_defaults():
         "tahsilat_kritik_list": [],
         "kargo_bugun": [],
         "kargo_teslim_bekleyen": [],
+        "fatura_bekleyen_count": 0,
     }
 
 
