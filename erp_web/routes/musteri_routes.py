@@ -346,6 +346,7 @@ def index():
     imported = request.args.get("imported", type=int)
     import_hatalar = request.args.get("import_hatalar", type=int) or 0
     bugun = date.today()
+    MONTHS_TR = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"]
     return render_template(
         "musteriler/fintech.html",
         **data,
