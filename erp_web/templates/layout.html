@@ -245,7 +245,7 @@
             <a href="/dashboard/" class="{% if request.path.startswith('/dashboard') %}active{% endif %}">
                 <i class="fa fa-tachometer-alt"></i> Dashboard
             </a>
-            <a href="/musteriler/" class="{% if request.path.startswith('/musteriler') %}active{% endif %}">
+            <a href="/musteriler/" id="nav-tab-musteriler" class="nav-tab-link {% if request.path.startswith('/musteriler') %}active{% endif %}" data-tab="musteriler">
                 <i class="fa fa-users"></i> Müşteriler
             </a>
             <a href="/faturalar/" class="{% if request.path.startswith('/faturalar') %}active{% endif %}">
@@ -275,7 +275,7 @@
             <a href="/ilan-robotu/" class="{% if request.path.startswith('/ilan-robotu') %}active{% endif %}">
                 <i class="fa fa-bullhorn"></i> İlan Robotu
             </a>
-            <a href="/giris/" class="{% if request.path.startswith('/giris') %}active{% endif %}">
+            <a href="/giris/" id="nav-tab-giris" class="nav-tab-link {% if request.path.startswith('/giris') %}active{% endif %}" data-tab="giris">
                 <i class="fa fa-user-plus"></i> Giriş
             </a>
             <a href="/admin/" class="{% if request.path.startswith('/admin') %}active{% endif %}">
@@ -306,6 +306,13 @@
         {% block content %}{% endblock %}
     </main>
     
+    <script>
+    window.setActiveTab = function(tabId) {
+      document.querySelectorAll('.nav-tab-link').forEach(function(a) { a.classList.remove('active'); });
+      var el = document.getElementById('nav-tab-' + tabId);
+      if (el) el.classList.add('active');
+    };
+    </script>
     {% block extra_js %}{% endblock %}
 </body>
 </html>

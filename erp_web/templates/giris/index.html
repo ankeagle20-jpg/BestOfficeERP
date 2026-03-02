@@ -542,29 +542,44 @@
             <input type="text" id="senaryo_musteri_ismi" placeholder="Müşteri adı girebilirsiniz (opsiyonel)">
 
             <label class="required">Başlangıç Kira (₺)</label>
-            <input type="number" step="0.01" id="senaryo_baslangic_kira" placeholder="Örn: 5000">
+            <div style="grid-column: 2;">
+                <input type="number" step="0.01" id="senaryo_baslangic_kira" placeholder="Örn: 5000" style="width: 100%; margin-bottom: 8px;" oninput="senaryoKdvDokumGuncelle()">
+                <div class="senaryo-kdv-switch" style="display: flex; align-items: center; gap: 16px; margin-bottom: 6px;">
+                    <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: #90a4ae; font-size: 12px;">
+                        <input type="radio" name="senaryo_kdv_tip" value="dahil" onchange="senaryoKdvDokumGuncelle()"> KDV Dahil
+                    </label>
+                    <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: #90a4ae; font-size: 12px;">
+                        <input type="radio" name="senaryo_kdv_tip" value="net" checked onchange="senaryoKdvDokumGuncelle()"> Net
+                    </label>
+                </div>
+                <div id="senaryo_kdv_dokum" style="font-size: 11px; color: #4fc3f7; margin-top: 4px;">Net: — ₺ | KDV Dahil: — ₺</div>
+            </div>
             
             <label class="required">Başlangıç Tarihi</label>
             <input type="date" id="senaryo_baslangic_tarih">
-            
-            <label class="required">Kaç Yıl?</label>
-            <input type="number" id="senaryo_yil_sayisi" value="5" min="1" max="10">
-            
 
+            <label>Hizmet Türü</label>
+            <select id="senaryo_hizmet_turu" style="width: 100%; padding: 8px; border-radius: 3px; border: 1px solid #2d4060; background: #0f2537; color: #e0f7fa; font-size: 13px;">
+                <option value="sanal_ofis" selected>Sanal Ofis</option>
+                <option value="hazir_ofis">Hazır Ofis</option>
+            </select>
         </div>
         
-        <div style="margin-top: 15px; text-align: center;">
-            <button onclick="kiraSenaryo()" style="background: #00bcd4; color: white; border: none; padding: 10px 30px; border-radius: 3px; cursor: pointer; font-size: 13px; font-weight: bold;">
+        <div style="margin-top: 15px; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px;">
+            <button type="button" onclick="kiraSenaryo()" style="background: #00bcd4; color: white; border: none; padding: 10px 30px; border-radius: 3px; cursor: pointer; font-size: 13px; font-weight: bold;">
                 📊 Hesapla
             </button>
-            <button onclick="senaryoTemizle()" style="background: #6b7280; color: white; border: none; padding: 10px 30px; border-radius: 3px; cursor: pointer; font-size: 13px; font-weight: bold; margin-left: 8px;">
+            <button type="button" onclick="senaryoTemizle()" style="background: #6b7280; color: white; border: none; padding: 10px 30px; border-radius: 3px; cursor: pointer; font-size: 13px; font-weight: bold;">
                 ✖ Temizle
             </button>
-            <button onclick="tufeVerileri()" style="background: #9c27b0; color: white; border: none; padding: 10px 30px; border-radius: 3px; cursor: pointer; font-size: 13px; font-weight: bold; margin-left: 8px;">
+            <button type="button" onclick="tufeVerileri()" style="background: #9c27b0; color: white; border: none; padding: 10px 30px; border-radius: 3px; cursor: pointer; font-size: 13px; font-weight: bold;">
                 📊 TCMB TÜFE Verileri
             </button>
-            <button onclick="excelIndir()" style="background: #4caf50; color: white; border: none; padding: 10px 30px; border-radius: 3px; cursor: pointer; font-size: 13px; font-weight: bold; margin-left: 8px;">
+            <button type="button" onclick="excelIndir()" style="background: #4caf50; color: white; border: none; padding: 10px 30px; border-radius: 3px; cursor: pointer; font-size: 13px; font-weight: bold;">
                 📥 Excel İndir
+            </button>
+            <button type="button" id="btn-kira-bildirgesi-olustur" onclick="kiraBildirgesiOlusturFromSenaryo()" style="background: linear-gradient(135deg, #2e7d32, #1b5e20); color: white; border: none; padding: 10px 30px; border-radius: 3px; cursor: pointer; font-size: 13px; font-weight: bold; box-shadow: 0 2px 8px rgba(46,125,50,0.35);">
+                📄 Kira Bildirgesi Oluştur
             </button>
         </div>
         
@@ -958,16 +973,50 @@ document.addEventListener('DOMContentLoaded', () => {
     musteriAra();
     hesaplaYuzde();
 });
-// Kira Senaryo Hesaplama (Basit - Her yıl aynı ay TÜFE'si)
-async function kiraSenaryo() {
-    const baslangicKira = parseFloat(document.getElementById('senaryo_baslangic_kira').value);
-    const baslangicTarih = document.getElementById('senaryo_baslangic_tarih').value;
-    const yilSayisi = parseInt(document.getElementById('senaryo_yil_sayisi').value);
-    
-    if (!baslangicKira || !baslangicTarih || !yilSayisi) {
-        alert('Lütfen tüm zorunlu alanları doldurun!');
+// KDV oranı (güncel)
+const SENARYO_KDV_ORAN = 0.20;
+
+// Başlangıç kirası: kullanıcı girişine göre Net tutarı döndürür (projeksiyon hep net üzerinden)
+function senaryoEffectiveNet() {
+    const val = parseFloat((document.getElementById('senaryo_baslangic_kira').value || '').replace(',', '.'));
+    if (!val || isNaN(val)) return null;
+    const dahilSecili = (document.querySelector('input[name="senaryo_kdv_tip"]:checked') || {}).value === 'dahil';
+    return dahilSecili ? val / (1 + SENARYO_KDV_ORAN) : val;
+}
+
+// Net / KDV Dahil dökümünü anlık güncelle
+function senaryoKdvDokumGuncelle() {
+    const val = parseFloat((document.getElementById('senaryo_baslangic_kira').value || '').replace(',', '.'));
+    const el = document.getElementById('senaryo_kdv_dokum');
+    if (!el) return;
+    if (!val || isNaN(val) || val <= 0) {
+        el.textContent = 'Net: — ₺ | KDV Dahil: — ₺';
         return;
     }
+    const dahilSecili = (document.querySelector('input[name="senaryo_kdv_tip"]:checked') || {}).value === 'dahil';
+    let net, dahil;
+    if (dahilSecili) {
+        dahil = val;
+        net = val / (1 + SENARYO_KDV_ORAN);
+    } else {
+        net = val;
+        dahil = val * (1 + SENARYO_KDV_ORAN);
+    }
+    el.textContent = 'Net: ' + net.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ₺ | KDV Dahil: ' + dahil.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ₺';
+}
+
+// Kira Senaryo Hesaplama (projeksiyon net kira üzerinden)
+async function kiraSenaryo() {
+    const baslangicNet = senaryoEffectiveNet();
+    const baslangicTarih = document.getElementById('senaryo_baslangic_tarih').value;
+    var yilEl = document.getElementById('senaryo_yil_sayisi');
+    const yilSayisi = yilEl ? (parseInt(yilEl.value) || 5) : 5;
+    
+    if (baslangicNet == null || baslangicNet <= 0 || !baslangicTarih) {
+        alert('Lütfen tüm zorunlu alanları doldurun ve geçerli bir kira girin!');
+        return;
+    }
+    const baslangicKira = baslangicNet;
     
     try {
         // TÜFE verilerini getir
@@ -1075,6 +1124,24 @@ async function kiraSenaryo() {
         document.getElementById('senaryo-toplam-yil').textContent = yilSayisi;
         document.getElementById('senaryo-toplam-tutar').textContent = toplamYilliklar.toLocaleString('tr-TR', {minimumFractionDigits: 2});
         document.getElementById('senaryo-sonuc').style.display = 'block';
+
+        window.senaryoProjeksiyonVerisi = { musteri_ismi: document.getElementById('senaryo_musteri_ismi').value.trim(), baslangic_tarih: baslangicTarih, yil_sayisi: yilSayisi, net_kira: baslangicKira, toplam_tutar: toplamYilliklar, satirlar: [] };
+        var tbody = document.getElementById('senaryo-tablo');
+        if (tbody) {
+            var rows = tbody.querySelectorAll('tr');
+            for (var r = 0; r < rows.length; r++) {
+                var cells = rows[r].querySelectorAll('td');
+                if (cells.length >= 5 && cells[0].textContent.trim() !== 'TOPLAM') {
+                    window.senaryoProjeksiyonVerisi.satirlar.push({
+                        yil: cells[0].textContent.trim(),
+                        aylik_kira: (cells[1].textContent || '').replace(/\s*TL/gi, '').trim(),
+                        yillik_toplam: (cells[2].textContent || '').replace(/\s*TL/gi, '').trim(),
+                        artis_yuzde: (cells[3].textContent || '').trim(),
+                        artis_tutar: (cells[4].textContent || '').replace(/\s*TL/gi, '').trim()
+                    });
+                }
+            }
+        }
         
     } catch (error) {
         alert('❌ Hata: ' + error.message);
@@ -1084,9 +1151,15 @@ async function kiraSenaryo() {
 function senaryoTemizle() {
     document.getElementById('senaryo_baslangic_kira').value = '';
     document.getElementById('senaryo_baslangic_tarih').value = '';
-    document.getElementById('senaryo_yil_sayisi').value = '5';
-    document.getElementById('senaryo_tufe').value = '65.0';
+    var yilEl = document.getElementById('senaryo_yil_sayisi');
+    if (yilEl) yilEl.value = '5';
+    var hizmetEl = document.getElementById('senaryo_hizmet_turu');
+    if (hizmetEl) hizmetEl.value = 'sanal_ofis';
+    var tufeEl = document.getElementById('senaryo_tufe');
+    if (tufeEl) tufeEl.value = '65.0';
     document.getElementById('senaryo-sonuc').style.display = 'none';
+    senaryoKdvDokumGuncelle();
+    window.senaryoProjeksiyonVerisi = null;
 }
 // TCMB TÜFE Verileri Göster
 async function tufeVerileri() {
@@ -1137,13 +1210,18 @@ async function tufeVerileri() {
 
 // Excel İndir
 async function excelIndir() {
-    const baslangicKira = document.getElementById('senaryo_baslangic_kira').value;
+    var effectiveNet = senaryoEffectiveNet();
+    if (effectiveNet == null || effectiveNet <= 0) {
+        alert('Lütfen başlangıç kirası girin ve gerekirse Hesapla yapın.');
+        return;
+    }
     const baslangicTarih = document.getElementById('senaryo_baslangic_tarih').value;
-    const yilSayisi = document.getElementById('senaryo_yil_sayisi').value;
+    var yilEl = document.getElementById('senaryo_yil_sayisi');
+    const yilSayisi = yilEl ? yilEl.value : '5';
     const tufeOran = 65; // Varsayılan TÜFE (Excel için)
     
-    if (!baslangicKira || !baslangicTarih || !yilSayisi) {
-        alert('Lütfen önce hesaplama yapın!');
+    if (!baslangicTarih) {
+        alert('Lütfen başlangıç tarihini girin.');
         return;
     }
     
@@ -1152,7 +1230,7 @@ async function excelIndir() {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
-                baslangic_kira: baslangicKira,
+                baslangic_kira: effectiveNet,
                 baslangic_tarih: baslangicTarih,
                 yil_sayisi: yilSayisi,
                 tufe_oran: tufeOran
@@ -1211,13 +1289,40 @@ document.addEventListener('click', function(e) {
     if (e.target.id === 'bildirge_musteri_adi' || e.target.closest('button[onclick*="bildirgeMusteriListeToggle"]')) return;
     list.style.display = 'none';
 });
+
+// Kira Senaryo sekmesinden Kira Bildirgesi sekmesine veri aktar ve bildirgeyi tetikle (SPA)
+function kiraBildirgesiOlusturFromSenaryo() {
+    var musteriEl = document.getElementById('senaryo_musteri_ismi');
+    var tarihEl = document.getElementById('senaryo_baslangic_tarih');
+    var netKira = window.senaryoProjeksiyonVerisi && window.senaryoProjeksiyonVerisi.net_kira != null
+        ? window.senaryoProjeksiyonVerisi.net_kira
+        : senaryoEffectiveNet();
+    if (netKira == null || netKira <= 0) {
+        alert('Önce kira tutarını girin ve gerekirse Hesapla ile projeksiyonu oluşturun.');
+        return;
+    }
+    var musteriAdi = (musteriEl && musteriEl.value) ? String(musteriEl.value).trim() : '';
+    var sozlesmeTarihi = (tarihEl && tarihEl.value) ? tarihEl.value : '';
+    var gecerlilikTarihi = sozlesmeTarihi || new Date().toISOString().slice(0, 10);
+
+    switchTab(2);
+    // Sekme geçişinden sonra doldur ki switchTab(2)'nin Müşteri Ekle'den kopyaladığı değerler ezilmesin
+    if (document.getElementById('bildirge_musteri_adi')) document.getElementById('bildirge_musteri_adi').value = musteriAdi;
+    if (document.getElementById('bildirge_sozlesme_tarihi')) document.getElementById('bildirge_sozlesme_tarihi').value = sozlesmeTarihi;
+    if (document.getElementById('bildirge_gecerlilik_tarihi')) document.getElementById('bildirge_gecerlilik_tarihi').value = gecerlilikTarihi;
+    if (document.getElementById('bildirge_kira_net')) document.getElementById('bildirge_kira_net').value = Math.round(netKira * 100) / 100;
+    if (document.getElementById('bildirge_kdv_oran')) document.getElementById('bildirge_kdv_oran').value = (SENARYO_KDV_ORAN * 100);
+
+    setTimeout(function() { kiraBildirgesiOnizle(); }, 100);
+}
+
 function kiraBildirgesiPayload() {
     const gecerlilik = document.getElementById('bildirge_gecerlilik_tarihi').value;
     const kiraNet = parseFloat((document.getElementById('bildirge_kira_net').value || '').replace(',', '.')) || 0;
     const kdv = parseFloat((document.getElementById('bildirge_kdv_oran').value || '20').replace(',', '.')) || 20;
     const hizmetTuru = (document.getElementById('bildirge_hizmet_turu') || {}).value || 'sanal_ofis';
     return {
-        musteri_adi: (document.getElementById('bildirge_musteri_adi').value || '').trim() || 'Değerli Kiracımız',
+        musteri_adi: (document.getElementById('bildirge_musteri_adi').value || '').trim(),
         sozlesme_tarihi: document.getElementById('bildirge_sozlesme_tarihi').value || '',
         gecerlilik_tarihi: gecerlilik,
         kira_net: kiraNet,

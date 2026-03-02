@@ -251,6 +251,8 @@ def _fintech_dashboard_data():
                     pass
         m["toplam_borc"] = round(mb.get("borc", 0), 2)
 
+    toplam_bakiye = sum((m.get("toplam_borc") or 0) for m in (musteriler or []))
+
     return {
         "kpi": {
             "toplam_musteri": toplam_musteri,
@@ -267,16 +269,15 @@ def _fintech_dashboard_data():
         "en_riskli_5": en_riskli_5,
         "sozlesme_30_list": sozlesme_30_list,
         "musteriler": musteriler or [],
+        "toplam_bakiye": round(toplam_bakiye, 2),
         "tahsilat_kritik_list": tahsilat_kritik_list,
         "kargo_bugun": kargo_bugun,
         "kargo_teslim_bekleyen": kargo_teslim_bekleyen,
     }
 
 
-@bp.route("/list")
-@giris_gerekli
-def list_full():
-    """Eski müşteri listesi — tüm ekran tablo (Toplam Müşteri tıklanınca)."""
+def _musteri_liste_data():
+    """Müşteri listesi sayfası için ortak veri (ana sayfa ve /list)."""
     arama = request.args.get("q", "").strip()
     tum_yillar_odenmis = request.args.get("tum_yillar_odenmis") == "1"
     if tum_yillar_odenmis:
@@ -294,30 +295,77 @@ def list_full():
             (f"%{arama}%",))
     else:
         musteriler = fetch_all("SELECT * FROM customers ORDER BY name")
-    import_sonuc = request.args.get("import_sonuc")
-    imported = request.args.get("imported", type=int)
-    import_hatalar = request.args.get("import_hatalar", type=int) or 0
+    return {
+        "musteriler": musteriler,
+        "arama": arama,
+        "tum_yillar_odenmis": tum_yillar_odenmis,
+    }
+
+
+@bp.route("/list")
+@giris_gerekli
+def list_full():
+    arama = request.args.get("q", "").strip()
+    tum_yillar_odenmis = request.args.get("tum_yillar_odenmis") == "1"
+    if tum_yillar_odenmis:
+        musteriler = fetch_all("""
+            SELECT c.* FROM customers c
+            WHERE NOT EXISTS (
+                SELECT 1 FROM faturalar f
+                WHERE f.musteri_id = c.id AND (f.durum IS NULL OR f.durum != 'odendi')
+            )
+            ORDER BY c.name
+        """)
+    elif arama:
+        musteriler = fetch_all(
+            "SELECT * FROM customers WHERE name ILIKE %s ORDER BY name",
+            (f"%{arama}%",),
+        )
+    else:
+        musteriler = fetch_all("SELECT * FROM customers ORDER BY name")
+    if musteriler:
+        print("list_full: musteriler[0] keys =", list(musteriler[0].keys()))
     return render_template(
         "musteriler/index.html",
-        faturalar=musteriler,
+        musteriler=musteriler,
         arama=arama,
         tum_yillar_odenmis=tum_yillar_odenmis,
-        import_sonuc=import_sonuc,
-        imported=imported or 0,
-        import_hatalar=import_hatalar,
     )
 
 
 @bp.route("/")
 @giris_gerekli
 def index():
-    """Müşteri Fintech Komuta Paneli — analiz dashboard + müşteri listesi drawer."""
+    data = _fintech_dashboard_data()
+    import_sonuc = request.args.get("import_sonuc")
+    imported = request.args.get("imported", type=int)
+    import_hatalar = request.args.get("import_hatalar", type=int) or 0
+    bugun = date.today()
+    now_year = bugun.year
+    now_month = bugun.month
+    MONTHS_TR = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"]
+    return render_template(
+        "musteriler/fintech.html",
+        **data,
+        import_sonuc=import_sonuc,
+        imported=imported or 0,
+        import_hatalar=import_hatalar,
+        bugun=bugun,
+        now_year=now_year,
+        now_month=now_month,
+        MONTHS_TR=MONTHS_TR,
+    )
+
+
+@bp.route("/ozet")
+@giris_gerekli
+def ozet():
+    """Müşteri özet / Fintech komuta paneli — KPI kartları + sağ panel drawer."""
     try:
         data = _fintech_dashboard_data()
     except Exception as e:
         print(f"Fintech dashboard error: {e}")
-        data = {}
-        
+        data = _fintech_defaults()
     import_sonuc = request.args.get("import_sonuc")
     imported = request.args.get("imported", type=int)
     import_hatalar = request.args.get("import_hatalar", type=int) or 0
@@ -332,6 +380,23 @@ def index():
         now_month=bugun.month,
         MONTHS_TR=MONTHS_TR,
     )
+
+
+def _fintech_defaults():
+    """Fintech sayfası için varsayılan veri (hata durumunda şablon kırılmasın)."""
+    return {
+        "kpi": {"toplam_musteri": 0, "aktif_musteri": 0, "kritik_musteri": 0, "toplam_aylik_tahakkuk": 0, "toplam_gecikme": 0, "tahsilat_orani": 0, "ortalama_kira": 0},
+        "tahsilat_trend": [],
+        "gecikme_dagilimi": [{"label": "0-7 Gün", "tutar": 0}, {"label": "7-30 Gün", "tutar": 0}, {"label": "30+ Gün", "tutar": 0}],
+        "genel_risk_puan": 100,
+        "en_riskli_5": [],
+        "sozlesme_30_list": [],
+        "musteriler": [],
+        "toplam_bakiye": 0,
+        "tahsilat_kritik_list": [],
+        "kargo_bugun": [],
+        "kargo_teslim_bekleyen": [],
+    }
 
 
 def _komuta_merkezi_data(mid):

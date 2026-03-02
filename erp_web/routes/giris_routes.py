@@ -539,22 +539,16 @@ def build_kira_bildirgesi_pdf(musteri_adi, sozlesme_tarihi, gecerlilik_tarihi, k
     soz_fmt = _tarih_fmt(sozlesme_tarihi)
     gec_fmt = _tarih_fmt(gecerlilik_tarihi)
 
-    y = 25
-    c.setFont(font_name, 10)
-    c.setFillColorRGB(0.2, 0.5, 0.8)
-    c.drawString(15 * mm, h - y * mm, "bestoffice")
-    c.setFillColorRGB(0, 0, 0)
-    y += 6
+    y = 22
     c.setFont(font_name, 9)
+    c.setFillColorRGB(0, 0, 0)
     c.drawString(15 * mm, h - y * mm, "Ofisbir Ofis ve Danışmanlık Hizmetleri A.Ş.")
-    y += 18
+    y += 20
 
-    c.setFont(font_name, 14)
-    c.drawCentredString(w / 2, h - y * mm, "DEĞERLİ KİRACIMIZ")
-    y += 12
+    hitap_adi = (musteri_adi or "").strip() or "Değerli Kiracımız"
     c.setFont(font_name, 11)
-    c.drawString(15 * mm, h - y * mm, "DEĞERLİ KİRACIMIZ,")
-    y += 14
+    c.drawString(15 * mm, h - y * mm, "Sayın " + hitap_adi + ",")
+    y += 12
 
     par1 = f"Tarafınızla {soz_fmt} tarihinde imzalanmış olan kira sözleşmesi gereği, {gec_fmt} tarihi itibarıyla kira bedeli güncellemesi yapılması gerekmektedir."
     c.setFont(font_name, 10)
@@ -580,16 +574,70 @@ def build_kira_bildirgesi_pdf(musteri_adi, sozlesme_tarihi, gecerlilik_tarihi, k
     for chunk in (par3[i:i+95] for i in range(0, len(par3), 95)):
         c.drawString(15 * mm, h - y * mm, chunk)
         y += 5
-    y += 12
+    y += 14
 
-    c.drawString(15 * mm, h - y * mm, "Saygılarımızla,")
+    right_margin = w - 20 * mm
+    c.setFont(font_name, 10)
+    c.drawRightString(right_margin, h - y * mm, "Saygılarımızla,")
     y += 10
     c.setFont(font_name, 11)
-    c.drawString(15 * mm, h - y * mm, "BESTOFFICE")
+    c.drawRightString(right_margin, h - y * mm, "BESTOFFICE")
+    y += 6
+    c.setFont(font_name, 9)
+    unvan_text = "Ofisbir Ofis ve Danışmanlık Hizmetleri A.Ş."
+    w_best = c.stringWidth("BESTOFFICE", font_name, 11)
+    w_unvan = c.stringWidth(unvan_text, font_name, 9)
+    unvan_x = right_margin - w_best / 2 - w_unvan / 2
+    c.drawString(unvan_x, h - y * mm, unvan_text)
 
     c.save()
     buf.seek(0)
     return buf.getvalue()
+
+
+def _kira_bildirgesi_metinleri(sozlesme_tarihi, gecerlilik_tarihi, kira_net, kdv_oran, hizmet_turu="sanal_ofis"):
+    """Kira bildirgesi paragraf metinlerini döndürür (HTML şablonu için)."""
+    soz_fmt = _tarih_fmt(sozlesme_tarihi)
+    gec_fmt = _tarih_fmt(gecerlilik_tarihi)
+    kira_net = float(kira_net or 0)
+    kdv_oran = float(kdv_oran or 20)
+    kdv_dahil = round(kira_net * (1 + kdv_oran / 100), 2)
+    yillik = round(kdv_dahil * 12, 2)
+    sanal_ofis = (str(hizmet_turu or "").strip().lower() == "sanal_ofis")
+    par1 = f"Tarafınızla {soz_fmt} tarihinde imzalanmış olan kira sözleşmesi gereği, {gec_fmt} tarihi itibarıyla kira bedeli güncellemesi yapılması gerekmektedir."
+    par2 = (f"Mevcut ekonomik koşullar ve yasal düzenlemeler göz önüne alınarak, adı geçen tarihten itibaren uygulanacak yeni kira bedeli TÜFE Yasal Oranı çerçevesinde güncellenecektir. "
+            f"Buna göre, {gec_fmt} itibarıyla aylık kira bedeliniz {kira_net:,.2f} TL + %{int(kdv_oran)} KDV dahil {kdv_dahil:,.2f} TL dir.")
+    if sanal_ofis:
+        par2 += f" KDV Dahil yıllık {yillik:,.2f} TL dir."
+    par3 = "Anlayışınız ve iş birliğiniz için teşekkür eder, sorularınız veya ek talepleriniz olması durumunda bizimle iletişime geçmekten çekinmemenizi rica ederiz."
+    return par1, par2, par3
+
+
+@bp.route('/kira-bildirgesi-antet')
+@giris_gerekli
+def kira_bildirgesi_antet():
+    """Antetli kira bildirgesi HTML sayfası (önizleme / yazdır)."""
+    musteri_adi = (request.args.get('musteri_adi') or '').strip() or 'Müşteri Adı'
+    sozlesme_tarihi = request.args.get('sozlesme_tarihi') or ''
+    gecerlilik_tarihi = request.args.get('gecerlilik_tarihi') or ''
+    try:
+        kira_net = float(request.args.get('kira_net') or 0)
+        kdv_oran = float(request.args.get('kdv_oran') or 20)
+    except (TypeError, ValueError):
+        kira_net, kdv_oran = 0, 20
+    hizmet_turu = (request.args.get('hizmet_turu') or 'sanal_ofis').strip().lower().replace(" ", "_")
+    if not gecerlilik_tarihi:
+        gecerlilik_tarihi = sozlesme_tarihi or datetime.now().strftime("%Y-%m-%d")
+    par1, par2, par3 = _kira_bildirgesi_metinleri(sozlesme_tarihi, gecerlilik_tarihi, kira_net, kdv_oran, hizmet_turu)
+    hitap_adi = (musteri_adi or "").strip() or "Değerli Kiracımız"
+    return render_template(
+        'giris/kira_bildirgesi_antet.html',
+        musteri_adi=musteri_adi,
+        hitap_adi=hitap_adi,
+        par1=par1,
+        par2=par2,
+        par3=par3
+    )
 
 
 @bp.route('/kira-bildirgesi-pdf', methods=['POST'])

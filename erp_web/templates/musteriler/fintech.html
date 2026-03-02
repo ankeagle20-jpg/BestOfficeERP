@@ -2,22 +2,28 @@
 {% block page_title %}Müşteriler — Müşteri Özeti{% endblock %}
 {% block content %}
 <style>
-  /* Modern Fintech — Card'lar border-radius, Grid arası ince çizgi, grid bozulma yok */
+  /* Fintech Dashboard 2026 — Grid 1.25rem, Cool Blue / Wasabi / Persimmon, Ripple, Trust badge */
   :root {
     --fintech-radius: 12px;
     --fintech-radius-sm: 10px;
-    --fintech-gap: 4px;
-    --fintech-gap-sm: 4px;
-    --fintech-card-bg: rgba(15, 37, 55, 0.92);
-    --fintech-card-border: 1px solid rgba(30, 58, 80, 0.8);
-    --fintech-shadow: 0 4px 20px rgba(0,0,0,0.15), 0 0 1px rgba(79,195,247,0.08);
-    --fintech-shadow-hover: 0 8px 28px rgba(0,0,0,0.2), 0 0 20px rgba(79,195,247,0.12);
+    --fintech-gap: 1.25rem;
+    --fintech-gap-sm: 0.5rem;
+    --fintech-card-bg: rgba(15, 37, 55, 0.45);
+    --fintech-card-border: 1px solid #ffffff10;
+    --fintech-shadow: 0 4px 24px rgba(0,0,0,0.2);
+    --fintech-shadow-hover: 0 8px 32px rgba(0,0,0,0.25), 0 0 24px rgba(79,195,247,0.15);
+    --deep-midnight: #0a0e14;
+    --cool-blue: #4fc3f7;
+    --cool-blue-glow: rgba(79, 195, 247, 0.25);
+    --wasabi-green: #cddc39;
+    --persimmon-orange: #ff7043;
   }
   .fintech-wrap {
     max-width: 100%; margin: -10px; padding: var(--fintech-gap);
-    min-height: calc(100vh - 100px);
     height: calc(100vh - 100px);
-    background: #0a1929;
+    min-height: 0;
+    max-height: calc(100vh - 100px);
+    background: linear-gradient(160deg, #0a0e14 0%, #0d1520 50%, #0a1929 100%);
     display: grid;
     grid-template-rows: auto auto 1fr auto auto;
     gap: var(--fintech-gap);
@@ -26,54 +32,69 @@
   }
   .fintech-page-title {
     display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
-    gap: var(--fintech-gap);
-    padding: var(--fintech-gap-sm) var(--fintech-gap);
+    gap: var(--fintech-gap-sm);
+    padding: 0.6rem 1rem;
     background: var(--fintech-card-bg);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
     border: var(--fintech-card-border);
     border-radius: var(--fintech-radius);
     box-shadow: var(--fintech-shadow);
   }
-  .fintech-page-title .title-wrap { display: flex; flex-direction: column; gap: 2px; }
-  .fintech-page-title h1 { color: #4fc3f7; font-size: 16px; font-weight: 700; margin: 0; }
-  .fintech-page-title .subtitle { color: #90a4ae; font-size: 11px; margin: 0; }
-  .fintech-filters { display: flex; gap: var(--fintech-gap-sm); align-items: center; }
-  .fintech-filters select { background: #1e3a50; border: 1px solid #2d4060; color: #e0f7fa; padding: 6px 10px; border-radius: var(--fintech-radius-sm); font-size: 11px; }
-  .fintech-filters .icon-btn { background: #1e3a50; border: 1px solid #2d4060; color: #90a4ae; width: 32px; height: 32px; border-radius: var(--fintech-radius-sm); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s; }
-  .fintech-filters .icon-btn:hover { color: #4fc3f7; border-color: #4fc3f7; }
-  .kpi-strip { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: var(--fintech-gap); min-width: 0; }
+  .fintech-page-title .title-wrap { display: flex; flex-direction: column; gap: 2px; pointer-events: auto; cursor: pointer; }
+  .fintech-page-title .title-wrap.title-btn { cursor: pointer; user-select: none; border-radius: var(--fintech-radius-sm); padding: 2px 4px; margin: -2px -4px; transition: background 0.2s; }
+  .fintech-page-title .title-wrap.title-btn:hover { background: rgba(255,255,255,0.06); }
+  .fintech-page-title h1 { color: #fff; font-size: 20px; font-weight: 700; margin: 0; letter-spacing: 0.02em; }
+  .fintech-page-title .subtitle { color: #90a4ae; font-size: 12px; margin: 0; opacity: 0.7; font-weight: 500; }
+  .fintech-filters { display: flex; gap: var(--fintech-gap-sm); align-items: center; flex-wrap: wrap; }
+  .fintech-filters select { background: rgba(30,58,80,0.6); border: 1px solid rgba(255,255,255,0.08); color: #e0f7fa; padding: 6px 10px; border-radius: var(--fintech-radius-sm); font-size: 11px; }
+  .fintech-filters .icon-btn { background: rgba(30,58,80,0.6); border: 1px solid rgba(255,255,255,0.08); color: #90a4ae; width: 32px; height: 32px; border-radius: var(--fintech-radius-sm); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s; }
+  .fintech-filters .icon-btn:hover { color: #4fc3f7; border-color: rgba(79,195,247,0.4); }
+  .kpi-strip { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--fintech-gap); min-width: 0; }
   @media (max-width: 1400px) { .kpi-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
   @media (max-width: 900px) { .kpi-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   .kpi-card {
     background: var(--fintech-card-bg);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
     border: var(--fintech-card-border);
     border-radius: var(--fintech-radius);
-    padding: 10px 12px;
-    text-align: center;
+    padding: 0.75rem 0.5rem;
     box-shadow: var(--fintech-shadow);
     transition: transform 0.2s, box-shadow 0.2s;
     cursor: pointer;
     position: relative;
     min-width: 0;
     overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
   }
   .kpi-card:hover { transform: translateY(-2px); box-shadow: var(--fintech-shadow-hover); }
-  .kpi-card .icon { font-size: 18px; margin-bottom: 2px; }
-  .kpi-card .val { font-size: 16px; font-weight: 700; color: #e0f7fa; line-height: 1.2; }
-  .kpi-card .lbl { font-size: 10px; color: #90a4ae; margin-top: 2px; }
-  .kpi-card .trend { position: absolute; top: 8px; right: 10px; color: #22c55e; font-size: 10px; opacity: 0.9; }
-  .kpi-card.blue .icon, .kpi-card.blue .val { color: #4fc3f7; }
-  .kpi-card.green .icon, .kpi-card.green .val { color: #22c55e; }
-  .kpi-card.orange .icon, .kpi-card.orange .val { color: #f97316; }
+  .kpi-card .icon { font-size: 1.25rem; margin-bottom: 2px; display: flex; align-items: center; justify-content: center; }
+  .kpi-card .val { font-size: 1rem; font-weight: 700; color: #e0f7fa; line-height: 1.2; }
+  .kpi-card .lbl { font-size: 10px; color: #90a4ae; margin-top: 2px; opacity: 0.7; font-weight: 500; }
+  .kpi-card .trend { position: absolute; top: 6px; right: 8px; color: var(--wasabi-green); font-size: 10px; opacity: 0.9; }
+  .kpi-card.kpi-hero .val { font-size: 1.2rem; }
+  .kpi-card.kpi-hero .lbl { opacity: 1; }
+  .kpi-card.blue .icon, .kpi-card.blue .val { color: var(--cool-blue); }
+  .kpi-card.green .icon, .kpi-card.green .val { color: var(--wasabi-green); }
+  .kpi-card.orange .icon, .kpi-card.orange .val { color: var(--persimmon-orange); }
   .kpi-card.red .icon, .kpi-card.red .val { color: #ef4444; }
   .kpi-card.cyan .icon, .kpi-card.cyan .val { color: #22d3ee; }
-  .fintech-three { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: var(--fintech-gap); min-height: 0; flex: 1; min-width: 0; }
-  @media (max-width: 1200px) { .fintech-three { grid-template-columns: minmax(0, 1fr) 260px; } }
-  .fintech-left { display: flex; flex-direction: column; gap: var(--fintech-gap); min-height: 0; min-width: 0; }
+  .kpi-link { text-decoration: none; color: inherit; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; min-width: 0; }
+  .fintech-three { display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: var(--fintech-gap); min-height: 0; flex: 1; min-width: 0; align-items: stretch; }
+  @media (max-width: 1200px) { .fintech-three { grid-template-columns: minmax(0, 1fr) 240px; } }
+  .fintech-left { display: flex; flex-direction: column; gap: var(--fintech-gap); min-height: 0; min-width: 0; align-items: stretch; }
   .glass-card {
     background: var(--fintech-card-bg);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
     border: var(--fintech-card-border);
     border-radius: var(--fintech-radius);
-    padding: 14px;
+    padding: 1rem;
     box-shadow: var(--fintech-shadow);
     min-height: 0;
     min-width: 0;
@@ -81,71 +102,134 @@
     display: flex;
     flex-direction: column;
   }
-  .glass-card h3 { color: #4fc3f7; font-size: 12px; margin: 0 0 8px 0; padding-bottom: 8px; border-bottom: 1px solid #1e3a50; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px; min-width: 0; }
-  .glass-card .chart-wrap { flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; }
+  .glass-card h3 { color: #fff; font-size: 13px; font-weight: 600; margin: 0 0 8px 0; padding-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.08); display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px; min-width: 0; }
+  .glass-card h3 i { color: var(--cool-blue); margin-right: 6px; }
+  .glass-card .chart-wrap { flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; align-items: stretch; justify-content: center; }
   .segment-tabs { display: flex; gap: var(--fintech-gap-sm); margin-bottom: 8px; }
-  .segment-tabs .tab { padding: 6px 12px; border-radius: var(--fintech-radius-sm); font-size: 10px; background: #1e3a50; border: 1px solid #2d4060; color: #90a4ae; cursor: pointer; }
-  .segment-tabs .tab.active { background: rgba(79,195,247,0.2); border-color: #4fc3f7; color: #4fc3f7; }
+  .segment-tabs .tab { padding: 6px 12px; border-radius: var(--fintech-radius-sm); font-size: 10px; background: rgba(30,58,80,0.5); border: 1px solid rgba(255,255,255,0.08); color: #90a4ae; cursor: pointer; }
+  .segment-tabs .tab.active { background: rgba(79,195,247,0.15); border-color: rgba(79,195,247,0.5); color: #4fc3f7; }
   .chart-legend { display: flex; flex-wrap: wrap; gap: 10px; font-size: 9px; color: #90a4ae; margin-top: 6px; }
   .chart-legend span { display: inline-flex; align-items: center; gap: 4px; }
   .chart-legend .dot { width: 6px; height: 6px; border-radius: 50%; }
-  .donut-inline { position: absolute; bottom: 8px; right: 8px; width: 56px; height: 56px; text-align: center; font-size: 10px; font-weight: 700; color: #22d3ee; display: flex; flex-direction: column; align-items: center; justify-content: center; }
-  .donut-inline .pct { font-size: 14px; }
-  .chart-container { height: 100%; min-height: 90px; max-height: 140px; position: relative; }
-  .chart-container.small { min-height: 60px; max-height: 80px; }
-  .risk-hex { width: 64px; height: 64px; margin: 0 auto 8px; background: linear-gradient(135deg, #1e3a50 0%, #0f2537 100%); border: 2px solid; border-image: linear-gradient(135deg, #ef4444, #22c55e) 1; border-radius: var(--fintech-radius-sm); display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: 800; color: #e0f7fa; flex-shrink: 0; box-shadow: 0 0 16px rgba(79,195,247,0.2); }
+  .donut-inline { position: absolute; bottom: 6px; right: 6px; width: 44px; height: 44px; text-align: center; font-size: 9px; font-weight: 700; color: #22d3ee; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  .donut-inline .pct { font-size: 12px; }
+  .chart-container { height: 100%; min-height: 80px; max-height: 120px; position: relative; }
+  .chart-container.small { min-height: 48px; max-height: 64px; }
+  .risk-hex {
+    width: 56px; height: 64px;
+    margin: 0 auto 8px;
+    background: linear-gradient(165deg, rgba(30,58,80,0.8) 0%, rgba(15,37,55,0.9) 100%);
+    border: 1px solid rgba(255,255,255,0.1);
+    clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.35rem;
+    font-weight: 800;
+    color: #e0f7fa;
+    flex-shrink: 0;
+    box-shadow: 0 0 20px rgba(34,197,94,0.4), inset 0 0 20px rgba(79,195,247,0.08);
+  }
   .risk-list { list-style: none; padding: 0; margin: 0; font-size: 10px; }
-  .risk-list li { padding: 4px 0; border-bottom: 1px solid #1e3a50; display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+  .risk-list li { padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.06); display: flex; justify-content: space-between; align-items: center; gap: 6px; }
   .risk-list li:last-child { border-bottom: none; }
   .risk-list a { color: #4fc3f7; text-decoration: none; }
   .risk-list a:hover { text-decoration: underline; }
   .analiz-search { display: flex; gap: var(--fintech-gap-sm); align-items: center; margin-bottom: 10px; flex-wrap: wrap; min-width: 0; }
-  .analiz-search input, .analiz-search select { background: #1e3a50; border: 1px solid #2d4060; color: #e0f7fa; padding: 6px 10px; border-radius: var(--fintech-radius-sm); font-size: 11px; min-width: 0; }
-  .analiz-buttons { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--fintech-gap); margin-bottom: 12px; min-width: 0; }
-  .analiz-btn { border-radius: var(--fintech-radius); padding: 10px; text-align: center; cursor: pointer; transition: all 0.2s; border: 1px solid transparent; font-size: 11px; font-weight: 600; text-decoration: none; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; color: #fff; min-width: 0; overflow: hidden; }
+  .analiz-search input, .analiz-search select { background: rgba(30,58,80,0.5); border: 1px solid rgba(255,255,255,0.08); color: #e0f7fa; padding: 6px 10px; border-radius: var(--fintech-radius-sm); font-size: 11px; min-width: 0; }
+  .analiz-buttons { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.5rem; margin-bottom: 0; }
+  .analiz-btn {
+    border-radius: 10px;
+    padding: 8px 4px;
+    text-align: center;
+    cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s;
+    border: 1px solid rgba(255,255,255,0.12);
+    font-size: 0.68rem;
+    font-weight: 600;
+    text-decoration: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    color: #fff;
+    min-width: 0;
+    overflow: hidden;
+    position: relative;
+  }
+  .analiz-btn span, .analiz-btn .analiz-btn-text { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .analiz-btn.blue { background: linear-gradient(135deg, #0d47a1, #1565c0); }
   .analiz-btn.red { background: linear-gradient(135deg, #b71c1c, #c62828); }
-  .analiz-btn.orange { background: linear-gradient(135deg, #e65100, #f97316); }
-  .analiz-btn.green { background: linear-gradient(135deg, #1b5e20, #22c55e); }
+  .analiz-btn.orange { background: linear-gradient(135deg, #e65100, var(--persimmon-orange)); }
+  .analiz-btn.green { background: linear-gradient(135deg, #1b5e20, var(--wasabi-green)); }
   .analiz-btn.purple { background: linear-gradient(135deg, #4a148c, #7b1fa2); }
   .analiz-btn.cyan { background: linear-gradient(135deg, #006064, #22d3ee); }
   .analiz-btn:hover { box-shadow: var(--fintech-shadow-hover); transform: translateY(-2px); }
+  .analiz-btn:active::after { content: ''; position: absolute; inset: 0; background: radial-gradient(circle at var(--ripple-x, 50%) var(--ripple-y, 50%), rgba(255,255,255,0.35) 0%, transparent 60%); animation: ripple 0.5s ease-out; pointer-events: none; }
+  @keyframes ripple { to { transform: scale(2); opacity: 0; } }
   .cta-double { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--fintech-gap); min-width: 0; }
   .cta-card {
     background: var(--fintech-card-bg);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
     border: var(--fintech-card-border);
     border-radius: var(--fintech-radius);
     padding: 12px;
     text-align: center;
     box-shadow: var(--fintech-shadow);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
   }
   .cta-card .btn-drawer { background: linear-gradient(90deg, #0d47a1, #1565c0); color: #fff; border: none; padding: 8px 14px; border-radius: var(--fintech-radius-sm); font-weight: 600; font-size: 11px; cursor: pointer; width: 100%; margin-bottom: 6px; }
-  .cta-card .small { font-size: 9px; color: #90a4ae; }
-  .ops-panel { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--fintech-gap); min-width: 0; }
+  .cta-card .small { font-size: 9px; color: #90a4ae; opacity: 0.7; font-weight: 500; }
+  .ops-panel { display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 0.5rem; }
   .ops-btn {
     background: var(--fintech-card-bg);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
     border: var(--fintech-card-border);
-    border-radius: var(--fintech-radius);
-    padding: 10px;
+    border-radius: 10px;
+    padding: 8px 4px;
     text-align: center;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: transform 0.2s, box-shadow 0.2s;
     color: #e0f7fa;
     text-decoration: none;
-    display: block;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
     box-shadow: var(--fintech-shadow);
+    position: relative;
+    font-size: 0.68rem;
   }
-  .ops-btn:hover { border-color: #4fc3f7; box-shadow: var(--fintech-shadow-hover); transform: translateY(-1px); }
-  .ops-btn .icon { font-size: 18px; margin-bottom: 2px; display: block; }
-  .ops-btn .label { font-size: 10px; font-weight: 600; }
-  .ops-btn .badge { position: absolute; top: 6px; right: 8px; background: #ef4444; color: #fff; font-size: 9px; padding: 2px 6px; border-radius: 10px; }
-  .ops-btn { position: relative; }
-  .fintech-footer-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--fintech-gap); padding: var(--fintech-gap-sm) var(--fintech-gap); background: var(--fintech-card-bg); border: var(--fintech-card-border); border-radius: var(--fintech-radius); box-shadow: var(--fintech-shadow); }
+  .ops-btn:hover { border-color: var(--cool-blue-glow); box-shadow: var(--fintech-shadow-hover); transform: translateY(-1px); }
+  .ops-btn .icon { font-size: 1.1rem; display: flex; align-items: center; justify-content: center; }
+  .ops-btn .label { font-weight: 600; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ops-btn .badge { position: absolute; top: 6px; right: 8px; color: #fff; font-size: 9px; padding: 2px 6px; border-radius: 10px; font-weight: 700; }
+  .ops-btn.ops-blue { background: linear-gradient(135deg, #0d47a1, #1565c0); border-color: rgba(255,255,255,0.2); color: #fff; }
+  .ops-btn.ops-blue .badge { background: #ffc107; color: #0a0e14; }
+  .ops-btn.ops-red { background: linear-gradient(135deg, #b71c1c, #c62828); border-color: rgba(255,255,255,0.2); color: #fff; }
+  .ops-btn.ops-red .badge { background: #ef4444; color: #fff; }
+  .ops-btn.ops-orange { background: linear-gradient(135deg, #e65100, var(--persimmon-orange)); border-color: rgba(255,255,255,0.2); color: #fff; }
+  .ops-btn.ops-orange .badge { background: var(--persimmon-orange); color: #fff; }
+  .ops-btn.ops-teal { background: linear-gradient(135deg, #006064, #0d7377); border-color: rgba(255,255,255,0.2); color: #fff; }
+  .ops-btn.ops-teal .badge { background: rgba(255,255,255,0.3); color: #fff; }
+  .ops-btn:active::after { content: ''; position: absolute; inset: 0; background: radial-gradient(circle at var(--ripple-x, 50%) var(--ripple-y, 50%), rgba(255,255,255,0.2) 0%, transparent 60%); animation: ripple 0.5s ease-out; pointer-events: none; border-radius: 10px; }
+  .toplu-section { margin-top: 0; }
+  .toplu-section .analiz-buttons { margin-bottom: 0; }
+  .fintech-footer-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--fintech-gap-sm); padding: 0.6rem 1rem; background: var(--fintech-card-bg); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: var(--fintech-card-border); border-radius: var(--fintech-radius); box-shadow: var(--fintech-shadow); }
   .smart-actions { display: flex; flex-wrap: wrap; gap: var(--fintech-gap-sm); align-items: center; }
-  .smart-btn { background: rgba(30, 58, 80, 0.9); border: 1px solid #2d4060; border-radius: var(--fintech-radius-sm); padding: 6px 12px; display: inline-flex; align-items: center; gap: 6px; color: #90a4ae; text-decoration: none; font-size: 11px; transition: all 0.2s; }
-  .smart-btn:hover { border-color: #4fc3f7; color: #4fc3f7; box-shadow: 0 0 12px rgba(79,195,247,0.2); }
+  .smart-btn { background: rgba(30, 58, 80, 0.5); border: 1px solid rgba(255,255,255,0.08); border-radius: var(--fintech-radius-sm); padding: 6px 12px; display: inline-flex; align-items: center; gap: 6px; color: #90a4ae; text-decoration: none; font-size: 11px; transition: all 0.2s; }
+  .smart-btn:hover { border-color: rgba(79,195,247,0.4); color: #4fc3f7; box-shadow: 0 0 12px rgba(79,195,247,0.2); }
+  .cta-list { display: flex; align-items: center; gap: var(--fintech-gap); flex-wrap: wrap; }
   .cta-list .btn-drawer { background: linear-gradient(90deg, #0d47a1, #1565c0); color: #fff; border: none; padding: 8px 18px; border-radius: var(--fintech-radius-sm); font-weight: 600; font-size: 12px; cursor: pointer; box-shadow: 0 0 12px rgba(33,150,243,0.4); }
   .cta-list .btn-drawer:hover { background: linear-gradient(90deg, #1565c0, #1976d2); }
+  .cta-list .btn-drawer-green { background: linear-gradient(90deg, #1b5e20, var(--wasabi-green)); color: #fff; box-shadow: 0 0 12px rgba(205,220,57,0.35); }
+  .cta-list .btn-drawer-green:hover { background: linear-gradient(90deg, #2e7d32, #cddc39); }
+  .footer-summary { display: flex; flex-direction: column; align-items: flex-end; font-size: 11px; color: #90a4ae; opacity: 0.8; }
+  .footer-summary-val { font-size: 14px; font-weight: 700; color: #e0f7fa; margin-top: 2px; }
   /* Drawer */
   .drawer-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 2000; display: none; }
   .drawer-overlay.open { display: block; }
@@ -166,11 +250,24 @@
   .import-banner { padding: 8px 14px; margin-bottom: var(--fintech-gap); border-radius: var(--fintech-radius-sm); font-size: 12px; display: flex; align-items: center; justify-content: space-between; }
   .import-banner.ok { background: rgba(34,197,94,0.2); border: 1px solid #22c55e; color: #22c55e; }
   .import-banner.uyari { background: rgba(234,179,8,0.2); border: 1px solid #eab308; color: #eab308; }
-  /* Sağ panel — Modern Fintech card, gap'li grid ile uyumlu */
-  .musteri-layout { display: flex; height: calc(100vh - 100px); min-height: 0; margin: -10px; overflow: hidden; padding: var(--fintech-gap) 0; box-sizing: border-box; gap: var(--fintech-gap); }
-  .right-panel { width: 0; height: 100%; transition: width 0.25s ease; overflow: hidden; background: transparent; display: flex; flex-direction: column; flex-shrink: 0; align-self: stretch; padding: 0 0 0 var(--fintech-gap); gap: 0; min-height: 0; }
-  .right-panel.open { width: 420px; }
-  .right-panel .panel-content { display: none; flex: 1; flex-direction: column; overflow: hidden; min-width: 0; min-height: 0; background: var(--fintech-card-bg); border: var(--fintech-card-border); border-radius: var(--fintech-radius); box-shadow: var(--fintech-shadow); }
+  /* Sağ panel — Dikey hizalama align-items: stretch, row hover Cool Blue */
+  .musteri-layout {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  height: calc(100vh - 100px);
+  max-height: calc(100vh - 100px);
+  min-height: 0;
+  margin: -10px;
+  overflow: hidden;
+  padding: var(--fintech-gap) 0;
+  box-sizing: border-box;
+  gap: var(--fintech-gap);
+}
+  .right-panel { width: 0; height: 100%; transition: width 0.25s ease; overflow: hidden; background: transparent; display: flex; flex-direction: column; flex-shrink: 0; align-self: stretch; padding: 0 0 0 var(--fintech-gap); min-height: 0; }
+  .right-panel.open { width: 340px; }
+  .right-panel.open.panel-musteri-list { width: 520px; max-width: 90vw; }
+  .right-panel .panel-content { display: none; flex: 1; flex-direction: column; overflow: hidden; min-width: 0; min-height: 0; background: var(--fintech-card-bg); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: var(--fintech-card-border); border-radius: var(--fintech-radius); box-shadow: var(--fintech-shadow); }
   .right-panel .panel-content.active { display: flex; }
   .right-panel .drawer-header { padding: 10px 12px; border-bottom: 1px solid #1e3a50; flex-shrink: 0; display: flex; justify-content: space-between; align-items: center; gap: 8px; min-height: 0; }
   .right-panel .drawer-header h2 { margin: 0; font-size: 12px; font-weight: 700; color: #4fc3f7; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -188,13 +285,18 @@
   .right-panel .drawer-table th { background: #1e3a50; color: #4fc3f7; padding: 8px 8px; text-align: left; font-weight: 600; font-size: 10px; white-space: nowrap; line-height: 1.3; }
   .right-panel .drawer-table td { padding: 8px 8px; border-bottom: 1px solid #1e3a50; color: #e0f7fa; overflow: hidden; text-overflow: ellipsis; line-height: 1.3; box-sizing: border-box; }
   .right-panel .drawer-table tbody tr:last-child td { border-bottom: none; }
-  .right-panel .drawer-table tr:hover { background: rgba(30, 58, 80, 0.6); }
-  .right-panel .drawer-table tr { cursor: pointer; }
+  .right-panel .drawer-table tr { cursor: pointer; transition: transform 0.15s ease, box-shadow 0.15s ease; }
+  .right-panel .drawer-table tbody tr:hover { transform: scale(1.01); background: rgba(30, 58, 80, 0.5); box-shadow: 0 0 12px var(--cool-blue-glow); }
+  .right-panel .drawer-table tbody tr { border-radius: 6px; }
   .right-panel .drawer-table .gecikme { color: #ef4444; }
   .right-panel .drawer-table .gecikme.ok { color: #22c55e; }
+  .right-panel .drawer-table .borc { color: #e0f7fa; }
+  .right-panel .drawer-table .borc.positive { color: var(--persimmon-orange); font-weight: 600; }
+  .right-panel .drawer-table .borc.zero { color: #4fc3f7; }
   .right-panel .drawer-table td:first-child { max-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .right-panel .excel-link { color: #4fc3f7; font-size: 11px; text-decoration: none; }
-  .right-panel .excel-link:hover { color: #22c55e; }
+  .right-panel .excel-link { display: inline-flex; align-items: center; gap: 6px; background: linear-gradient(135deg, #1b5e20, #2e7d32); color: #fff; font-size: 11px; font-weight: 600; text-decoration: none; padding: 6px 12px; border-radius: var(--fintech-radius-sm); border: 1px solid rgba(255,255,255,0.15); }
+  .right-panel .excel-link:hover { background: linear-gradient(135deg, #2e7d32, #cddc39); color: #0a0e14; }
+  .right-panel .drawer-header h2 { color: #fff; }
   .right-panel .list-toolbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
   .right-panel .list-search-row { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
   .right-panel .list-search-row .fa-search { color: #90a4ae; font-size: 10px; }
@@ -202,12 +304,21 @@
   .right-panel .list-select { padding: 4px 6px; font-size: 10px; background: #1e3a50; border: 1px solid #2d4060; border-radius: 4px; color: #e0f7fa; }
   .right-panel .list-pagination { font-size: 10px; color: #90a4ae; }
   .right-panel .list-subtitle { font-size: 10px; color: #90a4ae; margin-bottom: 6px; }
-  .right-panel .list-footer { flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 0 0; border-top: 1px solid #1e3a50; margin-top: 8px; font-size: 10px; color: #90a4ae; }
-  .right-panel .list-footer-nav { display: flex; gap: 8px; align-items: center; }
+  .right-panel .list-footer { flex-shrink: 0; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 0 0; border-top: 1px solid #1e3a50; margin-top: 8px; font-size: 10px; color: #90a4ae; }
+  .right-panel .list-footer-nav { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .right-panel .list-footer-nav i { cursor: pointer; }
   .right-panel .list-footer-nav i:hover { color: #4fc3f7; }
   .right-panel .list-footer-totals { display: flex; flex-direction: column; align-items: flex-end; }
   .right-panel .list-footer-totals strong { color: #e0f7fa; }
+  .right-panel .btn-drawer-sm { width: 100%; margin-top: 8px; padding: 6px 12px; font-size: 11px; background: linear-gradient(90deg, #0d47a1, #1565c0); color: #fff; border: none; border-radius: var(--fintech-radius-sm); font-weight: 600; cursor: pointer; }
+  .right-panel .btn-drawer-sm:hover { background: linear-gradient(90deg, #1565c0, #1976d2); }
+  .right-panel .list-subtitle { opacity: 0.7; }
+  .trust-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 10px; color: #90a4ae; opacity: 0.8; padding: 4px 10px; border-radius: 20px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06); }
+  .trust-badge i { color: var(--wasabi-green); }
+  #chartTahsilat ~ canvas { display: block; }
+  /* Glassmorphic tooltip — Chart.js tooltip container */
+  .chartjs-tooltip-glass { background: rgba(15,37,55,0.82) !important; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.12) !important; border-radius: 10px !important; padding: 10px 14px !important; box-shadow: 0 8px 24px rgba(0,0,0,0.3) !important; }
+
 </style>
 
 {% if import_sonuc == 'ok' or import_sonuc == 'uyari' %}
@@ -218,176 +329,158 @@
 {% endif %}
 
 <div class="musteri-layout">
+  <!-- Özet paneli (varsayılan görünüm) -->
+  <div id="fintech-ozet-view" style="flex: 1; min-width: 0; display: flex; flex-direction: column;">
 <div class="fintech-wrap" style="flex: 1; min-width: 0;">
   <div class="fintech-page-title">
-    <div class="title-wrap">
+    <a href="{{ url_for('musteriler.list_full') }}" class="title-wrap title-btn" title="Müşteri listesine git" style="text-decoration:none; color:inherit; display:block;">
       <h1>Müşteriler</h1>
       <p class="subtitle">Müşteri Özeti</p>
-    </div>
+    </a>
     <div class="fintech-filters">
+      <span class="trust-badge" title="Uçtan uca şifreli bağlantı"><i class="fa fa-lock"></i> Uçtan Uca Şifreli</span>
       <select id="filterYear"><option>{{ now_year|default(2024) }}</option></select>
       <select id="filterPeriod"><option>Son 6 Ay</option></select>
       <button type="button" class="icon-btn" title="Takvim"><i class="fa fa-calendar-alt"></i></button>
       <button type="button" class="icon-btn" title="Ayarlar"><i class="fa fa-cog"></i></button>
+      <a href="{{ url_for('index') }}" class="icon-btn" title="Ana Sayfa"><i class="fa fa-home"></i></a>
     </div>
   </div>
 
   <div class="kpi-strip">
-    <a href="{{ url_for('musteriler.list_full') }}" class="kpi-card blue" style="text-decoration:none; color:inherit;" title="Müşteri listesi">
+    <div class="kpi-card blue kpi-hero kpi-link" role="button" tabindex="0" title="Müşteri listesini sağda aç" onclick="openDrawer();" onkeydown="if(event.key==='Enter'||event.key===' ') { event.preventDefault(); openDrawer(); }">
       <span class="trend"><i class="fa fa-arrow-up"></i></span>
       <div class="icon"><i class="fa fa-users"></i></div>
       <div class="val">{{ kpi.toplam_musteri|default(0) }}</div>
       <div class="lbl">Toplam Müşteri</div>
-    </a>
-    <a href="{{ url_for('musteriler.list_full') }}" class="kpi-card blue" style="text-decoration:none; color:inherit;" title="Aktif müşteriler">
+    </div>
+    <a href="{{ url_for('musteriler.list_full', tum_yillar_odenmis=1) }}" class="kpi-card green kpi-link" title="Aktif müşteriler (tüm yıllar ödenmiş)">
       <span class="trend"><i class="fa fa-arrow-up"></i></span>
       <div class="icon"><i class="fa fa-user-check"></i></div>
       <div class="val">{{ kpi.aktif_musteri|default(0) }}</div>
       <div class="lbl">Aktif Müşteri</div>
     </a>
-    <div class="kpi-card orange" onclick="openDrawerTahsilat()" role="button" title="Kritik müşteriler">
+    <a href="{{ url_for('musteriler.list_full') }}" class="kpi-card orange kpi-hero kpi-link" title="Kritik müşteriler (müşteri listesi)">
       <span class="trend"><i class="fa fa-arrow-up"></i></span>
-      <div class="icon"><i class="fa fa-users"></i></div>
+      <div class="icon"><i class="fa fa-exclamation-triangle"></i></div>
       <div class="val">{{ kpi.kritik_musteri|default(0) }}</div>
       <div class="lbl">Kritik Müşteri</div>
-    </div>
-    <div class="kpi-card green" onclick="openDrawerFatura()" role="button" title="Aylık tahakkuk">
+    </a>
+    <a href="{{ url_for('faturalar.index') }}" class="kpi-card cyan kpi-link" title="Faturalar / Aylık tahakkuk">
       <span class="trend"><i class="fa fa-arrow-up"></i></span>
       <div class="icon"><i class="fa fa-lira-sign"></i></div>
       <div class="val">{{ "{:,.0f}".format(kpi.toplam_aylik_tahakkuk|default(0)).replace(",", " ") }} ₺</div>
       <div class="lbl">Toplam Aylık Tahakkuk</div>
-    </div>
-    <div class="kpi-card blue" onclick="openDrawerTahsilat()" role="button" title="Gecikme">
-      <span class="trend"><i class="fa fa-arrow-up"></i></span>
-      <div class="icon"><i class="fa fa-clock"></i></div>
-      <div class="val">{{ "{:,.0f}".format(kpi.toplam_gecikme|default(0)).replace(",", " ") }} ₺</div>
-      <div class="lbl">Toplam Gecikme</div>
-    </div>
-    <div class="kpi-card blue" onclick="openDrawerKpiTahsilat()" role="button" title="Tahsilat oranı">
+    </a>
+    <a href="{{ url_for('tahsilat.index') }}" class="kpi-card blue kpi-hero kpi-link" title="Tahsilat oranı / Tahsilat sayfası">
       <span class="trend"><i class="fa fa-arrow-up"></i></span>
       <div class="icon"><i class="fa fa-percent"></i></div>
       <div class="val">{{ kpi.tahsilat_orani|default(0) }}%</div>
       <div class="lbl">Tahsilat Oranı %</div>
-    </div>
+    </a>
   </div>
 
   <div class="fintech-three" id="fintechThree">
     <div class="fintech-left">
       <div class="glass-card">
-        <h3>
-          <span><i class="fa fa-chart-line"></i> Müşteri Analizi</span>
-          <span style="font-size:10px; color:#90a4ae;">Tahsilat Performansı</span>
-        </h3>
-        <div class="fintech-filters" style="margin-bottom:6px;">
-          <select><option>{{ now_year|default(2024) }}</option></select>
+        <h3><i class="fa fa-bolt"></i> Müşteri Analizi</h3>
+        <div class="fintech-filters" style="margin-bottom:8px;">
+          <select><option>Euro ₺</option></select>
           <select><option>Son 6 Ay</option></select>
         </div>
-        <div class="segment-tabs">
-          <button type="button" class="tab active">Euro</button>
-          <button type="button" class="tab">Zonr</button>
-          <button type="button" class="tab">Ream</button>
-        </div>
         <div class="chart-wrap">
-          <div class="chart-container">
+          <div class="chart-container" style="min-height:100px; max-height:140px;">
             <canvas id="chartTahsilat"></canvas>
-          </div>
-          <div style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:6px; margin-top:4px;">
-            <div class="chart-legend">
-              <span><i class="dot" style="background:#4fc3f7;"></i> 7 Gün Gecikme</span>
-              <span><i class="dot" style="background:#f97316;"></i> 7-30 Gün</span>
-              <span><i class="dot" style="background:#ef4444;"></i> 30 Gün Üzeri</span>
-            </div>
-            <div class="donut-inline" style="position:static;"><span class="pct">28.2%</span><span>Kısmen</span></div>
-          </div>
-        </div>
-        <div class="chart-container small">
-          <canvas id="chartGecikme"></canvas>
-        </div>
-      </div>
-      <div class="glass-card">
-        <h3><i class="fa fa-search"></i> Müşteri Analizi</h3>
-        <div class="analiz-search">
-          <i class="fa fa-search" style="color:#90a4ae;"></i>
-          <select><option>Tümünü</option></select>
-          <select><option>Aynı v.1</option></select>
-          <input type="text" value="₺{{ now_year|default(2026) }}" style="width:70px;">
-        </div>
-        <div class="analiz-buttons">
-          <a href="#" class="analiz-btn blue"><i class="fa fa-users"></i> Kafilik Analizi</a>
-          <a href="#" class="analiz-btn red"><i class="fa fa-cube"></i> Risk Analizi</a>
-          <a href="/tufe/" class="analiz-btn orange"><i class="fa fa-chart-line"></i> TÜFE Simulasyonu</a>
-          <a href="#" class="analiz-btn green"><i class="fa fa-whatsapp"></i> WhatsApp Toplu Gönder</a>
-          <a href="#" class="analiz-btn purple"><i class="fa fa-calendar"></i> Sözleşme Süre Analizi</a>
-          <a href="{{ url_for('musteriler.export_excel') }}" class="analiz-btn cyan"><i class="fa fa-file-excel"></i> Excel Export</a>
-        </div>
-        <div class="cta-double">
-          <div class="cta-card">
-            <button type="button" class="btn-drawer" onclick="openDrawer()">Müşteri Listesine Git →</button>
-            <div class="small">{{ kpi.toplam_musteri|default(0) }} Toplam Müşteri</div>
-          </div>
-          <div class="cta-card">
-            <button type="button" class="btn-drawer" onclick="openDrawer()">Müşteri Listesine Git →</button>
-            <div class="small">TÜFE uyarıları · {{ sozlesme_30_list|length }} sözleşme</div>
           </div>
         </div>
       </div>
     </div>
     <div class="glass-card">
       <h3><i class="fa fa-shield-halved"></i> Risk Paneli</h3>
-      <div class="risk-hex" id="riskHex">{{ genel_risk_puan|default(82) }}</div>
-      <div style="font-size:10px; color:#90a4ae; margin-bottom:4px;">En Riskli 5 Müşteri</div>
+      <div class="risk-hex" id="riskHex">{{ genel_risk_puan|default(100) }}</div>
+      <div style="font-size:10px; color:#90a4ae; margin-bottom:4px; opacity:0.7;">En Riskli 5 Müşteri</div>
       <ul class="risk-list" style="max-height:72px; overflow-y:auto;">
         {% for r in en_riskli_5 %}
         <li><i class="fa fa-gem" style="color:{% if r.geciken_gun and r.geciken_gun > 30 %}#ef4444{% else %}#22c55e{% endif %}; font-size:8px;"></i> <a href="{{ url_for('musteriler.detay', mid=r.musteri_id) }}">{{ r.name }}</a> <span style="color:#ef4444;">{{ r.geciken_gun }} Gün</span></li>
         {% endfor %}
         {% if not en_riskli_5 %}<li style="color:#90a4ae;">Kayıt yok</li>{% endif %}
       </ul>
-      <div style="font-size:10px; color:#90a4ae; margin-top:8px; margin-bottom:4px;">Sözleşmesi 30 Gün içinde Bitecekler</div>
+      <div style="font-size:10px; color:#90a4ae; margin-top:8px; margin-bottom:4px; opacity:0.7;">Sözleşmesi 30 Gün içinde Bitecekler</div>
       <ul class="risk-list" style="max-height:56px; overflow-y:auto;">
         {% for s in sozlesme_30_list %}
-        <li><a href="{{ url_for('musteriler.detay', mid=s.musteri_id) }}">{{ s.name }}</a> <span>{{ s.office_code }} · {{ s.kalan_gun }} gün</span> <a href="{{ url_for('musteriler.detay', mid=s.musteri_id) }}" class="smart-btn" style="padding:2px 6px; font-size:9px;">Detay</a></li>
+        <li><a href="{{ url_for('musteriler.detay', mid=s.musteri_id) }}">{{ s.name }}</a> <span>{{ s.office_code }} · {{ s.kalan_gun }} gün</span></li>
         {% endfor %}
         {% if not sozlesme_30_list %}<li style="color:#90a4ae;">Yok</li>{% endif %}
+      </ul>
+      <div style="font-size:10px; color:#90a4ae; margin-top:8px; margin-bottom:4px; opacity:0.7;">TÜFE Artışı Yaklaşanlar</div>
+      <ul class="risk-list" style="max-height:40px; overflow-y:auto;">
+        <li style="color:#90a4ae;">Yok</li>
       </ul>
     </div>
   </div>
 
-  <div class="ops-panel">
-    <button type="button" class="ops-btn" onclick="openDrawerFatura()"><span class="icon"><i class="fa fa-file-invoice"></i></span><span class="label">Toplu Faturalama</span></button>
-    <button type="button" class="ops-btn" onclick="openDrawerTahsilat()"><span class="icon"><i class="fa fa-wallet"></i></span><span class="label">Toplu Tahsilat</span><span class="badge">{{ tahsilat_kritik_list|length }}</span></button>
-    <button type="button" class="ops-btn" onclick="openDrawerKargo()"><span class="icon"><i class="fa fa-box"></i></span><span class="label">Kargolar</span><span class="badge">{{ kargo_teslim_bekleyen|length }}</span></button>
-    <button type="button" class="ops-btn" onclick="openDrawer()"><span class="icon"><i class="fa fa-list"></i></span><span class="label">Müşteri Listesi</span><span class="badge">{{ musteriler|length }}</span></button>
+  <div class="glass-card toplu-section">
+    <h3><i class="fa fa-bolt"></i> Toplu Faturalama</h3>
+    <div style="display:grid; grid-template-columns:repeat(9,minmax(0,1fr)); gap:0.5rem; margin-bottom:0.5rem;">
+      <a href="{{ url_for('faturalar.index') }}" class="ops-btn ops-blue"><span class="icon"><i class="fa fa-file-invoice"></i></span><span class="label">Toplu Faturalama</span><span class="badge">{{ fatura_bekleyen_count|default(20) }}</span></a>
+      <a href="{{ url_for('tahsilat.index') }}" class="ops-btn ops-red"><span class="icon"><i class="fa fa-wallet"></i></span><span class="label">Toplu Tahsilat</span><span class="badge">{{ tahsilat_kritik_list|length }}</span></a>
+      <a href="{{ url_for('kargolar.index') }}" class="ops-btn ops-orange"><span class="icon"><i class="fa fa-box"></i></span><span class="label">Kargolar</span><span class="badge">{{ kargo_teslim_bekleyen|length }}</span></a>
+      <a href="{{ url_for('musteriler.list_full') }}" class="ops-btn ops-teal"><span class="icon"><i class="fa fa-list"></i></span><span class="label">Müşteri Listesi</span><span class="badge">{{ musteriler|length }}</span></a>
+      <a href="#" id="btn-fintech-musteri-ekle" class="analiz-btn blue" role="button"><i class="fa fa-plus"></i><span class="analiz-btn-text">+ Müşteri Ekle</span></a>
+      <a href="{{ url_for('musteriler.list_full', filtre='risk') }}" class="analiz-btn red"><i class="fa fa-cube"></i><span class="analiz-btn-text">Risk Analizi</span></a>
+      <a href="{{ url_for('tufe.index') }}" class="analiz-btn orange"><i class="fa fa-chart-line"></i><span class="analiz-btn-text">TÜFE Simülasyonu</span></a>
+      <a href="{{ url_for('musteriler.list_full', filtre='whatsapp') }}" class="analiz-btn green"><i class="fa fa-whatsapp"></i><span class="analiz-btn-text">WhatsApp Toplu Gönder</span></a>
+      <a href="{{ url_for('musteriler.export_excel') }}" class="analiz-btn cyan"><i class="fa fa-file-excel"></i><span class="analiz-btn-text">Excel</span></a>
+    </div>
+    <div style="display:grid; grid-template-columns:1fr; gap:0.5rem;">
+      <a href="{{ url_for('musteriler.gemini_analiz') }}" class="analiz-btn purple"><i class="fa fa-robot"></i><span class="analiz-btn-text">AI Yorumla</span></a>
+    </div>
   </div>
 
   <div class="fintech-footer-row">
     <div class="smart-actions">
-      <a href="#" class="smart-btn"><i class="fa fa-chart-pie"></i> Kârlılık</a>
-      <a href="#" class="smart-btn"><i class="fa fa-exclamation-circle"></i> Risk</a>
-      <a href="/tufe/" class="smart-btn"><i class="fa fa-building"></i> TÜFE</a>
-      <a href="#" class="smart-btn"><i class="fa fa-whatsapp"></i> WhatsApp</a>
+      <a href="{{ url_for('musteriler.ozet') }}" class="smart-btn"><i class="fa fa-chart-pie"></i> Kârlılık</a>
+      <a href="{{ url_for('musteriler.list_full', filtre='risk') }}" class="smart-btn"><i class="fa fa-exclamation-circle"></i> Risk</a>
+      <a href="{{ url_for('tufe.index') }}" class="smart-btn"><i class="fa fa-building"></i> TÜFE</a>
+      <a href="{{ url_for('musteriler.list_full', filtre='whatsapp') }}" class="smart-btn"><i class="fa fa-whatsapp"></i> WhatsApp</a>
       <a href="{{ url_for('musteriler.export_excel') }}" class="smart-btn"><i class="fa fa-file-excel"></i> Excel</a>
     </div>
     <div class="cta-list">
-      <button type="button" class="btn-drawer" onclick="openDrawer()">Müşteri Listesine Git →</button>
+      <a href="{{ url_for('musteriler.ozet') }}" class="btn-drawer btn-drawer-green" style="text-decoration:none;color:inherit;display:inline-flex;align-items:center;justify-content:center;">Özet Paneli →</a>
+      <div class="footer-summary">
+        <span class="footer-summary-text">{{ kpi.toplam_musteri|default(0) }} Toplam Müşteri</span>
+        <span class="footer-summary-val">{{ "{:,.0f}".format(toplam_bakiye|default(0)).replace(",", " ") }} ₺</span>
+      </div>
     </div>
   </div>
 </div>
+  </div>
 
-<!-- Sağ panel: Müşteri listesi varsayılan olarak sabit görünür -->
-<div class="right-panel open" id="rightPanel">
-  <div class="panel-content active" id="panelMusteri">
+  <!-- Giriş / Müşteri Ekle gömülü görünüm (sayfa içi, URL değişmez) -->
+  <div id="fintech-giris-embed-view" style="display: none; flex: 1; min-width: 0; flex-direction: column; min-height: 0; background: #0a1929;">
+    <div style="display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; background: #0f2537; border-bottom: 1px solid #1e3a50; flex-shrink: 0;">
+      <h2 style="margin: 0; font-size: 14px; color: #4fc3f7;"><i class="fa fa-user-plus"></i> Giriş / Müşteri Kaydı</h2>
+      <a href="#" id="btn-fintech-ozete-don" style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; background: rgba(79, 195, 247, 0.15); border: 1px solid rgba(79, 195, 247, 0.3); border-radius: 6px; color: #4fc3f7; font-size: 12px; font-weight: 600; text-decoration: none;"><i class="fa fa-arrow-left"></i> Özet Paneline Dön</a>
+    </div>
+    <iframe id="fintech-giris-iframe" src="about:blank" title="Giriş / Müşteri Kaydı" style="flex: 1; width: 100%; min-height: calc(100vh - 180px); border: none; display: block;"></iframe>
+  </div>
+
+  <!-- Sağ panel: Müşteriler başlığına veya Toplam Müşteri kartına tıklanınca açılır -->
+  <div class="right-panel" id="rightPanel">
+  <div class="panel-content" id="panelMusteri">
     <div class="drawer-header">
-      <h2>Müşteri Listesi</h2>
+      <h2><i class="fa fa-users"></i> Müşteri Listesi</h2>
       <div style="display:flex; align-items:center; gap:10px;">
-        <a href="{{ url_for('musteriler.import_excel') }}" class="excel-link"><i class="fa fa-file-excel"></i> Excel</a>
+        <a href="{{ url_for('musteriler.export_excel') }}" class="excel-link"><i class="fa fa-file-excel"></i> Excel</a>
         <button type="button" class="drawer-close" onclick="closeRightPanel()" aria-label="Kapat">×</button>
       </div>
     </div>
     <div class="drawer-body">
+      <p class="list-subtitle" style="margin:0 0 8px 0; font-size:10px; opacity:0.85;">Satıra tıklayınca 12 aylık müşteri detay sayfası açılır.</p>
       <div class="list-toolbar">
         <div class="list-search-row">
           <i class="fa fa-search"></i>
-          <input type="text" class="drawer-search" id="drawerSearch" placeholder="Ad/Ünvan" oninput="filterDrawerTable(this.value)">
+          <input type="text" class="drawer-search" id="drawerSearch" placeholder="Q Ad/Ünvan" oninput="filterDrawerTable(this.value)">
           <select class="list-select"><option>Ad/Ünvan</option></select>
         </div>
         <div class="list-pagination">
@@ -399,14 +492,14 @@
       <div class="list-scroll-wrap">
         <table class="drawer-table" id="drawerTable">
           <thead>
-            <tr><th>Ad/Ünvan</th><th>Ofis / Unit</th><th>Borç</th><th><i class="fa fa-sort"></i> Gecikme</th></tr>
+            <tr><th>Ad/Ünvan</th><th>Ofis/Ünite</th><th>Borç</th><th><i class="fa fa-sort"></i> Gecikme</th></tr>
           </thead>
           <tbody>
             {% for m in musteriler %}
             <tr data-id="{{ m.id }}" data-name="{{ (m.name or '')|lower }}" data-borc="{{ m.get('toplam_borc', 0) }}" onclick="window.location.href='{{ url_for('musteriler.detay', mid=m.id) }}'">
               <td title="{{ m.name or '—' }}">{{ m.name or '—' }}</td>
               <td>{{ m.office_code or '—' }}</td>
-              <td>{{ "{:,.2f}".format(m.get('toplam_borc', 0)).replace(",", " ") }} ₺</td>
+              <td class="borc {{ 'positive' if (m.get('toplam_borc') or 0) > 0 else 'zero' }}">{{ "{:,.2f}".format(m.get('toplam_borc', 0)).replace(",", " ") }} ₺</td>
               <td class="gecikme {{ 'ok' if (m.get('geciken_gun') or 0) == 0 else '' }}">{{ m.get('geciken_gun', 0) }}</td>
             </tr>
             {% endfor %}
@@ -415,16 +508,18 @@
       </div>
       <div class="list-footer">
         <div class="list-footer-nav">
-          <i class="fa fa-search"></i>
-          <i class="fa fa-chevron-left"></i>
-          <i class="fa fa-chevron-right"></i>
+          <i class="fa fa-search" title="Ara"></i>
+          <i class="fa fa-plus" title="Ekle"></i>
+          <i class="fa fa-chevron-left" title="Önceki"></i>
+          <i class="fa fa-chevron-right" title="Sonraki"></i>
+          <select class="list-select" style="margin:0;"><option>Aktif M</option></select>
+          <span class="list-pagination">{{ (musteriler|default([]))|length }}</span>
         </div>
         <div class="list-footer-totals">
-          <span>Toplam Müşteri <strong>{{ musteriler|length }}</strong></span>
-          {% set _tb = namespace(v=0) %}
-          {% for _m in musteriler %}{% set _tb.v = _tb.v + ((_m.get('toplam_borc', 0) or 0)|float) %}{% endfor %}
-          <span>Toplam Bakiye <strong>{{ "{:,.0f}".format(_tb.v).replace(",", " ") }} ₺</strong></span>
+          <span class="list-subtitle">Toplam Müşteri <strong>{{ (musteriler|default([]))|length }}</strong></span>
+          <span class="list-subtitle">₺ <strong>{{ "{:,.0f}".format(toplam_bakiye|default(0)).replace(",", " ") }}</strong></span>
         </div>
+        <a href="{{ url_for('musteriler.list_full') }}" class="btn-drawer btn-drawer-sm" style="text-decoration:none;color:inherit;display:block;text-align:center;">Müşteri Listesine Git →</a>
       </div>
     </div>
   </div>
@@ -441,7 +536,7 @@
           {% for i in range(1, 13) %}<option value="{{ i }}" {{ 'selected' if i == now_month else '' }}>{{ MONTHS_TR[i-1] }} {{ now_year }}</option>{% endfor %}
         </select>
       </div>
-      <a href="/faturalar/" class="ops-btn" style="text-align:center; margin-top:12px; display:block;"><i class="fa fa-external-link-alt"></i> Faturalar sayfasına git</a>
+      <a href="{{ url_for('faturalar.index') }}" class="ops-btn" style="text-align:center; margin-top:12px; display:block;"><i class="fa fa-external-link-alt"></i> Faturalar sayfasına git</a>
     </div>
   </div>
   <div class="panel-content" id="panelTahsilat">
@@ -464,13 +559,13 @@
           <div style="margin-top:8px; display:flex; gap:6px; flex-wrap:wrap;">
             <a href="tel:{{ r.phone }}" class="smart-btn" style="padding:6px 10px; font-size:11px;"><i class="fa fa-phone"></i> Ara</a>
             <a href="https://wa.me/90{{ r.phone }}" target="_blank" class="smart-btn" style="padding:6px 10px; font-size:11px; color:#22c55e;"><i class="fa fa-whatsapp"></i> WhatsApp</a>
-            <a href="/faturalar/?musteri={{ r.musteri_id }}" class="smart-btn" style="padding:6px 10px; font-size:11px; color:#22c55e;"><i class="fa fa-wallet"></i> Ödeme Al</a>
+            <a href="{{ url_for('faturalar.index', musteri=r.musteri_id) }}" class="smart-btn" style="padding:6px 10px; font-size:11px; color:#22c55e;"><i class="fa fa-wallet"></i> Ödeme Al</a>
           </div>
         </div>
         {% endfor %}
         {% if not tahsilat_kritik_list %}<p style="color:#90a4ae; padding:20px;">Kritik müşteri yok.</p>{% endif %}
       </div>
-      <a href="/tahsilat/" class="ops-btn" style="text-align:center; margin-top:12px; display:block;"><i class="fa fa-external-link-alt"></i> Tahsilat sayfasına git</a>
+      <a href="{{ url_for('tahsilat.index') }}" class="ops-btn" style="text-align:center; margin-top:12px; display:block;"><i class="fa fa-external-link-alt"></i> Tahsilat sayfasına git</a>
     </div>
   </div>
   <div class="panel-content" id="panelKargo">
@@ -489,11 +584,11 @@
       <h4 style="color:#4fc3f7; font-size:12px; margin-bottom:8px;">Teslim bekleyen</h4>
       <ul class="risk-list">
         {% for k in kargo_teslim_bekleyen %}
-        <li><a href="/kargolar/{{ k.id }}">{{ k.musteri_adi or '—' }}</a> · {{ k.takip_no or '—' }} <a href="/kargolar/{{ k.id }}" style="color:#22c55e; font-size:11px;">Teslim al</a></li>
+        <li><a href="{{ url_for('kargolar.detay', kargo_id=k.id) }}">{{ k.musteri_adi or '—' }}</a> · {{ k.takip_no or '—' }} <a href="{{ url_for('kargolar.detay', kargo_id=k.id) }}" style="color:#22c55e; font-size:11px;">Teslim al</a></li>
         {% endfor %}
         {% if not kargo_teslim_bekleyen %}<li style="color:#90a4ae;">Bekleyen yok.</li>{% endif %}
       </ul>
-      <a href="/kargolar/" class="ops-btn" style="text-align:center; margin-top:12px; display:block;"><i class="fa fa-external-link-alt"></i> Kargolar sayfasına git</a>
+      <a href="{{ url_for('kargolar.index') }}" class="ops-btn" style="text-align:center; margin-top:12px; display:block;"><i class="fa fa-external-link-alt"></i> Kargolar sayfasına git</a>
     </div>
   </div>
   <div class="panel-content" id="panelKpiTahsilat">
@@ -507,7 +602,7 @@
         <div style="font-size:28px; font-weight:700; color:#22d3ee;">{{ kpi.tahsilat_orani|default(0) }}%</div>
         <div style="font-size:11px; color:#90a4ae;">Güncel oran</div>
       </div>
-      <a href="/tahsilat/" class="ops-btn" style="text-align:center; display:block;"><i class="fa fa-external-link-alt"></i> Tahsilat sayfasına git</a>
+      <a href="{{ url_for('tahsilat.index') }}" class="ops-btn" style="text-align:center; display:block;"><i class="fa fa-external-link-alt"></i> Tahsilat sayfasına git</a>
     </div>
   </div>
   <div class="panel-content" id="panelKpiKira">
@@ -521,17 +616,18 @@
         <div style="font-size:28px; font-weight:700; color:#4fc3f7;">{{ "{:,.0f}".format(kpi.ortalama_kira|default(0)).replace(",", " ") }} ₺</div>
         <div style="font-size:11px; color:#90a4ae;">Aylık ortalama</div>
       </div>
-      <a href="/kira/" class="ops-btn" style="text-align:center; display:block;"><i class="fa fa-external-link-alt"></i> Kira sayfasına git</a>
+      <a href="{{ url_for('kira.index') }}" class="ops-btn" style="text-align:center; display:block;"><i class="fa fa-external-link-alt"></i> Kira sayfasına git</a>
     </div>
   </div>
 </div>
 </div>
+<!-- musteri-layout sonu -->
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
 function closeRightPanel() {
   var rp = document.getElementById('rightPanel');
-  if (rp) rp.classList.remove('open');
+  if (rp) { rp.classList.remove('open'); rp.classList.remove('panel-musteri-list'); }
   document.querySelectorAll('.right-panel .panel-content').forEach(function(el) { el.classList.remove('active'); });
 }
 function openRightPanel(panelId) {
@@ -540,10 +636,13 @@ function openRightPanel(panelId) {
   var panel = document.getElementById(panelId);
   if (rp && panel) {
     rp.classList.add('open');
+    if (panelId === 'panelMusteri') rp.classList.add('panel-musteri-list');
+    else rp.classList.remove('panel-musteri-list');
     panel.classList.add('active');
   }
 }
 function openDrawer() { openRightPanel('panelMusteri'); }
+window.openDrawer = openDrawer;
 function openDrawerFatura() { openRightPanel('panelFatura'); }
 function openDrawerTahsilat() { openRightPanel('panelTahsilat'); }
 function openDrawerKargo() { openRightPanel('panelKargo'); }
@@ -563,9 +662,33 @@ document.querySelectorAll('.segment-tabs .tab').forEach(function(t) {
   });
 });
 
+function setupRipple(selector) {
+  document.querySelectorAll(selector).forEach(function(btn) {
+    btn.addEventListener('click', function(e) {
+      var rect = this.getBoundingClientRect();
+      var x = ((e.clientX - rect.left) / rect.width * 100).toFixed(2);
+      var y = ((e.clientY - rect.top) / rect.height * 100).toFixed(2);
+      this.style.setProperty('--ripple-x', x + '%');
+      this.style.setProperty('--ripple-y', y + '%');
+    });
+  });
+}
+setupRipple('.analiz-btn');
+setupRipple('.ops-btn');
+
 var trendData = {{ tahsilat_trend | tojson }};
 var trendLabels = trendData.map(function(d) { return d.ay + ' ' + d.yil; });
 var trendValues = trendData.map(function(d) { return d.tutar; });
+
+var ctxTahsilat = document.getElementById('chartTahsilat').getContext('2d');
+var gradientLine = ctxTahsilat.createLinearGradient(0, 140, 400, 0);
+gradientLine.addColorStop(0, '#4fc3f7');
+gradientLine.addColorStop(0.6, 'rgba(79,195,247,0.7)');
+gradientLine.addColorStop(1, '#cddc39');
+var gradientFill = ctxTahsilat.createLinearGradient(0, 0, 0, 140);
+gradientFill.addColorStop(0, 'rgba(79,195,247,0.08)');
+gradientFill.addColorStop(0.5, 'rgba(205,220,57,0.06)');
+gradientFill.addColorStop(1, 'rgba(205,220,57,0.12)');
 
 new Chart(document.getElementById('chartTahsilat'), {
   type: 'line',
@@ -574,16 +697,36 @@ new Chart(document.getElementById('chartTahsilat'), {
     datasets: [{
       label: 'Tahsilat',
       data: trendValues,
-      borderColor: '#4fc3f7',
-      backgroundColor: 'rgba(79,195,247,0.1)',
+      borderColor: gradientLine,
+      backgroundColor: gradientFill,
       fill: true,
-      tension: 0.3
+      tension: 0.3,
+      borderWidth: 2
     }]
   },
   options: {
     responsive: true,
     maintainAspectRatio: false,
-    plugins: { legend: { display: false } },
+    interaction: { intersect: false, mode: 'index' },
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        backgroundColor: 'rgba(15, 37, 55, 0.85)',
+        titleColor: '#4fc3f7',
+        bodyColor: '#e0f7fa',
+        borderColor: 'rgba(255,255,255,0.12)',
+        borderWidth: 1,
+        padding: 12,
+        cornerRadius: 10,
+        displayColors: true,
+        callbacks: {
+          label: function(ctx) {
+            var v = ctx.raw;
+            return 'Tahsilat: ' + (typeof v === 'number' ? v.toLocaleString('tr-TR', { minimumFractionDigits: 2 }) : v) + ' ₺';
+          }
+        }
+      }
+    },
     scales: {
       y: { beginAtZero: true, grid: { color: '#1e3a50' }, ticks: { color: '#90a4ae', font: { size: 10 } } },
       x: { grid: { display: false }, ticks: { color: '#90a4ae', font: { size: 9 }, maxRotation: 45 } }
@@ -591,24 +734,35 @@ new Chart(document.getElementById('chartTahsilat'), {
   }
 });
 
-var gecikmeData = {{ gecikme_dagilimi | tojson }};
-var gecikmeVals = gecikmeData.map(function(d) { return Math.max(0, d.tutar); });
-if (gecikmeVals.every(function(v){ return v === 0; })) gecikmeVals = [1, 0, 0];
-new Chart(document.getElementById('chartGecikme'), {
-  type: 'doughnut',
-  data: {
-    labels: gecikmeData.map(function(d) { return d.label; }),
-    datasets: [{
-      data: gecikmeVals,
-      backgroundColor: ['#4fc3f7', '#f97316', '#ef4444'],
-      borderWidth: 0
-    }]
-  },
-  options: {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: { legend: { position: 'bottom', labels: { color: '#90a4ae', font: { size: 10 } } } }
+function showFintechGirisView() {
+  var ozet = document.getElementById('fintech-ozet-view');
+  var giris = document.getElementById('fintech-giris-embed-view');
+  if (ozet) ozet.style.display = 'none';
+  if (giris) {
+    giris.style.display = 'flex';
+    var ifr = document.getElementById('fintech-giris-iframe');
+    if (ifr) ifr.src = '/giris/';
   }
+  if (window.setActiveTab) window.setActiveTab('giris');
+}
+function showFintechOzetView() {
+  var ozet = document.getElementById('fintech-ozet-view');
+  var giris = document.getElementById('fintech-giris-embed-view');
+  if (giris) {
+    giris.style.display = 'none';
+    var ifr = document.getElementById('fintech-giris-iframe');
+    if (ifr) ifr.src = 'about:blank';
+  }
+  if (ozet) ozet.style.display = 'flex';
+  if (window.setActiveTab) window.setActiveTab('musteriler');
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  openDrawer();
+  var btnEkle = document.getElementById('btn-fintech-musteri-ekle');
+  if (btnEkle) btnEkle.addEventListener('click', function(e) { e.preventDefault(); showFintechGirisView(); });
+  var btnOzet = document.getElementById('btn-fintech-ozete-don');
+  if (btnOzet) btnOzet.addEventListener('click', function(e) { e.preventDefault(); showFintechOzetView(); });
 });
 </script>
 {% endblock %}

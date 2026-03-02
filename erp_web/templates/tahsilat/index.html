@@ -8,51 +8,80 @@
 {% endblock %}
 
 {% block content %}
+{% include 'partials/erp_page_style.html' %}
 <style>
-.tahsilat-header { background: #0f2537; padding: 12px 16px; margin: -10px -10px 10px -10px; display: flex; align-items: center; justify-content: space-between; }
-.tahsilat-header h2 { color: #4fc3f7; margin: 0; font-size: 16px; }
-.ozet-bar { background: #1e3a50; padding: 10px 12px; margin-bottom: 10px; border-radius: 4px; display: flex; align-items: center; gap: 20px; }
-.ozet-item { font-size: 14px; font-weight: bold; }
-.ozet-item.nakit { color: #2ecc71; }
-.ozet-item.banka { color: #3498db; }
-.ozet-item.toplam { color: #f59e0b; }
-.tahsilat-container { display: grid; grid-template-columns: 480px 1fr; gap: 12px; }
-.borclu-panel { background: #1e3a50; padding: 12px; border-radius: 4px; }
+.tahsilat-container { display: grid; grid-template-columns: 480px 1fr; gap: 12px; margin-top: 0; }
+.borclu-panel {
+  background: var(--erp-surface, rgba(15,37,55,0.65));
+  backdrop-filter: blur(10px);
+  padding: 12px;
+  border-radius: var(--erp-radius, 10px);
+  border: 1px solid rgba(255,255,255,0.08);
+}
 .borclu-panel h3 { color: #4fc3f7; font-size: 14px; margin: 0 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #2d4060; }
-.borclu-table { width: 100%; background: #243447; border-collapse: collapse; font-size: 11px; }
-.borclu-table th { background: #0097a7; color: white; padding: 6px 4px; text-align: left; font-size: 10px; }
-.borclu-table td { padding: 5px 6px; border-bottom: 1px solid #2d4060; color: #e0f7fa; }
-.borclu-table tr:hover { background: #2d4060; cursor: pointer; }
-.form-panel { background: #1e3a50; padding: 12px; border-radius: 4px; }
+.borclu-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.borclu-table th { background: rgba(15,37,55,0.9); color: #4fc3f7; padding: 8px 6px; text-align: left; font-size: 10px; }
+.borclu-table td { padding: 6px 8px; border-bottom: 1px solid rgba(255,255,255,0.06); color: #e0f7fa; }
+.borclu-table tbody tr:hover { background: rgba(30,58,80,0.6); cursor: pointer; }
+.form-panel {
+  background: var(--erp-surface, rgba(15,37,55,0.65));
+  backdrop-filter: blur(10px);
+  padding: 12px;
+  border-radius: var(--erp-radius, 10px);
+  border: 1px solid rgba(255,255,255,0.08);
+}
 .form-panel h3 { color: #4fc3f7; font-size: 14px; margin: 0 0 10px 0; }
 .form-row { display: flex; gap: 12px; margin-bottom: 8px; }
 .form-group { flex: 1; display: flex; align-items: center; gap: 8px; }
 .form-group label { color: #b0bec5; font-size: 13px; min-width: 90px; }
-.form-group input, .form-group select { flex: 1; background: #2d4060; border: 1px solid #3d5070; color: #e0f7fa; padding: 6px 10px; border-radius: 3px; font-size: 13px; }
+.form-group input, .form-group select { flex: 1; background: rgba(45,64,96,0.6); border: 1px solid rgba(255,255,255,0.1); color: #e0f7fa; padding: 6px 10px; border-radius: 6px; font-size: 13px; }
 input.error { border-color: #e74c3c !important; }
-.tahsilat-table { width: 100%; background: #243447; border-collapse: collapse; font-size: 12px; margin-top: 10px; }
-.tahsilat-table th { background: #0097a7; color: white; padding: 8px 6px; text-align: center; font-size: 11px; }
-.tahsilat-table td { padding: 6px 8px; border-bottom: 1px solid #2d4060; text-align: center; color: #e0f7fa; }
-.tahsilat-table tr:hover { background: #2d4060; }
-.btn-sil { background: #e74c3c; color: white; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer; font-size: 11px; }
+.tahsilat-table { width: 100%; border-collapse: separate; border-spacing: 0 4px; font-size: 12px; margin-top: 10px; }
+.tahsilat-table thead th { background: rgba(15,37,55,0.9); color: #4fc3f7; padding: 10px 12px; text-align: center; font-size: 11px; }
+.tahsilat-table tbody tr { background: rgba(30,58,80,0.4); }
+.tahsilat-table tbody td { padding: 8px 12px; border-top: 1px solid rgba(255,255,255,0.04); border-bottom: 1px solid rgba(255,255,255,0.04); color: #e0f7fa; text-align: center; }
+.tahsilat-table tbody tr:hover { background: rgba(30,58,80,0.7); }
+.btn-sil { background: #e74c3c; color: white; border: none; padding: 4px 8px; border-radius: 6px; cursor: pointer; font-size: 11px; }
 </style>
 
-<div class="tahsilat-header">
-    <h2>💰 Tahsilat</h2>
-    <div>
-        <label style="color: #b0bec5;">Başlangıç:</label>
-        <input type="text" id="filter-baslangic" value="" placeholder="GG.AA.YYYY" style="width: 110px; background: #2d4060; border: 1px solid #3d5070; color: #e0f7fa; padding: 4px 8px; margin: 0 6px;">
-        <label style="color: #b0bec5;">Bitiş:</label>
-        <input type="text" id="filter-bitis" value="" placeholder="GG.AA.YYYY" style="width: 110px; background: #2d4060; border: 1px solid #3d5070; color: #e0f7fa; padding: 4px 8px; margin: 0 6px;">
-        <button type="button" id="btn-filtrele" style="background: #00bcd4; color: white; border: none; padding: 6px 12px; border-radius: 3px; margin: 0 4px;">🔍 Filtrele</button>
-        <button type="button" id="btn-bugun" style="background: #6b7280; color: white; border: none; padding: 6px 12px; border-radius: 3px;">↺ Bugün</button>
-    </div>
+<div class="erp-page-wrap">
+<div class="erp-tab-bar">
+  <a href="/musteriler/" class="page-title-prefix"><i class="fa fa-arrow-left"></i> Müşteriler</a>
+  <div class="tabs">
+    <a href="/musteriler/" class="tab"><i class="fa fa-th-large"></i><span>Özet</span></a>
+    <a href="/faturalar/finans" class="tab"><i class="fa fa-file-invoice"></i><span>Faturalar</span></a>
+    <a href="/tahsilat/" class="tab active"><i class="fa fa-money-bill-wave"></i><span>Tahsilatlar</span></a>
+  </div>
 </div>
 
-<div class="ozet-bar">
-    <span class="ozet-item nakit" id="ozet-nakit">💵 Nakit: 0,00 ₺</span>
-    <span class="ozet-item banka" id="ozet-banka">🏦 Banka: 0,00 ₺</span>
-    <span class="ozet-item toplam" id="ozet-toplam">📊 Toplam: 0,00 ₺</span>
+<div class="erp-filter-bar">
+  <label>Yıl:</label>
+  <select id="filter-yil" style="width: 90px;">
+    <option>2026</option>
+    <option>2025</option>
+    <option>2024</option>
+  </select>
+  <label>Başlangıç:</label>
+  <input type="text" id="filter-baslangic" value="" placeholder="GG.AA.YYYY" style="width: 110px;">
+  <label>Bitiş:</label>
+  <input type="text" id="filter-bitis" value="" placeholder="GG.AA.YYYY" style="width: 110px;">
+  <button type="button" id="btn-filtrele"><i class="fa fa-filter"></i> Filtrele</button>
+  <button type="button" id="btn-bugun" style="background: #6b7280;"><i class="fa fa-redo"></i> Bugün</button>
+</div>
+
+<div class="erp-kpi-cards">
+  <div class="erp-kpi-card accent-green">
+    <h4>Nakit</h4>
+    <div class="value" id="ozet-nakit">0,00 ₺</div>
+  </div>
+  <div class="erp-kpi-card accent-blue">
+    <h4>Banka</h4>
+    <div class="value" id="ozet-banka">0,00 ₺</div>
+  </div>
+  <div class="erp-kpi-card accent-red">
+    <h4>Toplam</h4>
+    <div class="value" id="ozet-toplam">0,00 ₺</div>
+  </div>
 </div>
 
 <div class="tahsilat-container">
@@ -138,6 +167,7 @@ input.error { border-color: #e74c3c !important; }
         </div>
     </div>
 </div>
+</div>
 
 <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/tr.js"></script>
@@ -186,9 +216,9 @@ async function loadOzet() {
   const url = API_OZET + (bas ? '?baslangic=' + encodeURIComponent(bas) : '') + (bit ? (bas ? '&' : '?') + 'bitis=' + encodeURIComponent(bit) : '');
   const res = await fetch(url);
   const j = await res.json();
-  document.getElementById('ozet-nakit').textContent = '💵 Nakit: ' + formatTutar(j.nakit) + ' ₺';
-  document.getElementById('ozet-banka').textContent = '🏦 Banka: ' + formatTutar(j.banka) + ' ₺';
-  document.getElementById('ozet-toplam').textContent = '📊 Toplam: ' + formatTutar(j.toplam) + ' ₺';
+  document.getElementById('ozet-nakit').textContent = formatTutar(j.nakit) + ' ₺';
+  document.getElementById('ozet-banka').textContent = formatTutar(j.banka) + ' ₺';
+  document.getElementById('ozet-toplam').textContent = formatTutar(j.toplam) + ' ₺';
 }
 
 async function loadBorclular() {

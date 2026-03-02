@@ -1,0 +1,199 @@
+{# Ortak ERP sayfa şablonu stilleri – cam efekti, CSS değişkenleri #}
+<style>
+.erp-page-wrap {
+  --erp-bg: #0a1929;
+  --erp-surface: rgba(15, 37, 55, 0.65);
+  --erp-surface-solid: #0f2537;
+  --erp-accent: #4fc3f7;
+  --erp-accent-dim: rgba(79, 195, 247, 0.15);
+  --erp-border: 1px solid rgba(255,255,255,0.08);
+  --erp-radius: 10px;
+  --erp-radius-sm: 6px;
+  background: var(--erp-bg);
+  color: #e0f7fa;
+}
+
+/* Tab bar & title – inline, aynı satır */
+.erp-tab-bar {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  background: var(--erp-surface-solid);
+  padding: 12px 16px;
+  margin: -20px -20px 0 -20px;
+  border-bottom: 2px solid #1e3a50;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+.erp-tab-bar .page-title-prefix {
+  text-decoration: none;
+  color: var(--erp-accent);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 20px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.erp-tab-bar .page-title-prefix i { font-size: 14px; }
+.erp-tab-bar .tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 0;
+  border-bottom: none;
+}
+.erp-tab-bar .tab {
+  padding: 12px 24px;
+  background: transparent;
+  border: none;
+  color: #90a4ae;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  border-bottom: 3px solid transparent;
+  margin-bottom: -2px;
+  transition: all 0.2s;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  text-decoration: none;
+  font-family: inherit;
+}
+.erp-tab-bar .tab:hover {
+  color: var(--erp-accent);
+  background: var(--erp-accent-dim);
+}
+.erp-tab-bar .tab.active {
+  color: var(--erp-accent);
+  border-bottom-color: var(--erp-accent);
+  background: var(--erp-accent-dim);
+}
+
+/* Filtreleme alanı – ince, şık bar */
+.erp-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  margin: 16px 0;
+  background: var(--erp-surface);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: var(--erp-border);
+  border-radius: var(--erp-radius);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+}
+.erp-filter-bar label {
+  color: #90a4ae;
+  font-size: 13px;
+  font-weight: 600;
+}
+.erp-filter-bar select,
+.erp-filter-bar input {
+  background: rgba(45, 64, 96, 0.6);
+  border: 1px solid rgba(255,255,255,0.1);
+  color: #e0f7fa;
+  padding: 6px 10px;
+  border-radius: var(--erp-radius-sm);
+  font-size: 13px;
+}
+.erp-filter-bar button {
+  background: var(--erp-accent);
+  color: #0a1929;
+  border: none;
+  padding: 6px 14px;
+  border-radius: var(--erp-radius-sm);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.erp-filter-bar button:hover { filter: brightness(1.1); }
+
+/* KPI kartları – neon accent border */
+.erp-kpi-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.erp-kpi-card {
+  background: var(--erp-surface);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: var(--erp-border);
+  border-radius: var(--erp-radius);
+  padding: 14px 16px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+}
+.erp-kpi-card h4 {
+  color: #90a4ae;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 0 0 6px 0;
+  font-weight: 600;
+}
+.erp-kpi-card .value {
+  font-size: 20px;
+  font-weight: 700;
+}
+.erp-kpi-card.accent-blue { border-left: 3px solid var(--erp-accent); }
+.erp-kpi-card.accent-blue .value { color: var(--erp-accent); }
+.erp-kpi-card.accent-green { border-left: 3px solid #4caf50; }
+.erp-kpi-card.accent-green .value { color: #4caf50; }
+.erp-kpi-card.accent-red { border-left: 3px solid #f44336; }
+.erp-kpi-card.accent-red .value { color: #f44336; }
+
+/* Veri tablosu – minimalist, hafif boşluklu satırlar */
+.erp-table-card {
+  background: var(--erp-surface);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: var(--erp-border);
+  border-radius: var(--erp-radius);
+  overflow: hidden;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+}
+.erp-table-card .erp-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0 4px;
+  font-size: 13px;
+}
+.erp-table-card .erp-table thead th {
+  background: rgba(15, 37, 55, 0.9);
+  color: var(--erp-accent);
+  padding: 12px 14px;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 600;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.erp-table-card .erp-table tbody tr {
+  background: rgba(30, 58, 80, 0.4);
+  transition: background 0.2s;
+}
+.erp-table-card .erp-table tbody tr:hover {
+  background: rgba(30, 58, 80, 0.7);
+}
+.erp-table-card .erp-table tbody td {
+  padding: 10px 14px;
+  border-top: 1px solid rgba(255,255,255,0.04);
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  color: #e0f7fa;
+}
+.erp-table-card .erp-table tbody tr td:first-child { border-radius: var(--erp-radius-sm) 0 0 var(--erp-radius-sm); }
+.erp-table-card .erp-table tbody tr td:last-child { border-radius: 0 var(--erp-radius-sm) var(--erp-radius-sm) 0; }
+.erp-table-card .erp-table tbody tr td { border-left: none; border-right: none; }
+.erp-table-empty {
+  text-align: center;
+  color: #90a4ae;
+  padding: 40px 20px;
+  font-size: 14px;
+}
+</style>

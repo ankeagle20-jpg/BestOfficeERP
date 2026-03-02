@@ -3,124 +3,79 @@
 {% block page_title %}Kargolar{% endblock %}
 
 {% block content %}
+{% include 'partials/erp_page_style.html' %}
 <style>
-.kargo-toolbar {
-    background: #1e3a50;
-    padding: 10px 12px;
-    margin: -10px -10px 10px -10px;
-    display: flex;
-    gap: 10px;
-    align-items: center;
-}
-.kargo-toolbar input {
-    background: #2d4060;
-    border: 1px solid #3d5070;
-    color: #e0f7fa;
-    padding: 6px 10px;
-    border-radius: 3px;
-    font-size: 13px;
-    width: 200px;
-}
-.kargo-toolbar select {
-    background: #2d4060;
-    border: 1px solid #3d5070;
-    color: #e0f7fa;
-    padding: 6px 10px;
-    border-radius: 3px;
-    font-size: 13px;
-}
-.kargo-toolbar button {
-    background: #00bcd4;
-    color: white;
-    border: none;
-    padding: 7px 14px;
-    border-radius: 3px;
-    cursor: pointer;
-    font-size: 13px;
-    font-weight: bold;
-}
-.kargo-ozet {
-    background: #0f2537;
-    padding: 10px 12px;
-    margin-bottom: 10px;
-    border-radius: 4px;
-    display: flex;
-    gap: 20px;
-    color: #4fc3f7;
-    font-size: 13px;
-    font-weight: bold;
-}
-.kargo-table {
-    width: 100%;
-    background: #243447;
-    border-collapse: collapse;
-    font-size: 12px;
-}
-.kargo-table th {
-    background: #0097a7;
-    color: white;
-    padding: 8px 6px;
-    text-align: center;
-    font-weight: bold;
-    font-size: 11px;
-}
-.kargo-table td {
-    padding: 6px 8px;
-    border-bottom: 1px solid #2d4060;
-    text-align: center;
-    color: #e0f7fa;
-}
-.kargo-table tr:hover {
-    background: #2d4060;
-    cursor: pointer;
-}
-.durum-badge {
-    padding: 4px 8px;
-    border-radius: 3px;
-    font-size: 11px;
-    font-weight: bold;
-}
-.durum-beklemede {
-    background: #fff176;
-    color: #000;
-}
-.durum-gonderildi {
-    background: #4fc3f7;
-    color: #000;
-}
-.durum-teslim {
-    background: #69f0ae;
-    color: #000;
-}
+.durum-badge { padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: bold; }
+.durum-beklemede { background: rgba(255,241,118,0.25); color: #f9a825; }
+.durum-gonderildi { background: rgba(79,195,247,0.25); color: #4fc3f7; }
+.durum-teslim { background: rgba(105,240,174,0.25); color: #4caf50; }
 </style>
 
-<div class="card-erp">
-    <h2>📦 Kargolar</h2>
-    
-    <!-- Toolbar -->
-    <div class="kargo-toolbar">
-        <input type="text" id="musteri-ara" placeholder="Müşteri:" style="width: 150px;">
-        <select id="durum-filtre">
-            <option value="">Durum: Tümü</option>
-            <option>beklemede</option>
-            <option>gonderildi</option>
-            <option>teslim</option>
-        </select>
-        <button onclick="listele()">Listele</button>
-        <button onclick="yenile()">↺ Yenile</button>
-    </div>
-    
-    <!-- Özet -->
-    <div class="kargo-ozet">
-        <span>Toplam: {{ kargolar|length }}</span>
-        <span>Tahsilat bekleyen: 0,00 TL</span>
-        <span>Toplam ödeme: 0,00 TL</span>
-    </div>
-    
-    <!-- Tablo -->
-    {% if kargolar %}
-    <div style="overflow-x: auto; max-height: 600px; overflow-y: auto;">
-        <table class="kargo-table">
+<div class="erp-page-wrap">
+<div class="erp-tab-bar">
+  <a href="/musteriler/" class="page-title-prefix"><i class="fa fa-arrow-left"></i> Müşteriler</a>
+  <div class="tabs">
+    <a href="/musteriler/" class="tab"><i class="fa fa-th-large"></i><span>Özet</span></a>
+    <a href="/faturalar/finans" class="tab"><i class="fa fa-file-invoice"></i><span>Faturalar</span></a>
+    <a href="/tahsilat/" class="tab"><i class="fa fa-money-bill-wave"></i><span>Tahsilatlar</span></a>
+    <a href="/kargolar/" class="tab active"><i class="fa fa-box"></i><span>Kargolar</span></a>
+  </div>
+</div>
+
+<div class="erp-filter-bar">
+  <label>Yıl:</label>
+  <select id="filter-yil" style="width: 90px;">
+    <option>2026</option>
+    <option>2025</option>
+    <option>2024</option>
+  </select>
+  <label>Ay:</label>
+  <select id="filter-ay" style="width: 100px;">
+    <option value="">Tümü</option>
+    <option>Ocak</option>
+    <option>Şubat</option>
+    <option>Mart</option>
+    <option>Nisan</option>
+    <option>Mayıs</option>
+    <option>Haziran</option>
+    <option>Temmuz</option>
+    <option>Ağustos</option>
+    <option>Eylül</option>
+    <option>Ekim</option>
+    <option>Kasım</option>
+    <option>Aralık</option>
+  </select>
+  <label>Müşteri:</label>
+  <input type="text" id="musteri-ara" placeholder="Ara..." style="width: 150px;">
+  <select id="durum-filtre" style="width: 120px;">
+    <option value="">Durum: Tümü</option>
+    <option>beklemede</option>
+    <option>gonderildi</option>
+    <option>teslim</option>
+  </select>
+  <button type="button" onclick="listele()"><i class="fa fa-filter"></i> Filtrele</button>
+  <button type="button" onclick="yenile()" style="background: #6b7280;"><i class="fa fa-redo"></i> Yenile</button>
+</div>
+
+<div class="erp-kpi-cards">
+  <div class="erp-kpi-card accent-blue">
+    <h4>Toplam Kargo</h4>
+    <div class="value">{{ kargolar|length }}</div>
+  </div>
+  <div class="erp-kpi-card accent-red">
+    <h4>Bekleyen Ödeme</h4>
+    <div class="value">0,00 TL</div>
+  </div>
+  <div class="erp-kpi-card accent-green">
+    <h4>Toplam Ödenen</h4>
+    <div class="value">0,00 TL</div>
+  </div>
+</div>
+
+<div class="erp-table-card">
+{% if kargolar %}
+<div style="overflow-x: auto; max-height: 600px; overflow-y: auto;">
+    <table class="erp-table kargo-table">
             <thead>
                 <tr>
                     <th>Tarih</th>
@@ -158,13 +113,14 @@
         </table>
     </div>
     {% else %}
-    <div style="text-align: center; padding: 40px; color: #6b7280;">
-        <p style="font-size: 16px; margin-bottom: 10px;">ℹ️ Henüz kargo kaydı yok.</p>
-        <button onclick="location.href='{{ url_for('kargolar.yeni') }}'" style="background: #00bcd4; color: white; border: none; padding: 10px 20px; border-radius: 3px; cursor: pointer;">
-            + Yeni Kargo
+    <div class="erp-table-empty">
+        <p style="font-size: 16px; margin-bottom: 12px;">Henüz kargo kaydı yok.</p>
+        <button onclick="location.href='{{ url_for('kargolar.yeni') }}'" style="background: var(--erp-accent); color: #0a1929; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: 600;">
+            <i class="fa fa-plus"></i> Yeni Kargo
         </button>
     </div>
     {% endif %}
+</div>
 </div>
 
 <script>

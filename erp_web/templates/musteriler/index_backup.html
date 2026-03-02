@@ -1,0 +1,75 @@
+<html>
+<head>
+    <title>Customer Index</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: linear-gradient(to right, #00c6ff, #0072ff);
+            color: #fff;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 20px;
+        }
+        .stat-cards {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            width: 70%;
+        }
+        .card {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 20px;
+            flex: 1;
+            min-width: 250px;
+            transition: transform 0.2s;
+        }
+        .card:hover {
+            transform: scale(1.05);
+        }
+        .customer-list {
+            width: 25%;
+            background: rgba(0, 0, 0, 0.5);
+            border-radius: 10px;
+            padding: 20px;
+        }
+        h1 {
+            margin-bottom: 20px;
+        }
+        .neon {
+            color: #39ff14;
+            text-shadow: 0 0 10px #39ff14;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="stat-cards">
+            <div class="card">
+                <h2 class="neon">Total Customers</h2>
+                <p>1500</p>
+            </div>
+            <div class="card">
+                <h2 class="neon">Active Customers</h2>
+                <p>1200</p>
+            </div>
+            <div class="card">
+                <h2 class="neon">New Customers This Month</h2>
+                <p>50</p>
+            </div>
+        </div>
+        <div class="customer-list">
+            <h3>Customer List</h3>
+            <ul>
+                <li>Customer A</li>
+                <li>Customer B</li>
+                <li>Customer C</li>
+            </ul>
+        </div>
+    </div>
+</body>
+</html>

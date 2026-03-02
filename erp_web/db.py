@@ -247,6 +247,7 @@ def init_schema():
     with db() as conn:
         conn.cursor().execute(SCHEMA_SQL)
         ensure_customers_notes()
+        ensure_customers_rent_columns()
         ensure_tahsilatlar_columns()
         ensure_kargolar_durum()
         ensure_faturalar_amount_columns()
@@ -309,6 +310,20 @@ def ensure_customers_notes():
         execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS notes TEXT")
     except Exception as e:
         print(f"Notes sütunu zaten var veya hata: {e}")
+
+
+def ensure_customers_rent_columns():
+    """Customers tablosuna kira başlangıç ve ilk kira sütunları ekle (toplu tahsilat için)."""
+    for col, typ in (
+        ("rent_start_date", "DATE"),
+        ("rent_start_year", "INTEGER"),
+        ("rent_start_month", "TEXT DEFAULT 'Ocak'"),
+        ("ilk_kira_bedeli", "NUMERIC(12,2) DEFAULT 0"),
+    ):
+        try:
+            execute(f"ALTER TABLE customers ADD COLUMN IF NOT EXISTS {col} {typ}")
+        except Exception as e:
+            print(f"customers.{col}: {e}")
 
 
 def ensure_tahsilatlar_columns():

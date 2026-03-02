@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kira Bildirgesi — BestOffice</title>
+    <style>
+        @page { size: A4; margin: 20mm; }
+        * { box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+            font-size: 11pt;
+            line-height: 1.5;
+            color: #1a1a1a;
+            max-width: 210mm;
+            margin: 0 auto;
+            padding: 18mm 22mm;
+            background: #fff;
+        }
+        .letterhead {
+            min-height: 297mm;
+            display: flex;
+            flex-direction: column;
+        }
+        /* Logo grubu — sol üst */
+        .logo-wrap {
+            text-align: left;
+            margin-bottom: 24px;
+        }
+        .logo-wrap .unvan {
+            font-size: 9pt;
+            color: #1a1a1a;
+            font-weight: normal;
+            line-height: 1.3;
+        }
+        /* Hitap — dinamik */
+        .hitap {
+            font-size: 11pt;
+            margin-bottom: 18px;
+        }
+        .body-text {
+            text-align: justify;
+            margin-bottom: 14px;
+        }
+        .body-text p {
+            margin: 0 0 12px 0;
+        }
+        /* İmza bloğu — sağ alt, ünvan BESTOFFICE'e göre ortalanmış */
+        .signature-block {
+            margin-top: 40px;
+            text-align: right;
+        }
+        .signature-block .saygi {
+            font-size: 10pt;
+            color: #333;
+            margin-bottom: 6px;
+        }
+        .signature-inner {
+            display: inline-block;
+            text-align: center;
+        }
+        .signature-block .firma {
+            font-size: 12pt;
+            font-weight: 700;
+            color: #1a1a1a;
+            margin-bottom: 2px;
+        }
+        .signature-block .unvan {
+            font-size: 9pt;
+            color: #555;
+        }
+        @media print {
+            body { padding: 15mm 20mm; }
+            .letterhead { min-height: auto; }
+        }
+    </style>
+</head>
+<body>
+    <div class="letterhead">
+        <!-- Sol üst: resmi ünvan -->
+        <div class="logo-wrap">
+            <div class="unvan">Ofisbir Ofis ve Danışmanlık Hizmetleri A.Ş.</div>
+        </div>
+
+        <!-- Dinamik hitap -->
+        <div class="hitap">Sayın <strong id="musteri-adi">{{ hitap_adi|default('Değerli Kiracımız', true) }}</strong>,</div>
+
+        <!-- İçerik metni -->
+        <div class="body-text">
+            <p id="par1">{{ par1|default('Tarafınızla sözleşme tarihi itibarıyla imzalanmış olan kira sözleşmesi gereği, geçerlilik tarihi itibarıyla kira bedeli güncellemesi yapılması gerekmektedir.', true) }}</p>
+            <p id="par2">{{ par2|default('Mevcut ekonomik koşullar ve yasal düzenlemeler göz önüne alınarak, adı geçen tarihten itibaren uygulanacak yeni kira bedeli TÜFE Yasal Oranı çerçevesinde güncellenecektir. Buna göre aylık kira bedeliniz (net + KDV) ve yıllık tutar metinde belirtilmiştir.', true) }}</p>
+            <p id="par3">{{ par3|default('Anlayışınız ve iş birliğiniz için teşekkür eder, sorularınız veya ek talepleriniz olması durumunda bizimle iletişime geçmekten çekinmemenizi rica ederiz.', true) }}</p>
+        </div>
+
+        <!-- İmza bloğu — sağ alt; ünvan BESTOFFICE'e göre ortalanmış -->
+        <div class="signature-block">
+            <div class="saygi">Saygılarımızla,</div>
+            <div class="signature-inner">
+                <div class="firma">BESTOFFICE</div>
+                <div class="unvan">Ofisbir Ofis ve Danışmanlık Hizmetleri A.Ş.</div>
+            </div>
+        </div>
+    </div>
+
+</body>
+</html>
