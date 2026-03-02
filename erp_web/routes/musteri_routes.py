@@ -27,95 +27,135 @@ bp = Blueprint("musteriler", __name__)
 
 def _fintech_dashboard_data():
     """Müşteri Fintech Komuta Paneli için KPI, analitik, risk ve liste verileri."""
-    ensure_faturalar_amount_columns()
+    try:
+        ensure_faturalar_amount_columns()
+    except Exception:
+        pass
     bugun = date.today()
     otuz_gun_once = bugun - timedelta(days=30)
     alti_ay_once = bugun - timedelta(days=180)
 
     # KPI: Toplam Müşteri
-    r = fetch_one("SELECT COUNT(*) as n FROM customers")
-    toplam_musteri = (r.get("n") or 0) if r else 0
+    try:
+        r = fetch_one("SELECT COUNT(*) as n FROM customers")
+        toplam_musteri = (r.get("n") or 0) if r else 0
+    except Exception:
+        toplam_musteri = 0
 
     # Aktif: en az bir ödenmemiş fatura veya sözleşmesi olan
-    r = fetch_one("""
-        SELECT COUNT(DISTINCT c.id) as n FROM customers c
-        WHERE EXISTS (SELECT 1 FROM faturalar f WHERE f.musteri_id = c.id AND COALESCE(f.durum,'') != 'odendi')
-           OR EXISTS (SELECT 1 FROM musteri_kyc k WHERE k.musteri_id = c.id AND (
-             k.sozlesme_bitis IS NULL OR TRIM(COALESCE(k.sozlesme_bitis, '')) = ''
-             OR (NULLIF(TRIM(k.sozlesme_bitis), '')::date) >= %s
-           ))
-    """, (bugun,))
-    aktif_musteri = (r.get("n") or 0) if r else 0
+    try:
+        r = fetch_one("""
+            SELECT COUNT(DISTINCT c.id) as n FROM customers c
+            WHERE EXISTS (SELECT 1 FROM faturalar f WHERE f.musteri_id = c.id AND COALESCE(f.durum,'') != 'odendi')
+               OR EXISTS (SELECT 1 FROM musteri_kyc k WHERE k.musteri_id = c.id AND (
+                 k.sozlesme_bitis IS NULL OR TRIM(COALESCE(k.sozlesme_bitis, '')) = ''
+                 OR (NULLIF(TRIM(k.sozlesme_bitis), '')::date) >= %s
+               ))
+        """, (bugun,))
+        aktif_musteri = (r.get("n") or 0) if r else 0
+    except Exception:
+        aktif_musteri = 0
 
     # Kritik: 30+ gün gecikmiş
-    r = fetch_one("""
-        SELECT COUNT(DISTINCT musteri_id) as n FROM faturalar
-        WHERE COALESCE(durum,'') != 'odendi' AND vade_tarihi IS NOT NULL AND (vade_tarihi::date) <= %s
-    """, (otuz_gun_once,))
-    kritik_musteri = (r.get("n") or 0) if r else 0
+    try:
+        r = fetch_one("""
+            SELECT COUNT(DISTINCT musteri_id) as n FROM faturalar
+            WHERE COALESCE(durum,'') != 'odendi' AND vade_tarihi IS NOT NULL AND (vade_tarihi::date) <= %s
+        """, (otuz_gun_once,))
+        kritik_musteri = (r.get("n") or 0) if r else 0
+    except Exception:
+        kritik_musteri = 0
 
     # Toplam aylık tahakkuk: bu ay vadesi gelen ödenmemiş toplam
-    r = fetch_one("""
-        SELECT COALESCE(SUM(COALESCE(toplam, tutar)), 0) as t FROM faturalar
-        WHERE COALESCE(durum,'') != 'odendi' AND vade_tarihi IS NOT NULL
-          AND EXTRACT(YEAR FROM (vade_tarihi::date)) = %s AND EXTRACT(MONTH FROM (vade_tarihi::date)) = %s
-    """, (bugun.year, bugun.month))
-    toplam_aylik_tahakkuk = float(r.get("t") or 0) if r else 0
+    try:
+        r = fetch_one("""
+            SELECT COALESCE(SUM(COALESCE(toplam, tutar)), 0) as t FROM faturalar
+            WHERE COALESCE(durum,'') != 'odendi' AND vade_tarihi IS NOT NULL
+              AND EXTRACT(YEAR FROM (vade_tarihi::date)) = %s AND EXTRACT(MONTH FROM (vade_tarihi::date)) = %s
+        """, (bugun.year, bugun.month))
+        toplam_aylik_tahakkuk = float(r.get("t") or 0) if r else 0
+    except Exception:
+        toplam_aylik_tahakkuk = 0.0
 
     # Toplam gecikme (vadesi geçmiş ödenmemiş)
-    r = fetch_one("""
-        SELECT COALESCE(SUM(COALESCE(toplam, tutar)), 0) as t FROM faturalar
-        WHERE COALESCE(durum,'') != 'odendi' AND vade_tarihi IS NOT NULL AND (vade_tarihi::date) < %s
-    """, (bugun,))
-    toplam_gecikme = float(r.get("t") or 0) if r else 0
+    try:
+        r = fetch_one("""
+            SELECT COALESCE(SUM(COALESCE(toplam, tutar)), 0) as t FROM faturalar
+            WHERE COALESCE(durum,'') != 'odendi' AND vade_tarihi IS NOT NULL AND (vade_tarihi::date) < %s
+        """, (bugun,))
+        toplam_gecikme = float(r.get("t") or 0) if r else 0
+    except Exception:
+        toplam_gecikme = 0.0
 
     # Tahsilat oranı % (son 6 ay: tahsilat / tahakkuk)
-    r = fetch_one("""
-        SELECT COALESCE(SUM(COALESCE(toplam, tutar)), 0) as t FROM faturalar
-        WHERE vade_tarihi IS NOT NULL AND (vade_tarihi::date) >= %s
-    """, (alti_ay_once,))
-    tahakkuk_6ay = float(r.get("t") or 0) if r else 0
-    r = fetch_one("""
-        SELECT COALESCE(SUM(tutar), 0) as t FROM tahsilatlar
-        WHERE (tahsilat_tarihi::date) >= %s
-    """, (alti_ay_once,))
-    tahsilat_6ay = float(r.get("t") or 0) if r else 0
+    try:
+        r = fetch_one("""
+            SELECT COALESCE(SUM(COALESCE(toplam, tutar)), 0) as t FROM faturalar
+            WHERE vade_tarihi IS NOT NULL AND (vade_tarihi::date) >= %s
+        """, (alti_ay_once,))
+        tahakkuk_6ay = float(r.get("t") or 0) if r else 0
+    except Exception:
+        tahakkuk_6ay = 0.0
+    try:
+        r = fetch_one("""
+            SELECT COALESCE(SUM(tutar), 0) as t FROM tahsilatlar
+            WHERE (tahsilat_tarihi::date) >= %s
+        """, (alti_ay_once,))
+        tahsilat_6ay = float(r.get("t") or 0) if r else 0
+    except Exception:
+        tahsilat_6ay = 0.0
     tahsilat_orani = round((tahsilat_6ay / tahakkuk_6ay * 100), 0) if tahakkuk_6ay else 100
 
     # Ortalama kira (musteri_kyc aylik_kira)
-    r = fetch_one("SELECT COALESCE(AVG(aylik_kira), 0) as t FROM musteri_kyc WHERE aylik_kira IS NOT NULL AND aylik_kira > 0")
-    ortalama_kira = round(float(r.get("t") or 0), 0) if r else 0
+    try:
+        r = fetch_one("SELECT COALESCE(AVG(aylik_kira), 0) as t FROM musteri_kyc WHERE aylik_kira IS NOT NULL AND aylik_kira > 0")
+        ortalama_kira = round(float(r.get("t") or 0), 0) if r else 0
+    except Exception:
+        ortalama_kira = 0
 
     # Tahsilat performansı trendi (son 6 ay aylık)
     tahsilat_trend = []
     for i in range(5, -1, -1):
         d = bugun - timedelta(days=30 * i)
         y, m = d.year, d.month
-        r = fetch_one("""
-            SELECT COALESCE(SUM(tutar), 0) as t FROM tahsilatlar
-            WHERE EXTRACT(YEAR FROM (tahsilat_tarihi::date)) = %s AND EXTRACT(MONTH FROM (tahsilat_tarihi::date)) = %s
-        """, (y, m))
-        tahsilat_trend.append({"ay": MONTHS_TR[m - 1], "yil": y, "tutar": float(r.get("t") or 0) if r else 0})
+        try:
+            r = fetch_one("""
+                SELECT COALESCE(SUM(tutar), 0) as t FROM tahsilatlar
+                WHERE EXTRACT(YEAR FROM (tahsilat_tarihi::date)) = %s AND EXTRACT(MONTH FROM (tahsilat_tarihi::date)) = %s
+            """, (y, m))
+            tutar = float(r.get("t") or 0) if r else 0
+        except Exception:
+            tutar = 0
+        tahsilat_trend.append({"ay": MONTHS_TR[m - 1], "yil": y, "tutar": tutar})
 
     # Gecikme dağılımı: 0-7, 7-30, 30+ gün
     yedi_gun = bugun - timedelta(days=7)
-    r7 = fetch_one("""
-        SELECT COALESCE(SUM(COALESCE(toplam, tutar)), 0) as t FROM faturalar
-        WHERE COALESCE(durum,'') != 'odendi' AND vade_tarihi IS NOT NULL
-          AND (vade_tarihi::date) < %s AND (vade_tarihi::date) > %s
-    """, (bugun, yedi_gun))
-    r30 = fetch_one("""
-        SELECT COALESCE(SUM(COALESCE(toplam, tutar)), 0) as t FROM faturalar
-        WHERE COALESCE(durum,'') != 'odendi' AND vade_tarihi IS NOT NULL
-          AND (vade_tarihi::date) <= %s AND (vade_tarihi::date) > %s
-    """, (yedi_gun, otuz_gun_once))
-    r30p = fetch_one("""
-        SELECT COALESCE(SUM(COALESCE(toplam, tutar)), 0) as t FROM faturalar
-        WHERE COALESCE(durum,'') != 'odendi' AND vade_tarihi IS NOT NULL AND (vade_tarihi::date) <= %s
-    """, (otuz_gun_once,))
-    gecikme_0_7 = float(r7.get("t") or 0) if r7 else 0
-    gecikme_7_30 = float(r30.get("t") or 0) if r30 else 0
-    gecikme_30_plus = float(r30p.get("t") or 0) if r30p else 0
+    try:
+        r7 = fetch_one("""
+            SELECT COALESCE(SUM(COALESCE(toplam, tutar)), 0) as t FROM faturalar
+            WHERE COALESCE(durum,'') != 'odendi' AND vade_tarihi IS NOT NULL
+              AND (vade_tarihi::date) < %s AND (vade_tarihi::date) > %s
+        """, (bugun, yedi_gun))
+        gecikme_0_7 = float(r7.get("t") or 0) if r7 else 0
+    except Exception:
+        gecikme_0_7 = 0.0
+    try:
+        r30 = fetch_one("""
+            SELECT COALESCE(SUM(COALESCE(toplam, tutar)), 0) as t FROM faturalar
+            WHERE COALESCE(durum,'') != 'odendi' AND vade_tarihi IS NOT NULL
+              AND (vade_tarihi::date) <= %s AND (vade_tarihi::date) > %s
+        """, (yedi_gun, otuz_gun_once))
+        gecikme_7_30 = float(r30.get("t") or 0) if r30 else 0
+    except Exception:
+        gecikme_7_30 = 0.0
+    try:
+        r30p = fetch_one("""
+            SELECT COALESCE(SUM(COALESCE(toplam, tutar)), 0) as t FROM faturalar
+            WHERE COALESCE(durum,'') != 'odendi' AND vade_tarihi IS NOT NULL AND (vade_tarihi::date) <= %s
+        """, (otuz_gun_once,))
+        gecikme_30_plus = float(r30p.get("t") or 0) if r30p else 0
+    except Exception:
+        gecikme_30_plus = 0.0
     toplam_gecikme_dagilim = gecikme_0_7 + gecikme_7_30 + gecikme_30_plus
     gecikme_dagilimi = [
         {"label": "0-7 Gün", "tutar": gecikme_0_7, "yuzde": round(gecikme_0_7 / toplam_gecikme_dagilim * 100, 1) if toplam_gecikme_dagilim else 0},
@@ -124,17 +164,20 @@ def _fintech_dashboard_data():
     ]
 
     # En riskli 5 müşteri (gecikme günü + borç)
-    risk_list = fetch_all("""
-        SELECT f.musteri_id, c.name,
-               SUM(COALESCE(f.toplam, f.tutar)) as borc,
-               MIN(f.vade_tarihi) as en_eski_vade
-        FROM faturalar f
-        JOIN customers c ON c.id = f.musteri_id
-        WHERE COALESCE(f.durum,'') != 'odendi' AND f.vade_tarihi IS NOT NULL AND (f.vade_tarihi::date) < %s
-        GROUP BY f.musteri_id, c.name
-        ORDER BY MIN(f.vade_tarihi)
-        LIMIT 5
-    """, (bugun,))
+    try:
+        risk_list = fetch_all("""
+            SELECT f.musteri_id, c.name,
+                   SUM(COALESCE(f.toplam, f.tutar)) as borc,
+                   MIN(f.vade_tarihi) as en_eski_vade
+            FROM faturalar f
+            JOIN customers c ON c.id = f.musteri_id
+            WHERE COALESCE(f.durum,'') != 'odendi' AND f.vade_tarihi IS NOT NULL AND (f.vade_tarihi::date) < %s
+            GROUP BY f.musteri_id, c.name
+            ORDER BY MIN(f.vade_tarihi)
+            LIMIT 5
+        """, (bugun,))
+    except Exception:
+        risk_list = []
     en_riskli_5 = []
     for row in (risk_list or []):
         vd = row.get("en_eski_vade")
@@ -151,16 +194,19 @@ def _fintech_dashboard_data():
     genel_risk_puan = max(0, min(100, 100 - (kritik_musteri * 3) - int(toplam_gecikme / 10000))) if toplam_musteri else 100
 
     # Sözleşme 30 gün içinde bitecekler
-    sozlesme_30 = fetch_all("""
-        SELECT k.musteri_id, c.name, c.office_code, k.sozlesme_bitis
-        FROM musteri_kyc k
-        JOIN customers c ON c.id = k.musteri_id
-        WHERE NULLIF(TRIM(COALESCE(k.sozlesme_bitis, '')), '') IS NOT NULL
-          AND (NULLIF(TRIM(k.sozlesme_bitis), '')::date) >= %s
-          AND (NULLIF(TRIM(k.sozlesme_bitis), '')::date) <= %s
-        ORDER BY (NULLIF(TRIM(k.sozlesme_bitis), '')::date)
-        LIMIT 10
-    """, (bugun, bugun + timedelta(days=30)))
+    try:
+        sozlesme_30 = fetch_all("""
+            SELECT k.musteri_id, c.name, c.office_code, k.sozlesme_bitis
+            FROM musteri_kyc k
+            JOIN customers c ON c.id = k.musteri_id
+            WHERE NULLIF(TRIM(COALESCE(k.sozlesme_bitis, '')), '') IS NOT NULL
+              AND (NULLIF(TRIM(k.sozlesme_bitis), '')::date) >= %s
+              AND (NULLIF(TRIM(k.sozlesme_bitis), '')::date) <= %s
+            ORDER BY (NULLIF(TRIM(k.sozlesme_bitis), '')::date)
+            LIMIT 10
+        """, (bugun, bugun + timedelta(days=30)))
+    except Exception:
+        sozlesme_30 = []
     sozlesme_30_list = []
     for row in (sozlesme_30 or []):
         bitis = row.get("sozlesme_bitis")
@@ -174,17 +220,20 @@ def _fintech_dashboard_data():
         sozlesme_30_list.append({"name": row.get("name") or "—", "office_code": row.get("office_code") or "—", "kalan_gun": kalan, "musteri_id": row.get("musteri_id")})
 
     # Toplu Tahsilat drawer: kritik müşteriler (telefon ile)
-    tahsilat_kritik = fetch_all("""
-        SELECT f.musteri_id, c.name, c.phone, c.office_code,
-               SUM(COALESCE(f.toplam, f.tutar)) as toplam_alacak,
-               MIN(f.vade_tarihi) as en_eski_vade
-        FROM faturalar f
-        JOIN customers c ON c.id = f.musteri_id
-        WHERE COALESCE(f.durum,'') != 'odendi' AND f.vade_tarihi IS NOT NULL AND (f.vade_tarihi::date) <= %s
-        GROUP BY f.musteri_id, c.name, c.phone, c.office_code
-        ORDER BY MIN(f.vade_tarihi)
-        LIMIT 50
-    """, (otuz_gun_once,))
+    try:
+        tahsilat_kritik = fetch_all("""
+            SELECT f.musteri_id, c.name, c.phone, c.office_code,
+                   SUM(COALESCE(f.toplam, f.tutar)) as toplam_alacak,
+                   MIN(f.vade_tarihi) as en_eski_vade
+            FROM faturalar f
+            JOIN customers c ON c.id = f.musteri_id
+            WHERE COALESCE(f.durum,'') != 'odendi' AND f.vade_tarihi IS NOT NULL AND (f.vade_tarihi::date) <= %s
+            GROUP BY f.musteri_id, c.name, c.phone, c.office_code
+            ORDER BY MIN(f.vade_tarihi)
+            LIMIT 50
+        """, (otuz_gun_once,))
+    except Exception:
+        tahsilat_kritik = []
     tahsilat_kritik_list = []
     for row in (tahsilat_kritik or []):
         vd = row.get("en_eski_vade")
@@ -204,13 +253,19 @@ def _fintech_dashboard_data():
             "toplam_alacak": round(float(row.get("toplam_alacak") or 0), 2),
         })
 
-    # Kargo drawer: bugün gelen, teslim bekleyen
+    # Kargo drawer: bugün gelen
     try:
         kargo_bugun = fetch_all("""
             SELECT k.id, k.tarih, k.takip_no, k.teslim_alan, k.notlar, c.name as musteri_adi
             FROM kargolar k LEFT JOIN customers c ON c.id = k.musteri_id
             WHERE (k.tarih::date) = %s ORDER BY k.id DESC
         """, (bugun,))
+    except Exception:
+        kargo_bugun = []
+    kargo_bugun = kargo_bugun or []
+
+    # Kargo drawer: teslim bekleyen
+    try:
         kargo_teslim_bekleyen = fetch_all("""
             SELECT k.id, k.tarih, k.takip_no, k.teslim_alan, k.notlar, c.name as musteri_adi
             FROM kargolar k LEFT JOIN customers c ON c.id = k.musteri_id
@@ -218,20 +273,24 @@ def _fintech_dashboard_data():
             ORDER BY k.id DESC LIMIT 30
         """)
     except Exception:
-        kargo_bugun = []
         kargo_teslim_bekleyen = []
-    kargo_bugun = kargo_bugun or []
     kargo_teslim_bekleyen = kargo_teslim_bekleyen or []
 
     # Müşteri listesi (drawer için)
-    musteriler = fetch_all("SELECT * FROM customers ORDER BY name")
+    try:
+        musteriler = fetch_all("SELECT * FROM customers ORDER BY name")
+    except Exception:
+        musteriler = []
 
     # Drawer'da kullanmak için müşteri bazlı borç/gecikme
-    fat_borc = fetch_all("""
-        SELECT musteri_id, SUM(COALESCE(toplam, tutar)) as toplam, MIN(vade_tarihi) as min_vade
-        FROM faturalar WHERE COALESCE(durum,'') != 'odendi' AND vade_tarihi IS NOT NULL
-        GROUP BY musteri_id
-    """)
+    try:
+        fat_borc = fetch_all("""
+            SELECT musteri_id, SUM(COALESCE(toplam, tutar)) as toplam, MIN(vade_tarihi) as min_vade
+            FROM faturalar WHERE COALESCE(durum,'') != 'odendi' AND vade_tarihi IS NOT NULL
+            GROUP BY musteri_id
+        """)
+    except Exception:
+        fat_borc = []
     musteri_borc = {}
     for row in (fat_borc or []):
         mid = row["musteri_id"]
