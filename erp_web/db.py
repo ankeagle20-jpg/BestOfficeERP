@@ -17,6 +17,7 @@ def get_conn():
         user=Config.DB_USER,
         password=Config.DB_PASSWORD,
         sslmode="require",
+        connect_timeout=5,
         cursor_factory=psycopg2.extras.RealDictCursor
     )
 
@@ -28,7 +29,7 @@ def db():
     try:
         yield conn
         conn.commit()
-    except Exception:
+    except BaseException:
         conn.rollback()
         raise
     finally:
