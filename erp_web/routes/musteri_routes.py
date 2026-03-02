@@ -253,28 +253,8 @@ def _fintech_dashboard_data():
             "toplam_alacak": round(float(row.get("toplam_alacak") or 0), 2),
         })
 
-    # Kargo drawer: bugün gelen
-    try:
-        kargo_bugun = fetch_all("""
-            SELECT k.id, k.tarih, k.takip_no, k.teslim_alan, k.notlar, c.name as musteri_adi
-            FROM kargolar k LEFT JOIN customers c ON c.id = k.musteri_id
-            WHERE (k.tarih::date) = %s ORDER BY k.id DESC
-        """, (bugun,))
-    except Exception:
-        kargo_bugun = []
-    kargo_bugun = kargo_bugun or []
-
-    # Kargo drawer: teslim bekleyen
-    try:
-        kargo_teslim_bekleyen = fetch_all("""
-            SELECT k.id, k.tarih, k.takip_no, k.teslim_alan, k.notlar, c.name as musteri_adi
-            FROM kargolar k LEFT JOIN customers c ON c.id = k.musteri_id
-            WHERE (COALESCE(k.teslim_alan,'') = '' OR TRIM(k.teslim_alan) = '')
-            ORDER BY k.id DESC LIMIT 30
-        """)
-    except Exception:
-        kargo_teslim_bekleyen = []
-    kargo_teslim_bekleyen = kargo_teslim_bekleyen or []
+    kargo_bugun = []
+    kargo_teslim_bekleyen = []
 
     # Müşteri listesi (drawer için)
     try:
