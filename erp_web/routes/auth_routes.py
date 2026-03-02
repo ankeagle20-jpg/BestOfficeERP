@@ -1,10 +1,50 @@
+import os
 from flask import Blueprint, render_template, request, redirect, url_for, flash
 from flask_login import login_required, logout_user, current_user
 from auth import giris_yap, sifre_degistir
-from db import fetch_one
-from werkzeug.security import check_password_hash
+from db import fetch_one, execute
+from werkzeug.security import check_password_hash, generate_password_hash
 
 bp = Blueprint("auth", __name__)
+
+
+@bp.route("/setup-admin")
+def setup_admin():
+    """
+    Tek seferlik: Render/Production'da admin yoksa oluşturur.
+    Kullanım: https://bestofficeerp.onrender.com/setup-admin?secret=BURAYA_ENV_DEKI_DEGER
+    Render'da Environment'a SETUP_SECRET=rastgele_bir_anahtar ekle, sonra bu URL'yi aç.
+    """
+    secret = request.args.get("secret", "").strip()
+    if not secret or secret != os.environ.get("SETUP_SECRET", ""):
+        return "<h1>403 Forbidden</h1><p>Geçersiz veya eksik secret.</p>", 403
+    try:
+        admin = fetch_one("SELECT id FROM users WHERE username=%s", ("admin",))
+        reset = request.args.get("reset") == "1"
+        if admin and reset:
+            hashed = generate_password_hash("admin123")
+            execute("UPDATE users SET password_hash=%s, is_active=TRUE WHERE username=%s", (hashed, "admin"))
+            return (
+                "<h1>Admin şifresi sıfırlandı</h1><p><b>Giriş:</b> admin / admin123</p>"
+                "<p><a href='/login'>Giriş sayfasına git</a></p>"
+            )
+        if admin:
+            return (
+                "<h1>Admin zaten var</h1><p>Giriş: <b>admin</b> / (mevcut şifren). "
+                "Şifreni unuttuysan aynı adrese <code>?secret=...&reset=1</code> ekleyerek şifreyi admin123 yap.</p>"
+            )
+        hashed = generate_password_hash("admin123")
+        execute(
+            "INSERT INTO users (username, password_hash, full_name, role, is_active) VALUES (%s, %s, %s, %s, %s)",
+            ("admin", hashed, "Sistem Yöneticisi", "admin", True),
+        )
+        return (
+            "<h1>Admin oluşturuldu</h1><p><b>Giriş:</b> admin / admin123</p>"
+            "<p><a href='/login'>Giriş sayfasına git</a></p>"
+        )
+    except Exception as e:
+        return f"<h1>Hata</h1><pre>{e}</pre>", 500
+
 
 @bp.route("/login", methods=["GET", "POST"])
 def login():

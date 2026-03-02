@@ -132,37 +132,25 @@ def inject_globals():
 def ilk_kurulum():
     """Uygulama ilk başladığında tabloları oluştur ve admin kullanıcı ekle."""
     try:
-        from db import init_schema, fetch_one
+        from db import init_schema, fetch_one, execute
         from werkzeug.security import generate_password_hash
-        import psycopg2
-       
+
         # Şema oluştur
         init_schema()
-       
-        # Admin yoksa oluştur
+
+        # Admin yoksa oluştur (ilk giriş: admin / admin123)
         admin = fetch_one("SELECT id FROM users WHERE role='admin' LIMIT 1")
         if not admin:
-            hashed = generate_password_hash('admin123')
-           
-            # Doğrudan psycopg2 kullan
-            import psycopg2
-            from config import Config
-            conn = psycopg2.connect(Config.SUPABASE_DB_URL)
-            cur = conn.cursor()
-            cur.execute(
+            hashed = generate_password_hash("admin123")
+            execute(
                 "INSERT INTO users (username, password_hash, full_name, role, is_active) VALUES (%s, %s, %s, %s, %s)",
-                ('admin', hashed, 'Sistem Yöneticisi', 'admin', True)
+                ("admin", hashed, "Sistem Yöneticisi", "admin", True),
             )
-            conn.commit()
-            cur.close()
-            conn.close()
-           
             print("Admin user created: admin / admin123")
         else:
             print("Admin user already exists")
-           
     except Exception as e:
-        print(f"Warning - setup error: {e}")
+        print(f"Warning - ilk_kurulum error: {e}")
 
 # Uygulama yüklendiğinde (gunicorn/Render dahil) şema ve admin kontrolü
 ilk_kurulum()
