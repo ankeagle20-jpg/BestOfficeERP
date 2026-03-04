@@ -1,0 +1,24 @@
+OFİSBİR ERP — Yerel çalıştırma
+================================
+
+1) Sunucuyu başlat:
+   cd erp_web
+   python app.py
+
+2) Tarayıcıda aç:
+   http://127.0.0.1:5000
+
+3) Giriş:
+   Kullanıcı: admin
+   Şifre: admin123
+
+4) "Bağlanamıyor" / "Connection refused" hatası:
+   Sunucu çalışmıyor demektir. Önce 1. adımı yapın (python app.py).
+   Adres çubuğunda mutlaka http://127.0.0.1:5000 yazın (veya terminalde
+   yazdığı port numarasını kullanın).
+
+5) Dashboard açılıyor ama Müşteriler/Finans vb. hata veriyor:
+   - Terminalde (python app.py çalışan pencerede) kırmızı hata mesajı
+     var mı kontrol edin.
+   - Varsa bu hata mesajını paylaşın; route veya veritabanı kaynaklı
+     olabilir.

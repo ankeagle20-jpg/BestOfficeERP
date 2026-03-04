@@ -39,6 +39,7 @@ from routes.giris_routes    import bp as giris_bp
 from routes.urun_routes     import bp as urun_bp
 from routes.dashboard_routes import bp as dashboard_bp
 from routes.mobile_routes import bp as mobile_bp
+from routes.cari_kart_routes import bp as cari_kart_bp
 try:
     from routes.ilan_robotu_routes import bp as ilan_robotu_bp
 except Exception as e:
@@ -60,6 +61,7 @@ app.register_blueprint(personel_bp, url_prefix="/personel")
 app.register_blueprint(banka_bp, url_prefix="/bankalar")
 app.register_blueprint(urun_bp, url_prefix="/urunler")
 app.register_blueprint(giris_bp, url_prefix="/giris")
+app.register_blueprint(cari_kart_bp, url_prefix="/cari-kart")
 if ilan_robotu_bp is not None:
     app.register_blueprint(ilan_robotu_bp, url_prefix="/ilan-robotu")
 
@@ -159,4 +161,11 @@ ilk_kurulum()
 if __name__ == "__main__":
     # Enable debug for local troubleshooting
     app.debug = True
-    app.run(debug=True, host="0.0.0.0", port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    print("\n" + "=" * 50)
+    print("  OFİSBİR ERP — Sunucu çalışıyor")
+    print("  Tarayıcıda aç: http://127.0.0.1:{}".format(port))
+    print("  Giriş: admin / admin123")
+    print("  Tüm sayfalar (Dashboard, Müşteriler, Finans vb.) bu adresten açılır.")
+    print("=" * 50 + "\n")
+    app.run(debug=True, host="0.0.0.0", port=port)

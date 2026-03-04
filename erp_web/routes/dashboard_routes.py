@@ -136,7 +136,8 @@ def _dashboard_tablo_data(arama="", filtre=None):
     # Müşteri + ofis (offices.customer_id = c.id ile)
     sql = """
         SELECT c.id as musteri_id, c.name as musteri_adi, c.phone, c.office_code,
-               o.code as ofis_kod, o.type as ofis_tip, o.status as ofis_durum
+               o.code as ofis_kod, o.type as ofis_tip, o.status as ofis_durum,
+               COALESCE(LOWER(TRIM(c.durum)), '') as musteri_durum
         FROM customers c
         LEFT JOIN offices o ON o.customer_id = c.id
         WHERE 1=1
@@ -287,6 +288,7 @@ def _dashboard_tablo_data(arama="", filtre=None):
             "ofis_kod": m.get("ofis_kod") or "—",
             "ofis_tip": m.get("ofis_tip") or "—",
             "hizmet_turu": hizmet_turu,
+            "musteri_durum": (m.get("musteri_durum") or ""),
             "aylik_durum": aylik,
             "toplam_alacak": round(toplam_alacak, 2),
             "son_kargo_durum": kargo_durum,

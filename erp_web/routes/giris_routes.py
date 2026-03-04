@@ -3,15 +3,17 @@ Giriş / Müşteri Kaydı Routes
 Desktop'taki gibi tam fonksiyonel + Sözleşme oluşturma
 """
 from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, send_file, Response
+from flask_login import current_user
 from auth import giris_gerekli
-from db import fetch_all, fetch_one, execute, execute_returning
-from datetime import datetime
+from db import fetch_all, fetch_one, execute, execute_returning, db as get_db
+from datetime import datetime, date, timedelta
 from docx import Document
 from docx.shared import Pt, Cm
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 import os
 import io
 import re
+import urllib.parse
 from werkzeug.utils import secure_filename
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
@@ -100,7 +102,7 @@ def kaydet():
                     phone = %s,
                     email = %s,
                     address = %s,
-                    office_code = %s,
+                    ev_adres = %s,
                     notes = %s
                 WHERE id = %s
             """, (
@@ -109,7 +111,7 @@ def kaydet():
                 data.get('phone'),
                 data.get('email'),
                 data.get('address'),
-                data.get('office_code'),
+                data.get('ev_adres'),
                 data.get('notes'),
                 musteri_id
             ))
@@ -119,8 +121,8 @@ def kaydet():
             # Yeni kayıt
             result = execute_returning("""
                 INSERT INTO customers (
-                    name, tax_number, phone, email, address, 
-                    office_code, notes, created_at
+                    name, tax_number, phone, email, address,
+                    ev_adres, notes, created_at
                 )
                 VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
                 RETURNING id
@@ -130,7 +132,7 @@ def kaydet():
                 data.get('phone'),
                 data.get('email'),
                 data.get('address'),
-                data.get('office_code'),
+                data.get('ev_adres'),
                 data.get('notes')
             ))
             
@@ -179,18 +181,25 @@ def resim_yukle(mid):
 @bp.route('/sozlesme-olustur/<int:mid>')
 @giris_gerekli
 def sozlesme_olustur(mid):
-    """Müşteri sözleşmesi oluştur (Word) - Yüklenen şablona göre"""
+    """Müşteri sözleşmesi oluştur (Word). ?indir=1 ile doğrudan Word indirilir; yoksa sayfa + Word İndir / WhatsApp."""
     try:
-        # Müşteri bilgilerini getir
-        musteri = fetch_one("""
-            SELECT c.*
-            FROM customers c
-            WHERE c.id = %s
-        """, (mid,))
-        
+        musteri = fetch_one("SELECT c.* FROM customers c WHERE c.id = %s", (mid,))
         if not musteri:
             return "Müşteri bulunamadı", 404
-        
+
+        if request.args.get("indir") != "1":
+            indir_url = url_for("giris.sozlesme_olustur", mid=mid, indir="1", tur=request.args.get("tur", ""))
+            tel = (musteri.get("phone") or "").replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+            num = ("90" + tel[1:]) if (tel and tel.startswith("0")) else ("90" + tel if tel else "")
+            metin = "Sayın " + (musteri.get("name") or "Müşteri") + ",\n\nHizmet sözleşmeniz ekte yer almaktadır. İncelemenizi rica ederiz.\n\nİyi günler dileriz.\nBESTOFFICE"
+            whatsapp_url = "https://wa.me/" + num + "?text=" + urllib.parse.quote(metin) if num else "https://wa.me/?text=" + urllib.parse.quote(metin)
+            return render_template(
+                "giris/sozlesme_olustur_sayfa.html",
+                musteri=musteri,
+                indir_url=indir_url,
+                whatsapp_url=whatsapp_url,
+            )
+
         # Sözleşme numarası otomatik oluştur
         # Hizmet türüne göre prefix belirle (SO/HO/PO)
         tur_raw = (request.args.get("tur") or "").lower()
@@ -662,3 +671,201 @@ def kira_bildirgesi_pdf():
         })
     except Exception as e:
         return jsonify({'ok': False, 'mesaj': str(e)}), 500
+
+
+# ── Cari Kart API ───────────────────────────────────────────────────────────
+
+def _cari_hareketler(musteri_id):
+    """Fatura (borç) ve tahsilat (alacak) satırlarını tarih sırasına göre birleştirip bakiye hesaplar."""
+    faturalar = fetch_all(
+        """SELECT id, fatura_no AS belge_no, fatura_tarihi AS tarih, COALESCE(toplam, tutar, 0) AS tutar, 'Fatura' AS tur, vade_tarihi
+           FROM faturalar WHERE musteri_id = %s ORDER BY fatura_tarihi, id""",
+        (musteri_id,)
+    )
+    tahsilatlar = fetch_all(
+        """SELECT id, COALESCE(makbuz_no, 'Makbuz-' || id) AS belge_no, tahsilat_tarihi AS tarih, tutar, 'Tahsilat' AS tur
+           FROM tahsilatlar WHERE musteri_id = %s ORDER BY tahsilat_tarihi, id""",
+        (musteri_id,)
+    )
+    rows = []
+    for r in faturalar:
+        rows.append({
+            "id": r.get("id"), "belge_no": r.get("belge_no") or "", "tarih": str(r.get("tarih") or "")[:10],
+            "tur": "Fatura", "borc": float(r.get("tutar") or 0), "alacak": 0, "vade_tarihi": str(r.get("vade_tarihi") or "")[:10] if r.get("vade_tarihi") else None
+        })
+    for r in tahsilatlar:
+        rows.append({
+            "id": "t-" + str(r.get("id")), "belge_no": r.get("belge_no") or "", "tarih": str(r.get("tarih") or "")[:10],
+            "tur": "Tahsilat", "borc": 0, "alacak": float(r.get("tutar") or 0), "vade_tarihi": None
+        })
+    rows.sort(key=lambda x: (x["tarih"], x["tur"] == "Fatura" and 0 or 1))
+    bakiye = 0
+    for r in rows:
+        bakiye = bakiye + r["borc"] - r["alacak"]
+        r["bakiye"] = round(bakiye, 2)
+    return rows
+
+
+def _risk_skoru_hesapla(musteri_id, gecikmis_gun, gecikmis_tutar):
+    """Gecikme ve tutara göre 1-100 risk skoru. 50 altı kritik."""
+    if not gecikmis_gun and (not gecikmis_tutar or gecikmis_tutar <= 0):
+        return 85
+    if gecikmis_gun and gecikmis_gun > 60:
+        return max(1, 40 - (gecikmis_gun // 30) * 5)
+    if gecikmis_gun and gecikmis_gun > 30:
+        return 55
+    return 70
+
+
+@bp.route('/api/cari-kart/<int:mid>')
+@giris_gerekli
+def api_cari_kart(mid):
+    """Cari kart verisi: özet (bakiye, gecikmiş, bu ay tahsilat, risk, aging), hareketler, finansal profil."""
+    cust = fetch_one("SELECT * FROM customers WHERE id = %s", (mid,))
+    if not cust:
+        return jsonify({"ok": False, "mesaj": "Müşteri bulunamadı."}), 404
+    bugun = date.today()
+    # Ödenmemiş faturalar toplamı (gecikmiş tutar)
+    faturalar_odenmemis = fetch_all(
+        """SELECT id, fatura_no, fatura_tarihi, vade_tarihi, COALESCE(toplam, tutar, 0) AS toplam
+           FROM faturalar WHERE musteri_id = %s AND COALESCE(durum, '') != 'odendi'""",
+        (mid,)
+    )
+    toplam_borc = sum(float(f.get("toplam") or 0) for f in faturalar_odenmemis)
+    gecikmis_gun = 0
+    min_vade = None
+    for f in faturalar_odenmemis:
+        vd = f.get("vade_tarihi")
+        if vd:
+            if hasattr(vd, "year"):
+                vd = vd
+            else:
+                try:
+                    vd = datetime.strptime(str(vd)[:10], "%Y-%m-%d").date()
+                except Exception:
+                    continue
+            if vd < bugun:
+                gun = (bugun - vd).days
+                if gun > gecikmis_gun:
+                    gecikmis_gun = gun
+            if min_vade is None or (vd and vd < min_vade):
+                min_vade = vd
+    if min_vade and min_vade < bugun:
+        gecikmis_gun = (bugun - min_vade).days
+    bu_ay_bas = bugun.replace(day=1)
+    bu_ay_tahsilat = fetch_one(
+        """SELECT COALESCE(SUM(tutar), 0) AS t FROM tahsilatlar
+           WHERE musteri_id = %s
+             AND tahsilat_tarihi::date >= %s
+             AND tahsilat_tarihi::date < %s""",
+        (mid, bu_ay_bas, bu_ay_bas + timedelta(days=32))
+    )
+    bu_ay_tahsilat = float(bu_ay_tahsilat.get("t", 0) or 0) if bu_ay_tahsilat else 0
+    aging_0_30 = aging_31_60 = aging_61_90 = aging_91 = 0
+    for f in faturalar_odenmemis:
+        vd = f.get("vade_tarihi")
+        if not vd:
+            continue
+        try:
+            if not hasattr(vd, "year"):
+                vd = datetime.strptime(str(vd)[:10], "%Y-%m-%d").date()
+        except Exception:
+            continue
+        gun = (bugun - vd).days
+        tutar = float(f.get("toplam") or 0)
+        if gun <= 30:
+            aging_0_30 += tutar
+        elif gun <= 60:
+            aging_31_60 += tutar
+        elif gun <= 90:
+            aging_61_90 += tutar
+        else:
+            aging_91 += tutar
+    risk_skoru = _risk_skoru_hesapla(mid, gecikmis_gun, toplam_borc)
+    hareketler = _cari_hareketler(mid)
+    profil = fetch_one("SELECT * FROM customer_financial_profile WHERE musteri_id = %s", (mid,))
+    is_admin = getattr(current_user, "role", None) == "admin"
+    payload = {
+        "ok": True,
+        "musteri": {
+            "id": cust.get("id"), "name": cust.get("name"), "tax_number": cust.get("tax_number"),
+            "phone": cust.get("phone"), "email": cust.get("email"), "address": cust.get("address"),
+            "vergi_dairesi": cust.get("vergi_dairesi"), "mersis_no": cust.get("mersis_no"),
+            "nace_kodu": cust.get("nace_kodu"), "ofis_tipi": cust.get("ofis_tipi"),
+        },
+        "ozet": {
+            "guncel_bakiye": round(toplam_borc, 2),
+            "gecikmis_tutar": round(toplam_borc, 2),
+            "gecikmis_gun": gecikmis_gun,
+            "bu_ayki_tahsilat": round(bu_ay_tahsilat, 2),
+            "risk_skoru": risk_skoru,
+            "aging_0_30": round(aging_0_30, 2),
+            "aging_31_60": round(aging_31_60, 2),
+            "aging_61_90": round(aging_61_90, 2),
+            "aging_91_plus": round(aging_91, 2),
+        },
+        "hareketler": hareketler,
+        "finansal_profil": None,
+    }
+    if profil:
+        payload["finansal_profil"] = {
+            "tahmini_odeme_gunu": profil.get("tahmini_odeme_gunu"),
+            "yillik_karlilik_endeksi": float(profil.get("yillik_karlilik_endeksi") or 0),
+            "hukuki_esk_puan": profil.get("hukuki_esk_puan"),
+            "mutabakat_tarihi": str(profil.get("mutabakat_tarihi"))[:10] if profil.get("mutabakat_tarihi") else None,
+            "vade_gunu": profil.get("vade_gunu"),
+        }
+        if is_admin:
+            payload["finansal_profil"]["ic_not"] = profil.get("ic_not")
+            payload["finansal_profil"]["hukuki_surec"] = profil.get("hukuki_surec")
+    return jsonify(payload)
+
+
+@bp.route('/api/cari-kart-pdf/<int:mid>')
+@giris_gerekli
+def api_cari_kart_pdf(mid):
+    """Cari hareketleri BestOffice antetli PDF ekstre olarak indir."""
+    cust = fetch_one("SELECT id, name, tax_number FROM customers WHERE id = %s", (mid,))
+    if not cust:
+        return jsonify({"ok": False, "mesaj": "Müşteri bulunamadı."}), 404
+    hareketler = _cari_hareketler(mid)
+    _register_arial()
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    w, h = A4
+    y = h - 40
+    try:
+        c.setFont("Arial", 16)
+    except Exception:
+        c.setFont("Helvetica", 16)
+    c.drawString(40, y, "BestOffice - Cari Ekstre")
+    y -= 24
+    c.setFont("Helvetica", 10)
+    c.drawString(40, y, "Müşteri: " + (cust.get("name") or ""))
+    c.drawString(40, y - 14, "Vergi No: " + (cust.get("tax_number") or ""))
+    y -= 40
+    c.drawString(40, y, "Tarih")
+    c.drawString(120, y, "Belge No")
+    c.drawString(220, y, "Tür")
+    c.drawString(300, y, "Borç")
+    c.drawString(380, y, "Alacak")
+    c.drawString(460, y, "Bakiye")
+    y -= 6
+    c.line(40, y, 520, y)
+    y -= 14
+    for row in hareketler:
+        if y < 80:
+            c.showPage()
+            y = h - 40
+        c.drawString(40, y, (row.get("tarih") or "")[:10])
+        c.drawString(120, y, (row.get("belge_no") or "")[:18])
+        c.drawString(220, y, row.get("tur") or "")
+        c.drawString(300, y, "{:,.2f}".format(row.get("borc") or 0))
+        c.drawString(380, y, "{:,.2f}".format(row.get("alacak") or 0))
+        c.drawString(460, y, "{:,.2f}".format(row.get("bakiye") or 0))
+        y -= 14
+    c.save()
+    buf.seek(0)
+    return Response(buf.read(), mimetype="application/pdf", headers={
+        "Content-Disposition": "attachment; filename=Cari_Ekstre_%s.pdf" % (cust.get("name") or "musteri").replace(" ", "_")[:30]
+    })

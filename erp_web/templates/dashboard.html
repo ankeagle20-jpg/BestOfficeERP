@@ -85,6 +85,42 @@
 .dash-table thead .sticky-col { background: #0f2537; }
 .dash-table tbody tr:hover .sticky-col { background: rgba(255,255,255,0.06); }
 
+/* Durum filtresi ve rozetleri */
+.dash-durum-select {
+  margin-left: 6px;
+  background: #0f2537;
+  border: 1px solid #2d4060;
+  color: #e0f7fa;
+  border-radius: 4px;
+  font-size: 12px;
+  padding: 2px 6px;
+}
+.dash-durum-badge-aktif {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  background: rgba(34,197,94,0.18);
+  color: #22c55e;
+  border: 1px solid rgba(34,197,94,0.45);
+}
+.dash-durum-badge-pasif {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  background: rgba(148,163,184,0.35);
+  color: #cbd5f5;
+  border: 1px solid rgba(148,163,184,0.6);
+  opacity: 0.6;
+}
+
 /* 12 aylık mini kutucuklar */
 .month-cell { padding: 4px !important; }
 .month-dot {
@@ -222,6 +258,13 @@
           <th class="sticky-col">Müşteri / Şirket</th>
           <th>Ofis No / Tip</th>
           <th>Ürün / Kira Tipi</th>
+          <th>
+            <select id="dashDurum" class="dash-durum-select">
+              <option value="">Durum: Hepsi</option>
+              <option value="aktif">Sadece Aktif</option>
+              <option value="pasif">Sadece Pasif</option>
+            </select>
+          </th>
           {% for ay in aylar %}
           <th class="month-cell">{{ ay[:3] }}</th>
           {% endfor %}
@@ -233,10 +276,18 @@
       </thead>
       <tbody id="dash-tbody">
         {% for r in tablo_rows %}
-        <tr data-musteri-id="{{ r.musteri_id }}">
+        {% set d = (r.musteri_durum or '')|lower %}
+        <tr data-musteri-id="{{ r.musteri_id }}" data-durum="{{ d }}">
           <td class="sticky-col"><strong>{{ r.musteri_adi }}</strong><br><small style="color:#78909c;">{{ r.phone }}</small></td>
           <td>{{ r.ofis_kod }} / {{ r.ofis_tip }}</td>
           <td>{{ r.hizmet_turu }}</td>
+          <td>
+            {% if d == 'pasif' %}
+              <span class="dash-durum-badge-pasif"><i class="fa fa-pause-circle"></i> Pasif</span>
+            {% else %}
+              <span class="dash-durum-badge-aktif"><i class="fa fa-check-circle"></i> Aktif</span>
+            {% endif %}
+          </td>
           {% for d in r.aylik_durum %}
           <td class="month-cell"><span class="month-dot {{ d }}" title="{{ aylar[loop.index0] }}"></span></td>
           {% endfor %}
@@ -309,15 +360,17 @@
       }
       tbody.innerHTML = rows.map(function(r) {
         const sozStr = r.sozlesme_bitis_str || (r.sozlesme_bitis ? (typeof r.sozlesme_bitis === 'string' ? r.sozlesme_bitis.substring(0,10) : r.sozlesme_bitis) : '—');
-        const dots = (r.aylik_durum || []).map(function(d) {
-          return '<span class="month-dot ' + d + '" title=""></span>';
-        }).join('');
         const alacakClass = r.toplam_alacak > 0 ? 'alacak-kirmizi' : '';
         const alacakStr = r.toplam_alacak > 0 ? '₺ ' + Number(r.toplam_alacak).toLocaleString('tr-TR', {maximumFractionDigits:0}) : '—';
-        return '<tr data-musteri-id="' + r.musteri_id + '">' +
+        const durumRaw = (r.musteri_durum || '').toLowerCase();
+        const durumBadge = durumRaw === 'pasif'
+          ? '<span class="dash-durum-badge-pasif"><i class="fa fa-pause-circle"></i> Pasif</span>'
+          : '<span class="dash-durum-badge-aktif"><i class="fa fa-check-circle"></i> Aktif</span>';
+        return '<tr data-musteri-id="' + r.musteri_id + '" data-durum="' + durumRaw + '">' +
           '<td class="sticky-col"><strong>' + (r.musteri_adi || '—') + '</strong><br><small style="color:#78909c">' + (r.phone || '') + '</small></td>' +
           '<td>' + (r.ofis_kod || '—') + ' / ' + (r.ofis_tip || '—') + '</td>' +
           '<td>' + (r.hizmet_turu || '—') + '</td>' +
+          '<td>' + durumBadge + '</td>' +
           aylar.slice(0,12).map(function(_, i) { return '<td class="month-cell">' + (r.aylik_durum && r.aylik_durum[i] ? '<span class="month-dot ' + r.aylik_durum[i] + '"></span>' : '') + '</td>'; }).join('') +
           '<td class="' + alacakClass + '">' + alacakStr + '</td>' +
           '<td>' + (r.son_kargo_durum || '—') + '</td>' +
@@ -334,6 +387,24 @@
       tbody.querySelectorAll('.dash-btn.whatsapp').forEach(function(btn) {
         btn.addEventListener('click', whatsappClick);
       });
+      applyDurumFilter();
+    });
+  }
+
+  function applyDurumFilter() {
+    var sel = document.getElementById('dashDurum');
+    if (!sel) return;
+    var val = (sel.value || '').toLowerCase();
+    var rows = document.querySelectorAll('#dash-tbody tr[data-musteri-id]');
+    rows.forEach(function(tr) {
+      var d = (tr.getAttribute('data-durum') || '').toLowerCase();
+      var show = true;
+      if (val === 'aktif') {
+        show = d !== 'pasif';
+      } else if (val === 'pasif') {
+        show = d === 'pasif';
+      }
+      tr.style.display = show ? '' : 'none';
     });
   }
 
@@ -351,6 +422,11 @@
   document.getElementById('dash-search').addEventListener('keydown', function(e) {
     if (e.key === 'Enter') tabloYenile();
   });
+
+  var durumSel = document.getElementById('dashDurum');
+  if (durumSel) {
+    durumSel.addEventListener('change', applyDurumFilter);
+  }
 
   function whatsappClick() {
     const mid = this.getAttribute('data-mid');

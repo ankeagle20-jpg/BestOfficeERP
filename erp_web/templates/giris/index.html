@@ -182,7 +182,7 @@
     text-align: right;
 }
 .form-grid label.required::after {
-    content: " *";
+    content: " •";
     color: #ff5252;
 }
 .form-grid input, .form-grid select, .form-grid textarea {
@@ -299,6 +299,102 @@
 .btn-yazdir { background: #ff9800; color: white; }
 .btn-sil { background: #e74c3c; color: white; }
 .btn-temizle { background: #6b7280; color: white; }
+/* Cari Kart (tab-4) */
+.cari-kart-wrap { background: #1e3a50; border-radius: 8px; padding: 14px; }
+.cari-kart-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.cari-btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; color: #fff; }
+.cari-btn.fatura { background: linear-gradient(135deg, #1976d2, #0d47a1); }
+.cari-btn.tahsilat { background: linear-gradient(135deg, #388e3c, #1b5e20); }
+.cari-btn.whatsapp { background: linear-gradient(135deg, #25d366, #128c7e); }
+.cari-btn.pdf { background: linear-gradient(135deg, #c62828, #b71c1c); }
+.cari-kart-uyari { padding: 24px; text-align: center; color: #90a4ae; font-size: 13px; }
+.cari-kart-uyari i { margin-right: 6px; color: #4fc3f7; }
+.cari-kart-grid { display: grid; grid-template-columns: 280px 1fr; gap: 16px; min-height: 360px; }
+.cari-kart-sol { min-width: 0; }
+.cari-ozet-kart { background: #0f2537; border-radius: 8px; padding: 14px; border: 1px solid #2d4060; }
+.cari-ozet-kart h4 { margin: 0 0 12px 0; color: #4fc3f7; font-size: 13px; }
+.cari-ozet-satir { display: flex; justify-content: space-between; padding: 6px 0; font-size: 12px; color: #b0bec5; }
+.cari-ozet-satir strong { color: #e0f7fa; font-family: monospace; }
+.cari-ozet-satir.risk strong { color: #ffeb3b; }
+.cari-ozet-satir.risk.kritik strong { color: #ff5252; }
+.cari-aging-bar-wrap { margin-top: 12px; }
+.cari-aging-bar-wrap label { font-size: 11px; color: #90a4ae; display: block; margin-bottom: 4px; }
+.cari-aging-bar { display: flex; height: 24px; border-radius: 4px; overflow: hidden; }
+.cari-aging-bar span { flex: 1; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; color: #fff; min-width: 0; }
+.cari-aging-0-30 { background: #43a047; }
+.cari-aging-31-60 { background: #fb8c00; }
+.cari-aging-61-90 { background: #e53935; }
+.cari-aging-91 { background: #880e4f; }
+.cari-profil-ek { margin-top: 12px; padding-top: 10px; border-top: 1px solid #2d4060; font-size: 11px; color: #90a4ae; }
+.cari-kart-sag { min-width: 0; overflow: auto; }
+.cari-hareketler-baslik { color: #4fc3f7; font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+.cari-hareketler-tablo-wrap { overflow-x: auto; max-height: 400px; overflow-y: auto; background: #0f2537; border-radius: 6px; }
+.cari-hareketler-tablo { width: 100%; border-collapse: collapse; font-size: 11px; }
+.cari-hareketler-tablo th { background: #1e3a50; color: #4fc3f7; padding: 8px 10px; text-align: left; position: sticky; top: 0; }
+.cari-hareketler-tablo td { padding: 6px 10px; border-bottom: 1px solid #2d4060; color: #e0f7fa; }
+.cari-hareketler-tablo td.num { text-align: right; font-family: monospace; }
+.cari-hareketler-tablo tr.kritik-satir { background: rgba(229,57,53,0.15); }
+.cari-whatsapp-btn { color: #25d366; cursor: pointer; padding: 2px 6px; }
+@media (max-width: 900px) { .cari-kart-grid { grid-template-columns: 1fr; } }
+
+/* Tahsilat makbuz formu (tab-3) */
+.tahsilat-makbuz-wrap {
+    background: #1e3a50;
+    border-radius: 8px;
+    max-width: 480px;
+    overflow: hidden;
+}
+.tahsilat-makbuz-baslik {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 12px 16px;
+    background: #0f2537;
+    border-radius: 8px 8px 0 0;
+}
+.tahsilat-makbuz-baslik h3 { margin: 0; color: #4fc3f7; font-size: 15px; }
+.tahsilat-form-grup { padding: 8px 16px; }
+.tahsilat-form-grup label { display: block; color: #90a4ae; font-size: 12px; margin-bottom: 4px; }
+.tahsilat-form-grup input, .tahsilat-form-grup select, .tahsilat-form-grup textarea {
+    width: 100%; padding: 8px 10px;
+    background: #2d4060; border: 1px solid #3d5070;
+    color: #e0f7fa; border-radius: 4px; font-size: 13px;
+}
+.tahsilat-form-grup textarea { resize: vertical; min-height: 50px; }
+.tahsilat-form-grup .zorunlu { color: #ff5252; }
+.tahsilat-musteri-dropdown {
+    max-height: 180px; overflow-y: auto;
+    background: #0f2537; border: 1px solid #3d5070;
+    border-radius: 4px; margin-top: 4px;
+}
+.tahsilat-musteri-dropdown div {
+    padding: 8px 12px; cursor: pointer;
+    border-bottom: 1px solid #2d4060;
+}
+.tahsilat-musteri-dropdown div:hover { background: #2d4060; }
+.tahsilat-musteri-secilen { color: #4fc3f7; font-size: 13px; padding: 4px 0; }
+.tahsilat-makbuz-aksiyon {
+    display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap;
+    padding: 12px 16px; border-top: 1px solid #2d4060;
+}
+.tahsilat-btn-iptal {
+    background: #546e7a; color: white; border: none;
+    padding: 8px 16px; border-radius: 4px; cursor: pointer;
+}
+.tahsilat-btn-onizle {
+    background: #7e57c2; color: white; border: none;
+    padding: 8px 14px; border-radius: 4px; cursor: pointer; font-size: 12px;
+    display: inline-flex; align-items: center; gap: 6px;
+}
+.tahsilat-btn-onizle:hover { background: #5e35b1; color: white; }
+.tahsilat-btn-yazdir {
+    background: #00bcd4; color: white; border: none;
+    padding: 8px 14px; border-radius: 4px; cursor: pointer; font-size: 12px;
+    display: inline-flex; align-items: center; gap: 6px;
+}
+.tahsilat-btn-yazdir:hover { background: #0097a7; color: white; }
+.tahsilat-btn-pdf { background: #e91e63; color: white; border: none; padding: 8px 14px; border-radius: 4px; cursor: pointer; font-size: 12px; display: inline-flex; align-items: center; gap: 6px; }
+.tahsilat-btn-pdf:hover { background: #c2185b; color: white; }
+.tahsilat-btn-whatsapp { background: #25d366; color: white; border: none; padding: 8px 14px; border-radius: 4px; cursor: pointer; font-size: 12px; display: inline-flex; align-items: center; gap: 6px; }
+.tahsilat-btn-whatsapp:hover { background: #1da851; color: white; }
 .sozlesme-durum {
     margin-top: 10px;
     padding: 10px;
@@ -364,6 +460,8 @@
             <button class="tab active" onclick="switchTab(0)">Müşteri Ekle</button>
             <button class="tab" onclick="switchTab(1)">Kira Senaryo</button>
             <button class="tab" onclick="switchTab(2)">Kira Bildirgesi</button>
+            <button class="tab" onclick="switchTab(3)">Tahsilat</button>
+            <button class="tab" onclick="switchTab(4)">Cari Kart</button>
         </div>
         
         <!-- Sekme 1: Müşteri Ekle -->
@@ -379,10 +477,10 @@
                         <input type="text" id="name" required onchange="hesaplaYuzde()">
                         
                         <label class="required">Vergi Numarası</label>
-                        <input type="text" id="tax_number" required onchange="hesaplaYuzde()">
+                        <input type="text" id="tax_number" required maxlength="10" inputmode="numeric" oninput="sadeceRakam(this, 10)" onchange="hesaplaYuzde()">
                         
-                        <label>Vergi Dairesi</label>
-                        <input type="text" id="vergi_dairesi" onchange="hesaplaYuzde()">
+                        <label class="required">Vergi Dairesi</label>
+                        <input type="text" id="vergi_dairesi" value="kavaklıdere" onchange="hesaplaYuzde()">
                         
                         <label>MERSİS Numarası</label>
                         <input type="text" id="mersis" onchange="hesaplaYuzde()">
@@ -409,9 +507,12 @@
                         <input type="text" id="onceki_adres" onchange="hesaplaYuzde()">
                         
                         <label class="required">Şu Anki Adres</label>
-                        <textarea id="address" required onchange="hesaplaYuzde()"></textarea>
+                        <textarea id="address" required onchange="hesaplaYuzde()">kavaklıdere mah. esat cad. no:12/1 çankaya /ankara</textarea>
                         
-                        <label>Şube / Merkez</label>
+                        <label class="required">İkametgah Adresi</label>
+                        <textarea id="ev_adres" required onchange="hesaplaYuzde()" placeholder="Müşterinin ikamet adresi"></textarea>
+                        
+                        <label class="required">Şube / Merkez</label>
                         <select id="sube_merkez" onchange="hesaplaYuzde()">
                             <option>Merkez</option>
                             <option>Şube</option>
@@ -426,14 +527,14 @@
                         <label class="required">Yetkili Ad Soyad</label>
                         <input type="text" id="yetkili_ad" required onchange="hesaplaYuzde()">
                         
-                        <label>Yetkili T.C. Kimlik No</label>
-                        <input type="text" id="yetkili_tc" placeholder="11=TC / 12=Yab" onchange="hesaplaYuzde()">
+                        <label class="required">Yetkili T.C. Kimlik No</label>
+                        <input type="text" id="yetkili_tc" placeholder="11=TC / 12=Yab" maxlength="11" inputmode="numeric" oninput="sadeceRakam(this, 11)" onchange="hesaplaYuzde()">
                         
-                        <label>Yetkili Cep Telefon</label>
-                        <input type="text" id="phone" placeholder="5XX XXX XX XX" onchange="hesaplaYuzde()">
+                        <label class="required">Yetkili Cep Telefon</label>
+                        <input type="text" id="phone" placeholder="5XX XXX XX XX" maxlength="10" inputmode="numeric" oninput="telefonInput(this)" onchange="hesaplaYuzde()">
                         
                         <label>Yetkili Cep Tel 2</label>
-                        <input type="text" id="phone2" onchange="hesaplaYuzde()">
+                        <input type="text" id="phone2" maxlength="10" inputmode="numeric" oninput="telefonInput(this)" onchange="hesaplaYuzde()">
                         
                         <label>Yetkili E-posta</label>
                         <input type="email" id="email" onchange="hesaplaYuzde()">
@@ -447,7 +548,7 @@
                 <div class="form-section">
                     <h4>Sözleşme</h4>
                     <div class="form-grid">
-                        <label>Hizmet Türü</label>
+                        <label class="required">Hizmet Türü</label>
                         <select id="hizmet_turu" onchange="hesaplaYuzde()">
                             <option>Sanal Ofis</option>
                             <option>Hazır Ofis</option>
@@ -457,10 +558,10 @@
                         <label>Aylık Kira (₺)</label>
                         <input type="number" step="0.01" id="aylik_kira" value="0.00" onchange="hesaplaYuzde()">
                         
-                        <label>Sözleşme Başlangıç</label>
+                        <label class="required">Sözleşme Başlangıç</label>
                         <input type="date" id="sozlesme_baslangic" onchange="hesaplaYuzde()">
                         
-                        <label>Sözleşme Bitiş</label>
+                        <label class="required">Sözleşme Bitiş</label>
                         <input type="date" id="sozlesme_bitis" onchange="hesaplaYuzde()">
                     </div>
                 </div>
@@ -530,6 +631,98 @@
                     <button type="button" class="btn-temizle" onclick="temizleForm()">✖ Temizle</button>
                 </div>
             </form>
+        </div>
+        
+        <!-- Sekme 4: Cari Kart -->
+        <div class="tab-content" id="tab-4">
+            <div class="cari-kart-wrap">
+                <div class="cari-kart-actions">
+                    <button type="button" class="cari-btn fatura" onclick="cariKartFaturaKes()"><i class="fa fa-file-invoice"></i> Fatura Kes</button>
+                    <button type="button" class="cari-btn tahsilat" onclick="cariKartTahsilatAc()"><i class="fa fa-hand-holding-usd"></i> Tahsilat Al</button>
+                    <button type="button" class="cari-btn whatsapp" onclick="cariKartWhatsApp()"><i class="fa fa-whatsapp"></i> WhatsApp Hatırlatma</button>
+                    <button type="button" class="cari-btn pdf" onclick="cariKartPdfIndir()"><i class="fa fa-file-pdf-o"></i> PDF Ekstre</button>
+                </div>
+                <div id="cari-kart-musteri-sec" class="cari-kart-uyari">
+                    <i class="fa fa-info-circle"></i> Cari kartı görmek için soldan bir müşteri seçin.
+                </div>
+                <div id="cari-kart-icerik" class="cari-kart-grid" style="display:none;">
+                    <div class="cari-kart-sol">
+                        <div class="cari-ozet-kart">
+                            <h4><i class="fa fa-wallet"></i> Özet</h4>
+                            <div class="cari-ozet-satir"><span>Güncel Bakiye</span><strong id="cari-bakiye">0</strong> ₺</div>
+                            <div class="cari-ozet-satir"><span>Gecikmiş Tutar</span><strong id="cari-gecikmis">0</strong> ₺</div>
+                            <div class="cari-ozet-satir"><span>Bu Ayki Tahsilat</span><strong id="cari-bu-ay">0</strong> ₺</div>
+                            <div class="cari-ozet-satir risk"><span>Risk Skoru</span><strong id="cari-risk">—</strong> <span id="cari-risk-badge"></span></div>
+                            <div class="cari-aging-bar-wrap">
+                                <label>Yaşlandırma (Borç)</label>
+                                <div class="cari-aging-bar">
+                                    <span class="cari-aging-0-30" id="cari-aging-30" title="0-30 gün">0</span>
+                                    <span class="cari-aging-31-60" id="cari-aging-60" title="31-60 gün">0</span>
+                                    <span class="cari-aging-61-90" id="cari-aging-90" title="61-90 gün">0</span>
+                                    <span class="cari-aging-91" id="cari-aging-91" title="91+ gün">0</span>
+                                </div>
+                            </div>
+                            <div id="cari-profil-ek" class="cari-profil-ek"></div>
+                        </div>
+                    </div>
+                    <div class="cari-kart-sag">
+                        <div class="cari-hareketler-baslik">Cari Hareketler</div>
+                        <div class="cari-hareketler-tablo-wrap">
+                            <table class="cari-hareketler-tablo" id="cari-hareketler-tablo">
+                                <thead><tr><th>Tarih</th><th>Belge No</th><th>Tür</th><th>Borç</th><th>Alacak</th><th>Bakiye</th><th></th></tr></thead>
+                                <tbody id="cari-hareketler-tbody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sekme 5: Tahsilat - Yeni Tahsilat Makbuzu -->
+        <div class="tab-content" id="tab-3">
+            <div class="tahsilat-makbuz-wrap">
+                <div class="tahsilat-makbuz-baslik">
+                    <h3><i class="fa fa-receipt"></i> Yeni Tahsilat Makbuzu</h3>
+                </div>
+                <form id="giris-tahsilat-form" onsubmit="return girisTahsilatKaydet(event)">
+                    <div class="tahsilat-form-grup">
+                        <label>Müşteri <span class="zorunlu">*</span></label>
+                        <input type="text" id="giris_tahsilat_musteri_ara" placeholder="Müşteri ara, seçin..." autocomplete="off">
+                        <input type="hidden" id="giris_tahsilat_musteri_id" name="musteri_id">
+                        <input type="hidden" id="giris_tahsilat_musteri_phone" name="musteri_phone">
+                        <div id="giris_tahsilat_musteri_listesi" class="tahsilat-musteri-dropdown" style="display:none;"></div>
+                        <span id="giris_tahsilat_musteri_secilen" class="tahsilat-musteri-secilen" style="display:none;"></span>
+                    </div>
+                    <div class="tahsilat-form-grup">
+                        <label>Tutar (TL) <span class="zorunlu">*</span></label>
+                        <input type="text" id="giris_tahsilat_tutar" name="tutar" placeholder="0,00" required>
+                    </div>
+                    <div class="tahsilat-form-grup">
+                        <label>Ödeme Türü</label>
+                        <select id="giris_tahsilat_odeme_turu" name="odeme_turu">
+                            <option value="nakit">Nakit</option>
+                            <option value="havale">Havale/EFT</option>
+                            <option value="kredi_karti">Kredi Kartı</option>
+                            <option value="cek">Çek</option>
+                        </select>
+                    </div>
+                    <div class="tahsilat-form-grup">
+                        <label>Tarih</label>
+                        <input type="date" id="giris_tahsilat_tarih" name="tahsilat_tarihi">
+                    </div>
+                    <div class="tahsilat-form-grup">
+                        <label>Açıklama</label>
+                        <textarea id="giris_tahsilat_aciklama" name="aciklama" rows="2" placeholder="Örn: 2026 Mart ayı kira bedeli"></textarea>
+                    </div>
+                    <div class="tahsilat-makbuz-aksiyon">
+                        <button type="button" class="tahsilat-btn-iptal" onclick="girisTahsilatIptal()">İptal</button>
+                        <button type="button" class="tahsilat-btn-onizle" onclick="girisTahsilatOnizle(); return false;"><i class="fa fa-eye"></i> Önizle</button>
+                        <button type="button" class="tahsilat-btn-yazdir" onclick="girisTahsilatYazdir(); return false;"><i class="fa fa-print"></i> Yazdır</button>
+                        <button type="button" class="tahsilat-btn-pdf" onclick="girisTahsilatPdfIndir(); return false;"><i class="fa fa-file-pdf-o"></i> PDF İndir</button>
+                        <button type="button" class="tahsilat-btn-whatsapp" onclick="girisTahsilatWhatsApp(); return false;"><i class="fa fa-whatsapp"></i> WhatsApp</button>
+                    </div>
+                </form>
+            </div>
         </div>
         
         <!-- Sekme 2: Kira Senaryo -->
@@ -646,11 +839,14 @@
                     <button type="button" onclick="kiraBildirgesiOnizle()" style="background: #7e57c2; color: white; border: none; padding: 10px 20px; border-radius: 3px; cursor: pointer; font-size: 13px;">
                         👁 Önizle
                     </button>
+                    <button type="button" onclick="kiraBildirgesiPdfIndir()" style="background: #e91e63; color: white; border: none; padding: 10px 20px; border-radius: 3px; cursor: pointer; font-size: 13px;">
+                        📄 PDF İndir
+                    </button>
                     <button type="button" onclick="kiraBildirgesiYazdir()" style="background: #00bcd4; color: white; border: none; padding: 10px 20px; border-radius: 3px; cursor: pointer; font-size: 13px;">
                         🖨 Yazdır
                     </button>
                     <button type="button" onclick="kiraBildirgesiWhatsApp()" style="background: #25d366; color: white; border: none; padding: 10px 20px; border-radius: 3px; cursor: pointer; font-size: 13px;">
-                        📱 WhatsApp'tan Gönder
+                        📱 WhatsApp
                     </button>
                 </div>
             </div>
@@ -662,7 +858,7 @@ let selectedId = null;
 let musteriler = [];
 let yukluDosyalar = [];
 
-// Sekme değiştirme
+// Sekme değiştirme (içerik id ile eşleştirilir: tab-0 .. tab-4)
 function switchTab(index) {
     document.querySelectorAll('.tab').forEach((t, i) => {
         if (i === index) {
@@ -672,9 +868,21 @@ function switchTab(index) {
         }
     });
     
-    document.querySelectorAll('.tab-content').forEach((c, i) => {
-        if (i === index) {
+    var tabId = 'tab-' + index;
+    document.querySelectorAll('.tab-content').forEach(function(c) {
+        if (c.id === tabId) {
             c.classList.add('active');
+            if (index === 3) {
+                var tarihEl = document.getElementById('giris_tahsilat_tarih');
+                if (tarihEl && !tarihEl.value) tarihEl.value = new Date().toISOString().slice(0, 10);
+            }
+            if (index === 4) {
+                if (selectedId) cariKartYukle(selectedId);
+                else {
+                    document.getElementById('cari-kart-musteri-sec').style.display = 'block';
+                    document.getElementById('cari-kart-icerik').style.display = 'none';
+                }
+            }
         } else {
             c.classList.remove('active');
         }
@@ -691,7 +899,7 @@ function switchTab(index) {
 // Tamamlanma yüzdesini hesapla
 function hesaplaYuzde() {
     const zorunluAlanlar = [
-        'name', 'tax_number', 'address', 'yetkili_ad'
+        'name', 'tax_number', 'address', 'ev_adres', 'yetkili_ad'
     ];
     
     const opsiyonelAlanlar = [
@@ -785,16 +993,81 @@ function selectMusteri(id) {
     document.getElementById('tax_number').value = musteri.tax_number || '';
     document.getElementById('phone').value = musteri.phone || '';
     document.getElementById('email').value = musteri.email || '';
-    document.getElementById('address').value = musteri.address || '';
+    document.getElementById('address').value = musteri.address || 'kavaklıdere mah. esat cad. no:12/1 çankaya /ankara';
+    document.getElementById('ev_adres').value = (musteri.ev_adres || '').trim();
     document.getElementById('notes').value = musteri.notes || '';
     
     // Yüzde hesapla
     hesaplaYuzde();
+    // Cari Kart sekmesi açıksa veriyi yükle
+    if (document.getElementById('tab-4') && document.getElementById('tab-4').classList.contains('active')) {
+        cariKartYukle(id);
+    }
+}
+
+// Sadece rakam girişine izin ver (maxLen opsiyonel)
+function sadeceRakam(input, maxLen) {
+    let v = (input.value || '').replace(/\D/g, '');
+    if (maxLen) v = v.slice(0, maxLen);
+    input.value = v;
+}
+
+// Telefon inputu: baştaki 0'ı at, 10 hane ile sınırla
+function telefonInput(input) {
+    let v = (input.value || '').replace(/\D/g, '');
+    if (v.startsWith('0')) v = v.slice(1);
+    if (v.length > 10) v = v.slice(0, 10);
+    input.value = v;
 }
 
 // Kaydet
 async function kaydet(event) {
     event.preventDefault();
+    
+    // Zorunlu alan kontrolleri (boş bırakılamaz)
+    const requiredFields = [
+        ['name', 'Şirket Ünvanı'],
+        ['tax_number', 'Vergi No'],
+        ['vergi_dairesi', 'Vergi Dairesi'],
+        ['yetkili_ad', 'Yetkili Ad Soyad'],
+        ['yetkili_tc', 'Yetkili T.C. Kimlik No'],
+        ['phone', 'Yetkili Cep Telefon'],
+        ['email', 'Yetkili E-posta'],
+        ['address', 'Şu Anki Adres'],
+        ['ev_adres', 'Ev Adresi'],
+        ['sube_merkez', 'Şube / Merkez'],
+        ['hizmet_turu', 'Hizmet Türü'],
+    ];
+    for (const [id, label] of requiredFields) {
+        const el = document.getElementById(id);
+        if (el && (!el.value || el.value.trim() === '')) {
+            alert(label + ' zorunlu alandır.');
+            el.focus();
+            return;
+        }
+    }
+    
+    // Strict sayısal doğrulamalar
+    const vergiNo = (document.getElementById('tax_number').value || '').trim();
+    if (vergiNo && !/^\d{10}$/.test(vergiNo)) {
+        alert('Vergi No 10 hane olmalıdır.');
+        document.getElementById('tax_number').focus();
+        return;
+    }
+
+    const tcNo = (document.getElementById('yetkili_tc').value || '').trim();
+    if (tcNo && !/^\d{11}$/.test(tcNo)) {
+        alert('TC Kimlik No 11 hane olmalıdır.');
+        document.getElementById('yetkili_tc').focus();
+        return;
+    }
+
+    const tel = (document.getElementById('phone').value || '').trim();
+    if (tel && !/^\d{10}$/.test(tel)) {
+        alert('Telefon numarasını başında 0 olmadan 10 hane olarak giriniz.');
+        document.getElementById('phone').focus();
+        return;
+    }
     
     const data = {
         id: document.getElementById('musteri-id').value || null,
@@ -803,6 +1076,7 @@ async function kaydet(event) {
         phone: document.getElementById('phone').value,
         email: document.getElementById('email').value,
         address: document.getElementById('address').value,
+        ev_adres: document.getElementById('ev_adres').value,
         notes: document.getElementById('notes').value
     };
     
@@ -971,8 +1245,308 @@ function yeniMusteri() {
 // Sayfa yüklendiğinde
 document.addEventListener('DOMContentLoaded', () => {
     musteriAra();
+    // Yeni kayıt formu için sözleşme tarihlerini bugünden 1 yıl sonrasına ayarla
+    try {
+        const today = new Date();
+        const pad = n => (n < 10 ? '0' + n : '' + n);
+        const todayStr = today.getFullYear() + '-' + pad(today.getMonth() + 1) + '-' + pad(today.getDate());
+        const nextYear = new Date(today);
+        nextYear.setFullYear(today.getFullYear() + 1);
+        const nextYearStr = nextYear.getFullYear() + '-' + pad(nextYear.getMonth() + 1) + '-' + pad(nextYear.getDate());
+        const bas = document.getElementById('sozlesme_baslangic');
+        const bit = document.getElementById('sozlesme_bitis');
+        if (bas && !bas.value) bas.value = todayStr;
+        if (bit && !bit.value) bit.value = nextYearStr;
+    } catch (e) {
+        console.warn('Sözleşme tarihleri set edilemedi:', e);
+    }
     hesaplaYuzde();
+    // Tahsilat sekmesi: müşteri arama
+    let girisTahsilatAramaZamanlayici;
+    const tahsilatAra = document.getElementById('giris_tahsilat_musteri_ara');
+    if (tahsilatAra) {
+        tahsilatAra.addEventListener('focus', function() {
+            if (!this.value) girisTahsilatMusteriListesiGetir('');
+            const list = document.getElementById('giris_tahsilat_musteri_listesi');
+            if (list) list.style.display = 'block';
+        });
+        tahsilatAra.addEventListener('input', function() {
+            clearTimeout(girisTahsilatAramaZamanlayici);
+            girisTahsilatAramaZamanlayici = setTimeout(function() {
+                girisTahsilatMusteriListesiGetir(tahsilatAra.value);
+            }, 250);
+        });
+    }
+    document.addEventListener('click', function(e) {
+        const list = document.getElementById('giris_tahsilat_musteri_listesi');
+        const ara = document.getElementById('giris_tahsilat_musteri_ara');
+        if (list && ara && !list.contains(e.target) && e.target !== ara) list.style.display = 'none';
+    });
 });
+
+// Eski tahsilat hızlı arama (artık Tahsilat sekmesi makbuz formu; bu fonksiyon çağrılmıyor)
+function tahsilatHizliAra(ev) {
+    const div = document.getElementById('tahsilat_hizli_sonuc');
+    if (div) div.textContent = '';
+}
+
+function tahsilatHizliGit() {
+    window.location.href = '/tahsilat';
+}
+
+// ——— Giriş Tahsilat Makbuzu (tab-3) ———
+const API_TAHSILAT_MUSTERILER = '/faturalar/api/musteriler';
+const API_TAHSILAT_EKLE = '/faturalar/tahsilat-ekle';
+const API_TAHSILAT_ONIZLE = '/faturalar/tahsilat-makbuz-onizle';
+
+function girisTahsilatFormPayload() {
+    const musteriId = document.getElementById('giris_tahsilat_musteri_id').value;
+    const musteriAdi = (document.getElementById('giris_tahsilat_musteri_secilen').textContent || '').trim();
+    const tutarStr = (document.getElementById('giris_tahsilat_tutar').value || '').replace(',', '.');
+    const tutar = parseFloat(tutarStr);
+    return {
+        musteri_id: musteriId ? parseInt(musteriId, 10) : null,
+        musteri_adi: musteriAdi,
+        tutar: isNaN(tutar) ? 0 : tutar,
+        odeme_turu: (document.getElementById('giris_tahsilat_odeme_turu').value || 'nakit'),
+        tahsilat_tarihi: document.getElementById('giris_tahsilat_tarih').value,
+        aciklama: (document.getElementById('giris_tahsilat_aciklama').value || '').trim(),
+        havale_banka: '',
+        cek_detay: []
+    };
+}
+
+function girisTahsilatOnizle() {
+    const payload = girisTahsilatFormPayload();
+    if (!payload.musteri_id && !payload.musteri_adi) {
+        alert('Lütfen müşteri seçiniz.');
+        return;
+    }
+    if (payload.tutar <= 0) {
+        alert('Geçerli bir tutar giriniz.');
+        return;
+    }
+    fetch(API_TAHSILAT_ONIZLE, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    })
+    .then(r => r.blob())
+    .then(blob => {
+        const url = URL.createObjectURL(blob);
+        window.open(url, '_blank', 'noopener');
+    })
+    .catch(() => alert('Önizleme alınamadı.'));
+}
+
+function girisTahsilatYazdir() {
+    const payload = girisTahsilatFormPayload();
+    if (!payload.musteri_id) {
+        alert('Lütfen müşteri seçiniz.');
+        return;
+    }
+    if (payload.tutar <= 0) {
+        alert('Geçerli bir tutar giriniz.');
+        return;
+    }
+    fetch(API_TAHSILAT_EKLE, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.ok && data.tahsilat_id) {
+            const pdfUrl = '/faturalar/tahsilat-pdf/' + data.tahsilat_id;
+            window.open(pdfUrl, '_blank', 'noopener');
+            girisTahsilatIptal();
+        } else {
+            alert(data.mesaj || 'Kayıt yapılamadı.');
+        }
+    })
+    .catch(err => alert('İstek gönderilemedi: ' + (err.message || err)));
+}
+
+function girisTahsilatIptal() {
+    document.getElementById('giris_tahsilat_musteri_id').value = '';
+    document.getElementById('giris_tahsilat_musteri_phone').value = '';
+    document.getElementById('giris_tahsilat_musteri_ara').value = '';
+    document.getElementById('giris_tahsilat_musteri_secilen').textContent = '';
+    document.getElementById('giris_tahsilat_musteri_secilen').style.display = 'none';
+    document.getElementById('giris_tahsilat_musteri_listesi').style.display = 'none';
+    document.getElementById('giris_tahsilat_tutar').value = '';
+    document.getElementById('giris_tahsilat_aciklama').value = '';
+    const today = new Date().toISOString().slice(0, 10);
+    const tarihEl = document.getElementById('giris_tahsilat_tarih');
+    if (tarihEl) tarihEl.value = today;
+}
+
+function girisTahsilatPdfIndir() {
+    var payload = girisTahsilatFormPayload();
+    if (!payload.musteri_id && !payload.musteri_adi) { alert('Lütfen müşteri seçiniz.'); return; }
+    if (payload.tutar <= 0) { alert('Geçerli bir tutar giriniz.'); return; }
+    fetch(API_TAHSILAT_ONIZLE, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+    .then(r => r.blob())
+    .then(blob => {
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'Tahsilat_Makbuzu_' + (payload.musteri_adi || 'Onizleme').replace(/\s+/g, '_') + '.pdf';
+        a.click();
+        URL.revokeObjectURL(a.href);
+    })
+    .catch(() => alert('PDF oluşturulamadı.'));
+}
+
+function girisTahsilatWhatsApp() {
+    var payload = girisTahsilatFormPayload();
+    if (!payload.musteri_id && !payload.musteri_adi) { alert('Lütfen müşteri seçiniz.'); return; }
+    if (payload.tutar <= 0) { alert('Geçerli bir tutar giriniz.'); return; }
+    var tel = (document.getElementById('giris_tahsilat_musteri_phone').value || '').replace(/\D/g, '');
+    var num = tel.startsWith('0') ? '90' + tel.slice(1) : (tel ? '90' + tel : '');
+    var adi = (document.getElementById('giris_tahsilat_musteri_secilen').textContent || payload.musteri_adi || 'Müşteri').trim();
+    var metin = encodeURIComponent(
+        'Sayın ' + adi + ',\n\nTahsilat makbuzunuz ekte yer almaktadır. İncelemenizi rica ederiz.\n\nİyi günler dileriz.\nBESTOFFICE'
+    );
+    var url = num ? 'https://wa.me/' + num + '?text=' + metin : 'https://wa.me/?text=' + metin;
+    window.open(url, '_blank', 'noopener');
+}
+
+function girisTahsilatKaydet(e) {
+    e.preventDefault();
+    girisTahsilatYazdir();
+    return false;
+}
+
+function girisTahsilatMusteriListesiGetir(q) {
+    const url = q ? API_TAHSILAT_MUSTERILER + '?q=' + encodeURIComponent(q) : API_TAHSILAT_MUSTERILER;
+    fetch(url)
+        .then(r => r.json())
+        .then(arr => {
+            const list = document.getElementById('giris_tahsilat_musteri_listesi');
+            if (!list) return;
+            list.innerHTML = arr.length ? arr.map(m => {
+                var phone = (m.phone || '').replace(/\D/g, '');
+                return '<div data-id="' + m.id + '" data-name="' + (m.name || '').replace(/"/g, '&quot;') + '" data-phone="' + (phone || '').replace(/"/g, '&quot;') + '">' + (m.name || '—') + '</div>';
+            }).join('') : '<div style="padding:10px;color:#90a4ae;">Müşteri bulunamadı</div>';
+            list.querySelectorAll('div[data-id]').forEach(el => {
+                el.onclick = function() {
+                    document.getElementById('giris_tahsilat_musteri_id').value = this.getAttribute('data-id');
+                    document.getElementById('giris_tahsilat_musteri_phone').value = this.getAttribute('data-phone') || '';
+                    document.getElementById('giris_tahsilat_musteri_ara').value = '';
+                    document.getElementById('giris_tahsilat_musteri_secilen').textContent = this.getAttribute('data-name');
+                    document.getElementById('giris_tahsilat_musteri_secilen').style.display = 'block';
+                    list.style.display = 'none';
+                };
+            });
+        })
+        .catch(() => {
+            const list = document.getElementById('giris_tahsilat_musteri_listesi');
+            if (list) list.innerHTML = '<div style="padding:10px;color:#f44336;">Yüklenemedi</div>';
+        });
+}
+
+// ——— Cari Kart (tab-4) ———
+let cariKartVeri = null;
+
+function cariKartYukle(mid) {
+    if (!mid) {
+        document.getElementById('cari-kart-musteri-sec').style.display = 'block';
+        document.getElementById('cari-kart-icerik').style.display = 'none';
+        return;
+    }
+    document.getElementById('cari-kart-musteri-sec').style.display = 'none';
+    document.getElementById('cari-kart-icerik').style.display = 'grid';
+    fetch('/giris/api/cari-kart/' + mid)
+        .then(r => r.json())
+        .then(data => {
+            if (!data || !data.ok) {
+                alert(data && data.mesaj ? data.mesaj : 'Cari veri yüklenemedi.');
+                return;
+            }
+            cariKartVeri = data;
+            var o = data.ozet;
+            document.getElementById('cari-bakiye').textContent = (o.guncel_bakiye || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 });
+            document.getElementById('cari-gecikmis').textContent = (o.gecikmis_tutar || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 });
+            document.getElementById('cari-bu-ay').textContent = (o.bu_ayki_tahsilat || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 });
+            var riskEl = document.getElementById('cari-risk');
+            var badgeEl = document.getElementById('cari-risk-badge');
+            riskEl.textContent = o.risk_skoru != null ? o.risk_skoru : '—';
+            riskEl.parentElement.classList.toggle('kritik', (o.risk_skoru != null && o.risk_skoru < 50));
+            badgeEl.textContent = (o.risk_skoru != null && o.risk_skoru < 50) ? ' ⚠' : '';
+            var a30 = o.aging_0_30 || 0, a60 = o.aging_31_60 || 0, a90 = o.aging_61_90 || 0, a91 = o.aging_91_plus || 0;
+            var top = a30 + a60 + a90 + a91 || 1;
+            document.getElementById('cari-aging-30').textContent = a30 > 0 ? a30.toLocaleString('tr-TR', { maximumFractionDigits: 0 }) : '0';
+            document.getElementById('cari-aging-30').style.flex = a30;
+            document.getElementById('cari-aging-60').textContent = a60 > 0 ? a60.toLocaleString('tr-TR', { maximumFractionDigits: 0 }) : '0';
+            document.getElementById('cari-aging-60').style.flex = a60;
+            document.getElementById('cari-aging-90').textContent = a90 > 0 ? a90.toLocaleString('tr-TR', { maximumFractionDigits: 0 }) : '0';
+            document.getElementById('cari-aging-90').style.flex = a90;
+            document.getElementById('cari-aging-91').textContent = a91 > 0 ? a91.toLocaleString('tr-TR', { maximumFractionDigits: 0 }) : '0';
+            document.getElementById('cari-aging-91').style.flex = a91;
+            var fp = data.finansal_profil;
+            var pek = document.getElementById('cari-profil-ek');
+            if (fp && (fp.tahmini_odeme_gunu != null || fp.mutabakat_tarihi || fp.ic_not)) {
+                var html = [];
+                if (fp.tahmini_odeme_gunu != null) html.push('Tahmini ödeme günü: ' + fp.tahmini_odeme_gunu);
+                if (fp.mutabakat_tarihi) html.push('Mutabakat: ' + fp.mutabakat_tarihi);
+                if (fp.ic_not) html.push('İç not: ' + (fp.ic_not || '').substring(0, 80) + (fp.ic_not && fp.ic_not.length > 80 ? '…' : ''));
+                pek.innerHTML = html.join('<br>');
+            } else pek.innerHTML = '';
+            var tbody = document.getElementById('cari-hareketler-tbody');
+            tbody.innerHTML = (data.hareketler || []).map(function(row) {
+                var kritik = row.tur === 'Fatura' && row.borc > 0 && row.vade_tarihi && new Date(row.vade_tarihi) < new Date();
+                var wa = row.tur === 'Fatura' && row.borc > 0 ? '<span class="cari-whatsapp-btn" onclick="cariKartSatirWhatsApp(\'' + (row.belge_no || '').replace(/'/g, "\\'") + '\',' + row.borc + ')" title="WhatsApp hatırlatma"><i class="fa fa-whatsapp"></i></span>' : '';
+                return '<tr' + (kritik ? ' class="kritik-satir"' : '') + '>' +
+                    '<td>' + (row.tarih || '') + '</td>' +
+                    '<td>' + (row.belge_no || '') + '</td>' +
+                    '<td>' + (row.tur || '') + '</td>' +
+                    '<td class="num">' + (row.borc || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 }) + '</td>' +
+                    '<td class="num">' + (row.alacak || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 }) + '</td>' +
+                    '<td class="num">' + (row.bakiye || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 }) + '</td>' +
+                    '<td>' + wa + '</td></tr>';
+            }).join('') || '<tr><td colspan="7" style="text-align:center;color:#90a4ae;">Hareket yok</td></tr>';
+        })
+        .catch(function() { alert('Cari kart verisi alınamadı.'); });
+}
+
+function cariKartFaturaKes() {
+    if (!selectedId) { alert('Önce bir müşteri seçin.'); return; }
+    window.open('/faturalar/yeni?musteri_id=' + selectedId, '_blank');
+}
+
+function cariKartTahsilatAc() {
+    if (!selectedId) { alert('Önce bir müşteri seçin.'); return; }
+    switchTab(3);
+    var m = cariKartVeri && cariKartVeri.musteri ? cariKartVeri.musteri : (musteriler.find(function(x) { return x.id === selectedId; }) || {});
+    document.getElementById('giris_tahsilat_musteri_id').value = selectedId;
+    document.getElementById('giris_tahsilat_musteri_phone').value = (m.phone || '').replace(/\D/g, '');
+    document.getElementById('giris_tahsilat_musteri_ara').value = '';
+    document.getElementById('giris_tahsilat_musteri_secilen').textContent = m.name || '';
+    document.getElementById('giris_tahsilat_musteri_secilen').style.display = 'block';
+}
+
+function cariKartWhatsApp() {
+    if (!cariKartVeri || !cariKartVeri.musteri) { alert('Önce bir müşteri seçip Cari Kart verisini yükleyin.'); return; }
+    var tel = (cariKartVeri.musteri.phone || '').replace(/\D/g, '');
+    var num = tel.startsWith('0') ? '90' + tel.slice(1) : (tel ? '90' + tel : '');
+    var bakiye = (cariKartVeri.ozet.guncel_bakiye || 0).toFixed(2);
+    var metin = encodeURIComponent('Sayın ' + (cariKartVeri.musteri.name || 'Müşteri') + ',\n\nGüncel cari bakiyeniz: ' + bakiye + ' TL.\nÖdeme yapmanızı rica ederiz.\n\nBESTOFFICE');
+    window.open((num ? 'https://wa.me/' + num + '?text=' : 'https://wa.me/?text=') + metin, '_blank');
+}
+
+function cariKartSatirWhatsApp(belgeNo, tutar) {
+    if (!cariKartVeri || !cariKartVeri.musteri) return;
+    var tel = (cariKartVeri.musteri.phone || '').replace(/\D/g, '');
+    var num = tel.startsWith('0') ? '90' + tel.slice(1) : (tel ? '90' + tel : '');
+    var metin = encodeURIComponent('Sayın ' + (cariKartVeri.musteri.name || 'Müşteri') + ',\n\n' + (belgeNo ? 'Belge: ' + belgeNo + ', ' : '') + 'Tutar: ' + (tutar || 0).toFixed(2) + ' TL. Ödeme yapmanızı rica ederiz.\n\nBESTOFFICE');
+    window.open((num ? 'https://wa.me/' + num + '?text=' : 'https://wa.me/?text=') + metin, '_blank');
+}
+
+function cariKartPdfIndir() {
+    if (!selectedId) { alert('Önce bir müşteri seçin.'); return; }
+    window.location.href = '/giris/api/cari-kart-pdf/' + selectedId;
+}
+
 // KDV oranı (güncel)
 const SENARYO_KDV_ORAN = 0.20;
 
@@ -1366,6 +1940,17 @@ async function kiraBildirgesiYazdir() {
         const w = window.open(url, '_blank', 'noopener');
         if (w) w.focus();
     }
+}
+async function kiraBildirgesiPdfIndir() {
+    const blob = await kiraBildirgesiPdfBlob();
+    if (!blob) return;
+    const payload = kiraBildirgesiPayload();
+    const adi = (payload.musteri_adi || 'KiraBildirgesi').replace(/\s+/g, '_');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'Kira_Bildirgesi_' + adi + '.pdf';
+    a.click();
+    URL.revokeObjectURL(a.href);
 }
 async function kiraBildirgesiWhatsApp() {
     const blob = await kiraBildirgesiPdfBlob();

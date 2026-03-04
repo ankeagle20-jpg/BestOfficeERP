@@ -560,16 +560,16 @@ def tahsilat_makbuz_onizle():
 @bp.route('/api/musteriler')
 @faturalar_gerekli
 def api_musteriler_list():
-    """Tahsilat formu için müşteri listesi."""
+    """Tahsilat formu için müşteri listesi (WhatsApp için phone döner)."""
     arama = request.args.get('q', '').strip()
     if arama:
         rows = fetch_all(
-            "SELECT id, name FROM customers WHERE name ILIKE %s OR tax_number::text ILIKE %s ORDER BY name LIMIT 50",
+            "SELECT id, name, phone FROM customers WHERE name ILIKE %s OR tax_number::text ILIKE %s ORDER BY name LIMIT 50",
             (f'%{arama}%', f'%{arama}%')
         )
     else:
-        rows = fetch_all("SELECT id, name FROM customers ORDER BY name LIMIT 100")
-    return jsonify([{"id": r["id"], "name": r["name"]} for r in rows])
+        rows = fetch_all("SELECT id, name, phone FROM customers ORDER BY name LIMIT 100")
+    return jsonify([{"id": r["id"], "name": r["name"], "phone": (r.get("phone") or "")} for r in rows])
 
 
 @bp.route('/api/banka-hesaplar')

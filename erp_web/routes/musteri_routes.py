@@ -1,12 +1,13 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, send_file
 from auth import yetki_gerekli, giris_gerekli
-from db import fetch_all, fetch_one, execute, execute_returning, ensure_faturalar_amount_columns, db as get_db
+from db import fetch_all, fetch_one, execute, execute_returning, ensure_faturalar_amount_columns, ensure_customers_durum, ensure_customers_quick_edit_columns, db as get_db, clear_all_customers
 import pandas as pd
 from io import BytesIO
 from datetime import date, datetime, timedelta
 from docx import Document
 import os
 import sys
+import re
 
 # Web kökü (gemini_helper import için)
 _web_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -217,8 +218,8 @@ def _fintech_dashboard_data():
                     "toplam_alacak": round(float(row.get("toplam_alacak") or 0), 2),
                 })
 
-            # Müşteri listesi (drawer için ilk 500; tam liste /musteriler/list sayfasında)
-            cur.execute("SELECT * FROM customers ORDER BY name LIMIT 500")
+            # Müşteri listesi (drawer; tam liste /musteriler/list sayfasında)
+            cur.execute("SELECT * FROM customers ORDER BY name LIMIT 5000")
             musteriler = [dict(r) for r in cur.fetchall()]
 
             # Müşteri bazlı borç/gecikme
@@ -303,9 +304,52 @@ def _musteri_liste_data():
     }
 
 
+def _enrich_musteri_list_with_borc_gecikme(musteriler):
+    """Müşteri listesine toplam_borc, geciken_gun, son_odeme_tarihi ekler (cari kart / liste)."""
+    if not musteriler:
+        return
+    bugun = date.today()
+    ids = [m["id"] for m in musteriler]
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT musteri_id, SUM(COALESCE(toplam, tutar)) as toplam, MIN(vade_tarihi) as min_vade
+            FROM faturalar WHERE COALESCE(durum,'') != 'odendi' AND vade_tarihi IS NOT NULL
+            AND musteri_id = ANY(%s) GROUP BY musteri_id
+        """, (ids,))
+        fat_borc = {r["musteri_id"]: {"borc": float(r.get("toplam") or 0), "min_vade": r.get("min_vade")} for r in cur.fetchall()}
+        cur.execute("""
+            SELECT musteri_id, MAX(tahsilat_tarihi) as son_tahsilat
+            FROM tahsilatlar WHERE musteri_id = ANY(%s) GROUP BY musteri_id
+        """, (ids,))
+        son_tahsilat = {r["musteri_id"]: r.get("son_tahsilat") for r in cur.fetchall()}
+    for m in musteriler:
+        mb = fat_borc.get(m["id"], {})
+        if "manuel_borc" in m and m["manuel_borc"] is not None:
+            m["toplam_borc"] = round(float(m["manuel_borc"] or 0), 2)
+        else:
+            m["toplam_borc"] = round(mb.get("borc", 0), 2)
+        m["geciken_gun"] = 0
+        if mb.get("min_vade"):
+            vd = mb["min_vade"]
+            try:
+                if hasattr(vd, "year"):
+                    m["geciken_gun"] = (bugun - vd).days
+                else:
+                    vd = date(*[int(x) for x in str(vd)[:10].split("-")])
+                    m["geciken_gun"] = (bugun - vd).days
+            except Exception:
+                pass
+        m["son_odeme_tarihi"] = m.get("son_odeme_tarihi") or son_tahsilat.get(m["id"])
+
+
 @bp.route("/list")
 @giris_gerekli
 def list_full():
+    try:
+        ensure_customers_quick_edit_columns()
+    except Exception:
+        pass
     arama = request.args.get("q", "").strip()
     tum_yillar_odenmis = request.args.get("tum_yillar_odenmis") == "1"
     if tum_yillar_odenmis:
@@ -325,7 +369,7 @@ def list_full():
     else:
         musteriler = fetch_all("SELECT * FROM customers ORDER BY name")
     if musteriler:
-        print("list_full: musteriler[0] keys =", list(musteriler[0].keys()))
+        _enrich_musteri_list_with_borc_gecikme(musteriler)
     return render_template(
         "musteriler/index.html",
         musteriler=musteriler,
@@ -349,6 +393,8 @@ def index():
         import_sonuc = request.args.get("import_sonuc")
         imported = request.args.get("imported", type=int)
         import_hatalar = request.args.get("import_hatalar", type=int) or 0
+        import_percent = request.args.get("import_percent", type=int)
+        import_total = request.args.get("import_total", type=int)
         bugun = date.today()
         MONTHS_TR = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"]
         try:
@@ -358,6 +404,8 @@ def index():
                 import_sonuc=import_sonuc,
                 imported=imported or 0,
                 import_hatalar=import_hatalar,
+                import_percent=import_percent,
+                import_total=import_total,
                 bugun=bugun,
                 now_year=bugun.year,
                 now_month=bugun.month,
@@ -403,6 +451,8 @@ def ozet():
     import_sonuc = request.args.get("import_sonuc")
     imported = request.args.get("imported", type=int)
     import_hatalar = request.args.get("import_hatalar", type=int) or 0
+    import_percent = request.args.get("import_percent", type=int)
+    import_total = request.args.get("import_total", type=int)
     bugun = date.today()
     return render_template(
         "musteriler/fintech.html",
@@ -410,6 +460,8 @@ def ozet():
         import_sonuc=import_sonuc,
         imported=imported or 0,
         import_hatalar=import_hatalar,
+        import_percent=import_percent,
+        import_total=import_total,
         now_year=bugun.year,
         now_month=bugun.month,
         MONTHS_TR=MONTHS_TR,
@@ -950,9 +1002,14 @@ def import_excel():
             phone_col = find_col(["telefon", "phone", "tel", "gsm", "cep"])
             addr_col = find_col(["adres", "address"])
             tax_col = find_col(["vergi", "tax", "vkn", "tckn", "vergi no", "vergino"])
+            yetkili_col = find_col(["yetkili", "yetkili kişi", "contact", "yetkili kisi"])
+            durum_col = find_col(["durum", "status", "durumu"])
+            rent_start_col = find_col(["başlangıç tarihi", "baslangic tarihi"])
+            ilk_kira_col = find_col(["ilk kira"])
+            guncel_kira_col = find_col(["güncel kira", "guncel kira"])
 
-            if not name_col:
-                flash("Excel'de müşteri adı sütunu bulunamadı. Sütunlardan biri şunlardan biri olmalı: Ad, Unvan, Firma, Name, Müşteri Adı.", "danger")
+            if not name_col and not yetkili_col:
+                flash("Excel'de müşteri adı veya yetkili sütunu bulunamadı. Ad/Unvan veya Yetkili Kişi gerekli.", "danger")
                 return redirect(request.url)
 
             def _cell(row, col):
@@ -971,54 +1028,223 @@ def import_excel():
                     return None
                 return s
 
-            inserted = 0
-            errors = []
-            for idx, row in df.iterrows():
-                name = _cell(row, name_col)
-                if not name:
-                    continue
-                email = _cell(row, email_col)
-                phone = _cell(row, phone_col)
-                address = _cell(row, addr_col)
-                tax = _cell(row, tax_col)
+            ensure_customers_rent_columns()
+            ensure_customers_excel_columns()
 
+            def _norm_tax(t):
+                """Vergi No: 10 hane ise baştaki sıfırları kaldır."""
+                if not t:
+                    return None
+                s = str(t).strip()
+                if not s:
+                    return None
+                if s.isdigit() and len(s) == 10:
+                    return s.lstrip("0") or "0"
+                return s
+
+            def _norm_durum(val):
+                """Excel'deki faal→aktif, terk→pasif."""
+                if not val:
+                    return None
+                v = str(val).strip().lower()
+                if v == "faal":
+                    return "aktif"
+                if v == "terk":
+                    return "pasif"
+                return v if v in ("aktif", "pasif") else None
+
+            def _parse_date_excel(value):
+                """Excel tarih hücresi -> date."""
+                if value is None:
+                    return None
+                if isinstance(value, (datetime, date)):
+                    return value.date() if isinstance(value, datetime) else value
+                s = str(value).strip()
+                if not s:
+                    return None
+                for fmt in ("%d.%m.%Y", "%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"):
+                    try:
+                        return datetime.strptime(s[:10], fmt).date()
+                    except Exception:
+                        continue
                 try:
-                    if tax:
-                        existing = fetch_one("SELECT id FROM customers WHERE tax_number = %s", (tax,))
-                    else:
-                        existing = None
+                    return pd.to_datetime(s).date()
+                except Exception:
+                    return None
 
-                    if existing:
-                        execute(
-                            "UPDATE customers SET name=%s,email=%s,phone=%s,address=%s WHERE id=%s",
-                            (name, email or None, phone or None, address or None, existing["id"])
-                        )
+            def _parse_money_excel(value) -> float:
+                """Türkçe para formatı: 1.200 = 1200, 1.234,56 = 1234.56."""
+                if value is None:
+                    return 0.0
+                if isinstance(value, (int, float)):
+                    return float(value)
+                s = str(value).strip()
+                if not s:
+                    return 0.0
+                s = s.replace(" ", "").replace("\u00a0", "")
+                s = re.sub(r"[^0-9,.-]", "", s)
+                if not s:
+                    return 0.0
+                # Virgül varsa Türkçe ondalık: 1.234,56 → 1234.56
+                if "," in s:
+                    if "." in s:
+                        s = s.replace(".", "").replace(",", ".")
                     else:
-                        execute(
-                            "INSERT INTO customers (name, email, phone, address, tax_number) VALUES (%s,%s,%s,%s,%s)",
-                            (name, email or None, phone or None, address or None, tax or None)
-                        )
-                    inserted += 1
-                except Exception as e:
-                    errors.append(f"Satır {idx + 2}: {name[:30]} — {e}")
+                        s = s.replace(",", ".")
+                else:
+                    # Sadece nokta: 1.200 = 1200 (binlik) mı yoksa 1.25 = 1.25 (ondalık) mı?
+                    if "." in s:
+                        parts = s.split(".")
+                        if len(parts) == 2 and len(parts[1]) == 3 and parts[1].isdigit():
+                            s = s.replace(".", "")
+                try:
+                    return float(s)
+                except Exception:
+                    return 0.0
+
+            try:
+                ensure_customers_durum()
+            except Exception:
+                pass
+            inserted = 0
+            updated = 0
+            errors = []
+            total_rows = len(df)
+            # Tek bağlantı ile tüm import (çok daha hızlı)
+            with get_db() as conn:
+                cur = conn.cursor()
+                # Mevcut vergi no -> id haritası (bir sorguda)
+                cur.execute("SELECT id, TRIM(COALESCE(tax_number,'')) AS tn FROM customers")
+                existing_by_tax = {}
+                for r in cur.fetchall() or []:
+                    tn = str(r.get("tn") or "").strip()
+                    if tn:
+                        existing_by_tax[tn] = r.get("id")
+                    if tn and str(tn).isdigit() and len(str(tn)) == 10:
+                        normalized = tn.lstrip("0") or "0"
+                        if normalized not in existing_by_tax:
+                            existing_by_tax[normalized] = r.get("id")
+                for idx, row in df.iterrows():
+                    name = _cell(row, name_col) or _cell(row, yetkili_col)
+                    if not name:
+                        name = f"Müşteri-{idx + 2}"
+                    email = _cell(row, email_col)
+                    phone = _cell(row, phone_col)
+                    address = _cell(row, addr_col)
+                    tax_raw = _cell(row, tax_col)
+                    tax = _norm_tax(tax_raw) if tax_raw else None
+                    durum_val = _norm_durum(_cell(row, durum_col))
+                    rent_start = _parse_date_excel(row.get(rent_start_col)) if rent_start_col else None
+                    ilk_kira = _parse_money_excel(row.get(ilk_kira_col)) if ilk_kira_col else 0.0
+                    guncel_kira = _parse_money_excel(row.get(guncel_kira_col)) if guncel_kira_col else 0.0
+                    if guncel_kira <= 0 and ilk_kira > 0:
+                        guncel_kira = ilk_kira
+                    rent_start_year = rent_start.year if rent_start else None
+                    rent_start_month = rent_start.strftime("%B") if rent_start else None
+                    try:
+                        existing_id = None
+                        if tax:
+                            existing_id = existing_by_tax.get(tax) or existing_by_tax.get((tax_raw or "").strip())
+                        if existing_id:
+                            cur.execute(
+                                "UPDATE customers SET name=%s,email=%s,phone=%s,address=%s,tax_number=%s,durum=%s,"
+                                "rent_start_date=%s,rent_start_year=%s,rent_start_month=%s,"
+                                "ilk_kira_bedeli=%s,guncel_kira_bedeli=%s WHERE id=%s",
+                                (
+                                    name,
+                                    email or None,
+                                    phone or None,
+                                    address or None,
+                                    tax or None,
+                                    durum_val,
+                                    rent_start,
+                                    rent_start_year,
+                                    rent_start_month,
+                                    ilk_kira or 0.0,
+                                    guncel_kira or 0.0,
+                                    existing_id,
+                                ),
+                            )
+                            updated += 1
+                        else:
+                            cur.execute(
+                                "INSERT INTO customers (name, email, phone, address, tax_number, durum,"
+                                "rent_start_date, rent_start_year, rent_start_month, ilk_kira_bedeli, guncel_kira_bedeli) "
+                                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                                (
+                                    name,
+                                    email or None,
+                                    phone or None,
+                                    address or None,
+                                    tax or None,
+                                    durum_val,
+                                    rent_start,
+                                    rent_start_year,
+                                    rent_start_month,
+                                    ilk_kira or 0.0,
+                                    guncel_kira or 0.0,
+                                ),
+                            )
+                            inserted += 1
+                    except Exception as e:
+                        errors.append(f"Satır {idx + 2}: {name[:30]} — {e}")
+
+            processed = inserted + updated
+            percent = int(round(processed * 100 / total_rows)) if total_rows else 0
+            msg_extra = f" ({inserted} yeni, {updated} güncelleme)" if updated else ""
 
             if errors:
                 flash(
-                    f"Excel aktarımı tamamlandı: {inserted} müşteri aktarıldı. {len(errors)} satırda hata oluştu. Detay: " + "; ".join(errors[:3]) + ("..." if len(errors) > 3 else ""),
+                    f"Excel aktarımı tamamlandı: {processed}/{total_rows} (%{percent}) satır işlendi{msg_extra}. "
+                    f"{len(errors)} satırda hata. Detay: "
+                    + "; ".join(errors[:3]) + ("..." if len(errors) > 3 else ""),
                     "warning",
                 )
                 return redirect(
-                    url_for("musteriler.index", import_sonuc="uyari", imported=inserted, import_hatalar=len(errors))
+                    url_for(
+                        "musteriler.index",
+                        import_sonuc="uyari",
+                        imported=processed,
+                        import_hatalar=len(errors),
+                        import_percent=percent,
+                        import_total=total_rows,
+                    )
                 )
-            flash(f"Excel aktarımı başarılı: {inserted} müşteri içe aktarıldı.", "success")
+            flash(f"Excel aktarımı başarılı: {processed}/{total_rows} (%{percent}) satır işlendi{msg_extra}. Toplam benzersiz müşteri: {inserted} yeni + güncellemeler.", "success")
             return redirect(
-                url_for("musteriler.index", import_sonuc="ok", imported=inserted, import_hatalar=0)
+                url_for(
+                    "musteriler.index",
+                    import_sonuc="ok",
+                    imported=processed,
+                    import_hatalar=0,
+                    import_percent=percent,
+                    import_total=total_rows,
+                )
             )
         except Exception as e:
             flash(f"Aktarım sırasında hata oluştu: {e}", "danger")
             return redirect(request.url)
 
     return render_template("musteriler/import.html")
+
+
+@bp.route("/tumunu-sil", methods=["GET", "POST"])
+@giris_gerekli
+def tumunu_sil():
+    """Tüm müşteri verilerini siler (tahsilat, fatura, kargo, sözleşme dahil). Geri alınamaz."""
+    if request.method == "POST":
+        onay = (request.form.get("onay") or request.args.get("onay") or "").strip().lower()
+        if onay != "evet":
+            flash("İşlem iptal edildi. Onay için 'evet' yazmanız gerekiyor.", "warning")
+            return redirect(url_for("musteriler.tumunu_sil"))
+        try:
+            clear_all_customers()
+            flash("Tüm müşteri verileri silindi. Şimdi Excel'den yeniden yükleyebilirsiniz.", "success")
+            return redirect(url_for("musteriler.import_excel"))
+        except Exception as e:
+            flash(f"Müşteriler silinirken hata: {e}", "danger")
+            return redirect(url_for("musteriler.tumunu_sil"))
+    return render_template("musteriler/tumunu_sil_onay.html")
 
 
 @bp.route("/export")
@@ -1165,6 +1391,87 @@ def api_list_full():
         "SELECT id, name, email, phone, address, office_code, notes, created_at FROM customers ORDER BY name"
     )
     return jsonify(rows)
+
+
+@bp.route("/api/bulk-update", methods=["POST"])
+@giris_gerekli
+def api_bulk_update():
+    """Hızlı bilgi düzenleme: tablodaki değişiklikleri toplu kaydet. Cari kart (customers) güncellenir."""
+    try:
+        ensure_customers_quick_edit_columns()
+    except Exception:
+        pass
+    data = request.get_json(silent=True) or {}
+    updates = data.get("updates") or []
+    if not isinstance(updates, list):
+        return jsonify({"ok": False, "message": "Geçersiz veri."}), 400
+    updated = 0
+    with get_db() as conn:
+        cur = conn.cursor()
+        for row in updates:
+            mid = row.get("id")
+            if not mid:
+                continue
+            try:
+                mid = int(mid)
+            except (TypeError, ValueError):
+                continue
+            sets = []
+            params = []
+            rent_start_date_val = None
+            for key, col in (
+                ("yetkili_kisi", "yetkili_kisi"),
+                ("hizmet_turu", "hizmet_turu"),
+                ("phone", "phone"),
+                ("rent_start_date", "rent_start_date"),
+                ("ilk_kira_bedeli", "ilk_kira_bedeli"),
+                ("guncel_kira_bedeli", "guncel_kira_bedeli"),
+                ("manuel_borc", "manuel_borc"),
+                ("son_odeme_tarihi", "son_odeme_tarihi"),
+                ("durum", "durum"),
+            ):
+                if key not in row:
+                    continue
+                val = row[key]
+                if key in ("ilk_kira_bedeli", "guncel_kira_bedeli", "manuel_borc") and val is not None:
+                    try:
+                        val = float(val)
+                    except (TypeError, ValueError):
+                        val = None
+                if key in ("son_odeme_tarihi", "rent_start_date") and val:
+                    if hasattr(val, "year"):
+                        pass
+                    else:
+                        s = str(val).strip()[:10]
+                        if s and s != "—" and s != "":
+                            try:
+                                val = date(*[int(x) for x in s.split("-")])
+                            except Exception:
+                                val = None
+                        else:
+                            val = None
+                    if key == "rent_start_date":
+                        rent_start_date_val = val  # date objesi veya parse edilmiş if hasattr(val, "year") else val
+                if key == "durum" and val is not None:
+                    val = (str(val).strip().lower() or None)
+                    if val and val not in ("aktif", "pasif"):
+                        val = None
+                sets.append(f"{col} = %s")
+                params.append(val)
+            if rent_start_date_val:
+                sets.append("rent_start_year = %s")
+                params.append(rent_start_date_val.year)
+                sets.append("rent_start_month = %s")
+                params.append(MONTHS_TR[rent_start_date_val.month - 1] if rent_start_date_val.month else None)
+            if not sets:
+                continue
+            params.append(mid)
+            cur.execute(
+                "UPDATE customers SET " + ", ".join(sets) + " WHERE id = %s",
+                params,
+            )
+            updated += cur.rowcount or 0
+    return jsonify({"ok": True, "updated": updated, "message": "Veriler başarıyla kaydedildi ve cari kartlar güncellendi."})
 
 
 # ── Giriş / KYC API ──────────────────────────────────────────────────────────

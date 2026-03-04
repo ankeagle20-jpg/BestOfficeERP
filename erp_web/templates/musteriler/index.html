@@ -13,6 +13,7 @@
 .ml-btn:hover{filter:brightness(1.15)}
 .ml-btn.back{background:#0d1520;border:1px solid rgba(0,200,255,.2);color:#00c8ff}
 .ml-btn.excel{background:linear-gradient(135deg,#0a6640,#043d25);color:#fff}
+.ml-btn.excel-upload{background:linear-gradient(135deg,#0d7a47,#05552e);color:#fff;border:1px solid rgba(255,255,255,.2)}
 .ml-btn.ekle{background:linear-gradient(135deg,#1a5fff,#0030b3);color:#fff}
 .ml-toolbar{display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap}
 .ml-search-wrap{position:relative;flex:1;max-width:360px}
@@ -51,6 +52,16 @@
 .ml-footer .red{color:#ff4557}
 .ml-empty{text-align:center;padding:40px;color:#5a7a9a;font-size:13px}
 .ml-empty i{font-size:32px;margin-bottom:8px;display:block;color:#1a3a5a}
+/* Hızlı bilgi düzenleme */
+.ml-cell-changed{background:rgba(79,195,247,.15)!important}
+.ml-edit-mode .ml-table tbody tr{cursor:default}
+.ml-edit-mode .ml-table tbody tr:hover{background:rgba(0,200,255,.04)}
+.ml-edit-mode .ml-table td input,.ml-edit-mode .ml-table td select{width:100%;max-width:160px;padding:4px 6px;background:#0d1520;border:1px solid rgba(0,200,255,.25);border-radius:4px;color:#e8f1ff;font-size:11px}
+.ml-edit-mode .ml-table td input:focus,.ml-edit-mode .ml-table td select:focus{outline:none;border-color:#00c8ff}
+.ml-edit-mode .ml-table td input[readonly]{opacity:.8;cursor:not-allowed}
+.ml-btn.quick-edit{background:linear-gradient(135deg,#7c3aed,#5b21b6);color:#fff}
+.ml-btn.bulk-save{background:linear-gradient(135deg,#059669,#047857);color:#fff}
+.ml-btn.bulk-save[disabled]{opacity:.6;cursor:not-allowed}
 /* Giriş gömülü görünüm (sayfa içi geçiş) */
 #giris-embed-view{display:none;height:100%;min-height:60vh;flex-direction:column;background:#0a1929}
 #giris-embed-view .giris-embed-toolbar{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:#0f2537;border-bottom:1px solid #1e3a50;flex-shrink:0}
@@ -75,7 +86,9 @@ window.setActiveTab = function(tabId) {
     <h1><i class="fa fa-users" style="color:#00c8ff"></i> Müşteri Listesi <span>{{ musteriler|length }} kayıt</span></h1>
     <div class="ml-actions">
       <a href="/musteriler/" class="ml-btn back"><i class="fa fa-arrow-left"></i> Özet Panel</a>
-      <a href="/musteriler/export" class="ml-btn excel"><i class="fa fa-file-excel"></i> Excel İndir</a>
+      <button type="button" id="btn-bulk-save" class="ml-btn bulk-save" style="display:none;" disabled><i class="fa fa-save"></i> Değişiklikleri Toplu Kaydet</button>
+      <a href="{{ url_for('musteriler.export_excel') }}" class="ml-btn excel"><i class="fa fa-file-excel"></i> Excel İndir</a>
+      <a href="{{ url_for('musteriler.import_excel') }}" class="ml-btn excel-upload"><i class="fa fa-upload"></i> Excel Yükle</a>
       <a href="#" id="btn-musteri-ekle-giris" class="ml-btn ekle"><i class="fa fa-plus"></i> Müşteri Ekle</a>
     </div>
   </div>
@@ -86,11 +99,11 @@ window.setActiveTab = function(tabId) {
       <i class="fa fa-search"></i>
       <input class="ml-search" id="mlQ" type="text" placeholder="Müşteri ara..." value="{{ arama or '' }}">
     </div>
-    <select class="ml-filter-sel" id="mlDurum">
-      <option value="">Tümü</option>
-      <option value="aktif">Aktif</option>
-      <option value="pasif">Pasif</option>
-      <option value="geciken">Geciken</option>
+    <select class="ml-filter-sel" id="mlDurumTop">
+      <option value="aktif" selected>Durum: Aktif</option>
+      <option value="hepsi">Durum: Hepsi</option>
+      <option value="pasif">Durum: Pasif</option>
+      <option value="geciken">Sadece Geciken</option>
     </select>
     <select class="ml-filter-sel" id="mlOfis">
       <option value="">Tüm Ofisler</option>
@@ -99,6 +112,8 @@ window.setActiveTab = function(tabId) {
       <option value="{{ o }}">{{ o }}</option>
       {% endfor %}
     </select>
+    <button type="button" id="btn-quick-edit" class="ml-btn quick-edit"><i class="fa fa-edit"></i> Hızlı Bilgi Gir</button>
+    <button type="button" id="btn-quick-edit-vazgec" class="ml-btn back" style="display:none;"><i class="fa fa-times"></i> Vazgeç</button>
     <div class="ml-stats">
       <span>Toplam: <b id="mlCount">{{ musteriler|length }}</b></span>
       {% set _ns = namespace(total_borc=0) %}
@@ -114,15 +129,22 @@ window.setActiveTab = function(tabId) {
         <tr>
           <th style="width:40px">#</th>
           <th>Ad / Ünvan <i class="fa fa-sort"></i></th>
-          <th>Ofis / Ünite <i class="fa fa-sort"></i></th>
-          <th>Vergi No</th>
+          <th>Yetkili Kişi</th>
+          <th>Hizmet Türü</th>
+          <th>Telefon</th>
           <th>Baş. Tarihi <i class="fa fa-sort"></i></th>
-          <th>Ay</th>
-          <th>Yıl</th>
           <th style="text-align:right">İlk Kira (₺) <i class="fa fa-sort"></i></th>
+          <th style="text-align:right">Güncel (₺)</th>
           <th style="text-align:right">Borç (₺) <i class="fa fa-sort"></i></th>
           <th style="text-align:center">Gecikme <i class="fa fa-sort"></i></th>
-          <th>Durum</th>
+          <th>
+            <select id="mlDurum" class="ml-filter-sel" style="margin-left:0;min-width:110px;">
+              <option value="aktif" selected>Durum: Aktif</option>
+              <option value="hepsi">Durum: Hepsi</option>
+              <option value="pasif">Durum: Pasif</option>
+              <option value="geciken">Sadece Geciken</option>
+            </select>
+          </th>
           <th>Son Tahsilat</th>
         </tr>
       </thead>
@@ -130,24 +152,42 @@ window.setActiveTab = function(tabId) {
         {% for m in musteriler %}
         {% set borc = m.get('toplam_borc', 0) or 0 %}
         {% set gec = m.get('geciken_gun', 0) or 0 %}
-        {% set ilk_kira = m.get('ilk_kira', 0) or m.get('aylik_kira', 0) or 0 %}
-        <tr onclick="window.location.href='/musteriler/{{ m.id }}'"
+        {% set ilk_kira = m.get('ilk_kira_bedeli', 0) or 0 %}
+        {% set db_durum = (m.get('durum') or '')|lower %}
+        {% set borc_edit = m.get('manuel_borc') if m.get('manuel_borc') is not none else borc %}
+        {% set son_tah_str = (m.get('son_odeme_tarihi')|string|trim)[:10] if m.get('son_odeme_tarihi') else '' %}
+        {% set bas_tarih_val = m.get('rent_start_date') %}
+        {% set bas_tarih_str = bas_tarih_val.strftime('%Y-%m-%d') if bas_tarih_val and bas_tarih_val.__class__.__name__ in ('date', 'datetime') else ((bas_tarih_val|string|trim)[:10] if bas_tarih_val else '') %}
+        <tr class="ml-row" data-id="{{ m.id }}"
             data-name="{{ (m.name or '')|lower }}"
             data-ofis="{{ (m.office_code or '')|lower }}"
             data-geciken="{{ gec }}"
-            data-durum="{{ 'geciken' if gec > 0 else 'aktif' }}">
+            data-durum="{{ 'pasif' if db_durum == 'pasif' else ('geciken' if gec > 0 else 'aktif') }}"
+            data-yetkili="{{ (m.get('yetkili_kisi') or '')|e }}"
+            data-hizmet="{{ (m.get('hizmet_turu') or '')|e }}"
+            data-phone="{{ (m.phone or '')|e }}"
+            data-ilk-kira="{{ ilk_kira }}"
+            data-guncel-kira="{{ (m.get('guncel_kira_bedeli') or 0) }}"
+            data-borc="{{ borc_edit }}"
+            data-durum-val="{{ db_durum or 'aktif' }}"
+            data-son-tahsilat="{{ son_tah_str|e }}"
+            data-bas-tarih="{{ bas_tarih_str|e }}"
+            onclick="if(!document.querySelector('.ml-table-wrap.ml-edit-mode')) window.location.href='/musteriler/{{ m.id }}'">
           <td class="num">{{ loop.index }}</td>
           <td class="name" title="{{ m.name or '' }}">{{ m.name or '—' }}</td>
-          <td class="ofis">{{ m.office_code or '—' }}</td>
-          <td class="vergi">{{ m.get('vergi_no') or m.get('tax_number') or 'None' }}</td>
-          <td class="tarih">{{ m.get('sozlesme_baslangic') or m.get('baslangic_tarihi') or '—' }}</td>
-          <td class="tarih">{{ m.get('baslangic_ay') or '—' }}</td>
-          <td class="tarih">{{ m.get('baslangic_yil') or '—' }}</td>
+          <td class="yetkili">{{ m.get('yetkili_kisi') or '—' }}</td>
+          <td class="hizmet">{{ m.get('hizmet_turu') or '—' }}</td>
+          <td class="tel">{{ m.phone or '—' }}</td>
+          <td class="tarih">{{ m.get('rent_start_date') or m.get('sozlesme_baslangic') or m.get('baslangic_tarihi') or '—' }}</td>
           <td class="kira">{{ "{:,.2f}".format(ilk_kira) if ilk_kira else '—' }}</td>
+          {% set guncel = m.get('guncel_kira_bedeli') %}
+          <td class="kira">{% if guncel is number and guncel == guncel and guncel != 0 %}{{ "{:,.2f}".format(guncel) }}{% else %}—{% endif %}</td>
           <td class="{{ 'borc-pos' if borc > 0 else 'borc-zero' }}">{{ "{:,.2f}".format(borc) }}</td>
           <td class="{{ 'gec-pos' if gec > 0 else 'gec-zero' }}">{{ gec }}</td>
           <td class="durum">
-            {% if gec > 30 %}
+            {% if db_durum == 'pasif' %}
+              <span class="durum-pasif"><i class="fa fa-pause-circle"></i> Pasif</span>
+            {% elif gec > 30 %}
               <span class="durum-kritik"><i class="fa fa-exclamation-triangle"></i> Kritik</span>
             {% elif gec > 0 %}
               <span class="durum-kritik"><i class="fa fa-clock"></i> Geciken</span>
@@ -158,7 +198,7 @@ window.setActiveTab = function(tabId) {
           <td class="tarih">{{ m.get('son_odeme_tarihi') or m.get('son_tahsilat') or '—' }}</td>
         </tr>
         {% else %}
-        <tr><td colspan="12" class="ml-empty"><i class="fa fa-inbox"></i>Müşteri bulunamadı</td></tr>
+        <tr><td colspan="11" class="ml-empty"><i class="fa fa-inbox"></i>Müşteri bulunamadı</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -195,14 +235,26 @@ function filterTable(){
   allRows.forEach(function(tr){
     var name = tr.getAttribute('data-name') || '';
     var rowOfis = tr.getAttribute('data-ofis') || '';
-    var rowDurum = tr.getAttribute('data-durum') || '';
+    var rowDurum = (tr.getAttribute('data-durum') || '').toLowerCase();
     var geciken = parseInt(tr.getAttribute('data-geciken') || '0');
     var ok = true;
     if(q && name.indexOf(q) === -1) ok = false;
     if(ofis && rowOfis !== ofis) ok = false;
-    if(durum === 'aktif' && geciken > 0) ok = false;
-    if(durum === 'pasif' && geciken === 0) ok = false;
-    if(durum === 'geciken' && geciken === 0) ok = false;
+
+    if (ok) {
+      if (durum === 'pasif') {
+        ok = (rowDurum === 'pasif');
+      } else if (durum === 'geciken') {
+        ok = (rowDurum === 'geciken');
+      } else if (durum === 'hepsi') {
+        // hepsi: hiçbir ek filtre yok
+        ok = true;
+      } else {
+        // varsayılan / aktif: pasifler hariç, aktif + geciken + boş
+        ok = (rowDurum === 'aktif' || rowDurum === 'geciken' || rowDurum === '');
+      }
+    }
+
     tr.style.display = ok ? '' : 'none';
     if(ok) shown++;
   });
@@ -211,8 +263,25 @@ function filterTable(){
 }
 
 document.getElementById('mlQ').addEventListener('input', filterTable);
-document.getElementById('mlDurum').addEventListener('change', filterTable);
+var mlDurumHeader = document.getElementById('mlDurum');
+var mlDurumTop = document.getElementById('mlDurumTop');
+if (mlDurumHeader && mlDurumTop) {
+  // İlk açılışta her iki dropdown da Aktif olsun
+  mlDurumHeader.value = 'aktif';
+  mlDurumTop.value = 'aktif';
+  mlDurumHeader.addEventListener('change', function(){
+    mlDurumTop.value = mlDurumHeader.value;
+    filterTable();
+  });
+  mlDurumTop.addEventListener('change', function(){
+    mlDurumHeader.value = mlDurumTop.value;
+    filterTable();
+  });
+} else if (mlDurumHeader) {
+  mlDurumHeader.addEventListener('change', filterTable);
+}
 document.getElementById('mlOfis').addEventListener('change', filterTable);
+filterTable();
 
 function showGirisView() {
   document.getElementById('musteri-listesi-view').style.display = 'none';
@@ -235,9 +304,10 @@ document.getElementById('btn-listeye-don').addEventListener('click', function(e)
 // Sütun sıralama
 document.querySelectorAll('.ml-table thead th').forEach(function(th, idx){
   th.addEventListener('click', function(){
+    if (document.querySelector('.ml-table-wrap.ml-edit-mode')) return;
     var asc = th.getAttribute('data-asc') !== 'true';
     th.setAttribute('data-asc', asc);
-    var rows = Array.from(document.querySelectorAll('#mlBody tr[data-name]'));
+    var rows = Array.from(document.querySelectorAll('#mlBody tr.ml-row'));
     rows.sort(function(a,b){
       var av = a.cells[idx] ? a.cells[idx].textContent.trim() : '';
       var bv = b.cells[idx] ? b.cells[idx].textContent.trim() : '';
@@ -248,6 +318,242 @@ document.querySelectorAll('.ml-table thead th').forEach(function(th, idx){
     });
     var tbody = document.getElementById('mlBody');
     rows.forEach(function(r){ tbody.appendChild(r); });
+  });
+});
+
+// ——— Hızlı Bilgi Düzenleme ———
+var HIZMET_OPTIONS = ['', 'Sanal Ofis', 'Hazır Ofis', 'Toplantı Odası'];
+var DURUM_OPTIONS = [{v:'aktif', l:'Aktif'}, {v:'pasif', l:'Pasif'}];
+
+function numVal(n) { return (n === '' || n === null || n === undefined) ? '' : (typeof n === 'number' ? n : parseFloat(String(n))); }
+function strVal(s) { return (s == null || s === undefined) ? '' : String(s).trim(); }
+
+function enterQuickEditMode() {
+  var wrap = document.querySelector('.ml-table-wrap');
+  if (!wrap || wrap.classList.contains('ml-edit-mode')) return;
+  wrap.classList.add('ml-edit-mode');
+  document.getElementById('btn-bulk-save').style.display = 'inline-flex';
+  document.getElementById('btn-bulk-save').disabled = true;
+  var vazgecBtn = document.getElementById('btn-quick-edit-vazgec');
+  if (vazgecBtn) vazgecBtn.style.display = 'inline-flex';
+
+  var rows = document.querySelectorAll('#mlBody tr.ml-row');
+  rows.forEach(function(tr) {
+    if (tr.cells.length < 12) return;
+    var id = tr.getAttribute('data-id');
+    var yetkili = tr.getAttribute('data-yetkili') || '';
+    var hizmet = tr.getAttribute('data-hizmet') || '';
+    var phone = tr.getAttribute('data-phone') || '';
+    var basTarih = tr.getAttribute('data-bas-tarih') || '';
+    var ilkKira = tr.getAttribute('data-ilk-kira') || '';
+    var guncelKira = tr.getAttribute('data-guncel-kira') || '';
+    var borc = tr.getAttribute('data-borc') || '';
+    var durumVal = tr.getAttribute('data-durum-val') || 'aktif';
+    var sonTahsilat = tr.getAttribute('data-son-tahsilat') || '';
+
+    // 2 Yetkili Kişi
+    var td2 = tr.cells[2];
+    var orig2 = strVal(td2.textContent);
+    td2.innerHTML = '';
+    var inp2 = document.createElement('input');
+    inp2.type = 'text';
+    inp2.value = yetkili;
+    inp2.placeholder = 'Yetkili';
+    inp2.dataset.original = orig2;
+    inp2.dataset.key = 'yetkili_kisi';
+    td2.appendChild(inp2);
+
+    // 3 Hizmet Türü
+    var td3 = tr.cells[3];
+    var orig3 = strVal(td3.textContent);
+    td3.innerHTML = '';
+    var sel3 = document.createElement('select');
+    sel3.dataset.original = orig3;
+    sel3.dataset.key = 'hizmet_turu';
+    HIZMET_OPTIONS.forEach(function(opt) {
+      var o = document.createElement('option');
+      o.value = opt;
+      o.textContent = opt || '—';
+      sel3.appendChild(o);
+    });
+    sel3.value = hizmet;
+    td3.appendChild(sel3);
+
+    // 4 Telefon
+    var td4 = tr.cells[4];
+    var orig4 = strVal(td4.textContent);
+    td4.innerHTML = '';
+    var inp4 = document.createElement('input');
+    inp4.type = 'text';
+    inp4.value = phone;
+    inp4.placeholder = 'Telefon';
+    inp4.dataset.original = orig4;
+    inp4.dataset.key = 'phone';
+    td4.appendChild(inp4);
+
+    // 5 Baş. Tarihi (giriş tarihi)
+    var td5 = tr.cells[5];
+    var orig5 = (td5.textContent || '').trim();
+    td5.innerHTML = '';
+    var inp5 = document.createElement('input');
+    inp5.type = 'date';
+    inp5.title = 'Gün / Ay / Yıl seçmek için tıklayın';
+    inp5.value = (basTarih && basTarih.length >= 10) ? basTarih.substring(0, 10) : '';
+    inp5.dataset.original = orig5;
+    inp5.dataset.key = 'rent_start_date';
+    td5.appendChild(inp5);
+
+    // 6 İlk Kira
+    var td6 = tr.cells[6];
+    var orig6 = (td6.textContent || '').trim();
+    td6.innerHTML = '';
+    var inp6 = document.createElement('input');
+    inp6.type = 'number';
+    inp6.step = '0.01';
+    inp6.min = '0';
+    inp6.value = numVal(ilkKira) !== '' ? numVal(ilkKira) : '';
+    inp6.placeholder = '0';
+    inp6.dataset.original = orig6;
+    inp6.dataset.key = 'ilk_kira_bedeli';
+    td6.appendChild(inp6);
+
+    // 7 Güncel Kira
+    var td7 = tr.cells[7];
+    var orig7 = (td7.textContent || '').trim();
+    td7.innerHTML = '';
+    var inp7 = document.createElement('input');
+    inp7.type = 'number';
+    inp7.step = '0.01';
+    inp7.min = '0';
+    inp7.value = numVal(guncelKira) !== '' ? numVal(guncelKira) : '';
+    inp7.placeholder = '0';
+    inp7.dataset.original = orig7;
+    inp7.dataset.key = 'guncel_kira_bedeli';
+    td7.appendChild(inp7);
+
+    // 8 Borç
+    var td8 = tr.cells[8];
+    var orig8 = (td8.textContent || '').trim();
+    td8.innerHTML = '';
+    var inp8 = document.createElement('input');
+    inp8.type = 'number';
+    inp8.step = '0.01';
+    inp8.min = '0';
+    inp8.value = numVal(borc) !== '' ? numVal(borc) : '0';
+    inp8.dataset.original = orig8;
+    inp8.dataset.key = 'manuel_borc';
+    td8.appendChild(inp8);
+
+    // 9 Gecikme — salt okunur, içeriği koru
+    // 10 Durum
+    var td10 = tr.cells[10];
+    var orig10 = (td10.textContent || '').trim();
+    td10.innerHTML = '';
+    var sel10 = document.createElement('select');
+    sel10.dataset.original = orig10;
+    sel10.dataset.key = 'durum';
+    DURUM_OPTIONS.forEach(function(opt) {
+      var o = document.createElement('option');
+      o.value = opt.v;
+      o.textContent = opt.l;
+      sel10.appendChild(o);
+    });
+    sel10.value = durumVal;
+    td10.appendChild(sel10);
+
+    // 11 Son Tahsilat (takvimden gün/ay/yıl seçimi)
+    var td11 = tr.cells[11];
+    var orig11 = (td11.textContent || '').trim();
+    td11.innerHTML = '';
+    var inp11 = document.createElement('input');
+    inp11.type = 'date';
+    inp11.title = 'Gün / Ay / Yıl seçmek için tıklayın';
+    inp11.value = (sonTahsilat && sonTahsilat.length >= 10) ? sonTahsilat.substring(0, 10) : '';
+    inp11.dataset.original = orig11;
+    inp11.dataset.key = 'son_odeme_tarihi';
+    td11.appendChild(inp11);
+
+    function markIfChanged(el, td) {
+      var orig = (el.dataset.original || '').trim();
+      var cur = (el.value || '').trim();
+      if (el.type === 'number') cur = el.value === '' ? '' : String(parseFloat(el.value) || 0);
+      if (cur !== orig) td.classList.add('ml-cell-changed'); else td.classList.remove('ml-cell-changed');
+      document.getElementById('btn-bulk-save').disabled = !document.querySelectorAll('.ml-cell-changed').length;
+    }
+    [inp2, sel3, inp4, inp5, inp6, inp7, inp8, sel10, inp11].forEach(function(el) {
+      var td = el.closest('td');
+      el.addEventListener('input', function() { markIfChanged(el, td); });
+      el.addEventListener('change', function() { markIfChanged(el, td); });
+    });
+  });
+}
+
+function exitQuickEditMode() {
+  var wrap = document.querySelector('.ml-table-wrap');
+  if (wrap) wrap.classList.remove('ml-edit-mode');
+  document.getElementById('btn-bulk-save').style.display = 'none';
+  document.getElementById('btn-bulk-save').disabled = true;
+  var vazgecBtn = document.getElementById('btn-quick-edit-vazgec');
+  if (vazgecBtn) vazgecBtn.style.display = 'none';
+  location.reload();
+}
+
+function collectBulkUpdates() {
+  var updates = [];
+  document.querySelectorAll('#mlBody tr.ml-row').forEach(function(tr) {
+    if (tr.style.display === 'none') return;
+    var id = tr.getAttribute('data-id');
+    if (!id) return;
+    var row = { id: parseInt(id, 10) };
+    tr.querySelectorAll('input[data-key], select[data-key]').forEach(function(el) {
+      var k = el.dataset.key;
+      var v = el.value;
+      if (k === 'ilk_kira_bedeli' || k === 'guncel_kira_bedeli' || k === 'manuel_borc') {
+        v = v === '' ? null : parseFloat(v);
+        if (isNaN(v)) v = null;
+      }
+      if (k === 'son_odeme_tarihi' && (v === '' || v === '—')) v = null;
+      if (k === 'rent_start_date' && (v === '' || v === '—')) v = null;
+      if (k === 'durum' && (v === '' || v === '—')) v = 'aktif';
+      row[k] = v;
+    });
+    updates.push(row);
+  });
+  return updates;
+}
+
+document.getElementById('btn-quick-edit').addEventListener('click', function() {
+  enterQuickEditMode();
+});
+
+document.getElementById('btn-quick-edit-vazgec').addEventListener('click', function() {
+  exitQuickEditMode();
+});
+
+document.getElementById('btn-bulk-save').addEventListener('click', function() {
+  var btn = this;
+  if (btn.disabled) return;
+  var updates = collectBulkUpdates();
+  if (!updates.length) { alert('Kaydedilecek veri yok.'); return; }
+  btn.disabled = true;
+  fetch('{{ url_for("musteriler.api_bulk_update") }}', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+    body: JSON.stringify({ updates: updates })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    if (data && data.ok) {
+      alert(data.message || 'Veriler başarıyla kaydedildi ve cari kartlar güncellendi.');
+      exitQuickEditMode();
+    } else {
+      alert(data && data.message ? data.message : 'Kayıt sırasında hata oluştu.');
+      btn.disabled = false;
+    }
+  })
+  .catch(function() {
+    alert('Bağlantı hatası. Tekrar deneyin.');
+    btn.disabled = false;
   });
 });
 </script>

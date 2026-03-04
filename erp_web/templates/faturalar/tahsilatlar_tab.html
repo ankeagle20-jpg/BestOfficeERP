@@ -223,6 +223,10 @@
         .btn-onizle:hover { background: #5e35b1; color: white; }
         .btn-yazdir-form { background: #00bcd4; color: white; border: none; padding: 8px 14px; border-radius: 4px; cursor: pointer; font-size: 12px; display: inline-flex; align-items: center; gap: 6px; }
         .btn-yazdir-form:hover { background: #0097a7; color: white; }
+        .btn-pdf-form { background: #e91e63; color: white; border: none; padding: 8px 14px; border-radius: 4px; cursor: pointer; font-size: 12px; display: inline-flex; align-items: center; gap: 6px; }
+        .btn-pdf-form:hover { background: #c2185b; color: white; }
+        .btn-whatsapp-form { background: #25d366; color: white; border: none; padding: 8px 14px; border-radius: 4px; cursor: pointer; font-size: 12px; display: inline-flex; align-items: center; gap: 6px; }
+        .btn-whatsapp-form:hover { background: #1da851; color: white; }
         .btn-pdf { background: #e91e63; color: white; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer; font-size: 11px; text-decoration: none; display: inline-flex; align-items: center; gap: 3px; margin-right: 4px; }
         .btn-pdf:hover { color: white; background: #c2185b; }
         .btn-islem-onizle { background: #7e57c2; color: white; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer; font-size: 11px; display: inline-flex; align-items: center; gap: 3px; margin-right: 4px; }
@@ -253,6 +257,7 @@
                     <label>Müşteri <span class="zorunlu">*</span></label>
                     <input type="text" id="tahsilat-musteri-ara" placeholder="Müşteri ara, seçin..." autocomplete="off">
                     <input type="hidden" id="tahsilat-musteri-id" name="musteri_id">
+                    <input type="hidden" id="tahsilat-musteri-phone" name="musteri_phone">
                     <div id="tahsilat-musteri-listesi" class="musteri-dropdown" style="display:none;"></div>
                     <span id="tahsilat-musteri-secilen" class="secilen-ad" style="display:none;"></span>
                 </div>
@@ -308,6 +313,8 @@
                     <button type="button" class="btn-iptal" onclick="tahsilatModalKapat()">İptal</button>
                     <button type="button" class="btn-onizle" onclick="tahsilatFormOnizle(); return false;"><i class="fa fa-eye"></i> Önizle</button>
                     <button type="button" class="btn-yazdir-form" onclick="tahsilatFormYazdir(); return false;"><i class="fa fa-print"></i> Yazdır</button>
+                    <button type="button" class="btn-pdf-form" onclick="tahsilatFormPdfIndir(); return false;"><i class="fa fa-file-pdf-o"></i> PDF İndir</button>
+                    <button type="button" class="btn-whatsapp-form" onclick="tahsilatFormWhatsApp(); return false;"><i class="fa fa-whatsapp"></i> WhatsApp</button>
                     <button type="submit" class="btn-kaydet"><i class="fa fa-check"></i> Kaydet ve Makbuz Oluştur</button>
                 </div>
             </form>
@@ -443,6 +450,7 @@
         document.getElementById('tahsilat-modal').style.display = 'flex';
         document.getElementById('tahsilat-tarih').value = new Date().toISOString().slice(0, 10);
         document.getElementById('tahsilat-musteri-id').value = '';
+        document.getElementById('tahsilat-musteri-phone').value = '';
         document.getElementById('tahsilat-musteri-ara').value = '';
         document.getElementById('tahsilat-musteri-secilen').style.display = 'none';
         document.getElementById('tahsilat-musteri-listesi').style.display = 'none';
@@ -533,12 +541,14 @@
             .then(r => r.json())
             .then(arr => {
                 const list = document.getElementById('tahsilat-musteri-listesi');
-                list.innerHTML = arr.length ? arr.map(m => 
-                    '<div data-id="' + m.id + '" data-name="' + (m.name || '').replace(/"/g, '&quot;') + '">' + (m.name || '—') + '</div>'
+                const phoneVal = (m) => (m.phone || '').replace(/\D/g, '');
+                list.innerHTML = arr.length ? arr.map(m =>
+                    '<div data-id="' + m.id + '" data-name="' + (m.name || '').replace(/"/g, '&quot;') + '" data-phone="' + (phoneVal(m) || '').replace(/"/g, '&quot;') + '">' + (m.name || '—') + '</div>'
                 ).join('') : '<div style="padding:10px;color:#90a4ae;">Müşteri bulunamadı</div>';
                 list.querySelectorAll('div[data-id]').forEach(el => {
                     el.onclick = function() {
                         document.getElementById('tahsilat-musteri-id').value = this.getAttribute('data-id');
+                        document.getElementById('tahsilat-musteri-phone').value = this.getAttribute('data-phone') || '';
                         document.getElementById('tahsilat-musteri-ara').value = '';
                         document.getElementById('tahsilat-musteri-secilen').textContent = this.getAttribute('data-name');
                         document.getElementById('tahsilat-musteri-secilen').style.display = 'block';
@@ -616,6 +626,34 @@
             if (w) w.focus();
         })
         .catch(() => alert('PDF açılamadı.'));
+    }
+
+    function tahsilatFormPdfIndir() {
+        const payload = tahsilatFormPayload();
+        if (!payload.musteri_id && !payload.musteri_adi) { alert('Lütfen müşteri seçiniz.'); return; }
+        if (payload.tutar <= 0 && !(payload.odeme_turu === 'cek' && (payload.cek_detay || []).length > 0)) { alert('Geçerli bir tutar giriniz veya çek satırları ekleyiniz.'); return; }
+        fetch(API_TAHSILAT_ONIZLE, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+        .then(r => r.blob())
+        .then(blob => {
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = 'Tahsilat_Makbuzu_' + (payload.musteri_adi || 'Onizleme').replace(/\s+/g, '_') + '.pdf';
+            a.click();
+            URL.revokeObjectURL(a.href);
+        })
+        .catch(() => alert('PDF oluşturulamadı.'));
+    }
+
+    function tahsilatFormWhatsApp() {
+        const payload = tahsilatFormPayload();
+        if (!payload.musteri_id && !payload.musteri_adi) { alert('Lütfen müşteri seçiniz.'); return; }
+        if (payload.tutar <= 0) { alert('Geçerli bir tutar giriniz.'); return; }
+        let tel = (document.getElementById('tahsilat-musteri-phone').value || '').replace(/\D/g, '');
+        const num = tel.startsWith('0') ? '90' + tel.slice(1) : (tel ? '90' + tel : '');
+        const adi = (document.getElementById('tahsilat-musteri-secilen').textContent || payload.musteri_adi || 'Müşteri').trim();
+        const metin = encodeURIComponent('Sayın ' + adi + ',\n\nTahsilat makbuzunuz ekte yer almaktadır. İncelemenizi rica ederiz.\n\nİyi günler dileriz.\nBESTOFFICE');
+        const url = num ? 'https://wa.me/' + num + '?text=' + metin : 'https://wa.me/?text=' + metin;
+        window.open(url, '_blank', 'noopener');
     }
 
     function pdfOnizleAc(tahsilatId) {

@@ -85,9 +85,11 @@
   .kpi-card.red .icon, .kpi-card.red .val { color: #ef4444; }
   .kpi-card.cyan .icon, .kpi-card.cyan .val { color: #22d3ee; }
   .kpi-link { text-decoration: none; color: inherit; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; min-width: 0; }
-  .fintech-three { display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: var(--fintech-gap); min-height: 0; flex: 1; min-width: 0; align-items: stretch; }
+  .fintech-three { display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: var(--fintech-gap); min-height: 180px; flex: 1; min-width: 0; align-items: stretch; }
   @media (max-width: 1200px) { .fintech-three { grid-template-columns: minmax(0, 1fr) 240px; } }
   .fintech-left { display: flex; flex-direction: column; gap: var(--fintech-gap); min-height: 0; min-width: 0; align-items: stretch; }
+  .fintech-left .glass-card { min-height: 160px; }
+  .glass-card .chart-wrap { min-height: 100px; }
   .glass-card {
     background: var(--fintech-card-bg);
     backdrop-filter: blur(10px);
@@ -293,6 +295,8 @@
   .right-panel .drawer-table .borc { color: #e0f7fa; }
   .right-panel .drawer-table .borc.positive { color: var(--persimmon-orange); font-weight: 600; }
   .right-panel .drawer-table .borc.zero { color: #4fc3f7; }
+  .right-panel .drawer-table .durum-aktif-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; border-radius: 8px; font-size: 9px; font-weight: 600; background: rgba(34,197,94,0.2); color: #22c55e; border: 1px solid rgba(34,197,94,0.3); }
+  .right-panel .drawer-table .durum-pasif-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; border-radius: 8px; font-size: 9px; font-weight: 600; background: rgba(239,68,68,0.2); color: #ef4444; border: 1px solid rgba(239,68,68,0.3); }
   .right-panel .drawer-table td:first-child { max-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .right-panel .excel-link { display: inline-flex; align-items: center; gap: 6px; background: linear-gradient(135deg, #1b5e20, #2e7d32); color: #fff; font-size: 11px; font-weight: 600; text-decoration: none; padding: 6px 12px; border-radius: var(--fintech-radius-sm); border: 1px solid rgba(255,255,255,0.15); }
   .right-panel .excel-link:hover { background: linear-gradient(135deg, #2e7d32, #cddc39); color: #0a0e14; }
@@ -323,9 +327,33 @@
 
 {% if import_sonuc == 'ok' or import_sonuc == 'uyari' %}
 <div class="import-banner {{ 'ok' if import_sonuc == 'ok' else 'uyari' }}">
-  <span>Excel: {{ imported }} aktarıldı{% if import_hatalar %} ({{ import_hatalar }} hata){% endif %}.</span>
+  <span>
+    <strong>{{ imported }}{% if import_total %} / {{ import_total }}{% endif %} adet</strong> müşteri yüklendi
+    {% if import_percent is not none %} — <strong>%{{ import_percent }}</strong>{% endif %}
+    {% if import_hatalar %} ({{ import_hatalar }} satırda hata){% endif %}.
+  </span>
   <button type="button" onclick="this.closest('.import-banner').remove()">×</button>
 </div>
+<script>
+// Sayfa yüklendiğinde tek seferlik bildirim göster
+window.addEventListener('load', function() {
+  try {
+    var msg = "{{ imported }}{% if import_total %} / {{ import_total }}{% endif %} adet müşteri yüklendi (%{{ import_percent or 0 }}){% if import_hatalar %}. {{ import_hatalar }} satırda hata{% endif %}";
+    var key = 'excel_import_last_msg';
+    if (!window.localStorage) {
+      alert(msg);
+      return;
+    }
+    var prev = localStorage.getItem(key);
+    if (prev !== msg) {
+      alert(msg);
+      localStorage.setItem(key, msg);
+    }
+  } catch (e) {
+    // sessiz geç
+  }
+});
+</script>
 {% endif %}
 
 <div class="musteri-layout">
@@ -471,8 +499,10 @@
   <div class="panel-content" id="panelMusteri">
     <div class="drawer-header">
       <h2><i class="fa fa-users"></i> Müşteri Listesi</h2>
-      <div style="display:flex; align-items:center; gap:10px;">
-        <a href="{{ url_for('musteriler.export_excel') }}" class="excel-link"><i class="fa fa-file-excel"></i> Excel</a>
+      <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+        <a href="{{ url_for('musteriler.export_excel') }}" class="excel-link"><i class="fa fa-file-excel"></i> Excel İndir</a>
+        <a href="{{ url_for('musteriler.import_excel') }}" class="excel-link excel-upload"><i class="fa fa-upload"></i> Excel Yükle</a>
+        <a href="{{ url_for('musteriler.tumunu_sil') }}" class="excel-link" style="color:#eab308;"><i class="fa fa-trash-alt"></i> Tümünü Sil</a>
         <button type="button" class="drawer-close" onclick="closeRightPanel()" aria-label="Kapat">×</button>
       </div>
     </div>
@@ -493,13 +523,21 @@
       <div class="list-scroll-wrap">
         <table class="drawer-table" id="drawerTable">
           <thead>
-            <tr><th>Ad/Ünvan</th><th>Ofis/Ünite</th><th>Borç</th><th><i class="fa fa-sort"></i> Gecikme</th></tr>
+            <tr><th>Ad/Ünvan</th><th>Ofis/Ünite</th><th>Durum</th><th>Borç</th><th><i class="fa fa-sort"></i> Gecikme</th></tr>
           </thead>
           <tbody>
             {% for m in musteriler %}
+            {% set d = (m.get('durum') or '')|lower %}
             <tr data-id="{{ m.id }}" data-name="{{ (m.name or '')|lower }}" data-borc="{{ m.get('toplam_borc', 0) }}" onclick="window.location.href='{{ url_for('musteriler.detay', mid=m.id) }}'">
               <td title="{{ m.name or '—' }}">{{ m.name or '—' }}</td>
               <td>{{ m.office_code or '—' }}</td>
+              <td class="durum-cell">
+                {% if d == 'pasif' %}
+                <span class="durum-pasif-badge"><i class="fa fa-pause-circle"></i> Pasif</span>
+                {% else %}
+                <span class="durum-aktif-badge"><i class="fa fa-check-circle"></i> Aktif</span>
+                {% endif %}
+              </td>
               <td class="borc {{ 'positive' if (m.get('toplam_borc') or 0) > 0 else 'zero' }}">{{ "{:,.2f}".format(m.get('toplam_borc', 0)).replace(",", " ") }} ₺</td>
               <td class="gecikme {{ 'ok' if (m.get('geciken_gun') or 0) == 0 else '' }}">{{ m.get('geciken_gun', 0) }}</td>
             </tr>
@@ -520,6 +558,7 @@
           <span class="list-subtitle">Toplam Müşteri <strong>{{ (musteriler|default([]))|length }}</strong></span>
           <span class="list-subtitle">₺ <strong>{{ "{:,.0f}".format(toplam_bakiye|default(0)).replace(",", " ") }}</strong></span>
         </div>
+        <a href="{{ url_for('musteriler.tumunu_sil') }}" style="display:block;text-align:center;font-size:11px;color:#eab308;margin-bottom:6px;"><i class="fa fa-trash-alt"></i> Tüm müşterileri sil (Excel'den yeniden yüklemeden önce)</a>
         <a href="{{ url_for('musteriler.list_full') }}" class="btn-drawer btn-drawer-sm" style="text-decoration:none;color:inherit;display:block;text-align:center;">Müşteri Listesine Git →</a>
       </div>
     </div>
@@ -677,11 +716,13 @@ function setupRipple(selector) {
 setupRipple('.analiz-btn');
 setupRipple('.ops-btn');
 
-var trendData = {{ tahsilat_trend | tojson }};
-var trendLabels = trendData.map(function(d) { return d.ay + ' ' + d.yil; });
-var trendValues = trendData.map(function(d) { return d.tutar; });
+var trendData = {{ (tahsilat_trend or []) | tojson }};
+var trendLabels = Array.isArray(trendData) ? trendData.map(function(d) { return (d && d.ay) ? (d.ay + ' ' + (d.yil || '')) : ''; }) : [];
+var trendValues = Array.isArray(trendData) ? trendData.map(function(d) { return (d && typeof d.tutar === 'number') ? d.tutar : 0; }) : [];
 
-var ctxTahsilat = document.getElementById('chartTahsilat').getContext('2d');
+var chartEl = document.getElementById('chartTahsilat');
+if (!chartEl) { console.warn('chartTahsilat not found'); } else {
+var ctxTahsilat = chartEl.getContext('2d');
 var gradientLine = ctxTahsilat.createLinearGradient(0, 140, 400, 0);
 gradientLine.addColorStop(0, '#4fc3f7');
 gradientLine.addColorStop(0.6, 'rgba(79,195,247,0.7)');
@@ -691,13 +732,13 @@ gradientFill.addColorStop(0, 'rgba(79,195,247,0.08)');
 gradientFill.addColorStop(0.5, 'rgba(205,220,57,0.06)');
 gradientFill.addColorStop(1, 'rgba(205,220,57,0.12)');
 
-new Chart(document.getElementById('chartTahsilat'), {
+new Chart(chartEl, {
   type: 'line',
   data: {
-    labels: trendLabels,
+    labels: trendLabels.length ? trendLabels : ['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran'],
     datasets: [{
       label: 'Tahsilat',
-      data: trendValues,
+      data: trendValues.length ? trendValues : [0,0,0,0,0,0],
       borderColor: gradientLine,
       backgroundColor: gradientFill,
       fill: true,
@@ -734,6 +775,7 @@ new Chart(document.getElementById('chartTahsilat'), {
     }
   }
 });
+}
 
 function showFintechGirisView() {
   var ozet = document.getElementById('fintech-ozet-view');

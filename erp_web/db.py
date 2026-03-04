@@ -249,6 +249,13 @@ def init_schema():
         conn.cursor().execute(SCHEMA_SQL)
         ensure_customers_notes()
         ensure_customers_rent_columns()
+        ensure_customers_excel_columns()
+        ensure_customers_quick_edit_columns()
+        ensure_customers_durum()
+        ensure_customers_cari_columns()
+        ensure_customer_financial_profile()
+        ensure_customers_balance_trigger()
+        ensure_cari_360_tables()
         ensure_tahsilatlar_columns()
         ensure_kargolar_durum()
         ensure_faturalar_amount_columns()
@@ -306,25 +313,285 @@ def _ensure_office_rentals_extra_columns():
 
 
 def ensure_customers_notes():
-    """Customers tablosuna notes sütunu ekle."""
+    """Customers tablosuna notes ve ev_adres sütunlarını ekle."""
     try:
         execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS notes TEXT")
     except Exception as e:
         print(f"Notes sütunu zaten var veya hata: {e}")
+    try:
+        execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS ev_adres TEXT")
+    except Exception as e:
+        print(f"customers.ev_adres: {e}")
 
 
 def ensure_customers_rent_columns():
-    """Customers tablosuna kira başlangıç ve ilk kira sütunları ekle (toplu tahsilat için)."""
+    """Customers tablosuna kira başlangıç ve ilk/güncel kira sütunları ekle (toplu tahsilat için)."""
     for col, typ in (
         ("rent_start_date", "DATE"),
         ("rent_start_year", "INTEGER"),
         ("rent_start_month", "TEXT DEFAULT 'Ocak'"),
         ("ilk_kira_bedeli", "NUMERIC(12,2) DEFAULT 0"),
+        ("guncel_kira_bedeli", "NUMERIC(12,2) DEFAULT 0"),
     ):
         try:
             execute(f"ALTER TABLE customers ADD COLUMN IF NOT EXISTS {col} {typ}")
         except Exception as e:
             print(f"customers.{col}: {e}")
+
+
+def ensure_customers_excel_columns():
+    """Excel'den gelen ekstra alanlar için sütunlar: yetkili_kisi, hizmet_turu."""
+    for col, typ in (
+        ("yetkili_kisi", "TEXT"),
+        ("hizmet_turu", "TEXT"),
+    ):
+        try:
+            execute(f"ALTER TABLE customers ADD COLUMN IF NOT EXISTS {col} {typ}")
+        except Exception as e:
+            print(f"customers.{col}: {e}")
+
+
+def ensure_customers_quick_edit_columns():
+    """Hızlı bilgi düzenleme: manuel_borc, son_odeme_tarihi (cari kart / listede gösterim)."""
+    for col, typ in (
+        ("manuel_borc", "NUMERIC(12,2)"),
+        ("son_odeme_tarihi", "DATE"),
+    ):
+        try:
+            execute(f"ALTER TABLE customers ADD COLUMN IF NOT EXISTS {col} {typ}")
+        except Exception as e:
+            print(f"customers.{col}: {e}")
+
+
+def ensure_customers_cari_columns():
+    """Cari kart: vergi_dairesi, mersis_no, nace_kodu, ofis_tipi, tebligat_adresi."""
+    for col, typ in (
+        ("vergi_dairesi", "TEXT"),
+        ("mersis_no", "TEXT"),
+        ("nace_kodu", "TEXT"),
+        ("ofis_tipi", "TEXT"),
+        ("tebligat_adresi", "TEXT"),
+    ):
+        try:
+            execute(f"ALTER TABLE customers ADD COLUMN IF NOT EXISTS {col} {typ}")
+        except Exception as e:
+            print(f"customers.{col}: {e}")
+
+
+def ensure_customer_financial_profile():
+    """Cari kart finansal profil: risk limiti, vade günü, tahmini ödeme günü, karlılık, hukuki eşik, mutabakat, notlar."""
+    try:
+        execute("""
+            CREATE TABLE IF NOT EXISTS customer_financial_profile (
+                id                      SERIAL PRIMARY KEY,
+                musteri_id              INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+                risk_limit              NUMERIC(14,2),
+                vade_gunu               INTEGER DEFAULT 5,
+                odeme_tercihi           TEXT,
+                gecikme_faiz_orani      NUMERIC(6,2),
+                stopaj_durumu            TEXT,
+                tahmini_odeme_gunu      INTEGER,
+                yillik_karlilik_endeksi NUMERIC(12,2),
+                hukuki_esk_puan         INTEGER DEFAULT 0,
+                mutabakat_tarihi        DATE,
+                ic_not                  TEXT,
+                hukuki_surec            TEXT,
+                created_at              TIMESTAMPTZ DEFAULT NOW(),
+                updated_at              TIMESTAMPTZ DEFAULT NOW(),
+                UNIQUE(musteri_id)
+            )
+        """)
+    except Exception as e:
+        print(f"customer_financial_profile: {e}")
+
+
+def ensure_customers_balance_trigger():
+    """Customers.current_balance için yürüyen bakiye trigger'ı oluştur.
+
+    Mantık: current_balance = SUM(faturalar.toplam/tutar) - SUM(tahsilatlar.tutar)
+    (sadece ilgili musteri_id için).
+    """
+    try:
+        execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS current_balance NUMERIC(14,2) DEFAULT 0")
+    except Exception as e:
+        print(f"customers.current_balance: {e}")
+    # Trigger fonksiyonu: NEW/OLD üzerinden musteri_id alır
+    try:
+        execute(
+            """
+            CREATE OR REPLACE FUNCTION fn_update_customer_balance()
+            RETURNS trigger AS $$
+            DECLARE
+                v_borc NUMERIC(14,2);
+                v_alacak NUMERIC(14,2);
+                v_mid INTEGER;
+            BEGIN
+                v_mid := COALESCE(NEW.musteri_id, OLD.musteri_id);
+                IF v_mid IS NULL THEN
+                    RETURN NULL;
+                END IF;
+                SELECT COALESCE(SUM(COALESCE(toplam, tutar, 0)), 0)
+                  INTO v_borc
+                  FROM faturalar
+                 WHERE musteri_id = v_mid;
+                SELECT COALESCE(SUM(tutar), 0)
+                  INTO v_alacak
+                  FROM tahsilatlar
+                 WHERE musteri_id = v_mid;
+                UPDATE customers
+                   SET current_balance = COALESCE(v_borc,0) - COALESCE(v_alacak,0)
+                 WHERE id = v_mid;
+                RETURN NULL;
+            END;
+            $$ LANGUAGE plpgsql;
+            """
+        )
+    except Exception as e:
+        print(f"fn_update_customer_balance: {e}")
+    # Faturalar trigger
+    try:
+        execute(
+            """
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_trigger WHERE tgname = 'trg_faturalar_update_balance'
+                ) THEN
+                    CREATE TRIGGER trg_faturalar_update_balance
+                    AFTER INSERT OR UPDATE OR DELETE ON faturalar
+                    FOR EACH ROW
+                    EXECUTE FUNCTION fn_update_customer_balance();
+                END IF;
+            END$$;
+            """
+        )
+    except Exception as e:
+        print(f"trg_faturalar_update_balance: {e}")
+    # Tahsilatlar trigger
+    try:
+        execute(
+            """
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_trigger WHERE tgname = 'trg_tahsilatlar_update_balance'
+                ) THEN
+                    CREATE TRIGGER trg_tahsilatlar_update_balance
+                    AFTER INSERT OR UPDATE OR DELETE ON tahsilatlar
+                    FOR EACH ROW
+                    EXECUTE FUNCTION fn_update_customer_balance();
+                END IF;
+            END$$;
+            """
+        )
+    except Exception as e:
+        print(f"trg_tahsilatlar_update_balance: {e}")
+
+
+def ensure_cari_360_tables():
+    """360° Cari Kart: randevular, iletisim_log, audit_log, cari_belgeler."""
+    try:
+        execute("""
+            CREATE TABLE IF NOT EXISTS randevular (
+                id SERIAL PRIMARY KEY,
+                musteri_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+                randevu_tarihi DATE NOT NULL,
+                saat TIME,
+                oda TEXT,
+                sure_dakika INTEGER,
+                ucret NUMERIC(12,2) DEFAULT 0,
+                faturalandi BOOLEAN DEFAULT FALSE,
+                personel_id INTEGER,
+                notlar TEXT,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+    except Exception as e:
+        print(f"randevular: {e}")
+    try:
+        execute("""
+            CREATE TABLE IF NOT EXISTS iletisim_log (
+                id SERIAL PRIMARY KEY,
+                musteri_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+                kanal TEXT NOT NULL,
+                konu TEXT,
+                icerik TEXT,
+                personel_id INTEGER,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+    except Exception as e:
+        print(f"iletisim_log: {e}")
+    try:
+        execute("""
+            CREATE TABLE IF NOT EXISTS audit_log (
+                id SERIAL PRIMARY KEY,
+                tablo_adi TEXT,
+                kayit_id INTEGER,
+                islem TEXT,
+                eski_deger TEXT,
+                yeni_deger TEXT,
+                user_id INTEGER,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+    except Exception as e:
+        print(f"audit_log: {e}")
+    try:
+        execute("""
+            CREATE TABLE IF NOT EXISTS cari_belgeler (
+                id SERIAL PRIMARY KEY,
+                musteri_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+                belge_turu TEXT NOT NULL,
+                dosya_adi TEXT,
+                dosya_yolu TEXT,
+                versiyon INTEGER DEFAULT 1,
+                yukleyen_id INTEGER,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+    except Exception as e:
+        print(f"cari_belgeler: {e}")
+
+
+def ensure_customers_durum():
+    """Customers tablosuna durum sütunu ekle; Excel'deki faal/terk değerlerini aktif/pasif'e çevirir.
+
+    - Mevcut durum='faal' → 'aktif'
+    - Mevcut durum='terk' → 'pasif'
+    - Durumu boş olanlar için, notes içinde 'DurumExcel: faal/terk' varsa oradan doldurur.
+    """
+    try:
+        execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS durum TEXT")
+    except Exception as e:
+        print(f"customers.durum: {e}")
+        return
+    # Eski kayıtlarda doğrudan durum alanı kullanılmışsa normalize et
+    try:
+        execute("UPDATE customers SET durum = 'aktif' WHERE LOWER(TRIM(COALESCE(durum,''))) = 'faal'")
+    except Exception as e:
+        print(f"customers.durum faal→aktif: {e}")
+    try:
+        execute("UPDATE customers SET durum = 'pasif' WHERE LOWER(TRIM(COALESCE(durum,''))) = 'terk'")
+    except Exception as e:
+        print(f"customers.durum terk→pasif: {e}")
+    # Daha önce reset_ve_import_musteriler.py ile gelenler için notes içindeki 'DurumExcel:' bilgisini kullan
+    try:
+        execute(
+            """
+            UPDATE customers
+            SET durum = CASE
+                WHEN LOWER(notes) LIKE '%durumexcel:%faal%' THEN 'aktif'
+                WHEN LOWER(notes) LIKE '%durumexcel:%terk%' THEN 'pasif'
+                ELSE durum
+            END
+            WHERE (durum IS NULL OR TRIM(COALESCE(durum,'')) = '')
+              AND notes IS NOT NULL
+              AND LOWER(notes) LIKE '%durumexcel:%';
+            """
+        )
+    except Exception as e:
+        print(f"customers.durum notes→durum: {e}")
 
 
 def ensure_tahsilatlar_columns():
@@ -373,3 +640,27 @@ def ensure_faturalar_amount_columns():
         execute("ALTER TABLE faturalar ADD COLUMN IF NOT EXISTS toplam NUMERIC(12,2) DEFAULT 0")
     except Exception as e:
         print(f"faturalar.toplam: {e}")
+
+
+def clear_all_customers():
+    """
+    Tüm müşteri verilerini ve müşteriye bağlı kayıtları siler (geri alınamaz).
+    Sıra: tahsilatlar -> faturalar -> kargolar -> musteri_kyc -> banka_hareketleri -> offices -> sozlesmeler -> customers.
+    """
+    with db() as conn:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM tahsilatlar")
+        cur.execute("DELETE FROM faturalar")
+        cur.execute("DELETE FROM kargolar")
+        try:
+            cur.execute("DELETE FROM musteri_kyc")
+        except Exception:
+            pass
+        try:
+            cur.execute("UPDATE banka_hareketleri SET musteri_id = NULL, tahsilat_id = NULL WHERE musteri_id IS NOT NULL")
+        except Exception:
+            pass
+        cur.execute("UPDATE offices SET customer_id = NULL WHERE customer_id IS NOT NULL")
+        cur.execute("DELETE FROM sozlesmeler")
+        cur.execute("DELETE FROM customers")
+    return True

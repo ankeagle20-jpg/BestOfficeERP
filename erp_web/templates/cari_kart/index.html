@@ -1,0 +1,376 @@
+{% extends "layout.html" %}
+{% block page_title %}360° Cari Kart | BestOffice{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+:root { --neon-blue: #00d4ff; --neon-green: #00ff9d; --glass: rgba(15,37,55,0.85); --glass-border: rgba(0,212,255,0.2); }
+.cc-page { background: #0a1929; min-height: 100vh; padding: 0; font-family: 'Segoe UI', sans-serif; }
+/* Müşteri seç ekranı */
+.cc-select-wrap { max-width: 560px; margin: 40px auto; padding: 24px; background: var(--glass); border: 1px solid var(--glass-border); border-radius: 16px; backdrop-filter: blur(12px); }
+.cc-select-wrap h2 { color: var(--neon-blue); font-size: 18px; margin-bottom: 16px; }
+.cc-select-wrap input { width: 100%; padding: 12px 16px; background: #1e3a50; border: 1px solid var(--glass-border); border-radius: 8px; color: #e0f7fa; font-size: 14px; }
+.cc-select-wrap input:focus { outline: none; border-color: var(--neon-blue); }
+.cc-musteri-list { max-height: 400px; overflow-y: auto; margin-top: 12px; }
+.cc-musteri-item { padding: 12px 16px; border-bottom: 1px solid #2d4060; cursor: pointer; display: flex; justify-content: space-between; align-items: center; transition: background .15s; }
+.cc-musteri-item:hover { background: rgba(0,212,255,0.08); }
+.cc-musteri-item .badge { font-size: 10px; padding: 2px 8px; border-radius: 10px; }
+.cc-musteri-item .badge.aktif { background: rgba(0,255,157,.2); color: var(--neon-green); }
+.cc-musteri-item .badge.pasif { background: rgba(255,69,87,.2); color: #ff4557; }
+/* Sticky header */
+.cc-sticky-header { position: sticky; top: 0; z-index: 100; background: var(--glass); border-bottom: 1px solid var(--glass-border); backdrop-filter: blur(12px); padding: 12px 20px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.cc-sticky-left { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.cc-firma-unvan { font-size: 16px; font-weight: 700; color: #e0f7fa; }
+.cc-ofis-no { font-family: monospace; color: var(--neon-blue); font-size: 13px; }
+.cc-badge { padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: 700; }
+.cc-badge.aktif { background: rgba(0,255,157,.15); color: var(--neon-green); border: 1px solid rgba(0,255,157,.3); }
+.cc-badge.pasif { background: rgba(255,69,87,.15); color: #ff4557; }
+.cc-risk-score { font-family: monospace; font-weight: 800; padding: 4px 10px; border-radius: 8px; }
+.cc-risk-score.safe { background: rgba(0,255,157,.2); color: var(--neon-green); }
+.cc-risk-score.warn { background: rgba(255,193,7,.2); color: #ffc107; }
+.cc-risk-score.danger { background: rgba(255,69,87,.2); color: #ff4557; }
+.cc-rozet { font-size: 10px; padding: 2px 6px; border-radius: 6px; margin-left: 4px; }
+.cc-rozet.vip { background: linear-gradient(135deg,#7c3aed,#5b21b6); color: #fff; }
+.cc-rozet.riskli { background: rgba(255,69,87,.3); color: #ff4557; }
+.cc-rozet.duzenli { background: rgba(0,255,157,.2); color: var(--neon-green); }
+.cc-rozet.hukuki { background: rgba(255,152,0,.3); color: #ff9800; }
+.cc-sticky-right { display: flex; flex-wrap: wrap; gap: 8px; }
+.cc-header-btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border-radius: 8px; font-size: 12px; font-weight: 600; border: none; cursor: pointer; text-decoration: none; color: #fff; transition: filter .15s; }
+.cc-header-btn:hover { filter: brightness(1.15); }
+.cc-header-btn.fatura { background: linear-gradient(135deg,#1976d2,#0d47a1); }
+.cc-header-btn.tahsilat { background: linear-gradient(135deg,#388e3c,#1b5e20); }
+.cc-header-btn.pdf { background: linear-gradient(135deg,#c62828,#b71c1c); }
+.cc-header-btn.whatsapp { background: linear-gradient(135deg,#25d366,#128c7e); }
+.cc-header-btn.sozlesme { background: linear-gradient(135deg,#7c3aed,#5b21b6); }
+.cc-header-btn.not { background: #2d4060; color: var(--neon-blue); border: 1px solid var(--glass-border); }
+/* 360 özet paneli */
+.cc-ozet-panel { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 14px; padding: 20px; }
+.cc-ozet-kart { background: var(--glass); border: 1px solid var(--glass-border); border-radius: 12px; padding: 16px; backdrop-filter: blur(8px); }
+.cc-ozet-kart label { display: block; font-size: 11px; color: #90a4ae; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px; }
+.cc-ozet-kart .val { font-size: 18px; font-weight: 800; font-family: monospace; color: var(--neon-blue); }
+.cc-ozet-kart .val.green { color: var(--neon-green); }
+.cc-ozet-kart .val.red { color: #ff4557; }
+/* Sekmeler */
+.cc-tabs { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 20px 12px; border-bottom: 1px solid var(--glass-border); }
+.cc-tab { padding: 10px 16px; border: none; background: transparent; color: #90a4ae; font-size: 12px; font-weight: 600; cursor: pointer; border-radius: 8px; transition: all .15s; }
+.cc-tab:hover { color: var(--neon-blue); background: rgba(0,212,255,.06); }
+.cc-tab.active { color: var(--neon-blue); background: rgba(0,212,255,.12); }
+.cc-tab-content { display: none; padding: 20px; }
+.cc-tab-content.active { display: block; }
+/* Tablo */
+.cc-table-wrap { overflow-x: auto; background: var(--glass); border-radius: 10px; border: 1px solid var(--glass-border); }
+.cc-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.cc-table th { background: #1e3a50; color: var(--neon-blue); padding: 10px 12px; text-align: left; }
+.cc-table td { padding: 8px 12px; border-bottom: 1px solid #2d4060; color: #e0f7fa; }
+.cc-table tr.kritik { background: rgba(255,69,87,.1); }
+.cc-table td.num { text-align: right; font-family: monospace; }
+/* Aging bar */
+.cc-aging-bar { display: flex; height: 28px; border-radius: 6px; overflow: hidden; margin-top: 8px; }
+.cc-aging-bar span { flex: 1; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; color: #fff; min-width: 0; }
+.cc-aging-30 { background: #43a047; }
+.cc-aging-60 { background: #fb8c00; }
+.cc-aging-90 { background: #e53935; }
+.cc-aging-91 { background: #880e4f; }
+/* Genel bilgiler grid */
+.cc-form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.cc-form-grid label { font-size: 11px; color: #90a4ae; }
+.cc-form-grid .val { color: #e0f7fa; font-size: 13px; }
+</style>
+
+<div class="cc-page">
+  <!-- Müşteri seç (mid yoksa) -->
+  <div id="cc-select-view" class="cc-select-wrap" style="{{ 'display:none;' if selected_mid else '' }}">
+    <h2><i class="fa fa-address-card"></i> 360° Cari Kart — Müşteri Seçin</h2>
+    <input type="text" id="cc-musteri-ara" placeholder="Müşteri adı veya vergi no ile ara..." autocomplete="off">
+    <div class="cc-musteri-list" id="cc-musteri-list">
+      {% for m in musteriler %}
+      <div class="cc-musteri-item" data-id="{{ m.id }}" data-name="{{ m.name or '' }}">
+        <span>{{ m.name or '—' }}</span>
+        <span class="badge {{ 'aktif' if (m.durum or '').lower() != 'pasif' else 'pasif' }}">{{ (m.durum or 'Aktif')[:1] }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- 360 görünüm (mid varsa veya seçildiyse) -->
+  <div id="cc-360-view" style="{{ 'display:none;' if not selected_mid else '' }}">
+    <!-- STICKY HEADER -->
+    <div class="cc-sticky-header">
+      <div class="cc-sticky-left">
+        <span class="cc-firma-unvan" id="cc-firma-unvan">—</span>
+        <span class="cc-ofis-no" id="cc-ofis-no"></span>
+        <span class="cc-badge aktif" id="cc-durum-badge">Aktif</span>
+        <span class="cc-risk-score safe" id="cc-risk-display">—</span>
+        <span id="cc-rozetler"></span>
+      </div>
+      <div class="cc-sticky-right">
+        <a href="#" id="cc-btn-fatura" class="cc-header-btn fatura"><i class="fa fa-file-invoice"></i> Fatura Kes</a>
+        <a href="#" id="cc-btn-tahsilat" class="cc-header-btn tahsilat"><i class="fa fa-hand-holding-usd"></i> Tahsilat Al</a>
+        <a href="#" id="cc-btn-pdf" class="cc-header-btn pdf"><i class="fa fa-file-pdf-o"></i> PDF Ekstre</a>
+        <a href="#" id="cc-btn-whatsapp" class="cc-header-btn whatsapp"><i class="fa fa-whatsapp"></i> WhatsApp Hatırlat</a>
+        <a href="#" id="cc-btn-sozlesme" class="cc-header-btn sozlesme"><i class="fa fa-file-contract"></i> Sözleşme Gör</a>
+        <button type="button" id="cc-btn-not" class="cc-header-btn not"><i class="fa fa-sticky-note"></i> Not Ekle</button>
+      </div>
+    </div>
+
+    <!-- 360 ÖZET PANELİ -->
+    <div class="cc-ozet-panel">
+      <!-- Üst 4 ana kart (mockuptaki gibi) -->
+      <div class="cc-ozet-kart"><label>GÜNCEL BAKİYE</label><div class="val" id="ozet-bakiye">0</div> ₺</div>
+      <div class="cc-ozet-kart"><label>GECİKMİŞ TUTAR</label><div class="val red" id="ozet-gecikmis">0</div> ₺</div>
+      <div class="cc-ozet-kart"><label>BU AY FATURA</label><div class="val" id="ozet-bu-ay-fatura">0</div> ₺</div>
+      <div class="cc-ozet-kart"><label>BU AY TAHSİLAT</label><div class="val green" id="ozet-bu-ay-tahsilat">0</div> ₺</div>
+      <!-- Alt satır: Son Ödeme, Ortalama Ödeme, Risk Limiti, Yaşlandırma özeti -->
+      <div class="cc-ozet-kart"><label>Son Ödeme</label><div class="val" id="ozet-son-odeme">—</div></div>
+      <div class="cc-ozet-kart"><label>Ortalama Ödeme Süresi</label><div class="val" id="ozet-ort-odeme">—</div></div>
+      <div class="cc-ozet-kart"><label>Risk Limiti Kullanım Oranı</label><div class="val" id="ozet-risk-limit">—</div> %</div>
+      <div class="cc-ozet-kart">
+        <label>Borç Yaşlandırma</label>
+        <div class="cc-aging-bar">
+          <span class="cc-aging-30" id="aging-30">0</span>
+          <span class="cc-aging-60" id="aging-60">0</span>
+          <span class="cc-aging-90" id="aging-90">0</span>
+          <span class="cc-aging-91" id="aging-91">0</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- SEKME SİSTEMİ -->
+    <div class="cc-tabs">
+      <button type="button" class="cc-tab active" data-tab="genel">Genel Bilgiler</button>
+      <button type="button" class="cc-tab" data-tab="finansal">Finansal Hareketler</button>
+      <button type="button" class="cc-tab" data-tab="fatura-tahsilat">Faturalar & Tahsilatlar</button>
+      <button type="button" class="cc-tab" data-tab="borc-yaslandirma">Borç Yaşlandırma</button>
+      <button type="button" class="cc-tab" data-tab="randevular">Randevular</button>
+      <button type="button" class="cc-tab" data-tab="kargo">Kargo Hareketleri</button>
+      <button type="button" class="cc-tab" data-tab="ek-hizmet">Ek Hizmetler</button>
+      <button type="button" class="cc-tab" data-tab="belgeler">Belgeler & Evraklar</button>
+      <button type="button" class="cc-tab" data-tab="analiz">Analiz & Notlar</button>
+      <button type="button" class="cc-tab" data-tab="hukuki">Hukuki Durum</button>
+      <button type="button" class="cc-tab" data-tab="iletisim">İletişim Logları</button>
+    </div>
+
+    <div id="cc-tab-genel" class="cc-tab-content active">
+      <div class="cc-form-grid" id="cc-genel-grid"></div>
+    </div>
+    <div id="cc-tab-finansal" class="cc-tab-content">
+      <div class="cc-table-wrap"><table class="cc-table"><thead><tr><th>Tarih</th><th>Belge No</th><th>Tür</th><th>Borç</th><th>Alacak</th><th>Bakiye</th></tr></thead><tbody id="cc-hareketler-tbody"></tbody></table></div>
+    </div>
+    <div id="cc-tab-fatura-tahsilat" class="cc-tab-content">
+      <p style="color:#90a4ae;">Faturalar ve tahsilatlar listesi — Finansal Hareketler sekmesiyle aynı kaynak.</p>
+    </div>
+    <div id="cc-tab-borc-yaslandirma" class="cc-tab-content">
+      <p style="color:#90a4ae;">Vade bazlı borç dilimleri — Özet paneldeki yaşlandırma barı ve API aging verisi kullanılacak.</p>
+    </div>
+    <div id="cc-tab-randevular" class="cc-tab-content">
+      <div class="cc-table-wrap"><table class="cc-table"><thead><tr><th>Tarih</th><th>Saat</th><th>Oda</th><th>Süre</th><th>Ücret</th><th>Faturalandı</th></tr></thead><tbody id="cc-randevu-tbody"></tbody></table></div>
+    </div>
+    <div id="cc-tab-kargo" class="cc-tab-content">
+      <div class="cc-table-wrap"><table class="cc-table"><thead><tr><th>Tarih</th><th>Teslim Alan</th><th>Kargo Firması</th><th>Takip No</th><th>Ödeme</th></tr></thead><tbody id="cc-kargo-tbody"></tbody></table></div>
+    </div>
+    <div id="cc-tab-ek-hizmet" class="cc-tab-content">
+      <p style="color:#90a4ae;">Kargo, toplantı odası, sekreterya — Ek hizmet faturalama modülüne veri bağlantısı.</p>
+    </div>
+    <div id="cc-tab-belgeler" class="cc-tab-content">
+      <div class="cc-table-wrap"><table class="cc-table"><thead><tr><th>Belge Türü</th><th>Dosya</th><th>Versiyon</th><th>Tarih</th></tr></thead><tbody id="cc-belge-tbody"></tbody></table></div>
+    </div>
+    <div id="cc-tab-analiz" class="cc-tab-content">
+      <div class="cc-ozet-panel" style="padding:0;margin-bottom:16px;">
+        <div class="cc-ozet-kart">
+          <label>Risk Skoru (0-100)</label>
+          <canvas id="cc-risk-gauge" style="max-width:260px;max-height:260px;"></canvas>
+        </div>
+        <div class="cc-ozet-kart" style="grid-column:span 2;min-width:260px;">
+          <label>Son 6 Ay Ödeme Davranışı</label>
+          <canvas id="cc-odeme-chart" style="width:100%;max-height:260px;"></canvas>
+        </div>
+      </div>
+    </div>
+    <div id="cc-tab-hukuki" class="cc-tab-content">
+      <p style="color:#90a4ae;">İhtar, avukata devir, icra dosyası — Sadece yönetici görür.</p>
+      <div id="cc-hukuki-icerik"></div>
+    </div>
+    <div id="cc-tab-iletisim" class="cc-tab-content">
+      <div class="cc-table-wrap"><table class="cc-table"><thead><tr><th>Tarih</th><th>Kanal</th><th>Konu</th><th>İçerik</th></tr></thead><tbody id="cc-iletisim-tbody"></tbody></table></div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  var selectedMid = {{ selected_mid or 'null' }};
+  var ccData = null;
+  var riskChart = null;
+  var odemeChart = null;
+
+  function showSelect() {
+    document.getElementById('cc-select-view').style.display = 'block';
+    document.getElementById('cc-360-view').style.display = 'none';
+  }
+  function show360() {
+    document.getElementById('cc-select-view').style.display = 'none';
+    document.getElementById('cc-360-view').style.display = 'block';
+  }
+
+  function formatMoney(n) { return (n || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+
+  function load360(mid) {
+    if (!mid) return;
+    selectedMid = mid;
+    history.replaceState({}, '', '/cari-kart/?mid=' + mid);
+    show360();
+    fetch('/cari-kart/api/360/' + mid)
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (!data || !data.ok) { alert(data && data.mesaj ? data.mesaj : 'Veri yüklenemedi.'); return; }
+        ccData = data;
+        var m = data.musteri;
+        var o = data.ozet;
+        document.getElementById('cc-firma-unvan').textContent = m.name || '—';
+        document.getElementById('cc-ofis-no').textContent = m.office_code ? 'Ofis: ' + m.office_code : '';
+        var badge = document.getElementById('cc-durum-badge');
+        badge.textContent = (m.durum || 'aktif').toLowerCase() === 'pasif' ? 'Pasif' : 'Aktif';
+        badge.className = 'cc-badge ' + ((m.durum || 'aktif').toLowerCase() === 'pasif' ? 'pasif' : 'aktif');
+        var riskEl = document.getElementById('cc-risk-display');
+        var rs = o.risk_skoru != null ? o.risk_skoru : 0;
+        riskEl.textContent = rs;
+        riskEl.className = 'cc-risk-score ' + (rs >= 60 ? 'safe' : (rs >= 40 ? 'warn' : 'danger'));
+        var rozetEl = document.getElementById('cc-rozetler');
+        rozetEl.innerHTML = (rs < 60 ? '<span class="cc-rozet riskli">Riskli</span>' : '') + (rs >= 80 ? '<span class="cc-rozet duzenli">Düzenli Ödeyen</span>' : '');
+        document.getElementById('ozet-bakiye').textContent = formatMoney(o.guncel_bakiye);
+        document.getElementById('ozet-gecikmis').textContent = formatMoney(o.gecikmis_tutar);
+        document.getElementById('ozet-bu-ay-fatura').textContent = formatMoney(o.bu_ay_fatura);
+        document.getElementById('ozet-bu-ay-tahsilat').textContent = formatMoney(o.bu_ayki_tahsilat);
+        document.getElementById('ozet-son-odeme').textContent = o.son_odeme_tarihi || '—';
+        var ortGun = (o.ortalama_odeme_suresi != null) ? o.ortalama_odeme_suresi : (data.finansal_profil && data.finansal_profil.tahmini_odeme_gunu != null ? data.finansal_profil.tahmini_odeme_gunu : null);
+        document.getElementById('ozet-ort-odeme').textContent = ortGun != null ? Math.round(ortGun) + ' gün' : '—';
+        document.getElementById('ozet-sozlesme-gun').textContent = o.sozlesme_bitis_gun != null ? o.sozlesme_bitis_gun : '—';
+        document.getElementById('ozet-risk-limit').textContent = o.risk_limit_kullanim != null ? o.risk_limit_kullanim : '—';
+        var a30 = o.aging_0_30 || 0, a60 = o.aging_31_60 || 0, a90 = o.aging_61_90 || 0, a91 = o.aging_91_plus || 0;
+        var at = a30 + a60 + a90 + a91 || 1;
+        document.getElementById('aging-30').textContent = a30 > 0 ? formatMoney(a30) : '0';
+        document.getElementById('aging-30').style.flex = a30 || 0.001;
+        document.getElementById('aging-60').textContent = a60 > 0 ? formatMoney(a60) : '0';
+        document.getElementById('aging-60').style.flex = a60 || 0.001;
+        document.getElementById('aging-90').textContent = a90 > 0 ? formatMoney(a90) : '0';
+        document.getElementById('aging-90').style.flex = a90 || 0.001;
+        document.getElementById('aging-91').textContent = a91 > 0 ? formatMoney(a91) : '0';
+        document.getElementById('aging-91').style.flex = a91 || 0.001;
+        var grid = document.getElementById('cc-genel-grid');
+        grid.innerHTML = '<div><label>Ünvan</label><div class="val">' + (m.name || '—') + '</div></div><div><label>Vergi No</label><div class="val">' + (m.tax_number || '—') + '</div></div><div><label>Vergi Dairesi</label><div class="val">' + (m.vergi_dairesi || '—') + '</div></div><div><label>Telefon</label><div class="val">' + (m.phone || '—') + '</div></div><div><label>E-posta</label><div class="val">' + (m.email || '—') + '</div></div><div><label>Adres</label><div class="val">' + (m.address || '—') + '</div></div>';
+        var tbody = document.getElementById('cc-hareketler-tbody');
+        tbody.innerHTML = (data.hareketler || []).map(function(r) {
+          return '<tr' + (r.vade_tarihi && r.vade_tarihi < new Date().toISOString().slice(0,10) ? ' class="kritik"' : '') + '><td>' + (r.tarih || '') + '</td><td>' + (r.belge_no || '') + '</td><td>' + (r.tur || '') + '</td><td class="num">' + formatMoney(r.borc) + '</td><td class="num">' + formatMoney(r.alacak) + '</td><td class="num">' + formatMoney(r.bakiye) + '</td></tr>';
+        }).join('') || '<tr><td colspan="6" style="text-align:center;color:#90a4ae;">Hareket yok</td></tr>';
+        document.getElementById('cc-randevu-tbody').innerHTML = (data.randevular || []).map(function(r) {
+          return '<tr><td>' + (r.randevu_tarihi || '') + '</td><td>' + (r.saat || '') + '</td><td>' + (r.oda || '') + '</td><td>' + (r.sure_dakika || '') + '</td><td class="num">' + formatMoney(r.ucret) + '</td><td>' + (r.faturalandi ? 'Evet' : 'Hayır') + '</td></tr>';
+        }).join('') || '<tr><td colspan="6" style="text-align:center;color:#90a4ae;">Randevu yok</td></tr>';
+        document.getElementById('cc-kargo-tbody').innerHTML = (data.kargolar || []).map(function(r) {
+          return '<tr><td>' + (r.tarih || '') + '</td><td>' + (r.teslim_alan || '') + '</td><td>' + (r.kargo_firmasi || '') + '</td><td>' + (r.takip_no || '') + '</td><td class="num">' + formatMoney(r.odeme_tutari) + '</td></tr>';
+        }).join('') || '<tr><td colspan="5" style="text-align:center;color:#90a4ae;">Kargo yok</td></tr>';
+        document.getElementById('cc-belge-tbody').innerHTML = (data.belgeler || []).map(function(r) {
+          return '<tr><td>' + (r.belge_turu || '') + '</td><td>' + (r.dosya_adi || '') + '</td><td>' + (r.versiyon || 1) + '</td><td>' + (r.created_at || '') + '</td></tr>';
+        }).join('') || '<tr><td colspan="4" style="text-align:center;color:#90a4ae;">Belge yok</td></tr>';
+        document.getElementById('cc-iletisim-tbody').innerHTML = (data.iletisim_log || []).map(function(r) {
+          return '<tr><td>' + (r.created_at || '') + '</td><td>' + (r.kanal || '') + '</td><td>' + (r.konu || '') + '</td><td>' + (r.icerik || '').substring(0, 80) + '</td></tr>';
+        }).join('') || '<tr><td colspan="4" style="text-align:center;color:#90a4ae;">Kayıt yok</td></tr>';
+        if (data.finansal_profil && (data.finansal_profil.ic_not || data.finansal_profil.hukuki_surec)) {
+          document.getElementById('cc-hukuki-icerik').innerHTML = '<p>İç not / Hukuki süreç (yönetici): ' + (data.finansal_profil.ic_not || '') + ' ' + (data.finansal_profil.hukuki_surec || '') + '</p>';
+        }
+        // Chart.js: Risk gauge
+        var ctxGauge = document.getElementById('cc-risk-gauge').getContext('2d');
+        var gaugeVal = rs || 0;
+        if (riskChart) {
+          riskChart.data.datasets[0].data = [gaugeVal, 100 - gaugeVal];
+          riskChart.update();
+        } else {
+          riskChart = new Chart(ctxGauge, {
+            type: 'doughnut',
+            data: {
+              labels: ['Risk Skoru', ''],
+              datasets: [{
+                data: [gaugeVal, 100 - gaugeVal],
+                backgroundColor: ['#00ff9d', 'rgba(15,37,55,0.6)'],
+                borderWidth: 0
+              }]
+            },
+            options: {
+              rotation: -90,
+              circumference: 180,
+              cutout: '70%',
+              plugins: { legend: { display: false }, tooltip: { enabled: false } }
+            }
+          });
+        }
+        // Chart.js: Ödeme davranışı (son 6 ay)
+        var ctxOdeme = document.getElementById('cc-odeme-chart').getContext('2d');
+        var odeme = data.odeme_davranisi || [];
+        var labels = odeme.map(function(r) { return r.etiket; });
+        var values = odeme.map(function(r) { return r.tutar; });
+        if (odemeChart) {
+          odemeChart.data.labels = labels;
+          odemeChart.data.datasets[0].data = values;
+          odemeChart.update();
+        } else {
+          odemeChart = new Chart(ctxOdeme, {
+            type: 'bar',
+            data: {
+              labels: labels,
+              datasets: [{
+                label: 'Tahsilat (TL)',
+                data: values,
+                backgroundColor: 'rgba(56,189,248,0.6)'
+              }]
+            },
+            options: {
+              plugins: { legend: { display: false } },
+              scales: {
+                x: { ticks: { color: '#e0f7fa' } },
+                y: { ticks: { color: '#e0f7fa' } }
+              }
+            }
+          });
+        }
+      })
+      .catch(function() { alert('Veri alınamadı.'); });
+  }
+
+  document.querySelectorAll('.cc-tab').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('.cc-tab').forEach(function(b) { b.classList.remove('active'); });
+      document.querySelectorAll('.cc-tab-content').forEach(function(c) { c.classList.remove('active'); });
+      this.classList.add('active');
+      var id = 'cc-tab-' + this.getAttribute('data-tab');
+      var el = document.getElementById(id);
+      if (el) el.classList.add('active');
+    });
+  });
+
+  document.getElementById('cc-musteri-ara').addEventListener('input', function() {
+    var q = this.value.toLowerCase();
+    document.querySelectorAll('.cc-musteri-item').forEach(function(item) {
+      var name = (item.getAttribute('data-name') || '').toLowerCase();
+      item.style.display = (!q || name.indexOf(q) >= 0) ? '' : 'none';
+    });
+  });
+  document.querySelectorAll('.cc-musteri-item').forEach(function(item) {
+    item.addEventListener('click', function() { load360(parseInt(this.getAttribute('data-id'), 10)); });
+  });
+
+  document.getElementById('cc-btn-fatura').addEventListener('click', function(e) { e.preventDefault(); if (selectedMid) window.open('/faturalar/?musteri_id=' + selectedMid); });
+  document.getElementById('cc-btn-tahsilat').addEventListener('click', function(e) { e.preventDefault(); if (selectedMid) window.open('/giris/#tab-3&mid=' + selectedMid); });
+  document.getElementById('cc-btn-pdf').addEventListener('click', function(e) { e.preventDefault(); if (selectedMid) window.location.href = '/giris/api/cari-kart-pdf/' + selectedMid; });
+  document.getElementById('cc-btn-whatsapp').addEventListener('click', function(e) {
+    e.preventDefault();
+    if (!ccData || !ccData.musteri) return;
+    var tel = (ccData.musteri.phone || '').replace(/\D/g, '');
+    var num = tel.startsWith('0') ? '90' + tel.slice(1) : (tel ? '90' + tel : '');
+    var metin = encodeURIComponent('Sayın ' + (ccData.musteri.name || 'Müşteri') + ',\n\nGüncel bakiyeniz: ' + formatMoney(ccData.ozet.guncel_bakiye) + ' TL. Ödeme yapmanızı rica ederiz.\n\nBESTOFFICE');
+    window.open((num ? 'https://wa.me/' + num + '?text=' : 'https://wa.me/?text=') + metin, '_blank');
+  });
+  document.getElementById('cc-btn-sozlesme').addEventListener('click', function(e) { e.preventDefault(); if (selectedMid) window.open('/giris/?mid=' + selectedMid); });
+
+  if (selectedMid) load360(selectedMid);
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,26 @@
+{% extends "layout.html" %}
+{% block page_title %}Tüm Müşterileri Sil{% endblock %}
+{% block content %}
+<div class="card-erp" style="max-width:560px; margin:24px auto;">
+  <h3 style="color:#ef4444;">⚠ Tüm Müşteri Verilerini Sil</h3>
+  <p style="color:#90a4ae; margin:12px 0;">
+    Aşağıdaki işlem <strong>geri alınamaz</strong>. Silinecekler:
+  </p>
+  <ul style="color:#b0bec5; font-size:13px; margin:8px 0 16px 20px;">
+    <li>Tüm müşteriler (customers)</li>
+    <li>Tüm faturalar</li>
+    <li>Tüm tahsilatlar</li>
+    <li>Tüm kargolar</li>
+    <li>Müşteri sözleşmeleri ve KYC kayıtları</li>
+  </ul>
+  <p style="color:#eab308; font-size:13px;">Devam etmek için aşağıya <strong>evet</strong> yazıp butona tıklayın.</p>
+  <form method="post" action="{{ url_for('musteriler.tumunu_sil') }}" id="tumunuSilForm">
+    <input type="text" name="onay" placeholder="evet yazın" autocomplete="off" maxlength="10"
+           style="width:120px; padding:8px; margin-right:8px; border:1px solid #2d4060; border-radius:6px; background:#0f2537; color:#e0f7fa;">
+    <button type="submit" class="btn-erp" style="background:#b91c1c; color:#fff;">Tümünü Sil</button>
+  </form>
+  <p style="margin-top:16px;">
+    <a href="{{ url_for('musteriler.import_excel') }}" class="btn-erp btn-erp-sm" style="background:#6b7280;">← Excel Yükle sayfasına dön</a>
+  </p>
+</div>
+{% endblock %}
