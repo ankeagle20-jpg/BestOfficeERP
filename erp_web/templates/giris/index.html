@@ -5,9 +5,8 @@
 {% block content %}
 <style>
 .giris-container {
-    display: grid;
-    grid-template-columns: 1fr 1.2fr;
-    gap: 15px;
+    display: block;
+    width: 100%;
 }
 .giris-header {
     background: #0f2537;
@@ -17,10 +16,27 @@
     justify-content: space-between;
     align-items: center;
 }
+.giris-header-left {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
 .giris-header h2 {
     color: #4fc3f7;
     margin: 0;
     font-size: 16px;
+}
+.giris-header-search {
+    min-width: 260px;
+}
+.giris-header-search input {
+    width: 100%;
+    background: #2d4060;
+    border: 1px solid #3d5070;
+    color: #e0f7fa;
+    padding: 6px 10px;
+    border-radius: 3px;
+    font-size: 12px;
 }
 .giris-buttons button {
     background: #00bcd4;
@@ -31,40 +47,6 @@
     cursor: pointer;
     font-size: 12px;
     margin-left: 6px;
-}
-.completion-bar {
-    background: #1e3a50;
-    padding: 10px 12px;
-    margin-bottom: 10px;
-    border-radius: 4px;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-}
-.completion-bar label {
-    color: #b0bec5;
-    font-size: 13px;
-    font-weight: bold;
-}
-.progress-bar {
-    flex: 1;
-    background: #2d4060;
-    height: 20px;
-    border-radius: 10px;
-    overflow: hidden;
-    position: relative;
-}
-.progress-fill {
-    background: linear-gradient(90deg, #00bcd4, #00e676);
-    height: 100%;
-    width: 0%;
-    transition: width 0.3s;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: white;
-    font-size: 11px;
-    font-weight: bold;
 }
 .musteri-liste {
     background: #1e3a50;
@@ -170,6 +152,146 @@
 .tab-content.active {
     display: block;
 }
+.tab-content-wrapper {
+    display: block;
+}
+.tab-content-wrapper.sozlesmeler-split {
+    display: flex;
+    gap: 0;
+    align-items: stretch;
+}
+.tab-content-wrapper.sozlesmeler-split .tab-content-left {
+    flex: 0 0 50%;
+    max-width: 50%;
+    min-width: 0;
+}
+.tab-content-wrapper.sozlesmeler-split .tab-content-right {
+    flex: 0 0 50%;
+    max-width: 50%;
+    min-height: 400px;
+    border-left: 1px solid #2d4060;
+    background: #0f2537;
+    padding: 12px;
+    overflow: auto;
+}
+.sozlesmeler-sag-baslik {
+    color: #4fc3f7;
+    font-size: 14px;
+    margin: 0 0 10px 0;
+    font-weight: 600;
+}
+.sozlesmeler-aylik-grid {
+    display: grid;
+    grid-template-columns: repeat(9, 1fr);
+    gap: 6px;
+    max-width: 50%;
+}
+.sozlesmeler-ay-kart {
+    background: #1e3a50;
+    padding: 5px 6px;
+    border-radius: 3px;
+    border: 1px solid #2d4060;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    transition: all 0.2s;
+}
+.sozlesmeler-ay-kart:hover {
+    border-color: #00bcd4;
+}
+.sozlesmeler-ay-kart h3 {
+    color: #90a4ae;
+    font-size: 9px;
+    margin: 0 0 3px 0;
+    text-align: center;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+.sozlesmeler-ay-kart .aylik-deger {
+    width: 100%;
+    min-width: 4em;
+    min-height: 1.5em;
+    box-sizing: border-box;
+    background: #2d4060;
+    border: 1px solid #3d5070;
+    color: #00bcd4;
+    padding: 2px 4px;
+    border-radius: 2px;
+    font-size: 11px;
+    text-align: center;
+    font-weight: bold;
+    font-family: 'Courier New', monospace;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.sozlesmeler-aylik-bos {
+    color: #546e7a;
+    font-size: 12px;
+    padding: 20px;
+    text-align: center;
+}
+.sozlesmeler-tahsilat-wrap {
+    margin-top: 16px;
+}
+.sozlesmeler-tahsilat-wrap .tahsilat-makbuz-wrap {
+    max-width: 100%;
+}
+.sozlesmeler-cari-ekstre-wrap {
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1px solid #2d4060;
+}
+.sozlesmeler-cari-ekstre-wrap .sozlesmeler-sag-baslik { margin-bottom: 6px; }
+.cari-ekstre-aciklama {
+    font-size: 11px;
+    color: #90a4ae;
+    margin-bottom: 10px;
+}
+.cari-ekstre-filtre {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 14px;
+    margin-bottom: 12px;
+}
+.cari-ekstre-filtre label { color: #b0bec5; font-size: 12px; }
+.cari-ekstre-filtre input[type="date"],
+.cari-ekstre-filtre input[type="number"] {
+    background: #2d4060;
+    border: 1px solid #3d5070;
+    color: #e0f7fa;
+    padding: 6px 10px;
+    border-radius: 3px;
+    font-size: 12px;
+    width: 130px;
+}
+.cari-ekstre-musteri {
+    font-size: 12px;
+    color: #4fc3f7;
+    margin-bottom: 8px;
+}
+.cari-ekstre-tablo-wrap {
+    overflow-x: auto;
+    margin-bottom: 8px;
+}
+.cari-ekstre-tablo {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+.cari-ekstre-tablo th,
+.cari-ekstre-tablo td {
+    padding: 6px 10px;
+    border: 1px solid #2d4060;
+    text-align: left;
+    background: #1a2332;
+    color: #e0f7fa;
+}
+.cari-ekstre-tablo th.num,
+.cari-ekstre-tablo td.num { text-align: right; }
+.cari-ekstre-tablo tbody tr:hover { background: #243447; }
+.cari-ekstre-tablo .cari-ekstre-toplam { font-weight: bold; background: #2d4060 !important; }
 .form-grid {
     display: grid;
     grid-template-columns: 140px 1fr;
@@ -326,8 +448,44 @@
 .cari-aging-61-90 { background: #e53935; }
 .cari-aging-91 { background: #880e4f; }
 .cari-profil-ek { margin-top: 12px; padding-top: 10px; border-top: 1px solid #2d4060; font-size: 11px; color: #90a4ae; }
+.contract-card { margin-top: 12px; background:#0f2537; border-radius:8px; padding:12px; border:1px solid #2d4060; font-size:12px; color:#e0f7fa; }
+.contract-card h4 { margin:0 0 8px 0; color:#4fc3f7; font-size:13px; }
+.contract-grid { display:grid; grid-template-columns: 110px 1fr; gap:6px 8px; align-items:center; }
+.contract-grid label { color:#b0bec5; font-size:11px; text-align:right; }
+.contract-grid input, .contract-grid select { background:#2d4060; border:1px solid #3d5070; color:#e0f7fa; padding:4px 8px; border-radius:3px; font-size:11px; }
+.contract-summary { margin-top:8px; font-size:11px; color:#b0bec5; }
+.contract-summary strong { color:#e0f7fa; font-family:monospace; }
+.contract-actions { margin-top:8px; display:flex; flex-wrap:wrap; gap:6px; }
+.contract-actions button { border:none; border-radius:4px; padding:6px 10px; font-size:11px; cursor:pointer; }
+.contract-actions .primary { background:#00bcd4; color:#fff; }
+.contract-actions .secondary { background:#546e7a; color:#fff; }
+.contract-actions .danger { background:#c62828; color:#fff; }
+.contract-metrics { display:flex; flex-wrap:wrap; gap:10px; margin-bottom:12px; }
+.contract-metric {
+    flex:1 1 140px;
+    min-width:140px;
+    background:#0f2537;
+    border-radius:8px;
+    padding:10px 12px;
+    border:1px solid #1e3a5f;
+    display:flex;
+    flex-direction:column;
+    gap:4px;
+}
+.contract-metric-label { font-size:11px; color:#90a4ae; text-transform:uppercase; }
+.contract-metric-value { font-size:16px; font-weight:700; color:#e0f7fa; }
+.contract-metric-sub { font-size:11px; color:#b0bec5; }
+.contract-metric.risk .contract-metric-value { font-size:20px; }
 .cari-kart-sag { min-width: 0; overflow: auto; }
 .cari-hareketler-baslik { color: #4fc3f7; font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+.contract-plan-baslik { color:#4fc3f7; font-size:13px; font-weight:700; margin-bottom:4px; margin-top:4px; }
+.contract-plan-tablo-wrap { overflow-x:auto; max-height:220px; overflow-y:auto; background:#0f2537; border-radius:6px; border:1px solid #2d4060; margin-bottom:12px; }
+.contract-plan-tablo { width:100%; border-collapse:collapse; font-size:11px; }
+.contract-plan-tablo th { background:#1e3a50; color:#4fc3f7; padding:6px 8px; text-align:left; position:sticky; top:0; }
+.contract-plan-tablo td { padding:5px 8px; border-bottom:1px solid #2d4060; color:#e0f7fa; }
+.contract-plan-tablo td.num { text-align:right; font-family:monospace; }
+.contract-plan-tablo tr.gecikmis { background:rgba(229,57,53,0.15); }
+.contract-plan-tablo tr.odendi { background:rgba(56,142,60,0.12); }
 .cari-hareketler-tablo-wrap { overflow-x: auto; max-height: 400px; overflow-y: auto; background: #0f2537; border-radius: 6px; }
 .cari-hareketler-tablo { width: 100%; border-collapse: collapse; font-size: 11px; }
 .cari-hareketler-tablo th { background: #1e3a50; color: #4fc3f7; padding: 8px 10px; text-align: left; position: sticky; top: 0; }
@@ -379,6 +537,12 @@
     background: #546e7a; color: white; border: none;
     padding: 8px 16px; border-radius: 4px; cursor: pointer;
 }
+.tahsilat-btn-kaydet {
+    background: #2e7d32; color: white; border: none;
+    padding: 8px 14px; border-radius: 4px; cursor: pointer; font-size: 12px;
+    display: inline-flex; align-items: center; gap: 6px;
+}
+.tahsilat-btn-kaydet:hover { background: #1b5e20; color: white; }
 .tahsilat-btn-onizle {
     background: #7e57c2; color: white; border: none;
     padding: 8px 14px; border-radius: 4px; cursor: pointer; font-size: 12px;
@@ -414,56 +578,53 @@
 }
 @media (max-width: 1024px) {
     .giris-container {
-        grid-template-columns: 1fr;
+        display: block;
     }
 }
 </style>
 
 <div class="giris-header">
-    <h2>📋 Giriş / Müşteri Kaydı</h2>
+    <div class="giris-header-left">
+        <h2>Müşteri Listesi</h2>
+        <div class="giris-header-search">
+            <input type="text" id="header-arama-input" placeholder="Müşteri adı / vergi no ara..." onkeyup="headerMusteriAra()">
+        </div>
+    </div>
     <div class="giris-buttons">
         <button onclick="yeniMusteri()" style="background: #4caf50;">➕ Yeni Müşteri</button>
         <button onclick="location.reload()">↺ Yenile</button>
     </div>
 </div>
 
-<!-- Tamamlanma Çubuğu -->
-<div class="completion-bar">
-    <label>Tamamlanma:</label>
-    <div class="progress-bar">
-        <div class="progress-fill" id="completion-fill">0%</div>
-    </div>
-</div>
-
 <div class="giris-container">
-    <!-- Sol: Müşteri Listesi -->
-    <div class="musteri-liste">
-        <h3>Müşteri Listesi</h3>
-        
-        <div class="arama-box">
-            <input type="text" id="arama-input" placeholder="Müşteri adı veya vergi no ara..." onkeyup="musteriAra()">
-            <button onclick="temizle()">✖ Temizle</button>
-        </div>
-        
-        <div class="musteri-liste-items" id="musteri-liste">
+    <!-- Sağ: Müşteri Formu (tam genişlik) -->
+    <div class="musteri-form">
+        <!-- Arama sonuçları: sadece üst arama kutusuna yazınca göster -->
+        <div class="musteri-liste-items" id="musteri-liste" style="display:none; margin-bottom:10px;">
             <div style="padding: 20px; text-align: center; color: #6b7280; font-size: 12px;">
-                Müşteri arayın veya yeni kayıt oluşturun
+                Müşteri aramak için yukarıdaki alana yazmaya başlayın.
             </div>
         </div>
-    </div>
-<!-- Sağ: Müşteri Formu -->
-    <div class="musteri-form">
-        <h3>Müşteri Ekle / Güncelle</h3>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <h3 style="margin:0;">Müşteri Ekle / Güncelle</h3>
+            <button type="button" onclick="temizleForm()" style="background:#4caf50;color:#fff;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600;">
+                ➕ Yeni Müşteri
+            </button>
+        </div>
         
         <!-- Sekmeler -->
         <div class="tabs">
-            <button class="tab active" onclick="switchTab(0)">Müşteri Ekle</button>
-            <button class="tab" onclick="switchTab(1)">Kira Senaryo</button>
-            <button class="tab" onclick="switchTab(2)">Kira Bildirgesi</button>
-            <button class="tab" onclick="switchTab(3)">Tahsilat</button>
-            <button class="tab" onclick="switchTab(4)">Cari Kart</button>
+            <button class="tab active" data-index="0" onclick="switchTab(0)">Müşteri Ekle</button>
+            <button class="tab" data-index="5" onclick="switchTab(5)">Potansiyel Müşteriler</button>
+            <button class="tab" data-index="1" onclick="switchTab(1)">Kira Senaryo</button>
+            <button class="tab" data-index="2" onclick="switchTab(2)">Kira Bildirgesi</button>
+            <button class="tab" data-index="3" onclick="switchTab(3)">Tahsilat</button>
+            <button class="tab" data-index="4" onclick="switchTab(4)">Cari Kart</button>
+            <button class="tab" data-index="6" onclick="switchTab(6)">Sözleşmeler</button>
         </div>
         
+        <div class="tab-content-wrapper" id="tab-content-wrapper">
+        <div class="tab-content-left">
         <!-- Sekme 1: Müşteri Ekle -->
         <div class="tab-content active" id="tab-0">
             <form id="musteri-form" onsubmit="kaydet(event)">
@@ -555,8 +716,11 @@
                             <option>Paylaşımlı Ofis</option>
                         </select>
                         
-                        <label>Aylık Kira (₺)</label>
-                        <input type="number" step="0.01" id="aylik_kira" value="0.00" onchange="hesaplaYuzde()">
+                        <label class="required">Aylık Kira (₺)</label>
+                        <input type="number" step="0.01" id="aylik_kira" value="0.00" required onchange="hesaplaYuzde()" oninput="sozlesmelerAylikGuncelle()">
+                        
+                        <label>Kira Süresi Aylık</label>
+                        <input type="number" id="kira_suresi_ay" value="12" min="1" max="240" step="1" placeholder="12" onchange="hesaplaYuzde()" oninput="sozlesmelerAylikGuncelle()" title="Sözleşme süresi (ay). Tıklayıp manuel girebilirsiniz.">
                         
                         <label class="required">Sözleşme Başlangıç</label>
                         <input type="date" id="sozlesme_baslangic" onchange="hesaplaYuzde()">
@@ -621,6 +785,14 @@
                 <div class="sozlesme-durum" id="sozlesme-durum">
                     <p>Henüz sözleşme oluşturulmadı.</p>
                 </div>
+                <!-- Sözleşme Önizleme -->
+                <div id="sozlesme-onizleme" style="display:none;margin-top:10px;background:#0f2537;border:1px solid #1e3a50;border-radius:4px;">
+                    <div style="padding:6px 10px;border-bottom:1px solid #1e3a50;font-size:12px;color:#4fc3f7;display:flex;justify-content:space-between;align-items:center;">
+                        <span>📄 Sözleşme Önizleme</span>
+                        <button type="button" onclick="document.getElementById('sozlesme-onizleme').style.display='none';" style="background:none;border:none;color:#90a4ae;cursor:pointer;font-size:11px;">Kapat</button>
+                    </div>
+                    <iframe id="sozlesme-onizleme-iframe" src="about:blank" style="width:100%;height:260px;border:none;"></iframe>
+                </div>
                 
                 <!-- Butonlar -->
                 <div class="form-actions">
@@ -641,6 +813,33 @@
                     <button type="button" class="cari-btn tahsilat" onclick="cariKartTahsilatAc()"><i class="fa fa-hand-holding-usd"></i> Tahsilat Al</button>
                     <button type="button" class="cari-btn whatsapp" onclick="cariKartWhatsApp()"><i class="fa fa-whatsapp"></i> WhatsApp Hatırlatma</button>
                     <button type="button" class="cari-btn pdf" onclick="cariKartPdfIndir()"><i class="fa fa-file-pdf-o"></i> PDF Ekstre</button>
+                </div>
+                <div class="contract-metrics" id="ck_metrics" style="display:none;">
+                    <div class="contract-metric">
+                        <div class="contract-metric-label">Toplam Sözleşme</div>
+                        <div class="contract-metric-value" id="ck_m_toplam">0,00 ₺</div>
+                        <div class="contract-metric-sub">Planlanan borç</div>
+                    </div>
+                    <div class="contract-metric">
+                        <div class="contract-metric-label">Tahakkuk Eden</div>
+                        <div class="contract-metric-value" id="ck_m_tahakkuk">0,00 ₺</div>
+                        <div class="contract-metric-sub">Vadesi gelmiş taksitler</div>
+                    </div>
+                    <div class="contract-metric">
+                        <div class="contract-metric-label">Gelecek Taksitler</div>
+                        <div class="contract-metric-value" id="ck_m_gelecek">0,00 ₺</div>
+                        <div class="contract-metric-sub">Sözleşme bakiyesi</div>
+                    </div>
+                    <div class="contract-metric">
+                        <div class="contract-metric-label">Geciken</div>
+                        <div class="contract-metric-value" id="ck_m_geciken">0,00 ₺</div>
+                        <div class="contract-metric-sub">Gecikmiş taksitler</div>
+                    </div>
+                    <div class="contract-metric risk">
+                        <div class="contract-metric-label">Risk Skoru</div>
+                        <div class="contract-metric-value" id="ck_m_risk">—</div>
+                        <div class="contract-metric-sub">80+ iyi · 50-80 riskli · &lt;50 kritik</div>
+                    </div>
                 </div>
                 <div id="cari-kart-musteri-sec" class="cari-kart-uyari">
                     <i class="fa fa-info-circle"></i> Cari kartı görmek için soldan bir müşteri seçin.
@@ -664,8 +863,85 @@
                             </div>
                             <div id="cari-profil-ek" class="cari-profil-ek"></div>
                         </div>
+                        <div class="contract-card">
+                            <h4>📜 Sözleşme Yönetimi</h4>
+                            <div style="margin-bottom:6px;">
+                                <label style="font-size:11px;color:#b0bec5;">Aktif Sözleşme</label>
+                                <select id="ck_contract_select" style="width:100%;background:#2d4060;border:1px solid #3d5070;color:#e0f7fa;padding:4px 8px;border-radius:3px;font-size:11px;" onchange="ckAktifSozlesmeDegisti()">
+                                    <option value="">— Sözleşme Seçin / Yeni —</option>
+                                </select>
+                            </div>
+                            <div class="contract-grid">
+                                <label>Cari Kodu</label>
+                                <input type="text" id="ck_cari_kodu">
+                                <label>Sözleşme No</label>
+                                <input type="text" id="ck_sozlesme_no">
+                                <label>Başlangıç</label>
+                                <input type="date" id="ck_baslangic">
+                                <label>Bitiş</label>
+                                <input type="date" id="ck_bitis">
+                                <label>Süre (Ay)</label>
+                                <input type="number" id="ck_sure_ay" min="1" step="1">
+                                <label>Aylık Kira</label>
+                                <input type="number" id="ck_aylik_kira" step="0.01">
+                                <label>Toplam</label>
+                                <input type="number" id="ck_toplam_tutar" step="0.01">
+                                <label>Para Birimi</label>
+                                <select id="ck_para_birimi">
+                                    <option value="TRY">TL</option>
+                                    <option value="USD">USD</option>
+                                    <option value="EUR">EUR</option>
+                                </select>
+                                <label>Ödeme Günü</label>
+                                <input type="number" id="ck_odeme_gunu" min="1" max="28" placeholder="1,5,15...">
+                                <label>Depozito</label>
+                                <input type="number" id="ck_depozito" step="0.01">
+                                <label>Gecikme Faizi (%)</label>
+                                <input type="number" id="ck_gecikme_faizi" step="0.01">
+                                <label>Yıllık Artış (%)</label>
+                                <input type="number" id="ck_yillik_artis" step="0.01">
+                                <label>Muacceliyet</label>
+                                <select id="ck_muacceliyet">
+                                    <option value="false">Yok</option>
+                                    <option value="true">Var</option>
+                                </select>
+                                <label>Durum</label>
+                                <select id="ck_durum">
+                                    <option value="aktif">Aktif</option>
+                                    <option value="gecikmeli">Gecikmeli</option>
+                                    <option value="ihtar">İhtar Gönderildi</option>
+                                    <option value="avukatlik">Avukatlık</option>
+                                    <option value="kapandi">Kapandı</option>
+                                </select>
+                            </div>
+                            <div class="contract-summary">
+                                <div>Toplam Sözleşme: <strong id="ck_ozet_toplam">0</strong> ₺</div>
+                                <div>Tahakkuk Eden: <strong id="ck_ozet_tahakkuk">0</strong> ₺ · Ödenen: <strong id="ck_ozet_odenen">0</strong> ₺</div>
+                                <div>Gelecek Taksitler: <strong id="ck_ozet_gelecek">0</strong> ₺ · Geciken: <strong id="ck_ozet_geciken">0</strong> ₺</div>
+                            </div>
+                            <div class="contract-actions">
+                                <button type="button" class="primary" onclick="ckSozlesmeKaydet()">💾 Sözleşmeyi Kaydet</button>
+                                <button type="button" class="secondary" onclick="ckYeniSozlesme()">Yeni</button>
+                            </div>
+                        </div>
                     </div>
                     <div class="cari-kart-sag">
+                        <div class="contract-plan-baslik">Taksit Planı</div>
+                        <div class="contract-plan-tablo-wrap">
+                            <table class="contract-plan-tablo">
+                                <thead>
+                                    <tr>
+                                        <th>#</th>
+                                        <th>Vade</th>
+                                        <th class="num">Tutar</th>
+                                        <th class="num">Ödenen</th>
+                                        <th class="num">Kalan</th>
+                                        <th>Durum</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="ck_plan_tbody"></tbody>
+                            </table>
+                        </div>
                         <div class="cari-hareketler-baslik">Cari Hareketler</div>
                         <div class="cari-hareketler-tablo-wrap">
                             <table class="cari-hareketler-tablo" id="cari-hareketler-tablo">
@@ -716,6 +992,7 @@
                     </div>
                     <div class="tahsilat-makbuz-aksiyon">
                         <button type="button" class="tahsilat-btn-iptal" onclick="girisTahsilatIptal()">İptal</button>
+                        <button type="button" class="tahsilat-btn-kaydet" onclick="girisTahsilatMakbuzKaydet(); return false;"><i class="fa fa-save"></i> Makbuzu Kayıt</button>
                         <button type="button" class="tahsilat-btn-onizle" onclick="girisTahsilatOnizle(); return false;"><i class="fa fa-eye"></i> Önizle</button>
                         <button type="button" class="tahsilat-btn-yazdir" onclick="girisTahsilatYazdir(); return false;"><i class="fa fa-print"></i> Yazdır</button>
                         <button type="button" class="tahsilat-btn-pdf" onclick="girisTahsilatPdfIndir(); return false;"><i class="fa fa-file-pdf-o"></i> PDF İndir</button>
@@ -725,6 +1002,54 @@
             </div>
         </div>
         
+        <!-- Sekme 6: Potansiyel Müşteriler -->
+        <div class="tab-content" id="tab-5">
+            <div style="background:#1e3a50;padding:12px;border-radius:4px;display:flex;flex-direction:column;gap:12px;max-height:700px;overflow-y:auto;">
+                <h4 style="color:#4fc3f7;margin:0 0 6px 0;display:flex;align-items:center;justify-content:space-between;">
+                    <span>Potansiyel Müşteriler</span>
+                    <small style="color:#90a4ae;font-weight:400;">"Düşünüyor" durumundakiler için hatırlatma planla</small>
+                </h4>
+                <form id="pot-form" onsubmit="potKaydet(event)">
+                    <input type="hidden" id="pm_id">
+                    <div class="form-grid" style="margin-bottom:10px;">
+                        <label class="required">Müşteri Adı</label>
+                        <input type="text" id="pm_ad" required>
+
+                        <label class="required">Telefon</label>
+                        <input type="text" id="pm_telefon" placeholder="5XX XXX XX XX">
+
+                        <label>İlgilendiği Paket</label>
+                        <input type="text" id="pm_paket" placeholder="Örn: Sanal Ofis · 12 Ay">
+
+                        <label>Görüşme Notu</label>
+                        <textarea id="pm_not" rows="2" style="min-height:50px;"></textarea>
+
+                        <label class="required">Hatırlatma Tarihi</label>
+                        <input type="date" id="pm_hatirlatma">
+
+                        <label>Durum</label>
+                        <select id="pm_durum">
+                            <option value="düşünüyor" selected>Düşünüyor</option>
+                            <option value="olumlu">Olumlu</option>
+                            <option value="olumsuz">Olumsuz</option>
+                        </select>
+                    </div>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;margin-bottom:6px;">
+                        <button type="button" onclick="potYeni()" style="background:#546e7a;color:#fff;border:none;padding:6px 10px;border-radius:4px;font-size:12px;cursor:pointer;">Yeni</button>
+                        <button type="submit" style="background:#00bcd4;color:#fff;border:none;padding:6px 14px;border-radius:4px;font-size:12px;font-weight:600;cursor:pointer;">💾 Kaydet</button>
+                        <button type="button" onclick="potSozlesme()" style="background:#22c55e;color:#fff;border:none;padding:6px 14px;border-radius:4px;font-size:12px;font-weight:600;cursor:pointer;">📄 Sözleşme Başlat</button>
+                    </div>
+                </form>
+                <div style="border-top:1px solid #2d4060;padding-top:8px;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                        <div style="color:#90a4ae;font-size:12px;">Geri dönüş bekleyenler</div>
+                        <button type="button" onclick="potYukle()" style="background:#0d47a1;color:#fff;border:none;padding:4px 10px;border-radius:4px;font-size:11px;cursor:pointer;">⟳ Listeyi Yenile</button>
+                    </div>
+                    <div id="pm_list" style="max-height:260px;overflow-y:auto;background:#0f2537;border-radius:3px;border:1px solid #2d4060;font-size:12px;color:#e0f7fa;"></div>
+                </div>
+            </div>
+        </div>
+
         <!-- Sekme 2: Kira Senaryo -->
 <div class="tab-content" id="tab-1">
     <div style="background: #1e3a50; padding: 15px; border-radius: 4px;">
@@ -732,7 +1057,12 @@
         
         <div class="form-grid">
             <label>Müşteri İsmi</label>
-            <input type="text" id="senaryo_musteri_ismi" placeholder="Müşteri adı girebilirsiniz (opsiyonel)">
+            <div style="grid-column: 2;">
+                <input type="text" id="senaryo_musteri_ismi" placeholder="Müşteri adını yazın veya listeden seçin" style="width: 100%; margin-bottom: 4px;">
+                <div id="senaryo_musteri_liste" style="display:none; max-height:200px; overflow-y:auto; background:#0f2537; border:1px solid #2d4060; border-radius:4px; margin-top:4px; font-size:12px; color:#e0f7fa;"></div>
+                <input type="hidden" id="senaryo_musteri_id">
+                <div style="font-size:11px;color:#90a4ae;margin-top:4px;">İstersen elle yazabilir veya birkaç harf yazınca listeden seçebilirsin.</div>
+            </div>
 
             <label class="required">Başlangıç Kira (₺)</label>
             <div style="grid-column: 2;">
@@ -784,9 +1114,12 @@
                     <thead>
                         <tr style="background: #0097a7; color: white;">
                             <th style="padding: 8px; text-align: left; font-size: 11px;">Yıl</th>
+                            <th style="padding: 8px; text-align: center; font-size: 11px;">Kira Bildirgesi</th>
                             <th style="padding: 8px; text-align: right; font-size: 11px;">Aylık Kira</th>
-                            <th style="padding: 8px; text-align: right; font-size: 11px;">Yıllık Toplam</th>
+                            <th style="padding: 8px; text-align: right; font-size: 11px;">KDV Dahil</th>
                             <th style="padding: 8px; text-align: right; font-size: 11px;">Artış %</th>
+                            <th style="padding: 8px; text-align: right; font-size: 11px;">Yıllık Toplam</th>
+                            <th style="padding: 8px; text-align: right; font-size: 11px;">KDV Dahil Yıllık</th>
                             <th style="padding: 8px; text-align: right; font-size: 11px;">Artış Tutar</th>
                         </tr>
                     </thead>
@@ -851,48 +1184,223 @@
                 </div>
             </div>
         </div>
+        </div>
+        <div class="tab-content-right" id="sozlesmeler-sag-alan">
+            <h4 class="sozlesmeler-sag-baslik">Aylık Tutarlar</h4>
+            <div class="sozlesmeler-aylik-grid" id="sozlesmeler-aylik-grid"></div>
+            <div class="sozlesmeler-aylik-bos" id="sozlesmeler-aylik-bos" style="display:none;">Sözleşme başlangıç ve bitiş tarihlerini girin; aylık kira hücreleri burada listelenecek.</div>
+            <div class="sozlesmeler-tahsilat-wrap">
+                <h4 class="sozlesmeler-sag-baslik">Tahsilat Makbuzu</h4>
+                <div class="tahsilat-makbuz-wrap">
+                    <div class="tahsilat-makbuz-baslik">
+                        <h3><i class="fa fa-receipt"></i> Yeni Tahsilat Makbuzu</h3>
+                    </div>
+                    <form id="sozlesme-tahsilat-form" onsubmit="return false;">
+                        <div class="tahsilat-form-grup">
+                            <label>Müşteri <span class="zorunlu">*</span></label>
+                            <input type="text" id="sozlesme_tahsilat_musteri_ara" placeholder="Müşteri ara, seçin..." autocomplete="off">
+                            <input type="hidden" id="sozlesme_tahsilat_musteri_id">
+                            <input type="hidden" id="sozlesme_tahsilat_musteri_phone">
+                            <div id="sozlesme_tahsilat_musteri_listesi" class="tahsilat-musteri-dropdown" style="display:none;"></div>
+                            <span id="sozlesme_tahsilat_musteri_secilen" class="tahsilat-musteri-secilen" style="display:none;"></span>
+                        </div>
+                        <div class="tahsilat-form-grup">
+                            <label>Tutar (TL) <span class="zorunlu">*</span></label>
+                            <input type="text" id="sozlesme_tahsilat_tutar" placeholder="0,00" required>
+                        </div>
+                        <div class="tahsilat-form-grup">
+                            <label>Ödeme Türü</label>
+                            <select id="sozlesme_tahsilat_odeme_turu">
+                                <option value="nakit">Nakit</option>
+                                <option value="havale">Havale/EFT</option>
+                                <option value="kredi_karti">Kredi Kartı</option>
+                                <option value="cek">Çek</option>
+                            </select>
+                        </div>
+                        <div class="tahsilat-form-grup">
+                            <label>Tarih</label>
+                            <input type="date" id="sozlesme_tahsilat_tarih">
+                        </div>
+                        <div class="tahsilat-form-grup">
+                            <label>Açıklama</label>
+                            <textarea id="sozlesme_tahsilat_aciklama" rows="2" placeholder="Örn: 2026 Mart ayı kira bedeli"></textarea>
+                        </div>
+                        <div class="tahsilat-makbuz-aksiyon">
+                            <button type="button" class="tahsilat-btn-iptal" onclick="sozlesmeTahsilatIptal()">İptal</button>
+                            <button type="button" class="tahsilat-btn-kaydet" onclick="sozlesmeTahsilatKaydet(); return false;"><i class="fa fa-save"></i> Makbuzu Kayıt</button>
+                            <button type="button" class="tahsilat-btn-onizle" onclick="sozlesmeTahsilatOnizle(); return false;"><i class="fa fa-eye"></i> Önizle</button>
+                            <button type="button" class="tahsilat-btn-yazdir" onclick="sozlesmeTahsilatYazdir(); return false;"><i class="fa fa-print"></i> Yazdır</button>
+                            <button type="button" class="tahsilat-btn-pdf" onclick="sozlesmeTahsilatPdfIndir(); return false;"><i class="fa fa-file-pdf-o"></i> PDF İndir</button>
+                            <button type="button" class="tahsilat-btn-whatsapp" onclick="sozlesmeTahsilatWhatsApp(); return false;"><i class="fa fa-whatsapp"></i> WhatsApp</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            <div class="sozlesmeler-cari-ekstre-wrap">
+                <h4 class="sozlesmeler-sag-baslik">Cari Ekstre</h4>
+                <p class="cari-ekstre-aciklama">Tarih aralığında aylık kira borç (her ay fatura gibi) ve tahsilat alacak; ödemeler bakiyeden düşülür.</p>
+                <div class="cari-ekstre-filtre">
+                    <label>Başlangıç</label>
+                    <input type="date" id="cari_ekstre_baslangic">
+                    <label>Bitiş</label>
+                    <input type="date" id="cari_ekstre_bitis">
+                    <label>Aylık Kira (₺)</label>
+                    <input type="number" step="0.01" id="cari_ekstre_aylik_kira" placeholder="Sol formdan alınır">
+                    <button type="button" class="tahsilat-btn-kaydet" onclick="cariEkstreYukle()"><i class="fa fa-refresh"></i> Ekstre Göster</button>
+                </div>
+                <div id="cari_ekstre_musteri_bilgi" class="cari-ekstre-musteri" style="display:none;"></div>
+                <div class="cari-ekstre-tablo-wrap">
+                    <table class="cari-ekstre-tablo" id="cari_ekstre_tablo">
+                        <thead>
+                            <tr>
+                                <th>Tarih</th>
+                                <th>Açıklama</th>
+                                <th class="num">Borç</th>
+                                <th class="num">Alacak</th>
+                                <th class="num">Bakiye</th>
+                            </tr>
+                        </thead>
+                        <tbody id="cari_ekstre_tbody"></tbody>
+                        <tfoot id="cari_ekstre_foot" style="display:none;">
+                            <tr class="cari-ekstre-toplam">
+                                <td colspan="2"><strong>Toplam</strong></td>
+                                <td class="num" id="cari_ekstre_toplam_borc">0,00</td>
+                                <td class="num" id="cari_ekstre_toplam_alacak">0,00</td>
+                                <td class="num" id="cari_ekstre_bakiye">0,00</td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+                <div id="cari_ekstre_bos" class="sozlesmeler-aylik-bos">Müşteri seçin, tarih aralığı ve aylık kira girin, Ekstre Göster ile yükleyin.</div>
+            </div>
+        </div>
+        </div>
    </div>
 </div>
 <script>
 let selectedId = null;
 let musteriler = [];
 let yukluDosyalar = [];
+let potansiyeller = [];
+let potSelectedId = null;
+/** Açık olan sekme (0=Müşteri Ekle, 1=Kira Senaryo, 2=Kira Bildirgesi, 3=Tahsilat, 4=Cari Kart, 5=Potansiyel, 6=Sözleşmeler). Müşteri seçimi bu sekmeye göre forma doldurur. */
+let currentTabIndex = 0;
 
-// Sekme değiştirme (içerik id ile eşleştirilir: tab-0 .. tab-4)
+// Sekme değiştirme (içerik id ile eşleştirilir: tab-0 .. tab-5)
 function switchTab(index) {
-    document.querySelectorAll('.tab').forEach((t, i) => {
-        if (i === index) {
+    currentTabIndex = index;
+    // Üst sekme butonlarının aktifliğini index yerine data-index ile kontrol et
+    document.querySelectorAll('.tab').forEach(function(t) {
+        var v = parseInt(t.getAttribute('data-index'), 10);
+        if (!isNaN(v) && v === index) {
             t.classList.add('active');
         } else {
             t.classList.remove('active');
         }
     });
-    
-    var tabId = 'tab-' + index;
+
+    // Sözleşmeler sekmesi (index 6) için içerik Müşteri Ekle (tab-0) ile aynıdır
+    var effectiveIndex = (index === 6 ? 0 : index);
+    var tabId = 'tab-' + effectiveIndex;
+    var wrapper = document.getElementById('tab-content-wrapper');
+    if (wrapper) {
+        if (index === 6) {
+            wrapper.classList.add('sozlesmeler-split');
+            sozlesmelerAylikGuncelle();
+        } else wrapper.classList.remove('sozlesmeler-split');
+    }
     document.querySelectorAll('.tab-content').forEach(function(c) {
         if (c.id === tabId) {
             c.classList.add('active');
-            if (index === 3) {
+            if (effectiveIndex === 3) {
                 var tarihEl = document.getElementById('giris_tahsilat_tarih');
                 if (tarihEl && !tarihEl.value) tarihEl.value = new Date().toISOString().slice(0, 10);
             }
-            if (index === 4) {
+            if (effectiveIndex === 4) {
                 if (selectedId) cariKartYukle(selectedId);
                 else {
                     document.getElementById('cari-kart-musteri-sec').style.display = 'block';
                     document.getElementById('cari-kart-icerik').style.display = 'none';
                 }
             }
+            if (effectiveIndex === 5) {
+                potDefaultHatirlatma();
+                potYukle();
+            }
         } else {
             c.classList.remove('active');
         }
     });
     // Kira Bildirgesi sekmesine geçince müşteri ve sözleşme tarihini formdan al
-    if (index === 2) {
+    if (effectiveIndex === 2) {
         const ad = document.getElementById('name');
         const soz = document.getElementById('sozlesme_baslangic');
         if (document.getElementById('bildirge_musteri_adi')) document.getElementById('bildirge_musteri_adi').value = ad ? ad.value : '';
         if (document.getElementById('bildirge_sozlesme_tarihi')) document.getElementById('bildirge_sozlesme_tarihi').value = soz ? soz.value : '';
+    }
+}
+
+var SOZLESME_AY_ADLARI = ['OCAK','ŞUBAT','MART','NİSAN','MAYIS','HAZİRAN','TEMMUZ','AĞUSTOS','EYLÜL','EKİM','KASIM','ARALIK'];
+function sozlesmelerAylikGuncelle() {
+    var grid = document.getElementById('sozlesmeler-aylik-grid');
+    var bos = document.getElementById('sozlesmeler-aylik-bos');
+    if (!grid || !bos) return;
+    var basEl = document.getElementById('sozlesme_baslangic');
+    var bitEl = document.getElementById('sozlesme_bitis');
+    var kiraEl = document.getElementById('aylik_kira');
+    var sureEl = document.getElementById('kira_suresi_ay');
+    var basStr = basEl && basEl.value ? basEl.value.trim() : '';
+    var bitStr = bitEl && bitEl.value ? bitEl.value.trim() : '';
+    var aylikKira = kiraEl && kiraEl.value ? parseFloat(String(kiraEl.value).replace(',','.')) : 0;
+    if (isNaN(aylikKira)) aylikKira = 0;
+    var aySayisi = 0;
+    if (sureEl && sureEl.value) {
+        var sureAy = parseInt(sureEl.value, 10);
+        if (!isNaN(sureAy) && sureAy >= 1) {
+            aySayisi = Math.min(sureAy, 240);
+        }
+    }
+    if (aySayisi <= 0 && basStr && bitStr) {
+        var bas = new Date(basStr);
+        var bit = new Date(bitStr);
+        if (!isNaN(bas.getTime()) && !isNaN(bit.getTime()) && bit >= bas) {
+            aySayisi = (bit.getFullYear() - bas.getFullYear()) * 12 + (bit.getMonth() - bas.getMonth()) + 1;
+            if (aySayisi < 1) aySayisi = 1;
+            if (aySayisi > 240) aySayisi = 240;
+        }
+    }
+    if (aySayisi <= 0) {
+        grid.innerHTML = '';
+        bos.style.display = 'block';
+        return;
+    }
+    if (!basStr) basStr = new Date().toISOString().slice(0, 10);
+    var bas = new Date(basStr);
+    if (isNaN(bas.getTime())) bas = new Date();
+    bos.style.display = 'none';
+    var html = '';
+    for (var i = 0; i < aySayisi; i++) {
+        var d = new Date(bas);
+        d.setMonth(d.getMonth() + i);
+        var ayAdi = SOZLESME_AY_ADLARI[d.getMonth()];
+        var yil = d.getFullYear();
+        var tutarStr = aylikKira > 0 ? (Math.round(aylikKira * 100) / 100).toFixed(2) : '—';
+        html += '<div class="sozlesmeler-ay-kart"><h3>' + ayAdi + ' ' + yil + '</h3><div class="aylik-deger">' + tutarStr + '</div></div>';
+    }
+    grid.innerHTML = html;
+    // Cari Ekstre aylık kira alanını sol formla senkronize et (borç satırları aynı tutarda olsun)
+    var ceAylik = document.getElementById('cari_ekstre_aylik_kira');
+    if (ceAylik && (aylikKira > 0 || kiraEl.value === '')) {
+        ceAylik.value = kiraEl && kiraEl.value ? kiraEl.value : '';
+    }
+}
+
+function potDefaultHatirlatma() {
+    const el = document.getElementById('pm_hatirlatma');
+    if (el && !el.value) {
+        const d = new Date();
+        d.setDate(d.getDate() + 2);
+        el.value = d.toISOString().slice(0, 10);
     }
 }
 
@@ -906,7 +1414,7 @@ function hesaplaYuzde() {
         'vergi_dairesi', 'mersis', 'ticaret_sicil', 'kurulus_tarihi',
         'faaliyet', 'nace', 'onceki_adres', 'sube_merkez',
         'yetkili_tc', 'phone', 'phone2', 'email', 'email_sirket',
-        'hizmet_turu', 'aylik_kira', 'sozlesme_baslangic', 'sozlesme_bitis',
+        'hizmet_turu', 'aylik_kira', 'kira_suresi_ay', 'sozlesme_baslangic', 'sozlesme_bitis',
         'ev_imza_sirküleri', 'ev_vergi_levhasi', 'ev_ticaret_sicil',
         'ev_faaliyet_belgesi', 'ev_ikametgah', 'ev_kase_ornegi'
     ];
@@ -939,31 +1447,156 @@ function hesaplaYuzde() {
     const opsiyonelYuzde = (doluOpsiyonel / opsiyonelAlanlar.length) * 40;
     const toplamYuzde = Math.round(zorunluYuzde + opsiyonelYuzde);
     
-    // Progress bar güncelle
+    // Progress bar güncelle (eleman kaldırıldıysa atla)
     const fill = document.getElementById('completion-fill');
-    fill.style.width = toplamYuzde + '%';
-    fill.textContent = toplamYuzde + '%';
-    
+    if (fill) {
+        fill.style.width = toplamYuzde + '%';
+        fill.textContent = toplamYuzde + '%';
+    }
+    sozlesmelerAylikGuncelle();
     return toplamYuzde;
 }
 
-// Müşteri ara
+// Potansiyel Müşteri sekmesi
+async function potYukle() {
+    try {
+        const res = await fetch('/giris/api/potansiyel');
+        const data = await res.json();
+        potansiyeller = data || [];
+        const box = document.getElementById('pm_list');
+        if (!box) return;
+        if (!potansiyeller.length) {
+            box.innerHTML = '<div style="padding:10px;color:#90a4ae;font-size:12px;">Kayıtlı potansiyel müşteri yok.</div>';
+            return;
+        }
+        box.innerHTML = potansiyeller.map(function(p){
+            const ht = p.hatirlatma_tarihi ? String(p.hatirlatma_tarihi).substring(0,10) : '—';
+            const durum = (p.durum || '').toLowerCase();
+            const etiket = durum === 'olumlu' ? 'Olumlu' : durum === 'olumsuz' ? 'Olumsuz' : 'Düşünüyor';
+            return '<div class="pot-row" data-id="'+p.id+'" onclick="potSec('+p.id+')" style="display:flex;justify-content:space-between;align-items:center;padding:6px 9px;border-bottom:1px solid #2d4060;cursor:pointer;">'
+                + '<div>'
+                + '<div style="font-weight:600;color:#e0f7fa;">'+(p.ad || '—')+'</div>'
+                + '<div style="font-size:11px;color:#90a4ae;">'+(p.paket || '')+' · Hatırlatma: '+ht+' · '+etiket+'</div>'
+                + '</div>'
+                + '<div style="font-size:11px;color:#4fc3f7;">'+(p.telefon || '')+'</div>'
+                + '</div>';
+        }).join('');
+    } catch(e) {
+        const box = document.getElementById('pm_list');
+        if (box) box.innerHTML = '<div style="padding:10px;color:#ef5350;font-size:12px;">Liste yüklenemedi.</div>';
+    }
+}
+
+function potYeni() {
+    potSelectedId = null;
+    if (document.getElementById('pm_id')) document.getElementById('pm_id').value = '';
+    ['pm_ad','pm_telefon','pm_paket','pm_not'].forEach(function(id){
+        const el = document.getElementById(id); if (el) el.value = '';
+    });
+    const dsel = document.getElementById('pm_durum');
+    if (dsel) dsel.value = 'düşünüyor';
+    const ht = document.getElementById('pm_hatirlatma');
+    if (ht) ht.value = '';
+    potDefaultHatirlatma();
+}
+
+function potSec(id) {
+    potSelectedId = id;
+    const p = (potansiyeller || []).find(function(x){ return x.id === id; });
+    if (!p) return;
+    document.getElementById('pm_id').value = p.id;
+    document.getElementById('pm_ad').value = p.ad || '';
+    document.getElementById('pm_telefon').value = p.telefon || '';
+    document.getElementById('pm_paket').value = p.paket || '';
+    document.getElementById('pm_not').value = p.gorusme_notu || '';
+    if (p.hatirlatma_tarihi) document.getElementById('pm_hatirlatma').value = String(p.hatirlatma_tarihi).substring(0,10);
+    if (p.durum) document.getElementById('pm_durum').value = p.durum;
+}
+
+async function potKaydet(ev) {
+    ev.preventDefault();
+    const payload = {
+        id: document.getElementById('pm_id').value || null,
+        ad: document.getElementById('pm_ad').value,
+        telefon: document.getElementById('pm_telefon').value,
+        paket: document.getElementById('pm_paket').value,
+        gorusme_notu: document.getElementById('pm_not').value,
+        hatirlatma_tarihi: document.getElementById('pm_hatirlatma').value,
+        durum: document.getElementById('pm_durum').value
+    };
+    try {
+        const res = await fetch('/giris/api/potansiyel', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const d = await res.json();
+        alert(d.mesaj || (d.ok ? 'Kayıt başarılı.' : 'Kayıt hatası.'));
+        if (d.ok) {
+            document.getElementById('pm_id').value = d.id || '';
+            potYukle();
+        }
+    } catch(e) {
+        alert('Kayıt sırasında hata oluştu.');
+    }
+}
+
+async function potSozlesme() {
+    const id = document.getElementById('pm_id').value || potSelectedId;
+    if (!id) {
+        alert('Önce listeden bir potansiyel müşteri seçin veya kaydedin.');
+        return;
+    }
+    try {
+        const res = await fetch('/giris/api/potansiyel/' + id + '/convert', { method: 'POST' });
+        const d = await res.json();
+        if (!d.ok) {
+            alert(d.mesaj || 'İşlem başarısız.');
+            return;
+        }
+        if (d.cari_kart_url) {
+            window.location.href = d.cari_kart_url;
+        } else if (d.mid) {
+            window.location.href = '/cari-kart/?mid=' + d.mid;
+        } else {
+            alert('Cari kart oluşturuldu ancak yönlendirme linki alınamadı.');
+        }
+    } catch(e) {
+        alert('Sözleşme başlatma sırasında hata oluştu.');
+    }
+}
+
+// Müşteri ara (sol liste)
 async function musteriAra() {
-    const arama = document.getElementById('arama-input').value.trim();
+    const headerInput = document.getElementById('header-arama-input');
+    const aramaInput = document.getElementById('arama-input');
+    let arama = '';
+    if (headerInput && headerInput.value.trim()) {
+        arama = headerInput.value.trim();
+    } else if (aramaInput && aramaInput.value.trim()) {  // eski input kalırsa geriye dönük destek
+        arama = aramaInput.value.trim();
+    }
+    const liste = document.getElementById('musteri-liste');
+    if (!liste) return;
+    if (!arama) {
+        // Boşken listeyi gizle
+        liste.style.display = 'none';
+        liste.innerHTML = '<div style="padding: 20px; text-align: center; color: #6b7280; font-size: 12px;">Müşteri aramak için yukarıya yazın</div>';
+        return;
+    }
     
     try {
         const response = await fetch(`/giris/api/musteriler?q=${encodeURIComponent(arama)}`);
         musteriler = await response.json();
         
-        const liste = document.getElementById('musteri-liste');
-        
+        liste.style.display = 'block';
         if (musteriler.length === 0) {
             liste.innerHTML = '<div style="padding: 20px; text-align: center; color: #6b7280; font-size: 12px;">Müşteri bulunamadı</div>';
             return;
         }
         
         liste.innerHTML = musteriler.map(m => `
-            <div class="musteri-item" onclick="selectMusteri(${m.id})">
+            <div class="musteri-item" data-id="${m.id}" onclick="selectMusteri(${m.id})">
                 <div class="name">${m.name}</div>
                 <div class="vergi">${m.tax_number || 'Vergi no yok'}</div>
             </div>
@@ -974,35 +1607,101 @@ async function musteriAra() {
     }
 }
 
-// Müşteri seç
-function selectMusteri(id) {
-    const musteri = musteriler.find(m => m.id === id);
-    if (!musteri) return;
-    
-    selectedId = id;
-    
-    // Seçili göster
-    document.querySelectorAll('.musteri-item').forEach(item => {
-        item.classList.remove('selected');
-    });
-    event.currentTarget.classList.add('selected');
-    
-    // Formu doldur
-    document.getElementById('musteri-id').value = musteri.id;
-    document.getElementById('name').value = musteri.name || '';
-    document.getElementById('tax_number').value = musteri.tax_number || '';
-    document.getElementById('phone').value = musteri.phone || '';
-    document.getElementById('email').value = musteri.email || '';
-    document.getElementById('address').value = musteri.address || 'kavaklıdere mah. esat cad. no:12/1 çankaya /ankara';
-    document.getElementById('ev_adres').value = (musteri.ev_adres || '').trim();
-    document.getElementById('notes').value = musteri.notes || '';
-    
-    // Yüzde hesapla
-    hesaplaYuzde();
-    // Cari Kart sekmesi açıksa veriyi yükle
-    if (document.getElementById('tab-4') && document.getElementById('tab-4').classList.contains('active')) {
-        cariKartYukle(id);
+// Üst bardaki hızlı arama: header input'u sol listedeki arama kutusuna senkronize eder
+function headerMusteriAra() {
+    const headerInput = document.getElementById('header-arama-input');
+    const mainInput = document.getElementById('arama-input');
+    if (headerInput && mainInput) {
+        mainInput.value = headerInput.value;
     }
+    musteriAra();
+}
+
+// Açık olan sekmenin index'ini döndür (DOM'dan yedek olarak; asıl kaynak currentTabIndex)
+function getActiveTabIndex() {
+    var tab = document.querySelector('.tab.active');
+    if (!tab) return currentTabIndex;
+    var v = parseInt(tab.getAttribute('data-index'), 10);
+    return isNaN(v) ? currentTabIndex : v;
+}
+
+// Müşteri seç — hangi sekme açıksa o sekmeye göre forma doldurur (liste veya API'den)
+function selectMusteri(id) {
+    selectedId = id;
+    var activeTab = getActiveTabIndex();
+    // Seçili göster (data-id ile)
+    document.querySelectorAll('.musteri-item').forEach(function(item) {
+        item.classList.toggle('selected', parseInt(item.getAttribute('data-id'), 10) === id);
+    });
+
+    var musteri = musteriler.find(function(m) { return m.id == id; }); // == ile string/id uyumu
+    function fillActiveTab(data) {
+        var m = data || { id: id, name: '', phone: '' };
+        if (activeTab === 0 || activeTab === 6) {
+            var set = function(fid, val) { var el = document.getElementById(fid); if (el) el.value = (val != null && val !== undefined) ? String(val).trim() : ''; };
+            set('musteri-id', m.id);
+            set('name', m.name);
+            set('tax_number', m.tax_number);
+            set('phone', m.phone);
+            set('email', m.email);
+            set('address', m.address || '');
+            set('ev_adres', m.ev_adres);
+            set('notes', m.notes);
+            set('vergi_dairesi', m.vergi_dairesi);
+            set('mersis', m.mersis_no != null ? m.mersis_no : m.mersis);
+            set('nace', m.nace_kodu != null ? m.nace_kodu : m.nace);
+            set('yetkili_ad', m.yetkili_kisi != null ? m.yetkili_kisi : m.yetkili_ad);
+            set('hizmet_turu', m.hizmet_turu);
+            if (m.guncel_kira_bedeli != null && m.guncel_kira_bedeli !== '') set('aylik_kira', m.guncel_kira_bedeli);
+            else if (m.ilk_kira_bedeli != null && m.ilk_kira_bedeli !== '') set('aylik_kira', m.ilk_kira_bedeli);
+            if (m.rent_start_date) set('sozlesme_baslangic', m.rent_start_date);
+            hesaplaYuzde();
+            sozlesmelerAylikGuncelle();
+            if (activeTab === 6) fillSozlesmeTahsilatMusteri(id, m);
+        } else if (activeTab === 3) {
+            document.getElementById('giris_tahsilat_musteri_id').value = id;
+            document.getElementById('giris_tahsilat_musteri_phone').value = (m.phone || '').replace(/\D/g, '');
+            document.getElementById('giris_tahsilat_musteri_ara').value = m.name || '';
+            document.getElementById('giris_tahsilat_musteri_secilen').textContent = m.name || '';
+            document.getElementById('giris_tahsilat_musteri_secilen').style.display = 'block';
+            document.getElementById('giris_tahsilat_musteri_listesi').style.display = 'none';
+        } else if (activeTab === 4) {
+            cariKartYukle(id);
+        } else if (activeTab === 2) {
+            var el = document.getElementById('bildirge_musteri_adi');
+            if (el) el.value = m.name || '';
+        } else if (activeTab === 1) {
+            var senaryoAd = document.getElementById('senaryo_musteri_ismi');
+            if (senaryoAd) senaryoAd.value = m.name || '';
+        }
+    }
+
+    if (activeTab === 0 || activeTab === 6) {
+        fetch('/giris/api/musteri/' + id).then(function(r) { return r.json(); }).then(function(res) {
+            if (res.ok && res.musteri) fillActiveTab(res.musteri);
+            else if (musteri) fillActiveTab(musteri);
+        }).catch(function() {
+            if (musteri) fillActiveTab(musteri);
+        });
+        return;
+    }
+    if (musteri) {
+        fillActiveTab(musteri);
+        return;
+    }
+    fetch('/giris/api/musteri/' + id).then(function(r) { return r.json(); }).then(function(res) {
+        if (res.ok && res.musteri) fillActiveTab(res.musteri);
+        else fillActiveTab(null);
+    }).catch(function() { fillActiveTab(null); });
+}
+function fillSozlesmeTahsilatMusteri(id, musteri) {
+    document.getElementById('sozlesme_tahsilat_musteri_id').value = id;
+    document.getElementById('sozlesme_tahsilat_musteri_phone').value = (musteri.phone || '').replace(/\D/g, '');
+    document.getElementById('sozlesme_tahsilat_musteri_ara').value = musteri.name || '';
+    var secilen = document.getElementById('sozlesme_tahsilat_musteri_secilen');
+    if (secilen) { secilen.textContent = musteri.name || ''; secilen.style.display = 'block'; }
+    var list = document.getElementById('sozlesme_tahsilat_musteri_listesi');
+    if (list) list.style.display = 'none';
 }
 
 // Sadece rakam girişine izin ver (maxLen opsiyonel)
@@ -1037,6 +1736,7 @@ async function kaydet(event) {
         ['ev_adres', 'Ev Adresi'],
         ['sube_merkez', 'Şube / Merkez'],
         ['hizmet_turu', 'Hizmet Türü'],
+        ['aylik_kira', 'Aylık Kira'],
     ];
     for (const [id, label] of requiredFields) {
         const el = document.getElementById(id);
@@ -1171,8 +1871,13 @@ function dosyaSil(index) {
 // Sözleşme oluştur
 async function sozlesmeOlustur() {
     if (!selectedId) {
-        alert('Lütfen önce bir müşteri seçin!');
-        return;
+        // Henüz kayıtlı müşteri yoksa, formu kaydedip id almayı dene
+        const fakeEvent = { preventDefault: function(){} };
+        await kaydet(fakeEvent);
+        if (!selectedId) {
+            // Kaydet sırasında zorunlu alan/validasyon hatası verilmiş olabilir
+            return;
+        }
     }
     const turSelect = document.getElementById('hizmet_turu');
     const tur = turSelect ? turSelect.value : '';
@@ -1220,8 +1925,15 @@ async function sil() {
 
 // Temizle
 function temizle() {
-    document.getElementById('arama-input').value = '';
-    document.getElementById('musteri-liste').innerHTML = '<div style="padding: 20px; text-align: center; color: #6b7280; font-size: 12px;">Müşteri arayın</div>';
+    const headerInput = document.getElementById('header-arama-input');
+    const mainInput = document.getElementById('arama-input');
+    if (headerInput) headerInput.value = '';
+    if (mainInput) mainInput.value = '';
+    const liste = document.getElementById('musteri-liste');
+    if (liste) {
+        liste.style.display = 'none';
+        liste.innerHTML = '<div style="padding: 20px; text-align: center; color: #6b7280; font-size: 12px;">Müşteri aramak için yukarıya yazın</div>';
+    }
     temizleForm();
 }
 
@@ -1281,7 +1993,72 @@ document.addEventListener('DOMContentLoaded', () => {
         const list = document.getElementById('giris_tahsilat_musteri_listesi');
         const ara = document.getElementById('giris_tahsilat_musteri_ara');
         if (list && ara && !list.contains(e.target) && e.target !== ara) list.style.display = 'none';
+        const listSoz = document.getElementById('sozlesme_tahsilat_musteri_listesi');
+        const araSoz = document.getElementById('sozlesme_tahsilat_musteri_ara');
+        if (listSoz && araSoz && !listSoz.contains(e.target) && e.target !== araSoz) listSoz.style.display = 'none';
+        const senaryoList = document.getElementById('senaryo_musteri_liste');
+        const senaryoInput = document.getElementById('senaryo_musteri_ismi');
+        if (senaryoList && senaryoInput && !senaryoList.contains(e.target) && e.target !== senaryoInput) {
+            senaryoList.style.display = 'none';
+        }
     });
+    // Sözleşme tahsilat: müşteri arama
+    let sozlesmeTahsilatAramaZamanlayici;
+    const sozlesmeTahsilatAra = document.getElementById('sozlesme_tahsilat_musteri_ara');
+    if (sozlesmeTahsilatAra) {
+        sozlesmeTahsilatAra.addEventListener('focus', function() {
+            if (!this.value) sozlesmeTahsilatMusteriListesiGetir('');
+            const list = document.getElementById('sozlesme_tahsilat_musteri_listesi');
+            if (list) list.style.display = 'block';
+        });
+        sozlesmeTahsilatAra.addEventListener('input', function() {
+            clearTimeout(sozlesmeTahsilatAramaZamanlayici);
+            sozlesmeTahsilatAramaZamanlayici = setTimeout(function() {
+                sozlesmeTahsilatMusteriListesiGetir(sozlesmeTahsilatAra.value);
+            }, 250);
+        });
+    }
+    // Kira senaryo: müşteri arama (serbest yaz + listeden seç)
+    let senaryoMusteriAramaZamanlayici;
+    const senaryoInput = document.getElementById('senaryo_musteri_ismi');
+    if (senaryoInput) {
+        senaryoInput.addEventListener('focus', function() {
+            const q = this.value.trim();
+            senaryoMusteriListeGetir(q);
+        });
+        senaryoInput.addEventListener('input', function() {
+            const q = this.value.trim();
+            clearTimeout(senaryoMusteriAramaZamanlayici);
+            if (!q) {
+                const list = document.getElementById('senaryo_musteri_liste');
+                if (list) {
+                    list.style.display = 'none';
+                    list.innerHTML = '';
+                }
+                return;
+            }
+            senaryoMusteriAramaZamanlayici = setTimeout(function() {
+                senaryoMusteriListeGetir(q);
+            }, 250);
+        });
+    }
+    // Sözleşme tahsilat tarih varsayılanı
+    const sozlesmeTahsilatTarih = document.getElementById('sozlesme_tahsilat_tarih');
+    if (sozlesmeTahsilatTarih && !sozlesmeTahsilatTarih.value) {
+        sozlesmeTahsilatTarih.value = new Date().toISOString().slice(0, 10);
+    }
+    // Cari ekstre varsayılan tarihler: yıl başı — bu ay sonu
+    const ekstreBas = document.getElementById('cari_ekstre_baslangic');
+    const ekstreBit = document.getElementById('cari_ekstre_bitis');
+    if (ekstreBas && !ekstreBas.value) {
+        var d = new Date();
+        ekstreBas.value = d.getFullYear() + '-01-01';
+    }
+    if (ekstreBit && !ekstreBit.value) {
+        var d = new Date();
+        var sonGun = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+        ekstreBit.value = sonGun.getFullYear() + '-' + String(sonGun.getMonth() + 1).padStart(2, '0') + '-' + String(sonGun.getDate()).padStart(2, '0');
+    }
 });
 
 // Eski tahsilat hızlı arama (artık Tahsilat sekmesi makbuz formu; bu fonksiyon çağrılmıyor)
@@ -1301,12 +2078,14 @@ const API_TAHSILAT_ONIZLE = '/faturalar/tahsilat-makbuz-onizle';
 
 function girisTahsilatFormPayload() {
     const musteriId = document.getElementById('giris_tahsilat_musteri_id').value;
-    const musteriAdi = (document.getElementById('giris_tahsilat_musteri_secilen').textContent || '').trim();
+    const musteriAdiAra = (document.getElementById('giris_tahsilat_musteri_ara').value || '').trim();
+    const musteriAdiSecilen = (document.getElementById('giris_tahsilat_musteri_secilen').textContent || '').trim();
     const tutarStr = (document.getElementById('giris_tahsilat_tutar').value || '').replace(',', '.');
     const tutar = parseFloat(tutarStr);
     return {
         musteri_id: musteriId ? parseInt(musteriId, 10) : null,
-        musteri_adi: musteriAdi,
+        musteri_adi: musteriAdiSecilen || musteriAdiAra,
+        musteri_phone: (document.getElementById('giris_tahsilat_musteri_phone').value || '').replace(/\D/g, ''),
         tutar: isNaN(tutar) ? 0 : tutar,
         odeme_turu: (document.getElementById('giris_tahsilat_odeme_turu').value || 'nakit'),
         tahsilat_tarihi: document.getElementById('giris_tahsilat_tarih').value,
@@ -1314,6 +2093,43 @@ function girisTahsilatFormPayload() {
         havale_banka: '',
         cek_detay: []
     };
+}
+
+/** Makbuzu sadece kaydeder; Faturalar, Cari Kart ve müşteri bakiyesi otomatik güncellenir. */
+function girisTahsilatMakbuzKaydet() {
+    const payload = girisTahsilatFormPayload();
+    if (!payload.musteri_id && !payload.musteri_adi) {
+        alert('Lütfen müşteri seçiniz veya isim yazınız.');
+        return;
+    }
+    if (payload.tutar <= 0) {
+        alert('Geçerli bir tutar giriniz.');
+        return;
+    }
+    fetch(API_TAHSILAT_EKLE, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.ok && data.tahsilat_id) {
+            alert('Makbuz kaydedildi. Tahsilatlar, Cari Kart ve müşteri bakiyesi güncellendi.');
+            var mid = document.getElementById('giris_tahsilat_musteri_id').value;
+            if (mid && typeof selectedId !== 'undefined' && selectedId == mid && document.getElementById('cari-bu-ay')) {
+                fetch('/giris/api/cari-kart/' + mid)
+                    .then(function(r) { return r.json(); })
+                    .then(function(o) {
+                        var ozet = o.ozet || {};
+                        document.getElementById('cari-bu-ay').textContent = (ozet.bu_ayki_tahsilat || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 });
+                    })
+                    .catch(function() {});
+            }
+        } else {
+            alert(data.mesaj || 'Kayıt yapılamadı.');
+        }
+    })
+    .catch(err => alert('İstek gönderilemedi: ' + (err.message || err)));
 }
 
 function girisTahsilatOnizle() {
@@ -1341,8 +2157,8 @@ function girisTahsilatOnizle() {
 
 function girisTahsilatYazdir() {
     const payload = girisTahsilatFormPayload();
-    if (!payload.musteri_id) {
-        alert('Lütfen müşteri seçiniz.');
+    if (!payload.musteri_id && !payload.musteri_adi) {
+        alert('Lütfen müşteri seçiniz veya isim yazınız.');
         return;
     }
     if (payload.tutar <= 0) {
@@ -1430,11 +2246,14 @@ function girisTahsilatMusteriListesiGetir(q) {
             }).join('') : '<div style="padding:10px;color:#90a4ae;">Müşteri bulunamadı</div>';
             list.querySelectorAll('div[data-id]').forEach(el => {
                 el.onclick = function() {
-                    document.getElementById('giris_tahsilat_musteri_id').value = this.getAttribute('data-id');
-                    document.getElementById('giris_tahsilat_musteri_phone').value = this.getAttribute('data-phone') || '';
-                    document.getElementById('giris_tahsilat_musteri_ara').value = '';
-                    document.getElementById('giris_tahsilat_musteri_secilen').textContent = this.getAttribute('data-name');
-                    document.getElementById('giris_tahsilat_musteri_secilen').style.display = 'block';
+                    const id = this.getAttribute('data-id');
+                    const name = this.getAttribute('data-name');
+                    const phone = this.getAttribute('data-phone') || '';
+                    document.getElementById('giris_tahsilat_musteri_id').value = id;
+                    document.getElementById('giris_tahsilat_musteri_phone').value = phone;
+                    document.getElementById('giris_tahsilat_musteri_ara').value = name; // seçili müşteriyi input içinde göster
+                    document.getElementById('giris_tahsilat_musteri_secilen').textContent = '';
+                    document.getElementById('giris_tahsilat_musteri_secilen').style.display = 'none';
                     list.style.display = 'none';
                 };
             });
@@ -1442,6 +2261,270 @@ function girisTahsilatMusteriListesiGetir(q) {
         .catch(() => {
             const list = document.getElementById('giris_tahsilat_musteri_listesi');
             if (list) list.innerHTML = '<div style="padding:10px;color:#f44336;">Yüklenemedi</div>';
+        });
+}
+
+// ——— Kira Senaryo sekmesi: müşteri arama listesi ———
+function senaryoMusteriListeGetir(q) {
+    const list = document.getElementById('senaryo_musteri_liste');
+    if (!list) return;
+    const url = q ? `/giris/api/musteriler?q=${encodeURIComponent(q)}` : '/giris/api/musteriler';
+    list.style.display = 'block';
+    list.innerHTML = '<div style="padding:8px;color:#90a4ae;font-size:11px;">Yükleniyor...</div>';
+    fetch(url)
+        .then(r => r.json())
+        .then(arr => {
+            if (!arr.length) {
+                list.innerHTML = '<div style="padding:8px;color:#90a4ae;">Müşteri bulunamadı</div>';
+                return;
+            }
+            list.innerHTML = arr.map(m => {
+                const name = (m.name || '').replace(/"/g, '&quot;');
+                return '<div class="senaryo-musteri-item" style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #2d4060;" data-id="' + m.id + '" data-name="' + name + '">' + (m.name || '—') + '</div>';
+            }).join('');
+            list.querySelectorAll('.senaryo-musteri-item').forEach(el => {
+                el.onclick = function() {
+                    const id = this.getAttribute('data-id');
+                    const name = this.getAttribute('data-name') || this.textContent;
+                    const input = document.getElementById('senaryo_musteri_ismi');
+                    const hidden = document.getElementById('senaryo_musteri_id');
+                    if (input) input.value = name;
+                    if (hidden) hidden.value = id;
+                    list.style.display = 'none';
+                    if (typeof selectMusteri === 'function' && id) {
+                        selectMusteri(parseInt(id, 10));
+                    }
+                };
+            });
+        })
+        .catch(() => {
+            list.innerHTML = '<div style="padding:8px;color:#f44336;">Yüklenemedi</div>';
+        });
+}
+
+// ——— Sözleşme sayfası Tahsilat Makbuzu (sağ panel, Aylık Tutarlar altı) ———
+function sozlesmeTahsilatFormPayload() {
+    const musteriId = document.getElementById('sozlesme_tahsilat_musteri_id').value;
+    const musteriAdiAra = (document.getElementById('sozlesme_tahsilat_musteri_ara').value || '').trim();
+    const musteriAdiSecilen = (document.getElementById('sozlesme_tahsilat_musteri_secilen').textContent || '').trim();
+    const tutarStr = (document.getElementById('sozlesme_tahsilat_tutar').value || '').replace(',', '.');
+    const tutar = parseFloat(tutarStr);
+    return {
+        musteri_id: musteriId ? parseInt(musteriId, 10) : null,
+        musteri_adi: musteriAdiSecilen || musteriAdiAra,
+        musteri_phone: (document.getElementById('sozlesme_tahsilat_musteri_phone').value || '').replace(/\D/g, ''),
+        tutar: isNaN(tutar) ? 0 : tutar,
+        odeme_turu: (document.getElementById('sozlesme_tahsilat_odeme_turu').value || 'nakit'),
+        tahsilat_tarihi: document.getElementById('sozlesme_tahsilat_tarih').value,
+        aciklama: (document.getElementById('sozlesme_tahsilat_aciklama').value || '').trim(),
+        havale_banka: '',
+        cek_detay: []
+    };
+}
+
+function sozlesmeTahsilatKaydet() {
+    const payload = sozlesmeTahsilatFormPayload();
+    if (!payload.musteri_id && !payload.musteri_adi) {
+        alert('Lütfen müşteri seçiniz veya isim yazınız.');
+        return;
+    }
+    if (payload.tutar <= 0) {
+        alert('Geçerli bir tutar giriniz.');
+        return;
+    }
+    fetch(API_TAHSILAT_EKLE, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.ok && data.tahsilat_id) {
+            alert('Makbuz kaydedildi. Tahsilatlar, Cari Kart ve müşteri bakiyesi güncellendi.');
+            sozlesmeTahsilatIptal();
+        } else {
+            alert(data.mesaj || 'Kayıt yapılamadı.');
+        }
+    })
+    .catch(err => alert('İstek gönderilemedi: ' + (err.message || err)));
+}
+
+function sozlesmeTahsilatOnizle() {
+    const payload = sozlesmeTahsilatFormPayload();
+    if (!payload.musteri_id && !payload.musteri_adi) {
+        alert('Lütfen müşteri seçiniz.');
+        return;
+    }
+    if (payload.tutar <= 0) {
+        alert('Geçerli bir tutar giriniz.');
+        return;
+    }
+    fetch(API_TAHSILAT_ONIZLE, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    })
+    .then(r => r.blob())
+    .then(blob => {
+        const url = URL.createObjectURL(blob);
+        window.open(url, '_blank', 'noopener');
+    })
+    .catch(() => alert('Önizleme alınamadı.'));
+}
+
+function sozlesmeTahsilatYazdir() {
+    const payload = sozlesmeTahsilatFormPayload();
+    if (!payload.musteri_id && !payload.musteri_adi) {
+        alert('Lütfen müşteri seçiniz veya isim yazınız.');
+        return;
+    }
+    if (payload.tutar <= 0) {
+        alert('Geçerli bir tutar giriniz.');
+        return;
+    }
+    fetch(API_TAHSILAT_EKLE, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.ok && data.tahsilat_id) {
+            const pdfUrl = '/faturalar/tahsilat-pdf/' + data.tahsilat_id;
+            window.open(pdfUrl, '_blank', 'noopener');
+            sozlesmeTahsilatIptal();
+        } else {
+            alert(data.mesaj || 'Kayıt yapılamadı.');
+        }
+    })
+    .catch(err => alert('İstek gönderilemedi: ' + (err.message || err)));
+}
+
+function sozlesmeTahsilatIptal() {
+    document.getElementById('sozlesme_tahsilat_musteri_id').value = '';
+    document.getElementById('sozlesme_tahsilat_musteri_phone').value = '';
+    document.getElementById('sozlesme_tahsilat_musteri_ara').value = '';
+    const secilen = document.getElementById('sozlesme_tahsilat_musteri_secilen');
+    if (secilen) { secilen.textContent = ''; secilen.style.display = 'none'; }
+    const list = document.getElementById('sozlesme_tahsilat_musteri_listesi');
+    if (list) list.style.display = 'none';
+    document.getElementById('sozlesme_tahsilat_tutar').value = '';
+    document.getElementById('sozlesme_tahsilat_aciklama').value = '';
+    const today = new Date().toISOString().slice(0, 10);
+    const tarihEl = document.getElementById('sozlesme_tahsilat_tarih');
+    if (tarihEl) tarihEl.value = today;
+}
+
+function sozlesmeTahsilatPdfIndir() {
+    var payload = sozlesmeTahsilatFormPayload();
+    if (!payload.musteri_id && !payload.musteri_adi) { alert('Lütfen müşteri seçiniz.'); return; }
+    if (payload.tutar <= 0) { alert('Geçerli bir tutar giriniz.'); return; }
+    fetch(API_TAHSILAT_ONIZLE, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+    .then(r => r.blob())
+    .then(blob => {
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'Tahsilat_Makbuzu_' + (payload.musteri_adi || 'Onizleme').replace(/\s+/g, '_') + '.pdf';
+        a.click();
+        URL.revokeObjectURL(a.href);
+    })
+    .catch(() => alert('PDF oluşturulamadı.'));
+}
+
+function sozlesmeTahsilatWhatsApp() {
+    var payload = sozlesmeTahsilatFormPayload();
+    if (!payload.musteri_id && !payload.musteri_adi) { alert('Lütfen müşteri seçiniz.'); return; }
+    if (payload.tutar <= 0) { alert('Geçerli bir tutar giriniz.'); return; }
+    var tel = (document.getElementById('sozlesme_tahsilat_musteri_phone').value || '').replace(/\D/g, '');
+    var num = tel.startsWith('0') ? '90' + tel.slice(1) : (tel ? '90' + tel : '');
+    var adi = (document.getElementById('sozlesme_tahsilat_musteri_secilen').textContent || payload.musteri_adi || 'Müşteri').trim();
+    var metin = encodeURIComponent(
+        'Sayın ' + adi + ',\n\nTahsilat makbuzunuz ekte yer almaktadır. İncelemenizi rica ederiz.\n\nİyi günler dileriz.\nBESTOFFICE'
+    );
+    var url = num ? 'https://wa.me/' + num + '?text=' + metin : 'https://wa.me/?text=' + metin;
+    window.open(url, '_blank', 'noopener');
+}
+
+function sozlesmeTahsilatMusteriListesiGetir(q) {
+    const url = q ? API_TAHSILAT_MUSTERILER + '?q=' + encodeURIComponent(q) : API_TAHSILAT_MUSTERILER;
+    fetch(url)
+        .then(r => r.json())
+        .then(arr => {
+            const list = document.getElementById('sozlesme_tahsilat_musteri_listesi');
+            if (!list) return;
+            list.innerHTML = arr.length ? arr.map(m => {
+                var phone = (m.phone || '').replace(/\D/g, '');
+                return '<div data-id="' + m.id + '" data-name="' + (m.name || '').replace(/"/g, '&quot;') + '" data-phone="' + (phone || '').replace(/"/g, '&quot;') + '">' + (m.name || '—') + '</div>';
+            }).join('') : '<div style="padding:10px;color:#90a4ae;">Müşteri bulunamadı</div>';
+            list.querySelectorAll('div[data-id]').forEach(el => {
+                el.onclick = function() {
+                    const id = this.getAttribute('data-id');
+                    const name = this.getAttribute('data-name');
+                    const phone = this.getAttribute('data-phone') || '';
+                    document.getElementById('sozlesme_tahsilat_musteri_id').value = id;
+                    document.getElementById('sozlesme_tahsilat_musteri_phone').value = phone;
+                    document.getElementById('sozlesme_tahsilat_musteri_ara').value = name;
+                    const secilen = document.getElementById('sozlesme_tahsilat_musteri_secilen');
+                    if (secilen) { secilen.textContent = ''; secilen.style.display = 'none'; }
+                    list.style.display = 'none';
+                };
+            });
+        })
+        .catch(() => {
+            const list = document.getElementById('sozlesme_tahsilat_musteri_listesi');
+            if (list) list.innerHTML = '<div style="padding:10px;color:#f44336;">Yüklenemedi</div>';
+        });
+}
+
+// ——— Cari Ekstre (Sözleşme sayfası, Tahsilat altı) ———
+function cariEkstreYukle() {
+    var musteriId = (document.getElementById('sozlesme_tahsilat_musteri_id').value || '').trim();
+    if (!musteriId) {
+        alert('Cari ekstre için önce Tahsilat alanında müşteri seçin.');
+        return;
+    }
+    var baslangic = document.getElementById('cari_ekstre_baslangic').value;
+    var bitis = document.getElementById('cari_ekstre_bitis').value;
+    var aylikKiraEl = document.getElementById('cari_ekstre_aylik_kira');
+    var aylikKira = (aylikKiraEl && aylikKiraEl.value !== '') ? parseFloat((aylikKiraEl.value || '0').replace(',', '.')) : parseFloat((document.getElementById('aylik_kira').value || '0').replace(',', '.'));
+    if (isNaN(aylikKira)) aylikKira = 0;
+    var params = new URLSearchParams({ musteri_id: musteriId, baslangic: baslangic || '', bitis: bitis || '', aylik_kira: aylikKira });
+    fetch('/giris/api/cari-ekstre?' + params.toString())
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (!data.ok) {
+                alert(data.mesaj || 'Ekstre yüklenemedi.');
+                return;
+            }
+            var tbody = document.getElementById('cari_ekstre_tbody');
+            var foot = document.getElementById('cari_ekstre_foot');
+            var bos = document.getElementById('cari_ekstre_bos');
+            var musterBilgi = document.getElementById('cari_ekstre_musteri_bilgi');
+            if (data.musteri_adi) {
+                musterBilgi.textContent = 'Müşteri: ' + data.musteri_adi;
+                musterBilgi.style.display = 'block';
+            }
+            var hareketler = data.hareketler || [];
+            if (hareketler.length === 0) {
+                tbody.innerHTML = '';
+                foot.style.display = 'none';
+                if (bos) { bos.style.display = 'block'; bos.textContent = 'Bu aralıkta hareket yok.'; }
+                return;
+            }
+            if (bos) bos.style.display = 'none';
+            foot.style.display = 'table-footer-group';
+            tbody.innerHTML = hareketler.map(function(h) {
+                var borc = (h.borc || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                var alacak = (h.alacak || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                var bakiye = (h.bakiye != null ? h.bakiye : '').toLocaleString ? (h.bakiye).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : (h.bakiye || '');
+                return '<tr><td>' + (h.tarih || '') + '</td><td>' + (h.aciklama || '') + '</td><td class="num">' + borc + '</td><td class="num">' + alacak + '</td><td class="num">' + bakiye + '</td></tr>';
+            }).join('');
+            document.getElementById('cari_ekstre_toplam_borc').textContent = (data.toplam_borc || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            document.getElementById('cari_ekstre_toplam_alacak').textContent = (data.toplam_alacak || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            document.getElementById('cari_ekstre_bakiye').textContent = (data.bakiye != null ? data.bakiye : 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        })
+        .catch(function(err) {
+            alert('Ekstre alınamadı: ' + (err.message || err));
         });
 }
 
@@ -1492,6 +2575,9 @@ function cariKartYukle(mid) {
                 if (fp.ic_not) html.push('İç not: ' + (fp.ic_not || '').substring(0, 80) + (fp.ic_not && fp.ic_not.length > 80 ? '…' : ''));
                 pek.innerHTML = html.join('<br>');
             } else pek.innerHTML = '';
+
+            // Sözleşme özetleri ve liste
+            ckRenderContracts(data.contracts || [], data.contracts_ozet || {}, o.risk_skoru);
             var tbody = document.getElementById('cari-hareketler-tbody');
             tbody.innerHTML = (data.hareketler || []).map(function(row) {
                 var kritik = row.tur === 'Fatura' && row.borc > 0 && row.vade_tarihi && new Date(row.vade_tarihi) < new Date();
@@ -1507,6 +2593,143 @@ function cariKartYukle(mid) {
             }).join('') || '<tr><td colspan="7" style="text-align:center;color:#90a4ae;">Hareket yok</td></tr>';
         })
         .catch(function() { alert('Cari kart verisi alınamadı.'); });
+}
+
+// ——— Sözleşme Yönetimi (Cari Kart içi) ———
+
+function ckYeniSozlesme() {
+    document.getElementById('ck_contract_select').value = '';
+    ['ck_cari_kodu','ck_sozlesme_no','ck_baslangic','ck_bitis','ck_sure_ay',
+     'ck_aylik_kira','ck_toplam_tutar','ck_para_birimi','ck_odeme_gunu',
+     'ck_depozito','ck_gecikme_faizi','ck_yillik_artis'].forEach(function(id){
+        var el = document.getElementById(id);
+        if (el) el.value = '';
+    });
+    var pb = document.getElementById('ck_para_birimi'); if (pb) pb.value = 'TRY';
+    var mu = document.getElementById('ck_muacceliyet'); if (mu) mu.value = 'false';
+    var dr = document.getElementById('ck_durum'); if (dr) dr.value = 'aktif';
+    var tbody = document.getElementById('ck_plan_tbody'); if (tbody) tbody.innerHTML = '';
+}
+
+function ckRenderContracts(list, ozet, riskSkor) {
+    var sel = document.getElementById('ck_contract_select');
+    if (sel) {
+        sel.innerHTML = '<option value="">— Sözleşme Seçin / Yeni —</option>';
+        list.forEach(function(c){
+            var opt = document.createElement('option');
+            opt.value = c.id;
+            var lbl = (c.sozlesme_no || ('Sözleşme #' + c.id)) + ' · ' +
+                      (c.baslangic_tarihi || '').toString().substring(0,10);
+            opt.textContent = lbl;
+            sel.appendChild(opt);
+        });
+    }
+    // Özet rakamlar (kart altındaki küçük özet)
+    document.getElementById('ck_ozet_toplam').textContent = (ozet.planlanan || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 });
+    document.getElementById('ck_ozet_tahakkuk').textContent = (ozet.tahakkuk || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 });
+    document.getElementById('ck_ozet_odenen').textContent = (ozet.odenen || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 });
+    document.getElementById('ck_ozet_gelecek').textContent = (ozet.gelecek || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 });
+    document.getElementById('ck_ozet_geciken').textContent = (ozet.geciken || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 });
+    // Üstteki büyük metrik kartları
+    var metrics = document.getElementById('ck_metrics');
+    if (metrics) {
+        metrics.style.display = 'flex';
+        document.getElementById('ck_m_toplam').textContent = (ozet.planlanan || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 }) + ' ₺';
+        document.getElementById('ck_m_tahakkuk').textContent = (ozet.tahakkuk || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 }) + ' ₺';
+        document.getElementById('ck_m_gelecek').textContent = (ozet.gelecek || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 }) + ' ₺';
+        document.getElementById('ck_m_geciken').textContent = (ozet.geciken || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 }) + ' ₺';
+        var r = (typeof riskSkor === 'number' ? riskSkor : (cariKartVeri && cariKartVeri.ozet && cariKartVeri.ozet.risk_skoru));
+        document.getElementById('ck_m_risk').textContent = (r != null ? r : '—');
+    }
+    // Taksit planı (tüm sözleşmeler için; seçim olduğunda filtreleriz)
+    ckRenderPlan((cariKartVeri && cariKartVeri.installments) || []);
+}
+
+function ckRenderPlan(plan) {
+    var tbody = document.getElementById('ck_plan_tbody');
+    if (!tbody) return;
+    if (!plan || !plan.length) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#90a4ae;">Taksit planı yok</td></tr>';
+        return;
+    }
+    var html = plan.map(function(r){
+        var cls = '';
+        if (r.odeme_durumu === 'gecikmis' || r.odeme_durumu === 'icrada') cls = ' class="gecikmis"';
+        else if (r.odeme_durumu === 'odendi') cls = ' class="odendi"';
+        return '<tr'+cls+'>' +
+          '<td>'+ (r.taksit_no || '') +'</td>' +
+          '<td>'+ (r.vade_tarihi || '').toString().substring(0,10) +'</td>' +
+          '<td class="num">'+ (r.tutar || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 }) +'</td>' +
+          '<td class="num">'+ (r.odenen_tutar || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 }) +'</td>' +
+          '<td class="num">'+ (r.kalan_tutar || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 }) +'</td>' +
+          '<td>'+ (r.odeme_durumu || 'planlandi') +'</td>' +
+        '</tr>';
+    }).join('');
+    tbody.innerHTML = html;
+}
+
+function ckAktifSozlesmeDegisti() {
+    var sel = document.getElementById('ck_contract_select');
+    if (!sel || !cariKartVeri) return;
+    var cid = parseInt(sel.value || '0', 10);
+    var list = cariKartVeri.contracts || [];
+    var c = list.find(function(x){ return x.id === cid; });
+    if (!c) {
+        ckYeniSozlesme();
+        ckRenderPlan((cariKartVeri.installments || []));
+        return;
+    }
+    document.getElementById('ck_cari_kodu').value = c.cari_kodu || '';
+    document.getElementById('ck_sozlesme_no').value = c.sozlesme_no || '';
+    document.getElementById('ck_baslangic').value = (c.baslangic_tarihi || '').toString().substring(0,10);
+    document.getElementById('ck_bitis').value = c.bitis_tarihi ? c.bitis_tarihi.toString().substring(0,10) : '';
+    document.getElementById('ck_sure_ay').value = c.sure_ay || '';
+    document.getElementById('ck_aylik_kira').value = c.aylik_kira || '';
+    document.getElementById('ck_toplam_tutar').value = c.toplam_tutar || '';
+    document.getElementById('ck_para_birimi').value = c.para_birimi || 'TRY';
+    document.getElementById('ck_odeme_gunu').value = c.odeme_gunu || '';
+    document.getElementById('ck_depozito').value = c.depozito || '';
+    document.getElementById('ck_gecikme_faizi').value = c.gecikme_faizi_orani || '';
+    document.getElementById('ck_yillik_artis').value = c.yillik_artis_orani || '';
+    document.getElementById('ck_muacceliyet').value = c.muacceliyet_var ? 'true' : 'false';
+    document.getElementById('ck_durum').value = c.durum || 'aktif';
+    // Planı sadece bu sözleşme için filtrele
+    var plan = (cariKartVeri.installments || []).filter(function(r){ return r.contract_id === c.id; });
+    ckRenderPlan(plan);
+}
+
+function ckSozlesmeKaydet() {
+    if (!selectedId) { alert('Önce soldan bir müşteri seçin.'); return; }
+    var cid = document.getElementById('ck_contract_select').value || null;
+    var payload = {
+        id: cid ? parseInt(cid,10) : null,
+        cari_kodu: document.getElementById('ck_cari_kodu').value.trim(),
+        sozlesme_no: document.getElementById('ck_sozlesme_no').value.trim(),
+        baslangic_tarihi: document.getElementById('ck_baslangic').value,
+        bitis_tarihi: document.getElementById('ck_bitis').value,
+        sure_ay: document.getElementById('ck_sure_ay').value,
+        aylik_kira: document.getElementById('ck_aylik_kira').value,
+        toplam_tutar: document.getElementById('ck_toplam_tutar').value,
+        para_birimi: document.getElementById('ck_para_birimi').value,
+        odeme_gunu: document.getElementById('ck_odeme_gunu').value,
+        depozito: document.getElementById('ck_depozito').value,
+        gecikme_faizi_orani: document.getElementById('ck_gecikme_faizi').value,
+        yillik_artis_orani: document.getElementById('ck_yillik_artis').value,
+        muacceliyet_var: document.getElementById('ck_muacceliyet').value === 'true',
+        durum: document.getElementById('ck_durum').value
+    };
+    fetch('/giris/api/contracts/' + selectedId, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    }).then(r => r.json()).then(function(d){
+        if (!d.ok) { alert(d.mesaj || 'Sözleşme kaydedilemedi.'); return; }
+        alert(d.mesaj || 'Sözleşme kaydedildi.');
+        // Cari kartı tazele ki özet + plan güncellensin
+        cariKartYukle(selectedId);
+    }).catch(function(e){
+        alert('Hata: ' + e);
+    });
 }
 
 function cariKartFaturaKes() {
@@ -1664,12 +2887,19 @@ async function kiraSenaryo() {
                 toplamArtislar += artisTutar;
             }
             
+            const kdvDahil = mevcutKira * (1 + SENARYO_KDV_ORAN);
+            const kdvDahilYillik = yillikToplam * (1 + SENARYO_KDV_ORAN);
             tablo += `
                 <tr style="border-bottom: 1px solid #2d4060;">
                     <td style="padding: 8px; color: #e0f7fa; font-size: 11px;">${yil}</td>
+                    <td style="padding: 8px; text-align: center; font-size: 11px;">
+                        <button type="button" onclick="kiraBildirgesiOlusturYil(${yil}, ${mevcutKira})" style="background:#2e7d32;color:#fff;border:none;padding:4px 10px;border-radius:12px;font-size:10px;cursor:pointer;">Kira bildirgesi oluştur</button>
+                    </td>
                     <td style="padding: 8px; text-align: right; color: #e0f7fa; font-size: 11px;">${mevcutKira.toLocaleString('tr-TR', {minimumFractionDigits: 2})} TL</td>
-                    <td style="padding: 8px; text-align: right; color: #4fc3f7; font-weight: bold; font-size: 11px;">${yillikToplam.toLocaleString('tr-TR', {minimumFractionDigits: 2})} TL</td>
+                    <td style="padding: 8px; text-align: right; color: #e0f7fa; font-size: 11px;">${kdvDahil.toLocaleString('tr-TR', {minimumFractionDigits: 2})} TL</td>
                     <td style="padding: 8px; text-align: right; color: #ff9800; font-size: 11px;">${artisOran.toFixed(2)}%</td>
+                    <td style="padding: 8px; text-align: right; color: #4fc3f7; font-weight: bold; font-size: 11px;">${yillikToplam.toLocaleString('tr-TR', {minimumFractionDigits: 2})} TL</td>
+                    <td style="padding: 8px; text-align: right; color: #4fc3f7; font-size: 11px;">${kdvDahilYillik.toLocaleString('tr-TR', {minimumFractionDigits: 2})} TL</td>
                     <td style="padding: 8px; text-align: right; color: #4caf50; font-size: 11px;">${artisTutar.toLocaleString('tr-TR', {minimumFractionDigits: 2})} TL</td>
                 </tr>
             `;
@@ -1684,12 +2914,16 @@ async function kiraSenaryo() {
         }
         
         // Toplam satırı
+        const toplamKdvDahilYillik = toplamYilliklar * (1 + SENARYO_KDV_ORAN);
         tablo += `
             <tr style="background: #0097a7; font-weight: bold;">
                 <td style="padding: 8px; color: white; font-size: 11px;">TOPLAM</td>
+                <td style="padding: 8px; text-align: center; color: white; font-size: 11px;">-</td>
+                <td style="padding: 8px; text-align: right; color: white; font-size: 11px;">-</td>
+                <td style="padding: 8px; text-align: right; color: white; font-size: 11px;">-</td>
                 <td style="padding: 8px; text-align: right; color: white; font-size: 11px;">-</td>
                 <td style="padding: 8px; text-align: right; color: white; font-size: 11px;">${toplamYilliklar.toLocaleString('tr-TR', {minimumFractionDigits: 2})} TL</td>
-                <td style="padding: 8px; text-align: right; color: white; font-size: 11px;">-</td>
+                <td style="padding: 8px; text-align: right; color: white; font-size: 11px;">${toplamKdvDahilYillik.toLocaleString('tr-TR', {minimumFractionDigits: 2})} TL</td>
                 <td style="padding: 8px; text-align: right; color: white; font-size: 11px;">${toplamArtislar.toLocaleString('tr-TR', {minimumFractionDigits: 2})} TL</td>
             </tr>
         `;
@@ -1705,13 +2939,13 @@ async function kiraSenaryo() {
             var rows = tbody.querySelectorAll('tr');
             for (var r = 0; r < rows.length; r++) {
                 var cells = rows[r].querySelectorAll('td');
-                if (cells.length >= 5 && cells[0].textContent.trim() !== 'TOPLAM') {
+                if (cells.length >= 8 && cells[0].textContent.trim() !== 'TOPLAM') {
                     window.senaryoProjeksiyonVerisi.satirlar.push({
                         yil: cells[0].textContent.trim(),
-                        aylik_kira: (cells[1].textContent || '').replace(/\s*TL/gi, '').trim(),
-                        yillik_toplam: (cells[2].textContent || '').replace(/\s*TL/gi, '').trim(),
-                        artis_yuzde: (cells[3].textContent || '').trim(),
-                        artis_tutar: (cells[4].textContent || '').replace(/\s*TL/gi, '').trim()
+                        aylik_kira: (cells[2].textContent || '').replace(/\s*TL/gi, '').trim(),
+                        yillik_toplam: (cells[5].textContent || '').replace(/\s*TL/gi, '').trim(),
+                        artis_yuzde: (cells[4].textContent || '').trim(),
+                        artis_tutar: (cells[7].textContent || '').replace(/\s*TL/gi, '').trim()
                     });
                 }
             }
@@ -1786,44 +3020,61 @@ async function tufeVerileri() {
 async function excelIndir() {
     var effectiveNet = senaryoEffectiveNet();
     if (effectiveNet == null || effectiveNet <= 0) {
-        alert('Lütfen başlangıç kirası girin ve gerekirse Hesapla yapın.');
+        alert('Lütfen başlangıç kirası girin ve önce Hesapla butonuna basın.');
         return;
     }
     const baslangicTarih = document.getElementById('senaryo_baslangic_tarih').value;
     var yilEl = document.getElementById('senaryo_yil_sayisi');
     const yilSayisi = yilEl ? yilEl.value : '5';
-    const tufeOran = 65; // Varsayılan TÜFE (Excel için)
     
     if (!baslangicTarih) {
         alert('Lütfen başlangıç tarihini girin.');
         return;
     }
+    if (!window.senaryoProjeksiyonVerisi || !window.senaryoProjeksiyonVerisi.satirlar || !window.senaryoProjeksiyonVerisi.satirlar.length) {
+        alert('Önce Hesapla deyip projeksiyon tablosunu oluşturun, sonra Excel İndir butonuna basın.');
+        return;
+    }
     
     try {
+        const payload = Object.assign({}, window.senaryoProjeksiyonVerisi, {
+            net_kira: effectiveNet,
+            baslangic_tarih: baslangicTarih,
+            yil_sayisi: yilSayisi
+        });
         const response = await fetch('/giris/api/kira-senaryo-excel', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                baslangic_kira: effectiveNet,
-                baslangic_tarih: baslangicTarih,
-                yil_sayisi: yilSayisi,
-                tufe_oran: tufeOran
-            })
+            body: JSON.stringify(payload)
         });
         
-        if (response.ok) {
-            const blob = await response.blob();
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `Kira_Senaryo_${new Date().getTime()}.xlsx`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            window.URL.revokeObjectURL(url);
-        } else {
-            alert('❌ Excel oluşturulamadı!');
+        if (!response.ok) {
+            alert('❌ Excel oluşturulamadı (sunucu hatası).');
+            return;
         }
+
+        const ct = response.headers.get('Content-Type') || '';
+        if (!ct.includes('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')) {
+            const text = await response.text();
+            if (text && text.toLowerCase().includes('giriş') && text.toLowerCase().includes('şifre')) {
+                alert('Oturumunuz sona ermiş olabilir. Lütfen sayfayı yenileyip tekrar giriş yapın.');
+            } else if (text && text.length < 500) {
+                alert('Excel yerine şu yanıt geldi:\n' + text);
+            } else {
+                alert('Excel yerine beklenmeyen bir yanıt alındı. Lütfen sayfayı yenileyip tekrar deneyin.');
+            }
+            return;
+        }
+
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Kira_Senaryo_${new Date().getTime()}.xlsx`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
         
     } catch (error) {
         alert('❌ Hata: ' + error.message);
@@ -1864,13 +3115,87 @@ document.addEventListener('click', function(e) {
     list.style.display = 'none';
 });
 
+// Senaryo tablosundan son yılın (en güncel) kira bilgilerini döndür
+function senaryoSonYilBilgisi() {
+    if (!window.senaryoProjeksiyonVerisi || !Array.isArray(window.senaryoProjeksiyonVerisi.satirlar) || !window.senaryoProjeksiyonVerisi.satirlar.length) {
+        return null;
+    }
+    var satirlar = window.senaryoProjeksiyonVerisi.satirlar;
+    var son = satirlar[satirlar.length - 1];
+    if (!son) return null;
+
+    function parseMoney(v) {
+        if (v == null) return 0;
+        var s = String(v).replace(/\s*TL/gi, '').trim();
+        // Nokta binlik ayırıcı, virgül ondalık olabilir; hepsini normalize et
+        s = s.replace(/\./g, '').replace(',', '.');
+        var n = parseFloat(s);
+        return isNaN(n) ? 0 : n;
+    }
+
+    var aylik = parseMoney(son.aylik_kira);
+    var yillik = parseMoney(son.yillik_toplam);
+    var kdvOran = (typeof SENARYO_KDV_ORAN === 'number' ? SENARYO_KDV_ORAN : 0.20);
+    var kdvDahilAylik = aylik * (1 + kdvOran);
+    var kdvDahilYillik = yillik * (1 + kdvOran);
+
+    return {
+        yil: parseInt(son.yil, 10) || null,
+        aylik_kira: aylik,
+        yillik_toplam: yillik,
+        kdv_oran: kdvOran,
+        kdv_dahil_aylik: kdvDahilAylik,
+        kdv_dahil_yillik: kdvDahilYillik
+    };
+}
+
 // Kira Senaryo sekmesinden Kira Bildirgesi sekmesine veri aktar ve bildirgeyi tetikle (SPA)
+function kiraBildirgesiOlusturYil(yil, aylikKira) {
+    // İstek: Hangi satırdaki butona basılırsa, O YILA ait rakamlar kullanılsın
+    // Önce ilgili yılı senaryo verisinde bulup aylık net kira değerini oradan okuyalım
+    if (window.senaryoProjeksiyonVerisi && Array.isArray(window.senaryoProjeksiyonVerisi.satirlar)) {
+        var hedef = window.senaryoProjeksiyonVerisi.satirlar.find(function (s) {
+            return String(s.yil) === String(yil);
+        });
+        if (hedef && hedef.aylik_kira) {
+            var s = String(hedef.aylik_kira).replace(/\s*TL/gi, '').trim();
+            s = s.replace(/\./g, '').replace(',', '.');
+            var n = parseFloat(s);
+            if (!isNaN(n) && n > 0) {
+                aylikKira = n;
+            }
+        }
+    }
+
+    var musteriEl = document.getElementById('senaryo_musteri_ismi');
+    var tarihEl = document.getElementById('senaryo_baslangic_tarih');
+    var musteriAdi = (musteriEl && musteriEl.value) ? String(musteriEl.value).trim() : '';
+    var sozlesmeTarihi = (tarihEl && tarihEl.value) ? tarihEl.value : '';
+    var gecerlilikTarihi = sozlesmeTarihi || new Date(yil, 0, 1).toISOString().slice(0, 10);
+
+    switchTab(2);
+    if (document.getElementById('bildirge_musteri_adi')) document.getElementById('bildirge_musteri_adi').value = musteriAdi;
+    if (document.getElementById('bildirge_sozlesme_tarihi')) document.getElementById('bildirge_sozlesme_tarihi').value = sozlesmeTarihi;
+    if (document.getElementById('bildirge_gecerlilik_tarihi')) document.getElementById('bildirge_gecerlilik_tarihi').value = gecerlilikTarihi;
+    if (document.getElementById('bildirge_kira_net')) document.getElementById('bildirge_kira_net').value = Math.round(aylikKira * 100) / 100;
+    if (document.getElementById('bildirge_kdv_oran')) document.getElementById('bildirge_kdv_oran').value = (SENARYO_KDV_ORAN * 100);
+
+    setTimeout(function() { kiraBildirgesiOnizle(); }, 100);
+}
+
 function kiraBildirgesiOlusturFromSenaryo() {
     var musteriEl = document.getElementById('senaryo_musteri_ismi');
     var tarihEl = document.getElementById('senaryo_baslangic_tarih');
-    var netKira = window.senaryoProjeksiyonVerisi && window.senaryoProjeksiyonVerisi.net_kira != null
-        ? window.senaryoProjeksiyonVerisi.net_kira
-        : senaryoEffectiveNet();
+    // İstek: her zaman projeksiyon tablosundaki SON yılın aylık net tutarı kullanılsın
+    var sonYilBilgi = senaryoSonYilBilgisi();
+    var netKira = null;
+    if (sonYilBilgi && sonYilBilgi.aylik_kira > 0) {
+        netKira = sonYilBilgi.aylik_kira;
+    } else {
+        netKira = window.senaryoProjeksiyonVerisi && window.senaryoProjeksiyonVerisi.net_kira != null
+            ? window.senaryoProjeksiyonVerisi.net_kira
+            : senaryoEffectiveNet();
+    }
     if (netKira == null || netKira <= 0) {
         alert('Önce kira tutarını girin ve gerekirse Hesapla ile projeksiyonu oluşturun.');
         return;

@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<title>QR Kod Kartları</title>
+<style>
+@media print {
+  .no-print{display:none!important}
+  .qr-kart-tek{display:none!important}
+  body{background:#fff;margin:0}
+  .qr-grid{gap:12px}
+  .qr-kart{break-inside:avoid}
+}
+body{font-family:'Inter',Arial,sans-serif;background:#f0f4f8;padding:20px}
+h1{font-size:20px;font-weight:800;margin-bottom:6px;color:#0d1f35}
+h2{font-size:16px;font-weight:700;color:#1565c0;margin:24px 0 12px 0}
+.aciklama{font-size:13px;color:#4a7899;margin-bottom:12px}
+.btn-yazdir{
+  padding:10px 24px;background:#1565c0;color:#fff;
+  border:none;border-radius:8px;font-size:14px;font-weight:700;
+  cursor:pointer;margin-bottom:24px;
+}
+.qr-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(200px,1fr));
+  gap:16px;
+}
+.qr-kart,.qr-kart-tek{
+  background:#fff;border-radius:14px;
+  padding:20px;text-align:center;
+  box-shadow:0 2px 12px rgba(0,0,0,.1);
+}
+.qr-kart-tek{max-width:320px;margin-bottom:24px}
+.qr-ofis{font-size:12px;font-weight:700;color:#0288d1;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+.qr-img{width:140px;height:140px;margin:0 auto 10px;display:block}
+.qr-kart-tek .qr-img{width:200px;height:200px;margin:0 auto 14px}
+.qr-adi{font-size:16px;font-weight:800;color:#0d1f35;margin-bottom:6px}
+.qr-baslik{font-size:18px;font-weight:800;color:#0d1f35;margin-bottom:10px}
+.qr-talimat{font-size:11px;color:#6b7280;line-height:1.4}
+.qr-logo{font-size:10px;font-weight:700;color:#0288d1;margin-top:8px;opacity:.6}
+</style>
+</head>
+<body>
+
+<div class="no-print">
+  <h1>📱 QR Kod Kartları</h1>
+  <p class="aciklama">Kalabalık ofislerde <strong>her personel için ayrı kart</strong> yazdırın — okutunca direkt kendi ismi ve buton çıkar, listeden aramaz.</p>
+  <p class="aciklama">İsterseniz ofis girişi için tek QR kartını da yazdırabilirsiniz (liste ile).</p>
+  <button class="btn-yazdir" onclick="window.print()">🖨 Yazdır</button>
+</div>
+
+<!-- Ofis girişi: tek QR (liste sayfası) — yazdırmada gizli, sadece ekranda -->
+<div class="qr-kart-tek" style="margin-bottom:16px;">
+  <div class="qr-ofis">BestOffice ERP — Ofis girişi (tek QR)</div>
+  <img class="qr-img" src="{{ url_for('pdovam.qr_tek') }}" alt="Tek QR">
+  <div class="qr-baslik">Giriş / Çıkış (liste)</div>
+  <div class="qr-talimat">
+    Okutunca listeden isim seçilir. Az personelli yerler için.
+  </div>
+  <div class="qr-logo">BESTOFFICE ERP</div>
+</div>
+
+<h2 class="no-print">Kişiye özel kartlar (önerilen)</h2>
+<div class="qr-grid">
+  {% for p in personeller %}
+  <div class="qr-kart">
+    <div class="qr-ofis">BestOffice ERP</div>
+    <img class="qr-img" src="{{ url_for('pdovam.qr_uret', personel_id=p.id) }}" alt="QR — {{ p.ad_soyad }}">
+    <div class="qr-adi">{{ p.ad_soyad }}</div>
+    <div class="qr-talimat">
+      📸 Sabah okutun → <strong>Giriş</strong><br>
+      📸 Akşam okutun → <strong>Çıkış</strong>
+    </div>
+    <div class="qr-logo">BESTOFFICE ERP</div>
+  </div>
+  {% endfor %}
+</div>
+
+</body>
+</html>

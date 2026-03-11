@@ -273,6 +273,7 @@ def _fintech_dashboard_data():
                 "tahsilat_kritik_list": tahsilat_kritik_list,
                 "kargo_bugun": kargo_bugun,
                 "kargo_teslim_bekleyen": kargo_teslim_bekleyen,
+                "gemini_available": GEMINI_AVAILABLE,
             }
     except Exception:
         return _fintech_defaults()
@@ -483,6 +484,7 @@ def _fintech_defaults():
         "kargo_bugun": [],
         "kargo_teslim_bekleyen": [],
         "fatura_bekleyen_count": 0,
+        "gemini_available": GEMINI_AVAILABLE,
     }
 
 
@@ -1332,14 +1334,93 @@ def _musteri_ozet_metni():
     return "\n".join(satirlar)
 
 
+def _sistem_ozet_metni():
+    """Sistem analizi için genişletilmiş özet: müşteri + fatura + tahsilat + bakiye."""
+    base = _musteri_ozet_metni()
+    extra = []
+    try:
+        fatura = fetch_one(
+            "SELECT COUNT(*) AS n, COALESCE(SUM(COALESCE(toplam, tutar, 0)), 0) AS toplam FROM faturalar"
+        )
+        if fatura:
+            extra.append(
+                f"Toplam fatura sayısı: {fatura.get('n') or 0}, toplam tutar: {float(fatura.get('toplam') or 0):,.2f} TL"
+            )
+        tahsilat = fetch_one(
+            "SELECT COUNT(*) AS n, COALESCE(SUM(tutar), 0) AS toplam FROM tahsilatlar"
+        )
+        if tahsilat:
+            extra.append(
+                f"Toplam tahsilat sayısı: {tahsilat.get('n') or 0}, toplam tahsilat: {float(tahsilat.get('toplam') or 0):,.2f} TL"
+            )
+        bakiye = fetch_one(
+            "SELECT COALESCE(SUM(current_balance), 0) AS t FROM customers"
+        )
+        if bakiye is not None:
+            extra.append(f"Toplam cari bakiye (fatura - tahsilat): {float(bakiye.get('t') or 0):,.2f} TL")
+        geciken = fetch_one(
+            """SELECT COUNT(DISTINCT c.id) AS n FROM customers c
+               JOIN faturalar f ON f.musteri_id = c.id
+               WHERE (COALESCE(f.vade_tarihi::date, f.fatura_tarihi::date + INTERVAL '30 days') < CURRENT_DATE)
+               AND COALESCE(f.durum, '') != 'odendi'"""
+        )
+        if geciken and (geciken.get("n") or 0) > 0:
+            extra.append(f"Gecikmiş ödemesi olan müşteri sayısı: {geciken.get('n')}")
+    except Exception:
+        pass
+    if extra:
+        base += "\n\n--- Ek sistem verileri ---\n" + "\n".join(extra)
+    return base
+
+
+def _sistem_ozet_metni_kisa():
+    """Sistem analizi için kısa özet (token tasarrufu, ücretsiz kota): sadece sayılar, liste yok."""
+    satirlar = []
+    try:
+        toplam = fetch_one("SELECT COUNT(*) AS n FROM customers")
+        n = (toplam or {}).get("n") or 0
+        kira = fetch_one(
+            "SELECT COUNT(*) AS n, COALESCE(SUM(ilk_kira_bedeli), 0) AS toplam FROM customers WHERE ilk_kira_bedeli IS NOT NULL"
+        )
+        kira_n = (kira or {}).get("n") or 0
+        kira_toplam = float((kira or {}).get("toplam") or 0)
+        satirlar.append(f"Toplam müşteri: {n}. Kira girilmiş: {kira_n}, aylık toplam kira: {kira_toplam:,.0f} TL.")
+        fatura = fetch_one(
+            "SELECT COUNT(*) AS n, COALESCE(SUM(COALESCE(toplam, tutar, 0)), 0) AS toplam FROM faturalar"
+        )
+        if fatura:
+            satirlar.append(f"Fatura: {fatura.get('n') or 0} adet, toplam {float(fatura.get('toplam') or 0):,.0f} TL.")
+        tahsilat = fetch_one(
+            "SELECT COUNT(*) AS n, COALESCE(SUM(tutar), 0) AS toplam FROM tahsilatlar"
+        )
+        if tahsilat:
+            satirlar.append(f"Tahsilat: {tahsilat.get('n') or 0} adet, toplam {float(tahsilat.get('toplam') or 0):,.0f} TL.")
+        bakiye = fetch_one("SELECT COALESCE(SUM(current_balance), 0) AS t FROM customers")
+        if bakiye is not None:
+            satirlar.append(f"Cari bakiye: {float(bakiye.get('t') or 0):,.0f} TL.")
+    except Exception:
+        pass
+    return "\n".join(satirlar) if satirlar else "Veri yok."
+
+
 @bp.route("/api/gemini-analiz", methods=["POST"])
 @giris_gerekli
 def api_gemini_analiz():
     """Müşteri verisi özeti + isteğe bağlı kullanıcı sorusu ile Gemini'den analiz alır."""
     data = request.get_json(silent=True) or request.form
     soru = (data.get("soru") or data.get("prompt") or "").strip()
-    context = _musteri_ozet_metni()
-    ok, metin = gemini_analiz_yap(context, soru)
+    sistem_analizi = data.get("sistem_analizi") in (True, "true", "1")
+    if sistem_analizi:
+        # Kısa özet + tek istek: ücretsiz planda kota aşımını önler (1 tıklama = 1 API çağrısı)
+        context = _sistem_ozet_metni_kisa()
+        soru = (
+            "Bu ERP sisteminin mevcut müşteri, fatura ve tahsilat verilerine göre kısa bir sistem analizi yap. "
+            "Güçlü yönler, olası riskler ve 3-5 maddelik iyileştirme önerileri ver. Yanıtı Türkçe, net ve kısa tut."
+        )
+        ok, metin = gemini_analiz_yap(context, soru, tek_istek=True)
+    else:
+        context = _musteri_ozet_metni()
+        ok, metin = gemini_analiz_yap(context, soru)
     if ok:
         return jsonify({"ok": True, "metin": metin})
     return jsonify({"ok": False, "hata": metin}), 400

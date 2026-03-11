@@ -336,10 +336,11 @@ def _bugun_tarih_gun():
 @bp.route("/dashboard")
 @giris_gerekli
 def dashboard():
-    strip = _mobile_kritik_strip()
     data = _mobile_dashboard_data()
     bugun_tarih, bugun_gun = _bugun_tarih_gun()
-    return render_template("mobile/dashboard.html", **data, strip=strip, bugun_tarih=bugun_tarih, bugun_gun=bugun_gun)
+    data["bugun_tarih"] = bugun_tarih
+    data["bugun_gun"] = bugun_gun
+    return render_template("mobile/dashboard.html", **data)
 
 
 @bp.route("/musteriler")

@@ -1,0 +1,484 @@
+{% extends "layout.html" %}
+{% block title %}Personel Devam - Giriş{% endblock %}
+{% block page_title %}{% if not request.args.get('embed') %}👥 Personel Devam Takibi{% endif %}{% endblock %}
+
+{% block content %}
+{% set is_admin = current_user.is_authenticated and current_user.role == 'admin' %}
+{% if request.args.get('embed') %}
+<style>
+header.main-header{display:none;}
+body{margin:0;}
+.main-content{padding-top:0;}
+</style>
+{% endif %}
+<style>
+.pdovam-tabs{display:flex;gap:6px;margin-bottom:10px;border-bottom:1px solid #243447;}
+.pdovam-tab{padding:6px 14px;font-size:13px;color:#90a4ae;text-decoration:none;border-radius:12px 12px 0 0;border:1px solid transparent;border-bottom:none;cursor:pointer;}
+.pdovam-tab.active{color:#4fc3f7;border-color:#243447;background:#102133;}
+.pdovam-pane-hidden{display:none;}
+.pdovam-btn{padding:3px 6px;font-size:11px;border:none;border-radius:4px;cursor:pointer;margin:0 1px;}
+.pdovam-btn-duzenle{background:#00bcd4;color:#fff;}
+.pdovam-btn-kaydet{background:#2e7d32;color:#fff;}
+.pdovam-btn-sil{background:#c62828;color:#fff;}
+</style>
+<div style="max-width:960px;margin:0 auto;padding:10px 0 40px 0;">
+  <div style="margin-bottom:8px;color:#b0bec5;font-size:14px;display:flex;justify-content:space-between;align-items:center;gap:8px;">
+    <div>
+      <strong>{{ bugun }}</strong> · {{ gun_adi }}
+    </div>
+    <form method="get" style="display:flex;align-items:center;gap:6px;font-size:12px;">
+      <label for="pdovam-bas" style="color:#b0bec5;">Tarih:</label>
+      <input type="date" id="pdovam-bas" name="bas" value="{{ bas_iso }}" style="background:#102133;border:1px solid #243447;color:#e0f7fa;padding:4px 8px;border-radius:4px;font-size:12px;">
+      <span style="color:#b0bec5;">–</span>
+      <input type="date" id="pdovam-bit" name="bit" value="{{ bit_iso }}" style="background:#102133;border:1px solid #243447;color:#e0f7fa;padding:4px 8px;border-radius:4px;font-size:12px;">
+      <label for="pdovam-personel" style="color:#b0bec5;margin-left:8px;">Personel:</label>
+      <select id="pdovam-personel" name="personel_id" style="background:#102133;border:1px solid #243447;color:#e0f7fa;padding:4px 8px;border-radius:4px;font-size:12px;min-width:140px;">
+        <option value="">Tümü</option>
+        {% for p in tum_personeller %}
+        <option value="{{ p.id }}" {% if secili_personel_id == p.id %}selected{% endif %}>{{ p.ad_soyad }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit" style="background:#00bcd4;border:none;color:#fff;padding:4px 10px;border-radius:4px;font-size:12px;cursor:pointer;">Göster</button>
+    </form>
+  </div>
+
+  <div class="pdovam-tabs">
+    <a href="#" id="pdovam-tab-giris" class="pdovam-tab active">Giriş / Çıkış</a>
+    <a href="#" id="pdovam-tab-barkod" class="pdovam-tab">Barkodlar</a>
+  </div>
+
+  <!-- TAB 1: Giriş / Çıkış -->
+  <div id="pdovam-pane-giris">
+    <!-- Tek kişi görünümü: bu cihaz bir personelle eşlendi -->
+    <div id="pdovam-tek-kisi" style="display:none; background:#102133; border:1px solid #243447; border-radius:12px; padding:20px; margin-bottom:12px; text-align:center;">
+      <div style="font-size:14px; color:#90a4ae; margin-bottom:4px;">Cihazınız tanımlı</div>
+      <div id="pdovam-tek-adi" style="font-size:20px; color:#4fc3f7; font-weight:600; margin-bottom:16px;"></div>
+      <button type="button" id="pdovam-tek-btn" style="display:block; width:100%; max-width:280px; margin:0 auto 12px; padding:16px 24px; font-size:18px; background:#00bcd4; color:#000; border:none; border-radius:8px; cursor:pointer; font-weight:600;"></button>
+      <a href="#" id="pdovam-baska-kisi" style="font-size:13px; color:#90a4ae;">Başka kişi olarak giriş yap</a>
+    </div>
+
+    <!-- Liste: cihaz tanımlı değil veya "başka kişi" seçildi -->
+    <div id="pdovam-liste" style="margin-bottom:12px;">
+      <div style="background:#102133;border:1px solid #243447;border-radius:8px;padding:10px 12px;margin-bottom:12px;">
+        <div style="font-size:14px;color:#e0f7fa;margin-bottom:6px;">İsminize dokunun — bu cihaz sadece sizin kaydınızı kullanacak.</div>
+        <div style="font-size:12px;color:#90a4ae;">İlk dokunuş giriş, ikinci dokunuş çıkış. Cihazınız bir kez sizinle eşlenir.</div>
+      </div>
+
+      <table style="width:100%;border-collapse:collapse;font-size:13px;">
+        <thead>
+          <tr style="background:#0f2537;color:#4fc3f7;">
+            <th style="padding:8px 10px;text-align:left;">Personel</th>
+            <th style="padding:8px 10px;text-align:left;">Görüntüle</th>
+            <th style="padding:8px 10px;text-align:left;">Mesai</th>
+            <th style="padding:8px 10px;text-align:left;">Giriş</th>
+            <th style="padding:8px 10px;text-align:left;">Çıkış</th>
+            <th style="padding:8px 10px;text-align:left;">Mesai Saat</th>
+            <th style="padding:8px 10px;text-align:left;">Mola</th>
+            <th style="padding:8px 10px;text-align:left;">Durum</th>
+            {% if is_admin %}
+            <th style="padding:8px 10px;text-align:left;">İşlem</th>
+            {% endif %}
+          </tr>
+        </thead>
+        <tbody>
+        {% for p in personeller %}
+          <tr data-id="{{ p.id }}" data-ad="{{ p.ad_soyad or '' }}" class="pdovam-row" style="border-bottom:1px solid #243447;cursor:pointer;">
+            <td style="padding:8px 10px;color:#e0f7fa;white-space:nowrap;">{{ p.ad_soyad }}</td>
+            <td style="padding:6px 8px;min-width:120px;">
+              <button type="button" class="pdovam-goruntule-btn" style="width:100%;padding:8px 10px;border:none;border-radius:16px;background:#00bcd4;color:#000;font-size:13px;font-weight:600;cursor:pointer;">Görüntüle</button>
+            </td>
+            <td style="padding:8px 10px;color:#90a4ae;">{{ p.mesai_baslangic or "--" }} - {{ p.mesai_bitis or "--" }}</td>
+            <td data-col="giris" style="padding:8px 10px;color:#e0f7fa;">{{ p.giris_saati or "--" }}</td>
+            <td data-col="cikis" style="padding:8px 10px;color:#e0f7fa;">{{ p.cikis_saati or "--" }}</td>
+            <td data-col="mesai-saat" style="padding:8px 10px;color:#e0f7fa;">
+              {% if p.toplam_saat is not none and p.toplam_saat_saat is not none %}
+                {{ p.toplam_saat_saat }} saat {{ "%02d"|format(p.toplam_saat_dakika or 0) }} dakika<br>
+                <span style="font-size:11px;color:#90a4ae;">
+                  Net: {{ p.net_saat_saat }} saat {{ "%02d"|format(p.net_saat_dakika or 0) }} dakika
+                </span>
+              {% else %}
+                --
+              {% endif %}
+            </td>
+            <td style="padding:8px 10px;color:#e0f7fa;">1.50</td>
+            <td data-col="durum" style="padding:8px 10px;color:#e0f7fa;">{{ p.durum or "--" }}</td>
+            {% if is_admin %}
+            <td style="padding:6px 4px;color:#e0f7fa;white-space:nowrap;">
+              <button type="button" class="pdovam-btn pdovam-btn-duzenle">Düzenle</button>
+              <button type="button" class="pdovam-btn pdovam-btn-kaydet" style="display:none;">Kaydet</button>
+              <button type="button" class="pdovam-btn pdovam-btn-sil">Sil</button>
+            </td>
+            {% endif %}
+          </tr>
+        {% else %}
+          <tr><td colspan="{{ 8 + (1 if is_admin else 0) }}" style="padding:12px 10px;text-align:center;color:#78909c;">Aktif personel bulunamadı.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div id="pdovam-mesaj" style="margin-top:12px;font-size:13px;color:#e0f7fa;"></div>
+    <div style="margin-top:8px;font-size:11px;color:#90a4ae;">Bu işlem sadece ofis WiFi / yerel ağından yapılabilir.</div>
+  </div>
+
+  <!-- TAB 2: Barkodlar -->
+  <div id="pdovam-pane-barkod" class="pdovam-pane-hidden">
+    <div style="background:#102133;border:1px solid #243447;border-radius:12px;padding:16px 18px;margin-bottom:14px;">
+      <h3 style="margin:0 0 8px 0;font-size:15px;color:#4fc3f7;">Tek Barkod (Liste)</h3>
+      <p style="margin:0 0 8px 0;font-size:12px;color:#90a4ae;">
+        Ofis girişine asmak için tek barkod. Personeller okutup listeden kendi isimlerini seçerek giriş/çıkış yapar.
+      </p>
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:16px;">
+        <img src="{{ url_for('pdovam.qr_tek') }}" alt="Tek QR" style="width:150px;height:150px;border-radius:8px;background:#fff;padding:4px;">
+        <div style="font-size:11px;color:#78909c;max-width:260px;">
+          Yazdırmak isterseniz görseli sağ tıklayıp kaydedebilir veya
+          <a href="{{ url_for('pdovam.qr_tek') }}" target="_blank" style="color:#4fc3f7;text-decoration:underline;">yeni sekmede açıp</a> yazdırabilirsiniz.
+        </div>
+      </div>
+    </div>
+
+    <div style="background:#102133;border:1px solid #243447;border-radius:12px;padding:16px 18px;">
+      <h3 style="margin:0 0 8px 0;font-size:15px;color:#4fc3f7;">Kişiye Özel Barkodlar</h3>
+      <p style="margin:0 0 10px 0;font-size:12px;color:#90a4ae;">
+        Her personel için ayrı barkod. Sabah okutunca giriş, akşam okutunca çıkış kaydı oluşur.
+      </p>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px;">
+        {% for p in tum_personeller %}
+        <div style="background:#0f2537;border-radius:10px;padding:10px 10px 12px 10px;text-align:center;">
+          <div style="font-size:11px;color:#90a4ae;margin-bottom:4px;">BestOffice ERP</div>
+          <img src="{{ url_for('pdovam.qr_uret', personel_id=p.id) }}" alt="QR — {{ p.ad_soyad }}" style="width:120px;height:120px;background:#fff;border-radius:6px;padding:3px;">
+          <div style="font-size:13px;font-weight:600;color:#e0f7fa;margin-top:6px;">{{ p.ad_soyad }}</div>
+        </div>
+        {% else %}
+        <div style="font-size:12px;color:#78909c;">Aktif personel bulunamadı.</div>
+        {% endfor %}
+      </div>
+      <div style="margin-top:10px;font-size:11px;color:#78909c;">
+        Tüm kartları yazdırmak için
+        <a href="{{ url_for('pdovam.qr_yazdir') }}" target="_blank" style="color:#4fc3f7;text-decoration:underline;">QR Kartları yazdır</a>
+        sayfasını da kullanabilirsiniz.
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  var STORAGE_KEY = 'pdovam_personel_id';
+  var STORAGE_AD  = 'pdovam_ad_soyad';
+  var personeller = {{ (personeller_json or []) | tojson }};
+  var params = new URLSearchParams(window.location.search || '');
+  var ORTAK_MOD = params.get('ortak') === '1';
+  var IS_ADMIN = {{ 'true' if is_admin else 'false' }};
+  var API_MANUEL = "{{ url_for('pdovam.api_manuel') }}";
+  var API_SIL = "{{ url_for('pdovam.api_sil') }}";
+
+  // Eğer bu sayfa bir iframe içinde açıldıysa, üstteki ana header/nav kısmını gizle
+  try {
+    if (window.self !== window.top) {
+      var hdr = document.querySelector('.header');
+      if (hdr) hdr.style.display = 'none';
+    }
+  } catch (e) {
+    // cross-origin durumunda dokunma
+  }
+
+  var tabGiris = document.getElementById('pdovam-tab-giris');
+  var tabBarkod = document.getElementById('pdovam-tab-barkod');
+  var paneGiris = document.getElementById('pdovam-pane-giris');
+  var paneBarkod = document.getElementById('pdovam-pane-barkod');
+
+  var listEl = document.getElementById('pdovam-liste');
+  var tekEl = document.getElementById('pdovam-tek-kisi');
+  var tekAd = document.getElementById('pdovam-tek-adi');
+  var tekBtn = document.getElementById('pdovam-tek-btn');
+  var mesajEl = document.getElementById('pdovam-mesaj');
+  var baskaLink = document.getElementById('pdovam-baska-kisi');
+
+  function getStoredId() {
+    var id = localStorage.getItem(STORAGE_KEY);
+    return id ? parseInt(id, 10) : null;
+  }
+
+  function setStored(id, ad) {
+    localStorage.setItem(STORAGE_KEY, String(id));
+    localStorage.setItem(STORAGE_AD, ad || '');
+  }
+
+  function clearStored() {
+    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(STORAGE_AD);
+  }
+
+  function switchTab(which) {
+    if (!paneGiris || !paneBarkod) return;
+    if (which === 'barkod') {
+      paneGiris.classList.add('pdovam-pane-hidden');
+      paneBarkod.classList.remove('pdovam-pane-hidden');
+      if (tabGiris) tabGiris.classList.remove('active');
+      if (tabBarkod) tabBarkod.classList.add('active');
+    } else {
+      paneGiris.classList.remove('pdovam-pane-hidden');
+      paneBarkod.classList.add('pdovam-pane-hidden');
+      if (tabGiris) tabGiris.classList.add('active');
+      if (tabBarkod) tabBarkod.classList.remove('active');
+    }
+  }
+
+  function timeDiffHours(girisStr, cikisStr) {
+    if (!girisStr || !cikisStr) return null;
+    function toMinutes(s) {
+      var p = String(s).split(':');
+      if (p.length < 2) return null;
+      var h = parseInt(p[0], 10); if (isNaN(h)) h = 0;
+      var m = parseInt(p[1], 10); if (isNaN(m)) m = 0;
+      return h * 60 + m;
+    }
+    var mg = toMinutes(girisStr);
+    var mc = toMinutes(cikisStr);
+    if (mg === null || mc === null) return null;
+    var mins = mc - mg;
+    if (mins <= 0) return null;
+    var toplam = mins / 60;
+    var net = Math.max(0, toplam - 1.5);
+    return {
+      toplam: parseFloat(toplam.toFixed(2)),
+      net: parseFloat(net.toFixed(2))
+    };
+  }
+
+  function findPersonel(id) {
+    for (var i = 0; i < personeller.length; i++) {
+      if (personeller[i].id === id) return personeller[i];
+    }
+    return null;
+  }
+
+  function showSingleView() {
+    // Ortak cihaz (tek barkod) modunda her zaman listeyi göster
+    if (ORTAK_MOD) {
+      listEl.style.display = 'block';
+      if (tekEl) tekEl.style.display = 'none';
+      return;
+    }
+    var id = getStoredId();
+    var p = id ? findPersonel(id) : null;
+    if (!p) {
+      listEl.style.display = 'block';
+      if (tekEl) tekEl.style.display = 'none';
+      return;
+    }
+    listEl.style.display = 'none';
+    tekEl.style.display = 'block';
+    tekAd.textContent = p.ad_soyad || 'Personel';
+    var durum = (p.durum || '').toLowerCase();
+    if (durum === 'cikis' || durum === 'zaten_cikis') {
+      tekBtn.textContent = 'Çıkış zaten yapıldı';
+      tekBtn.disabled = true;
+    } else if (durum === 'giris') {
+      tekBtn.textContent = 'Çıkış Yap';
+      tekBtn.disabled = false;
+    } else {
+      tekBtn.textContent = 'Giriş Yap';
+      tekBtn.disabled = false;
+    }
+  }
+
+  function guncelleSatir(tr, data) {
+    if (!tr || !data) return;
+    var girisTd = tr.querySelector('td[data-col="giris"]');
+    var cikisTd = tr.querySelector('td[data-col="cikis"]');
+    var durumTd = tr.querySelector('td[data-col="durum"]');
+    var mesaiTd = tr.querySelector('td[data-col="mesai-saat"]');
+    if (data.islem === 'giris') {
+      if (girisTd) girisTd.textContent = data.saat || '--';
+      if (durumTd) durumTd.textContent = 'giris';
+    } else if (data.islem === 'cikis') {
+      if (cikisTd) cikisTd.textContent = data.saat || '--';
+      if (durumTd) durumTd.textContent = 'cikis';
+    }
+    if (mesaiTd && girisTd && cikisTd) {
+      var r = timeDiffHours(girisTd.textContent.trim(), cikisTd.textContent.trim());
+      if (r) {
+        mesaiTd.innerHTML = r.toplam.toFixed(2) + '<br><span style="font-size:11px;color:#90a4ae;">Net: ' + r.net.toFixed(2) + '</span>';
+      } else {
+        mesaiTd.textContent = '--';
+      }
+    }
+  }
+
+  function postIsle(id, onSuccess) {
+    fetch('/pdovam/isle/' + id, { method: 'POST' })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if (mesajEl) mesajEl.textContent = d.mesaj || '';
+        if (d.ok && onSuccess) onSuccess(d);
+        if (d.ok && d.islem) {
+          var p = findPersonel(id);
+          if (p) {
+            if (d.islem === 'giris') { p.durum = 'giris'; p.giris_saati = d.saat; }
+            else if (d.islem === 'cikis') { p.durum = 'cikis'; p.cikis_saati = d.saat; }
+          }
+        }
+      })
+      .catch(function(){
+        if (mesajEl) mesajEl.textContent = 'Sunucuya ulaşılamadı.';
+      });
+  }
+
+  // Liste satırına tıklanınca: işlem yap, cihazı bu kişiye bağla, tek kişi görünümüne geç
+  document.querySelectorAll('.pdovam-row').forEach(function(tr){
+    tr.addEventListener('click', function(){
+      var id = this.getAttribute('data-id');
+      var ad = this.getAttribute('data-ad') || '';
+      if (!id) return;
+      id = parseInt(id, 10);
+      postIsle(id, function(d) {
+        setStored(id, ad);
+        guncelleSatir(tr, d);
+        var p = findPersonel(id);
+        if (p && d.islem) { p.durum = d.islem; if (d.islem === 'giris') p.giris_saati = d.saat; else if (d.islem === 'cikis') p.cikis_saati = d.saat; }
+        showSingleView();
+      });
+    });
+
+    // Admin için satır içi düzenleme / silme
+    if (IS_ADMIN) {
+      var btnDuz = tr.querySelector('.pdovam-btn-duzenle');
+      var btnKay = tr.querySelector('.pdovam-btn-kaydet');
+      var btnSil = tr.querySelector('.pdovam-btn-sil');
+      var girisTd = tr.querySelector('td[data-col=\"giris\"]');
+      var cikisTd = tr.querySelector('td[data-col=\"cikis\"]');
+      var mesaiTd = tr.querySelector('td[data-col=\"mesai-saat\"]');
+      var durumTd = tr.querySelector('td[data-col=\"durum\"]');
+
+      function setViewMode() {
+        if (btnKay) btnKay.style.display = 'none';
+        if (btnDuz) btnDuz.style.display = '';
+        if (girisTd && girisTd.firstElementChild && girisTd.firstElementChild.tagName === 'INPUT') {
+          var v = girisTd.firstElementChild.value || '--';
+          girisTd.textContent = v || '--';
+        }
+        if (cikisTd && cikisTd.firstElementChild && cikisTd.firstElementChild.tagName === 'INPUT') {
+          var v2 = cikisTd.firstElementChild.value || '--';
+          cikisTd.textContent = v2 || '--';
+        }
+      }
+
+      function setEditMode() {
+        if (!girisTd || !cikisTd) return;
+        var curG = girisTd.textContent.trim();
+        var curC = cikisTd.textContent.trim();
+        var gVal = curG === '--' ? '' : curG;
+        var cVal = curC === '--' ? '' : curC;
+        girisTd.innerHTML = '<input type=\"time\" value=\"'+gVal+'\" style=\"width:90px;background:#102133;border:1px solid #243447;color:#e0f7fa;padding:4px 6px;border-radius:4px;font-size:12px;\">';
+        cikisTd.innerHTML = '<input type=\"time\" value=\"'+cVal+'\" style=\"width:90px;background:#102133;border:1px solid #243447;color:#e0f7fa;padding:4px 6px;border-radius:4px;font-size:12px;\">';
+        if (btnKay) btnKay.style.display = '';
+        if (btnDuz) btnDuz.style.display = 'none';
+      }
+
+      if (btnDuz) {
+        btnDuz.addEventListener('click', function(e){
+          e.stopPropagation();
+          setEditMode();
+        });
+      }
+
+      if (btnKay) {
+        btnKay.addEventListener('click', function(e){
+          e.stopPropagation();
+          var id = parseInt(tr.getAttribute('data-id'), 10);
+          if (!id) return;
+          var gInp = girisTd ? girisTd.querySelector('input') : null;
+          var cInp = cikisTd ? cikisTd.querySelector('input') : null;
+          var gVal = gInp && gInp.value ? gInp.value : null;
+          var cVal = cInp && cInp.value ? cInp.value : null;
+          fetch(API_MANUEL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ personel_id: id, giris_saati: gVal, cikis_saati: cVal })
+          }).then(function(r){ return r.json(); }).then(function(resp){
+            if (!resp.ok) { alert(resp.mesaj || 'Kaydedilemedi'); return; }
+            setViewMode();
+            if (mesaiTd && girisTd && cikisTd) {
+              var r = timeDiffHours(girisTd.textContent.trim(), cikisTd.textContent.trim());
+              if (r) {
+                mesaiTd.innerHTML = r.toplam.toFixed(2) + '<br><span style=\"font-size:11px;color:#90a4ae;\">Net: ' + r.net.toFixed(2) + '</span>';
+              } else {
+                mesaiTd.textContent = '--';
+              }
+            }
+            if (mesajEl && resp.mesaj) mesajEl.textContent = resp.mesaj;
+          }).catch(function(){
+            alert('Sunucuya ulaşılamadı.');
+          });
+        });
+      }
+
+      if (btnSil) {
+        btnSil.addEventListener('click', function(e){
+          e.stopPropagation();
+          var id = parseInt(tr.getAttribute('data-id'), 10);
+          if (!id) return;
+          if (!confirm('Bu personelin bugünkü devam kaydını silmek istiyor musunuz?')) return;
+          fetch(API_SIL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ personel_id: id })
+          }).then(function(r){ return r.json(); }).then(function(resp){
+            if (!resp.ok) { alert(resp.mesaj || 'Silinemedi'); return; }
+            if (girisTd) girisTd.textContent = '--';
+            if (cikisTd) cikisTd.textContent = '--';
+            if (mesaiTd) mesaiTd.textContent = '--';
+            if (durumTd) durumTd.textContent = '--';
+          }).catch(function(){
+            alert('Sunucuya ulaşılamadı.');
+          });
+        });
+      }
+    }
+  });
+
+  // Tek kişi butonu: giriş/çıkış yap, sonra buton metnini güncelle
+  if (tekBtn) {
+    tekBtn.addEventListener('click', function(){
+      if (this.disabled) return;
+      var id = getStoredId();
+      if (!id) return;
+      tekBtn.disabled = true;
+      postIsle(id, function(d) {
+        var p = findPersonel(id);
+        if (p && d.islem === 'giris') { p.durum = 'giris'; p.giris_saati = d.saat; tekBtn.textContent = 'Çıkış Yap'; tekBtn.disabled = false; }
+        else if (p && d.islem === 'cikis') { p.durum = 'cikis'; p.cikis_saati = d.saat; tekBtn.textContent = 'Çıkış zaten yapıldı'; }
+        else if (d.islem === 'zaten_cikis') { if (p) p.durum = 'cikis'; tekBtn.textContent = 'Çıkış zaten yapıldı'; }
+        else { tekBtn.disabled = false; }
+      });
+    });
+  }
+
+  if (baskaLink) {
+    baskaLink.addEventListener('click', function(e){
+      e.preventDefault();
+      clearStored();
+      location.reload();
+    });
+  }
+
+  // Sayfa yüklenince: cihaz tanımlıysa tek kişi görünümü
+  showSingleView();
+
+  if (tabGiris) {
+    tabGiris.addEventListener('click', function(e){
+      e.preventDefault();
+      switchTab('giris');
+    });
+  }
+  if (tabBarkod) {
+    tabBarkod.addEventListener('click', function(e){
+      e.preventDefault();
+      switchTab('barkod');
+    });
+  }
+})();
+</script>
+{% endblock %}

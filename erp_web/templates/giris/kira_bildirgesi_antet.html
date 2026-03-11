@@ -41,9 +41,16 @@
         .body-text {
             text-align: justify;
             margin-bottom: 14px;
+            /* Tarih ve rakamların ortadan bölünmesini engelle */
+            word-break: keep-all;
+            overflow-wrap: normal;
+            hyphens: none;
         }
         .body-text p {
             margin: 0 0 12px 0;
+        }
+        .body-text .nowrap {
+            white-space: nowrap;
         }
         /* İmza bloğu — sağ alt, ünvan BESTOFFICE'e göre ortalanmış */
         .signature-block {
@@ -87,9 +94,9 @@
 
         <!-- İçerik metni -->
         <div class="body-text">
-            <p id="par1">{{ par1|default('Tarafınızla sözleşme tarihi itibarıyla imzalanmış olan kira sözleşmesi gereği, geçerlilik tarihi itibarıyla kira bedeli güncellemesi yapılması gerekmektedir.', true) }}</p>
-            <p id="par2">{{ par2|default('Mevcut ekonomik koşullar ve yasal düzenlemeler göz önüne alınarak, adı geçen tarihten itibaren uygulanacak yeni kira bedeli TÜFE Yasal Oranı çerçevesinde güncellenecektir. Buna göre aylık kira bedeliniz (net + KDV) ve yıllık tutar metinde belirtilmiştir.', true) }}</p>
-            <p id="par3">{{ par3|default('Anlayışınız ve iş birliğiniz için teşekkür eder, sorularınız veya ek talepleriniz olması durumunda bizimle iletişime geçmekten çekinmemenizi rica ederiz.', true) }}</p>
+            <p id="par1">{{ par1|default('Tarafınızla sözleşme tarihi itibarıyla imzalanmış olan kira sözleşmesi gereği, geçerlilik tarihi itibarıyla kira bedeli güncellemesi yapılması gerekmektedir.', true)|safe }}</p>
+            <p id="par2">{{ par2|default('Mevcut ekonomik koşullar ve yasal düzenlemeler göz önüne alınarak, adı geçen tarihten itibaren uygulanacak yeni kira bedeli TÜFE Yasal Oranı çerçevesinde güncellenecektir. Buna göre aylık kira bedeliniz (net + KDV) ve yıllık tutar metinde belirtilmiştir.', true)|safe }}</p>
+            <p id="par3">{{ par3|default('Anlayışınız ve iş birliğiniz için teşekkür eder, sorularınız veya ek talepleriniz olması durumunda bizimle iletişime geçmekten çekinmemenizi rica ederiz.', true)|safe }}</p>
         </div>
 
         <!-- İmza bloğu — sağ alt; ünvan BESTOFFICE'e göre ortalanmış -->

@@ -17,14 +17,14 @@ def index():
 @bp.route("/yeni")
 @giris_gerekli
 def yeni():
-    """Yeni ürün sayfasına yönlendir (aynı index, form temiz)."""
-    return redirect(url_for("urunler.index"))
+    """Yeni ürün sayfası."""
+    return render_template("urunler/yeni.html")
 
 
 @bp.route("/api/list")
 @giris_gerekli
 def api_list():
-    """Tüm ürünler (opsiyonel arama)."""
+    """Tüm ürünler (opsiyonel arama). Her kelime ad/açıklama/stok_kodu içinde aranır, sıra fark etmez."""
     q = (request.args.get("q") or "").strip()[:100]
     sql = """
     SELECT id, urun_adi, stok_kodu, birim_fiyat, stok_miktari, birim, aciklama, is_active
@@ -32,8 +32,11 @@ def api_list():
     """
     params = []
     if q:
-        sql += " AND (LOWER(urun_adi) LIKE LOWER(%s) OR LOWER(stok_kodu) LIKE LOWER(%s))"
-        params.extend(("%" + q + "%", "%" + q + "%"))
+        words = [w.strip() for w in q.split() if w.strip()]
+        for word in words:
+            pattern = "%" + word + "%"
+            sql += " AND (LOWER(urun_adi) LIKE LOWER(%s) OR LOWER(COALESCE(aciklama,'')) LIKE LOWER(%s) OR LOWER(COALESCE(stok_kodu,'')) LIKE LOWER(%s))"
+            params.extend((pattern, pattern, pattern))
     sql += " ORDER BY stok_kodu"
     rows = fetch_all(sql, tuple(params) if params else None)
     for r in rows or []:

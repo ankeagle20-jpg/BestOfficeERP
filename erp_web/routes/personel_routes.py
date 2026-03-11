@@ -3,6 +3,7 @@
 Personel Devam Takip, İzin Yönetimi, Personel Yönetimi
 """
 from flask import Blueprint, render_template, request, jsonify
+from flask_login import current_user
 from auth import giris_gerekli
 from db import fetch_all, fetch_one, execute, execute_returning
 from datetime import date, datetime, timedelta
@@ -22,10 +23,41 @@ def _parse_date(s):
     return None
 
 
+def _izin_hakki_4857(ise_baslama, dogum_tarihi, ref_tarih=None):
+    """4857 sayılı İş Kanunu: kıdem ve yaşa göre yıllık ücretli izin günü.
+    - 0-6 yıl: 14 gün, 6-15 yıl: 20 gün, 15+ yıl: 26 gün.
+    - 18 yaş altı veya 50 yaş üstü: en az 20 gün.
+    """
+    ref = ref_tarih or date.today()
+    if not ise_baslama:
+        return 14
+    # Kıdem (tam yıl): işe girişten ref tarihine kadar
+    gun_farki = (ref - ise_baslama).days
+    if gun_farki < 365:
+        kidem_gun = 14  # 1 yıldan az da en az 14 (deneme dahil 1 yıl şartı uygulanabilir)
+    else:
+        kidem_yil = gun_farki // 365
+        if kidem_yil < 6:
+            kidem_gun = 14
+        elif kidem_yil < 15:
+            kidem_gun = 20
+        else:
+            kidem_gun = 26
+    # Yaş kriteri (18 altı / 50 üstü): en az 20 gün
+    if dogum_tarihi:
+        yas = ref.year - dogum_tarihi.year
+        if (ref.month, ref.day) < (dogum_tarihi.month, dogum_tarihi.day):
+            yas -= 1
+        if yas <= 18 or yas >= 50:
+            return max(20, kidem_gun)
+    return kidem_gun
+
+
 @bp.route("/")
 @giris_gerekli
 def index():
-    return render_template("personel/index.html")
+    is_admin = getattr(current_user, "role", None) == "admin"
+    return render_template("personel/index.html", is_admin=is_admin)
 
 
 # ── Personel listesi ────────────────────────────────────────────────────────
@@ -85,6 +117,50 @@ def api_personel_kaydet():
         return jsonify({"ok": False, "mesaj": str(e)}), 400
 
 
+@bp.route("/api/personel/ad", methods=["POST"])
+@giris_gerekli
+def api_personel_ad_guncelle():
+    try:
+        data = request.json or request.form
+        pid = int(data.get("personel_id") or data.get("id"))
+        ad = (data.get("ad_soyad") or "").strip()
+        if not ad:
+            return jsonify({"ok": False, "mesaj": "Ad soyad zorunlu"}), 400
+        execute("UPDATE personel SET ad_soyad=%s WHERE id=%s", (ad, pid))
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "mesaj": str(e)}), 400
+
+
+@bp.route("/api/personel/sil", methods=["POST"])
+@giris_gerekli
+def api_personel_sil():
+    """Personeli sil (ilgili kayıtları da temizler)."""
+    try:
+        data = request.json or request.form
+        pid = data.get("id") or data.get("personel_id")
+        if not pid:
+            return jsonify({"ok": False, "mesaj": "Personel id gerekli"}), 400
+        pid = int(pid)
+        for sql in (
+            "DELETE FROM personel_izin WHERE personel_id=%s",
+            "DELETE FROM personel_bilgi WHERE personel_id=%s",
+            "DELETE FROM personel_yetki WHERE personel_id=%s",
+        ):
+            try:
+                execute(sql, (pid,))
+            except Exception:
+                pass
+        try:
+            execute("DELETE FROM devam_kayitlari WHERE personel_id=%s", (pid,))
+        except Exception:
+            pass
+        execute("DELETE FROM personel WHERE id=%s", (pid,))
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "mesaj": str(e)}), 400
+
+
 @bp.route("/api/personel/bilgi")
 @giris_gerekli
 def api_personel_bilgi():
@@ -93,10 +169,15 @@ def api_personel_bilgi():
         return jsonify({})
     r = fetch_one("SELECT * FROM personel_bilgi WHERE personel_id=%s", (pid,))
     if not r:
-        return jsonify({"personel_id": int(pid), "yillik_izin_hakki": 14, "manuel_izin_gun": 0})
+        return jsonify({"personel_id": int(pid), "yillik_izin_hakki": 14, "yillik_izin_hakki_4857": 14, "manuel_izin_gun": 0})
     d = dict(r)
     if d.get("ise_baslama_tarihi"):
         d["ise_baslama_tarihi"] = d["ise_baslama_tarihi"].isoformat()[:10] if hasattr(d["ise_baslama_tarihi"], "isoformat") else str(d["ise_baslama_tarihi"])[:10]
+    if d.get("dogum_tarihi") and hasattr(d["dogum_tarihi"], "isoformat"):
+        d["dogum_tarihi"] = d["dogum_tarihi"].isoformat()[:10]
+    ise_baslama = r.get("ise_baslama_tarihi")
+    dogum = r.get("dogum_tarihi")
+    d["yillik_izin_hakki_4857"] = _izin_hakki_4857(ise_baslama, dogum)
     return jsonify(d)
 
 
@@ -107,7 +188,8 @@ def api_personel_bilgi_kaydet():
         data = request.json or request.form
         pid = int(data.get("personel_id"))
         ise_baslama = _parse_date(data.get("ise_baslama_tarihi"))
-        yillik_izin_hakki = int(data.get("yillik_izin_hakki") or 14)
+        dogum_tarihi = _parse_date(data.get("dogum_tarihi"))
+        yillik_izin_hakki = int(data.get("yillik_izin_hakki") or 0) or _izin_hakki_4857(ise_baslama, dogum_tarihi)
         manuel_izin_gun = int(data.get("manuel_izin_gun") or 0)
         unvan = (data.get("unvan") or "").strip()
         departman = (data.get("departman") or "").strip()
@@ -117,17 +199,114 @@ def api_personel_bilgi_kaydet():
             gec_kesinti_tipi = "izin"
 
         execute(
-            """INSERT INTO personel_bilgi (personel_id, ise_baslama_tarihi, yillik_izin_hakki, manuel_izin_gun, unvan, departman, tc_no, gec_kesinti_tipi)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+            """INSERT INTO personel_bilgi (personel_id, ise_baslama_tarihi, dogum_tarihi, yillik_izin_hakki, manuel_izin_gun, unvan, departman, tc_no, gec_kesinti_tipi)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
                ON CONFLICT (personel_id) DO UPDATE SET
-                 ise_baslama_tarihi=EXCLUDED.ise_baslama_tarihi, yillik_izin_hakki=EXCLUDED.yillik_izin_hakki,
+                 ise_baslama_tarihi=EXCLUDED.ise_baslama_tarihi, dogum_tarihi=EXCLUDED.dogum_tarihi, yillik_izin_hakki=EXCLUDED.yillik_izin_hakki,
                  manuel_izin_gun=EXCLUDED.manuel_izin_gun, unvan=EXCLUDED.unvan, departman=EXCLUDED.departman,
                  tc_no=EXCLUDED.tc_no, gec_kesinti_tipi=EXCLUDED.gec_kesinti_tipi""",
-            (pid, ise_baslama, yillik_izin_hakki, manuel_izin_gun, unvan, departman, tc_no, gec_kesinti_tipi)
+            (pid, ise_baslama, dogum_tarihi, yillik_izin_hakki, manuel_izin_gun, unvan, departman, tc_no, gec_kesinti_tipi)
         )
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"ok": False, "mesaj": str(e)}), 400
+
+
+# ── Özlük / detay bilgileri (sadece admin) ───────────────────────────────────
+
+def _ozluk_columns():
+    return (
+        "tc_kimlik", "dogum_tarihi", "dogum_yeri", "medeni_durum", "esi_calisiyor", "cocuk_sayisi",
+        "cinsiyet", "kan_grubu", "ikametgah", "cep_telefon", "mac_adres", "email", "acil_kisi",
+        "ise_giris_tarihi", "izin_hakedis_gun", "izin_hakedis_saat", "izin_kalan_gun", "izin_kalan_saat",
+        "departman", "unvan", "gorev_tanimi", "calisma_sekli", "ucret_bilgisi",
+        "iban", "yemek_yol_yardim", "ogrenim_durumu", "mezun_okul_bolum", "yabanci_dil",
+        "adli_sicil", "saglik_raporu", "ikametgah_belgesi", "diploma", "nufus_kayit", "askerlik_durum", "notlar"
+    )
+
+
+@bp.route("/api/personel/ozluk")
+@giris_gerekli
+def api_personel_ozluk():
+    """Özlük kaydını getir (sadece admin)."""
+    if getattr(current_user, "role", None) != "admin":
+        return jsonify({"ok": False, "mesaj": "Yetkisiz"}), 403
+    pid = request.args.get("personel_id")
+    if not pid:
+        return jsonify({})
+    try:
+        pid = int(pid)
+    except ValueError:
+        return jsonify({})
+    r = fetch_one("SELECT * FROM personel_ozluk WHERE personel_id=%s", (pid,))
+    if not r:
+        return jsonify({"personel_id": pid, "izin_hakedis_gun": 14, "izin_hakedis_saat": 112})
+    d = dict(r)
+    # İzin hakediş: işe giriş yoksa default 14 gün / 112 saat (14*8); varsa 4857'ye göre gün, saat = gün*8
+    ise_giris = d.get("ise_giris_tarihi")
+    dogum = d.get("dogum_tarihi")
+    if ise_giris:
+        gun = _izin_hakki_4857(ise_giris, dogum)
+        d["izin_hakedis_gun"] = gun
+        d["izin_hakedis_saat"] = gun * 8
+    else:
+        d["izin_hakedis_gun"] = 14
+        d["izin_hakedis_saat"] = 112
+    for k in ("dogum_tarihi", "ise_giris_tarihi"):
+        if d.get(k) and hasattr(d[k], "isoformat"):
+            d[k] = d[k].isoformat()[:10]
+    return jsonify(d)
+
+
+@bp.route("/api/personel/ozluk", methods=["POST"])
+@giris_gerekli
+def api_personel_ozluk_kaydet():
+    """Özlük kaydı oluştur/güncelle (sadece admin)."""
+    if getattr(current_user, "role", None) != "admin":
+        return jsonify({"ok": False, "mesaj": "Yetkisiz"}), 403
+    try:
+        data = request.get_json(silent=True) or request.form
+        pid = int(data.get("personel_id"))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "mesaj": "personel_id gerekli"}), 400
+    cols = _ozluk_columns()
+    vals = []
+    for c in cols:
+        v = data.get(c)
+        if c in ("dogum_tarihi", "ise_giris_tarihi"):
+            v = _parse_date(v) if v else None
+        elif c in ("cocuk_sayisi", "izin_hakedis_gun", "izin_hakedis_saat", "izin_kalan_gun", "izin_kalan_saat"):
+            try:
+                v = int(v) if v not in (None, "") else None
+            except (ValueError, TypeError):
+                v = None
+        else:
+            v = (v or "").strip() or None
+        vals.append(v)
+    placeholders = ", ".join("%s" for _ in cols)
+    updates = ", ".join(f"{c}=EXCLUDED.{c}" for c in cols)
+    execute(
+        f"""INSERT INTO personel_ozluk (personel_id, {", ".join(cols)})
+            VALUES (%s, {placeholders})
+            ON CONFLICT (personel_id) DO UPDATE SET {updates}, updated_at=NOW()""",
+        (pid, *vals)
+    )
+    return jsonify({"ok": True})
+
+
+@bp.route("/api/personel/ozluk/sil", methods=["POST"])
+@giris_gerekli
+def api_personel_ozluk_sil():
+    """Özlük kaydını sil (sadece admin)."""
+    if getattr(current_user, "role", None) != "admin":
+        return jsonify({"ok": False, "mesaj": "Yetkisiz"}), 403
+    try:
+        data = request.get_json(silent=True) or request.form
+        pid = int(data.get("personel_id"))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "mesaj": "personel_id gerekli"}), 400
+    execute("DELETE FROM personel_ozluk WHERE personel_id=%s", (pid,))
+    return jsonify({"ok": True})
 
 
 # ── Devam (günlük listesi, aylık özet, manuel kayıt) ─────────────────────────
@@ -261,8 +440,15 @@ def api_izin_ozet():
     yil = int(request.args.get("yil") or date.today().year)
     if not pid:
         return jsonify({"hak": 14, "kullanilan": 0, "kalan": 14})
-    bilgi = fetch_one("SELECT yillik_izin_hakki, manuel_izin_gun FROM personel_bilgi WHERE personel_id=%s", (pid,))
-    hak = int(bilgi.get("yillik_izin_hakki") or 14) if bilgi else 14
+    bilgi = fetch_one(
+        "SELECT yillik_izin_hakki, manuel_izin_gun, ise_baslama_tarihi, dogum_tarihi FROM personel_bilgi WHERE personel_id=%s",
+        (pid,)
+    )
+    # Kayıtlı yıllık izin yoksa 4857'ye göre hesapla
+    if bilgi and bilgi.get("yillik_izin_hakki") is not None and str(bilgi.get("yillik_izin_hakki")).strip() != "":
+        hak = int(bilgi.get("yillik_izin_hakki"))
+    else:
+        hak = _izin_hakki_4857(bilgi.get("ise_baslama_tarihi") if bilgi else None, bilgi.get("dogum_tarihi") if bilgi else None) if bilgi else 14
     manuel = int(bilgi.get("manuel_izin_gun") or 0) if bilgi else 0
     r = fetch_one(
         """SELECT COALESCE(SUM(gun_sayisi), 0) AS toplam FROM personel_izin

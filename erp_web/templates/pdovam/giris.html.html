@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#0a1628">
+<title>Ofis Giriş/Çıkış</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{
+  font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;
+  background:#0a1628;color:#cde6f8;
+  min-height:100vh;padding:0 0 40px;
+}
+
+/* HEADER */
+.hdr{
+  background:linear-gradient(135deg,#0d1f35,#0a2540);
+  border-bottom:1px solid rgba(0,200,240,.15);
+  padding:18px 20px 14px;
+  text-align:center;
+}
+.hdr-logo{
+  display:inline-flex;align-items:center;gap:10px;
+  margin-bottom:10px;
+}
+.hdr-mark{
+  width:36px;height:36px;border-radius:9px;
+  background:linear-gradient(135deg,#0288d1,#00bcd4);
+  display:flex;align-items:center;justify-content:center;
+  font-size:18px;
+}
+.hdr-name{font-size:16px;font-weight:800;letter-spacing:-.3px}
+.hdr-sub{font-size:11px;color:#4a7899;letter-spacing:.3px}
+.hdr-tarih{
+  margin-top:6px;
+  font-size:13px;font-weight:600;color:#00c8f0;
+}
+.hdr-saat{
+  font-size:28px;font-weight:800;
+  font-family:'JetBrains Mono','Courier New',monospace;
+  letter-spacing:-.5px;margin-top:2px;
+}
+
+/* PERSONEL KARTLARI */
+.liste{padding:14px 12px;display:flex;flex-direction:column;gap:10px}
+
+.p-kart{
+  background:#101f30;
+  border:1px solid rgba(255,255,255,.07);
+  border-radius:14px;overflow:hidden;
+}
+.p-kart-ust{
+  display:flex;align-items:center;gap:12px;
+  padding:14px 16px;
+}
+.p-avatar{
+  width:44px;height:44px;border-radius:50%;
+  background:linear-gradient(135deg,#1565c0,#0288d1);
+  display:flex;align-items:center;justify-content:center;
+  font-size:17px;font-weight:800;flex-shrink:0;
+}
+.p-info{flex:1;min-width:0}
+.p-adi{font-size:14.5px;font-weight:700;letter-spacing:-.2px}
+.p-mesai{font-size:11px;color:#4a7899;margin-top:2px}
+.p-durum-badge{
+  padding:3px 10px;border-radius:5px;
+  font-size:10px;font-weight:700;
+  font-family:monospace;white-space:nowrap;
+}
+.bd-giris{background:rgba(0,200,83,.12);color:#00c853;border:1px solid rgba(0,200,83,.2)}
+.bd-cikis{background:rgba(74,120,153,.12);color:#4a7899;border:1px solid rgba(74,120,153,.2)}
+.bd-bos  {background:rgba(255,255,255,.05);color:#4a7899;border:1px solid rgba(255,255,255,.07)}
+
+/* kayıt bilgisi */
+.p-kayit{
+  display:flex;gap:6px;
+  padding:0 16px 10px;
+}
+.p-kayit-item{
+  flex:1;background:#0c1926;border-radius:7px;
+  padding:7px 10px;border:1px solid rgba(255,255,255,.05);
+}
+.p-kayit-lbl{font-size:8.5px;color:#2a4a62;text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px}
+.p-kayit-val{font-size:13px;font-weight:700;font-family:monospace}
+
+/* BUTON */
+.p-btn-wrap{padding:0 12px 14px}
+.p-btn{
+  width:100%;padding:15px;
+  border-radius:11px;border:none;
+  font-size:15px;font-weight:800;
+  cursor:pointer;letter-spacing:-.2px;
+  transition:all .15s;display:flex;
+  align-items:center;justify-content:center;gap:8px;
+  font-family:'Inter',sans-serif;
+}
+.p-btn:active{transform:scale(.97)}
+.btn-giris{
+  background:linear-gradient(135deg,#1b5e20,#2e7d32);
+  color:#fff;box-shadow:0 4px 20px rgba(0,200,83,.25);
+}
+.btn-cikis{
+  background:linear-gradient(135deg,#b71c1c,#c62828);
+  color:#fff;box-shadow:0 4px 20px rgba(255,52,82,.2);
+}
+.btn-tamam{
+  background:rgba(255,255,255,.06);
+  color:#4a7899;border:1px solid rgba(255,255,255,.08);
+  cursor:default;
+}
+.btn-loading{
+  background:rgba(0,200,240,.1);
+  color:#00c8f0;border:1px solid rgba(0,200,240,.2);
+  cursor:wait;
+}
+
+/* TOAST */
+.toast{
+  position:fixed;bottom:24px;left:50%;
+  transform:translateX(-50%);
+  background:#1b5e20;color:#fff;
+  padding:13px 22px;border-radius:11px;
+  font-size:14px;font-weight:600;
+  box-shadow:0 8px 32px rgba(0,0,0,.5);
+  z-index:9999;white-space:nowrap;
+  animation:tst .25s ease;
+  max-width:90vw;text-align:center;
+}
+.toast.err{background:#b71c1c}
+@keyframes tst{from{opacity:0;transform:translateX(-50%) translateY(14px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
+
+/* SONUÇ EKRANI */
+.sonuc{
+  display:none;
+  position:fixed;inset:0;
+  background:#0a1628;
+  z-index:8000;
+  flex-direction:column;
+  align-items:center;justify-content:center;
+  text-align:center;padding:30px;
+}
+.sonuc.goster{display:flex}
+.sonuc-ic{font-size:72px;margin-bottom:16px;animation:pop .4s cubic-bezier(.175,.885,.32,1.275)}
+@keyframes pop{from{transform:scale(0)}to{transform:scale(1)}}
+.sonuc-ad{font-size:22px;font-weight:800;margin-bottom:6px}
+.sonuc-msg{font-size:15px;color:#4a7899;line-height:1.5;margin-bottom:6px}
+.sonuc-saat{font-size:32px;font-weight:800;font-family:monospace;color:#00c8f0;margin-bottom:24px}
+.sonuc-gec{font-size:13px;color:#ff9500;margin-bottom:24px}
+.sonuc-geri{
+  padding:13px 32px;border-radius:11px;
+  background:rgba(0,200,240,.1);border:1px solid rgba(0,200,240,.2);
+  color:#00c8f0;font-size:14px;font-weight:600;
+  cursor:pointer;font-family:'Inter',sans-serif;
+}
+</style>
+</head>
+<body>
+
+<div class="hdr">
+  <div class="hdr-logo">
+    <div class="hdr-mark">🏢</div>
+    <div>
+      <div class="hdr-name">BestOffice</div>
+      <div class="hdr-sub">HAZIR SANAL OFİS</div>
+    </div>
+  </div>
+  <div class="hdr-tarih">{{ gun_adi }}, {{ bugun }}</div>
+  <div class="hdr-saat" id="saat-goster">--:--</div>
+</div>
+
+<div class="liste">
+  {% for p in personeller %}
+  <div class="p-kart" id="kart-{{ p.id }}">
+    <div class="p-kart-ust">
+      <div class="p-avatar">{{ (p.ad_soyad or '?')[0] }}</div>
+      <div class="p-info">
+        <div class="p-adi">{{ p.ad_soyad }}</div>
+        <div class="p-mesai">
+          {{ (p.mesai_baslangic or '09:00')|string|truncate(5,true,'') }} –
+          {{ (p.mesai_bitis or '18:30')|string|truncate(5,true,'') }}
+        </div>
+      </div>
+      {% if p.durum == 'giris' %}
+        <span class="p-durum-badge bd-giris">● İçeride</span>
+      {% elif p.durum == 'cikis' %}
+        <span class="p-durum-badge bd-cikis">✓ Çıktı</span>
+      {% else %}
+        <span class="p-durum-badge bd-bos">Henüz Gelmedi</span>
+      {% endif %}
+    </div>
+
+    <!-- Giriş / Çıkış saatleri -->
+    <div class="p-kayit">
+      <div class="p-kayit-item">
+        <div class="p-kayit-lbl">Giriş</div>
+        <div class="p-kayit-val" style="color:#00c853" id="giris-{{ p.id }}">
+          {{ (p.giris_saati|string)[:5] if p.giris_saati else '—' }}
+        </div>
+      </div>
+      <div class="p-kayit-item">
+        <div class="p-kayit-lbl">Çıkış</div>
+        <div class="p-kayit-val" style="color:#ff3452" id="cikis-{{ p.id }}">
+          {{ (p.cikis_saati|string)[:5] if p.cikis_saati else '—' }}
+        </div>
+      </div>
+      <div class="p-kayit-item">
+        <div class="p-kayit-lbl">Gecikme</div>
+        <div class="p-kayit-val" style="color:{% if p.gec_dakika and p.gec_dakika > 0 %}#ff9500{% else %}#00c853{% endif %}" id="gec-{{ p.id }}">
+          {% if p.gec_dakika and p.gec_dakika > 0 %}{{ p.gec_dakika }} dk{% else %}—{% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- BUTON -->
+    <div class="p-btn-wrap">
+      {% if p.durum == 'cikis' %}
+        <button class="p-btn btn-tamam" disabled>✓ Bugün tamamlandı</button>
+      {% elif p.durum == 'giris' %}
+        <button class="p-btn btn-cikis" id="btn-{{ p.id }}"
+                onclick="isle({{ p.id }}, '{{ p.ad_soyad }}')">
+          🚪 Çıkış Yap
+        </button>
+      {% else %}
+        <button class="p-btn btn-giris" id="btn-{{ p.id }}"
+                onclick="isle({{ p.id }}, '{{ p.ad_soyad }}')">
+          ✅ Giriş Yap
+        </button>
+      {% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<!-- SONUÇ EKRANI -->
+<div class="sonuc" id="sonuc">
+  <div class="sonuc-ic" id="sonuc-ic">✅</div>
+  <div class="sonuc-ad" id="sonuc-ad"></div>
+  <div class="sonuc-msg" id="sonuc-msg"></div>
+  <div class="sonuc-saat" id="sonuc-saat"></div>
+  <div class="sonuc-gec" id="sonuc-gec"></div>
+  <button class="sonuc-geri" onclick="sonucKapat()">← Geri Dön</button>
+</div>
+
+<script>
+// Saat göster
+function saatGoster(){
+  var s=new Date();
+  var h=String(s.getHours()).padStart(2,'0');
+  var m=String(s.getMinutes()).padStart(2,'0');
+  document.getElementById('saat-goster').textContent=h+':'+m;
+}
+saatGoster();
+setInterval(saatGoster,10000);
+
+// Giriş/Çıkış işlemi
+function isle(pid, adi){
+  var btn=document.getElementById('btn-'+pid);
+  if(!btn||btn.disabled)return;
+
+  // Loading state
+  btn.disabled=true;
+  btn.className='p-btn btn-loading';
+  btn.textContent='⏳ Kaydediliyor...';
+
+  fetch('/pdovam/isle/'+pid,{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({})
+  })
+  .then(function(r){return r.json();})
+  .then(function(res){
+    if(res.ok){
+      sonucGoster(adi, res);
+      // Kartı güncelle
+      setTimeout(function(){sayfaYenile(pid,res);},2500);
+    } else {
+      toast(res.mesaj||'Hata oluştu', true);
+      btn.disabled=false;
+    }
+  })
+  .catch(function(){
+    toast('Bağlantı hatası!', true);
+    btn.disabled=false;
+    btn.className='p-btn btn-giris';
+    btn.textContent='✅ Giriş Yap';
+  });
+}
+
+function sonucGoster(adi, res){
+  var isGiris = res.islem === 'giris';
+  document.getElementById('sonuc-ic').textContent  = isGiris ? '✅' : '🚪';
+  document.getElementById('sonuc-ad').textContent  = adi;
+  document.getElementById('sonuc-msg').textContent = isGiris ? 'Giriş kaydedildi' : 'Çıkış kaydedildi';
+  document.getElementById('sonuc-saat').textContent= res.saat || '';
+  document.getElementById('sonuc-gec').textContent = res.gec && res.gec > 0 ? '⚠ ' + res.gec + ' dakika geç' : '';
+  document.getElementById('sonuc').classList.add('goster');
+  // 4 saniye sonra otomatik kapat
+  setTimeout(sonucKapat, 4000);
+}
+
+function sonucKapat(){
+  document.getElementById('sonuc').classList.remove('goster');
+}
+
+function sayfaYenile(pid, res){
+  // Sayfayı yenile — en basit yöntem
+  location.reload();
+}
+
+function toast(msg, err){
+  var t=document.createElement('div');
+  t.className='toast'+(err?' err':'');
+  t.textContent=msg;
+  document.body.appendChild(t);
+  setTimeout(function(){t.remove();},3000);
+}
+</script>
+</body>
+</html>

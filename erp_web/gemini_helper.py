@@ -125,12 +125,12 @@ def _analiz_eski_sdk(api_key: str, prompt: str):
     return False, last_err or ""
 
 
-def _analiz_rest_api(api_key: str, prompt: str):
-    """Doğrudan Gemini REST API çağrısı (SDK bağımlılığı yok)."""
+def _analiz_rest_api(api_key: str, prompt: str, modeller=None):
+    """Doğrudan Gemini REST API çağrısı (SDK bağımlılığı yok). modeller verilirse sadece onlar denenir."""
     last_err = ""
     key_style_err = False
-    # Tek model ile başla (kota tüketimini azalt); 404 alırsan sıradakini dene
-    for model in ("gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash", "gemini-2.5-flash"):
+    model_list = modeller if modeller else ("gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash", "gemini-1.5-pro")
+    for model in model_list:
         try:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
             data = json.dumps({"contents": [{"parts": [{"text": prompt}]}]}).encode("utf-8")
@@ -169,10 +169,10 @@ def _analiz_rest_api(api_key: str, prompt: str):
     return False, last_err or ""
 
 
-def analiz_yap(context_metni: str, kullanici_sorusu: str = ""):
+def analiz_yap(context_metni: str, kullanici_sorusu: str = "", tek_istek: bool = False):
     """
     Verilen bağlam ve isteğe bağlı kullanıcı sorusu ile Gemini'den yanıt alır.
-    Önce yeni SDK, 403/anahtar hatası alırsa eski SDK (google-generativeai) denenir.
+    tek_istek=True: Sadece 1 model (REST gemini-1.5-flash) dene — ücretsiz planda kota tasarrufu.
     """
     if not GEMINI_API_KEY:
         return False, "Gemini API anahtarı tanımlı değil. .env dosyasına GEMINI_API_KEY=... ekleyin."
@@ -193,6 +193,33 @@ def analiz_yap(context_metni: str, kullanici_sorusu: str = ""):
         prompt += "Bu verilere göre kısa bir özet ve 2-3 maddelik analiz/öneri yaz. Türkçe, net ve kısa olsun.\n"
     prompt += "\nYanıtını yalnızca Türkçe ver, kısa ve net tut."
 
+    # Ücretsiz planda tek istek: sadece REST ile 1 model dene (kota aşımı riskini azaltır)
+    # v1beta'da gemini-1.5-flash 404 verebiliyor; önce gemini-2.0-flash dene
+    if tek_istek:
+        ok, out = _analiz_rest_api(api_key, prompt, modeller=("gemini-2.0-flash", "gemini-1.5-flash"))
+        if ok:
+            return True, out
+        if out == "quota_exceeded":
+            # Bir kez 5 sn bekleyip tekrar dene (dakikalık limit bazen hemen açılır)
+            import time
+            time.sleep(5)
+            ok2, out2 = _analiz_rest_api(api_key, prompt, modeller=("gemini-2.0-flash",))
+            if ok2:
+                return True, out2
+            return False, (
+                "Kota aşıldı. Ücretsiz planda günlük istek sınırı var, genelde ertesi gün sıfırlanır. "
+                "Yarın tekrar deneyin. Kullanım: https://aistudio.google.com/app/apikey"
+            )
+        if out == "key_error" or (isinstance(out, str) and out.startswith("key_error|")):
+            detay = out.split("|", 1)[1].strip() if isinstance(out, str) and "|" in out else ""
+            if detay and "leaked" in detay.lower():
+                return False, (
+                    "Bu API anahtarı Google tarafından «sızdırılmış» olarak işaretlenmiş ve kapatılmış. "
+                    "Yeni anahtar: https://aistudio.google.com/apikey — .env'de GEMINI_API_KEY=... güncelleyip uygulamayı yeniden başlatın."
+                )
+            return False, "API anahtarı reddedildi. https://aistudio.google.com/apikey — .env'de GEMINI_API_KEY=... kontrol edin."
+        return False, (out or "Yanıt alınamadı. 1–2 dakika sonra tekrar deneyin.")
+
     # 1) Önce eski SDK (google-generativeai) — AI Studio anahtarları çoğunlukla bununla çalışır
     try:
         import google.generativeai
@@ -200,7 +227,7 @@ def analiz_yap(context_metni: str, kullanici_sorusu: str = ""):
         if ok and out:
             return True, out
         if out == "quota_exceeded":
-            return False, "Kota aşıldı. 1–2 dakika bekleyip tekrar deneyin."
+            return False, "Kota aşıldı. Ücretsiz planda günlük sınır var; yarın tekrar deneyin."
     except ImportError:
         pass
 
@@ -216,7 +243,7 @@ def analiz_yap(context_metni: str, kullanici_sorusu: str = ""):
         except Exception as e:
             err = str(e)
             if "429" in err or "RESOURCE_EXHAUSTED" in err:
-                return False, "Kota aşıldı. Birkaç dakika sonra tekrar deneyin."
+                return False, "Kota aşıldı. Ücretsiz planda günlük sınır var; yarın tekrar deneyin."
     except ImportError:
         pass
 
@@ -225,7 +252,7 @@ def analiz_yap(context_metni: str, kullanici_sorusu: str = ""):
     if ok:
         return True, out
     if out == "quota_exceeded":
-        return False, "Kota aşıldı. Ücretsiz planda dakikada sınırlı istek var; 1–2 dakika bekleyip tekrar deneyin."
+        return False, "Kota aşıldı. Ücretsiz planda günlük sınır var; yarın tekrar deneyin."
     if out == "key_error" or (isinstance(out, str) and out.startswith("key_error|")):
         detay = ""
         if isinstance(out, str) and "|" in out:

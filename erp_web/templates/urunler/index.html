@@ -54,6 +54,7 @@
 <div class="urun-header">
     <h2>📦 Ürünler</h2>
     <div class="urun-buttons">
+        <button onclick="urunCogalt()">📄 Ürün Çoğalt</button>
         <button onclick="yeniUrun()">➕ Yeni Ürün</button>
         <button onclick="yenile()">↺ Yenile</button>
     </div>
@@ -76,7 +77,7 @@
         <tbody>
             {% if urunler %}
                 {% for u in urunler %}
-                <tr onclick="selectUrun({{ u.id }})" {% if u.stok < 10 %}style="background: #4a1a1a;"{% endif %}>
+                <tr class="urun-row" data-id="{{ u.id }}" data-ad="{{ u.urun_adi }}" {% if u.stok < 10 %}style="background: #4a1a1a;"{% endif %} onclick="selectUrun(this)">
                     <td><strong>{{ u.urun_adi }}</strong></td>
                     <td>{{ u.stok_kodu }}</td>
                     <td>{{ u.birim }}</td>
@@ -101,6 +102,9 @@
 </div>
 
 <script>
+let seciliUrunId = null;
+let seciliUrunAd = '';
+
 function yeniUrun() {
     window.location.href = "{{ url_for('urunler.yeni') }}";
 }
@@ -109,8 +113,48 @@ function yenile() {
     location.reload();
 }
 
-function selectUrun(id) {
-    console.log('Seçili ürün:', id);
+function selectUrun(tr) {
+    if (!tr) return;
+    const id = parseInt(tr.getAttribute('data-id'), 10);
+    const ad = tr.getAttribute('data-ad') || '';
+    seciliUrunId = id;
+    seciliUrunAd = ad;
+    document.querySelectorAll('.urun-row').forEach(function(row) {
+        row.style.outline = '';
+    });
+    tr.style.outline = '2px solid #00bcd4';
+}
+
+async function urunCogalt() {
+    if (!seciliUrunId) {
+        alert('Lütfen önce listeden bir ürün seçin.');
+        return;
+    }
+    let varsayilanAd = (seciliUrunAd || '').trim();
+    if (varsayilanAd) varsayilanAd = varsayilanAd + ' (kopya)';
+    let yeniAd = prompt('Yeni ürün adı:', varsayilanAd || 'Yeni Ürün');
+    if (yeniAd === null) return; // vazgeçildi
+    yeniAd = yeniAd.trim();
+    if (!yeniAd) {
+        alert('Ürün adı boş olamaz.');
+        return;
+    }
+    try {
+        const res = await fetch('/urunler/api/duplicate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ kaynak_id: seciliUrunId, yeni_urun_adi: yeniAd })
+        });
+        const j = await res.json();
+        if (!res.ok || !j.ok) {
+            alert(j.mesaj || 'Ürün çoğaltılamadı.');
+            return;
+        }
+        alert('Ürün çoğaltıldı. Yeni stok kodu: ' + (j.stok_kodu || ''));
+        location.reload();
+    } catch (e) {
+        alert('Ürün çoğaltılırken bir hata oluştu.');
+    }
 }
 
 function duzenle(id) {

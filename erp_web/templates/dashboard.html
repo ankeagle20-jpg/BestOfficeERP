@@ -20,55 +20,160 @@
 .dash-search::placeholder { color: #78909c; }
 .dash-search:focus { outline: none; border-color: #4fc3f7; }
 
-/* 8 istatistik kartı — 2–4 sütun grid */
+/* Üst satır: sol = 8 küçük kart + filtreler; sağ = müşteri listesi en üstten */
+.dash-top-row {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 0;
+}
+.dash-left-col {
+  width: 340px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+/* 8 istatistik kartı — küçültülmüş, 2x4 grid */
 .dash-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 16px;
-  margin-bottom: 24px;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 0;
 }
 .dash-card {
   background: #1e3a50;
-  border-radius: 8px;
-  padding: 18px;
+  border-radius: 6px;
+  padding: 8px 10px;
   border: 1px solid #2d4060;
   transition: box-shadow 0.2s;
 }
 .dash-card:hover { box-shadow: 0 0 0 1px #4fc3f7; }
-.dash-card-title { color: #b0bec5; font-size: 13px; margin-bottom: 8px; }
-.dash-card-value { font-size: 20px; font-weight: bold; }
+.dash-card-title { color: #b0bec5; font-size: 10px; margin-bottom: 4px; line-height: 1.2; }
+.dash-card-value { font-size: 14px; font-weight: bold; }
 .dash-card-value.green { color: #22c55e; }
 .dash-card-value.yellow { color: #eab308; }
 .dash-card-value.red { color: #ef4444; }
 .dash-card-value.cyan { color: #4fc3f7; }
+.dash-card-value small { font-size: 9px; }
 
-/* Hızlı filtre butonları */
-.dash-filters {
+.dash-buttons-area {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: stretch;
   gap: 10px;
-  margin-bottom: 20px;
 }
-.dash-filters .btn-filter {
+.dash-filters-vertical {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+}
+.dash-filters-vertical .btn-filter {
   background: #2d4060;
   color: #e0f7fa;
   border: 1px solid #3d5070;
-  padding: 12px 18px;
+  padding: 10px 16px;
   border-radius: 6px;
   cursor: pointer;
-  font-size: 15px;
+  font-size: 13px;
+  transition: all 0.2s;
+  text-align: center;
+  width: auto;
+}
+.dash-filters-vertical .btn-filter:hover { background: #3d5070; border-color: #4fc3f7; }
+.dash-filters-vertical .btn-filter.active { background: #0d47a1; border-color: #4fc3f7; color: #fff; }
+/* İki buton: Geri Dönüş + Arama — filtre butonlarının hemen altında */
+.dash-under-filters {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+}
+.dash-search-inline {
+  background: #1e3a50;
+  border: 1px solid #3d5070;
+  color: #e0f7fa;
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  min-width: 220px;
+}
+.dash-search-inline::placeholder { color: #78909c; }
+.dash-search-inline:focus { outline: none; border-color: #4fc3f7; }
+.dash-geri-btn {
+  background: #2d4060;
+  color: #e0f7fa;
+  border: 1px solid #3d5070;
+  padding: 10px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  width: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   transition: all 0.2s;
 }
-.dash-filters .btn-filter:hover { background: #3d5070; border-color: #4fc3f7; }
-.dash-filters .btn-filter.active { background: #0d47a1; border-color: #4fc3f7; color: #fff; }
+.dash-geri-btn:hover { background: #3d5070; border-color: #4fc3f7; }
+.dash-geri-list-wrap {
+  max-height: 180px;
+  overflow-y: auto;
+  background: #0f2537;
+  border: 1px solid #2d4060;
+  border-radius: 6px;
+  padding: 8px;
+  font-size: 12px;
+  width: 100%;
+  max-width: 560px;
+}
+/* Sağ kolon: müşteri listesi en üstten, kalan alanı doldurur */
+.dash-right-col {
+  flex: 0 0 35%;
+  max-width: 35%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  margin-left: auto;
+}
+.dash-musteri-block {
+  flex: 0 0 35vh;
+  min-width: 0;
+  min-height: 0;
+  border-radius: 8px;
+  border: 1px solid #2d4060;
+  overflow: hidden;
+  background: #0f2537;
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
+}
+.dash-musteri-block .dash-table-wrap {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+  max-height: 35vh;
+}
+.dash-musteri-block .dash-table { font-size: 12px; min-width: 400px; }
+.dash-musteri-block .dash-table th,
+.dash-musteri-block .dash-table td { padding: 6px 8px; }
+.dash-musteri-block .dash-btn { padding: 5px 8px; font-size: 11px; }
+.dash-musteri-block .dash-actions-cell { min-width: 240px; }
+
+/* Hızlı filtre butonları (eski yatay — artık sidebar'da) */
+.dash-filters { display: none; }
 
 /* Ana tablo — sticky header, scrollable */
-.dash-table-wrap { overflow-x: auto; margin-bottom: 24px; border-radius: 8px; border: 1px solid #2d4060; }
+.dash-table-wrap { overflow-x: auto; margin-bottom: 0; border-radius: 0; border: none; }
 .dash-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 15px;
-  min-width: 1200px;
+  min-width: 800px;
 }
 .dash-table th, .dash-table td { padding: 12px 10px; text-align: left; border-bottom: 1px solid #2d4060; }
 .dash-table thead th {
@@ -135,8 +240,16 @@
 .month-dot.bugun_yakin { background: #eab308; }
 .month-dot.gelecek { background: #546e7a; }
 
-/* Aksiyon butonları — büyük, ikonlu */
-.dash-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+/* Aksiyon butonları — yatay, tek satırda */
+.dash-actions {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  gap: 6px;
+  align-items: center;
+  justify-content: flex-start;
+}
+.dash-table .dash-actions-cell { white-space: nowrap; min-width: 320px; }
 .dash-btn {
   padding: 8px 12px;
   border: none;
@@ -190,6 +303,61 @@
 .sozlesme-yakin { color: #eab308; }
 .sozlesme-kritik { color: #ef4444; }
 
+/* Geri Dönüş Bekleyenler kutusu */
+.geri-wrap {
+  background: #0f2537;
+  border-radius: 8px;
+  border: 1px solid #2d4060;
+  padding: 10px 12px;
+  margin-bottom: 18px;
+}
+.geri-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.geri-title {
+  color: #b0bec5;
+  font-size: 13px;
+  font-weight: 600;
+}
+.geri-body {
+  max-height: 130px;
+  overflow-y: auto;
+}
+.geri-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-bottom: 1px solid #1e3a50;
+  font-size: 13px;
+}
+.geri-item:last-child { border-bottom: none; }
+.geri-name { font-weight: 600; color: #e0f7fa; }
+.geri-meta { font-size: 11px; color: #90a4ae; }
+.geri-wa-btn {
+  background: #22c55e;
+  color: #fff;
+  border: none;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.geri-wa-btn:hover { background: #16a34a; }
+
+@media (max-width: 900px) {
+  .dash-top-row { flex-direction: column; }
+  .dash-left-col { width: 100%; }
+  .dash-right-col { flex: 1 1 auto; max-width: none; margin-left: 0; width: 100%; }
+  .dash-musteri-block { min-height: 400px; }
+  .dash-filters-vertical { justify-content: center; }
+}
 @media (max-width: 768px) {
   .dash-cards { grid-template-columns: 1fr 1fr; }
   .dash-table { font-size: 14px; }
@@ -200,63 +368,71 @@
 
 {% block content %}
 <div class="dash-wrap">
-  <!-- Hızlı Müşteri / Şirket Ara -->
-  <input type="text" class="dash-search" id="dash-search" placeholder="🔍 Hızlı Müşteri / Şirket Ara..." autocomplete="off">
-
-  <!-- 8 istatistik kartı -->
-  <div class="dash-cards">
-    <div class="dash-card">
-      <div class="dash-card-title">📦 Bugün Gelen Kargolar</div>
-      <div class="dash-card-value cyan" id="stat-bugun-kargo">{{ bugun_kargo_say }}</div>
+  <!-- Üst satır: sol = 8 küçük kart + filtreler; sağ = müşteri listesi en üstten -->
+  <div class="dash-top-row">
+    <div class="dash-left-col">
+      <div class="dash-cards">
+        <div class="dash-card">
+          <div class="dash-card-title">📦 Bugün Gelen Kargolar</div>
+          <div class="dash-card-value cyan" id="stat-bugun-kargo">{{ bugun_kargo_say }}</div>
+        </div>
+        <div class="dash-card">
+          <div class="dash-card-title">💰 Geciken Toplam Alacak</div>
+          <div class="dash-card-value red" id="stat-geciken">₺ {{ "{:,.0f}".format(geciken_toplam) }}</div>
+        </div>
+        <div class="dash-card">
+          <div class="dash-card-title">⚠ Kritik Geciken (30+ gün)</div>
+          <div class="dash-card-value red" id="stat-kritik">{{ kritik_geciken_say }}</div>
+        </div>
+        <div class="dash-card">
+          <div class="dash-card-title">⏳ Yakın Geciken (1–30 gün)</div>
+          <div class="dash-card-value yellow" id="stat-yakin">{{ yakin_geciken_say }}</div>
+        </div>
+        <div class="dash-card">
+          <div class="dash-card-title">✅ Bugün Beklenen Tahsilat</div>
+          <div class="dash-card-value {% if bugun_tahsilat > 0 %}red{% else %}green{% endif %}" id="stat-tahsilat">₺ {{ "{:,.0f}".format(bugun_tahsilat) }}</div>
+        </div>
+        <div class="dash-card">
+          <div class="dash-card-title">📈 TÜFE Güncel / Oran</div>
+          <div class="dash-card-value {% if tufe_oran > 50 %}red{% else %}cyan{% endif %}" id="stat-tufe">% {{ "{:.2f}".format(tufe_oran) }}</div>
+        </div>
+        <div class="dash-card">
+          <div class="dash-card-title">📅 Sözleşmesi Bitecekler</div>
+          <div class="dash-card-value yellow" id="stat-sozlesme">{{ sozlesme_bitecek_say }}</div>
+        </div>
+        <div class="dash-card">
+          <div class="dash-card-title">🏢 Boş Ofis</div>
+          <div class="dash-card-value cyan" id="stat-bos">{{ bos_ofis_say }} <small style="font-size:9px;color:#78909c;">(Hazır: {{ bos_hazir }}, Sanal: {{ bos_sanal }})</small></div>
+        </div>
+      </div>
+      <div class="dash-buttons-area">
+        <div class="dash-filters-vertical">
+          <button type="button" class="btn-filter active" data-filtre="">Tümü</button>
+          <button type="button" class="btn-filter" data-filtre="tam">Ödemesi Tam</button>
+          <button type="button" class="btn-filter" data-filtre="yakin">Yakın Gecikme</button>
+          <button type="button" class="btn-filter" data-filtre="kritik">Kritik Gecikme</button>
+          <button type="button" class="btn-filter" data-filtre="kargo">Kargosu Bekleyen</button>
+          <button type="button" class="btn-filter" data-filtre="bos">Boş Ofisler</button>
+          <button type="button" class="btn-filter" data-filtre="sozlesme">Sözleşme Bitiş Yakın</button>
+        </div>
+        <div class="dash-under-filters">
+          <button type="button" id="geri-yenile" class="dash-geri-btn" title="Geri dönüş bekleyenler listesini yenile"><i class="fa fa-clock-o"></i> Geri Dönüş</button>
+        </div>
+        <div id="geri-list" class="dash-geri-list-wrap">
+          <div style="color:#78909c;font-size:12px;">Liste yükleniyor...</div>
+        </div>
+      </div>
     </div>
-    <div class="dash-card">
-      <div class="dash-card-title">💰 Geciken Toplam Alacak</div>
-      <div class="dash-card-value red" id="stat-geciken">₺ {{ "{:,.0f}".format(geciken_toplam) }}</div>
-    </div>
-    <div class="dash-card">
-      <div class="dash-card-title">⚠ Kritik Geciken (30+ gün)</div>
-      <div class="dash-card-value red" id="stat-kritik">{{ kritik_geciken_say }}</div>
-    </div>
-    <div class="dash-card">
-      <div class="dash-card-title">⏳ Yakın Geciken (1–30 gün)</div>
-      <div class="dash-card-value yellow" id="stat-yakin">{{ yakin_geciken_say }}</div>
-    </div>
-    <div class="dash-card">
-      <div class="dash-card-title">📅 Sözleşmesi Bitecekler</div>
-      <div class="dash-card-value yellow" id="stat-sozlesme">{{ sozlesme_bitecek_say }}</div>
-    </div>
-    <div class="dash-card">
-      <div class="dash-card-title">🏢 Boş Ofis</div>
-      <div class="dash-card-value cyan" id="stat-bos">{{ bos_ofis_say }} <small style="font-size:12px;color:#78909c;">(Hazır: {{ bos_hazir }}, Sanal: {{ bos_sanal }})</small></div>
-    </div>
-    <div class="dash-card">
-      <div class="dash-card-title">✅ Bugün Beklenen Tahsilat</div>
-      <div class="dash-card-value {% if bugun_tahsilat > 0 %}red{% else %}green{% endif %}" id="stat-tahsilat">₺ {{ "{:,.0f}".format(bugun_tahsilat) }}</div>
-    </div>
-    <div class="dash-card">
-      <div class="dash-card-title">📈 TÜFE Güncel / Oran</div>
-      <div class="dash-card-value {% if tufe_oran > 50 %}red{% else %}cyan{% endif %}" id="stat-tufe">% {{ "{:.2f}".format(tufe_oran) }}</div>
-    </div>
-  </div>
-
-  <!-- Hızlı filtre butonları -->
-  <div class="dash-filters">
-    <button type="button" class="btn-filter active" data-filtre="">Tümü</button>
-    <button type="button" class="btn-filter" data-filtre="tam">Ödemesi Tam</button>
-    <button type="button" class="btn-filter" data-filtre="yakin">Yakın Gecikme</button>
-    <button type="button" class="btn-filter" data-filtre="kritik">Kritik Gecikme</button>
-    <button type="button" class="btn-filter" data-filtre="kargo">Kargosu Bekleyen</button>
-    <button type="button" class="btn-filter" data-filtre="bos">Boş Ofisler</button>
-    <button type="button" class="btn-filter" data-filtre="sozlesme">Sözleşme Bitiş Yakın</button>
-  </div>
-
-  <!-- Ana tablo -->
-  <div class="dash-table-wrap">
+    <div class="dash-right-col">
+      <div class="dash-musteri-block">
+        <div style="padding:8px 10px; border-bottom:1px solid #2d4060; background:#0f2537;">
+          <input type="text" class="dash-search-inline" id="dash-search" placeholder="🔍 Hızlı Müşteri / Şirket Ara..." autocomplete="off" style="width:100%; box-sizing:border-box;">
+        </div>
+        <div class="dash-table-wrap">
     <table class="dash-table" id="dash-table">
       <thead>
         <tr>
           <th class="sticky-col">Müşteri / Şirket</th>
-          <th>Ofis No / Tip</th>
           <th>Ürün / Kira Tipi</th>
           <th>
             <select id="dashDurum" class="dash-durum-select">
@@ -265,13 +441,10 @@
               <option value="pasif">Sadece Pasif</option>
             </select>
           </th>
-          {% for ay in aylar %}
-          <th class="month-cell">{{ ay[:3] }}</th>
-          {% endfor %}
           <th>Toplam Alacak</th>
           <th>Son Kargo</th>
           <th>Sözleşme Bitiş</th>
-          <th>Aksiyon</th>
+          <th class="dash-actions-cell">Aksiyon</th>
         </tr>
       </thead>
       <tbody id="dash-tbody">
@@ -279,7 +452,6 @@
         {% set d = (r.musteri_durum or '')|lower %}
         <tr data-musteri-id="{{ r.musteri_id }}" data-durum="{{ d }}">
           <td class="sticky-col"><strong>{{ r.musteri_adi }}</strong><br><small style="color:#78909c;">{{ r.phone }}</small></td>
-          <td>{{ r.ofis_kod }} / {{ r.ofis_tip }}</td>
           <td>{{ r.hizmet_turu }}</td>
           <td>
             {% if d == 'pasif' %}
@@ -288,13 +460,10 @@
               <span class="dash-durum-badge-aktif"><i class="fa fa-check-circle"></i> Aktif</span>
             {% endif %}
           </td>
-          {% for d in r.aylik_durum %}
-          <td class="month-cell"><span class="month-dot {{ d }}" title="{{ aylar[loop.index0] }}"></span></td>
-          {% endfor %}
           <td class="{% if r.toplam_alacak > 0 %}alacak-kirmizi{% endif %}">{% if r.toplam_alacak > 0 %}₺ {{ "{:,.0f}".format(r.toplam_alacak) }}{% else %}—{% endif %}</td>
           <td>{{ r.son_kargo_durum }}</td>
           <td class="{% if r.sozlesme_bitis %}sozlesme-yakin{% endif %}">{{ r.sozlesme_bitis_str }}</td>
-          <td>
+          <td class="dash-actions-cell">
             <div class="dash-actions">
               <button type="button" class="dash-btn whatsapp" title="WhatsApp hatırlat" data-mid="{{ r.musteri_id }}" data-alacak="{{ r.toplam_alacak }}"><i class="fa fa-whatsapp"></i> WhatsApp</button>
               <a href="/faturalar/?musteri={{ r.musteri_id }}" class="dash-btn odeme" title="Ödeme işle"><i class="fa fa-money-bill"></i> Ödeme</a>
@@ -306,10 +475,13 @@
         </tr>
         {% endfor %}
         {% if not tablo_rows %}
-        <tr><td colspan="21" style="text-align:center;color:#78909c;padding:24px;">Kayıt yok. Arama veya filtreyi değiştirin.</td></tr>
+        <tr><td colspan="7" style="text-align:center;color:#78909c;padding:24px;">Kayıt yok. Arama veya filtreyi değiştirin.</td></tr>
         {% endif %}
       </tbody>
     </table>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -334,6 +506,7 @@
 (function() {
   const API_TABLO = "{{ url_for('dashboard.api_tablo') }}";
   const API_WHATSAPP = "{{ url_for('dashboard.api_whatsapp_metin') }}";
+  const API_POT_PENDING = "{{ url_for('giris.api_potansiyel_pending') }}";
   const MUSTERI_DETAY = "{{ url_for('musteriler.detay', mid=0) }}".replace(/\/0$/, '/');
 
   function toast(mesaj, type) {
@@ -346,16 +519,56 @@
     setTimeout(function() { el.remove(); }, 3500);
   }
 
+  function geriListeYenile() {
+    fetch(API_POT_PENDING)
+      .then(function(r){ return r.json(); })
+      .then(function(rows){
+        var box = document.getElementById('geri-list');
+        if (!box) return;
+        if (!rows || !rows.length) {
+          box.innerHTML = '<div style="color:#78909c;font-size:12px;">Şu anda geri dönüş bekleyen potansiyel müşteri yok.</div>';
+          return;
+        }
+        box.innerHTML = rows.map(function(r){
+          var ht = r.hatirlatma_tarihi ? String(r.hatirlatma_tarihi).substring(0,10) : '—';
+          var meta = (r.paket || '') + ' · Hatırlatma: ' + ht;
+          return '<div class="geri-item">'
+            + '<div>'
+            + '<div class="geri-name">' + (r.ad || '—') + '</div>'
+            + '<div class="geri-meta">' + meta + '</div>'
+            + '</div>'
+            + '<button type="button" class="geri-wa-btn" data-msg="' + (r.mesaj || '').replace(/"/g,'&quot;') + '" data-wa="' + (r.whatsapp_url || '') + '"><i class="fa fa-whatsapp"></i> WhatsApp</button>'
+            + '</div>';
+        }).join('');
+        box.querySelectorAll('.geri-wa-btn').forEach(function(btn){
+          btn.addEventListener('click', function(){
+            var msg = this.getAttribute('data-msg') || '';
+            var url = this.getAttribute('data-wa') || '';
+            if (msg) {
+              document.getElementById('whatsapp-metin-area').value = msg;
+              document.getElementById('whatsapp-modal').style.display = 'flex';
+            }
+            if (url) {
+              window.open(url, '_blank');
+            }
+          });
+        });
+      })
+      .catch(function(){
+        var box = document.getElementById('geri-list');
+        if (box) box.innerHTML = '<div style="color:#ef4444;font-size:12px;">Liste yüklenemedi.</div>';
+      });
+  }
+
   function tabloYenile() {
     const q = document.getElementById('dash-search').value.trim();
-    const filtre = document.querySelector('.dash-filters .btn-filter.active');
+    const filtre = document.querySelector('.dash-filters-vertical .btn-filter.active');
     const f = filtre ? filtre.getAttribute('data-filtre') || '' : '';
     const url = API_TABLO + '?q=' + encodeURIComponent(q) + '&filtre=' + encodeURIComponent(f);
     fetch(url).then(function(r) { return r.json(); }).then(function(rows) {
       const tbody = document.getElementById('dash-tbody');
-      const aylar = {{ aylar | tojson }};
       if (!rows.length) {
-        tbody.innerHTML = '<tr><td colspan="21" style="text-align:center;color:#78909c;padding:24px;">Kayıt yok.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#78909c;padding:24px;">Kayıt yok.</td></tr>';
         return;
       }
       tbody.innerHTML = rows.map(function(r) {
@@ -368,14 +581,12 @@
           : '<span class="dash-durum-badge-aktif"><i class="fa fa-check-circle"></i> Aktif</span>';
         return '<tr data-musteri-id="' + r.musteri_id + '" data-durum="' + durumRaw + '">' +
           '<td class="sticky-col"><strong>' + (r.musteri_adi || '—') + '</strong><br><small style="color:#78909c">' + (r.phone || '') + '</small></td>' +
-          '<td>' + (r.ofis_kod || '—') + ' / ' + (r.ofis_tip || '—') + '</td>' +
           '<td>' + (r.hizmet_turu || '—') + '</td>' +
           '<td>' + durumBadge + '</td>' +
-          aylar.slice(0,12).map(function(_, i) { return '<td class="month-cell">' + (r.aylik_durum && r.aylik_durum[i] ? '<span class="month-dot ' + r.aylik_durum[i] + '"></span>' : '') + '</td>'; }).join('') +
           '<td class="' + alacakClass + '">' + alacakStr + '</td>' +
           '<td>' + (r.son_kargo_durum || '—') + '</td>' +
           '<td>' + sozStr + '</td>' +
-          '<td><div class="dash-actions">' +
+          '<td class="dash-actions-cell"><div class="dash-actions">' +
           '<button type="button" class="dash-btn whatsapp" data-mid="' + r.musteri_id + '" data-alacak="' + (r.toplam_alacak || 0) + '"><i class="fa fa-whatsapp"></i> WhatsApp</button> ' +
           '<a href="/faturalar/?musteri=' + r.musteri_id + '" class="dash-btn odeme"><i class="fa fa-money-bill"></i> Ödeme</a> ' +
           '<a href="/kargolar/?musteri=' + r.musteri_id + '" class="dash-btn kargo"><i class="fa fa-truck"></i> Kargo</a> ' +
@@ -408,9 +619,11 @@
     });
   }
 
-  document.querySelectorAll('.dash-filters .btn-filter').forEach(function(btn) {
+  document.getElementById('geri-yenile').addEventListener('click', geriListeYenile);
+
+  document.querySelectorAll('.dash-filters-vertical .btn-filter').forEach(function(btn) {
     btn.addEventListener('click', function() {
-      document.querySelectorAll('.dash-filters .btn-filter').forEach(function(b) { b.classList.remove('active'); });
+      document.querySelectorAll('.dash-filters-vertical .btn-filter').forEach(function(b) { b.classList.remove('active'); });
       this.classList.add('active');
       tabloYenile();
     });
@@ -465,6 +678,9 @@
     const mid = tr.getAttribute('data-musteri-id');
     if (mid) window.location.href = MUSTERI_DETAY + mid;
   });
+
+  // İlk yüklemede Geri Dönüş Bekleyenler listesini getir
+  geriListeYenile();
 })();
 </script>
 {% endblock %}

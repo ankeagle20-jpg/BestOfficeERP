@@ -502,7 +502,7 @@ window.addEventListener('load', function() {
       <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
         <a href="{{ url_for('musteriler.export_excel') }}" class="excel-link"><i class="fa fa-file-excel"></i> Excel İndir</a>
         <a href="{{ url_for('musteriler.import_excel') }}" class="excel-link excel-upload"><i class="fa fa-upload"></i> Excel Yükle</a>
-        <a href="{{ url_for('musteriler.tumunu_sil') }}" class="excel-link" style="color:#eab308;"><i class="fa fa-trash-alt"></i> Tümünü Sil</a>
+        <button type="button" class="excel-link gemini-ai-btn" onclick="openGeminiModal()" style="color:#8b5cf6;border:none;background:transparent;cursor:pointer;font-size:inherit;"><i class="fa fa-robot"></i> Gemini AI</button>
         <button type="button" class="drawer-close" onclick="closeRightPanel()" aria-label="Kapat">×</button>
       </div>
     </div>
@@ -558,7 +558,7 @@ window.addEventListener('load', function() {
           <span class="list-subtitle">Toplam Müşteri <strong>{{ (musteriler|default([]))|length }}</strong></span>
           <span class="list-subtitle">₺ <strong>{{ "{:,.0f}".format(toplam_bakiye|default(0)).replace(",", " ") }}</strong></span>
         </div>
-        <a href="{{ url_for('musteriler.tumunu_sil') }}" style="display:block;text-align:center;font-size:11px;color:#eab308;margin-bottom:6px;"><i class="fa fa-trash-alt"></i> Tüm müşterileri sil (Excel'den yeniden yüklemeden önce)</a>
+        <a href="{{ url_for('cari_kart.index') }}" class="musteri-iliskileri-btn" style="display:block;width:100%;margin-bottom:8px;padding:10px 12px;background:linear-gradient(135deg,#0288d1,#00bcd4);color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;text-align:center;text-decoration:none;box-sizing:border-box;"><i class="fa fa-handshake-o"></i> Müşteri İlişkilerine Git →</a>
         <a href="{{ url_for('musteriler.list_full') }}" class="btn-drawer btn-drawer-sm" style="text-decoration:none;color:inherit;display:block;text-align:center;">Müşteri Listesine Git →</a>
       </div>
     </div>
@@ -663,6 +663,24 @@ window.addEventListener('load', function() {
 </div>
 <!-- musteri-layout sonu -->
 
+<!-- Gemini AI Sistem Analizi Modal -->
+<div id="geminiModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;">
+  <div style="background:linear-gradient(160deg,#0d1520 0%,#1e3a50 100%);border:1px solid rgba(139,92,246,0.3);border-radius:12px;max-width:560px;width:100%;max-height:85vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.5);">
+    <div style="padding:14px 16px;border-bottom:1px solid rgba(255,255,255,0.08);display:flex;align-items:center;justify-content:space-between;">
+      <h3 style="margin:0;color:#8b5cf6;font-size:16px;"><i class="fa fa-robot"></i> Gemini AI — Sistem Analizi</h3>
+      <button type="button" onclick="closeGeminiModal()" style="background:none;border:none;color:#90a4ae;cursor:pointer;font-size:20px;line-height:1;padding:0 4px;">×</button>
+    </div>
+    <div id="geminiModalBody" style="padding:16px;overflow-y:auto;flex:1;min-height:120px;">
+      <p id="geminiModalMsg" style="color:#90a4ae;margin:0;font-size:13px;">Analiz başlatılıyor…</p>
+      <div id="geminiModalResult" style="margin-top:12px;white-space:pre-wrap;color:#e0f7fa;font-size:13px;line-height:1.55;display:none;"></div>
+    </div>
+    <div style="padding:12px 16px;border-top:1px solid rgba(255,255,255,0.08);">
+      <a href="{{ url_for('musteriler.gemini_analiz') }}" style="color:#8b5cf6;font-size:12px;text-decoration:none;">Detaylı analiz sayfası →</a>
+      <button type="button" onclick="closeGeminiModal()" style="float:right;padding:6px 14px;background:#374151;color:#e0f7fa;border:none;border-radius:6px;cursor:pointer;font-size:12px;">Kapat</button>
+    </div>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
 function closeRightPanel() {
@@ -683,6 +701,53 @@ function openRightPanel(panelId) {
 }
 function openDrawer() { openRightPanel('panelMusteri'); }
 window.openDrawer = openDrawer;
+
+var geminiAvailable = {{ 'true' if gemini_available else 'false' }};
+function openGeminiModal() {
+  var modal = document.getElementById('geminiModal');
+  var msg = document.getElementById('geminiModalMsg');
+  var result = document.getElementById('geminiModalResult');
+  if (!modal || !msg || !result) return;
+  result.style.display = 'none';
+  result.textContent = '';
+  msg.style.display = 'block';
+  msg.textContent = 'Analiz başlatılıyor…';
+  modal.style.display = 'flex';
+  if (!geminiAvailable) {
+    msg.innerHTML = 'Gemini API anahtarı tanımlı değil. <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" style="color:#8b5cf6;">aistudio.google.com/apikey</a> adresinden ücretsiz key alıp <code style="background:#0f2537;padding:2px 6px;">.env</code> dosyasına <code style="background:#0f2537;padding:2px 6px;">GEMINI_API_KEY=...</code> ekleyin.';
+    return;
+  }
+  fetch("{{ url_for('musteriler.api_gemini_analiz') }}", {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+    body: JSON.stringify({ sistem_analizi: true })
+  })
+  .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+  .then(function(_ref) {
+    var ok = _ref.ok, data = _ref.data;
+    msg.style.display = 'none';
+    result.style.display = 'block';
+    if (ok && data.metin) {
+      result.textContent = data.metin;
+      result.style.color = '#e0f7fa';
+    } else {
+      result.textContent = data.hata || data.mesaj || 'Analiz alınamadı.';
+      result.style.color = '#fca5a5';
+    }
+  })
+  .catch(function(e) {
+    msg.style.display = 'none';
+    result.style.display = 'block';
+    result.textContent = 'Bağlantı hatası: ' + (e.message || 'Tekrar deneyin.');
+    result.style.color = '#fca5a5';
+  });
+}
+function closeGeminiModal() {
+  var modal = document.getElementById('geminiModal');
+  if (modal) modal.style.display = 'none';
+}
+window.openGeminiModal = openGeminiModal;
+window.closeGeminiModal = closeGeminiModal;
 function openDrawerFatura() { openRightPanel('panelFatura'); }
 function openDrawerTahsilat() { openRightPanel('panelTahsilat'); }
 function openDrawerKargo() { openRightPanel('panelKargo'); }

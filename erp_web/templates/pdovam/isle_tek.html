@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Giriş / Çıkış</title>
+  <style>
+    body { font-family: Arial, sans-serif; background: #0d1f30; color: #e0f7fa; margin: 0; padding: 24px; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; box-sizing: border-box; }
+    .kutu { background: #12243a; border: 1px solid #243447; border-radius: 16px; padding: 32px; max-width: 340px; width: 100%; }
+    .adi { font-size: 22px; font-weight: 700; color: #4fc3f7; margin-bottom: 8px; }
+    .acik { font-size: 14px; color: #90a4ae; margin-bottom: 24px; }
+    .btn-isle { display: block; width: 100%; padding: 20px 24px; font-size: 20px; font-weight: 700; border: none; border-radius: 12px; cursor: pointer; background: #00bcd4; color: #0d1f30; }
+    .btn-isle:active { opacity: 0.9; }
+    .btn-isle:disabled { background: #546e7a; color: #90a4ae; cursor: not-allowed; }
+    .mesaj { font-size: 16px; margin-top: 16px; min-height: 24px; }
+    .ok { color: #81c784; }
+    .hata { color: #e57373; }
+  </style>
+</head>
+<body>
+  <div class="kutu">
+    {% if hata %}
+      <p class="mesaj hata">{{ hata }}</p>
+    {% else %}
+      <p class="adi">Merhaba, {{ personel_adi }}</p>
+      <p class="acik">Bugünkü kaydınız</p>
+      <button type="button" class="btn-isle" id="btn-isle" data-metin="{{ buton_metni }}"
+              {% if buton_metni == 'Çıkış yapıldı' %}disabled{% endif %}>{{ buton_metni }}</button>
+      <p id="pdovam-mesaj" class="mesaj"></p>
+    {% endif %}
+  </div>
+  {% if not hata %}
+  <script>
+    (function(){
+      var personelId = {{ personel_id }};
+      var btn = document.getElementById('btn-isle');
+      var mesajEl = document.getElementById('pdovam-mesaj');
+      if (!btn) return;
+      // Sayfa QR ile açılır açılmaz bir kez otomatik işlem yap:
+      // - Sabah okutunca otomatik giriş
+      // - Akşam okutunca otomatik çıkış
+      window.addEventListener('load', function() {
+        var metin = btn.getAttribute('data-metin') || '';
+        if (!btn.disabled && (metin === 'Giriş Yap' || metin === 'Çıkış Yap')) {
+          btn.click();
+        }
+      });
+      btn.addEventListener('click', function(){
+        if (this.disabled) return;
+        this.disabled = true;
+        if (mesajEl) mesajEl.textContent = 'Kaydediliyor…';
+        fetch('/pdovam/isle/' + personelId, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' } })
+          .then(function(r) { return r.json(); })
+          .then(function(d) {
+            if (mesajEl) {
+              mesajEl.textContent = d.mesaj || (d.ok ? 'Kayıt alındı.' : 'Hata.');
+              mesajEl.className = 'mesaj ' + (d.ok ? 'ok' : 'hata');
+            }
+            if (d.ok && d.islem === 'giris') { btn.textContent = 'Çıkış Yap'; btn.disabled = false; }
+            else if (d.ok && (d.islem === 'cikis' || d.islem === 'zaten_cikis')) { btn.textContent = 'Çıkış yapıldı'; }
+            else if (!d.ok) btn.disabled = false;
+          })
+          .catch(function() {
+            if (mesajEl) { mesajEl.textContent = 'Bağlantı hatası.'; mesajEl.className = 'mesaj hata'; }
+            btn.disabled = false;
+          });
+      });
+    })();
+  </script>
+  {% endif %}
+</body>
+</html>

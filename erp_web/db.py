@@ -260,7 +260,211 @@ def init_schema():
         ensure_kargolar_durum()
         ensure_faturalar_amount_columns()
         ensure_office_rentals()
+        ensure_crm_leads()
+        ensure_personel_extra_columns()
+        ensure_personel_bilgi_dogum_tarihi()
+        ensure_personel_izin_onay_durumu()
+        ensure_personel_izin_saat_sayisi()
+        ensure_personel_ozluk()
+        ensure_personel_ozluk_izin_columns()
+        ensure_contracts_engine()
     print("✅ Supabase şema oluşturuldu.")
+
+
+def ensure_personel_extra_columns():
+    """personel tablosuna mesai, giris_tarihi, mac_adres, notlar sütunlarını ekle (varsa dokunma)."""
+    for col, ctype in (
+        ("mesai_baslangic", "TEXT"),
+        ("mesai_bitis", "TEXT"),
+        ("giris_tarihi", "DATE"),
+        ("mac_adres", "TEXT"),
+        ("notlar", "TEXT"),
+    ):
+        try:
+            execute(f"ALTER TABLE personel ADD COLUMN IF NOT EXISTS {col} {ctype}")
+        except Exception as e:
+            print(f"personel.{col}: {e}")
+
+
+def ensure_personel_bilgi_dogum_tarihi():
+    """personel_bilgi tablosuna dogum_tarihi (4857 yaş istisnası için) ekler."""
+    try:
+        execute("ALTER TABLE personel_bilgi ADD COLUMN IF NOT EXISTS dogum_tarihi DATE")
+    except Exception as e:
+        print(f"personel_bilgi.dogum_tarihi: {e}")
+
+
+def ensure_personel_izin_onay_durumu():
+    """personel_izin tablosuna onay_durumu ekler (yoksa). Mevcut kayıtlara dokunulmaz (NULL kalır)."""
+    try:
+        execute("ALTER TABLE personel_izin ADD COLUMN IF NOT EXISTS onay_durumu TEXT DEFAULT 'bekliyor'")
+    except Exception as e:
+        print(f"personel_izin.onay_durumu: {e}")
+
+
+def ensure_personel_izin_saat_sayisi():
+    """personel_izin tablosuna saatlik izin için saat_sayisi ekler (günlük izinde 0)."""
+    try:
+        execute("ALTER TABLE personel_izin ADD COLUMN IF NOT EXISTS saat_sayisi INTEGER DEFAULT 0")
+    except Exception as e:
+        print(f"personel_izin.saat_sayisi: {e}")
+
+
+def ensure_personel_ozluk():
+    """Özlük / detay bilgileri tablosu (sadece admin)."""
+    try:
+        execute("""
+            CREATE TABLE IF NOT EXISTS personel_ozluk (
+                personel_id INTEGER PRIMARY KEY REFERENCES personel(id) ON DELETE CASCADE,
+                tc_kimlik TEXT, dogum_tarihi DATE, dogum_yeri TEXT, medeni_durum TEXT, esi_calisiyor TEXT, cocuk_sayisi INTEGER,
+                cinsiyet TEXT, kan_grubu TEXT, ikametgah TEXT, cep_telefon TEXT, mac_adres TEXT, email TEXT, acil_kisi TEXT,
+                ise_giris_tarihi DATE, departman TEXT, unvan TEXT, gorev_tanimi TEXT, calisma_sekli TEXT, ucret_bilgisi TEXT,
+                iban TEXT, yemek_yol_yardim TEXT, ogrenim_durumu TEXT, mezun_okul_bolum TEXT, yabanci_dil TEXT,
+                adli_sicil TEXT, saglik_raporu TEXT, ikametgah_belgesi TEXT, diploma TEXT, nufus_kayit TEXT, askerlik_durum TEXT,
+                notlar TEXT, updated_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+    except Exception as e:
+        print(f"personel_ozluk: {e}")
+
+
+def ensure_personel_ozluk_izin_columns():
+    """personel_ozluk tablosuna izin hakediş/kalan (gün+saat) sütunlarını ekler."""
+    for col in ("izin_hakedis_gun", "izin_hakedis_saat", "izin_kalan_gun", "izin_kalan_saat"):
+        try:
+            execute(f"ALTER TABLE personel_ozluk ADD COLUMN IF NOT EXISTS {col} INTEGER")
+        except Exception as e:
+            print(f"personel_ozluk.{col}: {e}")
+
+
+def ensure_crm_leads():
+    """CRM Lead tablosu: potansiyel müşteriler ve satış pipeline alanları."""
+    try:
+        execute(
+            """
+            CREATE TABLE IF NOT EXISTS crm_leads (
+                id SERIAL PRIMARY KEY,
+                ad_soyad TEXT NOT NULL,
+                firma_adi TEXT,
+                telefon TEXT,
+                email TEXT,
+                sektor TEXT,
+                hizmet_turu TEXT,
+                lead_durumu TEXT,
+                lead_skoru INTEGER DEFAULT 0,
+                ilk_gorusme DATE,
+                son_gorusme DATE,
+                takip_tarihi DATE,
+                sorumlu_satis TEXT,
+                notlar TEXT
+            )
+            """
+        )
+    except Exception as e:
+        print(f"crm_leads: {e}")
+
+
+def ensure_contracts_engine():
+    """Sözleşme / taksit / hukuk motoru tablolarını oluştur."""
+    try:
+        # Ana sözleşme tablosu
+        execute(
+            """
+            CREATE TABLE IF NOT EXISTS contracts (
+                id                  SERIAL PRIMARY KEY,
+                musteri_id          INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+                cari_kodu           TEXT,
+                sozlesme_no         TEXT,
+                baslangic_tarihi    DATE NOT NULL,
+                bitis_tarihi        DATE,
+                sure_ay             INTEGER,
+                aylik_kira          NUMERIC(12,2) NOT NULL,
+                toplam_tutar        NUMERIC(14,2),
+                para_birimi         TEXT DEFAULT 'TRY',
+                odeme_gunu          INTEGER,              -- ayın kaçıncı günü
+                depozito            NUMERIC(12,2),
+                gecikme_faizi_orani NUMERIC(6,2),
+                yillik_artis_orani  NUMERIC(6,2),
+                muacceliyet_var     BOOLEAN DEFAULT FALSE,
+                durum               TEXT DEFAULT 'aktif',  -- aktif / gecikmeli / ihtar / avukatlik / kapandi
+                aciklama            TEXT,
+                created_at          TIMESTAMPTZ DEFAULT NOW(),
+                updated_at          TIMESTAMPTZ DEFAULT NOW()
+            )
+            """
+        )
+    except Exception as e:
+        print(f"contracts: {e}")
+
+    try:
+        # Taksit planı tablosu
+        execute(
+            """
+            CREATE TABLE IF NOT EXISTS contract_installments (
+                id               SERIAL PRIMARY KEY,
+                contract_id      INTEGER NOT NULL REFERENCES contracts(id) ON DELETE CASCADE,
+                musteri_id       INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+                taksit_no        INTEGER NOT NULL,
+                vade_tarihi      DATE NOT NULL,
+                tutar            NUMERIC(12,2) NOT NULL,
+                odeme_durumu     TEXT DEFAULT 'planlandi',  -- planlandi / tahakkuk / odendi / gecikmis / icrada
+                odenen_tutar     NUMERIC(12,2) DEFAULT 0,
+                kalan_tutar      NUMERIC(12,2) DEFAULT 0,
+                tahakkuk_tarihi  DATE,
+                odeme_tarihi     DATE,
+                created_at       TIMESTAMPTZ DEFAULT NOW()
+            )
+            """
+        )
+    except Exception as e:
+        print(f"contract_installments: {e}")
+
+    try:
+        # Hukuki süreç tablosu
+        execute(
+            """
+            CREATE TABLE IF NOT EXISTS legal_cases (
+                id              SERIAL PRIMARY KEY,
+                musteri_id      INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+                contract_id     INTEGER REFERENCES contracts(id) ON DELETE SET NULL,
+                durum           TEXT,         -- ihtar / arabuluculuk / icra / dava / tahsil / kapandi
+                aciklama        TEXT,
+                toplam_borc     NUMERIC(14,2),
+                created_at      TIMESTAMPTZ DEFAULT NOW(),
+                updated_at      TIMESTAMPTZ DEFAULT NOW()
+            )
+            """
+        )
+    except Exception as e:
+        print(f"legal_cases: {e}")
+
+
+def ensure_potansiyel_musteriler():
+    """Potansiyel müşteri havuzu: teklif aşamasındakiler + hatırlatma tarihleri.
+
+    NOT: Eski sürümler için geriye dönük; yeni CRM için crm_leads kullanılmaktadır.
+    """
+    try:
+        execute(
+            """
+            CREATE TABLE IF NOT EXISTS potansiyel_musteriler (
+                id SERIAL PRIMARY KEY,
+                ad TEXT NOT NULL,
+                telefon TEXT,
+                paket TEXT,
+                gorusme_notu TEXT,
+                hatirlatma_tarihi DATE,
+                durum TEXT DEFAULT 'düşünüyor',
+                kaynak TEXT,
+                converted_customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL,
+                last_reminder_sent_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+            """
+        )
+    except Exception as e:
+        print(f"potansiyel_musteriler: {e}")
+
 
 
 def ensure_office_rentals():
@@ -581,14 +785,15 @@ def ensure_customers_durum():
             """
             UPDATE customers
             SET durum = CASE
-                WHEN LOWER(notes) LIKE '%durumexcel:%faal%' THEN 'aktif'
-                WHEN LOWER(notes) LIKE '%durumexcel:%terk%' THEN 'pasif'
+                WHEN LOWER(notes) LIKE %s THEN 'aktif'
+                WHEN LOWER(notes) LIKE %s THEN 'pasif'
                 ELSE durum
             END
             WHERE (durum IS NULL OR TRIM(COALESCE(durum,'')) = '')
               AND notes IS NOT NULL
-              AND LOWER(notes) LIKE '%durumexcel:%';
-            """
+              AND LOWER(notes) LIKE %s;
+            """,
+            ("%durumexcel:%faal%", "%durumexcel:%terk%", "%durumexcel:%"),
         )
     except Exception as e:
         print(f"customers.durum notes→durum: {e}")

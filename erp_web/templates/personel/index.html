@@ -23,7 +23,7 @@
 .tbl tr:hover { background: #2d4060; }
 .frm-row { display: flex; gap: 10px; margin-bottom: 8px; align-items: center; }
 .frm-row label { color: #b0bec5; font-size: 12px; min-width: 100px; }
-.frm-row input, .frm-row select { background: #2d4060; border: 1px solid #3d5070; color: #e0f7fa; padding: 6px 10px; border-radius: 3px; font-size: 12px; }
+.frm-row input, .frm-row select, .frm-row textarea { background: #2d4060; border: 1px solid #3d5070; color: #e0f7fa; padding: 6px 10px; border-radius: 3px; font-size: 12px; }
 .btn-p { background: #00bcd4; color: white; border: none; padding: 8px 14px; border-radius: 3px; cursor: pointer; font-size: 12px; }
 .btn-p:hover { background: #0097a7; }
 .btn-s { background: #6b7280; color: white; border: none; padding: 8px 14px; border-radius: 3px; cursor: pointer; font-size: 12px; }
@@ -31,6 +31,10 @@
 .wifi-off { color: #e74c3c; font-size: 12px; }
 .izin-kart { background: #0f2537; padding: 10px; border-radius: 4px; display: inline-block; margin-right: 10px; margin-bottom: 8px; }
 .izin-kart .val { font-size: 18px; font-weight: bold; color: #69f0ae; }
+.ozluk-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.ozluk-section { border: 1px solid #2d4060; border-radius: 4px; padding: 10px; margin: 0; }
+.ozluk-section legend { color: #4fc3f7; font-size: 12px; padding: 0 6px; }
+.ozluk-section .frm-row { margin-bottom: 6px; }
 </style>
 
 <div class="personel-header">
@@ -46,6 +50,7 @@
     <a href="#" id="tab-devam" class="active">Devam</a>
     <a href="#" id="tab-izin">İzin Yönetimi</a>
     <a href="#" id="tab-personel">Personel Yönetimi</a>
+    <a href="#" id="tab-giris-cikis">Giriş / Çıkış</a>
 </div>
 
 <!-- Devam -->
@@ -130,47 +135,82 @@
 
 <!-- Personel Yönetimi -->
 <div id="pane-personel" class="tab-pane">
-    <div class="grid2">
-        <div>
-            <div class="panel">
-                <h4>Personel Listesi</h4>
-                <div class="frm-row"><label>Göster:</label><label><input type="radio" name="filtre-p" value="tumu"> Tümü</label><label><input type="radio" name="filtre-p" value="aktif" checked> Aktif</label><label><input type="radio" name="filtre-p" value="pasif"> Pasif</label></div>
-                <div style="max-height:400px;overflow-y:auto;"><table class="tbl"><thead><tr><th>Personel Adı</th><th>Mesai</th><th>Durum</th><th>Not</th></tr></thead><tbody id="personel-tbody"></tbody></table></div>
-            </div>
-        </div>
-        <div>
-            <div class="panel">
-                <h4>Personel Ekle / Güncelle</h4>
-                <input type="hidden" id="personel-id" value="">
-                <div class="frm-row"><label>Ad Soyad *</label><input type="text" id="personel-ad" required></div>
-                <div class="frm-row"><label>Mesai (giriş)</label><input type="text" id="personel-mesai" placeholder="09:00" style="width:80px;"></div>
-                <div class="frm-row"><label>Durum</label><select id="personel-durum"><option value="1">Aktif</option><option value="0">Pasif</option></select></div>
-                <div class="frm-row"><label>MAC Adres</label><input type="text" id="personel-mac" placeholder="AA:BB:CC:DD:EE:FF"></div>
-                <div class="frm-row"><label>Pozisyon</label><input type="text" id="personel-pozisyon"></div>
-                <div class="frm-row"><label>Telefon</label><input type="text" id="personel-telefon"></div>
-                <div class="frm-row"><label>E-posta</label><input type="email" id="personel-email"></div>
-                <div class="frm-row"><label>Not</label><input type="text" id="personel-not"></div>
-                <div style="margin-top:10px;">
-                    <button type="button" id="btn-personel-kaydet" class="btn-p">Ekle / Güncelle</button>
-                    <button type="button" id="btn-personel-temizle" class="btn-s">Temizle</button>
-                </div>
-            </div>
-            <div class="panel">
-                <h4>İzin Bilgisi (Seçili personel)</h4>
-                <div class="frm-row"><label>İşe başlama</label><input type="text" id="bilgi-ise-baslama" placeholder="GG.AA.YYYY"></div>
-                <div class="frm-row"><label>Yıllık izin hakkı</label><input type="number" id="bilgi-yillik-izin" value="14" min="0" style="width:70px;"></div>
-                <div class="frm-row"><label>Manuel ek gün</label><input type="number" id="bilgi-manuel-izin" value="0" min="0" style="width:70px;"></div>
-                <div class="frm-row"><label>Ünvan</label><input type="text" id="bilgi-unvan"></div>
-                <div class="frm-row"><label>Departman</label><input type="text" id="bilgi-departman"></div>
-                <button type="button" id="btn-bilgi-kaydet" class="btn-p">Kaydet</button>
-            </div>
-            <div class="panel">
-                <h4>Yetki Alanları</h4>
-                <p style="font-size:11px;color:#90a4ae;">Personel seçip aşağıdaki modüllere erişim verebilirsiniz.</p>
+    <!-- Personel listesi üstte -->
+    <div class="panel">
+        <h4>Personel Listesi</h4>
+        <div class="frm-row"><label>Göster:</label><label><input type="radio" name="filtre-p" value="tumu"> Tümü</label><label><input type="radio" name="filtre-p" value="aktif" checked> Aktif</label><label><input type="radio" name="filtre-p" value="pasif"> Pasif</label></div>
+        <div style="max-height:320px;overflow-y:auto;"><table class="tbl"><thead><tr><th>Personel Adı</th><th>Mesai</th><th>Durum</th><th>Not</th><th>İşlem</th></tr></thead><tbody id="personel-tbody"></tbody></table></div>
+    </div>
+    {% if is_admin %}
+    <div class="panel" id="ozluk-panel" style="margin-top:12px;">
+        <h4>📋 Özlük / Detay Bilgileri (Sadece admin)</h4>
+        <p style="font-size:11px;color:#90a4ae;">Personel listesinden bir personel seçin; aşağıdaki alanları doldurup Kaydet veya Sil yapabilirsiniz.</p>
+        <input type="hidden" id="ozluk-personel-id" value="">
+        <div class="ozluk-grid">
+            <fieldset class="ozluk-section"><legend>1. Kişisel ve Kimlik</legend>
+                <div class="frm-row"><label>İsim Soyisim</label><input type="text" id="ozluk-ad_soyad" placeholder="İsim Soyisim"></div>
+                <div class="frm-row"><label>T.C. Kimlik No</label><input type="text" id="ozluk-tc_kimlik" maxlength="11"></div>
+                <div class="frm-row"><label>Doğum Tarihi</label><input type="text" id="ozluk-dogum_tarihi" placeholder="GG.AA.YYYY"></div>
+                <div class="frm-row"><label>Doğum Yeri</label><input type="text" id="ozluk-dogum_yeri"></div>
+                <div class="frm-row"><label>Medeni Durum</label><select id="ozluk-medeni_durum"><option value="">—</option><option value="Bekar">Bekar</option><option value="Evli">Evli</option></select></div>
+                <div class="frm-row"><label>Eşi çalışıyor?</label><input type="text" id="ozluk-esi_calisiyor" placeholder="Evet/Hayır"></div>
+                <div class="frm-row"><label>Çocuk sayısı</label><input type="number" id="ozluk-cocuk_sayisi" min="0" style="width:70px;"></div>
+                <div class="frm-row"><label>Cinsiyet</label><select id="ozluk-cinsiyet"><option value="">—</option><option value="E">Erkek</option><option value="K">Kadın</option></select></div>
+                <div class="frm-row"><label>Kan Grubu</label><input type="text" id="ozluk-kan_grubu" placeholder="A Rh+"></div>
+            </fieldset>
+            <fieldset class="ozluk-section"><legend>2. İletişim ve Adres</legend>
+                <div class="frm-row"><label>Cep Telefon</label><input type="text" id="ozluk-cep_telefon"></div>
+                <div class="frm-row"><label>Telefon MAC</label><input type="text" id="ozluk-mac_adres"></div>
+                <div class="frm-row"><label>E-posta</label><input type="email" id="ozluk-email"></div>
+                <div class="frm-row"><label>Acil Ulaşılacak Kişi</label><input type="text" id="ozluk-acil_kisi" placeholder="Ad, telefon, yakınlık"></div>
+                <div class="frm-row"><label>İkametgah</label><textarea id="ozluk-ikametgah" style="min-height:80px;resize:vertical;width:100%;"></textarea></div>
+            </fieldset>
+            <fieldset class="ozluk-section"><legend>3. İş ve Bordro</legend>
+                <div class="frm-row"><label>İşe Giriş Tarihi</label><input type="text" id="ozluk-ise_giris_tarihi" placeholder="GG.AA.YYYY"></div>
+                <div class="frm-row"><label>İzin hakediş (gün/saat)</label><input type="number" id="ozluk-izin_hakedis_gun" min="0" placeholder="gün" style="width:56px;"> gün <input type="number" id="ozluk-izin_hakedis_saat" min="0" placeholder="saat" style="width:56px;"> saat</div>
+                <div class="frm-row"><label>İzin kalan (gün/saat)</label><input type="number" id="ozluk-izin_kalan_gun" min="0" placeholder="gün" style="width:56px;"> gün <input type="number" id="ozluk-izin_kalan_saat" min="0" placeholder="saat" style="width:56px;"> saat</div>
+                <div class="frm-row"><label>Departman</label><input type="text" id="ozluk-departman"></div>
+                <div class="frm-row"><label>Ünvan</label><input type="text" id="ozluk-unvan"></div>
+                <div class="frm-row"><label>Görev Tanımı</label><input type="text" id="ozluk-gorev_tanimi"></div>
+                <div class="frm-row"><label>Çalışma Şekli</label><select id="ozluk-calisma_sekli"><option value="">—</option><option value="Tam zamanlı">Tam zamanlı</option><option value="Yarı zamanlı">Yarı zamanlı</option><option value="Proje bazlı">Proje bazlı</option></select></div>
+                <div class="frm-row"><label>Ücret Bilgisi</label><input type="text" id="ozluk-ucret_bilgisi"></div>
+                <div class="frm-row"><label>IBAN</label><input type="text" id="ozluk-iban"></div>
+                <div class="frm-row"><label>Yemek/Yol Yardımı</label><input type="text" id="ozluk-yemek_yol_yardim"></div>
+            </fieldset>
+            <fieldset class="ozluk-section"><legend>4. Eğitim</legend>
+                <div class="frm-row"><label>Öğrenim Durumu</label><select id="ozluk-ogrenim_durumu"><option value="">—</option><option value="İlkokul">İlkokul</option><option value="Lise">Lise</option><option value="Lisans">Lisans</option><option value="Yüksek Lisans">Yüksek Lisans</option></select></div>
+                <div class="frm-row"><label>Mezun Okul / Bölüm</label><input type="text" id="ozluk-mezun_okul_bolum"></div>
+                <div class="frm-row"><label>Yabancı Dil</label><input type="text" id="ozluk-yabanci_dil"></div>
+            </fieldset>
+            <fieldset class="ozluk-section"><legend>5. Evraklar (bilgi)</legend>
+                <div class="frm-row"><label>Adli Sicil</label><input type="text" id="ozluk-adli_sicil" placeholder="E-devlet"></div>
+                <div class="frm-row"><label>Sağlık Raporu</label><input type="text" id="ozluk-saglik_raporu"></div>
+                <div class="frm-row"><label>İkametgah Belgesi</label><input type="text" id="ozluk-ikametgah_belgesi"></div>
+                <div class="frm-row"><label>Diploma</label><input type="text" id="ozluk-diploma"></div>
+                <div class="frm-row"><label>Nüfus Kayıt</label><input type="text" id="ozluk-nufus_kayit"></div>
+                <div class="frm-row"><label>Askerlik Durum</label><input type="text" id="ozluk-askerlik_durum"></div>
+            </fieldset>
+            <fieldset class="ozluk-section"><legend>6. Yetki Alanları</legend>
+                <p style="font-size:11px;color:#90a4ae;margin:0 0 8px 0;">Personel seçip modüllere erişim verebilirsiniz.</p>
                 <div id="yetki-listesi"></div>
                 <button type="button" id="btn-yetki-kaydet" class="btn-s" style="margin-top:8px;">Yetkileri Kaydet</button>
-            </div>
+            </fieldset>
         </div>
+        <div class="frm-row" style="margin-top:10px;"><label>Not</label><input type="text" id="ozluk-notlar" style="flex:1;"></div>
+        <div style="margin-top:10px;">
+            <button type="button" id="btn-ozluk-kaydet" class="btn-p">Özlük Kaydet</button>
+            <button type="button" id="btn-ozluk-temizle" class="btn-s">Formu Temizle</button>
+            <button type="button" id="btn-ozluk-sil" class="btn-s" style="background:#c62828;">Özlük Kaydını Sil</button>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Giriş / Çıkış (PDOVAM ekranı) -->
+<div id="pane-giris-cikis" class="tab-pane">
+    <div class="panel" style="padding-top:8px;">
+        <iframe src="{{ url_for('pdovam.pdovam_anasayfa', embed=1) }}"
+                style="width:100%;height:540px;border:none;border-radius:4px;background:#0f2537;overflow:hidden;"></iframe>
     </div>
 </div>
 
@@ -183,7 +223,12 @@ const API_DEVAM_GUNLUK = "{{ url_for('personel.api_devam_gunluk') }}";
 const API_DEVAM_AYLIK = "{{ url_for('personel.api_devam_aylik') }}";
 const API_DEVAM_KAYDET = "{{ url_for('personel.api_devam_kaydet') }}";
 const API_PERSONEL_KAYDET = "{{ url_for('personel.api_personel_kaydet') }}";
+const API_PERSONEL_SIL = "{{ url_for('personel.api_personel_sil') }}";
+const API_PERSONEL_AD_GUNCELLE = "{{ url_for('personel.api_personel_ad_guncelle') }}";
 const API_PERSONEL_BILGI = "{{ url_for('personel.api_personel_bilgi') }}";
+const API_OZLUK_GET = "{{ url_for('personel.api_personel_ozluk') }}";
+const API_OZLUK_KAYDET = "{{ url_for('personel.api_personel_ozluk_kaydet') }}";
+const API_OZLUK_SIL = "{{ url_for('personel.api_personel_ozluk_sil') }}";
 const API_IZIN_LIST = "{{ url_for('personel.api_izin_list') }}";
 const API_IZIN_OZET = "{{ url_for('personel.api_izin_ozet') }}";
 const API_IZIN_KAYDET = "{{ url_for('personel.api_izin_kaydet') }}";
@@ -255,28 +300,39 @@ async function personelListeYukle(filtre) {
   rows.forEach(r => {
     const tr = document.createElement('tr');
     tr.dataset.id = r.id;
-    tr.innerHTML = '<td>'+ (r.ad_soyad||'') +'</td><td>'+ (r.mesai_baslangic||'09:00') +'</td><td>'+ (r.is_active ? 'Aktif' : 'Pasif') +'</td><td>'+ (r.notlar||'') +'</td>';
+    const notKisa = (r.notlar || '').toString().substring(0, 30);
+    tr.innerHTML = '<td>'+(r.ad_soyad||'')+'</td><td>'+(r.mesai_baslangic||'09:00')+'</td><td>'+(r.is_active ? 'Aktif' : 'Pasif')+'</td><td>'+notKisa+'</td><td style="white-space:nowrap;"></td>';
+    const tdBtn = tr.lastElementChild;
+    const btnDuzenle = document.createElement('button'); btnDuzenle.type = 'button'; btnDuzenle.className = 'btn-p'; btnDuzenle.style.cssText = 'padding:4px 8px;font-size:11px;margin:0 2px;background:#2e7d32;'; btnDuzenle.textContent = 'Düzenle'; btnDuzenle.onclick = (e) => { e.stopPropagation(); personelSec(r); };
+    const btnSil = document.createElement('button'); btnSil.type = 'button'; btnSil.className = 'btn-s'; btnSil.style.cssText = 'padding:4px 8px;font-size:11px;margin:0 2px;background:#c62828;'; btnSil.textContent = 'Sil'; btnSil.onclick = (e) => { e.stopPropagation(); personelSil(r.id); };
+    tdBtn.appendChild(btnDuzenle); tdBtn.appendChild(btnSil);
     tr.onclick = () => personelSec(r);
     tbody.appendChild(tr);
   });
 }
 
+async function personelSil(id) {
+  if (!confirm('Bu personeli silmek istediğinize emin misiniz? İlgili devam ve izin kayıtları da etkilenebilir.')) return;
+  try {
+    const res = await fetch(API_PERSONEL_SIL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: id }) });
+    const d = await res.json();
+    if (d && d.ok) {
+      if (seciliPersonelId === id) { seciliPersonelId = null; document.querySelectorAll('#personel-tbody tr').forEach(tr => tr.style.background = ''); }
+      personelListeYukle(document.querySelector('input[name="filtre-p"]:checked').value);
+    } else alert(d.mesaj || 'Silme başarısız.');
+  } catch (e) { alert('Silme hatası: ' + (e.message || e)); }
+}
+
 function personelSec(r) {
   seciliPersonelId = r.id;
-  document.getElementById('personel-id').value = r.id;
-  document.getElementById('personel-ad').value = r.ad_soyad || '';
-  document.getElementById('personel-mesai').value = r.mesai_baslangic || '09:00';
-  document.getElementById('personel-durum').value = r.is_active ? '1' : '0';
-  document.getElementById('personel-mac').value = r.mac_adres || '';
-  document.getElementById('personel-pozisyon').value = r.pozisyon || '';
-  document.getElementById('personel-telefon').value = r.telefon || '';
-  document.getElementById('personel-email').value = r.email || '';
-  document.getElementById('personel-not').value = r.notlar || '';
   document.querySelectorAll('#personel-tbody tr').forEach(tr => tr.style.background = tr.dataset.id == r.id ? '#00695c' : '');
+  var adInp = document.getElementById('ozluk-ad_soyad');
+  if (adInp) adInp.value = r.ad_soyad || '';
   bilgiYukle(r.id);
   izinOzetYukle(r.id);
   gecListYukle(r.id);
   yetkiYukle(r.id);
+  ozlukYukle(r.id);
 }
 
 function isoToTr(s) {
@@ -285,16 +341,100 @@ function isoToTr(s) {
   if (p.length === 3) return p[2] + '.' + p[1] + '.' + p[0];
   return s;
 }
+
+/** GG.AA.YYYY veya YYYY-MM-DD string'ini Date'e çevirir. */
+function parseTrDate(str) {
+  if (!str || !String(str).trim()) return null;
+  let y, m, d;
+  const s = String(str).trim();
+  if (s.indexOf('-') >= 0) {
+    const p = s.split('T')[0].split('-');
+    if (p.length !== 3) return null;
+    y = parseInt(p[0], 10); m = parseInt(p[1], 10) - 1; d = parseInt(p[2], 10);
+  } else {
+    const p = s.split('.');
+    if (p.length !== 3) return null;
+    d = parseInt(p[0], 10); m = parseInt(p[1], 10) - 1; y = parseInt(p[2], 10);
+  }
+  if (isNaN(y) || isNaN(m) || isNaN(d)) return null;
+  const dt = new Date(y, m, d);
+  if (dt.getFullYear() !== y || dt.getMonth() !== m || dt.getDate() !== d) return null;
+  return dt;
+}
+
+/** 4857 İş Kanunu: işe giriş (ve isteğe bağlı doğum) tarihine göre yıllık izin günü. Gün yoksa 14 gün / 112 saat default. */
+function izinHakedis4857(iseGirisStr, dogumStr) {
+  const gunFarki = function(from, to) {
+    const a = from.getTime ? from.getTime() : from;
+    const b = to.getTime ? to.getTime() : to;
+    return Math.floor((b - a) / (24 * 60 * 60 * 1000));
+  };
+  const ref = new Date();
+  ref.setHours(0, 0, 0, 0);
+  const iseGiris = parseTrDate(iseGirisStr);
+  if (!iseGiris) return { gun: 14, saat: 112 };
+  const dogum = parseTrDate(dogumStr);
+  let kidemGun = 14;
+  const days = gunFarki(iseGiris, ref);
+  if (days >= 365) {
+    const kidemYil = Math.floor(days / 365);
+    if (kidemYil < 6) kidemGun = 14;
+    else if (kidemYil < 15) kidemGun = 20;
+    else kidemGun = 26;
+  }
+  if (dogum) {
+    let yas = ref.getFullYear() - dogum.getFullYear();
+    if (ref.getMonth() < dogum.getMonth() || (ref.getMonth() === dogum.getMonth() && ref.getDate() < dogum.getDate())) yas--;
+    if (yas <= 18 || yas >= 50) kidemGun = Math.max(20, kidemGun);
+  }
+  return { gun: kidemGun, saat: kidemGun * 8 };
+}
+
+function ozlukIzinHakedisGuncelle() {
+  const iseGirisEl = document.getElementById('ozluk-ise_giris_tarihi');
+  const dogumEl = document.getElementById('ozluk-dogum_tarihi');
+  const gunEl = document.getElementById('ozluk-izin_hakedis_gun');
+  const saatEl = document.getElementById('ozluk-izin_hakedis_saat');
+  if (!gunEl || !saatEl) return;
+  const iseGirisStr = iseGirisEl ? iseGirisEl.value.trim() : '';
+  const dogumStr = dogumEl ? dogumEl.value.trim() : '';
+  const r = izinHakedis4857(iseGirisStr, dogumStr);
+  gunEl.value = r.gun;
+  saatEl.value = r.saat;
+}
+
 async function bilgiYukle(pid) {
   const res = await fetch(API_PERSONEL_BILGI + '?personel_id='+pid);
   const d = await res.json();
-  document.getElementById('bilgi-ise-baslama').value = isoToTr(d.ise_baslama_tarihi) || '';
-  document.getElementById('bilgi-yillik-izin').value = d.yillik_izin_hakki || 14;
-  document.getElementById('bilgi-manuel-izin').value = d.manuel_izin_gun || 0;
-  document.getElementById('bilgi-unvan').value = d.unvan || '';
-  document.getElementById('bilgi-departman').value = d.departman || '';
   const rad = document.querySelector('input[name="gec_kesinti"][value="'+ (d.gec_kesinti_tipi||'izin') +'"]');
   if (rad) rad.checked = true;
+}
+
+async function ozlukYukle(pid) {
+  const el = document.getElementById('ozluk-personel-id');
+  if (!el) return;
+  el.value = pid || '';
+  const list = typeof ozlukFieldList !== 'undefined' ? ozlukFieldList : ['tc_kimlik','dogum_tarihi','dogum_yeri','medeni_durum','esi_calisiyor','cocuk_sayisi','cinsiyet','kan_grubu','ikametgah','cep_telefon','mac_adres','email','acil_kisi','ise_giris_tarihi','izin_hakedis_gun','izin_hakedis_saat','izin_kalan_gun','izin_kalan_saat','departman','unvan','gorev_tanimi','calisma_sekli','ucret_bilgisi','iban','yemek_yol_yardim','ogrenim_durumu','mezun_okul_bolum','yabanci_dil','adli_sicil','saglik_raporu','ikametgah_belgesi','diploma','nufus_kayit','askerlik_durum','notlar'];
+  list.forEach(k => {
+    const inp = document.getElementById('ozluk-'+k);
+    if (inp) inp.value = '';
+  });
+  if (!pid) return;
+  try {
+    const res = await fetch(API_OZLUK_GET + '?personel_id='+pid);
+    const d = await res.json();
+    if (d.ok === false) return;
+    list.forEach(k => {
+      const inp = document.getElementById('ozluk-'+k);
+      if (!inp) return;
+      let v = d[k];
+      if (v == null || v === undefined) v = '';
+      if (k === 'dogum_tarihi' || k === 'ise_giris_tarihi') v = isoToTr(v) || v;
+      if (typeof v === 'number') v = String(v);
+      inp.value = v;
+    });
+    ozlukIzinHakedisGuncelle();
+  } catch (e) {}
 }
 
 async function izinOzetYukle(pid) {
@@ -369,27 +509,9 @@ document.getElementById('btn-manuel-kaydet').onclick = async function() {
 document.getElementById('tab-devam').onclick = function(e){ e.preventDefault(); document.querySelectorAll('.personel-tabs a').forEach(a=>a.classList.remove('active')); document.querySelectorAll('.tab-pane').forEach(p=>p.classList.remove('active')); this.classList.add('active'); document.getElementById('pane-devam').classList.add('active'); };
 document.getElementById('tab-izin').onclick = function(e){ e.preventDefault(); document.querySelectorAll('.personel-tabs a').forEach(a=>a.classList.remove('active')); document.querySelectorAll('.tab-pane').forEach(p=>p.classList.remove('active')); this.classList.add('active'); document.getElementById('pane-izin').classList.add('active'); personelListeYukle('aktif'); };
 document.getElementById('tab-personel').onclick = function(e){ e.preventDefault(); document.querySelectorAll('.personel-tabs a').forEach(a=>a.classList.remove('active')); document.querySelectorAll('.tab-pane').forEach(p=>p.classList.remove('active')); this.classList.add('active'); document.getElementById('pane-personel').classList.add('active'); personelListeYukle(document.querySelector('input[name="filtre-p"]:checked').value); };
+document.getElementById('tab-giris-cikis').onclick = function(e){ e.preventDefault(); document.querySelectorAll('.personel-tabs a').forEach(a=>a.classList.remove('active')); document.querySelectorAll('.tab-pane').forEach(p=>p.classList.remove('active')); this.classList.add('active'); document.getElementById('pane-giris-cikis').classList.add('active'); };
 
 document.querySelectorAll('input[name="filtre-p"]').forEach(inp => inp.onchange = function() { personelListeYukle(this.value); });
-
-document.getElementById('btn-personel-kaydet').onclick = async function() {
-  const ad = document.getElementById('personel-ad').value.trim();
-  if (!ad) { alert('Ad soyad zorunlu.'); return; }
-  const id = document.getElementById('personel-id').value;
-  const payload = { ad_soyad: ad, mesai_baslangic: document.getElementById('personel-mesai').value || '09:00', mac_adres: document.getElementById('personel-mac').value, notlar: document.getElementById('personel-not').value, pozisyon: document.getElementById('personel-pozisyon').value, telefon: document.getElementById('personel-telefon').value, email: document.getElementById('personel-email').value, is_active: document.getElementById('personel-durum').value === '1' };
-  if (id) payload.id = id;
-  await fetch(API_PERSONEL_KAYDET, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-  personelListeYukle(document.querySelector('input[name="filtre-p"]:checked').value);
-  document.getElementById('btn-personel-temizle').click();
-};
-document.getElementById('btn-personel-temizle').onclick = function() { seciliPersonelId = null; document.getElementById('personel-id').value = ''; document.getElementById('personel-ad').value = ''; document.getElementById('personel-mesai').value = '09:00'; document.getElementById('personel-durum').value = '1'; document.getElementById('personel-mac').value = ''; document.getElementById('personel-pozisyon').value = ''; document.getElementById('personel-telefon').value = ''; document.getElementById('personel-email').value = ''; document.getElementById('personel-not').value = ''; document.querySelectorAll('#personel-tbody tr').forEach(tr => tr.style.background = ''); };
-
-document.getElementById('btn-bilgi-kaydet').onclick = async function() {
-  if (!seciliPersonelId) { alert('Önce personel seçin.'); return; }
-  const payload = { personel_id: seciliPersonelId, ise_baslama_tarihi: document.getElementById('bilgi-ise-baslama').value, yillik_izin_hakki: document.getElementById('bilgi-yillik-izin').value, manuel_izin_gun: document.getElementById('bilgi-manuel-izin').value, unvan: document.getElementById('bilgi-unvan').value, departman: document.getElementById('bilgi-departman').value, gec_kesinti_tipi: document.querySelector('input[name="gec_kesinti"]:checked').value };
-  await fetch(API_PERSONEL_BILGI, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-  izinOzetYukle(seciliPersonelId);
-};
 
 document.getElementById('izin-personel').onchange = function() { seciliPersonelId = this.value; if (this.value) { bilgiYukle(this.value); izinOzetYukle(this.value); izinListYukle(this.value); gecListYukle(this.value); yetkiYukle(this.value); } };
 document.getElementById('izin-yil').onchange = function() { if (seciliPersonelId) { izinOzetYukle(seciliPersonelId); izinListYukle(seciliPersonelId); } };
@@ -412,12 +534,82 @@ document.getElementById('btn-yetki-kaydet').onclick = async function() {
   await fetch(API_YETKI_KAYDET, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ personel_id: seciliPersonelId, yetkiler }) });
 };
 
+var ozlukFieldList = ['tc_kimlik','dogum_tarihi','dogum_yeri','medeni_durum','esi_calisiyor','cocuk_sayisi','cinsiyet','kan_grubu','ikametgah','cep_telefon','mac_adres','email','acil_kisi','ise_giris_tarihi','izin_hakedis_gun','izin_hakedis_saat','izin_kalan_gun','izin_kalan_saat','departman','unvan','gorev_tanimi','calisma_sekli','ucret_bilgisi','iban','yemek_yol_yardim','ogrenim_durumu','mezun_okul_bolum','yabanci_dil','adli_sicil','saglik_raporu','ikametgah_belgesi','diploma','nufus_kayit','askerlik_durum','notlar'];
+
+var btnOzlukKaydet = document.getElementById('btn-ozluk-kaydet');
+if (btnOzlukKaydet) btnOzlukKaydet.onclick = async function() {
+  var pidEl = document.getElementById('ozluk-personel-id');
+  var pid = pidEl ? pidEl.value : '';
+  if (!pid) { alert('Önce personel listesinden bir personel seçin.'); return; }
+  var data = { personel_id: parseInt(pid, 10) };
+  ozlukFieldList.forEach(function(k) {
+    var inp = document.getElementById('ozluk-'+k);
+    if (!inp) return;
+    var v = inp.value;
+    if (k === 'dogum_tarihi' || k === 'ise_giris_tarihi') v = tarihToIso(v) || v;
+    if (k === 'cocuk_sayisi' || k === 'izin_hakedis_gun' || k === 'izin_hakedis_saat' || k === 'izin_kalan_gun' || k === 'izin_kalan_saat') { var n = parseInt(v,10); v = isNaN(n) ? '' : n; }
+    data[k] = v === '' ? null : v;
+  });
+  try {
+    var res = await fetch(API_OZLUK_KAYDET, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+    var d = await res.json();
+    if (d && d.ok) {
+      // İsim Soyisim alanı doldurulmuşsa ana personel kaydındaki adı da güncelle
+      var adInp = document.getElementById('ozluk-ad_soyad');
+      if (adInp && adInp.value.trim()) {
+        try {
+          await fetch(API_PERSONEL_AD_GUNCELLE, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ personel_id: parseInt(pid, 10), ad_soyad: adInp.value.trim() })
+          });
+          // Listeyi tazele ki üst tarafta da isim güncellensin
+          var f = document.querySelector('input[name="filtre-p"]:checked');
+          personelListeYukle(f ? f.value : 'aktif');
+        } catch (e) {}
+      }
+      ozlukYukle(pid);
+    } else { alert(d.mesaj || 'Kayıt yapılamadı.'); }
+  } catch (e) { alert('Kayıt hatası: ' + (e.message || e)); }
+};
+var btnOzlukTemizle = document.getElementById('btn-ozluk-temizle');
+if (btnOzlukTemizle) btnOzlukTemizle.onclick = function() {
+  var el = document.getElementById('ozluk-personel-id');
+  if (el) el.value = '';
+  ozlukFieldList.forEach(function(k) {
+    var inp = document.getElementById('ozluk-'+k);
+    if (inp) inp.value = '';
+  });
+  var adInp = document.getElementById('ozluk-ad_soyad');
+  if (adInp) adInp.value = '';
+};
+var btnOzlukSil = document.getElementById('btn-ozluk-sil');
+if (btnOzlukSil) btnOzlukSil.onclick = async function() {
+  var pidEl = document.getElementById('ozluk-personel-id');
+  var pid = pidEl ? pidEl.value : '';
+  if (!pid) { alert('Önce personel seçin.'); return; }
+  if (!confirm('Bu personelin özlük kaydını silmek istediğinize emin misiniz?')) return;
+  try {
+    var res = await fetch(API_OZLUK_SIL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ personel_id: parseInt(pid,10) }) });
+    var d = await res.json();
+    if (d && d.ok) { ozlukYukle(pid); }
+    else { alert(d.mesaj || 'Silinemedi.'); }
+  } catch (e) { alert('Silme hatası: ' + (e.message || e)); }
+};
+
 document.addEventListener('DOMContentLoaded', function() {
   flatpickr('#filter-tarih', { dateFormat: 'd.m.Y', locale: 'tr', defaultDate: 'today' });
   document.getElementById('filter-tarih').addEventListener('change', function() { devamGunlukYukle(); });
   flatpickr('#izin-bas', { dateFormat: 'd.m.Y', locale: 'tr' });
   flatpickr('#izin-bit', { dateFormat: 'd.m.Y', locale: 'tr' });
-  flatpickr('#bilgi-ise-baslama', { dateFormat: 'd.m.Y', locale: 'tr' });
+  var ozlukIseGiris = document.getElementById('ozluk-ise_giris_tarihi');
+  var ozlukDogum = document.getElementById('ozluk-dogum_tarihi');
+  if (ozlukIseGiris) { ozlukIseGiris.addEventListener('change', ozlukIzinHakedisGuncelle); ozlukIseGiris.addEventListener('input', ozlukIzinHakedisGuncelle); }
+  if (ozlukDogum) { ozlukDogum.addEventListener('change', ozlukIzinHakedisGuncelle); ozlukDogum.addEventListener('input', ozlukIzinHakedisGuncelle); }
+  try {
+    flatpickr('#ozluk-ise_giris_tarihi', { dateFormat: 'd.m.Y', locale: 'tr', onChange: function() { ozlukIzinHakedisGuncelle(); } });
+    flatpickr('#ozluk-dogum_tarihi', { dateFormat: 'd.m.Y', locale: 'tr', onChange: function() { ozlukIzinHakedisGuncelle(); } });
+  } catch (e) {}
   const y = new Date().getFullYear();
   for (let i = y; i >= y - 5; i--) { const o = document.createElement('option'); o.value = i; o.textContent = i; document.getElementById('aylik-yil').appendChild(o); document.getElementById('izin-yil').appendChild(o.cloneNode(true)); }
   AYLAR.forEach((a,i) => { const o = document.createElement('option'); o.value = i+1; o.textContent = a; if (i+1 === new Date().getMonth()+1) o.selected = true; document.getElementById('aylik-ay').appendChild(o); });
