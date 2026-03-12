@@ -140,11 +140,12 @@
         <h4>Personel Listesi</h4>
         <div class="frm-row"><label>Göster:</label><label><input type="radio" name="filtre-p" value="tumu"> Tümü</label><label><input type="radio" name="filtre-p" value="aktif" checked> Aktif</label><label><input type="radio" name="filtre-p" value="pasif"> Pasif</label></div>
         <div style="max-height:320px;overflow-y:auto;"><table class="tbl"><thead><tr><th>Personel Adı</th><th>Mesai</th><th>Durum</th><th>Not</th><th>İşlem</th></tr></thead><tbody id="personel-tbody"></tbody></table></div>
+        <div style="margin-top:8px;"><button type="button" id="btn-yeni-personel" class="btn-p">+ Yeni Personel Ekle</button></div>
     </div>
     {% if is_admin %}
     <div class="panel" id="ozluk-panel" style="margin-top:12px;">
         <h4>📋 Özlük / Detay Bilgileri (Sadece admin)</h4>
-        <p style="font-size:11px;color:#90a4ae;">Personel listesinden bir personel seçin; aşağıdaki alanları doldurup Kaydet veya Sil yapabilirsiniz.</p>
+        <p style="font-size:11px;color:#90a4ae;">Personel listesinden bir personel seçin veya <strong>Yeni Personel Ekle</strong> ile yeni kayıt oluşturun; aşağıdaki alanları doldurup Kaydet veya Sil yapabilirsiniz.</p>
         <input type="hidden" id="ozluk-personel-id" value="">
         <div class="ozluk-grid">
             <fieldset class="ozluk-section"><legend>1. Kişisel ve Kimlik</legend>
@@ -540,7 +541,33 @@ var btnOzlukKaydet = document.getElementById('btn-ozluk-kaydet');
 if (btnOzlukKaydet) btnOzlukKaydet.onclick = async function() {
   var pidEl = document.getElementById('ozluk-personel-id');
   var pid = pidEl ? pidEl.value : '';
-  if (!pid) { alert('Önce personel listesinden bir personel seçin.'); return; }
+  var adInp = document.getElementById('ozluk-ad_soyad');
+  var adSoyad = adInp ? adInp.value.trim() : '';
+  if (!pid) {
+    if (!adSoyad) { alert('Yeni personel için en az İsim Soyisim girin.'); return; }
+    try {
+      var createRes = await fetch(API_PERSONEL_KAYDET, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ad_soyad: adSoyad,
+          telefon: (document.getElementById('ozluk-cep_telefon') || {}).value || '',
+          email: (document.getElementById('ozluk-email') || {}).value || '',
+          giris_tarihi: tarihToIso((document.getElementById('ozluk-ise_giris_tarihi') || {}).value) || null,
+          mesai_baslangic: '09:00',
+          mac_adres: (document.getElementById('ozluk-mac_adres') || {}).value || '',
+          notlar: (document.getElementById('ozluk-notlar') || {}).value || ''
+        })
+      });
+      var createD = await createRes.json();
+      if (!createD || !createD.ok) { alert(createD && createD.mesaj ? createD.mesaj : 'Yeni personel oluşturulamadı.'); return; }
+      pid = String(createD.id);
+      pidEl.value = pid;
+      seciliPersonelId = createD.id;
+      var f = document.querySelector('input[name="filtre-p"]:checked');
+      personelListeYukle(f ? f.value : 'aktif');
+    } catch (e) { alert('Yeni personel oluşturulurken hata: ' + (e.message || e)); return; }
+  }
   var data = { personel_id: parseInt(pid, 10) };
   ozlukFieldList.forEach(function(k) {
     var inp = document.getElementById('ozluk-'+k);
@@ -554,8 +581,6 @@ if (btnOzlukKaydet) btnOzlukKaydet.onclick = async function() {
     var res = await fetch(API_OZLUK_KAYDET, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
     var d = await res.json();
     if (d && d.ok) {
-      // İsim Soyisim alanı doldurulmuşsa ana personel kaydındaki adı da güncelle
-      var adInp = document.getElementById('ozluk-ad_soyad');
       if (adInp && adInp.value.trim()) {
         try {
           await fetch(API_PERSONEL_AD_GUNCELLE, {
@@ -563,7 +588,6 @@ if (btnOzlukKaydet) btnOzlukKaydet.onclick = async function() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ personel_id: parseInt(pid, 10), ad_soyad: adInp.value.trim() })
           });
-          // Listeyi tazele ki üst tarafta da isim güncellensin
           var f = document.querySelector('input[name="filtre-p"]:checked');
           personelListeYukle(f ? f.value : 'aktif');
         } catch (e) {}
@@ -571,6 +595,21 @@ if (btnOzlukKaydet) btnOzlukKaydet.onclick = async function() {
       ozlukYukle(pid);
     } else { alert(d.mesaj || 'Kayıt yapılamadı.'); }
   } catch (e) { alert('Kayıt hatası: ' + (e.message || e)); }
+};
+
+var btnYeniPersonel = document.getElementById('btn-yeni-personel');
+if (btnYeniPersonel) btnYeniPersonel.onclick = function() {
+  var pidEl = document.getElementById('ozluk-personel-id');
+  if (pidEl) pidEl.value = '';
+  seciliPersonelId = null;
+  document.querySelectorAll('#personel-tbody tr').forEach(function(tr){ tr.style.background = ''; });
+  ozlukFieldList.forEach(function(k) {
+    var inp = document.getElementById('ozluk-'+k);
+    if (inp) inp.value = '';
+  });
+  var adInp = document.getElementById('ozluk-ad_soyad');
+  if (adInp) { adInp.value = ''; adInp.focus(); }
+  document.getElementById('yetki-listesi').innerHTML = '';
 };
 var btnOzlukTemizle = document.getElementById('btn-ozluk-temizle');
 if (btnOzlukTemizle) btnOzlukTemizle.onclick = function() {

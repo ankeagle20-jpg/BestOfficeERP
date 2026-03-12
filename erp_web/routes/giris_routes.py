@@ -250,22 +250,59 @@ def api_musteriler():
     return jsonify(sonuc)
 
 
+def _musteri_serialize_val(v):
+    """Tarih/sayı alanlarını JSON uyumlu string yap."""
+    if v is None:
+        return ""
+    if hasattr(v, "isoformat"):
+        return v.isoformat()[:10] if v else ""
+    return str(v).strip() if v else ""
+
+
 @bp.route('/api/musteri/<int:mid>')
 @giris_gerekli
 def api_musteri_detay(mid):
-    """Tek müşteri tüm alanları - listeden seçildiğinde forma doldurmak için."""
+    """Tek müşteri tüm alanları - customers + son musteri_kyc birleşik; forma doldurmak için."""
     row = fetch_one("SELECT * FROM customers WHERE id = %s", (mid,))
     if not row:
         return jsonify({"ok": False, "mesaj": "Müşteri bulunamadı."}), 404
-    # Tarih/sayı alanlarını JSON uyumlu yap
+    kyc = fetch_one(
+        "SELECT * FROM musteri_kyc WHERE musteri_id = %s ORDER BY id DESC LIMIT 1",
+        (mid,),
+    )
     out = {}
     for k, v in row.items():
-        if hasattr(v, "isoformat"):
-            out[k] = v.isoformat()[:10] if v else ""
-        elif v is None:
-            out[k] = ""
-        else:
-            out[k] = v
+        out[k] = _musteri_serialize_val(v)
+    # KYC alanlarını forma uyumlu anahtarlarla birleştir (KYC öncelikli)
+    if kyc:
+        out["name"] = out.get("name") or _musteri_serialize_val(kyc.get("sirket_unvani"))
+        out["tax_number"] = out.get("tax_number") or _musteri_serialize_val(kyc.get("vergi_no"))
+        out["vergi_dairesi"] = _musteri_serialize_val(kyc.get("vergi_dairesi")) or out.get("vergi_dairesi", "")
+        out["mersis_no"] = _musteri_serialize_val(kyc.get("mersis_no"))
+        out["mersis"] = out["mersis_no"]
+        out["nace_kodu"] = _musteri_serialize_val(kyc.get("nace_kodu"))
+        out["nace"] = out["nace_kodu"]
+        out["yetkili_kisi"] = _musteri_serialize_val(kyc.get("yetkili_adsoyad"))
+        out["yetkili_ad"] = out["yetkili_kisi"]
+        out["yetkili_tc"] = _musteri_serialize_val(kyc.get("yetkili_tcno"))
+        out["phone"] = out.get("phone") or _musteri_serialize_val(kyc.get("yetkili_tel"))
+        out["phone2"] = _musteri_serialize_val(kyc.get("yetkili_tel2"))
+        out["email"] = out.get("email") or _musteri_serialize_val(kyc.get("yetkili_email"))
+        out["email_sirket"] = _musteri_serialize_val(kyc.get("email"))
+        out["address"] = out.get("address") or _musteri_serialize_val(kyc.get("yeni_adres"))
+        out["ev_adres"] = out.get("ev_adres") or _musteri_serialize_val(kyc.get("yetkili_ikametgah"))
+        out["notes"] = out.get("notes") or _musteri_serialize_val(kyc.get("notlar"))
+        out["hizmet_turu"] = _musteri_serialize_val(kyc.get("hizmet_turu"))
+        out["guncel_kira_bedeli"] = _musteri_serialize_val(kyc.get("aylik_kira"))
+        out["ilk_kira_bedeli"] = out["guncel_kira_bedeli"]
+        out["rent_start_date"] = _musteri_serialize_val(kyc.get("sozlesme_tarihi"))
+        out["sozlesme_baslangic"] = out["rent_start_date"]
+        out["sozlesme_bitis"] = _musteri_serialize_val(kyc.get("sozlesme_bitis"))
+        out["ticaret_sicil"] = _musteri_serialize_val(kyc.get("ticaret_sicil_no"))
+        out["kurulus_tarihi"] = _musteri_serialize_val(kyc.get("kurulus_tarihi"))
+        out["faaliyet"] = _musteri_serialize_val(kyc.get("faaliyet_konusu"))
+        out["onceki_adres"] = _musteri_serialize_val(kyc.get("eski_adres"))
+        out["sube_merkez"] = _musteri_serialize_val(kyc.get("sube_merkez"))
     return jsonify({"ok": True, "musteri": out})
 
 

@@ -670,11 +670,33 @@ def index():
 @bp.route('/yeni')
 @faturalar_gerekli
 def yeni_fatura():
-    """Yeni fatura oluşturma ekranı (Finans > Yeni Fatura sekmesi için)."""
+    """Yeni fatura oluşturma ekranı. ?musteri_id= ile gelirse seçili müşteri bilgileri forma doldurulur."""
     now = datetime.now()
+    secili_musteri = None
+    musteri_id = request.args.get('musteri_id', type=int)
+    if musteri_id:
+        cust = fetch_one("SELECT id, name, address, tax_number FROM customers WHERE id = %s", (musteri_id,))
+        if cust:
+            kyc = fetch_one(
+                "SELECT yeni_adres, vergi_dairesi, vergi_no FROM musteri_kyc WHERE musteri_id = %s ORDER BY id DESC LIMIT 1",
+                (musteri_id,),
+            )
+            address = (kyc and (kyc.get("yeni_adres") or kyc.get("address"))) or cust.get("address") or ""
+            vergi_dairesi = (kyc and kyc.get("vergi_dairesi")) or ""
+            vergi_no = (kyc and kyc.get("vergi_no")) or cust.get("tax_number") or ""
+            if isinstance(vergi_no, float):
+                vergi_no = str(int(vergi_no)) if vergi_no == int(vergi_no) else str(vergi_no)
+            secili_musteri = {
+                "id": cust["id"],
+                "name": cust.get("name") or "",
+                "address": address,
+                "vergi_dairesi": vergi_dairesi,
+                "vergi_no": str(vergi_no) if vergi_no else "",
+            }
     return render_template('faturalar/yeni_fatura.html',
                            bugun=now.strftime("%Y-%m-%d"),
-                           saat=now.strftime("%H:%M"))
+                           saat=now.strftime("%H:%M"),
+                           secili_musteri=secili_musteri)
 
 
 @bp.route('/faturalar')

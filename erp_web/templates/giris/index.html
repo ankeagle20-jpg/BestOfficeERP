@@ -231,6 +231,36 @@
     padding: 20px;
     text-align: center;
 }
+.sozlesmeler-yeni-fatura-wrap {
+    margin-top: 12px;
+    padding: 10px 12px;
+    background: #1e3a50;
+    border-radius: 6px;
+    border: 1px solid #2d4060;
+}
+.sozlesmeler-yeni-fatura-wrap .sozlesmeler-sag-baslik {
+    margin-bottom: 8px;
+    font-size: 13px;
+}
+.btn-yeni-fatura-kisa {
+    display: inline-block;
+    background: #1565c0;
+    color: #fff;
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    text-decoration: none;
+    margin-right: 8px;
+    transition: background 0.2s;
+}
+.btn-yeni-fatura-kisa:hover {
+    background: #1976d2;
+    color: #fff;
+}
+.sozlesmeler-yeni-fatura-not {
+    font-size: 11px;
+    color: #90a4ae;
+}
 .sozlesmeler-tahsilat-wrap {
     margin-top: 16px;
 }
@@ -529,6 +559,20 @@
 }
 .tahsilat-musteri-dropdown div:hover { background: #2d4060; }
 .tahsilat-musteri-secilen { color: #4fc3f7; font-size: 13px; padding: 4px 0; }
+.sirket-unvani-dropdown {
+    position: absolute; left: 0; right: 0; top: 100%; margin-top: 2px;
+    max-height: 220px; overflow-y: auto; z-index: 1000;
+    background: #0f2537; border: 1px solid #3d5070; border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0,0,0,.3);
+}
+.sirket-unvani-dropdown div.sirket-item {
+    padding: 10px 12px; cursor: pointer; border-bottom: 1px solid #2d4060;
+    font-size: 13px; color: #e0f7fa;
+}
+.sirket-unvani-dropdown div.sirket-item:hover { background: #2d4060; }
+.sirket-unvani-dropdown div.sirket-item .sirket-name { font-weight: 600; }
+.sirket-unvani-dropdown div.sirket-item .sirket-vergi { font-size: 11px; color: #90a4ae; margin-top: 2px; }
+.sirket-unvani-dropdown div.sirket-bos { padding: 12px; color: #90a4ae; font-size: 12px; text-align: center; }
 .tahsilat-makbuz-aksiyon {
     display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap;
     padding: 12px 16px; border-top: 1px solid #2d4060;
@@ -635,7 +679,10 @@
                     <h4>Şirket Bilgileri</h4>
                     <div class="form-grid">
                         <label class="required">Şirket Ünvanı</label>
-                        <input type="text" id="name" required onchange="hesaplaYuzde()">
+                        <div class="sirket-unvani-wrap" style="position:relative;">
+                            <input type="text" id="name" required autocomplete="off" onchange="hesaplaYuzde()" oninput="sirketUnvaniAutocomplete()" onfocus="sirketUnvaniAutocomplete()">
+                            <div id="sirket-unvani-dropdown" class="sirket-unvani-dropdown" style="display:none;"></div>
+                        </div>
                         
                         <label class="required">Vergi Numarası</label>
                         <input type="text" id="tax_number" required maxlength="10" inputmode="numeric" oninput="sadeceRakam(this, 10)" onchange="hesaplaYuzde()">
@@ -1189,6 +1236,11 @@
             <h4 class="sozlesmeler-sag-baslik">Aylık Tutarlar</h4>
             <div class="sozlesmeler-aylik-grid" id="sozlesmeler-aylik-grid"></div>
             <div class="sozlesmeler-aylik-bos" id="sozlesmeler-aylik-bos" style="display:none;">Sözleşme başlangıç ve bitiş tarihlerini girin; aylık kira hücreleri burada listelenecek.</div>
+            <div class="sozlesmeler-yeni-fatura-wrap">
+                <h4 class="sozlesmeler-sag-baslik"><i class="fa fa-file-invoice"></i> Yeni Fatura Oluştur</h4>
+                <a href="/faturalar/yeni" id="sozlesme-yeni-fatura-btn" class="btn-yeni-fatura-kisa" target="_blank" onclick="var u='/faturalar/yeni'; if (typeof selectedId !== 'undefined' && selectedId) u += '?musteri_id=' + selectedId; window.open(u,'_blank'); return false;"><i class="fa fa-plus"></i> Fatura Oluştur</a>
+                <span class="sozlesmeler-yeni-fatura-not" id="sozlesme-yeni-fatura-not">Seçili müşteri ile fatura sayfası açılır.</span>
+            </div>
             <div class="sozlesmeler-tahsilat-wrap">
                 <h4 class="sozlesmeler-sag-baslik">Tahsilat Makbuzu</h4>
                 <div class="tahsilat-makbuz-wrap">
@@ -1651,10 +1703,22 @@ function selectMusteri(id) {
             set('mersis', m.mersis_no != null ? m.mersis_no : m.mersis);
             set('nace', m.nace_kodu != null ? m.nace_kodu : m.nace);
             set('yetkili_ad', m.yetkili_kisi != null ? m.yetkili_kisi : m.yetkili_ad);
+            set('yetkili_tc', m.yetkili_tc);
+            set('phone2', m.phone2);
+            set('email_sirket', m.email_sirket);
+            set('ticaret_sicil', m.ticaret_sicil);
+            set('kurulus_tarihi', m.kurulus_tarihi);
+            set('faaliyet', m.faaliyet);
+            set('onceki_adres', m.onceki_adres);
+            if (m.sube_merkez) {
+                var subeEl = document.getElementById('sube_merkez');
+                if (subeEl && (m.sube_merkez === 'Şube' || m.sube_merkez === 'Merkez')) subeEl.value = m.sube_merkez;
+            }
             set('hizmet_turu', m.hizmet_turu);
             if (m.guncel_kira_bedeli != null && m.guncel_kira_bedeli !== '') set('aylik_kira', m.guncel_kira_bedeli);
             else if (m.ilk_kira_bedeli != null && m.ilk_kira_bedeli !== '') set('aylik_kira', m.ilk_kira_bedeli);
             if (m.rent_start_date) set('sozlesme_baslangic', m.rent_start_date);
+            if (m.sozlesme_bitis) set('sozlesme_bitis', m.sozlesme_bitis);
             hesaplaYuzde();
             sozlesmelerAylikGuncelle();
             if (activeTab === 6) fillSozlesmeTahsilatMusteri(id, m);
@@ -1718,6 +1782,53 @@ function telefonInput(input) {
     if (v.length > 10) v = v.slice(0, 10);
     input.value = v;
 }
+
+var sirketUnvaniAutocompleteTimer = null;
+function sirketUnvaniAutocomplete() {
+    var input = document.getElementById('name');
+    var dropdown = document.getElementById('sirket-unvani-dropdown');
+    if (!input || !dropdown) return;
+    var q = (input.value || '').trim();
+    clearTimeout(sirketUnvaniAutocompleteTimer);
+    sirketUnvaniAutocompleteTimer = setTimeout(function() {
+        fetch('/giris/api/musteriler?q=' + encodeURIComponent(q))
+            .then(function(r) { return r.json(); })
+            .then(function(list) {
+                if (!Array.isArray(list)) list = [];
+                if (q.length === 0) list = list.slice(0, 25);
+                dropdown.innerHTML = '';
+                if (list.length === 0) {
+                    dropdown.innerHTML = '<div class="sirket-bos">' + (q.length >= 1 ? 'Bu aramaya uygun şirket yok.' : 'Şirket adı veya vergi no ile arayın.') + '</div>';
+                } else {
+                    list.forEach(function(m) {
+                        var div = document.createElement('div');
+                        div.className = 'sirket-item';
+                        div.setAttribute('data-id', m.id);
+                        div.innerHTML = '<div class="sirket-name">' + (m.name || '').replace(/</g, '&lt;') + '</div><div class="sirket-vergi">Vergi no: ' + (m.tax_number || '—') + '</div>';
+                        div.onclick = function() { sirketUnvaniSec(m.id); };
+                        dropdown.appendChild(div);
+                    });
+                }
+                dropdown.style.display = 'block';
+            })
+            .catch(function() {
+                dropdown.innerHTML = '<div class="sirket-bos">Arama yapılamadı.</div>';
+                dropdown.style.display = 'block';
+            });
+    }, q.length >= 1 ? 200 : 100);
+}
+function sirketUnvaniSec(id) {
+    var dropdown = document.getElementById('sirket-unvani-dropdown');
+    if (dropdown) dropdown.style.display = 'none';
+    selectMusteri(parseInt(id, 10));
+}
+document.addEventListener('click', function(e) {
+    var dropdown = document.getElementById('sirket-unvani-dropdown');
+    var input = document.getElementById('name');
+    if (dropdown && dropdown.style.display === 'block' && input && !dropdown.contains(e.target) && e.target !== input) {
+        dropdown.style.display = 'none';
+    }
+});
 
 // Kaydet
 async function kaydet(event) {

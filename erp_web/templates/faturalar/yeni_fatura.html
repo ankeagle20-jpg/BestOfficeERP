@@ -283,6 +283,7 @@
         const API_FATURA_EKLE = "{{ url_for('faturalar.fatura_ekle') }}";
         const API_TUTAR_YAZI = "{{ url_for('faturalar.tutar_yazi_api') }}";
         const API_FATURA_ONIZLE = "{{ url_for('faturalar.fatura_onizleme') }}";
+        const SECILI_MUSTERI = {{ (secili_musteri | tojson) if secili_musteri else 'null' }};
 
         const musteriAra = document.getElementById('musteri-ara');
         const musteriSonuclar = document.getElementById('musteri-sonuclar');
@@ -565,6 +566,23 @@
         });
 
         document.getElementById('btn-satir-ekle').addEventListener('click', function(){ addRow(); });
+
+        // Giriş sayfasından ?musteri_id= ile açıldıysa seçili firma bilgilerini doldur
+        if (SECILI_MUSTERI) {
+            musteriIdEl.value = SECILI_MUSTERI.id;
+            musteriAra.value = SECILI_MUSTERI.name || '';
+            const adrEl = document.getElementById('musteri-adres');
+            const vdEl = document.getElementById('musteri-vergi-dairesi');
+            const vnEl = document.getElementById('musteri-vergi-no');
+            if (adrEl) adrEl.value = SECILI_MUSTERI.address || '';
+            if (vdEl) vdEl.value = SECILI_MUSTERI.vergi_dairesi || '';
+            if (vnEl) vnEl.value = SECILI_MUSTERI.vergi_no || '';
+            musteriOzet.textContent = 'Müşteri: ' + (SECILI_MUSTERI.name || '');
+            if (SECILI_MUSTERI.vergi_no || SECILI_MUSTERI.vergi_dairesi) {
+                musteriOzet.textContent += ' • VKN/TCKN: ' + (SECILI_MUSTERI.vergi_no || '—') + ' • Vergi Dairesi: ' + (SECILI_MUSTERI.vergi_dairesi || '—');
+            }
+            musteriOzet.style.display = 'inline-block';
+        }
 
         function validateForm() {
             let ok = true;

@@ -89,6 +89,12 @@ def _wifi_izinli_mi():
     Giriş/çıkış işlemlerini sadece yerel ağdan (ofis WiFi / LAN) yapılabilir hale getir.
     Öntanımlı olarak private IP aralıklarını kabul eder.
     """
+    # Eğer istek Render / bulut ortamından geliyorsa (örn. *.onrender.com),
+    # ofis WiFi kısıtlamasını uygulamayalım; bulut barkodlarının amacı dışarıdan da çalışması.
+    host = (request.host or "").lower()
+    public_url = (os.getenv("PUBLIC_APP_URL") or "").lower()
+    if "onrender.com" in host or "onrender.com" in public_url:
+        return True
     ip = _get_client_ip()
     if not ip:
         return False
@@ -223,6 +229,28 @@ def pdovam_anasayfa():
         bugun = f"{bas_tarih.strftime('%d.%m.%Y')} - {bit_tarih.strftime('%d.%m.%Y')}"
         gun_adi = "Tarih aralığı"
     is_admin = current_user.is_authenticated and getattr(current_user, "role", None) == "admin"
+    bulut_base = (os.getenv("PUBLIC_APP_URL") or "https://bestofficeerp.onrender.com").strip().rstrip("/")
+    # Görselleri her zaman mevcut sunucudan yükle (yerelde hızlı, Render'da aynı origin)
+    qr_img_base = request.url_root.rstrip("/") or _server_base_url().rstrip("/")
+
+    # Supabase devam logları (bulut raporu)
+    devam_kayitlari = []
+    client = _supabase_client()
+    if client:
+        try:
+            query = client.table("personel_devam").select("*")
+            query = query.gte("tarih", bas_tarih.isoformat()).lte("tarih", bit_tarih.isoformat())
+            if secili_pid:
+                query = query.eq("personel_id", secili_pid)
+            result = query.order("tarih", desc=False).order("saat", desc=False).execute()
+            data = getattr(result, "data", None) or getattr(result, "model", None) or []
+            ad_map = {p["id"]: p["ad_soyad"] for p in tum_personeller}
+            for row in data:
+                r = dict(row)
+                r["personel_adi"] = ad_map.get(r.get("personel_id")) or ""
+                devam_kayitlari.append(r)
+        except Exception:
+            devam_kayitlari = []
     return render_template("pdovam/giris.html",
                            personeller=personeller_list,
                            personeller_json=personeller_json,
@@ -232,7 +260,10 @@ def pdovam_anasayfa():
                            bas_iso=bas_tarih.isoformat(),
                            bit_iso=bit_tarih.isoformat(),
                            secili_personel_id=secili_pid,
-                           is_admin=is_admin)
+                           is_admin=is_admin,
+                           bulut_base=bulut_base,
+                           qr_img_base=qr_img_base,
+                           devam_kayitlari=devam_kayitlari)
 
 
 @bp.route("/isle/<int:personel_id>", methods=["GET", "POST"])
@@ -393,6 +424,61 @@ def api_sil():
     return jsonify({"ok": True})
 
 
+@bp.route("/api/supabase-senkron")
+@login_required
+def api_supabase_senkron():
+    """Yerel devam_kayitlari tablosundaki geçmiş hareketleri Supabase personel_devam tablosuna bas."""
+    if getattr(current_user, "role", None) != "admin":
+        return jsonify({"ok": False, "mesaj": "Yetkisiz"}), 403
+    client = _supabase_client()
+    if not client:
+        return jsonify({"ok": False, "mesaj": "Supabase yapılandırılmamış (SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY)."}), 500
+
+    bas_str = request.args.get("bas")
+    bit_str = request.args.get("bit") or bas_str
+    if not bas_str:
+        return jsonify({"ok": False, "mesaj": "bas parametresi (YYYY-MM-DD) gerekli"}), 400
+    try:
+        bas_tarih = datetime.strptime(bas_str[:10], "%Y-%m-%d").date()
+        if bit_str:
+            bit_tarih = datetime.strptime(bit_str[:10], "%Y-%m-%d").date()
+        else:
+            bit_tarih = bas_tarih
+    except ValueError:
+        return jsonify({"ok": False, "mesaj": "Tarih formatı hatalı (YYYY-MM-DD)"}), 400
+    if bit_tarih < bas_tarih:
+        bas_tarih, bit_tarih = bit_tarih, bas_tarih
+
+    rows = fetch_all(
+        """
+        SELECT personel_id, tarih, giris_saati, cikis_saati, durum
+        FROM devam_kayitlari
+        WHERE tarih BETWEEN %s AND %s
+        ORDER BY tarih, personel_id
+        """,
+        (bas_tarih, bit_tarih),
+    ) or []
+
+    adet = 0
+    for r in rows:
+        t = r.get("tarih")
+        if not isinstance(t, date):
+            try:
+                t = datetime.strptime(str(t)[:10], "%Y-%m-%d").date()
+            except Exception:
+                continue
+        giris = r.get("giris_saati")
+        cikis = r.get("cikis_saati")
+        if giris:
+            _supabase_log_devam(r["personel_id"], t, str(giris), "giris")
+            adet += 1
+        if cikis:
+            _supabase_log_devam(r["personel_id"], t, str(cikis), "cikis")
+            adet += 1
+
+    return jsonify({"ok": True, "mesaj": "Senkron tamamlandı.", "tarih_araligi": [bas_tarih.isoformat(), bit_tarih.isoformat()], "toplam_hareket": adet, "satir_sayisi": len(rows)})
+
+
 @bp.route("/api/schema-kur")
 @login_required
 def api_schema_kur():
@@ -451,7 +537,6 @@ def qr_tek():
 
 
 @bp.route("/qr/<int:personel_id>")
-@login_required
 def qr_uret(personel_id):
     """Personele özel QR kod PNG döndürür."""
     host = _server_base_url().rstrip("/")
@@ -468,6 +553,43 @@ def qr_uret(personel_id):
     buf.seek(0)
     return send_file(buf, mimetype="image/png",
                      download_name=f"qr_personel_{personel_id}.png")
+
+
+def _bulut_base():
+    """Bulut (Render) adresi — QR içeriği bu adrese gider."""
+    return (os.getenv("PUBLIC_APP_URL") or "https://bestofficeerp.onrender.com").strip().rstrip("/")
+
+
+@bp.route("/qr/bulut/tek")
+def qr_bulut_tek():
+    """Bulut sekmesi: Tek QR görseli — içerik Render adresine gider, görsel mevcut sunucudan hızlı yüklenir."""
+    host = _bulut_base()
+    url = f"{host}/pdovam/?ortak=1"
+    qr = qrcode.QRCode(version=2, box_size=10, border=4,
+                       error_correction=qrcode.constants.ERROR_CORRECT_H)
+    qr.add_data(url)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="#0d1f30", back_color="white")
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    return send_file(buf, mimetype="image/png", download_name="pdovam_bulut_tek_qr.png")
+
+
+@bp.route("/qr/bulut/<int:personel_id>")
+def qr_bulut_personel(personel_id):
+    """Bulut sekmesi: Kişiye özel QR görseli — içerik Render adresine gider."""
+    host = _bulut_base()
+    url = f"{host}/pdovam/isle/{personel_id}"
+    qr = qrcode.QRCode(version=2, box_size=10, border=4,
+                       error_correction=qrcode.constants.ERROR_CORRECT_H)
+    qr.add_data(url)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="#0d1f30", back_color="white")
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    return send_file(buf, mimetype="image/png", download_name=f"qr_bulut_{personel_id}.png")
 
 
 @bp.route("/qr-yazdir")

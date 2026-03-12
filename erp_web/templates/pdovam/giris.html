@@ -20,31 +20,43 @@ body{margin:0;}
 .pdovam-btn-duzenle{background:#00bcd4;color:#fff;}
 .pdovam-btn-kaydet{background:#2e7d32;color:#fff;}
 .pdovam-btn-sil{background:#c62828;color:#fff;}
+.pdovam-goruntule-btn{transition:transform .12s ease, opacity .12s ease;}
+.pdovam-goruntule-btn.pdovam-btn-pressed{transform:scale(0.96);opacity:0.9;}
+#pdovam-mesaj{min-height:44px;padding:10px 14px;border-radius:8px;margin-bottom:10px;font-weight:600;font-size:14px;transition:background .2s, color .2s;}
+#pdovam-mesaj.pdovam-mesaj-bos{display:none;}
+#pdovam-mesaj.pdovam-mesaj-ok{background:#1b5e20;color:#a5d6a7;border:1px solid #2e7d32;}
+#pdovam-mesaj.pdovam-mesaj-hata{background:#b71c1c;color:#ffcdd2;border:1px solid #c62828;}
+.pdovam-toast{position:fixed;top:0;left:0;right:0;z-index:99999;padding:14px 16px;font-size:15px;font-weight:700;text-align:center;box-shadow:0 4px 12px rgba(0,0,0,.4);animation:pdovam-toast-in .25s ease;}
+.pdovam-toast-ok{background:#2e7d32;color:#fff;}
+.pdovam-toast-hata{background:#c62828;color:#fff;}
+@keyframes pdovam-toast-in{from{opacity:0;transform:translateY(-20px);}to{opacity:1;transform:translateY(0);}}
+/* Tam sayfa loader */
+.pdovam-fullscreen-loader{position:fixed;inset:0;background:rgba(1,8,20,.96);z-index:99990;display:none;align-items:center;justify-content:center;flex-direction:column;text-align:center;}
+.pdovam-loader-spinner{width:46px;height:46px;border-radius:50%;border:4px solid rgba(79,195,247,.25);border-top-color:#4fc3f7;animation:pdovam-spin 1s linear infinite;margin-bottom:14px;}
+.pdovam-loader-title{font-size:15px;font-weight:600;color:#e0f7fa;margin-bottom:4px;}
+.pdovam-loader-text{font-size:12px;color:#90a4ae;margin-bottom:10px;max-width:260px;}
+.pdovam-loader-btn{margin-top:4px;padding:6px 14px;font-size:12px;border-radius:16px;border:none;background:#00bcd4;color:#000;font-weight:600;cursor:pointer;display:none;}
+@keyframes pdovam-spin{to{transform:rotate(360deg);}}
 </style>
+<div id="pdovam-toast" class="pdovam-toast" style="display:none;"></div>
+<div id="pdovam-loader" class="pdovam-fullscreen-loader">
+  <div class="pdovam-loader-spinner"></div>
+  <div class="pdovam-loader-title">Sunucu hazırlanıyor, lütfen bekleyin…</div>
+  <div id="pdovam-loader-text" class="pdovam-loader-text">İşleminiz kaydediliyor. Bu ekran Render ücretsiz planda ilk açılışta biraz sürebilir.</div>
+  <button id="pdovam-loader-retry" type="button" class="pdovam-loader-btn">Tekrar dene</button>
+</div>
 <div style="max-width:960px;margin:0 auto;padding:10px 0 40px 0;">
   <div style="margin-bottom:8px;color:#b0bec5;font-size:14px;display:flex;justify-content:space-between;align-items:center;gap:8px;">
     <div>
       <strong>{{ bugun }}</strong> · {{ gun_adi }}
     </div>
-    <form method="get" style="display:flex;align-items:center;gap:6px;font-size:12px;">
-      <label for="pdovam-bas" style="color:#b0bec5;">Tarih:</label>
-      <input type="date" id="pdovam-bas" name="bas" value="{{ bas_iso }}" style="background:#102133;border:1px solid #243447;color:#e0f7fa;padding:4px 8px;border-radius:4px;font-size:12px;">
-      <span style="color:#b0bec5;">–</span>
-      <input type="date" id="pdovam-bit" name="bit" value="{{ bit_iso }}" style="background:#102133;border:1px solid #243447;color:#e0f7fa;padding:4px 8px;border-radius:4px;font-size:12px;">
-      <label for="pdovam-personel" style="color:#b0bec5;margin-left:8px;">Personel:</label>
-      <select id="pdovam-personel" name="personel_id" style="background:#102133;border:1px solid #243447;color:#e0f7fa;padding:4px 8px;border-radius:4px;font-size:12px;min-width:140px;">
-        <option value="">Tümü</option>
-        {% for p in tum_personeller %}
-        <option value="{{ p.id }}" {% if secili_personel_id == p.id %}selected{% endif %}>{{ p.ad_soyad }}</option>
-        {% endfor %}
-      </select>
-      <button type="submit" style="background:#00bcd4;border:none;color:#fff;padding:4px 10px;border-radius:4px;font-size:12px;cursor:pointer;">Göster</button>
-    </form>
   </div>
 
   <div class="pdovam-tabs">
     <a href="#" id="pdovam-tab-giris" class="pdovam-tab active">Giriş / Çıkış</a>
     <a href="#" id="pdovam-tab-barkod" class="pdovam-tab">Barkodlar</a>
+    <a href="#" id="pdovam-tab-bulut" class="pdovam-tab">Bulut</a>
+    <a href="#" id="pdovam-tab-rapor" class="pdovam-tab">Raporlar</a>
   </div>
 
   <!-- TAB 1: Giriş / Çıkış -->
@@ -63,6 +75,7 @@ body{margin:0;}
         <div style="font-size:14px;color:#e0f7fa;margin-bottom:6px;">İsminize dokunun — bu cihaz sadece sizin kaydınızı kullanacak.</div>
         <div style="font-size:12px;color:#90a4ae;">İlk dokunuş giriş, ikinci dokunuş çıkış. Cihazınız bir kez sizinle eşlenir.</div>
       </div>
+      <div id="pdovam-mesaj" class="pdovam-mesaj-bos" style="margin-bottom:10px;"></div>
 
       <table style="width:100%;border-collapse:collapse;font-size:13px;">
         <thead>
@@ -117,7 +130,6 @@ body{margin:0;}
       </table>
     </div>
 
-    <div id="pdovam-mesaj" style="margin-top:12px;font-size:13px;color:#e0f7fa;"></div>
     <div style="margin-top:8px;font-size:11px;color:#90a4ae;">Bu işlem sadece ofis WiFi / yerel ağından yapılabilir.</div>
   </div>
 
@@ -160,6 +172,103 @@ body{margin:0;}
       </div>
     </div>
   </div>
+
+  <!-- TAB 3: Bulut — PC kapalıyken de çalışan barkodlar (Render URL) -->
+  <div id="pdovam-pane-bulut" class="pdovam-pane-hidden">
+    <div style="background:#0d2d1b;border:1px solid #1b5e3c;border-radius:12px;padding:14px 18px;margin-bottom:14px;">
+      <p style="margin:0 0 12px 0;font-size:12px;color:#81c784;">Bu barkodlar bulut adresine ({{ bulut_base }}) gider. PC kapalıyken de okutulabilir.</p>
+    </div>
+    <div style="background:#102133;border:1px solid #243447;border-radius:12px;padding:16px 18px;margin-bottom:14px;">
+      <h3 style="margin:0 0 8px 0;font-size:15px;color:#4fc3f7;">Tek Barkod (Liste) — Bulut</h3>
+      <p style="margin:0 0 8px 0;font-size:12px;color:#90a4ae;">
+        Ofis girişine asmak için tek barkod. Personeller okutup listeden kendi isimlerini seçerek giriş/çıkış yapar.
+      </p>
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:16px;">
+        <img src="{{ qr_img_base }}/pdovam/qr/bulut/tek" alt="Tek QR (Bulut)" style="width:150px;height:150px;border-radius:8px;background:#fff;padding:4px;">
+        <div style="font-size:11px;color:#78909c;max-width:260px;">
+          Yazdırmak isterseniz görseli sağ tıklayıp kaydedebilir veya
+          <a href="{{ qr_img_base }}/pdovam/qr/bulut/tek" target="_blank" style="color:#4fc3f7;text-decoration:underline;">yeni sekmede açıp</a> yazdırabilirsiniz.
+        </div>
+      </div>
+    </div>
+    <div style="background:#102133;border:1px solid #243447;border-radius:12px;padding:16px 18px;">
+      <h3 style="margin:0 0 8px 0;font-size:15px;color:#4fc3f7;">Kişiye Özel Barkodlar — Bulut</h3>
+      <p style="margin:0 0 10px 0;font-size:12px;color:#90a4ae;">
+        Her personel için ayrı barkod. Sabah okutunca giriş, akşam okutunca çıkış kaydı oluşur.
+      </p>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px;">
+        {% for p in tum_personeller %}
+        <div style="background:#0f2537;border-radius:10px;padding:10px 10px 12px 10px;text-align:center;">
+          <div style="font-size:11px;color:#90a4ae;margin-bottom:4px;">BestOffice ERP</div>
+          <img src="{{ qr_img_base }}/pdovam/qr/bulut/{{ p.id }}" alt="QR — {{ p.ad_soyad }}" style="width:120px;height:120px;background:#fff;border-radius:6px;padding:3px;">
+          <div style="font-size:13px;font-weight:600;color:#e0f7fa;margin-top:6px;">{{ p.ad_soyad }}</div>
+        </div>
+        {% else %}
+        <div style="font-size:12px;color:#78909c;">Aktif personel bulunamadı.</div>
+        {% endfor %}
+      </div>
+      <div style="margin-top:10px;font-size:11px;color:#78909c;">
+        Bu barkodlar <strong>{{ bulut_base }}</strong> adresine gider; yerel PC kapalı olsa bile çalışır.
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 4: Raporlar — Supabase devam logları -->
+  <div id="pdovam-pane-rapor" class="pdovam-pane-hidden">
+    <div style="background:#102133;border:1px solid #243447;border-radius:12px;padding:14px 18px;margin-bottom:12px;display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:10px;">
+      <div style="min-width:0;flex:1 1 220px;">
+        <h3 style="margin:0 0 6px 0;font-size:15px;color:#4fc3f7;">Giriş / Çıkış Raporu (Bulut)</h3>
+        <p style="margin:0;font-size:12px;color:#90a4ae;">
+          Supabase üzerinde tutulan barkod giriş/çıkış logları. Aşağıdaki tarih ve personel filtresi ile süzebilirsiniz.
+        </p>
+      </div>
+      <form method="get" style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:11px;">
+        <input type="hidden" name="tab" value="rapor">
+        <label for="pdovam-bas" style="color:#b0bec5;">Tarih:</label>
+        <input type="date" id="pdovam-bas" name="bas" value="{{ bas_iso }}" style="background:#0b1826;border:1px solid #243447;color:#e0f7fa;padding:3px 7px;border-radius:4px;font-size:11px;">
+        <span style="color:#b0bec5;">–</span>
+        <input type="date" id="pdovam-bit" name="bit" value="{{ bit_iso }}" style="background:#0b1826;border:1px solid #243447;color:#e0f7fa;padding:3px 7px;border-radius:4px;font-size:11px;">
+        <label for="pdovam-personel" style="color:#b0bec5;margin-left:4px;">Personel:</label>
+        <select id="pdovam-personel" name="personel_id" style="background:#0b1826;border:1px solid #243447;color:#e0f7fa;padding:3px 7px;border-radius:4px;font-size:11px;min-width:140px;">
+          <option value="">Tümü</option>
+          {% for p in tum_personeller %}
+          <option value="{{ p.id }}" {% if secili_personel_id == p.id %}selected{% endif %}>{{ p.ad_soyad }}</option>
+          {% endfor %}
+        </select>
+        <button type="submit" style="background:#00bcd4;border:none;color:#000;padding:4px 10px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;">Göster</button>
+      </form>
+    </div>
+    <div style="background:#102133;border:1px solid #243447;border-radius:12px;padding:12px 16px;">
+      <table style="width:100%;border-collapse:collapse;font-size:12px;">
+        <thead>
+          <tr style="background:#0f2537;color:#4fc3f7;">
+            <th style="padding:6px 8px;text-align:left;">Tarih</th>
+            <th style="padding:6px 8px;text-align:left;">Saat</th>
+            <th style="padding:6px 8px;text-align:left;">Personel</th>
+            <th style="padding:6px 8px;text-align:left;">İşlem</th>
+            <th style="padding:6px 8px;text-align:left;">Okutan</th>
+            <th style="padding:6px 8px;text-align:left;">Onaylayan</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in devam_kayitlari %}
+          <tr style="border-bottom:1px solid #243447;">
+            <td style="padding:6px 8px;color:#e0f7fa;">{{ r.tarih_tr or r.tarih }}</td>
+            <td style="padding:6px 8px;color:#e0f7fa;">{{ r.saat }}</td>
+            <td style="padding:6px 8px;color:#e0f7fa;">{{ r.personel_adi or r.personel_id }}</td>
+            <td style="padding:6px 8px;color:#e0f7fa;">{{ r.islem }}</td>
+            <td style="padding:6px 8px;color:#90a4ae;">{{ r.okutan_ad or r.okutan or r.okutan_id or '--' }}</td>
+            <td style="padding:6px 8px;color:#90a4ae;">{{ r.onaylayan_ad or r.onaylayan or r.onaylayan_id or '--' }}</td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="6" style="padding:10px 8px;text-align:center;color:#78909c;">Seçilen aralık için Supabase logu bulunamadı.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -185,8 +294,12 @@ body{margin:0;}
 
   var tabGiris = document.getElementById('pdovam-tab-giris');
   var tabBarkod = document.getElementById('pdovam-tab-barkod');
+  var tabBulut = document.getElementById('pdovam-tab-bulut');
+  var tabRapor = document.getElementById('pdovam-tab-rapor');
   var paneGiris = document.getElementById('pdovam-pane-giris');
   var paneBarkod = document.getElementById('pdovam-pane-barkod');
+  var paneBulut = document.getElementById('pdovam-pane-bulut');
+  var paneRapor = document.getElementById('pdovam-pane-rapor');
 
   var listEl = document.getElementById('pdovam-liste');
   var tekEl = document.getElementById('pdovam-tek-kisi');
@@ -194,6 +307,10 @@ body{margin:0;}
   var tekBtn = document.getElementById('pdovam-tek-btn');
   var mesajEl = document.getElementById('pdovam-mesaj');
   var baskaLink = document.getElementById('pdovam-baska-kisi');
+  var loaderEl = document.getElementById('pdovam-loader');
+  var loaderTextEl = document.getElementById('pdovam-loader-text');
+  var loaderRetryBtn = document.getElementById('pdovam-loader-retry');
+  var loaderTimer = null;
 
   function getStoredId() {
     var id = localStorage.getItem(STORAGE_KEY);
@@ -212,17 +329,35 @@ body{margin:0;}
 
   function switchTab(which) {
     if (!paneGiris || !paneBarkod) return;
+    paneGiris.classList.add('pdovam-pane-hidden');
+    paneBarkod.classList.add('pdovam-pane-hidden');
+    if (paneBulut) paneBulut.classList.add('pdovam-pane-hidden');
+    if (paneRapor) paneRapor.classList.add('pdovam-pane-hidden');
+    if (tabGiris) tabGiris.classList.remove('active');
+    if (tabBarkod) tabBarkod.classList.remove('active');
+    if (tabBulut) tabBulut.classList.remove('active');
+    if (tabRapor) tabRapor.classList.remove('active');
     if (which === 'barkod') {
-      paneGiris.classList.add('pdovam-pane-hidden');
       paneBarkod.classList.remove('pdovam-pane-hidden');
-      if (tabGiris) tabGiris.classList.remove('active');
       if (tabBarkod) tabBarkod.classList.add('active');
+    } else if (which === 'bulut' && paneBulut) {
+      paneBulut.classList.remove('pdovam-pane-hidden');
+      if (tabBulut) tabBulut.classList.add('active');
+    } else if (which === 'rapor' && paneRapor) {
+      paneRapor.classList.remove('pdovam-pane-hidden');
+      if (tabRapor) tabRapor.classList.add('active');
     } else {
       paneGiris.classList.remove('pdovam-pane-hidden');
-      paneBarkod.classList.add('pdovam-pane-hidden');
       if (tabGiris) tabGiris.classList.add('active');
-      if (tabBarkod) tabBarkod.classList.remove('active');
     }
+  }
+
+  // Sayfa ilk açıldığında URL'deki ?tab= parametresine göre başlangıç sekmesini belirle
+  var initialTab = params.get('tab');
+  if (initialTab === 'barkod' || initialTab === 'bulut' || initialTab === 'rapor') {
+    switchTab(initialTab);
+  } else {
+    switchTab('giris');
   }
 
   function timeDiffHours(girisStr, cikisStr) {
@@ -307,40 +442,132 @@ body{margin:0;}
     }
   }
 
+  var COOLDOWN_MS = 60 * 1000;
+  function getCooldownKey(pid) { return 'pdovam_cool_' + pid; }
+  function isInCooldown(pid) {
+    var t = localStorage.getItem(getCooldownKey(pid));
+    return t && (Date.now() - parseInt(t, 10)) < COOLDOWN_MS;
+  }
+  function setCooldown(pid) { localStorage.setItem(getCooldownKey(pid), String(Date.now())); }
+
+  var toastEl = document.getElementById('pdovam-toast');
+  var toastTimer = null;
+  function gosterMesaj(text, basarili) {
+    if (mesajEl) {
+      mesajEl.textContent = text || '';
+      mesajEl.classList.remove('pdovam-mesaj-bos', 'pdovam-mesaj-ok', 'pdovam-mesaj-hata');
+      if (!text) {
+        mesajEl.classList.add('pdovam-mesaj-bos');
+      } else {
+        mesajEl.classList.add(basarili ? 'pdovam-mesaj-ok' : 'pdovam-mesaj-hata');
+        mesajEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }
+    if (toastEl && text) {
+      toastEl.textContent = text;
+      toastEl.className = 'pdovam-toast ' + (basarili ? 'pdovam-toast-ok' : 'pdovam-toast-hata');
+      toastEl.style.display = 'block';
+      if (toastTimer) clearTimeout(toastTimer);
+      toastTimer = setTimeout(function(){
+        toastEl.style.display = 'none';
+        toastTimer = null;
+      }, 4000);
+    }
+  }
+
+  function showGlobalLoader(msg) {
+    if (!loaderEl) return;
+    loaderEl.style.display = 'flex';
+    if (loaderTextEl) loaderTextEl.textContent = msg || 'İşleminiz kaydediliyor. Bu ekran Render ücretsiz planda ilk açılışta biraz sürebilir.';
+    if (loaderRetryBtn) loaderRetryBtn.style.display = 'none';
+    if (loaderTimer) clearTimeout(loaderTimer);
+    loaderTimer = setTimeout(function(){
+      if (!loaderEl) return;
+      if (loaderTextEl) loaderTextEl.textContent = 'Sunucudan yanıt bekleniyor. Ücretsiz planda ilk açılış biraz uzun sürebilir.';
+      if (loaderRetryBtn) loaderRetryBtn.style.display = 'inline-block';
+    }, 10000);
+  }
+
+  function hideGlobalLoader() {
+    if (!loaderEl) return;
+    loaderEl.style.display = 'none';
+    if (loaderTimer) {
+      clearTimeout(loaderTimer);
+      loaderTimer = null;
+    }
+  }
+
   function postIsle(id, onSuccess) {
+    showGlobalLoader('Sunucuya bağlanılıyor, lütfen bekleyin…');
     fetch('/pdovam/isle/' + id, { method: 'POST' })
-      .then(function(r){ return r.json(); })
+      .then(function(r){ return r.json().catch(function(){ return { ok: false }; }); })
       .then(function(d){
-        if (mesajEl) mesajEl.textContent = d.mesaj || '';
+        hideGlobalLoader();
+        if (!d) d = { ok: false };
+        if (d.ok) {
+          setCooldown(id);
+          if (d.islem === 'giris') gosterMesaj('Giriş kaydınız başarıyla gerçekleşmiştir.', true);
+          else if (d.islem === 'cikis' || d.islem === 'zaten_cikis') gosterMesaj('Çıkış kaydınız başarıyla gerçekleşmiştir.', true);
+          else gosterMesaj(d.mesaj || 'İşlem kaydedildi.', true);
+        } else {
+          gosterMesaj(d.mesaj || 'Giriş kaydınızda hata oluştu.', false);
+        }
         if (d.ok && onSuccess) onSuccess(d);
         if (d.ok && d.islem) {
           var p = findPersonel(id);
           if (p) {
             if (d.islem === 'giris') { p.durum = 'giris'; p.giris_saati = d.saat; }
-            else if (d.islem === 'cikis') { p.durum = 'cikis'; p.cikis_saati = d.saat; }
+            else if (d.islem === 'cikis' || d.islem === 'zaten_cikis') { p.durum = 'cikis'; p.cikis_saati = d.saat; }
           }
         }
       })
       .catch(function(){
-        if (mesajEl) mesajEl.textContent = 'Sunucuya ulaşılamadı.';
+        hideGlobalLoader();
+        gosterMesaj('Giriş kaydınızda hata oluştu.', false);
       });
+  }
+
+  function handleGirisCikisTik(id, tr, ad, onSuccess) {
+    if (isInCooldown(id)) {
+      gosterMesaj('Bu işlem zaten kaydedildi. Kısa süre sonra tekrar deneyebilirsiniz.', false);
+      return;
+    }
+    postIsle(id, function(d) {
+      if (!d || !d.ok) return;
+      setStored(id, ad);
+      guncelleSatir(tr, d);
+      var p = findPersonel(id);
+      if (p && d.islem) { p.durum = d.islem; if (d.islem === 'giris') p.giris_saati = d.saat; else if (d.islem === 'cikis' || d.islem === 'zaten_cikis') p.cikis_saati = d.saat; }
+      if (onSuccess) onSuccess(d);
+      showSingleView();
+    });
   }
 
   // Liste satırına tıklanınca: işlem yap, cihazı bu kişiye bağla, tek kişi görünümüne geç
   document.querySelectorAll('.pdovam-row').forEach(function(tr){
-    tr.addEventListener('click', function(){
+    tr.addEventListener('click', function(e){
+      if (e.target && e.target.classList && e.target.classList.contains('pdovam-goruntule-btn')) return;
       var id = this.getAttribute('data-id');
       var ad = this.getAttribute('data-ad') || '';
       if (!id) return;
       id = parseInt(id, 10);
-      postIsle(id, function(d) {
-        setStored(id, ad);
-        guncelleSatir(tr, d);
-        var p = findPersonel(id);
-        if (p && d.islem) { p.durum = d.islem; if (d.islem === 'giris') p.giris_saati = d.saat; else if (d.islem === 'cikis') p.cikis_saati = d.saat; }
-        showSingleView();
-      });
+      handleGirisCikisTik(id, tr, ad, function(){});
     });
+
+    var goruntuleBtn = tr.querySelector('.pdovam-goruntule-btn');
+    if (goruntuleBtn) {
+      goruntuleBtn.addEventListener('click', function(e){
+        e.preventDefault();
+        e.stopPropagation();
+        var id = parseInt(tr.getAttribute('data-id'), 10);
+        var ad = tr.getAttribute('data-ad') || '';
+        if (!id) return;
+        this.classList.add('pdovam-btn-pressed');
+        var btn = this;
+        setTimeout(function(){ btn.classList.remove('pdovam-btn-pressed'); }, 300);
+        handleGirisCikisTik(id, tr, ad, function(){});
+      });
+    }
 
     // Admin için satır içi düzenleme / silme
     if (IS_ADMIN) {
@@ -477,6 +704,24 @@ body{margin:0;}
     tabBarkod.addEventListener('click', function(e){
       e.preventDefault();
       switchTab('barkod');
+    });
+  }
+  if (tabBulut) {
+    tabBulut.addEventListener('click', function(e){
+      e.preventDefault();
+      switchTab('bulut');
+    });
+  }
+  if (tabRapor) {
+    tabRapor.addEventListener('click', function(e){
+      e.preventDefault();
+      switchTab('rapor');
+    });
+  }
+
+  if (loaderRetryBtn) {
+    loaderRetryBtn.addEventListener('click', function(){
+      window.location.reload();
     });
   }
 })();

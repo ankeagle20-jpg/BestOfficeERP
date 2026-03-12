@@ -7,7 +7,7 @@ services:
     plan: free
     rootDir: erp_web
     # Selenium/ChromeDriver build'de timeout yapıyor; Render için hafif liste kullan
-buildCommand: pip install -r requirements-render.txt
+    buildCommand: pip install -r requirements-render.txt
     startCommand: gunicorn -w 2 -b 0.0.0.0:$PORT --timeout 120 app:app
     envVars:
       - key: SECRET_KEY
