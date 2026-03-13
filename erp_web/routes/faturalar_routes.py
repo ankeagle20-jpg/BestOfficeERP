@@ -673,16 +673,25 @@ def yeni_fatura():
     """Yeni fatura oluşturma ekranı. ?musteri_id= ile gelirse seçili müşteri bilgileri forma doldurulur."""
     now = datetime.now()
     secili_musteri = None
+    default_hizmet_urun = ""
+    default_birim_fiyat = 0
     musteri_id = request.args.get('musteri_id', type=int)
     if musteri_id:
-        cust = fetch_one("SELECT id, name, address, tax_number FROM customers WHERE id = %s", (musteri_id,))
+        cust = fetch_one(
+            "SELECT id, name, address, tax_number FROM customers WHERE id = %s",
+            (musteri_id,),
+        )
         if cust:
             kyc = fetch_one(
-                "SELECT yeni_adres, vergi_dairesi, vergi_no FROM musteri_kyc WHERE musteri_id = %s ORDER BY id DESC LIMIT 1",
+                "SELECT yeni_adres, vergi_dairesi, vergi_no, hizmet_turu, aylik_kira FROM musteri_kyc WHERE musteri_id = %s ORDER BY id DESC LIMIT 1",
                 (musteri_id,),
             )
             address = (kyc and (kyc.get("yeni_adres") or kyc.get("address"))) or cust.get("address") or ""
             vergi_dairesi = (kyc and kyc.get("vergi_dairesi")) or ""
+            if not vergi_dairesi:
+                cust_vd = fetch_one("SELECT vergi_dairesi FROM customers WHERE id = %s", (musteri_id,))
+                if cust_vd and cust_vd.get("vergi_dairesi"):
+                    vergi_dairesi = (cust_vd.get("vergi_dairesi") or "").strip()
             vergi_no = (kyc and kyc.get("vergi_no")) or cust.get("tax_number") or ""
             if isinstance(vergi_no, float):
                 vergi_no = str(int(vergi_no)) if vergi_no == int(vergi_no) else str(vergi_no)
@@ -693,10 +702,18 @@ def yeni_fatura():
                 "vergi_dairesi": vergi_dairesi,
                 "vergi_no": str(vergi_no) if vergi_no else "",
             }
+            if kyc:
+                default_hizmet_urun = (kyc.get("hizmet_turu") or "Sanal Ofis").strip() or "Sanal Ofis"
+                try:
+                    default_birim_fiyat = float(kyc.get("aylik_kira") or 0)
+                except (TypeError, ValueError):
+                    default_birim_fiyat = 0
     return render_template('faturalar/yeni_fatura.html',
                            bugun=now.strftime("%Y-%m-%d"),
                            saat=now.strftime("%H:%M"),
-                           secili_musteri=secili_musteri)
+                           secili_musteri=secili_musteri,
+                           default_hizmet_urun=default_hizmet_urun,
+                           default_birim_fiyat=default_birim_fiyat)
 
 
 @bp.route('/faturalar')
@@ -998,7 +1015,7 @@ def tahsilat_ekle():
             INSERT INTO tahsilatlar (
                 musteri_id, customer_id, fatura_id, tutar, odeme_turu,
                 tahsilat_tarihi, aciklama, makbuz_no, cek_detay, havale_banka
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id, fatura_id, makbuz_no, tutar, odeme_turu, tahsilat_tarihi, aciklama, created_at, cek_detay, havale_banka
         """, (
             musteri_id,
