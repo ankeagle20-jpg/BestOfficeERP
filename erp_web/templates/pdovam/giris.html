@@ -86,6 +86,7 @@ body{margin:0;}
             <th style="padding:8px 10px;text-align:left;">Giriş</th>
             <th style="padding:8px 10px;text-align:left;">Çıkış</th>
             <th style="padding:8px 10px;text-align:left;">Mesai Saat</th>
+            <th style="padding:8px 10px;text-align:left;">İzin</th>
             <th style="padding:8px 10px;text-align:left;">Mola</th>
             <th style="padding:8px 10px;text-align:left;">Durum</th>
             {% if is_admin %}
@@ -113,6 +114,7 @@ body{margin:0;}
                 --
               {% endif %}
             </td>
+            <td style="padding:8px 10px;color:#e0f7fa;">{{ p.gun_izin_str or '--' }}</td>
             <td style="padding:8px 10px;color:#e0f7fa;">1.50</td>
             <td data-col="durum" style="padding:8px 10px;color:#e0f7fa;">{{ p.durum or "--" }}</td>
             {% if is_admin %}
@@ -222,7 +224,7 @@ body{margin:0;}
           Supabase üzerinde tutulan barkod giriş/çıkış logları. Aşağıdaki tarih ve personel filtresi ile süzebilirsiniz.
         </p>
       </div>
-      <form method="get" style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:11px;">
+      <form method="get" style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:11px;justify-content:flex-end;flex:0 1 auto;">
         <input type="hidden" name="tab" value="rapor">
         <label for="pdovam-bas" style="color:#b0bec5;">Tarih:</label>
         <input type="date" id="pdovam-bas" name="bas" value="{{ bas_iso }}" style="background:#0b1826;border:1px solid #243447;color:#e0f7fa;padding:3px 7px;border-radius:4px;font-size:11px;">
@@ -236,6 +238,16 @@ body{margin:0;}
           {% endfor %}
         </select>
         <button type="submit" style="background:#00bcd4;border:none;color:#000;padding:4px 10px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;">Göster</button>
+        <div style="margin-left:10px;display:flex;align-items:center;gap:6px;">
+          <span style="color:#b0bec5;font-size:11px;">Toplam fark:</span>
+          <div style="min-width:90px;padding:3px 8px;border-radius:4px;border:1px solid #243447;background:#0b1826;color:#e0f7fa;font-size:11px;text-align:right;">
+            {{ toplam_fark or '0 dk' }}
+          </div>
+          <span style="color:#b0bec5;font-size:11px;margin-left:6px;">Toplam gün:</span>
+          <div style="min-width:100px;padding:3px 8px;border-radius:4px;border:1px solid #243447;background:#0b1826;color:#e0f7fa;font-size:11px;text-align:right;">
+            {{ toplam_gun or '0 gün' }}
+          </div>
+        </div>
       </form>
     </div>
     <div style="background:#102133;border:1px solid #243447;border-radius:12px;padding:12px 16px;">
@@ -243,31 +255,73 @@ body{margin:0;}
         <thead>
           <tr style="background:#0f2537;color:#4fc3f7;">
             <th style="padding:6px 8px;text-align:left;">Tarih</th>
-            <th style="padding:6px 8px;text-align:left;">Saat</th>
+            <th style="padding:6px 8px;text-align:left;">Giriş Saati</th>
+            <th style="padding:6px 8px;text-align:left;">Çıkış Saati</th>
             <th style="padding:6px 8px;text-align:left;">Personel</th>
             <th style="padding:6px 8px;text-align:left;">İşlem</th>
-            <th style="padding:6px 8px;text-align:left;">Okutan</th>
-            <th style="padding:6px 8px;text-align:left;">Onaylayan</th>
+            <th style="padding:6px 8px;text-align:left;">Fark</th>
+            {% if is_admin %}
+            <th style="padding:6px 8px;text-align:left;">Düzenle</th>
+            {% endif %}
           </tr>
         </thead>
         <tbody>
           {% for r in devam_kayitlari %}
-          <tr style="border-bottom:1px solid #243447;">
+          <tr style="border-bottom:1px solid #243447;" data-personel-id="{{ r.personel_id }}" data-tarih="{{ r.tarih }}">
             <td style="padding:6px 8px;color:#e0f7fa;">{{ r.tarih_tr or r.tarih }}</td>
-            <td style="padding:6px 8px;color:#e0f7fa;">{{ r.saat }}</td>
+            <td style="padding:6px 8px;color:#e0f7fa;">
+              {% if (r.islem or '') == 'giris' %}{{ r.saat }}{% endif %}
+            </td>
+            <td style="padding:6px 8px;color:#e0f7fa;">
+              {% if (r.islem or '') == 'cikis' %}{{ r.saat }}{% endif %}
+            </td>
             <td style="padding:6px 8px;color:#e0f7fa;">{{ r.personel_adi or r.personel_id }}</td>
             <td style="padding:6px 8px;color:#e0f7fa;">{{ r.islem }}</td>
-            <td style="padding:6px 8px;color:#90a4ae;">{{ r.okutan_ad or r.okutan or r.okutan_id or '--' }}</td>
-            <td style="padding:6px 8px;color:#90a4ae;">{{ r.onaylayan_ad or r.onaylayan or r.onaylayan_id or '--' }}</td>
+            <td style="padding:6px 8px;color:#90a4ae;">
+              {% if (r.islem or '') == 'giris' and r.fark %}{{ r.fark }}{% else %}--{% endif %}
+            </td>
+            {% if is_admin %}
+            <td style="padding:6px 8px;">
+              <button type="button" class="pdovam-rapor-duzenle-btn" style="background:#00bcd4;color:#000;border:none;padding:4px 10px;border-radius:4px;font-size:11px;cursor:pointer;">Düzenle</button>
+            </td>
+            {% endif %}
           </tr>
           {% else %}
           <tr>
-            <td colspan="6" style="padding:10px 8px;text-align:center;color:#78909c;">Seçilen aralık için Supabase logu bulunamadı.</td>
+            <td colspan="{{ 7 if is_admin else 6 }}" style="padding:10px 8px;text-align:center;color:#78909c;">Seçilen aralık için Supabase veya devam kaydı logu bulunamadı.</td>
           </tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
+
+    {% if is_admin %}
+    <div id="pdovam-rapor-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;align-items:center;justify-content:center;" class="pdovam-modal-wrap">
+      <div style="background:#102133;border:1px solid #243447;border-radius:12px;padding:20px;min-width:320px;max-width:420px;">
+        <h4 style="margin:0 0 14px 0;color:#4fc3f7;font-size:14px;">Devam Kaydı Düzenle</h4>
+        <div style="margin-bottom:10px;">
+          <label style="font-size:11px;color:#90a4ae;">Personel</label>
+          <div id="pdovam-modal-personel" style="color:#e0f7fa;font-size:13px;"></div>
+        </div>
+        <div style="margin-bottom:10px;">
+          <label style="font-size:11px;color:#90a4ae;">Tarih</label>
+          <div id="pdovam-modal-tarih" style="color:#e0f7fa;font-size:13px;"></div>
+        </div>
+        <div style="margin-bottom:10px;">
+          <label for="pdovam-modal-giris" style="font-size:11px;color:#90a4ae;">Giriş saati</label>
+          <input type="time" id="pdovam-modal-giris" step="1" style="width:100%;background:#0b1826;border:1px solid #243447;color:#e0f7fa;padding:6px 8px;border-radius:4px;font-size:13px;">
+        </div>
+        <div style="margin-bottom:14px;">
+          <label for="pdovam-modal-cikis" style="font-size:11px;color:#90a4ae;">Çıkış saati</label>
+          <input type="time" id="pdovam-modal-cikis" step="1" style="width:100%;background:#0b1826;border:1px solid #243447;color:#e0f7fa;padding:6px 8px;border-radius:4px;font-size:13px;">
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;">
+          <button type="button" id="pdovam-modal-vazgec" style="background:#37474f;color:#eceff1;border:none;padding:8px 14px;border-radius:4px;cursor:pointer;font-size:12px;">Vazgeç</button>
+          <button type="button" id="pdovam-modal-kaydet" style="background:#00bcd4;color:#000;border:none;padding:8px 14px;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600;">Kaydet</button>
+        </div>
+      </div>
+    </div>
+    {% endif %}
   </div>
 </div>
 
@@ -281,6 +335,7 @@ body{margin:0;}
   var IS_ADMIN = {{ 'true' if is_admin else 'false' }};
   var API_MANUEL = "{{ url_for('pdovam.api_manuel') }}";
   var API_SIL = "{{ url_for('pdovam.api_sil') }}";
+  var API_KAYIT = "{{ url_for('pdovam.api_kayit') }}";
 
   // Eğer bu sayfa bir iframe içinde açıldıysa, üstteki ana header/nav kısmını gizle
   try {
@@ -716,6 +771,76 @@ body{margin:0;}
     tabRapor.addEventListener('click', function(e){
       e.preventDefault();
       switchTab('rapor');
+    });
+  }
+
+  // Rapor tablosu: Düzenle butonu → modal aç, kaydet
+  var raporModal = document.getElementById('pdovam-rapor-modal');
+  var modalPersonel = document.getElementById('pdovam-modal-personel');
+  var modalTarih = document.getElementById('pdovam-modal-tarih');
+  var modalGiris = document.getElementById('pdovam-modal-giris');
+  var modalCikis = document.getElementById('pdovam-modal-cikis');
+  var modalVazgec = document.getElementById('pdovam-modal-vazgec');
+  var modalKaydet = document.getElementById('pdovam-modal-kaydet');
+  var _duzenlePid = null;
+  var _duzenleTarih = null;
+
+  if (raporModal && API_KAYIT) {
+    document.addEventListener('click', function(e){
+      if (!e.target || !e.target.classList) return;
+      if (!e.target.classList.contains('pdovam-rapor-duzenle-btn')) return;
+      e.preventDefault();
+      var tr = e.target.closest('tr');
+      if (!tr) return;
+      var pid = tr.getAttribute('data-personel-id');
+      var tarih = tr.getAttribute('data-tarih');
+      if (!pid || !tarih) return;
+      _duzenlePid = pid;
+      _duzenleTarih = tarih;
+      fetch(API_KAYIT + '?personel_id=' + encodeURIComponent(pid) + '&tarih=' + encodeURIComponent(tarih))
+        .then(function(r){ return r.json(); })
+        .then(function(data){
+          if (!data || data.ok === false) { alert(data && data.mesaj ? data.mesaj : 'Kayıt bulunamadı'); return; }
+          if (data.personel_adi) modalPersonel.textContent = data.personel_adi;
+          else modalPersonel.textContent = 'Personel #' + pid;
+          modalTarih.textContent = data.tarih || tarih;
+          modalGiris.value = (data.giris_saati || '').substr(0, 5);
+          if (modalGiris.value && modalGiris.value.length === 5 && modalGiris.value.indexOf(':') !== -1) modalGiris.value += ':00';
+          modalCikis.value = (data.cikis_saati || '').substr(0, 5);
+          if (modalCikis.value && modalCikis.value.length === 5 && modalCikis.value.indexOf(':') !== -1) modalCikis.value += ':00';
+          raporModal.style.display = 'flex';
+        })
+        .catch(function(){ alert('Kayıt yüklenemedi.'); });
+    });
+  }
+  if (modalVazgec) {
+    modalVazgec.addEventListener('click', function(){
+      if (raporModal) raporModal.style.display = 'none';
+    });
+  }
+  if (modalKaydet && raporModal) {
+    modalKaydet.addEventListener('click', function(){
+      if (!_duzenlePid || !_duzenleTarih) return;
+      var giris = (modalGiris && modalGiris.value) ? modalGiris.value.trim() : null;
+      var cikis = (modalCikis && modalCikis.value) ? modalCikis.value.trim() : null;
+      if (!giris && !cikis) { alert('Giriş veya çıkış saatinden en az biri dolu olmalı.'); return; }
+      fetch(API_MANUEL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ personel_id: _duzenlePid, tarih: _duzenleTarih, giris_saati: giris || null, cikis_saati: cikis || null })
+      })
+        .then(function(r){ return r.json(); })
+        .then(function(resp){
+          if (!resp.ok) { alert(resp.mesaj || 'Kaydedilemedi'); return; }
+          raporModal.style.display = 'none';
+          window.location.reload();
+        })
+        .catch(function(){ alert('Kayıt güncellenirken hata oluştu.'); });
+    });
+  }
+  if (raporModal && raporModal.addEventListener) {
+    raporModal.addEventListener('click', function(e){
+      if (e.target === raporModal) raporModal.style.display = 'none';
     });
   }
 

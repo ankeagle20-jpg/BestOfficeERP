@@ -1,7 +1,7 @@
-from flask import Blueprint, render_template, request, jsonify, redirect, url_for, flash, send_file, Response
+from flask import Blueprint, render_template, request, jsonify, redirect, url_for, flash, send_file, Response, abort
 from flask_login import login_required, current_user
 from functools import wraps
-from datetime import datetime
+from datetime import datetime, date
 from db import fetch_all, fetch_one, execute, execute_returning
 from utils.text_utils import turkish_lower
 import os
@@ -719,27 +719,31 @@ def yeni_fatura():
 @bp.route('/faturalar')
 @faturalar_gerekli
 def faturalar():
-    """Faturalar sekmesi"""
-    yil = request.args.get('yil', datetime.now().year, type=int)
+    """Faturalar sekmesi. Tarih aralığı varsayılan: bu ayın 1'i - bugün."""
+    today = date.today()
+    first_of_month = today.replace(day=1)
+    baslangic_str = request.args.get('baslangic', first_of_month.isoformat())
+    bitis_str = request.args.get('bitis', today.isoformat())
+    try:
+        baslangic = datetime.strptime(baslangic_str[:10], '%Y-%m-%d').date()
+        bitis = datetime.strptime(bitis_str[:10], '%Y-%m-%d').date()
+    except (ValueError, TypeError):
+        baslangic, bitis = first_of_month, today
+    if baslangic > bitis:
+        baslangic, bitis = bitis, baslangic
+    yil = request.args.get('yil', today.year, type=int)
     ay_str = request.args.get('ay', '')
     ofis_kodu = request.args.get('ofis', '')
     
-    # Tüm ofisleri çek
     ofisler = fetch_all("SELECT DISTINCT code FROM offices WHERE COALESCE(is_active::int, 1) = 1 ORDER BY code")
     
-    # Fatura listesi (fatura_tarihi TEXT veya DATE olabilir; ::date ile uyumlu)
     sql = """
         SELECT f.*, c.name as musteri_adi
         FROM faturalar f
         LEFT JOIN customers c ON CAST(f.musteri_id AS INTEGER) = c.id
-        WHERE EXTRACT(YEAR FROM (f.fatura_tarihi::date)) = %s
+        WHERE (f.fatura_tarihi::date) >= %s AND (f.fatura_tarihi::date) <= %s
     """
-    params = [yil]
-    
-    if ay_str:
-        ay_no = AYLAR.index(ay_str) + 1 if ay_str in AYLAR else 1
-        sql += " AND EXTRACT(MONTH FROM (f.fatura_tarihi::date)) = %s"
-        params.append(ay_no)
+    params = [baslangic, bitis]
     
     if ofis_kodu:
         sql += " AND f.ofis_kodu = %s"
@@ -750,20 +754,26 @@ def faturalar():
     faturalar_raw = fetch_all(sql, tuple(params))
     faturalar = [_row_serializable(f) for f in (faturalar_raw or [])]
     
-    # Toplamlar
     toplam_tutar = sum(f.get('toplam') or 0 for f in faturalar)
     toplam_odenen = sum(f.get('toplam') or 0 for f in faturalar if f.get('durum') == 'odendi')
     toplam_kalan = toplam_tutar - toplam_odenen
     
     ofisler_list = list(ofisler or [])
     ofisler = [_row_serializable(o) for o in ofisler_list]
+    yillar = list(range(today.year, today.year - 6, -1))
+    musteriler = fetch_all("SELECT id, name FROM customers ORDER BY name LIMIT 500")
+    musteriler = [_row_serializable(m) for m in (musteriler or [])]
     
     return render_template('faturalar/faturalar_tab.html',
                          yil=yil,
                          ay=ay_str,
+                         baslangic=baslangic.isoformat(),
+                         bitis=bitis.isoformat(),
                          ofis_kodu=ofis_kodu,
                          aylar=AYLAR,
+                         yillar=yillar,
                          ofisler=ofisler,
+                         musteriler=musteriler,
                          faturalar=faturalar,
                          toplam_tutar=toplam_tutar,
                          toplam_odenen=toplam_odenen,
@@ -940,6 +950,13 @@ def fatura_ekle():
                 data.get("notlar"),
             ),
         )
+        row = fetch_one("SELECT id FROM faturalar WHERE fatura_no = %s ORDER BY id DESC LIMIT 1", (fatura_no,))
+        fatura_id = row.get("id") if row else None
+        if fatura_id and satirlar:
+            try:
+                execute("UPDATE faturalar SET satirlar_json = %s WHERE id = %s", (json.dumps(satirlar), fatura_id))
+            except Exception:
+                pass
 
         earsiv_payload = {
             "fatura_no": fatura_no,
@@ -955,9 +972,135 @@ def fatura_ekle():
             "yazi_ile": tutar_yaziya(toplam),
         }
 
-        return jsonify({"ok": True, "mesaj": "Fatura eklendi!", "earsiv": earsiv_payload})
+        return jsonify({"ok": True, "mesaj": "Fatura eklendi!", "fatura_id": fatura_id, "earsiv": earsiv_payload})
     except Exception as e:
         return jsonify({"ok": False, "mesaj": str(e)}), 500
+
+
+@bp.route('/onizleme/<int:fatura_id>')
+@faturalar_gerekli
+def fatura_onizleme_ekran(fatura_id):
+    """Kaydedilmiş faturanın e-Arşiv tarzı önizleme ekranı (GİB'e Gönder burada)."""
+    fatura = fetch_one(
+        "SELECT id, fatura_no, fatura_tarihi, musteri_id, musteri_adi, tutar, kdv_tutar, toplam, notlar, satirlar_json FROM faturalar WHERE id = %s",
+        (fatura_id,),
+    )
+    if not fatura:
+        abort(404)
+    fatura = dict(fatura)
+    musteri_id = fatura.get("musteri_id")
+    musteri = {"name": fatura.get("musteri_adi"), "address": "", "tax_number": "", "vergi_dairesi": ""}
+    if musteri_id:
+        cust = fetch_one("SELECT id, name, address, tax_number FROM customers WHERE id = %s", (musteri_id,))
+        if cust:
+            musteri["name"] = cust.get("name") or musteri["name"]
+            musteri["address"] = (cust.get("address") or "").strip()
+            musteri["tax_number"] = str(cust.get("tax_number") or "").strip()
+        vd_row = fetch_one("SELECT vergi_dairesi FROM customers WHERE id = %s", (musteri_id,))
+        if vd_row and vd_row.get("vergi_dairesi"):
+            musteri["vergi_dairesi"] = (vd_row.get("vergi_dairesi") or "").strip()
+        kyc = fetch_one(
+            "SELECT vergi_dairesi, vergi_no, yeni_adres FROM musteri_kyc WHERE musteri_id = %s ORDER BY id DESC LIMIT 1",
+            (musteri_id,),
+        )
+        if kyc:
+            if kyc.get("vergi_dairesi"):
+                musteri["vergi_dairesi"] = (kyc.get("vergi_dairesi") or "").strip()
+            if kyc.get("vergi_no"):
+                musteri["tax_number"] = str(kyc.get("vergi_no") or "").strip()
+            if kyc.get("yeni_adres"):
+                musteri["address"] = (kyc.get("yeni_adres") or "").strip() or musteri["address"]
+
+    ft = fatura.get("fatura_tarihi")
+    if hasattr(ft, "strftime"):
+        fatura_tarihi_str = ft.strftime("%d.%m.%Y")
+    else:
+        s = str(ft or "")[:10]
+        if s and len(s) == 10 and s[4] == "-":
+            fatura_tarihi_str = f"{s[8:10]}.{s[5:7]}.{s[0:4]}"
+        else:
+            fatura_tarihi_str = s or "--"
+    fatura["fatura_tarihi_str"] = fatura_tarihi_str
+    toplam = float(fatura.get("toplam") or 0)
+    fatura["yazi_ile"] = tutar_yaziya(toplam)
+
+    satirlar = []
+    try:
+        if fatura.get("satirlar_json"):
+            raw = json.loads(fatura["satirlar_json"])
+            for s in (raw if isinstance(raw, list) else []):
+                miktar = float(s.get("miktar") or 0)
+                birim_fiyat = float(s.get("birim_fiyat") or 0)
+                isk_oran = float(s.get("iskonto_orani") or 0)
+                isk_tutar_giris = s.get("iskonto_tutar")
+                kdv_oran = float(s.get("kdv_orani") or 0)
+                brut = miktar * birim_fiyat
+                if isk_tutar_giris is not None and float(isk_tutar_giris or 0) > 0:
+                    isk_tutar = min(float(isk_tutar_giris), brut)
+                else:
+                    isk_tutar = brut * isk_oran / 100.0
+                net = brut - isk_tutar
+                kdv_tutar = net * kdv_oran / 100.0
+                satirlar.append({
+                    "ad": (s.get("ad") or s.get("mal_hizmet") or "Hizmet").strip() or "Hizmet",
+                    "miktar": miktar,
+                    "birim": (s.get("birim") or "Adet").strip() or "Adet",
+                    "birim_fiyat": birim_fiyat,
+                    "iskonto_orani": isk_oran,
+                    "iskonto_tutar": isk_tutar,
+                    "kdv_orani": kdv_oran,
+                    "kdv_tutar": kdv_tutar,
+                    "mal_tutar": net,
+                    "satir_toplam": net + kdv_tutar,
+                })
+    except Exception:
+        pass
+    if not satirlar:
+        tutar = float(fatura.get("tutar") or 0)
+        kdv_tutar = float(fatura.get("kdv_tutar") or 0)
+        satirlar = [{
+            "ad": "Hizmet",
+            "miktar": 1,
+            "birim": "Ay",
+            "birim_fiyat": tutar,
+            "iskonto_orani": 0,
+            "iskonto_tutar": 0,
+            "kdv_orani": (kdv_tutar / tutar * 100) if tutar else 20,
+            "kdv_tutar": kdv_tutar,
+            "mal_tutar": tutar,
+            "satir_toplam": toplam,
+        }]
+
+    ara_toplam = sum(s.get("miktar", 0) * s.get("birim_fiyat", 0) for s in satirlar)
+    toplam_iskonto = sum(
+        (s.get("iskonto_tutar") if s.get("iskonto_tutar") is not None else (s.get("miktar", 0) * s.get("birim_fiyat", 0) * (s.get("iskonto_orani") or 0) / 100.0))
+        for s in satirlar
+    )
+    kdv_toplam = sum(s.get("kdv_tutar", 0) for s in satirlar)
+    ettn = "Önizleme-ETTN"
+    if fatura.get("notlar"):
+        for part in (fatura.get("notlar") or "").split("|"):
+            if "ETTN:" in part or "GİB ETTN:" in part:
+                ettn = part.split(":")[-1].strip() or ettn
+                break
+    fatura["ettn"] = ettn
+
+    return render_template(
+        "faturalar/fatura_onizleme_ekran.html",
+        fatura=fatura,
+        musteri=musteri,
+        satirlar=satirlar,
+        ara_toplam=ara_toplam,
+        toplam_iskonto=toplam_iskonto,
+        kdv_toplam=kdv_toplam,
+        toplam=toplam,
+        firma_unvan=FIRMA_UNVAN,
+        firma_adres=FIRMA_ADRES,
+        firma_telefon=FIRMA_TELEFON,
+        firma_web=FIRMA_WEB,
+        firma_vd=FIRMA_VERGI_DAIRESI,
+        firma_vkn=FIRMA_VERGI_NO,
+    )
 
 
 @bp.route('/tahsilat-ekle', methods=['POST'])
@@ -1134,6 +1277,68 @@ def tahsilat_makbuz_onizle():
         })
     except Exception as e:
         return jsonify({'ok': False, 'mesaj': str(e)}), 500
+
+
+# --- GİB e-Arşiv Fatura (taslak + SMS onay) ---
+@bp.route('/api/gib-taslak', methods=['POST'])
+@faturalar_gerekli
+def api_gib_taslak():
+    """Fatura ID ile GİB'de taslak oluşturur. Döner: ok, uuid (ETTN), mesaj."""
+    try:
+        from gib_earsiv import BestOfficeGIBManager, build_fatura_data_from_db
+        data = request.get_json() or {}
+        fatura_id = data.get("fatura_id") or request.form.get("fatura_id")
+        if not fatura_id:
+            return jsonify({"ok": False, "mesaj": "fatura_id gerekli."}), 400
+        fatura_id = int(fatura_id)
+        fatura_data = build_fatura_data_from_db(fatura_id, fetch_one)
+        gib = BestOfficeGIBManager()
+        if not gib.is_available():
+            return jsonify({
+                "ok": False,
+                "mesaj": "GİB modülü kullanılamıyor. .env içinde GIB_USER ve GIB_PASS tanımlayın ve 'fatura' kütüphanesini yükleyin."
+            }), 503
+        uuid = gib.fatura_taslak_olustur(fatura_data)
+        if not uuid:
+            return jsonify({"ok": False, "mesaj": "GİB taslak oluşturulamadı."}), 500
+        return jsonify({"ok": True, "uuid": uuid, "mesaj": "Taslak oluşturuldu. SMS ile gelen kodu girin."})
+    except ValueError as e:
+        return jsonify({"ok": False, "mesaj": str(e)}), 400
+    except RuntimeError as e:
+        return jsonify({"ok": False, "mesaj": str(e)}), 401
+    except Exception as e:
+        return jsonify({"ok": False, "mesaj": "GİB hatası: " + str(e)}), 500
+
+
+@bp.route('/api/gib-sms-onay', methods=['POST'])
+@faturalar_gerekli
+def api_gib_sms_onay():
+    """SMS kodu ile taslak faturayı onaylar. İsteğe bağlı fatura_id ile veritabanında güncelleme yapılabilir."""
+    try:
+        from gib_earsiv import BestOfficeGIBManager
+        data = request.get_json() or {}
+        uuid = (data.get("uuid") or request.form.get("uuid") or "").strip()
+        sms_kodu = (data.get("sms_kodu") or request.form.get("sms_kodu") or "").strip()
+        fatura_id = data.get("fatura_id") or request.form.get("fatura_id")
+        if not uuid or not sms_kodu:
+            return jsonify({"ok": False, "mesaj": "uuid ve sms_kodu gerekli."}), 400
+        gib = BestOfficeGIBManager()
+        if not gib.is_available():
+            return jsonify({"ok": False, "mesaj": "GİB modülü kullanılamıyor."}), 503
+        success = gib.sms_onay_ve_imzala(uuid, sms_kodu)
+        if not success:
+            return jsonify({"ok": False, "mesaj": "SMS onayı başarısız veya kod hatalı."}), 400
+        if fatura_id:
+            try:
+                execute(
+                    "UPDATE faturalar SET notlar = COALESCE(notlar,'') || ' | GİB ETTN: ' || %s WHERE id = %s",
+                    (uuid, int(fatura_id))
+                )
+            except Exception:
+                pass
+        return jsonify({"ok": True, "mesaj": "Fatura GİB üzerinde imzalandı."})
+    except Exception as e:
+        return jsonify({"ok": False, "mesaj": str(e)}), 500
 
 
 @bp.route('/api/musteriler')

@@ -68,6 +68,8 @@
 #giris-embed-view .giris-embed-toolbar h2{color:#4fc3f7;font-size:14px;margin:0}
 #giris-embed-view #giris-iframe{flex:1;width:100%;min-height:calc(100vh - 180px);border:none;display:block}
 .ml-view-wrap{display:block}
+.yenile-ay-bar .ml-ay-btn{margin-right:4px}
+.yenile-ay-bar .ml-ay-btn.aktif{background:#00c8ff;color:#080d14;border-color:#00c8ff}
 </style>
 
 <script>
@@ -113,6 +115,7 @@ window.setActiveTab = function(tabId) {
       {% endfor %}
     </select>
     <button type="button" id="btn-quick-edit" class="ml-btn quick-edit"><i class="fa fa-edit"></i> Hızlı Bilgi Gir</button>
+    <button type="button" id="btn-yenile-ay" class="ml-btn back" title="Sözleşme ayına göre filtrele"><i class="fa fa-refresh"></i> Yenile</button>
     <button type="button" id="btn-quick-edit-vazgec" class="ml-btn back" style="display:none;"><i class="fa fa-times"></i> Vazgeç</button>
     <div class="ml-stats">
       <span>Toplam: <b id="mlCount">{{ musteriler|length }}</b></span>
@@ -120,6 +123,24 @@ window.setActiveTab = function(tabId) {
     {% for _m in musteriler %}{% set _ns.total_borc = _ns.total_borc + (_m.get('toplam_borc', 0) or 0) %}{% endfor %}
     <span>Toplam Borç: <b class="red" id="mlTotalBorc">{{ "{:,.0f}".format(_ns.total_borc) }} ₺</b></span>
     </div>
+  </div>
+
+  <!-- Yenile: Sözleşme ayına göre filtre (gizli, tıklanınca açılır) -->
+  <div id="yenile-ay-bar" class="ml-toolbar yenile-ay-bar" style="display:none; margin-bottom:10px; padding:10px; background:rgba(0,200,255,.06); border-radius:8px; border:1px solid rgba(0,200,255,.12);">
+    <span style="color:#5a7a9a;font-size:11px;margin-right:8px;">Sözleşme ayına göre filtre:</span>
+    <button type="button" class="ml-btn back ml-ay-btn" data-ay="0" style="font-size:10px; padding:4px 8px;">Tümü</button>
+    <button type="button" class="ml-btn back ml-ay-btn" data-ay="1">Ocak</button>
+    <button type="button" class="ml-btn back ml-ay-btn" data-ay="2">Şubat</button>
+    <button type="button" class="ml-btn back ml-ay-btn" data-ay="3">Mart</button>
+    <button type="button" class="ml-btn back ml-ay-btn" data-ay="4">Nisan</button>
+    <button type="button" class="ml-btn back ml-ay-btn" data-ay="5">Mayıs</button>
+    <button type="button" class="ml-btn back ml-ay-btn" data-ay="6">Haziran</button>
+    <button type="button" class="ml-btn back ml-ay-btn" data-ay="7">Temmuz</button>
+    <button type="button" class="ml-btn back ml-ay-btn" data-ay="8">Ağustos</button>
+    <button type="button" class="ml-btn back ml-ay-btn" data-ay="9">Eylül</button>
+    <button type="button" class="ml-btn back ml-ay-btn" data-ay="10">Ekim</button>
+    <button type="button" class="ml-btn back ml-ay-btn" data-ay="11">Kasım</button>
+    <button type="button" class="ml-btn back ml-ay-btn" data-ay="12">Aralık</button>
   </div>
 
   <!-- TABLE -->
@@ -226,6 +247,7 @@ window.setActiveTab = function(tabId) {
 
 <script>
 var allRows = Array.from(document.querySelectorAll('#mlBody tr[data-name]'));
+var sozlesmeAySecili = 0; // 0 = tümü, 1-12 = ay
 
 function filterTable(){
   var q = (document.getElementById('mlQ').value || '').toLowerCase();
@@ -237,9 +259,18 @@ function filterTable(){
     var rowOfis = tr.getAttribute('data-ofis') || '';
     var rowDurum = (tr.getAttribute('data-durum') || '').toLowerCase();
     var geciken = parseInt(tr.getAttribute('data-geciken') || '0');
+    var basTarih = (tr.getAttribute('data-bas-tarih') || '').trim();
     var ok = true;
     if(q && name.indexOf(q) === -1) ok = false;
     if(ofis && rowOfis !== ofis) ok = false;
+    if(sozlesmeAySecili > 0) {
+      if(!basTarih) ok = false;
+      else {
+        var parts = basTarih.split('-');
+        var ay = parseInt(parts[1], 10);
+        if(ay !== sozlesmeAySecili) ok = false;
+      }
+    }
 
     if (ok) {
       if (durum === 'pasif') {
@@ -247,10 +278,8 @@ function filterTable(){
       } else if (durum === 'geciken') {
         ok = (rowDurum === 'geciken');
       } else if (durum === 'hepsi') {
-        // hepsi: hiçbir ek filtre yok
         ok = true;
       } else {
-        // varsayılan / aktif: pasifler hariç, aktif + geciken + boş
         ok = (rowDurum === 'aktif' || rowDurum === 'geciken' || rowDurum === '');
       }
     }
@@ -261,6 +290,19 @@ function filterTable(){
   document.getElementById('mlCount').textContent = shown;
   document.getElementById('mlShown').textContent = shown;
 }
+
+document.getElementById('btn-yenile-ay').addEventListener('click', function(){
+  var bar = document.getElementById('yenile-ay-bar');
+  bar.style.display = bar.style.display === 'none' ? 'flex' : 'none';
+});
+document.querySelectorAll('.ml-ay-btn').forEach(function(btn){
+  btn.addEventListener('click', function(){
+    sozlesmeAySecili = parseInt(this.getAttribute('data-ay'), 10) || 0;
+    document.querySelectorAll('.ml-ay-btn').forEach(function(b){ b.classList.remove('aktif'); });
+    this.classList.add('aktif');
+    filterTable();
+  });
+});
 
 document.getElementById('mlQ').addEventListener('input', filterTable);
 var mlDurumHeader = document.getElementById('mlDurum');

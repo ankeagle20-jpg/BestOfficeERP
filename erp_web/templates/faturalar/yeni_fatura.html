@@ -173,7 +173,6 @@
         <h2><i class="fa fa-file-invoice"></i> Yeni Fatura Oluştur</h2>
         <div class="page-actions">
             <button type="button" class="secondary" id="btn-onizleme"><i class="fa fa-eye"></i> Önizleme</button>
-            <button type="button" id="btn-kaydet"><i class="fa fa-save"></i> Kaydet</button>
         </div>
     </div>
 
@@ -232,7 +231,17 @@
     </div>
 
     <div class="panel">
-        <h3>Fatura Satırları</h3>
+        <div class="panel-row-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <h3 style="margin-bottom:0;">Fatura Satırları</h3>
+            <div style="display:inline-flex; align-items:center; gap:8px;">
+                <button type="button" id="btn-fatura-olustur" class="btn-icon" style="background:#00bcd4; color:#fff; border:none; padding:6px 12px; border-radius:4px; font-size:12px; cursor:pointer; display:inline-flex; align-items:center; gap:6px;">
+                    <i class="fa fa-file-invoice"></i> Fatura Oluştur
+                </button>
+                <button type="button" id="btn-yeni-fatura-aylik" class="btn-icon" style="background:#00695c; color:#fff; border:none; padding:6px 12px; border-radius:4px; font-size:12px; cursor:pointer; display:inline-flex; align-items:center; gap:6px;">
+                    <i class="fa fa-file-invoice"></i> Yeni Fatura Oluştur
+                </button>
+            </div>
+        </div>
         <table id="satir-tablo">
             <thead>
                 <tr>
@@ -283,7 +292,10 @@
         const API_FATURA_EKLE = "{{ url_for('faturalar.fatura_ekle') }}";
         const API_TUTAR_YAZI = "{{ url_for('faturalar.tutar_yazi_api') }}";
         const API_FATURA_ONIZLE = "{{ url_for('faturalar.fatura_onizleme') }}";
+        const FATURA_ONIZLEME_URL = "{{ url_for('faturalar.fatura_onizleme_ekran', fatura_id=0) }}".replace('/0', '/');
         const SECILI_MUSTERI = {{ (secili_musteri | tojson) if secili_musteri else 'null' }};
+        const DEFAULT_HIZMET_URUN = {{ (default_hizmet_urun or '') | tojson }};
+        const DEFAULT_BIRIM_FIYAT = {{ default_birim_fiyat | default(0) }};
 
         const musteriAra = document.getElementById('musteri-ara');
         const musteriSonuclar = document.getElementById('musteri-sonuclar');
@@ -505,7 +517,7 @@
                         musteriIdEl.value = id;
                         musteriAra.value = ad;
                         musteriSonuclar.style.display = 'none';
-                        musteriOzet.textContent = 'Müşteri: ' + ad;
+                        musteriOzet.style.display = 'none';  // Özet satırı kaldırıldı, bilgiler formda
                             // Alanları temizle
                             const adrEl = document.getElementById('musteri-adres');
                             const vdEl = document.getElementById('musteri-vergi-dairesi');
@@ -524,11 +536,7 @@
                                     if (adrEl) adrEl.value = adr;
                                     if (vdEl) vdEl.value = vd;
                                     if (vnEl) vnEl.value = vn;
-                                    if (vd || vn) {
-                                        ek = ' • VKN/TCKN: ' + (vn || '—') + ' • Vergi Dairesi: ' + (vd || '—');
-                                    }
                                 }
-                                musteriOzet.textContent = 'Müşteri: ' + ad + (ek || '');
                         } catch(e){}
                     });
                 });
@@ -543,7 +551,7 @@
             if (!q.trim()) {
                 // yazı temizlenirse seçimi de temizle ama listeyi gizleme, focus event'i handle eder
                 musteriIdEl.value = '';
-                musteriOzet.textContent = 'Müşteri seçilmedi';
+                musteriOzet.style.display = 'none';
                 const adrEl = document.getElementById('musteri-adres');
                 const vdEl = document.getElementById('musteri-vergi-dairesi');
                 const vnEl = document.getElementById('musteri-vergi-no');
@@ -577,11 +585,14 @@
             if (adrEl) adrEl.value = SECILI_MUSTERI.address || '';
             if (vdEl) vdEl.value = SECILI_MUSTERI.vergi_dairesi || '';
             if (vnEl) vnEl.value = SECILI_MUSTERI.vergi_no || '';
-            musteriOzet.textContent = 'Müşteri: ' + (SECILI_MUSTERI.name || '');
-            if (SECILI_MUSTERI.vergi_no || SECILI_MUSTERI.vergi_dairesi) {
-                musteriOzet.textContent += ' • VKN/TCKN: ' + (SECILI_MUSTERI.vergi_no || '—') + ' • Vergi Dairesi: ' + (SECILI_MUSTERI.vergi_dairesi || '—');
-            }
-            musteriOzet.style.display = 'inline-block';
+            musteriOzet.style.display = 'none';  // Müşteri özet satırı gösterilmiyor, bilgiler formda
+        }
+
+        // İlk satır: müşterinin hizmet türü (sanal ofis vb.) ve aylık tutar varsa varsayılan doldur; manuel değiştirilebilir
+        if (SECILI_MUSTERI && (DEFAULT_HIZMET_URUN || DEFAULT_BIRIM_FIYAT)) {
+            addRow({ ad: DEFAULT_HIZMET_URUN, miktar: 1, birim: 'Ay', birim_fiyat: DEFAULT_BIRIM_FIYAT });
+        } else {
+            addRow();
         }
 
         function validateForm() {
@@ -640,13 +651,17 @@
                     body: JSON.stringify(payload)
                 });
                 const j = await res.json();
+                if (j.ok && j.fatura_id) {
+                    window.location.href = FATURA_ONIZLEME_URL + j.fatura_id;
+                    return;
+                }
                 if (j.ok) {
                     alert(j.mesaj || 'Fatura kaydedildi.');
                     document.getElementById('fatura-no').value = '';
                     document.getElementById('fatura-not').value = '';
                     musteriAra.value = '';
                     musteriIdEl.value = '';
-                    musteriOzet.textContent = 'Müşteri seçilmedi';
+                    musteriOzet.style.display = 'none';
                     tbody.innerHTML = '';
                     addRow();
                     recalc();
@@ -658,7 +673,15 @@
             }
         }
 
-        document.getElementById('btn-kaydet').addEventListener('click', kaydet);
+        document.getElementById('btn-fatura-olustur').addEventListener('click', kaydet);
+
+        document.getElementById('btn-yeni-fatura-aylik').addEventListener('click', function(){
+            var mid = (document.getElementById('musteri-id') || {}).value || '';
+            var url = '/faturalar/yeni';
+            if (mid) url += '?musteri_id=' + encodeURIComponent(mid);
+            window.open(url, '_blank', 'noopener');
+        });
+
         document.getElementById('btn-onizleme').addEventListener('click', async function(){
             const v = validateForm();
             if (!v.ok) {
@@ -710,7 +733,7 @@
             }
         });
 
-        addRow();
+        // İlk satır yukarıdaki SECILI_MUSTERI bloğunda ekleniyor (varsayılan hizmet veya boş)
     })();
     </script>
 </body>

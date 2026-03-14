@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>e-Arşiv Fatura Önizleme</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #0a1929; color: #e0f7fa; padding: 16px; }
+        .toolbar {
+            display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 8px;
+        }
+        .toolbar h1 { font-size: 18px; color: #4fc3f7; }
+        .toolbar-actions { display: flex; gap: 8px; align-items: center; }
+        .toolbar-actions a, .toolbar-actions button {
+            display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border-radius: 4px;
+            font-size: 13px; text-decoration: none; cursor: pointer; border: none;
+        }
+        .btn-kaydet { background: #00bcd4; color: #fff; }
+        .btn-kaydet:hover { opacity: 0.9; }
+        .btn-gib { background: #2e7d32; color: #fff; }
+        .btn-gib:hover { opacity: 0.9; }
+        .btn-secondary { background: #546e7a; color: #fff; }
+        .btn-secondary:hover { opacity: 0.9; }
+        .doc-paper {
+            max-width: 210mm; margin: 0 auto; background: #fff; color: #111; padding: 14mm; border-radius: 4px; box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+        }
+        .doc-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; border-bottom: 1px solid #ddd; padding-bottom: 8px; }
+        .doc-date { font-size: 11px; color: #555; }
+        .doc-title { font-size: 16px; font-weight: bold; text-align: center; flex: 1; }
+        .firma-block { font-size: 10px; margin-bottom: 14px; }
+        .firma-block strong { display: block; margin-bottom: 4px; font-size: 11px; }
+        .firma-block div { margin-bottom: 2px; color: #333; }
+        .meta-box {
+            border: 1px solid #333; padding: 6px 10px; font-size: 9px; width: 55mm;
+        }
+        .meta-box div { display: flex; justify-content: space-between; gap: 8px; }
+        .meta-box .k { color: #555; }
+        .musteri-block { margin: 12px 0; font-size: 10px; }
+        .musteri-block strong { display: block; margin-bottom: 4px; }
+        .musteri-block div { margin-bottom: 2px; color: #333; }
+        .tbl { width: 100%; border-collapse: collapse; font-size: 10px; margin: 10px 0; }
+        .tbl th { background: #f5f5f5; border: 1px solid #ddd; padding: 6px 8px; text-align: left; font-weight: 600; }
+        .tbl th.num { text-align: right; }
+        .tbl td { border: 1px solid #ddd; padding: 5px 8px; }
+        .tbl td.num { text-align: right; }
+        .tbl tbody tr:nth-child(even) { background: #fafafa; }
+        .ozet-block { margin-top: 12px; text-align: right; font-size: 11px; }
+        .ozet-block div { margin-bottom: 4px; }
+        .ozet-block .toplam { font-weight: bold; font-size: 12px; margin-top: 6px; }
+        .yazi-ile { margin-top: 14px; font-size: 10px; color: #333; border-top: 1px solid #eee; padding-top: 8px; }
+    </style>
+</head>
+<body>
+    <div class="toolbar">
+        <h1><i class="fa fa-file-invoice"></i> e-Arşiv Fatura (Önizleme)</h1>
+        <div class="toolbar-actions">
+            <button type="button" id="btn-kaydet" class="btn-kaydet" title="Faturayı kayıtlı olarak bırak (GİB'e göndermeden)"><i class="fa fa-save"></i> Kaydet</button>
+            <button type="button" id="btn-gib-gonder" class="btn-gib"><i class="fa fa-paper-plane"></i> GİB'e Gönder</button>
+            <a href="{{ url_for('faturalar.yeni_fatura') }}" class="btn-secondary"><i class="fa fa-plus"></i> Yeni Fatura</a>
+            <a href="{{ url_for('faturalar.faturalar') }}" class="btn-secondary"><i class="fa fa-list"></i> Faturalar</a>
+        </div>
+    </div>
+
+    <div class="doc-paper">
+        <div class="doc-header">
+            <span class="doc-date">{{ fatura.fatura_tarihi_str }}</span>
+            <span class="doc-title">e-Arşiv Fatura (Önizleme)</span>
+            <div class="meta-box">
+                <div><span class="k">Düzenleme No</span><span>TR1.2</span></div>
+                <div><span class="k">Senaryo</span><span>EARSIVFATURA</span></div>
+                <div><span class="k">Fatura Tipi</span><span>{{ (fatura.fatura_tipi or 'SATIS')|upper }}</span></div>
+                <div><span class="k">Fatura No</span><span>{{ fatura.fatura_no or '—' }}</span></div>
+                <div><span class="k">Fatura Tarihi</span><span>{{ fatura.fatura_tarihi_str }}</span></div>
+            </div>
+        </div>
+
+        <div class="firma-block" style="max-width: 55%;">
+            <strong>{{ firma_unvan }}</strong>
+            <div>{{ firma_adres }}</div>
+            <div>Tel: {{ firma_telefon or '—' }}</div>
+            <div>Web Sitesi: {{ firma_web or '—' }}</div>
+            <div>Vergi Dairesi: {{ firma_vd or '—' }}</div>
+            <div>VKN: {{ firma_vkn or '—' }}</div>
+        </div>
+
+        <div class="musteri-block">
+            <strong>SAYIN</strong>
+            <div>{{ musteri.name or fatura.musteri_adi or 'Müşteri' }}</div>
+            <div>{{ musteri.address or '—' }}</div>
+            <div>Vergi Dairesi: {{ musteri.vergi_dairesi or '—' }}</div>
+            <div>VKN/TCKN: {{ musteri.tax_number or '—' }}</div>
+            <div>ETTN: {{ fatura.ettn or 'Önizleme-ETTN' }}</div>
+        </div>
+
+        <table class="tbl">
+            <thead>
+                <tr>
+                    <th>Sıra No</th>
+                    <th>Mal Hizmet</th>
+                    <th class="num">Miktar</th>
+                    <th>Birim</th>
+                    <th class="num">Birim Fiyat</th>
+                    <th class="num">İsk./Artt. Oranı</th>
+                    <th class="num">İsk./Artt. Tutarı</th>
+                    <th class="num">KDV Oranı</th>
+                    <th class="num">KDV Tutarı</th>
+                    <th class="num">Mal Hizmet Tutarı</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for s in satirlar %}
+                <tr>
+                    <td>{{ loop.index }}</td>
+                    <td>{{ s.ad }}</td>
+                    <td class="num">{{ "%.2f"|format(s.miktar) }}</td>
+                    <td>{{ s.birim }}</td>
+                    <td class="num">{{ "%.2f"|format(s.birim_fiyat)|replace(".", ",") }}</td>
+                    <td class="num">{{ "%.2f"|format(s.iskonto_orani) }}</td>
+                    <td class="num">{{ "%.2f"|format(s.iskonto_tutar) }}</td>
+                    <td class="num">{{ "%.2f"|format(s.kdv_orani) }}</td>
+                    <td class="num">{{ "%.2f"|format(s.kdv_tutar)|replace(".", ",") }}</td>
+                    <td class="num">{{ "%.2f"|format(s.mal_tutar)|replace(".", ",") }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <div class="ozet-block">
+            <div>Mal Hizmet Toplam Tutarı: {{ "%.2f"|format(ara_toplam)|replace(".", ",") }} TL</div>
+            <div>Toplam İskonto: {{ "%.2f"|format(toplam_iskonto)|replace(".", ",") }} TL</div>
+            <div>Hesaplanan KDV: {{ "%.2f"|format(kdv_toplam)|replace(".", ",") }} TL</div>
+            <div>Vergiler Dahil Toplam Tutar: {{ "%.2f"|format(toplam)|replace(".", ",") }} TL</div>
+            <div class="toplam">Ödenecek Tutar: {{ "%.2f"|format(toplam)|replace(".", ",") }} TL</div>
+        </div>
+
+        <div class="yazi-ile">YALNIZ: {{ fatura.yazi_ile }}</div>
+    </div>
+
+    <!-- GİB SMS Onay Modal -->
+    <div id="gib-sms-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:9999; align-items:center; justify-content:center;">
+        <div style="background:#102133; border:1px solid #1e3a50; border-radius:8px; padding:20px; min-width:320px; max-width:400px;">
+            <h3 style="color:#4fc3f7; margin-bottom:12px; font-size:14px;"><i class="fa fa-mobile"></i> SMS Onay Kodu</h3>
+            <p style="color:#90a4ae; font-size:12px; margin-bottom:12px;">Telefonunuza gelen 6 haneli kodu girin.</p>
+            <input type="text" id="gib-sms-kod" placeholder="000000" maxlength="6" style="width:100%; padding:10px; background:#1e3a50; border:1px solid #2d4060; color:#e0f7fa; border-radius:4px; font-size:16px; letter-spacing:6px; text-align:center; margin-bottom:12px;">
+            <div style="display:flex; gap:8px; justify-content:flex-end;">
+                <button type="button" id="gib-sms-iptal" style="background:#546e7a; color:#fff; border:none; padding:8px 14px; border-radius:4px; cursor:pointer;">İptal</button>
+                <button type="button" id="gib-sms-onayla" style="background:#2e7d32; color:#fff; border:none; padding:8px 14px; border-radius:4px; cursor:pointer;"><i class="fa fa-check"></i> Onayla</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    (function(){
+        const faturaId = {{ fatura.id }};
+        const API_GIB_TASLAK = "{{ url_for('faturalar.api_gib_taslak') }}";
+        const API_GIB_SMS_ONAY = "{{ url_for('faturalar.api_gib_sms_onay') }}";
+        let gibTaslakUuid = null;
+
+        document.getElementById('btn-kaydet').addEventListener('click', function(){
+            alert('Fatura kayıtlı. GİB\'e göndermeden kayıt oluşturuldu.');
+            window.location.href = "{{ url_for('faturalar.faturalar') }}";
+        });
+
+        document.getElementById('btn-gib-gonder').addEventListener('click', async function(){
+            const btn = this;
+            btn.disabled = true;
+            try {
+                const res = await fetch(API_GIB_TASLAK, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ fatura_id: faturaId })
+                });
+                const j = await res.json();
+                if (j.ok && j.uuid) {
+                    gibTaslakUuid = j.uuid;
+                    document.getElementById('gib-sms-kod').value = '';
+                    document.getElementById('gib-sms-modal').style.display = 'flex';
+                } else {
+                    alert(j.mesaj || 'GİB taslak oluşturulamadı.');
+                }
+            } catch (e) {
+                alert('GİB isteği hatası: ' + (e.message || e));
+            }
+            btn.disabled = false;
+        });
+
+        const gibSmsModal = document.getElementById('gib-sms-modal');
+        document.getElementById('gib-sms-iptal').addEventListener('click', function(){
+            gibSmsModal.style.display = 'none';
+        });
+        document.getElementById('gib-sms-onayla').addEventListener('click', async function(){
+            const uuid = gibTaslakUuid;
+            const smsKod = (document.getElementById('gib-sms-kod').value || '').trim();
+            if (!uuid || !smsKod) {
+                alert('SMS kodunu girin.');
+                return;
+            }
+            try {
+                const res = await fetch(API_GIB_SMS_ONAY, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ uuid: uuid, sms_kodu: smsKod, fatura_id: faturaId })
+                });
+                const j = await res.json();
+                if (j.ok) {
+                    gibSmsModal.style.display = 'none';
+                    alert(j.mesaj || 'Fatura GİB e-Arşiv\'e gönderildi.');
+                    window.location.reload();
+                } else {
+                    alert(j.mesaj || 'SMS onayı başarısız.');
+                }
+            } catch (e) {
+                alert('Onay isteği hatası: ' + (e.message || e));
+            }
+        });
+    })();
+    </script>
+</body>
+</html>

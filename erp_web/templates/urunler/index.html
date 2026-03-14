@@ -17,6 +17,30 @@
     margin: 0;
     font-size: 16px;
 }
+.urun-search {
+    display:flex;
+    align-items:center;
+    gap:6px;
+    margin-left:16px;
+}
+.urun-search input {
+    background:#102133;
+    border:1px solid #243447;
+    color:#e0f7fa;
+    padding:4px 8px;
+    border-radius:4px;
+    font-size:12px;
+    min-width:220px;
+}
+.urun-search button {
+    background:#00bcd4;
+    color:#000;
+    border:none;
+    padding:5px 10px;
+    border-radius:4px;
+    font-size:11px;
+    cursor:pointer;
+}
 .urun-buttons button {
     background: #00bcd4;
     color: white;
@@ -52,7 +76,13 @@
 </style>
 
 <div class="urun-header">
-    <h2>📦 Ürünler</h2>
+    <div style="display:flex;align-items:center;">
+        <h2>📦 Ürünler</h2>
+        <div class="urun-search">
+            <input id="urun-ara" type="text" placeholder="Ürün adı / stok kodu / açıklama" onkeydown="if(event.key==='Enter'){urunAra();}" oninput="urunAraCanli();">
+            <button type="button" onclick="urunAra()">Ara</button>
+        </div>
+    </div>
     <div class="urun-buttons">
         <button onclick="urunCogalt()">📄 Ürün Çoğalt</button>
         <button onclick="yeniUrun()">➕ Yeni Ürün</button>
@@ -72,12 +102,13 @@
                 <th>Düşük Stok (<10)</th>
                 <th>Açıklama</th>
                 <th>İşlem</th>
+                <th>Sil</th>
             </tr>
         </thead>
-        <tbody>
+        <tbody id="urun-tbody">
             {% if urunler %}
                 {% for u in urunler %}
-                <tr class="urun-row" data-id="{{ u.id }}" data-ad="{{ u.urun_adi }}" {% if u.stok < 10 %}style="background: #4a1a1a;"{% endif %} onclick="selectUrun(this)">
+                <tr class="urun-row" data-id="{{ u.id }}" data-ad="{{ u.urun_adi }}" onclick="selectUrun(this)">
                     <td><strong>{{ u.urun_adi }}</strong></td>
                     <td>{{ u.stok_kodu }}</td>
                     <td>{{ u.birim }}</td>
@@ -86,13 +117,16 @@
                     <td style="text-align: center;">{% if u.stok < 10 %}⚠️{% else %}—{% endif %}</td>
                     <td>{{ u.aciklama or '—' }}</td>
                     <td>
-                        <button onclick="duzenle({{ u.id }})" style="background: #00bcd4; color: white; border: none; padding: 4px 8px; border-radius: 3px; font-size: 11px;">✏️ Düzenle</button>
+                        <button type="button" onclick="event.stopPropagation(); duzenle({{ u.id }});" style="background: #00bcd4; color: white; border: none; padding: 4px 8px; border-radius: 3px; font-size: 11px;">✏️ Düzenle</button>
+                    </td>
+                    <td>
+                        <button type="button" onclick="event.stopPropagation(); urunSil({{ u.id }}, this);" style="background: #c62828; color: white; border: none; padding: 4px 8px; border-radius: 3px; font-size: 11px;">🗑️ Sil</button>
                     </td>
                 </tr>
                 {% endfor %}
             {% else %}
                 <tr>
-                    <td colspan="8" style="text-align: center; padding: 40px; color: #6b7280;">
+                    <td colspan="9" style="text-align: center; padding: 40px; color: #6b7280;">
                         Henüz ürün kaydı yok
                     </td>
                 </tr>
@@ -104,6 +138,7 @@
 <script>
 let seciliUrunId = null;
 let seciliUrunAd = '';
+let urunAraTimer = null;
 
 function yeniUrun() {
     window.location.href = "{{ url_for('urunler.yeni') }}";
@@ -123,6 +158,59 @@ function selectUrun(tr) {
         row.style.outline = '';
     });
     tr.style.outline = '2px solid #00bcd4';
+}
+
+async function urunAra() {
+    const qEl = document.getElementById('urun-ara');
+    if (!qEl) return;
+    const q = qEl.value.trim();
+    const tbody = document.getElementById('urun-tbody');
+    if (!tbody) return;
+    try {
+        const res = await fetch('/urunler/api/list?q=' + encodeURIComponent(q));
+        const list = await res.json();
+        seciliUrunId = null;
+        seciliUrunAd = '';
+        if (!list || !list.length) {
+            tbody.innerHTML = '<tr><td colspan=\"9\" style=\"text-align:center;padding:40px;color:#6b7280;\">Eşleşen ürün bulunamadı</td></tr>';
+            return;
+        }
+        let html = '';
+        list.forEach(function(u){
+            const stok = u.stok_miktari != null ? u.stok_miktari : 0;
+            const low = stok < 10;
+            const fiyat = (u.birim_fiyat != null ? parseFloat(u.birim_fiyat) : 0).toFixed(2);
+            const aciklama = u.aciklama || '—';
+            html += `
+            <tr class="urun-row" data-id="${u.id}" data-ad="${u.urun_adi || ''}" onclick="selectUrun(this)">
+              <td><strong>${u.urun_adi || ''}</strong></td>
+              <td>${u.stok_kodu || ''}</td>
+              <td>${u.birim || ''}</td>
+              <td style="text-align:right;">${fiyat}</td>
+              <td style="text-align:center;">${stok}</td>
+              <td style="text-align:center;">${low ? '⚠️' : '—'}</td>
+              <td>${aciklama}</td>
+              <td>
+                <button type="button" onclick="event.stopPropagation(); duzenle(${u.id});" style="background:#00bcd4;color:white;border:none;padding:4px 8px;border-radius:3px;font-size:11px;">✏️ Düzenle</button>
+              </td>
+              <td>
+                <button type="button" onclick="event.stopPropagation(); urunSil(${u.id}, this);" style="background:#c62828;color:white;border:none;padding:4px 8px;border-radius:3px;font-size:11px;">🗑️ Sil</button>
+              </td>
+            </tr>`;
+        });
+        tbody.innerHTML = html;
+    } catch (e) {
+        alert('Ürün ararken bir hata oluştu.');
+    }
+}
+
+function urunAraCanli() {
+  if (urunAraTimer) {
+    clearTimeout(urunAraTimer);
+  }
+  urunAraTimer = setTimeout(function() {
+    urunAra();
+  }, 300);
 }
 
 async function urunCogalt() {
@@ -159,6 +247,28 @@ async function urunCogalt() {
 
 function duzenle(id) {
     window.location.href = `/urunler/${id}/duzenle`;
+}
+
+async function urunSil(id, btn) {
+    var row = btn && btn.closest ? btn.closest('tr') : null;
+    var ad = row ? (row.getAttribute('data-ad') || '').trim() : '';
+    if (!confirm('Bu ürünü silmek istediğinize emin misiniz?\n\n' + (ad || 'Ürün #' + id))) return;
+    try {
+        const res = await fetch('/urunler/api/delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: id })
+        });
+        const j = await res.json();
+        if (!res.ok || !j.ok) {
+            alert(j.mesaj || 'Ürün silinemedi. Fatura veya başka işlemde kullanılıyor olabilir.');
+            return;
+        }
+        alert('Ürün silindi.');
+        location.reload();
+    } catch (e) {
+        alert('Silme sırasında hata oluştu.');
+    }
 }
 </script>
 {% endblock %}

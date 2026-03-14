@@ -163,6 +163,7 @@ CREATE TABLE IF NOT EXISTS urunler (
     stok            INTEGER DEFAULT 0,
     birim           TEXT DEFAULT 'adet',
     aciklama        TEXT,
+    kdv_orani       INTEGER DEFAULT 20,
     is_active       BOOLEAN DEFAULT TRUE,
     created_at      TIMESTAMPTZ DEFAULT NOW()
 );
@@ -259,6 +260,7 @@ def init_schema():
         ensure_tahsilatlar_columns()
         ensure_kargolar_durum()
         ensure_faturalar_amount_columns()
+        ensure_musteri_kyc_columns()
         ensure_office_rentals()
         ensure_crm_leads()
         ensure_personel_extra_columns()
@@ -362,6 +364,49 @@ def ensure_crm_leads():
         )
     except Exception as e:
         print(f"crm_leads: {e}")
+
+
+def ensure_musteri_kyc_columns():
+    """Supabase musteri_kyc tablosunu web tarafındaki KYC şemasına yaklaştırır.
+
+    Not: migrate_to_supabase.py içindeki ilk şema daha sade; buradaki kolonlar
+    API'nin beklediği alanlarla uyumlu olacak şekilde sonradan eklenir.
+    Var olan kolonlara dokunulmaz.
+    """
+    columns = (
+        ("sirket_unvani", "TEXT"),
+        ("unvan", "TEXT"),
+        ("email", "TEXT"),
+        ("mersis_no", "TEXT"),
+        ("ticaret_sicil_no", "TEXT"),
+        ("kurulus_tarihi", "DATE"),
+        ("faaliyet_konusu", "TEXT"),
+        ("nace_kodu", "TEXT"),
+        ("eski_adres", "TEXT"),
+        ("yeni_adres", "TEXT"),
+        ("sube_merkez", "TEXT"),
+        ("yetkili_tcno", "TEXT"),
+        ("yetkili_dogum", "DATE"),
+        ("yetkili_ikametgah", "TEXT"),
+        ("yillik_kira", "NUMERIC(12,2)"),
+        ("sozlesme_no", "TEXT"),
+        ("evrak_imza_sirkuleri", "INTEGER DEFAULT 0"),
+        ("evrak_vergi_levhasi", "INTEGER DEFAULT 0"),
+        ("evrak_ticaret_sicil", "INTEGER DEFAULT 0"),
+        ("evrak_faaliyet_belgesi", "INTEGER DEFAULT 0"),
+        ("evrak_kimlik_fotokopi", "INTEGER DEFAULT 0"),
+        ("evrak_ikametgah", "INTEGER DEFAULT 0"),
+        ("evrak_kase", "INTEGER DEFAULT 0"),
+        ("notlar", "TEXT"),
+        ("tamamlanma_yuzdesi", "INTEGER DEFAULT 0"),
+        ("created_at", "TIMESTAMPTZ DEFAULT NOW()"),
+        ("updated_at", "TIMESTAMPTZ DEFAULT NOW()"),
+    )
+    for col, ctype in columns:
+        try:
+            execute(f"ALTER TABLE musteri_kyc ADD COLUMN IF NOT EXISTS {col} {ctype}")
+        except Exception as e:
+            print(f"musteri_kyc.{col}: {e}")
 
 
 def ensure_contracts_engine():
@@ -836,15 +881,27 @@ def ensure_kargolar_durum():
 
 
 def ensure_faturalar_amount_columns():
-    """faturalar tablosunda tutar/toplam yoksa ekle (farklı şemalarda sadece biri olabilir)."""
+    """faturalar tablosunda tutar/toplam/kdv_tutar yoksa ekle (farklı şemalarda sadece biri olabilir)."""
     try:
         execute("ALTER TABLE faturalar ADD COLUMN IF NOT EXISTS tutar NUMERIC(12,2) DEFAULT 0")
     except Exception as e:
         print(f"faturalar.tutar: {e}")
     try:
+        execute("ALTER TABLE faturalar ADD COLUMN IF NOT EXISTS kdv_tutar NUMERIC(12,2) DEFAULT 0")
+    except Exception as e:
+        print(f"faturalar.kdv_tutar: {e}")
+    try:
         execute("ALTER TABLE faturalar ADD COLUMN IF NOT EXISTS toplam NUMERIC(12,2) DEFAULT 0")
     except Exception as e:
         print(f"faturalar.toplam: {e}")
+    try:
+        execute("ALTER TABLE faturalar ADD COLUMN IF NOT EXISTS notlar TEXT")
+    except Exception as e:
+        print(f"faturalar.notlar: {e}")
+    try:
+        execute("ALTER TABLE faturalar ADD COLUMN IF NOT EXISTS satirlar_json TEXT")
+    except Exception as e:
+        print(f"faturalar.satirlar_json: {e}")
 
 
 def clear_all_customers():

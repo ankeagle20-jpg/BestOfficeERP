@@ -54,6 +54,48 @@
         .filter-bar button:hover {
             background: #0097a7;
         }
+        .filter-bar button[style*="background:#4caf50"]:hover {
+            background: #388e3c;
+        }
+        .cari-ara-wrap {
+            position: relative;
+            display: inline-block;
+        }
+        .cari-ara-wrap input[type="text"] {
+            width: 260px;
+        }
+        .cari-ara-list {
+            position: absolute;
+            left: 0;
+            top: 100%;
+            margin-top: 2px;
+            width: 100%;
+            max-height: 280px;
+            overflow-y: auto;
+            background: #1e3a50;
+            border: 1px solid #3d5070;
+            border-radius: 4px;
+            z-index: 1000;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        }
+        .cari-ara-list div {
+            padding: 10px 12px;
+            cursor: pointer;
+            border-bottom: 1px solid #2d4060;
+            font-size: 13px;
+        }
+        .cari-ara-list div:hover {
+            background: #2d4060;
+            color: #4fc3f7;
+        }
+        .cari-ara-list div.empty {
+            color: #90a4ae;
+            cursor: default;
+        }
+        .cari-ara-list div.empty:hover {
+            background: transparent;
+            color: #90a4ae;
+        }
         .stats {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
@@ -122,26 +164,46 @@
     <div class="filter-bar">
         <label>Yıl:</label>
         <select id="yil">
-            <option>2026</option>
-            <option>2025</option>
-            <option>2024</option>
+            {% for y in yillar %}<option value="{{ y }}" {{ 'selected' if yil == y else '' }}>{{ y }}</option>{% endfor %}
         </select>
         
         <label>Ay:</label>
         <select id="ay">
             <option value="">Tümü</option>
-            <option>Ocak</option>
-            <option>Şubat</option>
-            <option>Mart</option>
+            {% for a in aylar %}<option value="{{ a }}" {{ 'selected' if ay == a else '' }}>{{ a }}</option>{% endfor %}
         </select>
+        
+        <label>Başlangıç:</label>
+        <input type="date" id="baslangic" value="{{ baslangic }}">
+        <label>Bitiş:</label>
+        <input type="date" id="bitis" value="{{ bitis }}">
         
         <label>Ofis:</label>
         <select id="ofis">
             <option value="">Tümü</option>
+            {% for o in ofisler %}<option value="{{ o.code|default('') }}" {{ 'selected' if ofis_kodu == (o.code|default('')) else '' }}>{{ o.code|default('') }}</option>{% endfor %}
         </select>
         
         <button onclick="filtrele()">
             <i class="fa fa-filter"></i> Filtrele
+        </button>
+        <button type="button" onclick="yeniFaturaEkleAc()" style="background:#4caf50;">
+            <i class="fa fa-plus"></i> Yeni fatura ekle
+        </button>
+    </div>
+    
+    <div id="yeni_fatura_cari_wrap" class="filter-bar yeni-fatura-cari-bar" style="display:none; margin-top:8px;">
+        <label>Cari seçin:</label>
+        <div class="cari-ara-wrap">
+            <input type="text" id="cari_musteri_ara" placeholder="Cari adı yazarak arayın..." autocomplete="off">
+            <input type="hidden" id="cari_musteri_id" value="">
+            <div id="cari_ara_list" class="cari-ara-list" style="display:none;"></div>
+        </div>
+        <button type="button" onclick="cariSecipFaturaKes()" style="background:#4caf50;">
+            <i class="fa fa-file-invoice"></i> Seçilen caride fatura kes
+        </button>
+        <button type="button" onclick="yeniFaturaCariKapat()" style="background:#546e7a;">
+            <i class="fa fa-times"></i> Kapat
         </button>
     </div>
     
@@ -205,13 +267,86 @@
     function filtrele() {
         const yil = document.getElementById('yil').value;
         const ay = document.getElementById('ay').value;
+        const baslangic = document.getElementById('baslangic').value;
+        const bitis = document.getElementById('bitis').value;
         const ofis = document.getElementById('ofis').value;
         
-        let url = '/faturalar/faturalar?yil=' + yil;
+        let url = '/faturalar/faturalar?yil=' + yil + '&baslangic=' + encodeURIComponent(baslangic) + '&bitis=' + encodeURIComponent(bitis);
         if (ay) url += '&ay=' + encodeURIComponent(ay);
         if (ofis) url += '&ofis=' + encodeURIComponent(ofis);
         
         window.location.href = url;
+    }
+    
+    var cariAraTimer = null;
+    function yeniFaturaEkleAc() {
+        document.getElementById('yeni_fatura_cari_wrap').style.display = 'flex';
+        document.getElementById('cari_musteri_ara').value = '';
+        document.getElementById('cari_musteri_id').value = '';
+        document.getElementById('cari_ara_list').style.display = 'none';
+        document.getElementById('cari_musteri_ara').focus();
+    }
+    function yeniFaturaCariKapat() {
+        document.getElementById('yeni_fatura_cari_wrap').style.display = 'none';
+        document.getElementById('cari_ara_list').style.display = 'none';
+    }
+    function cariAraInput() {
+        var q = (document.getElementById('cari_musteri_ara').value || '').trim();
+        var listEl = document.getElementById('cari_ara_list');
+        listEl.style.display = 'block';
+        if (q.length < 1) {
+            listEl.innerHTML = '<div class="empty">En az 1 karakter yazın</div>';
+            return;
+        }
+        clearTimeout(cariAraTimer);
+        cariAraTimer = setTimeout(function() {
+            fetch('/faturalar/api/musteriler?q=' + encodeURIComponent(q))
+                .then(function(r) { return r.json(); })
+                .then(function(arr) {
+                    if (!Array.isArray(arr)) arr = [];
+                    if (arr.length === 0) {
+                        listEl.innerHTML = '<div class="empty">Eşleşen cari yok</div>';
+                        return;
+                    }
+                    listEl.innerHTML = arr.map(function(m) {
+                        return '<div data-id="' + (m.id || '') + '" data-name="' + (m.name || '').replace(/"/g, '&quot;') + '">' + (m.name || '').replace(/</g, '&lt;') + '</div>';
+                    }).join('');
+                    listEl.querySelectorAll('div[data-id]').forEach(function(div) {
+                        div.onclick = function() {
+                            document.getElementById('cari_musteri_id').value = this.getAttribute('data-id') || '';
+                            document.getElementById('cari_musteri_ara').value = this.getAttribute('data-name') || '';
+                            listEl.style.display = 'none';
+                        };
+                    });
+                })
+                .catch(function() {
+                    listEl.innerHTML = '<div class="empty">Arama yapılamadı</div>';
+                });
+        }, 200);
+    }
+    document.addEventListener('DOMContentLoaded', function() {
+        var ara = document.getElementById('cari_musteri_ara');
+        if (ara) {
+            ara.addEventListener('focus', function() { if (this.value.trim()) cariAraInput(); });
+            ara.addEventListener('input', cariAraInput);
+            ara.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape') {
+                    document.getElementById('cari_ara_list').style.display = 'none';
+                }
+            });
+        }
+        document.addEventListener('click', function(e) {
+            var wrap = document.querySelector('.cari-ara-wrap');
+            if (wrap && !wrap.contains(e.target)) document.getElementById('cari_ara_list').style.display = 'none';
+        });
+    });
+    function cariSecipFaturaKes() {
+        var cariId = document.getElementById('cari_musteri_id').value;
+        if (!cariId) {
+            alert('Lütfen önce cari arayıp seçin.');
+            return;
+        }
+        window.location.href = '/faturalar/yeni?musteri_id=' + encodeURIComponent(cariId);
     }
     </script>
 </body>

@@ -303,6 +303,46 @@ def api_musteri_detay(mid):
         out["faaliyet"] = _musteri_serialize_val(kyc.get("faaliyet_konusu"))
         out["onceki_adres"] = _musteri_serialize_val(kyc.get("eski_adres"))
         out["sube_merkez"] = _musteri_serialize_val(kyc.get("sube_merkez"))
+
+    # Kaç ay ödeme yapıldı (tahsilat / aylık kira KDV dahil)
+    try:
+        aylik_kira = 0.0
+        if out.get("guncel_kira_bedeli"):
+            aylik_kira = float(str(out["guncel_kira_bedeli"]).replace(",", ".")) or 0.0
+        elif out.get("ilk_kira_bedeli"):
+            aylik_kira = float(str(out["ilk_kira_bedeli"]).replace(",", ".")) or 0.0
+    except Exception:
+        aylik_kira = 0.0
+    try:
+        kdv_oran = float(str(kyc.get("kdv_oran") or "20").replace(",", ".")) if kyc else 20.0
+    except Exception:
+        kdv_oran = 20.0
+    aylik_kdv_dahil = round(aylik_kira * (1 + kdv_oran / 100), 2) if aylik_kira > 0 else 0.0
+
+    odenen_ay_sayisi = 0
+    kismi_odeme_var = False
+    kismi_ay_eksik_tutar = 0.0  # Kısmi ödenen ayda kalan borç (kutuda gösterilecek)
+    if aylik_kdv_dahil > 0:
+        tahsilat_row = fetch_one(
+            "SELECT COALESCE(SUM(tutar), 0) AS t FROM tahsilatlar WHERE musteri_id = %s OR customer_id = %s",
+            (mid, mid),
+        )
+        try:
+            toplam_tahsilat = float(tahsilat_row.get("t") or 0) if tahsilat_row else 0.0
+        except Exception:
+            toplam_tahsilat = 0.0
+        if toplam_tahsilat > 0:
+            odenen_ay_sayisi = int(toplam_tahsilat // aylik_kdv_dahil)
+            kalan = toplam_tahsilat - (odenen_ay_sayisi * aylik_kdv_dahil)
+            if 0 < kalan < aylik_kdv_dahil:
+                kismi_odeme_var = True
+                kismi_ay_eksik_tutar = round(aylik_kdv_dahil - kalan, 2)  # O aydan ne kadar eksik kaldı
+
+    out["odenen_ay_sayisi"] = odenen_ay_sayisi
+    out["odenen_tam_ay_sayisi"] = odenen_ay_sayisi
+    out["kismi_odeme_var"] = kismi_odeme_var
+    out["kismi_ay_eksik_tutar"] = kismi_ay_eksik_tutar
+
     return jsonify({"ok": True, "musteri": out})
 
 
@@ -1041,18 +1081,44 @@ def kira_bildirgesi_pdf():
 
 # ── Cari Kart API ───────────────────────────────────────────────────────────
 
-def _cari_hareketler(musteri_id):
-    """Fatura (borç) ve tahsilat (alacak) satırlarını tarih sırasına göre birleştirip bakiye hesaplar."""
+def _odeme_turu_harf(odeme_turu):
+    """Tahsilat açıklaması için harf: EFT/Havale/Banka=B, Çek=C, Kredi Kartı=K, Nakit=N."""
+    if not odeme_turu:
+        return "N"
+    o = str(odeme_turu).strip().lower()
+    if o in ("havale", "eft", "banka"):
+        return "B"
+    if o == "cek":
+        return "C"
+    if o in ("kredi_karti", "kredi kartı"):
+        return "K"
+    return "N"
+
+
+def _cari_hareketler(musteri_id, banka_tahsilat_only=False):
+    """Fatura (borç) ve tahsilat (alacak) satırlarını tarih sırasına göre birleştirip bakiye hesaplar.
+    banka_tahsilat_only=True ise sadece havale/eft/banka ödeme türlü tahsilatlar alınır."""
     faturalar = fetch_all(
         """SELECT id, fatura_no AS belge_no, fatura_tarihi AS tarih, COALESCE(toplam, tutar, 0) AS tutar, 'Fatura' AS tur, vade_tarihi
            FROM faturalar WHERE musteri_id = %s ORDER BY fatura_tarihi, id""",
         (musteri_id,)
     )
-    tahsilatlar = fetch_all(
-        """SELECT id, COALESCE(makbuz_no, 'Makbuz-' || id) AS belge_no, tahsilat_tarihi AS tarih, tutar, 'Tahsilat' AS tur
-           FROM tahsilatlar WHERE musteri_id = %s ORDER BY tahsilat_tarihi, id""",
-        (musteri_id,)
-    )
+    if banka_tahsilat_only:
+        # Nakit hariç tüm tahsilatlar: havale, eft, banka, kredi kartı, çek. Sadece nakit gösterilmez.
+        tahsilatlar = fetch_all(
+            """SELECT id, COALESCE(makbuz_no, 'Makbuz-' || id) AS belge_no, tahsilat_tarihi AS tarih, tutar, odeme_turu, 'Tahsilat' AS tur
+               FROM tahsilatlar
+               WHERE (musteri_id = %s OR customer_id = %s)
+                 AND LOWER(TRIM(COALESCE(odeme_turu, 'nakit'))) IN ('havale', 'eft', 'banka', 'kredi_karti', 'cek')
+               ORDER BY tahsilat_tarihi, id""",
+            (musteri_id, musteri_id)
+        )
+    else:
+        tahsilatlar = fetch_all(
+            """SELECT id, COALESCE(makbuz_no, 'Makbuz-' || id) AS belge_no, tahsilat_tarihi AS tarih, tutar, odeme_turu, 'Tahsilat' AS tur
+               FROM tahsilatlar WHERE (musteri_id = %s OR customer_id = %s) ORDER BY tahsilat_tarihi, id""",
+            (musteri_id, musteri_id)
+        )
     rows = []
     for r in faturalar:
         rows.append({
@@ -1062,7 +1128,7 @@ def _cari_hareketler(musteri_id):
     for r in tahsilatlar:
         rows.append({
             "id": "t-" + str(r.get("id")), "belge_no": r.get("belge_no") or "", "tarih": str(r.get("tarih") or "")[:10],
-            "tur": "Tahsilat", "borc": 0, "alacak": float(r.get("tutar") or 0), "vade_tarihi": None
+            "tur": "Tahsilat", "borc": 0, "alacak": float(r.get("tutar") or 0), "vade_tarihi": None, "odeme_turu": r.get("odeme_turu")
         })
     rows.sort(key=lambda x: (x["tarih"], x["tur"] == "Fatura" and 0 or 1))
     bakiye = 0
@@ -1078,10 +1144,7 @@ _AY_ADLARI = ("Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran",
 
 
 def _cari_ekstre_hareketler(musteri_id, baslangic, bitis, aylik_kira):
-    """
-    Cari ekstre: Tarih aralığında aylık kira borç (her ay fatura gibi) + tahsilat alacak,
-    tarih sırasında birleştirilip yürüyen bakiye hesaplanır.
-    """
+    """Cari ekstre: aylık kira borç + tahsilat alacak + devir bakiyesi."""
     try:
         bas = baslangic if isinstance(baslangic, date) else datetime.strptime(str(baslangic)[:10], "%Y-%m-%d").date()
         bit = bitis if isinstance(bitis, date) else datetime.strptime(str(bitis)[:10], "%Y-%m-%d").date()
@@ -1089,7 +1152,41 @@ def _cari_ekstre_hareketler(musteri_id, baslangic, bitis, aylik_kira):
         return []
     aylik = float(aylik_kira or 0)
     rows = []
-    # Her ay için bir "Kira" borç satırı (ayın ilk günü)
+
+    # 1) Sözleşme başlangıcından ekstre başlangıcına kadar olan kira taksitlerini DEVİR olarak hesapla
+    soz = fetch_one(
+        "SELECT sozlesme_tarihi FROM musteri_kyc WHERE musteri_id = %s ORDER BY id DESC LIMIT 1",
+        (musteri_id,),
+    )
+    dev_bas = bas
+    if soz and soz.get("sozlesme_tarihi"):
+        try:
+            soz_raw = soz["sozlesme_tarihi"]
+            soz_tarih = soz_raw if isinstance(soz_raw, date) else datetime.strptime(str(soz_raw)[:10], "%Y-%m-%d").date()
+        except Exception:
+            soz_tarih = None
+        if soz_tarih and soz_tarih < bas:
+            dev_bas = soz_tarih
+    devreden = 0.0
+    if aylik > 0 and dev_bas < bas:
+        y, m = dev_bas.year, dev_bas.month
+        while (y, m) < (bas.year, bas.month):
+            devreden += aylik
+            m += 1
+            if m > 12:
+                m, y = 1, y + 1
+        if devreden:
+            rows.append({
+                "tarih": bas.isoformat(),
+                "aciklama": "Devreden Bakiye",
+                "belge_no": "DEVIR",
+                "tur": "Devir",
+                "borc": round(devreden, 2),
+                "alacak": 0,
+                "bakiye": None,
+            })
+
+    # 2) Ekstre aralığındaki aylık kira satırları (her ayın 1'i)
     y, m = bas.year, bas.month
     bit_y, bit_m = bit.year, bit.month
     while (y, m) <= (bit_y, bit_m):
@@ -1103,32 +1200,35 @@ def _cari_ekstre_hareketler(musteri_id, baslangic, bitis, aylik_kira):
                 "tur": "Kira",
                 "borc": round(aylik, 2),
                 "alacak": 0,
-                "bakiye": None
+                "bakiye": None,
             })
         m += 1
         if m > 12:
             m, y = 1, y + 1
-    # Tahsilatlar (alacak) aynı aralıkta
+
+    # 3) Tahsilatlar (alacak) aynı aralıkta; açıklamada ödeme türü harfi (B/C/K/N)
     tahsilatlar = fetch_all(
-        """SELECT id, COALESCE(makbuz_no, 'Makbuz-' || id) AS belge_no, tahsilat_tarihi AS tarih, tutar
+        """SELECT id, COALESCE(makbuz_no, 'Makbuz-' || id) AS belge_no, tahsilat_tarihi AS tarih, tutar, odeme_turu
            FROM tahsilatlar
            WHERE (musteri_id = %s OR customer_id = %s)
              AND (tahsilat_tarihi::date) >= %s AND (tahsilat_tarihi::date) <= %s
            ORDER BY tahsilat_tarihi, id""",
-        (musteri_id, musteri_id, bas, bit)
+        (musteri_id, musteri_id, bas, bit),
     )
     for r in (tahsilatlar or []):
         tarih = str(r.get("tarih") or "")[:10]
+        harf = _odeme_turu_harf(r.get("odeme_turu"))
         rows.append({
             "tarih": tarih,
-            "aciklama": "Tahsilat",
+            "aciklama": "Tahsilat " + harf,
             "belge_no": r.get("belge_no") or "",
             "tur": "Tahsilat",
             "borc": 0,
             "alacak": round(float(r.get("tutar") or 0), 2),
-            "bakiye": None
+            "bakiye": None,
         })
-    rows.sort(key=lambda x: (x["tarih"], x["tur"] == "Kira" and 0 or 1))
+
+    rows.sort(key=lambda x: (x["tarih"], 0 if x["tur"] in ("Devir", "Kira") else 1))
     bakiye = 0
     for r in rows:
         bakiye = bakiye + r["borc"] - r["alacak"]
@@ -1319,10 +1419,93 @@ def api_cari_ekstre():
     if bas > bit:
         bas, bit = bit, bas
     aylik_kira = request.args.get("aylik_kira", type=float) or 0
-    hareketler = _cari_ekstre_hareketler(musteri_id, bas, bit, aylik_kira)
+    kdv_oran = request.args.get("kdv_oran", type=float) or 20
+    # Borçlar KDV dahil (örn. 1000 + %20 = 1200)
+    aylik_kira_kdv_dahil = round(aylik_kira * (1 + kdv_oran / 100), 2) if aylik_kira else 0
+    hareketler = _cari_ekstre_hareketler(musteri_id, bas, bit, aylik_kira_kdv_dahil)
     toplam_borc = sum(h.get("borc") or 0 for h in hareketler)
     toplam_alacak = sum(h.get("alacak") or 0 for h in hareketler)
     bakiye = round(toplam_borc - toplam_alacak, 2)
+    return jsonify({
+        "ok": True,
+        "musteri_adi": cust.get("name") or "",
+        "hareketler": hareketler,
+        "toplam_borc": round(toplam_borc, 2),
+        "toplam_alacak": round(toplam_alacak, 2),
+        "bakiye": bakiye,
+    })
+
+
+@bp.route('/api/cari-ekstre-b')
+@giris_gerekli
+def api_cari_ekstre_b():
+    """
+    Cari Ekstre B: Kesilen faturalar (borç) + nakit hariç tahsilatlar (havale, EFT, banka, kredi kartı, çek) (alacak).
+    Sadece nakit tahsilatlar bu ekstrede gösterilmez.
+    """
+    musteri_id = request.args.get("musteri_id", type=int)
+    if not musteri_id:
+        return jsonify({"ok": False, "mesaj": "musteri_id gerekli."}), 400
+    cust = fetch_one("SELECT id, name FROM customers WHERE id = %s", (musteri_id,))
+    if not cust:
+        return jsonify({"ok": False, "mesaj": "Müşteri bulunamadı."}), 404
+    bugun = date.today()
+    yil_basi = date(bugun.year, 1, 1)
+    sonraki_ay = bugun.replace(day=28) + timedelta(days=4)
+    bu_ay_sonu = sonraki_ay.replace(day=1) - timedelta(days=1)
+    baslangic = request.args.get("baslangic")
+    bitis = request.args.get("bitis")
+    try:
+        bas = datetime.strptime(baslangic[:10], "%Y-%m-%d").date() if baslangic else yil_basi
+        bit = datetime.strptime(bitis[:10], "%Y-%m-%d").date() if bitis else bu_ay_sonu
+    except Exception:
+        bas, bit = yil_basi, bu_ay_sonu
+    if bas > bit:
+        bas, bit = bit, bas
+    rows = _cari_hareketler(musteri_id, banka_tahsilat_only=True)
+    # Açılış bakiyesi: bas tarihinden önceki hareketlerin net tutarı
+    acilis = 0.0
+    filtered = []
+    for r in rows:
+        tarih_str = (r.get("tarih") or "")[:10]
+        try:
+            t = datetime.strptime(tarih_str, "%Y-%m-%d").date() if tarih_str else None
+        except Exception:
+            t = None
+        borc = round(float(r.get("borc") or 0), 2)
+        alacak = round(float(r.get("alacak") or 0), 2)
+        if t is None:
+            continue
+        if t < bas:
+            acilis += borc - alacak
+            continue
+        if t > bit:
+            continue
+        tur = r.get("tur") or ""
+        belge_no = (r.get("belge_no") or "").strip()
+        if tur == "Tahsilat":
+            harf = _odeme_turu_harf(r.get("odeme_turu"))
+            aciklama = "Tahsilat " + harf + (" " + belge_no if belge_no else "")
+        else:
+            aciklama = tur + (" " + belge_no if belge_no else "")
+        filtered.append({
+            "tarih": tarih_str,
+            "aciklama": aciklama.strip() or tur,
+            "belge_no": r.get("belge_no") or "",
+            "tur": r.get("tur") or "",
+            "borc": borc,
+            "alacak": alacak,
+        })
+    filtered.sort(key=lambda x: (x["tarih"], x["tur"] == "Fatura" and 0 or 1))
+    bakiye = acilis
+    hareketler = []
+    for h in filtered:
+        bakiye = round(bakiye + (h["borc"] - h["alacak"]), 2)
+        h["bakiye"] = bakiye
+        hareketler.append(h)
+    toplam_borc = sum(h.get("borc") or 0 for h in hareketler)
+    toplam_alacak = sum(h.get("alacak") or 0 for h in hareketler)
+    bakiye = round(acilis + toplam_borc - toplam_alacak, 2)
     return jsonify({
         "ok": True,
         "musteri_adi": cust.get("name") or "",

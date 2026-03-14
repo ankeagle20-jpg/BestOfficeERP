@@ -1,17 +1,43 @@
 """
 Ürünler: ürün listesi, ekleme/güncelleme/silme, ürün çoğalt, otomatik stok kodu.
 """
-from flask import Blueprint, render_template, request, jsonify, redirect, url_for
+from flask import Blueprint, render_template, request, jsonify, redirect, url_for, abort
 from auth import giris_gerekli, admin_gerekli
 from db import fetch_all, fetch_one, execute, execute_returning
 
 bp = Blueprint("urunler", __name__)
 
 
+def _ensure_urunler_kdv_column():
+    """urunler tablosuna kdv_orani kolonu yoksa ekle (tek seferlik)."""
+    try:
+        execute("ALTER TABLE urunler ADD COLUMN IF NOT EXISTS kdv_orani INTEGER DEFAULT 20")
+    except Exception:
+        # Eski Postgres sürümlerinde veya yetki sorununda ana akışı bozmasın
+        return
+
+
+_ensure_urunler_kdv_column()
+
+
 @bp.route("/")
 @giris_gerekli
 def index():
-    return render_template("urunler/index.html")
+    """Ürünler listesi — veritabanından çekip şablona ver."""
+    rows = fetch_all(
+        """
+        SELECT id, urun_adi, stok_kodu, birim_fiyat, stok_miktari, birim, aciklama, kdv_orani, is_active
+        FROM urunler
+        ORDER BY LOWER(urun_adi), stok_kodu
+        """
+    )
+    urunler = []
+    for r in (rows or []):
+        u = dict(r)
+        u["birim_fiyat"] = float(r.get("birim_fiyat") or 0)
+        u["stok"] = int(r.get("stok_miktari") or 0)
+        urunler.append(u)
+    return render_template("urunler/index.html", urunler=urunler)
 
 
 @bp.route("/yeni")
@@ -21,13 +47,31 @@ def yeni():
     return render_template("urunler/yeni.html")
 
 
+@bp.route("/<int:id>/duzenle")
+@giris_gerekli
+def duzenle(id):
+    """Ürün düzenleme sayfası."""
+    row = fetch_one(
+        "SELECT id, urun_adi, stok_kodu, birim_fiyat, stok_miktari, birim, aciklama, kdv_orani, is_active FROM urunler WHERE id = %s",
+        (id,),
+    )
+    if not row:
+        abort(404)
+    urun = dict(row)
+    urun["birim_fiyat"] = float(urun.get("birim_fiyat") or 0)
+    urun["stok_miktari"] = float(urun.get("stok_miktari") or 0)
+    urun["kdv_orani"] = int(urun.get("kdv_orani") or 20)
+    urun["is_active"] = bool(urun.get("is_active"))
+    return render_template("urunler/duzenle.html", urun=urun)
+
+
 @bp.route("/api/list")
 @giris_gerekli
 def api_list():
     """Tüm ürünler (opsiyonel arama). Her kelime ad/açıklama/stok_kodu içinde aranır, sıra fark etmez."""
     q = (request.args.get("q") or "").strip()[:100]
     sql = """
-    SELECT id, urun_adi, stok_kodu, birim_fiyat, stok_miktari, birim, aciklama, is_active
+    SELECT id, urun_adi, stok_kodu, birim_fiyat, stok_miktari, birim, aciklama, kdv_orani, is_active
     FROM urunler WHERE 1=1
     """
     params = []
@@ -37,11 +81,12 @@ def api_list():
             pattern = "%" + word + "%"
             sql += " AND (LOWER(urun_adi) LIKE LOWER(%s) OR LOWER(COALESCE(aciklama,'')) LIKE LOWER(%s) OR LOWER(COALESCE(stok_kodu,'')) LIKE LOWER(%s))"
             params.extend((pattern, pattern, pattern))
-    sql += " ORDER BY stok_kodu"
+    sql += " ORDER BY LOWER(urun_adi), stok_kodu"
     rows = fetch_all(sql, tuple(params) if params else None)
     for r in rows or []:
         r["birim_fiyat"] = float(r.get("birim_fiyat") or 0)
         r["stok_miktari"] = float(r.get("stok_miktari") or 0)
+        r["kdv_orani"] = int(r.get("kdv_orani") or 20)
         r["is_active"] = bool(r.get("is_active"))
     return jsonify(rows or [])
 
@@ -91,6 +136,14 @@ def api_save():
             stok_miktari = 0
         birim = (data.get("birim") or "adet").strip()[:20]
         aciklama = (data.get("aciklama") or "").strip()[:500]
+        try:
+            kdv_orani = int(data.get("kdv_orani", 20))
+        except (TypeError, ValueError):
+            kdv_orani = 20
+        if kdv_orani < 0:
+            kdv_orani = 0
+        if kdv_orani > 100:
+            kdv_orani = 100
         is_active = data.get("is_active") not in (False, 0, "0", "false")
         pid = data.get("id")
 
@@ -99,17 +152,17 @@ def api_save():
             if existing:
                 return jsonify({"ok": False, "mesaj": "Bu stok kodu başka üründe kullanılıyor"}), 400
             execute(
-                """UPDATE urunler SET urun_adi=%s, stok_kodu=%s, birim_fiyat=%s, stok_miktari=%s, birim=%s, aciklama=%s, is_active=%s WHERE id=%s""",
-                (urun_adi, stok_kodu, birim_fiyat, stok_miktari, birim, aciklama or None, is_active, int(pid)),
+                """UPDATE urunler SET urun_adi=%s, stok_kodu=%s, birim_fiyat=%s, stok_miktari=%s, birim=%s, aciklama=%s, kdv_orani=%s, is_active=%s WHERE id=%s""",
+                (urun_adi, stok_kodu, birim_fiyat, stok_miktari, birim, aciklama or None, kdv_orani, is_active, int(pid)),
             )
             return jsonify({"ok": True, "id": int(pid)})
         existing = fetch_one("SELECT id FROM urunler WHERE stok_kodu = %s", (stok_kodu,))
         if existing:
             return jsonify({"ok": False, "mesaj": "Bu stok kodu zaten var"}), 400
         row = execute_returning(
-            """INSERT INTO urunler (urun_adi, stok_kodu, birim_fiyat, stok_miktari, birim, aciklama, is_active)
-               VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id""",
-            (urun_adi, stok_kodu, birim_fiyat, stok_miktari, birim, aciklama or None, is_active),
+            """INSERT INTO urunler (urun_adi, stok_kodu, birim_fiyat, stok_miktari, birim, aciklama, kdv_orani, is_active)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+            (urun_adi, stok_kodu, birim_fiyat, stok_miktari, birim, aciklama or None, kdv_orani, is_active),
         )
         return jsonify({"ok": True, "id": row["id"]})
     except Exception as e:
@@ -162,11 +215,12 @@ def api_duplicate():
         stok_miktari = float(kaynak.get("stok_miktari") or 0)
         birim = (kaynak.get("birim") or "adet")[:20]
         aciklama = (kaynak.get("aciklama") or "")[:500]
+        kdv_orani = int(kaynak.get("kdv_orani") or 20)
 
         row = execute_returning(
-            """INSERT INTO urunler (urun_adi, stok_kodu, birim_fiyat, stok_miktari, birim, aciklama, is_active)
-               VALUES (%s, %s, %s, %s, %s, %s, TRUE) RETURNING id""",
-            (yeni_ad, yeni_stok_kodu, birim_fiyat, stok_miktari, birim, aciklama or None),
+            """INSERT INTO urunler (urun_adi, stok_kodu, birim_fiyat, stok_miktari, birim, aciklama, kdv_orani, is_active)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, TRUE) RETURNING id""",
+            (yeni_ad, yeni_stok_kodu, birim_fiyat, stok_miktari, birim, aciklama or None, kdv_orani),
         )
         return jsonify({"ok": True, "id": row["id"], "stok_kodu": yeni_stok_kodu})
     except Exception as e:

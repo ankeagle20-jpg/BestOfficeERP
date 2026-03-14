@@ -199,13 +199,38 @@
 .sozlesmeler-ay-kart:hover {
     border-color: #00bcd4;
 }
+.sozlesmeler-ay-kart.sozlesmeler-ay-kart-odendi {
+    background: #1b4332;
+    border-color: #4caf50;
+}
+.sozlesmeler-ay-kart.sozlesmeler-ay-kart-odendi .aylik-deger {
+    background: #275d3d;
+    border-color: #4caf50;
+    color: #b9f6ca;
+}
+.sozlesmeler-ay-kart.sozlesmeler-ay-kart-kismi {
+    background: #4e342e;
+    border-color: #ffb300;
+}
+.sozlesmeler-ay-kart.sozlesmeler-ay-kart-kismi .aylik-deger {
+    background: #5d4037;
+    border-color: #ffb300;
+    color: #ffe082;
+}
 .sozlesmeler-ay-kart h3 {
+    color: #90a4ae;
+    font-size: 9px;
+    margin: 0 0 1px 0;
+    text-align: center;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+.sozlesmeler-ay-kart .sozlesmeler-ay-yil {
     color: #90a4ae;
     font-size: 9px;
     margin: 0 0 3px 0;
     text-align: center;
-    font-weight: 600;
-    text-transform: uppercase;
+    font-weight: 500;
 }
 .sozlesmeler-ay-kart .aylik-deger {
     width: 100%;
@@ -273,6 +298,26 @@
     border-top: 1px solid #2d4060;
 }
 .sozlesmeler-cari-ekstre-wrap .sozlesmeler-sag-baslik { margin-bottom: 6px; }
+.cari-ekstre-tab-bar {
+    display: flex;
+    gap: 0;
+    margin-bottom: 12px;
+    border-bottom: 1px solid #2d4060;
+}
+.cari-ekstre-tab {
+    padding: 8px 16px;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: #90a4ae;
+    cursor: pointer;
+    font-size: 14px;
+}
+.cari-ekstre-tab:hover { color: #e3f2fd; }
+.cari-ekstre-tab.active {
+    color: #4fc3f7;
+    border-bottom-color: #4fc3f7;
+}
 .cari-ekstre-aciklama {
     font-size: 11px;
     color: #90a4ae;
@@ -459,6 +504,8 @@
 .cari-btn.tahsilat { background: linear-gradient(135deg, #388e3c, #1b5e20); }
 .cari-btn.whatsapp { background: linear-gradient(135deg, #25d366, #128c7e); }
 .cari-btn.pdf { background: linear-gradient(135deg, #c62828, #b71c1c); }
+.cari-btn.musteri-listesi { background: linear-gradient(135deg, #00bcd4, #0097a7); text-decoration: none; }
+.cari-btn.musteri-listesi:hover { opacity: 0.95; color: #fff; }
 .cari-kart-uyari { padding: 24px; text-align: center; color: #90a4ae; font-size: 13px; }
 .cari-kart-uyari i { margin-right: 6px; color: #4fc3f7; }
 .cari-kart-grid { display: grid; grid-template-columns: 280px 1fr; gap: 16px; min-height: 360px; }
@@ -573,6 +620,8 @@
 .sirket-unvani-dropdown div.sirket-item .sirket-name { font-weight: 600; }
 .sirket-unvani-dropdown div.sirket-item .sirket-vergi { font-size: 11px; color: #90a4ae; margin-top: 2px; }
 .sirket-unvani-dropdown div.sirket-bos { padding: 12px; color: #90a4ae; font-size: 12px; text-align: center; }
+.sirket-unvani-dropdown div.sirket-bos-manuel { padding: 10px 12px; font-size: 12px; color: #4fc3f7; border-top: 1px solid #2d4060; cursor: pointer; }
+.sirket-unvani-dropdown div.sirket-bos-manuel:hover { background: #2d4060; color: #b3e5fc; }
 .tahsilat-makbuz-aksiyon {
     display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap;
     padding: 12px 16px; border-top: 1px solid #2d4060;
@@ -682,10 +731,11 @@
                         <div class="sirket-unvani-wrap" style="position:relative;">
                             <input type="text" id="name" required autocomplete="off" onchange="hesaplaYuzde()" oninput="sirketUnvaniAutocomplete()" onfocus="sirketUnvaniAutocomplete()">
                             <div id="sirket-unvani-dropdown" class="sirket-unvani-dropdown" style="display:none;"></div>
+                            <div class="sirket-unvani-hint" style="margin-top:4px;font-size:11px;color:#78909c;">Yeni şirket ekliyorsanız listeden seçmeyin; bilgileri doldurup aşağıdaki <strong>Kaydet</strong> butonuna basın.</div>
                         </div>
                         
                         <label class="required">Vergi Numarası</label>
-                        <input type="text" id="tax_number" required maxlength="10" inputmode="numeric" oninput="sadeceRakam(this, 10)" onchange="hesaplaYuzde()">
+                        <input type="text" id="tax_number" required maxlength="10" inputmode="numeric" oninput="sadeceRakam(this, 10)" onchange="hesaplaYuzde()" placeholder="10 hane">
                         
                         <label class="required">Vergi Dairesi</label>
                         <input type="text" id="vergi_dairesi" value="kavaklıdere" onchange="hesaplaYuzde()">
@@ -744,8 +794,8 @@
                         <label>Yetkili Cep Tel 2</label>
                         <input type="text" id="phone2" maxlength="10" inputmode="numeric" oninput="telefonInput(this)" onchange="hesaplaYuzde()">
                         
-                        <label>Yetkili E-posta</label>
-                        <input type="email" id="email" onchange="hesaplaYuzde()">
+                        <label class="required">Yetkili E-posta</label>
+                        <input type="email" id="email" required onchange="hesaplaYuzde()">
                         
                         <label>E-posta (şirket)</label>
                         <input type="email" id="email_sirket" onchange="hesaplaYuzde()">
@@ -763,17 +813,34 @@
                             <option>Paylaşımlı Ofis</option>
                         </select>
                         
+                        <label>Ödeme Düzeni</label>
+                        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                            <select id="odeme_duzeni" onchange="hesaplaYuzde(); var m=document.getElementById('odeme_duzeni_manuel_wrap'); if(m) m.style.display=(this.value==='manuel'?'block':'none');">
+                                <option value="aylik" selected>Aylık</option>
+                                <option value="yillik">Yıllık</option>
+                                <option value="3_aylik">3 Aylık</option>
+                                <option value="6_aylik">6 Aylık</option>
+                                <option value="manuel">Manuel</option>
+                            </select>
+                            <span id="odeme_duzeni_manuel_wrap" style="display:none;">
+                                <input type="text" id="odeme_duzeni_manuel" placeholder="Örn: 2 aylık, 9 aylık" style="max-width: 140px;">
+                            </span>
+                        </div>
+                        
                         <label class="required">Aylık Kira (₺)</label>
                         <input type="number" step="0.01" id="aylik_kira" value="0.00" required onchange="hesaplaYuzde()" oninput="sozlesmelerAylikGuncelle()">
+                        
+                        <label>KDV %</label>
+                        <input type="number" id="kdv_oran" value="20" min="0" max="100" step="0.01" placeholder="20" onchange="hesaplaYuzde(); sozlesmelerAylikGuncelle();">
                         
                         <label>Kira Süresi Aylık</label>
                         <input type="number" id="kira_suresi_ay" value="12" min="1" max="240" step="1" placeholder="12" onchange="hesaplaYuzde()" oninput="sozlesmelerAylikGuncelle()" title="Sözleşme süresi (ay). Tıklayıp manuel girebilirsiniz.">
                         
                         <label class="required">Sözleşme Başlangıç</label>
-                        <input type="date" id="sozlesme_baslangic" onchange="hesaplaYuzde()">
+                        <input type="date" id="sozlesme_baslangic" onchange="hesaplaYuzde(); sozlesmeBitisOto(); kiraSuresiAylikOto();">
                         
                         <label class="required">Sözleşme Bitiş</label>
-                        <input type="date" id="sozlesme_bitis" onchange="hesaplaYuzde()">
+                        <input type="date" id="sozlesme_bitis" onchange="hesaplaYuzde(); kiraSuresiAylikOto();">
                     </div>
                 </div>
                 
@@ -860,6 +927,7 @@
                     <button type="button" class="cari-btn tahsilat" onclick="cariKartTahsilatAc()"><i class="fa fa-hand-holding-usd"></i> Tahsilat Al</button>
                     <button type="button" class="cari-btn whatsapp" onclick="cariKartWhatsApp()"><i class="fa fa-whatsapp"></i> WhatsApp Hatırlatma</button>
                     <button type="button" class="cari-btn pdf" onclick="cariKartPdfIndir()"><i class="fa fa-file-pdf-o"></i> PDF Ekstre</button>
+                    <a href="{{ url_for('musteriler.list_full') }}" class="cari-btn musteri-listesi" target="_blank" title="Müşteri listesi sayfasına git"><i class="fa fa-users"></i> Müşteri Listesi</a>
                 </div>
                 <div class="contract-metrics" id="ck_metrics" style="display:none;">
                     <div class="contract-metric">
@@ -1039,7 +1107,7 @@
                     </div>
                     <div class="tahsilat-makbuz-aksiyon">
                         <button type="button" class="tahsilat-btn-iptal" onclick="girisTahsilatIptal()">İptal</button>
-                        <button type="button" class="tahsilat-btn-kaydet" onclick="girisTahsilatMakbuzKaydet(); return false;"><i class="fa fa-save"></i> Makbuzu Kayıt</button>
+                        <button type="button" class="tahsilat-btn-kaydet" onclick="girisTahsilatMakbuzKaydet(); return false;"><i class="fa fa-save"></i> Kayıt</button>
                         <button type="button" class="tahsilat-btn-onizle" onclick="girisTahsilatOnizle(); return false;"><i class="fa fa-eye"></i> Önizle</button>
                         <button type="button" class="tahsilat-btn-yazdir" onclick="girisTahsilatYazdir(); return false;"><i class="fa fa-print"></i> Yazdır</button>
                         <button type="button" class="tahsilat-btn-pdf" onclick="girisTahsilatPdfIndir(); return false;"><i class="fa fa-file-pdf-o"></i> PDF İndir</button>
@@ -1279,7 +1347,7 @@
                         </div>
                         <div class="tahsilat-makbuz-aksiyon">
                             <button type="button" class="tahsilat-btn-iptal" onclick="sozlesmeTahsilatIptal()">İptal</button>
-                            <button type="button" class="tahsilat-btn-kaydet" onclick="sozlesmeTahsilatKaydet(); return false;"><i class="fa fa-save"></i> Makbuzu Kayıt</button>
+                            <button type="button" class="tahsilat-btn-kaydet" onclick="sozlesmeTahsilatKaydet(); return false;"><i class="fa fa-save"></i> Kayıt</button>
                             <button type="button" class="tahsilat-btn-onizle" onclick="sozlesmeTahsilatOnizle(); return false;"><i class="fa fa-eye"></i> Önizle</button>
                             <button type="button" class="tahsilat-btn-yazdir" onclick="sozlesmeTahsilatYazdir(); return false;"><i class="fa fa-print"></i> Yazdır</button>
                             <button type="button" class="tahsilat-btn-pdf" onclick="sozlesmeTahsilatPdfIndir(); return false;"><i class="fa fa-file-pdf-o"></i> PDF İndir</button>
@@ -1289,41 +1357,79 @@
                 </div>
             </div>
             <div class="sozlesmeler-cari-ekstre-wrap">
-                <h4 class="sozlesmeler-sag-baslik">Cari Ekstre</h4>
-                <p class="cari-ekstre-aciklama">Tarih aralığında aylık kira borç (her ay fatura gibi) ve tahsilat alacak; ödemeler bakiyeden düşülür.</p>
-                <div class="cari-ekstre-filtre">
-                    <label>Başlangıç</label>
-                    <input type="date" id="cari_ekstre_baslangic">
-                    <label>Bitiş</label>
-                    <input type="date" id="cari_ekstre_bitis">
-                    <label>Aylık Kira (₺)</label>
-                    <input type="number" step="0.01" id="cari_ekstre_aylik_kira" placeholder="Sol formdan alınır">
-                    <button type="button" class="tahsilat-btn-kaydet" onclick="cariEkstreYukle()"><i class="fa fa-refresh"></i> Ekstre Göster</button>
+                <div class="cari-ekstre-tab-bar">
+                    <button type="button" class="cari-ekstre-tab active" data-tab="cari_ekstre" id="cari_ekstre_tab_btn">Cari Ekstre</button>
+                    <button type="button" class="cari-ekstre-tab" data-tab="cari_ekstre_b" id="cari_ekstre_b_tab_btn">Cari Ekstre B</button>
                 </div>
-                <div id="cari_ekstre_musteri_bilgi" class="cari-ekstre-musteri" style="display:none;"></div>
-                <div class="cari-ekstre-tablo-wrap">
-                    <table class="cari-ekstre-tablo" id="cari_ekstre_tablo">
-                        <thead>
-                            <tr>
-                                <th>Tarih</th>
-                                <th>Açıklama</th>
-                                <th class="num">Borç</th>
-                                <th class="num">Alacak</th>
-                                <th class="num">Bakiye</th>
-                            </tr>
-                        </thead>
-                        <tbody id="cari_ekstre_tbody"></tbody>
-                        <tfoot id="cari_ekstre_foot" style="display:none;">
-                            <tr class="cari-ekstre-toplam">
-                                <td colspan="2"><strong>Toplam</strong></td>
-                                <td class="num" id="cari_ekstre_toplam_borc">0,00</td>
-                                <td class="num" id="cari_ekstre_toplam_alacak">0,00</td>
-                                <td class="num" id="cari_ekstre_bakiye">0,00</td>
-                            </tr>
-                        </tfoot>
-                    </table>
+                <div id="cari_ekstre_panel" class="cari-ekstre-panel">
+                    <p class="cari-ekstre-aciklama">Tarih aralığında aylık kira borç (her ay fatura gibi) ve tahsilat alacak; ödemeler bakiyeden düşülür.</p>
+                    <div class="cari-ekstre-filtre">
+                        <label>Başlangıç</label>
+                        <input type="date" id="cari_ekstre_baslangic">
+                        <label>Bitiş</label>
+                        <input type="date" id="cari_ekstre_bitis">
+                        <label>Aylık Kira (₺)</label>
+                        <input type="number" step="0.01" id="cari_ekstre_aylik_kira" placeholder="Sol formdan alınır">
+                        <button type="button" class="tahsilat-btn-kaydet" onclick="cariEkstreYukle()"><i class="fa fa-refresh"></i> Ekstre Göster</button>
+                    </div>
+                    <div id="cari_ekstre_musteri_bilgi" class="cari-ekstre-musteri" style="display:none;"></div>
+                    <div class="cari-ekstre-tablo-wrap">
+                        <table class="cari-ekstre-tablo" id="cari_ekstre_tablo">
+                            <thead>
+                                <tr>
+                                    <th>Tarih</th>
+                                    <th>Açıklama</th>
+                                    <th class="num">Borç</th>
+                                    <th class="num">Alacak</th>
+                                    <th class="num">Bakiye</th>
+                                </tr>
+                            </thead>
+                            <tbody id="cari_ekstre_tbody"></tbody>
+                            <tfoot id="cari_ekstre_foot" style="display:none;">
+                                <tr class="cari-ekstre-toplam">
+                                    <td colspan="2"><strong>Toplam</strong></td>
+                                    <td class="num" id="cari_ekstre_toplam_borc">0,00</td>
+                                    <td class="num" id="cari_ekstre_toplam_alacak">0,00</td>
+                                    <td class="num" id="cari_ekstre_bakiye">0,00</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                    <div id="cari_ekstre_bos" class="sozlesmeler-aylik-bos">Müşteri seçin, tarih aralığı ve aylık kira girin, Ekstre Göster ile yükleyin.</div>
                 </div>
-                <div id="cari_ekstre_bos" class="sozlesmeler-aylik-bos">Müşteri seçin, tarih aralığı ve aylık kira girin, Ekstre Göster ile yükleyin.</div>
+                <div id="cari_ekstre_b_panel" class="cari-ekstre-panel" style="display:none;">
+                    <p class="cari-ekstre-aciklama">Kesilen faturalar (borç) ve nakit hariç tahsilatlar (havale, EFT, banka, kredi kartı, çek) (alacak). Sadece nakit tahsilatlar bu ekstrede gösterilmez.</p>
+                    <div class="cari-ekstre-filtre">
+                        <label>Başlangıç</label>
+                        <input type="date" id="cari_ekstre_b_baslangic">
+                        <label>Bitiş</label>
+                        <input type="date" id="cari_ekstre_b_bitis">
+                        <button type="button" class="tahsilat-btn-kaydet" onclick="cariEkstreBYukle()"><i class="fa fa-refresh"></i> Ekstre Göster</button>
+                    </div>
+                    <div class="cari-ekstre-tablo-wrap">
+                        <table class="cari-ekstre-tablo" id="cari_ekstre_b_tablo">
+                            <thead>
+                                <tr>
+                                    <th>Tarih</th>
+                                    <th>Açıklama</th>
+                                    <th class="num">Borç</th>
+                                    <th class="num">Alacak</th>
+                                    <th class="num">Bakiye</th>
+                                </tr>
+                            </thead>
+                            <tbody id="cari_ekstre_b_tbody"></tbody>
+                            <tfoot id="cari_ekstre_b_foot" style="display:none;">
+                                <tr class="cari-ekstre-toplam">
+                                    <td colspan="2"><strong>Toplam</strong></td>
+                                    <td class="num" id="cari_ekstre_b_toplam_borc">0,00</td>
+                                    <td class="num" id="cari_ekstre_b_toplam_alacak">0,00</td>
+                                    <td class="num" id="cari_ekstre_b_bakiye">0,00</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                    <div id="cari_ekstre_b_bos" class="sozlesmeler-aylik-bos">Müşteri seçin, tarih aralığı girin, Ekstre Göster ile yükleyin.</div>
+                </div>
             </div>
         </div>
         </div>
@@ -1335,6 +1441,9 @@ let musteriler = [];
 let yukluDosyalar = [];
 let potansiyeller = [];
 let potSelectedId = null;
+let sozlesmeOdenenAySayisi = 0; // tam ödenen ay sayısı
+let sozlesmeKismiOdemeVar = false; // kısmi ödenen ay var mı (sarı kutu)
+let sozlesmeKismiEksikTutar = 0; // kısmi ödenen ayda kalan borç (kutuda gösterilir)
 /** Açık olan sekme (0=Müşteri Ekle, 1=Kira Senaryo, 2=Kira Bildirgesi, 3=Tahsilat, 4=Cari Kart, 5=Potansiyel, 6=Sözleşmeler). Müşteri seçimi bu sekmeye göre forma doldurur. */
 let currentTabIndex = 0;
 
@@ -1393,6 +1502,60 @@ function switchTab(index) {
 }
 
 var SOZLESME_AY_ADLARI = ['OCAK','ŞUBAT','MART','NİSAN','MAYIS','HAZİRAN','TEMMUZ','AĞUSTOS','EYLÜL','EKİM','KASIM','ARALIK'];
+
+function sozlesmeBitisOto() {
+    var basEl = document.getElementById('sozlesme_baslangic');
+    var bitEl = document.getElementById('sozlesme_bitis');
+    if (!basEl || !bitEl || !basEl.value) return;
+    try {
+        var d = new Date(basEl.value);
+        if (isNaN(d.getTime())) return;
+        // 1 yıl sonrası, aynı gün
+        d.setFullYear(d.getFullYear() + 1);
+        var y = d.getFullYear();
+        var m = String(d.getMonth() + 1).padStart(2, '0');
+        var day = String(d.getDate()).padStart(2, '0');
+        bitEl.value = y + '-' + m + '-' + day;
+        kiraSuresiAylikOto();
+        sozlesmelerAylikGuncelle();
+    } catch (e) {
+        return;
+    }
+}
+
+/** DD.MM.YYYY veya YYYY-MM-DD stringini Date'e çevirir. */
+function parseTarihStr(str) {
+    if (!str || typeof str !== 'string') return null;
+    str = str.trim();
+    var m = str.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+    if (m) return new Date(parseInt(m[3],10), parseInt(m[2],10)-1, parseInt(m[1],10));
+    var d = new Date(str);
+    return isNaN(d.getTime()) ? null : d;
+}
+
+/** Sözleşme başlangıç/bitiş tarihine göre Kira Süresi Aylık'ı otomatik doldurur. Geçersizse varsayılan 12. */
+function kiraSuresiAylikOto() {
+    var basEl = document.getElementById('sozlesme_baslangic');
+    var bitEl = document.getElementById('sozlesme_bitis');
+    var sureEl = document.getElementById('kira_suresi_ay');
+    if (!sureEl) return;
+    var basStr = basEl && basEl.value ? basEl.value.trim() : '';
+    var bitStr = bitEl && bitEl.value ? bitEl.value.trim() : '';
+    var ay = 12;
+    if (basStr && bitStr) {
+        var bas = parseTarihStr(basStr) || new Date(basStr);
+        var bit = parseTarihStr(bitStr) || new Date(bitStr);
+        if (!isNaN(bas.getTime()) && !isNaN(bit.getTime()) && bit >= bas) {
+            ay = (bit.getFullYear() - bas.getFullYear()) * 12 + (bit.getMonth() - bas.getMonth());
+            if (ay < 1) ay = 1;
+            if (ay > 240) ay = 240;
+        }
+    }
+    sureEl.value = String(ay);
+    hesaplaYuzde();
+    sozlesmelerAylikGuncelle();
+}
+
 function sozlesmelerAylikGuncelle() {
     var grid = document.getElementById('sozlesmeler-aylik-grid');
     var bos = document.getElementById('sozlesmeler-aylik-bos');
@@ -1430,14 +1593,35 @@ function sozlesmelerAylikGuncelle() {
     var bas = new Date(basStr);
     if (isNaN(bas.getTime())) bas = new Date();
     bos.style.display = 'none';
+    var kdvEl = document.getElementById('kdv_oran');
+    var kdvOran = (kdvEl && kdvEl.value !== '') ? parseFloat(String(kdvEl.value).replace(',', '.')) : 20;
+    if (isNaN(kdvOran)) kdvOran = 20;
+    var aylikKiraKdvDahil = aylikKira > 0 ? aylikKira * (1 + kdvOran / 100) : 0;
+    var odenenAy = Math.floor(Number(sozlesmeOdenenAySayisi) || 0);
+    var kismiVar = !!sozlesmeKismiOdemeVar;
+    var kismiEksik = Math.max(0, Number(sozlesmeKismiEksikTutar) || 0);
     var html = '';
     for (var i = 0; i < aySayisi; i++) {
         var d = new Date(bas);
         d.setMonth(d.getMonth() + i);
-        var ayAdi = SOZLESME_AY_ADLARI[d.getMonth()];
+        var ayAdiTam = SOZLESME_AY_ADLARI[d.getMonth()];
+        var ayAdi = ayAdiTam ? ayAdiTam.substring(0, 6) : '';
         var yil = d.getFullYear();
-        var tutarStr = aylikKira > 0 ? (Math.round(aylikKira * 100) / 100).toFixed(2) : '—';
-        html += '<div class="sozlesmeler-ay-kart"><h3>' + ayAdi + ' ' + yil + '</h3><div class="aylik-deger">' + tutarStr + '</div></div>';
+        var tutarStr;
+        if (i < odenenAy) {
+            tutarStr = '0.00';  // Tam kapanmış aylar
+        } else if (i === odenenAy && kismiVar && kismiEksik > 0) {
+            tutarStr = (Math.round(kismiEksik * 100) / 100).toFixed(2);  // Kısmi: kalan borç (örn. 100.00)
+        } else {
+            tutarStr = aylikKiraKdvDahil > 0 ? (Math.round(aylikKiraKdvDahil * 100) / 100).toFixed(2) : '—';
+        }
+        var extraClass = '';
+        if (i < odenenAy) {
+            extraClass = ' sozlesmeler-ay-kart-odendi';
+        } else if (i === odenenAy && kismiVar) {
+            extraClass = ' sozlesmeler-ay-kart-kismi';
+        }
+        html += '<div class="sozlesmeler-ay-kart' + extraClass + '"><h3>' + ayAdi + '</h3><div class="sozlesmeler-ay-yil">' + yil + '</div><div class="aylik-deger">' + tutarStr + '</div></div>';
     }
     grid.innerHTML = html;
     // Cari Ekstre aylık kira alanını sol formla senkronize et (borç satırları aynı tutarda olsun)
@@ -1708,6 +1892,15 @@ function selectMusteri(id) {
             set('email_sirket', m.email_sirket);
             set('ticaret_sicil', m.ticaret_sicil);
             set('kurulus_tarihi', m.kurulus_tarihi);
+            // Ödenen ay sayısı (KDV dahil aylık kira ile) ve kısmi ödeme bilgisi - Aylık Tutarlar renklendirme için
+            sozlesmeOdenenAySayisi = Math.floor(Number(m.odenen_tam_ay_sayisi != null ? m.odenen_tam_ay_sayisi : m.odenen_ay_sayisi) || 0);
+            sozlesmeKismiOdemeVar = !!m.kismi_odeme_var;
+            sozlesmeKismiEksikTutar = Math.max(0, parseFloat(m.kismi_ay_eksik_tutar) || 0);
+            // Cari ekstre varsayılan başlangıç ve aylık kira
+            var ekBas = document.getElementById('cari_ekstre_baslangic');
+            if (ekBas && m.sozlesme_baslangic) ekBas.value = m.sozlesme_baslangic;
+            var ekAylik = document.getElementById('cari_ekstre_aylik_kira');
+            if (ekAylik && m.guncel_kira_bedeli) ekAylik.value = m.guncel_kira_bedeli;
             set('faaliyet', m.faaliyet);
             set('onceki_adres', m.onceki_adres);
             if (m.sube_merkez) {
@@ -1719,6 +1912,7 @@ function selectMusteri(id) {
             else if (m.ilk_kira_bedeli != null && m.ilk_kira_bedeli !== '') set('aylik_kira', m.ilk_kira_bedeli);
             if (m.rent_start_date) set('sozlesme_baslangic', m.rent_start_date);
             if (m.sozlesme_bitis) set('sozlesme_bitis', m.sozlesme_bitis);
+            kiraSuresiAylikOto();
             hesaplaYuzde();
             sozlesmelerAylikGuncelle();
             if (activeTab === 6) fillSozlesmeTahsilatMusteri(id, m);
@@ -1798,7 +1992,17 @@ function sirketUnvaniAutocomplete() {
                 if (q.length === 0) list = list.slice(0, 25);
                 dropdown.innerHTML = '';
                 if (list.length === 0) {
-                    dropdown.innerHTML = '<div class="sirket-bos">' + (q.length >= 1 ? 'Bu aramaya uygun şirket yok.' : 'Şirket adı veya vergi no ile arayın.') + '</div>';
+                    var msg = q.length >= 1
+                        ? 'Bu aramaya uygun kayıtlı şirket yok.'
+                        : 'Şirket adı veya vergi no ile arayın.';
+                    dropdown.innerHTML = '<div class="sirket-bos">' + msg + '</div>';
+                    if (q.length >= 1) {
+                        var manuel = document.createElement('div');
+                        manuel.className = 'sirket-bos-manuel';
+                        manuel.innerHTML = '➕ Listede yok — Yeni müşteri olarak kaydedeceğim (formu doldurup Kaydet\'e basın)';
+                        manuel.onclick = function() { dropdown.style.display = 'none'; if (document.getElementById('tax_number')) document.getElementById('tax_number').focus(); };
+                        dropdown.appendChild(manuel);
+                    }
                 } else {
                     list.forEach(function(m) {
                         var div = document.createElement('div');
@@ -1890,6 +2094,32 @@ async function kaydet(event) {
         ev_adres: document.getElementById('ev_adres').value,
         notes: document.getElementById('notes').value
     };
+
+    // KYC verisi (sözleşme + detaylar)
+    const kycData = {
+        musteri_id: data.id,
+        sirket_unvani: document.getElementById('name').value,
+        vergi_no: document.getElementById('tax_number').value,
+        vergi_dairesi: document.getElementById('vergi_dairesi').value,
+        mersis_no: document.getElementById('mersis').value,
+        ticaret_sicil_no: document.getElementById('ticaret_sicil').value,
+        kurulus_tarihi: document.getElementById('kurulus_tarihi').value,
+        faaliyet_konusu: document.getElementById('faaliyet').value,
+        nace_kodu: document.getElementById('nace').value,
+        eski_adres: document.getElementById('onceki_adres').value,
+        yeni_adres: document.getElementById('address').value,
+        sube_merkez: document.getElementById('sube_merkez').value,
+        yetkili_adsoyad: document.getElementById('yetkili_ad').value,
+        yetkili_tcno: document.getElementById('yetkili_tc').value,
+        yetkili_ikametgah: document.getElementById('ev_adres').value,
+        yetkili_tel: document.getElementById('phone').value,
+        yetkili_email: document.getElementById('email').value,
+        hizmet_turu: document.getElementById('hizmet_turu').value,
+        aylik_kira: document.getElementById('aylik_kira').value,
+        sozlesme_tarihi: document.getElementById('sozlesme_baslangic').value,
+        sozlesme_bitis: document.getElementById('sozlesme_bitis').value,
+        notlar: document.getElementById('notes').value
+    };
     
     try {
         const response = await fetch('/giris/kaydet', {
@@ -1901,12 +2131,24 @@ async function kaydet(event) {
         const result = await response.json();
         
         if (result.ok) {
-            alert(result.mesaj);
-            musteriAra();
+            // Önce customers başarıyla kaydedildi
             if (result.id) {
                 selectedId = result.id;
                 document.getElementById('musteri-id').value = result.id;
+                kycData.musteri_id = result.id;
             }
+            // KYC bilgisini de kaydet
+            try {
+                await fetch('/musteriler/api/kyc/kaydet', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(kycData)
+                });
+            } catch (e) {
+                console.warn('KYC kaydı sırasında hata:', e);
+            }
+            alert(result.mesaj);
+            musteriAra();
         } else {
             alert(result.mesaj);
         }
@@ -2452,12 +2694,20 @@ function sozlesmeTahsilatKaydet() {
     .then(data => {
         if (data.ok && data.tahsilat_id) {
             alert('Makbuz kaydedildi. Tahsilatlar, Cari Kart ve müşteri bakiyesi güncellendi.');
-            sozlesmeTahsilatIptal();
+            sozlesmeTahsilatKayitSonrasiTemizlik();  // Müşteri seçili kalsın, sadece tutar/açıklama temizlensin
         } else {
             alert(data.mesaj || 'Kayıt yapılamadı.');
         }
     })
     .catch(err => alert('İstek gönderilemedi: ' + (err.message || err)));
+}
+
+function sozlesmeTahsilatKayitSonrasiTemizlik() {
+    document.getElementById('sozlesme_tahsilat_tutar').value = '';
+    document.getElementById('sozlesme_tahsilat_aciklama').value = '';
+    const today = new Date().toISOString().slice(0, 10);
+    const tarihEl = document.getElementById('sozlesme_tahsilat_tarih');
+    if (tarihEl) tarihEl.value = today;
 }
 
 function sozlesmeTahsilatOnizle() {
@@ -2503,7 +2753,7 @@ function sozlesmeTahsilatYazdir() {
         if (data.ok && data.tahsilat_id) {
             const pdfUrl = '/faturalar/tahsilat-pdf/' + data.tahsilat_id;
             window.open(pdfUrl, '_blank', 'noopener');
-            sozlesmeTahsilatIptal();
+            sozlesmeTahsilatKayitSonrasiTemizlik();
         } else {
             alert(data.mesaj || 'Kayıt yapılamadı.');
         }
@@ -2594,12 +2844,28 @@ function cariEkstreYukle() {
         alert('Cari ekstre için önce Tahsilat alanında müşteri seçin.');
         return;
     }
-    var baslangic = document.getElementById('cari_ekstre_baslangic').value;
+    var baslangicInput = document.getElementById('cari_ekstre_baslangic');
     var bitis = document.getElementById('cari_ekstre_bitis').value;
+    var baslangic = baslangicInput ? baslangicInput.value : '';
+
+    // Sözleşme başlangıcından önceki tarihe izin verme
+    var sozlesmeBasInput = document.getElementById('sozlesme_baslangic');
+    if (sozlesmeBasInput && sozlesmeBasInput.value && baslangic) {
+        var soz = new Date(sozlesmeBasInput.value);
+        var bas = new Date(baslangic);
+        if (bas < soz) {
+            baslangic = sozlesmeBasInput.value;
+            baslangicInput.value = baslangic;
+        }
+    }
+
     var aylikKiraEl = document.getElementById('cari_ekstre_aylik_kira');
     var aylikKira = (aylikKiraEl && aylikKiraEl.value !== '') ? parseFloat((aylikKiraEl.value || '0').replace(',', '.')) : parseFloat((document.getElementById('aylik_kira').value || '0').replace(',', '.'));
     if (isNaN(aylikKira)) aylikKira = 0;
-    var params = new URLSearchParams({ musteri_id: musteriId, baslangic: baslangic || '', bitis: bitis || '', aylik_kira: aylikKira });
+    var kdvEl = document.getElementById('kdv_oran');
+    var kdvOran = (kdvEl && kdvEl.value !== '') ? parseFloat(String(kdvEl.value).replace(',', '.')) : 20;
+    if (isNaN(kdvOran)) kdvOran = 20;
+    var params = new URLSearchParams({ musteri_id: musteriId, baslangic: baslangic || '', bitis: bitis || '', aylik_kira: aylikKira, kdv_oran: kdvOran });
     fetch('/giris/api/cari-ekstre?' + params.toString())
         .then(function(r) { return r.json(); })
         .then(function(data) {
@@ -2611,10 +2877,7 @@ function cariEkstreYukle() {
             var foot = document.getElementById('cari_ekstre_foot');
             var bos = document.getElementById('cari_ekstre_bos');
             var musterBilgi = document.getElementById('cari_ekstre_musteri_bilgi');
-            if (data.musteri_adi) {
-                musterBilgi.textContent = 'Müşteri: ' + data.musteri_adi;
-                musterBilgi.style.display = 'block';
-            }
+            if (musterBilgi) musterBilgi.style.display = 'none';  // Müşteri bilgisi zaten form alanlarında
             var hareketler = data.hareketler || [];
             if (hareketler.length === 0) {
                 tbody.innerHTML = '';
@@ -2633,6 +2896,71 @@ function cariEkstreYukle() {
             document.getElementById('cari_ekstre_toplam_borc').textContent = (data.toplam_borc || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
             document.getElementById('cari_ekstre_toplam_alacak').textContent = (data.toplam_alacak || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
             document.getElementById('cari_ekstre_bakiye').textContent = (data.bakiye != null ? data.bakiye : 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        })
+        .catch(function(err) {
+            alert('Ekstre alınamadı: ' + (err.message || err));
+        });
+}
+
+// Cari Ekstre / Cari Ekstre B sekme geçişi
+function cariEkstreTabGoster(tabName) {
+    var panels = document.querySelectorAll('.cari-ekstre-panel');
+    var tabs = document.querySelectorAll('.cari-ekstre-tab');
+    panels.forEach(function(p) { p.style.display = 'none'; });
+    tabs.forEach(function(t) { t.classList.remove('active'); });
+    var panel = document.getElementById(tabName === 'cari_ekstre_b' ? 'cari_ekstre_b_panel' : 'cari_ekstre_panel');
+    var btn = document.getElementById(tabName === 'cari_ekstre_b' ? 'cari_ekstre_b_tab_btn' : 'cari_ekstre_tab_btn');
+    if (panel) panel.style.display = 'block';
+    if (btn) btn.classList.add('active');
+    if (tabName === 'cari_ekstre_b') {
+        var bas = document.getElementById('cari_ekstre_baslangic');
+        var bit = document.getElementById('cari_ekstre_bitis');
+        var bBas = document.getElementById('cari_ekstre_b_baslangic');
+        var bBit = document.getElementById('cari_ekstre_b_bitis');
+        if (bas && bBas && bas.value) bBas.value = bas.value;
+        if (bit && bBit && bit.value) bBit.value = bit.value;
+    }
+}
+document.getElementById('cari_ekstre_tab_btn').addEventListener('click', function() { cariEkstreTabGoster('cari_ekstre'); });
+document.getElementById('cari_ekstre_b_tab_btn').addEventListener('click', function() { cariEkstreTabGoster('cari_ekstre_b'); });
+
+function cariEkstreBYukle() {
+    var musteriId = (document.getElementById('sozlesme_tahsilat_musteri_id').value || '').trim();
+    if (!musteriId) {
+        alert('Cari Ekstre B için önce Tahsilat alanında müşteri seçin.');
+        return;
+    }
+    var baslangic = (document.getElementById('cari_ekstre_b_baslangic') || {}).value || '';
+    var bitis = (document.getElementById('cari_ekstre_b_bitis') || {}).value || '';
+    var params = new URLSearchParams({ musteri_id: musteriId, baslangic: baslangic, bitis: bitis });
+    fetch('/giris/api/cari-ekstre-b?' + params.toString())
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (!data.ok) {
+                alert(data.mesaj || 'Ekstre yüklenemedi.');
+                return;
+            }
+            var tbody = document.getElementById('cari_ekstre_b_tbody');
+            var foot = document.getElementById('cari_ekstre_b_foot');
+            var bos = document.getElementById('cari_ekstre_b_bos');
+            var hareketler = data.hareketler || [];
+            if (hareketler.length === 0) {
+                tbody.innerHTML = '';
+                foot.style.display = 'none';
+                if (bos) { bos.style.display = 'block'; bos.textContent = 'Bu aralıkta hareket yok.'; }
+                return;
+            }
+            if (bos) bos.style.display = 'none';
+            foot.style.display = 'table-footer-group';
+            tbody.innerHTML = hareketler.map(function(h) {
+                var borc = (h.borc || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                var alacak = (h.alacak || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                var bakiye = (h.bakiye != null ? h.bakiye : '').toLocaleString ? (h.bakiye).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : (h.bakiye || '');
+                return '<tr><td>' + (h.tarih || '') + '</td><td>' + (h.aciklama || '') + '</td><td class="num">' + borc + '</td><td class="num">' + alacak + '</td><td class="num">' + bakiye + '</td></tr>';
+            }).join('');
+            document.getElementById('cari_ekstre_b_toplam_borc').textContent = (data.toplam_borc || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            document.getElementById('cari_ekstre_b_toplam_alacak').textContent = (data.toplam_alacak || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            document.getElementById('cari_ekstre_b_bakiye').textContent = (data.bakiye != null ? data.bakiye : 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         })
         .catch(function(err) {
             alert('Ekstre alınamadı: ' + (err.message || err));

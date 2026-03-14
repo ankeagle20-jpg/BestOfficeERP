@@ -306,7 +306,7 @@ def _musteri_liste_data():
 
 
 def _enrich_musteri_list_with_borc_gecikme(musteriler):
-    """Müşteri listesine toplam_borc, geciken_gun, son_odeme_tarihi ekler (cari kart / liste)."""
+    """Müşteri listesine toplam_borc, geciken_gun, son_odeme_tarihi, rent_start_date (kyc'den) ekler."""
     if not musteriler:
         return
     bugun = date.today()
@@ -324,7 +324,15 @@ def _enrich_musteri_list_with_borc_gecikme(musteriler):
             FROM tahsilatlar WHERE musteri_id = ANY(%s) GROUP BY musteri_id
         """, (ids,))
         son_tahsilat = {r["musteri_id"]: r.get("son_tahsilat") for r in cur.fetchall()}
+        cur.execute("""
+            SELECT DISTINCT ON (musteri_id) musteri_id, sozlesme_tarihi
+            FROM musteri_kyc WHERE musteri_id = ANY(%s) AND sozlesme_tarihi IS NOT NULL
+            ORDER BY musteri_id, id DESC
+        """, (ids,))
+        kyc_tarih = {r["musteri_id"]: r.get("sozlesme_tarihi") for r in cur.fetchall()}
     for m in musteriler:
+        if not m.get("rent_start_date") and kyc_tarih.get(m["id"]):
+            m["rent_start_date"] = kyc_tarih[m["id"]]
         mb = fat_borc.get(m["id"], {})
         if "manuel_borc" in m and m["manuel_borc"] is not None:
             m["toplam_borc"] = round(float(m["manuel_borc"] or 0), 2)
@@ -1731,7 +1739,10 @@ def api_kyc_kaydet():
                    evrak_imza_sirkuleri, evrak_vergi_levhasi, evrak_ticaret_sicil, evrak_faaliyet_belgesi,
                    evrak_kimlik_fotokopi, evrak_ikametgah, evrak_kase, notlar, tamamlanma_yuzdesi
                 ) VALUES (
-                   %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s
+                   %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
+                   %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
+                   %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
+                   %s,%s,%s,%s,%s,%s
                 ) RETURNING id""",
                 (musteri_id, sirket_unvani, sirket_unvani, vergi_no, vergi_dairesi, mersis_no, ticaret_sicil_no,
                  kurulus_tarihi, faaliyet_konusu, nace_kodu, eski_adres, yeni_adres, sube_merkez,
