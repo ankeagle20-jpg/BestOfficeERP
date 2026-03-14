@@ -1,6 +1,7 @@
 """
 OFİSBİR ERP — Web Uygulaması
 Flask + Supabase PostgreSQL
+Deploy: 2026-03-14 (Fatura GIB onizleme, Musteri listesi, Kira suresi oto, Cari Kart Musteri Listesi butonu)
 """
 
 from flask import Flask, render_template, redirect, url_for, request, flash, jsonify
