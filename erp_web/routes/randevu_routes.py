@@ -19,7 +19,7 @@ def _get_musait_slotlar(tarih_str, oda_adi, tip=""):
     except ValueError:
         return None, "Geçersiz tarih"
     bas_ts = datetime.combine(gun, time(8, 0))
-    bitis_ts = datetime.combine(gun, time(17, 0))
+    bitis_ts = datetime.combine(gun, time(20, 0))
     oda = (oda_adi or "").strip() or ODALAR[0]
     try:
         if tip == "gorusme":
@@ -35,12 +35,12 @@ def _get_musait_slotlar(tarih_str, oda_adi, tip=""):
                   )
             """, (oda, gun, gun))
         else:
+            # Toplantılar sekmesi: aynı odadaki TÜM randevular (randevu + gorusme) slotları kapatsın
             rows = fetch_all("""
                 SELECT baslangic_zamani, bitis_zamani, randevu_tarihi, saat, sure_dakika
                 FROM randevular
                 WHERE COALESCE(NULLIF(TRIM(oda_adi), ''), oda) = %s
                   AND COALESCE(durum, '') != 'İptal'
-                  AND (randevu_tipi IS NULL OR randevu_tipi = 'randevu')
                   AND (
                     (baslangic_zamani IS NOT NULL AND (baslangic_zamani::date) = %s)
                     OR (randevu_tarihi = %s)
@@ -240,6 +240,7 @@ def api_gun_randevulari():
         return jsonify({"randevular": []})
     try:
         if tip == "gorusme":
+            # Görüşmeler sekmesi: sadece gorusme tipindekiler
             rows = fetch_all("""
                 SELECT r.id, r.baslangic_zamani, r.bitis_zamani, r.randevu_tarihi, r.saat, r.sure_dakika,
                        c.name AS musteri_adi
@@ -255,6 +256,7 @@ def api_gun_randevulari():
                 ORDER BY COALESCE(r.baslangic_zamani, (r.randevu_tarihi + COALESCE(r.saat, '09:00'::time))::timestamptz)
             """, (oda_adi, gun, gun))
         else:
+            # Toplantılar sekmesi: aynı odadaki TÜM randevular (randevu+gorusme) listelensin ki çakışmalar görülsün
             rows = fetch_all("""
                 SELECT r.id, r.baslangic_zamani, r.bitis_zamani, r.randevu_tarihi, r.saat, r.sure_dakika,
                        c.name AS musteri_adi
@@ -262,7 +264,6 @@ def api_gun_randevulari():
                 LEFT JOIN customers c ON c.id = r.musteri_id
                 WHERE COALESCE(NULLIF(TRIM(r.oda_adi), ''), r.oda) = %s
                   AND COALESCE(r.durum, '') != 'İptal'
-                  AND (r.randevu_tipi IS NULL OR r.randevu_tipi = 'randevu')
                   AND (
                     (r.baslangic_zamani IS NOT NULL AND (r.baslangic_zamani::date) = %s)
                     OR (r.randevu_tarihi = %s)

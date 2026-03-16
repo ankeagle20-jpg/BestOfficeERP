@@ -448,8 +448,15 @@
     document.querySelectorAll('.ra-left-panel').forEach(function(p) { p.classList.remove('active'); });
     var panel = document.getElementById('ra-panel-' + tab);
     if (panel) panel.classList.add('active');
+
+    // Tür değiştiğinde her iki planda da bugün seçili olsun
+    var today = new Date();
+    today.setHours(0,0,0,0);
+    selectedDate = new Date(today);
+    calYear = today.getFullYear();
+    calMonth = today.getMonth();
+
     if (raGorusmeModu) {
-      selectedDate = null;
       baslangicStr = ''; bitisStr = '';
       raFirstSlotStart = null; raFirstSlotEnd = null;
       raDegistirRandevuId = null; raDegistirAralik = null;
@@ -472,8 +479,9 @@
       if (titleF) titleF.textContent = 'Randevular';
     }
     loadAylikDoluluk();
-    if (!raGorusmeModu && selectedDate && odaAdi) {
-      loadSlots(selectedDate); loadGunRandevulari();
+    if (odaAdi && selectedDate) {
+      loadSlots(selectedDate);
+      loadGunRandevulari();
     }
   });
 
@@ -537,7 +545,7 @@
         });
         raMusaitSet = musaitSet;
         var allSlots = [];
-        for (var tMin = 8 * 60; tMin < 17 * 60; tMin += 30) {
+        for (var tMin = 8 * 60; tMin < 20 * 60; tMin += 30) {
           var sStart = minutesToTime(tMin);
           var sEnd = minutesToTime(tMin + 30);
           var musaitMu = !!musaitSet[sStart];
@@ -703,7 +711,10 @@
         selectedDate = new Date(y, m, day);
         selectedDate.setHours(0, 0, 0, 0);
         renderCal();
-        loadSlots(selectedDate);
+        if (odaAdi) {
+          loadSlots(selectedDate);
+          loadGunRandevulari();
+        }
       });
       grid.appendChild(cell);
     }
@@ -720,6 +731,8 @@
   }
 
   var now = new Date();
+  now.setHours(0,0,0,0);
+  selectedDate = new Date(now);
   calYear = now.getFullYear();
   calMonth = now.getMonth();
   document.getElementById('ra-cal-prev').addEventListener('click', function() {
@@ -1194,6 +1207,11 @@
       }
     }).catch(function(err) {
       raMsg(null, (err && err.message) || 'İstek gönderilemedi.', true);
+      // Hata durumunda da slot ve randevu listesini tazeleyelim ki çakışan randevu hemen görülsün
+      if (selectedDate && odaAdi) {
+        loadSlots(selectedDate, true);
+        loadGunRandevulari(true);
+      }
     });
   });
 })();
