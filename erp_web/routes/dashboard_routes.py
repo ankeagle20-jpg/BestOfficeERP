@@ -295,6 +295,12 @@ def _dashboard_tablo_data(arama="", filtre=None):
             "sozlesme_bitis": sozlesme_bitis,
             "sozlesme_bitis_str": soz_str or "—",
         })
+
+    # Bellek yükünü azaltmak için hem dashboard hem API'de satır sayısını sınırlayalım.
+    # Arama yoksa ve filtre yoksa ilk 300 kayıt yeterli; aksi halde ilk 500 kayıt.
+    max_rows = 300 if (not arama and not filtre) else 500
+    if len(rows) > max_rows:
+        rows = rows[:max_rows]
     return rows
 
 
