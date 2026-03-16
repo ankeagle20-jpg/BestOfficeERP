@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Randevu Al</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #0f2537; color: #e0f7fa; margin: 0; padding: 20px; min-height: 100vh; }
+    .book-wrap { max-width: 520px; margin: 0 auto; }
+    h1 { font-size: 22px; margin-bottom: 8px; color: #4fc3f7; }
+    .book-sub { color: #90a4ae; font-size: 14px; margin-bottom: 24px; }
+    .book-card { background: #1e3a50; border: 1px solid #2d4060; border-radius: 8px; padding: 20px; margin-bottom: 16px; }
+    label { display: block; color: #b0bec5; font-size: 12px; margin: 12px 0 4px; }
+    select, input[type="text"], input[type="email"], input[type="date"], textarea {
+      width: 100%; padding: 10px 12px; border-radius: 6px; border: 1px solid #2d4060;
+      background: #0f2537; color: #e0f7fa; font-size: 14px;
+    }
+    textarea { min-height: 70px; resize: vertical; }
+    .slot-list { max-height: 220px; overflow-y: auto; margin: 12px 0; }
+    .slot-btn {
+      display: block; width: 100%; padding: 10px 12px; margin-bottom: 6px;
+      background: #0f2537; border: 1px solid #2d4060; border-radius: 6px;
+      color: #4fc3f7; text-align: center; cursor: pointer; font-size: 14px;
+    }
+    .slot-btn:hover { background: #2d4060; border-color: #4fc3f7; }
+    .slot-btn.selected { background: rgba(79, 195, 247, 0.2); border-color: #4fc3f7; }
+    .btn-primary {
+      width: 100%; padding: 14px; margin-top: 16px;
+      background: #1565c0; border: 1px solid #42a5f5; color: #fff;
+      border-radius: 6px; font-size: 16px; cursor: pointer; font-weight: 600;
+    }
+    .btn-primary:hover { background: #1976d2; }
+    .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+    .msg { padding: 10px; border-radius: 6px; margin-top: 12px; font-size: 14px; }
+    .msg.err { background: rgba(239, 68, 68, 0.2); color: #fca5a5; }
+    .msg.ok { background: rgba(34, 197, 94, 0.2); color: #86efac; }
+    .msg.info { background: rgba(79, 195, 247, 0.15); color: #7dd3fc; }
+    #ra-secilen-slot { color: #4fc3f7; font-size: 13px; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <div class="book-wrap">
+    <h1>Randevu Al</h1>
+    <p class="book-sub">Tarih ve saat seçin, bilgilerinizi girin. Onay e-postası gönderilir.</p>
+    <div class="book-card">
+      <label>Oda</label>
+      <select id="book-oda">{% for o in odalar %}<option value="{{ o }}" {% if secili_oda == o %}selected{% endif %}>{{ o }}</option>{% endfor %}</select>
+      <label>Tarih</label>
+      <input type="date" id="book-tarih" min="">
+      <p id="ra-secilen-slot" style="display:none;"></p>
+      <label>Müsait saatler</label>
+      <div class="slot-list" id="book-slots"></div>
+    </div>
+    <div class="book-card">
+      <label>Ad Soyad *</label>
+      <input type="text" id="book-ad" placeholder="Adınız soyadınız" required>
+      <label>E-posta</label>
+      <input type="email" id="book-email" placeholder="Onay ve iptal linki gonderilir">
+      <label>Telefon</label>
+      <input type="text" id="book-tel" placeholder="Telefon">
+      <label>Not</label>
+      <textarea id="book-notlar" placeholder="Ek not..."></textarea>
+      <div id="book-msg"></div>
+      <button type="button" class="btn-primary" id="book-submit" disabled>Randevu Al</button>
+    </div>
+  </div>
+  <script>
+(function() {
+  var odaEl = document.getElementById('book-oda');
+  var tarihEl = document.getElementById('book-tarih');
+  var slotsEl = document.getElementById('book-slots');
+  var secilenSlotEl = document.getElementById('ra-secilen-slot');
+  var adEl = document.getElementById('book-ad');
+  var msgEl = document.getElementById('book-msg');
+  var submitBtn = document.getElementById('book-submit');
+  var selectedSlot = null;
+  function setMinDate() {
+    var d = new Date();
+    tarihEl.setAttribute('min', d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'));
+  }
+  setMinDate();
+  function msg(txt, type) { msgEl.innerHTML = txt ? '<div class="msg ' + (type || 'info') + '">' + txt + '</div>' : ''; }
+  function updateSubmit() { submitBtn.disabled = !(tarihEl.value && selectedSlot && adEl.value.trim()); }
+  function loadSlots() {
+    var tarih = tarihEl.value, oda = odaEl.value;
+    if (!tarih) { slotsEl.innerHTML = '<p class="msg info">Once tarih secin.</p>'; return; }
+    slotsEl.innerHTML = '<p class="msg info">Yukleniyor...</p>';
+    fetch('/randevu/api/public/slotlar?tarih=' + encodeURIComponent(tarih) + '&oda_adi=' + encodeURIComponent(oda))
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.error) { slotsEl.innerHTML = '<p class="msg err">' + (data.error || 'Hata') + '</p>'; return; }
+        var arr = data.slotlar || [];
+        selectedSlot = null;
+        secilenSlotEl.style.display = 'none';
+        if (!arr.length) { slotsEl.innerHTML = '<p class="msg info">Bu gun müsait slot yok.</p>'; updateSubmit(); return; }
+        var html = '';
+        arr.forEach(function(s) { html += '<button type="button" class="slot-btn" data-start="' + s.start + '" data-end="' + s.end + '">' + s.start + ' – ' + s.end + '</button>'; });
+        slotsEl.innerHTML = html;
+        slotsEl.querySelectorAll('.slot-btn').forEach(function(btn) {
+          btn.addEventListener('click', function() {
+            slotsEl.querySelectorAll('.slot-btn').forEach(function(b) { b.classList.remove('selected'); });
+            btn.classList.add('selected');
+            selectedSlot = { start: btn.getAttribute('data-start'), end: btn.getAttribute('data-end') };
+            secilenSlotEl.textContent = 'Secili: ' + selectedSlot.start + ' – ' + selectedSlot.end;
+            secilenSlotEl.style.display = 'block';
+            updateSubmit();
+          });
+        });
+        updateSubmit();
+      })
+      .catch(function() { slotsEl.innerHTML = '<p class="msg err">Slotlar yuklenemedi.</p>'; });
+  }
+  tarihEl.addEventListener('change', loadSlots);
+  odaEl.addEventListener('change', loadSlots);
+  adEl.addEventListener('input', updateSubmit);
+  submitBtn.addEventListener('click', function() {
+    if (!tarihEl.value || !selectedSlot || !adEl.value.trim()) return;
+    var baslangic = tarihEl.value + 'T' + selectedSlot.start + ':00', bitis = tarihEl.value + 'T' + selectedSlot.end + ':00';
+    msg('Gonderiliyor...', 'info');
+    submitBtn.disabled = true;
+    fetch('/randevu/api/public/ekle', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        oda_adi: odaEl.value,
+        baslangic_zamani: baslangic,
+        bitis_zamani: bitis,
+        ad_soyad: adEl.value.trim(),
+        email: document.getElementById('book-email').value.trim() || null,
+        telefon: document.getElementById('book-tel').value.trim() || null,
+        notlar: document.getElementById('book-notlar').value.trim() || null
+      })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(res) {
+      if (res.ok) { msg('Randevunuz alindi. ' + (res.message || ''), 'ok'); selectedSlot = null; secilenSlotEl.style.display = 'none'; slotsEl.querySelectorAll('.slot-btn').forEach(function(b) { b.classList.remove('selected'); }); }
+      else { msg(res.error || 'Randevu alinamadi.', 'err'); }
+      submitBtn.disabled = false;
+      updateSubmit();
+    })
+    .catch(function() { msg('Istek gonderilemedi.', 'err'); submitBtn.disabled = false; });
+  });
+})();
+  </script>
+</body>
+</html>

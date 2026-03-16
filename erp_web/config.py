@@ -33,3 +33,14 @@ class Config:
 
     # Gemini AI (opsiyonel; .env içinde GEMINI_API_KEY=...)
     GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
+
+    # E-posta (randevu onay/iptal/hatırlatma)
+    MAIL_SERVER = os.environ.get("MAIL_SERVER", "smtp.gmail.com")
+    MAIL_PORT = int(os.environ.get("MAIL_PORT", 587))
+    MAIL_USE_TLS = os.environ.get("MAIL_USE_TLS", "true").lower() == "true"
+    MAIL_USERNAME = os.environ.get("MAIL_USERNAME", "")
+    MAIL_PASSWORD = os.environ.get("MAIL_PASSWORD", "")
+    MAIL_DEFAULT_SENDER = os.environ.get("MAIL_DEFAULT_SENDER", MAIL_USERNAME or "noreply@example.com")
+    APP_URL = os.environ.get("APP_URL", "http://127.0.0.1:5000")  # Onay maillerindeki linkler için
+    RANDEVU_WEBHOOK_URL = os.environ.get("RANDEVU_WEBHOOK_URL", "").strip()  # Randevu oluştur/iptal webhook
+    RANDEVU_BOOKING_TITLE = os.environ.get("RANDEVU_BOOKING_TITLE", "Randevu Al")  # Beyaz etiket: sayfa başlığı

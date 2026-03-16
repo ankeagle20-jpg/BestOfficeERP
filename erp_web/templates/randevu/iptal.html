@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Randevu İptal</title>
+  <style>
+    body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #0f2537; color: #e0f7fa; margin: 0; padding: 24px; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+    .box { max-width: 420px; background: #1e3a50; border: 1px solid #2d4060; border-radius: 8px; padding: 24px; text-align: center; }
+    h1 { font-size: 20px; color: #f87171; margin-bottom: 12px; }
+    p { color: #b0bec5; font-size: 14px; margin: 8px 0; }
+    .btn { display: inline-block; padding: 12px 24px; margin-top: 16px; background: #dc2626; border: 1px solid #ef4444; color: #fff; border-radius: 6px; cursor: pointer; font-size: 14px; text-decoration: none; }
+    .btn:hover { background: #b91c1c; }
+    .success { color: #86efac; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    {% if bulunamadi %}
+      <h1>Randevu bulunamadı</h1>
+      <p>Bu randevu zaten iptal edilmiş veya mevcut değil.</p>
+    {% else %}
+      <h1>Randevuyu iptal et</h1>
+      <p><strong>{{ randevu.name or 'Randevu' }}</strong></p>
+      <p>{{ randevu.oda_adi or randevu.oda }}</p>
+      <p>{{ randevu.baslangic_zamani.strftime('%d.%m.%Y %H:%M') if randevu.baslangic_zamani else '' }} – {{ randevu.bitis_zamani.strftime('%H:%M') if randevu.bitis_zamani else '' }}</p>
+      <p>İptal etmek için aşağıdaki butona tıklayın.</p>
+      <button type="button" class="btn" id="iptal-btn">Randevuyu iptal et</button>
+      <p id="iptal-msg" class="success" style="display:none; margin-top:12px;">Randevu iptal edildi. E-postanıza bilgi gönderildi.</p>
+    {% endif %}
+  </div>
+  {% if not bulunamadi %}
+  <script>
+    document.getElementById('iptal-btn').addEventListener('click', function() {
+      var btn = this;
+      btn.disabled = true;
+      fetch('{{ url_for("randevu.api_public_iptal", rid=randevu.id) }}', { method: 'POST', headers: { 'Content-Type': 'application/json' } })
+        .then(function(r) { return r.json(); })
+        .then(function(res) {
+          if (res.ok) {
+            document.getElementById('iptal-msg').style.display = 'block';
+            btn.style.display = 'none';
+          } else {
+            btn.disabled = false;
+            alert(res.error || 'İptal edilemedi.');
+          }
+        })
+        .catch(function() { btn.disabled = false; alert('İstek gönderilemedi.'); });
+    });
+  </script>
+  {% endif %}
+</body>
+</html>

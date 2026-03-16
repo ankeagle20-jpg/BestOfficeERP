@@ -737,6 +737,27 @@ def ensure_customers_balance_trigger():
         print(f"trg_tahsilatlar_update_balance: {e}")
 
 
+def ensure_randevular_takip_columns():
+    """Randevu Takip: baslangic/bitis, toplam_ucret, pakete_dahil_mi, durum, randevu_tipi, tekrarlayan, hatirlatma."""
+    for col, sql in [
+        ("baslangic_zamani", "ALTER TABLE randevular ADD COLUMN IF NOT EXISTS baslangic_zamani TIMESTAMPTZ"),
+        ("bitis_zamani", "ALTER TABLE randevular ADD COLUMN IF NOT EXISTS bitis_zamani TIMESTAMPTZ"),
+        ("toplam_ucret", "ALTER TABLE randevular ADD COLUMN IF NOT EXISTS toplam_ucret NUMERIC(12,2) DEFAULT 0"),
+        ("pakete_dahil_mi", "ALTER TABLE randevular ADD COLUMN IF NOT EXISTS pakete_dahil_mi BOOLEAN DEFAULT FALSE"),
+        ("durum", "ALTER TABLE randevular ADD COLUMN IF NOT EXISTS durum TEXT DEFAULT 'Beklemede'"),
+        ("oda_adi", "ALTER TABLE randevular ADD COLUMN IF NOT EXISTS oda_adi TEXT"),
+        ("randevu_tipi", "ALTER TABLE randevular ADD COLUMN IF NOT EXISTS randevu_tipi TEXT DEFAULT 'randevu'"),
+        ("recurrence_rule", "ALTER TABLE randevular ADD COLUMN IF NOT EXISTS recurrence_rule TEXT"),
+        ("recurrence_end_date", "ALTER TABLE randevular ADD COLUMN IF NOT EXISTS recurrence_end_date DATE"),
+        ("parent_id", "ALTER TABLE randevular ADD COLUMN IF NOT EXISTS parent_id INTEGER"),
+        ("reminder_sent", "ALTER TABLE randevular ADD COLUMN IF NOT EXISTS reminder_sent BOOLEAN DEFAULT FALSE"),
+    ]:
+        try:
+            execute(sql)
+        except Exception as e:
+            print(f"randevular.{col}: {e}")
+
+
 def ensure_cari_360_tables():
     """360° Cari Kart: randevular, iletisim_log, audit_log, cari_belgeler."""
     try:
@@ -757,6 +778,32 @@ def ensure_cari_360_tables():
         """)
     except Exception as e:
         print(f"randevular: {e}")
+    ensure_randevular_takip_columns()
+    try:
+        execute("""
+            CREATE TABLE IF NOT EXISTS toplanti_odasi_fiyat (
+                oda_adi TEXT PRIMARY KEY,
+                saatlik_ucret NUMERIC(12,2) NOT NULL DEFAULT 0,
+                aciklama TEXT
+            )
+        """)
+    except Exception as e:
+        print(f"toplanti_odasi_fiyat: {e}")
+    try:
+        execute("""
+            CREATE TABLE IF NOT EXISTS faturalandirilacak_hizmetler (
+                id SERIAL PRIMARY KEY,
+                kaynak TEXT NOT NULL DEFAULT 'randevu',
+                kaynak_id INTEGER NOT NULL,
+                musteri_id INTEGER REFERENCES customers(id),
+                aciklama TEXT,
+                tutar NUMERIC(12,2) DEFAULT 0,
+                islendi BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+    except Exception as e:
+        print(f"faturalandirilacak_hizmetler: {e}")
     try:
         execute("""
             CREATE TABLE IF NOT EXISTS iletisim_log (

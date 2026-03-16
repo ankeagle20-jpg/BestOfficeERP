@@ -28,18 +28,31 @@
   margin-bottom: 0;
 }
 .dash-left-col {
-  width: 340px;
+  width: 520px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
-/* 8 istatistik kartı — küçültülmüş, 2x4 grid */
+/* Üst blok: 8 istatistik kartı + sağında filtre kartları, altında 5 aksiyon butonu */
+.dash-cards-and-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.dash-cards-and-filters-top {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 12px;
+}
+/* 8 istatistik kartı — 2x4 grid */
 .dash-cards {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 8px;
   margin-bottom: 0;
+  flex: 0 0 auto;
 }
 .dash-card {
   background: #1e3a50;
@@ -47,8 +60,51 @@
   padding: 8px 10px;
   border: 1px solid #2d4060;
   transition: box-shadow 0.2s;
+  min-height: 50px;
+  height: 50px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 .dash-card:hover { box-shadow: 0 0 0 1px #4fc3f7; }
+/* Kart boyutundaki filtre butonları (Tahsilat/TÜFE/Sözleşme kartlarının altında) */
+.dash-card-btn {
+  cursor: pointer;
+  font-size: 10px;
+  line-height: 1.2;
+  text-align: center;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid #2d4060;
+  color: #e0f7fa;
+}
+.dash-card-btn .filter-icon { font-size: 14px; color: #78909c; display: block; }
+.dash-card-btn .filter-label { color: #b0bec5; font-weight: 500; }
+.dash-card-btn:hover { background: #2d4060; border-color: #3d5070; box-shadow: 0 0 0 1px #4fc3f7; }
+.dash-card-btn:hover .filter-icon { color: #4fc3f7; }
+.dash-card-btn.active { background: #0d47a1; border-color: #4fc3f7; box-shadow: 0 0 0 1px #4fc3f7; }
+.dash-card-btn.active .filter-icon,
+.dash-card-btn.active .filter-label { color: #fff; }
+/* Link butonları (Randevu, Yeni Fatura, Yeni Tahsilat) — kart boyutu, buton görünümü */
+.dash-card-link {
+  text-decoration: none;
+  color: inherit;
+}
+.dash-card-link .filter-label { color: #b0bec5; }
+.dash-card-link .filter-icon { color: #78909c; }
+.dash-card-link:hover { background: #2d4060; border-color: #3d5070; box-shadow: 0 0 0 1px #4fc3f7; }
+.dash-card-link:hover .filter-icon { color: #4fc3f7; }
+/* İkinci satır: 5 aksiyon butonu (Müşteri listesi, Müşteri ekle, …) */
+.dash-action-row {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+}
+.dash-action-row .dash-card-link {
+  min-height: 50px;
+  height: 50px;
+}
 .dash-card-title { color: #b0bec5; font-size: 10px; margin-bottom: 4px; line-height: 1.2; }
 .dash-card-value { font-size: 14px; font-weight: bold; }
 .dash-card-value.green { color: #22c55e; }
@@ -61,35 +117,115 @@
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 10px;
+  gap: 14px;
 }
-.dash-filters-vertical {
+/* Filtreler: 8 kartın sağında — sol sütun 5 buton, sağ sütun 2 buton (Boş Ofisler, Sözleşme Bitiş) */
+.dash-filters-wrap {
   display: flex;
   flex-direction: row;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 10px;
+  gap: 8px;
+  align-items: flex-start;
 }
-.dash-filters-vertical .btn-filter {
-  background: #2d4060;
+.dash-filters-vertical {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  min-width: 120px;
+}
+.dash-filters-right {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  min-width: 120px;
+}
+.dash-filters-right .btn-filter {
+  background: #1e3a50;
   color: #e0f7fa;
-  border: 1px solid #3d5070;
-  padding: 10px 16px;
+  border: 1px solid #2d4060;
+  padding: 8px 10px;
   border-radius: 6px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 10px;
+  line-height: 1.2;
   transition: all 0.2s;
-  text-align: center;
-  width: auto;
+  text-align: left;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 4px;
+  min-height: 50px;
+  height: 50px;
+  box-sizing: border-box;
 }
-.dash-filters-vertical .btn-filter:hover { background: #3d5070; border-color: #4fc3f7; }
-.dash-filters-vertical .btn-filter.active { background: #0d47a1; border-color: #4fc3f7; color: #fff; }
-/* İki buton: Geri Dönüş + Arama — filtre butonlarının hemen altında */
+.dash-filters-right .btn-filter .filter-icon { font-size: 14px; color: #78909c; }
+.dash-filters-right .btn-filter .filter-label { color: #b0bec5; font-weight: 500; }
+.dash-filters-right .btn-filter:hover { background: #2d4060; border-color: #3d5070; box-shadow: 0 0 0 1px #4fc3f7; }
+.dash-filters-right .btn-filter:hover .filter-icon { color: #4fc3f7; }
+.dash-filters-right .btn-filter.active { background: #0d47a1; border-color: #4fc3f7; box-shadow: 0 0 0 1px #4fc3f7; }
+.dash-filters-right .btn-filter.active .filter-icon,
+.dash-filters-right .btn-filter.active .filter-label { color: #fff; }
+.dash-filters-vertical .btn-filter {
+  background: #1e3a50;
+  color: #e0f7fa;
+  border: 1px solid #2d4060;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 10px;
+  line-height: 1.2;
+  transition: all 0.2s;
+  text-align: left;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 4px;
+  min-height: 50px;
+  height: 50px;
+  box-sizing: border-box;
+}
+.dash-filters-vertical .btn-filter .filter-icon {
+  font-size: 14px;
+  color: #78909c;
+}
+.dash-filters-vertical .btn-filter .filter-label {
+  color: #b0bec5;
+  font-weight: 500;
+}
+.dash-filters-vertical .btn-filter:hover {
+  background: #2d4060;
+  border-color: #3d5070;
+  box-shadow: 0 0 0 1px #4fc3f7;
+}
+.dash-filters-vertical .btn-filter:hover .filter-icon { color: #4fc3f7; }
+.dash-filters-vertical .btn-filter.active {
+  background: #0d47a1;
+  border-color: #4fc3f7;
+  box-shadow: 0 0 0 1px #4fc3f7;
+}
+.dash-filters-vertical .btn-filter.active .filter-icon,
+.dash-filters-vertical .btn-filter.active .filter-label { color: #fff; }
+.dash-filter-link { text-decoration: none; color: inherit; display: flex; }
+.dash-filters-right .dash-filter-link { display: flex; }
+@media (max-width: 600px) {
+  .dash-cards-and-filters { flex-direction: column; }
+  .dash-filters-wrap { flex-direction: column; }
+  .dash-filters-vertical { grid-template-columns: repeat(2, 1fr); min-width: 0; }
+  .dash-filters-right { grid-template-columns: repeat(2, 1fr); min-width: 0; }
+}
+@media (max-width: 400px) {
+  .dash-filters-vertical { grid-template-columns: 1fr; }
+  .dash-filters-right { grid-template-columns: 1fr; }
+}
+/* Geri Dönüş: kart stilinde, tam genişlik */
 .dash-under-filters {
   display: flex;
   flex-direction: row;
   flex-wrap: wrap;
-  justify-content: center;
+  justify-content: stretch;
   align-items: center;
   gap: 12px;
 }
@@ -105,21 +241,22 @@
 .dash-search-inline::placeholder { color: #78909c; }
 .dash-search-inline:focus { outline: none; border-color: #4fc3f7; }
 .dash-geri-btn {
-  background: #2d4060;
+  background: #1e3a50;
   color: #e0f7fa;
-  border: 1px solid #3d5070;
-  padding: 10px 16px;
-  border-radius: 6px;
+  border: 1px solid #2d4060;
+  padding: 12px 18px;
+  border-radius: 8px;
   cursor: pointer;
   font-size: 13px;
-  width: auto;
+  width: 100%;
+  max-width: 200px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 8px;
   transition: all 0.2s;
 }
-.dash-geri-btn:hover { background: #3d5070; border-color: #4fc3f7; }
+.dash-geri-btn:hover { background: #2d4060; border-color: #4fc3f7; box-shadow: 0 0 0 1px #4fc3f7; }
 .dash-geri-list-wrap {
   max-height: 180px;
   overflow-y: auto;
@@ -353,10 +490,9 @@
 
 @media (max-width: 900px) {
   .dash-top-row { flex-direction: column; }
-  .dash-left-col { width: 100%; }
+  .dash-left-col { width: 100%; max-width: none; }
   .dash-right-col { flex: 1 1 auto; max-width: none; margin-left: 0; width: 100%; }
   .dash-musteri-block { min-height: 400px; }
-  .dash-filters-vertical { justify-content: center; }
 }
 @media (max-width: 768px) {
   .dash-cards { grid-template-columns: 1fr 1fr; }
@@ -371,7 +507,9 @@
   <!-- Üst satır: sol = 8 küçük kart + filtreler; sağ = müşteri listesi en üstten -->
   <div class="dash-top-row">
     <div class="dash-left-col">
-      <div class="dash-cards">
+      <div class="dash-cards-and-filters">
+        <div class="dash-cards-and-filters-top">
+        <div class="dash-cards">
         <div class="dash-card">
           <div class="dash-card-title">📦 Bugün Gelen Kargolar</div>
           <div class="dash-card-value cyan" id="stat-bugun-kargo">{{ bugun_kargo_say }}</div>
@@ -404,17 +542,36 @@
           <div class="dash-card-title">🏢 Boş Ofis</div>
           <div class="dash-card-value cyan" id="stat-bos">{{ bos_ofis_say }} <small style="font-size:9px;color:#78909c;">(Hazır: {{ bos_hazir }}, Sanal: {{ bos_sanal }})</small></div>
         </div>
+        <!-- 3 filtre butonu: yukarıdaki 3 kartın (Tahsilat, TÜFE, Sözleşmesi Bitecekler) altında, aynı boyutta -->
+        <button type="button" class="dash-card dash-card-btn btn-filter" data-filtre="yakin"><span class="filter-icon"><i class="fa fa-hourglass-half"></i></span><span class="filter-label">Yakın Gecikme</span></button>
+        <button type="button" class="dash-card dash-card-btn btn-filter" data-filtre="kritik"><span class="filter-icon"><i class="fa fa-exclamation-triangle"></i></span><span class="filter-label">Kritik Gecikme</span></button>
+        <button type="button" class="dash-card dash-card-btn btn-filter" data-filtre="kargo"><span class="filter-icon"><i class="fa fa-truck"></i></span><span class="filter-label">Kargosu Bekleyen</span></button>
+        <!-- Randevu — kart satırında tek link butonu -->
+        <a href="{{ url_for('randevu.randevu_al') }}" class="dash-card dash-card-btn dash-card-link" title="Randevu Al"><span class="filter-icon"><i class="fa fa-calendar"></i></span><span class="filter-label">Randevu</span></a>
+        </div>
+        <div class="dash-filters-wrap">
+          <div class="dash-filters-vertical">
+            <button type="button" class="btn-filter active" data-filtre=""><span class="filter-icon"><i class="fa fa-th-large"></i></span><span class="filter-label">Tümü</span></button>
+            <button type="button" class="btn-filter" data-filtre="tam"><span class="filter-icon"><i class="fa fa-check-circle"></i></span><span class="filter-label">Ödemesi Tam</span></button>
+            <a href="{{ url_for('faturalar.yeni_fatura') }}" class="btn-filter dash-filter-link" title="Yeni fatura oluştur"><span class="filter-icon"><i class="fa fa-file-invoice"></i></span><span class="filter-label">Yeni Fatura</span></a>
+          </div>
+          <div class="dash-filters-right">
+            <button type="button" class="btn-filter" data-filtre="bos"><span class="filter-icon"><i class="fa fa-building"></i></span><span class="filter-label">Boş Ofisler</span></button>
+            <button type="button" class="btn-filter" data-filtre="sozlesme"><span class="filter-icon"><i class="fa fa-calendar"></i></span><span class="filter-label">Sözleşme Bitiş Yakın</span></button>
+            <a href="{{ url_for('tahsilat.index') }}" class="btn-filter dash-filter-link" title="Tahsilat / Yeni tahsilat"><span class="filter-icon"><i class="fa fa-money-bill-wave"></i></span><span class="filter-label">Yeni Tahsilat</span></a>
+          </div>
+        </div>
+        </div>
+        <!-- Beş buton: resimdeki altı butonun (Yakın Gecikme … Yeni Tahsilat) hemen altında -->
+        <div class="dash-action-row">
+          <a href="{{ url_for('musteriler.list_full') }}" class="dash-card dash-card-btn dash-card-link" title="Müşteri listesi"><span class="filter-icon"><i class="fa fa-list"></i></span><span class="filter-label">Müşteri Listesi</span></a>
+          <a href="{{ url_for('musteriler.ekle') }}" class="dash-card dash-card-btn dash-card-link" title="Yeni müşteri ekle"><span class="filter-icon"><i class="fa fa-user-plus"></i></span><span class="filter-label">Müşteri Ekle</span></a>
+          <a href="{{ url_for('musteriler.list_full', filtre='whatsapp') }}" class="dash-card dash-card-btn dash-card-link" title="Toplu WhatsApp gönder"><span class="filter-icon"><i class="fa fa-whatsapp"></i></span><span class="filter-label">Toplu WhatsApp</span></a>
+          <a href="{{ url_for('faturalar.index') }}" class="dash-card dash-card-btn dash-card-link" title="Toplu faturalama"><span class="filter-icon"><i class="fa fa-file-invoice"></i></span><span class="filter-label">Toplu Faturalama</span></a>
+          <a href="{{ url_for('tufe.index') }}" class="dash-card dash-card-btn dash-card-link" title="TÜFE senaryosu / simülasyon"><span class="filter-icon"><i class="fa fa-chart-line"></i></span><span class="filter-label">TÜFE Senaryosu</span></a>
+        </div>
       </div>
       <div class="dash-buttons-area">
-        <div class="dash-filters-vertical">
-          <button type="button" class="btn-filter active" data-filtre="">Tümü</button>
-          <button type="button" class="btn-filter" data-filtre="tam">Ödemesi Tam</button>
-          <button type="button" class="btn-filter" data-filtre="yakin">Yakın Gecikme</button>
-          <button type="button" class="btn-filter" data-filtre="kritik">Kritik Gecikme</button>
-          <button type="button" class="btn-filter" data-filtre="kargo">Kargosu Bekleyen</button>
-          <button type="button" class="btn-filter" data-filtre="bos">Boş Ofisler</button>
-          <button type="button" class="btn-filter" data-filtre="sozlesme">Sözleşme Bitiş Yakın</button>
-        </div>
         <div class="dash-under-filters">
           <button type="button" id="geri-yenile" class="dash-geri-btn" title="Geri dönüş bekleyenler listesini yenile"><i class="fa fa-clock-o"></i> Geri Dönüş</button>
         </div>
@@ -562,7 +719,7 @@
 
   function tabloYenile() {
     const q = document.getElementById('dash-search').value.trim();
-    const filtre = document.querySelector('.dash-filters-vertical .btn-filter.active');
+    const filtre = document.querySelector('.btn-filter.active');
     const f = filtre ? filtre.getAttribute('data-filtre') || '' : '';
     const url = API_TABLO + '?q=' + encodeURIComponent(q) + '&filtre=' + encodeURIComponent(f);
     fetch(url).then(function(r) { return r.json(); }).then(function(rows) {
@@ -621,9 +778,9 @@
 
   document.getElementById('geri-yenile').addEventListener('click', geriListeYenile);
 
-  document.querySelectorAll('.dash-filters-vertical .btn-filter').forEach(function(btn) {
+  document.querySelectorAll('.btn-filter').forEach(function(btn) {
     btn.addEventListener('click', function() {
-      document.querySelectorAll('.dash-filters-vertical .btn-filter').forEach(function(b) { b.classList.remove('active'); });
+      document.querySelectorAll('.btn-filter').forEach(function(b) { b.classList.remove('active'); });
       this.classList.add('active');
       tabloYenile();
     });

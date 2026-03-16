@@ -1,0 +1,91 @@
+{% extends "layout.html" %}
+{% block title %}Randevu — Cal.com | OFİSBİR ERP{% endblock %}
+{% block page_title %}📅 Randevu (Cal.com){% endblock %}
+
+{% block extra_head %}
+<style>
+  /* Cal.com embed kabı: %100 genişlik, min 700px yükseklik, ERP temasına uyumlu */
+  .calcom-page { width: 100%; max-width: 100%; margin: 0; padding: 0; box-sizing: border-box; }
+  .calcom-container {
+    width: 100%;
+    min-height: 700px;
+    min-height: min(700px, calc(100vh - 120px));
+    height: calc(100vh - 120px);
+    max-height: none;
+    background: #0f2537;
+    border: 1px solid #1e3a50;
+    border-radius: 8px;
+    overflow: hidden;
+    position: relative;
+  }
+  .calcom-container iframe { width: 100%; height: 100%; min-height: 700px; border: none; display: block; }
+  #calcom-embed-root { width: 100%; min-height: 700px; height: 100%; }
+  .calcom-loading {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: #0f2537;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+    transition: opacity 0.3s ease;
+  }
+  .calcom-loading.hidden { opacity: 0; pointer-events: none; }
+  .calcom-spinner {
+    width: 48px;
+    height: 48px;
+    border: 4px solid #1e3a50;
+    border-top-color: #4fc3f7;
+    border-radius: 50%;
+    animation: calcom-spin 0.9s linear infinite;
+  }
+  .calcom-loading span { margin-top: 16px; color: #4fc3f7; font-size: 14px; }
+  @keyframes calcom-spin { to { transform: rotate(360deg); } }
+  .calcom-back { margin-bottom: 12px; }
+  .calcom-back a { color: #4fc3f7; text-decoration: none; font-size: 13px; }
+  .calcom-back a:hover { text-decoration: underline; }
+  @media (max-width: 768px) {
+    .calcom-container { min-height: 600px; height: calc(100vh - 100px); }
+    .calcom-container iframe, #calcom-embed-root { min-height: 600px; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="calcom-page">
+  <div class="calcom-back">
+    <a href="{{ url_for('randevu.index') }}"><i class="fa fa-arrow-left"></i> ERP Randevu listesine dön</a>
+  </div>
+  <div class="calcom-container" id="calcom-container">
+    <div class="calcom-loading" id="calcom-loading">
+      <div class="calcom-spinner"></div>
+      <span>Yükleniyor...</span>
+    </div>
+    {% set cal_link = cal_com_cal_link | default('PLACEHOLDER') %}
+    {% if cal_link and cal_link != 'PLACEHOLDER' %}
+    <iframe id="calcom-iframe" src="https://app.cal.com/{{ cal_link }}" title="Cal.com Randevu" allow="camera; microphone; fullscreen" loading="lazy"></iframe>
+    {% else %}
+    <div id="calcom-placeholder" style="padding:24px;text-align:center;color:#78909c;"><p>Cal.com linki ayarlanmamış. <code>CAL_COM_CAL_LINK</code> veya randevu_routes.py içinde cal_link değerini güncelleyin.</p></div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script type="text/javascript">
+(function() {
+  var loading = document.getElementById('calcom-loading');
+  var iframe = document.getElementById('calcom-iframe');
+  function hideLoading() {
+    if (loading) loading.classList.add('hidden');
+  }
+  if (iframe) {
+    iframe.onload = hideLoading;
+    setTimeout(hideLoading, 6000);
+  } else {
+    hideLoading();
+  }
+})();
+</script>
+{% endblock %}

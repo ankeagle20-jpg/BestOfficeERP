@@ -1,0 +1,353 @@
+{% extends "layout.html" %}
+{% block title %}Randevu Takip Sistemi — OFİSBİR ERP{% endblock %}
+{% block page_title %}📅 Toplantı Odası ve Randevu Takip{% endblock %}
+
+{% block extra_head %}
+<style>
+  .randevu-wrap { max-width: 1200px; margin: 0 auto; padding: 16px; }
+  .randevu-toolbar { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+  .randevu-form-card { background: #1e3a50; border-radius: 8px; padding: 16px; margin-bottom: 16px; border: 1px solid #2d4060; }
+  .randevu-form-card h3 { color: #4fc3f7; margin-bottom: 12px; font-size: 14px; }
+  .randevu-form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+  .randevu-form-grid label { display: block; color: #b0bec5; font-size: 12px; margin-bottom: 4px; }
+  .randevu-form-grid input, .randevu-form-grid select, .randevu-form-grid textarea {
+    width: 100%; padding: 8px 10px; border-radius: 4px; border: 1px solid #2d4060;
+    background: #0f2537; color: #e0f7fa; box-sizing: border-box;
+  }
+  .randevu-form-grid textarea { min-height: 60px; resize: vertical; }
+  .combobox-wrap { position: relative; }
+  .combobox-list { position: absolute; left: 0; right: 0; top: 100%; z-index: 100;
+    background: #1e3a50; border: 1px solid #2d4060; border-radius: 4px; max-height: 200px; overflow-y: auto;
+    margin-top: 2px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  }
+  .combobox-item { padding: 8px 10px; cursor: pointer; border-bottom: 1px solid #2d4060; font-size: 13px; }
+  .combobox-item:hover { background: #2d4060; }
+  .randevu-btn { background: #0d47a1; color: #fff; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+  .randevu-btn:hover { background: #1565c0; }
+  .randevu-btn.secondary { background: #37474f; }
+  .randevu-btn.secondary:hover { background: #455a64; }
+  .cal-view { background: #1e3a50; border-radius: 8px; border: 1px solid #2d4060; overflow: hidden; margin-bottom: 16px; }
+  .cal-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: #0f2537; border-bottom: 1px solid #2d4060; }
+  .cal-nav { display: flex; gap: 8px; }
+  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; background: #2d4060; }
+  .cal-day { min-height: 80px; background: #0f2537; padding: 6px; font-size: 12px; }
+  .cal-day.other-month { opacity: 0.5; }
+  .cal-day-num { color: #4fc3f7; font-weight: bold; margin-bottom: 4px; }
+  .cal-event { padding: 4px 6px; border-radius: 4px; margin-bottom: 4px; font-size: 11px; cursor: pointer; }
+  .cal-event.Beklemede { background: rgba(234, 179, 8, 0.4); border-left: 3px solid #eab308; }
+  .cal-event.Onaylandı { background: rgba(34, 197, 94, 0.4); border-left: 3px solid #22c55e; }
+  .cal-event.Tamamlandı { background: rgba(79, 195, 247, 0.4); border-left: 3px solid #4fc3f7; }
+  .cal-event.İptal { background: rgba(239, 68, 68, 0.4); border-left: 3px solid #ef4444; }
+  .list-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .list-table th, .list-table td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #2d4060; }
+  .list-table th { background: #0f2537; color: #4fc3f7; }
+  .list-table tr:hover { background: #1e3a50; }
+  .durum-badge { padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; }
+  .durum-badge.Beklemede { background: #eab308; color: #000; }
+  .durum-badge.Onaylandı { background: #22c55e; color: #fff; }
+  .durum-badge.Tamamlandı { background: #4fc3f7; color: #000; }
+  .durum-badge.İptal { background: #ef4444; color: #fff; }
+  .err-msg { color: #ef4444; font-size: 12px; margin-top: 8px; }
+  .success-msg { color: #22c55e; font-size: 12px; margin-top: 8px; }
+  .randevu-ucret-wrap { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .randevu-ucret-select { padding: 6px 10px; border-radius: 4px; border: 1px solid #2d4060; background: #0f2537; color: #e0f7fa; min-width: 160px; }
+  .randevu-ucret-input { width: 80px; padding: 6px 10px; border-radius: 4px; border: 1px solid #2d4060; background: #0f2537; color: #e0f7fa; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="randevu-wrap">
+  <div class="randevu-toolbar">
+    <span style="color:#78909c;">Görünüm:</span>
+    <button type="button" class="randevu-btn secondary" id="view-list">Liste</button>
+    <button type="button" class="randevu-btn secondary" id="view-week">Haftalık</button>
+    <div class="randevu-ucret-wrap">
+      <span style="color:#78909c;">Saat ücreti (₺):</span>
+      <select id="oda-ucret-select" class="randevu-ucret-select">
+        <option value="">Oda seçin</option>
+      </select>
+      <input type="number" id="oda-ucret-input" value="500" min="0" step="50" class="randevu-ucret-input" placeholder="500">
+      <button type="button" class="randevu-btn secondary" id="oda-ucret-guncelle"><i class="fa fa-edit"></i> Güncelle</button>
+    </div>
+  </div>
+
+  <div class="randevu-form-card">
+    <h3><i class="fa fa-plus"></i> Yeni Randevu</h3>
+    <div class="randevu-form-grid">
+      <div>
+        <label>Müşteri</label>
+        <div class="combobox-wrap">
+          <input type="text" id="musteri-ara" placeholder="Müşteri ara..." autocomplete="off">
+          <input type="hidden" id="musteri-id">
+          <div class="combobox-list" id="musteri-list" style="display:none;"></div>
+        </div>
+      </div>
+      <div>
+        <label>Oda</label>
+        <select id="oda-adi"></select>
+      </div>
+      <div>
+        <label>Başlangıç</label>
+        <input type="datetime-local" id="baslangic">
+      </div>
+      <div>
+        <label>Bitiş</label>
+        <input type="datetime-local" id="bitis">
+      </div>
+      <div style="display:flex;align-items:flex-end;">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+          <input type="checkbox" id="pakete-dahil">
+          <span>Pakete dahil (ücretsiz)</span>
+        </label>
+      </div>
+      <div style="grid-column: 1 / -1;">
+        <label>Notlar (ikram, teknik)</label>
+        <textarea id="notlar" placeholder="İkram ve teknik detaylar..."></textarea>
+      </div>
+    </div>
+    <div style="margin-top:12px;">
+      <button type="button" class="randevu-btn" id="btn-kaydet"><i class="fa fa-save"></i> Kaydet</button>
+    </div>
+    <div id="form-msg"></div>
+  </div>
+
+  <div id="cal-container" class="cal-view" style="display:none;">
+    <div class="cal-header">
+      <button type="button" class="randevu-btn secondary" id="cal-prev"><i class="fa fa-chevron-left"></i></button>
+      <span id="cal-title" style="color:#e0f7fa;font-weight:bold;"></span>
+      <button type="button" class="randevu-btn secondary" id="cal-next"><i class="fa fa-chevron-right"></i></button>
+    </div>
+    <div id="cal-grid" class="cal-grid"></div>
+  </div>
+
+  <div id="list-container">
+    <div class="cal-view">
+      <div class="cal-header">
+        <span id="list-title" style="color:#e0f7fa;">Randevular</span>
+        <button type="button" class="randevu-btn secondary" id="list-refresh"><i class="fa fa-refresh"></i> Yenile</button>
+      </div>
+      <div style="padding:12px;overflow-x:auto;">
+        <table class="list-table">
+          <thead>
+            <tr>
+              <th>Tarih / Saat</th>
+              <th>Müşteri</th>
+              <th>Oda</th>
+              <th>Ücret</th>
+              <th>Durum</th>
+              <th>Notlar</th>
+            </tr>
+          </thead>
+          <tbody id="list-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  const API_LIST = "{{ url_for('randevu.api_list') }}";
+  const API_MUSTERILER = "{{ url_for('randevu.api_musteriler') }}";
+  const API_ODALAR = "{{ url_for('randevu.api_odalar') }}";
+  const API_ODALAR_GUNCELLE = "/randevu/api/odalar/guncelle";
+  const API_EKLE = "{{ url_for('randevu.api_ekle') }}";
+  const DURUM_RENK = {{ durum_renk | tojson }};
+
+  let currentView = 'list';
+  let calStart = new Date();
+
+  function getWeekStart(d) {
+    const x = new Date(d);
+    const day = x.getDay();
+    const diff = x.getDate() - day + (day === 0 ? -6 : 1);
+    x.setDate(diff);
+    x.setHours(0,0,0,0);
+    return x;
+  }
+  function fmtDate(d) {
+    return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+  }
+  function fmtDateTime(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    return d.toLocaleDateString('tr-TR') + ' ' + d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+  }
+
+  // Müşteri combobox
+  const musteriAra = document.getElementById('musteri-ara');
+  const musteriId = document.getElementById('musteri-id');
+  const musteriList = document.getElementById('musteri-list');
+  let musteriTimer;
+  musteriAra.addEventListener('input', function() {
+    clearTimeout(musteriTimer);
+    musteriId.value = '';
+    const q = this.value.trim();
+    if (q.length < 1) { musteriList.style.display = 'none'; return; }
+    musteriTimer = setTimeout(function() {
+      fetch(API_MUSTERILER + '?q=' + encodeURIComponent(q))
+        .then(r => r.json())
+        .then(arr => {
+          musteriList.innerHTML = arr.map(m => '<div class="combobox-item" data-id="' + m.id + '" data-name="' + (m.name || '').replace(/"/g, '&quot;') + '">' + (m.name || '—') + (m.phone ? ' <small style="color:#78909c">' + m.phone + '</small>' : '') + '</div>').join('') || '<div class="combobox-item" style="color:#78909c">Sonuç yok</div>';
+          musteriList.style.display = 'block';
+          musteriList.querySelectorAll('.combobox-item[data-id]').forEach(el => {
+            el.addEventListener('click', function() {
+              musteriId.value = this.getAttribute('data-id');
+              musteriAra.value = this.getAttribute('data-name');
+              musteriList.style.display = 'none';
+            });
+          });
+        });
+    }, 300);
+  });
+  musteriAra.addEventListener('focus', function() {
+    if (this.value.trim() && musteriList.innerHTML) musteriList.style.display = 'block';
+  });
+  document.addEventListener('click', function(e) {
+    if (!musteriAra.contains(e.target) && !musteriList.contains(e.target)) musteriList.style.display = 'none';
+  });
+
+  // Odalar + saat ücreti güncelleme alanı
+  function fillOdalar(odalar) {
+    const sel = document.getElementById('oda-adi');
+    const ucretSel = document.getElementById('oda-ucret-select');
+    const opt = (o) => '<option value="' + (o.oda_adi || '').replace(/"/g, '&quot;') + '" data-ucret="' + (o.saatlik_ucret || 0) + '">' + (o.oda_adi || '') + ' (' + (o.saatlik_ucret || 0) + ' ₺/saat)</option>';
+    sel.innerHTML = '<option value="">Oda seçin</option>' + odalar.map(opt).join('');
+    ucretSel.innerHTML = '<option value="">Oda seçin</option>' + odalar.map(opt).join('');
+  }
+  fetch(API_ODALAR).then(r => r.json()).then(odalar => {
+    fillOdalar(odalar);
+  });
+  document.getElementById('oda-ucret-select').addEventListener('change', function() {
+    const opt = this.options[this.selectedIndex];
+    const ucret = opt && opt.getAttribute('data-ucret');
+    document.getElementById('oda-ucret-input').value = ucret !== null && ucret !== '' ? ucret : '500';
+  });
+  document.getElementById('oda-ucret-guncelle').addEventListener('click', function() {
+    const oda = document.getElementById('oda-ucret-select').value;
+    const ucret = parseFloat(document.getElementById('oda-ucret-input').value);
+    if (!oda) { alert('Lütfen oda seçin.'); return; }
+    if (isNaN(ucret) || ucret < 0) { alert('Geçerli bir ücret girin.'); return; }
+    fetch(API_ODALAR_GUNCELLE, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ oda_adi: oda, saatlik_ucret: ucret }) })
+      .then(r => r.json())
+      .then(data => {
+        if (data.ok) {
+          fetch(API_ODALAR).then(r => r.json()).then(fillOdalar);
+          document.getElementById('form-msg').textContent = 'Saat ücreti güncellendi: ' + oda + ' = ' + ucret + ' ₺/saat';
+          document.getElementById('form-msg').className = 'success-msg';
+        } else { alert(data.error || 'Güncellenemedi.'); }
+      })
+      .catch(function() { alert('İstek hatası.'); });
+  });
+
+  // Kaydet
+  document.getElementById('btn-kaydet').addEventListener('click', function() {
+    const mid = musteriId.value.trim();
+    const oda = document.getElementById('oda-adi').value;
+    const bas = document.getElementById('baslangic').value;
+    const bitis = document.getElementById('bitis').value;
+    if (!mid) { showFormMsg('Müşteri seçiniz.', true); return; }
+    if (!oda) { showFormMsg('Oda seçiniz.', true); return; }
+    if (!bas || !bitis) { showFormMsg('Başlangıç ve bitiş giriniz.', true); return; }
+    if (new Date(bas) >= new Date(bitis)) { showFormMsg('Başlangıç saati bitiş saatinden önce olmalıdır.', true); return; }
+    const payload = {
+      musteri_id: parseInt(mid, 10),
+      oda_adi: oda,
+      baslangic_zamani: bas.replace('T', ' ') + ':00',
+      bitis_zamani: bitis.replace('T', ' ') + ':00',
+      pakete_dahil_mi: document.getElementById('pakete-dahil').checked,
+      notlar: document.getElementById('notlar').value
+    };
+    fetch(API_EKLE, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+      .then(r => r.json())
+      .then(data => {
+        if (data.ok) {
+          showFormMsg('Randevu kaydedildi. Toplam ücret: ' + (data.toplam_ucret || 0) + ' ₺', false);
+          document.getElementById('notlar').value = '';
+          loadList();
+          if (currentView === 'week') loadCal();
+        } else {
+          showFormMsg(data.error || 'Kayıt yapılamadı.', true);
+        }
+      })
+      .catch(() => showFormMsg('İstek hatası.', true));
+  });
+  function showFormMsg(txt, err) {
+    const el = document.getElementById('form-msg');
+    el.textContent = txt;
+    el.className = err ? 'err-msg' : 'success-msg';
+  }
+
+  // Liste yükle
+  function loadList() {
+    const start = new Date();
+    start.setDate(1);
+    start.setMonth(start.getMonth() - 1);
+    const end = new Date();
+    end.setMonth(end.getMonth() + 2);
+    fetch(API_LIST + '?bas=' + fmtDate(start) + '&bitis=' + fmtDate(end))
+      .then(r => r.json())
+      .then(rows => {
+        const tbody = document.getElementById('list-tbody');
+        tbody.innerHTML = rows.map(r => {
+          const durum = r.durum || 'Beklemede';
+          return '<tr><td>' + fmtDateTime(r.baslangic_zamani) + '</td><td>' + (r.musteri_adi || '—') + '</td><td>' + (r.oda_adi || '—') + '</td><td>' + (r.pakete_dahil_mi ? 'Paket' : (r.toplam_ucret || 0) + ' ₺') + '</td><td><span class="durum-badge ' + durum + '">' + durum + '</span></td><td>' + (r.notlar || '—') + '</td></tr>';
+        }).join('') || '<tr><td colspan="6" style="color:#78909c;text-align:center;">Randevu yok</td></tr>';
+      });
+  }
+
+  // Haftalık takvim
+  function loadCal() {
+    const ws = getWeekStart(calStart);
+    const we = new Date(ws);
+    we.setDate(we.getDate() + 6);
+    document.getElementById('cal-title').textContent = ws.toLocaleDateString('tr-TR') + ' – ' + we.toLocaleDateString('tr-TR');
+    fetch(API_LIST + '?bas=' + fmtDate(ws) + '&bitis=' + fmtDate(new Date(we.getTime() + 86400000)))
+      .then(r => r.json())
+      .then(rows => {
+        const grid = document.getElementById('cal-grid');
+        const days = [];
+        for (let i = 0; i < 7; i++) {
+          const d = new Date(ws);
+          d.setDate(d.getDate() + i);
+          days.push(d);
+        }
+        grid.innerHTML = days.map(d => {
+          const dayStr = fmtDate(d);
+          const dayEvents = rows.filter(r => {
+            const start = r.baslangic_zamani ? r.baslangic_zamani.slice(0, 10) : '';
+            return start === dayStr;
+          });
+          const other = d.getMonth() !== calStart.getMonth();
+          return '<div class="cal-day ' + (other ? 'other-month' : '') + '"><div class="cal-day-num">' + d.getDate() + '</div>' + dayEvents.map(e => '<div class="cal-event ' + (e.durum || 'Beklemede') + '" title="' + (e.musteri_adi || '') + '">' + (e.baslangic_zamani ? new Date(e.baslangic_zamani).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }) : '') + ' ' + (e.musteri_adi || '') + '</div>').join('') + '</div>';
+        }).join('');
+      });
+  }
+
+  document.getElementById('view-list').addEventListener('click', function() {
+    currentView = 'list';
+    document.getElementById('cal-container').style.display = 'none';
+    document.getElementById('list-container').style.display = 'block';
+    loadList();
+  });
+  document.getElementById('view-week').addEventListener('click', function() {
+    currentView = 'week';
+    calStart = new Date();
+    document.getElementById('list-container').style.display = 'none';
+    document.getElementById('cal-container').style.display = 'block';
+    loadCal();
+  });
+  document.getElementById('cal-prev').addEventListener('click', function() {
+    calStart.setDate(calStart.getDate() - 7);
+    loadCal();
+  });
+  document.getElementById('cal-next').addEventListener('click', function() {
+    calStart.setDate(calStart.getDate() + 7);
+    loadCal();
+  });
+  document.getElementById('list-refresh').addEventListener('click', loadList);
+
+  loadList();
+})();
+</script>
+{% endblock %}

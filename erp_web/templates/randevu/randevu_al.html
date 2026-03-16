@@ -1,0 +1,1201 @@
+{% extends "layout.html" %}
+{% block page_title %}📅 Randevu Al — OFİSBİR ERP{% endblock %}
+
+{% block extra_head %}
+<style>
+  .randevu-al-page { max-width: 1300px; margin: 0 auto; padding: 16px; }
+  .randevu-al-grid {
+    display: grid;
+    grid-template-columns: 260px 1fr 220px 240px;
+    gap: 20px;
+    align-items: start;
+  }
+  @media (max-width: 1100px) {
+    .randevu-al-grid { grid-template-columns: 1fr; }
+  }
+  .randevu-al-left {
+    background: #1e3a50;
+    border: 1px solid #2d4060;
+    border-radius: 8px;
+    padding: 16px;
+  }
+  .ra-left-panel { display: none; }
+  .ra-left-panel.active { display: block; }
+  .randevu-al-left h2 { color: #e0f7fa; font-size: 16px; margin-bottom: 4px; }
+  .randevu-al-left .sub { color: #90a4ae; font-size: 13px; margin-bottom: 12px; }
+  .randevu-al-meta { color: #b0bec5; font-size: 12px; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+  .randevu-al-meta i { color: #4fc3f7; width: 18px; }
+  .randevu-al-left label { display: block; color: #b0bec5; font-size: 12px; margin: 12px 0 4px; }
+  .randevu-al-left select,
+  .randevu-al-left input[type="text"],
+  .randevu-al-left input[type="time"],
+  .randevu-al-left input[type="number"],
+  .randevu-al-left textarea {
+    width: 100%; padding: 8px 10px; border-radius: 4px; border: 1px solid #2d4060;
+    background: #0f2537; color: #e0f7fa; box-sizing: border-box;
+  }
+  .randevu-al-left textarea { min-height: 60px; resize: vertical; }
+  .combobox-wrap-ra { position: relative; }
+  .combobox-list-ra {
+    position: absolute; left: 0; right: 0; top: 100%; z-index: 50;
+    background: #1e3a50; border: 1px solid #2d4060; border-radius: 4px;
+    max-height: 180px; overflow-y: auto; margin-top: 2px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  }
+  .combobox-item-ra { padding: 8px 10px; cursor: pointer; border-bottom: 1px solid #2d4060; font-size: 13px; }
+  .combobox-item-ra:hover { background: #2d4060; }
+  .randevu-al-cal {
+    background: #1e3a50;
+    border: 1px solid #2d4060;
+    border-radius: 8px;
+    padding: 16px;
+  }
+  .randevu-al-cal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  .randevu-al-cal-header span { color: #e0f7fa; font-weight: bold; }
+  .randevu-al-cal-header button {
+    background: #0f2537; border: 1px solid #2d4060; color: #4fc3f7;
+    padding: 6px 12px; border-radius: 4px; cursor: pointer;
+  }
+  .randevu-al-cal-header button:hover { background: #2d4060; }
+  .randevu-al-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+  .randevu-al-cal-dow { text-align: center; color: #78909c; font-size: 11px; padding: 4px 0; }
+  .randevu-al-cal-day {
+    aspect-ratio: 1; display: flex; align-items: center; justify-content: center;
+    background: #0f2537; border-radius: 4px; font-size: 13px; cursor: pointer;
+    color: #b0bec5;
+  }
+  .randevu-al-cal-day:hover { background: #2d4060; color: #e0f7fa; }
+  .randevu-al-cal-day.other { opacity: 0.4; }
+  .randevu-al-cal-day.today:not(.selected) { border: 1px dashed rgba(79, 195, 247, 0.5); }
+  .randevu-al-cal-day.doluluk-4 {
+    background: rgba(27, 67, 50, 0.85);
+    border: 1px solid rgba(76, 175, 80, 0.6);
+    color: #b9f6ca;
+  }
+  .randevu-al-cal-day.doluluk-6 {
+    background: rgba(78, 52, 46, 0.85);
+    border: 1px solid rgba(255, 179, 0, 0.65);
+    color: #ffe082;
+  }
+  .randevu-al-cal-day.doluluk-8 {
+    background: rgba(78, 52, 52, 0.85);
+    border: 1px solid rgba(239, 68, 68, 0.65);
+    color: #fca5a5;
+  }
+  .randevu-al-cal-day.selected {
+    border: 2px solid #4fc3f7 !important;
+    box-shadow: 0 0 0 2px rgba(79, 195, 247, 0.6), inset 0 0 0 1px rgba(79, 195, 247, 0.2);
+  }
+  .randevu-al-cal-day.past { opacity: 0.45; cursor: not-allowed; pointer-events: none; }
+  .randevu-al-right {
+    background: #1e3a50;
+    border: 1px solid #2d4060;
+    border-radius: 8px;
+    padding: 16px;
+  }
+  .randevu-al-right h3 { color: #e0f7fa; font-size: 14px; margin-bottom: 12px; }
+  .randevu-al-slots { min-height: 200px; }
+  .randevu-al-firmalar {
+    background: #1e3a50;
+    border: 1px solid #2d4060;
+    border-radius: 8px;
+    padding: 16px;
+  }
+  .randevu-al-firmalar h3 { color: #e0f7fa; font-size: 14px; margin-bottom: 12px; }
+  .randevu-al-firmalar-list { min-height: 200px; }
+  .randevu-al-firma-item {
+    padding: 10px 12px; margin-bottom: 8px;
+    background: #0f2537; border: 1px solid #2d4060; border-radius: 6px;
+    font-size: 12px; color: #b0bec5;
+  }
+  .randevu-al-firma-item { cursor: pointer; }
+  .randevu-al-firma-item:hover { background: #1a2d3d; }
+  .randevu-al-firma-item.firma-secili { border-color: #22c55e; box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.5); }
+  .randevu-al-firma-item .ra-firma-adi { color: #4fc3f7; font-weight: 600; margin-bottom: 4px; }
+  .randevu-al-firma-item .ra-firma-sure { font-weight: normal; color: #90a4ae; margin-left: 4px; }
+  .randevu-al-firma-item .ra-firma-saat { color: #90a4ae; font-size: 11px; }
+  .ra-degistir-btn {
+    margin-top: 6px; padding: 4px 10px; font-size: 11px;
+    background: #2d4060; border: 1px solid #4fc3f7; color: #4fc3f7;
+    border-radius: 4px; cursor: pointer;
+  }
+  .ra-degistir-btn:hover { background: #3d5070; }
+  .randevu-al-slot.slot-firma-secili {
+    background: rgba(34, 197, 94, 0.25) !important;
+    border-color: rgba(34, 197, 94, 0.65) !important;
+    color: #bbf7d0 !important;
+  }
+  .randevu-al-slot.slot-firma-secili::before { content: "● "; color: #22c55e !important; }
+  .randevu-al-right.ra-degistir-mod {
+    border-color: #22c55e;
+    box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.35);
+  }
+  .ra-degistir-mod-label { display: none; font-size: 11px; color: #22c55e; margin-bottom: 8px; }
+  .randevu-al-right.ra-degistir-mod .ra-degistir-mod-label { display: block; }
+  .ra-degistir-btn {
+    margin-top: 6px; padding: 4px 10px; font-size: 11px;
+    background: #2d4060; border: 1px solid #4fc3f7; color: #4fc3f7;
+    border-radius: 4px; cursor: pointer;
+  }
+  .ra-degistir-btn:hover { background: #3d5070; }
+  .ra-firma-actions { margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .ra-vazgec-kaydet-wrap { display: none; gap: 8px; }
+  .ra-vazgec-kaydet-wrap.ra-goster { display: flex; }
+  .ra-vazgec-btn, .ra-kaydet-btn {
+    padding: 5px 12px; font-size: 11px; border-radius: 4px; cursor: pointer;
+  }
+  .ra-vazgec-btn { background: #2d4060; border: 1px solid #78909c; color: #90a4ae; }
+  .ra-vazgec-btn:hover { background: #3d5070; color: #b0bec5; }
+  .ra-kaydet-btn { background: #1565c0; border: 1px solid #42a5f5; color: #fff; }
+  .ra-kaydet-btn:hover { background: #1976d2; }
+  .ra-sil-btn {
+    margin-top: 6px; padding: 4px 10px; font-size: 11px;
+    background: #2d4060; border: 1px solid #ef4444; color: #f87171;
+    border-radius: 4px; cursor: pointer;
+  }
+  .ra-sil-btn:hover { background: #4a2d2d; color: #fca5a5; }
+  .randevu-al-slot {
+    display: block; width: 100%; padding: 10px 12px; margin-bottom: 6px;
+    background: #0f2537; border: 1px solid #2d4060; border-radius: 6px;
+    color: #4fc3f7; text-align: center; cursor: pointer; font-size: 13px;
+  }
+  .randevu-al-slot:hover { background: #2d4060; }
+  .randevu-al-slot::before { content: "● "; color: #22c55e; }
+  .randevu-al-slot.slot-dolu {
+    background: rgba(239, 68, 68, 0.35) !important;
+    border-color: rgba(239, 68, 68, 0.8) !important;
+    color: #fecaca !important;
+  }
+  .randevu-al-slot.slot-dolu:hover { background: rgba(239, 68, 68, 0.45) !important; }
+  .randevu-al-slot.slot-dolu::before { content: "● "; color: #fecaca !important; }
+  /* Firma kartına tıklanınca, o randevuya ait slotlar kırmızı değil yeşil görünsün */
+  .randevu-al-slot.slot-dolu.slot-firma-secili {
+    background: rgba(34, 197, 94, 0.3) !important;
+    border-color: rgba(34, 197, 94, 0.9) !important;
+    color: #bbf7d0 !important;
+  }
+  .randevu-al-slot.slot-dolu.slot-firma-secili::before { content: "● "; color: #bbf7d0 !important; }
+  .randevu-al-slot.slot-almis {
+    background: rgba(239, 68, 68, 0.25);
+    border-color: rgba(239, 68, 68, 0.65);
+    color: #fecaca;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+  .randevu-al-slot.slot-almis.slot-degistir-secilebilir {
+    pointer-events: auto;
+    cursor: pointer;
+    border-color: rgba(34, 197, 94, 0.6);
+    background: rgba(34, 197, 94, 0.2);
+    color: #bbf7d0;
+  }
+  .randevu-al-slot.slot-almis.slot-degistir-secilebilir::before { content: "● "; color: #22c55e; }
+  .randevu-al-slot.slot-almis::before { content: "▪ "; color: rgba(239, 68, 68, 0.9); }
+  .randevu-al-slot.slot-ilk-secim { border-color: #4fc3f7 !important; box-shadow: 0 0 0 2px #4fc3f7; }
+  .randevu-al-msg { margin-top: 12px; font-size: 12px; }
+  .randevu-al-msg.err { color: #ef4444; }
+  .randevu-al-msg.ok { color: #22c55e; }
+  .randevu-al-hint { margin-top: 8px; font-size: 11px; color: #78909c; }
+  .randevu-al-secilen { margin-top: 8px; font-size: 12px; color: #4fc3f7; }
+  .randevu-al-btn {
+    background: #0d47a1; color: #fff; border: none; padding: 10px 20px;
+    border-radius: 6px; cursor: pointer; font-size: 14px; width: 100%; margin-top: 12px;
+  }
+  .randevu-al-btn:hover { background: #1565c0; }
+  .randevu-al-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+  .randevu-al-back { margin-bottom: 12px; }
+  .randevu-al-back a { color: #4fc3f7; text-decoration: none; font-size: 13px; }
+  .randevu-al-back a:hover { text-decoration: underline; }
+  .randevu-al-mevcut { margin-top: 8px; padding: 8px 10px; background: rgba(76, 175, 80, 0.15); border: 1px solid rgba(76, 175, 80, 0.5); border-radius: 6px; font-size: 12px; color: #a5d6a7; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="randevu-al-page">
+  <div class="randevu-al-back">
+    <a href="{{ url_for('randevu.index') }}"><i class="fa fa-arrow-left"></i> Randevu listesine dön</a>
+  </div>
+  <div class="randevu-al-grid">
+    <div class="randevu-al-left">
+      <label>Tür</label>
+      <select id="ra-tur">
+        <option value="toplanti">Toplantılar</option>
+        <option value="gorusme">Görüşmeler</option>
+      </select>
+      <label>Toplantı süresi</label>
+      <select id="ra-sure">
+        <option value="30">30 dakika</option>
+        <option value="60">1 saat</option>
+        <option value="90">1,5 saat</option>
+        <option value="120">2 saat</option>
+        <option value="150">2,5 saat</option>
+        <option value="180">3 saat</option>
+        <option value="210">3,5 saat</option>
+        <option value="240">4 saat</option>
+        <option value="270">4,5 saat</option>
+        <option value="300">5 saat</option>
+        <option value="330">5,5 saat</option>
+        <option value="360">6 saat</option>
+        <option value="390">6,5 saat</option>
+        <option value="420">7 saat</option>
+        <option value="450">7,5 saat</option>
+        <option value="480">8 saat</option>
+        <option value="510">8,5 saat</option>
+        <option value="540">9 saat</option>
+        <option value="570">9,5 saat</option>
+        <option value="600">10 saat</option>
+        <option value="custom">Özel (dakika)</option>
+      </select>
+      <div id="ra-sure-ozel-wrap" style="display:none; margin-top:6px;">
+        <label style="margin-bottom:4px;">Dakika (30–600)</label>
+        <input type="number" id="ra-sure-ozel" min="30" max="600" step="15" value="30" placeholder="Örn. 45">
+      </div>
+      <label>Başlama saati (en erken)</label>
+      <input type="time" id="ra-baslama-saati" value="09:00" min="08:00">
+      <div id="ra-panel-toplanti" class="ra-left-panel active">
+      <label>Oda</label>
+      <select id="ra-oda">
+        <option value="">Seçiniz</option>
+      </select>
+      <label>Müşteri</label>
+      <div class="combobox-wrap-ra">
+        <input type="text" id="ra-musteri-ara" placeholder="Firma veya müşteri ara, listeden seçin..." autocomplete="off">
+        <input type="hidden" id="ra-musteri-id">
+        <div class="combobox-list-ra" id="ra-musteri-list" style="display:none;"></div>
+      </div>
+      <label>Notlar</label>
+      <textarea id="ra-notlar" placeholder="İsteğe bağlı not..."></textarea>
+      <p id="ra-secilen-slot" class="randevu-al-secilen" style="display:none;"></p>
+      <label style="display:flex;align-items:center;gap:8px;margin:8px 0;"><input type="checkbox" id="ra-tekrarli"> Tekrarlı (haftalık)</label>
+      <label>Tekrar bitiş tarihi</label>
+      <input type="date" id="ra-tekrarli-bitis" style="width:100%;padding:8px;border-radius:4px;border:1px solid #2d4060;background:#0f2537;color:#e0f7fa;">
+      <button type="button" class="randevu-al-btn" id="ra-btn-kaydet" disabled><i class="fa fa-check"></i> Randevu Al</button>
+      <p class="randevu-al-hint">Takvimden tarih seçin, sağdaki listeden yeşil (müsait) bir saat aralığına tıklayın.</p>
+      <div id="ra-mevcut-randevu" class="randevu-al-mevcut" style="display:none;"></div>
+      <div id="ra-form-msg" class="randevu-al-msg"></div>
+      </div>
+      <div id="ra-panel-gorusme" class="ra-left-panel">
+        <label>Şirket bilgisi</label>
+        <input type="text" id="ra-gorusme-sirket" placeholder="Şirket adı veya bilgisi...">
+        <label>Kişi bilgisi</label>
+        <input type="text" id="ra-gorusme-kisi" placeholder="Görüşülecek kişi adı...">
+        <label>İletişim (Telefon bilgisi)</label>
+        <input type="text" id="ra-gorusme-telefon" placeholder="Telefon numarası...">
+        <label>Notlar</label>
+        <textarea id="ra-gorusme-notlar" placeholder="İsteğe bağlı not..."></textarea>
+        <p id="ra-gorusme-secilen-slot" class="randevu-al-secilen" style="display:none;"></p>
+        <button type="button" class="randevu-al-btn" id="ra-btn-gorusme-randevu-al" disabled><i class="fa fa-check"></i> Randevu Al</button>
+        <p class="randevu-al-hint">Takvimden tarih seçin, Kişi bilgisine görüşülecek kişiyi yazın, sağdaki listeden yeşil (müsait) bir saat aralığına tıklayıp Randevu Al'a basın.</p>
+      </div>
+    </div>
+    <div class="randevu-al-cal">
+      <div class="randevu-al-cal-header">
+        <button type="button" id="ra-cal-prev"><i class="fa fa-chevron-left"></i></button>
+        <span id="ra-cal-title">Mart 2026</span>
+        <button type="button" id="ra-cal-next"><i class="fa fa-chevron-right"></i></button>
+      </div>
+      <div class="randevu-al-cal-dow" style="display:grid;grid-template-columns:repeat(7,1fr);">
+        <span>Pt</span><span>Sa</span><span>Ça</span><span>Pe</span><span>Cu</span><span>Ct</span><span>Pz</span>
+      </div>
+      <div id="ra-cal-grid" class="randevu-al-cal-grid"></div>
+    </div>
+    <div class="randevu-al-right" id="ra-slots-col">
+      <h3 id="ra-slots-title">Tarih seçin</h3>
+      <p class="ra-degistir-mod-label" id="ra-degistir-mod-label">1) Başlangıç slotuna tıklayın → 2) Bitiş slotuna tıklayın → 3) Kaydet'e basın</p>
+      <div id="ra-slots" class="randevu-al-slots"></div>
+    </div>
+    <div class="randevu-al-firmalar">
+      <h3 id="ra-firmalar-title">Randevular</h3>
+      <div id="ra-firmalar-list" class="randevu-al-firmalar-list"></div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function() {
+  var calYear, calMonth, selectedDate = null;
+  var odaAdi = '';
+  var baslangicStr = '';
+  var bitisStr = '';
+  var dolulukByDate = {};
+  var raMevcutRandevuId = null;
+  var mevcutRandevuMetin = '';
+  var raFirstSlotStart = null;
+  var raFirstSlotEnd = null;
+  var raMusaitSet = {};
+  var raDegistirRandevuId = null;
+  var raDegistirAralik = null;
+  var raDegistirSecilenBaslangic = null;
+  var raDegistirSecilenBitis = null;
+  var raDegistirSecilenTarih = null;
+  var raGorusmeModu = false;
+
+  function raSureDk() {
+    var sel = document.getElementById('ra-sure').value;
+    if (sel === 'custom') {
+      var v = parseInt(document.getElementById('ra-sure-ozel').value, 10);
+      if (isNaN(v) || v < 30) return 30;
+      if (v > 600) return 600;
+      return v;
+    }
+    return parseInt(sel, 10) || 30;
+  }
+  function raBaslamaSaati() { return (document.getElementById('ra-baslama-saati').value || '09:00').substring(0, 5); }
+
+  function timeToMinutes(hhmm) {
+    var p = (hhmm || '00:00').split(':');
+    return parseInt(p[0], 10) * 60 + parseInt(p[1], 10);
+  }
+  function minutesToTime(m) {
+    var h = Math.floor(m / 60) % 24;
+    var min = m % 60;
+    return String(h).padStart(2, '0') + ':' + String(min).padStart(2, '0');
+  }
+  function addMinutesToTime(hhmm, addM) {
+    return minutesToTime(timeToMinutes(hhmm) + addM);
+  }
+
+  function raMsg(el, text, isErr) {
+    var m = document.getElementById('ra-form-msg');
+    m.textContent = text || '';
+    m.className = 'randevu-al-msg ' + (isErr ? 'err' : 'ok');
+  }
+
+  function raFetch(url) {
+    return fetch(url, { headers: { 'Accept': 'application/json' } }).then(function(r) { return r.json(); });
+  }
+
+  function raPost(url, data) {
+    return fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify(data)
+    }).then(function(r) {
+      return r.text().then(function(t) {
+        var res;
+        try { res = t ? JSON.parse(t) : {}; } catch(e) { res = {}; }
+        if (!r.ok) return Promise.reject(new Error(res.error || r.statusText || 'Kayıt yapılamadı.'));
+        return res;
+      });
+    });
+  }
+
+  var DEFAULT_ODA = 'turkuaz toplantı salonu';
+  function loadOdalar() {
+    raFetch('/randevu/api/odalar').then(function(arr) {
+      var sel = document.getElementById('ra-oda');
+      sel.innerHTML = '<option value="">Seçiniz</option>';
+      arr.forEach(function(o) {
+        var opt = document.createElement('option');
+        opt.value = o.oda_adi;
+        opt.textContent = o.oda_adi;
+        sel.appendChild(opt);
+      });
+        if (arr.length > 0) {
+          var defaultOda = arr.some(function(o) { return o.oda_adi === DEFAULT_ODA; }) ? DEFAULT_ODA : (arr[0].oda_adi || '');
+        if (defaultOda) {
+          sel.value = defaultOda;
+          odaAdi = defaultOda;
+          var odaLabelEl = document.getElementById('oda-label'); if (odaLabelEl) odaLabelEl.textContent = defaultOda;
+          if (selectedDate) loadSlots(selectedDate);
+          loadAylikDoluluk();
+        }
+      }
+      loadGunRandevulari();
+    });
+  }
+
+  function updateSureLabel() {
+    var dk = raSureDk();
+    var sureLabelEl = document.getElementById('ra-sure-label'); if (sureLabelEl) sureLabelEl.textContent = dk === 60 ? '1s' : (dk === 30 ? '30m' : dk < 60 ? dk + 'm' : (dk / 60) + 's');
+  }
+  document.getElementById('ra-sure').addEventListener('change', function() {
+    var wrap = document.getElementById('ra-sure-ozel-wrap');
+    if (this.value === 'custom') {
+      wrap.style.display = 'block';
+      var dk = parseInt(document.getElementById('ra-sure-ozel').value, 10);
+      if (isNaN(dk) || dk < 30) document.getElementById('ra-sure-ozel').value = 30;
+      if (dk > 600) document.getElementById('ra-sure-ozel').value = 600;
+    } else {
+      wrap.style.display = 'none';
+    }
+    updateSureLabel();
+    if (selectedDate && odaAdi) loadSlots(selectedDate);
+  });
+  document.getElementById('ra-sure-ozel').addEventListener('input', function() {
+    var v = parseInt(this.value, 10);
+    if (!isNaN(v) && v > 600) this.value = 600;
+    if (!isNaN(v) && v < 30) this.value = 30;
+    updateSureLabel();
+    if (selectedDate && odaAdi) loadSlots(selectedDate);
+  });
+  document.getElementById('ra-baslama-saati').addEventListener('change', function() {
+    if (selectedDate && odaAdi) loadSlots(selectedDate);
+  });
+  document.getElementById('ra-oda').addEventListener('change', function() {
+    odaAdi = this.value || '';
+    var odaLabelEl2 = document.getElementById('oda-label'); if (odaLabelEl2) odaLabelEl2.textContent = odaAdi || 'Oda seçin';
+    if (selectedDate && odaAdi) loadSlots(selectedDate);
+    else document.getElementById('ra-slots').innerHTML = '';
+    loadAylikDoluluk();
+  });
+
+  document.getElementById('ra-tur').addEventListener('change', function() {
+    var tab = this.value;
+    if (tab !== 'toplanti' && tab !== 'gorusme') return;
+    raGorusmeModu = (tab === 'gorusme');
+    document.querySelectorAll('.ra-left-panel').forEach(function(p) { p.classList.remove('active'); });
+    var panel = document.getElementById('ra-panel-' + tab);
+    if (panel) panel.classList.add('active');
+    if (raGorusmeModu) {
+      selectedDate = null;
+      baslangicStr = ''; bitisStr = '';
+      raFirstSlotStart = null; raFirstSlotEnd = null;
+      raDegistirRandevuId = null; raDegistirAralik = null;
+      var titleEl = document.getElementById('ra-slots-title');
+      if (titleEl) titleEl.textContent = 'Tarih seçin';
+      document.getElementById('ra-slots').innerHTML = '';
+      document.getElementById('ra-firmalar-list').innerHTML = '';
+      var colClear = document.getElementById('ra-slots-col');
+      if (colClear) colClear.classList.remove('ra-degistir-mod');
+      var secilenEl = document.getElementById('ra-secilen-slot');
+      if (secilenEl) { secilenEl.style.display = 'none'; secilenEl.textContent = ''; }
+      var gs = document.getElementById('ra-gorusme-secilen-slot');
+      if (gs) { gs.style.display = 'none'; gs.textContent = ''; }
+      var titleF = document.getElementById('ra-firmalar-title');
+      if (titleF) titleF.textContent = 'Görüşmeler';
+      var gorusmeBtn = document.getElementById('ra-btn-gorusme-randevu-al');
+      if (gorusmeBtn) gorusmeBtn.disabled = true;
+    } else {
+      var titleF = document.getElementById('ra-firmalar-title');
+      if (titleF) titleF.textContent = 'Randevular';
+    }
+    loadAylikDoluluk();
+    if (!raGorusmeModu && selectedDate && odaAdi) {
+      loadSlots(selectedDate); loadGunRandevulari();
+    }
+  });
+
+  function loadAylikDoluluk() {
+    var oda = odaAdi || '';
+    var url = '/randevu/api/aylik-doluluk?yil=' + calYear + '&ay=' + (calMonth + 1) + (oda ? '&oda_adi=' + encodeURIComponent(oda) : '');
+    if (raGorusmeModu) url += '&tip=gorusme';
+    fetch(url, { headers: { 'Accept': 'application/json' } }).then(function(r) { return r.json(); }).then(function(data) {
+      dolulukByDate = data || {};
+      renderCal();
+    }).catch(function() { dolulukByDate = {}; renderCal(); });
+  }
+
+  function dolulukClass(saat) {
+    if (saat == null || saat === undefined) return '';
+    if (saat >= 8) return 'doluluk-8';
+    if (saat > 4) return 'doluluk-6';
+    if (saat > 0) return 'doluluk-4';
+    return '';
+  }
+
+  function loadSlots(dateObj, skipClear) {
+    if (!skipClear) {
+      baslangicStr = '';
+      bitisStr = '';
+      raFirstSlotStart = null;
+      raFirstSlotEnd = null;
+      raDegistirRandevuId = null;
+      raDegistirAralik = null;
+      var colClear = document.getElementById('ra-slots-col');
+      if (colClear) colClear.classList.remove('ra-degistir-mod');
+      var secilenEl = document.getElementById('ra-secilen-slot');
+      if (secilenEl) { secilenEl.style.display = 'none'; secilenEl.textContent = ''; }
+    }
+    var y = dateObj.getFullYear(), m = dateObj.getMonth(), d = dateObj.getDate();
+    var tarih = y + '-' + String(m + 1).padStart(2,'0') + '-' + String(d).padStart(2,'0');
+    var title = document.getElementById('ra-slots-title');
+    var gunler = 'Pazar Pazartesi Salı Çarşamba Perşembe Cuma Cumartesi'.split(' ');
+    var ayAdlari = 'Ocak Şubat Mart Nisan Mayıs Haziran Temmuz Ağustos Eylül Ekim Kasım Aralık'.split(' ');
+    title.textContent = d + ' ' + ayAdlari[m] + ' ' + gunler[dateObj.getDay()];
+    if (!odaAdi) { document.getElementById('ra-slots').innerHTML = '<p style="color:#78909c;">Önce oda seçin.</p>'; return; }
+    if (!skipClear) document.getElementById('ra-slots').innerHTML = '<p style="color:#78909c;">Yükleniyor...</p>';
+    var slotUrl = '/randevu/api/musait-slotlar?tarih=' + encodeURIComponent(tarih) + '&oda_adi=' + encodeURIComponent(odaAdi);
+    if (raGorusmeModu) slotUrl += '&tip=gorusme';
+    fetch(slotUrl, { headers: { 'Accept': 'application/json' } })
+      .then(function(r) { return r.text().then(function(t) { try { return t ? JSON.parse(t) : {}; } catch(e) { return {}; } }); })
+      .then(function(res) {
+        if (res.error) {
+          document.getElementById('ra-slots').innerHTML = '<p class="randevu-al-msg err">' + (res.error || 'Hata') + '</p>';
+          return;
+        }
+        var slotlar = res.slotlar || [];
+        var sureDk = raSureDk();
+        var baslama = raBaslamaSaati();
+        var bitis = addMinutesToTime(baslama, sureDk);
+        var baslamaMin = timeToMinutes(baslama);
+        var bitisMin = timeToMinutes(bitis);
+        var musaitSet = {};
+        slotlar.forEach(function(s) {
+          if (s.start) musaitSet[s.start] = true;
+        });
+        raMusaitSet = musaitSet;
+        var allSlots = [];
+        for (var tMin = 8 * 60; tMin < 17 * 60; tMin += 30) {
+          var sStart = minutesToTime(tMin);
+          var sEnd = minutesToTime(tMin + 30);
+          var musaitMu = !!musaitSet[sStart];
+          /* Kırmızı (dolu) sadece gerçekten randevulu slotlarda: API'nin müsait listesinde yoksa dolu */
+          var doluMu = !musaitMu;
+          allSlots.push({ start: sStart, end: sEnd, dolu: doluMu, musait: musaitMu });
+        }
+        var html = '';
+        allSlots.forEach(function(v) {
+          var cls = 'randevu-al-slot';
+          if (v.dolu) cls += ' slot-dolu';
+          if (!v.musait) cls += ' slot-almis';
+          var endBook = v.musait ? addMinutesToTime(v.start, sureDk) : v.end;
+          html += '<button type="button" class="' + cls + '" data-start="' + v.start + '" data-end="' + endBook + '" data-slot-end="' + v.end + '" data-musait="' + v.musait + '">' + v.start + ' – ' + v.end + '</button>';
+        });
+        document.getElementById('ra-slots').innerHTML = html || '<p style="color:#78909c;">Müsait slot yok.</p>';
+        loadMevcutRandevu();
+        loadGunRandevulari();
+      })
+      .catch(function() {
+        document.getElementById('ra-slots').innerHTML = '<p class="randevu-al-msg err">Slotlar yüklenemedi. Sayfayı yenileyip tekrar deneyin.</p>';
+        raMevcutRandevuId = null;
+        document.getElementById('ra-mevcut-randevu').style.display = 'none';
+        document.getElementById('ra-firmalar-list').innerHTML = '';
+      });
+  }
+
+  function loadGunRandevulari(silentRefresh) {
+    var titleEl = document.getElementById('ra-firmalar-title');
+    var listEl = document.getElementById('ra-firmalar-list');
+    if (!selectedDate || !odaAdi) {
+      if (titleEl) titleEl.textContent = raGorusmeModu ? 'Görüşmeler' : 'Randevular';
+      if (listEl) listEl.innerHTML = '<p style="color:#78909c;font-size:12px;">Tarih ve oda seçin.</p>';
+      return;
+    }
+    var y = selectedDate.getFullYear(), m = selectedDate.getMonth(), d = selectedDate.getDate();
+    var tarih = y + '-' + String(m + 1).padStart(2,'0') + '-' + String(d).padStart(2,'0');
+    var gunler = 'Pazar Pazartesi Salı Çarşamba Perşembe Cuma Cumartesi'.split(' ');
+    var gunAdi = gunler[selectedDate.getDay()];
+    var ayAdlari = 'Ocak Şubat Mart Nisan Mayıs Haziran Temmuz Ağustos Eylül Ekim Kasım Aralık'.split(' ');
+    if (titleEl) titleEl.textContent = raGorusmeModu ? 'Görüşmeler' : 'Randevular';
+    if (!silentRefresh && listEl) listEl.innerHTML = '<p style="color:#78909c;font-size:12px;">Yükleniyor...</p>';
+    var gunUrl = '/randevu/api/gun-randevulari?tarih=' + encodeURIComponent(tarih) + '&oda_adi=' + encodeURIComponent(odaAdi);
+    if (raGorusmeModu) gunUrl += '&tip=gorusme';
+    fetch(gunUrl, { headers: { 'Accept': 'application/json' } })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        var arr = data.randevular || [];
+        if (!listEl) return;
+        if (arr.length === 0) {
+          listEl.innerHTML = '<p style="color:#78909c;font-size:12px;">Bu gün için randevu yok.</p>';
+          return;
+        }
+        var html = '';
+        arr.forEach(function(r) {
+          var ad = (r.musteri_adi || '—').replace(/</g, '&lt;');
+          var sure = (r.sure_metin || '').replace(/</g, '&lt;');
+          var bas = (r.baslangic || '').replace(/</g, '&lt;');
+          var bit = (r.bitis || '').replace(/</g, '&lt;');
+          var rid = (r.id != null && r.id !== '') ? String(r.id) : '';
+          html += '<div class="randevu-al-firma-item" data-id="' + rid + '" data-baslangic="' + bas + '" data-bitis="' + bit + '">';
+          html += '<div class="ra-firma-adi">' + ad + (sure ? ' <span class="ra-firma-sure">' + sure + '</span>' : '') + '</div>';
+          html += '<div class="ra-firma-saat">' + (r.baslangic || '') + ' – ' + (r.bitis || '') + '</div>';
+          if (rid) {
+            html += '<div class="ra-firma-actions">';
+            html += '<button type="button" class="ra-degistir-btn">Değiştir</button>';
+            html += '<button type="button" class="ra-sil-btn">Sil</button>';
+            html += '<span class="ra-vazgec-kaydet-wrap"><button type="button" class="ra-vazgec-btn">Vazgeç</button><button type="button" class="ra-kaydet-btn">Kaydet</button></span>';
+            html += '</div>';
+          }
+          html += '</div>';
+        });
+        listEl.innerHTML = html;
+      })
+      .catch(function() {
+        if (listEl) listEl.innerHTML = '<p style="color:#ef4444;font-size:12px;">Liste yüklenemedi.</p>';
+      });
+  }
+
+  function loadMevcutRandevu() {
+    var midEl = document.getElementById('ra-musteri-id');
+    var mid = midEl && midEl.value ? midEl.value.trim() : '';
+    if (!selectedDate || !odaAdi || !mid) {
+      raMevcutRandevuId = null;
+      mevcutRandevuMetin = '';
+      var el = document.getElementById('ra-mevcut-randevu');
+      if (el) el.style.display = 'none';
+      return;
+    }
+    var y = selectedDate.getFullYear(), m = selectedDate.getMonth(), d = selectedDate.getDate();
+    var tarih = y + '-' + String(m + 1).padStart(2,'0') + '-' + String(d).padStart(2,'0');
+    fetch('/randevu/api/mevcut-randevu?tarih=' + encodeURIComponent(tarih) + '&oda_adi=' + encodeURIComponent(odaAdi) + '&musteri_id=' + encodeURIComponent(mid), { headers: { 'Accept': 'application/json' } })
+      .then(function(r) { return r.json(); })
+      .then(function(mevcut) {
+        var box = document.getElementById('ra-mevcut-randevu');
+        if (!box) return;
+        if (mevcut && mevcut.id) {
+          raMevcutRandevuId = mevcut.id;
+          var b = mevcut.baslangic_zamani, e = mevcut.bitis_zamani;
+          if (b && e) {
+            b = (b.indexOf('T') !== -1 ? b.split('T')[1] : b.substring(11)).substring(0, 5);
+            e = (e.indexOf('T') !== -1 ? e.split('T')[1] : e.substring(11)).substring(0, 5);
+            mevcutRandevuMetin = 'Bu gün için mevcut randevunuz: ' + b + ' – ' + e + '. Saati değiştirmek için yeşil slota tıklayıp butona basın.';
+          } else {
+            mevcutRandevuMetin = 'Bu gün için mevcut randevunuz var. Saati değiştirmek için yeşil slota tıklayıp butona basın.';
+          }
+          box.textContent = mevcutRandevuMetin;
+          box.style.display = 'block';
+        } else {
+          raMevcutRandevuId = null;
+          mevcutRandevuMetin = '';
+          box.style.display = 'none';
+        }
+      })
+      .catch(function() {
+        raMevcutRandevuId = null;
+        var box = document.getElementById('ra-mevcut-randevu');
+        if (box) box.style.display = 'none';
+      });
+  }
+
+  function isSameDay(a, b) {
+    if (!a || !b) return false;
+    return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  }
+
+  function renderCal() {
+    var first = new Date(calYear, calMonth, 1);
+    var last = new Date(calYear, calMonth + 1, 0);
+    var startPad = (first.getDay() + 6) % 7;
+    var today = new Date();
+    today.setHours(0,0,0,0);
+    var grid = document.getElementById('ra-cal-grid');
+    grid.innerHTML = '';
+    for (var i = 0; i < startPad; i++) {
+      var c = document.createElement('div');
+      c.className = 'randevu-al-cal-day other';
+      var prev = new Date(calYear, calMonth, -startPad + i + 1);
+      c.textContent = prev.getDate();
+      grid.appendChild(c);
+    }
+    for (var d = 1; d <= last.getDate(); d++) {
+      var cell = document.createElement('div');
+      cell.className = 'randevu-al-cal-day';
+      var dt = new Date(calYear, calMonth, d);
+      var tarihStr = calYear + '-' + String(calMonth + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+      var saat = dolulukByDate[tarihStr];
+      var dc = dolulukClass(saat);
+      if (dc) cell.classList.add(dc);
+      if (isSameDay(dt, today)) cell.classList.add('today');
+      if (selectedDate && isSameDay(dt, selectedDate)) cell.classList.add('selected');
+      var isPast = dt.getTime() < today.getTime();
+      if (isPast) cell.classList.add('past');
+      cell.textContent = d;
+      cell.setAttribute('data-y', calYear);
+      cell.setAttribute('data-m', calMonth);
+      cell.setAttribute('data-d', d);
+      cell.addEventListener('click', function() {
+        if (this.classList.contains('past')) return;
+        var y = parseInt(this.getAttribute('data-y'), 10);
+        var m = parseInt(this.getAttribute('data-m'), 10);
+        var day = parseInt(this.getAttribute('data-d'), 10);
+        selectedDate = new Date(y, m, day);
+        selectedDate.setHours(0, 0, 0, 0);
+        renderCal();
+        loadSlots(selectedDate);
+      });
+      grid.appendChild(cell);
+    }
+    var total = startPad + last.getDate();
+    var rest = total % 7;
+    if (rest) for (var j = 0; j < 7 - rest; j++) {
+      var c = document.createElement('div');
+      c.className = 'randevu-al-cal-day other';
+      c.textContent = j + 1;
+      grid.appendChild(c);
+    }
+    var ay = 'Ocak Şubat Mart Nisan Mayıs Haziran Temmuz Ağustos Eylül Ekim Kasım Aralık'.split(' ');
+    document.getElementById('ra-cal-title').textContent = ay[calMonth] + ' ' + calYear;
+  }
+
+  var now = new Date();
+  calYear = now.getFullYear();
+  calMonth = now.getMonth();
+  document.getElementById('ra-cal-prev').addEventListener('click', function() {
+    calMonth--;
+    if (calMonth < 0) { calMonth = 11; calYear--; }
+    loadAylikDoluluk();
+  });
+  document.getElementById('ra-cal-next').addEventListener('click', function() {
+    calMonth++;
+    if (calMonth > 11) { calMonth = 0; calYear++; }
+    loadAylikDoluluk();
+  });
+
+  loadOdalar();
+  renderCal();
+  updateSureLabel();
+
+  function raDegistirModuKapat(restoreCard) {
+    var id = raDegistirRandevuId;
+    raDegistirRandevuId = null;
+    raDegistirAralik = null;
+    raFirstSlotStart = null;
+    raFirstSlotEnd = null;
+    raDegistirSecilenBaslangic = null;
+    raDegistirSecilenBitis = null;
+    raDegistirSecilenTarih = null;
+    var col = document.getElementById('ra-slots-col');
+    if (col) col.classList.remove('ra-degistir-mod');
+    document.querySelectorAll('#ra-slots .randevu-al-slot').forEach(function(b) {
+      b.style.borderColor = ''; b.style.boxShadow = '';
+      b.classList.remove('slot-ilk-secim', 'slot-firma-secili', 'slot-degistir-secilebilir', 'slot-dolu');
+    });
+    var secilenEl = document.getElementById('ra-secilen-slot');
+    if (secilenEl) { secilenEl.style.display = 'none'; secilenEl.textContent = ''; }
+    if (restoreCard && id) {
+      var card = document.querySelector('.randevu-al-firma-item[data-id="' + id + '"]');
+      if (card) {
+        var db = card.querySelector('.ra-degistir-btn');
+        var wrap = card.querySelector('.ra-vazgec-kaydet-wrap');
+        if (db) db.style.display = '';
+        if (wrap) { wrap.style.display = 'none'; wrap.classList.remove('ra-goster'); }
+      }
+    }
+  }
+
+  document.getElementById('ra-firmalar-list').addEventListener('click', function(e) {
+    if (e.target && e.target.classList && e.target.classList.contains('ra-vazgec-btn')) {
+      e.preventDefault();
+      e.stopPropagation();
+      raDegistirModuKapat(true);
+      raMsg(null, 'Değişiklik iptal edildi.', false);
+      return;
+    }
+    if (e.target && e.target.classList && e.target.classList.contains('ra-sil-btn')) {
+      e.preventDefault();
+      e.stopPropagation();
+      var item = e.target.closest('.randevu-al-firma-item');
+      var id = item && item.getAttribute('data-id');
+      if (!id) return;
+      if (!confirm('Bu randevuyu tamamen silmek istediğinize emin misiniz?')) return;
+      raPost('/randevu/api/sil/' + id, {}).then(function() {
+        raMsg(null, 'Randevu silindi.', false);
+        if (raDegistirRandevuId === id) raDegistirModuKapat(false);
+        if (selectedDate && odaAdi) {
+          loadSlots(selectedDate, true);
+          loadGunRandevulari(true);
+          loadAylikDoluluk();
+        }
+      }).catch(function(err) {
+        raMsg(null, (err && err.message) || 'Silinemedi.', true);
+      });
+      return;
+    }
+    if (e.target && e.target.classList && e.target.classList.contains('ra-kaydet-btn')) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!raDegistirRandevuId) return;
+      if (!raDegistirSecilenBaslangic || !raDegistirSecilenBitis) {
+        raMsg(null, 'Önce soldan başlangıç ve bitiş slotuna tıklayın.', true);
+        return;
+      }
+      raPost('/randevu/api/saat-guncelle/' + raDegistirRandevuId, {
+        baslangic_zamani: raDegistirSecilenBaslangic,
+        bitis_zamani: raDegistirSecilenBitis
+      }).then(function() {
+        raMsg(null, 'Randevu saati kaydedildi.', false);
+        raDegistirModuKapat(false);
+        if (selectedDate && odaAdi) {
+          loadSlots(selectedDate, true);
+          loadGunRandevulari(true);
+        }
+      }).catch(function(err) {
+        raMsg(null, (err && err.message) || 'Kaydedilemedi.', true);
+      });
+      return;
+    }
+    if (e.target && e.target.classList && e.target.classList.contains('ra-degistir-btn')) {
+      e.preventDefault();
+      e.stopPropagation();
+      var item = e.target.closest('.randevu-al-firma-item');
+      var id = item && item.getAttribute('data-id');
+      if (!id) return;
+      raDegistirRandevuId = id;
+      raDegistirAralik = { bas: item.getAttribute('data-baslangic'), bit: item.getAttribute('data-bitis') };
+      raFirstSlotStart = null;
+      raFirstSlotEnd = null;
+      raDegistirSecilenBaslangic = null;
+      raDegistirSecilenBitis = null;
+      raDegistirSecilenTarih = null;
+      item.querySelector('.ra-degistir-btn').style.display = 'none';
+      var wrap = item.querySelector('.ra-vazgec-kaydet-wrap');
+      if (wrap) { wrap.classList.add('ra-goster'); wrap.style.display = 'flex'; }
+      document.querySelectorAll('.randevu-al-firma-item').forEach(function(el) {
+        if (el !== item) {
+          var db = el.querySelector('.ra-degistir-btn');
+          var w = el.querySelector('.ra-vazgec-kaydet-wrap');
+          if (db) db.style.display = ''; if (w) { w.classList.remove('ra-goster'); w.style.display = 'none'; }
+        }
+      });
+      var basMin = timeToMinutes(raDegistirAralik.bas);
+      var bitMin = timeToMinutes(raDegistirAralik.bit);
+      document.querySelectorAll('#ra-slots .randevu-al-slot').forEach(function(b) {
+        b.classList.remove('slot-firma-secili', 'slot-ilk-secim', 'slot-degistir-secilebilir');
+        b.style.borderColor = ''; b.style.boxShadow = '';
+        var s = b.getAttribute('data-start');
+        if (s) {
+          var sm = timeToMinutes(s);
+          if (sm >= basMin && sm < bitMin) {
+            b.classList.add('slot-degistir-secilebilir');
+            b.classList.remove('slot-dolu');  /* Değiştir modunda kırmızı gösterme; sadece kullanıcı seçince slot-dolu eklenecek */
+          }
+        }
+      });
+      var secilenEl = document.getElementById('ra-secilen-slot');
+      if (secilenEl) { secilenEl.style.display = 'none'; secilenEl.textContent = ''; }
+      var col = document.getElementById('ra-slots-col');
+      if (col) col.classList.add('ra-degistir-mod');
+      raMsg(null, 'Soldaki slot sütununda önce başlangıç, sonra bitiş slotuna tıklayın. Ardından Kaydet\'e basın.', false);
+      return;
+    }
+    var item = e.target && e.target.closest && e.target.closest('.randevu-al-firma-item');
+    if (!item) return;
+    var bas = item.getAttribute('data-baslangic');
+    var bit = item.getAttribute('data-bitis');
+    if (!bas || !bit) return;
+    document.querySelectorAll('.randevu-al-firma-item').forEach(function(el) { el.classList.remove('firma-secili'); });
+    item.classList.add('firma-secili');
+    var basMin = timeToMinutes(bas);
+    var bitMin = timeToMinutes(bit);
+    document.querySelectorAll('#ra-slots .randevu-al-slot').forEach(function(slot) {
+      var s = slot.getAttribute('data-start');
+      if (!s) return;
+      var sm = timeToMinutes(s);
+      if (sm >= basMin && sm < bitMin) slot.classList.add('slot-firma-secili');
+      else slot.classList.remove('slot-firma-secili');
+    });
+  });
+
+  document.getElementById('ra-slots').addEventListener('click', function(e) {
+    var slotEl = e.target && e.target.closest && e.target.closest('.randevu-al-slot');
+    var btn = null;
+    if (raDegistirRandevuId && slotEl) {
+      var musait = slotEl.getAttribute('data-musait') === 'true';
+      var slotStart = slotEl.getAttribute('data-start');
+      var inDegistirAralik = false;
+      if (raDegistirAralik && slotStart) {
+        var sm = timeToMinutes(slotStart);
+        inDegistirAralik = sm >= timeToMinutes(raDegistirAralik.bas) && sm < timeToMinutes(raDegistirAralik.bit);
+      }
+      if (musait || inDegistirAralik) btn = slotEl;
+    } else if (slotEl && slotEl.getAttribute('data-musait') === 'true') {
+      btn = slotEl;
+    }
+    if (!selectedDate) return;
+    var y = selectedDate.getFullYear(), m = selectedDate.getMonth(), d = selectedDate.getDate();
+    var tarih = y + '-' + String(m + 1).padStart(2,'0') + '-' + String(d).padStart(2,'0');
+
+    if (raDegistirRandevuId) {
+      if (!btn) return;
+      var start = btn.getAttribute('data-start');
+      var slotEnd = btn.getAttribute('data-slot-end') || btn.getAttribute('data-end');
+      if (!start || !slotEnd) return;
+      if (raFirstSlotStart === null) {
+        raFirstSlotStart = start;
+        raFirstSlotEnd = slotEnd;
+        /* Sadece slot-dolu ve ilk-secim güncelle; slot-degistir-secilebilir kalsın ki seçilmeyen slotlar yeşil kalsın */
+        document.querySelectorAll('#ra-slots .randevu-al-slot').forEach(function(b) {
+          b.style.borderColor = ''; b.style.boxShadow = '';
+          b.classList.remove('slot-ilk-secim', 'slot-dolu');
+        });
+        btn.classList.add('slot-dolu', 'slot-ilk-secim');
+        btn.style.borderColor = '#4fc3f7';
+        btn.style.boxShadow = '0 0 0 2px #4fc3f7';
+        raMsg(null, 'Bitiş slotuna tıklayın.', false);
+        var se = document.getElementById('ra-secilen-slot');
+        if (se) { se.textContent = 'Başlangıç: ' + start + '. Bitiş slotuna tıklayın.'; se.style.display = 'block'; }
+        return;
+      }
+      var firstStartMin = timeToMinutes(raFirstSlotStart);
+      var firstEndMin = timeToMinutes(raFirstSlotEnd);
+      var secondStartMin = timeToMinutes(start);
+      var secondEndMin = timeToMinutes(slotEnd);
+      var rangeStartMin = Math.min(firstStartMin, secondStartMin);
+      var rangeEndMin = Math.max(firstEndMin, secondEndMin);
+      var startStr = minutesToTime(rangeStartMin);
+      var endStr = minutesToTime(rangeEndMin);
+      raDegistirSecilenBaslangic = tarih + 'T' + startStr + ':00';
+      raDegistirSecilenBitis = tarih + 'T' + endStr + ':00';
+      raDegistirSecilenTarih = tarih;
+      raFirstSlotStart = null;
+      raFirstSlotEnd = null;
+      var basMin = timeToMinutes(raDegistirAralik.bas);
+      var bitMin = timeToMinutes(raDegistirAralik.bit);
+      /* Sadece seçilen aralık kırmızı; seçim dışı kalan (eski randevudaki) slotlar yeşil kalacak */
+      document.querySelectorAll('#ra-slots .randevu-al-slot').forEach(function(b) {
+        b.style.borderColor = ''; b.style.boxShadow = ''; b.classList.remove('slot-ilk-secim');
+        var s = b.getAttribute('data-start');
+        if (s) {
+          var sm = timeToMinutes(s);
+          var inSecilen = (sm >= rangeStartMin && sm < rangeEndMin);
+          var inEskiAralik = (sm >= basMin && sm < bitMin);
+          if (inSecilen) {
+            b.classList.add('slot-dolu');
+            b.classList.remove('slot-degistir-secilebilir');
+          } else {
+            b.classList.remove('slot-dolu');
+            if (inEskiAralik) b.classList.add('slot-degistir-secilebilir');
+            else b.classList.remove('slot-degistir-secilebilir');
+          }
+        }
+      });
+      var secilenEl = document.getElementById('ra-secilen-slot');
+      if (secilenEl) { secilenEl.textContent = 'Seçili: ' + startStr + ' – ' + endStr + '. Kaydet\'e basın.'; secilenEl.style.display = 'block'; }
+      raMsg(null, 'Değişiklikleri kaydetmek için Kaydet butonuna basın.', false);
+      return;
+    }
+
+    if (!btn) return;
+    var start = btn.getAttribute('data-start');
+    var slotEnd = btn.getAttribute('data-slot-end') || btn.getAttribute('data-end');
+    var endBook = btn.getAttribute('data-end');
+    if (!start || !slotEnd) return;
+
+    if (raFirstSlotStart !== null && (start !== raFirstSlotStart || slotEnd !== raFirstSlotEnd)) {
+      var firstStartMin = timeToMinutes(raFirstSlotStart);
+      var firstEndMin = timeToMinutes(raFirstSlotEnd);
+      var secondStartMin = timeToMinutes(start);
+      var secondEndMin = timeToMinutes(slotEnd);
+      var rangeStartMin = Math.min(firstStartMin, secondStartMin);
+      var rangeEndMin = Math.max(firstEndMin, secondEndMin);
+      var startStr = minutesToTime(rangeStartMin);
+      var endStr = minutesToTime(rangeEndMin);
+      var allMusait = true;
+      for (var tMin = rangeStartMin; tMin < rangeEndMin; tMin += 30) {
+        if (!raMusaitSet[minutesToTime(tMin)]) { allMusait = false; break; }
+      }
+      if (!allMusait) {
+        raMsg(null, 'Seçilen aralıkta dolu saat var. Kesintisiz müsait aralık seçin.', true);
+        raFirstSlotStart = null;
+        raFirstSlotEnd = null;
+        document.querySelectorAll('#ra-slots .randevu-al-slot').forEach(function(b) {
+          b.style.borderColor = ''; b.style.boxShadow = ''; b.classList.remove('slot-ilk-secim');
+        });
+        var se = document.getElementById('ra-secilen-slot'); if (se) se.style.display = 'none';
+        return;
+      }
+      baslangicStr = tarih + 'T' + startStr + ':00';
+      bitisStr = tarih + 'T' + endStr + ':00';
+      raFirstSlotStart = null;
+      raFirstSlotEnd = null;
+      document.querySelectorAll('#ra-slots .randevu-al-slot').forEach(function(b) {
+        b.style.borderColor = ''; b.style.boxShadow = ''; b.classList.remove('slot-ilk-secim');
+        var s = b.getAttribute('data-start');
+        if (s) {
+          var sm = timeToMinutes(s);
+          if (sm >= rangeStartMin && sm < rangeEndMin) b.classList.add('slot-dolu'); else b.classList.remove('slot-dolu');
+        }
+      });
+      document.getElementById('ra-btn-kaydet').disabled = false;
+      var secilenEl = document.getElementById('ra-secilen-slot');
+      secilenEl.textContent = 'Seçili saat: ' + startStr + ' – ' + endStr;
+      secilenEl.style.display = 'block';
+      var gorusmeSecilen = document.getElementById('ra-gorusme-secilen-slot');
+      if (gorusmeSecilen) { gorusmeSecilen.textContent = 'Seçili saat: ' + startStr + ' – ' + endStr; gorusmeSecilen.style.display = 'block'; }
+      var gorusmeBtn = document.getElementById('ra-btn-gorusme-randevu-al');
+      if (gorusmeBtn) {
+        var kisiVal = (document.getElementById('ra-gorusme-kisi') || {}).value;
+        gorusmeBtn.disabled = !(baslangicStr && bitisStr && odaAdi && (raGorusmeModu ? (kisiVal && kisiVal.trim()) : (musteriId && musteriId.value)));
+      }
+      raMsg(null, 'Firma seçin ve Randevu Al\'a tıklayın.', false);
+      return;
+    }
+
+    raFirstSlotStart = start;
+    raFirstSlotEnd = slotEnd;
+    baslangicStr = tarih + 'T' + start + ':00';
+    bitisStr = tarih + 'T' + (endBook || slotEnd) + ':00';
+    document.querySelectorAll('#ra-slots .randevu-al-slot').forEach(function(b) {
+      b.style.borderColor = ''; b.style.boxShadow = ''; b.classList.remove('slot-ilk-secim');
+      var s = b.getAttribute('data-start');
+      if (s) {
+        var sm = timeToMinutes(s), startM = timeToMinutes(start), endM = timeToMinutes(endBook || slotEnd);
+        if (sm >= startM && sm < endM) b.classList.add('slot-dolu'); else b.classList.remove('slot-dolu');
+      }
+    });
+    btn.style.borderColor = '#4fc3f7';
+    btn.style.boxShadow = '0 0 0 2px #4fc3f7';
+    btn.classList.add('slot-ilk-secim');
+    document.getElementById('ra-btn-kaydet').disabled = false;
+    var secilenEl = document.getElementById('ra-secilen-slot');
+    secilenEl.textContent = 'Seçili: ' + start + ' – ' + (endBook || slotEnd) + '. Bitiş için başka slota tıklayın.';
+    secilenEl.style.display = 'block';
+    var gorusmeSecilen = document.getElementById('ra-gorusme-secilen-slot');
+    if (gorusmeSecilen) { gorusmeSecilen.textContent = 'Seçili: ' + start + ' – ' + (endBook || slotEnd); gorusmeSecilen.style.display = 'block'; }
+    var gorusmeBtn = document.getElementById('ra-btn-gorusme-randevu-al');
+    if (gorusmeBtn) {
+      var kisiVal = (document.getElementById('ra-gorusme-kisi') || {}).value;
+      gorusmeBtn.disabled = !(baslangicStr && bitisStr && odaAdi && (raGorusmeModu ? (kisiVal && kisiVal.trim()) : (musteriId && musteriId.value)));
+    }
+    raMsg(null, 'İkinci slota tıklayarak bitişi seçin veya firma seçip Randevu Al\'a basın.', false);
+  });
+
+  var musteriAra = document.getElementById('ra-musteri-ara');
+  var musteriId = document.getElementById('ra-musteri-id');
+  var musteriList = document.getElementById('ra-musteri-list');
+  var musteriTimer = null;
+  musteriAra.addEventListener('input', function() {
+    clearTimeout(musteriTimer);
+    var q = this.value.trim();
+    musteriId.value = '';
+    musteriList.style.display = 'none';
+    if (q.length < 2) {
+      raMevcutRandevuId = null;
+      var boxM = document.getElementById('ra-mevcut-randevu'); if (boxM) boxM.style.display = 'none';
+      return;
+    }
+    musteriTimer = setTimeout(function() {
+      raFetch('/randevu/api/musteriler?q=' + encodeURIComponent(q)).then(function(arr) {
+        musteriList.innerHTML = '';
+        arr.forEach(function(m) {
+          var div = document.createElement('div');
+          div.className = 'combobox-item-ra';
+          div.textContent = (m.name || '') + (m.phone ? ' — ' + m.phone : '');
+          div.setAttribute('data-id', m.id);
+          div.addEventListener('click', function() {
+            musteriId.value = this.getAttribute('data-id');
+            musteriAra.value = (m.name || '');
+            musteriList.style.display = 'none';
+            document.getElementById('ra-btn-kaydet').disabled = false;
+            var gorusmeBtn = document.getElementById('ra-btn-gorusme-randevu-al');
+            if (gorusmeBtn) {
+              var kisiVal = (document.getElementById('ra-gorusme-kisi') || {}).value;
+              gorusmeBtn.disabled = !(baslangicStr && bitisStr && odaAdi && (raGorusmeModu ? (kisiVal && kisiVal.trim()) : true));
+            }
+            if (selectedDate && odaAdi) loadMevcutRandevu();
+          });
+          musteriList.appendChild(div);
+        });
+        musteriList.style.display = arr.length ? 'block' : 'none';
+      });
+    }, 300);
+  });
+  musteriAra.addEventListener('blur', function() {
+    setTimeout(function() { musteriList.style.display = 'none'; }, 200);
+  });
+
+  function raGorusmeBtnGuncelle() {
+    if (!raGorusmeModu) return;
+    var gorusmeBtn = document.getElementById('ra-btn-gorusme-randevu-al');
+    if (!gorusmeBtn) return;
+    var kisiVal = (document.getElementById('ra-gorusme-kisi') || {}).value;
+    gorusmeBtn.disabled = !(baslangicStr && bitisStr && odaAdi && (kisiVal && kisiVal.trim()));
+  }
+  var gorusmeKisiEl = document.getElementById('ra-gorusme-kisi');
+  if (gorusmeKisiEl) gorusmeKisiEl.addEventListener('input', raGorusmeBtnGuncelle);
+
+  document.getElementById('ra-btn-gorusme-randevu-al').addEventListener('click', function() {
+    var kisiEl = document.getElementById('ra-gorusme-kisi');
+    var kisiVal = kisiEl && kisiEl.value ? kisiEl.value.trim() : '';
+    if (raGorusmeModu) {
+      if (!kisiVal) { raMsg(null, 'Görüşülecek kişi adını giriniz (Kişi bilgisi).', true); return; }
+    } else {
+      var mid = musteriId && musteriId.value;
+      if (!mid) { raMsg(null, 'Müşteri seçiniz.', true); return; }
+    }
+    if (!odaAdi) { raMsg(null, 'Oda seçiniz.', true); return; }
+    if (!baslangicStr || !bitisStr) { raMsg(null, 'Lütfen sağdaki listeden müsait bir saat aralığına tıklayın.', true); return; }
+    var baslangicDate = new Date(baslangicStr.replace('T', ' ').substring(0, 16));
+    if (baslangicDate.getTime() < Date.now()) {
+      raMsg(null, 'Geriye dönük randevu girilemez.', true);
+      return;
+    }
+    raMsg(null, '');
+    var sirketEl = document.getElementById('ra-gorusme-sirket');
+    var telEl = document.getElementById('ra-gorusme-telefon');
+    var notlarEl = document.getElementById('ra-gorusme-notlar');
+    var notMetin = (notlarEl && notlarEl.value) ? notlarEl.value.trim() : '';
+    var payload = {
+      oda_adi: odaAdi,
+      baslangic_zamani: baslangicStr,
+      bitis_zamani: bitisStr,
+      pakete_dahil_mi: false,
+      notlar: notMetin.substring(0, 500),
+      randevu_tipi: 'gorusme'
+    };
+    if (raGorusmeModu) {
+      payload.gorusme_kisi_adi = kisiVal;
+      payload.gorusme_sirket = (sirketEl && sirketEl.value) ? sirketEl.value.trim() : '';
+      payload.gorusme_telefon = (telEl && telEl.value) ? telEl.value.trim() : '';
+    } else {
+      payload.musteri_id = parseInt(musteriId.value, 10);
+    }
+    raPost('/randevu/api/ekle', payload).then(function(res) {
+      raMsg(null, 'Görüşme kaydedildi.', false);
+      baslangicStr = ''; bitisStr = '';
+      document.querySelectorAll('#ra-slots .randevu-al-slot').forEach(function(b) { b.style.borderColor = ''; b.style.boxShadow = ''; });
+      var se = document.getElementById('ra-secilen-slot'); if (se) { se.style.display = 'none'; se.textContent = ''; }
+      var gs = document.getElementById('ra-gorusme-secilen-slot'); if (gs) { gs.style.display = 'none'; gs.textContent = ''; }
+      var gb = document.getElementById('ra-btn-gorusme-randevu-al'); if (gb) gb.disabled = true;
+      if (selectedDate && odaAdi) {
+        loadSlots(selectedDate, true);
+        loadGunRandevulari(true);
+        loadAylikDoluluk();
+      }
+    }).catch(function(err) {
+      raMsg(null, (err && err.message) || 'İstek gönderilemedi.', true);
+    });
+  });
+
+  document.getElementById('ra-btn-kaydet').addEventListener('click', function() {
+    var mid = musteriId.value;
+    if (!mid) { raMsg(null, 'Müşteri seçiniz.', true); return; }
+    if (!odaAdi) { raMsg(null, 'Oda seçiniz.', true); return; }
+    if (!baslangicStr || !bitisStr) { raMsg(null, 'Lütfen sağdaki listeden müsait bir saat aralığına (yeşil noktalı slot) tıklayın.', true); return; }
+    var baslangicDate = new Date(baslangicStr.replace('T', ' ').substring(0, 16));
+    if (baslangicDate.getTime() < Date.now()) {
+      raMsg(null, 'Geriye dönük randevu girilemez.', true);
+      return;
+    }
+    raMsg(null, '');
+    var isGuncelle = !!raMevcutRandevuId;
+    var url = isGuncelle ? ('/randevu/api/saat-guncelle/' + raMevcutRandevuId) : '/randevu/api/ekle';
+    var gorusmeOlarak = false;  // Görüşmeler artık sadece üstteki Tür seçimiyle yönetiliyor
+    var payload = isGuncelle
+      ? { baslangic_zamani: baslangicStr, bitis_zamani: bitisStr }
+      : {
+          musteri_id: parseInt(mid, 10),
+          oda_adi: odaAdi,
+          baslangic_zamani: baslangicStr,
+          bitis_zamani: bitisStr,
+          pakete_dahil_mi: false,
+          notlar: document.getElementById('ra-notlar').value.trim(),
+          randevu_tipi: gorusmeOlarak ? 'gorusme' : 'randevu'
+        };
+    var tekrarliChk = document.getElementById('ra-tekrarli');
+    var tekrarliBitis = document.getElementById('ra-tekrarli-bitis');
+    if (!isGuncelle && tekrarliChk && tekrarliChk.checked && tekrarliBitis && tekrarliBitis.value) {
+      payload.recurrence_rule = 'weekly';
+      payload.recurrence_end_date = tekrarliBitis.value;
+    }
+    raPost(url, payload).then(function(res) {
+      raMsg(null, isGuncelle ? 'Randevu saati güncellendi.' : (gorusmeOlarak ? 'Görüşme kaydedildi.' : 'Randevu kaydedildi.'), false);
+      raMevcutRandevuId = null;
+      baslangicStr = ''; bitisStr = '';
+      document.querySelectorAll('#ra-slots .randevu-al-slot').forEach(function(b) { b.style.borderColor = ''; b.style.boxShadow = ''; });
+      var secilenEl = document.getElementById('ra-secilen-slot'); if (secilenEl) { secilenEl.style.display = 'none'; }
+      var mevcutEl = document.getElementById('ra-mevcut-randevu'); if (mevcutEl) mevcutEl.style.display = 'none';
+      if (selectedDate && odaAdi) {
+        loadSlots(selectedDate, true);
+        loadGunRandevulari(true);
+        loadAylikDoluluk();
+      }
+    }).catch(function(err) {
+      raMsg(null, (err && err.message) || 'İstek gönderilemedi.', true);
+    });
+  });
+})();
+</script>
+{% endblock %}
