@@ -637,17 +637,18 @@ if (btnOzlukSil) btnOzlukSil.onclick = async function() {
 };
 
 document.addEventListener('DOMContentLoaded', function() {
-  flatpickr('#filter-tarih', { dateFormat: 'd.m.Y', locale: 'tr', defaultDate: 'today' });
+  var fpOpt = { dateFormat: 'd.m.Y', locale: 'tr', allowInput: true };
+  flatpickr('#filter-tarih', Object.assign({ defaultDate: 'today' }, fpOpt));
   document.getElementById('filter-tarih').addEventListener('change', function() { devamGunlukYukle(); });
-  flatpickr('#izin-bas', { dateFormat: 'd.m.Y', locale: 'tr' });
-  flatpickr('#izin-bit', { dateFormat: 'd.m.Y', locale: 'tr' });
+  flatpickr('#izin-bas', fpOpt);
+  flatpickr('#izin-bit', fpOpt);
   var ozlukIseGiris = document.getElementById('ozluk-ise_giris_tarihi');
   var ozlukDogum = document.getElementById('ozluk-dogum_tarihi');
   if (ozlukIseGiris) { ozlukIseGiris.addEventListener('change', ozlukIzinHakedisGuncelle); ozlukIseGiris.addEventListener('input', ozlukIzinHakedisGuncelle); }
   if (ozlukDogum) { ozlukDogum.addEventListener('change', ozlukIzinHakedisGuncelle); ozlukDogum.addEventListener('input', ozlukIzinHakedisGuncelle); }
   try {
-    flatpickr('#ozluk-ise_giris_tarihi', { dateFormat: 'd.m.Y', locale: 'tr', onChange: function() { ozlukIzinHakedisGuncelle(); } });
-    flatpickr('#ozluk-dogum_tarihi', { dateFormat: 'd.m.Y', locale: 'tr', onChange: function() { ozlukIzinHakedisGuncelle(); } });
+    flatpickr('#ozluk-ise_giris_tarihi', { dateFormat: 'd.m.Y', locale: 'tr', allowInput: true, onChange: function() { ozlukIzinHakedisGuncelle(); } });
+    flatpickr('#ozluk-dogum_tarihi', { dateFormat: 'd.m.Y', locale: 'tr', allowInput: true, onChange: function() { ozlukIzinHakedisGuncelle(); } });
   } catch (e) {}
   const y = new Date().getFullYear();
   for (let i = y; i >= y - 5; i--) { const o = document.createElement('option'); o.value = i; o.textContent = i; document.getElementById('aylik-yil').appendChild(o); document.getElementById('izin-yil').appendChild(o.cloneNode(true)); }

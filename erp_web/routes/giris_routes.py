@@ -5,7 +5,7 @@ Desktop'taki gibi tam fonksiyonel + Sözleşme oluşturma
 from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, send_file, Response
 from flask_login import current_user
 from auth import giris_gerekli
-from db import fetch_all, fetch_one, execute, execute_returning, db as get_db
+from db import fetch_all, fetch_one, execute, execute_returning, ensure_hizmet_turleri_table, db as get_db
 from datetime import datetime, date, timedelta
 from docx import Document
 from docx.shared import Pt, Cm
@@ -259,6 +259,60 @@ def _musteri_serialize_val(v):
     return str(v).strip() if v else ""
 
 
+def _parse_kapanis_tarihi(s):
+    """Formdan gelen kapanış tarihi (YYYY-MM-DD veya GG.AA.YYYY)."""
+    if not s:
+        return None
+    s = str(s).strip()[:10]
+    for fmt in ("%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(s, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _normalize_musteri_durum_kapanis(data):
+    """durum: aktif|pasif; pasif değilse kapanis_tarihi None."""
+    dr = (data.get("durum") or "aktif").strip().lower()
+    if dr not in ("aktif", "pasif"):
+        dr = "aktif"
+    kap = _parse_kapanis_tarihi(data.get("kapanis_tarihi")) if dr == "pasif" else None
+    return dr, kap
+
+
+@bp.route("/api/hizmet-turleri", methods=["GET", "POST"])
+@giris_gerekli
+def api_hizmet_turleri():
+    """Hizmet türü listesi (GET) veya yeni tür ekleme (POST)."""
+    ensure_hizmet_turleri_table()
+    if request.method == "GET":
+        rows = fetch_all("SELECT id, ad FROM hizmet_turleri ORDER BY sira NULLS LAST, ad")
+        return jsonify({"ok": True, "turler": [{"id": r["id"], "ad": r["ad"]} for r in (rows or [])]})
+    data = request.get_json(silent=True) or {}
+    ad = (data.get("ad") or "").strip()
+    if not ad:
+        return jsonify({"ok": False, "mesaj": "Hizmet türü adı boş olamaz."}), 400
+    if len(ad) > 200:
+        return jsonify({"ok": False, "mesaj": "En fazla 200 karakter girebilirsiniz."}), 400
+    mx = fetch_one("SELECT COALESCE(MAX(sira), 0) + 1 AS n FROM hizmet_turleri")
+    next_sira = int(mx["n"] or 1) if mx else 1
+    ins = execute_returning(
+        "INSERT INTO hizmet_turleri (ad, sira) VALUES (%s, %s) ON CONFLICT (ad) DO NOTHING RETURNING id, ad",
+        (ad, next_sira),
+    )
+    if not ins:
+        ins = fetch_one("SELECT id, ad FROM hizmet_turleri WHERE ad = %s", (ad,))
+    rows = fetch_all("SELECT id, ad FROM hizmet_turleri ORDER BY sira NULLS LAST, ad")
+    return jsonify(
+        {
+            "ok": True,
+            "turler": [{"id": r["id"], "ad": r["ad"]} for r in (rows or [])],
+            "secilen": {"id": ins.get("id"), "ad": ins.get("ad")} if ins else None,
+        }
+    )
+
+
 @bp.route('/api/musteri/<int:mid>')
 @giris_gerekli
 def api_musteri_detay(mid):
@@ -273,8 +327,13 @@ def api_musteri_detay(mid):
     out = {}
     for k, v in row.items():
         out[k] = _musteri_serialize_val(v)
+    if not kyc and out.get("yetkili_tcno"):
+        out["yetkili_tc"] = out["yetkili_tcno"]
     # KYC alanlarını forma uyumlu anahtarlarla birleştir (KYC öncelikli)
     if kyc:
+        out["musteri_adi"] = _musteri_serialize_val(out.get("musteri_adi")) or _musteri_serialize_val(
+            kyc.get("musteri_adi")
+        )
         out["name"] = out.get("name") or _musteri_serialize_val(kyc.get("sirket_unvani"))
         out["tax_number"] = out.get("tax_number") or _musteri_serialize_val(kyc.get("vergi_no"))
         out["vergi_dairesi"] = _musteri_serialize_val(kyc.get("vergi_dairesi")) or out.get("vergi_dairesi", "")
@@ -354,27 +413,34 @@ def kaydet():
         data = request.get_json()
         
         musteri_id = data.get('id')
-        
+        dr, kap = _normalize_musteri_durum_kapanis(data)
+
         if musteri_id:
             # Güncelleme
             execute("""
                 UPDATE customers SET 
                     name = %s,
+                    musteri_adi = %s,
                     tax_number = %s,
                     phone = %s,
                     email = %s,
                     address = %s,
                     ev_adres = %s,
-                    notes = %s
+                    notes = %s,
+                    durum = %s,
+                    kapanis_tarihi = %s
                 WHERE id = %s
             """, (
                 data.get('name'),
+                (data.get('musteri_adi') or '').strip() or None,
                 data.get('tax_number'),
                 data.get('phone'),
                 data.get('email'),
                 data.get('address'),
                 data.get('ev_adres'),
                 data.get('notes'),
+                dr,
+                kap,
                 musteri_id
             ))
             
@@ -383,19 +449,22 @@ def kaydet():
             # Yeni kayıt
             result = execute_returning("""
                 INSERT INTO customers (
-                    name, tax_number, phone, email, address,
-                    ev_adres, notes, created_at
+                    name, musteri_adi, tax_number, phone, email, address,
+                    ev_adres, notes, durum, kapanis_tarihi, created_at
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
                 RETURNING id
             """, (
                 data.get('name'),
+                (data.get('musteri_adi') or '').strip() or None,
                 data.get('tax_number'),
                 data.get('phone'),
                 data.get('email'),
                 data.get('address'),
                 data.get('ev_adres'),
-                data.get('notes')
+                data.get('notes'),
+                dr,
+                kap,
             ))
             
             return jsonify({

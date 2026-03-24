@@ -299,7 +299,8 @@ def api_360(mid):
     payload = {
         "ok": True,
         "musteri": {
-            "id": cust.get("id"), "name": cust.get("name"), "tax_number": cust.get("tax_number"),
+            "id": cust.get("id"), "name": cust.get("name"), "musteri_adi": cust.get("musteri_adi"),
+            "tax_number": cust.get("tax_number"),
             "phone": cust.get("phone"), "email": cust.get("email"), "address": cust.get("address"),
             "office_code": cust.get("office_code"), "durum": cust.get("durum") or "aktif",
             "vergi_dairesi": cust.get("vergi_dairesi"), "mersis_no": cust.get("mersis_no"),

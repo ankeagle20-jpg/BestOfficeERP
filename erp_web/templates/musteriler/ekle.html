@@ -95,6 +95,9 @@
 
   <div class="ekle-card">
     <form method="post" action="{{ url_for('musteriler.ekle') }}">
+      <label for="musteri_adi">Müşteri adı</label>
+      <input type="text" id="musteri_adi" name="musteri_adi" placeholder="Kısa / görünen ad (isteğe bağlı)">
+
       <label for="name">Ad / Ünvan <span style="color:#f44336;">*</span></label>
       <input type="text" id="name" name="name" required placeholder="Şirket unvanı veya ad soyad">
 

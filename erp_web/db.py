@@ -125,6 +125,7 @@ CREATE TABLE IF NOT EXISTS faturalar (
     fatura_tarihi   DATE DEFAULT CURRENT_DATE,
     vade_tarihi     DATE,
     notlar          TEXT,
+    sevk_adresi     TEXT,
     created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -249,10 +250,12 @@ def init_schema():
     with db() as conn:
         conn.cursor().execute(SCHEMA_SQL)
         ensure_customers_notes()
+        ensure_customers_musteri_adi()
         ensure_customers_rent_columns()
         ensure_customers_excel_columns()
         ensure_customers_quick_edit_columns()
         ensure_customers_durum()
+        ensure_customers_kapanis_tarihi()
         ensure_customers_cari_columns()
         ensure_customer_financial_profile()
         ensure_customers_balance_trigger()
@@ -261,6 +264,7 @@ def init_schema():
         ensure_kargolar_durum()
         ensure_faturalar_amount_columns()
         ensure_musteri_kyc_columns()
+        ensure_hizmet_turleri_table()
         ensure_office_rentals()
         ensure_crm_leads()
         ensure_personel_extra_columns()
@@ -375,6 +379,7 @@ def ensure_musteri_kyc_columns():
     """
     columns = (
         ("sirket_unvani", "TEXT"),
+        ("musteri_adi", "TEXT"),
         ("unvan", "TEXT"),
         ("email", "TEXT"),
         ("mersis_no", "TEXT"),
@@ -561,6 +566,14 @@ def _ensure_office_rentals_extra_columns():
             print(f"office_rentals.{col}: {e}")
 
 
+def ensure_customers_musteri_adi():
+    """Şirket ünvanından ayrı kısa / görünen müşteri adı (opsiyonel)."""
+    try:
+        execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS musteri_adi TEXT")
+    except Exception as e:
+        print(f"customers.musteri_adi: {e}")
+
+
 def ensure_customers_notes():
     """Customers tablosuna notes ve ev_adres sütunlarını ekle."""
     try:
@@ -589,10 +602,12 @@ def ensure_customers_rent_columns():
 
 
 def ensure_customers_excel_columns():
-    """Excel'den gelen ekstra alanlar için sütunlar: yetkili_kisi, hizmet_turu."""
+    """Excel'den gelen ekstra alanlar: yetkili_kisi, hizmet_turu, phone2, yetkili_tcno."""
     for col, typ in (
         ("yetkili_kisi", "TEXT"),
         ("hizmet_turu", "TEXT"),
+        ("phone2", "TEXT"),
+        ("yetkili_tcno", "TEXT"),
     ):
         try:
             execute(f"ALTER TABLE customers ADD COLUMN IF NOT EXISTS {col} {typ}")
@@ -610,6 +625,38 @@ def ensure_customers_quick_edit_columns():
             execute(f"ALTER TABLE customers ADD COLUMN IF NOT EXISTS {col} {typ}")
         except Exception as e:
             print(f"customers.{col}: {e}")
+
+
+def ensure_hizmet_turleri_table():
+    """Sözleşme / müşteri formunda seçilebilir hizmet türleri (kullanıcı yeni ekleyebilir)."""
+    try:
+        execute(
+            """
+            CREATE TABLE IF NOT EXISTS hizmet_turleri (
+                id SERIAL PRIMARY KEY,
+                ad TEXT NOT NULL,
+                sira INTEGER DEFAULT 0,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                UNIQUE(ad)
+            )
+            """
+        )
+    except Exception as e:
+        print(f"hizmet_turleri CREATE: {e}")
+    varsayilan = (
+        ("Sanal Ofis", 1),
+        ("Hazır Ofis", 2),
+        ("Paylaşımlı Ofis", 3),
+        ("Paylaşımlı Masa", 4),
+    )
+    for ad, sira in varsayilan:
+        try:
+            execute(
+                "INSERT INTO hizmet_turleri (ad, sira) VALUES (%s, %s) ON CONFLICT (ad) DO NOTHING",
+                (ad, sira),
+            )
+        except Exception as e:
+            print(f"hizmet_turleri seed {ad}: {e}")
 
 
 def ensure_customers_cari_columns():
@@ -850,6 +897,14 @@ def ensure_cari_360_tables():
         print(f"cari_belgeler: {e}")
 
 
+def ensure_customers_kapanis_tarihi():
+    """Şirket pasifken kapanış tarihi (customers.durum = pasif ile birlikte)."""
+    try:
+        execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS kapanis_tarihi DATE")
+    except Exception as e:
+        print(f"customers.kapanis_tarihi: {e}")
+
+
 def ensure_customers_durum():
     """Customers tablosuna durum sütunu ekle; Excel'deki faal/terk değerlerini aktif/pasif'e çevirir.
 
@@ -949,6 +1004,10 @@ def ensure_faturalar_amount_columns():
         execute("ALTER TABLE faturalar ADD COLUMN IF NOT EXISTS satirlar_json TEXT")
     except Exception as e:
         print(f"faturalar.satirlar_json: {e}")
+    try:
+        execute("ALTER TABLE faturalar ADD COLUMN IF NOT EXISTS sevk_adresi TEXT")
+    except Exception as e:
+        print(f"faturalar.sevk_adresi: {e}")
 
 
 def clear_all_customers():

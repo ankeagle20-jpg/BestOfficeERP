@@ -2,14 +2,18 @@ from flask import Blueprint, render_template, request, jsonify, redirect, url_fo
 from flask_login import login_required, current_user
 from functools import wraps
 from datetime import datetime, date
-from db import fetch_all, fetch_one, execute, execute_returning
+from db import fetch_all, fetch_one, execute, execute_returning, ensure_faturalar_amount_columns
 from utils.text_utils import turkish_lower
 import os
 import io
 import re
 import json
+import uuid
+from urllib.parse import urlencode
 from reportlab.lib.pagesizes import A5, A4
 from reportlab.lib.units import mm
+from reportlab.lib import colors
+from reportlab.platypus import Table, TableStyle
 from reportlab.pdfgen import canvas
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
@@ -47,15 +51,98 @@ def _register_arial():
                     pass
     _register_arial._done = True
 
+
+def _resolve_ettn_for_pdf(raw_ettn, fatura_id=None):
+    """
+    ETTN: Sadece geçerli UUID string'i olduğu gibi (büyük harf) kullanılır.
+    Aksi halde (boş, Önizleme-ETTN, yazım hatası, ASCII O vb.) sentetik UUID — metin eşleştirmeye güvenilmez.
+    Kayıtlı fatura (id var): uuid5 → aynı faturada PDF her seferinde aynı; önizlemede (id yok): uuid4.
+    """
+    v = (raw_ettn or "").strip()
+    if v:
+        try:
+            cleaned = v.replace("{", "").replace("}", "").strip()
+            return str(uuid.UUID(cleaned)).upper()
+        except (ValueError, TypeError, AttributeError):
+            pass
+    if fatura_id is not None:
+        try:
+            return str(
+                uuid.uuid5(uuid.NAMESPACE_URL, f"bestoffice-erp:fatura:{int(fatura_id)}")
+            ).upper()
+        except (TypeError, ValueError):
+            pass
+    return str(uuid.uuid4()).upper()
+
+
+def _resolve_gib_logo_path():
+    """GİB logosu: cwd + __file__ tabanlı adaylar; sunucu konsoluna exists logu."""
+    cwd = os.getcwd()
+    here = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        os.path.join(cwd, "BestOfficeERP", "assets", "gib_logo.png"),
+        os.path.join(cwd, "assets", "gib_logo.png"),
+        os.path.abspath(os.path.join(here, "..", "..", "assets", "gib_logo.png")),
+        os.path.abspath(os.path.join(here, "..", "static", "gib_logo.png")),
+    ]
+    for name in ("gib_logo.PNG", "gib_logo.jpg", "gib_logo.jpeg"):
+        candidates.append(os.path.join(cwd, "BestOfficeERP", "assets", name))
+        candidates.append(os.path.abspath(os.path.join(here, "..", "..", "assets", name)))
+    seen = set()
+    for p in candidates:
+        if not p or p in seen:
+            continue
+        seen.add(p)
+        ex = os.path.isfile(p)
+        print(f"[fatura PDF] GIB logo yolu: {p} exists={ex}")
+        if ex:
+            return p
+    print("[fatura PDF] GIB logo bulunamadı (tüm adaylar denendi).")
+    return None
+
+
+def _gib_dogrulama_qr_url(fatura, sender_vkn, alici_vkn, ettn):
+    """
+    e-Arşiv / e-Fatura önizleme için GİB portal tabanlı doğrulama URL'si (QR içeriği).
+    Kamuya açık sorgu ekranı: earsivportal.efatura.gov.tr
+    """
+    def _dig(x):
+        return re.sub(r"\D", "", str(x or ""))
+
+    try:
+        toplam = float(fatura.get("genel_toplam") or fatura.get("toplam") or 0)
+    except (TypeError, ValueError):
+        toplam = 0.0
+    try:
+        kdv = float(fatura.get("kdv_toplam") or fatura.get("kdv_tutar") or 0)
+    except (TypeError, ValueError):
+        kdv = 0.0
+    tarih = str(fatura.get("fatura_tarihi") or "")[:10]
+    q = {
+        "ettn": str(ettn or "").strip(),
+        "vknoGonderen": _dig(sender_vkn),
+        "vknoAlici": _dig(alici_vkn),
+        "faturaNo": str(fatura.get("fatura_no") or "").strip(),
+        "tarih": tarih,
+        "tutar": f"{toplam:.2f}",
+        "kdvToplam": f"{kdv:.2f}",
+    }
+    base = "https://earsivportal.efatura.gov.tr/earsiv-fatura-sorgula"
+    url = f"{base}?{urlencode(q)}"
+    if len(url) > 450:
+        url = f"{base}?{urlencode({'ettn': q['ettn'], 'vknoGonderen': q['vknoGonderen'], 'vknoAlici': q['vknoAlici'], 'tarih': tarih})}"
+    return url
+
+
 bp = Blueprint('faturalar', __name__, url_prefix='/faturalar')
 
 # Tahsilat makbuzu firma bilgileri (.env'den FIRMA_VERGI_DAIRESI, FIRMA_VERGI_NO eklenebilir)
 FIRMA_UNVAN = os.environ.get("FIRMA_UNVAN", "OFİSBİR OFİS VE DANIŞMANLIK HİZMETLERİ ANONİM ŞİRKETİ")
 FIRMA_ADRES = os.environ.get("FIRMA_ADRES", "KAVAKLIDERE MAH. ESAT CADDESİ NO:12 KAPI NO:1 ÇANKAYA / Ankara / Türkiye")
-FIRMA_TELEFON = os.environ.get("FIRMA_TELEFON", "0 (312) 000 00 00")
+FIRMA_TELEFON = os.environ.get("FIRMA_TELEFON", "+90 549 590 79 10")
 FIRMA_WEB = os.environ.get("FIRMA_WEB", "www.ofisbir.com.tr")
-FIRMA_VERGI_DAIRESI = os.environ.get("FIRMA_VERGI_DAIRESI", "Büyük Mükellefler VD")
-FIRMA_VERGI_NO = os.environ.get("FIRMA_VERGI_NO", "1234567890")
+FIRMA_VERGI_DAIRESI = os.environ.get("FIRMA_VERGI_DAIRESI", "Kavaklıdere")
+FIRMA_VERGI_NO = os.environ.get("FIRMA_VERGI_NO", "6340871926")
 UPLOAD_MUSTERI_DOSYALARI = "uploads/musteri_dosyalari"
 
 AYLAR = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 
@@ -63,57 +150,66 @@ AYLAR = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran',
 
 
 def tutar_yaziya(tutar):
-    """Tutarı Türkçe yazıya çevirir (örn: 15000 -> 'On Beş Bin Türk Lirası')."""
-    if tutar is None or tutar == 0:
+    """Tutarı Türkçe yazıya çevirir (örn: 1200 -> 'Bin İki Yüz Türk Lirası'; 1000-1999 arası 'Bir Bin' değil 'Bin')."""
+    if tutar is None:
         return "Sıfır Türk Lirası"
     try:
-        t = float(tutar)
+        t = round(float(tutar), 2)
     except (TypeError, ValueError):
         return str(tutar) + " Türk Lirası"
+    if t == 0:
+        return "Sıfır Türk Lirası"
+
     birler = ["", "Bir", "İki", "Üç", "Dört", "Beş", "Altı", "Yedi", "Sekiz", "Dokuz"]
     onlar = ["", "On", "Yirmi", "Otuz", "Kırk", "Elli", "Altmış", "Yetmiş", "Seksen", "Doksan"]
     yuzler = ["", "Yüz", "İki Yüz", "Üç Yüz", "Dört Yüz", "Beş Yüz", "Altı Yüz", "Yedi Yüz", "Sekiz Yüz", "Dokuz Yüz"]
-    binler = ["", "Bin", "İki Bin", "Üç Bin", "Dört Bin", "Beş Bin", "Altı Bin", "Yedi Bin", "Sekiz Bin", "Dokuz Bin"]
-    onbinler = ["", "On", "Yirmi", "Otuz", "Kırk", "Elli", "Altmış", "Yetmiş", "Seksen", "Doksan"]
-    yuzbinler = ["", "Yüz", "İki Yüz", "Üç Yüz", "Dört Yüz", "Beş Yüz", "Altı Yüz", "Yedi Yüz", "Sekiz Yüz", "Dokuz Yüz"]
-    milyonlar = ["", "Bir Milyon", "İki Milyon", "Üç Milyon", "Dört Milyon", "Beş Milyon", "Altı Milyon", "Yedi Milyon", "Sekiz Milyon", "Dokuz Milyon"]
-    onmilyonlar = ["", "On", "Yirmi", "Otuz", "Kırk", "Elli", "Altmış", "Yetmiş", "Seksen", "Doksan"]
+    scale_names = ["", "Bin", "Milyon", "Milyar", "Trilyon"]
 
-    def uce_bol(s):
-        s = str(int(s))
-        return s.zfill((len(s) + 2) // 3 * 3)
+    def three_digits(d):
+        if d <= 0:
+            return ""
+        y, o, b = d // 100, (d // 10) % 10, d % 10
+        chunks = []
+        if y:
+            chunks.append(yuzler[y])
+        if o:
+            chunks.append(onlar[o])
+        if b:
+            chunks.append(birler[b])
+        return " ".join(chunks).strip()
 
     k = int(t)
-    kuruş = round((t - k) * 100)
+    kuruş = int(round((t - k) * 100))
+    if kuruş >= 100:
+        k += 1
+        kuruş = 0
+
     if k == 0:
         yazi = "Sıfır"
     else:
-        s = uce_bol(k)
-        gruplar = [s[i:i+3] for i in range(0, len(s), 3)]
-        parcalar = []
-        if len(gruplar) >= 3:
-            g = gruplar[-3]
-            if g != "000":
-                y = int(g[0])
-                o = int(g[1])
-                b = int(g[2])
-                parca = (yuzbinler[y] + " " + onbinler[o] + " " + binler[b] if b and (y or o) else (yuzbinler[y] + " " + onbinler[o] + " " + birler[b]) if o or y else birler[b]).strip()
-                if parca == "Bir":
-                    parca = "Bin"
-                parcalar.append(parca + " Bin" if parca and parca != "Bin" else "Bin")
-        if len(gruplar) >= 2:
-            g = gruplar[-2]
-            if g != "000":
-                y, o, b = int(g[0]), int(g[1]), int(g[2])
-                parca = (yuzler[y] + " " + onlar[o] + " " + birler[b]).strip()
-                parcalar.append(parca)
-        if len(gruplar) >= 1:
-            g = gruplar[-1]
-            if g != "000":
-                y, o, b = int(g[0]), int(g[1]), int(g[2])
-                parca = (yuzler[y] + " " + onlar[o] + " " + birler[b]).strip()
-                parcalar.append(parca)
-        yazi = " ".join(parcalar).replace("  ", " ").strip()
+        gruplar = []
+        kk = k
+        while kk > 0:
+            gruplar.append(kk % 1000)
+            kk //= 1000
+        parts_out = []
+        for i in range(len(gruplar) - 1, -1, -1):
+            d = gruplar[i]
+            if d == 0:
+                continue
+            word = three_digits(d)
+            if i == 0:
+                parts_out.append(word)
+            else:
+                scale = scale_names[i] if i < len(scale_names) else "?"
+                if i == 1 and d == 1:
+                    parts_out.append("Bin")
+                elif d == 1:
+                    parts_out.append("Bir " + scale)
+                else:
+                    parts_out.append(word + " " + scale)
+        yazi = " ".join(parts_out).replace("  ", " ").strip()
+
     yazi = yazi or "Sıfır"
     return yazi + " Türk Lirası" + (f" {kuruş:02}/100" if kuruş else "")
 
@@ -376,115 +472,417 @@ def build_makbuz_pdf(tahsilat, musteri_adi, fatura_no=None, banka_hesaplar=None)
     return buf.getvalue()
 
 
+def _pdf_irsaliye_modu(fatura):
+    """Belge irsaliye akışından mı? (API bool, notlar etiketi veya fatura_tipi yedekleri)."""
+    if not isinstance(fatura, dict):
+        return False
+    v = fatura.get("irsaliye_modu")
+    if v is True:
+        return True
+    if v is False or v is None:
+        pass
+    else:
+        if str(v).strip().lower() in ("1", "true", "yes", "on"):
+            return True
+    notlar = fatura.get("notlar")
+    if notlar and "IRSALIYE_MODU" in str(notlar):
+        return True
+    ft = turkish_lower(str(fatura.get("fatura_tipi") or "")).replace(" ", "").replace("-", "")
+    if "irsaliye" in ft:
+        return True
+    return False
+
+
 def build_fatura_pdf(fatura, musteri, satirlar):
-    """e-Arşiv tarzı A4 fatura PDF (önizleme için)."""
+    """e-Arşiv tarzı A4 fatura / e-irsaliye PDF (önizleme için)."""
     _register_arial()
     font_name = "Arial" if "Arial" in pdfmetrics.getRegisteredFontNames() else "Helvetica"
     font_bold = "Arial-Bold" if "Arial-Bold" in pdfmetrics.getRegisteredFontNames() else "Helvetica-Bold"
     buf = io.BytesIO()
     w_pt, h_pt = A4
+    irsaliye_modu = _pdf_irsaliye_modu(fatura)
     c = canvas.Canvas(buf, pagesize=A4)
-    c.setTitle("Fatura Önizleme")
+    c.setTitle("İrsaliye Önizleme" if irsaliye_modu else "Fatura Önizleme")
 
     # Kenarlar
     margin = 15 * mm
     right = (A4_W_MM - 15) * mm
 
-    # Tarih / Saat (sol üst)
+    # Tarih: gönderici üst çift çizgisinin 3 mm üstü, sol hiza = şirket unvanı (left_x) — çizim sender_top sonrası
     now = datetime.now()
     ust_tarih = fatura.get("fatura_tarihi_str") or now.strftime("%d.%m.%Y %H:%M")
-    c.setFont(font_name, 9)
-    c.drawString(margin, h_pt - 12 * mm, ust_tarih)
-    c.setFont(font_bold, 11)
-    c.drawCentredString(w_pt / 2, h_pt - 12 * mm, "e-Arşiv Fatura (Önizleme)")
 
-    # Firma bilgileri (sol blok) — okunur (9pt)
-    y = 22
-    c.setFont(font_bold, 10)
-    c.drawString(margin, h_pt - y * mm, (FIRMA_UNVAN or "")[:80])
-    y += 5
-    c.setFont(font_name, 9)
-    for line in (FIRMA_ADRES or "").split("\\n"):
-        c.drawString(margin, h_pt - y * mm, line[:90])
-        y += 4
-    c.drawString(margin, h_pt - y * mm, f"Tel: {FIRMA_TELEFON or '—'}")
-    y += 4
-    c.drawString(margin, h_pt - y * mm, f"Web Sitesi: {FIRMA_WEB or '—'}")
-    y += 4
-    c.drawString(margin, h_pt - y * mm, f"Vergi Dairesi: {FIRMA_VERGI_DAIRESI or '—'}")
-    y += 4
-    c.drawString(margin, h_pt - y * mm, f"VKN: {FIRMA_VERGI_NO or '—'}")
+    # --- Kurumsal üst/alt bloklar (örnek görsel gibi çift çizgi) ---
+    def _double_hr(y_pt, line_w=0.8, gap_pt=1.6):
+        """Tam sayfa genişliğinde çift yatay çizgi."""
+        c.setLineWidth(line_w)
+        c.line(margin, y_pt, right, y_pt)
+        c.line(margin, y_pt - gap_pt, right, y_pt - gap_pt)
 
-    # Sağ üst: QR kod ve meta kutusu
+    def _double_hr_segment(x1_pt, x2_pt, y_pt, line_w=0.8, gap_pt=1.6):
+        """Belirli bir yatay aralıkta (ör: sadece şirket bloğu genişliğinde) çift çizgi."""
+        c.setLineWidth(line_w)
+        c.line(x1_pt, y_pt, x2_pt, y_pt)
+        c.line(x1_pt, y_pt - gap_pt, x2_pt, y_pt - gap_pt)
+
+    def _wrap_text(text, max_w_pt, font_nm, font_sz):
+        """Kelime bazlı wrap + break-word."""
+        t = (text or "").strip()
+        if not t:
+            return [""]
+        c.setFont(font_nm, font_sz)
+        words = t.split()
+        if not words:
+            return [t]
+        out = []
+        cur = ""
+        for w in words:
+            cand = (cur + " " + w).strip() if cur else w
+            if c.stringWidth(cand, font_nm, font_sz) <= max_w_pt:
+                cur = cand
+                continue
+            if cur:
+                out.append(cur)
+                cur = ""
+            if c.stringWidth(w, font_nm, font_sz) <= max_w_pt:
+                cur = w
+            else:
+                chunk = ""
+                for ch in w:
+                    cand2 = chunk + ch
+                    if c.stringWidth(cand2, font_nm, font_sz) <= max_w_pt:
+                        chunk = cand2
+                    else:
+                        if chunk:
+                            out.append(chunk)
+                        chunk = ch
+                cur = chunk
+        if cur:
+            out.append(cur)
+        return out or [t]
+
+    def _draw_labeled_line(x_pt, y_pt, label, value, label_w_pt, value_max_w_pt=None):
+        c.setFont(font_name, 9)
+        c.drawString(x_pt, y_pt, (label or "")[:30])
+        if value_max_w_pt:
+            v_lines = _wrap_text(value, value_max_w_pt, font_name, 9)
+            c.drawString(x_pt + label_w_pt, y_pt, (v_lines[0] if v_lines else "")[:95])
+        else:
+            c.drawString(x_pt + label_w_pt, y_pt, (value or "")[:95])
+
+    company = (fatura.get("current_user_company") or fatura.get("company") or {}) if isinstance(fatura, dict) else {}
+    sender_unvan = (company.get("unvan") or FIRMA_UNVAN or "").strip()
+    sender_adres = (company.get("adres") or FIRMA_ADRES or "").strip()
+    sender_tel = (company.get("telefon") or FIRMA_TELEFON or "").strip() or "—"
+    sender_web = (company.get("web") or FIRMA_WEB or "").strip() or "—"
+    sender_vd = (company.get("vergi_dairesi") or FIRMA_VERGI_DAIRESI or "").strip() or "—"
+    sender_vkn = (company.get("vkn") or FIRMA_VERGI_NO or "").strip() or "—"
+
+    client = (fatura.get("active_invoice_client") or fatura.get("client") or {}) if isinstance(fatura, dict) else {}
+    # mevcut musteri dict'i ile birleştir (varsa client öncelikli)
+    must = {}
+    must.update(musteri or {})
+    must.update(client or {})
+    alici_unvan = (must.get("unvan") or must.get("sirket_unvani") or must.get("name") or fatura.get("musteri_adi") or "Müşteri").strip()
+    alici_adres = (must.get("yeni_adres") or must.get("address") or "").strip() or "—"
+    sevk_adresi_pdf = (
+        str(fatura.get("sevk_adresi") or fatura.get("sevk_adres") or must.get("sevk_adresi") or "")
+        .replace("\r\n", "\n")
+        .strip()
+    )
+    alici_vd = (must.get("vergi_dairesi") or "—").strip()
+    alici_vkn = str(must.get("vergi_no") or must.get("tax_number") or "—").strip()
+    pdf_ettn = _resolve_ettn_for_pdf(fatura.get("ettn"), fatura.get("id"))
+
+    # Gönderici bloğu (sol şirket | gutter GİB logosu | sağ meta/QR)
+    sender_top = h_pt - 14 * mm
+    gutter = 10 * mm
+    left_col_w = (right - margin) * 0.40
+    right_col_w = (right - margin) - left_col_w - gutter
+    left_x = margin
+    right_x = margin + left_col_w + gutter
+    gutter_pad = 1.5 * mm
+    gutter_left = left_x + left_col_w + gutter_pad
+    gutter_right = right_x - gutter_pad
+    gutter_cx = (gutter_left + gutter_right) / 2.0
+
+    alici_block_pad_x = 2 * mm
+    alici_inner_right = left_x + left_col_w - alici_block_pad_x
+
+    # Orta üst: GİB logosu + belge türü — koordinatlar burada; çizim kalemler öncesi (üst katman)
+    gib_path = _resolve_gib_logo_path()
+    _gib_forced = os.path.join(os.getcwd(), "BestOfficeERP", "assets", "gib_logo.png")
+    print(
+        f"[fatura PDF] GIB zorunlu yol: {_gib_forced} "
+        f"exists={os.path.exists(_gib_forced)} isfile={os.path.isfile(_gib_forced)}"
+    )
+    if os.path.isfile(_gib_forced):
+        gib_path = _gib_forced
+    if irsaliye_modu:
+        doc_subtitle = "e-İRSALİYE"
+    else:
+        ft_low = turkish_lower(str(fatura.get("fatura_tipi") or ""))
+        if "efatura" in ft_low.replace(" ", "") or ft_low in ("efatura", "e-fatura"):
+            doc_subtitle = "e-FATURA"
+        else:
+            doc_subtitle = "e-Arşiv Fatura"
+    doc_subtitle_pdf = doc_subtitle
+
+    # GİB logosu: sender_bottom sonrası OFİSBİR üst çizgisi … VKN alt çift çizgi arası + sayfa ortası
+    _dhr_gap_pt = 1.6
+    # Çift çizgi altından sonraki blok üst çizgisine kadar boşluk (≈ eski sender_bottom - 18); SAYIN/SEVK aynı
+    BLOCK_GAP_BELOW_DOUBLE_PT = 18 - _dhr_gap_pt
+    BLOCK_GAP_MM = BLOCK_GAP_BELOW_DOUBLE_PT  # eski isim kaldıysa NameError önleme (pt cinsinden aynı değer)
+    ar = 1.0
+    if gib_path:
+        try:
+            from reportlab.lib.utils import ImageReader
+
+            iw, ih = ImageReader(gib_path).getSize()
+            ar = iw / float(ih or 1)
+        except Exception:
+            ar = 1.0
+    GIB_LOGO_H_FIXED = 25 * mm
+    GIB_LOGO_H_MAX = GIB_LOGO_H_FIXED  # geriye uyum (eski kod / kopyalar)
+    GIB_LOGO_LEFT_FROM_PAGE = 85 * mm  # sayfa sol kenarından logo solu (statik)
+    GIB_LOGO_SIDE_CLEAR = 10 * mm  # gönderici sağı ve QR solu ile minimum boşluk
+    GIB_LOGO_GAP_AFTER_SENDER = 20 * mm  # eski sabit adı (yerel/karışık kopya NameError önleme)
+    SUBTITLE_BELOW_LOGO_MM = 3 * mm
+    logo_h = GIB_LOGO_H_FIXED
+    logo_draw_w = GIB_LOGO_H_FIXED * ar
+    logo_ll_x = 0.0
+    logo_ll_y = 0.0
+    sub_baseline = 0.0
+
+    # QR kare boyutu (ETTN hizalı meta üstünde)
+    qr_size = min(26 * mm, max(20 * mm, right_col_w * 0.88))
+    qr_x = 0.0
+    qr_y = 0.0
+
+    qr_pil_image = None
     try:
         import qrcode
-        qr_data = f"FATURA|{fatura.get('fatura_no') or ''}|{fatura.get('fatura_tarihi') or ''}"
-        qr = qrcode.QRCode(box_size=2, border=1)
-        qr.add_data(qr_data)
-        qr.make(fit=True)
-        img = qr.make_image(fill_color="black", back_color="white")
-        qr_buf = io.BytesIO()
-        img.save(qr_buf, format="PNG")
-        qr_buf.seek(0)
-        qr_size = 35 * mm
-        c.drawImage(qr_buf, right - qr_size, h_pt - 28 * mm, qr_size, qr_size, preserveAspectRatio=True, mask="auto")
-    except Exception:
-        pass
+        import qrcode.constants
 
-    # QR altındaki bilgiler kutusu
-    box_top = h_pt - 30 * mm
-    box_left = right - 60 * mm
-    box_width = 60 * mm
-    box_height = 26 * mm
-    c.rect(box_left, box_top - box_height, box_width, box_height)
-    c.setFont(font_name, 7)
-    lines = [
-        ("Özelleştirme No", "TR1.2"),
-        ("Senaryo", "EARSIVFATURA"),
-        ("Fatura Tipi", (fatura.get("fatura_tipi") or "SATIS").upper()),
-        ("Fatura No", fatura.get("fatura_no") or "—"),
-        ("Fatura Tarihi", fatura.get("fatura_tarihi_str") or "—"),
-    ]
-    row_h = box_height / len(lines)
-    for idx, (lbl, val) in enumerate(lines):
-        y0 = box_top - row_h * idx
-        c.line(box_left, y0, box_left + box_width, y0)
-        c.drawString(box_left + 2 * mm, y0 - row_h + 3 * mm, lbl)
-        c.drawRightString(box_left + box_width - 2 * mm, y0 - row_h + 3 * mm, val[:28])
+        qr_data = _gib_dogrulama_qr_url(fatura, sender_vkn, alici_vkn, pdf_ettn)
+        try:
+            qr = qrcode.QRCode(
+                version=1,
+                box_size=3,
+                border=0,
+                error_correction=qrcode.constants.ERROR_CORRECT_M,
+            )
+            qr.add_data(qr_data)
+            qr.make(fit=True)
+            qr_pil_image = qr.make_image(fill_color="black", back_color="white")
+            print(f"[fatura PDF] QR PIL (v1, M), veri uzunluğu={len(qr_data)}")
+        except Exception as e_v1:
+            print(f"[fatura PDF] QR v1 başarısız ({e_v1}), auto version.")
+            qr = qrcode.QRCode(
+                version=None,
+                box_size=3,
+                border=0,
+                error_correction=qrcode.constants.ERROR_CORRECT_M,
+            )
+            qr.add_data(qr_data)
+            qr.make(fit=True)
+            qr_pil_image = qr.make_image(fill_color="black", back_color="white")
+            print(f"[fatura PDF] QR PIL (auto, M), veri uzunluğu={len(qr_data)}")
+    except Exception as e_qr:
+        print(f"[fatura PDF] QR üretilemedi: {e_qr}")
+        qr_pil_image = None
 
-    # Alıcı bilgiler bloğu ("SAYIN ...") — okunur (9pt)
-    y = 55
-    c.setFont(font_bold, 10)
-    c.drawString(margin, h_pt - y * mm, "SAYIN")
-    y += 4
+    # Tarih: üst çift çizginin 3 mm üstü, unvan ile aynı sol hiza (overlay’de tekrar basılır)
+    date_header_y = sender_top + 3 * mm
     c.setFont(font_name, 9)
-    musteri_ad = (musteri.get("unvan") or musteri.get("sirket_unvani") or musteri.get("name") or fatura.get("musteri_adi") or "Müşteri")
-    c.drawString(margin, h_pt - y * mm, musteri_ad[:90])
-    y += 4
-    adres = musteri.get("yeni_adres") or musteri.get("address") or ""
-    for line in str(adres).split("\\n"):
-        if not line:
+    c.drawString(left_x, date_header_y, ust_tarih)
+
+    _double_hr_segment(left_x, left_x + left_col_w, sender_top)
+    sender_y = sender_top - 12
+
+    # Sol sütun: şirket bilgileri (wrap'li)
+    c.setFont(font_bold, 10.5)
+    for ln in _wrap_text(sender_unvan, left_col_w, font_bold, 10.5)[:2]:
+        c.drawString(left_x, sender_y, ln[:110])
+        sender_y -= 12
+    c.setFont(font_name, 9)
+    addr_lines = []
+    for raw_ln in sender_adres.split("\\n"):
+        raw_ln = (raw_ln or "").strip()
+        if not raw_ln:
             continue
-        c.drawString(margin, h_pt - y * mm, line[:95])
-        y += 4
-    vergi_dairesi = musteri.get("vergi_dairesi") or "Kavaklıdere"
-    vergi_no = musteri.get("vergi_no") or musteri.get("tax_number") or "—"
-    c.drawString(margin, h_pt - y * mm, f"Vergi Dairesi: {vergi_dairesi}")
-    y += 4
-    c.drawString(margin, h_pt - y * mm, f"VKN/TCKN: {vergi_no}")
-    y += 4
-    ettn = fatura.get("ettn") or "Önizleme-ETTN"
-    c.drawString(margin, h_pt - y * mm, f"ETTN: {ettn}")
+        addr_lines.extend(_wrap_text(raw_ln, left_col_w, font_name, 9))
+    for ln in addr_lines[:3]:
+        c.drawString(left_x, sender_y, ln[:120])
+        sender_y -= 11
+
+    label_w = 28 * mm
+    value_w = max(20, left_col_w - label_w)
+    _draw_labeled_line(left_x, sender_y, "Tel:", sender_tel, label_w, value_max_w_pt=value_w)
+    sender_y -= 11
+    _draw_labeled_line(left_x, sender_y, "Web Sitesi:", sender_web, label_w, value_max_w_pt=value_w)
+    sender_y -= 11
+    _draw_labeled_line(left_x, sender_y, "Vergi Dairesi:", sender_vd, label_w, value_max_w_pt=value_w)
+    sender_y -= 11
+    # VKN satırı için y konumunu ayrı değişkende tut (çizgiyi buna yapıştıracağız)
+    vkn_y = sender_y
+    _draw_labeled_line(left_x, vkn_y, "VKN:", sender_vkn, label_w, value_max_w_pt=value_w)
+
+    # Sağ meta tablo: start_y sonrası çizilir; logo/QR üst katman _flush_gib_overlay ile
+    try:
+        from datetime import datetime as _dt
+        ft_raw = fatura.get("fatura_tarihi") or now.strftime("%Y-%m-%d")
+        try:
+            dt_ft = _dt.strptime(str(ft_raw)[:10], "%Y-%m-%d")
+        except Exception:
+            dt_ft = now
+        irs_tarih = fatura.get("irsaliye_tarihi") or dt_ft.strftime("%d-%m-%Y")
+        irs_saat = fatura.get("irsaliye_saati") or now.strftime("%H:%M:%S")
+        sevk_tarih = fatura.get("sevk_tarihi") or irs_tarih
+        sevk_saat = fatura.get("sevk_saati") or irs_saat
+        yil = dt_ft.year
+        import re as _re
+        num_raw = "".join(_re.findall(r"\d", str(fatura.get("fatura_no") or ""))) or "1"
+        num_val = int(num_raw[-9:]) if num_raw else 1
+        irs_no = f"GRS{yil}{num_val:09d}"
+    except Exception:
+        dt_ft = now
+        irs_tarih = now.strftime("%d-%m-%Y")
+        irs_saat = now.strftime("%H:%M:%S")
+        sevk_tarih = irs_tarih
+        sevk_saat = irs_saat
+        irs_no = "GRS" + now.strftime("%Y") + "000000001"
+
+    fat_tarih_dm = dt_ft.strftime("%d-%m-%Y")
+    fat_saat = (fatura.get("fatura_saati") or fatura.get("irsaliye_saati") or now.strftime("%H:%M:%S"))
+    fat_tip_disp = (str(fatura.get("fatura_tipi") or "SATIŞ")).strip().upper() or "SATIŞ"
+    fat_no_goster = (str(fatura.get("fatura_no") or "").strip() or irs_no)[:32]
+
+    if irsaliye_modu:
+        meta_lines = [
+            ("Özelleştirme No", "TR1.2.1"),
+            ("Senaryo", "TEMELIRSALIYE"),
+            ("İrsaliye Tipi", (fatura.get("irsaliye_tipi") or "SEVK")),
+            ("İrsaliye No", irs_no),
+            ("İrsaliye Tarihi", irs_tarih),
+            ("İrsaliye Zamanı", irs_saat),
+            ("Sevk Tarihi", sevk_tarih),
+            ("Sevk Zamanı", sevk_saat),
+        ]
+    else:
+        meta_lines = [
+            ("Özelleştirme No", "TR1.2"),
+            ("Senaryo", "EARSIVFATURA"),
+            ("Fatura Tipi", fat_tip_disp[:24]),
+            ("Fatura No", fat_no_goster),
+            ("Fatura Tarihi", fat_tarih_dm),
+            ("Fatura Zamanı", str(fat_saat)[:16]),
+        ]
+
+    # Gönderici bloğu alt çizgisi: sadece sol sütunda; meta kutu sağda olduğu için
+    # kutu altı (box_top - box_height) ile sınırlamak VKN ile çizgi arasında büyük boşluk yaratıyordu.
+    # Üst çift çizginin ilk çizgisi VKN baseline'ının ~2 pt (~0,7 mm) altında.
+    gap_below_vkn_pt = 2
+    sender_bottom = vkn_y - gap_below_vkn_pt
+    _double_hr_segment(left_x, left_x + left_col_w, sender_bottom)
+
+    # GİB: yükseklik 25 mm; dikey orta = üst çift (sender_top) … alt çift alt çizgisi (sender_bottom - gap)
+    band_high_y = sender_top
+    band_low_y = sender_bottom - _dhr_gap_pt
+    logo_cy = (band_high_y + band_low_y) / 2.0
+    logo_w_nat = logo_h * ar
+    max_logo_w = (right - margin) * 0.46
+    logo_draw_w = min(logo_w_nat, max_logo_w)
+
+    # Alıcı bloğu (header ile aynı genişlikte, sol sınırlı)
+    # Boşluk: BLOCK_GAP_BELOW_DOUBLE_PT (GİB bölümünde tanımlı)
+    SAYIN_TOP_PAD_BELOW_DOUBLE_PT = 14
+    sender_hr_lower_y = sender_bottom - _dhr_gap_pt
+    y_pt = sender_hr_lower_y - BLOCK_GAP_BELOW_DOUBLE_PT
+    y_sayin_hr_top = y_pt
+    _double_hr_segment(left_x, left_x + left_col_w, y_pt)
+    y_pt -= SAYIN_TOP_PAD_BELOW_DOUBLE_PT
+    c.setFont(font_bold, 10.5)
+    c.drawString(margin, y_pt, "SAYIN")
+    y_pt -= 12
+    c.setFont(font_bold, 10)
+    c.drawString(margin, y_pt, alici_unvan[:95])
+    y_pt -= 12
+    c.setFont(font_name, 9)
+    for ln in str(alici_adres).split("\\n"):
+        if not ln.strip():
+            continue
+        c.drawString(margin, y_pt, ln.strip()[:105])
+        y_pt -= 11
+    _draw_labeled_line(margin, y_pt, "Vergi Dairesi:", alici_vd, label_w)
+    y_pt -= 11
+    _draw_labeled_line(margin, y_pt, "VKN/TCKN:", alici_vkn, label_w)
+    y_pt -= 10
+    sayin_bottom_hr_top = y_pt
+    sayin_inner_top_y = y_sayin_hr_top - _dhr_gap_pt
+    sayin_inner_height_pt = sayin_inner_top_y - sayin_bottom_hr_top
+    _double_hr_segment(left_x, left_x + left_col_w, y_pt)
+
+    # Sevk adresi (alıcı adresinden farklı; boşsa blok çizilmez)
+    # Üst boşluk: gönderici–SAYIN ile aynı (BLOCK_GAP_BELOW_DOUBLE_PT)
+    ettn_anchor_hr_top = sayin_bottom_hr_top
+    if sevk_adresi_pdf:
+        sevk_val_x = margin
+        wrap_max = max(40, alici_inner_right - sevk_val_x)
+        sevk_lines = []
+        for raw_ln in sevk_adresi_pdf.split("\n"):
+            raw_ln = (raw_ln or "").strip()
+            if not raw_ln:
+                continue
+            sevk_lines.extend(_wrap_text(raw_ln, wrap_max, font_name, 9))
+        if sevk_lines:
+            sayin_hr_lower_y = sayin_bottom_hr_top - _dhr_gap_pt
+            y_sevk_open_top = sayin_hr_lower_y - BLOCK_GAP_BELOW_DOUBLE_PT
+            _double_hr_segment(left_x, left_x + left_col_w, y_sevk_open_top)
+            y_sevk_title = y_sevk_open_top - SAYIN_TOP_PAD_BELOW_DOUBLE_PT
+            c.setFont(font_bold, 9)
+            c.setFillColorRGB(0, 0, 0)
+            c.drawString(left_x, y_sevk_title, "SEVK ADRESİ:")
+            last_txt_baseline = y_sevk_title
+            c.setFont(font_name, 9)
+            y_sevk_line = y_sevk_title - 12
+            for ln in sevk_lines:
+                c.drawString(sevk_val_x, y_sevk_line, (ln or "")[:220])
+                last_txt_baseline = y_sevk_line
+                y_sevk_line -= 11
+            top_sevk_inner_y = y_sevk_open_top - _dhr_gap_pt
+            y_close_for_min_height = top_sevk_inner_y - sayin_inner_height_pt
+            y_close_after_text = last_txt_baseline - 5 * mm
+            y_sevk_close_top = min(y_close_after_text, y_close_for_min_height)
+            _double_hr_segment(left_x, left_x + left_col_w, y_sevk_close_top)
+            ettn_anchor_hr_top = y_sevk_close_top
+
+    # ETTN satırı (kurumsal tasarım: alıcı / sevk bloğu alt çizgisinin hemen altında; QR ile aynı kod)
+    ettn = pdf_ettn
+    ettn_baseline_y = ettn_anchor_hr_top - 14
+    ettn_fs = 9
+    ettn_lbl = "ETTN:"
+    c.setFont(font_bold, ettn_fs)
+    ettn_lbl_w = c.stringWidth(ettn_lbl, font_bold, ettn_fs)
+    c.drawString(margin, ettn_baseline_y, ettn_lbl)
+    c.setFont(font_name, ettn_fs)
+    ettn_val_x = margin + ettn_lbl_w + c.stringWidth(" ", font_name, ettn_fs)
+    c.drawString(ettn_val_x, ettn_baseline_y, str(ettn)[:48])
 
     # Mal/Hizmet tablosu — GİB tarzı: başlık üst border, çok satırlı okunaklı başlıklar
     table_width = right - margin
-    start_y = h_pt - 95 * mm
+    # Tablo üst çizgisi ETTN'e yapışık: önceki min(..., h_pt - 95mm) tabloyu sayfada aşağı sabitliyor,
+    # ETTN ile tablo arasında büyük beyaz boşluk bırakıyordu.
+    descent_below_baseline_pt = 2.5
+    gap_ettn_to_table_top_pt = 2.5
+    start_y = ettn_baseline_y - descent_below_baseline_pt - gap_ettn_to_table_top_pt
     header_row_h = 28   # pt, 2 satırlı başlıklar (İsk./Artt. Oranı vb.) üst/alt sınırlara değmesin
     row_h = 11          # pt, veri + boş satırlar
     cell_pad_vert = 3   # pt, satır altı boşluk
     data_text_offset = 0.5 * mm
     summary_row_h = 11   # pt, özet kutusu satırları
-    table_bottom_target = 68 * mm
+    GAP_TABLE_TO_SUMMARY = 1 * mm
+    GAP_SUMMARY_TO_YALNIZ = 2.5 * mm
     header_line_h = 10  # pt, başlık satırı aralığı
     header_font_ascent = 8   # 9pt font yaklaşık ascent (dikey ortalama için)
     c.setFont(font_bold, 9)
@@ -505,6 +903,82 @@ def build_fatura_pdf(fatura, musteri, satirlar):
     w_ratios = [8, 46, 11, 11, 18, 13, 21, 12, 20, 20]
     widths = [table_width * (r / 180.0) for r in w_ratios]
     table_right = margin + table_width
+
+    # Sağ meta + QR: son satır baseline = ETTN ile aynı Y; sağ kenar = table_right (start_y ile konum yok)
+    meta_row_min_pt = 11.5
+    meta_font_size = 6.5
+    box_height = max(28 * mm, len(meta_lines) * meta_row_min_pt)
+    box_width = min(62 * mm, max(28 * mm, table_right - right_x))
+    box_left = table_right - box_width
+    n_meta = len(meta_lines)
+    row_h_meta = box_height / float(n_meta)
+    box_top = ettn_baseline_y + row_h_meta * (n_meta - 0.5) + 0.32 * meta_font_size
+    qr_meta_gap = 2 * mm
+    qr_y_min = box_top + qr_meta_gap
+    # QR üst kenarı = gönderici üst çift çizgisi (sender_top); sağ = table_right
+    qr_size = max(16 * mm, sender_top - qr_y_min)
+    qr_y = sender_top - qr_size
+    if qr_y < qr_y_min:
+        qr_y = qr_y_min
+        qr_size = max(16 * mm, sender_top - qr_y)
+    qr_x = table_right - qr_size
+
+    # GİB logo x/y: qr_size burada kesinleşti; 85 mm + 10 mm gönderici/QR payı
+    _sender_block_right = left_x + left_col_w
+    _logo_x_min = _sender_block_right + GIB_LOGO_SIDE_CLEAR
+    _logo_x_max = qr_x - GIB_LOGO_SIDE_CLEAR - logo_draw_w
+    if _logo_x_max < _logo_x_min:
+        logo_ll_x = _logo_x_min
+    else:
+        logo_ll_x = max(_logo_x_min, min(GIB_LOGO_LEFT_FROM_PAGE, _logo_x_max))
+    logo_ll_y = logo_cy - logo_h / 2.0
+    sub_baseline = logo_ll_y - SUBTITLE_BELOW_LOGO_MM
+
+    box_pad_x = 2.2 * mm
+    gutter_cols = 1.4 * mm
+    label_col_frac = 0.42
+    label_col_right = box_left + box_width * label_col_frac
+    lbl_max_w = label_col_right - box_left - box_pad_x - gutter_cols
+    val_max_w = (box_left + box_width - box_pad_x) - label_col_right - gutter_cols
+    val_draw_right_x = box_left + box_width - box_pad_x
+
+    def _meta_fit_sizes(txt, max_w_pt, sizes_tuple):
+        t = str(txt or "")
+        for fs in sizes_tuple:
+            c.setFont(font_name, fs)
+            if c.stringWidth(t, font_name, fs) <= max_w_pt:
+                return t, fs
+        fs = sizes_tuple[-1]
+        c.setFont(font_name, fs)
+        ell = "…"
+        if c.stringWidth(ell, font_name, fs) > max_w_pt:
+            return "", fs
+        tt = t
+        while len(tt) > 0 and c.stringWidth(tt + ell, font_name, fs) > max_w_pt:
+            tt = tt[:-1]
+        return (tt + ell) if tt else "", fs
+
+    c.rect(box_left, box_top - box_height, box_width, box_height)
+    for idx, (lbl, val) in enumerate(meta_lines):
+        y0 = box_top - row_h_meta * idx
+        c.line(box_left, y0, box_left + box_width, y0)
+        cell_mid_y = y0 - row_h_meta / 2
+        baseline_y = cell_mid_y - 0.32 * meta_font_size
+
+        if idx == n_meta - 1:
+            baseline_y = ettn_baseline_y
+            c.setFont(font_name, meta_font_size)
+            c.drawString(box_left + box_pad_x, baseline_y, (lbl or "")[:28])
+            c.drawRightString(val_draw_right_x, baseline_y, (str(val) or "")[:22])
+            continue
+
+        s_lbl, fs_l = _meta_fit_sizes(lbl, lbl_max_w, (meta_font_size, 6.0))
+        c.setFont(font_name, fs_l)
+        c.drawString(box_left + box_pad_x, baseline_y, s_lbl)
+
+        s_val, fs_v = _meta_fit_sizes(val, val_max_w, (meta_font_size, 6.0, 5.5))
+        c.setFont(font_name, fs_v)
+        c.drawRightString(val_draw_right_x, baseline_y, s_val)
 
     # Başlık üst border (GİB gibi)
     c.line(margin, start_y, table_right, start_y)
@@ -529,13 +1003,124 @@ def build_fatura_pdf(fatura, musteri, satirlar):
     y_line = start_y - header_row_h - 5
     sira = 1
     pad = 5
-    first_data_row_h = 18   # pt, sadece ilk veri satırı (Sanal ofis...) daha yüksek
+
+    def _wrap_cell_text(text, max_width_pt, font_nm, font_sz):
+        """Hücre metni: normal wrap + break-word (uzun kelimeyi böler)."""
+        t = (text or "").strip()
+        if not t:
+            return [""]
+        c.setFont(font_nm, font_sz)
+        words = t.split()
+        if not words:
+            return [t]
+        lines = []
+        cur = ""
+        for w in words:
+            candidate = (cur + " " + w).strip() if cur else w
+            if c.stringWidth(candidate, font_nm, font_sz) <= max_width_pt:
+                cur = candidate
+                continue
+            if cur:
+                lines.append(cur)
+                cur = ""
+            # break-word: tek kelime bile sığmıyorsa parçala
+            if c.stringWidth(w, font_nm, font_sz) <= max_width_pt:
+                cur = w
+            else:
+                chunk = ""
+                for ch in w:
+                    cand2 = chunk + ch
+                    if c.stringWidth(cand2, font_nm, font_sz) <= max_width_pt:
+                        chunk = cand2
+                    else:
+                        if chunk:
+                            lines.append(chunk)
+                        chunk = ch
+                cur = chunk
+        if cur:
+            lines.append(cur)
+        return lines or [t]
+
+    # Logo + alt başlık + QR + tarih: en son (z-order); tarih/ başlık kaybolmasın diye tekrar
+    def _flush_gib_overlay():
+        c.saveState()
+        try:
+            c.setFillColorRGB(0, 0, 0)
+            c.setFont(font_name, 9)
+            c.drawString(left_x, date_header_y, ust_tarih)
+            if gib_path and os.path.isfile(gib_path):
+                try:
+                    c.drawImage(
+                        gib_path,
+                        logo_ll_x,
+                        logo_ll_y,
+                        width=logo_draw_w,
+                        height=logo_h,
+                        preserveAspectRatio=True,
+                        mask="auto",
+                    )
+                    print(f"[fatura PDF] GIB logo drawImage tamam: {gib_path}")
+                except Exception as ex_logo:
+                    print(f"[fatura PDF] GIB logo drawImage hata: {ex_logo}")
+            else:
+                print("[fatura PDF] GIB logo dosyası yok")
+            c.setFillColorRGB(0, 0, 0)
+            c.setStrokeColorRGB(0, 0, 0)
+            c.setFont(font_bold, 12)
+            sub_txt = doc_subtitle_pdf or ""
+            logo_cx = logo_ll_x + logo_draw_w / 2.0
+            _sr = left_x + left_col_w
+            _half_avail = min(logo_cx - _sr - GIB_LOGO_SIDE_CLEAR, qr_x - GIB_LOGO_SIDE_CLEAR - logo_cx)
+            _max_tw = max(24 * mm, 2.0 * max(0, _half_avail))
+            while sub_txt and c.stringWidth(sub_txt, font_bold, 12) > _max_tw:
+                sub_txt = sub_txt[:-1]
+            if sub_txt != doc_subtitle_pdf and sub_txt:
+                sub_txt = sub_txt.rstrip() + "…"
+            display_sub = sub_txt or (doc_subtitle_pdf or "")[:28]
+            c.drawCentredString(logo_cx, sub_baseline, display_sub)
+            if qr_pil_image is not None:
+                try:
+                    c.drawInlineImage(
+                        qr_pil_image,
+                        qr_x,
+                        qr_y,
+                        width=qr_size,
+                        height=qr_size,
+                        preserveAspectRatio=True,
+                    )
+                    print("[fatura PDF] QR drawInlineImage tamam")
+                except Exception as ex_qr:
+                    print(f"[fatura PDF] QR drawInlineImage hata: {ex_qr}, ImageReader deneniyor.")
+                    try:
+                        from reportlab.lib.utils import ImageReader
+
+                        _b = io.BytesIO()
+                        qr_pil_image.save(_b, format="PNG")
+                        _b.seek(0)
+                        c.drawImage(
+                            ImageReader(_b),
+                            qr_x,
+                            qr_y,
+                            width=qr_size,
+                            height=qr_size,
+                            preserveAspectRatio=True,
+                            mask="auto",
+                        )
+                        print("[fatura PDF] QR drawImage (PNG buffer) tamam")
+                    except Exception as ex2:
+                        print(f"[fatura PDF] QR drawImage yedek hata: {ex2}")
+            else:
+                print("[fatura PDF] QR PIL yok — çizilmedi (konsola bakın)")
+        finally:
+            c.restoreState()
+
+    _flush_gib_overlay()
+
     for s in satirlar:
         if y_line < 50 * mm:
             c.showPage()
             y_line = h_pt - 50 * mm
             c.setFont(font_name, 9)
-        current_row_h = first_data_row_h if sira == 1 else row_h
         miktar = float(s.get("miktar") or 0)
         birim_fiyat = float(s.get("birim_fiyat") or 0)
         isk_oran = float(s.get("iskonto_orani") or 0)
@@ -552,9 +1137,19 @@ def build_fatura_pdf(fatura, musteri, satirlar):
         kdv_tutar = net * kdv / 100.0
         mal_tutar = net
 
+        mal_hizmet_text = (s.get("ad") or s.get("hizmet_urun_adi") or "")[:200]
+        # "Mal Hizmet" sütunu: wrap + satır yüksekliği metne göre artsın (width sabit)
+        mal_col_idx = 1
+        mal_col_w = widths[mal_col_idx]
+        mal_max_w = max(10, mal_col_w - (pad * 2))
+        mal_lines = _wrap_cell_text(mal_hizmet_text, mal_max_w, font_name, 9)
+        line_h = 10  # pt
+        min_row_h_pt = row_h
+        current_row_h = max(min_row_h_pt, (len(mal_lines) * line_h) + 6)  # üst/alt boşluk
+
         values = [
             str(sira),
-            (s.get("ad") or s.get("hizmet_urun_adi") or "")[:70],
+            "",  # Mal Hizmet'i aşağıda çok satır çizeceğiz
             f"{miktar:.2f}",
             s.get("birim") or "Adet",
             f"{birim_fiyat:.2f}",
@@ -565,26 +1160,83 @@ def build_fatura_pdf(fatura, musteri, satirlar):
             f"{mal_tutar:.2f}",
         ]
         x = margin
-        # İlk satırda tüm yazılar dikey ortada, üst/alt çizgiye değmesin
-        draw_y_base = y_line - data_text_offset
-        draw_y_center = y_line - (current_row_h / 2) - 3  # satır ortası (9pt font)
+        row_top = y_line
+        # Diğer sütunlar: satır içinde dikey ortala
+        draw_y_center = row_top - (current_row_h / 2) - 3
         for i, val in enumerate(values):
             w_pt = widths[i]
-            dy = draw_y_center if (sira == 1 or i == 1) else draw_y_base
-            if i in (0, 2, 4, 5, 6, 8, 9):
-                c.drawRightString(x + w_pt - pad, dy, val)
+            if i == mal_col_idx:
+                # Çok satırlı "Mal Hizmet"
+                y_txt = row_top - 4  # pt
+                for ln in mal_lines:
+                    c.drawString(x + pad, y_txt, ln[:120])
+                    y_txt -= line_h
             else:
-                c.drawString(x + pad, dy, val)
+                if i in (0, 2, 4, 5, 6, 8, 9):
+                    c.drawRightString(x + w_pt - pad, draw_y_center, val)
+                else:
+                    c.drawString(x + pad, draw_y_center, val)
             x += w_pt
-        c.line(margin, y_line - current_row_h, table_right, y_line - current_row_h)
-        y_line -= current_row_h
+        c.line(margin, row_top - current_row_h, table_right, row_top - current_row_h)
+        y_line = row_top - current_row_h
         sira += 1
 
-    # Izgara aşağıya kadar boş satırlar
-    while y_line - row_h > table_bottom_target:
-        y_line -= row_h
-        c.line(margin, y_line - cell_pad_vert, table_right, y_line - cell_pad_vert)
-    table_bottom = max(y_line - cell_pad_vert, table_bottom_target)
+    # Veri sonrası boş ızgara satırları (GİB tarzı dolu tablo görünümü)
+    _n_sum_rows = 5
+    _yalniz_h_pre = 14  # pt
+    _box_h_sm = _n_sum_rows * summary_row_h + 8
+    _table_bottom_min = (
+        8 * mm + _yalniz_h_pre + GAP_SUMMARY_TO_YALNIZ + _box_h_sm + GAP_TABLE_TO_SUMMARY
+    )
+    MIN_EMPTY_GRID_ROWS = 22
+    empty_row_h = float(row_h)
+    c.saveState()
+    c.setLineWidth(0.5)
+    try:
+        for _ in range(MIN_EMPTY_GRID_ROWS):
+            if y_line - empty_row_h < 50 * mm:
+                break
+            if y_line - empty_row_h < _table_bottom_min:
+                break
+            ny = y_line - empty_row_h
+            c.line(margin, ny, table_right, ny)
+            y_line = ny
+        while y_line - empty_row_h >= _table_bottom_min and y_line - empty_row_h >= 50 * mm:
+            ny = y_line - empty_row_h
+            c.line(margin, ny, table_right, ny)
+            y_line = ny
+    finally:
+        c.restoreState()
+
+    # Tablo sonu: son yatay çizgi ile aynı y
+    table_bottom = y_line
+
+    genel_toplam = float(fatura.get("genel_toplam") or fatura.get("toplam") or 0)
+    ara_toplam = float(fatura.get("ara_toplam") or 0)
+    toplam_isk = float(fatura.get("toplam_iskonto") or 0)
+    kdv_toplam = float(fatura.get("kdv_toplam") or 0)
+    summary_box_w = table_width * 0.45
+    summary_box_x = margin + table_width - summary_box_w
+    label_w_pt = summary_box_w * 0.68
+    val_w_pt = summary_box_w - label_w_pt
+
+    def _fmt_tl(v):
+        return f"{float(v):,.2f} TL".replace(",", "X").replace(".", ",").replace("X", ".")
+
+    labels_vals = [
+        ("Mal Hizmet Toplam Tutarı", ara_toplam),
+        ("Toplam İskonto", toplam_isk),
+        ("Hesaplanan KDV", kdv_toplam),
+        ("Vergiler Dahil Toplam Tutar", genel_toplam),
+        ("Ödenecek Tutar", genel_toplam),
+    ]
+    n_summary_rows = len(labels_vals)
+    row_heights = [(n_summary_rows * summary_row_h + 8) / float(n_summary_rows)] * n_summary_rows
+    box_h = sum(row_heights)
+    summary_top = table_bottom - GAP_TABLE_TO_SUMMARY
+    box_y = summary_top - box_h
+    yalniz_box_h = 14  # pt
+    yalniz_box_y = box_y - GAP_SUMMARY_TO_YALNIZ - yalniz_box_h
 
     # Dikey sütun çizgileri (başlıktan kalem tablosu sonuna)
     x_pos = margin
@@ -593,39 +1245,36 @@ def build_fatura_pdf(fatura, musteri, satirlar):
         x_pos += w
         c.line(x_pos, start_y, x_pos, table_bottom)
 
-    # Alt toplam tablosu — sayfa sağ altında ayrı kutu (kalem tablosundan büyük boşlukla)
-    genel_toplam = float(fatura.get("genel_toplam") or fatura.get("toplam") or 0)
-    ara_toplam = float(fatura.get("ara_toplam") or 0)
-    toplam_isk = float(fatura.get("toplam_iskonto") or 0)
-    kdv_toplam = float(fatura.get("kdv_toplam") or 0)
-    summary_box_w = table_width * 0.45
-    summary_box_x = margin + table_width - summary_box_w
-    box_y = 35 * mm
-    box_h = 5 * summary_row_h + 8
-    label_w_pt = summary_box_w * 0.68
-    c.rect(summary_box_x, box_y, summary_box_w, box_h)
-    c.line(summary_box_x + label_w_pt, box_y, summary_box_x + label_w_pt, box_y + box_h)
-    for i in range(1, 5):
-        c.line(summary_box_x, box_y + box_h - i * summary_row_h, summary_box_x + summary_box_w, box_y + box_h - i * summary_row_h)
-    labels_vals = [
-        ("Mal Hizmet Toplam Tutarı", ara_toplam),
-        ("Toplam İskonto", toplam_isk),
-        ("Hesaplanan KDV", kdv_toplam),
-        ("Vergiler Dahil Toplam Tutar", genel_toplam),
-        ("Ödenecek Tutar", genel_toplam),
-    ]
-    c.setFont(font_name, 9)
-    yy = box_y + box_h - (summary_row_h / 2) - 3
-    for lbl, val in labels_vals:
-        c.drawString(summary_box_x + 2 * mm, yy, (lbl or "")[:55])
-        c.drawRightString(summary_box_x + summary_box_w - 2 * mm, yy, f"{val:,.2f} TL".replace(",", "X").replace(".", ",").replace("X", "."))
-        yy -= summary_row_h
+    # Alt toplam — ReportLab Table: tam dış kutu + ızgara (sol kenar dahil)
+    summary_data = [[(lbl or "")[:55], _fmt_tl(val)] for lbl, val in labels_vals]
+    sum_table = Table(
+        summary_data,
+        colWidths=[label_w_pt, val_w_pt],
+        rowHeights=row_heights,
+    )
+    sum_table.setStyle(
+        TableStyle(
+            [
+                ("BOX", (0, 0), (-1, -1), 0.5, colors.black),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+                ("FONTNAME", (0, 0), (-1, -1), font_name),
+                ("FONTSIZE", (0, 0), (-1, -1), 9),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("ALIGN", (0, 0), (0, -1), "LEFT"),
+                ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 2 * mm),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 2 * mm),
+                ("TOPPADDING", (0, 0), (-1, -1), 2),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+            ]
+        )
+    )
+    sum_table.wrapOn(c, summary_box_w, box_h)
+    sum_table.drawOn(c, summary_box_x, box_y)
 
-    # GİB: Yazı ile tutar — faturanın en altına sabit (sayfa tabanından 10mm), tam genişlik kutu
+    # GİB: Yazı ile tutar — özet kutusunun altına ~2,5 mm, tam genişlik kutu
     yalniz_text = tutar_yaziya_gib(genel_toplam)
     yalniz_font_size = 9
-    yalniz_box_h = 14   # pt (tek satır + üst/alt boşluk)
-    yalniz_box_y = 10 * mm   # sayfa en altından 10mm (tüm kalemlerin ve özetin altında)
     c.setFont(font_name, yalniz_font_size)
     c.rect(margin, yalniz_box_y, table_width, yalniz_box_h)
     # Metni kutu içinde sola hizalı, dikey ortada (kenara yapışmasın)
@@ -633,7 +1282,6 @@ def build_fatura_pdf(fatura, musteri, satirlar):
     yalniz_baseline = yalniz_box_y + (yalniz_box_h / 2) - (yalniz_font_size * 0.35)
     c.drawString(margin + yalniz_pad_left, yalniz_baseline, (yalniz_text or "")[:120])
 
-    c.showPage()
     c.save()
     return buf.getvalue()
 
@@ -644,6 +1292,16 @@ def faturalar_gerekli(f):
     def decorated_function(*args, **kwargs):
         return f(*args, **kwargs)
     return decorated_function
+
+
+def _opt_customer_id(v):
+    """Form/JSON'dan gelen müşteri id: boş string veya geçersiz → None (PG integer hatasını önler)."""
+    if v is None or v == "":
+        return None
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
 
 
 def _row_serializable(row):
@@ -711,9 +1369,62 @@ def yeni_fatura():
     return render_template('faturalar/yeni_fatura.html',
                            bugun=now.strftime("%Y-%m-%d"),
                            saat=now.strftime("%H:%M"),
-                           secili_musteri=secili_musteri,
+                           secili_musteri=_row_serializable(secili_musteri) if secili_musteri else None,
                            default_hizmet_urun=default_hizmet_urun,
                            default_birim_fiyat=default_birim_fiyat)
+
+
+@bp.route('/irsaliye/yeni')
+@faturalar_gerekli
+def yeni_irsaliye():
+    """Yeni irsaliye oluşturma ekranı. Fatura ekranını irsaliye modu ile kullanır."""
+    now = datetime.now()
+    musteri_id = request.args.get('musteri_id', type=int)
+    secili_musteri = None
+    default_hizmet_urun = ""
+    default_birim_fiyat = 0
+    if musteri_id:
+        cust = fetch_one(
+            "SELECT id, name, address, tax_number FROM customers WHERE id = %s",
+            (musteri_id,),
+        )
+        if cust:
+            kyc = fetch_one(
+                "SELECT yeni_adres, vergi_dairesi, vergi_no, hizmet_turu, aylik_kira FROM musteri_kyc WHERE musteri_id = %s ORDER BY id DESC LIMIT 1",
+                (musteri_id,),
+            )
+            address = (kyc and (kyc.get("yeni_adres") or kyc.get("address"))) or cust.get("address") or ""
+            vergi_dairesi = (kyc and kyc.get("vergi_dairesi")) or ""
+            if not vergi_dairesi:
+                cust_vd = fetch_one("SELECT vergi_dairesi FROM customers WHERE id = %s", (musteri_id,))
+                if cust_vd and cust_vd.get("vergi_dairesi"):
+                    vergi_dairesi = (cust_vd.get("vergi_dairesi") or "").strip()
+            vergi_no = (kyc and kyc.get("vergi_no")) or cust.get("tax_number") or ""
+            if isinstance(vergi_no, float):
+                vergi_no = str(int(vergi_no)) if vergi_no == int(vergi_no) else str(vergi_no)
+            secili_musteri = {
+                "id": cust["id"],
+                "name": cust.get("name") or "",
+                "address": address,
+                "vergi_dairesi": vergi_dairesi,
+                "vergi_no": str(vergi_no) if vergi_no else "",
+            }
+            if kyc:
+                default_hizmet_urun = (kyc.get("hizmet_turu") or "Sanal Ofis").strip() or "Sanal Ofis"
+                try:
+                    default_birim_fiyat = float(kyc.get("aylik_kira") or 0)
+                except (TypeError, ValueError):
+                    default_birim_fiyat = 0
+    # Aynı fatura ekranını, irsaliye modu bilgisiyle kullanıyoruz
+    return render_template(
+        'faturalar/yeni_fatura.html',
+        bugun=now.strftime("%Y-%m-%d"),
+        saat=now.strftime("%H:%M"),
+        secili_musteri=_row_serializable(secili_musteri) if secili_musteri else None,
+        default_hizmet_urun=default_hizmet_urun,
+        default_birim_fiyat=default_birim_fiyat,
+        irsaliye_modu=True,
+    )
 
 
 @bp.route('/faturalar')
@@ -836,9 +1547,11 @@ def tutar_yazi_api():
 def fatura_onizleme():
     """Form verileriyle A4 fatura PDF önizlemesi (kaydetmeden)."""
     try:
+        ensure_faturalar_amount_columns()
         data = request.get_json() or {}
         satirlar = data.get("satirlar") or []
-        musteri_id = data.get("musteri_id")
+        irsaliye_modu = str(data.get("irsaliye_modu") or "").lower() in ("1", "true", "yes")
+        musteri_id = _opt_customer_id(data.get("musteri_id"))
         musteri = {}
         if musteri_id:
             m = fetch_one("SELECT id, name, address, tax_number FROM customers WHERE id = %s", (musteri_id,))
@@ -859,17 +1572,27 @@ def fatura_onizleme():
             "fatura_tarihi": fatura_tarihi,
             "fatura_tarihi_str": fatura_tarihi_str,
             "fatura_tipi": data.get("fatura_tipi") or "satis",
+            "fatura_saati": (data.get("fatura_saati") or "").strip() or None,
             "musteri_adi": data.get("musteri_adi"),
+            "notlar": data.get("notlar"),
             "ara_toplam": ara_toplam,
             "toplam_iskonto": toplam_iskonto,
             "kdv_toplam": kdv_toplam,
             "genel_toplam": genel_toplam,
             "toplam": genel_toplam,
+            "irsaliye_modu": irsaliye_modu,
+            "sevk_adresi": (data.get("sevk_adresi") or "").strip() or None,
         }
         pdf_bytes = build_fatura_pdf(fatura, musteri, satirlar)
-        return Response(pdf_bytes, mimetype="application/pdf", headers={
-            "Content-Disposition": "inline; filename=Fatura_Onizleme.pdf"
-        })
+        return Response(
+            pdf_bytes,
+            mimetype="application/pdf",
+            headers={
+                "Content-Disposition": "inline; filename=Fatura_Onizleme.pdf",
+                "Cache-Control": "no-store, no-cache, must-revalidate",
+                "Pragma": "no-cache",
+            },
+        )
     except Exception as e:
         return jsonify({"ok": False, "mesaj": str(e)}), 500
 
@@ -879,8 +1602,10 @@ def fatura_onizleme():
 def fatura_ekle():
     """Yeni fatura ekle (satır detaylarıyla)."""
     try:
+        ensure_faturalar_amount_columns()
         data = request.get_json() or {}
         satirlar = data.get("satirlar") or []
+        irsaliye_modu = str(data.get("irsaliye_modu") or "").lower() in ("1", "true", "yes")
         ara_toplam = float(data.get("ara_toplam") or 0)
         toplam_iskonto = float(data.get("toplam_iskonto") or 0)
         kdv_toplam = float(data.get("kdv_toplam") or 0)
@@ -927,15 +1652,16 @@ def fatura_ekle():
             vade_tarihi = f"{y}-{a.zfill(2)}-{g.zfill(2)}"
 
         fatura_no = (data.get("fatura_no") or "").strip() or _next_fatura_no()
-        musteri_id = data.get("musteri_id")
+        musteri_id = _opt_customer_id(data.get("musteri_id"))
         musteri_adi = (data.get("musteri_adi") or "").strip()
 
+        sevk_adresi_kayit = (data.get("sevk_adresi") or "").strip() or None
         execute(
             """
             INSERT INTO faturalar (
                 fatura_no, musteri_id, musteri_adi, tutar, kdv_tutar,
-                toplam, durum, fatura_tarihi, vade_tarihi, notlar
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                toplam, durum, fatura_tarihi, vade_tarihi, notlar, sevk_adresi
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 fatura_no,
@@ -948,6 +1674,7 @@ def fatura_ekle():
                 fatura_tarihi,
                 vade_tarihi,
                 data.get("notlar"),
+                sevk_adresi_kayit,
             ),
         )
         row = fetch_one("SELECT id FROM faturalar WHERE fatura_no = %s ORDER BY id DESC LIMIT 1", (fatura_no,))
@@ -955,6 +1682,14 @@ def fatura_ekle():
         if fatura_id and satirlar:
             try:
                 execute("UPDATE faturalar SET satirlar_json = %s WHERE id = %s", (json.dumps(satirlar), fatura_id))
+            except Exception:
+                pass
+        if fatura_id and irsaliye_modu:
+            try:
+                execute(
+                    "UPDATE faturalar SET notlar = COALESCE(notlar,'') || ' | IRSALIYE_MODU' WHERE id = %s",
+                    (fatura_id,),
+                )
             except Exception:
                 pass
 
@@ -970,6 +1705,7 @@ def fatura_ekle():
             "kdv_toplam": kdv_toplam,
             "genel_toplam": toplam,
             "yazi_ile": tutar_yaziya(toplam),
+            "irsaliye_modu": irsaliye_modu,
         }
 
         return jsonify({"ok": True, "mesaj": "Fatura eklendi!", "fatura_id": fatura_id, "earsiv": earsiv_payload})
@@ -980,14 +1716,15 @@ def fatura_ekle():
 @bp.route('/onizleme/<int:fatura_id>')
 @faturalar_gerekli
 def fatura_onizleme_ekran(fatura_id):
-    """Kaydedilmiş faturanın e-Arşiv tarzı önizleme ekranı (GİB'e Gönder burada)."""
-    fatura = fetch_one(
-        "SELECT id, fatura_no, fatura_tarihi, musteri_id, musteri_adi, tutar, kdv_tutar, toplam, notlar, satirlar_json FROM faturalar WHERE id = %s",
+    """Kaydedilmiş faturanın e-Arşiv PDF önizlemesi ("Fatura Oluştur" sonrası)."""
+    ensure_faturalar_amount_columns()
+    fatura_row = fetch_one(
+        "SELECT id, fatura_no, fatura_tarihi, musteri_id, musteri_adi, tutar, kdv_tutar, toplam, notlar, satirlar_json, sevk_adresi FROM faturalar WHERE id = %s",
         (fatura_id,),
     )
-    if not fatura:
+    if not fatura_row:
         abort(404)
-    fatura = dict(fatura)
+    fatura = dict(fatura_row)
     musteri_id = fatura.get("musteri_id")
     musteri = {"name": fatura.get("musteri_adi"), "address": "", "tax_number": "", "vergi_dairesi": ""}
     if musteri_id:
@@ -1022,7 +1759,6 @@ def fatura_onizleme_ekran(fatura_id):
             fatura_tarihi_str = s or "--"
     fatura["fatura_tarihi_str"] = fatura_tarihi_str
     toplam = float(fatura.get("toplam") or 0)
-    fatura["yazi_ile"] = tutar_yaziya(toplam)
 
     satirlar = []
     try:
@@ -1077,29 +1813,44 @@ def fatura_onizleme_ekran(fatura_id):
         for s in satirlar
     )
     kdv_toplam = sum(s.get("kdv_tutar", 0) for s in satirlar)
-    ettn = "Önizleme-ETTN"
+    ettn = ""
     if fatura.get("notlar"):
         for part in (fatura.get("notlar") or "").split("|"):
             if "ETTN:" in part or "GİB ETTN:" in part:
                 ettn = part.split(":")[-1].strip() or ettn
                 break
-    fatura["ettn"] = ettn
 
-    return render_template(
-        "faturalar/fatura_onizleme_ekran.html",
-        fatura=fatura,
-        musteri=musteri,
-        satirlar=satirlar,
-        ara_toplam=ara_toplam,
-        toplam_iskonto=toplam_iskonto,
-        kdv_toplam=kdv_toplam,
-        toplam=toplam,
-        firma_unvan=FIRMA_UNVAN,
-        firma_adres=FIRMA_ADRES,
-        firma_telefon=FIRMA_TELEFON,
-        firma_web=FIRMA_WEB,
-        firma_vd=FIRMA_VERGI_DAIRESI,
-        firma_vkn=FIRMA_VERGI_NO,
+    irsaliye_modu = False
+    if fatura.get("notlar") and "IRSALIYE_MODU" in (fatura.get("notlar") or ""):
+        irsaliye_modu = True
+
+    fatura_pdf_dict = {
+        "id": fatura.get("id"),
+        "fatura_no": fatura.get("fatura_no"),
+        "fatura_tarihi": fatura.get("fatura_tarihi"),
+        "fatura_tarihi_str": fatura_tarihi_str,
+        "fatura_tipi": (fatura.get("fatura_tipi") or "satis"),
+        "musteri_adi": fatura.get("musteri_adi"),
+        "notlar": fatura.get("notlar"),
+        "ara_toplam": ara_toplam,
+        "toplam_iskonto": toplam_iskonto,
+        "kdv_toplam": kdv_toplam,
+        "genel_toplam": toplam,
+        "toplam": toplam,
+        "ettn": ettn,
+        "irsaliye_modu": irsaliye_modu,
+        "sevk_adresi": (fatura.get("sevk_adresi") or "").strip() or None,
+    }
+
+    pdf_bytes = build_fatura_pdf(fatura_pdf_dict, musteri, satirlar)
+    return Response(
+        pdf_bytes,
+        mimetype="application/pdf",
+        headers={
+            "Content-Disposition": f"inline; filename=Fatura_{fatura.get('fatura_no') or fatura_id}.pdf",
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "Pragma": "no-cache",
+        },
     )
 
 

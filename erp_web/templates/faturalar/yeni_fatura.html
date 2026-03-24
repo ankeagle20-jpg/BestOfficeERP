@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Yeni Fatura Oluştur</title>
+    <title>{% if irsaliye_modu %}Yeni İrsaliye Oluştur{% else %}Yeni Fatura Oluştur{% endif %}</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -170,30 +170,36 @@
 </head>
 <body>
     <div class="page-header">
-        <h2><i class="fa fa-file-invoice"></i> Yeni Fatura Oluştur</h2>
+        <h2>
+            {% if irsaliye_modu %}
+                <i class="fa fa-truck"></i> Yeni İrsaliye Oluştur
+            {% else %}
+                <i class="fa fa-file-invoice"></i> Yeni Fatura Oluştur
+            {% endif %}
+        </h2>
         <div class="page-actions">
             <button type="button" class="secondary" id="btn-onizleme"><i class="fa fa-eye"></i> Önizleme</button>
         </div>
     </div>
 
     <div class="panel">
-        <h3>Fatura Bilgileri</h3>
+        <h3>{% if irsaliye_modu %}İrsaliye Bilgileri{% else %}Fatura Bilgileri{% endif %}</h3>
         <div class="grid-2">
             <div>
                 <div class="form-row">
-                    <label>Fatura No</label>
+                    <label>{% if irsaliye_modu %}İrsaliye No{% else %}Fatura No{% endif %}</label>
                     <input type="text" id="fatura-no" placeholder="Boş bırakırsanız otomatik atanır">
                 </div>
                 <div class="form-row">
-                    <label>Fatura Tarihi</label>
+                    <label>{% if irsaliye_modu %}İrsaliye Tarihi{% else %}Fatura Tarihi{% endif %}</label>
                     <input type="date" id="fatura-tarihi" value="{{ bugun }}">
                 </div>
                 <div class="form-row">
-                    <label>Fatura Saati</label>
+                    <label>{% if irsaliye_modu %}İrsaliye Saati{% else %}Fatura Saati{% endif %}</label>
                     <input type="time" id="fatura-saati" value="{{ saat }}">
                 </div>
                 <div class="form-row">
-                    <label>Fatura Tipi</label>
+                    <label>{% if irsaliye_modu %}Belge Tipi{% else %}Fatura Tipi{% endif %}</label>
                     <select id="fatura-tipi">
                         <option value="satis">Satış</option>
                         <option value="iade">İade</option>
@@ -205,22 +211,26 @@
             <div>
                 <div class="form-row">
                     <label>Müşteri <span style="color:#ffb74d;">*</span></label>
-                    <input type="text" id="musteri-ara" placeholder="Müşteri ara, seçin..." autocomplete="off">
-                    <input type="hidden" id="musteri-id">
+                    <input type="text" id="musteri-ara" placeholder="Müşteri ara, seçin..." autocomplete="off" value="{{ secili_musteri.name if secili_musteri else '' }}">
+                    <input type="hidden" id="musteri-id" value="{{ secili_musteri.id if secili_musteri else '' }}">
                 </div>
                 <div id="musteri-sonuclar" style="max-height:180px;overflow-y:auto;margin-bottom:6px;border-radius:4px;border:1px solid #1e3a50;background:#0f2537;display:none;margin-left:110px;max-width:calc(100% - 110px);"></div>
                 <div id="musteri-ozet" class="tag" style="display:none;"></div>
                 <div class="form-row">
                     <label>Adres</label>
-                    <input type="text" id="musteri-adres" placeholder="Seçili müşterinin adresi" readonly>
+                    <input type="text" id="musteri-adres" placeholder="Seçili müşterinin adresi" readonly value="{{ secili_musteri.address if secili_musteri else '' }}">
+                </div>
+                <div class="form-row">
+                    <label>Sevk adresi</label>
+                    <textarea id="sevk-adresi" rows="2" placeholder="Teslimat adresi alıcıdan farklıysa yazın; boş bırakılırsa PDF’de gösterilmez"></textarea>
                 </div>
                 <div class="form-row">
                     <label>Vergi Dairesi</label>
-                    <input type="text" id="musteri-vergi-dairesi" placeholder="Seçili müşterinin vergi dairesi" readonly>
+                    <input type="text" id="musteri-vergi-dairesi" placeholder="Seçili müşterinin vergi dairesi" readonly value="{{ secili_musteri.vergi_dairesi if secili_musteri else '' }}">
                 </div>
                 <div class="form-row">
                     <label>VKN / TCKN</label>
-                    <input type="text" id="musteri-vergi-no" placeholder="Seçili müşterinin vergi numarası" readonly>
+                    <input type="text" id="musteri-vergi-no" placeholder="Seçili müşterinin vergi numarası" readonly value="{{ secili_musteri.vergi_no if secili_musteri else '' }}">
                 </div>
                 <div class="form-row">
                     <label>Notlar</label>
@@ -232,13 +242,21 @@
 
     <div class="panel">
         <div class="panel-row-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-            <h3 style="margin-bottom:0;">Fatura Satırları</h3>
+            <h3 style="margin-bottom:0;">{% if irsaliye_modu %}İrsaliye Satırları{% else %}Fatura Satırları{% endif %}</h3>
             <div style="display:inline-flex; align-items:center; gap:8px;">
                 <button type="button" id="btn-fatura-olustur" class="btn-icon" style="background:#00bcd4; color:#fff; border:none; padding:6px 12px; border-radius:4px; font-size:12px; cursor:pointer; display:inline-flex; align-items:center; gap:6px;">
-                    <i class="fa fa-file-invoice"></i> Fatura Oluştur
+                    {% if irsaliye_modu %}
+                        <i class="fa fa-truck"></i> İrsaliye Oluştur
+                    {% else %}
+                        <i class="fa fa-file-invoice"></i> Fatura Oluştur
+                    {% endif %}
                 </button>
                 <button type="button" id="btn-yeni-fatura-aylik" class="btn-icon" style="background:#00695c; color:#fff; border:none; padding:6px 12px; border-radius:4px; font-size:12px; cursor:pointer; display:inline-flex; align-items:center; gap:6px;">
-                    <i class="fa fa-file-invoice"></i> Yeni Fatura Oluştur
+                    {% if irsaliye_modu %}
+                        <i class="fa fa-truck"></i> Yeni İrsaliye Oluştur
+                    {% else %}
+                        <i class="fa fa-file-invoice"></i> Yeni Fatura Oluştur
+                    {% endif %}
                 </button>
             </div>
         </div>
@@ -260,6 +278,7 @@
         </table>
         <div id="urun-sonuclar" style="display:none;max-height:200px;overflow-y:auto;border-radius:4px;border:1px solid #1e3a50;background:#0f2537;margin-top:4px;"></div>
         <button type="button" id="btn-satir-ekle" class="btn-icon btn-add-row"><i class="fa fa-plus"></i> Satır Ekle</button>
+        <button type="button" id="btn-manuel-stok" class="btn-icon btn-add-row" style="background:#00796b;"><i class="fa fa-keyboard"></i> Manuel stok ekle</button>
 
         <div class="summary">
             <div class="summary-item">
@@ -294,6 +313,7 @@
         const API_FATURA_ONIZLE = "{{ url_for('faturalar.fatura_onizleme') }}";
         const FATURA_ONIZLEME_URL = "{{ url_for('faturalar.fatura_onizleme_ekran', fatura_id=0) }}".replace('/0', '/');
         const SECILI_MUSTERI = {{ (secili_musteri | tojson) if secili_musteri else 'null' }};
+        const IRSALIYE_MODU = {{ 'true' if irsaliye_modu else 'false' }};
         const DEFAULT_HIZMET_URUN = {{ (default_hizmet_urun or '') | tojson }};
         const DEFAULT_BIRIM_FIYAT = {{ default_birim_fiyat | default(0) }};
 
@@ -308,7 +328,7 @@
         }
         function parseNumber(v) {
             if (v === null || v === undefined) return 0;
-            const s = String(v).replace('.', '').replace(',', '.').replace(/\\s/g, '');
+            const s = String(v).replace('.', '').replace(',', '.').replace(/\s/g, '');
             const n = parseFloat(s);
             return isNaN(n) ? 0 : n;
         }
@@ -575,6 +595,22 @@
 
         document.getElementById('btn-satir-ekle').addEventListener('click', function(){ addRow(); });
 
+        var btnManuel = document.getElementById('btn-manuel-stok');
+        if (btnManuel) {
+            btnManuel.addEventListener('click', function(){
+                var ad = prompt('Manuel ürün / hizmet adı:');
+                if (ad === null) return;
+                ad = ad.trim();
+                if (!ad) return;
+                var fiyatStr = prompt('Birim fiyat (₺):');
+                if (fiyatStr === null) return;
+                fiyatStr = fiyatStr.trim();
+                var fiyat = parseNumber(fiyatStr.replace(',', '.'));
+                if (!fiyat || fiyat < 0) fiyat = 0;
+                addRow({ ad: ad, miktar: 1, birim: 'Adet', birim_fiyat: fiyat, iskonto_orani: 0, iskonto_tutar: null, kdv_orani: 20 });
+            });
+        }
+
         // Giriş sayfasından ?musteri_id= ile açıldıysa seçili firma bilgilerini doldur
         if (SECILI_MUSTERI) {
             musteriIdEl.value = SECILI_MUSTERI.id;
@@ -637,20 +673,30 @@
                 musteri_id: musteriIdEl.value,
                 musteri_adi: musteriAra.value.trim(),
                 notlar: document.getElementById('fatura-not').value.trim() || null,
+                sevk_adresi: (document.getElementById('sevk-adresi') && document.getElementById('sevk-adresi').value.trim()) || null,
                 satirlar: rows,
                 ara_toplam: araToplam,
                 toplam_iskonto: toplamIskonto,
                 kdv_toplam: kdvToplam,
-                toplam: genelToplam
+                toplam: genelToplam,
+                irsaliye_modu: !!(IRSALIYE_MODU === true || IRSALIYE_MODU === 'true')
             };
 
             try {
                 const res = await fetch(API_FATURA_EKLE, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
                     body: JSON.stringify(payload)
                 });
-                const j = await res.json();
+                const raw = await res.text();
+                let j;
+                try {
+                    j = raw ? JSON.parse(raw) : {};
+                } catch (parseErr) {
+                    alert('Sunucu yanıtı JSON değil (' + res.status + '). Oturum süresi dolmuş olabilir veya sunucu hata sayfası döndü. Sayfayı yenileyip tekrar deneyin.\n\n' + (raw || '').slice(0, 280));
+                    return;
+                }
                 if (j.ok && j.fatura_id) {
                     window.location.href = FATURA_ONIZLEME_URL + j.fatura_id;
                     return;
@@ -668,8 +714,13 @@
                 } else {
                     alert(j.mesaj || 'Fatura kaydedilemedi.');
                 }
-            } catch(e){
-                alert('Fatura kaydedilirken hata: ' + (e.message || e));
+            } catch (e) {
+                const m = (e && e.message) ? e.message : String(e);
+                if (m === 'Failed to fetch') {
+                    alert('Sunucuya bağlanılamadı (Failed to fetch). Flask çalışıyor mu (127.0.0.1:5000), internet/Supabase erişimi var mı kontrol edin.');
+                } else {
+                    alert('Fatura kaydedilirken hata: ' + m);
+                }
             }
         }
 
@@ -708,34 +759,42 @@
                 musteri_id: document.getElementById('musteri-id').value,
                 musteri_adi: document.getElementById('musteri-ara').value.trim(),
                 notlar: document.getElementById('fatura-not').value.trim() || null,
+                sevk_adresi: (document.getElementById('sevk-adresi') && document.getElementById('sevk-adresi').value.trim()) || null,
                 satirlar: rows,
                 ara_toplam: araToplam,
                 toplam_iskonto: toplamIskonto,
                 kdv_toplam: kdvToplam,
-                toplam: genelToplam
+                toplam: genelToplam,
+                irsaliye_modu: !!(IRSALIYE_MODU === true || IRSALIYE_MODU === 'true')
             };
             try {
                 const res = await fetch(API_FATURA_ONIZLE, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
                     body: JSON.stringify(payload)
                 });
                 if (!res.ok) {
                     const txt = await res.text();
-                    alert('Önizleme hatası: ' + txt);
+                    alert('Önizleme hatası (' + res.status + '): ' + (txt || '').slice(0, 400));
                     return;
                 }
                 const blob = await res.blob();
                 const url = URL.createObjectURL(blob);
                 window.open(url, '_blank');
-            } catch(e){
-                alert('Önizleme sırasında hata: ' + (e.message || e));
+            } catch (e) {
+                const m = (e && e.message) ? e.message : String(e);
+                if (m === 'Failed to fetch') {
+                    alert('Önizleme: sunucuya bağlanılamadı. Flask çalışıyor mu ve oturum açık mı kontrol edin.');
+                } else {
+                    alert('Önizleme sırasında hata: ' + m);
+                }
             }
         });
 
         // İlk satır yukarıdaki SECILI_MUSTERI bloğunda ekleniyor (varsayılan hizmet veya boş)
     })();
     </script>
+    <script src="/static/js/erp-tarih-hizli.js"></script>
 </body>
 </html>
-

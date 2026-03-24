@@ -1286,7 +1286,7 @@ function renderAll(d){
 function rGenel(d){
   var m=d.musteri,o=d.ozet,rl=o.risk_limit_kullanim||0;
   document.getElementById('gb-f').innerHTML=
-    gr('Ünvan',m.name)+gr('Vergi No',m.tax_number)+
+    gr('Müşteri adı',m.musteri_adi)+gr('Ünvan',m.name)+gr('Vergi No',m.tax_number)+
     gr('Vergi Dairesi',m.vergi_dairesi)+gr('Telefon',m.phone)+
     gr('E-posta',m.email)+gr('Adres',m.address);
   document.getElementById('gb-s').innerHTML=
@@ -1473,14 +1473,14 @@ var MDS={
   randevu:{t:'📅 Randevu',h:'<div class="fr2"><div class="fg"><label class="fl">Tarih</label><input class="fi" type="date"></div><div class="fg"><label class="fl">Saat</label><input class="fi" type="time"></div></div><div class="fr2"><div class="fg"><label class="fl">Oda</label><select class="fi"><option>Toplantı Odası A</option><option>Toplantı Odası B</option></select></div><div class="fg"><label class="fl">Süre (dk)</label><input class="fi" type="number" value="60"></div></div><div class="ma"><button class="mc" onclick="cmo()">İptal</button><button class="ms">Kaydet</button></div>'},
   kargo:{t:'📦 Kargo Gir',h:'<div class="fg"><label class="fl">Firma</label><select class="fi"><option>Aras Kargo</option><option>Yurtiçi Kargo</option><option>MNG Kargo</option></select></div><div class="fr2"><div class="fg"><label class="fl">Takip No</label><input class="fi" placeholder="AR..."></div><div class="fg"><label class="fl">Tarih</label><input class="fi" type="date"></div></div><div class="ma"><button class="mc" onclick="cmo()">İptal</button><button class="ms">Kaydet</button></div>'},
   log:{t:'📞 Log Ekle',h:'<div class="fr2"><div class="fg"><label class="fl">Kanal</label><select class="fi"><option>WhatsApp</option><option>SMS</option><option>Email</option><option>Arama</option></select></div><div class="fg"><label class="fl">Tarih</label><input class="fi" type="date"></div></div><div class="fg"><label class="fl">İçerik</label><textarea class="fi" rows="3" style="resize:none"></textarea></div><div class="ma"><button class="mc" onclick="cmo()">İptal</button><button class="ms">Kaydet</button></div>'},
-  edit:{t:'✏ Firma Düzenle',h:'<div class="fr2"><div class="fg"><label class="fl">Ünvan</label><input class="fi" id="ed-n"></div><div class="fg"><label class="fl">Vergi No</label><input class="fi" id="ed-v"></div></div><div class="fr2"><div class="fg"><label class="fl">Telefon</label><input class="fi" id="ed-t"></div><div class="fg"><label class="fl">E-posta</label><input class="fi" id="ed-e"></div></div><div class="ma"><button class="mc" onclick="cmo()">İptal</button><button class="ms">Kaydet</button></div>'},
+  edit:{t:'✏ Firma Düzenle',h:'<div class="fg" style="margin-bottom:8px"><label class="fl">Müşteri adı</label><input class="fi" id="ed-ma"></div><div class="fr2"><div class="fg"><label class="fl">Ünvan</label><input class="fi" id="ed-n"></div><div class="fg"><label class="fl">Vergi No</label><input class="fi" id="ed-v"></div></div><div class="fr2"><div class="fg"><label class="fl">Telefon</label><input class="fi" id="ed-t"></div><div class="fg"><label class="fl">E-posta</label><input class="fi" id="ed-e"></div></div><div class="ma"><button class="mc" onclick="cmo()">İptal</button><button class="ms">Kaydet</button></div>'},
 };
 window.openMo=function(t){
   var m=MDS[t]||MDS.not;
   document.getElementById('mo-t').textContent=m.t;
   document.getElementById('mo-b').innerHTML=m.h;
   document.getElementById('mo').classList.add('open');
-  if(t==='edit'&&D){var x=D.musteri;['ed-n','ed-v','ed-t','ed-e'].forEach(function(id,i){var el=document.getElementById(id);if(el)el.value=[x.name,x.tax_number,x.phone,x.email][i]||'';});}
+  if(t==='edit'&&D){var x=D.musteri;['ed-ma','ed-n','ed-v','ed-t','ed-e'].forEach(function(id,i){var el=document.getElementById(id);if(el)el.value=[x.musteri_adi,x.name,x.tax_number,x.phone,x.email][i]||'';});}
 };
 window.cmo=function(e){if(!e||e.target===document.getElementById('mo'))document.getElementById('mo').classList.remove('open');};
 

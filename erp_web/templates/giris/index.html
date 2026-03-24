@@ -398,6 +398,24 @@
     resize: vertical;
     min-height: 60px;
 }
+/* Tarih: dar satır; takvim simgesi tarih metnine yakın (tam genişlik yerine) */
+.form-grid input[type="date"] {
+    width: min(168px, 100%);
+    max-width: 100%;
+    box-sizing: border-box;
+    padding: 6px 6px 6px 10px;
+}
+.form-grid input[type="date"]::-webkit-calendar-picker-indicator {
+    cursor: pointer;
+    opacity: 0.95;
+    padding: 2px 4px;
+    margin: 0 0 0 2px;
+}
+/* Durum (Pasif/Aktif) aynı hizada dar kalsın */
+.form-grid select#musteri_durum {
+    width: min(168px, 100%);
+    max-width: 100%;
+}
 .form-section {
     margin-bottom: 15px;
 }
@@ -617,6 +635,7 @@
     font-size: 13px; color: #e0f7fa;
 }
 .sirket-unvani-dropdown div.sirket-item:hover { background: #2d4060; }
+
 .sirket-unvani-dropdown div.sirket-item .sirket-name { font-weight: 600; }
 .sirket-unvani-dropdown div.sirket-item .sirket-vergi { font-size: 11px; color: #90a4ae; margin-top: 2px; }
 .sirket-unvani-dropdown div.sirket-bos { padding: 12px; color: #90a4ae; font-size: 12px; text-align: center; }
@@ -674,9 +693,44 @@
         display: block;
     }
 }
+.giris-secili-toolbar {
+    display: none;
+    margin: -10px -10px 10px -10px;
+    padding: 10px 14px;
+    background: #142d42;
+    border: 1px solid #2d4060;
+    border-radius: 4px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+.giris-secili-toolbar.is-visible {
+    display: flex;
+}
+.giris-secili-toolbar .giris-secili-ad {
+    color: #e0f7fa;
+    font-size: 13px;
+}
+.giris-secili-toolbar .giris-secili-ad strong {
+    color: #4fc3f7;
+}
+.giris-secili-toolbar button {
+    background: #00695c;
+    color: #fff;
+    border: none;
+    padding: 7px 14px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+}
+.giris-secili-toolbar button:hover {
+    background: #00897b;
+}
 </style>
 
-<div class="giris-header">
+<div class="giris-header" id="giris-musteri-arama-panel">
     <div class="giris-header-left">
         <h2>Müşteri Listesi</h2>
         <div class="giris-header-search">
@@ -687,6 +741,11 @@
         <button onclick="yeniMusteri()" style="background: #4caf50;">➕ Yeni Müşteri</button>
         <button onclick="location.reload()">↺ Yenile</button>
     </div>
+</div>
+
+<div id="giris-secili-musteri-toolbar" class="giris-secili-toolbar" aria-live="polite">
+    <span class="giris-secili-ad">Seçili müşteri: <strong id="giris-secili-musteri-ad">—</strong></span>
+    <button type="button" onclick="girisMusteriAramayiAc()">Müşteri değiştir</button>
 </div>
 
 <div class="giris-container">
@@ -727,6 +786,9 @@
                 <div class="form-section">
                     <h4>Şirket Bilgileri</h4>
                     <div class="form-grid">
+                        <label>Müşteri adı</label>
+                        <input type="text" id="musteri_adi" autocomplete="off" placeholder="Kısa / görünen ad (isteğe bağlı)">
+                        
                         <label class="required">Şirket Ünvanı</label>
                         <div class="sirket-unvani-wrap" style="position:relative;">
                             <input type="text" id="name" required autocomplete="off" onchange="hesaplaYuzde()" oninput="sirketUnvaniAutocomplete()" onfocus="sirketUnvaniAutocomplete()">
@@ -807,11 +869,11 @@
                     <h4>Sözleşme</h4>
                     <div class="form-grid">
                         <label class="required">Hizmet Türü</label>
-                        <select id="hizmet_turu" onchange="hesaplaYuzde()">
-                            <option>Sanal Ofis</option>
-                            <option>Hazır Ofis</option>
-                            <option>Paylaşımlı Ofis</option>
-                        </select>
+                        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+                            <select id="hizmet_turu" onchange="hesaplaYuzde()" style="flex:1;min-width:160px;"></select>
+                            <input type="text" id="hizmet_turu_yeni" placeholder="Yeni tür adı" autocomplete="off" style="flex:1;min-width:120px;max-width:200px;padding:8px 10px;border-radius:4px;border:1px solid #2d4060;background:#0f2537;color:#e0f7fa;font-size:13px;">
+                            <button type="button" id="btn_hizmet_turu_ekle" onclick="hizmetTuruYeniEkle(); return false;" style="padding:8px 14px;border-radius:4px;border:none;background:#00838f;color:#fff;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">+ Listeye ekle</button>
+                        </div>
                         
                         <label>Ödeme Düzeni</label>
                         <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
@@ -841,6 +903,14 @@
                         
                         <label class="required">Sözleşme Bitiş</label>
                         <input type="date" id="sozlesme_bitis" onchange="hesaplaYuzde(); kiraSuresiAylikOto();">
+                        
+                        <label>Durum</label>
+                        <select id="musteri_durum" name="musteri_durum" onchange="syncDurumUI(this.value === 'pasif' ? 'pasif' : 'aktif', {});" style="padding:8px 10px;border-radius:4px;border:1px solid #2d4060;background:#0f2537;color:#e0f7fa;font-size:13px;">
+                            <option value="aktif" selected>Aktif</option>
+                            <option value="pasif">Pasif</option>
+                        </select>
+                        <label id="kapanis_tarihi_label" style="display:none;">Kapanış Tarihi</label>
+                        <input type="date" id="kapanis_tarihi" style="display:none;" onchange="hesaplaYuzde()" title="Şirket kapanış tarihi (pasif seçildiğinde)">
                     </div>
                 </div>
                 
@@ -1192,7 +1262,15 @@
                 </div>
                 <div id="senaryo_kdv_dokum" style="font-size: 11px; color: #4fc3f7; margin-top: 4px;">Net: — ₺ | KDV Dahil: — ₺</div>
             </div>
-            
+
+            <label>Reel Kira (₺)</label>
+            <div style="grid-column: 2;">
+                <input type="number" step="0.01" id="senaryo_reel_kira" placeholder="Müşterinin reel ödediği kira" style="width: 100%; margin-bottom: 8px;">
+            </div>
+
+            <label>Kira Artış Tarihi</label>
+            <input type="date" id="senaryo_kira_artis_tarih">
+
             <label class="required">Başlangıç Tarihi</label>
             <input type="date" id="senaryo_baslangic_tarih">
 
@@ -1651,6 +1729,7 @@ function hesaplaYuzde() {
         'faaliyet', 'nace', 'onceki_adres', 'sube_merkez',
         'yetkili_tc', 'phone', 'phone2', 'email', 'email_sirket',
         'hizmet_turu', 'aylik_kira', 'kira_suresi_ay', 'sozlesme_baslangic', 'sozlesme_bitis',
+        'kapanis_tarihi',
         'ev_imza_sirküleri', 'ev_vergi_levhasi', 'ev_ticaret_sicil',
         'ev_faaliyet_belgesi', 'ev_ikametgah', 'ev_kase_ornegi'
     ];
@@ -1861,10 +1940,129 @@ function getActiveTabIndex() {
     return isNaN(v) ? currentTabIndex : v;
 }
 
+function girisMusteriAramaPaneliniGizle(secilenAd) {
+    var panel = document.getElementById('giris-musteri-arama-panel');
+    var liste = document.getElementById('musteri-liste');
+    var tb = document.getElementById('giris-secili-musteri-toolbar');
+    var adEl = document.getElementById('giris-secili-musteri-ad');
+    if (panel) panel.style.display = 'none';
+    if (liste) liste.style.display = 'none';
+    if (tb) tb.classList.add('is-visible');
+    if (adEl) adEl.textContent = (secilenAd != null && String(secilenAd).trim()) ? String(secilenAd).trim() : '—';
+}
+
+function girisMusteriAramayiAc() {
+    var panel = document.getElementById('giris-musteri-arama-panel');
+    var tb = document.getElementById('giris-secili-musteri-toolbar');
+    if (panel) panel.style.display = 'flex';
+    if (tb) tb.classList.remove('is-visible');
+    var hi = document.getElementById('header-arama-input');
+    if (hi) { hi.focus(); hi.select(); }
+}
+
+function hizmetTuruSelectSet(value) {
+    var sel = document.getElementById('hizmet_turu');
+    if (!sel) return;
+    var v = (value != null && value !== undefined) ? String(value).trim() : '';
+    if (!v) return;
+    var found = false;
+    for (var i = 0; i < sel.options.length; i++) {
+        if (sel.options[i].value === v) { found = true; break; }
+    }
+    if (!found) {
+        var o = document.createElement('option');
+        o.value = v;
+        o.textContent = v;
+        sel.appendChild(o);
+    }
+    sel.value = v;
+}
+
+async function yukleHizmetTurleriSelect(selectId, preserveValue) {
+    var sel = document.getElementById(selectId);
+    if (!sel) return;
+    var cur = preserveValue != null && preserveValue !== undefined ? String(preserveValue) : sel.value;
+    try {
+        var r = await fetch('/giris/api/hizmet-turleri');
+        var j = await r.json();
+        if (!j.ok || !j.turler) return;
+        sel.innerHTML = '';
+        j.turler.forEach(function(t) {
+            var o = document.createElement('option');
+            o.value = t.ad;
+            o.textContent = t.ad;
+            sel.appendChild(o);
+        });
+        if (cur && String(cur).trim()) hizmetTuruSelectSet(cur);
+        else if (sel.options.length) sel.selectedIndex = 0;
+    } catch (e) {
+        console.warn('Hizmet türleri yüklenemedi', e);
+    }
+}
+
+function bugunISO() {
+    var d = new Date();
+    var p = function(n) { return n < 10 ? '0' + n : '' + n; };
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+}
+
+/** opts.kapanis: API'den gelen kayıtlı tarih (YYYY-MM-DD) */
+function syncDurumUI(d, opts) {
+    opts = opts || {};
+    var v = (d === 'pasif') ? 'pasif' : 'aktif';
+    var sel = document.getElementById('musteri_durum');
+    if (sel) sel.value = v;
+    var lbl = document.getElementById('kapanis_tarihi_label');
+    var inp = document.getElementById('kapanis_tarihi');
+    var showKap = v === 'pasif';
+    if (lbl) lbl.style.display = showKap ? '' : 'none';
+    if (inp) {
+        inp.style.display = showKap ? '' : 'none';
+        if (showKap) {
+            var ks = opts.kapanis != null ? String(opts.kapanis).trim().substring(0, 10) : '';
+            if (ks) inp.value = ks;
+            else if (!inp.value || !String(inp.value).trim()) inp.value = bugunISO();
+        } else {
+            inp.value = '';
+        }
+    }
+    hesaplaYuzde();
+}
+
+async function hizmetTuruYeniEkle() {
+    var inp = document.getElementById('hizmet_turu_yeni');
+    var ad = inp ? inp.value.trim() : '';
+    if (!ad) {
+        alert('Yeni hizmet türü için bir ad yazın.');
+        return;
+    }
+    try {
+        var r = await fetch('/giris/api/hizmet-turleri', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ad: ad })
+        });
+        var j = await r.json();
+        if (!j.ok) {
+            alert(j.mesaj || 'Eklenemedi');
+            return;
+        }
+        if (inp) inp.value = '';
+        await yukleHizmetTurleriSelect('hizmet_turu', ad);
+        hesaplaYuzde();
+    } catch (e) {
+        alert('Bağlantı hatası: ' + e.message);
+    }
+}
+
 // Müşteri seç — hangi sekme açıksa o sekmeye göre forma doldurur (liste veya API'den)
 function selectMusteri(id) {
     selectedId = id;
     var activeTab = getActiveTabIndex();
+    if (activeTab === 0 || activeTab === 6) {
+        var muQuick = musteriler.find(function(m) { return m.id == id; });
+        girisMusteriAramaPaneliniGizle(muQuick && muQuick.name ? muQuick.name : ('Müşteri #' + id));
+    }
     // Seçili göster (data-id ile)
     document.querySelectorAll('.musteri-item').forEach(function(item) {
         item.classList.toggle('selected', parseInt(item.getAttribute('data-id'), 10) === id);
@@ -1876,7 +2074,10 @@ function selectMusteri(id) {
         if (activeTab === 0 || activeTab === 6) {
             var set = function(fid, val) { var el = document.getElementById(fid); if (el) el.value = (val != null && val !== undefined) ? String(val).trim() : ''; };
             set('musteri-id', m.id);
+            set('musteri_adi', m.musteri_adi);
             set('name', m.name);
+            var sad = document.getElementById('giris-secili-musteri-ad');
+            if (sad && m.name) sad.textContent = m.name;
             set('tax_number', m.tax_number);
             set('phone', m.phone);
             set('email', m.email);
@@ -1907,7 +2108,18 @@ function selectMusteri(id) {
                 var subeEl = document.getElementById('sube_merkez');
                 if (subeEl && (m.sube_merkez === 'Şube' || m.sube_merkez === 'Merkez')) subeEl.value = m.sube_merkez;
             }
-            set('hizmet_turu', m.hizmet_turu);
+            if (m.hizmet_turu != null && String(m.hizmet_turu).trim() !== '') {
+                hizmetTuruSelectSet(m.hizmet_turu);
+            } else {
+                var hsel = document.getElementById('hizmet_turu');
+                if (hsel && hsel.options.length) hsel.selectedIndex = 0;
+            }
+            var dnorm = (m.durum && String(m.durum).toLowerCase().trim() === 'pasif') ? 'pasif' : 'aktif';
+            if (dnorm === 'pasif') {
+                syncDurumUI('pasif', { kapanis: m.kapanis_tarihi });
+            } else {
+                syncDurumUI('aktif');
+            }
             if (m.guncel_kira_bedeli != null && m.guncel_kira_bedeli !== '') set('aylik_kira', m.guncel_kira_bedeli);
             else if (m.ilk_kira_bedeli != null && m.ilk_kira_bedeli !== '') set('aylik_kira', m.ilk_kira_bedeli);
             if (m.rent_start_date) set('sozlesme_baslangic', m.rent_start_date);
@@ -2083,21 +2295,34 @@ async function kaydet(event) {
         document.getElementById('phone').focus();
         return;
     }
+
+    var mdEl = document.getElementById('musteri_durum');
+    var mdVal = (mdEl && mdEl.value === 'pasif') ? 'pasif' : 'aktif';
+    var kapInp = document.getElementById('kapanis_tarihi');
+    if (mdVal === 'pasif' && kapInp && (!kapInp.value || !String(kapInp.value).trim())) {
+        kapInp.value = bugunISO();
+    }
     
     const data = {
         id: document.getElementById('musteri-id').value || null,
         name: document.getElementById('name').value,
+        musteri_adi: document.getElementById('musteri_adi') ? document.getElementById('musteri_adi').value : '',
         tax_number: document.getElementById('tax_number').value,
         phone: document.getElementById('phone').value,
         email: document.getElementById('email').value,
         address: document.getElementById('address').value,
         ev_adres: document.getElementById('ev_adres').value,
-        notes: document.getElementById('notes').value
+        notes: document.getElementById('notes').value,
+        durum: mdVal,
+        kapanis_tarihi: (kapInp && mdVal === 'pasif') ? kapInp.value : ''
     };
 
     // KYC verisi (sözleşme + detaylar)
     const kycData = {
         musteri_id: data.id,
+        musteri_adi: document.getElementById('musteri_adi') ? document.getElementById('musteri_adi').value : '',
+        durum: mdVal,
+        kapanis_tarihi: (kapInp && mdVal === 'pasif') ? kapInp.value : '',
         sirket_unvani: document.getElementById('name').value,
         vergi_no: document.getElementById('tax_number').value,
         vergi_dairesi: document.getElementById('vergi_dairesi').value,
@@ -2292,6 +2517,8 @@ function temizle() {
 
 function temizleForm() {
     document.getElementById('musteri-form').reset();
+    syncDurumUI('aktif');
+    yukleHizmetTurleriSelect('hizmet_turu', 'Sanal Ofis');
     document.getElementById('musteri-id').value = '';
     selectedId = null;
     yukluDosyalar = [];
@@ -2300,6 +2527,7 @@ function temizleForm() {
     });
     dosyaListesiGuncelle();
     hesaplaYuzde();
+    girisMusteriAramayiAc();
 }
 // Yeni müşteri formu aç
 function yeniMusteri() {
@@ -2309,6 +2537,7 @@ function yeniMusteri() {
 
 // Sayfa yüklendiğinde
 document.addEventListener('DOMContentLoaded', () => {
+    yukleHizmetTurleriSelect('hizmet_turu', '');
     musteriAra();
     // Yeni kayıt formu için sözleşme tarihlerini bugünden 1 yıl sonrasına ayarla
     try {
@@ -3214,6 +3443,13 @@ const SENARYO_KDV_ORAN = 0.20;
 
 // Başlangıç kirası: kullanıcı girişine göre Net tutarı döndürür (projeksiyon hep net üzerinden)
 function senaryoEffectiveNet() {
+    // Öncelik: Reel Kira girilmişse onu kullan (zaten net kabul edilir)
+    var reelInput = document.getElementById('senaryo_reel_kira');
+    if (reelInput && reelInput.value) {
+        var reelVal = parseFloat(String(reelInput.value).replace(',', '.'));
+        if (reelVal && !isNaN(reelVal)) return reelVal;
+    }
+    // Aksi halde Başlangıç Kira alanını kullan (KDV dahil/net seçimine göre nete çevir)
     const val = parseFloat((document.getElementById('senaryo_baslangic_kira').value || '').replace(',', '.'));
     if (!val || isNaN(val)) return null;
     const dahilSecili = (document.querySelector('input[name="senaryo_kdv_tip"]:checked') || {}).value === 'dahil';

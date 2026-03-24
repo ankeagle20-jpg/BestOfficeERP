@@ -91,7 +91,7 @@
             <div>{{ musteri.address or '—' }}</div>
             <div>Vergi Dairesi: {{ musteri.vergi_dairesi or '—' }}</div>
             <div>VKN/TCKN: {{ musteri.tax_number or '—' }}</div>
-            <div>ETTN: {{ fatura.ettn or 'Önizleme-ETTN' }}</div>
+            <div><strong>ETTN:</strong> <span style="font-weight:normal">{{ fatura.ettn or '—' }}</span></div>
         </div>
 
         <table class="tbl">

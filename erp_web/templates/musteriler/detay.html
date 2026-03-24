@@ -116,7 +116,24 @@
   <div class="komuta-hero">
     <div class="komuta-hero-sol">
       <h1>{{ musteri.name or '—' }}</h1>
+      {% if musteri.get('musteri_adi') %}
+      <div style="font-size:14px;color:#90a4ae;margin-top:4px;">Müşteri adı: {{ musteri.musteri_adi }}</div>
+      {% endif %}
       <span class="ofis-badge">{{ hizmet_turu }} — {{ musteri.office_code or '—' }}</span>
+      <div class="meta" style="margin-top:6px;">
+        Kayıt:
+        {% set _md = (musteri.get('durum') or 'aktif')|lower %}
+        {% if _md == 'pasif' %}
+          <strong style="color:#f87171;">Pasif</strong>
+          {% if musteri.get('kapanis_tarihi') %}
+            {% set _kp = musteri.kapanis_tarihi %}
+            · Kapanış:
+            {% if _kp.strftime is defined %}{{ _kp.strftime('%d.%m.%Y') }}{% else %}{{ _kp }}{% endif %}
+          {% endif %}
+        {% else %}
+          <strong style="color:#4ade80;">Aktif</strong>
+        {% endif %}
+      </div>
       <div class="meta">Sözleşme: {{ sozlesme_bas_str }} – {{ sozlesme_bitis_str }}</div>
       <div class="kalan">
         {% if kalan_gun is not none %}

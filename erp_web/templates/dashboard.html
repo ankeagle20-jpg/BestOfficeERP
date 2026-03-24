@@ -328,7 +328,8 @@
 .dash-table tbody tr:hover .sticky-col { background: rgba(255,255,255,0.06); }
 
 /* Durum filtresi ve rozetleri */
-.dash-durum-select {
+.dash-durum-select,
+.dash-hizmet-select {
   margin-left: 6px;
   background: #0f2537;
   border: 1px solid #2d4060;
@@ -336,6 +337,7 @@
   border-radius: 4px;
   font-size: 12px;
   padding: 2px 6px;
+  max-width: 150px;
 }
 .dash-durum-badge-aktif {
   display: inline-flex;
@@ -590,7 +592,16 @@
       <thead>
         <tr>
           <th class="sticky-col">Müşteri / Şirket</th>
-          <th>Ürün / Kira Tipi</th>
+          <th>
+            <select id="dashHizmet" class="dash-hizmet-select" title="Hizmet türüne göre filtrele">
+              <option value="">Hizmet: Tümü</option>
+              <option value="__bos__">— / Belirtilmemiş</option>
+              <option value="Mükellef">Mükellef</option>
+              <option value="Sanal ofis">Sanal ofis</option>
+              <option value="Hazır Ofis">Hazır Ofis</option>
+              <option value="Paylaşımlı Masa">Paylaşımlı Masa</option>
+            </select>
+          </th>
           <th>
             <select id="dashDurum" class="dash-durum-select">
               <option value="">Durum: Hepsi</option>
@@ -607,7 +618,7 @@
       <tbody id="dash-tbody">
         {% for r in tablo_rows %}
         {% set d = (r.musteri_durum or '')|lower %}
-        <tr data-musteri-id="{{ r.musteri_id }}" data-durum="{{ d }}">
+        <tr data-musteri-id="{{ r.musteri_id }}" data-durum="{{ d }}" data-hizmet="{{ (r.hizmet_turu or '')|e }}">
           <td class="sticky-col"><strong>{{ r.musteri_adi }}</strong><br><small style="color:#78909c;">{{ r.phone }}</small></td>
           <td>{{ r.hizmet_turu }}</td>
           <td>
@@ -717,6 +728,21 @@
       });
   }
 
+  function normDashHizmet(s) {
+    if (s == null || s === undefined) return '';
+    var t = String(s).toLowerCase().trim().replace(/[—\-]/g, '').replace(/\s+/g, ' ');
+    t = t.replace(/ı/g, 'i').replace(/ğ/g, 'g').replace(/ü/g, 'u').replace(/ş/g, 's').replace(/ö/g, 'o').replace(/ç/g, 'c');
+    return t.trim();
+  }
+  function rowMatchesDashHizmet(rowRaw, filtVal) {
+    if (!filtVal) return true;
+    var rowH = String(rowRaw || '').trim();
+    if (filtVal === '__bos__') {
+      return !rowH || rowH === '—' || normDashHizmet(rowH) === '';
+    }
+    return normDashHizmet(rowH) === normDashHizmet(filtVal);
+  }
+
   function tabloYenile() {
     const q = document.getElementById('dash-search').value.trim();
     const filtre = document.querySelector('.btn-filter.active');
@@ -733,10 +759,11 @@
         const alacakClass = r.toplam_alacak > 0 ? 'alacak-kirmizi' : '';
         const alacakStr = r.toplam_alacak > 0 ? '₺ ' + Number(r.toplam_alacak).toLocaleString('tr-TR', {maximumFractionDigits:0}) : '—';
         const durumRaw = (r.musteri_durum || '').toLowerCase();
+        const hizmetEsc = String(r.hizmet_turu || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
         const durumBadge = durumRaw === 'pasif'
           ? '<span class="dash-durum-badge-pasif"><i class="fa fa-pause-circle"></i> Pasif</span>'
           : '<span class="dash-durum-badge-aktif"><i class="fa fa-check-circle"></i> Aktif</span>';
-        return '<tr data-musteri-id="' + r.musteri_id + '" data-durum="' + durumRaw + '">' +
+        return '<tr data-musteri-id="' + r.musteri_id + '" data-durum="' + durumRaw + '" data-hizmet="' + hizmetEsc + '">' +
           '<td class="sticky-col"><strong>' + (r.musteri_adi || '—') + '</strong><br><small style="color:#78909c">' + (r.phone || '') + '</small></td>' +
           '<td>' + (r.hizmet_turu || '—') + '</td>' +
           '<td>' + durumBadge + '</td>' +
@@ -755,24 +782,23 @@
       tbody.querySelectorAll('.dash-btn.whatsapp').forEach(function(btn) {
         btn.addEventListener('click', whatsappClick);
       });
-      applyDurumFilter();
+      applyDashRowFilters();
     });
   }
 
-  function applyDurumFilter() {
-    var sel = document.getElementById('dashDurum');
-    if (!sel) return;
-    var val = (sel.value || '').toLowerCase();
-    var rows = document.querySelectorAll('#dash-tbody tr[data-musteri-id]');
-    rows.forEach(function(tr) {
+  function applyDashRowFilters() {
+    var dsel = document.getElementById('dashDurum');
+    var hsel = document.getElementById('dashHizmet');
+    var val = dsel ? (dsel.value || '').toLowerCase() : '';
+    var hf = hsel ? (hsel.value || '').trim() : '';
+    document.querySelectorAll('#dash-tbody tr[data-musteri-id]').forEach(function(tr) {
       var d = (tr.getAttribute('data-durum') || '').toLowerCase();
-      var show = true;
-      if (val === 'aktif') {
-        show = d !== 'pasif';
-      } else if (val === 'pasif') {
-        show = d === 'pasif';
-      }
-      tr.style.display = show ? '' : 'none';
+      var rh = tr.getAttribute('data-hizmet') || '';
+      var showD = true;
+      if (val === 'aktif') showD = d !== 'pasif';
+      else if (val === 'pasif') showD = d === 'pasif';
+      var showH = rowMatchesDashHizmet(rh, hf);
+      tr.style.display = (showD && showH) ? '' : 'none';
     });
   }
 
@@ -794,9 +820,9 @@
   });
 
   var durumSel = document.getElementById('dashDurum');
-  if (durumSel) {
-    durumSel.addEventListener('change', applyDurumFilter);
-  }
+  if (durumSel) durumSel.addEventListener('change', applyDashRowFilters);
+  var hizmetSel = document.getElementById('dashHizmet');
+  if (hizmetSel) hizmetSel.addEventListener('change', applyDashRowFilters);
 
   function whatsappClick() {
     const mid = this.getAttribute('data-mid');

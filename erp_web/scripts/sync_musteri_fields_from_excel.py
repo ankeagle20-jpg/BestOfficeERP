@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Excel'den Yetkili Kişi, Hizmet Türü, Telefon, Başlangıç Tarihi, İlk Kira, Güncel Kira
+"""Eski akış: data/ içindeki ilk .xlsx ile sınırlı güncelleme.
+
+Müşteri kartı listesi için bunun yerine:
+
+    python yukle_musteri_karti_excel.py --guncelle
+
+Excel'den Yetkili Kişi, Hizmet Türü, Telefon, Başlangıç Tarihi, İlk Kira, Güncel Kira
 alanlarını okuyup mevcut customers kayıtlarını günceller.
 
 Eşleştirme Vergi No üzerinden yapılır (normalize edilmiş + ham hali).

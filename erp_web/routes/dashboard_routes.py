@@ -6,6 +6,7 @@ from flask import Blueprint, render_template, request, jsonify
 from auth import giris_gerekli
 from db import fetch_all, fetch_one, execute_returning, ensure_faturalar_amount_columns
 from datetime import date, timedelta
+from phone_util import format_phone_for_display
 
 bp = Blueprint("dashboard", __name__)
 
@@ -133,15 +134,22 @@ def _dashboard_tablo_data(arama="", filtre=None):
         sql_extra += " AND (c.name ILIKE %s OR c.phone ILIKE %s OR c.tax_number ILIKE %s)"
         params.extend([f"%{arama}%", f"%{arama}%", f"%{arama}%"])
 
-    # Müşteri + ofis (offices.customer_id = c.id ile)
+    # Müşteri başına tek satır: aksi halde birden fazla ofis aynı telefonu listede tekrarlar.
     sql = """
-        SELECT c.id as musteri_id, c.name as musteri_adi, c.phone, c.office_code,
-               o.code as ofis_kod, o.type as ofis_tip, o.status as ofis_durum,
-               COALESCE(LOWER(TRIM(c.durum)), '') as musteri_durum
-        FROM customers c
-        LEFT JOIN offices o ON o.customer_id = c.id
-        WHERE 1=1
-    """ + sql_extra + " ORDER BY c.name"
+        SELECT * FROM (
+            SELECT DISTINCT ON (c.id)
+                c.id as musteri_id, c.name as musteri_adi, c.phone, c.office_code,
+                c.hizmet_turu as customer_hizmet_turu,
+                o.code as ofis_kod, o.type as ofis_tip, o.status as ofis_durum,
+                COALESCE(LOWER(TRIM(c.durum)), '') as musteri_durum
+            FROM customers c
+            LEFT JOIN offices o ON o.customer_id = c.id
+            WHERE 1=1
+    """ + sql_extra + """
+            ORDER BY c.id, o.code NULLS LAST
+        ) sub
+        ORDER BY sub.musteri_adi
+    """
     musteriler = fetch_all(sql, params) if params else fetch_all(sql)
 
     # Sözleşme bitiş (musteri_kyc) — son kayıt per müşteri
@@ -237,7 +245,9 @@ def _dashboard_tablo_data(arama="", filtre=None):
         toplam_alacak = sum(f.get("toplam") or 0 for f in fat_by_cid.get(cid, []))
         kyc = kyc_by_cid.get(cid, {})
         sozlesme_bitis = kyc.get("sozlesme_bitis")
-        hizmet_turu = kyc.get("hizmet_turu") or "-"
+        ht_c = (m.get("customer_hizmet_turu") or "").strip() or None
+        ht_k = (kyc.get("hizmet_turu") or "").strip() or None
+        hizmet_turu = ht_c or ht_k or "—"
         son_kargo = kargo_by_cid.get(cid, {})
         kargo_durum = (son_kargo.get("durum") or "—")
         if son_kargo and son_kargo.get("teslim_alan"):
@@ -284,7 +294,7 @@ def _dashboard_tablo_data(arama="", filtre=None):
         rows.append({
             "musteri_id": cid,
             "musteri_adi": m.get("musteri_adi") or "—",
-            "phone": m.get("phone") or "—",
+            "phone": format_phone_for_display(m.get("phone")),
             "ofis_kod": m.get("ofis_kod") or "—",
             "ofis_tip": m.get("ofis_tip") or "—",
             "hizmet_turu": hizmet_turu,

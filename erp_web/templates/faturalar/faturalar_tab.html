@@ -190,6 +190,9 @@
         <button type="button" onclick="yeniFaturaEkleAc()" style="background:#4caf50;">
             <i class="fa fa-plus"></i> Yeni fatura ekle
         </button>
+        <button type="button" onclick="yeniIrsaliyeEkleAc()" style="background:#43a047;">
+            <i class="fa fa-truck"></i> Yeni irsaliye ekle
+        </button>
     </div>
     
     <div id="yeni_fatura_cari_wrap" class="filter-bar yeni-fatura-cari-bar" style="display:none; margin-top:8px;">
@@ -199,7 +202,7 @@
             <input type="hidden" id="cari_musteri_id" value="">
             <div id="cari_ara_list" class="cari-ara-list" style="display:none;"></div>
         </div>
-        <button type="button" onclick="cariSecipFaturaKes()" style="background:#4caf50;">
+        <button type="button" id="btn_cari_ile_fatura" onclick="cariSecipFaturaKes()" style="background:#4caf50;">
             <i class="fa fa-file-invoice"></i> Seçilen caride fatura kes
         </button>
         <button type="button" onclick="yeniFaturaCariKapat()" style="background:#546e7a;">
@@ -264,6 +267,8 @@
     </table>
     
     <script>
+    var yeniCariHedef = 'fatura';
+
     function filtrele() {
         const yil = document.getElementById('yil').value;
         const ay = document.getElementById('ay').value;
@@ -280,10 +285,28 @@
     
     var cariAraTimer = null;
     function yeniFaturaEkleAc() {
+        yeniCariHedef = 'fatura';
         document.getElementById('yeni_fatura_cari_wrap').style.display = 'flex';
         document.getElementById('cari_musteri_ara').value = '';
         document.getElementById('cari_musteri_id').value = '';
         document.getElementById('cari_ara_list').style.display = 'none';
+        var btn = document.getElementById('btn_cari_ile_fatura');
+        if (btn) {
+            btn.innerHTML = '<i class="fa fa-file-invoice"></i> Seçilen caride fatura kes';
+        }
+        document.getElementById('cari_musteri_ara').focus();
+    }
+
+    function yeniIrsaliyeEkleAc() {
+        yeniCariHedef = 'irsaliye';
+        document.getElementById('yeni_fatura_cari_wrap').style.display = 'flex';
+        document.getElementById('cari_musteri_ara').value = '';
+        document.getElementById('cari_musteri_id').value = '';
+        document.getElementById('cari_ara_list').style.display = 'none';
+        var btn = document.getElementById('btn_cari_ile_fatura');
+        if (btn) {
+            btn.innerHTML = '<i class="fa fa-file-invoice"></i> Seçilen caride irsaliye kes';
+        }
         document.getElementById('cari_musteri_ara').focus();
     }
     function yeniFaturaCariKapat() {
@@ -346,8 +369,11 @@
             alert('Lütfen önce cari arayıp seçin.');
             return;
         }
-        window.location.href = '/faturalar/yeni?musteri_id=' + encodeURIComponent(cariId);
+        var hedef = (typeof yeniCariHedef !== 'undefined') ? yeniCariHedef : 'fatura';
+        var baseUrl = hedef === 'irsaliye' ? '/faturalar/irsaliye/yeni' : '/faturalar/yeni';
+        window.location.href = baseUrl + '?musteri_id=' + encodeURIComponent(cariId);
     }
     </script>
+    <script src="/static/js/erp-tarih-hizli.js"></script>
 </body>
 </html>

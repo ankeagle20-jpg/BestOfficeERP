@@ -1,6 +1,17 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, send_file
 from auth import yetki_gerekli, giris_gerekli
-from db import fetch_all, fetch_one, execute, execute_returning, ensure_faturalar_amount_columns, ensure_customers_durum, ensure_customers_quick_edit_columns, db as get_db, clear_all_customers
+from db import (
+    fetch_all,
+    fetch_one,
+    execute,
+    execute_returning,
+    ensure_faturalar_amount_columns,
+    ensure_customers_durum,
+    ensure_customers_quick_edit_columns,
+    ensure_customers_kapanis_tarihi,
+    db as get_db,
+    clear_all_customers,
+)
 import pandas as pd
 from io import BytesIO
 from datetime import date, datetime, timedelta
@@ -357,6 +368,7 @@ def _enrich_musteri_list_with_borc_gecikme(musteriler):
 def list_full():
     try:
         ensure_customers_quick_edit_columns()
+        ensure_customers_kapanis_tarihi()
     except Exception:
         pass
     arama = request.args.get("q", "").strip()
@@ -943,10 +955,12 @@ def giris():
 def ekle():
     """Yeni müşteri ekle"""
     if request.method == "POST":
+        ma = (request.form.get("musteri_adi") or "").strip() or None
         row = execute_returning(
-            """INSERT INTO customers (name, email, phone, address, notes)
-               VALUES (%s,%s,%s,%s,%s) RETURNING id""",
+            """INSERT INTO customers (name, musteri_adi, email, phone, address, notes)
+               VALUES (%s,%s,%s,%s,%s,%s) RETURNING id""",
             (request.form.get("name"),
+             ma,
              request.form.get("email"),
              request.form.get("phone"),
              request.form.get("address"),
@@ -1488,6 +1502,7 @@ def api_bulk_update():
     """Hızlı bilgi düzenleme: tablodaki değişiklikleri toplu kaydet. Cari kart (customers) güncellenir."""
     try:
         ensure_customers_quick_edit_columns()
+        ensure_customers_kapanis_tarihi()
     except Exception:
         pass
     data = request.get_json(silent=True) or {}
@@ -1518,6 +1533,7 @@ def api_bulk_update():
                 ("manuel_borc", "manuel_borc"),
                 ("son_odeme_tarihi", "son_odeme_tarihi"),
                 ("durum", "durum"),
+                ("kapanis_tarihi", "kapanis_tarihi"),
             ):
                 if key not in row:
                     continue
@@ -1527,12 +1543,14 @@ def api_bulk_update():
                         val = float(val)
                     except (TypeError, ValueError):
                         val = None
-                if key in ("son_odeme_tarihi", "rent_start_date") and val:
-                    if hasattr(val, "year"):
+                if key in ("son_odeme_tarihi", "rent_start_date", "kapanis_tarihi"):
+                    if val is None or val == "":
+                        val = None
+                    elif hasattr(val, "year"):
                         pass
                     else:
                         s = str(val).strip()[:10]
-                        if s and s != "—" and s != "":
+                        if s and s not in ("—", ""):
                             try:
                                 val = date(*[int(x) for x in s.split("-")])
                             except Exception:
@@ -1595,7 +1613,7 @@ def api_kyc_getir():
     # Eğer henüz KYC kaydı yoksa, en azından customers tablosundaki temel bilgileri döndür
     if not row:
         cust = fetch_one(
-            "SELECT id, name, email, phone, address, tax_number FROM customers WHERE id = %s",
+            "SELECT id, name, musteri_adi, email, phone, address, tax_number, durum, kapanis_tarihi FROM customers WHERE id = %s",
             (musteri_id,),
         )
         if not cust:
@@ -1606,6 +1624,9 @@ def api_kyc_getir():
                 "musteri_id": cust.get("id"),
                 "sirket_unvani": cust.get("name"),
                 "unvan": cust.get("name"),
+                "musteri_adi": cust.get("musteri_adi"),
+                "durum": cust.get("durum"),
+                "kapanis_tarihi": cust.get("kapanis_tarihi"),
                 "email": cust.get("email"),
                 "yetkili_email": cust.get("email"),
                 "yetkili_tel": cust.get("phone"),
@@ -1633,6 +1654,7 @@ def api_kyc_kaydet():
         data = request.json or request.form
         musteri_id = data.get("musteri_id")
         sirket_unvani = (data.get("sirket_unvani") or data.get("unvan") or "").strip()
+        musteri_adi = (data.get("musteri_adi") or "").strip() or None
         vergi_no = (data.get("vergi_no") or "").strip()
         vergi_dairesi = (data.get("vergi_dairesi") or "").strip()
         mersis_no = (data.get("mersis_no") or "").strip()
@@ -1652,6 +1674,9 @@ def api_kyc_kaydet():
         yetkili_email = (data.get("yetkili_email") or "").strip()
         email = (data.get("email") or "").strip()
         hizmet_turu = (data.get("hizmet_turu") or "Sanal Ofis").strip()
+        durum_m = (data.get("durum") or "aktif").strip().lower()
+        if durum_m not in ("aktif", "pasif"):
+            durum_m = "aktif"
         aylik_kira = float(str(data.get("aylik_kira") or 0).replace(",", ".") or 0)
         yillik_kira = float(str(data.get("yillik_kira") or 0).replace(",", ".") or 0)
         sozlesme_no = (data.get("sozlesme_no") or "").strip()
@@ -1675,6 +1700,7 @@ def api_kyc_kaydet():
         yetkili_dogum = parse_date(yetkili_dogum)
         sozlesme_tarihi = parse_date(sozlesme_tarihi)
         sozlesme_bitis = parse_date(sozlesme_bitis)
+        kapanis_tarihi = parse_date(data.get("kapanis_tarihi")) if durum_m == "pasif" else None
 
         evrak_imza_sirkuleri = 1 if data.get("evrak_imza_sirkuleri") in (True, 1, "1", "on") else 0
         evrak_vergi_levhasi = 1 if data.get("evrak_vergi_levhasi") in (True, 1, "1", "on") else 0
@@ -1693,7 +1719,7 @@ def api_kyc_kaydet():
         if mevcut:
             execute(
                 """UPDATE musteri_kyc SET
-                   sirket_unvani=%s, unvan=%s, vergi_no=%s, vergi_dairesi=%s, mersis_no=%s, ticaret_sicil_no=%s,
+                   sirket_unvani=%s, unvan=%s, musteri_adi=%s, vergi_no=%s, vergi_dairesi=%s, mersis_no=%s, ticaret_sicil_no=%s,
                    kurulus_tarihi=%s, faaliyet_konusu=%s, nace_kodu=%s, eski_adres=%s, yeni_adres=%s, sube_merkez=%s,
                    yetkili_adsoyad=%s, yetkili_tcno=%s, yetkili_dogum=%s, yetkili_ikametgah=%s,
                    yetkili_tel=%s, yetkili_tel2=%s, yetkili_email=%s, email=%s,
@@ -1701,7 +1727,7 @@ def api_kyc_kaydet():
                    evrak_imza_sirkuleri=%s, evrak_vergi_levhasi=%s, evrak_ticaret_sicil=%s, evrak_faaliyet_belgesi=%s,
                    evrak_kimlik_fotokopi=%s, evrak_ikametgah=%s, evrak_kase=%s, notlar=%s, tamamlanma_yuzdesi=%s, updated_at=NOW()
                    WHERE id=%s""",
-                (sirket_unvani, sirket_unvani, vergi_no, vergi_dairesi, mersis_no, ticaret_sicil_no,
+                (sirket_unvani, sirket_unvani, musteri_adi, vergi_no, vergi_dairesi, mersis_no, ticaret_sicil_no,
                  kurulus_tarihi, faaliyet_konusu, nace_kodu, eski_adres, yeni_adres, sube_merkez,
                  yetkili_adsoyad, yetkili_tcno, yetkili_dogum, yetkili_ikametgah,
                  yetkili_tel, yetkili_tel2, yetkili_email, email,
@@ -1712,26 +1738,26 @@ def api_kyc_kaydet():
             kyc_id = mevcut["id"]
             if musteri_id:
                 execute(
-                    "UPDATE customers SET name=%s, email=%s, phone=%s, address=%s, tax_number=%s WHERE id=%s",
-                    (sirket_unvani or None, email or None, yetkili_tel or None, yeni_adres or None, vergi_no or None, musteri_id)
+                    "UPDATE customers SET name=%s, musteri_adi=%s, email=%s, phone=%s, address=%s, tax_number=%s, durum=%s, kapanis_tarihi=%s WHERE id=%s",
+                    (sirket_unvani or None, musteri_adi, email or None, yetkili_tel or None, yeni_adres or None, vergi_no or None, durum_m, kapanis_tarihi, musteri_id)
                 )
         else:
             if musteri_id:
                 execute(
-                    "UPDATE customers SET name=%s, email=%s, phone=%s, address=%s, tax_number=%s WHERE id=%s",
-                    (sirket_unvani or None, email or None, yetkili_tel or None, yeni_adres or None, vergi_no or None, musteri_id)
+                    "UPDATE customers SET name=%s, musteri_adi=%s, email=%s, phone=%s, address=%s, tax_number=%s, durum=%s, kapanis_tarihi=%s WHERE id=%s",
+                    (sirket_unvani or None, musteri_adi, email or None, yetkili_tel or None, yeni_adres or None, vergi_no or None, durum_m, kapanis_tarihi, musteri_id)
                 )
             else:
                 # Yeni müşteri oluştur
                 cust = execute_returning(
-                    """INSERT INTO customers (name, email, phone, address, notes, tax_number)
-                       VALUES (%s,%s,%s,%s,%s,%s) RETURNING id""",
-                    (sirket_unvani or "Yeni Müşteri", email or None, yetkili_tel or None, yeni_adres or None, notlar or None, vergi_no or None)
+                    """INSERT INTO customers (name, musteri_adi, email, phone, address, notes, tax_number, durum, kapanis_tarihi)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                    (sirket_unvani or "Yeni Müşteri", musteri_adi, email or None, yetkili_tel or None, yeni_adres or None, notlar or None, vergi_no or None, durum_m, kapanis_tarihi)
                 )
                 musteri_id = cust["id"] if cust else None
             row = execute_returning(
                 """INSERT INTO musteri_kyc (
-                   musteri_id, sirket_unvani, unvan, vergi_no, vergi_dairesi, mersis_no, ticaret_sicil_no,
+                   musteri_id, sirket_unvani, unvan, musteri_adi, vergi_no, vergi_dairesi, mersis_no, ticaret_sicil_no,
                    kurulus_tarihi, faaliyet_konusu, nace_kodu, eski_adres, yeni_adres, sube_merkez,
                    yetkili_adsoyad, yetkili_tcno, yetkili_dogum, yetkili_ikametgah,
                    yetkili_tel, yetkili_tel2, yetkili_email, email,
@@ -1739,12 +1765,12 @@ def api_kyc_kaydet():
                    evrak_imza_sirkuleri, evrak_vergi_levhasi, evrak_ticaret_sicil, evrak_faaliyet_belgesi,
                    evrak_kimlik_fotokopi, evrak_ikametgah, evrak_kase, notlar, tamamlanma_yuzdesi
                 ) VALUES (
+                   %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
                    %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
                    %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
-                   %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
-                   %s,%s,%s,%s,%s,%s
+                   %s,%s,%s,%s,%s,%s,%s
                 ) RETURNING id""",
-                (musteri_id, sirket_unvani, sirket_unvani, vergi_no, vergi_dairesi, mersis_no, ticaret_sicil_no,
+                (musteri_id, sirket_unvani, sirket_unvani, musteri_adi, vergi_no, vergi_dairesi, mersis_no, ticaret_sicil_no,
                  kurulus_tarihi, faaliyet_konusu, nace_kodu, eski_adres, yeni_adres, sube_merkez,
                  yetkili_adsoyad, yetkili_tcno, yetkili_dogum, yetkili_ikametgah,
                  yetkili_tel, yetkili_tel2, yetkili_email, email,

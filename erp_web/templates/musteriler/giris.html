@@ -116,6 +116,7 @@ input.error { border-color: #e74c3c !important; }
 
         <div class="giris-section">
             <h4>Şirket Bilgileri</h4>
+            <div class="giris-row"><label>Müşteri adı</label><input type="text" id="musteri_adi" placeholder="İsteğe bağlı"></div>
             <div class="giris-row"><label>Şirket Unvanı *</label><input type="text" id="sirket_unvani" required></div>
             <div class="giris-row"><label>Vergi Numarası *</label><input type="text" id="vergi_no" maxlength="10" placeholder="10 hane"></div>
             <div class="giris-row"><label>Vergi Dairesi *</label><input type="text" id="vergi_dairesi"></div>
@@ -150,7 +151,11 @@ input.error { border-color: #e74c3c !important; }
         <div class="giris-section">
             <h4>Sözleşme</h4>
             <div class="giris-row"><label>Hizmet Türü</label>
-                <select id="hizmet_turu"><option value="Sanal Ofis">Sanal Ofis</option><option value="Hazır Ofis">Hazır Ofis</option><option value="Paylaşımlı Masa">Paylaşımlı Masa</option></select>
+                <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;">
+                    <select id="hizmet_turu" style="flex:1;min-width:140px;"></select>
+                    <input type="text" id="hizmet_turu_yeni" placeholder="Yeni tür" style="flex:0 0 110px;max-width:140px;padding:6px 8px;font-size:12px;">
+                    <button type="button" class="btn-giris secondary" style="padding:6px 10px;font-size:11px;" onclick="hizmetTuruMgEkle(); return false;">Ekle</button>
+                </div>
             </div>
             <div class="giris-row"><label>Aylık Kira (₺)</label><input type="text" id="aylik_kira" placeholder="0,00"></div>
             <div class="giris-row"><label>Yıllık Kira (₺)</label><input type="text" id="yillik_kira" placeholder="0,00"></div>
@@ -277,6 +282,7 @@ const API_TCMB_CEK = "{{ url_for('tufe.tcmb_cek') }}";
 const API_KIRA_HESAPLA = "{{ url_for('kira.hesapla') }}";
 const API_KIRA_EXCEL = "{{ url_for('kira.excel_cikti') }}";
 const API_SOZLESME = "{{ url_for('musteriler.api_kyc_sozlesme') }}";
+const API_HIZMET_TURLERI = "/giris/api/hizmet-turleri";
 
 let selectedMusteriId = null;
 let aramaTimer = null;
@@ -290,6 +296,65 @@ function parseDateStr(d) {
   const p = s.split("-");
   if (p.length === 3) return p[2] + "." + p[1] + "." + p[0];
   return s;
+}
+
+function hizmetTuruMgSec(value) {
+  const sel = document.getElementById("hizmet_turu");
+  if (!sel) return;
+  const v = (value != null && value !== undefined) ? String(value).trim() : "";
+  const useVal = v || "Sanal Ofis";
+  let found = false;
+  for (let i = 0; i < sel.options.length; i++) {
+    if (sel.options[i].value === useVal) { found = true; break; }
+  }
+  if (!found) {
+    const o = document.createElement("option");
+    o.value = useVal;
+    o.textContent = useVal;
+    sel.appendChild(o);
+  }
+  sel.value = useVal;
+}
+
+async function yukleHizmetTurleriMg(preserveValue) {
+  const sel = document.getElementById("hizmet_turu");
+  if (!sel) return;
+  const cur = preserveValue != null && preserveValue !== undefined ? String(preserveValue) : sel.value;
+  try {
+    const r = await fetch(API_HIZMET_TURLERI);
+    const j = await r.json();
+    if (!j.ok || !j.turler) return;
+    sel.innerHTML = "";
+    j.turler.forEach(t => {
+      const o = document.createElement("option");
+      o.value = t.ad;
+      o.textContent = t.ad;
+      sel.appendChild(o);
+    });
+    hizmetTuruMgSec(cur && cur.trim() ? cur : "Sanal Ofis");
+  } catch (e) {
+    console.warn(e);
+  }
+}
+
+async function hizmetTuruMgEkle() {
+  const inp = document.getElementById("hizmet_turu_yeni");
+  const ad = inp ? inp.value.trim() : "";
+  if (!ad) { alert("Yeni hizmet türü adı yazın."); return; }
+  try {
+    const r = await fetch(API_HIZMET_TURLERI, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ad })
+    });
+    const j = await r.json();
+    if (!j.ok) { alert(j.mesaj || "Eklenemedi"); return; }
+    if (inp) inp.value = "";
+    await yukleHizmetTurleriMg(ad);
+    ilerlemeHesapla();
+  } catch (e) {
+    alert("Bağlantı hatası: " + e.message);
+  }
 }
 
 function ilerlemeHesapla() {
@@ -313,6 +378,7 @@ function formdanVeri() {
   });
   return {
     musteri_id: selectedMusteriId,
+    musteri_adi: (document.getElementById("musteri_adi") || {}).value,
     sirket_unvani: (document.getElementById("sirket_unvani") || {}).value,
     vergi_no: (document.getElementById("vergi_no") || {}).value,
     vergi_dairesi: (document.getElementById("vergi_dairesi") || {}).value,
@@ -347,6 +413,7 @@ function formuDoldur(data) {
   if (!data) return;
   const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v || ""; };
   const setCheck = (id, v) => { const el = document.getElementById(id); if (el) el.checked = !!v; };
+  set("musteri_adi", data.musteri_adi);
   set("sirket_unvani", data.sirket_unvani || data.unvan);
   set("vergi_no", data.vergi_no);
   set("vergi_dairesi", data.vergi_dairesi);
@@ -366,7 +433,7 @@ function formuDoldur(data) {
   set("yetkili_email", data.yetkili_email || data.email);
   set("email", data.email);
   set("yetkili_ikametgah", data.yetkili_ikametgah);
-  set("hizmet_turu", data.hizmet_turu || "Sanal Ofis");
+  hizmetTuruMgSec(data.hizmet_turu || "Sanal Ofis");
   set("aylik_kira", data.aylik_kira);
   set("yillik_kira", data.yillik_kira);
   set("sozlesme_no", data.sozlesme_no);
@@ -635,6 +702,7 @@ document.getElementById("btn-excel-cikti").onclick = function() {
 
 document.addEventListener("DOMContentLoaded", function() {
   initFlatpickr();
+  yukleHizmetTurleriMg("Sanal Ofis");
   musteriAra();
   ilerlemeHesapla();
 });
