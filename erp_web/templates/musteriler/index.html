@@ -1,12 +1,67 @@
 {% extends "layout.html" %}
 {% block page_title %}Müşteri Listesi{% endblock %}
 {% block content %}
+{% macro ml_customer_colgroup() %}
+<colgroup>
+  <col class="ml-c-unvan">
+  <col class="ml-c-yetkili">
+  <col class="ml-c-hizmet">
+  <col class="ml-c-tel">
+  <col class="ml-c-bas">
+  <col class="ml-c-kira">
+  <col class="ml-c-guncel">
+  <col class="ml-c-borc">
+  <col class="ml-c-gec">
+  <col class="ml-c-durum">
+  <col class="ml-c-kapanis">
+  <col class="ml-c-son">
+</colgroup>
+{% endmacro %}
+{% macro ml_customer_thead_tr() %}
+  <tr>
+    <th class="ml-col-unvan">
+      <select id="mlBenzer" class="ml-filter-sel ml-benzer-head-sel ml-sel-ad-unvan" title="Ad / Ünvan — çift veya benzer kayıtları listele">
+        <option value="" selected>Ad / Ünvan</option>
+        <option value="mukerrer">Benzerler: Aynı ünvan (çift)</option>
+        <option value="benzer">Benzerler: Benzer kayıtlar</option>
+        <option value="tekil">Sadece tekil olanlar</option>
+      </select>
+    </th>
+    <th class="ml-col-yetkili">Yetkili Kişi</th>
+    <th class="ml-col-hizmet">
+      <select id="mlHizmet" class="ml-filter-sel ml-hizmet-head-sel">
+        <option value="" selected>Hizmet: Tümü</option>
+        <option value="__bos__">— / Belirtilmemiş</option>
+        <option value="Mükellef">Mükellef</option>
+        <option value="Sanal ofis">Sanal ofis</option>
+        <option value="Hazır Ofis">Hazır Ofis</option>
+        <option value="Paylaşımlı Masa">Paylaşımlı Masa</option>
+      </select>
+    </th>
+    <th class="ml-col-tel">Telefon</th>
+    <th class="ml-col-bas">Baş. Tarihi <i class="fa fa-sort"></i></th>
+    <th class="ml-col-kira">İlk Kira (₺) <i class="fa fa-sort"></i></th>
+    <th class="ml-col-guncel">Güncel (₺)</th>
+    <th class="ml-col-borc">Borç (₺) <i class="fa fa-sort"></i></th>
+    <th class="ml-col-gec">Gecikme <i class="fa fa-sort"></i></th>
+    <th class="ml-col-durum">
+      <select id="mlDurum" class="ml-filter-sel ml-durum-head-sel">
+        <option value="aktif" selected>Durum: Aktif</option>
+        <option value="hepsi">Durum: Hepsi</option>
+        <option value="pasif">Durum: Pasif</option>
+        <option value="geciken">Sadece Geciken</option>
+      </select>
+    </th>
+    <th class="ml-col-kapanis">Kapanış Tarihi</th>
+    <th class="ml-col-son">Son Tahsilat</th>
+  </tr>
+{% endmacro %}
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
 <style>
 *{box-sizing:border-box}
 .ml-page{background:#080d14;min-height:100vh;padding:14px 16px;font-family:'Segoe UI',sans-serif}
-.ml-topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px}
+.ml-topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:0;padding-bottom:10px;border-bottom:1px solid rgba(0,200,255,.1);flex-wrap:wrap;gap:8px}
 .ml-topbar h1{color:#e8f1ff;font-size:18px;font-weight:800;display:flex;align-items:center;gap:8px}
 .ml-topbar h1 span{color:#00c8ff;font-size:13px;font-weight:400;font-family:monospace}
 .ml-actions{display:flex;gap:6px;flex-wrap:wrap}
@@ -16,35 +71,71 @@
 .ml-btn.excel{background:linear-gradient(135deg,#0a6640,#043d25);color:#fff}
 .ml-btn.excel-upload{background:linear-gradient(135deg,#0d7a47,#05552e);color:#fff;border:1px solid rgba(255,255,255,.2)}
 .ml-btn.ekle{background:linear-gradient(135deg,#1a5fff,#0030b3);color:#fff}
-.ml-toolbar{display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+.ml-toolbar{display:flex;align-items:center;gap:8px;margin:0;padding-top:10px;flex-wrap:wrap}
 .ml-search-wrap{position:relative;flex:1;max-width:360px}
 .ml-search-wrap i{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:#5a7a9a;font-size:11px}
 .ml-search{width:100%;padding:7px 10px 7px 30px;background:#0d1520;border:1px solid rgba(0,200,255,.15);border-radius:7px;color:#e8f1ff;font-size:11px;outline:none}
 .ml-search:focus{border-color:#00c8ff}
 .ml-filter-sel{padding:6px 10px;background:#0d1520;border:1px solid rgba(0,200,255,.12);border-radius:6px;color:#e8f1ff;font-size:11px;outline:none;cursor:pointer}
+.ml-sel-ad-unvan{color:#00c8ff!important;letter-spacing:.07em}
 .ml-stats{display:flex;gap:14px;margin-left:auto;font-size:11px;color:#5a7a9a}
 .ml-stats b{color:#e8f1ff;font-family:monospace}
 .ml-stats .red{color:#ff4557}
-.ml-table-wrap{overflow-x:auto;border-radius:10px;border:1px solid rgba(0,200,255,.08)}
-.ml-table{width:100%;border-collapse:collapse;font-size:11px;min-width:900px}
-.ml-table thead th{background:#0d1520;color:#00c8ff;padding:9px 10px;text-align:left;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid rgba(0,200,255,.1);white-space:nowrap;cursor:pointer;user-select:none}
+.ml-table-wrap{border-radius:0 0 10px 10px;border:1px solid rgba(0,200,255,.08);border-top:none;overflow:visible;margin-top:0}
+.ml-table-xscroll{overflow-x:auto;width:100%;-webkit-overflow-scrolling:touch;scrollbar-gutter:stable}
+@supports (overflow:clip){
+  .ml-table-xscroll{overflow-y:clip}
+}
+.ml-table{border-collapse:separate;border-spacing:0;font-size:11px}
+/* Tam genişlik + yüzde kolon: sağdaki boşluk sütunlara yayılır; th’ye piksel width verme (başlık üst üste biniyordu) */
+.ml-table-compact{table-layout:fixed;width:100%;min-width:920px}
+.ml-table-compact col.ml-c-unvan{width:16%}
+.ml-table-compact col.ml-c-yetkili{width:13%}
+.ml-table-compact col.ml-c-hizmet{width:8%}
+.ml-table-compact col.ml-c-tel{width:8%}
+.ml-table-compact col.ml-c-bas{width:7%}
+.ml-table-compact col.ml-c-kira{width:7%}
+.ml-table-compact col.ml-c-guncel{width:7%}
+.ml-table-compact col.ml-c-borc{width:7%}
+.ml-table-compact col.ml-c-gec{width:4%}
+.ml-table-compact col.ml-c-durum{width:9%}
+.ml-table-compact col.ml-c-kapanis{width:7%}
+.ml-table-compact col.ml-c-son{width:7%}
+.ml-table thead th{
+  background:#0d1520;color:#00c8ff;
+  padding:10px clamp(12px,0.55cm,22px);
+  text-align:left;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.25px;
+  border-bottom:1px solid rgba(0,200,255,.1);white-space:nowrap;cursor:pointer;user-select:none;vertical-align:middle;
+}
 .ml-table thead th:hover{color:#e8f1ff}
 .ml-table thead th i{margin-left:3px;opacity:.5;font-size:8px}
+.ml-table thead th.ml-col-kira,.ml-table thead th.ml-col-guncel,.ml-table thead th.ml-col-borc,.ml-table thead th.ml-col-gec{text-align:right}
 .ml-table tbody tr{cursor:pointer;transition:background .1s;border-bottom:1px solid rgba(0,200,255,.04)}
 .ml-table tbody tr:hover{background:rgba(0,200,255,.06)}
 .ml-table tbody tr:last-child{border-bottom:none}
-.ml-table td{padding:8px 10px;color:#e8f1ff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px}
-.ml-table td.num{font-family:monospace;font-size:10px;color:#5a7a9a}
-.ml-table td.name{font-weight:600;max-width:220px}
+.ml-table-compact thead th,.ml-table-compact td{min-width:0}
+.ml-table td{
+  padding:8px clamp(12px,0.55cm,22px);color:#e8f1ff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;vertical-align:middle;
+}
+.ml-table td.ml-text,.ml-table td.name,.ml-table td.yetkili,.ml-table td.hizmet,.ml-table td.tel{text-align:left}
+.ml-table td.name{font-weight:600}
+.ml-table td.ml-num,.ml-table td.kira{font-variant-numeric:tabular-nums;font-family:monospace;text-align:right}
+.ml-table thead th.ml-col-unvan .ml-benzer-head-sel{
+  display:block;width:100%;max-width:100%;min-width:0;margin:0;
+  font-size:10px;padding:4px 5px;
+}
+.ml-table thead th.ml-col-hizmet .ml-hizmet-head-sel{display:block;width:100%;max-width:100%;min-width:0;margin:0;font-size:10px;padding:4px 5px}
+.ml-table thead th.ml-col-durum .ml-durum-head-sel{display:block;width:100%;max-width:100%;min-width:0;margin:0;font-size:10px;padding:4px 5px}
+.ml-edit-mode .ml-table td.yetkili input{max-width:100%}
 .ml-table td.ofis{font-family:monospace;font-size:10px;color:#5a7a9a}
 .ml-table td.vergi{font-family:monospace;font-size:10px;color:#5a7a9a}
 .ml-table td.tarih{font-family:monospace;font-size:10px}
-.ml-table td.kira{font-family:monospace;text-align:right}
-.ml-table td.borc-pos{color:#ff4557;font-weight:700;font-family:monospace;text-align:right}
-.ml-table td.borc-zero{color:#00c8ff;font-family:monospace;text-align:right}
-.ml-table td.gec-pos{color:#ff4557;font-weight:800;font-family:monospace;text-align:center}
-.ml-table td.gec-zero{color:#00ff9d;font-family:monospace;text-align:center}
-.ml-table td.durum span{display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:10px;font-size:9px;font-weight:700}
+.ml-table td.borc-pos{color:#ff4557;font-weight:700}
+.ml-table td.borc-zero{color:#00c8ff;font-weight:700}
+.ml-table td.gec-pos{color:#ff4557;font-weight:800}
+.ml-table td.gec-zero{color:#00ff9d;font-weight:700}
+.ml-table td.durum{text-align:left}
+.ml-table td.durum span{display:inline-flex;align-items:center;gap:3px;padding:2px 6px;border-radius:10px;font-size:9px;font-weight:700}
 .durum-aktif{background:rgba(0,255,157,.1);color:#00ff9d;border:1px solid rgba(0,255,157,.2)}
 .durum-pasif{background:rgba(255,69,87,.1);color:#ff4557;border:1px solid rgba(255,69,87,.2)}
 .durum-kritik{background:rgba(255,178,36,.1);color:#ffb224;border:1px solid rgba(255,178,36,.2)}
@@ -80,6 +171,7 @@
 .ml-edit-mode .ml-table td input,.ml-edit-mode .ml-table td select{width:100%;max-width:160px;padding:4px 6px;background:#0d1520;border:1px solid rgba(0,200,255,.25);border-radius:4px;color:#e8f1ff;font-size:11px}
 .ml-edit-mode .ml-table td input:focus,.ml-edit-mode .ml-table td select:focus{outline:none;border-color:#00c8ff}
 .ml-edit-mode .ml-table td input[readonly]{opacity:.8;cursor:not-allowed}
+.ml-edit-mode .ml-table td input.flatpickr-alt-input{max-width:155px;min-width:118px;font-size:11px}
 .ml-btn.quick-edit{background:linear-gradient(135deg,#7c3aed,#5b21b6);color:#fff}
 .ml-btn.bulk-save{background:linear-gradient(135deg,#059669,#047857);color:#fff}
 .ml-btn.bulk-save[disabled]{opacity:.6;cursor:not-allowed}
@@ -91,6 +183,41 @@
 .ml-view-wrap{display:block}
 .yenile-ay-bar .ml-ay-btn{margin-right:4px}
 .yenile-ay-bar .ml-ay-btn.aktif{background:#00c8ff;color:#080d14;border-color:#00c8ff}
+/* Sabit küme: üst başlık + filtreler + tablo başlık satırı (#mlHeadTable). Gövde ayrı tabloda; genişlik + scrollLeft senkron. */
+:root{--ml-header-h:108px}
+.ml-fixed-head-cluster{
+  position:fixed;
+  top:var(--ml-header-h);
+  z-index:45;
+  box-sizing:border-box;
+  background:#080d14;
+  border:1px solid rgba(0,200,255,.12);
+  border-radius:10px 10px 0 0;
+  box-shadow:0 10px 32px rgba(0,0,0,.55);
+}
+.ml-pinned-thead-xscroll{
+  overflow-x:auto;
+  overflow-y:hidden;
+  width:100%;
+  -webkit-overflow-scrolling:touch;
+  border-top:1px solid rgba(0,200,255,.1);
+  scrollbar-width:none;
+  -ms-overflow-style:none;
+}
+.ml-pinned-thead-xscroll::-webkit-scrollbar{height:0}
+#mlHeadTable{margin:0;border-collapse:separate;border-spacing:0}
+#musteri-listesi-view .ml-sticky-block{
+  display:flow-root;
+  position:static;
+  margin:0;
+  padding:10px 12px 12px;
+  border:none;
+  border-radius:0;
+  box-shadow:none;
+  background:transparent;
+}
+.ml-fixed-head-spacer{height:0;flex-shrink:0;pointer-events:none}
+#musteri-listesi-view .ml-table-wrap{z-index:0}
 </style>
 
 <script>
@@ -104,6 +231,8 @@ window.setActiveTab = function(tabId) {
 <div class="ml-view-wrap">
   <!-- 1) Müşteri Listesi görünümü (varsayılan) -->
   <div id="musteri-listesi-view" class="ml-page">
+  <div id="mlFixedHeadCluster" class="ml-fixed-head-cluster">
+  <div class="ml-sticky-block">
   <!-- TOP BAR -->
   <div class="ml-topbar">
     <h1><i class="fa fa-users" style="color:#00c8ff"></i> Müşteri Listesi <span id="mlTitleCount">{{ musteriler|length }} kayıt</span></h1>
@@ -120,7 +249,7 @@ window.setActiveTab = function(tabId) {
   <div class="ml-toolbar">
     <div class="ml-search-wrap">
       <i class="fa fa-search"></i>
-      <input class="ml-search" id="mlQ" type="text" placeholder="Müşteri ara..." value="{{ arama or '' }}">
+      <input class="ml-search" id="mlQ" type="text" placeholder="Ünvan, müşteri adı veya yetkili ara…" value="{{ arama or '' }}">
     </div>
     <select class="ml-filter-sel" id="mlDurumTop">
       <option value="aktif" selected>Durum: Aktif</option>
@@ -142,6 +271,12 @@ window.setActiveTab = function(tabId) {
       <option value="Sanal ofis">Sanal ofis</option>
       <option value="Hazır Ofis">Hazır Ofis</option>
       <option value="Paylaşımlı Masa">Paylaşımlı Masa</option>
+    </select>
+    <select class="ml-filter-sel ml-sel-ad-unvan" id="mlBenzerTop" title="Ad / Ünvan — çift veya benzer kayıtları listele">
+      <option value="" selected>Ad / Ünvan</option>
+      <option value="mukerrer">Benzerler: Aynı ünvan (çift)</option>
+      <option value="benzer">Benzerler: Benzer kayıtlar</option>
+      <option value="tekil">Sadece tekil olanlar</option>
     </select>
     <button type="button" id="btn-quick-edit" class="ml-btn quick-edit"><i class="fa fa-edit"></i> Hızlı Bilgi Gir</button>
     <button type="button" id="btn-yenile-ay" class="ml-btn back" title="Sözleşme ayına göre filtrele"><i class="fa fa-refresh"></i> Yenile</button>
@@ -171,42 +306,18 @@ window.setActiveTab = function(tabId) {
     <button type="button" class="ml-btn back ml-ay-btn" data-ay="11">Kasım</button>
     <button type="button" class="ml-btn back ml-ay-btn" data-ay="12">Aralık</button>
   </div>
+  </div>
+  <div class="ml-pinned-thead-xscroll" id="mlHeadXScroll">
+    <table class="ml-table ml-table-compact" id="mlHeadTable">{{ ml_customer_colgroup() }}<thead>{{ ml_customer_thead_tr() }}</thead></table>
+  </div>
+  </div>
+  <div id="mlFixedHeadSpacer" class="ml-fixed-head-spacer" aria-hidden="true"></div>
 
   <!-- TABLE -->
   <div class="ml-table-wrap">
-    <table class="ml-table" id="mlTable">
-      <thead>
-        <tr>
-          <th style="width:40px">#</th>
-          <th>Ad / Ünvan <i class="fa fa-sort"></i></th>
-          <th>Yetkili Kişi</th>
-          <th>
-            <select id="mlHizmet" class="ml-filter-sel" style="margin-left:0;min-width:128px;max-width:160px;">
-              <option value="" selected>Hizmet: Tümü</option>
-              <option value="__bos__">— / Belirtilmemiş</option>
-              <option value="Mükellef">Mükellef</option>
-              <option value="Sanal ofis">Sanal ofis</option>
-              <option value="Hazır Ofis">Hazır Ofis</option>
-              <option value="Paylaşımlı Masa">Paylaşımlı Masa</option>
-            </select>
-          </th>
-          <th>Telefon</th>
-          <th>Baş. Tarihi <i class="fa fa-sort"></i></th>
-          <th style="text-align:right">İlk Kira (₺) <i class="fa fa-sort"></i></th>
-          <th style="text-align:right">Güncel (₺)</th>
-          <th style="text-align:right">Borç (₺) <i class="fa fa-sort"></i></th>
-          <th style="text-align:center">Gecikme <i class="fa fa-sort"></i></th>
-          <th>
-            <select id="mlDurum" class="ml-filter-sel" style="margin-left:0;min-width:110px;">
-              <option value="aktif" selected>Durum: Aktif</option>
-              <option value="hepsi">Durum: Hepsi</option>
-              <option value="pasif">Durum: Pasif</option>
-              <option value="geciken">Sadece Geciken</option>
-            </select>
-          </th>
-          <th>Son Tahsilat</th>
-        </tr>
-      </thead>
+    <div class="ml-table-xscroll" id="mlBodyXScroll">
+    <table class="ml-table ml-table-compact" id="mlTable">
+      {{ ml_customer_colgroup() }}
       <tbody id="mlBody">
         {% for m in musteriler %}
         {% set borc = m.get('toplam_borc', 0) or 0 %}
@@ -219,7 +330,10 @@ window.setActiveTab = function(tabId) {
         {% set bas_tarih_str = bas_tarih_val.strftime('%Y-%m-%d') if bas_tarih_val and bas_tarih_val.__class__.__name__ in ('date', 'datetime') else ((bas_tarih_val|string|trim)[:10] if bas_tarih_val else '') %}
         {% set kap_iso = ((m.get('kapanis_tarihi')|string)|trim)[:10] if m.get('kapanis_tarihi') else '' %}
         <tr class="ml-row" data-id="{{ m.id }}"
+            data-name-display="{{ (m.name or '')|e }}"
             data-name="{{ (m.name or '')|lower }}"
+            data-musteri-adi="{{ (m.get('musteri_adi') or '')|e }}"
+            data-musteri-adi-l="{{ (m.get('musteri_adi') or '')|lower }}"
             data-ofis="{{ (m.office_code or '')|lower }}"
             data-geciken="{{ gec }}"
             data-durum="{{ 'pasif' if db_durum == 'pasif' else ('geciken' if gec > 0 else 'aktif') }}"
@@ -234,23 +348,19 @@ window.setActiveTab = function(tabId) {
             data-son-tahsilat="{{ son_tah_str|e }}"
             data-bas-tarih="{{ bas_tarih_str|e }}"
             onclick="var ev=event; if(document.querySelector('.ml-table-wrap.ml-edit-mode')) return; if(ev.target.closest('td.durum')) return; window.location.href='/musteriler/{{ m.id }}'">
-          <td class="num">{{ loop.index }}</td>
           <td class="name" title="{{ m.name or '' }}">{{ m.name or '—' }}</td>
           <td class="yetkili">{{ m.get('yetkili_kisi') or '—' }}</td>
-          <td class="hizmet">{{ m.get('hizmet_turu') or '—' }}</td>
-          <td class="tel">{{ m.phone or '—' }}</td>
-          <td class="tarih">{{ m.get('rent_start_date') or m.get('sozlesme_baslangic') or m.get('baslangic_tarihi') or '—' }}</td>
-          <td class="kira">{{ "{:,.2f}".format(ilk_kira) if ilk_kira else '—' }}</td>
+          <td class="hizmet ml-text">{{ m.get('hizmet_turu') or '—' }}</td>
+          <td class="tel ml-text">{{ m.phone or '—' }}</td>
+          <td class="tarih ml-text ml-col-bas">{{ m.get('rent_start_date') or m.get('sozlesme_baslangic') or m.get('baslangic_tarihi') or '—' }}</td>
+          <td class="kira ml-num">{{ "{:,.2f}".format(ilk_kira) if ilk_kira else '—' }}</td>
           {% set guncel = m.get('guncel_kira_bedeli') %}
-          <td class="kira">{% if guncel is number and guncel == guncel and guncel != 0 %}{{ "{:,.2f}".format(guncel) }}{% else %}—{% endif %}</td>
-          <td class="{{ 'borc-pos' if borc > 0 else 'borc-zero' }}">{{ "{:,.2f}".format(borc) }}</td>
-          <td class="{{ 'gec-pos' if gec > 0 else 'gec-zero' }}">{{ gec }}</td>
+          <td class="kira ml-num">{% if guncel is number and guncel == guncel and guncel != 0 %}{{ "{:,.2f}".format(guncel) }}{% else %}—{% endif %}</td>
+          <td class="ml-num {{ 'borc-pos' if borc > 0 else 'borc-zero' }}">{{ "{:,.2f}".format(borc) }}</td>
+          <td class="ml-num {{ 'gec-pos' if gec > 0 else 'gec-zero' }}">{{ gec }}</td>
           <td class="durum" title="Aktif/Geciken/Kritik: tıkla → pasif + kapanış tarihi. Pasif: tıkla → tekrar aktif.">
             {% if db_durum == 'pasif' %}
               <span class="durum-pasif"><i class="fa fa-pause-circle"></i> Pasif</span>
-              {% if kap_iso|length == 10 %}
-              <div class="ml-kapanis-note">Kapanış: {{ kap_iso[8:10] }}.{{ kap_iso[5:7] }}.{{ kap_iso[0:4] }}</div>
-              {% endif %}
             {% elif gec > 30 %}
               <span class="durum-kritik"><i class="fa fa-exclamation-triangle"></i> Kritik</span>
             {% elif gec > 0 %}
@@ -259,13 +369,15 @@ window.setActiveTab = function(tabId) {
               <span class="durum-aktif"><i class="fa fa-check"></i> Aktif</span>
             {% endif %}
           </td>
-          <td class="tarih">{{ m.get('son_odeme_tarihi') or m.get('son_tahsilat') or '—' }}</td>
+          <td class="tarih ml-text ml-kapanis-col ml-col-kapanis" title="Kapanış tarihi">{% if kap_iso|length == 10 %}{{ kap_iso[8:10] }}.{{ kap_iso[5:7] }}.{{ kap_iso[0:4] }}{% else %}—{% endif %}</td>
+          <td class="tarih ml-text ml-col-son">{{ m.get('son_odeme_tarihi') or m.get('son_tahsilat') or '—' }}</td>
         </tr>
         {% else %}
-        <tr><td colspan="11" class="ml-empty"><i class="fa fa-inbox"></i>Müşteri bulunamadı</td></tr>
+        <tr><td colspan="12" class="ml-empty"><i class="fa fa-inbox"></i>Müşteri bulunamadı</td></tr>
         {% endfor %}
       </tbody>
     </table>
+    </div>
   </div>
 
   <!-- FOOTER -->
@@ -318,9 +430,6 @@ function refreshDurumCell(tr, dbDurumVal, kapanisIso) {
   var html;
   if (v === 'pasif') {
     html = '<span class="durum-pasif"><i class="fa fa-pause-circle"></i> Pasif</span>';
-    if (kapAttr.length === 10) {
-      html += '<div class="ml-kapanis-note">Kapanış: ' + fmtKapTr(kapAttr) + '</div>';
-    }
   } else if (gec > 30) {
     html = '<span class="durum-kritik"><i class="fa fa-exclamation-triangle"></i> Kritik</span>';
   } else if (gec > 0) {
@@ -329,6 +438,10 @@ function refreshDurumCell(tr, dbDurumVal, kapanisIso) {
     html = '<span class="durum-aktif"><i class="fa fa-check"></i> Aktif</span>';
   }
   td.innerHTML = html;
+  var kapTd = tr.querySelector('td.ml-kapanis-col');
+  if (kapTd) {
+    kapTd.textContent = kapAttr.length === 10 ? fmtKapTr(kapAttr) : '—';
+  }
   filterTable();
 }
 
@@ -503,12 +616,75 @@ function rowMatchesHizmetFilter(rowHizmetRaw, filtVal) {
   return normHizmetStr(rowH) === normHizmetStr(filtVal);
 }
 
+function mlNormNameKey(s) {
+  var t = String(s || '').toLowerCase().trim().replace(/\s+/g, ' ');
+  return t.replace(/ı/g, 'i').replace(/ğ/g, 'g').replace(/ü/g, 'u').replace(/ş/g, 's').replace(/ö/g, 'o').replace(/ç/g, 'c');
+}
+function mlNamesSimilar(seedNorm, rowNorm, strict) {
+  if (!seedNorm || !rowNorm) return false;
+  if (strict) return seedNorm === rowNorm;
+  if (seedNorm === rowNorm) return true;
+  if (seedNorm.length < 3 || rowNorm.length < 3) return seedNorm === rowNorm;
+  if (seedNorm.indexOf(rowNorm) !== -1 || rowNorm.indexOf(seedNorm) !== -1) return true;
+  var a0 = seedNorm.split(' ')[0] || '';
+  var b0 = rowNorm.split(' ')[0] || '';
+  if (a0.length >= 4 && b0.length >= 4 && a0 === b0) return true;
+  var wa = seedNorm.split(' ').filter(function(w) { return w.length >= 5; });
+  var wb = rowNorm.split(' ');
+  for (var i = 0; i < wa.length; i++) {
+    for (var j = 0; j < wb.length; j++) {
+      if (wa[i] === wb[j]) return true;
+    }
+  }
+  return false;
+}
+
+window._mlBenzerSetsBuilt = false;
+window._mlBenzerMukerrerIds = null;
+window._mlBenzerBenzerIds = null;
+
+function mlEnsureBenzerSets() {
+  if (window._mlBenzerSetsBuilt) return;
+  var rows = allRows;
+  var normCount = {};
+  rows.forEach(function(tr) {
+    var n = mlNormNameKey(tr.getAttribute('data-name-display') || '');
+    tr.setAttribute('data-name-norm', n);
+    if (!normCount[n]) normCount[n] = [];
+    normCount[n].push(tr);
+  });
+  var muk = new Set();
+  Object.keys(normCount).forEach(function(k) {
+    if (!k) return;
+    if (normCount[k].length >= 2) {
+      normCount[k].forEach(function(tr) { muk.add(tr.getAttribute('data-id')); });
+    }
+  });
+  var ben = new Set(muk);
+  for (var i = 0; i < rows.length; i++) {
+    var ni = rows[i].getAttribute('data-name-norm') || '';
+    for (var j = i + 1; j < rows.length; j++) {
+      var nj = rows[j].getAttribute('data-name-norm') || '';
+      if (mlNamesSimilar(ni, nj, false)) {
+        ben.add(rows[i].getAttribute('data-id'));
+        ben.add(rows[j].getAttribute('data-id'));
+      }
+    }
+  }
+  window._mlBenzerMukerrerIds = muk;
+  window._mlBenzerBenzerIds = ben;
+  window._mlBenzerSetsBuilt = true;
+}
+
 function filterTable(){
   var q = (document.getElementById('mlQ').value || '').toLowerCase();
   var durum = document.getElementById('mlDurum').value;
   var ofis = document.getElementById('mlOfis').value.toLowerCase();
   var hizmetSel = document.getElementById('mlHizmet');
   var hizmetFilt = hizmetSel ? (hizmetSel.value || '').trim() : '';
+  var benzerSel = document.getElementById('mlBenzer');
+  var benzerVal = benzerSel ? benzerSel.value : '';
+  if (benzerVal === 'mukerrer' || benzerVal === 'benzer' || benzerVal === 'tekil') mlEnsureBenzerSets();
   var shown = 0;
   allRows.forEach(function(tr){
     var name = tr.getAttribute('data-name') || '';
@@ -518,7 +694,11 @@ function filterTable(){
     var geciken = parseInt(tr.getAttribute('data-geciken') || '0');
     var basTarih = (tr.getAttribute('data-bas-tarih') || '').trim();
     var ok = true;
-    if(q && name.indexOf(q) === -1) ok = false;
+    if (q) {
+      var mAdi = (tr.getAttribute('data-musteri-adi-l') || '');
+      var yet = (tr.getAttribute('data-yetkili') || '').toLowerCase();
+      if (name.indexOf(q) === -1 && mAdi.indexOf(q) === -1 && yet.indexOf(q) === -1) ok = false;
+    }
     if(ofis && rowOfis !== ofis) ok = false;
     if (ok && !rowMatchesHizmetFilter(rowHizmet, hizmetFilt)) ok = false;
     if(sozlesmeAySecili > 0) {
@@ -542,20 +722,162 @@ function filterTable(){
       }
     }
 
+    if (ok && benzerVal === 'mukerrer') {
+      var idm = tr.getAttribute('data-id');
+      if (!window._mlBenzerMukerrerIds || !window._mlBenzerMukerrerIds.has(idm)) ok = false;
+    }
+    if (ok && benzerVal === 'benzer') {
+      var idb = tr.getAttribute('data-id');
+      if (!window._mlBenzerBenzerIds || !window._mlBenzerBenzerIds.has(idb)) ok = false;
+    }
+
     tr.style.display = ok ? '' : 'none';
     if(ok) shown++;
   });
+  if (benzerVal === 'tekil') {
+    var visTek = allRows.filter(function(tr) { return tr.style.display !== 'none'; });
+    var byNorm = {};
+    visTek.forEach(function(tr) {
+      var n = tr.getAttribute('data-name-norm') || '';
+      if (!byNorm[n]) byNorm[n] = [];
+      byNorm[n].push(tr);
+    });
+    visTek.forEach(function(tr) {
+      var n = tr.getAttribute('data-name-norm') || '';
+      var grp = byNorm[n];
+      if (!grp || grp.length <= 1 || n === '') return;
+      var minId = Infinity;
+      grp.forEach(function(r) {
+        var id = parseInt(r.getAttribute('data-id'), 10);
+        if (!isNaN(id) && id < minId) minId = id;
+      });
+      if (minId === Infinity) return;
+      var myId = parseInt(tr.getAttribute('data-id'), 10);
+      if (!isNaN(myId) && myId !== minId) tr.style.display = 'none';
+    });
+    shown = allRows.filter(function(tr) { return tr.style.display !== 'none'; }).length;
+  }
+  if (benzerVal) {
+    var tb = document.getElementById('mlBody');
+    var vis = allRows.filter(function(tr) { return tr.style.display !== 'none'; });
+    vis.sort(function(a, b) {
+      var na = a.getAttribute('data-name-norm') || '';
+      var nb = b.getAttribute('data-name-norm') || '';
+      if (na !== nb) return na.localeCompare(nb);
+      return (a.getAttribute('data-name-display') || '').localeCompare(b.getAttribute('data-name-display') || '', 'tr');
+    });
+    vis.forEach(function(tr) { tb.appendChild(tr); });
+  }
   var tc = document.getElementById('mlTitleCount');
   if (tc) tc.textContent = shown + ' kayıt';
   var mc = document.getElementById('mlCount');
   if (mc) mc.textContent = shown;
   var ms = document.getElementById('mlShown');
   if (ms) ms.textContent = shown;
+  mlClusterLayoutRequest();
+}
+
+var _mlClusterRaf = null;
+function mlClusterLayoutRequest() {
+  if (_mlClusterRaf != null) return;
+  _mlClusterRaf = requestAnimationFrame(function() {
+    _mlClusterRaf = null;
+    mlLayoutFixedCluster();
+  });
+}
+
+function mlLayoutFixedCluster() {
+  var view = document.getElementById('musteri-listesi-view');
+  var cluster = document.getElementById('mlFixedHeadCluster');
+  var spacer = document.getElementById('mlFixedHeadSpacer');
+  if (!view || !cluster || !spacer) return;
+
+  if (window.getComputedStyle(view).display === 'none') {
+    cluster.style.visibility = 'hidden';
+    cluster.style.pointerEvents = 'none';
+    spacer.style.height = '0px';
+    return;
+  }
+  cluster.style.visibility = '';
+  cluster.style.pointerEvents = '';
+
+  var hdr = document.querySelector('header.header');
+  /* height yerine bottom: ceil(height) üstüne yuvarlayınca 1px altında boşluk kalıp kayıcı içerik sızdırıyordu */
+  var hh = hdr ? hdr.getBoundingClientRect().bottom : 108;
+  document.documentElement.style.setProperty('--ml-header-h', hh + 'px');
+
+  var r = view.getBoundingClientRect();
+  cluster.style.left = Math.round(r.left) + 'px';
+  cluster.style.width = Math.round(r.width) + 'px';
+
+  spacer.style.height = Math.ceil(cluster.offsetHeight) + 'px';
+  requestAnimationFrame(function() {
+    spacer.style.height = Math.ceil(cluster.offsetHeight) + 'px';
+    mlSyncHeadBodyColWidths();
+    mlSyncHeadBodyScrollLeft();
+    requestAnimationFrame(function() {
+      mlSyncHeadBodyColWidths();
+      mlSyncHeadBodyScrollLeft();
+    });
+  });
+}
+
+var _mlHeadBodyScrollLock = false;
+function mlSyncHeadBodyScrollLeft() {
+  var h = document.getElementById('mlHeadXScroll');
+  var b = document.getElementById('mlBodyXScroll');
+  if (!h || !b) return;
+  _mlHeadBodyScrollLock = true;
+  h.scrollLeft = b.scrollLeft;
+  _mlHeadBodyScrollLock = false;
+}
+
+function mlBindHeadBodyScrollSync() {
+  var h = document.getElementById('mlHeadXScroll');
+  var b = document.getElementById('mlBodyXScroll');
+  if (!h || !b || h.dataset.mlScrollBound === '1') return;
+  h.dataset.mlScrollBound = '1';
+  h.addEventListener('scroll', function() {
+    if (_mlHeadBodyScrollLock) return;
+    _mlHeadBodyScrollLock = true;
+    b.scrollLeft = h.scrollLeft;
+    _mlHeadBodyScrollLock = false;
+  });
+  b.addEventListener('scroll', function() {
+    if (_mlHeadBodyScrollLock) return;
+    _mlHeadBodyScrollLock = true;
+    h.scrollLeft = b.scrollLeft;
+    _mlHeadBodyScrollLock = false;
+  });
+}
+
+function mlSyncHeadBodyColWidths() {
+  var headTable = document.getElementById('mlHeadTable');
+  var bodyTable = document.getElementById('mlTable');
+  var bodyScroll = document.getElementById('mlBodyXScroll');
+  if (!headTable || !bodyTable) return;
+  headTable.querySelectorAll('thead th').forEach(function(th) {
+    th.style.width = '';
+    th.style.minWidth = '';
+    th.style.maxWidth = '';
+  });
+  var trackW = bodyScroll ? bodyScroll.clientWidth : bodyTable.getBoundingClientRect().width;
+  if (trackW > 0) {
+    headTable.style.width = trackW + 'px';
+    bodyTable.style.width = '100%';
+  }
+}
+
+function mlSyncStickyHeights() {
+  var view = document.getElementById('musteri-listesi-view');
+  if (!view || window.getComputedStyle(view).display === 'none') return;
+  mlLayoutFixedCluster();
 }
 
 document.getElementById('btn-yenile-ay').addEventListener('click', function(){
   var bar = document.getElementById('yenile-ay-bar');
   bar.style.display = bar.style.display === 'none' ? 'flex' : 'none';
+  mlSyncStickyHeights();
 });
 document.querySelectorAll('.ml-ay-btn').forEach(function(btn){
   btn.addEventListener('click', function(){
@@ -603,8 +925,35 @@ if (mlHizmetHeader && mlHizmetTop) {
 
 filterTable();
 
+var mlBenzerHeader = document.getElementById('mlBenzer');
+var mlBenzerTop = document.getElementById('mlBenzerTop');
+if (mlBenzerHeader && mlBenzerTop) {
+  mlBenzerHeader.addEventListener('change', function() {
+    mlBenzerTop.value = mlBenzerHeader.value;
+    filterTable();
+  });
+  mlBenzerTop.addEventListener('change', function() {
+    mlBenzerHeader.value = mlBenzerTop.value;
+    filterTable();
+  });
+} else if (mlBenzerHeader) {
+  mlBenzerHeader.addEventListener('change', filterTable);
+} else if (mlBenzerTop) {
+  mlBenzerTop.addEventListener('change', filterTable);
+}
+
+window.addEventListener('resize', function() { mlSyncStickyHeights(); });
+window.addEventListener('load', function() { mlSyncStickyHeights(); });
+setTimeout(mlSyncStickyHeights, 0);
+setTimeout(mlSyncStickyHeights, 300);
+setTimeout(function() { mlSyncHeadBodyColWidths(); mlSyncHeadBodyScrollLeft(); }, 120);
+window.addEventListener('scroll', mlClusterLayoutRequest, { passive: true });
+mlBindHeadBodyScrollSync();
+mlSyncStickyHeights();
+
 function showGirisView() {
   document.getElementById('musteri-listesi-view').style.display = 'none';
+  mlLayoutFixedCluster();
   var girisView = document.getElementById('giris-embed-view');
   girisView.style.display = 'flex';
   document.getElementById('giris-iframe').src = '/giris/';
@@ -615,6 +964,7 @@ function showListeView() {
   document.getElementById('musteri-listesi-view').style.display = 'block';
   document.getElementById('giris-iframe').src = 'about:blank';
   if (window.setActiveTab) window.setActiveTab('musteriler');
+  requestAnimationFrame(function() { mlSyncStickyHeights(); });
 }
 
 document.getElementById('btn-musteri-ekle-giris').addEventListener('click', function(e) { e.preventDefault(); showGirisView(); });
@@ -622,7 +972,7 @@ document.getElementById('btn-musteri-ekle-giris-footer').addEventListener('click
 document.getElementById('btn-listeye-don').addEventListener('click', function(e) { e.preventDefault(); showListeView(); });
 
 // Sütun sıralama (başlıktaki <select> ile sıralama tetiklenmesin)
-document.querySelectorAll('.ml-table thead th').forEach(function(th, idx){
+document.querySelectorAll('#mlHeadTable thead th').forEach(function(th, idx){
   th.addEventListener('click', function(ev){
     if (ev && ev.target && ev.target.closest && ev.target.closest('select')) return;
     if (document.querySelector('.ml-table-wrap.ml-edit-mode')) return;
@@ -656,6 +1006,65 @@ var DURUM_OPTIONS = [{v:'aktif', l:'Aktif'}, {v:'pasif', l:'Pasif'}];
 function numVal(n) { return (n === '' || n === null || n === undefined) ? '' : (typeof n === 'number' ? n : parseFloat(String(n))); }
 function strVal(s) { return (s == null || s === undefined) ? '' : String(s).trim(); }
 
+function mlQEditFpVisibleVal(el) {
+  if (!el) return '';
+  var fp = el._flatpickr;
+  if (fp && fp.altInput) return (fp.altInput.value || '').trim();
+  return (el.value || '').trim();
+}
+/** Hızlı bilgi tarih alanları: takvim + 01012026 / 010125 (erp-tarih-hizli) */
+function mlInitQEditFlatpickr(inp, iso10, markFn) {
+  if (typeof flatpickr !== 'function') {
+    inp.type = 'date';
+    inp.removeAttribute('placeholder');
+    var s = iso10 ? String(iso10).substring(0, 10) : '';
+    if (s.length === 10 && s[4] === '-') inp.value = s;
+    return false;
+  }
+  var trLoc = (flatpickr.l10ns && flatpickr.l10ns.tr) ? flatpickr.l10ns.tr : undefined;
+  var conf = {
+    dateFormat: 'Y-m-d',
+    altInput: true,
+    altFormat: 'd.m.Y',
+    allowInput: true,
+    locale: trLoc,
+    disableMobile: true,
+    monthSelectorType: 'dropdown',
+    clickOpens: true,
+    onChange: markFn,
+    onClose: markFn
+  };
+  var iso = iso10 ? String(iso10).substring(0, 10) : '';
+  if (iso.length === 10 && iso[4] === '-') conf.defaultDate = iso;
+  flatpickr(inp, conf);
+  if (inp._flatpickr && typeof erpBindFlatpickrInstance === 'function') {
+    erpBindFlatpickrInstance(inp._flatpickr);
+  }
+  if (inp._flatpickr && inp._flatpickr.altInput) {
+    var alt = inp._flatpickr.altInput;
+    alt.addEventListener('input', markFn);
+    alt.addEventListener('blur', markFn);
+  }
+  return true;
+}
+function mlSetKapanisQEditEnabled(inpKap, on) {
+  var fp = inpKap && inpKap._flatpickr;
+  if (fp) {
+    fp.set('clickOpens', !!on);
+    fp._input.disabled = !on;
+    if (fp.altInput) {
+      fp.altInput.disabled = !on;
+      fp.altInput.readOnly = !on;
+      fp.altInput.style.pointerEvents = on ? '' : 'none';
+      fp.altInput.style.opacity = on ? '1' : '0.45';
+    }
+    if (!on) fp.clear();
+  } else if (inpKap) {
+    inpKap.disabled = !on;
+    if (!on) inpKap.value = '';
+  }
+}
+
 function enterQuickEditMode() {
   var wrap = document.querySelector('.ml-table-wrap');
   if (!wrap || wrap.classList.contains('ml-edit-mode')) return;
@@ -677,10 +1086,25 @@ function enterQuickEditMode() {
     var guncelKira = tr.getAttribute('data-guncel-kira') || '';
     var borc = tr.getAttribute('data-borc') || '';
     var durumVal = tr.getAttribute('data-durum-val') || 'aktif';
+    var kapanisIso = (tr.getAttribute('data-kapanis') || '').substring(0, 10);
     var sonTahsilat = tr.getAttribute('data-son-tahsilat') || '';
 
-    // 2 Yetkili Kişi
-    var td2 = tr.cells[2];
+    function markIfChanged(el, td) {
+      var orig = (el.dataset.original || '').trim();
+      var cur;
+      if (el._flatpickr && el._flatpickr.altInput) {
+        cur = mlQEditFpVisibleVal(el);
+      } else if (el.type === 'number') {
+        cur = el.value === '' ? '' : String(parseFloat(el.value) || 0);
+      } else {
+        cur = (el.value || '').trim();
+      }
+      if (cur !== orig) td.classList.add('ml-cell-changed'); else td.classList.remove('ml-cell-changed');
+      document.getElementById('btn-bulk-save').disabled = !document.querySelectorAll('.ml-cell-changed').length;
+    }
+
+    // 1 Yetkili Kişi
+    var td2 = tr.cells[1];
     var orig2 = strVal(td2.textContent);
     td2.innerHTML = '';
     var inp2 = document.createElement('input');
@@ -691,8 +1115,8 @@ function enterQuickEditMode() {
     inp2.dataset.key = 'yetkili_kisi';
     td2.appendChild(inp2);
 
-    // 3 Hizmet Türü
-    var td3 = tr.cells[3];
+    // 2 Hizmet Türü
+    var td3 = tr.cells[2];
     var orig3 = strVal(td3.textContent);
     td3.innerHTML = '';
     var sel3 = document.createElement('select');
@@ -707,8 +1131,8 @@ function enterQuickEditMode() {
     sel3.value = hizmet;
     td3.appendChild(sel3);
 
-    // 4 Telefon
-    var td4 = tr.cells[4];
+    // 3 Telefon
+    var td4 = tr.cells[3];
     var orig4 = strVal(td4.textContent);
     td4.innerHTML = '';
     var inp4 = document.createElement('input');
@@ -719,20 +1143,27 @@ function enterQuickEditMode() {
     inp4.dataset.key = 'phone';
     td4.appendChild(inp4);
 
-    // 5 Baş. Tarihi (giriş tarihi)
-    var td5 = tr.cells[5];
-    var orig5 = (td5.textContent || '').trim();
+    // 4 Baş. Tarihi — Flatpickr + hızlı rakam
+    var td5 = tr.cells[4];
+    var basIso = (basTarih && basTarih.length >= 10) ? basTarih.substring(0, 10) : '';
+    var orig5 = basIso.length === 10 ? fmtKapTr(basIso) : (td5.textContent || '').trim();
     td5.innerHTML = '';
     var inp5 = document.createElement('input');
-    inp5.type = 'date';
-    inp5.title = 'Gün / Ay / Yıl seçmek için tıklayın';
-    inp5.value = (basTarih && basTarih.length >= 10) ? basTarih.substring(0, 10) : '';
+    inp5.type = 'text';
+    inp5.className = 'ml-qedit-date';
+    inp5.setAttribute('autocomplete', 'off');
+    inp5.placeholder = 'gg.aa.yyyy veya 01012026';
+    inp5.title = 'Takvim veya 01012026 / 010125';
     inp5.dataset.original = orig5;
     inp5.dataset.key = 'rent_start_date';
+    inp5.value = '';
     td5.appendChild(inp5);
+    if (!mlInitQEditFlatpickr(inp5, basIso, function() { markIfChanged(inp5, td5); })) {
+      inp5.dataset.original = basIso || '';
+    }
 
-    // 6 İlk Kira
-    var td6 = tr.cells[6];
+    // 5 İlk Kira
+    var td6 = tr.cells[5];
     var orig6 = (td6.textContent || '').trim();
     td6.innerHTML = '';
     var inp6 = document.createElement('input');
@@ -745,8 +1176,8 @@ function enterQuickEditMode() {
     inp6.dataset.key = 'ilk_kira_bedeli';
     td6.appendChild(inp6);
 
-    // 7 Güncel Kira
-    var td7 = tr.cells[7];
+    // 6 Güncel Kira
+    var td7 = tr.cells[6];
     var orig7 = (td7.textContent || '').trim();
     td7.innerHTML = '';
     var inp7 = document.createElement('input');
@@ -759,8 +1190,8 @@ function enterQuickEditMode() {
     inp7.dataset.key = 'guncel_kira_bedeli';
     td7.appendChild(inp7);
 
-    // 8 Borç
-    var td8 = tr.cells[8];
+    // 7 Borç
+    var td8 = tr.cells[7];
     var orig8 = (td8.textContent || '').trim();
     td8.innerHTML = '';
     var inp8 = document.createElement('input');
@@ -773,8 +1204,8 @@ function enterQuickEditMode() {
     td8.appendChild(inp8);
 
     // 9 Gecikme — salt okunur, içeriği koru
-    // 10 Durum
-    var td10 = tr.cells[10];
+    // 9 Durum
+    var td10 = tr.cells[9];
     var orig10 = (td10.textContent || '').trim();
     td10.innerHTML = '';
     var sel10 = document.createElement('select');
@@ -789,31 +1220,60 @@ function enterQuickEditMode() {
     sel10.value = durumVal;
     td10.appendChild(sel10);
 
-    // 11 Son Tahsilat (takvimden gün/ay/yıl seçimi)
-    var td11 = tr.cells[11];
-    var orig11 = (td11.textContent || '').trim();
-    td11.innerHTML = '';
-    var inp11 = document.createElement('input');
-    inp11.type = 'date';
-    inp11.title = 'Gün / Ay / Yıl seçmek için tıklayın';
-    inp11.value = (sonTahsilat && sonTahsilat.length >= 10) ? sonTahsilat.substring(0, 10) : '';
-    inp11.dataset.original = orig11;
-    inp11.dataset.key = 'son_odeme_tarihi';
-    td11.appendChild(inp11);
-
-    function markIfChanged(el, td) {
-      var orig = (el.dataset.original || '').trim();
-      var cur = (el.value || '').trim();
-      if (el.type === 'number') cur = el.value === '' ? '' : String(parseFloat(el.value) || 0);
-      if (cur !== orig) td.classList.add('ml-cell-changed'); else td.classList.remove('ml-cell-changed');
-      document.getElementById('btn-bulk-save').disabled = !document.querySelectorAll('.ml-cell-changed').length;
+    // 10 Kapanış tarihi — Flatpickr + hızlı rakam (01012026); pasifte açık
+    var tdKap = tr.cells[10];
+    var origKap = (tdKap.textContent || '').trim();
+    tdKap.innerHTML = '';
+    var inpKap = document.createElement('input');
+    inpKap.type = 'text';
+    inpKap.className = 'ml-qedit-kapanis';
+    inpKap.setAttribute('autocomplete', 'off');
+    inpKap.placeholder = 'gg.aa.yyyy veya 01012026';
+    inpKap.title = 'Takvime tıkla veya 01012026 / 010125 yaz';
+    inpKap.dataset.original = origKap;
+    inpKap.dataset.key = 'kapanis_tarihi';
+    inpKap.value = '';
+    tdKap.appendChild(inpKap);
+    if (!mlInitQEditFlatpickr(inpKap, kapanisIso, function() { markIfChanged(inpKap, tdKap); })) {
+      inpKap.type = 'date';
+      inpKap.removeAttribute('placeholder');
+      if (kapanisIso.length === 10) inpKap.value = kapanisIso;
+      inpKap.dataset.original = kapanisIso || origKap;
     }
-    [inp2, sel3, inp4, inp5, inp6, inp7, inp8, sel10, inp11].forEach(function(el) {
+    mlSetKapanisQEditEnabled(inpKap, durumVal === 'pasif');
+
+    // 11 Son Tahsilat — Flatpickr + hızlı rakam
+    var td12 = tr.cells[11];
+    var sonIso = (sonTahsilat && sonTahsilat.length >= 10) ? sonTahsilat.substring(0, 10) : '';
+    var orig12 = sonIso.length === 10 ? fmtKapTr(sonIso) : (td12.textContent || '').trim();
+    td12.innerHTML = '';
+    var inpST = document.createElement('input');
+    inpST.type = 'text';
+    inpST.className = 'ml-qedit-date';
+    inpST.setAttribute('autocomplete', 'off');
+    inpST.placeholder = 'gg.aa.yyyy veya 01012026';
+    inpST.title = 'Takvim veya 01012026 / 010125';
+    inpST.dataset.original = orig12;
+    inpST.dataset.key = 'son_odeme_tarihi';
+    inpST.value = '';
+    td12.appendChild(inpST);
+    if (!mlInitQEditFlatpickr(inpST, sonIso, function() { markIfChanged(inpST, td12); })) {
+      inpST.dataset.original = sonIso || '';
+    }
+
+    sel10.addEventListener('change', function() {
+      var pasif = sel10.value === 'pasif';
+      mlSetKapanisQEditEnabled(inpKap, pasif);
+      markIfChanged(sel10, td10);
+      markIfChanged(inpKap, tdKap);
+    });
+    [inp2, sel3, inp4, inp5, inp6, inp7, inp8, sel10, inpKap, inpST].forEach(function(el) {
       var td = el.closest('td');
       el.addEventListener('input', function() { markIfChanged(el, td); });
       el.addEventListener('change', function() { markIfChanged(el, td); });
     });
   });
+  mlSyncStickyHeights();
 }
 
 function exitQuickEditMode() {
@@ -833,6 +1293,11 @@ function collectBulkUpdates() {
     var id = tr.getAttribute('data-id');
     if (!id) return;
     var row = { id: parseInt(id, 10) };
+    tr.querySelectorAll('input[data-key]').forEach(function(el) {
+      if (el._flatpickr && typeof erpSyncFlatpickrFromVisible === 'function') {
+        erpSyncFlatpickrFromVisible(el);
+      }
+    });
     tr.querySelectorAll('input[data-key], select[data-key]').forEach(function(el) {
       var k = el.dataset.key;
       var v = el.value;
@@ -842,9 +1307,11 @@ function collectBulkUpdates() {
       }
       if (k === 'son_odeme_tarihi' && (v === '' || v === '—')) v = null;
       if (k === 'rent_start_date' && (v === '' || v === '—')) v = null;
+      if (k === 'kapanis_tarihi' && (v === '' || v === '—')) v = null;
       if (k === 'durum' && (v === '' || v === '—')) v = 'aktif';
       row[k] = v;
     });
+    if (row.durum === 'aktif') row.kapanis_tarihi = null;
     updates.push(row);
   });
   return updates;
