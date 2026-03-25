@@ -1265,7 +1265,8 @@
 
             <label>Reel Kira (₺)</label>
             <div style="grid-column: 2;">
-                <input type="number" step="0.01" id="senaryo_reel_kira" placeholder="Müşterinin reel ödediği kira" style="width: 100%; margin-bottom: 8px;">
+                <input type="number" step="0.01" id="senaryo_reel_kira" placeholder="Güncel / bugünkü aylık kira (net veya KDV dahil)" style="width: 100%; margin-bottom: 4px;">
+                <div style="font-size:11px;color:#90a4ae;">Reel tablo: bir önceki yılın (ör. 2025) net aylık reel kirası + sadece sonraki yıl için kira artış ayı TÜFE’si. Net/KDV seçimi başlangıç ile aynı. Excel yalnızca sözleşme başı projeksiyonunu indirir.</div>
             </div>
 
             <label>Kira Artış Tarihi</label>
@@ -1326,6 +1327,34 @@
                     Toplam Kira Geliri (<span id="senaryo-toplam-yil"></span> Yıl): 
                     <span id="senaryo-toplam-tutar"></span> TL
                 </p>
+            </div>
+
+            <div id="senaryo-reel-bolum" style="display: none; margin-top: 22px;">
+                <h4 style="color: #4fc3f7; margin: 15px 0 10px 0;">Reel Kira Projeksiyonu</h4>
+                <div style="overflow-x: auto;">
+                    <table style="width: 100%; border-collapse: collapse; background: #0f2537; border-radius: 3px;">
+                        <thead>
+                            <tr style="background: #0097a7; color: white;">
+                                <th style="padding: 8px; text-align: left; font-size: 11px;">Yıl</th>
+                                <th style="padding: 8px; text-align: center; font-size: 11px;">Kira Bildirgesi</th>
+                                <th style="padding: 8px; text-align: right; font-size: 11px;">Aylık Kira</th>
+                                <th style="padding: 8px; text-align: right; font-size: 11px;">KDV Dahil</th>
+                                <th style="padding: 8px; text-align: right; font-size: 11px;">Artış %</th>
+                                <th style="padding: 8px; text-align: right; font-size: 11px;">Yıllık Toplam</th>
+                                <th style="padding: 8px; text-align: right; font-size: 11px;">KDV Dahil Yıllık</th>
+                                <th style="padding: 8px; text-align: right; font-size: 11px;">Artış Tutar</th>
+                            </tr>
+                        </thead>
+                        <tbody id="senaryo-tablo-reel">
+                        </tbody>
+                    </table>
+                </div>
+                <div style="margin-top: 15px; padding: 12px; background: #0f2537; border-radius: 3px; border-left: 3px solid #4caf50;">
+                    <p style="margin: 0; color: #4caf50; font-weight: bold; font-size: 13px;">
+                        Toplam Reel Kira Geliri (<span id="senaryo-toplam-yil-reel"></span> Yıl):
+                        <span id="senaryo-toplam-tutar-reel"></span> TL
+                    </p>
+                </div>
             </div>
         </div>
     </div>
@@ -2055,6 +2084,61 @@ async function hizmetTuruYeniEkle() {
     }
 }
 
+/** Sözleşme başlangıcını YYYY-MM-DD yap; GG.AA.YYYY de kabul et. */
+function senaryoSozlesmeBaslangicIso(raw) {
+    if (raw == null || raw === '') return '';
+    var s = String(raw).trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+    var dm = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})/);
+    if (dm) return dm[3] + '-' + dm[2].padStart(2, '0') + '-' + dm[1].padStart(2, '0');
+    var t = new Date(s);
+    if (!isNaN(t.getTime())) return t.toISOString().slice(0, 10);
+    return '';
+}
+
+/** Müşteri kaydındaki sözleşme başlangıcı → senaryo başlangıç tarihi; kira artış = aynı gün/ay + bugünün yılı. */
+function senaryoTarihleriMusteridenDoldur(m) {
+    if (!m) return;
+    var raw = m.rent_start_date || m.sozlesme_baslangic;
+    var basEl = document.getElementById('senaryo_baslangic_tarih');
+    var artisEl = document.getElementById('senaryo_kira_artis_tarih');
+    if (!raw || !basEl) return;
+    var iso = senaryoSozlesmeBaslangicIso(raw);
+    if (!iso || iso.length < 10) return;
+    var p = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!p) return;
+    var sy = parseInt(p[1], 10);
+    var sm = parseInt(p[2], 10);
+    var sd = parseInt(p[3], 10);
+    basEl.value = iso;
+    if (!artisEl) return;
+    var buYil = new Date().getFullYear();
+    var tTest = new Date(buYil, sm - 1, sd);
+    if (tTest.getFullYear() !== buYil || tTest.getMonth() !== sm - 1 || tTest.getDate() !== sd) {
+        var sonGun = new Date(buYil, sm, 0).getDate();
+        sd = sonGun;
+    }
+    artisEl.value = buYil + '-' + String(sm).padStart(2, '0') + '-' + String(sd).padStart(2, '0');
+}
+
+function senaryoMusteriFormDoldur(m) {
+    if (!m) return;
+    var ad = document.getElementById('senaryo_musteri_ismi');
+    var hid = document.getElementById('senaryo_musteri_id');
+    if (ad && m.name) ad.value = m.name;
+    if (hid && m.id != null && m.id !== '') hid.value = String(m.id);
+    senaryoTarihleriMusteridenDoldur(m);
+    var aylikRaw = (m.guncel_kira_bedeli != null && m.guncel_kira_bedeli !== '')
+        ? m.guncel_kira_bedeli
+        : ((m.ilk_kira_bedeli != null && m.ilk_kira_bedeli !== '') ? m.ilk_kira_bedeli : null);
+    var basKiraEl = document.getElementById('senaryo_baslangic_kira');
+    if (basKiraEl && aylikRaw != null && String(aylikRaw).trim() !== '') {
+        var n = parseFloat(String(aylikRaw).replace(/\s/g, '').replace(',', '.'));
+        basKiraEl.value = isNaN(n) ? String(aylikRaw).replace(',', '.').trim() : String(n);
+    }
+    if (typeof senaryoKdvDokumGuncelle === 'function') senaryoKdvDokumGuncelle();
+}
+
 // Müşteri seç — hangi sekme açıksa o sekmeye göre forma doldurur (liste veya API'den)
 function selectMusteri(id) {
     selectedId = id;
@@ -2067,6 +2151,13 @@ function selectMusteri(id) {
     document.querySelectorAll('.musteri-item').forEach(function(item) {
         item.classList.toggle('selected', parseInt(item.getAttribute('data-id'), 10) === id);
     });
+
+    if (activeTab === 1) {
+        fetch('/giris/api/musteri/' + id).then(function(r) { return r.json(); }).then(function(res) {
+            if (res.ok && res.musteri) senaryoMusteriFormDoldur(res.musteri);
+        }).catch(function() {});
+        return;
+    }
 
     var musteri = musteriler.find(function(m) { return m.id == id; }); // == ile string/id uyumu
     function fillActiveTab(data) {
@@ -2140,9 +2231,6 @@ function selectMusteri(id) {
         } else if (activeTab === 2) {
             var el = document.getElementById('bildirge_musteri_adi');
             if (el) el.value = m.name || '';
-        } else if (activeTab === 1) {
-            var senaryoAd = document.getElementById('senaryo_musteri_ismi');
-            if (senaryoAd) senaryoAd.value = m.name || '';
         }
     }
 
@@ -3441,15 +3529,8 @@ function cariKartPdfIndir() {
 // KDV oranı (güncel)
 const SENARYO_KDV_ORAN = 0.20;
 
-// Başlangıç kirası: kullanıcı girişine göre Net tutarı döndürür (projeksiyon hep net üzerinden)
+// Projeksiyon neti: yalnızca «Başlangıç Kira» + Net/KDV seçimi. Reel kira (güncel ödeme) bilgi amaçlıdır.
 function senaryoEffectiveNet() {
-    // Öncelik: Reel Kira girilmişse onu kullan (zaten net kabul edilir)
-    var reelInput = document.getElementById('senaryo_reel_kira');
-    if (reelInput && reelInput.value) {
-        var reelVal = parseFloat(String(reelInput.value).replace(',', '.'));
-        if (reelVal && !isNaN(reelVal)) return reelVal;
-    }
-    // Aksi halde Başlangıç Kira alanını kullan (KDV dahil/net seçimine göre nete çevir)
     const val = parseFloat((document.getElementById('senaryo_baslangic_kira').value || '').replace(',', '.'));
     if (!val || isNaN(val)) return null;
     const dahilSecili = (document.querySelector('input[name="senaryo_kdv_tip"]:checked') || {}).value === 'dahil';
@@ -3475,6 +3556,177 @@ function senaryoKdvDokumGuncelle() {
         dahil = val * (1 + SENARYO_KDV_ORAN);
     }
     el.textContent = 'Net: ' + net.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ₺ | KDV Dahil: ' + dahil.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ₺';
+}
+
+function senaryoEffectiveReelNet() {
+    const val = parseFloat((document.getElementById('senaryo_reel_kira').value || '').replace(',', '.'));
+    if (!val || isNaN(val) || val <= 0) return null;
+    const dahilSecili = (document.querySelector('input[name="senaryo_kdv_tip"]:checked') || {}).value === 'dahil';
+    return dahilSecili ? val / (1 + SENARYO_KDV_ORAN) : val;
+}
+
+/**
+ * Kira / reel projeksiyon tablosu — TÜFE tutar simülasyonu ile aynı zincir:
+ * ilk yıl başlangıç net; sonraki her yıl için o yılın sözleşme ayı TÜFE’si (yıl N → çarpan TÜFE_N).
+ */
+function senaryoProjeksiyonTabloUret(baslangicKiraNet, baslangicYil, donguSayisi, maxGosterilebilirYil, tufeListe, sozlesmeAyAdi) {
+    let tablo = '';
+    let toplamYilliklar = 0;
+    let toplamArtislar = 0;
+    let mevcutKira = baslangicKiraNet;
+    let projeksiyonSatirSayisi = 0;
+    for (let i = 0; i < donguSayisi; i++) {
+        const yil = baslangicYil + i;
+        if (yil > maxGosterilebilirYil) break;
+        const yillikToplam = mevcutKira * 12;
+        toplamYilliklar += yillikToplam;
+        let artisOran = 0;
+        let artisTutar = 0;
+        if (i > 0) {
+            let tufeOran = 0;
+            if (sozlesmeAyAdi && tufeListe[yil] && tufeListe[yil][sozlesmeAyAdi]) {
+                tufeOran = tufeListe[yil][sozlesmeAyAdi] / 100;
+            }
+            const eskiKira = tufeOran ? mevcutKira / (1 + tufeOran) : mevcutKira;
+            artisOran = tufeOran * 100;
+            artisTutar = mevcutKira - eskiKira;
+            toplamArtislar += artisTutar;
+        }
+        const kdvDahil = mevcutKira * (1 + SENARYO_KDV_ORAN);
+        const kdvDahilYillik = yillikToplam * (1 + SENARYO_KDV_ORAN);
+        projeksiyonSatirSayisi += 1;
+        tablo += `
+                <tr style="border-bottom: 1px solid #2d4060;">
+                    <td style="padding: 8px; color: #e0f7fa; font-size: 11px;">${yil}</td>
+                    <td style="padding: 8px; text-align: center; font-size: 11px;">
+                        <button type="button" onclick="kiraBildirgesiOlusturYil(${yil}, ${mevcutKira})" style="background:#2e7d32;color:#fff;border:none;padding:4px 10px;border-radius:12px;font-size:10px;cursor:pointer;">Kira bildirgesi oluştur</button>
+                    </td>
+                    <td style="padding: 8px; text-align: right; color: #e0f7fa; font-size: 11px;">${mevcutKira.toLocaleString('tr-TR', {minimumFractionDigits: 2})} TL</td>
+                    <td style="padding: 8px; text-align: right; color: #e0f7fa; font-size: 11px;">${kdvDahil.toLocaleString('tr-TR', {minimumFractionDigits: 2})} TL</td>
+                    <td style="padding: 8px; text-align: right; color: #ff9800; font-size: 11px;">${artisOran.toFixed(2)}%</td>
+                    <td style="padding: 8px; text-align: right; color: #4fc3f7; font-weight: bold; font-size: 11px;">${yillikToplam.toLocaleString('tr-TR', {minimumFractionDigits: 2})} TL</td>
+                    <td style="padding: 8px; text-align: right; color: #4fc3f7; font-size: 11px;">${kdvDahilYillik.toLocaleString('tr-TR', {minimumFractionDigits: 2})} TL</td>
+                    <td style="padding: 8px; text-align: right; color: #4caf50; font-size: 11px;">${artisTutar.toLocaleString('tr-TR', {minimumFractionDigits: 2})} TL</td>
+                </tr>
+            `;
+        if (yil < maxGosterilebilirYil) {
+            const sonrakiYil = yil + 1;
+            let tufeOran = 0;
+            if (sozlesmeAyAdi && tufeListe[sonrakiYil] && tufeListe[sonrakiYil][sozlesmeAyAdi]) {
+                tufeOran = tufeListe[sonrakiYil][sozlesmeAyAdi] / 100;
+                mevcutKira = Math.round(mevcutKira * (1 + tufeOran) * 100) / 100;
+            }
+        }
+    }
+    const toplamKdvDahilYillik = toplamYilliklar * (1 + SENARYO_KDV_ORAN);
+    tablo += `
+            <tr style="background: #0097a7; font-weight: bold;">
+                <td style="padding: 8px; color: white; font-size: 11px;">TOPLAM</td>
+                <td style="padding: 8px; text-align: center; color: white; font-size: 11px;">-</td>
+                <td style="padding: 8px; text-align: right; color: white; font-size: 11px;">-</td>
+                <td style="padding: 8px; text-align: right; color: white; font-size: 11px;">-</td>
+                <td style="padding: 8px; text-align: right; color: white; font-size: 11px;">-</td>
+                <td style="padding: 8px; text-align: right; color: white; font-size: 11px;">${toplamYilliklar.toLocaleString('tr-TR', {minimumFractionDigits: 2})} TL</td>
+                <td style="padding: 8px; text-align: right; color: white; font-size: 11px;">${toplamKdvDahilYillik.toLocaleString('tr-TR', {minimumFractionDigits: 2})} TL</td>
+                <td style="padding: 8px; text-align: right; color: white; font-size: 11px;">${toplamArtislar.toLocaleString('tr-TR', {minimumFractionDigits: 2})} TL</td>
+            </tr>
+        `;
+    return {
+        tablo: tablo,
+        toplamYilliklar: toplamYilliklar,
+        toplamArtislar: toplamArtislar,
+        projeksiyonSatirSayisi: projeksiyonSatirSayisi,
+        toplamKdvDahilYillik: toplamKdvDahilYillik
+    };
+}
+
+/**
+ * Reel kira: yalnızca (maxYıl−1) satırı = girilen reel; (maxYıl) = reel × (1 + TÜFE_maxYıl).
+ * Sözleşme henüz ikinci yıla gelmediyse tek satır (maxYıl = reel).
+ */
+function senaryoReelKisaProjeksiyonTabloUret(reelNet, baslangicYil, maxGosterilebilirYil, tufeListe, sozlesmeAyAdi) {
+    var sonYil = maxGosterilebilirYil;
+    var oncekiYil = sonYil - 1;
+    var tablo = '';
+    var toplamYilliklar = 0;
+    var toplamArtislar = 0;
+    var projeksiyonSatirSayisi = 0;
+
+    function satirEkle(yil, mevcutKira, artisOranYuzde, artisTutar) {
+        var yillikToplam = mevcutKira * 12;
+        toplamYilliklar += yillikToplam;
+        toplamArtislar += artisTutar;
+        projeksiyonSatirSayisi += 1;
+        var kdvDahil = mevcutKira * (1 + SENARYO_KDV_ORAN);
+        var kdvDahilYillik = yillikToplam * (1 + SENARYO_KDV_ORAN);
+        tablo += `
+                <tr style="border-bottom: 1px solid #2d4060;">
+                    <td style="padding: 8px; color: #e0f7fa; font-size: 11px;">${yil}</td>
+                    <td style="padding: 8px; text-align: center; font-size: 11px;">
+                        <button type="button" onclick="kiraBildirgesiOlusturYil(${yil}, ${mevcutKira})" style="background:#2e7d32;color:#fff;border:none;padding:4px 10px;border-radius:12px;font-size:10px;cursor:pointer;">Kira bildirgesi oluştur</button>
+                    </td>
+                    <td style="padding: 8px; text-align: right; color: #e0f7fa; font-size: 11px;">${mevcutKira.toLocaleString('tr-TR', {minimumFractionDigits: 2})} TL</td>
+                    <td style="padding: 8px; text-align: right; color: #e0f7fa; font-size: 11px;">${kdvDahil.toLocaleString('tr-TR', {minimumFractionDigits: 2})} TL</td>
+                    <td style="padding: 8px; text-align: right; color: #ff9800; font-size: 11px;">${artisOranYuzde.toFixed(2)}%</td>
+                    <td style="padding: 8px; text-align: right; color: #4fc3f7; font-weight: bold; font-size: 11px;">${yillikToplam.toLocaleString('tr-TR', {minimumFractionDigits: 2})} TL</td>
+                    <td style="padding: 8px; text-align: right; color: #4fc3f7; font-size: 11px;">${kdvDahilYillik.toLocaleString('tr-TR', {minimumFractionDigits: 2})} TL</td>
+                    <td style="padding: 8px; text-align: right; color: #4caf50; font-size: 11px;">${artisTutar.toLocaleString('tr-TR', {minimumFractionDigits: 2})} TL</td>
+                </tr>
+            `;
+    }
+
+    if (oncekiYil >= baslangicYil) {
+        satirEkle(oncekiYil, reelNet, 0, 0);
+        var tufeOran = 0;
+        if (sozlesmeAyAdi && tufeListe[sonYil] && tufeListe[sonYil][sozlesmeAyAdi]) {
+            tufeOran = tufeListe[sonYil][sozlesmeAyAdi] / 100;
+        }
+        var sonKira = tufeOran ? Math.round(reelNet * (1 + tufeOran) * 100) / 100 : reelNet;
+        var artisT2 = sonKira - reelNet;
+        satirEkle(sonYil, sonKira, tufeOran * 100, artisT2);
+    } else {
+        satirEkle(sonYil, reelNet, 0, 0);
+    }
+
+    var toplamKdvDahilYillik = toplamYilliklar * (1 + SENARYO_KDV_ORAN);
+    tablo += `
+            <tr style="background: #0097a7; font-weight: bold;">
+                <td style="padding: 8px; color: white; font-size: 11px;">TOPLAM</td>
+                <td style="padding: 8px; text-align: center; color: white; font-size: 11px;">-</td>
+                <td style="padding: 8px; text-align: right; color: white; font-size: 11px;">-</td>
+                <td style="padding: 8px; text-align: right; color: white; font-size: 11px;">-</td>
+                <td style="padding: 8px; text-align: right; color: white; font-size: 11px;">-</td>
+                <td style="padding: 8px; text-align: right; color: white; font-size: 11px;">${toplamYilliklar.toLocaleString('tr-TR', {minimumFractionDigits: 2})} TL</td>
+                <td style="padding: 8px; text-align: right; color: white; font-size: 11px;">${toplamKdvDahilYillik.toLocaleString('tr-TR', {minimumFractionDigits: 2})} TL</td>
+                <td style="padding: 8px; text-align: right; color: white; font-size: 11px;">${toplamArtislar.toLocaleString('tr-TR', {minimumFractionDigits: 2})} TL</td>
+            </tr>
+        `;
+    return {
+        tablo: tablo,
+        toplamYilliklar: toplamYilliklar,
+        toplamArtislar: toplamArtislar,
+        projeksiyonSatirSayisi: projeksiyonSatirSayisi,
+        toplamKdvDahilYillik: toplamKdvDahilYillik
+    };
+}
+
+function senaryoProjeksiyonSatirlariOku(tbodyEl) {
+    var satirlar = [];
+    if (!tbodyEl) return satirlar;
+    var rows = tbodyEl.querySelectorAll('tr');
+    for (var r = 0; r < rows.length; r++) {
+        var cells = rows[r].querySelectorAll('td');
+        if (cells.length >= 8 && cells[0].textContent.trim() !== 'TOPLAM') {
+            satirlar.push({
+                yil: cells[0].textContent.trim(),
+                aylik_kira: (cells[2].textContent || '').replace(/\s*TL/gi, '').trim(),
+                yillik_toplam: (cells[5].textContent || '').replace(/\s*TL/gi, '').trim(),
+                artis_yuzde: (cells[4].textContent || '').trim(),
+                artis_tutar: (cells[7].textContent || '').replace(/\s*TL/gi, '').trim()
+            });
+        }
+    }
+    return satirlar;
 }
 
 // Kira Senaryo Hesaplama (projeksiyon net kira üzerinden)
@@ -3518,112 +3770,60 @@ async function kiraSenaryo() {
         const baslangicYil = baslangic.getFullYear();
         const baslangicAy = baslangic.getMonth() + 1; // 0-11 → 1-12
         
-        // Sözleşme ayı adı
-        const sozlesmeAyAdi = Object.keys(ayMap).find(key => ayMap[key] === baslangicAy);
+        // Kira artış (yıldönümü) ayı: varsa «Kira Artış Tarihi»nden, yoksa başlangıçtan — gün önemli değil, takvim ayı yeterli
+        let sozlesmeAy = baslangicAy;
+        const artisTarihVal = (document.getElementById('senaryo_kira_artis_tarih') || {}).value;
+        if (artisTarihVal) {
+            const ad = new Date(artisTarihVal);
+            if (!isNaN(ad.getTime())) sozlesmeAy = ad.getMonth() + 1;
+        }
+        const sozlesmeAyAdi = Object.keys(ayMap).find(key => ayMap[key] === sozlesmeAy);
         
         // Şu anki tarih
         const bugun = new Date();
         const suAnkiYil = bugun.getFullYear();
         const suAnkiAy = bugun.getMonth() + 1;
+        /** Bu yıla kadar satır göster: sözleşme ayına henüz girilmediyse bir önceki yıl son. (Mart içindeysek Mart yıldönümü yılı dahil.) */
+        const maxGosterilebilirYil = suAnkiAy < sozlesmeAy ? suAnkiYil - 1 : suAnkiYil;
+        const buguneKadarSatir = Math.max(1, maxGosterilebilirYil - baslangicYil + 1);
+        const donguSayisi = Math.max(yilSayisi, buguneKadarSatir);
         
-        let tablo = '';
-        let toplamYilliklar = 0;
-        let toplamArtislar = 0;
-        let mevcutKira = baslangicKira;
-        
-        for (let i = 0; i < yilSayisi; i++) {
-            const yil = baslangicYil + i;
-            
-            // Bu yılın sözleşme ayı geldi mi kontrol et
-            if (yil === suAnkiYil && suAnkiAy < baslangicAy) {
-                // Henüz sözleşme ayı gelmedi, hesaplama yapma!
-                break;
-            } else if (yil > suAnkiYil) {
-                // Gelecek yıl, hesaplama yapma!
-                break;
-            }
-            
-            const yillikToplam = mevcutKira * 12;
-            toplamYilliklar += yillikToplam;
-            
-            // İlk yıl artış yok
-            let artisOran = 0;
-            let artisTutar = 0;
-            
-            if (i > 0) {
-                let tufeOran = 0;
-                if (tufeListe[yil] && tufeListe[yil][sozlesmeAyAdi]) {
-                    tufeOran = tufeListe[yil][sozlesmeAyAdi] / 100;
-                }
-                
-                const eskiKira = mevcutKira / (1 + tufeOran);
-                artisOran = tufeOran * 100;
-                artisTutar = mevcutKira - eskiKira;
-                toplamArtislar += artisTutar;
-            }
-            
-            const kdvDahil = mevcutKira * (1 + SENARYO_KDV_ORAN);
-            const kdvDahilYillik = yillikToplam * (1 + SENARYO_KDV_ORAN);
-            tablo += `
-                <tr style="border-bottom: 1px solid #2d4060;">
-                    <td style="padding: 8px; color: #e0f7fa; font-size: 11px;">${yil}</td>
-                    <td style="padding: 8px; text-align: center; font-size: 11px;">
-                        <button type="button" onclick="kiraBildirgesiOlusturYil(${yil}, ${mevcutKira})" style="background:#2e7d32;color:#fff;border:none;padding:4px 10px;border-radius:12px;font-size:10px;cursor:pointer;">Kira bildirgesi oluştur</button>
-                    </td>
-                    <td style="padding: 8px; text-align: right; color: #e0f7fa; font-size: 11px;">${mevcutKira.toLocaleString('tr-TR', {minimumFractionDigits: 2})} TL</td>
-                    <td style="padding: 8px; text-align: right; color: #e0f7fa; font-size: 11px;">${kdvDahil.toLocaleString('tr-TR', {minimumFractionDigits: 2})} TL</td>
-                    <td style="padding: 8px; text-align: right; color: #ff9800; font-size: 11px;">${artisOran.toFixed(2)}%</td>
-                    <td style="padding: 8px; text-align: right; color: #4fc3f7; font-weight: bold; font-size: 11px;">${yillikToplam.toLocaleString('tr-TR', {minimumFractionDigits: 2})} TL</td>
-                    <td style="padding: 8px; text-align: right; color: #4fc3f7; font-size: 11px;">${kdvDahilYillik.toLocaleString('tr-TR', {minimumFractionDigits: 2})} TL</td>
-                    <td style="padding: 8px; text-align: right; color: #4caf50; font-size: 11px;">${artisTutar.toLocaleString('tr-TR', {minimumFractionDigits: 2})} TL</td>
-                </tr>
-            `;
-            
-            if (i < yilSayisi - 1) {
-                let tufeOran = 0;
-                if (tufeListe[yil] && tufeListe[yil][sozlesmeAyAdi]) {
-                    tufeOran = tufeListe[yil][sozlesmeAyAdi] / 100;
-                    mevcutKira = mevcutKira * (1 + tufeOran);
-                }
-            }
-        }
-        
-        // Toplam satırı
-        const toplamKdvDahilYillik = toplamYilliklar * (1 + SENARYO_KDV_ORAN);
-        tablo += `
-            <tr style="background: #0097a7; font-weight: bold;">
-                <td style="padding: 8px; color: white; font-size: 11px;">TOPLAM</td>
-                <td style="padding: 8px; text-align: center; color: white; font-size: 11px;">-</td>
-                <td style="padding: 8px; text-align: right; color: white; font-size: 11px;">-</td>
-                <td style="padding: 8px; text-align: right; color: white; font-size: 11px;">-</td>
-                <td style="padding: 8px; text-align: right; color: white; font-size: 11px;">-</td>
-                <td style="padding: 8px; text-align: right; color: white; font-size: 11px;">${toplamYilliklar.toLocaleString('tr-TR', {minimumFractionDigits: 2})} TL</td>
-                <td style="padding: 8px; text-align: right; color: white; font-size: 11px;">${toplamKdvDahilYillik.toLocaleString('tr-TR', {minimumFractionDigits: 2})} TL</td>
-                <td style="padding: 8px; text-align: right; color: white; font-size: 11px;">${toplamArtislar.toLocaleString('tr-TR', {minimumFractionDigits: 2})} TL</td>
-            </tr>
-        `;
-        
-        document.getElementById('senaryo-tablo').innerHTML = tablo;
-        document.getElementById('senaryo-toplam-yil').textContent = yilSayisi;
-        document.getElementById('senaryo-toplam-tutar').textContent = toplamYilliklar.toLocaleString('tr-TR', {minimumFractionDigits: 2});
+        const sonuc = senaryoProjeksiyonTabloUret(baslangicKira, baslangicYil, donguSayisi, maxGosterilebilirYil, tufeListe, sozlesmeAyAdi);
+        document.getElementById('senaryo-tablo').innerHTML = sonuc.tablo;
+        document.getElementById('senaryo-toplam-yil').textContent = String(sonuc.projeksiyonSatirSayisi || yilSayisi);
+        document.getElementById('senaryo-toplam-tutar').textContent = sonuc.toplamYilliklar.toLocaleString('tr-TR', {minimumFractionDigits: 2});
         document.getElementById('senaryo-sonuc').style.display = 'block';
 
-        window.senaryoProjeksiyonVerisi = { musteri_ismi: document.getElementById('senaryo_musteri_ismi').value.trim(), baslangic_tarih: baslangicTarih, yil_sayisi: yilSayisi, net_kira: baslangicKira, toplam_tutar: toplamYilliklar, satirlar: [] };
-        var tbody = document.getElementById('senaryo-tablo');
-        if (tbody) {
-            var rows = tbody.querySelectorAll('tr');
-            for (var r = 0; r < rows.length; r++) {
-                var cells = rows[r].querySelectorAll('td');
-                if (cells.length >= 8 && cells[0].textContent.trim() !== 'TOPLAM') {
-                    window.senaryoProjeksiyonVerisi.satirlar.push({
-                        yil: cells[0].textContent.trim(),
-                        aylik_kira: (cells[2].textContent || '').replace(/\s*TL/gi, '').trim(),
-                        yillik_toplam: (cells[5].textContent || '').replace(/\s*TL/gi, '').trim(),
-                        artis_yuzde: (cells[4].textContent || '').trim(),
-                        artis_tutar: (cells[7].textContent || '').replace(/\s*TL/gi, '').trim()
-                    });
-                }
-            }
+        window.senaryoProjeksiyonVerisi = {
+            musteri_ismi: document.getElementById('senaryo_musteri_ismi').value.trim(),
+            baslangic_tarih: baslangicTarih,
+            yil_sayisi: sonuc.projeksiyonSatirSayisi || yilSayisi,
+            net_kira: baslangicKira,
+            toplam_tutar: sonuc.toplamYilliklar,
+            satirlar: senaryoProjeksiyonSatirlariOku(document.getElementById('senaryo-tablo'))
+        };
+
+        var reelNet = senaryoEffectiveReelNet();
+        var reelBolum = document.getElementById('senaryo-reel-bolum');
+        if (reelNet != null && reelNet > 0) {
+            var reelSonuc = senaryoReelKisaProjeksiyonTabloUret(reelNet, baslangicYil, maxGosterilebilirYil, tufeListe, sozlesmeAyAdi);
+            document.getElementById('senaryo-tablo-reel').innerHTML = reelSonuc.tablo;
+            document.getElementById('senaryo-toplam-yil-reel').textContent = String(reelSonuc.projeksiyonSatirSayisi || yilSayisi);
+            document.getElementById('senaryo-toplam-tutar-reel').textContent = reelSonuc.toplamYilliklar.toLocaleString('tr-TR', {minimumFractionDigits: 2});
+            if (reelBolum) reelBolum.style.display = 'block';
+            window.senaryoProjeksiyonVerisiReel = {
+                musteri_ismi: document.getElementById('senaryo_musteri_ismi').value.trim(),
+                baslangic_tarih: baslangicTarih,
+                yil_sayisi: reelSonuc.projeksiyonSatirSayisi || yilSayisi,
+                net_kira: reelNet,
+                toplam_tutar: reelSonuc.toplamYilliklar,
+                satirlar: senaryoProjeksiyonSatirlariOku(document.getElementById('senaryo-tablo-reel'))
+            };
+        } else {
+            if (reelBolum) reelBolum.style.display = 'none';
+            var treel = document.getElementById('senaryo-tablo-reel');
+            if (treel) treel.innerHTML = '';
+            window.senaryoProjeksiyonVerisiReel = null;
         }
         
     } catch (error) {
@@ -3634,6 +3834,8 @@ async function kiraSenaryo() {
 function senaryoTemizle() {
     document.getElementById('senaryo_baslangic_kira').value = '';
     document.getElementById('senaryo_baslangic_tarih').value = '';
+    var reelInp = document.getElementById('senaryo_reel_kira');
+    if (reelInp) reelInp.value = '';
     var yilEl = document.getElementById('senaryo_yil_sayisi');
     if (yilEl) yilEl.value = '5';
     var hizmetEl = document.getElementById('senaryo_hizmet_turu');
@@ -3641,8 +3843,13 @@ function senaryoTemizle() {
     var tufeEl = document.getElementById('senaryo_tufe');
     if (tufeEl) tufeEl.value = '65.0';
     document.getElementById('senaryo-sonuc').style.display = 'none';
+    var reelBolum = document.getElementById('senaryo-reel-bolum');
+    if (reelBolum) reelBolum.style.display = 'none';
+    var treel = document.getElementById('senaryo-tablo-reel');
+    if (treel) treel.innerHTML = '';
     senaryoKdvDokumGuncelle();
     window.senaryoProjeksiyonVerisi = null;
+    window.senaryoProjeksiyonVerisiReel = null;
 }
 // TCMB TÜFE Verileri Göster
 async function tufeVerileri() {
@@ -3826,20 +4033,11 @@ function senaryoSonYilBilgisi() {
 
 // Kira Senaryo sekmesinden Kira Bildirgesi sekmesine veri aktar ve bildirgeyi tetikle (SPA)
 function kiraBildirgesiOlusturYil(yil, aylikKira) {
-    // İstek: Hangi satırdaki butona basılırsa, O YILA ait rakamlar kullanılsın
-    // Önce ilgili yılı senaryo verisinde bulup aylık net kira değerini oradan okuyalım
-    if (window.senaryoProjeksiyonVerisi && Array.isArray(window.senaryoProjeksiyonVerisi.satirlar)) {
-        var hedef = window.senaryoProjeksiyonVerisi.satirlar.find(function (s) {
-            return String(s.yil) === String(yil);
-        });
-        if (hedef && hedef.aylik_kira) {
-            var s = String(hedef.aylik_kira).replace(/\s*TL/gi, '').trim();
-            s = s.replace(/\./g, '').replace(',', '.');
-            var n = parseFloat(s);
-            if (!isNaN(n) && n > 0) {
-                aylikKira = n;
-            }
-        }
+    // Satırdaki onclick ile gelen net aylık kira kullanılır (ana veya reel projeksiyon — ezme yok).
+    var net = typeof aylikKira === 'number' ? aylikKira : parseFloat(String(aylikKira || '').replace(',', '.'));
+    if (isNaN(net) || net <= 0) {
+        alert('Geçerli aylık kira bulunamadı; lütfen Hesapla ile tabloyu yenileyip tekrar deneyin.');
+        return;
     }
 
     var musteriEl = document.getElementById('senaryo_musteri_ismi');
@@ -3852,7 +4050,7 @@ function kiraBildirgesiOlusturYil(yil, aylikKira) {
     if (document.getElementById('bildirge_musteri_adi')) document.getElementById('bildirge_musteri_adi').value = musteriAdi;
     if (document.getElementById('bildirge_sozlesme_tarihi')) document.getElementById('bildirge_sozlesme_tarihi').value = sozlesmeTarihi;
     if (document.getElementById('bildirge_gecerlilik_tarihi')) document.getElementById('bildirge_gecerlilik_tarihi').value = gecerlilikTarihi;
-    if (document.getElementById('bildirge_kira_net')) document.getElementById('bildirge_kira_net').value = Math.round(aylikKira * 100) / 100;
+    if (document.getElementById('bildirge_kira_net')) document.getElementById('bildirge_kira_net').value = Math.round(net * 100) / 100;
     if (document.getElementById('bildirge_kdv_oran')) document.getElementById('bildirge_kdv_oran').value = (SENARYO_KDV_ORAN * 100);
 
     setTimeout(function() { kiraBildirgesiOnizle(); }, 100);

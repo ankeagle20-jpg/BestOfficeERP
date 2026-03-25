@@ -12,6 +12,7 @@ from db import (
     db as get_db,
     clear_all_customers,
 )
+from utils.musteri_arama import customers_arama_sql_3, customers_arama_params_3
 import pandas as pd
 from io import BytesIO
 from datetime import date, datetime, timedelta
@@ -304,9 +305,11 @@ def _musteri_liste_data():
             ORDER BY c.name
         """)
     elif arama:
+        w3 = customers_arama_sql_3("")
         musteriler = fetch_all(
-            "SELECT * FROM customers WHERE name ILIKE %s ORDER BY name",
-            (f"%{arama}%",))
+            f"SELECT * FROM customers WHERE {w3} ORDER BY name",
+            customers_arama_params_3(arama),
+        )
     else:
         musteriler = fetch_all("SELECT * FROM customers ORDER BY name")
     return {
@@ -371,31 +374,15 @@ def list_full():
         ensure_customers_kapanis_tarihi()
     except Exception:
         pass
-    arama = request.args.get("q", "").strip()
-    tum_yillar_odenmis = request.args.get("tum_yillar_odenmis") == "1"
-    if tum_yillar_odenmis:
-        musteriler = fetch_all("""
-            SELECT c.* FROM customers c
-            WHERE NOT EXISTS (
-                SELECT 1 FROM faturalar f
-                WHERE f.musteri_id = c.id AND (f.durum IS NULL OR f.durum != 'odendi')
-            )
-            ORDER BY c.name
-        """)
-    elif arama:
-        musteriler = fetch_all(
-            "SELECT * FROM customers WHERE name ILIKE %s ORDER BY name",
-            (f"%{arama}%",),
-        )
-    else:
-        musteriler = fetch_all("SELECT * FROM customers ORDER BY name")
+    data = _musteri_liste_data()
+    musteriler = data["musteriler"]
     if musteriler:
         _enrich_musteri_list_with_borc_gecikme(musteriler)
     return render_template(
         "musteriler/index.html",
         musteriler=musteriler,
-        arama=arama,
-        tum_yillar_odenmis=tum_yillar_odenmis,
+        arama=data["arama"],
+        tum_yillar_odenmis=data["tum_yillar_odenmis"],
     )
 
 
@@ -782,9 +769,10 @@ def api_ara():
     q = (request.args.get("q") or "").strip()
     if not q or len(q) < 1:
         return jsonify([])
+    w3 = customers_arama_sql_3("")
     rows = fetch_all(
-        "SELECT id, name FROM customers WHERE name ILIKE %s ORDER BY name LIMIT 25",
-        (f"%{q}%",),
+        f"SELECT id, name FROM customers WHERE {w3} ORDER BY name LIMIT 25",
+        customers_arama_params_3(q),
     )
     return jsonify(rows or [])
 
@@ -1591,9 +1579,10 @@ def api_musteri_ara():
     if not q:
         rows = fetch_all("SELECT id, name FROM customers ORDER BY name LIMIT 50")
     else:
+        w3 = customers_arama_sql_3("")
         rows = fetch_all(
-            "SELECT id, name FROM customers WHERE name ILIKE %s ORDER BY name LIMIT 30",
-            (f"%{q}%",)
+            f"SELECT id, name FROM customers WHERE {w3} ORDER BY name LIMIT 30",
+            customers_arama_params_3(q),
         )
     return jsonify(rows)
 

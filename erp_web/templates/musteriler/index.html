@@ -29,9 +29,9 @@
     </th>
     <th class="ml-col-yetkili">Yetkili Kişi</th>
     <th class="ml-col-hizmet">
-      <select id="mlHizmet" class="ml-filter-sel ml-hizmet-head-sel">
-        <option value="" selected>Hizmet: Tümü</option>
-        <option value="__bos__">— / Belirtilmemiş</option>
+      <select id="mlHizmet" class="ml-filter-sel ml-hizmet-head-sel ml-sel-hizmet-turu" title="Hizmet türüne göre filtrele">
+        <option value="" selected>Hizmet Türü</option>
+        <option value="__bos__">Belirtilmemiş</option>
         <option value="Mükellef">Mükellef</option>
         <option value="Sanal ofis">Sanal ofis</option>
         <option value="Hazır Ofis">Hazır Ofis</option>
@@ -78,6 +78,7 @@
 .ml-search:focus{border-color:#00c8ff}
 .ml-filter-sel{padding:6px 10px;background:#0d1520;border:1px solid rgba(0,200,255,.12);border-radius:6px;color:#e8f1ff;font-size:11px;outline:none;cursor:pointer}
 .ml-sel-ad-unvan{color:#00c8ff!important;letter-spacing:.07em}
+.ml-sel-hizmet-turu{color:#00c8ff!important;letter-spacing:.07em}
 .ml-stats{display:flex;gap:14px;margin-left:auto;font-size:11px;color:#5a7a9a}
 .ml-stats b{color:#e8f1ff;font-family:monospace}
 .ml-stats .red{color:#ff4557}
@@ -264,9 +265,9 @@ window.setActiveTab = function(tabId) {
       <option value="{{ o }}">{{ o }}</option>
       {% endfor %}
     </select>
-    <select class="ml-filter-sel" id="mlHizmetTop" title="Hizmet türüne göre filtrele">
-      <option value="" selected>Hizmet: Tümü</option>
-      <option value="__bos__">— / Belirtilmemiş</option>
+    <select class="ml-filter-sel ml-sel-hizmet-turu" id="mlHizmetTop" title="Hizmet türüne göre filtrele">
+      <option value="" selected>Hizmet Türü</option>
+      <option value="__bos__">Belirtilmemiş</option>
       <option value="Mükellef">Mükellef</option>
       <option value="Sanal ofis">Sanal ofis</option>
       <option value="Hazır Ofis">Hazır Ofis</option>
@@ -281,6 +282,7 @@ window.setActiveTab = function(tabId) {
     <button type="button" id="btn-quick-edit" class="ml-btn quick-edit"><i class="fa fa-edit"></i> Hızlı Bilgi Gir</button>
     <button type="button" id="btn-yenile-ay" class="ml-btn back" title="Sözleşme ayına göre filtrele"><i class="fa fa-refresh"></i> Yenile</button>
     <button type="button" id="btn-quick-edit-vazgec" class="ml-btn back" style="display:none;"><i class="fa fa-times"></i> Vazgeç</button>
+    <button type="button" id="btn-hepsini-kayde" class="ml-btn bulk-save" style="display:none;" disabled title="Tüm satırları sunucuya kaydet"><i class="fa fa-save"></i> Hepsini kayde</button>
     <div class="ml-stats">
       <span>Toplam: <b id="mlCount">{{ musteriler|length }}</b></span>
       {% set _ns = namespace(total_borc=0) %}
@@ -993,9 +995,28 @@ document.querySelectorAll('#mlHeadTable thead th').forEach(function(th, idx){
 });
 
 // ——— Hızlı Bilgi Düzenleme ———
-var HIZMET_OPTIONS_FALLBACK = ['', 'Sanal Ofis', 'Hazır Ofis', 'Toplantı Odası'];
+// Liste filtresi + seed ile uyumlu; API gelene kadar kullanılır. Eksik kalan DB değerleri mlEnsureHizmetSelectValue ile eklenir.
+var HIZMET_OPTIONS_FALLBACK = ['', 'Mükellef', 'Sanal ofis', 'Sanal Ofis', 'Hazır Ofis', 'Paylaşımlı Masa', 'Paylaşımlı Ofis', 'Toplantı Odası'];
 function hizmetSecenekleriListe() {
   return (window.__hizmetTuruAdlari && window.__hizmetTuruAdlari.length) ? window.__hizmetTuruAdlari : HIZMET_OPTIONS_FALLBACK;
+}
+/** Select’te value yoksa (API/fallback’te olmayan eski DB değeri) seçenek ekler; boş select görünümünü önler. */
+function mlEnsureHizmetSelectValue(sel, value) {
+  if (!sel) return;
+  var v = (value == null ? '' : String(value)).trim();
+  sel.value = v;
+  if (!v) return;
+  var ok = false;
+  for (var i = 0; i < sel.options.length; i++) {
+    if (sel.options[i].value === v) { ok = true; break; }
+  }
+  if (!ok) {
+    var o = document.createElement('option');
+    o.value = v;
+    o.textContent = v;
+    sel.appendChild(o);
+    sel.value = v;
+  }
 }
 fetch('/giris/api/hizmet-turleri').then(function(r) { return r.json(); }).then(function(j) {
   if (j.ok && j.turler && j.turler.length)
@@ -1065,12 +1086,26 @@ function mlSetKapanisQEditEnabled(inpKap, on) {
   }
 }
 
+function mlUpdateBulkSaveButtonsState() {
+  var has = document.querySelectorAll('.ml-cell-changed').length;
+  var dis = !has;
+  var b1 = document.getElementById('btn-bulk-save');
+  var b2 = document.getElementById('btn-hepsini-kayde');
+  if (b1) b1.disabled = dis;
+  if (b2) b2.disabled = dis;
+}
+
 function enterQuickEditMode() {
   var wrap = document.querySelector('.ml-table-wrap');
   if (!wrap || wrap.classList.contains('ml-edit-mode')) return;
   wrap.classList.add('ml-edit-mode');
   document.getElementById('btn-bulk-save').style.display = 'inline-flex';
   document.getElementById('btn-bulk-save').disabled = true;
+  var hepsiBtn = document.getElementById('btn-hepsini-kayde');
+  if (hepsiBtn) {
+    hepsiBtn.style.display = 'inline-flex';
+    hepsiBtn.disabled = true;
+  }
   var vazgecBtn = document.getElementById('btn-quick-edit-vazgec');
   if (vazgecBtn) vazgecBtn.style.display = 'inline-flex';
 
@@ -1100,7 +1135,7 @@ function enterQuickEditMode() {
         cur = (el.value || '').trim();
       }
       if (cur !== orig) td.classList.add('ml-cell-changed'); else td.classList.remove('ml-cell-changed');
-      document.getElementById('btn-bulk-save').disabled = !document.querySelectorAll('.ml-cell-changed').length;
+      mlUpdateBulkSaveButtonsState();
     }
 
     // 1 Yetkili Kişi
@@ -1115,12 +1150,15 @@ function enterQuickEditMode() {
     inp2.dataset.key = 'yetkili_kisi';
     td2.appendChild(inp2);
 
-    // 2 Hizmet Türü
+    // 2 Hizmet Türü — data-hizmet ile hücre metni bazen ayrışabilir; DB değeri öncelikli. Listede yoksa seçenek eklenir.
     var td3 = tr.cells[2];
-    var orig3 = strVal(td3.textContent);
+    var orig3Cell = strVal(td3.textContent);
+    var dispEmpty = (orig3Cell === '—' || orig3Cell === '–' || orig3Cell === '-');
+    var hizmetVal = (hizmet || '').trim();
+    if (!hizmetVal && !dispEmpty) hizmetVal = orig3Cell;
     td3.innerHTML = '';
     var sel3 = document.createElement('select');
-    sel3.dataset.original = orig3;
+    sel3.dataset.original = hizmetVal;
     sel3.dataset.key = 'hizmet_turu';
     hizmetSecenekleriListe().forEach(function(opt) {
       var o = document.createElement('option');
@@ -1128,7 +1166,7 @@ function enterQuickEditMode() {
       o.textContent = opt || '—';
       sel3.appendChild(o);
     });
-    sel3.value = hizmet;
+    mlEnsureHizmetSelectValue(sel3, hizmetVal);
     td3.appendChild(sel3);
 
     // 3 Telefon
@@ -1281,6 +1319,11 @@ function exitQuickEditMode() {
   if (wrap) wrap.classList.remove('ml-edit-mode');
   document.getElementById('btn-bulk-save').style.display = 'none';
   document.getElementById('btn-bulk-save').disabled = true;
+  var hepsiBtn = document.getElementById('btn-hepsini-kayde');
+  if (hepsiBtn) {
+    hepsiBtn.style.display = 'none';
+    hepsiBtn.disabled = true;
+  }
   var vazgecBtn = document.getElementById('btn-quick-edit-vazgec');
   if (vazgecBtn) vazgecBtn.style.display = 'none';
   location.reload();
@@ -1325,12 +1368,14 @@ document.getElementById('btn-quick-edit-vazgec').addEventListener('click', funct
   exitQuickEditMode();
 });
 
-document.getElementById('btn-bulk-save').addEventListener('click', function() {
-  var btn = this;
-  if (btn.disabled) return;
+function mlRunBulkSave(btn) {
+  if (btn && btn.disabled) return;
   var updates = collectBulkUpdates();
   if (!updates.length) { alert('Kaydedilecek veri yok.'); return; }
-  btn.disabled = true;
+  var bSave = document.getElementById('btn-bulk-save');
+  var bHepsi = document.getElementById('btn-hepsini-kayde');
+  if (bSave) bSave.disabled = true;
+  if (bHepsi) bHepsi.disabled = true;
   fetch('{{ url_for("musteriler.api_bulk_update") }}', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
@@ -1343,13 +1388,16 @@ document.getElementById('btn-bulk-save').addEventListener('click', function() {
       exitQuickEditMode();
     } else {
       alert(data && data.message ? data.message : 'Kayıt sırasında hata oluştu.');
-      btn.disabled = false;
+      mlUpdateBulkSaveButtonsState();
     }
   })
   .catch(function() {
     alert('Bağlantı hatası. Tekrar deneyin.');
-    btn.disabled = false;
+    mlUpdateBulkSaveButtonsState();
   });
-});
+}
+
+document.getElementById('btn-bulk-save').addEventListener('click', function() { mlRunBulkSave(this); });
+document.getElementById('btn-hepsini-kayde').addEventListener('click', function() { mlRunBulkSave(this); });
 </script>
 {% endblock %}

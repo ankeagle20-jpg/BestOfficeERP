@@ -4,6 +4,7 @@ Bankalar: hesap dökümü, ekstre yükleme, tahsilat eşleştirme, masraf takibi
 from flask import Blueprint, render_template, request, jsonify, redirect, url_for
 from auth import giris_gerekli, admin_gerekli
 from db import fetch_all, fetch_one, execute, execute_returning
+from utils.musteri_arama import customers_arama_sql_3, customers_arama_params_3
 from datetime import datetime, date
 
 bp = Blueprint("banka", __name__)
@@ -113,9 +114,10 @@ def api_musteri_ara():
     q = (request.args.get("q") or "").strip()[:80]
     if not q:
         return jsonify([])
+    w3 = customers_arama_sql_3("")
     rows = fetch_all(
-        "SELECT id, name FROM customers WHERE LOWER(name) LIKE LOWER(%s) ORDER BY name LIMIT 30",
-        ("%" + q + "%",),
+        f"SELECT id, name FROM customers WHERE {w3} ORDER BY name LIMIT 30",
+        customers_arama_params_3(q),
     )
     return jsonify(rows or [])
 

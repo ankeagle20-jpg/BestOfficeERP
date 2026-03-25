@@ -4,6 +4,7 @@ from functools import wraps
 from datetime import datetime, date
 from db import fetch_all, fetch_one, execute, execute_returning, ensure_faturalar_amount_columns
 from utils.text_utils import turkish_lower
+from utils.musteri_arama import customers_arama_sql_3_plus_tax, customers_arama_params_4
 import os
 import io
 import re
@@ -2097,20 +2098,16 @@ def api_gib_sms_onay():
 def api_musteriler_list():
     """Tahsilat formu için müşteri listesi (WhatsApp için phone döner)."""
     arama = (request.args.get('q') or '').strip()
-    rows = fetch_all("SELECT id, name, phone, tax_number FROM customers ORDER BY name LIMIT 300")
-
+    base = "SELECT id, name, phone, tax_number FROM customers "
     if not arama:
-        return jsonify([{"id": r["id"], "name": r["name"], "phone": (r.get("phone") or "")} for r in rows])
-
-    q_norm = turkish_lower(arama)
-    filtered = []
-    for r in rows:
-        name = turkish_lower(r.get("name") or "")
-        tax = turkish_lower(str(r.get("tax_number") or ""))
-        if q_norm in name or q_norm in tax:
-            filtered.append(r)
-
-    return jsonify([{"id": r["id"], "name": r["name"], "phone": (r.get("phone") or "")} for r in filtered])
+        rows = fetch_all(base + "ORDER BY name LIMIT 300")
+    else:
+        w = customers_arama_sql_3_plus_tax()
+        rows = fetch_all(
+            base + f"WHERE {w} ORDER BY name LIMIT 300",
+            customers_arama_params_4(arama),
+        )
+    return jsonify([{"id": r["id"], "name": r["name"], "phone": (r.get("phone") or "")} for r in rows])
 
 
 @bp.route('/api/banka-hesaplar')

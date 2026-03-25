@@ -5,6 +5,7 @@ Müşteri analizi, ödeme takibi, kargo, sözleşme alarmı, hızlı müdahale.
 from flask import Blueprint, render_template, request, jsonify
 from auth import giris_gerekli
 from db import fetch_all, fetch_one, execute_returning, ensure_faturalar_amount_columns
+from utils.musteri_arama import customers_arama_sql_3_plus_phone_tax, customers_arama_params_5
 from datetime import date, timedelta
 from phone_util import format_phone_for_display
 
@@ -131,8 +132,8 @@ def _dashboard_tablo_data(arama="", filtre=None):
     params = []
     sql_extra = ""
     if arama:
-        sql_extra += " AND (c.name ILIKE %s OR c.phone ILIKE %s OR c.tax_number ILIKE %s)"
-        params.extend([f"%{arama}%", f"%{arama}%", f"%{arama}%"])
+        sql_extra += " AND " + customers_arama_sql_3_plus_phone_tax("c")
+        params.extend(customers_arama_params_5(arama))
 
     # Müşteri başına tek satır: aksi halde birden fazla ofis aynı telefonu listede tekrarlar.
     sql = """

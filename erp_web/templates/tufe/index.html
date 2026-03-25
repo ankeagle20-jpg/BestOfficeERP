@@ -42,6 +42,8 @@
     background: #37474f;
 }
 .yil-selector {
+    position: relative;
+    flex-wrap: wrap;
     background: #1e3a50;
     padding: 10px 12px;
     margin-bottom: 12px;
@@ -55,16 +57,102 @@
     font-size: 13px;
     font-weight: bold;
 }
-.yil-selector input {
+.tufe-yil-trigger-wrap {
+    position: relative;
+}
+.tufe-yil-trigger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    min-width: 160px;
+    max-width: min(420px, 92vw);
     background: #2d4060;
     border: 1px solid #3d5070;
     color: #e0f7fa;
-    padding: 6px 12px;
+    padding: 8px 12px;
     border-radius: 3px;
     font-size: 15px;
-    width: 80px;
-    text-align: center;
     font-weight: bold;
+    cursor: pointer;
+    text-align: left;
+    font-family: inherit;
+}
+.tufe-yil-trigger:hover {
+    border-color: #00bcd4;
+}
+.tufe-yil-trigger .tufe-yil-trigger-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+}
+.tufe-yil-trigger .chev {
+    color: #90a4ae;
+    font-size: 10px;
+    flex-shrink: 0;
+}
+.tufe-yil-picker {
+    display: none;
+    position: absolute;
+    left: 0;
+    top: 100%;
+    margin-top: 6px;
+    z-index: 55;
+    background: #1e3a50;
+    border: 1px solid #2d4060;
+    border-radius: 6px;
+    padding: 10px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+    min-width: 300px;
+    max-width: min(420px, 94vw);
+}
+.tufe-yil-picker.open {
+    display: block;
+}
+.tufe-yil-picker .tufe-yil-check-wrap {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px 10px;
+    max-height: 220px;
+    overflow-y: auto;
+    padding: 4px 2px 8px 2px;
+}
+.tufe-yil-picker .tufe-yil-check-wrap label {
+    font-weight: normal;
+    color: #cfd8dc;
+    font-size: 12px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    user-select: none;
+    margin: 0;
+}
+.tufe-yil-picker .tufe-yil-check-wrap input {
+    width: auto;
+    accent-color: #00bcd4;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+.tufe-yil-picker-hint {
+    font-size: 10px;
+    color: #607d8b;
+    margin-top: 8px;
+    line-height: 1.35;
+}
+.tufe-yil-blok {
+    margin-bottom: 18px;
+}
+.tufe-yil-gorusu > .tufe-yil-blok + .tufe-yil-blok {
+    padding-top: 12px;
+    border-top: 1px solid #2d4060;
+}
+.tufe-yil-blok h3 {
+    color: #4fc3f7;
+    margin: 0 0 10px 0;
+    font-size: 15px;
+    font-weight: 700;
 }
 .yil-selector button {
     background: #00bcd4;
@@ -75,6 +163,273 @@
     cursor: pointer;
     font-size: 13px;
     font-weight: bold;
+}
+.yil-selector button.secondary {
+    background: #37474f;
+}
+.yil-selector button.secondary:hover {
+    background: #455a64;
+}
+.tufe-yil-bar-actions {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+}
+.tufe-sim-inline {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+}
+.tufe-sim-tutar-inp {
+    width: 96px;
+    background: #2d4060;
+    border: 1px solid #3d5070;
+    color: #e0f7fa;
+    padding: 6px 8px;
+    border-radius: 3px;
+    font-size: 13px;
+    font-weight: 600;
+}
+.tufe-sim-tutar-inp::placeholder {
+    color: #78909c;
+    font-weight: normal;
+}
+.tufe-sim-ay-sel {
+    min-width: 104px;
+    background: #2d4060;
+    border: 1px solid #3d5070;
+    color: #e0f7fa;
+    padding: 5px 8px;
+    border-radius: 3px;
+    font-size: 12px;
+    cursor: pointer;
+}
+.tufe-sim-panel {
+    margin: 14px 0 18px 0;
+    background: #1e3a50;
+    border: 1px solid #2d4060;
+    border-radius: 6px;
+    padding: 10px 12px;
+    width: fit-content;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+.tufe-sim-panel h4 {
+    color: #4fc3f7;
+    margin: 0 0 6px 0;
+    font-size: 14px;
+}
+.tufe-sim-panel .tufe-sim-aciklama {
+    font-size: 11px;
+    color: #90a4ae;
+    margin-bottom: 10px;
+    line-height: 1.4;
+}
+.tufe-sim-modu-banner {
+    margin: 0 0 10px 0;
+    padding: 8px 12px;
+    background: rgba(0,188,212,0.08);
+    border: 1px solid rgba(0,188,212,0.25);
+    border-radius: 4px;
+    font-size: 12px;
+    color: #b0bec5;
+}
+.tufe-sim-modu-banner a {
+    color: #4fc3f7;
+    font-weight: 600;
+}
+.tufe-yil-gorusu--sim-hidden {
+    display: none !important;
+}
+.tufe-sim-tablo {
+    border-collapse: collapse;
+    font-size: 12px;
+    width: max-content;
+    max-width: 100%;
+}
+.tufe-sim-tablo th {
+    text-align: left;
+    color: #90a4ae;
+    padding: 6px 10px 8px 0;
+    border-bottom: 1px solid #2d4060;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.tufe-sim-tablo th:last-child {
+    padding-right: 0;
+}
+.tufe-sim-tablo td {
+    padding: 6px 10px 6px 0;
+    color: #e0f7fa;
+    border-bottom: 1px solid #263a50;
+    vertical-align: middle;
+}
+.tufe-sim-tablo td:last-child {
+    padding-right: 0;
+}
+.tufe-sim-tablo td.num {
+    text-align: right;
+    font-family: 'Courier New', monospace;
+    color: #00bcd4;
+    font-weight: bold;
+    font-variant-numeric: tabular-nums;
+}
+.tufe-sim-tablo tr.uyari td {
+    color: #ffab40;
+    font-size: 11px;
+}
+/* Tutar zinciri: sütunlar bitişik, tek bakışta okunur */
+.tufe-sim-tablo--zincir th:nth-child(1),
+.tufe-sim-tablo--zincir td:nth-child(1) {
+    padding-right: 12px;
+}
+.tufe-sim-tablo--zincir th:nth-child(2),
+.tufe-sim-tablo--zincir td:nth-child(2) {
+    text-align: center;
+    padding-left: 0;
+    padding-right: 12px;
+    white-space: nowrap;
+}
+.tufe-sim-tablo--zincir th:nth-child(3),
+.tufe-sim-tablo--zincir td:nth-child(3) {
+    text-align: right;
+    padding-left: 0;
+    padding-right: 12px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+.tufe-sim-tablo--zincir th:nth-child(4),
+.tufe-sim-tablo--zincir td:nth-child(4) {
+    text-align: right;
+    padding-left: 4px;
+    border-left: 1px solid rgba(45, 64, 96, 0.9);
+}
+.tufe-sim-tablo--zincir td:nth-child(4) {
+    font-family: 'Courier New', monospace;
+    font-weight: bold;
+    color: #00bcd4;
+}
+.tufe-ay-btn-wrap {
+    position: relative;
+}
+.tufe-ay-picker {
+    display: none;
+    position: absolute;
+    left: 0;
+    top: 100%;
+    margin-top: 6px;
+    z-index: 50;
+    background: #1e3a50;
+    border: 1px solid #2d4060;
+    border-radius: 6px;
+    padding: 10px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+    min-width: 280px;
+}
+.tufe-ay-picker.open {
+    display: block;
+}
+.tufe-ay-picker-title {
+    color: #90a4ae;
+    font-size: 11px;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+.tufe-ay-picker-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+}
+.tufe-ay-picker-grid button {
+    padding: 8px 4px;
+    font-size: 12px;
+    width: 100%;
+}
+.tufe-ay-gorusu {
+    display: none;
+    margin-bottom: 12px;
+}
+.tufe-ay-gorusu.active {
+    display: block;
+}
+.tufe-ay-gorusu-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+    background: #1e3a50;
+    padding: 10px 12px;
+    border-radius: 4px;
+    margin-bottom: 10px;
+    border: 1px solid #2d4060;
+}
+.tufe-ay-gorusu-bar strong {
+    color: #4fc3f7;
+    font-size: 14px;
+}
+.tufe-ay-gorusu-bar button {
+    background: #546e7a;
+    color: #fff;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: bold;
+}
+.tufe-ay-gorusu-bar button:hover {
+    background: #607d8b;
+}
+.tufe-yil-gorusu.hidden {
+    display: none;
+}
+.tufe-ay-yil-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    gap: 8px;
+}
+.tufe-ay-yil-kart {
+    background: #1e3a50;
+    padding: 10px;
+    border-radius: 3px;
+    border: 1px solid #2d4060;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.2s;
+}
+.tufe-ay-yil-kart:hover {
+    border-color: #00bcd4;
+}
+.tufe-ay-yil-kart h3 {
+    color: #90a4ae;
+    font-size: 11px;
+    margin: 0 0 6px 0;
+    font-weight: 600;
+}
+.tufe-ay-yil-kart .oran {
+    color: #00bcd4;
+    font-size: 15px;
+    font-weight: bold;
+    font-family: 'Courier New', monospace;
+}
+.tufe-ay-yil-kart .alt {
+    font-size: 9px;
+    color: #607d8b;
+    margin-top: 4px;
+}
+.tufe-ay-bos {
+    color: #90a4ae;
+    padding: 24px;
+    text-align: center;
+    background: #1e3a50;
+    border-radius: 4px;
+    border: 1px dashed #2d4060;
 }
 .aylar-grid {
     display: grid;
@@ -150,37 +505,394 @@
 
 <!-- Yıl Seçici -->
 <form id="tufe-form" method="post" action="{{ url_for('tufe.kaydet') }}">
-    <div class="yil-selector">
+    <div class="yil-selector" style="align-items:center;">
         <label>Yıl:</label>
-        <input type="number" name="yil" value="{{ yil }}" id="tufe-yil" min="2000" max="2100">
-        <button type="button" onclick="yilDegistir()">▶ Göster</button>
+        <div class="tufe-yil-trigger-wrap">
+            <button type="button" class="tufe-yil-trigger" id="btn-tufe-yil" onclick="tufeYilPickerToggle(event)" title="Yıl seçmek için tıklayın">
+                <span class="tufe-yil-trigger-text" id="tufe-yil-trigger-text">{% if secili_yillar %}{{ secili_yillar|join(', ') }}{% else %}—{% endif %}</span>
+                <span class="chev">▼</span>
+            </button>
+            <div class="tufe-yil-picker" id="tufe-yil-picker" role="dialog" aria-label="Yıl seçin">
+                <div class="tufe-ay-picker-title">Yıl seçin (birden fazla işaretlenebilir)</div>
+                <div class="tufe-yil-check-wrap" id="tufe-yil-checkbox-wrap">
+                    {% for yy in checkbox_yillar %}
+                    <label>
+                        <input type="checkbox" name="tufe-yil-cb" value="{{ yy }}" {% if yy in secili_yillar %}checked{% endif %}>
+                        <span>{{ yy }}</span>
+                    </label>
+                    {% endfor %}
+                </div>
+                <div class="tufe-yil-picker-hint">Yıl yok + ay → o ayın tüm yıllar. Yıl + ay, tutar yok → sadece seçili yıllar. Yıl + ay + tutar → kira zinciri. <strong>Temizle</strong> sıfırlar.</div>
+            </div>
+        </div>
+        <div class="tufe-yil-bar-actions">
+            <div class="tufe-ay-btn-wrap">
+                <button type="button" class="secondary" id="btn-tufe-aylar" onclick="tufeAylarPickerToggle(event)">Aylar</button>
+                <div class="tufe-ay-picker" id="tufe-ay-picker" role="dialog" aria-label="Ay seçin">
+                    <div class="tufe-ay-picker-title">Ay seçin (tüm yıllar)</div>
+                    <div class="tufe-ay-picker-grid" id="tufe-ay-picker-grid"></div>
+                </div>
+            </div>
+            <div class="tufe-sim-inline" title="Başlangıç tutarı ve ay: kira senaryosu ile aynı çarpan (×(1+TÜFE/100)) zinciri">
+                <input type="number" step="0.01" min="0" id="tufe-sim-tutar" class="tufe-sim-tutar-inp" placeholder="Tutar ₺" inputmode="decimal" autocomplete="off" value="{% if sim_tutar_str %}{{ sim_tutar_str|e }}{% endif %}">
+                <select id="tufe-sim-ay" class="tufe-sim-ay-sel" aria-label="TÜFE uygulama ayı">
+                    <option value="">Ay</option>
+                    {% for ay in aylar %}
+                    <option value="{{ ay }}" {% if sim_ay_secili and ay == sim_ay_secili %}selected{% endif %}>{{ ay }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <button type="button" onclick="yilDegistir()">▶ Göster</button>
+            <button type="button" class="secondary" onclick="tufeTemizle()">Temizle</button>
+        </div>
     </div>
 
-    <!-- Aylar Grid (6 sütun x 2 satır) -->
-    <div class="aylar-grid">
-        {% for ay in aylar %}
-        {% set oran = data.get(ay) %}
-        <div class="ay-kart {% if oran is not none %}veri-var{% else %}veri-yok{% endif %}">
-            <h3>{{ ay }}</h3>
-            <input type="text"
-                   name="ay_{{ loop.index }}"
-                   id="ay_{{ loop.index }}"
-                   placeholder="—"
-                   value="{% if oran is not none %}{{ '%.2f'|format(oran) }}{% endif %}">
+    {% if sim_modu %}
+    <div class="tufe-sim-modu-banner">
+        Kira / tutar simülasyonu: aşağıda seçili ay için yıllık zincir. <a href="{{ url_for('tufe.index', yillar=yillar_query) }}">Tüm aylık TÜFE tablolarını göster</a>
+    </div>
+    {% elif ay_oran_satirlar is not none %}
+    <div class="tufe-sim-modu-banner">
+        {% if secili_yillar %}
+        Seçili yıllar — <strong>{{ sim_ay_secili }}</strong> TÜFE (%).
+        {% else %}
+        Tüm yıllar — <strong>{{ sim_ay_secili }}</strong> TÜFE (%).
+        {% endif %}
+        <a href="{% if secili_yillar %}{{ url_for('tufe.index', yillar=yillar_query) }}{% else %}{{ url_for('tufe.index') }}{% endif %}">12 aylık tablolara dön</a>
+    </div>
+    <div class="tufe-sim-panel" aria-live="polite">
+        <h4>{{ sim_ay_secili }} — TÜFE oranları</h4>
+        {% if ay_oran_satirlar|length %}
+        <table class="tufe-sim-tablo">
+            <thead><tr><th>Yıl</th><th>TÜFE %</th></tr></thead>
+            <tbody>
+            {% for s in ay_oran_satirlar %}
+                <tr><td>{{ s.yil }}</td><td class="num">%{{ '%.2f'|format(s.oran) }}</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="tufe-sim-aciklama" style="margin:0;">Bu ay için kayıt yok.</p>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <div class="tufe-ay-gorusu" id="tufe-ay-gorusu">
+        <div class="tufe-ay-gorusu-bar">
+            <span><strong id="tufe-ay-baslik">—</strong> <span style="color:#90a4ae;font-size:12px;">TÜFE (%)</span></span>
+            <button type="button" onclick="tufeYillikGorunumeDon()">← Yıllık görünüme dön</button>
         </div>
-        {% endfor %}
+        <div id="tufe-ay-sonuc"></div>
+    </div>
+
+    <!-- Her seçili yıl için Ocak–Aralık (simülasyon modunda gizli) -->
+    <div class="tufe-yil-gorusu{% if tufe_hide_grids %} tufe-yil-gorusu--sim-hidden{% endif %}" id="tufe-yil-gorusu">
+    {% for y in secili_yillar %}
+    <div class="tufe-yil-blok" data-tufe-yil="{{ y }}">
+        <input type="hidden" name="yillar_secili" value="{{ y }}">
+        <h3>{{ y }} — TÜFE (%)</h3>
+        <div class="aylar-grid">
+            {% for ay in aylar %}
+            {% set oran = veri_yillar[y].get(ay) %}
+            <div class="ay-kart {% if oran is not none %}veri-var{% else %}veri-yok{% endif %}">
+                <h3>{{ ay }}</h3>
+                <input type="text"
+                       name="y{{ y }}_ay_{{ loop.index }}"
+                       id="y{{ y }}_ay_{{ loop.index }}"
+                       placeholder="—"
+                       value="{% if oran is not none %}{{ '%.2f'|format(oran) }}{% endif %}">
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endfor %}
     </div>
 </form>
+
+<div id="tufe-sim-panel" class="tufe-sim-panel" style="display:none;" aria-live="polite"></div>
 
 <script>
 const TUFE_INDEX_URL = "{{ url_for('tufe.index') }}";
 const TUFE_KAYDET_URL = "{{ url_for('tufe.kaydet') }}";
 const TUFE_SIL_URL = "{{ url_for('tufe.sil') }}";
 const TUFE_TCMB_URL = "{{ url_for('tufe.tcmb_cek') }}";
+const TUFE_AY_OZET_URL = "{{ url_for('tufe.api_ay_ozeti') }}";
+const TUFE_SIM_ORAN_URL = "{{ url_for('tufe.api_yillar_ay_oranlari') }}";
+const TUFE_AYLAR_LIST = {{ aylar|tojson }};
+const TUFE_SIM_MODU = {{ sim_modu|tojson }};
+
+/** Tutar+ay+yıl simülasyonu tablosu açıkken 12 aylık yıl grid'lerini gizler. */
+function tufeSimYilGridAyarla(simTablosuAcik) {
+    var ygv = document.getElementById('tufe-yil-gorusu');
+    if (!ygv) return;
+    if (simTablosuAcik) {
+        ygv.classList.add('tufe-yil-gorusu--sim-hidden');
+    } else {
+        ygv.classList.remove('tufe-yil-gorusu--sim-hidden');
+    }
+}
+
+var _tufeSimTimer = null;
+var _tufeSimSeq = 0;
+
+function tufeSimZamanla() {
+    if (_tufeSimTimer) clearTimeout(_tufeSimTimer);
+    _tufeSimTimer = setTimeout(tufeSimGuncelle, 380);
+}
+
+function tufeSimPara(n) {
+    return (typeof n === 'number' && !isNaN(n) ? n : 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function tufeSimGuncelle() {
+    var panel = document.getElementById('tufe-sim-panel');
+    var tutInp = document.getElementById('tufe-sim-tutar');
+    var aySel = document.getElementById('tufe-sim-ay');
+    if (!panel || !tutInp || !aySel) return;
+    var ay = (aySel.value || '').trim();
+    var tuts = (tutInp.value || '').replace(/\s/g, '').replace(',', '.');
+    var bas = parseFloat(tuts);
+    if (!ay || tuts === '' || isNaN(bas) || bas <= 0) {
+        panel.style.display = 'none';
+        panel.innerHTML = '';
+        tufeSimYilGridAyarla(false);
+        return;
+    }
+    var ys = [];
+    document.querySelectorAll('input[name="tufe-yil-cb"]:checked').forEach(function (c) {
+        var n = parseInt(c.value, 10);
+        if (!isNaN(n)) ys.push(n);
+    });
+    ys.sort(function (a, b) { return a - b; });
+    if (!ys.length) {
+        panel.style.display = 'none';
+        panel.innerHTML = '';
+        tufeSimYilGridAyarla(false);
+        return;
+    }
+    var seq = ++_tufeSimSeq;
+    var url = TUFE_SIM_ORAN_URL + '?ay=' + encodeURIComponent(ay) + '&yillar=' + ys.join(',');
+    fetch(url)
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            if (seq !== _tufeSimSeq) return;
+            if (!data || !data.ok || !data.yillar) {
+                panel.style.display = 'none';
+                tufeSimYilGridAyarla(false);
+                return;
+            }
+            var oranlar = data.oranlar || {};
+            var yillar = data.yillar.slice().sort(function (a, b) { return a - b; });
+            var amt = bas;
+            var rows = [];
+            rows.push({
+                tip: 'bas',
+                yil: yillar[0],
+                tufe: null,
+                tutar: amt
+            });
+            var i;
+            for (i = 1; i < yillar.length; i++) {
+                var y = yillar[i];
+                var or = oranlar[String(y)];
+                if (or == null || isNaN(parseFloat(or))) {
+                    rows.push({
+                        tip: 'eksik',
+                        yil: y,
+                        tufe: null,
+                        tutar: amt,
+                        txt: ay + ' ' + y + ' TÜFE kaydı yok; tutar değişmedi'
+                    });
+                    continue;
+                }
+                var pct = parseFloat(or) / 100;
+                amt = amt * (1 + pct);
+                rows.push({
+                    tip: 'artis',
+                    yil: y,
+                    tufe: parseFloat(or),
+                    tutar: amt
+                });
+            }
+            var html = '<h4>TÜFE tutar simülasyonu</h4>';
+            html += '<table class="tufe-sim-tablo tufe-sim-tablo--zincir"><thead><tr><th>Açıklama</th><th>Yıl</th><th>TÜFE %</th><th>Tutar (₺)</th></tr></thead><tbody>';
+            rows.forEach(function (row) {
+                if (row.tip === 'eksik') {
+                    html += '<tr class="uyari"><td colspan="4">' + row.txt + '</td></tr>';
+                    return;
+                }
+                html += '<tr><td>' + (row.tip === 'bas' ? 'Başlangıç' : 'Artış') + '</td><td>' + row.yil + '</td><td>' + (row.tufe != null ? '%' + tufeSimPara(row.tufe) : '—') + '</td><td class="num">' + tufeSimPara(row.tutar) + '</td></tr>';
+            });
+            html += '</tbody></table>';
+            if (yillar.length === 1) {
+                html += '<p class="tufe-sim-aciklama" style="margin-top:10px;margin-bottom:0;">Zincir artış için yıl panelinden birden fazla yıl işaretleyin.</p>';
+            }
+            panel.innerHTML = html;
+            panel.style.display = 'block';
+            tufeSimYilGridAyarla(true);
+            if (TUFE_SIM_MODU) {
+                try {
+                    panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                } catch (e) {}
+            }
+        })
+        .catch(function () {
+            if (seq !== _tufeSimSeq) return;
+            panel.style.display = 'none';
+            tufeSimYilGridAyarla(false);
+        });
+}
+
+(function initTufeAyPicker() {
+    var grid = document.getElementById('tufe-ay-picker-grid');
+    if (!grid || !TUFE_AYLAR_LIST) return;
+    grid.innerHTML = TUFE_AYLAR_LIST.map(function(ay) {
+        return '<button type="button" onclick="tufeAySec(\'' + ay.replace(/'/g, "\\'") + '\')">' + ay + '</button>';
+    }).join('');
+})();
+
+document.addEventListener('click', function(ev) {
+    var ay = document.getElementById('tufe-ay-picker');
+    var ayBtn = document.getElementById('btn-tufe-aylar');
+    if (ay && ay.classList.contains('open')) {
+        if (!ay.contains(ev.target) && !(ayBtn && ayBtn.contains(ev.target))) ay.classList.remove('open');
+    }
+    var yp = document.getElementById('tufe-yil-picker');
+    var yBtn = document.getElementById('btn-tufe-yil');
+    if (yp && yp.classList.contains('open')) {
+        if (!yp.contains(ev.target) && !(yBtn && yBtn.contains(ev.target))) yp.classList.remove('open');
+    }
+});
+
+function tufeYilPickerToggle(ev) {
+    if (ev) ev.stopPropagation();
+    var yp = document.getElementById('tufe-yil-picker');
+    var ap = document.getElementById('tufe-ay-picker');
+    if (ap) ap.classList.remove('open');
+    if (yp) yp.classList.toggle('open');
+}
+
+function tufeAylarPickerToggle(ev) {
+    if (ev) ev.stopPropagation();
+    var ap = document.getElementById('tufe-ay-picker');
+    var yp = document.getElementById('tufe-yil-picker');
+    if (yp) yp.classList.remove('open');
+    if (ap) ap.classList.toggle('open');
+}
+
+function tufeYilTriggerMetniGuncelle() {
+    var ys = [];
+    document.querySelectorAll('input[name="tufe-yil-cb"]:checked').forEach(function (c) {
+        var n = parseInt(c.value, 10);
+        if (!isNaN(n)) ys.push(n);
+    });
+    ys.sort(function (a, b) { return a - b; });
+    var el = document.getElementById('tufe-yil-trigger-text');
+    if (el) el.textContent = ys.length ? ys.join(', ') : '—';
+    tufeSimZamanla();
+}
+
+(function tufeYilCbBind() {
+    var w = document.getElementById('tufe-yil-checkbox-wrap');
+    if (w) w.addEventListener('change', tufeYilTriggerMetniGuncelle);
+})();
+
+(function tufeSimInputBind() {
+    var t = document.getElementById('tufe-sim-tutar');
+    var a = document.getElementById('tufe-sim-ay');
+    if (t) {
+        t.addEventListener('input', tufeSimZamanla);
+        t.addEventListener('change', tufeSimZamanla);
+    }
+    if (a) a.addEventListener('change', tufeSimZamanla);
+})();
+
+function tufeYillikGorunumeDon() {
+    document.getElementById('tufe-ay-gorusu').classList.remove('active');
+    document.getElementById('tufe-yil-gorusu').classList.remove('hidden');
+    var p = document.getElementById('tufe-ay-picker');
+    if (p) p.classList.remove('open');
+    var yp = document.getElementById('tufe-yil-picker');
+    if (yp) yp.classList.remove('open');
+}
+
+function tufeAyYilKartaGit(yil) {
+    window.location.href = TUFE_INDEX_URL + '?yillar=' + encodeURIComponent(String(yil));
+}
+
+function tufeAySec(ayAdi) {
+    var p = document.getElementById('tufe-ay-picker');
+    if (p) p.classList.remove('open');
+    var simAy = document.getElementById('tufe-sim-ay');
+    if (simAy) {
+        simAy.value = ayAdi;
+        tufeSimZamanla();
+    }
+    document.getElementById('tufe-ay-sonuc').innerHTML = '<div class="tufe-ay-bos">Yükleniyor…</div>';
+    document.getElementById('tufe-ay-baslik').textContent = ayAdi;
+    document.getElementById('tufe-ay-gorusu').classList.add('active');
+    document.getElementById('tufe-yil-gorusu').classList.add('hidden');
+
+    fetch(TUFE_AY_OZET_URL + '?ay=' + encodeURIComponent(ayAdi))
+        .then(function(r) { return r.json(); })
+        .then(function(j) {
+            var el = document.getElementById('tufe-ay-sonuc');
+            if (!j.ok || !j.satirlar) {
+                el.innerHTML = '<div class="tufe-ay-bos">Veri alınamadı.</div>';
+                return;
+            }
+            if (!j.satirlar.length) {
+                el.innerHTML = '<div class="tufe-ay-bos">Bu ay için veritabanında kayıt yok.</div>';
+                return;
+            }
+            el.innerHTML = '<div class="tufe-ay-yil-grid">' + j.satirlar.map(function(s) {
+                var o = (typeof s.oran === 'number' ? s.oran : parseFloat(s.oran));
+                if (isNaN(o)) o = 0;
+                var os = o.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                return '<div class="tufe-ay-yil-kart" role="button" tabindex="0" onclick="tufeAyYilKartaGit(' + s.yil + ')" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();tufeAyYilKartaGit(' + s.yil + ');}" title="Bu yılı düzenlemek için tıklayın">' +
+                    '<h3>' + s.yil + '</h3>' +
+                    '<div class="oran">%' + os + '</div>' +
+                    '<div class="alt">' + ayAdi + ' TÜFE</div></div>';
+            }).join('') + '</div>';
+        })
+        .catch(function() {
+            document.getElementById('tufe-ay-sonuc').innerHTML = '<div class="tufe-ay-bos">Bağlantı hatası.</div>';
+        });
+}
+
+function tufeTemizle() {
+    window.location.href = TUFE_INDEX_URL;
+}
 
 function yilDegistir() {
-    const yil = document.getElementById('tufe-yil').value;
-    window.location.href = TUFE_INDEX_URL + "?yil=" + encodeURIComponent(yil);
+    tufeYillikGorunumeDon();
+    var ys = [];
+    document.querySelectorAll('input[name="tufe-yil-cb"]:checked').forEach(function (c) {
+        var n = parseInt(c.value, 10);
+        if (!isNaN(n)) ys.push(n);
+    });
+    ys.sort(function (a, b) { return a - b; });
+    var tutEl = document.getElementById('tufe-sim-tutar');
+    var ayEl = document.getElementById('tufe-sim-ay');
+    var tut = tutEl ? String(tutEl.value || '').trim().replace(/\s/g, '').replace(',', '.') : '';
+    var ay = ayEl ? String(ayEl.value || '').trim() : '';
+    if (!ys.length && !ay) {
+        alert('En az bir yıl seçin veya ay seçin.');
+        return;
+    }
+    if (!ys.length && ay) {
+        window.location.href = TUFE_INDEX_URL + '?sim_ay=' + encodeURIComponent(ay);
+        return;
+    }
+    var q = 'yillar=' + ys.join(',');
+    if (ay) q += '&sim_ay=' + encodeURIComponent(ay);
+    if (tut !== '' && ay) {
+        var bas = parseFloat(tut);
+        if (!isNaN(bas) && bas > 0) {
+            q += '&sim_tutar=' + encodeURIComponent(tut);
+        }
+    }
+    window.location.href = TUFE_INDEX_URL + '?' + q;
 }
 
 function yukle() {
@@ -210,28 +922,40 @@ async function tcmbCek() {
 }
 
 async function sil() {
-    const yil = document.getElementById('tufe-yil').value;
-    if (!confirm(yil + " yılı verilerini silmek istiyor musunuz?")) return;
-    
-    const fd = new FormData();
-    fd.append("yil", yil);
-    
-    // Değer girilmiş ayları sil
-    const aylar = {{ aylar|tojson }};
-    for (let i = 1; i <= 12; i++) {
-        const inp = document.getElementById("ay_" + i);
-        if (inp && inp.value.trim()) {
-            fd.append("aylar", aylar[i-1]);
-        }
+    var fd = new FormData(document.getElementById('tufe-form'));
+    var yillar = [];
+    document.querySelectorAll('input[name="yillar_secili"]').forEach(function (h) {
+        yillar.push(h.value);
+    });
+    if (!yillar.length) {
+        alert('Silinecek yıl yok.');
+        return;
     }
-    
+    if (!confirm('Görünen yıllarda (' + yillar.join(', ') + ') dolu olan TÜFE hücreleri silinsin mi?')) return;
     try {
         await fetch(TUFE_SIL_URL, { method: "POST", body: fd });
-        alert("✅ Veriler silindi!");
-        yilDegistir();
+        alert('✅ İlgili ay kayıtları silindi.');
+        var q = 'yillar=' + yillar.join(',');
+        var tutEl = document.getElementById('tufe-sim-tutar');
+        var ayEl = document.getElementById('tufe-sim-ay');
+        var tut = tutEl ? String(tutEl.value || '').trim().replace(/\s/g, '').replace(',', '.') : '';
+        var ay = ayEl ? String(ayEl.value || '').trim() : '';
+        if (tut !== '' && ay !== '') {
+            var bas = parseFloat(tut);
+            if (!isNaN(bas) && bas > 0) {
+                q += '&sim_tutar=' + encodeURIComponent(tut) + '&sim_ay=' + encodeURIComponent(ay);
+            }
+        }
+        window.location.href = TUFE_INDEX_URL + '?' + q;
     } catch (e) {
-        alert("❌ Silme hatası: " + e.message);
+        alert('❌ Silme hatası: ' + e.message);
     }
 }
+
+{% if sim_modu %}
+setTimeout(function () { tufeSimGuncelle(); }, 30);
+{% else %}
+setTimeout(tufeSimZamanla, 200);
+{% endif %}
 </script>
 {% endblock %}

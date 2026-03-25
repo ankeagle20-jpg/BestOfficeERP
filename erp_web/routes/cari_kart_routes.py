@@ -6,6 +6,7 @@ from flask_login import current_user
 from auth import giris_gerekli
 from db import fetch_all, fetch_one, db as get_db
 from utils.text_utils import turkish_lower
+from utils.musteri_arama import customers_arama_sql_3_plus_tax_office, customers_arama_params_5
 from datetime import date, datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import io
@@ -348,20 +349,15 @@ def api_360(mid):
 @bp.route("/api/musteriler")
 @giris_gerekli
 def api_musteriler():
-    """Müşteri listesi (arama için)."""
+    """Müşteri listesi (ünvan, müşteri adı, yetkili + vergi no, ofis)."""
     q = request.args.get("q", "").strip()
-
-    rows = fetch_all("SELECT id, name, tax_number, office_code, durum FROM customers ORDER BY name LIMIT 200")
-
+    base = "SELECT id, name, tax_number, office_code, durum FROM customers "
     if not q:
-        return jsonify(rows or [])
-
-    q_norm = turkish_lower(q)
-    sonuc = []
-    for r in rows:
-        name = turkish_lower(r.get("name") or "")
-        tax = turkish_lower(r.get("tax_number") or "")
-        office = turkish_lower(r.get("office_code") or "")
-        if q_norm in name or q_norm in tax or q_norm in office:
-            sonuc.append(r)
-    return jsonify(sonuc or [])
+        rows = fetch_all(base + "ORDER BY name LIMIT 200")
+    else:
+        w = customers_arama_sql_3_plus_tax_office()
+        rows = fetch_all(
+            base + f"WHERE {w} ORDER BY name LIMIT 200",
+            customers_arama_params_5(q),
+        )
+    return jsonify(rows or [])

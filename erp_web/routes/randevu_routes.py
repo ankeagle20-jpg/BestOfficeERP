@@ -6,6 +6,7 @@ Toplantı Odası ve Randevu Takip Sistemi
 from flask import Blueprint, render_template, request, jsonify, flash, redirect, url_for, current_app
 from flask_login import login_required
 from db import fetch_all, fetch_one, execute, execute_returning
+from utils.musteri_arama import customers_arama_sql_randevu, customers_arama_params_5_randevu
 from datetime import datetime, date, time, timedelta
 from decimal import Decimal
 
@@ -182,19 +183,15 @@ def api_list():
 @bp.route("/api/musteriler")
 @login_required
 def api_musteriler():
-    """Müşteri/firma arama (combobox). name, phone ve notes alanlarında arar."""
+    """Müşteri/firma arama: ünvan, müşteri adı, yetkili + telefon + notes."""
     q = (request.args.get("q") or "").strip()[:80]
     if not q:
         rows = fetch_all("SELECT id, name, phone FROM customers ORDER BY name LIMIT 30")
     else:
-        pattern = "%" + q + "%"
+        w = customers_arama_sql_randevu()
         rows = fetch_all(
-            """SELECT id, name, phone FROM customers
-               WHERE LOWER(name) LIKE LOWER(%s)
-                  OR phone LIKE %s
-                  OR LOWER(COALESCE(notes, '')) LIKE LOWER(%s)
-               ORDER BY name LIMIT 30""",
-            (pattern, pattern, pattern),
+            f"SELECT id, name, phone FROM customers WHERE {w} ORDER BY name LIMIT 30",
+            customers_arama_params_5_randevu(q),
         )
     return jsonify([{"id": r["id"], "name": r.get("name") or "", "phone": r.get("phone") or ""} for r in rows])
 

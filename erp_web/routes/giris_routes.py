@@ -21,6 +21,7 @@ from reportlab.pdfgen import canvas
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from utils.text_utils import turkish_lower
+from utils.musteri_arama import customers_arama_sql_3_plus_tax_office, customers_arama_params_5
 
 def _register_arial():
     """Türkçe karakter için Arial veya alternatif font kaydet."""
@@ -226,28 +227,21 @@ def api_potansiyel_pending():
 @bp.route('/api/musteriler')
 @giris_gerekli
 def api_musteriler():
-    """Müşteri listesi - AJAX için"""
+    """Müşteri listesi - AJAX için (ünvan, müşteri adı, yetkili + vergi no, ofis)."""
     arama = (request.args.get('q') or '').strip()
-
-    rows = fetch_all(
-        """SELECT id, name, tax_number, phone, email, office_code 
-           FROM customers 
-           ORDER BY name LIMIT 1000"""
+    base = (
+        "SELECT id, name, tax_number, phone, email, office_code "
+        "FROM customers "
     )
-
     if not arama:
-        return jsonify(rows)
-
-    q_norm = turkish_lower(arama)
-    sonuc = []
-    for r in rows:
-        name = turkish_lower(r.get('name') or '')
-        tax = turkish_lower(r.get('tax_number') or '')
-        office = turkish_lower(r.get('office_code') or '')
-        if q_norm in name or q_norm in tax or q_norm in office:
-            sonuc.append(r)
-
-    return jsonify(sonuc)
+        rows = fetch_all(base + "ORDER BY name LIMIT 1000")
+    else:
+        w = customers_arama_sql_3_plus_tax_office()
+        rows = fetch_all(
+            base + f"WHERE {w} ORDER BY name LIMIT 1000",
+            customers_arama_params_5(arama),
+        )
+    return jsonify(rows or [])
 
 
 def _musteri_serialize_val(v):
