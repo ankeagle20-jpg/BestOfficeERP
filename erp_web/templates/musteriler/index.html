@@ -429,6 +429,28 @@ var allRows = Array.from(document.querySelectorAll('#mlBody tr[data-name]'));
 var sozlesmeAySecili = 0; // 0 = tümü, 1-12 = ay
 var _durumSavePending = {};
 
+/**
+ * Türkçe arama metni — utils.musteri_arama.normalize_musteri_arama_tr ile uyumlu.
+ * JS .toLowerCase() «DERVİŞ» gibi girişlerde data-name (Python |lower) ile eşleşmeyebiliyor.
+ */
+function mlAramaFoldTr(s) {
+  if (s == null || s === undefined) return '';
+  var t = String(s);
+  var out = '';
+  for (var i = 0; i < t.length; i++) {
+    var ch = t[i];
+    if (ch === '\u0130') out += 'i';
+    else if (ch === 'I') out += '\u0131';
+    else out += ch;
+  }
+  var x = out.toLocaleLowerCase('tr-TR');
+  try {
+    return x.normalize('NFC');
+  } catch (e) {
+    return x;
+  }
+}
+
 function fmtKapTr(iso) {
   var s = (iso || '').substring(0, 10);
   if (s.length !== 10 || s[4] !== '-') return '';
@@ -712,7 +734,8 @@ function mlGetSozBasTarihFiltreIso(inp) {
 }
 
 function filterTable(){
-  var q = (document.getElementById('mlQ').value || '').toLowerCase();
+  var qRaw = (document.getElementById('mlQ').value || '').trim();
+  var q = qRaw ? mlAramaFoldTr(qRaw) : '';
   var durum = document.getElementById('mlDurum').value;
   var hizmetSel = document.getElementById('mlHizmet');
   var rawHizOf = hizmetSel ? (hizmetSel.value || '').trim() : '';
@@ -741,7 +764,7 @@ function filterTable(){
     var ok = true;
     if (q) {
       var mAdi = (tr.getAttribute('data-musteri-adi-l') || '');
-      var yet = (tr.getAttribute('data-yetkili') || '').toLowerCase();
+      var yet = mlAramaFoldTr(tr.getAttribute('data-yetkili') || '');
       if (name.indexOf(q) === -1 && mAdi.indexOf(q) === -1 && yet.indexOf(q) === -1) ok = false;
     }
     if(ofis && rowOfis !== ofis) ok = false;

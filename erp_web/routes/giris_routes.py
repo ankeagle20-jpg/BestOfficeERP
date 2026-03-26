@@ -5,7 +5,7 @@ Desktop'taki gibi tam fonksiyonel + Sözleşme oluşturma
 from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, send_file, Response
 from flask_login import current_user
 from auth import giris_gerekli
-from db import fetch_all, fetch_one, execute, execute_returning, ensure_hizmet_turleri_table, db as get_db
+from db import fetch_all, fetch_one, execute, execute_returning, ensure_hizmet_turleri_table, ensure_faturalar_amount_columns, db as get_db
 from datetime import datetime, date, timedelta
 from docx import Document
 from docx.shared import Pt, Cm
@@ -1498,6 +1498,241 @@ def api_cari_ekstre():
         "toplam_borc": round(toplam_borc, 2),
         "toplam_alacak": round(toplam_alacak, 2),
         "bakiye": bakiye,
+    })
+
+
+def _next_fatura_no_aylik(prefix="INV"):
+    """Yıla göre artan fatura numarası (faturalar tablosu ile uyumlu)."""
+    yil = datetime.now().year
+    like = f"{prefix}{yil}%"
+    row = fetch_one("SELECT fatura_no FROM faturalar WHERE fatura_no LIKE %s ORDER BY id DESC LIMIT 1", (like,))
+    if not row or not row.get("fatura_no"):
+        return f"{prefix}{yil}000001"
+    no = str(row["fatura_no"])
+    try:
+        tail = int(no[-6:])
+        return f"{prefix}{yil}{tail+1:06d}"
+    except Exception:
+        return f"{prefix}{yil}000001"
+
+
+def _next_makbuz_no_aylik():
+    """Yıla göre bir sonraki makbuz numarası (tahsilatlar ile uyumlu)."""
+    yil = datetime.now().year
+    row = fetch_one(
+        "SELECT makbuz_no FROM tahsilatlar WHERE makbuz_no LIKE %s ORDER BY id DESC LIMIT 1",
+        (f"{yil}-%",),
+    )
+    if not row or not row.get("makbuz_no"):
+        return f"{yil}-0001"
+    try:
+        num = int(row["makbuz_no"].split("-")[-1])
+        return f"{yil}-{num + 1:04d}"
+    except (ValueError, IndexError):
+        return f"{yil}-0001"
+
+
+@bp.route('/api/aylik-tutarlardan-borclandir', methods=['POST'])
+@giris_gerekli
+def api_aylik_tutarlardan_borclandir():
+    """
+    Aylık Tutarlar gridinden seçilen aylar için ayrı fatura (borç) kaydı oluşturur.
+    Tutarlar KDV dahil kabul edilir; net/kdv satırları faturalar.tutar / kdv_tutar olarak bölünür.
+    Cari Ekstre B ve genel cari kartta faturalar görünür.
+    """
+    ensure_faturalar_amount_columns()
+    try:
+        data = request.get_json(force=True, silent=True) or {}
+    except Exception:
+        data = {}
+    musteri_id = data.get("musteri_id")
+    try:
+        musteri_id = int(musteri_id)
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "mesaj": "musteri_id gerekli."}), 400
+    cust = fetch_one("SELECT id, name FROM customers WHERE id = %s", (musteri_id,))
+    if not cust:
+        return jsonify({"ok": False, "mesaj": "Müşteri bulunamadı."}), 404
+    musteri_adi = (cust.get("name") or "").strip() or "—"
+    satirlar = data.get("satirlar")
+    if not isinstance(satirlar, list) or not satirlar:
+        return jsonify({"ok": False, "mesaj": "En az bir ay satırı gerekli."}), 400
+
+    KDV_ORAN = 20.0
+    olusturulan = []
+    atlanan = []
+
+    for raw in satirlar:
+        if not isinstance(raw, dict):
+            continue
+        try:
+            yil = int(raw.get("yil"))
+            ay = int(raw.get("ay"))
+        except (TypeError, ValueError):
+            atlanan.append({"neden": "geçersiz_yil_ay", "satir": raw})
+            continue
+        if ay < 1 or ay > 12 or yil < 1990 or yil > 2100:
+            atlanan.append({"neden": "tarih_aralik", "satir": raw})
+            continue
+        try:
+            tutar = float(raw.get("tutar_kdv_dahil"))
+        except (TypeError, ValueError):
+            atlanan.append({"neden": "geçersiz_tutar", "satir": raw})
+            continue
+        if tutar <= 0:
+            atlanan.append({"neden": "tutar_sifir", "satir": raw})
+            continue
+
+        ay_bir = date(yil, ay, 1)
+        ay_anahtar = ay_bir.isoformat()
+        marker = f"|AYLIK_TUTAR|{ay_anahtar}|"
+        var = fetch_one(
+            "SELECT id, fatura_no FROM faturalar WHERE musteri_id = %s AND COALESCE(notlar,'') LIKE %s LIMIT 1",
+            (musteri_id, f"%{marker}%"),
+        )
+        if var:
+            atlanan.append({"neden": "zaten_faturali", "yil": yil, "ay": ay, "fatura_no": var.get("fatura_no")})
+            continue
+
+        # Ay sonu vade (yaklaşık)
+        if ay == 12:
+            vade = date(yil, 12, 31)
+        else:
+            vade = date(yil, ay + 1, 1) - timedelta(days=1)
+
+        toplam = round(tutar, 2)
+        net = round(toplam / (1 + KDV_ORAN / 100.0), 2)
+        kdv_tutar = round(toplam - net, 2)
+        net = round(toplam - kdv_tutar, 2)
+
+        ay_adi = _AY_ADLARI[ay - 1]
+        notlar = f"{ay_adi} {yil} kira bedeli (KDV dahil, Aylık Tutarlar){marker}"
+
+        fatura_no = _next_fatura_no_aylik()
+        execute(
+            """
+            INSERT INTO faturalar (
+                fatura_no, musteri_id, musteri_adi, tutar, kdv_tutar,
+                toplam, durum, fatura_tarihi, vade_tarihi, notlar
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                fatura_no,
+                musteri_id,
+                musteri_adi,
+                net,
+                kdv_tutar,
+                toplam,
+                "odenmedi",
+                ay_bir,
+                vade,
+                notlar,
+            ),
+        )
+        row = fetch_one("SELECT id FROM faturalar WHERE fatura_no = %s ORDER BY id DESC LIMIT 1", (fatura_no,))
+        fid = row.get("id") if row else None
+        olusturulan.append({"id": fid, "fatura_no": fatura_no, "yil": yil, "ay": ay, "toplam": toplam})
+
+    return jsonify({
+        "ok": True,
+        "olusturulan": olusturulan,
+        "atlanan": atlanan,
+        "mesaj": f"{len(olusturulan)} fatura oluşturuldu, {len(atlanan)} satır atlandı.",
+    })
+
+
+@bp.route('/api/aylik-tutarlardan-tahsil-et', methods=['POST'])
+@giris_gerekli
+def api_aylik_tutarlardan_tahsil_et():
+    """
+    Aylık Tutarlar gridinden seçilen aylar için ayrı tahsilat (alacak) kaydı.
+    Tutarlar griddeki gibi KDV dahil; cari kart ve ekstrelerde tahsilat olarak görünür.
+    Aynı ay için tekrar kayıt engellenir (açıklama işaretçisi).
+    """
+    try:
+        data = request.get_json(force=True, silent=True) or {}
+    except Exception:
+        data = {}
+    musteri_id = data.get("musteri_id")
+    try:
+        musteri_id = int(musteri_id)
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "mesaj": "musteri_id gerekli."}), 400
+    cust = fetch_one("SELECT id, name FROM customers WHERE id = %s", (musteri_id,))
+    if not cust:
+        return jsonify({"ok": False, "mesaj": "Müşteri bulunamadı."}), 404
+
+    satirlar = data.get("satirlar")
+    if not isinstance(satirlar, list) or not satirlar:
+        return jsonify({"ok": False, "mesaj": "En az bir ay satırı gerekli."}), 400
+
+    tahsilat_tarihi = date.today()
+    raw_tarih = (data.get("tahsilat_tarihi") or "").strip()
+    if raw_tarih:
+        try:
+            tahsilat_tarihi = datetime.strptime(raw_tarih[:10], "%Y-%m-%d").date()
+        except Exception:
+            pass
+
+    odeme = (data.get("odeme_turu") or "havale").strip().lower()
+    if odeme not in ("nakit", "havale", "eft", "banka", "kredi_karti", "cek"):
+        odeme = "havale"
+
+    olusturulan = []
+    atlanan = []
+
+    for raw in satirlar:
+        if not isinstance(raw, dict):
+            continue
+        try:
+            yil = int(raw.get("yil"))
+            ay = int(raw.get("ay"))
+        except (TypeError, ValueError):
+            atlanan.append({"neden": "geçersiz_yil_ay", "satir": raw})
+            continue
+        if ay < 1 or ay > 12 or yil < 1990 or yil > 2100:
+            atlanan.append({"neden": "tarih_aralik", "satir": raw})
+            continue
+        try:
+            tutar = float(raw.get("tutar_kdv_dahil"))
+        except (TypeError, ValueError):
+            atlanan.append({"neden": "geçersiz_tutar", "satir": raw})
+            continue
+        if tutar <= 0:
+            atlanan.append({"neden": "tutar_sifir", "satir": raw})
+            continue
+
+        ay_bir = date(yil, ay, 1)
+        ay_anahtar = ay_bir.isoformat()
+        marker = f"|AYLIK_TAH|{ay_anahtar}|"
+        var = fetch_one(
+            "SELECT id, makbuz_no FROM tahsilatlar WHERE (musteri_id = %s OR customer_id = %s) AND COALESCE(aciklama,'') LIKE %s LIMIT 1",
+            (musteri_id, musteri_id, f"%{marker}%"),
+        )
+        if var:
+            atlanan.append({"neden": "zaten_tahsil", "yil": yil, "ay": ay, "makbuz_no": var.get("makbuz_no")})
+            continue
+
+        tutar = round(tutar, 2)
+        ay_adi = _AY_ADLARI[ay - 1]
+        aciklama = f"{ay_adi} {yil} kira tahsilatı (KDV dahil, Aylık Tutarlar){marker}"
+        makbuz_no = _next_makbuz_no_aylik()
+        row = execute_returning(
+            """
+            INSERT INTO tahsilatlar (musteri_id, customer_id, tutar, odeme_turu, aciklama, tahsilat_tarihi, makbuz_no)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+            """,
+            (musteri_id, musteri_id, tutar, odeme, aciklama, tahsilat_tarihi, makbuz_no),
+        )
+        tid = row.get("id") if row else None
+        olusturulan.append({"id": tid, "makbuz_no": makbuz_no, "yil": yil, "ay": ay, "tutar": tutar})
+
+    return jsonify({
+        "ok": True,
+        "olusturulan": olusturulan,
+        "atlanan": atlanan,
+        "mesaj": f"{len(olusturulan)} tahsilat kaydı oluşturuldu, {len(atlanan)} satır atlandı.",
     })
 
 

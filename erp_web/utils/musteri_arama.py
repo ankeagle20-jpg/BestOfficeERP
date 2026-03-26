@@ -9,8 +9,31 @@ customers tablosunda ortak metin araması.
 from __future__ import annotations
 
 
+def normalize_musteri_arama_tr(q: str) -> str:
+    """
+    PostgreSQL ILIKE ile Türkçe büyük harf uyumu.
+
+    Veritabanında ILIKE, ASCII dışı harflerde locale'e göre tutarsız olabiliyor;
+    özellikle «DERVİŞ» gibi tam büyük aramalar «derviş» ile eşleşmeyebiliyor.
+    Arama metnini Türkçe kurallarına uygun tek küçük harf formuna indirgeriz
+    (İ→i, ASCII I→ı, diğerleri .lower()).
+    """
+    if not q:
+        return ""
+    s = q.strip()
+    out: list[str] = []
+    for ch in s:
+        if ch == "\u0130":  # LATIN CAPITAL LETTER I WITH DOT ABOVE (İ)
+            out.append("i")
+        elif ch == "I":  # ASCII büyük I → Türkçe ı
+            out.append("\u0131")
+        else:
+            out.append(ch.lower())
+    return "".join(out)
+
+
 def _pct(q: str) -> str:
-    return f"%{(q or '').strip()}%"
+    return f"%{normalize_musteri_arama_tr(q or '')}%"
 
 
 def customers_arama_sql_3(alias: str = "") -> str:
