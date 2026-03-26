@@ -364,6 +364,119 @@ def _enrich_musteri_list_with_borc_gecikme(musteriler):
             except Exception:
                 pass
         m["son_odeme_tarihi"] = m.get("son_odeme_tarihi") or son_tahsilat.get(m["id"])
+    _normalize_musteri_durum_for_liste(musteriler)
+    _dedupe_musteri_liste_by_identity(musteriler)
+
+
+def _normalize_musteri_durum_for_liste(musteriler):
+    """Tek kaynak: customers.durum ile kapanış tarihi tutarlı olsun.
+    Kapanış tarihi doluysa müşteri pasiftir (eski kayıtta durum=aktif kalmış olsa bile).
+    Böylece Aktif / Pasif listeleri birbirini dışlar."""
+    if not musteriler:
+        return
+    for m in musteriler:
+        raw = (m.get("durum") or "").strip().lower()
+        kap = m.get("kapanis_tarihi")
+        has_kap = False
+        if kap is not None:
+            if hasattr(kap, "year"):
+                has_kap = True
+            else:
+                s = str(kap).strip()
+                if len(s) >= 10 and s[4] == "-":
+                    has_kap = True
+                elif s and s not in ("None", "null", ""):
+                    has_kap = True
+        if raw == "pasif":
+            m["durum"] = "pasif"
+            continue
+        if has_kap:
+            m["durum"] = "pasif"
+            continue
+        if raw == "aktif":
+            m["durum"] = "aktif"
+            continue
+        m["durum"] = "aktif"
+
+
+def _dedupe_musteri_liste_by_identity(musteriler):
+    """Aynı vergi numarası veya aynı cep telefonu ile birden fazla müşteri satırı varsa (çift kart)
+    listede tek kayıt gösterilir. Tercih: pasif + kapanış tarihi, yoksa daha yüksek id (genelde güncel)."""
+    if not musteriler:
+        return
+    from collections import defaultdict
+
+    def bucket_key(m):
+        tn = "".join(c for c in str(m.get("tax_number") or "") if c.isdigit())
+        if len(tn) >= 10:
+            return ("tax", tn)
+        ph = "".join(c for c in str(m.get("phone") or "") if c.isdigit())
+        if len(ph) >= 10:
+            return ("ph", ph[-10:])
+        return None
+
+    def has_kapanis(m):
+        kap = m.get("kapanis_tarihi")
+        if kap is None:
+            return False
+        if hasattr(kap, "year"):
+            return True
+        s = str(kap).strip()
+        return bool(s) and s not in ("None", "null", "")
+
+    def score_row(m):
+        s = int(m.get("id") or 0)
+        if (m.get("durum") or "").strip().lower() == "pasif":
+            s += 1_000_000
+        if has_kapanis(m):
+            s += 500_000
+        return s
+
+    buckets = defaultdict(list)
+    no_key = []
+    for m in musteriler:
+        k = bucket_key(m)
+        if k is None:
+            no_key.append(m)
+        else:
+            buckets[k].append(m)
+
+    out = list(no_key)
+    for _key, group in buckets.items():
+        if len(group) == 1:
+            out.append(group[0])
+            continue
+        best = max(group, key=score_row)
+        for o in group:
+            if o["id"] == best["id"]:
+                continue
+            try:
+                best["toplam_borc"] = max(
+                    float(best.get("toplam_borc") or 0),
+                    float(o.get("toplam_borc") or 0),
+                )
+            except (TypeError, ValueError):
+                pass
+            best["geciken_gun"] = max(
+                int(best.get("geciken_gun") or 0),
+                int(o.get("geciken_gun") or 0),
+            )
+            if o.get("manuel_borc") is not None and best.get("manuel_borc") is not None:
+                try:
+                    best["manuel_borc"] = max(
+                        float(best.get("manuel_borc") or 0),
+                        float(o.get("manuel_borc") or 0),
+                    )
+                except (TypeError, ValueError):
+                    pass
+        try:
+            best["toplam_borc"] = round(float(best.get("toplam_borc") or 0), 2)
+        except (TypeError, ValueError):
+            pass
+        out.append(best)
+
+    out.sort(key=lambda m: ((m.get("name") or "").lower(), m.get("id") or 0))
+    musteriler[:] = out
 
 
 @bp.route("/list")
@@ -1671,6 +1784,7 @@ def api_kyc_kaydet():
         sozlesme_no = (data.get("sozlesme_no") or "").strip()
         sozlesme_tarihi = data.get("sozlesme_tarihi")
         sozlesme_bitis = data.get("sozlesme_bitis")
+        kira_artis_tarihi = data.get("kira_artis_tarihi")
         notlar = (data.get("notlar") or "").strip()
 
         def parse_date(s):
@@ -1689,6 +1803,7 @@ def api_kyc_kaydet():
         yetkili_dogum = parse_date(yetkili_dogum)
         sozlesme_tarihi = parse_date(sozlesme_tarihi)
         sozlesme_bitis = parse_date(sozlesme_bitis)
+        kira_artis_tarihi = parse_date(kira_artis_tarihi)
         kapanis_tarihi = parse_date(data.get("kapanis_tarihi")) if durum_m == "pasif" else None
 
         evrak_imza_sirkuleri = 1 if data.get("evrak_imza_sirkuleri") in (True, 1, "1", "on") else 0
@@ -1713,6 +1828,7 @@ def api_kyc_kaydet():
                    yetkili_adsoyad=%s, yetkili_tcno=%s, yetkili_dogum=%s, yetkili_ikametgah=%s,
                    yetkili_tel=%s, yetkili_tel2=%s, yetkili_email=%s, email=%s,
                    hizmet_turu=%s, aylik_kira=%s, yillik_kira=%s, sozlesme_no=%s, sozlesme_tarihi=%s, sozlesme_bitis=%s,
+                   kira_artis_tarihi=%s,
                    evrak_imza_sirkuleri=%s, evrak_vergi_levhasi=%s, evrak_ticaret_sicil=%s, evrak_faaliyet_belgesi=%s,
                    evrak_kimlik_fotokopi=%s, evrak_ikametgah=%s, evrak_kase=%s, notlar=%s, tamamlanma_yuzdesi=%s, updated_at=NOW()
                    WHERE id=%s""",
@@ -1721,6 +1837,7 @@ def api_kyc_kaydet():
                  yetkili_adsoyad, yetkili_tcno, yetkili_dogum, yetkili_ikametgah,
                  yetkili_tel, yetkili_tel2, yetkili_email, email,
                  hizmet_turu, aylik_kira, yillik_kira, sozlesme_no, sozlesme_tarihi, sozlesme_bitis,
+                 kira_artis_tarihi,
                  evrak_imza_sirkuleri, evrak_vergi_levhasi, evrak_ticaret_sicil, evrak_faaliyet_belgesi,
                  evrak_kimlik_fotokopi, evrak_ikametgah, evrak_kase, notlar, tamamlanma_yuzdesi, mevcut["id"])
             )
@@ -1751,6 +1868,7 @@ def api_kyc_kaydet():
                    yetkili_adsoyad, yetkili_tcno, yetkili_dogum, yetkili_ikametgah,
                    yetkili_tel, yetkili_tel2, yetkili_email, email,
                    hizmet_turu, aylik_kira, yillik_kira, sozlesme_no, sozlesme_tarihi, sozlesme_bitis,
+                   kira_artis_tarihi,
                    evrak_imza_sirkuleri, evrak_vergi_levhasi, evrak_ticaret_sicil, evrak_faaliyet_belgesi,
                    evrak_kimlik_fotokopi, evrak_ikametgah, evrak_kase, notlar, tamamlanma_yuzdesi
                 ) VALUES (
@@ -1764,6 +1882,7 @@ def api_kyc_kaydet():
                  yetkili_adsoyad, yetkili_tcno, yetkili_dogum, yetkili_ikametgah,
                  yetkili_tel, yetkili_tel2, yetkili_email, email,
                  hizmet_turu, aylik_kira, yillik_kira, sozlesme_no, sozlesme_tarihi, sozlesme_bitis,
+                 kira_artis_tarihi,
                  evrak_imza_sirkuleri, evrak_vergi_levhasi, evrak_ticaret_sicil, evrak_faaliyet_belgesi,
                  evrak_kimlik_fotokopi, evrak_ikametgah, evrak_kase, notlar, tamamlanma_yuzdesi)
             )

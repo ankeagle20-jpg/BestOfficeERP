@@ -899,10 +899,16 @@
                         <input type="number" id="kira_suresi_ay" value="12" min="1" max="240" step="1" placeholder="12" onchange="hesaplaYuzde()" oninput="sozlesmelerAylikGuncelle()" title="Sözleşme süresi (ay). Tıklayıp manuel girebilirsiniz.">
                         
                         <label class="required">Sözleşme Başlangıç</label>
-                        <input type="date" id="sozlesme_baslangic" onchange="hesaplaYuzde(); sozlesmeBitisOto(); kiraSuresiAylikOto();">
+                        <input type="date" id="sozlesme_baslangic" onchange="hesaplaYuzde(); sozlesmeBitisOto(); kiraSuresiAylikOto(); girisFormKiraArtisTarihiDoldur();">
                         
                         <label class="required">Sözleşme Bitiş</label>
                         <input type="date" id="sozlesme_bitis" onchange="hesaplaYuzde(); kiraSuresiAylikOto();">
+                        
+                        <label>Kira Artış Tarihi</label>
+                        <div style="grid-column: 2;">
+                            <input type="date" id="kira_artis_tarihi" title="Yıldönümü (başlangıç gün/ay, cari yıl)" style="width:100%;max-width:280px;">
+                            <div style="font-size:11px;color:#90a4ae;margin-top:4px;">Sözleşme başlangıcındaki gün ve ay, içinde bulunulan yıl. Aktif kiracıda sözleşme bitişi geçmişse form açılırken birer yıl ileri alınır.</div>
+                        </div>
                         
                         <label>Durum</label>
                         <select id="musteri_durum" name="musteri_durum" onchange="syncDurumUI(this.value === 'pasif' ? 'pasif' : 'aktif', {});" style="padding:8px 10px;border-radius:4px;border:1px solid #2d4060;background:#0f2537;color:#e0f7fa;font-size:13px;">
@@ -1595,6 +1601,21 @@ function switchTab(index) {
                 potDefaultHatirlatma();
                 potYukle();
             }
+            if (effectiveIndex === 1) {
+                var midSenaryo = selectedId;
+                if (!midSenaryo) {
+                    try {
+                        var ps = new URLSearchParams(window.location.search);
+                        var mids = ps.get('mid');
+                        if (mids && /^\d+$/.test(String(mids))) midSenaryo = parseInt(mids, 10);
+                    } catch (e2) {}
+                }
+                if (midSenaryo) {
+                    fetch('/giris/api/musteri/' + midSenaryo).then(function(r) { return r.json(); }).then(function(res) {
+                        if (res.ok && res.musteri) senaryoMusteriFormDoldur(res.musteri);
+                    }).catch(function() {});
+                }
+            }
         } else {
             c.classList.remove('active');
         }
@@ -1628,6 +1649,65 @@ function sozlesmeBitisOto() {
     } catch (e) {
         return;
     }
+}
+
+/** Sözleşme bitiş ISO tarihine tam yıl ekler (29 Şubat güvenli). */
+function sozlesmeTarihIsoYilEkle(isoStr, yilEkle) {
+    if (!isoStr || !yilEkle) return isoStr;
+    var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(isoStr).trim());
+    if (!m) return isoStr;
+    var y = parseInt(m[1], 10) + yilEkle;
+    var mo = parseInt(m[2], 10);
+    var d = parseInt(m[3], 10);
+    var t = new Date(y, mo - 1, d);
+    if (t.getMonth() !== mo - 1) {
+        t = new Date(y, mo, 0);
+    }
+    return t.getFullYear() + '-' + String(t.getMonth() + 1).padStart(2, '0') + '-' + String(t.getDate()).padStart(2, '0');
+}
+
+/**
+ * Aktif müşteride sözleşme bitişi bugünden önceyse, yıllık döneme göre ileri taşınır
+ * (fesih yoksa her yıldönümü bir yıl uzar).
+ */
+function sozlesmeBitisAktifKiraciIcinUzat() {
+    var durEl = document.getElementById('musteri_durum');
+    if (!durEl || durEl.value === 'pasif') return;
+    var bitEl = document.getElementById('sozlesme_bitis');
+    if (!bitEl || !bitEl.value) return;
+    var today = new Date();
+    today.setHours(0, 0, 0, 0);
+    var end = new Date(bitEl.value + 'T12:00:00');
+    if (isNaN(end.getTime())) return;
+    end.setHours(0, 0, 0, 0);
+    var guard = 0;
+    while (end < today && guard < 120) {
+        bitEl.value = sozlesmeTarihIsoYilEkle(bitEl.value, 1);
+        end = new Date(bitEl.value + 'T12:00:00');
+        if (isNaN(end.getTime())) break;
+        end.setHours(0, 0, 0, 0);
+        guard++;
+    }
+    kiraSuresiAylikOto();
+    sozlesmelerAylikGuncelle();
+}
+
+/** Başlangıçtaki gün/ay + içinde bulunulan yıl (Kira Senaryo ile uyumlu). */
+function girisFormKiraArtisTarihiDoldur() {
+    var basEl = document.getElementById('sozlesme_baslangic');
+    var artEl = document.getElementById('kira_artis_tarihi');
+    if (!basEl || !artEl || !basEl.value) return;
+    var iso = basEl.value.slice(0, 10);
+    var p = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!p) return;
+    var sm = parseInt(p[2], 10);
+    var sd = parseInt(p[3], 10);
+    var buYil = new Date().getFullYear();
+    var tTest = new Date(buYil, sm - 1, sd);
+    if (tTest.getFullYear() !== buYil || tTest.getMonth() !== sm - 1 || tTest.getDate() !== sd) {
+        sd = new Date(buYil, sm, 0).getDate();
+    }
+    artEl.value = buYil + '-' + String(sm).padStart(2, '0') + '-' + String(sd).padStart(2, '0');
 }
 
 /** DD.MM.YYYY veya YYYY-MM-DD stringini Date'e çevirir. */
@@ -2055,6 +2135,10 @@ function syncDurumUI(d, opts) {
             inp.value = '';
         }
     }
+    if (v === 'aktif') {
+        sozlesmeBitisAktifKiraciIcinUzat();
+        girisFormKiraArtisTarihiDoldur();
+    }
     hesaplaYuzde();
 }
 
@@ -2132,9 +2216,17 @@ function senaryoMusteriFormDoldur(m) {
         ? m.guncel_kira_bedeli
         : ((m.ilk_kira_bedeli != null && m.ilk_kira_bedeli !== '') ? m.ilk_kira_bedeli : null);
     var basKiraEl = document.getElementById('senaryo_baslangic_kira');
+    var reelEl = document.getElementById('senaryo_reel_kira');
     if (basKiraEl && aylikRaw != null && String(aylikRaw).trim() !== '') {
         var n = parseFloat(String(aylikRaw).replace(/\s/g, '').replace(',', '.'));
-        basKiraEl.value = isNaN(n) ? String(aylikRaw).replace(',', '.').trim() : String(n);
+        var valStr = isNaN(n) ? String(aylikRaw).replace(',', '.').trim() : String(n);
+        basKiraEl.value = valStr;
+        if (reelEl) reelEl.value = valStr;
+    }
+    var hizSel = document.getElementById('senaryo_hizmet_turu');
+    if (hizSel && m.hizmet_turu != null && String(m.hizmet_turu).trim() !== '') {
+        var ht = String(m.hizmet_turu).toLowerCase();
+        hizSel.value = (ht.indexOf('hazır') >= 0 || ht.indexOf('hazir') >= 0) ? 'hazir_ofis' : 'sanal_ofis';
     }
     if (typeof senaryoKdvDokumGuncelle === 'function') senaryoKdvDokumGuncelle();
 }
@@ -2215,6 +2307,8 @@ function selectMusteri(id) {
             else if (m.ilk_kira_bedeli != null && m.ilk_kira_bedeli !== '') set('aylik_kira', m.ilk_kira_bedeli);
             if (m.rent_start_date) set('sozlesme_baslangic', m.rent_start_date);
             if (m.sozlesme_bitis) set('sozlesme_bitis', m.sozlesme_bitis);
+            sozlesmeBitisAktifKiraciIcinUzat();
+            girisFormKiraArtisTarihiDoldur();
             kiraSuresiAylikOto();
             hesaplaYuzde();
             sozlesmelerAylikGuncelle();
@@ -2431,6 +2525,7 @@ async function kaydet(event) {
         aylik_kira: document.getElementById('aylik_kira').value,
         sozlesme_tarihi: document.getElementById('sozlesme_baslangic').value,
         sozlesme_bitis: document.getElementById('sozlesme_bitis').value,
+        kira_artis_tarihi: (document.getElementById('kira_artis_tarihi') || {}).value || '',
         notlar: document.getElementById('notes').value
     };
     
@@ -4163,5 +4258,18 @@ async function kiraBildirgesiWhatsApp() {
     const url = num ? `https://wa.me/${num}?text=${metin}` : `https://wa.me/?text=${metin}`;
     window.open(url, '_blank', 'noopener');
 }
+
+(function girisAutoSelectMidFromUrl() {
+  try {
+    var p = new URLSearchParams(window.location.search);
+    var mid = p.get('mid');
+    if (!mid || !/^\d+$/.test(String(mid))) return;
+    var id = parseInt(mid, 10);
+    if (typeof switchTab === 'function') switchTab(0);
+    setTimeout(function() {
+      if (typeof selectMusteri === 'function') selectMusteri(id);
+    }, 120);
+  } catch (e) {}
+})();
 </script>
 {% endblock %}

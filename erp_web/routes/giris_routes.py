@@ -59,7 +59,8 @@ def allowed_file(filename):
 @giris_gerekli
 def index():
     """Giriş / Müşteri Kaydı ana sayfası"""
-    return render_template('giris/index.html')
+    embed = str(request.args.get('embed') or '').lower() in ('1', 'true', 'yes', 'on')
+    return render_template('giris/index.html', embed=embed)
 
 
 @bp.route('/api/potansiyel', methods=['GET', 'POST'])
@@ -351,6 +352,7 @@ def api_musteri_detay(mid):
         out["rent_start_date"] = _musteri_serialize_val(kyc.get("sozlesme_tarihi"))
         out["sozlesme_baslangic"] = out["rent_start_date"]
         out["sozlesme_bitis"] = _musteri_serialize_val(kyc.get("sozlesme_bitis"))
+        out["kira_artis_tarihi"] = _musteri_serialize_val(kyc.get("kira_artis_tarihi"))
         out["ticaret_sicil"] = _musteri_serialize_val(kyc.get("ticaret_sicil_no"))
         out["kurulus_tarihi"] = _musteri_serialize_val(kyc.get("kurulus_tarihi"))
         out["faaliyet"] = _musteri_serialize_val(kyc.get("faaliyet_konusu"))

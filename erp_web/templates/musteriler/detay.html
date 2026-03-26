@@ -93,16 +93,53 @@
 .odal a.btn { display: inline-block; background: #22c55e; color: #fff; padding: 8px 14px; border-radius: 4px; text-decoration: none; font-weight: 600; margin-top: 8px; font-size: 12px; }
 .odal a.btn:hover { color: #fff; }
 @media (max-width: 1024px) { .komuta-main { grid-template-columns: 1fr; } }
+/* Giriş / Müşteri Kaydı ile aynı sekme çizgisi (üst tab şeridi) */
+.komuta-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-left: 12px;
+  align-items: flex-end;
+  border-bottom: 2px solid #2d4060;
+}
+.komuta-tab {
+  padding: 8px 14px;
+  background: transparent;
+  border: none;
+  color: #90a4ae;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  border-radius: 0;
+  white-space: nowrap;
+}
+.komuta-tab:hover { color: #b0bec5; }
+.komuta-tab.active {
+  color: #4fc3f7;
+  border-bottom-color: #4fc3f7;
+  background: rgba(79, 195, 247, 0.1);
+}
+#komuta-panel { flex:1; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
+#musteri-kart-panel { display:none; flex:1; min-height:0; flex-direction:column; overflow:hidden; min-height:0; }
+#musteri-kart-panel.komuta-kart-visible { display:flex; }
+#komuta-panel.komuta-panel-hidden { display:none !important; }
+.giris-musteri-kart-iframe { flex:1; width:100%; min-height:0; border:none; background:#0a1929; }
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="komuta-wrap">
   <div class="komuta-sticky">
-    <div>
-      <a href="{{ url_for('musteriler.index') }}">← Müşteriler</a>
-      <span style="color:#546e7a; margin-left:12px;">|</span>
-      <span style="color:#90a4ae; margin-left:12px; font-size:14px;">Müşteri Operasyon Komuta Merkezi</span>
+    <div style="display:flex;align-items:flex-end;flex-wrap:wrap;gap:6px 8px;">
+      <a href="{{ url_for('musteriler.index') }}" style="padding-bottom:8px;">← Müşteriler</a>
+      <span style="color:#546e7a; padding-bottom:8px;">|</span>
+      <div class="komuta-tabs" role="tablist" aria-label="Müşteri görünümü">
+        <button type="button" class="komuta-tab active" id="tab-musteri-kart" role="tab" aria-selected="true">Müşteri Kartı</button>
+        <button type="button" class="komuta-tab" id="tab-komuta" role="tab" aria-selected="false">Müşteri Operasyon Komuta Merkezi</button>
+      </div>
     </div>
     <div style="display:flex; gap:10px; align-items:center;">
       <a href="/faturalar/?musteri={{ musteri.id }}">Finans</a>
@@ -112,6 +149,7 @@
     </div>
   </div>
 
+  <div id="komuta-panel" class="komuta-panel-hidden">
   <!-- Hero -->
   <div class="komuta-hero">
     <div class="komuta-hero-sol">
@@ -290,6 +328,11 @@
     <a href="/kargolar/yeni?musteri={{ musteri.id }}" class="btn-kargo"><i class="fa fa-box"></i> Kargo Ekle / Teslim Al</a>
     <a href="/giris/?mid={{ musteri.id }}" class="btn-dosya"><i class="fa fa-folder"></i> Dosyalar</a>
   </div>
+  </div>
+
+  <div id="musteri-kart-panel" class="komuta-kart-visible" aria-hidden="false">
+    <iframe class="giris-musteri-kart-iframe" id="giris-musteri-kart-iframe" title="Müşteri kartı — Giriş / Müşteri Kaydı" src="{{ url_for('giris.index', mid=musteri.id, embed=1) }}"></iframe>
+  </div>
 </div>
 
 <div class="toast-holder" id="toastHolder"></div>
@@ -306,10 +349,24 @@
 
 <script>
 (function() {
+  var pKomuta = document.getElementById('komuta-panel');
+  var pKart = document.getElementById('musteri-kart-panel');
+  var ifr = document.getElementById('giris-musteri-kart-iframe');
+  var tK = document.getElementById('tab-komuta');
+  var tM = document.getElementById('tab-musteri-kart');
   var chartData = {{ son_6_ay_chart | tojson }};
-  var ctx = document.getElementById('chart6ay');
-  if (ctx && chartData && chartData.length) {
-    new Chart(ctx, {
+  var chartInited = false;
+  function initKomutaChartIfNeeded() {
+    if (chartInited) {
+      if (window._komutaChart6ay && typeof window._komutaChart6ay.resize === 'function') {
+        setTimeout(function() { try { window._komutaChart6ay.resize(); } catch (e) {} }, 80);
+      }
+      return;
+    }
+    var ctx = document.getElementById('chart6ay');
+    if (!ctx || !chartData || !chartData.length) return;
+    chartInited = true;
+    window._komutaChart6ay = new Chart(ctx, {
       type: 'bar',
       data: {
         labels: chartData.map(function(d) { return d.ay; }),
@@ -332,6 +389,25 @@
       }
     });
   }
+  function showKomuta() {
+    if (pKomuta) pKomuta.classList.remove('komuta-panel-hidden');
+    if (pKart) { pKart.classList.remove('komuta-kart-visible'); pKart.setAttribute('aria-hidden', 'true'); }
+    if (tK) { tK.classList.add('active'); tK.setAttribute('aria-selected', 'true'); }
+    if (tM) { tM.classList.remove('active'); tM.setAttribute('aria-selected', 'false'); }
+    initKomutaChartIfNeeded();
+  }
+  function showKart() {
+    if (pKomuta) pKomuta.classList.add('komuta-panel-hidden');
+    if (pKart) { pKart.classList.add('komuta-kart-visible'); pKart.setAttribute('aria-hidden', 'false'); }
+    if (tK) { tK.classList.remove('active'); tK.setAttribute('aria-selected', 'false'); }
+    if (tM) { tM.classList.add('active'); tM.setAttribute('aria-selected', 'true'); }
+    if (ifr && !ifr.getAttribute('src')) {
+      var ds = ifr.getAttribute('data-src');
+      if (ds) ifr.src = ds;
+    }
+  }
+  if (tK) tK.addEventListener('click', showKomuta);
+  if (tM) tM.addEventListener('click', showKart);
 
   function toast(msg, isError) {
     var h = document.getElementById('toastHolder');

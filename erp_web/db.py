@@ -406,6 +406,7 @@ def ensure_musteri_kyc_columns():
         ("tamamlanma_yuzdesi", "INTEGER DEFAULT 0"),
         ("created_at", "TIMESTAMPTZ DEFAULT NOW()"),
         ("updated_at", "TIMESTAMPTZ DEFAULT NOW()"),
+        ("kira_artis_tarihi", "DATE"),
     )
     for col, ctype in columns:
         try:

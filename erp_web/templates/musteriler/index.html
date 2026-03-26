@@ -1,6 +1,25 @@
 {% extends "layout.html" %}
 {% block page_title %}Müşteri Listesi{% endblock %}
 {% block content %}
+{% set ml_ofis_list = musteriler|map(attribute='office_code')|select|unique|list|sort %}
+{# Hizmet türü + ofis tek select; ofis değerleri ofis|KOD (KOD içinde : olabilir) #}
+{% macro ml_select_hizmet_ofis(first_label) %}
+  <optgroup label="Hizmet Türü">
+    <option value="" selected>{{ first_label }}</option>
+    <option value="__bos__">Belirtilmemiş</option>
+    <option value="Mükellef">Mükellef</option>
+    <option value="Sanal ofis">Sanal ofis</option>
+    <option value="Hazır Ofis">Hazır Ofis</option>
+    <option value="Paylaşımlı Masa">Paylaşımlı Masa</option>
+  </optgroup>
+  {% if ml_ofis_list %}
+  <optgroup label="Tüm Ofisler">
+    {% for o in ml_ofis_list %}
+    <option value="ofis|{{ o|e }}">{{ o }}</option>
+    {% endfor %}
+  </optgroup>
+  {% endif %}
+{% endmacro %}
 {% macro ml_customer_colgroup() %}
 <colgroup>
   <col class="ml-c-unvan">
@@ -29,13 +48,8 @@
     </th>
     <th class="ml-col-yetkili">Yetkili Kişi</th>
     <th class="ml-col-hizmet">
-      <select id="mlHizmet" class="ml-filter-sel ml-hizmet-head-sel ml-sel-hizmet-turu" title="Hizmet türüne göre filtrele">
-        <option value="" selected>Hizmet Türü</option>
-        <option value="__bos__">Belirtilmemiş</option>
-        <option value="Mükellef">Mükellef</option>
-        <option value="Sanal ofis">Sanal ofis</option>
-        <option value="Hazır Ofis">Hazır Ofis</option>
-        <option value="Paylaşımlı Masa">Paylaşımlı Masa</option>
+      <select id="mlHizmet" class="ml-filter-sel ml-hizmet-head-sel ml-sel-hizmet-turu" title="Hizmet türü veya ofis seçin">
+        {{ ml_select_hizmet_ofis('Hizmet')|safe }}
       </select>
     </th>
     <th class="ml-col-tel">Telefon</th>
@@ -79,7 +93,7 @@
 .ml-filter-sel{padding:6px 10px;background:#0d1520;border:1px solid rgba(0,200,255,.12);border-radius:6px;color:#e8f1ff;font-size:11px;outline:none;cursor:pointer}
 .ml-sel-ad-unvan{color:#00c8ff!important;letter-spacing:.07em}
 .ml-sel-hizmet-turu{color:#00c8ff!important;letter-spacing:.07em}
-.ml-stats{display:flex;gap:14px;margin-left:auto;font-size:11px;color:#5a7a9a}
+.ml-stats{display:flex;gap:14px;font-size:11px;color:#5a7a9a}
 .ml-stats b{color:#e8f1ff;font-family:monospace}
 .ml-stats .red{color:#ff4557}
 .ml-table-wrap{border-radius:0 0 10px 10px;border:1px solid rgba(0,200,255,.08);border-top:none;overflow:visible;margin-top:0}
@@ -184,6 +198,14 @@
 .ml-view-wrap{display:block}
 .yenile-ay-bar .ml-ay-btn{margin-right:4px}
 .yenile-ay-bar .ml-ay-btn.aktif{background:#00c8ff;color:#080d14;border-color:#00c8ff}
+.ml-toolbar-trailing{display:flex;align-items:center;gap:12px;margin-left:auto;flex-wrap:wrap;justify-content:flex-end}
+.ml-soz-bas-range{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
+.ml-soz-bas-range input.ml-soz-bas-date,.ml-soz-bas-range .flatpickr-alt-input{
+  box-sizing:border-box;width:11ch;min-width:11ch;max-width:11ch;padding:4px 6px;background:#0d1520;border:1px solid rgba(0,200,255,.2);border-radius:6px;color:#e8f1ff;font-size:11px;outline:none;cursor:pointer;flex:0 0 auto
+}
+.ml-soz-bas-range input.ml-soz-bas-date:focus,.ml-soz-bas-range .flatpickr-alt-input:focus{border-color:#00c8ff}
+.ml-soz-bas-range .flatpickr-input[readonly]{cursor:pointer}
+.ml-soz-bas-range .ml-soz-bas-dash{color:#5a7a9a;font-size:11px}
 /* Sabit küme: üst başlık + filtreler + tablo başlık satırı (#mlHeadTable). Gövde ayrı tabloda; genişlik + scrollLeft senkron. */
 :root{--ml-header-h:108px}
 .ml-fixed-head-cluster{
@@ -258,20 +280,8 @@ window.setActiveTab = function(tabId) {
       <option value="pasif">Durum: Pasif</option>
       <option value="geciken">Sadece Geciken</option>
     </select>
-    <select class="ml-filter-sel" id="mlOfis">
-      <option value="">Tüm Ofisler</option>
-      {% set ofisler = musteriler|map(attribute='office_code')|select|unique|list|sort %}
-      {% for o in ofisler %}
-      <option value="{{ o }}">{{ o }}</option>
-      {% endfor %}
-    </select>
-    <select class="ml-filter-sel ml-sel-hizmet-turu" id="mlHizmetTop" title="Hizmet türüne göre filtrele">
-      <option value="" selected>Hizmet Türü</option>
-      <option value="__bos__">Belirtilmemiş</option>
-      <option value="Mükellef">Mükellef</option>
-      <option value="Sanal ofis">Sanal ofis</option>
-      <option value="Hazır Ofis">Hazır Ofis</option>
-      <option value="Paylaşımlı Masa">Paylaşımlı Masa</option>
+    <select class="ml-filter-sel ml-sel-hizmet-turu" id="mlHizmetTop" title="Hizmet türü veya ofis seçin">
+      {{ ml_select_hizmet_ofis('Hizmet Türü')|safe }}
     </select>
     <select class="ml-filter-sel ml-sel-ad-unvan" id="mlBenzerTop" title="Ad / Ünvan — çift veya benzer kayıtları listele">
       <option value="" selected>Ad / Ünvan</option>
@@ -283,11 +293,19 @@ window.setActiveTab = function(tabId) {
     <button type="button" id="btn-yenile-ay" class="ml-btn back" title="Sözleşme ayına göre filtrele"><i class="fa fa-refresh"></i> Yenile</button>
     <button type="button" id="btn-quick-edit-vazgec" class="ml-btn back" style="display:none;"><i class="fa fa-times"></i> Vazgeç</button>
     <button type="button" id="btn-hepsini-kayde" class="ml-btn bulk-save" style="display:none;" disabled title="Tüm satırları sunucuya kaydet"><i class="fa fa-save"></i> Hepsini kayde</button>
-    <div class="ml-stats">
-      <span>Toplam: <b id="mlCount">{{ musteriler|length }}</b></span>
-      {% set _ns = namespace(total_borc=0) %}
-    {% for _m in musteriler %}{% set _ns.total_borc = _ns.total_borc + (_m.get('toplam_borc', 0) or 0) %}{% endfor %}
-    <span>Toplam Borç: <b class="red" id="mlTotalBorc">{{ "{:,.0f}".format(_ns.total_borc) }} ₺</b></span>
+    <div class="ml-toolbar-trailing">
+      <span class="ml-soz-bas-range" title="Takvim veya hızlı: 01012026 / 010125 (gün ay yıl)">
+        <input type="text" id="mlSozBasBas" class="ml-soz-bas-date" placeholder="gg.aa.yyyy" autocomplete="off" aria-label="Sözleşme başlangıç — başlangıç tarihi">
+        <span class="ml-soz-bas-dash">—</span>
+        <input type="text" id="mlSozBasBit" class="ml-soz-bas-date" placeholder="gg.aa.yyyy" autocomplete="off" aria-label="Sözleşme başlangıç — bitiş tarihi">
+        <button type="button" id="mlSozBasTarihTemizle" class="ml-btn back" style="font-size:10px;padding:4px 8px;" title="Tarih aralığını temizle">Temizle</button>
+      </span>
+      <div class="ml-stats">
+        <span>Toplam: <b id="mlCount">{{ musteriler|length }}</b></span>
+        {% set _ns = namespace(total_borc=0) %}
+      {% for _m in musteriler %}{% set _ns.total_borc = _ns.total_borc + (_m.get('toplam_borc', 0) or 0) %}{% endfor %}
+      <span>Toplam Borç: <b class="red" id="mlTotalBorc">{{ "{:,.0f}".format(_ns.total_borc) }} ₺</b></span>
+      </div>
     </div>
   </div>
 
@@ -325,10 +343,11 @@ window.setActiveTab = function(tabId) {
         {% set borc = m.get('toplam_borc', 0) or 0 %}
         {% set gec = m.get('geciken_gun', 0) or 0 %}
         {% set ilk_kira = m.get('ilk_kira_bedeli', 0) or 0 %}
-        {% set db_durum = (m.get('durum') or '')|lower %}
+        {% set db_durum = (m.get('durum') or 'aktif')|trim|lower %}
+        {% if db_durum not in ('aktif', 'pasif') %}{% set db_durum = 'aktif' %}{% endif %}
         {% set borc_edit = m.get('manuel_borc') if m.get('manuel_borc') is not none else borc %}
         {% set son_tah_str = (m.get('son_odeme_tarihi')|string|trim)[:10] if m.get('son_odeme_tarihi') else '' %}
-        {% set bas_tarih_val = m.get('rent_start_date') %}
+        {% set bas_tarih_val = m.get('rent_start_date') or m.get('sozlesme_baslangic') or m.get('baslangic_tarihi') %}
         {% set bas_tarih_str = bas_tarih_val.strftime('%Y-%m-%d') if bas_tarih_val and bas_tarih_val.__class__.__name__ in ('date', 'datetime') else ((bas_tarih_val|string|trim)[:10] if bas_tarih_val else '') %}
         {% set kap_iso = ((m.get('kapanis_tarihi')|string)|trim)[:10] if m.get('kapanis_tarihi') else '' %}
         <tr class="ml-row" data-id="{{ m.id }}"
@@ -678,20 +697,44 @@ function mlEnsureBenzerSets() {
   window._mlBenzerSetsBuilt = true;
 }
 
+/** Takvim + hızlı giriş (01012026 / 010125) ile uyumlu ISO (Y-m-d) */
+function mlGetSozBasTarihFiltreIso(inp) {
+  if (!inp) return '';
+  var fp = inp._flatpickr;
+  if (fp && fp.selectedDates && fp.selectedDates.length) {
+    try {
+      return fp.formatDate(fp.selectedDates[0], 'Y-m-d');
+    } catch (e) {}
+  }
+  var v = (inp.value || '').trim();
+  if (v.length >= 10 && v[4] === '-') return v.substring(0, 10);
+  return '';
+}
+
 function filterTable(){
   var q = (document.getElementById('mlQ').value || '').toLowerCase();
   var durum = document.getElementById('mlDurum').value;
-  var ofis = document.getElementById('mlOfis').value.toLowerCase();
   var hizmetSel = document.getElementById('mlHizmet');
-  var hizmetFilt = hizmetSel ? (hizmetSel.value || '').trim() : '';
+  var rawHizOf = hizmetSel ? (hizmetSel.value || '').trim() : '';
+  var ofis = '';
+  var hizmetFilt = rawHizOf;
+  if (rawHizOf.indexOf('ofis|') === 0) {
+    ofis = rawHizOf.slice(5).toLowerCase();
+    hizmetFilt = '';
+  }
   var benzerSel = document.getElementById('mlBenzer');
   var benzerVal = benzerSel ? benzerSel.value : '';
   if (benzerVal === 'mukerrer' || benzerVal === 'benzer' || benzerVal === 'tekil') mlEnsureBenzerSets();
+  var inpBasF = document.getElementById('mlSozBasBas');
+  var inpBitF = document.getElementById('mlSozBasBit');
+  var vBas = mlGetSozBasTarihFiltreIso(inpBasF);
+  var vBit = mlGetSozBasTarihFiltreIso(inpBitF);
   var shown = 0;
   allRows.forEach(function(tr){
     var name = tr.getAttribute('data-name') || '';
     var rowOfis = tr.getAttribute('data-ofis') || '';
     var rowDurum = (tr.getAttribute('data-durum') || '').toLowerCase();
+    var durumVal = (tr.getAttribute('data-durum-val') || 'aktif').toLowerCase();
     var rowHizmet = tr.getAttribute('data-hizmet') || '';
     var geciken = parseInt(tr.getAttribute('data-geciken') || '0');
     var basTarih = (tr.getAttribute('data-bas-tarih') || '').trim();
@@ -711,16 +754,24 @@ function filterTable(){
         if(ay !== sozlesmeAySecili) ok = false;
       }
     }
+    if (ok && (vBas || vBit)) {
+      var lo = vBas || '0000-01-01';
+      var hi = vBit || '9999-12-31';
+      if (lo > hi) { var _sw = lo; lo = hi; hi = _sw; }
+      if (!basTarih || basTarih.length < 10) ok = false;
+      else if (basTarih < lo || basTarih > hi) ok = false;
+    }
 
     if (ok) {
+      // Filtre: canonical durum (data-durum-val). data-durum = geciken/aktif rozeti için; karışıklık yaratmasın.
       if (durum === 'pasif') {
-        ok = (rowDurum === 'pasif');
+        ok = (durumVal === 'pasif');
       } else if (durum === 'geciken') {
         ok = (rowDurum === 'geciken');
       } else if (durum === 'hepsi') {
         ok = true;
       } else {
-        ok = (rowDurum === 'aktif' || rowDurum === 'geciken' || rowDurum === '');
+        ok = (durumVal === 'aktif');
       }
     }
 
@@ -889,6 +940,56 @@ document.querySelectorAll('.ml-ay-btn').forEach(function(btn){
     filterTable();
   });
 });
+function mlBindSozBasErpHizli() {
+  ['mlSozBasBas', 'mlSozBasBit'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el && el._flatpickr && typeof erpBindFlatpickrInstance === 'function') {
+      erpBindFlatpickrInstance(el._flatpickr);
+    }
+  });
+}
+function mlInitSozBasTarihFiltre() {
+  var b0 = document.getElementById('mlSozBasBas');
+  var b1 = document.getElementById('mlSozBasBit');
+  if (!b0 || !b1 || b0._flatpickr) return;
+  if (typeof flatpickr !== 'function') return;
+  var trLoc = (flatpickr.l10ns && flatpickr.l10ns.tr) ? flatpickr.l10ns.tr : undefined;
+  function onUpd() { filterTable(); }
+  var conf = {
+    dateFormat: 'Y-m-d',
+    altInput: true,
+    altFormat: 'd.m.Y',
+    allowInput: true,
+    locale: trLoc,
+    disableMobile: true,
+    monthSelectorType: 'dropdown',
+    clickOpens: true,
+    onChange: onUpd,
+    onClose: onUpd,
+    onReady: function(sel, str, inst) {
+      if (inst.altInput) inst.altInput.placeholder = 'gg.aa.yyyy';
+    }
+  };
+  flatpickr(b0, conf);
+  flatpickr(b1, conf);
+  mlBindSozBasErpHizli();
+  var clr = document.getElementById('mlSozBasTarihTemizle');
+  if (clr && !clr.dataset.mlSozBasClrBound) {
+    clr.dataset.mlSozBasClrBound = '1';
+    clr.addEventListener('click', function() {
+      if (b0._flatpickr) b0._flatpickr.clear();
+      if (b1._flatpickr) b1._flatpickr.clear();
+      filterTable();
+    });
+  }
+}
+mlInitSozBasTarihFiltre();
+setTimeout(mlBindSozBasErpHizli, 0);
+setTimeout(mlBindSozBasErpHizli, 400);
+window.addEventListener('load', function() {
+  mlBindSozBasErpHizli();
+  if (typeof erpRescanTarihHizli === 'function') erpRescanTarihHizli();
+});
 
 document.getElementById('mlQ').addEventListener('input', filterTable);
 var mlDurumHeader = document.getElementById('mlDurum');
@@ -908,8 +1009,6 @@ if (mlDurumHeader && mlDurumTop) {
 } else if (mlDurumHeader) {
   mlDurumHeader.addEventListener('change', filterTable);
 }
-document.getElementById('mlOfis').addEventListener('change', filterTable);
-
 var mlHizmetHeader = document.getElementById('mlHizmet');
 var mlHizmetTop = document.getElementById('mlHizmetTop');
 if (mlHizmetHeader && mlHizmetTop) {
@@ -925,6 +1024,25 @@ if (mlHizmetHeader && mlHizmetTop) {
   mlHizmetHeader.addEventListener('change', filterTable);
 }
 
+(function mlRestoreBenzerAdUnvan() {
+  try {
+    var raw = localStorage.getItem('mlBenzerAdUnvan');
+    if (raw === null || raw === undefined) return;
+    var allowed = ['', 'mukerrer', 'benzer', 'tekil'];
+    if (allowed.indexOf(String(raw)) < 0) return;
+    var h = document.getElementById('mlBenzer');
+    var t = document.getElementById('mlBenzerTop');
+    if (h) h.value = raw;
+    if (t) t.value = raw;
+  } catch (e) {}
+})();
+
+function mlPersistBenzerAdUnvan(val) {
+  try {
+    localStorage.setItem('mlBenzerAdUnvan', val === null || val === undefined ? '' : String(val));
+  } catch (e) {}
+}
+
 filterTable();
 
 var mlBenzerHeader = document.getElementById('mlBenzer');
@@ -932,16 +1050,24 @@ var mlBenzerTop = document.getElementById('mlBenzerTop');
 if (mlBenzerHeader && mlBenzerTop) {
   mlBenzerHeader.addEventListener('change', function() {
     mlBenzerTop.value = mlBenzerHeader.value;
+    mlPersistBenzerAdUnvan(mlBenzerHeader.value);
     filterTable();
   });
   mlBenzerTop.addEventListener('change', function() {
     mlBenzerHeader.value = mlBenzerTop.value;
+    mlPersistBenzerAdUnvan(mlBenzerTop.value);
     filterTable();
   });
 } else if (mlBenzerHeader) {
-  mlBenzerHeader.addEventListener('change', filterTable);
+  mlBenzerHeader.addEventListener('change', function() {
+    mlPersistBenzerAdUnvan(mlBenzerHeader.value);
+    filterTable();
+  });
 } else if (mlBenzerTop) {
-  mlBenzerTop.addEventListener('change', filterTable);
+  mlBenzerTop.addEventListener('change', function() {
+    mlPersistBenzerAdUnvan(mlBenzerTop.value);
+    filterTable();
+  });
 }
 
 window.addEventListener('resize', function() { mlSyncStickyHeights(); });
