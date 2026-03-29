@@ -93,7 +93,7 @@
                 {% for k in kargolar %}
                 <tr onclick="selectKargo({{ k.id }})">
                     <td>{{ k.tarih or k.created_at[:10] or '—' }}</td>
-                    <td style="text-align: left;">{{ k.musteri_adi or '—' }}</td>
+                    <td style="text-align: left;">{{ k.musteri_unvan or '—' }}{% if k.musteri_kisa_adi %} <span style="color:#90a4ae;font-size:11px;">({{ k.musteri_kisa_adi }})</span>{% endif %}</td>
                     <td>{{ k.kargo_firmasi or '—' }}</td>
                     <td>{{ k.teslim_alan or '—' }}</td>
                     <td><strong>{{ k.takip_no or '—' }}</strong></td>

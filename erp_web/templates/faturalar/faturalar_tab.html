@@ -57,6 +57,69 @@
         .filter-bar button[style*="background:#4caf50"]:hover {
             background: #388e3c;
         }
+        .filter-bar button[style*="background:#7cb342"]:hover {
+            background: #689f38;
+        }
+        .filter-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: nowrap;
+        }
+        .filter-actions button {
+            white-space: nowrap;
+        }
+        .aday-panel {
+            background: #1e3a50;
+            border: 1px solid #2d4060;
+            border-radius: 4px;
+            padding: 10px 12px;
+            margin-bottom: 12px;
+        }
+        .aday-title {
+            color: #4fc3f7;
+            font-weight: 700;
+            margin-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+        }
+        .aday-actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-bottom: 8px;
+        }
+        .aday-actions button {
+            border: none;
+            border-radius: 3px;
+            padding: 6px 10px;
+            font-size: 12px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        .aday-list {
+            max-height: 280px;
+            overflow: auto;
+            border: 1px solid #2d4060;
+            border-radius: 4px;
+        }
+        .aday-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            padding: 8px 10px;
+            border-bottom: 1px solid #2d4060;
+            font-size: 13px;
+        }
+        .aday-row:last-child { border-bottom: none; }
+        .aday-empty {
+            padding: 12px;
+            color: #90a4ae;
+            font-size: 13px;
+        }
         .cari-ara-wrap {
             position: relative;
             display: inline-block;
@@ -184,15 +247,37 @@
             {% for o in ofisler %}<option value="{{ o.code|default('') }}" {{ 'selected' if ofis_kodu == (o.code|default('')) else '' }}>{{ o.code|default('') }}</option>{% endfor %}
         </select>
         
-        <button onclick="filtrele()">
-            <i class="fa fa-filter"></i> Filtrele
-        </button>
-        <button type="button" onclick="yeniFaturaEkleAc()" style="background:#4caf50;">
-            <i class="fa fa-plus"></i> Yeni fatura ekle
-        </button>
-        <button type="button" onclick="yeniIrsaliyeEkleAc()" style="background:#43a047;">
-            <i class="fa fa-truck"></i> Yeni irsaliye ekle
-        </button>
+        <div class="filter-actions">
+            <button onclick="filtrele()">
+                <i class="fa fa-filter"></i> Filtrele
+            </button>
+            <button type="button" onclick="yeniFaturaEkleAc()" style="background:#4caf50;">
+                <i class="fa fa-plus"></i> Yeni fatura ekle
+            </button>
+            <button type="button" onclick="yeniIrsaliyeEkleAc()" style="background:#43a047;">
+                <i class="fa fa-truck"></i> Yeni irsaliye ekle
+            </button>
+            <button type="button" onclick="faturaKesilecekPanelAc()" style="background:#7cb342;">
+                <i class="fa fa-list-check"></i> Fatura kesilecek müşteriler
+            </button>
+        </div>
+    </div>
+
+    <div id="fatura_kesilecek_panel" class="aday-panel" style="display:none;">
+        <div class="aday-title">
+            <span><i class="fa fa-users"></i> Seçilen Ayda Fatura Kesilecek Müşteriler</span>
+            <span id="aday_period_info" style="font-size:12px;color:#90a4ae;"></span>
+        </div>
+        <div class="aday-actions">
+            <button type="button" style="background:#00bcd4;color:#fff;" onclick="faturaKesilecekAdaylariYukle()">Listeyi yenile</button>
+            <button type="button" style="background:#546e7a;color:#fff;" onclick="adayTumunuSec()">Tümünü seç</button>
+            <button type="button" style="background:#607d8b;color:#fff;" onclick="adaySecimiKaldir()">Seçimi kaldır</button>
+            <button type="button" id="aday_olustur_btn" style="background:#4caf50;color:#fff;" onclick="adaySecilenlereFaturaOlustur()">Seçilenlere otomatik fatura oluştur</button>
+            <button type="button" style="background:#455a64;color:#fff;" onclick="faturaKesilecekPanelKapat()">Kapat</button>
+        </div>
+        <div id="aday_listesi" class="aday-list">
+            <div class="aday-empty">Yükleniyor...</div>
+        </div>
     </div>
     
     <div id="yeni_fatura_cari_wrap" class="filter-bar yeni-fatura-cari-bar" style="display:none; margin-top:8px;">
@@ -241,7 +326,7 @@
                 {% for f in faturalar %}
                 <tr>
                     <td>{{ f.fatura_no }}</td>
-                    <td>{{ f.musteri_adi }}</td>
+                    <td>{{ f.musteri_adi_goster or f.customer_name or f.musteri_adi or '—' }}</td>
                     <td>{{ f.ofis_kodu }}</td>
                     <td>{{ f.toplam|round(2) }} TL</td>
                     <td>
@@ -268,6 +353,7 @@
     
     <script>
     var yeniCariHedef = 'fatura';
+    var autoAdaylar = [];
 
     function filtrele() {
         const yil = document.getElementById('yil').value;
@@ -323,6 +409,13 @@
         }
         clearTimeout(cariAraTimer);
         cariAraTimer = setTimeout(function() {
+            function escAttr(s) { return String(s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
+            function escHtml(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+            function cariListeEtiket(m) {
+                var n = (m.name || '').trim();
+                var ma = (m.musteri_adi || '').trim();
+                return ma ? (n + ' · ' + ma) : n;
+            }
             fetch('/faturalar/api/musteriler?q=' + encodeURIComponent(q))
                 .then(function(r) { return r.json(); })
                 .then(function(arr) {
@@ -332,7 +425,8 @@
                         return;
                     }
                     listEl.innerHTML = arr.map(function(m) {
-                        return '<div data-id="' + (m.id || '') + '" data-name="' + (m.name || '').replace(/"/g, '&quot;') + '">' + (m.name || '').replace(/</g, '&lt;') + '</div>';
+                        var lbl = cariListeEtiket(m);
+                        return '<div data-id="' + (m.id || '') + '" data-name="' + escAttr(lbl) + '">' + escHtml(lbl) + '</div>';
                     }).join('');
                     listEl.querySelectorAll('div[data-id]').forEach(function(div) {
                         div.onclick = function() {
@@ -372,6 +466,89 @@
         var hedef = (typeof yeniCariHedef !== 'undefined') ? yeniCariHedef : 'fatura';
         var baseUrl = hedef === 'irsaliye' ? '/faturalar/irsaliye/yeni' : '/faturalar/yeni';
         window.location.href = baseUrl + '?musteri_id=' + encodeURIComponent(cariId);
+    }
+
+    function faturaKesilecekPanelAc() {
+        document.getElementById('fatura_kesilecek_panel').style.display = 'block';
+        faturaKesilecekAdaylariYukle();
+    }
+    function faturaKesilecekPanelKapat() {
+        document.getElementById('fatura_kesilecek_panel').style.display = 'none';
+    }
+    function faturaKesilecekAdaylariYukle() {
+        var yil = document.getElementById('yil').value;
+        var ay = document.getElementById('ay').value;
+        if (!ay) {
+            alert('Önce Ay seçiniz (örn. Mart).');
+            return;
+        }
+        var listEl = document.getElementById('aday_listesi');
+        listEl.innerHTML = '<div class="aday-empty">Yükleniyor...</div>';
+        document.getElementById('aday_period_info').textContent = yil + ' / ' + ay;
+        fetch('/faturalar/api/auto-fatura/adaylar?yil=' + encodeURIComponent(yil) + '&ay=' + encodeURIComponent(ay))
+          .then(function(r){ return r.json(); })
+          .then(function(j){
+            if (!j || !j.ok) throw new Error((j && j.mesaj) || 'Adaylar alınamadı');
+            autoAdaylar = Array.isArray(j.adaylar) ? j.adaylar : [];
+            if (!autoAdaylar.length) {
+                listEl.innerHTML = '<div class="aday-empty">Bu ay için fatura kesilecek müşteri bulunamadı.</div>';
+                return;
+            }
+            listEl.innerHTML = autoAdaylar.map(function(a){
+                return '<label class="aday-row">' +
+                  '<span><input type="checkbox" class="aday-cb" value="' + (a.musteri_id || '') + '" checked> ' +
+                  (a.musteri_adi || 'Müşteri') + '</span>' +
+                  '<strong>' + Number(a.toplam || 0).toFixed(2) + ' TL</strong>' +
+                '</label>';
+            }).join('');
+          })
+          .catch(function(err){
+            listEl.innerHTML = '<div class="aday-empty">Adaylar yüklenemedi: ' + (err.message || err) + '</div>';
+          });
+    }
+    function adayTumunuSec() {
+        document.querySelectorAll('.aday-cb').forEach(function(cb){ cb.checked = true; });
+    }
+    function adaySecimiKaldir() {
+        document.querySelectorAll('.aday-cb').forEach(function(cb){ cb.checked = false; });
+    }
+    function adaySecilenlereFaturaOlustur() {
+        var yil = document.getElementById('yil').value;
+        var ay = document.getElementById('ay').value;
+        var ids = [];
+        document.querySelectorAll('.aday-cb:checked').forEach(function(cb){
+            ids.push(parseInt(cb.value || '0', 10));
+        });
+        ids = ids.filter(function(v){ return v > 0; });
+        if (!ids.length) {
+            alert('En az 1 müşteri seçiniz.');
+            return;
+        }
+        if (!confirm(ids.length + ' müşteri için otomatik fatura oluşturulsun mu?')) return;
+        var btn = document.getElementById('aday_olustur_btn');
+        btn.disabled = true;
+        btn.style.opacity = '0.7';
+        var eski = btn.innerHTML;
+        btn.innerHTML = 'Oluşturuluyor...';
+        fetch('/faturalar/api/auto-fatura/secili-olustur', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({yil: yil, ay: ay, musteri_ids: ids})
+        }).then(function(r){ return r.json(); })
+          .then(function(j){
+            if (!j || !j.ok) throw new Error((j && j.mesaj) || 'İşlem başarısız');
+            alert('Tamamlandı. Oluşan: ' + (j.created_count || 0) + ', mevcut: ' + (j.exists_count || 0) + ', atlanan: ' + (j.skip_count || 0) + ', hatalı: ' + (j.fail_count || 0));
+            faturaKesilecekAdaylariYukle();
+            filtrele();
+          })
+          .catch(function(err){
+            alert('Fatura oluşturma hatası: ' + (err.message || err));
+          })
+          .finally(function(){
+            btn.disabled = false;
+            btn.style.opacity = '';
+            btn.innerHTML = eski;
+          });
     }
     </script>
     <script src="/static/js/erp-tarih-hizli.js"></script>

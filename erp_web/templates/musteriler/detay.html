@@ -331,7 +331,7 @@
   </div>
 
   <div id="musteri-kart-panel" class="komuta-kart-visible" aria-hidden="false">
-    <iframe class="giris-musteri-kart-iframe" id="giris-musteri-kart-iframe" title="Müşteri kartı — Giriş / Müşteri Kaydı" src="{{ url_for('giris.index', mid=musteri.id, embed=1) }}"></iframe>
+    <iframe class="giris-musteri-kart-iframe" id="giris-musteri-kart-iframe" title="Müşteri kartı — Giriş / Müşteri Kaydı" data-src="{{ url_for('giris.index', mid=musteri.id, embed=1) }}" src="about:blank"></iframe>
   </div>
 </div>
 
@@ -354,6 +354,14 @@
   var ifr = document.getElementById('giris-musteri-kart-iframe');
   var tK = document.getElementById('tab-komuta');
   var tM = document.getElementById('tab-musteri-kart');
+  var iframeSrc = ifr && ifr.getAttribute('data-src');
+  function loadGirisIframe() {
+    if (!ifr || !iframeSrc || ifr.getAttribute('data-iframe-loaded')) return;
+    ifr.setAttribute('data-iframe-loaded', '1');
+    ifr.src = iframeSrc;
+  }
+  /* Varsayılan sekme Müşteri Kartı: sunucu cevabından sonra bir tick ile giris iframe’ini başlat (komuta ile aynı anda yarıştırmaz) */
+  setTimeout(loadGirisIframe, 0);
   var chartData = {{ son_6_ay_chart | tojson }};
   var chartInited = false;
   function initKomutaChartIfNeeded() {
@@ -401,10 +409,7 @@
     if (pKart) { pKart.classList.add('komuta-kart-visible'); pKart.setAttribute('aria-hidden', 'false'); }
     if (tK) { tK.classList.remove('active'); tK.setAttribute('aria-selected', 'false'); }
     if (tM) { tM.classList.add('active'); tM.setAttribute('aria-selected', 'true'); }
-    if (ifr && !ifr.getAttribute('src')) {
-      var ds = ifr.getAttribute('data-src');
-      if (ds) ifr.src = ds;
-    }
+    loadGirisIframe();
   }
   if (tK) tK.addEventListener('click', showKomuta);
   if (tM) tM.addEventListener('click', showKart);

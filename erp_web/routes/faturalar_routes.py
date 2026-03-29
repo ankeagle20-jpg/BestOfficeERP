@@ -1,10 +1,17 @@
 from flask import Blueprint, render_template, request, jsonify, redirect, url_for, flash, send_file, Response, abort
 from flask_login import login_required, current_user
 from functools import wraps
-from datetime import datetime, date
-from db import fetch_all, fetch_one, execute, execute_returning, ensure_faturalar_amount_columns
+from datetime import datetime, date, timedelta
+from db import (
+    fetch_all,
+    fetch_one,
+    execute,
+    execute_returning,
+    ensure_faturalar_amount_columns,
+    ensure_auto_invoice_tables,
+)
 from utils.text_utils import turkish_lower
-from utils.musteri_arama import customers_arama_sql_3_plus_tax, customers_arama_params_4
+from utils.musteri_arama import customers_arama_sql_3_plus_tax, customers_arama_params_5
 import os
 import io
 import re
@@ -18,6 +25,11 @@ from reportlab.platypus import Table, TableStyle
 from reportlab.pdfgen import canvas
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
+
+
+def _fatura_pdf_debug():
+    return os.environ.get("FATURA_PDF_DEBUG", "").lower() in ("1", "true", "yes")
+
 
 def _register_arial():
     """Türkçe karakter için Arial fontlarını kaydet (fatura/makbuz PDF)."""
@@ -77,7 +89,20 @@ def _resolve_ettn_for_pdf(raw_ettn, fatura_id=None):
 
 
 def _resolve_gib_logo_path():
-    """GİB logosu: cwd + __file__ tabanlı adaylar; sunucu konsoluna exists logu."""
+    """GİB logosu: cwd + __file__ tabanlı adaylar; sonuç işlem ömrü boyunca önbelleklenir."""
+    if getattr(_resolve_gib_logo_path, "_done", False):
+        return getattr(_resolve_gib_logo_path, "_path", None)
+    dbg = _fatura_pdf_debug()
+    forced = os.path.join(os.getcwd(), "BestOfficeERP", "assets", "gib_logo.png")
+    if dbg:
+        print(
+            f"[fatura PDF] GIB zorunlu yol: {forced} "
+            f"exists={os.path.exists(forced)} isfile={os.path.isfile(forced)}"
+        )
+    if os.path.isfile(forced):
+        _resolve_gib_logo_path._done = True
+        _resolve_gib_logo_path._path = forced
+        return forced
     cwd = os.getcwd()
     here = os.path.dirname(os.path.abspath(__file__))
     candidates = [
@@ -90,16 +115,62 @@ def _resolve_gib_logo_path():
         candidates.append(os.path.join(cwd, "BestOfficeERP", "assets", name))
         candidates.append(os.path.abspath(os.path.join(here, "..", "..", "assets", name)))
     seen = set()
+    result = None
     for p in candidates:
         if not p or p in seen:
             continue
         seen.add(p)
         ex = os.path.isfile(p)
-        print(f"[fatura PDF] GIB logo yolu: {p} exists={ex}")
+        if dbg:
+            print(f"[fatura PDF] GIB logo yolu: {p} exists={ex}")
         if ex:
-            return p
-    print("[fatura PDF] GIB logo bulunamadı (tüm adaylar denendi).")
-    return None
+            result = p
+            break
+    if result is None and dbg:
+        print("[fatura PDF] GIB logo bulunamadı (tüm adaylar denendi).")
+    _resolve_gib_logo_path._done = True
+    _resolve_gib_logo_path._path = result
+    return result
+
+
+# GİB logosu: en-boy + tek ImageReader örneği (her PDF’de dosyayı yeniden açmayı önler)
+_gib_logo_aspect_cache = {}
+_gib_logo_reader_cache = {}
+
+
+def _gib_logo_reader(gib_path):
+    if not gib_path:
+        return None
+    r = _gib_logo_reader_cache.get(gib_path)
+    if r is not None:
+        return r
+    try:
+        from reportlab.lib.utils import ImageReader
+
+        r = ImageReader(gib_path)
+        _gib_logo_reader_cache[gib_path] = r
+        return r
+    except Exception:
+        return None
+
+
+def _gib_logo_aspect_ratio(gib_path):
+    if not gib_path:
+        return 1.0
+    cached = _gib_logo_aspect_cache.get(gib_path)
+    if cached is not None:
+        return cached
+    reader = _gib_logo_reader(gib_path)
+    if reader is None:
+        ar = 1.0
+    else:
+        try:
+            iw, ih = reader.getSize()
+            ar = iw / float(ih or 1)
+        except Exception:
+            ar = 1.0
+    _gib_logo_aspect_cache[gib_path] = ar
+    return ar
 
 
 def _gib_dogrulama_qr_url(fatura, sender_vkn, alici_vkn, ettn):
@@ -494,8 +565,11 @@ def _pdf_irsaliye_modu(fatura):
     return False
 
 
-def build_fatura_pdf(fatura, musteri, satirlar):
-    """e-Arşiv tarzı A4 fatura / e-irsaliye PDF (önizleme için)."""
+def build_fatura_pdf(fatura, musteri, satirlar, preview=False):
+    """e-Arşiv tarzı A4 fatura / e-irsaliye PDF.
+
+    preview=True: kayıt öncesi form önizlemesi — QR üretimi atlanır (daha hızlı).
+    """
     _register_arial()
     font_name = "Arial" if "Arial" in pdfmetrics.getRegisteredFontNames() else "Helvetica"
     font_bold = "Arial-Bold" if "Arial-Bold" in pdfmetrics.getRegisteredFontNames() else "Helvetica-Bold"
@@ -613,10 +687,11 @@ def build_fatura_pdf(fatura, musteri, satirlar):
     # Orta üst: GİB logosu + belge türü — koordinatlar burada; çizim kalemler öncesi (üst katman)
     gib_path = _resolve_gib_logo_path()
     _gib_forced = os.path.join(os.getcwd(), "BestOfficeERP", "assets", "gib_logo.png")
-    print(
-        f"[fatura PDF] GIB zorunlu yol: {_gib_forced} "
-        f"exists={os.path.exists(_gib_forced)} isfile={os.path.isfile(_gib_forced)}"
-    )
+    if _fatura_pdf_debug():
+        print(
+            f"[fatura PDF] GIB zorunlu yol: {_gib_forced} "
+            f"exists={os.path.exists(_gib_forced)} isfile={os.path.isfile(_gib_forced)}"
+        )
     if os.path.isfile(_gib_forced):
         gib_path = _gib_forced
     if irsaliye_modu:
@@ -634,15 +709,7 @@ def build_fatura_pdf(fatura, musteri, satirlar):
     # Çift çizgi altından sonraki blok üst çizgisine kadar boşluk (≈ eski sender_bottom - 18); SAYIN/SEVK aynı
     BLOCK_GAP_BELOW_DOUBLE_PT = 18 - _dhr_gap_pt
     BLOCK_GAP_MM = BLOCK_GAP_BELOW_DOUBLE_PT  # eski isim kaldıysa NameError önleme (pt cinsinden aynı değer)
-    ar = 1.0
-    if gib_path:
-        try:
-            from reportlab.lib.utils import ImageReader
-
-            iw, ih = ImageReader(gib_path).getSize()
-            ar = iw / float(ih or 1)
-        except Exception:
-            ar = 1.0
+    ar = _gib_logo_aspect_ratio(gib_path)
     GIB_LOGO_H_FIXED = 25 * mm
     GIB_LOGO_H_MAX = GIB_LOGO_H_FIXED  # geriye uyum (eski kod / kopyalar)
     GIB_LOGO_LEFT_FROM_PAGE = 85 * mm  # sayfa sol kenarından logo solu (statik)
@@ -661,37 +728,42 @@ def build_fatura_pdf(fatura, musteri, satirlar):
     qr_y = 0.0
 
     qr_pil_image = None
-    try:
-        import qrcode
-        import qrcode.constants
-
-        qr_data = _gib_dogrulama_qr_url(fatura, sender_vkn, alici_vkn, pdf_ettn)
+    if not preview:
         try:
-            qr = qrcode.QRCode(
-                version=1,
-                box_size=3,
-                border=0,
-                error_correction=qrcode.constants.ERROR_CORRECT_M,
-            )
-            qr.add_data(qr_data)
-            qr.make(fit=True)
-            qr_pil_image = qr.make_image(fill_color="black", back_color="white")
-            print(f"[fatura PDF] QR PIL (v1, M), veri uzunluğu={len(qr_data)}")
-        except Exception as e_v1:
-            print(f"[fatura PDF] QR v1 başarısız ({e_v1}), auto version.")
-            qr = qrcode.QRCode(
-                version=None,
-                box_size=3,
-                border=0,
-                error_correction=qrcode.constants.ERROR_CORRECT_M,
-            )
-            qr.add_data(qr_data)
-            qr.make(fit=True)
-            qr_pil_image = qr.make_image(fill_color="black", back_color="white")
-            print(f"[fatura PDF] QR PIL (auto, M), veri uzunluğu={len(qr_data)}")
-    except Exception as e_qr:
-        print(f"[fatura PDF] QR üretilemedi: {e_qr}")
-        qr_pil_image = None
+            import qrcode
+            import qrcode.constants
+
+            qr_data = _gib_dogrulama_qr_url(fatura, sender_vkn, alici_vkn, pdf_ettn)
+            try:
+                qr = qrcode.QRCode(
+                    version=1,
+                    box_size=3,
+                    border=0,
+                    error_correction=qrcode.constants.ERROR_CORRECT_M,
+                )
+                qr.add_data(qr_data)
+                qr.make(fit=True)
+                qr_pil_image = qr.make_image(fill_color="black", back_color="white")
+                if _fatura_pdf_debug():
+                    print(f"[fatura PDF] QR PIL (v1, M), veri uzunluğu={len(qr_data)}")
+            except Exception as e_v1:
+                if _fatura_pdf_debug():
+                    print(f"[fatura PDF] QR v1 başarısız ({e_v1}), auto version.")
+                qr = qrcode.QRCode(
+                    version=None,
+                    box_size=3,
+                    border=0,
+                    error_correction=qrcode.constants.ERROR_CORRECT_M,
+                )
+                qr.add_data(qr_data)
+                qr.make(fit=True)
+                qr_pil_image = qr.make_image(fill_color="black", back_color="white")
+                if _fatura_pdf_debug():
+                    print(f"[fatura PDF] QR PIL (auto, M), veri uzunluğu={len(qr_data)}")
+        except Exception as e_qr:
+            if _fatura_pdf_debug():
+                print(f"[fatura PDF] QR üretilemedi: {e_qr}")
+            qr_pil_image = None
 
     # Tarih: üst çift çizginin 3 mm üstü, unvan ile aynı sol hiza (overlay’de tekrar basılır)
     date_header_y = sender_top + 3 * mm
@@ -1042,6 +1114,48 @@ def build_fatura_pdf(fatura, musteri, satirlar):
             lines.append(cur)
         return lines or [t]
 
+    def _force_lines_to_max_width(lines, max_width_pt, font_nm, font_sz):
+        """Kelime sarması bazen genişliği aşar (Türkçe glif / font ölçümü); satırı güvenli biçimde böl.
+        Mümkünse boşluk/tire üzerinden bölünür (AĞUSTOS → AĞUSTO|S gibi hatalı harf kırığını önler)."""
+        c.setFont(font_nm, font_sz)
+        mw = max(8.0, float(max_width_pt) - 3.0)
+        out = []
+        for ln in list(lines or [""]):
+            s = ln or ""
+            while s:
+                if c.stringWidth(s, font_nm, font_sz) <= mw:
+                    out.append(s)
+                    break
+                lo, hi = 1, len(s)
+                best = 1
+                while lo <= hi:
+                    mid = (lo + hi) // 2
+                    if c.stringWidth(s[:mid], font_nm, font_sz) <= mw:
+                        best = mid
+                        lo = mid + 1
+                    else:
+                        hi = mid - 1
+                take = max(1, best)
+                # Kelime ortasında kırma: geriye doğru boşluk, tire veya em-dash ara
+                if take < len(s) and s[take - 1] not in (" ", "\t"):
+                    cut = -1
+                    for sep in (" ", "\t", "—", "-", "/"):
+                        p = s.rfind(sep, 0, take)
+                        if p >= 1:
+                            cand = s[:p].rstrip()
+                            if cand and c.stringWidth(cand, font_nm, font_sz) <= mw:
+                                cut = p
+                                break
+                    if cut > 0:
+                        take = cut
+                chunk = s[:take].rstrip()
+                if not chunk:
+                    chunk = s[:1]
+                    take = 1
+                out.append(chunk)
+                s = s[take:].lstrip()
+        return out if out else [""]
+
     # Logo + alt başlık + QR + tarih: en son (z-order); tarih/ başlık kaybolmasın diye tekrar
     def _flush_gib_overlay():
         c.saveState()
@@ -1051,20 +1165,35 @@ def build_fatura_pdf(fatura, musteri, satirlar):
             c.drawString(left_x, date_header_y, ust_tarih)
             if gib_path and os.path.isfile(gib_path):
                 try:
-                    c.drawImage(
-                        gib_path,
-                        logo_ll_x,
-                        logo_ll_y,
-                        width=logo_draw_w,
-                        height=logo_h,
-                        preserveAspectRatio=True,
-                        mask="auto",
-                    )
-                    print(f"[fatura PDF] GIB logo drawImage tamam: {gib_path}")
+                    _gib_r = _gib_logo_reader(gib_path)
+                    if _gib_r is not None:
+                        c.drawImage(
+                            _gib_r,
+                            logo_ll_x,
+                            logo_ll_y,
+                            width=logo_draw_w,
+                            height=logo_h,
+                            preserveAspectRatio=True,
+                            mask="auto",
+                        )
+                    else:
+                        c.drawImage(
+                            gib_path,
+                            logo_ll_x,
+                            logo_ll_y,
+                            width=logo_draw_w,
+                            height=logo_h,
+                            preserveAspectRatio=True,
+                            mask="auto",
+                        )
+                    if _fatura_pdf_debug():
+                        print(f"[fatura PDF] GIB logo drawImage tamam: {gib_path}")
                 except Exception as ex_logo:
-                    print(f"[fatura PDF] GIB logo drawImage hata: {ex_logo}")
+                    if _fatura_pdf_debug():
+                        print(f"[fatura PDF] GIB logo drawImage hata: {ex_logo}")
             else:
-                print("[fatura PDF] GIB logo dosyası yok")
+                if _fatura_pdf_debug():
+                    print("[fatura PDF] GIB logo dosyası yok")
             c.setFillColorRGB(0, 0, 0)
             c.setStrokeColorRGB(0, 0, 0)
             c.setFont(font_bold, 12)
@@ -1089,9 +1218,11 @@ def build_fatura_pdf(fatura, musteri, satirlar):
                         height=qr_size,
                         preserveAspectRatio=True,
                     )
-                    print("[fatura PDF] QR drawInlineImage tamam")
+                    if _fatura_pdf_debug():
+                        print("[fatura PDF] QR drawInlineImage tamam")
                 except Exception as ex_qr:
-                    print(f"[fatura PDF] QR drawInlineImage hata: {ex_qr}, ImageReader deneniyor.")
+                    if _fatura_pdf_debug():
+                        print(f"[fatura PDF] QR drawInlineImage hata: {ex_qr}, ImageReader deneniyor.")
                     try:
                         from reportlab.lib.utils import ImageReader
 
@@ -1107,11 +1238,14 @@ def build_fatura_pdf(fatura, musteri, satirlar):
                             preserveAspectRatio=True,
                             mask="auto",
                         )
-                        print("[fatura PDF] QR drawImage (PNG buffer) tamam")
+                        if _fatura_pdf_debug():
+                            print("[fatura PDF] QR drawImage (PNG buffer) tamam")
                     except Exception as ex2:
-                        print(f"[fatura PDF] QR drawImage yedek hata: {ex2}")
+                        if _fatura_pdf_debug():
+                            print(f"[fatura PDF] QR drawImage yedek hata: {ex2}")
             else:
-                print("[fatura PDF] QR PIL yok — çizilmedi (konsola bakın)")
+                if _fatura_pdf_debug():
+                    print("[fatura PDF] QR PIL yok — çizilmedi (konsola bakın)")
         finally:
             c.restoreState()
 
@@ -1139,14 +1273,22 @@ def build_fatura_pdf(fatura, musteri, satirlar):
         mal_tutar = net
 
         mal_hizmet_text = (s.get("ad") or s.get("hizmet_urun_adi") or "")[:200]
-        # "Mal Hizmet" sütunu: wrap + satır yüksekliği metne göre artsın (width sabit)
+        # "Mal Hizmet" sütunu: wrap + satır yüksekliği her satırda metne göre (üst/alt padding + satır aralığı)
         mal_col_idx = 1
         mal_col_w = widths[mal_col_idx]
-        mal_max_w = max(10, mal_col_w - (pad * 2))
+        mal_max_w = max(10, mal_col_w - (pad * 2) - 6)  # clip + metin ölçümü için pay
         mal_lines = _wrap_cell_text(mal_hizmet_text, mal_max_w, font_name, 9)
-        line_h = 10  # pt
+        mal_lines = _force_lines_to_max_width(mal_lines, mal_max_w, font_name, 9)
+        # 9pt font: baseline aralığı + descender; alt/üst çizgiye değmesin
+        mal_line_leading = 12.5  # pt (satır başına toplam dikey pay)
+        mal_pad_top = 10  # üst border + büyük harf ascent
+        mal_pad_bottom = 9  # alt border ile son satır descender arası
         min_row_h_pt = row_h
-        current_row_h = max(min_row_h_pt, (len(mal_lines) * line_h) + 6)  # üst/alt boşluk
+        n_mal = max(1, len(mal_lines))
+        current_row_h = max(
+            min_row_h_pt,
+            mal_pad_top + mal_pad_bottom + n_mal * mal_line_leading,
+        )
 
         values = [
             str(sira),
@@ -1167,11 +1309,18 @@ def build_fatura_pdf(fatura, musteri, satirlar):
         for i, val in enumerate(values):
             w_pt = widths[i]
             if i == mal_col_idx:
-                # Çok satırlı "Mal Hizmet"
-                y_txt = row_top - 4  # pt
+                # Çok satırlı "Mal Hizmet" — clip ile komşu sütuna taşmayı kes; yükseklik padding + leading ile hesaplı
+                cell_bottom_y = row_top - current_row_h
+                c.saveState()
+                _clip = c.beginPath()
+                _clip.rect(x, cell_bottom_y, w_pt, current_row_h)
+                c.clipPath(_clip, stroke=0, fill=0)
+                # İlk baseline: üst iç boşluktan sonra (~9pt font ascent payı)
+                y_txt = row_top - mal_pad_top
                 for ln in mal_lines:
-                    c.drawString(x + pad, y_txt, ln[:120])
-                    y_txt -= line_h
+                    c.drawString(x + pad, y_txt, (ln or "")[:200])
+                    y_txt -= mal_line_leading
+                c.restoreState()
             else:
                 if i in (0, 2, 4, 5, 6, 8, 9):
                     c.drawRightString(x + w_pt - pad, draw_y_center, val)
@@ -1189,7 +1338,8 @@ def build_fatura_pdf(fatura, musteri, satirlar):
     _table_bottom_min = (
         8 * mm + _yalniz_h_pre + GAP_SUMMARY_TO_YALNIZ + _box_h_sm + GAP_TABLE_TO_SUMMARY
     )
-    MIN_EMPTY_GRID_ROWS = 22
+    # Önizleme: GİB görünümü için yüzlerce yatay çizgi gereksiz; PDF üretimi belirgin hızlanır.
+    MIN_EMPTY_GRID_ROWS = 4 if preview else 22
     empty_row_h = float(row_h)
     c.saveState()
     c.setLineWidth(0.5)
@@ -1202,10 +1352,15 @@ def build_fatura_pdf(fatura, musteri, satirlar):
             ny = y_line - empty_row_h
             c.line(margin, ny, table_right, ny)
             y_line = ny
+        _extra_empty = 0
+        _extra_empty_cap = 8 if preview else 500
         while y_line - empty_row_h >= _table_bottom_min and y_line - empty_row_h >= 50 * mm:
             ny = y_line - empty_row_h
             c.line(margin, ny, table_right, ny)
             y_line = ny
+            _extra_empty += 1
+            if _extra_empty >= _extra_empty_cap:
+                break
     finally:
         c.restoreState()
 
@@ -1329,15 +1484,37 @@ def index():
 @bp.route('/yeni')
 @faturalar_gerekli
 def yeni_fatura():
-    """Yeni fatura oluşturma ekranı. ?musteri_id= ile gelirse seçili müşteri bilgileri forma doldurulur."""
+    """Yeni fatura oluşturma ekranı. ?musteri_id= ile gelirse seçili müşteri bilgileri forma doldurulur.
+    Sözleşmeler gridinden: ?birim_fiyat=&kdv=&satir_aciklama= (net birim fiyat; KDV satıra uygulanır)."""
     now = datetime.now()
     secili_musteri = None
     default_hizmet_urun = ""
     default_birim_fiyat = 0
+    default_kdv_orani = 20
+    satir_aciklama_url = (request.args.get("satir_aciklama") or "").strip()
+
+    bf_q = request.args.get("birim_fiyat")
+    url_birim_set = False
+    if bf_q is not None and str(bf_q).strip() != "":
+        try:
+            default_birim_fiyat = float(str(bf_q).replace(",", "."))
+            url_birim_set = True
+        except (TypeError, ValueError):
+            default_birim_fiyat = 0
+
+    kdv_q = request.args.get("kdv")
+    if kdv_q is not None and str(kdv_q).strip() != "":
+        try:
+            k = int(float(str(kdv_q).replace(",", ".")))
+            if k in (0, 1, 10, 20):
+                default_kdv_orani = k
+        except (TypeError, ValueError):
+            pass
+
     musteri_id = request.args.get('musteri_id', type=int)
     if musteri_id:
         cust = fetch_one(
-            "SELECT id, name, address, tax_number FROM customers WHERE id = %s",
+            "SELECT id, name, musteri_adi, address, tax_number FROM customers WHERE id = %s",
             (musteri_id,),
         )
         if cust:
@@ -1354,25 +1531,36 @@ def yeni_fatura():
             vergi_no = (kyc and kyc.get("vergi_no")) or cust.get("tax_number") or ""
             if isinstance(vergi_no, float):
                 vergi_no = str(int(vergi_no)) if vergi_no == int(vergi_no) else str(vergi_no)
+            ma = (cust.get("musteri_adi") or "").strip()
+            nm = (cust.get("name") or "").strip()
             secili_musteri = {
                 "id": cust["id"],
                 "name": cust.get("name") or "",
+                "musteri_adi": ma or None,
+                "display_label": (nm + " · " + ma) if ma else nm,
                 "address": address,
                 "vergi_dairesi": vergi_dairesi,
                 "vergi_no": str(vergi_no) if vergi_no else "",
             }
             if kyc:
                 default_hizmet_urun = (kyc.get("hizmet_turu") or "Sanal Ofis").strip() or "Sanal Ofis"
-                try:
-                    default_birim_fiyat = float(kyc.get("aylik_kira") or 0)
-                except (TypeError, ValueError):
-                    default_birim_fiyat = 0
+                if not url_birim_set:
+                    try:
+                        default_birim_fiyat = float(kyc.get("aylik_kira") or 0)
+                    except (TypeError, ValueError):
+                        default_birim_fiyat = 0
+    _pk = (request.args.get("prefill_key") or "").strip()
+    fatura_prefill_key = _pk if re.match(r"^[a-zA-Z0-9_-]{12,140}$", _pk) else ""
+
     return render_template('faturalar/yeni_fatura.html',
                            bugun=now.strftime("%Y-%m-%d"),
                            saat=now.strftime("%H:%M"),
                            secili_musteri=_row_serializable(secili_musteri) if secili_musteri else None,
                            default_hizmet_urun=default_hizmet_urun,
-                           default_birim_fiyat=default_birim_fiyat)
+                           default_birim_fiyat=default_birim_fiyat,
+                           default_kdv_orani=default_kdv_orani,
+                           satir_aciklama_url=satir_aciklama_url,
+                           fatura_prefill_key=fatura_prefill_key)
 
 
 @bp.route('/irsaliye/yeni')
@@ -1386,7 +1574,7 @@ def yeni_irsaliye():
     default_birim_fiyat = 0
     if musteri_id:
         cust = fetch_one(
-            "SELECT id, name, address, tax_number FROM customers WHERE id = %s",
+            "SELECT id, name, musteri_adi, address, tax_number FROM customers WHERE id = %s",
             (musteri_id,),
         )
         if cust:
@@ -1403,9 +1591,13 @@ def yeni_irsaliye():
             vergi_no = (kyc and kyc.get("vergi_no")) or cust.get("tax_number") or ""
             if isinstance(vergi_no, float):
                 vergi_no = str(int(vergi_no)) if vergi_no == int(vergi_no) else str(vergi_no)
+            ma = (cust.get("musteri_adi") or "").strip()
+            nm = (cust.get("name") or "").strip()
             secili_musteri = {
                 "id": cust["id"],
                 "name": cust.get("name") or "",
+                "musteri_adi": ma or None,
+                "display_label": (nm + " · " + ma) if ma else nm,
                 "address": address,
                 "vergi_dairesi": vergi_dairesi,
                 "vergi_no": str(vergi_no) if vergi_no else "",
@@ -1424,6 +1616,9 @@ def yeni_irsaliye():
         secili_musteri=_row_serializable(secili_musteri) if secili_musteri else None,
         default_hizmet_urun=default_hizmet_urun,
         default_birim_fiyat=default_birim_fiyat,
+        default_kdv_orani=20,
+        satir_aciklama_url="",
+        fatura_prefill_key="",
         irsaliye_modu=True,
     )
 
@@ -1446,11 +1641,24 @@ def faturalar():
     yil = request.args.get('yil', today.year, type=int)
     ay_str = request.args.get('ay', '')
     ofis_kodu = request.args.get('ofis', '')
+    ay_no = None
+    if ay_str:
+        try:
+            ay_no = AYLAR.index(ay_str) + 1
+        except ValueError:
+            ay_no = None
+    if ay_no:
+        # Ay filtresinde tarih aralığını seçilen yılın tamamına çekiyoruz;
+        # aksi halde varsayılan "bu ay" aralığı Mart gibi geçmiş ayları gizliyor.
+        baslangic = date(yil, 1, 1)
+        bitis = date(yil, 12, 31)
     
     ofisler = fetch_all("SELECT DISTINCT code FROM offices WHERE COALESCE(is_active::int, 1) = 1 ORDER BY code")
     
     sql = """
-        SELECT f.*, c.name as musteri_adi
+        SELECT f.*,
+               c.name AS customer_name,
+               COALESCE(NULLIF(TRIM(c.name), ''), NULLIF(TRIM(f.musteri_adi), ''), '—') AS musteri_adi_goster
         FROM faturalar f
         LEFT JOIN customers c ON CAST(f.musteri_id AS INTEGER) = c.id
         WHERE (f.fatura_tarihi::date) >= %s AND (f.fatura_tarihi::date) <= %s
@@ -1460,11 +1668,45 @@ def faturalar():
     if ofis_kodu:
         sql += " AND f.ofis_kodu = %s"
         params.append(ofis_kodu)
-    
-    sql += " ORDER BY (f.fatura_tarihi::date) DESC"
+
+    # Ay seçilmişse (örn. Mart), seçilen yıl + ay kayıtlarını getir.
+    if ay_no:
+        sql += " AND EXTRACT(YEAR FROM (f.fatura_tarihi::date)) = %s"
+        sql += " AND EXTRACT(MONTH FROM (f.fatura_tarihi::date)) = %s"
+        params.extend([yil, ay_no])
+
+    # Ay filtresinde ödenenler (kira ödemesi gelenler) üstte görünsün.
+    if ay_no:
+        sql += " ORDER BY CASE WHEN COALESCE(f.durum, '') = 'odendi' THEN 0 ELSE 1 END, (f.fatura_tarihi::date) DESC"
+    else:
+        sql += " ORDER BY (f.fatura_tarihi::date) DESC"
     
     faturalar_raw = fetch_all(sql, tuple(params))
     faturalar = [_row_serializable(f) for f in (faturalar_raw or [])]
+
+    if ay_no:
+        # Ay bazında "kesilecek" görünümünde:
+        # - 0 TL satırları ele
+        # - Aynı müşteriyi tek satıra indir (en güncel kayıt)
+        tekil = []
+        gorulen = set()
+        for f in faturalar:
+            try:
+                if float(f.get('toplam') or 0) <= 0:
+                    continue
+            except Exception:
+                continue
+            key = f.get('musteri_id') or (f.get('musteri_adi_goster') or f.get('customer_name') or f.get('musteri_adi') or '').strip().lower()
+            if not key or key in gorulen:
+                continue
+            gorulen.add(key)
+            tekil.append(f)
+        faturalar = sorted(
+            tekil,
+            key=lambda x: (
+                (x.get('musteri_adi_goster') or x.get('customer_name') or x.get('musteri_adi') or '').strip().lower()
+            )
+        )
     
     toplam_tutar = sum(f.get('toplam') or 0 for f in faturalar)
     toplam_odenen = sum(f.get('toplam') or 0 for f in faturalar if f.get('durum') == 'odendi')
@@ -1473,7 +1715,7 @@ def faturalar():
     ofisler_list = list(ofisler or [])
     ofisler = [_row_serializable(o) for o in ofisler_list]
     yillar = list(range(today.year, today.year - 6, -1))
-    musteriler = fetch_all("SELECT id, name FROM customers ORDER BY name LIMIT 500")
+    musteriler = fetch_all("SELECT id, name, musteri_adi FROM customers ORDER BY name LIMIT 500")
     musteriler = [_row_serializable(m) for m in (musteriler or [])]
     
     return render_template('faturalar/faturalar_tab.html',
@@ -1531,6 +1773,231 @@ def _next_fatura_no(prefix="INV"):
         return f"{prefix}{yil}000001"
 
 
+_AY_ADLARI_TR = ("Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran",
+                 "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık")
+
+
+def _auto_inv_settings():
+    ensure_auto_invoice_tables()
+    s = fetch_one("SELECT * FROM auto_invoice_settings ORDER BY id LIMIT 1") or {}
+    return {
+        "enabled": bool(s.get("enabled")),
+        "run_day": int(s.get("run_day") or 1),
+        "run_hour": int(s.get("run_hour") or 9),
+        "send_gib": bool(s.get("send_gib")),
+        "auto_sms_code": (s.get("auto_sms_code") or "").strip(),
+    }
+
+
+def _auto_month_amount_from_cache(musteri_id, run_month_date):
+    try:
+        from routes.giris_routes import _build_aylik_grid_cache_payload
+    except Exception:
+        _build_aylik_grid_cache_payload = None
+    if _build_aylik_grid_cache_payload:
+        payload = _build_aylik_grid_cache_payload(int(musteri_id))
+        if payload and isinstance(payload.get("aylar"), list):
+            key = f"{run_month_date.year}-{run_month_date.month}"
+            for a in payload["aylar"]:
+                if str(a.get("ay_key")) == key:
+                    try:
+                        v = float(a.get("tutar_kdv_dahil") or 0)
+                        if v > 0:
+                            return round(v, 2)
+                    except Exception:
+                        pass
+    kyc = fetch_one(
+        "SELECT aylik_kira FROM musteri_kyc WHERE musteri_id = %s ORDER BY id DESC LIMIT 1",
+        (musteri_id,),
+    ) or {}
+    net = float(kyc.get("aylik_kira") or 0)
+    return round(net * 1.2, 2) if net > 0 else 0.0
+
+
+def _auto_month_amount_resolved(musteri_id, run_month_date):
+    """Aylık tutarı cache -> kyc -> son fatura toplam fallback zinciriyle bul."""
+    try:
+        v = float(_auto_month_amount_from_cache(musteri_id, run_month_date) or 0)
+    except Exception:
+        v = 0.0
+    if v > 0:
+        return round(v, 2)
+
+    # KYC/cache boş ise müşterinin son pozitif toplamlı faturasını baz al.
+    last_inv = fetch_one(
+        """
+        SELECT toplam
+        FROM faturalar
+        WHERE musteri_id = %s
+          AND COALESCE(toplam, 0) > 0
+        ORDER BY (fatura_tarihi::date) DESC, id DESC
+        LIMIT 1
+        """,
+        (musteri_id,),
+    ) or {}
+    try:
+        v2 = float(last_inv.get("toplam") or 0)
+    except Exception:
+        v2 = 0.0
+    if v2 > 0:
+        return round(v2, 2)
+
+    # Son fallback: customers.ilk_kira_bedeli (net) üzerinden KDV dahil.
+    c = fetch_one(
+        "SELECT ilk_kira_bedeli FROM customers WHERE id = %s",
+        (musteri_id,),
+    ) or {}
+    try:
+        net = float(c.get("ilk_kira_bedeli") or 0)
+    except Exception:
+        net = 0.0
+    return round(net * 1.2, 2) if net > 0 else 0.0
+
+
+def _auto_invoice_create_for_customer(musteri_id, run_month_date):
+    marker = f"|AUTO_INV|{run_month_date.strftime('%Y-%m')}|"
+    mevcut = fetch_one(
+        """SELECT id, fatura_no FROM faturalar
+           WHERE musteri_id = %s
+             AND COALESCE(notlar, '') LIKE %s
+           ORDER BY id DESC LIMIT 1""",
+        (musteri_id, f"%{marker}%"),
+    )
+    if mevcut:
+        return {"status": "exists", "fatura_id": mevcut.get("id"), "fatura_no": mevcut.get("fatura_no")}
+    cust = fetch_one("SELECT id, name FROM customers WHERE id = %s", (musteri_id,))
+    if not cust:
+        return {"status": "error", "error": "Müşteri bulunamadı."}
+    toplam = _auto_month_amount_resolved(musteri_id, run_month_date)
+    if toplam <= 0:
+        return {"status": "skip", "error": "Aylık tutar bulunamadı veya 0."}
+    fatura_no = _next_fatura_no()
+    ay_ad = _AY_ADLARI_TR[run_month_date.month - 1]
+    notlar = f"{ay_ad} {run_month_date.year} otomatik kira faturası {marker}"
+    row = execute_returning(
+        """INSERT INTO faturalar (
+               fatura_no, musteri_id, musteri_adi, tutar, kdv_tutar, toplam,
+               durum, fatura_tarihi, vade_tarihi, notlar
+           ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+           RETURNING id""",
+        (
+            fatura_no,
+            musteri_id,
+            cust.get("name") or "Müşteri",
+            round(toplam / 1.2, 2),
+            round(toplam - (toplam / 1.2), 2),
+            toplam,
+            "odenmedi",
+            run_month_date,
+            run_month_date,
+            notlar,
+        ),
+    )
+    return {"status": "created", "fatura_id": (row or {}).get("id"), "fatura_no": fatura_no, "toplam": toplam}
+
+
+def run_auto_invoice_cycle(force=False, run_date=None):
+    ensure_auto_invoice_tables()
+    now = run_date or date.today()
+    settings = _auto_inv_settings()
+    if (not force) and (not settings["enabled"]):
+        return {"ok": True, "skipped": True, "mesaj": "Otomatik fatura kapalı."}
+    if (not force) and int(now.day) != int(settings["run_day"]):
+        return {"ok": True, "skipped": True, "mesaj": "Bugün planlanan gün değil."}
+    period_key = now.strftime("%Y-%m")
+    var = fetch_one("SELECT id, status FROM auto_invoice_runs WHERE period_key = %s", (period_key,))
+    if var and str(var.get("status") or "").lower() == "success" and not force:
+        return {"ok": True, "skipped": True, "mesaj": "Bu dönem zaten çalıştırılmış."}
+
+    run_row = execute_returning(
+        """INSERT INTO auto_invoice_runs (period_key, run_date, status, started_at)
+           VALUES (%s, %s, 'running', NOW())
+           ON CONFLICT (period_key)
+           DO UPDATE SET status='running', started_at=NOW(), finished_at=NULL, message=NULL
+           RETURNING id""",
+        (period_key, now),
+    )
+    run_id = (run_row or {}).get("id")
+    success_count = 0
+    fail_count = 0
+    send_gib = settings["send_gib"]
+    auto_sms = settings["auto_sms_code"]
+    gib = None
+    if send_gib:
+        try:
+            from gib_earsiv import BestOfficeGIBManager, build_fatura_data_from_db
+            gib = BestOfficeGIBManager()
+        except Exception:
+            gib = None
+            send_gib = False
+
+    musteri_rows = fetch_all(
+        """
+        SELECT c.id
+        FROM customers c
+        WHERE LOWER(COALESCE(c.durum, 'aktif')) != 'pasif'
+          AND EXISTS (SELECT 1 FROM musteri_kyc k WHERE k.musteri_id = c.id)
+        ORDER BY c.id
+        """
+    ) or []
+    for mr in musteri_rows:
+        mid = int(mr.get("id"))
+        try:
+            created = _auto_invoice_create_for_customer(mid, now.replace(day=1))
+            if created.get("status") in ("skip", "exists"):
+                execute(
+                    """INSERT INTO auto_invoice_items (run_id, musteri_id, fatura_id, period_key, status, error_message)
+                       VALUES (%s,%s,%s,%s,%s,%s)""",
+                    (run_id, mid, created.get("fatura_id"), period_key, created.get("status"), created.get("error")),
+                )
+                continue
+            if created.get("status") != "created":
+                fail_count += 1
+                execute(
+                    """INSERT INTO auto_invoice_items (run_id, musteri_id, period_key, status, error_message)
+                       VALUES (%s,%s,%s,'error',%s)""",
+                    (run_id, mid, period_key, created.get("error") or "Fatura oluşturulamadı."),
+                )
+                continue
+            fatura_id = int(created.get("fatura_id"))
+            gib_uuid = None
+            item_status = "created"
+            err = None
+            if send_gib and gib and gib.is_available():
+                try:
+                    from gib_earsiv import build_fatura_data_from_db
+                    f_data = build_fatura_data_from_db(fatura_id, fetch_one)
+                    gib_uuid = gib.fatura_taslak_olustur(f_data)
+                    item_status = "gib_draft" if gib_uuid else "gib_fail"
+                    if gib_uuid and auto_sms:
+                        ok_sms = gib.sms_onay_ve_imzala(gib_uuid, auto_sms)
+                        item_status = "gib_signed" if ok_sms else "gib_sms_fail"
+                except Exception as ge:
+                    item_status = "gib_fail"
+                    err = str(ge)
+            execute(
+                """INSERT INTO auto_invoice_items (run_id, musteri_id, fatura_id, period_key, status, gib_uuid, error_message)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s)""",
+                (run_id, mid, fatura_id, period_key, item_status, gib_uuid, err),
+            )
+            success_count += 1
+        except Exception as e:
+            fail_count += 1
+            execute(
+                """INSERT INTO auto_invoice_items (run_id, musteri_id, period_key, status, error_message)
+                   VALUES (%s,%s,%s,'error',%s)""",
+                (run_id, mid, period_key, str(e)),
+            )
+
+    execute(
+        """UPDATE auto_invoice_runs
+           SET status=%s, finished_at=NOW(), success_count=%s, fail_count=%s, message=%s
+           WHERE id=%s""",
+        ("success" if fail_count == 0 else "partial", success_count, fail_count, f"{success_count} başarılı, {fail_count} hatalı", run_id),
+    )
+    return {"ok": True, "run_id": run_id, "success_count": success_count, "fail_count": fail_count}
+
+
 @bp.route('/api/tutar-yazi')
 @faturalar_gerekli
 def tutar_yazi_api():
@@ -1548,7 +2015,6 @@ def tutar_yazi_api():
 def fatura_onizleme():
     """Form verileriyle A4 fatura PDF önizlemesi (kaydetmeden)."""
     try:
-        ensure_faturalar_amount_columns()
         data = request.get_json() or {}
         satirlar = data.get("satirlar") or []
         irsaliye_modu = str(data.get("irsaliye_modu") or "").lower() in ("1", "true", "yes")
@@ -1568,8 +2034,12 @@ def fatura_onizleme():
             fatura_tarihi_str = dt.strftime("%d.%m.%Y")
         except Exception:
             fatura_tarihi_str = fatura_tarihi
+        # Önizlemede boş numara için DB sorgusu yapma (her tıklamada gecikme)
+        _fn = (data.get("fatura_no") or "").strip()
+        if not _fn:
+            _fn = f"ÖN-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
         fatura = {
-            "fatura_no": data.get("fatura_no") or _next_fatura_no(),
+            "fatura_no": _fn,
             "fatura_tarihi": fatura_tarihi,
             "fatura_tarihi_str": fatura_tarihi_str,
             "fatura_tipi": data.get("fatura_tipi") or "satis",
@@ -1584,7 +2054,7 @@ def fatura_onizleme():
             "irsaliye_modu": irsaliye_modu,
             "sevk_adresi": (data.get("sevk_adresi") or "").strip() or None,
         }
-        pdf_bytes = build_fatura_pdf(fatura, musteri, satirlar)
+        pdf_bytes = build_fatura_pdf(fatura, musteri, satirlar, preview=True)
         return Response(
             pdf_bytes,
             mimetype="application/pdf",
@@ -1655,6 +2125,25 @@ def fatura_ekle():
         fatura_no = (data.get("fatura_no") or "").strip() or _next_fatura_no()
         musteri_id = _opt_customer_id(data.get("musteri_id"))
         musteri_adi = (data.get("musteri_adi") or "").strip()
+        # Cari ekstre tarafında kayıtlar musteri_id ile toplandığı için,
+        # id boş gelirse isimden eşleyip otomatik doldur.
+        if not musteri_id and musteri_adi:
+            try:
+                m = fetch_one(
+                    """
+                    SELECT id, name
+                    FROM customers
+                    WHERE LOWER(TRIM(COALESCE(name, ''))) = LOWER(TRIM(%s))
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (musteri_adi,),
+                )
+                if m and m.get("id"):
+                    musteri_id = int(m.get("id"))
+                    musteri_adi = (m.get("name") or musteri_adi).strip()
+            except Exception:
+                pass
 
         sevk_adresi_kayit = (data.get("sevk_adresi") or "").strip() or None
         execute(
@@ -1720,7 +2209,7 @@ def fatura_onizleme_ekran(fatura_id):
     """Kaydedilmiş faturanın e-Arşiv PDF önizlemesi ("Fatura Oluştur" sonrası)."""
     ensure_faturalar_amount_columns()
     fatura_row = fetch_one(
-        "SELECT id, fatura_no, fatura_tarihi, musteri_id, musteri_adi, tutar, kdv_tutar, toplam, notlar, satirlar_json, sevk_adresi FROM faturalar WHERE id = %s",
+        "SELECT id, fatura_no, fatura_tarihi, musteri_id, musteri_adi, tutar, kdv_tutar, toplam, notlar, satirlar_json, sevk_adresi, ettn FROM faturalar WHERE id = %s",
         (fatura_id,),
     )
     if not fatura_row:
@@ -1814,8 +2303,8 @@ def fatura_onizleme_ekran(fatura_id):
         for s in satirlar
     )
     kdv_toplam = sum(s.get("kdv_tutar", 0) for s in satirlar)
-    ettn = ""
-    if fatura.get("notlar"):
+    ettn = (fatura.get("ettn") or "").strip()
+    if (not ettn) and fatura.get("notlar"):
         for part in (fatura.get("notlar") or "").split("|"):
             if "ETTN:" in part or "GİB ETTN:" in part:
                 ettn = part.split(":")[-1].strip() or ettn
@@ -2032,6 +2521,26 @@ def tahsilat_makbuz_onizle():
 
 
 # --- GİB e-Arşiv Fatura (taslak + SMS onay) ---
+def _fatura_notlarina_gib_ettn_yaz(fatura_id, ettn):
+    """Fatura notlarına GİB ETTN bilgisini tekil olarak yazar/günceller."""
+    try:
+        fid = int(fatura_id)
+    except Exception:
+        return
+    ettn_val = (ettn or "").strip()
+    if not ettn_val:
+        return
+    row = fetch_one("SELECT notlar FROM faturalar WHERE id = %s", (fid,)) or {}
+    notlar = str(row.get("notlar") or "")
+    # Eski ETTN etiketlerini temizleyip tek bir güncel satır bırak.
+    cleaned = re.sub(r"\s*\|\s*G[İI]B\s*ETTN:\s*[^|]*", "", notlar, flags=re.IGNORECASE).strip()
+    if cleaned:
+        yeni = f"{cleaned} | GİB ETTN: {ettn_val}"
+    else:
+        yeni = f"GİB ETTN: {ettn_val}"
+    execute("UPDATE faturalar SET notlar = %s, ettn = %s WHERE id = %s", (yeni, ettn_val, fid))
+
+
 @bp.route('/api/gib-taslak', methods=['POST'])
 @faturalar_gerekli
 def api_gib_taslak():
@@ -2048,12 +2557,31 @@ def api_gib_taslak():
         if not gib.is_available():
             return jsonify({
                 "ok": False,
-                "mesaj": "GİB modülü kullanılamıyor. .env içinde GIB_USER ve GIB_PASS tanımlayın ve 'fatura' kütüphanesini yükleyin."
+                "mesaj": "GİB modülü kullanılamıyor. .env içinde GIB_USER ve GIB_PASS tanımlayın ve eArsivPortal kurulumunu kontrol edin."
             }), 503
         uuid = gib.fatura_taslak_olustur(fatura_data)
         if not uuid:
             return jsonify({"ok": False, "mesaj": "GİB taslak oluşturulamadı."}), 500
-        return jsonify({"ok": True, "uuid": uuid, "mesaj": "Taslak oluşturuldu. SMS ile gelen kodu girin."})
+        oid = None
+        sms_error = None
+        try:
+            oid = gib.sms_kodu_gonder(uuid)
+            sms_error = getattr(gib, "last_sms_error", None)
+        except Exception:
+            oid = None
+            sms_error = getattr(gib, "last_sms_error", None) or "SMS gönderimi tetiklenemedi."
+        try:
+            _fatura_notlarina_gib_ettn_yaz(fatura_id, uuid)
+        except Exception:
+            pass
+        msg = "Taslak oluşturuldu."
+        if oid:
+            msg += " SMS gönderildi, gelen kodu girin."
+        else:
+            msg += " SMS otomatik tetiklenemedi; 'SMS Gönder' ile tekrar deneyin."
+            if sms_error:
+                msg += f" Detay: {sms_error}"
+        return jsonify({"ok": True, "uuid": uuid, "oid": oid, "sms_sent": bool(oid), "sms_error": sms_error, "mesaj": msg})
     except ValueError as e:
         return jsonify({"ok": False, "mesaj": str(e)}), 400
     except RuntimeError as e:
@@ -2071,21 +2599,22 @@ def api_gib_sms_onay():
         data = request.get_json() or {}
         uuid = (data.get("uuid") or request.form.get("uuid") or "").strip()
         sms_kodu = (data.get("sms_kodu") or request.form.get("sms_kodu") or "").strip()
+        oid = (data.get("oid") or request.form.get("oid") or "").strip()
         fatura_id = data.get("fatura_id") or request.form.get("fatura_id")
         if not uuid or not sms_kodu:
             return jsonify({"ok": False, "mesaj": "uuid ve sms_kodu gerekli."}), 400
         gib = BestOfficeGIBManager()
         if not gib.is_available():
             return jsonify({"ok": False, "mesaj": "GİB modülü kullanılamıyor."}), 503
-        success = gib.sms_onay_ve_imzala(uuid, sms_kodu)
+        if oid and getattr(gib, "client_type", "") == "earsivportal":
+            success = gib.sms_onay_earsivportal(uuid, sms_kodu, oid)
+        else:
+            success = gib.sms_onay_ve_imzala(uuid, sms_kodu)
         if not success:
             return jsonify({"ok": False, "mesaj": "SMS onayı başarısız veya kod hatalı."}), 400
         if fatura_id:
             try:
-                execute(
-                    "UPDATE faturalar SET notlar = COALESCE(notlar,'') || ' | GİB ETTN: ' || %s WHERE id = %s",
-                    (uuid, int(fatura_id))
-                )
+                _fatura_notlarina_gib_ettn_yaz(fatura_id, uuid)
             except Exception:
                 pass
         return jsonify({"ok": True, "mesaj": "Fatura GİB üzerinde imzalandı."})
@@ -2093,21 +2622,305 @@ def api_gib_sms_onay():
         return jsonify({"ok": False, "mesaj": str(e)}), 500
 
 
+@bp.route('/api/gib-sms-gonder', methods=['POST'])
+@faturalar_gerekli
+def api_gib_sms_gonder():
+    """UUID için GİB SMS kodu gönderimini tetikler (eArsivPortal akışı)."""
+    try:
+        from gib_earsiv import BestOfficeGIBManager
+        data = request.get_json() or {}
+        uuid = (data.get("uuid") or request.form.get("uuid") or "").strip()
+        if not uuid:
+            return jsonify({"ok": False, "mesaj": "uuid gerekli."}), 400
+        gib = BestOfficeGIBManager()
+        if not gib.is_available():
+            return jsonify({"ok": False, "mesaj": "GİB modülü kullanılamıyor."}), 503
+        oid = gib.sms_kodu_gonder(uuid)
+        if not oid:
+            return jsonify({"ok": False, "mesaj": "SMS gönderimi başlatılamadı."}), 500
+        return jsonify({"ok": True, "oid": oid, "mesaj": "SMS gönderildi. Telefonunuza gelen kodu girin."})
+    except Exception as e:
+        return jsonify({"ok": False, "mesaj": str(e)}), 500
+
+
+@bp.route('/api/gib-fatura-olustur', methods=['POST'])
+@faturalar_gerekli
+def api_gib_fatura_olustur():
+    """SMS onayı sonrası faturayı gerçek ETTN ile kesinleştirir."""
+    try:
+        from gib_earsiv import BestOfficeGIBManager
+        data = request.get_json() or {}
+        fatura_id = data.get("fatura_id")
+        uuid = (data.get("uuid") or "").strip()
+        if not fatura_id:
+            return jsonify({"ok": False, "mesaj": "fatura_id gerekli."}), 400
+        if not uuid:
+            return jsonify({"ok": False, "mesaj": "uuid gerekli."}), 400
+        fid = int(fatura_id)
+        gib = BestOfficeGIBManager()
+        if gib.is_available() and getattr(gib, "client_type", "") == "earsivportal":
+            st = gib.fatura_durum_getir(uuid, days_back=370) or {}
+            onay = str(st.get("onayDurumu") or "")
+            if onay and ("onaylan" not in onay.lower()):
+                return jsonify({"ok": False, "mesaj": f"GİB onayı bekleniyor ({onay}). Önce SMS onayını tamamlayın."}), 400
+        _fatura_notlarina_gib_ettn_yaz(fid, uuid)
+        return jsonify({"ok": True, "mesaj": "Fatura gerçek ETTN ile oluşturuldu/kesinleşti.", "fatura_id": fid, "onizleme_url": f"/faturalar/onizleme/{fid}"})
+    except Exception as e:
+        return jsonify({"ok": False, "mesaj": str(e)}), 500
+
+
+@bp.route('/api/gib-son-fatura')
+@faturalar_gerekli
+def api_gib_son_fatura():
+    """GİB manuel gönderim alanı için son oluşturulan fatura kimliğini döndürür."""
+    row = fetch_one(
+        """
+        SELECT id, fatura_no, musteri_id, musteri_adi, fatura_tarihi, toplam
+        FROM faturalar
+        ORDER BY id DESC
+        LIMIT 1
+        """
+    ) or {}
+    if not row:
+        return jsonify({"ok": False, "mesaj": "Fatura bulunamadı."}), 404
+    return jsonify({"ok": True, "fatura": _row_serializable(row)})
+
+
+@bp.route('/api/auto-fatura/status')
+@faturalar_gerekli
+def api_auto_fatura_status():
+    ensure_auto_invoice_tables()
+    settings = _auto_inv_settings()
+    last_run = fetch_one("SELECT * FROM auto_invoice_runs ORDER BY id DESC LIMIT 1") or {}
+    recent_errors = fetch_all(
+        """
+        SELECT i.id, i.created_at, i.period_key, i.status, i.error_message,
+               i.musteri_id, COALESCE(c.name, '—') AS musteri_adi
+        FROM auto_invoice_items i
+        LEFT JOIN customers c ON c.id = i.musteri_id
+        WHERE i.status IN ('error', 'gib_fail', 'gib_sms_fail')
+           OR COALESCE(i.error_message, '') <> ''
+        ORDER BY i.id DESC
+        LIMIT 20
+        """
+    ) or []
+    return jsonify({
+        "ok": True,
+        "settings": settings,
+        "last_run": _row_serializable(last_run) if last_run else None,
+        "recent_errors": [_row_serializable(r) for r in recent_errors],
+    })
+
+
+@bp.route('/api/auto-fatura/settings', methods=['POST'])
+@faturalar_gerekli
+def api_auto_fatura_settings():
+    ensure_auto_invoice_tables()
+    data = request.get_json(silent=True) or {}
+    enabled = bool(data.get("enabled"))
+    run_day = int(data.get("run_day") or 1)
+    run_hour = int(data.get("run_hour") or 9)
+    send_gib = bool(data.get("send_gib"))
+    auto_sms_code = (data.get("auto_sms_code") or "").strip()
+    run_day = min(28, max(1, run_day))
+    run_hour = min(23, max(0, run_hour))
+    row = fetch_one("SELECT id FROM auto_invoice_settings ORDER BY id LIMIT 1")
+    if row:
+        execute(
+            """UPDATE auto_invoice_settings
+               SET enabled=%s, run_day=%s, run_hour=%s, send_gib=%s, auto_sms_code=%s, updated_at=NOW()
+               WHERE id=%s""",
+            (enabled, run_day, run_hour, send_gib, auto_sms_code or None, row["id"]),
+        )
+    else:
+        execute(
+            """INSERT INTO auto_invoice_settings (enabled, run_day, run_hour, send_gib, auto_sms_code)
+               VALUES (%s,%s,%s,%s,%s)""",
+            (enabled, run_day, run_hour, send_gib, auto_sms_code or None),
+        )
+    return jsonify({"ok": True, "mesaj": "Otomatik fatura ayarları güncellendi.", "settings": _auto_inv_settings()})
+
+
+@bp.route('/api/auto-fatura/run', methods=['POST'])
+@faturalar_gerekli
+def api_auto_fatura_run():
+    data = request.get_json(silent=True) or {}
+    force = bool(data.get("force", True))
+    out = run_auto_invoice_cycle(force=force)
+    return jsonify(out)
+
+
+def _parse_auto_year_month(yil_raw, ay_raw):
+    try:
+        yil = int(yil_raw)
+    except Exception:
+        yil = date.today().year
+    yil = max(2000, min(2100, yil))
+    ay_ad = (ay_raw or "").strip()
+    ay_no = None
+    if ay_ad:
+        try:
+            ay_no = AYLAR.index(ay_ad) + 1
+        except ValueError:
+            ay_no = None
+    if not ay_no:
+        ay_no = date.today().month
+    return yil, ay_no
+
+
+@bp.route('/api/auto-fatura/adaylar')
+@faturalar_gerekli
+def api_auto_fatura_adaylar():
+    yil, ay_no = _parse_auto_year_month(request.args.get("yil"), request.args.get("ay"))
+    run_month_date = date(yil, ay_no, 1)
+    period_key = run_month_date.strftime("%Y-%m")
+    marker_like = f"%|AUTO_INV|{period_key}|%"
+    rows = fetch_all(
+        """
+        WITH last_kyc AS (
+            SELECT DISTINCT ON (k.musteri_id) k.musteri_id, k.aylik_kira
+            FROM musteri_kyc k
+            ORDER BY k.musteri_id, k.id DESC
+        ),
+        last_inv AS (
+            SELECT DISTINCT ON (f.musteri_id) f.musteri_id, f.toplam
+            FROM faturalar f
+            WHERE COALESCE(f.toplam, 0) > 0
+            ORDER BY f.musteri_id, (f.fatura_tarihi::date) DESC, f.id DESC
+        )
+        SELECT c.id AS musteri_id,
+               COALESCE(NULLIF(TRIM(c.name), ''), 'Müşteri') AS musteri_adi,
+               ROUND(
+                   COALESCE(
+                       NULLIF(COALESCE(lk.aylik_kira, 0), 0) * 1.2,
+                       NULLIF(COALESCE(li.toplam, 0), 0),
+                       NULLIF(COALESCE(c.ilk_kira_bedeli, 0), 0) * 1.2,
+                       0
+                   )::numeric,
+                   2
+               ) AS toplam
+        FROM customers c
+        LEFT JOIN last_kyc lk ON lk.musteri_id = c.id
+        LEFT JOIN last_inv li ON (li.musteri_id::text = c.id::text)
+        WHERE LOWER(COALESCE(c.durum, 'aktif')) != 'pasif'
+          AND NOT EXISTS (
+              SELECT 1
+              FROM faturalar fx
+              WHERE fx.musteri_id::text = c.id::text
+                AND COALESCE(fx.notlar, '') LIKE %s
+          )
+        ORDER BY c.name
+        """,
+        (marker_like,),
+    ) or []
+    adaylar = [_row_serializable(r) for r in rows]
+
+    return jsonify({
+        "ok": True,
+        "period_key": period_key,
+        "adaylar": adaylar,
+        "count": len(adaylar),
+    })
+
+
+@bp.route('/api/auto-fatura/secili-olustur', methods=['POST'])
+@faturalar_gerekli
+def api_auto_fatura_secili_olustur():
+    data = request.get_json(silent=True) or {}
+    yil, ay_no = _parse_auto_year_month(data.get("yil"), data.get("ay"))
+    run_month_date = date(yil, ay_no, 1)
+    raw_ids = data.get("musteri_ids") or []
+    musteri_ids = []
+    for v in raw_ids:
+        try:
+            iv = int(v)
+            if iv > 0:
+                musteri_ids.append(iv)
+        except Exception:
+            continue
+    musteri_ids = list(dict.fromkeys(musteri_ids))
+    if not musteri_ids:
+        return jsonify({"ok": False, "mesaj": "En az 1 müşteri seçiniz."}), 400
+
+    created_count = 0
+    exists_count = 0
+    skip_count = 0
+    fail_count = 0
+    detaylar = []
+    for mid in musteri_ids:
+        try:
+            out = _auto_invoice_create_for_customer(mid, run_month_date)
+            st = (out.get("status") or "").lower()
+            if st == "created":
+                created_count += 1
+            elif st == "exists":
+                exists_count += 1
+            elif st == "skip":
+                skip_count += 1
+            else:
+                fail_count += 1
+            detaylar.append({
+                "musteri_id": mid,
+                "status": st or "error",
+                "fatura_id": out.get("fatura_id"),
+                "fatura_no": out.get("fatura_no"),
+                "mesaj": out.get("error") or "",
+            })
+        except Exception as e:
+            fail_count += 1
+            detaylar.append({
+                "musteri_id": mid,
+                "status": "error",
+                "mesaj": str(e),
+            })
+
+    return jsonify({
+        "ok": True,
+        "period_key": run_month_date.strftime("%Y-%m"),
+        "created_count": created_count,
+        "exists_count": exists_count,
+        "skip_count": skip_count,
+        "fail_count": fail_count,
+        "detaylar": detaylar,
+    })
+
+
+@bp.route('/cron/auto-fatura')
+def cron_auto_fatura():
+    """Dış cron için açık endpoint (opsiyonel). ?token=CRON_TOKEN doğrulaması yapar."""
+    token_cfg = (os.getenv("CRON_TOKEN") or "").strip()
+    token_q = (request.args.get("token") or "").strip()
+    if token_cfg and token_q != token_cfg:
+        return jsonify({"ok": False, "mesaj": "Yetkisiz."}), 401
+    out = run_auto_invoice_cycle(force=False)
+    return jsonify(out)
+
+
 @bp.route('/api/musteriler')
 @faturalar_gerekli
 def api_musteriler_list():
     """Tahsilat formu için müşteri listesi (WhatsApp için phone döner)."""
     arama = (request.args.get('q') or '').strip()
-    base = "SELECT id, name, phone, tax_number FROM customers "
+    base = "SELECT id, name, musteri_adi, phone, tax_number FROM customers "
     if not arama:
         rows = fetch_all(base + "ORDER BY name LIMIT 300")
     else:
         w = customers_arama_sql_3_plus_tax()
         rows = fetch_all(
             base + f"WHERE {w} ORDER BY name LIMIT 300",
-            customers_arama_params_4(arama),
+            customers_arama_params_5(arama),
         )
-    return jsonify([{"id": r["id"], "name": r["name"], "phone": (r.get("phone") or "")} for r in rows])
+    return jsonify(
+        [
+            {
+                "id": r["id"],
+                "name": r["name"],
+                "musteri_adi": r.get("musteri_adi") or "",
+                "phone": (r.get("phone") or ""),
+            }
+            for r in rows
+        ]
+    )
 
 
 @bp.route('/api/banka-hesaplar')

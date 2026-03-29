@@ -4,7 +4,7 @@ Bankalar: hesap dökümü, ekstre yükleme, tahsilat eşleştirme, masraf takibi
 from flask import Blueprint, render_template, request, jsonify, redirect, url_for
 from auth import giris_gerekli, admin_gerekli
 from db import fetch_all, fetch_one, execute, execute_returning
-from utils.musteri_arama import customers_arama_sql_3, customers_arama_params_3
+from utils.musteri_arama import customers_arama_sql_3, customers_arama_params_4
 from datetime import datetime, date
 
 bp = Blueprint("banka", __name__)
@@ -116,8 +116,8 @@ def api_musteri_ara():
         return jsonify([])
     w3 = customers_arama_sql_3("")
     rows = fetch_all(
-        f"SELECT id, name FROM customers WHERE {w3} ORDER BY name LIMIT 30",
-        customers_arama_params_3(q),
+        f"SELECT id, name, musteri_adi FROM customers WHERE {w3} ORDER BY name LIMIT 30",
+        customers_arama_params_4(q),
     )
     return jsonify(rows or [])
 
@@ -280,17 +280,22 @@ def api_oto_eslestir():
             sql += " AND h.banka_hesap_id = %s"
             params.append(hesap_id)
         rows = fetch_all(sql, tuple(params) if params else None)
-        musteriler = fetch_all("SELECT id, name FROM customers ORDER BY name")
+        musteriler = fetch_all("SELECT id, name, musteri_adi FROM customers ORDER BY name")
         eslesti = 0
         for h in rows or []:
             g = (h.get("gonderici") or "").strip().upper()
             a = (h.get("aciklama") or "").strip().upper()
             for m in musteriler or []:
                 ad = (m.get("name") or "").strip().upper()
-                if not ad:
+                kisa = (m.get("musteri_adi") or "").strip().upper()
+                esles = False
+                if ad and (ad in g or ad in a or g in ad or a in ad):
+                    esles = True
+                elif kisa and (kisa in g or kisa in a or g in kisa or a in kisa):
+                    esles = True
+                if not esles:
                     continue
-                if ad in g or ad in a or g in ad or a in ad:
-                    # Eşleştir: tahsilat oluştur, hareketi güncelle
+                # Eşleştir: tahsilat oluştur, hareketi güncelle
                     tarih = h.get("hareket_tarihi") or date.today()
                     if hasattr(tarih, "isoformat"):
                         tarih = tarih

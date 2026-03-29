@@ -29,6 +29,7 @@
   <col class="ml-c-bas">
   <col class="ml-c-kira">
   <col class="ml-c-guncel">
+  <col class="ml-c-reel">
   <col class="ml-c-borc">
   <col class="ml-c-gec">
   <col class="ml-c-durum">
@@ -56,6 +57,7 @@
     <th class="ml-col-bas">Baş. Tarihi <i class="fa fa-sort"></i></th>
     <th class="ml-col-kira">İlk Kira (₺) <i class="fa fa-sort"></i></th>
     <th class="ml-col-guncel">Güncel (₺)</th>
+    <th class="ml-col-reel">Reel (₺)</th>
     <th class="ml-col-borc">Borç (₺) <i class="fa fa-sort"></i></th>
     <th class="ml-col-gec">Gecikme <i class="fa fa-sort"></i></th>
     <th class="ml-col-durum">
@@ -111,11 +113,12 @@
 .ml-table-compact col.ml-c-bas{width:7%}
 .ml-table-compact col.ml-c-kira{width:7%}
 .ml-table-compact col.ml-c-guncel{width:7%}
+.ml-table-compact col.ml-c-reel{width:7%}
 .ml-table-compact col.ml-c-borc{width:7%}
 .ml-table-compact col.ml-c-gec{width:4%}
 .ml-table-compact col.ml-c-durum{width:9%}
 .ml-table-compact col.ml-c-kapanis{width:7%}
-.ml-table-compact col.ml-c-son{width:7%}
+.ml-table-compact col.ml-c-son{width:6%}
 .ml-table thead th{
   background:#0d1520;color:#00c8ff;
   padding:10px clamp(12px,0.55cm,22px);
@@ -124,7 +127,7 @@
 }
 .ml-table thead th:hover{color:#e8f1ff}
 .ml-table thead th i{margin-left:3px;opacity:.5;font-size:8px}
-.ml-table thead th.ml-col-kira,.ml-table thead th.ml-col-guncel,.ml-table thead th.ml-col-borc,.ml-table thead th.ml-col-gec{text-align:right}
+.ml-table thead th.ml-col-kira,.ml-table thead th.ml-col-guncel,.ml-table thead th.ml-col-reel,.ml-table thead th.ml-col-borc,.ml-table thead th.ml-col-gec{text-align:right}
 .ml-table tbody tr{cursor:pointer;transition:background .1s;border-bottom:1px solid rgba(0,200,255,.04)}
 .ml-table tbody tr:hover{background:rgba(0,200,255,.06)}
 .ml-table tbody tr:last-child{border-bottom:none}
@@ -343,6 +346,7 @@ window.setActiveTab = function(tabId) {
         {% set borc = m.get('toplam_borc', 0) or 0 %}
         {% set gec = m.get('geciken_gun', 0) or 0 %}
         {% set ilk_kira = m.get('ilk_kira_bedeli', 0) or 0 %}
+        {% set reel = m.get('reel_kira_bedeli') %}
         {% set db_durum = (m.get('durum') or 'aktif')|trim|lower %}
         {% if db_durum not in ('aktif', 'pasif') %}{% set db_durum = 'aktif' %}{% endif %}
         {% set borc_edit = m.get('manuel_borc') if m.get('manuel_borc') is not none else borc %}
@@ -363,6 +367,7 @@ window.setActiveTab = function(tabId) {
             data-phone="{{ (m.phone or '')|e }}"
             data-ilk-kira="{{ ilk_kira }}"
             data-guncel-kira="{{ (m.get('guncel_kira_bedeli') or 0) }}"
+            data-reel-kira="{{ (reel or 0) }}"
             data-borc="{{ borc_edit }}"
             data-durum-val="{{ db_durum or 'aktif' }}"
             data-kapanis="{{ kap_iso }}"
@@ -377,6 +382,7 @@ window.setActiveTab = function(tabId) {
           <td class="kira ml-num">{{ "{:,.2f}".format(ilk_kira) if ilk_kira else '—' }}</td>
           {% set guncel = m.get('guncel_kira_bedeli') %}
           <td class="kira ml-num">{% if guncel is number and guncel == guncel and guncel != 0 %}{{ "{:,.2f}".format(guncel) }}{% else %}—{% endif %}</td>
+          <td class="kira ml-num">{% if reel is number and reel == reel and reel != 0 %}{{ "{:,.2f}".format(reel) }}{% else %}—{% endif %}</td>
           <td class="ml-num {{ 'borc-pos' if borc > 0 else 'borc-zero' }}">{{ "{:,.2f}".format(borc) }}</td>
           <td class="ml-num {{ 'gec-pos' if gec > 0 else 'gec-zero' }}">{{ gec }}</td>
           <td class="durum" title="Aktif/Geciken/Kritik: tıkla → pasif + kapanış tarihi. Pasif: tıkla → tekrar aktif.">
@@ -394,7 +400,7 @@ window.setActiveTab = function(tabId) {
           <td class="tarih ml-text ml-col-son">{{ m.get('son_odeme_tarihi') or m.get('son_tahsilat') or '—' }}</td>
         </tr>
         {% else %}
-        <tr><td colspan="12" class="ml-empty"><i class="fa fa-inbox"></i>Müşteri bulunamadı</td></tr>
+        <tr><td colspan="13" class="ml-empty"><i class="fa fa-inbox"></i>Müşteri bulunamadı</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -747,6 +753,9 @@ function filterTable(){
   }
   var benzerSel = document.getElementById('mlBenzer');
   var benzerVal = benzerSel ? benzerSel.value : '';
+  // Arama yazıldığında "tekil/benzer" filtresi sonucu gizlemesin;
+  // kullanıcı aradığı ünvanı her durumda görebilsin.
+  if (q) benzerVal = '';
   if (benzerVal === 'mukerrer' || benzerVal === 'benzer' || benzerVal === 'tekil') mlEnsureBenzerSets();
   var inpBasF = document.getElementById('mlSozBasBas');
   var inpBitF = document.getElementById('mlSozBasBit');
@@ -1260,7 +1269,7 @@ function enterQuickEditMode() {
 
   var rows = document.querySelectorAll('#mlBody tr.ml-row');
   rows.forEach(function(tr) {
-    if (tr.cells.length < 12) return;
+    if (tr.cells.length < 13) return;
     var id = tr.getAttribute('data-id');
     var yetkili = tr.getAttribute('data-yetkili') || '';
     var hizmet = tr.getAttribute('data-hizmet') || '';
@@ -1268,6 +1277,7 @@ function enterQuickEditMode() {
     var basTarih = tr.getAttribute('data-bas-tarih') || '';
     var ilkKira = tr.getAttribute('data-ilk-kira') || '';
     var guncelKira = tr.getAttribute('data-guncel-kira') || '';
+    var reelKira = tr.getAttribute('data-reel-kira') || '';
     var borc = tr.getAttribute('data-borc') || '';
     var durumVal = tr.getAttribute('data-durum-val') || 'aktif';
     var kapanisIso = (tr.getAttribute('data-kapanis') || '').substring(0, 10);
@@ -1378,7 +1388,21 @@ function enterQuickEditMode() {
     td7.appendChild(inp7);
 
     // 7 Borç
-    var td8 = tr.cells[7];
+    var td8r = tr.cells[7];
+    var orig8r = (td8r.textContent || '').trim();
+    td8r.innerHTML = '';
+    var inp8r = document.createElement('input');
+    inp8r.type = 'number';
+    inp8r.step = '0.01';
+    inp8r.min = '0';
+    inp8r.value = numVal(reelKira) !== '' ? numVal(reelKira) : '';
+    inp8r.placeholder = '0';
+    inp8r.dataset.original = orig8r;
+    inp8r.dataset.key = 'reel_kira_bedeli';
+    td8r.appendChild(inp8r);
+
+    // 8 Borç
+    var td8 = tr.cells[8];
     var orig8 = (td8.textContent || '').trim();
     td8.innerHTML = '';
     var inp8 = document.createElement('input');
@@ -1390,9 +1414,9 @@ function enterQuickEditMode() {
     inp8.dataset.key = 'manuel_borc';
     td8.appendChild(inp8);
 
-    // 9 Gecikme — salt okunur, içeriği koru
-    // 9 Durum
-    var td10 = tr.cells[9];
+    // 10 Gecikme — salt okunur, içeriği koru
+    // 10 Durum
+    var td10 = tr.cells[10];
     var orig10 = (td10.textContent || '').trim();
     td10.innerHTML = '';
     var sel10 = document.createElement('select');
@@ -1407,8 +1431,8 @@ function enterQuickEditMode() {
     sel10.value = durumVal;
     td10.appendChild(sel10);
 
-    // 10 Kapanış tarihi — Flatpickr + hızlı rakam (01012026); pasifte açık
-    var tdKap = tr.cells[10];
+    // 11 Kapanış tarihi — Flatpickr + hızlı rakam (01012026); pasifte açık
+    var tdKap = tr.cells[11];
     var origKap = (tdKap.textContent || '').trim();
     tdKap.innerHTML = '';
     var inpKap = document.createElement('input');
@@ -1429,8 +1453,8 @@ function enterQuickEditMode() {
     }
     mlSetKapanisQEditEnabled(inpKap, durumVal === 'pasif');
 
-    // 11 Son Tahsilat — Flatpickr + hızlı rakam
-    var td12 = tr.cells[11];
+    // 12 Son Tahsilat — Flatpickr + hızlı rakam
+    var td12 = tr.cells[12];
     var sonIso = (sonTahsilat && sonTahsilat.length >= 10) ? sonTahsilat.substring(0, 10) : '';
     var orig12 = sonIso.length === 10 ? fmtKapTr(sonIso) : (td12.textContent || '').trim();
     td12.innerHTML = '';
@@ -1454,7 +1478,7 @@ function enterQuickEditMode() {
       markIfChanged(sel10, td10);
       markIfChanged(inpKap, tdKap);
     });
-    [inp2, sel3, inp4, inp5, inp6, inp7, inp8, sel10, inpKap, inpST].forEach(function(el) {
+    [inp2, sel3, inp4, inp5, inp6, inp7, inp8r, inp8, sel10, inpKap, inpST].forEach(function(el) {
       var td = el.closest('td');
       el.addEventListener('input', function() { markIfChanged(el, td); });
       el.addEventListener('change', function() { markIfChanged(el, td); });
@@ -1493,7 +1517,7 @@ function collectBulkUpdates() {
     tr.querySelectorAll('input[data-key], select[data-key]').forEach(function(el) {
       var k = el.dataset.key;
       var v = el.value;
-      if (k === 'ilk_kira_bedeli' || k === 'guncel_kira_bedeli' || k === 'manuel_borc') {
+      if (k === 'ilk_kira_bedeli' || k === 'guncel_kira_bedeli' || k === 'reel_kira_bedeli' || k === 'manuel_borc') {
         v = v === '' ? null : parseFloat(v);
         if (isNaN(v)) v = null;
       }

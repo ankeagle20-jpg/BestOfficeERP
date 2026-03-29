@@ -188,7 +188,11 @@
       fetch(API_MUSTERILER + '?q=' + encodeURIComponent(q))
         .then(r => r.json())
         .then(arr => {
-          musteriList.innerHTML = arr.map(m => '<div class="combobox-item" data-id="' + m.id + '" data-name="' + (m.name || '').replace(/"/g, '&quot;') + '">' + (m.name || '—') + (m.phone ? ' <small style="color:#78909c">' + m.phone + '</small>' : '') + '</div>').join('') || '<div class="combobox-item" style="color:#78909c">Sonuç yok</div>';
+          musteriList.innerHTML = arr.map(m => {
+            const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+            const ma = (m.musteri_adi || '').trim();
+            return '<div class="combobox-item" data-id="' + m.id + '" data-name="' + esc(m.name) + '">' + esc(m.name || '—') + (ma ? ' <small style="color:#78909c">· ' + esc(ma) + '</small>' : '') + (m.phone ? ' <small style="color:#78909c">' + esc(m.phone) + '</small>' : '') + '</div>';
+          }).join('') || '<div class="combobox-item" style="color:#78909c">Sonuç yok</div>';
           musteriList.style.display = 'block';
           musteriList.querySelectorAll('.combobox-item[data-id]').forEach(el => {
             el.addEventListener('click', function() {

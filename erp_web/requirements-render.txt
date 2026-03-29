@@ -18,3 +18,5 @@ google-genai>=1.0.0
 google-generativeai>=0.8.0
 qrcode>=7.4.2
 Pillow>=10.3.0
+eArsivPortal>=1.1.0
+pytz>=2026.1

@@ -1075,11 +1075,16 @@
         arr.forEach(function(m) {
           var div = document.createElement('div');
           div.className = 'combobox-item-ra';
-          div.textContent = (m.name || '') + (m.phone ? ' — ' + m.phone : '');
+          var line = (m.name || '');
+          if (m.musteri_adi && String(m.musteri_adi).trim()) line += ' · ' + String(m.musteri_adi).trim();
+          if (m.phone) line += ' — ' + m.phone;
+          div.textContent = line;
           div.setAttribute('data-id', m.id);
           div.addEventListener('click', function() {
             musteriId.value = this.getAttribute('data-id');
-            musteriAra.value = (m.name || '');
+            var nm = (m.name || '').trim();
+            var ma = (m.musteri_adi || '').trim();
+            musteriAra.value = ma ? (nm + ' · ' + ma) : nm;
             musteriList.style.display = 'none';
             document.getElementById('ra-btn-kaydet').disabled = false;
             var gorusmeBtn = document.getElementById('ra-btn-gorusme-randevu-al');

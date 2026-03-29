@@ -2,7 +2,7 @@
 customers tablosunda ortak metin araması.
 
 - Şirket ünvanı: name
-- Müşteri adı (kısa/görünen): musteri_adi
+- Müşteri adı (kısa/görünen): customers.musteri_adi + musteri_kyc.musteri_adi (son KYC kaydı)
 - Yetkili ad soyad: yetkili_kisi
 """
 
@@ -37,49 +37,13 @@ def _pct(q: str) -> str:
 
 
 def customers_arama_sql_3(alias: str = "") -> str:
-    """Üç alanda ILIKE; alias ör. 'c' → c.name, c.musteri_adi, c.yetkili_kisi."""
+    """name, musteri_adi, musteri_kyc.musteri_adi (EXISTS), yetkili_kisi — 4 ILIKE."""
     a = f"{alias.strip()}." if alias and alias.strip() else ""
     return (
         f"(COALESCE({a}name, '') ILIKE %s "
         f"OR COALESCE({a}musteri_adi, '') ILIKE %s "
+        f"OR EXISTS (SELECT 1 FROM musteri_kyc mk WHERE mk.musteri_id = {a}id AND COALESCE(mk.musteri_adi, '') ILIKE %s) "
         f"OR COALESCE({a}yetkili_kisi, '') ILIKE %s)"
-    )
-
-
-def customers_arama_params_3(q: str):
-    p = _pct(q)
-    return (p, p, p)
-
-
-def customers_arama_sql_3_plus_tax_office() -> str:
-    """Giriş / cari listeleri: 3 alan + vergi no + ofis kodu."""
-    return (
-        "(" + customers_arama_sql_3("").strip("()") + " "
-        "OR COALESCE(tax_number::text, '') ILIKE %s "
-        "OR COALESCE(office_code, '') ILIKE %s)"
-    )
-
-
-def customers_arama_params_5(q: str):
-    p = _pct(q)
-    return (p, p, p, p, p)
-
-
-def customers_arama_sql_3_plus_phone_tax(alias: str = "c") -> str:
-    """Dashboard: 3 alan + telefon + vergi no."""
-    a = f"{alias.strip()}."
-    return (
-        f"(COALESCE({a}name, '') ILIKE %s OR COALESCE({a}musteri_adi, '') ILIKE %s "
-        f"OR COALESCE({a}yetkili_kisi, '') ILIKE %s OR COALESCE({a}phone, '') ILIKE %s "
-        f"OR COALESCE({a}tax_number::text, '') ILIKE %s)"
-    )
-
-
-def customers_arama_sql_3_plus_tax() -> str:
-    """Fatura tahsilat API: 3 alan + vergi no."""
-    return (
-        "(" + customers_arama_sql_3("").strip("()") + " "
-        "OR COALESCE(tax_number::text, '') ILIKE %s)"
     )
 
 
@@ -88,26 +52,70 @@ def customers_arama_params_4(q: str):
     return (p, p, p, p)
 
 
+def customers_arama_sql_3_plus_tax_office() -> str:
+    """Giriş / cari listeleri: çekirdek + vergi no + ofis kodu."""
+    return (
+        "(" + customers_arama_sql_3("").strip("()") + " "
+        "OR COALESCE(tax_number::text, '') ILIKE %s "
+        "OR COALESCE(office_code, '') ILIKE %s)"
+    )
+
+
+def customers_arama_params_6(q: str):
+    p = _pct(q)
+    return (p, p, p, p, p, p)
+
+
+def customers_arama_sql_3_plus_phone_tax(alias: str = "c") -> str:
+    """Dashboard: çekirdek + telefon + vergi no."""
+    a = f"{alias.strip()}."
+    return (
+        f"(COALESCE({a}name, '') ILIKE %s OR COALESCE({a}musteri_adi, '') ILIKE %s "
+        f"OR EXISTS (SELECT 1 FROM musteri_kyc mk WHERE mk.musteri_id = {a}id AND COALESCE(mk.musteri_adi, '') ILIKE %s) "
+        f"OR COALESCE({a}yetkili_kisi, '') ILIKE %s OR COALESCE({a}phone, '') ILIKE %s "
+        f"OR COALESCE({a}tax_number::text, '') ILIKE %s)"
+    )
+
+
+def customers_arama_sql_3_plus_tax() -> str:
+    """Fatura tahsilat API: çekirdek + vergi no."""
+    return (
+        "(" + customers_arama_sql_3("").strip("()") + " "
+        "OR COALESCE(tax_number::text, '') ILIKE %s)"
+    )
+
+
+def customers_arama_params_5(q: str):
+    p = _pct(q)
+    return (p, p, p, p, p)
+
+
 def customers_arama_sql_3_plus_phone() -> str:
-    """Mobil liste: 3 alan + telefon."""
+    """Mobil liste: çekirdek + telefon."""
     return (
         "(" + customers_arama_sql_3("c").strip("()") + " OR COALESCE(c.phone, '') ILIKE %s)"
     )
 
 
-def customers_arama_params_4_phone(q: str):
+def customers_arama_params_5_phone(q: str):
     p = _pct(q)
-    return (p, p, p, p)
+    return (p, p, p, p, p)
 
 
 def customers_arama_sql_randevu() -> str:
-    """Randevu combobox: 3 alan + telefon + notes."""
+    """Randevu combobox: çekirdek + telefon + notes."""
     return (
         "(" + customers_arama_sql_3("").strip("()") + " "
         "OR COALESCE(phone, '') ILIKE %s OR COALESCE(notes, '') ILIKE %s)"
     )
 
 
-def customers_arama_params_5_randevu(q: str):
+def customers_arama_params_6_randevu(q: str):
     p = _pct(q)
-    return (p, p, p, p, p)
+    return (p, p, p, p, p, p)
+
+
+# Eski yanlış isimlerle import eden kodlar kırılmasın (4 = çekirdek ILIKE sayısı değil; tarihsel isim)
+customers_arama_params_3 = customers_arama_params_4
+customers_arama_params_4_phone = customers_arama_params_5_phone
+customers_arama_params_5_randevu = customers_arama_params_6_randevu

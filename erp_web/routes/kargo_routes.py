@@ -16,9 +16,9 @@ def index():
     try:
         # Desktop'taki sütunlara göre çek
         kargolar = fetch_all("""
-            SELECT k.id, k.tarih, k.musteri_id, k.kargo_firmasi, k.teslim_alan, 
+            SELECT k.id, k.tarih, k.musteri_id, k.kargo_firmasi, k.teslim_alan,
                    k.takip_no, k.odeme_tutari, k.odeme_durumu, k.notlar,
-                   c.name as musteri_adi
+                   c.name AS musteri_unvan, c.musteri_adi AS musteri_kisa_adi
             FROM kargolar k
             LEFT JOIN customers c ON k.musteri_id = c.id
             ORDER BY k.created_at DESC
@@ -65,7 +65,7 @@ def yeni():
     
     # GET - form göster
     try:
-        musteriler = fetch_all("SELECT id, name FROM customers ORDER BY name")
+        musteriler = fetch_all("SELECT id, name, musteri_adi FROM customers ORDER BY name")
         return render_template('kargolar/yeni.html', musteriler=musteriler)
     except Exception as e:
         flash(f"Hata: {e}", "danger")
@@ -78,7 +78,7 @@ def detay(kargo_id):
     """Kargo detayları"""
     try:
         kargo = fetch_one("""
-            SELECT k.*, c.name as musteri_adi
+            SELECT k.*, c.name AS musteri_unvan, c.musteri_adi AS musteri_kisa_adi
             FROM kargolar k
             LEFT JOIN customers c ON k.musteri_id = c.id
             WHERE k.id = %s

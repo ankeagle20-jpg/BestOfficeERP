@@ -40,11 +40,18 @@
         .musteri-block { margin: 12px 0; font-size: 10px; }
         .musteri-block strong { display: block; margin-bottom: 4px; }
         .musteri-block div { margin-bottom: 2px; color: #333; }
-        .tbl { width: 100%; border-collapse: collapse; font-size: 10px; margin: 10px 0; }
-        .tbl th { background: #f5f5f5; border: 1px solid #ddd; padding: 6px 8px; text-align: left; font-weight: 600; }
+        .tbl { width: 100%; border-collapse: collapse; font-size: 10px; margin: 10px 0; table-layout: fixed; }
+        .tbl th { background: #f5f5f5; border: 1px solid #ddd; padding: 6px 8px; text-align: left; font-weight: 600; vertical-align: top; }
         .tbl th.num { text-align: right; }
-        .tbl td { border: 1px solid #ddd; padding: 5px 8px; }
-        .tbl td.num { text-align: right; }
+        .tbl td { border: 1px solid #ddd; padding: 6px 8px; vertical-align: top; word-wrap: break-word; overflow-wrap: anywhere; white-space: normal; line-height: 1.35; }
+        .tbl th:nth-child(2),
+        .tbl td.td-mal-hizmet {
+            min-width: 0;
+            max-width: 30%;
+            hyphens: auto;
+            -webkit-hyphens: auto;
+        }
+        .tbl td.num { text-align: right; white-space: nowrap; overflow-wrap: normal; word-break: normal; }
         .tbl tbody tr:nth-child(even) { background: #fafafa; }
         .ozet-block { margin-top: 12px; text-align: right; font-size: 11px; }
         .ozet-block div { margin-bottom: 4px; }
@@ -95,6 +102,18 @@
         </div>
 
         <table class="tbl">
+            <colgroup>
+                <col style="width:6%;">
+                <col style="width:26%;">
+                <col style="width:8%;">
+                <col style="width:8%;">
+                <col style="width:10%;">
+                <col style="width:9%;">
+                <col style="width:9%;">
+                <col style="width:8%;">
+                <col style="width:8%;">
+                <col style="width:8%;">
+            </colgroup>
             <thead>
                 <tr>
                     <th>Sıra No</th>
@@ -113,7 +132,7 @@
                 {% for s in satirlar %}
                 <tr>
                     <td>{{ loop.index }}</td>
-                    <td>{{ s.ad }}</td>
+                    <td class="td-mal-hizmet">{{ s.ad }}</td>
                     <td class="num">{{ "%.2f"|format(s.miktar) }}</td>
                     <td>{{ s.birim }}</td>
                     <td class="num">{{ "%.2f"|format(s.birim_fiyat)|replace(".", ",") }}</td>

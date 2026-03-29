@@ -5,30 +5,36 @@
 {% block content %}
 <h2>➕ Yeni Kargo Oluştur</h2>
 
-<div class="card-erp" style="max-width: 500px;">
+<div class="card-erp" style="max-width: 520px;">
   <form method="POST">
-    <div class="form-erp">
-      <label>Takip Numarası *</label>
-      <input type="text" name="tracking_no" required placeholder="Örn: TRK123456">
-    </div>
-
     <div class="form-erp">
       <label>Müşteri *</label>
       <select name="musteri_id" required>
         <option value="">-- Müşteri Seç --</option>
         {% for musteri in musteriler %}
-        <option value="{{ musteri.id }}">{{ musteri.ad }}</option>
+        <option value="{{ musteri.id }}">{{ musteri.name }}{% if musteri.musteri_adi %} — {{ musteri.musteri_adi }}{% endif %}</option>
         {% endfor %}
       </select>
     </div>
 
     <div class="form-erp">
-      <label>Durum *</label>
-      <select name="status" required>
-        <option value="hazirlanıyor">Hazırlanıyor</option>
-        <option value="gonderildi">Gönderildi</option>
-        <option value="teslim">Teslim Edildi</option>
-      </select>
+      <label>Kargo firması</label>
+      <input type="text" name="kargo_firmasi" placeholder="Örn: Aras, Yurtiçi">
+    </div>
+
+    <div class="form-erp">
+      <label>Takip numarası *</label>
+      <input type="text" name="takip_no" required placeholder="Örn: TRK123456">
+    </div>
+
+    <div class="form-erp">
+      <label>Teslim alan</label>
+      <input type="text" name="teslim_alan" placeholder="Teslim alan kişi">
+    </div>
+
+    <div class="form-erp">
+      <label>Ödeme tutarı (TL)</label>
+      <input type="text" name="odeme_tutari" value="0" placeholder="0">
     </div>
 
     <div style="display: flex; gap: 10px;">

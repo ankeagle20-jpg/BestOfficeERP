@@ -536,15 +536,23 @@
     });
 
     function musteriListesiGetir(q) {
+        const escAttr = (s) => String(s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+        const escHtml = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
+        const listeEtiket = (m) => {
+            const n = (m.name || '').trim();
+            const ma = (m.musteri_adi || '').trim();
+            return ma ? (n + ' · ' + ma) : n;
+        };
         const url = q ? API_MUSTERILER + '?q=' + encodeURIComponent(q) : API_MUSTERILER;
         fetch(url)
             .then(r => r.json())
             .then(arr => {
                 const list = document.getElementById('tahsilat-musteri-listesi');
                 const phoneVal = (m) => (m.phone || '').replace(/\D/g, '');
-                list.innerHTML = arr.length ? arr.map(m =>
-                    '<div data-id="' + m.id + '" data-name="' + (m.name || '').replace(/"/g, '&quot;') + '" data-phone="' + (phoneVal(m) || '').replace(/"/g, '&quot;') + '">' + (m.name || '—') + '</div>'
-                ).join('') : '<div style="padding:10px;color:#90a4ae;">Müşteri bulunamadı</div>';
+                list.innerHTML = arr.length ? arr.map(m => {
+                    const lbl = listeEtiket(m) || '—';
+                    return '<div data-id="' + m.id + '" data-name="' + escAttr(lbl) + '" data-phone="' + escAttr(phoneVal(m) || '') + '">' + escHtml(lbl) + '</div>';
+                }).join('') : '<div style="padding:10px;color:#90a4ae;">Müşteri bulunamadı</div>';
                 list.querySelectorAll('div[data-id]').forEach(el => {
                     el.onclick = function() {
                         document.getElementById('tahsilat-musteri-id').value = this.getAttribute('data-id');

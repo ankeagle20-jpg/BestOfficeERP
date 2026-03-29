@@ -20,6 +20,76 @@
 }
 .tab-content { display: none; }
 .tab-content.active { display: block; }
+.auto-wrap {
+  margin-top: 12px;
+  background: #1e3a50;
+  border: 1px solid #2d4060;
+  border-radius: 6px;
+  padding: 10px 12px;
+  color: #e0f7fa;
+  min-height: 110px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+.auto-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+.auto-row label {
+  font-size: 12px;
+  color: #90a4ae;
+}
+.auto-row input[type="number"], .auto-row input[type="text"] {
+  width: 88px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  border: 1px solid #2d4060;
+  background: #0f2537;
+  color: #e0f7fa;
+}
+.auto-btn {
+  border: none;
+  border-radius: 4px;
+  padding: 7px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.auto-btn.save { background: #2e7d32; color: #fff; }
+.auto-btn.run { background: #1565c0; color: #fff; }
+.auto-status {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #b0bec5;
+  min-height: 18px;
+  display: flex;
+  align-items: center;
+}
+.gib-manuel-wrap {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #2d4060;
+}
+.gib-manuel-title {
+  font-size: 12px;
+  color: #80deea;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+.gib-manuel-status {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #b0bec5;
+  min-height: 18px;
+}
+@media (max-width: 900px) {
+  .auto-wrap {
+    min-height: 0;
+  }
+}
 </style>
 
 <div class="erp-page-wrap">
@@ -30,6 +100,40 @@
     <a href="/faturalar/finans" class="tab finans-tab active" onclick="event.preventDefault(); switchTab(0);"><i class="fa fa-file-invoice"></i><span>Faturalar</span></a>
     <a href="/faturalar/finans#tahsilat" class="tab finans-tab" onclick="event.preventDefault(); switchTab(1);"><i class="fa fa-money-bill-wave"></i><span>Tahsilatlar</span></a>
     <a href="/faturalar/finans#yeni" class="tab finans-tab" onclick="event.preventDefault(); switchTab(2);"><i class="fa fa-plus-circle"></i><span>Yeni Fatura</span></a>
+  </div>
+</div>
+
+<div class="auto-wrap">
+  <div style="font-size:13px;font-weight:700;color:#4fc3f7;margin-bottom:8px;">
+    <i class="fa fa-robot"></i> Otomatik Fatura ve GİB
+  </div>
+  <div class="auto-row">
+    <label><input type="checkbox" id="auto_enabled"> Otomatik aktif</label>
+    <label>Gün <input type="number" id="auto_day" min="1" max="28" value="1"></label>
+    <label>Saat <input type="number" id="auto_hour" min="0" max="23" value="9"></label>
+    <label><input type="checkbox" id="auto_send_gib"> GİB taslak/gönderim dene</label>
+    <label>SMS Kod (ops.) <input type="text" id="auto_sms" placeholder="123456" style="width:110px;"></label>
+    <button type="button" class="auto-btn save" id="auto_save_btn" onclick="autoSaveSettings()">Kaydet</button>
+    <button type="button" class="auto-btn run" id="auto_run_btn" onclick="autoRunNow()">Şimdi Çalıştır</button>
+    <button type="button" class="auto-btn" id="kira_backfill_btn" style="background:#6a1b9a;color:#fff;" onclick="kiraGuncelleVeBorclandirAll()">
+      Kira Güncelle + Borçlandır (Toplu)
+    </button>
+  </div>
+  <div class="auto-status" id="auto_status">Durum yükleniyor...</div>
+  <div class="gib-manuel-wrap">
+    <div class="gib-manuel-title"><i class="fa fa-paper-plane"></i> Tekil Faturayı GİB'e Gönder</div>
+    <div class="auto-row">
+      <label>Fatura ID <input type="number" id="gib_fatura_id" min="1" placeholder="141" style="width:90px;"></label>
+      <button type="button" class="auto-btn" id="gib_son_btn" style="background:#455a64;color:#fff;" onclick="gibSonFaturaGetir()">Son Faturayı Getir</button>
+      <button type="button" class="auto-btn run" id="gib_taslak_btn" onclick="gibTaslakGonder()">GİB Taslak Gönder</button>
+      <label>UUID/ETTN <input type="text" id="gib_uuid" placeholder="taslak sonrası gelir" style="width:220px;"></label>
+      <button type="button" class="auto-btn" id="gib_sms_send_btn" style="background:#00897b;color:#fff;" onclick="gibSmsGonder()">SMS Gönder</button>
+      <label>SMS Kod <input type="text" id="gib_sms_kod" placeholder="123456" style="width:110px;"></label>
+      <button type="button" class="auto-btn save" id="gib_sms_btn" onclick="gibSmsOnayla()">SMS ile Onayla</button>
+      <button type="button" class="auto-btn run" id="gib_fatura_olustur_btn" onclick="gibFaturaOlustur()"><i class="fa fa-file-invoice"></i> Fatura Oluştur</button>
+      <input type="hidden" id="gib_oid" value="">
+    </div>
+    <div class="gib-manuel-status" id="gib_manual_status">Tekil gönderim için fatura ID girip "GİB Taslak Gönder" butonuna basın.</div>
   </div>
 </div>
 
@@ -54,6 +158,265 @@
 </div>
 
 <script>
+function autoStatusText(lastRun) {
+    if (!lastRun || !lastRun.id) return 'Henüz otomatik çalışma kaydı yok.';
+    return 'Son çalışma: #' + lastRun.id + ' | dönem: ' + (lastRun.period_key || '-') +
+           ' | durum: ' + (lastRun.status || '-') +
+           ' | başarılı: ' + (lastRun.success_count || 0) +
+           ' | hatalı: ' + (lastRun.fail_count || 0) +
+           (lastRun.finished_at ? (' | bitiş: ' + lastRun.finished_at) : '');
+}
+
+function autoSetBusy(btn, busy, textBusy) {
+    if (!btn) return;
+    if (!btn.dataset.orig) btn.dataset.orig = btn.innerHTML;
+    btn.disabled = !!busy;
+    btn.style.opacity = busy ? '0.7' : '';
+    btn.style.cursor = busy ? 'not-allowed' : '';
+    btn.innerHTML = busy ? textBusy : btn.dataset.orig;
+}
+
+function autoLoadStatus() {
+    fetch('/faturalar/api/auto-fatura/status')
+      .then(r => r.json())
+      .then(j => {
+        if (!j || !j.ok) throw new Error((j && j.mesaj) || 'Durum alınamadı');
+        var s = j.settings || {};
+        document.getElementById('auto_enabled').checked = !!s.enabled;
+        document.getElementById('auto_day').value = s.run_day != null ? s.run_day : 1;
+        document.getElementById('auto_hour').value = s.run_hour != null ? s.run_hour : 9;
+        document.getElementById('auto_send_gib').checked = !!s.send_gib;
+        document.getElementById('auto_sms').value = s.auto_sms_code || '';
+        document.getElementById('auto_status').textContent = autoStatusText(j.last_run);
+      })
+      .catch(err => {
+        document.getElementById('auto_status').textContent = 'Durum okunamadı: ' + (err.message || err);
+      });
+}
+
+function autoSaveSettings() {
+    var btn = document.getElementById('auto_save_btn');
+    autoSetBusy(btn, true, 'Kaydediliyor...');
+    var payload = {
+      enabled: document.getElementById('auto_enabled').checked,
+      run_day: parseInt(document.getElementById('auto_day').value || '1', 10),
+      run_hour: parseInt(document.getElementById('auto_hour').value || '9', 10),
+      send_gib: document.getElementById('auto_send_gib').checked,
+      auto_sms_code: (document.getElementById('auto_sms').value || '').trim()
+    };
+    fetch('/faturalar/api/auto-fatura/settings', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    }).then(r => r.json())
+      .then(j => {
+        if (!j || !j.ok) throw new Error((j && j.mesaj) || 'Kaydedilemedi');
+        document.getElementById('auto_status').textContent = j.mesaj || 'Ayarlar kaydedildi.';
+        autoLoadStatus();
+      })
+      .catch(err => {
+        document.getElementById('auto_status').textContent = 'Ayar kaydedilemedi: ' + (err.message || err);
+      })
+      .finally(() => autoSetBusy(btn, false));
+}
+
+function autoRunNow() {
+    if (!confirm('Otomatik fatura döngüsü şimdi çalıştırılsın mı?')) return;
+    var btn = document.getElementById('auto_run_btn');
+    autoSetBusy(btn, true, 'Çalışıyor...');
+    fetch('/faturalar/api/auto-fatura/run', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({force: true})
+    }).then(r => r.json())
+      .then(j => {
+        if (!j || !j.ok) throw new Error((j && j.mesaj) || 'Çalıştırılamadı');
+        document.getElementById('auto_status').textContent =
+          'Çalıştı: başarılı ' + (j.success_count || 0) + ', hatalı ' + (j.fail_count || 0) + '.';
+        autoLoadStatus();
+      })
+      .catch(err => {
+        document.getElementById('auto_status').textContent = 'Çalıştırma hatası: ' + (err.message || err);
+      })
+      .finally(() => autoSetBusy(btn, false));
+}
+
+function kiraGuncelleVeBorclandirAll() {
+    if (!confirm('Aktif müşteriler için güncel kira hesaplanıp eksik aylık borçlar eklensin mi?')) return;
+    var btn = document.getElementById('kira_backfill_btn');
+    autoSetBusy(btn, true, 'Çalışıyor...');
+    fetchJsonWithTimeout('/giris/api/aylik-kira-guncelle-ve-borclandir-all', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({})
+    }, 900000)
+      .then(function(j) {
+        if (!j || !j.ok) throw new Error((j && j.mesaj) || 'Toplu işlem başarısız');
+        document.getElementById('auto_status').textContent =
+          'Toplu tamamlandı: güncellenen müşteri ' + (j.updated_customers || 0) +
+          ', eklenen borç ayı ' + (j.borc_eklenen || 0) +
+          ', atlanan ' + (j.atlanan || 0) + '.';
+      })
+      .catch(function(err) {
+        var msg = (err && err.name === 'AbortError')
+          ? 'Toplu işlem zaman aşımına uğradı. Ağ/DB bağlantısını kontrol edin.'
+          : ('Toplu işlem hatası: ' + ((err && err.message) || err));
+        document.getElementById('auto_status').textContent = msg;
+      })
+      .finally(function() {
+        autoSetBusy(btn, false);
+      });
+}
+
+function fetchJsonWithTimeout(url, options, timeoutMs) {
+    var ms = timeoutMs || 25000;
+    var ctrl = new AbortController();
+    var t = setTimeout(function(){ ctrl.abort(); }, ms);
+    var opts = Object.assign({}, options || {}, { signal: ctrl.signal });
+    return fetch(url, opts)
+      .then(function(r){ return r.json(); })
+      .finally(function(){ clearTimeout(t); });
+}
+
+function gibTaslakGonder() {
+    var faturaId = parseInt(document.getElementById('gib_fatura_id').value || '0', 10);
+    if (!faturaId || faturaId < 1) {
+      document.getElementById('gib_manual_status').textContent = 'Geçerli bir Fatura ID girin.';
+      return;
+    }
+    var btn = document.getElementById('gib_taslak_btn');
+    autoSetBusy(btn, true, 'Gönderiliyor...');
+    fetchJsonWithTimeout('/faturalar/api/gib-taslak', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({fatura_id: faturaId})
+    }, 30000)
+      .then(j => {
+        if (!j || !j.ok) throw new Error((j && j.mesaj) || 'Taslak gönderilemedi');
+        document.getElementById('gib_uuid').value = j.uuid || '';
+        document.getElementById('gib_oid').value = j.oid || '';
+        document.getElementById('gib_manual_status').textContent = (j.mesaj || 'Taslak oluşturuldu.') + ' UUID: ' + (j.uuid || '-');
+      })
+      .catch(err => {
+        var msg = (err && err.name === 'AbortError')
+          ? 'İstek zaman aşımına uğradı. GİB servisinden yanıt gelmedi.'
+          : ('GİB taslak hatası: ' + ((err && err.message) || err));
+        document.getElementById('gib_manual_status').textContent = msg;
+      })
+      .finally(() => autoSetBusy(btn, false));
+}
+
+function gibSmsGonder() {
+    var uuid = (document.getElementById('gib_uuid').value || '').trim();
+    if (!uuid) {
+      document.getElementById('gib_manual_status').textContent = 'Önce taslak gönderin (UUID gerekli).';
+      return;
+    }
+    var btn = document.getElementById('gib_sms_send_btn');
+    autoSetBusy(btn, true, 'SMS gönderiliyor...');
+    fetchJsonWithTimeout('/faturalar/api/gib-sms-gonder', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({uuid: uuid})
+    }, 30000)
+      .then(function(j){
+        if (!j || !j.ok) throw new Error((j && j.mesaj) || 'SMS gönderimi başarısız');
+        document.getElementById('gib_oid').value = j.oid || '';
+        document.getElementById('gib_manual_status').textContent = (j.mesaj || 'SMS gönderildi.') + (j.oid ? (' OID: ' + j.oid) : '');
+      })
+      .catch(function(err){
+        var msg = (err && err.name === 'AbortError')
+          ? 'SMS gönderim isteği zaman aşımına uğradı.'
+          : ('SMS gönderim hatası: ' + ((err && err.message) || err));
+        document.getElementById('gib_manual_status').textContent = msg;
+      })
+      .finally(function(){ autoSetBusy(btn, false); });
+}
+
+function gibSonFaturaGetir() {
+    var btn = document.getElementById('gib_son_btn');
+    autoSetBusy(btn, true, 'Getiriliyor...');
+    fetch('/faturalar/api/gib-son-fatura')
+      .then(function(r){ return r.json(); })
+      .then(function(j){
+        if (!j || !j.ok || !j.fatura) throw new Error((j && j.mesaj) || 'Son fatura alınamadı');
+        document.getElementById('gib_fatura_id').value = j.fatura.id || '';
+        document.getElementById('gib_manual_status').textContent =
+          'Son fatura seçildi: #' + (j.fatura.id || '-') + ' / ' + (j.fatura.fatura_no || '-');
+      })
+      .catch(function(err){
+        document.getElementById('gib_manual_status').textContent = 'Son fatura getirilemedi: ' + (err.message || err);
+      })
+      .finally(function(){ autoSetBusy(btn, false); });
+}
+
+function gibSmsOnayla() {
+    var faturaId = parseInt(document.getElementById('gib_fatura_id').value || '0', 10);
+    var uuid = (document.getElementById('gib_uuid').value || '').trim();
+    var sms = (document.getElementById('gib_sms_kod').value || '').trim();
+    var oid = (document.getElementById('gib_oid').value || '').trim();
+    if (!uuid) {
+      document.getElementById('gib_manual_status').textContent = 'Önce taslak gönderin; UUID alanı dolmalı.';
+      return;
+    }
+    if (!sms) {
+      document.getElementById('gib_manual_status').textContent = 'SMS kodu girin.';
+      return;
+    }
+    var btn = document.getElementById('gib_sms_btn');
+    autoSetBusy(btn, true, 'Onaylanıyor...');
+    fetchJsonWithTimeout('/faturalar/api/gib-sms-onay', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({uuid: uuid, sms_kodu: sms, oid: oid || null, fatura_id: faturaId || null})
+    }, 30000)
+      .then(j => {
+        if (!j || !j.ok) throw new Error((j && j.mesaj) || 'SMS onayı başarısız');
+        document.getElementById('gib_manual_status').textContent = j.mesaj || 'Fatura GİB üzerinde onaylandı.';
+      })
+      .catch(err => {
+        var msg = (err && err.name === 'AbortError')
+          ? 'SMS onay isteği zaman aşımına uğradı.'
+          : ('SMS onay hatası: ' + ((err && err.message) || err));
+        document.getElementById('gib_manual_status').textContent = msg;
+      })
+      .finally(() => autoSetBusy(btn, false));
+}
+
+function gibFaturaOlustur() {
+    var faturaId = parseInt(document.getElementById('gib_fatura_id').value || '0', 10);
+    var uuid = (document.getElementById('gib_uuid').value || '').trim();
+    if (!faturaId || faturaId < 1) {
+      document.getElementById('gib_manual_status').textContent = 'Önce geçerli bir Fatura ID seçin.';
+      return;
+    }
+    if (!uuid) {
+      document.getElementById('gib_manual_status').textContent = 'Önce GİB taslağı oluşturun (UUID gerekli).';
+      return;
+    }
+    var btn = document.getElementById('gib_fatura_olustur_btn');
+    autoSetBusy(btn, true, 'Oluşturuluyor...');
+    fetchJsonWithTimeout('/faturalar/api/gib-fatura-olustur', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({fatura_id: faturaId, uuid: uuid})
+    }, 30000)
+      .then(function(j){
+        if (!j || !j.ok) throw new Error((j && j.mesaj) || 'Fatura oluşturulamadı');
+        document.getElementById('gib_manual_status').textContent = j.mesaj || 'Fatura oluşturuldu.';
+        if (j.onizleme_url) {
+          window.open(j.onizleme_url, '_blank');
+        }
+      })
+      .catch(function(err){
+        var msg = (err && err.name === 'AbortError')
+          ? 'Fatura oluşturma isteği zaman aşımına uğradı.'
+          : ('Fatura oluşturma hatası: ' + ((err && err.message) || err));
+        document.getElementById('gib_manual_status').textContent = msg;
+      })
+      .finally(function(){ autoSetBusy(btn, false); });
+}
+
 function switchTab(index) {
     // Sadece Finans sekmelerinde (Faturalar, Tahsilatlar, Yeni Fatura) active değiştir
     document.querySelectorAll('.finans-tab').forEach((t, i) => {
@@ -68,6 +431,8 @@ function switchTab(index) {
     var hash = (window.location.hash || '').toLowerCase();
     if (hash === '#tahsilat') switchTab(1);
     else if (hash === '#yeni') switchTab(2);
+    autoLoadStatus();
+    gibSonFaturaGetir();
 })();
 </script>
 {% endblock %}

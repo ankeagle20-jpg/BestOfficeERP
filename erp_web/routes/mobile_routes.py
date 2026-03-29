@@ -5,7 +5,7 @@ Dashboard, Müşteriler, Tahsilat, Operasyon, Yönetim.
 from flask import Blueprint, render_template, request, jsonify, redirect, url_for
 from auth import giris_gerekli
 from db import fetch_all, fetch_one, ensure_faturalar_amount_columns
-from utils.musteri_arama import customers_arama_sql_3_plus_phone, customers_arama_params_4_phone
+from utils.musteri_arama import customers_arama_sql_3_plus_phone, customers_arama_params_5_phone
 from datetime import date, timedelta
 
 bp = Blueprint("mobile", __name__, url_prefix="/m")
@@ -128,7 +128,7 @@ def _mobile_musteri_list(arama=""):
     sql_extra = ""
     if arama:
         sql_extra = " AND " + customers_arama_sql_3_plus_phone()
-        params = list(customers_arama_params_4_phone(arama))
+        params = list(customers_arama_params_5_phone(arama))
     sql = "SELECT c.id, c.name, c.phone, c.office_code FROM customers c WHERE 1=1" + sql_extra + " ORDER BY c.name"
     musteriler = fetch_all(sql, params) if params else fetch_all(sql)
     # Ödenmemiş + vade

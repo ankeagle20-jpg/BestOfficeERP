@@ -15,13 +15,20 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# GİB kütüphanesi opsiyonel; yoksa stub kullanılır
+# GİB kütüphanesi opsiyonel; yoksa alternatif eArsivPortal denenir
 try:
     from fatura import Client as FaturaClient
     _HAS_FATURA_LIB = True
 except ImportError:
     FaturaClient = None
     _HAS_FATURA_LIB = False
+
+try:
+    from eArsivPortal import eArsivPortal as EArsivPortalClient
+    _HAS_EARSIV_PORTAL = True
+except ImportError:
+    EArsivPortalClient = None
+    _HAS_EARSIV_PORTAL = False
 
 
 # Hizmet adı eşlemesi (GİB'de görünecek)
@@ -77,8 +84,21 @@ class BestOfficeGIBManager:
         self.password = os.getenv("GIB_PASS", "").strip()
         self.test_mode = test_mode if test_mode is not None else (os.getenv("GIB_TEST", "0").strip().lower() in ("1", "true", "evet"))
         self.client = None
-        if _HAS_FATURA_LIB and self.username and self.password:
-            self.client = FaturaClient(self.username, self.password, test_mode=self.test_mode)
+        self.client_type = None
+        self.last_sms_error = None
+        self.init_error = None
+        try:
+            if _HAS_FATURA_LIB and self.username and self.password:
+                self.client = FaturaClient(self.username, self.password, test_mode=self.test_mode)
+                self.client_type = "fatura"
+            elif _HAS_EARSIV_PORTAL and self.username and self.password:
+                # eArsivPortal test_modu=True iken test ortamını kullanır.
+                self.client = EArsivPortalClient(self.username, self.password, test_modu=bool(self.test_mode))
+                self.client_type = "earsivportal"
+        except Exception as e:
+            self.init_error = str(e)
+            self.client = None
+            self.client_type = None
 
     def is_available(self):
         """GİB kütüphanesi ve kimlik bilgileri hazır mı."""
@@ -86,10 +106,12 @@ class BestOfficeGIBManager:
 
     def _ensure_client(self):
         if not self.client:
-            if not _HAS_FATURA_LIB:
+            if self.init_error:
+                raise RuntimeError(f"GİB istemcisi başlatılamadı: {self.init_error}")
+            if (not _HAS_FATURA_LIB) and (not _HAS_EARSIV_PORTAL):
                 raise RuntimeError(
-                    "GİB e-Arşiv için 'fatura' kütüphanesi yüklü değil. "
-                    "Örn: pip install fatura veya eArsivPortal kullanın."
+                    "GİB e-Arşiv için desteklenen kütüphaneler yüklü değil. "
+                    "Örn: pip install eArsivPortal"
                 )
             if not self.username or not self.password:
                 raise ValueError("GIB_USER ve GIB_PASS .env dosyasında tanımlı olmalı.")
@@ -105,7 +127,10 @@ class BestOfficeGIBManager:
         """
         self._ensure_client()
         try:
-            self.client.login()
+            if self.client_type == "fatura":
+                self.client.login()
+            elif self.client_type == "earsivportal":
+                self.client.giris_yap()
         except Exception as e:
             err = str(e).lower()
             if "geçersiz kullanıcı" in err or "invalid" in err or "yetkisiz" in err or "kullanıcı adı" in err:
@@ -126,21 +151,48 @@ class BestOfficeGIBManager:
         note = fatura_data.get("note") or ""
         if fatura_data.get("iban"):
             note = f"IBAN: {fatura_data['iban']} - BestOfficeERP"
-        invoice = {
-            "date": fatura_data.get("tarih") or "",
-            "time": fatura_data.get("saat") or "00:00:00",
-            "tax_number": str(fatura_data.get("vkn") or "").strip(),
-            "first_name": (fatura_data.get("ad") or "").strip(),
-            "last_name": (fatura_data.get("soyad") or "").strip(),
-            "title": (fatura_data.get("unvan") or "").strip(),
-            "tax_office": (fatura_data.get("vd") or "").strip(),
-            "items": items,
-            "note": note[:500] if note else "BestOfficeERP",
-        }
-        result = self.client.create_draft(invoice)
-        if result and isinstance(result, dict):
-            return result.get("uuid") or result.get("ettn")
-        return result
+        if self.client_type == "fatura":
+            invoice = {
+                "date": fatura_data.get("tarih") or "",
+                "time": fatura_data.get("saat") or "00:00:00",
+                "tax_number": str(fatura_data.get("vkn") or "").strip(),
+                "first_name": (fatura_data.get("ad") or "").strip(),
+                "last_name": (fatura_data.get("soyad") or "").strip(),
+                "title": (fatura_data.get("unvan") or "").strip(),
+                "tax_office": (fatura_data.get("vd") or "").strip(),
+                "items": items,
+                "note": note[:500] if note else "BestOfficeERP",
+            }
+            result = self.client.create_draft(invoice)
+            if result and isinstance(result, dict):
+                return result.get("uuid") or result.get("ettn")
+            return result
+
+        if self.client_type == "earsivportal":
+            # eArsivPortal tek satır API sunuyor; ilk satırdan temel alanları kullanıyoruz.
+            first = items[0] if items else {}
+            urun_adi = str(first.get("name") or fatura_data.get("hizmet_adi") or "Hizmet")
+            fiyat = float(first.get("unit_price") or fatura_data.get("birim_fiyat") or fatura_data.get("toplam") or 0)
+            out = self.client.fatura_olustur(
+                tarih=fatura_data.get("tarih") or "",
+                saat=fatura_data.get("saat") or "12:00:00",
+                vkn_veya_tckn=str(fatura_data.get("vkn") or "").strip(),
+                ad=(fatura_data.get("ad") or "").strip(),
+                soyad=(fatura_data.get("soyad") or "").strip(),
+                unvan=(fatura_data.get("unvan") or "").strip(),
+                vergi_dairesi=(fatura_data.get("vd") or "").strip(),
+                urun_adi=urun_adi,
+                fiyat=fiyat,
+                fatura_notu=(note[:500] if note else "BestOfficeERP"),
+            )
+            if hasattr(out, "dict"):
+                d = out.dict()
+                return d.get("ettn") or d.get("uuid")
+            if isinstance(out, dict):
+                return out.get("ettn") or out.get("uuid")
+            return out
+
+        raise RuntimeError("Desteklenen GİB istemcisi bulunamadı.")
 
     def sms_onay_ve_imzala(self, uuid, sms_kodu):
         """
@@ -149,13 +201,99 @@ class BestOfficeGIBManager:
         """
         self._ensure_client()
         try:
-            confirm = self.client.confirm_with_sms(uuid, sms_kodu)
-            if confirm:
-                return True
+            if self.client_type == "fatura":
+                confirm = self.client.confirm_with_sms(uuid, sms_kodu)
+                return bool(confirm)
+
+            if self.client_type == "earsivportal":
+                self.client.giris_yap()
+                # Önce SMS gönderimi başlat ve oid al.
+                imza = self.client.gib_imza()
+                oid = None
+                if hasattr(imza, "dict"):
+                    oid = (imza.dict() or {}).get("oid")
+                elif isinstance(imza, dict):
+                    oid = imza.get("oid")
+                if not oid:
+                    return False
+                return self.sms_onay_earsivportal(uuid, sms_kodu, oid)
+
             return False
         except Exception as e:
             print(f"SMS Onay Hatası: {e}")
             return False
+
+    def sms_onay_earsivportal(self, uuid, sms_kodu, oid):
+        """eArsivPortal için verilen oid ile SMS kodunu onaylar."""
+        self._ensure_client()
+        if self.client_type != "earsivportal":
+            return False
+        try:
+            self.client.giris_yap()
+            from datetime import datetime, timedelta
+            bugun = datetime.now().date()
+            bas = (bugun - timedelta(days=31)).strftime("%d/%m/%Y")
+            bit = (bugun + timedelta(days=1)).strftime("%d/%m/%Y")
+            drafts = self.client.faturalari_getir(baslangic_tarihi=bas, bitis_tarihi=bit) or []
+            hedef = None
+            for f in drafts:
+                d = f.dict() if hasattr(f, "dict") else (f if isinstance(f, dict) else {})
+                if str(d.get("ettn") or d.get("uuid") or "").strip() == str(uuid).strip():
+                    hedef = d
+                    break
+            if not hedef:
+                return False
+            res = self.client.gib_sms_onay(hedef, oid, sms_kodu)
+            msg = ""
+            if hasattr(res, "dict"):
+                msg = str((res.dict() or {}).get("mesaj") or "")
+            elif isinstance(res, dict):
+                msg = str(res.get("mesaj") or "")
+            return ("başar" in msg.lower()) or ("onay" in msg.lower()) or (msg.strip() == "")
+        except Exception as e:
+            print(f"SMS OID Onay Hatası: {e}")
+            return False
+
+    def sms_kodu_gonder(self, uuid):
+        """eArsivPortal için SMS gönderimini başlatır ve oid döndürür."""
+        self._ensure_client()
+        if self.client_type != "earsivportal":
+            return None
+        self.last_sms_error = None
+        for _ in range(3):
+            try:
+                self.client.giris_yap()
+                imza = self.client.gib_imza()
+                d = imza.dict() if hasattr(imza, "dict") else (imza if isinstance(imza, dict) else {})
+                oid = d.get("oid")
+                if oid:
+                    return oid
+                self.last_sms_error = "OID alınamadı (telefon kayıtlı olmayabilir veya GİB SMS servisi yanıt vermedi)."
+            except Exception as e:
+                self.last_sms_error = str(e)
+                print(f"SMS Gönderim Hatası: {e}")
+                time.sleep(1.2)
+        return None
+
+    def fatura_durum_getir(self, uuid, days_back=370):
+        """UUID ile GİB'deki fatura/onay durumunu bulur (eArsivPortal)."""
+        self._ensure_client()
+        if self.client_type != "earsivportal":
+            return None
+        try:
+            from datetime import datetime, timedelta
+            self.client.giris_yap()
+            bugun = datetime.now().date()
+            bas = (bugun - timedelta(days=max(7, int(days_back or 370)))).strftime("%d/%m/%Y")
+            bit = (bugun + timedelta(days=1)).strftime("%d/%m/%Y")
+            rows = self.client.faturalari_getir(baslangic_tarihi=bas, bitis_tarihi=bit) or []
+            for r in rows:
+                d = r.dict() if hasattr(r, "dict") else (r if isinstance(r, dict) else {})
+                if str(d.get("ettn") or d.get("uuid") or "").strip().lower() == str(uuid or "").strip().lower():
+                    return d
+        except Exception as e:
+            print(f"Fatura durum getir hatası: {e}")
+        return None
 
 
 def build_fatura_data_from_db(fatura_id, fetch_one_func):
@@ -193,7 +331,7 @@ def build_fatura_data_from_db(fatura_id, fetch_one_func):
     else:
         s = str(ft or "")[:10]
         if s and len(s) == 10 and s[4] == "-":
-            g, a, y = s.split("-")[0], s.split("-")[1], s.split("-")[2]
+            y, a, g = s.split("-")[0], s.split("-")[1], s.split("-")[2]
             tarih_str = f"{g}/{a}/{y}"
         else:
             tarih_str = "01/01/2025"

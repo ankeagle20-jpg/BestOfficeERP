@@ -10,6 +10,7 @@ from config import Config
 from auth import login_manager, giris_yap, kullanici_olustur, ROLLER
 from flask_login import current_user
 import os
+import atexit
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -69,6 +70,29 @@ app.register_blueprint(randevu_bp)
 app.register_blueprint(pdovam_bp, url_prefix="/pdovam")
 if ilan_robotu_bp is not None:
     app.register_blueprint(ilan_robotu_bp, url_prefix="/ilan-robotu")
+
+
+def _start_background_jobs():
+    """Opsiyonel arkaplan işler: otomatik fatura döngüsü."""
+    try:
+        from apscheduler.schedulers.background import BackgroundScheduler
+        from routes.faturalar_routes import run_auto_invoice_cycle
+    except Exception as e:
+        print("⚠ Background scheduler devre dışı:", e)
+        return
+    scheduler = BackgroundScheduler(timezone="Europe/Istanbul")
+    scheduler.add_job(
+        lambda: run_auto_invoice_cycle(force=False),
+        "interval",
+        minutes=15,
+        id="auto_invoice_cycle",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    scheduler.start()
+    atexit.register(lambda: scheduler.shutdown(wait=False))
+    print("✅ Background scheduler aktif: auto_invoice_cycle/15dk")
 
 # ── Ana sayfa ────────────────────────────────────────────────────────────────
 @app.route("/")
@@ -161,6 +185,9 @@ def ilk_kurulum():
 
 # Uygulama yüklendiğinde (gunicorn/Render dahil) şema ve admin kontrolü
 ilk_kurulum()
+# Debug reloader'da parent process'te çift scheduler açmamak için sadece child'da başlat.
+if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or os.environ.get("GUNICORN_CMD_ARGS"):
+    _start_background_jobs()
 
 # ── Uygulamayı başlat ────────────────────────────────────────────────────────
 if __name__ == "__main__":

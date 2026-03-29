@@ -110,7 +110,7 @@
     <select id="musteri-sec" onchange="musteriSec()">
         <option value="">— Müşteri Seçin —</option>
         {% for m in musteriler %}
-        <option value="{{ m.id }}">{{ m.name }}</option>
+        <option value="{{ m.id }}">{{ m.name }}{% if m.musteri_adi %} — {{ m.musteri_adi }}{% endif %}</option>
         {% endfor %}
     </select>
 </div>

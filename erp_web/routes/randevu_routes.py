@@ -6,7 +6,7 @@ Toplantı Odası ve Randevu Takip Sistemi
 from flask import Blueprint, render_template, request, jsonify, flash, redirect, url_for, current_app
 from flask_login import login_required
 from db import fetch_all, fetch_one, execute, execute_returning
-from utils.musteri_arama import customers_arama_sql_randevu, customers_arama_params_5_randevu
+from utils.musteri_arama import customers_arama_sql_randevu, customers_arama_params_6_randevu
 from datetime import datetime, date, time, timedelta
 from decimal import Decimal
 
@@ -186,14 +186,24 @@ def api_musteriler():
     """Müşteri/firma arama: ünvan, müşteri adı, yetkili + telefon + notes."""
     q = (request.args.get("q") or "").strip()[:80]
     if not q:
-        rows = fetch_all("SELECT id, name, phone FROM customers ORDER BY name LIMIT 30")
+        rows = fetch_all("SELECT id, name, musteri_adi, phone FROM customers ORDER BY name LIMIT 30")
     else:
         w = customers_arama_sql_randevu()
         rows = fetch_all(
-            f"SELECT id, name, phone FROM customers WHERE {w} ORDER BY name LIMIT 30",
-            customers_arama_params_5_randevu(q),
+            f"SELECT id, name, musteri_adi, phone FROM customers WHERE {w} ORDER BY name LIMIT 30",
+            customers_arama_params_6_randevu(q),
         )
-    return jsonify([{"id": r["id"], "name": r.get("name") or "", "phone": r.get("phone") or ""} for r in rows])
+    return jsonify(
+        [
+            {
+                "id": r["id"],
+                "name": r.get("name") or "",
+                "musteri_adi": r.get("musteri_adi") or "",
+                "phone": r.get("phone") or "",
+            }
+            for r in rows
+        ]
+    )
 
 
 @bp.route("/randevu-al")

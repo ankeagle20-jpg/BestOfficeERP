@@ -32,7 +32,7 @@ def _tufe_yukle():
 @bp.route("/")
 @yetki_gerekli("kira_senaryo")
 def index():
-    musteriler = fetch_all("SELECT id, name FROM customers ORDER BY name")
+    musteriler = fetch_all("SELECT id, name, musteri_adi FROM customers ORDER BY name")
     return render_template("kira/index.html", musteriler=musteriler)
 
 

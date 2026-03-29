@@ -749,9 +749,9 @@ tr.kr td{background:rgba(255,52,82,.04)}
       <input class="sel-inp" id="sel-ara" type="text" placeholder="Müşteri adı veya vergi numarası…" autocomplete="off">
       <div class="sel-list" id="sel-lst">
         {% for m in musteriler %}
-        <div class="sel-row" data-id="{{ m.id }}" data-name="{{ (m.name or '')|lower }}">
+        <div class="sel-row" data-id="{{ m.id }}" data-name="{{ (m.name or '')|lower }}" data-ma="{{ (m.get('musteri_adi') or '')|lower }}" data-tax="{{ (m.tax_number|string if m.tax_number is not none else '')|lower }}">
           <div>
-            <div>{{ m.name or '—' }}</div>
+            <div>{{ m.name or '—' }}{% if m.get('musteri_adi') %} <span style="opacity:.75;font-size:12px;">· {{ m.musteri_adi }}</span>{% endif %}</div>
             <div class="sel-sub">{{ m.office_code or '' }}{% if m.tax_number %} · {{ m.tax_number }}{% endif %}</div>
           </div>
           <span class="mb {{ 'mb-p' if (m.durum or '').lower()=='pasif' else 'mb-a' }}">
@@ -1037,7 +1037,7 @@ tr.kr td{background:rgba(255,52,82,.04)}
         <div class="rp-mini-toolbar">
           <div class="rp-mini-search-wrap">
             <i class="fa fa-search"></i>
-            <input type="text" class="rp-mini-search" id="rpMiniSearch" placeholder="Q Ad/Ünvan" autocomplete="off">
+            <input type="text" class="rp-mini-search" id="rpMiniSearch" placeholder="Ünvan, müşteri adı veya vergi no…" autocomplete="off">
           </div>
           <span class="rp-mini-count">Ad/Ünvan: <strong id="rpMiniTotal">{{ (musteriler|default([]))|length }}</strong></span>
         </div>
@@ -1050,8 +1050,8 @@ tr.kr td{background:rgba(255,52,82,.04)}
               {% for m in (musteriler|default([]))[:25] %}
               {% set d = (m.get('durum') or '')|lower %}
               {% set is_selected = (m.id == selected_mid) if selected_mid else False %}
-              <tr data-id="{{ m.id }}" data-name="{{ (m.name or '')|lower }}" data-display-name="{{ (m.name or '—')|e }}" class="{{ 'rp-mini-selected' if is_selected else '' }}" onclick="switchCariMusteri({{ m.id }}, this)">
-                <td title="{{ m.name or '—' }}">{{ (m.name or '—')[:18] }}{% if (m.name or '')|length > 18 %}…{% endif %}</td>
+              <tr data-id="{{ m.id }}" data-name="{{ (m.name or '')|lower }}" data-ma="{{ (m.get('musteri_adi') or '')|lower }}" data-tax="{{ (m.tax_number|string if m.tax_number is not none else '')|lower }}" data-display-name="{{ (m.name or '—')|e }}" class="{{ 'rp-mini-selected' if is_selected else '' }}" onclick="switchCariMusteri({{ m.id }}, this)">
+                <td title="{{ m.name or '—' }}{% if m.get('musteri_adi') %} · {{ m.musteri_adi }}{% endif %}">{{ (m.name or '—')[:18] }}{% if (m.name or '')|length > 18 %}…{% endif %}{% if m.get('musteri_adi') %} <span style="opacity:.72;font-size:9px;">{{ (m.musteri_adi or '')[:10] }}{% if (m.musteri_adi or '')|length > 10 %}…{% endif %}</span>{% endif %}</td>
                 <td>{{ (m.office_code or '—')[:6] }}</td>
                 <td>{% if d == 'pasif' %}<span class="rp-mini-badge pasif">Pasif</span>{% else %}<span class="rp-mini-badge aktif">Aktif</span>{% endif %}</td>
                 <td>0,00 ₺</td>
@@ -1139,9 +1139,13 @@ function activateTab(t){
 
 /* ── MÜŞTERİ ARA ── */
 document.getElementById('sel-ara').addEventListener('input',function(){
-  var q=this.value.toLowerCase();
+  var q=(this.value||'').toLowerCase().trim();
   document.querySelectorAll('.sel-row').forEach(function(r){
-    r.style.display=(!q||r.dataset.name.indexOf(q)>=0)?'':'none';
+    var n=r.dataset.name||'';
+    var ma=r.dataset.ma||'';
+    var tx=r.dataset.tax||'';
+    var ok=!q||n.indexOf(q)>=0||ma.indexOf(q)>=0||tx.indexOf(q)>=0;
+    r.style.display=ok?'':'none';
   });
 });
 document.querySelectorAll('.sel-row').forEach(function(r){
@@ -1497,7 +1501,9 @@ window.cmo=function(e){if(!e||e.target===document.getElementById('mo'))document.
     var vis=0;
     rows.forEach(function(tr){
       var name=(tr.getAttribute('data-name')||'');
-      var show=!q||name.indexOf(q)!==-1;
+      var ma=(tr.getAttribute('data-ma')||'');
+      var tx=(tr.getAttribute('data-tax')||'');
+      var show=!q||name.indexOf(q)!==-1||ma.indexOf(q)!==-1||tx.indexOf(q)!==-1;
       tr.style.display=show?'':'none';
       if(show)vis++;
     });

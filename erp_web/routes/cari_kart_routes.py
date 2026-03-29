@@ -6,7 +6,7 @@ from flask_login import current_user
 from auth import giris_gerekli
 from db import fetch_all, fetch_one, db as get_db
 from utils.text_utils import turkish_lower
-from utils.musteri_arama import customers_arama_sql_3_plus_tax_office, customers_arama_params_5
+from utils.musteri_arama import customers_arama_sql_3_plus_tax_office, customers_arama_params_6
 from datetime import date, datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import io
@@ -62,7 +62,9 @@ def _risk_skoru_360(gecikmis_gun, gecikmis_tutar, gecikme_sayisi, aging_90_plus)
 def index():
     """360° Cari Kart ana sayfa: seçilen müşteri listede üstte, ana ekranda 360° müşteri bilgi ekranı."""
     mid = request.args.get("mid", type=int)
-    musteriler = fetch_all("SELECT id, name, tax_number, office_code, durum FROM customers ORDER BY name LIMIT 500")
+    musteriler = fetch_all(
+        "SELECT id, name, musteri_adi, tax_number, office_code, durum FROM customers ORDER BY name LIMIT 500"
+    )
     # Ana sayfa = 360° ekran: mid verilmemişse ilk müşteriyi seç
     if mid is None and musteriler:
         mid = musteriler[0]["id"]
@@ -351,13 +353,13 @@ def api_360(mid):
 def api_musteriler():
     """Müşteri listesi (ünvan, müşteri adı, yetkili + vergi no, ofis)."""
     q = request.args.get("q", "").strip()
-    base = "SELECT id, name, tax_number, office_code, durum FROM customers "
+    base = "SELECT id, name, musteri_adi, tax_number, office_code, durum FROM customers "
     if not q:
         rows = fetch_all(base + "ORDER BY name LIMIT 200")
     else:
         w = customers_arama_sql_3_plus_tax_office()
         rows = fetch_all(
             base + f"WHERE {w} ORDER BY name LIMIT 200",
-            customers_arama_params_5(q),
+            customers_arama_params_6(q),
         )
     return jsonify(rows or [])

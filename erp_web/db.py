@@ -274,6 +274,7 @@ def init_schema():
         ensure_personel_ozluk()
         ensure_personel_ozluk_izin_columns()
         ensure_contracts_engine()
+        ensure_auto_invoice_tables()
     print("✅ Supabase şema oluşturuldu.")
 
 
@@ -407,6 +408,8 @@ def ensure_musteri_kyc_columns():
         ("created_at", "TIMESTAMPTZ DEFAULT NOW()"),
         ("updated_at", "TIMESTAMPTZ DEFAULT NOW()"),
         ("kira_artis_tarihi", "DATE"),
+        ("kira_suresi_ay", "INTEGER"),
+        ("kira_nakit", "BOOLEAN DEFAULT FALSE"),
     )
     for col, ctype in columns:
         try:
@@ -488,6 +491,70 @@ def ensure_contracts_engine():
         )
     except Exception as e:
         print(f"legal_cases: {e}")
+
+
+def ensure_auto_invoice_tables():
+    """Otomatik fatura + GIB gönderim ayar/run/log tabloları."""
+    try:
+        execute(
+            """
+            CREATE TABLE IF NOT EXISTS auto_invoice_settings (
+                id SERIAL PRIMARY KEY,
+                enabled BOOLEAN DEFAULT FALSE,
+                run_day INTEGER DEFAULT 1,
+                run_hour INTEGER DEFAULT 9,
+                send_gib BOOLEAN DEFAULT FALSE,
+                auto_sms_code TEXT,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            )
+            """
+        )
+        row = fetch_one("SELECT id FROM auto_invoice_settings ORDER BY id LIMIT 1")
+        if not row:
+            execute(
+                "INSERT INTO auto_invoice_settings (enabled, run_day, run_hour, send_gib) VALUES (FALSE, 1, 9, FALSE)"
+            )
+    except Exception as e:
+        print(f"auto_invoice_settings: {e}")
+
+    try:
+        execute(
+            """
+            CREATE TABLE IF NOT EXISTS auto_invoice_runs (
+                id SERIAL PRIMARY KEY,
+                period_key TEXT UNIQUE NOT NULL,
+                run_date DATE NOT NULL,
+                status TEXT DEFAULT 'running',
+                started_at TIMESTAMPTZ DEFAULT NOW(),
+                finished_at TIMESTAMPTZ,
+                success_count INTEGER DEFAULT 0,
+                fail_count INTEGER DEFAULT 0,
+                message TEXT
+            )
+            """
+        )
+    except Exception as e:
+        print(f"auto_invoice_runs: {e}")
+
+    try:
+        execute(
+            """
+            CREATE TABLE IF NOT EXISTS auto_invoice_items (
+                id SERIAL PRIMARY KEY,
+                run_id INTEGER REFERENCES auto_invoice_runs(id) ON DELETE CASCADE,
+                musteri_id INTEGER REFERENCES customers(id) ON DELETE SET NULL,
+                fatura_id INTEGER REFERENCES faturalar(id) ON DELETE SET NULL,
+                period_key TEXT,
+                status TEXT DEFAULT 'created',
+                gib_uuid TEXT,
+                error_message TEXT,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+            """
+        )
+    except Exception as e:
+        print(f"auto_invoice_items: {e}")
 
 
 def ensure_potansiyel_musteriler():
@@ -595,6 +662,7 @@ def ensure_customers_rent_columns():
         ("rent_start_month", "TEXT DEFAULT 'Ocak'"),
         ("ilk_kira_bedeli", "NUMERIC(12,2) DEFAULT 0"),
         ("guncel_kira_bedeli", "NUMERIC(12,2) DEFAULT 0"),
+        ("reel_kira_bedeli", "NUMERIC(12,2) DEFAULT 0"),
     ):
         try:
             execute(f"ALTER TABLE customers ADD COLUMN IF NOT EXISTS {col} {typ}")
@@ -983,8 +1051,14 @@ def ensure_kargolar_durum():
         print(f"kargolar.durum: {e}")
 
 
+_faturalar_amount_columns_done = False
+
+
 def ensure_faturalar_amount_columns():
     """faturalar tablosunda tutar/toplam/kdv_tutar yoksa ekle (farklı şemalarda sadece biri olabilir)."""
+    global _faturalar_amount_columns_done
+    if _faturalar_amount_columns_done:
+        return
     try:
         execute("ALTER TABLE faturalar ADD COLUMN IF NOT EXISTS tutar NUMERIC(12,2) DEFAULT 0")
     except Exception as e:
@@ -1009,6 +1083,11 @@ def ensure_faturalar_amount_columns():
         execute("ALTER TABLE faturalar ADD COLUMN IF NOT EXISTS sevk_adresi TEXT")
     except Exception as e:
         print(f"faturalar.sevk_adresi: {e}")
+    try:
+        execute("ALTER TABLE faturalar ADD COLUMN IF NOT EXISTS ettn TEXT")
+    except Exception as e:
+        print(f"faturalar.ettn: {e}")
+    _faturalar_amount_columns_done = True
 
 
 def clear_all_customers():
