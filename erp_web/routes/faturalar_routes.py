@@ -2612,8 +2612,18 @@ def api_gib_taslak():
             pass
         msg = "Taslak oluşturuldu."
         if taslak_dogrulandi is False:
-            msg = ("Taslak isteği gönderildi ancak GİB listesinden doğrulanamadı. "
-                   "Portalda tarih filtresini genişletip tekrar sorgulayın; görünmüyorsa yeniden taslak gönderin.")
+            # UUID dönüp portalda görünmeyen durumları başarılı kabul etmeyelim.
+            return jsonify({
+                "ok": False,
+                "uuid": uuid,
+                "oid": oid,
+                "sms_sent": bool(oid),
+                "sms_error": sms_error,
+                "taslak_dogrulandi": False,
+                "taslak_onay_durumu": taslak_onay_durumu,
+                "mesaj": ("GİB taslak isteği gönderildi fakat portalda doğrulanamadı. "
+                          "Bu nedenle taslak oluşmamış kabul edildi. Tekrar deneyin.")
+            }), 502
         elif taslak_onay_durumu:
             msg += f" Durum: {taslak_onay_durumu}."
         if oid:
