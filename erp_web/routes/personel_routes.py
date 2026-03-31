@@ -7,6 +7,168 @@ from flask_login import current_user
 from auth import giris_gerekli
 from db import fetch_all, fetch_one, execute, execute_returning
 from datetime import date, datetime, timedelta
+from utils.devam_bulut_sync import sync_devam_gunu_buluta
+from routes.pdovam_routes import pdovam_toplam_fark_dk_for_personel
+
+
+MESAI_SABAH_DK = 9 * 60
+VARSAYILAN_CIKIS_DK = 18 * 60 + 30
+
+
+def _saat_to_minutes(val):
+    if val is None:
+        return None
+    if hasattr(val, "hour"):
+        try:
+            return int(val.hour) * 60 + int(val.minute)
+        except Exception:
+            return None
+    s = str(val).strip()
+    if not s:
+        return None
+    p = s.split(":")
+    if len(p) < 2:
+        return None
+    try:
+        return int(p[0]) * 60 + int(p[1])
+    except Exception:
+        return None
+
+
+def _dk_yazi(dk: int) -> str:
+    try:
+        dk = int(dk or 0)
+    except Exception:
+        dk = 0
+    if dk <= 0:
+        return "0 dk"
+    h = dk // 60
+    m = dk % 60
+    if h > 0 and m > 0:
+        return f"{h} saat {m} dk"
+    if h > 0:
+        return f"{h} saat"
+    return f"{m} dk"
+
+
+def _dk_gun_yazi(dk: int) -> str:
+    try:
+        dk = int(dk or 0)
+    except Exception:
+        dk = 0
+    if dk <= 0:
+        return "0 dk"
+    gun = dk // (8 * 60)
+    kalan = dk % (8 * 60)
+    saat = kalan // 60
+    dakika = kalan % 60
+    if gun > 0 and saat > 0 and dakika > 0:
+        return f"{gun} gün {saat} saat {dakika} dk"
+    if gun > 0 and saat > 0:
+        return f"{gun} gün {saat} saat"
+    if gun > 0 and dakika > 0:
+        return f"{gun} gün {dakika} dk"
+    if gun > 0:
+        return f"{gun} gün"
+    if saat > 0 and dakika > 0:
+        return f"{saat} saat {dakika} dk"
+    if saat > 0:
+        return f"{saat} saat"
+    return f"{dakika} dk"
+
+
+def _saat_to_gun_saat_yazi(saat_val: float) -> str:
+    """Saat değerini 1 gün=8 saat kuralı ile 'X gün Y saat' yazar."""
+    try:
+        toplam_saat = float(saat_val or 0)
+    except Exception:
+        toplam_saat = 0.0
+    if toplam_saat <= 0:
+        return "0 dk"
+    toplam_dk = int(round(toplam_saat * 60))
+    return _dk_gun_yazi(toplam_dk)
+
+
+def _safe_anniversary(ref: date, mm: int, dd: int) -> date:
+    """ref.year içinde mm/dd; geçersizse (29 Şubat) 28 Şubat'a kırp."""
+    try:
+        return date(ref.year, mm, dd)
+    except ValueError:
+        # 29 Şubat gibi
+        if mm == 2 and dd == 29:
+            return date(ref.year, 2, 28)
+        # fallback: ayın son günü
+        for d in range(28, 0, -1):
+            try:
+                return date(ref.year, mm, d)
+            except ValueError:
+                continue
+        return date(ref.year, 1, 1)
+
+
+def _izin_yili_araligi(ise_giris: date | None, bugun: date) -> tuple[date, date]:
+    """İşe giriş gün/ayına göre son 1 izin yılı aralığı (başlangıç yıldönümü -> bugün)."""
+    if not ise_giris:
+        return (bugun - timedelta(days=365), bugun)
+    anniv = _safe_anniversary(bugun, ise_giris.month, ise_giris.day)
+    if anniv <= bugun:
+        bas = anniv
+    else:
+        bas = _safe_anniversary(date(bugun.year - 1, 1, 1), ise_giris.month, ise_giris.day).replace(year=bugun.year - 1)
+    return (bas, bugun)
+
+
+def _fark_toplam_dk_from_events(events: list[dict]) -> int:
+    """pdovam fark mantığının özet hali: geç kalma + gün içi çıkış->giriş + erken çıkış."""
+    by_day: dict[str, list[dict]] = {}
+    for e in events or []:
+        tk = str(e.get("tarih") or "")[:10]
+        if not tk:
+            continue
+        islem = (e.get("islem") or "").strip().lower()
+        if islem not in ("giris", "cikis"):
+            continue
+        m = _saat_to_minutes(e.get("saat"))
+        if m is None:
+            continue
+        by_day.setdefault(tk, []).append({"islem": islem, "min": int(m)})
+
+    total = 0
+    for tk, evs in by_day.items():
+        evs.sort(key=lambda x: (x["min"], 0 if x["islem"] == "giris" else 1))
+        # ilk giriş
+        i0 = None
+        for i, x in enumerate(evs):
+            if x["islem"] == "giris":
+                i0 = i
+                break
+        if i0 is None:
+            continue
+        trimmed = evs[i0:]
+        first_min = trimmed[0]["min"]
+        gec_sabah = max(0, first_min - MESAI_SABAH_DK)
+
+        inside = True
+        pending = None
+        izin_disari = 0
+        for x in trimmed[1:]:
+            if x["islem"] == "cikis":
+                pending = x["min"]
+                inside = False
+            else:
+                if not inside and pending is not None:
+                    izin_disari += max(0, x["min"] - pending)
+                    pending = None
+                inside = True
+
+        if pending is not None:
+            cikis_min = min(pending, VARSAYILAN_CIKIS_DK)
+            erken = max(0, VARSAYILAN_CIKIS_DK - cikis_min)
+        else:
+            erken = 0
+
+        total += int(gec_sabah + izin_disari + erken)
+    return int(total)
 
 bp = Blueprint("personel", __name__)
 
@@ -398,10 +560,21 @@ def api_devam_kaydet():
                 (giris or None, cikis or None, gec_dakika, "manuel", row["id"])
             )
         else:
+            pn = fetch_one("SELECT ad_soyad FROM personel WHERE id=%s", (pid,))
+            ad = (pn.get("ad_soyad") or "") if pn else ""
             execute(
-                "INSERT INTO devam_kayitlari (personel_id, tarih, giris_saati, cikis_saati, gec_dakika, kaynak) VALUES (%s,%s,%s,%s,%s,%s)",
-                (pid, t, giris or None, cikis or None, gec_dakika, "manuel")
+                "INSERT INTO devam_kayitlari (personel_id, ad_soyad, tarih, giris_saati, cikis_saati, gec_dakika, kaynak) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                (pid, ad, t, giris or None, cikis or None, gec_dakika, "manuel")
             )
+        row_sb = fetch_one(
+            "SELECT giris_saati, cikis_saati, tarih FROM devam_kayitlari WHERE personel_id=%s AND tarih=%s",
+            (pid, t),
+        )
+        if row_sb:
+            try:
+                sync_devam_gunu_buluta(pid, row_sb["tarih"], row_sb.get("giris_saati"), row_sb.get("cikis_saati"))
+            except Exception:
+                pass
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"ok": False, "mesaj": str(e)}), 400
@@ -419,7 +592,7 @@ def api_izin_list():
     sql = "SELECT id, personel_id, izin_turu, baslangic_tarihi, bitis_tarihi, gun_sayisi, aciklama, onay_durumu FROM personel_izin WHERE personel_id=%s"
     params = [pid]
     if yil:
-        sql += " AND (EXTRACT(YEAR FROM baslangic_tarihi)=%s OR EXTRACT(YEAR FROM bitis_tarihi)=%s)"
+        sql += " AND (EXTRACT(YEAR FROM baslangic_tarihi::date)=%s OR EXTRACT(YEAR FROM bitis_tarihi::date)=%s)"
         params.extend([yil, yil])
     sql += " ORDER BY baslangic_tarihi DESC"
     rows = fetch_all(sql, params)
@@ -440,12 +613,21 @@ def api_izin_ozet():
     yil = int(request.args.get("yil") or date.today().year)
     if not pid:
         return jsonify({"hak": 14, "kullanilan": 0, "kalan": 14})
+    ozluk = fetch_one(
+        "SELECT izin_hakedis_gun, izin_kalan_gun, izin_kalan_saat, ise_giris_tarihi FROM personel_ozluk WHERE personel_id=%s",
+        (pid,),
+    )
     bilgi = fetch_one(
         "SELECT yillik_izin_hakki, manuel_izin_gun, ise_baslama_tarihi, dogum_tarihi FROM personel_bilgi WHERE personel_id=%s",
         (pid,)
     )
-    # Kayıtlı yıllık izin yoksa 4857'ye göre hesapla
-    if bilgi and bilgi.get("yillik_izin_hakki") is not None and str(bilgi.get("yillik_izin_hakki")).strip() != "":
+    p0 = fetch_one("SELECT giris_tarihi FROM personel WHERE id=%s", (pid,))
+
+    # Öncelik: personel_ozluk.izin_hakedis_gun
+    if ozluk and ozluk.get("izin_hakedis_gun") is not None and str(ozluk.get("izin_hakedis_gun")).strip() != "":
+        hak = int(ozluk.get("izin_hakedis_gun"))
+    # Sonra personel_bilgi.yillik_izin_hakki
+    elif bilgi and bilgi.get("yillik_izin_hakki") is not None and str(bilgi.get("yillik_izin_hakki")).strip() != "":
         hak = int(bilgi.get("yillik_izin_hakki"))
     else:
         hak = _izin_hakki_4857(bilgi.get("ise_baslama_tarihi") if bilgi else None, bilgi.get("dogum_tarihi") if bilgi else None) if bilgi else 14
@@ -453,12 +635,233 @@ def api_izin_ozet():
     r = fetch_one(
         """SELECT COALESCE(SUM(gun_sayisi), 0) AS toplam FROM personel_izin
            WHERE personel_id=%s AND izin_turu = 'Yıllık Ücretli İzin'
-           AND (EXTRACT(YEAR FROM baslangic_tarihi)=%s OR EXTRACT(YEAR FROM bitis_tarihi)=%s)""",
+           AND (EXTRACT(YEAR FROM baslangic_tarihi::date)=%s OR EXTRACT(YEAR FROM bitis_tarihi::date)=%s)""",
         (pid, yil, yil)
     )
     kullanilan = float(r.get("toplam") or 0)
-    kalan = hak + manuel - kullanilan
-    return jsonify({"hak": hak, "manuel_ek": manuel, "toplam_hak": hak + manuel, "kullanilan": kullanilan, "kalan": max(0, kalan)})
+    toplam_hak = hak + manuel
+    kalan_hesap = max(0, toplam_hak - kullanilan)
+
+    # Özlükte kalan gün/saat girildiyse onu öncelikle göster
+    kalan_ozluk = None
+    if ozluk:
+        kg = ozluk.get("izin_kalan_gun")
+        ks = ozluk.get("izin_kalan_saat")
+        if kg not in (None, "") or ks not in (None, ""):
+            try:
+                kalan_ozluk = float(kg or 0) + (float(ks or 0) / 8.0)
+            except (TypeError, ValueError):
+                kalan_ozluk = None
+    kalan = kalan_ozluk if kalan_ozluk is not None else kalan_hesap
+
+    # Devreden/ek hak: manuel_ek ile ozluk-kalan farkını birlikte dikkate al
+    devreden = manuel
+    try:
+        ekstra_from_kalan = max(0.0, float(kalan) - float(max(0, hak - kullanilan)))
+        devreden = max(devreden, ekstra_from_kalan)
+    except (TypeError, ValueError):
+        pass
+    # Geç Süre: giriş/çıkış raporundaki Fark mantığına göre;
+    # tarih aralığı verilmezse son 1 ay, verilirse o aralık.
+    bas_raw = request.args.get("bas")
+    bit_raw = request.args.get("bit")
+
+    def _parse_iso(s):
+        if not s:
+            return None
+        try:
+            return datetime.strptime(str(s)[:10], "%Y-%m-%d").date()
+        except Exception:
+            return None
+
+    today = date.today()
+    bas = _parse_iso(bas_raw)
+    bit = _parse_iso(bit_raw)
+    if bas and bit:
+        if bit < bas:
+            bas, bit = bit, bas
+    elif bas and not bit:
+        bit = today
+    elif not bas and bit:
+        bas = bit - timedelta(days=30)
+    else:
+        bit = today
+        bas = today - timedelta(days=30)
+    try:
+        gec_sure_dk = pdovam_toplam_fark_dk_for_personel(int(pid), bas, bit)
+    except Exception:
+        gec_sure_dk = 0
+    # Kalan izin: 1 gün = 8 saat. Geç süre (fark) izin bakiyesinden düşülür.
+    kalan_saat_toplam = max(0.0, float(kalan) * 8.0 - (float(gec_sure_dk) / 60.0))
+    kalan_net_gun = max(0.0, kalan_saat_toplam / 8.0)
+    return jsonify({
+        "hak": hak,
+        "manuel_ek": devreden,
+        "toplam_hak": toplam_hak,
+        "kullanilan": kullanilan,
+        "kalan": max(0, kalan),
+        "kalan_net_gun": kalan_net_gun,
+        "kalan_net_text": _saat_to_gun_saat_yazi(kalan_saat_toplam),
+        "gec_sure_dk": gec_sure_dk,
+        "gec_sure_saat": _dk_yazi(gec_sure_dk),
+        "gec_sure_gun": _dk_gun_yazi(gec_sure_dk),
+        "tarih_bas": bas.isoformat(),
+        "tarih_bit": bit.isoformat(),
+    })
+
+
+@bp.route("/api/izin/ozet/liste")
+@giris_gerekli
+def api_izin_ozet_liste():
+    """
+    Aktif/pasif/tümü tüm personeller için izin özet listesi.
+    UI'da "Süre" tablosunu besler.
+    """
+    filtre = request.args.get("filtre", "aktif")  # tumu, aktif, pasif
+    yil = int(request.args.get("yil") or date.today().year)
+
+    # Geç süre için tarih aralığı: ?bas / ?bit verilmezse son 1 ay
+    bas_raw = request.args.get("bas")
+    bit_raw = request.args.get("bit")
+
+    def _parse_iso_local(s):
+        if not s:
+            return None
+        try:
+            return datetime.strptime(str(s)[:10], "%Y-%m-%d").date()
+        except Exception:
+            return None
+
+    today = date.today()
+    bas = _parse_iso_local(bas_raw)
+    bit = _parse_iso_local(bit_raw)
+    if bas and bit:
+        if bit < bas:
+            bas, bit = bit, bas
+    elif bas and not bit:
+        bit = today
+    elif not bas and bit:
+        bas = bit - timedelta(days=30)
+    else:
+        bit = today
+        bas = today - timedelta(days=30)
+
+    sql = """
+      SELECT p.id, p.ad_soyad,
+             pb.yillik_izin_hakki, pb.manuel_izin_gun,
+             pb.ise_baslama_tarihi, pb.dogum_tarihi
+      FROM personel p
+      LEFT JOIN personel_bilgi pb ON pb.personel_id = p.id
+      WHERE 1=1
+    """
+    params = []
+    if filtre == "aktif":
+        sql += " AND p.is_active = TRUE"
+    elif filtre == "pasif":
+        sql += " AND p.is_active = FALSE"
+    sql += " ORDER BY p.ad_soyad"
+
+    rows = fetch_all(sql, tuple(params)) or []
+    if not rows:
+        return jsonify([])
+
+    pids = [int(r.get("id")) for r in rows if r.get("id") is not None]
+    if not pids:
+        return jsonify([])
+
+    ozluk_rows = fetch_all(
+        """
+        SELECT personel_id, izin_hakedis_gun, izin_kalan_gun, izin_kalan_saat
+        FROM personel_ozluk
+        WHERE personel_id = ANY(%s)
+        """,
+        (pids,),
+    ) or []
+    ozluk_map = {int(o["personel_id"]): o for o in ozluk_rows if o.get("personel_id") is not None}
+
+    kullanilan_rows = fetch_all(
+        """
+        SELECT personel_id, COALESCE(SUM(gun_sayisi), 0) AS toplam
+        FROM personel_izin
+        WHERE personel_id = ANY(%s)
+          AND izin_turu = 'Yıllık Ücretli İzin'
+          AND (EXTRACT(YEAR FROM baslangic_tarihi::date)=%s OR EXTRACT(YEAR FROM bitis_tarihi::date)=%s)
+        GROUP BY personel_id
+        """,
+        (pids, yil, yil),
+    ) or []
+    kullanilan_map = {int(k["personel_id"]): float(k.get("toplam") or 0) for k in kullanilan_rows if k.get("personel_id") is not None}
+
+    out = []
+    for r in rows:
+        pid = int(r.get("id"))
+        ad_soyad = r.get("ad_soyad") or ""
+        ozluk = ozluk_map.get(pid) or {}
+
+        pb_var_mi = any(
+            r.get(k) is not None and str(r.get(k)).strip() != ""
+            for k in ("yillik_izin_hakki", "manuel_izin_gun", "ise_baslama_tarihi", "dogum_tarihi")
+        )
+        yillik_izin_hakki = r.get("yillik_izin_hakki")
+        manuel = int(r.get("manuel_izin_gun") or 0) if pb_var_mi else 0
+
+        if ozluk.get("izin_hakedis_gun") not in (None, ""):
+            hak = int(ozluk.get("izin_hakedis_gun"))
+        elif pb_var_mi and yillik_izin_hakki is not None and str(yillik_izin_hakki).strip() != "":
+            hak = int(yillik_izin_hakki)
+        else:
+            hak = _izin_hakki_4857(r.get("ise_baslama_tarihi"), r.get("dogum_tarihi")) if pb_var_mi else 14
+
+        kullanilan = float(kullanilan_map.get(pid, 0))
+        toplam_hak = hak + manuel
+        kalan_hesap = max(0, toplam_hak - kullanilan)
+
+        kalan_ozluk = None
+        kg = ozluk.get("izin_kalan_gun")
+        ks = ozluk.get("izin_kalan_saat")
+        if kg not in (None, "") or ks not in (None, ""):
+            try:
+                kalan_ozluk = float(kg or 0) + (float(ks or 0) / 8.0)
+            except (TypeError, ValueError):
+                kalan_ozluk = None
+
+        kalan = kalan_ozluk if kalan_ozluk is not None else kalan_hesap
+        devreden = manuel
+        try:
+            ekstra_from_kalan = max(0.0, float(kalan) - float(max(0, hak - kullanilan)))
+            devreden = max(devreden, ekstra_from_kalan)
+        except (TypeError, ValueError):
+            pass
+
+        # Geç Süre ve net kalan (tüm personeller için, Bahar'daki mantıkla)
+        try:
+            gec_sure_dk = pdovam_toplam_fark_dk_for_personel(pid, bas, bit)
+        except Exception:
+            gec_sure_dk = 0
+        try:
+            kalan_saat_toplam = max(0.0, float(kalan) * 8.0 - (float(gec_sure_dk) / 60.0))
+            kalan_net_gun = max(0.0, kalan_saat_toplam / 8.0)
+        except Exception:
+            kalan_saat_toplam = float(kalan or 0) * 8.0
+            kalan_net_gun = kalan
+
+        out.append({
+            "personel_id": pid,
+            "ad_soyad": ad_soyad,
+            "hak": hak,
+            "manuel_ek": devreden,
+            "toplam_hak": toplam_hak,
+            "kullanilan": kullanilan,
+            "kalan": kalan,
+            "gec_sure_dk": gec_sure_dk,
+            "gec_sure_saat": _dk_yazi(gec_sure_dk),
+            "gec_sure_gun": _dk_gun_yazi(gec_sure_dk),
+            "kalan_net_gun": kalan_net_gun,
+            "kalan_net_text": _saat_to_gun_saat_yazi(kalan_saat_toplam),
+            "tarih_bas": bas.isoformat(),
+            "tarih_bit": bit.isoformat(),
+        })
+    return jsonify(out)
 
 
 @bp.route("/api/izin/kaydet", methods=["POST"])

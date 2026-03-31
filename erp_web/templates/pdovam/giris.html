@@ -66,6 +66,10 @@ body{margin:0;}
       <div style="font-size:14px; color:#90a4ae; margin-bottom:4px;">Cihazınız tanımlı</div>
       <div id="pdovam-tek-adi" style="font-size:20px; color:#4fc3f7; font-weight:600; margin-bottom:16px;"></div>
       <button type="button" id="pdovam-tek-btn" style="display:block; width:100%; max-width:280px; margin:0 auto 12px; padding:16px 24px; font-size:18px; background:#00bcd4; color:#000; border:none; border-radius:8px; cursor:pointer; font-weight:600;"></button>
+      <div style="max-width:520px;margin:0 auto 12px;text-align:left;background:#0f2537;border:1px solid #243447;border-radius:8px;padding:10px 12px;">
+        <div style="font-size:12px;color:#90a4ae;margin-bottom:6px;">Son 10 hareket</div>
+        <div id="pdovam-tek-hareketler" style="font-size:12px;color:#e0f7fa;line-height:1.45;">Yükleniyor…</div>
+      </div>
       <a href="#" id="pdovam-baska-kisi" style="font-size:13px; color:#90a4ae;">Başka kişi olarak giriş yap</a>
     </div>
 
@@ -81,11 +85,12 @@ body{margin:0;}
         <thead>
           <tr style="background:#0f2537;color:#4fc3f7;">
             <th style="padding:8px 10px;text-align:left;">Personel</th>
+            <th style="padding:8px 10px;text-align:left;">Tarih</th>
             <th style="padding:8px 10px;text-align:left;">Görüntüle</th>
             <th style="padding:8px 10px;text-align:left;">Mesai</th>
             <th style="padding:8px 10px;text-align:left;">Giriş</th>
             <th style="padding:8px 10px;text-align:left;">Çıkış</th>
-            <th style="padding:8px 10px;text-align:left;">Mesai Saat</th>
+            <th style="padding:8px 10px;text-align:left;">Fark</th>
             <th style="padding:8px 10px;text-align:left;">İzin</th>
             <th style="padding:8px 10px;text-align:left;">Mola</th>
             <th style="padding:8px 10px;text-align:left;">Durum</th>
@@ -96,22 +101,26 @@ body{margin:0;}
         </thead>
         <tbody>
         {% for p in personeller %}
-          <tr data-id="{{ p.id }}" data-ad="{{ p.ad_soyad or '' }}" class="pdovam-row" style="border-bottom:1px solid #243447;cursor:pointer;">
+          <tr data-id="{{ p.id }}" data-ad="{{ p.ad_soyad or '' }}" data-tarih-iso="{{ p.tarih_iso or bas_iso }}" class="pdovam-row" style="border-bottom:1px solid #243447;cursor:pointer;">
             <td style="padding:8px 10px;color:#e0f7fa;white-space:nowrap;">{{ p.ad_soyad }}</td>
+            <td data-col="tarih" style="padding:8px 10px;color:#90a4ae;white-space:nowrap;">{{ p.tarih_tr or '—' }}</td>
             <td style="padding:6px 8px;min-width:120px;">
               <button type="button" class="pdovam-goruntule-btn" style="width:100%;padding:8px 10px;border:none;border-radius:16px;background:#00bcd4;color:#000;font-size:13px;font-weight:600;cursor:pointer;">Görüntüle</button>
             </td>
             <td style="padding:8px 10px;color:#90a4ae;">{{ p.mesai_baslangic or "--" }} - {{ p.mesai_bitis or "--" }}</td>
             <td data-col="giris" style="padding:8px 10px;color:#e0f7fa;">{{ p.giris_saati or "--" }}</td>
             <td data-col="cikis" style="padding:8px 10px;color:#e0f7fa;">{{ p.cikis_saati or "--" }}</td>
-            <td data-col="mesai-saat" style="padding:8px 10px;color:#e0f7fa;">
-              {% if p.toplam_saat is not none and p.toplam_saat_saat is not none %}
-                {{ p.toplam_saat_saat }} saat {{ "%02d"|format(p.toplam_saat_dakika or 0) }} dakika<br>
-                <span style="font-size:11px;color:#90a4ae;">
-                  Net: {{ p.net_saat_saat }} saat {{ "%02d"|format(p.net_saat_dakika or 0) }} dakika
-                </span>
-              {% else %}
-                --
+            <td data-col="fark" style="padding:8px 10px;color:#e0f7fa;">
+              <strong style="color:#4fc3f7;">{{ p.fark_rapor or '—' }}</strong>
+              {% if p.fark_detay_lines %}
+              <details style="margin-top:4px;font-size:11px;color:#90a4ae;">
+                <summary style="cursor:pointer;list-style:none;">Ayrıntı</summary>
+                <ul style="margin:4px 0 0 12px;padding:0;">
+                  {% for line in p.fark_detay_lines %}
+                  <li>{{ line }}</li>
+                  {% endfor %}
+                </ul>
+              </details>
               {% endif %}
             </td>
             <td style="padding:8px 10px;color:#e0f7fa;">{{ p.gun_izin_str or '--' }}</td>
@@ -126,7 +135,7 @@ body{margin:0;}
             {% endif %}
           </tr>
         {% else %}
-          <tr><td colspan="{{ 8 + (1 if is_admin else 0) }}" style="padding:12px 10px;text-align:center;color:#78909c;">Aktif personel bulunamadı.</td></tr>
+          <tr><td colspan="{{ 9 + (1 if is_admin else 0) }}" style="padding:12px 10px;text-align:center;color:#78909c;">Aktif personel bulunamadı.</td></tr>
         {% endfor %}
         </tbody>
       </table>
@@ -221,11 +230,13 @@ body{margin:0;}
       <div style="min-width:0;flex:1 1 220px;">
         <h3 style="margin:0 0 6px 0;font-size:15px;color:#4fc3f7;">Giriş / Çıkış Raporu (Bulut)</h3>
         <p style="margin:0;font-size:12px;color:#90a4ae;">
-          Supabase üzerinde tutulan barkod giriş/çıkış logları. Aşağıdaki tarih ve personel filtresi ile süzebilirsiniz.
+          Her gün tek satır: ilk okutma sabah girişi; sonrasında çıkış–giriş arası süreler <strong>Fark</strong>ta toplanır (izin dışarı). Akşam çıkışı yoksa çıkış <strong>18:30</strong> varsayılır. Geç geliş 09:00’a göre ayrıca yazılır.
         </p>
       </div>
       <form method="get" style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:11px;justify-content:flex-end;flex:0 1 auto;">
         <input type="hidden" name="tab" value="rapor">
+        {% if request.args.get('embed') %}<input type="hidden" name="embed" value="1">{% endif %}
+        {% if request.args.get('ortak') %}<input type="hidden" name="ortak" value="{{ request.args.get('ortak') }}">{% endif %}
         <label for="pdovam-bas" style="color:#b0bec5;">Tarih:</label>
         <input type="date" id="pdovam-bas" name="bas" value="{{ bas_iso }}" style="background:#0b1826;border:1px solid #243447;color:#e0f7fa;padding:3px 7px;border-radius:4px;font-size:11px;">
         <span style="color:#b0bec5;">–</span>
@@ -251,6 +262,12 @@ body{margin:0;}
       </form>
     </div>
     <div style="background:#102133;border:1px solid #243447;border-radius:12px;padding:12px 16px;">
+      <p style="margin:0 0 10px 0;font-size:11px;color:#78909c;">Fark sütunu günlük toplamdır. Geç kalma ve izin kalemleri için satıra tıklayın.</p>
+      <style>
+        .pdovam-rapor-detay { display: none; }
+        .pdovam-rapor-detay.pdovam-detay-acik { display: table-row; }
+        tr.pdovam-rapor-ana:hover { background: rgba(79,195,247,.07); }
+      </style>
       <table style="width:100%;border-collapse:collapse;font-size:12px;">
         <thead>
           <tr style="background:#0f2537;color:#4fc3f7;">
@@ -267,25 +284,44 @@ body{margin:0;}
         </thead>
         <tbody>
           {% for r in devam_kayitlari %}
-          <tr style="border-bottom:1px solid #243447;" data-personel-id="{{ r.personel_id }}" data-tarih="{{ r.tarih }}">
-            <td style="padding:6px 8px;color:#e0f7fa;">{{ r.tarih_tr or r.tarih }}</td>
-            <td style="padding:6px 8px;color:#e0f7fa;">
-              {% if (r.islem or '') == 'giris' %}{{ r.saat }}{% endif %}
-            </td>
-            <td style="padding:6px 8px;color:#e0f7fa;">
-              {% if (r.islem or '') == 'cikis' %}{{ r.saat }}{% endif %}
-            </td>
+          {% if r.rapor_birlestirilmis %}
+          <tr class="pdovam-rapor-ana" role="button" tabindex="0" aria-expanded="false" style="border-bottom:1px solid #243447;cursor:pointer;" data-personel-id="{{ r.personel_id }}" data-tarih="{{ r.tarih }}">
+            <td style="padding:6px 8px;color:#e0f7fa;">{{ r.tarih_tr or r.tarih }} <span style="opacity:.5;font-size:10px;">▸</span></td>
+            <td style="padding:6px 8px;color:#e0f7fa;">{{ r.rapor_giris or r.saat }}</td>
+            <td style="padding:6px 8px;color:#e0f7fa;">{{ r.rapor_cikis or '—' }}{% if r.cikis_varsayilan %}<span style="opacity:.65;font-size:10px;margin-left:4px;">(varsayılan)</span>{% endif %}</td>
             <td style="padding:6px 8px;color:#e0f7fa;">{{ r.personel_adi or r.personel_id }}</td>
-            <td style="padding:6px 8px;color:#e0f7fa;">{{ r.islem }}</td>
-            <td style="padding:6px 8px;color:#90a4ae;">
-              {% if (r.islem or '') == 'giris' and r.fark %}{{ r.fark }}{% else %}--{% endif %}
-            </td>
+            <td style="padding:6px 8px;color:#90a4ae;">Gün özeti</td>
+            <td style="padding:6px 8px;color:#4fc3f7;font-weight:600;">{{ r.fark }}</td>
             {% if is_admin %}
             <td style="padding:6px 8px;">
               <button type="button" class="pdovam-rapor-duzenle-btn" style="background:#00bcd4;color:#000;border:none;padding:4px 10px;border-radius:4px;font-size:11px;cursor:pointer;">Düzenle</button>
             </td>
             {% endif %}
           </tr>
+          <tr class="pdovam-rapor-detay" style="background:#0a1624;">
+            <td colspan="{{ 7 if is_admin else 6 }}" style="padding:10px 14px 12px 14px;border-bottom:1px solid #243447;">
+              <ul style="margin:0;padding-left:18px;color:#b0bec5;font-size:12px;line-height:1.55;">
+                {% for line in r.fark_detay_lines %}
+                <li>{{ line }}</li>
+                {% endfor %}
+              </ul>
+            </td>
+          </tr>
+          {% else %}
+          <tr style="border-bottom:1px solid #243447;" data-personel-id="{{ r.personel_id }}" data-tarih="{{ r.tarih }}">
+            <td style="padding:6px 8px;color:#e0f7fa;">{{ r.tarih_tr or r.tarih }}</td>
+            <td style="padding:6px 8px;color:#e0f7fa;">{{ r.rapor_giris or r.saat }}</td>
+            <td style="padding:6px 8px;color:#e0f7fa;">{{ r.rapor_cikis or '—' }}</td>
+            <td style="padding:6px 8px;color:#e0f7fa;">{{ r.personel_adi or r.personel_id }}</td>
+            <td style="padding:6px 8px;color:#90a4ae;">{{ r.islem }}</td>
+            <td style="padding:6px 8px;color:#90a4ae;">{{ r.fark }}</td>
+            {% if is_admin %}
+            <td style="padding:6px 8px;">
+              <button type="button" class="pdovam-rapor-duzenle-btn" style="background:#00bcd4;color:#000;border:none;padding:4px 10px;border-radius:4px;font-size:11px;cursor:pointer;">Düzenle</button>
+            </td>
+            {% endif %}
+          </tr>
+          {% endif %}
           {% else %}
           <tr>
             <td colspan="{{ 7 if is_admin else 6 }}" style="padding:10px 8px;text-align:center;color:#78909c;">Seçilen aralık için Supabase veya devam kaydı logu bulunamadı.</td>
@@ -336,6 +372,8 @@ body{margin:0;}
   var API_MANUEL = "{{ url_for('pdovam.api_manuel') }}";
   var API_SIL = "{{ url_for('pdovam.api_sil') }}";
   var API_KAYIT = "{{ url_for('pdovam.api_kayit') }}";
+  var API_FARK_GUN = "{{ url_for('pdovam.api_fark_gun') }}";
+  var API_HAREKET_SON = "{{ url_for('pdovam.api_hareket_son') }}";
 
   // Eğer bu sayfa bir iframe içinde açıldıysa, üstteki ana header/nav kısmını gizle
   try {
@@ -360,6 +398,7 @@ body{margin:0;}
   var tekEl = document.getElementById('pdovam-tek-kisi');
   var tekAd = document.getElementById('pdovam-tek-adi');
   var tekBtn = document.getElementById('pdovam-tek-btn');
+  var tekHareketlerEl = document.getElementById('pdovam-tek-hareketler');
   var mesajEl = document.getElementById('pdovam-mesaj');
   var baskaLink = document.getElementById('pdovam-baska-kisi');
   var loaderEl = document.getElementById('pdovam-loader');
@@ -415,26 +454,33 @@ body{margin:0;}
     switchTab('giris');
   }
 
-  function timeDiffHours(girisStr, cikisStr) {
-    if (!girisStr || !cikisStr) return null;
-    function toMinutes(s) {
-      var p = String(s).split(':');
-      if (p.length < 2) return null;
-      var h = parseInt(p[0], 10); if (isNaN(h)) h = 0;
-      var m = parseInt(p[1], 10); if (isNaN(m)) m = 0;
-      return h * 60 + m;
-    }
-    var mg = toMinutes(girisStr);
-    var mc = toMinutes(cikisStr);
-    if (mg === null || mc === null) return null;
-    var mins = mc - mg;
-    if (mins <= 0) return null;
-    var toplam = mins / 60;
-    var net = Math.max(0, toplam - 1.5);
-    return {
-      toplam: parseFloat(toplam.toFixed(2)),
-      net: parseFloat(net.toFixed(2))
-    };
+  function pdovamHtmlEscape(s) {
+    if (s === '') return '';
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+  }
+
+  /** Rapor sekmesiyle aynı Fark (sunucu _consolidate_pdovam_gunluk) */
+  function pdovamFarkYenile(tr) {
+    var pid = tr.getAttribute('data-id');
+    var tiso = tr.getAttribute('data-tarih-iso');
+    var farkTd = tr.querySelector('td[data-col="fark"]');
+    if (!farkTd || !pid || !tiso) { if (farkTd) farkTd.innerHTML = '<strong style="color:#4fc3f7">—</strong>'; return; }
+    farkTd.innerHTML = '<span style="opacity:.65;font-size:11px;">…</span>';
+    fetch(API_FARK_GUN + '?personel_id=' + encodeURIComponent(pid) + '&tarih=' + encodeURIComponent(tiso))
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if (!d || !d.ok) { farkTd.innerHTML = '<strong style="color:#4fc3f7">—</strong>'; return; }
+        var html = '<strong style="color:#4fc3f7">' + pdovamHtmlEscape(d.fark || '—') + '</strong>';
+        if (d.fark_detay_lines && d.fark_detay_lines.length) {
+          html += '<details style="margin-top:4px;font-size:11px;color:#90a4ae;"><summary style="cursor:pointer;list-style:none;">Ayrıntı</summary><ul style="margin:4px 0 0 12px;padding:0;">';
+          for (var i = 0; i < d.fark_detay_lines.length; i++) {
+            html += '<li>' + pdovamHtmlEscape(d.fark_detay_lines[i]) + '</li>';
+          }
+          html += '</ul></details>';
+        }
+        farkTd.innerHTML = html;
+      })
+      .catch(function(){ farkTd.innerHTML = '<strong style="color:#4fc3f7">—</strong>'; });
   }
 
   function findPersonel(id) {
@@ -442,6 +488,34 @@ body{margin:0;}
       if (personeller[i].id === id) return personeller[i];
     }
     return null;
+  }
+
+  function tekHareketlerYukle(pid) {
+    if (!tekHareketlerEl || !pid) return;
+    tekHareketlerEl.textContent = 'Yükleniyor…';
+    fetch(API_HAREKET_SON + '?personel_id=' + encodeURIComponent(pid))
+      .then(function(r){ return r.json().catch(function(){ return { ok:false, data:[] }; }); })
+      .then(function(d){
+        if (!d || !d.ok || !Array.isArray(d.data)) {
+          tekHareketlerEl.textContent = 'Hareket listesi yüklenemedi.';
+          return;
+        }
+        if (!d.data.length) {
+          tekHareketlerEl.textContent = 'Henüz kayıt yok.';
+          return;
+        }
+        var html = '<ul style="margin:0;padding-left:18px;">';
+        for (var i = 0; i < d.data.length; i++) {
+          var x = d.data[i] || {};
+          var tipTxt = (x.tip === 'giris') ? 'Giriş' : ((x.tip === 'cikis') ? 'Çıkış' : (x.tip || 'Hareket'));
+          html += '<li>' + pdovamHtmlEscape(x.tarih_tr || x.tarih || '') + ' ' + pdovamHtmlEscape(x.saat || '') + ' — ' + pdovamHtmlEscape(tipTxt) + '</li>';
+        }
+        html += '</ul>';
+        tekHareketlerEl.innerHTML = html;
+      })
+      .catch(function(){
+        tekHareketlerEl.textContent = 'Hareket listesi yüklenemedi.';
+      });
   }
 
   function showSingleView() {
@@ -461,11 +535,9 @@ body{margin:0;}
     listEl.style.display = 'none';
     tekEl.style.display = 'block';
     tekAd.textContent = p.ad_soyad || 'Personel';
+    tekHareketlerYukle(id);
     var durum = (p.durum || '').toLowerCase();
-    if (durum === 'cikis' || durum === 'zaten_cikis') {
-      tekBtn.textContent = 'Çıkış zaten yapıldı';
-      tekBtn.disabled = true;
-    } else if (durum === 'giris') {
+    if (durum === 'giris') {
       tekBtn.textContent = 'Çıkış Yap';
       tekBtn.disabled = false;
     } else {
@@ -479,25 +551,18 @@ body{margin:0;}
     var girisTd = tr.querySelector('td[data-col="giris"]');
     var cikisTd = tr.querySelector('td[data-col="cikis"]');
     var durumTd = tr.querySelector('td[data-col="durum"]');
-    var mesaiTd = tr.querySelector('td[data-col="mesai-saat"]');
     if (data.islem === 'giris') {
       if (girisTd) girisTd.textContent = data.saat || '--';
+      if (cikisTd) cikisTd.textContent = '--';
       if (durumTd) durumTd.textContent = 'giris';
     } else if (data.islem === 'cikis') {
       if (cikisTd) cikisTd.textContent = data.saat || '--';
       if (durumTd) durumTd.textContent = 'cikis';
     }
-    if (mesaiTd && girisTd && cikisTd) {
-      var r = timeDiffHours(girisTd.textContent.trim(), cikisTd.textContent.trim());
-      if (r) {
-        mesaiTd.innerHTML = r.toplam.toFixed(2) + '<br><span style="font-size:11px;color:#90a4ae;">Net: ' + r.net.toFixed(2) + '</span>';
-      } else {
-        mesaiTd.textContent = '--';
-      }
-    }
+    pdovamFarkYenile(tr);
   }
 
-  var COOLDOWN_MS = 60 * 1000;
+  var COOLDOWN_MS = 10 * 1000;
   function getCooldownKey(pid) { return 'pdovam_cool_' + pid; }
   function isInCooldown(pid) {
     var t = localStorage.getItem(getCooldownKey(pid));
@@ -561,9 +626,12 @@ body{margin:0;}
         if (!d) d = { ok: false };
         if (d.ok) {
           setCooldown(id);
-          if (d.islem === 'giris') gosterMesaj('Giriş kaydınız başarıyla gerçekleşmiştir.', true);
-          else if (d.islem === 'cikis' || d.islem === 'zaten_cikis') gosterMesaj('Çıkış kaydınız başarıyla gerçekleşmiştir.', true);
-          else gosterMesaj(d.mesaj || 'İşlem kaydedildi.', true);
+          var tarihTxt = d.tarih_tr || '';
+          var saatTxt = d.saat || '';
+          var extra = (tarihTxt || saatTxt) ? (' | ' + tarihTxt + (saatTxt ? (' ' + saatTxt) : '')) : '';
+          if (d.islem === 'giris') gosterMesaj((d.mesaj || 'Giriş kaydınız başarıyla gerçekleşmiştir.') + extra, true);
+          else if (d.islem === 'cikis') gosterMesaj((d.mesaj || 'Çıkış kaydınız başarıyla gerçekleşmiştir.') + extra, true);
+          else gosterMesaj((d.mesaj || 'İşlem kaydedildi.') + extra, true);
         } else {
           gosterMesaj(d.mesaj || 'Giriş kaydınızda hata oluştu.', false);
         }
@@ -571,8 +639,8 @@ body{margin:0;}
         if (d.ok && d.islem) {
           var p = findPersonel(id);
           if (p) {
-            if (d.islem === 'giris') { p.durum = 'giris'; p.giris_saati = d.saat; }
-            else if (d.islem === 'cikis' || d.islem === 'zaten_cikis') { p.durum = 'cikis'; p.cikis_saati = d.saat; }
+            if (d.islem === 'giris') { p.durum = 'giris'; p.giris_saati = d.saat; p.cikis_saati = null; }
+            else if (d.islem === 'cikis') { p.durum = 'cikis'; p.cikis_saati = d.saat; }
           }
         }
       })
@@ -592,7 +660,12 @@ body{margin:0;}
       setStored(id, ad);
       guncelleSatir(tr, d);
       var p = findPersonel(id);
-      if (p && d.islem) { p.durum = d.islem; if (d.islem === 'giris') p.giris_saati = d.saat; else if (d.islem === 'cikis' || d.islem === 'zaten_cikis') p.cikis_saati = d.saat; }
+      if (p && d.islem) {
+        p.durum = d.islem;
+        if (d.islem === 'giris') { p.giris_saati = d.saat; p.cikis_saati = null; }
+        else if (d.islem === 'cikis') p.cikis_saati = d.saat;
+      }
+      tekHareketlerYukle(id);
       if (onSuccess) onSuccess(d);
       showSingleView();
     });
@@ -631,7 +704,7 @@ body{margin:0;}
       var btnSil = tr.querySelector('.pdovam-btn-sil');
       var girisTd = tr.querySelector('td[data-col=\"giris\"]');
       var cikisTd = tr.querySelector('td[data-col=\"cikis\"]');
-      var mesaiTd = tr.querySelector('td[data-col=\"mesai-saat\"]');
+      var farkTd = tr.querySelector('td[data-col=\"fark\"]');
       var durumTd = tr.querySelector('td[data-col=\"durum\"]');
 
       function setViewMode() {
@@ -675,21 +748,15 @@ body{margin:0;}
           var cInp = cikisTd ? cikisTd.querySelector('input') : null;
           var gVal = gInp && gInp.value ? gInp.value : null;
           var cVal = cInp && cInp.value ? cInp.value : null;
+          var tiso = tr.getAttribute('data-tarih-iso');
           fetch(API_MANUEL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ personel_id: id, giris_saati: gVal, cikis_saati: cVal })
+            body: JSON.stringify({ personel_id: id, giris_saati: gVal, cikis_saati: cVal, tarih: tiso || undefined })
           }).then(function(r){ return r.json(); }).then(function(resp){
             if (!resp.ok) { alert(resp.mesaj || 'Kaydedilemedi'); return; }
             setViewMode();
-            if (mesaiTd && girisTd && cikisTd) {
-              var r = timeDiffHours(girisTd.textContent.trim(), cikisTd.textContent.trim());
-              if (r) {
-                mesaiTd.innerHTML = r.toplam.toFixed(2) + '<br><span style=\"font-size:11px;color:#90a4ae;\">Net: ' + r.net.toFixed(2) + '</span>';
-              } else {
-                mesaiTd.textContent = '--';
-              }
-            }
+            pdovamFarkYenile(tr);
             if (mesajEl && resp.mesaj) mesajEl.textContent = resp.mesaj;
           }).catch(function(){
             alert('Sunucuya ulaşılamadı.');
@@ -703,15 +770,16 @@ body{margin:0;}
           var id = parseInt(tr.getAttribute('data-id'), 10);
           if (!id) return;
           if (!confirm('Bu personelin bugünkü devam kaydını silmek istiyor musunuz?')) return;
+          var tSil = tr.getAttribute('data-tarih-iso');
           fetch(API_SIL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ personel_id: id })
+            body: JSON.stringify({ personel_id: id, tarih: tSil || undefined })
           }).then(function(r){ return r.json(); }).then(function(resp){
             if (!resp.ok) { alert(resp.mesaj || 'Silinemedi'); return; }
             if (girisTd) girisTd.textContent = '--';
             if (cikisTd) cikisTd.textContent = '--';
-            if (mesaiTd) mesaiTd.textContent = '--';
+            pdovamFarkYenile(tr);
             if (durumTd) durumTd.textContent = '--';
           }).catch(function(){
             alert('Sunucuya ulaşılamadı.');
@@ -731,9 +799,9 @@ body{margin:0;}
       postIsle(id, function(d) {
         var p = findPersonel(id);
         if (p && d.islem === 'giris') { p.durum = 'giris'; p.giris_saati = d.saat; tekBtn.textContent = 'Çıkış Yap'; tekBtn.disabled = false; }
-        else if (p && d.islem === 'cikis') { p.durum = 'cikis'; p.cikis_saati = d.saat; tekBtn.textContent = 'Çıkış zaten yapıldı'; }
-        else if (d.islem === 'zaten_cikis') { if (p) p.durum = 'cikis'; tekBtn.textContent = 'Çıkış zaten yapıldı'; }
+        else if (p && d.islem === 'cikis') { p.durum = 'cikis'; p.cikis_saati = d.saat; tekBtn.textContent = 'Giriş Yap'; tekBtn.disabled = false; }
         else { tekBtn.disabled = false; }
+        tekHareketlerYukle(id);
       });
     });
   }
@@ -843,6 +911,21 @@ body{margin:0;}
       if (e.target === raporModal) raporModal.style.display = 'none';
     });
   }
+
+  document.querySelectorAll('tr.pdovam-rapor-ana').forEach(function(tr){
+    tr.addEventListener('click', function(e){
+      if (e.target.closest && e.target.closest('.pdovam-rapor-duzenle-btn')) return;
+      var det = tr.nextElementSibling;
+      if (!det || !det.classList.contains('pdovam-rapor-detay')) return;
+      var acik = det.classList.toggle('pdovam-detay-acik');
+      tr.setAttribute('aria-expanded', acik ? 'true' : 'false');
+    });
+    tr.addEventListener('keydown', function(e){
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      e.preventDefault();
+      tr.click();
+    });
+  });
 
   if (loaderRetryBtn) {
     loaderRetryBtn.addEventListener('click', function(){

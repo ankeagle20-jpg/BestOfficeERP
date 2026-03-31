@@ -1551,6 +1551,18 @@ def yeni_fatura():
                         default_birim_fiyat = 0
     _pk = (request.args.get("prefill_key") or "").strip()
     fatura_prefill_key = _pk if re.match(r"^[a-zA-Z0-9_-]{12,140}$", _pk) else ""
+    default_gib_fatura_id = request.args.get("gib_fatura_id", type=int)
+    if default_gib_fatura_id is not None and default_gib_fatura_id < 1:
+        default_gib_fatura_id = None
+    # GİB paneli: tek HTTP ile son fatura ID (JS beklemeden dolu gelsin)
+    _son_gib = fetch_one("SELECT id FROM faturalar ORDER BY id DESC LIMIT 1") or {}
+    try:
+        _sid = _son_gib.get("id")
+        son_fatura_id_for_gib = int(_sid) if _sid is not None else None
+    except (TypeError, ValueError):
+        son_fatura_id_for_gib = None
+    if son_fatura_id_for_gib is not None and son_fatura_id_for_gib < 1:
+        son_fatura_id_for_gib = None
 
     return render_template('faturalar/yeni_fatura.html',
                            bugun=now.strftime("%Y-%m-%d"),
@@ -1560,7 +1572,9 @@ def yeni_fatura():
                            default_birim_fiyat=default_birim_fiyat,
                            default_kdv_orani=default_kdv_orani,
                            satir_aciklama_url=satir_aciklama_url,
-                           fatura_prefill_key=fatura_prefill_key)
+                           fatura_prefill_key=fatura_prefill_key,
+                           default_gib_fatura_id=default_gib_fatura_id,
+                           son_fatura_id_for_gib=son_fatura_id_for_gib)
 
 
 @bp.route('/irsaliye/yeni')
@@ -1620,6 +1634,8 @@ def yeni_irsaliye():
         satir_aciklama_url="",
         fatura_prefill_key="",
         irsaliye_modu=True,
+        default_gib_fatura_id=None,
+        son_fatura_id_for_gib=None,
     )
 
 

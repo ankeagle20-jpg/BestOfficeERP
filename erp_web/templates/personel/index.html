@@ -60,7 +60,7 @@
             <div class="panel">
                 <h4>Günlük Devam Listesi</h4>
                 <div style="max-height:320px;overflow-y:auto;">
-                    <table class="tbl"><thead><tr><th>Personel</th><th>Giriş</th><th>Çıkış</th><th>Durum</th><th>Geç (dk)</th></tr></thead><tbody id="devam-tbody"></tbody></table>
+                    <table class="tbl"><thead><tr><th>Tarih</th><th>Personel</th><th>Giriş</th><th>Çıkış</th><th>Durum</th><th>Geç (dk)</th></tr></thead><tbody id="devam-tbody"></tbody></table>
                 </div>
             </div>
             <div class="panel">
@@ -135,12 +135,60 @@
 
 <!-- Personel Yönetimi -->
 <div id="pane-personel" class="tab-pane">
-    <!-- Personel listesi üstte -->
-    <div class="panel">
-        <h4>Personel Listesi</h4>
-        <div class="frm-row"><label>Göster:</label><label><input type="radio" name="filtre-p" value="tumu"> Tümü</label><label><input type="radio" name="filtre-p" value="aktif" checked> Aktif</label><label><input type="radio" name="filtre-p" value="pasif"> Pasif</label></div>
-        <div style="max-height:320px;overflow-y:auto;"><table class="tbl"><thead><tr><th>Personel Adı</th><th>Mesai</th><th>Durum</th><th>Not</th><th>İşlem</th></tr></thead><tbody id="personel-tbody"></tbody></table></div>
-        <div style="margin-top:8px;"><button type="button" id="btn-yeni-personel" class="btn-p">+ Yeni Personel Ekle</button></div>
+    <div style="display:flex;gap:8px;margin-bottom:10px;border-bottom:1px solid #2d4060;">
+        <button type="button" id="personel-alt-tab-liste" class="btn-s" style="border-radius:6px 6px 0 0;background:#00bcd4;color:#001018;">Personel Listesi</button>
+        <button type="button" id="personel-alt-tab-sure" class="btn-s" style="border-radius:6px 6px 0 0;background:#2d4060;color:#cfd8dc;">Süre</button>
+    </div>
+
+    <div id="personel-alt-pane-liste">
+        <div class="panel">
+            <h4>Personel Listesi</h4>
+            <div class="frm-row"><label>Göster:</label><label><input type="radio" name="filtre-p" value="tumu"> Tümü</label><label><input type="radio" name="filtre-p" value="aktif" checked> Aktif</label><label><input type="radio" name="filtre-p" value="pasif"> Pasif</label></div>
+            <div style="max-height:320px;overflow-y:auto;"><table class="tbl"><thead><tr><th>Personel Adı</th><th>Mesai</th><th>Durum</th><th>Not</th><th>İşlem</th></tr></thead><tbody id="personel-tbody"></tbody></table></div>
+            <div style="margin-top:8px;"><button type="button" id="btn-yeni-personel" class="btn-p">+ Yeni Personel Ekle</button></div>
+        </div>
+    </div>
+
+    <div id="personel-alt-pane-sure" style="display:none;">
+        <div class="panel">
+            <h4>Süre</h4>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px;">
+                <div style="font-size:11px;color:#90a4ae;">Yıl:</div>
+                <div style="font-size:12px;color:#e0f7fa;font-weight:600;" id="izin-sure-yil"></div>
+            </div>
+            <div style="margin-bottom:8px;">
+                <div style="font-size:11px;color:#90a4ae;margin-bottom:4px;">Personel Listesi</div>
+                <div style="max-height:140px;overflow-y:auto;">
+                    <table class="tbl">
+                        <thead>
+                            <tr>
+                                <th style="text-align:left;">Personel Adı</th>
+                                <th style="text-align:center;">Mesai</th>
+                                <th style="text-align:center;">Durum</th>
+                            </tr>
+                        </thead>
+                        <tbody id="sure-personel-tbody"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div id="izin-sure-personel-list" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;"></div>
+            <div style="max-height:320px;overflow-y:auto;">
+                <table class="tbl">
+                    <thead>
+                        <tr>
+                            <th style="text-align:left;">Personel</th>
+                            <th style="text-align:center;">Yıllık Hak</th>
+                            <th style="text-align:center;">Kullanılan İzin</th>
+                            <th style="text-align:center;">Geç Süre</th>
+                            <th style="text-align:center;">Devreden</th>
+                            <th style="text-align:center;">Toplam Hak</th>
+                            <th style="text-align:center;">Kalan</th>
+                        </tr>
+                    </thead>
+                    <tbody id="izin-sure-tbody"></tbody>
+                </table>
+            </div>
+        </div>
     </div>
     {% if is_admin %}
     <div class="panel" id="ozluk-panel" style="margin-top:12px;">
@@ -232,6 +280,7 @@ const API_OZLUK_KAYDET = "{{ url_for('personel.api_personel_ozluk_kaydet') }}";
 const API_OZLUK_SIL = "{{ url_for('personel.api_personel_ozluk_sil') }}";
 const API_IZIN_LIST = "{{ url_for('personel.api_izin_list') }}";
 const API_IZIN_OZET = "{{ url_for('personel.api_izin_ozet') }}";
+const API_IZIN_OZET_LISTE = "{{ url_for('personel.api_izin_ozet_liste') }}";
 const API_IZIN_KAYDET = "{{ url_for('personel.api_izin_kaydet') }}";
 const API_IZIN_SIL = "{{ url_for('personel.api_izin_sil') }}";
 const API_GEC_LIST = "{{ url_for('personel.api_gec_list') }}";
@@ -241,6 +290,10 @@ const API_YETKI_KAYDET = "{{ url_for('personel.api_yetki_kaydet') }}";
 const AYLAR = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"];
 let seciliTarih = null;
 let seciliPersonelId = null;
+let seciliSurePersonelId = null;
+let sureRowsCache = [];
+let personelRowsCache = [];
+let sureRowsByPid = {};
 
 function bugunStr() {
   const d = new Date();
@@ -261,10 +314,11 @@ async function devamGunlukYukle() {
   const rows = await res.json();
   const tbody = document.getElementById('devam-tbody');
   tbody.innerHTML = '';
-  if (!rows.length) { tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#6b7280;">Kayıt yok.</td></tr>'; return; }
+  if (!rows.length) { tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#6b7280;">Kayıt yok.</td></tr>'; return; }
   rows.forEach(r => {
     const tr = document.createElement('tr');
-    tr.innerHTML = '<td>'+ (r.ad_soyad||'') +'</td><td>'+ (r.giris_saati||'—') +'</td><td>'+ (r.cikis_saati||'—') +'</td><td>'+ (r.durum||'') +'</td><td>'+ (r.gec_dakika||0) +'</td>';
+    const trTarih = isoToTr(r.tarih) || t;
+    tr.innerHTML = '<td style="white-space:nowrap;color:#90a4ae;">'+ trTarih +'</td><td>'+ (r.ad_soyad||'') +'</td><td>'+ (r.giris_saati||'—') +'</td><td>'+ (r.cikis_saati||'—') +'</td><td>'+ (r.durum||'') +'</td><td>'+ (r.gec_dakika||0) +'</td>';
     tbody.appendChild(tr);
   });
 }
@@ -288,6 +342,7 @@ async function devamAylikYukle() {
 async function personelListeYukle(filtre) {
   const res = await fetch(API_LIST + (filtre ? '?filtre='+filtre : ''));
   const rows = await res.json();
+  personelRowsCache = Array.isArray(rows) ? rows : [];
   const sel = document.getElementById('manuel-personel');
   const sel2 = document.getElementById('izin-personel');
   sel.innerHTML = '<option value="">— Seçin —</option>';
@@ -310,6 +365,260 @@ async function personelListeYukle(filtre) {
     tr.onclick = () => personelSec(r);
     tbody.appendChild(tr);
   });
+  renderSurePersonelTablosu();
+}
+
+function gunFmt(v) {
+  if (v === null || v === undefined) return '—';
+  var n = Number(v);
+  if (!isFinite(n)) return '—';
+  // 14.0 gibi geliyorsa sadeleştir
+  if (Math.abs(n - Math.round(n)) < 0.00001) return String(Math.round(n));
+  return String(n);
+}
+
+function renderSurePersonelListesi(rows) {
+  const wrap = document.getElementById('izin-sure-personel-list');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  if (!rows || !rows.length) return;
+  rows.forEach(r => {
+    const btn = document.createElement('button');
+    const aktif = Number(seciliSurePersonelId) === Number(r.personel_id);
+    btn.type = 'button';
+    btn.textContent = r.ad_soyad || '';
+    btn.style.cssText = 'border:none;border-radius:14px;padding:4px 10px;font-size:11px;cursor:pointer;'
+      + (aktif ? 'background:#00bcd4;color:#001018;font-weight:700;' : 'background:#2d4060;color:#cfd8dc;');
+    btn.onclick = function() {
+      seciliSurePersonelId = r.personel_id;
+      renderSurePersonelListesi(sureRowsCache);
+      renderSurePersonelTablosu();
+      renderSureTablo();
+      if (!sureRowsByPid[String(r.personel_id)]) {
+        sureTekPersonelYukle(r.personel_id).then(function() {
+          renderSurePersonelListesi(sureRowsCache);
+          renderSurePersonelTablosu();
+          renderSureTablo();
+        });
+      }
+    };
+    wrap.appendChild(btn);
+  });
+}
+
+function sureRowMapYenile() {
+  sureRowsByPid = {};
+  (sureRowsCache || []).forEach(function(r) {
+    sureRowsByPid[String(r.personel_id)] = r;
+  });
+}
+
+function sureRowUpsert(r) {
+  if (!r || r.personel_id == null) return;
+  const key = String(r.personel_id);
+  sureRowsByPid[key] = r;
+  let bulundu = false;
+  sureRowsCache = (sureRowsCache || []).map(function(x) {
+    if (String(x.personel_id) === key) {
+      bulundu = true;
+      return r;
+    }
+    return x;
+  });
+  if (!bulundu) sureRowsCache.push(r);
+}
+
+async function sureTekPersonelYukle(pid) {
+  if (pid == null) return;
+  const yilEl = document.getElementById('izin-yil');
+  const yil = (yilEl && yilEl.value) ? parseInt(yilEl.value, 10) : new Date().getFullYear();
+  try {
+    const rr = await fetch(API_IZIN_OZET + '?personel_id=' + encodeURIComponent(String(pid)) + '&yil=' + encodeURIComponent(String(yil)));
+    if (!rr.ok) return;
+    const d = await rr.json();
+    const p = (personelRowsCache || []).find(function(x) { return Number(x.id) === Number(pid); });
+    sureRowUpsert({
+      personel_id: Number(pid),
+      ad_soyad: p ? (p.ad_soyad || '') : '',
+      hak: d.hak != null ? d.hak : 14,
+      manuel_ek: d.manuel_ek != null ? d.manuel_ek : 0,
+      toplam_hak: d.toplam_hak != null ? d.toplam_hak : ((d.hak || 14) + (d.manuel_ek || 0)),
+      kullanilan: d.kullanilan != null ? d.kullanilan : 0,
+      kalan: d.kalan_net_gun != null ? d.kalan_net_gun : (d.kalan != null ? d.kalan : 0),
+      kalan_text: d.kalan_net_text != null ? d.kalan_net_text : null,
+      gec_sure_dk: d.gec_sure_dk != null ? d.gec_sure_dk : null,
+      gec_sure_gun: d.gec_sure_gun != null ? d.gec_sure_gun : null,
+      gec_sure_saat: d.gec_sure_saat != null ? d.gec_sure_saat : null
+    });
+  } catch (e) {}
+}
+
+function renderSurePersonelTablosu() {
+  const tbody = document.getElementById('sure-personel-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+  if (!personelRowsCache.length) {
+    tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:#6b7280;">Kayıt yok.</td></tr>';
+    return;
+  }
+  personelRowsCache.forEach(p => {
+    const tr = document.createElement('tr');
+    const secili = Number(seciliSurePersonelId) === Number(p.id);
+    tr.style.cursor = 'pointer';
+    if (secili) tr.style.background = '#00695c';
+    tr.innerHTML = '<td style="text-align:left;">' + (p.ad_soyad || '') + '</td>'
+      + '<td style="text-align:center;">' + (p.mesai_baslangic || '09:00') + '</td>'
+      + '<td style="text-align:center;">' + (p.is_active ? 'Aktif' : 'Pasif') + '</td>';
+    tr.onclick = function() {
+      seciliSurePersonelId = p.id;
+      renderSurePersonelTablosu();
+      renderSurePersonelListesi(sureRowsCache);
+      renderSureTablo();
+      if (!sureRowsByPid[String(p.id)]) {
+        sureTekPersonelYukle(p.id).then(function() {
+          renderSurePersonelListesi(sureRowsCache);
+          renderSurePersonelTablosu();
+          renderSureTablo();
+        });
+      }
+    };
+    tbody.appendChild(tr);
+  });
+}
+
+function renderSureTablo() {
+  const tbody = document.getElementById('izin-sure-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+  if (!sureRowsCache.length) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#6b7280;">Kayıt yok.</td></tr>';
+    return;
+  }
+  let rows = sureRowsCache;
+  if (seciliSurePersonelId != null) {
+    rows = rows.filter(r => Number(r.personel_id) === Number(seciliSurePersonelId));
+  }
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#6b7280;">Seçili personel verisi yükleniyor...</td></tr>';
+    return;
+  }
+  rows.forEach(r => {
+    const yillikHak = (r.hak !== undefined ? r.hak : 0);
+    const devreden = (r.manuel_ek !== undefined ? r.manuel_ek : 0);
+    const toplamHak = (r.toplam_hak !== undefined ? r.toplam_hak : (yillikHak + devreden));
+    const gecSure = (r.gec_sure_gun || r.gec_sure_saat || '—');
+    const kalanText = (r.kalan_text || null);
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td style="text-align:left;">'+ (r.ad_soyad || '') +'</td>'
+      + '<td style="text-align:center;">'+ gunFmt(yillikHak) +'</td>'
+      + '<td style="text-align:center;">'+ gunFmt(r.kullanilan || 0) +'</td>'
+      + '<td style="text-align:center;">'+ (gecSure || '—') +'</td>'
+      + '<td style="text-align:center;">'+ gunFmt(devreden) +'</td>'
+      + '<td style="text-align:center;">'+ gunFmt(toplamHak) +'</td>'
+      + '<td style="text-align:center;">'+ (kalanText || gunFmt(r.kalan || 0)) +'</td>';
+    tbody.appendChild(tr);
+  });
+}
+
+async function izinSureListeYukle(filtre) {
+  var yilEl = document.getElementById('izin-yil');
+  const yil = (yilEl && yilEl.value) ? parseInt(yilEl.value, 10) : new Date().getFullYear();
+  const tbody = document.getElementById('izin-sure-tbody');
+  const yilSureEl = document.getElementById('izin-sure-yil');
+  if (yilSureEl) yilSureEl.textContent = String(yil);
+  if (!tbody) return;
+  let rows = [];
+  try {
+    const res = await fetch(API_IZIN_OZET_LISTE + '?filtre=' + encodeURIComponent(filtre || 'aktif') + '&yil=' + encodeURIComponent(String(yil)));
+    if (res.ok) {
+      const data = await res.json();
+      rows = Array.isArray(data) ? data : [];
+    }
+  } catch (e) {}
+
+  // Fallback: toplu endpoint yok/boşsa seçili filtredeki personeller için tekil özet çek
+  if (!rows.length && Array.isArray(personelRowsCache) && personelRowsCache.length) {
+    const reqs = personelRowsCache.map(async function(p) {
+      try {
+        let hak = 14;
+        let kalan = null;
+        try {
+          const oz = await fetch(API_OZLUK_GET + '?personel_id=' + encodeURIComponent(p.id));
+          if (oz.ok) {
+            const od = await oz.json();
+            if (od && od.izin_hakedis_gun != null && od.izin_hakedis_gun !== '') hak = Number(od.izin_hakedis_gun) || 14;
+            if (od && (od.izin_kalan_gun != null || od.izin_kalan_saat != null)) {
+              const kg = Number(od.izin_kalan_gun || 0);
+              const ks = Number(od.izin_kalan_saat || 0);
+              kalan = kg + (ks / 8.0);
+            }
+          }
+        } catch (e) {}
+
+        let kullanilan = 0;
+        try {
+          const il = await fetch(API_IZIN_LIST + '?personel_id=' + encodeURIComponent(p.id) + '&yil=' + encodeURIComponent(String(yil)));
+          if (il.ok) {
+            const list = await il.json();
+            if (Array.isArray(list)) {
+              list.forEach(function(x) {
+                if ((x.izin_turu || '') === 'Yıllık Ücretli İzin') {
+                  kullanilan += Number(x.gun_sayisi || 0);
+                }
+              });
+            }
+          }
+        } catch (e) {}
+
+        let devreden = 0;
+        let toplamHak = hak;
+        if (kalan != null) {
+          // kalan = (hak + devreden) - kullanilan  => devreden = kalan + kullanilan - hak
+          devreden = Math.max(0, (Number(kalan) + Number(kullanilan) - Number(hak)));
+          toplamHak = hak + devreden;
+        } else {
+          kalan = Math.max(0, hak - kullanilan);
+          toplamHak = hak;
+        }
+        return {
+          personel_id: p.id,
+          ad_soyad: p.ad_soyad || '',
+          hak: hak,
+          manuel_ek: devreden,
+          toplam_hak: toplamHak,
+          kullanilan: kullanilan,
+          kalan: kalan
+        };
+      } catch (e) {
+        return null;
+      }
+    });
+    const all = await Promise.all(reqs);
+    rows = all.filter(Boolean);
+  }
+
+  sureRowsCache = rows;
+  sureRowMapYenile();
+  if (!sureRowsCache.length) {
+    seciliSurePersonelId = null;
+    renderSurePersonelListesi(sureRowsCache);
+    renderSureTablo();
+    return;
+  }
+  if (!sureRowsCache.some(r => Number(r.personel_id) === Number(seciliSurePersonelId))) {
+    seciliSurePersonelId = sureRowsCache[0].personel_id;
+  }
+  renderSurePersonelTablosu();
+  renderSurePersonelListesi(sureRowsCache);
+  renderSureTablo();
+  // İlk tıklamayı hızlandır: seçili personelin geç süre/kalan netini önceden çek.
+  if (seciliSurePersonelId != null) {
+    setTimeout(function() {
+      sureTekPersonelYukle(seciliSurePersonelId).then(function() {
+        renderSureTablo();
+      });
+    }, 0);
+  }
 }
 
 async function personelSil(id) {
@@ -320,6 +629,7 @@ async function personelSil(id) {
     if (d && d.ok) {
       if (seciliPersonelId === id) { seciliPersonelId = null; document.querySelectorAll('#personel-tbody tr').forEach(tr => tr.style.background = ''); }
       personelListeYukle(document.querySelector('input[name="filtre-p"]:checked').value);
+      izinSureListeYukle(document.querySelector('input[name="filtre-p"]:checked') ? document.querySelector('input[name="filtre-p"]:checked').value : 'aktif');
     } else alert(d.mesaj || 'Silme başarısız.');
   } catch (e) { alert('Silme hatası: ' + (e.message || e)); }
 }
@@ -464,7 +774,11 @@ async function izinListYukle(pid) {
 async function izinSil(id) {
   if (!confirm('Bu izin kaydını silmek istediğinize emin misiniz?')) return;
   await fetch(API_IZIN_SIL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ izin_id: id }) });
-  if (seciliPersonelId) { izinListYukle(seciliPersonelId); izinOzetYukle(seciliPersonelId); }
+  if (seciliPersonelId) {
+    izinListYukle(seciliPersonelId);
+    izinOzetYukle(seciliPersonelId);
+    izinSureListeYukle(document.querySelector('input[name="filtre-p"]:checked') ? document.querySelector('input[name="filtre-p"]:checked').value : 'aktif');
+  }
 }
 
 async function gecListYukle(pid) {
@@ -494,6 +808,26 @@ function yetkiYukle(pid) {
   });
 }
 
+function personelAltTabGoster(which) {
+  var btnListe = document.getElementById('personel-alt-tab-liste');
+  var btnSure = document.getElementById('personel-alt-tab-sure');
+  var paneListe = document.getElementById('personel-alt-pane-liste');
+  var paneSure = document.getElementById('personel-alt-pane-sure');
+  var ozlukPanel = document.getElementById('ozluk-panel');
+  var showSure = which === 'sure';
+
+  if (paneListe) paneListe.style.display = showSure ? 'none' : '';
+  if (paneSure) paneSure.style.display = showSure ? '' : 'none';
+  if (btnListe) { btnListe.style.background = showSure ? '#2d4060' : '#00bcd4'; btnListe.style.color = showSure ? '#cfd8dc' : '#001018'; }
+  if (btnSure) { btnSure.style.background = showSure ? '#00bcd4' : '#2d4060'; btnSure.style.color = showSure ? '#001018' : '#cfd8dc'; }
+  if (ozlukPanel) ozlukPanel.style.display = showSure ? 'none' : '';
+
+  if (showSure) {
+    var f = document.querySelector('input[name="filtre-p"]:checked');
+    izinSureListeYukle(f ? f.value : 'aktif');
+  }
+}
+
 document.getElementById('btn-bugun').onclick = function() { document.getElementById('filter-tarih').value = bugunStr(); devamGunlukYukle(); };
 document.getElementById('btn-aylik-goster').onclick = devamAylikYukle;
 document.getElementById('btn-manuel-kaydet').onclick = async function() {
@@ -509,14 +843,28 @@ document.getElementById('btn-manuel-kaydet').onclick = async function() {
 
 document.getElementById('tab-devam').onclick = function(e){ e.preventDefault(); document.querySelectorAll('.personel-tabs a').forEach(a=>a.classList.remove('active')); document.querySelectorAll('.tab-pane').forEach(p=>p.classList.remove('active')); this.classList.add('active'); document.getElementById('pane-devam').classList.add('active'); };
 document.getElementById('tab-izin').onclick = function(e){ e.preventDefault(); document.querySelectorAll('.personel-tabs a').forEach(a=>a.classList.remove('active')); document.querySelectorAll('.tab-pane').forEach(p=>p.classList.remove('active')); this.classList.add('active'); document.getElementById('pane-izin').classList.add('active'); personelListeYukle('aktif'); };
-document.getElementById('tab-personel').onclick = function(e){ e.preventDefault(); document.querySelectorAll('.personel-tabs a').forEach(a=>a.classList.remove('active')); document.querySelectorAll('.tab-pane').forEach(p=>p.classList.remove('active')); this.classList.add('active'); document.getElementById('pane-personel').classList.add('active'); personelListeYukle(document.querySelector('input[name="filtre-p"]:checked').value); };
+document.getElementById('tab-personel').onclick = function(e){ e.preventDefault(); document.querySelectorAll('.personel-tabs a').forEach(a=>a.classList.remove('active')); document.querySelectorAll('.tab-pane').forEach(p=>p.classList.remove('active')); this.classList.add('active'); document.getElementById('pane-personel').classList.add('active'); var f = document.querySelector('input[name="filtre-p"]:checked'); personelListeYukle(f ? f.value : 'aktif'); personelAltTabGoster('liste'); };
 document.getElementById('tab-giris-cikis').onclick = function(e){ e.preventDefault(); document.querySelectorAll('.personel-tabs a').forEach(a=>a.classList.remove('active')); document.querySelectorAll('.tab-pane').forEach(p=>p.classList.remove('active')); this.classList.add('active'); document.getElementById('pane-giris-cikis').classList.add('active'); };
 
-document.querySelectorAll('input[name="filtre-p"]').forEach(inp => inp.onchange = function() { personelListeYukle(this.value); });
+document.querySelectorAll('input[name="filtre-p"]').forEach(inp => inp.onchange = function() { personelListeYukle(this.value); izinSureListeYukle(this.value); });
+var personelAltTabListeBtn = document.getElementById('personel-alt-tab-liste');
+if (personelAltTabListeBtn) personelAltTabListeBtn.onclick = function() { personelAltTabGoster('liste'); };
+var personelAltTabSureBtn = document.getElementById('personel-alt-tab-sure');
+if (personelAltTabSureBtn) personelAltTabSureBtn.onclick = function() { personelAltTabGoster('sure'); };
 
 document.getElementById('izin-personel').onchange = function() { seciliPersonelId = this.value; if (this.value) { bilgiYukle(this.value); izinOzetYukle(this.value); izinListYukle(this.value); gecListYukle(this.value); yetkiYukle(this.value); } };
-document.getElementById('izin-yil').onchange = function() { if (seciliPersonelId) { izinOzetYukle(seciliPersonelId); izinListYukle(seciliPersonelId); } };
-document.getElementById('btn-izin-ozet').onclick = function() { if (seciliPersonelId) { izinOzetYukle(seciliPersonelId); izinListYukle(seciliPersonelId); } };
+document.getElementById('izin-yil').onchange = function() {
+  var f = document.querySelector('input[name="filtre-p"]:checked');
+  var val = f ? f.value : 'aktif';
+  if (seciliPersonelId) { izinOzetYukle(seciliPersonelId); izinListYukle(seciliPersonelId); }
+  izinSureListeYukle(val);
+};
+document.getElementById('btn-izin-ozet').onclick = function() {
+  var f = document.querySelector('input[name="filtre-p"]:checked');
+  var val = f ? f.value : 'aktif';
+  if (seciliPersonelId) { izinOzetYukle(seciliPersonelId); izinListYukle(seciliPersonelId); }
+  izinSureListeYukle(val);
+};
 
 document.getElementById('btn-izin-kaydet').onclick = async function() {
   if (!seciliPersonelId) { alert('Personel seçin.'); return; }
@@ -525,6 +873,8 @@ document.getElementById('btn-izin-kaydet').onclick = async function() {
   if (!bas || !bit) { alert('Başlangıç ve bitiş tarihi girin.'); return; }
   await fetch(API_IZIN_KAYDET, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ personel_id: seciliPersonelId, izin_turu: document.getElementById('izin-turu').value, baslangic_tarihi: tarihToIso(bas) || bas, bitis_tarihi: tarihToIso(bit) || bit, aciklama: document.getElementById('izin-aciklama').value }) });
   izinListYukle(seciliPersonelId); izinOzetYukle(seciliPersonelId);
+  var f = document.querySelector('input[name="filtre-p"]:checked');
+  izinSureListeYukle(f ? f.value : 'aktif');
   document.getElementById('izin-bas').value = ''; document.getElementById('izin-bit').value = ''; document.getElementById('izin-aciklama').value = '';
 };
 
@@ -656,6 +1006,9 @@ document.addEventListener('DOMContentLoaded', function() {
   document.getElementById('filter-tarih').value = bugunStr();
   devamGunlukYukle();
   personelListeYukle('aktif');
+  // Süre verilerini arka planda önceden yükle (ilk tıklama gecikmesini azaltır)
+  setTimeout(function() { izinSureListeYukle('aktif'); }, 0);
+  personelAltTabGoster('liste');
 });
 </script>
 {% endblock %}

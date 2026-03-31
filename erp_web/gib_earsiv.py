@@ -173,18 +173,24 @@ class BestOfficeGIBManager:
             first = items[0] if items else {}
             urun_adi = str(first.get("name") or fatura_data.get("hizmet_adi") or "Hizmet")
             fiyat = float(first.get("unit_price") or fatura_data.get("birim_fiyat") or fatura_data.get("toplam") or 0)
-            out = self.client.fatura_olustur(
-                tarih=fatura_data.get("tarih") or "",
-                saat=fatura_data.get("saat") or "12:00:00",
-                vkn_veya_tckn=str(fatura_data.get("vkn") or "").strip(),
-                ad=(fatura_data.get("ad") or "").strip(),
-                soyad=(fatura_data.get("soyad") or "").strip(),
-                unvan=(fatura_data.get("unvan") or "").strip(),
-                vergi_dairesi=(fatura_data.get("vd") or "").strip(),
-                urun_adi=urun_adi,
-                fiyat=fiyat,
-                fatura_notu=(note[:500] if note else "BestOfficeERP"),
-            )
+            kdv_orani = int(first.get("tax_rate") or fatura_data.get("kdv_orani") or 20)
+            payload = {
+                "tarih": fatura_data.get("tarih") or "",
+                "saat": fatura_data.get("saat") or "12:00:00",
+                "vkn_veya_tckn": str(fatura_data.get("vkn") or "").strip(),
+                "ad": (fatura_data.get("ad") or "").strip(),
+                "soyad": (fatura_data.get("soyad") or "").strip(),
+                "unvan": (fatura_data.get("unvan") or "").strip(),
+                "vergi_dairesi": (fatura_data.get("vd") or "").strip(),
+                "urun_adi": urun_adi,
+                "fiyat": fiyat,
+                "fatura_notu": (note[:500] if note else "BestOfficeERP"),
+            }
+            # Bazı eArsivPortal sürümleri kdv_orani alır, bazıları almaz.
+            try:
+                out = self.client.fatura_olustur(**payload, kdv_orani=kdv_orani)
+            except TypeError:
+                out = self.client.fatura_olustur(**payload)
             if hasattr(out, "dict"):
                 d = out.dict()
                 return d.get("ettn") or d.get("uuid")
@@ -362,11 +368,65 @@ def build_fatura_data_from_db(fatura_id, fetch_one_func):
         ad = unvan or ""
 
     toplam = float(fatura.get("toplam") or fatura.get("tutar") or 0)
-    hizmet_turu = (kyc and kyc.get("hizmet_turu")) or ""
-    hizmet_adi = _hizmet_adi_gib(hizmet_turu)
-    birim_fiyat = float(kyc.get("aylik_kira") or 0) if kyc else toplam
-    if birim_fiyat <= 0:
-        birim_fiyat = toplam
+
+    # Öncelik her zaman kaydedilmiş fatura satırlarıdır.
+    # Eski sürüm KYC varsayılanı (sanal ofis/aylık kira/%20) kullandığı için
+    # GİB'de yanlış ürün adı/fiyat/KDV oluşabiliyordu.
+    items = []
+    kdv_orani_genel = None
+    hizmet_adi = None
+    birim_fiyat = None
+    try:
+        import json
+        satirlar_raw = fatura.get("satirlar_json")
+        satirlar = json.loads(satirlar_raw) if satirlar_raw else []
+        if isinstance(satirlar, list):
+            for s in satirlar:
+                try:
+                    ad_raw = (s.get("ad") or s.get("mal_hizmet") or s.get("urun_adi") or "").strip()
+                    ad = ad_raw or "Hizmet"
+                    miktar = float(s.get("miktar") or 0) or 1.0
+                    birim_f = float(s.get("birim_fiyat") or 0)
+                    isk_oran = float(s.get("iskonto_orani") or 0)
+                    isk_tutar_in = s.get("iskonto_tutar")
+                    kdv = int(round(float(s.get("kdv_orani") or 0)))
+                    brut = max(0.0, miktar * birim_f)
+                    if isk_tutar_in is not None and float(isk_tutar_in or 0) > 0:
+                        isk_tutar = min(float(isk_tutar_in), brut)
+                    else:
+                        isk_tutar = brut * (isk_oran / 100.0)
+                    net = max(0.0, brut - isk_tutar)
+                    unit_net = (net / miktar) if miktar > 0 else net
+                    item = {
+                        "name": ad,
+                        "quantity": round(miktar, 2),
+                        "unit_price": round(unit_net, 2),
+                        "tax_rate": int(max(0, min(100, kdv))),
+                    }
+                    items.append(item)
+                except Exception:
+                    continue
+    except Exception:
+        items = []
+
+    if items:
+        hizmet_adi = items[0].get("name") or "Hizmet"
+        birim_fiyat = float(items[0].get("unit_price") or 0)
+        kdv_orani_genel = int(items[0].get("tax_rate") or 0)
+    else:
+        # Fallback: satır yoksa önce KYC, sonra fatura toplamı
+        hizmet_turu = (kyc and kyc.get("hizmet_turu")) or ""
+        hizmet_adi = _hizmet_adi_gib(hizmet_turu)
+        birim_fiyat = float(kyc.get("aylik_kira") or 0) if kyc else toplam
+        if birim_fiyat <= 0:
+            birim_fiyat = toplam
+        kdv_orani_genel = 20
+        items = [{
+            "name": hizmet_adi,
+            "quantity": 1,
+            "unit_price": round(birim_fiyat, 2),
+            "tax_rate": int(kdv_orani_genel),
+        }]
 
     return {
         "tarih": tarih_str,
@@ -379,15 +439,8 @@ def build_fatura_data_from_db(fatura_id, fetch_one_func):
         "hizmet_adi": hizmet_adi,
         "birim_fiyat": birim_fiyat,
         "toplam": toplam,
-        "kdv_orani": 20,
-        "items": [
-            {
-                "name": hizmet_adi,
-                "quantity": 1,
-                "unit_price": round(birim_fiyat, 2),
-                "tax_rate": 20,
-            }
-        ],
+        "kdv_orani": int(kdv_orani_genel or 0),
+        "items": items,
         "iban": "",
         "note": (fatura.get("notlar") or "").strip() or "BestOfficeERP",
     }
