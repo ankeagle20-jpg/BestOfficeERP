@@ -2578,6 +2578,26 @@ def api_gib_taslak():
         uuid = gib.fatura_taslak_olustur(fatura_data)
         if not uuid:
             return jsonify({"ok": False, "mesaj": "GİB taslak oluşturulamadı."}), 500
+        # Taslak oluşturma çağrısı UUID dönse bile bazen portal listesine düşmeyebilir.
+        # eArsivPortal için kısa bir doğrulama yapıp kullanıcıya net durum dönelim.
+        taslak_dogrulandi = None
+        taslak_onay_durumu = None
+        if getattr(gib, "client_type", "") == "earsivportal":
+            taslak_dogrulandi = False
+            for _ in range(3):
+                try:
+                    st = gib.fatura_durum_getir(uuid, days_back=7) or {}
+                except Exception:
+                    st = {}
+                if st:
+                    taslak_dogrulandi = True
+                    taslak_onay_durumu = (st.get("onayDurumu") or st.get("durum") or "").strip() or None
+                    break
+                try:
+                    import time
+                    time.sleep(1.2)
+                except Exception:
+                    pass
         oid = None
         sms_error = None
         try:
@@ -2591,13 +2611,27 @@ def api_gib_taslak():
         except Exception:
             pass
         msg = "Taslak oluşturuldu."
+        if taslak_dogrulandi is False:
+            msg = ("Taslak isteği gönderildi ancak GİB listesinden doğrulanamadı. "
+                   "Portalda tarih filtresini genişletip tekrar sorgulayın; görünmüyorsa yeniden taslak gönderin.")
+        elif taslak_onay_durumu:
+            msg += f" Durum: {taslak_onay_durumu}."
         if oid:
             msg += " SMS gönderildi, gelen kodu girin."
         else:
             msg += " SMS otomatik tetiklenemedi; 'SMS Gönder' ile tekrar deneyin."
             if sms_error:
                 msg += f" Detay: {sms_error}"
-        return jsonify({"ok": True, "uuid": uuid, "oid": oid, "sms_sent": bool(oid), "sms_error": sms_error, "mesaj": msg})
+        return jsonify({
+            "ok": True,
+            "uuid": uuid,
+            "oid": oid,
+            "sms_sent": bool(oid),
+            "sms_error": sms_error,
+            "taslak_dogrulandi": taslak_dogrulandi,
+            "taslak_onay_durumu": taslak_onay_durumu,
+            "mesaj": msg,
+        })
     except ValueError as e:
         return jsonify({"ok": False, "mesaj": str(e)}), 400
     except RuntimeError as e:
