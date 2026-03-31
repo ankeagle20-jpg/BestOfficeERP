@@ -1049,6 +1049,9 @@
                     body: JSON.stringify({ fatura_id: faturaId })
                 }, 30000)
                     .then(function (j) {
+                        // Backend doğrulama hatası dönse bile uuid/oid geldiyse alanlara yaz.
+                        if (j && j.uuid) document.getElementById('yeni-gib-uuid').value = j.uuid || '';
+                        if (j && j.oid) document.getElementById('yeni-gib-oid').value = j.oid || '';
                         if (!j || !j.ok) throw new Error((j && j.mesaj) || 'Taslak gönderilemedi');
                         document.getElementById('yeni-gib-uuid').value = j.uuid || '';
                         document.getElementById('yeni-gib-oid').value = j.oid || '';
