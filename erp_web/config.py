@@ -17,6 +17,8 @@ class Config:
     SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")  # service_role key
     
     # PostgreSQL (Supabase DB)
+    # Öneri: Paneldeki "Connection string" URI'yi .env'e DATABASE_URL=... olarak yapıştırın
+    # (db.get_conn önce DATABASE_URL / SUPABASE_DB_URL okur; SSL/pooler uyumu daha iyi olur.)
     DB_HOST = os.environ.get("DB_HOST", "")
     DB_PORT = int(os.environ.get("DB_PORT", 5432))
     DB_NAME = os.environ.get("DB_NAME", "postgres")

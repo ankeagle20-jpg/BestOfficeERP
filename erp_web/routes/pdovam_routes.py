@@ -276,6 +276,13 @@ def _pdovam_dk_yazi(dk):
     return f"{m} dk"
 
 
+def _pdovam_saat_display_from_event(ev):
+    raw = (ev.get("saat_raw") or "").strip()
+    if raw and ":" in raw:
+        return (raw + ":00")[:8] if raw.count(":") == 1 and len(raw) <= 5 else raw[:8]
+    return _pdovam_minutes_clock(int(ev.get("min") or 0))
+
+
 def _pdovam_local_rows_to_rapor_hareketleri(rows_local, ad_map):
     """devam_kayitlari satırlarını rapordaki Supabase satır formatına çevirir.
     (personel_id, tarih_iso) anahtarları, buluttaki ham logların üzerine yazılır."""
@@ -678,6 +685,37 @@ def _consolidate_pdovam_gunluk(rows):
         if not detay_lines:
             detay_lines.append("Bu gün için hesaplanan fark yok.")
 
+        # Gün içindeki tüm giriş/çıkış hareketlerini çiftler halinde sırala
+        hareket_ciftleri = []
+        aktif_giris = None
+        for e in trimmed:
+            islem = (e.get("islem") or "").strip().lower()
+            if islem == "giris":
+                if aktif_giris is None:
+                    aktif_giris = e
+            elif islem == "cikis":
+                if aktif_giris is not None:
+                    gmin = int(aktif_giris.get("min") or 0)
+                    cmin = int(e.get("min") or 0)
+                    sure_dk = max(0, cmin - gmin)
+                    hareket_ciftleri.append({
+                        "giris": _pdovam_saat_display_from_event(aktif_giris),
+                        "cikis": _pdovam_saat_display_from_event(e),
+                        "sure": _pdovam_dk_yazi(sure_dk) if sure_dk > 0 else "0 dk",
+                        "cikis_varsayilan": False,
+                    })
+                    aktif_giris = None
+        if aktif_giris is not None:
+            gmin = int(aktif_giris.get("min") or 0)
+            cmin = max(gmin, VARSAYILAN_CIKIS_DK)
+            sure_dk = max(0, cmin - gmin)
+            hareket_ciftleri.append({
+                "giris": _pdovam_saat_display_from_event(aktif_giris),
+                "cikis": VARSAYILAN_CIKIS_SAATI,
+                "sure": _pdovam_dk_yazi(sure_dk) if sure_dk > 0 else "0 dk",
+                "cikis_varsayilan": True,
+            })
+
         out.append({
             "personel_id": pid,
             "personel_adi": ad,
@@ -692,6 +730,7 @@ def _consolidate_pdovam_gunluk(rows):
             "fark": fark_str,
             "fark_toplam_dk": fark_toplam_dk,
             "fark_detay_lines": detay_lines,
+            "hareket_ciftleri": hareket_ciftleri,
             "gec_sabah_dk": gec_sabah_dk,
             "izin_disari_dk": izin_disari_dk,
             "erken_cikis_izin_dk": erken_cikis_izin_dk,
@@ -907,6 +946,8 @@ def pdovam_anasayfa():
     # Eğer kullanıcı yanlışlıkla ters girdiyse, yer değiştir
     if bit_tarih < bas_tarih:
         bas_tarih, bit_tarih = bit_tarih, bas_tarih
+    # Giriş/Çıkış listesi (barkod / tek QR): sadece bugün — aynı personel için birden fazla satır (farklı günler) olmasın.
+    liste_gun = today
     rows = fetch_all(
         """
         SELECT p.id, p.ad_soyad, p.mesai_baslangic, p.mesai_bitis,
@@ -914,22 +955,22 @@ def pdovam_anasayfa():
                d.giris_saati, d.cikis_saati, d.durum, d.gec_dakika
         FROM personel p
         LEFT JOIN devam_kayitlari d
-            ON d.personel_id = p.id AND d.tarih BETWEEN %s AND %s
+            ON d.personel_id = p.id AND d.tarih = %s
         WHERE p.is_active = true
         ORDER BY p.ad_soyad, d.tarih
         """,
-        (bas_tarih, bit_tarih),
+        (liste_gun,),
     )
     rows = rows or []
 
-    # Gün içi izin süreleri için hareketler tablosu
+    # Gün içi izin süreleri (liste günü) — hareketler tablosu
     hareket_rows = fetch_all(
         """
         SELECT personel_id, tarih, saat, tip
         FROM personel_hareketleri
-        WHERE tarih BETWEEN %s AND %s
+        WHERE tarih = %s
         """,
-        (bas_tarih, bit_tarih),
+        (liste_gun,),
     ) or []
     izin_dakika_map = {}
     toplam_izin_dk = 0
@@ -992,6 +1033,11 @@ def pdovam_anasayfa():
         seen_ids.add(pid)
         tum_personeller.append({"id": pid, "ad_soyad": r["ad_soyad"]})
     personeller_all = [_personel_row_to_json_serializable(r) for r in rows]
+    # Bugün için henüz devam satırı yoksa liste yine bugünü göstersin (Fark API / data-tarih-iso doğru olsun)
+    for d in personeller_all:
+        if not d.get("tarih_iso"):
+            d["tarih_iso"] = liste_gun.isoformat()
+            d["tarih_tr"] = liste_gun.strftime("%d.%m.%Y")
     # Her personel + gün için izin süresini ekle
     for d in personeller_all:
         pid = d.get("id")
@@ -1010,12 +1056,9 @@ def pdovam_anasayfa():
         else:
             d["gun_izin_str"] = ""
     # personeller_list / personeller_json: fark eşlemesinden sonra (aşağıda)
-    if bas_tarih == bit_tarih:
-        bugun = bas_tarih.strftime("%d.%m.%Y")
-        gun_adi = ["Pazartesi","Salı","Çarşamba","Perşembe","Cuma","Cumartesi","Pazar"][bas_tarih.weekday()]
-    else:
-        bugun = f"{bas_tarih.strftime('%d.%m.%Y')} - {bit_tarih.strftime('%d.%m.%Y')}"
-        gun_adi = "Tarih aralığı"
+    # Üst başlık: liste her zaman bugün (barkod ekranında gün karışmasın)
+    bugun = liste_gun.strftime("%d.%m.%Y")
+    gun_adi = ["Pazartesi","Salı","Çarşamba","Perşembe","Cuma","Cumartesi","Pazar"][liste_gun.weekday()]
     is_admin = current_user.is_authenticated and getattr(current_user, "role", None) == "admin"
     bulut_base = (os.getenv("PUBLIC_APP_URL") or "https://bestofficeerp.onrender.com").strip().rstrip("/")
     # Görselleri her zaman mevcut sunucudan yükle (yerelde hızlı, Render'da aynı origin)
@@ -1216,6 +1259,7 @@ def pdovam_anasayfa():
                            tum_personeller=tum_personeller,
                            bugun=bugun,
                            gun_adi=gun_adi,
+                           liste_iso=liste_gun.isoformat(),
                            bas_iso=bas_tarih.isoformat(),
                            bit_iso=bit_tarih.isoformat(),
                            secili_personel_id=secili_pid,

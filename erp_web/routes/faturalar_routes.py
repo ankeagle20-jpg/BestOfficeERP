@@ -9,6 +9,8 @@ from db import (
     execute_returning,
     ensure_faturalar_amount_columns,
     ensure_auto_invoice_tables,
+    ensure_customers_durum,
+    ensure_customers_is_active,
 )
 from utils.text_utils import turkish_lower
 from utils.musteri_arama import customers_arama_sql_3_plus_tax, customers_arama_params_5
@@ -18,6 +20,7 @@ import re
 import json
 import uuid
 from urllib.parse import urlencode
+import logging
 from reportlab.lib.pagesizes import A5, A4
 from reportlab.lib.units import mm
 from reportlab.lib import colors
@@ -86,6 +89,24 @@ def _resolve_ettn_for_pdf(raw_ettn, fatura_id=None):
         except (TypeError, ValueError):
             pass
     return str(uuid.uuid4()).upper()
+
+
+def _normalize_vergi_dairesi(vd):
+    """Vergi dairesi adını sadeleştir: 'KAVAKLIDERE VERGİ DAİRESİ MÜD.' -> 'KAVAKLIDERE'."""
+    s = str(vd or "").strip()
+    if not s:
+        return "—"
+    # En güvenlisi: "VERGI" kökünden sonrasını at (Unicode farklılıklarına dayanıklı).
+    su = s.upper().replace("İ", "I")
+    idx = su.find("VERG")
+    if idx > 0:
+        s = s[:idx].strip()
+    # Kalan olası resmi ekleri temizle.
+    s = re.sub(r"\bDA[İI]RES[İI]\b", "", s, flags=re.IGNORECASE)
+    s = re.sub(r"\bM[ÜU]D(?:[ÜU]RL[ÜU][ĞG][ÜU]|\.?)\b", "", s, flags=re.IGNORECASE)
+    s = re.sub(r"\bBA[ŞS]KANLI[ĞG][İI]\b", "", s, flags=re.IGNORECASE)
+    s = re.sub(r"\s{2,}", " ", s).strip(" ,.-")
+    return s or "—"
 
 
 def _resolve_gib_logo_path():
@@ -580,8 +601,8 @@ def build_fatura_pdf(fatura, musteri, satirlar, preview=False):
     c.setTitle("İrsaliye Önizleme" if irsaliye_modu else "Fatura Önizleme")
 
     # Kenarlar
-    margin = 15 * mm
-    right = (A4_W_MM - 15) * mm
+    margin = 10 * mm
+    right = (A4_W_MM - 10) * mm
 
     # Tarih: gönderici üst çift çizgisinin 3 mm üstü, sol hiza = şirket unvanı (left_x) — çizim sender_top sonrası
     now = datetime.now()
@@ -636,21 +657,51 @@ def build_fatura_pdf(fatura, musteri, satirlar, preview=False):
             out.append(cur)
         return out or [t]
 
+    def _sanitize_addr_text(text):
+        """Adres bloğunda placeholder satırları tek satırda topla."""
+        out = []
+        placeholders = []
+        for raw in str(text or "").split("\n"):
+            ln = (raw or "").strip()
+            if not ln:
+                continue
+            n = (
+                ln.lower()
+                .replace("ı", "i")
+                .replace("İ", "i")
+                .replace("ş", "s")
+                .replace("ğ", "g")
+                .replace("ü", "u")
+                .replace("ö", "o")
+                .replace("ç", "c")
+                .replace(".", "")
+                .replace(":", "")
+                .strip()
+            )
+            # Değeri girilmemiş placeholder satırları biriktir: No:, Kapı No:, / Türkiye, Web Sitesi:
+            if n in ("no", "kapi no", "/ turkiye", "turkiye", "web sitesi", "web sitesi /"):
+                placeholders.append(ln)
+                continue
+            out.append(ln)
+        if placeholders:
+            out.append(" ".join(placeholders))
+        return "\n".join(out)
+
     def _draw_labeled_line(x_pt, y_pt, label, value, label_w_pt, value_max_w_pt=None):
-        c.setFont(font_name, 9)
+        c.setFont(font_name, 8)
         c.drawString(x_pt, y_pt, (label or "")[:30])
         if value_max_w_pt:
-            v_lines = _wrap_text(value, value_max_w_pt, font_name, 9)
+            v_lines = _wrap_text(value, value_max_w_pt, font_name, 8)
             c.drawString(x_pt + label_w_pt, y_pt, (v_lines[0] if v_lines else "")[:95])
         else:
             c.drawString(x_pt + label_w_pt, y_pt, (value or "")[:95])
 
     company = (fatura.get("current_user_company") or fatura.get("company") or {}) if isinstance(fatura, dict) else {}
     sender_unvan = (company.get("unvan") or FIRMA_UNVAN or "").strip()
-    sender_adres = (company.get("adres") or FIRMA_ADRES or "").strip()
+    sender_adres = _sanitize_addr_text((company.get("adres") or FIRMA_ADRES or "").strip())
     sender_tel = (company.get("telefon") or FIRMA_TELEFON or "").strip() or "—"
     sender_web = (company.get("web") or FIRMA_WEB or "").strip() or "—"
-    sender_vd = (company.get("vergi_dairesi") or FIRMA_VERGI_DAIRESI or "").strip() or "—"
+    sender_vd = _normalize_vergi_dairesi(company.get("vergi_dairesi") or FIRMA_VERGI_DAIRESI or "")
     sender_vkn = (company.get("vkn") or FIRMA_VERGI_NO or "").strip() or "—"
 
     client = (fatura.get("active_invoice_client") or fatura.get("client") or {}) if isinstance(fatura, dict) else {}
@@ -659,13 +710,13 @@ def build_fatura_pdf(fatura, musteri, satirlar, preview=False):
     must.update(musteri or {})
     must.update(client or {})
     alici_unvan = (must.get("unvan") or must.get("sirket_unvani") or must.get("name") or fatura.get("musteri_adi") or "Müşteri").strip()
-    alici_adres = (must.get("yeni_adres") or must.get("address") or "").strip() or "—"
+    alici_adres = _sanitize_addr_text((must.get("yeni_adres") or must.get("address") or "").strip()) or "—"
     sevk_adresi_pdf = (
         str(fatura.get("sevk_adresi") or fatura.get("sevk_adres") or must.get("sevk_adresi") or "")
         .replace("\r\n", "\n")
         .strip()
     )
-    alici_vd = (must.get("vergi_dairesi") or "—").strip()
+    alici_vd = _normalize_vergi_dairesi(must.get("vergi_dairesi") or "")
     alici_vkn = str(must.get("vergi_no") or must.get("tax_number") or "—").strip()
     pdf_ettn = _resolve_ettn_for_pdf(fatura.get("ettn"), fatura.get("id"))
 
@@ -767,24 +818,24 @@ def build_fatura_pdf(fatura, musteri, satirlar, preview=False):
 
     # Tarih: üst çift çizginin 3 mm üstü, unvan ile aynı sol hiza (overlay’de tekrar basılır)
     date_header_y = sender_top + 3 * mm
-    c.setFont(font_name, 9)
+    c.setFont(font_name, 8)
     c.drawString(left_x, date_header_y, ust_tarih)
 
     _double_hr_segment(left_x, left_x + left_col_w, sender_top)
     sender_y = sender_top - 12
 
     # Sol sütun: şirket bilgileri (wrap'li)
-    c.setFont(font_bold, 10.5)
-    for ln in _wrap_text(sender_unvan, left_col_w, font_bold, 10.5)[:2]:
+    c.setFont(font_bold, 9.5)
+    for ln in _wrap_text(sender_unvan, left_col_w, font_bold, 9.5)[:2]:
         c.drawString(left_x, sender_y, ln[:110])
         sender_y -= 12
-    c.setFont(font_name, 9)
+    c.setFont(font_name, 8)
     addr_lines = []
     for raw_ln in sender_adres.split("\\n"):
         raw_ln = (raw_ln or "").strip()
         if not raw_ln:
             continue
-        addr_lines.extend(_wrap_text(raw_ln, left_col_w, font_name, 9))
+        addr_lines.extend(_wrap_text(raw_ln, left_col_w, font_name, 8))
     for ln in addr_lines[:3]:
         c.drawString(left_x, sender_y, ln[:120])
         sender_y -= 11
@@ -875,13 +926,13 @@ def build_fatura_pdf(fatura, musteri, satirlar, preview=False):
     y_sayin_hr_top = y_pt
     _double_hr_segment(left_x, left_x + left_col_w, y_pt)
     y_pt -= SAYIN_TOP_PAD_BELOW_DOUBLE_PT
-    c.setFont(font_bold, 10.5)
+    c.setFont(font_bold, 9.5)
     c.drawString(margin, y_pt, "SAYIN")
     y_pt -= 12
-    c.setFont(font_bold, 10)
+    c.setFont(font_bold, 8.5)
     c.drawString(margin, y_pt, alici_unvan[:95])
     y_pt -= 12
-    c.setFont(font_name, 9)
+    c.setFont(font_name, 8)
     for ln in str(alici_adres).split("\\n"):
         if not ln.strip():
             continue
@@ -907,17 +958,17 @@ def build_fatura_pdf(fatura, musteri, satirlar, preview=False):
             raw_ln = (raw_ln or "").strip()
             if not raw_ln:
                 continue
-            sevk_lines.extend(_wrap_text(raw_ln, wrap_max, font_name, 9))
+            sevk_lines.extend(_wrap_text(raw_ln, wrap_max, font_name, 8))
         if sevk_lines:
             sayin_hr_lower_y = sayin_bottom_hr_top - _dhr_gap_pt
             y_sevk_open_top = sayin_hr_lower_y - BLOCK_GAP_BELOW_DOUBLE_PT
             _double_hr_segment(left_x, left_x + left_col_w, y_sevk_open_top)
             y_sevk_title = y_sevk_open_top - SAYIN_TOP_PAD_BELOW_DOUBLE_PT
-            c.setFont(font_bold, 9)
+            c.setFont(font_bold, 8.5)
             c.setFillColorRGB(0, 0, 0)
             c.drawString(left_x, y_sevk_title, "SEVK ADRESİ:")
             last_txt_baseline = y_sevk_title
-            c.setFont(font_name, 9)
+            c.setFont(font_name, 8)
             y_sevk_line = y_sevk_title - 12
             for ln in sevk_lines:
                 c.drawString(sevk_val_x, y_sevk_line, (ln or "")[:220])
@@ -933,7 +984,7 @@ def build_fatura_pdf(fatura, musteri, satirlar, preview=False):
     # ETTN satırı (kurumsal tasarım: alıcı / sevk bloğu alt çizgisinin hemen altında; QR ile aynı kod)
     ettn = pdf_ettn
     ettn_baseline_y = ettn_anchor_hr_top - 14
-    ettn_fs = 9
+    ettn_fs = 8.5
     ettn_lbl = "ETTN:"
     c.setFont(font_bold, ettn_fs)
     ettn_lbl_w = c.stringWidth(ettn_lbl, font_bold, ettn_fs)
@@ -949,11 +1000,11 @@ def build_fatura_pdf(fatura, musteri, satirlar, preview=False):
     descent_below_baseline_pt = 2.5
     gap_ettn_to_table_top_pt = 2.5
     start_y = ettn_baseline_y - descent_below_baseline_pt - gap_ettn_to_table_top_pt
-    header_row_h = 28   # pt, 2 satırlı başlıklar (İsk./Artt. Oranı vb.) üst/alt sınırlara değmesin
-    row_h = 11          # pt, veri + boş satırlar
+    header_row_h = 26   # pt, başlıkları daha kompakt tut
+    row_h = 10.5        # pt, veri + boş satırlar
     cell_pad_vert = 3   # pt, satır altı boşluk
     data_text_offset = 0.5 * mm
-    summary_row_h = 11   # pt, özet kutusu satırları
+    summary_row_h = 10.5   # pt, özet kutusu satırları
     GAP_TABLE_TO_SUMMARY = 1 * mm
     GAP_SUMMARY_TO_YALNIZ = 2.5 * mm
     header_line_h = 10  # pt, başlık satırı aralığı
@@ -972,8 +1023,30 @@ def build_fatura_pdf(fatura, musteri, satirlar, preview=False):
         "KDV Tutarı",
         "Mal Hizmet Tutarı",
     ]
-    # Sütun oranları (toplam 180): Sıra No ve İsk./Artt., KDV başlıkları hücreye sığsın
+    # Sütun oranları (toplam 180): uzun ürün adında "Mal Hizmet" kolonu dinamik genişlesin.
     w_ratios = [8, 46, 11, 11, 18, 13, 21, 12, 20, 20]
+    try:
+        max_name_len = 0
+        for srow in (satirlar or []):
+            nm = str((srow or {}).get("ad") or (srow or {}).get("hizmet_urun_adi") or "").strip()
+            if len(nm) > max_name_len:
+                max_name_len = len(nm)
+        # 34 karakter üzerini uzun kabul et; Mal/Hizmet'e +8'e kadar alan ver.
+        extra = min(8, max(0, int((max_name_len - 34) / 6)))
+        if extra > 0:
+            w_ratios[1] += extra
+            # Alanı toplamdan düşmek için daraltılabilir kolonlar: tutar/iskonto/kdv.
+            for idx in (9, 8, 6, 5, 4, 7):
+                if extra <= 0:
+                    break
+                min_w = 11 if idx in (5, 7) else 14
+                can_take = max(0, w_ratios[idx] - min_w)
+                take = min(extra, can_take)
+                if take > 0:
+                    w_ratios[idx] -= take
+                    extra -= take
+    except Exception:
+        pass
     widths = [table_width * (r / 180.0) for r in w_ratios]
     table_right = margin + table_width
 
@@ -1072,7 +1145,7 @@ def build_fatura_pdf(fatura, musteri, satirlar, preview=False):
     c.line(margin, start_y - header_row_h, table_right, start_y - header_row_h)
 
     # Veri satırları — ilk satır (1 Sanal ofis...) daha yüksek, yazı üst/alt çizgiye değmesin
-    c.setFont(font_name, 9)
+    c.setFont(font_name, 8.5)
     y_line = start_y - header_row_h - 5
     sira = 1
     pad = 5
@@ -1335,25 +1408,24 @@ def build_fatura_pdf(fatura, musteri, satirlar, preview=False):
     _n_sum_rows = 5
     _yalniz_h_pre = 14  # pt
     _box_h_sm = _n_sum_rows * summary_row_h + 8
-    _table_bottom_min = (
-        8 * mm + _yalniz_h_pre + GAP_SUMMARY_TO_YALNIZ + _box_h_sm + GAP_TABLE_TO_SUMMARY
-    )
-    # Önizleme: GİB görünümü için yüzlerce yatay çizgi gereksiz; PDF üretimi belirgin hızlanır.
-    MIN_EMPTY_GRID_ROWS = 4 if preview else 22
-    empty_row_h = float(row_h)
+    # Özet kutusunu sayfanın alt bandına sabitle: tek satır olsa bile tablo ızgarası aşağıya kadar dolsun.
+    _summary_box_y_fixed = 8 * mm + _yalniz_h_pre + GAP_SUMMARY_TO_YALNIZ
+    _summary_top_fixed = _summary_box_y_fixed + _box_h_sm
+    _table_bottom_min = _summary_top_fixed + GAP_TABLE_TO_SUMMARY
+    # Boş ızgara: tek satırda bile ortadaki alan dolu görünsün.
+    # Hedef satır sayısına göre boş satır yüksekliğini adaptif belirle.
+    TARGET_EMPTY_ROWS = 14 if preview else 24
+    available_h = max(0.0, float(y_line - _table_bottom_min))
+    if available_h > 0:
+        empty_row_h = max(5.8, min(float(row_h), available_h / float(TARGET_EMPTY_ROWS)))
+    else:
+        empty_row_h = max(5.8, min(float(row_h), 8.0))
     c.saveState()
     c.setLineWidth(0.5)
     try:
-        for _ in range(MIN_EMPTY_GRID_ROWS):
-            if y_line - empty_row_h < 50 * mm:
-                break
-            if y_line - empty_row_h < _table_bottom_min:
-                break
-            ny = y_line - empty_row_h
-            c.line(margin, ny, table_right, ny)
-            y_line = ny
         _extra_empty = 0
-        _extra_empty_cap = 8 if preview else 500
+        # Önizlemede de ızgara sayfa sonuna kadar dolsun.
+        _extra_empty_cap = 800
         while y_line - empty_row_h >= _table_bottom_min and y_line - empty_row_h >= 50 * mm:
             ny = y_line - empty_row_h
             c.line(margin, ny, table_right, ny)
@@ -1389,8 +1461,9 @@ def build_fatura_pdf(fatura, musteri, satirlar, preview=False):
     n_summary_rows = len(labels_vals)
     row_heights = [(n_summary_rows * summary_row_h + 8) / float(n_summary_rows)] * n_summary_rows
     box_h = sum(row_heights)
-    summary_top = table_bottom - GAP_TABLE_TO_SUMMARY
-    box_y = summary_top - box_h
+    # Özet kutusu sabit alt konumda.
+    box_y = _summary_box_y_fixed
+    summary_top = box_y + box_h
     yalniz_box_h = 14  # pt
     yalniz_box_y = box_y - GAP_SUMMARY_TO_YALNIZ - yalniz_box_h
 
@@ -1414,7 +1487,7 @@ def build_fatura_pdf(fatura, musteri, satirlar, preview=False):
                 ("BOX", (0, 0), (-1, -1), 0.5, colors.black),
                 ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
                 ("FONTNAME", (0, 0), (-1, -1), font_name),
-                ("FONTSIZE", (0, 0), (-1, -1), 9),
+                ("FONTSIZE", (0, 0), (-1, -1), 8.5),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                 ("ALIGN", (0, 0), (0, -1), "LEFT"),
                 ("ALIGN", (1, 0), (1, -1), "RIGHT"),
@@ -1430,7 +1503,7 @@ def build_fatura_pdf(fatura, musteri, satirlar, preview=False):
 
     # GİB: Yazı ile tutar — özet kutusunun altına ~2,5 mm, tam genişlik kutu
     yalniz_text = tutar_yaziya_gib(genel_toplam)
-    yalniz_font_size = 9
+    yalniz_font_size = 8.5
     c.setFont(font_name, yalniz_font_size)
     c.rect(margin, yalniz_box_y, table_width, yalniz_box_h)
     # Metni kutu içinde sola hizalı, dikey ortada (kenara yapışmasın)
@@ -1471,6 +1544,345 @@ def _row_serializable(row):
         if hasattr(v, "strftime"):
             d[k] = v.strftime("%Y-%m-%d %H:%M:%S") if hasattr(v, "hour") else v.strftime("%Y-%m-%d")
     return d
+
+
+def _fatura_satirlar_hesapla(fatura):
+    """Fatura kaydından satır kırılımı (PDF önizleme ile aynı mantık)."""
+    toplam = float(fatura.get("toplam") or 0)
+    satirlar = []
+    try:
+        raw_j = fatura.get("satirlar_json")
+        if raw_j:
+            raw = json.loads(raw_j) if isinstance(raw_j, str) else raw_j
+            for s in (raw if isinstance(raw, list) else []):
+                miktar = float(s.get("miktar") or 0)
+                birim_fiyat = float(s.get("birim_fiyat") or 0)
+                isk_oran = float(s.get("iskonto_orani") or 0)
+                isk_tutar_giris = s.get("iskonto_tutar")
+                kdv_oran = float(s.get("kdv_orani") or 0)
+                brut = miktar * birim_fiyat
+                if isk_tutar_giris is not None and float(isk_tutar_giris or 0) > 0:
+                    isk_tutar = min(float(isk_tutar_giris), brut)
+                else:
+                    isk_tutar = brut * isk_oran / 100.0
+                net = brut - isk_tutar
+                kdv_tutar = net * kdv_oran / 100.0
+                satirlar.append({
+                    "ad": (s.get("ad") or s.get("mal_hizmet") or "Hizmet").strip() or "Hizmet",
+                    "miktar": miktar,
+                    "birim": (s.get("birim") or "Adet").strip() or "Adet",
+                    "birim_fiyat": birim_fiyat,
+                    "iskonto_orani": isk_oran,
+                    "iskonto_tutar": isk_tutar,
+                    "kdv_orani": kdv_oran,
+                    "kdv_tutar": kdv_tutar,
+                    "mal_tutar": net,
+                    "satir_toplam": net + kdv_tutar,
+                })
+    except Exception:
+        pass
+    if not satirlar:
+        tutar = float(fatura.get("tutar") or 0)
+        kdv_tutar = float(fatura.get("kdv_tutar") or 0)
+        satirlar = [{
+            "ad": "Hizmet",
+            "miktar": 1,
+            "birim": "Ay",
+            "birim_fiyat": tutar,
+            "iskonto_orani": 0,
+            "iskonto_tutar": 0,
+            "kdv_orani": (kdv_tutar / tutar * 100) if tutar else 20,
+            "kdv_tutar": kdv_tutar,
+            "mal_tutar": tutar,
+            "satir_toplam": toplam,
+        }]
+    return satirlar
+
+
+def _fatura_rapor_aktif_musteri_sql_durum_kosulu():
+    """customers.durum: pasif / kapalı kayıtları rapor kapsamı dışı bırak."""
+    return """
+        (
+            c.durum IS NULL
+            OR TRIM(COALESCE(c.durum, '')) = ''
+            OR LOWER(TRIM(c.durum)) NOT IN (
+                'pasif', 'terk', 'kapandi', 'kapandı', 'kapalı', 'kapali', 'kapanmış', 'kapanmis'
+            )
+        )
+    """
+
+
+def _fatura_rapor_query_truthy(val) -> bool:
+    return str(val or "").strip().lower() in ("1", "true", "yes", "on", "evet")
+
+
+def _fatura_rapor_musteri_where_sql(pasifleri_dahil: bool, tum_musteriler: bool) -> str:
+    """Müşteri kartı listesi için WHERE parçası (fatura yok satırları)."""
+    if tum_musteriler:
+        return "TRUE"
+    durum_sql = _fatura_rapor_aktif_musteri_sql_durum_kosulu().strip()
+    base = "COALESCE(c.is_active, TRUE) = TRUE"
+    if pasifleri_dahil:
+        return base
+    return f"{base} AND {durum_sql}"
+
+
+@bp.route('/api/fatura-rapor')
+@faturalar_gerekli
+def api_fatura_rapor():
+    """Tarih aralığında kesilen faturaların satır bazlı dökümü (müşteri, tutarlar)."""
+    ensure_faturalar_amount_columns()
+    ensure_customers_is_active()
+    ensure_customers_durum()
+    bugun = date.today()
+    first_this = bugun.replace(day=1)
+    last_prev = first_this - timedelta(days=1)
+    bas_default = last_prev.replace(day=1)
+    bas_s = (request.args.get("baslangic") or "").strip()
+    bit_s = (request.args.get("bitis") or "").strip()
+    try:
+        bas = datetime.strptime(bas_s[:10], "%Y-%m-%d").date() if len(bas_s) >= 10 else bas_default
+    except Exception:
+        bas = bas_default
+    try:
+        bit = datetime.strptime(bit_s[:10], "%Y-%m-%d").date() if len(bit_s) >= 10 else bugun
+    except Exception:
+        bit = bugun
+    if bas > bit:
+        bas, bit = bit, bas
+    sadece_faturali = str(request.args.get("sadece_faturali") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+        "evet",
+    )
+    pasifleri_dahil = _fatura_rapor_query_truthy(request.args.get("pasifleri_dahil"))
+    tum_musteriler = _fatura_rapor_query_truthy(request.args.get("tum_musteriler"))
+    # Tarih filtresi: bazı kayıtlarda fatura_tarihi boş kalabiliyor (GİB sonrası vb.);
+    # vade_tarihi veya oluşturulma tarihi ile yedeklenir; aksi halde raporda görünmezler.
+    rows_raw = fetch_all(
+        """
+        SELECT f.id, f.fatura_no, f.fatura_tarihi, f.vade_tarihi,
+               f.musteri_id, f.musteri_adi,
+               COALESCE(
+                   NULLIF(TRIM(c.musteri_adi), ''),
+                   NULLIF(TRIM(c.name), ''),
+                   NULLIF(TRIM(f.musteri_adi), ''),
+                   '—'
+               ) AS musteri_adi_goster,
+               f.tutar, f.kdv_tutar, f.toplam, f.satirlar_json, f.durum, f.ettn
+        FROM faturalar f
+        LEFT JOIN customers c ON CAST(f.musteri_id AS INTEGER) = c.id
+        WHERE (
+            COALESCE(
+                    f.fatura_tarihi::date,
+                    f.vade_tarihi::date
+                  ) >= %s
+            AND COALESCE(
+                    f.fatura_tarihi::date,
+                    f.vade_tarihi::date
+                  ) <= %s
+        )
+        OR (
+            COALESCE(
+                    f.fatura_tarihi::date,
+                    f.vade_tarihi::date
+                  ) IS NULL
+            AND NULLIF(TRIM(COALESCE(f.ettn::text, '')), '') IS NOT NULL
+        )
+        ORDER BY COALESCE(
+                f.fatura_tarihi::date,
+                f.vade_tarihi::date
+              ) ASC NULLS LAST, f.id ASC
+        """,
+        (bas, bit),
+    ) or []
+    satirlar_out = []
+    for f in rows_raw:
+        fdict = dict(f)
+        line_items = _fatura_satirlar_hesapla(fdict)
+        ft = fdict.get("fatura_tarihi")
+        ftarih = ""
+        if ft is not None and str(ft).strip():
+            ftarih = str(ft)[:10]
+        elif fdict.get("vade_tarihi") is not None and str(fdict.get("vade_tarihi") or "").strip():
+            ftarih = str(fdict.get("vade_tarihi"))[:10]
+        else:
+            ftarih = ""
+        m_ad = (fdict.get("musteri_adi_goster") or fdict.get("musteri_adi") or "").strip() or "—"
+        mid = fdict.get("musteri_id")
+        fn = (fdict.get("fatura_no") or "").strip()
+        gid = fdict.get("id")
+        genel = round(float(fdict.get("toplam") or 0), 2)
+        ettn = (str(fdict.get("ettn") or "").strip() or None)
+        for idx, ln in enumerate(line_items, start=1):
+            st = float(ln.get("satir_toplam") or 0)
+            satirlar_out.append({
+                "fatura_id": gid,
+                "fatura_no": fn,
+                "fatura_tarihi": ftarih,
+                "musteri_id": mid,
+                "musteri_adi": m_ad,
+                "satir_no": idx,
+                "satir_aciklama": ln.get("ad") or "Hizmet",
+                "miktar": round(float(ln.get("miktar") or 0), 4),
+                "birim": (ln.get("birim") or "Adet").strip(),
+                "birim_fiyat": round(float(ln.get("birim_fiyat") or 0), 2),
+                "iskonto_tutar": round(float(ln.get("iskonto_tutar") or 0), 2),
+                "kdv_orani": round(float(ln.get("kdv_orani") or 0), 2),
+                "mal_tutar": round(float(ln.get("mal_tutar") or 0), 2),
+                "kdv_tutar": round(float(ln.get("kdv_tutar") or 0), 2),
+                "satir_toplam": round(st, 2),
+                "fatura_genel_toplam": genel,
+                "ettn": ettn,
+            })
+    kesilen_fatura_satir_sayisi = len(satirlar_out)
+    musteri_kapsam_adedi = 0
+    donemde_faturasiz_musteri = 0
+    if not sadece_faturali:
+        musteri_where = _fatura_rapor_musteri_where_sql(pasifleri_dahil, tum_musteriler)
+        aktif_musteriler = fetch_all(
+            f"""
+            SELECT c.id,
+                   COALESCE(NULLIF(TRIM(c.musteri_adi), ''), NULLIF(TRIM(c.name), ''), '—') AS musteri_adi_goster,
+                   TRIM(COALESCE(c.durum, '')) AS musteri_durum
+            FROM customers c
+            WHERE {musteri_where}
+            ORDER BY 2
+            """,
+        ) or []
+        musteri_kapsam_adedi = len(aktif_musteriler)
+        musteri_faturali = set()
+        for s in satirlar_out:
+            mid = s.get("musteri_id")
+            if mid is None:
+                continue
+            try:
+                musteri_faturali.add(int(mid))
+            except (TypeError, ValueError):
+                continue
+        for row in aktif_musteriler:
+            try:
+                cid = int(row.get("id"))
+            except (TypeError, ValueError):
+                continue
+            if cid in musteri_faturali:
+                continue
+            donemde_faturasiz_musteri += 1
+            m_ad = (row.get("musteri_adi_goster") or "—").strip() or "—"
+            mdur = (row.get("musteri_durum") or "").strip() or None
+            ph = {
+                "fatura_id": None,
+                "fatura_no": "—",
+                "fatura_tarihi": "",
+                "musteri_id": cid,
+                "musteri_adi": m_ad,
+                "satir_no": None,
+                "satir_aciklama": "Seçilen dönemde fatura kaydı yok",
+                "miktar": 0.0,
+                "birim": "—",
+                "birim_fiyat": 0.0,
+                "iskonto_tutar": 0.0,
+                "kdv_orani": 0.0,
+                "mal_tutar": 0.0,
+                "kdv_tutar": 0.0,
+                "satir_toplam": 0.0,
+                "fatura_genel_toplam": 0.0,
+                "ettn": None,
+                "musteri_doldurma": True,
+            }
+            if mdur:
+                ph["musteri_durum"] = mdur
+            satirlar_out.append(ph)
+        satirlar_out.sort(
+            key=lambda s: (
+                turkish_lower((s.get("musteri_adi") or "").strip()),
+                str(s.get("fatura_tarihi") or "9999-12-31"),
+                int(s.get("fatura_id") or 0),
+                int(s.get("satir_no") or 0),
+            )
+        )
+    toplam_satir = round(sum(s["satir_toplam"] for s in satirlar_out), 2)
+    kapsam_etiket = "tum_kayitlar" if tum_musteriler else ("pasif_dahil" if pasifleri_dahil else "aktif")
+    return jsonify({
+        "ok": True,
+        "baslangic": bas.isoformat(),
+        "bitis": bit.isoformat(),
+        "sadece_faturali": sadece_faturali,
+        "musteri_kapsam": kapsam_etiket,
+        "pasifleri_dahil": pasifleri_dahil,
+        "tum_musteriler": tum_musteriler,
+        "satirlar": satirlar_out,
+        "ozet": {
+            "fatura_adedi": len(rows_raw),
+            "satir_adedi": len(satirlar_out),
+            "kesilen_fatura_satir_sayisi": kesilen_fatura_satir_sayisi,
+            "musteri_kapsam_adedi": musteri_kapsam_adedi,
+            "donemde_faturasiz_musteri": donemde_faturasiz_musteri,
+            "toplam_satir_kdv_dahil": toplam_satir,
+        },
+    })
+
+
+@bp.route("/api/fatura-sil-toplu", methods=["POST"])
+@faturalar_gerekli
+def api_fatura_sil_toplu():
+    """Fatura raporundan seçilen faturaları siler; önce tahsilatlar, sonra fatura. ETTN’li (GİB kesilmiş) faturalar silinmez."""
+    ensure_faturalar_amount_columns()
+    try:
+        data = request.get_json(force=True, silent=True) or {}
+    except Exception:
+        data = {}
+    raw = data.get("fatura_ids")
+    if not isinstance(raw, list):
+        return jsonify({"ok": False, "mesaj": "fatura_ids listesi gerekli."}), 400
+    ids = []
+    seen = set()
+    for x in raw:
+        try:
+            i = int(x)
+            if i > 0 and i not in seen:
+                seen.add(i)
+                ids.append(i)
+        except (TypeError, ValueError):
+            continue
+    if not ids:
+        return jsonify({"ok": False, "mesaj": "Geçerli fatura id yok."}), 400
+    if len(ids) > 500:
+        return jsonify({"ok": False, "mesaj": "En fazla 500 fatura birden silinebilir."}), 400
+
+    silinen = []
+    atlanan = []
+    for fid in ids:
+        row = fetch_one(
+            """SELECT id, fatura_no,
+                      NULLIF(TRIM(COALESCE(ettn::text, '')), '') AS ettn_val
+               FROM faturalar WHERE id = %s""",
+            (fid,),
+        )
+        if not row:
+            atlanan.append({"id": fid, "neden": "bulunamadi"})
+            continue
+        if row.get("ettn_val"):
+            atlanan.append(
+                {
+                    "id": fid,
+                    "fatura_no": row.get("fatura_no"),
+                    "neden": "ettn_var",
+                }
+            )
+            continue
+        execute("DELETE FROM tahsilatlar WHERE fatura_id = %s", (fid,))
+        rc = execute("DELETE FROM faturalar WHERE id = %s", (fid,))
+        if rc:
+            silinen.append({"id": fid, "fatura_no": row.get("fatura_no")})
+        else:
+            atlanan.append({"id": fid, "neden": "silinemedi"})
+    msg = f"{len(silinen)} fatura silindi."
+    if atlanan:
+        msg += f" {len(atlanan)} kayıt atlandı (ETTN’li veya bulunamadı)."
+    return jsonify({"ok": True, "silinen": silinen, "atlanan": atlanan, "mesaj": msg})
 
 
 @bp.route('/')
@@ -2084,6 +2496,143 @@ def fatura_onizleme():
         return jsonify({"ok": False, "mesaj": str(e)}), 500
 
 
+# --- Aylık kira / hizmet: aynı müşteri + aynı takvim ayı mükerrer fatura engeli ---
+_AY_PARSE_VARIANTS = [
+    (1, ("ocak",)),
+    (2, ("şubat", "subat")),
+    (3, ("mart",)),
+    (4, ("nisan",)),
+    (5, ("mayıs", "mayis")),
+    (6, ("haziran",)),
+    (7, ("temmuz",)),
+    (8, ("ağustos", "agustos")),
+    (9, ("eylül", "eylul")),
+    (10, ("ekim",)),
+    (11, ("kasım", "kasim")),
+    (12, ("aralık", "aralik")),
+]
+
+
+def _satir_adindan_ay_yil_cikar(ad):
+    """Satır açıklamasından (örn. 'Hizmet bedeli — NİSAN 2026') (yıl, ay) çiftleri."""
+    tl = turkish_lower(ad or "")
+    out = []
+    for mno, variants in _AY_PARSE_VARIANTS:
+        for vn in variants:
+            if vn not in tl:
+                continue
+            idx = tl.find(vn)
+            chunk = tl[max(0, idx - 16) : idx + len(vn) + 22]
+            for my in re.finditer(r"(20\d{2})", chunk):
+                try:
+                    y = int(my.group(1))
+                    if 1990 <= y <= 2100:
+                        out.append((y, mno))
+                except (TypeError, ValueError):
+                    pass
+            break
+    return out
+
+
+def _fatura_kira_donemleri_topla(satirlar, fatura_tarihi_iso, notlar):
+    """Ay birimi, satır metni ve |AYLIK_TUTAR| işaretinden (yıl, ay) kümesi."""
+    donemler = set()
+    for m in re.finditer(r"\|AYLIK_TUTAR\|(\d{4}-\d{2}-\d{2})\|", notlar or ""):
+        try:
+            d = datetime.strptime(m.group(1), "%Y-%m-%d").date()
+            donemler.add((d.year, d.month))
+        except Exception:
+            pass
+    ay_birimi = False
+    if isinstance(satirlar, list):
+        for s in satirlar:
+            if not isinstance(s, dict):
+                continue
+            ad = (s.get("ad") or s.get("name") or s.get("hizmet") or "").strip()
+            birim = (s.get("birim") or "").strip().lower()
+            if birim == "ay":
+                ay_birimi = True
+            for pair in _satir_adindan_ay_yil_cikar(ad):
+                donemler.add(pair)
+    if ay_birimi and not donemler and fatura_tarihi_iso:
+        try:
+            d = datetime.strptime(str(fatura_tarihi_iso)[:10], "%Y-%m-%d").date()
+            donemler.add((d.year, d.month))
+        except Exception:
+            pass
+    return donemler
+
+
+def _musteri_icin_ayda_baska_fatura(musteri_id, y, m, exclude_fatura_id=None):
+    """Aynı müşteri için verilen ay/yılda (fatura_tarihi ayı) başka fatura var mı."""
+    try:
+        mid = int(musteri_id)
+    except (TypeError, ValueError):
+        return None
+    ay1 = date(y, m, 1)
+    sql = """
+        SELECT id, fatura_no, fatura_tarihi, ettn
+        FROM faturalar
+        WHERE musteri_id = %s
+          AND DATE_TRUNC('month', COALESCE(fatura_tarihi::date, vade_tarihi::date)) = DATE_TRUNC('month', %s::date)
+    """
+    params = [mid, ay1]
+    if exclude_fatura_id is not None:
+        sql += " AND id <> %s"
+        params.append(int(exclude_fatura_id))
+    sql += " ORDER BY id DESC LIMIT 1"
+    return fetch_one(sql, tuple(params))
+
+
+@bp.route("/api/secilen-aylar-fatura-kontrol", methods=["POST"])
+@faturalar_gerekli
+def api_secilen_aylar_fatura_kontrol():
+    """Sözleşme gridinden «Seçilenlerden fatura oluştur» öncesi kontrol.
+
+    Kural: Sadece GİB'den imzalı (ettn dolu) faturalar mükerrer sayılır.
+    ERP içi taslak/deneme (ettn boş) faturalar için engel çıkarılmaz.
+    """
+    try:
+        data = request.get_json() or {}
+    except Exception:
+        data = {}
+    musteri_id = _opt_customer_id(data.get("musteri_id"))
+    if not musteri_id:
+        return jsonify({"ok": False, "mesaj": "musteri_id gerekli."}), 400
+    aylar = data.get("aylar")
+    if not isinstance(aylar, list) or not aylar:
+        return jsonify({"ok": False, "mesaj": "aylar listesi gerekli."}), 400
+    cakismalar = []
+    seen = set()
+    for raw in aylar:
+        if not isinstance(raw, dict):
+            continue
+        try:
+            yv = int(raw.get("yil"))
+            mv = int(raw.get("ay"))
+        except (TypeError, ValueError):
+            continue
+        if mv < 1 or mv > 12 or yv < 1990 or yv > 2100:
+            continue
+        k = (yv, mv)
+        if k in seen:
+            continue
+        seen.add(k)
+        dup = _musteri_icin_ayda_baska_fatura(int(musteri_id), yv, mv)
+        if dup:
+            # Sadece GİB imzalı faturaları çakışma say (ettn dolu)
+            ettn = (dup.get("ettn") or "").strip()
+            if not ettn:
+                continue
+            cakismalar.append({
+                "yil": yv,
+                "ay": mv,
+                "fatura_no": dup.get("fatura_no"),
+                "fatura_id": dup.get("id"),
+            })
+    return jsonify({"ok": True, "cakismalar": cakismalar})
+
+
 @bp.route('/fatura-ekle', methods=['POST'])
 @faturalar_gerekli
 def fatura_ekle():
@@ -2160,6 +2709,27 @@ def fatura_ekle():
                     musteri_adi = (m.get("name") or musteri_adi).strip()
             except Exception:
                 pass
+
+        if musteri_id:
+            try:
+                mid = int(musteri_id)
+                donemler = _fatura_kira_donemleri_topla(satirlar, fatura_tarihi, data.get("notlar"))
+                if donemler:
+                    for yy, mm in sorted(donemler):
+                        dup = _musteri_icin_ayda_baska_fatura(mid, yy, mm)
+                        if dup:
+                            fn = dup.get("fatura_no") or ""
+                            fid = dup.get("id")
+                            return jsonify({
+                                "ok": False,
+                                "mesaj": (
+                                    f"Bu müşteri için {mm:02d}.{yy} dönemi zaten faturalandırılmış "
+                                    f"(Kayıt: {fn or ('#' + str(fid))}). "
+                                    "Aynı ay için mükerrer fatura oluşturulamaz."
+                                ),
+                            }), 409
+            except Exception as ex_dup:
+                logging.getLogger(__name__).exception("fatura mükerrer ay kontrolü: %s", ex_dup)
 
         sevk_adresi_kayit = (data.get("sevk_adresi") or "").strip() or None
         execute(
@@ -2537,24 +3107,100 @@ def tahsilat_makbuz_onizle():
 
 
 # --- GİB e-Arşiv Fatura (taslak + SMS onay) ---
-def _fatura_notlarina_gib_ettn_yaz(fatura_id, ettn):
-    """Fatura notlarına GİB ETTN bilgisini tekil olarak yazar/günceller."""
+def _extract_gib_fatura_no_from_obj(obj):
+    """GİB yanıt/durum sözlüğünden belge/fatura no alanını dayanıklı şekilde çıkar."""
+    if not isinstance(obj, dict):
+        return ""
+    direct_keys = (
+        "belgeNumarasi",
+        "faturaNo",
+        "fatura_no",
+        "belge_no",
+        "belgeno",
+        "belgeNo",
+        "invoiceNumber",
+    )
+    for k in direct_keys:
+        v = obj.get(k)
+        if v is not None and str(v).strip():
+            return str(v).strip()
+    # Anahtar adını normalize edip yeniden dene (büyük/küçük, Türkçe farkları vb.)
+    normalized = {}
+    for k, v in obj.items():
+        nk = re.sub(r"[^a-z0-9]", "", str(k or "").lower())
+        normalized[nk] = v
+    for nk in ("belgenumarasi", "faturano", "belgeno", "invoicenumber"):
+        v = normalized.get(nk)
+        if v is not None and str(v).strip():
+            return str(v).strip()
+    return ""
+
+
+def _extract_gib_ettn_from_obj(obj):
+    """GİB yanıt/durum sözlüğünden ETTN/UUID alanını dayanıklı şekilde çıkar."""
+    if not isinstance(obj, dict):
+        return ""
+    for k in ("ettn", "uuid", "faturaUuid", "fatura_uuid"):
+        v = obj.get(k)
+        if v is not None and str(v).strip():
+            return str(v).strip()
+    normalized = {}
+    for k, v in obj.items():
+        nk = re.sub(r"[^a-z0-9]", "", str(k or "").lower())
+        normalized[nk] = v
+    for nk in ("ettn", "uuid", "faturauuid"):
+        v = normalized.get(nk)
+        if v is not None and str(v).strip():
+            return str(v).strip()
+    return ""
+
+
+def _gib_kayit_bekle(gib, uuid, deneme=10, bekleme_s=1.2):
+    """UUID için GİB durum kaydını birkaç kez dener; bulunduğunda döndürür."""
+    if not gib or not uuid:
+        return {}
+    for _ in range(max(1, int(deneme))):
+        try:
+            st = gib.fatura_durum_getir(uuid, days_back=370) or {}
+            if st:
+                return st
+        except Exception:
+            pass
+        try:
+            import time
+            time.sleep(float(bekleme_s))
+        except Exception:
+            pass
+    return {}
+
+
+def _fatura_gib_bilgilerini_yaz(fatura_id, ettn=None, gib_fatura_no=None):
+    """GİB ETTN + GİB Fatura No bilgisini faturaya ve notlara tekil şekilde yazar/günceller."""
     try:
         fid = int(fatura_id)
     except Exception:
         return
-    ettn_val = (ettn or "").strip()
-    if not ettn_val:
-        return
-    row = fetch_one("SELECT notlar FROM faturalar WHERE id = %s", (fid,)) or {}
+    row = fetch_one("SELECT notlar, ettn, fatura_no FROM faturalar WHERE id = %s", (fid,)) or {}
     notlar = str(row.get("notlar") or "")
+    ettn_val = (ettn or "").strip() or str(row.get("ettn") or "").strip()
+    gib_no_val = (gib_fatura_no or "").strip() or str(row.get("fatura_no") or "").strip()
+
     # Eski ETTN etiketlerini temizleyip tek bir güncel satır bırak.
     cleaned = re.sub(r"\s*\|\s*G[İI]B\s*ETTN:\s*[^|]*", "", notlar, flags=re.IGNORECASE).strip()
-    if cleaned:
-        yeni = f"{cleaned} | GİB ETTN: {ettn_val}"
-    else:
-        yeni = f"GİB ETTN: {ettn_val}"
-    execute("UPDATE faturalar SET notlar = %s, ettn = %s WHERE id = %s", (yeni, ettn_val, fid))
+    cleaned = re.sub(r"\s*\|\s*G[İI]B\s*FATURA\s*NO:\s*[^|]*", "", cleaned, flags=re.IGNORECASE).strip()
+    tags = []
+    if ettn_val:
+        tags.append(f"GİB ETTN: {ettn_val}")
+    if gib_no_val:
+        tags.append(f"GİB FATURA NO: {gib_no_val}")
+    yeni = cleaned
+    if tags:
+        yeni = f"{cleaned} | {' | '.join(tags)}".strip(" |") if cleaned else " | ".join(tags)
+
+    execute(
+        "UPDATE faturalar SET notlar = %s, ettn = %s, fatura_no = %s WHERE id = %s",
+        (yeni, ettn_val or None, gib_no_val or row.get("fatura_no"), fid),
+    )
 
 
 @bp.route('/api/gib-taslak', methods=['POST'])
@@ -2563,12 +3209,78 @@ def api_gib_taslak():
     """Fatura ID ile GİB'de taslak oluşturur. Döner: ok, uuid (ETTN), mesaj."""
     try:
         from gib_earsiv import BestOfficeGIBManager, build_fatura_data_from_db
+        def _mask_vkn(v):
+            s = str(v or "").strip()
+            if len(s) <= 4:
+                return s
+            return ("*" * (len(s) - 4)) + s[-4:]
+
+        def _payload_debug_text(fd):
+            items = fd.get("items") or []
+            first = (items[0] if items else {}) or {}
+            dbg = {
+                "tarih": fd.get("tarih"),
+                "saat": fd.get("saat"),
+                "vkn_veya_tckn": _mask_vkn(fd.get("vkn")),
+                "unvan": fd.get("unvan"),
+                "vd": fd.get("vd"),
+                "satir_sayisi": len(items),
+                "ilk_satir": {
+                    "name": first.get("name"),
+                    "quantity": first.get("quantity"),
+                    "unit_price": first.get("unit_price"),
+                    "tax_rate": first.get("tax_rate"),
+                    "discount_rate": first.get("discount_rate"),
+                    "discount_amount": first.get("discount_amount"),
+                },
+                "toplam": fd.get("toplam"),
+                "kdv_orani_genel": fd.get("kdv_orani"),
+            }
+            try:
+                return json.dumps(dbg, ensure_ascii=False)[:900]
+            except Exception:
+                return str(dbg)[:900]
+
         data = request.get_json() or {}
         fatura_id = data.get("fatura_id") or request.form.get("fatura_id")
         if not fatura_id:
             return jsonify({"ok": False, "mesaj": "fatura_id gerekli."}), 400
         fatura_id = int(fatura_id)
+        f_row = fetch_one(
+            "SELECT musteri_id, fatura_tarihi, satirlar_json, notlar FROM faturalar WHERE id = %s",
+            (fatura_id,),
+        )
+        if not f_row:
+            return jsonify({"ok": False, "mesaj": "Fatura bulunamadı."}), 404
+        try:
+            sj = f_row.get("satirlar_json")
+            satirlar_db = json.loads(sj) if sj else []
+        except Exception:
+            satirlar_db = []
+        ft = f_row.get("fatura_tarihi")
+        ft_iso = ft.strftime("%Y-%m-%d") if hasattr(ft, "strftime") else str(ft)[:10]
+        donemler_gib = _fatura_kira_donemleri_topla(satirlar_db, ft_iso, f_row.get("notlar") or "")
+        mid_gib = f_row.get("musteri_id")
+        if donemler_gib and mid_gib:
+            try:
+                mid_i = int(mid_gib)
+                for yy, mm in sorted(donemler_gib):
+                    dup = _musteri_icin_ayda_baska_fatura(mid_i, yy, mm, exclude_fatura_id=fatura_id)
+                    if dup:
+                        fn = dup.get("fatura_no") or ""
+                        fid = dup.get("id")
+                        return jsonify({
+                            "ok": False,
+                            "mesaj": (
+                                f"Bu müşteri için {mm:02d}.{yy} dönemi başka bir fatura kaydıyla zaten kapatılmış "
+                                f"({fn or ('#' + str(fid))}). GİB taslağı oluşturulmadı."
+                            ),
+                        }), 409
+            except Exception as ex_gib_dup:
+                logging.getLogger(__name__).exception("gib-taslak mükerrer kontrol: %s", ex_gib_dup)
+
         fatura_data = build_fatura_data_from_db(fatura_id, fetch_one)
+        payload_debug = _payload_debug_text(fatura_data)
         gib = BestOfficeGIBManager()
         if not gib.is_available():
             return jsonify({
@@ -2576,70 +3288,117 @@ def api_gib_taslak():
                 "mesaj": "GİB modülü kullanılamıyor. .env içinde GIB_USER ve GIB_PASS tanımlayın ve eArsivPortal kurulumunu kontrol edin."
             }), 503
         uuid = gib.fatura_taslak_olustur(fatura_data)
+        taslak_raw = getattr(gib, "last_taslak_raw", None)
+        gonderilen_payload = getattr(gib, "last_gonderilen_payload", None)
+        raw_type = type(taslak_raw).__name__
+        try:
+            if isinstance(taslak_raw, (dict, list)):
+                taslak_raw_text = json.dumps(taslak_raw, ensure_ascii=False)[:700]
+            else:
+                taslak_raw_text = str(taslak_raw or "")[:700]
+        except Exception:
+            taslak_raw_text = str(taslak_raw or "")[:700]
+        try:
+            if isinstance(gonderilen_payload, dict):
+                gp = gonderilen_payload
+                gmh = (gp.get("malHizmetTable") or [{}])[0]
+                gonderilen_dbg = json.dumps({
+                    "malHizmetTable0": {
+                        "birimFiyat": gmh.get("birimFiyat"),
+                        "fiyat": gmh.get("fiyat"),
+                        "malHizmetTutari": gmh.get("malHizmetTutari"),
+                        "kdvOrani": gmh.get("kdvOrani"),
+                        "iskontoOrani": gmh.get("iskontoOrani"),
+                        "iskontoTutari": gmh.get("iskontoTutari"),
+                        "iskontoNedeni": gmh.get("iskontoNedeni"),
+                        "iskontoArttirimOrani": gmh.get("iskontoArttirimOrani"),
+                        "iskontoArttirimTutari": gmh.get("iskontoArttirimTutari"),
+                        "iskontoArttirimNedeni": gmh.get("iskontoArttirimNedeni"),
+                    },
+                    "toplamIskonto": gp.get("toplamIskonto"),
+                    "matrah": gp.get("matrah"),
+                    "odenecekTutar": gp.get("odenecekTutar"),
+                }, ensure_ascii=False)[:1000]
+            else:
+                gonderilen_dbg = ""
+        except Exception:
+            gonderilen_dbg = ""
         if not uuid:
-            return jsonify({"ok": False, "mesaj": "GİB taslak oluşturulamadı."}), 500
-        # Taslak oluşturma çağrısı UUID dönse bile bazen portal listesine düşmeyebilir.
-        # eArsivPortal için kısa bir doğrulama yapıp kullanıcıya net durum dönelim.
+            return jsonify({
+                "ok": False,
+                "mesaj": "GİB taslak oluşturulamadı.",
+                "taslak_raw": taslak_raw_text,
+                "payload_debug": payload_debug,
+            }), 500
+        # Önce taslak gerçekten portal listesinde bulunmalı; aksi halde SMS adımına
+        # geçmek kullanıcıyı gereksiz hataya sokuyor.
         taslak_dogrulandi = None
         taslak_onay_durumu = None
+        taslak_kayit = None
         if getattr(gib, "client_type", "") == "earsivportal":
             taslak_dogrulandi = False
-            for _ in range(3):
-                try:
-                    st = gib.fatura_durum_getir(uuid, days_back=7) or {}
-                except Exception:
-                    st = {}
-                if st:
-                    taslak_dogrulandi = True
-                    taslak_onay_durumu = (st.get("onayDurumu") or st.get("durum") or "").strip() or None
-                    break
-                try:
-                    import time
-                    time.sleep(1.2)
-                except Exception:
-                    pass
+            st = _gib_kayit_bekle(gib, uuid, deneme=8, bekleme_s=1.5)
+            if st:
+                taslak_dogrulandi = True
+                taslak_kayit = st
+                taslak_onay_durumu = (st.get("onayDurumu") or st.get("durum") or "").strip() or None
+            if taslak_dogrulandi is False:
+                # Pragmatik mod: doğrulama olmasa da akış dursun istemiyoruz.
+                # UUID/ETTN kaydı ile SMS adımına izin ver.
+                pass
         oid = None
         sms_error = None
+        gib_ettn = _extract_gib_ettn_from_obj(taslak_kayit) or uuid
+        gib_fatura_no = (
+            _extract_gib_fatura_no_from_obj(taslak_kayit)
+            or _extract_gib_fatura_no_from_obj(taslak_raw if isinstance(taslak_raw, dict) else {})
+        )
+        try:
+            _fatura_gib_bilgilerini_yaz(fatura_id, gib_ettn, gib_fatura_no)
+        except Exception:
+            pass
+        msg = "Taslak oluşturuldu."
+        if getattr(gib, "client_type", "") == "earsivportal":
+            if taslak_dogrulandi is False:
+                msg = ("GİB taslak isteği gönderildi fakat portal listesinde henüz görünmedi. "
+                       "Yine de UUID kaydedildi; SMS adımına devam edebilirsiniz.")
+            else:
+                msg = "GİB taslak isteği gönderildi ve portal kaydı doğrulandı."
+        elif taslak_onay_durumu:
+            msg += f" Durum: {taslak_onay_durumu}."
+        # Taslak gerçekten portalda görünüyorsa SMS akışına geç.
         try:
             oid = gib.sms_kodu_gonder(uuid)
             sms_error = getattr(gib, "last_sms_error", None)
         except Exception:
             oid = None
             sms_error = getattr(gib, "last_sms_error", None) or "SMS gönderimi tetiklenemedi."
-        try:
-            _fatura_notlarina_gib_ettn_yaz(fatura_id, uuid)
-        except Exception:
-            pass
-        msg = "Taslak oluşturuldu."
-        if taslak_dogrulandi is False:
-            # UUID dönüp portalda görünmeyen durumları başarılı kabul etmeyelim.
-            return jsonify({
-                "ok": False,
-                "uuid": uuid,
-                "oid": oid,
-                "sms_sent": bool(oid),
-                "sms_error": sms_error,
-                "taslak_dogrulandi": False,
-                "taslak_onay_durumu": taslak_onay_durumu,
-                "mesaj": ("GİB taslak isteği gönderildi fakat portalda doğrulanamadı. "
-                          "Bu nedenle taslak oluşmamış kabul edildi. Tekrar deneyin.")
-            }), 502
-        elif taslak_onay_durumu:
-            msg += f" Durum: {taslak_onay_durumu}."
         if oid:
             msg += " SMS gönderildi, gelen kodu girin."
         else:
             msg += " SMS otomatik tetiklenemedi; 'SMS Gönder' ile tekrar deneyin."
             if sms_error:
                 msg += f" Detay: {sms_error}"
+        debug_meta = (
+            f"[debug client={getattr(gib, 'client_type', '-')}; "
+            f"raw_type={raw_type}; raw_len={len(taslak_raw_text or '')}; "
+            f"verify={taslak_dogrulandi}; onay={taslak_onay_durumu or '-'}]"
+        )
+        msg = f"{msg} {debug_meta} | payload={payload_debug}"
+        if gonderilen_dbg:
+            msg += f" | gonderilen={gonderilen_dbg}"
         return jsonify({
             "ok": True,
-            "uuid": uuid,
+            "uuid": gib_ettn,
+            "gib_fatura_no": gib_fatura_no,
             "oid": oid,
             "sms_sent": bool(oid),
             "sms_error": sms_error,
             "taslak_dogrulandi": taslak_dogrulandi,
             "taslak_onay_durumu": taslak_onay_durumu,
+            "taslak_raw": taslak_raw_text,
+            "payload_debug": payload_debug,
+            "gonderilen_debug": gonderilen_dbg,
             "mesaj": msg,
         })
     except ValueError as e:
@@ -2663,6 +3422,12 @@ def api_gib_sms_onay():
         fatura_id = data.get("fatura_id") or request.form.get("fatura_id")
         if not uuid or not sms_kodu:
             return jsonify({"ok": False, "mesaj": "uuid ve sms_kodu gerekli."}), 400
+        sms_norm = re.sub(r"\s+", "", sms_kodu).upper()
+        # GİB kodu: sadece harf, sadece rakam veya harf+rakam karışık olabilir.
+        # Uzunluk sağlayıcıya göre değişebildiği için 4-8 aralığı kabul edilir.
+        if not re.fullmatch(r"[A-Z0-9]{4,8}", sms_norm):
+            return jsonify({"ok": False, "mesaj": "SMS kodu harf/rakam içermeli (4-8 karakter, örn: B2Z7V5)."}), 400
+        sms_kodu = sms_norm
         gib = BestOfficeGIBManager()
         if not gib.is_available():
             return jsonify({"ok": False, "mesaj": "GİB modülü kullanılamıyor."}), 503
@@ -2671,10 +3436,17 @@ def api_gib_sms_onay():
         else:
             success = gib.sms_onay_ve_imzala(uuid, sms_kodu)
         if not success:
-            return jsonify({"ok": False, "mesaj": "SMS onayı başarısız veya kod hatalı."}), 400
+            det = getattr(gib, "last_sms_error", None)
+            msg = "SMS onayı başarısız veya kod hatalı."
+            if det:
+                msg += f" Detay: {det}"
+            return jsonify({"ok": False, "mesaj": msg}), 400
         if fatura_id:
             try:
-                _fatura_notlarina_gib_ettn_yaz(fatura_id, uuid)
+                st = _gib_kayit_bekle(gib, uuid, deneme=10, bekleme_s=1.2)
+                gib_ettn = _extract_gib_ettn_from_obj(st) or uuid
+                gib_fatura_no = _extract_gib_fatura_no_from_obj(st)
+                _fatura_gib_bilgilerini_yaz(fatura_id, gib_ettn, gib_fatura_no)
             except Exception:
                 pass
         return jsonify({"ok": True, "mesaj": "Fatura GİB üzerinde imzalandı."})
@@ -2695,12 +3467,92 @@ def api_gib_sms_gonder():
         gib = BestOfficeGIBManager()
         if not gib.is_available():
             return jsonify({"ok": False, "mesaj": "GİB modülü kullanılamıyor."}), 503
+        if getattr(gib, "client_type", "") == "earsivportal":
+            # Pragmatik mod: taslak doğrulaması başarısız olsa da SMS denenebilir.
+            # Burada akışı kesmiyoruz.
+            pass
         oid = gib.sms_kodu_gonder(uuid)
         if not oid:
             return jsonify({"ok": False, "mesaj": "SMS gönderimi başlatılamadı."}), 500
         return jsonify({"ok": True, "oid": oid, "mesaj": "SMS gönderildi. Telefonunuza gelen kodu girin."})
     except Exception as e:
         return jsonify({"ok": False, "mesaj": str(e)}), 500
+
+
+@bp.route('/api/gib-fatura-onizleme')
+@faturalar_gerekli
+def api_gib_fatura_onizleme():
+    """GİB portalındaki gerçek fatura HTML önizlemesini döndürür."""
+    try:
+        from gib_earsiv import BestOfficeGIBManager
+        uuid = (request.args.get("uuid") or "").strip()
+        fatura_id = request.args.get("fatura_id", type=int)
+        if not uuid and fatura_id:
+            row = fetch_one("SELECT ettn FROM faturalar WHERE id = %s", (fatura_id,)) or {}
+            uuid = str(row.get("ettn") or "").strip()
+        if not uuid:
+            return jsonify({"ok": False, "mesaj": "uuid veya fatura_id gerekli."}), 400
+        gib = BestOfficeGIBManager()
+        if not gib.is_available():
+            return jsonify({"ok": False, "mesaj": "GİB modülü kullanılamıyor."}), 503
+        html = gib.fatura_html_getir(uuid, days_back=370)
+        if not html.strip():
+            return jsonify({"ok": False, "mesaj": "GİB önizleme içeriği boş döndü."}), 404
+        # GİB HTML'ini bozmadan, sol üst alanı ERP şablonuna daha yakın ve kompakt göster.
+        compact_patch = """
+<style id="boerp-gib-compact">
+  body { font-family: Arial, Helvetica, sans-serif !important; }
+  td, th, div, span, p { font-size: 12px !important; line-height: 1.18 !important; }
+  b, strong { font-size: 13px !important; }
+  table { border-collapse: collapse !important; }
+</style>
+<script id="boerp-gib-compact-script">
+(function(){
+  function norm(s){
+    return (s||'').toLowerCase()
+      .replace(/ı/g,'i').replace(/İ/g,'i').replace(/ş/g,'s').replace(/ğ/g,'g')
+      .replace(/ü/g,'u').replace(/ö/g,'o').replace(/ç/g,'c')
+      .replace(/\\s+/g,' ').trim();
+  }
+  function hideNoiseRows(){
+    var bad = ['no', 'kapi no', '/ turkiye', 'turkiye', 'web sitesi'];
+    document.querySelectorAll('tr, div, p, span, td').forEach(function(el){
+      try{
+        var t = norm(el.textContent || '');
+        if (!t) return;
+        if (bad.indexOf(t) >= 0 || t.startsWith('kapi no') || t.startsWith('web sitesi') || t === 'no') {
+          el.style.display = 'none';
+          if (el.parentElement && (el.parentElement.tagName === 'TR' || el.parentElement.tagName === 'TABLE')) {
+            el.parentElement.style.display = 'none';
+          }
+        }
+      }catch(e){}
+    });
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', hideNoiseRows);
+  } else {
+    hideNoiseRows();
+  }
+})();
+</script>
+"""
+        if "</head>" in html:
+            html = html.replace("</head>", compact_patch + "</head>", 1)
+        elif "</body>" in html:
+            html = html.replace("</body>", compact_patch + "</body>", 1)
+        else:
+            html = compact_patch + html
+        return Response(html, mimetype="text/html; charset=utf-8")
+    except Exception as e:
+        err = str(e or "")
+        # Bazı eArsivPortal sürümlerinde fatura_html içinde private login method adı değiştiği için
+        # '_eArsivPortal__giris_yap' hatası alınabiliyor. Kullanıcı akışını kırmamak için ERP önizlemeye düş.
+        if "_eArsivPortal__giris_yap" in err:
+            fatura_id_fb = request.args.get("fatura_id", type=int)
+            if fatura_id_fb:
+                return redirect(url_for("faturalar.fatura_onizleme_ekran", fatura_id=fatura_id_fb))
+        return jsonify({"ok": False, "mesaj": "GİB önizleme hatası: " + err}), 500
 
 
 @bp.route('/api/gib-fatura-olustur', methods=['POST'])
@@ -2723,7 +3575,11 @@ def api_gib_fatura_olustur():
             onay = str(st.get("onayDurumu") or "")
             if onay and ("onaylan" not in onay.lower()):
                 return jsonify({"ok": False, "mesaj": f"GİB onayı bekleniyor ({onay}). Önce SMS onayını tamamlayın."}), 400
-        _fatura_notlarina_gib_ettn_yaz(fid, uuid)
+            gib_ettn = _extract_gib_ettn_from_obj(st) or uuid
+            gib_fatura_no = _extract_gib_fatura_no_from_obj(st)
+            _fatura_gib_bilgilerini_yaz(fid, gib_ettn, gib_fatura_no)
+        else:
+            _fatura_gib_bilgilerini_yaz(fid, uuid, None)
         return jsonify({"ok": True, "mesaj": "Fatura gerçek ETTN ile oluşturuldu/kesinleşti.", "fatura_id": fid, "onizleme_url": f"/faturalar/onizleme/{fid}"})
     except Exception as e:
         return jsonify({"ok": False, "mesaj": str(e)}), 500

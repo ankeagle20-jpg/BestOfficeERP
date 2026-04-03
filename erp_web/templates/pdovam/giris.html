@@ -101,7 +101,7 @@ body{margin:0;}
         </thead>
         <tbody>
         {% for p in personeller %}
-          <tr data-id="{{ p.id }}" data-ad="{{ p.ad_soyad or '' }}" data-tarih-iso="{{ p.tarih_iso or bas_iso }}" class="pdovam-row" style="border-bottom:1px solid #243447;cursor:pointer;">
+          <tr data-id="{{ p.id }}" data-ad="{{ p.ad_soyad or '' }}" data-tarih-iso="{{ p.tarih_iso or liste_iso }}" class="pdovam-row" style="border-bottom:1px solid #243447;cursor:pointer;">
             <td style="padding:8px 10px;color:#e0f7fa;white-space:nowrap;">{{ p.ad_soyad }}</td>
             <td data-col="tarih" style="padding:8px 10px;color:#90a4ae;white-space:nowrap;">{{ p.tarih_tr or '—' }}</td>
             <td style="padding:6px 8px;min-width:120px;">
@@ -300,6 +300,29 @@ body{margin:0;}
           </tr>
           <tr class="pdovam-rapor-detay" style="background:#0a1624;">
             <td colspan="{{ 7 if is_admin else 6 }}" style="padding:10px 14px 12px 14px;border-bottom:1px solid #243447;">
+              {% if r.hareket_ciftleri %}
+              <div style="margin:0 0 8px 0;font-size:11px;color:#90a4ae;">Gün içi hareketler</div>
+              <table style="width:100%;border-collapse:collapse;font-size:11px;margin-bottom:8px;">
+                <thead>
+                  <tr style="background:#102133;color:#90a4ae;">
+                    <th style="padding:4px 6px;text-align:left;">#</th>
+                    <th style="padding:4px 6px;text-align:left;">Giriş</th>
+                    <th style="padding:4px 6px;text-align:left;">Çıkış</th>
+                    <th style="padding:4px 6px;text-align:left;">Süre</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for h in r.hareket_ciftleri %}
+                  <tr style="border-bottom:1px solid #1e2f43;">
+                    <td style="padding:4px 6px;color:#90a4ae;">{{ loop.index }}</td>
+                    <td style="padding:4px 6px;color:#e0f7fa;">{{ h.giris }}</td>
+                    <td style="padding:4px 6px;color:#e0f7fa;">{{ h.cikis }}{% if h.cikis_varsayilan %}<span style="opacity:.65;font-size:10px;margin-left:4px;">(varsayılan)</span>{% endif %}</td>
+                    <td style="padding:4px 6px;color:#4fc3f7;">{{ h.sure }}</td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+              {% endif %}
               <ul style="margin:0;padding-left:18px;color:#b0bec5;font-size:12px;line-height:1.55;">
                 {% for line in r.fark_detay_lines %}
                 <li>{{ line }}</li>

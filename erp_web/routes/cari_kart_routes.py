@@ -20,7 +20,10 @@ def _cari_hareketler(musteri_id):
     """Fatura (borç) ve tahsilat (alacak) birleşik hareketler, yürüyen bakiye."""
     faturalar = fetch_all(
         """SELECT id, fatura_no AS belge_no, fatura_tarihi AS tarih, COALESCE(toplam, tutar, 0) AS tutar, 'Fatura' AS tur, vade_tarihi
-           FROM faturalar WHERE musteri_id = %s ORDER BY fatura_tarihi, id""",
+           FROM faturalar
+           WHERE musteri_id = %s
+             AND NULLIF(TRIM(COALESCE(ettn::text, '')), '') IS NOT NULL
+           ORDER BY fatura_tarihi, id""",
         (musteri_id,),
     )
     tahsilatlar = fetch_all(
@@ -93,7 +96,9 @@ def _api_360_parallel_fetches(mid, bugun, bu_ay_bas, bu_ay_son, altı_ay_once):
     def _bu_ay_fatura():
         r = fetch_one(
             """SELECT COALESCE(SUM(COALESCE(toplam, tutar, 0)), 0) AS t FROM faturalar
-               WHERE musteri_id = %s AND fatura_tarihi::date >= %s AND fatura_tarihi::date <= %s""",
+               WHERE musteri_id = %s
+                 AND NULLIF(TRIM(COALESCE(ettn::text, '')), '') IS NOT NULL
+                 AND fatura_tarihi::date >= %s AND fatura_tarihi::date <= %s""",
             (mid, bu_ay_bas, bu_ay_son),
         )
         return float(r.get("t", 0) or 0) if r else 0
@@ -126,6 +131,7 @@ def _api_360_parallel_fetches(mid, bugun, bu_ay_bas, bu_ay_son, altı_ay_once):
               FROM tahsilatlar t
               JOIN faturalar f ON t.fatura_id = f.id
              WHERE t.musteri_id = %s
+               AND NULLIF(TRIM(COALESCE(f.ettn::text, '')), '') IS NOT NULL
                AND t.tahsilat_tarihi IS NOT NULL
                AND f.vade_tarihi IS NOT NULL
             """,
@@ -207,7 +213,10 @@ def api_360(mid):
     # Önce sadece müşteri + ödenmemiş faturalar (aging için zorunlu)
     faturalar_odenmemis = fetch_all(
         """SELECT id, fatura_no, fatura_tarihi, vade_tarihi, COALESCE(toplam, tutar, 0) AS toplam
-           FROM faturalar WHERE musteri_id = %s AND COALESCE(durum, '') != 'odendi'""",
+           FROM faturalar
+           WHERE musteri_id = %s
+             AND COALESCE(durum, '') != 'odendi'
+             AND NULLIF(TRIM(COALESCE(ettn::text, '')), '') IS NOT NULL""",
         (mid,),
     )
     # Diğer tüm sorgular paralel

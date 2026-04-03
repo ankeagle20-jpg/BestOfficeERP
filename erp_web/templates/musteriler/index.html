@@ -124,9 +124,24 @@
   padding:10px clamp(12px,0.55cm,22px);
   text-align:left;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.25px;
   border-bottom:1px solid rgba(0,200,255,.1);white-space:nowrap;cursor:pointer;user-select:none;vertical-align:middle;
+  position:relative;
+  padding-right:16px;
 }
 .ml-table thead th:hover{color:#e8f1ff}
 .ml-table thead th i{margin-left:3px;opacity:.5;font-size:8px}
+.ml-col-resizer{
+  position:absolute;
+  top:0;
+  right:0;
+  height:100%;
+  width:8px;
+  cursor:col-resize;
+  z-index:10;
+  user-select:none;
+}
+.ml-col-resizer:hover{
+  background:rgba(0,200,255,.18);
+}
 .ml-table thead th.ml-col-kira,.ml-table thead th.ml-col-guncel,.ml-table thead th.ml-col-reel,.ml-table thead th.ml-col-borc,.ml-table thead th.ml-col-gec{text-align:right}
 .ml-table tbody tr{cursor:pointer;transition:background .1s;border-bottom:1px solid rgba(0,200,255,.04)}
 .ml-table tbody tr:hover{background:rgba(0,200,255,.06)}
@@ -354,6 +369,7 @@ window.setActiveTab = function(tabId) {
         {% set bas_tarih_val = m.get('rent_start_date') or m.get('sozlesme_baslangic') or m.get('baslangic_tarihi') %}
         {% set bas_tarih_str = bas_tarih_val.strftime('%Y-%m-%d') if bas_tarih_val and bas_tarih_val.__class__.__name__ in ('date', 'datetime') else ((bas_tarih_val|string|trim)[:10] if bas_tarih_val else '') %}
         {% set kap_iso = ((m.get('kapanis_tarihi')|string)|trim)[:10] if m.get('kapanis_tarihi') else '' %}
+        {% set kurulus_iso = ((m.get('kurulus_tarihi')|string)|trim)[:10] if m.get('kurulus_tarihi') else '' %}
         <tr class="ml-row" data-id="{{ m.id }}"
             data-name-display="{{ (m.name or '')|e }}"
             data-name="{{ (m.name or '')|lower }}"
@@ -363,8 +379,24 @@ window.setActiveTab = function(tabId) {
             data-geciken="{{ gec }}"
             data-durum="{{ 'pasif' if db_durum == 'pasif' else ('geciken' if gec > 0 else 'aktif') }}"
             data-yetkili="{{ (m.get('yetkili_kisi') or '')|e }}"
+            data-yetkili-adsoyad="{{ (m.get('yetkili_adsoyad') or m.get('yetkili_kisi') or '')|e }}"
+            data-yetkili-tcno="{{ (m.get('yetkili_tcno') or '')|e }}"
+            data-yetkili-cep-tel="{{ (m.get('yetkili_tel') or '')|e }}"
+            data-yetkili-cep-tel2="{{ (m.get('yetkili_tel2') or '')|e }}"
+            data-yetkili-eposta="{{ (m.get('yetkili_email') or '')|e }}"
             data-hizmet="{{ (m.get('hizmet_turu') or '')|e }}"
             data-phone="{{ (m.phone or '')|e }}"
+            data-email="{{ (m.get('email') or '')|e }}"
+            data-vergi-no="{{ (m.get('vergi_no') or m.get('tax_number') or '')|e }}"
+            data-vergi-dairesi="{{ (m.get('vergi_dairesi') or '')|e }}"
+            data-mersis-no="{{ (m.get('mersis_no') or '')|e }}"
+            data-ticaret-sicil-no="{{ (m.get('ticaret_sicil_no') or '')|e }}"
+            data-kurulus-tarihi="{{ kurulus_iso|e }}"
+            data-faaliyet-konu="{{ (m.get('faaliyet_konusu') or '')|e }}"
+            data-nace-kodu="{{ (m.get('nace_kodu') or '')|e }}"
+            data-adres="{{ (m.get('yeni_adres') or m.get('address') or '')|e }}"
+            data-onceki-adres="{{ (m.get('eski_adres') or '')|e }}"
+            data-ikametgah-adresi="{{ (m.get('yetkili_ikametgah') or '')|e }}"
             data-ilk-kira="{{ ilk_kira }}"
             data-guncel-kira="{{ (m.get('guncel_kira_bedeli') or 0) }}"
             data-reel-kira="{{ (reel or 0) }}"
@@ -451,10 +483,58 @@ function mlAramaFoldTr(s) {
   }
   var x = out.toLocaleLowerCase('tr-TR');
   try {
+    // "i̇" (U+0069 + U+0307 combining dot) gibi durumları temizle.
+    // Böylece "İ" ile "i" araması birebir tutarlı olur.
+    x = x.normalize('NFD');
+    try {
+      x = x.replace(/\p{M}/gu, '');
+    } catch (e) {
+      // Eski JS engine'larda \p{M} desteklenmiyorsa en azından U+0307'yi temizle.
+      x = x.replace(/\u0307/g, '');
+    }
     return x.normalize('NFC');
   } catch (e) {
     return x;
   }
+}
+
+/**
+ * Arama kutusunu (`mlQ`) Türkçe büyük-küçük + Unicode tutarlı hale getirmek için
+ * satır bazında tek bir "normalize arama string" üretir.
+ */
+function mlEnsureSearchNorms() {
+  try {
+    allRows.forEach(function(tr) {
+      var parts = [
+        tr.getAttribute('data-name-display') || '',
+        tr.getAttribute('data-name') || '',
+        tr.getAttribute('data-musteri-adi') || '',
+        tr.getAttribute('data-yetkili') || '',
+        tr.getAttribute('data-yetkili-adsoyad') || '',
+        tr.getAttribute('data-yetkili-tcno') || '',
+        tr.getAttribute('data-yetkili-cep-tel') || '',
+        tr.getAttribute('data-yetkili-cep-tel2') || '',
+        tr.getAttribute('data-yetkili-eposta') || '',
+        tr.getAttribute('data-hizmet') || '',
+        tr.getAttribute('data-phone') || '',
+        tr.getAttribute('data-email') || '',
+        tr.getAttribute('data-ofis') || '',
+        tr.getAttribute('data-vergi-no') || '',
+        tr.getAttribute('data-vergi-dairesi') || '',
+        tr.getAttribute('data-mersis-no') || '',
+        tr.getAttribute('data-ticaret-sicil-no') || '',
+        tr.getAttribute('data-kurulus-tarihi') || '',
+        tr.getAttribute('data-faaliyet-konu') || '',
+        tr.getAttribute('data-nace-kodu') || '',
+        tr.getAttribute('data-adres') || '',
+        tr.getAttribute('data-onceki-adres') || '',
+        tr.getAttribute('data-ikametgah-adresi') || '',
+        tr.getAttribute('data-son-tahsilat') || '',
+        tr.getAttribute('data-bas-tarih') || '',
+      ];
+      tr.setAttribute('data-search-norm', mlAramaFoldTr(parts.join(' ')));
+    });
+  } catch (e) {}
 }
 
 function fmtKapTr(iso) {
@@ -667,7 +747,17 @@ function rowMatchesHizmetFilter(rowHizmetRaw, filtVal) {
 
 function mlNormNameKey(s) {
   var t = String(s || '').toLowerCase().trim().replace(/\s+/g, ' ');
-  return t.replace(/ı/g, 'i').replace(/ğ/g, 'g').replace(/ü/g, 'u').replace(/ş/g, 's').replace(/ö/g, 'o').replace(/ç/g, 'c');
+  t = t.replace(/ı/g, 'i').replace(/ğ/g, 'g').replace(/ü/g, 'u').replace(/ş/g, 's').replace(/ö/g, 'o').replace(/ç/g, 'c');
+  try {
+    t = t.normalize('NFD');
+    try {
+      t = t.replace(/\p{M}/gu, '');
+    } catch (e) {
+      t = t.replace(/\u0307/g, '');
+    }
+    t = t.normalize('NFC');
+  } catch (e) {}
+  return t;
 }
 function mlNamesSimilar(seedNorm, rowNorm, strict) {
   if (!seedNorm || !rowNorm) return false;
@@ -763,7 +853,6 @@ function filterTable(){
   var vBit = mlGetSozBasTarihFiltreIso(inpBitF);
   var shown = 0;
   allRows.forEach(function(tr){
-    var name = tr.getAttribute('data-name') || '';
     var rowOfis = tr.getAttribute('data-ofis') || '';
     var rowDurum = (tr.getAttribute('data-durum') || '').toLowerCase();
     var durumVal = (tr.getAttribute('data-durum-val') || 'aktif').toLowerCase();
@@ -772,9 +861,8 @@ function filterTable(){
     var basTarih = (tr.getAttribute('data-bas-tarih') || '').trim();
     var ok = true;
     if (q) {
-      var mAdi = (tr.getAttribute('data-musteri-adi-l') || '');
-      var yet = mlAramaFoldTr(tr.getAttribute('data-yetkili') || '');
-      if (name.indexOf(q) === -1 && mAdi.indexOf(q) === -1 && yet.indexOf(q) === -1) ok = false;
+      var searchNorm = tr.getAttribute('data-search-norm') || '';
+      if (searchNorm.indexOf(q) === -1) ok = false;
     }
     if(ofis && rowOfis !== ofis) ok = false;
     if (ok && !rowMatchesHizmetFilter(rowHizmet, hizmetFilt)) ok = false;
@@ -859,6 +947,12 @@ function filterTable(){
   if (mc) mc.textContent = shown;
   var ms = document.getElementById('mlShown');
   if (ms) ms.textContent = shown;
+  // Kullanıcı benzerlik/tekil gibi özel sıralama modundaysa üstüne yazmayalım.
+  try {
+    if (!benzerVal && typeof window.mlDynApplyStoredSort === 'function') {
+      window.mlDynApplyStoredSort();
+    }
+  } catch (e) {}
   mlClusterLayoutRequest();
 }
 
@@ -941,15 +1035,27 @@ function mlSyncHeadBodyColWidths() {
   var bodyTable = document.getElementById('mlTable');
   var bodyScroll = document.getElementById('mlBodyXScroll');
   if (!headTable || !bodyTable) return;
-  headTable.querySelectorAll('thead th').forEach(function(th) {
-    th.style.width = '';
-    th.style.minWidth = '';
-    th.style.maxWidth = '';
+  var dyn = window.mlDynColWidthsRead ? window.mlDynColWidthsRead() : null;
+  var dynWidths = dyn && dyn.widths ? dyn.widths : {};
+  headTable.querySelectorAll('thead th').forEach(function(th, idx) {
+    if (dynWidths && dynWidths[idx]) {
+      th.style.width = dynWidths[idx] + 'px';
+      th.style.minWidth = dynWidths[idx] + 'px';
+      th.style.maxWidth = dynWidths[idx] + 'px';
+    } else {
+      th.style.width = '';
+      th.style.minWidth = '';
+      th.style.maxWidth = '';
+    }
   });
   var trackW = bodyScroll ? bodyScroll.clientWidth : bodyTable.getBoundingClientRect().width;
   if (trackW > 0) {
     headTable.style.width = trackW + 'px';
     bodyTable.style.width = '100%';
+  }
+  // colgroup üzerinden de genişliği uygula (sticky cluster align için)
+  if (window.mlDynColWidthsApply) {
+    try { window.mlDynColWidthsApply(); } catch (e) {}
   }
 }
 
@@ -1075,6 +1181,8 @@ function mlPersistBenzerAdUnvan(val) {
   } catch (e) {}
 }
 
+// Satır arama string'lerini üret.
+mlEnsureSearchNorms();
 filterTable();
 
 var mlBenzerHeader = document.getElementById('mlBenzer');
@@ -1131,6 +1239,168 @@ document.getElementById('btn-musteri-ekle-giris').addEventListener('click', func
 document.getElementById('btn-musteri-ekle-giris-footer').addEventListener('click', function(e) { e.preventDefault(); showGirisView(); });
 document.getElementById('btn-listeye-don').addEventListener('click', function(e) { e.preventDefault(); showListeView(); });
 
+// ——— Dinamik sütun ayarları: genişlik (drag) + sıralama (persist) ———
+// Not: kolon yer değiştirme (reorder) şimdilik yok; quick-edit / hücre indekslerini bozmasın.
+(function () {
+  var LS_COL_WIDTHS = 'ml_dyn_col_widths_v1';
+  var LS_SORT = 'ml_dyn_sort_v1';
+
+  function readJson(key, fallback) {
+    try {
+      var raw = localStorage.getItem(key);
+      if (!raw) return fallback;
+      return JSON.parse(raw);
+    } catch (e) {
+      return fallback;
+    }
+  }
+
+  function saveJson(key, val) {
+    try { localStorage.setItem(key, JSON.stringify(val || {})); } catch (e) {}
+  }
+
+  function getHeadBodyTables() {
+    return {
+      headTable: document.getElementById('mlHeadTable'),
+      bodyTable: document.getElementById('mlTable')
+    };
+  }
+
+  // widths: { [colIndex:number]: px }
+  window.mlDynColWidthsRead = function () {
+    var j = readJson(LS_COL_WIDTHS, null);
+    return j && typeof j === 'object' ? j : {};
+  };
+
+  window.mlDynColWidthsApply = function () {
+    var cfg = window.mlDynColWidthsRead ? window.mlDynColWidthsRead() : {};
+    if (!cfg || !Object.keys(cfg).length) return;
+    var t = getHeadBodyTables();
+    if (!t.headTable || !t.bodyTable) return;
+
+    var headCols = t.headTable.querySelectorAll('colgroup col');
+    var bodyCols = t.bodyTable.querySelectorAll('colgroup col');
+    // th'leri de sabitleyelim (sticky cluster hizası için)
+    var headThs = t.headTable.querySelectorAll('thead th');
+
+    Object.keys(cfg).forEach(function (k) {
+      var idx = parseInt(k, 10);
+      var w = parseInt(cfg[k], 10);
+      if (!Number.isFinite(idx) || !Number.isFinite(w) || w <= 0) return;
+      if (headCols[idx]) {
+        headCols[idx].style.width = w + 'px';
+      }
+      if (bodyCols[idx]) {
+        bodyCols[idx].style.width = w + 'px';
+      }
+      if (headThs[idx]) {
+        headThs[idx].style.width = w + 'px';
+        headThs[idx].style.minWidth = w + 'px';
+        headThs[idx].style.maxWidth = w + 'px';
+      }
+    });
+  };
+
+  window.mlDynSortSave = function (colIndex, asc) {
+    saveJson(LS_SORT, { colIndex: colIndex, asc: !!asc });
+  };
+
+  window.mlDynSortRead = function () {
+    var j = readJson(LS_SORT, null);
+    if (!j || j.colIndex == null) return null;
+    var colIndex = parseInt(j.colIndex, 10);
+    if (!Number.isFinite(colIndex)) return null;
+    return { colIndex: colIndex, asc: !!j.asc };
+  };
+
+  window.mlDynApplyStoredSort = function () {
+    var cfg = window.mlDynSortRead ? window.mlDynSortRead() : null;
+    if (!cfg) return;
+    var tbody = document.getElementById('mlBody');
+    if (!tbody) return;
+    var headThs = document.querySelectorAll('#mlHeadTable thead th');
+    var colIndex = cfg.colIndex;
+    var asc = cfg.asc;
+    if (!headThs[colIndex]) return;
+
+    // görünürlük (style.display) ile uyumlu: tüm satırları sıralayıp DOM'u yeniden diziyoruz
+    var rows = Array.from(document.querySelectorAll('#mlBody tr.ml-row'));
+    rows.sort(function (a, b) {
+      var av = a.cells && a.cells[colIndex] ? a.cells[colIndex].textContent.trim() : '';
+      var bv = b.cells && b.cells[colIndex] ? b.cells[colIndex].textContent.trim() : '';
+      var an = parseFloat(av.replace(/[^0-9.-]/g, ''));
+      var bn = parseFloat(bv.replace(/[^0-9.-]/g, ''));
+      if (!isNaN(an) && !isNaN(bn)) return asc ? an - bn : bn - an;
+      return asc ? av.localeCompare(bv, 'tr') : bv.localeCompare(av, 'tr');
+    });
+    rows.forEach(function (r) { tbody.appendChild(r); });
+  };
+
+  window.mlDynInitColResizers = function () {
+    var headTable = document.getElementById('mlHeadTable');
+    var bodyTable = document.getElementById('mlTable');
+    if (!headTable || !bodyTable) return;
+
+    var headCols = headTable.querySelectorAll('colgroup col');
+    var bodyCols = bodyTable.querySelectorAll('colgroup col');
+    var headThs = headTable.querySelectorAll('thead th');
+    if (!headThs || !headThs.length) return;
+
+    headThs.forEach(function (th, idx) {
+      if (th.querySelector('.ml-col-resizer')) return;
+
+      var handle = document.createElement('div');
+      handle.className = 'ml-col-resizer';
+      handle.title = 'Sütun genişliği';
+      th.appendChild(handle);
+
+      handle.addEventListener('mousedown', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        var startX = e.clientX;
+        var startW = th.getBoundingClientRect().width;
+        var widths = window.mlDynColWidthsRead ? window.mlDynColWidthsRead() : {};
+
+        function onMove(ev) {
+          var delta = ev.clientX - startX;
+          var newW = Math.max(64, startW + delta);
+          // canlı uygula
+          if (headCols[idx]) headCols[idx].style.width = newW + 'px';
+          if (bodyCols[idx]) bodyCols[idx].style.width = newW + 'px';
+          th.style.width = newW + 'px';
+          th.style.minWidth = newW + 'px';
+          th.style.maxWidth = newW + 'px';
+        }
+
+        function onUp() {
+          document.removeEventListener('mousemove', onMove);
+          document.removeEventListener('mouseup', onUp);
+          var finalW = Math.round(th.getBoundingClientRect().width);
+          widths[idx] = finalW;
+          saveJson(LS_COL_WIDTHS, widths);
+          // hizayı oturt
+          if (typeof mlSyncHeadBodyColWidths === 'function') mlSyncHeadBodyColWidths();
+          if (typeof mlSyncStickyHeights === 'function') mlSyncStickyHeights();
+        }
+
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+      });
+    });
+  };
+
+  // Init: ayarları uygula + resizer'ları bağla
+  window.addEventListener('load', function () {
+    try {
+      if (typeof window.mlDynColWidthsApply === 'function') window.mlDynColWidthsApply();
+      if (typeof window.mlDynInitColResizers === 'function') window.mlDynInitColResizers();
+      if (typeof window.mlDynApplyStoredSort === 'function') window.mlDynApplyStoredSort();
+      if (typeof mlSyncHeadBodyColWidths === 'function') mlSyncHeadBodyColWidths();
+    } catch (e) {}
+  });
+})();
+
 // Sütun sıralama (başlıktaki <select> ile sıralama tetiklenmesin)
 document.querySelectorAll('#mlHeadTable thead th').forEach(function(th, idx){
   th.addEventListener('click', function(ev){
@@ -1138,6 +1408,9 @@ document.querySelectorAll('#mlHeadTable thead th').forEach(function(th, idx){
     if (document.querySelector('.ml-table-wrap.ml-edit-mode')) return;
     var asc = th.getAttribute('data-asc') !== 'true';
     th.setAttribute('data-asc', asc);
+    if (typeof window.mlDynSortSave === 'function') {
+      window.mlDynSortSave(idx, asc);
+    }
     var rows = Array.from(document.querySelectorAll('#mlBody tr.ml-row'));
     rows.sort(function(a,b){
       var av = a.cells[idx] ? a.cells[idx].textContent.trim() : '';

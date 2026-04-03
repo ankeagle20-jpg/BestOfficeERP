@@ -34,6 +34,21 @@ except ImportError:
     def gemini_analiz_yap(*args, **kwargs):
         return False, "Gemini modülü yüklenemedi."
 
+
+def _vergi_no_normalize_veya_hata_kyc(tax_raw, yetkili_tc_raw):
+    """10 hane VKN veya Yetkili T.C. ile birebir aynı 11 hane T.C. (Giriş / kaydet ile aynı kural)."""
+    v = "".join(c for c in str(tax_raw or "") if c.isdigit())
+    tc = "".join(c for c in str(yetkili_tc_raw or "") if c.isdigit())
+    if not v:
+        return "Vergi numarası zorunludur.", None
+    if len(v) == 10:
+        return None, v
+    if len(v) == 11 and len(tc) == 11 and v == tc:
+        return None, v
+    if len(v) == 11:
+        return "Vergi no 11 hane yalnızca Yetkili T.C. Kimlik No ile aynı olduğunda kabul edilir.", None
+    return "Vergi no 10 haneli VKN veya Yetkili T.C. ile aynı 11 haneli T.C. olmalıdır.", None
+
 # helper month names (Turkish)
 MONTHS_TR = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"]
 
@@ -1891,13 +1906,25 @@ def api_kyc_kaydet():
         sube_merkez = (data.get("sube_merkez") or "Merkez").strip()
         yetkili_adsoyad = (data.get("yetkili_adsoyad") or "").strip()
         yetkili_tcno = (data.get("yetkili_tcno") or "").strip()
+        vergi_err, vergi_no_norm = _vergi_no_normalize_veya_hata_kyc(vergi_no, yetkili_tcno)
+        if vergi_err:
+            return jsonify({"ok": False, "mesaj": vergi_err}), 400
+        vergi_no = vergi_no_norm
         yetkili_dogum = data.get("yetkili_dogum")
         yetkili_ikametgah = (data.get("yetkili_ikametgah") or "").strip()
         yetkili_tel = (data.get("yetkili_tel") or "").strip()
         yetkili_tel2 = (data.get("yetkili_tel2") or "").strip()
+        yetkili_tel_aciklama = (data.get("yetkili_tel_aciklama") or "").strip()
+        yetkili_tel2_aciklama = (data.get("yetkili_tel2_aciklama") or "").strip()
         yetkili_email = (data.get("yetkili_email") or "").strip()
         email = (data.get("email") or "").strip()
         hizmet_turu = (data.get("hizmet_turu") or "Sanal Ofis").strip()
+        _df = (data.get("duzenli_fatura") or "duzenle").strip().lower()
+        _df = _df.replace(" ", "_").replace("-", "_")
+        _df = re.sub(r"[^a-z0-9_]", "", _df)
+        if not _df or len(_df) > 120:
+            _df = "duzenle"
+        duzenli_fatura = _df
         durum_m = (data.get("durum") or "aktif").strip().lower()
         if durum_m not in ("aktif", "pasif"):
             durum_m = "aktif"
@@ -1989,8 +2016,8 @@ def api_kyc_kaydet():
                    sirket_unvani=%s, unvan=%s, musteri_adi=%s, vergi_no=%s, vergi_dairesi=%s, mersis_no=%s, ticaret_sicil_no=%s,
                    kurulus_tarihi=%s, faaliyet_konusu=%s, nace_kodu=%s, eski_adres=%s, yeni_adres=%s, sube_merkez=%s,
                    yetkili_adsoyad=%s, yetkili_tcno=%s, yetkili_dogum=%s, yetkili_ikametgah=%s,
-                   yetkili_tel=%s, yetkili_tel2=%s, yetkili_email=%s, email=%s,
-                   hizmet_turu=%s, aylik_kira=%s, yillik_kira=%s, sozlesme_no=%s, sozlesme_tarihi=%s, sozlesme_bitis=%s,
+                   yetkili_tel=%s, yetkili_tel2=%s, yetkili_tel_aciklama=%s, yetkili_tel2_aciklama=%s, yetkili_email=%s, email=%s,
+                   hizmet_turu=%s, duzenli_fatura=%s, aylik_kira=%s, yillik_kira=%s, sozlesme_no=%s, sozlesme_tarihi=%s, sozlesme_bitis=%s,
                    kira_artis_tarihi=%s, kira_suresi_ay=%s, kira_nakit=%s,
                    evrak_imza_sirkuleri=%s, evrak_vergi_levhasi=%s, evrak_ticaret_sicil=%s, evrak_faaliyet_belgesi=%s,
                    evrak_kimlik_fotokopi=%s, evrak_ikametgah=%s, evrak_kase=%s, notlar=%s, tamamlanma_yuzdesi=%s, updated_at=NOW()
@@ -1998,8 +2025,8 @@ def api_kyc_kaydet():
                 (sirket_unvani, sirket_unvani, musteri_adi, vergi_no, vergi_dairesi, mersis_no, ticaret_sicil_no,
                  kurulus_tarihi, faaliyet_konusu, nace_kodu, eski_adres, yeni_adres, sube_merkez,
                  yetkili_adsoyad, yetkili_tcno, yetkili_dogum, yetkili_ikametgah,
-                 yetkili_tel, yetkili_tel2, yetkili_email, email,
-                 hizmet_turu, aylik_kira, yillik_kira, sozlesme_no, sozlesme_tarihi, sozlesme_bitis,
+                 yetkili_tel, yetkili_tel2, yetkili_tel_aciklama, yetkili_tel2_aciklama, yetkili_email, email,
+                 hizmet_turu, duzenli_fatura, aylik_kira, yillik_kira, sozlesme_no, sozlesme_tarihi, sozlesme_bitis,
                  kira_artis_tarihi, kira_suresi_ay, kira_nakit,
                  evrak_imza_sirkuleri, evrak_vergi_levhasi, evrak_ticaret_sicil, evrak_faaliyet_belgesi,
                  evrak_kimlik_fotokopi, evrak_ikametgah, evrak_kase, notlar, tamamlanma_yuzdesi, mevcut["id"])
@@ -2029,22 +2056,22 @@ def api_kyc_kaydet():
                    musteri_id, sirket_unvani, unvan, musteri_adi, vergi_no, vergi_dairesi, mersis_no, ticaret_sicil_no,
                    kurulus_tarihi, faaliyet_konusu, nace_kodu, eski_adres, yeni_adres, sube_merkez,
                    yetkili_adsoyad, yetkili_tcno, yetkili_dogum, yetkili_ikametgah,
-                   yetkili_tel, yetkili_tel2, yetkili_email, email,
-                   hizmet_turu, aylik_kira, yillik_kira, sozlesme_no, sozlesme_tarihi, sozlesme_bitis,
+                   yetkili_tel, yetkili_tel2, yetkili_tel_aciklama, yetkili_tel2_aciklama, yetkili_email, email,
+                   hizmet_turu, duzenli_fatura, aylik_kira, yillik_kira, sozlesme_no, sozlesme_tarihi, sozlesme_bitis,
                    kira_artis_tarihi, kira_suresi_ay, kira_nakit,
                    evrak_imza_sirkuleri, evrak_vergi_levhasi, evrak_ticaret_sicil, evrak_faaliyet_belgesi,
                    evrak_kimlik_fotokopi, evrak_ikametgah, evrak_kase, notlar, tamamlanma_yuzdesi
                 ) VALUES (
                    %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
-                   %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
                    %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
+                   %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
                    %s,%s,%s,%s,%s,%s,%s
                 ) RETURNING id""",
                 (musteri_id, sirket_unvani, sirket_unvani, musteri_adi, vergi_no, vergi_dairesi, mersis_no, ticaret_sicil_no,
                  kurulus_tarihi, faaliyet_konusu, nace_kodu, eski_adres, yeni_adres, sube_merkez,
                  yetkili_adsoyad, yetkili_tcno, yetkili_dogum, yetkili_ikametgah,
-                 yetkili_tel, yetkili_tel2, yetkili_email, email,
-                 hizmet_turu, aylik_kira, yillik_kira, sozlesme_no, sozlesme_tarihi, sozlesme_bitis,
+                 yetkili_tel, yetkili_tel2, yetkili_tel_aciklama, yetkili_tel2_aciklama, yetkili_email, email,
+                 hizmet_turu, duzenli_fatura, aylik_kira, yillik_kira, sozlesme_no, sozlesme_tarihi, sozlesme_bitis,
                  kira_artis_tarihi, kira_suresi_ay, kira_nakit,
                  evrak_imza_sirkuleri, evrak_vergi_levhasi, evrak_ticaret_sicil, evrak_faaliyet_belgesi,
                  evrak_kimlik_fotokopi, evrak_ikametgah, evrak_kase, notlar, tamamlanma_yuzdesi)

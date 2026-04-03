@@ -5,7 +5,7 @@ Flask-Login + Supabase PostgreSQL
 from flask_login import LoginManager, UserMixin, login_user, current_user
 from werkzeug.security import check_password_hash, generate_password_hash
 from functools import wraps
-from flask import abort, flash, redirect, request, url_for
+from flask import abort, flash, jsonify, redirect, request, url_for
 from db import fetch_one, fetch_all
 import psycopg2
 from config import Config
@@ -253,6 +253,15 @@ def giris_gerekli(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if not current_user.is_authenticated:
+            path = request.path or ""
+            # fetch() ile çağrılan API'lerde HTML login yerine JSON dön (parse hatası / belirsiz hatalar önlenir)
+            if path.startswith("/giris/api/"):
+                return jsonify(
+                    {
+                        "ok": False,
+                        "mesaj": "Oturum gerekli veya süresi doldu. Sayfayı yenileyip tekrar giriş yapın.",
+                    }
+                ), 401
             flash("Bu sayfaya erişmek için giriş yapmalısınız.", "warning")
             next_url = request.path
             if request.query_string:

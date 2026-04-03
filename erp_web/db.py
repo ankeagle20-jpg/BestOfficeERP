@@ -1,25 +1,80 @@
 """
 Supabase PostgreSQL Bağlantı Katmanı
 """
+import logging
+import os
+import time
+
 import psycopg2
 import psycopg2.extras
 from psycopg2.extras import RealDictCursor
 from contextlib import contextmanager
 from config import Config
 
+logger = logging.getLogger(__name__)
+
+
+def _db_connect_kwargs_common():
+    """Ortak libpq parametreleri (kopmalara karşı keepalive, TLS)."""
+    return dict(
+        connect_timeout=int(os.environ.get("DB_CONNECT_TIMEOUT", "15")),
+        cursor_factory=psycopg2.extras.RealDictCursor,
+        keepalives=1,
+        keepalives_idle=int(os.environ.get("DB_KEEPALIVES_IDLE", "30")),
+        keepalives_interval=10,
+        keepalives_count=3,
+        sslmode=os.environ.get("DB_SSLMODE", "require"),
+    )
+
 
 def get_conn():
-    """Supabase PostgreSQL bağlantısı döndür."""
-    return psycopg2.connect(
-        host=Config.DB_HOST,
-        port=Config.DB_PORT,
-        dbname=Config.DB_NAME,
-        user=Config.DB_USER,
-        password=Config.DB_PASSWORD,
-        sslmode="require",
-        connect_timeout=5,
-        cursor_factory=psycopg2.extras.RealDictCursor
-    )
+    """
+    Supabase PostgreSQL bağlantısı döndürür.
+
+    Öncelik: DATABASE_URL veya SUPABASE_DB_URL (.env) — Supabase panelindeki tam URI
+    genelde pooler + doğru kullanıcı biçimi (postgres.PROJECT_REF) içerir.
+
+    "SSL connection has been closed unexpectedly" gibi geçici pooler/ağ hatalarında
+    birkaç kez yeniden dener (DB_CONNECT_RETRIES, varsayılan 3).
+    """
+    dsn = (os.environ.get("DATABASE_URL") or os.environ.get("SUPABASE_DB_URL") or "").strip()
+    extra = _db_connect_kwargs_common()
+    attempts = max(1, int(os.environ.get("DB_CONNECT_RETRIES", "3")))
+
+    def _connect_once():
+        if dsn:
+            return psycopg2.connect(dsn, **extra)
+        if not Config.DB_HOST:
+            raise psycopg2.OperationalError(
+                "DB_HOST tanımlı değil. .env içinde DATABASE_URL veya DB_HOST / DB_* değişkenlerini ayarlayın."
+            )
+        return psycopg2.connect(
+            host=Config.DB_HOST,
+            port=Config.DB_PORT,
+            dbname=Config.DB_NAME,
+            user=Config.DB_USER,
+            password=Config.DB_PASSWORD,
+            **extra,
+        )
+
+    last_err = None
+    for attempt in range(attempts):
+        try:
+            return _connect_once()
+        except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
+            last_err = e
+            if attempt >= attempts - 1:
+                raise
+            delay = min(2.0, 0.25 * (2**attempt))
+            logger.warning(
+                "PostgreSQL bağlantı denemesi %s/%s başarısız (%s). %.2fs sonra tekrar.",
+                attempt + 1,
+                attempts,
+                e,
+                delay,
+            )
+            time.sleep(delay)
+    raise last_err  # pragma: no cover
 
 
 @contextmanager
@@ -251,6 +306,7 @@ def init_schema():
         conn.cursor().execute(SCHEMA_SQL)
         ensure_customers_notes()
         ensure_customers_musteri_adi()
+        ensure_customers_is_active()
         ensure_customers_rent_columns()
         ensure_customers_excel_columns()
         ensure_customers_quick_edit_columns()
@@ -265,6 +321,7 @@ def init_schema():
         ensure_faturalar_amount_columns()
         ensure_musteri_kyc_columns()
         ensure_hizmet_turleri_table()
+        ensure_duzenli_fatura_secenekleri_table()
         ensure_office_rentals()
         ensure_crm_leads()
         ensure_personel_extra_columns()
@@ -410,6 +467,9 @@ def ensure_musteri_kyc_columns():
         ("kira_artis_tarihi", "DATE"),
         ("kira_suresi_ay", "INTEGER"),
         ("kira_nakit", "BOOLEAN DEFAULT FALSE"),
+        ("duzenli_fatura", "TEXT"),
+        ("yetkili_tel_aciklama", "TEXT"),
+        ("yetkili_tel2_aciklama", "TEXT"),
     )
     for col, ctype in columns:
         try:
@@ -642,6 +702,14 @@ def ensure_customers_musteri_adi():
         print(f"customers.musteri_adi: {e}")
 
 
+def ensure_customers_is_active():
+    """Eski veritabanlarında customers.is_active yoksa ekler (rapor / pasif kart süzgeci)."""
+    try:
+        execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE")
+    except Exception as e:
+        print(f"customers.is_active: {e}")
+
+
 def ensure_customers_notes():
     """Customers tablosuna notes ve ev_adres sütunlarını ekle."""
     try:
@@ -726,6 +794,42 @@ def ensure_hizmet_turleri_table():
             )
         except Exception as e:
             print(f"hizmet_turleri seed {ad}: {e}")
+
+
+def ensure_duzenli_fatura_secenekleri_table():
+    """Giriş formu Düzenli Fatura açılır listesi (varsayılanlar + kullanıcı ekleri)."""
+    try:
+        execute(
+            """
+            CREATE TABLE IF NOT EXISTS duzenli_fatura_secenekleri (
+                id SERIAL PRIMARY KEY,
+                kod TEXT NOT NULL,
+                etiket TEXT NOT NULL,
+                sira INTEGER DEFAULT 0,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                UNIQUE(kod)
+            )
+            """
+        )
+    except Exception as e:
+        print(f"duzenli_fatura_secenekleri CREATE: {e}")
+    varsayilan = (
+        ("duzenle", "Düzenle", 1),
+        ("fatura_aylik", "Fatura Aylık", 2),
+        ("fatura_yillik", "Fatura Yıllık", 3),
+    )
+    for kod, etiket, sira in varsayilan:
+        try:
+            execute(
+                """
+                INSERT INTO duzenli_fatura_secenekleri (kod, etiket, sira)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (kod) DO NOTHING
+                """,
+                (kod, etiket, sira),
+            )
+        except Exception as e:
+            print(f"duzenli_fatura_secenekleri seed {kod}: {e}")
 
 
 def ensure_customers_cari_columns():

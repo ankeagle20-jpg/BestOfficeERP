@@ -221,6 +221,25 @@
             background: rgba(244, 67, 54, 0.2);
             color: #f44336;
         }
+        /* Dinamik tablo: resizer + sıralama */
+        th.dyn-sort-th {
+            cursor: pointer;
+            user-select: none;
+        }
+        .dyn-col-resizer {
+            position: absolute;
+            top: 0;
+            right: 0;
+            height: 100%;
+            width: 7px;
+            cursor: col-resize;
+            z-index: 5;
+            user-select: none;
+        }
+        th.dyn-sort-th { position: relative; }
+        .dyn-col-resizer:hover { background: rgba(79, 195, 247, 0.25); }
+        .dyn-sort-asc::after { content: " ▲"; font-size: 10px; color: #4fc3f7; }
+        .dyn-sort-desc::after { content: " ▼"; font-size: 10px; color: #4fc3f7; }
     </style>
 </head>
 <body>
@@ -310,14 +329,14 @@
         </div>
     </div>
     
-    <table>
+    <table id="faturalar_liste_tablo" class="dyn-resizable">
         <thead>
             <tr>
-                <th>Fatura No</th>
-                <th>Müşteri</th>
-                <th>Ofis</th>
-                <th>Tutar</th>
-                <th>Durum</th>
+                <th class="dyn-sort-th" data-dyn-type="str">Fatura No</th>
+                <th class="dyn-sort-th" data-dyn-type="str">Müşteri</th>
+                <th class="dyn-sort-th" data-dyn-type="str">Ofis</th>
+                <th class="dyn-sort-th" data-dyn-type="num">Tutar</th>
+                <th class="dyn-sort-th" data-dyn-type="str">Durum</th>
                 <th>İşlem</th>
             </tr>
         </thead>
@@ -551,6 +570,155 @@
             btn.innerHTML = eski;
           });
     }
+    </script>
+    <script>
+        (function initDynTableFaturalar() {
+            var table = document.getElementById('faturalar_liste_tablo');
+            if (!table) return;
+            var LS_KEY = 'dyn_table_faturalar_v1';
+
+            function parseNumberTR(s) {
+                if (s == null) return 0;
+                s = String(s).trim();
+                if (!s) return 0;
+                // TL ve diğer karakterleri temizle
+                s = s.replace(/TL/gi, '').replace(/\s/g, '');
+                // örn 1.234,56 => 1234.56
+                s = s.replace(/\./g, '').replace(',', '.');
+                var n = parseFloat(s);
+                return Number.isFinite(n) ? n : 0;
+            }
+
+            function parseDateTR(s) {
+                s = String(s || '').trim();
+                if (!s) return NaN;
+                var m1 = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+                if (m1) return new Date(Number(m1[1]), Number(m1[2]) - 1, Number(m1[3])).getTime();
+                var m2 = s.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+                if (m2) return new Date(Number(m2[3]), Number(m2[2]) - 1, Number(m2[1])).getTime();
+                return NaN;
+            }
+
+            function readCfg() {
+                try {
+                    var raw = localStorage.getItem(LS_KEY);
+                    if (!raw) return {};
+                    return JSON.parse(raw) || {};
+                } catch (e) {
+                    return {};
+                }
+            }
+
+            function saveCfg(cfg) {
+                try { localStorage.setItem(LS_KEY, JSON.stringify(cfg || {})); } catch (e) {}
+            }
+
+            var cfg = readCfg();
+            var widths = cfg.widths || {};
+            var sort = cfg.sort || null; // {colIndex, dir}
+
+            table.style.tableLayout = 'fixed';
+            var rows = table.querySelectorAll('tr');
+            // width uygula
+            Object.keys(widths).forEach(function(k){
+                var idx = parseInt(k, 10);
+                var w = parseInt(widths[k], 10);
+                if (!Number.isFinite(idx) || !Number.isFinite(w) || w <= 0) return;
+                rows.forEach(function(r){
+                    if (!r.cells || !r.cells[idx]) return;
+                    r.cells[idx].style.width = w + 'px';
+                });
+            });
+
+            var ths = table.querySelectorAll('thead th.dyn-sort-th');
+            ths.forEach(function(th, thPos){
+                var colIndex = th.cellIndex;
+                // Resizer
+                if (!th.querySelector('.dyn-col-resizer')) {
+                    var handle = document.createElement('div');
+                    handle.className = 'dyn-col-resizer';
+                    th.appendChild(handle);
+                    handle.addEventListener('mousedown', function(e){
+                        e.preventDefault();
+                        e.stopPropagation();
+                        var startX = e.clientX;
+                        var startW = th.getBoundingClientRect().width;
+                        function onMove(ev) {
+                            var delta = ev.clientX - startX;
+                            var newW = Math.max(48, startW + delta);
+                            rows.forEach(function(r){
+                                if (!r.cells || !r.cells[colIndex]) return;
+                                r.cells[colIndex].style.width = newW + 'px';
+                            });
+                        }
+                        function onUp() {
+                            document.removeEventListener('mousemove', onMove);
+                            document.removeEventListener('mouseup', onUp);
+                            var finalW = Math.round(th.getBoundingClientRect().width);
+                            widths[colIndex] = finalW;
+                            cfg.widths = widths;
+                            saveCfg(cfg);
+                        }
+                        document.addEventListener('mousemove', onMove);
+                        document.addEventListener('mouseup', onUp);
+                    });
+                }
+
+                // Sort
+                th.addEventListener('click', function(e){
+                    if (e.target && e.target.classList && e.target.classList.contains('dyn-col-resizer')) return;
+                    var dir = 'asc';
+                    if (sort && sort.colIndex === colIndex) dir = (sort.dir === 'asc') ? 'desc' : 'asc';
+                    sort = { colIndex: colIndex, dir: dir };
+                    cfg.sort = sort;
+                    saveCfg(cfg);
+                    applySort(colIndex, dir);
+                    applySortIndicator(colIndex, dir);
+                });
+            });
+
+            function applySortIndicator(colIndex, dir) {
+                table.querySelectorAll('thead th.dyn-sort-th').forEach(function(th){ th.classList.remove('dyn-sort-asc', 'dyn-sort-desc'); });
+                var th = table.querySelector('thead th:nth-child(' + (colIndex + 1) + ')');
+                if (th) th.classList.add(dir === 'desc' ? 'dyn-sort-desc' : 'dyn-sort-asc');
+            }
+
+            function applySort(colIndex, dir) {
+                var tbody = table.querySelector('tbody');
+                if (!tbody) return;
+                var trs = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
+                var sign = (dir === 'desc') ? -1 : 1;
+                // type
+                var type = (table.querySelector('thead th:nth-child(' + (colIndex + 1) + ')') || {}).getAttribute
+                    ? (table.querySelector('thead th:nth-child(' + (colIndex + 1) + ')').getAttribute('data-dyn-type') || 'str')
+                    : 'str';
+                trs.sort(function(a,b){
+                    var ca = a.cells && a.cells[colIndex] ? a.cells[colIndex].textContent.trim() : '';
+                    var cb = b.cells && b.cells[colIndex] ? b.cells[colIndex].textContent.trim() : '';
+                    if (type === 'num') {
+                        var na = parseNumberTR(ca);
+                        var nb = parseNumberTR(cb);
+                        if (na === nb) return 0;
+                        return (na - nb) * sign;
+                    }
+                    if (type === 'date') {
+                        var da = parseDateTR(ca);
+                        var db = parseDateTR(cb);
+                        if (da === db) return 0;
+                        if (!Number.isFinite(da)) return 1;
+                        if (!Number.isFinite(db)) return -1;
+                        return (da - db) * sign;
+                    }
+                    return ca.localeCompare(cb, 'tr', { sensitivity: 'base', numeric: true }) * sign;
+                });
+                trs.forEach(function(tr){ tbody.appendChild(tr); });
+            }
+
+            if (sort && sort.colIndex != null) {
+                applySort(sort.colIndex, sort.dir || 'asc');
+                applySortIndicator(sort.colIndex, sort.dir || 'asc');
+            }
+        })();
     </script>
     <script src="/static/js/erp-tarih-hizli.js"></script>
 </body>

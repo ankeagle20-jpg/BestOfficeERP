@@ -11,6 +11,7 @@ from auth import login_manager, giris_yap, kullanici_olustur, ROLLER
 from flask_login import current_user
 import os
 import atexit
+import sys
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -48,7 +49,7 @@ try:
     from routes.ilan_robotu_routes import bp as ilan_robotu_bp
 except Exception as e:
     ilan_robotu_bp = None
-    print("⚠ İlan Robotu blueprint yüklenemedi:", e)
+    print("[WARN] İlan Robotu blueprint yüklenemedi:", e)
 
 app.register_blueprint(auth_bp)
 app.register_blueprint(dashboard_bp, url_prefix="/dashboard")
@@ -78,7 +79,7 @@ def _start_background_jobs():
         from apscheduler.schedulers.background import BackgroundScheduler
         from routes.faturalar_routes import run_auto_invoice_cycle
     except Exception as e:
-        print("⚠ Background scheduler devre dışı:", e)
+        print("[WARN] Background scheduler devre dışı:", e)
         return
     scheduler = BackgroundScheduler(timezone="Europe/Istanbul")
     scheduler.add_job(
@@ -92,7 +93,7 @@ def _start_background_jobs():
     )
     scheduler.start()
     atexit.register(lambda: scheduler.shutdown(wait=False))
-    print("✅ Background scheduler aktif: auto_invoice_cycle/15dk")
+    print("[OK] Background scheduler aktif: auto_invoice_cycle/15dk")
 
 # ── Ana sayfa ────────────────────────────────────────────────────────────────
 @app.route("/")
@@ -194,10 +195,31 @@ if __name__ == "__main__":
     # Enable debug for local troubleshooting
     app.debug = True
     port = int(os.environ.get("PORT", 5000))
+    # Windows console encoding (cp1254 vb.) yüzünden uygulama çökmesin:
+    # stdout/stderr UTF-8 olamıyorsa bile yazdırmayı güvenli hale getir.
+    try:
+        if hasattr(sys.stdout, "reconfigure"):
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        if hasattr(sys.stderr, "reconfigure"):
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
     print("\n" + "=" * 50)
     print("  OFİSBİR ERP — Sunucu çalışıyor")
     print("  Tarayıcıda aç: http://127.0.0.1:{}".format(port))
     print("  Giriş: admin / admin123")
     print("  Tüm sayfalar (Dashboard, Müşteriler, Finans vb.) bu adresten açılır.")
     print("=" * 50 + "\n")
-    app.run(debug=True, host="0.0.0.0", port=port)
+    # threaded=True: Paralel fetch istekleri birbirini bloklamasın.
+    # use_reloader: Cursor/IDE dosya kaydında sunucu 1–2 sn kapanır → "Sunucuya bağlanılamadı". Kararlı test için:
+    #   PowerShell: $env:BESTOFFICE_DEV_NO_RELOAD="1"; python app.py
+    _no_reload = os.environ.get("BESTOFFICE_DEV_NO_RELOAD", "").strip().lower() in ("1", "true", "yes", "on")
+    if _no_reload:
+        print("  [BESTOFFICE_DEV_NO_RELOAD] Otomatik yeniden başlatma kapalı (kod kaydı sunucuyu düşürmez).\n")
+    app.run(
+        debug=True,
+        host="0.0.0.0",
+        port=port,
+        threaded=True,
+        use_reloader=not _no_reload,
+    )

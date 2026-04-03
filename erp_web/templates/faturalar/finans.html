@@ -90,6 +90,101 @@
     min-height: 0;
   }
 }
+.fatura-rapor-wrap {
+  margin-top: 12px;
+  background: var(--erp-bg, #0f2537);
+  border: 1px solid #2d4060;
+  border-radius: 8px;
+  padding: 14px 16px;
+  color: #e0f7fa;
+}
+.fatura-rapor-filtre {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+  align-items: flex-end;
+  margin-bottom: 12px;
+}
+.fatura-rapor-filtre label {
+  font-size: 12px;
+  color: #90a4ae;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.fatura-rapor-opt {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px !important;
+  cursor: pointer;
+  font-size: 11px !important;
+  max-width: 100%;
+}
+.fatura-rapor-opt input { margin: 0; cursor: pointer; }
+.fatura-rapor-filtre input[type="date"] {
+  padding: 6px 8px;
+  border-radius: 4px;
+  border: 1px solid #2d4060;
+  background: #0f2537;
+  color: #e0f7fa;
+}
+.fatura-rapor-tablo {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+.fatura-rapor-tablo th,
+.fatura-rapor-tablo td {
+  padding: 6px 8px;
+  border: 1px solid #2d4060;
+  text-align: left;
+  background: #1a2332;
+}
+.fatura-rapor-tablo th {
+  background: #243447;
+  color: #b3e5fc;
+  font-weight: 600;
+  white-space: nowrap;
+  position: relative;
+}
+.fatura-rapor-tablo td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.fatura-rapor-tablo tbody tr:hover { background: #243447; }
+.fatura-rapor-tablo tbody tr.fatura-rapor-placeholder-row { background: rgba(0,0,0,0.12); }
+.fatura-rapor-tablo tbody tr.fatura-rapor-placeholder-row td { color: #90a4ae; font-style: italic; }
+.fatura-rapor-tablo {
+  table-layout: fixed;
+}
+.fatura-rapor-tablo th .col-resizer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 100%;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 5;
+  user-select: none;
+}
+.fatura-rapor-tablo th .col-resizer:hover {
+  background: rgba(79, 195, 247, 0.25);
+}
+.fatura-sort-asc::after { content: " ▲"; font-size: 10px; color: #4fc3f7; }
+.fatura-sort-desc::after { content: " ▼"; font-size: 10px; color: #4fc3f7; }
+.fatura-rapor-tablo th.ch-n,
+.fatura-rapor-tablo td.ch-n { text-align: center; width: 38px; vertical-align: middle; }
+.fatura-rapor-tablo th.goz-n,
+.fatura-rapor-tablo td.goz-n { text-align: center; width: 44px; vertical-align: middle; }
+.fatura-rapor-goz-btn {
+  background: transparent;
+  border: none;
+  color: #4fc3f7;
+  cursor: pointer;
+  padding: 4px 8px;
+  font-size: 15px;
+  line-height: 1;
+  border-radius: 4px;
+}
+.fatura-rapor-goz-btn:hover { color: #fff; background: rgba(79, 195, 247, 0.15); }
+.fatura-rapor-sil-btn { background: #c62828 !important; color: #fff !important; }
 </style>
 
 <div class="erp-page-wrap">
@@ -100,6 +195,7 @@
     <a href="/faturalar/finans" class="tab finans-tab active" onclick="event.preventDefault(); switchTab(0);"><i class="fa fa-file-invoice"></i><span>Faturalar</span></a>
     <a href="/faturalar/finans#tahsilat" class="tab finans-tab" onclick="event.preventDefault(); switchTab(1);"><i class="fa fa-money-bill-wave"></i><span>Tahsilatlar</span></a>
     <a href="/faturalar/finans#yeni" class="tab finans-tab" onclick="event.preventDefault(); switchTab(2);"><i class="fa fa-plus-circle"></i><span>Yeni Fatura</span></a>
+    <a href="/faturalar/finans#rapor" class="tab finans-tab" onclick="event.preventDefault(); switchTab(3);"><i class="fa fa-table"></i><span>Fatura Rapor</span></a>
   </div>
 </div>
 
@@ -112,7 +208,7 @@
     <label>Gün <input type="number" id="auto_day" min="1" max="28" value="1"></label>
     <label>Saat <input type="number" id="auto_hour" min="0" max="23" value="9"></label>
     <label><input type="checkbox" id="auto_send_gib"> GİB taslak/gönderim dene</label>
-    <label>SMS Kod (ops.) <input type="text" id="auto_sms" placeholder="123456" style="width:110px;"></label>
+    <label>SMS Kod (ops.) <input type="text" id="auto_sms" placeholder="B2Z7V5" style="width:110px;"></label>
     <button type="button" class="auto-btn save" id="auto_save_btn" onclick="autoSaveSettings()">Kaydet</button>
     <button type="button" class="auto-btn run" id="auto_run_btn" onclick="autoRunNow()">Şimdi Çalıştır</button>
     <button type="button" class="auto-btn" id="kira_backfill_btn" style="background:#6a1b9a;color:#fff;" onclick="kiraGuncelleVeBorclandirAll()">
@@ -124,11 +220,12 @@
     <div class="gib-manuel-title"><i class="fa fa-paper-plane"></i> Tekil Faturayı GİB'e Gönder</div>
     <div class="auto-row">
       <label>Fatura ID <input type="number" id="gib_fatura_id" min="1" placeholder="141" style="width:90px;"></label>
+      <button type="button" class="auto-btn" id="gib_kaydet_btn" style="background:#3949ab;color:#fff;" onclick="gibFaturaKaydetEkraniAc()"><i class="fa fa-save"></i> Faturayı Kaydet</button>
       <button type="button" class="auto-btn" id="gib_son_btn" style="background:#455a64;color:#fff;" onclick="gibSonFaturaGetir()">Son Faturayı Getir</button>
       <button type="button" class="auto-btn run" id="gib_taslak_btn" onclick="gibTaslakGonder()">GİB Taslak Gönder</button>
       <label>UUID/ETTN <input type="text" id="gib_uuid" placeholder="taslak sonrası gelir" style="width:220px;"></label>
       <button type="button" class="auto-btn" id="gib_sms_send_btn" style="background:#00897b;color:#fff;" onclick="gibSmsGonder()">SMS Gönder</button>
-      <label>SMS Kod <input type="text" id="gib_sms_kod" placeholder="123456" style="width:110px;"></label>
+      <label>SMS Kod <input type="text" id="gib_sms_kod" placeholder="B2Z7V5" style="width:110px;"></label>
       <button type="button" class="auto-btn save" id="gib_sms_btn" onclick="gibSmsOnayla()">SMS ile Onayla</button>
       <button type="button" class="auto-btn run" id="gib_fatura_olustur_btn" onclick="gibFaturaOlustur()"><i class="fa fa-file-invoice"></i> Fatura Oluştur</button>
       <input type="hidden" id="gib_oid" value="">
@@ -155,6 +252,56 @@
         <iframe src="/faturalar/yeni"></iframe>
     </div>
 </div>
+
+<div class="tab-content" id="tab-3">
+    <div class="fatura-rapor-wrap">
+        <div style="font-size:13px;font-weight:700;color:#4fc3f7;margin-bottom:10px;">
+            <i class="fa fa-table"></i> Fatura raporu (satır bazlı)
+        </div>
+        <p style="font-size:12px;color:#90a4ae;margin:0 0 12px 0;">
+        Tarih boş bırakılırsa: başlangıç <strong>geçen ayın 1’i</strong>, bitiş <strong>bugün</strong>. Aralığa, fatura tarihi boşsa <strong>vade tarihi</strong> ile dahil edilir. <strong>Aktif müşteri kartları</strong> (pasif/kapanmış hariç) tamamı listelenir; dönemde faturası olmayan firmalar için tek satırda “fatura yok” satırı eklenir (pasif dahil modunda müşteri sütununda <strong>durum</strong> parantez içinde). Üç filtre kutusu birbirini dışlar. <strong>Seçilenleri sil</strong> deneme faturaları için (ETTN’li GİB faturaları silinmez). Göz: PDF önizleme.
+        </p>
+        <div class="fatura-rapor-filtre">
+            <label>Başlangıç <input type="date" id="fatura_rapor_baslangic" autocomplete="off"></label>
+            <label>Bitiş <input type="date" id="fatura_rapor_bitis" autocomplete="off"></label>
+            <button type="button" class="auto-btn run" id="fatura_rapor_btn" onclick="faturaRaporYukle()"><i class="fa fa-search"></i> Raporu Getir</button>
+            <button type="button" class="auto-btn fatura-rapor-sil-btn" id="fatura_rapor_sil_btn" onclick="faturaRaporSecilenleriSil()"><i class="fa fa-trash"></i> Seçilenleri sil</button>
+        </div>
+        <div class="fatura-rapor-filtre" style="margin-top:-4px;padding-top:0;border-top:none;">
+            <label class="fatura-rapor-opt"><input type="checkbox" id="fatura_rapor_tum_musteri"> Tüm müşteri kayıtları (is_active/durum süzmez)</label>
+            <label class="fatura-rapor-opt"><input type="checkbox" id="fatura_rapor_pasif_dahil"> Pasif/kapanmış <em>durum</em>lu firmaları da listele</label>
+            <label class="fatura-rapor-opt"><input type="checkbox" id="fatura_rapor_sadece_kesilen"> Yalnız kesilen faturalar (fatura yok satırı ekleme)</label>
+        </div>
+        <div id="fatura_rapor_durum" style="font-size:12px;color:#b0bec5;min-height:20px;"></div>
+        <div style="overflow-x:auto;">
+            <table id="fatura_rapor_tablo" class="fatura-rapor-tablo" style="display:none;">
+                <thead>
+                    <tr>
+                        <th class="ch-n" title="Seç"><input type="checkbox" id="fatura_rapor_hepsini_sec" title="Tümünü seç"></th>
+                        <th class="goz-n" title="Önizle"></th>
+                        <th>Tarih</th>
+                        <th>Fatura no</th>
+                        <th>Müşteri</th>
+                        <th>Satır</th>
+                        <th>Açıklama</th>
+                        <th class="num">Miktar</th>
+                        <th>Birim</th>
+                        <th class="num">Birim fiyat</th>
+                        <th class="num">İskonto</th>
+                        <th class="num">KDV %</th>
+                        <th class="num">Net</th>
+                        <th class="num">KDV tutarı</th>
+                        <th class="num">Satır toplam</th>
+                        <th class="num">Fatura genel</th>
+                        <th>ETTN</th>
+                    </tr>
+                </thead>
+                <tbody id="fatura_rapor_tbody"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
 </div>
 
 <script>
@@ -278,6 +425,29 @@ function fetchJsonWithTimeout(url, options, timeoutMs) {
       .finally(function(){ clearTimeout(t); });
 }
 
+function gibFaturaKaydetEkraniAc() {
+    var yeniUrl = '/faturalar/yeni';
+    var w = window.open(yeniUrl, '_blank');
+    if (!w) {
+      document.getElementById('gib_manual_status').textContent =
+        'Yeni fatura ekranı açılamadı. Tarayıcı popup engelini kapatıp tekrar deneyin.';
+      return;
+    }
+    document.getElementById('gib_manual_status').textContent =
+      'Yeni fatura ekranı açıldı. Kaydedince buraya dönüp "Son Faturayı Getir"e basın.';
+}
+
+var gibTaslakDogrulandi = false;
+function gibSetFlowEnabled(enabled) {
+    var on = !!enabled;
+    var smsSend = document.getElementById('gib_sms_send_btn');
+    var smsOnay = document.getElementById('gib_sms_btn');
+    var faturaOlustur = document.getElementById('gib_fatura_olustur_btn');
+    if (smsSend) smsSend.disabled = !on;
+    if (smsOnay) smsOnay.disabled = !on;
+    if (faturaOlustur) faturaOlustur.disabled = !on;
+}
+
 function gibTaslakGonder() {
     var faturaId = parseInt(document.getElementById('gib_fatura_id').value || '0', 10);
     if (!faturaId || faturaId < 1) {
@@ -286,27 +456,72 @@ function gibTaslakGonder() {
     }
     var btn = document.getElementById('gib_taslak_btn');
     autoSetBusy(btn, true, 'Gönderiliyor...');
-    fetchJsonWithTimeout('/faturalar/api/gib-taslak', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({fatura_id: faturaId})
-    }, 30000)
-      .then(j => {
-        if (!j || !j.ok) throw new Error((j && j.mesaj) || 'Taslak gönderilemedi');
-        document.getElementById('gib_uuid').value = j.uuid || '';
-        document.getElementById('gib_oid').value = j.oid || '';
-        document.getElementById('gib_manual_status').textContent = (j.mesaj || 'Taslak oluşturuldu.') + ' UUID: ' + (j.uuid || '-');
+    var MAX_RETRY = 3;
+    var RETRY_MS = 2500;
+    var sleep = function(ms){ return new Promise(function(resolve){ setTimeout(resolve, ms); }); };
+    var requestOnce = function() {
+      return fetchJsonWithTimeout('/faturalar/api/gib-taslak', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({fatura_id: faturaId})
+      }, 30000);
+    };
+
+    (async function run() {
+      gibTaslakDogrulandi = false;
+      gibSetFlowEnabled(false);
+      for (var attempt = 1; attempt <= MAX_RETRY; attempt++) {
+        try {
+          var j = await requestOnce();
+          if (j && j.ok) {
+            gibTaslakDogrulandi = true; // pragmatik mod: verify=false olsa da akışa izin
+            gibSetFlowEnabled(true);
+            document.getElementById('gib_uuid').value = j.uuid || '';
+            document.getElementById('gib_oid').value = j.oid || '';
+            document.getElementById('gib_manual_status').textContent =
+              (j.mesaj || 'Taslak oluşturuldu.') + ' UUID: ' + (j.uuid || '-');
+            return;
+          }
+
+          var msg = (j && j.mesaj) || 'Taslak gönderilemedi';
+          var beklemeGecikmesi = /portal listesinde bulunamad/i.test(msg) || (j && j.taslak_dogrulandi === false);
+          if (beklemeGecikmesi && attempt < MAX_RETRY) {
+            document.getElementById('gib_manual_status').textContent =
+              'Taslak henüz portalda görünmedi. ' + attempt + '/' + MAX_RETRY +
+              ' deneme yapıldı, ' + (RETRY_MS / 1000) + ' sn sonra tekrar deneniyor...';
+            await sleep(RETRY_MS);
+            continue;
+          }
+          throw new Error(msg);
+        } catch (err) {
+          if (attempt < MAX_RETRY && err && err.name === 'AbortError') {
+            document.getElementById('gib_manual_status').textContent =
+              'GİB yanıtı gecikti. ' + attempt + '/' + MAX_RETRY +
+              ' deneme tamamlandı, tekrar deneniyor...';
+            await sleep(RETRY_MS);
+            continue;
+          }
+          var em = (err && err.name === 'AbortError')
+            ? 'İstek zaman aşımına uğradı. GİB servisinden yanıt gelmedi.'
+            : ((err && err.message) || err);
+          throw new Error(em);
+        }
+      }
+      throw new Error('Taslak portalda doğrulanamadı. Lütfen kısa süre sonra tekrar deneyin.');
+    })()
+      .catch(function(err){
+        document.getElementById('gib_manual_status').textContent = 'GİB taslak hatası: ' + ((err && err.message) || err);
       })
-      .catch(err => {
-        var msg = (err && err.name === 'AbortError')
-          ? 'İstek zaman aşımına uğradı. GİB servisinden yanıt gelmedi.'
-          : ('GİB taslak hatası: ' + ((err && err.message) || err));
-        document.getElementById('gib_manual_status').textContent = msg;
-      })
-      .finally(() => autoSetBusy(btn, false));
+      .finally(function(){
+        autoSetBusy(btn, false);
+      });
 }
 
 function gibSmsGonder() {
+    if (!gibTaslakDogrulandi) {
+      document.getElementById('gib_manual_status').textContent = 'Önce taslak gönderin. UUID alanı dolmalı.';
+      return;
+    }
     var uuid = (document.getElementById('gib_uuid').value || '').trim();
     if (!uuid) {
       document.getElementById('gib_manual_status').textContent = 'Önce taslak gönderin (UUID gerekli).';
@@ -351,6 +566,10 @@ function gibSonFaturaGetir() {
 }
 
 function gibSmsOnayla() {
+    if (!gibTaslakDogrulandi) {
+      document.getElementById('gib_manual_status').textContent = 'Önce taslak gönderin. UUID alanı dolmalı.';
+      return;
+    }
     var faturaId = parseInt(document.getElementById('gib_fatura_id').value || '0', 10);
     var uuid = (document.getElementById('gib_uuid').value || '').trim();
     var sms = (document.getElementById('gib_sms_kod').value || '').trim();
@@ -363,6 +582,11 @@ function gibSmsOnayla() {
       document.getElementById('gib_manual_status').textContent = 'SMS kodu girin.';
       return;
     }
+    if (!/^[A-Za-z0-9]{4,8}$/.test(sms)) {
+      document.getElementById('gib_manual_status').textContent = 'SMS kodu harf/rakam içermeli (4-8 karakter, örn: B2Z7V5).';
+      return;
+    }
+    sms = sms.toUpperCase();
     var btn = document.getElementById('gib_sms_btn');
     autoSetBusy(btn, true, 'Onaylanıyor...');
     fetchJsonWithTimeout('/faturalar/api/gib-sms-onay', {
@@ -384,6 +608,10 @@ function gibSmsOnayla() {
 }
 
 function gibFaturaOlustur() {
+    if (!gibTaslakDogrulandi) {
+      document.getElementById('gib_manual_status').textContent = 'Önce taslak gönderin. UUID alanı dolmalı.';
+      return;
+    }
     var faturaId = parseInt(document.getElementById('gib_fatura_id').value || '0', 10);
     var uuid = (document.getElementById('gib_uuid').value || '').trim();
     if (!faturaId || faturaId < 1) {
@@ -417,20 +645,432 @@ function gibFaturaOlustur() {
       .finally(function(){ autoSetBusy(btn, false); });
 }
 
+gibSetFlowEnabled(false);
+
+function faturaRaporVarsayilanTarihlerDoldur() {
+    var basEl = document.getElementById('fatura_rapor_baslangic');
+    var bitEl = document.getElementById('fatura_rapor_bitis');
+    if (!basEl || !bitEl) return;
+    var d = new Date();
+    var bugun = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    var o1 = new Date(d.getFullYear(), d.getMonth() - 1, 1);
+    var bas = o1.getFullYear() + '-' + String(o1.getMonth() + 1).padStart(2, '0') + '-' + String(o1.getDate()).padStart(2, '0');
+    if (!basEl.value) basEl.value = bas;
+    if (!bitEl.value) bitEl.value = bugun;
+}
+
+function faturaRaporYukle() {
+    var basEl = document.getElementById('fatura_rapor_baslangic');
+    var bitEl = document.getElementById('fatura_rapor_bitis');
+    var durum = document.getElementById('fatura_rapor_durum');
+    var tablo = document.getElementById('fatura_rapor_tablo');
+    var tbody = document.getElementById('fatura_rapor_tbody');
+    if (!basEl || !bitEl || !durum || !tablo || !tbody) return;
+    if (!basEl.value || !bitEl.value) faturaRaporVarsayilanTarihlerDoldur();
+    var bas = basEl.value;
+    var bit = bitEl.value;
+    if (!bas || !bit) {
+        durum.textContent = 'Tarih seçin veya varsayılanlar için alanları boş bırakıp tekrar deneyin.';
+        return;
+    }
+    durum.textContent = 'Yükleniyor…';
+    tablo.style.display = 'none';
+    tbody.innerHTML = '';
+    var u = '/faturalar/api/fatura-rapor?baslangic=' + encodeURIComponent(bas) + '&bitis=' + encodeURIComponent(bit);
+    var elSk = document.getElementById('fatura_rapor_sadece_kesilen');
+    var elTm = document.getElementById('fatura_rapor_tum_musteri');
+    var elPd = document.getElementById('fatura_rapor_pasif_dahil');
+    if (elSk && elSk.checked) u += '&sadece_faturali=1';
+    else {
+        if (elTm && elTm.checked) u += '&tum_musteriler=1';
+        else if (elPd && elPd.checked) u += '&pasifleri_dahil=1';
+    }
+    fetch(u, { credentials: 'same-origin' })
+        .then(function (r) {
+            var ct = (r.headers && r.headers.get ? r.headers.get('content-type') : '') || '';
+            if (!r.ok) {
+                return r.text().then(function (t) {
+                    var snip = (t || '').replace(/\s+/g, ' ').trim().slice(0, 180);
+                    throw new Error('HTTP ' + r.status + (snip ? ': ' + snip : ''));
+                });
+            }
+            if (String(ct).toLowerCase().indexOf('application/json') >= 0) return r.json();
+            return r.text().then(function (t) {
+                throw new Error('JSON gelmedi. İlk 200 karakter: ' + (t || '').slice(0, 200));
+            });
+        })
+        .then(function (data) {
+            if (!data || !data.ok) {
+                durum.textContent = (data && data.mesaj) ? data.mesaj : 'Rapor alınamadı.';
+                return;
+            }
+            var oz = data.ozet || {};
+            var mk = oz.musteri_kapsam_adedi != null ? oz.musteri_kapsam_adedi : 0;
+            var fz = oz.donemde_faturasiz_musteri != null ? oz.donemde_faturasiz_musteri : 0;
+            var ks = oz.kesilen_fatura_satir_sayisi;
+            var kap = '';
+            if (data.musteri_kapsam === 'tum_kayitlar') kap = ' | Kapsam: tüm kayıtlar';
+            else if (data.musteri_kapsam === 'pasif_dahil') kap = ' | Kapsam: pasif durumlar dahil';
+            else if (!data.sadece_faturali) kap = ' | Kapsam: aktif kartlar';
+            var musBlok = '';
+            if (!data.sadece_faturali) {
+                musBlok = ' | Müşteri kartı: ' + mk + ', dönemde faturasız: ' + fz + kap;
+                if (ks != null && ks !== oz.satir_adedi) musBlok += ' | Kesilen fatura satırı: ' + ks;
+            }
+            durum.textContent = 'Dönem: ' + (data.baslangic || '') + ' — ' + (data.bitis || '') +
+                ' | Fatura (belge): ' + (oz.fatura_adedi || 0) + ' | Tablo satırı: ' + (oz.satir_adedi || 0) +
+                musBlok +
+                ' | Toplam (satır KDV dahil): ' + (oz.toplam_satir_kdv_dahil != null ? oz.toplam_satir_kdv_dahil : 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ₺';
+            var satirlar = data.satirlar || [];
+            window.__faturaRaporSatirlarAny = satirlar.length > 0;
+            if (!satirlar.length) {
+                durum.textContent += ' — Bu aralıkta kayıt yok.';
+                return;
+            }
+            tbody.innerHTML = satirlar.map(function (s) {
+                var fmt = function (n) {
+                    return (n != null ? n : 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                };
+                var ettn = (s.ettn || '—').toString();
+                if (ettn.length > 14) ettn = ettn.slice(0, 12) + '…';
+                var fid = s.fatura_id != null ? String(s.fatura_id) : '';
+                var isPh = s.musteri_doldurma === true;
+                var chCell = isPh
+                    ? '<td class="ch-n"></td>'
+                    : '<td class="ch-n"><input type="checkbox" class="fatura-rapor-satir" data-fatura-id="' + fid.replace(/"/g, '') + '"></td>';
+                var gozCell = isPh
+                    ? '<td class="goz-n">—</td>'
+                    : '<td class="goz-n"><button type="button" class="fatura-rapor-goz-btn" data-fatura-id="' + fid.replace(/"/g, '') + '" title="Faturayı görüntüle"><i class="fa fa-eye"></i></button></td>';
+                var musEsc = (s.musteri_adi || '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
+                if (isPh && s.musteri_durum) {
+                    var dEsc = String(s.musteri_durum).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+                    musEsc += ' <span style="color:#78909c;font-size:10px;font-style:normal;">(' + dEsc + ')</span>';
+                }
+                return '<tr class="' + (isPh ? 'fatura-rapor-placeholder-row' : '') + '" data-fatura-id="' + fid.replace(/"/g, '') + '">' +
+                    chCell + gozCell +
+                    '<td>' + (s.fatura_tarihi || '') + '</td>' +
+                    '<td>' + (s.fatura_no || '') + '</td>' +
+                    '<td>' + musEsc + '</td>' +
+                    '<td>' + (s.satir_no != null ? s.satir_no : '') + '</td>' +
+                    '<td>' + (s.satir_aciklama || '').replace(/</g, '&lt;') + '</td>' +
+                    '<td class="num">' + fmt(s.miktar) + '</td>' +
+                    '<td>' + (s.birim || '') + '</td>' +
+                    '<td class="num">' + fmt(s.birim_fiyat) + '</td>' +
+                    '<td class="num">' + fmt(s.iskonto_tutar) + '</td>' +
+                    '<td class="num">' + fmt(s.kdv_orani) + '</td>' +
+                    '<td class="num">' + fmt(s.mal_tutar) + '</td>' +
+                    '<td class="num">' + fmt(s.kdv_tutar) + '</td>' +
+                    '<td class="num">' + fmt(s.satir_toplam) + '</td>' +
+                    '<td class="num">' + fmt(s.fatura_genel_toplam) + '</td>' +
+                    '<td title="' + (s.ettn || '').replace(/"/g, '&quot;') + '">' + ettn + '</td>' +
+                    '</tr>';
+            }).join('');
+            // Render sonrası kullanıcı ayarlarını geri uygulayalım
+            try { if (typeof window.faturaRaporApplyColumnWidths === 'function') window.faturaRaporApplyColumnWidths(); } catch (e0) {}
+            try { if (typeof window.faturaRaporApplyStoredSort === 'function') window.faturaRaporApplyStoredSort(); } catch (e1) {}
+            var hall = document.getElementById('fatura_rapor_hepsini_sec');
+            if (hall) hall.checked = false;
+            tablo.style.display = 'table';
+        })
+        .catch(function (err) {
+            durum.textContent = 'Hata: ' + (err && err.message ? err.message : err);
+        });
+}
+
+function faturaRaporSecilenleriSil() {
+    var ids = [];
+    var seen = {};
+    document.querySelectorAll('#fatura_rapor_tbody .fatura-rapor-satir:checked').forEach(function (cb) {
+        var id = cb.getAttribute('data-fatura-id');
+        if (id && !seen[id]) {
+            seen[id] = true;
+            var n = parseInt(id, 10);
+            if (n) ids.push(n);
+        }
+    });
+    if (!ids.length) {
+        alert('Silmek için en az bir satır seçin.');
+        return;
+    }
+    if (!confirm(ids.length + ' fatura silinecek.\n\nBu faturaya bağlı tahsilat satırları da silinir.\nETTN’li (GİB) faturalar atlanır.\n\nDevam edilsin mi?')) return;
+    var btn = document.getElementById('fatura_rapor_sil_btn');
+    if (btn) {
+        btn.disabled = true;
+        btn.style.opacity = '0.75';
+    }
+    fetch('/faturalar/api/fatura-sil-toplu', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ fatura_ids: ids })
+    })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            if (!data || !data.ok) {
+                alert((data && data.mesaj) ? data.mesaj : 'Silinemedi.');
+                return;
+            }
+            var m = data.mesaj || 'Tamamlandı.';
+            if (data.atlanan && data.atlanan.length) {
+                var oz = data.atlanan.slice(0, 8).map(function (a) {
+                    return '#' + a.id + (a.neden === 'ettn_var' ? ' (ETTN)' : '');
+                }).join(', ');
+                if (data.atlanan.length > 8) oz += '…';
+                m += '\n\nAtlanan: ' + oz;
+            }
+            alert(m);
+            faturaRaporYukle();
+        })
+        .catch(function (err) {
+            alert('İstek hatası: ' + (err && err.message ? err.message : err));
+        })
+        .finally(function () {
+            if (btn) {
+                btn.disabled = false;
+                btn.style.opacity = '';
+            }
+        });
+}
+
+(function initFaturaRaporSortResizeHelpers() {
+    // localStorage: tablo ayarları (sütun genişliği + sıralama)
+    var LS_SORT = 'fatura_rapor_sort_v1';
+    var LS_WIDTHS = 'fatura_rapor_col_width_v1';
+    var NUM_COLS = { 5: true, 7: true, 9: true, 10: true, 11: true, 12: true, 13: true, 14: true, 15: true };
+
+    window.faturaRaporReadSortCfg = function () {
+        try {
+            var raw = localStorage.getItem(LS_SORT) || '';
+            if (!raw) return null;
+            var j = JSON.parse(raw);
+            if (!j || j.colIndex == null) return null;
+            return j;
+        } catch (e) {
+            return null;
+        }
+    };
+
+    window.faturaRaporSaveSortCfg = function (colIndex, dir) {
+        try {
+            localStorage.setItem(LS_SORT, JSON.stringify({ colIndex: colIndex, dir: dir }));
+        } catch (e) {}
+    };
+
+    window.faturaRaporApplyColumnWidths = function () {
+        var table = document.getElementById('fatura_rapor_tablo');
+        if (!table) return;
+        var widths = {};
+        try {
+            widths = JSON.parse(localStorage.getItem(LS_WIDTHS) || '{}') || {};
+        } catch (e) {
+            widths = {};
+        }
+        table.style.tableLayout = 'fixed';
+        var rows = table.querySelectorAll('tr');
+        Object.keys(widths).forEach(function (k) {
+            var idx = parseInt(k, 10);
+            var w = parseInt(widths[k], 10);
+            if (!Number.isFinite(idx) || !Number.isFinite(w) || w <= 0) return;
+            rows.forEach(function (r) {
+                if (!r.cells || !r.cells[idx]) return;
+                r.cells[idx].style.width = w + 'px';
+            });
+        });
+    };
+
+    function parseNumberTR(s) {
+        if (s == null) return 0;
+        s = String(s).trim();
+        if (!s) return 0;
+        // örn: 1.234,56 -> 1234.56
+        s = s.replace(/\./g, '').replace(',', '.');
+        var n = parseFloat(s);
+        return Number.isFinite(n) ? n : 0;
+    }
+
+    window.faturaRaporSortBodyRows = function (colIndex, dir) {
+        var table = document.getElementById('fatura_rapor_tablo');
+        var tbody = document.getElementById('fatura_rapor_tbody');
+        if (!table || !tbody || colIndex == null) return;
+        var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
+        var sign = (dir === 'desc') ? -1 : 1;
+        rows.sort(function (ra, rb) {
+            var ca = ra.cells[colIndex] ? ra.cells[colIndex].textContent.trim() : '';
+            var cb = rb.cells[colIndex] ? rb.cells[colIndex].textContent.trim() : '';
+            if (NUM_COLS[colIndex]) {
+                var na = parseNumberTR(ca);
+                var nb = parseNumberTR(cb);
+                if (na === nb) return 0;
+                return (na - nb) * sign;
+            }
+            if (colIndex === 2) {
+                // Tarih: YYYY-MM-DD => lexicographic çalışır
+                return ca.localeCompare(cb) * sign;
+            }
+            // String: tr duyarlılık tabanlı
+            return ca.localeCompare(cb, 'tr', { sensitivity: 'base', numeric: true }) * sign;
+        });
+        // nodes'u taşıyalım (checkbox state bozulmasın diye)
+        rows.forEach(function (r) { tbody.appendChild(r); });
+    };
+
+    window.faturaRaporUpdateSortIndicators = function (colIndex, dir) {
+        var table = document.getElementById('fatura_rapor_tablo');
+        if (!table) return;
+        var ths = table.querySelectorAll('thead th');
+        ths.forEach(function (th) {
+            th.classList.remove('fatura-sort-asc', 'fatura-sort-desc');
+        });
+        var th = table.querySelector('thead tr th:nth-child(' + (colIndex + 1) + ')');
+        if (th) th.classList.add(dir === 'desc' ? 'fatura-sort-desc' : 'fatura-sort-asc');
+    };
+
+    window.faturaRaporApplyStoredSort = function () {
+        var cfg = window.faturaRaporReadSortCfg();
+        if (!cfg || cfg.colIndex == null) return;
+        window.faturaRaporSortBodyRows(cfg.colIndex, cfg.dir || 'asc');
+        window.faturaRaporUpdateSortIndicators(cfg.colIndex, cfg.dir || 'asc');
+    };
+
+    window.faturaRaporSetupSortableResizable = function () {
+        var table = document.getElementById('fatura_rapor_tablo');
+        if (!table || table.dataset.faturaRaporUiBound) return;
+        table.dataset.faturaRaporUiBound = '1';
+        var ths = table.querySelectorAll('thead th');
+
+        // Kenar genişliği / sıralama ayarı
+        ths.forEach(function (th) {
+            var colIndex = th.cellIndex;
+            if (colIndex < 2) return; // ilk 2 sütun (Seç / göz)
+
+            // Sort
+            th.addEventListener('click', function (ev) {
+                if (ev.target && ev.target.classList && ev.target.classList.contains('col-resizer')) return;
+                if (!window.__faturaRaporSatirlarAny && document.getElementById('fatura_rapor_tbody').children.length === 0) return;
+                var cfg = window.faturaRaporReadSortCfg();
+                var dir = 'asc';
+                if (cfg && cfg.colIndex === colIndex) dir = (cfg.dir === 'asc') ? 'desc' : 'asc';
+                window.faturaRaporSaveSortCfg(colIndex, dir);
+                window.faturaRaporSortBodyRows(colIndex, dir);
+                window.faturaRaporUpdateSortIndicators(colIndex, dir);
+            });
+
+            // Resizer handle
+            if (!th.querySelector('.col-resizer')) {
+                var handle = document.createElement('div');
+                handle.className = 'col-resizer';
+                th.appendChild(handle);
+                handle.addEventListener('mousedown', function (e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+
+                    var startX = e.clientX;
+                    var startW = th.getBoundingClientRect().width;
+                    var idx = th.cellIndex;
+
+                    function onMove(ev) {
+                        var delta = ev.clientX - startX;
+                        var newW = Math.max(48, startW + delta);
+                        // canlı uygula
+                        table.querySelectorAll('tr').forEach(function (r) {
+                            if (!r.cells || !r.cells[idx]) return;
+                            r.cells[idx].style.width = newW + 'px';
+                        });
+                    }
+
+                    function onUp(ev) {
+                        document.removeEventListener('mousemove', onMove);
+                        document.removeEventListener('mouseup', onUp);
+                        var widths = {};
+                        try {
+                            widths = JSON.parse(localStorage.getItem(LS_WIDTHS) || '{}') || {};
+                        } catch (ex) { widths = {}; }
+                        var finalW = th.getBoundingClientRect().width;
+                        widths[idx] = Math.round(finalW);
+                        try { localStorage.setItem(LS_WIDTHS, JSON.stringify(widths)); } catch (ex2) {}
+                    }
+
+                    document.addEventListener('mousemove', onMove);
+                    document.addEventListener('mouseup', onUp);
+                });
+            }
+        });
+
+        // İlk açılış: mevcut width + sort
+        window.faturaRaporApplyColumnWidths();
+        window.faturaRaporApplyStoredSort();
+    };
+})();
+
+(function initFaturaRaporTabloEtkilesim() {
+    var tablo = document.getElementById('fatura_rapor_tablo');
+    if (!tablo || tablo.dataset.faturaRaporBound) return;
+    tablo.dataset.faturaRaporBound = '1';
+    tablo.addEventListener('change', function (e) {
+        var t = e.target;
+        if (!t) return;
+        if (t.id === 'fatura_rapor_hepsini_sec') {
+            var c = !!t.checked;
+            tablo.querySelectorAll('#fatura_rapor_tbody .fatura-rapor-satir').forEach(function (x) { x.checked = c; });
+            return;
+        }
+        if (t.classList && t.classList.contains('fatura-rapor-satir')) {
+            var id = t.getAttribute('data-fatura-id');
+            if (!id) return;
+            var checked = !!t.checked;
+            tablo.querySelectorAll('.fatura-rapor-satir[data-fatura-id="' + id + '"]').forEach(function (x) { x.checked = checked; });
+        }
+    });
+    tablo.addEventListener('click', function (e) {
+        var b = e.target.closest('.fatura-rapor-goz-btn');
+        if (b) {
+            e.preventDefault();
+            var fid = b.getAttribute('data-fatura-id');
+            if (fid) window.open('/faturalar/onizleme/' + encodeURIComponent(fid), '_blank');
+        }
+    });
+
+    // başlık sıralama + sütun resize bağla
+    if (typeof window.faturaRaporSetupSortableResizable === 'function') {
+        window.faturaRaporSetupSortableResizable();
+    }
+})();
+
+(function initFaturaRaporFiltreCakisFinans() {
+    var sk = document.getElementById('fatura_rapor_sadece_kesilen');
+    var tm = document.getElementById('fatura_rapor_tum_musteri');
+    var pd = document.getElementById('fatura_rapor_pasif_dahil');
+    if (!sk && !tm && !pd) return;
+    function onChange(ev) {
+        var t = ev.target;
+        if (t === sk && sk.checked) {
+            if (tm) tm.checked = false;
+            if (pd) pd.checked = false;
+        } else if (t === tm && tm.checked) {
+            if (sk) sk.checked = false;
+            if (pd) pd.checked = false;
+        } else if (t === pd && pd.checked) {
+            if (sk) sk.checked = false;
+            if (tm) tm.checked = false;
+        }
+    }
+    [sk, tm, pd].forEach(function (el) { if (el) el.addEventListener('change', onChange); });
+})();
+
 function switchTab(index) {
-    // Sadece Finans sekmelerinde (Faturalar, Tahsilatlar, Yeni Fatura) active değiştir
     document.querySelectorAll('.finans-tab').forEach((t, i) => {
         t.classList.toggle('active', i === index);
     });
     document.querySelectorAll('.tab-content').forEach((c, i) => {
         c.classList.toggle('active', i === index);
     });
+    if (index === 3) faturaRaporVarsayilanTarihlerDoldur();
 }
-// Sayfa #tahsilat veya #yeni ile açıldıysa doğru sekmeyi aç
+// Sayfa #tahsilat, #yeni veya #rapor ile açıldıysa doğru sekmeyi aç
 (function() {
     var hash = (window.location.hash || '').toLowerCase();
     if (hash === '#tahsilat') switchTab(1);
     else if (hash === '#yeni') switchTab(2);
+    else if (hash === '#rapor') switchTab(3);
     autoLoadStatus();
     gibSonFaturaGetir();
 })();

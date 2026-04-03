@@ -213,6 +213,7 @@
         .gib-yeni-btn.sms { background: #00897b; }
         .gib-yeni-btn.onay { background: #2e7d32; }
         .gib-yeni-btn.olustur { background: #1565c0; }
+        .gib-yeni-btn.onizleme { background: #5e35b1; }
         .gib-yeni-status {
             margin-top: 8px;
             font-size: 12px;
@@ -231,6 +232,7 @@
             {% endif %}
         </h2>
         <div class="page-actions">
+            <button type="button" id="btn-kaydet"><i class="fa fa-save"></i> Kaydet</button>
             <button type="button" class="secondary" id="btn-onizleme"><i class="fa fa-eye"></i> Önizleme</button>
         </div>
     </div>
@@ -306,9 +308,10 @@
             <button type="button" class="gib-yeni-btn taslak" id="yeni-gib-taslak-btn">GİB Taslak Gönder</button>
             <label>UUID/ETTN <input type="text" id="yeni-gib-uuid" placeholder="taslak sonrası gelir"></label>
             <button type="button" class="gib-yeni-btn sms" id="yeni-gib-sms-send-btn">SMS Gönder</button>
-            <label>SMS Kod <input type="text" id="yeni-gib-sms-kod" placeholder="123456"></label>
+            <label>SMS Kod <input type="text" id="yeni-gib-sms-kod" placeholder="B2Z7V5"></label>
             <button type="button" class="gib-yeni-btn onay" id="yeni-gib-sms-onay-btn">SMS ile Onayla</button>
             <button type="button" class="gib-yeni-btn olustur" id="yeni-gib-fatura-olustur-btn"><i class="fa fa-file-invoice"></i> Fatura Oluştur</button>
+            <button type="button" class="gib-yeni-btn onizleme" id="yeni-gib-onizleme-btn"><i class="fa fa-eye"></i> GİB Fatura Önizle</button>
             <input type="hidden" id="yeni-gib-oid" value="">
         </div>
         <div class="gib-yeni-status" id="yeni-gib-status">Fatura ID girip &quot;GİB Taslak Gönder&quot; ile başlayın.</div>
@@ -319,6 +322,9 @@
         <div class="panel-row-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
             <h3 style="margin-bottom:0;">{% if irsaliye_modu %}İrsaliye Satırları{% else %}Fatura Satırları{% endif %}</h3>
             <div style="display:inline-flex; align-items:center; gap:8px;">
+                <button type="button" id="btn-kaydet-inline" class="btn-icon" style="background:#2e7d32; color:#fff; border:none; padding:6px 12px; border-radius:4px; font-size:12px; cursor:pointer; display:inline-flex; align-items:center; gap:6px;">
+                    <i class="fa fa-save"></i> Kaydet
+                </button>
                 <button type="button" id="btn-fatura-olustur" class="btn-icon" style="background:#00bcd4; color:#fff; border:none; padding:6px 12px; border-radius:4px; font-size:12px; cursor:pointer; display:inline-flex; align-items:center; gap:6px;">
                     {% if irsaliye_modu %}
                         <i class="fa fa-eye"></i> İrsaliye Önizleme
@@ -342,11 +348,12 @@
                     <th style="width:7%;">Miktar</th>
                     <th style="width:7%;">Birim</th>
                     <th style="width:11%;">Birim Fiyat</th>
-                    <th style="width:7%;">İsk. %</th>
-                    <th style="width:10%;">İskontu Tutarı</th>
+                    <th style="width:9%;">Tür</th>
+                    <th style="width:7%;">İsk./Art. %</th>
+                    <th style="width:10%;">İsk./Art. Tutarı</th>
                     <th style="width:7%;">KDV %</th>
-                    <th style="width:15%;">Satır Toplam (KDV Dahil)</th>
-                    <th style="width:6%;text-align:center;">Sil</th>
+                    <th style="width:13%;">Satır Toplam (KDV Dahil)</th>
+                    <th style="width:3%;text-align:center;">Sil</th>
                 </tr>
             </thead>
             <tbody id="satir-tbody"></tbody>
@@ -391,6 +398,7 @@
         const API_GIB_SMS_GONDER = "{{ url_for('faturalar.api_gib_sms_gonder') }}";
         const API_GIB_SMS_ONAY = "{{ url_for('faturalar.api_gib_sms_onay') }}";
         const API_GIB_FATURA_OLUSTUR = "{{ url_for('faturalar.api_gib_fatura_olustur') }}";
+        const API_GIB_FATURA_ONIZLEME = "{{ url_for('faturalar.api_gib_fatura_onizleme') }}";
         const API_GIB_SON_FATURA = "{{ url_for('faturalar.api_gib_son_fatura') }}";
         const SECILI_MUSTERI = {{ (secili_musteri | tojson) if secili_musteri else 'null' }};
         const IRSALIYE_MODU = {{ 'true' if irsaliye_modu else 'false' }};
@@ -497,8 +505,14 @@
                     </select>
                 </td>
                 <td><input type="number" step="0.01" min="0" class="inp-birim-fiyat" value="${initial && initial.birim_fiyat != null && initial.birim_fiyat !== '' ? birimFiyatInputValue(initial.birim_fiyat) : ''}"></td>
-                <td><input type="number" step="0.01" min="0" max="100" class="inp-iskonto" value="${initial && initial.iskonto_orani || 0}" placeholder="%"></td>
-                <td><input type="number" step="0.01" min="0" class="inp-iskonto-tutar" value="${initial && initial.iskonto_tutar != null ? initial.iskonto_tutar : ''}" placeholder="Tutar"></td>
+                <td>
+                    <select class="inp-iskonto-tipi">
+                        <option value="iskonto">İskonto</option>
+                        <option value="arttirim">Arttırım</option>
+                    </select>
+                </td>
+                <td><input type="number" step="0.01" min="0" max="100" class="inp-iskonto" value="${Math.abs((initial && initial.iskonto_orani) || 0)}" placeholder="% İskonto"></td>
+                <td><input type="number" step="0.01" min="0" class="inp-iskonto-tutar" value="${initial && initial.iskonto_tutar != null ? Math.abs(initial.iskonto_tutar) : ''}" placeholder="İskonto Tutarı"></td>
                 <td>
                     <select class="inp-kdv">
                         <option value="0">%0</option>
@@ -513,12 +527,42 @@
             tbody.appendChild(tr);
             const birimSel = tr.querySelector('.inp-birim');
             const kdvSel = tr.querySelector('.inp-kdv');
+            const iskontoTipiSel = tr.querySelector('.inp-iskonto-tipi');
+            const iskontoInp = tr.querySelector('.inp-iskonto');
+            const iskontoTutarInp = tr.querySelector('.inp-iskonto-tutar');
             if (initial && initial.birim) birimSel.value = initial.birim;
             if (initial && initial.kdv_orani != null) kdvSel.value = String(initial.kdv_orani);
+            if (iskontoTipiSel) {
+                const tip0 = String((initial && initial.iskonto_tipi) || '').toLowerCase();
+                const oran0 = Number((initial && initial.iskonto_orani) || 0);
+                const tutar0 = Number((initial && initial.iskonto_tutar) || 0);
+                iskontoTipiSel.value = (tip0.startsWith('art') || oran0 < 0 || tutar0 < 0) ? 'arttirim' : 'iskonto';
+            }
             tr.querySelectorAll('input,select').forEach(inp => {
                 inp.addEventListener('input', recalc);
                 inp.addEventListener('change', recalc);
             });
+            function _refreshTypeUI() {
+                const tip = (iskontoTipiSel && iskontoTipiSel.value === 'arttirim') ? 'arttirim' : 'iskonto';
+                if (iskontoInp) iskontoInp.placeholder = (tip === 'arttirim') ? '% Arttırım' : '% İskonto';
+                if (iskontoTutarInp) iskontoTutarInp.placeholder = (tip === 'arttirim') ? 'Arttırım Tutarı' : 'İskonto Tutarı';
+            }
+            // Kullanıcının son düzenlediği alanı hatırla: yüzde mi tutar mı?
+            if (iskontoInp) {
+                iskontoInp.addEventListener('input', function(){ tr.dataset.iskontoLastEdit = 'oran'; });
+                iskontoInp.addEventListener('change', function(){ tr.dataset.iskontoLastEdit = 'oran'; });
+            }
+            if (iskontoTutarInp) {
+                iskontoTutarInp.addEventListener('input', function(){ tr.dataset.iskontoLastEdit = 'tutar'; });
+                iskontoTutarInp.addEventListener('change', function(){ tr.dataset.iskontoLastEdit = 'tutar'; });
+            }
+            if (iskontoTipiSel) {
+                iskontoTipiSel.addEventListener('change', function(){
+                    _refreshTypeUI();
+                    recalc();
+                });
+            }
+            _refreshTypeUI();
             const urunBtn = tr.querySelector('.btn-urun-sec');
             const urunInp = tr.querySelector('.inp-urun');
             if (urunBtn) {
@@ -553,12 +597,16 @@
                 const miktar = parseNumber(tr.querySelector('.inp-miktar').value);
                 const birim = tr.querySelector('.inp-birim').value;
                 const birimFiyat = parseNumber(tr.querySelector('.inp-birim-fiyat').value);
-                const iskonto = parseNumber(tr.querySelector('.inp-iskonto').value);
+                const iskontoTipi = ((tr.querySelector('.inp-iskonto-tipi') || {}).value || 'iskonto').toLowerCase();
+                const iskonto = Math.abs(parseNumber(tr.querySelector('.inp-iskonto').value));
                 const iskontoTutarVal = tr.querySelector('.inp-iskonto-tutar').value.trim();
-                const iskonto_tutar = iskontoTutarVal === '' ? null : parseNumber(iskontoTutarVal);
+                const iskontoTutarAbs = iskontoTutarVal === '' ? null : Math.abs(parseNumber(iskontoTutarVal));
+                const sign = (iskontoTipi === 'arttirim') ? -1 : 1;
+                const iskonto_orani = iskonto * sign;
+                const iskonto_tutar = (iskontoTutarAbs === null) ? null : (iskontoTutarAbs * sign);
                 const kdv = parseNumber(tr.querySelector('.inp-kdv').value);
                 if (!ad && miktar === 0 && birimFiyat === 0) return;
-                rows.push({ ad, miktar, birim, birim_fiyat: birimFiyat, iskonto_orani: iskonto, iskonto_tutar: iskonto_tutar, kdv_orani: kdv });
+                rows.push({ ad, miktar, birim, birim_fiyat: birimFiyat, iskonto_tipi: iskontoTipi, iskonto_orani: iskonto_orani, iskonto_tutar: iskonto_tutar, kdv_orani: kdv });
             });
             return rows;
         }
@@ -571,30 +619,37 @@
             tbody.querySelectorAll('tr').forEach(tr => {
                 const miktar = parseNumber(tr.querySelector('.inp-miktar').value);
                 const birimFiyat = parseNumber(tr.querySelector('.inp-birim-fiyat').value);
+                const iskontoTipi = ((tr.querySelector('.inp-iskonto-tipi') || {}).value || 'iskonto').toLowerCase();
                 const iskontoInp = tr.querySelector('.inp-iskonto');
                 const iskontoTutarEl = tr.querySelector('.inp-iskonto-tutar');
-                let iskonto = parseNumber(iskontoInp ? iskontoInp.value : 0);
-                let iskontoTutarInp = parseNumber(iskontoTutarEl ? iskontoTutarEl.value : 0);
+                let iskonto = Math.abs(parseNumber(iskontoInp ? iskontoInp.value : 0));
+                let iskontoTutarInp = Math.abs(parseNumber(iskontoTutarEl ? iskontoTutarEl.value : 0));
+                const iskontoLastEdit = tr.dataset.iskontoLastEdit || 'oran';
                 const kdv = parseNumber(tr.querySelector('.inp-kdv').value);
                 const brut = miktar * birimFiyat;
 
-                let iskontoTutar = 0;
+                let iskontoTutarAbs = 0;
                 if (brut > 0) {
-                    if (iskontoTutarEl && iskontoTutarEl.value.trim() !== '' && iskontoTutarInp > 0) {
-                        // Kullanıcı iskonto tutarını girdi -> yüzdeyi güncelle
-                        iskontoTutar = Math.min(iskontoTutarInp, brut);
-                        const yeniYuzde = (iskontoTutar / brut) * 100;
+                    if (iskontoLastEdit === 'tutar' && iskontoTutarEl && iskontoTutarEl.value.trim() !== '' && iskontoTutarInp !== 0) {
+                        iskontoTutarAbs = Math.min(iskontoTutarInp, brut);
+                        const yeniYuzde = (iskontoTutarAbs / brut) * 100;
                         if (Math.abs(iskonto - yeniYuzde) > 0.01) {
                             iskonto = yeniYuzde;
                             if (iskontoInp) iskontoInp.value = yeniYuzde.toFixed(2);
                         }
-                    } else if (iskonto > 0) {
-                        // Kullanıcı oran girdi -> tutarı güncelle
-                        iskontoTutar = brut * (iskonto / 100);
-                        if (iskontoTutarEl) iskontoTutarEl.value = iskontoTutar.toFixed(2);
+                    } else if (iskonto !== 0) {
+                        if (iskonto > 100) iskonto = 100;
+                        if (iskontoInp) iskontoInp.value = String(iskonto);
+                        iskontoTutarAbs = brut * (iskonto / 100);
+                        if (iskontoTutarEl) iskontoTutarEl.value = iskontoTutarAbs.toFixed(2);
+                    } else {
+                        // Oran sıfırlandı/temizlendiğinde tutar alanını da temizle.
+                        if (iskontoTutarEl) iskontoTutarEl.value = '';
                     }
                 }
 
+                const sign = (iskontoTipi === 'arttirim') ? -1 : 1;
+                const iskontoTutar = iskontoTutarAbs * sign;
                 const net = brut - iskontoTutar;
                 const kdvTutar = net * (kdv / 100);
                 const toplam = net + kdvTutar;
@@ -819,7 +874,9 @@
             throw lastErr || new Error('Failed to fetch');
         }
 
-        async function kaydet() {
+        async function kaydet(opts) {
+            opts = opts || {};
+            var redirectOnSuccess = !!opts.redirectOnSuccess;
             const v = validateForm();
             if (!v.ok) {
                 alert('Lütfen zorunlu alanları doldurun.');
@@ -871,19 +928,22 @@
                     return;
                 }
                 if (j.ok && j.fatura_id) {
-                    window.location.href = FATURA_ONIZLEME_URL + j.fatura_id;
+                    if (redirectOnSuccess) {
+                        window.location.href = FATURA_ONIZLEME_URL + j.fatura_id;
+                        return;
+                    }
+                    // Kaydet sonrası GİB paneline otomatik bağla.
+                    var gibIdEl = document.getElementById('yeni-gib-fatura-id');
+                    if (gibIdEl) gibIdEl.value = j.fatura_id;
+                    var gibStatusEl = document.getElementById('yeni-gib-status');
+                    if (gibStatusEl) {
+                        gibStatusEl.textContent = 'Fatura kaydedildi. ID #' + j.fatura_id + ' ile "GİB Taslak Gönder"e basabilirsiniz.';
+                    }
+                    alert((j.mesaj || 'Fatura kaydedildi.') + ' (ID: ' + j.fatura_id + ')');
                     return;
                 }
                 if (j.ok) {
                     alert(j.mesaj || 'Fatura kaydedildi.');
-                    document.getElementById('fatura-no').value = '';
-                    document.getElementById('fatura-not').value = '';
-                    musteriAra.value = '';
-                    musteriIdEl.value = '';
-                    musteriOzet.style.display = 'none';
-                    tbody.innerHTML = '';
-                    addRow();
-                    recalc();
                 } else {
                     alert(j.mesaj || 'Fatura kaydedilemedi.');
                 }
@@ -902,6 +962,15 @@
             var btn = document.getElementById('btn-onizleme');
             if (btn && typeof btn.click === 'function') btn.click();
         });
+        document.getElementById('btn-kaydet').addEventListener('click', function(){
+            kaydet({ redirectOnSuccess: false });
+        });
+        var kaydetInlineBtn = document.getElementById('btn-kaydet-inline');
+        if (kaydetInlineBtn) {
+            kaydetInlineBtn.addEventListener('click', function(){
+                kaydet({ redirectOnSuccess: false });
+            });
+        }
 
         document.getElementById('btn-yeni-fatura-aylik').addEventListener('click', function(){
             var mid = (document.getElementById('musteri-id') || {}).value || '';
@@ -984,8 +1053,35 @@
             var t = setTimeout(function () { ctrl.abort(); }, ms);
             var opts = Object.assign({}, options || {}, { signal: ctrl.signal });
             return fetch(url, opts)
-                .then(function (r) { return r.json(); })
+                .then(function (r) {
+                    return r.text().then(function (txt) {
+                        var j = {};
+                        try { j = txt ? JSON.parse(txt) : {}; } catch (e) { j = { ok: false, mesaj: txt || ('HTTP ' + r.status) }; }
+                        if (!r.ok) {
+                            var err = new Error((j && j.mesaj) || ('HTTP ' + r.status));
+                            err.httpStatus = r.status;
+                            throw err;
+                        }
+                        return j;
+                    });
+                })
                 .finally(function () { clearTimeout(t); });
+        }
+
+        async function fetchJsonWithRetryYeniGib(url, options, timeoutList) {
+            var timeouts = Array.isArray(timeoutList) && timeoutList.length ? timeoutList : [30000];
+            var lastErr = null;
+            for (var i = 0; i < timeouts.length; i++) {
+                try {
+                    return await fetchJsonWithTimeoutYeniGib(url, options, timeouts[i]);
+                } catch (e) {
+                    lastErr = e;
+                    var isTimeout = e && e.name === 'AbortError';
+                    var isNet = e && /Failed to fetch|NetworkError|Load failed/i.test(String(e.message || ''));
+                    if (!(isTimeout || isNet) || i === timeouts.length - 1) throw e;
+                }
+            }
+            throw lastErr || new Error('İstek başarısız.');
         }
 
         function yeniGibSetBusy(btn, busy, textBusy) {
@@ -1000,10 +1096,22 @@
         (function initYeniGib() {
             var st = document.getElementById('yeni-gib-status');
             if (!st || IRSALIYE_MODU === true || IRSALIYE_MODU === 'true') return;
+            var smsSendBtn = document.getElementById('yeni-gib-sms-send-btn');
+            var smsOnayBtn = document.getElementById('yeni-gib-sms-onay-btn');
+            var faturaOlusturBtn = document.getElementById('yeni-gib-fatura-olustur-btn');
+            var gibOnizlemeBtn = document.getElementById('yeni-gib-onizleme-btn');
 
             function setStatus(msg) {
                 var el = document.getElementById('yeni-gib-status');
                 if (el) el.textContent = msg;
+            }
+
+            function setSmsFlowEnabled(enabled) {
+                var on = !!enabled;
+                if (smsSendBtn) smsSendBtn.disabled = !on;
+                if (smsOnayBtn) smsOnayBtn.disabled = !on;
+                if (faturaOlusturBtn) faturaOlusturBtn.disabled = !on;
+                if (gibOnizlemeBtn) gibOnizlemeBtn.disabled = !on;
             }
 
             function yeniGibSonFaturayiGetir(opts) {
@@ -1035,31 +1143,42 @@
                     .finally(function () { if (showBtnBusy && btn) yeniGibSetBusy(btn, false); });
             }
 
-            document.getElementById('yeni-gib-taslak-btn').addEventListener('click', function () {
-                var faturaId = parseInt((document.getElementById('yeni-gib-fatura-id') || {}).value || '0', 10);
+            document.getElementById('yeni-gib-taslak-btn').addEventListener('click', async function () {
+                var idEl = document.getElementById('yeni-gib-fatura-id');
+                var faturaId = parseInt((idEl || {}).value || '0', 10);
                 if (!faturaId || faturaId < 1) {
-                    setStatus('Geçerli bir Fatura ID girin.');
+                    setStatus('Önce faturayı kaydedin, sonra GİB Taslak Gönder\'e basın.');
                     return;
                 }
                 var btn = document.getElementById('yeni-gib-taslak-btn');
                 yeniGibSetBusy(btn, true, 'Gönderiliyor...');
-                fetchJsonWithTimeoutYeniGib(API_GIB_TASLAK, {
+                fetchJsonWithRetryYeniGib(API_GIB_TASLAK, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ fatura_id: faturaId })
-                }, 30000)
+                }, [45000, 90000])
                     .then(function (j) {
+                        // Her denemede önce SMS akışını kapat; sadece doğrulanan taslakta aç.
+                        setSmsFlowEnabled(false);
                         // Backend doğrulama hatası dönse bile uuid/oid geldiyse alanlara yaz.
                         if (j && j.uuid) document.getElementById('yeni-gib-uuid').value = j.uuid || '';
                         if (j && j.oid) document.getElementById('yeni-gib-oid').value = j.oid || '';
-                        if (!j || !j.ok) throw new Error((j && j.mesaj) || 'Taslak gönderilemedi');
+                        if (!j || !j.ok) {
+                            var baseMsg = (j && j.mesaj) || 'Taslak gönderilemedi';
+                            if (j && j.taslak_raw) baseMsg += ' | Ham yanıt: ' + j.taslak_raw;
+                            throw new Error(baseMsg);
+                        }
                         document.getElementById('yeni-gib-uuid').value = j.uuid || '';
                         document.getElementById('yeni-gib-oid').value = j.oid || '';
-                        setStatus((j.mesaj || 'Taslak oluşturuldu.') + ' UUID: ' + (j.uuid || '-'));
+                        setSmsFlowEnabled(true);
+                        var okMsg = (j.mesaj || 'Taslak oluşturuldu.') + ' UUID: ' + (j.uuid || '-');
+                        if (j && j.taslak_raw) okMsg += ' | Ham yanıt: ' + j.taslak_raw;
+                        setStatus(okMsg);
                     })
                     .catch(function (err) {
+                        setSmsFlowEnabled(false);
                         var msg = (err && err.name === 'AbortError')
-                            ? 'İstek zaman aşımına uğradı. GİB servisinden yanıt gelmedi.'
+                            ? 'İstek zaman aşımına uğradı. GİB servisi geç yanıt veriyor olabilir; lütfen tekrar deneyin.'
                             : ('GİB taslak hatası: ' + ((err && err.message) || err));
                         setStatus(msg);
                     })
@@ -1108,6 +1227,7 @@
                 setStatus('Son fatura ID getiriliyor...');
                 yeniGibSonFaturayiGetir({ onlyIfEmpty: true, showBtnBusy: false, autoLoad: true });
             }
+            setSmsFlowEnabled(false);
 
             document.getElementById('yeni-gib-sms-onay-btn').addEventListener('click', function () {
                 var faturaId = parseInt((document.getElementById('yeni-gib-fatura-id') || {}).value || '0', 10);
@@ -1122,6 +1242,11 @@
                     setStatus('SMS kodu girin.');
                     return;
                 }
+                if (!/^[A-Za-z0-9]{4,8}$/.test(sms)) {
+                    setStatus('SMS kodu harf/rakam içermeli (4-8 karakter, örn: B2Z7V5).');
+                    return;
+                }
+                sms = sms.toUpperCase();
                 var btn = document.getElementById('yeni-gib-sms-onay-btn');
                 yeniGibSetBusy(btn, true, 'Onaylanıyor...');
                 fetchJsonWithTimeoutYeniGib(API_GIB_SMS_ONAY, {
@@ -1175,6 +1300,27 @@
                     })
                     .finally(function () { yeniGibSetBusy(btn, false); });
             });
+
+            if (gibOnizlemeBtn) {
+                gibOnizlemeBtn.addEventListener('click', function () {
+                    var faturaId = parseInt((document.getElementById('yeni-gib-fatura-id') || {}).value || '0', 10);
+                    var uuid = ((document.getElementById('yeni-gib-uuid') || {}).value || '').trim();
+                    if (!faturaId && !uuid) {
+                        setStatus('Önizleme için fatura ID veya UUID gerekli.');
+                        return;
+                    }
+                    var q = [];
+                    // Öncelik her zaman fatura_id: DB'deki en güncel ETTN/UUID ile doğru taslağı aç.
+                    // Eski UUID input'ta kalsa bile yanlış taslağa gitmesin.
+                    if (faturaId) {
+                        q.push('fatura_id=' + encodeURIComponent(String(faturaId)));
+                    } else if (uuid) {
+                        q.push('uuid=' + encodeURIComponent(uuid));
+                    }
+                    var url = API_GIB_FATURA_ONIZLEME + '?' + q.join('&') + '&_=' + Date.now();
+                    window.open(url, '_blank', 'noopener');
+                });
+            }
         })();
     })();
     </script>

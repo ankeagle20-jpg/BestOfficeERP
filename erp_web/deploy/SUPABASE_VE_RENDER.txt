@@ -1,0 +1,16 @@
+Supabase
+--------
+1) Dashboard → SQL → New query → erp_web/deploy/supabase_idempotent.sql içeriğini yapıştır → Run.
+2) Zaten çalışan sütun/tablolar için IF NOT EXISTS / ON CONFLICT nedeniyle güvenlidir.
+
+Render
+------
+1) Bu repoyu GitHub/GitLab’a push edin (Render servisi bu repoyu izliyorsa otomatik deploy başlar).
+   Örnek (ana dal main ise):
+   git add erp_web/
+   git commit -m "ERP: fatura raporu, DB ensure, deploy SQL"
+   git push origin main
+2) Ortam değişkenleri: .env’deki DB_HOST, DB_PORT, DATABASE_URL vb. Render “Environment” ile aynı kalsın.
+3) Build/start komutları projenizdeki gibi kalsın (ör. pip install -r requirements.txt; gunicorn …).
+
+Not: Excel, yerel upload ve temp dosyalar repoya eklenmedi (.gitignore / seçici commit).
