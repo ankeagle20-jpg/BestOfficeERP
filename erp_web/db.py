@@ -491,7 +491,7 @@ def ensure_musteri_kyc_columns():
 
 
 def ensure_customers_hazir_ofis_oda():
-    """Hazır Ofis oda numarası (201–230); doluluk raporu için customers üzerinde."""
+    """Hazır Ofis oda numarası (200–230); doluluk raporu için customers üzerinde."""
     try:
         execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS hazir_ofis_oda_no INTEGER")
     except Exception as e:

@@ -25,7 +25,7 @@ import os
 import sys
 import re
 
-_HAZIR_OFIS_ODA_MIN, _HAZIR_OFIS_ODA_MAX = 201, 230
+_HAZIR_OFIS_ODA_MIN, _HAZIR_OFIS_ODA_MAX = 200, 230
 
 
 def _hizmet_str_hazir_ofis_mi(ht: str) -> bool:
@@ -1989,7 +1989,7 @@ def api_kyc_kaydet():
         hazir_oda_val = _coerce_hazir_ofis_oda_no(data, hizmet_turu, durum_pasif)
         if hazir_oda_val is False:
             return jsonify(
-                {"ok": False, "mesaj": "Hazır Ofis oda numarası 201–230 arasında olmalıdır."}
+                {"ok": False, "mesaj": "Hazır Ofis oda numarası 200–230 arasında olmalıdır."}
             ), 400
 
         try:

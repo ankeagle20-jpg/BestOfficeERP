@@ -1031,7 +1031,7 @@ def api_musteri_detay(mid):
 @bp.route("/api/hazir-ofis-durum", methods=["GET"])
 @giris_gerekli
 def api_hazir_ofis_durum():
-    """201–230 odalar: dolu (aktif kart + atanmış oda) ve boş liste."""
+    """200–230 odalar: dolu (aktif kart + atanmış oda) ve boş liste."""
     ensure_customers_hazir_ofis_oda()
     rows = fetch_all(
         """
@@ -1040,7 +1040,7 @@ def api_hazir_ofis_durum():
                COALESCE(NULLIF(TRIM(c.musteri_adi), ''), NULLIF(TRIM(c.name), ''), '—') AS firma_adi
         FROM customers c
         WHERE c.hazir_ofis_oda_no IS NOT NULL
-          AND c.hazir_ofis_oda_no BETWEEN 201 AND 230
+          AND c.hazir_ofis_oda_no BETWEEN 200 AND 230
           AND COALESCE(c.is_active, TRUE) = TRUE
           AND LOWER(TRIM(COALESCE(c.durum, ''))) = 'aktif'
         ORDER BY c.hazir_ofis_oda_no
@@ -1060,7 +1060,7 @@ def api_hazir_ofis_durum():
             }
         )
     used = {d["oda"] for d in dolu}
-    bos = [n for n in range(201, 231) if n not in used]
+    bos = [n for n in range(200, 231) if n not in used]
     return jsonify({"ok": True, "dolu": dolu, "bos": bos})
 
 

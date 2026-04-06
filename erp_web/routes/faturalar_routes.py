@@ -1955,7 +1955,7 @@ def api_fatura_rapor():
         if hazir_oda_raw:
             try:
                 _hz = int(hazir_oda_raw)
-                if 201 <= _hz <= 230:
+                if 200 <= _hz <= 230:
                     hazir_oda_filtre = _hz
             except (TypeError, ValueError):
                 pass

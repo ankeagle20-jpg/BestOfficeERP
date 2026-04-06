@@ -1533,7 +1533,7 @@
     white-space: nowrap !important;
     border: 0 !important;
 }
-/* Fatura raporu: Oda No — 201–230 pill (yeşil boş / kırmızı dolu) */
+/* Fatura raporu: Oda No — 200–230 pill (yeşil boş / kırmızı dolu) */
 .fatura-rapor-bos-oda-wrap {
     position: relative;
     display: inline-flex;
@@ -1585,6 +1585,11 @@
 }
 #fatura_rapor_bos_odalar_btn.fatura-rapor-oda-no-btn--aktif {
     box-shadow: 0 0 0 2px rgba(129, 199, 132, 0.85);
+}
+.fatura-rapor-bos-oda-pill--hepsi {
+    color: #e1f5fe;
+    background: rgba(3, 155, 229, 0.22);
+    border-color: rgba(79, 195, 247, 0.95);
 }
 .fatura-rapor-bos-oda-pill--yok {
     color: #b0bec5;
@@ -1963,7 +1968,7 @@
                         <label id="hazir_ofis_oda_lbl" style="display:none;">Oda numarası</label>
                         <div id="hazir_ofis_oda_ctl" style="display:none;flex-direction:column;gap:6px;min-width:0;">
                             <div class="giris-hazir-ofis-oda-wrap">
-                                <button type="button" id="hazir_ofis_oda_btn" class="auto-btn" onclick="girisHazirOfisOdaPanelToggle(event)" aria-expanded="false" aria-haspopup="dialog" title="201–230 oda seç — yeşil: boş veya bu kartın odası, kırmızı: başka müşteri" style="background:#1565c0;color:#fff;max-width:100%;">Oda seçin…</button>
+                                <button type="button" id="hazir_ofis_oda_btn" class="auto-btn" onclick="girisHazirOfisOdaPanelToggle(event)" aria-expanded="false" aria-haspopup="dialog" title="200–230 oda seç — yeşil: boş veya bu kartın odası, kırmızı: başka müşteri" style="background:#1565c0;color:#fff;max-width:100%;">Oda seçin…</button>
                                 <div id="giris_hazir_ofis_oda_pop" class="giris-hazir-ofis-oda-pop" hidden role="dialog" aria-label="Hazır ofis oda seçimi">
                                     <div id="giris_hazir_ofis_oda_row" class="giris-hazir-ofis-oda-row"></div>
                                 </div>
@@ -2580,7 +2585,7 @@
                     <button type="button" class="auto-btn" id="tufe_borc_tahsil_btn" style="background:#00695c;color:#fff;" onclick="tufeBorclandirNakitTahsilToplu()" title="Sözleşme başlangıcından Nisan 2026 dahil TÜFE borç + nakit tahsilat">Borç+Tahsil</button>
                     <button type="button" class="auto-btn" id="fatura_rapor_secili_otomatik_fatura_btn" style="background:#455a64;color:#eceff1;" onclick="faturaRaporSecilenlereFaturaOlustur(event)" title="İşaretli müşteriler için liste ayına otomatik kira faturası (tek tık)">Seçiliye otomatik fatura</button>
                     <span class="fatura-rapor-bos-oda-wrap">
-                        <button type="button" class="auto-btn" id="fatura_rapor_bos_odalar_btn" onclick="faturaRaporBosHazirOfisOdaPanelToggle(event)" aria-expanded="false" aria-haspopup="dialog" style="background:#1565c0;color:#fff;" title="201–230 hazır ofis odaları: yeşil boş, kırmızı dolu">Oda No</button>
+                        <button type="button" class="auto-btn" id="fatura_rapor_bos_odalar_btn" onclick="faturaRaporBosHazirOfisOdaPanelToggle(event)" aria-expanded="false" aria-haspopup="dialog" style="background:#1565c0;color:#fff;" title="200–230 hazır ofis odaları: yeşil boş, kırmızı dolu">Oda No</button>
                         <div id="fatura_rapor_bos_oda_pop" class="fatura-rapor-bos-oda-pop" hidden role="dialog" aria-label="Hazır ofis oda numaraları">
                             <div id="fatura_rapor_bos_oda_row" class="fatura-rapor-bos-oda-row"></div>
                         </div>
@@ -4019,9 +4024,10 @@ function faturaRaporFiltreStateUygula() {
     if (gor && gor.value === 'firma_ozet' && st.oda_no_filtre != null && String(st.oda_no_filtre).trim() !== '') {
         var ovs = String(st.oda_no_filtre).trim();
         if (ovs === 'yok') window.__faturaRaporOdaFiltre = 'yok';
+        else if (ovs === 'hepsi') window.__faturaRaporOdaFiltre = 'hepsi';
         else {
             var on = parseInt(ovs, 10);
-            if (!isNaN(on) && on >= 201 && on <= 230) window.__faturaRaporOdaFiltre = String(on);
+            if (!isNaN(on) && on >= 200 && on <= 230) window.__faturaRaporOdaFiltre = String(on);
             else try { window.__faturaRaporOdaFiltre = null; } catch (eOf) {}
         }
     } else try { window.__faturaRaporOdaFiltre = null; } catch (eOf2) {}
@@ -4580,6 +4586,7 @@ function faturaRaporFirmaSuzgecEtiketiKisa() {
     if (gaz && gaz.length) parts.push('giriş ayı');
     var odaF = (typeof faturaRaporOdaFiltreOku === 'function') ? faturaRaporOdaFiltreOku() : null;
     if (odaF === 'yok') parts.push('oda yok');
+    else if (odaF === 'hepsi') parts.push('oda atanmış (hepsi)');
     else if (odaF) parts.push('oda ' + odaF);
     return parts.join(', ');
 }
@@ -4668,7 +4675,9 @@ function faturaRaporListeAraUygula() {
             var odaF = (typeof faturaRaporOdaFiltreOku === 'function') ? faturaRaporOdaFiltreOku() : null;
             if (odaF) {
                 var trOda = (tr.getAttribute('data-fr-hazir-oda') || '').trim();
-                if (odaF === 'yok') {
+                if (odaF === 'hepsi') {
+                    if (trOda === '') ok = false;
+                } else if (odaF === 'yok') {
                     if (trOda !== '') ok = false;
                 } else if (trOda !== odaF) {
                     ok = false;
@@ -5123,14 +5132,15 @@ function faturaRaporSecilenlereFaturaOlustur(ev) {
         });
 }
 
-/** Tekil listede Oda No panelinden seçilen oda süzgeci (null | 'yok' | '201'…'230'). */
+/** Tekil listede Oda No panelinden seçilen oda süzgeci (null | 'hepsi' | 'yok' | '200'…'230'). */
 function faturaRaporOdaFiltreOku() {
     try {
         var v = window.__faturaRaporOdaFiltre;
         if (v === undefined || v === null || v === '') return null;
+        if (v === 'hepsi') return 'hepsi';
         if (v === 'yok') return 'yok';
         var n = parseInt(String(v), 10);
-        if (!isNaN(n) && n >= 201 && n <= 230) return String(n);
+        if (!isNaN(n) && n >= 200 && n <= 230) return String(n);
         return null;
     } catch (e) {
         return null;
@@ -5163,17 +5173,17 @@ function faturaRaporBosOdaPillSecimGuncelle() {
         el.classList.remove('fatura-rapor-bos-oda-pill--filtre-secili');
         var d = el.getAttribute('data-oda');
         if (cur == null) return;
-        if (cur === 'yok' && d === 'yok') el.classList.add('fatura-rapor-bos-oda-pill--filtre-secili');
-        else if (cur !== 'yok' && d === cur) el.classList.add('fatura-rapor-bos-oda-pill--filtre-secili');
+        if (d === cur) el.classList.add('fatura-rapor-bos-oda-pill--filtre-secili');
     });
 }
 
 function faturaRaporOdaFiltrePillTikla(raw) {
     var next = null;
-    if (raw === 'yok') next = 'yok';
+    if (raw === 'hepsi') next = 'hepsi';
+    else if (raw === 'yok') next = 'yok';
     else {
         var n = parseInt(String(raw || ''), 10);
-        if (!isNaN(n) && n >= 201 && n <= 230) next = String(n);
+        if (!isNaN(n) && n >= 200 && n <= 230) next = String(n);
     }
     if (next == null) return;
     var cur = typeof faturaRaporOdaFiltreOku === 'function' ? faturaRaporOdaFiltreOku() : null;
@@ -5217,8 +5227,9 @@ function faturaRaporBosHazirOfisOdaPanelRender(doluArr) {
         if (!isNaN(o)) used[o] = true;
     });
     var parts = [];
+    parts.push('<span class="fatura-rapor-bos-oda-pill fatura-rapor-bos-oda-pill--hepsi" data-fatura-rapor-oda-pill data-oda="hepsi" role="button" tabindex="0" title="Oda numarası atanmış tüm müşteriler · Aynı seçim: süzgeci kaldır">Hepsi</span>');
     parts.push('<span class="fatura-rapor-bos-oda-pill fatura-rapor-bos-oda-pill--yok" data-fatura-rapor-oda-pill data-oda="yok" role="button" tabindex="0" title="Oda atanmamış müşterileri göster · Aynı seçim: tümü">Yok</span>');
-    for (var n = 201; n <= 230; n++) {
+    for (var n = 200; n <= 230; n++) {
         var cls = used[n]
             ? 'fatura-rapor-bos-oda-pill fatura-rapor-bos-oda-pill--dolu'
             : 'fatura-rapor-bos-oda-pill fatura-rapor-bos-oda-pill--bos';
@@ -5430,7 +5441,7 @@ function faturaRaporYukle() {
                         var _hi = parseInt(_hoN, 10);
                         if (!isNaN(_hi)) {
                             hizmetRaw = hizmetBase + ' · Oda ' + _hi;
-                            if (_hi >= 201 && _hi <= 230) hoAttr = String(_hi);
+                            if (_hi >= 200 && _hi <= 230) hoAttr = String(_hi);
                         }
                     }
                     var durEt = (s.durum_etiket != null && String(s.durum_etiket).trim() !== '') ? String(s.durum_etiket).trim() : 'Aktif';
@@ -8006,7 +8017,7 @@ function girisHazirOfisOdaSelectleriDoldur() {
     o0.value = '';
     o0.textContent = '— Seçin —';
     sel.appendChild(o0);
-    for (var n = 201; n <= 230; n++) {
+    for (var n = 200; n <= 230; n++) {
         var o = document.createElement('option');
         o.value = String(n);
         o.textContent = String(n);
@@ -8094,7 +8105,7 @@ function girisHazirOfisOdaPanelRenderOnce() {
     if (!row || row.dataset.built === '1') return;
     row.dataset.built = '1';
     var parts = ['<button type="button" class="giris-hazir-ofis-oda-pill giris-hazir-ofis-oda-pill--temiz" data-hazir-oda="0">Yok</button>'];
-    for (var n = 201; n <= 230; n++) {
+    for (var n = 200; n <= 230; n++) {
         parts.push('<button type="button" class="giris-hazir-ofis-oda-pill" data-hazir-oda="' + n + '">' + n + '</button>');
     }
     row.innerHTML = parts.join('');

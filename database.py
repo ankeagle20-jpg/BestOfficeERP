@@ -928,9 +928,9 @@ def initialize_offices() -> None:
             return  # Zaten dolu
 
         offices = []
-        # Hazır Ofis: HO-201 ... HO-230 (30 oda, +1 yedek = 31)
+        # Hazır Ofis: HO-200 ... HO-230 (31 oda)
         for i in range(31):
-            unit = 200 + i + 1
+            unit = 200 + i
             code = f"HO-{unit}"
             offices.append((code, "Hazır Ofis", str(unit), 0, "bos", None, None))
 
@@ -1010,7 +1010,7 @@ def assign_office_to_customer(code: str, customer_id: Optional[int]) -> None:
 def get_next_office_code(type_: str) -> str:
     """Yeni ofis için otomatik kod üret."""
     prefix = {"Hazır Ofis": "HO", "Paylaşımlı Masa": "PM", "Sanal Ofis": "SO"}.get(type_, "OF")
-    start  = {"Hazır Ofis": 201, "Paylaşımlı Masa": 1001, "Sanal Ofis": 2001}.get(type_, 1000)
+    start  = {"Hazır Ofis": 200, "Paylaşımlı Masa": 1001, "Sanal Ofis": 2001}.get(type_, 1000)
 
     rows = fetch_all(
         "SELECT code FROM offices WHERE type=? ORDER BY CAST(SUBSTR(code, INSTR(code,'-')+1) AS INTEGER) DESC LIMIT 1",
