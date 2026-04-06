@@ -4,6 +4,10 @@
 -- Fatura raporu: customers.is_active yoksa 500 hatası (UndefinedColumn)
 ALTER TABLE customers ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;
 
+-- Müşteri kartı: görünen sıra no (1001+); uygulama ensure_customers_musteri_no ile doldurur / sequence kurar
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS musteri_no INTEGER;
+CREATE SEQUENCE IF NOT EXISTS customers_musteri_no_seq;
+
 -- Düzenli fatura açılır listesi (Giriş formu)
 CREATE TABLE IF NOT EXISTS duzenli_fatura_secenekleri (
     id SERIAL PRIMARY KEY,
@@ -16,7 +20,9 @@ CREATE TABLE IF NOT EXISTS duzenli_fatura_secenekleri (
 INSERT INTO duzenli_fatura_secenekleri (kod, etiket, sira) VALUES
     ('duzenle', 'Düzenle', 1),
     ('fatura_aylik', 'Fatura Aylık', 2),
-    ('fatura_yillik', 'Fatura Yıllık', 3)
+    ('fatura_yillik', 'Fatura Yıllık', 3),
+    ('fatura_6_aylik', 'Fatura 6 Aylık', 4),
+    ('fatura_3_aylik', 'Fatura 3 Aylık', 5)
 ON CONFLICT (kod) DO NOTHING;
 
 -- Aylık sözleşme grid önbelleği (giris_routes ile aynı şema)

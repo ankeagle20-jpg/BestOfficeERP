@@ -306,6 +306,8 @@ def init_schema():
         conn.cursor().execute(SCHEMA_SQL)
         ensure_customers_notes()
         ensure_customers_musteri_adi()
+        ensure_customers_musteri_no()
+        ensure_customers_hazir_ofis_oda()
         ensure_customers_is_active()
         ensure_customers_rent_columns()
         ensure_customers_excel_columns()
@@ -320,6 +322,7 @@ def init_schema():
         ensure_kargolar_durum()
         ensure_faturalar_amount_columns()
         ensure_musteri_kyc_columns()
+        ensure_musteri_kyc_hazir_ofis_oda_no()
         ensure_hizmet_turleri_table()
         ensure_duzenli_fatura_secenekleri_table()
         ensure_office_rentals()
@@ -332,6 +335,7 @@ def init_schema():
         ensure_personel_ozluk_izin_columns()
         ensure_contracts_engine()
         ensure_auto_invoice_tables()
+        ensure_user_ui_preferences_table()
     print("✅ Supabase şema oluşturuldu.")
 
 
@@ -428,6 +432,9 @@ def ensure_crm_leads():
         print(f"crm_leads: {e}")
 
 
+_musteri_kyc_columns_done = False
+
+
 def ensure_musteri_kyc_columns():
     """Supabase musteri_kyc tablosunu web tarafındaki KYC şemasına yaklaştırır.
 
@@ -435,6 +442,9 @@ def ensure_musteri_kyc_columns():
     API'nin beklediği alanlarla uyumlu olacak şekilde sonradan eklenir.
     Var olan kolonlara dokunulmaz.
     """
+    global _musteri_kyc_columns_done
+    if _musteri_kyc_columns_done:
+        return
     columns = (
         ("sirket_unvani", "TEXT"),
         ("musteri_adi", "TEXT"),
@@ -470,12 +480,47 @@ def ensure_musteri_kyc_columns():
         ("duzenli_fatura", "TEXT"),
         ("yetkili_tel_aciklama", "TEXT"),
         ("yetkili_tel2_aciklama", "TEXT"),
+        ("kdv_oran", "NUMERIC(8,2) DEFAULT 20"),
     )
     for col, ctype in columns:
         try:
             execute(f"ALTER TABLE musteri_kyc ADD COLUMN IF NOT EXISTS {col} {ctype}")
         except Exception as e:
             print(f"musteri_kyc.{col}: {e}")
+    _musteri_kyc_columns_done = True
+
+
+def ensure_customers_hazir_ofis_oda():
+    """Hazır Ofis oda numarası (201–230); doluluk raporu için customers üzerinde."""
+    try:
+        execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS hazir_ofis_oda_no INTEGER")
+    except Exception as e:
+        print(f"customers.hazir_ofis_oda_no: {e}")
+
+
+def ensure_musteri_kyc_hazir_ofis_oda_no():
+    """KYC satırında Hazır Ofis oda no (ensure_musteri_kyc_columns tek seferlik olduğu için ayrı)."""
+    try:
+        execute("ALTER TABLE musteri_kyc ADD COLUMN IF NOT EXISTS hazir_ofis_oda_no INTEGER")
+    except Exception as e:
+        print(f"musteri_kyc.hazir_ofis_oda_no: {e}")
+
+
+_musteri_kyc_latest_idx_done = False
+
+
+def ensure_musteri_kyc_latest_lookup_index():
+    """Son KYC satırı (musteri_id başına en yüksek id) sorgularını hızlandırır."""
+    global _musteri_kyc_latest_idx_done
+    if _musteri_kyc_latest_idx_done:
+        return
+    try:
+        execute(
+            "CREATE INDEX IF NOT EXISTS idx_musteri_kyc_musteri_id_id_desc ON musteri_kyc (musteri_id, id DESC)"
+        )
+        _musteri_kyc_latest_idx_done = True
+    except Exception as e:
+        logger.warning("musteri_kyc indeks idx_musteri_kyc_musteri_id_id_desc: %s", e)
 
 
 def ensure_contracts_engine():
@@ -702,10 +747,62 @@ def ensure_customers_musteri_adi():
         print(f"customers.musteri_adi: {e}")
 
 
+def ensure_customers_musteri_no():
+    """Sabit müşteri sıra no: 1001'den başlar; eski kayıtlar id sırasıyla numaralanır; yeni kayıt sequence ile."""
+    try:
+        execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS musteri_no INTEGER")
+    except Exception as e:
+        print(f"customers.musteri_no: {e}")
+    try:
+        execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_musteri_no ON customers (musteri_no)"
+        )
+    except Exception as e:
+        print(f"idx_customers_musteri_no: {e}")
+    try:
+        execute(
+            """
+            WITH mx AS (
+                SELECT COALESCE((SELECT MAX(musteri_no) FROM customers c2 WHERE c2.musteri_no IS NOT NULL), 1000) AS v
+            ),
+            ord AS (
+                SELECT c.id, ROW_NUMBER() OVER (ORDER BY c.id ASC)::int AS rn
+                FROM customers c
+                WHERE c.musteri_no IS NULL
+            )
+            UPDATE customers c
+            SET musteri_no = mx.v + ord.rn
+            FROM mx, ord
+            WHERE c.id = ord.id
+            """
+        )
+    except Exception as e:
+        print(f"musteri_no backfill: {e}")
+    try:
+        execute("CREATE SEQUENCE IF NOT EXISTS customers_musteri_no_seq")
+    except Exception as e:
+        print(f"customers_musteri_no_seq: {e}")
+    try:
+        r = fetch_one(
+            "SELECT COALESCE((SELECT MAX(musteri_no) FROM customers), 1000) AS mx"
+        )
+        mx = int(r["mx"]) if r and r.get("mx") is not None else 1000
+        execute("SELECT setval('customers_musteri_no_seq', %s, true)", (mx,))
+    except Exception as e:
+        print(f"musteri_no setval: {e}")
+
+
+_customers_is_active_column_done = False
+
+
 def ensure_customers_is_active():
     """Eski veritabanlarında customers.is_active yoksa ekler (rapor / pasif kart süzgeci)."""
+    global _customers_is_active_column_done
+    if _customers_is_active_column_done:
+        return
     try:
         execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE")
+        _customers_is_active_column_done = True
     except Exception as e:
         print(f"customers.is_active: {e}")
 
@@ -722,8 +819,14 @@ def ensure_customers_notes():
         print(f"customers.ev_adres: {e}")
 
 
+_customers_rent_columns_done = False
+
+
 def ensure_customers_rent_columns():
     """Customers tablosuna kira başlangıç ve ilk/güncel kira sütunları ekle (toplu tahsilat için)."""
+    global _customers_rent_columns_done
+    if _customers_rent_columns_done:
+        return
     for col, typ in (
         ("rent_start_date", "DATE"),
         ("rent_start_year", "INTEGER"),
@@ -736,6 +839,7 @@ def ensure_customers_rent_columns():
             execute(f"ALTER TABLE customers ADD COLUMN IF NOT EXISTS {col} {typ}")
         except Exception as e:
             print(f"customers.{col}: {e}")
+    _customers_rent_columns_done = True
 
 
 def ensure_customers_excel_columns():
@@ -817,6 +921,8 @@ def ensure_duzenli_fatura_secenekleri_table():
         ("duzenle", "Düzenle", 1),
         ("fatura_aylik", "Fatura Aylık", 2),
         ("fatura_yillik", "Fatura Yıllık", 3),
+        ("fatura_6_aylik", "Fatura 6 Aylık", 4),
+        ("fatura_3_aylik", "Fatura 3 Aylık", 5),
     )
     for kod, etiket, sira in varsayilan:
         try:
@@ -1078,17 +1184,26 @@ def ensure_customers_kapanis_tarihi():
         print(f"customers.kapanis_tarihi: {e}")
 
 
+_customers_durum_migration_done = False
+
+
 def ensure_customers_durum():
     """Customers tablosuna durum sütunu ekle; Excel'deki faal/terk değerlerini aktif/pasif'e çevirir.
 
     - Mevcut durum='faal' → 'aktif'
     - Mevcut durum='terk' → 'pasif'
     - Durumu boş olanlar için, notes içinde 'DurumExcel: faal/terk' varsa oradan doldurur.
+
+    Not: Veri düzeltme UPDATE'leri yalnızca süreç başına bir kez çalışır; her API isteğinde
+    tüm tabloyu taramak uzaktaki DB'de listeyi dakikalarca kilitleyebilirdi.
     """
+    global _customers_durum_migration_done
     try:
         execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS durum TEXT")
     except Exception as e:
         print(f"customers.durum: {e}")
+        return
+    if _customers_durum_migration_done:
         return
     # Eski kayıtlarda doğrudan durum alanı kullanılmışsa normalize et
     try:
@@ -1117,6 +1232,7 @@ def ensure_customers_durum():
         )
     except Exception as e:
         print(f"customers.durum notes→durum: {e}")
+    _customers_durum_migration_done = True
 
 
 def ensure_tahsilatlar_columns():
@@ -1192,6 +1308,24 @@ def ensure_faturalar_amount_columns():
     except Exception as e:
         print(f"faturalar.ettn: {e}")
     _faturalar_amount_columns_done = True
+
+
+def ensure_user_ui_preferences_table():
+    """Sayfa / grid UI tercihleri (JSON, kullanıcı başına)."""
+    try:
+        execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_ui_preferences (
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                pref_key TEXT NOT NULL,
+                pref_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+                updated_at TIMESTAMPTZ DEFAULT NOW(),
+                PRIMARY KEY (user_id, pref_key)
+            )
+            """
+        )
+    except Exception as e:
+        print(f"user_ui_preferences: {e}")
 
 
 def clear_all_customers():

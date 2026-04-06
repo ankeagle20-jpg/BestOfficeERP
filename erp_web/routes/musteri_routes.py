@@ -9,6 +9,8 @@ from db import (
     ensure_customers_durum,
     ensure_customers_quick_edit_columns,
     ensure_customers_kapanis_tarihi,
+    ensure_customers_hazir_ofis_oda,
+    ensure_musteri_kyc_hazir_ofis_oda_no,
     db as get_db,
     clear_all_customers,
     get_conn,
@@ -22,6 +24,32 @@ from docx import Document
 import os
 import sys
 import re
+
+_HAZIR_OFIS_ODA_MIN, _HAZIR_OFIS_ODA_MAX = 201, 230
+
+
+def _hizmet_str_hazir_ofis_mi(ht: str) -> bool:
+    s = (ht or "").strip().lower().replace("ı", "i")
+    return "hazir" in s and "ofis" in s
+
+
+def _coerce_hazir_ofis_oda_no(data: dict, hizmet_turu: str, durum_pasif: bool):
+    """None = yok; False = geçersiz aralık; int = oda no."""
+    if durum_pasif:
+        return None
+    if not _hizmet_str_hazir_ofis_mi(hizmet_turu):
+        return None
+    raw = data.get("hazir_ofis_oda_no")
+    if raw is None or str(raw).strip() == "":
+        return None
+    try:
+        n = int(float(str(raw).strip()))
+    except (TypeError, ValueError):
+        return False
+    if n < _HAZIR_OFIS_ODA_MIN or n > _HAZIR_OFIS_ODA_MAX:
+        return False
+    return n
+
 
 # Web kökü (gemini_helper import için)
 _web_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -1891,6 +1919,8 @@ def api_kyc_kaydet():
     """Giriş formundan KYC kaydı kaydet / güncelle"""
     try:
         data = request.json or request.form
+        ensure_customers_hazir_ofis_oda()
+        ensure_musteri_kyc_hazir_ofis_oda_no()
         musteri_id = data.get("musteri_id")
         sirket_unvani = (data.get("sirket_unvani") or data.get("unvan") or "").strip()
         musteri_adi = (data.get("musteri_adi") or "").strip() or None
@@ -1955,6 +1985,13 @@ def api_kyc_kaydet():
         kira_artis_tarihi = parse_date(kira_artis_tarihi)
         kapanis_tarihi = parse_date(data.get("kapanis_tarihi")) if durum_m == "pasif" else None
 
+        durum_pasif = durum_m == "pasif"
+        hazir_oda_val = _coerce_hazir_ofis_oda_no(data, hizmet_turu, durum_pasif)
+        if hazir_oda_val is False:
+            return jsonify(
+                {"ok": False, "mesaj": "Hazır Ofis oda numarası 201–230 arasında olmalıdır."}
+            ), 400
+
         try:
             _ks = int(float(str(data.get("kira_suresi_ay") or "").replace(",", ".").strip() or "0"))
             kira_suresi_ay = _ks if 1 <= _ks <= 240 else None
@@ -2010,7 +2047,33 @@ def api_kyc_kaydet():
 
         mevcut = fetch_one("SELECT id FROM musteri_kyc WHERE musteri_id = %s ORDER BY id DESC LIMIT 1", (musteri_id,)) if musteri_id else None
 
+        def _hazir_oda_cakisma_kontrol(mid):
+            if hazir_oda_val is None or not mid:
+                return None
+            crow = fetch_one(
+                """
+                SELECT id,
+                    COALESCE(NULLIF(TRIM(musteri_adi), ''), NULLIF(TRIM(name), ''), '') AS ad_gor
+                FROM customers
+                WHERE id <> %s AND hazir_ofis_oda_no = %s
+                  AND COALESCE(is_active, TRUE) = TRUE
+                  AND LOWER(TRIM(COALESCE(durum, ''))) = 'aktif'
+                LIMIT 1
+                """,
+                (int(mid), hazir_oda_val),
+            )
+            return crow
+
         if mevcut:
+            ck = _hazir_oda_cakisma_kontrol(musteri_id)
+            if ck:
+                return jsonify(
+                    {
+                        "ok": False,
+                        "mesaj": "Oda %s başka aktif müşteride (ID: %s, %s)."
+                        % (hazir_oda_val, ck["id"], (ck.get("ad_gor") or "—").strip() or "—"),
+                    }
+                ), 409
             execute(
                 """UPDATE musteri_kyc SET
                    sirket_unvani=%s, unvan=%s, musteri_adi=%s, vergi_no=%s, vergi_dairesi=%s, mersis_no=%s, ticaret_sicil_no=%s,
@@ -2018,7 +2081,7 @@ def api_kyc_kaydet():
                    yetkili_adsoyad=%s, yetkili_tcno=%s, yetkili_dogum=%s, yetkili_ikametgah=%s,
                    yetkili_tel=%s, yetkili_tel2=%s, yetkili_tel_aciklama=%s, yetkili_tel2_aciklama=%s, yetkili_email=%s, email=%s,
                    hizmet_turu=%s, duzenli_fatura=%s, aylik_kira=%s, yillik_kira=%s, sozlesme_no=%s, sozlesme_tarihi=%s, sozlesme_bitis=%s,
-                   kira_artis_tarihi=%s, kira_suresi_ay=%s, kira_nakit=%s,
+                   kira_artis_tarihi=%s, kira_suresi_ay=%s, kira_nakit=%s, hazir_ofis_oda_no=%s,
                    evrak_imza_sirkuleri=%s, evrak_vergi_levhasi=%s, evrak_ticaret_sicil=%s, evrak_faaliyet_belgesi=%s,
                    evrak_kimlik_fotokopi=%s, evrak_ikametgah=%s, evrak_kase=%s, notlar=%s, tamamlanma_yuzdesi=%s, updated_at=NOW()
                    WHERE id=%s""",
@@ -2027,28 +2090,62 @@ def api_kyc_kaydet():
                  yetkili_adsoyad, yetkili_tcno, yetkili_dogum, yetkili_ikametgah,
                  yetkili_tel, yetkili_tel2, yetkili_tel_aciklama, yetkili_tel2_aciklama, yetkili_email, email,
                  hizmet_turu, duzenli_fatura, aylik_kira, yillik_kira, sozlesme_no, sozlesme_tarihi, sozlesme_bitis,
-                 kira_artis_tarihi, kira_suresi_ay, kira_nakit,
+                 kira_artis_tarihi, kira_suresi_ay, kira_nakit, hazir_oda_val,
                  evrak_imza_sirkuleri, evrak_vergi_levhasi, evrak_ticaret_sicil, evrak_faaliyet_belgesi,
                  evrak_kimlik_fotokopi, evrak_ikametgah, evrak_kase, notlar, tamamlanma_yuzdesi, mevcut["id"])
             )
             kyc_id = mevcut["id"]
             if musteri_id:
                 execute(
-                    "UPDATE customers SET name=%s, musteri_adi=%s, email=%s, phone=%s, address=%s, tax_number=%s, durum=%s, kapanis_tarihi=%s WHERE id=%s",
-                    (sirket_unvani or None, musteri_adi, email or None, yetkili_tel or None, yeni_adres or None, vergi_no or None, durum_m, kapanis_tarihi, musteri_id)
+                    """UPDATE customers SET name=%s, musteri_adi=%s, email=%s, phone=%s, address=%s, tax_number=%s,
+                       durum=%s, kapanis_tarihi=%s, hizmet_turu=%s, hazir_ofis_oda_no=%s WHERE id=%s""",
+                    (sirket_unvani or None, musteri_adi, email or None, yetkili_tel or None, yeni_adres or None, vergi_no or None,
+                     durum_m, kapanis_tarihi, hizmet_turu, hazir_oda_val, musteri_id)
                 )
         else:
             if musteri_id:
+                ck = _hazir_oda_cakisma_kontrol(musteri_id)
+                if ck:
+                    return jsonify(
+                        {
+                            "ok": False,
+                            "mesaj": "Oda %s başka aktif müşteride (ID: %s, %s)."
+                            % (hazir_oda_val, ck["id"], (ck.get("ad_gor") or "—").strip() or "—"),
+                        }
+                    ), 409
                 execute(
-                    "UPDATE customers SET name=%s, musteri_adi=%s, email=%s, phone=%s, address=%s, tax_number=%s, durum=%s, kapanis_tarihi=%s WHERE id=%s",
-                    (sirket_unvani or None, musteri_adi, email or None, yetkili_tel or None, yeni_adres or None, vergi_no or None, durum_m, kapanis_tarihi, musteri_id)
+                    """UPDATE customers SET name=%s, musteri_adi=%s, email=%s, phone=%s, address=%s, tax_number=%s,
+                       durum=%s, kapanis_tarihi=%s, hizmet_turu=%s, hazir_ofis_oda_no=%s WHERE id=%s""",
+                    (sirket_unvani or None, musteri_adi, email or None, yetkili_tel or None, yeni_adres or None, vergi_no or None,
+                     durum_m, kapanis_tarihi, hizmet_turu, hazir_oda_val, musteri_id)
                 )
             else:
-                # Yeni müşteri oluştur
+                # Yeni müşteri oluştur (oda çakışması: kayıt öncesi, başka aktif kartta aynı oda var mı)
+                if hazir_oda_val is not None:
+                    ex0 = fetch_one(
+                        """
+                        SELECT id,
+                            COALESCE(NULLIF(TRIM(musteri_adi), ''), NULLIF(TRIM(name), ''), '') AS ad_gor
+                        FROM customers
+                        WHERE hazir_ofis_oda_no = %s
+                          AND COALESCE(is_active, TRUE) = TRUE
+                          AND LOWER(TRIM(COALESCE(durum, ''))) = 'aktif'
+                        LIMIT 1
+                        """,
+                        (hazir_oda_val,),
+                    )
+                    if ex0:
+                        return jsonify(
+                            {
+                                "ok": False,
+                                "mesaj": "Oda %s başka aktif müşteride (ID: %s, %s)."
+                                % (hazir_oda_val, ex0["id"], (ex0.get("ad_gor") or "—").strip() or "—"),
+                            }
+                        ), 409
                 cust = execute_returning(
-                    """INSERT INTO customers (name, musteri_adi, email, phone, address, notes, tax_number, durum, kapanis_tarihi)
-                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
-                    (sirket_unvani or "Yeni Müşteri", musteri_adi, email or None, yetkili_tel or None, yeni_adres or None, notlar or None, vergi_no or None, durum_m, kapanis_tarihi)
+                    """INSERT INTO customers (name, musteri_adi, email, phone, address, notes, tax_number, durum, kapanis_tarihi, hizmet_turu, hazir_ofis_oda_no)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                    (sirket_unvani or "Yeni Müşteri", musteri_adi, email or None, yetkili_tel or None, yeni_adres or None, notlar or None, vergi_no or None, durum_m, kapanis_tarihi, hizmet_turu, hazir_oda_val)
                 )
                 musteri_id = cust["id"] if cust else None
             row = execute_returning(
@@ -2058,13 +2155,13 @@ def api_kyc_kaydet():
                    yetkili_adsoyad, yetkili_tcno, yetkili_dogum, yetkili_ikametgah,
                    yetkili_tel, yetkili_tel2, yetkili_tel_aciklama, yetkili_tel2_aciklama, yetkili_email, email,
                    hizmet_turu, duzenli_fatura, aylik_kira, yillik_kira, sozlesme_no, sozlesme_tarihi, sozlesme_bitis,
-                   kira_artis_tarihi, kira_suresi_ay, kira_nakit,
+                   kira_artis_tarihi, kira_suresi_ay, kira_nakit, hazir_ofis_oda_no,
                    evrak_imza_sirkuleri, evrak_vergi_levhasi, evrak_ticaret_sicil, evrak_faaliyet_belgesi,
                    evrak_kimlik_fotokopi, evrak_ikametgah, evrak_kase, notlar, tamamlanma_yuzdesi
                 ) VALUES (
                    %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
                    %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
-                   %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
+                   %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
                    %s,%s,%s,%s,%s,%s,%s
                 ) RETURNING id""",
                 (musteri_id, sirket_unvani, sirket_unvani, musteri_adi, vergi_no, vergi_dairesi, mersis_no, ticaret_sicil_no,
@@ -2072,7 +2169,7 @@ def api_kyc_kaydet():
                  yetkili_adsoyad, yetkili_tcno, yetkili_dogum, yetkili_ikametgah,
                  yetkili_tel, yetkili_tel2, yetkili_tel_aciklama, yetkili_tel2_aciklama, yetkili_email, email,
                  hizmet_turu, duzenli_fatura, aylik_kira, yillik_kira, sozlesme_no, sozlesme_tarihi, sozlesme_bitis,
-                 kira_artis_tarihi, kira_suresi_ay, kira_nakit,
+                 kira_artis_tarihi, kira_suresi_ay, kira_nakit, hazir_oda_val,
                  evrak_imza_sirkuleri, evrak_vergi_levhasi, evrak_ticaret_sicil, evrak_faaliyet_belgesi,
                  evrak_kimlik_fotokopi, evrak_ikametgah, evrak_kase, notlar, tamamlanma_yuzdesi)
             )

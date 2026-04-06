@@ -1,0 +1,9 @@
+*.db
+*.sqlite3
+*.xlsx
+*.xls
+*.png
+*.jpg
+*.jpeg
+__pycache__/
+.venv/
