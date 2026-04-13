@@ -299,8 +299,9 @@
     <div class="panel gib-yeni-panel">
         <h3><i class="fa fa-paper-plane"></i> GİB'e fatura gönder (tekil)</h3>
         <p class="gib-yeni-hint">
-            Önce faturayı veritabanına kaydedin (ör. önizleme ekranından kayıt veya listeden oluşturduğunuz fatura).
-            Aşağıya <strong>Fatura ID</strong> yazın veya <strong>Son Faturayı Getir</strong> ile doldurun; ardından taslak → SMS → onay → fatura oluştur adımlarını izleyin.
+            GİB her zaman <strong>kayıtlı fatura satırına</strong> bağlanır — ekrandaki tutar/müşteri ile karışmaması için önce <strong>Kaydet</strong> edin.
+            <strong>Fatura ID</strong> alanı bu müşteri için son kayıtla dolar; yeni faturada önce kayıt, sonra GİB.
+            <strong>Son Faturayı Getir</strong> yalnızca formdaki müşterinin son faturasını getirir (başka müşterinin ID’si kullanılmaz).
         </p>
         <div class="gib-yeni-row">
             <label>Fatura ID <input type="number" id="yeni-gib-fatura-id" min="1" placeholder="örn. 196" value="{% if default_gib_fatura_id %}{{ default_gib_fatura_id }}{% elif son_fatura_id_for_gib %}{{ son_fatura_id_for_gib }}{% endif %}"></label>
@@ -1060,6 +1061,8 @@
                         if (!r.ok) {
                             var err = new Error((j && j.mesaj) || ('HTTP ' + r.status));
                             err.httpStatus = r.status;
+                            err.detay = (j && j.detay) ? String(j.detay) : '';
+                            err.dispatch_ham = (j && j.dispatch_ham) ? String(j.dispatch_ham) : '';
                             throw err;
                         }
                         return j;
@@ -1124,14 +1127,20 @@
                 if (onlyIfEmpty && String(idInput.value || '').trim() !== '') return Promise.resolve();
                 var btn = document.getElementById('yeni-gib-son-btn');
                 if (showBtnBusy && btn) yeniGibSetBusy(btn, true, 'Getiriliyor...');
-                return fetch(API_GIB_SON_FATURA, { credentials: 'same-origin' })
+                var midEl = document.getElementById('musteri-id');
+                var midRaw = midEl ? String(midEl.value || '').trim() : '';
+                var sonUrl = API_GIB_SON_FATURA;
+                if (midRaw && /^\d+$/.test(midRaw)) {
+                    sonUrl += (sonUrl.indexOf('?') >= 0 ? '&' : '?') + 'musteri_id=' + encodeURIComponent(midRaw);
+                }
+                return fetch(sonUrl, { credentials: 'same-origin' })
                     .then(function (r) {
                         return r.json().catch(function () { return {}; });
                     })
                     .then(function (j) {
                         if (!j || !j.ok || !j.fatura) throw new Error((j && j.mesaj) || 'Son fatura alınamadı');
                         idInput.value = j.fatura.id || '';
-                        setStatus('Son fatura seçildi: #' + (j.fatura.id || '-') + ' / ' + (j.fatura.fatura_no || '-'));
+                        setStatus('Bu müşterinin son faturası: #' + (j.fatura.id || '-') + ' / ' + (j.fatura.fatura_no || '-'));
                     })
                     .catch(function (err) {
                         if (autoLoad) {
@@ -1152,10 +1161,13 @@
                 }
                 var btn = document.getElementById('yeni-gib-taslak-btn');
                 yeniGibSetBusy(btn, true, 'Gönderiliyor...');
+                var midForm = parseInt(String((document.getElementById('musteri-id') || {}).value || '0'), 10);
+                var taslakBody = { fatura_id: faturaId };
+                if (midForm > 0) taslakBody.beklenen_musteri_id = midForm;
                 fetchJsonWithRetryYeniGib(API_GIB_TASLAK, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ fatura_id: faturaId })
+                    body: JSON.stringify(taslakBody)
                 }, [45000, 90000])
                     .then(function (j) {
                         // Her denemede önce SMS akışını kapat; sadece doğrulanan taslakta aç.
@@ -1204,10 +1216,16 @@
                         setStatus((j.mesaj || 'SMS gönderildi.') + (j.oid ? (' OID: ' + j.oid) : ''));
                     })
                     .catch(function (err) {
-                        var msg = (err && err.name === 'AbortError')
+                        var base = (err && err.name === 'AbortError')
                             ? 'SMS gönderim isteği zaman aşımına uğradı.'
                             : ('SMS gönderim hatası: ' + ((err && err.message) || err));
-                        setStatus(msg);
+                        var det = (err && err.detay && String(err.detay).trim() && String(err.message || '').indexOf(String(err.detay).trim()) < 0)
+                            ? (' ' + String(err.detay).trim())
+                            : '';
+                        var ham = (err && err.dispatch_ham && String(err.dispatch_ham).trim())
+                            ? (' | ' + String(err.dispatch_ham).trim().substring(0, 1200))
+                            : '';
+                        setStatus(base + det + ham);
                     })
                     .finally(function () { yeniGibSetBusy(btn, false); });
             });
@@ -1222,7 +1240,7 @@
                 if (idEl0) idEl0.value = String(DEFAULT_GIB_FATURA_ID);
                 setStatus('Fatura ID #' + DEFAULT_GIB_FATURA_ID + ' (sayfa adresinden). «GİB Taslak Gönder» ile devam edin.');
             } else if (idVal0) {
-                setStatus('Fatura ID #' + idVal0 + ' (son kayıt). «GİB Taslak Gönder» ile devam edin.');
+                setStatus('Fatura ID #' + idVal0 + ' (bu müşterinin son kaydı). Yeni tutar için önce «Kaydet», sonra GİB.');
             } else {
                 setStatus('Son fatura ID getiriliyor...');
                 yeniGibSonFaturayiGetir({ onlyIfEmpty: true, showBtnBusy: false, autoLoad: true });

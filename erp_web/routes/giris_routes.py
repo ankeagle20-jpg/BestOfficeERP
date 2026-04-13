@@ -20,6 +20,9 @@ from db import (
     ensure_customers_is_active,
     ensure_customers_musteri_no,
     ensure_customers_hazir_ofis_oda,
+    ensure_musteri_kyc_columns,
+    ensure_musteri_kyc_hazir_ofis_oda_no,
+    ensure_musteri_kyc_kira_banka,
     db as get_db,
     get_conn,
 )
@@ -41,8 +44,13 @@ from reportlab.pdfgen import canvas
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from utils.text_utils import turkish_lower
-from utils.musteri_arama import customers_arama_sql_3_plus_tax_office, customers_arama_params_6
+from utils.musteri_arama import (
+    customers_arama_params_giris_genis,
+    customers_arama_sql_giris_genis,
+    musteri_arama_ilike_pattern_email_duz,
+)
 import json
+import psycopg2
 import secrets
 from decimal import Decimal
 
@@ -114,7 +122,8 @@ def _aylik_grid_cache_matches_kyc(musteri_id, cache_obj):
     if not isinstance(cache_obj, dict):
         return False
     kyc = fetch_one(
-        """SELECT sozlesme_tarihi, sozlesme_bitis, kira_suresi_ay, aylik_kira, kira_nakit, kira_artis_tarihi
+        """SELECT sozlesme_tarihi, sozlesme_bitis, kira_suresi_ay, aylik_kira, kira_nakit, kira_artis_tarihi,
+                  kira_nakit_tutar, kira_banka_tutar
            FROM musteri_kyc WHERE musteri_id = %s ORDER BY id DESC LIMIT 1""",
         (musteri_id,),
     )
@@ -131,6 +140,15 @@ def _aylik_grid_cache_matches_kyc(musteri_id, cache_obj):
         return False
 
     if bool(kyc.get("kira_nakit")) != bool(cache_obj.get("kira_nakit")):
+        return False
+
+    if _aylik_grid_coerce_money(kyc.get("kira_nakit_tutar")) != _aylik_grid_coerce_money(
+        cache_obj.get("kira_nakit_tutar")
+    ):
+        return False
+    if _aylik_grid_coerce_money(kyc.get("kira_banka_tutar")) != _aylik_grid_coerce_money(
+        cache_obj.get("kira_banka_tutar")
+    ):
         return False
 
     bas_k = _aylik_grid_coerce_date(kyc.get("sozlesme_tarihi"))
@@ -283,6 +301,24 @@ def _aylik_grid_coerce_money(val):
         return 0.0
 
 
+def _kyc_karma_kira_paylari(kyc, aylik_net: float):
+    """Nakit + banka tutarı toplam kiraya (toleransla) denkse karma ödeme; KDV yalnız banka payına."""
+    aylik_net = _aylik_grid_coerce_money(aylik_net)
+    if aylik_net <= 0:
+        return False, 0.0, 0.0, 0.0, 0.0
+    kyc = kyc or {}
+    n = _aylik_grid_coerce_money(kyc.get("kira_nakit_tutar"))
+    b = _aylik_grid_coerce_money(kyc.get("kira_banka_tutar"))
+    if n <= 0 or b <= 0:
+        return False, n, b, 0.0, 0.0
+    tol = max(0.02, abs(aylik_net) * 0.01 + 1e-9)
+    if abs((n + b) - aylik_net) > tol:
+        return False, n, b, 0.0, 0.0
+    r_n = n / aylik_net
+    r_b = b / aylik_net
+    return True, n, b, r_n, r_b
+
+
 def _aylik_grid_contract_core(kyc, tufe_map):
     """
     KYC + TÜFE ile sözleşme ufku ve yıllık KDV dahil tutar haritası.
@@ -349,7 +385,8 @@ def _aylik_grid_contract_core(kyc, tufe_map):
     if not math.isfinite(kdv_oran) or kdv_oran < 0:
         kdv_oran = 20.0
     kira_nakit = bool(kyc.get("kira_nakit"))
-    kdv_carpan = 1.0 if kira_nakit else (1.0 + kdv_oran / 100.0)
+    split_ok, _nak0, _ban0, r_n, r_b = _kyc_karma_kira_paylari(kyc, aylik_net)
+    kdv_mult = 1.0 + kdv_oran / 100.0
     current = aylik_net
     start_year = bas.year
     max_year = start_year + max(0, (ay_sayisi - 1) // 12)
@@ -361,7 +398,14 @@ def _aylik_grid_contract_core(kyc, tufe_map):
         artis_month = bas.month
     yillik_map = {}
     for yil in range(start_year, max_year + 1):
-        yillik_map[yil] = round(current * kdv_carpan, 2)
+        if split_ok:
+            nak_kisim = round(current * r_n, 2)
+            ban_kisim = round(current - nak_kisim, 2)
+            yillik_map[yil] = round(nak_kisim + ban_kisim * kdv_mult, 2)
+        elif kira_nakit:
+            yillik_map[yil] = round(current * 1.0, 2)
+        else:
+            yillik_map[yil] = round(current * kdv_mult, 2)
         if yil < max_year:
             sonraki = yil + 1
             oran = float((tufe_map.get(sonraki) or {}).get(artis_month) or 0)
@@ -377,6 +421,7 @@ def _aylik_grid_contract_core(kyc, tufe_map):
         "aylik_net": aylik_net,
         "ks_int": ks_int_early,
         "kira_nakit": kira_nakit,
+        "split_kira_odeme": split_ok,
     }
 
 
@@ -417,6 +462,7 @@ def _aylik_grid_compute(musteri_id, kyc, tufe_map, tahsil_set):
     ks_int = core["ks_int"]
     kira_nakit = core["kira_nakit"]
     aylik_net = core["aylik_net"]
+    split_kira = bool(core.get("split_kira_odeme"))
     artis_month = core["artis_month"]
     aylar = []
     for i in range(ay_sayisi):
@@ -440,6 +486,9 @@ def _aylik_grid_compute(musteri_id, kyc, tufe_map, tahsil_set):
         "bitis": bit.isoformat(),
         "kira_suresi_ay": ks_int if 1 <= ks_int <= 240 else None,
         "kira_nakit": kira_nakit,
+        "split_kira_odeme": split_kira,
+        "kira_nakit_tutar": round(_aylik_grid_coerce_money(kyc.get("kira_nakit_tutar")), 2),
+        "kira_banka_tutar": round(_aylik_grid_coerce_money(kyc.get("kira_banka_tutar")), 2),
         "taban_aylik_net": aylik_net,
         "artis_ay": artis_month,
         "aylar": aylar,
@@ -449,7 +498,8 @@ def _aylik_grid_compute(musteri_id, kyc, tufe_map, tahsil_set):
 
 def _build_aylik_grid_cache_payload(musteri_id, tufe_map=None):
     kyc = fetch_one(
-        """SELECT sozlesme_tarihi, sozlesme_bitis, aylik_kira, kira_artis_tarihi, kira_suresi_ay, kira_nakit
+        """SELECT sozlesme_tarihi, sozlesme_bitis, aylik_kira, kira_artis_tarihi, kira_suresi_ay, kira_nakit,
+                  kira_nakit_tutar, kira_banka_tutar
            FROM musteri_kyc WHERE musteri_id = %s ORDER BY id DESC LIMIT 1""",
         (musteri_id,),
     ) or {}
@@ -706,7 +756,7 @@ def api_potansiyel_pending():
 @bp.route('/api/musteriler')
 @giris_gerekli
 def api_musteriler():
-    """Müşteri listesi - AJAX için (ünvan, müşteri adı, yetkili + vergi no, ofis)."""
+    """Müşteri listesi - AJAX; ünvan, müşteri adı, vergi, adres, yetkili iletişim, KYC alanları."""
     arama = (request.args.get('q') or '').strip()
     base = (
         "SELECT id, name, musteri_adi, musteri_no, tax_number, phone, email, office_code "
@@ -715,11 +765,25 @@ def api_musteriler():
     if not arama:
         rows = fetch_all(base + "ORDER BY name LIMIT 1000")
     else:
-        w = customers_arama_sql_3_plus_tax_office()
+        w = customers_arama_sql_giris_genis("")
         rows = fetch_all(
             base + f"WHERE {w} ORDER BY name LIMIT 1000",
-            customers_arama_params_6(arama),
+            customers_arama_params_giris_genis(arama),
         )
+        # Geniş WHERE bazen e-postayı kaçırır (@, normalizasyon); boşsa sadece e-posta kolonlarında düz ILIKE dene
+        if (not rows) and ("@" in arama):
+            pat = musteri_arama_ilike_pattern_email_duz(arama)
+            fb = (
+                "TRIM(COALESCE(email, '')) ILIKE %s ESCAPE '\\' OR EXISTS ("
+                " SELECT 1 FROM musteri_kyc mk WHERE mk.musteri_id = customers.id AND ("
+                " TRIM(COALESCE(mk.email, '')) ILIKE %s ESCAPE '\\'"
+                " OR TRIM(COALESCE(mk.yetkili_email, '')) ILIKE %s ESCAPE '\\'"
+                "))"
+            )
+            rows = fetch_all(
+                base + f"WHERE ({fb}) ORDER BY name LIMIT 1000",
+                (pat, pat, pat),
+            )
     return jsonify(rows or [])
 
 
@@ -952,7 +1016,8 @@ def api_musteri_detay(mid):
         out["phone2"] = _musteri_serialize_val(kyc.get("yetkili_tel2"))
         out["phone_kime"] = _musteri_serialize_val(kyc.get("yetkili_tel_aciklama"))
         out["phone2_kime"] = _musteri_serialize_val(kyc.get("yetkili_tel2_aciklama"))
-        out["email"] = out.get("email") or _musteri_serialize_val(kyc.get("yetkili_email"))
+        # Formdaki «Yetkili e-posta» alanı: KYC yetkili e-postası öncelikli (customers.email şirket yedeği olabilir)
+        out["email"] = _musteri_serialize_val(kyc.get("yetkili_email")) or out.get("email")
         out["email_sirket"] = _musteri_serialize_val(kyc.get("email"))
         out["address"] = out.get("address") or _musteri_serialize_val(kyc.get("yeni_adres"))
         out["ev_adres"] = out.get("ev_adres") or _musteri_serialize_val(kyc.get("yetkili_ikametgah"))
@@ -976,6 +1041,9 @@ def api_musteri_detay(mid):
         out["onceki_adres"] = _musteri_serialize_val(kyc.get("eski_adres"))
         out["sube_merkez"] = _musteri_serialize_val(kyc.get("sube_merkez"))
         out["kira_nakit"] = bool(kyc.get("kira_nakit"))
+        out["kira_banka"] = bool(kyc.get("kira_banka"))
+        out["kira_nakit_tutar"] = _musteri_serialize_val(kyc.get("kira_nakit_tutar"))
+        out["kira_banka_tutar"] = _musteri_serialize_val(kyc.get("kira_banka_tutar"))
 
     # Kaç ay ödeme yapıldı (tahsilat / aylık kira KDV dahil)
     try:
@@ -991,7 +1059,10 @@ def api_musteri_detay(mid):
     except Exception:
         kdv_oran = 20.0
     kira_nakit_m = bool(kyc.get("kira_nakit")) if kyc else False
-    if kira_nakit_m and aylik_kira > 0:
+    split_ok, npay, bpay, _, _ = _kyc_karma_kira_paylari(kyc, aylik_kira) if kyc else (False, 0.0, 0.0, 0.0, 0.0)
+    if kyc and split_ok:
+        aylik_kdv_dahil = round(npay + bpay * (1 + kdv_oran / 100), 2)
+    elif kira_nakit_m and aylik_kira > 0:
         aylik_kdv_dahil = round(aylik_kira, 2)
     else:
         aylik_kdv_dahil = round(aylik_kira * (1 + kdv_oran / 100), 2) if aylik_kira > 0 else 0.0
@@ -1104,6 +1175,105 @@ def api_musteri_durum_guncelle(mid):
         ), 409
     kap_out = kap.isoformat() if kap else None
     return jsonify({"ok": True, "durum": dr2, "kapanis_tarihi": kap_out, "is_active": kart_aktif})
+
+
+@bp.route("/api/musteri-cogalt", methods=["POST"])
+@giris_gerekli
+def api_musteri_cogalt():
+    """
+    Kayıtlı müşteriyi yeni id + yeni müşteri_no ile kopyalar (plan değişimi: eski kart pasif, yeni kart).
+    Fatura/tahsilat kopyalanmaz. Son KYC satırı yeni müşteriye kopyalanır; sözleşme no ve hazır ofis odası temizlenir.
+    """
+    ensure_customers_musteri_no()
+    ensure_customers_durum()
+    ensure_customers_is_active()
+    ensure_customers_hazir_ofis_oda()
+    ensure_musteri_kyc_columns()
+    ensure_musteri_kyc_hazir_ofis_oda_no()
+    ensure_musteri_kyc_kira_banka()
+    data = request.get_json(silent=True) or {}
+    raw_id = data.get("kaynak_id") if data.get("kaynak_id") is not None else data.get("musteri_id")
+    try:
+        kaynak_id = int(raw_id)
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "mesaj": "Geçerli bir müşteri seçin."}), 400
+
+    src = fetch_one("SELECT * FROM customers WHERE id = %s", (kaynak_id,))
+    if not src:
+        return jsonify({"ok": False, "mesaj": "Kaynak müşteri bulunamadı."}), 404
+
+    kyc = fetch_one(
+        "SELECT * FROM musteri_kyc WHERE musteri_id = %s ORDER BY id DESC LIMIT 1",
+        (kaynak_id,),
+    )
+
+    skip_cols = {"id", "musteri_no", "created_at"}
+    new_row = {k: v for k, v in src.items() if k not in skip_cols}
+    new_row.pop("updated_at", None)
+    new_row["durum"] = "aktif"
+    new_row["kapanis_tarihi"] = None
+    new_row["is_active"] = True
+    new_row["hazir_ofis_oda_no"] = None
+    tag = f"Çoğaltma kaynağı: müşteri ID {kaynak_id}."
+    prev_notes = (new_row.get("notes") or "").strip()
+    new_row["notes"] = f"{prev_notes} {tag}".strip() if prev_notes else tag
+
+    cols = list(new_row.keys())
+    vals = [new_row[c] for c in cols]
+    placeholders = ", ".join(["%s"] * len(vals))
+    sql_cust = (
+        f"INSERT INTO customers ({','.join(cols)},musteri_no) VALUES ({placeholders},"
+        "nextval('customers_musteri_no_seq')) RETURNING id, musteri_no"
+    )
+
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute(sql_cust, tuple(vals))
+            ins = cur.fetchone()
+            if not ins:
+                raise RuntimeError("INSERT RETURNING sonuç dönmedi.")
+            # RealDictCursor: satır anahtarları id / musteri_no (konumla ins[0] kullanılmaz).
+            new_id = int(ins["id"])
+            new_mno = ins.get("musteri_no") if hasattr(ins, "get") else ins["musteri_no"]
+            if kyc:
+                k2 = {k: v for k, v in kyc.items() if k not in ("id", "created_at", "updated_at")}
+                k2["musteri_id"] = new_id
+                k2["sozlesme_no"] = None
+                k2["hazir_ofis_oda_no"] = None
+                kcols = list(k2.keys())
+                kvals = [k2[c] for c in kcols]
+                kph = ", ".join(["%s"] * len(kvals))
+                cur.execute(
+                    f"INSERT INTO musteri_kyc ({','.join(kcols)}) VALUES ({kph})",
+                    tuple(kvals),
+                )
+    except psycopg2.errors.UniqueViolation as e:
+        logging.warning("api_musteri_cogalt unique violation kaynak=%s: %s", kaynak_id, e)
+        return jsonify(
+            {
+                "ok": False,
+                "mesaj": (
+                    "Çoğaltılamadı: vergi numarası veya başka benzersiz alan çakışıyor. "
+                    "Veritabanında vergi no tekil ise önce kaynak müşterinin vergi numarasını güncelleyin "
+                    "veya yöneticiye başvurun."
+                ),
+            }
+        ), 409
+    except Exception as e:
+        logging.exception("api_musteri_cogalt")
+        return jsonify({"ok": False, "mesaj": str(e) or "Çoğaltma başarısız."}), 400
+
+    try:
+        _upsert_aylik_grid_cache(new_id)
+    except Exception:
+        pass
+
+    mesaj = f"Yeni müşteri oluşturuldu (ID: {new_id}"
+    if new_mno is not None:
+        mesaj += f", müşteri no: {new_mno}"
+    mesaj += "). Hizmet türü ve sözleşme tarihlerini kontrol edip Kaydet ile onaylayın."
+    return jsonify({"ok": True, "id": new_id, "musteri_no": new_mno, "mesaj": mesaj})
 
 
 def _digits_only(s):
@@ -2366,8 +2536,10 @@ def _cari_ekstre_ay_borc_tutar(y, m, prev_borc, tahsilat_ay_tutar_map, reel_ay_m
     return round(float(aylik or 0), 2)
 
 
-def _cari_ekstre_hareketler(musteri_id, baslangic, bitis, aylik_kira):
-    """Cari ekstre: aylık kira borç + tahsilat alacak + devir bakiyesi."""
+def _cari_ekstre_hareketler(musteri_id, baslangic, bitis, aylik_kira, use_reel_cells=True):
+    """Cari ekstre: aylık kira borç + tahsilat alacak + devir bakiyesi.
+    use_reel_cells=False: reel grid önbelleği kullanılmaz; formdan gelen taban aylık + TÜFE zinciri (tahsilattan çıkarım vb.) kullanılır.
+    """
     try:
         bas = baslangic if isinstance(baslangic, date) else datetime.strptime(str(baslangic)[:10], "%Y-%m-%d").date()
         bit = bitis if isinstance(bitis, date) else datetime.strptime(str(bitis)[:10], "%Y-%m-%d").date()
@@ -2486,7 +2658,7 @@ def _cari_ekstre_hareketler(musteri_id, baslangic, bitis, aylik_kira):
     bugun_y = date.today()
     y_end = max(bit.year, bas.year, bugun_y.year, bas_soz.year if bas_soz else bit.year)
     reel_ay_map = {}
-    if bas_soz:
+    if use_reel_cells and bas_soz:
         try:
             reel_ay_map = _reel_ay_key_tutar_map_musteri(
                 musteri_id, bas_soz, artis_month, artis_day, tufe_map, y_end
@@ -2860,12 +3032,24 @@ def _api_cari_kart_impl(mid):
         ), 500
 
 
+def _cari_ekstre_varsayilan_son_tam_ay():
+    """Parametresiz isteklerde: bir önceki takvim ayının 1. ve son günü (UI ile uyumlu)."""
+    bugun = date.today()
+    y, m = bugun.year, bugun.month
+    if m == 1:
+        y, m = y - 1, 12
+    else:
+        m -= 1
+    _, son = calendar.monthrange(y, m)
+    return date(y, m, 1), date(y, m, son)
+
+
 @bp.route('/api/cari-ekstre')
 @giris_gerekli
 def api_cari_ekstre():
     """
     Sözleşme sayfası cari ekstre: Tarih aralığında aylık kira borç + tahsilat alacak.
-    Query: musteri_id, baslangic (YYYY-MM-DD, default yıl başı), bitis (default bu ay sonu), aylik_kira.
+    Query: musteri_id, baslangic, bitis (YYYY-MM-DD; boşsa bir önceki tam ay), aylik_kira.
     """
     musteri_id = request.args.get("musteri_id", type=int)
     if not musteri_id:
@@ -2873,31 +3057,32 @@ def api_cari_ekstre():
     cust = fetch_one("SELECT id, name FROM customers WHERE id = %s", (musteri_id,))
     if not cust:
         return jsonify({"ok": False, "mesaj": "Müşteri bulunamadı."}), 404
-    bugun = date.today()
-    yil_basi = date(bugun.year, 1, 1)
-    # Bu ayın son günü
-    sonraki_ay = bugun.replace(day=28) + timedelta(days=4)
-    bu_ay_sonu = sonraki_ay.replace(day=1) - timedelta(days=1)
+    def_b, def_bit = _cari_ekstre_varsayilan_son_tam_ay()
     baslangic = request.args.get("baslangic")
     bitis = request.args.get("bitis")
     try:
-        bas = datetime.strptime(baslangic[:10], "%Y-%m-%d").date() if baslangic else yil_basi
-        bit = datetime.strptime(bitis[:10], "%Y-%m-%d").date() if bitis else bu_ay_sonu
+        bas = datetime.strptime(baslangic[:10], "%Y-%m-%d").date() if baslangic else def_b
+        bit = datetime.strptime(bitis[:10], "%Y-%m-%d").date() if bitis else def_bit
     except Exception:
-        bas, bit = yil_basi, bu_ay_sonu
+        bas, bit = def_b, def_bit
     if bas > bit:
         bas, bit = bit, bas
     aylik_kira = request.args.get("aylik_kira", type=float) or 0
     kdv_oran = request.args.get("kdv_oran", type=float) or 20
     kira_nakit_q = request.args.get("kira_nakit", type=str, default="") or ""
     kira_nakit_ekstre = str(kira_nakit_q).lower() in ("1", "true", "on", "yes")
+    # Formdaki kira/tarih ile uyum: reel grid önbelleğini yok say (çoğaltma / taslak düzenleme sonrası eski tutarlar gelmesin)
+    _fb = str(request.args.get("form_bazli_kira") or "").strip().lower()
+    use_reel_cells = _fb not in ("1", "true", "yes", "on", "evet")
     # Borçlar: normalde net + KDV; nakit kiracıda forma girilen tutar doğrudan aylık borç
     if kira_nakit_ekstre and aylik_kira:
         aylik_kira_kdv_dahil = round(aylik_kira, 2)
     else:
         aylik_kira_kdv_dahil = round(aylik_kira * (1 + kdv_oran / 100), 2) if aylik_kira else 0
     try:
-        hareketler = _cari_ekstre_hareketler(musteri_id, bas, bit, aylik_kira_kdv_dahil)
+        hareketler = _cari_ekstre_hareketler(
+            musteri_id, bas, bit, aylik_kira_kdv_dahil, use_reel_cells=use_reel_cells
+        )
     except Exception as e:
         logging.getLogger(__name__).exception("api_cari_ekstre musteri_id=%s", musteri_id)
         return jsonify({"ok": False, "mesaj": f"Ekstre hesaplanamadı: {e}"}), 500
@@ -4280,17 +4465,14 @@ def api_cari_ekstre_b():
     cust = fetch_one("SELECT id, name FROM customers WHERE id = %s", (musteri_id,))
     if not cust:
         return jsonify({"ok": False, "mesaj": "Müşteri bulunamadı."}), 404
-    bugun = date.today()
-    yil_basi = date(bugun.year, 1, 1)
-    sonraki_ay = bugun.replace(day=28) + timedelta(days=4)
-    bu_ay_sonu = sonraki_ay.replace(day=1) - timedelta(days=1)
+    def_b, def_bit = _cari_ekstre_varsayilan_son_tam_ay()
     baslangic = request.args.get("baslangic")
     bitis = request.args.get("bitis")
     try:
-        bas = datetime.strptime(baslangic[:10], "%Y-%m-%d").date() if baslangic else yil_basi
-        bit = datetime.strptime(bitis[:10], "%Y-%m-%d").date() if bitis else bu_ay_sonu
+        bas = datetime.strptime(baslangic[:10], "%Y-%m-%d").date() if baslangic else def_b
+        bit = datetime.strptime(bitis[:10], "%Y-%m-%d").date() if bitis else def_bit
     except Exception:
-        bas, bit = yil_basi, bu_ay_sonu
+        bas, bit = def_b, def_bit
     if bas > bit:
         bas, bit = bit, bas
     rows = _cari_hareketler(musteri_id, cari_ekstre_b=True)

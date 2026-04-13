@@ -131,6 +131,71 @@ th.ak-sort-num { text-align: right; }
 }
 .ak-filter-bar input[type=text]::placeholder { color: #546e7a; }
 #akFilterCount { font-size: 12px; }
+th.ak-th-sira {
+    text-align: center;
+    width: 56px;
+    max-width: 64px;
+    font-size: 11px;
+    line-height: 1.25;
+    vertical-align: middle;
+}
+th.ak-th-sira.ak-sira-apply {
+    cursor: pointer;
+    user-select: none;
+}
+th.ak-th-sira.ak-sira-apply:hover { background: #00796b; }
+th.ak-th-sira.ak-sira-pending { box-shadow: inset 0 -2px 0 #ffcc80; }
+th.ak-th-sira.ak-sira-filtered { box-shadow: inset 0 -2px 0 #4fc3f7; }
+td.ak-td-sira {
+    text-align: center;
+    vertical-align: middle;
+    color: #90a4ae;
+}
+.ak-sira-lab {
+    cursor: pointer;
+    user-select: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 28px;
+    padding: 2px 4px;
+}
+.ak-sira-lab input { cursor: pointer; width: 16px; height: 16px; margin: 0; }
+.ak-saved-panel {
+    margin: 0 -10px 14px -10px;
+    padding: 12px 14px;
+    background: #0d1f2d;
+    border: 1px solid #1e3a50;
+    border-radius: 4px;
+    font-size: 13px;
+    color: #b0bec5;
+}
+.ak-saved-panel h3 {
+    margin: 0 0 10px 0;
+    font-size: 14px;
+    color: #4fc3f7;
+    font-weight: 600;
+}
+.ak-saved-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 200px;
+    overflow-y: auto;
+    margin-bottom: 10px;
+}
+.ak-saved-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 6px 8px;
+    background: #132f3f;
+    border-radius: 4px;
+    cursor: pointer;
+}
+.ak-saved-row:hover { background: #1a3d52; }
+.ak-saved-row input { margin-top: 3px; flex-shrink: 0; }
+.ak-saved-meta { font-size: 11px; color: #78909c; margin-top: 2px; }
 </style>
 
 <div class="ak-wrap">
@@ -139,9 +204,18 @@ th.ak-sort-num { text-align: right; }
         <div class="ak-toolbar">
             <input type="file" id="akFile" accept=".xlsx,.xls" />
             <button type="button" class="ak-btn" id="btnAnalyze">Analiz et</button>
-            <button type="button" class="ak-btn secondary" id="btnApproveAllMatched">Eşleşenleri onayla</button>
-            <button type="button" class="ak-btn" id="btnCommit" disabled>Onayla ve kaydet</button>
+            <button type="button" class="ak-btn" id="btnSecilenleriOnayla" disabled title="Önce satırlarda Onay kutusunu işaretleyin">Seçilenleri onayla</button>
             <a href="/bankalar/" class="ak-btn secondary" style="text-decoration:none;display:inline-block;">Bankalara dön</a>
+        </div>
+    </div>
+
+    <div class="ak-saved-panel" id="akSavedPanel">
+        <h3>Kayıtlı Akbank dosyaları</h3>
+        <p class="muted" style="margin:0 0 8px 0;font-size:12px;">Yüklenen her Excel ERP’de saklanır (ad: yükleme günü DDMMYY). Cariye kaydettiğiniz fişler bir daha listelenmez. Birden fazla dosya işaretleyip birleşik liste alabilirsiniz.</p>
+        <div id="akSavedList" class="ak-saved-list"></div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+            <button type="button" class="ak-btn" id="btnAnalyzeSaved">Seçili kayıtlı dosyaları analiz et</button>
+            <span class="muted" style="font-size:11px;">Yeni dosya: yukarıdan seçip «Analiz et» — otomatik kaydedilir.</span>
         </div>
     </div>
 
@@ -151,6 +225,7 @@ th.ak-sort-num { text-align: right; }
     <div id="akFilterBar" class="ak-filter-bar">
         <label for="akAciklamaFilter">Açıklama filtre</label>
         <input type="text" id="akAciklamaFilter" placeholder="İsim, kelime, sayı… (açıklama içinde geçen)" autocomplete="off" />
+        <button type="button" class="ak-btn secondary" id="btnAkMusFiltreTemiz" style="display:none;font-size:12px;padding:6px 12px;">Müşteri filtresini temizle</button>
         <span id="akFilterCount"></span>
     </div>
 
@@ -164,6 +239,7 @@ th.ak-sort-num { text-align: right; }
                     <th class="ak-sort-th ak-sort-num" data-sort="tutar" title="Sırala">Tutar<span class="ak-sort-hint"></span></th>
                     <th>Fiş / Dekont</th>
                     <th class="ak-sort-th" data-sort="aciklama" title="Sırala">Açıklama<span class="ak-sort-hint"></span></th>
+                    <th class="ak-th-sira ak-sira-apply" id="akThSira" title="İlk tık: işaretli müşterilere göre listeyi daraltır. Daraltılmışken tekrar tık: tüm listeyi gösterir. Daraltılmamışken ve işaret yokken tık: filtre zaten kapalıdır.">Sırala</th>
                     <th class="ak-sort-th" data-sort="musteri" title="Sırala">Müşteri<span class="ak-sort-hint"></span></th>
                 </tr>
             </thead>
@@ -176,9 +252,14 @@ th.ak-sort-num { text-align: right; }
 (function () {
     /* Sabit path: url_for bazen eski worker belleğinde endpoint bulamadığında BuildError vermesin */
     const URL_ANALYZE = "/bankalar/api/akbank-tahsilat/analyze";
+    const URL_ANALYZE_KAYITLI = "/bankalar/api/akbank-tahsilat/analyze-kayitli";
+    const URL_DOSYALAR = "/bankalar/api/akbank-tahsilat/dosyalar";
     const URL_MUSTERI = "/bankalar/api/akbank-tahsilat/musteriler";
     const URL_GONDERICI_KAYDET = "/bankalar/api/akbank-tahsilat/gonderici-kaydet";
     const URL_COMMIT = "/bankalar/api/akbank-tahsilat/commit";
+
+    let lastAnalyzeMode = "none";
+    let lastSavedFileIds = [];
 
     /* Tüm satırlar (analiz sonrası); onay / müşteri bu nesneler üzerinde */
     let allRows = [];
@@ -186,6 +267,11 @@ th.ak-sort-num { text-align: right; }
     let aciklamaFilter = "";
     /* sortState: key = sütun adı veya null; dir = 1 artan, -1 azalan */
     let sortState = { key: null, dir: 1 };
+    /* Sırala: satır checkbox’ları seçimi (başlığa tıklanınca uygulanır) */
+    let pendingMusteriIdSet = new Set();
+    /* Başlığa tıklayınca kopyalanır; liste bu id’lere göre daralır */
+    let filtreMusteriIdSet = new Set();
+    let musteriFiltreUygulandi = false;
 
     document.addEventListener("click", function (ev) {
         if (!ev.target.closest(".ak-search-wrap")) {
@@ -239,6 +325,22 @@ th.ak-sort-num { text-align: right; }
     function musteriHatirBadge(r) {
         if (!r._gondericiMapKaydedildi) return "";
         return " <span class=\"badge\" style=\"background:#00695c;color:#e0f2f1;font-size:9px;vertical-align:middle;\">Hatırlandı</span>";
+    }
+
+    function secilebilirSatirVarMi() {
+        return allRows.some(function (r) {
+            return r._onay && r.musteri_id && r.ui_status !== "duplicate";
+        });
+    }
+
+    function guncelleSecilenOnayButonu() {
+        const b = document.getElementById("btnSecilenleriOnayla");
+        if (!b) return;
+        if (!allRows.length) {
+            b.disabled = true;
+            return;
+        }
+        b.disabled = !secilebilirSatirVarMi();
     }
 
     function musteriSortKey(r) {
@@ -301,7 +403,14 @@ th.ak-sort-num { text-align: right; }
         const q = aciklamaFilter.trim();
         if (q) {
             const ql = q.toLocaleLowerCase("tr");
-            list = allRows.filter((r) => (r.aciklama || "").toLocaleLowerCase("tr").includes(ql));
+            list = list.filter((r) => (r.aciklama || "").toLocaleLowerCase("tr").includes(ql));
+        }
+        if (musteriFiltreUygulandi && filtreMusteriIdSet.size > 0) {
+            list = list.filter((r) => {
+                const m = r.musteri_id;
+                if (m == null || m === "") return false;
+                return filtreMusteriIdSet.has(Number(m));
+            });
         }
         list = list.slice();
         sortInPlace(list);
@@ -343,26 +452,50 @@ th.ak-sort-num { text-align: right; }
         if (!allRows.length) {
             wrap.style.display = "none";
             fbar.style.display = "none";
-            document.getElementById("btnCommit").disabled = true;
+            guncelleSecilenOnayButonu();
             tb.innerHTML = "";
             updateSortHeaders();
             return;
         }
         fbar.style.display = "flex";
         wrap.style.display = "block";
-        document.getElementById("btnCommit").disabled = false;
         const displayRows = getDisplayRows();
         const nAll = allRows.length;
         const nDisp = displayRows.length;
         const fq = aciklamaFilter.trim();
-        if (fq) {
-            fcount.textContent = "Toplam " + nAll + " satır · Filtre: " + nDisp + " eşleşme (\"" + fq + "\")";
+        const musIds = filtreMusteriIdSet.size
+            ? Array.from(filtreMusteriIdSet).sort(function (a, b) { return a - b; }).map(function (id) { return "#" + id; }).join(", ")
+            : "";
+        const pendIds = pendingMusteriIdSet.size
+            ? Array.from(pendingMusteriIdSet).sort(function (a, b) { return a - b; }).map(function (id) { return "#" + id; }).join(", ")
+            : "";
+        const btnMus = document.getElementById("btnAkMusFiltreTemiz");
+        if (btnMus) btnMus.style.display = (musteriFiltreUygulandi || pendingMusteriIdSet.size > 0) ? "inline-block" : "none";
+        const thSira = document.getElementById("akThSira");
+        if (thSira) {
+            if (pendingMusteriIdSet.size > 0 && !musteriFiltreUygulandi) thSira.classList.add("ak-sira-pending");
+            else thSira.classList.remove("ak-sira-pending");
+            if (musteriFiltreUygulandi) thSira.classList.add("ak-sira-filtered");
+            else thSira.classList.remove("ak-sira-filtered");
+        }
+        if (fq || musteriFiltreUygulandi || pendingMusteriIdSet.size > 0) {
+            let t = "Toplam " + nAll + " satır · Görünen: " + nDisp;
+            if (musteriFiltreUygulandi && filtreMusteriIdSet.size) t += " · Müşteri filtresi: " + musIds;
+            else if (pendingMusteriIdSet.size) t += " · Sırala seçimi (başlığa tıklayın): " + pendIds;
+            if (fq) t += " · Açıklama: \"" + fq + "\"";
+            fcount.textContent = t;
         } else {
             fcount.textContent = "Toplam " + nAll + " satır gösteriliyor.";
         }
         updateSortHeaders();
         if (!displayRows.length) {
-            tb.innerHTML = "<tr><td colspan=\"7\" style=\"padding:24px;text-align:center;color:#90a4ae;\">Bu metne uyan açıklama yok. Filtreyi temizleyin veya başka kelime deneyin.</td></tr>";
+            const fm = musteriFiltreUygulandi && filtreMusteriIdSet.size > 0;
+            const fa = !!fq;
+            let msg = "Gösterilecek satır yok.";
+            if (fa && fm) msg = "Bu açıklama ve müşteri filtresine uyan satır yok.";
+            else if (fa) msg = "Bu metne uyan açıklama yok. Filtreyi temizleyin veya başka kelime deneyin.";
+            else if (fm) msg = "Uygulanan müşteri filtresine uyan satır yok veya bu satırlarda müşteri atanmamış.";
+            tb.innerHTML = "<tr><td colspan=\"8\" style=\"padding:24px;text-align:center;color:#90a4ae;\">" + msg + "</td></tr>";
             return;
         }
         tb.innerHTML = displayRows.map((r, i) => {
@@ -371,6 +504,11 @@ th.ak-sort-num { text-align: right; }
             const checked = r._onay && canCheck ? " checked" : "";
             const dis = !canCheck ? " disabled" : "";
             const mid = r.musteri_id || "";
+            const midNum = mid ? Number(mid) : NaN;
+            const siraCell = dup || !mid
+                ? "—"
+                : ("<label class=\"ak-sira-lab\" title=\"Seç — uygulamak için üstteki Sırala başlığına tıklayın\"><input type=\"checkbox\" class=\"ak-mus-filter-cb\" data-mid=\"" + mid + "\""
+                    + (pendingMusteriIdSet.has(midNum) ? " checked" : "") + " /></label>");
             return `
 <tr class="${rowClass(r.ui_status)}" data-i="${i}">
   <td><input type="checkbox" class="ak-cb"${checked}${dis} /></td>
@@ -379,8 +517,9 @@ th.ak-sort-num { text-align: right; }
   <td style="text-align:right;">${Number(r.tutar).toLocaleString("tr-TR", { minimumFractionDigits: 2 })}</td>
   <td style="font-family:monospace;font-size:11px;">${escapeHtml(r.banka_referans_no || "")}</td>
   <td style="max-width:280px;word-break:break-word;">${escapeHtml(r.aciklama || "")}</td>
+  <td class="ak-td-sira">${siraCell}</td>
   <td>
-    <div class="muted" id="ml-${i}">${escapeHtml(musteriLabel(r))}${musteriHatirBadge(r)}</div>
+    <div class="muted ak-ml">${escapeHtml(musteriLabel(r))}${musteriHatirBadge(r)}</div>
     ${dup ? "" : `<div class="ak-search-wrap" data-i="${i}">
       <input type="text" class="ak-mus-q" placeholder="Ara: ad, ünvan, tel, vergi no, adres… (min 2 harf)" autocomplete="off" />
       <div class="ak-dd"></div>
@@ -390,10 +529,15 @@ th.ak-sort-num { text-align: right; }
 </tr>`;
         }).join("");
 
+        guncelleSecilenOnayButonu();
+
         tb.querySelectorAll("tr").forEach((tr) => {
             const i = parseInt(tr.dataset.i, 10);
             const cb = tr.querySelector(".ak-cb");
-            if (cb) cb.addEventListener("change", () => { displayRows[i]._onay = cb.checked; });
+            if (cb) cb.addEventListener("change", function () {
+                displayRows[i]._onay = cb.checked;
+                guncelleSecilenOnayButonu();
+            });
 
             const hid = tr.querySelector(".ak-mid");
             const q = tr.querySelector(".ak-mus-q");
@@ -439,9 +583,14 @@ th.ak-sort-num { text-align: right; }
                                     displayRows[i].eslestirme = { musteri_id: id, musteri_label: lab };
                                 }
                                 hid.value = id;
-                                const ml = document.getElementById("ml-" + i);
+                                const ml = tr.querySelector(".ak-ml");
                                 if (ml) {
                                     ml.innerHTML = escapeHtml("#" + id + " · " + lab) + musteriHatirBadge({ _gondericiMapKaydedildi: false });
+                                }
+                                const siraTd = tr.querySelector("td.ak-td-sira");
+                                if (siraTd) {
+                                    const chk = pendingMusteriIdSet.has(id) ? " checked" : "";
+                                    siraTd.innerHTML = "<label class=\"ak-sira-lab\" title=\"Seç — uygulamak için Sırala başlığına tıklayın\"><input type=\"checkbox\" class=\"ak-mus-filter-cb\" data-mid=\"" + id + "\"" + chk + " /></label>";
                                 }
                                 q.value = "";
                                 dd.classList.remove("show");
@@ -469,6 +618,7 @@ th.ak-sort-num { text-align: right; }
                 }, 280);
             });
         });
+
     }
 
     function escapeHtml(s) {
@@ -494,10 +644,132 @@ th.ak-sort-num { text-align: right; }
         });
     }
 
+    function fmtTrDateTime(iso) {
+        if (!iso) return "";
+        const d = new Date(iso);
+        if (Number.isNaN(d.getTime())) return String(iso);
+        return d.toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+    }
+
+    function resetListeState() {
+        allRows = [];
+        aciklamaFilter = "";
+        filtreMusteriIdSet.clear();
+        pendingMusteriIdSet.clear();
+        musteriFiltreUygulandi = false;
+        lastSavedFileIds = [];
+        lastAnalyzeMode = "none";
+        const fin = document.getElementById("akAciklamaFilter");
+        if (fin) fin.value = "";
+        sortState = { key: null, dir: 1 };
+        render();
+    }
+
+    function applyOzetText(oz) {
+        const g = oz && oz.tahsilatta_gizlenen != null ? oz.tahsilatta_gizlenen : 0;
+        let t = "Excel satırı: " + (oz.excel_satir || 0) +
+            " | İşlenen (Alacak): " + (oz.islenen || 0) +
+            " | A değil: " + (oz.a_degil || 0) +
+            " | Ref boş: " + (oz.ref_bos || 0) +
+            " | Tutar 0: " + (oz.tutar_sifir || 0) +
+            " | Tarih yok: " + (oz.tarih_yok || 0);
+        if (g > 0) t += " | Cariye zaten işlenmiş (gizlendi): " + g;
+        document.getElementById("akOzet").textContent = t;
+    }
+
+    function applyAnalyzeSuccess(data, infoMsg) {
+        const oz = data.ozet || {};
+        applyOzetText(oz);
+        allRows = (data.satirlar || []).map((r) => {
+            const mid = r.musteri_id_oneri != null ? r.musteri_id_oneri : (r.eslestirme && r.eslestirme.musteri_id);
+            const es = r.eslestirme || {};
+            const hatirDb = es.kaynak === "manuel_hatirlat";
+            return Object.assign({}, r, {
+                musteri_id: mid || null,
+                _onay: false,
+                _manuelMusteri: false,
+                _gondericiMapKaydedildi: !!hatirDb,
+            });
+        });
+        aciklamaFilter = "";
+        filtreMusteriIdSet.clear();
+        pendingMusteriIdSet.clear();
+        musteriFiltreUygulandi = false;
+        const fin = document.getElementById("akAciklamaFilter");
+        if (fin) fin.value = "";
+        sortState = { key: null, dir: 1 };
+        showMsg(infoMsg || (allRows.length + " satır listelendi. Cariye aktarılmış fişler gösterilmez."), true);
+        render();
+        loadKayitliDosyalar();
+    }
+
+    async function loadKayitliDosyalar() {
+        const box = document.getElementById("akSavedList");
+        if (!box) return;
+        try {
+            const res = await fetch(URL_DOSYALAR, { credentials: "same-origin" });
+            const j = await res.json();
+            if (!j || !j.ok || !Array.isArray(j.dosyalar)) {
+                box.innerHTML = "<span class=\"muted\">Liste alınamadı.</span>";
+                return;
+            }
+            if (!j.dosyalar.length) {
+                box.innerHTML = "<span class=\"muted\">Henüz kayıtlı dosya yok. Yukarıdan Excel seçip «Analiz et» deyin.</span>";
+                return;
+            }
+            box.innerHTML = j.dosyalar.map(function (d) {
+                const kb = d.boyut_octet != null ? Math.round(Number(d.boyut_octet) / 1024) : "?";
+                const orig = (d.orijinal_filename || "").trim();
+                const origEsc = escapeHtml(orig.length > 48 ? orig.slice(0, 48) + "…" : orig);
+                return (
+                    "<label class=\"ak-saved-row\">" +
+                    "<input type=\"checkbox\" class=\"ak-saved-cb\" value=\"" + Number(d.id) + "\" />" +
+                    "<div><strong>" + escapeHtml(d.ad_gosterim || "") + "</strong>" +
+                    "<div class=\"ak-saved-meta\">" + escapeHtml(fmtTrDateTime(d.yuklenme_tarihi)) +
+                    (orig ? " · " + origEsc : "") +
+                    " · ~" + kb + " KB</div></div></label>"
+                );
+            }).join("");
+        } catch (e) {
+            box.innerHTML = "<span class=\"muted\">Ağ hatası.</span>";
+        }
+    }
+
+    async function tabloyuYenile() {
+        if (lastSavedFileIds.length) {
+            showMsg("", true);
+            document.getElementById("akOzet").textContent = "Yenileniyor…";
+            try {
+                const res = await fetch(URL_ANALYZE_KAYITLI, {
+                    method: "POST",
+                    credentials: "same-origin",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ file_ids: lastSavedFileIds }),
+                });
+                const data = await res.json();
+                if (!data.ok) {
+                    showMsg(data.mesaj || "Yenileme başarısız.", false);
+                    return;
+                }
+                applyAnalyzeSuccess(data, "Liste güncellendi (cariye işlenen fişler çıkarıldı).");
+            } catch (e) {
+                showMsg("Ağ hatası: " + e, false);
+            }
+            return;
+        }
+        const inp = document.getElementById("akFile");
+        if (inp && inp.files && inp.files[0]) {
+            document.getElementById("btnAnalyze").click();
+            return;
+        }
+        loadKayitliDosyalar();
+        showMsg("Listeyi güncellemek için kayıtlı dosya seçip «Seçili… analiz et» veya yeni Excel yükleyin.", true);
+    }
+
     document.getElementById("btnAnalyze").addEventListener("click", async () => {
         const inp = document.getElementById("akFile");
         if (!inp.files || !inp.files[0]) {
-            showMsg("Önce .xlsx dosyasını seçin.", false);
+            showMsg("Önce .xlsx dosyasını seçin veya aşağıdan kayıtlı dosya işaretleyin.", false);
             return;
         }
         showMsg("", true);
@@ -510,58 +782,62 @@ th.ak-sort-num { text-align: right; }
             if (!data.ok) {
                 showMsg(data.mesaj || "Analiz başarısız.", false);
                 document.getElementById("akOzet").textContent = "";
-                allRows = [];
-                aciklamaFilter = "";
-                const fin = document.getElementById("akAciklamaFilter");
-                if (fin) fin.value = "";
-                sortState = { key: null, dir: 1 };
-                render();
+                resetListeState();
                 return;
             }
-            const oz = data.ozet || {};
-            document.getElementById("akOzet").textContent =
-                "Excel satırı: " + (oz.excel_satir || 0) +
-                " | İşlenen (Alacak): " + (oz.islenen || 0) +
-                " | A değil: " + (oz.a_degil || 0) +
-                " | Ref boş: " + (oz.ref_bos || 0) +
-                " | Tutar 0: " + (oz.tutar_sifir || 0) +
-                " | Tarih yok: " + (oz.tarih_yok || 0);
-            allRows = (data.satirlar || []).map((r) => {
-                const mid = r.musteri_id_oneri != null ? r.musteri_id_oneri : (r.eslestirme && r.eslestirme.musteri_id);
-                const es = r.eslestirme || {};
-                const hatirDb = es.kaynak === "manuel_hatirlat";
-                return Object.assign({}, r, {
-                    musteri_id: mid || null,
-                    _onay: r.ui_status === "matched",
-                    _manuelMusteri: false,
-                    _gondericiMapKaydedildi: !!hatirDb,
-                });
-            });
-            aciklamaFilter = "";
-            const fin = document.getElementById("akAciklamaFilter");
-            if (fin) fin.value = "";
-            sortState = { key: null, dir: 1 };
-            showMsg(allRows.length + " tahsilat satırı listelendi. Mükerrer satırlar kaydedilemez.", true);
-            render();
+            const kd = data.kayit_dosya;
+            lastAnalyzeMode = "saved";
+            lastSavedFileIds = kd && kd.id != null ? [Number(kd.id)] : [];
+            let msg = data.satirlar ? data.satirlar.length : 0;
+            msg = msg + " satır listelendi. Dosya ERP’ye kaydedildi";
+            if (kd && kd.ad_gosterim) msg += " (" + kd.ad_gosterim + ").";
+            else msg += ".";
+            applyAnalyzeSuccess(data, msg);
         } catch (e) {
             showMsg("Ağ hatası: " + e, false);
             document.getElementById("akOzet").textContent = "";
         }
     });
 
-    document.getElementById("btnApproveAllMatched").addEventListener("click", () => {
-        allRows.forEach((r) => {
-            if (r.ui_status === "matched" && r.musteri_id) r._onay = true;
-        });
-        render();
+    document.getElementById("btnAnalyzeSaved").addEventListener("click", async () => {
+        const ids = Array.prototype.map.call(document.querySelectorAll(".ak-saved-cb:checked"), function (c) {
+            return parseInt(c.value, 10);
+        }).filter(function (id) { return Number.isFinite(id); });
+        if (!ids.length) {
+            showMsg("Aşağıdan en az bir kayıtlı dosya işaretleyin.", false);
+            return;
+        }
+        showMsg("", true);
+        document.getElementById("akOzet").textContent = "Kayıtlı dosyalar yükleniyor…";
+        lastAnalyzeMode = "saved";
+        lastSavedFileIds = ids.slice();
+        try {
+            const res = await fetch(URL_ANALYZE_KAYITLI, {
+                method: "POST",
+                credentials: "same-origin",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ file_ids: ids }),
+            });
+            const data = await res.json();
+            if (!data.ok) {
+                showMsg(data.mesaj || "Analiz başarısız.", false);
+                document.getElementById("akOzet").textContent = "";
+                resetListeState();
+                return;
+            }
+            const adlar = (data.kayit_dosya && data.kayit_dosya.kayitli_dosyalar)
+                ? data.kayit_dosya.kayitli_dosyalar.map(function (x) { return x.ad_gosterim; }).join(", ")
+                : "";
+            applyAnalyzeSuccess(data, (data.satirlar ? data.satirlar.length : 0) + " satır (birleşik). " + (adlar ? "Dosyalar: " + adlar : ""));
+        } catch (e) {
+            showMsg("Ağ hatası: " + e, false);
+            document.getElementById("akOzet").textContent = "";
+        }
     });
 
-    document.getElementById("akAciklamaFilter").addEventListener("input", function () {
-        aciklamaFilter = this.value;
-        render();
-    });
+    loadKayitliDosyalar();
 
-    document.getElementById("btnCommit").addEventListener("click", async () => {
+    async function secilenleriOnaylaVeKaydet() {
         syncFromDom();
         const satirlar = allRows
             .filter((r) => r._onay && r.musteri_id && r.ui_status !== "duplicate")
@@ -575,10 +851,11 @@ th.ak-sort-num { text-align: right; }
                 manuel_musteri: !!r._manuelMusteri,
             }));
         if (!satirlar.length) {
-            showMsg("Kaydedilecek onaylı satır yok (müşteri seçili ve onaylı olmalı).", false);
+            showMsg("Kaydedilecek satır yok. Cariye aktarmak istediğiniz satırlarda Onay kutusunu işaretleyin (müşteri atanmış olmalı).", false);
             return;
         }
-        document.getElementById("btnCommit").disabled = true;
+        const btn = document.getElementById("btnSecilenleriOnayla");
+        if (btn) btn.disabled = true;
         try {
             const res = await fetch(URL_COMMIT, {
                 method: "POST",
@@ -587,20 +864,70 @@ th.ak-sort-num { text-align: right; }
                 body: JSON.stringify({ satirlar }),
             });
             const data = await res.json();
-            document.getElementById("btnCommit").disabled = false;
             if (!data.ok) {
                 showMsg(data.mesaj || "Kayıt başarısız.", false);
+                guncelleSecilenOnayButonu();
                 return;
             }
             let t = "Eklendi: " + (data.eklendi || 0) + ", atlandı: " + (data.atlandi || 0);
             if (data.uyarilar && data.uyarilar.length) t += ". " + data.uyarilar.join(" ");
             showMsg(t, true);
-            document.getElementById("btnAnalyze").click();
+            await tabloyuYenile();
         } catch (e) {
-            document.getElementById("btnCommit").disabled = false;
             showMsg("Ağ hatası: " + e, false);
+        } finally {
+            guncelleSecilenOnayButonu();
         }
+    }
+
+    document.getElementById("btnSecilenleriOnayla").addEventListener("click", function () {
+        secilenleriOnaylaVeKaydet();
     });
+
+    document.getElementById("akAciklamaFilter").addEventListener("input", function () {
+        aciklamaFilter = this.value;
+        render();
+    });
+
+    document.getElementById("btnAkMusFiltreTemiz").addEventListener("click", function () {
+        filtreMusteriIdSet.clear();
+        pendingMusteriIdSet.clear();
+        musteriFiltreUygulandi = false;
+        render();
+    });
+
+    document.getElementById("akThSira").addEventListener("click", function (ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        /* Daraltılmışken tekrar tık → tam liste (işlem yaptıktan sonra geri dönmek için) */
+        if (musteriFiltreUygulandi) {
+            musteriFiltreUygulandi = false;
+            filtreMusteriIdSet.clear();
+            showMsg("Tüm liste gösteriliyor. Tekrar daraltmak için müşterileri işaretleyip Sırala’ya tıklayın.", true);
+            render();
+            return;
+        }
+        if (pendingMusteriIdSet.size === 0) {
+            filtreMusteriIdSet.clear();
+            showMsg("Daraltmak için önce satırlarda müşteri kutularını işaretleyin.", true);
+        } else {
+            filtreMusteriIdSet = new Set(pendingMusteriIdSet);
+            musteriFiltreUygulandi = true;
+            showMsg("Liste daraltıldı: " + Array.from(filtreMusteriIdSet).sort(function (a, b) { return a - b; }).map(function (id) { return "#" + id; }).join(", ") + ". Tümünü görmek için Sırala’ya yeniden tıklayın.", true);
+        }
+        render();
+    });
+
+    document.getElementById("akGrid").addEventListener("change", function (ev) {
+        const t = ev.target;
+        if (!t || !t.classList.contains("ak-mus-filter-cb")) return;
+        const id = parseInt(t.getAttribute("data-mid"), 10);
+        if (!Number.isFinite(id)) return;
+        if (t.checked) pendingMusteriIdSet.add(id);
+        else pendingMusteriIdSet.delete(id);
+        render();
+    });
+
 })();
 </script>
 {% endblock %}

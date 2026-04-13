@@ -6,6 +6,8 @@ from __future__ import annotations
 import io
 import re
 import unicodedata
+from collections import defaultdict
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -92,8 +94,9 @@ _TOKEN_STOP = frozenset({
 })
 _MIN_TOKEN_LEN = 4
 _MIN_PHRASE_LEN = 3
+# İndekste daha kısa marka kelimeleri (yalnız aday kümesi; skor yine _MIN_TOKEN_LEN ile)
+_INDEX_TOKEN_MIN = 3
 
-# Sektör / unvan kalıbı — tek başına eşleşince yanlış pozitif (OFİSBİR ↔ BULGU… danismanlik)
 _GENERIC_WORD = frozenset({
     "danismanlik", "danismanligi", "insaat", "insaati", "sanayi", "ticaret", "limited",
     "sirketi", "anonim", "ltd", "sti", "as", "ao", "aojv", "otas", "lojistik", "tic",
@@ -104,6 +107,146 @@ _GENERIC_WORD = frozenset({
     "iletisim", "musavirlik", "muhasebe", "holding", "yonetim", "otel", "cafe",
     "restoran", "market", "magaza", "doviz", "consulting", "group", "international",
 })
+
+
+def _hay_tokens_for_index(hay: str) -> set[str]:
+    return {t for t in hay.split() if len(t) >= _INDEX_TOKEN_MIN}
+
+
+def _metinden_indeks_tokenlari(raw: str) -> set[str]:
+    """Ünvan/ad alanlarından anlamlı tokenlar (indeks anahtarı)."""
+    full = norm_loose(raw)
+    if not full:
+        return set()
+    out: set[str] = set()
+    for t in full.split():
+        if len(t) < _INDEX_TOKEN_MIN or t in _TOKEN_STOP or t in _GENERIC_WORD:
+            continue
+        out.add(t)
+    return out
+
+
+@dataclass
+class AkbankMusteriIndeks:
+    """Satır başına O(aday) eşleştirme: token + VKN/TC ters indeks."""
+
+    token_to_cids: dict[str, set[int]] = field(default_factory=dict)
+    vkn_to_cids: dict[str, set[int]] = field(default_factory=dict)
+    tc_to_cids: dict[str, set[int]] = field(default_factory=dict)
+    must_map: dict[int, dict[str, Any]] = field(default_factory=dict)
+
+
+def build_akbank_musteri_indeks(musteriler: list[dict[str, Any]]) -> AkbankMusteriIndeks:
+    tok: dict[str, set[int]] = defaultdict(set)
+    vkn_m: dict[str, set[int]] = defaultdict(set)
+    tc_m: dict[str, set[int]] = defaultdict(set)
+    must_map: dict[int, dict[str, Any]] = {}
+
+    for c in musteriler:
+        try:
+            cid = int(c.get("id"))
+        except (TypeError, ValueError):
+            continue
+        must_map[cid] = c
+
+        unvan = (c.get("sirket_unvani") or "").strip()
+        if len(unvan) >= _MIN_PHRASE_LEN:
+            for t in _metinden_indeks_tokenlari(unvan):
+                tok[t].add(cid)
+
+        for key in ("musteri_adi", "name", "yetkili_adsoyad"):
+            raw = (c.get(key) or "").strip()
+            if len(raw) >= _MIN_PHRASE_LEN:
+                for t in _metinden_indeks_tokenlari(raw):
+                    tok[t].add(cid)
+
+        vkn = _digits_only(c.get("kyc_vergi_no")) or _digits_only(c.get("tax_number"))
+        if len(vkn) >= 10:
+            vkn_m[vkn].add(cid)
+
+        tc = _digits_only(c.get("yetkili_tcno"))
+        if len(tc) == 11:
+            tc_m[tc].add(cid)
+
+    return AkbankMusteriIndeks(
+        token_to_cids={k: set(v) for k, v in tok.items()},
+        vkn_to_cids={k: set(v) for k, v in vkn_m.items()},
+        tc_to_cids={k: set(v) for k, v in tc_m.items()},
+        must_map=must_map,
+    )
+
+
+def _aday_musteri_idleri(hay: str, digit_hay: str, idx: AkbankMusteriIndeks) -> set[int]:
+    out: set[int] = set()
+    if hay:
+        for t in _hay_tokens_for_index(hay):
+            s = idx.token_to_cids.get(t)
+            if s:
+                out |= s
+    dh = digit_hay
+    ln = len(dh)
+    if ln >= 10:
+        for i in range(ln - 9):
+            sub = dh[i : i + 10]
+            s = idx.vkn_to_cids.get(sub)
+            if s:
+                out |= s
+    if ln >= 11:
+        for i in range(ln - 10):
+            sub = dh[i : i + 11]
+            s = idx.tc_to_cids.get(sub)
+            if s:
+                out |= s
+    return out
+
+
+def _eslestir_musteri_cekirdek(
+    hay: str,
+    digit_hay: str,
+    must_map: dict[int, dict[str, Any]],
+    id_sirasi: list[int],
+    musteriler: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Verilen müşteri id listesi üzerinde tam skor (sıra korunur)."""
+    per_id: dict[int, tuple[int, int, str]] = {}
+    for cid in id_sirasi:
+        c = must_map.get(cid)
+        if c is None:
+            continue
+        sig = _musteri_en_iyi_sinyal(c, hay, digit_hay)
+        if sig is not None:
+            per_id[cid] = sig
+    if not per_id:
+        return {
+            "status": "unknown",
+            "musteri_id": None,
+            "musteri_label": None,
+            "candidates": [],
+        }
+    ranked = sorted(
+        per_id.items(),
+        key=lambda x: (
+            x[1][0],
+            -x[1][1],
+            -_vkn_in_aciklama(must_map.get(x[0], {}), digit_hay),
+            x[0],
+        ),
+    )
+    top_id, (top_pri, top_score, top_label) = ranked[0]
+    cands = [
+        {
+            "id": i,
+            "label": t[2],
+            "name": next((str(m.get("name") or "") for m in musteriler if int(m.get("id") or 0) == i), ""),
+        }
+        for i, t in ranked[:12]
+    ]
+    return {
+        "status": "matched",
+        "musteri_id": top_id,
+        "musteri_label": top_label,
+        "candidates": cands[:3],
+    }
 
 
 def _best_unvan_match(raw: str, hay: str) -> tuple[int, str] | None:
@@ -336,11 +479,14 @@ def _musteri_en_iyi_sinyal(c: dict[str, Any], hay: str, digit_hay: str) -> tuple
     return best
 
 
-def eslestir_musteri(aciklama: str, musteriler: list[dict[str, Any]]) -> dict[str, Any]:
+def eslestir_musteri(
+    aciklama: str,
+    musteriler: list[dict[str, Any]],
+    indeks: AkbankMusteriIndeks | None = None,
+) -> dict[str, Any]:
     """
     Açıklamada geçen bilgileri müşteri kartı (KYC + customers) ile eşleştirir.
-    Öncelik: şirket ünvanı → müşteri adı / ad → vergi no → TC.
-    Dönüş: status matched | unknown, musteri_id, musteri_label, candidates (çoklu adayda VKN + müşteri no ile tek seçim)
+    indeks verilirse önce token/VKN-TC aday kümesinde arar (toplu önizlemede çok daha hızlı).
     """
     hay = norm_loose(aciklama)
     digit_hay = _digit_haystack(aciklama)
@@ -351,49 +497,30 @@ def eslestir_musteri(aciklama: str, musteriler: list[dict[str, Any]]) -> dict[st
             "musteri_label": None,
             "candidates": [],
         }
-    per_id: dict[int, tuple[int, int, str]] = {}
-    must_map: dict[int, dict[str, Any]] = {}
-    for c in musteriler:
-        try:
-            cid = int(c.get("id"))
-        except (TypeError, ValueError):
-            continue
-        must_map[cid] = c
-        sig = _musteri_en_iyi_sinyal(c, hay, digit_hay)
-        if sig is not None:
-            per_id[cid] = sig
-    if not per_id:
-        return {
-            "status": "unknown",
-            "musteri_id": None,
-            "musteri_label": None,
-            "candidates": [],
-        }
-    # Aynı skorda: dekontta VKN geçen müşteri; çift kartta düşük müşteri no (ilk / ana kayıt)
-    ranked = sorted(
-        per_id.items(),
-        key=lambda x: (
-            x[1][0],
-            -x[1][1],
-            -_vkn_in_aciklama(must_map.get(x[0], {}), digit_hay),
-            x[0],
-        ),
-    )
-    top_id, (top_pri, top_score, top_label) = ranked[0]
-    cands = [
-        {
-            "id": i,
-            "label": t[2],
-            "name": next((str(m.get("name") or "") for m in musteriler if int(m.get("id") or 0) == i), ""),
-        }
-        for i, t in ranked[:12]
-    ]
-    return {
-        "status": "matched",
-        "musteri_id": top_id,
-        "musteri_label": top_label,
-        "candidates": cands[:3],
-    }
+
+    def _id_list_tumu() -> tuple[dict[int, dict[str, Any]], list[int]]:
+        mm: dict[int, dict[str, Any]] = {}
+        ids: list[int] = []
+        for c in musteriler:
+            try:
+                cid = int(c.get("id"))
+            except (TypeError, ValueError):
+                continue
+            mm[cid] = c
+            ids.append(cid)
+        return mm, ids
+
+    if indeks is not None:
+        cand = _aday_musteri_idleri(hay, digit_hay, indeks)
+        if cand:
+            r = _eslestir_musteri_cekirdek(hay, digit_hay, indeks.must_map, sorted(cand), musteriler)
+            if r["status"] == "matched":
+                return r
+        _, ids_all = _id_list_tumu()
+        return _eslestir_musteri_cekirdek(hay, digit_hay, indeks.must_map, ids_all, musteriler)
+
+    mm, ids_all = _id_list_tumu()
+    return _eslestir_musteri_cekirdek(hay, digit_hay, mm, ids_all, musteriler)
 
 
 def dataframe_hareket_satirlari(df: pd.DataFrame) -> tuple[list[dict[str, Any]], dict[str, int]]:
@@ -463,6 +590,27 @@ def dataframe_hareket_satirlari(df: pd.DataFrame) -> tuple[list[dict[str, Any]],
     return satirlar, ozet
 
 
+def ham_tahsilatta_olanlari_cikar(
+    ham_satirlar: list[dict[str, Any]],
+    tahsilatta_refler: set[str],
+) -> tuple[list[dict[str, Any]], int]:
+    """
+    banka_referans_no tahsilatlar'da kayıtlı satırları listeden çıkarır (tekrar gösterme).
+    Dönüş: (kalan_ham, cikarilan_adet)
+    """
+    if not tahsilatta_refler:
+        return ham_satirlar, 0
+    out: list[dict[str, Any]] = []
+    cik = 0
+    for r in ham_satirlar:
+        ref = str(r.get("banka_referans_no") or "").strip()
+        if ref and ref in tahsilatta_refler:
+            cik += 1
+            continue
+        out.append(r)
+    return out, cik
+
+
 def onizleme_satirlari(
     ham_satirlar: list[dict[str, Any]],
     musteriler: list[dict[str, Any]],
@@ -476,6 +624,7 @@ def onizleme_satirlari(
             must_by_id[int(c.get("id"))] = c
         except (TypeError, ValueError):
             continue
+    indeks = build_akbank_musteri_indeks(musteriler)
     out = []
     for r in ham_satirlar:
         ref = str(r.get("banka_referans_no") or "").strip()
@@ -499,7 +648,7 @@ def onizleme_satirlari(
                 "kaynak": "manuel_hatirlat",
             }
         else:
-            em = {**eslestir_musteri(r.get("aciklama") or "", musteriler), "kaynak": "otomatik"}
+            em = {**eslestir_musteri(r.get("aciklama") or "", musteriler, indeks), "kaynak": "otomatik"}
         if dup:
             ui_status = "duplicate"
         elif em["status"] == "matched":

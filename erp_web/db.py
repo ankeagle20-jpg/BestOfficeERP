@@ -322,6 +322,7 @@ def init_schema():
         ensure_kargolar_durum()
         ensure_faturalar_amount_columns()
         ensure_musteri_kyc_columns()
+        ensure_musteri_kyc_arama_kolonlari()
         ensure_musteri_kyc_hazir_ofis_oda_no()
         ensure_hizmet_turleri_table()
         ensure_duzenli_fatura_secenekleri_table()
@@ -477,10 +478,19 @@ def ensure_musteri_kyc_columns():
         ("kira_artis_tarihi", "DATE"),
         ("kira_suresi_ay", "INTEGER"),
         ("kira_nakit", "BOOLEAN DEFAULT FALSE"),
+        ("kira_banka", "BOOLEAN DEFAULT FALSE"),
+        ("kira_nakit_tutar", "NUMERIC(14,2)"),
+        ("kira_banka_tutar", "NUMERIC(14,2)"),
         ("duzenli_fatura", "TEXT"),
         ("yetkili_tel_aciklama", "TEXT"),
         ("yetkili_tel2_aciklama", "TEXT"),
         ("kdv_oran", "NUMERIC(8,2) DEFAULT 20"),
+        ("vergi_no", "TEXT"),
+        ("vergi_dairesi", "TEXT"),
+        ("yetkili_adsoyad", "TEXT"),
+        ("yetkili_tel", "TEXT"),
+        ("yetkili_tel2", "TEXT"),
+        ("yetkili_email", "TEXT"),
     )
     for col, ctype in columns:
         try:
@@ -488,6 +498,26 @@ def ensure_musteri_kyc_columns():
         except Exception as e:
             print(f"musteri_kyc.{col}: {e}")
     _musteri_kyc_columns_done = True
+
+
+def ensure_musteri_kyc_arama_kolonlari():
+    """Geniş müşteri araması (musteri_kyc EXISTS …) için kolonlar; eski DB'lerde tek seferlik ALTER.
+
+    ensure_musteri_kyc_columns() bir kez çalıştıysa yeni tuple satırları atlanabildiği için
+    bu fonksiyon her çağrıda güvenli şekilde IF NOT EXISTS uygular (maliyet düşük).
+    """
+    for col, typ in (
+        ("vergi_no", "TEXT"),
+        ("vergi_dairesi", "TEXT"),
+        ("yetkili_adsoyad", "TEXT"),
+        ("yetkili_tel", "TEXT"),
+        ("yetkili_tel2", "TEXT"),
+        ("yetkili_email", "TEXT"),
+    ):
+        try:
+            execute(f"ALTER TABLE musteri_kyc ADD COLUMN IF NOT EXISTS {col} {typ}")
+        except Exception as e:
+            print(f"musteri_kyc arama kolonu {col}: {e}")
 
 
 def ensure_customers_hazir_ofis_oda():
@@ -504,6 +534,22 @@ def ensure_musteri_kyc_hazir_ofis_oda_no():
         execute("ALTER TABLE musteri_kyc ADD COLUMN IF NOT EXISTS hazir_ofis_oda_no INTEGER")
     except Exception as e:
         print(f"musteri_kyc.hazir_ofis_oda_no: {e}")
+
+
+def ensure_musteri_kyc_kira_banka():
+    """Aylık kira ödeme tipi: Banka (Nakit ile karşılıklı; KDV mantığı yine kira_nakit)."""
+    try:
+        execute("ALTER TABLE musteri_kyc ADD COLUMN IF NOT EXISTS kira_banka BOOLEAN DEFAULT FALSE")
+    except Exception as e:
+        print(f"musteri_kyc.kira_banka: {e}")
+    for col_sql in (
+        "ALTER TABLE musteri_kyc ADD COLUMN IF NOT EXISTS kira_nakit_tutar NUMERIC(14,2)",
+        "ALTER TABLE musteri_kyc ADD COLUMN IF NOT EXISTS kira_banka_tutar NUMERIC(14,2)",
+    ):
+        try:
+            execute(col_sql)
+        except Exception as e:
+            print(f"musteri_kyc tutar kolonu: {e}")
 
 
 _musteri_kyc_latest_idx_done = False
@@ -1261,6 +1307,10 @@ def ensure_tahsilatlar_columns():
         execute("ALTER TABLE tahsilatlar ADD COLUMN IF NOT EXISTS customer_id INTEGER REFERENCES customers(id)")
     except Exception as e:
         print(f"tahsilatlar.customer_id: {e}")
+    try:
+        execute("ALTER TABLE tahsilatlar ADD COLUMN IF NOT EXISTS banka_referans_no TEXT")
+    except Exception as e:
+        print(f"tahsilatlar.banka_referans_no: {e}")
 
 
 def ensure_kargolar_durum():

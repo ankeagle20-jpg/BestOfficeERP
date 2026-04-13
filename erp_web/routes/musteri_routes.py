@@ -11,11 +11,12 @@ from db import (
     ensure_customers_kapanis_tarihi,
     ensure_customers_hazir_ofis_oda,
     ensure_musteri_kyc_hazir_ofis_oda_no,
+    ensure_musteri_kyc_kira_banka,
     db as get_db,
     clear_all_customers,
     get_conn,
 )
-from utils.musteri_arama import customers_arama_sql_3, customers_arama_params_4
+from utils.musteri_arama import customers_arama_sql_giris_genis, customers_arama_params_giris_genis
 import pandas as pd
 import calendar
 from io import BytesIO
@@ -26,6 +27,22 @@ import sys
 import re
 
 _HAZIR_OFIS_ODA_MIN, _HAZIR_OFIS_ODA_MAX = 200, 230
+
+
+def _kyc_optional_money(val):
+    """Formdan opsiyonel para; boş → None, negatif → None."""
+    if val is None:
+        return None
+    s = str(val).strip().replace(",", ".")
+    if not s:
+        return None
+    try:
+        n = float(s)
+        if n < 0:
+            return None
+        return round(n, 2)
+    except (TypeError, ValueError):
+        return None
 
 
 def _hizmet_str_hazir_ofis_mi(ht: str) -> bool:
@@ -364,10 +381,10 @@ def _musteri_liste_data():
             ORDER BY c.name
         """)
     elif arama:
-        w3 = customers_arama_sql_3("")
+        w3 = customers_arama_sql_giris_genis("")
         musteriler = fetch_all(
             f"SELECT * FROM customers WHERE {w3} ORDER BY name",
-            customers_arama_params_4(arama),
+            customers_arama_params_giris_genis(arama),
         )
     else:
         musteriler = fetch_all("SELECT * FROM customers ORDER BY name")
@@ -1046,10 +1063,10 @@ def api_ara():
     q = (request.args.get("q") or "").strip()
     if not q or len(q) < 1:
         return jsonify([])
-    w3 = customers_arama_sql_3("")
+    w3 = customers_arama_sql_giris_genis("")
     rows = fetch_all(
         f"SELECT id, name, musteri_adi FROM customers WHERE {w3} ORDER BY name LIMIT 25",
-        customers_arama_params_4(q),
+        customers_arama_params_giris_genis(q),
     )
     return jsonify(rows or [])
 
@@ -1857,10 +1874,10 @@ def api_musteri_ara():
     if not q:
         rows = fetch_all("SELECT id, name, musteri_adi FROM customers ORDER BY name LIMIT 50")
     else:
-        w3 = customers_arama_sql_3("")
+        w3 = customers_arama_sql_giris_genis("")
         rows = fetch_all(
             f"SELECT id, name, musteri_adi FROM customers WHERE {w3} ORDER BY name LIMIT 30",
-            customers_arama_params_4(q),
+            customers_arama_params_giris_genis(q),
         )
     return jsonify(rows)
 
@@ -1921,6 +1938,7 @@ def api_kyc_kaydet():
         data = request.json or request.form
         ensure_customers_hazir_ofis_oda()
         ensure_musteri_kyc_hazir_ofis_oda_no()
+        ensure_musteri_kyc_kira_banka()
         musteri_id = data.get("musteri_id")
         sirket_unvani = (data.get("sirket_unvani") or data.get("unvan") or "").strip()
         musteri_adi = (data.get("musteri_adi") or "").strip() or None
@@ -1948,6 +1966,8 @@ def api_kyc_kaydet():
         yetkili_tel2_aciklama = (data.get("yetkili_tel2_aciklama") or "").strip()
         yetkili_email = (data.get("yetkili_email") or "").strip()
         email = (data.get("email") or "").strip()
+        # customers.email: arama / liste için şirket e-postası yoksa yetkili e-postası (KYC öncesi kayıt silinmesin)
+        cust_row_email = email or yetkili_email or None
         hizmet_turu = (data.get("hizmet_turu") or "Sanal Ofis").strip()
         _df = (data.get("duzenli_fatura") or "duzenle").strip().lower()
         _df = _df.replace(" ", "_").replace("-", "_")
@@ -2039,7 +2059,21 @@ def api_kyc_kaydet():
         evrak_kimlik_fotokopi = 1 if data.get("evrak_kimlik_fotokopi") in (True, 1, "1", "on") else 0
         evrak_ikametgah = 1 if data.get("evrak_ikametgah") in (True, 1, "1", "on") else 0
         evrak_kase = 1 if data.get("evrak_kase") in (True, 1, "1", "on") else 0
+        kira_nakit_tutar = _kyc_optional_money(data.get("kira_nakit_tutar"))
+        kira_banka_tutar = _kyc_optional_money(data.get("kira_banka_tutar"))
         kira_nakit = data.get("kira_nakit") in (True, 1, "1", "on", "true", "yes")
+        kira_banka = data.get("kira_banka") in (True, 1, "1", "on", "true", "yes")
+        karma_kira = (
+            kira_nakit_tutar is not None
+            and kira_banka_tutar is not None
+            and kira_nakit_tutar > 0
+            and kira_banka_tutar > 0
+        )
+        if not karma_kira:
+            if kira_nakit:
+                kira_banka = False
+            elif kira_banka:
+                kira_nakit = False
 
         zorunlu = ["sirket_unvani", "vergi_no", "vergi_dairesi", "yeni_adres", "yetkili_adsoyad", "yetkili_tcno"]
         dolu = sum(1 for k in zorunlu if (data.get(k) or "").strip())
@@ -2081,7 +2115,7 @@ def api_kyc_kaydet():
                    yetkili_adsoyad=%s, yetkili_tcno=%s, yetkili_dogum=%s, yetkili_ikametgah=%s,
                    yetkili_tel=%s, yetkili_tel2=%s, yetkili_tel_aciklama=%s, yetkili_tel2_aciklama=%s, yetkili_email=%s, email=%s,
                    hizmet_turu=%s, duzenli_fatura=%s, aylik_kira=%s, yillik_kira=%s, sozlesme_no=%s, sozlesme_tarihi=%s, sozlesme_bitis=%s,
-                   kira_artis_tarihi=%s, kira_suresi_ay=%s, kira_nakit=%s, hazir_ofis_oda_no=%s,
+                   kira_artis_tarihi=%s, kira_suresi_ay=%s, kira_nakit=%s, kira_banka=%s, kira_nakit_tutar=%s, kira_banka_tutar=%s, hazir_ofis_oda_no=%s,
                    evrak_imza_sirkuleri=%s, evrak_vergi_levhasi=%s, evrak_ticaret_sicil=%s, evrak_faaliyet_belgesi=%s,
                    evrak_kimlik_fotokopi=%s, evrak_ikametgah=%s, evrak_kase=%s, notlar=%s, tamamlanma_yuzdesi=%s, updated_at=NOW()
                    WHERE id=%s""",
@@ -2090,7 +2124,7 @@ def api_kyc_kaydet():
                  yetkili_adsoyad, yetkili_tcno, yetkili_dogum, yetkili_ikametgah,
                  yetkili_tel, yetkili_tel2, yetkili_tel_aciklama, yetkili_tel2_aciklama, yetkili_email, email,
                  hizmet_turu, duzenli_fatura, aylik_kira, yillik_kira, sozlesme_no, sozlesme_tarihi, sozlesme_bitis,
-                 kira_artis_tarihi, kira_suresi_ay, kira_nakit, hazir_oda_val,
+                 kira_artis_tarihi, kira_suresi_ay, kira_nakit, kira_banka, kira_nakit_tutar, kira_banka_tutar, hazir_oda_val,
                  evrak_imza_sirkuleri, evrak_vergi_levhasi, evrak_ticaret_sicil, evrak_faaliyet_belgesi,
                  evrak_kimlik_fotokopi, evrak_ikametgah, evrak_kase, notlar, tamamlanma_yuzdesi, mevcut["id"])
             )
@@ -2099,7 +2133,7 @@ def api_kyc_kaydet():
                 execute(
                     """UPDATE customers SET name=%s, musteri_adi=%s, email=%s, phone=%s, address=%s, tax_number=%s,
                        durum=%s, kapanis_tarihi=%s, hizmet_turu=%s, hazir_ofis_oda_no=%s WHERE id=%s""",
-                    (sirket_unvani or None, musteri_adi, email or None, yetkili_tel or None, yeni_adres or None, vergi_no or None,
+                    (sirket_unvani or None, musteri_adi, cust_row_email, yetkili_tel or None, yeni_adres or None, vergi_no or None,
                      durum_m, kapanis_tarihi, hizmet_turu, hazir_oda_val, musteri_id)
                 )
         else:
@@ -2116,7 +2150,7 @@ def api_kyc_kaydet():
                 execute(
                     """UPDATE customers SET name=%s, musteri_adi=%s, email=%s, phone=%s, address=%s, tax_number=%s,
                        durum=%s, kapanis_tarihi=%s, hizmet_turu=%s, hazir_ofis_oda_no=%s WHERE id=%s""",
-                    (sirket_unvani or None, musteri_adi, email or None, yetkili_tel or None, yeni_adres or None, vergi_no or None,
+                    (sirket_unvani or None, musteri_adi, cust_row_email, yetkili_tel or None, yeni_adres or None, vergi_no or None,
                      durum_m, kapanis_tarihi, hizmet_turu, hazir_oda_val, musteri_id)
                 )
             else:
@@ -2145,7 +2179,7 @@ def api_kyc_kaydet():
                 cust = execute_returning(
                     """INSERT INTO customers (name, musteri_adi, email, phone, address, notes, tax_number, durum, kapanis_tarihi, hizmet_turu, hazir_ofis_oda_no)
                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
-                    (sirket_unvani or "Yeni Müşteri", musteri_adi, email or None, yetkili_tel or None, yeni_adres or None, notlar or None, vergi_no or None, durum_m, kapanis_tarihi, hizmet_turu, hazir_oda_val)
+                    (sirket_unvani or "Yeni Müşteri", musteri_adi, cust_row_email, yetkili_tel or None, yeni_adres or None, notlar or None, vergi_no or None, durum_m, kapanis_tarihi, hizmet_turu, hazir_oda_val)
                 )
                 musteri_id = cust["id"] if cust else None
             row = execute_returning(
@@ -2155,13 +2189,13 @@ def api_kyc_kaydet():
                    yetkili_adsoyad, yetkili_tcno, yetkili_dogum, yetkili_ikametgah,
                    yetkili_tel, yetkili_tel2, yetkili_tel_aciklama, yetkili_tel2_aciklama, yetkili_email, email,
                    hizmet_turu, duzenli_fatura, aylik_kira, yillik_kira, sozlesme_no, sozlesme_tarihi, sozlesme_bitis,
-                   kira_artis_tarihi, kira_suresi_ay, kira_nakit, hazir_ofis_oda_no,
+                   kira_artis_tarihi, kira_suresi_ay, kira_nakit, kira_banka, kira_nakit_tutar, kira_banka_tutar, hazir_ofis_oda_no,
                    evrak_imza_sirkuleri, evrak_vergi_levhasi, evrak_ticaret_sicil, evrak_faaliyet_belgesi,
                    evrak_kimlik_fotokopi, evrak_ikametgah, evrak_kase, notlar, tamamlanma_yuzdesi
                 ) VALUES (
                    %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
                    %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
-                   %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
+                   %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
                    %s,%s,%s,%s,%s,%s,%s
                 ) RETURNING id""",
                 (musteri_id, sirket_unvani, sirket_unvani, musteri_adi, vergi_no, vergi_dairesi, mersis_no, ticaret_sicil_no,
@@ -2169,7 +2203,7 @@ def api_kyc_kaydet():
                  yetkili_adsoyad, yetkili_tcno, yetkili_dogum, yetkili_ikametgah,
                  yetkili_tel, yetkili_tel2, yetkili_tel_aciklama, yetkili_tel2_aciklama, yetkili_email, email,
                  hizmet_turu, duzenli_fatura, aylik_kira, yillik_kira, sozlesme_no, sozlesme_tarihi, sozlesme_bitis,
-                 kira_artis_tarihi, kira_suresi_ay, kira_nakit, hazir_oda_val,
+                 kira_artis_tarihi, kira_suresi_ay, kira_nakit, kira_banka, kira_nakit_tutar, kira_banka_tutar, hazir_oda_val,
                  evrak_imza_sirkuleri, evrak_vergi_levhasi, evrak_ticaret_sicil, evrak_faaliyet_belgesi,
                  evrak_kimlik_fotokopi, evrak_ikametgah, evrak_kase, notlar, tamamlanma_yuzdesi)
             )

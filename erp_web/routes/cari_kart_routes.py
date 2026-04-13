@@ -6,7 +6,7 @@ from flask_login import current_user
 from auth import giris_gerekli
 from db import fetch_all, fetch_one, db as get_db
 from utils.text_utils import turkish_lower
-from utils.musteri_arama import customers_arama_sql_3_plus_tax_office, customers_arama_params_6
+from utils.musteri_arama import customers_arama_sql_giris_genis, customers_arama_params_giris_genis
 from datetime import date, datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import io
@@ -360,15 +360,15 @@ def api_360(mid):
 @bp.route("/api/musteriler")
 @giris_gerekli
 def api_musteriler():
-    """Müşteri listesi (ünvan, müşteri adı, yetkili + vergi no, ofis)."""
+    """Müşteri listesi; kart + KYC alanlarında geniş metin araması."""
     q = request.args.get("q", "").strip()
     base = "SELECT id, name, musteri_adi, tax_number, office_code, durum FROM customers "
     if not q:
         rows = fetch_all(base + "ORDER BY name LIMIT 200")
     else:
-        w = customers_arama_sql_3_plus_tax_office()
+        w = customers_arama_sql_giris_genis("")
         rows = fetch_all(
             base + f"WHERE {w} ORDER BY name LIMIT 200",
-            customers_arama_params_6(q),
+            customers_arama_params_giris_genis(q),
         )
     return jsonify(rows or [])

@@ -12,6 +12,7 @@ from flask_login import current_user
 import os
 import atexit
 import sys
+import socket
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -190,6 +191,19 @@ ilk_kurulum()
 if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or os.environ.get("GUNICORN_CMD_ARGS"):
     _start_background_jobs()
 
+def _dev_yerel_ag_ipv4():
+    """Bu makinenin LAN IP'si (başka PC'ler 127.0.0.1 ile erişemez)."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(0.25)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except OSError:
+        return None
+
+
 # ── Uygulamayı başlat ────────────────────────────────────────────────────────
 if __name__ == "__main__":
     # Enable debug for local troubleshooting
@@ -206,9 +220,14 @@ if __name__ == "__main__":
         pass
     print("\n" + "=" * 50)
     print("  OFİSBİR ERP — Sunucu çalışıyor")
-    print("  Tarayıcıda aç: http://127.0.0.1:{}".format(port))
+    print("  Bu bilgisayarda aç: http://127.0.0.1:{}".format(port))
+    _lan = _dev_yerel_ag_ipv4()
+    if _lan and _lan != "127.0.0.1":
+        print("  Başka bilgisayar / telefon (aynı ağ): http://{}:{}".format(_lan, port))
+        print("  Not: 127.0.0.1 yalnızca bu PC içindir; diğerine LAN adresini verin.")
+    else:
+        print("  Başka PC için: ipconfig ile IPv4 adresini kullanın (örn. 192.168.x.x).")
     print("  Giriş: admin / admin123")
-    print("  Tüm sayfalar (Dashboard, Müşteriler, Finans vb.) bu adresten açılır.")
     print("=" * 50 + "\n")
     # threaded=True: Paralel fetch istekleri birbirini bloklamasın.
     # use_reloader: Cursor/IDE dosya kaydında sunucu 1–2 sn kapanır → "Sunucuya bağlanılamadı". Kararlı test için:

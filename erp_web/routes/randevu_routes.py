@@ -183,7 +183,7 @@ def api_list():
 @bp.route("/api/musteriler")
 @login_required
 def api_musteriler():
-    """Müşteri/firma arama: ünvan, müşteri adı, yetkili + telefon + notes."""
+    """Müşteri/firma arama: geniş kart+KYC alanları + notlar (customers.notes)."""
     q = (request.args.get("q") or "").strip()[:80]
     if not q:
         rows = fetch_all("SELECT id, name, musteri_adi, phone FROM customers ORDER BY name LIMIT 30")

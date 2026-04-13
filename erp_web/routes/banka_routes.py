@@ -7,6 +7,7 @@ from db import fetch_all, fetch_one, execute, execute_returning, db
 from services.banka_ak_import import (
     akbank_sender_key,
     dataframe_hareket_satirlari,
+    ham_tahsilatta_olanlari_cikar,
     onizleme_satirlari,
     read_akbank_excel,
 )
@@ -523,6 +524,155 @@ def _ensure_tahsilat_banka_referans_no():
         pass
 
 
+def _ensure_akbank_import_dosyalar():
+    """Yüklenen Akbank Excel dosyalarını ERP içinde saklar."""
+    try:
+        execute(
+            """
+            CREATE TABLE IF NOT EXISTS akbank_import_dosyalar (
+                id SERIAL PRIMARY KEY,
+                ad_gosterim TEXT NOT NULL UNIQUE,
+                orijinal_filename TEXT,
+                yuklenme_tarihi TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                excel_binary BYTEA NOT NULL
+            )
+            """
+        )
+    except Exception:
+        pass
+    try:
+        execute(
+            "CREATE INDEX IF NOT EXISTS ix_akbank_import_dosyalar_yuklenme ON akbank_import_dosyalar (yuklenme_tarihi DESC)"
+        )
+    except Exception:
+        pass
+
+
+def _akbank_allocate_ad_gosterim(d: date | None = None) -> str:
+    """Gün bazlı kısa ad: DDMMYY; aynı gün tekrarı → _2, _3 …"""
+    d = d or date.today()
+    base = f"{d.day:02d}{d.month:02d}{str(d.year)[-2:]}"
+    for i in range(0, 200):
+        cand = base if i == 0 else f"{base}_{i + 1}"
+        if not fetch_one("SELECT 1 FROM akbank_import_dosyalar WHERE ad_gosterim = %s LIMIT 1", (cand,)):
+            return cand
+    return f"{base}_{int(datetime.now().timestamp())}"
+
+
+def _bytea_to_bytes(val) -> bytes:
+    if val is None:
+        return b""
+    if isinstance(val, memoryview):
+        return val.tobytes()
+    if isinstance(val, bytes):
+        return val
+    return bytes(val)
+
+
+def _musteriler_akbank_listesi():
+    try:
+        return fetch_all(
+            """
+            SELECT c.id,
+                   c.name,
+                   COALESCE(c.musteri_adi, '') AS musteri_adi,
+                   COALESCE(c.tax_number, '') AS tax_number,
+                   COALESCE(
+                       NULLIF(TRIM(k.sirket_unvani), ''),
+                       NULLIF(TRIM(k.unvan), ''),
+                       ''
+                   ) AS sirket_unvani,
+                   COALESCE(NULLIF(TRIM(k.vergi_no), ''), '') AS kyc_vergi_no,
+                   COALESCE(NULLIF(TRIM(k.yetkili_tcno), ''), '') AS yetkili_tcno,
+                   COALESCE(NULLIF(TRIM(k.yetkili_adsoyad), ''), '') AS yetkili_adsoyad
+            FROM customers c
+            LEFT JOIN LATERAL (
+                SELECT sirket_unvani, unvan, vergi_no, yetkili_tcno, yetkili_adsoyad
+                FROM musteri_kyc
+                WHERE musteri_id = c.id
+                ORDER BY id DESC NULLS LAST
+                LIMIT 1
+            ) k ON TRUE
+            ORDER BY COALESCE(c.name, '')
+            """
+        ) or []
+    except Exception:
+        return fetch_all(
+            """SELECT id, name, COALESCE(musteri_adi, '') AS musteri_adi,
+                      COALESCE(tax_number, '') AS tax_number,
+                      '' AS sirket_unvani, '' AS kyc_vergi_no, '' AS yetkili_tcno, '' AS yetkili_adsoyad
+               FROM customers ORDER BY COALESCE(name, '')"""
+        ) or []
+
+
+def _tahsilatta_refler_for_ham(ham: list) -> set[str]:
+    refs = [str(r.get("banka_referans_no") or "").strip() for r in ham if r.get("banka_referans_no")]
+    refs_u = [x for x in dict.fromkeys(refs) if x]
+    if not refs_u:
+        return set()
+    rows = fetch_all(
+        "SELECT banka_referans_no FROM tahsilatlar WHERE banka_referans_no IN %s",
+        (tuple(refs_u),),
+    )
+    return {str(x["banka_referans_no"]) for x in (rows or []) if x.get("banka_referans_no")}
+
+
+def _manual_map_for_ham(ham: list) -> dict[str, int]:
+    keys_u = list(dict.fromkeys(akbank_sender_key(r.get("aciklama") or "") for r in ham))
+    keys_u = [k for k in keys_u if k]
+    manual_by_key: dict[str, int] = {}
+    if not keys_u:
+        return manual_by_key
+    try:
+        map_rows = fetch_all(
+            "SELECT sender_key, musteri_id FROM akbank_dekont_musteri_map WHERE sender_key IN %s",
+            (tuple(keys_u),),
+        )
+        for mr in map_rows or []:
+            sk = str(mr.get("sender_key") or "")
+            if not sk:
+                continue
+            try:
+                manual_by_key[sk] = int(mr["musteri_id"])
+            except (TypeError, ValueError, KeyError):
+                continue
+    except Exception:
+        pass
+    return manual_by_key
+
+
+def _ham_birlestir_dedupe(ham_parcalar: list[list]) -> list:
+    """Aynı fiş no tekrarını at (ilk kazanır)."""
+    seen: set[str] = set()
+    out: list = []
+    for ham in ham_parcalar:
+        for r in ham:
+            ref = str(r.get("banka_referans_no") or "").strip()
+            if ref:
+                if ref in seen:
+                    continue
+                seen.add(ref)
+            out.append(r)
+    return out
+
+
+def _json_akbank_analyze_ham(ham: list, ozet: dict, kayit_dosya: dict | None) -> dict:
+    """Tahsilatta olan satırları çıkarır; kalan için önizleme (mükerrer satır yok)."""
+    _ensure_tahsilat_banka_referans_no()
+    _ensure_akbank_dekont_musteri_map()
+    mevcut = _tahsilatta_refler_for_ham(ham)
+    ham_goster, cikarilan = ham_tahsilatta_olanlari_cikar(ham, mevcut)
+    ozet_out = dict(ozet)
+    ozet_out["tahsilatta_gizlenen"] = cikarilan
+    musteriler = _musteriler_akbank_listesi()
+    manual_by_key = _manual_map_for_ham(ham_goster)
+    satirlar = onizleme_satirlari(ham_goster, musteriler, set(), manual_by_key)
+    out: dict = {"ok": True, "ozet": ozet_out, "satirlar": satirlar}
+    if kayit_dosya:
+        out["kayit_dosya"] = kayit_dosya
+    return out
+
+
 def _ensure_akbank_dekont_musteri_map():
     """Manuel seçilen dekont gönderici anahtarı → müşteri (sonraki Excel analizlerinde öncelik)."""
     try:
@@ -553,17 +703,33 @@ def akbank_tahsilat_import_sayfa():
     return render_template("bankalar/akbank_tahsilat_import.html")
 
 
+_AKBANK_IMPORT_MAX_BYTES = 20 * 1024 * 1024
+
+
+def _iso_or_str(v):
+    if v is None:
+        return None
+    if hasattr(v, "isoformat"):
+        try:
+            return v.isoformat()
+        except Exception:
+            return str(v)
+    return str(v)
+
+
 @bp.route("/api/akbank-tahsilat/analyze", methods=["POST"])
 @giris_gerekli
 def api_akbank_tahsilat_analyze():
-    """Aşama 1: Excel yükle, DB’ye yazma; eşleştirme + mükerrer işaretle."""
+    """Yeni Excel yükle: dosyayı ERP'ye kaydet + önizleme (cariye işlenmiş fişler listelenmez)."""
     f = request.files.get("file")
     if not f or not getattr(f, "filename", ""):
         return jsonify({"ok": False, "mesaj": "Excel dosyası seçin (.xlsx)."}), 400
     if not str(f.filename).lower().endswith((".xlsx", ".xls")):
         return jsonify({"ok": False, "mesaj": "Yalnızca .xlsx / .xls desteklenir."}), 400
+    raw = f.read()
+    if len(raw) > _AKBANK_IMPORT_MAX_BYTES:
+        return jsonify({"ok": False, "mesaj": "Dosya çok büyük (en fazla 20 MB)."}), 400
     try:
-        raw = f.read()
         df = read_akbank_excel(raw)
         ham, ozet = dataframe_hareket_satirlari(df)
     except ValueError as e:
@@ -572,72 +738,104 @@ def api_akbank_tahsilat_analyze():
         return jsonify({"ok": False, "mesaj": f"Excel okunamadı: {e}"}), 400
 
     _ensure_tahsilat_banka_referans_no()
+    _ensure_akbank_import_dosyalar()
     _ensure_akbank_dekont_musteri_map()
+
+    ad = _akbank_allocate_ad_gosterim()
+    fname = (getattr(f, "filename", None) or "")[:500]
     try:
-        musteriler = fetch_all(
+        ins = execute_returning(
             """
-            SELECT c.id,
-                   c.name,
-                   COALESCE(c.musteri_adi, '') AS musteri_adi,
-                   COALESCE(c.tax_number, '') AS tax_number,
-                   COALESCE(
-                       NULLIF(TRIM(k.sirket_unvani), ''),
-                       NULLIF(TRIM(k.unvan), ''),
-                       ''
-                   ) AS sirket_unvani,
-                   COALESCE(NULLIF(TRIM(k.vergi_no), ''), '') AS kyc_vergi_no,
-                   COALESCE(NULLIF(TRIM(k.yetkili_tcno), ''), '') AS yetkili_tcno,
-                   COALESCE(NULLIF(TRIM(k.yetkili_adsoyad), ''), '') AS yetkili_adsoyad
-            FROM customers c
-            LEFT JOIN LATERAL (
-                SELECT sirket_unvani, unvan, vergi_no, yetkili_tcno, yetkili_adsoyad
-                FROM musteri_kyc
-                WHERE musteri_id = c.id
-                ORDER BY id DESC NULLS LAST
-                LIMIT 1
-            ) k ON TRUE
-            ORDER BY COALESCE(c.name, '')
-            """
-        ) or []
-    except Exception:
-        musteriler = fetch_all(
-            """SELECT id, name, COALESCE(musteri_adi, '') AS musteri_adi,
-                      COALESCE(tax_number, '') AS tax_number,
-                      '' AS sirket_unvani, '' AS kyc_vergi_no, '' AS yetkili_tcno, '' AS yetkili_adsoyad
-               FROM customers ORDER BY COALESCE(name, '')"""
-        ) or []
-    refs = [str(r.get("banka_referans_no") or "").strip() for r in ham if r.get("banka_referans_no")]
-    refs_u = list(dict.fromkeys(refs))
-    mevcut: set[str] = set()
-    if refs_u:
-        rows = fetch_all(
-            "SELECT banka_referans_no FROM tahsilatlar WHERE banka_referans_no IN %s",
-            (tuple(refs_u),),
+            INSERT INTO akbank_import_dosyalar (ad_gosterim, orijinal_filename, excel_binary)
+            VALUES (%s, %s, %s)
+            RETURNING id, ad_gosterim, yuklenme_tarihi
+            """,
+            (ad, fname or None, raw),
         )
-        mevcut = {str(x["banka_referans_no"]) for x in (rows or []) if x.get("banka_referans_no")}
+    except Exception as e:
+        return jsonify({"ok": False, "mesaj": f"Dosya kaydedilemedi: {e}"}), 400
 
-    keys_u = list(dict.fromkeys(akbank_sender_key(r.get("aciklama") or "") for r in ham))
-    keys_u = [k for k in keys_u if k]
-    manual_by_key: dict[str, int] = {}
-    if keys_u:
+    if not ins:
+        return jsonify({"ok": False, "mesaj": "Dosya kaydı dönmedi."}), 400
+
+    kayit = {
+        "id": ins["id"],
+        "ad_gosterim": ins["ad_gosterim"],
+        "yuklenme_tarihi": _iso_or_str(ins.get("yuklenme_tarihi")),
+        "orijinal_filename": fname,
+    }
+    out = _json_akbank_analyze_ham(ham, ozet, kayit)
+    return jsonify(out)
+
+
+@bp.route("/api/akbank-tahsilat/dosyalar", methods=["GET"])
+@giris_gerekli
+def api_akbank_tahsilat_dosyalar():
+    """Kayıtlı Excel listesi (içerik dönmez)."""
+    _ensure_akbank_import_dosyalar()
+    rows = fetch_all(
+        """
+        SELECT id, ad_gosterim, orijinal_filename, yuklenme_tarihi,
+               octet_length(excel_binary) AS boyut_octet
+        FROM akbank_import_dosyalar
+        ORDER BY yuklenme_tarihi DESC
+        LIMIT 300
+        """
+    ) or []
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["yuklenme_tarihi"] = _iso_or_str(d.get("yuklenme_tarihi"))
+        out.append(d)
+    return jsonify({"ok": True, "dosyalar": out})
+
+
+@bp.route("/api/akbank-tahsilat/analyze-kayitli", methods=["POST"])
+@giris_gerekli
+def api_akbank_tahsilat_analyze_kayitli():
+    """Bir veya birden fazla kayıtlı dosyayı aç; içerik birleştirilir (aynı fiş no tekil)."""
+    data = request.get_json(silent=True) or {}
+    ids = data.get("file_ids")
+    if not isinstance(ids, list) or not ids:
+        return jsonify({"ok": False, "mesaj": "En az bir kayıtlı dosya seçin."}), 400
+    clean_ids: list[int] = []
+    for x in ids:
         try:
-            map_rows = fetch_all(
-                "SELECT sender_key, musteri_id FROM akbank_dekont_musteri_map WHERE sender_key IN %s",
-                (tuple(keys_u),),
-            )
-            for mr in map_rows or []:
-                sk = str(mr.get("sender_key") or "")
-                if not sk:
-                    continue
-                try:
-                    manual_by_key[sk] = int(mr["musteri_id"])
-                except (TypeError, ValueError, KeyError):
-                    continue
-        except Exception:
-            manual_by_key = {}
+            clean_ids.append(int(x))
+        except (TypeError, ValueError):
+            continue
+    clean_ids = list(dict.fromkeys(clean_ids))
+    if not clean_ids:
+        return jsonify({"ok": False, "mesaj": "Geçersiz dosya seçimi."}), 400
 
-    satirlar = onizleme_satirlari(ham, musteriler, mevcut, manual_by_key)
-    return jsonify({"ok": True, "ozet": ozet, "satirlar": satirlar})
+    _ensure_akbank_import_dosyalar()
+    rows = fetch_all(
+        "SELECT id, ad_gosterim, excel_binary FROM akbank_import_dosyalar WHERE id IN %s",
+        (tuple(clean_ids),),
+    ) or []
+    found = {int(r["id"]): r for r in rows}
+    if len(found) != len(clean_ids):
+        return jsonify({"ok": False, "mesaj": "Bazı dosyalar bulunamadı."}), 400
+
+    hams: list = []
+    ozet_top = {"excel_satir": 0, "a_degil": 0, "ref_bos": 0, "tutar_sifir": 0, "tarih_yok": 0, "islenen": 0}
+    meta_list: list[dict] = []
+    for fid in clean_ids:
+        row = found[fid]
+        raw = _bytea_to_bytes(row.get("excel_binary"))
+        try:
+            df = read_akbank_excel(raw)
+            ham, ozet = dataframe_hareket_satirlari(df)
+        except Exception as e:
+            return jsonify({"ok": False, "mesaj": f"Dosya okunamadı ({row.get('ad_gosterim')}): {e}"}), 400
+        hams.append(ham)
+        for k in ozet_top:
+            ozet_top[k] = ozet_top.get(k, 0) + int(ozet.get(k, 0) or 0)
+        meta_list.append({"id": row["id"], "ad_gosterim": row["ad_gosterim"]})
+
+    ham_birlesik = _ham_birlestir_dedupe(hams)
+    out = _json_akbank_analyze_ham(ham_birlesik, ozet_top, {"kayitli_dosyalar": meta_list})
+    return jsonify(out)
 
 
 @bp.route("/api/akbank-tahsilat/musteriler")

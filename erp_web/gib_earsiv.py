@@ -10,9 +10,13 @@ Alternatif: pip install eArsivPortal ile farklı API kullanılabilir (adaptör g
 """
 
 import os
+import re
 import time
 import json
+import logging
 from dotenv import load_dotenv
+
+_log = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -92,6 +96,7 @@ class BestOfficeGIBManager:
         self.client = None
         self.client_type = None
         self.last_sms_error = None
+        self.last_sms_debug = None
         self.last_taslak_raw = None
         self.last_gonderilen_payload = None
         self.init_error = None
@@ -147,12 +152,194 @@ class BestOfficeGIBManager:
 
     @staticmethod
     def _to_dict(val):
-        if hasattr(val, "dict"):
+        if val is None:
+            return {}
+        if isinstance(val, dict):
+            return val
+        md = getattr(val, "model_dump", None)
+        if callable(md):
             try:
-                return val.dict() or {}
+                out = md()
+                return out if isinstance(out, dict) else {}
             except Exception:
-                return {}
-        return val if isinstance(val, dict) else {}
+                pass
+        dc = getattr(val, "dict", None)
+        if callable(dc):
+            try:
+                out = dc()
+                return out if isinstance(out, dict) else {}
+            except Exception:
+                pass
+        return {}
+
+    @staticmethod
+    def _oid_hunt_in_dict(obj, depth=0, max_depth=12):
+        """GİB dispatch yanıtında oid — dict/list iç içe, farklı anahtar adları."""
+        if obj is None or depth > max_depth:
+            return None
+        if isinstance(obj, dict):
+            for k in (
+                "oid", "OID", "Oid", "operationId", "OPERATIONID",
+                "operasyonId", "OperasyonId", "OPERASYONID",
+            ):
+                v = obj.get(k)
+                if v is not None and str(v).strip():
+                    return str(v).strip()
+            for v in obj.values():
+                found = BestOfficeGIBManager._oid_hunt_in_dict(v, depth + 1, max_depth)
+                if found:
+                    return found
+        elif isinstance(obj, list):
+            for item in obj:
+                found = BestOfficeGIBManager._oid_hunt_in_dict(item, depth + 1, max_depth)
+                if found:
+                    return found
+        return None
+
+    @staticmethod
+    def _oid_regex_in_text(s: str):
+        """GİB bazen oid'yi düz metin veya gömülü JSON parçasında döndürür."""
+        if not s or not isinstance(s, str):
+            return None
+        for pat in (
+            r'(?i)["\']?oid["\']?\s*[:=]\s*["\']?([0-9A-Za-z_-]{6,80})',
+            r'(?i)["\']?operationId["\']?\s*[:=]\s*["\']?([0-9A-Za-z_-]{6,80})',
+        ):
+            m = re.search(pat, s)
+            if m:
+                return m.group(1).strip()
+        return None
+
+    def _oid_from_smssifre_response(self, sms_resp):
+        """SMSSIFRE_GONDER tam gövdesinden OID çıkar (dict, iç içe, data string JSON, mesaj metni)."""
+        if not isinstance(sms_resp, dict):
+            return None
+        o = self._oid_hunt_in_dict(sms_resp)
+        if o:
+            return o
+        d = sms_resp.get("data")
+        o = self._oid_hunt_in_dict(d)
+        if o:
+            return o
+        if isinstance(d, str):
+            st = d.strip()
+            if st.startswith("{") or st.startswith("["):
+                try:
+                    parsed = json.loads(st)
+                    o = self._oid_hunt_in_dict(parsed)
+                    if o:
+                        return o
+                except Exception:
+                    pass
+            o = self._oid_regex_in_text(st)
+            if o:
+                return o
+        for m in sms_resp.get("messages") or []:
+            if not isinstance(m, dict):
+                continue
+            o = self._oid_hunt_in_dict(m)
+            if o:
+                return o
+            for key in ("text", "message", "msg", "description"):
+                t = m.get(key)
+                if isinstance(t, str) and t.strip():
+                    o = self._oid_regex_in_text(t)
+                    if o:
+                        return o
+        return None
+
+    @staticmethod
+    def _smssifre_yanit_ozeti(sms_resp):
+        """PII sızdırmadan OID hata ayıklama (kullanıcıya kısa teknik özet)."""
+        if not isinstance(sms_resp, dict):
+            return f"yanıt_türü={type(sms_resp).__name__}"
+        parts = [f"kök_anahtarlar={list(sms_resp.keys())}"]
+        d = sms_resp.get("data")
+        parts.append(f"data_tipi={type(d).__name__}")
+        if isinstance(d, dict) and d:
+            parts.append(f"data_anahtarlar={list(d.keys())[:24]}")
+        elif isinstance(d, str) and d:
+            parts.append(f"data_uzunluk={len(d)}")
+        msgs = sms_resp.get("messages")
+        if isinstance(msgs, list) and msgs:
+            m0 = msgs[0]
+            if isinstance(m0, dict):
+                t = (m0.get("text") or m0.get("message") or m0.get("msg") or "")[:240]
+            else:
+                t = str(m0)[:240]
+            if t.strip():
+                parts.append(f"messages[0]={t.strip()}")
+        return " ".join(parts)
+
+    def _client_dispatch(self, cmd: str, sayfa: str, jp: dict):
+        """eArsivPortal özel __kod_calistir (sayfa adı GİB sürümüne göre kritik)."""
+        from eArsivPortal.Models.Komutlar import Komut
+
+        kod = getattr(self.client, "_eArsivPortal__kod_calistir", None)
+        if not callable(kod):
+            raise RuntimeError("eArsivPortal istemcisi dispatch (kod_calistir) bulunamadı.")
+        return kod(Komut(cmd=cmd, sayfa=sayfa), jp or {})
+
+    def _portal_sms_gonder_ve_oid_al(self):
+        """
+        SMS + OID: kütüphanenin gib_imza() yerine doğrudan dispatch.
+
+        - TELEFONNO: önce RG_SMSONAY, olmazsa RG_BASITTASLAKLAR (mlevent/fatura vb. ile uyumlu).
+        - SMSSIFRE: önce KCEPTEL=False, OID yoksa KCEPTEL=True (ikinci SMS — operatör/GİB uyumu).
+        - pageName: RG_SMSONAY, OID yoksa RG_BASITTASLAKLAR (TELEFONNO ile aynı yedek).
+        - OID: dict/list derin arama + data string JSON + mesaj metninde regex.
+        """
+        self.last_sms_error = None
+        self.last_sms_debug = None
+        telefon_no = None
+        for sayfa in ("RG_SMSONAY", "RG_BASITTASLAKLAR"):
+            try:
+                tel_resp = self._client_dispatch("EARSIV_PORTAL_TELEFONNO_SORGULA", sayfa, {})
+                tv = tel_resp.get("data") if isinstance(tel_resp, dict) else None
+                if isinstance(tv, dict):
+                    telefon_no = tv.get("telefon") or tv.get("CEPTEL") or tv.get("ceptel")
+                if telefon_no:
+                    _log.info("GİB TELEFONNO ok (sayfa=%s)", sayfa)
+                    break
+            except Exception as e:
+                _log.debug("TELEFONNO %s: %s", sayfa, e)
+        if not telefon_no:
+            self.last_sms_error = (
+                "GİB kayıtlı cep telefonu alınamadı (RG_SMSONAY / RG_BASITTASLAKLAR). "
+                "İnteraktif Vergi Dairesi → e-Arşiv işyeri ayarlarından GSM doğrulayın."
+            )
+            return None
+        last_sms_resp = None
+        for sayfa_sms in ("RG_SMSONAY", "RG_BASITTASLAKLAR"):
+            for kceptel in (False, True):
+                try:
+                    sms_resp = self._client_dispatch(
+                        "EARSIV_PORTAL_SMSSIFRE_GONDER",
+                        sayfa_sms,
+                        {"CEPTEL": telefon_no, "KCEPTEL": bool(kceptel), "TIP": ""},
+                    )
+                    last_sms_resp = sms_resp
+                    oid = self._oid_from_smssifre_response(sms_resp) if isinstance(sms_resp, dict) else None
+                    if oid:
+                        _log.info("GİB SMSSIFRE OID alındı (sayfa=%s, KCEPTEL=%s)", sayfa_sms, kceptel)
+                        return oid
+                except Exception as e:
+                    self.last_sms_error = str(e)
+                    _log.warning("SMSSIFRE_GONDER sayfa=%s KCEPTEL=%s: %s", sayfa_sms, kceptel, e)
+        ozet = self._smssifre_yanit_ozeti(last_sms_resp) if last_sms_resp is not None else "yanıt_yok"
+        _log.warning("GİB SMSSIFRE OID yok. %s", ozet)
+        if os.getenv("GIB_SMS_DEBUG", "").strip().lower() in ("1", "true", "evet"):
+            try:
+                self.last_sms_debug = json.dumps(last_sms_resp, ensure_ascii=False, default=str)[:4000]
+            except Exception:
+                self.last_sms_debug = repr(last_sms_resp)[:4000]
+        self.last_sms_error = (
+            "GİB SMSSIFRE yanıtında OID parse edilemedi. Taslaklar portalda listeleniyorsa "
+            "satırı seçip «GİB İmza» ile tarayıcıdan imzalayın; veya birkaç dakika sonra "
+            "ERP’den «SMS Gönder»i tekrar deneyin."
+            f" (Teknik özet: {ozet})"
+        )
+        return None
 
     def _find_fatura_by_uuid(self, uuid, days_back=370, force_new_session=True):
         from datetime import datetime, timedelta
@@ -397,11 +584,10 @@ class BestOfficeGIBManager:
         try:
             self.last_sms_error = None
             self._fresh_login()
-            # Önce SMS gönderimi başlat ve oid al.
-            imza = self.client.gib_imza()
-            oid = self._to_dict(imza).get("oid")
+            oid = self._portal_sms_gonder_ve_oid_al()
             if not oid:
-                self.last_sms_error = "OID alınamadı."
+                if not self.last_sms_error:
+                    self.last_sms_error = "OID alınamadı."
                 return False
             return self.sms_onay_earsivportal(uuid, sms_kodu, oid)
         except Exception as e:
@@ -443,18 +629,27 @@ class BestOfficeGIBManager:
         """eArsivPortal için SMS gönderimini başlatır ve oid döndürür."""
         self._ensure_client()
         self.last_sms_error = None
-        for _ in range(3):
+        for attempt in range(3):
             try:
                 self._fresh_login()
-                imza = self.client.gib_imza()
-                oid = self._to_dict(imza).get("oid")
+                oid = self._portal_sms_gonder_ve_oid_al()
                 if oid:
                     return oid
-                self.last_sms_error = "OID alınamadı (telefon kayıtlı olmayabilir veya GİB SMS servisi yanıt vermedi)."
+                if self.test_mode and self.last_sms_error and "GIB_TEST" not in self.last_sms_error:
+                    self.last_sms_error += (
+                        " Not: GIB_TEST açık — test portalı kullanılıyor; canlı mükellef hesabıyla "
+                        "çakışma olabilir (.env GIB_TEST=0 deneyin)."
+                    )
+                _log.warning("sms_kodu_gonder: OID yok (deneme %s/3): %s", attempt + 1, self.last_sms_error)
             except Exception as e:
                 self.last_sms_error = str(e)
+                _log.exception("sms_kodu_gonder istisna (deneme %s/3)", attempt + 1)
                 print(f"SMS Gönderim Hatası: {e}")
                 time.sleep(1.2)
+        if not (self.last_sms_error or "").strip():
+            self.last_sms_error = (
+                "OID alınamadı. GIB_USER / GIB_PASS / GIB_TEST ve GİB’de kayıtlı cep numarasını kontrol edin."
+            )
         return None
 
     def fatura_durum_getir(self, uuid, days_back=370):
