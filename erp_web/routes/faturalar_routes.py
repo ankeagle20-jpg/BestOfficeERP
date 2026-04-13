@@ -2227,18 +2227,23 @@ def api_fatura_rapor():
     ensure_customers_durum()
     # Tarih filtresi: bazı kayıtlarda fatura_tarihi boş kalabiliyor (GİB sonrası vb.);
     # vade_tarihi veya oluşturulma tarihi ile yedeklenir; aksi halde raporda görünmezler.
-    df_sql = ""
-    df_params = []
+    df_join = ""
+    df_where = ""
+    df_params: list = []
     if duzenli_fatura:
-        df_sql = """
+        # Satır başı correlated subquery yerine tek DISTINCT ON birleşimi (N× alt sorgu yok).
+        df_join = """
+        LEFT JOIN (
+            SELECT DISTINCT ON (musteri_id)
+                musteri_id,
+                duzenli_fatura
+            FROM musteri_kyc
+            ORDER BY musteri_id, id DESC
+        ) mk_df ON mk_df.musteri_id = CAST(f.musteri_id AS INTEGER)
+        """
+        df_where = """
         AND COALESCE(
-            NULLIF(LOWER(TRIM((
-                SELECT mk.duzenli_fatura
-                FROM musteri_kyc mk
-                WHERE mk.musteri_id = CAST(f.musteri_id AS INTEGER)
-                ORDER BY mk.id DESC
-                LIMIT 1
-            ))), ''),
+            NULLIF(LOWER(TRIM(mk_df.duzenli_fatura)), ''),
             'duzenle'
         ) = %s
         """
@@ -2256,6 +2261,7 @@ def api_fatura_rapor():
                f.tutar, f.kdv_tutar, f.toplam, f.satirlar_json, f.durum, f.ettn
         FROM faturalar f
         LEFT JOIN customers c ON CAST(f.musteri_id AS INTEGER) = c.id
+        {df_join}
         WHERE (
             (
                 COALESCE(
@@ -2275,7 +2281,7 @@ def api_fatura_rapor():
                 AND NULLIF(TRIM(COALESCE(f.ettn::text, '')), '') IS NOT NULL
             )
         )
-        {df_sql}
+        {df_where}
         ORDER BY COALESCE(
                 f.fatura_tarihi::date,
                 f.vade_tarihi::date
@@ -2807,14 +2813,17 @@ def tahsilatlar():
     """Tahsilatlar sekmesi"""
     yil = request.args.get('yil', datetime.now().year, type=int)
     
+    # EXTRACT(YEAR …) indeks kullanımını engeller; yıl için tarih aralığı (ix_tahsilatlar_tahsilat_tarihi).
+    _y1 = date(int(yil), 1, 1)
+    _y2 = date(int(yil) + 1, 1, 1)
     tahsilatlar_raw = fetch_all("""
         SELECT t.*, c.name as musteri_adi, f.fatura_no
         FROM tahsilatlar t
         LEFT JOIN customers c ON COALESCE(t.customer_id, t.musteri_id) = c.id
         LEFT JOIN faturalar f ON t.fatura_id = f.id
-        WHERE EXTRACT(YEAR FROM (t.tahsilat_tarihi::date)) = %s
-        ORDER BY (t.tahsilat_tarihi::date) DESC
-    """, (yil,))
+        WHERE t.tahsilat_tarihi::date >= %s AND t.tahsilat_tarihi::date < %s
+        ORDER BY t.tahsilat_tarihi DESC NULLS LAST, t.id DESC
+    """, (_y1, _y2))
     tahsilatlar_list = [_row_serializable(t) for t in (tahsilatlar_raw or [])]
     
     toplam = sum(t.get('tutar') or 0 for t in tahsilatlar_list)

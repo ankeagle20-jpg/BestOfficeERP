@@ -187,6 +187,12 @@ def ilk_kurulum():
 
 # Uygulama yüklendiğinde (gunicorn/Render dahil) şema ve admin kontrolü
 ilk_kurulum()
+try:
+    from utils.compute_device import log_startup_accelerators
+
+    log_startup_accelerators()
+except Exception:
+    pass
 # Debug reloader'da parent process'te çift scheduler açmamak için sadece child'da başlat.
 if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or os.environ.get("GUNICORN_CMD_ARGS"):
     _start_background_jobs()

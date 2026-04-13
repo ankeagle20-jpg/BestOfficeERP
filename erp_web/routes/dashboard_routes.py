@@ -156,9 +156,10 @@ def _dashboard_tablo_data(arama="", filtre=None):
     # Sözleşme bitiş (musteri_kyc) — son kayıt per müşteri
     try:
         kyc_list = fetch_all("""
-            SELECT k.musteri_id, k.sozlesme_bitis, k.hizmet_turu FROM musteri_kyc k
-            INNER JOIN (SELECT musteri_id, MAX(id) as mid FROM musteri_kyc GROUP BY musteri_id) t
-            ON k.musteri_id = t.musteri_id AND k.id = t.mid
+            SELECT DISTINCT ON (musteri_id)
+                musteri_id, sozlesme_bitis, hizmet_turu
+            FROM musteri_kyc
+            ORDER BY musteri_id, id DESC
         """)
         kyc_by_cid = {r["musteri_id"]: r for r in (kyc_list or [])}
     except Exception:

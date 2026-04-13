@@ -22,3 +22,6 @@ venv/
 # Windows
 Thumbs.db
 Desktop.ini
+
+# ONNX embedding modelleri (büyük; export script ile üretilir)
+erp_web/models/

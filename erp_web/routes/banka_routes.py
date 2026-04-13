@@ -984,3 +984,87 @@ def api_akbank_tahsilat_commit():
         "atlandi": atlandi,
         "uyarilar": hatalar[:30],
     })
+
+
+@bp.route("/api/embed-prototype/status")
+@giris_gerekli
+def api_embed_prototype_status():
+    """ONNX embedding prototipi: model yolu, yükleme durumu, hızlandırıcılar."""
+    from pathlib import Path
+
+    from services.embedding_onnx_minilm import embedding_model_dir, get_embedder
+    from utils.compute_device import accelerator_summary
+
+    d = embedding_model_dir()
+    emb = get_embedder()
+    return jsonify({
+        "ok": True,
+        "model_dir": str(d) if d else None,
+        "default_model_path": str(
+            Path(__file__).resolve().parent.parent / "models" / "multilingual-minilm-l12-onnx"
+        ),
+        "loaded": emb is not None,
+        "accelerators": accelerator_summary(),
+    })
+
+
+@bp.route("/api/embed-prototype/score", methods=["POST"])
+@giris_gerekli
+def api_embed_prototype_score():
+    """Deknot açıklamasına göre seçilen müşteri id’leri arasında kosinüs benzerliği sıralaması."""
+    from services.embedding_akbank_prototype import musteri_embed_label
+    from services.embedding_onnx_minilm import get_embedder
+
+    emb = get_embedder()
+    if emb is None:
+        return jsonify({
+            "ok": False,
+            "mesaj": "ONNX model yüklü değil. scripts/export_multilingual_minilm_onnx.py ve EMBEDDING_ONNX_DIR.",
+        }), 503
+    data = request.get_json() or {}
+    q = (data.get("aciklama") or data.get("query") or "").strip()
+    mids_raw = data.get("musteri_ids") or []
+    if not q or not mids_raw:
+        return jsonify({"ok": False, "mesaj": "aciklama ve musteri_ids (dizi) gerekli."}), 400
+    try:
+        mids = [int(x) for x in mids_raw]
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "mesaj": "musteri_ids sayı listesi olmalı."}), 400
+    if not mids:
+        return jsonify({"ok": False, "mesaj": "musteri_ids boş."}), 400
+    try:
+        topk = int(data.get("topk") or 10)
+    except (TypeError, ValueError):
+        topk = 10
+    topk = max(1, min(topk, 50))
+
+    rows = fetch_all(
+        """
+        SELECT c.id, c.name, c.musteri_adi,
+               COALESCE(NULLIF(TRIM(k.sirket_unvani), ''), '') AS sirket_unvani,
+               COALESCE(NULLIF(TRIM(k.yetkili_adsoyad), ''), '') AS yetkili_adsoyad
+        FROM customers c
+        LEFT JOIN LATERAL (
+            SELECT sirket_unvani, yetkili_adsoyad
+            FROM musteri_kyc
+            WHERE musteri_id = c.id
+            ORDER BY id DESC
+            LIMIT 1
+        ) k ON TRUE
+        WHERE c.id = ANY(%s)
+        """,
+        (mids,),
+    ) or []
+    by_id = {int(r["id"]): r for r in rows if r.get("id") is not None}
+    labels = []
+    ids = []
+    for mid in mids:
+        r = by_id.get(mid)
+        if r is None:
+            continue
+        labels.append(musteri_embed_label(r))
+        ids.append(mid)
+    if len(labels) < 1:
+        return jsonify({"ok": False, "mesaj": "Geçerli müşteri kaydı bulunamadı."}), 400
+    top = emb.rank_query(q, labels, ids, topk=topk)
+    return jsonify({"ok": True, "top": top, "scored_count": len(labels)})

@@ -1,0 +1,6 @@
+# Çalışma zamanı (embedding ONNX çıkarıldıktan sonra):
+onnxruntime>=1.17.0
+tokenizers>=0.15.0
+
+# Dışa aktarma script’i (scripts/export_multilingual_minilm_onnx.py) için ayrıca:
+# pip install optimum[onnxruntime] transformers torch

@@ -1,11 +1,25 @@
 """
 Akbank Excel → tahsilat önizleme / müşteri eşleştirme (web + CLI ortak).
+
+Çok satırlı önizlemede müşteri eşleştirmesi CPU yoğun; varsayılan olarak
+tüm mantıksal çekirdekleri kullanır (multiprocessing, spawn).
+
+Ortam:
+  AKBANK_ONIZLEME_PROCESSES=1     → paralelliği kapat (tek süreç)
+  AKBANK_ONIZLEME_MAX_WORKERS=8   → en fazla 8 işçi (ör. Render’da sınırla)
+  AKBANK_ONIZLEME_MIN_ROWS=32     → bundan az satırda havuz açılmaz (overhead)
+
+Önbellek: norm_text_fold, norm_loose, akbank_sender_key, _digits_only_str, _digit_haystack
+  için LRU (tekrarlayan ünvan/açıklama/rakam dizilerinde O(1) yakın maliyet).
 """
 from __future__ import annotations
 
 import io
+import logging
+import os
 import re
 import unicodedata
+from functools import lru_cache
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -13,6 +27,8 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+
+_log_ak = logging.getLogger(__name__)
 
 
 def norm_header(c: object) -> str:
@@ -35,6 +51,7 @@ def norm_text(s: str) -> str:
     return re.sub(r"\s+", " ", str(s or "").lower().strip())
 
 
+@lru_cache(maxsize=16384)
 def norm_text_fold(s: str) -> str:
     """
     Türkçe / Unicode tutarlılığı: İ→i birleşik nokta artığı yüzünden [^a-z0-9] ile
@@ -55,6 +72,7 @@ def norm_text_fold(s: str) -> str:
     return re.sub(r"\s+", " ", t).strip()
 
 
+@lru_cache(maxsize=16384)
 def norm_loose(s: str) -> str:
     """
     Eşleştirme için: fold + noktalama/özel karakterleri boşluk yap (TİC.NAK ≈ TIC NAK).
@@ -65,6 +83,7 @@ def norm_loose(s: str) -> str:
     return re.sub(r"\s+", " ", t).strip()
 
 
+@lru_cache(maxsize=8192)
 def akbank_sender_key(aciklama: str) -> str:
     """
     Aynı göndericiden gelen farklı dekontlar için stabil anahtar (saat, uzun referans vb. atılır).
@@ -177,6 +196,10 @@ def build_akbank_musteri_indeks(musteriler: list[dict[str, Any]]) -> AkbankMuste
 
 
 def _aday_musteri_idleri(hay: str, digit_hay: str, idx: AkbankMusteriIndeks) -> set[int]:
+    """
+    VKN/TC: kayıtlı VKN/TC sayısı digit_hay üzerindeki kayan pencere sayısından azsa
+    ters tarama (her VKN için 'in digit_hay') daha az iş yapar.
+    """
     out: set[int] = set()
     if hay:
         for t in _hay_tokens_for_index(hay):
@@ -185,18 +208,32 @@ def _aday_musteri_idleri(hay: str, digit_hay: str, idx: AkbankMusteriIndeks) -> 
                 out |= s
     dh = digit_hay
     ln = len(dh)
-    if ln >= 10:
-        for i in range(ln - 9):
-            sub = dh[i : i + 10]
-            s = idx.vkn_to_cids.get(sub)
-            if s:
-                out |= s
-    if ln >= 11:
-        for i in range(ln - 10):
-            sub = dh[i : i + 11]
-            s = idx.tc_to_cids.get(sub)
-            if s:
-                out |= s
+    win10 = max(0, ln - 9)
+    win11 = max(0, ln - 10)
+    nv = len(idx.vkn_to_cids)
+    nt = len(idx.tc_to_cids)
+    if ln >= 10 and nv:
+        if nv < win10:
+            for sub, s in idx.vkn_to_cids.items():
+                if sub in dh:
+                    out |= s
+        else:
+            for i in range(win10):
+                sub = dh[i : i + 10]
+                s = idx.vkn_to_cids.get(sub)
+                if s:
+                    out |= s
+    if ln >= 11 and nt:
+        if nt < win11:
+            for sub, s in idx.tc_to_cids.items():
+                if sub in dh:
+                    out |= s
+        else:
+            for i in range(win11):
+                sub = dh[i : i + 11]
+                s = idx.tc_to_cids.get(sub)
+                if s:
+                    out |= s
     return out
 
 
@@ -205,7 +242,7 @@ def _eslestir_musteri_cekirdek(
     digit_hay: str,
     must_map: dict[int, dict[str, Any]],
     id_sirasi: list[int],
-    musteriler: list[dict[str, Any]],
+    hay_words: frozenset[str],
 ) -> dict[str, Any]:
     """Verilen müşteri id listesi üzerinde tam skor (sıra korunur)."""
     per_id: dict[int, tuple[int, int, str]] = {}
@@ -213,7 +250,7 @@ def _eslestir_musteri_cekirdek(
         c = must_map.get(cid)
         if c is None:
             continue
-        sig = _musteri_en_iyi_sinyal(c, hay, digit_hay)
+        sig = _musteri_en_iyi_sinyal(c, hay, digit_hay, hay_words)
         if sig is not None:
             per_id[cid] = sig
     if not per_id:
@@ -223,21 +260,17 @@ def _eslestir_musteri_cekirdek(
             "musteri_label": None,
             "candidates": [],
         }
+    vkn_sort = {cid: _vkn_in_aciklama(must_map[cid], digit_hay) for cid in per_id}
     ranked = sorted(
         per_id.items(),
-        key=lambda x: (
-            x[1][0],
-            -x[1][1],
-            -_vkn_in_aciklama(must_map.get(x[0], {}), digit_hay),
-            x[0],
-        ),
+        key=lambda x: (x[1][0], -x[1][1], -vkn_sort[x[0]], x[0]),
     )
     top_id, (top_pri, top_score, top_label) = ranked[0]
     cands = [
         {
             "id": i,
             "label": t[2],
-            "name": next((str(m.get("name") or "") for m in musteriler if int(m.get("id") or 0) == i), ""),
+            "name": str(must_map.get(i, {}).get("name") or ""),
         }
         for i, t in ranked[:12]
     ]
@@ -249,7 +282,7 @@ def _eslestir_musteri_cekirdek(
     }
 
 
-def _best_unvan_match(raw: str, hay: str) -> tuple[int, str] | None:
+def _best_unvan_match(raw: str, hay: str, hay_words: frozenset[str]) -> tuple[int, str] | None:
     """
     Şirket ünvanı: tam ifade VEYA en az 2 anlamlı (genel olmayan) kelime dekontta kelime olarak,
     VEYA ünvanda anlamlı tek token kaldıysa (ör. OFİSBİR A.Ş.),
@@ -263,7 +296,6 @@ def _best_unvan_match(raw: str, hay: str) -> tuple[int, str] | None:
     if len(full) >= _MIN_PHRASE_LEN and full in hay:
         return (len(full), raw)
 
-    hay_words = frozenset(w for w in hay.split() if w)
     tokens = [t for t in full.split() if len(t) >= _MIN_TOKEN_LEN and t not in _TOKEN_STOP]
     ng = [t for t in tokens if t not in _GENERIC_WORD]
     hit = [t for t in ng if t in hay_words]
@@ -277,7 +309,7 @@ def _best_unvan_match(raw: str, hay: str) -> tuple[int, str] | None:
     return None
 
 
-def _best_kisi_adi_match(raw: str, hay: str) -> tuple[int, str] | None:
+def _best_kisi_adi_match(raw: str, hay: str, hay_words: frozenset[str]) -> tuple[int, str] | None:
     """
     Müşteri adı / yetkili: tam ifade VEYA en az 2 anlamlı kelime aynı anda dekontta.
     Tek kelime (soyad çakışması: ADEM DOGAN vs EBRU … DOĞAN) ile eşleşme yapılmaz.
@@ -289,7 +321,6 @@ def _best_kisi_adi_match(raw: str, hay: str) -> tuple[int, str] | None:
     if len(full) >= _MIN_PHRASE_LEN and full in hay:
         return (len(full), raw)
 
-    hay_words = frozenset(w for w in hay.split() if w)
     tokens = [t for t in full.split() if len(t) >= _MIN_TOKEN_LEN and t not in _TOKEN_STOP]
     ng = [t for t in tokens if t not in _GENERIC_WORD]
     hit = [t for t in ng if t in hay_words]
@@ -413,10 +444,16 @@ def col(df: pd.DataFrame, *names: str) -> str | None:
     return None
 
 
+@lru_cache(maxsize=8192)
+def _digits_only_str(s: str) -> str:
+    return "".join(ch for ch in s if ch.isdigit())
+
+
 def _digits_only(s: object) -> str:
-    return "".join(ch for ch in str(s or "") if ch.isdigit())
+    return _digits_only_str(str(s or ""))
 
 
+@lru_cache(maxsize=8192)
 def _digit_haystack(aciklama: str) -> str:
     """Açıklamadaki tüm rakamlar (VKN/TCKN alt dizisi kontrolü için)."""
     return "".join(ch for ch in str(aciklama or "") if ch.isdigit())
@@ -429,7 +466,12 @@ _PRI_VERGI = 3
 _PRI_TC = 4
 
 
-def _musteri_en_iyi_sinyal(c: dict[str, Any], hay: str, digit_hay: str) -> tuple[int, int, str] | None:
+def _musteri_en_iyi_sinyal(
+    c: dict[str, Any],
+    hay: str,
+    digit_hay: str,
+    hay_words: frozenset[str],
+) -> tuple[int, int, str] | None:
     """
     Tek müşteri için (öncelik, skor, etiket) veya eşleşme yoksa None.
     Öncelik düşük = güçlü; skor = eşleşme uzunluğu (aynı öncelikte büyük olan kazanır).
@@ -446,7 +488,7 @@ def _musteri_en_iyi_sinyal(c: dict[str, Any], hay: str, digit_hay: str) -> tuple
     # 1) Şirket ünvanı (KYC) — tam metin veya güçlü kelime parçaları
     unvan = (c.get("sirket_unvani") or "").strip()
     if len(unvan) >= _MIN_PHRASE_LEN:
-        hit = _best_unvan_match(unvan, hay)
+        hit = _best_unvan_match(unvan, hay, hay_words)
         if hit:
             consider(_PRI_UNVAN, hit[0], hit[1])
 
@@ -461,7 +503,7 @@ def _musteri_en_iyi_sinyal(c: dict[str, Any], hay: str, digit_hay: str) -> tuple
         nl = norm_loose(raw)
         if len(nl) < _MIN_PHRASE_LEN or nl in seen_loose:
             continue
-        hit = _best_kisi_adi_match(raw, hay)
+        hit = _best_kisi_adi_match(raw, hay, hay_words)
         if hit:
             seen_loose.add(nl)
             consider(_PRI_MUSTERI_ADI, hit[0], hit[1])
@@ -488,8 +530,10 @@ def eslestir_musteri(
     Açıklamada geçen bilgileri müşteri kartı (KYC + customers) ile eşleştirir.
     indeks verilirse önce token/VKN-TC aday kümesinde arar (toplu önizlemede çok daha hızlı).
     """
-    hay = norm_loose(aciklama)
-    digit_hay = _digit_haystack(aciklama)
+    acik = str(aciklama or "")
+    hay = norm_loose(acik)
+    digit_hay = _digit_haystack(acik)
+    hay_words = frozenset(w for w in hay.split() if w)
     if not hay and not digit_hay:
         return {
             "status": "unknown",
@@ -513,14 +557,14 @@ def eslestir_musteri(
     if indeks is not None:
         cand = _aday_musteri_idleri(hay, digit_hay, indeks)
         if cand:
-            r = _eslestir_musteri_cekirdek(hay, digit_hay, indeks.must_map, sorted(cand), musteriler)
+            r = _eslestir_musteri_cekirdek(hay, digit_hay, indeks.must_map, sorted(cand), hay_words)
             if r["status"] == "matched":
                 return r
         _, ids_all = _id_list_tumu()
-        return _eslestir_musteri_cekirdek(hay, digit_hay, indeks.must_map, ids_all, musteriler)
+        return _eslestir_musteri_cekirdek(hay, digit_hay, indeks.must_map, ids_all, hay_words)
 
     mm, ids_all = _id_list_tumu()
-    return _eslestir_musteri_cekirdek(hay, digit_hay, mm, ids_all, musteriler)
+    return _eslestir_musteri_cekirdek(hay, digit_hay, mm, ids_all, hay_words)
 
 
 def dataframe_hareket_satirlari(df: pd.DataFrame) -> tuple[list[dict[str, Any]], dict[str, int]]:
@@ -611,13 +655,12 @@ def ham_tahsilatta_olanlari_cikar(
     return out, cik
 
 
-def onizleme_satirlari(
-    ham_satirlar: list[dict[str, Any]],
-    musteriler: list[dict[str, Any]],
-    mevcut_refler: set[str],
-    manual_by_key: dict[str, int] | None = None,
-) -> list[dict[str, Any]]:
-    manual_by_key = manual_by_key or {}
+# --- Çok çekirdekli önizleme (ProcessPool, spawn; Windows + Gunicorn uyumlu) ---
+_ONIZLEME_MP_STATE: tuple[list[dict[str, Any]], AkbankMusteriIndeks, dict[int, dict[str, Any]], dict[str, int]] | None = None
+
+
+def _onizleme_mp_init(musteriler: list[dict[str, Any]], manual_by_key: dict[str, int]) -> None:
+    global _ONIZLEME_MP_STATE
     must_by_id: dict[int, dict[str, Any]] = {}
     for c in musteriler:
         try:
@@ -625,44 +668,153 @@ def onizleme_satirlari(
         except (TypeError, ValueError):
             continue
     indeks = build_akbank_musteri_indeks(musteriler)
-    out = []
-    for r in ham_satirlar:
-        ref = str(r.get("banka_referans_no") or "").strip()
-        dup = ref in mevcut_refler
-        sk = akbank_sender_key(r.get("aciklama") or "")
-        mid_man = manual_by_key.get(sk) if sk else None
-        mid_int: int | None = None
-        if mid_man is not None:
+    _ONIZLEME_MP_STATE = (musteriler, indeks, must_by_id, dict(manual_by_key))
+
+
+def _onizleme_mp_worker_chunk(
+    ham_chunk: list[dict[str, Any]],
+    mevcut_refler: set[str],
+) -> list[dict[str, Any]]:
+    global _ONIZLEME_MP_STATE
+    if _ONIZLEME_MP_STATE is None:
+        return []
+    musteriler, indeks, must_by_id, manual_by_key = _ONIZLEME_MP_STATE
+    return [
+        _onizleme_satir_tek(r, must_by_id, indeks, musteriler, mevcut_refler, manual_by_key)
+        for r in ham_chunk
+    ]
+
+
+def _onizleme_worker_count(n_rows: int) -> int:
+    """İşçi sayısı: varsayılan tüm CPU; AKBANK_ONIZLEME_PROCESSES=1 → 1 (paralel kapalı)."""
+    raw = os.environ.get("AKBANK_ONIZLEME_PROCESSES", "").strip().lower()
+    if raw == "1" or raw == "off" or raw == "false":
+        return 1
+    cpu = os.cpu_count() or 1
+    if raw and raw not in ("0", "auto", ""):
+        try:
+            w = max(1, int(raw))
+        except ValueError:
+            w = cpu
+    else:
+        w = cpu
+    cap_s = os.environ.get("AKBANK_ONIZLEME_MAX_WORKERS", "").strip()
+    if cap_s.isdigit():
+        w = min(w, max(1, int(cap_s)))
+    return max(1, min(w, max(1, n_rows)))
+
+
+def _onizleme_satir_tek(
+    r: dict[str, Any],
+    must_by_id: dict[int, dict[str, Any]],
+    indeks: AkbankMusteriIndeks,
+    musteriler: list[dict[str, Any]],
+    mevcut_refler: set[str],
+    manual_by_key: dict[str, int],
+) -> dict[str, Any]:
+    ref = str(r.get("banka_referans_no") or "").strip()
+    dup = ref in mevcut_refler
+    sk = akbank_sender_key(r.get("aciklama") or "")
+    mid_man = manual_by_key.get(sk) if sk else None
+    mid_int: int | None = None
+    if mid_man is not None:
+        try:
+            mid_int = int(mid_man)
+        except (TypeError, ValueError):
+            mid_int = None
+    c_man = must_by_id.get(mid_int) if mid_int is not None else None
+    if c_man is not None:
+        lab = _musteri_kart_etiketi(c_man)
+        em = {
+            "status": "matched",
+            "musteri_id": mid_int,
+            "musteri_label": lab,
+            "candidates": [{"id": mid_int, "label": lab, "name": str(c_man.get("name") or "")}],
+            "kaynak": "manuel_hatirlat",
+        }
+    else:
+        em = {**eslestir_musteri(r.get("aciklama") or "", musteriler, indeks), "kaynak": "otomatik"}
+    if dup:
+        ui_status = "duplicate"
+    elif em["status"] == "matched":
+        ui_status = "matched"
+    elif em["status"] == "ambiguous":
+        ui_status = "ambiguous"
+    else:
+        ui_status = "unknown"
+    return {
+        **r,
+        "eslestirme": em,
+        "sender_key": sk,
+        "ui_status": ui_status,
+        "musteri_id_oneri": em.get("musteri_id"),
+        "musteri_label_oneri": em.get("musteri_label"),
+    }
+
+
+def onizleme_satirlari(
+    ham_satirlar: list[dict[str, Any]],
+    musteriler: list[dict[str, Any]],
+    mevcut_refler: set[str],
+    manual_by_key: dict[str, int] | None = None,
+) -> list[dict[str, Any]]:
+    manual_by_key = manual_by_key or {}
+    n = len(ham_satirlar)
+    if n == 0:
+        return []
+
+    min_rows = max(8, int(os.environ.get("AKBANK_ONIZLEME_MIN_ROWS", "32")))
+    workers = _onizleme_worker_count(n)
+
+    if workers < 2 or n < min_rows:
+        must_by_id: dict[int, dict[str, Any]] = {}
+        for c in musteriler:
             try:
-                mid_int = int(mid_man)
+                must_by_id[int(c.get("id"))] = c
             except (TypeError, ValueError):
-                mid_int = None
-        c_man = must_by_id.get(mid_int) if mid_int is not None else None
-        if c_man is not None:
-            lab = _musteri_kart_etiketi(c_man)
-            em = {
-                "status": "matched",
-                "musteri_id": mid_int,
-                "musteri_label": lab,
-                "candidates": [{"id": mid_int, "label": lab, "name": str(c_man.get("name") or "")}],
-                "kaynak": "manuel_hatirlat",
-            }
-        else:
-            em = {**eslestir_musteri(r.get("aciklama") or "", musteriler, indeks), "kaynak": "otomatik"}
-        if dup:
-            ui_status = "duplicate"
-        elif em["status"] == "matched":
-            ui_status = "matched"
-        elif em["status"] == "ambiguous":
-            ui_status = "ambiguous"
-        else:
-            ui_status = "unknown"
-        out.append({
-            **r,
-            "eslestirme": em,
-            "sender_key": sk,
-            "ui_status": ui_status,
-            "musteri_id_oneri": em.get("musteri_id"),
-            "musteri_label_oneri": em.get("musteri_label"),
-        })
+                continue
+        indeks = build_akbank_musteri_indeks(musteriler)
+        out = [
+            _onizleme_satir_tek(r, must_by_id, indeks, musteriler, mevcut_refler, manual_by_key)
+            for r in ham_satirlar
+        ]
+    else:
+        chunk_sz = max(1, (n + workers - 1) // workers)
+        chunks: list[list[dict[str, Any]]] = [
+            ham_satirlar[i : i + chunk_sz] for i in range(0, n, chunk_sz)
+        ]
+        import multiprocessing
+
+        ctx = multiprocessing.get_context("spawn")
+        with ctx.Pool(
+            processes=min(workers, len(chunks)),
+            initializer=_onizleme_mp_init,
+            initargs=(musteriler, manual_by_key),
+        ) as pool:
+            parts: list[list[dict[str, Any]]] = pool.starmap(
+                _onizleme_mp_worker_chunk,
+                [(ch, mevcut_refler) for ch in chunks],
+            )
+        out = []
+        for p in parts:
+            out.extend(p)
+
+    try:
+        from services.embedding_akbank_prototype import (
+            augment_preview_rows_with_embeddings,
+            embed_candidate_cap,
+            embed_prototype_enabled,
+            embed_prototype_max_rows,
+        )
+
+        if embed_prototype_enabled():
+            augment_preview_rows_with_embeddings(
+                out,
+                musteriler,
+                max_rows=embed_prototype_max_rows(),
+                candidate_cap=embed_candidate_cap(),
+            )
+    except Exception as e:
+        _log_ak.warning("AKBANK embedding prototype: %s", e)
+
     return out
