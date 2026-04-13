@@ -43,6 +43,15 @@ def _torch_cuda_summary() -> dict[str, Any]:
     return out
 
 
+def onnxruntime_import_ok() -> bool:
+    try:
+        import onnxruntime  # noqa: F401
+
+        return True
+    except Exception:
+        return False
+
+
 def _onnx_available_providers() -> list[str]:
     try:
         import onnxruntime as ort
@@ -57,6 +66,8 @@ def preferred_onnx_providers() -> list[str]:
     ONNX Runtime sağlayıcı sırası: CUDA → DirectML → OpenVINO → CPU.
     ORT_PREFERRED veya USE_* ile zorlanabilir.
     """
+    if not onnxruntime_import_ok():
+        return []
     avail = set(_onnx_available_providers())
     if not avail:
         return ["CPUExecutionProvider"]
@@ -126,10 +137,12 @@ def create_onnx_inference_session(
 
 def accelerator_summary() -> dict[str, Any]:
     """Teşhis / API için özet (şifre veya model yolu içermez)."""
-    onnx_p = _onnx_available_providers()
+    ort_ok = onnxruntime_import_ok()
+    onnx_p = _onnx_available_providers() if ort_ok else []
     return {
+        "onnxruntime_installed": ort_ok,
         "onnxruntime_providers": onnx_p,
-        "preferred_onnx_order": preferred_onnx_providers(),
+        "preferred_onnx_order": preferred_onnx_providers() if ort_ok else [],
         "torch_cuda": _torch_cuda_summary(),
     }
 
@@ -138,11 +151,11 @@ def log_startup_accelerators() -> None:
     """Uygulama açılışında bir kez (log + konsol; yerel MSI testinde görünür)."""
     try:
         s = accelerator_summary()
-        line = (
-            f"[compute] ONNX: {s.get('onnxruntime_providers')} | "
-            f"tercih: {s.get('preferred_onnx_order')} | "
-            f"torch_cuda: {s.get('torch_cuda')}"
-        )
+        if not s.get("onnxruntime_installed"):
+            ort_hint = "onnxruntime yüklü değil (pip install onnxruntime veya requirements-embedding-prototype.txt)"
+        else:
+            ort_hint = f"sağlayıcılar={s.get('onnxruntime_providers')} tercih={s.get('preferred_onnx_order')}"
+        line = f"[compute] ONNX: {ort_hint} | torch_cuda: {s.get('torch_cuda')}"
         print(line)
         _log.info(line)
     except Exception as e:

@@ -5,7 +5,8 @@ Bir kerelik ONNX dışa aktarma (çok dilli MiniLM, Türkçe dekont metni için 
 Kurulum:
   pip install optimum[onnxruntime] transformers torch
 
-Çalıştır (erp_web klasöründen):
+Çalıştır (PowerShell’de proje kökü değil, mutlaka erp_web klasöründen — iç içe cd erp_web yapma):
+  cd "...\BestOfficeERP\erp_web"
   python scripts/export_multilingual_minilm_onnx.py
 
 Çıktı:
