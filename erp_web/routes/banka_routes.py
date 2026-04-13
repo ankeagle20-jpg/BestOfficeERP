@@ -3,8 +3,14 @@ Bankalar: hesap dökümü, ekstre yükleme, tahsilat eşleştirme, masraf takibi
 """
 from flask import Blueprint, render_template, request, jsonify, redirect, url_for
 from auth import giris_gerekli, admin_gerekli
-from db import fetch_all, fetch_one, execute, execute_returning
-from utils.musteri_arama import customers_arama_sql_3, customers_arama_params_4
+from db import fetch_all, fetch_one, execute, execute_returning, db
+from services.banka_ak_import import (
+    akbank_sender_key,
+    dataframe_hareket_satirlari,
+    onizleme_satirlari,
+    read_akbank_excel,
+)
+from utils.musteri_arama import customers_arama_sql_giris_genis, customers_arama_params_giris_genis
 from datetime import datetime, date
 
 bp = Blueprint("banka", __name__)
@@ -114,10 +120,10 @@ def api_musteri_ara():
     q = (request.args.get("q") or "").strip()[:80]
     if not q:
         return jsonify([])
-    w3 = customers_arama_sql_3("")
+    w3 = customers_arama_sql_giris_genis("")
     rows = fetch_all(
         f"SELECT id, name, musteri_adi FROM customers WHERE {w3} ORDER BY name LIMIT 30",
-        customers_arama_params_4(q),
+        customers_arama_params_giris_genis(q),
     )
     return jsonify(rows or [])
 
@@ -508,3 +514,275 @@ def api_hesap_kaydet():
         return jsonify({"ok": True, "id": row["id"]})
     except Exception as e:
         return jsonify({"ok": False, "mesaj": str(e)}), 400
+
+
+def _ensure_tahsilat_banka_referans_no():
+    try:
+        execute("ALTER TABLE tahsilatlar ADD COLUMN IF NOT EXISTS banka_referans_no TEXT")
+    except Exception:
+        pass
+
+
+def _ensure_akbank_dekont_musteri_map():
+    """Manuel seçilen dekont gönderici anahtarı → müşteri (sonraki Excel analizlerinde öncelik)."""
+    try:
+        execute(
+            """
+            CREATE TABLE IF NOT EXISTS akbank_dekont_musteri_map (
+                sender_key TEXT PRIMARY KEY,
+                musteri_id INTEGER NOT NULL,
+                ornek_aciklama TEXT,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+    except Exception:
+        pass
+    try:
+        execute(
+            "CREATE INDEX IF NOT EXISTS ix_akbank_dekont_map_musteri ON akbank_dekont_musteri_map (musteri_id)"
+        )
+    except Exception:
+        pass
+
+
+@bp.route("/akbank-tahsilat-import", strict_slashes=False)
+@giris_gerekli
+def akbank_tahsilat_import_sayfa():
+    """Akbank Excel → önizleme, müşteri eşleştirme, onaylı tahsilat kaydı."""
+    return render_template("bankalar/akbank_tahsilat_import.html")
+
+
+@bp.route("/api/akbank-tahsilat/analyze", methods=["POST"])
+@giris_gerekli
+def api_akbank_tahsilat_analyze():
+    """Aşama 1: Excel yükle, DB’ye yazma; eşleştirme + mükerrer işaretle."""
+    f = request.files.get("file")
+    if not f or not getattr(f, "filename", ""):
+        return jsonify({"ok": False, "mesaj": "Excel dosyası seçin (.xlsx)."}), 400
+    if not str(f.filename).lower().endswith((".xlsx", ".xls")):
+        return jsonify({"ok": False, "mesaj": "Yalnızca .xlsx / .xls desteklenir."}), 400
+    try:
+        raw = f.read()
+        df = read_akbank_excel(raw)
+        ham, ozet = dataframe_hareket_satirlari(df)
+    except ValueError as e:
+        return jsonify({"ok": False, "mesaj": str(e)}), 400
+    except Exception as e:
+        return jsonify({"ok": False, "mesaj": f"Excel okunamadı: {e}"}), 400
+
+    _ensure_tahsilat_banka_referans_no()
+    _ensure_akbank_dekont_musteri_map()
+    try:
+        musteriler = fetch_all(
+            """
+            SELECT c.id,
+                   c.name,
+                   COALESCE(c.musteri_adi, '') AS musteri_adi,
+                   COALESCE(c.tax_number, '') AS tax_number,
+                   COALESCE(
+                       NULLIF(TRIM(k.sirket_unvani), ''),
+                       NULLIF(TRIM(k.unvan), ''),
+                       ''
+                   ) AS sirket_unvani,
+                   COALESCE(NULLIF(TRIM(k.vergi_no), ''), '') AS kyc_vergi_no,
+                   COALESCE(NULLIF(TRIM(k.yetkili_tcno), ''), '') AS yetkili_tcno,
+                   COALESCE(NULLIF(TRIM(k.yetkili_adsoyad), ''), '') AS yetkili_adsoyad
+            FROM customers c
+            LEFT JOIN LATERAL (
+                SELECT sirket_unvani, unvan, vergi_no, yetkili_tcno, yetkili_adsoyad
+                FROM musteri_kyc
+                WHERE musteri_id = c.id
+                ORDER BY id DESC NULLS LAST
+                LIMIT 1
+            ) k ON TRUE
+            ORDER BY COALESCE(c.name, '')
+            """
+        ) or []
+    except Exception:
+        musteriler = fetch_all(
+            """SELECT id, name, COALESCE(musteri_adi, '') AS musteri_adi,
+                      COALESCE(tax_number, '') AS tax_number,
+                      '' AS sirket_unvani, '' AS kyc_vergi_no, '' AS yetkili_tcno, '' AS yetkili_adsoyad
+               FROM customers ORDER BY COALESCE(name, '')"""
+        ) or []
+    refs = [str(r.get("banka_referans_no") or "").strip() for r in ham if r.get("banka_referans_no")]
+    refs_u = list(dict.fromkeys(refs))
+    mevcut: set[str] = set()
+    if refs_u:
+        rows = fetch_all(
+            "SELECT banka_referans_no FROM tahsilatlar WHERE banka_referans_no IN %s",
+            (tuple(refs_u),),
+        )
+        mevcut = {str(x["banka_referans_no"]) for x in (rows or []) if x.get("banka_referans_no")}
+
+    keys_u = list(dict.fromkeys(akbank_sender_key(r.get("aciklama") or "") for r in ham))
+    keys_u = [k for k in keys_u if k]
+    manual_by_key: dict[str, int] = {}
+    if keys_u:
+        try:
+            map_rows = fetch_all(
+                "SELECT sender_key, musteri_id FROM akbank_dekont_musteri_map WHERE sender_key IN %s",
+                (tuple(keys_u),),
+            )
+            for mr in map_rows or []:
+                sk = str(mr.get("sender_key") or "")
+                if not sk:
+                    continue
+                try:
+                    manual_by_key[sk] = int(mr["musteri_id"])
+                except (TypeError, ValueError, KeyError):
+                    continue
+        except Exception:
+            manual_by_key = {}
+
+    satirlar = onizleme_satirlari(ham, musteriler, mevcut, manual_by_key)
+    return jsonify({"ok": True, "ozet": ozet, "satirlar": satirlar})
+
+
+@bp.route("/api/akbank-tahsilat/musteriler")
+@giris_gerekli
+def api_akbank_tahsilat_musteriler():
+    """Manuel seçim için arama — giriş / müşteri kartı ile aynı geniş alan araması (min 2 karakter)."""
+    q = (request.args.get("q") or "").strip()
+    if len(q) < 2:
+        return jsonify([])
+    w3 = customers_arama_sql_giris_genis("c")
+    rows = fetch_all(
+        f"""SELECT c.id, c.name, COALESCE(c.musteri_adi, '') AS musteri_adi,
+                   COALESCE(NULLIF(TRIM(k.sirket_unvani), ''), NULLIF(TRIM(k.unvan), ''), '') AS sirket_unvani
+            FROM customers c
+            LEFT JOIN LATERAL (
+                SELECT sirket_unvani, unvan FROM musteri_kyc WHERE musteri_id = c.id ORDER BY id DESC NULLS LAST LIMIT 1
+            ) k ON TRUE
+            WHERE {w3}
+            ORDER BY c.name NULLS LAST
+            LIMIT 50""",
+        customers_arama_params_giris_genis(q),
+    )
+    return jsonify(rows or [])
+
+
+@bp.route("/api/akbank-tahsilat/gonderici-kaydet", methods=["POST"])
+@giris_gerekli
+def api_akbank_tahsilat_gonderici_kaydet():
+    """Manuel müşteri seçimini tahsilat kaydı olmadan kalıcılaştırır (sonraki Excel analizinde önerilir)."""
+    data = request.get_json(silent=True) or {}
+    aciklama = (data.get("aciklama") or "").strip()
+    try:
+        mid = int(data.get("musteri_id"))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "mesaj": "Geçersiz müşteri."}), 400
+    if not aciklama:
+        return jsonify({"ok": False, "mesaj": "Açıklama gerekli."}), 400
+    sk = akbank_sender_key(aciklama)
+    if not sk:
+        return jsonify({"ok": False, "mesaj": "Bu açıklamadan gönderici anahtarı çıkarılamadı."}), 400
+    if not fetch_one("SELECT id FROM customers WHERE id = %s LIMIT 1", (mid,)):
+        return jsonify({"ok": False, "mesaj": "Müşteri bulunamadı."}), 400
+    _ensure_akbank_dekont_musteri_map()
+    try:
+        execute(
+            """
+            INSERT INTO akbank_dekont_musteri_map (sender_key, musteri_id, ornek_aciklama, updated_at)
+            VALUES (%s, %s, %s, NOW())
+            ON CONFLICT (sender_key) DO UPDATE SET
+                musteri_id = EXCLUDED.musteri_id,
+                ornek_aciklama = EXCLUDED.ornek_aciklama,
+                updated_at = NOW()
+            """,
+            (sk, mid, aciklama[:2000]),
+        )
+    except Exception as e:
+        return jsonify({"ok": False, "mesaj": str(e)}), 400
+    return jsonify({"ok": True, "sender_key": sk})
+
+
+@bp.route("/api/akbank-tahsilat/commit", methods=["POST"])
+@giris_gerekli
+def api_akbank_tahsilat_commit():
+    """Aşama 2: Onaylanan satırları tahsilatlar tablosuna yazar."""
+    data = request.get_json(silent=True) or {}
+    items = data.get("satirlar")
+    if not isinstance(items, list) or not items:
+        return jsonify({"ok": False, "mesaj": "Kaydedilecek satır yok."}), 400
+
+    _ensure_tahsilat_banka_referans_no()
+    _ensure_akbank_dekont_musteri_map()
+    eklendi = 0
+    atlandi = 0
+    hatalar: list[str] = []
+
+    with db() as conn:
+        cur = conn.cursor()
+        for it in items:
+            if not it.get("onay"):
+                continue
+            ref = str(it.get("banka_referans_no") or "").strip()
+            if not ref:
+                atlandi += 1
+                continue
+            try:
+                mid = int(it.get("musteri_id"))
+            except (TypeError, ValueError):
+                atlandi += 1
+                hatalar.append(f"Ref {ref}: geçersiz müşteri.")
+                continue
+            try:
+                tutar = float(it.get("tutar"))
+            except (TypeError, ValueError):
+                atlandi += 1
+                continue
+            if tutar <= 0:
+                atlandi += 1
+                continue
+            aciklama = (it.get("aciklama") or "").strip() or "Banka tahsilat"
+            tah_str = (it.get("tahsilat_tarihi") or it.get("tarih") or "")[:10]
+            if len(tah_str) < 10:
+                atlandi += 1
+                continue
+            cur.execute(
+                "SELECT 1 FROM tahsilatlar WHERE banka_referans_no = %s LIMIT 1",
+                (ref,),
+            )
+            if cur.fetchone():
+                atlandi += 1
+                hatalar.append(f"Ref {ref}: mükerrer (atlandı).")
+                continue
+            cur.execute(
+                "SELECT id FROM customers WHERE id = %s LIMIT 1",
+                (mid,),
+            )
+            if not cur.fetchone():
+                atlandi += 1
+                hatalar.append(f"Ref {ref}: müşteri yok (id={mid}).")
+                continue
+            cur.execute(
+                """INSERT INTO tahsilatlar (
+                    musteri_id, customer_id, fatura_id, tutar, odeme_turu,
+                    aciklama, tahsilat_tarihi, makbuz_no, banka_referans_no
+                ) VALUES (%s, NULL, NULL, %s, %s, %s, %s::date, NULL, %s)""",
+                (mid, round(tutar, 2), "havale", aciklama, tah_str, ref),
+            )
+            eklendi += 1
+            if it.get("manuel_musteri") and aciklama:
+                sk = akbank_sender_key(aciklama)
+                if sk:
+                    cur.execute(
+                        """
+                        INSERT INTO akbank_dekont_musteri_map (sender_key, musteri_id, ornek_aciklama, updated_at)
+                        VALUES (%s, %s, %s, NOW())
+                        ON CONFLICT (sender_key) DO UPDATE SET
+                            musteri_id = EXCLUDED.musteri_id,
+                            ornek_aciklama = EXCLUDED.ornek_aciklama,
+                            updated_at = NOW()
+                        """,
+                        (sk, mid, aciklama[:2000]),
+                    )
+
+    return jsonify({
+        "ok": True,
+        "eklendi": eklendi,
+        "atlandi": atlandi,
+        "uyarilar": hatalar[:30],
+    })

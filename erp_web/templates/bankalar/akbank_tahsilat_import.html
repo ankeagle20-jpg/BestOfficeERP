@@ -1,0 +1,606 @@
+{% extends "layout.html" %}
+
+{% block page_title %}Akbank Tahsilat Önizleme{% endblock %}
+
+{% block content %}
+<style>
+.ak-wrap { max-width: 1400px; margin: 0 auto; }
+.ak-head {
+    background: #0f2537;
+    padding: 14px 16px;
+    margin: -10px -10px 16px -10px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    justify-content: space-between;
+}
+.ak-head h2 { color: #4fc3f7; margin: 0; font-size: 17px; }
+.ak-toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.ak-toolbar input[type=file] { font-size: 13px; color: #b0bec5; }
+.ak-btn {
+    background: #00838f;
+    color: #fff;
+    border: none;
+    padding: 9px 18px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+}
+.ak-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.ak-btn.secondary { background: #37474f; }
+.ak-ozet {
+    font-size: 12px;
+    color: #90a4ae;
+    margin-bottom: 12px;
+    line-height: 1.5;
+}
+.ak-msg { padding: 10px 14px; border-radius: 4px; font-size: 13px; margin-bottom: 12px; display: none; }
+.ak-msg.err { display: block; background: #3e1a1a; color: #ffcdd2; border: 1px solid #b71c1c; }
+.ak-msg.ok { display: block; background: #1b3d2f; color: #a5d6a7; border: 1px solid #2e7d32; }
+.ak-scroll { overflow: auto; max-height: 62vh; border: 1px solid #1e3a50; border-radius: 4px; }
+.ak-grid {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+.ak-grid th {
+    position: sticky;
+    top: 0;
+    background: #006064;
+    color: #fff;
+    padding: 8px 6px;
+    text-align: left;
+    z-index: 1;
+}
+.ak-sort-th {
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+}
+.ak-sort-th:hover { background: #00796b; }
+.ak-sort-th .ak-sort-hint { color: #b2dfdb; font-size: 10px; font-weight: normal; margin-left: 4px; }
+th.ak-sort-num { text-align: right; }
+.ak-grid td { padding: 6px; border-bottom: 1px solid #263238; vertical-align: top; color: #eceff1; }
+.ak-grid tr.row-matched { background: rgba(46, 125, 50, 0.18); }
+.ak-grid tr.row-unknown { background: rgba(245, 127, 23, 0.15); }
+.ak-grid tr.row-ambiguous { background: rgba(255, 152, 0, 0.12); }
+.ak-grid tr.row-duplicate { background: rgba(183, 28, 28, 0.22); opacity: 0.95; }
+.badge { font-size: 10px; padding: 2px 6px; border-radius: 3px; white-space: nowrap; }
+.badge-matched { background: #2e7d32; color: #fff; }
+.badge-unknown { background: #f57c00; color: #111; }
+.badge-ambiguous { background: #ff8f00; color: #111; }
+.badge-dup { background: #c62828; color: #fff; }
+.ak-search-wrap { position: relative; min-width: 180px; }
+.ak-search-wrap input {
+    width: 100%;
+    padding: 5px 8px;
+    font-size: 11px;
+    border: 1px solid #455a64;
+    border-radius: 3px;
+    background: #102027;
+    color: #eceff1;
+}
+.ak-dd {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 100%;
+    margin-top: 2px;
+    max-height: 180px;
+    overflow-y: auto;
+    background: #1c2f3f;
+    border: 1px solid #37474f;
+    border-radius: 3px;
+    z-index: 5;
+    display: none;
+}
+.ak-dd.show { display: block; }
+.ak-dd div {
+    padding: 6px 8px;
+    cursor: pointer;
+    font-size: 11px;
+    border-bottom: 1px solid #263238;
+}
+.ak-dd div:hover { background: #2d4a5e; }
+.muted { color: #78909c; font-size: 11px; }
+.ak-filter-bar {
+    display: none;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px 14px;
+    margin-bottom: 10px;
+    padding: 10px 12px;
+    background: #132f3f;
+    border: 1px solid #1e3a50;
+    border-radius: 4px;
+    font-size: 13px;
+    color: #b0bec5;
+}
+.ak-filter-bar label { color: #80cbc4; font-weight: 600; }
+.ak-filter-bar input[type=text] {
+    flex: 1;
+    min-width: 200px;
+    max-width: 480px;
+    padding: 8px 10px;
+    font-size: 13px;
+    border: 1px solid #455a64;
+    border-radius: 4px;
+    background: #0d1f2d;
+    color: #eceff1;
+}
+.ak-filter-bar input[type=text]::placeholder { color: #546e7a; }
+#akFilterCount { font-size: 12px; }
+</style>
+
+<div class="ak-wrap">
+    <div class="ak-head">
+        <h2>Akbank Excel — Önizleme ve Onay</h2>
+        <div class="ak-toolbar">
+            <input type="file" id="akFile" accept=".xlsx,.xls" />
+            <button type="button" class="ak-btn" id="btnAnalyze">Analiz et</button>
+            <button type="button" class="ak-btn secondary" id="btnApproveAllMatched">Eşleşenleri onayla</button>
+            <button type="button" class="ak-btn" id="btnCommit" disabled>Onayla ve kaydet</button>
+            <a href="/bankalar/" class="ak-btn secondary" style="text-decoration:none;display:inline-block;">Bankalara dön</a>
+        </div>
+    </div>
+
+    <div id="akMsg" class="ak-msg"></div>
+    <div id="akOzet" class="ak-ozet"></div>
+
+    <div id="akFilterBar" class="ak-filter-bar">
+        <label for="akAciklamaFilter">Açıklama filtre</label>
+        <input type="text" id="akAciklamaFilter" placeholder="İsim, kelime, sayı… (açıklama içinde geçen)" autocomplete="off" />
+        <span id="akFilterCount"></span>
+    </div>
+
+    <div class="ak-scroll" id="akTableWrap" style="display:none;">
+        <table class="ak-grid" id="akGrid">
+            <thead>
+                <tr>
+                    <th style="width:36px;">Onay</th>
+                    <th>Durum</th>
+                    <th class="ak-sort-th" data-sort="tarih" title="Sırala">Tarih<span class="ak-sort-hint"></span></th>
+                    <th class="ak-sort-th ak-sort-num" data-sort="tutar" title="Sırala">Tutar<span class="ak-sort-hint"></span></th>
+                    <th>Fiş / Dekont</th>
+                    <th class="ak-sort-th" data-sort="aciklama" title="Sırala">Açıklama<span class="ak-sort-hint"></span></th>
+                    <th class="ak-sort-th" data-sort="musteri" title="Sırala">Müşteri<span class="ak-sort-hint"></span></th>
+                </tr>
+            </thead>
+            <tbody id="akTbody"></tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+(function () {
+    /* Sabit path: url_for bazen eski worker belleğinde endpoint bulamadığında BuildError vermesin */
+    const URL_ANALYZE = "/bankalar/api/akbank-tahsilat/analyze";
+    const URL_MUSTERI = "/bankalar/api/akbank-tahsilat/musteriler";
+    const URL_GONDERICI_KAYDET = "/bankalar/api/akbank-tahsilat/gonderici-kaydet";
+    const URL_COMMIT = "/bankalar/api/akbank-tahsilat/commit";
+
+    /* Tüm satırlar (analiz sonrası); onay / müşteri bu nesneler üzerinde */
+    let allRows = [];
+    /* Açıklama metninde içerir araması (boş = tümü) */
+    let aciklamaFilter = "";
+    /* sortState: key = sütun adı veya null; dir = 1 artan, -1 azalan */
+    let sortState = { key: null, dir: 1 };
+
+    document.addEventListener("click", function (ev) {
+        if (!ev.target.closest(".ak-search-wrap")) {
+            document.querySelectorAll(".ak-dd.show").forEach((d) => {
+                d.classList.remove("show");
+            });
+        }
+    });
+
+    function showMsg(text, ok) {
+        const el = document.getElementById("akMsg");
+        el.textContent = text || "";
+        el.className = "ak-msg " + (ok ? "ok" : "err");
+        el.style.display = text ? "block" : "none";
+    }
+
+    /** Manuel gönderici→müşteri eşlemesini DB’ye yazar (tahsilat onayı gerekmez). */
+    function gondericiEslestirmeyiKaydet(row, musteriId) {
+        const ac = (row.aciklama || "").trim();
+        if (!ac || !musteriId) return Promise.resolve({ ok: false });
+        return fetch(URL_GONDERICI_KAYDET, {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ aciklama: ac, musteri_id: musteriId }),
+        }).then(function (res) { return res.json(); });
+    }
+
+    function rowClass(st) {
+        if (st === "duplicate") return "row-duplicate";
+        if (st === "matched") return "row-matched";
+        if (st === "ambiguous") return "row-ambiguous";
+        return "row-unknown";
+    }
+
+    function badge(st) {
+        if (st === "duplicate") return '<span class="badge badge-dup">Mükerrer</span>';
+        if (st === "matched") return '<span class="badge badge-matched">Eşleşti</span>';
+        if (st === "ambiguous") return '<span class="badge badge-ambiguous">Belirsiz</span>';
+        return '<span class="badge badge-unknown">Bilinmiyor</span>';
+    }
+
+    function musteriLabel(r) {
+        const m = r.musteri_id;
+        if (!m) return "—";
+        const e = r.eslestirme || {};
+        if (e.musteri_label) return "#" + m + " · " + e.musteri_label;
+        return "#" + m;
+    }
+
+    function musteriHatirBadge(r) {
+        if (!r._gondericiMapKaydedildi) return "";
+        return " <span class=\"badge\" style=\"background:#00695c;color:#e0f2f1;font-size:9px;vertical-align:middle;\">Hatırlandı</span>";
+    }
+
+    function musteriSortKey(r) {
+        const m = r.musteri_id;
+        if (!m) return "\uFFFF";
+        const e = r.eslestirme || {};
+        const lab = (e.musteri_label || "").toLocaleLowerCase("tr");
+        return ("#" + m + " " + lab).toLocaleLowerCase("tr");
+    }
+
+    function cmpTarih(a, b) {
+        const ta = (a.tarih || "").slice(0, 10);
+        const tb = (b.tarih || "").slice(0, 10);
+        if (ta < tb) return -1;
+        if (ta > tb) return 1;
+        return 0;
+    }
+
+    function cmpTutar(a, b) {
+        const va = Number(a.tutar) || 0;
+        const vb = Number(b.tutar) || 0;
+        if (va < vb) return -1;
+        if (va > vb) return 1;
+        return 0;
+    }
+
+    function cmpAciklama(a, b) {
+        const va = (a.aciklama || "").toLocaleLowerCase("tr");
+        const vb = (b.aciklama || "").toLocaleLowerCase("tr");
+        return va.localeCompare(vb, "tr");
+    }
+
+    function cmpMusteri(a, b) {
+        return musteriSortKey(a).localeCompare(musteriSortKey(b), "tr");
+    }
+
+    function tieSira(a, b) {
+        const sa = Number(a.sira) || 0;
+        const sb = Number(b.sira) || 0;
+        return sa - sb;
+    }
+
+    function sortInPlace(list) {
+        if (!sortState.key || !list.length) return;
+        const k = sortState.key;
+        const d = sortState.dir;
+        const primary = k === "tarih" ? cmpTarih
+            : k === "tutar" ? cmpTutar
+            : k === "aciklama" ? cmpAciklama
+            : cmpMusteri;
+        list.sort((a, b) => {
+            let c = primary(a, b);
+            if (c !== 0) return c * d;
+            return tieSira(a, b);
+        });
+    }
+
+    function getDisplayRows() {
+        let list = allRows;
+        const q = aciklamaFilter.trim();
+        if (q) {
+            const ql = q.toLocaleLowerCase("tr");
+            list = allRows.filter((r) => (r.aciklama || "").toLocaleLowerCase("tr").includes(ql));
+        }
+        list = list.slice();
+        sortInPlace(list);
+        return list;
+    }
+
+    function updateSortHeaders() {
+        document.querySelectorAll("#akGrid thead th.ak-sort-th").forEach((th) => {
+            const key = th.getAttribute("data-sort");
+            const hint = th.querySelector(".ak-sort-hint");
+            if (!hint) return;
+            if (sortState.key === key) {
+                hint.textContent = sortState.dir === 1 ? "▲" : "▼";
+            } else {
+                hint.textContent = "";
+            }
+        });
+    }
+
+    document.querySelector("#akGrid thead").addEventListener("click", (ev) => {
+        const th = ev.target.closest("th.ak-sort-th");
+        if (!th) return;
+        const key = th.getAttribute("data-sort");
+        if (!key) return;
+        if (sortState.key === key) {
+            sortState.dir = -sortState.dir;
+        } else {
+            sortState.key = key;
+            sortState.dir = 1;
+        }
+        render();
+    });
+
+    function render() {
+        const tb = document.getElementById("akTbody");
+        const wrap = document.getElementById("akTableWrap");
+        const fbar = document.getElementById("akFilterBar");
+        const fcount = document.getElementById("akFilterCount");
+        if (!allRows.length) {
+            wrap.style.display = "none";
+            fbar.style.display = "none";
+            document.getElementById("btnCommit").disabled = true;
+            tb.innerHTML = "";
+            updateSortHeaders();
+            return;
+        }
+        fbar.style.display = "flex";
+        wrap.style.display = "block";
+        document.getElementById("btnCommit").disabled = false;
+        const displayRows = getDisplayRows();
+        const nAll = allRows.length;
+        const nDisp = displayRows.length;
+        const fq = aciklamaFilter.trim();
+        if (fq) {
+            fcount.textContent = "Toplam " + nAll + " satır · Filtre: " + nDisp + " eşleşme (\"" + fq + "\")";
+        } else {
+            fcount.textContent = "Toplam " + nAll + " satır gösteriliyor.";
+        }
+        updateSortHeaders();
+        if (!displayRows.length) {
+            tb.innerHTML = "<tr><td colspan=\"7\" style=\"padding:24px;text-align:center;color:#90a4ae;\">Bu metne uyan açıklama yok. Filtreyi temizleyin veya başka kelime deneyin.</td></tr>";
+            return;
+        }
+        tb.innerHTML = displayRows.map((r, i) => {
+            const dup = r.ui_status === "duplicate";
+            const canCheck = !dup && r.musteri_id;
+            const checked = r._onay && canCheck ? " checked" : "";
+            const dis = !canCheck ? " disabled" : "";
+            const mid = r.musteri_id || "";
+            return `
+<tr class="${rowClass(r.ui_status)}" data-i="${i}">
+  <td><input type="checkbox" class="ak-cb"${checked}${dis} /></td>
+  <td>${badge(r.ui_status)}</td>
+  <td>${(r.tarih || "").slice(0, 10)}</td>
+  <td style="text-align:right;">${Number(r.tutar).toLocaleString("tr-TR", { minimumFractionDigits: 2 })}</td>
+  <td style="font-family:monospace;font-size:11px;">${escapeHtml(r.banka_referans_no || "")}</td>
+  <td style="max-width:280px;word-break:break-word;">${escapeHtml(r.aciklama || "")}</td>
+  <td>
+    <div class="muted" id="ml-${i}">${escapeHtml(musteriLabel(r))}${musteriHatirBadge(r)}</div>
+    ${dup ? "" : `<div class="ak-search-wrap" data-i="${i}">
+      <input type="text" class="ak-mus-q" placeholder="Ara: ad, ünvan, tel, vergi no, adres… (min 2 harf)" autocomplete="off" />
+      <div class="ak-dd"></div>
+    </div>`}
+    <input type="hidden" class="ak-mid" value="${mid}" />
+  </td>
+</tr>`;
+        }).join("");
+
+        tb.querySelectorAll("tr").forEach((tr) => {
+            const i = parseInt(tr.dataset.i, 10);
+            const cb = tr.querySelector(".ak-cb");
+            if (cb) cb.addEventListener("change", () => { displayRows[i]._onay = cb.checked; });
+
+            const hid = tr.querySelector(".ak-mid");
+            const q = tr.querySelector(".ak-mus-q");
+            const dd = tr.querySelector(".ak-dd");
+            if (!q || !dd) return;
+
+            let tmr;
+            q.addEventListener("input", () => {
+                clearTimeout(tmr);
+                const term = q.value.trim();
+                dd.classList.remove("show");
+                dd.innerHTML = "";
+                if (term.length < 2) return;
+                tmr = setTimeout(async () => {
+                    try {
+                        const res = await fetch(URL_MUSTERI + "?q=" + encodeURIComponent(term), { credentials: "same-origin" });
+                        const list = await res.json();
+                        if (!Array.isArray(list) || !list.length) {
+                            dd.innerHTML = "<div style=\"cursor:default;color:#78909c;\">Sonuç yok</div>";
+                            dd.classList.add("show");
+                            return;
+                        }
+                        dd.innerHTML = list.map((c) => {
+                            const lab = (c.name || "") + (c.musteri_adi ? " · " + c.musteri_adi : "");
+                            const uv = (c.sirket_unvani || "").trim();
+                            const sub = uv
+                                ? `<div class="muted" style="margin-top:2px;line-height:1.2;">${escapeHtml(uv.length > 90 ? uv.slice(0, 90) + "…" : uv)}</div>`
+                                : "";
+                            return `<div data-id="${c.id}" data-lab="${escapeAttr(lab)}"><strong>#${c.id}</strong> ${escapeHtml(lab)}${sub}</div>`;
+                        }).join("");
+                        dd.classList.add("show");
+                        dd.querySelectorAll("[data-id]").forEach((div) => {
+                            div.addEventListener("mousedown", (ev) => {
+                                ev.preventDefault();
+                                const id = parseInt(div.dataset.id, 10);
+                                const lab = div.dataset.lab || "";
+                                displayRows[i]._manuelMusteri = true;
+                                displayRows[i].musteri_id = id;
+                                if (displayRows[i].eslestirme) {
+                                    displayRows[i].eslestirme.musteri_id = id;
+                                    displayRows[i].eslestirme.musteri_label = lab;
+                                } else {
+                                    displayRows[i].eslestirme = { musteri_id: id, musteri_label: lab };
+                                }
+                                hid.value = id;
+                                const ml = document.getElementById("ml-" + i);
+                                if (ml) {
+                                    ml.innerHTML = escapeHtml("#" + id + " · " + lab) + musteriHatirBadge({ _gondericiMapKaydedildi: false });
+                                }
+                                q.value = "";
+                                dd.classList.remove("show");
+                                dd.innerHTML = "";
+                                const cbx = tr.querySelector(".ak-cb");
+                                if (cbx) cbx.disabled = false;
+                                gondericiEslestirmeyiKaydet(displayRows[i], id).then(function (j) {
+                                    if (j && j.ok) {
+                                        displayRows[i]._gondericiMapKaydedildi = true;
+                                        if (ml) {
+                                            ml.innerHTML = escapeHtml("#" + id + " · " + lab) + musteriHatirBadge(displayRows[i]);
+                                        }
+                                        showMsg("Gönderici bu müşteriye bağlandı ve kaydedildi. Yeni Excel’de aynı gönderici otomatik bu müşteriyle gelecek.", true);
+                                    } else if (j && j.mesaj) {
+                                        showMsg(j.mesaj, false);
+                                    }
+                                }).catch(function () {
+                                    showMsg("Eşleşme kaydı gönderilemedi (ağ hatası).", false);
+                                });
+                            });
+                        });
+                    } catch (e) {
+                        console.error(e);
+                    }
+                }, 280);
+            });
+        });
+    }
+
+    function escapeHtml(s) {
+        if (!s) return "";
+        const d = document.createElement("div");
+        d.textContent = s;
+        return d.innerHTML;
+    }
+    function escapeAttr(s) {
+        return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+    }
+
+    function syncFromDom() {
+        const displayRows = getDisplayRows();
+        document.querySelectorAll("#akTbody tr").forEach((tr) => {
+            if (!tr.querySelector(".ak-cb")) return;
+            const i = parseInt(tr.dataset.i, 10);
+            if (i < 0 || i >= displayRows.length) return;
+            const hid = tr.querySelector(".ak-mid");
+            const cb = tr.querySelector(".ak-cb");
+            if (hid && hid.value) displayRows[i].musteri_id = parseInt(hid.value, 10);
+            if (cb) displayRows[i]._onay = cb.checked;
+        });
+    }
+
+    document.getElementById("btnAnalyze").addEventListener("click", async () => {
+        const inp = document.getElementById("akFile");
+        if (!inp.files || !inp.files[0]) {
+            showMsg("Önce .xlsx dosyasını seçin.", false);
+            return;
+        }
+        showMsg("", true);
+        document.getElementById("akOzet").textContent = "Yükleniyor…";
+        const fd = new FormData();
+        fd.append("file", inp.files[0]);
+        try {
+            const res = await fetch(URL_ANALYZE, { method: "POST", body: fd, credentials: "same-origin" });
+            const data = await res.json();
+            if (!data.ok) {
+                showMsg(data.mesaj || "Analiz başarısız.", false);
+                document.getElementById("akOzet").textContent = "";
+                allRows = [];
+                aciklamaFilter = "";
+                const fin = document.getElementById("akAciklamaFilter");
+                if (fin) fin.value = "";
+                sortState = { key: null, dir: 1 };
+                render();
+                return;
+            }
+            const oz = data.ozet || {};
+            document.getElementById("akOzet").textContent =
+                "Excel satırı: " + (oz.excel_satir || 0) +
+                " | İşlenen (Alacak): " + (oz.islenen || 0) +
+                " | A değil: " + (oz.a_degil || 0) +
+                " | Ref boş: " + (oz.ref_bos || 0) +
+                " | Tutar 0: " + (oz.tutar_sifir || 0) +
+                " | Tarih yok: " + (oz.tarih_yok || 0);
+            allRows = (data.satirlar || []).map((r) => {
+                const mid = r.musteri_id_oneri != null ? r.musteri_id_oneri : (r.eslestirme && r.eslestirme.musteri_id);
+                const es = r.eslestirme || {};
+                const hatirDb = es.kaynak === "manuel_hatirlat";
+                return Object.assign({}, r, {
+                    musteri_id: mid || null,
+                    _onay: r.ui_status === "matched",
+                    _manuelMusteri: false,
+                    _gondericiMapKaydedildi: !!hatirDb,
+                });
+            });
+            aciklamaFilter = "";
+            const fin = document.getElementById("akAciklamaFilter");
+            if (fin) fin.value = "";
+            sortState = { key: null, dir: 1 };
+            showMsg(allRows.length + " tahsilat satırı listelendi. Mükerrer satırlar kaydedilemez.", true);
+            render();
+        } catch (e) {
+            showMsg("Ağ hatası: " + e, false);
+            document.getElementById("akOzet").textContent = "";
+        }
+    });
+
+    document.getElementById("btnApproveAllMatched").addEventListener("click", () => {
+        allRows.forEach((r) => {
+            if (r.ui_status === "matched" && r.musteri_id) r._onay = true;
+        });
+        render();
+    });
+
+    document.getElementById("akAciklamaFilter").addEventListener("input", function () {
+        aciklamaFilter = this.value;
+        render();
+    });
+
+    document.getElementById("btnCommit").addEventListener("click", async () => {
+        syncFromDom();
+        const satirlar = allRows
+            .filter((r) => r._onay && r.musteri_id && r.ui_status !== "duplicate")
+            .map((r) => ({
+                onay: true,
+                banka_referans_no: r.banka_referans_no,
+                musteri_id: r.musteri_id,
+                tutar: r.tutar,
+                aciklama: r.aciklama,
+                tahsilat_tarihi: r.tarih,
+                manuel_musteri: !!r._manuelMusteri,
+            }));
+        if (!satirlar.length) {
+            showMsg("Kaydedilecek onaylı satır yok (müşteri seçili ve onaylı olmalı).", false);
+            return;
+        }
+        document.getElementById("btnCommit").disabled = true;
+        try {
+            const res = await fetch(URL_COMMIT, {
+                method: "POST",
+                credentials: "same-origin",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ satirlar }),
+            });
+            const data = await res.json();
+            document.getElementById("btnCommit").disabled = false;
+            if (!data.ok) {
+                showMsg(data.mesaj || "Kayıt başarısız.", false);
+                return;
+            }
+            let t = "Eklendi: " + (data.eklendi || 0) + ", atlandı: " + (data.atlandi || 0);
+            if (data.uyarilar && data.uyarilar.length) t += ". " + data.uyarilar.join(" ");
+            showMsg(t, true);
+            document.getElementById("btnAnalyze").click();
+        } catch (e) {
+            document.getElementById("btnCommit").disabled = false;
+            showMsg("Ağ hatası: " + e, false);
+        }
+    });
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,519 @@
+"""
+Akbank Excel → tahsilat önizleme / müşteri eşleştirme (web + CLI ortak).
+"""
+from __future__ import annotations
+
+import io
+import re
+import unicodedata
+from datetime import date, datetime
+from pathlib import Path
+from typing import Any
+
+import pandas as pd
+
+
+def norm_header(c: object) -> str:
+    s = str(c).strip().lower()
+    for a, b in (
+        ("ı", "i"),
+        ("ş", "s"),
+        ("ğ", "g"),
+        ("ü", "u"),
+        ("ö", "o"),
+        ("ç", "c"),
+    ):
+        s = s.replace(a, b)
+    s = re.sub(r"\s+", " ", s)
+    return s
+
+
+def norm_text(s: str) -> str:
+    """Geriye dönük: basit boşluk sıkıştırma (Excel sütunları vb.)."""
+    return re.sub(r"\s+", " ", str(s or "").lower().strip())
+
+
+def norm_text_fold(s: str) -> str:
+    """
+    Türkçe / Unicode tutarlılığı: İ→i birleşik nokta artığı yüzünden [^a-z0-9] ile
+    harf silinmesini önlemek için NFKD + birleşik işaret temizliği, sonra ASCII harf eşlemesi.
+    """
+    t = str(s or "").strip().casefold()
+    t = unicodedata.normalize("NFKD", t)
+    t = "".join(ch for ch in t if not unicodedata.combining(ch))
+    for a, b in (
+        ("ı", "i"),
+        ("ş", "s"),
+        ("ğ", "g"),
+        ("ü", "u"),
+        ("ö", "o"),
+        ("ç", "c"),
+    ):
+        t = t.replace(a, b)
+    return re.sub(r"\s+", " ", t).strip()
+
+
+def norm_loose(s: str) -> str:
+    """
+    Eşleştirme için: fold + noktalama/özel karakterleri boşluk yap (TİC.NAK ≈ TIC NAK).
+    Sadece harf/rakam/boşluk kalır.
+    """
+    t = norm_text_fold(s)
+    t = re.sub(r"[^a-z0-9]+", " ", t)
+    return re.sub(r"\s+", " ", t).strip()
+
+
+def akbank_sender_key(aciklama: str) -> str:
+    """
+    Aynı göndericiden gelen farklı dekontlar için stabil anahtar (saat, uzun referans vb. atılır).
+    Manuel eşleştirme hatırlama tablosu için kullanılır.
+    """
+    t = str(aciklama or "").strip()
+    if not t:
+        return ""
+    # İlk köşeli parantez (genelde [Saat …])
+    t = re.sub(r"^\s*\[[^\]]+\]\s*", "", t, count=1)
+    # Uzun rakam / fiş no / kart gövdesi benzeri diziler
+    t = re.sub(r"\d[\d\s.]{3,}\d|\d{5,}", " ", t)
+    return norm_loose(t)[:480]
+
+
+def _musteri_kart_etiketi(c: dict[str, Any]) -> str:
+    name = str(c.get("name") or "").strip()
+    ma = str(c.get("musteri_adi") or "").strip()
+    if ma and norm_text_fold(ma) != norm_text_fold(name):
+        return f"{name} · {ma}".strip()
+    return name or f"#{c.get('id')}"
+
+
+# Sadece çoğu şirket adında geçmeyen bağlaç / kanal kelimeleri (tic, dis, nakliyat vb. ünvanda olabilir)
+_TOKEN_STOP = frozenset({
+    "ve", "veya", "ile", "icin", "the", "and", "mbh", "fast", "havale", "transfer",
+})
+_MIN_TOKEN_LEN = 4
+_MIN_PHRASE_LEN = 3
+
+# Sektör / unvan kalıbı — tek başına eşleşince yanlış pozitif (OFİSBİR ↔ BULGU… danismanlik)
+_GENERIC_WORD = frozenset({
+    "danismanlik", "danismanligi", "insaat", "insaati", "sanayi", "ticaret", "limited",
+    "sirketi", "anonim", "ltd", "sti", "as", "ao", "aojv", "otas", "lojistik", "tic",
+    "ve", "ofis", "hizmetleri", "hizmet", "nakliyat", "nakliye", "dis", "los", "taahhut",
+    "proje", "yapi", "gayrimenkul", "dagitim", "ticari", "genel", "turizm", "gida",
+    "enerji", "tekstil", "metalurji", "mobilya", "malzemeleri", "orman", "urunleri",
+    "muhendislik", "reklam", "bilisim", "temizlik", "guvenlik", "merkezi", "sube",
+    "iletisim", "musavirlik", "muhasebe", "holding", "yonetim", "otel", "cafe",
+    "restoran", "market", "magaza", "doviz", "consulting", "group", "international",
+})
+
+
+def _best_unvan_match(raw: str, hay: str) -> tuple[int, str] | None:
+    """
+    Şirket ünvanı: tam ifade VEYA en az 2 anlamlı (genel olmayan) kelime dekontta kelime olarak,
+    VEYA ünvanda anlamlı tek token kaldıysa (ör. OFİSBİR A.Ş.),
+    VEYA çok kelimeli ünvanda ilk anlamlı kelime marka gibi eşleşiyorsa (İZALP İNŞAAT…).
+    Tek genel kelime (danismanlik, insaat…) ile eşleşme yok sayılır.
+    """
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    full = norm_loose(raw)
+    if len(full) >= _MIN_PHRASE_LEN and full in hay:
+        return (len(full), raw)
+
+    hay_words = frozenset(w for w in hay.split() if w)
+    tokens = [t for t in full.split() if len(t) >= _MIN_TOKEN_LEN and t not in _TOKEN_STOP]
+    ng = [t for t in tokens if t not in _GENERIC_WORD]
+    hit = [t for t in ng if t in hay_words]
+
+    if len(hit) >= 2:
+        return (sum(len(x) for x in hit), raw)
+    if len(hit) == 1 and len(ng) == 1:
+        return (len(hit[0]), raw)
+    if len(hit) == 1 and len(ng) >= 2 and hit[0] == ng[0] and len(hit[0]) >= 5:
+        return (len(hit[0]), raw)
+    return None
+
+
+def _best_kisi_adi_match(raw: str, hay: str) -> tuple[int, str] | None:
+    """
+    Müşteri adı / yetkili: tam ifade VEYA en az 2 anlamlı kelime aynı anda dekontta.
+    Tek kelime (soyad çakışması: ADEM DOGAN vs EBRU … DOĞAN) ile eşleşme yapılmaz.
+    """
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    full = norm_loose(raw)
+    if len(full) >= _MIN_PHRASE_LEN and full in hay:
+        return (len(full), raw)
+
+    hay_words = frozenset(w for w in hay.split() if w)
+    tokens = [t for t in full.split() if len(t) >= _MIN_TOKEN_LEN and t not in _TOKEN_STOP]
+    ng = [t for t in tokens if t not in _GENERIC_WORD]
+    hit = [t for t in ng if t in hay_words]
+
+    if len(hit) >= 2:
+        return (sum(len(x) for x in hit), raw)
+    if len(hit) == 1 and len(ng) == 1 and len(hit[0]) >= 5:
+        return (len(hit[0]), raw)
+    return None
+
+
+def _vkn_in_aciklama(c: dict[str, Any], digit_hay: str) -> int:
+    v = _digits_only(c.get("kyc_vergi_no")) or _digits_only(c.get("tax_number"))
+    return 1 if len(v) >= 10 and v in digit_hay else 0
+
+
+def parse_tutar_tr(val: object) -> float:
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return 0.0
+    s = str(val).strip().replace(" ", "").replace("TL", "").replace("₺", "")
+    if not s or s == "-":
+        return 0.0
+    if "," in s and "." in s:
+        if s.rfind(",") > s.rfind("."):
+            s = s.replace(".", "").replace(",", ".")
+        else:
+            s = s.replace(",", "")
+    elif "," in s:
+        s = s.replace(",", ".")
+    try:
+        return abs(float(s))
+    except ValueError:
+        return 0.0
+
+
+def parse_tarih(val: object) -> date | None:
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return None
+    if hasattr(val, "date") and callable(getattr(val, "date", None)):
+        try:
+            d = val.date()  # type: ignore[union-attr]
+            if isinstance(d, date):
+                return d
+        except Exception:
+            pass
+    s = str(val).strip()
+    for fmt in ("%d.%m.%Y", "%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y"):
+        try:
+            return datetime.strptime(s[:10], fmt).date()
+        except ValueError:
+            continue
+    try:
+        return pd.to_datetime(s, dayfirst=True).date()
+    except Exception:
+        return None
+
+
+def read_akbank_excel(source: Path | bytes) -> pd.DataFrame:
+    last_err: Exception | None = None
+    for skip in range(0, 18):
+        try:
+            if isinstance(source, bytes):
+                df = pd.read_excel(io.BytesIO(source), engine="openpyxl", skiprows=skip, header=0)
+            else:
+                df = pd.read_excel(source, engine="openpyxl", skiprows=skip, header=0)
+            if df.empty:
+                continue
+            cols_norm = [norm_header(c) for c in df.columns]
+            if any("tarih" in c for c in cols_norm) and any(
+                "borc" in c or "alacak" in c or "fis" in c or "dekont" in c for c in cols_norm
+            ):
+                df.columns = cols_norm
+                return df
+        except Exception as e:
+            last_err = e
+            continue
+    if last_err:
+        raise RuntimeError(f"Excel okunamadı: {last_err}") from last_err
+    raise RuntimeError("Akbank ekstre başlığı bulunamadı.")
+
+
+def pick_tutar_column(df: pd.DataFrame) -> str | None:
+    candidates = []
+    for c in df.columns:
+        cn = str(c).lower()
+        if "bakiye" in cn:
+            continue
+        if "tutar" in cn or cn.startswith("unnamed"):
+            non_null = df[c].dropna()
+            if non_null.empty:
+                continue
+            sample = non_null.head(20).astype(str)
+            if sample.str.contains(r"\d", regex=True).any():
+                candidates.append(c)
+    if not candidates:
+        return None
+    for c in candidates:
+        if str(c) == "tutar" or str(c).startswith("tutar"):
+            ser = df[c].apply(parse_tutar_tr)
+            if ser.sum() > 0 or (ser.max() or 0) > 0:
+                return c
+    best = None
+    best_sum = -1.0
+    for c in candidates:
+        s = df[c].apply(parse_tutar_tr).sum()
+        if s > best_sum:
+            best_sum = s
+            best = c
+    return best
+
+
+def col(df: pd.DataFrame, *names: str) -> str | None:
+    for n in names:
+        for c in df.columns:
+            if str(c).strip().lower() == n:
+                return c
+    for n in names:
+        for c in df.columns:
+            if n in str(c).lower():
+                return c
+    return None
+
+
+def _digits_only(s: object) -> str:
+    return "".join(ch for ch in str(s or "") if ch.isdigit())
+
+
+def _digit_haystack(aciklama: str) -> str:
+    """Açıklamadaki tüm rakamlar (VKN/TCKN alt dizisi kontrolü için)."""
+    return "".join(ch for ch in str(aciklama or "") if ch.isdigit())
+
+
+# Eşleştirme önceliği: küçük sayı = önce (şirket ünvanı → müşteri adı → vergi no → TC)
+_PRI_UNVAN = 1
+_PRI_MUSTERI_ADI = 2
+_PRI_VERGI = 3
+_PRI_TC = 4
+
+
+def _musteri_en_iyi_sinyal(c: dict[str, Any], hay: str, digit_hay: str) -> tuple[int, int, str] | None:
+    """
+    Tek müşteri için (öncelik, skor, etiket) veya eşleşme yoksa None.
+    Öncelik düşük = güçlü; skor = eşleşme uzunluğu (aynı öncelikte büyük olan kazanır).
+    """
+    best: tuple[int, int, str] | None = None
+
+    def consider(pri: int, score: int, label: str) -> None:
+        nonlocal best
+        if score <= 0:
+            return
+        if best is None or pri < best[0] or (pri == best[0] and score > best[1]):
+            best = (pri, score, label)
+
+    # 1) Şirket ünvanı (KYC) — tam metin veya güçlü kelime parçaları
+    unvan = (c.get("sirket_unvani") or "").strip()
+    if len(unvan) >= _MIN_PHRASE_LEN:
+        hit = _best_unvan_match(unvan, hay)
+        if hit:
+            consider(_PRI_UNVAN, hit[0], hit[1])
+
+    # 2) Müşteri adı / kart adı (ünvan ile aynı loose metinse atla)
+    seen_loose: set[str] = set()
+    if unvan:
+        seen_loose.add(norm_loose(unvan))
+    for key in ("musteri_adi", "name", "yetkili_adsoyad"):
+        raw = (c.get(key) or "").strip()
+        if len(raw) < _MIN_PHRASE_LEN:
+            continue
+        nl = norm_loose(raw)
+        if len(nl) < _MIN_PHRASE_LEN or nl in seen_loose:
+            continue
+        hit = _best_kisi_adi_match(raw, hay)
+        if hit:
+            seen_loose.add(nl)
+            consider(_PRI_MUSTERI_ADI, hit[0], hit[1])
+
+    # 3) Vergi no: KYC vergi_no veya customers.tax_number (en az 10 hane)
+    vkn = _digits_only(c.get("kyc_vergi_no")) or _digits_only(c.get("tax_number"))
+    if len(vkn) >= 10 and vkn in digit_hay:
+        consider(_PRI_VERGI, len(vkn), f"VKN {vkn}")
+
+    # 4) TC kimlik (KYC yetkili_tcno, 11 hane)
+    tc = _digits_only(c.get("yetkili_tcno"))
+    if len(tc) == 11 and tc in digit_hay:
+        consider(_PRI_TC, 11, f"TC {tc}")
+
+    return best
+
+
+def eslestir_musteri(aciklama: str, musteriler: list[dict[str, Any]]) -> dict[str, Any]:
+    """
+    Açıklamada geçen bilgileri müşteri kartı (KYC + customers) ile eşleştirir.
+    Öncelik: şirket ünvanı → müşteri adı / ad → vergi no → TC.
+    Dönüş: status matched | unknown, musteri_id, musteri_label, candidates (çoklu adayda VKN + müşteri no ile tek seçim)
+    """
+    hay = norm_loose(aciklama)
+    digit_hay = _digit_haystack(aciklama)
+    if not hay and not digit_hay:
+        return {
+            "status": "unknown",
+            "musteri_id": None,
+            "musteri_label": None,
+            "candidates": [],
+        }
+    per_id: dict[int, tuple[int, int, str]] = {}
+    must_map: dict[int, dict[str, Any]] = {}
+    for c in musteriler:
+        try:
+            cid = int(c.get("id"))
+        except (TypeError, ValueError):
+            continue
+        must_map[cid] = c
+        sig = _musteri_en_iyi_sinyal(c, hay, digit_hay)
+        if sig is not None:
+            per_id[cid] = sig
+    if not per_id:
+        return {
+            "status": "unknown",
+            "musteri_id": None,
+            "musteri_label": None,
+            "candidates": [],
+        }
+    # Aynı skorda: dekontta VKN geçen müşteri; çift kartta düşük müşteri no (ilk / ana kayıt)
+    ranked = sorted(
+        per_id.items(),
+        key=lambda x: (
+            x[1][0],
+            -x[1][1],
+            -_vkn_in_aciklama(must_map.get(x[0], {}), digit_hay),
+            x[0],
+        ),
+    )
+    top_id, (top_pri, top_score, top_label) = ranked[0]
+    cands = [
+        {
+            "id": i,
+            "label": t[2],
+            "name": next((str(m.get("name") or "") for m in musteriler if int(m.get("id") or 0) == i), ""),
+        }
+        for i, t in ranked[:12]
+    ]
+    return {
+        "status": "matched",
+        "musteri_id": top_id,
+        "musteri_label": top_label,
+        "candidates": cands[:3],
+    }
+
+
+def dataframe_hareket_satirlari(df: pd.DataFrame) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """
+    Borç/Alacak = A satırlarını dict listesine çevirir.
+    Dönüş: (satirlar, ozet_sayac)
+    """
+    col_tarih = col(df, "tarih")
+    col_saat = col(df, "saat")
+    col_tutar = pick_tutar_column(df)
+    col_aciklama = col(df, "aciklama", "açiklama")
+    col_ba = col(df, "borç/alacak", "borc/alacak", "borc / alacak")
+    col_fis = col(df, "fiş/dekont no", "fis/dekont no", "fiş dekont no", "fis dekont no", "dekont no")
+    eksik = [n for n, c in [
+        ("tarih", col_tarih),
+        ("tutar", col_tutar),
+        ("borc/alacak", col_ba),
+        ("aciklama", col_aciklama),
+        ("fis/dekont no", col_fis),
+    ] if c is None]
+    if eksik:
+        raise ValueError(f"Eksik sütunlar: {eksik}. Mevcut: {list(df.columns)}")
+
+    ozet = {"excel_satir": 0, "a_degil": 0, "ref_bos": 0, "tutar_sifir": 0, "tarih_yok": 0, "islenen": 0}
+    satirlar: list[dict[str, Any]] = []
+
+    for sira, (idx, row) in enumerate(df.iterrows(), start=1):
+        ozet["excel_satir"] += 1
+        ba = str(row[col_ba] if col_ba else "").strip().upper()
+        if ba != "A":
+            ozet["a_degil"] += 1
+            continue
+        ref_raw = row[col_fis] if col_fis else None
+        if ref_raw is None or (isinstance(ref_raw, float) and pd.isna(ref_raw)):
+            ozet["ref_bos"] += 1
+            continue
+        ref = str(ref_raw).strip()
+        if not ref:
+            ozet["ref_bos"] += 1
+            continue
+        tutar = parse_tutar_tr(row[col_tutar])
+        if tutar <= 0:
+            ozet["tutar_sifir"] += 1
+            continue
+        d = parse_tarih(row[col_tarih])
+        if not d:
+            ozet["tarih_yok"] += 1
+            continue
+        acik = str(row[col_aciklama] if col_aciklama else "").strip()
+        saat_str = ""
+        if col_saat and col_saat in df.columns:
+            sa = row[col_saat]
+            if sa is not None and not (isinstance(sa, float) and pd.isna(sa)):
+                saat_str = str(sa).strip()
+        if saat_str:
+            acik = f"[Saat {saat_str}] {acik}".strip()
+        ozet["islenen"] += 1
+        satirlar.append({
+            "sira": sira,
+            "excel_index": int(idx) if isinstance(idx, (int, float)) else str(idx),
+            "tarih": d.isoformat(),
+            "saat": saat_str,
+            "tutar": round(tutar, 2),
+            "aciklama": acik,
+            "banka_referans_no": ref,
+        })
+    return satirlar, ozet
+
+
+def onizleme_satirlari(
+    ham_satirlar: list[dict[str, Any]],
+    musteriler: list[dict[str, Any]],
+    mevcut_refler: set[str],
+    manual_by_key: dict[str, int] | None = None,
+) -> list[dict[str, Any]]:
+    manual_by_key = manual_by_key or {}
+    must_by_id: dict[int, dict[str, Any]] = {}
+    for c in musteriler:
+        try:
+            must_by_id[int(c.get("id"))] = c
+        except (TypeError, ValueError):
+            continue
+    out = []
+    for r in ham_satirlar:
+        ref = str(r.get("banka_referans_no") or "").strip()
+        dup = ref in mevcut_refler
+        sk = akbank_sender_key(r.get("aciklama") or "")
+        mid_man = manual_by_key.get(sk) if sk else None
+        mid_int: int | None = None
+        if mid_man is not None:
+            try:
+                mid_int = int(mid_man)
+            except (TypeError, ValueError):
+                mid_int = None
+        c_man = must_by_id.get(mid_int) if mid_int is not None else None
+        if c_man is not None:
+            lab = _musteri_kart_etiketi(c_man)
+            em = {
+                "status": "matched",
+                "musteri_id": mid_int,
+                "musteri_label": lab,
+                "candidates": [{"id": mid_int, "label": lab, "name": str(c_man.get("name") or "")}],
+                "kaynak": "manuel_hatirlat",
+            }
+        else:
+            em = {**eslestir_musteri(r.get("aciklama") or "", musteriler), "kaynak": "otomatik"}
+        if dup:
+            ui_status = "duplicate"
+        elif em["status"] == "matched":
+            ui_status = "matched"
+        elif em["status"] == "ambiguous":
+            ui_status = "ambiguous"
+        else:
+            ui_status = "unknown"
+        out.append({
+            **r,
+            "eslestirme": em,
+            "sender_key": sk,
+            "ui_status": ui_status,
+            "musteri_id_oneri": em.get("musteri_id"),
+            "musteri_label_oneri": em.get("musteri_label"),
+        })
+    return out

@@ -55,6 +55,7 @@
     <h2>🏦 Banka Hesapları</h2>
     <div class="banka-buttons">
         <button onclick="yeniBanka()">➕ Yeni Hesap</button>
+        <a href="/bankalar/akbank-tahsilat-import" style="background:#00838f;color:#fff;text-decoration:none;padding:8px 16px;border-radius:3px;font-size:13px;margin-left:8px;display:inline-block;">📋 Akbank Tahsilat (Önizleme)</a>
         <button onclick="excelYukle()">📂 Excel'den Aktar</button>
         <button onclick="yenile()">↺ Yenile</button>
     </div>
@@ -105,7 +106,8 @@ function yeniBanka() {
 }
 
 function excelYukle() {
-    alert('Excel yükleme özelliği yakında!');
+    /* Akbank hesap ekstresi (.xlsx) → önizleme ve onaylı tahsilat kaydı */
+    window.location.href = "/bankalar/akbank-tahsilat-import";
 }
 
 function yenile() {
