@@ -1658,6 +1658,7 @@ def kira_senaryo_excel():
         yil_sayisi = int(data.get('yil_sayisi') or (len(satirlar) or 0) or 0)
         musteri_ismi = (data.get('musteri_ismi') or '').strip()
         nakit_mod = bool(data.get("kira_nakit_senaryo"))
+        hibrit_mod = bool(data.get("kira_hibrit_senaryo"))
 
         # Workbook oluştur
         wb = Workbook()
@@ -1665,7 +1666,8 @@ def kira_senaryo_excel():
         ws.title = "Kira Senaryo"
 
         # Başlık
-        ws['A1'] = 'KİRA SENARYO HESAPLAMA' + (' (Nakit / KDV yok)' if nakit_mod else '')
+        _excel_baslik_ek = ' (Nakit / KDV yok)' if nakit_mod else (' (Hibrit)' if hibrit_mod else '')
+        ws['A1'] = 'KİRA SENARYO HESAPLAMA' + _excel_baslik_ek
         ws['A1'].font = Font(bold=True, size=14)
         ws.merge_cells('A1:E1' if nakit_mod else 'A1:F1')
         ws['A1'].alignment = Alignment(horizontal='center')
@@ -1735,7 +1737,21 @@ def kira_senaryo_excel():
                     ws.cell(row=row, column=5).value = artis_tutar
                     ws.cell(row=row, column=5).number_format = '#,##0.00'
                 else:
-                    kdv_dahil = aylik * 1.20
+                    kd_raw = s.get("kdv_dahil_aylik")
+                    kd_row = None
+                    if kd_raw is not None and kd_raw not in ("", False):
+                        if isinstance(kd_raw, (int, float)) and not isinstance(kd_raw, bool):
+                            kd_row = float(kd_raw)
+                        else:
+                            try:
+                                st = str(kd_raw).replace(" ", "").replace("TL", "").strip().replace(".", "").replace(",", ".")
+                                kd_row = float(st) if st else None
+                            except Exception:
+                                kd_row = None
+                    if hibrit_mod and kd_row is not None and kd_row > 0:
+                        kdv_dahil = kd_row
+                    else:
+                        kdv_dahil = aylik * 1.20
                     ws.cell(row=row, column=3).value = kdv_dahil
                     ws.cell(row=row, column=3).number_format = '#,##0.00'
                     ws.cell(row=row, column=4).value = artis_yuzde
@@ -1889,9 +1905,29 @@ def _kira_bildirgesi_yillik_goster(hizmet_turu) -> bool:
     return key == "sanalofis"
 
 
-def build_kira_bildirgesi_pdf(musteri_adi, sozlesme_tarihi, gecerlilik_tarihi, kira_net, kdv_oran=20, hizmet_turu=""):
+def _kira_bildirgesi_kdv_oran_float(kdv_raw, default=20.0):
+    """KDV %0 (nakit) geçerlidir; `x or 20` / `float(x or 20)` kullanılmaz — 0 yanlışlıkla 20 olur."""
+    if kdv_raw is None:
+        return float(default)
+    try:
+        return float(kdv_raw)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def build_kira_bildirgesi_pdf(
+    musteri_adi,
+    sozlesme_tarihi,
+    gecerlilik_tarihi,
+    kira_net,
+    kdv_oran=20,
+    hizmet_turu="",
+    hibrit_nakit_pay=None,
+    hibrit_banka_net=None,
+):
     """Kira bildirgesi mektubu A4 PDF (bestoffice / Ofisbir). Arial ile Türkçe karakter desteği.
     hizmet_turu: yalnızca sanal_ofis -> yıllık kira ibaresi; diğerlerinde aylık net + KDV dahil.
+    Hibrit: nakit payı KDV dışı, banka net payı üzerinden KDV — toplam KDV dahil = nakit + banka_net * (1+kdv%).
     """
     _register_arial()
     buf = io.BytesIO()
@@ -1901,8 +1937,20 @@ def build_kira_bildirgesi_pdf(musteri_adi, sozlesme_tarihi, gecerlilik_tarihi, k
     font_name = "Arial" if "Arial" in pdfmetrics.getRegisteredFontNames() else "Helvetica"
 
     kira_net = float(kira_net or 0)
-    kdv_oran = float(kdv_oran or 20)
-    kdv_dahil = round(kira_net * (1 + kdv_oran / 100), 2)
+    kdv_oran = _kira_bildirgesi_kdv_oran_float(kdv_oran, 20.0)
+    try:
+        hn = float(hibrit_nakit_pay)
+    except (TypeError, ValueError):
+        hn = 0.0
+    try:
+        hb = float(hibrit_banka_net)
+    except (TypeError, ValueError):
+        hb = 0.0
+    if hn > 0 and hb > 0 and kdv_oran > 0:
+        kira_net = round(hn + hb, 2)
+        kdv_dahil = round(hn + hb * (1 + kdv_oran / 100), 2)
+    else:
+        kdv_dahil = round(kira_net * (1 + kdv_oran / 100), 2)
     yillik = round(kdv_dahil * 12, 2)
     sanal_ofis = _kira_bildirgesi_yillik_goster(hizmet_turu)
 
@@ -1929,7 +1977,7 @@ def build_kira_bildirgesi_pdf(musteri_adi, sozlesme_tarihi, gecerlilik_tarihi, k
     if kdv_oran == 0:
         par2_base = (
             f"Mevcut ekonomik koşullar ve yasal düzenlemeler göz önüne alınarak, adı geçen tarihten itibaren uygulanacak yeni kira bedeli TÜFE Yasal Oranı çerçevesinde güncellenecektir. "
-            f"Buna göre, {gec_fmt} itibarıyla aylık kira bedeliniz {kira_net:,.2f} TL dir (KDV uygulanmamaktadır)."
+            f"Buna göre, {gec_fmt} itibarıyla bedeliniz {kira_net:,.2f} TL dir."
         )
         if sanal_ofis:
             par2 = par2_base + f" Yıllık toplam {yillik:,.2f} TL dir."
@@ -2000,7 +2048,7 @@ def _kira_bildirgesi_metinleri(sozlesme_tarihi, gecerlilik_tarihi, kira_net, kdv
     soz_fmt, gec_fmt = _soz_ve_guncel_tarih(sozlesme_tarihi, gecerlilik_tarihi)
 
     kira_net = float(kira_net or 0)
-    kdv_oran = float(kdv_oran or 20)
+    kdv_oran = _kira_bildirgesi_kdv_oran_float(kdv_oran, 20.0)
     kdv_dahil = round(kira_net * (1 + kdv_oran / 100), 2)
     yillik = round(kdv_dahil * 12, 2)
     yillik_goster = _kira_bildirgesi_yillik_goster(hizmet_turu)
@@ -2052,7 +2100,7 @@ def kira_bildirgesi_antet():
     gecerlilik_tarihi = request.args.get('gecerlilik_tarihi') or ''
     try:
         kira_net = float(request.args.get('kira_net') or 0)
-        kdv_oran = float(request.args.get('kdv_oran') or 20)
+        kdv_oran = _kira_bildirgesi_kdv_oran_float(request.args.get('kdv_oran'), 20.0)
     except (TypeError, ValueError):
         kira_net, kdv_oran = 0, 20
     hizmet_turu = (request.args.get('hizmet_turu') or "").strip()
@@ -2080,7 +2128,27 @@ def kira_bildirgesi_pdf():
         sozlesme_tarihi = data.get('sozlesme_tarihi') or ''
         gecerlilik_tarihi = data.get('gecerlilik_tarihi') or ''
         kira_net = float(data.get('kira_net') or 0)
-        kdv_oran = float(data.get('kdv_oran') or 20)
+        kdv_oran = _kira_bildirgesi_kdv_oran_float(data.get('kdv_oran'), 20.0)
+        try:
+            hibrit_n = float(data.get("hibrit_nakit_pay"))
+        except (TypeError, ValueError):
+            hibrit_n = 0.0
+        try:
+            hibrit_b = float(data.get("hibrit_banka_net"))
+        except (TypeError, ValueError):
+            hibrit_b = 0.0
+        kh = data.get("kira_hibrit")
+        use_hibrit_pdf = kh is True or kh == 1 or (isinstance(kh, str) and kh.strip().lower() in ("1", "true", "on", "yes"))
+        if not use_hibrit_pdf or hibrit_n <= 0 or hibrit_b <= 0:
+            use_hibrit_pdf = False
+            hibrit_n, hibrit_b = 0.0, 0.0
+        kn = data.get("kira_nakit")
+        if not use_hibrit_pdf and (
+            kn is True
+            or kn == 1
+            or (isinstance(kn, str) and kn.strip().lower() in ("1", "true", "on", "yes"))
+        ):
+            kdv_oran = 0.0
         if not gecerlilik_tarihi:
             return jsonify({'ok': False, 'mesaj': 'Geçerlilik tarihi giriniz.'}), 400
         if kira_net <= 0:
@@ -2090,7 +2158,16 @@ def kira_bildirgesi_pdf():
             hizmet_turu = ""
         else:
             hizmet_turu = str(ht_raw).strip()
-        pdf_bytes = build_kira_bildirgesi_pdf(musteri_adi, sozlesme_tarihi, gecerlilik_tarihi, kira_net, kdv_oran, hizmet_turu=hizmet_turu)
+        pdf_bytes = build_kira_bildirgesi_pdf(
+            musteri_adi,
+            sozlesme_tarihi,
+            gecerlilik_tarihi,
+            kira_net,
+            kdv_oran,
+            hizmet_turu=hizmet_turu,
+            hibrit_nakit_pay=hibrit_n if use_hibrit_pdf else None,
+            hibrit_banka_net=hibrit_b if use_hibrit_pdf else None,
+        )
         return Response(pdf_bytes, mimetype="application/pdf", headers={
             "Content-Disposition": "inline; filename=Kira_Bildirgesi.pdf"
         })

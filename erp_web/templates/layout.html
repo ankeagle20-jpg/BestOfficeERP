@@ -322,6 +322,9 @@
     };
     </script>
     <script src="{{ url_for('static', filename='js/erp-tarih-hizli.js') }}"></script>
+    {% if not embed|default(false) and current_user.is_authenticated %}
+    <script src="{{ url_for('static', filename='js/randevu-hatirlatma.js') }}"></script>
+    {% endif %}
     {% block extra_js %}{% endblock %}
 </body>
 </html>

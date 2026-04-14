@@ -210,7 +210,16 @@ def api_musteriler():
 @login_required
 def randevu_al():
     """Kendi randevu sayfamız: takvim + müsait slotlar + form (ERP teması)."""
-    return render_template("randevu/randevu_al.html")
+    embed = request.args.get("embed", "").strip().lower() in ("1", "true", "yes", "on")
+    mid = request.args.get("musteri_id", type=int)
+    if mid is not None and mid < 1:
+        mid = None
+    embed_musteri_id = mid if embed and mid else None
+    return render_template(
+        "randevu/randevu_al.html",
+        embed=embed,
+        embed_musteri_id=embed_musteri_id,
+    )
 
 
 @bp.route("/api/musait-slotlar")

@@ -79,7 +79,7 @@
         <div class="combobox-wrap">
           <input type="text" id="musteri-ara" placeholder="Müşteri ara..." autocomplete="off">
           <input type="hidden" id="musteri-id">
-          <div class="combobox-list" id="musteri-list" style="display:none;"></div>
+          <div class="combobox-list" id="musteri-list" style="display:none;" role="listbox" aria-label="Müşteri arama" onmousedown="event.preventDefault();"></div>
         </div>
       </div>
       <div>
@@ -148,7 +148,7 @@
 <script>
 (function() {
   const API_LIST = "{{ url_for('randevu.api_list') }}";
-  const API_MUSTERILER = "{{ url_for('randevu.api_musteriler') }}";
+  const API_GIRIS_MUSTERILER = "{{ url_for('giris.api_musteriler') }}";
   const API_ODALAR = "{{ url_for('randevu.api_odalar') }}";
   const API_ODALAR_GUNCELLE = "/randevu/api/odalar/guncelle";
   const API_EKLE = "{{ url_for('randevu.api_ekle') }}";
@@ -174,39 +174,127 @@
     return d.toLocaleDateString('tr-TR') + ' ' + d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
   }
 
-  // Müşteri combobox
+  // Müşteri combobox — Giriş sayfası ile aynı API (geniş arama + e-posta yedeği)
   const musteriAra = document.getElementById('musteri-ara');
   const musteriId = document.getElementById('musteri-id');
   const musteriList = document.getElementById('musteri-list');
   let musteriTimer;
+  let musteriAraAbort = null;
+
+  function escHtml(s) {
+    return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+  }
+
+  function fetchGirisMusteriler(q) {
+    if (musteriAraAbort) { try { musteriAraAbort.abort(); } catch (e) {} }
+    musteriAraAbort = new AbortController();
+    return fetch(API_GIRIS_MUSTERILER + '?q=' + encodeURIComponent(q != null ? q : ''), {
+      credentials: 'same-origin',
+      signal: musteriAraAbort.signal,
+      headers: { 'Accept': 'application/json' }
+    }).then(r => {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    }).then(d => Array.isArray(d) ? d : []);
+  }
+
+  musteriList.addEventListener('click', function(ev) {
+    const el = ev.target.closest('.combobox-item[data-id]');
+    if (!el) return;
+    musteriId.value = el.getAttribute('data-id');
+    const lab = el.getAttribute('data-label');
+    musteriAra.value = lab ? lab.replace(/&quot;/g, '"') : '';
+    musteriList.style.display = 'none';
+  });
+
   musteriAra.addEventListener('input', function() {
     clearTimeout(musteriTimer);
     musteriId.value = '';
     const q = this.value.trim();
     if (q.length < 1) { musteriList.style.display = 'none'; return; }
     musteriTimer = setTimeout(function() {
-      fetch(API_MUSTERILER + '?q=' + encodeURIComponent(q))
-        .then(r => r.json())
-        .then(arr => {
-          musteriList.innerHTML = arr.map(m => {
-            const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
-            const ma = (m.musteri_adi || '').trim();
-            return '<div class="combobox-item" data-id="' + m.id + '" data-name="' + esc(m.name) + '">' + esc(m.name || '—') + (ma ? ' <small style="color:#78909c">· ' + esc(ma) + '</small>' : '') + (m.phone ? ' <small style="color:#78909c">' + esc(m.phone) + '</small>' : '') + '</div>';
-          }).join('') || '<div class="combobox-item" style="color:#78909c">Sonuç yok</div>';
+      const qSnap = musteriAra.value.trim();
+      fetchGirisMusteriler(qSnap).then(function(list) {
+        if (musteriAra.value.trim() !== qSnap) return;
+        if (!list.length) {
+          musteriList.innerHTML = '<div class="combobox-item" style="color:#78909c;cursor:default">Bu aramaya uygun müşteri yok.</div>';
           musteriList.style.display = 'block';
-          musteriList.querySelectorAll('.combobox-item[data-id]').forEach(el => {
-            el.addEventListener('click', function() {
-              musteriId.value = this.getAttribute('data-id');
-              musteriAra.value = this.getAttribute('data-name');
-              musteriList.style.display = 'none';
-            });
-          });
-        });
-    }, 300);
+          return;
+        }
+        musteriList.innerHTML = list.map(function(m) {
+          const ma = (m.musteri_adi || '').trim();
+          const nm = (m.name || '').trim();
+          const ust = ma ? (nm ? (nm + ' · ' + ma) : ma) : (nm || '—');
+          const altNo = (m.musteri_no != null && m.musteri_no !== '') ? String(m.musteri_no) : '—';
+          const vn = (m.tax_number || '').trim() || '—';
+          let alt = 'No: ' + altNo + ' · Vergi: ' + vn;
+          if (nm && ma && nm !== ma) alt += ' · ' + nm.slice(0, 40);
+          if (m.phone) alt += ' · ' + m.phone;
+          return '<div class="combobox-item" role="option" data-id="' + m.id + '" data-label="' + escHtml(ust) + '">' +
+            '<div>' + escHtml(ust) + '</div><div style="font-size:11px;color:#78909c;margin-top:2px">' + escHtml(alt) + '</div></div>';
+        }).join('');
+        musteriList.style.display = 'block';
+      }).catch(function(err) {
+        if (err && err.name === 'AbortError') return;
+        if (musteriAra.value.trim() !== qSnap) return;
+        musteriList.innerHTML = '<div class="combobox-item" style="color:#ef9a9a;cursor:default">Arama yapılamadı.</div>';
+        musteriList.style.display = 'block';
+      });
+    }, 220);
   });
+
   musteriAra.addEventListener('focus', function() {
-    if (this.value.trim() && musteriList.innerHTML) musteriList.style.display = 'block';
+    const q = this.value.trim();
+    if (q.length >= 1) {
+      musteriTimer = setTimeout(function() {
+        const qSnap = musteriAra.value.trim();
+        if (qSnap.length < 1) return;
+        fetchGirisMusteriler(qSnap).then(function(list) {
+          if (musteriAra.value.trim() !== qSnap) return;
+          if (!list.length) {
+            musteriList.innerHTML = '<div class="combobox-item" style="color:#78909c;cursor:default">Sonuç yok.</div>';
+          } else {
+            musteriList.innerHTML = list.map(function(m) {
+              const ma = (m.musteri_adi || '').trim();
+              const nm = (m.name || '').trim();
+              const ust = ma ? (nm ? (nm + ' · ' + ma) : ma) : (nm || '—');
+              const altNo = (m.musteri_no != null && m.musteri_no !== '') ? String(m.musteri_no) : '—';
+              const vn = (m.tax_number || '').trim() || '—';
+              let alt = 'No: ' + altNo + ' · Vergi: ' + vn;
+              if (m.phone) alt += ' · ' + m.phone;
+              return '<div class="combobox-item" role="option" data-id="' + m.id + '" data-label="' + escHtml(ust) + '">' +
+                '<div>' + escHtml(ust) + '</div><div style="font-size:11px;color:#78909c;margin-top:2px">' + escHtml(alt) + '</div></div>';
+            }).join('');
+          }
+          musteriList.style.display = 'block';
+        }).catch(function() {});
+      }, 120);
+      return;
+    }
+    musteriTimer = setTimeout(function() {
+      fetchGirisMusteriler('').then(function(list) {
+        if ((musteriAra.value || '').trim().length >= 1) return;
+        const slice = list.slice(0, 28);
+        if (!slice.length) {
+          musteriList.innerHTML = '<div class="combobox-item" style="color:#78909c;cursor:default">Müşteri bulunamadı.</div>';
+        } else {
+          musteriList.innerHTML = slice.map(function(m) {
+            const ma = (m.musteri_adi || '').trim();
+            const nm = (m.name || '').trim();
+            const ust = ma ? (nm ? (nm + ' · ' + ma) : ma) : (nm || '—');
+            const altNo = (m.musteri_no != null && m.musteri_no !== '') ? String(m.musteri_no) : '—';
+            const vn = (m.tax_number || '').trim() || '—';
+            let alt = 'No: ' + altNo + ' · Vergi: ' + vn;
+            if (m.phone) alt += ' · ' + m.phone;
+            return '<div class="combobox-item" role="option" data-id="' + m.id + '" data-label="' + escHtml(ust) + '">' +
+              '<div>' + escHtml(ust) + '</div><div style="font-size:11px;color:#78909c;margin-top:2px">' + escHtml(alt) + '</div></div>';
+          }).join('');
+        }
+        musteriList.style.display = 'block';
+      }).catch(function() {});
+    }, 100);
   });
+
   document.addEventListener('click', function(e) {
     if (!musteriAra.contains(e.target) && !musteriList.contains(e.target)) musteriList.style.display = 'none';
   });
