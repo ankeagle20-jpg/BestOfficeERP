@@ -11,7 +11,18 @@ from services.banka_ak_import import (
     onizleme_satirlari,
     read_akbank_excel,
 )
-from utils.musteri_arama import customers_arama_sql_giris_genis, customers_arama_params_giris_genis
+try:
+    # Yeni sürüm: giriş/müşteri kartı ile aynı geniş arama.
+    from utils.musteri_arama import customers_arama_sql_giris_genis, customers_arama_params_giris_genis
+except ImportError:
+    # Geriye uyumluluk: eski deploylarda sadece dar arama yardımcıları olabilir.
+    from utils.musteri_arama import customers_arama_sql_3, customers_arama_params_4
+
+    def customers_arama_sql_giris_genis(table_alias: str = "") -> str:
+        return customers_arama_sql_3(table_alias)
+
+    def customers_arama_params_giris_genis(q: str):
+        return customers_arama_params_4(q)
 from datetime import datetime, date
 
 bp = Blueprint("banka", __name__)
