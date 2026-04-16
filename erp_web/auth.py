@@ -254,8 +254,16 @@ def giris_gerekli(f):
     def decorated_function(*args, **kwargs):
         if not current_user.is_authenticated:
             path = request.path or ""
-            # fetch() ile çağrılan API'lerde HTML login yerine JSON dön (parse hatası / belirsiz hatalar önlenir)
-            if path.startswith("/giris/api/"):
+            # fetch()+JSON bekleyen uçlarda HTML login yerine JSON (SPA; aksi halde JSON.parse sessizce patlar).
+            _json401_exact = frozenset({"/giris/kaydet"})
+            _json401_prefixes = (
+                "/giris/api/",
+                "/giris/resim-yukle/",
+                "/cari-kart/api/",
+                "/musteriler/api/",
+            )
+            wants_json401 = path in _json401_exact or any(path.startswith(p) for p in _json401_prefixes)
+            if wants_json401:
                 return jsonify(
                     {
                         "ok": False,

@@ -1,6 +1,6 @@
 from flask import Blueprint, render_template, request, jsonify
 from auth import giris_gerekli, admin_gerekli
-from db import fetch_all, fetch_one, execute, execute_returning
+from db import fetch_all, fetch_one, execute, execute_returning, sql_expr_fatura_not_gib_taslak
 from datetime import datetime, date
 
 bp = Blueprint("tahsilat", __name__)
@@ -61,9 +61,10 @@ def api_borclular():
     """
     Return debtors with this_month and total outstanding and last payment.
     """
-    sql = """
+    _nt = sql_expr_fatura_not_gib_taslak("f.notlar")
+    sql = f"""
     SELECT c.id, c.name,
-      COALESCE( (SELECT SUM(f.toplam) FROM faturalar f WHERE f.musteri_id = c.id AND f.durum != 'odendi'), 0 ) as toplam_fatura,
+      COALESCE( (SELECT SUM(f.toplam) FROM faturalar f WHERE f.musteri_id = c.id AND f.durum != 'odendi' AND {_nt}), 0 ) as toplam_fatura,
       COALESCE( (SELECT SUM(t.tutar) FROM tahsilatlar t WHERE t.musteri_id = c.id), 0 ) as toplam_tahsilat,
       COALESCE( (SELECT MAX(t.tahsilat_tarihi) FROM tahsilatlar t WHERE t.musteri_id = c.id), NULL ) as son_tahsilat
     FROM customers c
@@ -97,7 +98,7 @@ def api_faturalar_odenmemis():
     if not musteri_id:
         return jsonify([])
     rows = fetch_all(
-        "SELECT id, fatura_no, toplam, fatura_tarihi, vade_tarihi FROM faturalar WHERE musteri_id = %s AND durum != 'odendi' ORDER BY fatura_tarihi DESC",
+        f"SELECT id, fatura_no, toplam, fatura_tarihi, vade_tarihi FROM faturalar WHERE musteri_id = %s AND durum != 'odendi' AND {sql_expr_fatura_not_gib_taslak('notlar')} ORDER BY fatura_tarihi DESC",
         (musteri_id,)
     )
     return jsonify(rows)

@@ -238,6 +238,42 @@
     background: #0f2537;
     display: block;
 }
+/* Grup sekmesi: ana satır tıklanınca alt firma tablosu */
+#giris_grup_ozet_tbody tr.giris-grup-ana-satir {
+    cursor: pointer;
+}
+#giris_grup_ozet_tbody tr.giris-grup-ana-satir:hover {
+    background: rgba(79, 195, 247, 0.07);
+}
+.giris-grup-detay-icerik {
+    border-radius: 6px;
+    border: 1px solid #2d4060;
+}
+.giris-grup-detay-tablo {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    color: #e0f7fa;
+}
+.giris-grup-detay-tablo th,
+.giris-grup-detay-tablo td {
+    padding: 6px 8px;
+    border-bottom: 1px solid #1e3a50;
+    text-align: left;
+}
+.giris-grup-detay-tablo th.num,
+.giris-grup-detay-tablo td.num {
+    text-align: right;
+}
+.giris-grup-detay-tablo thead th {
+    color: #90a4ae;
+    font-weight: 600;
+}
+.giris-grup-detay-bos {
+    color: #90a4ae;
+    font-size: 12px;
+    padding: 6px 0;
+}
 .sozlesmeler-sag-baslik {
     color: #4fc3f7;
     font-size: 14px;
@@ -444,6 +480,16 @@
 }
 .sozlesmeler-reel-hibrit-field .sozlesmeler-reel-tutar-input {
     width: 108px;
+}
+.sozlesmeler-manuel-bilgi {
+    font-size: 12px;
+    color: #90a4ae;
+    margin: 10px 0 6px;
+    padding: 10px 12px;
+    border-radius: 6px;
+    border: 1px solid #37474f;
+    background: rgba(15, 37, 55, 0.65);
+    line-height: 1.45;
 }
 .sozlesmeler-aylik-grid {
     display: grid;
@@ -870,6 +916,9 @@
     width: min(168px, 100%);
     max-width: 100%;
 }
+.form-grid select#giris_form_grup_select {
+    max-width: 100%;
+}
 .form-section {
     margin-bottom: 15px;
 }
@@ -1046,6 +1095,139 @@
 @media (max-width: 900px) { .cari-kart-grid { grid-template-columns: 1fr; } }
 
 /* Tahsilat makbuz formu (tab-3) */
+/* Tahsilat: Yeni makbuz | Rapor alt sekmeleri */
+.giris-tahsil-ust-sekmeler {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0;
+    margin-bottom: 12px;
+    border-bottom: 1px solid #2d4060;
+}
+.giris-tahsil-ust-tab {
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: #90a4ae;
+    padding: 10px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.giris-tahsil-ust-tab:hover { color: #b3e5fc; }
+.giris-tahsil-ust-tab.active {
+    color: #4fc3f7;
+    border-bottom-color: #4fc3f7;
+}
+.giris-tahsil-panel { max-width: 720px; }
+.giris-tahsil-rapor-kutu {
+    background: #1e3a50;
+    border-radius: 8px;
+    padding: 14px 16px 16px;
+    border: 1px solid #2d4060;
+}
+.giris-tahsil-rapor-filtre {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 10px 14px;
+    margin-bottom: 10px;
+}
+.giris-tahsil-rapor-filtre label {
+    display: block;
+    font-size: 11px;
+    color: #90a4ae;
+    margin-bottom: 4px;
+}
+.giris-tahsil-rapor-filtre input[type="date"] {
+    padding: 7px 8px;
+    border-radius: 4px;
+    border: 1px solid #3d5070;
+    background: #0f2537;
+    color: #e0f7fa;
+    font-size: 13px;
+}
+.giris-tahsil-rapor-aciklama {
+    font-size: 12px;
+    color: #78909c;
+    margin: 0 0 12px 0;
+    line-height: 1.4;
+}
+.giris-tahsil-rapor-durum { font-size: 12px; margin-bottom: 10px; min-height: 1.2em; }
+.giris-tahsil-rapor-durum--err { color: #ef9a9a; }
+.giris-tahsil-rapor-durum--ok { color: #81c784; }
+.giris-tahsil-rapor-list { border: 1px solid #2d4060; border-radius: 6px; overflow: hidden; background: #0f2537; }
+.giris-tahsil-rapor-scroll { max-height: 52vh; overflow: auto; }
+.giris-tahsil-rapor-baslik-satir {
+    display: grid;
+    grid-template-columns: 86px minmax(100px, 1fr) 96px 72px;
+    gap: 8px 10px;
+    align-items: center;
+    padding: 7px 10px;
+    background: #152a3d;
+    color: #4fc3f7;
+    font-weight: 700;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    border-bottom: 1px solid #2d4060;
+    line-height: 1.25;
+}
+.giris-tahsil-rapor-baslik-satir .gtr-tutar,
+.giris-tahsil-rapor-baslik-satir .gtr-odeme { text-align: right; }
+.giris-tahsil-rapor-row {
+    display: grid;
+    grid-template-columns: 86px minmax(100px, 1fr) 96px 72px;
+    gap: 8px 10px;
+    align-items: center;
+    padding: 4px 10px;
+    font-size: 12px;
+    border-bottom: 1px solid #243952;
+}
+.giris-tahsil-rapor-row:last-child { border-bottom: none; }
+.giris-tahsil-rapor-row:nth-child(even) { background: rgba(0, 0, 0, 0.12); }
+.giris-tahsil-rapor-row .gtr-tarih {
+    color: #90a4ae;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+.giris-tahsil-rapor-row .gtr-firma {
+    color: #e0f7fa;
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+.giris-tahsil-rapor-row .gtr-tutar {
+    text-align: right;
+    color: #4fc3f7;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+.giris-tahsil-rapor-row .gtr-odeme {
+    text-align: right;
+    color: #b0bec5;
+    font-size: 11px;
+    white-space: nowrap;
+}
+.giris-tahsil-rapor-bos { color: #90a4ae; font-size: 13px; padding: 16px 8px; text-align: center; }
+.giris-tahsil-rapor-toplam {
+    padding: 8px 10px;
+    background: #152a3d;
+    font-size: 13px;
+    font-weight: 700;
+    color: #b3e5fc;
+    text-align: right;
+    border-top: 1px solid #2d4060;
+}
+
 .tahsilat-makbuz-wrap {
     background: #1e3a50;
     border-radius: 8px;
@@ -2047,8 +2229,10 @@
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:8px;">
             <h3 style="margin:0;">Müşteri Ekle / Güncelle</h3>
             <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+                <span id="giris_group_status_badge" style="display:none;padding:4px 9px;border-radius:999px;background:rgba(79,195,247,.16);border:1px solid rgba(79,195,247,.5);color:#b3e5fc;font-size:11px;font-weight:700;white-space:nowrap;">Grup: Grupsuz</span>
                 <button type="button" class="musteri-form-btn-cogalt" onclick="girisMusteriCogalt()" title="Yeni müşteri no ile kopya oluştur; eski kartı pasif yapıp yeni planla devam edebilirsiniz"><i class="fa fa-copy" aria-hidden="true"></i> Müşteri çoğalt</button>
                 <button type="button" class="musteri-form-btn-whatsapp" onclick="girisMusteriWhatsAppAc()" title="Formdaki telefon numarası ile WhatsApp aç"><i class="fa-brands fa-whatsapp" aria-hidden="true"></i> WhatsApp</button>
+                <button type="button" class="musteri-form-btn-cogalt" onclick="girisGroupModalAc()" title="Cariyi gruba bağla / gruptan çıkar / hızlı grup oluştur"><i class="fa fa-sitemap" aria-hidden="true"></i> Grup Ayarları</button>
                 <button type="button" onclick="temizleForm()" style="background:#4caf50;color:#fff;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600;">
                     ➕ Yeni Müşteri
                 </button>
@@ -2066,6 +2250,7 @@
             <button class="tab" data-index="6" onclick="switchTab(6)">Sözleşmeler</button>
             <button class="tab" data-index="7" onclick="switchTab(7)">Müşteriler</button>
             <button class="tab" data-index="8" onclick="switchTab(8)">Randevu</button>
+            <button class="tab" data-index="9" onclick="switchTab(9)">Grup</button>
         </div>
         
         <div class="tab-content-wrapper" id="tab-content-wrapper">
@@ -2074,6 +2259,7 @@
         <div class="tab-content active" id="tab-0">
             <form id="musteri-form" onsubmit="event.preventDefault(); return false;" action="javascript:void(0)">
                 <input type="hidden" id="musteri-id">
+                <input type="hidden" id="parent_cari_id">
                 
                 <!-- Şirket Bilgileri -->
                 <div class="form-section">
@@ -2155,13 +2341,13 @@
                         
                         <label class="required">Yetkili Cep Telefon</label>
                         <div class="giris-tel-ve-kime" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;min-width:0;width:100%;">
-                            <input type="text" id="phone" placeholder="5XX XXX XX XX" maxlength="10" inputmode="numeric" oninput="telefonInput(this)" onchange="hesaplaYuzde()" style="flex:0 1 120px;min-width:90px;max-width:160px;">
+                            <input type="text" id="phone" placeholder="5XX XXX XX XX" maxlength="10" inputmode="numeric" oninput="telefonInput(this)" onpaste="telefonPasteTr(event)" onchange="hesaplaYuzde()" style="flex:0 1 120px;min-width:90px;max-width:160px;">
                             <input type="text" id="phone_kime" placeholder="Kime ait" maxlength="120" autocomplete="off" onchange="hesaplaYuzde()" style="flex:1 1 160px;min-width:120px;">
                         </div>
                         
                         <label>Yetkili Cep Tel 2</label>
                         <div class="giris-tel-ve-kime" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;min-width:0;width:100%;">
-                            <input type="text" id="phone2" maxlength="10" inputmode="numeric" oninput="telefonInput(this)" onchange="hesaplaYuzde()" style="flex:0 1 120px;min-width:90px;max-width:160px;">
+                            <input type="text" id="phone2" maxlength="10" inputmode="numeric" oninput="telefonInput(this)" onpaste="telefonPasteTr(event)" onchange="hesaplaYuzde()" style="flex:0 1 120px;min-width:90px;max-width:160px;">
                             <input type="text" id="phone2_kime" placeholder="Kime ait" maxlength="120" autocomplete="off" onchange="hesaplaYuzde()" style="flex:1 1 160px;min-width:120px;">
                         </div>
                         
@@ -2207,7 +2393,7 @@
                         
                         <label>Ödeme Düzeni</label>
                         <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-                            <select id="odeme_duzeni" onchange="hesaplaYuzde(); var m=document.getElementById('odeme_duzeni_manuel_wrap'); if(m) m.style.display=(this.value==='manuel'?'block':'none');">
+                            <select id="odeme_duzeni" onchange="hesaplaYuzde(); sozlesmelerOdemeDuzeniManuelUygula();">
                                 <option value="aylik" selected>Aylık</option>
                                 <option value="yillik">Yıllık</option>
                                 <option value="3_aylik">3 Aylık</option>
@@ -2257,6 +2443,13 @@
                             <option value="aktif" selected>Aktif</option>
                             <option value="pasif">Pasif</option>
                         </select>
+                        <label>Grup</label>
+                        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;min-width:0;">
+                            <select id="giris_form_grup_select" title="Tümü: gruba bağlı değil; listeden grup seçerek cariyi bağlarsınız." onchange="girisFormGrupDegisti();" style="flex:1;min-width:160px;max-width:320px;padding:8px 10px;border-radius:4px;border:1px solid #2d4060;background:#0f2537;color:#e0f7fa;font-size:13px;">
+                                <option value="">Tümü</option>
+                            </select>
+                            <button type="button" id="giris_form_grup_yeni_btn" class="auto-btn" onclick="girisFormYeniGrupEkle(); return false;" title="Yeni grup oluştur" style="padding:8px 14px;border-radius:4px;border:none;background:#00838f;color:#fff;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">+ Yeni grup</button>
+                        </div>
                         <label id="kapanis_tarihi_label" style="display:none;">Kapanış Tarihi</label>
                         <input type="date" id="kapanis_tarihi" style="display:none;" onchange="hesaplaYuzde()" title="Şirket kapanış tarihi (pasif seçildiğinde)">
                     </div>
@@ -2489,8 +2682,15 @@
             </div>
         </div>
 
-        <!-- Sekme 5: Tahsilat - Yeni Tahsilat Makbuzu -->
+        <!-- Sekme 5: Tahsilat - Yeni Tahsilat Makbuzu + Rapor -->
         <div class="tab-content" id="tab-3">
+            <div class="giris-tahsil-ust-sekmeler" role="tablist">
+                <button type="button" role="tab" class="giris-tahsil-ust-tab active" id="giris_tahsil_tab_makbuz" aria-selected="true"
+                    onclick="girisTahsilUstSekme('makbuz'); return false;"><i class="fa fa-receipt"></i> Yeni Tahsilat Makbuzu</button>
+                <button type="button" role="tab" class="giris-tahsil-ust-tab" id="giris_tahsil_tab_rapor" aria-selected="false"
+                    onclick="girisTahsilUstSekme('rapor'); return false;"><i class="fa fa-bar-chart"></i> Rapor</button>
+            </div>
+            <div id="giris_tahsil_panel_makbuz" class="giris-tahsil-panel" role="tabpanel">
             <div class="tahsilat-makbuz-wrap">
                 <div class="tahsilat-makbuz-baslik">
                     <h3><i class="fa fa-receipt"></i> Yeni Tahsilat Makbuzu</h3>
@@ -2540,6 +2740,25 @@
                         <button type="button" class="tahsilat-btn-whatsapp" onclick="girisTahsilatWhatsApp(); return false;"><i class="fa fa-whatsapp"></i> WhatsApp</button>
                     </div>
                 </form>
+            </div>
+            </div>
+            <div id="giris_tahsil_panel_rapor" class="giris-tahsil-panel" role="tabpanel" style="display:none;">
+                <div class="giris-tahsil-rapor-kutu">
+                    <div class="giris-tahsil-rapor-filtre">
+                        <div>
+                            <label for="giris_tahsil_rapor_bas">Başlangıç</label>
+                            <input type="date" id="giris_tahsil_rapor_bas" autocomplete="off">
+                        </div>
+                        <div>
+                            <label for="giris_tahsil_rapor_bit">Bitiş</label>
+                            <input type="date" id="giris_tahsil_rapor_bit" autocomplete="off">
+                        </div>
+                        <button type="button" class="tahsilat-btn-kaydet" onclick="girisTahsilRaporYukle(); return false;"><i class="fa fa-search"></i> Listele</button>
+                    </div>
+                    <p class="giris-tahsil-rapor-aciklama">Tahsilat tarihine göre kayıtlı makbuzlar. Varsayılan: bugün. Tarih aralığı seçip <strong>Listele</strong> ile filtreleyebilirsiniz.</p>
+                    <div id="giris_tahsil_rapor_durum" class="giris-tahsil-rapor-durum" role="status" aria-live="polite"></div>
+                    <div id="giris_tahsil_rapor_list" class="giris-tahsil-rapor-list"></div>
+                </div>
             </div>
         </div>
         
@@ -2867,9 +3086,35 @@
         <div class="tab-content" id="tab-8">
             <iframe id="giris-randevu-iframe" title="Randevu al"></iframe>
         </div>
+        <div class="tab-content" id="tab-9">
+            <div class="fatura-rapor-wrap giris-fatura-rapor-wrap fatura-rapor-wrap--compact">
+                <div class="fatura-rapor-filtre">
+                    <button type="button" class="auto-btn run" id="giris_grup_ozet_btn" onclick="girisGrupOzetListeYukle({ force: true })"><i class="fa fa-list"></i> Listeyi yenile</button>
+                    <span style="font-size:12px;color:#90a4ae;margin-left:6px;">Alt carilerin fatura ve tahsilat toplamları (konsolide). Grup satırına tıklayınca alt firmalar açılır.</span>
+                </div>
+                <div id="giris_grup_ozet_durum" class="fatura-rapor-durum fatura-rapor-durum--idle" role="status" aria-live="polite" aria-atomic="true" hidden></div>
+                <div id="giris_grup_ozet_tablo_scroll" class="fatura-rapor-tablo-scroll">
+                    <table id="giris_grup_ozet_tablo" class="fatura-rapor-tablo" style="display:table;">
+                        <thead>
+                            <tr>
+                                <th class="num">Grup no</th>
+                                <th>Grup adı</th>
+                                <th class="num" title="Bu gruba bağlı cari sayısı">Alt cari</th>
+                                <th class="num" id="giris_grup_ozet_th_aylik" title="Alt carilerde fatura tarihi bu takvim ayı içindeki faturaların toplamı">Aylık borç</th>
+                                <th class="num">Toplam borç (fatura)</th>
+                                <th class="num">Toplam alacak (tahsilat)</th>
+                                <th class="num">Net</th>
+                            </tr>
+                        </thead>
+                        <tbody id="giris_grup_ozet_tbody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
         </div>
         <div class="tab-content-right" id="sozlesmeler-sag-alan">
             <div id="sozlesmeler-aylik-bolum">
+                <div id="sozlesmeler-aylik-kiracı-panel">
                 <div class="sozlesmeler-aylik-baslik-bar">
                     <div class="sozlesmeler-aylik-sekme-bar">
                         <button type="button" class="sozlesmeler-aylik-sekme" data-pane="normal" aria-selected="false" onclick="sozlesmelerAylikSekmeAc('normal')">Aylık Tutarlar</button>
@@ -2950,6 +3195,10 @@
                     </div>
                     <p class="sozlesmeler-aylik-makbuz-alt-hint">Seçili aylar cari hesaba havale tahsilatı olarak işlenir (üstteki «Seçilenleri tahsil et» ile aynı). PDF önizleme veya farklı ödeme türü için aşağıdaki «Yeni Tahsilat Makbuzu» formunu kullanın.</p>
                 </div>
+                </div>
+                <p id="sozlesmeler-manuel-bilgi" class="sozlesmeler-manuel-bilgi" style="display:none;" role="status">
+                    <strong>Manuel ödeme</strong> — Bu kayıt düzenli aylık kira borçlandırması için değil; günlük fatura ve tahsilat akışındaki bir firmadır. Aylık takvim gizlendi. Fatura ve tahsilatı aşağıdaki formlardan işleyebilirsiniz.
+                </p>
                 <div class="sozlesmeler-yeni-fatura-wrap">
                     <h4 class="sozlesmeler-sag-baslik"><i class="fa fa-file-text-o"></i> Yeni Fatura Oluştur</h4>
                     <button type="button" class="btn-yeni-fatura-kisa" onclick="sozlesmeYeniFaturaAc(false)"><i class="fa fa-plus"></i> Fatura Oluştur</button>
@@ -3091,6 +3340,66 @@
                         <button type="button" class="cari-ekstre-modal-close" onclick="cariEkstreTahsilatModalKapat()" aria-label="Kapat">&times;</button>
                     </div>
                     <div id="cari_ekstre_tahsilat_modal_body" class="cari-ekstre-modal-body"></div>
+                </div>
+            </div>
+            <div id="giris_group_modal" class="cari-ekstre-modal-overlay" aria-hidden="true">
+                <div class="cari-ekstre-modal-panel" role="dialog" aria-labelledby="giris_group_modal_baslik">
+                    <div class="cari-ekstre-modal-head">
+                        <h3 id="giris_group_modal_baslik">Grup Ayarları</h3>
+                        <button type="button" class="cari-ekstre-modal-close" onclick="girisGroupModalKapat()" aria-label="Kapat">&times;</button>
+                    </div>
+                    <div class="cari-ekstre-modal-body">
+                        <div style="display:grid;gap:10px;">
+                            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                                <button type="button" id="giris_group_tab_customer" class="btn-aylik-sec" onclick="girisGroupSekmeAc('customer')" style="min-width:140px;">Cari Bazlı</button>
+                                <button type="button" id="giris_group_tab_service" class="btn-aylik-sec" onclick="girisGroupSekmeAc('service')" style="min-width:140px;">Hizmet Türü</button>
+                            </div>
+
+                            <div id="giris_group_panel_customer" style="display:grid;gap:10px;">
+                                <div>
+                                    <label style="display:block;font-size:12px;color:#90a4ae;margin-bottom:6px;">Bu Cariyi Bir Gruba Bağla</label>
+                                    <input type="text" id="giris_group_parent_search" placeholder="Grup ara..." autocomplete="off" style="width:100%;padding:8px 10px;margin-bottom:6px;border-radius:6px;border:1px solid #2d4060;background:#0f2537;color:#e0f7fa;font-size:13px;">
+                                    <select id="giris_group_parent_select" style="width:100%;padding:9px 10px;border-radius:6px;border:1px solid #2d4060;background:#0f2537;color:#e0f7fa;font-size:13px;">
+                                        <option value="">Grupsuz</option>
+                                    </select>
+                                    <div id="giris_group_current_info" style="margin-top:6px;font-size:12px;color:#90a4ae;">Mevcut: Grupsuz</div>
+                                    <div id="giris_group_preview" style="display:none;margin-top:7px;padding:8px 10px;border-radius:6px;background:rgba(33,150,243,.12);border:1px solid rgba(33,150,243,.35);font-size:12px;color:#d2ecff;"></div>
+                                </div>
+                                <div>
+                                    <label style="display:block;font-size:12px;color:#90a4ae;margin-bottom:6px;">Hızlı Grup Oluştur</label>
+                                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                                        <input type="text" id="giris_group_new_name" placeholder="Örn: DUVPAN Grup" style="flex:1;min-width:180px;padding:9px 10px;border-radius:6px;border:1px solid #2d4060;background:#0f2537;color:#e0f7fa;font-size:13px;">
+                                        <button type="button" class="tahsilat-btn-kaydet" onclick="girisGroupOlusturVeBagla()"><i class="fa fa-plus"></i> Yeni Grup Oluştur</button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div id="giris_group_panel_service" style="display:none;grid-template-columns:1fr;gap:10px;">
+                                <div>
+                                    <label style="display:block;font-size:12px;color:#90a4ae;margin-bottom:6px;">Hizmet Türü Seç</label>
+                                    <select id="giris_group_hizmet_turu_select" style="width:100%;padding:9px 10px;border-radius:6px;border:1px solid #2d4060;background:#0f2537;color:#e0f7fa;font-size:13px;">
+                                        <option value="">Hizmet türü seçin</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label style="display:block;font-size:12px;color:#90a4ae;margin-bottom:6px;">Seçili Hizmet Türündeki Tüm Carileri Bir Gruba Bağla</label>
+                                    <input type="text" id="giris_group_parent_search_service" placeholder="Grup ara..." autocomplete="off" style="width:100%;padding:8px 10px;margin-bottom:6px;border-radius:6px;border:1px solid #2d4060;background:#0f2537;color:#e0f7fa;font-size:13px;">
+                                    <select id="giris_group_parent_select_service" style="width:100%;padding:9px 10px;border-radius:6px;border:1px solid #2d4060;background:#0f2537;color:#e0f7fa;font-size:13px;">
+                                        <option value="">Grup seçin</option>
+                                    </select>
+                                    <div id="giris_group_preview_service" style="display:none;margin-top:7px;padding:8px 10px;border-radius:6px;background:rgba(33,150,243,.12);border:1px solid rgba(33,150,243,.35);font-size:12px;color:#d2ecff;"></div>
+                                </div>
+                                <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:2px;">
+                                    <button type="button" class="tahsilat-btn-kaydet" onclick="girisGroupHizmetTurunuTopluBagla()"><i class="fa fa-object-group"></i> Hizmet Türünü Toplu Bağla</button>
+                                </div>
+                            </div>
+
+                            <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:6px;">
+                                <button type="button" class="btn-aylik-sec" onclick="girisGroupModalKapat()">Kapat</button>
+                                <button type="button" id="giris_group_customer_save_btn" class="tahsilat-btn-kaydet" onclick="girisGroupBaglantiyiKaydet()"><i class="fa fa-save"></i> Kaydet</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -3315,7 +3624,7 @@ function girisBootstrapMusteriVeSekme() {
             var ts = localStorage.getItem('bestoffice_giris_tab_index');
             if (ts != null) {
                 var ti = parseInt(ts, 10);
-                if (!isNaN(ti) && ti >= 0 && ti <= 8) tabIdx = ti;
+                if (!isNaN(ti) && ti >= 0 && ti <= 9) tabIdx = ti;
             }
         }
         if (typeof switchTab === 'function') switchTab(tabIdx);
@@ -3376,28 +3685,38 @@ function sozlesmeTahsilSetFromJson(j) {
 function sozlesmeTahsilDurumunuYukle() {
     if (!selectedId) {
         sozlesmeTahsilEdilenAyAnahtarlari = new Set();
-        return Promise.resolve();
+        return Promise.resolve(null);
     }
-    return fetch('/giris/api/aylik-tahsil-durum?musteri_id=' + encodeURIComponent(selectedId))
-        .then(function(r) { return r.json(); })
-        .then(sozlesmeTahsilSetFromJson)
-        .catch(function() {
+    /* no-store + ts: tahsil/tahsilden sonrası ardışık GET'lerde önbellekten eski «aylar» gelmesini önle */
+    var bust = '&_ts=' + encodeURIComponent(String(Date.now()));
+    return fetch('/giris/api/aylik-tahsil-durum?musteri_id=' + encodeURIComponent(selectedId) + bust, {
+        credentials: 'same-origin',
+        cache: 'no-store'
+    })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+            sozlesmeTahsilSetFromJson(j);
+            return j;
+        })
+        .catch(function () {
             sozlesmeTahsilEdilenAyAnahtarlari = new Set();
+            return null;
         });
 }
 
 /** Tahsil durumu + grid cache aynı anda; müşteri seçiminde gecikmeyi azaltır. */
 function sozlesmeAylikGridParalelYukle(mid) {
     if (!mid) return Promise.resolve();
+    if (sozlesmelerOdemeDuzeniManuelMi()) return Promise.resolve();
     if (!document.getElementById('sozlesmeler-aylik-grid')) return Promise.resolve();
     sozlesmeAylikBorclananMusteriDegistir(mid);
-    var tUrl = '/giris/api/aylik-tahsil-durum?musteri_id=' + encodeURIComponent(mid);
+    var tUrl = '/giris/api/aylik-tahsil-durum?musteri_id=' + encodeURIComponent(mid) + '&_ts=' + encodeURIComponent(String(Date.now()));
     var cUrl = '/giris/api/aylik-grid-cache?musteri_id=' + encodeURIComponent(mid);
     var rUrl = '/giris/api/reel-donem-tutarlar?musteri_id=' + encodeURIComponent(mid);
     return Promise.all([
-        fetch(tUrl).then(function (r) { return r.json(); }),
-        fetch(cUrl).then(function (r) { return r.json(); }),
-        fetch(rUrl).then(function (r) { return r.json(); })
+        fetch(tUrl, { credentials: 'same-origin', cache: 'no-store' }).then(function (r) { return r.json(); }),
+        fetch(cUrl, { credentials: 'same-origin' }).then(function (r) { return r.json(); }),
+        fetch(rUrl, { credentials: 'same-origin' }).then(function (r) { return r.json(); })
     ]).then(function (triple) {
         sozlesmeTahsilSetFromJson(triple[0]);
         var rj = triple[2];
@@ -4445,6 +4764,7 @@ function sozlesmelerAylikHizliYukle(force) {
             pCache,
             fetch('/giris/api/reel-donem-tutarlar?musteri_id=' + encodeURIComponent(mid)).then(function (r) { return r.json(); })
         ]).then(function (triple) {
+            sozlesmeTahsilSetFromJson(triple[0]);
             var j = triple[1];
             var rj = triple[2];
             window.__musteriReelDonemTutarlari = (rj && rj.ok && rj.map && typeof rj.map === 'object') ? rj.map : {};
@@ -4460,6 +4780,7 @@ function sozlesmelerAylikHizliYukle(force) {
         pCache,
         fetch('/giris/api/reel-donem-tutarlar?musteri_id=' + encodeURIComponent(mid)).then(function (r) { return r.json(); })
     ]).then(function (triple) {
+        sozlesmeTahsilSetFromJson(triple[0]);
         var j = triple[1];
         var rj = triple[2];
         window.__musteriReelDonemTutarlari = (rj && rj.ok && rj.map && typeof rj.map === 'object') ? rj.map : {};
@@ -4470,7 +4791,7 @@ function sozlesmelerAylikHizliYukle(force) {
         return ok;
     }).catch(function () { return false; });
 }
-/** Açık olan sekme (0=Müşteri Ekle, 1=Kira Senaryo, 2=Kira Bildirgesi, 3=Tahsilat, 4=Cari Kart, 5=Potansiyel, 6=Sözleşmeler, 7=Müşteri listesi, 8=Randevu). Müşteri seçimi bu sekmeye göre forma doldurur. */
+/** Açık olan sekme (0=Müşteri Ekle, 1=Kira Senaryo, 2=Kira Bildirgesi, 3=Tahsilat, 4=Cari Kart, 5=Potansiyel, 6=Sözleşmeler, 7=Müşteri listesi, 8=Randevu, 9=Grup). Müşteri seçimi bu sekmeye göre forma doldurur. */
 let currentTabIndex = 0;
 
 /** Giriş sayfası Randevu sekmesi: tam genişlik /randevu/randevu-al iframe; seçili müşteri URL ile ön doldurulur (iframe içinde başka müşteri aranabilir). */
@@ -4489,11 +4810,11 @@ function girisRandevuIframeYukle() {
     fr.src = url;
 }
 
-// Sekme değiştirme (içerik id: tab-0 .. tab-8)
+// Sekme değiştirme (içerik id: tab-0 .. tab-9)
 function switchTab(index) {
     currentTabIndex = index;
     try {
-        if (index >= 0 && index <= 8) localStorage.setItem('bestoffice_giris_tab_index', String(index));
+        if (index >= 0 && index <= 9) localStorage.setItem('bestoffice_giris_tab_index', String(index));
     } catch (e) {}
     // Üst sekme butonlarının aktifliğini index yerine data-index ile kontrol et
     document.querySelectorAll('.tab').forEach(function(t) {
@@ -4505,7 +4826,7 @@ function switchTab(index) {
         }
     });
 
-    // Sözleşmeler (6): sol panelde tab-0 gösterilir; Randevu (8) tam genişlik tab-8
+    // Sözleşmeler (6): sol panelde tab-0 gösterilir; Randevu (8) tam genişlik tab-8; Grup (9) tab-9
     var effectiveIndex = (index === 6 ? 0 : index);
     var tabId = (index === 6 ? 'tab-0' : 'tab-' + index);
     var wrapper = document.getElementById('tab-content-wrapper');
@@ -4537,6 +4858,9 @@ function switchTab(index) {
                 if (tarihEl && !tarihEl.value) tarihEl.value = new Date().toISOString().slice(0, 10);
                 girisTahsilatFormunuSeciliMusteridenDoldur();
                 tahsilatMakbuzTutarlariniGuncelleDisardan();
+                if (window.__girisTahsilAktifAltSekme === 'rapor' && typeof girisTahsilRaporYukle === 'function') {
+                    girisTahsilRaporYukle();
+                }
             }
             if (effectiveIndex === 4) {
                 if (selectedId) cariKartYukle(selectedId);
@@ -4560,6 +4884,9 @@ function switchTab(index) {
                 if (_frBosSatir && _frDurBosVeyaIdle && typeof faturaRaporDurumGoster === 'function') {
                     faturaRaporDurumGoster('idle', '');
                 }
+            }
+            if (effectiveIndex === 9) {
+                if (typeof girisGrupOzetListeYukle === 'function') girisGrupOzetListeYukle();
             }
             if (effectiveIndex === 1) {
                 var midSenaryo = selectedId;
@@ -4599,6 +4926,273 @@ function switchTab(index) {
     }
     /* Cari ekstre burada çağrılmasın: form henüz güncellenmeden eski tarihlerle istek gidiyordu.
        Tarihler fillActiveTab + cariEkstreMusteriDegisinceYenile ile ayarlanır. */
+}
+
+function girisGrupOzetDurumGoster(tip, metin) {
+    var el = document.getElementById('giris_grup_ozet_durum');
+    if (!el) return;
+    var t = tip || 'idle';
+    var s = metin != null ? String(metin) : '';
+    el.setAttribute('aria-busy', t === 'loading' ? 'true' : 'false');
+    if (t === 'idle' && !s.trim()) {
+        el.textContent = '';
+        el.className = 'fatura-rapor-durum fatura-rapor-durum--idle';
+        el.hidden = true;
+        return;
+    }
+    el.hidden = false;
+    el.className = 'fatura-rapor-durum fatura-rapor-durum--' + t;
+    el.textContent = s;
+}
+
+function girisGrupOzetParaYaz(v) {
+    var n = parseFloat(v || 0);
+    if (isNaN(n)) n = 0;
+    return n.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ₺';
+}
+
+function girisGrupHtmlEsc(s) {
+    if (s == null) return '';
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/"/g, '&quot;');
+}
+
+function girisGrupOzetTbodyClickInit() {
+    var tb = document.getElementById('giris_grup_ozet_tbody');
+    if (!tb || tb.__girisGrupClickOk) return;
+    tb.__girisGrupClickOk = true;
+    tb.addEventListener('click', function (ev) {
+        var tr = ev.target.closest('tr.giris-grup-ana-satir');
+        if (!tr || !tb.contains(tr)) return;
+        if (ev.target.closest('.giris-grup-detay-icerik')) return;
+        girisGrupAnaSatirToggle(ev, tr);
+    });
+}
+
+function girisGrupAnaSatirToggle(ev, tr) {
+    if (ev) ev.preventDefault();
+    var gid = tr.getAttribute('data-gid');
+    if (!gid) return;
+    var next = tr.nextElementSibling;
+    if (next && next.classList && next.classList.contains('giris-grup-nested-row')) {
+        next.remove();
+        return;
+    }
+    var tb = tr.parentNode;
+    if (tb) {
+        tb.querySelectorAll('tr.giris-grup-nested-row').forEach(function (r) { r.remove(); });
+    }
+    var holder = document.createElement('tr');
+    holder.className = 'giris-grup-nested-row';
+    holder.innerHTML = '<td colspan="7"><div class="giris-grup-detay-icerik" style="padding:10px 12px 12px 20px;background:rgba(0,0,0,.18);">Alt firmalar yükleniyor…</div></td>';
+    tr.parentNode.insertBefore(holder, tr.nextSibling);
+    var box = holder.querySelector('.giris-grup-detay-icerik');
+    girisFetchAgKopmasinaKarsi('/cari-kart/api/group-children/' + encodeURIComponent(gid), { credentials: 'same-origin' }, 2)
+        .then(function (r) { return girisFetchJsonSafely(r); })
+        .then(function (j) {
+            if (!j || !j.ok) throw new Error((j && j.mesaj) || 'Alt liste alınamadı.');
+            var ch = Array.isArray(j.children) ? j.children : [];
+            if (!ch.length) {
+                if (box) box.innerHTML = '<div class="giris-grup-detay-bos">Bu gruba bağlı cari yok.</div>';
+                return;
+            }
+            var h = [
+                '<div style="font-size:12px;color:#4fc3f7;font-weight:600;margin-bottom:8px;">Alt firmalar — ',
+                girisGrupHtmlEsc(j.group_name || ('Grup #' + gid)),
+                '</div>',
+                '<table class="giris-grup-detay-tablo fatura-rapor-tablo"><thead><tr>',
+                '<th class="num">Cari no</th><th>Firma</th>',
+                '<th class="num">Aylık borç</th><th class="num">Toplam borç</th><th class="num">Alacak</th><th class="num">Net</th>',
+                '<th class="num">İşlem</th></tr></thead><tbody>'
+            ];
+            ch.forEach(function (c) {
+                var firma = (c.name && String(c.name).trim()) ? c.name : (c.musteri_adi || '');
+                var mid = String(c.id);
+                h.push(
+                    '<tr>' +
+                    '<td class="num">' + girisGrupHtmlEsc(c.musteri_no || '—') + '</td>' +
+                    '<td>' + girisGrupHtmlEsc(firma || ('#' + mid)) + '</td>' +
+                    '<td class="num">' + girisGrupOzetParaYaz(c.borc_month != null ? c.borc_month : 0) + '</td>' +
+                    '<td class="num">' + girisGrupOzetParaYaz(c.borc_total) + '</td>' +
+                    '<td class="num">' + girisGrupOzetParaYaz(c.alacak_total) + '</td>' +
+                    '<td class="num">' + girisGrupOzetParaYaz(c.net_balance) + '</td>' +
+                    '<td class="num"><button type="button" class="auto-btn" style="padding:4px 8px;font-size:11px;" data-mid="' + mid + '" onclick="girisGrupDetayMusteriSec(event,' + mid + ')">Aç</button></td>' +
+                    '</tr>'
+                );
+            });
+            h.push('</tbody></table>');
+            if (box) box.innerHTML = h.join('');
+        })
+        .catch(function (e) {
+            if (box) box.innerHTML = '<div class="giris-grup-detay-bos" style="color:#ef9a9a;">' + girisGrupHtmlEsc((e && e.message) ? e.message : 'Yüklenemedi') + '</div>';
+        });
+}
+
+function girisGrupDetayMusteriSec(ev, mid) {
+    if (ev) ev.stopPropagation();
+    var n = parseInt(mid, 10);
+    if (isNaN(n) || n < 1) return;
+    if (typeof switchTab === 'function') switchTab(0);
+    if (typeof selectMusteri === 'function') selectMusteri(n);
+}
+
+/** Grup konsolide API yanıtı: sayfa açılışında arka planda bir kez alınır; sekme geçişlerinde tekrar istek atılmaz. */
+window.__girisGrupOzetReportCache = null;
+window.__girisGrupOzetReportInflight = null;
+/** Yalnızca «Listeyi yenile» (force) ile artar; bitmemiş eski isteklerin önbelleği ezmesini engeller. */
+window.__girisGrupOzetWriteToken = 0;
+
+function girisGrupOzetListeJsonUygula(j) {
+    var tbody = document.getElementById('giris_grup_ozet_tbody');
+    if (!tbody || !j || !j.ok) return null;
+    var meta = j.meta || {};
+    var thA = document.getElementById('giris_grup_ozet_th_aylik');
+    if (thA && meta.borc_month_label) {
+        thA.textContent = 'Aylık borç (' + String(meta.borc_month_label) + ')';
+        thA.title = 'Sözleşme aylık gridi (TÜFE + reel) ile aynı KDV dahil tutar, ' + String(meta.borc_month_label || '') + ' (alt cariler).';
+    }
+    var arr = Array.isArray(j.groups) ? j.groups : [];
+    var tot = j.totals || {};
+    var rows = [];
+    arr.forEach(function (g) {
+        var nm = String(g.name || ('Grup #' + g.id)).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+        rows.push(
+            '<tr class="giris-grup-ana-satir" data-gid="' + String(g.id) + '">' +
+            '<td class="num">' + String(g.id) + '</td>' +
+            '<td>' + nm + '</td>' +
+            '<td class="num">' + String(g.child_count != null ? g.child_count : 0) + '</td>' +
+            '<td class="num">' + girisGrupOzetParaYaz(g.borc_month != null ? g.borc_month : 0) + '</td>' +
+            '<td class="num">' + girisGrupOzetParaYaz(g.borc_total) + '</td>' +
+            '<td class="num">' + girisGrupOzetParaYaz(g.alacak_total) + '</td>' +
+            '<td class="num">' + girisGrupOzetParaYaz(g.net_balance) + '</td>' +
+            '</tr>'
+        );
+    });
+    tbody.innerHTML = rows.join('');
+    return '✓ Liste güncellendi. | Grup: ' + String(tot.group_count != null ? tot.group_count : arr.length) +
+        ' | Alt cari (bağlantı) toplamı: ' + String(tot.child_count_sum != null ? tot.child_count_sum : '—') +
+        ' | Bu ay (grid): ' + girisGrupOzetParaYaz(tot.borc_month_total) +
+        ' | Toplam borç: ' + girisGrupOzetParaYaz(tot.borc_total) +
+        ' | Alacak: ' + girisGrupOzetParaYaz(tot.alacak_total) +
+        ' | Net: ' + girisGrupOzetParaYaz(tot.net_balance);
+}
+
+/**
+ * @param {object} [opt]
+ * @param {boolean} [opt.force] — true: sunucudan yeniden çek (Listeyi yenile).
+ * @param {boolean} [opt.background] — true: giriş sayfası açılışında sessiz ön yükleme; yükleme çubuğu ve buton kilidi yok.
+ */
+function girisGrupOzetListeYukle(opt) {
+    opt = opt || {};
+    var force = !!opt.force;
+    var background = !!opt.background;
+    var tbody = document.getElementById('giris_grup_ozet_tbody');
+    var btn = document.getElementById('giris_grup_ozet_btn');
+    if (!tbody) return;
+    girisGrupOzetTbodyClickInit();
+
+    function btnSerbestBirak() {
+        if (btn) {
+            btn.disabled = false;
+            btn.removeAttribute('aria-busy');
+            btn.innerHTML = '<i class="fa fa-list"></i> Listeyi yenile';
+        }
+    }
+
+    if (!force && window.__girisGrupOzetReportCache && window.__girisGrupOzetReportCache.ok) {
+        var ozetHit = girisGrupOzetListeJsonUygula(window.__girisGrupOzetReportCache);
+        if (ozetHit) girisGrupOzetDurumGoster('success', ozetHit);
+        return;
+    }
+
+    if (!force && window.__girisGrupOzetReportInflight) {
+        if (!background) {
+            if (btn) {
+                btn.disabled = true;
+                btn.setAttribute('aria-busy', 'true');
+            }
+            girisGrupOzetDurumGoster('loading', 'Gruplar yükleniyor…');
+        }
+        window.__girisGrupOzetReportInflight
+            .then(function (j) {
+                if (!j || !j.ok) {
+                    var cW = window.__girisGrupOzetReportCache;
+                    if (cW && cW.ok) j = cW;
+                }
+                if (!j || !j.ok) {
+                    if (!background && window.__girisGrupOzetReportInflight) {
+                        girisGrupOzetListeYukle(opt);
+                        return;
+                    }
+                    if (!background) {
+                        tbody.innerHTML = '';
+                        girisGrupOzetDurumGoster('error', (j && j.mesaj) ? j.mesaj : 'Liste alınamadı.');
+                    }
+                    return;
+                }
+                var ozetW = girisGrupOzetListeJsonUygula(j);
+                if (ozetW && !background) girisGrupOzetDurumGoster('success', ozetW);
+                else if (ozetW && background && typeof currentTabIndex !== 'undefined' && currentTabIndex === 9) {
+                    girisGrupOzetDurumGoster('success', ozetW);
+                }
+            })
+            .catch(function (e) {
+                if (!background) {
+                    tbody.innerHTML = '';
+                    girisGrupOzetDurumGoster('error', (e && e.message) ? e.message : 'Liste yüklenemedi.');
+                }
+            })
+            .finally(btnSerbestBirak);
+        return;
+    }
+
+    if (force) {
+        window.__girisGrupOzetWriteToken++;
+        window.__girisGrupOzetReportCache = null;
+    }
+    var writeToken = window.__girisGrupOzetWriteToken;
+
+    if (!background) {
+        if (btn) {
+            btn.disabled = true;
+            btn.setAttribute('aria-busy', 'true');
+        }
+        girisGrupOzetDurumGoster('loading', 'Gruplar yükleniyor…');
+    }
+
+    var p = girisFetchAgKopmasinaKarsi('/cari-kart/api/groups-consolidated-report', { credentials: 'same-origin' }, 2)
+        .then(function (r) { return girisFetchJsonSafely(r); })
+        .then(function (j) {
+            if (writeToken !== window.__girisGrupOzetWriteToken) return null;
+            if (!j || !j.ok) throw new Error((j && j.mesaj) || 'Liste alınamadı.');
+            window.__girisGrupOzetReportCache = j;
+            var ozet = girisGrupOzetListeJsonUygula(j);
+            if (!ozet) throw new Error('Liste işlenemedi.');
+            if (!background) girisGrupOzetDurumGoster('success', ozet);
+            else if (typeof currentTabIndex !== 'undefined' && currentTabIndex === 9) girisGrupOzetDurumGoster('success', ozet);
+            return j;
+        })
+        .catch(function (e) {
+            if (writeToken !== window.__girisGrupOzetWriteToken) return;
+            if (!background) tbody.innerHTML = '';
+            if (!background) girisGrupOzetDurumGoster('error', (e && e.message) ? e.message : 'Liste yüklenemedi.');
+        })
+        .finally(function () {
+            btnSerbestBirak();
+            if (window.__girisGrupOzetReportInflight === p) window.__girisGrupOzetReportInflight = null;
+        });
+
+    window.__girisGrupOzetReportInflight = p;
+}
+
+/** Giriş sayfası yüklenince grup tablosunu bir kez arka planda doldurur (Grup sekmesine tıklanınca hazır olur). */
+function girisGrupOzetSayfaAcilisPrefetch() {
+    try {
+        if (typeof girisGrupOzetListeYukle !== 'function') return;
+        girisGrupOzetListeYukle({ background: true });
+    } catch (ePf) {}
 }
 
 function faturaRaporVarsayilanTarihlerDoldur() {
@@ -7839,9 +8433,56 @@ function kiraSuresiAylikOto(skipAylikGrid) {
     hesaplaYuzde(!!skipAylikGrid);
 }
 
+/** Ödeme düzeni «Manuel» — düzenli aylık grid / kiracı tahsil akışı kapalı (günlük fatura firması). */
+function sozlesmelerOdemeDuzeniManuelMi() {
+    var el = document.getElementById('odeme_duzeni');
+    return !!(el && String(el.value || '').toLowerCase() === 'manuel');
+}
+
+function sozlesmelerOdemeDuzeniManuelUygula() {
+    var panel = document.getElementById('sozlesmeler-aylik-kiracı-panel');
+    var mwrap = document.getElementById('odeme_duzeni_manuel_wrap');
+    var bilgi = document.getElementById('sozlesmeler-manuel-bilgi');
+    var manuel = sozlesmelerOdemeDuzeniManuelMi();
+    if (mwrap) mwrap.style.display = manuel ? 'inline-block' : 'none';
+    if (bilgi) bilgi.style.display = manuel ? 'block' : 'none';
+    if (panel) panel.style.display = manuel ? 'none' : '';
+    if (!manuel) return;
+    sozlesmelerAylikTwinGridHtml('');
+    sozlesmelerAylikTwinBosVisible(false);
+    sozlesmeAylikSeciliAnahtarlar.clear();
+    try { window.__girisAylikVarsayilanSecilenAnahtar = null; } catch (eOz) {}
+    sozlesmeAylikSecimOzetSpanlariYaz('Seçim yok');
+    var mAlt0 = document.getElementById('sozlesmeler-aylik-makbuz-alt');
+    if (mAlt0) mAlt0.style.display = 'none';
+    tahsilatMakbuzTutarlariniGuncelle(null, null);
+    try {
+        window.__sozlesmelerAylikSonCacheObj = null;
+        window.__sozlesmelerAylikYilSig = null;
+        window.__sozlesmelerAylikSonYilListesi = [];
+    } catch (eY0) {}
+    window.__sozlesmeAylikReqId = (window.__sozlesmeAylikReqId || 0) + 1;
+}
+
 function sozlesmelerAylikGuncelle() {
     var grid = document.getElementById('sozlesmeler-aylik-grid');
     if (!grid) return;
+    if (sozlesmelerOdemeDuzeniManuelMi()) {
+        sozlesmelerAylikTwinGridHtml('');
+        sozlesmelerAylikTwinBosVisible(false);
+        sozlesmeAylikSeciliAnahtarlar.clear();
+        try { window.__girisAylikVarsayilanSecilenAnahtar = null; } catch (eM) {}
+        sozlesmeAylikSecimOzetSpanlariYaz('Seçim yok');
+        var mAltM = document.getElementById('sozlesmeler-aylik-makbuz-alt');
+        if (mAltM) mAltM.style.display = 'none';
+        tahsilatMakbuzTutarlariniGuncelle(null, null);
+        try {
+            window.__sozlesmelerAylikSonCacheObj = null;
+            window.__sozlesmelerAylikYilSig = null;
+            window.__sozlesmelerAylikSonYilListesi = [];
+        } catch (eYm) {}
+        return;
+    }
     var basEl = document.getElementById('sozlesme_baslangic');
     var bitEl = document.getElementById('sozlesme_bitis');
     var kiraEl = document.getElementById('aylik_kira');
@@ -8374,18 +9015,17 @@ function sozlesmeAylikTahsildenCikar() {
         }
         var s = res.j.silinen || [];
         var a = res.j.atlanan || [];
-        alert((res.j.mesaj || '') + '\nSilinen: ' + s.length + ', kayıt yok: ' + a.length);
-        sozlesmeAylikSecimiTemizle();
         s.forEach(function (r) {
             var k = sozlesmeAylikAyKeyFromYilAy(r.yil, r.ay);
             if (k) sozlesmeTahsilEdilenAyAnahtarlari.delete(k);
         });
+        alert((res.j.mesaj || '') + '\nSilinen: ' + s.length + ', kayıt yok: ' + a.length);
+        sozlesmeAylikSecimiTemizle();
         if (window.__sozlesmelerAylikSonCacheObj && typeof sozlesmelerAylikOnbellekFormlaUyumlu === 'function' && sozlesmelerAylikOnbellekFormlaUyumlu(window.__sozlesmelerAylikSonCacheObj)) {
             sozlesmelerAylikCacheRender(window.__sozlesmelerAylikSonCacheObj, true);
         }
-        sozlesmeTahsilDurumunuYukle().then(function () {
-            return sozlesmelerAylikHizliYukle(true);
-        }).then(function (ok) {
+        /* Tahsil et ile aynı: tek sozlesmelerAylikHizliYukle (içinde tahsil durumu + cache); çift GET eski ayları geri yazmasın */
+        sozlesmelerAylikHizliYukle(true).then(function (ok) {
             if (!ok) sozlesmelerAylikGuncelle();
         });
         if (typeof cariEkstreBYukle === 'function') {
@@ -8431,18 +9071,16 @@ function sozlesmeAylikBorctanCikar() {
         }
         var s = res.j.silinen || [];
         var a = res.j.atlanan || [];
-        alert((res.j.mesaj || '') + '\nSilinen fatura: ' + s.length + ', kayıt yok: ' + a.length);
-        sozlesmeAylikSecimiTemizle();
         s.forEach(function (r) {
             var k = sozlesmeAylikAyKeyFromYilAy(r.yil, r.ay);
             if (k) sozlesmeAylikBorclananAyAnahtarlari.delete(k);
         });
+        alert((res.j.mesaj || '') + '\nSilinen fatura: ' + s.length + ', kayıt yok: ' + a.length);
+        sozlesmeAylikSecimiTemizle();
         if (window.__sozlesmelerAylikSonCacheObj && typeof sozlesmelerAylikOnbellekFormlaUyumlu === 'function' && sozlesmelerAylikOnbellekFormlaUyumlu(window.__sozlesmelerAylikSonCacheObj)) {
             sozlesmelerAylikCacheRender(window.__sozlesmelerAylikSonCacheObj, true);
         }
-        sozlesmeTahsilDurumunuYukle().then(function () {
-            return sozlesmelerAylikHizliYukle(true);
-        }).then(function (ok) {
+        sozlesmelerAylikHizliYukle(true).then(function (ok) {
             if (!ok) sozlesmelerAylikGuncelle();
         });
         if (typeof cariEkstreBYukle === 'function') {
@@ -9752,7 +10390,7 @@ function selectMusteri(id) {
     girisEmbedParentMusteriUrlGuncelle(id);
     girisStandaloneMidQueryGuncelle(id);
     var activeTab = getActiveTabIndex();
-    if (activeTab === 0 || activeTab === 6 || activeTab === 7 || activeTab === 8) {
+    if (activeTab === 0 || activeTab === 6 || activeTab === 7 || activeTab === 8 || activeTab === 9) {
         var muQuick = musteriler.find(function(m) { return m.id == id; });
         girisMusteriAramaPaneliniGizle(muQuick && muQuick.name ? muQuick.name : ('Müşteri #' + id));
     }
@@ -9788,7 +10426,7 @@ function selectMusteri(id) {
     }
     function fillActiveTab(data) {
         var m = data || { id: id, name: '', phone: '' };
-        if (activeTab === 0 || activeTab === 6 || activeTab === 7) {
+        if (activeTab === 0 || activeTab === 6 || activeTab === 7 || activeTab === 9) {
             var set = function(fid, val) { var el = document.getElementById(fid); if (el) el.value = (val != null && val !== undefined) ? String(val).trim() : ''; };
             set('musteri-id', m.id);
             set('musteri_no', m.musteri_no);
@@ -9851,11 +10489,32 @@ function selectMusteri(id) {
                 var raw = (m.duzenli_fatura != null && String(m.duzenli_fatura).trim() !== '') ? m.duzenli_fatura : 'duzenle';
                 duzenliFaturaSelectSet(raw);
             })();
+            (function () {
+                var parentHidden = document.getElementById('parent_cari_id');
+                if (!parentHidden) return;
+                var pval = (m.parent_cari_id != null && String(m.parent_cari_id).trim() !== '')
+                    ? String(m.parent_cari_id).trim()
+                    : ((m.parent_customer_id != null && String(m.parent_customer_id).trim() !== '') ? String(m.parent_customer_id).trim() : '');
+                parentHidden.value = pval;
+            })();
+            girisFormGrupListeYukle();
+            girisGroupStatusBadgeYaz();
+            (function () {
+                var odSel = document.getElementById('odeme_duzeni');
+                if (!odSel) return;
+                var rawOd = (m.odeme_duzeni != null && String(m.odeme_duzeni).trim() !== '') ? String(m.odeme_duzeni).trim().toLowerCase() : 'aylik';
+                var izin = { aylik: 1, yillik: 1, '3_aylik': 1, '6_aylik': 1, manuel: 1 };
+                if (!izin[rawOd]) rawOd = 'aylik';
+                odSel.value = rawOd;
+                var manInp = document.getElementById('odeme_duzeni_manuel');
+                if (manInp) manInp.value = (m.odeme_duzeni_manuel != null && m.odeme_duzeni_manuel !== undefined) ? String(m.odeme_duzeni_manuel) : '';
+                if (typeof sozlesmelerOdemeDuzeniManuelUygula === 'function') sozlesmelerOdemeDuzeniManuelUygula();
+            })();
             var dnorm = (m.durum && String(m.durum).toLowerCase().trim() === 'pasif') ? 'pasif' : 'aktif';
             if (dnorm === 'pasif') {
                 syncDurumUI('pasif', { kapanis: m.kapanis_tarihi });
             } else {
-                syncDurumUI('aktif', { skipAylikGrid: activeTab === 0 || activeTab === 6 || activeTab === 7 });
+                syncDurumUI('aktif', { skipAylikGrid: activeTab === 0 || activeTab === 6 || activeTab === 7 || activeTab === 9 });
             }
             if (m.guncel_kira_bedeli != null && m.guncel_kira_bedeli !== '') set('aylik_kira', m.guncel_kira_bedeli);
             else if (m.ilk_kira_bedeli != null && m.ilk_kira_bedeli !== '') set('aylik_kira', m.ilk_kira_bedeli);
@@ -9940,12 +10599,30 @@ function selectMusteri(id) {
             fillSozlesmeTahsilatMusteri(m.id, m);
         }
         sozlesmelerReelBaslangicGuncelle();
-        if (activeTab === 0 || activeTab === 6 || activeTab === 7) {
+        if (activeTab === 0 || activeTab === 6 || activeTab === 7 || activeTab === 9) {
             setTimeout(function () { cariEkstreMusteriDegisinceYenile(); }, 0);
         }
     }
 
     if (activeTab === 7) {
+        fetch('/giris/api/musteri/' + id + '?odemeler=0').then(function (r) { return r.json(); }).then(function (res) {
+            if (res.ok && res.musteri) {
+                girisSonMusteriDetayHafifYukleme = true;
+                fillActiveTab(res.musteri);
+            } else if (musteri) {
+                girisSonMusteriDetayHafifYukleme = true;
+                fillActiveTab(musteri);
+            }
+        }).catch(function () {
+            if (musteri) {
+                girisSonMusteriDetayHafifYukleme = true;
+                fillActiveTab(musteri);
+            }
+        });
+        return;
+    }
+
+    if (activeTab === 9) {
         fetch('/giris/api/musteri/' + id + '?odemeler=0').then(function (r) { return r.json(); }).then(function (res) {
             if (res.ok && res.musteri) {
                 girisSonMusteriDetayHafifYukleme = true;
@@ -9991,7 +10668,9 @@ function selectMusteri(id) {
             sozlesmeTahsilSetFromJson(tj);
             if (res.ok && res.musteri) fillActiveTab(res.musteri);
             else if (musteri) fillActiveTab(musteri);
-            if (cj && cj.ok && cj.cache && Array.isArray(cj.cache.aylar) && cj.cache.aylar.length) {
+            if (sozlesmelerOdemeDuzeniManuelMi()) {
+                /* Manuel: sunucu önbelleği yok sayılır, grid açılmaz */
+            } else if (cj && cj.ok && cj.cache && Array.isArray(cj.cache.aylar) && cj.cache.aylar.length) {
                 if (sozlesmelerAylikOnbellekFormlaUyumlu(cj.cache)) {
                     sozlesmelerAylikCacheRender(cj.cache, true);
                 } else {
@@ -10043,6 +10722,10 @@ function girisTahsilatFormunuSeciliMusteridenDoldur() {
     var nameEl = document.getElementById('name');
     var ad = (nameEl && nameEl.value) ? nameEl.value.trim() : '';
     if (!ad) {
+        var maEl2 = document.getElementById('musteri_adi');
+        if (maEl2 && maEl2.value) ad = String(maEl2.value).trim();
+    }
+    if (!ad) {
         var sad = document.getElementById('giris-secili-musteri-ad');
         if (sad) ad = (sad.textContent || '').trim();
         if (ad === '—') ad = '';
@@ -10076,6 +10759,10 @@ function sozlesmeTahsilatFormunuSeciliMusteridenDoldur() {
     var nameEl = document.getElementById('name');
     var ad = (nameEl && nameEl.value) ? nameEl.value.trim() : '';
     if (!ad) {
+        var maEl = document.getElementById('musteri_adi');
+        if (maEl && maEl.value) ad = String(maEl.value).trim();
+    }
+    if (!ad) {
         var sad = document.getElementById('giris-secili-musteri-ad');
         if (sad) ad = (sad.textContent || '').trim();
         if (ad === '—') ad = '';
@@ -10105,12 +10792,55 @@ function vergiNoRakamGiris(input) {
     input.value = v;
 }
 
-// Telefon inputu: baştaki 0'ı at, 10 hane ile sınırla
+/** Türkiye GSM: +90 / 90 / 0 öneklerini at; gerekirse ilk 5 ile başlayan 10 haneyi al. */
+function telefonNormalizeTr10(raw) {
+    var d = (raw == null ? '' : String(raw)).replace(/\D/g, '');
+    if (!d) return '';
+    if (d.length >= 11 && d.slice(0, 2) === '90' && d.charAt(2) === '5') {
+        d = d.slice(2);
+        if (d.length > 10) d = d.slice(0, 10);
+    } else if (d.length >= 11 && d.charAt(0) === '0' && d.charAt(1) === '5') {
+        d = d.slice(1, 11);
+    } else if (d.charAt(0) === '0') {
+        d = d.slice(1);
+    }
+    if (d.length > 10) {
+        var found = false;
+        for (var i = 0; i <= d.length - 10; i++) {
+            if (d.charAt(i) !== '5') continue;
+            var chunk = d.slice(i, i + 10);
+            if (/^5\d{9}$/.test(chunk)) {
+                d = chunk;
+                found = true;
+                break;
+            }
+        }
+        if (!found) d = d.slice(0, 10);
+    }
+    return d.slice(0, 10);
+}
+
+// Telefon inputu: yapıştırma / yazımda 10 hane (başında 0 yok)
 function telefonInput(input) {
-    let v = (input.value || '').replace(/\D/g, '');
-    if (v.startsWith('0')) v = v.slice(1);
-    if (v.length > 10) v = v.slice(0, 10);
-    input.value = v;
+    if (!input) return;
+    input.value = telefonNormalizeTr10(input.value);
+}
+
+function telefonPasteTr(ev) {
+    var e = ev || window.event;
+    var input = e.target;
+    if (!input || (input.id !== 'phone' && input.id !== 'phone2')) return;
+    var pasted = (e.clipboardData || window.clipboardData || {}).getData('text');
+    if (pasted == null || pasted === '') return;
+    e.preventDefault();
+    var cur = input.value || '';
+    var start = typeof input.selectionStart === 'number' ? input.selectionStart : cur.length;
+    var end = typeof input.selectionEnd === 'number' ? input.selectionEnd : cur.length;
+    input.value = telefonNormalizeTr10(cur.slice(0, start) + pasted + cur.slice(end));
+    try {
+        var len = input.value.length;
+        input.setSelectionRange(len, len);
+    } catch (err) {}
 }
 
 /** Kart yüklendiğinde müşteri adı + şirket ünvanı — aramadan vazgeçince / Escape / boş blur ile geri yüklenir */
@@ -10144,6 +10874,433 @@ function girisAramaAlanlariKartGeriYukleTamamini() {
     if (ma) ma.value = snap.musteri_adi;
     if (nm) nm.value = snap.name;
     girisAramaAlanlariAutocompleteDropdownKapat();
+}
+
+function girisGrupAdiHiddendan(hiddenVal) {
+    if (!hiddenVal) return '';
+    var hv = String(hiddenVal).trim();
+    var sel = document.getElementById('giris_group_parent_select');
+    var selForm = document.getElementById('giris_form_grup_select');
+    var opt = sel ? sel.querySelector('option[value="' + hv + '"]') : null;
+    if (opt && opt.textContent) return String(opt.textContent).trim();
+    opt = selForm ? selForm.querySelector('option[value="' + hv + '"]') : null;
+    if (opt && opt.textContent) return String(opt.textContent).trim();
+    return '';
+}
+
+function girisFormGrupListeYukle() {
+    var sel = document.getElementById('giris_form_grup_select');
+    if (!sel) return Promise.resolve();
+    var hid = document.getElementById('parent_cari_id');
+    var want = hid ? String(hid.value || '').trim() : '';
+    var ex = selectedId ? ('?exclude_id=' + encodeURIComponent(String(selectedId))) : '';
+    return girisFetchAgKopmasinaKarsi('/cari-kart/api/groups' + ex, { credentials: 'same-origin' }, 2)
+        .then(function (r) { return girisFetchJsonSafely(r); })
+        .then(function (j) {
+            var arr = (j && j.ok && Array.isArray(j.groups)) ? j.groups : [];
+            window.__girisGroupListRaw = arr.slice();
+            window.__girisFormGrupProgrammatic = true;
+            try {
+                var html = ['<option value="">Tümü</option>'];
+                arr.forEach(function (g) {
+                    html.push('<option value="' + String(g.id) + '">' + String(g.name || ('Grup #' + g.id)).replace(/</g, '&lt;') + '</option>');
+                });
+                sel.innerHTML = html.join('');
+                if (want && sel.querySelector('option[value="' + want + '"]')) sel.value = want;
+                else sel.value = '';
+                var msel = document.getElementById('giris_group_parent_select');
+                var msvc = document.getElementById('giris_group_parent_select_service');
+                if (msel) {
+                    girisGroupSecenekleriniYaz('giris_group_parent_select', true, 'Grupsuz');
+                    if (want && msel.querySelector('option[value="' + want + '"]')) msel.value = want;
+                    else msel.value = '';
+                }
+                if (msvc) {
+                    girisGroupSecenekleriniYaz('giris_group_parent_select_service', true, 'Grup seçin');
+                    msvc.value = '';
+                }
+            } finally {
+                window.__girisFormGrupProgrammatic = false;
+            }
+        })
+        .catch(function () {});
+}
+
+function girisFormGrupDegisti() {
+    if (window.__girisFormGrupProgrammatic) return;
+    var sel = document.getElementById('giris_form_grup_select');
+    var hid = document.getElementById('parent_cari_id');
+    if (!sel) return;
+    var v = String(sel.value || '').trim();
+    if (hid) hid.value = v;
+    girisGroupStatusBadgeYaz();
+    girisGroupSeciliBilgiYaz();
+    var msel = document.getElementById('giris_group_parent_select');
+    if (msel) {
+        if (!v) msel.value = '';
+        else if (msel.querySelector('option[value="' + v + '"]')) msel.value = v;
+        girisGroupPreviewYaz();
+    }
+    if (!selectedId) return;
+    var parentVal = v ? parseInt(v, 10) : null;
+    girisFetchAgKopmasinaKarsi('/cari-kart/api/parent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ cari_id: selectedId, parent_cari_id: parentVal })
+    }, 2)
+        .then(function (r) { return girisFetchJsonSafely(r); })
+        .then(function (j) {
+            if (!j || !j.ok) throw new Error((j && j.mesaj) || 'Grup güncellenemedi.');
+            if (selectedId) selectMusteri(parseInt(selectedId, 10));
+        })
+        .catch(function (e) {
+            alert((e && e.message) ? e.message : 'Grup güncellenemedi.');
+            girisFormGrupListeYukle();
+        });
+}
+
+function girisFormYeniGrupEkle() {
+    var ad = prompt('Yeni grup adı:');
+    if (ad == null) return;
+    ad = String(ad).trim();
+    if (!ad) return;
+    girisFetchAgKopmasinaKarsi('/cari-kart/api/groups', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ name: ad })
+    }, 2)
+        .then(function (r) { return girisFetchJsonSafely(r); })
+        .then(function (j) {
+            if (!j || !j.ok || !j.group || !j.group.id) throw new Error((j && j.mesaj) || 'Grup oluşturulamadı.');
+            return girisFormGrupListeYukle().then(function () {
+                var sel = document.getElementById('giris_form_grup_select');
+                if (sel) sel.value = String(j.group.id);
+                girisFormGrupDegisti();
+            });
+        })
+        .catch(function (e) {
+            alert((e && e.message) ? e.message : 'Grup oluşturulamadı.');
+        });
+}
+
+function girisGroupSeciliBilgiYaz() {
+    var info = document.getElementById('giris_group_current_info');
+    var hidden = document.getElementById('parent_cari_id');
+    if (!info) return;
+    if (!hidden || !hidden.value) {
+        info.textContent = 'Mevcut: Grupsuz';
+        return;
+    }
+    var hv = String(hidden.value).trim();
+    var ad = girisGrupAdiHiddendan(hv);
+    info.textContent = ad ? ('Mevcut grup: ' + ad) : ('Mevcut grup: #' + hv);
+}
+
+function girisGroupStatusBadgeYaz() {
+    var b = document.getElementById('giris_group_status_badge');
+    if (!b) return;
+    if (!selectedId) { b.style.display = 'none'; return; }
+    var hidden = document.getElementById('parent_cari_id');
+    var hasGroup = !!(hidden && hidden.value);
+    var gText = 'Grupsuz';
+    if (hasGroup) {
+        var ad = girisGrupAdiHiddendan(hidden.value);
+        gText = ad || ('#' + String(hidden.value).trim());
+    }
+    b.textContent = 'Grup: ' + gText;
+    b.style.display = 'inline-flex';
+}
+
+function girisGroupPreviewYaz() {
+    var box = document.getElementById('giris_group_preview');
+    var sel = document.getElementById('giris_group_parent_select');
+    if (!box || !sel) return;
+    var gid = String(sel.value || '').trim();
+    if (!gid) { box.style.display = 'none'; box.textContent = ''; return; }
+    box.style.display = 'block';
+    box.textContent = 'Grup özeti yükleniyor...';
+    girisFetchAgKopmasinaKarsi('/cari-kart/api/group-summary/' + encodeURIComponent(gid), { credentials: 'same-origin' }, 2)
+        .then(function (r) { return girisFetchJsonSafely(r); })
+        .then(function (j) {
+            if (!j || !j.ok || !j.summary) throw new Error('Özet alınamadı');
+            var s = j.summary;
+            box.textContent = 'Alt cari: ' + String(s.child_count || 0) +
+                ' | Toplam borç: ' + formatParaTR(s.borc_total || 0) +
+                ' | Toplam alacak: ' + formatParaTR(s.alacak_total || 0) +
+                ' | Net: ' + formatParaTR(s.net_balance || 0);
+        })
+        .catch(function () {
+            box.textContent = 'Grup özeti alınamadı.';
+        });
+}
+
+function girisGroupPreviewYazService() {
+    var box = document.getElementById('giris_group_preview_service');
+    var sel = document.getElementById('giris_group_parent_select_service');
+    if (!box || !sel) return;
+    var gid = String(sel.value || '').trim();
+    if (!gid) { box.style.display = 'none'; box.textContent = ''; return; }
+    box.style.display = 'block';
+    box.textContent = 'Grup özeti yükleniyor...';
+    girisFetchAgKopmasinaKarsi('/cari-kart/api/group-summary/' + encodeURIComponent(gid), { credentials: 'same-origin' }, 2)
+        .then(function (r) { return girisFetchJsonSafely(r); })
+        .then(function (j) {
+            if (!j || !j.ok || !j.summary) throw new Error('Özet alınamadı');
+            var s = j.summary;
+            box.textContent = 'Alt cari: ' + String(s.child_count || 0) +
+                ' | Toplam borç: ' + formatParaTR(s.borc_total || 0) +
+                ' | Toplam alacak: ' + formatParaTR(s.alacak_total || 0) +
+                ' | Net: ' + formatParaTR(s.net_balance || 0);
+        })
+        .catch(function () {
+            box.textContent = 'Grup özeti alınamadı.';
+        });
+}
+
+function formatParaTR(v) {
+    var n = parseFloat(v || 0);
+    if (isNaN(n)) n = 0;
+    return n.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ₺';
+}
+
+function girisGroupSekmeAc(tab) {
+    var isService = String(tab || '') === 'service';
+    var panelCustomer = document.getElementById('giris_group_panel_customer');
+    var panelService = document.getElementById('giris_group_panel_service');
+    var btnCustomer = document.getElementById('giris_group_tab_customer');
+    var btnService = document.getElementById('giris_group_tab_service');
+    var customerSave = document.getElementById('giris_group_customer_save_btn');
+    if (panelCustomer) panelCustomer.style.display = isService ? 'none' : 'grid';
+    if (panelService) panelService.style.display = isService ? 'grid' : 'none';
+    if (customerSave) customerSave.style.display = isService ? 'none' : 'inline-flex';
+    if (btnCustomer) btnCustomer.className = isService ? 'btn-aylik-sec' : 'tahsilat-btn-kaydet';
+    if (btnService) btnService.className = isService ? 'tahsilat-btn-kaydet' : 'btn-aylik-sec';
+}
+
+function girisGroupSecenekleriniYaz(selectId, includeEmpty, emptyText) {
+    var sel = document.getElementById(selectId);
+    if (!sel) return;
+    var arr = Array.isArray(window.__girisGroupListRaw) ? window.__girisGroupListRaw : [];
+    var html = [];
+    if (includeEmpty) html.push('<option value="">' + String(emptyText || 'Grupsuz') + '</option>');
+    arr.forEach(function (g) {
+        html.push('<option value="' + String(g.id) + '">' + String(g.name || ('Grup #' + g.id)).replace(/</g, '&lt;') + '</option>');
+    });
+    sel.innerHTML = html.join('');
+}
+
+function girisGroupParentAraFrom(searchId, selectId, includeEmpty, emptyText) {
+    var qEl = document.getElementById(searchId);
+    var sel = document.getElementById(selectId);
+    var arr = Array.isArray(window.__girisGroupListRaw) ? window.__girisGroupListRaw : [];
+    if (!sel) return;
+    var cur = String(sel.value || '');
+    var q = (qEl && qEl.value ? String(qEl.value) : '').trim().toLocaleLowerCase('tr-TR');
+    var filtered = !q ? arr : arr.filter(function (g) {
+        return String(g.name || '').toLocaleLowerCase('tr-TR').indexOf(q) !== -1;
+    });
+    var html = [];
+    if (includeEmpty) html.push('<option value="">' + String(emptyText || 'Grupsuz') + '</option>');
+    filtered.forEach(function (g) {
+        html.push('<option value="' + String(g.id) + '">' + String(g.name || ('Grup #' + g.id)).replace(/</g, '&lt;') + '</option>');
+    });
+    sel.innerHTML = html.join('');
+    if (cur) sel.value = cur;
+}
+
+function girisGroupParentAra() {
+    girisGroupParentAraFrom('giris_group_parent_search', 'giris_group_parent_select', true, 'Grupsuz');
+}
+
+function girisGroupParentAraService() {
+    girisGroupParentAraFrom('giris_group_parent_search_service', 'giris_group_parent_select_service', true, 'Grup seçin');
+}
+
+function girisHizmetTurleriYukle() {
+    var sel = document.getElementById('giris_group_hizmet_turu_select');
+    if (!sel) return Promise.resolve();
+    return girisFetchAgKopmasinaKarsi('/giris/api/hizmet-turleri', { credentials: 'same-origin' }, 2)
+        .then(function (r) { return girisFetchJsonSafely(r); })
+        .then(function (j) {
+            var arr = (j && j.ok && Array.isArray(j.turler)) ? j.turler : [];
+            var html = ['<option value="">Hizmet türü seçin</option>'];
+            arr.forEach(function (t) {
+                var ad = String((t && t.ad) || '').trim();
+                if (!ad) return;
+                html.push('<option value="' + ad.replace(/"/g, '&quot;') + '">' + ad.replace(/</g, '&lt;') + '</option>');
+            });
+            sel.innerHTML = html.join('');
+        })
+        .catch(function () {});
+}
+
+function girisGroupModalAc() {
+    if (!selectedId) { alert('Önce bir müşteri seçin.'); return; }
+    var modal = document.getElementById('giris_group_modal');
+    if (!modal) return;
+    modal.style.display = 'flex';
+    modal.setAttribute('aria-hidden', 'false');
+    girisGroupSekmeAc('customer');
+    Promise.all([girisGroupListesiniYukle(), girisHizmetTurleriYukle()]).then(function () {
+        var hidden = document.getElementById('parent_cari_id');
+        var sel = document.getElementById('giris_group_parent_select');
+        if (sel) sel.value = (hidden && hidden.value) ? hidden.value : '';
+        var selService = document.getElementById('giris_group_parent_select_service');
+        if (selService) selService.value = '';
+        var q = document.getElementById('giris_group_parent_search');
+        if (q) q.value = '';
+        var q2 = document.getElementById('giris_group_parent_search_service');
+        if (q2) q2.value = '';
+        girisGroupParentAra();
+        girisGroupParentAraService();
+        girisGroupSeciliBilgiYaz();
+        girisGroupStatusBadgeYaz();
+        girisGroupPreviewYaz();
+        girisGroupPreviewYazService();
+    });
+}
+
+function girisGroupModalKapat() {
+    var modal = document.getElementById('giris_group_modal');
+    if (!modal) return;
+    modal.style.display = 'none';
+    modal.setAttribute('aria-hidden', 'true');
+}
+
+function girisGroupListesiniYukle() {
+    var sel = document.getElementById('giris_group_parent_select');
+    var selService = document.getElementById('giris_group_parent_select_service');
+    if (!sel && !selService) return Promise.resolve();
+    return girisFetchAgKopmasinaKarsi('/cari-kart/api/groups?exclude_id=' + encodeURIComponent(String(selectedId || '')), { credentials: 'same-origin' }, 2)
+        .then(function (r) { return girisFetchJsonSafely(r); })
+        .then(function (j) {
+            var arr = (j && j.ok && Array.isArray(j.groups)) ? j.groups : [];
+            window.__girisGroupListRaw = arr.slice();
+            if (document.getElementById('giris_group_parent_select')) {
+                girisGroupSecenekleriniYaz('giris_group_parent_select', true, 'Grupsuz');
+            }
+            if (document.getElementById('giris_group_parent_select_service')) {
+                girisGroupSecenekleriniYaz('giris_group_parent_select_service', true, 'Grup seçin');
+            }
+            var arama = document.getElementById('giris_group_parent_search');
+            if (arama && !arama.__boundInput) {
+                arama.addEventListener('input', girisGroupParentAra);
+                arama.__boundInput = true;
+            }
+            var aramaService = document.getElementById('giris_group_parent_search_service');
+            if (aramaService && !aramaService.__boundInput) {
+                aramaService.addEventListener('input', girisGroupParentAraService);
+                aramaService.__boundInput = true;
+            }
+            if (sel && !sel.__boundChange) {
+                sel.addEventListener('change', function () {
+                    girisGroupSeciliBilgiYaz();
+                    girisGroupPreviewYaz();
+                });
+                sel.__boundChange = true;
+            }
+            if (selService && !selService.__boundChange) {
+                selService.addEventListener('change', girisGroupPreviewYazService);
+                selService.__boundChange = true;
+            }
+            var fsel = document.getElementById('giris_form_grup_select');
+            if (fsel) {
+                var hid = document.getElementById('parent_cari_id');
+                var want = hid ? String(hid.value || '').trim() : '';
+                window.__girisFormGrupProgrammatic = true;
+                try {
+                    var html = ['<option value="">Tümü</option>'];
+                    arr.forEach(function (g) {
+                        html.push('<option value="' + String(g.id) + '">' + String(g.name || ('Grup #' + g.id)).replace(/</g, '&lt;') + '</option>');
+                    });
+                    fsel.innerHTML = html.join('');
+                    if (want && fsel.querySelector('option[value="' + want + '"]')) fsel.value = want;
+                    else fsel.value = '';
+                } finally {
+                    window.__girisFormGrupProgrammatic = false;
+                }
+            }
+        })
+        .catch(function () {});
+}
+
+function girisGroupBaglantiyiKaydet() {
+    if (!selectedId) { alert('Önce bir müşteri seçin.'); return; }
+    var sel = document.getElementById('giris_group_parent_select');
+    var parentRaw = sel ? String(sel.value || '').trim() : '';
+    var parentVal = parentRaw ? parseInt(parentRaw, 10) : null;
+    return girisFetchAgKopmasinaKarsi('/cari-kart/api/parent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ cari_id: selectedId, parent_cari_id: parentVal })
+    }, 2)
+        .then(function (r) { return girisFetchJsonSafely(r); })
+        .then(function (j) {
+            if (!j || !j.ok) throw new Error((j && j.mesaj) || 'Grup kaydı yapılamadı.');
+            var hidden = document.getElementById('parent_cari_id');
+            if (hidden) hidden.value = parentVal ? String(parentVal) : '';
+            girisGroupSeciliBilgiYaz();
+            girisGroupStatusBadgeYaz();
+            girisGroupModalKapat();
+            if (selectedId) selectMusteri(parseInt(selectedId, 10));
+        })
+        .catch(function (e) {
+            alert((e && e.message) ? e.message : 'Grup kaydı yapılamadı.');
+        });
+}
+
+function girisGroupOlusturVeBagla() {
+    if (!selectedId) { alert('Önce bir müşteri seçin.'); return; }
+    var inp = document.getElementById('giris_group_new_name');
+    var ad = inp ? String(inp.value || '').trim() : '';
+    if (!ad) { alert('Yeni grup adı girin.'); return; }
+    girisFetchAgKopmasinaKarsi('/cari-kart/api/groups', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ name: ad })
+    }, 2)
+        .then(function (r) { return girisFetchJsonSafely(r); })
+        .then(function (j) {
+            if (!j || !j.ok || !j.group || !j.group.id) throw new Error((j && j.mesaj) || 'Grup oluşturulamadı.');
+            var sel = document.getElementById('giris_group_parent_select');
+            if (sel) sel.value = String(j.group.id);
+            if (inp) inp.value = '';
+            girisGroupSeciliBilgiYaz();
+            girisGroupStatusBadgeYaz();
+            return girisGroupBaglantiyiKaydet();
+        })
+        .catch(function (e) {
+            alert((e && e.message) ? e.message : 'Grup oluşturulamadı.');
+        });
+}
+
+function girisGroupHizmetTurunuTopluBagla() {
+    var hizmetSel = document.getElementById('giris_group_hizmet_turu_select');
+    var groupSel = document.getElementById('giris_group_parent_select_service');
+    var hizmetTuru = hizmetSel ? String(hizmetSel.value || '').trim() : '';
+    var parentRaw = groupSel ? String(groupSel.value || '').trim() : '';
+    var parentId = parentRaw ? parseInt(parentRaw, 10) : 0;
+    if (!hizmetTuru) { alert('Önce hizmet türü seçin.'); return; }
+    if (!parentId || parentId < 1) { alert('Toplu bağlama için bir grup seçin.'); return; }
+    return girisFetchAgKopmasinaKarsi('/cari-kart/api/parent/by-hizmet-turu', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ hizmet_turu: hizmetTuru, parent_cari_id: parentId })
+    }, 2)
+        .then(function (r) { return girisFetchJsonSafely(r); })
+        .then(function (j) {
+            if (!j || !j.ok) throw new Error((j && j.mesaj) || 'Toplu grup ataması başarısız.');
+            alert('"' + hizmetTuru + '" hizmet türündeki ' + String(j.updated || 0) + ' cari seçili gruba bağlandı.');
+            if (selectedId) selectMusteri(parseInt(selectedId, 10));
+        })
+        .catch(function (e) {
+            alert((e && e.message) ? e.message : 'Toplu grup ataması yapılamadı.');
+        });
 }
 
 function girisAramaAlanlariBosAlanGeriYukle(which) {
@@ -10495,6 +11652,9 @@ async function kaydet(event) {
             return isNaN(n) ? null : n;
         })(),
         duzenli_fatura: (document.getElementById('duzenli_fatura') || {}).value || 'duzenle',
+        parent_cari_id: (document.getElementById('parent_cari_id') || {}).value || '',
+        odeme_duzeni: (document.getElementById('odeme_duzeni') || {}).value || 'aylik',
+        odeme_duzeni_manuel: (document.getElementById('odeme_duzeni_manuel') || {}).value || '',
         aylik_kira: document.getElementById('aylik_kira').value,
         kira_suresi_ay: (function () { var el = document.getElementById('kira_suresi_ay'); return el ? el.value : ''; })(),
         sozlesme_tarihi: document.getElementById('sozlesme_baslangic').value,
@@ -10521,6 +11681,9 @@ async function kaydet(event) {
         try {
             result = text ? JSON.parse(text) : {};
         } catch (eParse) {
+            if (text && /^[\s]*</.test(text)) {
+                throw new Error('Oturum süresi doldu veya giriş sayfası döndü. Sayfayı yenileyip tekrar giriş yapın.');
+            }
             throw new Error(!response.ok && text ? ('HTTP ' + response.status + ': ' + text.slice(0, 120)) : 'Sunucu yanıtı okunamadı');
         }
 
@@ -10563,6 +11726,14 @@ async function kaydet(event) {
             alert(result.mesaj);
             musteriAra();
             girisHizmetTuruAltFormlaraUygula(kycData.hizmet_turu);
+            try {
+                if (typeof sozlesmeTahsilatFormunuSeciliMusteridenDoldur === 'function') {
+                    sozlesmeTahsilatFormunuSeciliMusteridenDoldur();
+                }
+                if (typeof girisTahsilatFormunuSeciliMusteridenDoldur === 'function') {
+                    girisTahsilatFormunuSeciliMusteridenDoldur();
+                }
+            } catch (eTahSync) {}
             musteriKaydetDurumGoster('success');
         } else {
             var errMsg = result.mesaj || 'Kayıt başarısız.';
@@ -10748,14 +11919,17 @@ function temizleForm() {
     yukleHizmetTurleriSelect('hizmet_turu', 'Sanal Ofis');
     if (typeof girisHazirOfisOdaSatiriniGuncelle === 'function') girisHazirOfisOdaSatiriniGuncelle();
     document.getElementById('musteri-id').value = '';
+    var pch = document.getElementById('parent_cari_id'); if (pch) pch.value = '';
     selectedId = null;
     girisSonSeciliMusteriSil();
+    girisFormGrupListeYukle();
     yukluDosyalar = [];
     try { window.__musteriDosyaSirasi = []; } catch (eQ) {}
     document.querySelectorAll('.musteri-item').forEach(item => {
         item.classList.remove('selected');
     });
     dosyaListesiGuncelle();
+    girisGroupStatusBadgeYaz();
     hesaplaYuzde();
     girisMusteriAramayiAc();
     if (typeof cariEkstreTablolariniTemizle === 'function') cariEkstreTablolariniTemizle();
@@ -10943,6 +12117,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (typeof girisBootstrapMusteriVeSekme === 'function') girisBootstrapMusteriVeSekme();
     })();
     musteriAra();
+    setTimeout(function () {
+        if (typeof girisGrupOzetSayfaAcilisPrefetch === 'function') girisGrupOzetSayfaAcilisPrefetch();
+    }, 0);
     // Yeni kayıt formu için sözleşme tarihlerini bugünden 1 yıl sonrasına ayarla
     try {
         const today = new Date();
@@ -11109,6 +12286,146 @@ function tahsilatHizliGit() {
 const API_TAHSILAT_MUSTERILER = '/faturalar/api/musteriler';
 const API_TAHSILAT_EKLE = '/faturalar/tahsilat-ekle';
 const API_TAHSILAT_ONIZLE = '/faturalar/tahsilat-makbuz-onizle';
+const API_TAHSILAT_RAPOR = '/faturalar/api/tahsilat-raporu';
+
+window.__girisTahsilAktifAltSekme = 'makbuz';
+
+function girisTahsilRaporBuguneAyarla() {
+    var d = new Date();
+    var s = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    var b = document.getElementById('giris_tahsil_rapor_bas');
+    var e = document.getElementById('giris_tahsil_rapor_bit');
+    if (b) b.value = s;
+    if (e) e.value = s;
+}
+
+function girisTahsilUstSekme(which) {
+    var w = which === 'rapor' ? 'rapor' : 'makbuz';
+    window.__girisTahsilAktifAltSekme = w;
+    var tm = document.getElementById('giris_tahsil_tab_makbuz');
+    var tr = document.getElementById('giris_tahsil_tab_rapor');
+    var pm = document.getElementById('giris_tahsil_panel_makbuz');
+    var pr = document.getElementById('giris_tahsil_panel_rapor');
+    if (tm) {
+        tm.classList.toggle('active', w === 'makbuz');
+        tm.setAttribute('aria-selected', w === 'makbuz' ? 'true' : 'false');
+    }
+    if (tr) {
+        tr.classList.toggle('active', w === 'rapor');
+        tr.setAttribute('aria-selected', w === 'rapor' ? 'true' : 'false');
+    }
+    if (pm) pm.style.display = w === 'makbuz' ? '' : 'none';
+    if (pr) pr.style.display = w === 'rapor' ? '' : 'none';
+    if (w === 'rapor') {
+        var b = document.getElementById('giris_tahsil_rapor_bas');
+        var e = document.getElementById('giris_tahsil_rapor_bit');
+        if (b && e && !b.value && !e.value) girisTahsilRaporBuguneAyarla();
+        if (typeof girisTahsilRaporYukle === 'function') girisTahsilRaporYukle();
+    }
+}
+
+function girisTahsilRaporHtmlEsc(s) {
+    if (s == null) return '';
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/"/g, '&quot;');
+}
+
+/** Havale/EFT → Banka; nakit → Nakit (rapor tek satır ödeme sütunu). */
+function girisTahsilRaporOdemeEtiket(raw) {
+    var o = String(raw || '').trim().toLowerCase().replace(/\s+/g, '_');
+    if (o === 'nakit') return 'Nakit';
+    if (o === 'havale' || o === 'eft' || o === 'banka' || o === 'havale/eft') return 'Banka';
+    if (o === 'kredi_karti' || o === 'kredi-kartı' || o === 'kredi_kartı') return 'K. kartı';
+    if (o === 'cek' || o === 'çek') return 'Çek';
+    if (!o) return '—';
+    return girisTahsilRaporHtmlEsc(String(raw).trim());
+}
+
+function girisTahsilRaporYukle() {
+    var dur = document.getElementById('giris_tahsil_rapor_durum');
+    var list = document.getElementById('giris_tahsil_rapor_list');
+    var bEl = document.getElementById('giris_tahsil_rapor_bas');
+    var eEl = document.getElementById('giris_tahsil_rapor_bit');
+    if (!list) return;
+    var bas = (bEl && bEl.value) ? bEl.value : '';
+    var bit = (eEl && eEl.value) ? eEl.value : '';
+    if (!bas || !bit) girisTahsilRaporBuguneAyarla();
+    bas = (document.getElementById('giris_tahsil_rapor_bas') || {}).value || '';
+    bit = (document.getElementById('giris_tahsil_rapor_bit') || {}).value || '';
+    if (dur) {
+        dur.textContent = 'Yükleniyor…';
+        dur.className = 'giris-tahsil-rapor-durum';
+    }
+    var u = API_TAHSILAT_RAPOR + '?baslangic=' + encodeURIComponent(bas) + '&bitis=' + encodeURIComponent(bit);
+    fetch(u, { credentials: 'same-origin' })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+            if (!j || !j.ok) {
+                if (dur) {
+                    dur.textContent = (j && j.mesaj) ? j.mesaj : 'Liste alınamadı.';
+                    dur.className = 'giris-tahsil-rapor-durum giris-tahsil-rapor-durum--err';
+                }
+                list.innerHTML = '';
+                return;
+            }
+            var items = Array.isArray(j.items) ? j.items : [];
+            var toplam = j.toplam != null ? Number(j.toplam) : items.reduce(function (a, x) { return a + (parseFloat(x.tutar) || 0); }, 0);
+            if (dur) {
+                dur.textContent = j.baslangic === j.bitis
+                    ? (String(j.adet || 0) + ' kayıt · ' + j.baslangic)
+                    : (String(j.adet || 0) + ' kayıt · ' + j.baslangic + ' — ' + j.bitis);
+                dur.className = 'giris-tahsil-rapor-durum giris-tahsil-rapor-durum--ok';
+            }
+            if (!items.length) {
+                list.innerHTML = '<div class="giris-tahsil-rapor-bos">Bu aralıkta tahsilat kaydı yok.</div>';
+                return;
+            }
+            var parts = [];
+            parts.push(
+                '<div class="giris-tahsil-rapor-scroll">' +
+                '<div class="giris-tahsil-rapor-baslik-satir" role="row">' +
+                '<span class="gtr-tarih">Tarih</span><span class="gtr-firma">Firma</span><span class="gtr-tutar">Tutar</span><span class="gtr-odeme">Ödeme</span>' +
+                '</div>'
+            );
+            items.forEach(function (it) {
+                var ad = girisTahsilRaporHtmlEsc(it.musteri_adi || '—');
+                var tut = parseFloat(it.tutar);
+                if (isNaN(tut)) tut = 0;
+                var tutStr = tut.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ₺';
+                var tarihRaw = (it.tahsilat_tarihi || '').toString();
+                var tarihGun = tarihRaw.length >= 10 ? tarihRaw.slice(0, 10) : tarihRaw;
+                var tarih = girisTahsilRaporHtmlEsc(tarihGun);
+                var odemeEt = girisTahsilRaporOdemeEtiket(it.odeme_turu);
+                parts.push(
+                    '<div class="giris-tahsil-rapor-row" role="row">' +
+                    '<span class="gtr-tarih">' + tarih + '</span>' +
+                    '<span class="gtr-firma">' + ad + '</span>' +
+                    '<span class="gtr-tutar">' + tutStr + '</span>' +
+                    '<span class="gtr-odeme">' + odemeEt + '</span>' +
+                    '</div>'
+                );
+            });
+            parts.push('</div>');
+            parts.push(
+                '<div class="giris-tahsil-rapor-toplam">Toplam: ' +
+                toplam.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ₺</div>'
+            );
+            list.innerHTML = parts.join('');
+        })
+        .catch(function () {
+            if (dur) {
+                dur.textContent = 'Sunucuya bağlanılamadı.';
+                dur.className = 'giris-tahsil-rapor-durum giris-tahsil-rapor-durum--err';
+            }
+            list.innerHTML = '';
+        });
+}
+
+function girisTahsilRaporPanelTaze() {
+    if (window.__girisTahsilAktifAltSekme === 'rapor' && typeof girisTahsilRaporYukle === 'function') girisTahsilRaporYukle();
+}
 
 function girisTahsilatFormPayload() {
     const musteriId = document.getElementById('giris_tahsilat_musteri_id').value;
@@ -11148,6 +12465,7 @@ function girisTahsilatMakbuzKaydet() {
     .then(r => r.json())
     .then(data => {
         if (data.ok && data.tahsilat_id) {
+            if (typeof girisTahsilRaporPanelTaze === 'function') girisTahsilRaporPanelTaze();
             alert('Makbuz kaydedildi. Tahsilatlar, Cari Kart ve müşteri bakiyesi güncellendi.');
             var mid = document.getElementById('giris_tahsilat_musteri_id').value;
             if (mid && typeof selectedId !== 'undefined' && selectedId == mid && document.getElementById('cari-bu-ay')) {

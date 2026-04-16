@@ -728,6 +728,116 @@
   color: #b9ffe8;
   border-color: rgba(0, 255, 157, 0.55);
 }
+
+/* Finans sekmesi: GİB kesilmiş fatura raporu (tab-4; tahsilat raporu ile aynı kompakt satır düzeni) */
+.finans-gib-rapor-wrap { max-width: 920px; margin-top: 12px; }
+.finans-gib-rapor-kutu {
+  background: #1e3a50;
+  border-radius: 8px;
+  padding: 14px 16px;
+  border: 1px solid #2d4060;
+  color: #e0f7fa;
+}
+.finans-gib-rapor-filtre {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 14px;
+  margin-bottom: 10px;
+}
+.finans-gib-rapor-filtre label {
+  display: block;
+  font-size: 11px;
+  color: #90a4ae;
+  margin-bottom: 4px;
+}
+.finans-gib-rapor-filtre input[type="date"] {
+  padding: 7px 8px;
+  border-radius: 4px;
+  border: 1px solid #3d5070;
+  background: #0f2537;
+  color: #e0f7fa;
+  font-size: 13px;
+}
+.finans-gib-rapor-aciklama {
+  font-size: 12px;
+  color: #78909c;
+  margin: 0 0 12px 0;
+  line-height: 1.4;
+}
+.finans-gib-rapor-durum { font-size: 12px; margin-bottom: 10px; min-height: 1.2em; }
+.finans-gib-rapor-durum--err { color: #ef9a9a; }
+.finans-gib-rapor-durum--ok { color: #81c784; }
+.finans-gib-rapor-list { border: 1px solid #2d4060; border-radius: 6px; overflow: hidden; background: #0f2537; }
+.finans-gib-rapor-scroll { max-height: 52vh; overflow: auto; }
+.finans-gib-rapor-baslik-satir {
+  display: grid;
+  grid-template-columns: 86px minmax(108px, 1.1fr) minmax(140px, 1.6fr) 96px;
+  gap: 8px 10px;
+  align-items: center;
+  padding: 7px 10px;
+  background: #152a3d;
+  color: #4fc3f7;
+  font-weight: 700;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  border-bottom: 1px solid #2d4060;
+  line-height: 1.25;
+}
+.finans-gib-rapor-baslik-satir .gfr-tutar { text-align: right; }
+.finans-gib-rapor-row {
+  display: grid;
+  grid-template-columns: 86px minmax(108px, 1.1fr) minmax(140px, 1.6fr) 96px;
+  gap: 8px 10px;
+  align-items: center;
+  padding: 4px 10px;
+  font-size: 12px;
+  border-bottom: 1px solid #243952;
+}
+.finans-gib-rapor-row:last-child { border-bottom: none; }
+.finans-gib-rapor-row:nth-child(even) { background: rgba(0, 0, 0, 0.12); }
+.finans-gib-rapor-row .gfr-tarih {
+  color: #90a4ae;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.finans-gib-rapor-row .gfr-fno {
+  color: #b3e5fc;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.finans-gib-rapor-row .gfr-firma {
+  color: #e0f7fa;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.finans-gib-rapor-row .gfr-tutar {
+  text-align: right;
+  color: #4fc3f7;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.finans-gib-rapor-bos { color: #90a4ae; font-size: 13px; padding: 16px 8px; text-align: center; }
+.finans-gib-rapor-toplam {
+  padding: 8px 10px;
+  background: #152a3d;
+  font-size: 13px;
+  font-weight: 700;
+  color: #b3e5fc;
+  text-align: right;
+  border-top: 1px solid #2d4060;
+}
 </style>
 
 <div class="erp-page-wrap">
@@ -739,6 +849,7 @@
     <a href="/faturalar/finans#tahsilat" class="tab finans-tab" onclick="event.preventDefault(); switchTab(1);"><i class="fa fa-money-bill-wave"></i><span>Tahsilatlar</span></a>
     <a href="/faturalar/finans#yeni" class="tab finans-tab" onclick="event.preventDefault(); switchTab(2);"><i class="fa fa-plus-circle"></i><span>Yeni Fatura</span></a>
     <a href="/faturalar/finans#rapor" class="tab finans-tab" onclick="event.preventDefault(); switchTab(3);"><i class="fa fa-users"></i><span>Müşteri listesi</span></a>
+    <a href="/faturalar/finans#gib-rapor" class="tab finans-tab" onclick="event.preventDefault(); switchTab(4);"><i class="fa fa-bar-chart"></i><span>Rapor</span></a>
   </div>
 </div>
 
@@ -874,6 +985,27 @@
             </table>
             <div id="fatura_rapor_firma_ozet_alt" class="fatura-rapor-firma-ozet-alt" hidden aria-live="polite"></div>
             </div>
+        </div>
+    </div>
+</div>
+
+<div class="tab-content" id="tab-4">
+    <div class="finans-gib-rapor-wrap">
+        <div class="finans-gib-rapor-kutu">
+            <div class="finans-gib-rapor-filtre">
+                <div>
+                    <label for="finans_gib_rapor_bas">Başlangıç</label>
+                    <input type="date" id="finans_gib_rapor_bas" autocomplete="off">
+                </div>
+                <div>
+                    <label for="finans_gib_rapor_bit">Bitiş</label>
+                    <input type="date" id="finans_gib_rapor_bit" autocomplete="off">
+                </div>
+                <button type="button" class="auto-btn run" onclick="finansGibRaporYukle(); return false;"><i class="fa fa-search"></i> Listele</button>
+            </div>
+            <p class="finans-gib-rapor-aciklama">Yalnızca GİB’de SMS ile kesinleşmiş (imzalanmış) faturalar; portal taslağı bu listede yer almaz. Fatura tarihine göre sıralanır. Varsayılan: bugün; aralık seçip <strong>Listele</strong> deyin.</p>
+            <div id="finans_gib_rapor_durum" class="finans-gib-rapor-durum" role="status" aria-live="polite"></div>
+            <div id="finans_gib_rapor_list" class="finans-gib-rapor-list"></div>
         </div>
     </div>
 </div>
@@ -4057,6 +4189,119 @@ function faturaRaporSecilenleriSil() {
     });
 })();
 
+const API_FINANS_GIB_FATURA_RAPOR = '/faturalar/api/gib-kesilmis-fatura-raporu';
+
+function finansGibRaporBuguneAyarla() {
+    const d = new Date();
+    const s = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    const b = document.getElementById('finans_gib_rapor_bas');
+    const e = document.getElementById('finans_gib_rapor_bit');
+    if (b) b.value = s;
+    if (e) e.value = s;
+}
+
+function finansGibRaporHtmlEsc(s) {
+    if (s == null) return '';
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/"/g, '&quot;');
+}
+
+function finansGibRaporYukle() {
+    const dur = document.getElementById('finans_gib_rapor_durum');
+    const list = document.getElementById('finans_gib_rapor_list');
+    const bEl = document.getElementById('finans_gib_rapor_bas');
+    const eEl = document.getElementById('finans_gib_rapor_bit');
+    if (!list) return;
+    let bas = (bEl && bEl.value) ? bEl.value : '';
+    let bit = (eEl && eEl.value) ? eEl.value : '';
+    if (!bas || !bit) finansGibRaporBuguneAyarla();
+    bas = (document.getElementById('finans_gib_rapor_bas') || {}).value || '';
+    bit = (document.getElementById('finans_gib_rapor_bit') || {}).value || '';
+    if (dur) {
+        dur.textContent = 'Yükleniyor…';
+        dur.className = 'finans-gib-rapor-durum';
+    }
+    const u = API_FINANS_GIB_FATURA_RAPOR + '?baslangic=' + encodeURIComponent(bas) + '&bitis=' + encodeURIComponent(bit);
+    fetch(u, { credentials: 'same-origin' })
+        .then(async function (r) {
+            const finalUrl = (r && r.url) ? String(r.url) : '';
+            if (finalUrl.indexOf('/login') !== -1) {
+                throw new Error('OTURUM');
+            }
+            const ct = (r.headers.get('content-type') || '').toLowerCase();
+            if (!ct.includes('application/json')) {
+                throw new Error('JSON_DEGIL:' + r.status);
+            }
+            return r.json();
+        })
+        .then((j) => {
+            if (!j || !j.ok) {
+                if (dur) {
+                    dur.textContent = (j && j.mesaj) ? j.mesaj : 'Liste alınamadı.';
+                    dur.className = 'finans-gib-rapor-durum finans-gib-rapor-durum--err';
+                }
+                list.innerHTML = '';
+                return;
+            }
+            const items = Array.isArray(j.items) ? j.items : [];
+            const toplam = j.toplam != null ? Number(j.toplam) : items.reduce((a, x) => a + (parseFloat(x.tutar) || 0), 0);
+            if (dur) {
+                dur.textContent = j.baslangic === j.bitis
+                    ? (String(j.adet || 0) + ' fatura · ' + j.baslangic)
+                    : (String(j.adet || 0) + ' fatura · ' + j.baslangic + ' — ' + j.bitis);
+                dur.className = 'finans-gib-rapor-durum finans-gib-rapor-durum--ok';
+            }
+            if (!items.length) {
+                list.innerHTML = '<div class="finans-gib-rapor-bos">Bu aralıkta GİB’de imzalanmış fatura yok.</div>';
+                return;
+            }
+            const parts = [];
+            parts.push(
+                '<div class="finans-gib-rapor-scroll">' +
+                '<div class="finans-gib-rapor-baslik-satir" role="row">' +
+                '<span class="gfr-tarih">Tarih</span><span class="gfr-fno">GİB fatura no</span><span class="gfr-firma">Firma</span><span class="gfr-tutar">Tutar</span>' +
+                '</div>'
+            );
+            items.forEach((it) => {
+                const fno = finansGibRaporHtmlEsc(it.fatura_no || '—');
+                const firma = finansGibRaporHtmlEsc(it.musteri_adi || '—');
+                const tut = parseFloat(it.tutar);
+                const tutStr = (isNaN(tut) ? 0 : tut).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ₺';
+                const tarihRaw = (it.fatura_tarihi || '').toString();
+                const tarih = tarihRaw.length >= 10 ? finansGibRaporHtmlEsc(tarihRaw.slice(0, 10)) : finansGibRaporHtmlEsc(tarihRaw);
+                parts.push(
+                    '<div class="finans-gib-rapor-row" role="row">' +
+                    '<span class="gfr-tarih">' + tarih + '</span>' +
+                    '<span class="gfr-fno">' + fno + '</span>' +
+                    '<span class="gfr-firma">' + firma + '</span>' +
+                    '<span class="gfr-tutar">' + tutStr + '</span>' +
+                    '</div>'
+                );
+            });
+            parts.push('</div>');
+            parts.push(
+                '<div class="finans-gib-rapor-toplam">Toplam: ' +
+                toplam.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ₺</div>'
+            );
+            list.innerHTML = parts.join('');
+        })
+        .catch(function (err) {
+            if (dur) {
+                var msg = 'Sunucuya bağlanılamadı.';
+                if (err && err.message === 'OTURUM') {
+                    msg = 'Oturum gerekli veya süresi doldu; sayfayı yenileyip tekrar giriş yapın.';
+                } else if (err && String(err.message || '').indexOf('JSON_DEGIL:') === 0) {
+                    msg = 'Sunucu JSON yerine başka yanıt döndü; oturum veya sunucu hatası olabilir.';
+                }
+                dur.textContent = msg;
+                dur.className = 'finans-gib-rapor-durum finans-gib-rapor-durum--err';
+            }
+            list.innerHTML = '';
+        });
+}
+
 function switchTab(index) {
     document.querySelectorAll('.finans-tab').forEach((t, i) => {
         t.classList.toggle('active', i === index);
@@ -4067,6 +4312,12 @@ function switchTab(index) {
     if (index === 3) {
         faturaRaporVarsayilanTarihlerDoldur();
         if (typeof faturaRaporGorunumUI === 'function') faturaRaporGorunumUI();
+    }
+    if (index === 4) {
+        const b = document.getElementById('finans_gib_rapor_bas');
+        const e = document.getElementById('finans_gib_rapor_bit');
+        if (b && e && !b.value && !e.value) finansGibRaporBuguneAyarla();
+        if (typeof finansGibRaporYukle === 'function') finansGibRaporYukle();
     }
 }
 // Sayfa #tahsilat, #yeni veya #rapor ile açıldıysa doğru sekmeyi aç; kayıtlı fatura raporu filtreleri önce uygulanır
@@ -4080,6 +4331,7 @@ function switchTab(index) {
         if (hash === '#tahsilat') switchTab(1);
         else if (hash === '#yeni') switchTab(2);
         else if (hash === '#rapor') switchTab(3);
+        else if (hash === '#gib-rapor') switchTab(4);
         autoLoadStatus();
         gibSonFaturaGetir();
     })();

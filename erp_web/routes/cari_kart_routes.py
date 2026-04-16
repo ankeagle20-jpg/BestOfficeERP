@@ -4,12 +4,29 @@ BestOffice 360° Cari Kart — Finans + CRM + Operasyon + Hukuk + Randevu + Karg
 from flask import Blueprint, render_template, request, jsonify, Response, url_for
 from flask_login import current_user
 from auth import giris_gerekli
-from db import fetch_all, fetch_one, db as get_db
+from db import fetch_all, fetch_one, db as get_db, execute_returning, sql_expr_fatura_not_gib_taslak
 from utils.text_utils import turkish_lower
 from utils.musteri_arama import customers_arama_sql_giris_genis, customers_arama_params_giris_genis
+from services.cari_service import CariService, build_customer_levels
 from datetime import date, datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import io
+
+_GRUP_RAPOR_AYLAR = (
+    "",
+    "Ocak",
+    "Şubat",
+    "Mart",
+    "Nisan",
+    "Mayıs",
+    "Haziran",
+    "Temmuz",
+    "Ağustos",
+    "Eylül",
+    "Ekim",
+    "Kasım",
+    "Aralık",
+)
 
 _executor = ThreadPoolExecutor(max_workers=12)
 
@@ -19,10 +36,11 @@ bp = Blueprint("cari_kart", __name__)
 def _cari_hareketler(musteri_id):
     """Fatura (borç) ve tahsilat (alacak) birleşik hareketler, yürüyen bakiye."""
     faturalar = fetch_all(
-        """SELECT id, fatura_no AS belge_no, fatura_tarihi AS tarih, COALESCE(toplam, tutar, 0) AS tutar, 'Fatura' AS tur, vade_tarihi
+        f"""SELECT id, fatura_no AS belge_no, fatura_tarihi AS tarih, COALESCE(toplam, tutar, 0) AS tutar, 'Fatura' AS tur, vade_tarihi
            FROM faturalar
            WHERE musteri_id = %s
              AND NULLIF(TRIM(COALESCE(ettn::text, '')), '') IS NOT NULL
+             AND {sql_expr_fatura_not_gib_taslak("notlar")}
            ORDER BY fatura_tarihi, id""",
         (musteri_id,),
     )
@@ -66,8 +84,15 @@ def index():
     """360° Cari Kart ana sayfa: seçilen müşteri listede üstte, ana ekranda 360° müşteri bilgi ekranı."""
     mid = request.args.get("mid", type=int)
     musteriler = fetch_all(
-        "SELECT id, name, musteri_adi, tax_number, office_code, durum FROM customers ORDER BY name LIMIT 500"
+        """
+        SELECT id, name, musteri_adi, tax_number, office_code, durum,
+               parent_id, COALESCE(is_group, FALSE) AS is_group
+        FROM customers
+        ORDER BY name
+        LIMIT 500
+        """
     )
+    musteriler = build_customer_levels(musteriler)
     # Ana sayfa = 360° ekran: mid verilmemişse ilk müşteriyi seç
     if mid is None and musteriler:
         mid = musteriler[0]["id"]
@@ -95,9 +120,10 @@ def _api_360_parallel_fetches(mid, bugun, bu_ay_bas, bu_ay_son, altı_ay_once):
 
     def _bu_ay_fatura():
         r = fetch_one(
-            """SELECT COALESCE(SUM(COALESCE(toplam, tutar, 0)), 0) AS t FROM faturalar
+            f"""SELECT COALESCE(SUM(COALESCE(toplam, tutar, 0)), 0) AS t FROM faturalar
                WHERE musteri_id = %s
                  AND NULLIF(TRIM(COALESCE(ettn::text, '')), '') IS NOT NULL
+                 AND {sql_expr_fatura_not_gib_taslak("notlar")}
                  AND fatura_tarihi::date >= %s AND fatura_tarihi::date <= %s""",
             (mid, bu_ay_bas, bu_ay_son),
         )
@@ -126,12 +152,13 @@ def _api_360_parallel_fetches(mid, bugun, bu_ay_bas, bu_ay_son, altı_ay_once):
 
     def _ort_odeme():
         return fetch_one(
-            """
+            f"""
             SELECT AVG((t.tahsilat_tarihi::date - f.vade_tarihi::date)) AS gun
               FROM tahsilatlar t
               JOIN faturalar f ON t.fatura_id = f.id
              WHERE t.musteri_id = %s
                AND NULLIF(TRIM(COALESCE(f.ettn::text, '')), '') IS NOT NULL
+               AND {sql_expr_fatura_not_gib_taslak("f.notlar")}
                AND t.tahsilat_tarihi IS NOT NULL
                AND f.vade_tarihi IS NOT NULL
             """,
@@ -212,11 +239,12 @@ def api_360(mid):
 
     # Önce sadece müşteri + ödenmemiş faturalar (aging için zorunlu)
     faturalar_odenmemis = fetch_all(
-        """SELECT id, fatura_no, fatura_tarihi, vade_tarihi, COALESCE(toplam, tutar, 0) AS toplam
+        f"""SELECT id, fatura_no, fatura_tarihi, vade_tarihi, COALESCE(toplam, tutar, 0) AS toplam
            FROM faturalar
            WHERE musteri_id = %s
              AND COALESCE(durum, '') != 'odendi'
-             AND NULLIF(TRIM(COALESCE(ettn::text, '')), '') IS NOT NULL""",
+             AND NULLIF(TRIM(COALESCE(ettn::text, '')), '') IS NOT NULL
+             AND {sql_expr_fatura_not_gib_taslak("notlar")}""",
         (mid,),
     )
     # Diğer tüm sorgular paralel
@@ -308,6 +336,19 @@ def api_360(mid):
             gecikme_sayisi += 1
     risk_skoru = _risk_skoru_360(gecikmis_gun, toplam_borc, gecikme_sayisi, aging_91)
     is_admin = getattr(current_user, "role", None) == "admin"
+    parent_name = None
+    parent_id = cust.get("parent_id")
+    if parent_id:
+        gids = fetch_all("SELECT id, name FROM customers WHERE COALESCE(is_group, FALSE)=TRUE LIMIT 500") or []
+        pstr = str(parent_id)
+        for g in gids:
+            try:
+                if str(CariService.customer_uuid(int(g.get("id")))) == pstr:
+                    parent_name = g.get("name")
+                    break
+            except Exception:
+                continue
+
     payload = {
         "ok": True,
         "musteri": {
@@ -317,6 +358,9 @@ def api_360(mid):
             "office_code": cust.get("office_code"), "durum": cust.get("durum") or "aktif",
             "vergi_dairesi": cust.get("vergi_dairesi"), "mersis_no": cust.get("mersis_no"),
             "nace_kodu": cust.get("nace_kodu"), "ofis_tipi": cust.get("ofis_tipi"),
+            "is_group": bool(cust.get("is_group")),
+            "parent_id": str(parent_id) if parent_id else None,
+            "parent_name": parent_name,
         },
         "ozet": {
             "guncel_bakiye": round(toplam_borc, 2),
@@ -362,7 +406,11 @@ def api_360(mid):
 def api_musteriler():
     """Müşteri listesi; kart + KYC alanlarında geniş metin araması."""
     q = request.args.get("q", "").strip()
-    base = "SELECT id, name, musteri_adi, tax_number, office_code, durum FROM customers "
+    base = (
+        "SELECT id, name, musteri_adi, tax_number, office_code, durum, "
+        "parent_id, COALESCE(is_group, FALSE) AS is_group "
+        "FROM customers "
+    )
     if not q:
         rows = fetch_all(base + "ORDER BY name LIMIT 200")
     else:
@@ -371,4 +419,218 @@ def api_musteriler():
             base + f"WHERE {w} ORDER BY name LIMIT 200",
             customers_arama_params_giris_genis(q),
         )
-    return jsonify(rows or [])
+    return jsonify(build_customer_levels(rows or []))
+
+
+@bp.route("/api/group-balance/<int:musteri_id>")
+@giris_gerekli
+def api_group_balance(musteri_id):
+    row = fetch_one("SELECT id, COALESCE(is_group, FALSE) AS is_group FROM customers WHERE id = %s", (musteri_id,))
+    if not row:
+        return jsonify({"ok": False, "mesaj": "Cari bulunamadı."}), 404
+    if not bool(row.get("is_group")):
+        return jsonify({"ok": True, "is_group": False, "total_balance": 0.0})
+    total = CariService.get_total_group_balance(musteri_id)
+    return jsonify({"ok": True, "is_group": True, "total_balance": round(total, 2)})
+
+
+@bp.route("/api/group-summary/<int:group_id>")
+@giris_gerekli
+def api_group_summary(group_id):
+    row = fetch_one(
+        "SELECT id, COALESCE(is_group, FALSE) AS is_group, name FROM customers WHERE id = %s",
+        (group_id,),
+    )
+    if not row:
+        return jsonify({"ok": False, "mesaj": "Grup bulunamadı."}), 404
+    if not bool(row.get("is_group")):
+        return jsonify({"ok": False, "mesaj": "Seçilen kayıt grup değil."}), 400
+    s = CariService.get_group_financial_summary(group_id)
+    return jsonify({"ok": True, "group_id": int(group_id), "group_name": row.get("name") or "", "summary": s})
+
+
+@bp.route("/api/parent", methods=["POST"])
+@giris_gerekli
+def api_set_parent():
+    data = request.get_json(silent=True) or {}
+    try:
+        cid = int(data.get("cari_id") or 0)
+    except (TypeError, ValueError):
+        cid = 0
+    if cid <= 0:
+        return jsonify({"ok": False, "mesaj": "Geçerli cari_id gerekli."}), 400
+    raw_parent = data.get("parent_cari_id")
+    parent_id = None
+    if raw_parent not in (None, "", 0, "0"):
+        try:
+            parent_id = int(raw_parent)
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "mesaj": "Geçersiz parent_cari_id."}), 400
+    changed = CariService.set_parent(cid, parent_id)
+    return jsonify({"ok": True, "updated": int(changed or 0)})
+
+
+@bp.route("/api/parent/by-hizmet-turu", methods=["POST"])
+@giris_gerekli
+def api_set_parent_by_hizmet_turu():
+    data = request.get_json(silent=True) or {}
+    hizmet_turu = (data.get("hizmet_turu") or "").strip()
+    if not hizmet_turu:
+        return jsonify({"ok": False, "mesaj": "Hizmet türü seçilmelidir."}), 400
+    try:
+        parent_id = int(data.get("parent_cari_id") or 0)
+    except (TypeError, ValueError):
+        parent_id = 0
+    if parent_id <= 0:
+        return jsonify({"ok": False, "mesaj": "Geçerli grup seçilmelidir."}), 400
+    parent = fetch_one("SELECT id, COALESCE(is_group, FALSE) AS is_group FROM customers WHERE id = %s", (parent_id,))
+    if not parent:
+        return jsonify({"ok": False, "mesaj": "Grup bulunamadı."}), 404
+    if not bool(parent.get("is_group")):
+        execute("UPDATE customers SET is_group = TRUE WHERE id = %s", (parent_id,))
+    changed = CariService.set_parent_by_hizmet_turu(hizmet_turu, parent_id)
+    return jsonify({"ok": True, "updated": int(changed or 0), "hizmet_turu": hizmet_turu, "group_id": parent_id})
+
+
+@bp.route("/api/groups")
+@giris_gerekli
+def api_groups():
+    exclude_id = request.args.get("exclude_id", type=int)
+    if exclude_id:
+        rows = fetch_all(
+            """
+            SELECT id, name, COALESCE(current_balance, 0) AS current_balance
+            FROM customers
+            WHERE COALESCE(is_group, FALSE) = TRUE
+              AND id <> %s
+            ORDER BY name
+            LIMIT 300
+            """,
+            (exclude_id,),
+        )
+    else:
+        rows = fetch_all(
+            """
+            SELECT id, name, COALESCE(current_balance, 0) AS current_balance
+            FROM customers
+            WHERE COALESCE(is_group, FALSE) = TRUE
+            ORDER BY name
+            LIMIT 300
+            """
+        )
+    return jsonify({"ok": True, "groups": rows or []})
+
+
+@bp.route("/api/groups", methods=["POST"])
+@giris_gerekli
+def api_create_group():
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"ok": False, "mesaj": "Grup adı gerekli."}), 400
+    row = execute_returning(
+        """
+        INSERT INTO customers (name, musteri_adi, is_group)
+        VALUES (%s, %s, TRUE)
+        RETURNING id, name
+        """,
+        (name, name),
+    )
+    if not row:
+        return jsonify({"ok": False, "mesaj": "Grup oluşturulamadı."}), 500
+    return jsonify({"ok": True, "group": row})
+
+
+@bp.route("/api/groups-consolidated-report")
+@giris_gerekli
+def api_groups_consolidated_report():
+    """is_group kayıtları; alt carilerin toplam borç/alacak ve bu ay sözleşme gridi KDV dahil aylık tutarları (konsolide)."""
+    bugun = date.today()
+    ay_idx = int(bugun.month)
+    ay_label = f"{_GRUP_RAPOR_AYLAR[ay_idx]} {bugun.year}" if 1 <= ay_idx <= 12 else str(bugun)
+    rows = fetch_all(
+        """
+        SELECT id, name
+        FROM customers
+        WHERE COALESCE(is_group, FALSE) = TRUE
+        ORDER BY name
+        LIMIT 500
+        """
+    ) or []
+    group_ids = [int(r.get("id") or 0) for r in rows if int(r.get("id") or 0) > 0]
+    batch = CariService.get_groups_consolidated_financials(group_ids, bugun)
+    groups_out = []
+    sum_borc = 0.0
+    sum_alacak = 0.0
+    sum_children = 0
+    sum_borc_month = 0.0
+    for r in rows:
+        gid = int(r.get("id") or 0)
+        if gid <= 0:
+            continue
+        s = batch.get(gid) or {
+            "child_count": 0,
+            "borc_total": 0.0,
+            "alacak_total": 0.0,
+            "net_balance": 0.0,
+            "borc_month": 0.0,
+        }
+        borc = float(s.get("borc_total") or 0)
+        alacak = float(s.get("alacak_total") or 0)
+        borc_month = float(s.get("borc_month") or 0)
+        sum_borc += borc
+        sum_alacak += alacak
+        sum_children += int(s.get("child_count") or 0)
+        sum_borc_month += borc_month
+        groups_out.append(
+            {
+                "id": gid,
+                "name": (r.get("name") or "").strip(),
+                "child_count": int(s.get("child_count") or 0),
+                "borc_month": round(borc_month, 2),
+                "borc_total": round(borc, 2),
+                "alacak_total": round(alacak, 2),
+                "net_balance": float(s.get("net_balance") or 0),
+            }
+        )
+    return jsonify(
+        {
+            "ok": True,
+            "meta": {
+                "borc_month_iso": f"{bugun.year:04d}-{bugun.month:02d}",
+                "borc_month_label": ay_label,
+            },
+            "groups": groups_out,
+            "totals": {
+                "group_count": len(groups_out),
+                "child_count_sum": sum_children,
+                "borc_month_total": round(sum_borc_month, 2),
+                "borc_total": round(sum_borc, 2),
+                "alacak_total": round(sum_alacak, 2),
+                "net_balance": round(sum_borc - sum_alacak, 2),
+            },
+        }
+    )
+
+
+@bp.route("/api/group-children/<int:group_id>")
+@giris_gerekli
+def api_group_children(group_id):
+    """Grup altındaki cariler + her biri için borç / alacak / bu ay sözleşme gridi aylık tutarı."""
+    g = fetch_one(
+        "SELECT id, name, COALESCE(is_group, FALSE) AS is_group FROM customers WHERE id = %s",
+        (group_id,),
+    )
+    if not g:
+        return jsonify({"ok": False, "mesaj": "Kayıt bulunamadı."}), 404
+    if not bool(g.get("is_group")):
+        return jsonify({"ok": False, "mesaj": "Bu kayıt grup değil."}), 400
+    children = CariService.get_group_children_financial_rows(group_id)
+    return jsonify(
+        {
+            "ok": True,
+            "group_id": int(group_id),
+            "group_name": (g.get("name") or "").strip(),
+            "children": children,
+        }
+    )

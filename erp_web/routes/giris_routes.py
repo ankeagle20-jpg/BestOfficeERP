@@ -25,6 +25,7 @@ from db import (
     ensure_musteri_kyc_kira_banka,
     db as get_db,
     get_conn,
+    sql_expr_fatura_not_gib_taslak,
 )
 from datetime import datetime, date, timedelta
 import calendar
@@ -536,11 +537,12 @@ def _load_aylik_tahsil_ay_keys_by_musteri():
 def _load_manual_fatura_ay_by_musteri():
     """AYLIK_TUTAR işaretçisi olmayan faturalar: müşteri + ay başı (manuel / dış kayıt)."""
     rows = fetch_all(
-        """
+        f"""
         SELECT musteri_id, (DATE_TRUNC('month', fatura_tarihi::date))::date AS m
         FROM faturalar
         WHERE fatura_tarihi IS NOT NULL
           AND COALESCE(notlar, '') NOT LIKE '%%|AYLIK_TUTAR|%%'
+          AND {sql_expr_fatura_not_gib_taslak("notlar")}
         """
     ) or []
     by_mid = defaultdict(set)
@@ -995,6 +997,24 @@ def api_musteri_detay(mid):
     out = {}
     for k, v in row.items():
         out[k] = _musteri_serialize_val(v)
+    out["is_group"] = bool(row.get("is_group"))
+    out["parent_cari_id"] = ""
+    if row.get("parent_id"):
+        try:
+            from services.cari_service import CariService
+
+            pstr = str(row.get("parent_id"))
+            groups = fetch_all(
+                "SELECT id, name FROM customers WHERE COALESCE(is_group, FALSE)=TRUE LIMIT 500"
+            ) or []
+            for g in groups:
+                gid = int(g.get("id") or 0)
+                if gid > 0 and str(CariService.customer_uuid(gid)) == pstr:
+                    out["parent_cari_id"] = str(gid)
+                    out["parent_name"] = (g.get("name") or "").strip()
+                    break
+        except Exception:
+            pass
     if not kyc and out.get("yetkili_tcno"):
         out["yetkili_tc"] = out["yetkili_tcno"]
     # KYC alanlarını forma uyumlu anahtarlarla birleştir (KYC öncelikli)
@@ -1028,6 +1048,9 @@ def api_musteri_detay(mid):
             out["hazir_ofis_oda_no"] = _musteri_serialize_val(ho)
         _df = _musteri_serialize_val(kyc.get("duzenli_fatura"))
         out["duzenli_fatura"] = (_df if _df else "duzenle")
+        _od = _musteri_serialize_val(kyc.get("odeme_duzeni"))
+        out["odeme_duzeni"] = (_od if _od else "aylik")
+        out["odeme_duzeni_manuel"] = _musteri_serialize_val(kyc.get("odeme_duzeni_manuel")) or ""
         out["guncel_kira_bedeli"] = _musteri_serialize_val(kyc.get("aylik_kira"))
         out["ilk_kira_bedeli"] = out["guncel_kira_bedeli"]
         out["rent_start_date"] = _musteri_serialize_val(kyc.get("sozlesme_tarihi"))
@@ -2218,12 +2241,14 @@ def _cari_hareketler(musteri_id, banka_tahsilat_only=False, cari_ekstre_b=False)
     banka_tahsilat_only=True ise nakit hariç tahsilatlar (havale, eft, banka, kredi kartı, çek).
     cari_ekstre_b=True ise Cari Ekstre B: borçta yalnızca ETTN’li (GİB kesilmiş) faturalar;
     alacakta yalnızca havale, EFT, çek, kredi kartı (banka ve nakit yok)."""
+    _nt = sql_expr_fatura_not_gib_taslak("notlar")
     if cari_ekstre_b:
         faturalar = fetch_all(
-            """SELECT id, fatura_no AS belge_no, fatura_tarihi AS tarih, COALESCE(toplam, tutar, 0) AS tutar, 'Fatura' AS tur, vade_tarihi
+            f"""SELECT id, fatura_no AS belge_no, fatura_tarihi AS tarih, COALESCE(toplam, tutar, 0) AS tutar, 'Fatura' AS tur, vade_tarihi
                FROM faturalar
                WHERE musteri_id = %s
                  AND NULLIF(TRIM(COALESCE(ettn::text, '')), '') IS NOT NULL
+                 AND {_nt}
                ORDER BY fatura_tarihi, id""",
             (musteri_id,),
         )
@@ -2246,8 +2271,8 @@ def _cari_hareketler(musteri_id, banka_tahsilat_only=False, cari_ekstre_b=False)
         )
     else:
         faturalar = fetch_all(
-            """SELECT id, fatura_no AS belge_no, fatura_tarihi AS tarih, COALESCE(toplam, tutar, 0) AS tutar, 'Fatura' AS tur, vade_tarihi
-               FROM faturalar WHERE musteri_id = %s ORDER BY fatura_tarihi, id""",
+            f"""SELECT id, fatura_no AS belge_no, fatura_tarihi AS tarih, COALESCE(toplam, tutar, 0) AS tutar, 'Fatura' AS tur, vade_tarihi
+               FROM faturalar WHERE musteri_id = %s AND {_nt} ORDER BY fatura_tarihi, id""",
             (musteri_id,),
         )
         if banka_tahsilat_only:
@@ -2712,6 +2737,200 @@ def firma_ozet_aylik_grid_hucre_kdv_dahil(
     return 0.0
 
 
+# Firma özeti / fatura raporu ile aynı: giriş tarihi (KYC söz. / rent_start / created_at)
+_FIRMA_OZET_GIRIS_TARIHI_SQL = """
+COALESCE(
+    CASE
+        WHEN mk.sozlesme_tarihi IS NULL THEN NULL
+        WHEN BTRIM(mk.sozlesme_tarihi::text) = '' THEN NULL
+        WHEN BTRIM(mk.sozlesme_tarihi::text) ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+            THEN (SUBSTRING(BTRIM(mk.sozlesme_tarihi::text) FROM 1 FOR 10))::date
+        WHEN BTRIM(mk.sozlesme_tarihi::text) ~ '^[0-9]{1,2}\\.[0-9]{1,2}\\.[0-9]{4}'
+            THEN TO_DATE(
+                REGEXP_REPLACE(BTRIM(mk.sozlesme_tarihi::text), ' .*$', ''),
+                'DD.MM.YYYY'
+            )
+        WHEN BTRIM(mk.sozlesme_tarihi::text) ~ '^[0-9]{1,2}-[0-9]{1,2}-[0-9]{4}'
+            THEN TO_DATE(
+                REGEXP_REPLACE(BTRIM(mk.sozlesme_tarihi::text), ' .*$', ''),
+                'DD-MM-YYYY'
+            )
+        ELSE NULL
+    END,
+    c.rent_start_date::date,
+    c.created_at::date
+)
+""".strip()
+
+
+def _firma_ozet_kyc_dict_from_grid_sql_row(row) -> dict | None:
+    """musteri_aylik_grid_* SELECT satırından firma_ozet_aylik_grid_hucre_kdv_dahil için kyc dict."""
+    if not row or row.get("id") is None:
+        return None
+    raw_soz_bas = row.get("kyc_soz_bas")
+    raw_soz_bit = row.get("kyc_soz_bit")
+    giris_sql = row.get("giris_raw")
+    bas_parsed = _aylik_grid_coerce_date(raw_soz_bas)
+    bit_parsed = _aylik_grid_coerce_date(raw_soz_bit)
+    soz_bas_eff = bas_parsed or giris_sql or raw_soz_bas
+    soz_bit_eff = bit_parsed if bit_parsed is not None else raw_soz_bit
+    return {
+        "sozlesme_tarihi": soz_bas_eff,
+        "sozlesme_bitis": soz_bit_eff,
+        "aylik_kira": row.get("firma_grid_aylik_net"),
+        "kira_artis_tarihi": row.get("kyc_kira_artis"),
+        "kira_suresi_ay": row.get("kyc_kira_suresi_ay"),
+        "kira_nakit": row.get("kira_nakit"),
+        "kira_banka": row.get("kira_banka"),
+        "kira_nakit_tutar": row.get("kira_nakit_tutar"),
+        "kira_banka_tutar": row.get("kira_banka_tutar"),
+        "kdv_oran": row.get("kdv_oran"),
+    }
+
+
+def _musteri_aylik_grid_customer_kyc_select_sql():
+    """Tek müşteri veya ANY(musteri_ids) için ortak FROM; WHERE dışarıda eklenir."""
+    gsql = _FIRMA_OZET_GIRIS_TARIHI_SQL
+    return f"""
+        SELECT c.id,
+               ({gsql}) AS giris_raw,
+               c.guncel_kira_bedeli,
+               c.ilk_kira_bedeli,
+               mk.sozlesme_tarihi AS kyc_soz_bas,
+               mk.sozlesme_bitis AS kyc_soz_bit,
+               mk.kira_artis_tarihi AS kyc_kira_artis,
+               mk.kira_suresi_ay AS kyc_kira_suresi_ay,
+               mk.aylik_kira,
+               mk.kira_nakit,
+               mk.kira_banka,
+               mk.kira_nakit_tutar,
+               mk.kira_banka_tutar,
+               mk.kdv_oran,
+               CASE
+                   WHEN mk.aylik_kira IS NOT NULL AND mk.aylik_kira > 0 THEN mk.aylik_kira
+                   ELSE COALESCE(c.guncel_kira_bedeli, c.ilk_kira_bedeli, mk.aylik_kira)
+               END AS firma_grid_aylik_net
+        FROM customers c
+        LEFT JOIN (
+            SELECT DISTINCT ON (musteri_id)
+                musteri_id,
+                sozlesme_tarihi,
+                sozlesme_bitis,
+                kira_artis_tarihi,
+                kira_suresi_ay,
+                aylik_kira,
+                kira_nakit,
+                kira_banka,
+                kira_nakit_tutar,
+                kira_banka_tutar,
+                kdv_oran
+            FROM musteri_kyc
+            ORDER BY musteri_id, id DESC
+        ) mk ON mk.musteri_id = c.id
+    """
+
+
+def musteri_aylik_grid_hucre_kdv_dahil_takvim_ayi_batch(musteri_ids: list, ref: date | None = None) -> dict[int, float]:
+    """
+    Birden çok müşteri için tek TÜFE + tek KYC/reel sorgusu; Grup konsolide raporu için.
+    Dönüş: {{ musteri_id: tutar, ... }} — istekte olmayan id'ler için anahtar yoktur.
+    """
+    d = ref or date.today()
+    ref_y, ref_m = int(d.year), int(d.month)
+    if ref_m < 1 or ref_m > 12:
+        return {}
+
+    mids: list[int] = []
+    seen = set()
+    for x in musteri_ids or []:
+        try:
+            i = int(x)
+        except (TypeError, ValueError):
+            continue
+        if i <= 0 or i in seen:
+            continue
+        seen.add(i)
+        mids.append(i)
+    if not mids:
+        return {}
+
+    _ensure_musteri_reel_donem_tutar_table()
+    tufe_map = _tufe_map_by_year_month()
+
+    base_sql = _musteri_aylik_grid_customer_kyc_select_sql()
+    rows = fetch_all(base_sql + " WHERE c.id = ANY(%s)", (mids,)) or []
+    row_by_id: dict[int, dict] = {}
+    for r in rows:
+        try:
+            rid = int(r.get("id") or 0)
+        except (TypeError, ValueError):
+            continue
+        if rid > 0:
+            row_by_id[rid] = r
+
+    reel_by_mid: dict[int, dict[int, float]] = {}
+    rrows = (
+        fetch_all(
+            "SELECT musteri_id, donem_yil, tutar_kdv_dahil FROM musteri_reel_donem_tutar WHERE musteri_id = ANY(%s)",
+            (mids,),
+        )
+        or []
+    )
+    for rr in rrows:
+        try:
+            mid_r = int(rr.get("musteri_id") or 0)
+            yil = int(rr.get("donem_yil") or 0)
+            tut = float(rr.get("tutar_kdv_dahil") or 0)
+        except (TypeError, ValueError):
+            continue
+        if mid_r <= 0:
+            continue
+        reel_by_mid.setdefault(mid_r, {})[yil] = tut
+
+    out: dict[int, float] = {}
+    for mid in mids:
+        row = row_by_id.get(mid)
+        kyc_for_grid = _firma_ozet_kyc_dict_from_grid_sql_row(row) if row else None
+        if not kyc_for_grid:
+            out[mid] = 0.0
+            continue
+        reel_manual = dict(reel_by_mid.get(mid) or {})
+        try:
+            v = float(
+                firma_ozet_aylik_grid_hucre_kdv_dahil(
+                    mid,
+                    ref_y,
+                    ref_m,
+                    tufe_map,
+                    kyc_for_grid,
+                    None,
+                    reel_manual,
+                    skip_disk_cache=True,
+                    skip_reel_overlay=False,
+                )
+            )
+            out[mid] = round(v, 2) if math.isfinite(v) else 0.0
+        except Exception:
+            out[mid] = 0.0
+    return out
+
+
+def musteri_aylik_grid_hucre_kdv_dahil_takvim_ayi(musteri_id: int, ref: date | None = None) -> float:
+    """
+    Cari kart Grup «Aylık borç» ile Sözleşmeler aylık gridi aynı kaynak:
+    TÜFE + sözleşme çekirdeği + reel dönem (faturaların fatura_tarihi değil).
+    ref: içindeki takvim ayı; None ise bugün.
+    """
+    try:
+        mid = int(musteri_id)
+    except (TypeError, ValueError):
+        return 0.0
+    if mid <= 0:
+        return 0.0
+    m = musteri_aylik_grid_hucre_kdv_dahil_takvim_ayi_batch([mid], ref)
+    return float(m.get(mid, 0.0))
+
+
 def _cari_ekstre_ay_borc_tutar(y, m, prev_borc, tahsilat_ay_tutar_map, reel_ay_map, artis_month, tufe_map, aylik):
     """Önce reel hücre (kayıtlı/otomatik reel kira), yoksa tahsilattan çıkarım, sonra önceki ay + TÜFE, son çare taban aylık KDV dahil."""
     ilk_gun = date(y, m, 1)
@@ -3103,8 +3322,9 @@ def _api_cari_kart_impl(mid):
     bugun = date.today()
     # Ödenmemiş faturalar toplamı (gecikmiş tutar)
     faturalar_odenmemis = fetch_all(
-        """SELECT id, fatura_no, fatura_tarihi, vade_tarihi, COALESCE(toplam, tutar, 0) AS toplam
-           FROM faturalar WHERE musteri_id = %s AND COALESCE(durum, '') != 'odendi'""",
+        f"""SELECT id, fatura_no, fatura_tarihi, vade_tarihi, COALESCE(toplam, tutar, 0) AS toplam
+           FROM faturalar WHERE musteri_id = %s AND COALESCE(durum, '') != 'odendi'
+           AND {sql_expr_fatura_not_gib_taslak("notlar")}""",
         (mid,)
     )
     toplam_borc = sum(float(f.get("toplam") or 0) for f in faturalar_odenmemis)
@@ -4075,9 +4295,10 @@ def api_aylik_kira_guncelle_ve_borclandir_all():
             kyc_by_mid[mid_k] = kr
 
     marker_rows = fetch_all(
-        """
+        f"""
         SELECT musteri_id, notlar FROM faturalar
         WHERE COALESCE(notlar, '') LIKE '%%|AYLIK_TUTAR|%%'
+          AND {sql_expr_fatura_not_gib_taslak("notlar")}
         """
     ) or []
     markers_by_mid = defaultdict(set)
@@ -4268,10 +4489,11 @@ def api_tufe_borclandir_nakit_tahsil_toplu():
     manual_ay_by_mid = _load_manual_fatura_ay_by_musteri() if manuel_faturali_musteri_atla else {}
 
     marker_rows = fetch_all(
-        """
+        f"""
         SELECT musteri_id, notlar, COALESCE(NULLIF(TRIM(ettn), ''), '') AS ettn_g
         FROM faturalar
         WHERE COALESCE(notlar, '') LIKE '%%|AYLIK_TUTAR|%%'
+          AND {sql_expr_fatura_not_gib_taslak("notlar")}
         """
     ) or []
     borc_keys_by_mid = defaultdict(set)
@@ -4563,11 +4785,12 @@ def api_tufe_borclandir_nakit_tahsil_toplu():
         fmap = {}
         if mids_tah:
             cur.execute(
-                """
+                f"""
                 SELECT DISTINCT ON (f.musteri_id, (DATE_TRUNC('month', f.fatura_tarihi::date))::date)
                     f.id, f.musteri_id, (DATE_TRUNC('month', f.fatura_tarihi::date))::date AS m
                 FROM faturalar f
                 WHERE f.musteri_id IN %s
+                  AND {sql_expr_fatura_not_gib_taslak("f.notlar")}
                 ORDER BY f.musteri_id, (DATE_TRUNC('month', f.fatura_tarihi::date))::date, f.id DESC
                 """,
                 (tuple(mids_tah),),

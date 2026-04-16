@@ -396,6 +396,7 @@
 .rp-mini-table tbody tr:hover{background:rgba(0,200,240,.06)}
 .rp-mini-table tbody tr.rp-mini-selected{background:rgba(0,200,240,.12);border-left:3px solid var(--cyan)}
 .rp-mini-badge{display:inline-block;padding:1px 4px;border-radius:3px;font-size:7px;font-weight:700}
+.rp-mini-badge.group{background:rgba(0,200,240,.15);color:var(--cyan)}
 .rp-mini-badge.aktif{background:rgba(0,208,104,.15);color:var(--grn)}
 .rp-mini-badge.pasif{background:rgba(255,52,82,.15);color:var(--red)}
 .rp-mini-footer{display:flex;justify-content:space-between;font-size:8px;color:var(--t2);margin-bottom:6px}
@@ -615,6 +616,8 @@ tr.kr td{background:rgba(255,52,82,.04)}
 }
 .sel-row:hover{background:rgba(0,200,240,.06)}
 .sel-row:last-child{border-bottom:none}
+.sel-row.group-row{background:rgba(0,200,240,.05);border-left:2px solid rgba(0,200,240,.4)}
+.sel-row .grp-dot{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:50%;font-size:9px;margin-right:6px;color:#00c8f0;background:rgba(0,200,240,.14)}
 .sel-sub{font-family:var(--mono);font-size:9.5px;color:var(--t3);margin-top:1px}
 .mb{padding:2px 8px;border-radius:4px;font-size:9.5px;font-weight:700;font-family:var(--mono)}
 .mb-a{background:var(--grnh);color:var(--grn)}
@@ -749,9 +752,9 @@ tr.kr td{background:rgba(255,52,82,.04)}
       <input class="sel-inp" id="sel-ara" type="text" placeholder="Müşteri adı veya vergi numarası…" autocomplete="off">
       <div class="sel-list" id="sel-lst">
         {% for m in musteriler %}
-        <div class="sel-row" data-id="{{ m.id }}" data-name="{{ (m.name or '')|lower }}" data-ma="{{ (m.get('musteri_adi') or '')|lower }}" data-tax="{{ (m.tax_number|string if m.tax_number is not none else '')|lower }}">
+        <div class="sel-row {{ 'group-row' if m.get('is_group') else '' }}" data-id="{{ m.id }}" data-name="{{ (m.name or '')|lower }}" data-ma="{{ (m.get('musteri_adi') or '')|lower }}" data-tax="{{ (m.tax_number|string if m.tax_number is not none else '')|lower }}" style="padding-left:{{ 13 + ((m.get('h_level') or 0) * 14) }}px;">
           <div>
-            <div>{{ m.name or '—' }}{% if m.get('musteri_adi') %} <span style="opacity:.75;font-size:12px;">· {{ m.musteri_adi }}</span>{% endif %}</div>
+            <div>{% if m.get('is_group') %}<span class="grp-dot">G</span>{% endif %}{{ m.name or '—' }}{% if m.get('musteri_adi') %} <span style="opacity:.75;font-size:12px;">· {{ m.musteri_adi }}</span>{% endif %}</div>
             <div class="sel-sub">{{ m.office_code or '' }}{% if m.tax_number %} · {{ m.tax_number }}{% endif %}</div>
           </div>
           <span class="mb {{ 'mb-p' if (m.durum or '').lower()=='pasif' else 'mb-a' }}">
@@ -812,6 +815,7 @@ tr.kr td{background:rgba(255,52,82,.04)}
       <div class="acts-gap"></div>
       <span class="stag stag-aktif" id="dur-tag">● Aktif</span>
       <span class="stag stag-risk"  id="risk-tag">Risk: —</span>
+      <button class="acts-btn" onclick="openMo('group')">🗂 Grup Ayarları</button>
       <button class="acts-btn" onclick="openMo('not')">📝 Not</button>
       <button class="acts-btn" onclick="openMo('edit')">✏ Düzenle</button>
     </div>
@@ -1051,7 +1055,7 @@ tr.kr td{background:rgba(255,52,82,.04)}
               {% set d = (m.get('durum') or '')|lower %}
               {% set is_selected = (m.id == selected_mid) if selected_mid else False %}
               <tr data-id="{{ m.id }}" data-name="{{ (m.name or '')|lower }}" data-ma="{{ (m.get('musteri_adi') or '')|lower }}" data-tax="{{ (m.tax_number|string if m.tax_number is not none else '')|lower }}" data-display-name="{{ (m.name or '—')|e }}" class="{{ 'rp-mini-selected' if is_selected else '' }}" onclick="switchCariMusteri({{ m.id }}, this)">
-                <td title="{{ m.name or '—' }}{% if m.get('musteri_adi') %} · {{ m.musteri_adi }}{% endif %}">{{ (m.name or '—')[:18] }}{% if (m.name or '')|length > 18 %}…{% endif %}{% if m.get('musteri_adi') %} <span style="opacity:.72;font-size:9px;">{{ (m.musteri_adi or '')[:10] }}{% if (m.musteri_adi or '')|length > 10 %}…{% endif %}</span>{% endif %}</td>
+                <td title="{{ m.name or '—' }}{% if m.get('musteri_adi') %} · {{ m.musteri_adi }}{% endif %}" style="padding-left:{{ 5 + ((m.get('h_level') or 0) * 10) }}px;">{% if m.get('is_group') %}<span class="rp-mini-badge group">GRP</span> {% endif %}{{ (m.name or '—')[:18] }}{% if (m.name or '')|length > 18 %}…{% endif %}{% if m.get('musteri_adi') %} <span style="opacity:.72;font-size:9px;">{{ (m.musteri_adi or '')[:10] }}{% if (m.musteri_adi or '')|length > 10 %}…{% endif %}</span>{% endif %}</td>
                 <td>{{ (m.office_code or '—')[:6] }}</td>
                 <td>{% if d == 'pasif' %}<span class="rp-mini-badge pasif">Pasif</span>{% else %}<span class="rp-mini-badge aktif">Aktif</span>{% endif %}</td>
                 <td>0,00 ₺</td>
@@ -1477,6 +1481,7 @@ var MDS={
   randevu:{t:'📅 Randevu',h:'<div class="fr2"><div class="fg"><label class="fl">Tarih</label><input class="fi" type="date"></div><div class="fg"><label class="fl">Saat</label><input class="fi" type="time"></div></div><div class="fr2"><div class="fg"><label class="fl">Oda</label><select class="fi"><option>Toplantı Odası A</option><option>Toplantı Odası B</option></select></div><div class="fg"><label class="fl">Süre (dk)</label><input class="fi" type="number" value="60"></div></div><div class="ma"><button class="mc" onclick="cmo()">İptal</button><button class="ms">Kaydet</button></div>'},
   kargo:{t:'📦 Kargo Gir',h:'<div class="fg"><label class="fl">Firma</label><select class="fi"><option>Aras Kargo</option><option>Yurtiçi Kargo</option><option>MNG Kargo</option></select></div><div class="fr2"><div class="fg"><label class="fl">Takip No</label><input class="fi" placeholder="AR..."></div><div class="fg"><label class="fl">Tarih</label><input class="fi" type="date"></div></div><div class="ma"><button class="mc" onclick="cmo()">İptal</button><button class="ms">Kaydet</button></div>'},
   log:{t:'📞 Log Ekle',h:'<div class="fr2"><div class="fg"><label class="fl">Kanal</label><select class="fi"><option>WhatsApp</option><option>SMS</option><option>Email</option><option>Arama</option></select></div><div class="fg"><label class="fl">Tarih</label><input class="fi" type="date"></div></div><div class="fg"><label class="fl">İçerik</label><textarea class="fi" rows="3" style="resize:none"></textarea></div><div class="ma"><button class="mc" onclick="cmo()">İptal</button><button class="ms">Kaydet</button></div>'},
+  group:{t:'🗂 Grup Ayarları',h:'<div class="fg"><label class="fl">Bu Cariyi Bir Gruba Bağla</label><select class="fi" id="grp-parent"><option value="">Grupsuz</option></select></div><div class="fg"><label class="fl">Yeni Grup Oluştur</label><div style="display:flex;gap:8px"><input class="fi" id="grp-new-name" placeholder="Örn: DUVPAN Grup"><button class="ms" type="button" style="flex:0 0 120px" onclick="createGroupAndAttach()">Yeni Grup</button></div></div><div class="ma"><button class="mc" onclick="cmo()">Kapat</button><button class="ms" onclick="saveGroupParent()">Kaydet</button></div>'},
   edit:{t:'✏ Firma Düzenle',h:'<div class="fg" style="margin-bottom:8px"><label class="fl">Müşteri adı</label><input class="fi" id="ed-ma"></div><div class="fr2"><div class="fg"><label class="fl">Ünvan</label><input class="fi" id="ed-n"></div><div class="fg"><label class="fl">Vergi No</label><input class="fi" id="ed-v"></div></div><div class="fr2"><div class="fg"><label class="fl">Telefon</label><input class="fi" id="ed-t"></div><div class="fg"><label class="fl">E-posta</label><input class="fi" id="ed-e"></div></div><div class="ma"><button class="mc" onclick="cmo()">İptal</button><button class="ms">Kaydet</button></div>'},
 };
 window.openMo=function(t){
@@ -1485,8 +1490,70 @@ window.openMo=function(t){
   document.getElementById('mo-b').innerHTML=m.h;
   document.getElementById('mo').classList.add('open');
   if(t==='edit'&&D){var x=D.musteri;['ed-ma','ed-n','ed-v','ed-t','ed-e'].forEach(function(id,i){var el=document.getElementById(id);if(el)el.value=[x.musteri_adi,x.name,x.tax_number,x.phone,x.email][i]||'';});}
+  if(t==='group'){loadGroupOptions();}
 };
 window.cmo=function(e){if(!e||e.target===document.getElementById('mo'))document.getElementById('mo').classList.remove('open');};
+
+window.loadGroupOptions=function(){
+  if(!selMid)return;
+  var sel=document.getElementById('grp-parent');
+  if(!sel)return;
+  fetch('/cari-kart/api/groups?exclude_id='+encodeURIComponent(String(selMid)))
+    .then(function(r){return r.json();})
+    .then(function(j){
+      if(!j||!j.ok){return;}
+      var arr=j.groups||[];
+      var html=['<option value="">Grupsuz</option>'];
+      arr.forEach(function(g){
+        html.push('<option value="'+g.id+'">'+(g.name||('Grup #'+g.id))+'</option>');
+      });
+      sel.innerHTML=html.join('');
+      if(D&&D.musteri&&D.musteri.parent_name){
+        var hit=arr.find(function(g){return (g.name||'')===D.musteri.parent_name;});
+        if(hit) sel.value=String(hit.id);
+      }
+    })
+    .catch(function(){});
+};
+
+window.saveGroupParent=function(){
+  if(!selMid){alert('Önce cari seçin.');return;}
+  var sel=document.getElementById('grp-parent');
+  var val=sel?String(sel.value||''):'';
+  var payload={cari_id:selMid,parent_cari_id:val?parseInt(val,10):null};
+  fetch('/cari-kart/api/parent',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
+    .then(function(r){return r.json();})
+    .then(function(j){
+      if(!j||!j.ok){alert((j&&j.mesaj)||'Grup güncellenemedi.');return;}
+      cmo();
+      load360(selMid);
+    })
+    .catch(function(){alert('Grup güncellenemedi.');});
+};
+
+window.createGroupAndAttach=function(){
+  if(!selMid){alert('Önce cari seçin.');return;}
+  var inp=document.getElementById('grp-new-name');
+  var ad=(inp&&inp.value?String(inp.value).trim():'');
+  if(!ad){alert('Yeni grup adı girin.');return;}
+  fetch('/cari-kart/api/groups',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:ad})})
+    .then(function(r){return r.json();})
+    .then(function(j){
+      if(!j||!j.ok||!j.group){alert((j&&j.mesaj)||'Grup oluşturulamadı.');return;}
+      var gid=parseInt(j.group.id,10);
+      if(!isNaN(gid)){
+        fetch('/cari-kart/api/parent',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cari_id:selMid,parent_cari_id:gid})})
+          .then(function(r){return r.json();})
+          .then(function(j2){
+            if(!j2||!j2.ok){alert((j2&&j2.mesaj)||'Cari gruba bağlanamadı.');return;}
+            cmo();
+            load360(selMid);
+          })
+          .catch(function(){alert('Cari gruba bağlanamadı.');});
+      }
+    })
+    .catch(function(){alert('Grup oluşturulamadı.');});
+};
 
 /* Mini müşteri listesi arama */
 (function(){

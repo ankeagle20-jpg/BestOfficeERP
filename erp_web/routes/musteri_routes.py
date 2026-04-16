@@ -12,6 +12,7 @@ from db import (
     ensure_customers_hazir_ofis_oda,
     ensure_musteri_kyc_hazir_ofis_oda_no,
     ensure_musteri_kyc_kira_banka,
+    ensure_musteri_kyc_odeme_duzeni,
     db as get_db,
     clear_all_customers,
     get_conn,
@@ -25,6 +26,7 @@ from docx import Document
 import os
 import sys
 import re
+from services.cari_service import CariService
 
 _HAZIR_OFIS_ODA_MIN, _HAZIR_OFIS_ODA_MAX = 200, 230
 
@@ -1939,6 +1941,7 @@ def api_kyc_kaydet():
         ensure_customers_hazir_ofis_oda()
         ensure_musteri_kyc_hazir_ofis_oda_no()
         ensure_musteri_kyc_kira_banka()
+        ensure_musteri_kyc_odeme_duzeni()
         musteri_id = data.get("musteri_id")
         sirket_unvani = (data.get("sirket_unvani") or data.get("unvan") or "").strip()
         musteri_adi = (data.get("musteri_adi") or "").strip() or None
@@ -1975,6 +1978,12 @@ def api_kyc_kaydet():
         if not _df or len(_df) > 120:
             _df = "duzenle"
         duzenli_fatura = _df
+        _odemd = (data.get("odeme_duzeni") or "aylik").strip().lower()
+        if _odemd not in ("aylik", "yillik", "3_aylik", "6_aylik", "manuel"):
+            _odemd = "aylik"
+        odeme_duzeni_manuel_txt = (
+            (data.get("odeme_duzeni_manuel") or "").strip()[:200] if _odemd == "manuel" else ""
+        )
         durum_m = (data.get("durum") or "aktif").strip().lower()
         if durum_m not in ("aktif", "pasif"):
             durum_m = "aktif"
@@ -2117,7 +2126,8 @@ def api_kyc_kaydet():
                    hizmet_turu=%s, duzenli_fatura=%s, aylik_kira=%s, yillik_kira=%s, sozlesme_no=%s, sozlesme_tarihi=%s, sozlesme_bitis=%s,
                    kira_artis_tarihi=%s, kira_suresi_ay=%s, kira_nakit=%s, kira_banka=%s, kira_nakit_tutar=%s, kira_banka_tutar=%s, hazir_ofis_oda_no=%s,
                    evrak_imza_sirkuleri=%s, evrak_vergi_levhasi=%s, evrak_ticaret_sicil=%s, evrak_faaliyet_belgesi=%s,
-                   evrak_kimlik_fotokopi=%s, evrak_ikametgah=%s, evrak_kase=%s, notlar=%s, tamamlanma_yuzdesi=%s, updated_at=NOW()
+                   evrak_kimlik_fotokopi=%s, evrak_ikametgah=%s, evrak_kase=%s, notlar=%s, tamamlanma_yuzdesi=%s,
+                   odeme_duzeni=%s, odeme_duzeni_manuel=%s, updated_at=NOW()
                    WHERE id=%s""",
                 (sirket_unvani, sirket_unvani, musteri_adi, vergi_no, vergi_dairesi, mersis_no, ticaret_sicil_no,
                  kurulus_tarihi, faaliyet_konusu, nace_kodu, eski_adres, yeni_adres, sube_merkez,
@@ -2126,7 +2136,8 @@ def api_kyc_kaydet():
                  hizmet_turu, duzenli_fatura, aylik_kira, yillik_kira, sozlesme_no, sozlesme_tarihi, sozlesme_bitis,
                  kira_artis_tarihi, kira_suresi_ay, kira_nakit, kira_banka, kira_nakit_tutar, kira_banka_tutar, hazir_oda_val,
                  evrak_imza_sirkuleri, evrak_vergi_levhasi, evrak_ticaret_sicil, evrak_faaliyet_belgesi,
-                 evrak_kimlik_fotokopi, evrak_ikametgah, evrak_kase, notlar, tamamlanma_yuzdesi, mevcut["id"])
+                 evrak_kimlik_fotokopi, evrak_ikametgah, evrak_kase, notlar, tamamlanma_yuzdesi,
+                 _odemd, odeme_duzeni_manuel_txt or None, mevcut["id"])
             )
             kyc_id = mevcut["id"]
             if musteri_id:
@@ -2188,21 +2199,21 @@ def api_kyc_kaydet():
                    kurulus_tarihi, faaliyet_konusu, nace_kodu, eski_adres, yeni_adres, sube_merkez,
                    yetkili_adsoyad, yetkili_tcno, yetkili_dogum, yetkili_ikametgah,
                    yetkili_tel, yetkili_tel2, yetkili_tel_aciklama, yetkili_tel2_aciklama, yetkili_email, email,
-                   hizmet_turu, duzenli_fatura, aylik_kira, yillik_kira, sozlesme_no, sozlesme_tarihi, sozlesme_bitis,
+                   hizmet_turu, duzenli_fatura, odeme_duzeni, odeme_duzeni_manuel, aylik_kira, yillik_kira, sozlesme_no, sozlesme_tarihi, sozlesme_bitis,
                    kira_artis_tarihi, kira_suresi_ay, kira_nakit, kira_banka, kira_nakit_tutar, kira_banka_tutar, hazir_ofis_oda_no,
                    evrak_imza_sirkuleri, evrak_vergi_levhasi, evrak_ticaret_sicil, evrak_faaliyet_belgesi,
                    evrak_kimlik_fotokopi, evrak_ikametgah, evrak_kase, notlar, tamamlanma_yuzdesi
                 ) VALUES (
                    %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
                    %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
-                   %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
+                   %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
                    %s,%s,%s,%s,%s,%s,%s
                 ) RETURNING id""",
                 (musteri_id, sirket_unvani, sirket_unvani, musteri_adi, vergi_no, vergi_dairesi, mersis_no, ticaret_sicil_no,
                  kurulus_tarihi, faaliyet_konusu, nace_kodu, eski_adres, yeni_adres, sube_merkez,
                  yetkili_adsoyad, yetkili_tcno, yetkili_dogum, yetkili_ikametgah,
                  yetkili_tel, yetkili_tel2, yetkili_tel_aciklama, yetkili_tel2_aciklama, yetkili_email, email,
-                 hizmet_turu, duzenli_fatura, aylik_kira, yillik_kira, sozlesme_no, sozlesme_tarihi, sozlesme_bitis,
+                 hizmet_turu, duzenli_fatura, _odemd, odeme_duzeni_manuel_txt or None, aylik_kira, yillik_kira, sozlesme_no, sozlesme_tarihi, sozlesme_bitis,
                  kira_artis_tarihi, kira_suresi_ay, kira_nakit, kira_banka, kira_nakit_tutar, kira_banka_tutar, hazir_oda_val,
                  evrak_imza_sirkuleri, evrak_vergi_levhasi, evrak_ticaret_sicil, evrak_faaliyet_belgesi,
                  evrak_kimlik_fotokopi, evrak_ikametgah, evrak_kase, notlar, tamamlanma_yuzdesi)
@@ -2210,9 +2221,26 @@ def api_kyc_kaydet():
             kyc_id = row["id"] if row else None
         if musteri_id:
             try:
-                from routes.giris_routes import _upsert_aylik_grid_cache
+                from routes.giris_routes import _ensure_aylik_grid_cache_table, _upsert_aylik_grid_cache
 
-                _upsert_aylik_grid_cache(int(musteri_id))
+                if _odemd == "manuel":
+                    _ensure_aylik_grid_cache_table()
+                    execute(
+                        "DELETE FROM musteri_aylik_grid_cache WHERE musteri_id = %s",
+                        (int(musteri_id),),
+                    )
+                else:
+                    _upsert_aylik_grid_cache(int(musteri_id))
+            except Exception:
+                pass
+        # Opsiyonel: hiyerarşik grup ataması (mevcut update akışına ek alan olarak)
+        if musteri_id:
+            try:
+                raw_parent = data.get("parent_cari_id")
+                parent_cari_id = None
+                if raw_parent not in (None, "", 0, "0"):
+                    parent_cari_id = int(raw_parent)
+                CariService.set_parent(int(musteri_id), parent_cari_id)
             except Exception:
                 pass
         return jsonify({"ok": True, "kyc_id": kyc_id})

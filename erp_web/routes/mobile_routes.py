@@ -4,11 +4,14 @@ Dashboard, Müşteriler, Tahsilat, Operasyon, Yönetim.
 """
 from flask import Blueprint, render_template, request, jsonify, redirect, url_for
 from auth import giris_gerekli
-from db import fetch_all, fetch_one, ensure_faturalar_amount_columns
+from db import fetch_all, fetch_one, ensure_faturalar_amount_columns, sql_expr_fatura_not_gib_taslak
 from utils.musteri_arama import customers_arama_sql_giris_genis, customers_arama_params_giris_genis
 from datetime import date, timedelta
 
 bp = Blueprint("mobile", __name__, url_prefix="/m")
+
+_NT_F = sql_expr_fatura_not_gib_taslak("f.notlar")
+_NT = sql_expr_fatura_not_gib_taslak("notlar")
 
 
 def _bugun():
@@ -21,11 +24,12 @@ def _mobile_kritik_strip():
     bugun = _bugun()
     otuz_gun = bugun - timedelta(days=30)
     # Müşteri bazında: en az bir fatura 30+ gün gecikmiş
-    r = fetch_one("""
+    r = fetch_one(f"""
         SELECT COUNT(DISTINCT f.musteri_id) as n,
                COALESCE(SUM(COALESCE(f.toplam, f.tutar)), 0) as toplam
         FROM faturalar f
         WHERE COALESCE(f.durum,'') != 'odendi' AND f.vade_tarihi IS NOT NULL AND (f.vade_tarihi::date) <= %s
+          AND {_NT_F}
     """, (otuz_gun,))
     n = (r.get("n") or 0) if r else 0
     toplam = float(r.get("toplam") or 0) if r else 0
@@ -40,23 +44,26 @@ def _mobile_dashboard_data():
     yedi_gun = bugun - timedelta(days=7)
 
     # Bugün beklenen tahsilat
-    r = fetch_one("""
+    r = fetch_one(f"""
         SELECT COALESCE(SUM(COALESCE(f.toplam, f.tutar)), 0) as t FROM faturalar f
         WHERE COALESCE(f.durum,'') != 'odendi' AND (f.vade_tarihi::date) = %s
+          AND {_NT_F}
     """, (bugun,))
     bugun_tahsilat = float(r.get("t") or 0) if r else 0
 
     # Toplam geciken (vade < bugün)
-    r = fetch_one("""
+    r = fetch_one(f"""
         SELECT COALESCE(SUM(COALESCE(f.toplam, f.tutar)), 0) as t FROM faturalar f
         WHERE COALESCE(f.durum,'') != 'odendi' AND f.vade_tarihi IS NOT NULL AND (f.vade_tarihi::date) < %s
+          AND {_NT_F}
     """, (bugun,))
     toplam_geciken = float(r.get("t") or 0) if r else 0
 
     # Kritik müşteri sayısı (30+ gün)
-    r = fetch_one("""
+    r = fetch_one(f"""
         SELECT COUNT(DISTINCT musteri_id) as n FROM faturalar
         WHERE COALESCE(durum,'') != 'odendi' AND vade_tarihi IS NOT NULL AND (vade_tarihi::date) <= %s
+          AND {_NT}
     """, (otuz_gun,))
     kritik_say = (r.get("n") or 0) if r else 0
 
@@ -84,13 +91,14 @@ def _mobile_dashboard_data():
         bugun_odeme_say = 0
 
     # Kritik liste: 30+ gün geciken müşteriler (ad, toplam alacak, geciken gün)
-    kritik_list = fetch_all("""
+    kritik_list = fetch_all(f"""
         SELECT f.musteri_id, c.name as musteri_adi, c.phone, c.office_code,
                SUM(COALESCE(f.toplam, f.tutar)) as toplam_alacak,
                MIN(f.vade_tarihi) as en_eski_vade
         FROM faturalar f
         JOIN customers c ON c.id = f.musteri_id
         WHERE COALESCE(f.durum,'') != 'odendi' AND f.vade_tarihi IS NOT NULL AND (f.vade_tarihi::date) <= %s
+          AND {_NT_F}
         GROUP BY f.musteri_id, c.name, c.phone, c.office_code
         ORDER BY MIN(f.vade_tarihi)
     """, (otuz_gun,))
@@ -132,9 +140,10 @@ def _mobile_musteri_list(arama=""):
     sql = "SELECT c.id, c.name, c.phone, c.office_code FROM customers c WHERE 1=1" + sql_extra + " ORDER BY c.name"
     musteriler = fetch_all(sql, params) if params else fetch_all(sql)
     # Ödenmemiş + vade
-    faturalar = fetch_all("""
+    faturalar = fetch_all(f"""
         SELECT musteri_id, COALESCE(toplam, tutar) as toplam, vade_tarihi
         FROM faturalar WHERE COALESCE(durum,'') != 'odendi' AND vade_tarihi IS NOT NULL
+          AND {_NT}
     """)
     fat_by_cid = {}
     for f in (faturalar or []):
@@ -191,28 +200,31 @@ def _mobile_tahsilat_data():
     yedi_gun = bugun - timedelta(days=7)
     otuz_gun = bugun - timedelta(days=30)
     # Bugün vadesi gelen
-    bugun_list = fetch_all("""
+    bugun_list = fetch_all(f"""
         SELECT f.id as fatura_id, f.musteri_id, c.name as musteri_adi, c.phone, c.office_code,
                COALESCE(f.toplam, f.tutar) as toplam, f.vade_tarihi, f.fatura_no
         FROM faturalar f JOIN customers c ON c.id = f.musteri_id
         WHERE COALESCE(f.durum,'') != 'odendi' AND (f.vade_tarihi::date) = %s
+          AND {_NT_F}
         ORDER BY c.name
     """, (bugun,))
     # 7+ gün geciken (vade < 7 gün önce)
-    yedi_list = fetch_all("""
+    yedi_list = fetch_all(f"""
         SELECT f.id as fatura_id, f.musteri_id, c.name as musteri_adi, c.phone, c.office_code,
                COALESCE(f.toplam, f.tutar) as toplam, f.vade_tarihi, f.fatura_no
         FROM faturalar f JOIN customers c ON c.id = f.musteri_id
         WHERE COALESCE(f.durum,'') != 'odendi' AND f.vade_tarihi IS NOT NULL
           AND (f.vade_tarihi::date) > %s AND (f.vade_tarihi::date) < %s
+          AND {_NT_F}
         ORDER BY f.vade_tarihi
     """, (otuz_gun, bugun))
     # 30+ kritik
-    otuz_list = fetch_all("""
+    otuz_list = fetch_all(f"""
         SELECT f.id as fatura_id, f.musteri_id, c.name as musteri_adi, c.phone, c.office_code,
                COALESCE(f.toplam, f.tutar) as toplam, f.vade_tarihi, f.fatura_no
         FROM faturalar f JOIN customers c ON c.id = f.musteri_id
         WHERE COALESCE(f.durum,'') != 'odendi' AND (f.vade_tarihi::date) <= %s
+          AND {_NT_F}
         ORDER BY f.vade_tarihi
     """, (otuz_gun,))
     def _geciken_gun(row):
@@ -284,9 +296,10 @@ def _mobile_yonetim_data():
     """, (yil, ay))
     aylik_ciro = float(r.get("t") or 0) if r else 0
     # Geciken toplam
-    r = fetch_one("""
+    r = fetch_one(f"""
         SELECT COALESCE(SUM(COALESCE(f.toplam, f.tutar)), 0) as t FROM faturalar f
         WHERE COALESCE(f.durum,'') != 'odendi' AND f.vade_tarihi IS NOT NULL AND (f.vade_tarihi::date) < %s
+          AND {_NT_F}
     """, (bugun,))
     geciken_toplam = float(r.get("t") or 0) if r else 0
     # Doluluk

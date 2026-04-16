@@ -4,7 +4,7 @@ Müşteri analizi, ödeme takibi, kargo, sözleşme alarmı, hızlı müdahale.
 """
 from flask import Blueprint, render_template, request, jsonify
 from auth import giris_gerekli
-from db import fetch_all, fetch_one, execute_returning, ensure_faturalar_amount_columns
+from db import fetch_all, fetch_one, execute_returning, ensure_faturalar_amount_columns, sql_expr_fatura_not_gib_taslak
 from utils.musteri_arama import customers_arama_sql_giris_genis, customers_arama_params_giris_genis
 from datetime import date, timedelta
 from phone_util import format_phone_for_display
@@ -23,17 +23,21 @@ def _dashboard_istatistikler():
     """8 kart için istatistikler."""
     bugun = _bugun()
     yil = bugun.year
+    _nt_f = sql_expr_fatura_not_gib_taslak("f.notlar")
+    _nt = sql_expr_fatura_not_gib_taslak("notlar")
 
     # Müşteri sayısı
     r = fetch_one("SELECT COUNT(*) as n FROM customers")
     musteri_say = (r.get("n") or 0) if r else 0
 
     # Fatura sayısı
-    r = fetch_one("SELECT COUNT(*) as n FROM faturalar")
+    r = fetch_one(f"SELECT COUNT(*) as n FROM faturalar WHERE {_nt}")
     fatura_say = (r.get("n") or 0) if r else 0
 
     # Ödenmemiş toplam (alacak) — COALESCE(toplam, tutar) farklı şemalara uyum
-    r = fetch_one("SELECT COALESCE(SUM(COALESCE(f.toplam, f.tutar)), 0) as toplam FROM faturalar f WHERE COALESCE(f.durum,'') != 'odendi'")
+    r = fetch_one(
+        f"SELECT COALESCE(SUM(COALESCE(f.toplam, f.tutar)), 0) as toplam FROM faturalar f WHERE COALESCE(f.durum,'') != 'odendi' AND {_nt_f}"
+    )
     odenmemis = float(r.get("toplam") or 0) if r else 0
 
     # Kargo sayısı (bugün gelen: tarih = bugün)
@@ -45,25 +49,28 @@ def _dashboard_istatistikler():
     kargo_say = (r.get("n") or 0) if r else 0
 
     # Geciken alacak (vade_tarihi < bugün ve durum != odendi)
-    r = fetch_one("""
+    r = fetch_one(f"""
         SELECT COALESCE(SUM(COALESCE(f.toplam, f.tutar)), 0) as toplam FROM faturalar f
         WHERE COALESCE(f.durum,'') != 'odendi' AND f.vade_tarihi IS NOT NULL AND (f.vade_tarihi::date) < %s
+          AND {_nt_f}
     """, (bugun,))
     geciken_toplam = float(r.get("toplam") or 0) if r else 0
 
     # Kritik geciken (30+ gün)
     otuz_gun_once = bugun - timedelta(days=30)
-    r = fetch_one("""
+    r = fetch_one(f"""
         SELECT COUNT(*) as n FROM faturalar
         WHERE COALESCE(durum,'') != 'odendi' AND vade_tarihi IS NOT NULL AND (vade_tarihi::date) <= %s
+          AND {_nt}
     """, (otuz_gun_once,))
     kritik_geciken_say = (r.get("n") or 0) if r else 0
 
     # Yakın geciken (1-30 gün)
-    r = fetch_one("""
+    r = fetch_one(f"""
         SELECT COUNT(*) as n FROM faturalar
         WHERE COALESCE(durum,'') != 'odendi' AND vade_tarihi IS NOT NULL
         AND (vade_tarihi::date) > %s AND (vade_tarihi::date) < %s
+          AND {_nt}
     """, (otuz_gun_once, bugun))
     yakin_geciken_say = (r.get("n") or 0) if r else 0
 
@@ -91,9 +98,10 @@ def _dashboard_istatistikler():
         bos_ofis_say = bos_hazir = bos_sanal = 0
 
     # Bugün beklenen tahsilat (vadesi bugün olan faturalar toplamı)
-    r = fetch_one("""
+    r = fetch_one(f"""
         SELECT COALESCE(SUM(COALESCE(f.toplam, f.tutar)), 0) as toplam FROM faturalar f
         WHERE COALESCE(f.durum,'') != 'odendi' AND (f.vade_tarihi::date) = %s
+          AND {_nt_f}
     """, (bugun,))
     bugun_tahsilat = float(r.get("toplam") or 0) if r else 0
 
@@ -129,6 +137,7 @@ def _dashboard_tablo_data(arama="", filtre=None):
     """
     bugun = _bugun()
     yil = bugun.year
+    _nt_f = sql_expr_fatura_not_gib_taslak("f.notlar")
     params = []
     sql_extra = ""
     if arama:
@@ -177,9 +186,10 @@ def _dashboard_tablo_data(arama="", filtre=None):
     kargo_by_cid = {r["musteri_id"]: r for r in (kargo_rows or [])}
 
     # Ödenmemiş faturalar + vade (12 ay grid için)
-    faturalar = fetch_all("""
+    faturalar = fetch_all(f"""
         SELECT musteri_id, COALESCE(f.toplam, f.tutar) as toplam, f.vade_tarihi, f.durum, f.id as fatura_id
         FROM faturalar f WHERE COALESCE(f.durum,'') != 'odendi' AND f.vade_tarihi IS NOT NULL
+          AND {_nt_f}
     """)
     fat_by_cid = {}
     for f in (faturalar or []):
@@ -189,8 +199,9 @@ def _dashboard_tablo_data(arama="", filtre=None):
         fat_by_cid[cid].append(f)
 
     # Tüm faturalar (ödendi dahil) 12 ay grid için: ay bazında vade ve durum
-    tum_faturalar = fetch_all("""
+    tum_faturalar = fetch_all(f"""
         SELECT musteri_id, COALESCE(f.toplam, f.tutar) as toplam, f.vade_tarihi, f.durum FROM faturalar f WHERE f.vade_tarihi IS NOT NULL
+          AND {_nt_f}
     """)
     fat_ay_by_cid = {}
     for f in (tum_faturalar or []):

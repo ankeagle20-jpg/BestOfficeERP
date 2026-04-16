@@ -14,6 +14,37 @@ from config import Config
 logger = logging.getLogger(__name__)
 
 
+def sql_expr_fatura_not_gib_taslak(notlar_column: str) -> str:
+    """PostgreSQL koşulu: notlarda «GİB durum: taslak» olmayan faturalar (GİB taslağı listelerde/cariye yansımasın).
+
+    notlar_column: tam sütun ifadesi, örn. ``f.notlar`` veya ``notlar``.
+    """
+    c = (notlar_column or "").strip()
+    if not c:
+        raise ValueError("notlar_column gerekli")
+    return (
+        "(" + c + " IS NULL OR NOT ("
+        "regexp_replace(COALESCE(" + c + ", ''), '[İIıi]', 'I', 'g') "
+        "~* 'GIB[[:space:]]+DURUM[[:space:]]*:[[:space:]]+TASLAK'"
+        "))"
+    )
+
+
+def sql_expr_fatura_gib_imzalanmis(notlar_column: str) -> str:
+    """PostgreSQL koşulu: ERP notunda GİB imzalı kesin fatura (SMS sonrası yazılan etiketler)."""
+    c = (notlar_column or "").strip()
+    if not c:
+        raise ValueError("notlar_column gerekli")
+    # LIKE içindeki % → psycopg2 execute(..., params) ile birleşince yer tutucu sanılmasın diye %% (tek % PG'ye gider).
+    return (
+        "("
+        "COALESCE(" + c + ", '') LIKE '%%GİB İMZALANDI%%' OR "
+        "regexp_replace(COALESCE(" + c + ", ''), '[İIıi]', 'I', 'g') ~* 'GIB[[:space:]]+IMZALANDI' OR "
+        "regexp_replace(COALESCE(" + c + ", ''), '[İIıi]', 'I', 'g') ~* 'GIB[[:space:]]+DURUM[[:space:]]*:[[:space:]]+IMZAL'"
+        ")"
+    )
+
+
 def _db_connect_kwargs_common():
     """Ortak libpq parametreleri (kopmalara karşı keepalive, TLS)."""
     return dict(
@@ -315,6 +346,7 @@ def init_schema():
         ensure_customers_durum()
         ensure_customers_kapanis_tarihi()
         ensure_customers_cari_columns()
+        ensure_customers_hierarchy_columns()
         ensure_customer_financial_profile()
         ensure_customers_balance_trigger()
         ensure_cari_360_tables()
@@ -534,6 +566,15 @@ def ensure_musteri_kyc_hazir_ofis_oda_no():
         execute("ALTER TABLE musteri_kyc ADD COLUMN IF NOT EXISTS hazir_ofis_oda_no INTEGER")
     except Exception as e:
         print(f"musteri_kyc.hazir_ofis_oda_no: {e}")
+
+
+def ensure_musteri_kyc_odeme_duzeni():
+    """Ödeme düzeni (aylık / manuel vb.) — aylık grid dışı müşteriler için."""
+    try:
+        execute("ALTER TABLE musteri_kyc ADD COLUMN IF NOT EXISTS odeme_duzeni TEXT")
+        execute("ALTER TABLE musteri_kyc ADD COLUMN IF NOT EXISTS odeme_duzeni_manuel TEXT")
+    except Exception as e:
+        print(f"musteri_kyc.odeme_duzeni: {e}")
 
 
 def ensure_musteri_kyc_kira_banka():
@@ -997,6 +1038,18 @@ def ensure_customers_cari_columns():
             execute(f"ALTER TABLE customers ADD COLUMN IF NOT EXISTS {col} {typ}")
         except Exception as e:
             print(f"customers.{col}: {e}")
+
+
+def ensure_customers_hierarchy_columns():
+    """Konsolide cari hiyerarşisi için ek kolonlar (incremental)."""
+    try:
+        execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS parent_id UUID")
+    except Exception as e:
+        print(f"customers.parent_id: {e}")
+    try:
+        execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS is_group BOOLEAN DEFAULT FALSE")
+    except Exception as e:
+        print(f"customers.is_group: {e}")
 
 
 def ensure_customer_financial_profile():

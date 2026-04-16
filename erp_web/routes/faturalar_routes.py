@@ -18,6 +18,8 @@ from db import (
     ensure_user_ui_preferences_table,
     ensure_customers_rent_columns,
     ensure_customers_hazir_ofis_oda,
+    sql_expr_fatura_not_gib_taslak,
+    sql_expr_fatura_gib_imzalanmis,
 )
 from utils.text_utils import turkish_lower
 from utils.musteri_arama import customers_arama_sql_giris_genis, customers_arama_params_giris_genis
@@ -245,6 +247,8 @@ FIRMA_WEB = os.environ.get("FIRMA_WEB", "www.ofisbir.com.tr")
 FIRMA_VERGI_DAIRESI = os.environ.get("FIRMA_VERGI_DAIRESI", "Kavaklıdere")
 FIRMA_VERGI_NO = os.environ.get("FIRMA_VERGI_NO", "6340871926")
 UPLOAD_MUSTERI_DOSYALARI = "uploads/musteri_dosyalari"
+# GİB portal HTML: imza sonrası bir kez indirilir; önizlemede tekrar GİB çağrılmaz.
+GIB_PORTAL_HTML_CACHE_DIR = "uploads/gib_portal_html"
 
 AYLAR = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 
          'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık']
@@ -2281,6 +2285,7 @@ def api_fatura_rapor():
                 AND NULLIF(TRIM(COALESCE(f.ettn::text, '')), '') IS NOT NULL
             )
         )
+        AND {sql_expr_fatura_not_gib_taslak("f.notlar")}
         {df_where}
         ORDER BY COALESCE(
                 f.fatura_tarihi::date,
@@ -2728,13 +2733,14 @@ def faturalar():
     
     ofisler = fetch_all("SELECT DISTINCT code FROM offices WHERE COALESCE(is_active::int, 1) = 1 ORDER BY code")
     
-    sql = """
+    sql = f"""
         SELECT f.*,
                c.name AS customer_name,
                COALESCE(NULLIF(TRIM(c.name), ''), NULLIF(TRIM(f.musteri_adi), ''), '—') AS musteri_adi_goster
         FROM faturalar f
         LEFT JOIN customers c ON CAST(f.musteri_id AS INTEGER) = c.id
         WHERE (f.fatura_tarihi::date) >= %s AND (f.fatura_tarihi::date) <= %s
+          AND {sql_expr_fatura_not_gib_taslak("f.notlar")}
     """
     params = [baslangic, bitis]
     
@@ -2901,11 +2907,12 @@ def _auto_month_amount_resolved(musteri_id, run_month_date):
 
     # KYC/cache boş ise müşterinin son pozitif toplamlı faturasını baz al.
     last_inv = fetch_one(
-        """
+        f"""
         SELECT toplam
         FROM faturalar
         WHERE musteri_id = %s
           AND COALESCE(toplam, 0) > 0
+          AND {sql_expr_fatura_not_gib_taslak("notlar")}
         ORDER BY (fatura_tarihi::date) DESC, id DESC
         LIMIT 1
         """,
@@ -3218,11 +3225,12 @@ def _musteri_icin_ayda_baska_fatura(musteri_id, y, m, exclude_fatura_id=None):
     except (TypeError, ValueError):
         return None
     ay1 = date(y, m, 1)
-    sql = """
+    sql = f"""
         SELECT id, fatura_no, fatura_tarihi, ettn, notlar
         FROM faturalar
         WHERE musteri_id = %s
           AND DATE_TRUNC('month', COALESCE(fatura_tarihi::date, vade_tarihi::date)) = DATE_TRUNC('month', %s::date)
+          AND {sql_expr_fatura_not_gib_taslak("notlar")}
     """
     params = [mid, ay1]
     if exclude_fatura_id is not None:
@@ -3702,6 +3710,110 @@ def tahsilat_ekle():
         return jsonify({'ok': False, 'mesaj': str(e)}), 500
 
 
+@bp.route("/api/tahsilat-raporu")
+@faturalar_gerekli
+def api_tahsilat_raporu():
+    """Tahsilat makbuzları: tarih aralığına göre firma + tutar listesi (giriş Tahsilat / Rapor sekmesi)."""
+    bugun = date.today()
+    bas_raw = (request.args.get("baslangic") or "").strip()
+    bit_raw = (request.args.get("bitis") or "").strip()
+    try:
+        bas = datetime.strptime(bas_raw[:10], "%Y-%m-%d").date() if len(bas_raw) >= 10 else bugun
+    except ValueError:
+        bas = bugun
+    try:
+        bit = datetime.strptime(bit_raw[:10], "%Y-%m-%d").date() if len(bit_raw) >= 10 else bugun
+    except ValueError:
+        bit = bugun
+    if bas > bit:
+        bas, bit = bit, bas
+    rows = fetch_all(
+        """
+        SELECT t.id, t.makbuz_no, t.tutar, t.odeme_turu, t.tahsilat_tarihi,
+               COALESCE(NULLIF(TRIM(c.name), ''), '—') AS musteri_adi
+        FROM tahsilatlar t
+        LEFT JOIN customers c ON COALESCE(t.customer_id, t.musteri_id) = c.id
+        WHERE (t.tahsilat_tarihi::date) >= %s AND (t.tahsilat_tarihi::date) <= %s
+        ORDER BY t.tahsilat_tarihi DESC NULLS LAST, t.id DESC
+        """,
+        (bas, bit),
+    )
+    items = [_row_serializable(r) for r in (rows or [])]
+    toplam = sum(float(it.get("tutar") or 0) for it in items)
+    return jsonify(
+        {
+            "ok": True,
+            "baslangic": bas.strftime("%Y-%m-%d"),
+            "bitis": bit.strftime("%Y-%m-%d"),
+            "items": items,
+            "toplam": round(toplam, 2),
+            "adet": len(items),
+        }
+    )
+
+
+@bp.route("/api/gib-kesilmis-fatura-raporu")
+@faturalar_gerekli
+def api_gib_kesilmis_fatura_raporu():
+    """GİB SMS ile kesinleşmiş faturalar (not: GİB İMZALANDI); taslaklar hariç. Finans / Rapor sekmesi."""
+    try:
+        ensure_faturalar_amount_columns()
+        bugun = date.today()
+        bas_raw = (request.args.get("baslangic") or "").strip()
+        bit_raw = (request.args.get("bitis") or "").strip()
+        try:
+            bas = datetime.strptime(bas_raw[:10], "%Y-%m-%d").date() if len(bas_raw) >= 10 else bugun
+        except ValueError:
+            bas = bugun
+        try:
+            bit = datetime.strptime(bit_raw[:10], "%Y-%m-%d").date() if len(bit_raw) >= 10 else bugun
+        except ValueError:
+            bit = bugun
+        if bas > bit:
+            bas, bit = bit, bas
+        _nt = sql_expr_fatura_not_gib_taslak("f.notlar")
+        _im = sql_expr_fatura_gib_imzalanmis("f.notlar")
+        rows = fetch_all(
+            f"""
+            SELECT f.id,
+                   f.fatura_tarihi,
+                   f.fatura_no,
+                   f.ettn,
+                   COALESCE(
+                       NULLIF(TRIM(f.musteri_adi), ''),
+                       NULLIF(TRIM(c.name), ''),
+                       '—'
+                   ) AS musteri_adi,
+                   COALESCE(f.toplam, f.tutar, 0)::double precision AS tutar
+            FROM faturalar f
+            LEFT JOIN customers c ON CAST(f.musteri_id AS INTEGER) = c.id
+            WHERE (f.fatura_tarihi::date) >= %s
+              AND (f.fatura_tarihi::date) <= %s
+              AND f.ettn IS NOT NULL
+              AND BTRIM(COALESCE(f.ettn::text, '')) <> ''
+              AND {_nt}
+              AND {_im}
+            ORDER BY f.fatura_tarihi DESC NULLS LAST, f.id DESC
+            """,
+            (bas, bit),
+        )
+        items = [_row_serializable(r) for r in (rows or [])]
+        toplam = sum(float(it.get("tutar") or 0) for it in items)
+        return jsonify(
+            {
+                "ok": True,
+                "baslangic": bas.strftime("%Y-%m-%d"),
+                "bitis": bit.strftime("%Y-%m-%d"),
+                "items": items,
+                "toplam": round(toplam, 2),
+                "adet": len(items),
+            }
+        )
+    except Exception as e:
+        logging.getLogger(__name__).exception("api_gib_kesilmis_fatura_raporu")
+        return jsonify({"ok": False, "mesaj": str(e)}), 500
+
+
 @bp.route('/tahsilat-pdf/<int:tahsilat_id>')
 @faturalar_gerekli
 def tahsilat_pdf(tahsilat_id):
@@ -3823,6 +3935,110 @@ def _extract_gib_ettn_from_obj(obj):
         if v is not None and str(v).strip():
             return str(v).strip()
     return ""
+
+
+def _gib_portal_html_cache_dir_abs() -> str:
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", GIB_PORTAL_HTML_CACHE_DIR))
+
+
+def _gib_portal_html_cache_path(fatura_id: int) -> str:
+    return os.path.join(_gib_portal_html_cache_dir_abs(), f"{int(fatura_id)}.html")
+
+
+def _gib_portal_html_cache_oku(fatura_id: int) -> str | None:
+    try:
+        fid = int(fatura_id)
+    except (TypeError, ValueError):
+        return None
+    p = _gib_portal_html_cache_path(fid)
+    if not os.path.isfile(p):
+        return None
+    try:
+        with open(p, "r", encoding="utf-8", errors="replace") as rf:
+            s = rf.read()
+        return s if (s or "").strip() else None
+    except OSError:
+        return None
+
+
+def _gib_portal_html_indir_ve_kaydet(fatura_id: int, uuid_ettn: str, gib=None) -> None:
+    """İmzadan hemen sonra GİB portal HTML'ini bir kez indirip diske yazar (önizleme GİB'siz açılır)."""
+    try:
+        fid = int(fatura_id)
+    except (TypeError, ValueError):
+        return
+    u = (uuid_ettn or "").strip()
+    if not u:
+        return
+    try:
+        from gib_earsiv import BestOfficeGIBManager
+        g = gib if gib is not None else BestOfficeGIBManager()
+        if not g.is_available():
+            return
+        html = g.fatura_html_getir(u, days_back=370)
+    except Exception:
+        logging.getLogger(__name__).exception("GİB portal HTML indirilemedi (fatura_id=%s)", fid)
+        return
+    if not (html or "").strip():
+        return
+    path = _gib_portal_html_cache_path(fid)
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as wf:
+            wf.write(html)
+        os.replace(tmp, path)
+    except OSError:
+        logging.getLogger(__name__).exception("GİB portal HTML önbelleği yazılamadı (fatura_id=%s)", fid)
+
+
+def _gib_portal_html_compact_inject(html: str) -> str:
+    """GİB HTML'ine ERP kompakt stil (önbellekten okurken de uygulanır)."""
+    if not (html or "").strip():
+        return html or ""
+    compact_patch = """
+<style id="boerp-gib-compact">
+  body { font-family: Arial, Helvetica, sans-serif !important; }
+  td, th, div, span, p { font-size: 12px !important; line-height: 1.18 !important; }
+  b, strong { font-size: 13px !important; }
+  table { border-collapse: collapse !important; }
+</style>
+<script id="boerp-gib-compact-script">
+(function(){
+  function norm(s){
+    return (s||'').toLowerCase()
+      .replace(/ı/g,'i').replace(/İ/g,'i').replace(/ş/g,'s').replace(/ğ/g,'g')
+      .replace(/ü/g,'u').replace(/ö/g,'o').replace(/ç/g,'c')
+      .replace(/\\s+/g,' ').trim();
+  }
+  function hideNoiseRows(){
+    var bad = ['no', 'kapi no', '/ turkiye', 'turkiye', 'web sitesi'];
+    document.querySelectorAll('tr, div, p, span, td').forEach(function(el){
+      try{
+        var t = norm(el.textContent || '');
+        if (!t) return;
+        if (bad.indexOf(t) >= 0 || t.startsWith('kapi no') || t.startsWith('web sitesi') || t === 'no') {
+          el.style.display = 'none';
+          if (el.parentElement && (el.parentElement.tagName === 'TR' || el.parentElement.tagName === 'TABLE')) {
+            el.parentElement.style.display = 'none';
+          }
+        }
+      }catch(e){}
+    });
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', hideNoiseRows);
+  } else {
+    hideNoiseRows();
+  }
+})();
+</script>
+"""
+    if "</head>" in html:
+        return html.replace("</head>", compact_patch + "</head>", 1)
+    if "</body>" in html:
+        return html.replace("</body>", compact_patch + "</body>", 1)
+    return compact_patch + html
 
 
 def _gib_kayit_bekle(gib, uuid, deneme=10, bekleme_s=1.2):
@@ -4155,13 +4371,20 @@ def api_gib_sms_onay():
                 msg += f" Detay: {det}"
             return jsonify({"ok": False, "mesaj": msg}), 400
         if fatura_id:
+            fid_i = int(fatura_id)
+            ettn_for_cache = uuid
             try:
                 st = _gib_kayit_bekle(gib, uuid, deneme=10, bekleme_s=1.2)
                 gib_ettn = _extract_gib_ettn_from_obj(st) or uuid
+                ettn_for_cache = gib_ettn or uuid
                 gib_fatura_no = _extract_gib_fatura_no_from_obj(st)
                 _fatura_gib_bilgilerini_yaz(fatura_id, gib_ettn, gib_fatura_no, gib_asama="imzali")
             except Exception:
                 pass
+            try:
+                _gib_portal_html_indir_ve_kaydet(fid_i, ettn_for_cache, gib)
+            except Exception:
+                logging.getLogger(__name__).exception("GİB portal HTML önbelleği (SMS onay) fid=%s", fid_i)
         return jsonify({"ok": True, "mesaj": "Fatura GİB üzerinde imzalandı."})
     except Exception as e:
         return jsonify({"ok": False, "mesaj": str(e)}), 500
@@ -4208,7 +4431,7 @@ def api_gib_sms_gonder():
 @bp.route('/api/gib-fatura-onizleme')
 @faturalar_gerekli
 def api_gib_fatura_onizleme():
-    """GİB portalındaki gerçek fatura HTML önizlemesini döndürür."""
+    """GİB portal fatura HTML önizlemesi: önce ERP önbelleği (imza sonrası kaydedilir), yoksa bir kez GİB."""
     try:
         from gib_earsiv import BestOfficeGIBManager
         uuid = (request.args.get("uuid") or "").strip()
@@ -4218,58 +4441,39 @@ def api_gib_fatura_onizleme():
             uuid = str(row.get("ettn") or "").strip()
         if not uuid:
             return jsonify({"ok": False, "mesaj": "uuid veya fatura_id gerekli."}), 400
+        fid = fatura_id
+        if fid is None or fid < 1:
+            r_id = fetch_one(
+                "SELECT id FROM faturalar WHERE BTRIM(COALESCE(ettn::text, '')) = BTRIM(%s) ORDER BY id DESC LIMIT 1",
+                (uuid,),
+            )
+            if r_id and r_id.get("id") is not None:
+                try:
+                    fid = int(r_id.get("id"))
+                except (TypeError, ValueError):
+                    fid = None
+        cached = _gib_portal_html_cache_oku(fid) if fid else None
+        if cached:
+            return Response(_gib_portal_html_compact_inject(cached), mimetype="text/html; charset=utf-8")
         gib = BestOfficeGIBManager()
         if not gib.is_available():
-            return jsonify({"ok": False, "mesaj": "GİB modülü kullanılamıyor."}), 503
+            if fid:
+                return redirect(url_for("faturalar.fatura_onizleme_ekran", fatura_id=fid))
+            return jsonify({"ok": False, "mesaj": "GİB modülü kullanılamıyor; fatura_id ile ERP PDF önizlemesi deneyin."}), 503
         html = gib.fatura_html_getir(uuid, days_back=370)
         if not html.strip():
             return jsonify({"ok": False, "mesaj": "GİB önizleme içeriği boş döndü."}), 404
-        # GİB HTML'ini bozmadan, sol üst alanı ERP şablonuna daha yakın ve kompakt göster.
-        compact_patch = """
-<style id="boerp-gib-compact">
-  body { font-family: Arial, Helvetica, sans-serif !important; }
-  td, th, div, span, p { font-size: 12px !important; line-height: 1.18 !important; }
-  b, strong { font-size: 13px !important; }
-  table { border-collapse: collapse !important; }
-</style>
-<script id="boerp-gib-compact-script">
-(function(){
-  function norm(s){
-    return (s||'').toLowerCase()
-      .replace(/ı/g,'i').replace(/İ/g,'i').replace(/ş/g,'s').replace(/ğ/g,'g')
-      .replace(/ü/g,'u').replace(/ö/g,'o').replace(/ç/g,'c')
-      .replace(/\\s+/g,' ').trim();
-  }
-  function hideNoiseRows(){
-    var bad = ['no', 'kapi no', '/ turkiye', 'turkiye', 'web sitesi'];
-    document.querySelectorAll('tr, div, p, span, td').forEach(function(el){
-      try{
-        var t = norm(el.textContent || '');
-        if (!t) return;
-        if (bad.indexOf(t) >= 0 || t.startsWith('kapi no') || t.startsWith('web sitesi') || t === 'no') {
-          el.style.display = 'none';
-          if (el.parentElement && (el.parentElement.tagName === 'TR' || el.parentElement.tagName === 'TABLE')) {
-            el.parentElement.style.display = 'none';
-          }
-        }
-      }catch(e){}
-    });
-  }
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', hideNoiseRows);
-  } else {
-    hideNoiseRows();
-  }
-})();
-</script>
-"""
-        if "</head>" in html:
-            html = html.replace("</head>", compact_patch + "</head>", 1)
-        elif "</body>" in html:
-            html = html.replace("</body>", compact_patch + "</body>", 1)
-        else:
-            html = compact_patch + html
-        return Response(html, mimetype="text/html; charset=utf-8")
+        if fid:
+            try:
+                path = _gib_portal_html_cache_path(fid)
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                tmp = path + ".tmp"
+                with open(tmp, "w", encoding="utf-8") as wf:
+                    wf.write(html)
+                os.replace(tmp, path)
+            except OSError:
+                logging.getLogger(__name__).exception("GİB HTML önbelleği (canlı çekim) yazılamadı fid=%s", fid)
+        return Response(_gib_portal_html_compact_inject(html), mimetype="text/html; charset=utf-8")
     except Exception as e:
         err = str(e or "")
         # Bazı eArsivPortal sürümlerinde fatura_html içinde private login method adı değiştiği için
@@ -4304,8 +4508,10 @@ def api_gib_fatura_olustur():
             gib_ettn = _extract_gib_ettn_from_obj(st) or uuid
             gib_fatura_no = _extract_gib_fatura_no_from_obj(st)
             _fatura_gib_bilgilerini_yaz(fid, gib_ettn, gib_fatura_no, gib_asama="imzali")
+            _gib_portal_html_indir_ve_kaydet(fid, gib_ettn or uuid, gib)
         else:
             _fatura_gib_bilgilerini_yaz(fid, uuid, None, gib_asama="imzali")
+            _gib_portal_html_indir_ve_kaydet(fid, uuid, gib)
         return jsonify({"ok": True, "mesaj": "Fatura gerçek ETTN ile oluşturuldu/kesinleşti.", "fatura_id": fid, "onizleme_url": f"/faturalar/onizleme/{fid}"})
     except Exception as e:
         return jsonify({"ok": False, "mesaj": str(e)}), 500
@@ -4316,12 +4522,14 @@ def api_gib_fatura_olustur():
 def api_gib_son_fatura():
     """GİB manuel gönderim: son fatura. ?musteri_id= verilirse yalnızca o müşterinin son kaydı."""
     mid = request.args.get("musteri_id", type=int)
+    _nt = sql_expr_fatura_not_gib_taslak("notlar")
     if mid is not None and mid >= 1:
         row = fetch_one(
-            """
+            f"""
             SELECT id, fatura_no, musteri_id, musteri_adi, fatura_tarihi, toplam
             FROM faturalar
             WHERE musteri_id = %s
+              AND {_nt}
             ORDER BY id DESC
             LIMIT 1
             """,
@@ -4329,9 +4537,10 @@ def api_gib_son_fatura():
         ) or {}
     else:
         row = fetch_one(
-            """
+            f"""
             SELECT id, fatura_no, musteri_id, musteri_adi, fatura_tarihi, toplam
             FROM faturalar
+            WHERE {_nt}
             ORDER BY id DESC
             LIMIT 1
             """
@@ -4431,7 +4640,7 @@ def api_auto_fatura_adaylar():
     period_key = run_month_date.strftime("%Y-%m")
     marker_like = f"%|AUTO_INV|{period_key}|%"
     rows = fetch_all(
-        """
+        f"""
         WITH last_kyc AS (
             SELECT DISTINCT ON (k.musteri_id) k.musteri_id, k.aylik_kira
             FROM musteri_kyc k
@@ -4441,6 +4650,7 @@ def api_auto_fatura_adaylar():
             SELECT DISTINCT ON (f.musteri_id) f.musteri_id, f.toplam
             FROM faturalar f
             WHERE COALESCE(f.toplam, 0) > 0
+              AND {sql_expr_fatura_not_gib_taslak("f.notlar")}
             ORDER BY f.musteri_id, (f.fatura_tarihi::date) DESC, f.id DESC
         )
         SELECT c.id AS musteri_id,

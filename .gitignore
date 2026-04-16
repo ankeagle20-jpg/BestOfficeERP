@@ -25,3 +25,6 @@ Desktop.ini
 
 # ONNX embedding modelleri (büyük; export script ile üretilir)
 erp_web/models/
+
+# Çalışma zamanı yüklemeleri (tahsilat PDF vb. — repoya girmez)
+erp_web/uploads/
