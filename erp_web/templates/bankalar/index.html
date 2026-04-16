@@ -17,6 +17,13 @@
     margin: 0;
     font-size: 16px;
 }
+.banka-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    justify-content: flex-end;
+}
 .banka-buttons button {
     background: #00bcd4;
     color: white;
@@ -25,7 +32,18 @@
     border-radius: 3px;
     cursor: pointer;
     font-size: 13px;
-    margin-left: 8px;
+}
+.banka-buttons a.banka-head-bankalar {
+    background: #00838f;
+    color: #fff;
+    text-decoration: none;
+    padding: 8px 16px;
+    border-radius: 3px;
+    font-size: 13px;
+    display: inline-block;
+}
+.banka-buttons a.banka-head-bankalar:hover {
+    background: #006064;
 }
 .banka-grid {
     width: 100%;
@@ -47,19 +65,21 @@
 }
 .banka-grid tr:hover {
     background: #2d4060;
-    cursor: pointer;
 }
 </style>
 
 <div class="banka-header">
-    <h2>🏦 Banka Hesapları</h2>
+    <h2>Banka Hesapları</h2>
     <div class="banka-buttons">
-        <button onclick="yeniBanka()">➕ Yeni Hesap</button>
-        <a href="/bankalar/akbank-tahsilat-import" style="background:#00838f;color:#fff;text-decoration:none;padding:8px 16px;border-radius:3px;font-size:13px;margin-left:8px;display:inline-block;">📋 Akbank Tahsilat (Önizleme)</a>
-        <button onclick="excelYukle()">📂 Excel'den Aktar</button>
-        <button onclick="yenile()">↺ Yenile</button>
+        <button type="button" onclick="yeniBanka()">Yeni Hesap</button>
+        <a href="{{ url_for('banka.akbank_tahsilat_import_sayfa') }}" class="banka-head-bankalar" title="Akbank veya Türkiye Finans Excel: önizleme, müşteri eşleştirme, tahsilat veya hesap hareketi">Bankalar</a>
+        <button type="button" onclick="yenile()">Yenile</button>
     </div>
 </div>
+
+<p style="font-size:12px;color:#90a4ae;margin:0 0 12px 0;max-width:720px;">
+    <strong>Bankalar</strong> ile ekstre yükleyip satırları önizleyebilir, müşteriyle eşleştirip <strong>Eşleşenleri aktar</strong> ile tahsilata alabilir veya aynı sayfada hesap hareketlerine kaydedebilirsiniz (Akbank / Türkiye Finans).
+</p>
 
 <div style="overflow: auto; max-height: 600px;">
     <table class="banka-grid">
@@ -77,15 +97,15 @@
         <tbody>
             {% if bankalar %}
                 {% for b in bankalar %}
-                <tr onclick="selectBanka({{ b.id }})">
-                    <td><strong>{{ b.banka_adi }}</strong></td>
+                <tr>
+                    <td><strong>{{ b.banka_adi }}</strong>{% if b.hesap_adi and b.hesap_adi != b.banka_adi %} <span style="color:#90a4ae;font-weight:normal;">({{ b.hesap_adi }})</span>{% endif %}</td>
                     <td>{{ b.hesap_no }}</td>
                     <td>{{ b.iban }}</td>
                     <td>{{ b.sube }}</td>
                     <td style="text-align: right;">{{ '%.2f'|format(b.bakiye or 0) }}</td>
-                    <td>{% if b.is_active %}🟢 Aktif{% else %}🔴 Pasif{% endif %}</td>
+                    <td>{% if b.is_active %}Aktif{% else %}Pasif{% endif %}</td>
                     <td>
-                        <button onclick="duzenle({{ b.id }})" style="background: #00bcd4; color: white; border: none; padding: 4px 8px; border-radius: 3px; font-size: 11px;">✏️ Düzenle</button>
+                        <button type="button" onclick="duzenle({{ b.id }})" style="background: #00bcd4; color: white; border: none; padding: 4px 8px; border-radius: 3px; font-size: 11px;">Düzenle</button>
                     </td>
                 </tr>
                 {% endfor %}
@@ -104,22 +124,11 @@
 function yeniBanka() {
     window.location.href = "{{ url_for('banka.yeni') }}";
 }
-
-function excelYukle() {
-    /* Akbank hesap ekstresi (.xlsx) → önizleme ve onaylı tahsilat kaydı */
-    window.location.href = "/bankalar/akbank-tahsilat-import";
-}
-
 function yenile() {
     location.reload();
 }
-
-function selectBanka(id) {
-    console.log('Seçili banka:', id);
-}
-
 function duzenle(id) {
-    window.location.href = `/bankalar/${id}/duzenle`;
+    window.location.href = "/bankalar/" + id + "/duzenle";
 }
 </script>
 {% endblock %}

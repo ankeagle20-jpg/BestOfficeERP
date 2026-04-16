@@ -61,9 +61,46 @@
   .randevu-al-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
   .randevu-al-cal-dow { text-align: center; color: #78909c; font-size: 11px; padding: 4px 0; }
   .randevu-al-cal-day {
+    position: relative;
     aspect-ratio: 1; display: flex; align-items: center; justify-content: center;
     background: #0f2537; border-radius: 4px; font-size: 13px; cursor: pointer;
     color: #b0bec5;
+    overflow: hidden;
+  }
+  /* Aynı günde hem Toplantılar hem Görüşmeler — çizgi arkada soluk; rakam önde kalın + gölge */
+  .randevu-al-cal-day.karisik-gun {
+    isolation: isolate;
+  }
+  .randevu-al-cal-day.karisik-gun::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 142%;
+    height: 1px;
+    margin-top: -0.5px;
+    margin-left: -71%;
+    background: linear-gradient(90deg, transparent, rgba(179, 229, 252, 0.45) 18%, rgba(224, 247, 250, 0.5) 50%, rgba(179, 229, 252, 0.45) 82%, transparent);
+    opacity: 0.42;
+    transform: rotate(-45deg);
+    transform-origin: center center;
+    pointer-events: none;
+    z-index: 0;
+    border-radius: 1px;
+  }
+  .randevu-al-cal-day .ra-cal-day-num {
+    position: relative;
+    z-index: 1;
+  }
+  .randevu-al-cal-day.karisik-gun .ra-cal-day-num {
+    z-index: 2;
+    font-weight: 700;
+    font-size: 14px;
+    letter-spacing: 0.02em;
+    text-shadow:
+      0 0 1px rgba(0, 0, 0, 0.95),
+      0 1px 2px rgba(0, 0, 0, 0.85),
+      0 0 6px rgba(0, 0, 0, 0.45);
   }
   .randevu-al-cal-day:hover { background: #2d4060; color: #e0f7fa; }
   .randevu-al-cal-day.other { opacity: 0.4; }
@@ -112,7 +149,26 @@
   .randevu-al-firma-item { cursor: pointer; }
   .randevu-al-firma-item:hover { background: #1a2d3d; }
   .randevu-al-firma-item.firma-secili { border-color: #22c55e; box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.5); }
-  .randevu-al-firma-item .ra-firma-adi { color: #4fc3f7; font-weight: 600; margin-bottom: 4px; }
+  .randevu-al-firma-item .ra-firma-adi { color: #4fc3f7; font-weight: 600; margin-bottom: 2px; }
+  .randevu-al-firma-item .ra-tur-satir { margin: 2px 0 6px 0; line-height: 1.2; }
+  .randevu-al-firma-item .ra-tur-etiket {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    padding: 2px 8px;
+    border-radius: 4px;
+  }
+  .randevu-al-firma-item .ra-tur-etiket.ra-tur-toplanti {
+    background: rgba(33, 150, 243, 0.18);
+    color: #81d4fa;
+    border: 1px solid rgba(79, 195, 247, 0.4);
+  }
+  .randevu-al-firma-item .ra-tur-etiket.ra-tur-gorusme {
+    background: rgba(171, 71, 188, 0.18);
+    color: #e1bee7;
+    border: 1px solid rgba(186, 104, 200, 0.45);
+  }
   .randevu-al-firma-item .ra-firma-sure { font-weight: normal; color: #90a4ae; margin-left: 4px; }
   .randevu-al-firma-item .ra-firma-saat { color: #90a4ae; font-size: 11px; }
   .ra-degistir-btn {
@@ -331,6 +387,8 @@ window.RA_EMBED_MUSTERI_ID = {{ embed_musteri_id | tojson }};
   var baslangicStr = '';
   var bitisStr = '';
   var dolulukByDate = {};
+  /** ISO gün (YYYY-MM-DD) → o gün hem toplantı hem görüşme doluluğu var */
+  var karisikGunTarihleri = {};
   var raMevcutRandevuId = null;
   var mevcutRandevuMetin = '';
   var raFirstSlotStart = null;
@@ -398,8 +456,23 @@ window.RA_EMBED_MUSTERI_ID = {{ embed_musteri_id | tojson }};
       signal: raMusteriAraAbort.signal,
       headers: { 'Accept': 'application/json' }
     }).then(function(r) {
-      if (!r.ok) return Promise.reject(new Error('HTTP ' + r.status));
-      return r.json();
+      return r.text().then(function(t) {
+        if (t && /^[\s]*</.test(t)) {
+          return Promise.reject(new Error('Oturum süresi doldu. Sayfayı yenileyin.'));
+        }
+        var ct = (r.headers.get('content-type') || '').toLowerCase();
+        if (!r.ok) {
+          var errObj = {};
+          try { errObj = t ? JSON.parse(t) : {}; } catch (eE) { errObj = {}; }
+          return Promise.reject(new Error((errObj.mesaj || errObj.error) || ('HTTP ' + r.status)));
+        }
+        if (ct.indexOf('application/json') === -1) {
+          return Promise.reject(new Error('Beklenmeyen sunucu yanıtı.'));
+        }
+        var data;
+        try { data = t ? JSON.parse(t) : []; } catch (e2) { return Promise.reject(new Error('Yanıt okunamadı.')); }
+        return data;
+      });
     }).then(raMusteriListesiCevir);
   }
 
@@ -417,13 +490,26 @@ window.RA_EMBED_MUSTERI_ID = {{ embed_musteri_id | tojson }};
   function raPost(url, data) {
     return fetch(url, {
       method: 'POST',
+      credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
       body: JSON.stringify(data)
     }).then(function(r) {
       return r.text().then(function(t) {
+        var ct = (r.headers.get('content-type') || '').toLowerCase();
+        if (t && /^[\s]*</.test(t)) {
+          return Promise.reject(new Error('Oturum süresi doldu veya giriş gerekli. Sayfayı yenileyip tekrar deneyin.'));
+        }
+        if (ct.indexOf('application/json') === -1 && (t || '').length) {
+          return Promise.reject(new Error('Sunucu JSON döndürmedi. Oturum süresi dolmuş olabilir; sayfayı yenileyin.'));
+        }
         var res;
-        try { res = t ? JSON.parse(t) : {}; } catch(e) { res = {}; }
-        if (!r.ok) return Promise.reject(new Error(res.error || r.statusText || 'Kayıt yapılamadı.'));
+        try { res = t ? JSON.parse(t) : {}; } catch (e) { return Promise.reject(new Error('Sunucu yanıtı okunamadı.')); }
+        if (!r.ok) {
+          return Promise.reject(new Error((res && (res.error || res.mesaj)) || r.statusText || 'Kayıt yapılamadı.'));
+        }
+        if (res && res.ok === false) {
+          return Promise.reject(new Error((res.error || res.mesaj) || 'İşlem başarısız.'));
+        }
         return res;
       });
     });
@@ -546,7 +632,7 @@ window.RA_EMBED_MUSTERI_ID = {{ embed_musteri_id | tojson }};
       var gs = document.getElementById('ra-gorusme-secilen-slot');
       if (gs) { gs.style.display = 'none'; gs.textContent = ''; }
       var titleF = document.getElementById('ra-firmalar-title');
-      if (titleF) titleF.textContent = 'Görüşmeler';
+      if (titleF) titleF.textContent = 'Randevular';
       var gorusmeBtn = document.getElementById('ra-btn-gorusme-randevu-al');
       if (gorusmeBtn) gorusmeBtn.disabled = true;
     } else {
@@ -560,14 +646,45 @@ window.RA_EMBED_MUSTERI_ID = {{ embed_musteri_id | tojson }};
     }
   });
 
+  function raKarisikGunleriHesapla(topMap, gorMap) {
+    var keys = {};
+    if (topMap && typeof topMap === 'object') Object.keys(topMap).forEach(function(k) { keys[k] = true; });
+    if (gorMap && typeof gorMap === 'object') Object.keys(gorMap).forEach(function(k) { keys[k] = true; });
+    var out = {};
+    Object.keys(keys).forEach(function(k) {
+      var t = parseFloat(topMap[k]);
+      var g = parseFloat(gorMap[k]);
+      if (!isNaN(t) && t > 0 && !isNaN(g) && g > 0) out[k] = true;
+    });
+    return out;
+  }
+
   function loadAylikDoluluk() {
     var oda = odaAdi || '';
-    var url = '/randevu/api/aylik-doluluk?yil=' + calYear + '&ay=' + (calMonth + 1) + (oda ? '&oda_adi=' + encodeURIComponent(oda) : '');
-    if (raGorusmeModu) url += '&tip=gorusme';
-    fetch(url, { headers: { 'Accept': 'application/json' } }).then(function(r) { return r.json(); }).then(function(data) {
-      dolulukByDate = data || {};
+    var base = '/randevu/api/aylik-doluluk?yil=' + calYear + '&ay=' + (calMonth + 1) + (oda ? '&oda_adi=' + encodeURIComponent(oda) : '');
+    var urlToplanti = base;
+    var urlGorusme = base + '&tip=gorusme';
+    var opts = { headers: { 'Accept': 'application/json' } };
+    Promise.all([
+      fetch(urlToplanti, opts).then(function(r) { return r.json(); }),
+      fetch(urlGorusme, opts).then(function(r) { return r.json(); })
+    ]).then(function(pair) {
+      var topMap = pair[0] || {};
+      var gorMap = pair[1] || {};
+      if (topMap.error || gorMap.error) {
+        dolulukByDate = {};
+        karisikGunTarihleri = {};
+        renderCal();
+        return;
+      }
+      dolulukByDate = raGorusmeModu ? gorMap : topMap;
+      karisikGunTarihleri = raKarisikGunleriHesapla(topMap, gorMap);
       renderCal();
-    }).catch(function() { dolulukByDate = {}; renderCal(); });
+    }).catch(function() {
+      dolulukByDate = {};
+      karisikGunTarihleri = {};
+      renderCal();
+    });
   }
 
   function dolulukClass(saat) {
@@ -652,7 +769,7 @@ window.RA_EMBED_MUSTERI_ID = {{ embed_musteri_id | tojson }};
     var titleEl = document.getElementById('ra-firmalar-title');
     var listEl = document.getElementById('ra-firmalar-list');
     if (!selectedDate || !odaAdi) {
-      if (titleEl) titleEl.textContent = raGorusmeModu ? 'Görüşmeler' : 'Randevular';
+      if (titleEl) titleEl.textContent = 'Randevular';
       if (listEl) listEl.innerHTML = '<p style="color:#78909c;font-size:12px;">Tarih ve oda seçin.</p>';
       return;
     }
@@ -661,10 +778,9 @@ window.RA_EMBED_MUSTERI_ID = {{ embed_musteri_id | tojson }};
     var gunler = 'Pazar Pazartesi Salı Çarşamba Perşembe Cuma Cumartesi'.split(' ');
     var gunAdi = gunler[selectedDate.getDay()];
     var ayAdlari = 'Ocak Şubat Mart Nisan Mayıs Haziran Temmuz Ağustos Eylül Ekim Kasım Aralık'.split(' ');
-    if (titleEl) titleEl.textContent = raGorusmeModu ? 'Görüşmeler' : 'Randevular';
+    if (titleEl) titleEl.textContent = 'Randevular';
     if (!silentRefresh && listEl) listEl.innerHTML = '<p style="color:#78909c;font-size:12px;">Yükleniyor...</p>';
     var gunUrl = '/randevu/api/gun-randevulari?tarih=' + encodeURIComponent(tarih) + '&oda_adi=' + encodeURIComponent(odaAdi);
-    if (raGorusmeModu) gunUrl += '&tip=gorusme';
     fetch(gunUrl, { headers: { 'Accept': 'application/json' } })
       .then(function(r) { return r.json(); })
       .then(function(data) {
@@ -681,8 +797,12 @@ window.RA_EMBED_MUSTERI_ID = {{ embed_musteri_id | tojson }};
           var bas = (r.baslangic || '').replace(/</g, '&lt;');
           var bit = (r.bitis || '').replace(/</g, '&lt;');
           var rid = (r.id != null && r.id !== '') ? String(r.id) : '';
-          html += '<div class="randevu-al-firma-item" data-id="' + rid + '" data-baslangic="' + bas + '" data-bitis="' + bit + '">';
+          var rt = (r.randevu_tipi === 'gorusme') ? 'gorusme' : 'toplanti';
+          var turLabel = (r.tur_etiket || (rt === 'gorusme' ? 'Görüşmeler' : 'Toplantılar')).replace(/</g, '&lt;');
+          var turCls = rt === 'gorusme' ? 'ra-tur-gorusme' : 'ra-tur-toplanti';
+          html += '<div class="randevu-al-firma-item" data-id="' + rid + '" data-baslangic="' + bas + '" data-bitis="' + bit + '" data-randevu-tipi="' + rt + '">';
           html += '<div class="ra-firma-adi">' + ad + (sure ? ' <span class="ra-firma-sure">' + sure + '</span>' : '') + '</div>';
+          html += '<div class="ra-tur-satir"><span class="ra-tur-etiket ' + turCls + '">' + turLabel + '</span></div>';
           html += '<div class="ra-firma-saat">' + (r.baslangic || '') + ' – ' + (r.bitis || '') + '</div>';
           if (rid) {
             html += '<div class="ra-firma-actions">';
@@ -770,11 +890,15 @@ window.RA_EMBED_MUSTERI_ID = {{ embed_musteri_id | tojson }};
       var saat = dolulukByDate[tarihStr];
       var dc = dolulukClass(saat);
       if (dc) cell.classList.add(dc);
+      if (karisikGunTarihleri[tarihStr]) cell.classList.add('karisik-gun');
       if (isSameDay(dt, today)) cell.classList.add('today');
       if (selectedDate && isSameDay(dt, selectedDate)) cell.classList.add('selected');
       var isPast = dt.getTime() < today.getTime();
       if (isPast) cell.classList.add('past');
-      cell.textContent = d;
+      var num = document.createElement('span');
+      num.className = 'ra-cal-day-num';
+      num.textContent = String(d);
+      cell.appendChild(num);
       cell.setAttribute('data-y', calYear);
       cell.setAttribute('data-m', calMonth);
       cell.setAttribute('data-d', d);
@@ -1296,7 +1420,14 @@ window.RA_EMBED_MUSTERI_ID = {{ embed_musteri_id | tojson }};
 
   document.getElementById('ra-btn-kaydet').addEventListener('click', function() {
     var mid = musteriId.value;
-    if (!mid) { raMsg(null, 'Müşteri seçiniz.', true); return; }
+    var kisiEl = document.getElementById('ra-gorusme-kisi');
+    var kisiVal = kisiEl && kisiEl.value ? kisiEl.value.trim() : '';
+    if (raGorusmeModu) {
+      if (!kisiVal) { raMsg(null, 'Görüşülecek kişi adını giriniz (Kişi bilgisi).', true); return; }
+    } else if (!mid) {
+      raMsg(null, 'Müşteri seçiniz.', true);
+      return;
+    }
     if (!odaAdi) { raMsg(null, 'Oda seçiniz.', true); return; }
     if (!baslangicStr || !bitisStr) { raMsg(null, 'Lütfen sağdaki listeden müsait bir saat aralığına (yeşil noktalı slot) tıklayın.', true); return; }
     var baslangicDate = new Date(baslangicStr.replace('T', ' ').substring(0, 16));
@@ -1307,18 +1438,28 @@ window.RA_EMBED_MUSTERI_ID = {{ embed_musteri_id | tojson }};
     raMsg(null, '');
     var isGuncelle = !!raMevcutRandevuId;
     var url = isGuncelle ? ('/randevu/api/saat-guncelle/' + raMevcutRandevuId) : '/randevu/api/ekle';
-    var gorusmeOlarak = false;  // Görüşmeler artık sadece üstteki Tür seçimiyle yönetiliyor
+    var gorusmeOlarak = !!raGorusmeModu;
+    var sirketEl = document.getElementById('ra-gorusme-sirket');
+    var telEl = document.getElementById('ra-gorusme-telefon');
     var payload = isGuncelle
       ? { baslangic_zamani: baslangicStr, bitis_zamani: bitisStr }
       : {
-          musteri_id: parseInt(mid, 10),
+          musteri_id: gorusmeOlarak ? undefined : parseInt(mid, 10),
           oda_adi: odaAdi,
           baslangic_zamani: baslangicStr,
           bitis_zamani: bitisStr,
           pakete_dahil_mi: false,
-          notlar: document.getElementById('ra-notlar').value.trim(),
+          notlar: gorusmeOlarak
+            ? ((document.getElementById('ra-gorusme-notlar') || {}).value || '').trim()
+            : document.getElementById('ra-notlar').value.trim(),
           randevu_tipi: gorusmeOlarak ? 'gorusme' : 'randevu'
         };
+    if (!isGuncelle && gorusmeOlarak) {
+      payload.gorusme_kisi_adi = kisiVal;
+      payload.gorusme_sirket = (sirketEl && sirketEl.value) ? sirketEl.value.trim() : '';
+      payload.gorusme_telefon = (telEl && telEl.value) ? telEl.value.trim() : '';
+      if (payload.musteri_id === undefined) delete payload.musteri_id;
+    }
     var tekrarliChk = document.getElementById('ra-tekrarli');
     var tekrarliBitis = document.getElementById('ra-tekrarli-bitis');
     if (!isGuncelle && tekrarliChk && tekrarliChk.checked && tekrarliBitis && tekrarliBitis.value) {

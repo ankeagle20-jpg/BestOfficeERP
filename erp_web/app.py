@@ -96,6 +96,13 @@ def _start_background_jobs():
     atexit.register(lambda: scheduler.shutdown(wait=False))
     print("[OK] Background scheduler aktif: auto_invoice_cycle/15dk")
 
+# ── Sağlık (Render health check / yük dengeleyici) — DB veya giriş gerekmez ───
+@app.route("/healthz")
+def healthz():
+    """Render `healthCheckPath` ve manuel ping için; uygulama ayakta mı kontrol eder."""
+    return "ok\n", 200, {"Content-Type": "text/plain; charset=utf-8"}
+
+
 # ── Ana sayfa ────────────────────────────────────────────────────────────────
 @app.route("/")
 @login_required

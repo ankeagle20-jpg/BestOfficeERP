@@ -242,12 +242,9 @@ def api_musait_slotlar():
 @bp.route("/api/gun-randevulari")
 @login_required
 def api_gun_randevulari():
-    """Seçilen tarih ve oda için o günkü randevuları döner. tip=gorusme ise sadece görüşmeler."""
+    """Seçilen tarih ve oda için o günkü tüm randevular (toplantı + görüşme). tip=gorusme artık yok sayılır."""
     tarih_str = request.args.get("tarih")
     oda_adi = (request.args.get("oda_adi") or "").strip() or ODALAR[0]
-    tip = (request.args.get("tip") or "").strip().lower()
-    if tip not in ("gorusme", ""):
-        tip = ""
     if not tarih_str:
         return jsonify({"randevular": []})
     try:
@@ -255,40 +252,24 @@ def api_gun_randevulari():
     except ValueError:
         return jsonify({"randevular": []})
     try:
-        if tip == "gorusme":
-            # Görüşmeler sekmesi: sadece gorusme tipindekiler
-            rows = fetch_all("""
-                SELECT r.id, r.baslangic_zamani, r.bitis_zamani, r.randevu_tarihi, r.saat, r.sure_dakika,
-                       c.name AS musteri_adi
-                FROM randevular r
-                LEFT JOIN customers c ON c.id = r.musteri_id
-                WHERE COALESCE(NULLIF(TRIM(r.oda_adi), ''), r.oda) = %s
-                  AND COALESCE(r.durum, '') != 'İptal'
-                  AND r.randevu_tipi = 'gorusme'
-                  AND (
-                    (r.baslangic_zamani IS NOT NULL AND (r.baslangic_zamani::date) = %s)
-                    OR (r.randevu_tarihi = %s)
-                  )
-                ORDER BY COALESCE(r.baslangic_zamani, (r.randevu_tarihi + COALESCE(r.saat, '09:00'::time))::timestamptz)
-            """, (oda_adi, gun, gun))
-        else:
-            # Toplantılar sekmesi: aynı odadaki TÜM randevular (randevu+gorusme) listelensin ki çakışmalar görülsün
-            rows = fetch_all("""
-                SELECT r.id, r.baslangic_zamani, r.bitis_zamani, r.randevu_tarihi, r.saat, r.sure_dakika,
-                       c.name AS musteri_adi
-                FROM randevular r
-                LEFT JOIN customers c ON c.id = r.musteri_id
-                WHERE COALESCE(NULLIF(TRIM(r.oda_adi), ''), r.oda) = %s
-                  AND COALESCE(r.durum, '') != 'İptal'
-                  AND (
-                    (r.baslangic_zamani IS NOT NULL AND (r.baslangic_zamani::date) = %s)
-                    OR (r.randevu_tarihi = %s)
-                  )
-                ORDER BY COALESCE(r.baslangic_zamani, (r.randevu_tarihi + COALESCE(r.saat, '09:00'::time))::timestamptz)
-            """, (oda_adi, gun, gun))
+        rows = fetch_all("""
+            SELECT r.id, r.baslangic_zamani, r.bitis_zamani, r.randevu_tarihi, r.saat, r.sure_dakika,
+                   r.randevu_tipi,
+                   c.name AS musteri_adi
+            FROM randevular r
+            LEFT JOIN customers c ON c.id = r.musteri_id
+            WHERE COALESCE(NULLIF(TRIM(r.oda_adi), ''), r.oda) = %s
+              AND COALESCE(r.durum, '') != 'İptal'
+              AND (
+                (r.baslangic_zamani IS NOT NULL AND (r.baslangic_zamani::date) = %s)
+                OR (r.randevu_tarihi = %s)
+              )
+            ORDER BY COALESCE(r.baslangic_zamani, (r.randevu_tarihi + COALESCE(r.saat, '09:00'::time))::timestamptz)
+        """, (oda_adi, gun, gun))
     except Exception:
         rows = fetch_all("""
             SELECT r.id, r.baslangic_zamani, r.bitis_zamani, r.randevu_tarihi, r.saat, r.sure_dakika,
+                   r.randevu_tipi,
                    c.name AS musteri_adi
             FROM randevular r
             LEFT JOIN customers c ON c.id = r.musteri_id
@@ -323,12 +304,19 @@ def api_gun_randevulari():
             sure_metin = "{} saat".format(int(sure_saat))
         else:
             sure_metin = "{} saat".format(str(sure_saat).replace(".", ","))
+        rt_raw = r.get("randevu_tipi")
+        rt = (str(rt_raw).strip().lower() if rt_raw else "") or "randevu"
+        if rt not in ("gorusme", "randevu"):
+            rt = "randevu"
+        tur_etiket = "Görüşmeler" if rt == "gorusme" else "Toplantılar"
         out.append({
             "id": r.get("id"),
             "musteri_adi": (r.get("musteri_adi") or "").strip() or "—",
             "baslangic": bas_str,
             "bitis": bitis_str,
             "sure_metin": sure_metin,
+            "randevu_tipi": rt,
+            "tur_etiket": tur_etiket,
         })
     return jsonify({"randevular": out})
 

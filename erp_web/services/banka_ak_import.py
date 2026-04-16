@@ -9,6 +9,8 @@ Ortam:
   AKBANK_ONIZLEME_MAX_WORKERS=8   → en fazla 8 işçi (ör. Render’da sınırla)
   AKBANK_ONIZLEME_MIN_ROWS=32     → bundan az satırda havuz açılmaz (overhead)
 
+Windows: AKBANK_ONIZLEME_PROCESSES ayarlı değilse önizleme tek süreç (ProcessPool Flask altında sık kilitlenir).
+
 Önbellek: norm_text_fold, norm_loose, akbank_sender_key, _digits_only_str, _digit_haystack
   için LRU (tekrarlayan ünvan/açıklama/rakam dizilerinde O(1) yakın maliyet).
 """
@@ -18,6 +20,7 @@ import io
 import logging
 import os
 import re
+import sys
 import unicodedata
 from functools import lru_cache
 from collections import defaultdict
@@ -689,6 +692,13 @@ def _onizleme_worker_count(n_rows: int) -> int:
     """İşçi sayısı: varsayılan tüm CPU; AKBANK_ONIZLEME_PROCESSES=1 → 1 (paralel kapalı)."""
     raw = os.environ.get("AKBANK_ONIZLEME_PROCESSES", "").strip().lower()
     if raw == "1" or raw == "off" or raw == "false":
+        return 1
+    # Windows + Flask/Werkzeug: ProcessPool önizlemede sık sonsuz beklemeye düşer; açıkça çoklu istenmediyse tek süreç.
+    if sys.platform == "win32":
+        if not raw or raw in ("0", "auto"):
+            return 1
+        if raw.isdigit():
+            return max(1, int(raw))
         return 1
     cpu = os.cpu_count() or 1
     if raw and raw not in ("0", "auto", ""):

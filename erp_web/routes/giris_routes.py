@@ -2339,6 +2339,7 @@ def _date_add_months(d: date, n: int) -> date:
 def _reel_donem_ay_keys_for_period(bas_soz: date, donem_yil: int, artis_month: int, artis_day: int):
     """
     Reel dönem: kira artış (yıldönümü) ay/gününden itibaren 12 ay — JS sozlesmeReelDonemAyKeys ile uyumlu.
+    Bu 12 ayda KDV dahil tutar sabit; TÜFE yalnızca sonraki dönem başında uygulanır.
     Örn. artış Şubat ise donem_yil=2026 → 2026-2 … 2027-1 (Ocak 2026 önceki dönemde kalır).
     """
     dm = max(1, min(12, int(artis_month)))
@@ -2362,6 +2363,16 @@ def _reel_donem_effective_yillik_for_ekstre(manual_by_year: dict, bas_soz: date,
     """
     out = {}
     y_start = bas_soz.year
+    bug = date.today().year
+    mx = 0
+    if isinstance(manual_by_year, dict):
+        for k in manual_by_year:
+            try:
+                mx = max(mx, int(k))
+            except (TypeError, ValueError):
+                continue
+    y_end = max(int(y_end), bug + 2, mx + 5, y_start + 12)
+    y_end = min(y_end, max(bug + 25, y_start + 30))
     for y in range(y_start, y_end + 1):
         if y in manual_by_year:
             try:
@@ -2369,10 +2380,20 @@ def _reel_donem_effective_yillik_for_ekstre(manual_by_year: dict, bas_soz: date,
             except (TypeError, ValueError):
                 mv = None
             if mv is not None and math.isfinite(mv) and mv >= 0:
-                out[y] = round(mv, 2)
-                continue
+                prev_m = out.get(y - 1) if y > y_start else None
+                if (
+                    prev_m is not None
+                    and math.isfinite(float(prev_m))
+                    and float(prev_m) > 0
+                    and float(mv) < float(prev_m) * 0.995
+                ):
+                    pass
+                else:
+                    out[y] = round(mv, 2)
+                    continue
         prev = out.get(y - 1)
         if y > y_start and prev and prev > 0 and math.isfinite(prev):
+            prev_f = float(prev)
             inner = tufe_map.get(y)
             if not isinstance(inner, dict):
                 inner = {}
@@ -2383,16 +2404,103 @@ def _reel_donem_effective_yillik_for_ekstre(manual_by_year: dict, bas_soz: date,
                 oran = float(raw_o or 0)
             except (TypeError, ValueError):
                 oran = 0.0
+            if (not oran or not math.isfinite(oran)) and y > y_start:
+                inner_prev = tufe_map.get(y - 1)
+                if isinstance(inner_prev, dict):
+                    raw_p = inner_prev.get(artis_month)
+                    if raw_p is None and artis_month is not None:
+                        raw_p = inner_prev.get(str(artis_month))
+                    try:
+                        oran2 = float(raw_p or 0)
+                    except (TypeError, ValueError):
+                        oran2 = 0.0
+                    if oran2 > 0 and math.isfinite(oran2):
+                        oran = oran2
             if oran > 0 and math.isfinite(oran):
-                nxt = round(prev * (1 + oran / 100.0), 2)
+                nxt = round(prev_f * (1 + oran / 100.0), 2)
                 if math.isfinite(nxt):
                     out[y] = nxt
+            else:
+                out[y] = round(prev_f, 2)
     return out
+
+
+def _reel_donem_effective_yilmap_orani_duzelt(
+    out: dict,
+    manual_by_year: dict,
+    tufe_map: dict,
+    y_start: int,
+    y_end: int,
+    kyc: dict,
+) -> None:
+    """
+    TÜFE map'te hedef yılın artış ayı oranı yoksa reel zincir düz kalırdı.
+    Aylık grid ile aynı _aylik_grid_contract_core yillik_map oranı out[yy]'yi günceller.
+    """
+    if not out or not kyc or not isinstance(out, dict):
+        return
+    kyc_d = dict(kyc or {})
+    aylik_net = _aylik_grid_coerce_money(kyc_d.get("aylik_kira"))
+    if aylik_net <= 0:
+        return
+    try:
+        core = _aylik_grid_contract_core(kyc_d, tufe_map)
+    except Exception:
+        core = None
+    if not core or not isinstance(core.get("yillik_map"), dict):
+        return
+    yillik_map = core["yillik_map"]
+    man = manual_by_year if isinstance(manual_by_year, dict) else {}
+    try:
+        y_lo = int(y_start)
+        y_hi = int(y_end)
+    except (TypeError, ValueError):
+        return
+    for yy in range(y_lo + 1, y_hi + 1):
+        prev = out.get(yy - 1)
+        cur = out.get(yy)
+        if prev is None or cur is None:
+            continue
+        try:
+            prev_n = float(prev)
+            cur_n = float(cur)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(prev_n) or prev_n <= 0 or not math.isfinite(cur_n):
+            continue
+        mv = man.get(yy)
+        if mv is not None and str(mv).strip() != "":
+            try:
+                mvn = round(float(mv), 2)
+            except (TypeError, ValueError):
+                mvn = None
+            if mvn is not None and math.isfinite(mvn) and mvn >= 0:
+                prev_r = round(prev_n, 2)
+                if mvn >= prev_r * 0.995:
+                    continue
+        if cur_n > prev_n * 1.001:
+            continue
+        ym = yillik_map.get(yy)
+        ym1 = yillik_map.get(yy - 1)
+        if ym is None or ym1 is None:
+            continue
+        try:
+            ymf = float(ym)
+            ym1f = float(ym1)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(ymf) or not math.isfinite(ym1f) or ym1f <= 0:
+            continue
+        ratio = ymf / ym1f
+        if not math.isfinite(ratio) or ratio <= 0:
+            continue
+        out[yy] = round(prev_n * ratio, 2)
 
 
 def _reel_ay_key_tutar_map_musteri(
     musteri_id, bas_soz: date, artis_month: int, artis_day: int, tufe_map: dict, y_end: int,
     manual_by_year=None,
+    kyc_for_yilmap=None,
 ) -> dict:
     """Ay anahtarı (Y-M) -> KDV dahil reel tutar; kayıt yoksa {} (ekstre eski aylık+TÜFE yoluna düşer).
     manual_by_year: {yil: tutar} önceden yüklenmişse DB sorgusu yapılmaz (toplu rapor için). None = DB'den oku."""
@@ -2429,10 +2537,25 @@ def _reel_ay_key_tutar_map_musteri(
             except (TypeError, ValueError):
                 continue
     effective = _reel_donem_effective_yillik_for_ekstre(manual, bas_soz, tufe_map, artis_month, y_end)
+    if kyc_for_yilmap and effective:
+        try:
+            ys = bas_soz.year
+            y_hi = max(int(k) for k in effective.keys())
+            _reel_donem_effective_yilmap_orani_duzelt(
+                effective, manual, tufe_map, ys, y_hi, kyc_for_yilmap
+            )
+        except Exception:
+            pass
     out = {}
     y_start = bas_soz.year
     ad = ad_raw
-    for d_y in range(y_start, y_end + 1):
+    y_paint_end = y_end
+    if effective:
+        try:
+            y_paint_end = max(int(y_paint_end), max(int(k) for k in effective))
+        except (TypeError, ValueError):
+            pass
+    for d_y in range(y_start, y_paint_end + 1):
         if d_y not in effective:
             continue
         tut = effective[d_y]
@@ -2558,7 +2681,14 @@ def firma_ozet_aylik_grid_hucre_kdv_dahil(
         reel_manual = manual_reel_by_year if isinstance(manual_reel_by_year, dict) else {}
         try:
             reel_map = _reel_ay_key_tutar_map_musteri(
-                musteri_id, bas_soz, artis_month, artis_day, tufe_map, y_end, manual_by_year=reel_manual
+                musteri_id,
+                bas_soz,
+                artis_month,
+                artis_day,
+                tufe_map,
+                y_end,
+                manual_by_year=reel_manual,
+                kyc_for_yilmap=kyc,
             )
         except Exception:
             reel_map = {}
@@ -2625,15 +2755,19 @@ def _cari_ekstre_hareketler(musteri_id, baslangic, bitis, aylik_kira, use_reel_c
     aylik = float(aylik_kira or 0)
     rows = []
 
-    # KYC: sözleşme başlangıcı (reel dönem + devir), kira artış ayı
+    # KYC: grid / reel yilmap düzeltmesi için aylık alanlar; ekstre satırı aylık_kira ile hizalanır.
     kyc = fetch_one(
-        """SELECT sozlesme_tarihi, kira_artis_tarihi
+        """SELECT sozlesme_tarihi, sozlesme_bitis, aylik_kira, kira_artis_tarihi, kira_suresi_ay, kira_nakit,
+                  kira_nakit_tutar, kira_banka_tutar, kdv_oran
            FROM musteri_kyc
            WHERE musteri_id = %s
            ORDER BY id DESC
            LIMIT 1""",
         (musteri_id,),
     ) or {}
+    if aylik > 0:
+        kyc = dict(kyc)
+        kyc["aylik_kira"] = aylik
     bas_soz = None
     soz_raw = kyc.get("sozlesme_tarihi")
     if soz_raw:
@@ -2738,7 +2872,13 @@ def _cari_ekstre_hareketler(musteri_id, baslangic, bitis, aylik_kira, use_reel_c
     if use_reel_cells and bas_soz:
         try:
             reel_ay_map = _reel_ay_key_tutar_map_musteri(
-                musteri_id, bas_soz, artis_month, artis_day, tufe_map, y_end
+                musteri_id,
+                bas_soz,
+                artis_month,
+                artis_day,
+                tufe_map,
+                y_end,
+                kyc_for_yilmap=kyc,
             )
         except Exception:
             logging.getLogger(__name__).exception("reel_ay_key_tutar_map_musteri musteri_id=%s", musteri_id)

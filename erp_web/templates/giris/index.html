@@ -429,6 +429,22 @@
     color: #fff;
     border: 1px solid #455a64;
 }
+.sozlesmeler-reel-hibrit-wrap {
+    display: none;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 10px 14px;
+}
+.sozlesmeler-reel-hibrit-field label {
+    display: block;
+    font-size: 11px;
+    color: #90a4ae;
+    margin-bottom: 2px;
+    white-space: nowrap;
+}
+.sozlesmeler-reel-hibrit-field .sozlesmeler-reel-tutar-input {
+    width: 108px;
+}
 .sozlesmeler-aylik-grid {
     display: grid;
     grid-template-columns: repeat(12, minmax(0, 1fr));
@@ -2899,8 +2915,25 @@
                             <option value="dahil">KDV dahil</option>
                             <option value="haric">KDV hariç</option>
                             <option value="net">Net tutar</option>
+                            <option value="hibrit">Hibrit</option>
                         </select>
-                        <input type="text" id="sozlesmeler-reel-tutar" class="sozlesmeler-reel-tutar-input" placeholder="KDV dahil tutar" autocomplete="off">
+                        <span id="sozlesmeler-reel-tutar-tek-wrap" class="sozlesmeler-reel-tutar-tek-wrap">
+                            <input type="text" id="sozlesmeler-reel-tutar" class="sozlesmeler-reel-tutar-input" placeholder="KDV dahil tutar" autocomplete="off">
+                        </span>
+                        <div id="sozlesmeler-reel-hibrit-wrap" class="sozlesmeler-reel-hibrit-wrap" aria-hidden="true">
+                            <div class="sozlesmeler-reel-hibrit-field">
+                                <label for="sozlesmeler-reel-hibrit-toplam">Toplam tutar</label>
+                                <input type="text" id="sozlesmeler-reel-hibrit-toplam" class="sozlesmeler-reel-tutar-input" placeholder="Nakit + banka (net)" autocomplete="off" title="Aylık kira satırındaki gibi: nakit + banka (net)" oninput="sozlesmelerReelHibritToplamDegisti()" onchange="sozlesmelerReelHibritToplamDegisti()">
+                            </div>
+                            <div class="sozlesmeler-reel-hibrit-field">
+                                <label for="sozlesmeler-reel-hibrit-net">Net tutar</label>
+                                <input type="text" id="sozlesmeler-reel-hibrit-net" class="sozlesmeler-reel-tutar-input" placeholder="Nakit (KDV yok)" autocomplete="off" title="Elden / nakit payı (KDV uygulanmaz)" oninput="sozlesmelerReelHibritNetDegisti()" onchange="sozlesmelerReelHibritNetDegisti()">
+                            </div>
+                            <div class="sozlesmeler-reel-hibrit-field">
+                                <label for="sozlesmeler-reel-hibrit-banka">Banka</label>
+                                <input type="text" id="sozlesmeler-reel-hibrit-banka" class="sozlesmeler-reel-tutar-input" placeholder="Banka (net)" autocomplete="off" title="Havale/EFT matrahı (net); KDV bu tutar üzerinden">
+                            </div>
+                        </div>
                         <button type="button" class="btn-aylik-sec" onclick="sozlesmelerReelDonemTutarUygula()"><i class="fa fa-check"></i> Uygula</button>
                         <button type="button" class="btn-aylik-tahsil" onclick="sozlesmelerReelSecilenlereTutarUygula()">Seçilenlere Uygula</button>
                         <button type="button" class="tahsilat-btn-kaydet" id="sozlesmeler-reel-kaydet-btn" onclick="sozlesmelerReelDonemTutarKaydet()"><i class="fa fa-save"></i> Kaydet</button>
@@ -3087,6 +3120,27 @@ function girisFetchAgKopmasinaKarsi(url, options, denemeSayisi) {
         });
     }
     return dene(denemeSayisi);
+}
+
+/** fetch yanıtı: giriş HTML'i JSON sanılıp sessiz hata veya boş liste üretmesin (401/oturum). */
+function girisFetchJsonSafely(r) {
+    var ct = (r.headers.get('content-type') || '').toLowerCase();
+    return r.text().then(function (t) {
+        if (t && /^[\s]*</.test(t)) {
+            throw new Error('Oturum süresi doldu veya giriş gerekli. Sayfayı yenileyin.');
+        }
+        var data;
+        try {
+            data = t ? JSON.parse(t) : null;
+        } catch (e) {
+            throw new Error('Sunucu yanıtı okunamadı.');
+        }
+        if (!r.ok) {
+            var msg = (data && (data.mesaj || data.error)) ? (data.mesaj || data.error) : ('HTTP ' + r.status);
+            throw new Error(msg);
+        }
+        return data;
+    });
 }
 
 /** fetch / JSON hataları için kullanıcıya gösterilecek kısa açıklama. */
@@ -3278,16 +3332,45 @@ let potSelectedId = null;
 let sozlesmeOdenenAySayisi = 0; // tam ödenen ay sayısı
 let sozlesmeKismiOdemeVar = false; // kısmi ödenen ay var mı (sarı kutu)
 let sozlesmeKismiEksikTutar = 0; // kısmi ödenen ayda kalan borç (kutuda gösterilir)
-let sozlesmeTahsilEdilenAyAnahtarlari = new Set(); // API: YYYY-M
+let sozlesmeTahsilEdilenAyAnahtarlari = new Set(); // API: YYYY-M (normalize: YYYY-M)
+/** Borçlandırılan aylar (|AYLIK_TUTAR| faturası) — tahsil yokken de yeşil; yalnızca borclananMid ile eşleşen müşteride geçerli. */
+var sozlesmeAylikBorclananAyAnahtarlari = new Set();
+var sozlesmeAylikBorclananMid = null;
 /** Aylık Tutarlar gridinde seçilen ay anahtarları (yıl-ay, örn. 2026-3). */
 var sozlesmeAylikSeciliAnahtarlar = new Set();
+
+function sozlesmeAylikAyKeyNormalize(k) {
+    if (k == null || k === '') return '';
+    var s = String(k).trim();
+    var m = s.match(/^(\d{4})-(\d{1,2})$/);
+    if (m) return parseInt(m[1], 10) + '-' + parseInt(m[2], 10);
+    return s;
+}
+
+function sozlesmeAylikAyKeyFromYilAy(y, m) {
+    var yy = parseInt(y, 10);
+    var mm = parseInt(m, 10);
+    if (isNaN(yy) || isNaN(mm) || mm < 1 || mm > 12) return '';
+    return yy + '-' + mm;
+}
+
+function sozlesmeAylikBorclananMusteriDegistir(yeniMid) {
+    try {
+        var y = parseInt(yeniMid, 10);
+        if (isNaN(y)) return;
+        if (sozlesmeAylikBorclananMid != null && sozlesmeAylikBorclananMid !== y) {
+            sozlesmeAylikBorclananAyAnahtarlari.clear();
+            sozlesmeAylikBorclananMid = null;
+        }
+    } catch (eBm) {}
+}
 
 function sozlesmeTahsilSetFromJson(j) {
     if (!j || !j.ok || !Array.isArray(j.aylar)) {
         sozlesmeTahsilEdilenAyAnahtarlari = new Set();
         return;
     }
-    sozlesmeTahsilEdilenAyAnahtarlari = new Set(j.aylar.map(function (x) { return String(x); }));
+    sozlesmeTahsilEdilenAyAnahtarlari = new Set(j.aylar.map(function (x) { return sozlesmeAylikAyKeyNormalize(String(x)); }));
 }
 
 function sozlesmeTahsilDurumunuYukle() {
@@ -3307,6 +3390,7 @@ function sozlesmeTahsilDurumunuYukle() {
 function sozlesmeAylikGridParalelYukle(mid) {
     if (!mid) return Promise.resolve();
     if (!document.getElementById('sozlesmeler-aylik-grid')) return Promise.resolve();
+    sozlesmeAylikBorclananMusteriDegistir(mid);
     var tUrl = '/giris/api/aylik-tahsil-durum?musteri_id=' + encodeURIComponent(mid);
     var cUrl = '/giris/api/aylik-grid-cache?musteri_id=' + encodeURIComponent(mid);
     var rUrl = '/giris/api/reel-donem-tutarlar?musteri_id=' + encodeURIComponent(mid);
@@ -3425,7 +3509,7 @@ function sozlesmelerReelDonemAnchor(basStr) {
     return { month: monthIdx, date: dateNum };
 }
 
-/** Yıldönümü ayından itibaren 12 takvim ayının data-ay-key listesi (örn. artış Şubat → donemYil 2026: 2026-2 … 2027-1). */
+/** Yıldönümü ayından itibaren 12 takvim ayının data-ay-key listesi (örn. artış Şubat → donemYil 2026: 2026-2 … 2027-1). Aynı dönem yılında tek tutar — müşteri bu 12 ay boyunca aynı rakamı öder; TÜFE sadece bir sonraki dönem başında uygulanır. */
 function sozlesmeReelDonemAyKeys(basStr, donemYil) {
     var bas = parseTarihStr(basStr) || new Date(basStr);
     if (isNaN(bas.getTime())) return [];
@@ -3478,17 +3562,15 @@ function sozlesmelerReelArtisAyAdi(basStr) {
 }
 
 /**
- * Dönem yılı başlangıç → KDV dahil tutar: elle girilen yıl sabit; girilmeyen yıl bir önceki efektif tutar ×
- * o yılın (takvim yılı, artış ayı) TÜFE oranı — backend _aylik_grid_compute ile uyumlu (sonraki yıl + artış ayı).
+ * Reel TÜFE zincirinin döngü üst sınırı: sadece «içinde bulunulan yıl» yetmez (örn. Nisan 2025’te 2026 Mart artışı hesaplanmaz).
+ * Bitiş tarihi, elle girilen en büyük dönem yılı + tampon ve bugünden en az 2 yıl sonrası arasından büyüğü.
  */
-function sozlesmelerReelDonemEffectiveYillik(manualMap, basStr, tufeListe) {
-    var out = {};
-    if (!manualMap) manualMap = {};
+function sozlesmelerReelDonemYilUfku(basStr, manualMap) {
     var bas = parseTarihStr(basStr) || new Date(basStr);
-    if (isNaN(bas.getTime())) return out;
+    if (isNaN(bas.getTime())) return new Date().getFullYear() + 4;
     var yStart = bas.getFullYear();
-    // Sözleşme bitişi ileri ise bir sonraki yıl(lar) dahil hesapla (örn. 2027 Mart’a kadar).
-    var yEnd = new Date().getFullYear();
+    var cy = new Date().getFullYear();
+    var yEnd = cy;
     try {
         var bitEl = document.getElementById('sozlesme_bitis');
         var bitStr = bitEl && bitEl.value ? bitEl.value.trim() : '';
@@ -3496,27 +3578,104 @@ function sozlesmelerReelDonemEffectiveYillik(manualMap, basStr, tufeListe) {
         if (bit && !isNaN(bit.getTime())) {
             yEnd = Math.max(yEnd, bit.getFullYear());
         } else {
-            yEnd = Math.max(yEnd, new Date().getFullYear() + 1);
+            yEnd = Math.max(yEnd, cy + 1);
         }
-    } catch (e0) {
-        yEnd = Math.max(yEnd, new Date().getFullYear() + 1);
+    } catch (eUf) {
+        yEnd = Math.max(yEnd, cy + 1);
     }
+    var maxManual = 0;
+    if (manualMap && typeof manualMap === 'object') {
+        Object.keys(manualMap).forEach(function (k) {
+            var n = parseInt(k, 10);
+            if (!isNaN(n)) maxManual = Math.max(maxManual, n);
+        });
+    }
+    yEnd = Math.max(yEnd, cy + 2, maxManual + 5, yStart + 12);
+    var cap = Math.max(cy + 22, yStart + 28);
+    if (yEnd > cap) yEnd = cap;
+    return yEnd;
+}
+
+/** tufe_verileri.ay ile anahtar uyumu (Mart / MART / 3). */
+function sozlesmelerReelTufeOranOku(inner, ayAdi) {
+    if (!inner || typeof inner !== 'object' || ayAdi == null || ayAdi === '') return NaN;
+    function parseV(v) {
+        if (v == null || v === '') return NaN;
+        var p = parseFloat(String(v).replace(',', '.').trim());
+        return isNaN(p) ? NaN : p;
+    }
+    var v0 = inner[ayAdi];
+    var p0 = parseV(v0);
+    if (!isNaN(p0)) return p0;
+    if (typeof ayAdi === 'string') {
+        var cap = ayAdi.charAt(0).toUpperCase() + ayAdi.slice(1).toLowerCase();
+        var up = ayAdi.toUpperCase();
+        var alts = [cap, ayAdi.toLowerCase(), up];
+        for (var i = 0; i < alts.length; i++) {
+            if (alts[i] === ayAdi) continue;
+            var pi = parseV(inner[alts[i]]);
+            if (!isNaN(pi)) return pi;
+        }
+    }
+    var idx = (typeof SOZLESME_TUFE_AY_ANAHTAR !== 'undefined' && Array.isArray(SOZLESME_TUFE_AY_ANAHTAR))
+        ? SOZLESME_TUFE_AY_ANAHTAR.indexOf(ayAdi)
+        : -1;
+    if (idx >= 0) {
+        var nk = idx + 1;
+        var p1 = parseV(inner[nk]);
+        if (!isNaN(p1)) return p1;
+        p1 = parseV(inner[String(nk)]);
+        if (!isNaN(p1)) return p1;
+    }
+    return NaN;
+}
+
+/**
+ * Dönem yılı başlangıç → KDV dahil tutar: elle girilen yıl sabit; girilmeyen yıl bir önceki efektif tutar ×
+ * o yılın (takvim yılı, artış ayı) TÜFE oranı — backend _aylik_grid_compute ile uyumlu (sonraki yıl + artış ayı).
+ * Mart oranı bazen henüz yıl y satırında yoksa y-1 satırında olabilir; ikisinde de yoksa oran gelene kadar önceki tutar korunur (düşük yanlış grid değerine düşmez).
+ */
+function sozlesmelerReelDonemEffectiveYillik(manualMap, basStr, tufeListe) {
+    var out = {};
+    if (!manualMap) manualMap = {};
+    var bas = parseTarihStr(basStr) || new Date(basStr);
+    if (isNaN(bas.getTime())) return out;
+    var yStart = bas.getFullYear();
+    var yEnd = sozlesmelerReelDonemYilUfku(basStr, manualMap);
     var sozlesmeAyAdi = sozlesmelerReelArtisAyAdi(basStr);
     for (var y = yStart; y <= yEnd; y++) {
         var ms = manualMap[String(y)];
         if (ms == null) ms = manualMap[y];
         if (ms != null && !isNaN(parseFloat(ms)) && parseFloat(ms) >= 0) {
-            out[y] = Math.round(parseFloat(ms) * 100) / 100;
-            continue;
+            var msNum = Math.round(parseFloat(ms) * 100) / 100;
+            /* DB’de kalan eski donem_yil satırı (ör. 67740), yeni 2025 hibritinden sonra TÜFE’den düşük kalır — yut, zincirle hesapla. */
+            var prevManual = y > yStart ? out[y - 1] : null;
+            var prevM = prevManual != null && !isNaN(parseFloat(prevManual)) ? Math.round(parseFloat(prevManual) * 100) / 100 : NaN;
+            var staleLower = !isNaN(prevM) && prevM > 0 && msNum < prevM * 0.995;
+            if (!staleLower) {
+                out[y] = msNum;
+                continue;
+            }
         }
         if (y > yStart && out[y - 1] != null && out[y - 1] > 0 && tufeListe) {
-            var oranRaw = tufeListe[y] && tufeListe[y][sozlesmeAyAdi];
-            var oran = parseFloat(oranRaw);
+            var prev = Math.round(parseFloat(out[y - 1]) * 100) / 100;
+            var oran = NaN;
+            if (tufeListe[y] && typeof tufeListe[y] === 'object') {
+                oran = sozlesmelerReelTufeOranOku(tufeListe[y], sozlesmeAyAdi);
+            }
+            if (isNaN(oran) || oran <= 0) {
+                if (tufeListe[y - 1] && typeof tufeListe[y - 1] === 'object') {
+                    oran = sozlesmelerReelTufeOranOku(tufeListe[y - 1], sozlesmeAyAdi);
+                }
+            }
             if (!isNaN(oran) && oran > 0) {
-                out[y] = Math.round(out[y - 1] * (1 + oran / 100) * 100) / 100;
+                out[y] = Math.round(prev * (1 + oran / 100) * 100) / 100;
+            } else {
+                out[y] = prev;
             }
         }
     }
+    sozlesmelerReelDonemYilmapOraniDuzelt(out, basStr, yStart, yEnd, tufeListe, manualMap);
     return out;
 }
 
@@ -3546,20 +3705,8 @@ function sozlesmelerReelYilSecenekleriniDoldur() {
     }
     sel.disabled = false;
     var yStart = bas.getFullYear();
-    // Sözleşme bitiş yılı ileri ise seçeneklere ekle; yoksa en azından 1 sonraki yıl.
-    var yEnd = new Date().getFullYear();
-    try {
-        var bitEl = document.getElementById('sozlesme_bitis');
-        var bitStr = bitEl && bitEl.value ? bitEl.value.trim() : '';
-        var bit = bitStr ? (parseTarihStr(bitStr) || new Date(bitStr)) : null;
-        if (bit && !isNaN(bit.getTime())) {
-            yEnd = Math.max(yEnd, bit.getFullYear());
-        } else {
-            yEnd = Math.max(yEnd, new Date().getFullYear() + 1);
-        }
-    } catch (e1) {
-        yEnd = Math.max(yEnd, new Date().getFullYear() + 1);
-    }
+    var mapRef = (typeof window !== 'undefined' && window.__musteriReelDonemTutarlari) ? window.__musteriReelDonemTutarlari : {};
+    var yEnd = sozlesmelerReelDonemYilUfku(v, mapRef);
     for (var yy = yStart; yy <= yEnd; yy++) {
         var opt = document.createElement('option');
         opt.value = String(yy);
@@ -3572,6 +3719,100 @@ function sozlesmelerReelYilSecenekleriniDoldur() {
     sozlesmelerReelYilSecimineGoreTutarAlani();
 }
 
+function sozlesmelerReelHibritAlanlariTemizle() {
+    ['sozlesmeler-reel-hibrit-toplam', 'sozlesmeler-reel-hibrit-net', 'sozlesmeler-reel-hibrit-banka'].forEach(function (hid) {
+        var e = document.getElementById(hid);
+        if (e) e.value = '';
+    });
+}
+
+function _sozlesmelerReelHibritParseEl(el) {
+    if (!el || String(el.value || '').trim() === '') return NaN;
+    return parseFloat(String(el.value).replace(/\s/g, '').replace(',', '.').trim());
+}
+
+/** Toplam / net değişince banka = toplam (net yoksa) veya toplam − net (Aylık Kira satırı ile aynı). */
+function sozlesmelerReelHibritBankaSenkron() {
+    var elT = document.getElementById('sozlesmeler-reel-hibrit-toplam');
+    var elN = document.getElementById('sozlesmeler-reel-hibrit-net');
+    var elB = document.getElementById('sozlesmeler-reel-hibrit-banka');
+    if (!elT || !elN || !elB) return;
+    var sel = document.getElementById('sozlesmeler-reel-tutar-tip');
+    if (!sel || sel.value !== 'hibrit') return;
+    var rawT = String(elT.value != null ? elT.value : '').trim();
+    var total = rawT ? _sozlesmelerReelHibritParseEl(elT) : NaN;
+    if (!rawT || isNaN(total) || total <= 0) {
+        elB.value = '';
+        return;
+    }
+    var nakStr = String(elN.value != null ? elN.value : '').trim();
+    var nakitVal = nakStr ? _sozlesmelerReelHibritParseEl(elN) : NaN;
+    if (!nakStr || isNaN(nakitVal) || nakitVal <= 0) {
+        elB.value = String(Math.round(total * 100) / 100);
+        return;
+    }
+    var capped = Math.min(nakitVal, total);
+    if (capped !== nakitVal) elN.value = String(Math.round(capped * 100) / 100);
+    var rem = Math.max(0, Math.round((total - capped) * 100) / 100);
+    elB.value = rem > 0 ? String(rem) : '';
+}
+
+function sozlesmelerReelHibritToplamDegisti() {
+    sozlesmelerReelHibritBankaSenkron();
+}
+
+function sozlesmelerReelHibritNetDegisti() {
+    sozlesmelerReelHibritBankaSenkron();
+}
+
+/** Reel hibrit üçlüsü → saklanan aylık KDV dahil (Aylık Kira satırı ile aynı: nakit + banka_net×(1+KDV%)). */
+function sozlesmelerReelHibritToStoredKdvDahil() {
+    function pv(id) {
+        return _sozlesmelerReelHibritParseEl(document.getElementById(id));
+    }
+    var toplam = pv('sozlesmeler-reel-hibrit-toplam');
+    var netNakit = pv('sozlesmeler-reel-hibrit-net');
+    var bankaNet = pv('sozlesmeler-reel-hibrit-banka');
+    if (isNaN(toplam) || isNaN(netNakit) || isNaN(bankaNet) || toplam <= 0 || netNakit < 0 || bankaNet < 0) return null;
+    var tol = Math.max(0.02, Math.abs(toplam) * 0.01 + 1e-9);
+    if (Math.abs((netNakit + bankaNet) - toplam) > tol) return null;
+    var kdvEl = document.getElementById('kdv_oran');
+    var kdv = kdvEl && kdvEl.value !== '' ? parseFloat(String(kdvEl.value).replace(',', '.')) : 20;
+    if (isNaN(kdv)) kdv = 20;
+    return Math.round((netNakit + bankaNet * (1 + kdv / 100)) * 100) / 100;
+}
+
+/** Kayıtlı KDV dahil tutarı, karttaki nakit/banka oranlarına bölünerek üç alana yazar (karma kira ile uyumlu). */
+function sozlesmelerReelHibritDoldurFromKdvDahil(kdvDahil) {
+    var elT = document.getElementById('sozlesmeler-reel-hibrit-toplam');
+    var elN = document.getElementById('sozlesmeler-reel-hibrit-net');
+    var elB = document.getElementById('sozlesmeler-reel-hibrit-banka');
+    if (!elT || !elN || !elB) return false;
+    var td = parseFloat(kdvDahil);
+    if (isNaN(td) || td <= 0) {
+        sozlesmelerReelHibritAlanlariTemizle();
+        return false;
+    }
+    var k = girisKiraKarmaPaylariOkuma();
+    if (!k.split) {
+        sozlesmelerReelHibritAlanlariTemizle();
+        return false;
+    }
+    var kdvEl = document.getElementById('kdv_oran');
+    var kdv = kdvEl && kdvEl.value !== '' ? parseFloat(String(kdvEl.value).replace(',', '.')) : 20;
+    if (isNaN(kdv)) kdv = 20;
+    var kdvM = 1 + kdv / 100;
+    var denom = k.rN + k.rB * kdvM;
+    if (!(denom > 0)) return false;
+    var base = td / denom;
+    var n = Math.round(base * k.rN * 100) / 100;
+    var b = Math.round(base * k.rB * 100) / 100;
+    elT.value = String(Math.round((n + b) * 100) / 100);
+    elN.value = String(n);
+    elB.value = String(b);
+    return true;
+}
+
 function sozlesmelerReelYilSecimineGoreTutarAlani() {
     var sel = document.getElementById('sozlesmeler-reel-yil-select');
     var wrap = document.getElementById('sozlesmeler-reel-tutar-wrap');
@@ -3582,6 +3823,7 @@ function sozlesmelerReelYilSecimineGoreTutarAlani() {
     if (!basStr) {
         wrap.classList.remove('is-visible');
         if (inp) inp.value = '';
+        sozlesmelerReelHibritAlanlariTemizle();
         return;
     }
     wrap.classList.add('is-visible');
@@ -3598,36 +3840,76 @@ function sozlesmelerReelYilSecimineGoreTutarAlani() {
     var t = map[y];
     if (t == null) t = map[String(yNum)];
     if (t == null || isNaN(parseFloat(t))) t = eff[yNum];
+    var tipEl = document.getElementById('sozlesmeler-reel-tutar-tip');
+    var tipv = tipEl && tipEl.value ? tipEl.value : 'dahil';
     if (inp) {
         if (t != null && !isNaN(parseFloat(t))) {
-            inp.value = String(parseFloat(t));
-            var tipEl = document.getElementById('sozlesmeler-reel-tutar-tip');
-            if (tipEl) tipEl.value = 'dahil';
-        } else inp.value = '';
+            var tv = parseFloat(t);
+            if (tipv === 'hibrit') {
+                if (!sozlesmelerReelHibritDoldurFromKdvDahil(tv)) {
+                    sozlesmelerReelHibritAlanlariTemizle();
+                }
+            } else {
+                inp.value = String(tv);
+            }
+        } else {
+            inp.value = '';
+            if (tipv === 'hibrit') sozlesmelerReelHibritAlanlariTemizle();
+        }
     }
     if (typeof sozlesmelerReelTutarTipPlaceholder === 'function') sozlesmelerReelTutarTipPlaceholder();
 }
 
-/** Reel tutar kutusu placeholder (KDV dahil / hariç / net). */
+/** Reel tutar: tek kutu vs hibrit üçlü görünümü + placeholder. */
 function sozlesmelerReelTutarTipPlaceholder() {
     var sel = document.getElementById('sozlesmeler-reel-tutar-tip');
     var inp = document.getElementById('sozlesmeler-reel-tutar');
-    if (!inp) return;
+    var tek = document.getElementById('sozlesmeler-reel-tutar-tek-wrap');
+    var hib = document.getElementById('sozlesmeler-reel-hibrit-wrap');
     var v = sel && sel.value ? sel.value : 'dahil';
+    if (tek && hib) {
+        if (v === 'hibrit') {
+            tek.style.display = 'none';
+            hib.style.display = 'flex';
+            hib.setAttribute('aria-hidden', 'false');
+        } else {
+            tek.style.display = '';
+            hib.style.display = 'none';
+            hib.setAttribute('aria-hidden', 'true');
+        }
+    }
+    if (!inp) return;
     if (v === 'haric') inp.placeholder = 'KDV hariç tutar';
     else if (v === 'net') inp.placeholder = 'Net tutar (aylık)';
     else inp.placeholder = 'KDV dahil tutar';
+    if (v === 'hibrit') {
+        var h1 = document.getElementById('sozlesmeler-reel-hibrit-toplam');
+        var h2 = document.getElementById('sozlesmeler-reel-hibrit-net');
+        var h3 = document.getElementById('sozlesmeler-reel-hibrit-banka');
+        if (h1) h1.placeholder = 'Nakit + banka (net)';
+        if (h2) h2.placeholder = 'Nakit (KDV yok)';
+        if (h3) h3.placeholder = 'Banka (net)';
+        /* Tek kutudaki KDV dahil değerini, kartta karma oran varsa üç alana böl */
+        if (h1 && !String(h1.value || '').trim() && inp && String(inp.value || '').trim()) {
+            var g = parseFloat(String(inp.value).replace(/\s/g, '').replace(',', '.').trim());
+            if (!isNaN(g) && g > 0) sozlesmelerReelHibritDoldurFromKdvDahil(g);
+        }
+    }
 }
 
 /**
  * Reel: kutuya yazılan tutarı dönem haritasında saklanacak aylık tutara çevirir.
  * — KDV dahil: aynen; KDV hariç: forma göre KDV eklenir (nakitte eklenmez); Net: aynen (borç satırı tutarı).
+ * — Hibrit: Toplam + Net tutar (nakit) + Banka (net); Toplam ≈ Net+Banka; saklanan = Net + Banka×(1+KDV%).
  */
 function sozlesmelerReelGirisToStoredTutar(rawStr) {
-    var t = parseFloat(String(rawStr || '').replace(',', '.').trim());
-    if (isNaN(t) || t < 0) return null;
     var tipEl = document.getElementById('sozlesmeler-reel-tutar-tip');
     var tip = tipEl && tipEl.value ? tipEl.value : 'dahil';
+    if (tip === 'hibrit') {
+        return sozlesmelerReelHibritToStoredKdvDahil();
+    }
+    var t = parseFloat(String(rawStr || '').replace(',', '.').trim());
+    if (isNaN(t) || t < 0) return null;
     t = Math.round(t * 100) / 100;
     if (tip === 'haric') {
         if (typeof kiraNakitMi === 'function' && kiraNakitMi()) return t;
@@ -3637,6 +3919,15 @@ function sozlesmelerReelGirisToStoredTutar(rawStr) {
         return Math.round(t * (1 + kdv / 100) * 100) / 100;
     }
     return t;
+}
+
+function sozlesmelerReelGirisStoredTutarUyari() {
+    var tipEl = document.getElementById('sozlesmeler-reel-tutar-tip');
+    var tip = tipEl && tipEl.value ? tipEl.value : 'dahil';
+    if (tip === 'hibrit') {
+        return 'Hibrit: Toplam tutar, Net tutar (nakit) ve Banka (net) girin. Toplam = Net + Banka olmalı (Aylık Kira satırındaki gibi).';
+    }
+    return 'Geçerli bir tutar girin.';
 }
 
 /** Ay anahtarı (örn. 2025-3) ile gridde tek kart bulur. */
@@ -3698,22 +3989,39 @@ function sozlesmelerReelDonemTutarlariUygula() {
     var effective = basStr ? sozlesmelerReelDonemEffectiveYillik(map, basStr, tufeListe) : {};
     var overrides = {};
     var yInts = Object.keys(effective).map(function (k) { return parseInt(k, 10); }).filter(function (x) { return !isNaN(x); }).sort(function (a, b) { return a - b; });
+    var normRef = document.getElementById('sozlesmeler-aylik-grid');
     for (var i = 0; i < yInts.length; i++) {
         var dy = yInts[i];
         var tutar = effective[dy];
         if (tutar == null || isNaN(tutar) || tutar < 0 || !basStr) continue;
         var keys = sozlesmeReelDonemAyKeys(basStr, dy);
-        for (var k = 0; k < keys.length; k++) overrides[keys[k]] = tutar;
+        if (!keys.length) continue;
+        /* 12 ay aynı tutar: kaynak effective (elle yıl + TÜFE zinciri). Norm grid henüz yenilenmediyse eski 67740 vb. kalır — effective’i norm ile EZME; norm yalnız effective yoksa yedek. */
+        var tutarRow = tutar;
+        if ((tutarRow == null || isNaN(tutarRow) || tutarRow <= 0) && normRef && keys[0]) {
+            var anKart = _sozlesmeAyKartBul(normRef, keys[0]);
+            if (anKart) {
+                var t0 = parseFloat(anKart.getAttribute('data-tutar-kdv'));
+                if (!isNaN(t0) && t0 > 0) tutarRow = Math.round(t0 * 100) / 100;
+            }
+        }
+        if (tutarRow == null || isNaN(tutarRow) || tutarRow <= 0) continue;
+        for (var k = 0; k < keys.length; k++) overrides[keys[k]] = tutarRow;
     }
-    grid.querySelectorAll('.sozlesmeler-ay-kart[data-ay-key]').forEach(function (card) {
-        var key = card.getAttribute('data-ay-key');
-        if (!key || overrides[key] == null) return;
-        var tutar = overrides[key];
-        card.setAttribute('data-tutar-kdv', String(tutar));
-        card.setAttribute('data-secilebilir', tutar > 0 ? '1' : '0');
-        var deg = card.querySelector('.aylik-deger');
-        if (deg) deg.textContent = tutar.toFixed(2);
-    });
+    function reelDonemOverridesKartaUygula(hedefGrid) {
+        if (!hedefGrid) return;
+        hedefGrid.querySelectorAll('.sozlesmeler-ay-kart[data-ay-key]').forEach(function (card) {
+            var key = card.getAttribute('data-ay-key');
+            if (!key || overrides[key] == null) return;
+            var tut = overrides[key];
+            card.setAttribute('data-tutar-kdv', String(tut));
+            card.setAttribute('data-secilebilir', tut > 0 ? '1' : '0');
+            var deg = card.querySelector('.aylik-deger');
+            if (deg) deg.textContent = tut.toFixed(2);
+        });
+    }
+    reelDonemOverridesKartaUygula(grid);
+    reelDonemOverridesKartaUygula(normRef);
     _sozlesmelerReelAyOzelTutarlariIkiGriddeUygula();
 }
 
@@ -3740,7 +4048,7 @@ function sozlesmelerReelSecilenlereTutarUygula() {
     var tutarStr = inp ? String(inp.value || '').replace(',', '.').trim() : '';
     var tutar = sozlesmelerReelGirisToStoredTutar(tutarStr);
     if (tutar == null) {
-        alert('Geçerli bir tutar girin (KDV dahil/hariç satırındaki kutuya).');
+        alert(typeof sozlesmelerReelGirisStoredTutarUyari === 'function' ? sozlesmelerReelGirisStoredTutarUyari() : 'Geçerli bir tutar girin.');
         return;
     }
     var reel = document.getElementById('sozlesmeler-reel-aylik-grid');
@@ -3782,7 +4090,7 @@ function sozlesmelerReelDonemTutarUygula() {
     var tutarStr = inp ? String(inp.value || '').replace(',', '.').trim() : '';
     var tutar = sozlesmelerReelGirisToStoredTutar(tutarStr);
     if (tutar == null) {
-        alert('Geçerli bir tutar girin.');
+        alert(typeof sozlesmelerReelGirisStoredTutarUyari === 'function' ? sozlesmelerReelGirisStoredTutarUyari() : 'Geçerli bir tutar girin.');
         return;
     }
     window.__musteriReelDonemTutarlari = window.__musteriReelDonemTutarlari || {};
@@ -3827,7 +4135,7 @@ function sozlesmelerReelDonemTutarKaydet() {
     var tutarStr = inp ? String(inp.value || '').replace(',', '.').trim() : '';
     var tutar = sozlesmelerReelGirisToStoredTutar(tutarStr);
     if (tutar == null) {
-        alert('Geçerli bir tutar girin.');
+        alert(typeof sozlesmelerReelGirisStoredTutarUyari === 'function' ? sozlesmelerReelGirisStoredTutarUyari() : 'Geçerli bir tutar girin.');
         return;
     }
     reelKaydetDurumTemizle();
@@ -3958,7 +4266,9 @@ function sozlesmelerAylikYilFiltreSonUcYilAyarla(yillarSorted) {
         window.__sozlesmelerAylikYilFiltre = { hepsi: true, yillar: [] };
         return;
     }
-    window.__sozlesmelerAylikYilFiltre = { hepsi: false, yillar: yillarSorted.slice(-3) };
+    // Varsayılan görünümde sözleşme başlangıç dönemini gizlememek için tüm yılları açık getir.
+    // Kullanıcı isterse panelden tekil yıl/çoklu yıl filtresi uygulayabilir.
+    window.__sozlesmelerAylikYilFiltre = { hepsi: true, yillar: [] };
 }
 
 function sozlesmelerAylikYilFiltreImzaKontrol(sig, yList) {
@@ -4095,12 +4405,14 @@ function sozlesmelerAylikCacheRender(cacheObj, preferLiveTahsil) {
         var ayAdiTam = SOZLESME_AY_ADLARI[ay - 1] || '';
         var ayAdi = ayAdiTam ? ayAdiTam.substring(0, 7) : '';
         var ayKey = String(a.ay_key || (yil + '-' + ay));
+        var ayKeyNorm = sozlesmeAylikAyKeyNormalize(ayKey);
         var t = parseFloat(a.tutar_kdv_dahil);
         var secilebilir = !isNaN(t) && t > 0;
         var tutarStr = secilebilir ? t.toFixed(2) : '—';
+        var borcG = (typeof selectedId !== 'undefined' && selectedId && sozlesmeAylikBorclananMid === parseInt(selectedId, 10) && sozlesmeAylikBorclananAyAnahtarlari.has(ayKeyNorm));
         var odendi = preferLiveTahsil
-            ? sozlesmeTahsilEdilenAyAnahtarlari.has(ayKey)
-            : !!a.tahsil_edildi;
+            ? (sozlesmeTahsilEdilenAyAnahtarlari.has(ayKeyNorm) || borcG)
+            : (!!a.tahsil_edildi || borcG);
         var colorClass = odendi ? ' sozlesmeler-ay-kart-odendi' : ' sozlesmeler-ay-kart-odenmedi';
         var selClass = sozlesmeAylikSeciliAnahtarlar.has(ayKey) ? ' sozlesmeler-ay-kart-secili' : '';
         html += '<div class="sozlesmeler-ay-kart' + colorClass + selClass + '" data-ay-key="' + ayKey + '" data-secilebilir="' + (secilebilir ? '1' : '0') + '" data-yil="' + yil + '" data-ay="' + ay + '" data-tutar-kdv="' + (secilebilir ? String(t) : '') + '"><h3>' + ayAdi + '</h3><div class="sozlesmeler-ay-yil">' + yil + '</div><div class="aylik-deger">' + tutarStr + '</div></div>';
@@ -4123,20 +4435,22 @@ function sozlesmelerAylikHizliYukle(force) {
     if (!selectedId) return Promise.resolve(false);
     if (!document.getElementById('sozlesmeler-aylik-grid')) return Promise.resolve(false);
     var mid = selectedId;
+    sozlesmeAylikBorclananMusteriDegistir(mid);
     var q = '/giris/api/aylik-grid-cache?musteri_id=' + encodeURIComponent(mid);
     if (force) q += '&force=1';
     var pCache = fetch(q).then(function (r) { return r.json(); });
     if (force) {
         return Promise.all([
+            sozlesmeTahsilDurumunuYukle(),
             pCache,
             fetch('/giris/api/reel-donem-tutarlar?musteri_id=' + encodeURIComponent(mid)).then(function (r) { return r.json(); })
-        ]).then(function (pair) {
-            var j = pair[0];
-            var rj = pair[1];
+        ]).then(function (triple) {
+            var j = triple[1];
+            var rj = triple[2];
             window.__musteriReelDonemTutarlari = (rj && rj.ok && rj.map && typeof rj.map === 'object') ? rj.map : {};
             if (!j || !j.ok || !j.cache) return false;
             if (!sozlesmelerAylikOnbellekFormlaUyumlu(j.cache)) return false;
-            var ok = sozlesmelerAylikCacheRender(j.cache, false);
+            var ok = sozlesmelerAylikCacheRender(j.cache, true);
             sozlesmelerReelYilSecimineGoreTutarAlani();
             return ok;
         }).catch(function () { return false; });
@@ -7304,6 +7618,46 @@ function sozlesmelerYillikKdvDahilMapSec(baslangicNet, baslangicYil, maxYearNeed
     );
 }
 
+/**
+ * Reel efektif yıllar: API’de hedef yıl Mart oranı yoksa TÜFE çarpanı 1 kalıyordu.
+ * Aylık Kira satırıyla aynı yilMap üzerinden yy / (yy-1) oranını uygula (2025 elle 75500 → 2026 = 75500 × yilMap[2026]/yilMap[2025]).
+ */
+function sozlesmelerReelDonemYilmapOraniDuzelt(out, basStr, yStart, yEnd, tufeListe, manualMap) {
+    if (!out || !tufeListe || typeof sozlesmelerYillikKdvDahilMapSec !== 'function') return;
+    var kiraEl = document.getElementById('aylik_kira');
+    var aylikKira = kiraEl && kiraEl.value ? parseFloat(String(kiraEl.value).replace(/\s/g, '').replace(',', '.')) : 0;
+    if (isNaN(aylikKira) || aylikKira <= 0) return;
+    var bas = parseTarihStr(basStr) || new Date(basStr);
+    if (isNaN(bas.getTime())) return;
+    var kdvEl = document.getElementById('kdv_oran');
+    var kdvOran = (kdvEl && kdvEl.value !== '') ? parseFloat(String(kdvEl.value).replace(',', '.')) : 20;
+    if (isNaN(kdvOran)) kdvOran = 20;
+    var nakit = typeof kiraNakitMi === 'function' ? kiraNakitMi() : false;
+    var baslangicYil = bas.getFullYear();
+    var sozlesmeAyAdiGrid = sozlesmelerReelArtisAyAdi(basStr);
+    var yilMap = sozlesmelerYillikKdvDahilMapSec(aylikKira, baslangicYil, yEnd, tufeListe, sozlesmeAyAdiGrid, kdvOran, nakit);
+    for (var yy = yStart + 1; yy <= yEnd; yy++) {
+        if (out[yy - 1] == null || out[yy] == null) continue;
+        var prevN = parseFloat(out[yy - 1]);
+        var curN = parseFloat(out[yy]);
+        if (isNaN(prevN) || prevN <= 0 || isNaN(curN)) continue;
+        var msY = manualMap[String(yy)];
+        if (msY == null) msY = manualMap[yy];
+        if (msY != null && String(msY).trim() !== '' && !isNaN(parseFloat(msY)) && parseFloat(msY) >= 0) {
+            var msYn = Math.round(parseFloat(msY) * 100) / 100;
+            var prevR = Math.round(prevN * 100) / 100;
+            if (!(msYn < prevR * 0.995)) continue;
+        }
+        if (curN > prevN * 1.001) continue;
+        var Ym = yilMap[yy];
+        var Ym1 = yilMap[yy - 1];
+        if (Ym == null || Ym1 == null || !(Ym1 > 0)) continue;
+        var ratio = Ym / Ym1;
+        if (!isFinite(ratio) || ratio <= 0) continue;
+        out[yy] = Math.round(prevN * ratio * 100) / 100;
+    }
+}
+
 /** Aylık grid: i. ayın hangi projeksiyon satırına (2022, 2023…) denk geldiği — 12 aylık kira dönemi. */
 function sozlesmelerProjeksiyonYil(baslangicYil, ayIndeksi) {
     return baslangicYil + Math.floor(ayIndeksi / 12);
@@ -7588,7 +7942,9 @@ function sozlesmelerAylikGuncelle() {
             }
             var extraClass = '';
             var ayKey = yil + '-' + ayNum;
-            var ayTahsilEdildi = sozlesmeTahsilEdilenAyAnahtarlari.has(ayKey);
+            var ayKeyNorm = sozlesmeAylikAyKeyNormalize(ayKey);
+            var borcG = (typeof selectedId !== 'undefined' && selectedId && sozlesmeAylikBorclananMid === parseInt(selectedId, 10) && sozlesmeAylikBorclananAyAnahtarlari.has(ayKeyNorm));
+            var ayTahsilEdildi = sozlesmeTahsilEdilenAyAnahtarlari.has(ayKeyNorm) || borcG;
             if (ayTahsilEdildi) {
                 extraClass = ' sozlesmeler-ay-kart-odendi';
             } else {
@@ -7835,8 +8191,18 @@ function sozlesmeAylikBorclandir() {
         var o = res.j.olusturulan || [];
         var a = res.j.atlanan || [];
         var msg = (res.j.mesaj || '') + '\nOluşturulan: ' + o.length + ', atlanan: ' + a.length;
+        if (o.length) {
+            sozlesmeAylikBorclananMid = parseInt(String(mid), 10);
+            o.forEach(function (row) {
+                var k = sozlesmeAylikAyKeyFromYilAy(row.yil, row.ay);
+                if (k) sozlesmeAylikBorclananAyAnahtarlari.add(k);
+            });
+        }
         alert(msg);
         sozlesmeAylikSecimiTemizle();
+        if (window.__sozlesmelerAylikSonCacheObj && typeof sozlesmelerAylikOnbellekFormlaUyumlu === 'function' && sozlesmelerAylikOnbellekFormlaUyumlu(window.__sozlesmelerAylikSonCacheObj)) {
+            sozlesmelerAylikCacheRender(window.__sozlesmelerAylikSonCacheObj, true);
+        }
         sozlesmeTahsilDurumunuYukle().then(function() {
             return sozlesmelerAylikHizliYukle(true);
         }).then(function(ok) {
@@ -7916,8 +8282,15 @@ function sozlesmeAylikTahsilEt() {
         var o = res.j.olusturulan || [];
         var a = res.j.atlanan || [];
         var msg = (res.j.mesaj || '') + '\nOluşturulan: ' + o.length + ', atlanan: ' + a.length;
+        o.forEach(function (row) {
+            var k = sozlesmeAylikAyKeyFromYilAy(row.yil, row.ay);
+            if (k) sozlesmeTahsilEdilenAyAnahtarlari.add(k);
+        });
         alert(msg);
         sozlesmeAylikSecimiTemizle();
+        if (window.__sozlesmelerAylikSonCacheObj && typeof sozlesmelerAylikOnbellekFormlaUyumlu === 'function' && sozlesmelerAylikOnbellekFormlaUyumlu(window.__sozlesmelerAylikSonCacheObj)) {
+            sozlesmelerAylikCacheRender(window.__sozlesmelerAylikSonCacheObj, true);
+        }
         sozlesmelerAylikHizliYukle(true).then(function(ok) {
             if (!ok) sozlesmelerAylikGuncelle();
         });
@@ -8003,6 +8376,13 @@ function sozlesmeAylikTahsildenCikar() {
         var a = res.j.atlanan || [];
         alert((res.j.mesaj || '') + '\nSilinen: ' + s.length + ', kayıt yok: ' + a.length);
         sozlesmeAylikSecimiTemizle();
+        s.forEach(function (r) {
+            var k = sozlesmeAylikAyKeyFromYilAy(r.yil, r.ay);
+            if (k) sozlesmeTahsilEdilenAyAnahtarlari.delete(k);
+        });
+        if (window.__sozlesmelerAylikSonCacheObj && typeof sozlesmelerAylikOnbellekFormlaUyumlu === 'function' && sozlesmelerAylikOnbellekFormlaUyumlu(window.__sozlesmelerAylikSonCacheObj)) {
+            sozlesmelerAylikCacheRender(window.__sozlesmelerAylikSonCacheObj, true);
+        }
         sozlesmeTahsilDurumunuYukle().then(function () {
             return sozlesmelerAylikHizliYukle(true);
         }).then(function (ok) {
@@ -8053,6 +8433,13 @@ function sozlesmeAylikBorctanCikar() {
         var a = res.j.atlanan || [];
         alert((res.j.mesaj || '') + '\nSilinen fatura: ' + s.length + ', kayıt yok: ' + a.length);
         sozlesmeAylikSecimiTemizle();
+        s.forEach(function (r) {
+            var k = sozlesmeAylikAyKeyFromYilAy(r.yil, r.ay);
+            if (k) sozlesmeAylikBorclananAyAnahtarlari.delete(k);
+        });
+        if (window.__sozlesmelerAylikSonCacheObj && typeof sozlesmelerAylikOnbellekFormlaUyumlu === 'function' && sozlesmelerAylikOnbellekFormlaUyumlu(window.__sozlesmelerAylikSonCacheObj)) {
+            sozlesmelerAylikCacheRender(window.__sozlesmelerAylikSonCacheObj, true);
+        }
         sozlesmeTahsilDurumunuYukle().then(function () {
             return sozlesmelerAylikHizliYukle(true);
         }).then(function (ok) {
@@ -8726,14 +9113,16 @@ async function musteriAra() {
     
     try {
         const response = await girisFetchAgKopmasinaKarsi(`/giris/api/musteriler?q=${encodeURIComponent(arama)}`, { credentials: 'same-origin' }, 2);
-        musteriler = await response.json();
-        
+        const data = await girisFetchJsonSafely(response);
+        if (!Array.isArray(data)) {
+            throw new Error('Beklenmeyen sunucu yanıtı.');
+        }
+        musteriler = data;
         liste.style.display = 'block';
         if (musteriler.length === 0) {
             liste.innerHTML = '<div style="padding: 20px; text-align: center; color: #6b7280; font-size: 12px;">Müşteri bulunamadı</div>';
             return;
         }
-        
         liste.innerHTML = musteriler.map(m => `
             <div class="musteri-item" data-id="${m.id}" onclick="selectMusteri(${m.id})">
                 <div class="name">${m.name}</div>
@@ -8741,9 +9130,10 @@ async function musteriAra() {
                 <div class="vergi">${m.tax_number || 'Vergi no yok'}</div>
             </div>
         `).join('');
-        
     } catch (error) {
-        console.error('Hata:', error);
+        liste.style.display = 'block';
+        liste.innerHTML = '<div style="padding: 20px; text-align: center; color: #f44336; font-size: 12px;">' +
+            String((error && error.message) ? error.message : 'Arama yapılamadı.').replace(/</g, '&lt;') + '</div>';
     }
 }
 
@@ -9592,6 +9982,7 @@ function selectMusteri(id) {
             fetch('/giris/api/reel-donem-tutarlar?musteri_id=' + encodeURIComponent(midNav)).then(function (r) { return r.json(); })
         ]).then(function (all) {
             girisSonMusteriDetayHafifYukleme = false;
+            sozlesmeAylikBorclananMusteriDegistir(midNav);
             var res = all[0];
             var tj = all[1];
             var cj = all[2];
@@ -9816,8 +10207,7 @@ function sirketUnvaniAutocomplete() {
         var qNow = (input.value || '').trim();
         girisFetchAgKopmasinaKarsi('/giris/api/musteriler?q=' + encodeURIComponent(qNow), { credentials: 'same-origin', signal: sirketUnvaniAutocompleteAbort.signal }, 2)
             .then(function(r) {
-                if (!r.ok) throw new Error('HTTP ' + r.status);
-                return r.json();
+                return girisFetchJsonSafely(r);
             })
             .then(function(list) {
                 if ((input.value || '').trim() !== qNow) return;
@@ -9878,8 +10268,7 @@ function musteriAdiAutocomplete() {
         var qNow = (input.value || '').trim();
         girisFetchAgKopmasinaKarsi('/giris/api/musteriler?q=' + encodeURIComponent(qNow), { credentials: 'same-origin', signal: musteriAdiAutocompleteAbort.signal }, 2)
             .then(function (r) {
-                if (!r.ok) throw new Error('HTTP ' + r.status);
-                return r.json();
+                return girisFetchJsonSafely(r);
             })
             .then(function (list) {
                 if ((input.value || '').trim() !== qNow) return;
@@ -10983,8 +11372,8 @@ function senaryoMusteriListeGetir(q) {
     const url = q ? `/giris/api/musteriler?q=${encodeURIComponent(q)}` : '/giris/api/musteriler';
     list.style.display = 'block';
     list.innerHTML = '<div style="padding:8px;color:#90a4ae;font-size:11px;">Yükleniyor...</div>';
-    fetch(url)
-        .then(r => r.json())
+    fetch(url, { credentials: 'same-origin' })
+        .then(function (r) { return girisFetchJsonSafely(r); })
         .then(arr => {
             if (!arr.length) {
                 list.innerHTML = '<div style="padding:8px;color:#90a4ae;">Müşteri bulunamadı</div>';
@@ -12590,8 +12979,8 @@ function bildirgeMusteriListeToggle() {
     if (el.style.display === 'none') {
         el.style.display = 'block';
         el.innerHTML = '<div style="padding:8px;color:#90a4ae;font-size:11px;">Yükleniyor...</div>';
-        fetch('/giris/api/musteriler')
-            .then(r => r.json())
+        fetch('/giris/api/musteriler', { credentials: 'same-origin' })
+            .then(function (r) { return girisFetchJsonSafely(r); })
             .then(arr => {
                 if (!arr.length) {
                     el.innerHTML = '<div style="padding:8px;color:#90a4ae;">Müşteri bulunamadı.</div>';

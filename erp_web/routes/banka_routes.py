@@ -3,7 +3,7 @@ Bankalar: hesap dökümü, ekstre yükleme, tahsilat eşleştirme, masraf takibi
 """
 from flask import Blueprint, render_template, request, jsonify, redirect, url_for
 from auth import giris_gerekli, admin_gerekli
-from db import fetch_all, fetch_one, execute, execute_returning, db
+from db import fetch_all, fetch_one, execute, execute_returning, db, ensure_banka_hesaplar_columns
 from services.banka_ak_import import (
     akbank_sender_key,
     dataframe_hareket_satirlari,
@@ -28,6 +28,50 @@ from datetime import datetime, date
 bp = Blueprint("banka", __name__)
 
 
+def _normalize_tahsilat_bank_type(raw: object) -> str:
+    """Tahsilat import API: AKBANK (varsayılan) veya TURKIYE_FINANS."""
+    t = str(raw or "").strip()
+    if not t:
+        return "AKBANK"
+    u = t.upper().replace("İ", "I").replace("ı", "I")
+    if u in ("TURKIYE_FINANS", "TF", "TURKIYE FINANS", "TÜRKİYE FİNANS"):
+        return "TURKIYE_FINANS"
+    if "FINANS" in u and "TURKIYE" in u.replace(" ", ""):
+        return "TURKIYE_FINANS"
+    return "AKBANK"
+
+
+def _request_bank_type_tahsilat() -> str:
+    """multipart + bazı proxy'lerde form alanı düşebilir; query string yedek."""
+    return _normalize_tahsilat_bank_type(
+        request.form.get("bank_type") or request.args.get("bank_type")
+    )
+
+
+def _infer_tahsilat_bank_type_from_filename(fname: object) -> str | None:
+    """Orijinal dosya adından TF ekstresi sezgisel tespit (kayıtlı analiz + yanlış dropdown)."""
+    s = str(fname or "").strip()
+    if not s:
+        return None
+    u = s.upper().replace("İ", "I")
+    if "TURKIYE" in u and "FINANS" in u:
+        return "TURKIYE_FINANS"
+    if "TF_" in u or u.startswith("TF ") or u.startswith("TF."):
+        return "TURKIYE_FINANS"
+    return None
+
+
+def _effective_tahsilat_bank_type(request_bt: str, fname: object) -> str:
+    """İstek AKBANK olsa bile dosya adı TF ise Türkiye Finans okuyucusu kullanılır."""
+    req = _normalize_tahsilat_bank_type(request_bt)
+    if req == "TURKIYE_FINANS":
+        return "TURKIYE_FINANS"
+    hit = _infer_tahsilat_bank_type_from_filename(fname)
+    if hit:
+        return hit
+    return req
+
+
 def _parse_date(s):
     if not s:
         return None
@@ -42,7 +86,17 @@ def _parse_date(s):
 @bp.route("/")
 @giris_gerekli
 def index():
-    return render_template("bankalar/index.html")
+    ensure_banka_hesaplar_columns()
+    bankalar = fetch_all(
+        """
+        SELECT id, banka_adi, COALESCE(hesap_adi, banka_adi) AS hesap_adi,
+               hesap_no, iban, sube, bakiye, is_active
+        FROM banka_hesaplar
+        WHERE is_active = TRUE
+        ORDER BY banka_adi, id
+        """
+    )
+    return render_template("bankalar/index.html", bankalar=bankalar or [])
 
 
 @bp.route("/yeni")
@@ -56,6 +110,7 @@ def yeni():
 @giris_gerekli
 def api_hesaplar():
     """Aktif banka hesapları listesi (dropdown için)."""
+    ensure_banka_hesaplar_columns()
     rows = fetch_all(
         "SELECT id, banka_adi, COALESCE(hesap_adi, banka_adi) as hesap_adi, hesap_no FROM banka_hesaplar WHERE is_active = TRUE ORDER BY banka_adi"
     )
@@ -277,6 +332,67 @@ def api_ekstre_yukle():
             )
             eklenen += 1
         return jsonify({"ok": True, "eklenen": eklenen})
+    except Exception as e:
+        return jsonify({"ok": False, "mesaj": str(e)}), 400
+
+
+@bp.route("/api/ekstre-processor-yukle", methods=["POST"])
+@giris_gerekli
+def api_ekstre_processor_yukle():
+    """
+    Akbank / Türkiye Finans Excel ekstresi → bank_processor → banka_hareketleri (mükerrer referans atlanır).
+    Form: banka_hesap_id, bank_type (AKBANK | TURKIYE_FINANS), file (.xlsx)
+    """
+    from services.bank_processor import bulk_upsert_banka_hareketleri, upload_bank_excel
+
+    try:
+        f = request.files.get("file")
+        if not f or not (f.filename or "").strip():
+            return jsonify({"ok": False, "mesaj": "Dosya seçin"}), 400
+        if not (f.filename or "").lower().endswith(".xlsx"):
+            return jsonify({"ok": False, "mesaj": "Yalnızca .xlsx dosyası yükleyin"}), 400
+
+        raw_hesap = request.form.get("banka_hesap_id")
+        if not raw_hesap:
+            return jsonify({"ok": False, "mesaj": "Banka hesabı seçin"}), 400
+        try:
+            banka_hesap_id = int(raw_hesap)
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "mesaj": "Geçersiz banka hesabı"}), 400
+
+        bank_type = (request.form.get("bank_type") or "").strip()
+        if not bank_type:
+            return jsonify({"ok": False, "mesaj": "Banka türünü seçin"}), 400
+
+        hesap = fetch_one(
+            "SELECT id FROM banka_hesaplar WHERE id = %s AND is_active = TRUE",
+            (banka_hesap_id,),
+        )
+        if not hesap:
+            return jsonify({"ok": False, "mesaj": "Banka hesabı bulunamadı veya pasif"}), 400
+
+        data = f.read()
+        if not data:
+            return jsonify({"ok": False, "mesaj": "Dosya boş"}), 400
+
+        txs = upload_bank_excel(data, bank_type)
+        if not txs:
+            return jsonify({"ok": False, "mesaj": "Dosyadan işlem satırı okunamadı"}), 400
+
+        ozet = bulk_upsert_banka_hareketleri(txs, banka_hesap_id)
+        eklenen = int(ozet.get("eklenen") or 0)
+        atlanan = int(ozet.get("atlanan") or 0)
+        toplam = int(ozet.get("toplam") or 0)
+
+        mesaj = f"{eklenen} yeni hareket başarıyla eklendi."
+        if atlanan > 0:
+            mesaj += f" {atlanan} satır aynı dekont/referans numarası zaten veritabanında olduğu için atlandı."
+        if eklenen == 0 and toplam > 0:
+            mesaj = f"Yeni satır eklenmedi; {atlanan} satırın tamamı zaten kayıtlı referanslara sahip."
+
+        return jsonify({"ok": True, "mesaj": mesaj, **ozet})
+    except ValueError as e:
+        return jsonify({"ok": False, "mesaj": str(e)}), 400
     except Exception as e:
         return jsonify({"ok": False, "mesaj": str(e)}), 400
 
@@ -557,6 +673,12 @@ def _ensure_akbank_import_dosyalar():
         )
     except Exception:
         pass
+    try:
+        execute(
+            "CREATE INDEX IF NOT EXISTS ix_akbank_import_excel_binary_hash ON akbank_import_dosyalar USING hash (excel_binary)"
+        )
+    except Exception:
+        pass
 
 
 def _akbank_allocate_ad_gosterim(d: date | None = None) -> str:
@@ -708,9 +830,10 @@ def _ensure_akbank_dekont_musteri_map():
 
 
 @bp.route("/akbank-tahsilat-import", strict_slashes=False)
+@bp.route("/tahsilat-import", strict_slashes=False)
 @giris_gerekli
 def akbank_tahsilat_import_sayfa():
-    """Akbank Excel → önizleme, müşteri eşleştirme, onaylı tahsilat kaydı."""
+    """Akbank / Türkiye Finans Excel → önizleme, müşteri eşleştirme, onaylı tahsilat kaydı."""
     return render_template("bankalar/akbank_tahsilat_import.html")
 
 
@@ -732,17 +855,29 @@ def _iso_or_str(v):
 @giris_gerekli
 def api_akbank_tahsilat_analyze():
     """Yeni Excel yükle: dosyayı ERP'ye kaydet + önizleme (cariye işlenmiş fişler listelenmez)."""
+    from services.bank_processor import standard_transactions_to_tahsilat_ham, upload_bank_excel
+
     f = request.files.get("file")
     if not f or not getattr(f, "filename", ""):
         return jsonify({"ok": False, "mesaj": "Excel dosyası seçin (.xlsx)."}), 400
-    if not str(f.filename).lower().endswith((".xlsx", ".xls")):
+    bank_type_req = _request_bank_type_tahsilat()
+    bank_type = _effective_tahsilat_bank_type(bank_type_req, getattr(f, "filename", None))
+    fn = str(f.filename).lower()
+    if bank_type == "TURKIYE_FINANS":
+        if not fn.endswith(".xlsx"):
+            return jsonify({"ok": False, "mesaj": "Türkiye Finans için yalnızca .xlsx desteklenir."}), 400
+    elif not fn.endswith((".xlsx", ".xls")):
         return jsonify({"ok": False, "mesaj": "Yalnızca .xlsx / .xls desteklenir."}), 400
     raw = f.read()
     if len(raw) > _AKBANK_IMPORT_MAX_BYTES:
         return jsonify({"ok": False, "mesaj": "Dosya çok büyük (en fazla 20 MB)."}), 400
     try:
-        df = read_akbank_excel(raw)
-        ham, ozet = dataframe_hareket_satirlari(df)
+        if bank_type == "TURKIYE_FINANS":
+            txs = upload_bank_excel(raw, bank_type)
+            ham, ozet = standard_transactions_to_tahsilat_ham(txs)
+        else:
+            df = read_akbank_excel(raw)
+            ham, ozet = dataframe_hareket_satirlari(df)
     except ValueError as e:
         return jsonify({"ok": False, "mesaj": str(e)}), 400
     except Exception as e:
@@ -752,30 +887,45 @@ def api_akbank_tahsilat_analyze():
     _ensure_akbank_import_dosyalar()
     _ensure_akbank_dekont_musteri_map()
 
-    ad = _akbank_allocate_ad_gosterim()
     fname = (getattr(f, "filename", None) or "")[:500]
-    try:
-        ins = execute_returning(
-            """
-            INSERT INTO akbank_import_dosyalar (ad_gosterim, orijinal_filename, excel_binary)
-            VALUES (%s, %s, %s)
-            RETURNING id, ad_gosterim, yuklenme_tarihi
-            """,
-            (ad, fname or None, raw),
-        )
-    except Exception as e:
-        return jsonify({"ok": False, "mesaj": f"Dosya kaydedilemedi: {e}"}), 400
-
-    if not ins:
-        return jsonify({"ok": False, "mesaj": "Dosya kaydı dönmedi."}), 400
+    dup = fetch_one(
+        """
+        SELECT id, ad_gosterim, yuklenme_tarihi, orijinal_filename
+        FROM akbank_import_dosyalar
+        WHERE excel_binary = %s
+        ORDER BY id ASC
+        LIMIT 1
+        """,
+        (raw,),
+    )
+    zaten = bool(dup)
+    if dup:
+        ins = dict(dup)
+    else:
+        ad = _akbank_allocate_ad_gosterim()
+        try:
+            ins = execute_returning(
+                """
+                INSERT INTO akbank_import_dosyalar (ad_gosterim, orijinal_filename, excel_binary)
+                VALUES (%s, %s, %s)
+                RETURNING id, ad_gosterim, yuklenme_tarihi
+                """,
+                (ad, fname or None, raw),
+            )
+        except Exception as e:
+            return jsonify({"ok": False, "mesaj": f"Dosya kaydedilemedi: {e}"}), 400
+        if not ins:
+            return jsonify({"ok": False, "mesaj": "Dosya kaydı dönmedi."}), 400
 
     kayit = {
         "id": ins["id"],
         "ad_gosterim": ins["ad_gosterim"],
         "yuklenme_tarihi": _iso_or_str(ins.get("yuklenme_tarihi")),
-        "orijinal_filename": fname,
+        "orijinal_filename": (ins.get("orijinal_filename") or fname or "").strip() or fname,
     }
     out = _json_akbank_analyze_ham(ham, ozet, kayit)
+    if zaten:
+        out["dosya_zaten_kayitli"] = True
     return jsonify(out)
 
 
@@ -805,7 +955,10 @@ def api_akbank_tahsilat_dosyalar():
 @giris_gerekli
 def api_akbank_tahsilat_analyze_kayitli():
     """Bir veya birden fazla kayıtlı dosyayı aç; içerik birleştirilir (aynı fiş no tekil)."""
+    from services.bank_processor import standard_transactions_to_tahsilat_ham, upload_bank_excel
+
     data = request.get_json(silent=True) or {}
+    bank_type = _normalize_tahsilat_bank_type(data.get("bank_type") or request.args.get("bank_type"))
     ids = data.get("file_ids")
     if not isinstance(ids, list) or not ids:
         return jsonify({"ok": False, "mesaj": "En az bir kayıtlı dosya seçin."}), 400
@@ -821,7 +974,7 @@ def api_akbank_tahsilat_analyze_kayitli():
 
     _ensure_akbank_import_dosyalar()
     rows = fetch_all(
-        "SELECT id, ad_gosterim, excel_binary FROM akbank_import_dosyalar WHERE id IN %s",
+        "SELECT id, ad_gosterim, orijinal_filename, excel_binary FROM akbank_import_dosyalar WHERE id IN %s",
         (tuple(clean_ids),),
     ) or []
     found = {int(r["id"]): r for r in rows}
@@ -834,9 +987,14 @@ def api_akbank_tahsilat_analyze_kayitli():
     for fid in clean_ids:
         row = found[fid]
         raw = _bytea_to_bytes(row.get("excel_binary"))
+        eff = _effective_tahsilat_bank_type(bank_type, row.get("orijinal_filename"))
         try:
-            df = read_akbank_excel(raw)
-            ham, ozet = dataframe_hareket_satirlari(df)
+            if eff == "TURKIYE_FINANS":
+                txs = upload_bank_excel(raw, eff)
+                ham, ozet = standard_transactions_to_tahsilat_ham(txs)
+            else:
+                df = read_akbank_excel(raw)
+                ham, ozet = dataframe_hareket_satirlari(df)
         except Exception as e:
             return jsonify({"ok": False, "mesaj": f"Dosya okunamadı ({row.get('ad_gosterim')}): {e}"}), 400
         hams.append(ham)

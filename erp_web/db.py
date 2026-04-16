@@ -1313,6 +1313,60 @@ def ensure_tahsilatlar_columns():
         print(f"tahsilatlar.banka_referans_no: {e}")
 
 
+def ensure_banka_hesaplar_columns():
+    """Eski Supabase / migrate şemalarında eksik olabilen banka_hesaplar sütunları (ör. sube)."""
+    for stmt in (
+        "ALTER TABLE banka_hesaplar ADD COLUMN IF NOT EXISTS hesap_adi TEXT",
+        "ALTER TABLE banka_hesaplar ADD COLUMN IF NOT EXISTS hesap_no TEXT",
+        "ALTER TABLE banka_hesaplar ADD COLUMN IF NOT EXISTS iban TEXT",
+        "ALTER TABLE banka_hesaplar ADD COLUMN IF NOT EXISTS sube TEXT",
+    ):
+        try:
+            execute(stmt)
+        except Exception as e:
+            print(f"banka_hesaplar şema: {e}")
+
+
+def ensure_banka_hareketleri_import_columns():
+    """
+    banka_hareketleri: ekstre import (referans, bakiye, kaynak banka) + mükerrer dekont/referans koruması.
+
+    Dolu `referans_no` değerleri tablo genelinde benzersizdir (kısmi UNIQUE indeks).
+    Boş veya yalnızca boşluk olan referanslar indekse dahil değildir; tekrar yüklemede yine eklenebilirler.
+    Eski (banka_hesap_id, referans_no) indeksi varsa kaldırılıp yerine global referans indeksi konur.
+    """
+    try:
+        execute("ALTER TABLE banka_hareketleri ADD COLUMN IF NOT EXISTS referans_no TEXT")
+    except Exception as e:
+        print(f"banka_hareketleri.referans_no: {e}")
+    try:
+        execute("ALTER TABLE banka_hareketleri ADD COLUMN IF NOT EXISTS bakiye_ekstre NUMERIC(14,2)")
+    except Exception as e:
+        print(f"banka_hareketleri.bakiye_ekstre: {e}")
+    try:
+        execute("ALTER TABLE banka_hareketleri ADD COLUMN IF NOT EXISTS kaynak_banka_adi TEXT")
+    except Exception as e:
+        print(f"banka_hareketleri.kaynak_banka_adi: {e}")
+    try:
+        execute("DROP INDEX IF EXISTS banka_hareketleri_hesap_referans_uidx")
+    except Exception as e:
+        print(f"banka_hareketleri DROP hesap_referans_uidx: {e}")
+    try:
+        execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS banka_hareketleri_referans_no_uidx
+            ON banka_hareketleri (referans_no)
+            WHERE referans_no IS NOT NULL AND btrim(referans_no) <> ''
+            """
+        )
+    except Exception as e:
+        print(
+            "banka_hareketleri_referans_no_uidx: "
+            f"{e} "
+            "(Aynı referans_no ile birden fazla satır varsa önce mükerrerleri temizleyin.)"
+        )
+
+
 def ensure_kargolar_durum():
     """kargolar tablosuna durum sütunu ekle (beklemede / teslim_alindi)."""
     try:

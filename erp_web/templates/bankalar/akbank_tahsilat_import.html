@@ -1,6 +1,6 @@
 {% extends "layout.html" %}
 
-{% block page_title %}Akbank Tahsilat Önizleme{% endblock %}
+{% block page_title %}Banka tahsilat önizleme{% endblock %}
 
 {% block content %}
 <style>
@@ -200,22 +200,28 @@ td.ak-td-sira {
 
 <div class="ak-wrap">
     <div class="ak-head">
-        <h2>Akbank Excel — Önizleme ve Onay</h2>
+        <h2>Banka Excel — Önizleme ve onay</h2>
         <div class="ak-toolbar">
+            <label class="muted" style="display:flex;flex-direction:column;gap:4px;font-size:11px;">Banka formatı
+                <select id="akBankType" style="min-width:160px;padding:6px 8px;border-radius:4px;border:1px solid #455a64;background:#0d1f2d;color:#eceff1;font-size:12px;">
+                    <option value="AKBANK">Akbank</option>
+                    <option value="TURKIYE_FINANS">Türkiye Finans</option>
+                </select>
+            </label>
             <input type="file" id="akFile" accept=".xlsx,.xls" />
-            <button type="button" class="ak-btn" id="btnAnalyze">Analiz et</button>
-            <button type="button" class="ak-btn" id="btnSecilenleriOnayla" disabled title="Önce satırlarda Onay kutusunu işaretleyin">Seçilenleri onayla</button>
+            <button type="button" class="ak-btn" id="btnAnalyze">Önizleme (analiz et)</button>
+            <button type="button" class="ak-btn" id="btnSecilenleriOnayla" disabled title="Önce satırlarda Onay kutusunu işaretleyin">Eşleşenleri aktar</button>
             <a href="/bankalar/" class="ak-btn secondary" style="text-decoration:none;display:inline-block;">Bankalara dön</a>
         </div>
     </div>
 
     <div class="ak-saved-panel" id="akSavedPanel">
-        <h3>Kayıtlı Akbank dosyaları</h3>
-        <p class="muted" style="margin:0 0 8px 0;font-size:12px;">Yüklenen her Excel ERP’de saklanır (ad: yükleme günü DDMMYY). Cariye kaydettiğiniz fişler bir daha listelenmez. Birden fazla dosya işaretleyip birleşik liste alabilirsiniz.</p>
+        <h3>Kayıtlı import dosyaları</h3>
+        <p class="muted" style="margin:0 0 8px 0;font-size:12px;">Yüklenen her Excel ERP’de saklanır. Cariye kaydettiğiniz fişler bir daha listelenmez. Kayıtlı dosyaları işaretlerken üstteki <strong>Banka formatı</strong> seçiminin dosya ile uyumlu olduğundan emin olun (TF yalnızca .xlsx).</p>
         <div id="akSavedList" class="ak-saved-list"></div>
         <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
             <button type="button" class="ak-btn" id="btnAnalyzeSaved">Seçili kayıtlı dosyaları analiz et</button>
-            <span class="muted" style="font-size:11px;">Yeni dosya: yukarıdan seçip «Analiz et» — otomatik kaydedilir.</span>
+            <span class="muted" style="font-size:11px;">Yeni dosya: yukarıdan seçip «Önizleme» — otomatik kaydedilir.</span>
         </div>
     </div>
 
@@ -235,7 +241,7 @@ td.ak-td-sira {
                 <tr>
                     <th style="width:36px;">Onay</th>
                     <th>Durum</th>
-                    <th class="ak-sort-th" data-sort="tarih" title="Sırala">Tarih<span class="ak-sort-hint"></span></th>
+                    <th class="ak-sort-th" data-sort="tarih" title="Tık 1: en yeni üstte (bugünden geçmişe, ▼). Tık 2: en eski üstte (kronolojik, ▲).">Tarih<span class="ak-sort-hint"></span></th>
                     <th class="ak-sort-th ak-sort-num" data-sort="tutar" title="Sırala">Tutar<span class="ak-sort-hint"></span></th>
                     <th>Fiş / Dekont</th>
                     <th class="ak-sort-th" data-sort="aciklama" title="Sırala">Açıklama<span class="ak-sort-hint"></span></th>
@@ -246,6 +252,26 @@ td.ak-td-sira {
             <tbody id="akTbody"></tbody>
         </table>
     </div>
+
+    <details class="ak-saved-panel" id="akEkstreDet" style="margin-top:12px;">
+        <summary style="cursor:pointer;color:#4fc3f7;font-weight:600;">Ekstreyi hesap hareketlerine kaydet (banka_hareketleri)</summary>
+        <div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;">
+            <label class="muted" style="display:flex;flex-direction:column;gap:4px;font-size:11px;">Hesap
+                <select id="ekHesap" style="min-width:220px;padding:6px 8px;border-radius:4px;border:1px solid #455a64;background:#0d1f2d;color:#eceff1;font-size:12px;"></select>
+            </label>
+            <label class="muted" style="display:flex;flex-direction:column;gap:4px;font-size:11px;">Banka formatı
+                <select id="ekBankType" style="min-width:160px;padding:6px 8px;border-radius:4px;border:1px solid #455a64;background:#0d1f2d;color:#eceff1;font-size:12px;">
+                    <option value="AKBANK">Akbank</option>
+                    <option value="TURKIYE_FINANS">Türkiye Finans</option>
+                </select>
+            </label>
+            <label class="muted" style="display:flex;flex-direction:column;gap:4px;font-size:11px;">Excel (.xlsx)
+                <input type="file" id="ekFile" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+            </label>
+            <button type="button" class="ak-btn" id="ekSubmit">Yükle ve kaydet</button>
+        </div>
+        <p id="ekMsg" class="muted" style="margin-top:10px;min-height:1.2em;font-size:12px;"></p>
+    </details>
 </div>
 
 <script>
@@ -257,6 +283,8 @@ td.ak-td-sira {
     const URL_MUSTERI = "/bankalar/api/akbank-tahsilat/musteriler";
     const URL_GONDERICI_KAYDET = "/bankalar/api/akbank-tahsilat/gonderici-kaydet";
     const URL_COMMIT = "/bankalar/api/akbank-tahsilat/commit";
+    const URL_EKSTRE_HAREKET = "/bankalar/api/ekstre-processor-yukle";
+    const URL_HESAPLAR = "/bankalar/api/hesaplar";
 
     let lastAnalyzeMode = "none";
     let lastSavedFileIds = [];
@@ -265,7 +293,7 @@ td.ak-td-sira {
     let allRows = [];
     /* Açıklama metninde içerir araması (boş = tümü) */
     let aciklamaFilter = "";
-    /* sortState: key = sütun adı veya null; dir = 1 artan, -1 azalan */
+    /* sortState: key = sütun adı veya null; dir = 1 artan (▲), -1 azalan (▼). Tarih: ilk seçim -1 = en yeni üstte. */
     let sortState = { key: null, dir: 1 };
     /* Sırala: satır checkbox’ları seçimi (başlığa tıklanınca uygulanır) */
     let pendingMusteriIdSet = new Set();
@@ -423,7 +451,12 @@ td.ak-td-sira {
             const hint = th.querySelector(".ak-sort-hint");
             if (!hint) return;
             if (sortState.key === key) {
-                hint.textContent = sortState.dir === 1 ? "▲" : "▼";
+                if (key === "tarih") {
+                    /* Tarih: ▼ = en yeni üstte (azalan), ▲ = en eski üstte (artan) */
+                    hint.textContent = sortState.dir === -1 ? "▼" : "▲";
+                } else {
+                    hint.textContent = sortState.dir === 1 ? "▲" : "▼";
+                }
             } else {
                 hint.textContent = "";
             }
@@ -439,7 +472,8 @@ td.ak-td-sira {
             sortState.dir = -sortState.dir;
         } else {
             sortState.key = key;
-            sortState.dir = 1;
+            /* Tarih: önce en yeni üstte (2026→2025…), sonra tıkta en eski üstte (kronolojik). Diğer sütunlar: önce artan. */
+            sortState.dir = (key === "tarih") ? -1 : 1;
         }
         render();
     });
@@ -697,7 +731,7 @@ td.ak-td-sira {
         musteriFiltreUygulandi = false;
         const fin = document.getElementById("akAciklamaFilter");
         if (fin) fin.value = "";
-        sortState = { key: null, dir: 1 };
+        sortState = { key: "tarih", dir: -1 };
         showMsg(infoMsg || (allRows.length + " satır listelendi. Cariye aktarılmış fişler gösterilmez."), true);
         render();
         loadKayitliDosyalar();
@@ -739,21 +773,40 @@ td.ak-td-sira {
         if (lastSavedFileIds.length) {
             showMsg("", true);
             document.getElementById("akOzet").textContent = "Yenileniyor…";
+            const ctrl = new AbortController();
+            const tid = setTimeout(function () { ctrl.abort(); }, 180000);
             try {
-                const res = await fetch(URL_ANALYZE_KAYITLI, {
+                const btVal = ((document.getElementById("akBankType") || {}).value) || "AKBANK";
+                const res = await fetch(URL_ANALYZE_KAYITLI + "?bank_type=" + encodeURIComponent(btVal), {
                     method: "POST",
                     credentials: "same-origin",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ file_ids: lastSavedFileIds }),
+                    signal: ctrl.signal,
+                    body: JSON.stringify({
+                        file_ids: lastSavedFileIds,
+                        bank_type: btVal,
+                    }),
                 });
-                const data = await res.json();
+                const text = await res.text();
+                let data;
+                try {
+                    data = text ? JSON.parse(text) : {};
+                } catch (pe) {
+                    showMsg("Yenileme yanıtı okunamadı.", false);
+                    document.getElementById("akOzet").textContent = "";
+                    return;
+                }
                 if (!data.ok) {
                     showMsg(data.mesaj || "Yenileme başarısız.", false);
+                    document.getElementById("akOzet").textContent = "";
                     return;
                 }
                 applyAnalyzeSuccess(data, "Liste güncellendi (cariye işlenen fişler çıkarıldı).");
             } catch (e) {
-                showMsg("Ağ hatası: " + e, false);
+                showMsg((e && e.name === "AbortError") ? "Yenileme zaman aşımı." : ("Ağ hatası: " + e), false);
+                document.getElementById("akOzet").textContent = "";
+            } finally {
+                clearTimeout(tid);
             }
             return;
         }
@@ -769,16 +822,31 @@ td.ak-td-sira {
     document.getElementById("btnAnalyze").addEventListener("click", async () => {
         const inp = document.getElementById("akFile");
         if (!inp.files || !inp.files[0]) {
-            showMsg("Önce .xlsx dosyasını seçin veya aşağıdan kayıtlı dosya işaretleyin.", false);
+            showMsg("Önce Excel dosyasını seçin veya aşağıdan kayıtlı dosya işaretleyin.", false);
             return;
         }
         showMsg("", true);
         document.getElementById("akOzet").textContent = "Yükleniyor…";
+        const bt = document.getElementById("akBankType");
+        const btVal = (bt && bt.value) ? bt.value : "AKBANK";
         const fd = new FormData();
+        fd.append("bank_type", btVal);
         fd.append("file", inp.files[0]);
+        const analyzeUrl = URL_ANALYZE + "?bank_type=" + encodeURIComponent(btVal);
+        const ctrl = new AbortController();
+        const tid = setTimeout(function () { ctrl.abort(); }, 180000);
         try {
-            const res = await fetch(URL_ANALYZE, { method: "POST", body: fd, credentials: "same-origin" });
-            const data = await res.json();
+            const res = await fetch(analyzeUrl, { method: "POST", body: fd, credentials: "same-origin", signal: ctrl.signal });
+            const text = await res.text();
+            let data;
+            try {
+                data = text ? JSON.parse(text) : {};
+            } catch (pe) {
+                showMsg("Sunucu yanıtı JSON değil (sayfa süresi doldu veya proxy hatası).", false);
+                document.getElementById("akOzet").textContent = "";
+                resetListeState();
+                return;
+            }
             if (!data.ok) {
                 showMsg(data.mesaj || "Analiz başarısız.", false);
                 document.getElementById("akOzet").textContent = "";
@@ -788,14 +856,24 @@ td.ak-td-sira {
             const kd = data.kayit_dosya;
             lastAnalyzeMode = "saved";
             lastSavedFileIds = kd && kd.id != null ? [Number(kd.id)] : [];
-            let msg = data.satirlar ? data.satirlar.length : 0;
-            msg = msg + " satır listelendi. Dosya ERP’ye kaydedildi";
+            const nSat = data.satirlar ? data.satirlar.length : 0;
+            let msg = nSat + " satır listelendi. ";
+            if (data.dosya_zaten_kayitli) {
+                msg += "Bu dosyanın aynısı zaten kayıtlıydı; yer kaplamaması için yeni kopya eklenmedi";
+            } else {
+                msg += "Dosya ERP’ye kaydedildi";
+            }
             if (kd && kd.ad_gosterim) msg += " (" + kd.ad_gosterim + ").";
             else msg += ".";
             applyAnalyzeSuccess(data, msg);
         } catch (e) {
-            showMsg("Ağ hatası: " + e, false);
+            const m = (e && e.name === "AbortError")
+                ? "İstek 3 dakikada tamamlanmadı (zaman aşımı). Çok satırlı dosyada önizleme uzun sürebilir; sunucuyu yeniden başlatıp tekrar deneyin."
+                : ("Ağ hatası: " + e);
+            showMsg(m, false);
             document.getElementById("akOzet").textContent = "";
+        } finally {
+            clearTimeout(tid);
         }
     });
 
@@ -811,14 +889,30 @@ td.ak-td-sira {
         document.getElementById("akOzet").textContent = "Kayıtlı dosyalar yükleniyor…";
         lastAnalyzeMode = "saved";
         lastSavedFileIds = ids.slice();
+        const btVal = ((document.getElementById("akBankType") || {}).value) || "AKBANK";
+        const ctrl = new AbortController();
+        const tid = setTimeout(function () { ctrl.abort(); }, 180000);
         try {
-            const res = await fetch(URL_ANALYZE_KAYITLI, {
+            const res = await fetch(URL_ANALYZE_KAYITLI + "?bank_type=" + encodeURIComponent(btVal), {
                 method: "POST",
                 credentials: "same-origin",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ file_ids: ids }),
+                signal: ctrl.signal,
+                body: JSON.stringify({
+                    file_ids: ids,
+                    bank_type: btVal,
+                }),
             });
-            const data = await res.json();
+            const text = await res.text();
+            let data;
+            try {
+                data = text ? JSON.parse(text) : {};
+            } catch (pe) {
+                showMsg("Sunucu yanıtı JSON değil.", false);
+                document.getElementById("akOzet").textContent = "";
+                resetListeState();
+                return;
+            }
             if (!data.ok) {
                 showMsg(data.mesaj || "Analiz başarısız.", false);
                 document.getElementById("akOzet").textContent = "";
@@ -830,8 +924,13 @@ td.ak-td-sira {
                 : "";
             applyAnalyzeSuccess(data, (data.satirlar ? data.satirlar.length : 0) + " satır (birleşik). " + (adlar ? "Dosyalar: " + adlar : ""));
         } catch (e) {
-            showMsg("Ağ hatası: " + e, false);
+            const m = (e && e.name === "AbortError")
+                ? "İstek 3 dakikada tamamlanmadı (zaman aşımı)."
+                : ("Ağ hatası: " + e);
+            showMsg(m, false);
             document.getElementById("akOzet").textContent = "";
+        } finally {
+            clearTimeout(tid);
         }
     });
 
@@ -927,6 +1026,103 @@ td.ak-td-sira {
         else pendingMusteriIdSet.delete(id);
         render();
     });
+
+    (function () {
+        const det = document.getElementById("akEkstreDet");
+        const selH = document.getElementById("ekHesap");
+        const selB = document.getElementById("ekBankType");
+        const fEl = document.getElementById("ekFile");
+        const btn = document.getElementById("ekSubmit");
+        const msg = document.getElementById("ekMsg");
+        const akBt = document.getElementById("akBankType");
+        if (!det || !selH || !btn || !msg) return;
+
+        async function loadEkstreHesaplar() {
+            try {
+                const r = await fetch(URL_HESAPLAR, { credentials: "same-origin" });
+                const rows = await r.json();
+                selH.innerHTML = "<option value=\"\">— Hesap seçin —</option>";
+                (rows || []).forEach(function (x) {
+                    const o = document.createElement("option");
+                    o.value = String(x.id);
+                    o.textContent = (x.banka_adi || "") + " — " + (x.hesap_adi || x.hesap_no || ("#" + x.id));
+                    selH.appendChild(o);
+                });
+            } catch (e) {
+                msg.textContent = "Hesap listesi yüklenemedi.";
+            }
+        }
+
+        det.addEventListener("toggle", function () {
+            if (det.open) {
+                loadEkstreHesaplar();
+                if (akBt && selB) selB.value = akBt.value || "AKBANK";
+            }
+        });
+
+        btn.addEventListener("click", async function () {
+            msg.textContent = "";
+            if (!selH.value) {
+                msg.textContent = "Hesap seçin.";
+                return;
+            }
+            if (!fEl.files || !fEl.files[0]) {
+                msg.textContent = "Excel seçin (.xlsx).";
+                return;
+            }
+            const fd = new FormData();
+            fd.append("banka_hesap_id", selH.value);
+            fd.append("bank_type", selB ? selB.value : "AKBANK");
+            fd.append("file", fEl.files[0]);
+            btn.disabled = true;
+            try {
+                const res = await fetch(URL_EKSTRE_HAREKET, { method: "POST", body: fd, credentials: "same-origin" });
+                const txt = await res.text();
+                let data = null;
+                try { data = JSON.parse(txt); } catch (e) { data = null; }
+                if (data && data.ok) {
+                    msg.textContent = data.mesaj || "Tamam.";
+                    msg.style.color = "#a5d6a7";
+                    fEl.value = "";
+                } else {
+                    msg.textContent = (data && data.mesaj) || txt.slice(0, 200) || "Hata.";
+                    msg.style.color = "#ffcdd2";
+                }
+            } catch (e) {
+                msg.textContent = "Ağ hatası.";
+                msg.style.color = "#ffcdd2";
+            }
+            btn.disabled = false;
+        });
+    })();
+
+    (function syncBankTypeAccept() {
+        const akBt = document.getElementById("akBankType");
+        const akFile = document.getElementById("akFile");
+        if (!akBt || !akFile) return;
+        function apply() {
+            if (akBt.value === "TURKIYE_FINANS") {
+                akFile.setAttribute("accept", ".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+            } else {
+                akFile.setAttribute("accept", ".xlsx,.xls");
+            }
+        }
+        akBt.addEventListener("change", apply);
+        apply();
+    })();
+
+    (function preselectBankFromQuery() {
+        try {
+            var q = (new URLSearchParams(window.location.search).get("bank") || "").toUpperCase();
+            if (!q) return;
+            var sel = document.getElementById("akBankType");
+            if (!sel) return;
+            if (q === "TF" || q.indexOf("TURKIYE") >= 0 || q.indexOf("FINANS") >= 0) {
+                sel.value = "TURKIYE_FINANS";
+                sel.dispatchEvent(new Event("change"));
+            }
+        } catch (e) { /* ignore */ }
+    })();
 
 })();
 </script>
