@@ -763,7 +763,7 @@ td.ak-td-sira {
                 const origEsc = escapeHtml(orig.length > 48 ? orig.slice(0, 48) + "…" : orig);
                 return (
                     "<label class=\"ak-saved-row\">" +
-                    "<input type=\"checkbox\" class=\"ak-saved-cb\" value=\"" + Number(d.id) + "\" />" +
+                    "<input type=\"checkbox\" class=\"ak-saved-cb\" value=\"" + Number(d.id) + "\" checked />" +
                     "<div><strong>" + escapeHtml(d.ad_gosterim || "") + "</strong>" +
                     "<div class=\"ak-saved-meta\">" + escapeHtml(fmtTrDateTime(d.yuklenme_tarihi)) +
                     (orig ? " · " + origEsc : "") +
