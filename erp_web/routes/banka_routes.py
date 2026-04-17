@@ -834,7 +834,8 @@ def _ensure_akbank_dekont_musteri_map():
 @giris_gerekli
 def akbank_tahsilat_import_sayfa():
     """Akbank / Türkiye Finans Excel → önizleme, müşteri eşleştirme, onaylı tahsilat kaydı."""
-    return render_template("bankalar/akbank_tahsilat_import.html")
+    embed = (request.args.get("embed") or "").strip().lower() in ("1", "true", "evet", "yes")
+    return render_template("bankalar/akbank_tahsilat_import.html", embed=embed)
 
 
 _AKBANK_IMPORT_MAX_BYTES = 20 * 1024 * 1024
@@ -929,6 +930,67 @@ def api_akbank_tahsilat_analyze():
     return jsonify(out)
 
 
+@bp.route("/api/akbank-tahsilat/upload-only", methods=["POST"])
+@giris_gerekli
+def api_akbank_tahsilat_upload_only():
+    """Excel dosyasını yalnızca ERP'ye kaydet (analiz etmeden)."""
+    f = request.files.get("file")
+    if not f or not getattr(f, "filename", ""):
+        return jsonify({"ok": False, "mesaj": "Excel dosyası seçin (.xlsx/.xls)."}), 400
+    bank_type_req = _request_bank_type_tahsilat()
+    bank_type = _effective_tahsilat_bank_type(bank_type_req, getattr(f, "filename", None))
+    fn = str(f.filename).lower()
+    if bank_type == "TURKIYE_FINANS":
+        if not fn.endswith(".xlsx"):
+            return jsonify({"ok": False, "mesaj": "Türkiye Finans için yalnızca .xlsx desteklenir."}), 400
+    elif not fn.endswith((".xlsx", ".xls")):
+        return jsonify({"ok": False, "mesaj": "Yalnızca .xlsx / .xls desteklenir."}), 400
+    raw = f.read()
+    if len(raw) > _AKBANK_IMPORT_MAX_BYTES:
+        return jsonify({"ok": False, "mesaj": "Dosya çok büyük (en fazla 20 MB)."}), 400
+
+    _ensure_akbank_import_dosyalar()
+    fname = (getattr(f, "filename", None) or "")[:500]
+    dup = fetch_one(
+        """
+        SELECT id, ad_gosterim, yuklenme_tarihi, orijinal_filename
+        FROM akbank_import_dosyalar
+        WHERE excel_binary = %s
+        ORDER BY id ASC
+        LIMIT 1
+        """,
+        (raw,),
+    )
+    zaten = bool(dup)
+    if dup:
+        ins = dict(dup)
+    else:
+        ad = _akbank_allocate_ad_gosterim()
+        ins = execute_returning(
+            """
+            INSERT INTO akbank_import_dosyalar (ad_gosterim, orijinal_filename, excel_binary)
+            VALUES (%s, %s, %s)
+            RETURNING id, ad_gosterim, yuklenme_tarihi, orijinal_filename
+            """,
+            (ad, fname or None, raw),
+        )
+        if not ins:
+            return jsonify({"ok": False, "mesaj": "Dosya kaydı dönmedi."}), 400
+
+    kayit = {
+        "id": ins["id"],
+        "ad_gosterim": ins["ad_gosterim"],
+        "yuklenme_tarihi": _iso_or_str(ins.get("yuklenme_tarihi")),
+        "orijinal_filename": (ins.get("orijinal_filename") or fname or "").strip() or fname,
+    }
+    return jsonify({
+        "ok": True,
+        "dosya_zaten_kayitli": zaten,
+        "kayit_dosya": kayit,
+        "mesaj": "Dosya zaten kayıtlıydı." if zaten else "Dosya içe aktarıldı ve kaydedildi.",
+    })
+
+
 @bp.route("/api/akbank-tahsilat/dosyalar", methods=["GET"])
 @giris_gerekli
 def api_akbank_tahsilat_dosyalar():
@@ -949,6 +1011,42 @@ def api_akbank_tahsilat_dosyalar():
         d["yuklenme_tarihi"] = _iso_or_str(d.get("yuklenme_tarihi"))
         out.append(d)
     return jsonify({"ok": True, "dosyalar": out})
+
+
+@bp.route("/api/akbank-tahsilat/dosyalar-sil", methods=["POST"])
+@giris_gerekli
+def api_akbank_tahsilat_dosyalar_sil():
+    """Seçili kayıtlı import dosyalarını siler."""
+    data = request.get_json(silent=True) or {}
+    ids = data.get("file_ids")
+    if not isinstance(ids, list) or not ids:
+        return jsonify({"ok": False, "mesaj": "Silmek için en az bir dosya seçin."}), 400
+    clean_ids: list[int] = []
+    for x in ids:
+        try:
+            clean_ids.append(int(x))
+        except (TypeError, ValueError):
+            continue
+    clean_ids = list(dict.fromkeys(clean_ids))
+    if not clean_ids:
+        return jsonify({"ok": False, "mesaj": "Geçersiz dosya seçimi."}), 400
+
+    _ensure_akbank_import_dosyalar()
+    mevcut = fetch_all(
+        "SELECT id, ad_gosterim FROM akbank_import_dosyalar WHERE id IN %s",
+        (tuple(clean_ids),),
+    ) or []
+    if not mevcut:
+        return jsonify({"ok": False, "mesaj": "Seçilen dosyalar bulunamadı."}), 404
+    mevcut_ids = [int(r["id"]) for r in mevcut if r.get("id") is not None]
+    adlar = [str(r.get("ad_gosterim") or "") for r in mevcut]
+    execute("DELETE FROM akbank_import_dosyalar WHERE id IN %s", (tuple(mevcut_ids),))
+    return jsonify({
+        "ok": True,
+        "silinen": len(mevcut_ids),
+        "silinen_ids": mevcut_ids,
+        "silinen_adlar": adlar,
+    })
 
 
 @bp.route("/api/akbank-tahsilat/analyze-kayitli", methods=["POST"])

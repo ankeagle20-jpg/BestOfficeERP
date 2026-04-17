@@ -33,6 +33,16 @@
     cursor: pointer;
     font-size: 13px;
 }
+.banka-buttons .banka-head-aktar {
+    background: #006064;
+    color: #fff;
+    text-decoration: none;
+    padding: 8px 16px;
+    border-radius: 3px;
+    font-size: 13px;
+    display: inline-block;
+}
+.banka-buttons .banka-head-aktar:hover { background: #004d53; }
 .banka-buttons a.banka-head-bankalar {
     background: #00838f;
     color: #fff;
@@ -66,58 +76,107 @@
 .banka-grid tr:hover {
     background: #2d4060;
 }
+.banka-tabs {
+    display: flex;
+    gap: 8px;
+    margin: 0;
+    flex-wrap: wrap;
+}
+.banka-tab-btn {
+    background: #163247;
+    color: #9ad7e1;
+    border: 1px solid #2d4060;
+    padding: 7px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+}
+.banka-tab-btn.active {
+    background: #00bcd4;
+    border-color: #00bcd4;
+    color: #fff;
+    font-weight: 700;
+}
+.banka-tab-panel { display: none; }
+.banka-tab-panel.active { display: block; }
+.hesap-aktar-wrap {
+    margin-top: 14px;
+    border: 1px solid #2d4060;
+    border-radius: 6px;
+    background: #0f2537;
+    overflow: hidden;
+}
+.hesap-aktar-iframe {
+    width: 100%;
+    height: 560px;
+    min-height: 560px;
+    border: 0;
+    background: #0d1f2d;
+}
 </style>
 
 <div class="banka-header">
-    <h2>Banka Hesapları</h2>
+    <div class="banka-tabs">
+        <button type="button" class="banka-tab-btn active" data-tab="excel">Banka Excel</button>
+        <button type="button" class="banka-tab-btn" data-tab="hesaplar">Bankalar</button>
+    </div>
     <div class="banka-buttons">
         <button type="button" onclick="yeniBanka()">Yeni Hesap</button>
-        <a href="{{ url_for('banka.akbank_tahsilat_import_sayfa') }}" class="banka-head-bankalar" title="Akbank veya Türkiye Finans Excel: önizleme, müşteri eşleştirme, tahsilat veya hesap hareketi">Bankalar</a>
+        <a href="{{ url_for('banka.akbank_tahsilat_import_sayfa') }}" class="banka-head-bankalar" title="Import ekranını ayrı sayfada aç">Hesap Aktar Sayfası</a>
         <button type="button" onclick="yenile()">Yenile</button>
     </div>
 </div>
 
-<p style="font-size:12px;color:#90a4ae;margin:0 0 12px 0;max-width:720px;">
-    <strong>Bankalar</strong> ile ekstre yükleyip satırları önizleyebilir, müşteriyle eşleştirip <strong>Eşleşenleri aktar</strong> ile tahsilata alabilir veya aynı sayfada hesap hareketlerine kaydedebilirsiniz (Akbank / Türkiye Finans).
-</p>
+<div class="banka-tab-panel active" id="banka_tab_excel">
+    <div class="hesap-aktar-wrap" id="hesap_aktar_wrap">
+        <iframe
+            id="hesap_aktar_iframe"
+            class="hesap-aktar-iframe"
+            src="{{ url_for('banka.akbank_tahsilat_import_sayfa') }}?embed=1"
+            loading="lazy"
+            title="Hesap Aktar ve Eşleştirme Paneli"></iframe>
+    </div>
+</div>
 
-<div style="overflow: auto; max-height: 600px;">
-    <table class="banka-grid">
-        <thead>
-            <tr>
-                <th>Banka Adı</th>
-                <th>Hesap No</th>
-                <th>IBAN</th>
-                <th>Şube</th>
-                <th>Bakiye (₺)</th>
-                <th>Durum</th>
-                <th>İşlem</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% if bankalar %}
-                {% for b in bankalar %}
+<div class="banka-tab-panel" id="banka_tab_hesaplar">
+    <div style="overflow: auto; max-height: 600px;">
+        <table class="banka-grid">
+            <thead>
                 <tr>
-                    <td><strong>{{ b.banka_adi }}</strong>{% if b.hesap_adi and b.hesap_adi != b.banka_adi %} <span style="color:#90a4ae;font-weight:normal;">({{ b.hesap_adi }})</span>{% endif %}</td>
-                    <td>{{ b.hesap_no }}</td>
-                    <td>{{ b.iban }}</td>
-                    <td>{{ b.sube }}</td>
-                    <td style="text-align: right;">{{ '%.2f'|format(b.bakiye or 0) }}</td>
-                    <td>{% if b.is_active %}Aktif{% else %}Pasif{% endif %}</td>
-                    <td>
-                        <button type="button" onclick="duzenle({{ b.id }})" style="background: #00bcd4; color: white; border: none; padding: 4px 8px; border-radius: 3px; font-size: 11px;">Düzenle</button>
-                    </td>
+                    <th>Banka Adı</th>
+                    <th>Hesap No</th>
+                    <th>IBAN</th>
+                    <th>Şube</th>
+                    <th>Bakiye (₺)</th>
+                    <th>Durum</th>
+                    <th>İşlem</th>
                 </tr>
-                {% endfor %}
-            {% else %}
-                <tr>
-                    <td colspan="7" style="text-align: center; padding: 40px; color: #6b7280;">
-                        Henüz banka hesabı yok
-                    </td>
-                </tr>
-            {% endif %}
-        </tbody>
-    </table>
+            </thead>
+            <tbody>
+                {% if bankalar %}
+                    {% for b in bankalar %}
+                    <tr>
+                        <td><strong>{{ b.banka_adi }}</strong>{% if b.hesap_adi and b.hesap_adi != b.banka_adi %} <span style="color:#90a4ae;font-weight:normal;">({{ b.hesap_adi }})</span>{% endif %}</td>
+                        <td>{{ b.hesap_no }}</td>
+                        <td>{{ b.iban }}</td>
+                        <td>{{ b.sube }}</td>
+                        <td style="text-align: right;">{{ '%.2f'|format(b.bakiye or 0) }}</td>
+                        <td>{% if b.is_active %}Aktif{% else %}Pasif{% endif %}</td>
+                        <td>
+                            <button type="button" onclick="duzenle({{ b.id }})" style="background: #00bcd4; color: white; border: none; padding: 4px 8px; border-radius: 3px; font-size: 11px;">Düzenle</button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                {% else %}
+                    <tr>
+                        <td colspan="7" style="text-align: center; padding: 40px; color: #6b7280;">
+                            Henüz banka hesabı yok
+                        </td>
+                    </tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
 </div>
 
 <script>
@@ -130,5 +189,58 @@ function yenile() {
 function duzenle(id) {
     window.location.href = "/bankalar/" + id + "/duzenle";
 }
+(function bankaTabsInit() {
+    var btns = Array.prototype.slice.call(document.querySelectorAll('.banka-tab-btn'));
+    var panels = {
+        excel: document.getElementById('banka_tab_excel'),
+        hesaplar: document.getElementById('banka_tab_hesaplar')
+    };
+    function activate(tab) {
+        btns.forEach(function (b) {
+            b.classList.toggle('active', b.getAttribute('data-tab') === tab);
+        });
+        Object.keys(panels).forEach(function (k) {
+            if (panels[k]) panels[k].classList.toggle('active', k === tab);
+        });
+    }
+    btns.forEach(function (b) {
+        b.addEventListener('click', function () {
+            activate(b.getAttribute('data-tab'));
+        });
+    });
+})();
+(function hesapAktarEmbedAutoHeight() {
+    var fr = document.getElementById("hesap_aktar_iframe");
+    if (!fr) return;
+    function applyHeight(h) {
+        var n = parseInt(h, 10);
+        if (!Number.isFinite(n) || n <= 0) return;
+        var minH = 560;
+        var maxH = Math.max(window.innerHeight * 1.8, 900);
+        if (n < minH) n = minH;
+        if (n > maxH) n = maxH;
+        fr.style.height = String(n + 8) + "px";
+    }
+    window.addEventListener("message", function (ev) {
+        var d = ev && ev.data;
+        if (!d || d.source !== "akbank_tahsilat_import" || d.type !== "embed-height") return;
+        applyHeight(d.height);
+    });
+    fr.addEventListener("load", function () {
+        try {
+            var doc = fr.contentDocument || (fr.contentWindow && fr.contentWindow.document);
+            if (!doc) return;
+            var b = doc.body;
+            var de = doc.documentElement;
+            var h = Math.max(
+                b ? b.scrollHeight : 0,
+                b ? b.offsetHeight : 0,
+                de ? de.scrollHeight : 0,
+                de ? de.offsetHeight : 0
+            );
+            applyHeight(h);
+        } catch (e) { /* ignore */ }
+    });
+})();
 </script>
 {% endblock %}

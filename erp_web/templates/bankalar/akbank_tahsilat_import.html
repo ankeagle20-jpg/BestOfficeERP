@@ -209,6 +209,7 @@ td.ak-td-sira {
                 </select>
             </label>
             <input type="file" id="akFile" accept=".xlsx,.xls" />
+            <button type="button" class="ak-btn secondary" id="btnUploadOnly">Dosyayı içe aktar</button>
             <button type="button" class="ak-btn" id="btnAnalyze">Önizleme (analiz et)</button>
             <button type="button" class="ak-btn" id="btnSecilenleriOnayla" disabled title="Önce satırlarda Onay kutusunu işaretleyin">Eşleşenleri aktar</button>
             <a href="/bankalar/" class="ak-btn secondary" style="text-decoration:none;display:inline-block;">Bankalara dön</a>
@@ -221,6 +222,7 @@ td.ak-td-sira {
         <div id="akSavedList" class="ak-saved-list"></div>
         <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
             <button type="button" class="ak-btn" id="btnAnalyzeSaved">Seçili kayıtlı dosyaları analiz et</button>
+            <button type="button" class="ak-btn secondary" id="btnDeleteSaved">Seçili dosyaları sil</button>
             <span class="muted" style="font-size:11px;">Yeni dosya: yukarıdan seçip «Önizleme» — otomatik kaydedilir.</span>
         </div>
     </div>
@@ -278,8 +280,10 @@ td.ak-td-sira {
 (function () {
     /* Sabit path: url_for bazen eski worker belleğinde endpoint bulamadığında BuildError vermesin */
     const URL_ANALYZE = "/bankalar/api/akbank-tahsilat/analyze";
+    const URL_UPLOAD_ONLY = "/bankalar/api/akbank-tahsilat/upload-only";
     const URL_ANALYZE_KAYITLI = "/bankalar/api/akbank-tahsilat/analyze-kayitli";
     const URL_DOSYALAR = "/bankalar/api/akbank-tahsilat/dosyalar";
+    const URL_DOSYALAR_SIL = "/bankalar/api/akbank-tahsilat/dosyalar-sil";
     const URL_MUSTERI = "/bankalar/api/akbank-tahsilat/musteriler";
     const URL_GONDERICI_KAYDET = "/bankalar/api/akbank-tahsilat/gonderici-kaydet";
     const URL_COMMIT = "/bankalar/api/akbank-tahsilat/commit";
@@ -747,6 +751,8 @@ td.ak-td-sira {
                 box.innerHTML = "<span class=\"muted\">Liste alınamadı.</span>";
                 return;
             }
+            const mevcutSet = new Set(j.dosyalar.map(function (d) { return Number(d.id); }));
+            lastSavedFileIds = (lastSavedFileIds || []).filter(function (id) { return mevcutSet.has(Number(id)); });
             if (!j.dosyalar.length) {
                 box.innerHTML = "<span class=\"muted\">Henüz kayıtlı dosya yok. Yukarıdan Excel seçip «Analiz et» deyin.</span>";
                 return;
@@ -877,6 +883,50 @@ td.ak-td-sira {
         }
     });
 
+    document.getElementById("btnUploadOnly").addEventListener("click", async () => {
+        const inp = document.getElementById("akFile");
+        if (!inp.files || !inp.files[0]) {
+            showMsg("Önce içe aktarılacak Excel dosyasını seçin.", false);
+            return;
+        }
+        const bt = document.getElementById("akBankType");
+        const btVal = (bt && bt.value) ? bt.value : "AKBANK";
+        const fd = new FormData();
+        fd.append("bank_type", btVal);
+        fd.append("file", inp.files[0]);
+        const btn = document.getElementById("btnUploadOnly");
+        if (btn) btn.disabled = true;
+        showMsg("", true);
+        document.getElementById("akOzet").textContent = "Dosya içe aktarılıyor…";
+        try {
+            const res = await fetch(URL_UPLOAD_ONLY + "?bank_type=" + encodeURIComponent(btVal), {
+                method: "POST",
+                body: fd,
+                credentials: "same-origin",
+            });
+            const data = await res.json();
+            if (!data || !data.ok) {
+                showMsg((data && data.mesaj) || "Dosya içe aktarılamadı.", false);
+                document.getElementById("akOzet").textContent = "";
+                return;
+            }
+            await loadKayitliDosyalar();
+            const kd = data.kayit_dosya || {};
+            const ad = kd.ad_gosterim ? (" (" + kd.ad_gosterim + ")") : "";
+            if (data.dosya_zaten_kayitli) {
+                showMsg("Bu dosya zaten kayıtlıydı" + ad + ".", true);
+            } else {
+                showMsg("Dosya içe aktarıldı ve kaydedildi" + ad + ".", true);
+            }
+            document.getElementById("akOzet").textContent = "Kayıtlı dosyalar güncellendi.";
+        } catch (e) {
+            showMsg("Ağ hatası: " + e, false);
+            document.getElementById("akOzet").textContent = "";
+        } finally {
+            if (btn) btn.disabled = false;
+        }
+    });
+
     document.getElementById("btnAnalyzeSaved").addEventListener("click", async () => {
         const ids = Array.prototype.map.call(document.querySelectorAll(".ak-saved-cb:checked"), function (c) {
             return parseInt(c.value, 10);
@@ -931,6 +981,45 @@ td.ak-td-sira {
             document.getElementById("akOzet").textContent = "";
         } finally {
             clearTimeout(tid);
+        }
+    });
+
+    document.getElementById("btnDeleteSaved").addEventListener("click", async () => {
+        const ids = Array.prototype.map.call(document.querySelectorAll(".ak-saved-cb:checked"), function (c) {
+            return parseInt(c.value, 10);
+        }).filter(function (id) { return Number.isFinite(id); });
+        if (!ids.length) {
+            showMsg("Silmek için en az bir kayıtlı dosya işaretleyin.", false);
+            return;
+        }
+        if (!confirm(ids.length + " kayıtlı dosya silinsin mi? Bu işlem geri alınamaz.")) {
+            return;
+        }
+        showMsg("", true);
+        const ozetEl = document.getElementById("akOzet");
+        if (ozetEl) ozetEl.textContent = "Seçili dosyalar siliniyor…";
+        try {
+            const res = await fetch(URL_DOSYALAR_SIL, {
+                method: "POST",
+                credentials: "same-origin",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ file_ids: ids }),
+            });
+            const data = await res.json();
+            if (!data || !data.ok) {
+                showMsg((data && data.mesaj) ? data.mesaj : "Dosya silinemedi.", false);
+                if (ozetEl) ozetEl.textContent = "";
+                return;
+            }
+            const silinenSet = new Set((data.silinen_ids || []).map(function (x) { return Number(x); }));
+            lastSavedFileIds = (lastSavedFileIds || []).filter(function (id) { return !silinenSet.has(Number(id)); });
+            await loadKayitliDosyalar();
+            const adet = Number(data.silinen || 0);
+            showMsg(adet + " kayıtlı dosya silindi.", true);
+            if (ozetEl) ozetEl.textContent = "";
+        } catch (e) {
+            showMsg("Ağ hatası: " + e, false);
+            if (ozetEl) ozetEl.textContent = "";
         }
     });
 
@@ -1125,5 +1214,40 @@ td.ak-td-sira {
     })();
 
 })();
+
+{% if embed|default(false) %}
+(function embedAutoHeightPublisher() {
+    function measure() {
+        var b = document.body;
+        var d = document.documentElement;
+        return Math.max(
+            b ? b.scrollHeight : 0,
+            b ? b.offsetHeight : 0,
+            d ? d.scrollHeight : 0,
+            d ? d.offsetHeight : 0
+        );
+    }
+    function publishHeight() {
+        try {
+            parent.postMessage(
+                {
+                    source: "akbank_tahsilat_import",
+                    type: "embed-height",
+                    height: measure()
+                },
+                "*"
+            );
+        } catch (e) { /* ignore */ }
+    }
+    window.addEventListener("load", publishHeight);
+    window.addEventListener("resize", publishHeight);
+    setInterval(publishHeight, 700);
+    try {
+        var mo = new MutationObserver(function () { publishHeight(); });
+        mo.observe(document.body || document.documentElement, { childList: true, subtree: true, attributes: true });
+    } catch (e) { /* ignore */ }
+    publishHeight();
+})();
+{% endif %}
 </script>
 {% endblock %}

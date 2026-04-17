@@ -173,6 +173,438 @@ class BestOfficeGIBManager:
         return {}
 
     @staticmethod
+    def _parse_tr_amount_portal(val):
+        """Portal/GİB tutarları: TR (1.375,00), US/JSON (11071.2), tam sayı."""
+        if val is None:
+            return 0.0
+        if isinstance(val, (int, float)):
+            return float(val)
+        s = str(val).strip().replace("₺", "").replace("TL", "").replace(" ", "")
+        if not s or s.lower() in ("null", "none", "-", "—"):
+            return 0.0
+        # Hem ',' hem '.' varsa ondalık ayracı sağdaki olandır.
+        if "," in s and "." in s:
+            last_comma = s.rfind(",")
+            last_dot = s.rfind(".")
+            if last_comma > last_dot:
+                # 1.375,00 -> 1375.00
+                s = s.replace(".", "").replace(",", ".")
+            else:
+                # 1,375.00 -> 1375.00
+                s = s.replace(",", "")
+        elif "," in s:
+            # 1375,00 -> 1375.00
+            s = s.replace(".", "").replace(",", ".")
+        else:
+            if re.fullmatch(r"-?\d+", s):
+                return float(s)
+            # 1375.00 (nokta ondalık) veya 1.375 (binlik) ayrımı:
+            # Son parça 1-2 hane ise ondalık kabul et, aksi halde binlikleri kaldır.
+            if re.fullmatch(r"-?\d+\.\d{1,2}", s):
+                pass
+            elif re.fullmatch(r"-?\d+\.\d+", s):
+                pass
+            else:
+                s = s.replace(".", "")
+        try:
+            return float(s)
+        except ValueError:
+            return 0.0
+
+    @staticmethod
+    def _portal_extract_belge_no(d):
+        if not isinstance(d, dict):
+            return ""
+        # GİB TASLAKLARI_GETIR listesi çoğunlukla belgeNo döner (belgeNumarasi değil).
+        for k in (
+            "belgeNo",
+            "belgeNumarasi",
+            "faturaNo",
+            "fatura_no",
+            "belge_no",
+            "invoiceNumber",
+        ):
+            v = d.get(k)
+            if v is not None and str(v).strip():
+                return str(v).strip()
+        normalized = {}
+        for k, v in d.items():
+            nk = re.sub(r"[^a-z0-9]", "", str(k or "").lower())
+            normalized[nk] = v
+        for nk in ("belgeno", "belgenumarasi", "faturano", "invoicenumber"):
+            v = normalized.get(nk)
+            if v is not None and str(v).strip():
+                return str(v).strip()
+        return ""
+
+    @staticmethod
+    def _portal_extract_ettn(d):
+        if not isinstance(d, dict):
+            return ""
+        for k in ("ettn", "uuid", "faturaUuid", "fatura_uuid", "ettnId"):
+            v = d.get(k)
+            if v is not None and str(v).strip():
+                return str(v).strip()
+        normalized = {}
+        for k, v in d.items():
+            nk = re.sub(r"[^a-z0-9]", "", str(k or "").lower())
+            normalized[nk] = v
+        for nk in ("ettn", "uuid", "faturauuid", "ettnid"):
+            v = normalized.get(nk)
+            if v is not None and str(v).strip():
+                return str(v).strip()
+        return ""
+
+    @staticmethod
+    def _portal_parse_any_date_to_iso(val):
+        """GG/MM/YYYY, GG.AA.YYYY veya YYYY-MM-DD → YYYY-MM-DD."""
+        if val is None:
+            return None
+        if hasattr(val, "strftime"):
+            try:
+                return val.strftime("%Y-%m-%d")
+            except Exception:
+                return None
+        s_full = str(val).strip()
+        if not s_full or s_full.lower() in ("null", "none", "-", "—"):
+            return None
+        s = s_full.split()[0].split("T")[0].strip()
+        m = re.match(r"^(\d{1,2})/(\d{1,2})/(\d{4})$", s)
+        if m:
+            g, a, y = m.group(1), m.group(2), m.group(3)
+            return f"{y}-{int(a):02d}-{int(g):02d}"
+        m2 = re.match(r"^(\d{1,2})\.(\d{1,2})\.(\d{4})$", s)
+        if m2:
+            g, a, y = m2.group(1), m2.group(2), m2.group(3)
+            return f"{y}-{int(a):02d}-{int(g):02d}"
+        m3 = re.match(r"^(\d{1,2})-(\d{1,2})-(\d{4})$", s)
+        if m3:
+            g, a, y = m3.group(1), m3.group(2), m3.group(3)
+            return f"{y}-{int(a):02d}-{int(g):02d}"
+        if re.match(r"^\d{4}-\d{2}-\d{2}$", s):
+            return s[:10]
+        return None
+
+    @staticmethod
+    def _portal_fatura_tarihi_iso(d):
+        """GİB liste satırından fatura/belge/düzenleme tarihini YYYY-MM-DD yapar."""
+        if not isinstance(d, dict):
+            return None
+        for k in (
+            "faturaTarihi",
+            "faturaTar",
+            "belgeTarihi",
+            "duzenlemeTarihi",
+            "duzenlenmeTarihi",
+            "olusturmaTarihi",
+            "tarih",
+            "invoiceDate",
+        ):
+            iso = BestOfficeGIBManager._portal_parse_any_date_to_iso(d.get(k))
+            if iso:
+                return iso
+        norm = {}
+        for k, v in d.items():
+            nk = re.sub(r"[^a-z0-9]", "", str(k).lower())
+            norm[nk] = v
+        for nk in (
+            "faturatarihi",
+            "belgetarihi",
+            "duzenlenmetarihi",
+            "olusturmatarihi",
+            "islemtarihi",
+        ):
+            iso = BestOfficeGIBManager._portal_parse_any_date_to_iso(norm.get(nk))
+            if iso:
+                return iso
+        # Anahtar adı bilinmeyen ama tarih içeren ilk skaler değeri dene.
+        for v in d.values():
+            if isinstance(v, (dict, list)):
+                continue
+            iso = BestOfficeGIBManager._portal_parse_any_date_to_iso(v)
+            if iso:
+                return iso
+        return None
+
+    @staticmethod
+    def _portal_odenecek_tutar(d):
+        if not isinstance(d, dict):
+            return 0.0
+        for k in (
+            "odenecekTutar",
+            "toplamTutar",
+            "genelToplam",
+            "vergilerDahilToplamTutar",
+            "vergilerDahilToplam",
+            "vergilerDahilTutar",
+            "faturaTutari",
+            "tutar",
+            "toplam",
+        ):
+            if k in d and d.get(k) is not None and str(d.get(k)).strip() != "":
+                t = BestOfficeGIBManager._parse_tr_amount_portal(d.get(k))
+                if t != 0.0:
+                    return round(t, 2)
+        best = 0.0
+        for k, v in d.items():
+            if v is None or isinstance(v, (dict, list)):
+                continue
+            nk = re.sub(r"[^a-z0-9]", "", str(k).lower())
+            if nk in ("kdvtutari", "kdvtutar", "hesaplanankdv", "matrah"):
+                continue
+            if any(x in nk for x in ("toplamtutar", "odenecektutar", "geneltoplam", "faturatutar", "vergilerdahil")):
+                t = BestOfficeGIBManager._parse_tr_amount_portal(v)
+                if t > best:
+                    best = t
+        # Son çare: satırdaki skaler değerlerde makul en büyük para değerini al.
+        if best == 0.0:
+            for k, v in d.items():
+                if v is None or isinstance(v, (dict, list)):
+                    continue
+                nk = re.sub(r"[^a-z0-9]", "", str(k).lower())
+                if any(x in nk for x in ("vkn", "tckn", "uuid", "ettn", "id", "belgeno", "belgenumarasi")):
+                    continue
+                t = BestOfficeGIBManager._parse_tr_amount_portal(v)
+                if t > best and t < 10_000_000:
+                    best = t
+        return round(best, 2) if best else 0.0
+
+    @staticmethod
+    def _portal_row_portal_raporunda_goster(d):
+        """İade hariç anlamlı satırlar (taslak + imzalı)."""
+        if not isinstance(d, dict) or not d:
+            return False
+        if str(d.get("faturaTipi") or "SATIS").strip().upper() == "IADE":
+            return False
+        et = BestOfficeGIBManager._portal_extract_ettn(d)
+        bn = BestOfficeGIBManager._portal_extract_belge_no(d)
+        unv = (d.get("aliciUnvanAdSoyad") or d.get("aliciUnvan") or "").strip()
+        if not et and not bn and not unv:
+            return False
+        return True
+
+    @staticmethod
+    def _portal_row_gib_kesinlik(d):
+        """imzalı | taslak | iptal (küçük harf)."""
+        if not isinstance(d, dict):
+            return "taslak"
+        norm = {}
+        for k, v in d.items():
+            nk = re.sub(r"[^a-z0-9]", "", str(k or "").lower())
+            norm[nk] = v
+
+        # Öncelik 1: İptal/itiraz alanında çarpı (x/×/✖/❌) veya iptal metni varsa -> İPTAL.
+        iptal_val = (
+            norm.get("iptalitirazdurumu")
+            or norm.get("iptaldurumu")
+            or norm.get("iptal")
+            or ""
+        )
+        iptal_s = str(iptal_val).strip().lower()
+        if (
+            "iptal" in iptal_s
+            or "i̇ptal" in iptal_s
+            or "red" in iptal_s
+            or "itiraz" in iptal_s
+            or any(ch in str(iptal_val) for ch in ("✖", "❌", "×", "x", "X"))
+        ):
+            return "iptal"
+
+        # Öncelik 2: Onay sütununda tik (✓/✔/☑) veya onaylandı metni varsa -> İMZALI.
+        onay_val = (
+            norm.get("onayli")
+            or norm.get("onaydurumu")
+            or norm.get("durum")
+            or ""
+        )
+        onay_s = str(onay_val).strip().lower()
+        if (
+            any(ch in str(onay_val) for ch in ("✓", "✔", "☑"))
+            or ("onaylan" in onay_s and "onaylanmad" not in onay_s)
+            or onay_s in ("1", "true", "evet")
+        ):
+            return "imzalı"
+
+        # Öncelik 3: Onay sütununda daire/çizgili daire veya onaylanmadı metni -> TASLAK.
+        if (
+            "onaylanmad" in onay_s
+            or "taslak" in onay_s
+            or any(ch in str(onay_val) for ch in ("⊘", "⦸", "◯", "○", "Ø", "ø"))
+            or onay_s in ("0", "false", "hayir")
+        ):
+            return "taslak"
+
+        # Bilinmeyen durumda güvenli varsayılan: taslak (imzalıyı fazla göstermemek için).
+        return "taslak"
+
+    def _portal_row_normalized_rapor(self, d):
+        """Finans GİB raporu API satırı (id yok; route ERP ile birleştirir)."""
+        unvan = (
+            (d.get("aliciUnvanAdSoyad") or d.get("aliciUnvan") or "").strip()
+        )
+        if not unvan:
+            ad = (d.get("aliciAdi") or "").strip()
+            soy = (d.get("aliciSoyadi") or "").strip()
+            unvan = (f"{ad} {soy}".strip()) or "—"
+        bn = self._portal_extract_belge_no(d)
+        et = self._portal_extract_ettn(d)
+        iso = self._portal_fatura_tarihi_iso(d)
+        if not iso:
+            iso = ""
+        tut = self._portal_odenecek_tutar(d)
+        kes = self._portal_row_gib_kesinlik(d)
+        gib_etiket = {"imzalı": "İmzalı", "taslak": "Taslak", "iptal": "İptal"}.get(kes, "Taslak")
+        return {
+            "id": None,
+            "fatura_tarihi": iso,
+            "fatura_no": bn,
+            "ettn": et,
+            "musteri_adi": unvan,
+            "tutar": tut,
+            "kaynak": "gib_portal",
+            "gib_durum": gib_etiket,
+            "gib_kesinlik": kes,
+        }
+
+    def _portal_taslaklari_data_raw(self, bas_s: str, bit_s: str, hangi_tip: str):
+        """
+        TASLAKLARI_GETIR cevabını JSON’daki gibi ham dict listesi olarak alır
+        (eArsivPortal’ın create_model ile bazı anahtarları budaması riskine karşı).
+        """
+        self._ensure_client()
+        try:
+            resp = self._client_dispatch(
+                "EARSIV_PORTAL_TASLAKLARI_GETIR",
+                "RG_BASITTASLAKLAR",
+                {
+                    "baslangic": bas_s,
+                    "bitis": bit_s,
+                    "hangiTip": hangi_tip or "5000/30000",
+                    "table": [],
+                },
+            )
+        except Exception as e:
+            _log.warning("GİB TASLAKLARI_GETIR (%s–%s tip=%s): %s", bas_s, bit_s, hangi_tip, e)
+            return []
+        if not isinstance(resp, dict):
+            return []
+        data = resp.get("data")
+        if data is None:
+            return []
+        if isinstance(data, dict):
+            inner = (
+                data.get("fatura")
+                or data.get("faturalar")
+                or data.get("liste")
+                or data.get("rows")
+            )
+            if isinstance(inner, list):
+                data = inner
+            elif inner is None and (data.get("ettn") or data.get("belgeNo") or data.get("belgeNumarasi")):
+                return [data]
+            else:
+                return []
+        if not isinstance(data, list):
+            return []
+        out = []
+        for row in data:
+            if isinstance(row, dict):
+                out.append(row)
+            else:
+                d = self._to_dict(row)
+                if d:
+                    out.append(d)
+        return out
+
+    @_retry_on_connection(max_attempts=3, delay=2.0)
+    def portal_kesilen_fatura_listesi_normalized(self, bas_date, bit_date):
+        """
+        GİB TASLAKLARI_GETIR ile kesinleşmiş satış satırlarını çeker; tarih filtresi
+        portalın kullandığı alan ERP’den farklı olabileceği için sorgu aralığı genişletilir,
+        sonuç kullanıcının seçtiği fatura tarihine göre süzülür. Uzun aralıklar günlük dilimlerle taranır.
+        """
+        from datetime import date as date_cls
+        from datetime import timedelta
+
+        self._ensure_client()
+        self._fresh_login()
+
+        try:
+            pad_before = int(os.getenv("GIB_PORTAL_LISTE_GUN_ONCE", "62").strip() or "62")
+        except ValueError:
+            pad_before = 62
+        try:
+            pad_after = int(os.getenv("GIB_PORTAL_LISTE_GUN_SONRA", "14").strip() or "14")
+        except ValueError:
+            pad_after = 14
+        try:
+            chunk_days = int(os.getenv("GIB_PORTAL_LISTE_CHUNK_GUN", "8").strip() or "8")
+        except ValueError:
+            chunk_days = 8
+        if chunk_days < 1:
+            chunk_days = 1
+
+        ht_raw = (os.getenv("GIB_PORTAL_LISTE_HANGI_TIP") or "5000/30000").strip()
+        hangi_tips = [t.strip() for t in ht_raw.split("|") if t.strip()] or ["5000/30000"]
+
+        bas_e = bas_date - timedelta(days=max(0, pad_before))
+        bit_e = bit_date + timedelta(days=max(0, pad_after))
+        today = date_cls.today()
+        if bit_e > today + timedelta(days=2):
+            bit_e = today + timedelta(days=2)
+
+        seen_bn = set()
+        seen_et = set()
+        merged_raw = []
+        cur = bas_e
+        while cur <= bit_e:
+            chunk_end = min(cur + timedelta(days=chunk_days - 1), bit_e)
+            bas_s = cur.strftime("%d/%m/%Y")
+            bit_s = chunk_end.strftime("%d/%m/%Y")
+            for ht in hangi_tips:
+                for d in self._portal_taslaklari_data_raw(bas_s, bit_s, ht):
+                    if not isinstance(d, dict):
+                        continue
+                    bn = self._portal_extract_belge_no(d).strip().upper()
+                    et = self._portal_extract_ettn(d).strip().lower()
+                    if bn and bn in seen_bn:
+                        continue
+                    if et and et in seen_et:
+                        continue
+                    if bn:
+                        seen_bn.add(bn)
+                    if et:
+                        seen_et.add(et)
+                    merged_raw.append(d)
+                time.sleep(0.22)
+            cur = chunk_end + timedelta(days=1)
+
+        items = []
+        seen_out = set()
+        for d in merged_raw:
+            if not d or not self._portal_row_portal_raporunda_goster(d):
+                continue
+            it = self._portal_row_normalized_rapor(d)
+            fn = (it.get("fatura_no") or "").strip().upper()
+            et = (it.get("ettn") or "").strip().lower()
+            iso = (it.get("fatura_tarihi") or "").strip()
+            if iso:
+                try:
+                    inv_d = date_cls.fromisoformat(iso[:10])
+                    if inv_d < bas_date or inv_d > bit_date:
+                        continue
+                except ValueError:
+                    pass
+            key = fn or et
+            if not key:
+                continue
+            if key in seen_out:
+                continue
+            seen_out.add(key)
+            items.append(it)
+        return items
+
+    @staticmethod
     def _oid_hunt_in_dict(obj, depth=0, max_depth=12):
         """GİB dispatch yanıtında oid — dict/list iç içe, farklı anahtar adları."""
         if obj is None or depth > max_depth:

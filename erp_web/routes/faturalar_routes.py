@@ -3755,12 +3755,15 @@ def api_tahsilat_raporu():
 @bp.route("/api/gib-kesilmis-fatura-raporu")
 @faturalar_gerekli
 def api_gib_kesilmis_fatura_raporu():
-    """GİB SMS ile kesinleşmiş faturalar (not: GİB İMZALANDI); taslaklar hariç. Finans / Rapor sekmesi."""
+    """GİB portalı + ERP: kesinleşmiş e-arşiv satış faturaları; taslaklar hariç. Finans / Rapor sekmesi."""
     try:
+        from gib_earsiv import BestOfficeGIBManager
+
         ensure_faturalar_amount_columns()
         bugun = date.today()
         bas_raw = (request.args.get("baslangic") or "").strip()
         bit_raw = (request.args.get("bitis") or "").strip()
+        sadece_erp = (request.args.get("sadece_erp") or "").strip().lower() in ("1", "true", "evet", "yes")
         try:
             bas = datetime.strptime(bas_raw[:10], "%Y-%m-%d").date() if len(bas_raw) >= 10 else bugun
         except ValueError:
@@ -3797,18 +3800,57 @@ def api_gib_kesilmis_fatura_raporu():
             """,
             (bas, bit),
         )
-        items = [_row_serializable(r) for r in (rows or [])]
-        toplam = sum(float(it.get("tutar") or 0) for it in items)
-        return jsonify(
-            {
-                "ok": True,
-                "baslangic": bas.strftime("%Y-%m-%d"),
-                "bitis": bit.strftime("%Y-%m-%d"),
-                "items": items,
-                "toplam": round(toplam, 2),
-                "adet": len(items),
-            }
-        )
+        erp_items = [_row_serializable(r) for r in (rows or [])]
+        gib_hata = None
+        gib_kullanildi = False
+        portal_norm = []
+        if not sadece_erp:
+            try:
+                gib = BestOfficeGIBManager()
+                if gib.is_available() and getattr(gib, "client_type", "") == "earsivportal":
+                    portal_norm = gib.portal_kesilen_fatura_listesi_normalized(bas, bit) or []
+                    gib_kullanildi = True
+            except Exception as ex_gib:
+                gib_hata = str(ex_gib)
+                logging.getLogger(__name__).warning("GİB portal kesilmiş fatura listesi: %s", ex_gib)
+
+        if gib_kullanildi:
+            items = _merge_gib_kesilmis_portal_ve_erp(portal_norm or [], erp_items)
+        else:
+            items = erp_items
+
+        gib_erp_disi = sum(1 for it in items if (it or {}).get("kaynak") == "gib_portal")
+
+        def _tut(it):
+            try:
+                return float((it or {}).get("tutar") or 0)
+            except (TypeError, ValueError):
+                return 0.0
+
+        def _taslak_satir(it):
+            return (it or {}).get("gib_durum") == "Taslak"
+
+        def _iptal_satir(it):
+            return (it or {}).get("gib_durum") == "İptal"
+
+        toplam_imzali = sum(_tut(it) for it in items if not _taslak_satir(it) and not _iptal_satir(it))
+        toplam_taslak = sum(_tut(it) for it in items if _taslak_satir(it))
+        adet_taslak = sum(1 for it in items if _taslak_satir(it))
+        payload = {
+            "ok": True,
+            "baslangic": bas.strftime("%Y-%m-%d"),
+            "bitis": bit.strftime("%Y-%m-%d"),
+            "items": items,
+            "toplam": round(toplam_imzali, 2),
+            "toplam_taslak": round(toplam_taslak, 2),
+            "adet": len(items),
+            "adet_taslak": adet_taslak,
+            "gib_portal_kullanildi": gib_kullanildi,
+            "gib_portal_esik_adet": gib_erp_disi,
+        }
+        if gib_hata:
+            payload["gib_portal_uyari"] = gib_hata
+        return jsonify(payload)
     except Exception as e:
         logging.getLogger(__name__).exception("api_gib_kesilmis_fatura_raporu")
         return jsonify({"ok": False, "mesaj": str(e)}), 500
@@ -3935,6 +3977,83 @@ def _extract_gib_ettn_from_obj(obj):
         if v is not None and str(v).strip():
             return str(v).strip()
     return ""
+
+
+def _merge_gib_kesilmis_portal_ve_erp(portal_items, erp_items):
+    """
+    GİB portal listesi ile ERP faturalar satırlarını tekilleştirir.
+    Aynı belge no veya ETTN varsa ERP satırı (id) korunur; yalnızca GİB'de olanlar eklenir.
+    """
+    portal_items = portal_items or []
+    erp_items = erp_items or []
+    erp_rows = []
+    for e in erp_items:
+        row = dict(e)
+        row["kaynak"] = "erp"
+        row.setdefault("gib_durum", "İmzalı")
+        erp_rows.append(row)
+
+    key_to_erp = {}
+    for e in erp_rows:
+        fn = (e.get("fatura_no") or "").strip().upper()
+        et = (e.get("ettn") or "").strip().lower()
+        keys = []
+        if fn:
+            keys.append(fn)
+        if et:
+            keys.append(et)
+        if not keys:
+            keys.append(f"erp_id_{e.get('id')}")
+        for k in keys:
+            key_to_erp[k] = e
+
+    result = []
+    added_erp_ids = set()
+    for p in portal_items:
+        p = dict(p)
+        pfn = (p.get("fatura_no") or "").strip().upper()
+        pet = str(p.get("ettn") or "").strip().lower()
+        erp_hit = None
+        if pfn and pfn in key_to_erp:
+            erp_hit = key_to_erp[pfn]
+        if erp_hit is None and pet and pet in key_to_erp:
+            erp_hit = key_to_erp[pet]
+        if erp_hit is not None:
+            eid = erp_hit.get("id")
+            if eid not in added_erp_ids:
+                erp_hit["gib_durum"] = "İmzalı"
+                p_tarih = (p.get("fatura_tarihi") or "").strip()
+                if p_tarih and not (str(erp_hit.get("fatura_tarihi") or "").strip()):
+                    erp_hit["fatura_tarihi"] = p_tarih
+                try:
+                    er_t = float(erp_hit.get("tutar") or 0)
+                except (TypeError, ValueError):
+                    er_t = 0.0
+                try:
+                    pt = float(p.get("tutar") or 0)
+                except (TypeError, ValueError):
+                    pt = 0.0
+                if er_t == 0 and pt:
+                    erp_hit["tutar"] = pt
+                result.append(erp_hit)
+                added_erp_ids.add(eid)
+        else:
+            p["kaynak"] = "gib_portal"
+            result.append(p)
+
+    for e in erp_rows:
+        eid = e.get("id")
+        if eid is not None and eid not in added_erp_ids:
+            e.setdefault("gib_durum", "İmzalı")
+            result.append(e)
+
+    def _sort_tuple(x):
+        fd = str(x.get("fatura_tarihi") or "")
+        fn = str(x.get("fatura_no") or "")
+        return (fd, fn)
+
+    result.sort(key=_sort_tuple, reverse=True)
+    return result
 
 
 def _gib_portal_html_cache_dir_abs() -> str:
