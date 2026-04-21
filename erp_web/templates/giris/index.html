@@ -916,7 +916,11 @@
     width: min(168px, 100%);
     max-width: 100%;
 }
-.form-grid select#giris_form_grup_select {
+.form-grid select#giris_form_grup_select,
+.form-grid .giris-grup2-row #giris_grup2_yeni_etiket {
+    max-width: 100%;
+}
+.form-grid .giris-grup2-row #giris_grup2_btn {
     max-width: 100%;
 }
 .form-section {
@@ -2062,12 +2066,14 @@
     line-height: 1.2;
     min-width: 0;
 }
-.fatura-rapor-tablo.fatura-rapor-tablo--firma thead th.fatura-rapor-firma-th-drg[data-fr-col-id="5"],
-.fatura-rapor-tablo.fatura-rapor-tablo--firma thead th.fatura-rapor-firma-th-drg[data-fr-col-id="6"] {
+.fatura-rapor-tablo.fatura-rapor-tablo--firma thead th.fatura-rapor-firma-th-drg[data-fr-col-id="9"],
+.fatura-rapor-tablo.fatura-rapor-tablo--firma thead th.fatura-rapor-firma-th-drg[data-fr-col-id="10"],
+.fatura-rapor-tablo.fatura-rapor-tablo--firma thead th.fatura-rapor-firma-th-drg[data-fr-col-id="11"] {
     cursor: pointer;
 }
-.fatura-rapor-tablo.fatura-rapor-tablo--firma thead th.fatura-rapor-firma-th-drg[data-fr-col-id="5"]:active,
-.fatura-rapor-tablo.fatura-rapor-tablo--firma thead th.fatura-rapor-firma-th-drg[data-fr-col-id="6"]:active {
+.fatura-rapor-tablo.fatura-rapor-tablo--firma thead th.fatura-rapor-firma-th-drg[data-fr-col-id="9"]:active,
+.fatura-rapor-tablo.fatura-rapor-tablo--firma thead th.fatura-rapor-firma-th-drg[data-fr-col-id="10"]:active,
+.fatura-rapor-tablo.fatura-rapor-tablo--firma thead th.fatura-rapor-firma-th-drg[data-fr-col-id="11"]:active {
     cursor: pointer;
 }
 .fatura-rapor-firma-th--filtered .fatura-rapor-firma-th-filter-label {
@@ -2288,8 +2294,11 @@
                         <label class="required">Vergi Numarası</label>
                         <input type="text" id="tax_number" required maxlength="11" inputmode="numeric" oninput="vergiNoRakamGiris(this)" onchange="hesaplaYuzde()" placeholder="10 hane VKN veya Yetkili T.C. ile aynı 11 hane">
                         
-                        <label class="required">Vergi Dairesi</label>
-                        <input type="text" id="vergi_dairesi" value="kavaklıdere" onchange="hesaplaYuzde()">
+                        <label class="required" for="vergi_dairesi">Vergi Dairesi</label>
+                        <div style="min-width:0;">
+                            <input type="text" id="vergi_dairesi" list="vergi_dairesi_datalist" value="Kavaklıdere" maxlength="120" autocomplete="off" placeholder="Listeden seçin veya yazın" onchange="hesaplaYuzde()" title="Vergi dairesi önerileri">
+                            <datalist id="vergi_dairesi_datalist"></datalist>
+                        </div>
                         
                         <label>MERSİS Numarası</label>
                         <input type="text" id="mersis" onchange="hesaplaYuzde()">
@@ -2452,6 +2461,13 @@
                         </div>
                         <label id="kapanis_tarihi_label" style="display:none;">Kapanış Tarihi</label>
                         <input type="date" id="kapanis_tarihi" style="display:none;" onchange="hesaplaYuzde()" title="Şirket kapanış tarihi (pasif seçildiğinde)">
+                        <label for="giris_grup2_btn">Grup 2</label>
+                        <div class="giris-grup2-row" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;min-width:0;">
+                            <input type="hidden" id="giris_grup2_secili_json" value="[]">
+                            <button type="button" id="giris_grup2_btn" title="Çoklu etiket seçin (fatura raporu «Hizmet türü» filtresi gibi). Hepsi: süzgeç/etiket yok." onclick="girisGrup2PanelAc(); return false;" style="flex:1;min-width:160px;max-width:320px;padding:8px 10px;border-radius:4px;border:1px solid #2d4060;background:#0f2537;color:#e0f7fa;font-size:13px;text-align:left;cursor:pointer;">Hepsi</button>
+                            <input type="text" id="giris_grup2_yeni_etiket" placeholder="Yeni etiket adı" maxlength="200" title="Listede yoksa buradan ekleyin" style="flex:1;min-width:120px;max-width:220px;padding:8px 10px;border-radius:4px;border:1px solid #2d4060;background:#0f2537;color:#e0f7fa;font-size:13px;">
+                            <button type="button" class="auto-btn" onclick="girisGrup2YeniEkle(); return false;" title="Etiketi kayda al ve seçime ekle" style="padding:8px 14px;border-radius:4px;border:none;background:#00838f;color:#fff;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">+ Listeye ekle</button>
+                        </div>
                     </div>
                 </div>
                 
@@ -3049,6 +3065,7 @@
                     <label class="fatura-rapor-opt"><input type="checkbox" id="fatura_rapor_pasif_dahil"> Pasifler Dahil</label>
                     <label class="fatura-rapor-opt" title="İşaretli değilken aynı firma adına sahip kartlardan yalnızca biri listelenir (önce aktif, aynıysa küçük müşteri no). İşaretleyince tüm çiftler gelir."><input type="checkbox" id="fatura_rapor_cift_olanlar"> Çift olanlar</label>
                     <label class="fatura-rapor-opt" title="Açıkken filtreler, tekil liste sütun düzeni/sıralaması ve fatura satırı tablosu ayarları tarayıcıda saklanır; sayfa yenilense korunur. Kapalıyken yalnızca bu sekme oturumu için geçerlidir."><input type="checkbox" id="fatura_rapor_ayarlari_kaydet" autocomplete="off"> Ayarları kaydet</label>
+                    <label class="fatura-rapor-opt" title="Müşteri kartında «Bizim Hesap» işaretli carileri listelemek için sunucuya filtre uygular; Listeyi getir ile yenileyin."><input type="checkbox" id="fatura_rapor_bizim_hesap" autocomplete="off"> Bizim Hesap</label>
                     <span id="fatura_rapor_opt_sadece_wrap" style="display:none;"><label class="fatura-rapor-opt"><input type="checkbox" id="fatura_rapor_sadece_kesilen"> Yalnız kesilen faturalar (fatura yok satırı ekleme)</label></span>
                 </div>
                 <div id="fatura_rapor_durum" class="fatura-rapor-durum fatura-rapor-durum--idle" role="status" aria-live="polite" aria-atomic="true" hidden></div>
@@ -3088,9 +3105,27 @@
         </div>
         <div class="tab-content" id="tab-9">
             <div class="fatura-rapor-wrap giris-fatura-rapor-wrap fatura-rapor-wrap--compact">
-                <div class="fatura-rapor-filtre">
-                    <button type="button" class="auto-btn run" id="giris_grup_ozet_btn" onclick="girisGrupOzetListeYukle({ force: true })"><i class="fa fa-list"></i> Listeyi yenile</button>
-                    <span style="font-size:12px;color:#90a4ae;margin-left:6px;">Alt carilerin fatura ve tahsilat toplamları (konsolide). Grup satırına tıklayınca alt firmalar açılır.</span>
+                <div class="fatura-rapor-filtre" id="giris_grup_ozet_filtre_wrap" style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;">
+                    <strong style="font-size:12px;color:#cfd8dc;">Tüm gruplar:</strong>
+                    <div id="giris_grup_multi_wrap" style="position:relative;min-width:220px;max-width:340px;">
+                        <button type="button" id="giris_grup_multi_btn" class="auto-btn" style="height:30px;min-width:220px;max-width:340px;display:inline-flex;align-items:center;justify-content:space-between;gap:8px;" title="Seçili gruplar (çoklu seçim)">
+                            <span id="giris_grup_multi_btn_label">Tüm gruplar</span>
+                            <i class="fa fa-caret-down"></i>
+                        </button>
+                        <div id="giris_grup_multi_panel" style="display:none;position:fixed;z-index:6000;min-width:260px;max-width:360px;max-height:280px;overflow:auto;background:#0b2942;border:1px solid #284e67;border-radius:8px;padding:8px 10px;box-shadow:0 8px 24px rgba(0,0,0,.35);"></div>
+                    </div>
+                    <button type="button" class="auto-btn run" id="giris_grup_ozet_btn" onclick="girisGrupOzetListeYukle({ force: true })"><i class="fa fa-filter"></i> Göster</button>
+                    <span style="font-size:12px;color:#90a4ae;">Alt carilerin fatura ve tahsilat toplamları (konsolide). Grup satırına tıklayınca alt firmalar açılır.</span>
+                    <span class="giris-grup-kapsam-rad" style="display:inline-flex;align-items:center;gap:14px;font-size:12px;color:#b0bec5;white-space:nowrap;">
+                        <label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;margin:0;">
+                            <input type="radio" name="giris_grup_alt_kapsam" id="giris_grup_kapsam_aktif" value="aktif" checked>
+                            Sadece aktif
+                        </label>
+                        <label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;margin:0;">
+                            <input type="radio" name="giris_grup_alt_kapsam" id="giris_grup_kapsam_hepsi" value="hepsi">
+                            Hepsi
+                        </label>
+                    </span>
                 </div>
                 <div id="giris_grup_ozet_durum" class="fatura-rapor-durum fatura-rapor-durum--idle" role="status" aria-live="polite" aria-atomic="true" hidden></div>
                 <div id="giris_grup_ozet_tablo_scroll" class="fatura-rapor-tablo-scroll">
@@ -3102,6 +3137,8 @@
                                 <th class="num" title="Bu gruba bağlı cari sayısı">Alt cari</th>
                                 <th class="num" id="giris_grup_ozet_th_aylik" title="Alt carilerde fatura tarihi bu takvim ayı içindeki faturaların toplamı">Aylık borç</th>
                                 <th class="num">Toplam borç (fatura)</th>
+                                <th class="num" title="Alt carilerde sözleşme başlangıç (giriş) günü; grupta en büyük gün">Gün</th>
+                                <th class="num" title="Firma özeti ile aynı grid mantığı; grupta alt cariler arası en yüksek geciken ay">Geciken ay</th>
                                 <th class="num">Toplam alacak (tahsilat)</th>
                                 <th class="num">Net</th>
                             </tr>
@@ -3412,14 +3449,32 @@ var girisSonMusteriDetayHafifYukleme = false;
 /** Sözleşme reel sekmesi: dönem başlangıç yılı (sözleşme yıldönümü) → KDV dahil sabit tutar (sunucu + yerel). */
 window.__musteriReelDonemTutarlari = window.__musteriReelDonemTutarlari || {};
 let musteriler = [];
+window.__faturaRaporReqSeq = window.__faturaRaporReqSeq || 0;
+window.__faturaRaporAktifCtrl = window.__faturaRaporAktifCtrl || null;
 
 /** Flask reloader / ağ kopması: fetch bir kez daha dener (500 ms sonra). AbortError tekrarlanmaz. */
 function girisFetchAgKopmasinaKarsi(url, options, denemeSayisi) {
     denemeSayisi = denemeSayisi == null ? 2 : Math.max(1, parseInt(denemeSayisi, 10) || 2);
     var opts = options || {};
+    var timeoutMs = Math.max(1000, parseInt((opts && opts.timeoutMs) || 10000, 10) || 10000);
     function dene(kalan) {
-        return fetch(url, opts).catch(function (e) {
-            if (e && e.name === 'AbortError') throw e;
+        var reqOpts = Object.assign({}, opts);
+        delete reqOpts.timeoutMs;
+        var ctrl = null;
+        var timer = null;
+        if (!reqOpts.signal && typeof AbortController !== 'undefined') {
+            ctrl = new AbortController();
+            reqOpts.signal = ctrl.signal;
+            timer = setTimeout(function () {
+                try { ctrl.abort(); } catch (eAbort) {}
+            }, timeoutMs);
+        }
+        return fetch(url, reqOpts)
+            .finally(function () {
+                if (timer) clearTimeout(timer);
+            })
+            .catch(function (e) {
+            if (e && e.name === 'AbortError') throw new Error('İstek zaman aşımı (' + Math.round(timeoutMs / 1000) + ' sn).');
             if (kalan <= 1) throw e;
             return new Promise(function (resolve, reject) {
                 setTimeout(function () {
@@ -3435,8 +3490,16 @@ function girisFetchAgKopmasinaKarsi(url, options, denemeSayisi) {
 function girisFetchJsonSafely(r) {
     var ct = (r.headers.get('content-type') || '').toLowerCase();
     return r.text().then(function (t) {
-        if (t && /^[\s]*</.test(t)) {
-            throw new Error('Oturum süresi doldu veya giriş gerekli. Sayfayı yenileyin.');
+        var st = r.status || 0;
+        var looksHtml = !!(t && /^[\s]*</.test(t));
+        if (looksHtml) {
+            if (st === 401 || st === 403) {
+                throw new Error('Oturum süresi doldu veya giriş gerekli. Sayfayı yenileyin.');
+            }
+            if (st >= 500 && st < 600) {
+                throw new Error('Sunucu hata sayfası döndü (HTTP ' + st + '). Veritabanı veya uygulama hatası olabilir; konsoldaki Network sekmesinden yanıtı kontrol edin.');
+            }
+            throw new Error('Sunucu beklenmeyen HTML yanıt döndü (HTTP ' + (st || '?') + '). Bu genelde oturum değil, ara katman veya hata sayfasıdır.');
         }
         var data;
         try {
@@ -3445,6 +3508,9 @@ function girisFetchJsonSafely(r) {
             throw new Error('Sunucu yanıtı okunamadı.');
         }
         if (!r.ok) {
+            if (data && Number(data.error_code) === 10013) {
+                throw new Error('Veritabanı erişim kısıtlaması (10013)');
+            }
             var msg = (data && (data.mesaj || data.error)) ? (data.mesaj || data.error) : ('HTTP ' + r.status);
             throw new Error(msg);
         }
@@ -3455,6 +3521,9 @@ function girisFetchJsonSafely(r) {
 /** fetch / JSON hataları için kullanıcıya gösterilecek kısa açıklama. */
 function girisSunucuBaglantiUyariMetni(err) {
     var m = (err && err.message) ? String(err.message) : String(err || '');
+    if (m.indexOf('10013') >= 0) {
+        return 'Veritabanı erişim kısıtlaması (10013). Ağ/VPN veya güvenlik duvarı nedeniyle bağlantı engellenmiş olabilir.';
+    }
     if (m === 'Failed to fetch') {
         return 'Sunucuya ulaşılamadı. Flask yeniden başlarken (IDE’de dosya kaydı) veya ağ kesintisinde olur; birkaç saniye bekleyip tekrar deneyin. Kalıcı geliştirmede sunucuyu BESTOFFICE_DEV_NO_RELOAD=1 ile başlatın.';
     }
@@ -4886,7 +4955,10 @@ function switchTab(index) {
                 }
             }
             if (effectiveIndex === 9) {
-                if (typeof girisGrupOzetListeYukle === 'function') girisGrupOzetListeYukle();
+                if (typeof girisGrupFiltreUiInit === 'function') girisGrupFiltreUiInit();
+                if (typeof girisGrupOzetDurumGoster === 'function') {
+                    girisGrupOzetDurumGoster('idle', 'Tüm gruplar listesinden seçim yapıp "Uygula" tıklayın.');
+                }
             }
             if (effectiveIndex === 1) {
                 var midSenaryo = selectedId;
@@ -4951,6 +5023,254 @@ function girisGrupOzetParaYaz(v) {
     return n.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ₺';
 }
 
+function girisGrupSozlesmeGunStr(v) {
+    var n = parseInt(v, 10);
+    if (isNaN(n) || n < 1 || n > 31) return '—';
+    return String(n);
+}
+
+function girisGrupGecikenAyStr(v) {
+    var n = parseInt(v, 10);
+    if (isNaN(n) || n < 0) return '0';
+    return String(n);
+}
+
+/** Grup konsolide: alt cari kapsamı (API `alt_cari_kapsam`). Varsayılan yalnız aktif. */
+function girisGrupOzetAltKapsamOku() {
+    var h = document.getElementById('giris_grup_kapsam_hepsi');
+    return (h && h.checked) ? 'hepsi' : 'aktif';
+}
+
+function girisGrupOzetKapsamRadiosInit() {
+    var bar = document.getElementById('giris_grup_ozet_filtre_wrap');
+    if (!bar || bar.__girisGrupKapsamOk) return;
+    bar.__girisGrupKapsamOk = true;
+    bar.addEventListener('change', function (ev) {
+        var t = ev.target;
+        if (!t || t.name !== 'giris_grup_alt_kapsam') return;
+        window.__girisGrupOzetReportCache = null;
+        window.__girisGrupOzetReportCacheKey = null;
+    });
+}
+
+function girisGrupTipiOku() {
+    return 'hepsi';
+}
+
+window.__girisGrupSecenekler = window.__girisGrupSecenekler || [];
+window.__girisGrupSeciliIds = window.__girisGrupSeciliIds || [];
+window.__girisGrupSeciliIdsDraft = window.__girisGrupSeciliIdsDraft || [];
+
+function girisGrupSeciliIdsOku() {
+    var out = Array.isArray(window.__girisGrupSeciliIds) ? window.__girisGrupSeciliIds.slice() : [];
+    out.sort(function (a, b) { return a - b; });
+    return out.filter(function (n, idx, arr) { return idx === 0 || n !== arr[idx - 1]; });
+}
+
+function girisGrupPanelSeciliIdsOku() {
+    var panel = document.getElementById('giris_grup_multi_panel');
+    if (!panel) return [];
+    var nodes = panel.querySelectorAll('input[type="checkbox"][data-grup-id]:checked');
+    var out = [];
+    for (var i = 0; i < nodes.length; i++) {
+        var n = parseInt(nodes[i].getAttribute('data-grup-id'), 10);
+        if (!isNaN(n) && n > 0) out.push(n);
+    }
+    out.sort(function (a, b) { return a - b; });
+    return out.filter(function (n, idx, arr) { return idx === 0 || n !== arr[idx - 1]; });
+}
+
+function girisGrupFiltreAnahtariOku() {
+    var kap = girisGrupOzetAltKapsamOku();
+    var ids = girisGrupSeciliIdsOku();
+    return kap + '|' + ids.join(',');
+}
+
+function girisGrupFiltreSecenekleriYukle() {
+    var panel = document.getElementById('giris_grup_multi_panel');
+    var lbl = document.getElementById('giris_grup_multi_btn_label');
+    if (!panel) return Promise.resolve();
+    if (lbl) lbl.textContent = 'Yükleniyor…';
+    panel.innerHTML = '<div style="font-size:12px;color:#90a4ae;">Yükleniyor…</div>';
+    // Müşteri kartındaki grup dropdown'u ile aynı kaynaktan beslenir.
+    return girisFetchAgKopmasinaKarsi('/cari-kart/api/groups', { credentials: 'same-origin' }, 1)
+        .then(function (r) { return girisFetchJsonSafely(r); })
+        .then(function (j) {
+            var arr = (j && j.ok && Array.isArray(j.groups)) ? j.groups : [];
+            window.__girisGrupSecenekler = arr.map(function (g) {
+                var gid = parseInt(g.id, 10);
+                if (isNaN(gid) || gid < 1) return null;
+                var nm = String(g.name || g.musteri_adi || ('Grup #' + gid)).trim();
+                return { id: gid, name: nm || ('Grup #' + gid) };
+            }).filter(function (x) { return !!x; });
+            window.__girisGrupSecenekler.sort(function (a, b) {
+                return String(a.name || '').localeCompare(String(b.name || ''), 'tr');
+            });
+            var validIds = {};
+            window.__girisGrupSecenekler.forEach(function (g) { validIds[g.id] = true; });
+            window.__girisGrupSeciliIds = (window.__girisGrupSeciliIds || []).filter(function (id) { return !!validIds[id]; });
+            if (!window.__girisGrupSeciliIds.length) {
+                window.__girisGrupSeciliIds = window.__girisGrupSecenekler.map(function (g) { return g.id; });
+            }
+            window.__girisGrupSeciliIdsDraft = girisGrupSeciliIdsOku().slice();
+            if (typeof girisGrupMultiPanelRender === 'function') girisGrupMultiPanelRender();
+            if (typeof girisGrupMultiBtnLabelGuncelle === 'function') girisGrupMultiBtnLabelGuncelle();
+        })
+        .catch(function () {
+            window.__girisGrupSecenekler = [];
+            window.__girisGrupSeciliIds = [];
+            window.__girisGrupSeciliIdsDraft = [];
+            if (typeof girisGrupMultiPanelRender === 'function') girisGrupMultiPanelRender();
+            if (typeof girisGrupMultiBtnLabelGuncelle === 'function') girisGrupMultiBtnLabelGuncelle();
+        });
+}
+
+function girisGrupMultiBtnLabelGuncelle() {
+    var lbl = document.getElementById('giris_grup_multi_btn_label');
+    if (!lbl) return;
+    var arr = Array.isArray(window.__girisGrupSecenekler) ? window.__girisGrupSecenekler : [];
+    var sec = girisGrupSeciliIdsOku();
+    if (!arr.length) { lbl.textContent = 'Grup bulunamadı'; return; }
+    if (!sec.length || sec.length === arr.length) { lbl.textContent = 'Tüm gruplar'; return; }
+    lbl.textContent = String(sec.length) + ' grup seçildi';
+}
+
+function girisGrupMultiPanelRender() {
+    var panel = document.getElementById('giris_grup_multi_panel');
+    if (!panel) return;
+    var arr = Array.isArray(window.__girisGrupSecenekler) ? window.__girisGrupSecenekler : [];
+    var sec = Array.isArray(window.__girisGrupSeciliIdsDraft) ? window.__girisGrupSeciliIdsDraft.slice() : girisGrupSeciliIdsOku();
+    var secMap = {};
+    sec.forEach(function (id) { secMap[id] = true; });
+    if (!arr.length) {
+        panel.innerHTML = '<div style="font-size:12px;color:#90a4ae;">Grup bulunamadı.</div>';
+        return;
+    }
+    var hepsi = sec.length === arr.length;
+    var h = [
+        '<label style="display:flex;flex-direction:row;align-items:center;justify-content:flex-start;gap:8px;font-size:12px;line-height:1.2;color:#d6e3eb;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.08);margin-bottom:6px;cursor:pointer;">',
+        '<input type="checkbox" data-grup-all="1" ' + (hepsi ? 'checked' : '') + ' style="margin:0;flex:0 0 auto;width:14px;height:14px;">',
+        '<span style="display:inline-block;">Tümü</span>',
+        '</label>'
+    ];
+    arr.forEach(function (g) {
+        h.push('<label style="display:flex;flex-direction:row;align-items:center;justify-content:flex-start;gap:8px;font-size:12px;line-height:1.2;color:#d6e3eb;padding:4px 0;cursor:pointer;">' +
+            '<input type="checkbox" data-grup-id="' + String(g.id) + '" ' + (secMap[g.id] ? 'checked' : '') + ' style="margin:0;flex:0 0 auto;width:14px;height:14px;">' +
+            '<span style="display:inline-block;">' + girisGrupHtmlEsc(g.name) + '</span>' +
+            '</label>');
+    });
+    h.push('<div style="padding-top:8px;border-top:1px solid rgba(255,255,255,.08);margin-top:8px;">' +
+        '<button type="button" id="giris_grup_multi_apply" class="auto-btn run" style="width:100%;height:30px;">Uygula</button>' +
+        '</div>');
+    panel.innerHTML = h.join('');
+}
+
+function girisGrupMultiSecimDegisti(ev) {
+    var t = ev && ev.target;
+    if (!t) return;
+    var arr = Array.isArray(window.__girisGrupSecenekler) ? window.__girisGrupSecenekler : [];
+    var sec = Array.isArray(window.__girisGrupSeciliIdsDraft) ? window.__girisGrupSeciliIdsDraft.slice() : [];
+    if (t.hasAttribute('data-grup-all')) {
+        if (t.checked) sec = arr.map(function (g) { return g.id; });
+        else sec = [];
+    } else if (t.hasAttribute('data-grup-id')) {
+        var gid = parseInt(t.getAttribute('data-grup-id'), 10);
+        if (!isNaN(gid) && gid > 0) {
+            var idx = sec.indexOf(gid);
+            if (t.checked && idx < 0) sec.push(gid);
+            if (!t.checked && idx >= 0) sec.splice(idx, 1);
+        }
+    }
+    window.__girisGrupSeciliIdsDraft = sec;
+    girisGrupMultiPanelRender();
+}
+
+function girisGrupMultiPanelToggle() {
+    var panel = document.getElementById('giris_grup_multi_panel');
+    if (!panel) return;
+    var isOpen = panel.style.display !== 'none' && !!panel.style.display;
+    if (isOpen) {
+        panel.style.display = 'none';
+        return;
+    }
+    window.__girisGrupSeciliIdsDraft = girisGrupSeciliIdsOku().slice();
+    if (typeof girisGrupMultiPanelRender === 'function') girisGrupMultiPanelRender();
+    panel.style.display = 'block';
+    if (typeof girisGrupMultiPanelKonumlandir === 'function') girisGrupMultiPanelKonumlandir();
+}
+
+function girisGrupMultiPanelKapat() {
+    var panel = document.getElementById('giris_grup_multi_panel');
+    if (!panel) return;
+    panel.style.display = 'none';
+}
+
+function girisGrupMultiPanelKonumlandir() {
+    var panel = document.getElementById('giris_grup_multi_panel');
+    var btn = document.getElementById('giris_grup_multi_btn');
+    if (!panel || !btn) return;
+    if (panel.style.display === 'none' || !panel.style.display) return;
+    var r = btn.getBoundingClientRect();
+    panel.style.minWidth = Math.max(260, Math.round(r.width)) + 'px';
+    var ph = panel.offsetHeight || 280;
+    var vw = window.innerWidth || document.documentElement.clientWidth || 0;
+    var vh = window.innerHeight || document.documentElement.clientHeight || 0;
+    var top = Math.round(r.bottom + 6);
+    if (vh > 0 && (top + ph) > (vh - 8)) {
+        top = Math.max(8, vh - ph - 8);
+    }
+    var left = Math.max(8, Math.round(r.left));
+    if (vw > 0 && (left + panel.offsetWidth) > (vw - 8)) {
+        left = Math.max(8, vw - panel.offsetWidth - 8);
+    }
+    panel.style.top = String(top) + 'px';
+    panel.style.left = String(left) + 'px';
+}
+
+function girisGrupMultiUiInit() {
+    var wrap = document.getElementById('giris_grup_multi_wrap');
+    if (!wrap || wrap.__girisGrupMultiOk) return;
+    wrap.__girisGrupMultiOk = true;
+    var btn = document.getElementById('giris_grup_multi_btn');
+    var panel = document.getElementById('giris_grup_multi_panel');
+    if (btn) {
+        btn.addEventListener('click', function (ev) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            girisGrupMultiPanelToggle();
+        });
+    }
+    if (panel) {
+        panel.addEventListener('click', function (ev) { ev.stopPropagation(); });
+        panel.addEventListener('change', girisGrupMultiSecimDegisti);
+        panel.addEventListener('click', function (ev) {
+            var t = ev && ev.target;
+            if (!t || t.id !== 'giris_grup_multi_apply') return;
+            var secFromPanel = girisGrupPanelSeciliIdsOku();
+            var toplam = Array.isArray(window.__girisGrupSecenekler) ? window.__girisGrupSecenekler.length : 0;
+            // Hepsi seçiliyse group_ids göndermeyip "tümü" akışına gidelim.
+            if (toplam > 0 && secFromPanel.length >= toplam) window.__girisGrupSeciliIds = [];
+            else window.__girisGrupSeciliIds = secFromPanel;
+            window.__girisGrupOzetReportCache = null;
+            window.__girisGrupOzetReportCacheKey = null;
+            girisGrupMultiBtnLabelGuncelle();
+            girisGrupMultiPanelKapat();
+        });
+    }
+    document.addEventListener('click', girisGrupMultiPanelKapat);
+    window.addEventListener('resize', girisGrupMultiPanelKonumlandir);
+    window.addEventListener('scroll', girisGrupMultiPanelKonumlandir, true);
+    girisGrupMultiBtnLabelGuncelle();
+}
+
+function girisGrupFiltreUiInit() {
+    var bar = document.getElementById('giris_grup_ozet_filtre_wrap');
+    if (!bar || bar.__girisGrupFiltreUiOk) return;
+    bar.__girisGrupFiltreUiOk = true;
+    if (typeof girisGrupMultiUiInit === 'function') girisGrupMultiUiInit();
+    girisGrupFiltreSecenekleriYukle();
+}
+
 function girisGrupHtmlEsc(s) {
     if (s == null) return '';
     return String(s)
@@ -4971,6 +5291,11 @@ function girisGrupOzetTbodyClickInit() {
     });
 }
 
+function girisGrupOzetGroupChildrenUrl(gid) {
+    var k = (typeof girisGrupOzetAltKapsamOku === 'function') ? girisGrupOzetAltKapsamOku() : 'aktif';
+    return '/cari-kart/api/group-children/' + encodeURIComponent(gid) + '?alt_cari_kapsam=' + encodeURIComponent(k);
+}
+
 function girisGrupAnaSatirToggle(ev, tr) {
     if (ev) ev.preventDefault();
     var gid = tr.getAttribute('data-gid');
@@ -4986,10 +5311,10 @@ function girisGrupAnaSatirToggle(ev, tr) {
     }
     var holder = document.createElement('tr');
     holder.className = 'giris-grup-nested-row';
-    holder.innerHTML = '<td colspan="7"><div class="giris-grup-detay-icerik" style="padding:10px 12px 12px 20px;background:rgba(0,0,0,.18);">Alt firmalar yükleniyor…</div></td>';
+    holder.innerHTML = '<td colspan="9"><div class="giris-grup-detay-icerik" style="padding:10px 12px 12px 20px;background:rgba(0,0,0,.18);">Alt firmalar yükleniyor…</div></td>';
     tr.parentNode.insertBefore(holder, tr.nextSibling);
     var box = holder.querySelector('.giris-grup-detay-icerik');
-    girisFetchAgKopmasinaKarsi('/cari-kart/api/group-children/' + encodeURIComponent(gid), { credentials: 'same-origin' }, 2)
+    girisFetchAgKopmasinaKarsi(girisGrupOzetGroupChildrenUrl(gid), { credentials: 'same-origin' }, 1)
         .then(function (r) { return girisFetchJsonSafely(r); })
         .then(function (j) {
             if (!j || !j.ok) throw new Error((j && j.mesaj) || 'Alt liste alınamadı.');
@@ -5004,7 +5329,7 @@ function girisGrupAnaSatirToggle(ev, tr) {
                 '</div>',
                 '<table class="giris-grup-detay-tablo fatura-rapor-tablo"><thead><tr>',
                 '<th class="num">Cari no</th><th>Firma</th>',
-                '<th class="num">Aylık borç</th><th class="num">Toplam borç</th><th class="num">Alacak</th><th class="num">Net</th>',
+                '<th class="num">Aylık borç</th><th class="num">Toplam borç</th><th class="num">Gün</th><th class="num">Geciken ay</th><th class="num">Alacak</th><th class="num">Net</th>',
                 '<th class="num">İşlem</th></tr></thead><tbody>'
             ];
             ch.forEach(function (c) {
@@ -5016,6 +5341,8 @@ function girisGrupAnaSatirToggle(ev, tr) {
                     '<td>' + girisGrupHtmlEsc(firma || ('#' + mid)) + '</td>' +
                     '<td class="num">' + girisGrupOzetParaYaz(c.borc_month != null ? c.borc_month : 0) + '</td>' +
                     '<td class="num">' + girisGrupOzetParaYaz(c.borc_total) + '</td>' +
+                    '<td class="num">' + girisGrupSozlesmeGunStr(c.sozlesme_gun) + '</td>' +
+                    '<td class="num">' + girisGrupGecikenAyStr(c.geciken_ay) + '</td>' +
                     '<td class="num">' + girisGrupOzetParaYaz(c.alacak_total) + '</td>' +
                     '<td class="num">' + girisGrupOzetParaYaz(c.net_balance) + '</td>' +
                     '<td class="num"><button type="button" class="auto-btn" style="padding:4px 8px;font-size:11px;" data-mid="' + mid + '" onclick="girisGrupDetayMusteriSec(event,' + mid + ')">Aç</button></td>' +
@@ -5038,11 +5365,50 @@ function girisGrupDetayMusteriSec(ev, mid) {
     if (typeof selectMusteri === 'function') selectMusteri(n);
 }
 
-/** Grup konsolide API yanıtı: sayfa açılışında arka planda bir kez alınır; sekme geçişlerinde tekrar istek atılmaz. */
+/** Grup konsolide API yanıtı: son seçilen filtre kombinasyonu için bellekte tutulur. */
 window.__girisGrupOzetReportCache = null;
+window.__girisGrupOzetReportCacheKey = null;
 window.__girisGrupOzetReportInflight = null;
+window.__girisGrupOzetInflightKey = null;
 /** Yalnızca «Listeyi yenile» (force) ile artar; bitmemiş eski isteklerin önbelleği ezmesini engeller. */
 window.__girisGrupOzetWriteToken = 0;
+
+function girisGrupOzetCacheLsKey(filtreKey) {
+    return 'bestoffice_grup_ozet_cache_v1:' + String(filtreKey || '');
+}
+
+function girisGrupOzetCacheLsYaz(filtreKey, payload) {
+    try {
+        if (!payload || !payload.ok) return;
+        localStorage.setItem(girisGrupOzetCacheLsKey(filtreKey), JSON.stringify({ ts: Date.now(), payload: payload }));
+    } catch (e) {}
+}
+
+function girisGrupOzetCacheLsOku(filtreKey) {
+    try {
+        var raw = localStorage.getItem(girisGrupOzetCacheLsKey(filtreKey));
+        if (!raw) return null;
+        var j = JSON.parse(raw);
+        if (!j || !j.payload || !j.payload.ok) return null;
+        return j.payload;
+    } catch (e) {
+        return null;
+    }
+}
+
+function girisGrupOzetOfflineFallbackDene(filtreKey, err) {
+    var cacheJ = girisGrupOzetCacheLsOku(filtreKey);
+    if (!cacheJ) return false;
+    window.__girisGrupOzetReportCache = cacheJ;
+    window.__girisGrupOzetReportCacheKey = filtreKey;
+    var ozetCache = girisGrupOzetListeJsonUygula(cacheJ);
+    if (!ozetCache) return false;
+    var msg = (err && String((err.message || err)).indexOf('10013') >= 0)
+        ? 'Çevrimdışı/Eski Veri gösteriliyor (10013). '
+        : 'Çevrimdışı/Eski Veri gösteriliyor. ';
+    girisGrupOzetDurumGoster('warning', msg + ozetCache);
+    return true;
+}
 
 function girisGrupOzetListeJsonUygula(j) {
     var tbody = document.getElementById('giris_grup_ozet_tbody');
@@ -5065,84 +5431,146 @@ function girisGrupOzetListeJsonUygula(j) {
             '<td class="num">' + String(g.child_count != null ? g.child_count : 0) + '</td>' +
             '<td class="num">' + girisGrupOzetParaYaz(g.borc_month != null ? g.borc_month : 0) + '</td>' +
             '<td class="num">' + girisGrupOzetParaYaz(g.borc_total) + '</td>' +
+            '<td class="num">' + girisGrupSozlesmeGunStr(g.sozlesme_gun) + '</td>' +
+            '<td class="num">' + girisGrupGecikenAyStr(g.geciken_ay) + '</td>' +
             '<td class="num">' + girisGrupOzetParaYaz(g.alacak_total) + '</td>' +
             '<td class="num">' + girisGrupOzetParaYaz(g.net_balance) + '</td>' +
             '</tr>'
         );
     });
     tbody.innerHTML = rows.join('');
+    var kapLbl = meta.alt_cari_kapsam_label ? (' | Kapsam: ' + String(meta.alt_cari_kapsam_label)) : '';
     return '✓ Liste güncellendi. | Grup: ' + String(tot.group_count != null ? tot.group_count : arr.length) +
         ' | Alt cari (bağlantı) toplamı: ' + String(tot.child_count_sum != null ? tot.child_count_sum : '—') +
         ' | Bu ay (grid): ' + girisGrupOzetParaYaz(tot.borc_month_total) +
         ' | Toplam borç: ' + girisGrupOzetParaYaz(tot.borc_total) +
         ' | Alacak: ' + girisGrupOzetParaYaz(tot.alacak_total) +
-        ' | Net: ' + girisGrupOzetParaYaz(tot.net_balance);
+        ' | Net: ' + girisGrupOzetParaYaz(tot.net_balance) +
+        kapLbl;
+}
+
+function girisGrupOzetPayloadBirlestir(hedef, parca) {
+    var out = hedef && hedef.ok ? JSON.parse(JSON.stringify(hedef)) : { ok: true, meta: {}, groups: [], totals: {} };
+    var pj = parca || {};
+    var grp = Array.isArray(out.groups) ? out.groups.slice() : [];
+    var byId = {};
+    grp.forEach(function (g) {
+        var gid = parseInt(g && g.id, 10);
+        if (!isNaN(gid) && gid > 0) byId[gid] = g;
+    });
+    (Array.isArray(pj.groups) ? pj.groups : []).forEach(function (g) {
+        var gid = parseInt(g && g.id, 10);
+        if (isNaN(gid) || gid <= 0) return;
+        byId[gid] = g;
+    });
+    var mergedGroups = Object.keys(byId).map(function (k) { return byId[k]; });
+    mergedGroups.sort(function (a, b) {
+        return String((a && a.name) || '').localeCompare(String((b && b.name) || ''), 'tr');
+    });
+    var tot = {
+        group_count: mergedGroups.length,
+        child_count_sum: 0,
+        borc_month_total: 0,
+        borc_total: 0,
+        alacak_total: 0,
+        net_balance: 0
+    };
+    mergedGroups.forEach(function (g) {
+        tot.child_count_sum += parseInt(g.child_count || 0, 10) || 0;
+        tot.borc_month_total += parseFloat(g.borc_month || 0) || 0;
+        tot.borc_total += parseFloat(g.borc_total || 0) || 0;
+        tot.alacak_total += parseFloat(g.alacak_total || 0) || 0;
+        tot.net_balance += parseFloat(g.net_balance || 0) || 0;
+    });
+    out.ok = true;
+    out.meta = Object.assign({}, out.meta || {}, pj.meta || {});
+    out.groups = mergedGroups;
+    out.totals = {
+        group_count: tot.group_count,
+        child_count_sum: tot.child_count_sum,
+        borc_month_total: Math.round(tot.borc_month_total * 100) / 100,
+        borc_total: Math.round(tot.borc_total * 100) / 100,
+        alacak_total: Math.round(tot.alacak_total * 100) / 100,
+        net_balance: Math.round(tot.net_balance * 100) / 100
+    };
+    return out;
+}
+
+function girisGrupArrayChunk(arr, size) {
+    var out = [];
+    var a = Array.isArray(arr) ? arr : [];
+    var n = Math.max(1, parseInt(size, 10) || 1);
+    for (var i = 0; i < a.length; i += n) out.push(a.slice(i, i + n));
+    return out;
+}
+
+function girisGrupChunkBoyutuSec(secimAdedi) {
+    var n = parseInt(secimAdedi, 10) || 0;
+    if (n <= 24) return 8;
+    if (n <= 120) return 12;
+    return 20;
 }
 
 /**
  * @param {object} [opt]
- * @param {boolean} [opt.force] — true: sunucudan yeniden çek (Listeyi yenile).
- * @param {boolean} [opt.background] — true: giriş sayfası açılışında sessiz ön yükleme; yükleme çubuğu ve buton kilidi yok.
+ * @param {boolean} [opt.force] — true: sunucudan yeniden çek.
  */
 function girisGrupOzetListeYukle(opt) {
     opt = opt || {};
     var force = !!opt.force;
-    var background = !!opt.background;
     var tbody = document.getElementById('giris_grup_ozet_tbody');
     var btn = document.getElementById('giris_grup_ozet_btn');
     if (!tbody) return;
     girisGrupOzetTbodyClickInit();
+    girisGrupOzetKapsamRadiosInit();
+    girisGrupFiltreUiInit();
+    var kap = girisGrupOzetAltKapsamOku();
+    var seciliIds = girisGrupSeciliIdsOku();
+    var filtreKey = girisGrupFiltreAnahtariOku();
 
     function btnSerbestBirak() {
         if (btn) {
             btn.disabled = false;
             btn.removeAttribute('aria-busy');
-            btn.innerHTML = '<i class="fa fa-list"></i> Listeyi yenile';
         }
     }
 
-    if (!force && window.__girisGrupOzetReportCache && window.__girisGrupOzetReportCache.ok) {
+    if (!force && window.__girisGrupOzetReportCache && window.__girisGrupOzetReportCache.ok &&
+            window.__girisGrupOzetReportCacheKey === filtreKey) {
         var ozetHit = girisGrupOzetListeJsonUygula(window.__girisGrupOzetReportCache);
         if (ozetHit) girisGrupOzetDurumGoster('success', ozetHit);
         return;
     }
 
-    if (!force && window.__girisGrupOzetReportInflight) {
-        if (!background) {
-            if (btn) {
-                btn.disabled = true;
-                btn.setAttribute('aria-busy', 'true');
-            }
-            girisGrupOzetDurumGoster('loading', 'Gruplar yükleniyor…');
+    if (!force && window.__girisGrupOzetReportInflight && window.__girisGrupOzetInflightKey === filtreKey) {
+        if (btn) {
+            btn.disabled = true;
+            btn.setAttribute('aria-busy', 'true');
         }
+        girisGrupOzetDurumGoster('loading', 'Gruplar yükleniyor…');
         window.__girisGrupOzetReportInflight
             .then(function (j) {
                 if (!j || !j.ok) {
                     var cW = window.__girisGrupOzetReportCache;
-                    if (cW && cW.ok) j = cW;
+                    if (cW && cW.ok && window.__girisGrupOzetReportCacheKey === filtreKey) j = cW;
                 }
                 if (!j || !j.ok) {
-                    if (!background && window.__girisGrupOzetReportInflight) {
+                    if (window.__girisGrupOzetReportInflight) {
                         girisGrupOzetListeYukle(opt);
                         return;
                     }
-                    if (!background) {
-                        tbody.innerHTML = '';
-                        girisGrupOzetDurumGoster('error', (j && j.mesaj) ? j.mesaj : 'Liste alınamadı.');
-                    }
+                    if (girisGrupOzetOfflineFallbackDene(filtreKey, j && j.mesaj ? new Error(j.mesaj) : null)) return;
+                    tbody.innerHTML = '';
+                    girisGrupOzetDurumGoster('error', (j && j.mesaj) ? j.mesaj : 'Liste alınamadı.');
                     return;
                 }
                 var ozetW = girisGrupOzetListeJsonUygula(j);
-                if (ozetW && !background) girisGrupOzetDurumGoster('success', ozetW);
-                else if (ozetW && background && typeof currentTabIndex !== 'undefined' && currentTabIndex === 9) {
-                    girisGrupOzetDurumGoster('success', ozetW);
-                }
+                if (ozetW) girisGrupOzetDurumGoster('success', ozetW);
             })
             .catch(function (e) {
-                if (!background) {
-                    tbody.innerHTML = '';
-                    girisGrupOzetDurumGoster('error', (e && e.message) ? e.message : 'Liste yüklenemedi.');
-                }
+                if (girisGrupOzetOfflineFallbackDene(filtreKey, e)) return;
+                tbody.innerHTML = '';
+                girisGrupOzetDurumGoster('error', (e && e.message) ? e.message : 'Liste yüklenemedi.');
             })
             .finally(btnSerbestBirak);
         return;
@@ -5151,47 +5579,137 @@ function girisGrupOzetListeYukle(opt) {
     if (force) {
         window.__girisGrupOzetWriteToken++;
         window.__girisGrupOzetReportCache = null;
+        window.__girisGrupOzetReportCacheKey = null;
     }
     var writeToken = window.__girisGrupOzetWriteToken;
+    var reqKey = filtreKey;
 
-    if (!background) {
-        if (btn) {
-            btn.disabled = true;
-            btn.setAttribute('aria-busy', 'true');
-        }
-        girisGrupOzetDurumGoster('loading', 'Gruplar yükleniyor…');
+    if (btn) {
+        btn.disabled = true;
+        btn.setAttribute('aria-busy', 'true');
+    }
+    girisGrupOzetDurumGoster('loading', 'Gruplar yükleniyor…');
+
+    var raporUrlBase = '/cari-kart/api/groups-consolidated-report?alt_cari_kapsam=' + encodeURIComponent(kap) +
+        '&grup_tipi=hepsi';
+    if (!seciliIds.length) {
+        var pAll = girisFetchAgKopmasinaKarsi(raporUrlBase, { credentials: 'same-origin' }, 1)
+            .then(function (r) { return girisFetchJsonSafely(r); })
+            .then(function (j) {
+                if (writeToken !== window.__girisGrupOzetWriteToken) return null;
+                if (reqKey !== girisGrupFiltreAnahtariOku()) return null;
+                if (!j || !j.ok) throw new Error((j && j.mesaj) || 'Liste alınamadı.');
+                window.__girisGrupOzetReportCache = j;
+                window.__girisGrupOzetReportCacheKey = reqKey;
+                girisGrupOzetCacheLsYaz(reqKey, j);
+                var ozet = girisGrupOzetListeJsonUygula(j);
+                if (!ozet) throw new Error('Liste işlenemedi.');
+                girisGrupOzetDurumGoster('success', ozet);
+                return j;
+            })
+            .catch(function (e) {
+                if (writeToken !== window.__girisGrupOzetWriteToken) return;
+                if (girisGrupOzetOfflineFallbackDene(reqKey, e)) return;
+                tbody.innerHTML = '';
+                girisGrupOzetDurumGoster('error', girisSunucuBaglantiUyariMetni(e));
+            })
+            .finally(function () {
+                btnSerbestBirak();
+                if (window.__girisGrupOzetReportInflight === pAll) {
+                    window.__girisGrupOzetReportInflight = null;
+                    window.__girisGrupOzetInflightKey = null;
+                }
+            });
+        window.__girisGrupOzetReportInflight = pAll;
+        window.__girisGrupOzetInflightKey = filtreKey;
+        return;
     }
 
-    var p = girisFetchAgKopmasinaKarsi('/cari-kart/api/groups-consolidated-report', { credentials: 'same-origin' }, 2)
-        .then(function (r) { return girisFetchJsonSafely(r); })
-        .then(function (j) {
+    var chunkSize = girisGrupChunkBoyutuSec(seciliIds.length);
+    var chunks = girisGrupArrayChunk(seciliIds, chunkSize);
+    var birlesen = { ok: true, meta: {}, groups: [], totals: {} };
+    var p = (async function () {
+        // 1) Hızlı dalga: borç/alacak/net (grid ağır hesapları yok)
+        for (var ci = 0; ci < chunks.length; ci++) {
             if (writeToken !== window.__girisGrupOzetWriteToken) return null;
+            if (reqKey !== girisGrupFiltreAnahtariOku()) return null;
+            var ids = chunks[ci];
+            var raporUrl = raporUrlBase + '&lite=1&group_ids=' + encodeURIComponent(ids.join(','));
+            var r = await girisFetchAgKopmasinaKarsi(raporUrl, { credentials: 'same-origin' }, 1);
+            var j = await girisFetchJsonSafely(r);
             if (!j || !j.ok) throw new Error((j && j.mesaj) || 'Liste alınamadı.');
-            window.__girisGrupOzetReportCache = j;
-            var ozet = girisGrupOzetListeJsonUygula(j);
-            if (!ozet) throw new Error('Liste işlenemedi.');
-            if (!background) girisGrupOzetDurumGoster('success', ozet);
-            else if (typeof currentTabIndex !== 'undefined' && currentTabIndex === 9) girisGrupOzetDurumGoster('success', ozet);
-            return j;
-        })
-        .catch(function (e) {
-            if (writeToken !== window.__girisGrupOzetWriteToken) return;
-            if (!background) tbody.innerHTML = '';
-            if (!background) girisGrupOzetDurumGoster('error', (e && e.message) ? e.message : 'Liste yüklenemedi.');
-        })
-        .finally(function () {
-            btnSerbestBirak();
-            if (window.__girisGrupOzetReportInflight === p) window.__girisGrupOzetReportInflight = null;
-        });
+            birlesen = girisGrupOzetPayloadBirlestir(birlesen, j);
+            var ozetAra = girisGrupOzetListeJsonUygula(birlesen);
+            if (ozetAra) {
+                girisGrupOzetDurumGoster('loading', 'Temel veriler yükleniyor… (' + (ci + 1) + '/' + chunks.length + ')');
+            }
+        }
+        // Hızlı dalga tamam: kullanıcıyı bekletmeden sonucu göster.
+        window.__girisGrupOzetReportCache = birlesen;
+        window.__girisGrupOzetReportCacheKey = reqKey;
+        girisGrupOzetCacheLsYaz(reqKey, birlesen);
+        var ozet = girisGrupOzetListeJsonUygula(birlesen);
+        if (!ozet) throw new Error('Liste işlenemedi.');
+        girisGrupOzetDurumGoster('success', ozet + ' | Detaylar arka planda tamamlanıyor…');
+
+        // 2) Detay dalga: geciken ay + gün + grid detayları (arka plan, paralel)
+        setTimeout(async function () {
+            try {
+                var detayBirlestik = birlesen;
+                var parallelN = 4;
+                for (var wi = 0; wi < chunks.length; wi += parallelN) {
+                    if (writeToken !== window.__girisGrupOzetWriteToken) return;
+                    if (reqKey !== girisGrupFiltreAnahtariOku()) return;
+                    var part = chunks.slice(wi, wi + parallelN);
+                    var jobs = part.map(function (ids2) {
+                        var raporUrl2 = raporUrlBase + '&group_ids=' + encodeURIComponent(ids2.join(','));
+                        return girisFetchAgKopmasinaKarsi(raporUrl2, { credentials: 'same-origin' }, 1)
+                            .then(function (r2) { return girisFetchJsonSafely(r2); })
+                            .catch(function () { return null; });
+                    });
+                    var settled = await Promise.all(jobs);
+                    for (var sj = 0; sj < settled.length; sj++) {
+                        var j2 = settled[sj];
+                        if (!j2 || !j2.ok) continue;
+                        detayBirlestik = girisGrupOzetPayloadBirlestir(detayBirlestik, j2);
+                    }
+                    girisGrupOzetListeJsonUygula(detayBirlestik);
+                }
+                if (writeToken !== window.__girisGrupOzetWriteToken) return;
+                if (reqKey !== girisGrupFiltreAnahtariOku()) return;
+                window.__girisGrupOzetReportCache = detayBirlestik;
+                window.__girisGrupOzetReportCacheKey = reqKey;
+                girisGrupOzetCacheLsYaz(reqKey, detayBirlestik);
+                var ozetDetayFinal = girisGrupOzetListeJsonUygula(detayBirlestik);
+                if (ozetDetayFinal) girisGrupOzetDurumGoster('success', ozetDetayFinal);
+            } catch (eBg) {
+                // Arka plan detay hatası temel raporu bozmasın.
+            }
+        }, 0);
+        return birlesen;
+    })()
+    .catch(function (e) {
+        if (writeToken !== window.__girisGrupOzetWriteToken) return;
+        if (girisGrupOzetOfflineFallbackDene(reqKey, e)) return;
+        tbody.innerHTML = '';
+        girisGrupOzetDurumGoster('error', girisSunucuBaglantiUyariMetni(e));
+    })
+    .finally(function () {
+        btnSerbestBirak();
+        if (window.__girisGrupOzetReportInflight === p) {
+            window.__girisGrupOzetReportInflight = null;
+            window.__girisGrupOzetInflightKey = null;
+        }
+    });
 
     window.__girisGrupOzetReportInflight = p;
+    window.__girisGrupOzetInflightKey = filtreKey;
 }
 
-/** Giriş sayfası yüklenince grup tablosunu bir kez arka planda doldurur (Grup sekmesine tıklanınca hazır olur). */
+/** Grup sekmesi açıldığında sadece filtreleri hazırlar; veri seçim panelindeki Uygula ile çekilir. */
 function girisGrupOzetSayfaAcilisPrefetch() {
     try {
-        if (typeof girisGrupOzetListeYukle !== 'function') return;
-        girisGrupOzetListeYukle({ background: true });
+        if (typeof girisGrupFiltreUiInit === 'function') girisGrupFiltreUiInit();
     } catch (ePf) {}
 }
 
@@ -5263,16 +5781,19 @@ function faturaRaporFiltreStateKaydet() {
         var bit = document.getElementById('fatura_rapor_bitis');
         var ara = document.getElementById('fatura_rapor_liste_ara');
         var co = document.getElementById('fatura_rapor_cift_olanlar');
+        var bh = document.getElementById('fatura_rapor_bizim_hesap');
         var o = {
             gorunum: gor ? gor.value : '',
             duzenli_fatura: df ? df.value : '',
             tum_musteri: !!(tm && tm.checked),
             pasif_dahil: !!(pd && pd.checked),
             cift_olanlar: !!(co && co.checked),
+            bizim_hesap: !!(bh && bh.checked),
             sadece_kesilen: !!(sk && sk.checked),
             baslangic: bas ? bas.value : '',
             bitis: bit ? bit.value : '',
             liste_ara: ara ? String(ara.value || '') : '',
+            firma_filtre_grup2: (typeof faturaRaporFirmaFiltreGrup2Oku === 'function') ? faturaRaporFirmaFiltreGrup2Oku() : '',
             firma_filtre_hizmet: (typeof faturaRaporFirmaFiltreHizmetDiziOku === 'function') ? faturaRaporFirmaFiltreHizmetDiziOku() : [],
             firma_filtre_durum: (typeof faturaRaporFirmaFiltreDurumOku === 'function') ? faturaRaporFirmaFiltreDurumOku() : '',
             giris_aylar: (typeof faturaRaporGirisAylarOku === 'function') ? faturaRaporGirisAylarOku() : [],
@@ -5309,11 +5830,13 @@ function faturaRaporFiltreStateUygula() {
     var tm = document.getElementById('fatura_rapor_tum_musteri');
     var pd = document.getElementById('fatura_rapor_pasif_dahil');
     var co = document.getElementById('fatura_rapor_cift_olanlar');
+    var bh = document.getElementById('fatura_rapor_bizim_hesap');
     var sk = document.getElementById('fatura_rapor_sadece_kesilen');
     if (sk) sk.checked = !!st.sadece_kesilen;
     if (tm) tm.checked = !!st.tum_musteri;
     if (pd) pd.checked = !!st.pasif_dahil;
     if (co) co.checked = !!st.cift_olanlar;
+    if (bh) bh.checked = !!st.bizim_hesap;
     if (sk && tm && pd) {
         if (sk.checked) { tm.checked = false; pd.checked = false; }
         else if (tm.checked) { sk.checked = false; pd.checked = false; }
@@ -5329,6 +5852,9 @@ function faturaRaporFiltreStateUygula() {
         var fhSt = st.firma_filtre_hizmet;
         if (Array.isArray(fhSt)) faturaRaporFirmaFiltreHizmetYaz(fhSt);
         else faturaRaporFirmaFiltreHizmetYaz(fhSt != null ? fhSt : '');
+    }
+    if (typeof faturaRaporFirmaFiltreGrup2Yaz === 'function') {
+        faturaRaporFirmaFiltreGrup2Yaz(st.firma_filtre_grup2 != null ? String(st.firma_filtre_grup2) : '');
     }
     if (typeof faturaRaporFirmaFiltreDurumYaz === 'function') {
         faturaRaporFirmaFiltreDurumYaz(st.firma_filtre_durum != null ? String(st.firma_filtre_durum) : '');
@@ -5514,8 +6040,58 @@ document.addEventListener('click', function (e) {
 /** Tekil listede: hizmet / durum sütun süzgeci (satır data-fr-* ile eşleşir). */
 var FR_FIRMA_FLT_HIZMET_BOS = '__FR_HIZMET_BOS';
 var FR_FIRMA_SVG_FILTRE = '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M10 18h4v-2h-4v2zM3 6v2h18V6zm3 7h12v-2H6z"/></svg>';
+var FR_FIRMA_TH_INNER_GRUP2_HTML = '<span class="fatura-rapor-firma-th-hiz-dur-inner"><span class="fatura-rapor-firma-th-title-block"><span class="fatura-rapor-firma-th-filter-label">Grup2</span></span><button type="button" class="fatura-rapor-firma-th-filtre-btn" title="Grup2 etiketine göre süz" aria-label="Grup2 süzgeci">' + FR_FIRMA_SVG_FILTRE + '</button></span>';
 var FR_FIRMA_TH_INNER_HIZMET_HTML = '<span class="fatura-rapor-firma-th-hiz-dur-inner"><span class="fatura-rapor-firma-th-title-block"><span class="fatura-rapor-firma-th-filter-label">Hizmet türü</span></span><button type="button" class="fatura-rapor-firma-th-filtre-btn" title="Hizmet türüne göre süz" aria-label="Hizmet süzgeci">' + FR_FIRMA_SVG_FILTRE + '</button></span>';
 var FR_FIRMA_TH_INNER_DURUM_HTML = '<span class="fatura-rapor-firma-th-hiz-dur-inner"><span class="fatura-rapor-firma-th-title-block"><span class="fatura-rapor-firma-th-filter-label">Durum</span></span><button type="button" class="fatura-rapor-firma-th-filtre-btn" title="Duruma göre süz" aria-label="Durum süzgeci">' + FR_FIRMA_SVG_FILTRE + '</button></span>';
+
+function faturaRaporFirmaFiltreGrup2Oku() {
+    try {
+        return window.__faturaRaporFirmaFiltreGrup2 != null ? String(window.__faturaRaporFirmaFiltreGrup2) : '';
+    } catch (e) {
+        return '';
+    }
+}
+function faturaRaporFirmaFiltreGrup2Yaz(v) {
+    var s = v != null ? String(v).trim() : '';
+    window.__faturaRaporFirmaFiltreGrup2 = s;
+}
+function faturaRaporGrup2Parcala(raw) {
+    var s = String(raw || '').trim();
+    if (!s) return [];
+    return s.split('|').map(function (x) { return String(x || '').trim(); }).filter(Boolean);
+}
+function faturaRaporFirmaGrup2SatirUygun(raw, sec) {
+    var f = String(sec || '').trim();
+    if (!f) return true;
+    var arr = faturaRaporGrup2Parcala(raw);
+    return arr.indexOf(f) >= 0;
+}
+function faturaRaporFirmaGrup2SecenekleriBirlestir(cb) {
+    var map = {};
+    var tbody = document.getElementById('fatura_rapor_tbody');
+    if (tbody) {
+        tbody.querySelectorAll('tr[data-fr-grup2]').forEach(function (tr) {
+            var g = tr.getAttribute('data-fr-grup2') || '';
+            faturaRaporGrup2Parcala(g).forEach(function (it) {
+                var tx = String(it || '').trim();
+                if (!tx || tx === '—' || tx === '-') return;
+                map[tx] = true;
+            });
+        });
+    }
+    // Dead-end API çağrısı kapalı: sadece tabloda bulunan + sabit Grup2 etiketleri kullanılır.
+    map['Bizim Hesap'] = true;
+    map['Vergi Dairesi'] = true;
+    map['Vergi Dairesi Terk'] = true;
+    var rank = { 'Bizim Hesap': 0, 'Vergi Dairesi': 1, 'Vergi Dairesi Terk': 2 };
+    var keys = Object.keys(map).sort(function (a, b) {
+        var ra = (rank[a] != null) ? rank[a] : 9;
+        var rb = (rank[b] != null) ? rank[b] : 9;
+        if (ra !== rb) return ra - rb;
+        return a.localeCompare(b, 'tr');
+    });
+    cb(keys);
+}
 
 function faturaRaporFirmaFiltreHizmetOku() {
     try {
@@ -5766,6 +6342,45 @@ function faturaRaporFirmaFilterMenuDurumAc(anchor) {
     faturaRaporFirmaFilterPopBindOutsideDeferred();
 }
 
+function faturaRaporFirmaFilterMenuGrup2Ac(anchor) {
+    faturaRaporFirmaFilterPopClose();
+    var pop = faturaRaporFirmaFilterPopEnsure();
+    var cur = (typeof faturaRaporFirmaFiltreGrup2Oku === 'function') ? faturaRaporFirmaFiltreGrup2Oku() : '';
+    var loading = document.createElement('div');
+    loading.className = 'fatura-rapor-firma-filter-pop-inn fatura-rapor-firma-filter-pop--yukleniyor';
+    loading.textContent = 'Yükleniyor…';
+    pop.appendChild(loading);
+    pop.hidden = false;
+    faturaRaporFirmaFilterPopPosition(anchor, pop);
+    faturaRaporFirmaGrup2SecenekleriBirlestir(function (list) {
+        pop.innerHTML = '';
+        var inn = document.createElement('div');
+        inn.className = 'fatura-rapor-firma-filter-pop-inn';
+        inn.setAttribute('role', 'listbox');
+        var opts = [{ v: '', t: 'Hepsi' }].concat((list || []).map(function (x) { return { v: x, t: x }; }));
+        opts.forEach(function (o) {
+            var b = document.createElement('button');
+            b.type = 'button';
+            b.setAttribute('role', 'option');
+            b.className = 'fatura-rapor-firma-filter-opt' + (cur === o.v ? ' fatura-rapor-firma-filter-opt--aktif' : '');
+            b.textContent = o.t;
+            b.addEventListener('click', function (ev) {
+                ev.preventDefault();
+                ev.stopPropagation();
+                if (typeof faturaRaporFirmaFiltreGrup2Yaz === 'function') faturaRaporFirmaFiltreGrup2Yaz(o.v);
+                faturaRaporFirmaFilterPopClose();
+                if (typeof faturaRaporListeAraUygula === 'function') faturaRaporListeAraUygula();
+                if (typeof faturaRaporFiltreStateKaydet === 'function') faturaRaporFiltreStateKaydet();
+            });
+            inn.appendChild(b);
+        });
+        pop.appendChild(inn);
+        pop.hidden = false;
+        faturaRaporFirmaFilterPopPosition(anchor, pop);
+    });
+    faturaRaporFirmaFilterPopBindOutsideDeferred();
+}
+
 function faturaRaporFirmaFilterMenuHizmetAc(anchor) {
     faturaRaporFirmaFilterPopClose();
     var pop = faturaRaporFirmaFilterPopEnsure();
@@ -5860,16 +6475,260 @@ function faturaRaporFirmaFilterMenuHizmetAc(anchor) {
     faturaRaporFirmaFilterPopBindOutsideDeferred();
 }
 
+var __girisGrup2PopBound = false;
+function girisGrup2PopClose() {
+    var pop = document.getElementById('giris_grup2_etiket_pop');
+    if (pop) {
+        pop.innerHTML = '';
+        pop.hidden = true;
+        pop.classList.remove('fatura-rapor-firma-filter-pop--hizmet-coklu');
+    }
+    if (__girisGrup2PopBound) {
+        document.removeEventListener('click', girisGrup2PopOutside, false);
+        __girisGrup2PopBound = false;
+    }
+}
+function girisGrup2PopOutside(ev) {
+    var pop = document.getElementById('giris_grup2_etiket_pop');
+    if (!pop || pop.hidden) return;
+    if (pop.contains(ev.target)) return;
+    var bar = ev.target.closest && ev.target.closest('.giris-grup2-row');
+    if (bar) return;
+    girisGrup2PopClose();
+}
+function girisGrup2PopBindOutsideDeferred() {
+    setTimeout(function () {
+        if (__girisGrup2PopBound) return;
+        var pop = document.getElementById('giris_grup2_etiket_pop');
+        if (!pop || pop.hidden) return;
+        __girisGrup2PopBound = true;
+        document.addEventListener('click', girisGrup2PopOutside, false);
+    }, 0);
+}
+function girisGrup2PopEnsure() {
+    var pop = document.getElementById('giris_grup2_etiket_pop');
+    if (pop) return pop;
+    pop = document.createElement('div');
+    pop.id = 'giris_grup2_etiket_pop';
+    pop.className = 'fatura-rapor-firma-filter-pop';
+    pop.hidden = true;
+    document.body.appendChild(pop);
+    return pop;
+}
+function girisGrup2PopPosition(anchor, pop) {
+    var r = anchor.getBoundingClientRect();
+    var vw = window.innerWidth || 800;
+    var w = Math.min(280, Math.max(200, vw - 16));
+    pop.style.position = 'fixed';
+    pop.style.minWidth = w + 'px';
+    pop.style.maxWidth = (vw - 16) + 'px';
+    var left = Math.min(Math.max(8, r.left), vw - w - 8);
+    pop.style.left = left + 'px';
+    pop.style.top = (r.bottom + 4) + 'px';
+    pop.style.zIndex = '20001';
+}
+function girisGrup2SeciliOku() {
+    try {
+        if (window.__girisGrup2SeciliSlugs && Array.isArray(window.__girisGrup2SeciliSlugs))
+            return window.__girisGrup2SeciliSlugs.slice();
+    } catch (e0) {}
+    var h = document.getElementById('giris_grup2_secili_json');
+    if (!h || !String(h.value || '').trim()) return [];
+    try {
+        var j = JSON.parse(h.value);
+        return Array.isArray(j) ? j.filter(Boolean) : [];
+    } catch (e1) { return []; }
+}
+function girisGrup2SeciliYaz(slugs) {
+    var arr = Array.isArray(slugs) ? slugs.filter(Boolean) : [];
+    window.__girisGrup2SeciliSlugs = arr;
+    var h = document.getElementById('giris_grup2_secili_json');
+    if (h) h.value = JSON.stringify(arr);
+    girisGrup2BtnLabelGuncelle();
+}
+function girisGrup2BtnLabelGuncelle() {
+    var btn = document.getElementById('giris_grup2_btn');
+    if (!btn) return;
+    var arr = girisGrup2SeciliOku();
+    if (!arr.length) {
+        btn.textContent = 'Hepsi';
+        return;
+    }
+    var map = window.__girisGrup2EtiketMap || {};
+    var parts = arr.map(function (s) { return map[s] || s; });
+    var t = parts.join(', ');
+    if (t.length > 52) t = t.slice(0, 50) + '…';
+    btn.textContent = t;
+}
+/** API + sabit sıra: Bizim Hesap → Vergi Dairesi → Vergi Dairesi Terk → diğerleri (A→Z). */
+function girisGrup2EtiketListeBirlestir(apiListe) {
+    var m = {};
+    (apiListe || []).forEach(function (x) {
+        if (!x || !x.slug) return;
+        var slug = String(x.slug);
+        var et = (x.etiket != null && String(x.etiket).trim()) ? String(x.etiket).trim() : slug;
+        m[slug] = { slug: slug, etiket: et };
+    });
+    function sure(slug, defEtiket) {
+        if (!m[slug]) m[slug] = { slug: slug, etiket: defEtiket };
+        else if (!m[slug].etiket) m[slug].etiket = defEtiket;
+    }
+    sure('bizim_hesap', 'Bizim Hesap');
+    sure('vergi_dairesi', 'Vergi Dairesi');
+    sure('vergi_dairesi_terk', 'Vergi Dairesi Terk');
+    var sabit = ['bizim_hesap', 'vergi_dairesi', 'vergi_dairesi_terk'];
+    var head = sabit.map(function (s) { return m[s]; }).filter(Boolean);
+    var tail = (apiListe || []).filter(function (x) {
+        return x && x.slug && sabit.indexOf(String(x.slug)) < 0;
+    });
+    tail.sort(function (a, b) {
+        return String(a.etiket || '').localeCompare(String(b.etiket || ''), 'tr');
+    });
+    return head.concat(tail);
+}
+function girisGrup2EtiketMapYenile(liste) {
+    var map = {};
+    (liste || []).forEach(function (x) {
+        if (x && x.slug) map[x.slug] = x.etiket || x.slug;
+    });
+    window.__girisGrup2EtiketMap = map;
+}
+function girisGrup2EtiketleriYukle(cb) {
+    // Dead-end API çağrısı kapalı: local/fallback etiket listesi.
+    var list = girisGrup2EtiketListeBirlestir([]);
+    window.__girisGrup2EtiketListe = list;
+    girisGrup2EtiketMapYenile(list);
+    if (cb) cb(list);
+}
+function girisGrup2PanelIcerikRender(anchor) {
+    var pop = document.getElementById('giris_grup2_etiket_pop');
+    if (!pop) return;
+    var curDizi = girisGrup2SeciliOku();
+    var curSet = {};
+    curDizi.forEach(function (x) { curSet[x] = true; });
+    pop.innerHTML = '';
+    pop.classList.add('fatura-rapor-firma-filter-pop--hizmet-coklu');
+    var inn = document.createElement('div');
+    inn.className = 'fatura-rapor-firma-filter-pop-inn';
+    inn.setAttribute('role', 'group');
+    var hepsiCb = null;
+    function satir(val, label, checked) {
+        var row = document.createElement('label');
+        row.className = 'fatura-rapor-firma-filter-opt-row';
+        var inp = document.createElement('input');
+        inp.type = 'checkbox';
+        inp.setAttribute('data-g2-f', val);
+        inp.checked = !!checked;
+        var span = document.createElement('span');
+        span.textContent = label;
+        row.appendChild(inp);
+        row.appendChild(span);
+        inn.appendChild(row);
+        if (val !== '__hepsi__') {
+            inp.addEventListener('change', function () {
+                if (inp.checked && hepsiCb) hepsiCb.checked = false;
+            });
+        }
+        return inp;
+    }
+    hepsiCb = satir('__hepsi__', 'Hepsi', curDizi.length === 0);
+    if (hepsiCb) hepsiCb.setAttribute('title', 'Hiçbir Grup 2 etiketi seçilmez (önceki «Hepsi» davranışı).');
+    hepsiCb.addEventListener('change', function () {
+        if (hepsiCb.checked) {
+            inn.querySelectorAll('input[type="checkbox"][data-g2-f]').forEach(function (c) {
+                if (c.getAttribute('data-g2-f') !== '__hepsi__') c.checked = false;
+            });
+        }
+    });
+    (window.__girisGrup2EtiketListe || []).forEach(function (x) {
+        var slug = x.slug || '';
+        if (!slug) return;
+        satir(slug, x.etiket || slug, !!curSet[slug]);
+    });
+    var act = document.createElement('div');
+    act.className = 'fatura-rapor-firma-filter-pop-actions';
+    var btnU = document.createElement('button');
+    btnU.type = 'button';
+    btnU.className = 'fatura-rapor-firma-filter-uygula';
+    btnU.textContent = 'Uygula';
+    btnU.addEventListener('click', function (ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        var h0 = inn.querySelector('input[data-g2-f="__hepsi__"]');
+        if (h0 && h0.checked) {
+            girisGrup2SeciliYaz([]);
+        } else {
+            var picked = [];
+            inn.querySelectorAll('input[type="checkbox"][data-g2-f]').forEach(function (c) {
+                var k = c.getAttribute('data-g2-f');
+                if (!k || k === '__hepsi__' || !c.checked) return;
+                picked.push(k);
+            });
+            girisGrup2SeciliYaz(picked);
+        }
+        girisGrup2PopClose();
+        if (typeof hesaplaYuzde === 'function') hesaplaYuzde();
+    });
+    act.appendChild(btnU);
+    pop.appendChild(inn);
+    pop.appendChild(act);
+    girisGrup2PopPosition(anchor, pop);
+}
+function girisGrup2PanelAc() {
+    var anchor = document.getElementById('giris_grup2_btn');
+    if (!anchor) return;
+    girisGrup2PopClose();
+    var pop = girisGrup2PopEnsure();
+    var loading = document.createElement('div');
+    loading.className = 'fatura-rapor-firma-filter-pop-inn fatura-rapor-firma-filter-pop--yukleniyor';
+    loading.textContent = 'Yükleniyor…';
+    pop.appendChild(loading);
+    pop.classList.add('fatura-rapor-firma-filter-pop--hizmet-coklu');
+    pop.hidden = false;
+    girisGrup2PopPosition(anchor, pop);
+    girisGrup2EtiketleriYukle(function () { girisGrup2PanelIcerikRender(anchor); });
+    girisGrup2PopBindOutsideDeferred();
+}
+function girisGrup2YeniEkle() {
+    var inp = document.getElementById('giris_grup2_yeni_etiket');
+    if (!inp) return;
+    var ad = String(inp.value || '').trim();
+    if (!ad) {
+        if (typeof toast === 'function') toast('Etiket adı girin.', 'warn');
+        else alert('Etiket adı girin.');
+        return;
+    }
+    // Dead-end API çağrısı kapalı: yeni etiket ekleme geçici olarak devre dışı.
+    if (typeof toast === 'function') toast('Grup2 etiket ekleme geçici olarak kapalı.', 'warn');
+    else alert('Grup2 etiket ekleme geçici olarak kapalı.');
+}
+
+/** Vergi dairesi önerileri: dead-end API kapalı, local kısa liste kullanılır. */
+function girisVergiDaireleriDatalistDoldur() {
+    var dl = document.getElementById('vergi_dairesi_datalist');
+    if (!dl) return;
+    var fallback = ['Kavaklidere', 'Cankaya', 'Ostim'];
+    dl.innerHTML = '';
+    fallback.forEach(function (ad) {
+        var o = document.createElement('option');
+        o.value = ad;
+        dl.appendChild(o);
+    });
+}
+
 function faturaRaporFirmaFilterMenuAc(kind, anchor) {
     if (kind === 'durum') faturaRaporFirmaFilterMenuDurumAc(anchor);
+    else if (kind === 'grup2') faturaRaporFirmaFilterMenuGrup2Ac(anchor);
     else faturaRaporFirmaFilterMenuHizmetAc(anchor);
 }
 
 function faturaRaporFirmaUpdateThFilterMarkers(tablo) {
     if (!tablo) tablo = document.getElementById('fatura_rapor_tablo');
     if (!tablo) return;
-    var th5 = tablo.querySelector('th[data-fr-col-id="5"]');
-    var th6 = tablo.querySelector('th[data-fr-col-id="6"]');
+    var thG = tablo.querySelector('th[data-fr-col-id="9"]');
+    var th5 = tablo.querySelector('th[data-fr-col-id="10"]');
+    var th6 = tablo.querySelector('th[data-fr-col-id="11"]');
+    if (thG) thG.classList.toggle('fatura-rapor-firma-th--filtered', !!faturaRaporFirmaFiltreGrup2Oku());
     if (th5) {
         var hzN = (typeof faturaRaporFirmaFiltreHizmetDiziOku === 'function') ? faturaRaporFirmaFiltreHizmetDiziOku().length : (faturaRaporFirmaFiltreHizmetOku() ? 1 : 0);
         th5.classList.toggle('fatura-rapor-firma-th--filtered', hzN > 0);
@@ -6006,6 +6865,8 @@ function faturaRaporFirmaSuzgecEtiketiKisa() {
     var fd = (typeof faturaRaporFirmaFiltreDurumOku === 'function') ? faturaRaporFirmaFiltreDurumOku() : '';
     if (fd === 'aktif') parts.push('yalnız aktif');
     else if (fd === 'pasif') parts.push('yalnız pasif');
+    var fg2 = (typeof faturaRaporFirmaFiltreGrup2Oku === 'function') ? faturaRaporFirmaFiltreGrup2Oku() : '';
+    if (fg2) parts.push('grup2');
     var fhd = (typeof faturaRaporFirmaFiltreHizmetDiziOku === 'function') ? faturaRaporFirmaFiltreHizmetDiziOku() : [];
     if (fhd.length === 1) parts.push('hizmet türü');
     else if (fhd.length > 1) parts.push('hizmet türleri (' + fhd.length + ')');
@@ -6029,6 +6890,7 @@ function faturaRaporFirmaUstDurumGuncelle() {
     var nYuk = 0;
     var nGor = 0;
     var sum = 0;
+    var sumBorc = 0;
     tbody.querySelectorAll('tr').forEach(function (tr) {
         nYuk++;
         if (tr.style.display === 'none') return;
@@ -6036,6 +6898,9 @@ function faturaRaporFirmaUstDurumGuncelle() {
         var n = parseFloat(tr.getAttribute('data-fr-tutar-n') || '');
         if (!isFinite(n)) n = 0;
         sum += n;
+        var b = parseFloat(tr.getAttribute('data-fr-borc-n') || '');
+        if (!isFinite(b)) b = 0;
+        sumBorc += b;
     });
     function fmtTop(x) {
         return (x != null ? x : 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -6050,7 +6915,8 @@ function faturaRaporFirmaUstDurumGuncelle() {
     var msg = '✓ Liste güncellendi. ' +
         (ayRef ? ('Aylık referans: ' + ayRef + ' | ') : '') +
         tekilStr + kapGen + gaLbl +
-        ' | Aylık tutar toplamı: ' + fmtTop(sum) + ' ₺';
+        ' | Aylık tutar toplamı: ' + fmtTop(sum) + ' ₺' +
+        ' | Toplam borç: ' + fmtTop(sumBorc) + ' ₺';
     faturaRaporDurumGoster('success', msg);
 }
 
@@ -6065,6 +6931,7 @@ function faturaRaporListeAraUygula() {
     var qRaw = inp ? String(inp.value || '').trim() : '';
     var q = qRaw.toLocaleLowerCase('tr-TR');
     var fd = (firmaMod && typeof faturaRaporFirmaFiltreDurumOku === 'function') ? faturaRaporFirmaFiltreDurumOku() : '';
+    var fg2 = (firmaMod && typeof faturaRaporFirmaFiltreGrup2Oku === 'function') ? faturaRaporFirmaFiltreGrup2Oku() : '';
     var fhDizi = (firmaMod && typeof faturaRaporFirmaFiltreHizmetDiziOku === 'function') ? faturaRaporFirmaFiltreHizmetDiziOku() : [];
     var gaz = (firmaMod && typeof faturaRaporGirisAylarOku === 'function') ? faturaRaporGirisAylarOku() : [];
     tbody.querySelectorAll('tr').forEach(function (tr) {
@@ -6075,9 +6942,10 @@ function faturaRaporListeAraUygula() {
                 var tarih = (tr.getAttribute('data-fr-tarih') || '').toLowerCase();
                 var hizm = (tr.getAttribute('data-fr-hizmet') || '').toLocaleLowerCase('tr-TR');
                 var durm = (tr.getAttribute('data-fr-durum') || '').toLocaleLowerCase('tr-TR');
+                var g2m = (tr.getAttribute('data-fr-grup2') || '').toLocaleLowerCase('tr-TR');
                 var frAra = (tr.getAttribute('data-fr-ara') || '').toLocaleLowerCase('tr-TR');
                 ok = ad.indexOf(q) >= 0 || tarih.indexOf(q) >= 0 || hizm.indexOf(q) >= 0 || durm.indexOf(q) >= 0
-                    || frAra.indexOf(q) >= 0;
+                    || g2m.indexOf(q) >= 0 || frAra.indexOf(q) >= 0;
             } else {
                 var t = (tr.textContent || '').toLocaleLowerCase('tr-TR');
                 ok = t.indexOf(q) >= 0;
@@ -6087,6 +6955,10 @@ function faturaRaporListeAraUygula() {
             var ds = (tr.getAttribute('data-fr-durum-sort') || '').toLowerCase();
             if (fd === 'aktif' && ds !== 'aktif') ok = false;
             if (fd === 'pasif' && ds !== 'pasif') ok = false;
+        }
+        if (ok && firmaMod && fg2) {
+            var g2r = tr.getAttribute('data-fr-grup2') || '';
+            if (!faturaRaporFirmaGrup2SatirUygun(g2r, fg2)) ok = false;
         }
         if (ok && firmaMod && fhDizi.length) {
             var hm = tr.getAttribute('data-fr-hizmet') || '';
@@ -6154,18 +7026,24 @@ function faturaRaporFirmaOzetAltGuncelle() {
         return;
     }
     var sumVis = 0;
+    var sumBorcVis = 0;
     var sumChk = 0;
+    var sumBorcChk = 0;
     var nVis = 0;
     var nChk = 0;
     tbody.querySelectorAll('tr').forEach(function (tr) {
         if (tr.style.display === 'none') return;
         var n = parseFloat(tr.getAttribute('data-fr-tutar-n') || '');
         if (!isFinite(n)) n = 0;
+        var b = parseFloat(tr.getAttribute('data-fr-borc-n') || '');
+        if (!isFinite(b)) b = 0;
         sumVis += n;
+        sumBorcVis += b;
         nVis++;
         var cb = tr.querySelector('.fatura-rapor-firma-sec');
         if (cb && cb.checked) {
             sumChk += n;
+            sumBorcChk += b;
             nChk++;
         }
     });
@@ -6177,9 +7055,9 @@ function faturaRaporFirmaOzetAltGuncelle() {
         el.textContent = '';
         return;
     }
-    var parts = ['Görünen aylık toplamı: ' + fmtTop(sumVis) + ' ₺ · ' + nVis + ' firma'];
+    var parts = ['Görünen aylık toplamı: ' + fmtTop(sumVis) + ' ₺ · Görünen toplam borç: ' + fmtTop(sumBorcVis) + ' ₺ · ' + nVis + ' firma'];
     if (nChk > 0) {
-        parts.push('Seçili aylık toplamı: ' + fmtTop(sumChk) + ' ₺ · ' + nChk + ' firma');
+        parts.push('Seçili aylık toplamı: ' + fmtTop(sumChk) + ' ₺ · Seçili toplam borç: ' + fmtTop(sumBorcChk) + ' ₺ · ' + nChk + ' firma');
     }
     el.textContent = parts.join(' — ');
     el.hidden = false;
@@ -6841,6 +7719,13 @@ function faturaRaporYukle() {
         faturaRaporDurumGoster('error', 'Tarih seçin veya varsayılanlar için alanları boş bırakıp tekrar deneyin.');
         return;
     }
+    window.__faturaRaporReqSeq = (window.__faturaRaporReqSeq || 0) + 1;
+    var reqSeq = window.__faturaRaporReqSeq;
+    if (window.__faturaRaporAktifCtrl) {
+        try { window.__faturaRaporAktifCtrl.abort(); } catch (eAbortPrev) {}
+    }
+    var reqCtrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    window.__faturaRaporAktifCtrl = reqCtrl;
     faturaRaporListeBtnBusy(true);
     faturaRaporDurumGoster('loading', 'Liste sunucudan isteniyor…');
     if (typeof girisSeciliMusteriTekilListeNotTemizle === 'function') girisSeciliMusteriTekilListeNotTemizle();
@@ -6862,12 +7747,22 @@ function faturaRaporYukle() {
         else if (elPd && elPd.checked) u += '&pasifleri_dahil=1';
     }
     if (elCo && elCo.checked) u += '&cift_olanlar=1';
+    var elBh = document.getElementById('fatura_rapor_bizim_hesap');
+    if (elBh && elBh.checked) u += '&bizim_hesap=1';
     if (elDf && elDf.value) u += '&duzenli_fatura=' + encodeURIComponent(elDf.value);
     var elGor = document.getElementById('fatura_rapor_gorunum');
     if (elGor && elGor.value) u += '&gorunum=' + encodeURIComponent(elGor.value);
     if (typeof faturaRaporGirisAyQuerySuffix === 'function') u += faturaRaporGirisAyQuerySuffix();
-    fetch(u, { credentials: 'same-origin' })
+    if (elGor && elGor.value === 'firma_ozet') u += '&page_size=50&page=1';
+    /* Uzun rapor + DB/SSL dalgalanması: 3 dk zaman aşımı, 4 deneme (girisFetchAgKopmasinaKarsi). */
+    var frFetchOpts = { credentials: 'same-origin', timeoutMs: 180000 };
+    if (reqCtrl) frFetchOpts.signal = reqCtrl.signal;
+    var frP = (typeof girisFetchAgKopmasinaKarsi === 'function')
+        ? girisFetchAgKopmasinaKarsi(u, frFetchOpts, 4)
+        : fetch(u, frFetchOpts);
+    frP
         .then(function (r) {
+            if (reqSeq !== window.__faturaRaporReqSeq) throw new Error('__FR_STALE__');
             var ct = (r.headers && r.headers.get ? r.headers.get('content-type') : '') || '';
             if (!r.ok) {
                 return r.text().then(function (t) {
@@ -6885,6 +7780,7 @@ function faturaRaporYukle() {
             });
         })
         .then(function (data) {
+            if (reqSeq !== window.__faturaRaporReqSeq) return;
             if (!data || !data.ok) {
                 try { window.__faturaRaporSonData = null; } catch (eSdE) {}
                 try { window.__faturaRaporDurumFirmaMeta = null; } catch (eDmE) {}
@@ -6911,7 +7807,7 @@ function faturaRaporYukle() {
                     var trh0 = tablo.querySelector('thead tr');
                     if (trh0) {
                         trh0.className = 'fatura-rapor-firma-hdr';
-                        var ordF = (typeof faturaRaporFirmaReadColOrder === 'function') ? faturaRaporFirmaReadColOrder() : [0, 1, 2, 3, 4, 5, 6];
+                        var ordF = (typeof faturaRaporFirmaReadColOrder === 'function') ? faturaRaporFirmaReadColOrder() : [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
                         var ayEsc = ayEt ? ayEt.replace(/</g, '&lt;') : '';
                         var thParts = ordF.map(function (lid) {
                             if (lid === 0) {
@@ -6921,10 +7817,23 @@ function faturaRaporYukle() {
                             if (lid === 2) return '<th class="fatura-rapor-firma-th-drg" data-fr-col-id="2">Firma ismi</th>';
                             if (lid === 3) return '<th class="num fatura-rapor-firma-th-drg" data-fr-col-id="3">Aylık tutar' + (ayEsc ? ' (' + ayEsc + ')' : '') + '</th>';
                             if (lid === 4) {
-                                return '<th class="fatura-rapor-firma-fatura-col-th fatura-rapor-firma-th-drg" data-fr-col-id="4">Fatura oluştur</th>';
+                                return '<th class="num fatura-rapor-firma-th-drg" data-fr-col-id="4" title="Sözleşme başından referans ayına kadar tahsil görülmeyen ayların KDV dahil toplamı (aylık grid ile aynı)">Toplam borç</th>';
                             }
-                            if (lid === 5) return '<th class="fatura-rapor-firma-th-drg" data-fr-col-id="5">' + FR_FIRMA_TH_INNER_HIZMET_HTML + '</th>';
-                            return '<th class="fatura-rapor-firma-th-drg" data-fr-col-id="6">' + FR_FIRMA_TH_INNER_DURUM_HTML + '</th>';
+                            if (lid === 5) {
+                                return '<th class="num fatura-rapor-firma-th-drg" data-fr-col-id="5" title="Sözleşme başlangıç tarihinin günü">Gün</th>';
+                            }
+                            if (lid === 6) {
+                                return '<th class="fatura-rapor-firma-th-drg" data-fr-col-id="6" title="Sözleşme başlangıç ayı (Türkçe ad)">Ay</th>';
+                            }
+                            if (lid === 7) {
+                                return '<th class="num fatura-rapor-firma-th-drg" data-fr-col-id="7" title="Tahsil görülmeyen ve pozitif tutarlı ay sayısı">Geciken ay</th>';
+                            }
+                            if (lid === 8) {
+                                return '<th class="fatura-rapor-firma-fatura-col-th fatura-rapor-firma-th-drg" data-fr-col-id="8">Fatura oluştur</th>';
+                            }
+                            if (lid === 9) return '<th class="fatura-rapor-firma-th-drg" data-fr-col-id="9">' + FR_FIRMA_TH_INNER_GRUP2_HTML + '</th>';
+                            if (lid === 10) return '<th class="fatura-rapor-firma-th-drg" data-fr-col-id="10">' + FR_FIRMA_TH_INNER_HIZMET_HTML + '</th>';
+                            return '<th class="fatura-rapor-firma-th-drg" data-fr-col-id="11">' + FR_FIRMA_TH_INNER_DURUM_HTML + '</th>';
                         });
                         trh0.innerHTML = thParts.join('');
                     }
@@ -6936,7 +7845,10 @@ function faturaRaporYukle() {
                 if (!satFirma.length) {
                     window.__faturaRaporAyReferans = null;
                     try { window.__faturaRaporDurumFirmaMeta = null; } catch (eDm0) {}
-                    faturaRaporDurumGoster('info', 'Kapsamda firma yok.');
+                    var _msBos = (data.sunucu_islem_ms != null && !isNaN(Number(data.sunucu_islem_ms)))
+                        ? (' | Sunucu: ' + Number(data.sunucu_islem_ms).toFixed(1) + ' ms')
+                        : '';
+                    faturaRaporDurumGoster('info', 'Kapsamda firma yok.' + _msBos);
                     tbody.innerHTML = '';
                     tablo.style.display = 'none';
                     if (fScroll) fScroll.classList.remove('fatura-rapor-tablo-scroll--firma');
@@ -6962,12 +7874,30 @@ function faturaRaporYukle() {
                 try {
                     window.__faturaRaporDurumFirmaMeta = { ayRef: ayRef, kapF: kapF, gaLbl: gaLbl };
                 } catch (eMeta) {}
-                var ordRows = (typeof faturaRaporFirmaReadColOrder === 'function') ? faturaRaporFirmaReadColOrder() : [0, 1, 2, 3, 4, 5, 6];
-                tbody.innerHTML = satFirma.map(function (s) {
+                var ordRows = (typeof faturaRaporFirmaReadColOrder === 'function') ? faturaRaporFirmaReadColOrder() : [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+                var buildFirmaRowsHtml = function (list) {
+                    return (list || []).map(function (s) {
                     var tarih = (s.giris_tarihi || '');
                     var plainAd = (s.firma_adi || '') + (s.musteri_durum ? (' (' + String(s.musteri_durum) + ')') : '');
                     var tutFmt = fmtF(s.aylik_tutar);
                     var tutN = (s.aylik_tutar != null && !isNaN(Number(s.aylik_tutar))) ? String(Number(s.aylik_tutar)) : '';
+                    var borcFmt = fmtF(s.toplam_borc);
+                    var borcN = (s.toplam_borc != null && !isNaN(Number(s.toplam_borc))) ? String(Number(s.toplam_borc)) : '';
+                    var sgRaw = s.sozlesme_gun;
+                    var sgNum = (sgRaw != null && !isNaN(parseInt(sgRaw, 10))) ? parseInt(sgRaw, 10) : 0;
+                    if (!Number.isFinite(sgNum) || sgNum < 1 || sgNum > 31) sgNum = 0;
+                    var gunStr = sgNum > 0 ? String(sgNum) : '—';
+                    var gunSortN = sgNum > 0 ? String(sgNum) : '0';
+                    var sayRaw = s.sozlesme_ay;
+                    var sayNum = (sayRaw != null && !isNaN(parseInt(sayRaw, 10))) ? parseInt(sayRaw, 10) : 0;
+                    if (!Number.isFinite(sayNum) || sayNum < 1 || sayNum > 12) sayNum = 0;
+                    var ayAd = (s.sozlesme_ay_adi != null && String(s.sozlesme_ay_adi).trim()) ? String(s.sozlesme_ay_adi).trim() : '';
+                    var ayStr = ayAd || '—';
+                    var aySortN = sayNum > 0 ? String(sayNum) : '0';
+                    var gaRaw = s.geciken_ay;
+                    var gaNum = (gaRaw != null && !isNaN(parseInt(gaRaw, 10))) ? parseInt(gaRaw, 10) : 0;
+                    if (!Number.isFinite(gaNum) || gaNum < 0) gaNum = 0;
+                    var gaStr = String(gaNum);
                     var ad = (s.firma_adi || '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
                     if (s.musteri_durum) {
                         ad += ' <span style="color:#78909c;font-size:9px;font-style:normal;">(' +
@@ -6991,6 +7921,8 @@ function faturaRaporYukle() {
                     var durKey = (durEt.toLowerCase().indexOf('pasif') >= 0) ? 'pasif' : 'aktif';
                     var durPillClass = durKey === 'pasif' ? 'fatura-rapor-firma-durum-pill--pasif' : 'fatura-rapor-firma-durum-pill--aktif';
                     var hizmetHtml = hizmetRaw.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+                    var grup2Raw = (s.grup2 != null && String(s.grup2).trim() !== '') ? String(s.grup2).trim() : '—';
+                    var grup2Html = grup2Raw.replace(/&/g, '&amp;').replace(/</g, '&lt;');
                     var durHtml = durEt.replace(/&/g, '&amp;').replace(/</g, '&lt;');
                     var midNum = (s.musteri_id != null) ? parseInt(s.musteri_id, 10) : NaN;
                     var midOk = !isNaN(midNum) && midNum > 0;
@@ -7004,7 +7936,11 @@ function faturaRaporYukle() {
                             '" title="Müşteri kartını aç" onclick="faturaRaporFirmaKartaGit(event, ' + midNum + ')">' + ad + '</button>'
                         : ad) + '</td>';
                     cells[3] = '<td class="num" data-fr-col-id="3">' + tutFmt + '</td>';
-                    cells[4] = '<td class="fatura-rapor-firma-actions" data-fr-col-id="4">' + (midOk
+                    cells[4] = '<td class="num" data-fr-col-id="4">' + borcFmt + '</td>';
+                    cells[5] = '<td class="num" data-fr-col-id="5">' + gunStr + '</td>';
+                    cells[6] = '<td data-fr-col-id="6">' + ayStr.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</td>';
+                    cells[7] = '<td class="num" data-fr-col-id="7">' + gaStr + '</td>';
+                    cells[8] = '<td class="fatura-rapor-firma-actions" data-fr-col-id="8">' + (midOk
                         ? (function () {
                             var fh = '/faturalar/yeni?musteri_id=' + midNum;
                             var tt = parseFloat(tutN);
@@ -7022,22 +7958,61 @@ function faturaRaporYukle() {
                                 '<i class="fa fa-check"></i> Fatura</a>';
                         })()
                         : '—') + '</td>';
-                    cells[5] = '<td data-fr-col-id="5" style="font-size:10px;">' + hizmetHtml + '</td>';
+                    cells[9] = '<td data-fr-col-id="9" style="font-size:10px;">' + grup2Html + '</td>';
                     var durPillHint = (durKey === 'aktif' && midOk) ? ' title="Çift tık: pasife al"' : '';
-                    cells[6] = '<td data-fr-col-id="6" style="text-align:center;">' +
+                    cells[10] = '<td data-fr-col-id="10" style="font-size:10px;">' + hizmetHtml + '</td>';
+                    cells[11] = '<td data-fr-col-id="11" style="text-align:center;">' +
                         '<span class="fatura-rapor-firma-durum-pill ' + durPillClass + '"' + durPillHint + '>' + durHtml + '</span></td>';
                     var rowInner = ordRows.map(function (lid) { return cells[lid]; }).join('');
                     var frAraRaw = (s.liste_ara_blob != null && String(s.liste_ara_blob).trim() !== '') ? String(s.liste_ara_blob) : plainAd;
                     return '<tr' + (midOk ? ' data-musteri-id="' + midNum + '"' : '') +
                         ' data-fr-tarih="' + esc(tarih) + '" data-fr-ad="' + esc(plainAd) + '" data-fr-tutar="' + esc(tutFmt) + '" data-fr-tutar-n="' + esc(tutN) + '"' +
-                        ' data-fr-hizmet="' + esc(hizmetRaw) + '" data-fr-durum="' + esc(durEt) + '"' +
+                        ' data-fr-borc-n="' + esc(borcN) + '" data-fr-gun-n="' + esc(gunSortN) + '" data-fr-ay-n="' + esc(aySortN) + '" data-fr-geciken-n="' + esc(gaStr) + '"' +
+                        ' data-fr-grup2="' + esc(grup2Raw) + '" data-fr-hizmet="' + esc(hizmetRaw) + '" data-fr-durum="' + esc(durEt) + '"' +
                         ' data-fr-hazir-oda="' + esc(hoAttr) + '"' +
                         ' data-fr-ara="' + esc(frAraRaw) + '"' +
+                        ' data-fr-grup2-sort="' + esc(grup2Raw.toLocaleLowerCase('tr-TR')) + '"' +
                         ' data-fr-hizmet-sort="' + esc(hizmetRaw.toLocaleLowerCase('tr-TR')) + '"' +
                         ' data-fr-durum-sort="' + esc(durKey) + '">' +
                         rowInner +
                         '</tr>';
-                }).join('');
+                    }).join('');
+                };
+                tbody.innerHTML = buildFirmaRowsHtml(satFirma);
+                var __firmaNextPage = (data.page != null ? (parseInt(data.page, 10) || 1) + 1 : 2);
+                var __firmaHasMore = !!data.has_more;
+                var sc = document.getElementById('fatura_rapor_tablo_scroll');
+                if (sc) {
+                    sc.onscroll = null;
+                    if (__firmaHasMore) {
+                        sc.onscroll = function () {
+                            if (!sc) return;
+                            var nearBottom = (sc.scrollTop + sc.clientHeight + 120) >= sc.scrollHeight;
+                            if (!nearBottom) return;
+                            if (!__firmaHasMore || window.__faturaRaporFirmaPagingBusy) return;
+                            window.__faturaRaporFirmaPagingBusy = true;
+                            var u2 = /[?&]page=/.test(u)
+                                ? u.replace(/([?&])page=\d+/, '$1page=' + __firmaNextPage)
+                                : u + (u.indexOf('?') < 0 ? '?' : '&') + 'page=' + __firmaNextPage;
+                            fetch(u2, { credentials: 'same-origin' })
+                                .then(function (r) { return r.json(); })
+                                .then(function (d2) {
+                                    var sat2 = (d2 && Array.isArray(d2.satirlar)) ? d2.satirlar : [];
+                                    if (sat2.length) tbody.insertAdjacentHTML('beforeend', buildFirmaRowsHtml(sat2));
+                                    __firmaHasMore = !!(d2 && d2.has_more);
+                                    __firmaNextPage += 1;
+                                    if (!__firmaHasMore) sc.onscroll = null;
+                                    try { if (typeof faturaRaporListeAraUygula === 'function') faturaRaporListeAraUygula(); } catch (eRp) {}
+                                })
+                                .catch(function () {})
+                                .finally(function () { window.__faturaRaporFirmaPagingBusy = false; });
+                        };
+                    }
+                }
+                var _msOk = (data.sunucu_islem_ms != null && !isNaN(Number(data.sunucu_islem_ms)))
+                    ? (' Sunucu: ' + Number(data.sunucu_islem_ms).toFixed(1) + ' ms')
+                    : '';
+                faturaRaporDurumGoster('success', 'Liste güncellendi.' + _msOk);
                 tablo.style.display = 'table';
                 try {
                     if (typeof faturaRaporFirmaAfterRender === 'function') faturaRaporFirmaAfterRender(tablo);
@@ -7139,17 +8114,25 @@ function faturaRaporYukle() {
             tablo.style.display = 'table';
         })
         .catch(function (err) {
+            if (reqSeq !== window.__faturaRaporReqSeq) return;
             try { window.__faturaRaporDurumFirmaMeta = null; } catch (eDmC) {}
             var msg = err && err.message ? err.message : String(err);
+            if (msg === '__FR_STALE__' || /aborted|abort/i.test(msg)) return;
+            if (/zaman aşımı|timeout/i.test(msg)) {
+                faturaRaporDurumGoster('error', msg + ' Rapor sorgusu uzun sürdü; tarih aralığını daraltıp tekrar deneyin veya birkaç saniye sonra yenileyin.');
+                return;
+            }
             if (msg === 'Failed to fetch' || /NetworkError|Load failed/i.test(msg)) {
                 faturaRaporDurumGoster('error',
-                    'Sunucuya ulaşılamadı (Failed to fetch). Uygulamanın çalıştığını kontrol edin; sayfayı yenileyip tekrar giriş yapın. ' +
-                    'VPN / güvenlik duvarı veya veritabanı kesintisi de buna yol açabilir.');
+                    'Sunucuya ulaşılamadı (Failed to fetch). PC’de Flask çalışıyor mu kontrol edin; IDE dosya kaydı sunucuyu 1–2 sn kapatır. ' +
+                    'Aynı ağda 192.168… adresi kullanıyorsanız güvenlik duvarının 5000 portuna izin verdiğinden emin olun. Birkaç saniye sonra «Listeyi getir»e tekrar basın.');
                 return;
             }
             faturaRaporDurumGoster('error', 'Hata: ' + msg);
         })
         .finally(function () {
+            if (reqSeq !== window.__faturaRaporReqSeq) return;
+            if (window.__faturaRaporAktifCtrl === reqCtrl) window.__faturaRaporAktifCtrl = null;
             faturaRaporListeBtnBusy(false);
         });
 }
@@ -7385,9 +8368,9 @@ function faturaRaporSecilenleriSil() {
     var API_KEY = 'firma_musteri_liste';
     var __firmaPostT = null;
     var __firmaUiSessionOverride = null;
-    /** 0=Seç, 1=Giriş, 2=Firma, 3=Aylık tutar, 4=Fatura, 5=Hizmet türü, 6=Durum */
-    var DEFAULT_COL_ORDER_FULL = [0, 1, 2, 3, 4, 5, 6];
-    var DEFAULT_WIDTHS = { 0: 44, 1: 96, 2: 220, 3: 88, 4: 100, 5: 120, 6: 76 };
+    /** 0=Seç, 1=Giriş, 2=Firma, 3=Aylık tutar, 4=Toplam borç, 5=Gün, 6=Ay, 7=Geciken ay, 8=Fatura, 9=Hizmet türü, 10=Durum */
+    var DEFAULT_COL_ORDER_FULL = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+    var DEFAULT_WIDTHS = { 0: 44, 1: 96, 2: 220, 3: 88, 4: 100, 5: 44, 6: 76, 7: 56, 8: 100, 9: 120, 10: 120, 11: 76 };
     var COL_MIN_PX = 36;
     var FRAME_MIN_PX = 100;
 
@@ -7410,23 +8393,238 @@ function faturaRaporSecilenleriSil() {
         };
     }
 
-    function migrateFirmaSortChLeft(s) {
+    /** Eski 7 sütun (0–6) → Toplam borç eklendi: 4 yeni, eski 4–6 → 5–7 */
+    function migrateFirmaWidthsV2ToV3(w) {
+        if (!w || typeof w !== 'object') return {};
+        if (w[7] != null && +w[7] > 0) return Object.assign({}, w);
+        var o = {};
+        var k;
+        for (k = 0; k <= 3; k++) {
+            if (w[k] != null && +w[k] > 0) o[k] = Math.round(+w[k]);
+        }
+        if (w[4] != null && +w[4] > 0) o[5] = Math.round(+w[4]);
+        if (w[5] != null && +w[5] > 0) o[6] = Math.round(+w[5]);
+        if (w[6] != null && +w[6] > 0) o[7] = Math.round(+w[6]);
+        if (o[4] == null || !(+o[4] > 0)) o[4] = DEFAULT_WIDTHS[4];
+        return o;
+    }
+
+    /** v3 (0–7) → Geciken ay eklendi: yeni 5, eski 5–7 → 6–8 */
+    function migrateFirmaWidthsV3ToV4(w) {
+        if (!w || typeof w !== 'object') return {};
+        if (w[8] != null && +w[8] > 0) return Object.assign({}, w);
+        var o = {};
+        var k;
+        for (k = 0; k <= 4; k++) {
+            if (w[k] != null && +w[k] > 0) o[k] = Math.round(+w[k]);
+        }
+        if (w[5] != null && +w[5] > 0) o[6] = Math.round(+w[5]);
+        if (w[6] != null && +w[6] > 0) o[7] = Math.round(+w[6]);
+        if (w[7] != null && +w[7] > 0) o[8] = Math.round(+w[7]);
+        if (o[5] == null || !(+o[5] > 0)) o[5] = 56;
+        return o;
+    }
+
+    /** v4 (0–8) → Gün sütunu: yeni 5, eski 5–8 → 6–9 */
+    function migrateFirmaWidthsV4ToV5(w) {
+        if (!w || typeof w !== 'object') return {};
+        if (w[9] != null && +w[9] > 0) return Object.assign({}, w);
+        var o = {};
+        var k;
+        for (k = 0; k <= 4; k++) {
+            if (w[k] != null && +w[k] > 0) o[k] = Math.round(+w[k]);
+        }
+        if (w[5] != null && +w[5] > 0) o[6] = Math.round(+w[5]);
+        if (w[6] != null && +w[6] > 0) o[7] = Math.round(+w[6]);
+        if (w[7] != null && +w[7] > 0) o[8] = Math.round(+w[7]);
+        if (w[8] != null && +w[8] > 0) o[9] = Math.round(+w[8]);
+        if (o[5] == null || !(+o[5] > 0)) o[5] = DEFAULT_WIDTHS[5];
+        return o;
+    }
+
+    /** v5 (0–9) → Ay sütunu: yeni 6, eski 6–9 → 7–10 */
+    function migrateFirmaWidthsV5ToV6(w) {
+        if (!w || typeof w !== 'object') return {};
+        if (w[10] != null && +w[10] > 0) return Object.assign({}, w);
+        var o = {};
+        var k;
+        for (k = 0; k <= 5; k++) {
+            if (w[k] != null && +w[k] > 0) o[k] = Math.round(+w[k]);
+        }
+        if (w[6] != null && +w[6] > 0) o[7] = Math.round(+w[6]);
+        if (w[7] != null && +w[7] > 0) o[8] = Math.round(+w[7]);
+        if (w[8] != null && +w[8] > 0) o[9] = Math.round(+w[8]);
+        if (w[9] != null && +w[9] > 0) o[10] = Math.round(+w[9]);
+        if (o[6] == null || !(+o[6] > 0)) o[6] = DEFAULT_WIDTHS[6];
+        return o;
+    }
+
+    function migrateFirmaColOrderV2ToV3(order) {
+        if (!order || !Array.isArray(order)) return null;
+        var raw = [];
+        var i;
+        for (i = 0; i < order.length; i++) {
+            var x = parseInt(order[i], 10);
+            if (Number.isFinite(x) && x >= 0 && x <= 7) raw.push(x);
+        }
+        if (raw.indexOf(7) >= 0) return null;
+        var max = raw.reduce(function (a, b) { return Math.max(a, b); }, -1);
+        if (max < 4) return null;
+        var bumped = [];
+        var seen = {};
+        for (i = 0; i < raw.length; i++) {
+            var lid = raw[i];
+            if (seen[lid]) continue;
+            seen[lid] = true;
+            if (lid >= 4) bumped.push(lid + 1);
+            else bumped.push(lid);
+        }
+        bumped = bumped.filter(function (x) { return x !== 4; });
+        var idx3 = bumped.indexOf(3);
+        if (idx3 >= 0) bumped.splice(idx3 + 1, 0, 4);
+        else bumped.unshift(4);
+        return bumped;
+    }
+
+    /** v3 (8 sütun, id 7=Durum) → v4 (9 sütun): yeni 5 Geciken ay, eski 5–7 kayar */
+    function migrateFirmaColOrderV3ToV4(order) {
+        if (!order || !Array.isArray(order)) return null;
+        var raw = [];
+        var i;
+        for (i = 0; i < order.length; i++) {
+            var x = parseInt(order[i], 10);
+            if (Number.isFinite(x) && x >= 0 && x <= 8) raw.push(x);
+        }
+        if (raw.indexOf(8) >= 0) return null;
+        if (raw.indexOf(7) < 0) return null;
+        var bumped = [];
+        var seen = {};
+        for (i = 0; i < raw.length; i++) {
+            var lid = raw[i];
+            if (seen[lid]) continue;
+            seen[lid] = true;
+            if (lid >= 5) bumped.push(lid + 1);
+            else bumped.push(lid);
+        }
+        bumped = bumped.filter(function (x) { return x !== 5; });
+        var idx4 = bumped.indexOf(4);
+        if (idx4 >= 0) bumped.splice(idx4 + 1, 0, 5);
+        else bumped.unshift(5);
+        return bumped;
+    }
+
+    /** v4 (id 8=Durum) → v5 (10 sütun): yeni 5 Gün, eski 5–8 kayar */
+    function migrateFirmaColOrderV4ToV5(order) {
+        if (!order || !Array.isArray(order)) return null;
+        var raw = [];
+        var i;
+        for (i = 0; i < order.length; i++) {
+            var x = parseInt(order[i], 10);
+            if (Number.isFinite(x) && x >= 0 && x <= 9) raw.push(x);
+        }
+        if (raw.indexOf(9) >= 0) return null;
+        if (raw.indexOf(8) < 0) return null;
+        var bumped = [];
+        var seen = {};
+        for (i = 0; i < raw.length; i++) {
+            var lid = raw[i];
+            if (seen[lid]) continue;
+            seen[lid] = true;
+            if (lid >= 5) bumped.push(lid + 1);
+            else bumped.push(lid);
+        }
+        bumped = bumped.filter(function (x) { return x !== 5; });
+        var idx4 = bumped.indexOf(4);
+        if (idx4 >= 0) bumped.splice(idx4 + 1, 0, 5);
+        else bumped.unshift(5);
+        return bumped;
+    }
+
+    /** v5 (id 9=Durum) → v6 (11 sütun): yeni 6 Ay, eski 6–9 kayar */
+    function migrateFirmaColOrderV5ToV6(order) {
+        if (!order || !Array.isArray(order)) return null;
+        var raw = [];
+        var i;
+        for (i = 0; i < order.length; i++) {
+            var x = parseInt(order[i], 10);
+            if (Number.isFinite(x) && x >= 0 && x <= 11) raw.push(x);
+        }
+        if (raw.indexOf(10) >= 0) return null;
+        if (raw.indexOf(9) < 0) return null;
+        var bumped = [];
+        var seen = {};
+        for (i = 0; i < raw.length; i++) {
+            var lid = raw[i];
+            if (seen[lid]) continue;
+            seen[lid] = true;
+            if (lid >= 6) bumped.push(lid + 1);
+            else bumped.push(lid);
+        }
+        bumped = bumped.filter(function (x) { return x !== 6; });
+        var idx5 = bumped.indexOf(5);
+        if (idx5 >= 0) bumped.splice(idx5 + 1, 0, 6);
+        else bumped.unshift(6);
+        return bumped;
+    }
+
+    function colOrderMaxId(order) {
+        if (!order || !Array.isArray(order)) return -1;
+        var m = -1;
+        var i;
+        for (i = 0; i < order.length; i++) {
+            var x = parseInt(order[i], 10);
+            if (Number.isFinite(x) && x > m) m = x;
+        }
+        return m;
+    }
+
+    function migrateFirmaSortPreserve(s, maxColId) {
+        if (!s || typeof s !== 'object' || s.colIndex == null) return null;
+        var ms = migrateFirmaSortChLeft(s, maxColId);
+        return ms != null ? ms : s;
+    }
+
+    function migrateFirmaSortChLeft(s, maxColId) {
         if (!s || typeof s !== 'object' || s.colIndex == null) return null;
         var c = parseInt(s.colIndex, 10);
         if (!Number.isFinite(c)) return null;
+        var mx = maxColId;
+        if (mx == null || !Number.isFinite(mx)) mx = -1;
+        mx = parseInt(mx, 10);
+        if (mx === 9 && c >= 6 && c <= 9) {
+            return { colIndex: c + 1, dir: s.dir || 'asc' };
+        }
+        if (mx === 8 && c >= 5 && c <= 8) {
+            return { colIndex: c + 1, dir: s.dir || 'asc' };
+        }
+        if (mx === 7 && c >= 5 && c <= 7) {
+            return { colIndex: c + 1, dir: s.dir || 'asc' };
+        }
         if (c >= 0 && c <= 2) return { colIndex: c + 1, dir: s.dir || 'asc' };
         if (c >= 1 && c <= 3) return { colIndex: c, dir: s.dir || 'asc' };
-        if (c === 5 || c === 6) return { colIndex: c, dir: s.dir || 'asc' };
+        if (mx <= 6) {
+            if (c === 5 || c === 6) return { colIndex: c + 1, dir: s.dir || 'asc' };
+            if (c === 4) return { colIndex: 5, dir: s.dir || 'asc' };
+        }
         return null;
     }
 
     function normalizeColOrder(order) {
         var def = DEFAULT_COL_ORDER_FULL.slice();
-        if (!order || !Array.isArray(order)) return def;
+        var orderUse = order;
+        var m23 = migrateFirmaColOrderV2ToV3(order);
+        if (m23 != null) orderUse = m23;
+        var m34 = migrateFirmaColOrderV3ToV4(orderUse);
+        if (m34 != null) orderUse = m34;
+        var m45 = migrateFirmaColOrderV4ToV5(orderUse);
+        if (m45 != null) orderUse = m45;
+        var m56 = migrateFirmaColOrderV5ToV6(orderUse);
+        if (m56 != null) orderUse = m56;
+        if (!orderUse || !Array.isArray(orderUse)) return def;
         var raw = [];
-        for (var i = 0; i < order.length; i++) {
-            var x = parseInt(order[i], 10);
-            if (Number.isFinite(x) && x >= 0 && x <= 6) raw.push(x);
+        for (var i = 0; i < orderUse.length; i++) {
+            var x = parseInt(orderUse[i], 10);
+            if (Number.isFinite(x) && x >= 0 && x <= 11) raw.push(x);
         }
         var seen = {};
         var out = [];
@@ -7436,7 +8634,7 @@ function faturaRaporSecilenleriSil() {
             seen[a] = true;
             out.push(a);
         }
-        if (out.length === 7) return out;
+        if (out.length === 12) return out;
         def.forEach(function (lid) {
             if (!seen[lid]) {
                 out.push(lid);
@@ -7471,8 +8669,8 @@ function faturaRaporSecilenleriSil() {
                 var leg = localStorage.getItem(LS_FIRMA_LEGACY);
                 if (leg) {
                     o = JSON.parse(leg) || {};
-                    o.widths = migrateFirmaWidthsChLeft(o.widths || {});
-                    o.sort = migrateFirmaSortChLeft(o.sort);
+                    o.widths = migrateFirmaWidthsV5ToV6(migrateFirmaWidthsV4ToV5(migrateFirmaWidthsV3ToV4(migrateFirmaWidthsV2ToV3(migrateFirmaWidthsChLeft(o.widths || {})))));
+                    o.sort = migrateFirmaSortPreserve(o.sort, colOrderMaxId(o.colOrder));
                     var owM = o.outerW;
                     if (owM != null && owM !== '') {
                         owM = parseInt(owM, 10);
@@ -7498,9 +8696,10 @@ function faturaRaporSecilenleriSil() {
                 ow = parseInt(ow, 10);
                 if (!Number.isFinite(ow)) ow = null;
             } else ow = null;
+            var mxCo = colOrderMaxId(o.colOrder);
             return {
-                widths: migrateFirmaWidthsChLeft((o.widths && typeof o.widths === 'object') ? o.widths : {}),
-                sort: migrateFirmaSortChLeft((o.sort && typeof o.sort === 'object') ? o.sort : null),
+                widths: migrateFirmaWidthsV5ToV6(migrateFirmaWidthsV4ToV5(migrateFirmaWidthsV3ToV4(migrateFirmaWidthsV2ToV3(migrateFirmaWidthsChLeft((o.widths && typeof o.widths === 'object') ? o.widths : {}))))),
+                sort: migrateFirmaSortPreserve((o.sort && typeof o.sort === 'object') ? o.sort : null, mxCo),
                 outerW: ow,
                 colOrder: normalizeColOrder(o.colOrder),
             };
@@ -7606,11 +8805,10 @@ function faturaRaporSecilenleriSil() {
                 var cur = readUi();
                 var p = d.prefs;
                 if (p.widths && typeof p.widths === 'object') {
-                    cur.widths = migrateFirmaWidthsChLeft(Object.assign({}, cur.widths, p.widths));
+                    cur.widths = migrateFirmaWidthsV5ToV6(migrateFirmaWidthsV4ToV5(migrateFirmaWidthsV3ToV4(migrateFirmaWidthsV2ToV3(migrateFirmaWidthsChLeft(Object.assign({}, cur.widths, p.widths))))));
                 }
                 if (p.sort && typeof p.sort === 'object') {
-                    var ms = migrateFirmaSortChLeft(p.sort);
-                    if (ms) cur.sort = ms;
+                    cur.sort = migrateFirmaSortPreserve(p.sort, colOrderMaxId(p.colOrder));
                 }
                 if (p.outerW != null && p.outerW !== '') {
                     var ow = parseInt(p.outerW, 10);
@@ -7640,12 +8838,27 @@ function faturaRaporSecilenleriSil() {
             return '<th class="num fatura-rapor-firma-th-drg" data-fr-col-id="3" title="Sıralama · kenardan genişlik · sütunu sürükleyerek taşı">' + th3 + '</th>';
         }
         if (lid === 4) {
-            return '<th class="fatura-rapor-firma-fatura-col-th fatura-rapor-firma-th-drg" data-fr-col-id="4" title="Sütunu taşı · satırda yeni fatura ekranı">Fatura oluştur</th>';
+            return '<th class="num fatura-rapor-firma-th-drg" data-fr-col-id="4" title="Sözleşme başından referans ayına kadar tahsil görülmeyen ayların KDV dahil toplamı (aylık grid) · sıralama · sürükle">Toplam borç</th>';
         }
         if (lid === 5) {
-            return '<th class="fatura-rapor-firma-th-drg" data-fr-col-id="5" title="Başlığa tıklayınca sırala · süzgeç için huni simgesi · sütunu sürükleyerek taşı">' + FR_FIRMA_TH_INNER_HIZMET_HTML + '</th>';
+            return '<th class="num fatura-rapor-firma-th-drg" data-fr-col-id="5" title="Sözleşme başlangıç (giriş) tarihinin günü · sıralama · sürükle">Gün</th>';
         }
-        return '<th class="fatura-rapor-firma-th-drg" data-fr-col-id="6" title="Başlığa tıklayınca sırala · süzgeç için huni simgesi · sütunu sürükleyerek taşı">' + FR_FIRMA_TH_INNER_DURUM_HTML + '</th>';
+        if (lid === 6) {
+            return '<th class="fatura-rapor-firma-th-drg" data-fr-col-id="6" title="Sözleşme başlangıç ayı (Türkçe) · sıralama · sürükle">Ay</th>';
+        }
+        if (lid === 7) {
+            return '<th class="num fatura-rapor-firma-th-drg" data-fr-col-id="7" title="Tahsil görülmeyen ve pozitif tutarlı ay sayısı (toplam borç ile aynı mantık) · sıralama · sürükle">Geciken ay</th>';
+        }
+        if (lid === 8) {
+            return '<th class="fatura-rapor-firma-fatura-col-th fatura-rapor-firma-th-drg" data-fr-col-id="8" title="Sütunu taşı · satırda yeni fatura ekranı">Fatura oluştur</th>';
+        }
+        if (lid === 9) {
+            return '<th class="fatura-rapor-firma-th-drg" data-fr-col-id="9" title="Başlığa tıklayınca sırala · süzgeç için huni simgesi · sütunu sürükleyerek taşı">' + FR_FIRMA_TH_INNER_GRUP2_HTML + '</th>';
+        }
+        if (lid === 10) {
+            return '<th class="fatura-rapor-firma-th-drg" data-fr-col-id="10" title="Başlığa tıklayınca sırala · süzgeç için huni simgesi · sütunu sürükleyerek taşı">' + FR_FIRMA_TH_INNER_HIZMET_HTML + '</th>';
+        }
+        return '<th class="fatura-rapor-firma-th-drg" data-fr-col-id="11" title="Başlığa tıklayınca sırala · süzgeç için huni simgesi · sütunu sürükleyerek taşı">' + FR_FIRMA_TH_INNER_DURUM_HTML + '</th>';
     }
 
     window.faturaRaporFirmaBuildThead = function (tablo, ayEtiket) {
@@ -7698,12 +8911,41 @@ function faturaRaporSecilenleriSil() {
                 if (na === nb) return 0;
                 return (na - nb) * sign;
             }
+            if (colIndex === 4) {
+                var ba = parseFloat(ra.getAttribute('data-fr-borc-n')) || 0;
+                var bb = parseFloat(rb.getAttribute('data-fr-borc-n')) || 0;
+                if (ba === bb) return 0;
+                return (ba - bb) * sign;
+            }
+            if (colIndex === 5) {
+                var gda = parseInt(ra.getAttribute('data-fr-gun-n'), 10) || 0;
+                var gdb = parseInt(rb.getAttribute('data-fr-gun-n'), 10) || 0;
+                if (gda === gdb) return 0;
+                return (gda - gdb) * sign;
+            }
+            if (colIndex === 6) {
+                var aa = parseInt(ra.getAttribute('data-fr-ay-n'), 10) || 0;
+                var ab = parseInt(rb.getAttribute('data-fr-ay-n'), 10) || 0;
+                if (aa === ab) return 0;
+                return (aa - ab) * sign;
+            }
+            if (colIndex === 7) {
+                var ga = parseInt(ra.getAttribute('data-fr-geciken-n'), 10) || 0;
+                var gb = parseInt(rb.getAttribute('data-fr-geciken-n'), 10) || 0;
+                if (ga === gb) return 0;
+                return (ga - gb) * sign;
+            }
             if (colIndex === 1) {
                 var ca = ra.getAttribute('data-fr-tarih') || '';
                 var cb = rb.getAttribute('data-fr-tarih') || '';
                 return ca.localeCompare(cb) * sign;
             }
-            if (colIndex === 5) {
+            if (colIndex === 9) {
+                var g2a = ra.getAttribute('data-fr-grup2-sort') || '';
+                var g2b = rb.getAttribute('data-fr-grup2-sort') || '';
+                return g2a.localeCompare(g2b, 'tr', { sensitivity: 'base', numeric: true }) * sign;
+            }
+            if (colIndex === 10) {
                 var ha = ra.getAttribute('data-fr-hizmet-sort') || '';
                 var hb = rb.getAttribute('data-fr-hizmet-sort') || '';
                 var oaRaw = (ra.getAttribute('data-fr-hazir-oda') || '').trim();
@@ -7719,7 +8961,7 @@ function faturaRaporSecilenleriSil() {
                 }
                 return ha.localeCompare(hb, 'tr', { sensitivity: 'base', numeric: true }) * sign;
             }
-            if (colIndex === 6) {
+            if (colIndex === 11) {
                 var da = ra.getAttribute('data-fr-durum-sort') || '';
                 var db = rb.getAttribute('data-fr-durum-sort') || '';
                 if (da === db) return 0;
@@ -7735,8 +8977,8 @@ function faturaRaporSecilenleriSil() {
     };
 
     window.faturaRaporFirmaUpdateSortUi = function (tablo, colIndex, dir) {
-        if (colIndex == null || colIndex === 0 || colIndex === 4) return;
-        var sortOk = (colIndex >= 1 && colIndex <= 3) || colIndex === 5 || colIndex === 6;
+        if (colIndex == null || colIndex === 0 || colIndex === 8) return;
+        var sortOk = (colIndex >= 1 && colIndex <= 7) || colIndex === 9 || colIndex === 10 || colIndex === 11;
         if (!sortOk) return;
         var hdr = tablo.querySelector('thead tr.fatura-rapor-firma-hdr');
         if (!hdr) return;
@@ -7749,7 +8991,7 @@ function faturaRaporSecilenleriSil() {
         var th = hdr.querySelector('th[data-fr-col-id="' + String(colIndex) + '"]');
         if (!th) return;
         var tblk = th.querySelector('.fatura-rapor-firma-th-title-block');
-        if (tblk && (colIndex === 5 || colIndex === 6)) {
+        if (tblk && (colIndex === 9 || colIndex === 10 || colIndex === 11)) {
             tblk.classList.add(dir === 'desc' ? 'fatura-sort-desc' : 'fatura-sort-asc');
         } else {
             th.classList.add(dir === 'desc' ? 'fatura-sort-desc' : 'fatura-sort-asc');
@@ -7846,9 +9088,9 @@ function faturaRaporSecilenleriSil() {
                     var thF = filtBtn.closest('th');
                     if (thF && hdr.contains(thF)) {
                         var flid = parseInt(thF.getAttribute('data-fr-col-id'), 10);
-                        if (flid === 5 || flid === 6) {
+                        if (flid === 9 || flid === 10 || flid === 11) {
                             if (typeof faturaRaporFirmaFilterMenuAc === 'function') {
-                                faturaRaporFirmaFilterMenuAc(flid === 5 ? 'hizmet' : 'durum', thF);
+                                faturaRaporFirmaFilterMenuAc(flid === 9 ? 'grup2' : (flid === 10 ? 'hizmet' : 'durum'), thF);
                             }
                         }
                     }
@@ -7859,7 +9101,7 @@ function faturaRaporSecilenleriSil() {
                 var th = ev.target.closest('th');
                 if (!th || !hdr.contains(th)) return;
                 var lid = parseInt(th.getAttribute('data-fr-col-id'), 10);
-                if (isNaN(lid) || lid === 0 || lid === 4) return;
+                if (isNaN(lid) || lid === 0 || lid === 8) return;
                 var tbody = document.getElementById('fatura_rapor_tbody');
                 var hasRows = tbody && tbody.querySelectorAll('tr').length > 0;
                 if (!hasRows) return;
@@ -7963,7 +9205,7 @@ function faturaRaporSecilenleriSil() {
         var uiSort = readUi();
         if (uiSort.sort && uiSort.sort.colIndex != null) {
             var sci = uiSort.sort.colIndex;
-            if ((sci >= 1 && sci <= 3) || sci === 5 || sci === 6) {
+            if ((sci >= 1 && sci <= 7) || sci === 9 || sci === 10 || sci === 11) {
                 window.faturaRaporFirmaSortBody(tablo, sci, uiSort.sort.dir || 'asc');
                 window.faturaRaporFirmaUpdateSortUi(tablo, sci, uiSort.sort.dir || 'asc');
             }
@@ -8073,6 +9315,15 @@ function faturaRaporSecilenleriSil() {
         if (gor && gor.value === 'firma_ozet' && typeof faturaRaporYukle === 'function') {
             faturaRaporYukle();
         }
+    });
+})();
+
+(function initFaturaRaporBizimHesapGiris() {
+    var bh = document.getElementById('fatura_rapor_bizim_hesap');
+    if (!bh) return;
+    bh.addEventListener('change', function () {
+        if (typeof faturaRaporFiltreStateKaydet === 'function') faturaRaporFiltreStateKaydet();
+        if (typeof faturaRaporYukle === 'function') faturaRaporYukle();
     });
 })();
 
@@ -9605,6 +10856,12 @@ function hesaplaYuzde(skipAylikGrid) {
             }
         }
     });
+    try {
+        if (typeof girisGrup2SeciliOku === 'function') {
+            var g2s = girisGrup2SeciliOku();
+            if (g2s && g2s.length) doluOpsiyonel++;
+        }
+    } catch (eG2) {}
     
     // Yüzde hesapla (zorunlu %60, opsiyonel %40)
     const zorunluYuzde = (doluZorunlu / zorunluAlanlar.length) * 60;
@@ -9766,6 +11023,7 @@ async function musteriAra() {
                 <div class="name">${m.name}</div>
                 ${m.musteri_adi ? `<div class="meta" style="font-size:11px;color:#90a4ae;">Müşteri adı: ${String(m.musteri_adi).replace(/</g,'&lt;')}</div>` : ''}
                 <div class="vergi">${m.tax_number || 'Vergi no yok'}</div>
+                <div class="meta" style="font-size:10px;color:#78909c;margin-top:2px;">Sözleşme: ${String(girisApiMusteriSozlesmeBaslangicGoster(m)).replace(/</g,'&lt;')} · Durum: ${String(girisApiMusteriDurumOzetMetni(m)).replace(/</g,'&lt;')}</div>
             </div>
         `).join('');
     } catch (error) {
@@ -10516,6 +11774,16 @@ function selectMusteri(id) {
             } else {
                 syncDurumUI('aktif', { skipAylikGrid: activeTab === 0 || activeTab === 6 || activeTab === 7 || activeTab === 9 });
             }
+            (function () {
+                var arr = Array.isArray(m.grup2_secimleri) ? m.grup2_secimleri.slice() : [];
+                if (!arr.length && m.bizim_hesap) arr = ['bizim_hesap'];
+                if (typeof girisGrup2SeciliYaz === 'function') girisGrup2SeciliYaz(arr);
+                if (typeof girisGrup2EtiketleriYukle === 'function') {
+                    girisGrup2EtiketleriYukle(function () {
+                        if (typeof girisGrup2BtnLabelGuncelle === 'function') girisGrup2BtnLabelGuncelle();
+                    });
+                } else if (typeof girisGrup2BtnLabelGuncelle === 'function') girisGrup2BtnLabelGuncelle();
+            })();
             if (m.guncel_kira_bedeli != null && m.guncel_kira_bedeli !== '') set('aylik_kira', m.guncel_kira_bedeli);
             else if (m.ilk_kira_bedeli != null && m.ilk_kira_bedeli !== '') set('aylik_kira', m.ilk_kira_bedeli);
             (function () {
@@ -11388,7 +12656,8 @@ function sirketUnvaniAutocomplete() {
                         var div = document.createElement('div');
                         div.className = 'sirket-item';
                         div.setAttribute('data-id', m.id);
-                        div.innerHTML = '<div class="sirket-name">' + (m.name || '').replace(/</g, '&lt;') + '</div><div class="sirket-vergi">Vergi no: ' + (m.tax_number || '—') + '</div>';
+                        var altV = 'Vergi no: ' + (m.tax_number || '—') + ' · Sözleşme: ' + girisApiMusteriSozlesmeBaslangicGoster(m) + ' · Durum: ' + girisApiMusteriDurumOzetMetni(m);
+                        div.innerHTML = '<div class="sirket-name">' + (m.name || '').replace(/</g, '&lt;') + '</div><div class="sirket-vergi">' + altV.replace(/</g, '&lt;') + '</div>';
                         div.onclick = function() { sirketUnvaniSec(m.id); };
                         dropdown.appendChild(div);
                     });
@@ -11410,6 +12679,26 @@ var musteriAdiAutocompleteAbort = null;
 function musteriAdiAramaEsc(s) {
     if (s == null || s === '') return '';
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+}
+/** /giris/api/musteriler satırı: KYC sözleşme tarihi, yoksa rent_start_date */
+function girisApiMusteriSozlesmeBaslangicGoster(m) {
+    var k = (m.kyc_sozlesme_tarihi != null) ? String(m.kyc_sozlesme_tarihi).trim() : '';
+    var r = (m.rent_start_date != null) ? String(m.rent_start_date).trim() : '';
+    var s = k || r;
+    if (!s) return '—';
+    if (s.length >= 10 && s.charAt(4) === '-') return s.slice(0, 10);
+    var mm = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})/);
+    if (mm) return mm[3] + '-' + ('0' + mm[2]).slice(-2) + '-' + ('0' + mm[1]).slice(-2);
+    return s.slice(0, 12);
+}
+/** Şirket durumu (durum) + isteğe bağlı kart pasif uyarısı */
+function girisApiMusteriDurumOzetMetni(m) {
+    var d = (m.durum != null) ? String(m.durum).trim().toLowerCase() : '';
+    var sirketPasif = (d === 'pasif');
+    var kartPasif = (m.is_active === false || m.is_active === 0 || m.is_active === '0');
+    var t = sirketPasif ? 'Pasif' : 'Aktif';
+    if (kartPasif && !sirketPasif) t += ' (kart pasif)';
+    return t;
 }
 function musteriAdiAutocomplete() {
     var input = document.getElementById('musteri_adi');
@@ -11444,6 +12733,7 @@ function musteriAdiAutocomplete() {
                         div.className = 'sirket-item';
                         div.setAttribute('data-id', m.id);
                         var altPlain = 'No: ' + (m.musteri_no != null && m.musteri_no !== '' ? m.musteri_no : '—') + ' · Vergi: ' + (m.tax_number || '—');
+                        altPlain += ' · Sözleşme: ' + girisApiMusteriSozlesmeBaslangicGoster(m) + ' · Durum: ' + girisApiMusteriDurumOzetMetni(m);
                         if (m.name && String(gosterAd).trim() !== String(m.name).trim()) {
                             altPlain += ' · ' + String(m.name).slice(0, 52);
                         }
@@ -11615,7 +12905,12 @@ async function kaydet(event) {
         ev_adres: document.getElementById('ev_adres').value,
         notes: document.getElementById('notes').value,
         durum: mdVal,
-        kapanis_tarihi: (kapInp && mdVal === 'pasif') ? kapInp.value : ''
+        kapanis_tarihi: (kapInp && mdVal === 'pasif') ? kapInp.value : '',
+        grup2_secimleri: (typeof girisGrup2SeciliOku === 'function') ? girisGrup2SeciliOku() : [],
+        bizim_hesap: (function () {
+            var sl = (typeof girisGrup2SeciliOku === 'function') ? girisGrup2SeciliOku() : [];
+            return sl.indexOf('bizim_hesap') >= 0;
+        })()
     };
 
     // KYC verisi (sözleşme + detaylar)
@@ -11626,7 +12921,10 @@ async function kaydet(event) {
         kapanis_tarihi: (kapInp && mdVal === 'pasif') ? kapInp.value : '',
         sirket_unvani: document.getElementById('name').value,
         vergi_no: vergiNo,
-        vergi_dairesi: document.getElementById('vergi_dairesi').value,
+        vergi_dairesi: (function () {
+            var el = document.getElementById('vergi_dairesi');
+            return el ? String(el.value || '').trim() : '';
+        })(),
         mersis_no: document.getElementById('mersis').value,
         ticaret_sicil_no: document.getElementById('ticaret_sicil').value,
         kurulus_tarihi: document.getElementById('kurulus_tarihi').value,
@@ -11912,6 +13210,13 @@ function temizle() {
 
 function temizleForm() {
     document.getElementById('musteri-form').reset();
+    if (typeof girisGrup2SeciliYaz === 'function') girisGrup2SeciliYaz([]);
+    else {
+        var g2h = document.getElementById('giris_grup2_secili_json');
+        if (g2h) g2h.value = '[]';
+        var g2b = document.getElementById('giris_grup2_btn');
+        if (g2b) g2b.textContent = 'Hepsi';
+    }
     var mnoEl = document.getElementById('musteri_no');
     if (mnoEl) mnoEl.value = '';
     syncDurumUI('aktif');
@@ -12103,6 +13408,12 @@ document.addEventListener('DOMContentLoaded', () => {
             console.warn(eHt);
         }
     })();
+    if (typeof girisGrup2EtiketleriYukle === 'function') {
+        girisGrup2EtiketleriYukle(function () {
+            if (typeof girisGrup2BtnLabelGuncelle === 'function') girisGrup2BtnLabelGuncelle();
+        });
+    }
+    if (typeof girisVergiDaireleriDatalistDoldur === 'function') girisVergiDaireleriDatalistDoldur();
     yukleDuzenliFaturaSelect();
     (async function faturaRaporSayfaFiltreVeBootstrap() {
         if (typeof girisHazirOfisOdaSelectleriDoldur === 'function') girisHazirOfisOdaSelectleriDoldur();

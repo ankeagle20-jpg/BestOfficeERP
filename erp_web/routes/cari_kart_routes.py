@@ -3,14 +3,42 @@ BestOffice 360° Cari Kart — Finans + CRM + Operasyon + Hukuk + Randevu + Karg
 """
 from flask import Blueprint, render_template, request, jsonify, Response, url_for
 from flask_login import current_user
+import psycopg2
 from auth import giris_gerekli
 from db import fetch_all, fetch_one, db as get_db, execute_returning, sql_expr_fatura_not_gib_taslak
 from utils.text_utils import turkish_lower
 from utils.musteri_arama import customers_arama_sql_giris_genis, customers_arama_params_giris_genis
 from services.cari_service import CariService, build_customer_levels
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import io
+import logging
+import time
+
+logger = logging.getLogger(__name__)
+
+
+def _json_safe_for_api(obj):
+    """jsonify öncesi: Decimal / date / bytes (DB sürprizleri) güvenli tiplere."""
+    if obj is None:
+        return None
+    if isinstance(obj, Decimal):
+        try:
+            x = float(obj)
+            return x if abs(x) < 1e308 else 0.0
+        except Exception:
+            return 0.0
+    if isinstance(obj, (bytes, bytearray)):
+        return obj.decode("utf-8", errors="replace")
+    if isinstance(obj, dict):
+        return {str(k): _json_safe_for_api(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe_for_api(v) for v in obj]
+    if isinstance(obj, (datetime, date)):
+        return obj.isoformat()
+    return obj
+
 
 _GRUP_RAPOR_AYLAR = (
     "",
@@ -29,6 +57,48 @@ _GRUP_RAPOR_AYLAR = (
 )
 
 _executor = ThreadPoolExecutor(max_workers=12)
+
+
+def _grup_rapor_alt_cari_pasifleri_dahil_mi() -> bool:
+    """Query: alt_cari_kapsam=hepsi → pasif / kapalı alt cariler de dahil (varsayılan: yalnız aktif)."""
+    v = (request.args.get("alt_cari_kapsam") or "aktif").strip().lower()
+    return v in ("hepsi", "tumu", "tum", "all", "pasif_dahil", "pasifler")
+
+
+def _grup_tipi_norm(v) -> str:
+    s = str(v or "").strip().lower()
+    if s in ("hazir", "mağaza", "magaza", "sanal"):
+        return "magaza" if s in ("mağaza", "magaza") else s
+    return "hepsi"
+
+
+def _grup_tipi_sql_and_params(grup_tipi: str) -> tuple[str, list]:
+    gt = _grup_tipi_norm(grup_tipi)
+    if gt == "hazir":
+        return "AND (LOWER(COALESCE(name, '')) LIKE %s OR LOWER(COALESCE(name, '')) LIKE %s)", ["%hazır%", "%hazir%"]
+    if gt == "sanal":
+        return "AND LOWER(COALESCE(name, '')) LIKE %s", ["%sanal%"]
+    if gt == "magaza":
+        return "AND (LOWER(COALESCE(name, '')) LIKE %s OR LOWER(COALESCE(name, '')) LIKE %s)", ["%mağaza%", "%magaza%"]
+    return "", []
+
+
+def _grup_ids_parse(raw) -> list[int]:
+    s = str(raw or "").strip()
+    if not s:
+        return []
+    out: list[int] = []
+    seen = set()
+    for p in s.split(","):
+        try:
+            i = int(str(p).strip())
+        except (TypeError, ValueError):
+            continue
+        if i > 0 and i not in seen:
+            seen.add(i)
+            out.append(i)
+    return out
+
 
 bp = Blueprint("cari_kart", __name__)
 
@@ -541,31 +611,145 @@ def api_create_group():
     return jsonify({"ok": True, "group": row})
 
 
+@bp.route("/api/groups-list")
+@giris_gerekli
+def api_groups_list():
+    """Grup raporu filtre dropdown/multi-select için hafif grup listesi."""
+    grup_tipi = _grup_tipi_norm(request.args.get("grup_tipi"))
+    tip_sql, tip_params = _grup_tipi_sql_and_params(grup_tipi)
+    rows = fetch_all(
+        f"""
+        SELECT id, name
+        FROM customers
+        WHERE COALESCE(is_group, FALSE) = TRUE
+          {tip_sql}
+        ORDER BY name
+        LIMIT 500
+        """,
+        tuple(tip_params),
+    ) or []
+    return jsonify(
+        {
+            "ok": True,
+            "grup_tipi": grup_tipi,
+            "groups": [
+                {
+                    "id": int(r.get("id") or 0),
+                    "name": (r.get("name") or "").strip(),
+                }
+                for r in rows
+                if int(r.get("id") or 0) > 0
+            ],
+        }
+    )
+
+
 @bp.route("/api/groups-consolidated-report")
 @giris_gerekli
 def api_groups_consolidated_report():
     """is_group kayıtları; alt carilerin toplam borç/alacak ve bu ay sözleşme gridi KDV dahil aylık tutarları (konsolide)."""
+    t0 = time.perf_counter()
+    pasif_alt = _grup_rapor_alt_cari_pasifleri_dahil_mi()
+    lite = str(request.args.get("lite") or "").strip().lower() in ("1", "true", "yes", "evet")
+    grup_tipi = _grup_tipi_norm(request.args.get("grup_tipi"))
+    secili_group_ids = _grup_ids_parse(request.args.get("group_ids"))
     bugun = date.today()
+    if not hasattr(api_groups_consolidated_report, "_cache"):
+        api_groups_consolidated_report._cache = {}
+    cache = api_groups_consolidated_report._cache
+    cache_ttl_sec = 90.0
+    cache_key = (
+        int(bugun.year),
+        int(bugun.month),
+        bool(pasif_alt),
+        bool(lite),
+        str(grup_tipi),
+        tuple(sorted(int(x) for x in secili_group_ids if int(x) > 0)),
+    )
+    now_ts = time.time()
+    cval = cache.get(cache_key)
+    if cval and (now_ts - float(cval[0])) <= cache_ttl_sec:
+        payload = dict(cval[1] or {})
+        try:
+            payload_meta = dict(payload.get("meta") or {})
+            payload_meta["cache_hit"] = True
+            payload_meta["timings_ms"] = {"total": round((time.perf_counter() - t0) * 1000.0, 1)}
+            payload["meta"] = payload_meta
+        except Exception:
+            pass
+        return jsonify(_json_safe_for_api(payload))
+
     ay_idx = int(bugun.month)
     ay_label = f"{_GRUP_RAPOR_AYLAR[ay_idx]} {bugun.year}" if 1 <= ay_idx <= 12 else str(bugun)
-    rows = fetch_all(
-        """
-        SELECT id, name
-        FROM customers
-        WHERE COALESCE(is_group, FALSE) = TRUE
-        ORDER BY name
-        LIMIT 500
-        """
-    ) or []
+    tip_sql, tip_params = _grup_tipi_sql_and_params(grup_tipi)
+    ids_sql = ""
+    ids_params = []
+    if secili_group_ids:
+        ids_sql = "AND id = ANY(%s)"
+        ids_params.append(secili_group_ids)
+    try:
+        rows = fetch_all(
+            f"""
+            SELECT id, name
+            FROM customers
+            WHERE COALESCE(is_group, FALSE) = TRUE
+              {tip_sql}
+              {ids_sql}
+            ORDER BY name
+            LIMIT 500
+            """,
+            tuple(tip_params + ids_params),
+        ) or []
+    except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
+        m = str(e or "")
+        if "10013" in m or "Permission denied (0x0000271D/10013)" in m:
+            return jsonify({
+                "ok": False,
+                "mesaj": "Veritabanı erişim kısıtlaması (10013). Lütfen kısa süre sonra tekrar deneyin.",
+                "error_code": 10013,
+            }), 503
+        return jsonify({"ok": False, "mesaj": "Veritabanı bağlantı hatası."}), 503
+    except psycopg2.Error:
+        logger.exception("api_groups_consolidated_report grup listesi SQL")
+        return jsonify({"ok": False, "mesaj": "Veritabanı sorgusu başarısız (grup listesi)."}), 500
+    if secili_group_ids:
+        secili_set = {int(x) for x in secili_group_ids if int(x) > 0}
+        rows = [r for r in rows if int(r.get("id") or 0) in secili_set]
+    t_rows = time.perf_counter()
     group_ids = [int(r.get("id") or 0) for r in rows if int(r.get("id") or 0) > 0]
-    batch = CariService.get_groups_consolidated_financials(group_ids, bugun)
+    try:
+        batch = CariService.get_groups_consolidated_financials(
+            group_ids,
+            bugun,
+            pasifleri_dahil=pasif_alt,
+            include_grid=(not lite),
+        )
+    except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
+        m = str(e or "")
+        if "10013" in m or "Permission denied (0x0000271D/10013)" in m:
+            return jsonify({
+                "ok": False,
+                "mesaj": "Veritabanı erişim kısıtlaması (10013). Lütfen kısa süre sonra tekrar deneyin.",
+                "error_code": 10013,
+            }), 503
+        return jsonify({"ok": False, "mesaj": "Veritabanı bağlantı hatası."}), 503
+    except psycopg2.Error:
+        logger.exception("api_groups_consolidated_report konsolidasyon SQL")
+        return jsonify({"ok": False, "mesaj": "Veritabanı sorgusu başarısız (konsolidasyon)."}), 500
+    except Exception:
+        logger.exception("api_groups_consolidated_report konsolidasyon")
+        return jsonify({"ok": False, "mesaj": "Grup raporu hesaplanamadı."}), 500
+    t_batch = time.perf_counter()
     groups_out = []
     sum_borc = 0.0
     sum_alacak = 0.0
     sum_children = 0
     sum_borc_month = 0.0
     for r in rows:
-        gid = int(r.get("id") or 0)
+        try:
+            gid = int(float(r.get("id") or 0))
+        except (TypeError, ValueError):
+            continue
         if gid <= 0:
             continue
         s = batch.get(gid) or {
@@ -574,63 +758,182 @@ def api_groups_consolidated_report():
             "alacak_total": 0.0,
             "net_balance": 0.0,
             "borc_month": 0.0,
+            "geciken_ay": 0,
+            "sozlesme_gun": 0,
         }
-        borc = float(s.get("borc_total") or 0)
-        alacak = float(s.get("alacak_total") or 0)
-        borc_month = float(s.get("borc_month") or 0)
+        try:
+            borc = float(s.get("borc_total") or 0)
+        except (TypeError, ValueError):
+            borc = 0.0
+        try:
+            alacak = float(s.get("alacak_total") or 0)
+        except (TypeError, ValueError):
+            alacak = 0.0
+        try:
+            borc_month = float(s.get("borc_month") or 0)
+        except (TypeError, ValueError):
+            borc_month = 0.0
         sum_borc += borc
         sum_alacak += alacak
-        sum_children += int(s.get("child_count") or 0)
         sum_borc_month += borc_month
+        try:
+            net_b = float(s.get("net_balance") or 0)
+        except (TypeError, ValueError):
+            net_b = round(borc - alacak, 2)
+        try:
+            gec = int(s.get("geciken_ay") or 0)
+        except (TypeError, ValueError):
+            gec = 0
+        try:
+            sgun = int(s.get("sozlesme_gun") or 0)
+        except (TypeError, ValueError):
+            sgun = 0
+        try:
+            cc_out = int(float(s.get("child_count") or 0))
+        except (TypeError, ValueError):
+            cc_out = 0
+        sum_children += cc_out
         groups_out.append(
             {
                 "id": gid,
                 "name": (r.get("name") or "").strip(),
-                "child_count": int(s.get("child_count") or 0),
+                "child_count": cc_out,
                 "borc_month": round(borc_month, 2),
                 "borc_total": round(borc, 2),
                 "alacak_total": round(alacak, 2),
-                "net_balance": float(s.get("net_balance") or 0),
+                "net_balance": net_b,
+                "geciken_ay": gec,
+                "sozlesme_gun": sgun,
             }
         )
-    return jsonify(
-        {
-            "ok": True,
-            "meta": {
-                "borc_month_iso": f"{bugun.year:04d}-{bugun.month:02d}",
-                "borc_month_label": ay_label,
+    payload = {
+        "ok": True,
+        "meta": {
+            "borc_month_iso": f"{bugun.year:04d}-{bugun.month:02d}",
+            "borc_month_label": ay_label,
+            "alt_cari_kapsam": "hepsi" if pasif_alt else "aktif",
+            "alt_cari_kapsam_label": "Tüm alt cariler" if pasif_alt else "Sadece aktif alt cariler",
+            "grup_tipi": grup_tipi,
+            "group_ids_count": len(secili_group_ids),
+            "lite": bool(lite),
+            "cache_hit": False,
+            "timings_ms": {
+                "rows_query": round((t_rows - t0) * 1000.0, 1),
+                "consolidation": round((t_batch - t_rows) * 1000.0, 1),
+                "serialize": round((time.perf_counter() - t_batch) * 1000.0, 1),
+                "total": round((time.perf_counter() - t0) * 1000.0, 1),
             },
-            "groups": groups_out,
-            "totals": {
-                "group_count": len(groups_out),
-                "child_count_sum": sum_children,
-                "borc_month_total": round(sum_borc_month, 2),
-                "borc_total": round(sum_borc, 2),
-                "alacak_total": round(sum_alacak, 2),
-                "net_balance": round(sum_borc - sum_alacak, 2),
-            },
-        }
-    )
+        },
+        "groups": groups_out,
+        "totals": {
+            "group_count": len(groups_out),
+            "child_count_sum": sum_children,
+            "borc_month_total": round(sum_borc_month, 2),
+            "borc_total": round(sum_borc, 2),
+            "alacak_total": round(sum_alacak, 2),
+            "net_balance": round(sum_borc - sum_alacak, 2),
+        },
+    }
+    cache[cache_key] = (now_ts, payload)
+    return jsonify(_json_safe_for_api(payload))
+
+
+def _serialize_group_children_for_api(children: list | None) -> list[dict]:
+    """jsonify / tarayıcı: Decimal, date vb. kalmaması için düz Python tipleri."""
+    out: list[dict] = []
+    for ch in children or []:
+        if not isinstance(ch, dict):
+            continue
+        try:
+            iid = int(ch.get("id") or 0)
+        except (TypeError, ValueError):
+            continue
+        if iid <= 0:
+            continue
+        try:
+            out.append(
+                {
+                    "id": iid,
+                    "musteri_no": str(ch.get("musteri_no") or ""),
+                    "name": str(ch.get("name") or ""),
+                    "musteri_adi": str(ch.get("musteri_adi") or ""),
+                    "borc_month": float(ch.get("borc_month") or 0),
+                    "borc_total": float(ch.get("borc_total") or 0),
+                    "alacak_total": float(ch.get("alacak_total") or 0),
+                    "net_balance": float(ch.get("net_balance") or 0),
+                    "geciken_ay": int(ch.get("geciken_ay") or 0),
+                    "sozlesme_gun": int(ch.get("sozlesme_gun") or 0),
+                }
+            )
+        except (TypeError, ValueError):
+            continue
+    return out
 
 
 @bp.route("/api/group-children/<int:group_id>")
 @giris_gerekli
 def api_group_children(group_id):
     """Grup altındaki cariler + her biri için borç / alacak / bu ay sözleşme gridi aylık tutarı."""
-    g = fetch_one(
-        "SELECT id, name, COALESCE(is_group, FALSE) AS is_group FROM customers WHERE id = %s",
-        (group_id,),
-    )
-    if not g:
-        return jsonify({"ok": False, "mesaj": "Kayıt bulunamadı."}), 404
-    if not bool(g.get("is_group")):
-        return jsonify({"ok": False, "mesaj": "Bu kayıt grup değil."}), 400
-    children = CariService.get_group_children_financial_rows(group_id)
-    return jsonify(
-        {
-            "ok": True,
-            "group_id": int(group_id),
-            "group_name": (g.get("name") or "").strip(),
-            "children": children,
-        }
-    )
+
+    def _db_baglanti_hatasi_yanit(e: BaseException):
+        m = str(e or "")
+        if "10013" in m or "Permission denied (0x0000271D/10013)" in m:
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "mesaj": "Veritabanı erişim kısıtlaması (10013). Lütfen kısa süre sonra tekrar deneyin.",
+                        "error_code": 10013,
+                    }
+                ),
+                503,
+            )
+        return jsonify({"ok": False, "mesaj": "Veritabanı bağlantı hatası."}), 503
+
+    # DEBUG açıkken yakalanmayan istisna Werkzeug HTML sayfası döner; tüm yolu sar.
+    try:
+        g = fetch_one(
+            "SELECT id, name, COALESCE(is_group, FALSE) AS is_group FROM customers WHERE id = %s",
+            (group_id,),
+        )
+        if not g:
+            return jsonify({"ok": False, "mesaj": "Kayıt bulunamadı."}), 404
+        if not bool(g.get("is_group")):
+            return jsonify({"ok": False, "mesaj": "Bu kayıt grup değil."}), 400
+        pasif_alt = _grup_rapor_alt_cari_pasifleri_dahil_mi()
+        children = CariService.get_group_children_financial_rows(
+            group_id, pasifleri_dahil=pasif_alt
+        )
+        safe_children = _serialize_group_children_for_api(children)
+        return jsonify(
+            {
+                "ok": True,
+                "group_id": int(group_id),
+                "group_name": str((g.get("name") or "")).strip(),
+                "children": safe_children,
+            }
+        )
+    except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
+        return _db_baglanti_hatasi_yanit(e)
+    except psycopg2.Error as e:
+        logger.exception("api_group_children veritabanı group_id=%s", group_id)
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "mesaj": "Veritabanı sorgusu başarısız (şema veya SQL). Sunucu günlüğüne bakın.",
+                }
+            ),
+            500,
+        )
+    except Exception:
+        logger.exception("api_group_children group_id=%s", group_id)
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "mesaj": "Alt firma listesi alınamadı. Kısa süre sonra tekrar deneyin.",
+                }
+            ),
+            500,
+        )

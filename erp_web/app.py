@@ -121,9 +121,34 @@ def not_found(e):
     """404 Sayfa bulunamadı hatası."""
     return render_template("errors/404.html"), 404
 
+_API_JSON_500_PREFIXES = (
+    "/giris/api/",
+    "/giris/resim-yukle/",
+    "/cari-kart/api/",
+    "/musteriler/api/",
+    "/bankalar/api/",
+    "/faturalar/api/",
+    "/randevu/api/",
+)
+
+
 @app.errorhandler(500)
 def server_error(e):
-    """500 Sunucu hatası."""
+    """500 Sunucu hatası — tam sayfa için HTML; fetch+JSON API uçları için JSON (HTML 500 SPA'yı kırıyordu)."""
+    try:
+        p = getattr(request, "path", None) or ""
+    except RuntimeError:
+        p = ""
+    if p.startswith(_API_JSON_500_PREFIXES):
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "mesaj": "Sunucu hatası oluştu. Lütfen tekrar deneyin.",
+                }
+            ),
+            500,
+        )
     return render_template("errors/500.html"), 500
 
 # ── Context processor — her template'e gönderilir ────────────────────────────
@@ -192,8 +217,32 @@ def ilk_kurulum():
     except Exception as e:
         print(f"Warning - ilk_kurulum error: {e}")
 
-# Uygulama yüklendiğinde (gunicorn/Render dahil) şema ve admin kontrolü
-ilk_kurulum()
+def _bootstrap_on_startup_enabled() -> bool:
+    """
+    Başlangıçta şema/admin bootstrap çalışsın mı?
+
+    Varsayılan:
+    - Geliştirmede kapalı (hızlı açılış, lock/connection dalgalanmasında bloklanmasın)
+    - Prod benzeri ortamlarda açık
+
+    Override:
+    - BESTOFFICE_RUN_BOOTSTRAP=1  -> zorla aç
+    - BESTOFFICE_RUN_BOOTSTRAP=0  -> zorla kapat
+    """
+    raw = (os.environ.get("BESTOFFICE_RUN_BOOTSTRAP") or "").strip().lower()
+    if raw in ("1", "true", "yes", "on"):
+        return True
+    if raw in ("0", "false", "no", "off"):
+        return False
+    # Local debug varsayılanı: kapalı
+    return bool(os.environ.get("GUNICORN_CMD_ARGS") or os.environ.get("RENDER"))
+
+
+# Uygulama yüklendiğinde (özellikle prod) şema ve admin kontrolü
+if _bootstrap_on_startup_enabled():
+    ilk_kurulum()
+else:
+    print("[BOOT] ilk_kurulum atlandı (BESTOFFICE_RUN_BOOTSTRAP ile açabilirsiniz).")
 try:
     from utils.compute_device import log_startup_accelerators
 
@@ -243,15 +292,15 @@ if __name__ == "__main__":
     print("  Giriş: admin / admin123")
     print("=" * 50 + "\n")
     # threaded=True: Paralel fetch istekleri birbirini bloklamasın.
-    # use_reloader: Cursor/IDE dosya kaydında sunucu 1–2 sn kapanır → "Sunucuya bağlanılamadı". Kararlı test için:
-    #   PowerShell: $env:BESTOFFICE_DEV_NO_RELOAD="1"; python app.py
-    _no_reload = os.environ.get("BESTOFFICE_DEV_NO_RELOAD", "").strip().lower() in ("1", "true", "yes", "on")
-    if _no_reload:
-        print("  [BESTOFFICE_DEV_NO_RELOAD] Otomatik yeniden başlatma kapalı (kod kaydı sunucuyu düşürmez).\n")
+    # use_reloader: IDE dosya kaydında sunucu 1–2 sn kapanır → UI'da "Failed to fetch" görülebilir.
+    # Varsayılanı "kapalı" tutuyoruz; isteyen BESTOFFICE_DEV_RELOAD=1 ile açar.
+    _reload_on = os.environ.get("BESTOFFICE_DEV_RELOAD", "").strip().lower() in ("1", "true", "yes", "on")
+    if not _reload_on:
+        print("  [DEV] Otomatik yeniden başlatma kapalı (BESTOFFICE_DEV_RELOAD=1 ile açılır).\n")
     app.run(
         debug=True,
         host="0.0.0.0",
         port=port,
         threaded=True,
-        use_reloader=not _no_reload,
+        use_reloader=_reload_on,
     )

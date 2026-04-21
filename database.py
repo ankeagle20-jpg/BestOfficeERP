@@ -1,7 +1,8 @@
 import sqlite3
 from pathlib import Path
 from datetime import date, datetime as dt
-from typing import Any, List, Optional, Dict, Union
+from typing import Any, List, Optional, Dict, Union, Tuple, Set
+from collections import defaultdict
 import pandas as pd
 
 # ============================================================================
@@ -9,6 +10,9 @@ import pandas as pd
 # ============================================================================
 
 DB_PATH = Path(__file__).with_name("erp.db")
+
+# TÜFE: tek sorguda cache (save_tufe_for_year sonrası invalidate_tufe_cache çağrılır)
+_TUFE_CACHE_GLOBAL: Optional[Dict[Tuple[int, str], float]] = None
 
 
 def get_connection() -> sqlite3.Connection:
@@ -360,11 +364,40 @@ def get_tufe_rate(year: int, month_name: str) -> Optional[float]:
     return float(row["oran"]) if row else None
 
 
+def _build_tufe_cache() -> Dict[Tuple[int, str], float]:
+    """Tüm TÜFE oranlarını tek sorguda dict olarak döndür (libpq/cache dışı)."""
+    cache: Dict[Tuple[int, str], float] = {}
+    rows = fetch_all("SELECT year, month, oran FROM tufe_verileri")
+    for r in rows:
+        try:
+            y = int(r["year"])
+            m = str(r["month"]).replace(" (%)", "").strip()
+            o = float(r["oran"])
+        except (TypeError, ValueError, KeyError):
+            continue
+        cache[(y, m)] = o
+    return cache
+
+
+def get_tufe_cache() -> Dict[Tuple[int, str], float]:
+    """Uygulama ömrü boyunca tek yükleme; TÜFE güncellenince invalidate_tufe_cache."""
+    global _TUFE_CACHE_GLOBAL
+    if _TUFE_CACHE_GLOBAL is None:
+        _TUFE_CACHE_GLOBAL = _build_tufe_cache()
+    return _TUFE_CACHE_GLOBAL
+
+
+def invalidate_tufe_cache() -> None:
+    global _TUFE_CACHE_GLOBAL
+    _TUFE_CACHE_GLOBAL = None
+
+
 def calculate_rent_progression(
     start_year: int,
     start_month: str,
     initial_rent: float,
-    manual_current: Optional[float] = None
+    manual_current: Optional[float] = None,
+    tufe_cache: Optional[Dict[tuple, float]] = None,
 ) -> Dict[str, Any]:
     """
     Kira başlangıç yılından bugüne TÜFE ile artışı hesapla.
@@ -382,13 +415,15 @@ def calculate_rent_progression(
 
     today = date.today()
     rent = float(initial_rent)
+    clean_start_month = str(start_month).replace(" (%)", "").strip()
+    cache = tufe_cache if tufe_cache is not None else get_tufe_cache()
 
     for year in range(start_year, today.year + 1):
         if year == start_year:
             result["years"][year] = round(rent, 2)
             continue
 
-        rate = get_tufe_rate(year, start_month)
+        rate = cache.get((year, clean_start_month))
         if rate is not None and rate > 0:
             rent *= (1 + rate / 100)
 
@@ -434,6 +469,7 @@ def save_tufe_for_year(year: int, data: Dict[str, float]) -> None:
                 except (ValueError, TypeError):
                     continue
         print(f"[DB] {year} yılı TÜFE oranları kaydedildi.")
+        invalidate_tufe_cache()
     except Exception as e:
         print(f"[DB HATA] save_tufe_for_year: {e}")
     finally:
@@ -444,26 +480,229 @@ def save_tufe_for_year(year: int, data: Dict[str, float]) -> None:
 # CUSTOMER OPERATIONS
 # ============================================================================
 
-def get_all_customers_with_rent_progression() -> List[Dict[str, Any]]:
-    """Tüm müşterileri kira progression verileriyle birlikte getir."""
+
+def count_customers() -> int:
+    row = fetch_one("SELECT COUNT(*) AS n FROM customers")
+    try:
+        return int(row["n"]) if row and row["n"] is not None else 0
+    except (TypeError, ValueError, KeyError):
+        return 0
+
+
+def get_distinct_rent_start_years() -> List[str]:
+    """Başlangıç tarihinden (GG.AA.YYYY) yıl listesi — filtre combobox için."""
     rows = fetch_all(
         """
+        SELECT DISTINCT rent_start_date
+        FROM customers
+        WHERE rent_start_date IS NOT NULL AND TRIM(rent_start_date) != ''
+        """
+    )
+    years: Set[str] = set()
+    for r in rows:
+        ds = str(r["rent_start_date"] or "").strip()
+        parts = ds.split(".")
+        if len(parts) == 3 and parts[2].strip().isdigit():
+            years.add(parts[2].strip())
+    return sorted(years)
+
+
+def fetch_rent_payments_paid_by_customer() -> Dict[int, Set[Tuple[int, str]]]:
+    """customer_id -> {(yıl, ay_adı), ...} ödenmiş aylar (amount > 0)."""
+    rows = fetch_all(
+        "SELECT customer_id, year, month FROM rent_payments WHERE amount > 0"
+    )
+    d: Dict[int, Set[Tuple[int, str]]] = defaultdict(set)
+    for r in rows:
+        try:
+            cid = int(r["customer_id"])
+            y = int(r["year"])
+            m = str(r["month"]).replace(" (%)", "").strip()
+            d[cid].add((y, m))
+        except (TypeError, ValueError, KeyError):
+            continue
+    return dict(d)
+
+
+def fetch_rent_payments_amount_map() -> Dict[Tuple[int, int, str], float]:
+    """(customer_id, year, month) -> amount (tüm satırlar)."""
+    rows = fetch_all("SELECT customer_id, year, month, amount FROM rent_payments")
+    d: Dict[Tuple[int, int, str], float] = {}
+    for r in rows:
+        try:
+            key = (
+                int(r["customer_id"]),
+                int(r["year"]),
+                str(r["month"]).replace(" (%)", "").strip(),
+            )
+            d[key] = float(r["amount"] or 0)
+        except (TypeError, ValueError, KeyError):
+            continue
+    return d
+
+
+def fetch_last_tahsilat_by_customer_id() -> Dict[int, Dict[str, Any]]:
+    """Müşteri başına son tahsilat (MAX(id))."""
+    rows = fetch_all(
+        """
+        SELECT t.customer_id, t.tahsilat_tarihi, t.tutar, t.odeme_turu
+        FROM tahsilatlar t
+        INNER JOIN (
+            SELECT customer_id, MAX(id) AS mid
+            FROM tahsilatlar
+            GROUP BY customer_id
+        ) x ON t.customer_id = x.customer_id AND t.id = x.mid
+        """
+    )
+    out: Dict[int, Dict[str, Any]] = {}
+    for r in rows:
+        try:
+            out[int(r["customer_id"])] = dict(r)
+        except (TypeError, ValueError, KeyError):
+            continue
+    return out
+
+
+def _toplam_odenmemis_kira_borc(
+    row: Dict[str, Any],
+    odenmis_set: Set[Tuple[int, str]],
+    bugun_yil: int,
+    bugun_ay: int,
+    months_tr: List[str],
+) -> float:
+    """get_musteri_toplam_borc ile aynı mantık; DB yok (ödenmiş set dışarıdan)."""
+    if not row or not row.get("ilk_kira_bedeli"):
+        return 0.0
+    ilk = float(row["ilk_kira_bedeli"])
+    sm = row.get("rent_start_month") or "Ocak"
+    try:
+        s_ay = months_tr.index(str(sm).replace(" (%)", "").strip()) + 1
+    except ValueError:
+        s_ay = 1
+    try:
+        s_yil = int(row.get("rent_start_year") or 2021)
+    except (TypeError, ValueError):
+        s_yil = 2021
+
+    borc = 0.0
+    y, m = s_yil, s_ay
+    while (y < bugun_yil) or (y == bugun_yil and m <= bugun_ay):
+        ay_key = (y, months_tr[m - 1])
+        if ay_key not in odenmis_set:
+            borc += ilk
+        m += 1
+        if m > 12:
+            m = 1
+            y += 1
+    return borc
+
+
+def get_borclu_musteri_ozet(arama_upper: str = "") -> Tuple[List[Dict[str, Any]], float, float, int]:
+    """Tahsilat sekmesi sol liste: tek geçişte kira/tahsilat verisi (N×DB yok)."""
+    from datetime import date as _date
+
+    bugun = _date.today()
+    bugun_yil = bugun.year
+    bugun_ay = bugun.month
+    ay_adi = MONTHS_TR[bugun_ay - 1]
+
+    customers = fetch_all(
+        """
+        SELECT id, name, rent_start_year, rent_start_month, ilk_kira_bedeli
+        FROM customers
+        ORDER BY name ASC
+        """
+    )
+    rp_paid = fetch_rent_payments_paid_by_customer()
+    rp_amt = fetch_rent_payments_amount_map()
+    last_t = fetch_last_tahsilat_by_customer_id()
+
+    arama = (arama_upper or "").strip().upper()
+    rows_out: List[Dict[str, Any]] = []
+    toplam_bu_ay = 0.0
+    toplam_borc = 0.0
+    count = 0
+
+    for row in customers:
+        name = str(row["name"] or "")
+        if arama and arama not in name.upper():
+            continue
+        cid = int(row["id"])
+        ilk = float(row["ilk_kira_bedeli"] or 0)
+        crow = dict(row)
+        odenmis = rp_paid.get(cid, set())
+        toplam = _toplam_odenmemis_kira_borc(crow, odenmis, bugun_yil, bugun_ay, MONTHS_TR)
+        amt = rp_amt.get((cid, bugun_yil, ay_adi), 0.0)
+        bu_ay = 0.0 if (amt and amt > 0) else ilk
+
+        if toplam <= 0 and bu_ay <= 0:
+            continue
+
+        son_str = ""
+        rlast = last_t.get(cid)
+        if rlast:
+            try:
+                p = str(rlast["tahsilat_tarihi"]).split("-")
+                if len(p) == 3:
+                    t_str = f"{p[2]}.{p[1]}.{p[0]}"
+                else:
+                    t_str = str(rlast["tahsilat_tarihi"])
+            except Exception:
+                t_str = str(rlast.get("tahsilat_tarihi") or "")
+            tur = "B" if rlast.get("odeme_turu") == "B" else "N"
+            try:
+                tut = float(rlast["tutar"] or 0)
+            except (TypeError, ValueError):
+                tut = 0.0
+            son_str = f"{t_str} {tut:,.0f}₺({tur})"
+
+        rows_out.append(
+            {
+                "id": cid,
+                "name": name,
+                "bu_ay": bu_ay,
+                "toplam_borc": toplam,
+                "son_tahsilat": son_str,
+            }
+        )
+        toplam_bu_ay += bu_ay
+        toplam_borc += toplam
+        count += 1
+
+    return rows_out, toplam_bu_ay, toplam_borc, count
+
+
+def get_all_customers_with_rent_progression(
+    limit: Optional[int] = None,
+    offset: int = 0,
+) -> List[Dict[str, Any]]:
+    """Tüm müşterileri kira progression verileriyle birlikte getir.
+
+    limit/offset verilmezse eski davranış: tüm müşteriler (ORDER BY name).
+    """
+    tufe_cache = get_tufe_cache()
+    sql = """
         SELECT
             id, name, email, phone, address, tax_number,
             rent_start_date, rent_start_year, rent_start_month, ilk_kira_bedeli, current_rent
         FROM customers
         ORDER BY name ASC
-        """
-    )
+    """
+    if limit is not None:
+        lim = max(1, int(limit))
+        off = max(0, int(offset))
+        rows = fetch_all(sql + " LIMIT ? OFFSET ?", (lim, off))
+    else:
+        rows = fetch_all(sql)
 
     result = []
     for row in rows:
         customer = dict(row)
 
-        start_year   = customer.get("rent_start_year")
-        start_month  = customer.get("rent_start_month") or "Ocak"
+        start_year = customer.get("rent_start_year")
+        start_month = customer.get("rent_start_month") or "Ocak"
         initial_rent = float(customer.get("ilk_kira_bedeli") or 0)
-        manual_curr  = customer.get("current_rent")
+        manual_curr = customer.get("current_rent")
         if manual_curr:
             manual_curr = float(manual_curr)
 
@@ -471,11 +710,12 @@ def get_all_customers_with_rent_progression() -> List[Dict[str, Any]]:
             start_year=start_year,
             start_month=start_month,
             initial_rent=initial_rent,
-            manual_current=manual_curr
+            manual_current=manual_curr,
+            tufe_cache=tufe_cache,
         )
 
         customer["rent_progression"] = progression
-        customer["rent_years_dict"]  = progression.get("years", {})
+        customer["rent_years_dict"] = progression.get("years", {})
         result.append(customer)
 
     return result
@@ -1076,47 +1316,35 @@ def get_tahsilatlar(baslangic: str = None, bitis: str = None,
     return [dict(r) for r in rows]
 
 
-def get_musteri_toplam_borc(customer_id: int) -> float:
-    """Müşterinin toplam ödenmemiş ay borcu (amount=0 olan ayların ilk_kira toplamı)."""
-    conn = get_connection()
-    try:
-        from datetime import date as _date
-        bugun_yil = _date.today().year
-        bugun_ay  = _date.today().month
+def get_musteri_toplam_borc(
+    customer_id: int,
+    odenmis_set: Optional[Set[Tuple[int, str]]] = None,
+) -> float:
+    """Müşterinin toplam ödenmemiş ay borcu (beklenen aylar − ödenmiş aylar).
 
-        row = conn.execute(
-            """SELECT rent_start_year, rent_start_month, ilk_kira_bedeli
-               FROM customers WHERE id=?""", (customer_id,)
-        ).fetchone()
-        if not row or not row["ilk_kira_bedeli"]:
-            return 0.0
+    odenmis_set verilirse rent_payments için ekstra sorgu atılmaz (toplu yükleme).
+    """
+    from datetime import date as _date
 
-        months_tr = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran",
-                     "Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"]
-        try:
-            s_ay  = months_tr.index(row["rent_start_month"]) + 1
-            s_yil = row["rent_start_year"] or 2021
-        except Exception:
-            s_ay, s_yil = 1, 2021
+    bugun_yil = _date.today().year
+    bugun_ay = _date.today().month
 
-        odenmis_rows = conn.execute(
+    row = fetch_one(
+        "SELECT rent_start_year, rent_start_month, ilk_kira_bedeli FROM customers WHERE id=?",
+        (customer_id,),
+    )
+    if not row:
+        return 0.0
+    crow = dict(row)
+    if odenmis_set is None:
+        orows = fetch_all(
             "SELECT year, month FROM rent_payments WHERE customer_id=? AND amount > 0",
-            (customer_id,)
-        ).fetchall()
-        odenmis_set = {(r["year"], r["month"]) for r in odenmis_rows}
-
-        borc = 0.0
-        y, m = s_yil, s_ay
-        while (y < bugun_yil) or (y == bugun_yil and m <= bugun_ay):
-            if (y, months_tr[m - 1]) not in odenmis_set:
-                borc += float(row["ilk_kira_bedeli"])
-            m += 1
-            if m > 12:
-                m = 1
-                y += 1
-        return borc
-    finally:
-        conn.close()
+            (customer_id,),
+        )
+        odenmis_set = {
+            (int(r["year"]), str(r["month"]).replace(" (%)", "").strip()) for r in orows
+        }
+    return _toplam_odenmemis_kira_borc(crow, odenmis_set, bugun_yil, bugun_ay, MONTHS_TR)
 
 
 def get_musteri_bu_ay_borc(customer_id: int) -> float:

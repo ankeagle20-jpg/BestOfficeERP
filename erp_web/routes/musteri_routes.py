@@ -369,142 +369,122 @@ def _fintech_dashboard_data():
         return _fintech_defaults()
 
 
+_TUM_YILLAR_ODENMIS_FROM = """
+FROM customers c
+WHERE NOT EXISTS (
+    SELECT 1 FROM faturalar f
+    WHERE f.musteri_id = c.id AND (f.durum IS NULL OR f.durum != 'odendi')
+)
+"""
+
+
 def _musteri_liste_data():
-    """Müşteri listesi sayfası için ortak veri (ana sayfa ve /list)."""
+    """Müşteri listesi sayfası için ortak veri (ana sayfa ve /list).
+
+    Sayfalama (isteğe bağlı): ?sayfa=1&limit=50 — yalnızca bu parametrelerden biri
+    URL'de varsa LIMIT/OFFSET uygulanır; aksi halde eski davranış (tüm kayıtlar).
+    """
     arama = request.args.get("q", "").strip()
     tum_yillar_odenmis = request.args.get("tum_yillar_odenmis") == "1"
+    paginate = ("sayfa" in request.args) or ("limit" in request.args)
+    sayfa = max(1, request.args.get("sayfa", default=1, type=int) or 1)
+    limit = request.args.get("limit", type=int)
+    if limit is None:
+        limit = 50
+    limit = max(1, min(500, int(limit)))
+
     if tum_yillar_odenmis:
-        musteriler = fetch_all("""
-            SELECT c.* FROM customers c
-            WHERE NOT EXISTS (
-                SELECT 1 FROM faturalar f
-                WHERE f.musteri_id = c.id AND (f.durum IS NULL OR f.durum != 'odendi')
-            )
-            ORDER BY c.name
-        """)
+        sql = f"SELECT c.* {_TUM_YILLAR_ODENMIS_FROM} ORDER BY c.name"
+        count_sql = f"SELECT COUNT(*) AS n {_TUM_YILLAR_ODENMIS_FROM}"
+        params = ()
     elif arama:
         w3 = customers_arama_sql_giris_genis("")
-        musteriler = fetch_all(
-            f"SELECT * FROM customers WHERE {w3} ORDER BY name",
-            customers_arama_params_giris_genis(arama),
-        )
+        sql = f"SELECT * FROM customers WHERE {w3} ORDER BY name"
+        count_sql = f"SELECT COUNT(*) AS n FROM customers WHERE {w3}"
+        params = customers_arama_params_giris_genis(arama)
     else:
-        musteriler = fetch_all("SELECT * FROM customers ORDER BY name")
+        sql = "SELECT * FROM customers ORDER BY name"
+        count_sql = "SELECT COUNT(*) AS n FROM customers"
+        params = ()
+
+    toplam_musteri = None
+    toplam_sayfa = None
+    if paginate:
+        cnt = fetch_one(count_sql, params) or {}
+        try:
+            toplam_musteri = int(cnt.get("n") or 0)
+        except (TypeError, ValueError):
+            toplam_musteri = 0
+        toplam_sayfa = max(1, (toplam_musteri + limit - 1) // limit) if toplam_musteri else 1
+        offset = (sayfa - 1) * limit
+        musteriler = fetch_all(sql + " LIMIT %s OFFSET %s", (*params, limit, offset))
+    else:
+        musteriler = fetch_all(sql, params)
+
     return {
         "musteriler": musteriler,
         "arama": arama,
         "tum_yillar_odenmis": tum_yillar_odenmis,
+        "paginate": paginate,
+        "sayfa": sayfa if paginate else 1,
+        "limit": limit if paginate else None,
+        "toplam_musteri": toplam_musteri if paginate else None,
+        "toplam_sayfa": toplam_sayfa if paginate else None,
     }
 
 
-def _enrich_musteri_list_with_borc_gecikme(musteriler):
+def _enrich_musteri_list_with_borc_gecikme(musteriler, *, skip_dedupe: bool = False):
     """Müşteri listesine toplam_borc, geciken_gun, son_odeme_tarihi, rent_start_date (kyc'den) ekler."""
     if not musteriler:
         return
     bugun = date.today()
     ids = [m["id"] for m in musteriler]
-    # Güncel kira hesaplaması için TÜFE haritası (tek sorgu).
-    tufe_rows = fetch_all(
-        "SELECT year, month, oran FROM tufe_verileri WHERE year IS NOT NULL AND month IS NOT NULL"
-    ) or []
-    ay_tr_to_num = {ad.lower(): i + 1 for i, ad in enumerate(MONTHS_TR)}
-    tufe_map = {}
-    for r in tufe_rows:
-        try:
-            yv = int(r.get("year"))
-        except Exception:
-            continue
-        mv_raw = str(r.get("month") or "").strip()
-        if not mv_raw:
-            continue
-        try:
-            mv = int(mv_raw)
-        except Exception:
-            mv = ay_tr_to_num.get(mv_raw.lower())
-        if not mv or mv < 1 or mv > 12:
-            continue
-        try:
-            oran = float(r.get("oran") or 0)
-        except Exception:
-            oran = 0.0
-        tufe_map.setdefault(yv, {})[mv] = oran
-
-    def _hesaplanan_guncel_kira(base_net, start_date, artis_date):
-        """Yıllık TÜFE artışına göre bugün için net güncel kira."""
-        try:
-            current = float(base_net or 0)
-        except Exception:
-            current = 0.0
-        if current <= 0:
-            return 0.0
-        if not start_date:
-            return round(current, 2)
-        try:
-            sd = start_date if hasattr(start_date, "year") else datetime.strptime(str(start_date)[:10], "%Y-%m-%d").date()
-        except Exception:
-            return round(current, 2)
-        try:
-            ad = artis_date if hasattr(artis_date, "month") else datetime.strptime(str(artis_date)[:10], "%Y-%m-%d").date()
-            artis_month = int(ad.month)
-        except Exception:
-            artis_month = int(sd.month)
-        # Başlangıç yılından bugüne kadar, her bir sonraki yılda artış ayının TÜFE oranını uygula.
-        for yil in range(int(sd.year + 1), int(bugun.year + 1)):
-            oran = float((tufe_map.get(yil) or {}).get(artis_month) or 0)
-            if oran > 0:
-                current = round(current * (1 + oran / 100.0), 2)
-        return round(current, 2)
 
     with get_db() as conn:
         cur = conn.cursor()
-        cur.execute("""
-            SELECT musteri_id, SUM(COALESCE(toplam, tutar)) as toplam, MIN(vade_tarihi) as min_vade
-            FROM faturalar WHERE COALESCE(durum,'') != 'odendi' AND vade_tarihi IS NOT NULL
-            AND musteri_id = ANY(%s) GROUP BY musteri_id
-        """, (ids,))
-        fat_borc = {r["musteri_id"]: {"borc": float(r.get("toplam") or 0), "min_vade": r.get("min_vade")} for r in cur.fetchall()}
-        cur.execute("""
-            SELECT musteri_id, MAX(tahsilat_tarihi) as son_tahsilat
-            FROM tahsilatlar WHERE musteri_id = ANY(%s) GROUP BY musteri_id
-        """, (ids,))
-        son_tahsilat = {r["musteri_id"]: r.get("son_tahsilat") for r in cur.fetchall()}
-        cur.execute("""
-            SELECT DISTINCT ON (musteri_id) musteri_id, sozlesme_tarihi
-            FROM musteri_kyc WHERE musteri_id = ANY(%s) AND sozlesme_tarihi IS NOT NULL
-            ORDER BY musteri_id, id DESC
-        """, (ids,))
-        kyc_tarih = {r["musteri_id"]: r.get("sozlesme_tarihi") for r in cur.fetchall()}
         cur.execute(
             """
-            SELECT DISTINCT ON (musteri_id) musteri_id, aylik_kira, kira_artis_tarihi, sozlesme_tarihi
-            FROM musteri_kyc
-            WHERE musteri_id = ANY(%s)
-            ORDER BY musteri_id, id DESC
+            SELECT
+              c.id,
+              COALESCE(f.toplam_borc, 0) as toplam_borc,
+              f.min_vade,
+              t.son_tahsilat,
+              k.sozlesme_tarihi,
+              k.aylik_kira
+            FROM customers c
+            LEFT JOIN (
+              SELECT musteri_id,
+                SUM(COALESCE(toplam,tutar)) as toplam_borc,
+                MIN(vade_tarihi) as min_vade
+              FROM faturalar
+              WHERE COALESCE(durum,'') != 'odendi'
+              GROUP BY musteri_id
+            ) f ON f.musteri_id = c.id
+            LEFT JOIN (
+              SELECT musteri_id, MAX(tahsilat_tarihi) as son_tahsilat
+              FROM tahsilatlar GROUP BY musteri_id
+            ) t ON t.musteri_id = c.id
+            LEFT JOIN LATERAL (
+              SELECT sozlesme_tarihi, aylik_kira
+              FROM musteri_kyc
+              WHERE musteri_id = c.id
+              ORDER BY id DESC LIMIT 1
+            ) k ON true
+            WHERE c.id = ANY(%s)
             """,
             (ids,),
         )
-        kyc_kira_map = {
-            r["musteri_id"]: {
-                "aylik_kira": r.get("aylik_kira"),
-                "kira_artis_tarihi": r.get("kira_artis_tarihi"),
-                "sozlesme_tarihi": r.get("sozlesme_tarihi"),
-            }
-            for r in cur.fetchall()
+        rows = cur.fetchall()
+        fat_borc = {
+            r["id"]: {"borc": float(r.get("toplam_borc") or 0), "min_vade": r.get("min_vade")}
+            for r in rows
         }
+        son_tahsilat = {r["id"]: r.get("son_tahsilat") for r in rows}
+        kyc_tarih = {r["id"]: r.get("sozlesme_tarihi") for r in rows}
     for m in musteriler:
         if not m.get("rent_start_date") and kyc_tarih.get(m["id"]):
             m["rent_start_date"] = kyc_tarih[m["id"]]
-        kk = kyc_kira_map.get(m["id"]) or {}
-        base_net = kk.get("aylik_kira")
-        if base_net in (None, "", 0):
-            base_net = m.get("ilk_kira_bedeli") or 0
-        calc_guncel = _hesaplanan_guncel_kira(
-            base_net,
-            kk.get("sozlesme_tarihi") or m.get("rent_start_date"),
-            kk.get("kira_artis_tarihi"),
-        )
-        if calc_guncel > 0:
-            m["guncel_kira_bedeli"] = calc_guncel
+        m["guncel_kira_bedeli"] = float(m.get("guncel_kira_bedeli") or m.get("current_rent") or 0)
         mb = fat_borc.get(m["id"], {})
         if "manuel_borc" in m and m["manuel_borc"] is not None:
             m["toplam_borc"] = round(float(m["manuel_borc"] or 0), 2)
@@ -523,7 +503,8 @@ def _enrich_musteri_list_with_borc_gecikme(musteriler):
                 pass
         m["son_odeme_tarihi"] = m.get("son_odeme_tarihi") or son_tahsilat.get(m["id"])
     _normalize_musteri_durum_for_liste(musteriler)
-    _dedupe_musteri_liste_by_identity(musteriler)
+    if not skip_dedupe:
+        _dedupe_musteri_liste_by_identity(musteriler)
 
 
 def _normalize_musteri_durum_for_liste(musteriler):
@@ -648,12 +629,23 @@ def list_full():
     data = _musteri_liste_data()
     musteriler = data["musteriler"]
     if musteriler:
-        _enrich_musteri_list_with_borc_gecikme(musteriler)
+        _enrich_musteri_list_with_borc_gecikme(
+            musteriler,
+            skip_dedupe=bool(data.get("paginate")),
+        )
+    paginate = bool(data.get("paginate"))
+    toplam_musteri = data.get("toplam_musteri") if paginate else len(musteriler)
+    toplam_sayfa = data.get("toplam_sayfa") if paginate else 1
     return render_template(
         "musteriler/index.html",
         musteriler=musteriler,
         arama=data["arama"],
         tum_yillar_odenmis=data["tum_yillar_odenmis"],
+        paginate=paginate,
+        sayfa=data.get("sayfa", 1),
+        limit=data.get("limit") or 50,
+        toplam_musteri=toplam_musteri,
+        toplam_sayfa=toplam_sayfa or 1,
     )
 
 
@@ -1773,11 +1765,43 @@ def api_liste():
 @bp.route("/api/list_full")
 @giris_gerekli
 def api_list_full():
-    """Tam müşteri listesi JSON"""
-    rows = fetch_all(
+    """Tam müşteri listesi JSON.
+
+    Eski davranış: parametre yok → düz dizi (geriye dönük uyumluluk).
+    ?sayfa=1&limit=50 → { paginate: true, rows, toplam_musteri, toplam_sayfa, sayfa, limit }.
+    """
+    base_sql = (
         "SELECT id, name, email, phone, address, office_code, notes, created_at FROM customers ORDER BY name"
     )
-    return jsonify(rows)
+    paginate = ("sayfa" in request.args) or ("limit" in request.args)
+    sayfa = max(1, request.args.get("sayfa", default=1, type=int) or 1)
+    limit = request.args.get("limit", type=int)
+    if limit is None:
+        limit = 50
+    limit = max(1, min(500, int(limit)))
+
+    if not paginate:
+        rows = fetch_all(base_sql)
+        return jsonify(rows)
+
+    cnt = fetch_one("SELECT COUNT(*) AS n FROM customers") or {}
+    try:
+        toplam_musteri = int(cnt.get("n") or 0)
+    except (TypeError, ValueError):
+        toplam_musteri = 0
+    toplam_sayfa = max(1, (toplam_musteri + limit - 1) // limit) if toplam_musteri else 1
+    offset = (sayfa - 1) * limit
+    rows = fetch_all(base_sql + " LIMIT %s OFFSET %s", (limit, offset))
+    return jsonify(
+        {
+            "paginate": True,
+            "rows": rows,
+            "toplam_musteri": toplam_musteri,
+            "toplam_sayfa": toplam_sayfa,
+            "sayfa": sayfa,
+            "limit": limit,
+        }
+    )
 
 
 @bp.route("/api/bulk-update", methods=["POST"])

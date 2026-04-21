@@ -1,7 +1,78 @@
+import logging
 import uuid
 from datetime import date
+from decimal import Decimal
 
 from db import execute, fetch_all, fetch_one, sql_expr_fatura_not_gib_taslak
+
+logger = logging.getLogger(__name__)
+
+
+def _coerce_sql_int_id(v) -> int | None:
+    """ARRAY / SUM sonuçlarında Decimal, str vb. gelmesine karşı."""
+    if v is None:
+        return None
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        try:
+            return int(Decimal(str(v)))
+        except Exception:
+            return None
+
+# Fatura raporu «aktif kart» ile aynı: is_active + customers.durum pasif benzeri değil.
+_GRUP_ALT_CARI_AKTIF_SQL = """
+COALESCE(c.is_active, TRUE) = TRUE
+AND (
+    c.durum IS NULL
+    OR TRIM(COALESCE(c.durum, '')) = ''
+    OR LOWER(TRIM(c.durum)) NOT IN (
+        'pasif', 'terk', 'kapandi', 'kapandı', 'kapalı', 'kapali', 'kapanmış', 'kapanmis'
+    )
+)
+""".strip()
+
+
+def _fallback_one_group_financials(
+    parent_uuid: str, pasifleri_dahil: bool
+) -> tuple[list[int], int, float, float, float]:
+    """fn_group_financial_aggregate kullanılamazsa: aynı aktif/pasif filtresiyle borç–alacak + alt cari id listesi."""
+    aktif_sql = "" if pasifleri_dahil else f" AND ({_GRUP_ALT_CARI_AKTIF_SQL})"
+    child_rows = (
+        fetch_all(
+            f"""
+            SELECT c.id FROM customers c
+            WHERE c.parent_id = %s {aktif_sql}
+            ORDER BY c.id
+            """,
+            (parent_uuid,),
+        )
+        or []
+    )
+    mids: list[int] = []
+    for r in child_rows:
+        mi = _coerce_sql_int_id(r.get("id"))
+        if mi is not None and mi > 0:
+            mids.append(mi)
+    if not mids:
+        return [], 0, 0.0, 0.0, 0.0
+    borc_row = fetch_one(
+        f"SELECT COALESCE(SUM(COALESCE(toplam, tutar, 0)), 0) AS t FROM faturalar WHERE musteri_id = ANY(%s) AND {sql_expr_fatura_not_gib_taslak('notlar')}",
+        (mids,),
+    ) or {}
+    alacak_row = fetch_one(
+        "SELECT COALESCE(SUM(tutar), 0) AS t FROM tahsilatlar WHERE musteri_id = ANY(%s)",
+        (mids,),
+    ) or {}
+    try:
+        bt = float(borc_row.get("t") or 0)
+    except (TypeError, ValueError):
+        bt = 0.0
+    try:
+        at = float(alacak_row.get("t") or 0)
+    except (TypeError, ValueError):
+        at = 0.0
+    return mids, len(mids), round(bt, 2), round(at, 2), round(bt - at, 2)
 
 
 class CariService:
@@ -106,10 +177,17 @@ class CariService:
         return round(sum(float(d.get(m, 0.0)) for m in mids), 2)
 
     @classmethod
-    def get_groups_consolidated_financials(cls, group_ids: list[int], ref: date | None = None) -> dict[int, dict]:
+    def get_groups_consolidated_financials(
+        cls,
+        group_ids: list[int],
+        ref: date | None = None,
+        pasifleri_dahil: bool = False,
+        include_grid: bool = True,
+    ) -> dict[int, dict]:
         """
         Birden çok grup için tek seferde alt cari listesi, fatura/tahsilat özetleri ve aylık grid tutarı.
         Grup konsolide API performansı için (grup başına ayrı sorgu döngüsü yok).
+        pasifleri_dahil=False: yalnız aktif alt cariler (fatura raporu firma özeti ile uyumlu).
         """
         ref = ref or date.today()
         gids: list[int] = []
@@ -125,104 +203,154 @@ class CariService:
             gids.append(gi)
         if not gids:
             return {}
-        zero = {"child_count": 0, "borc_total": 0.0, "alacak_total": 0.0, "net_balance": 0.0, "borc_month": 0.0}
+        zero = {
+            "child_count": 0,
+            "borc_total": 0.0,
+            "alacak_total": 0.0,
+            "net_balance": 0.0,
+            "borc_month": 0.0,
+            "geciken_ay": 0,
+            "sozlesme_gun": 0,
+        }
         out: dict[int, dict] = {g: dict(zero) for g in gids}
-
         uuid_by_gid = {gid: str(cls.customer_uuid(gid)) for gid in gids}
-        uuids = list(dict.fromkeys(uuid_by_gid.values()))
-        ph = ",".join(["%s"] * len(uuids))
-        children = fetch_all(
-            f"SELECT id, parent_id FROM customers WHERE parent_id IS NOT NULL AND parent_id IN ({ph})",
-            tuple(uuids),
-        ) or []
-
-        uuid_to_gid = {str(u).strip().lower(): gid for gid, u in uuid_by_gid.items()}
-        gid_to_mids: dict[int, list[int]] = {g: [] for g in gids}
-        for cr in children:
-            try:
-                cid = int(cr.get("id") or 0)
-            except (TypeError, ValueError):
-                continue
-            if cid <= 0:
-                continue
-            pid = cr.get("parent_id")
-            key = str(pid).strip().lower() if pid is not None else ""
-            gid = uuid_to_gid.get(key)
-            if gid is not None:
-                gid_to_mids[gid].append(cid)
-
-        all_mids: list[int] = []
-        seen_m = set()
-        for mids in gid_to_mids.values():
-            for mid in mids:
-                if mid not in seen_m:
-                    seen_m.add(mid)
-                    all_mids.append(mid)
-
-        from routes.giris_routes import musteri_aylik_grid_hucre_kdv_dahil_takvim_ayi_batch
-
-        grid_by_mid = musteri_aylik_grid_hucre_kdv_dahil_takvim_ayi_batch(all_mids, ref) if all_mids else {}
-
-        borc_by_mid: dict[int, float] = {}
-        alacak_by_mid: dict[int, float] = {}
-        if all_mids:
-            for r in (
-                fetch_all(
-                    f"""
-                    SELECT musteri_id, COALESCE(SUM(COALESCE(toplam, tutar, 0)), 0) AS t
-                    FROM faturalar
-                    WHERE musteri_id = ANY(%s)
-                      AND {sql_expr_fatura_not_gib_taslak("notlar")}
-                    GROUP BY musteri_id
-                    """,
-                    (all_mids,),
-                )
-                or []
-            ):
-                try:
-                    borc_by_mid[int(r["musteri_id"])] = float(r.get("t") or 0)
-                except (TypeError, ValueError, KeyError):
-                    pass
-            for r in (
+        gid_arr = [int(g) for g in gids]
+        parent_uuid_arr = [str(uuid_by_gid[g]) for g in gids]
+        rows: list = []
+        try:
+            rows = (
                 fetch_all(
                     """
-                    SELECT musteri_id, COALESCE(SUM(tutar), 0) AS t
-                    FROM tahsilatlar
-                    WHERE musteri_id = ANY(%s)
-                    GROUP BY musteri_id
+                    SELECT gid, child_count, mids, borc_total, alacak_total, net_balance, sozlesme_gun
+                    FROM fn_group_financial_aggregate(%s, %s, %s, %s)
                     """,
-                    (all_mids,),
+                    (gid_arr, parent_uuid_arr, bool(pasifleri_dahil), bool(include_grid)),
                 )
                 or []
-            ):
+            )
+        except Exception:
+            logger.exception(
+                "fn_group_financial_aggregate başarısız; Python/SQL yedeği (grup_sayısı=%s).",
+                len(gids),
+            )
+            rows = []
+            for gid in gids:
+                mids_fb, cc_fb, bt_fb, at_fb, nb_fb = _fallback_one_group_financials(
+                    uuid_by_gid[gid], pasifleri_dahil
+                )
+                rows.append(
+                    {
+                        "gid": int(gid),
+                        "child_count": int(cc_fb),
+                        "mids": mids_fb,
+                        "borc_total": bt_fb,
+                        "alacak_total": at_fb,
+                        "net_balance": nb_fb,
+                        "sozlesme_gun": 0,
+                    }
+                )
+        gid_to_mids: dict[int, list[int]] = {g: [] for g in gids}
+        all_mids: list[int] = []
+        seen_m = set()
+        for r in rows:
+            gid = _coerce_sql_int_id(r.get("gid"))
+            if gid is None or gid <= 0 or gid not in out:
+                continue
+            mids_raw = r.get("mids")
+            if mids_raw is None:
+                mids_iter = []
+            elif isinstance(mids_raw, (list, tuple)):
+                mids_iter = list(mids_raw)
+            else:
                 try:
-                    alacak_by_mid[int(r["musteri_id"])] = float(r.get("t") or 0)
-                except (TypeError, ValueError, KeyError):
-                    pass
+                    mids_iter = list(mids_raw)
+                except TypeError:
+                    mids_iter = []
+            mids: list[int] = []
+            for m in mids_iter:
+                mi = _coerce_sql_int_id(m)
+                if mi is None or mi <= 0:
+                    continue
+                mids.append(mi)
+                if mi not in seen_m:
+                    seen_m.add(mi)
+                    all_mids.append(mi)
+            gid_to_mids[gid] = mids
+            try:
+                bt = float(r.get("borc_total") or 0.0)
+            except (TypeError, ValueError):
+                bt = 0.0
+            try:
+                at = float(r.get("alacak_total") or 0.0)
+            except (TypeError, ValueError):
+                at = 0.0
+            cc = _coerce_sql_int_id(r.get("child_count"))
+            out[gid]["child_count"] = int(cc or 0)
+            out[gid]["borc_total"] = round(bt, 2)
+            out[gid]["alacak_total"] = round(at, 2)
+            try:
+                nb = float(r.get("net_balance")) if r.get("net_balance") is not None else (bt - at)
+            except (TypeError, ValueError):
+                nb = bt - at
+            out[gid]["net_balance"] = round(nb, 2)
+            sg = _coerce_sql_int_id(r.get("sozlesme_gun"))
+            out[gid]["sozlesme_gun"] = int(sg or 0)
+
+        grid_ozet_by_mid = {}
+        if include_grid and all_mids:
+            from routes.giris_routes import musteri_firma_ozet_grid_ozet_batch
+
+            try:
+                grid_ozet_by_mid = musteri_firma_ozet_grid_ozet_batch(all_mids, ref) or {}
+            except Exception:
+                logger.exception(
+                    "get_groups_consolidated_financials: grid_ozet_batch atlandi (grup=%s, musteri=%s)",
+                    len(gids),
+                    len(all_mids),
+                )
+                grid_ozet_by_mid = {}
 
         for gid in gids:
             mids = gid_to_mids.get(gid) or []
-            out[gid]["child_count"] = len(mids)
-            bt = sum(borc_by_mid.get(m, 0.0) for m in mids)
-            at = sum(alacak_by_mid.get(m, 0.0) for m in mids)
-            bm = sum(grid_by_mid.get(m, 0.0) for m in mids)
-            out[gid]["borc_total"] = round(bt, 2)
-            out[gid]["alacak_total"] = round(at, 2)
-            out[gid]["net_balance"] = round(bt - at, 2)
+            bm = 0.0
+            max_gec = 0
+            max_gun = 0
+            if include_grid and mids:
+                for m in mids:
+                    eg = grid_ozet_by_mid.get(m) or {}
+                    bm += float(eg.get("borc_month") or 0.0)
+                    try:
+                        gec = int(eg.get("geciken_ay") or 0)
+                    except (TypeError, ValueError):
+                        gec = 0
+                    if gec > max_gec:
+                        max_gec = gec
+                    try:
+                        gn = int(eg.get("sozlesme_gun") or 0)
+                    except (TypeError, ValueError):
+                        gn = 0
+                    if 1 <= gn <= 31 and gn > max_gun:
+                        max_gun = gn
             out[gid]["borc_month"] = round(bm, 2)
+            out[gid]["geciken_ay"] = max_gec
+            out[gid]["sozlesme_gun"] = max_gun
         return out
 
     @classmethod
-    def get_group_children_financial_rows(cls, group_cari_id: int, ref: date | None = None) -> list[dict]:
+    def get_group_children_financial_rows(
+        cls, group_cari_id: int, ref: date | None = None, pasifleri_dahil: bool = False
+    ) -> list[dict]:
         """Grup altındaki cariler ve her biri için borç/alacak/aylık grid (KDV dahil) özeti."""
         parent_uuid = str(cls.customer_uuid(group_cari_id))
+        aktif_sql = "" if pasifleri_dahil else f" AND ({_GRUP_ALT_CARI_AKTIF_SQL})"
         rows = fetch_all(
-            """
-            SELECT id, COALESCE(musteri_no::text, '') AS musteri_no,
-                   COALESCE(name, '') AS name, COALESCE(musteri_adi, '') AS musteri_adi
-            FROM customers
-            WHERE parent_id = %s
-            ORDER BY COALESCE(name, musteri_adi, '') NULLS LAST, id
+            f"""
+            SELECT c.id, COALESCE(c.musteri_no::text, '') AS musteri_no,
+                   COALESCE(c.name, '') AS name, COALESCE(c.musteri_adi, '') AS musteri_adi
+            FROM customers c
+            WHERE c.parent_id = %s
+            {aktif_sql}
+            ORDER BY COALESCE(c.name, c.musteri_adi, '') NULLS LAST, c.id
             """,
             (parent_uuid,),
         ) or []
@@ -232,9 +360,19 @@ class CariService:
             if cid is None:
                 continue
             iids.append(int(cid))
-        from routes.giris_routes import musteri_aylik_grid_hucre_kdv_dahil_takvim_ayi_batch
+        from routes.giris_routes import musteri_firma_ozet_grid_ozet_batch
 
-        bm_map = musteri_aylik_grid_hucre_kdv_dahil_takvim_ayi_batch(iids, ref) if iids else {}
+        grid_ozet_map: dict = {}
+        if iids:
+            try:
+                grid_ozet_map = musteri_firma_ozet_grid_ozet_batch(iids, ref) or {}
+            except Exception:
+                logger.exception(
+                    "get_group_children_financial_rows: grid_ozet_batch atlandı (group_id=%s, alt_sayi=%s)",
+                    group_cari_id,
+                    len(iids),
+                )
+                grid_ozet_map = {}
 
         borc_by_mid: dict[int, float] = {}
         alacak_by_mid: dict[int, float] = {}
@@ -282,7 +420,16 @@ class CariService:
             bt = float(borc_by_mid.get(iid, 0.0))
             at = float(alacak_by_mid.get(iid, 0.0))
             s = {"borc_total": round(bt, 2), "alacak_total": round(at, 2), "net_balance": round(bt - at, 2)}
-            bm = float(bm_map.get(iid, 0.0))
+            bm = float((grid_ozet_map.get(iid) or {}).get("borc_month") or 0.0)
+            eg = grid_ozet_map.get(iid) or {}
+            try:
+                gec_ex = int(eg.get("geciken_ay") or 0)
+            except (TypeError, ValueError):
+                gec_ex = 0
+            try:
+                gun_ex = int(eg.get("sozlesme_gun") or 0)
+            except (TypeError, ValueError):
+                gun_ex = 0
             out.append(
                 {
                     "id": iid,
@@ -293,6 +440,8 @@ class CariService:
                     "borc_total": s.get("borc_total", 0),
                     "alacak_total": s.get("alacak_total", 0),
                     "net_balance": s.get("net_balance", 0),
+                    "geciken_ay": gec_ex,
+                    "sozlesme_gun": gun_ex,
                 }
             )
         return out

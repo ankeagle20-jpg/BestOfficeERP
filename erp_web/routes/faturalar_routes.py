@@ -1,4 +1,16 @@
-from flask import Blueprint, render_template, request, jsonify, redirect, url_for, flash, send_file, Response, abort
+from flask import (
+    Blueprint,
+    render_template,
+    request,
+    jsonify,
+    redirect,
+    url_for,
+    flash,
+    send_file,
+    Response,
+    abort,
+    current_app,
+)
 from flask_login import login_required, current_user
 from functools import wraps
 from datetime import datetime, date, timedelta
@@ -18,6 +30,10 @@ from db import (
     ensure_user_ui_preferences_table,
     ensure_customers_rent_columns,
     ensure_customers_hazir_ofis_oda,
+    ensure_customers_bizim_hesap,
+    ensure_customers_grup2_secimleri,
+    ensure_grup2_etiketleri_table,
+    ensure_customers_balance_trigger,
     sql_expr_fatura_not_gib_taslak,
     sql_expr_fatura_gib_imzalanmis,
 )
@@ -31,6 +47,7 @@ import uuid
 from urllib.parse import urlencode
 import logging
 import math
+import time
 from reportlab.lib.pagesizes import A5, A4
 from reportlab.lib.units import mm
 from reportlab.lib import colors
@@ -1706,6 +1723,17 @@ def _fatura_rapor_musteri_where_sql(pasifleri_dahil: bool, tum_musteriler: bool)
     return f"{base} AND {durum_sql}"
 
 
+def _fatura_rapor_musteri_where_with_bizim(musteri_where: str, bizim_only: bool) -> str:
+    """İşaretliyse yalnız customers.bizim_hesap = TRUE (Bizim Hesap uygulamasında takip)."""
+    if not bizim_only:
+        return musteri_where
+    mw = (musteri_where or "").strip()
+    bsql = "COALESCE(c.bizim_hesap, FALSE) = TRUE"
+    if not mw or mw.upper() == "TRUE":
+        return bsql
+    return f"({mw}) AND {bsql}"
+
+
 _AYLAR_TR_FATURA_RAPOR = (
     "Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran",
     "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık",
@@ -1879,6 +1907,238 @@ def _firma_ozet_aylik_kdv_dahil(aylik_kira, kira_nakit, kdv_oran) -> float:
     return round(a * (1.0 + kdv / 100.0), 2)
 
 
+def _firma_ozet_sql_turkish_lower(col_sql: str) -> str:
+    """PostgreSQL ifadesi: utils.turkish_lower ile aynı harita + lower (sıralama için)."""
+    return f"""lower(
+      replace(replace(replace(replace(replace(replace(replace(replace(replace(
+        COALESCE(BTRIM(({col_sql})::text), ''),
+        E'İ','i'),'I','i'),'ı','i'),
+        'Ş','s'),'ş','s'),
+        'Ğ','g'),'ğ','g'),
+        'Ü','u'),'ü','u'),
+        'Ö','o'),'ö','o'),
+        'Ç','c'),'ç','c')
+    )"""
+
+
+# _firma_ozet_unvan_cekirdek_anahtar ile aynı sonek (4 geçiş); PG regexp 'gi'
+_FIRMA_OZET_SQL_UNVAN_SUFFIX_RE = (
+    r"\s*[.,]?\s*("
+    r"a\.?\s*ş\.?|aş\.?|"
+    r"ltd\.?|limited|"
+    r"şti\.?|"
+    r"san\.?\s+ve\s+tic\.?|sanayi\s+ve\s+ticaret|"
+    r"holding"
+    r")\s*\.?\s*$"
+)
+
+
+def _firma_ozet_sql_nm_core_sql(fa_col_sql: str) -> str:
+    """Ünvan çekirdeği — Python _firma_ozet_unvan_cekirdek_anahtar ile uyumlu (4 regexp geçişi)."""
+    tl = _firma_ozet_sql_turkish_lower(fa_col_sql)
+    x = f"regexp_replace(({tl})::text, E'\\\\s+', ' ', 'g')"
+    pat = _FIRMA_OZET_SQL_UNVAN_SUFFIX_RE.replace("'", "''")
+    for _ in range(4):
+        x = f"trim(both ' .,-' from regexp_replace({x}, '{pat}', '', 'gi'))"
+    return x
+
+
+def _firma_ozet_sql_sort_key(alias: str = "raw") -> str:
+    return _firma_ozet_sql_turkish_lower(f"{alias}.firma_adi")
+
+
+def _firma_ozet_sql_dedupe_key_sql(alias: str = "raw") -> str:
+    vn = f"regexp_replace(COALESCE(BTRIM({alias}.tax_number::text), ''), '[^0-9]', '', 'g')"
+    nm = _firma_ozet_sql_nm_core_sql(f"{alias}.firma_adi")
+    return f"""(CASE
+        WHEN length({vn}) BETWEEN 10 AND 11 AND ({vn}) ~ '^[0-9]+$' THEN 'vn:' || ({vn})
+        WHEN length(trim(COALESCE(({nm})::text, ''))) > 0 THEN 'nm:' || trim(COALESCE(({nm})::text, ''))
+        ELSE 'id:' || {alias}.id::text
+    END)"""
+
+
+def _firma_ozet_expect_borc_env():
+    """FIRMA_OZET_EXPECT_BORC: örn. 14590966.16 veya 14.590.966,16 (doğrulama logu için)."""
+    raw = (os.environ.get("FIRMA_OZET_EXPECT_BORC") or "").strip()
+    if not raw:
+        return None
+    s = raw.replace(" ", "").replace("\xa0", "").replace("₺", "")
+    if re.search(r",\d{1,2}\s*$", s):
+        s = s.replace(".", "").replace(",", ".")
+    else:
+        s = s.replace(",", "")
+    try:
+        v = float(s)
+        return v if math.isfinite(v) else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _firma_ozet_sql_paging_queries(rows_firma_sql_no_order: str, cift_olanlar: bool):
+    """Aynı filtreli müşteri kümesi: (1) toplamlar, (2) LIMIT/OFFSET sayfa satırları."""
+    dk = _firma_ozet_sql_dedupe_key_sql("raw")
+    pasif_rank = """(CASE WHEN lower(trim(COALESCE(raw.musteri_durum,''))) = 'pasif'
+        OR (COALESCE(raw.is_active_kart, TRUE) IS NOT TRUE)
+        THEN 1 ELSE 0 END)"""
+    tborc = "GREATEST(0, round(COALESCE(raw.current_balance, 0)::numeric, 2))"
+    aylik = """(CASE
+        WHEN COALESCE(raw.firma_grid_aylik_net, 0) <= 0 THEN 0::numeric
+        WHEN COALESCE(raw.kira_nakit, FALSE) THEN round(COALESCE(raw.firma_grid_aylik_net, 0)::numeric, 2)
+        ELSE round(
+            COALESCE(raw.firma_grid_aylik_net, 0)::numeric
+            * (1 + COALESCE(raw.kdv_oran::numeric, 20) / 100),
+            2
+        )
+    END)"""
+    sk = _firma_ozet_sql_sort_key("raw")
+    raw_cte = f"raw AS (\n{rows_firma_sql_no_order}\n)"
+    if cift_olanlar:
+        keyed = f"""
+        keyed AS (
+            SELECT raw.*,
+                   {tborc}::numeric AS tborc,
+                   {aylik}::numeric AS aylik_dahil,
+                   {sk}::text AS sk,
+                   1 AS rn
+            FROM raw
+        )"""
+    else:
+        keyed = f"""
+        keyed0 AS (
+            SELECT raw.*,
+                   {dk} AS dk,
+                   {pasif_rank} AS pasif_rank,
+                   {tborc}::numeric AS tborc,
+                   {aylik}::numeric AS aylik_dahil,
+                   {sk}::text AS sk
+            FROM raw
+        ),
+        keyed AS (
+            SELECT keyed0.*,
+                   row_number() OVER (PARTITION BY dk ORDER BY pasif_rank ASC, id) AS rn
+            FROM keyed0
+        )"""
+    winners = """
+        winners AS (
+            SELECT * FROM keyed WHERE rn = 1
+        )"""
+    with_common = f"WITH {raw_cte.strip()},\n{keyed.strip()},\n{winners.strip()}\n"
+    totals_sql = (
+        with_common
+        + """
+SELECT COUNT(*)::int AS cnt,
+       COALESCE(SUM(tborc), 0)::double precision AS sum_borc,
+       COALESCE(SUM(aylik_dahil), 0)::double precision AS sum_aylik
+FROM winners
+"""
+    )
+    page_sql = (
+        with_common
+        + """
+SELECT * FROM winners ORDER BY sk, id LIMIT %s OFFSET %s
+"""
+    )
+    return totals_sql, page_sql
+
+
+def _firma_ozet_row_to_satir_item(row: dict, pasifleri_dahil: bool) -> dict:
+    """Tek SQL satırından API firma_ozet öğesi (mevcut api_fatura_rapor döngüsü ile aynı mantık)."""
+    gid = row.get("id")
+    firma = (row.get("firma_adi") or "").strip() or "—"
+    mdur = (row.get("musteri_durum") or "").strip() or None
+    raw_soz_bas = row.get("kyc_soz_bas")
+    raw_soz_bit = row.get("kyc_soz_bit")
+    giris_sql = row.get("giris_raw")
+
+    def _coerce_date_light(v):
+        if isinstance(v, datetime):
+            return v.date()
+        if isinstance(v, date):
+            return v
+        s = str(v or "").strip()
+        if len(s) >= 10:
+            s = s[:10]
+        if not s:
+            return None
+        try:
+            return date.fromisoformat(s)
+        except (TypeError, ValueError):
+            return None
+
+    bas_parsed = _coerce_date_light(raw_soz_bas)
+    bit_parsed = _coerce_date_light(raw_soz_bit)
+    soz_bas_eff = bas_parsed or giris_sql or raw_soz_bas
+    soz_bit_eff = bit_parsed if bit_parsed is not None else raw_soz_bit
+    if isinstance(soz_bas_eff, datetime):
+        giris_iso = soz_bas_eff.date().isoformat()[:10]
+    elif isinstance(soz_bas_eff, date):
+        giris_iso = soz_bas_eff.isoformat()[:10]
+    else:
+        gr = giris_sql
+        giris_iso = str(gr)[:10] if gr is not None and str(gr).strip() else ""
+    sozlesme_gun = 0
+    if giris_iso:
+        try:
+            _gds = str(giris_iso).strip()[:10]
+            if len(_gds) == 10:
+                sozlesme_gun = int(date.fromisoformat(_gds).day)
+        except (ValueError, TypeError):
+            sozlesme_gun = 0
+    if not (1 <= sozlesme_gun <= 31):
+        sozlesme_gun = 0
+    sozlesme_ay = 0
+    sozlesme_ay_adi = ""
+    if giris_iso:
+        try:
+            _gds_ay = str(giris_iso).strip()[:10]
+            if len(_gds_ay) == 10:
+                _d_ay = date.fromisoformat(_gds_ay)
+                _m_ay = int(_d_ay.month)
+                if 1 <= _m_ay <= 12:
+                    sozlesme_ay = _m_ay
+                    sozlesme_ay_adi = _AYLAR_TR_FATURA_RAPOR[_m_ay - 1]
+        except (ValueError, TypeError):
+            sozlesme_ay = 0
+            sozlesme_ay_adi = ""
+    atut = _firma_ozet_aylik_kdv_dahil(row.get("aylik_kira"), row.get("kira_nakit"), row.get("kdv_oran"))
+    try:
+        tborc = max(0.0, round(float(row.get("current_balance") or 0), 2))
+    except (TypeError, ValueError):
+        tborc = 0.0
+    geciken_ay = 0
+    item = {
+        "musteri_id": gid,
+        "firma_adi": firma,
+        "giris_tarihi": giris_iso,
+        "aylik_tutar": atut,
+        "toplam_borc": tborc,
+        "grup2": (row.get("grup2_etiketler") or ("Bizim Hesap" if bool(row.get("bizim_hesap")) else "")).strip(),
+        "sozlesme_gun": sozlesme_gun,
+        "sozlesme_ay": sozlesme_ay,
+        "sozlesme_ay_adi": sozlesme_ay_adi,
+        "geciken_ay": geciken_ay,
+        "hizmet_turu": ((row.get("rapor_hizmet_turu") or "").strip() or "—"),
+        "durum_etiket": _firma_ozet_durum_etiket(row),
+        "_dedupe_vergi": row.get("tax_number"),
+        "liste_ara_blob": f"{firma} {str(row.get('tax_number') or '').strip()}".strip(),
+    }
+    _ho = row.get("hazir_ofis_oda_no")
+    if _ho is not None and str(_ho).strip() != "":
+        try:
+            item["hazir_ofis_oda_no"] = int(_ho)
+        except (TypeError, ValueError):
+            item["hazir_ofis_oda_no"] = _ho
+    try:
+        ko_raw = row.get("kdv_oran")
+        if ko_raw is not None and str(ko_raw).strip() != "":
+            item["kdv_oran"] = int(round(float(ko_raw)))
+    except (TypeError, ValueError):
+        pass
+    if mdur and pasifleri_dahil:
+        item["musteri_durum"] = mdur
+    return item
+
+
 UI_PREF_KEY_FIRMA_MUSTERI = "firma_musteri_liste"
 
 
@@ -1952,6 +2212,21 @@ def api_fatura_rapor():
         bit = bugun
     if bas > bit:
         bas, bit = bit, bas
+    try:
+        page_size = int(request.args.get("page_size", 0) or 0)
+    except (TypeError, ValueError):
+        page_size = 0
+    try:
+        page = int(request.args.get("page", 1) or 1)
+    except (TypeError, ValueError):
+        page = 1
+    if page < 1:
+        page = 1
+    if page_size < 0:
+        page_size = 0
+    if page_size > 500:
+        page_size = 500
+    ensure_customers_bizim_hesap()
     sadece_faturali = str(request.args.get("sadece_faturali") or "").strip().lower() in (
         "1",
         "true",
@@ -1961,6 +2236,7 @@ def api_fatura_rapor():
     )
     pasifleri_dahil = _fatura_rapor_query_truthy(request.args.get("pasifleri_dahil"))
     tum_musteriler = _fatura_rapor_query_truthy(request.args.get("tum_musteriler"))
+    bizim_hesap = _fatura_rapor_query_truthy(request.args.get("bizim_hesap"))
     cift_olanlar = _fatura_rapor_query_truthy(request.args.get("cift_olanlar"))
     duzenli_fatura = _fatura_rapor_duzenli_fatura_norm(request.args.get("duzenli_fatura"))
     gorunum_firma = _fatura_rapor_firma_ozet_mi(request.args.get("gorunum"))
@@ -1973,10 +2249,16 @@ def api_fatura_rapor():
         ensure_musteri_kyc_columns()
         ensure_musteri_kyc_hazir_ofis_oda_no()
         ensure_musteri_kyc_latest_lookup_index()
+        ensure_customers_grup2_secimleri()
+        ensure_grup2_etiketleri_table()
+        ensure_customers_balance_trigger()
         ref = bugun
         ay_y, ay_m = ref.year, ref.month
         ay_etiket = f"{_AYLAR_TR_FATURA_RAPOR[ay_m - 1]} {ay_y}"
-        musteri_where = _fatura_rapor_musteri_where_sql(pasifleri_dahil, tum_musteriler)
+        musteri_where = _fatura_rapor_musteri_where_with_bizim(
+            _fatura_rapor_musteri_where_sql(pasifleri_dahil, tum_musteriler),
+            bizim_hesap,
+        )
         mk_df_sql = ""
         mk_df_params = []
         if duzenli_fatura:
@@ -2006,22 +2288,13 @@ def api_fatura_rapor():
         if hazir_oda_filtre is not None:
             ho_sql = " AND COALESCE(mk.hazir_ofis_oda_no, c.hazir_ofis_oda_no) = %s"
             mk_df_params.append(hazir_oda_filtre)
-        rows_firma = fetch_all(
-            f"""
+        rows_firma_sql = f"""
             SELECT c.id,
                    c.tax_number,
+                   COALESCE(c.bizim_hesap, FALSE) AS bizim_hesap,
                    COALESCE(NULLIF(TRIM(c.musteri_adi), ''), NULLIF(TRIM(c.name), ''), '—') AS firma_adi,
                    TRIM(COALESCE(c.durum, '')) AS musteri_durum,
                    COALESCE(c.is_active, TRUE) AS is_active_kart,
-                   TRIM(COALESCE(c.name, '')) AS cust_name,
-                   c.phone AS cust_phone,
-                   c.phone2 AS cust_phone2,
-                   c.email AS cust_email,
-                   TRIM(COALESCE(c.vergi_dairesi, '')) AS cust_vergi_dairesi,
-                   TRIM(COALESCE(c.address, '')) AS cust_address,
-                   TRIM(COALESCE(c.ev_adres, '')) AS cust_ev_adres,
-                   TRIM(COALESCE(c.yetkili_kisi, '')) AS cust_yetkili_kisi,
-                   c.yetkili_tcno AS cust_yetkili_tcno,
                    COALESCE(
                        NULLIF(TRIM(mk.hizmet_turu), ''),
                        NULLIF(TRIM(c.hizmet_turu), ''),
@@ -2034,23 +2307,36 @@ def api_fatura_rapor():
                    mk.kira_artis_tarihi AS kyc_kira_artis,
                    mk.kira_suresi_ay AS kyc_kira_suresi_ay,
                    mk.aylik_kira, mk.kira_nakit, mk.kdv_oran,
-                   TRIM(COALESCE(mk.musteri_adi, '')) AS kyc_musteri_adi,
-                   TRIM(COALESCE(mk.vergi_dairesi, '')) AS kyc_vergi_dairesi,
-                   TRIM(COALESCE(mk.yeni_adres, '')) AS kyc_yeni_adres,
-                   TRIM(COALESCE(mk.yetkili_ikametgah, '')) AS kyc_yetkili_ikametgah,
-                   TRIM(COALESCE(mk.yetkili_adsoyad, '')) AS kyc_yetkili_adsoyad,
-                   mk.yetkili_tcno AS kyc_yetkili_tcno,
-                   TRIM(COALESCE(mk.yetkili_tel, '')) AS kyc_yetkili_tel,
-                   TRIM(COALESCE(mk.yetkili_tel2, '')) AS kyc_yetkili_tel2,
-                   TRIM(COALESCE(mk.yetkili_email, '')) AS kyc_yetkili_email,
-                   TRIM(COALESCE(mk.email, '')) AS kyc_mk_email,
-                   TRIM(COALESCE(mk.sirket_unvani, '')) AS kyc_sirket_unvani,
-                   TRIM(COALESCE(mk.unvan, '')) AS kyc_unvan,
-                   mk.vergi_no AS kyc_vergi_no,
                    CASE
                        WHEN mk.aylik_kira IS NOT NULL AND mk.aylik_kira > 0 THEN mk.aylik_kira
                        ELSE COALESCE(c.guncel_kira_bedeli, c.ilk_kira_bedeli, mk.aylik_kira)
-                   END AS firma_grid_aylik_net
+                   END AS firma_grid_aylik_net,
+                   COALESCE(c.current_balance, 0) AS current_balance,
+                   COALESCE(
+                       (
+                           SELECT string_agg(
+                                      COALESCE(g2.etiket, gs),
+                                      ' | '
+                                      ORDER BY
+                                          CASE gs
+                                              WHEN 'bizim_hesap' THEN 0
+                                              WHEN 'vergi_dairesi' THEN 1
+                                              WHEN 'vergi_dairesi_terk' THEN 2
+                                              ELSE 3
+                                          END,
+                                          COALESCE(g2.etiket, gs)
+                                  )
+                           FROM (
+                               SELECT DISTINCT gs
+                               FROM unnest(
+                                   COALESCE(c.grup2_secimleri, ARRAY[]::text[]) ||
+                                   CASE WHEN COALESCE(c.bizim_hesap, FALSE) THEN ARRAY['bizim_hesap']::text[] ELSE ARRAY[]::text[] END
+                               ) gs
+                           ) gg
+                           LEFT JOIN grup2_etiketleri g2 ON g2.slug = gg.gs
+                       ),
+                       ''
+                   ) AS grup2_etiketler
             FROM customers c
             LEFT JOIN (
                 SELECT DISTINCT ON (musteri_id)
@@ -2084,147 +2370,245 @@ def api_fatura_rapor():
             WHERE {musteri_where}
               {mk_df_sql}{giri_ay_sql}{ho_sql}
             ORDER BY 2
-            """,
-            tuple(mk_df_params),
-        ) or []
-        from routes.giris_routes import (
-            _ensure_musteri_reel_donem_tutar_table,
-            firma_ozet_aylik_grid_hucre_kdv_dahil,
-            _tufe_map_by_year_month,
-            _aylik_grid_coerce_date,
-        )
-
-        _ensure_musteri_reel_donem_tutar_table()
-        mids = [int(r["id"]) for r in rows_firma if r.get("id") is not None]
-        reel_by_mid = {}
-        if mids:
-            rrows = fetch_all(
-                """
-                SELECT musteri_id, donem_yil, tutar_kdv_dahil
-                FROM musteri_reel_donem_tutar
-                WHERE musteri_id = ANY(%s)
-                """,
-                (mids,),
-            ) or []
-            for rr in rrows:
+            """
+        rows_firma_params = tuple(mk_df_params)
+        rows_firma_sql_no_order = re.sub(r"\s+ORDER\s+BY\s+2\s*$", "", rows_firma_sql.rstrip(), flags=re.I)
+        firma_hizli_degrade = False
+        rows_firma = []
+        satirlar_firma = []
+        toplam_aylik = 0.0
+        toplam_borc = 0.0
+        total_count_firma = 0
+        satirlar_resp = []
+        has_more = False
+        sql_paging_ok = False
+        firma_sql_ms = None
+        firma_sunucu_ms = None
+        if page_size > 0:
+            totals_sql, page_sql = _firma_ozet_sql_paging_queries(rows_firma_sql_no_order, cift_olanlar)
+            _t_sql = time.perf_counter()
+            try:
+                tot_row = fetch_one(totals_sql, rows_firma_params)
+                lim = page_size
+                off = (page - 1) * page_size
+                page_rows = fetch_all(page_sql, rows_firma_params + (lim, off)) or []
+                firma_sql_ms = (time.perf_counter() - _t_sql) * 1000.0
+                if not tot_row:
+                    raise RuntimeError("firma_ozet totals row missing")
+                total_count_firma = int(tot_row.get("cnt") or 0)
+                toplam_borc = round(float(tot_row.get("sum_borc") or 0), 2)
+                toplam_aylik = round(float(tot_row.get("sum_aylik") or 0), 2)
+                satirlar_resp = [_firma_ozet_row_to_satir_item(r, pasifleri_dahil) for r in page_rows]
+                for _it in satirlar_resp:
+                    _it.pop("_dedupe_vergi", None)
+                has_more = off + len(satirlar_resp) < total_count_firma
+                sql_paging_ok = True
+                firma_sunucu_ms = firma_sql_ms
+                current_app.logger.info(
+                    "firma_ozet_sql_paging page=%s page_size=%s page_rows=%s total=%s ms=%.2f",
+                    page,
+                    page_size,
+                    len(satirlar_resp),
+                    total_count_firma,
+                    firma_sql_ms,
+                )
+                exp_b = _firma_ozet_expect_borc_env()
+                if exp_b is not None:
+                    if abs(toplam_borc - exp_b) > 0.005:
+                        current_app.logger.warning(
+                            "firma_ozet toplam_borc=%s FIRMA_OZET_EXPECT_BORC=%s fark=%.4f",
+                            toplam_borc,
+                            exp_b,
+                            toplam_borc - exp_b,
+                        )
+                    else:
+                        current_app.logger.info(
+                            "firma_ozet toplam_borc teyit OK (FIRMA_OZET_EXPECT_BORC=%s)", exp_b
+                        )
+            except Exception as e_pg:
+                firma_sql_ms = (time.perf_counter() - _t_sql) * 1000.0
+                current_app.logger.warning(
+                    "firma_ozet_sql_paging fallback err=%r ms=%.2f", e_pg, firma_sql_ms
+                )
+                sql_paging_ok = False
+        _last_firma_err = None
+        if not sql_paging_ok:
+            _t_fb = time.perf_counter()
+            for _att in range(0, 2):
                 try:
-                    mid = int(rr["musteri_id"])
-                    reel_by_mid.setdefault(mid, {})[int(rr["donem_yil"])] = float(rr.get("tutar_kdv_dahil") or 0)
+                    rows_firma = fetch_all(rows_firma_sql, rows_firma_params) or []
+                    _last_firma_err = None
+                    break
+                except Exception as e_rf:
+                    _last_firma_err = e_rf
+                    em = str(e_rf or "").lower()
+                    # Supabase pooler bağlantı kesmesi (SSL closed) için bir kez hızlı tekrar dene.
+                    if _att == 0 and ("ssl connection has been closed" in em or "connection to server" in em):
+                        time.sleep(0.35)
+                        continue
+                    break
+            if _last_firma_err is not None:
+                # Ağ/DB dalgalanmasında raporu tamamen düşürme:
+                # hafif (borç özeti olmayan) sorguya dönüp listeyi yine göster.
+                firma_hizli_degrade = True
+                rows_firma = fetch_all(
+                    f"""
+                SELECT c.id,
+                       c.tax_number,
+                       COALESCE(c.bizim_hesap, FALSE) AS bizim_hesap,
+                       COALESCE(NULLIF(TRIM(c.musteri_adi), ''), NULLIF(TRIM(c.name), ''), '—') AS firma_adi,
+                       TRIM(COALESCE(c.durum, '')) AS musteri_durum,
+                       COALESCE(c.is_active, TRUE) AS is_active_kart,
+                       COALESCE(
+                           NULLIF(TRIM(mk.hizmet_turu), ''),
+                           NULLIF(TRIM(c.hizmet_turu), ''),
+                           ''
+                       ) AS rapor_hizmet_turu,
+                       COALESCE(mk.hazir_ofis_oda_no, c.hazir_ofis_oda_no) AS hazir_ofis_oda_no,
+                       ({_FIRMA_OZET_GIRIS_TARIHI_SQL}) AS giris_raw,
+                       mk.sozlesme_tarihi AS kyc_soz_bas,
+                       mk.sozlesme_bitis AS kyc_soz_bit,
+                       mk.kira_artis_tarihi AS kyc_kira_artis,
+                       mk.kira_suresi_ay AS kyc_kira_suresi_ay,
+                       mk.aylik_kira, mk.kira_nakit, mk.kdv_oran,
+                       CASE
+                           WHEN mk.aylik_kira IS NOT NULL AND mk.aylik_kira > 0 THEN mk.aylik_kira
+                           ELSE COALESCE(c.guncel_kira_bedeli, c.ilk_kira_bedeli, mk.aylik_kira)
+                       END AS firma_grid_aylik_net,
+                       COALESCE(c.current_balance, 0) AS current_balance,
+                       COALESCE(
+                           (
+                               SELECT string_agg(
+                                          COALESCE(g2.etiket, gs),
+                                          ' | '
+                                          ORDER BY
+                                              CASE gs
+                                                  WHEN 'bizim_hesap' THEN 0
+                                                  WHEN 'vergi_dairesi' THEN 1
+                                                  WHEN 'vergi_dairesi_terk' THEN 2
+                                                  ELSE 3
+                                              END,
+                                              COALESCE(g2.etiket, gs)
+                                      )
+                               FROM (
+                                   SELECT DISTINCT gs
+                                   FROM unnest(
+                                       COALESCE(c.grup2_secimleri, ARRAY[]::text[]) ||
+                                       CASE WHEN COALESCE(c.bizim_hesap, FALSE) THEN ARRAY['bizim_hesap']::text[] ELSE ARRAY[]::text[] END
+                                   ) gs
+                               ) gg
+                               LEFT JOIN grup2_etiketleri g2 ON g2.slug = gg.gs
+                           ),
+                           ''
+                       ) AS grup2_etiketler
+                FROM customers c
+                LEFT JOIN (
+                    SELECT DISTINCT ON (musteri_id)
+                        musteri_id,
+                        sozlesme_tarihi,
+                        sozlesme_bitis,
+                        kira_artis_tarihi,
+                        kira_suresi_ay,
+                        aylik_kira,
+                        kira_nakit,
+                        kdv_oran,
+                        duzenli_fatura,
+                        hizmet_turu,
+                        hazir_ofis_oda_no
+                    FROM musteri_kyc
+                    ORDER BY musteri_id, id DESC
+                ) mk ON mk.musteri_id = c.id
+                WHERE {musteri_where}
+                  {mk_df_sql}{giri_ay_sql}{ho_sql}
+                ORDER BY 2
+                    """,
+                    rows_firma_params,
+                ) or []
+            satirlar_firma = []
+            for row in rows_firma:
+                satirlar_firma.append(_firma_ozet_row_to_satir_item(row, pasifleri_dahil))
+            satirlar_firma.sort(key=lambda x: turkish_lower((x.get("firma_adi") or "").strip()))
+            if not cift_olanlar:
+                satirlar_firma = _firma_ozet_dedupe_satirlar(satirlar_firma)
+            for _it in satirlar_firma:
+                _it.pop("_dedupe_vergi", None)
+            toplam_aylik = 0.0
+            toplam_borc = 0.0
+            for it in satirlar_firma:
+                try:
+                    v = float(it.get("aylik_tutar") or 0)
+                    if math.isfinite(v):
+                        toplam_aylik += v
                 except (TypeError, ValueError):
                     pass
-        tufe_map = _tufe_map_by_year_month()
-        satirlar_firma = []
-        for row in rows_firma:
-            gid = row.get("id")
-            firma = (row.get("firma_adi") or "").strip() or "—"
-            mdur = (row.get("musteri_durum") or "").strip() or None
-            raw_soz_bas = row.get("kyc_soz_bas")
-            raw_soz_bit = row.get("kyc_soz_bit")
-            giris_sql = row.get("giris_raw")
-            bas_parsed = _aylik_grid_coerce_date(raw_soz_bas)
-            bit_parsed = _aylik_grid_coerce_date(raw_soz_bit)
-            # Ham KYC metni (21-02-2022 vb.) parse edilebiliyorsa öncelikli; yoksa SQL COALESCE (created_at yanlış olabiliyordu).
-            soz_bas_eff = bas_parsed or giris_sql or raw_soz_bas
-            soz_bit_eff = bit_parsed if bit_parsed is not None else raw_soz_bit
-            if isinstance(soz_bas_eff, datetime):
-                giris_iso = soz_bas_eff.date().isoformat()[:10]
-            elif isinstance(soz_bas_eff, date):
-                giris_iso = soz_bas_eff.isoformat()[:10]
-            else:
-                gr = giris_sql
-                giris_iso = str(gr)[:10] if gr is not None and str(gr).strip() else ""
-            kyc_for_grid = {
-                "sozlesme_tarihi": soz_bas_eff,
-                "sozlesme_bitis": soz_bit_eff,
-                "aylik_kira": row.get("firma_grid_aylik_net"),
-                "kira_artis_tarihi": row.get("kyc_kira_artis"),
-                "kira_suresi_ay": row.get("kyc_kira_suresi_ay"),
-                "kira_nakit": row.get("kira_nakit"),
-                "kdv_oran": row.get("kdv_oran"),
-            }
-            try:
-                gid_int = int(gid)
-            except (TypeError, ValueError):
-                gid_int = 0
-            if gid_int <= 0:
-                atut = 0.0
-            else:
-                # Disk önbelleği yok (satır KYC + kart kirası ile canlı TÜFE grid).
-                # Ekranda Aylık kutularına reel dönem + TÜFE (sozlesmelerReelDonemTutarlariUygula) basıldığı için reel önce.
-                atut = firma_ozet_aylik_grid_hucre_kdv_dahil(
-                    gid_int,
-                    ay_y,
-                    ay_m,
-                    tufe_map,
-                    kyc_for_grid,
-                    None,
-                    reel_by_mid.get(gid_int, {}),
-                    skip_disk_cache=True,
-                    skip_reel_overlay=False,
-                )
-            item = {
-                "musteri_id": gid,
-                "firma_adi": firma,
-                "giris_tarihi": giris_iso,
-                "aylik_tutar": atut,
-                "hizmet_turu": ((row.get("rapor_hizmet_turu") or "").strip() or "—"),
-                "durum_etiket": _firma_ozet_durum_etiket(row),
-                "_dedupe_vergi": row.get("tax_number"),
-                "liste_ara_blob": _firma_ozet_liste_ara_blob_from_row(row, firma),
-            }
-            _ho = row.get("hazir_ofis_oda_no")
-            if _ho is not None and str(_ho).strip() != "":
                 try:
-                    item["hazir_ofis_oda_no"] = int(_ho)
+                    b = float(it.get("toplam_borc") or 0)
+                    if math.isfinite(b):
+                        toplam_borc += b
                 except (TypeError, ValueError):
-                    item["hazir_ofis_oda_no"] = _ho
-            try:
-                ko_raw = row.get("kdv_oran")
-                if ko_raw is not None and str(ko_raw).strip() != "":
-                    item["kdv_oran"] = int(round(float(ko_raw)))
-            except (TypeError, ValueError):
-                pass
-            if mdur and pasifleri_dahil:
-                item["musteri_durum"] = mdur
-            satirlar_firma.append(item)
-        satirlar_firma.sort(key=lambda x: turkish_lower((x.get("firma_adi") or "").strip()))
-        if not cift_olanlar:
-            satirlar_firma = _firma_ozet_dedupe_satirlar(satirlar_firma)
-        for _it in satirlar_firma:
-            _it.pop("_dedupe_vergi", None)
-        toplam_aylik = 0.0
-        for it in satirlar_firma:
-            try:
-                v = float(it.get("aylik_tutar") or 0)
-                if math.isfinite(v):
-                    toplam_aylik += v
-            except (TypeError, ValueError):
-                pass
-        toplam_aylik = round(toplam_aylik, 2)
+                    pass
+            toplam_aylik = round(toplam_aylik, 2)
+            toplam_borc = round(toplam_borc, 2)
+            total_count_firma = len(satirlar_firma)
+            satirlar_resp = satirlar_firma
+            has_more = False
+            if page_size > 0:
+                start_idx = (page - 1) * page_size
+                end_idx = start_idx + page_size
+                satirlar_resp = satirlar_firma[start_idx:end_idx]
+                has_more = end_idx < total_count_firma
+            if page_size > 0:
+                current_app.logger.info(
+                    "firma_ozet_python_liste_ms=%.2f (sql_paging devre dışı veya hata)",
+                    (time.perf_counter() - _t_fb) * 1000.0,
+                )
+                exp_b = _firma_ozet_expect_borc_env()
+                if exp_b is not None:
+                    if abs(toplam_borc - exp_b) > 0.005:
+                        current_app.logger.warning(
+                            "firma_ozet toplam_borc=%s FIRMA_OZET_EXPECT_BORC=%s fark=%.4f (python yolu)",
+                            toplam_borc,
+                            exp_b,
+                            toplam_borc - exp_b,
+                        )
+                    else:
+                        current_app.logger.info(
+                            "firma_ozet toplam_borc teyit OK (FIRMA_OZET_EXPECT_BORC=%s, python yolu)", exp_b
+                        )
+            firma_sunucu_ms = (time.perf_counter() - _t_fb) * 1000.0
         kapsam_etiket = "tum_kayitlar" if tum_musteriler else ("pasif_dahil" if pasifleri_dahil else "aktif")
         return jsonify({
             "ok": True,
             "gorunum": "firma_ozet",
+            "sunucu_islem_ms": (round(float(firma_sunucu_ms), 2) if firma_sunucu_ms is not None else None),
             "baslangic": bas.isoformat(),
             "bitis": bit.isoformat(),
             "duzenli_fatura": duzenli_fatura or "",
             "musteri_kapsam": kapsam_etiket,
             "pasifleri_dahil": pasifleri_dahil,
             "tum_musteriler": tum_musteriler,
+            "bizim_hesap": bizim_hesap,
             "cift_olanlar": cift_olanlar,
             "sadece_faturali": False,
             "giri_aylar_filtre": giris_aylar_filtre or [],
             "hazir_ofis_oda_filtre": hazir_oda_filtre,
             "ay_referans": {"y": ay_y, "m": ay_m, "etiket": ay_etiket},
-            "satirlar": satirlar_firma,
+            "satirlar": satirlar_resp,
+            "total_count": total_count_firma,
+            "page": page,
+            "page_size": page_size,
+            "has_more": has_more,
             "ozet": {
                 "fatura_adedi": 0,
-                "satir_adedi": len(satirlar_firma),
+                "satir_adedi": total_count_firma,
                 "kesilen_fatura_satir_sayisi": 0,
-                "musteri_kapsam_adedi": len(satirlar_firma),
+                "musteri_kapsam_adedi": total_count_firma,
                 "donemde_faturasiz_musteri": 0,
                 "toplam_satir_kdv_dahil": toplam_aylik,
+                "toplam_borc_kdv_dahil": toplam_borc,
             },
+            "degrade_mode": firma_hizli_degrade,
+            "mesaj": ("Bağlantı dalgalanması nedeniyle hızlı modda yüklendi (borç özetleri sadeleştirildi)." if firma_hizli_degrade else ""),
         })
     ensure_faturalar_amount_columns()
     ensure_customers_is_active()
@@ -2337,7 +2721,10 @@ def api_fatura_rapor():
     musteri_kapsam_adedi = 0
     donemde_faturasiz_musteri = 0
     if not sadece_faturali:
-        musteri_where = _fatura_rapor_musteri_where_sql(pasifleri_dahil, tum_musteriler)
+        musteri_where = _fatura_rapor_musteri_where_with_bizim(
+            _fatura_rapor_musteri_where_sql(pasifleri_dahil, tum_musteriler),
+            bizim_hesap,
+        )
         mk_df_sql = ""
         mk_df_params = []
         if duzenli_fatura:
@@ -2428,6 +2815,7 @@ def api_fatura_rapor():
         "musteri_kapsam": kapsam_etiket,
         "pasifleri_dahil": pasifleri_dahil,
         "tum_musteriler": tum_musteriler,
+        "bizim_hesap": bizim_hesap,
         "satirlar": satirlar_out,
         "ozet": {
             "fatura_adedi": len(rows_raw),
@@ -2515,6 +2903,23 @@ def api_fatura_sil_toplu():
     if atlanan:
         msg += f" {len(atlanan)} kayıt atlandı (ETTN’li veya bulunamadı)."
     return jsonify({"ok": True, "silinen": silinen, "atlanan": atlanan, "mesaj": msg})
+
+
+@bp.route("/api/vergi-daireleri", methods=["GET"])
+@faturalar_gerekli
+def api_faturalar_vergi_daireleri():
+    """Finans sayfası /faturalar altında göreli `api/...` çağrıları /giris önekine düşmeden 404 olmasın."""
+    from routes.giris_routes import api_vergi_daireleri
+
+    return api_vergi_daireleri()
+
+
+@bp.route("/api/grup2-etiketleri", methods=["GET", "POST"])
+@faturalar_gerekli
+def api_faturalar_grup2_etiketleri():
+    from routes.giris_routes import api_grup2_etiketleri
+
+    return api_grup2_etiketleri()
 
 
 @bp.route('/')

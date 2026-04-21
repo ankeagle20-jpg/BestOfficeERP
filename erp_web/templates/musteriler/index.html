@@ -276,7 +276,7 @@ window.setActiveTab = function(tabId) {
   <div class="ml-sticky-block">
   <!-- TOP BAR -->
   <div class="ml-topbar">
-    <h1><i class="fa fa-users" style="color:#00c8ff"></i> Müşteri Listesi <span id="mlTitleCount">{{ musteriler|length }} kayıt</span></h1>
+    <h1><i class="fa fa-users" style="color:#00c8ff"></i> Müşteri Listesi <span id="mlTitleCount">{% if paginate %}{{ musteriler|length }} / {{ toplam_musteri }} kayıt (sayfa {{ sayfa }}){% else %}{{ musteriler|length }} kayıt{% endif %}</span></h1>
     <div class="ml-actions">
       <a href="/musteriler/" class="ml-btn back"><i class="fa fa-arrow-left"></i> Özet Panel</a>
       <button type="button" id="btn-bulk-save" class="ml-btn bulk-save" style="display:none;" disabled><i class="fa fa-save"></i> Değişiklikleri Toplu Kaydet</button>
@@ -319,10 +319,10 @@ window.setActiveTab = function(tabId) {
         <button type="button" id="mlSozBasTarihTemizle" class="ml-btn back" style="font-size:10px;padding:4px 8px;" title="Tarih aralığını temizle">Temizle</button>
       </span>
       <div class="ml-stats">
-        <span>Toplam: <b id="mlCount">{{ musteriler|length }}</b></span>
+        <span>Toplam: <b id="mlCount">{% if paginate %}{{ musteriler|length }} / {{ toplam_musteri }}{% else %}{{ musteriler|length }}{% endif %}</b></span>
         {% set _ns = namespace(total_borc=0) %}
       {% for _m in musteriler %}{% set _ns.total_borc = _ns.total_borc + (_m.get('toplam_borc', 0) or 0) %}{% endfor %}
-      <span>Toplam Borç: <b class="red" id="mlTotalBorc">{{ "{:,.0f}".format(_ns.total_borc) }} ₺</b></span>
+      <span>{% if paginate %}Borç (bu sayfa):{% else %}Toplam Borç:{% endif %} <b class="red" id="mlTotalBorc">{{ "{:,.0f}".format(_ns.total_borc) }} ₺</b></span>
       </div>
     </div>
   </div>
@@ -441,7 +441,23 @@ window.setActiveTab = function(tabId) {
 
   <!-- FOOTER -->
   <div class="ml-footer">
-    <span>Gösterilen: <strong id="mlShown">{{ musteriler|length }}</strong> / <strong id="mlTotalAll">{{ musteriler|length }}</strong> müşteri</span>
+    <span>Gösterilen: <strong id="mlShown">{{ musteriler|length }}</strong> / <strong id="mlTotalAll">{% if paginate %}{{ toplam_musteri }}{% else %}{{ musteriler|length }}{% endif %}</strong> müşteri</span>
+    {% if paginate %}
+    <div class="ml-pager" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      {% if sayfa > 1 %}
+      <a class="ml-btn back" href="{{ url_for('musteriler.list_full', sayfa=sayfa-1, limit=limit, q=arama or None, tum_yillar_odenmis=('1' if tum_yillar_odenmis else None)) }}"><i class="fa fa-chevron-left"></i> Önceki</a>
+      {% endif %}
+      <span style="color:#5a7a9a;font-size:11px">Sayfa <strong style="color:#e8f1ff">{{ sayfa }}</strong> / <strong style="color:#e8f1ff">{{ toplam_sayfa }}</strong> · <strong style="color:#e8f1ff">{{ limit }}</strong> kayıt/sayfa</span>
+      {% if sayfa < toplam_sayfa %}
+      <a class="ml-btn back" href="{{ url_for('musteriler.list_full', sayfa=sayfa+1, limit=limit, q=arama or None, tum_yillar_odenmis=('1' if tum_yillar_odenmis else None)) }}">Sonraki <i class="fa fa-chevron-right"></i></a>
+      {% endif %}
+      <a class="ml-btn back" href="{{ url_for('musteriler.list_full', q=arama or None, tum_yillar_odenmis=('1' if tum_yillar_odenmis else None)) }}" title="Tüm satırlar; çok müşteride yükleme uzun sürebilir">Tümünü yükle</a>
+    </div>
+    {% else %}
+    <div class="ml-pager" style="display:flex;align-items:center;gap:8px">
+      <a class="ml-btn back" href="{{ url_for('musteriler.list_full', sayfa=1, limit=50, q=arama or None, tum_yillar_odenmis=('1' if tum_yillar_odenmis else None)) }}" title="Sunucu sayfalama — hızlı liste">Sayfalı görünüm (50)</a>
+    </div>
+    {% endif %}
     <div style="display:flex;gap:10px">
       <a href="/musteriler/" class="ml-btn back"><i class="fa fa-arrow-left"></i> Özet Panel</a>
       <a href="#" id="btn-musteri-ekle-giris-footer" class="ml-btn ekle"><i class="fa fa-plus"></i> Yeni Müşteri</a>

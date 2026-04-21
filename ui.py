@@ -60,6 +60,12 @@ except ImportError:
 
 from database import (
     get_all_customers_with_rent_progression,
+    count_customers,
+    get_distinct_rent_start_years,
+    fetch_rent_payments_paid_by_customer,
+    fetch_rent_payments_amount_map,
+    fetch_last_tahsilat_by_customer_id,
+    get_borclu_musteri_ozet,
     get_all_products,
     get_all_invoices,
     get_tufe_for_year,
@@ -94,8 +100,6 @@ from database import (
     insert_tahsilat,
     delete_tahsilat,
     get_tahsilatlar,
-    get_musteri_toplam_borc,
-    get_musteri_bu_ay_borc,
     get_tahsilat_toplam,
 )
 
@@ -606,12 +610,17 @@ class CustomerTab(ttk.Frame):
         tree_frame.pack(side=tk.TOP, fill=tk.X, pady=(0, 0))
 
         self.tree = ttk.Treeview(tree_frame, show="headings", selectmode="browse", height=15)
-        vsb = ttk.Scrollbar(tree_frame, orient="vertical",   command=self.tree.yview)
+        self._tree_vsb = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview)
         hsb = ttk.Scrollbar(tree_frame, orient="horizontal", command=self.tree.xview)
-        self.tree.configure(yscrollcommand=vsb.set)
+
+        def _yscroll_client(*args):
+            self._tree_vsb.set(*args)
+            self.after(120, self._maybe_load_next_customer_page)
+
+        self.tree.configure(yscrollcommand=_yscroll_client)
 
         self.tree.grid(row=0, column=0, sticky="nsew")
-        vsb.grid(row=0, column=1, sticky="ns")
+        self._tree_vsb.grid(row=0, column=1, sticky="ns")
         hsb.grid(row=1, column=0, sticky="ew")
         tree_frame.columnconfigure(0, weight=1)
         tree_frame.rowconfigure(0, weight=1)
@@ -869,19 +878,77 @@ class CustomerTab(ttk.Frame):
         for item in self.tree.get_children():
             self.tree.delete(item)
 
-        self._all_customers = get_all_customers_with_rent_progression()
+        self._full_customers_loaded = False
+        self._loading_more = False
+
+        if self._needs_full_customer_scan():
+            self._all_customers = get_all_customers_with_rent_progression()
+            self._full_customers_loaded = True
+            self._customers_has_more = False
+        else:
+            self._all_customers = get_all_customers_with_rent_progression(limit=50, offset=0)
+            total = count_customers()
+            self._customers_has_more = len(self._all_customers) < total
+
         year_range = self._get_year_range(self._all_customers)
         self._refresh_columns(year_range)
 
-        # Yıl filtresini güncelle
-        yil_values = ["Tümü"] + [str(y) for y in sorted(
-            set(c.get("rent_start_date", "").split(".")[-1]
-                for c in self._all_customers
-                if c.get("rent_start_date", ""))
-        )]
+        yil_values = ["Tümü"] + [str(y) for y in get_distinct_rent_start_years()]
         self.filter_yil["values"] = yil_values
 
         self._apply_filter()
+
+    def _needs_full_customer_scan(self) -> bool:
+        """Filtre aktifken tüm müşteri kümesi gerekir (sayfalama tek başına yetmez)."""
+        try:
+            if (self.filter_arama_var.get() or "").strip():
+                return True
+            if self.filter_ay_var.get() != "Tümü":
+                return True
+            if self.filter_yil_var.get() != "Tümü":
+                return True
+            if self.filter_odenmemis_var.get() != "Tümü":
+                return True
+        except Exception:
+            return True
+        return False
+
+    def _maybe_load_next_customer_page(self) -> None:
+        if getattr(self, "_loading_more", False):
+            return
+        if getattr(self, "_full_customers_loaded", False):
+            return
+        if not getattr(self, "_customers_has_more", False):
+            return
+        if self._needs_full_customer_scan():
+            return
+        try:
+            _lo, hi = self.tree.yview()
+        except Exception:
+            return
+        if hi < 0.92:
+            return
+        self._load_next_customer_page()
+
+    def _load_next_customer_page(self) -> None:
+        if getattr(self, "_loading_more", False):
+            return
+        self._loading_more = True
+        try:
+            off = len(self._all_customers)
+            batch = get_all_customers_with_rent_progression(limit=50, offset=off)
+            if not batch:
+                self._customers_has_more = False
+                return
+            self._all_customers.extend(batch)
+            if len(batch) < 50:
+                self._customers_has_more = False
+            else:
+                total = count_customers()
+                self._customers_has_more = len(self._all_customers) < total
+            self._apply_filter()
+        finally:
+            self._loading_more = False
 
     def _apply_filter(self) -> None:
         """Filtre uygula: ay, yıl, arama, ödenmeyen ay."""
@@ -897,12 +964,20 @@ class CustomerTab(ttk.Frame):
         if filtre_odenmemis != "Tümü":
             esik = int(filtre_odenmemis.replace("+ ay", "").strip())
 
+        if self._needs_full_customer_scan() and not getattr(self, "_full_customers_loaded", False):
+            self._all_customers = get_all_customers_with_rent_progression()
+            self._full_customers_loaded = True
+            self._customers_has_more = False
+
         year_range = self._get_year_range(self._all_customers)
 
-        from database import get_connection
         import datetime
         bugun_yil = datetime.date.today().year
         bugun_ay  = datetime.date.today().month
+
+        rp_paid_map = fetch_rent_payments_paid_by_customer()
+        rp_amt_map = fetch_rent_payments_amount_map()
+        last_tah = fetch_last_tahsilat_by_customer_id()
 
         for c in self._all_customers:
             rent_date = c.get("rent_start_date", "") or ""
@@ -929,37 +1004,24 @@ class CustomerTab(ttk.Frame):
 
             # Ödenmeyen ay filtresi
             if esik > 0:
-                conn = get_connection()
                 try:
-                    # Başlangıç tarihinden bugüne kadar beklenen ay sayısı
-                    try:
-                        p = rent_date.split(".")
-                        s_ay = int(p[1])
-                        s_yil = int(p[2])
-                    except Exception:
-                        s_ay, s_yil = 1, 2021
+                    p = rent_date.split(".")
+                    s_ay = int(p[1])
+                    s_yil = int(p[2])
+                except Exception:
+                    s_ay, s_yil = 1, 2021
 
-                    # Beklenen tüm ayları hesapla
-                    beklenen = []
-                    y, m = s_yil, s_ay
-                    while (y < bugun_yil) or (y == bugun_yil and m <= bugun_ay):
-                        beklenen.append((y, MONTHS_TR[m - 1]))
-                        m += 1
-                        if m > 12:
-                            m = 1
-                            y += 1
+                beklenen = []
+                y, m = s_yil, s_ay
+                while (y < bugun_yil) or (y == bugun_yil and m <= bugun_ay):
+                    beklenen.append((y, MONTHS_TR[m - 1]))
+                    m += 1
+                    if m > 12:
+                        m = 1
+                        y += 1
 
-                    # Ödenmiş ayları çek (amount > 0)
-                    odenmis_rows = conn.execute(
-                        "SELECT year, month FROM rent_payments WHERE customer_id=? AND amount > 0",
-                        (c["id"],)
-                    ).fetchall()
-                    odenmis_set = {(r["year"], r["month"]) for r in odenmis_rows}
-
-                    # Ödenmemiş = beklenen - ödenmiş
-                    odenmemis_sayi = sum(1 for (y2, m2) in beklenen if (y2, m2) not in odenmis_set)
-                finally:
-                    conn.close()
+                odenmis_set = rp_paid_map.get(int(c["id"]), set())
+                odenmemis_sayi = sum(1 for (y2, m2) in beklenen if (y2, m2) not in odenmis_set)
 
                 if odenmemis_sayi < esik:
                     continue
@@ -980,11 +1042,9 @@ class CustomerTab(ttk.Frame):
                 if "_" in col:
                     # Ay bazlı: "2026_Ocak"
                     yil_str, ay_str = col.split("_", 1)
-                    row = get_connection().execute(
-                        "SELECT amount FROM rent_payments WHERE customer_id=? AND year=? AND month=?",
-                        (c["id"], int(yil_str), ay_str)
-                    ).fetchone()
-                    amt = float(row["amount"]) if row and row["amount"] else 0.0
+                    amt = float(
+                        rp_amt_map.get((int(c["id"]), int(yil_str), str(ay_str).strip()), 0.0) or 0.0
+                    )
                     values.append(f"{amt:,.2f}" if amt > 0 else "—")
                 else:
                     # Yıl bazlı özet
@@ -1000,20 +1060,15 @@ class CustomerTab(ttk.Frame):
             else:
                 values.append("0,00")
 
-            # Son tahsilat
-            from database import fetch_all as _fa
-            son = _fa(
-                "SELECT tahsilat_tarihi, tutar, odeme_turu FROM tahsilatlar WHERE customer_id=? ORDER BY tahsilat_tarihi DESC, id DESC LIMIT 1",
-                (c["id"],)
-            )
-            if son:
+            rlast = last_tah.get(int(c["id"]))
+            if rlast:
                 try:
-                    p = son[0]["tahsilat_tarihi"].split("-")
+                    p = str(rlast["tahsilat_tarihi"]).split("-")
                     t_str = f"{p[2]}.{p[1]}.{p[0]}"
                 except Exception:
-                    t_str = son[0]["tahsilat_tarihi"]
-                tur = "B" if son[0]["odeme_turu"] == "B" else "N"
-                values.append(f"{t_str} {float(son[0]['tutar']):,.0f}₺({tur})")
+                    t_str = str(rlast.get("tahsilat_tarihi") or "")
+                tur = "B" if rlast.get("odeme_turu") == "B" else "N"
+                values.append(f"{t_str} {float(rlast['tutar']):,.0f}₺({tur})")
             else:
                 values.append("")
 
@@ -1087,6 +1142,7 @@ class CustomerTab(ttk.Frame):
         self.filter_arama_var.set("")
         self.gorunum_yil_var.set("2026")
         self.gorunum_ay_var.set("Tüm Aylar")
+        self._full_customers_loaded = False
         self._apply_filter()
 
     # ── Satır Seçimi ──
@@ -2737,53 +2793,27 @@ class TahsilatTab(ttk.Frame):
         self._update_summary()
 
     def _load_customer_list(self):
-        from database import fetch_all
         arama = self.arama_var.get().strip().upper()
 
         for item in self.cust_tree.get_children():
             self.cust_tree.delete(item)
 
-        customers = fetch_all("SELECT id, name FROM customers ORDER BY name")
-        self._all_customers = list(customers)
+        rows, toplam_bu_ay, toplam_borc, count = get_borclu_musteri_ozet(arama)
+        self._all_customers = rows
 
-        toplam_bu_ay = 0.0
-        toplam_borc  = 0.0
-        count = 0
-
-        for c in customers:
-            cid = c["id"]
-            if arama and arama not in c["name"].upper():
-                continue
-
-            bu_ay  = get_musteri_bu_ay_borc(cid)
-            toplam = get_musteri_toplam_borc(cid)
-
-            # Sadece borcu olanları göster
-            if toplam <= 0 and bu_ay <= 0:
-                continue
-
-            son = fetch_all(
-                "SELECT tahsilat_tarihi, tutar, odeme_turu FROM tahsilatlar WHERE customer_id=? ORDER BY tahsilat_tarihi DESC, id DESC LIMIT 1",
-                (cid,)
+        for c in rows:
+            self.cust_tree.insert(
+                "",
+                tk.END,
+                iid=str(c["id"]),
+                tags=("borc",),
+                values=(
+                    c["name"],
+                    f"{c['bu_ay']:,.2f}" if c["bu_ay"] > 0 else "—",
+                    f"{c['toplam_borc']:,.2f}",
+                    c.get("son_tahsilat") or "",
+                ),
             )
-            son_str = ""
-            if son:
-                try:
-                    p = son[0]["tahsilat_tarihi"].split("-")
-                    t_str = f"{p[2]}.{p[1]}.{p[0]}"
-                except Exception:
-                    t_str = son[0]["tahsilat_tarihi"]
-                tur = "B" if son[0]["odeme_turu"] == "B" else "N"
-                son_str = f"{t_str} {float(son[0]['tutar']):,.0f}₺({tur})"
-
-            self.cust_tree.insert("", tk.END, iid=str(cid), tags=("borc",),
-                                   values=(c["name"],
-                                           f"{bu_ay:,.2f}" if bu_ay > 0 else "—",
-                                           f"{toplam:,.2f}",
-                                           son_str))
-            toplam_bu_ay += bu_ay
-            toplam_borc  += toplam
-            count += 1
 
         self.cust_totals.config(
             text=f"  {count} borçlu müşteri   |   Bu Ay: {toplam_bu_ay:,.2f} ₺   |   Toplam: {toplam_borc:,.2f} ₺"

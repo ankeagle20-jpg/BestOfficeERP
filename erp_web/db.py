@@ -4,14 +4,41 @@ Supabase PostgreSQL Bağlantı Katmanı
 import logging
 import os
 import time
+import threading
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import psycopg2
 import psycopg2.extras
+import psycopg2.pool
 from psycopg2.extras import RealDictCursor
 from contextlib import contextmanager
 from config import Config
 
 logger = logging.getLogger(__name__)
+_POOL = None
+_POOL_KEY = None
+_POOL_LOCK = threading.Lock()
+_POOLED_CONN_IDS = set()
+
+
+def _dsn_with_sslmode(dsn: str, sslmode: str = "require") -> str:
+    """DSN içinde sslmode parametresini güvenli şekilde zorlar."""
+    raw = (dsn or "").strip()
+    if not raw:
+        return ""
+    mode = (sslmode or "require").strip() or "require"
+    try:
+        u = urlsplit(raw)
+        q = dict(parse_qsl(u.query, keep_blank_values=True))
+        # Supabase pooler için SSL mutlaka açık olmalı.
+        q["sslmode"] = mode
+        return urlunsplit((u.scheme, u.netloc, u.path, urlencode(q), u.fragment))
+    except Exception:
+        # URI parse edilemezse asgari düzeltme: sslmode ekle.
+        sep = "&" if "?" in raw else "?"
+        if "sslmode=" in raw.lower():
+            return raw
+        return f"{raw}{sep}sslmode={mode}"
 
 
 def sql_expr_fatura_not_gib_taslak(notlar_column: str) -> str:
@@ -47,8 +74,10 @@ def sql_expr_fatura_gib_imzalanmis(notlar_column: str) -> str:
 
 def _db_connect_kwargs_common():
     """Ortak libpq parametreleri (kopmalara karşı keepalive, TLS)."""
+    is_prod_like = bool(os.environ.get("GUNICORN_CMD_ARGS") or os.environ.get("RENDER"))
+    default_connect_timeout = "10"
     return dict(
-        connect_timeout=int(os.environ.get("DB_CONNECT_TIMEOUT", "15")),
+        connect_timeout=int(os.environ.get("DB_CONNECT_TIMEOUT", default_connect_timeout)),
         cursor_factory=psycopg2.extras.RealDictCursor,
         keepalives=1,
         keepalives_idle=int(os.environ.get("DB_KEEPALIVES_IDLE", "30")),
@@ -56,6 +85,81 @@ def _db_connect_kwargs_common():
         keepalives_count=3,
         sslmode=os.environ.get("DB_SSLMODE", "require"),
     )
+
+
+def _db_pool_enabled() -> bool:
+    return (os.environ.get("DB_USE_POOL", "1") or "").strip().lower() not in ("0", "false", "no", "off")
+
+
+def _is_10013_error(err) -> bool:
+    m = str(err or "")
+    return "10013" in m or "Permission denied (0x0000271D/10013)" in m
+
+
+def _pool_key_from(dsn: str, extra: dict) -> tuple:
+    return (
+        dsn,
+        extra.get("connect_timeout"),
+        extra.get("sslmode"),
+        extra.get("keepalives"),
+        extra.get("keepalives_idle"),
+        extra.get("keepalives_interval"),
+        extra.get("keepalives_count"),
+        Config.DB_HOST,
+        Config.DB_PORT,
+        Config.DB_NAME,
+        Config.DB_USER,
+    )
+
+
+def _pool_getconn(dsn: str, extra: dict):
+    global _POOL, _POOL_KEY
+    with _POOL_LOCK:
+        k = _pool_key_from(dsn, extra)
+        if _POOL is None or _POOL_KEY != k:
+            pool_kwargs = dict(
+                connect_timeout=extra.get("connect_timeout"),
+                sslmode=extra.get("sslmode"),
+                keepalives=extra.get("keepalives"),
+                keepalives_idle=extra.get("keepalives_idle"),
+                keepalives_interval=extra.get("keepalives_interval"),
+                keepalives_count=extra.get("keepalives_count"),
+                cursor_factory=extra.get("cursor_factory"),
+            )
+            if dsn:
+                pool_kwargs["dsn"] = dsn
+            else:
+                pool_kwargs.update(
+                    host=Config.DB_HOST,
+                    port=Config.DB_PORT,
+                    dbname=Config.DB_NAME,
+                    user=Config.DB_USER,
+                    password=Config.DB_PASSWORD,
+                )
+            _POOL = psycopg2.pool.ThreadedConnectionPool(
+                minconn=1,
+                maxconn=max(4, int(os.environ.get("DB_POOL_MAXCONN", "16"))),
+                **pool_kwargs,
+            )
+            _POOL_KEY = k
+        conn = _POOL.getconn()
+    _POOLED_CONN_IDS.add(id(conn))
+    return conn
+
+
+def _release_conn(conn):
+    cid = id(conn)
+    if cid in _POOLED_CONN_IDS and _POOL is not None:
+        try:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            _POOL.putconn(conn)
+        finally:
+            _POOLED_CONN_IDS.discard(cid)
+    else:
+        conn.close()
 
 
 def get_conn():
@@ -68,11 +172,16 @@ def get_conn():
     "SSL connection has been closed unexpectedly" gibi geçici pooler/ağ hatalarında
     birkaç kez yeniden dener (DB_CONNECT_RETRIES, varsayılan 3).
     """
-    dsn = (os.environ.get("DATABASE_URL") or os.environ.get("SUPABASE_DB_URL") or "").strip()
     extra = _db_connect_kwargs_common()
-    attempts = max(1, int(os.environ.get("DB_CONNECT_RETRIES", "3")))
+    dsn_raw = (os.environ.get("DATABASE_URL") or os.environ.get("SUPABASE_DB_URL") or "").strip()
+    dsn = _dsn_with_sslmode(dsn_raw, str(extra.get("sslmode") or "require"))
+    is_prod_like = bool(os.environ.get("GUNICORN_CMD_ARGS") or os.environ.get("RENDER"))
+    default_retries = "3" if _db_pool_enabled() else ("3" if is_prod_like else "1")
+    attempts = max(1, int(os.environ.get("DB_CONNECT_RETRIES", default_retries)))
 
     def _connect_once():
+        if _db_pool_enabled():
+            return _pool_getconn(dsn, extra)
         if dsn:
             return psycopg2.connect(dsn, **extra)
         if not Config.DB_HOST:
@@ -96,7 +205,10 @@ def get_conn():
             last_err = e
             if attempt >= attempts - 1:
                 raise
-            delay = min(2.0, 0.25 * (2**attempt))
+            if _is_10013_error(e):
+                delay = 0.5
+            else:
+                delay = min(1.0, 0.20 * (2**attempt))
             logger.warning(
                 "PostgreSQL bağlantı denemesi %s/%s başarısız (%s). %.2fs sonra tekrar.",
                 attempt + 1,
@@ -119,7 +231,7 @@ def db():
         conn.rollback()
         raise
     finally:
-        conn.close()
+        _release_conn(conn)
 
 
 def fetch_all(sql: str, params=()) -> list:
@@ -333,43 +445,217 @@ CREATE TABLE IF NOT EXISTS office_rentals (
 
 def init_schema():
     """Tüm tabloları Supabase'de oluştur."""
-    with db() as conn:
-        conn.cursor().execute(SCHEMA_SQL)
-        ensure_customers_notes()
-        ensure_customers_musteri_adi()
-        ensure_customers_musteri_no()
-        ensure_customers_hazir_ofis_oda()
-        ensure_customers_is_active()
-        ensure_customers_rent_columns()
-        ensure_customers_excel_columns()
-        ensure_customers_quick_edit_columns()
-        ensure_customers_durum()
-        ensure_customers_kapanis_tarihi()
-        ensure_customers_cari_columns()
-        ensure_customers_hierarchy_columns()
-        ensure_customer_financial_profile()
-        ensure_customers_balance_trigger()
-        ensure_cari_360_tables()
-        ensure_tahsilatlar_columns()
-        ensure_kargolar_durum()
-        ensure_faturalar_amount_columns()
-        ensure_musteri_kyc_columns()
-        ensure_musteri_kyc_arama_kolonlari()
-        ensure_musteri_kyc_hazir_ofis_oda_no()
-        ensure_hizmet_turleri_table()
-        ensure_duzenli_fatura_secenekleri_table()
-        ensure_office_rentals()
-        ensure_crm_leads()
-        ensure_personel_extra_columns()
-        ensure_personel_bilgi_dogum_tarihi()
-        ensure_personel_izin_onay_durumu()
-        ensure_personel_izin_saat_sayisi()
-        ensure_personel_ozluk()
-        ensure_personel_ozluk_izin_columns()
-        ensure_contracts_engine()
-        ensure_auto_invoice_tables()
-        ensure_user_ui_preferences_table()
+    # DDL kilitlerini kısa tut: SCHEMA_SQL ayrı transaction'da commit olsun.
+    # Aksi halde aşağıdaki ensure_* çağrıları (ayrı connection/transaction)
+    # aynı tabloları ALTER etmeye çalışırken lock-wait/deadlock'a girebilir.
+    execute(SCHEMA_SQL)
+    ensure_customers_notes()
+    ensure_customers_musteri_adi()
+    ensure_customers_musteri_no()
+    ensure_customers_hazir_ofis_oda()
+    ensure_customers_is_active()
+    ensure_customers_rent_columns()
+    ensure_customers_excel_columns()
+    ensure_customers_quick_edit_columns()
+    ensure_customers_durum()
+    ensure_customers_kapanis_tarihi()
+    ensure_customers_bizim_hesap()
+    ensure_grup2_etiketleri_table()
+    ensure_customers_grup2_secimleri()
+    ensure_grup2_bizim_hesap_into_array()
+    ensure_customers_cari_columns()
+    ensure_customers_hierarchy_columns()
+    ensure_group_report_indexes()
+    ensure_firma_ozet_report_indexes()
+    ensure_group_report_rpc()
+    ensure_customer_financial_profile()
+    ensure_customers_balance_trigger()
+    ensure_cari_360_tables()
+    ensure_tahsilatlar_columns()
+    ensure_kargolar_durum()
+    ensure_faturalar_amount_columns()
+    ensure_musteri_kyc_columns()
+    ensure_musteri_kyc_arama_kolonlari()
+    ensure_musteri_kyc_hazir_ofis_oda_no()
+    ensure_hizmet_turleri_table()
+    ensure_duzenli_fatura_secenekleri_table()
+    ensure_office_rentals()
+    ensure_crm_leads()
+    ensure_personel_extra_columns()
+    ensure_personel_bilgi_dogum_tarihi()
+    ensure_personel_izin_onay_durumu()
+    ensure_personel_izin_saat_sayisi()
+    ensure_personel_ozluk()
+    ensure_personel_ozluk_izin_columns()
+    ensure_contracts_engine()
+    ensure_auto_invoice_tables()
+    ensure_user_ui_preferences_table()
     print("✅ Supabase şema oluşturuldu.")
+
+
+def ensure_group_report_indexes():
+    """Grup raporu ve cari finans özet sorguları için temel indeksler."""
+    stmts = (
+        "CREATE INDEX IF NOT EXISTS idx_customers_parent_id ON customers (parent_id)",
+        "CREATE INDEX IF NOT EXISTS idx_faturalar_musteri_id ON faturalar (musteri_id)",
+        "CREATE INDEX IF NOT EXISTS idx_faturalar_musteri_id_tarih ON faturalar (musteri_id, fatura_tarihi DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_tahsilatlar_musteri_id ON tahsilatlar (musteri_id)",
+        "CREATE INDEX IF NOT EXISTS idx_tahsilatlar_musteri_id_tarih ON tahsilatlar (musteri_id, tahsilat_tarihi DESC)",
+        """
+        DO $$
+        BEGIN
+            IF to_regclass('public.cariler') IS NOT NULL THEN
+                EXECUTE 'CREATE INDEX IF NOT EXISTS idx_cariler_grup_id ON cariler (grup_id)';
+            END IF;
+        END$$;
+        """,
+        """
+        DO $$
+        BEGIN
+            IF to_regclass('public.cari_hareketler') IS NOT NULL THEN
+                EXECUTE 'CREATE INDEX IF NOT EXISTS idx_cari_hareketler_cari_id ON cari_hareketler (cari_id)';
+                EXECUTE 'CREATE INDEX IF NOT EXISTS idx_cari_hareketler_tarih ON cari_hareketler (tarih)';
+                EXECUTE 'CREATE INDEX IF NOT EXISTS idx_cari_hareketler_islem_turu ON cari_hareketler (islem_turu)';
+                EXECUTE 'CREATE INDEX IF NOT EXISTS idx_cari_hareketler_cari_tarih_tur ON cari_hareketler (cari_id, tarih DESC, islem_turu)';
+                EXECUTE 'CREATE INDEX IF NOT EXISTS idx_cari_hareketler_cari_islem_tarihi_tur ON cari_hareketler (cari_id, islem_tarihi DESC, islem_turu)';
+            END IF;
+        END$$;
+        """,
+    )
+    for s in stmts:
+        try:
+            execute(s)
+        except Exception as e:
+            print(f"group report index error: {e}")
+
+
+def ensure_firma_ozet_report_indexes():
+    """Tekil müşteri (firma_ozet) listesi süzgeçleri için hafif indeksler."""
+    stmts = (
+        "CREATE INDEX IF NOT EXISTS idx_customers_is_active ON customers (is_active)",
+        "CREATE INDEX IF NOT EXISTS idx_customers_bizim_hesap ON customers (bizim_hesap)",
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'customers' AND column_name = 'durum'
+            ) THEN
+                EXECUTE 'CREATE INDEX IF NOT EXISTS idx_customers_durum ON customers (durum)';
+            END IF;
+        END$$;
+        """,
+    )
+    for s in stmts:
+        try:
+            execute(s)
+        except Exception as e:
+            print(f"firma ozet index error: {e}")
+
+
+def ensure_group_report_rpc():
+    """Grup bazlı cari finans özetini DB katmanında toplar (N+1 ve Python döngülerini azaltır)."""
+    try:
+        execute(
+            """
+            CREATE OR REPLACE FUNCTION fn_group_financial_aggregate(
+                p_group_ids int[],
+                p_parent_uuids text[],
+                p_include_passive boolean DEFAULT false,
+                p_include_sozlesme_gun boolean DEFAULT true
+            )
+            RETURNS TABLE (
+                gid int,
+                child_count int,
+                mids int[],
+                borc_total numeric,
+                alacak_total numeric,
+                net_balance numeric,
+                sozlesme_gun int
+            )
+            LANGUAGE sql
+            AS $$
+            WITH parents AS (
+                SELECT t.gid, t.puid::uuid AS puid
+                FROM unnest(p_group_ids, p_parent_uuids) AS t(gid, puid)
+            ),
+            children AS (
+                SELECT p.gid, c.id AS mid
+                FROM parents p
+                JOIN customers c
+                  ON c.parent_id IS NOT NULL
+                 AND c.parent_id = p.puid
+                WHERE p_include_passive = TRUE
+                   OR (
+                        COALESCE(c.is_active, TRUE) = TRUE
+                        AND (
+                            c.durum IS NULL
+                            OR TRIM(COALESCE(c.durum, '')) = ''
+                            OR LOWER(TRIM(c.durum)) NOT IN (
+                                'pasif', 'terk', 'kapandi', 'kapandı', 'kapalı', 'kapali', 'kapanmış', 'kapanmis'
+                            )
+                        )
+                   )
+            ),
+            f_by_mid AS (
+                SELECT f.musteri_id AS mid,
+                       COALESCE(SUM(COALESCE(f.toplam, f.tutar, 0)), 0) AS borc
+                FROM faturalar f
+                JOIN children c ON c.mid = f.musteri_id
+                WHERE (
+                    f.notlar IS NULL OR NOT (
+                        regexp_replace(COALESCE(f.notlar, ''), '[İIıi]', 'I', 'g')
+                        ~* 'GIB[[:space:]]+DURUM[[:space:]]*:[[:space:]]+TASLAK'
+                    )
+                )
+                GROUP BY f.musteri_id
+            ),
+            t_by_mid AS (
+                SELECT t.musteri_id AS mid,
+                       COALESCE(SUM(t.tutar), 0) AS alacak
+                FROM tahsilatlar t
+                JOIN children c ON c.mid = t.musteri_id
+                GROUP BY t.musteri_id
+            ),
+            kyc_last AS (
+                SELECT DISTINCT ON (mk.musteri_id)
+                       mk.musteri_id,
+                       CASE
+                           WHEN mk.sozlesme_tarihi IS NULL THEN NULL
+                           WHEN BTRIM(mk.sozlesme_tarihi::text) = '' THEN NULL
+                           WHEN BTRIM(mk.sozlesme_tarihi::text) ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+                               THEN (SUBSTRING(BTRIM(mk.sozlesme_tarihi::text) FROM 1 FOR 10))::date
+                           WHEN BTRIM(mk.sozlesme_tarihi::text) ~ '^[0-9]{1,2}\\.[0-9]{1,2}\\.[0-9]{4}'
+                               THEN TO_DATE(REGEXP_REPLACE(BTRIM(mk.sozlesme_tarihi::text), ' .*$', ''), 'DD.MM.YYYY')
+                           WHEN BTRIM(mk.sozlesme_tarihi::text) ~ '^[0-9]{1,2}-[0-9]{1,2}-[0-9]{4}'
+                               THEN TO_DATE(REGEXP_REPLACE(BTRIM(mk.sozlesme_tarihi::text), ' .*$', ''), 'DD-MM-YYYY')
+                           ELSE NULL
+                       END AS soz_bas
+                FROM musteri_kyc mk
+                JOIN children c ON c.mid = mk.musteri_id
+                WHERE p_include_sozlesme_gun = TRUE
+                ORDER BY mk.musteri_id, mk.id DESC
+            )
+            SELECT c.gid,
+                   COUNT(*)::int AS child_count,
+                   ARRAY_AGG(c.mid)::int[] AS mids,
+                   COALESCE(SUM(COALESCE(fm.borc, 0)), 0) AS borc_total,
+                   COALESCE(SUM(COALESCE(tm.alacak, 0)), 0) AS alacak_total,
+                   COALESCE(SUM(COALESCE(fm.borc, 0)), 0) - COALESCE(SUM(COALESCE(tm.alacak, 0)), 0) AS net_balance,
+                   CASE
+                       WHEN p_include_sozlesme_gun THEN COALESCE(MAX(EXTRACT(DAY FROM kl.soz_bas)::int), 0)
+                       ELSE 0
+                   END AS sozlesme_gun
+            FROM children c
+            LEFT JOIN f_by_mid fm ON fm.mid = c.mid
+            LEFT JOIN t_by_mid tm ON tm.mid = c.mid
+            LEFT JOIN kyc_last kl ON kl.musteri_id = c.mid
+            GROUP BY c.gid
+            $$;
+            """
+        )
+    except Exception as e:
+        print(f"group report rpc error: {e}")
 
 
 def ensure_personel_extra_columns():
@@ -836,18 +1122,30 @@ def ensure_customers_musteri_adi():
 
 def ensure_customers_musteri_no():
     """Sabit müşteri sıra no: 1001'den başlar; eski kayıtlar id sırasıyla numaralanır; yeni kayıt sequence ile."""
+    def _exec_fast(sql: str, params=()):
+        """
+        Başlangıçta lock yüzünden uygulamayı kilitlememek için kısa timeout'lu çalıştır.
+        Şema iyileştirmesi başarısız olsa da uygulama ayağa kalkmalıdır.
+        """
+        with db() as conn:
+            cur = conn.cursor()
+            cur.execute("SET LOCAL lock_timeout = '1500ms'")
+            cur.execute("SET LOCAL statement_timeout = '8000ms'")
+            cur.execute(sql, params)
+            return cur.rowcount
+
     try:
-        execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS musteri_no INTEGER")
+        _exec_fast("ALTER TABLE customers ADD COLUMN IF NOT EXISTS musteri_no INTEGER")
     except Exception as e:
         print(f"customers.musteri_no: {e}")
     try:
-        execute(
+        _exec_fast(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_musteri_no ON customers (musteri_no)"
         )
     except Exception as e:
         print(f"idx_customers_musteri_no: {e}")
     try:
-        execute(
+        _exec_fast(
             """
             WITH mx AS (
                 SELECT COALESCE((SELECT MAX(musteri_no) FROM customers c2 WHERE c2.musteri_no IS NOT NULL), 1000) AS v
@@ -866,7 +1164,7 @@ def ensure_customers_musteri_no():
     except Exception as e:
         print(f"musteri_no backfill: {e}")
     try:
-        execute("CREATE SEQUENCE IF NOT EXISTS customers_musteri_no_seq")
+        _exec_fast("CREATE SEQUENCE IF NOT EXISTS customers_musteri_no_seq")
     except Exception as e:
         print(f"customers_musteri_no_seq: {e}")
     try:
@@ -874,7 +1172,7 @@ def ensure_customers_musteri_no():
             "SELECT COALESCE((SELECT MAX(musteri_no) FROM customers), 1000) AS mx"
         )
         mx = int(r["mx"]) if r and r.get("mx") is not None else 1000
-        execute("SELECT setval('customers_musteri_no_seq', %s, true)", (mx,))
+        _exec_fast("SELECT setval('customers_musteri_no_seq', %s, true)", (mx,))
     except Exception as e:
         print(f"musteri_no setval: {e}")
 
@@ -1281,6 +1579,103 @@ def ensure_customers_kapanis_tarihi():
         execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS kapanis_tarihi DATE")
     except Exception as e:
         print(f"customers.kapanis_tarihi: {e}")
+
+
+def ensure_customers_bizim_hesap():
+    """Bizim Hesap uygulamasında takip edilen cariler (işaretleme)."""
+    try:
+        execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS bizim_hesap BOOLEAN NOT NULL DEFAULT FALSE")
+    except Exception as e:
+        print(f"customers.bizim_hesap: {e}")
+
+
+def ensure_grup2_etiketleri_table():
+    """Müşteri kartı «Grup 2» çoklu etiketleri (slug + görünen ad; kullanıcı yeni ekleyebilir)."""
+    try:
+        execute(
+            """
+            CREATE TABLE IF NOT EXISTS grup2_etiketleri (
+                id SERIAL PRIMARY KEY,
+                slug TEXT NOT NULL UNIQUE,
+                etiket TEXT NOT NULL,
+                sira INTEGER NOT NULL DEFAULT 0,
+                aktif BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+            """
+        )
+    except Exception as e:
+        print(f"grup2_etiketleri CREATE: {e}")
+    try:
+        execute(
+            """
+            INSERT INTO grup2_etiketleri (slug, etiket, sira)
+            VALUES
+                ('bizim_hesap', 'Bizim Hesap', 1),
+                ('vergi_dairesi', 'Vergi Dairesi', 2),
+                ('vergi_dairesi_terk', 'Vergi Dairesi Terk', 3)
+            ON CONFLICT (slug) DO NOTHING
+            """
+        )
+    except Exception as e:
+        print(f"grup2_etiketleri seed: {e}")
+
+
+_customers_grup2_migration_done = False
+
+
+def ensure_customers_grup2_secimleri():
+    """customers.grup2_secimleri: slug listesi (TEXT[]). bizim_hesap ile geriye dönük uyum."""
+    global _customers_grup2_migration_done
+    ensure_customers_bizim_hesap()
+    try:
+        execute(
+            "ALTER TABLE customers ADD COLUMN IF NOT EXISTS grup2_secimleri TEXT[] NOT NULL DEFAULT ARRAY[]::text[]"
+        )
+    except Exception as e:
+        print(f"customers.grup2_secimleri: {e}")
+        return
+    if _customers_grup2_migration_done:
+        return
+    try:
+        execute(
+            """
+            UPDATE customers
+            SET grup2_secimleri = ARRAY['bizim_hesap']::text[]
+            WHERE COALESCE(bizim_hesap, FALSE) = TRUE
+              AND (
+                    grup2_secimleri IS NULL
+                    OR grup2_secimleri = ARRAY[]::text[]
+                    OR cardinality(grup2_secimleri) = 0
+                  )
+            """
+        )
+    except Exception as e:
+        print(f"customers.grup2_secimleri migrate from bizim_hesap: {e}")
+    _customers_grup2_migration_done = True
+
+
+_grup2_bh_array_sync_v1_done = False
+
+
+def ensure_grup2_bizim_hesap_into_array():
+    """customers.bizim_hesap=TRUE iken grup2_secimleri'nde bizim_hesap yoksa ekle (tek seferlik tamir)."""
+    global _grup2_bh_array_sync_v1_done
+    ensure_customers_grup2_secimleri()
+    if _grup2_bh_array_sync_v1_done:
+        return
+    try:
+        execute(
+            """
+            UPDATE customers
+            SET grup2_secimleri = grup2_secimleri || ARRAY['bizim_hesap']::text[]
+            WHERE COALESCE(bizim_hesap, FALSE) = TRUE
+              AND NOT ('bizim_hesap' = ANY(grup2_secimleri))
+            """
+        )
+    except Exception as e:
+        print(f"grup2 bizim_hesap dizi senkron: {e}")
+    _grup2_bh_array_sync_v1_done = True
 
 
 _customers_durum_migration_done = False

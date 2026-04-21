@@ -1226,8 +1226,8 @@ def api_akbank_tahsilat_commit():
                 """INSERT INTO tahsilatlar (
                     musteri_id, customer_id, fatura_id, tutar, odeme_turu,
                     aciklama, tahsilat_tarihi, makbuz_no, banka_referans_no
-                ) VALUES (%s, NULL, NULL, %s, %s, %s, %s::date, NULL, %s)""",
-                (mid, round(tutar, 2), "havale", aciklama, tah_str, ref),
+                ) VALUES (%s, %s, NULL, %s, %s, %s, %s::date, NULL, %s)""",
+                (mid, mid, round(tutar, 2), "havale", aciklama, tah_str, ref),
             )
             eklendi += 1
             if it.get("manuel_musteri") and aciklama:

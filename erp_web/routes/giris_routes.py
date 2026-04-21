@@ -23,6 +23,10 @@ from db import (
     ensure_musteri_kyc_columns,
     ensure_musteri_kyc_hazir_ofis_oda_no,
     ensure_musteri_kyc_kira_banka,
+    ensure_customers_bizim_hesap,
+    ensure_customers_grup2_secimleri,
+    ensure_grup2_etiketleri_table,
+    ensure_grup2_bizim_hesap_into_array,
     db as get_db,
     get_conn,
     sql_expr_fatura_not_gib_taslak,
@@ -51,6 +55,7 @@ from utils.musteri_arama import (
     musteri_arama_ilike_pattern_email_duz,
 )
 import json
+from pathlib import Path
 import psycopg2
 import secrets
 from decimal import Decimal
@@ -755,13 +760,32 @@ def api_potansiyel_pending():
     return jsonify(out)
 
 
+def _api_musteriler_row_json(row):
+    """Tarih ve boolean alanlarını /giris/api/musteriler JSON çıktısı için düzleştir."""
+    if not row:
+        return row
+    r = dict(row)
+    r["rent_start_date"] = _musteri_serialize_val(r.get("rent_start_date"))
+    r["kyc_sozlesme_tarihi"] = _musteri_serialize_val(r.get("kyc_sozlesme_tarihi"))
+    ia = r.get("is_active")
+    r["is_active"] = True if ia is None else bool(ia)
+    dr = r.get("durum")
+    r["durum"] = str(dr).strip() if dr is not None else ""
+    return r
+
+
 @bp.route('/api/musteriler')
 @giris_gerekli
 def api_musteriler():
     """Müşteri listesi - AJAX; ünvan, müşteri adı, vergi, adres, yetkili iletişim, KYC alanları."""
     arama = (request.args.get('q') or '').strip()
     base = (
-        "SELECT id, name, musteri_adi, musteri_no, tax_number, phone, email, office_code "
+        "SELECT id, name, musteri_adi, musteri_no, tax_number, phone, email, office_code, "
+        "NULLIF(TRIM(COALESCE(durum, '')), '') AS durum, "
+        "COALESCE(is_active, TRUE) AS is_active, "
+        "rent_start_date, "
+        "(SELECT mk.sozlesme_tarihi FROM musteri_kyc mk WHERE mk.musteri_id = customers.id "
+        "ORDER BY mk.id DESC NULLS LAST LIMIT 1) AS kyc_sozlesme_tarihi "
         "FROM customers "
     )
     if not arama:
@@ -786,7 +810,8 @@ def api_musteriler():
                 base + f"WHERE ({fb}) ORDER BY name LIMIT 1000",
                 (pat, pat, pat),
             )
-    return jsonify(rows or [])
+    out = [_api_musteriler_row_json(r) for r in (rows or [])]
+    return jsonify(out)
 
 
 def _musteri_serialize_val(v):
@@ -857,6 +882,189 @@ def _duzenli_fatura_kod_slug(etiket: str) -> str:
     s = re.sub(r"[^a-z0-9]+", "_", s)
     s = re.sub(r"_+", "_", s).strip("_")
     return (s or "ozel")[:80]
+
+
+def _parse_grup2_secimleri_from_request(data) -> list:
+    """Form / JSON: grup2_secimleri dizi veya JSON dizisi (string)."""
+    raw = data.get("grup2_secimleri")
+    if raw is None:
+        return []
+    if isinstance(raw, list):
+        return [str(x).strip() for x in raw if str(x).strip()]
+    if isinstance(raw, str):
+        s = raw.strip()
+        if not s:
+            return []
+        if s.startswith("["):
+            try:
+                j = json.loads(s)
+                if isinstance(j, list):
+                    return [str(x).strip() for x in j if str(x).strip()]
+            except Exception:
+                return []
+        return [s]
+    return []
+
+
+def _parse_pg_text_array_grup2(val):
+    """customers.grup2_secimleri: çoğu kurulumda list; bazen '{a,b}' metni gelebilir."""
+    if val is None:
+        return []
+    if isinstance(val, (list, tuple)):
+        return [str(x).strip() for x in val if str(x).strip()]
+    s = str(val).strip()
+    if not s or s == "{}":
+        return []
+    if s.startswith("{") and s.endswith("}"):
+        inner = s[1:-1].strip()
+        if not inner:
+            return []
+        return [p.strip().strip('"') for p in inner.split(",") if p.strip()]
+    return [s] if s else []
+
+
+def _filter_grup2_slugs_known(slugs: list) -> list:
+    if not slugs:
+        return []
+    ensure_grup2_etiketleri_table()
+    rows = fetch_all(
+        "SELECT slug FROM grup2_etiketleri WHERE COALESCE(aktif, TRUE) AND slug = ANY(%s)",
+        (list(slugs),),
+    )
+    allowed = {r["slug"] for r in (rows or [])}
+    return [s for s in slugs if s in allowed]
+
+
+_VD_LIST_CACHE = None
+
+
+def _tr_vergi_daireleri_list():
+    """data/tr_vergi_daireleri.json — form datalist için (tam resmi liste değil)."""
+    global _VD_LIST_CACHE
+    if _VD_LIST_CACHE is not None:
+        return _VD_LIST_CACHE
+    p = Path(__file__).resolve().parent.parent / "data" / "tr_vergi_daireleri.json"
+    try:
+        raw = p.read_text(encoding="utf-8")
+        j = json.loads(raw)
+        if isinstance(j, list):
+            seen = set()
+            out = []
+            for x in j:
+                s = str(x).strip()
+                if not s:
+                    continue
+                k = turkish_lower(s)
+                if k in seen:
+                    continue
+                seen.add(k)
+                out.append(s)
+            _VD_LIST_CACHE = sorted(out, key=turkish_lower)
+        else:
+            _VD_LIST_CACHE = ["Kavaklıdere", "Çankaya", "Ostim"]
+    except Exception:
+        _VD_LIST_CACHE = ["Kavaklıdere", "Çankaya", "Ostim"]
+    return _VD_LIST_CACHE
+
+
+@bp.route("/api/vergi-daireleri", methods=["GET"])
+@giris_gerekli
+def api_vergi_daireleri():
+    """Giriş formu vergi dairesi datalist / arama (aynı origin, DB gerektirmez)."""
+    q = (request.args.get("q") or "").strip()
+    rows = list(_tr_vergi_daireleri_list())
+    if q:
+        ql = turkish_lower(q)
+        rows = [x for x in rows if ql in turkish_lower(x)]
+    try:
+        lim = int(request.args.get("limit", 400))
+    except (TypeError, ValueError):
+        lim = 400
+    lim = max(1, min(lim, 600))
+    return jsonify({"ok": True, "liste": rows[:lim]})
+
+
+@bp.route("/api/grup2-etiketleri", methods=["GET", "POST"])
+@giris_gerekli
+def api_grup2_etiketleri():
+    """Grup 2 etiket listesi (GET) veya yeni etiket (POST)."""
+    _log = logging.getLogger(__name__)
+    try:
+        ensure_grup2_etiketleri_table()
+        if request.method == "GET":
+            ensure_grup2_bizim_hesap_into_array()
+            rows = fetch_all(
+                """
+                SELECT id, slug, etiket
+                FROM grup2_etiketleri
+                WHERE COALESCE(aktif, TRUE)
+                ORDER BY
+                    CASE slug
+                        WHEN 'bizim_hesap' THEN 0
+                        WHEN 'vergi_dairesi' THEN 1
+                        WHEN 'vergi_dairesi_terk' THEN 2
+                        ELSE 3
+                    END,
+                    sira NULLS LAST,
+                    etiket
+                """
+            )
+            return jsonify(
+                {
+                    "ok": True,
+                    "etiketler": [
+                        {"id": r["id"], "slug": r["slug"], "etiket": r["etiket"]} for r in (rows or [])
+                    ],
+                }
+            )
+        data = request.get_json(silent=True) or {}
+        etiket = (data.get("etiket") or "").strip()
+        if not etiket:
+            return jsonify({"ok": False, "mesaj": "Etiket adı boş olamaz."}), 400
+        if len(etiket) > 200:
+            return jsonify({"ok": False, "mesaj": "En fazla 200 karakter girebilirsiniz."}), 400
+        ex = fetch_one(
+            "SELECT id, slug, etiket FROM grup2_etiketleri WHERE lower(trim(etiket)) = lower(trim(%s)) LIMIT 1",
+            (etiket,),
+        )
+        if ex:
+            return jsonify(
+                {
+                    "ok": True,
+                    "slug": ex["slug"],
+                    "etiket": ex["etiket"],
+                    "mevcut": True,
+                }
+            )
+        rows_all = fetch_all("SELECT slug FROM grup2_etiketleri")
+        slug_set = {r["slug"] for r in (rows_all or [])}
+        base = _duzenli_fatura_kod_slug(etiket)
+        slug_out = None
+        for n in range(0, 200):
+            cand = (base if n == 0 else f"{base}_{n}")[:80]
+            if cand in slug_set:
+                continue
+            mx = fetch_one("SELECT COALESCE(MAX(sira), 0) + 1 AS n FROM grup2_etiketleri")
+            next_sira = int(mx["n"] or 1) if mx else 1
+            try:
+                execute(
+                    "INSERT INTO grup2_etiketleri (slug, etiket, sira) VALUES (%s, %s, %s)",
+                    (cand, etiket, next_sira),
+                )
+                slug_out = cand
+                break
+            except Exception as ins_err:
+                err_l = str(ins_err).lower()
+                if "unique" in err_l or "duplicate" in err_l:
+                    slug_set.add(cand)
+                    continue
+                raise
+        if not slug_out:
+            return jsonify({"ok": False, "mesaj": "Slug üretilemedi."}), 400
+        return jsonify({"ok": True, "slug": slug_out, "etiket": etiket})
+    except Exception as e:
+        _log.exception("api_grup2_etiketleri %s", request.method)
+        return jsonify({"ok": False, "mesaj": str(e)}), 500
 
 
 def _duzenli_fatura_next_sira() -> int:
@@ -987,6 +1195,10 @@ def api_musteri_komsu():
 @giris_gerekli
 def api_musteri_detay(mid):
     """Tek müşteri tüm alanları - customers + son musteri_kyc birleşik; forma doldurmak için."""
+    ensure_customers_bizim_hesap()
+    ensure_customers_grup2_secimleri()
+    ensure_grup2_etiketleri_table()
+    ensure_grup2_bizim_hesap_into_array()
     row = fetch_one("SELECT * FROM customers WHERE id = %s", (mid,))
     if not row:
         return jsonify({"ok": False, "mesaj": "Müşteri bulunamadı."}), 404
@@ -996,6 +1208,8 @@ def api_musteri_detay(mid):
     )
     out = {}
     for k, v in row.items():
+        if k == "grup2_secimleri":
+            continue
         out[k] = _musteri_serialize_val(v)
     out["is_group"] = bool(row.get("is_group"))
     out["parent_cari_id"] = ""
@@ -1118,6 +1332,16 @@ def api_musteri_detay(mid):
 
     if not out.get("hazir_ofis_oda_no") and row.get("hazir_ofis_oda_no") is not None:
         out["hazir_ofis_oda_no"] = _musteri_serialize_val(row.get("hazir_ofis_oda_no"))
+
+    g2_raw = row.get("grup2_secimleri")
+    g2_list = _parse_pg_text_array_grup2(g2_raw)
+    if bool(row.get("bizim_hesap")) and "bizim_hesap" not in g2_list:
+        g2_list = ["bizim_hesap"] + g2_list
+    if not g2_list and bool(row.get("bizim_hesap")):
+        g2_list = ["bizim_hesap"]
+    g2_list = list(dict.fromkeys(g2_list))
+    out["grup2_secimleri"] = g2_list
+    out["bizim_hesap"] = "bizim_hesap" in g2_list
 
     return jsonify({"ok": True, "musteri": out})
 
@@ -1324,6 +1548,9 @@ def kaydet():
     """Yeni müşteri kaydı veya güncelleme"""
     try:
         ensure_customers_musteri_no()
+        ensure_customers_bizim_hesap()
+        ensure_customers_grup2_secimleri()
+        ensure_grup2_etiketleri_table()
         data = request.get_json()
         vergi_err, tax_norm = _vergi_no_normalize_veya_hata(data.get("tax_number"), data.get("yetkili_tc"))
         if vergi_err:
@@ -1331,6 +1558,16 @@ def kaydet():
 
         musteri_id = data.get('id')
         dr, kap = _normalize_musteri_durum_kapanis(data)
+        bh_raw = data.get("bizim_hesap")
+        if isinstance(bh_raw, str):
+            bizim_hesap_legacy = bh_raw.strip().lower() in ("1", "true", "yes", "evet", "on")
+        else:
+            bizim_hesap_legacy = bool(bh_raw)
+        g2_list = _parse_grup2_secimleri_from_request(data)
+        if not g2_list and bizim_hesap_legacy:
+            g2_list = ["bizim_hesap"]
+        g2_list = list(dict.fromkeys(_filter_grup2_slugs_known(g2_list)))
+        bizim_hesap = "bizim_hesap" in g2_list
 
         if musteri_id:
             # Güncelleme
@@ -1345,7 +1582,9 @@ def kaydet():
                     ev_adres = %s,
                     notes = %s,
                     durum = %s,
-                    kapanis_tarihi = %s
+                    kapanis_tarihi = %s,
+                    bizim_hesap = %s,
+                    grup2_secimleri = %s
                 WHERE id = %s
             """, (
                 data.get('name'),
@@ -1358,6 +1597,8 @@ def kaydet():
                 data.get('notes'),
                 dr,
                 kap,
+                bizim_hesap,
+                g2_list,
                 musteri_id
             ))
             
@@ -1367,9 +1608,9 @@ def kaydet():
             result = execute_returning("""
                 INSERT INTO customers (
                     name, musteri_adi, tax_number, phone, email, address,
-                    ev_adres, notes, durum, kapanis_tarihi, musteri_no, created_at
+                    ev_adres, notes, durum, kapanis_tarihi, bizim_hesap, grup2_secimleri, musteri_no, created_at
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, nextval('customers_musteri_no_seq'), NOW())
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, nextval('customers_musteri_no_seq'), NOW())
                 RETURNING id, musteri_no
             """, (
                 data.get('name'),
@@ -1382,6 +1623,8 @@ def kaydet():
                 data.get('notes'),
                 dr,
                 kap,
+                bizim_hesap,
+                g2_list,
             ))
             mid = result["id"] if result else None
             mno = result.get("musteri_no") if result else None
@@ -2737,6 +2980,192 @@ def firma_ozet_aylik_grid_hucre_kdv_dahil(
     return 0.0
 
 
+def _firma_ozet_normalize_tahsil_ay_key(k: str) -> str | None:
+    """Tahsilat ay anahtarını grid ile uyumlu YYYY-M biçimine indirger."""
+    s = str(k or "").strip()
+    if not s:
+        return None
+    parts = s.split("-")
+    if len(parts) < 2:
+        return None
+    try:
+        y = int(parts[0])
+        m = int(parts[1])
+    except (TypeError, ValueError):
+        return None
+    if m < 1 or m > 12:
+        return None
+    return f"{y}-{m}"
+
+
+def _aylik_tahsil_edilen_aylar_set_normalized(musteri_id: int) -> set[str]:
+    raw = _aylik_tahsil_edilen_aylar_set(musteri_id)
+    out: set[str] = set()
+    for k in raw:
+        nk = _firma_ozet_normalize_tahsil_ay_key(k)
+        if nk:
+            out.add(nk)
+    return out
+
+
+def _aylik_tahsil_edilen_aylar_set_normalized_batch(musteri_ids: list[int]) -> dict[int, set[str]]:
+    """Birden çok müşteri için tahsil edilen ay setini tek sorguda döndürür."""
+    mids: list[int] = []
+    seen = set()
+    for x in musteri_ids or []:
+        try:
+            i = int(x)
+        except (TypeError, ValueError):
+            continue
+        if i <= 0 or i in seen:
+            continue
+        seen.add(i)
+        mids.append(i)
+    if not mids:
+        return {}
+    rows = fetch_all(
+        """
+        SELECT
+            COALESCE(t.musteri_id, t.customer_id) AS mid,
+            TO_CHAR(
+                COALESCE(
+                    DATE_TRUNC('month', f.fatura_tarihi::date),
+                    DATE_TRUNC('month', NULLIF(substring(COALESCE(t.aciklama, '') from '\\|AYLIK_TAH\\|([0-9]{4}-[0-9]{2}-[0-9]{2})\\|'), '')::date),
+                    DATE_TRUNC('month', t.tahsilat_tarihi::date)
+                ),
+                'YYYY-FMMM'
+            ) AS ay_key
+        FROM tahsilatlar t
+        LEFT JOIN faturalar f ON f.id = t.fatura_id
+        WHERE COALESCE(t.tutar, 0) > 0
+          AND COALESCE(t.musteri_id, t.customer_id) = ANY(%s)
+        GROUP BY 1, 2
+        """,
+        (mids,),
+    ) or []
+    out: dict[int, set[str]] = {m: set() for m in mids}
+    for r in rows:
+        try:
+            mid = int(r.get("mid") or 0)
+        except (TypeError, ValueError):
+            continue
+        if mid <= 0:
+            continue
+        nk = _firma_ozet_normalize_tahsil_ay_key(r.get("ay_key"))
+        if nk:
+            out.setdefault(mid, set()).add(nk)
+    return out
+
+
+def firma_ozet_toplam_borc_ve_geciken_ay(
+    musteri_id: int,
+    ref_y: int,
+    ref_m: int,
+    tufe_map: dict,
+    kyc_for_grid: dict,
+    manual_reel_by_year: dict,
+    tahsil_n_override: set[str] | None = None,
+    skip_disk_cache_for_months: bool = True,
+) -> tuple[float, int]:
+    """
+    Sözleşme başlangıcından referans ayına kadar (dahil), tahsilatı görülmeyen her ay için
+    aylık grid ile aynı KDV dahil tutarları toplar; geciken ay = bu koşulda pozitif tutarlı
+    ay adedi (toplam borç ile aynı döngü, tutarların birebir toplamı).
+
+    Not: «Yalnız son ödemeden sonraki borç» değil; ara aylarda ödeme olsa bile öncesi ödenmemiş
+    aylar da dahil edilir — böylece Ocak+Şubat+Mart+Nisan gibi üst üste kırmızı ayların toplamı
+    raporla örtüşür.
+    """
+    try:
+        mid = int(musteri_id)
+        ry = int(ref_y)
+        rm = int(ref_m)
+    except (TypeError, ValueError):
+        return 0.0, 0
+    if mid <= 0 or rm < 1 or rm > 12:
+        return 0.0, 0
+    kyc = dict(kyc_for_grid or {})
+    bas_soz = _aylik_grid_coerce_date(kyc.get("sozlesme_tarihi"))
+    if not bas_soz:
+        return 0.0, 0
+    bas_first = date(bas_soz.year, bas_soz.month, 1)
+    ref_first = date(ry, rm, 1)
+    if ref_first < bas_first:
+        return 0.0, 0
+    tahsil_n = tahsil_n_override if isinstance(tahsil_n_override, set) else _aylik_tahsil_edilen_aylar_set_normalized(mid)
+    reel = manual_reel_by_year if isinstance(manual_reel_by_year, dict) else {}
+    artis_d = _aylik_grid_coerce_date(kyc.get("kira_artis_tarihi")) or bas_soz
+    artis_month = int(artis_d.month)
+    artis_day = int(artis_d.day)
+    bit_soz = _aylik_grid_coerce_date(kyc.get("sozlesme_bitis")) or bas_soz
+    bugun_y = date.today().year
+    y_end = max(ref_first.year, bugun_y, bas_soz.year, bit_soz.year)
+    try:
+        reel_map = _reel_ay_key_tutar_map_musteri(
+            mid,
+            bas_soz,
+            artis_month,
+            artis_day,
+            tufe_map,
+            y_end,
+            manual_by_year=reel,
+            kyc_for_yilmap=kyc,
+        )
+    except Exception:
+        reel_map = {}
+    total = 0.0
+    n_ay = 0
+    cur = bas_first
+    while cur <= ref_first:
+        ay_key = f"{cur.year}-{cur.month}"
+        if ay_key not in tahsil_n:
+            v = 0.0
+            if ay_key in reel_map:
+                try:
+                    rv = float(reel_map.get(ay_key) or 0)
+                    if math.isfinite(rv) and rv > 0:
+                        v = rv
+                except (TypeError, ValueError):
+                    v = 0.0
+            if not v:
+                v = firma_ozet_aylik_grid_hucre_kdv_dahil(
+                    mid,
+                    cur.year,
+                    cur.month,
+                    tufe_map,
+                    kyc,
+                    None,
+                    reel,
+                    skip_disk_cache=bool(skip_disk_cache_for_months),
+                    # reel_map yukarıda bir kez üretildi; ay bazında tekrar üretme.
+                    skip_reel_overlay=True,
+                )
+            if isinstance(v, (int, float)) and math.isfinite(float(v)) and float(v) > 0:
+                total += float(v)
+                n_ay += 1
+        cur = _add_months(cur, 1)
+    return round(total, 2), int(n_ay)
+
+
+def firma_ozet_toplam_borc_kdv_dahil(
+    musteri_id: int,
+    ref_y: int,
+    ref_m: int,
+    tufe_map: dict,
+    kyc_for_grid: dict,
+    manual_reel_by_year: dict,
+) -> float:
+    t, _ = firma_ozet_toplam_borc_ve_geciken_ay(
+        musteri_id,
+        ref_y,
+        ref_m,
+        tufe_map,
+        kyc_for_grid,
+        manual_reel_by_year,
+    )
+    return t
+
+
 # Firma özeti / fatura raporu ile aynı: giriş tarihi (KYC söz. / rent_start / created_at)
 _FIRMA_OZET_GIRIS_TARIHI_SQL = """
 COALESCE(
@@ -2913,6 +3342,169 @@ def musteri_aylik_grid_hucre_kdv_dahil_takvim_ayi_batch(musteri_ids: list, ref: 
         except Exception:
             out[mid] = 0.0
     return out
+
+
+def musteri_firma_ozet_grid_ozet_batch(musteri_ids: list, ref: date | None = None) -> dict[int, dict]:
+    """
+    Grup raporları için tek geçişte:
+    - borc_month: referans ay KDV dahil aylık grid hücresi
+    - geciken_ay: tahsilsiz pozitif ay adedi
+    - sozlesme_gun: sözleşme başlangıç günü (1-31)
+    """
+    d = ref or date.today()
+    ref_y, ref_m = int(d.year), int(d.month)
+    if ref_m < 1 or ref_m > 12:
+        return {}
+
+    mids: list[int] = []
+    seen = set()
+    for x in musteri_ids or []:
+        try:
+            i = int(x)
+        except (TypeError, ValueError):
+            continue
+        if i <= 0 or i in seen:
+            continue
+        seen.add(i)
+        mids.append(i)
+    if not mids:
+        return {}
+    if not hasattr(musteri_firma_ozet_grid_ozet_batch, "_cache"):
+        musteri_firma_ozet_grid_ozet_batch._cache = {}
+    cache = musteri_firma_ozet_grid_ozet_batch._cache
+    cache_ttl = 120.0
+    now_ts = time.time()
+    cached_out: dict[int, dict] = {}
+    need_mids: list[int] = []
+    for mid in mids:
+        ckey = (int(mid), ref_y, ref_m)
+        cval = cache.get(ckey)
+        if cval and (now_ts - float(cval[0])) <= cache_ttl:
+            cached_out[mid] = dict(cval[1] or {})
+        else:
+            need_mids.append(mid)
+    if not need_mids:
+        return cached_out
+
+    _ensure_musteri_reel_donem_tutar_table()
+    tufe_map = _tufe_map_by_year_month()
+    base_sql = _musteri_aylik_grid_customer_kyc_select_sql()
+    rows = fetch_all(base_sql + " WHERE c.id = ANY(%s)", (need_mids,)) or []
+    row_by_id: dict[int, dict] = {}
+    for r in rows:
+        try:
+            rid = int(r.get("id") or 0)
+        except (TypeError, ValueError):
+            continue
+        if rid > 0:
+            row_by_id[rid] = r
+
+    reel_by_mid: dict[int, dict[int, float]] = {}
+    rrows = (
+        fetch_all(
+            "SELECT musteri_id, donem_yil, tutar_kdv_dahil FROM musteri_reel_donem_tutar WHERE musteri_id = ANY(%s)",
+            (need_mids,),
+        )
+        or []
+    )
+    for rr in rrows:
+        try:
+            mid_r = int(rr.get("musteri_id") or 0)
+            yil = int(rr.get("donem_yil") or 0)
+            tut = float(rr.get("tutar_kdv_dahil") or 0)
+        except (TypeError, ValueError):
+            continue
+        if mid_r <= 0:
+            continue
+        reel_by_mid.setdefault(mid_r, {})[yil] = tut
+
+    tahsil_by_mid = _aylik_tahsil_edilen_aylar_set_normalized_batch(need_mids)
+    out: dict[int, dict] = {}
+
+    def _sozlesme_gun_from_grid_row(row: dict | None) -> int:
+        if not row:
+            return 0
+        raw_soz_bas = row.get("kyc_soz_bas")
+        giris_sql = row.get("giris_raw")
+        bas_parsed = _aylik_grid_coerce_date(raw_soz_bas)
+        soz_bas_eff = bas_parsed or giris_sql or raw_soz_bas
+        if isinstance(soz_bas_eff, datetime):
+            giris_iso = soz_bas_eff.date().isoformat()[:10]
+        elif isinstance(soz_bas_eff, date):
+            giris_iso = soz_bas_eff.isoformat()[:10]
+        else:
+            gr = giris_sql
+            giris_iso = str(gr)[:10] if gr is not None and str(gr).strip() else ""
+        if not giris_iso:
+            return 0
+        try:
+            _gds = str(giris_iso).strip()[:10]
+            if len(_gds) == 10:
+                gd = int(date.fromisoformat(_gds).day)
+                return gd if 1 <= gd <= 31 else 0
+        except (ValueError, TypeError):
+            pass
+        return 0
+
+    for mid in need_mids:
+        row = row_by_id.get(mid)
+        kyc_for_grid = _firma_ozet_kyc_dict_from_grid_sql_row(row) if row else None
+        gun = _sozlesme_gun_from_grid_row(row)
+        if not kyc_for_grid:
+            out[mid] = {"borc_month": 0.0, "geciken_ay": 0, "sozlesme_gun": gun}
+            continue
+        reel_manual = dict(reel_by_mid.get(mid) or {})
+        try:
+            borc_month = float(
+                firma_ozet_aylik_grid_hucre_kdv_dahil(
+                    mid,
+                    ref_y,
+                    ref_m,
+                    tufe_map,
+                    kyc_for_grid,
+                    None,
+                    reel_manual,
+                    skip_disk_cache=False,
+                    skip_reel_overlay=False,
+                )
+            )
+            tborc, gec = firma_ozet_toplam_borc_ve_geciken_ay(
+                mid,
+                ref_y,
+                ref_m,
+                tufe_map,
+                kyc_for_grid,
+                reel_manual,
+                tahsil_n_override=tahsil_by_mid.get(mid, set()),
+                skip_disk_cache_for_months=False,
+            )
+            out[mid] = {
+                "borc_month": round(borc_month, 2) if math.isfinite(borc_month) else 0.0,
+                "toplam_borc": round(float(tborc or 0.0), 2),
+                "geciken_ay": int(gec or 0),
+                "sozlesme_gun": gun,
+            }
+        except Exception:
+            out[mid] = {"borc_month": 0.0, "toplam_borc": 0.0, "geciken_ay": 0, "sozlesme_gun": gun}
+        cache[(int(mid), ref_y, ref_m)] = (now_ts, dict(out[mid]))
+    out.update(cached_out)
+    return out
+
+
+def musteri_firma_ozet_geciken_ay_ve_sozlesme_gun_batch(musteri_ids: list, ref: date | None = None) -> dict[int, dict]:
+    """
+    Firma özeti / fatura raporu ile aynı kaynak: geciken_ay (grid üzerinden pozitif tahsilsiz ay adedi)
+    ve sözleşme başlangıç günü (1–31). Grup konsolide satırında alt cariler arası üst sınır (max) için kullanılır.
+    Dönüş: { musteri_id: {"geciken_ay": int, "sozlesme_gun": int}, ... }
+    """
+    all_map = musteri_firma_ozet_grid_ozet_batch(musteri_ids, ref)
+    return {
+        int(mid): {
+            "geciken_ay": int((v or {}).get("geciken_ay") or 0),
+            "sozlesme_gun": int((v or {}).get("sozlesme_gun") or 0),
+        }
+        for mid, v in (all_map or {}).items()
+    }
 
 
 def musteri_aylik_grid_hucre_kdv_dahil_takvim_ayi(musteri_id: int, ref: date | None = None) -> float:

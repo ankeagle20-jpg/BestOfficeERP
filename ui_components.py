@@ -4,6 +4,7 @@ from datetime import date
 from typing import Optional, Dict, List
 
 from database import (
+    fetch_all,
     get_all_customers_with_rent_progression,
     get_all_products,
     get_all_invoices,
@@ -1084,7 +1085,9 @@ class InvoiceTab(ttk.Frame):
 
     def _load_customer_list(self) -> None:
         """Müşteri listesini combobox'a yükle."""
-        customers = get_all_customers_with_rent_progression()
+        customers = fetch_all(
+            "SELECT id, name, tax_number FROM customers ORDER BY name ASC"
+        )
         self._customer_map: Dict[str, int] = {}
         names = []
         for c in customers:
