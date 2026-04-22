@@ -266,7 +266,7 @@
             <div>
                 <div class="form-row">
                     <label>Müşteri <span style="color:#ffb74d;">*</span></label>
-                    <input type="text" id="musteri-ara" placeholder="Müşteri ara, seçin (ünvan veya kısa ad)…" autocomplete="off" value="{% if secili_musteri %}{{ secili_musteri.get('display_label') or secili_musteri.name or '' }}{% endif %}">
+                    <input type="text" id="musteri-ara" placeholder="Müşteri ara, seçin (ünvan veya kısa ad)…" autocomplete="off" value="{% if secili_musteri %}{{ (secili_musteri.name or secili_musteri.get('display_label') or '') | e }}{% endif %}">
                     <input type="hidden" id="musteri-id" value="{{ secili_musteri.id if secili_musteri else '' }}">
                 </div>
                 <div id="musteri-sonuclar" style="max-height:180px;overflow-y:auto;margin-bottom:6px;border-radius:4px;border:1px solid #1e3a50;background:#0f2537;display:none;margin-left:110px;max-width:calc(100% - 110px);"></div>
@@ -680,12 +680,20 @@
 
         let musteriTimer = null;
         function escHtmlM(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
-        function musteriListeEtiket(r) {
+        /** Fatura / PDF müşteri satırı: şirket ünvanı (customers.name); ünvan yoksa müşteri adı. */
+        function faturaMusteriUnvan(r) {
             if (!r) return '';
-            if (r.display_label) return String(r.display_label).trim();
-            const n = (r.name || '').trim();
-            const ma = (r.musteri_adi || '').trim();
-            return ma ? (n + ' · ' + ma) : n;
+            const n = String(r.name || '').trim();
+            if (n) return n;
+            return String(r.musteri_adi || '').trim();
+        }
+        /** Arama listesinde ayırt etmek için: ünvan · müşteri adı (fatura alanına yazılan yalnızca ünvan). */
+        function musteriListeGorunur(r) {
+            if (!r) return '';
+            const u = faturaMusteriUnvan(r);
+            const ma = String(r.musteri_adi || '').trim();
+            if (ma && ma.toLowerCase() !== u.toLowerCase()) return u + ' · ' + ma;
+            return u;
         }
         async function musteriListeGetir(q, showAllOnEmpty) {
             const query = (q || '').trim();
@@ -701,15 +709,21 @@
                         musteriSonuclar.innerHTML = '<div style="padding:6px 10px;font-size:12px;color:#78909c;">Müşteri bulunamadı.</div>';
                     } else {
                         musteriSonuclar.innerHTML = rows.map(function(r){
-                            const lbl = musteriListeEtiket(r);
-                            return '<div class="musteri-opt" data-id="' + r.id + '">' + escHtmlM(lbl) + '</div>';
+                            const gor = musteriListeGorunur(r);
+                            const unvan = faturaMusteriUnvan(r);
+                            return '<div class="musteri-opt" data-id="' + r.id + '" data-unvan="' + encodeURIComponent(unvan) + '">' + escHtmlM(gor) + '</div>';
                         }).join('');
                     }
                 musteriSonuclar.style.display = 'block';
                 musteriSonuclar.querySelectorAll('div[data-id]').forEach(function(div){
                         div.addEventListener('click', async function() {
                         const id = this.getAttribute('data-id');
-                        const ad = this.textContent || '';
+                        var ad = '';
+                        var uv = this.getAttribute('data-unvan');
+                        if (uv) {
+                            try { ad = decodeURIComponent(uv); } catch (eU) { ad = ''; }
+                        }
+                        if (!ad) ad = (this.textContent || '').trim();
                         musteriIdEl.value = id;
                         musteriAra.value = ad;
                         musteriSonuclar.style.display = 'none';
@@ -790,7 +804,7 @@
         // Giriş sayfasından ?musteri_id= ile açıldıysa seçili firma bilgilerini doldur
         if (SECILI_MUSTERI) {
             musteriIdEl.value = SECILI_MUSTERI.id;
-            musteriAra.value = musteriListeEtiket(SECILI_MUSTERI);
+            musteriAra.value = faturaMusteriUnvan(SECILI_MUSTERI);
             const adrEl = document.getElementById('musteri-adres');
             const vdEl = document.getElementById('musteri-vergi-dairesi');
             const vnEl = document.getElementById('musteri-vergi-no');

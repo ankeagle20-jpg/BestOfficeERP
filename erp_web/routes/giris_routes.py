@@ -2648,17 +2648,9 @@ def _reel_donem_effective_yillik_for_ekstre(manual_by_year: dict, bas_soz: date,
             except (TypeError, ValueError):
                 mv = None
             if mv is not None and math.isfinite(mv) and mv >= 0:
-                prev_m = out.get(y - 1) if y > y_start else None
-                if (
-                    prev_m is not None
-                    and math.isfinite(float(prev_m))
-                    and float(prev_m) > 0
-                    and float(mv) < float(prev_m) * 0.995
-                ):
-                    pass
-                else:
-                    out[y] = round(mv, 2)
-                    continue
+                # Elle girilen dönem tutarı her zaman kullanılır (JS sozlesmelerReelDonemEffectiveYillik ile aynı).
+                out[y] = round(mv, 2)
+                continue
         prev = out.get(y - 1)
         if y > y_start and prev and prev > 0 and math.isfinite(prev):
             prev_f = float(prev)

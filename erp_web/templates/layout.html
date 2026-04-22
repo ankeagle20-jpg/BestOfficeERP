@@ -220,9 +220,13 @@
     </style>
     {% block extra_head %}{% endblock %}
 </head>
-<body class="{% if embed|default(false) %}layout-embed{% endif %}">
+{# Üst menü: şablona embed= verilebilir veya ?embed=1 (iframe / gömülü sayfa) — ikisi birleştirilir #}
+{% set _layout_req_embed = (request.args.get('embed') or '').lower() in ('1', 'true', 'yes', 'on') %}
+{% set _layout_tpl_embed = embed|default(false) %}
+{% set _layout_hide_chrome = _layout_req_embed or _layout_tpl_embed %}
+<body class="{% if _layout_hide_chrome %}layout-embed{% endif %}">
     <!-- Header -->
-    {% if not embed|default(false) %}
+    {% if not _layout_hide_chrome %}
     <header class="header">
         <div class="header-top">
             <div class="logo" onclick="window.location.href='/'">
@@ -322,7 +326,7 @@
     };
     </script>
     <script src="{{ url_for('static', filename='js/erp-tarih-hizli.js') }}"></script>
-    {% if not embed|default(false) and current_user.is_authenticated %}
+    {% if not _layout_hide_chrome and current_user.is_authenticated %}
     <script src="{{ url_for('static', filename='js/randevu-hatirlatma.js') }}"></script>
     {% endif %}
     {% block extra_js %}{% endblock %}

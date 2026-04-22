@@ -621,6 +621,7 @@ def _dedupe_musteri_liste_by_identity(musteriler):
 @bp.route("/list")
 @giris_gerekli
 def list_full():
+    embed = str(request.args.get("embed") or "").lower() in ("1", "true", "yes", "on")
     try:
         ensure_customers_quick_edit_columns()
         ensure_customers_kapanis_tarihi()
@@ -646,6 +647,7 @@ def list_full():
         limit=data.get("limit") or 50,
         toplam_musteri=toplam_musteri,
         toplam_sayfa=toplam_sayfa or 1,
+        embed=embed,
     )
 
 

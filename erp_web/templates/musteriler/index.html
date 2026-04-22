@@ -1,6 +1,23 @@
 {% extends "layout.html" %}
 {% block page_title %}Müşteri Listesi{% endblock %}
 {% block content %}
+{# Giriş > Müşteriler 2 iframe: ?embed=1 ile layout üst menüsü gizlenir; sayfalama linklerinde korunur. #}
+{% macro ml_list_href_page(sayfa, limit) -%}
+{%- set tu = ('1' if tum_yillar_odenmis else none) -%}
+{%- if embed|default(false) -%}
+{{- url_for('musteriler.list_full', sayfa=sayfa, limit=limit, q=arama or none, tum_yillar_odenmis=tu, embed=1) -}}
+{%- else -%}
+{{- url_for('musteriler.list_full', sayfa=sayfa, limit=limit, q=arama or none, tum_yillar_odenmis=tu) -}}
+{%- endif -%}
+{%- endmacro %}
+{% macro ml_list_href_unpaged() -%}
+{%- set tu = ('1' if tum_yillar_odenmis else none) -%}
+{%- if embed|default(false) -%}
+{{- url_for('musteriler.list_full', q=arama or none, tum_yillar_odenmis=tu, embed=1) -}}
+{%- else -%}
+{{- url_for('musteriler.list_full', q=arama or none, tum_yillar_odenmis=tu) -}}
+{%- endif -%}
+{%- endmacro %}
 {% set ml_ofis_list = musteriler|map(attribute='office_code')|select|unique|list|sort %}
 {# Hizmet türü + ofis tek select; ofis değerleri ofis|KOD (KOD içinde : olabilir) #}
 {% macro ml_select_hizmet_ofis(first_label) %}
@@ -445,17 +462,17 @@ window.setActiveTab = function(tabId) {
     {% if paginate %}
     <div class="ml-pager" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
       {% if sayfa > 1 %}
-      <a class="ml-btn back" href="{{ url_for('musteriler.list_full', sayfa=sayfa-1, limit=limit, q=arama or None, tum_yillar_odenmis=('1' if tum_yillar_odenmis else None)) }}"><i class="fa fa-chevron-left"></i> Önceki</a>
+      <a class="ml-btn back" href="{{ ml_list_href_page(sayfa-1, limit) }}"><i class="fa fa-chevron-left"></i> Önceki</a>
       {% endif %}
       <span style="color:#5a7a9a;font-size:11px">Sayfa <strong style="color:#e8f1ff">{{ sayfa }}</strong> / <strong style="color:#e8f1ff">{{ toplam_sayfa }}</strong> · <strong style="color:#e8f1ff">{{ limit }}</strong> kayıt/sayfa</span>
       {% if sayfa < toplam_sayfa %}
-      <a class="ml-btn back" href="{{ url_for('musteriler.list_full', sayfa=sayfa+1, limit=limit, q=arama or None, tum_yillar_odenmis=('1' if tum_yillar_odenmis else None)) }}">Sonraki <i class="fa fa-chevron-right"></i></a>
+      <a class="ml-btn back" href="{{ ml_list_href_page(sayfa+1, limit) }}">Sonraki <i class="fa fa-chevron-right"></i></a>
       {% endif %}
-      <a class="ml-btn back" href="{{ url_for('musteriler.list_full', q=arama or None, tum_yillar_odenmis=('1' if tum_yillar_odenmis else None)) }}" title="Tüm satırlar; çok müşteride yükleme uzun sürebilir">Tümünü yükle</a>
+      <a class="ml-btn back" href="{{ ml_list_href_unpaged() }}" title="Tüm satırlar; çok müşteride yükleme uzun sürebilir">Tümünü yükle</a>
     </div>
     {% else %}
     <div class="ml-pager" style="display:flex;align-items:center;gap:8px">
-      <a class="ml-btn back" href="{{ url_for('musteriler.list_full', sayfa=1, limit=50, q=arama or None, tum_yillar_odenmis=('1' if tum_yillar_odenmis else None)) }}" title="Sunucu sayfalama — hızlı liste">Sayfalı görünüm (50)</a>
+      <a class="ml-btn back" href="{{ ml_list_href_page(1, 50) }}" title="Sunucu sayfalama — hızlı liste">Sayfalı görünüm (50)</a>
     </div>
     {% endif %}
     <div style="display:flex;gap:10px">

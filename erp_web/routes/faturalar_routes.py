@@ -2999,7 +2999,8 @@ def yeni_fatura():
                 "id": cust["id"],
                 "name": cust.get("name") or "",
                 "musteri_adi": ma or None,
-                "display_label": (nm + " · " + ma) if ma else nm,
+                # Fatura PDF / müşteri satırı: yalnızca şirket ünvanı (customers.name); kişi adı ayrı alanda kalır.
+                "display_label": nm or ma or "",
                 "address": address,
                 "vergi_dairesi": vergi_dairesi,
                 "vergi_no": str(vergi_no) if vergi_no else "",
@@ -3078,7 +3079,7 @@ def yeni_irsaliye():
                 "id": cust["id"],
                 "name": cust.get("name") or "",
                 "musteri_adi": ma or None,
-                "display_label": (nm + " · " + ma) if ma else nm,
+                "display_label": nm or ma or "",
                 "address": address,
                 "vergi_dairesi": vergi_dairesi,
                 "vergi_no": str(vergi_no) if vergi_no else "",
@@ -3772,6 +3773,22 @@ def fatura_ekle():
         fatura_no = (data.get("fatura_no") or "").strip() or _next_fatura_no()
         musteri_id = _opt_customer_id(data.get("musteri_id"))
         musteri_adi = (data.get("musteri_adi") or "").strip()
+        # Kayıtlı müşteri: fatura satırında şirket ünvanı (name); yoksa cari müşteri adı.
+        if musteri_id:
+            try:
+                crow = fetch_one(
+                    "SELECT NULLIF(TRIM(COALESCE(name, '')), '') AS nm, NULLIF(TRIM(COALESCE(musteri_adi, '')), '') AS ma FROM customers WHERE id = %s",
+                    (int(musteri_id),),
+                )
+                if crow:
+                    nm = (crow.get("nm") or "").strip()
+                    ma = (crow.get("ma") or "").strip()
+                    if nm:
+                        musteri_adi = nm
+                    elif ma:
+                        musteri_adi = ma
+            except (TypeError, ValueError):
+                pass
         # Cari ekstre tarafında kayıtlar musteri_id ile toplandığı için,
         # id boş gelirse isimden eşleyip otomatik doldur.
         if not musteri_id and musteri_adi:

@@ -238,6 +238,18 @@
     background: #0f2537;
     display: block;
 }
+#tab-10.tab-content {
+    padding: 0;
+    margin: 0;
+}
+#giris-musteri-liste2-iframe {
+    width: 100%;
+    min-height: min(720px, calc(100vh - 180px));
+    height: calc(100vh - 160px);
+    border: 0;
+    background: #0f2537;
+    display: block;
+}
 /* Grup sekmesi: ana satır tıklanınca alt firma tablosu */
 #giris_grup_ozet_tbody tr.giris-grup-ana-satir {
     cursor: pointer;
@@ -2257,6 +2269,7 @@
             <button class="tab" data-index="7" onclick="switchTab(7)">Müşteriler</button>
             <button class="tab" data-index="8" onclick="switchTab(8)">Randevu</button>
             <button class="tab" data-index="9" onclick="switchTab(9)">Grup</button>
+            <button class="tab" data-index="10" onclick="switchTab(10)">Müşteriler 2</button>
         </div>
         
         <div class="tab-content-wrapper" id="tab-content-wrapper">
@@ -3148,6 +3161,9 @@
                 </div>
             </div>
         </div>
+        <div class="tab-content" id="tab-10">
+            <iframe id="giris-musteri-liste2-iframe" title="Müşteri listesi (sayfalı)" data-ml2-src="{{ url_for('musteriler.list_full', sayfa=1, limit=50, embed=1) }}"></iframe>
+        </div>
         </div>
         <div class="tab-content-right" id="sozlesmeler-sag-alan">
             <div id="sozlesmeler-aylik-bolum">
@@ -3693,7 +3709,7 @@ function girisBootstrapMusteriVeSekme() {
             var ts = localStorage.getItem('bestoffice_giris_tab_index');
             if (ts != null) {
                 var ti = parseInt(ts, 10);
-                if (!isNaN(ti) && ti >= 0 && ti <= 9) tabIdx = ti;
+                if (!isNaN(ti) && ti >= 0 && ti <= 10) tabIdx = ti;
             }
         }
         if (typeof switchTab === 'function') switchTab(tabIdx);
@@ -4036,14 +4052,9 @@ function sozlesmelerReelDonemEffectiveYillik(manualMap, basStr, tufeListe) {
         if (ms == null) ms = manualMap[y];
         if (ms != null && !isNaN(parseFloat(ms)) && parseFloat(ms) >= 0) {
             var msNum = Math.round(parseFloat(ms) * 100) / 100;
-            /* DB’de kalan eski donem_yil satırı (ör. 67740), yeni 2025 hibritinden sonra TÜFE’den düşük kalır — yut, zincirle hesapla. */
-            var prevManual = y > yStart ? out[y - 1] : null;
-            var prevM = prevManual != null && !isNaN(parseFloat(prevManual)) ? Math.round(parseFloat(prevManual) * 100) / 100 : NaN;
-            var staleLower = !isNaN(prevM) && prevM > 0 && msNum < prevM * 0.995;
-            if (!staleLower) {
-                out[y] = msNum;
-                continue;
-            }
+            /* Elle girilen dönem tutarı (Uygula / Kaydet / API) her zaman esas alınır; önceki yıla göre «düşük» diye yok sayma kaldırıldı — aksi halde Uygula gridde hiçbir şey değiştirmiyordu. */
+            out[y] = msNum;
+            continue;
         }
         if (y > yStart && out[y - 1] != null && out[y - 1] > 0 && tufeListe) {
             var prev = Math.round(parseFloat(out[y - 1]) * 100) / 100;
@@ -4860,8 +4871,31 @@ function sozlesmelerAylikHizliYukle(force) {
         return ok;
     }).catch(function () { return false; });
 }
-/** Açık olan sekme (0=Müşteri Ekle, 1=Kira Senaryo, 2=Kira Bildirgesi, 3=Tahsilat, 4=Cari Kart, 5=Potansiyel, 6=Sözleşmeler, 7=Müşteri listesi, 8=Randevu, 9=Grup). Müşteri seçimi bu sekmeye göre forma doldurur. */
+/** Açık olan sekme (0=Müşteri Ekle, 1=Kira Senaryo, 2=Kira Bildirgesi, 3=Tahsilat, 4=Cari Kart, 5=Potansiyel, 6=Sözleşmeler, 7=Müşteri listesi, 8=Randevu, 9=Grup, 10=Müşteriler 2). Müşteri seçimi bu sekmeye göre forma doldurur. */
 let currentTabIndex = 0;
+
+/** Giriş sayfası Müşteriler 2: /musteriler/list; ?embed=1 ile layout üst menüsü gizlenir. */
+function girisMusteriListe2IframeYukle() {
+    var fr = document.getElementById('giris-musteri-liste2-iframe');
+    if (!fr) return;
+    var raw = fr.getAttribute('data-ml2-src') || '';
+    if (!raw) return;
+    var want;
+    try {
+        var u = new URL(raw, window.location.origin);
+        u.searchParams.set('embed', '1');
+        want = u.toString();
+    } catch (e) {
+        want = raw + (raw.indexOf('?') >= 0 ? '&' : '?') + 'embed=1';
+    }
+    if (fr.getAttribute('data-ml2-inited') === '1') {
+        var cur = fr.src || '';
+        if (cur.indexOf('embed=1') >= 0 || cur.indexOf('embed=true') >= 0) return;
+        fr.removeAttribute('data-ml2-inited');
+    }
+    fr.setAttribute('data-ml2-inited', '1');
+    fr.src = want;
+}
 
 /** Giriş sayfası Randevu sekmesi: tam genişlik /randevu/randevu-al iframe; seçili müşteri URL ile ön doldurulur (iframe içinde başka müşteri aranabilir). */
 function girisRandevuIframeYukle() {
@@ -4879,11 +4913,11 @@ function girisRandevuIframeYukle() {
     fr.src = url;
 }
 
-// Sekme değiştirme (içerik id: tab-0 .. tab-9)
+// Sekme değiştirme (içerik id: tab-0 .. tab-10; 6 özel: sol panel tab-0)
 function switchTab(index) {
     currentTabIndex = index;
     try {
-        if (index >= 0 && index <= 9) localStorage.setItem('bestoffice_giris_tab_index', String(index));
+        if (index >= 0 && index <= 10) localStorage.setItem('bestoffice_giris_tab_index', String(index));
     } catch (e) {}
     // Üst sekme butonlarının aktifliğini index yerine data-index ile kontrol et
     document.querySelectorAll('.tab').forEach(function(t) {
@@ -4895,7 +4929,7 @@ function switchTab(index) {
         }
     });
 
-    // Sözleşmeler (6): sol panelde tab-0 gösterilir; Randevu (8) tam genişlik tab-8; Grup (9) tab-9
+    // Sözleşmeler (6): sol panelde tab-0 gösterilir; Randevu (8) ve Müşteriler 2 (10) tam genişlik iframe
     var effectiveIndex = (index === 6 ? 0 : index);
     var tabId = (index === 6 ? 'tab-0' : 'tab-' + index);
     var wrapper = document.getElementById('tab-content-wrapper');
@@ -4908,11 +4942,12 @@ function switchTab(index) {
             sozlesmeTahsilatFormunuSeciliMusteridenDoldur();
             if (selectedId) sozlesmeAylikGridParalelYukle(selectedId);
             else sozlesmelerAylikGuncelle();
-        } else if (index === 8) {
+        } else if (index === 8 || index === 10) {
             wrapper.classList.remove('sozlesmeler-split');
             wrapper.classList.add('giris-randevu-tab');
             if (sagSoz) sagSoz.style.display = '';
-            girisRandevuIframeYukle();
+            if (index === 8) girisRandevuIframeYukle();
+            else girisMusteriListe2IframeYukle();
         } else {
             wrapper.classList.remove('sozlesmeler-split');
             wrapper.classList.remove('giris-randevu-tab');
@@ -11648,7 +11683,7 @@ function selectMusteri(id) {
     girisEmbedParentMusteriUrlGuncelle(id);
     girisStandaloneMidQueryGuncelle(id);
     var activeTab = getActiveTabIndex();
-    if (activeTab === 0 || activeTab === 6 || activeTab === 7 || activeTab === 8 || activeTab === 9) {
+    if (activeTab === 0 || activeTab === 6 || activeTab === 7 || activeTab === 8 || activeTab === 9 || activeTab === 10) {
         var muQuick = musteriler.find(function(m) { return m.id == id; });
         girisMusteriAramaPaneliniGizle(muQuick && muQuick.name ? muQuick.name : ('Müşteri #' + id));
     }
@@ -11659,6 +11694,9 @@ function selectMusteri(id) {
 
     if (activeTab === 8) {
         if (typeof girisRandevuIframeYukle === 'function') girisRandevuIframeYukle();
+        return;
+    }
+    if (activeTab === 10) {
         return;
     }
 
