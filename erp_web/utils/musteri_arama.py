@@ -186,6 +186,8 @@ _GIRIS_GENIS_MK_ALANLARI = (
     "sirket_unvani",
     "unvan",
     "vergi_no",
+    "faaliyet_konusu",
+    "hizmet_turu",
     "notlar",
 )
 
@@ -243,6 +245,7 @@ def _giris_genis_cust_search_exprs(table_alias: str = "") -> list[tuple[str, str
         ("email", f"TRIM(COALESCE({a}email, ''))"),
         ("yetkili_tcno", f"TRIM(COALESCE({a}yetkili_tcno::text, ''))"),
         ("musteri_no", f"TRIM(COALESCE({a}musteri_no::text, ''))"),
+        ("hizmet_turu", f"TRIM(COALESCE({a}hizmet_turu, ''))"),
         ("notes", f"TRIM(COALESCE({a}notes, ''))"),
     ]
 
@@ -277,6 +280,35 @@ def customers_arama_params_giris_genis(q: str):
     # Telefon rakam bloğu: 5× aynı parametre (uzunluk eşiği + 4 LIKE)
     # E-posta bloğu: 4× iğne (strpos + boşluk kontrolü) + 3× kaçışlı ILIKE
     return (p,) * n + (digits, digits, digits, digits, digits) + (needle, needle, needle, needle, p_ilike, p_ilike, p_ilike)
+
+
+def customers_arama_tokens_split(q: str) -> list[str]:
+    """Sorguyu boşluk / tab / newline ile böler, tek karakterlik ve boş parçaları atar."""
+    if not q:
+        return []
+    raw = re.split(r"\s+", str(q).strip())
+    return [t for t in raw if t and len(t) >= 1]
+
+
+def customers_arama_sql_params_giris_genis_tokens(q: str, table_alias: str = "") -> tuple[str, tuple]:
+    """Çok tokenlı geniş arama: her kelime tüm alanlarda aranır, kelimeler AND ile birleştirilir.
+
+    Böylece «Mehmet Erdoğdu» ile «Erdoğdu Mehmet» aynı müşteri kartına ulaşır.
+    Tek kelime veya boş sorgu için tek blok üretir (eski davranışla aynı).
+    """
+    tokens = customers_arama_tokens_split(q)
+    if not tokens:
+        return "TRUE", ()
+    if len(tokens) == 1:
+        return customers_arama_sql_giris_genis(table_alias), tuple(
+            customers_arama_params_giris_genis(tokens[0])
+        )
+    sql_per = customers_arama_sql_giris_genis(table_alias)
+    sql = "(" + " AND ".join([sql_per] * len(tokens)) + ")"
+    params: tuple = ()
+    for t in tokens:
+        params = params + tuple(customers_arama_params_giris_genis(t))
+    return sql, params
 
 
 def customers_arama_sql_3_plus_phone_tax(alias: str = "c") -> str:
