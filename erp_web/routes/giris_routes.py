@@ -2,7 +2,7 @@
 Giriş / Müşteri Kaydı Routes
 Desktop'taki gibi tam fonksiyonel + Sözleşme oluşturma
 """
-from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, send_file, Response
+from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, send_file, Response, current_app
 from flask_login import current_user
 from auth import giris_gerekli
 from collections import defaultdict
@@ -18,6 +18,7 @@ from db import (
     ensure_customer_financial_profile,
     ensure_customers_durum,
     ensure_customers_is_active,
+    ensure_customers_kapanis_sonrasi_borc_ay,
     ensure_customers_musteri_no,
     ensure_customers_hazir_ofis_oda,
     ensure_musteri_kyc_columns,
@@ -33,6 +34,7 @@ from db import (
 )
 from datetime import datetime, date, timedelta
 import calendar
+import time
 from docx import Document
 from docx.shared import Pt, Cm
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -52,6 +54,7 @@ from utils.text_utils import turkish_lower
 from utils.musteri_arama import (
     customers_arama_params_giris_genis,
     customers_arama_sql_giris_genis,
+    customers_arama_sql_params_giris_genis_tokens,
     musteri_arama_ilike_pattern_email_duz,
 )
 import json
@@ -128,9 +131,21 @@ def _aylik_grid_cache_matches_kyc(musteri_id, cache_obj):
     if not isinstance(cache_obj, dict):
         return False
     kyc = fetch_one(
-        """SELECT sozlesme_tarihi, sozlesme_bitis, kira_suresi_ay, aylik_kira, kira_nakit, kira_artis_tarihi,
-                  kira_nakit_tutar, kira_banka_tutar
-           FROM musteri_kyc WHERE musteri_id = %s ORDER BY id DESC LIMIT 1""",
+        """
+        SELECT mk.sozlesme_tarihi, mk.sozlesme_bitis, mk.kira_suresi_ay, mk.aylik_kira, mk.kira_nakit, mk.kira_artis_tarihi,
+               mk.kira_nakit_tutar, mk.kira_banka_tutar,
+               c.kapanis_tarihi, c.kapanis_sonrasi_borc_ay, c.durum
+        FROM customers c
+        LEFT JOIN LATERAL (
+            SELECT sozlesme_tarihi, sozlesme_bitis, kira_suresi_ay, aylik_kira, kira_nakit, kira_artis_tarihi,
+                   kira_nakit_tutar, kira_banka_tutar
+            FROM musteri_kyc
+            WHERE musteri_id = c.id
+            ORDER BY id DESC
+            LIMIT 1
+        ) mk ON TRUE
+        WHERE c.id = %s
+        """,
         (musteri_id,),
     )
     if not kyc:
@@ -165,9 +180,25 @@ def _aylik_grid_cache_matches_kyc(musteri_id, cache_obj):
 
     d_bit = _aylik_grid_coerce_date(kyc.get("sozlesme_bitis"))
     if d_bit is not None:
-        if cache_obj.get("bitis") != d_bit.isoformat():
+        bit_eff = _aylik_grid_effective_bitis(kyc, d_bit) or d_bit
+        if cache_obj.get("bitis") != bit_eff.isoformat():
             return False
     # KYC'de bitiş yok: önbellek sentetik bitiş tutar; bitis alanını zorlamayız.
+
+    kap_db = _aylik_grid_coerce_date(kyc.get("kapanis_tarihi"))
+    kap_cache = _aylik_grid_coerce_date(cache_obj.get("kapanis_tarihi"))
+    if _kyc_date_iso(kap_db) != _kyc_date_iso(kap_cache):
+        return False
+    try:
+        ek_db = int(kyc.get("kapanis_sonrasi_borc_ay") or 0)
+    except (TypeError, ValueError):
+        ek_db = 0
+    try:
+        ek_cache = int(cache_obj.get("kapanis_sonrasi_borc_ay") or 0)
+    except (TypeError, ValueError):
+        ek_cache = 0
+    if ek_db != ek_cache:
+        return False
 
     artis_b = _aylik_grid_coerce_date(kyc.get("kira_artis_tarihi")) or bas_k
     try:
@@ -344,6 +375,7 @@ def _aylik_grid_contract_core(kyc, tufe_map):
         ks_int_early = 0
 
     bit = _aylik_grid_coerce_date(bit_raw) if bit_raw is not None and str(bit_raw).strip() != "" else None
+    bit = _aylik_grid_effective_bitis(kyc, bit)
     bit_kullanici = bit is not None
 
     bugun = date.today()
@@ -362,9 +394,15 @@ def _aylik_grid_contract_core(kyc, tufe_map):
             inclusive_last = date(ly, lm, calendar.monthrange(ly, lm)[1])
             bit = inclusive_last + timedelta(days=1)
 
-    bit_end = bit - timedelta(days=1)
-    ay_sayisi = ((bit_end.year - bas.year) * 12 + (bit_end.month - bas.month) + 1) if bit_end >= bas else 1
-    ay_sayisi = max(1, min(240, ay_sayisi))
+    if bit_kullanici:
+        ay_sayisi = 0
+        while ay_sayisi < 240 and _add_months(bas, ay_sayisi) < bit:
+            ay_sayisi += 1
+        ay_sayisi = max(0, min(240, ay_sayisi))
+    else:
+        bit_end = bit - timedelta(days=1)
+        ay_sayisi = ((bit_end.year - bas.year) * 12 + (bit_end.month - bas.month) + 1) if bit_end >= bas else 1
+        ay_sayisi = max(1, min(240, ay_sayisi))
     ks_int = ks_int_early
     # kira_suresi_ay yalnızca bitiş tarihi yokken / türetilmiş bitişte kullanılsın; aksi halde
     # sözleşme bitişi uzunken süre alanı kısa kaldıysa Nisan 2026 vb. aylar 0,00 kalıyordu.
@@ -378,11 +416,12 @@ def _aylik_grid_contract_core(kyc, tufe_map):
         m_roll -= 12
         y_roll += 1
     roll_son = date(y_roll, m_roll, 1)
-    horizon_need = max(
-        _aylik_grid_months_inclusive_from(bas_first, dec_son),
-        _aylik_grid_months_inclusive_from(bas_first, roll_son),
-    )
-    ay_sayisi = min(240, max(ay_sayisi, horizon_need))
+    if not bit_kullanici:
+        horizon_need = max(
+            _aylik_grid_months_inclusive_from(bas_first, dec_son),
+            _aylik_grid_months_inclusive_from(bas_first, roll_son),
+        )
+        ay_sayisi = min(240, max(ay_sayisi, horizon_need))
     aylik_net = _aylik_grid_coerce_money(kyc.get("aylik_kira"))
     try:
         kdv_oran = float(kyc.get("kdv_oran") if kyc.get("kdv_oran") is not None else 20)
@@ -490,6 +529,8 @@ def _aylik_grid_compute(musteri_id, kyc, tufe_map, tahsil_set):
         "musteri_id": musteri_id,
         "baslangic": bas.isoformat(),
         "bitis": bit.isoformat(),
+        "kapanis_tarihi": _kyc_date_iso(kyc.get("kapanis_tarihi")),
+        "kapanis_sonrasi_borc_ay": _normalize_kapanis_sonrasi_borc_ay(kyc, str(kyc.get("durum") or "")),
         "kira_suresi_ay": ks_int if 1 <= ks_int <= 240 else None,
         "kira_nakit": kira_nakit,
         "split_kira_odeme": split_kira,
@@ -504,9 +545,21 @@ def _aylik_grid_compute(musteri_id, kyc, tufe_map, tahsil_set):
 
 def _build_aylik_grid_cache_payload(musteri_id, tufe_map=None):
     kyc = fetch_one(
-        """SELECT sozlesme_tarihi, sozlesme_bitis, aylik_kira, kira_artis_tarihi, kira_suresi_ay, kira_nakit,
-                  kira_nakit_tutar, kira_banka_tutar
-           FROM musteri_kyc WHERE musteri_id = %s ORDER BY id DESC LIMIT 1""",
+        """
+        SELECT mk.sozlesme_tarihi, mk.sozlesme_bitis, mk.aylik_kira, mk.kira_artis_tarihi, mk.kira_suresi_ay, mk.kira_nakit,
+               mk.kira_nakit_tutar, mk.kira_banka_tutar,
+               c.kapanis_tarihi, c.kapanis_sonrasi_borc_ay, c.durum
+        FROM customers c
+        LEFT JOIN LATERAL (
+            SELECT sozlesme_tarihi, sozlesme_bitis, aylik_kira, kira_artis_tarihi, kira_suresi_ay, kira_nakit,
+                   kira_nakit_tutar, kira_banka_tutar
+            FROM musteri_kyc
+            WHERE musteri_id = c.id
+            ORDER BY id DESC
+            LIMIT 1
+        ) mk ON TRUE
+        WHERE c.id = %s
+        """,
         (musteri_id,),
     ) or {}
     if not kyc:
@@ -788,13 +841,17 @@ def api_musteriler():
         "ORDER BY mk.id DESC NULLS LAST LIMIT 1) AS kyc_sozlesme_tarihi "
         "FROM customers "
     )
+    # Autocomplete dropdown için 100 yeterli; dar aramada zaten eşleşenler üste gelir.
+    limit_n = 100 if arama else 1000
     if not arama:
-        rows = fetch_all(base + "ORDER BY name LIMIT 1000")
+        rows = fetch_all(base + f"ORDER BY name LIMIT {limit_n}")
     else:
-        w = customers_arama_sql_giris_genis("")
+        # Boşlukla ayrılmış her kelime tüm alanlarda aranır, kelimeler AND ile birleştirilir.
+        # «Mehmet Erdoğdu» ve «Erdoğdu Mehmet» aynı kartı bulur.
+        w, p = customers_arama_sql_params_giris_genis_tokens(arama, "")
         rows = fetch_all(
-            base + f"WHERE {w} ORDER BY name LIMIT 1000",
-            customers_arama_params_giris_genis(arama),
+            base + f"WHERE {w} ORDER BY name LIMIT {limit_n}",
+            p,
         )
         # Geniş WHERE bazen e-postayı kaçırır (@, normalizasyon); boşsa sadece e-posta kolonlarında düz ILIKE dene
         if (not rows) and ("@" in arama):
@@ -807,7 +864,7 @@ def api_musteriler():
                 "))"
             )
             rows = fetch_all(
-                base + f"WHERE ({fb}) ORDER BY name LIMIT 1000",
+                base + f"WHERE ({fb}) ORDER BY name LIMIT {limit_n}",
                 (pat, pat, pat),
             )
     out = [_api_musteriler_row_json(r) for r in (rows or [])]
@@ -843,6 +900,45 @@ def _normalize_musteri_durum_kapanis(data):
         dr = "aktif"
     kap = _parse_kapanis_tarihi(data.get("kapanis_tarihi")) if dr == "pasif" else None
     return dr, kap
+
+
+def _normalize_kapanis_sonrasi_borc_ay(data, durum: str | None = None):
+    """Pasif müşteri için kapanıştan sonra ek borç ayı: 1-12, aksi halde None (Hepsi)."""
+    dr = (durum or data.get("durum") or "aktif").strip().lower()
+    if dr != "pasif":
+        return None
+    raw = data.get("kapanis_sonrasi_borc_ay")
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    try:
+        val = int(s)
+    except (TypeError, ValueError):
+        return None
+    return val if 1 <= val <= 12 else None
+
+
+def _aylik_grid_effective_bitis(kyc: dict, bit: date | None) -> date | None:
+    """Pasif müşteride kapanış + ek ay seçimi varsa, sözleşme bitişini buna göre kısaltır."""
+    src = dict(kyc or {})
+    durum = str(src.get("durum") or src.get("musteri_durum") or "").strip().lower()
+    if durum != "pasif":
+        return bit
+    kap = _aylik_grid_coerce_date(src.get("kapanis_tarihi"))
+    if not kap:
+        return bit
+    try:
+        ek_ay = int(src.get("kapanis_sonrasi_borc_ay") or 0)
+    except (TypeError, ValueError):
+        ek_ay = 0
+    if ek_ay <= 0:
+        return bit
+    sinir = _add_months(date(kap.year, kap.month, 1), ek_ay + 1)
+    if bit is None:
+        return sinir
+    return min(bit, sinir)
 
 
 @bp.route("/api/hizmet-turleri", methods=["GET", "POST"])
@@ -907,14 +1003,26 @@ def _parse_grup2_secimleri_from_request(data) -> list:
 
 
 def _parse_pg_text_array_grup2(val):
-    """customers.grup2_secimleri: çoğu kurulumda list; bazen '{a,b}' metni gelebilir."""
+    """customers.grup2_secimleri: list/tuple; '{a,b}' PG metni; '["a"]' JSON; bazı sürücülerde iterable."""
     if val is None:
         return []
     if isinstance(val, (list, tuple)):
         return [str(x).strip() for x in val if str(x).strip()]
+    if not isinstance(val, (str, bytes, bytearray)) and hasattr(val, "__iter__"):
+        try:
+            return [str(x).strip() for x in val if str(x).strip()]
+        except (TypeError, ValueError):
+            pass
     s = str(val).strip()
-    if not s or s == "{}":
+    if not s or s in ("{}", "[]") or s.lower() in ("null", "none"):
         return []
+    if s.startswith("[") and s.endswith("]"):
+        try:
+            j = json.loads(s)
+            if isinstance(j, list):
+                return [str(x).strip() for x in j if str(x).strip()]
+        except Exception:
+            pass
     if s.startswith("{") and s.endswith("}"):
         inner = s[1:-1].strip()
         if not inner:
@@ -984,10 +1092,10 @@ def api_vergi_daireleri():
     return jsonify({"ok": True, "liste": rows[:lim]})
 
 
-@bp.route("/api/grup2-etiketleri", methods=["GET", "POST"])
+@bp.route("/api/grup2-etiketleri", methods=["GET", "POST", "PUT", "DELETE"])
 @giris_gerekli
 def api_grup2_etiketleri():
-    """Grup 2 etiket listesi (GET) veya yeni etiket (POST)."""
+    """Grup 2 etiket listesi (GET), yeni etiket (POST), güncelleme/silme (PUT/DELETE veya POST+action)."""
     _log = logging.getLogger(__name__)
     try:
         ensure_grup2_etiketleri_table()
@@ -1017,10 +1125,98 @@ def api_grup2_etiketleri():
                     ],
                 }
             )
-        data = request.get_json(silent=True) or {}
+        q = request.args.to_dict(flat=True) or {}
+        frm = request.form.to_dict(flat=True) or {}
+        # Önce ham gövde: get_json / Content-Type zinciri bazen {} döndürüyor; sil isteği put sanılıp "Etiket adı boş olamaz" oluyordu.
+        raw = request.get_data(cache=True) or b""
+        j = {}
+        if raw.strip():
+            try:
+                p = json.loads(raw.decode("utf-8", errors="replace"))
+                if isinstance(p, dict):
+                    j = p
+            except Exception:
+                j = {}
+        if not j and request.method in ("POST", "PUT", "PATCH", "DELETE"):
+            gj = request.get_json(silent=True, force=True)
+            if isinstance(gj, dict):
+                j = gj
+        data = {**q, **frm, **j}
+        op = None
+        act = ""
+        if request.method == "PUT":
+            op = "put"
+        elif request.method == "DELETE":
+            op = "delete"
+        elif request.method == "POST":
+            act = str((j.get("action") if isinstance(j, dict) else None) or data.get("action") or "").strip().lower()
+            if act in ("update_etiket", "put"):
+                op = "put"
+            elif act in ("delete_etiket", "delete"):
+                op = "delete"
+            elif str(data.get("slug") or "").strip() and not str(data.get("etiket") or "").strip():
+                op = "delete"
+            elif str(data.get("slug") or "").strip() and str(data.get("etiket") or "").strip():
+                op = "put"
+            else:
+                op = "create"
+        _log.info(
+            "api_grup2_etiketleri %s op=%s act=%r keys=%s ct=%s raw_len=%s",
+            request.method,
+            op,
+            act if request.method == "POST" else None,
+            list(data.keys()),
+            (request.content_type or "")[:80],
+            len(raw or b""),
+        )
+        if op == "put":
+            slug = (data.get("slug") or "").strip()
+            etiket = (data.get("etiket") or "").strip()
+            if not slug:
+                return jsonify({"ok": False, "mesaj": "Slug zorunludur."}), 400
+            if not etiket:
+                return jsonify({"ok": False, "mesaj": "Etiket adı boş olamaz."}), 400
+            if len(etiket) > 200:
+                return jsonify({"ok": False, "mesaj": "En fazla 200 karakter girebilirsiniz."}), 400
+            row = fetch_one(
+                "SELECT id, slug, etiket FROM grup2_etiketleri WHERE slug = %s AND COALESCE(aktif, TRUE) LIMIT 1",
+                (slug,),
+            )
+            if not row:
+                return jsonify({"ok": False, "mesaj": "Etiket bulunamadı."}), 400
+            dup = fetch_one(
+                """
+                SELECT id FROM grup2_etiketleri
+                WHERE COALESCE(aktif, TRUE)
+                  AND lower(trim(etiket)) = lower(trim(%s))
+                  AND slug <> %s
+                LIMIT 1
+                """,
+                (etiket, slug),
+            )
+            if dup:
+                return jsonify({"ok": False, "mesaj": "Bu etiket adı zaten kullanılıyor."}), 400
+            execute("UPDATE grup2_etiketleri SET etiket = %s WHERE slug = %s", (etiket, slug))
+            return jsonify({"ok": True, "slug": slug, "etiket": etiket})
+        if act == "delete_etiket":
+            slug = data.get("slug") or ""
+            if not slug:
+                return jsonify({"ok": False, "mesaj": "Slug boş"}), 400
+            execute("UPDATE grup2_etiketleri SET aktif = FALSE WHERE slug = %s", (slug,))
+            return jsonify({"ok": True})
+        if request.method != "POST" or op != "create":
+            return jsonify({"ok": False, "mesaj": "Geçersiz istek."}), 405
         etiket = (data.get("etiket") or "").strip()
         if not etiket:
-            return jsonify({"ok": False, "mesaj": "Etiket adı boş olamaz."}), 400
+            err = {"ok": False, "mesaj": "Etiket adı boş olamaz."}
+            if current_app and current_app.debug:
+                err["debug"] = {
+                    "sunulan_op": op,
+                    "anahtarlar": list(data.keys()),
+                    "ipucu": "Sil: action=delete_etiket + slug; güncelle: action=update_etiket + slug + etiket; yeni: yalnızca etiket.",
+                }
+            _log.warning("grup2 create reddi: op=%s data_keys=%s", op, list(data.keys()))
+            return jsonify(err), 400
         if len(etiket) > 200:
             return jsonify({"ok": False, "mesaj": "En fazla 200 karakter girebilirsiniz."}), 400
         ex = fetch_one(
@@ -1064,6 +1260,72 @@ def api_grup2_etiketleri():
         return jsonify({"ok": True, "slug": slug_out, "etiket": etiket})
     except Exception as e:
         _log.exception("api_grup2_etiketleri %s", request.method)
+        return jsonify({"ok": False, "mesaj": str(e)}), 500
+
+
+@bp.route("/api/grup2-etiket-guncelle", methods=["GET", "POST"])
+@giris_gerekli
+def api_grup2_etiket_guncelle():
+    try:
+        ensure_grup2_etiketleri_table()
+        data = request.get_json(silent=True) or {}
+        slug = data.get("slug") or request.args.get("slug") or ""
+        etiket = data.get("etiket") or request.args.get("etiket") or ""
+        slug = (slug or "").strip()
+        etiket = (etiket or "").strip()
+        if not slug:
+            return jsonify({"ok": False, "mesaj": "Slug zorunludur."}), 400
+        if not etiket:
+            return jsonify({"ok": False, "mesaj": "Etiket adı boş olamaz."}), 400
+        if len(etiket) > 200:
+            return jsonify({"ok": False, "mesaj": "En fazla 200 karakter girebilirsiniz."}), 400
+        row = fetch_one(
+            "SELECT id, slug, etiket FROM grup2_etiketleri WHERE slug = %s AND COALESCE(aktif, TRUE) LIMIT 1",
+            (slug,),
+        )
+        if not row:
+            return jsonify({"ok": False, "mesaj": "Etiket bulunamadı."}), 400
+        dup = fetch_one(
+            """
+            SELECT id FROM grup2_etiketleri
+            WHERE COALESCE(aktif, TRUE)
+              AND lower(trim(etiket)) = lower(trim(%s))
+              AND slug <> %s
+            LIMIT 1
+            """,
+            (etiket, slug),
+        )
+        if dup:
+            return jsonify({"ok": False, "mesaj": "Bu etiket adı zaten kullanılıyor."}), 400
+        execute("UPDATE grup2_etiketleri SET etiket = %s WHERE slug = %s", (etiket, slug))
+        return jsonify({"ok": True, "slug": slug, "etiket": etiket})
+    except Exception as e:
+        logging.getLogger(__name__).exception("api_grup2_etiket_guncelle")
+        return jsonify({"ok": False, "mesaj": str(e)}), 500
+
+
+@bp.route("/api/grup2-etiket-sil", methods=["GET", "POST"])
+@giris_gerekli
+def api_grup2_etiket_sil():
+    try:
+        ensure_grup2_etiketleri_table()
+        data = request.get_json(silent=True) or {}
+        slug = (data.get("slug") or request.args.get("slug") or "").strip()
+        if not slug:
+            return jsonify({"ok": False, "mesaj": "Slug boş"}), 400
+        # PostgreSQL: aktif BOOLEAN — 0 değil FALSE kullanılmalı (aksi halde 500 / istemci tarafında kırık yanıt).
+        execute("UPDATE grup2_etiketleri SET aktif = FALSE WHERE slug = %s", (slug,))
+        execute(
+            """
+            UPDATE customers
+            SET grup2_secimleri = array_remove(COALESCE(grup2_secimleri, ARRAY[]::text[]), %s)
+            WHERE %s = ANY(COALESCE(grup2_secimleri, ARRAY[]::text[]))
+            """,
+            (slug, slug),
+        )
+        return jsonify({"ok": True, "slug": slug})
+    except Exception as e:
+        logging.getLogger(__name__).exception("api_grup2_etiket_sil")
         return jsonify({"ok": False, "mesaj": str(e)}), 500
 
 
@@ -1197,15 +1459,55 @@ def api_musteri_detay(mid):
     """Tek müşteri tüm alanları - customers + son musteri_kyc birleşik; forma doldurmak için."""
     ensure_customers_bizim_hesap()
     ensure_customers_grup2_secimleri()
+    ensure_customers_kapanis_sonrasi_borc_ay()
     ensure_grup2_etiketleri_table()
     ensure_grup2_bizim_hesap_into_array()
-    row = fetch_one("SELECT * FROM customers WHERE id = %s", (mid,))
+    # Tek round-trip: customers + en son musteri_kyc + tahsilat toplamı birlikte.
+    _od_arg = str(request.args.get("odemeler", "1") or "").strip().lower()
+    _hesapla_tahsilat_ozet = _od_arg not in ("0", "false", "hayir", "no")
+    combined = fetch_all(
+        """
+        SELECT 'c' AS _src, to_jsonb(c) AS data
+        FROM customers c
+        WHERE c.id = %s
+        UNION ALL
+        SELECT 'k' AS _src, to_jsonb(k) AS data
+        FROM (
+            SELECT * FROM musteri_kyc
+            WHERE musteri_id = %s
+            ORDER BY id DESC
+            LIMIT 1
+        ) k
+        UNION ALL
+        SELECT 't' AS _src, jsonb_build_object('toplam', COALESCE(SUM(tutar), 0)) AS data
+        FROM tahsilatlar
+        WHERE %s::boolean AND (musteri_id = %s OR customer_id = %s)
+        """,
+        (mid, mid, _hesapla_tahsilat_ozet, mid, mid),
+    ) or []
+    row = None
+    kyc = None
+    _tahsilat_toplam_pre = 0.0
+    for r in combined:
+        src = r.get("_src")
+        data = r.get("data") or {}
+        if isinstance(data, str):
+            try:
+                import json as _json
+                data = _json.loads(data) or {}
+            except Exception:
+                data = {}
+        if src == "c":
+            row = data
+        elif src == "k":
+            kyc = data
+        elif src == "t":
+            try:
+                _tahsilat_toplam_pre = float(data.get("toplam") or 0)
+            except Exception:
+                _tahsilat_toplam_pre = 0.0
     if not row:
         return jsonify({"ok": False, "mesaj": "Müşteri bulunamadı."}), 404
-    kyc = fetch_one(
-        "SELECT * FROM musteri_kyc WHERE musteri_id = %s ORDER BY id DESC LIMIT 1",
-        (mid,),
-    )
     out = {}
     for k, v in row.items():
         if k == "grup2_secimleri":
@@ -1307,17 +1609,8 @@ def api_musteri_detay(mid):
     odenen_ay_sayisi = 0
     kismi_odeme_var = False
     kismi_ay_eksik_tutar = 0.0  # Kısmi ödenen ayda kalan borç (kutuda gösterilecek)
-    _od = str(request.args.get("odemeler", "1") or "").strip().lower()
-    hesapla_tahsilat_ozet = _od not in ("0", "false", "hayir", "no")
-    if hesapla_tahsilat_ozet and aylik_kdv_dahil > 0:
-        tahsilat_row = fetch_one(
-            "SELECT COALESCE(SUM(tutar), 0) AS t FROM tahsilatlar WHERE musteri_id = %s OR customer_id = %s",
-            (mid, mid),
-        )
-        try:
-            toplam_tahsilat = float(tahsilat_row.get("t") or 0) if tahsilat_row else 0.0
-        except Exception:
-            toplam_tahsilat = 0.0
+    if _hesapla_tahsilat_ozet and aylik_kdv_dahil > 0:
+        toplam_tahsilat = _tahsilat_toplam_pre
         if toplam_tahsilat > 0:
             odenen_ay_sayisi = int(toplam_tahsilat // aylik_kdv_dahil)
             kalan = toplam_tahsilat - (odenen_ay_sayisi * aylik_kdv_dahil)
@@ -1385,13 +1678,14 @@ def api_hazir_ofis_durum():
 @bp.route("/api/musteri/<int:mid>/durum", methods=["POST"])
 @giris_gerekli
 def api_musteri_durum_guncelle(mid):
-    """customers.durum + kapanis_tarihi + is_active (fatura raporu «aktif kart» süzgeci ile uyumlu)."""
+    """customers.durum + kapanis_tarihi + kapanış sonrası ek borç ayı + is_active."""
     data = request.get_json(silent=True) or {}
     dr_in = (data.get("durum") or "").strip().lower()
     if dr_in not in ("aktif", "pasif"):
         return jsonify({"ok": False, "mesaj": "durum aktif veya pasif olmalıdır."}), 400
     ensure_customers_durum()
     ensure_customers_is_active()
+    ensure_customers_kapanis_sonrasi_borc_ay()
     ensure_customers_hazir_ofis_oda()
     row = fetch_one("SELECT id FROM customers WHERE id = %s", (mid,))
     if not row:
@@ -1400,17 +1694,18 @@ def api_musteri_durum_guncelle(mid):
     if dr_in == "pasif" and not (payload.get("kapanis_tarihi") or "").strip():
         payload["kapanis_tarihi"] = date.today().isoformat()
     dr2, kap = _normalize_musteri_durum_kapanis(payload)
+    kap_borc_ay = _normalize_kapanis_sonrasi_borc_ay(payload, dr2)
     # Rapor / liste: COALESCE(is_active, TRUE) ve durum NOT IN (pasif, …) birlikte kullanılıyor.
     kart_aktif = dr2 == "aktif"
     pasif_mi = dr2 == "pasif"
     n = execute(
         """
         UPDATE customers
-        SET durum = %s, kapanis_tarihi = %s, is_active = %s,
+        SET durum = %s, kapanis_tarihi = %s, kapanis_sonrasi_borc_ay = %s, is_active = %s,
             hazir_ofis_oda_no = CASE WHEN %s THEN NULL ELSE hazir_ofis_oda_no END
         WHERE id = %s
         """,
-        (dr2, kap, kart_aktif, pasif_mi, int(mid)),
+        (dr2, kap, kap_borc_ay, kart_aktif, pasif_mi, int(mid)),
     )
     if n is None or int(n) < 1:
         logging.warning("api_musteri_durum_guncelle: UPDATE rowcount=%s mid=%s user=%s", n, mid, getattr(current_user, "id", None))
@@ -1421,7 +1716,14 @@ def api_musteri_durum_guncelle(mid):
             }
         ), 409
     kap_out = kap.isoformat() if kap else None
-    return jsonify({"ok": True, "durum": dr2, "kapanis_tarihi": kap_out, "is_active": kart_aktif})
+    _upsert_aylik_grid_cache(int(mid))
+    return jsonify({
+        "ok": True,
+        "durum": dr2,
+        "kapanis_tarihi": kap_out,
+        "kapanis_sonrasi_borc_ay": kap_borc_ay,
+        "is_active": kart_aktif,
+    })
 
 
 @bp.route("/api/musteri-cogalt", methods=["POST"])
@@ -1550,6 +1852,7 @@ def kaydet():
         ensure_customers_musteri_no()
         ensure_customers_bizim_hesap()
         ensure_customers_grup2_secimleri()
+        ensure_customers_kapanis_sonrasi_borc_ay()
         ensure_grup2_etiketleri_table()
         data = request.get_json()
         vergi_err, tax_norm = _vergi_no_normalize_veya_hata(data.get("tax_number"), data.get("yetkili_tc"))
@@ -1558,6 +1861,7 @@ def kaydet():
 
         musteri_id = data.get('id')
         dr, kap = _normalize_musteri_durum_kapanis(data)
+        kap_borc_ay = _normalize_kapanis_sonrasi_borc_ay(data, dr)
         bh_raw = data.get("bizim_hesap")
         if isinstance(bh_raw, str):
             bizim_hesap_legacy = bh_raw.strip().lower() in ("1", "true", "yes", "evet", "on")
@@ -1583,6 +1887,7 @@ def kaydet():
                     notes = %s,
                     durum = %s,
                     kapanis_tarihi = %s,
+                    kapanis_sonrasi_borc_ay = %s,
                     bizim_hesap = %s,
                     grup2_secimleri = %s
                 WHERE id = %s
@@ -1597,20 +1902,24 @@ def kaydet():
                 data.get('notes'),
                 dr,
                 kap,
+                kap_borc_ay,
                 bizim_hesap,
                 g2_list,
                 musteri_id
             ))
-            
+            try:
+                _upsert_aylik_grid_cache(int(musteri_id))
+            except Exception:
+                pass
             return jsonify({'ok': True, 'mesaj': '✅ Müşteri güncellendi'})
         else:
             # Yeni kayıt (musteri_no: 1001+ sıra, sequence ile)
             result = execute_returning("""
                 INSERT INTO customers (
                     name, musteri_adi, tax_number, phone, email, address,
-                    ev_adres, notes, durum, kapanis_tarihi, bizim_hesap, grup2_secimleri, musteri_no, created_at
+                    ev_adres, notes, durum, kapanis_tarihi, kapanis_sonrasi_borc_ay, bizim_hesap, grup2_secimleri, musteri_no, created_at
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, nextval('customers_musteri_no_seq'), NOW())
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, nextval('customers_musteri_no_seq'), NOW())
                 RETURNING id, musteri_no
             """, (
                 data.get('name'),
@@ -1623,6 +1932,7 @@ def kaydet():
                 data.get('notes'),
                 dr,
                 kap,
+                kap_borc_ay,
                 bizim_hesap,
                 g2_list,
             ))
@@ -3198,6 +3508,9 @@ def _firma_ozet_kyc_dict_from_grid_sql_row(row) -> dict | None:
     return {
         "sozlesme_tarihi": soz_bas_eff,
         "sozlesme_bitis": soz_bit_eff,
+        "durum": row.get("durum"),
+        "kapanis_tarihi": row.get("kapanis_tarihi"),
+        "kapanis_sonrasi_borc_ay": row.get("kapanis_sonrasi_borc_ay"),
         "aylik_kira": row.get("firma_grid_aylik_net"),
         "kira_artis_tarihi": row.get("kyc_kira_artis"),
         "kira_suresi_ay": row.get("kyc_kira_suresi_ay"),
@@ -3217,6 +3530,9 @@ def _musteri_aylik_grid_customer_kyc_select_sql():
                ({gsql}) AS giris_raw,
                c.guncel_kira_bedeli,
                c.ilk_kira_bedeli,
+               c.durum,
+               c.kapanis_tarihi,
+               c.kapanis_sonrasi_borc_ay,
                mk.sozlesme_tarihi AS kyc_soz_bas,
                mk.sozlesme_bitis AS kyc_soz_bit,
                mk.kira_artis_tarihi AS kyc_kira_artis,

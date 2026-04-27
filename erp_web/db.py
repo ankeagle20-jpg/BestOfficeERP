@@ -459,6 +459,7 @@ def init_schema():
     ensure_customers_quick_edit_columns()
     ensure_customers_durum()
     ensure_customers_kapanis_tarihi()
+    ensure_customers_kapanis_sonrasi_borc_ay()
     ensure_customers_bizim_hesap()
     ensure_grup2_etiketleri_table()
     ensure_customers_grup2_secimleri()
@@ -828,9 +829,15 @@ def ensure_musteri_kyc_arama_kolonlari():
         ("vergi_no", "TEXT"),
         ("vergi_dairesi", "TEXT"),
         ("yetkili_adsoyad", "TEXT"),
+        ("yetkili_tcno", "TEXT"),
         ("yetkili_tel", "TEXT"),
         ("yetkili_tel2", "TEXT"),
         ("yetkili_email", "TEXT"),
+        ("email", "TEXT"),
+        ("musteri_adi", "TEXT"),
+        ("sirket_unvani", "TEXT"),
+        ("faaliyet_konusu", "TEXT"),
+        ("hizmet_turu", "TEXT"),
     ):
         try:
             execute(f"ALTER TABLE musteri_kyc ADD COLUMN IF NOT EXISTS {col} {typ}")
@@ -1581,16 +1588,38 @@ def ensure_customers_kapanis_tarihi():
         print(f"customers.kapanis_tarihi: {e}")
 
 
+def ensure_customers_kapanis_sonrasi_borc_ay():
+    """Pasif müşteride kapanıştan sonra borç gösterilecek ek ay sayısı (1-12, boş=hepsi)."""
+    try:
+        execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS kapanis_sonrasi_borc_ay SMALLINT")
+    except Exception as e:
+        print(f"customers.kapanis_sonrasi_borc_ay: {e}")
+
+
+_customers_bizim_hesap_ensured = False
+
+
 def ensure_customers_bizim_hesap():
-    """Bizim Hesap uygulamasında takip edilen cariler (işaretleme)."""
+    """Bizim Hesap uygulamasında takip edilen cariler (işaretleme). Süreç başına bir kez yeterli."""
+    global _customers_bizim_hesap_ensured
+    if _customers_bizim_hesap_ensured:
+        return
     try:
         execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS bizim_hesap BOOLEAN NOT NULL DEFAULT FALSE")
+        _customers_bizim_hesap_ensured = True
     except Exception as e:
         print(f"customers.bizim_hesap: {e}")
 
 
+_grup2_etiketleri_table_ensured = False
+
+
 def ensure_grup2_etiketleri_table():
-    """Müşteri kartı «Grup 2» çoklu etiketleri (slug + görünen ad; kullanıcı yeni ekleyebilir)."""
+    """Müşteri kartı «Grup 2» çoklu etiketleri (slug + görünen ad; kullanıcı yeni ekleyebilir).
+    Süreç başına bir kez yeterli; her API isteğinde CREATE+INSERT çalıştırmaya gerek yok."""
+    global _grup2_etiketleri_table_ensured
+    if _grup2_etiketleri_table_ensured:
+        return
     try:
         execute(
             """
@@ -1606,6 +1635,7 @@ def ensure_grup2_etiketleri_table():
         )
     except Exception as e:
         print(f"grup2_etiketleri CREATE: {e}")
+        return
     try:
         execute(
             """
@@ -1619,6 +1649,7 @@ def ensure_grup2_etiketleri_table():
         )
     except Exception as e:
         print(f"grup2_etiketleri seed: {e}")
+    _grup2_etiketleri_table_ensured = True
 
 
 _customers_grup2_migration_done = False
