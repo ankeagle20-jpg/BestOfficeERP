@@ -433,7 +433,7 @@
 .sozlesmeler-reel-tutar-wrap {
     display: none;
     flex-wrap: wrap;
-    align-items: center;
+    align-items: flex-end;
     gap: 8px;
     width: 100%;
     box-sizing: border-box;
@@ -492,6 +492,10 @@
 }
 .sozlesmeler-reel-hibrit-field .sozlesmeler-reel-tutar-input {
     width: 108px;
+}
+.sozlesmeler-reel-hibrit-field .sozlesmeler-reel-tutar-input[readonly] {
+    background: #223645;
+    color: #b2dfdb;
 }
 .sozlesmeler-manuel-bilgi {
     font-size: 12px;
@@ -1289,6 +1293,16 @@
 }
 .tahsilat-musteri-dropdown div:hover { background: #2d4060; }
 .tahsilat-musteri-secilen { color: #4fc3f7; font-size: 13px; padding: 4px 0; }
+.tahsilat-cek-panel { margin-top: 4px; border: 1px solid #2d4060; border-radius: 6px; overflow: hidden; }
+.tahsilat-cek-table-wrap { overflow-x: auto; background: #0f2537; }
+.tahsilat-cek-table { width: 100%; border-collapse: collapse; min-width: 620px; }
+.tahsilat-cek-table th { background: #152a3d; color: #4fc3f7; font-size: 11px; padding: 6px 6px; border: 1px solid #2d4060; }
+.tahsilat-cek-table td { border: 1px solid #2d4060; padding: 4px; }
+.tahsilat-cek-table input { width: 100%; background: #2d4060; border: 1px solid #3d5070; color: #e0f7fa; border-radius: 4px; font-size: 12px; padding: 6px 8px; }
+.tahsilat-cek-toolbar { display: flex; justify-content: flex-end; gap: 8px; padding: 8px; background: #152a3d; border-top: 1px solid #2d4060; }
+.tahsilat-cek-btn { border: none; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 600; padding: 6px 10px; }
+.tahsilat-cek-btn-ekle { background: #00bcd4; color: #fff; }
+.tahsilat-cek-btn-sil { background: #f44336; color: #fff; }
 .sirket-unvani-dropdown {
     position: absolute; left: 0; right: 0; top: 100%; margin-top: 2px;
     max-height: 220px; overflow-y: auto; z-index: 1000;
@@ -1303,6 +1317,9 @@
 
 .sirket-unvani-dropdown div.sirket-item .sirket-name { font-weight: 600; }
 .sirket-unvani-dropdown div.sirket-item .sirket-vergi { font-size: 11px; color: #90a4ae; margin-top: 2px; }
+.sirket-durum-etiket { font-size: 11px; font-weight: 700; margin-left: 6px; }
+.sirket-durum-etiket--aktif { color: #81c784; }
+.sirket-durum-etiket--pasif { color: #ef9a9a; }
 .sirket-unvani-dropdown div.sirket-bos { padding: 12px; color: #90a4ae; font-size: 12px; text-align: center; }
 .sirket-unvani-dropdown div.sirket-bos-manuel { padding: 10px 12px; font-size: 12px; color: #4fc3f7; border-top: 1px solid #2d4060; cursor: pointer; }
 .sirket-unvani-dropdown div.sirket-bos-manuel:hover { background: #2d4060; color: #b3e5fc; }
@@ -2532,7 +2549,7 @@
                         </div>
                         
                         <label>KDV %</label>
-                        <input type="number" id="kdv_oran" value="20" min="0" max="100" step="0.01" placeholder="20" onchange="hesaplaYuzde(); sozlesmelerAylikGuncelle(); if (typeof syncBildirgeKdvFromCariKart === 'function') syncBildirgeKdvFromCariKart();">
+                        <input type="number" id="kdv_oran" value="20" min="0" max="100" step="0.01" placeholder="20" onchange="hesaplaYuzde(); sozlesmelerAylikGuncelle(); if (typeof syncBildirgeKdvFromCariKart === 'function') syncBildirgeKdvFromCariKart(); if (typeof sozlesmelerReelHibritKdvGuncelle === 'function') sozlesmelerReelHibritKdvGuncelle();">
                         
                         <label>Kira Süresi Aylık</label>
                         <input type="number" id="kira_suresi_ay" value="12" min="1" max="240" step="1" placeholder="12" onchange="hesaplaYuzde()" oninput="sozlesmelerAylikGuncelle()" title="Sözleşme süresi (ay). Tıklayıp manuel girebilirsiniz.">
@@ -2852,9 +2869,39 @@
                             <option value="cek">Çek</option>
                         </select>
                     </div>
+                    <div class="tahsilat-form-grup" id="giris_tahsilat_cek_panel_wrap" style="display:none;">
+                        <label>Çek Detayları</label>
+                        <div class="tahsilat-cek-panel">
+                            <div class="tahsilat-cek-table-wrap">
+                                <table class="tahsilat-cek-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Banka</th>
+                                            <th>Şube</th>
+                                            <th>Hesap No</th>
+                                            <th>Çek No</th>
+                                            <th>Çek Tarihi</th>
+                                            <th>Tutarı</th>
+                                            <th></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="giris_tahsilat_cek_tbody"></tbody>
+                                </table>
+                            </div>
+                            <div class="tahsilat-cek-toolbar">
+                                <button type="button" class="tahsilat-cek-btn tahsilat-cek-btn-ekle" onclick="tahsilatCekSatirEkle('giris_tahsilat')"><i class="fa fa-plus"></i> Satır Ekle</button>
+                            </div>
+                        </div>
+                    </div>
                     <div class="tahsilat-form-grup">
                         <label>Tarih</label>
                         <input type="date" id="giris_tahsilat_tarih" name="tahsilat_tarihi">
+                    </div>
+                    <div class="tahsilat-form-grup">
+                        <label>Tahsil eden</label>
+                        <select id="giris_tahsilat_tahsil_eden" name="tahsil_eden">
+                            <option value="DÖNDÜ GÜLGÖSTEREN" selected>DÖNDÜ GÜLGÖSTEREN</option>
+                        </select>
                     </div>
                     <div class="tahsilat-form-grup">
                         <label>Açıklama</label>
@@ -2862,6 +2909,7 @@
                     </div>
                     <div class="tahsilat-makbuz-birincil">
                         <div class="tahsilat-makbuz-birincil-ust">
+                            <button type="button" class="tahsilat-btn-kaydet" onclick="girisTahsilatMakbuzKaydet(); return false;"><i class="fa fa-save"></i> Kaydet</button>
                             <button type="button" class="tahsilat-btn-makbuz-olustur" onclick="girisTahsilatMakbuzOlustur(); return false;"><i class="fa fa-receipt"></i> Makbuz oluştur</button>
                         </div>
                         <p class="tahsilat-makbuz-birincil-hint"><strong>Makbuz oluştur:</strong> bu formdaki tutarla PDF (kayıt yok). Çoklu ayı cariye tek seferde işlemek için <strong>Sözleşmeler</strong> sekmesinde grid altındaki <strong>Seçilen aylardan tahsilat oluştur</strong> veya üstteki <strong>Seçilenleri tahsil et</strong> düğmesini kullanın. Tahsilatı bu sekmede kaydetmek için <strong>Kayıt</strong>.</p>
@@ -3310,7 +3358,8 @@
                         <button type="button" class="btn-aylik-iptal-borc" onclick="sozlesmeAylikBorctanCikar()"><i class="fa fa-undo"></i> Borçtan çıkar</button>
                         <button type="button" class="btn-aylik-sec" onclick="sozlesmeAylikTumunuSec()">Tümünü seç</button>
                         <button type="button" class="btn-aylik-sec" onclick="sozlesmeAylikSecimiTemizle()">Temizle</button>
-                        <span id="sozlesme-aylik-secim-ozet" style="color:#90a4ae;font-size:12px;white-space:nowrap;">Seçim yok</span>
+                        <button type="button" class="btn-aylik-sec" onclick="sozlesmelerAylikAyrintiliGoster()">Ayrıntılı</button>
+                        <span id="sozlesme-aylik-secim-ozet" style="display:none;color:#90a4ae;font-size:12px;white-space:nowrap;">Seçim yok</span>
                     </div>
                     <div id="sozlesmeler-aylik-grid" class="sozlesmeler-aylik-grid"></div>
                     <div id="sozlesmeler-aylik-bos" class="sozlesmeler-aylik-bos">Sözleşme tarihleri ve aylık kira girildiğinde ay hücreleri burada görünür.</div>
@@ -3327,7 +3376,8 @@
                             <button type="button" class="btn-aylik-iptal-borc" onclick="sozlesmeAylikBorctanCikar()"><i class="fa fa-undo"></i> Borçtan çıkar</button>
                             <button type="button" class="btn-aylik-sec" onclick="sozlesmeAylikTumunuSec()">Tümünü seç</button>
                             <button type="button" class="btn-aylik-sec" onclick="sozlesmeAylikSecimiTemizle()">Temizle</button>
-                            <span id="sozlesme-reel-aylik-secim-ozet" style="color:#90a4ae;font-size:12px;white-space:nowrap;">Seçim yok</span>
+                            <button type="button" class="btn-aylik-sec" onclick="sozlesmelerAylikAyrintiliGoster()">Ayrıntılı</button>
+                            <span id="sozlesme-reel-aylik-secim-ozet" style="display:none;color:#90a4ae;font-size:12px;white-space:nowrap;">Seçim yok</span>
                         </span>
                     </div>
                     <div id="sozlesmeler-reel-tutar-wrap" class="sozlesmeler-reel-tutar-wrap">
@@ -3351,7 +3401,11 @@
                             </div>
                             <div class="sozlesmeler-reel-hibrit-field">
                                 <label for="sozlesmeler-reel-hibrit-banka">Banka</label>
-                                <input type="text" id="sozlesmeler-reel-hibrit-banka" class="sozlesmeler-reel-tutar-input" placeholder="Banka (net)" autocomplete="off" title="Havale/EFT matrahı (net); KDV bu tutar üzerinden">
+                                <input type="text" id="sozlesmeler-reel-hibrit-banka" class="sozlesmeler-reel-tutar-input" placeholder="Banka (net)" autocomplete="off" title="Havale/EFT matrahı (net); KDV bu tutar üzerinden" oninput="sozlesmelerReelHibritKdvGuncelle()" onchange="sozlesmelerReelHibritKdvGuncelle()">
+                            </div>
+                            <div class="sozlesmeler-reel-hibrit-field">
+                                <label for="sozlesmeler-reel-hibrit-kdv">KDV</label>
+                                <input type="text" id="sozlesmeler-reel-hibrit-kdv" class="sozlesmeler-reel-tutar-input" placeholder="Banka KDV" autocomplete="off" title="Banka tutarı üzerinden otomatik KDV" readonly tabindex="-1">
                             </div>
                         </div>
                         <button type="button" class="btn-aylik-sec" onclick="sozlesmelerReelDonemTutarUygula()"><i class="fa fa-check"></i> Uygula</button>
@@ -3407,9 +3461,39 @@
                                     <option value="cek">Çek</option>
                                 </select>
                             </div>
+                            <div class="tahsilat-form-grup" id="sozlesme_tahsilat_cek_panel_wrap" style="display:none;">
+                                <label>Çek Detayları</label>
+                                <div class="tahsilat-cek-panel">
+                                    <div class="tahsilat-cek-table-wrap">
+                                        <table class="tahsilat-cek-table">
+                                            <thead>
+                                                <tr>
+                                                    <th>Banka</th>
+                                                    <th>Şube</th>
+                                                    <th>Hesap No</th>
+                                                    <th>Çek No</th>
+                                                    <th>Çek Tarihi</th>
+                                                    <th>Tutarı</th>
+                                                    <th></th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="sozlesme_tahsilat_cek_tbody"></tbody>
+                                        </table>
+                                    </div>
+                                    <div class="tahsilat-cek-toolbar">
+                                        <button type="button" class="tahsilat-cek-btn tahsilat-cek-btn-ekle" onclick="tahsilatCekSatirEkle('sozlesme_tahsilat')"><i class="fa fa-plus"></i> Satır Ekle</button>
+                                    </div>
+                                </div>
+                            </div>
                             <div class="tahsilat-form-grup">
                                 <label>Tarih</label>
                                 <input type="date" id="sozlesme_tahsilat_tarih" name="tahsilat_tarihi">
+                            </div>
+                            <div class="tahsilat-form-grup">
+                                <label>Tahsil eden</label>
+                                <select id="sozlesme_tahsilat_tahsil_eden" name="tahsil_eden">
+                                    <option value="DÖNDÜ GÜLGÖSTEREN" selected>DÖNDÜ GÜLGÖSTEREN</option>
+                                </select>
                             </div>
                             <div class="tahsilat-form-grup">
                                 <label>Açıklama</label>
@@ -3417,6 +3501,7 @@
                             </div>
                             <div class="tahsilat-makbuz-birincil">
                                 <div class="tahsilat-makbuz-birincil-ust">
+                                    <button type="button" class="tahsilat-btn-kaydet" onclick="sozlesmeTahsilatKaydet(); return false;"><i class="fa fa-save"></i> Kaydet</button>
                                     <button type="button" class="tahsilat-btn-makbuz-olustur" onclick="sozlesmeTahsilatMakbuzOlustur(); return false;"><i class="fa fa-receipt"></i> Makbuz oluştur</button>
                                 </div>
                                 <p class="tahsilat-makbuz-birincil-hint"><strong>Makbuz oluştur:</strong> bu formdaki tutarla PDF (kayıt yok). Çoklu ayı cariye tek seferde yazmak için yukarıdaki «Seçilen aylardan tahsilat oluştur» veya üst çubuktaki «Seçilenleri tahsil et» düğmesini kullanın.</p>
@@ -3475,7 +3560,7 @@
                     <div id="cari_ekstre_bos" class="sozlesmeler-aylik-bos">Müşteri seçin, tarih aralığı ve aylık kira girin, Ekstre Göster ile yükleyin.</div>
                 </div>
                 <div id="cari_ekstre_b_panel" class="cari-ekstre-panel" style="display:none;">
-                    <p class="cari-ekstre-aciklama">Borç: yalnızca GİB’e kesilmiş (ETTN’li) faturalar. Alacak: yalnızca havale, EFT, çek ve kredi kartı tahsilatları. İç fatura (INV vb.), nakit ve «banka» ödeme türü bu ekstrede yoktur. Fatura satırına tıklayınca GİB formatında PDF (yazdır / kaydet); tahsilat satırında makbuz PDF.</p>
+                    <p class="cari-ekstre-aciklama">Borç: yalnızca GİB’e kesilmiş (ETTN’li) faturalar. Alacak: yalnızca havale, EFT, banka, çek ve kredi kartı tahsilatları. İç fatura (INV vb.) ve nakit bu ekstrede yoktur. Fatura satırına tıklayınca GİB formatında PDF (yazdır / kaydet); tahsilat satırında makbuz PDF.</p>
                     <div class="cari-ekstre-filtre">
                         <label>Başlangıç</label>
                         <input type="date" id="cari_ekstre_b_baslangic">
@@ -3586,6 +3671,8 @@ let selectedId = null;
 var girisSonMusteriDetayHafifYukleme = false;
 /** Sözleşme reel sekmesi: dönem başlangıç yılı (sözleşme yıldönümü) → KDV dahil sabit tutar (sunucu + yerel). */
 window.__musteriReelDonemTutarlari = window.__musteriReelDonemTutarlari || {};
+window.__musteriReelDonemDetaylari = window.__musteriReelDonemDetaylari || {};
+window.__musteriReelDonemDetayTaslakByMid = window.__musteriReelDonemDetayTaslakByMid || {};
 let musteriler = [];
 window.__faturaRaporReqSeq = window.__faturaRaporReqSeq || 0;
 window.__faturaRaporAktifCtrl = window.__faturaRaporAktifCtrl || null;
@@ -3622,6 +3709,56 @@ function girisFetchAgKopmasinaKarsi(url, options, denemeSayisi) {
         });
     }
     return dene(denemeSayisi);
+}
+
+/**
+ * Kısa ömürlü JSON önbelleği + in-flight isteği tek paylaşımlı promise olarak yeniden kullanır.
+ * - Aynı URL'e arka arkaya çağrı tek HTTP isteğine düşer.
+ * - TTL içerisindeki yanıtı anında döner; opts.swr ile arka planda tazeler ve yeni veriyle promise zincirini günceller.
+ * Müşteri kartı geçişlerinde toplam bekleme süresini saniyelerden milisaniyelere indirir.
+ */
+window.__girisJsonCache = window.__girisJsonCache || new Map();
+window.__girisJsonInflight = window.__girisJsonInflight || new Map();
+function girisFetchJsonCached(url, opts) {
+    opts = opts || {};
+    var ttl = Math.max(0, parseInt(opts.ttlMs == null ? 30000 : opts.ttlMs, 10) || 0);
+    var swr = opts.swr !== false; // varsayılan: stale-while-revalidate
+    var now = Date.now();
+    var cached = window.__girisJsonCache.get(url);
+    if (cached && (now - cached.ts) < ttl) {
+        if (swr && (now - cached.ts) > Math.max(1000, ttl / 2)) {
+            // Yarı ömrü geçtiyse arka planda yenile (kullanıcıya gecikme yok).
+            if (!window.__girisJsonInflight.has(url)) girisFetchJsonNetwork(url, opts);
+        }
+        return Promise.resolve(cached.data);
+    }
+    var inflight = window.__girisJsonInflight.get(url);
+    if (inflight) return inflight;
+    return girisFetchJsonNetwork(url, opts);
+}
+function girisFetchJsonNetwork(url, opts) {
+    opts = opts || {};
+    var fetchOpts = Object.assign({ credentials: 'same-origin' }, opts.fetch || {});
+    var p = fetch(url, fetchOpts).then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+    }).then(function (data) {
+        window.__girisJsonCache.set(url, { ts: Date.now(), data: data });
+        return data;
+    }).finally(function () {
+        window.__girisJsonInflight.delete(url);
+    });
+    window.__girisJsonInflight.set(url, p);
+    return p;
+}
+function girisJsonCacheInvalidatePrefix(prefix) {
+    if (!prefix) return;
+    try {
+        var keys = Array.from(window.__girisJsonCache.keys());
+        for (var i = 0; i < keys.length; i++) {
+            if (keys[i].indexOf(prefix) === 0) window.__girisJsonCache.delete(keys[i]);
+        }
+    } catch (_e) {}
 }
 
 /** fetch yanıtı: giriş HTML'i JSON sanılıp sessiz hata veya boş liste üretmesin (401/oturum). */
@@ -3852,7 +3989,7 @@ let sozlesmeOdenenAySayisi = 0; // tam ödenen ay sayısı
 let sozlesmeKismiOdemeVar = false; // kısmi ödenen ay var mı (sarı kutu)
 let sozlesmeKismiEksikTutar = 0; // kısmi ödenen ayda kalan borç (kutuda gösterilir)
 let sozlesmeTahsilEdilenAyAnahtarlari = new Set(); // API: YYYY-M (normalize: YYYY-M)
-/** Borçlandırılan aylar (|AYLIK_TUTAR| faturası) — tahsil yokken de yeşil; yalnızca borclananMid ile eşleşen müşteride geçerli. */
+/** Borçlandırılan aylar (|AYLIK_TUTAR| faturası) — bu oturumda kırmızı önceliği için tutulur. */
 var sozlesmeAylikBorclananAyAnahtarlari = new Set();
 var sozlesmeAylikBorclananMid = null;
 /** Aylık Tutarlar gridinde seçilen ay anahtarları (yıl-ay, örn. 2026-3). */
@@ -3885,11 +4022,12 @@ function sozlesmeAylikBorclananMusteriDegistir(yeniMid) {
 }
 
 function sozlesmeTahsilSetFromJson(j) {
+    // Geçersiz/eksik yanıtta mevcut seti koru; anlık ağ hatalarında yeşil durum kırmızıya düşmesin.
     if (!j || !j.ok || !Array.isArray(j.aylar)) {
-        sozlesmeTahsilEdilenAyAnahtarlari = new Set();
-        return;
+        return false;
     }
     sozlesmeTahsilEdilenAyAnahtarlari = new Set(j.aylar.map(function (x) { return sozlesmeAylikAyKeyNormalize(String(x)); }));
+    return true;
 }
 
 function sozlesmeTahsilDurumunuYukle() {
@@ -3909,7 +4047,7 @@ function sozlesmeTahsilDurumunuYukle() {
             return j;
         })
         .catch(function () {
-            sozlesmeTahsilEdilenAyAnahtarlari = new Set();
+            // Hata anında mevcut tahsil setini koru.
             return null;
         });
 }
@@ -3931,6 +4069,11 @@ function sozlesmeAylikGridParalelYukle(mid) {
         sozlesmeTahsilSetFromJson(triple[0]);
         var rj = triple[2];
         window.__musteriReelDonemTutarlari = (rj && rj.ok && rj.map && typeof rj.map === 'object') ? rj.map : {};
+        window.__musteriReelDonemDetaylari = (rj && rj.ok && rj.detay_map && typeof rj.detay_map === 'object') ? rj.detay_map : {};
+        try {
+            window.__musteriReelDonemDetayTaslakByMid = window.__musteriReelDonemDetayTaslakByMid || {};
+            if (mid) delete window.__musteriReelDonemDetayTaslakByMid[String(mid)];
+        } catch (eDr) {}
         var cj = triple[1];
         if (cj && cj.ok && cj.cache && Array.isArray(cj.cache.aylar) && cj.cache.aylar.length) {
             if (!sozlesmelerAylikOnbellekFormlaUyumlu(cj.cache)) return false;
@@ -3941,8 +4084,13 @@ function sozlesmeAylikGridParalelYukle(mid) {
         if (!ok) sozlesmelerAylikGuncelle();
         else sozlesmelerReelDonemTutarlariUygula();
     }).catch(function () {
-        sozlesmeTahsilEdilenAyAnahtarlari = new Set();
+        // Paralel yükleme hatasında da mevcut tahsil setini koru.
         window.__musteriReelDonemTutarlari = {};
+        window.__musteriReelDonemDetaylari = {};
+        try {
+            window.__musteriReelDonemDetayTaslakByMid = window.__musteriReelDonemDetayTaslakByMid || {};
+            if (mid) delete window.__musteriReelDonemDetayTaslakByMid[String(mid)];
+        } catch (eDr2) {}
         sozlesmelerAylikGuncelle();
     });
 }
@@ -4249,11 +4397,39 @@ function sozlesmelerReelHibritAlanlariTemizle() {
         var e = document.getElementById(hid);
         if (e) e.value = '';
     });
+    var kdvEl = document.getElementById('sozlesmeler-reel-hibrit-kdv');
+    if (kdvEl) kdvEl.value = '';
 }
 
 function _sozlesmelerReelHibritParseEl(el) {
     if (!el || String(el.value || '').trim() === '') return NaN;
     return parseFloat(String(el.value).replace(/\s/g, '').replace(',', '.').trim());
+}
+
+function _sozlesmelerReelKdvOranOku() {
+    var kdvEl = document.getElementById('kdv_oran');
+    var kdv = kdvEl && kdvEl.value !== '' ? parseFloat(String(kdvEl.value).replace(',', '.')) : 20;
+    if (isNaN(kdv)) kdv = 20;
+    return kdv;
+}
+
+function sozlesmelerReelHibritKdvGuncelle() {
+    var sel = document.getElementById('sozlesmeler-reel-tutar-tip');
+    var kdvOut = document.getElementById('sozlesmeler-reel-hibrit-kdv');
+    var bankaEl = document.getElementById('sozlesmeler-reel-hibrit-banka');
+    if (!kdvOut) return;
+    if (!sel || sel.value !== 'hibrit') {
+        kdvOut.value = '';
+        return;
+    }
+    var bankaNet = _sozlesmelerReelHibritParseEl(bankaEl);
+    if (isNaN(bankaNet) || bankaNet <= 0) {
+        kdvOut.value = '';
+        return;
+    }
+    var kdv = _sozlesmelerReelKdvOranOku();
+    var kdvTutar = Math.round((bankaNet * kdv / 100) * 100) / 100;
+    kdvOut.value = String(kdvTutar);
 }
 
 /** Toplam / net değişince banka = toplam (net yoksa) veya toplam − net (Aylık Kira satırı ile aynı). */
@@ -4268,18 +4444,21 @@ function sozlesmelerReelHibritBankaSenkron() {
     var total = rawT ? _sozlesmelerReelHibritParseEl(elT) : NaN;
     if (!rawT || isNaN(total) || total <= 0) {
         elB.value = '';
+        sozlesmelerReelHibritKdvGuncelle();
         return;
     }
     var nakStr = String(elN.value != null ? elN.value : '').trim();
     var nakitVal = nakStr ? _sozlesmelerReelHibritParseEl(elN) : NaN;
     if (!nakStr || isNaN(nakitVal) || nakitVal <= 0) {
         elB.value = String(Math.round(total * 100) / 100);
+        sozlesmelerReelHibritKdvGuncelle();
         return;
     }
     var capped = Math.min(nakitVal, total);
     if (capped !== nakitVal) elN.value = String(Math.round(capped * 100) / 100);
     var rem = Math.max(0, Math.round((total - capped) * 100) / 100);
     elB.value = rem > 0 ? String(rem) : '';
+    sozlesmelerReelHibritKdvGuncelle();
 }
 
 function sozlesmelerReelHibritToplamDegisti() {
@@ -4324,8 +4503,7 @@ function sozlesmelerReelHibritDoldurFromKdvDahil(kdvDahil) {
         return false;
     }
     var kdvEl = document.getElementById('kdv_oran');
-    var kdv = kdvEl && kdvEl.value !== '' ? parseFloat(String(kdvEl.value).replace(',', '.')) : 20;
-    if (isNaN(kdv)) kdv = 20;
+    var kdv = _sozlesmelerReelKdvOranOku();
     var kdvM = 1 + kdv / 100;
     var denom = k.rN + k.rB * kdvM;
     if (!(denom > 0)) return false;
@@ -4335,20 +4513,166 @@ function sozlesmelerReelHibritDoldurFromKdvDahil(kdvDahil) {
     elT.value = String(Math.round((n + b) * 100) / 100);
     elN.value = String(n);
     elB.value = String(b);
+    sozlesmelerReelHibritKdvGuncelle();
     return true;
+}
+
+function _sozlesmelerReelDetayAnlamliMi(d) {
+    if (!d || typeof d !== 'object') return false;
+    var t = String(d.tip || '').trim().toLowerCase();
+    function _vv(v){ if (v === null || v === undefined || v === '') return false; var n = parseFloat(String(v).replace(',', '.')); return !isNaN(n); }
+    if (t === 'hibrit') {
+        return _vv(d.hibrit_toplam) || _vv(d.hibrit_net) || _vv(d.hibrit_banka);
+    }
+    if (t === 'dahil' || t === 'haric' || t === 'net') {
+        return _vv(d.giris_tutar);
+    }
+    return false;
+}
+
+function sozlesmelerReelDetayYukle(yilKey) {
+    var mid = selectedId ? String(selectedId) : '';
+    if (mid) {
+        var byMid = window.__musteriReelDonemDetayTaslakByMid || {};
+        var bm = byMid[mid] || {};
+        var bd = bm[String(yilKey)];
+        if (_sozlesmelerReelDetayAnlamliMi(bd)) return bd;
+    }
+    var dm = window.__musteriReelDonemDetaylari || {};
+    if (!dm || typeof dm !== 'object') return null;
+    var sd = dm[String(yilKey)];
+    return _sozlesmelerReelDetayAnlamliMi(sd) ? sd : null;
+}
+
+function sozlesmelerReelDetayTaslakYaz() {
+    if (window.__reelDetayHydrating) return;
+    var mid = selectedId ? String(selectedId) : '';
+    var sel = document.getElementById('sozlesmeler-reel-yil-select');
+    if (!mid || !sel || !sel.value) return;
+    var yil = String(sel.value);
+    var tipEl = document.getElementById('sozlesmeler-reel-tutar-tip');
+    var tip = tipEl && tipEl.value ? String(tipEl.value).trim().toLowerCase() : 'dahil';
+    var inp = document.getElementById('sozlesmeler-reel-tutar');
+    var hTop = document.getElementById('sozlesmeler-reel-hibrit-toplam');
+    var hNet = document.getElementById('sozlesmeler-reel-hibrit-net');
+    var hBan = document.getElementById('sozlesmeler-reel-hibrit-banka');
+    function pf(v){ var n=parseFloat(String(v||'').replace(',', '.')); return isNaN(n)?null:n; }
+    var byMid = window.__musteriReelDonemDetayTaslakByMid = window.__musteriReelDonemDetayTaslakByMid || {};
+    byMid[mid] = byMid[mid] || {};
+    byMid[mid][yil] = {
+        tip: tip,
+        giris_tutar: (tip === 'hibrit') ? null : pf(inp && inp.value),
+        hibrit_toplam: (tip === 'hibrit') ? pf(hTop && hTop.value) : null,
+        hibrit_net: (tip === 'hibrit') ? pf(hNet && hNet.value) : null,
+        hibrit_banka: (tip === 'hibrit') ? pf(hBan && hBan.value) : null
+    };
+}
+
+function sozlesmelerReelDetayUIUygula(detay, fallbackKdvDahil) {
+    if (!_sozlesmelerReelDetayAnlamliMi(detay)) return false;
+    var tipEl = document.getElementById('sozlesmeler-reel-tutar-tip');
+    var inp = document.getElementById('sozlesmeler-reel-tutar');
+    var hTop = document.getElementById('sozlesmeler-reel-hibrit-toplam');
+    var hNet = document.getElementById('sozlesmeler-reel-hibrit-net');
+    var hBan = document.getElementById('sozlesmeler-reel-hibrit-banka');
+    var tip = String(detay.tip || '').trim().toLowerCase();
+    if (tipEl && (tip === 'dahil' || tip === 'haric' || tip === 'net' || tip === 'hibrit')) {
+        tipEl.value = tip;
+    } else if (tipEl) {
+        tipEl.value = 'dahil';
+        tip = 'dahil';
+    }
+    if (typeof sozlesmelerReelTutarTipPlaceholder === 'function') {
+        sozlesmelerReelTutarTipPlaceholder();
+    }
+    function _fmt(n) {
+        var x = parseFloat(String(n).replace(',', '.'));
+        if (isNaN(x)) return '';
+        return String(Math.round(x * 100) / 100);
+    }
+    if (tip === 'hibrit') {
+        if (hTop) hTop.value = (detay.hibrit_toplam != null) ? _fmt(detay.hibrit_toplam) : '';
+        if (hNet) hNet.value = (detay.hibrit_net != null) ? _fmt(detay.hibrit_net) : '';
+        if (hBan) hBan.value = (detay.hibrit_banka != null) ? _fmt(detay.hibrit_banka) : '';
+        var hepBos = (!hTop || !String(hTop.value || '').trim())
+            && (!hNet || !String(hNet.value || '').trim())
+            && (!hBan || !String(hBan.value || '').trim());
+        if (hepBos && fallbackKdvDahil != null && !isNaN(fallbackKdvDahil)) {
+            sozlesmelerReelHibritDoldurFromKdvDahil(fallbackKdvDahil);
+        }
+        if (inp) inp.value = '';
+        sozlesmelerReelHibritKdvGuncelle();
+        return true;
+    }
+    if (inp) {
+        if (detay.giris_tutar != null && !isNaN(parseFloat(detay.giris_tutar))) {
+            inp.value = _fmt(detay.giris_tutar);
+        } else if (fallbackKdvDahil != null && !isNaN(fallbackKdvDahil)) {
+            inp.value = _fmt(fallbackKdvDahil);
+        } else {
+            inp.value = '';
+        }
+    }
+    return true;
+}
+
+function _sozlesmelerReelDetayToStoredKdvDahil(detay, fallbackKdvDahil) {
+    if (!_sozlesmelerReelDetayAnlamliMi(detay)) {
+        var fb = parseFloat(fallbackKdvDahil);
+        return isNaN(fb) ? null : fb;
+    }
+    var tip = String(detay.tip || '').trim().toLowerCase();
+    if (tip === 'hibrit') {
+        var netN = parseFloat(String(detay.hibrit_net != null ? detay.hibrit_net : '').replace(',', '.'));
+        var banN = parseFloat(String(detay.hibrit_banka != null ? detay.hibrit_banka : '').replace(',', '.'));
+        if (isNaN(netN) || isNaN(banN)) {
+            var fbH = parseFloat(fallbackKdvDahil);
+            return isNaN(fbH) ? null : fbH;
+        }
+        var kdv = _sozlesmelerReelKdvOranOku();
+        return Math.round((netN + banN * (1 + kdv / 100)) * 100) / 100;
+    }
+    var fb = parseFloat(fallbackKdvDahil);
+    return isNaN(fb) ? null : fb;
+}
+
+function _sozlesmelerReelYilSecimiGridAnlikUygula(yilNum, kdvDahilTutar) {
+    if (!yilNum || isNaN(yilNum)) return;
+    var t = parseFloat(kdvDahilTutar);
+    if (isNaN(t) || t < 0) return;
+    var basEl = document.getElementById('sozlesme_baslangic');
+    var basStr = basEl && basEl.value ? basEl.value.trim() : '';
+    if (!basStr) return;
+    var keys = sozlesmeReelDonemAyKeys(basStr, yilNum);
+    if (!keys || !keys.length) return;
+    function paintGrid(grid) {
+        if (!grid) return;
+        for (var i = 0; i < keys.length; i++) {
+            var card = _sozlesmeAyKartBul(grid, keys[i]);
+            if (!card) continue;
+            card.setAttribute('data-tutar-kdv', String(t));
+            card.setAttribute('data-secilebilir', t > 0 ? '1' : '0');
+            var deg = card.querySelector('.aylik-deger');
+            if (deg) deg.textContent = t.toFixed(2);
+        }
+    }
+    paintGrid(document.getElementById('sozlesmeler-reel-aylik-grid'));
+    paintGrid(document.getElementById('sozlesmeler-aylik-grid'));
 }
 
 function sozlesmelerReelYilSecimineGoreTutarAlani() {
     var sel = document.getElementById('sozlesmeler-reel-yil-select');
     var wrap = document.getElementById('sozlesmeler-reel-tutar-wrap');
     var inp = document.getElementById('sozlesmeler-reel-tutar');
-    if (!sel || !wrap) return;
+    var tipEl = document.getElementById('sozlesmeler-reel-tutar-tip');
+    if (!sel || !wrap || !inp) return;
     var basEl = document.getElementById('sozlesme_baslangic');
     var basStr = basEl && basEl.value ? basEl.value.trim() : '';
     if (!basStr) {
         wrap.classList.remove('is-visible');
-        if (inp) inp.value = '';
+        inp.value = '';
         sozlesmelerReelHibritAlanlariTemizle();
+        if (typeof sozlesmelerReelHibritKdvGuncelle === 'function') sozlesmelerReelHibritKdvGuncelle();
         return;
     }
     wrap.classList.add('is-visible');
@@ -4358,31 +4682,51 @@ function sozlesmelerReelYilSecimineGoreTutarAlani() {
         if (typeof sozlesmelerReelTutarTipPlaceholder === 'function') sozlesmelerReelTutarTipPlaceholder();
         return;
     }
-    var map = window.__musteriReelDonemTutarlari || {};
-    var tufeListe = sozlesmelerReelTufeListeHaritasi();
-    var eff = sozlesmelerReelDonemEffectiveYillik(map, basStr, tufeListe);
     var yNum = parseInt(y, 10);
-    var t = map[y];
-    if (t == null) t = map[String(yNum)];
-    if (t == null || isNaN(parseFloat(t))) t = eff[yNum];
-    var tipEl = document.getElementById('sozlesmeler-reel-tutar-tip');
-    var tipv = tipEl && tipEl.value ? tipEl.value : 'dahil';
-    if (inp) {
-        if (t != null && !isNaN(parseFloat(t))) {
-            var tv = parseFloat(t);
-            if (tipv === 'hibrit') {
-                if (!sozlesmelerReelHibritDoldurFromKdvDahil(tv)) {
-                    sozlesmelerReelHibritAlanlariTemizle();
+    if (isNaN(yNum)) return;
+    window.__reelDetayHydrating = true;
+    try {
+        var map = window.__musteriReelDonemTutarlari || {};
+        var tufeListe = sozlesmelerReelTufeListeHaritasi();
+        var eff = sozlesmelerReelDonemEffectiveYillik(map, basStr, tufeListe);
+        var t = map[y];
+        if (t == null) t = map[String(yNum)];
+        if (t == null || isNaN(parseFloat(t))) t = eff[yNum];
+        var fallback = (t != null && !isNaN(parseFloat(t))) ? parseFloat(t) : null;
+        var detay = sozlesmelerReelDetayYukle(yNum);
+        var anlamli = _sozlesmelerReelDetayAnlamliMi(detay);
+        var kdvDahilGoster = null;
+        if (anlamli) {
+            sozlesmelerReelDetayUIUygula(detay, fallback);
+            kdvDahilGoster = _sozlesmelerReelDetayToStoredKdvDahil(detay, fallback);
+        } else {
+            /* Kayıtlı detay yok: kart hibrit ise o yılın tutarını otomatik nakit/banka oranlarına böl,
+               aksi halde tek kutuda KDV dahil göster. */
+            var karma = (typeof girisKiraKarmaPaylariOkuma === 'function') ? girisKiraKarmaPaylariOkuma() : { split: false };
+            var hibritOlsun = !!(karma && karma.split);
+            sozlesmelerReelHibritAlanlariTemizle();
+            inp.value = '';
+            if (hibritOlsun && fallback != null) {
+                if (tipEl) tipEl.value = 'hibrit';
+                if (typeof sozlesmelerReelTutarTipPlaceholder === 'function') sozlesmelerReelTutarTipPlaceholder();
+                if (!sozlesmelerReelHibritDoldurFromKdvDahil(fallback)) {
+                    /* Karma payları hesaplanamadı: tek kutuya düş */
+                    if (tipEl) tipEl.value = 'dahil';
+                    if (typeof sozlesmelerReelTutarTipPlaceholder === 'function') sozlesmelerReelTutarTipPlaceholder();
+                    inp.value = String(fallback);
                 }
             } else {
-                inp.value = String(tv);
+                if (tipEl) tipEl.value = 'dahil';
+                if (typeof sozlesmelerReelTutarTipPlaceholder === 'function') sozlesmelerReelTutarTipPlaceholder();
+                inp.value = (fallback != null) ? String(fallback) : '';
             }
-        } else {
-            inp.value = '';
-            if (tipv === 'hibrit') sozlesmelerReelHibritAlanlariTemizle();
+            kdvDahilGoster = fallback;
         }
+        if (typeof sozlesmelerReelHibritKdvGuncelle === 'function') sozlesmelerReelHibritKdvGuncelle();
+        if (kdvDahilGoster != null) _sozlesmelerReelYilSecimiGridAnlikUygula(yNum, kdvDahilGoster);
+    } finally {
+        window.__reelDetayHydrating = false;
     }
-    if (typeof sozlesmelerReelTutarTipPlaceholder === 'function') sozlesmelerReelTutarTipPlaceholder();
 }
 
 /** Reel tutar: tek kutu vs hibrit üçlü görünümü + placeholder. */
@@ -4420,6 +4764,7 @@ function sozlesmelerReelTutarTipPlaceholder() {
             if (!isNaN(g) && g > 0) sozlesmelerReelHibritDoldurFromKdvDahil(g);
         }
     }
+    if (typeof sozlesmelerReelHibritKdvGuncelle === 'function') sozlesmelerReelHibritKdvGuncelle();
 }
 
 /**
@@ -4455,6 +4800,69 @@ function sozlesmelerReelGirisStoredTutarUyari() {
     return 'Geçerli bir tutar girin.';
 }
 
+/**
+ * Reel/manuel override yansıtırken kısmi tahsilat farkındalığını koru.
+ * Sözleşme aylığı override (örn. hibrit 100.000) iken zaten 52.000 tahsil edilmişse
+ * kart kalan 48.000'i kırmızıdan farklı renkte gösterir; tam ödendi ise yeşil kalır.
+ */
+function sozlesmelerAyKartTutarUygula(card, override) {
+    if (!card) return;
+    var tut = parseFloat(override);
+    if (isNaN(tut) || tut < 0) return;
+    tut = Math.round(tut * 100) / 100;
+    var odenen = parseFloat(card.getAttribute('data-odenen-kdv') || '0');
+    if (isNaN(odenen) || odenen < 0) odenen = 0;
+    var kalan = Math.max(Math.round((tut - odenen) * 100) / 100, 0);
+    var kismi = odenen > 0 && kalan > 0.01;
+    var tamOdendi = odenen > 0 && kalan <= 0.01;
+    // Reel override geldiğinde tahsil edilmiş ay yeşilini KORU.
+    // Tahsilat verisi data-odenen-kdv ile değil, AYLIK_TAH markeri ile aya atanıyor;
+    // bu yüzden kartın mevcut yeşil durumu (set / cache / mevcut sınıf) güvenilir kaynak.
+    if (!tamOdendi && !kismi) {
+        var keyAttr = card.getAttribute('data-ay-key') || '';
+        var keyNorm = (typeof sozlesmeAylikAyKeyNormalize === 'function') ? sozlesmeAylikAyKeyNormalize(keyAttr) : keyAttr;
+        var setHit = false;
+        try { setHit = !!(typeof sozlesmeTahsilEdilenAyAnahtarlari !== 'undefined' && sozlesmeTahsilEdilenAyAnahtarlari && sozlesmeTahsilEdilenAyAnahtarlari.has && sozlesmeTahsilEdilenAyAnahtarlari.has(keyNorm)); } catch (eK) {}
+        var cacheHit = false;
+        try {
+            var soncache = (typeof window !== 'undefined') ? window.__sozlesmelerAylikSonCacheObj : null;
+            if (!setHit && soncache && Array.isArray(soncache.aylar)) {
+                for (var ic = 0; ic < soncache.aylar.length; ic++) {
+                    var ac = soncache.aylar[ic];
+                    if (!ac || !ac.tahsil_edildi) continue;
+                    var akn = sozlesmeAylikAyKeyNormalize(String(ac.ay_key || (ac.yil + '-' + ac.ay)));
+                    if (akn === keyNorm) { cacheHit = true; break; }
+                }
+            }
+        } catch (eC2) {}
+        var domGreen = card.classList && card.classList.contains('sozlesmeler-ay-kart-odendi');
+        var borcKirmizi = false;
+        try {
+            borcKirmizi = !!(typeof selectedId !== 'undefined'
+                && selectedId
+                && sozlesmeAylikBorclananMid === parseInt(selectedId, 10)
+                && sozlesmeAylikBorclananAyAnahtarlari
+                && sozlesmeAylikBorclananAyAnahtarlari.has
+                && sozlesmeAylikBorclananAyAnahtarlari.has(keyNorm));
+        } catch (eBr) {}
+        var tahsilYolu = setHit || cacheHit;
+        if (!(borcKirmizi && !tahsilYolu) && (setHit || cacheHit || domGreen)) {
+            tamOdendi = true;
+        }
+    }
+    var goster = kismi ? kalan : tut;
+    card.setAttribute('data-tutar-kdv', String(goster));
+    card.setAttribute('data-brut-kdv', String(tut));
+    card.setAttribute('data-kismi', kismi ? '1' : '0');
+    card.setAttribute('data-secilebilir', goster > 0 ? '1' : '0');
+    card.classList.remove('sozlesmeler-ay-kart-kismi', 'sozlesmeler-ay-kart-odendi', 'sozlesmeler-ay-kart-odenmedi');
+    if (kismi) card.classList.add('sozlesmeler-ay-kart-kismi');
+    else if (tamOdendi) card.classList.add('sozlesmeler-ay-kart-odendi');
+    else card.classList.add('sozlesmeler-ay-kart-odenmedi');
+    var deg = card.querySelector('.aylik-deger');
+    if (deg) deg.textContent = goster.toFixed(2);
+}
+
 /** Ay anahtarı (örn. 2025-3) ile gridde tek kart bulur. */
 function _sozlesmeAyKartBul(grid, ayKey) {
     if (!grid || ayKey == null || ayKey === '') return null;
@@ -4481,10 +4889,7 @@ function _sozlesmelerReelAyOzelTutarlariIkiGriddeUygula() {
             tutar = Math.round(tutar * 100) / 100;
             var card = _sozlesmeAyKartBul(grid, ayKey);
             if (!card) return;
-            card.setAttribute('data-tutar-kdv', String(tutar));
-            card.setAttribute('data-secilebilir', tutar > 0 ? '1' : '0');
-            var deg = card.querySelector('.aylik-deger');
-            if (deg) deg.textContent = tutar.toFixed(2);
+            sozlesmelerAyKartTutarUygula(card, tutar);
         });
     }
     paintGrid(document.getElementById('sozlesmeler-reel-aylik-grid'));
@@ -4539,10 +4944,7 @@ function sozlesmelerReelDonemTutarlariUygula() {
             var key = card.getAttribute('data-ay-key');
             if (!key || overrides[key] == null) return;
             var tut = overrides[key];
-            card.setAttribute('data-tutar-kdv', String(tut));
-            card.setAttribute('data-secilebilir', tut > 0 ? '1' : '0');
-            var deg = card.querySelector('.aylik-deger');
-            if (deg) deg.textContent = tut.toFixed(2);
+            sozlesmelerAyKartTutarUygula(card, tut);
         });
     }
     reelDonemOverridesKartaUygula(grid);
@@ -4621,6 +5023,19 @@ function sozlesmelerReelDonemTutarUygula() {
     }
     window.__musteriReelDonemTutarlari = window.__musteriReelDonemTutarlari || {};
     window.__musteriReelDonemTutarlari[String(donemYil)] = tutar;
+    window.__musteriReelDonemDetaylari = window.__musteriReelDonemDetaylari || {};
+    var tipElA = document.getElementById('sozlesmeler-reel-tutar-tip');
+    var tipA = tipElA && tipElA.value ? String(tipElA.value).trim().toLowerCase() : 'dahil';
+    var hTopA = document.getElementById('sozlesmeler-reel-hibrit-toplam');
+    var hNetA = document.getElementById('sozlesmeler-reel-hibrit-net');
+    var hBanA = document.getElementById('sozlesmeler-reel-hibrit-banka');
+    window.__musteriReelDonemDetaylari[String(donemYil)] = {
+        tip: tipA,
+        giris_tutar: (tipA === 'hibrit') ? null : (parseFloat(String((inp && inp.value) || '').replace(',', '.')) || null),
+        hibrit_toplam: (tipA === 'hibrit') ? (parseFloat(String((hTopA && hTopA.value) || '').replace(',', '.')) || null) : null,
+        hibrit_net: (tipA === 'hibrit') ? (parseFloat(String((hNetA && hNetA.value) || '').replace(',', '.')) || null) : null,
+        hibrit_banka: (tipA === 'hibrit') ? (parseFloat(String((hBanA && hBanA.value) || '').replace(',', '.')) || null) : null
+    };
     sozlesmelerReelDonemTutarlariUygula();
     if (typeof sozlesmelerReelDonemEditorSonrakiSecimeHazirla === 'function') {
         sozlesmelerReelDonemEditorSonrakiSecimeHazirla();
@@ -4669,11 +5084,29 @@ function sozlesmelerReelDonemTutarKaydet() {
     }
     reelKaydetDurumTemizle();
     reelKaydetBtnYukleniyor();
+    var tipElSave = document.getElementById('sozlesmeler-reel-tutar-tip');
+    var tipSave = tipElSave && tipElSave.value ? String(tipElSave.value).trim().toLowerCase() : 'dahil';
+    var hTopSave = document.getElementById('sozlesmeler-reel-hibrit-toplam');
+    var hNetSave = document.getElementById('sozlesmeler-reel-hibrit-net');
+    var hBanSave = document.getElementById('sozlesmeler-reel-hibrit-banka');
+    var girisTutarSave = (tipSave === 'hibrit') ? null : (parseFloat(String((inp && inp.value) || '').replace(',', '.')) || null);
+    var hibTopSave = (tipSave === 'hibrit') ? (parseFloat(String((hTopSave && hTopSave.value) || '').replace(',', '.')) || null) : null;
+    var hibNetSave = (tipSave === 'hibrit') ? (parseFloat(String((hNetSave && hNetSave.value) || '').replace(',', '.')) || null) : null;
+    var hibBanSave = (tipSave === 'hibrit') ? (parseFloat(String((hBanSave && hBanSave.value) || '').replace(',', '.')) || null) : null;
     girisFetchAgKopmasinaKarsi('/giris/api/reel-donem-tutar', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({ musteri_id: mid, donem_yil: donemYil, tutar_kdv_dahil: tutar })
+        body: JSON.stringify({
+            musteri_id: mid,
+            donem_yil: donemYil,
+            tutar_kdv_dahil: tutar,
+            giris_tip: tipSave,
+            giris_tutar: girisTutarSave,
+            hibrit_toplam: hibTopSave,
+            hibrit_net: hibNetSave,
+            hibrit_banka: hibBanSave
+        })
     }, 3).then(function (r) {
         return r.json().then(function (j) { return { ok: r.ok, j: j }; });
     }).then(function (res) {
@@ -4686,6 +5119,20 @@ function sozlesmelerReelDonemTutarKaydet() {
         var yu = Math.round(tutar * 100) / 100;
         window.__musteriReelDonemTutarlari = window.__musteriReelDonemTutarlari || {};
         window.__musteriReelDonemTutarlari[String(donemYil)] = yu;
+        window.__musteriReelDonemDetaylari = window.__musteriReelDonemDetaylari || {};
+        var _tipEl0 = document.getElementById('sozlesmeler-reel-tutar-tip');
+        var _tip0 = _tipEl0 && _tipEl0.value ? String(_tipEl0.value).trim().toLowerCase() : 'dahil';
+        var _inp0 = document.getElementById('sozlesmeler-reel-tutar');
+        var _hTop0 = document.getElementById('sozlesmeler-reel-hibrit-toplam');
+        var _hNet0 = document.getElementById('sozlesmeler-reel-hibrit-net');
+        var _hBan0 = document.getElementById('sozlesmeler-reel-hibrit-banka');
+        window.__musteriReelDonemDetaylari[String(donemYil)] = {
+            tip: _tip0,
+            giris_tutar: (_tip0 === 'hibrit') ? null : (parseFloat(String((_inp0 && _inp0.value) || '').replace(',', '.')) || null),
+            hibrit_toplam: (_tip0 === 'hibrit') ? (parseFloat(String((_hTop0 && _hTop0.value) || '').replace(',', '.')) || null) : null,
+            hibrit_net: (_tip0 === 'hibrit') ? (parseFloat(String((_hNet0 && _hNet0.value) || '').replace(',', '.')) || null) : null,
+            hibrit_banka: (_tip0 === 'hibrit') ? (parseFloat(String((_hBan0 && _hBan0.value) || '').replace(',', '.')) || null) : null
+        };
         return girisFetchAgKopmasinaKarsi('/giris/api/reel-donem-tutarlar?musteri_id=' + encodeURIComponent(mid), { credentials: 'same-origin' }, 3)
             .then(function (r2) { return r2.json(); });
     }).then(function (rj) {
@@ -4694,6 +5141,7 @@ function sozlesmelerReelDonemTutarKaydet() {
         if (rj && rj.ok && rj.map && typeof rj.map === 'object') {
             window.__musteriReelDonemTutarlari = rj.map;
         }
+        window.__musteriReelDonemDetaylari = (rj && rj.ok && rj.detay_map && typeof rj.detay_map === 'object') ? rj.detay_map : (window.__musteriReelDonemDetaylari || {});
         window.__musteriReelAyOzelTutarByMid = window.__musteriReelAyOzelTutarByMid || {};
         delete window.__musteriReelAyOzelTutarByMid[String(mid)];
         sozlesmelerReelDonemTutarlariUygula();
@@ -4750,6 +5198,7 @@ function sozlesmelerReelDonemTutarVazgec() {
         .then(function (r) { return r.json(); })
         .then(function (rj) {
             window.__musteriReelDonemTutarlari = (rj && rj.ok && rj.map && typeof rj.map === 'object') ? rj.map : {};
+            window.__musteriReelDonemDetaylari = (rj && rj.ok && rj.detay_map && typeof rj.detay_map === 'object') ? rj.detay_map : {};
             if (mid) {
                 window.__musteriReelAyOzelTutarByMid = window.__musteriReelAyOzelTutarByMid || {};
                 delete window.__musteriReelAyOzelTutarByMid[String(mid)];
@@ -4785,6 +5234,14 @@ function sozlesmelerAylikBeklenenAySayisiFormdan() {
 
 /** Önbellek satır sayısı form ile uyuşmuyorsa (ör. DB kısa bitiş, formda uzatılmış bitiş) canlı çizim gerekir. */
 function sozlesmelerAylikOnbellekFormlaUyumlu(cacheObj) {
+    // Form alanları henüz hidrasyon olmadıysa (sözleşme başlangıcı boş) cache'i
+    // doğrudan kabul et. Aksi halde yanlışlıkla canlı çizime düşüp ayları
+    // "bugünden itibaren" 12 ay göstererek geçmiş ayları gizleyebiliyor.
+    var basEl = document.getElementById('sozlesme_baslangic');
+    var formHydrated = !!(basEl && String(basEl.value || '').trim());
+    var hasCacheAylar = !!(cacheObj && Array.isArray(cacheObj.aylar) && cacheObj.aylar.length);
+    if (!formHydrated && hasCacheAylar) return true;
+    if (girisSonMusteriDetayHafifYukleme && hasCacheAylar) return true;
     var nForm = sozlesmelerAylikBeklenenAySayisiFormdan();
     var nCache = (cacheObj && Array.isArray(cacheObj.aylar)) ? cacheObj.aylar.length : 0;
     if (nForm > 0 && nCache > 0 && nForm !== nCache) return false;
@@ -4968,13 +5425,24 @@ function sozlesmelerAylikCacheRender(cacheObj, preferLiveTahsil) {
         var t = parseFloat(a.tutar_kdv_dahil);
         var secilebilir = !isNaN(t) && t > 0;
         var tutarStr = secilebilir ? t.toFixed(2) : '—';
-        var borcG = (typeof selectedId !== 'undefined' && selectedId && sozlesmeAylikBorclananMid === parseInt(selectedId, 10) && sozlesmeAylikBorclananAyAnahtarlari.has(ayKeyNorm));
-        var odendi = preferLiveTahsil
-            ? (sozlesmeTahsilEdilenAyAnahtarlari.has(ayKeyNorm) || borcG)
-            : (!!a.tahsil_edildi || borcG);
-        var colorClass = odendi ? ' sozlesmeler-ay-kart-odendi' : ' sozlesmeler-ay-kart-odenmedi';
+        var borcKirmizi = (typeof selectedId !== 'undefined'
+            && selectedId
+            && sozlesmeAylikBorclananMid === parseInt(selectedId, 10)
+            && sozlesmeAylikBorclananAyAnahtarlari.has(ayKeyNorm));
+        // Borçlandırma vurgusu kırmızıyı yalnızca ay henüz tahsil edilmemişken uygula;
+        // tahsil edilmiş (veya canlı tahsil setinde) borçlandırılmış ay yeşil kalmalı.
+        var tahsilFlag = preferLiveTahsil
+            ? (sozlesmeTahsilEdilenAyAnahtarlari.has(ayKeyNorm) || !!a.tahsil_edildi)
+            : (!!a.tahsil_edildi);
+        var odendi = (borcKirmizi && !tahsilFlag) ? false : tahsilFlag;
+        var kismi = !!a.kismi_tahsilat && !odendi;
+        var colorClass = kismi
+            ? ' sozlesmeler-ay-kart-kismi'
+            : (odendi ? ' sozlesmeler-ay-kart-odendi' : ' sozlesmeler-ay-kart-odenmedi');
         var selClass = sozlesmeAylikSeciliAnahtarlar.has(ayKey) ? ' sozlesmeler-ay-kart-secili' : '';
-        html += '<div class="sozlesmeler-ay-kart' + colorClass + selClass + '" data-ay-key="' + ayKey + '" data-secilebilir="' + (secilebilir ? '1' : '0') + '" data-yil="' + yil + '" data-ay="' + ay + '" data-tutar-kdv="' + (secilebilir ? String(t) : '') + '"><h3>' + ayAdi + '</h3><div class="sozlesmeler-ay-yil">' + yil + '</div><div class="aylik-deger">' + tutarStr + '</div></div>';
+        var odenenAttr = (a.odenen_tutar_kdv != null) ? String(parseFloat(a.odenen_tutar_kdv) || 0) : '0';
+        var brutAttr = (a.brut_tutar_kdv != null) ? String(parseFloat(a.brut_tutar_kdv) || 0) : (secilebilir ? String(t) : '');
+        html += '<div class="sozlesmeler-ay-kart' + colorClass + selClass + '" data-ay-key="' + ayKey + '" data-secilebilir="' + (secilebilir ? '1' : '0') + '" data-yil="' + yil + '" data-ay="' + ay + '" data-tutar-kdv="' + (secilebilir ? String(t) : '') + '" data-odenen-kdv="' + odenenAttr + '" data-brut-kdv="' + brutAttr + '" data-kismi="' + (kismi ? '1' : '0') + '"><h3>' + ayAdi + '</h3><div class="sozlesmeler-ay-yil">' + yil + '</div><div class="aylik-deger">' + tutarStr + '</div></div>';
     });
     if (!html.trim()) {
         sozlesmelerAylikTwinGridHtml('');
@@ -4982,6 +5450,7 @@ function sozlesmelerAylikCacheRender(cacheObj, preferLiveTahsil) {
     } else {
         sozlesmelerAylikTwinGridHtml(html);
     }
+    _sozlesmelerAylikHoverSifirla();
     var mAlt = document.getElementById('sozlesmeler-aylik-makbuz-alt');
     if (mAlt) mAlt.style.display = html.trim() ? 'block' : 'none';
     sozlesmeAylikSecimOzetGuncelle();
@@ -5008,6 +5477,7 @@ function sozlesmelerAylikHizliYukle(force) {
             var j = triple[1];
             var rj = triple[2];
             window.__musteriReelDonemTutarlari = (rj && rj.ok && rj.map && typeof rj.map === 'object') ? rj.map : {};
+            window.__musteriReelDonemDetaylari = (rj && rj.ok && rj.detay_map && typeof rj.detay_map === 'object') ? rj.detay_map : {};
             if (!j || !j.ok || !j.cache) return false;
             if (!sozlesmelerAylikOnbellekFormlaUyumlu(j.cache)) return false;
             var ok = sozlesmelerAylikCacheRender(j.cache, true);
@@ -5024,6 +5494,7 @@ function sozlesmelerAylikHizliYukle(force) {
         var j = triple[1];
         var rj = triple[2];
         window.__musteriReelDonemTutarlari = (rj && rj.ok && rj.map && typeof rj.map === 'object') ? rj.map : {};
+        window.__musteriReelDonemDetaylari = (rj && rj.ok && rj.detay_map && typeof rj.detay_map === 'object') ? rj.detay_map : {};
         if (!j || !j.ok || !j.cache) return false;
         if (!sozlesmelerAylikOnbellekFormlaUyumlu(j.cache)) return false;
         var ok = sozlesmelerAylikCacheRender(j.cache, true);
@@ -11149,6 +11620,22 @@ function sozlesmelerAylikGuncelle() {
             kapanis_tarihi: (document.getElementById('kapanis_tarihi') || {}).value || '',
             kapanis_sonrasi_borc_ay: formKapanisSonrasiBorcAy()
         };
+        // Yarış koşullarına karşı önbellek fallback'i: set boş veya eksik ise
+        // son cache objesindeki tahsil_edildi=true ay anahtarlarını da yeşil say.
+        var __cacheYesilSet = null;
+        try {
+            var __soncache = (typeof window !== 'undefined') ? window.__sozlesmelerAylikSonCacheObj : null;
+            if (__soncache && Array.isArray(__soncache.aylar)) {
+                __cacheYesilSet = new Set();
+                for (var __ci = 0; __ci < __soncache.aylar.length; __ci++) {
+                    var __ca = __soncache.aylar[__ci];
+                    if (__ca && __ca.tahsil_edildi) {
+                        var __cak = sozlesmeAylikAyKeyNormalize(String(__ca.ay_key || (__ca.yil + '-' + __ca.ay)));
+                        if (__cak) __cacheYesilSet.add(__cak);
+                    }
+                }
+            }
+        } catch (eCb) { __cacheYesilSet = null; }
         for (var i = 0; i < aySayisi; i++) {
             if (sozlesmeAylikDonemBasGecersizMi(basStr, bitStr, i, effOpts)) continue;
             var ya = sozlesmeAylikYilAy(bas, i);
@@ -11175,8 +11662,13 @@ function sozlesmelerAylikGuncelle() {
             var extraClass = '';
             var ayKey = yil + '-' + ayNum;
             var ayKeyNorm = sozlesmeAylikAyKeyNormalize(ayKey);
-            var borcG = (typeof selectedId !== 'undefined' && selectedId && sozlesmeAylikBorclananMid === parseInt(selectedId, 10) && sozlesmeAylikBorclananAyAnahtarlari.has(ayKeyNorm));
-            var ayTahsilEdildi = sozlesmeTahsilEdilenAyAnahtarlari.has(ayKeyNorm) || borcG;
+            var borcKirmizi = (typeof selectedId !== 'undefined'
+                && selectedId
+                && sozlesmeAylikBorclananMid === parseInt(selectedId, 10)
+                && sozlesmeAylikBorclananAyAnahtarlari.has(ayKeyNorm));
+            var tahsilFromSetOrCache = sozlesmeTahsilEdilenAyAnahtarlari.has(ayKeyNorm)
+                || !!(__cacheYesilSet && __cacheYesilSet.has(ayKeyNorm));
+            var ayTahsilEdildi = (borcKirmizi && !tahsilFromSetOrCache) ? false : tahsilFromSetOrCache;
             if (ayTahsilEdildi) {
                 extraClass = ' sozlesmeler-ay-kart-odendi';
             } else {
@@ -11201,6 +11693,7 @@ function sozlesmelerAylikGuncelle() {
         } else {
             sozlesmelerAylikTwinGridHtml(html);
         }
+        _sozlesmelerAylikHoverSifirla();
         sozlesmeAylikSecimOzetGuncelle();
         sozlesmelerReelDonemTutarlariUygula();
         var ceAylik = document.getElementById('cari_ekstre_aylik_kira');
@@ -11294,6 +11787,105 @@ function sozlesmeAylikSecimOzetGuncelle() {
     tahsilatMakbuzTutarlariniGridSeciminden();
 }
 
+function _sozlesmelerAylikAyrintiKartBul() {
+    var grid = sozlesmelerAylikAktifGridEl();
+    if (!grid) return null;
+    var mx = Number(window.__sozlesmelerAylikMouseX);
+    var my = Number(window.__sozlesmelerAylikMouseY);
+    if (Number.isFinite(mx) && Number.isFinite(my) && typeof document.elementFromPoint === 'function') {
+        var el = document.elementFromPoint(mx, my);
+        var cardAtPoint = el ? el.closest('.sozlesmeler-ay-kart[data-ay-key][data-secilebilir="1"]') : null;
+        if (cardAtPoint && grid.contains(cardAtPoint)) return cardAtPoint;
+    }
+    var secKey = String(window.__sozlesmelerAylikSonSeciliAyKey || '').trim();
+    if (secKey) {
+        var escS = secKey.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        var sCard = grid.querySelector('.sozlesmeler-ay-kart.sozlesmeler-ay-kart-secili[data-ay-key="' + escS + '"][data-secilebilir="1"]');
+        if (sCard) return sCard;
+    }
+    var hoverKey = String(window.__sozlesmelerAylikHoverAyKey || '').trim();
+    if (hoverKey) {
+        var escH = hoverKey.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        var hCard = grid.querySelector('.sozlesmeler-ay-kart[data-ay-key="' + escH + '"][data-secilebilir="1"]');
+        if (hCard) return hCard;
+    }
+    var sec = grid.querySelector('.sozlesmeler-ay-kart.sozlesmeler-ay-kart-secili[data-secilebilir="1"]');
+    if (sec) return sec;
+    return grid.querySelector('.sozlesmeler-ay-kart[data-secilebilir="1"]');
+}
+
+function _sozlesmelerAylikAyrintiDegisimBilgisi(grid, card) {
+    if (!grid || !card) return '';
+    var curY = parseInt(card.getAttribute('data-yil') || '0', 10);
+    var curM = parseInt(card.getAttribute('data-ay') || '0', 10);
+    var curT = parseFloat(card.getAttribute('data-tutar-kdv') || '0');
+    if (!curY || !curM || isNaN(curT)) return '';
+    var prev = null;
+    grid.querySelectorAll('.sozlesmeler-ay-kart[data-secilebilir="1"]').forEach(function(c){
+        var y = parseInt(c.getAttribute('data-yil') || '0', 10);
+        var m = parseInt(c.getAttribute('data-ay') || '0', 10);
+        if (!y || !m) return;
+        var older = (y < curY) || (y === curY && m < curM);
+        if (!older) return;
+        if (!prev) { prev = c; return; }
+        var py = parseInt(prev.getAttribute('data-yil') || '0', 10);
+        var pm = parseInt(prev.getAttribute('data-ay') || '0', 10);
+        if (y > py || (y === py && m > pm)) prev = c;
+    });
+    if (!prev) return 'Önceki ay bulunamadı.';
+    var prevT = parseFloat(prev.getAttribute('data-tutar-kdv') || '0');
+    if (isNaN(prevT)) return 'Önceki ay tutarı okunamadı.';
+    var d = Math.round((curT - prevT) * 100) / 100;
+    if (Math.abs(d) < 0.01) return 'Bu ayda tutar değişikliği yok.';
+    var yon = d > 0 ? 'artış' : 'azalış';
+    return 'Önceki aya göre ' + yon + ': ' + Math.abs(d).toLocaleString('tr-TR', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' TL';
+}
+
+function sozlesmelerAylikAyrintiliGoster() {
+    var grid = sozlesmelerAylikAktifGridEl();
+    var card = _sozlesmelerAylikAyrintiKartBul();
+    if (!grid || !card) {
+        alert('Detay için önce bir ay kartına gelin veya bir ay seçin.');
+        return;
+    }
+    var ay = parseInt(card.getAttribute('data-ay') || '0', 10);
+    var yil = parseInt(card.getAttribute('data-yil') || '0', 10);
+    var tutarKdv = parseFloat(card.getAttribute('data-tutar-kdv') || '0');
+    if (!ay || !yil || isNaN(tutarKdv) || tutarKdv <= 0) {
+        alert('Seçilen ay için geçerli tutar bulunamadı.');
+        return;
+    }
+    var ayAdi = (typeof SOZLESME_AY_ADLARI !== 'undefined' && SOZLESME_AY_ADLARI[ay - 1]) ? SOZLESME_AY_ADLARI[ay - 1] : String(ay);
+    var kdvEl = document.getElementById('kdv_oran');
+    var kdv = kdvEl && kdvEl.value !== '' ? parseFloat(String(kdvEl.value).replace(',', '.')) : 20;
+    if (isNaN(kdv)) kdv = 20;
+    var karma = (typeof girisKiraKarmaPaylariOkuma === 'function') ? girisKiraKarmaPaylariOkuma() : {split:false};
+    var lines = [];
+    lines.push(ayAdi + ' ' + yil + ' ayrıntı');
+    lines.push('--------------------------------');
+    if (karma && karma.split && karma.rN > 0 && karma.rB > 0) {
+        var mult = 1 + (kdv / 100);
+        var denom = (karma.rN + karma.rB * mult);
+        if (!(denom > 0)) denom = 1;
+        var netTop = tutarKdv / denom;
+        var nakitNet = Math.round(netTop * karma.rN * 100) / 100;
+        var bankaNet = Math.round(netTop * karma.rB * 100) / 100;
+        var bankaKdvDahil = Math.round(bankaNet * mult * 100) / 100;
+        lines.push('Banka: ' + bankaNet.toLocaleString('tr-TR', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' + KDV = ' + bankaKdvDahil.toLocaleString('tr-TR', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' TL');
+        lines.push('Nakit: ' + nakitNet.toLocaleString('tr-TR', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' TL');
+        lines.push('Toplam: ' + tutarKdv.toLocaleString('tr-TR', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' TL');
+    } else {
+        lines.push('Aylık toplam (KDV dahil): ' + tutarKdv.toLocaleString('tr-TR', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' TL');
+    }
+    lines.push('--------------------------------');
+    lines.push(_sozlesmelerAylikAyrintiDegisimBilgisi(grid, card));
+    alert(lines.join('\n'));
+}
+
+function _sozlesmelerAylikHoverSifirla() {
+    window.__sozlesmelerAylikHoverAyKey = '';
+}
+
 function sozlesmeAylikTumunuSec() {
     try { window.__girisAylikVarsayilanSecilenAnahtar = null; } catch (eT) {}
     var grid = sozlesmelerAylikAktifGridEl();
@@ -11309,7 +11901,9 @@ function sozlesmeAylikTumunuSec() {
 }
 
 function sozlesmeAylikSecimiTemizle() {
+    tahsilatKismiOnizlemeSifirla();
     sozlesmeAylikSeciliAnahtarlar.clear();
+    window.__sozlesmelerAylikSonSeciliAyKey = '';
     try { window.__girisAylikVarsayilanSecilenAnahtar = null; } catch (eC) {}
     var bolum = sozlesmelerAylikBolumEl();
     if (bolum) {
@@ -11518,14 +12112,25 @@ function sozlesmeAylikTahsilEt() {
             var k = sozlesmeAylikAyKeyFromYilAy(row.yil, row.ay);
             if (k) sozlesmeTahsilEdilenAyAnahtarlari.add(k);
         });
+        // Daha önce tahsil edilmiş aylar "atlanan/zaten_tahsil" ile gelirse de
+        // sayfa yenilemeden yeşil durum korunmalı.
+        a.forEach(function (row) {
+            if (!row || row.neden !== 'zaten_tahsil') return;
+            var k = sozlesmeAylikAyKeyFromYilAy(row.yil, row.ay);
+            if (k) sozlesmeTahsilEdilenAyAnahtarlari.add(k);
+        });
         alert(msg);
         sozlesmeAylikSecimiTemizle();
         if (window.__sozlesmelerAylikSonCacheObj && typeof sozlesmelerAylikOnbellekFormlaUyumlu === 'function' && sozlesmelerAylikOnbellekFormlaUyumlu(window.__sozlesmelerAylikSonCacheObj)) {
             sozlesmelerAylikCacheRender(window.__sozlesmelerAylikSonCacheObj, true);
         }
-        sozlesmelerAylikHizliYukle(true).then(function(ok) {
-            if (!ok) sozlesmelerAylikGuncelle();
-        });
+        // Tamamı "zaten tahsil" ise (oluşturulan 0), mevcut yeşil set yeterli;
+        // zorla yeniden çekim bazı ortamlarda ay setini eksik döndürüp kırmızıya düşürebiliyor.
+        if (o.length > 0) {
+            sozlesmelerAylikHizliYukle(true).then(function(ok) {
+                if (!ok) sozlesmelerAylikGuncelle();
+            });
+        }
         if (typeof cariEkstreBYukle === 'function') {
             try { cariEkstreBYukle(); } catch (e1) {}
         }
@@ -11797,6 +12402,7 @@ function sozlesmeAylikVarsayilanSecimYoksaBuAy() {
     }
     if (!key) return;
     sozlesmeAylikSeciliAnahtarlar.add(key);
+    window.__sozlesmelerAylikSonSeciliAyKey = String(key);
     sozlesmelerAylikKartlariSecimleEsle(key, true);
     try {
         window.__girisAylikVarsayilanSecilenAnahtar = String(key);
@@ -13335,8 +13941,11 @@ function selectMusteri(id) {
         }
         sozlesmelerReelBaslangicGuncelle();
         if (activeTab === 0 || activeTab === 6 || activeTab === 7 || activeTab === 9) {
-            /* selectMusteri başında pre-warm edildiyse tekrar fetch etme (çift istek olmasın). */
-            if (window.__girisCariEkstrePreWarmedId !== (m && m.id)) {
+            /* selectMusteri başında pre-warm edildiyse tekrar fetch etme (çift istek olmasın).
+               m.id string, midNav int olabilir; tip-güvenli karşılaştırma için iki tarafı da String yap. */
+            var prewarmId = window.__girisCariEkstrePreWarmedId;
+            var thisId = (m && m.id != null && m.id !== '') ? m.id : null;
+            if (thisId == null || String(prewarmId) !== String(thisId)) {
                 setTimeout(function () { cariEkstreMusteriDegisinceYenile(); }, 0);
             }
         }
@@ -13380,6 +13989,23 @@ function selectMusteri(id) {
 
     if (activeTab === 0 || activeTab === 6) {
         var midNav = id;
+        /* Anlık görsel feedback: müşteriler[] içindeki hafif kayıttan formun adını/no'sunu
+           hemen yansıtırız ki kullanıcı 0 ms içinde geçişi görsün. Tam veri Promise.all
+           sonrasında üzerine yazılır. */
+        try {
+            var muLight = (typeof musteriler !== 'undefined' && musteriler && musteriler.find) ? musteriler.find(function (m) { return m && m.id == id; }) : null;
+            if (muLight) {
+                var setOptimistic = function (fid, val) { var el = document.getElementById(fid); if (el) el.value = (val != null) ? String(val) : ''; };
+                setOptimistic('musteri-id', muLight.id);
+                setOptimistic('musteri_no', muLight.musteri_no || '');
+                setOptimistic('musteri_adi', muLight.musteri_adi || muLight.name || '');
+                setOptimistic('name', muLight.name || muLight.musteri_adi || '');
+                setOptimistic('tax_number', muLight.tax_number || '');
+                setOptimistic('phone', muLight.phone || '');
+                var sadEl = document.getElementById('giris-secili-musteri-ad');
+                if (sadEl && (muLight.name || muLight.musteri_adi)) sadEl.textContent = muLight.name || muLight.musteri_adi;
+            }
+        } catch (_optimistic) {}
         /* Cari-ekstre & grup2-etiketleri paralel önyükleme: Promise.all'un bitmesini
            beklemeden fetch'leri hemen başlatırız, böylece toplam süre sıra toplamı değil
            max() olur (2–3 sn → ~1 sn). fillActiveTab içindeki aynı çağrılar bu flag
@@ -13410,25 +14036,54 @@ function selectMusteri(id) {
             });
             return;
         }
-        Promise.all([
-            fetch('/giris/api/musteri/' + midNav).then(function (r) { return r.json(); }),
-            fetch('/giris/api/aylik-tahsil-durum?musteri_id=' + encodeURIComponent(midNav)).then(function (r) { return r.json(); }),
-            fetch('/giris/api/aylik-grid-cache?musteri_id=' + encodeURIComponent(midNav)).then(function (r) { return r.json(); }),
-            fetch('/giris/api/reel-donem-tutarlar?musteri_id=' + encodeURIComponent(midNav)).then(function (r) { return r.json(); })
-        ]).then(function (all) {
+        /* Salise içinde formu göstermek için: 4 fetch'i paralel başlatıyoruz, ama
+           Promise.all'u beklemiyoruz. /api/musteri (en hızlısı) gelir gelmez form
+           dolduruluyor; tahsil durumu, reel-dönem ve aylik-grid sonradan yetiştikçe
+           gridi günceller. Böylece kullanıcı geçişi anında görüyor. */
+        var pMusteri = girisFetchJsonCached('/giris/api/musteri/' + midNav, { ttlMs: 60000 });
+        var pTahsil  = girisFetchJsonCached('/giris/api/aylik-tahsil-durum?musteri_id=' + encodeURIComponent(midNav), { ttlMs: 30000 });
+        var pGrid    = girisFetchJsonCached('/giris/api/aylik-grid-cache?musteri_id=' + encodeURIComponent(midNav) + '&skip_match=1', { ttlMs: 60000 });
+        var pReel    = girisFetchJsonCached('/giris/api/reel-donem-tutarlar?musteri_id=' + encodeURIComponent(midNav), { ttlMs: 60000 });
+        sozlesmeAylikBorclananMusteriDegistir(midNav);
+        // Müşteri açılışında yıl filtresi dar kalmasın: varsayılan "Tümü".
+        window.__sozlesmelerAylikYilFiltre = { hepsi: true, yillar: [] };
+        window.__sozlesmelerAylikYilSig = null;
+        var __selToken = (window.__girisSelectMusteriToken = (window.__girisSelectMusteriToken || 0) + 1);
+        function __selStillCurrent() {
+            return window.__girisSelectMusteriToken === __selToken && String(selectedId) === String(midNav);
+        }
+        // 1) Form: en hızlı yola al — /api/musteri.
+        pMusteri.then(function (res) {
+            if (!__selStillCurrent()) return;
             girisSonMusteriDetayHafifYukleme = false;
-            sozlesmeAylikBorclananMusteriDegistir(midNav);
-            var res = all[0];
-            var tj = all[1];
-            var cj = all[2];
-            var rj = all[3];
-            window.__musteriReelDonemTutarlari = (rj && rj.ok && rj.map && typeof rj.map === 'object') ? rj.map : {};
-            sozlesmeTahsilSetFromJson(tj);
-            if (res.ok && res.musteri) fillActiveTab(res.musteri);
+            if (res && res.ok && res.musteri) fillActiveTab(res.musteri);
             else if (musteri) fillActiveTab(musteri);
-            if (sozlesmelerOdemeDuzeniManuelMi()) {
-                /* Manuel: sunucu önbelleği yok sayılır, grid açılmaz */
-            } else if (cj && cj.ok && cj.cache && Array.isArray(cj.cache.aylar) && cj.cache.aylar.length) {
+        }).catch(function () {
+            if (!__selStillCurrent()) return;
+            if (musteri) fillActiveTab(musteri);
+        });
+        // 2) Reel dönem haritası geldiğinde global state'i tazele.
+        pReel.then(function (rj) {
+            if (!__selStillCurrent()) return;
+            window.__musteriReelDonemTutarlari = (rj && rj.ok && rj.map && typeof rj.map === 'object') ? rj.map : {};
+            window.__musteriReelDonemDetaylari = (rj && rj.ok && rj.detay_map && typeof rj.detay_map === 'object') ? rj.detay_map : {};
+        }).catch(function () {});
+        // 3) Tahsil durumu geldiğinde grid renklerini boya.
+        //    Hata anında MEVCUT seti KORU; aksi halde başka render (4. adım) henüz
+        //    set dolmadan tetiklenirse aylar kırmızıya düşüyordu.
+        pTahsil.then(function (tj) {
+            if (!__selStillCurrent()) return;
+            sozlesmeTahsilSetFromJson(tj);
+        }).catch(function () { /* set'i KORU */ });
+        // 4) Grid cache geldiğinde tabloyu çiz; form (pMusteri) sonrası bekleyip
+        //    cache uyumluluğunu doğru form değerleriyle ölç. pTahsil de beklenir,
+        //    aksi halde set boşken render olup yarısı yeşil/yarısı kırmızı kalıyor.
+        Promise.allSettled([pMusteri, pGrid, pTahsil]).then(function (rs) {
+            if (!__selStillCurrent()) return;
+            if (sozlesmelerOdemeDuzeniManuelMi()) return;
+            var gridRes = rs[1];
+            var cj = (gridRes && gridRes.status === 'fulfilled') ? gridRes.value : null;
+            if (cj && cj.ok && cj.cache && Array.isArray(cj.cache.aylar) && cj.cache.aylar.length) {
                 if (sozlesmelerAylikOnbellekFormlaUyumlu(cj.cache)) {
                     sozlesmelerAylikCacheRender(cj.cache, true);
                 } else {
@@ -13438,8 +14093,7 @@ function selectMusteri(id) {
                 sozlesmelerAylikGuncelle();
             }
         }).catch(function () {
-            sozlesmeTahsilEdilenAyAnahtarlari = new Set();
-            if (musteri) fillActiveTab(musteri);
+            if (!__selStillCurrent()) return;
             sozlesmeAylikGridParalelYukle(midNav);
         });
         return;
@@ -14174,9 +14828,11 @@ function sirketUnvaniAutocomplete() {
                         var basTxt;
                         if (mAdiRaw && unvanRaw && mAdiRaw !== unvanRaw) basTxt = mAdiRaw + '  —  ' + unvanRaw;
                         else basTxt = mAdiRaw || unvanRaw || '—';
-                        var altV = 'Vergi no: ' + (m.tax_number || '—') + ' · Sözleşme: ' + girisApiMusteriSozlesmeBaslangicGoster(m) + ' · Durum: ' + girisApiMusteriDurumOzetMetni(m);
-                        div.innerHTML = '<div class="sirket-name">' + basTxt.replace(/</g, '&lt;') + '</div><div class="sirket-vergi">' + altV.replace(/</g, '&lt;') + '</div>';
+                        var durumTxt1 = String(girisApiMusteriDurumOzetMetni(m) || '');
+                        var altV = 'Vergi no: ' + (m.tax_number || '—') + ' · Sözleşme: ' + girisApiMusteriSozlesmeBaslangicGoster(m);
+                        div.innerHTML = '<div class="sirket-name">' + basTxt.replace(/</g, '&lt;') + '<span class="' + girisApiMusteriDurumSinifi(m) + '">(' + musteriAdiAramaEsc(durumTxt1) + ')</span></div><div class="sirket-vergi">' + altV.replace(/</g, '&lt;') + '</div>';
                         div.onclick = function() { sirketUnvaniSec(m.id); };
+                        div.onmouseenter = (function (_id) { return function () { girisMusteriPrefetch(_id); }; })(m.id);
                         dropdown.appendChild(div);
                     });
                 }
@@ -14218,6 +14874,29 @@ function girisApiMusteriDurumOzetMetni(m) {
     if (kartPasif && !sirketPasif) t += ' (kart pasif)';
     return t;
 }
+function girisApiMusteriDurumSinifi(m) {
+    var d = (m && m.durum != null) ? String(m.durum).trim().toLowerCase() : '';
+    return d === 'pasif' ? 'sirket-durum-etiket sirket-durum-etiket--pasif' : 'sirket-durum-etiket sirket-durum-etiket--aktif';
+}
+
+/* Müşteri kartı için hover-prefetch: kullanıcı dropdown'da bir satıra geldiğinde
+   arka planda /api/musteri ve /api/aylik-grid-cache sorularını başlatırız.
+   Tıkladığında cache'den anında dolduğu için sayfa salisede açılır. */
+function girisMusteriPrefetch(mid) {
+    if (mid == null || mid === '') return;
+    if (!window.__girisMusteriPrefetched) window.__girisMusteriPrefetched = new Set();
+    var k = String(mid);
+    if (window.__girisMusteriPrefetched.has(k)) return;
+    window.__girisMusteriPrefetched.add(k);
+    try {
+        if (typeof girisFetchJsonCached === 'function') {
+            girisFetchJsonCached('/giris/api/musteri/' + k, { ttlMs: 60000 });
+            girisFetchJsonCached('/giris/api/aylik-grid-cache?musteri_id=' + encodeURIComponent(k) + '&skip_match=1', { ttlMs: 60000 });
+            girisFetchJsonCached('/giris/api/aylik-tahsil-durum?musteri_id=' + encodeURIComponent(k), { ttlMs: 30000 });
+            girisFetchJsonCached('/giris/api/reel-donem-tutarlar?musteri_id=' + encodeURIComponent(k), { ttlMs: 60000 });
+        }
+    } catch (_pfE) {}
+}
 function musteriAdiAutocomplete() {
     var input = document.getElementById('musteri_adi');
     var dropdown = document.getElementById('musteri-adi-dropdown');
@@ -14256,14 +14935,14 @@ function musteriAdiAutocomplete() {
                         div.className = 'sirket-item';
                         div.setAttribute('data-id', m.id);
                         var altPlain = 'No: ' + (m.musteri_no != null && m.musteri_no !== '' ? m.musteri_no : '—') + ' · Vergi: ' + (m.tax_number || '—');
-                        altPlain += ' · Sözleşme: ' + girisApiMusteriSozlesmeBaslangicGoster(m) + ' · Durum: ' + girisApiMusteriDurumOzetMetni(m);
+                        altPlain += ' · Sözleşme: ' + girisApiMusteriSozlesmeBaslangicGoster(m);
                         var durumText = String(girisApiMusteriDurumOzetMetni(m) || '');
-                        var durumColor = durumText.toLowerCase().indexOf('pasif') >= 0 ? '#ef9a9a' : '#a5d6a7';
-                        div.innerHTML = '<div class="sirket-name">' + musteriAdiAramaEsc(gosterAd) + ' <span style="font-size:11px;color:' + durumColor + ';">(' + musteriAdiAramaEsc(durumText) + ')</span></div><div class="sirket-vergi">' + musteriAdiAramaEsc(altPlain) + '</div>';
+                        div.innerHTML = '<div class="sirket-name">' + musteriAdiAramaEsc(gosterAd) + '<span class="' + girisApiMusteriDurumSinifi(m) + '">(' + musteriAdiAramaEsc(durumText) + ')</span></div><div class="sirket-vergi">' + musteriAdiAramaEsc(altPlain) + '</div>';
                         div.onclick = function (ev) {
                             ev.preventDefault();
                             musteriAdiSec(m.id);
                         };
+                        div.onmouseenter = (function (_id) { return function () { girisMusteriPrefetch(_id); }; })(m.id);
                         dropdown.appendChild(div);
                     });
                 }
@@ -14979,6 +15658,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     } catch (eReelSekme) {}
     // Tahsilat sekmesi: müşteri arama
+    tahsilatTahsilEdenSelectDoldur();
+    var gOdeme = document.getElementById('giris_tahsilat_odeme_turu');
+    var sOdeme = document.getElementById('sozlesme_tahsilat_odeme_turu');
+    if (gOdeme) gOdeme.addEventListener('change', function(){ tahsilatOdemeTuruUIUygula('giris_tahsilat'); });
+    if (sOdeme) sOdeme.addEventListener('change', function(){ tahsilatOdemeTuruUIUygula('sozlesme_tahsilat'); });
+    tahsilatOdemeTuruUIUygula('giris_tahsilat');
+    tahsilatOdemeTuruUIUygula('sozlesme_tahsilat');
     let girisTahsilatAramaZamanlayici;
     const tahsilatAra = document.getElementById('giris_tahsilat_musteri_ara');
     if (tahsilatAra) {
@@ -15074,6 +15760,24 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     var aylikBolum = document.getElementById('sozlesmeler-aylik-bolum');
     if (aylikBolum) {
+        aylikBolum.addEventListener('mousemove', function(e) {
+            window.__sozlesmelerAylikMouseX = e.clientX;
+            window.__sozlesmelerAylikMouseY = e.clientY;
+            var cardMove = e.target.closest('.sozlesmeler-ay-kart[data-ay-key]');
+            if (!cardMove) return;
+            var activeGrid = sozlesmelerAylikAktifGridEl();
+            if (!activeGrid || !activeGrid.contains(cardMove)) return;
+            var mk = cardMove.getAttribute('data-ay-key');
+            if (mk) window.__sozlesmelerAylikHoverAyKey = mk;
+        });
+        aylikBolum.addEventListener('mouseover', function(e) {
+            var cardHover = e.target.closest('.sozlesmeler-ay-kart[data-ay-key]');
+            if (!cardHover) return;
+            var activeGrid = sozlesmelerAylikAktifGridEl();
+            if (!activeGrid || !activeGrid.contains(cardHover)) return;
+            var hk = cardHover.getAttribute('data-ay-key');
+            if (hk) window.__sozlesmelerAylikHoverAyKey = hk;
+        });
         aylikBolum.addEventListener('click', function(e) {
             var card = e.target.closest('.sozlesmeler-ay-kart');
             if (!card || !card.getAttribute('data-ay-key')) return;
@@ -15083,6 +15787,9 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!key) return;
             if (sozlesmeAylikSeciliAnahtarlar.has(key)) {
                 sozlesmeAylikSeciliAnahtarlar.delete(key);
+                if (String(window.__sozlesmelerAylikSonSeciliAyKey || '') === String(key)) {
+                    window.__sozlesmelerAylikSonSeciliAyKey = '';
+                }
                 sozlesmelerAylikKartlariSecimleEsle(key, false);
                 try {
                     if (window.__girisAylikVarsayilanSecilenAnahtar === key) {
@@ -15099,11 +15806,25 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 } catch (eA) {}
                 sozlesmeAylikSeciliAnahtarlar.add(key);
+                window.__sozlesmelerAylikSonSeciliAyKey = String(key);
                 sozlesmelerAylikKartlariSecimleEsle(key, true);
             }
             sozlesmeAylikSecimOzetGuncelle();
+            tahsilatKismiOnizlemeGuncelle('sozlesme_tahsilat_tutar');
         });
     }
+    var sozTahsilTutar = document.getElementById('sozlesme_tahsilat_tutar');
+    if (sozTahsilTutar) {
+        sozTahsilTutar.addEventListener('input', function () { tahsilatKismiOnizlemeGuncelle('sozlesme_tahsilat_tutar'); });
+        sozTahsilTutar.addEventListener('change', function () { tahsilatKismiOnizlemeGuncelle('sozlesme_tahsilat_tutar'); });
+    }
+    ['sozlesmeler-reel-tutar', 'sozlesmeler-reel-hibrit-toplam', 'sozlesmeler-reel-hibrit-net', 'sozlesmeler-reel-hibrit-banka', 'sozlesmeler-reel-tutar-tip']
+        .forEach(function(id){
+            var el = document.getElementById(id);
+            if (!el) return;
+            el.addEventListener('input', function(){ if (typeof sozlesmelerReelDetayTaslakYaz === 'function') sozlesmelerReelDetayTaslakYaz(); });
+            el.addEventListener('change', function(){ if (typeof sozlesmelerReelDetayTaslakYaz === 'function') sozlesmelerReelDetayTaslakYaz(); });
+        });
     try {
         if (typeof girisHistoryEnsurePopstateListener === 'function') girisHistoryEnsurePopstateListener();
     } catch (ePop) {}
@@ -15124,9 +15845,99 @@ const API_TAHSILAT_MUSTERILER = '/faturalar/api/musteriler';
 const API_TAHSILAT_EKLE = '/faturalar/tahsilat-ekle';
 const API_TAHSILAT_ONIZLE = '/faturalar/tahsilat-makbuz-onizle';
 const API_TAHSILAT_RAPOR = '/faturalar/api/tahsilat-raporu';
+const API_TAHSILAT_PERSONELLER = '/giris/api/tahsilat-personeller';
 
 window.__girisTahsilAktifAltSekme = 'makbuz';
 window.__faturaRaporScrollSyncing = false;
+window.__tahsilatPersonellerLoaded = false;
+window.__girisTahsilKaydetInFlight = false;
+window.__sozlesmeTahsilKaydetInFlight = false;
+
+function tahsilatTahsilEdenSelectDoldur() {
+    if (window.__tahsilatPersonellerLoaded) return;
+    var hedefler = ['giris_tahsilat_tahsil_eden', 'sozlesme_tahsilat_tahsil_eden']
+        .map(function(id){ return document.getElementById(id); })
+        .filter(Boolean);
+    if (!hedefler.length) return;
+    fetch(API_TAHSILAT_PERSONELLER, { credentials: 'same-origin' })
+        .then(function(r){ return r.json(); })
+        .then(function(arr){
+            var list = Array.isArray(arr) ? arr : [];
+            var varsayilan = 'DÖNDÜ GÜLGÖSTEREN';
+            var adlar = list
+                .map(function(p){ return String((p && p.ad_soyad) || '').trim(); })
+                .filter(function(v){ return !!v; });
+            if (adlar.indexOf(varsayilan) < 0) adlar.unshift(varsayilan);
+            hedefler.forEach(function(sel){
+                var onceki = sel.value || varsayilan;
+                sel.innerHTML = adlar.map(function(ad){
+                    return '<option value="' + ad.replace(/"/g, '&quot;') + '">' + ad + '</option>';
+                }).join('');
+                sel.value = adlar.indexOf(onceki) >= 0 ? onceki : varsayilan;
+            });
+            window.__tahsilatPersonellerLoaded = true;
+        })
+        .catch(function(){
+            hedefler.forEach(function(sel){ sel.value = 'DÖNDÜ GÜLGÖSTEREN'; });
+        });
+}
+
+function tahsilatCekSatirEkle(prefix) {
+    var tbody = document.getElementById(prefix + '_cek_tbody');
+    if (!tbody) return;
+    var tr = document.createElement('tr');
+    tr.innerHTML =
+        '<td><input type="text" data-n="banka" placeholder="Banka"></td>' +
+        '<td><input type="text" data-n="sube" placeholder="Şube"></td>' +
+        '<td><input type="text" data-n="hesap_no" placeholder="Hesap no"></td>' +
+        '<td><input type="text" data-n="cek_no" placeholder="Çek no"></td>' +
+        '<td><input type="text" data-n="vade" placeholder="GG.AA.YYYY"></td>' +
+        '<td><input type="text" data-n="tutar" placeholder="0,00"></td>' +
+        '<td><button type="button" class="tahsilat-cek-btn tahsilat-cek-btn-sil" onclick="tahsilatCekSatirSil(this)">×</button></td>';
+    tbody.appendChild(tr);
+}
+
+function tahsilatCekSatirSil(btn) {
+    var tr = btn && btn.closest ? btn.closest('tr') : null;
+    if (tr && tr.parentNode) tr.parentNode.removeChild(tr);
+}
+
+function tahsilatCekDetayTopla(prefix) {
+    var tbody = document.getElementById(prefix + '_cek_tbody');
+    if (!tbody) return [];
+    var rows = [];
+    tbody.querySelectorAll('tr').forEach(function(tr){
+        function val(n) {
+            var el = tr.querySelector('input[data-n="' + n + '"]');
+            return (el && el.value ? String(el.value).trim() : '');
+        }
+        var tutarRaw = val('tutar');
+        var tutar = (typeof parseNumberTR === 'function')
+            ? parseNumberTR(tutarRaw)
+            : (parseFloat(String(tutarRaw).replace(/\./g, '').replace(',', '.')) || 0);
+        var row = {
+            banka: val('banka'),
+            sube: val('sube'),
+            hesap_no: val('hesap_no'),
+            cek_no: val('cek_no'),
+            vade: val('vade'),
+            tutar: tutar
+        };
+        if (row.banka || row.sube || row.hesap_no || row.cek_no || row.vade || tutar > 0) rows.push(row);
+    });
+    return rows;
+}
+
+function tahsilatOdemeTuruUIUygula(prefix) {
+    var odemeEl = document.getElementById(prefix + '_odeme_turu');
+    var panelWrap = document.getElementById(prefix + '_cek_panel_wrap');
+    var tbody = document.getElementById(prefix + '_cek_tbody');
+    if (!odemeEl || !panelWrap) return;
+    var odeme = String(odemeEl.value || '').toLowerCase();
+    var cekSecili = (odeme === 'cek' || odeme === 'çek');
+    panelWrap.style.display = cekSecili ? '' : 'none';
+    if (cekSecili && tbody && !tbody.children.length) tahsilatCekSatirEkle(prefix);
+}
 
 function faturaRaporScrollLeftYansit(source, left) {
     if (window.__faturaRaporScrollSyncing) return;
@@ -15325,23 +16136,48 @@ function girisTahsilatFormPayload() {
     const musteriId = document.getElementById('giris_tahsilat_musteri_id').value;
     const musteriAdiAra = (document.getElementById('giris_tahsilat_musteri_ara').value || '').trim();
     const musteriAdiSecilen = (document.getElementById('giris_tahsilat_musteri_secilen').textContent || '').trim();
-    const tutarStr = (document.getElementById('giris_tahsilat_tutar').value || '').replace(',', '.');
-    const tutar = parseFloat(tutarStr);
+    const tutarRaw = (document.getElementById('giris_tahsilat_tutar').value || '');
+    let tutar = (typeof parseNumberTR === 'function')
+        ? parseNumberTR(tutarRaw)
+        : (parseFloat(String(tutarRaw).replace(/\./g, '').replace(',', '.')) || 0);
+    const odemeTuru = (document.getElementById('giris_tahsilat_odeme_turu').value || 'nakit');
+    const cekDetay = tahsilatCekDetayTopla('giris_tahsilat');
+    if (String(odemeTuru).toLowerCase() === 'cek' && cekDetay.length) {
+        tutar = cekDetay.reduce(function(s, r){ return s + (r.tutar || 0); }, 0);
+    }
+    var seciliSatirlar = (typeof tahsilatMakbuzSecilenAylikSatirlari === 'function')
+        ? tahsilatMakbuzSecilenAylikSatirlari()
+        : [];
+    var ayRefIso = null;
+    var ayRefTutar = null;
+    if (Array.isArray(seciliSatirlar) && seciliSatirlar.length === 1) {
+        var s0 = seciliSatirlar[0] || {};
+        var y0 = parseInt(s0.yil, 10);
+        var m0 = parseInt(s0.ay, 10);
+        if (!isNaN(y0) && !isNaN(m0) && m0 >= 1 && m0 <= 12) {
+            ayRefIso = y0 + '-' + String(m0).padStart(2, '0') + '-01';
+            ayRefTutar = parseFloat(s0.tutar_kdv_dahil) || 0;
+        }
+    }
     return {
         musteri_id: musteriId ? parseInt(musteriId, 10) : null,
         musteri_adi: musteriAdiSecilen || musteriAdiAra,
         musteri_phone: (document.getElementById('giris_tahsilat_musteri_phone').value || '').replace(/\D/g, ''),
         tutar: isNaN(tutar) ? 0 : tutar,
-        odeme_turu: (document.getElementById('giris_tahsilat_odeme_turu').value || 'nakit'),
+        odeme_turu: odemeTuru,
         tahsilat_tarihi: document.getElementById('giris_tahsilat_tarih').value,
+        tahsil_eden: (document.getElementById('giris_tahsilat_tahsil_eden').value || 'DÖNDÜ GÜLGÖSTEREN'),
         aciklama: (document.getElementById('giris_tahsilat_aciklama').value || '').trim(),
+        ay_ref_iso: ayRefIso,
+        ay_ref_tutar: ayRefTutar,
         havale_banka: '',
-        cek_detay: []
+        cek_detay: cekDetay
     };
 }
 
 /** Makbuzu sadece kaydeder; Faturalar, Cari Kart ve müşteri bakiyesi otomatik güncellenir. */
 function girisTahsilatMakbuzKaydet() {
+    if (window.__girisTahsilKaydetInFlight) return;
     const payload = girisTahsilatFormPayload();
     if (!payload.musteri_id && !payload.musteri_adi) {
         alert('Lütfen müşteri seçiniz veya isim yazınız.');
@@ -15351,6 +16187,7 @@ function girisTahsilatMakbuzKaydet() {
         alert('Geçerli bir tutar giriniz.');
         return;
     }
+    window.__girisTahsilKaydetInFlight = true;
     fetch(API_TAHSILAT_EKLE, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -15361,6 +16198,20 @@ function girisTahsilatMakbuzKaydet() {
         if (data.ok && data.tahsilat_id) {
             if (typeof girisTahsilRaporPanelTaze === 'function') girisTahsilRaporPanelTaze();
             alert('Makbuz kaydedildi. Tahsilatlar, Cari Kart ve müşteri bakiyesi güncellendi.');
+            try {
+                var midInv = document.getElementById('giris_tahsilat_musteri_id').value;
+                if (midInv) {
+                    girisJsonCacheInvalidatePrefix('/giris/api/musteri/' + midInv);
+                    girisJsonCacheInvalidatePrefix('/giris/api/aylik-grid-cache?musteri_id=' + encodeURIComponent(midInv));
+                    girisJsonCacheInvalidatePrefix('/giris/api/aylik-tahsil-durum?musteri_id=' + encodeURIComponent(midInv));
+                }
+            } catch (_invE) {}
+            if (typeof sozlesmelerAylikHizliYukle === 'function') sozlesmelerAylikHizliYukle(true);
+            if (typeof cariEkstreYukle === 'function') { try { cariEkstreYukle(); } catch (eCe) {} }
+            var odG = String(payload.odeme_turu || '').toLowerCase();
+            if ((odG === 'banka' || odG === 'kredi_karti' || odG === 'kredi kartı') && typeof cariEkstreBYukle === 'function') {
+                try { cariEkstreBYukle(); } catch (eCb) {}
+            }
             var mid = document.getElementById('giris_tahsilat_musteri_id').value;
             if (mid && typeof selectedId !== 'undefined' && selectedId == mid && document.getElementById('cari-bu-ay')) {
                 fetch('/giris/api/cari-kart/' + mid)
@@ -15371,11 +16222,19 @@ function girisTahsilatMakbuzKaydet() {
                     })
                     .catch(function() {});
             }
+        } else if (data.ok && data.zaten_var) {
+            alert(data.mesaj || 'Bu ay için kayıt zaten var; çift kayıt yapılmadı.');
+            if (data.tahsilat_id) {
+                const pdfUrl = '/faturalar/tahsilat-pdf/' + data.tahsilat_id;
+                window.open(pdfUrl, '_blank', 'noopener');
+            }
+            if (typeof sozlesmelerAylikHizliYukle === 'function') sozlesmelerAylikHizliYukle(true);
         } else {
             alert(data.mesaj || 'Kayıt yapılamadı.');
         }
     })
-    .catch(err => alert('İstek gönderilemedi: ' + (err.message || err)));
+    .catch(err => alert('İstek gönderilemedi: ' + (err.message || err)))
+    .finally(() => { window.__girisTahsilKaydetInFlight = false; });
 }
 
 function girisTahsilatOnizle() {
@@ -15472,6 +16331,82 @@ function tahsilatMakbuzSecilenAylikSatirlari() {
     return satirlar;
 }
 
+function tahsilatKismiOnizlemeDurum() {
+    window.__tahsilatKismiOnizleme = window.__tahsilatKismiOnizleme || { aktif: false, ayKey: '', kartlar: [] };
+    return window.__tahsilatKismiOnizleme;
+}
+
+function tahsilatKismiOnizlemeSifirla() {
+    var st = tahsilatKismiOnizlemeDurum();
+    if (!st.aktif || !Array.isArray(st.kartlar) || !st.kartlar.length) {
+        st.aktif = false;
+        st.ayKey = '';
+        st.kartlar = [];
+        return;
+    }
+    st.kartlar.forEach(function (it) {
+        if (!it || !it.card) return;
+        var c = it.card;
+        c.classList.remove('sozlesmeler-ay-kart-kismi', 'sozlesmeler-ay-kart-odendi', 'sozlesmeler-ay-kart-odenmedi');
+        c.classList.add(it.sinif);
+        var deg = c.querySelector('.aylik-deger');
+        if (deg) deg.textContent = it.yazi;
+    });
+    st.aktif = false;
+    st.ayKey = '';
+    st.kartlar = [];
+}
+
+function tahsilatKismiOnizlemeGuncelle(kaynakInputId) {
+    tahsilatKismiOnizlemeSifirla();
+    var secili = (typeof tahsilatMakbuzSecilenAylikSatirlari === 'function')
+        ? tahsilatMakbuzSecilenAylikSatirlari()
+        : [];
+    if (!Array.isArray(secili) || secili.length !== 1) return;
+    var s = secili[0] || {};
+    var y = parseInt(s.yil, 10);
+    var m = parseInt(s.ay, 10);
+    if (isNaN(y) || isNaN(m) || m < 1 || m > 12) return;
+    var ayKey = y + '-' + m;
+    var inp = document.getElementById(kaynakInputId || 'sozlesme_tahsilat_tutar');
+    if (!inp) return;
+    var raw = String(inp.value || '').trim();
+    var girilen = (typeof parseNumberTR === 'function')
+        ? parseNumberTR(raw)
+        : (parseFloat(raw.replace(/\./g, '').replace(',', '.')) || 0);
+    if (!isFinite(girilen) || girilen <= 0) return;
+    var mevcut = parseFloat(s.tutar_kdv_dahil);
+    if (!isFinite(mevcut) || mevcut <= 0) return;
+    var kalan = Math.max(Math.round((mevcut - girilen) * 100) / 100, 0);
+    var kismi = girilen > 0 && kalan > 0.01;
+    var yeniSinif = kismi ? 'sozlesmeler-ay-kart-kismi' : (kalan <= 0.01 ? 'sozlesmeler-ay-kart-odendi' : 'sozlesmeler-ay-kart-odenmedi');
+    var sec = (typeof CSS !== 'undefined' && CSS.escape)
+        ? '.sozlesmeler-ay-kart[data-ay-key="' + CSS.escape(ayKey) + '"]'
+        : '.sozlesmeler-ay-kart[data-ay-key="' + ayKey.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"]';
+    var cards = Array.prototype.slice.call(document.querySelectorAll(sec));
+    if (!cards.length) return;
+    var st = tahsilatKismiOnizlemeDurum();
+    st.aktif = true;
+    st.ayKey = ayKey;
+    st.kartlar = [];
+    cards.forEach(function (c) {
+        var eskiSinif = 'sozlesmeler-ay-kart-odenmedi';
+        if (c.classList.contains('sozlesmeler-ay-kart-kismi')) eskiSinif = 'sozlesmeler-ay-kart-kismi';
+        else if (c.classList.contains('sozlesmeler-ay-kart-odendi')) eskiSinif = 'sozlesmeler-ay-kart-odendi';
+        st.kartlar.push({
+            card: c,
+            sinif: eskiSinif,
+            yazi: (c.querySelector('.aylik-deger') || {}).textContent || ''
+        });
+        // Sadece görsel önizleme: işlemde kullanılan data-* alanlarına dokunma.
+        // Aksi halde "Seçilenleri tahsil et / borçlandır" filtresi bozulabiliyor.
+        c.classList.remove('sozlesmeler-ay-kart-kismi', 'sozlesmeler-ay-kart-odendi', 'sozlesmeler-ay-kart-odenmedi');
+        c.classList.add(yeniSinif);
+        var deg = c.querySelector('.aylik-deger');
+        if (deg) deg.textContent = kalan.toFixed(2);
+    });
+}
+
 function girisTahsilatYazdir() {
     const payload = girisTahsilatFormPayload();
     if (!payload.musteri_id && !payload.musteri_adi) {
@@ -15512,6 +16447,11 @@ function girisTahsilatIptal() {
     const today = new Date().toISOString().slice(0, 10);
     const tarihEl = document.getElementById('giris_tahsilat_tarih');
     if (tarihEl) tarihEl.value = today;
+    const tahsilEdenEl = document.getElementById('giris_tahsilat_tahsil_eden');
+    if (tahsilEdenEl) tahsilEdenEl.value = 'DÖNDÜ GÜLGÖSTEREN';
+    const cekTbody = document.getElementById('giris_tahsilat_cek_tbody');
+    if (cekTbody) cekTbody.innerHTML = '';
+    tahsilatOdemeTuruUIUygula('giris_tahsilat');
 }
 
 function girisTahsilatPdfIndir() {
@@ -15620,22 +16560,47 @@ function sozlesmeTahsilatFormPayload() {
     const musteriId = document.getElementById('sozlesme_tahsilat_musteri_id').value;
     const musteriAdiAra = (document.getElementById('sozlesme_tahsilat_musteri_ara').value || '').trim();
     const musteriAdiSecilen = (document.getElementById('sozlesme_tahsilat_musteri_secilen').textContent || '').trim();
-    const tutarStr = (document.getElementById('sozlesme_tahsilat_tutar').value || '').replace(',', '.');
-    const tutar = parseFloat(tutarStr);
+    const tutarRaw = (document.getElementById('sozlesme_tahsilat_tutar').value || '');
+    let tutar = (typeof parseNumberTR === 'function')
+        ? parseNumberTR(tutarRaw)
+        : (parseFloat(String(tutarRaw).replace(/\./g, '').replace(',', '.')) || 0);
+    const odemeTuru = (document.getElementById('sozlesme_tahsilat_odeme_turu').value || 'nakit');
+    const cekDetay = tahsilatCekDetayTopla('sozlesme_tahsilat');
+    if (String(odemeTuru).toLowerCase() === 'cek' && cekDetay.length) {
+        tutar = cekDetay.reduce(function(s, r){ return s + (r.tutar || 0); }, 0);
+    }
+    var seciliSatirlar = (typeof tahsilatMakbuzSecilenAylikSatirlari === 'function')
+        ? tahsilatMakbuzSecilenAylikSatirlari()
+        : [];
+    var ayRefIso = null;
+    var ayRefTutar = null;
+    if (Array.isArray(seciliSatirlar) && seciliSatirlar.length === 1) {
+        var s0 = seciliSatirlar[0] || {};
+        var y0 = parseInt(s0.yil, 10);
+        var m0 = parseInt(s0.ay, 10);
+        if (!isNaN(y0) && !isNaN(m0) && m0 >= 1 && m0 <= 12) {
+            ayRefIso = y0 + '-' + String(m0).padStart(2, '0') + '-01';
+            ayRefTutar = parseFloat(s0.tutar_kdv_dahil) || 0;
+        }
+    }
     return {
         musteri_id: musteriId ? parseInt(musteriId, 10) : null,
         musteri_adi: musteriAdiSecilen || musteriAdiAra,
         musteri_phone: (document.getElementById('sozlesme_tahsilat_musteri_phone').value || '').replace(/\D/g, ''),
         tutar: isNaN(tutar) ? 0 : tutar,
-        odeme_turu: (document.getElementById('sozlesme_tahsilat_odeme_turu').value || 'nakit'),
+        odeme_turu: odemeTuru,
         tahsilat_tarihi: document.getElementById('sozlesme_tahsilat_tarih').value,
+        tahsil_eden: (document.getElementById('sozlesme_tahsilat_tahsil_eden').value || 'DÖNDÜ GÜLGÖSTEREN'),
         aciklama: (document.getElementById('sozlesme_tahsilat_aciklama').value || '').trim(),
+        ay_ref_iso: ayRefIso,
+        ay_ref_tutar: ayRefTutar,
         havale_banka: '',
-        cek_detay: []
+        cek_detay: cekDetay
     };
 }
 
 function sozlesmeTahsilatKaydet() {
+    if (window.__sozlesmeTahsilKaydetInFlight) return;
     const payload = sozlesmeTahsilatFormPayload();
     if (!payload.musteri_id && !payload.musteri_adi) {
         alert('Lütfen müşteri seçiniz veya isim yazınız.');
@@ -15645,6 +16610,7 @@ function sozlesmeTahsilatKaydet() {
         alert('Geçerli bir tutar giriniz.');
         return;
     }
+    window.__sozlesmeTahsilKaydetInFlight = true;
     fetch(API_TAHSILAT_EKLE, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -15655,19 +16621,47 @@ function sozlesmeTahsilatKaydet() {
         if (data.ok && data.tahsilat_id) {
             alert('Makbuz kaydedildi. Tahsilatlar, Cari Kart ve müşteri bakiyesi güncellendi.');
             sozlesmeTahsilatKayitSonrasiTemizlik();  // Müşteri seçili kalsın, sadece tutar/açıklama temizlensin
+            try {
+                var midInvS = (payload && payload.musteri_id) ? payload.musteri_id : '';
+                if (midInvS) {
+                    girisJsonCacheInvalidatePrefix('/giris/api/musteri/' + midInvS);
+                    girisJsonCacheInvalidatePrefix('/giris/api/aylik-grid-cache?musteri_id=' + encodeURIComponent(midInvS));
+                    girisJsonCacheInvalidatePrefix('/giris/api/aylik-tahsil-durum?musteri_id=' + encodeURIComponent(midInvS));
+                }
+            } catch (_invE2) {}
+            if (typeof sozlesmelerAylikHizliYukle === 'function') sozlesmelerAylikHizliYukle(true);
+            if (typeof cariEkstreYukle === 'function') { try { cariEkstreYukle(); } catch (eCe2) {} }
+            var odS = String(payload.odeme_turu || '').toLowerCase();
+            if ((odS === 'banka' || odS === 'kredi_karti' || odS === 'kredi kartı') && typeof cariEkstreBYukle === 'function') {
+                try { cariEkstreBYukle(); } catch (eCb2) {}
+            }
+        } else if (data.ok && data.zaten_var) {
+            alert(data.mesaj || 'Bu ay için kayıt zaten var; çift kayıt yapılmadı.');
+            if (data.tahsilat_id) {
+                const pdfUrl = '/faturalar/tahsilat-pdf/' + data.tahsilat_id;
+                window.open(pdfUrl, '_blank', 'noopener');
+            }
+            if (typeof sozlesmelerAylikHizliYukle === 'function') sozlesmelerAylikHizliYukle(true);
         } else {
             alert(data.mesaj || 'Kayıt yapılamadı.');
         }
     })
-    .catch(err => alert('İstek gönderilemedi: ' + (err.message || err)));
+    .catch(err => alert('İstek gönderilemedi: ' + (err.message || err)))
+    .finally(() => { window.__sozlesmeTahsilKaydetInFlight = false; });
 }
 
 function sozlesmeTahsilatKayitSonrasiTemizlik() {
+    tahsilatKismiOnizlemeSifirla();
     document.getElementById('sozlesme_tahsilat_tutar').value = '';
     document.getElementById('sozlesme_tahsilat_aciklama').value = '';
     const today = new Date().toISOString().slice(0, 10);
     const tarihEl = document.getElementById('sozlesme_tahsilat_tarih');
     if (tarihEl) tarihEl.value = today;
+    const tahsilEdenEl = document.getElementById('sozlesme_tahsilat_tahsil_eden');
+    if (tahsilEdenEl) tahsilEdenEl.value = 'DÖNDÜ GÜLGÖSTEREN';
+    const cekTbody = document.getElementById('sozlesme_tahsilat_cek_tbody');
+    if (cekTbody) cekTbody.innerHTML = '';
+    tahsilatOdemeTuruUIUygula('sozlesme_tahsilat');
     tahsilatMakbuzTutarlariniGuncelleDisardan();
 }
 
@@ -15739,6 +16733,11 @@ function sozlesmeTahsilatIptal() {
     const today = new Date().toISOString().slice(0, 10);
     const tarihEl = document.getElementById('sozlesme_tahsilat_tarih');
     if (tarihEl) tarihEl.value = today;
+    const tahsilEdenEl = document.getElementById('sozlesme_tahsilat_tahsil_eden');
+    if (tahsilEdenEl) tahsilEdenEl.value = 'DÖNDÜ GÜLGÖSTEREN';
+    const cekTbody = document.getElementById('sozlesme_tahsilat_cek_tbody');
+    if (cekTbody) cekTbody.innerHTML = '';
+    tahsilatOdemeTuruUIUygula('sozlesme_tahsilat');
 }
 
 function sozlesmeTahsilatPdfIndir() {
@@ -16055,6 +17054,13 @@ function cariEkstreYukle(opts) {
     var params = new URLSearchParams({ musteri_id: musteriId, baslangic: baslangic || '', bitis: bitis || '', aylik_kira: aylikKira, kdv_oran: kdvOran });
     if (kiraNakitMi()) params.set('kira_nakit', '1');
     params.set('form_bazli_kira', '1');
+    var __ekstreKey = 'cari_ekstre|' + params.toString();
+    var __ekstreSon = window.__girisEkstreSonIstek || (window.__girisEkstreSonIstek = {});
+    var __ekstreNow = Date.now();
+    if (__ekstreSon[__ekstreKey] && (__ekstreNow - __ekstreSon[__ekstreKey]) < 1500) {
+        return; // 1.5 sn içinde aynı parametrelerle ikinci istek bastırıldı (debouncer çift tetikleniyor).
+    }
+    __ekstreSon[__ekstreKey] = __ekstreNow;
     fetch('/giris/api/cari-ekstre?' + params.toString(), { credentials: 'same-origin' })
         .then(function (r) {
             if (!r.ok) {
@@ -16170,6 +17176,13 @@ function cariEkstreBYukle(opts) {
     var baslangic = (document.getElementById('cari_ekstre_b_baslangic') || {}).value || '';
     var bitis = (document.getElementById('cari_ekstre_b_bitis') || {}).value || '';
     var params = new URLSearchParams({ musteri_id: musteriId, baslangic: baslangic, bitis: bitis });
+    var __ekstreBKey = 'cari_ekstre_b|' + params.toString();
+    var __ekstreBSon = window.__girisEkstreSonIstek || (window.__girisEkstreSonIstek = {});
+    var __ekstreBNow = Date.now();
+    if (__ekstreBSon[__ekstreBKey] && (__ekstreBNow - __ekstreBSon[__ekstreBKey]) < 1500) {
+        return; // 1.5 sn içinde aynı parametrelerle ikinci istek bastırıldı.
+    }
+    __ekstreBSon[__ekstreBKey] = __ekstreBNow;
     fetch('/giris/api/cari-ekstre-b?' + params.toString(), { credentials: 'same-origin' })
         .then(function (r) {
             if (!r.ok) {

@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Faturalar</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    {% include 'partials/erp_page_style.html' %}
     <style>
         * {
             margin: 0;
@@ -15,21 +16,151 @@
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: #0a1929;
             color: #e0f7fa;
-            padding: 15px;
+            min-height: 100vh;
+        }
+        .header {
+            background: #0f2537;
+            border-bottom: 1px solid #1e3a50;
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+        }
+        .header-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0;
+            border-bottom: 1px solid #1e3a50;
+        }
+        .logo {
+            padding: 12px 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .logo:hover { background: rgba(79, 195, 247, 0.05); }
+        .logo i {
+            color: #4fc3f7;
+            font-size: 20px;
+        }
+        .logo-text {
+            color: #4fc3f7;
+            font-size: 16px;
+            font-weight: bold;
+        }
+        .logo-version {
+            color: #546e7a;
+            font-size: 11px;
+            margin-left: 8px;
+        }
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            padding: 12px 20px;
+            border-left: 1px solid #1e3a50;
+        }
+        .user-name {
+            color: #90a4ae;
+            font-size: 13px;
+        }
+        .user-role {
+            background: #1e3a50;
+            color: #4fc3f7;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        .user-actions a {
+            color: #90a4ae;
+            text-decoration: none;
+            font-size: 14px;
+            transition: color 0.2s;
+        }
+        .user-actions a:hover { color: #4fc3f7; }
+        .nav {
+            display: flex;
+            overflow-x: auto;
+            overflow-y: hidden;
+            padding: 0;
+            -webkit-overflow-scrolling: touch;
+        }
+        .nav::-webkit-scrollbar { height: 4px; }
+        .nav::-webkit-scrollbar-track { background: #0f2537; }
+        .nav::-webkit-scrollbar-thumb {
+            background: #2d4060;
+            border-radius: 2px;
+        }
+        .nav a {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 16px;
+            color: #90a4ae;
+            text-decoration: none;
+            white-space: nowrap;
+            border-bottom: 3px solid transparent;
+            transition: all 0.2s;
+            font-size: 13px;
+        }
+        .nav a:hover {
+            background: rgba(79, 195, 247, 0.05);
+            color: #4fc3f7;
+        }
+        .nav a.active {
+            background: #1e3a50;
+            color: #4fc3f7;
+            border-bottom-color: #4fc3f7;
+        }
+        .main-content {
+            padding: 20px;
+            max-width: 1920px;
+            margin: 0 auto;
+        }
+        body.layout-embed .main-content {
+            padding-top: 12px;
+        }
+        .erp-page-wrap {
+            padding: 0 15px 15px;
+        }
+        body.layout-embed .erp-page-wrap {
+            padding-top: 0;
+        }
+        @media (max-width: 768px) {
+            .header-top {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            .logo {
+                justify-content: center;
+                border-bottom: 1px solid #1e3a50;
+            }
+            .user-info {
+                justify-content: center;
+                border-left: none;
+                border-bottom: 1px solid #1e3a50;
+            }
+            .main-content {
+                padding: 15px;
+            }
         }
         .filter-bar {
             background: #1e3a50;
-            padding: 12px;
-            border-radius: 4px;
-            margin-bottom: 15px;
+            padding: 9px 12px;
+            border-radius: 6px;
+            margin-bottom: 10px;
             display: flex;
             align-items: center;
-            gap: 12px;
+            gap: 8px 12px;
             flex-wrap: wrap;
+            border: 1px solid #2d4060;
         }
         .filter-bar label {
             color: #90a4ae;
-            font-size: 13px;
+            font-size: 11px;
             font-weight: 600;
         }
         .filter-bar select,
@@ -37,19 +168,21 @@
             background: #2d4060;
             border: 1px solid #3d5070;
             color: #e0f7fa;
-            padding: 6px 10px;
-            border-radius: 3px;
-            font-size: 13px;
+            padding: 6px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            min-height: 30px;
         }
         .filter-bar button {
             background: #00bcd4;
             color: white;
             border: none;
-            padding: 6px 14px;
-            border-radius: 3px;
+            padding: 6px 10px;
+            border-radius: 4px;
             cursor: pointer;
-            font-size: 13px;
+            font-size: 12px;
             font-weight: 600;
+            min-height: 30px;
         }
         .filter-bar button:hover {
             background: #0097a7;
@@ -63,8 +196,8 @@
         .filter-actions {
             display: flex;
             align-items: center;
-            gap: 8px;
-            flex-wrap: nowrap;
+            gap: 6px;
+            flex-wrap: wrap;
         }
         .filter-actions button {
             white-space: nowrap;
@@ -162,56 +295,115 @@
         .stats {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
-            gap: 12px;
-            margin-bottom: 15px;
+            gap: 8px;
+            margin-bottom: 10px;
         }
         .stat-card {
             background: #1e3a50;
-            padding: 12px;
-            border-radius: 4px;
+            padding: 8px 12px;
+            border-radius: 6px;
             border-left: 3px solid #00bcd4;
+            min-height: 62px;
+            border-top: 1px solid #2d4060;
+            border-right: 1px solid #2d4060;
+            border-bottom: 1px solid #2d4060;
         }
         .stat-card h4 {
             color: #90a4ae;
-            font-size: 11px;
-            margin-bottom: 6px;
+            font-size: 10px;
+            margin-bottom: 4px;
             text-transform: uppercase;
+            letter-spacing: 0.03em;
         }
         .stat-card .value {
             color: #4fc3f7;
-            font-size: 20px;
+            font-size: 15px;
             font-weight: bold;
+            line-height: 1.2;
+        }
+        .faturalar-table-wrap {
+            background: #1e3a50;
+            border: 1px solid #2d4060;
+            border-radius: 6px;
+            overflow: auto;
+            max-height: calc(100vh - 270px);
+            width: fit-content;
+            max-width: 100%;
+            min-width: 760px;
+            resize: horizontal;
+            scrollbar-width: thin;
+            scrollbar-color: #78909c #163044;
+        }
+        .faturalar-table-wrap::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        .faturalar-table-wrap::-webkit-scrollbar-track {
+            background: #163044;
+            border-radius: 8px;
+        }
+        .faturalar-table-wrap::-webkit-scrollbar-thumb {
+            background: #78909c;
+            border-radius: 8px;
+            border: 1px solid #163044;
+        }
+        .faturalar-table-wrap::-webkit-scrollbar-thumb:hover {
+            background: #90a4ae;
         }
         table {
-            width: 100%;
+            width: max-content;
+            min-width: 760px;
             border-collapse: collapse;
             background: #1e3a50;
-            border-radius: 4px;
-            overflow: hidden;
+            border-radius: 0;
+            overflow: visible;
         }
         thead {
             background: #0f2537;
         }
         th {
             color: #4fc3f7;
-            padding: 12px;
+            padding: 8px 10px;
             text-align: left;
-            font-size: 12px;
+            font-size: 11px;
             font-weight: 600;
+            position: sticky;
+            top: 0;
+            z-index: 1;
         }
         td {
-            padding: 10px 12px;
+            padding: 7px 10px;
             border-bottom: 1px solid #2d4060;
-            font-size: 13px;
+            font-size: 12px;
+            line-height: 1.25;
+            vertical-align: top;
+        }
+        tfoot td {
+            background: #0f2537;
+            border-top: 2px solid #28506d;
+            border-bottom: none;
+            font-weight: 700;
+            color: #e0f7fa;
         }
         tr:hover td {
             background: rgba(79, 195, 247, 0.05);
         }
+        td:nth-child(3) {
+            max-width: 260px;
+            white-space: normal;
+            word-break: break-word;
+        }
+        td:nth-child(5),
+        th:nth-child(5) {
+            white-space: nowrap;
+        }
         .badge {
-            padding: 3px 10px;
+            padding: 2px 8px;
             border-radius: 12px;
-            font-size: 11px;
+            font-size: 10px;
             font-weight: 600;
+            display: inline-block;
+            line-height: 1.2;
         }
         .badge-odendi {
             background: rgba(76, 175, 80, 0.2);
@@ -221,10 +413,128 @@
             background: rgba(244, 67, 54, 0.2);
             color: #f44336;
         }
+        .badge-gib-imzali {
+            background: rgba(76, 175, 80, 0.18);
+            color: #81c784;
+        }
+        .badge-gib-taslak {
+            background: rgba(255, 183, 77, 0.18);
+            color: #ffb74d;
+        }
+        .badge-gib-iptal {
+            background: rgba(239, 83, 80, 0.22);
+            color: #ef9a9a;
+        }
+        .gib-durum-th-wrap {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            position: relative;
+        }
+        .gib-durum-toggle {
+            width: 18px;
+            height: 18px;
+            padding: 0;
+            border-radius: 4px;
+            border: 1px solid #3d5070;
+            background: #20384f;
+            color: #e0f7fa;
+            font-size: 10px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+        }
+        .gib-durum-toggle:hover {
+            background: #294865;
+        }
+        .gib-durum-menu {
+            position: absolute;
+            top: calc(100% + 6px);
+            left: 0;
+            min-width: 96px;
+            background: #20384f;
+            border: 1px solid #3d5070;
+            border-radius: 6px;
+            box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
+            padding: 4px;
+            display: none;
+            z-index: 20;
+        }
+        .gib-durum-menu.is-open {
+            display: block;
+        }
+        .gib-durum-menu button {
+            width: 100%;
+            border: none;
+            background: transparent;
+            color: #e0f7fa;
+            text-align: left;
+            font-size: 11px;
+            padding: 6px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .gib-durum-menu button:hover,
+        .gib-durum-menu button.is-active {
+            background: rgba(79, 195, 247, 0.16);
+            color: #b3e5fc;
+        }
+        .odeme-duzeni-cell {
+            white-space: nowrap;
+            cursor: pointer;
+            color: #b3e5fc;
+        }
+        .odeme-duzeni-editor {
+            min-width: 170px;
+            background: #17324a;
+            border: 1px solid #32516f;
+            border-radius: 6px;
+            padding: 6px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .odeme-duzeni-editor select,
+        .odeme-duzeni-editor input {
+            width: 100%;
+            background: #0f2437;
+            border: 1px solid #2d4b68;
+            color: #e0f7fa;
+            border-radius: 4px;
+            padding: 4px 6px;
+            font-size: 12px;
+        }
+        .odeme-duzeni-actions {
+            display: flex;
+            gap: 6px;
+        }
+        .odeme-duzeni-actions button {
+            border: none;
+            border-radius: 4px;
+            padding: 4px 8px;
+            font-size: 11px;
+            cursor: pointer;
+        }
+        .odeme-duzeni-save { background: #2ea043; color: #fff; }
+        .odeme-duzeni-cancel { background: #455a64; color: #fff; }
         /* Dinamik tablo: resizer + sıralama */
         th.dyn-sort-th {
             cursor: pointer;
             user-select: none;
+        }
+        th.dyn-draggable-th {
+            cursor: grab;
+        }
+        th.dyn-draggable-th.dragging {
+            opacity: 0.55;
+            cursor: grabbing;
+        }
+        th.dyn-draggable-th.drag-over-left {
+            box-shadow: inset 3px 0 0 #4fc3f7;
+        }
+        th.dyn-draggable-th.drag-over-right {
+            box-shadow: inset -3px 0 0 #4fc3f7;
         }
         .dyn-col-resizer {
             position: absolute;
@@ -240,9 +550,75 @@
         .dyn-col-resizer:hover { background: rgba(79, 195, 247, 0.25); }
         .dyn-sort-asc::after { content: " ▲"; font-size: 10px; color: #4fc3f7; }
         .dyn-sort-desc::after { content: " ▼"; font-size: 10px; color: #4fc3f7; }
+        @media (max-width: 1100px) {
+            .stats {
+                grid-template-columns: 1fr;
+            }
+            .faturalar-table-wrap {
+                width: 100%;
+                max-height: none;
+                resize: none;
+            }
+        }
     </style>
 </head>
-<body>
+{% set _hide_chrome = (request.args.get('embed') or '').lower() in ('1', 'true', 'yes', 'on') %}
+<body class="{% if _hide_chrome %}layout-embed{% endif %}">
+    {% if not _hide_chrome %}
+    <header class="header">
+        <div class="header-top">
+            <div class="logo" onclick="window.location.href='/'">
+                <i class="fa fa-cube"></i>
+                <div>
+                    <span class="logo-text">OFİSBİR ERP</span>
+                    <span class="logo-version">v2.0.0</span>
+                </div>
+            </div>
+            <div class="user-info">
+                <span class="user-name">
+                    <i class="fa fa-user"></i> {{ current_user.username }}
+                </span>
+                <span class="user-role">{{ current_user.role or 'Admin' }}</span>
+                <div class="user-actions">
+                    <a href="{{ url_for('auth.logout') }}" title="Çıkış">
+                        <i class="fa fa-sign-out-alt"></i> Çıkış
+                    </a>
+                </div>
+            </div>
+        </div>
+        <nav class="nav">
+            <a href="/dashboard/"><i class="fa fa-tachometer-alt"></i> Dashboard</a>
+            <a href="/musteriler/"><i class="fa fa-users"></i> Müşteriler</a>
+            <a href="/faturalar/" class="active"><i class="fa fa-chart-line"></i> Finans</a>
+            <a href="/ofisler/"><i class="fa fa-building"></i> Ofisler</a>
+            <a href="/urunler/"><i class="fa fa-box"></i> Ürünler</a>
+            <a href="/kira/"><i class="fa fa-home"></i> Kira</a>
+            <a href="/kargolar/"><i class="fa fa-truck"></i> Kargolar</a>
+            <a href="/bankalar/"><i class="fa fa-university"></i> Bankalar</a>
+            <a href="/tufe/"><i class="fa fa-chart-line"></i> TÜFE</a>
+            <a href="/personel/"><i class="fa fa-user-tie"></i> Personel</a>
+            <a href="/ilan-robotu/"><i class="fa fa-bullhorn"></i> İlan Robotu</a>
+            <a href="/giris/"><i class="fa fa-user-plus"></i> Giriş</a>
+            <a href="/admin/"><i class="fa fa-folder"></i> Yönetim</a>
+            <a href="/m/" target="_blank" title="Mobil sürüm"><i class="fa fa-mobile-alt"></i> Mobil</a>
+            <a href="/cari-kart/"><i class="fa fa-address-card"></i> Cari Kart</a>
+        </nav>
+    </header>
+    {% endif %}
+    <main class="main-content">
+    <div class="erp-page-wrap">
+    <div class="erp-tab-bar">
+        <a href="{{ url_for('musteriler.index') }}" class="page-title-prefix"><i class="fa fa-arrow-left"></i> Müşteriler</a>
+        <div class="tabs">
+            <a href="{{ url_for('musteriler.index') }}" class="tab"><i class="fa fa-th-large"></i><span>Özet</span></a>
+            <a href="{{ url_for('faturalar.faturalar') }}" id="tab-faturalar-link" class="tab {{ '' if erp_taslak_modu else 'active' }}" onclick="return erpGorunum('faturalar');"><i class="fa fa-file-invoice"></i><span>Faturalar</span></a>
+            <a href="{{ url_for('faturalar.faturalar') }}?erp_taslak=1" id="tab-taslaklar-link" class="tab {{ 'active' if erp_taslak_modu else '' }}" onclick="return erpGorunum('taslaklar');"><i class="fa fa-clipboard"></i><span>Taslaklar</span></a>
+            <a href="{{ url_for('faturalar.tahsilatlar') }}" class="tab"><i class="fa fa-money-bill-wave"></i><span>Tahsilatlar</span></a>
+            <a href="{{ url_for('faturalar.yeni_fatura') }}" class="tab"><i class="fa fa-plus-circle"></i><span>Yeni Fatura</span></a>
+            <a href="{{ url_for('musteriler.list_full', sayfa=1, limit=50) }}" class="tab"><i class="fa fa-users"></i><span>Müşteri listesi</span></a>
+            <a href="{{ url_for('faturalar.index') }}#gib-rapor" class="tab"><i class="fa fa-bar-chart"></i><span>Rapor</span></a>
+        </div>
+    </div>
     <div class="filter-bar">
         <label>Yıl:</label>
         <select id="yil">
@@ -270,6 +646,23 @@
             <button onclick="filtrele()">
                 <i class="fa fa-filter"></i> Filtrele
             </button>
+            <input type="hidden" id="erp_taslak_modu" value="{{ '1' if erp_taslak_modu else '' }}">
+            <input type="hidden" id="gib_canli" value="{{ '1' if gib_canli_kontrol else '' }}">
+            {% if not erp_taslak_modu %}
+            <button type="button" onclick="gibCanliKontrolEt()" style="background:#546e7a;" title="GİB ile karşılaştırma sadece bu butonda çalışır">
+                <i class="fa fa-shield-alt"></i> GİB ile kontrol
+            </button>
+            <input type="text" id="gib_tekil_ref" placeholder="GİB Fatura No / ETTN" style="min-width:230px;">
+            <button type="button" onclick="gibCekKaydet()" style="background:#00897b;" title="Kutuda ETTN/GIB no varsa tekil; boşsa üstteki tarih aralığında toplu ERP'ye aktarır">
+                <i class="fa fa-cloud-download-alt"></i> GİB'den çek + kaydet
+            </button>
+            <button type="button" onclick="gibSifirDoldur()" style="background:#6a1b9a;">
+                <i class="fa fa-wand-magic-sparkles"></i> 0 TL GİB faturaları doldur
+            </button>
+            <button type="button" onclick="gibDurumTarama()" style="background:#1565c0;" title="ETTN'li faturaların gerçek durumunu (İmzalı/Taslak/İptal) GİB HTML filigranıyla yeniden hesaplar ve ERP notlarını günceller.">
+                <i class="fa fa-rotate"></i> GİB durumlarını yenile
+            </button>
+            {% endif %}
             <button type="button" onclick="yeniFaturaEkleAc()" style="background:#4caf50;">
                 <i class="fa fa-plus"></i> Yeni fatura ekle
             </button>
@@ -314,79 +707,548 @@
         </button>
     </div>
     
-    <div class="stats">
+    <div class="stats" id="stats-faturalar">
         <div class="stat-card">
-            <h4>Toplam Tutar</h4>
-            <div class="value">{{ toplam_tutar|default(0)|round(2) }} TL</div>
+            <h4 id="stat-toplam-baslik">{{ 'Taslak Toplam' if erp_taslak_modu else 'Toplam Tutar' }}</h4>
+            <div class="value" id="stat-toplam-deger">{{ "{:,.2f}".format((toplam_tutar|default(0)|float)).replace(",", "X").replace(".", ",").replace("X", ".") }} TL</div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card" id="stat-odenen-kart">
             <h4>Ödenen</h4>
-            <div class="value" style="color: #4caf50;">{{ toplam_odenen|default(0)|round(2) }} TL</div>
+            <div class="value" style="color: #4caf50;" id="stat-odenen-deger">{{ "{:,.2f}".format((toplam_odenen|default(0)|float)).replace(",", "X").replace(".", ",").replace("X", ".") }} TL</div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card" id="stat-kalan-kart">
             <h4>Kalan</h4>
-            <div class="value" style="color: #f44336;">{{ toplam_kalan|default(0)|round(2) }} TL</div>
+            <div class="value" style="color: #f44336;" id="stat-kalan-deger">{{ "{:,.2f}".format((toplam_kalan|default(0)|float)).replace(",", "X").replace(".", ",").replace("X", ".") }} TL</div>
         </div>
     </div>
     
+    <div class="faturalar-table-wrap">
     <table id="faturalar_liste_tablo" class="dyn-resizable">
         <thead>
             <tr>
-                <th class="dyn-sort-th" data-dyn-type="str">Fatura No</th>
-                <th class="dyn-sort-th" data-dyn-type="str">Müşteri</th>
-                <th class="dyn-sort-th" data-dyn-type="str">Ofis</th>
-                <th class="dyn-sort-th" data-dyn-type="num">Tutar</th>
-                <th class="dyn-sort-th" data-dyn-type="str">Durum</th>
-                <th>İşlem</th>
+                <th class="dyn-sort-th dyn-draggable-th" data-dyn-type="str" data-col-key="tarih">Tarih</th>
+                <th class="dyn-sort-th dyn-draggable-th" data-dyn-type="str" data-col-key="fatura_no">Fatura No</th>
+                <th class="dyn-sort-th dyn-draggable-th" data-dyn-type="str" data-col-key="gib_durum">
+                    <div class="gib-durum-th-wrap">
+                        <span>Durum</span>
+                        <input type="hidden" id="gib_durum" value="{{ gib_durum or '' }}">
+                        {% if not erp_taslak_modu %}
+                        <button type="button" id="gib_durum_toggle" class="gib-durum-toggle" title="GİB durum filtresi" aria-haspopup="menu" aria-expanded="false" onclick="gibDurumMenuToggle(event)">
+                            <i class="fa fa-chevron-down"></i>
+                        </button>
+                        <div id="gib_durum_menu" class="gib-durum-menu" role="menu">
+                            <button type="button" class="{{ 'is-active' if not gib_durum else '' }}" onclick="gibDurumSec('')">Hepsi</button>
+                            <button type="button" class="{{ 'is-active' if gib_durum == 'imzali' else '' }}" onclick="gibDurumSec('imzali')">İmzalı</button>
+                            <button type="button" class="{{ 'is-active' if gib_durum == 'taslak' else '' }}" onclick="gibDurumSec('taslak')">Taslak / İmzasız</button>
+                            <button type="button" class="{{ 'is-active' if gib_durum == 'iptal' else '' }}" onclick="gibDurumSec('iptal')">İptal</button>
+                        </div>
+                        {% endif %}
+                    </div>
+                </th>
+                <th class="dyn-sort-th dyn-draggable-th" data-dyn-type="str" data-col-key="musteri">Müşteri</th>
+                <th class="dyn-sort-th dyn-draggable-th" data-dyn-type="num" data-col-key="tutar">Tutar</th>
+                <th class="dyn-sort-th dyn-draggable-th" data-dyn-type="str" data-col-key="odeme_durum">Durum</th>
+                <th class="dyn-draggable-th" data-col-key="islem">İşlem</th>
+                <th class="dyn-draggable-th" data-col-key="odeme_duzeni">Ödeme Düzeni</th>
             </tr>
         </thead>
         <tbody>
             {% if faturalar %}
                 {% for f in faturalar %}
                 <tr>
-                    <td>{{ f.fatura_no }}</td>
-                    <td>{{ f.musteri_adi_goster or f.customer_name or f.musteri_adi or '—' }}</td>
-                    <td>{{ f.ofis_kodu }}</td>
-                    <td>{{ f.toplam|round(2) }} TL</td>
-                    <td>
+                    <td data-col-key="tarih">{{ (f.fatura_tarihi or f.tarih or '—')[:10] if (f.fatura_tarihi or f.tarih) else '—' }}</td>
+                    <td data-col-key="fatura_no">
+                        {% if f.duzenle_url %}
+                        <a href="{{ f.duzenle_url }}" target="_blank" title="Faturayı düzenle"
+                           style="color:#e0f7fa;text-decoration:none;border-bottom:1px dotted rgba(224,247,250,.35);">
+                            {{ f.fatura_no }}
+                        </a>
+                        {% else %}
+                        {{ f.fatura_no }}
+                        {% endif %}
+                    </td>
+                    <td data-col-key="gib_durum">
+                        {% set _gibdr = f.gib_durum_rapor or 'Taslak' %}
+                        <span class="badge {% if _gibdr == 'İptal' %}badge-gib-iptal{% elif _gibdr in ('Taslak', 'İmzasız') %}badge-gib-taslak{% else %}badge-gib-imzali{% endif %}">
+                            {{ _gibdr }}
+                        </span>
+                    </td>
+                    <td data-col-key="musteri">{{ f.musteri_adi_goster or f.customer_name or f.musteri_adi or '—' }}</td>
+                    <td data-col-key="tutar" data-kdv="{{ (f.kdv_tutar|default(0)|float) }}">{{ "{:,.2f}".format((f.toplam|default(0)|float)).replace(",", "X").replace(".", ",").replace("X", ".") }} TL</td>
+                    <td data-col-key="odeme_durum">
+                        {% if f.durum %}
                         <span class="badge badge-{{ 'odendi' if f.durum == 'odendi' else 'odenmedi' }}">
                             {{ f.durum }}
                         </span>
+                        {% else %}
+                        <span style="color:#90a4ae;">—</span>
+                        {% endif %}
                     </td>
-                    <td>
+                    <td data-col-key="islem">
+                        {% if f.id %}
                         <a href="/faturalar/onizleme/{{ f.id }}" target="_blank" title="Faturayı görüntüle"
                            style="display:inline-block;background:#4fc3f7;color:white;border:none;padding:4px 10px;border-radius:3px;cursor:pointer;font-size:11px;text-decoration:none;">
                             <i class="fa fa-eye"></i>
                         </a>
+                        {% elif f.duzenle_url %}
+                        <a href="{{ f.duzenle_url }}" target="_blank" title="Faturayı düzenle"
+                           style="display:inline-block;background:#26a69a;color:white;border:none;padding:4px 10px;border-radius:3px;cursor:pointer;font-size:11px;text-decoration:none;">
+                            <i class="fa fa-pen"></i>
+                        </a>
+                        {% else %}
+                        <span style="color:#90a4ae;">—</span>
+                        {% endif %}
+                    </td>
+                    <td data-col-key="odeme_duzeni"
+                        class="odeme-duzeni-cell"
+                        data-musteri-id="{{ f.musteri_id or '' }}"
+                        data-odeme-duzeni="{{ f.odeme_duzeni or '' }}"
+                        data-odeme-duzeni-manuel="{{ f.odeme_duzeni_manuel or '' }}"
+                        onclick="odemeDuzeniEditorAc(this);event.stopPropagation();">
+                        {{ f.odeme_duzeni_display or '—' }}
                     </td>
                 </tr>
                 {% endfor %}
             {% else %}
                 <tr>
-                    <td colspan="6" style="text-align: center; color: #90a4ae; padding: 30px;">
+                    <td colspan="8" style="text-align: center; color: #90a4ae; padding: 30px;">
                         Fatura bulunamadı
                     </td>
                 </tr>
             {% endif %}
         </tbody>
+        <tfoot>
+            <tr id="faturalar_toplam_satiri">
+                <td data-col-key="tarih"></td>
+                <td data-col-key="fatura_no"></td>
+                <td data-col-key="gib_durum"></td>
+                <td data-col-key="musteri" style="text-align:right;">Toplam:</td>
+                <td data-col-key="tutar" id="faturalar_toplam_tutar_hucre">0,00 TL</td>
+                <td data-col-key="odeme_durum"></td>
+                <td data-col-key="islem"></td>
+                <td data-col-key="odeme_duzeni"></td>
+            </tr>
+            <tr id="faturalar_kdv_toplam_satiri">
+                <td data-col-key="tarih"></td>
+                <td data-col-key="fatura_no"></td>
+                <td data-col-key="gib_durum"></td>
+                <td data-col-key="musteri" style="text-align:right;">KDV Toplam:</td>
+                <td data-col-key="tutar" id="faturalar_kdv_toplam_tutar_hucre">0,00 TL</td>
+                <td data-col-key="odeme_durum"></td>
+                <td data-col-key="islem"></td>
+                <td data-col-key="odeme_duzeni"></td>
+            </tr>
+        </tfoot>
     </table>
+    </div>
     
     <script>
     var yeniCariHedef = 'fatura';
     var autoAdaylar = [];
 
-    function filtrele() {
+    async function gibCekKaydet() {
+        var inp = document.getElementById('gib_tekil_ref');
+        var ref = (inp && inp.value || '').trim();
+        if (ref) {
+            await gibTekilCekKaydetInner(ref);
+            return;
+        }
+        var baslangic = (document.getElementById('baslangic') || {}).value || '';
+        var bitis = (document.getElementById('bitis') || {}).value || '';
+        if (!baslangic || !bitis) {
+            alert('Toplu aktarım için üstte başlangıç ve bitiş tarihini seçin veya kutuya GİB No / ETTN yazın.');
+            return;
+        }
+        if (!confirm('Seçili ' + baslangic + ' — ' + bitis + ' aralığında GİB portalındaki faturaların tamamını ERP\'ye yazayım mı?\n\n(Bu işlem GİB\'e bağlanır; bittikten sonra liste yalnız veritabanından hızlı gelir.)')) {
+            return;
+        }
+        try {
+            var r = await fetch('/faturalar/api/gib-cek-kaydet-aralik', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
+                body: JSON.stringify({ baslangic: baslangic, bitis: bitis })
+            });
+            var j = await r.json();
+            if (!j || !j.ok) throw new Error((j && j.mesaj) || ('HTTP ' + r.status));
+            alert(j.mesaj || 'Tamamlandı.');
+            filtrele();
+        } catch (e) {
+            alert('GİB toplu aktarım hatası: ' + (e && e.message ? e.message : e));
+        }
+    }
+
+    async function gibTekilCekKaydetInner(ref) {
+        var body = {};
+        if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ref)) body.uuid = ref;
+        else body.fatura_no = ref.toUpperCase();
+        try {
+            var r = await fetch('/faturalar/api/gib-cek-kaydet', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
+                body: JSON.stringify(body)
+            });
+            var j = await r.json();
+            if (!j || !j.ok) throw new Error((j && j.mesaj) || ('HTTP ' + r.status));
+            alert((j.mesaj || 'Kaydedildi.') + (j.fatura_id ? (' (ID: ' + j.fatura_id + ')') : ''));
+            filtrele();
+        } catch (e) {
+            alert('GİB tekil çekme hatası: ' + (e && e.message ? e.message : e));
+        }
+    }
+
+    async function gibSifirDoldur() {
+        var baslangic = (document.getElementById('baslangic') || {}).value || '';
+        var bitis = (document.getElementById('bitis') || {}).value || '';
+        if (!confirm('Bu aralıktaki GİB kayıtlarını tarayıp 0 TL görünenleri ERP\'ye doldurayım mı?')) return;
+        try {
+            var r = await fetch('/faturalar/api/gib-sifir-doldur', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
+                body: JSON.stringify({ baslangic: baslangic, bitis: bitis })
+            });
+            var j = await r.json();
+            if (!j || !j.ok) throw new Error((j && j.mesaj) || ('HTTP ' + r.status));
+            alert(j.mesaj || 'Tamamlandı.');
+            filtrele();
+        } catch (e) {
+            alert('GİB toplu doldurma hatası: ' + (e && e.message ? e.message : e));
+        }
+    }
+
+    async function gibDurumTarama() {
+        var baslangic = (document.getElementById('baslangic') || {}).value || '';
+        var bitis = (document.getElementById('bitis') || {}).value || '';
+        var ay = (document.getElementById('ay') || {}).value || '';
+        if (ay) {
+            var msg = 'GİB durum taraması ETTN\'li tüm satırları HTML filigranı ile doğrular. ' +
+                'Ay filtresi açık olduğunda yıl tamamı taranır. Devam edilsin mi?';
+            if (!confirm(msg)) return;
+        } else if (!confirm('Bu tarih aralığındaki ETTN\'li faturaların GİB durumunu HTML filigranıyla yeniden tespit edip ERP notlarını güncelleyeyim mi?')) {
+            return;
+        }
+        var btn = event && event.target && event.target.closest ? event.target.closest('button') : null;
+        var oldHtml = btn ? btn.innerHTML : '';
+        if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Taranıyor...'; }
+        try {
+            var r = await fetch('/faturalar/api/gib-durum-tarama', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
+                body: JSON.stringify({ baslangic: baslangic, bitis: bitis })
+            });
+            var j = await r.json();
+            if (!j || !j.ok) throw new Error((j && j.mesaj) || ('HTTP ' + r.status));
+            alert(j.mesaj || 'GİB durumları yenilendi.');
+            filtrele();
+        } catch (e) {
+            alert('GİB durum taraması hatası: ' + (e && e.message ? e.message : e));
+        } finally {
+            if (btn) { btn.disabled = false; btn.innerHTML = oldHtml; }
+        }
+    }
+
+    // ============================================================
+    // ERP Görünüm Geçişi: Faturalar ↔ Taslaklar (sayfa yenileme YOK)
+    // ============================================================
+    var _erpGorunumAktif = '{{ "taslaklar" if erp_taslak_modu else "faturalar" }}';
+    var _taslakCache = null;  // yüklenen taslak verisi cache
+
+    function _formatTR(n) {
+        var v = Number(n || 0);
+        if (!Number.isFinite(v)) v = 0;
+        return v.toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' TL';
+    }
+
+    function erpGorunum(mod) {
+        if (_erpGorunumAktif === mod) return false;
+        if (mod === 'faturalar') {
+            // Orijinal fatura satırları bellekte varsa anında geri dön.
+            if (_faturaOrigRows !== null) {
+                _erpGorunumAktif = 'faturalar';
+                var linkF0 = document.getElementById('tab-faturalar-link');
+                var linkT0 = document.getElementById('tab-taslaklar-link');
+                if (linkF0) linkF0.classList.add('active');
+                if (linkT0) linkT0.classList.remove('active');
+                var erpFlag0 = document.getElementById('erp_taslak_modu');
+                if (erpFlag0) erpFlag0.value = '';
+                var gibBtn0 = document.getElementById('gib_durum_toggle');
+                if (gibBtn0) gibBtn0.style.display = '';
+                _taslakGizle();
+                document.getElementById('stat-toplam-baslik').textContent = 'Toplam Tutar';
+                var odeEl0 = document.getElementById('stat-odenen-kart');
+                var kalEl0 = document.getElementById('stat-kalan-kart');
+                if (odeEl0) odeEl0.style.display = '';
+                if (kalEl0) kalEl0.style.display = '';
+                return false;
+            }
+            // İlk açılış taslak modundaysa fallback: normal route'a git.
+            return true;
+        }
+        _erpGorunumAktif = mod;
+        var linkF = document.getElementById('tab-faturalar-link');
+        var linkT = document.getElementById('tab-taslaklar-link');
+        if (linkF) linkF.classList.toggle('active', mod === 'faturalar');
+        if (linkT) linkT.classList.toggle('active', mod === 'taslaklar');
+        var erpFlag = document.getElementById('erp_taslak_modu');
+        if (erpFlag) erpFlag.value = mod === 'taslaklar' ? '1' : '';
+
+        var gibBtnWrap = document.getElementById('gib_durum_toggle');
+        if (gibBtnWrap) gibBtnWrap.style.display = mod === 'taslaklar' ? 'none' : '';
+
+        if (mod === 'taslaklar') _taslakYukle();
+        return false;
+    }
+
+    function _taslakYukle() {
+        var bas = document.getElementById('baslangic').value;
+        var bit = document.getElementById('bitis').value;
+        var cacheKey = bas + '_' + bit;
+
+        var odeEl = document.getElementById('stat-odenen-kart');
+        var kalEl = document.getElementById('stat-kalan-kart');
+        if (odeEl) odeEl.style.display = 'none';
+        if (kalEl) kalEl.style.display = 'none';
+
+        if (_taslakCache && _taslakCache._key === cacheKey) {
+            _taslakRender(_taslakCache);
+            return;
+        }
+
+        document.getElementById('stat-toplam-baslik').textContent = 'Taslak Toplam';
+        document.getElementById('stat-toplam-deger').textContent = 'Yükleniyor…';
+        _taslakTbodyGoster([]);
+
+        fetch('/faturalar/api/erp-taslaklar?baslangic=' + encodeURIComponent(bas) + '&bitis=' + encodeURIComponent(bit), {credentials: 'same-origin'})
+            .then(function(r){ return r.json(); })
+            .then(function(j){
+                if (!j.ok) throw new Error(j.mesaj || 'hata');
+                j._key = cacheKey;
+                _taslakCache = j;
+                _taslakRender(j);
+            })
+            .catch(function(e){
+                document.getElementById('stat-toplam-deger').textContent = 'Hata: ' + (e.message || e);
+            });
+    }
+
+    function _taslakRender(j) {
+        document.getElementById('stat-toplam-baslik').textContent = 'Taslak Toplam';
+        document.getElementById('stat-toplam-deger').textContent = _formatTR(j.toplam);
+        var tfoot = document.getElementById('faturalar_toplam_satiri');
+        if (tfoot) {
+            var toplamHucre = tfoot.querySelector('[id$="tutar_hucre"]') || tfoot.querySelector('td:last-child');
+            if (toplamHucre) toplamHucre.textContent = _formatTR(j.toplam);
+        }
+        _taslakTbodyGoster(j.items || []);
+        if (typeof toplamSatiriGuncelle === 'function') toplamSatiriGuncelle();
+    }
+
+    var _faturaOrigRows = null;
+
+    function _taslakTbodyGoster(items) {
+        var tbody = document.querySelector('#faturalar_liste_tablo tbody');
+        if (!tbody) return;
+        // Orijinali sakla (ilk seferinde)
+        if (!_faturaOrigRows) _faturaOrigRows = tbody.innerHTML;
+
+        var html = '';
+        if (!items.length) {
+            html = '<tr><td colspan="8" style="text-align:center;color:#90a4ae;padding:16px;">Bu aralıkta ERP taslağı yok.</td></tr>';
+        } else {
+            items.forEach(function(f) {
+                var tarih = (f.fatura_tarihi || '').slice(0, 10);
+                var tutarTR = Number(f.toplam || 0).toLocaleString('tr-TR', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' TL';
+                var editLink = f.duzenle_url ? ('<a href="' + f.duzenle_url + '" target="_blank" title="Düzenle" style="color:#e0f7fa;text-decoration:none;border-bottom:1px dotted rgba(224,247,250,.35);">' + (f.fatura_no || '—') + '</a>') : (f.fatura_no || '—');
+                var durumBadge = '<span class="badge badge-gib-taslak">ERP Taslak</span>';
+                var odeBadge = f.durum ? ('<span class="badge badge-' + (f.durum === 'odendi' ? 'odendi' : 'odenmedi') + '">' + f.durum + '</span>') : '<span style="color:#90a4ae;">—</span>';
+                var islemBtn = f.id ? ('<a href="/faturalar/onizleme/' + f.id + '" target="_blank" style="display:inline-block;background:#4fc3f7;color:white;padding:4px 10px;border-radius:3px;font-size:11px;text-decoration:none;"><i class="fa fa-eye"></i></a>') : '—';
+                html += '<tr>';
+                html += '<td data-col-key="tarih">' + tarih + '</td>';
+                html += '<td data-col-key="fatura_no">' + editLink + '</td>';
+                html += '<td data-col-key="gib_durum">' + durumBadge + '</td>';
+                html += '<td data-col-key="musteri">' + (f.musteri_adi || '—') + '</td>';
+                html += '<td data-col-key="tutar" data-kdv="' + (f.kdv_tutar||0) + '">' + tutarTR + '</td>';
+                html += '<td data-col-key="odeme_durum">' + odeBadge + '</td>';
+                html += '<td data-col-key="islem">' + islemBtn + '</td>';
+                html += '<td data-col-key="odeme_duzeni" class="odeme-duzeni-cell" data-musteri-id="' + (f.musteri_id || '') + '" data-odeme-duzeni="' + (f.odeme_duzeni || 'aylik') + '" data-odeme-duzeni-manuel="' + (f.odeme_duzeni_manuel || '') + '" onclick="odemeDuzeniEditorAc(this);event.stopPropagation();">' + (f.odeme_duzeni_display || '—') + '</td>';
+                html += '</tr>';
+            });
+        }
+        tbody.innerHTML = html;
+        if (typeof reorderColumns === 'function') {
+            try { reorderColumns(typeof order !== 'undefined' ? order : []); } catch(e){}
+        }
+        if (typeof toplamSatiriGuncelle === 'function') toplamSatiriGuncelle();
+    }
+
+    function _taslakGizle() {
+        var tbody = document.querySelector('#faturalar_liste_tablo tbody');
+        if (tbody && _faturaOrigRows !== null) {
+            tbody.innerHTML = _faturaOrigRows;
+            if (typeof reorderColumns === 'function') {
+                try { reorderColumns(typeof order !== 'undefined' ? order : []); } catch(e){}
+            }
+            if (typeof toplamSatiriGuncelle === 'function') toplamSatiriGuncelle();
+        }
+    }
+    // ============================================================
+
+    function filtrele(gibCanliZorla) {
+        _taslakCache = null;  // filtre değişti, cache sıfırla
         const yil = document.getElementById('yil').value;
         const ay = document.getElementById('ay').value;
         const baslangic = document.getElementById('baslangic').value;
         const bitis = document.getElementById('bitis').value;
         const ofis = document.getElementById('ofis').value;
+        const gibDurum = document.getElementById('gib_durum');
+        const gibCanli = document.getElementById('gib_canli');
+        const erpTaslakModu = document.getElementById('erp_taslak_modu');
+        if (gibCanli) gibCanli.value = gibCanliZorla ? '1' : '';
         
         let url = '/faturalar/faturalar?yil=' + yil + '&baslangic=' + encodeURIComponent(baslangic) + '&bitis=' + encodeURIComponent(bitis);
         if (ay) url += '&ay=' + encodeURIComponent(ay);
         if (ofis) url += '&ofis=' + encodeURIComponent(ofis);
+        if (gibDurum && gibDurum.value) url += '&gib_durum=' + encodeURIComponent(gibDurum.value);
+        if (gibCanli && gibCanli.value) url += '&gib_canli=1';
+        if (erpTaslakModu && erpTaslakModu.value) url += '&erp_taslak=1';
         
         window.location.href = url;
+    }
+
+    function gibCanliKontrolEt() {
+        var gd = document.getElementById('gib_durum');
+        if (gd) gd.value = '';
+        filtrele(true);
+    }
+
+    function odemeDuzeniLabel(k, manuel) {
+        var key = String(k || 'aylik').toLowerCase();
+        if (key === 'yillik') return 'Yıllık';
+        if (key === '3_aylik') return '3 Aylık';
+        if (key === '6_aylik') return '6 Aylık';
+        if (key === 'manuel') return manuel ? ('Manuel: ' + manuel) : 'Manuel';
+        return 'Aylık';
+    }
+
+    function odemeDuzeniEditorAc(td) {
+        if (!td || td.querySelector('.odeme-duzeni-editor')) return;
+        var musteriId = parseInt(td.getAttribute('data-musteri-id') || '0', 10);
+        if (!musteriId) return;
+        var cur = (td.getAttribute('data-odeme-duzeni') || 'aylik').toLowerCase();
+        var curMan = td.getAttribute('data-odeme-duzeni-manuel') || '';
+        td.setAttribute('data-prev-html', td.innerHTML);
+        td.innerHTML = ''
+            + '<div class="odeme-duzeni-editor" onclick="event.stopPropagation();">'
+            + '  <select class="odeme-duzeni-select">'
+            + '    <option value="aylik">Aylık</option>'
+            + '    <option value="yillik">Yıllık</option>'
+            + '    <option value="3_aylik">3 Aylık</option>'
+            + '    <option value="6_aylik">6 Aylık</option>'
+            + '    <option value="manuel">Manuel</option>'
+            + '  </select>'
+            + '  <input type="text" class="odeme-duzeni-manuel" maxlength="200" placeholder="Manuel açıklama" style="display:none;">'
+            + '  <div class="odeme-duzeni-actions">'
+            + '    <button type="button" class="odeme-duzeni-save">Kaydet</button>'
+            + '    <button type="button" class="odeme-duzeni-cancel">İptal</button>'
+            + '  </div>'
+            + '</div>';
+        var sel = td.querySelector('.odeme-duzeni-select');
+        var inp = td.querySelector('.odeme-duzeni-manuel');
+        var btnSave = td.querySelector('.odeme-duzeni-save');
+        var btnCancel = td.querySelector('.odeme-duzeni-cancel');
+        if (sel) sel.value = cur;
+        if (inp) {
+            inp.value = curMan;
+            inp.style.display = (cur === 'manuel') ? '' : 'none';
+        }
+        if (sel) {
+            sel.addEventListener('change', function() {
+                if (!inp) return;
+                inp.style.display = (sel.value === 'manuel') ? '' : 'none';
+            });
+        }
+        if (btnCancel) {
+            btnCancel.addEventListener('click', function() {
+                odemeDuzeniEditorKapat(td, false);
+            });
+        }
+        if (btnSave) {
+            btnSave.addEventListener('click', function() {
+                odemeDuzeniKaydet(td);
+            });
+        }
+    }
+
+    function odemeDuzeniEditorKapat(td, basarili) {
+        if (!td) return;
+        if (!basarili) {
+            td.innerHTML = td.getAttribute('data-prev-html') || (td.textContent || '—');
+        } else {
+            var key = td.getAttribute('data-odeme-duzeni') || '';
+            var man = td.getAttribute('data-odeme-duzeni-manuel') || '';
+            td.textContent = key ? odemeDuzeniLabel(key, man) : '—';
+        }
+        td.removeAttribute('data-prev-html');
+    }
+
+    function odemeDuzeniKaydet(td) {
+        var musteriId = parseInt(td.getAttribute('data-musteri-id') || '0', 10);
+        var sel = td.querySelector('.odeme-duzeni-select');
+        var inp = td.querySelector('.odeme-duzeni-manuel');
+        if (!musteriId || !sel) return;
+        var odemeDuzeni = (sel.value || 'aylik');
+        var manuel = (odemeDuzeni === 'manuel' && inp) ? (inp.value || '').trim() : '';
+        fetch('/faturalar/api/musteri-odeme-duzeni', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            credentials: 'same-origin',
+            body: JSON.stringify({
+                musteri_id: musteriId,
+                odeme_duzeni: odemeDuzeni,
+                odeme_duzeni_manuel: manuel
+            })
+        })
+        .then(function(r){ return r.json(); })
+        .then(function(j){
+            if (!j.ok) throw new Error(j.mesaj || 'Kaydedilemedi');
+            td.setAttribute('data-odeme-duzeni', j.odeme_duzeni || odemeDuzeni);
+            td.setAttribute('data-odeme-duzeni-manuel', j.odeme_duzeni_manuel || manuel || '');
+            odemeDuzeniEditorKapat(td, true);
+        })
+        .catch(function(e){
+            alert('Ödeme düzeni kaydedilemedi: ' + (e.message || e));
+            odemeDuzeniEditorKapat(td, false);
+        });
+    }
+
+    function gibDurumMenuToggle(ev) {
+        if (ev) {
+            ev.preventDefault();
+            ev.stopPropagation();
+        }
+        var menu = document.getElementById('gib_durum_menu');
+        var btn = document.getElementById('gib_durum_toggle');
+        if (!menu || !btn) return;
+        var ac = !menu.classList.contains('is-open');
+        menu.classList.toggle('is-open', ac);
+        btn.setAttribute('aria-expanded', ac ? 'true' : 'false');
+    }
+
+    function gibDurumMenuKapat() {
+        var menu = document.getElementById('gib_durum_menu');
+        var btn = document.getElementById('gib_durum_toggle');
+        if (menu) menu.classList.remove('is-open');
+        if (btn) btn.setAttribute('aria-expanded', 'false');
+    }
+
+    function gibDurumSec(val) {
+        var inp = document.getElementById('gib_durum');
+        if (inp) inp.value = val || '';
+        gibDurumMenuKapat();
+        filtrele();
     }
     
     var cariAraTimer = null;
@@ -475,6 +1337,8 @@
         document.addEventListener('click', function(e) {
             var wrap = document.querySelector('.cari-ara-wrap');
             if (wrap && !wrap.contains(e.target)) document.getElementById('cari_ara_list').style.display = 'none';
+            var menuWrap = document.querySelector('.gib-durum-th-wrap');
+            if (menuWrap && !menuWrap.contains(e.target)) gibDurumMenuKapat();
         });
     });
     function cariSecipFaturaKes() {
@@ -518,7 +1382,7 @@
                 return '<label class="aday-row">' +
                   '<span><input type="checkbox" class="aday-cb" value="' + (a.musteri_id || '') + '" checked> ' +
                   (a.musteri_adi || 'Müşteri') + '</span>' +
-                  '<strong>' + Number(a.toplam || 0).toFixed(2) + ' TL</strong>' +
+                  '<strong>' + Number(a.toplam || 0).toLocaleString('tr-TR', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' TL</strong>' +
                 '</label>';
             }).join('');
           })
@@ -575,7 +1439,7 @@
         (function initDynTableFaturalar() {
             var table = document.getElementById('faturalar_liste_tablo');
             if (!table) return;
-            var LS_KEY = 'dyn_table_faturalar_v1';
+            var LS_KEY = 'dyn_table_faturalar_v2';
 
             function parseNumberTR(s) {
                 if (s == null) return 0;
@@ -599,6 +1463,12 @@
                 return NaN;
             }
 
+            function formatNumberTR(n) {
+                var v = Number(n || 0);
+                if (!Number.isFinite(v)) v = 0;
+                return v.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            }
+
             function readCfg() {
                 try {
                     var raw = localStorage.getItem(LS_KEY);
@@ -615,25 +1485,83 @@
 
             var cfg = readCfg();
             var widths = cfg.widths || {};
-            var sort = cfg.sort || null; // {colIndex, dir}
+            var sort = cfg.sort || null; // {key, dir}
+            var defaultOrder = Array.prototype.map.call(table.querySelectorAll('thead th[data-col-key]'), function(th) {
+                return th.getAttribute('data-col-key');
+            });
+            var order = Array.isArray(cfg.order) && cfg.order.length ? cfg.order.slice() : defaultOrder.slice();
+            order = order.filter(function(k){ return defaultOrder.indexOf(k) >= 0; });
+            defaultOrder.forEach(function(k){ if (order.indexOf(k) < 0) order.push(k); });
 
             table.style.tableLayout = 'fixed';
-            var rows = table.querySelectorAll('tr');
-            // width uygula
-            Object.keys(widths).forEach(function(k){
-                var idx = parseInt(k, 10);
-                var w = parseInt(widths[k], 10);
-                if (!Number.isFinite(idx) || !Number.isFinite(w) || w <= 0) return;
-                rows.forEach(function(r){
-                    if (!r.cells || !r.cells[idx]) return;
-                    r.cells[idx].style.width = w + 'px';
-                });
-            });
 
-            var ths = table.querySelectorAll('thead th.dyn-sort-th');
-            ths.forEach(function(th, thPos){
-                var colIndex = th.cellIndex;
-                // Resizer
+            function allRows() {
+                return table.querySelectorAll('tr');
+            }
+
+            function cellByKey(row, key) {
+                return row ? row.querySelector('[data-col-key="' + key + '"]') : null;
+            }
+
+            function toplamSatiriGuncelle() {
+                var tbody = table.querySelector('tbody');
+                var toplamEl = document.getElementById('faturalar_toplam_tutar_hucre');
+                var kdvToplamEl = document.getElementById('faturalar_kdv_toplam_tutar_hucre');
+                if (!tbody || !toplamEl || !kdvToplamEl) return;
+                var sum = 0;
+                var kdvSum = 0;
+                tbody.querySelectorAll('tr').forEach(function(tr){
+                    if (tr.style && tr.style.display === 'none') return;
+                    var hucre = cellByKey(tr, 'tutar');
+                    if (!hucre) return;
+                    var satirToplam = parseNumberTR(hucre.textContent || '');
+                    sum += satirToplam;
+                    var kdvRaw = hucre.getAttribute('data-kdv');
+                    var satirKdv = Number(kdvRaw || 0);
+                    if (!Number.isFinite(satirKdv) || satirKdv <= 0) {
+                        // GİB portal satırlarında kdv_tutar gelmeyebilir; varsayılan KDV %20.
+                        satirKdv = satirToplam > 0 ? (satirToplam / 6.0) : 0;
+                    }
+                    kdvSum += satirKdv;
+                });
+                toplamEl.textContent = formatNumberTR(sum) + ' TL';
+                kdvToplamEl.textContent = formatNumberTR(kdvSum) + ' TL';
+            }
+
+            function applyWidthByKey(key, widthPx) {
+                var w = parseInt(widthPx, 10);
+                if (!Number.isFinite(w) || w <= 0) return;
+                allRows().forEach(function(r){
+                    var cell = cellByKey(r, key);
+                    if (!cell) return;
+                    cell.style.width = w + 'px';
+                    cell.style.minWidth = w + 'px';
+                    cell.style.maxWidth = w + 'px';
+                });
+            }
+
+            function reorderColumns(keys) {
+                allRows().forEach(function(r){
+                    keys.forEach(function(key){
+                        var cell = cellByKey(r, key);
+                        if (cell) r.appendChild(cell);
+                    });
+                });
+            }
+
+            reorderColumns(order);
+            Object.keys(widths).forEach(function(key){
+                applyWidthByKey(key, widths[key]);
+            });
+            toplamSatiriGuncelle();
+
+            var dragKey = null;
+            table.querySelectorAll('thead th[data-col-key]').forEach(function(th){
+                var key = th.getAttribute('data-col-key') || '';
+                if (!key) return;
+
+                th.setAttribute('draggable', 'true');
+
                 if (!th.querySelector('.dyn-col-resizer')) {
                     var handle = document.createElement('div');
                     handle.className = 'dyn-col-resizer';
@@ -646,16 +1574,13 @@
                         function onMove(ev) {
                             var delta = ev.clientX - startX;
                             var newW = Math.max(48, startW + delta);
-                            rows.forEach(function(r){
-                                if (!r.cells || !r.cells[colIndex]) return;
-                                r.cells[colIndex].style.width = newW + 'px';
-                            });
+                            applyWidthByKey(key, newW);
                         }
                         function onUp() {
                             document.removeEventListener('mousemove', onMove);
                             document.removeEventListener('mouseup', onUp);
                             var finalW = Math.round(th.getBoundingClientRect().width);
-                            widths[colIndex] = finalW;
+                            widths[key] = finalW;
                             cfg.widths = widths;
                             saveCfg(cfg);
                         }
@@ -664,37 +1589,85 @@
                     });
                 }
 
-                // Sort
-                th.addEventListener('click', function(e){
-                    if (e.target && e.target.classList && e.target.classList.contains('dyn-col-resizer')) return;
-                    var dir = 'asc';
-                    if (sort && sort.colIndex === colIndex) dir = (sort.dir === 'asc') ? 'desc' : 'asc';
-                    sort = { colIndex: colIndex, dir: dir };
-                    cfg.sort = sort;
-                    saveCfg(cfg);
-                    applySort(colIndex, dir);
-                    applySortIndicator(colIndex, dir);
+                th.addEventListener('dragstart', function(e){
+                    if (e.target && (e.target.closest('select') || e.target.classList.contains('dyn-col-resizer'))) {
+                        e.preventDefault();
+                        return;
+                    }
+                    dragKey = key;
+                    th.classList.add('dragging');
+                    try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', key); } catch (ex) {}
                 });
+                th.addEventListener('dragend', function(){
+                    dragKey = null;
+                    table.querySelectorAll('thead th[data-col-key]').forEach(function(x){
+                        x.classList.remove('dragging', 'drag-over-left', 'drag-over-right');
+                    });
+                });
+                th.addEventListener('dragover', function(e){
+                    if (!dragKey || dragKey === key) return;
+                    e.preventDefault();
+                    var rect = th.getBoundingClientRect();
+                    var before = (e.clientX - rect.left) < (rect.width / 2);
+                    th.classList.toggle('drag-over-left', before);
+                    th.classList.toggle('drag-over-right', !before);
+                });
+                th.addEventListener('dragleave', function(){
+                    th.classList.remove('drag-over-left', 'drag-over-right');
+                });
+                th.addEventListener('drop', function(e){
+                    if (!dragKey || dragKey === key) return;
+                    e.preventDefault();
+                    var rect = th.getBoundingClientRect();
+                    var before = (e.clientX - rect.left) < (rect.width / 2);
+                    var from = order.indexOf(dragKey);
+                    var to = order.indexOf(key);
+                    if (from < 0 || to < 0) return;
+                    order.splice(from, 1);
+                    if (from < to) to--;
+                    order.splice(before ? to : (to + 1), 0, dragKey);
+                    cfg.order = order.slice();
+                    saveCfg(cfg);
+                    reorderColumns(order);
+                    Object.keys(widths).forEach(function(k){
+                        applyWidthByKey(k, widths[k]);
+                    });
+                    toplamSatiriGuncelle();
+                });
+
+                if (th.classList.contains('dyn-sort-th')) {
+                    th.addEventListener('click', function(e){
+                        if (e.target && e.target.classList && e.target.classList.contains('dyn-col-resizer')) return;
+                        if (e.target && (e.target.closest('select') || e.target.closest('option'))) return;
+                        var dir = 'asc';
+                        if (sort && sort.key === key) dir = (sort.dir === 'asc') ? 'desc' : 'asc';
+                        sort = { key: key, dir: dir };
+                        cfg.sort = sort;
+                        saveCfg(cfg);
+                        applySort(key, dir);
+                        applySortIndicator(key, dir);
+                    });
+                }
             });
 
-            function applySortIndicator(colIndex, dir) {
+            function applySortIndicator(key, dir) {
                 table.querySelectorAll('thead th.dyn-sort-th').forEach(function(th){ th.classList.remove('dyn-sort-asc', 'dyn-sort-desc'); });
-                var th = table.querySelector('thead th:nth-child(' + (colIndex + 1) + ')');
+                var th = table.querySelector('thead th[data-col-key="' + key + '"]');
                 if (th) th.classList.add(dir === 'desc' ? 'dyn-sort-desc' : 'dyn-sort-asc');
             }
 
-            function applySort(colIndex, dir) {
+            function applySort(key, dir) {
                 var tbody = table.querySelector('tbody');
                 if (!tbody) return;
                 var trs = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
                 var sign = (dir === 'desc') ? -1 : 1;
-                // type
-                var type = (table.querySelector('thead th:nth-child(' + (colIndex + 1) + ')') || {}).getAttribute
-                    ? (table.querySelector('thead th:nth-child(' + (colIndex + 1) + ')').getAttribute('data-dyn-type') || 'str')
-                    : 'str';
+                var th = table.querySelector('thead th[data-col-key="' + key + '"]');
+                var type = th && th.getAttribute ? (th.getAttribute('data-dyn-type') || 'str') : 'str';
                 trs.sort(function(a,b){
-                    var ca = a.cells && a.cells[colIndex] ? a.cells[colIndex].textContent.trim() : '';
-                    var cb = b.cells && b.cells[colIndex] ? b.cells[colIndex].textContent.trim() : '';
+                    var caCell = cellByKey(a, key);
+                    var cbCell = cellByKey(b, key);
+                    var ca = caCell ? caCell.textContent.trim() : '';
+                    var cb = cbCell ? cbCell.textContent.trim() : '';
                     if (type === 'num') {
                         var na = parseNumberTR(ca);
                         var nb = parseNumberTR(cb);
@@ -712,14 +1685,18 @@
                     return ca.localeCompare(cb, 'tr', { sensitivity: 'base', numeric: true }) * sign;
                 });
                 trs.forEach(function(tr){ tbody.appendChild(tr); });
+                toplamSatiriGuncelle();
             }
 
-            if (sort && sort.colIndex != null) {
-                applySort(sort.colIndex, sort.dir || 'asc');
-                applySortIndicator(sort.colIndex, sort.dir || 'asc');
+            if (sort && sort.key) {
+                applySort(sort.key, sort.dir || 'asc');
+                applySortIndicator(sort.key, sort.dir || 'asc');
             }
+            toplamSatiriGuncelle();
         })();
     </script>
     <script src="/static/js/erp-tarih-hizli.js"></script>
+</div>
+</main>
 </body>
 </html>

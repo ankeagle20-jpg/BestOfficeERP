@@ -14,11 +14,48 @@ import re
 import time
 import json
 import logging
+import threading
 from dotenv import load_dotenv
 
 _log = logging.getLogger(__name__)
 
 load_dotenv()
+
+# portal_kesilen_fatura_listesi_normalized için kısa TTL önbellek (aynı tarih aralığında GİB’i yormamak)
+_portal_kesilen_list_cache_lock = threading.Lock()
+_portal_kesilen_list_cache: dict[str, tuple[float, list]] = {}
+
+
+def _portal_kesilen_list_cache_key(bas_date, bit_date) -> str:
+    """Env’deki liste parametreleri sonucu etkilediği için anahtara dahil edilir."""
+    ht = (os.getenv("GIB_PORTAL_LISTE_HANGI_TIP") or "5000/30000").strip()
+    try:
+        pbd = int((os.getenv("GIB_PORTAL_LISTE_GUN_ONCE") or "62").strip() or "62")
+    except ValueError:
+        pbd = 62
+    try:
+        pad = int((os.getenv("GIB_PORTAL_LISTE_GUN_SONRA") or "14").strip() or "14")
+    except ValueError:
+        pad = 14
+    try:
+        ch = int((os.getenv("GIB_PORTAL_LISTE_CHUNK_GUN") or "8").strip() or "8")
+    except ValueError:
+        ch = 8
+    return f"{bas_date.isoformat()}|{bit_date.isoformat()}|{ht}|{pbd}|{pad}|{ch}"
+
+
+def _portal_kesilen_list_cache_ttl_saniye() -> int:
+    try:
+        return int((os.getenv("GIB_PORTAL_LISTE_CACHE_SANIYE") or "180").strip() or "180")
+    except ValueError:
+        return 180
+
+
+def portal_kesilen_fatura_listesi_cache_clear() -> None:
+    """GİB ile canlı kontrol sonrası vb. için portal liste önbelleğini boşalt."""
+    with _portal_kesilen_list_cache_lock:
+        _portal_kesilen_list_cache.clear()
+
 
 try:
     from eArsivPortal import eArsivPortal as EArsivPortalClient
@@ -86,6 +123,37 @@ def _retry_on_connection(max_attempts=3, delay=2.0):
     return decorator
 
 
+def gib_fatura_html_watermark_etiket(html) -> str | None:
+    """GİB e-arşiv fatura HTML/PDF içindeki filigran metninden durum.
+
+    Dönüş:
+      • «İptal»: HTML’de iptal/geçersiz filigranı varsa
+      • «İmzasız»: imzasız filigranı varsa
+      • «İmzalı»: HTML geçerli bir e-Arşiv faturası ve filigran yoksa
+      • None: HTML kısa/geçersiz veya tanımlanamadı (örn. hata sayfası)
+    """
+    if not isinstance(html, str) or len(html) < 80:
+        return None
+    # İptal su damgası (Türkçe / ASCII karışık HTML)
+    if re.search(r"iptal\s+edilm", html, flags=re.IGNORECASE):
+        return "İptal"
+    if re.search(r"(geçersizdir|gecersizdir|geçersiz\s+fatura)", html, flags=re.IGNORECASE):
+        return "İptal"
+    # Taslak / önizleme
+    if re.search(r"imzasız|imzasiz", html, flags=re.IGNORECASE):
+        return "İmzasız"
+    # Filigran yok: gerçekten geçerli bir e-Arşiv fatura HTML/PDF mi?
+    fatura_belirtisi = bool(
+        re.search(r"e[\-\s]*ar[şs]iv\s+fatura", html, flags=re.IGNORECASE)
+        or re.search(r"earsivfatura", html, flags=re.IGNORECASE)
+        or re.search(r"fatura\s+no\s*:", html, flags=re.IGNORECASE)
+        or re.search(r"ettn\s*:", html, flags=re.IGNORECASE)
+    )
+    if fatura_belirtisi:
+        return "İmzalı"
+    return None
+
+
 class BestOfficeGIBManager:
     """GİB e-Arşiv fatura taslağı oluşturma ve SMS onayı."""
 
@@ -105,6 +173,7 @@ class BestOfficeGIBManager:
                 # eArsivPortal test_modu=True iken test ortamını kullanır.
                 self.client = EArsivPortalClient(self.username, self.password, test_modu=bool(self.test_mode))
                 self.client_type = "earsivportal"
+                self._portal_compat_shim()
         except Exception as e:
             self.init_error = str(e)
             self.client = None
@@ -125,6 +194,29 @@ class BestOfficeGIBManager:
                 )
             if not self.username or not self.password:
                 raise ValueError("GIB_USER ve GIB_PASS .env dosyasında tanımlı olmalı.")
+        self._portal_compat_shim()
+
+    def _portal_compat_shim(self):
+        """
+        Bazı eArsivPortal sürümleri private isimli metotları çağırıyor
+        (_eArsivPortal__giris_yap gibi). Eksikse public metodlara alias aç.
+        """
+        c = self.client
+        if not c:
+            return
+        try:
+            if not hasattr(c, "_eArsivPortal__giris_yap"):
+                if hasattr(c, "giris_yap"):
+                    setattr(c, "_eArsivPortal__giris_yap", getattr(c, "giris_yap"))
+                elif hasattr(c, "login"):
+                    setattr(c, "_eArsivPortal__giris_yap", getattr(c, "login"))
+            if not hasattr(c, "_eArsivPortal__cikis_yap"):
+                if hasattr(c, "cikis_yap"):
+                    setattr(c, "_eArsivPortal__cikis_yap", getattr(c, "cikis_yap"))
+                elif hasattr(c, "logout"):
+                    setattr(c, "_eArsivPortal__cikis_yap", getattr(c, "logout"))
+        except Exception:
+            pass
 
     def _portal_logout(self):
         """Portal oturumunu kapat (method adı sürüme göre değişebilir)."""
@@ -393,6 +485,12 @@ class BestOfficeGIBManager:
             nk = re.sub(r"[^a-z0-9]", "", str(k or "").lower())
             norm[nk] = v
 
+        # Portal bazen iptal bilgisini ayrı sütun yerine metin alanında döner.
+        for v in d.values():
+            if isinstance(v, str) and 8 < len(v) < 900:
+                if re.search(r"iptal\s+edilm", v, flags=re.IGNORECASE):
+                    return "iptal"
+
         # Öncelik 1: İptal/itiraz alanında çarpı (x/×/✖/❌) veya iptal metni varsa -> İPTAL.
         iptal_val = (
             norm.get("iptalitirazdurumu")
@@ -409,12 +507,32 @@ class BestOfficeGIBManager:
             or any(ch in str(iptal_val) for ch in ("✖", "❌", "×", "x", "X"))
         ):
             return "iptal"
+        # Bazı portal cevaplarında "İptal/İtiraz Durumu" alanı metin yerine kod döner:
+        # iptalItiraz=0 ve talepDurum=1 => "İptal Kabul Edildi" (resmi iptal).
+        iptal_kod_raw = (
+            norm.get("iptalitiraz")
+            or norm.get("iptalitirazdurumu")
+            or ""
+        )
+        iptal_kod = str(iptal_kod_raw).strip().lower()
+        talep_raw = norm.get("talepdurum") or ""
+        talep = str(talep_raw).strip().lower()
+        if (
+            iptal_kod in ("0", "iptal kabul edildi", "kabul edildi", "kabul")
+            and talep in ("1", "var", "true", "evet")
+        ):
+            return "iptal"
 
         # Öncelik 2: Onay sütununda tik (✓/✔/☑) veya onaylandı metni varsa -> İMZALI.
+        # «Onaylı» anahtarı normalize edilince ı harfi düştüğü için «onayl» olur; «onayli» ile eşleşmezdi.
+        # Genel «durum» alanına düşmeyin: portal çoğu satırda 1 vb. kod döndürüp hepsini imzalı saydırıyordu.
         onay_val = (
             norm.get("onayli")
+            or norm.get("onayl")
             or norm.get("onaydurumu")
-            or norm.get("durum")
+            or norm.get("onaydurum")
+            or norm.get("onayflg")
+            or norm.get("onayflag")
             or ""
         )
         onay_s = str(onay_val).strip().lower()
@@ -526,6 +644,16 @@ class BestOfficeGIBManager:
         from datetime import date as date_cls
         from datetime import timedelta
 
+        ttl = _portal_kesilen_list_cache_ttl_saniye()
+        cache_key = _portal_kesilen_list_cache_key(bas_date, bit_date)
+        if ttl > 0:
+            with _portal_kesilen_list_cache_lock:
+                ent = _portal_kesilen_list_cache.get(cache_key)
+                if ent:
+                    ts, data = ent
+                    if time.monotonic() - ts < ttl:
+                        return [dict(x) for x in data]
+
         self._ensure_client()
         self._fresh_login()
 
@@ -602,6 +730,9 @@ class BestOfficeGIBManager:
                 continue
             seen_out.add(key)
             items.append(it)
+        if ttl > 0:
+            with _portal_kesilen_list_cache_lock:
+                _portal_kesilen_list_cache[cache_key] = (time.monotonic(), [dict(x) for x in items])
         return items
 
     @staticmethod

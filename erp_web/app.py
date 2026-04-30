@@ -13,9 +13,40 @@ import os
 import atexit
 import sys
 import socket
+import re
+
+from db import (
+    fetch_all,
+    fetch_one,
+    execute,
+    ensure_grup2_etiketleri_table,
+    ensure_grup2_bizim_hesap_into_array,
+)
 
 app = Flask(__name__)
 app.config.from_object(Config)
+
+
+def _format_tr_number(value, decimals=2):
+    """1.234,56 biçiminde TR sayı gösterimi."""
+    try:
+        n = float(value or 0)
+    except (TypeError, ValueError):
+        n = 0.0
+    try:
+        d = int(decimals)
+    except (TypeError, ValueError):
+        d = 2
+    if d < 0:
+        d = 0
+    s = f"{n:,.{d}f}"
+    # en_US: 1,234.56 -> tr_TR: 1.234,56
+    return s.replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+@app.template_filter("trnum")
+def trnum_filter(value, decimals=2):
+    return _format_tr_number(value, decimals=decimals)
 
 # Gzip sıkıştırma — mobil ve yavaş bağlantıda cevap boyutunu küçültür
 try:
@@ -72,6 +103,136 @@ app.register_blueprint(randevu_bp)
 app.register_blueprint(pdovam_bp, url_prefix="/pdovam")
 if ilan_robotu_bp is not None:
     app.register_blueprint(ilan_robotu_bp, url_prefix="/ilan-robotu")
+
+
+def _g2_slugify(label: str) -> str:
+    s = (label or "").strip().lower()
+    s = re.sub(r"[^a-z0-9]+", "_", s)
+    s = re.sub(r"_+", "_", s).strip("_")
+    return (s or "ozel")[:80]
+
+
+def _grup2_etiketleri_fallback_api():
+    if not getattr(current_user, "is_authenticated", False):
+        return jsonify({"ok": False, "mesaj": "Oturum gerekli veya süresi doldu. Sayfayı yenileyip tekrar giriş yapın."}), 401
+    ensure_grup2_etiketleri_table()
+    if request.method == "GET":
+        ensure_grup2_bizim_hesap_into_array()
+        rows = fetch_all(
+            """
+            SELECT id, slug, etiket
+            FROM grup2_etiketleri
+            WHERE COALESCE(aktif, TRUE)
+            ORDER BY
+                CASE slug
+                    WHEN 'bizim_hesap' THEN 0
+                    WHEN 'vergi_dairesi' THEN 1
+                    WHEN 'vergi_dairesi_terk' THEN 2
+                    ELSE 3
+                END,
+                sira NULLS LAST,
+                etiket
+            """
+        )
+        return jsonify({"ok": True, "etiketler": rows or []})
+    data = request.get_json(silent=True) or {}
+    if not data:
+        data = request.form.to_dict(flat=True) or {}
+    if not data:
+        data = request.args.to_dict(flat=True) or {}
+    act = (data.get("action") or "").strip().lower()
+    if act in ("update_etiket", "put") or (str(data.get("slug") or "").strip() and str(data.get("etiket") or "").strip()):
+        slug = (data.get("slug") or "").strip()
+        etiket_u = (data.get("etiket") or "").strip()
+        if not slug:
+            return jsonify({"ok": False, "mesaj": "Slug zorunludur."}), 400
+        if not etiket_u:
+            return jsonify({"ok": False, "mesaj": "Etiket adı boş olamaz."}), 400
+        if len(etiket_u) > 200:
+            return jsonify({"ok": False, "mesaj": "En fazla 200 karakter girebilirsiniz."}), 400
+        row = fetch_one(
+            "SELECT id, slug, etiket FROM grup2_etiketleri WHERE slug = %s AND COALESCE(aktif, TRUE) LIMIT 1",
+            (slug,),
+        )
+        if not row:
+            return jsonify({"ok": False, "mesaj": "Etiket bulunamadı."}), 400
+        dup = fetch_one(
+            """
+            SELECT id FROM grup2_etiketleri
+            WHERE COALESCE(aktif, TRUE)
+              AND lower(trim(etiket)) = lower(trim(%s))
+              AND slug <> %s
+            LIMIT 1
+            """,
+            (etiket_u, slug),
+        )
+        if dup:
+            return jsonify({"ok": False, "mesaj": "Bu etiket adı zaten kullanılıyor."}), 400
+        execute("UPDATE grup2_etiketleri SET etiket = %s WHERE slug = %s", (etiket_u, slug))
+        return jsonify({"ok": True, "slug": slug, "etiket": etiket_u})
+    if act in ("delete_etiket", "delete") or (str(data.get("slug") or "").strip() and not str(data.get("etiket") or "").strip()):
+        slug = (data.get("slug") or "").strip()
+        if not slug:
+            return jsonify({"ok": False, "mesaj": "Silinecek etiket slug bilgisi zorunludur."}), 400
+        row = fetch_one(
+            "SELECT id, slug, etiket FROM grup2_etiketleri WHERE slug = %s AND COALESCE(aktif, TRUE) LIMIT 1",
+            (slug,),
+        )
+        if not row:
+            return jsonify({"ok": False, "mesaj": "Etiket bulunamadı."}), 400
+        execute("UPDATE grup2_etiketleri SET aktif = FALSE WHERE slug = %s", (slug,))
+        execute(
+            """
+            UPDATE customers
+            SET grup2_secimleri = array_remove(COALESCE(grup2_secimleri, ARRAY[]::text[]), %s)
+            WHERE %s = ANY(COALESCE(grup2_secimleri, ARRAY[]::text[]))
+            """,
+            (slug, slug),
+        )
+        return jsonify({"ok": True, "slug": slug, "etiket": row.get("etiket")})
+    etiket = (data.get("etiket") or "").strip()
+    if not etiket:
+        return jsonify({"ok": False, "mesaj": "Etiket adı boş olamaz."}), 400
+    if len(etiket) > 200:
+        return jsonify({"ok": False, "mesaj": "En fazla 200 karakter girebilirsiniz."}), 400
+    ex = fetch_one(
+        "SELECT id, slug, etiket FROM grup2_etiketleri WHERE lower(trim(etiket)) = lower(trim(%s)) LIMIT 1",
+        (etiket,),
+    )
+    if ex:
+        return jsonify({"ok": True, "slug": ex["slug"], "etiket": ex["etiket"], "mevcut": True})
+    rows_all = fetch_all("SELECT slug FROM grup2_etiketleri")
+    slug_set = {r["slug"] for r in (rows_all or [])}
+    base = _g2_slugify(etiket)
+    slug_out = None
+    for n in range(0, 200):
+        cand = (base if n == 0 else f"{base}_{n}")[:80]
+        if cand in slug_set:
+            continue
+        mx = fetch_one("SELECT COALESCE(MAX(sira), 0) + 1 AS n FROM grup2_etiketleri")
+        next_sira = int(mx["n"] or 1) if mx else 1
+        try:
+            execute(
+                "INSERT INTO grup2_etiketleri (slug, etiket, sira) VALUES (%s, %s, %s)",
+                (cand, etiket, next_sira),
+            )
+            slug_out = cand
+            break
+        except Exception:
+            slug_set.add(cand)
+    if not slug_out:
+        return jsonify({"ok": False, "mesaj": "Slug üretilemedi."}), 400
+    return jsonify({"ok": True, "slug": slug_out, "etiket": etiket})
+
+
+def _register_grup2_fallback_api(path: str):
+    exists = any(r.rule == path for r in app.url_map.iter_rules())
+    if not exists:
+        app.add_url_rule(path, endpoint=f"grup2_fallback_{path.strip('/').replace('/', '_')}", view_func=_grup2_etiketleri_fallback_api, methods=["GET", "POST"])
+
+
+_register_grup2_fallback_api("/giris/api/grup2-etiketleri")
+_register_grup2_fallback_api("/faturalar/api/grup2-etiketleri")
 
 
 def _start_background_jobs():

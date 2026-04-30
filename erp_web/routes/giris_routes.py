@@ -87,35 +87,130 @@ def _register_arial():
 
 bp = Blueprint('giris', __name__)
 
+@bp.route('/api/tahsilat-personeller')
+@giris_gerekli
+def api_tahsilat_personeller():
+    rows = fetch_all(
+        """
+        SELECT id, ad_soyad
+        FROM personel
+        WHERE COALESCE(is_active, TRUE) = TRUE
+        ORDER BY ad_soyad
+        """
+    ) or []
+    out = []
+    for r in rows:
+        ad = str((r or {}).get("ad_soyad") or "").strip()
+        if not ad:
+            continue
+        out.append({"id": r.get("id"), "ad_soyad": ad})
+    return jsonify(out)
+
+
 # Dosya yükleme ayarları
 UPLOAD_FOLDER = 'uploads/musteri_dosyalari'
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'pdf', 'docx'}
 
 
+# Process içinde tek seferlik DDL koruması: ensure_*_table fonksiyonları her HTTP
+# isteğinde tetiklenip ~150-300ms ek gecikme yaratıyordu (Supabase round-trip).
+# İlk çağrıda tabloyu garanti altına alıp sonraki çağrılarda no-op'a düşüyoruz.
+_AYLIK_GRID_CACHE_TABLE_READY = False
+_REEL_DONEM_TUTAR_TABLE_READY = False
+
+# Süreç-içi grup cache'i: parent_cari_id çözümlemesi için her tıklamada 500 satır
+# çekiyorduk (~190ms). Grup listesi sık değişmiyor; 60 saniye TTL ile cacheliyoruz.
+_GIRIS_GRUP_HARITA_CACHE = {"ts": 0.0, "data": {}}
+_GIRIS_GRUP_HARITA_TTL = 60.0  # saniye
+
+
+def _giris_grup_uuid_id_haritasi():
+    """parent_id (uuid) → {id, name} haritası. Süreç içinde 60 sn TTL ile tutulur."""
+    import time as _time
+    now = _time.monotonic()
+    if (now - _GIRIS_GRUP_HARITA_CACHE.get("ts", 0.0)) < _GIRIS_GRUP_HARITA_TTL:
+        d = _GIRIS_GRUP_HARITA_CACHE.get("data")
+        if isinstance(d, dict):
+            return d
+    try:
+        from services.cari_service import CariService
+        groups = fetch_all(
+            "SELECT id, name FROM customers WHERE COALESCE(is_group, FALSE)=TRUE LIMIT 500"
+        ) or []
+        m = {}
+        for g in groups:
+            try:
+                gid = int(g.get("id") or 0)
+            except (TypeError, ValueError):
+                continue
+            if gid <= 0:
+                continue
+            try:
+                key = str(CariService.customer_uuid(gid))
+            except Exception:
+                continue
+            m[key] = {"id": gid, "name": (g.get("name") or "").strip()}
+        _GIRIS_GRUP_HARITA_CACHE["data"] = m
+        _GIRIS_GRUP_HARITA_CACHE["ts"] = now
+        return m
+    except Exception:
+        return _GIRIS_GRUP_HARITA_CACHE.get("data") or {}
+
+
 def _ensure_aylik_grid_cache_table():
-    execute(
-        """
-        CREATE TABLE IF NOT EXISTS musteri_aylik_grid_cache (
-            musteri_id INTEGER PRIMARY KEY REFERENCES customers(id) ON DELETE CASCADE,
-            payload TEXT NOT NULL,
-            updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+    global _AYLIK_GRID_CACHE_TABLE_READY
+    if _AYLIK_GRID_CACHE_TABLE_READY:
+        return
+    try:
+        execute(
+            """
+            CREATE TABLE IF NOT EXISTS musteri_aylik_grid_cache (
+                musteri_id INTEGER PRIMARY KEY REFERENCES customers(id) ON DELETE CASCADE,
+                payload TEXT NOT NULL,
+                updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+            )
+            """
         )
-        """
-    )
+    except Exception:
+        pass
+    _AYLIK_GRID_CACHE_TABLE_READY = True
 
 
 def _ensure_musteri_reel_donem_tutar_table():
-    execute(
-        """
-        CREATE TABLE IF NOT EXISTS musteri_reel_donem_tutar (
-            musteri_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
-            donem_yil INTEGER NOT NULL,
-            tutar_kdv_dahil NUMERIC(14, 2) NOT NULL,
-            updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-            PRIMARY KEY (musteri_id, donem_yil)
+    global _REEL_DONEM_TUTAR_TABLE_READY
+    if _REEL_DONEM_TUTAR_TABLE_READY:
+        return
+    try:
+        execute(
+            """
+            CREATE TABLE IF NOT EXISTS musteri_reel_donem_tutar (
+                musteri_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+                donem_yil INTEGER NOT NULL,
+                tutar_kdv_dahil NUMERIC(14, 2) NOT NULL,
+                giris_tip TEXT,
+                giris_tutar NUMERIC(14, 2),
+                hibrit_toplam NUMERIC(14, 2),
+                hibrit_net NUMERIC(14, 2),
+                hibrit_banka NUMERIC(14, 2),
+                updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (musteri_id, donem_yil)
+            )
+            """
         )
-        """
-    )
+        for col_sql in (
+            "ALTER TABLE musteri_reel_donem_tutar ADD COLUMN IF NOT EXISTS giris_tip TEXT",
+            "ALTER TABLE musteri_reel_donem_tutar ADD COLUMN IF NOT EXISTS giris_tutar NUMERIC(14, 2)",
+            "ALTER TABLE musteri_reel_donem_tutar ADD COLUMN IF NOT EXISTS hibrit_toplam NUMERIC(14, 2)",
+            "ALTER TABLE musteri_reel_donem_tutar ADD COLUMN IF NOT EXISTS hibrit_net NUMERIC(14, 2)",
+            "ALTER TABLE musteri_reel_donem_tutar ADD COLUMN IF NOT EXISTS hibrit_banka NUMERIC(14, 2)",
+        ):
+            try:
+                execute(col_sql)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    _REEL_DONEM_TUTAR_TABLE_READY = True
 
 
 def _kyc_date_iso(v):
@@ -222,6 +317,9 @@ def _aylik_grid_cache_matches_kyc(musteri_id, cache_obj):
 
     if _int_or_none(cache_obj.get("kira_suresi_ay")) != _int_or_none(kyc.get("kira_suresi_ay")):
         return False
+    # Tahsilat tarafı değiştiyse (eski kayıtlar/manuel düzeltmeler dahil) cache'i geçersiz say.
+    if cache_obj.get("tahsilat_imza") != _aylik_tahsil_cache_imza(musteri_id):
+        return False
     return True
 
 
@@ -256,18 +354,18 @@ def _aylik_tahsil_edilen_aylar_set(musteri_id):
         """
         SELECT DISTINCT TO_CHAR(
             COALESCE(
-                DATE_TRUNC('month', f.fatura_tarihi::date),
                 DATE_TRUNC('month', NULLIF(substring(COALESCE(t.aciklama, '') from '\\|AYLIK_TAH\\|([0-9]{4}-[0-9]{2}-[0-9]{2})\\|'), '')::date),
+                DATE_TRUNC('month', f.fatura_tarihi::date),
                 DATE_TRUNC('month', t.tahsilat_tarihi::date)
             ),
             'YYYY-FMMM'
         ) AS ay_key
         FROM tahsilatlar t
         LEFT JOIN faturalar f ON f.id = t.fatura_id
-        WHERE (t.musteri_id = %s OR t.customer_id = %s)
+        WHERE (t.musteri_id = %s OR t.customer_id = %s OR f.musteri_id = %s)
           AND COALESCE(t.tutar, 0) > 0
         """,
-        (musteri_id, musteri_id),
+        (musteri_id, musteri_id, musteri_id),
     ) or []
     return {str(r.get("ay_key") or "").strip() for r in rows if (r.get("ay_key") or "").strip()}
 
@@ -491,7 +589,7 @@ def _aylik_grid_single_month_kdv_from_core(core, ref_y, ref_m) -> float:
     return round(tutar, 2) if math.isfinite(tutar) else 0.0
 
 
-def _aylik_grid_compute(musteri_id, kyc, tufe_map, tahsil_set):
+def _aylik_grid_compute(musteri_id, kyc, tufe_map, tahsil_set, tahsil_tutar_map=None):
     """
     KYC satırı + önceden yüklenmiş TÜFE haritası ile aylık grid payload üretir.
     tahsil_set: gridde 'tahsil_edildi' için; toplu borçlandırmada boş set verilebilir.
@@ -510,6 +608,7 @@ def _aylik_grid_compute(musteri_id, kyc, tufe_map, tahsil_set):
     split_kira = bool(core.get("split_kira_odeme"))
     artis_month = core["artis_month"]
     aylar = []
+    tahsil_tutar_map = tahsil_tutar_map or {}
     for i in range(ay_sayisi):
         ay_toplam = (bas.month - 1) + i
         y = bas.year + (ay_toplam // 12)
@@ -518,12 +617,22 @@ def _aylik_grid_compute(musteri_id, kyc, tufe_map, tahsil_set):
         proj_yil = start_year + (i // 12)
         tutar = float(yillik_map.get(proj_yil) or 0)
         ay_key = f"{d.year}-{d.month}"
+        ay_iso = d.isoformat()
+        odenen = float(tahsil_tutar_map.get(ay_iso) or 0)
+        kalan = max(round(tutar - odenen, 2), 0.0)
+        kismi = odenen > 0 and kalan > 0.01
+        tam_odendi = (kalan <= 0.01) or (ay_key in tahsil_set)
+        gosterim_tutar = kalan if kismi else tutar
         aylar.append({
             "yil": d.year,
             "ay": d.month,
             "ay_key": ay_key,
-            "tutar_kdv_dahil": round(tutar, 2),
-            "tahsil_edildi": ay_key in tahsil_set,
+            "tutar_kdv_dahil": round(gosterim_tutar, 2),
+            "tahsil_edildi": tam_odendi,
+            "kismi_tahsilat": kismi,
+            "odenen_tutar_kdv": round(odenen, 2),
+            "kalan_tutar_kdv": round(kalan, 2),
+            "brut_tutar_kdv": round(tutar, 2),
         })
     return {
         "musteri_id": musteri_id,
@@ -566,7 +675,79 @@ def _build_aylik_grid_cache_payload(musteri_id, tufe_map=None):
         return None
     tm = tufe_map if tufe_map is not None else _tufe_map_by_year_month()
     tahsil_set = _aylik_tahsil_edilen_aylar_set(musteri_id)
-    return _aylik_grid_compute(musteri_id, kyc, tm, tahsil_set)
+    tahsil_map = _aylik_tahsil_tutar_map(musteri_id)
+    payload = _aylik_grid_compute(musteri_id, kyc, tm, tahsil_set, tahsil_map)
+    if isinstance(payload, dict):
+        payload["tahsilat_imza"] = _aylik_tahsil_cache_imza(musteri_id)
+    return payload
+
+
+def _aylik_tahsil_cache_imza(musteri_id):
+    row = fetch_one(
+        """
+        SELECT
+            COUNT(*)::bigint AS cnt,
+            COALESCE(SUM(COALESCE(tutar, 0)), 0)::numeric AS toplam,
+            COALESCE(MAX(tahsilat_tarihi::timestamp), TIMESTAMP '1970-01-01') AS mx
+        FROM tahsilatlar
+        WHERE (musteri_id = %s OR customer_id = %s)
+          AND COALESCE(tutar, 0) > 0
+        """,
+        (musteri_id, musteri_id),
+    ) or {}
+    try:
+        cnt = int(row.get("cnt") or 0)
+    except (TypeError, ValueError):
+        cnt = 0
+    try:
+        toplam = round(float(row.get("toplam") or 0), 2)
+    except (TypeError, ValueError):
+        toplam = 0.0
+    mx_raw = row.get("mx")
+    if hasattr(mx_raw, "isoformat"):
+        mx = str(mx_raw.isoformat())
+    else:
+        mx = str(mx_raw or "1970-01-01T00:00:00")
+    return f"{cnt}|{toplam:.2f}|{mx}"
+
+
+def _aylik_tahsil_tutar_map(musteri_id):
+    rows = fetch_all(
+        """
+        SELECT COALESCE(t.aciklama, '') AS aciklama, COALESCE(t.tutar, 0) AS tutar,
+               t.tahsilat_tarihi, f.fatura_tarihi
+        FROM tahsilatlar t
+        LEFT JOIN faturalar f ON f.id = t.fatura_id
+        WHERE (t.musteri_id = %s OR t.customer_id = %s OR f.musteri_id = %s)
+          AND COALESCE(t.tutar, 0) > 0
+        """,
+        (musteri_id, musteri_id, musteri_id),
+    ) or []
+    out = defaultdict(float)
+    for r in rows:
+        ac = str(r.get("aciklama") or "")
+        tut = float(r.get("tutar") or 0)
+        if tut <= 0:
+            continue
+        marker_isos = re.findall(r"\|AYLIK_TAH\|([0-9]{4}-[0-9]{2}-[0-9]{2})\|", ac)
+        if marker_isos:
+            for iso in marker_isos:
+                out[iso] += tut
+            continue
+        # Eski kayıtlar marker'sız olabilir: önce fatura ayı, yoksa tahsilat ayı.
+        d = r.get("fatura_tarihi") or r.get("tahsilat_tarihi")
+        if hasattr(d, "year"):
+            iso = date(int(d.year), int(d.month), 1).isoformat()
+            out[iso] += tut
+        elif d:
+            try:
+                ds = str(d)[:10]
+                dd = datetime.strptime(ds, "%Y-%m-%d").date()
+                iso = date(dd.year, dd.month, 1).isoformat()
+                out[iso] += tut
+            except Exception:
+                pass
+    return dict(out)
 
 
 def _load_aylik_tahsil_ay_keys_by_musteri():
@@ -1517,18 +1698,12 @@ def api_musteri_detay(mid):
     out["parent_cari_id"] = ""
     if row.get("parent_id"):
         try:
-            from services.cari_service import CariService
-
             pstr = str(row.get("parent_id"))
-            groups = fetch_all(
-                "SELECT id, name FROM customers WHERE COALESCE(is_group, FALSE)=TRUE LIMIT 500"
-            ) or []
-            for g in groups:
-                gid = int(g.get("id") or 0)
-                if gid > 0 and str(CariService.customer_uuid(gid)) == pstr:
-                    out["parent_cari_id"] = str(gid)
-                    out["parent_name"] = (g.get("name") or "").strip()
-                    break
+            gmap = _giris_grup_uuid_id_haritasi()
+            hit = gmap.get(pstr)
+            if hit:
+                out["parent_cari_id"] = str(hit.get("id"))
+                out["parent_name"] = (hit.get("name") or "").strip()
         except Exception:
             pass
     if not kyc and out.get("yetkili_tcno"):
@@ -2793,7 +2968,7 @@ def _cari_hareketler(musteri_id, banka_tahsilat_only=False, cari_ekstre_b=False)
     """Fatura (borç) ve tahsilat (alacak) satırlarını tarih sırasına göre birleştirip bakiye hesaplar.
     banka_tahsilat_only=True ise nakit hariç tahsilatlar (havale, eft, banka, kredi kartı, çek).
     cari_ekstre_b=True ise Cari Ekstre B: borçta yalnızca ETTN’li (GİB kesilmiş) faturalar;
-    alacakta yalnızca havale, EFT, çek, kredi kartı (banka ve nakit yok)."""
+    alacakta yalnızca havale, EFT, banka, çek, kredi kartı (nakit yok)."""
     _nt = sql_expr_fatura_not_gib_taslak("notlar")
     if cari_ekstre_b:
         faturalar = fetch_all(
@@ -2817,10 +2992,10 @@ def _cari_hareketler(musteri_id, banka_tahsilat_only=False, cari_ekstre_b=False)
                       t.tutar, t.odeme_turu, t.aciklama AS tahsilat_aciklama, 'Tahsilat' AS tur
                FROM tahsilatlar t
                LEFT JOIN faturalar f ON f.id = t.fatura_id
-               WHERE (t.musteri_id = %s OR t.customer_id = %s)
-                 AND LOWER(TRIM(COALESCE(t.odeme_turu, 'nakit'))) IN ('havale', 'eft', 'cek', 'kredi_karti')
+                WHERE (t.musteri_id = %s OR t.customer_id = %s OR f.musteri_id = %s)
+                  AND LOWER(TRIM(COALESCE(t.odeme_turu, 'nakit'))) IN ('havale', 'eft', 'banka', 'cek', 'kredi_karti')
                ORDER BY t.tahsilat_tarihi, t.id""",
-            (musteri_id, musteri_id),
+            (musteri_id, musteri_id, musteri_id),
         )
     else:
         faturalar = fetch_all(
@@ -2842,10 +3017,10 @@ def _cari_hareketler(musteri_id, banka_tahsilat_only=False, cari_ekstre_b=False)
                           t.tutar, t.odeme_turu, t.aciklama AS tahsilat_aciklama, 'Tahsilat' AS tur
                    FROM tahsilatlar t
                    LEFT JOIN faturalar f ON f.id = t.fatura_id
-                   WHERE (t.musteri_id = %s OR t.customer_id = %s)
+                   WHERE (t.musteri_id = %s OR t.customer_id = %s OR f.musteri_id = %s)
                      AND LOWER(TRIM(COALESCE(t.odeme_turu, 'nakit'))) IN ('havale', 'eft', 'banka', 'kredi_karti', 'cek')
                    ORDER BY t.tahsilat_tarihi, t.id""",
-                (musteri_id, musteri_id),
+                (musteri_id, musteri_id, musteri_id),
             )
         else:
             tahsilatlar = fetch_all(
@@ -2860,9 +3035,9 @@ def _cari_hareketler(musteri_id, banka_tahsilat_only=False, cari_ekstre_b=False)
                           t.tutar, t.odeme_turu, t.aciklama AS tahsilat_aciklama, 'Tahsilat' AS tur
                    FROM tahsilatlar t
                    LEFT JOIN faturalar f ON f.id = t.fatura_id
-                   WHERE (t.musteri_id = %s OR t.customer_id = %s)
+                   WHERE (t.musteri_id = %s OR t.customer_id = %s OR f.musteri_id = %s)
                    ORDER BY t.tahsilat_tarihi, t.id""",
-                (musteri_id, musteri_id),
+                (musteri_id, musteri_id, musteri_id),
             )
     rows = []
     for r in faturalar:
@@ -3902,6 +4077,8 @@ def _cari_ekstre_hareketler(musteri_id, baslangic, bitis, aylik_kira, use_reel_c
                 bas_soz = rs if isinstance(rs, date) else datetime.strptime(str(rs)[:10], "%Y-%m-%d").date()
             except Exception:
                 bas_soz = None
+    soz_floor_iso = bas_soz.isoformat() if bas_soz else ""
+    soz_first_month = date(bas_soz.year, bas_soz.month, 1) if bas_soz else None
 
     dev_bas = bas
     if bas_soz and bas_soz < bas:
@@ -3972,6 +4149,8 @@ def _cari_ekstre_hareketler(musteri_id, baslangic, bitis, aylik_kira, use_reel_c
         ts = str(tr.get("eslesme_tarihi") or "")[:10]
         if not ts:
             continue
+        if soz_floor_iso and ts < soz_floor_iso:
+            continue
         try:
             v = round(float(tr.get("tutar") or 0), 2)
         except Exception:
@@ -4033,7 +4212,10 @@ def _cari_ekstre_hareketler(musteri_id, baslangic, bitis, aylik_kira, use_reel_c
         })
 
     # 2) Ekstre aralığındaki aylık kira satırları (her ayın 1'i) — reel hücreler öncelikli
-    y, m = bas.year, bas.month
+    loop_bas = bas
+    if soz_first_month and soz_first_month > loop_bas:
+        loop_bas = soz_first_month
+    y, m = loop_bas.year, loop_bas.month
     bit_y, bit_m = bit.year, bit.month
     borc_by_tarih = {}
     prev_borc_tutar = prev_chain
@@ -4097,6 +4279,8 @@ def _cari_ekstre_hareketler(musteri_id, baslangic, bitis, aylik_kira, use_reel_c
     for r in (tahsilatlar or []):
         tarih = str(r.get("eslesme_tarihi") or r.get("tarih") or "")[:10]
         if not tarih:
+            continue
+        if soz_floor_iso and tarih < soz_floor_iso:
             continue
         harf = _odeme_turu_harf(r.get("odeme_turu"))
         tah_aciklama_raw = (r.get("tahsilat_aciklama") or "").strip()
@@ -4452,19 +4636,23 @@ def _next_fatura_no_aylik(prefix="INV"):
 
 
 def _next_makbuz_no_aylik():
-    """Yıla göre bir sonraki makbuz numarası (tahsilatlar ile uyumlu)."""
-    yil = datetime.now().year
+    """Bir sonraki makbuz numarası: 1000, 1001, 1002 ..."""
     row = fetch_one(
-        "SELECT makbuz_no FROM tahsilatlar WHERE makbuz_no LIKE %s ORDER BY id DESC LIMIT 1",
-        (f"{yil}-%",),
+        "SELECT makbuz_no FROM tahsilatlar WHERE makbuz_no IS NOT NULL AND makbuz_no <> '' ORDER BY id DESC LIMIT 1",
     )
     if not row or not row.get("makbuz_no"):
-        return f"{yil}-0001"
+        return "1000"
+    s = str(row.get("makbuz_no") or "").strip()
+    m = re.search(r"(\d+)$", s)
+    if not m:
+        return "1000"
     try:
-        num = int(row["makbuz_no"].split("-")[-1])
-        return f"{yil}-{num + 1:04d}"
-    except (ValueError, IndexError):
-        return f"{yil}-0001"
+        seq = int(m.group(1)) + 1
+    except Exception:
+        seq = 1000
+    if seq < 1000:
+        seq = 1000
+    return str(seq)
 
 
 @bp.route('/api/aylik-tutarlardan-borclandir', methods=['POST'])
@@ -4761,18 +4949,20 @@ def api_aylik_tutarlardan_tahsil_et():
                         if f"|AYLIK_TAH|{iso}|" in ac or em == ab:
                             dup_makbuz_by_ab[ab] = mb
 
-            yil_now = datetime.now().year
             cur.execute(
-                "SELECT makbuz_no FROM tahsilatlar WHERE makbuz_no LIKE %s ORDER BY id DESC LIMIT 1",
-                (f"{yil_now}-%",),
+                "SELECT makbuz_no FROM tahsilatlar WHERE makbuz_no IS NOT NULL AND makbuz_no <> '' ORDER BY id DESC LIMIT 1"
             )
             row_m = cur.fetchone()
-            makbuz_seq = 0
+            makbuz_seq = 999
             if row_m and row_m.get("makbuz_no"):
-                try:
-                    makbuz_seq = int(str(row_m["makbuz_no"]).split("-")[-1])
-                except (ValueError, IndexError):
-                    makbuz_seq = 0
+                m = re.search(r"(\d+)$", str(row_m.get("makbuz_no") or "").strip())
+                if m:
+                    try:
+                        makbuz_seq = int(m.group(1))
+                    except Exception:
+                        makbuz_seq = 999
+            if makbuz_seq < 999:
+                makbuz_seq = 999
 
             harf = _odeme_turu_harf(odeme)
             yerel_tahsil_iso = set()
@@ -4800,7 +4990,7 @@ def api_aylik_tutarlardan_tahsil_et():
                     )
                     continue
                 makbuz_seq += 1
-                makbuz_no = f"{yil_now}-{makbuz_seq:04d}"
+                makbuz_no = str(makbuz_seq)
                 ay_adi = _AY_ADLARI[p["ay"] - 1]
                 marker = f"|AYLIK_TAH|{iso}|"
                 aciklama = f"{ay_adi} {p['yil']} Tahsilat {harf}{marker}"
@@ -5019,19 +5209,24 @@ def api_aylik_grid_cache():
     musteri_id = request.args.get("musteri_id", type=int)
     if not musteri_id:
         return jsonify({"ok": False, "mesaj": "musteri_id gerekli."}), 400
-    if not fetch_one("SELECT id FROM customers WHERE id = %s", (musteri_id,)):
-        return jsonify({"ok": False, "mesaj": "Müşteri bulunamadı."}), 404
     force = str(request.args.get("force") or "").lower() in ("1", "true", "yes", "on")
+    skip_match = str(request.args.get("skip_match") or "").lower() in ("1", "true", "yes", "on")
     _ensure_aylik_grid_cache_table()
     if not force:
         row = fetch_one("SELECT payload FROM musteri_aylik_grid_cache WHERE musteri_id = %s", (musteri_id,))
         if row and row.get("payload"):
             try:
                 cache_obj = json.loads(row["payload"])
-                if _aylik_grid_cache_matches_kyc(musteri_id, cache_obj):
+                # Hızlı yol: skip_match ile çağrıldıysa normalde kyc-uyum kontrolünü
+                # atlayıp önbelleği döndürürüz. Ancak imzasız (eski şema) payload'larda
+                # bu davranış stale veriyi sonsuza kadar tutabilir.
+                skip_izinli = bool(skip_match and isinstance(cache_obj, dict) and cache_obj.get("tahsilat_imza"))
+                if skip_izinli or _aylik_grid_cache_matches_kyc(musteri_id, cache_obj):
                     return jsonify({"ok": True, "cache": cache_obj, "cached": True})
             except Exception:
                 pass
+    if not fetch_one("SELECT id FROM customers WHERE id = %s", (musteri_id,)):
+        return jsonify({"ok": False, "mesaj": "Müşteri bulunamadı."}), 404
     payload = _upsert_aylik_grid_cache(musteri_id)
     return jsonify({"ok": True, "cache": payload or {}, "cached": False})
 
@@ -5042,12 +5237,12 @@ def api_reel_donem_tutarlar():
     musteri_id = request.args.get("musteri_id", type=int)
     if not musteri_id:
         return jsonify({"ok": False, "mesaj": "musteri_id gerekli."}), 400
-    if not fetch_one("SELECT id FROM customers WHERE id = %s", (musteri_id,)):
-        return jsonify({"ok": False, "mesaj": "Müşteri bulunamadı."}), 404
+    # Müşteri var mı kontrolünü kaldırdık; doğrudan tablo sorgusu yapıyoruz.
+    # Yoksa 0 satır döner, çağıran tarafa zaten ok=True/empty map geliyor.
     _ensure_musteri_reel_donem_tutar_table()
     rows = fetch_all(
         """
-        SELECT donem_yil, tutar_kdv_dahil
+        SELECT donem_yil, tutar_kdv_dahil, giris_tip, giris_tutar, hibrit_toplam, hibrit_net, hibrit_banka
         FROM musteri_reel_donem_tutar
         WHERE musteri_id = %s
         ORDER BY donem_yil
@@ -5055,16 +5250,26 @@ def api_reel_donem_tutarlar():
         (musteri_id,),
     ) or []
     m = {}
+    detay_map = {}
     for r in rows:
         y = r.get("donem_yil")
         t = r.get("tutar_kdv_dahil")
         if y is None or t is None:
             continue
+        yk = None
         try:
-            m[str(int(y))] = float(t)
+            yk = str(int(y))
+            m[yk] = float(t)
         except (TypeError, ValueError):
             continue
-    return jsonify({"ok": True, "map": m})
+        detay_map[yk] = {
+            "tip": (r.get("giris_tip") or "").strip().lower() or None,
+            "giris_tutar": float(r.get("giris_tutar")) if r.get("giris_tutar") is not None else None,
+            "hibrit_toplam": float(r.get("hibrit_toplam")) if r.get("hibrit_toplam") is not None else None,
+            "hibrit_net": float(r.get("hibrit_net")) if r.get("hibrit_net") is not None else None,
+            "hibrit_banka": float(r.get("hibrit_banka")) if r.get("hibrit_banka") is not None else None,
+        }
+    return jsonify({"ok": True, "map": m, "detay_map": detay_map})
 
 
 @bp.route("/api/reel-donem-tutar", methods=["POST"])
@@ -5088,18 +5293,39 @@ def api_reel_donem_tutar_upsert():
         return jsonify({"ok": False, "mesaj": "Geçersiz tutar."}), 400
     if tutar < 0:
         return jsonify({"ok": False, "mesaj": "Tutar negatif olamaz."}), 400
+    giris_tip = (data.get("giris_tip") or "").strip().lower()
+    if giris_tip not in ("dahil", "haric", "net", "hibrit"):
+        giris_tip = "dahil"
+    def _optf(v):
+        if v is None or str(v).strip() == "":
+            return None
+        try:
+            return float(str(v).replace(",", ".").strip())
+        except Exception:
+            return None
+    giris_tutar = _optf(data.get("giris_tutar"))
+    hibrit_toplam = _optf(data.get("hibrit_toplam"))
+    hibrit_net = _optf(data.get("hibrit_net"))
+    hibrit_banka = _optf(data.get("hibrit_banka"))
     if not fetch_one("SELECT id FROM customers WHERE id = %s", (musteri_id,)):
         return jsonify({"ok": False, "mesaj": "Müşteri bulunamadı."}), 404
     _ensure_musteri_reel_donem_tutar_table()
     execute(
         """
-        INSERT INTO musteri_reel_donem_tutar (musteri_id, donem_yil, tutar_kdv_dahil)
-        VALUES (%s, %s, %s)
+        INSERT INTO musteri_reel_donem_tutar (
+            musteri_id, donem_yil, tutar_kdv_dahil, giris_tip, giris_tutar, hibrit_toplam, hibrit_net, hibrit_banka
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (musteri_id, donem_yil) DO UPDATE SET
             tutar_kdv_dahil = EXCLUDED.tutar_kdv_dahil,
+            giris_tip = EXCLUDED.giris_tip,
+            giris_tutar = EXCLUDED.giris_tutar,
+            hibrit_toplam = EXCLUDED.hibrit_toplam,
+            hibrit_net = EXCLUDED.hibrit_net,
+            hibrit_banka = EXCLUDED.hibrit_banka,
             updated_at = NOW()
         """,
-        (musteri_id, donem_yil, tutar),
+        (musteri_id, donem_yil, tutar, giris_tip, giris_tutar, hibrit_toplam, hibrit_net, hibrit_banka),
     )
     return jsonify({"ok": True})
 
@@ -5454,15 +5680,18 @@ def api_tufe_borclandir_nakit_tahsil_toplu():
             fatura_tail = 0
 
     row_m = fetch_one(
-        "SELECT makbuz_no FROM tahsilatlar WHERE makbuz_no LIKE %s ORDER BY id DESC LIMIT 1",
-        (f"{yil_fn}-%",),
+        "SELECT makbuz_no FROM tahsilatlar WHERE makbuz_no IS NOT NULL AND makbuz_no <> '' ORDER BY id DESC LIMIT 1"
     )
-    makbuz_seq = 0
+    makbuz_seq = 999
     if row_m and row_m.get("makbuz_no"):
-        try:
-            makbuz_seq = int(str(row_m["makbuz_no"]).split("-")[-1])
-        except (ValueError, IndexError):
-            makbuz_seq = 0
+        m = re.search(r"(\d+)$", str(row_m.get("makbuz_no") or "").strip())
+        if m:
+            try:
+                makbuz_seq = int(m.group(1))
+            except Exception:
+                makbuz_seq = 999
+    if makbuz_seq < 999:
+        makbuz_seq = 999
 
     insert_rows = []
     tahsil_plan = []
@@ -5707,7 +5936,7 @@ def api_tufe_borclandir_nakit_tahsil_toplu():
             mid = t["musteri_id"]
             ab = t["ay_bir"]
             makbuz_seq += 1
-            makbuz_no = f"{yil_fn}-{makbuz_seq:04d}"
+            makbuz_no = str(makbuz_seq)
             fid = fmap.get((mid, ab))
             tahsil_rows.append(
                 (
@@ -5764,25 +5993,23 @@ def api_aylik_tahsil_durum():
     musteri_id = request.args.get("musteri_id", type=int)
     if not musteri_id:
         return jsonify({"ok": False, "mesaj": "musteri_id gerekli."}), 400
-    cust = fetch_one("SELECT id FROM customers WHERE id = %s", (musteri_id,))
-    if not cust:
-        return jsonify({"ok": False, "mesaj": "Müşteri bulunamadı."}), 404
+    # Müşteri varlık kontrolünü kaldırdık; yoksa zaten 0 satır döner.
     rows = fetch_all(
         """
         SELECT DISTINCT TO_CHAR(
             COALESCE(
-                DATE_TRUNC('month', f.fatura_tarihi::date),
                 DATE_TRUNC('month', NULLIF(substring(COALESCE(t.aciklama, '') from '\\|AYLIK_TAH\\|([0-9]{4}-[0-9]{2}-[0-9]{2})\\|'), '')::date),
+                DATE_TRUNC('month', f.fatura_tarihi::date),
                 DATE_TRUNC('month', t.tahsilat_tarihi::date)
             ),
             'YYYY-FMMM'
         ) AS ay_key
         FROM tahsilatlar t
         LEFT JOIN faturalar f ON f.id = t.fatura_id
-        WHERE (t.musteri_id = %s OR t.customer_id = %s)
+        WHERE (t.musteri_id = %s OR t.customer_id = %s OR f.musteri_id = %s)
           AND COALESCE(t.tutar, 0) > 0
         """,
-        (musteri_id, musteri_id),
+        (musteri_id, musteri_id, musteri_id),
     ) or []
     aylar = []
     for r in rows:

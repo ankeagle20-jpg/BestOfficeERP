@@ -2,6 +2,11 @@
 {% block page_title %}Müşteri Listesi{% endblock %}
 {% block content %}
 {# Giriş > Müşteriler 2 iframe: ?embed=1 ile layout üst menüsü gizlenir; sayfalama linklerinde korunur. #}
+{% macro ml_list_suffix_grup2() -%}
+{%- for s in grup2_filter_slugs|default([]) -%}
+&grup2={{ s|urlencode }}
+{%- endfor -%}
+{%- endmacro %}
 {% macro ml_list_href_page(sayfa, limit) -%}
 {%- set tu = ('1' if tum_yillar_odenmis else none) -%}
 {%- if embed|default(false) -%}
@@ -9,6 +14,7 @@
 {%- else -%}
 {{- url_for('musteriler.list_full', sayfa=sayfa, limit=limit, q=arama or none, tum_yillar_odenmis=tu) -}}
 {%- endif -%}
+{{- ml_list_suffix_grup2() -}}
 {%- endmacro %}
 {% macro ml_list_href_unpaged() -%}
 {%- set tu = ('1' if tum_yillar_odenmis else none) -%}
@@ -17,6 +23,7 @@
 {%- else -%}
 {{- url_for('musteriler.list_full', q=arama or none, tum_yillar_odenmis=tu) -}}
 {%- endif -%}
+{{- ml_list_suffix_grup2() -}}
 {%- endmacro %}
 {% set ml_ofis_list = musteriler|map(attribute='office_code')|select|unique|list|sort %}
 {# Hizmet türü + ofis tek select; ofis değerleri ofis|KOD (KOD içinde : olabilir) #}
@@ -50,6 +57,7 @@
   <col class="ml-c-borc">
   <col class="ml-c-gec">
   <col class="ml-c-durum">
+  <col class="ml-c-grup2">
   <col class="ml-c-kapanis">
   <col class="ml-c-son">
 </colgroup>
@@ -84,6 +92,9 @@
         <option value="pasif">Durum: Pasif</option>
         <option value="geciken">Sadece Geciken</option>
       </select>
+    </th>
+    <th class="ml-col-grup2 ml-grup2-head-filter" id="mlGrup2HeadFilter" title="Grup 2 filtresi (tıkla)">
+      <span>Grup 2</span> <i class="fa fa-caret-down" aria-hidden="true"></i>
     </th>
     <th class="ml-col-kapanis">Kapanış Tarihi</th>
     <th class="ml-col-son">Son Tahsilat</th>
@@ -122,19 +133,20 @@
 }
 .ml-table{border-collapse:separate;border-spacing:0;font-size:11px}
 /* Tam genişlik + yüzde kolon: sağdaki boşluk sütunlara yayılır; th’ye piksel width verme (başlık üst üste biniyordu) */
-.ml-table-compact{table-layout:fixed;width:100%;min-width:920px}
-.ml-table-compact col.ml-c-unvan{width:16%}
-.ml-table-compact col.ml-c-yetkili{width:13%}
+.ml-table-compact{table-layout:fixed;width:100%;min-width:1000px}
+.ml-table-compact col.ml-c-unvan{width:15%}
+.ml-table-compact col.ml-c-yetkili{width:12%}
 .ml-table-compact col.ml-c-hizmet{width:8%}
-.ml-table-compact col.ml-c-tel{width:8%}
+.ml-table-compact col.ml-c-tel{width:7%}
 .ml-table-compact col.ml-c-bas{width:7%}
 .ml-table-compact col.ml-c-kira{width:7%}
 .ml-table-compact col.ml-c-guncel{width:7%}
-.ml-table-compact col.ml-c-reel{width:7%}
+.ml-table-compact col.ml-c-reel{width:6%}
 .ml-table-compact col.ml-c-borc{width:7%}
 .ml-table-compact col.ml-c-gec{width:4%}
-.ml-table-compact col.ml-c-durum{width:9%}
-.ml-table-compact col.ml-c-kapanis{width:7%}
+.ml-table-compact col.ml-c-durum{width:8%}
+.ml-table-compact col.ml-c-grup2{width:7%}
+.ml-table-compact col.ml-c-kapanis{width:6%}
 .ml-table-compact col.ml-c-son{width:6%}
 .ml-table thead th{
   background:#0d1520;color:#00c8ff;
@@ -209,6 +221,20 @@
 .ml-durum-editor .ml-durum-save{background:#059669;color:#fff}
 .ml-durum-editor .ml-durum-cancel{background:#37474f;color:#e8f1ff}
 .ml-durum-editor .ml-durum-hint{font-size:8px;color:#90a4ae;line-height:1.25}
+.ml-g2-editor{display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:2px 0;min-width:170px}
+.ml-g2-editor .ml-g2-list{display:flex;flex-direction:column;gap:3px;max-height:130px;overflow:auto;padding-right:2px}
+.ml-g2-editor label{display:flex;align-items:center;gap:5px;font-size:10px;color:#d7e8f8}
+.ml-g2-editor .ml-g2-actions{display:flex;flex-direction:column;gap:4px;margin-top:2px;width:100%}
+.ml-g2-editor button{font-size:10px;line-height:1.2;padding:4px 8px;border-radius:4px;border:none;cursor:pointer;font-weight:700;width:100%;white-space:nowrap;text-align:center}
+.ml-g2-editor .ml-g2-save{background:#059669;color:#fff!important}
+.ml-g2-editor button .ml-btn-txt{display:inline-block;opacity:1!important;visibility:visible!important;color:#fff!important;-webkit-text-fill-color:#fff!important;text-shadow:0 0 0 #fff}
+.ml-g2-editor .ml-g2-row{display:flex;align-items:center;justify-content:space-between;gap:6px}
+.ml-g2-editor .ml-g2-row .ml-g2-opt{display:flex;align-items:center;gap:5px;min-width:0;flex:1}
+.ml-g2-editor .ml-g2-row .ml-g2-opt span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ml-g2-editor .ml-g2-row-actions{display:flex;gap:4px;flex-shrink:0}
+.ml-g2-editor .ml-g2-row-actions .ml-g2-mini{width:auto;padding:2px 6px;font-size:9px;line-height:1.1}
+.ml-g2-editor .ml-g2-row-actions .ml-g2-edit{background:#1d4ed8;color:#fff}
+.ml-g2-editor .ml-g2-row-actions .ml-g2-del{background:#b91c1c;color:#fff}
 .ml-footer{display:flex;align-items:center;justify-content:space-between;margin-top:12px;padding:10px 0;border-top:1px solid rgba(0,200,255,.08);font-size:11px;color:#5a7a9a;flex-wrap:wrap;gap:8px}
 .ml-footer strong{color:#e8f1ff;font-family:monospace}
 .ml-footer .red{color:#ff4557}
@@ -231,9 +257,28 @@
 #giris-embed-view .giris-embed-toolbar h2{color:#4fc3f7;font-size:14px;margin:0}
 #giris-embed-view #giris-iframe{flex:1;width:100%;min-height:calc(100vh - 180px);border:none;display:block}
 .ml-view-wrap{display:block}
+/* Giriş iframe: 100vh iç içe çift kaydırma azalsın */
+.ml-page--embed{min-height:auto;padding-top:6px}
 .yenile-ay-bar .ml-ay-btn{margin-right:4px}
 .yenile-ay-bar .ml-ay-btn.aktif{background:#00c8ff;color:#080d14;border-color:#00c8ff}
 .ml-toolbar-trailing{display:flex;align-items:center;gap:12px;margin-left:auto;flex-wrap:wrap;justify-content:flex-end}
+.ml-grup2-filtre-wrap{display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;margin:10px 0 0;padding:8px 10px;background:rgba(0,200,255,.05);border:1px solid rgba(0,200,255,.1);border-radius:8px;font-size:11px;color:#90a4ae}
+.ml-grup2-filtre-wrap .ml-grup2-lbl{font-weight:700;color:#00c8ff;white-space:nowrap}
+.ml-grup2-filtre-wrap label.ml-grup2-chk{display:inline-flex;align-items:center;gap:4px;cursor:pointer;color:#e8f1ff;user-select:none}
+.ml-grup2-filtre-wrap label.ml-grup2-chk input{accent-color:#00c8ff}
+.ml-table td.ml-col-grup2,.ml-table th.ml-col-grup2{font-size:10px;color:#b0bec5;white-space:normal;max-width:0}
+.ml-table td.ml-col-grup2 .ml-g2-tag{display:inline-block;margin:1px 3px 1px 0;padding:1px 5px;border-radius:4px;background:rgba(0,200,255,.1);border:1px solid rgba(0,200,255,.2);color:#e0f7fa;font-size:9px;font-weight:600}
+.ml-grup2-head-filter{cursor:pointer;user-select:none}
+.ml-grup2-head-filter i{margin-left:4px;color:#00c8ff}
+.ml-g2-pop{
+  position:fixed;z-index:25000;min-width:260px;max-width:320px;max-height:360px;
+  overflow:auto;background:#0f2537;border:1px solid #2d4060;border-radius:8px;
+  box-shadow:0 12px 32px rgba(0,0,0,.45);padding:8px;
+}
+.ml-g2-pop .ml-g2-opt{display:flex;align-items:center;gap:7px;color:#e8f1ff;padding:6px 4px;font-size:12px;cursor:pointer}
+.ml-g2-pop .ml-g2-opt input{accent-color:#00c8ff}
+.ml-g2-pop .ml-g2-actions{display:flex;gap:8px;margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,.1)}
+.ml-g2-pop .ml-g2-actions .ml-btn{flex:1;justify-content:center}
 .ml-soz-bas-range{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
 .ml-soz-bas-range input.ml-soz-bas-date,.ml-soz-bas-range .flatpickr-alt-input{
   box-sizing:border-box;width:11ch;min-width:11ch;max-width:11ch;padding:4px 6px;background:#0d1520;border:1px solid rgba(0,200,255,.2);border-radius:6px;color:#e8f1ff;font-size:11px;outline:none;cursor:pointer;flex:0 0 auto
@@ -242,6 +287,7 @@
 .ml-soz-bas-range .flatpickr-input[readonly]{cursor:pointer}
 .ml-soz-bas-range .ml-soz-bas-dash{color:#5a7a9a;font-size:11px}
 /* Sabit küme: üst başlık + filtreler + tablo başlık satırı (#mlHeadTable). Gövde ayrı tabloda; genişlik + scrollLeft senkron. */
+/* Üst ofset JS ile yazılır; ilk kare için kabaca ERP şeridi (embed’de hemen view.top ile düzeltilir) */
 :root{--ml-header-h:108px}
 .ml-fixed-head-cluster{
   position:fixed;
@@ -288,12 +334,12 @@ window.setActiveTab = function(tabId) {
 
 <div class="ml-view-wrap">
   <!-- 1) Müşteri Listesi görünümü (varsayılan) -->
-  <div id="musteri-listesi-view" class="ml-page">
+  <div id="musteri-listesi-view" class="ml-page{% if embed|default(false) %} ml-page--embed{% endif %}">
   <div id="mlFixedHeadCluster" class="ml-fixed-head-cluster">
   <div class="ml-sticky-block">
   <!-- TOP BAR -->
   <div class="ml-topbar">
-    <h1><i class="fa fa-users" style="color:#00c8ff"></i> Müşteri Listesi <span id="mlTitleCount">{% if paginate %}{{ musteriler|length }} / {{ toplam_musteri }} kayıt (sayfa {{ sayfa }}){% else %}{{ musteriler|length }} kayıt{% endif %}</span></h1>
+    <h1><i class="fa fa-users" style="color:#00c8ff"></i> Müşteri Listesi <span id="mlTitleCount" data-total="{% if paginate %}{{ toplam_musteri }}{% else %}{{ musteriler|length }}{% endif %}">{% if paginate %}{{ toplam_musteri }} kayıt{% else %}{{ musteriler|length }} kayıt{% endif %}</span></h1>
     <div class="ml-actions">
       <a href="/musteriler/" class="ml-btn back"><i class="fa fa-arrow-left"></i> Özet Panel</a>
       <button type="button" id="btn-bulk-save" class="ml-btn bulk-save" style="display:none;" disabled><i class="fa fa-save"></i> Değişiklikleri Toplu Kaydet</button>
@@ -342,6 +388,15 @@ window.setActiveTab = function(tabId) {
       <span>{% if paginate %}Borç (bu sayfa):{% else %}Toplam Borç:{% endif %} <b class="red" id="mlTotalBorc">{{ "{:,.0f}".format(_ns.total_borc) }} ₺</b></span>
       </div>
     </div>
+  </div>
+
+  <div class="ml-grup2-filtre-wrap" id="mlGrup2FiltreWrap" aria-label="Grup 2 rapor süzgeci" style="display:none">
+    <span class="ml-grup2-lbl">Grup 2</span>
+    {% for g in grup2_etiketler|default([]) %}
+    <label class="ml-grup2-chk"><input type="checkbox" name="ml_grup2_filtre" value="{{ g.slug }}" {% if g.slug in (grup2_filter_slugs|default([])) %}checked{% endif %}> {{ g.etiket }}</label>
+    {% endfor %}
+    <button type="button" class="ml-btn back" id="mlGrup2Hepsi" title="Grup 2 süzgecini kaldır">Hepsi</button>
+    <button type="button" class="ml-btn ekle" id="mlGrup2Uygula" title="İşaretli etiketlerin hepsi kartta seçili olanları listele">Uygula</button>
   </div>
 
   <!-- Yenile: Sözleşme ayına göre filtre (gizli, tıklanınca açılır) -->
@@ -422,7 +477,9 @@ window.setActiveTab = function(tabId) {
             data-kapanis="{{ kap_iso }}"
             data-son-tahsilat="{{ son_tah_str|e }}"
             data-bas-tarih="{{ bas_tarih_str|e }}"
-            onclick="var ev=event; if(document.querySelector('.ml-table-wrap.ml-edit-mode')) return; if(ev.target.closest('td.durum')) return; window.location.href='/musteriler/{{ m.id }}'">
+            data-grup2-display="{{ (m.get('grup2_display') or '')|e }}"
+            data-grup2-slugs="{{ ((m.get('grup2_secimleri') or [])|join('|'))|e }}"
+            onclick="var ev=event; if(document.querySelector('.ml-table-wrap.ml-edit-mode')) return; if(ev.target.closest('td.durum') || ev.target.closest('td.ml-col-grup2')) return; window.location.href='/musteriler/{{ m.id }}'">
           <td class="name" title="{{ m.name or '' }}">{{ m.name or '—' }}</td>
           <td class="yetkili">{{ m.get('yetkili_kisi') or '—' }}</td>
           <td class="hizmet ml-text">{{ m.get('hizmet_turu') or '—' }}</td>
@@ -445,11 +502,13 @@ window.setActiveTab = function(tabId) {
               <span class="durum-aktif"><i class="fa fa-check"></i> Aktif</span>
             {% endif %}
           </td>
+          {% set g2d = (m.get('grup2_display') or '')|trim %}
+          <td class="ml-text ml-col-grup2" title="{{ g2d|e }}">{% if g2d %}{% for token in g2d.split(',') %}<span class="ml-g2-tag">{{ token.strip()|e }}</span>{% endfor %}{% else %}—{% endif %}</td>
           <td class="tarih ml-text ml-kapanis-col ml-col-kapanis" title="Kapanış tarihi">{% if kap_iso|length == 10 %}{{ kap_iso[8:10] }}.{{ kap_iso[5:7] }}.{{ kap_iso[0:4] }}{% else %}—{% endif %}</td>
           <td class="tarih ml-text ml-col-son">{{ m.get('son_odeme_tarihi') or m.get('son_tahsilat') or '—' }}</td>
         </tr>
         {% else %}
-        <tr><td colspan="13" class="ml-empty"><i class="fa fa-inbox"></i>Müşteri bulunamadı</td></tr>
+        <tr><td colspan="14" class="ml-empty"><i class="fa fa-inbox"></i>Müşteri bulunamadı</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -496,6 +555,7 @@ window.setActiveTab = function(tabId) {
 <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/tr.js"></script>
 <script>
 var ML_BULK_API = "{{ url_for('musteriler.api_bulk_update') }}";
+var ML_IS_PAGINATED = {{ 'true' if paginate else 'false' }};
 var allRows = Array.from(document.querySelectorAll('#mlBody tr[data-name]'));
 var sozlesmeAySecili = 0; // 0 = tümü, 1-12 = ay
 var _durumSavePending = {};
@@ -564,6 +624,7 @@ function mlEnsureSearchNorms() {
         tr.getAttribute('data-ikametgah-adresi') || '',
         tr.getAttribute('data-son-tahsilat') || '',
         tr.getAttribute('data-bas-tarih') || '',
+        tr.getAttribute('data-grup2-display') || '',
       ];
       tr.setAttribute('data-search-norm', mlAramaFoldTr(parts.join(' ')));
     });
@@ -616,6 +677,214 @@ function closeAnyDurumEditor() {
   if (tr) {
     refreshDurumCell(tr, tr.getAttribute('data-durum-val'), tr.getAttribute('data-kapanis') || '');
   }
+}
+
+var _mlGrup2SavePending = {};
+var _mlGrup2EtiketCache = null;
+
+function mlGrup2ParseSlugs(raw) {
+  if (!raw) return [];
+  var s = String(raw || '').trim();
+  if (!s) return [];
+  if (s.charAt(0) === '[') {
+    try {
+      var j = JSON.parse(s);
+      if (Array.isArray(j)) return j.map(function(x){ return String(x || '').trim(); }).filter(Boolean);
+    } catch (e) {}
+  }
+  if (s.charAt(0) === '{' && s.charAt(s.length - 1) === '}') {
+    var inn = s.substring(1, s.length - 1).trim();
+    if (!inn) return [];
+    return inn.split(',').map(function(x){ return String(x || '').replace(/^\"|\"$/g, '').trim(); }).filter(Boolean);
+  }
+  return s.split('|').map(function(x){ return String(x || '').trim(); }).filter(Boolean);
+}
+
+function mlGrup2FetchEtiketler() {
+  if (_mlGrup2EtiketCache && _mlGrup2EtiketCache.length) return Promise.resolve(_mlGrup2EtiketCache);
+  var urls = ['/giris/api/grup2-etiketleri', '/faturalar/api/grup2-etiketleri'];
+  var i = 0;
+  function one() {
+    if (i >= urls.length) return Promise.resolve([]);
+    return fetch(urls[i++], { credentials: 'same-origin' })
+      .then(function(r) { if (r.status === 404) throw new Error('404'); return r.json(); })
+      .then(function(j) { return (j && j.ok && Array.isArray(j.etiketler)) ? j.etiketler : []; })
+      .catch(function() { return one(); });
+  }
+  return one().then(function(list) { _mlGrup2EtiketCache = list || []; return _mlGrup2EtiketCache; });
+}
+
+function mlGrup2MutateEtiket(method, payload) {
+  var orig = String(method || 'GET').toUpperCase();
+  var urls = ['/giris/api/grup2-etiketleri', '/faturalar/api/grup2-etiketleri'];
+  var effMethod = orig;
+  var body = Object.assign({}, payload || {});
+  if (orig === 'PUT') {
+    urls = ['/giris/api/grup2-etiket-guncelle', '/faturalar/api/grup2-etiket-guncelle'];
+    effMethod = 'POST';
+    delete body.action;
+  } else if (orig === 'DELETE') {
+    urls = ['/giris/api/grup2-etiket-sil', '/faturalar/api/grup2-etiket-sil'];
+    effMethod = 'POST';
+    delete body.action;
+  }
+  var i = 0;
+  function one() {
+    if (i >= urls.length) return Promise.reject(new Error('Etiket servisine ulaşılamadı.'));
+    return fetch(urls[i++], {
+      method: effMethod,
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+      body: JSON.stringify(body || {})
+    }).then(function(r){
+      if (r.status === 404) return one();
+      return r.json().then(function(j){ return { ok: r.ok, data: j || {} }; });
+    });
+  }
+  return one().then(function(resp){
+    if (!resp.ok || !resp.data || !resp.data.ok) throw new Error((resp.data && (resp.data.mesaj || resp.data.message)) || 'İşlem başarısız.');
+    return resp.data;
+  });
+}
+
+function refreshGrup2Cell(tr, slugs, etiketMap) {
+  if (!tr) return;
+  var uniq = [];
+  var seen = {};
+  (slugs || []).forEach(function(s){ s = String(s || '').trim(); if (!s || seen[s]) return; seen[s]=1; uniq.push(s); });
+  tr.setAttribute('data-grup2-slugs', uniq.join('|'));
+  var labels = uniq.map(function(s){ return etiketMap[s] || s; });
+  var g2d = labels.join(', ');
+  tr.setAttribute('data-grup2-display', g2d);
+  var td = tr.querySelector('td.ml-col-grup2');
+  if (!td) return;
+  if (!labels.length) {
+    td.textContent = '—';
+    td.setAttribute('title', '');
+  } else {
+    td.innerHTML = labels.map(function(t){ return '<span class=\"ml-g2-tag\">' + String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</span>'; }).join('');
+    td.setAttribute('title', g2d);
+  }
+  mlEnsureSearchNorms();
+  filterTable();
+}
+
+function closeAnyGrup2Editor() {
+  var ed = document.querySelector('td.ml-col-grup2 .ml-g2-editor');
+  if (!ed) return;
+  var tr = ed.closest('tr.ml-row');
+  if (!tr) return;
+  var slugs = mlGrup2ParseSlugs(tr.getAttribute('data-grup2-slugs') || '');
+  var map = {};
+  (_mlGrup2EtiketCache || []).forEach(function(g){
+    if (!g || !g.slug) return;
+    map[String(g.slug)] = (g.etiket != null && String(g.etiket).trim()) ? String(g.etiket).trim() : String(g.slug);
+  });
+  refreshGrup2Cell(tr, slugs, map);
+}
+
+function openGrup2Editor(tr, td) {
+  if (document.querySelector('.ml-table-wrap.ml-edit-mode')) return;
+  closeAnyDurumEditor();
+  closeAnyGrup2Editor();
+  td.innerHTML = '<div class="ml-g2-editor" onclick="event.stopPropagation();"><div class="ml-g2-list">Yükleniyor…</div><div class="ml-g2-actions"><button type="button" onclick="grupKaydet()" style="background:#28a745; color:#fff !important; padding:4px 10px; border:none; border-radius:4px; cursor:pointer; font-size:13px; width:100%; height:28px; line-height:20px; text-align:left; padding-left:8px;">Kaydet</button><button type="button" class="ml-g2-cancel" style="background:#37474f; color:#e8f1ff !important; padding:4px 10px; border:none; border-radius:4px; cursor:pointer; font-size:13px; width:100%; height:28px; line-height:20px; text-align:left; padding-left:8px;">İptal</button></div></div>';
+  var ed = td.querySelector('.ml-g2-editor');
+  var listBox = ed ? ed.querySelector('.ml-g2-list') : null;
+  var curSet = {};
+  mlGrup2ParseSlugs(tr.getAttribute('data-grup2-slugs') || '').forEach(function(s){ curSet[s] = true; });
+  mlGrup2FetchEtiketler().then(function(list){
+    if (!listBox) return;
+    if (!list || !list.length) { listBox.innerHTML = '<span style="font-size:10px;color:#90a4ae">Etiket yok</span>'; return; }
+    var html = '';
+    list.forEach(function(g){
+      var slug = g && g.slug != null ? String(g.slug).trim() : '';
+      var et = (g && g.etiket != null && String(g.etiket).trim()) ? String(g.etiket).trim() : slug;
+      if (!slug) return;
+      var safeSlug = slug.replace(/\"/g, '&quot;');
+      var safeEt = String(et).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+      html += '<label><input type="checkbox" data-g2-s="' + safeSlug + '" value="' + safeSlug + '" ' + (curSet[slug] ? 'checked' : '') + '> ' + safeEt + '</label>';
+    });
+    listBox.innerHTML = html || '<span style="font-size:10px;color:#90a4ae">Etiket yok</span>';
+    listBox.querySelectorAll('button[data-g2-edit]').forEach(function(btn){
+      btn.addEventListener('click', function(ev){
+        ev.stopPropagation();
+        var slug = btn.getAttribute('data-g2-edit') || '';
+        var oldLabel = btn.getAttribute('data-g2-label') || '';
+        if (!slug) return;
+        var yeni = prompt('Etiket adını güncelle:', oldLabel);
+        if (yeni == null) return;
+        yeni = String(yeni).trim();
+        if (!yeni) { alert('Etiket adı boş olamaz.'); return; }
+        mlGrup2MutateEtiket('PUT', { slug: slug, etiket: yeni })
+          .then(function(){
+            _mlGrup2EtiketCache = null;
+            return mlGrup2FetchEtiketler();
+          })
+          .then(function(){ openGrup2Editor(tr, td); })
+          .catch(function(err){ alert(err && err.message ? err.message : 'Etiket güncellenemedi.'); });
+      });
+    });
+    listBox.querySelectorAll('button[data-g2-del]').forEach(function(btn){
+      btn.addEventListener('click', function(ev){
+        ev.stopPropagation();
+        var slug = btn.getAttribute('data-g2-del') || '';
+        var label = btn.getAttribute('data-g2-label') || slug;
+        if (!slug) return;
+        if (!confirm('"' + label + '" etiketini silmek istiyor musunuz?')) return;
+        mlGrup2MutateEtiket('DELETE', { slug: slug })
+          .then(function(){
+            _mlGrup2EtiketCache = null;
+            var now = mlGrup2ParseSlugs(tr.getAttribute('data-grup2-slugs') || '').filter(function(s){ return s !== slug; });
+            var map = {};
+            (_mlGrup2EtiketCache || []).forEach(function(g){
+              if (!g || !g.slug) return;
+              map[String(g.slug)] = (g.etiket != null && String(g.etiket).trim()) ? String(g.etiket).trim() : String(g.slug);
+            });
+            refreshGrup2Cell(tr, now, map);
+            return mlGrup2FetchEtiketler();
+          })
+          .then(function(){ openGrup2Editor(tr, td); })
+          .catch(function(err){ alert(err && err.message ? err.message : 'Etiket silinemedi.'); });
+      });
+    });
+  });
+  var btnSave = ed ? ed.querySelector('.ml-g2-actions button') : null;
+  if (btnSave) btnSave.addEventListener('click', function(ev){
+    ev.stopPropagation();
+    var id = tr.getAttribute('data-id');
+    if (!id || _mlGrup2SavePending[id]) return;
+    var picked = [];
+    (ed.querySelectorAll('input[data-g2-s]:checked') || []).forEach(function(cb){
+      var s = cb.getAttribute('data-g2-s');
+      if (s) picked.push(s);
+    });
+    _mlGrup2SavePending[id] = true;
+    fetch(ML_BULK_API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+      body: JSON.stringify({ updates: [{ id: parseInt(id, 10), grup2_secimleri: picked }] })
+    })
+      .then(function(r){ return r.json(); })
+      .then(function(data){
+        if (!data || !data.ok) {
+          alert((data && data.message) ? data.message : 'Kaydedilemedi.');
+          return;
+        }
+        var map = {};
+        (_mlGrup2EtiketCache || []).forEach(function(g){
+          if (!g || !g.slug) return;
+          map[String(g.slug)] = (g.etiket != null && String(g.etiket).trim()) ? String(g.etiket).trim() : String(g.slug);
+        });
+        refreshGrup2Cell(tr, picked, map);
+      })
+      .catch(function(){ alert('Bağlantı hatası.'); })
+      .finally(function(){ delete _mlGrup2SavePending[id]; });
+  });
+  var btnCancel = ed ? ed.querySelector('.ml-g2-cancel') : null;
+  if (btnCancel) btnCancel.addEventListener('click', function(ev){
+    ev.stopPropagation();
+    closeAnyGrup2Editor();
+  });
 }
 
 function todayIso() {
@@ -761,6 +1030,16 @@ function handleDurumCellClick(e) {
 }
 document.getElementById('mlBody').addEventListener('click', handleDurumCellClick);
 document.getElementById('mlBody').addEventListener('dblclick', handleDurumCellClick);
+document.getElementById('mlBody').addEventListener('click', function(e) {
+  var td = e.target.closest('td.ml-col-grup2');
+  if (!td || document.querySelector('.ml-table-wrap.ml-edit-mode')) return;
+  if (e.target.closest('.ml-g2-editor')) return;
+  var tr = td.closest('tr.ml-row');
+  if (!tr || !tr.getAttribute('data-id')) return;
+  e.preventDefault();
+  e.stopPropagation();
+  openGrup2Editor(tr, td);
+});
 
 function normHizmetStr(s) {
   if (s == null || s === undefined) return '';
@@ -975,7 +1254,10 @@ function filterTable(){
     vis.forEach(function(tr) { tb.appendChild(tr); });
   }
   var tc = document.getElementById('mlTitleCount');
-  if (tc) tc.textContent = shown + ' kayıt';
+  if (tc) {
+    var topTotal = parseInt(tc.getAttribute('data-total') || '0', 10);
+    tc.textContent = (topTotal > 0 ? topTotal : shown) + ' kayıt';
+  }
   var mc = document.getElementById('mlCount');
   if (mc) mc.textContent = shown;
   var ms = document.getElementById('mlShown');
@@ -1014,8 +1296,14 @@ function mlLayoutFixedCluster() {
   cluster.style.pointerEvents = '';
 
   var hdr = document.querySelector('header.header');
-  /* height yerine bottom: ceil(height) üstüne yuvarlayınca 1px altında boşluk kalıp kayıcı içerik sızdırıyordu */
-  var hh = hdr ? hdr.getBoundingClientRect().bottom : 108;
+  /* Tam sayfa: ERP header altına hizala. Embed/iframe: header yok — view üstü (main padding dahil), yoksa satırlar sabit başlığın üzerinde görünür. */
+  var hh;
+  if (hdr) {
+    hh = Math.ceil(hdr.getBoundingClientRect().bottom);
+  } else {
+    hh = Math.round(view.getBoundingClientRect().top);
+    if (hh < 0) hh = 0;
+  }
   document.documentElement.style.setProperty('--ml-header-h', hh + 'px');
 
   var r = view.getBoundingClientRect();
@@ -1148,9 +1436,42 @@ function mlInitSozBasTarihFiltre() {
   if (clr && !clr.dataset.mlSozBasClrBound) {
     clr.dataset.mlSozBasClrBound = '1';
     clr.addEventListener('click', function() {
+      // Tam temizle: tüm filtreleri varsayılana döndür + URL'deki sunucu filtrelerini kaldır.
+      var q = document.getElementById('mlQ');
+      if (q) q.value = '';
+
+      var dH = document.getElementById('mlDurum');
+      var dT = document.getElementById('mlDurumTop');
+      if (dH) dH.value = 'hepsi';
+      if (dT) dT.value = 'hepsi';
+
+      var hH = document.getElementById('mlHizmet');
+      var hT = document.getElementById('mlHizmetTop');
+      if (hH) hH.value = '';
+      if (hT) hT.value = '';
+
+      var bH = document.getElementById('mlBenzer');
+      var bT = document.getElementById('mlBenzerTop');
+      if (bH) bH.value = '';
+      if (bT) bT.value = '';
+      try { localStorage.removeItem('mlBenzerAdUnvan'); } catch (eLs) {}
+
       if (b0._flatpickr) b0._flatpickr.clear();
       if (b1._flatpickr) b1._flatpickr.clear();
-      filterTable();
+
+      sozlesmeAySecili = 0;
+      document.querySelectorAll('.ml-ay-btn').forEach(function(btn) { btn.classList.remove('aktif'); });
+      var ayTum = document.querySelector('.ml-ay-btn[data-ay="0"]');
+      if (ayTum) ayTum.classList.add('aktif');
+
+      // Grup2 popup filtresi URL parametresiyle çalışıyor; tümünü temizle.
+      var u = new URL(window.location.href);
+      u.searchParams.delete('grup2');
+      u.searchParams.delete('q');
+      u.searchParams.delete('tum_yillar_odenmis');
+      // Temizle sonrası ilk sayfaya dön.
+      if (u.searchParams.has('sayfa')) u.searchParams.set('sayfa', '1');
+      window.location.href = u.toString();
     });
   }
 }
@@ -1162,7 +1483,36 @@ window.addEventListener('load', function() {
   if (typeof erpRescanTarihHizli === 'function') erpRescanTarihHizli();
 });
 
-document.getElementById('mlQ').addEventListener('input', filterTable);
+function mlNavigateWithServerSearch(qVal) {
+  var u = new URL(window.location.href);
+  var q = String(qVal || '').trim();
+  if (q) u.searchParams.set('q', q);
+  else u.searchParams.delete('q');
+  // Arama yeni sonuç kümesi üretir; ilk sayfaya dönelim.
+  if (u.searchParams.has('sayfa')) u.searchParams.set('sayfa', '1');
+  window.location.href = u.toString();
+}
+
+var _mlQInput = document.getElementById('mlQ');
+var _mlQDebounce = null;
+if (_mlQInput) {
+  _mlQInput.addEventListener('input', function() {
+    if (ML_IS_PAGINATED) {
+      if (_mlQDebounce) clearTimeout(_mlQDebounce);
+      var v = _mlQInput.value || '';
+      _mlQDebounce = setTimeout(function() { mlNavigateWithServerSearch(v); }, 350);
+      return;
+    }
+    filterTable();
+  });
+  _mlQInput.addEventListener('keydown', function(ev) {
+    if (ev.key !== 'Enter') return;
+    if (!ML_IS_PAGINATED) return;
+    ev.preventDefault();
+    if (_mlQDebounce) clearTimeout(_mlQDebounce);
+    mlNavigateWithServerSearch(_mlQInput.value || '');
+  });
+}
 var mlDurumHeader = document.getElementById('mlDurum');
 var mlDurumTop = document.getElementById('mlDurumTop');
 if (mlDurumHeader && mlDurumTop) {
@@ -1242,6 +1592,128 @@ if (mlBenzerHeader && mlBenzerTop) {
     filterTable();
   });
 }
+
+(function () {
+  var mlG2List = null;
+  var mlG2Pop = null;
+  var mlG2OutsideBound = false;
+
+  function mlGrup2GetSelectedFromUrl() {
+    try { return new URL(window.location.href).searchParams.getAll('grup2').filter(Boolean); }
+    catch (e) { return []; }
+  }
+
+  function mlGrup2Navigate(slugs) {
+    var u = new URL(window.location.href);
+    u.searchParams.delete('grup2');
+    (slugs || []).forEach(function (s) { if (s) u.searchParams.append('grup2', s); });
+    window.location.href = u.toString();
+  }
+
+  function mlGrup2FetchList() {
+    if (Array.isArray(mlG2List) && mlG2List.length) return Promise.resolve(mlG2List);
+    var urls = ['/giris/api/grup2-etiketleri', '/faturalar/api/grup2-etiketleri'];
+    var i = 0;
+    function one() {
+      if (i >= urls.length) return Promise.resolve([]);
+      return fetch(urls[i++], { credentials: 'same-origin' })
+        .then(function (r) { if (r.status === 404) throw new Error('404'); return r.json(); })
+        .then(function (j) { return (j && j.ok && Array.isArray(j.etiketler)) ? j.etiketler : []; })
+        .catch(function () { return one(); });
+    }
+    return one().then(function (list) { mlG2List = list || []; return mlG2List; });
+  }
+
+  function mlGrup2PopClose() {
+    if (mlG2Pop) { mlG2Pop.remove(); mlG2Pop = null; }
+    if (mlG2OutsideBound) {
+      document.removeEventListener('click', mlGrup2Outside, false);
+      mlG2OutsideBound = false;
+    }
+  }
+
+  function mlGrup2Outside(ev) {
+    if (!mlG2Pop) return;
+    if (mlG2Pop.contains(ev.target)) return;
+    var th = document.getElementById('mlGrup2HeadFilter');
+    if (th && th.contains(ev.target)) return;
+    mlGrup2PopClose();
+  }
+
+  function mlGrup2PopOpen(anchor) {
+    mlGrup2FetchList().then(function (list) {
+      mlGrup2PopClose();
+      var selected = mlGrup2GetSelectedFromUrl();
+      var selSet = {};
+      selected.forEach(function (s) { selSet[s] = true; });
+      var pop = document.createElement('div');
+      pop.className = 'ml-g2-pop';
+      var html = '';
+      html += '<label class="ml-g2-opt"><input type="checkbox" data-g2-hepsi="1" ' + (selected.length ? '' : 'checked') + '> Hepsi</label>';
+      (list || []).forEach(function (g) {
+        var slug = g && g.slug != null ? String(g.slug).trim() : '';
+        var et = (g && g.etiket != null && String(g.etiket).trim()) ? String(g.etiket).trim() : slug;
+        if (!slug) return;
+        var safeSlug = slug.replace(/"/g, '&quot;');
+        var safeEt = String(et).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+        html += '<div style="padding:2px 0;">';
+        html += '<label class="ml-g2-opt"><input type="checkbox" data-g2-slug="' + safeSlug + '" ' + (selSet[slug] ? 'checked' : '') + '> ' + safeEt + '</label>';
+        html += '<div style="margin-left:22px; margin-top:1px;">';
+        html += '<a href="#" onclick="grup2Degistir(\'' + safeSlug + '\',\'' + safeEt.replace(/'/g, '&#39;') + '\'); return false;" style="font-size:10px; color:#7eb3ff; margin-right:8px;">düzenle</a>';
+        html += '<a href="#" onclick="grup2Sil(\'' + safeSlug + '\'); return false;" style="font-size:10px; color:#ff7e7e;">sil</a>';
+        html += '</div></div>';
+      });
+      html += '<div class="ml-g2-actions"><button type="button" class="ml-btn back" data-g2-cancel="1">İptal</button><button type="button" class="ml-btn ekle" data-g2-apply="1">Uygula</button></div>';
+      pop.innerHTML = html;
+      document.body.appendChild(pop);
+      mlG2Pop = pop;
+
+      var rect = anchor.getBoundingClientRect();
+      var w = Math.min(320, Math.max(260, rect.width));
+      pop.style.minWidth = w + 'px';
+      var left = Math.min(Math.max(8, rect.left), (window.innerWidth || 1200) - w - 8);
+      pop.style.left = left + 'px';
+      pop.style.top = (rect.bottom + 6) + 'px';
+
+      var hepsi = pop.querySelector('input[data-g2-hepsi="1"]');
+      if (hepsi) hepsi.addEventListener('change', function () {
+        if (!hepsi.checked) return;
+        pop.querySelectorAll('input[data-g2-slug]').forEach(function (cb) { cb.checked = false; });
+      });
+      pop.querySelectorAll('input[data-g2-slug]').forEach(function (cb) {
+        cb.addEventListener('change', function () { if (cb.checked && hepsi) hepsi.checked = false; });
+      });
+      var cancel = pop.querySelector('button[data-g2-cancel="1"]');
+      if (cancel) cancel.addEventListener('click', function () { mlGrup2PopClose(); });
+      var apply = pop.querySelector('button[data-g2-apply="1"]');
+      if (apply) apply.addEventListener('click', function () {
+        if (hepsi && hepsi.checked) { mlGrup2Navigate([]); return; }
+        var picked = [];
+        pop.querySelectorAll('input[data-g2-slug]:checked').forEach(function (cb) {
+          var s = cb.getAttribute('data-g2-slug');
+          if (s) picked.push(s);
+        });
+        mlGrup2Navigate(picked);
+      });
+      setTimeout(function () {
+        if (!mlG2OutsideBound) {
+          mlG2OutsideBound = true;
+          document.addEventListener('click', mlGrup2Outside, false);
+        }
+      }, 0);
+    });
+  }
+
+  var th = document.getElementById('mlGrup2HeadFilter');
+  if (th) {
+    th.addEventListener('click', function (ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (mlG2Pop) mlGrup2PopClose();
+      else mlGrup2PopOpen(th);
+    });
+  }
+})();
 
 window.addEventListener('resize', function() { mlSyncStickyHeights(); });
 window.addEventListener('load', function() { mlSyncStickyHeights(); });
@@ -1575,7 +2047,7 @@ function enterQuickEditMode() {
 
   var rows = document.querySelectorAll('#mlBody tr.ml-row');
   rows.forEach(function(tr) {
-    if (tr.cells.length < 13) return;
+    if (tr.cells.length < 14) return;
     var id = tr.getAttribute('data-id');
     var yetkili = tr.getAttribute('data-yetkili') || '';
     var hizmet = tr.getAttribute('data-hizmet') || '';
@@ -1737,8 +2209,9 @@ function enterQuickEditMode() {
     sel10.value = durumVal;
     td10.appendChild(sel10);
 
-    // 11 Kapanış tarihi — Flatpickr + hızlı rakam (01012026); pasifte açık
-    var tdKap = tr.cells[11];
+    // 11 Grup 2 — salt okunur (karttan yönetilir)
+    // 12 Kapanış tarihi — Flatpickr + hızlı rakam (01012026); pasifte açık
+    var tdKap = tr.cells[12];
     var origKap = (tdKap.textContent || '').trim();
     tdKap.innerHTML = '';
     var inpKap = document.createElement('input');
@@ -1759,11 +2232,11 @@ function enterQuickEditMode() {
     }
     mlSetKapanisQEditEnabled(inpKap, durumVal === 'pasif');
 
-    // 12 Son Tahsilat — Flatpickr + hızlı rakam
-    var td12 = tr.cells[12];
+    // 13 Son Tahsilat — Flatpickr + hızlı rakam
+    var tdSon = tr.cells[13];
     var sonIso = (sonTahsilat && sonTahsilat.length >= 10) ? sonTahsilat.substring(0, 10) : '';
-    var orig12 = sonIso.length === 10 ? fmtKapTr(sonIso) : (td12.textContent || '').trim();
-    td12.innerHTML = '';
+    var orig12 = sonIso.length === 10 ? fmtKapTr(sonIso) : (tdSon.textContent || '').trim();
+    tdSon.innerHTML = '';
     var inpST = document.createElement('input');
     inpST.type = 'text';
     inpST.className = 'ml-qedit-date';
@@ -1773,8 +2246,8 @@ function enterQuickEditMode() {
     inpST.dataset.original = orig12;
     inpST.dataset.key = 'son_odeme_tarihi';
     inpST.value = '';
-    td12.appendChild(inpST);
-    if (!mlInitQEditFlatpickr(inpST, sonIso, function() { markIfChanged(inpST, td12); })) {
+    tdSon.appendChild(inpST);
+    if (!mlInitQEditFlatpickr(inpST, sonIso, function() { markIfChanged(inpST, tdSon); })) {
       inpST.dataset.original = sonIso || '';
     }
 

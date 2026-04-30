@@ -42,18 +42,31 @@ def _dsn_with_sslmode(dsn: str, sslmode: str = "require") -> str:
 
 
 def sql_expr_fatura_not_gib_taslak(notlar_column: str) -> str:
-    """PostgreSQL koşulu: notlarda «GİB durum: taslak» olmayan faturalar (GİB taslağı listelerde/cariye yansımasın).
+    """PostgreSQL koşulu: notlarda «GİB durum: taslak» ve «ERP durum: taslak» olmayan faturalar.
 
     notlar_column: tam sütun ifadesi, örn. ``f.notlar`` veya ``notlar``.
     """
     c = (notlar_column or "").strip()
     if not c:
         raise ValueError("notlar_column gerekli")
+    norm = "regexp_replace(COALESCE(" + c + ", ''), '[İIıi]', 'I', 'g')"
     return (
         "(" + c + " IS NULL OR NOT ("
-        "regexp_replace(COALESCE(" + c + ", ''), '[İIıi]', 'I', 'g') "
-        "~* 'GIB[[:space:]]+DURUM[[:space:]]*:[[:space:]]+TASLAK'"
+        + norm + " ~* 'GIB[[:space:]]+DURUM[[:space:]]*:[[:space:]]+TASLAK'"
+        " OR "
+        + norm + " ~* 'ERP[[:space:]]+DURUM[[:space:]]*:[[:space:]]+TASLAK'"
         "))"
+    )
+
+
+def sql_expr_fatura_erp_taslak(notlar_column: str) -> str:
+    """PostgreSQL koşulu: notlarda «ERP durum: taslak» etiketi olan faturalar."""
+    c = (notlar_column or "").strip()
+    if not c:
+        raise ValueError("notlar_column gerekli")
+    return (
+        "regexp_replace(COALESCE(" + c + ", ''), '[İIıi]', 'I', 'g') "
+        "~* 'ERP[[:space:]]+DURUM[[:space:]]*:[[:space:]]+TASLAK'"
     )
 
 
@@ -67,7 +80,7 @@ def sql_expr_fatura_gib_imzalanmis(notlar_column: str) -> str:
         "("
         "COALESCE(" + c + ", '') LIKE '%%GİB İMZALANDI%%' OR "
         "regexp_replace(COALESCE(" + c + ", ''), '[İIıi]', 'I', 'g') ~* 'GIB[[:space:]]+IMZALANDI' OR "
-        "regexp_replace(COALESCE(" + c + ", ''), '[İIıi]', 'I', 'g') ~* 'GIB[[:space:]]+DURUM[[:space:]]*:[[:space:]]+IMZAL'"
+        "regexp_replace(COALESCE(" + c + ", ''), '[İIıi]', 'I', 'g') ~* 'GIB[[:space:]]+DURUM[[:space:]]*:[[:space:]]+IMZALI[[:>:]]'"
         ")"
     )
 
@@ -1588,10 +1601,18 @@ def ensure_customers_kapanis_tarihi():
         print(f"customers.kapanis_tarihi: {e}")
 
 
+_customers_kapanis_sonrasi_borc_ay_ensured = False
+
+
 def ensure_customers_kapanis_sonrasi_borc_ay():
-    """Pasif müşteride kapanıştan sonra borç gösterilecek ek ay sayısı (1-12, boş=hepsi)."""
+    """Pasif müşteride kapanıştan sonra borç gösterilecek ek ay sayısı (1-12, boş=hepsi).
+    Süreç başına bir kez yeterli; her API isteğinde ALTER TABLE çalıştırmaya gerek yok."""
+    global _customers_kapanis_sonrasi_borc_ay_ensured
+    if _customers_kapanis_sonrasi_borc_ay_ensured:
+        return
     try:
         execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS kapanis_sonrasi_borc_ay SMALLINT")
+        _customers_kapanis_sonrasi_borc_ay_ensured = True
     except Exception as e:
         print(f"customers.kapanis_sonrasi_borc_ay: {e}")
 
@@ -1790,6 +1811,10 @@ def ensure_tahsilatlar_columns():
         execute("ALTER TABLE tahsilatlar ADD COLUMN IF NOT EXISTS banka_referans_no TEXT")
     except Exception as e:
         print(f"tahsilatlar.banka_referans_no: {e}")
+    try:
+        execute("ALTER TABLE tahsilatlar ADD COLUMN IF NOT EXISTS tahsil_eden TEXT")
+    except Exception as e:
+        print(f"tahsilatlar.tahsil_eden: {e}")
 
 
 def ensure_banka_hesaplar_columns():

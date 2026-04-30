@@ -17,6 +17,30 @@ def _parse_date(s):
     return None
 
 
+def _parse_amount_flexible(v):
+    if v is None:
+        return 0.0
+    if isinstance(v, (int, float)):
+        try:
+            return float(v)
+        except Exception:
+            return 0.0
+    s = str(v).strip().replace(" ", "")
+    if not s:
+        return 0.0
+    if "," in s and "." in s:
+        if s.rfind(",") > s.rfind("."):
+            s = s.replace(".", "").replace(",", ".")
+        else:
+            s = s.replace(",", "")
+    elif "," in s:
+        s = s.replace(",", ".")
+    try:
+        return float(s)
+    except Exception:
+        return 0.0
+
+
 @bp.route("/")
 @giris_gerekli
 def index():
@@ -110,7 +134,7 @@ def api_tahsilat_save():
     try:
         data = request.json or request.form
         musteri_id = int(data.get("musteri_id"))
-        tutar = float(str(data.get("tutar", 0)).replace(",", ".") or 0)
+        tutar = _parse_amount_flexible(data.get("tutar", 0))
         if tutar <= 0:
             return jsonify({"ok": False, "mesaj": "Tutar 0'dan büyük olmalıdır."}), 400
         odeme = (data.get("odeme") or "nakit").lower()
@@ -127,9 +151,9 @@ def api_tahsilat_save():
                 fatura_id = None
 
         row = execute_returning(
-            """INSERT INTO tahsilatlar (customer_id, fatura_id, tutar, odeme_turu, aciklama, tahsilat_tarihi)
-               VALUES (%s, %s, %s, %s, %s, %s) RETURNING id""",
-            (musteri_id, fatura_id, tutar, odeme, aciklama, tarih)
+            """INSERT INTO tahsilatlar (musteri_id, customer_id, fatura_id, tutar, odeme_turu, aciklama, tahsilat_tarihi)
+               VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+            (musteri_id, musteri_id, fatura_id, tutar, odeme, aciklama, tarih)
         )
         if fatura_id:
             execute("UPDATE faturalar SET durum = 'odendi' WHERE id = %s", (fatura_id,))

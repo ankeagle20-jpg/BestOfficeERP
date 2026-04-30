@@ -227,12 +227,15 @@
         <h2>
             {% if irsaliye_modu %}
                 <i class="fa fa-truck"></i> Yeni İrsaliye Oluştur
+            {% elif duzenleme_modu %}
+                <i class="fa fa-pen-to-square"></i> Fatura Düzenle
             {% else %}
                 <i class="fa fa-file-invoice"></i> Yeni Fatura Oluştur
             {% endif %}
         </h2>
         <div class="page-actions">
-            <button type="button" id="btn-kaydet"><i class="fa fa-save"></i> Kaydet</button>
+            <button type="button" id="btn-kaydet"><i class="fa fa-save"></i> Taslak Kaydet</button>
+            <button type="button" id="btn-kaydet-taslak" style="background:#455a64;"><i class="fa fa-clipboard"></i> Taslak Kaydet</button>
             <button type="button" class="secondary" id="btn-onizleme"><i class="fa fa-eye"></i> Önizleme</button>
         </div>
     </div>
@@ -243,15 +246,15 @@
             <div>
                 <div class="form-row">
                     <label>{% if irsaliye_modu %}İrsaliye No{% else %}Fatura No{% endif %}</label>
-                    <input type="text" id="fatura-no" placeholder="Boş bırakırsanız otomatik atanır">
+                    <input type="text" id="fatura-no" placeholder="Boş bırakırsanız otomatik atanır" value="{{ edit_fatura.fatura_no if edit_fatura else '' }}">
                 </div>
                 <div class="form-row">
                     <label>{% if irsaliye_modu %}İrsaliye Tarihi{% else %}Fatura Tarihi{% endif %}</label>
-                    <input type="date" id="fatura-tarihi" value="{{ bugun }}">
+                    <input type="date" id="fatura-tarihi" value="{{ edit_fatura.fatura_tarihi if edit_fatura else bugun }}">
                 </div>
                 <div class="form-row">
                     <label>{% if irsaliye_modu %}İrsaliye Saati{% else %}Fatura Saati{% endif %}</label>
-                    <input type="time" id="fatura-saati" value="{{ saat }}">
+                    <input type="time" id="fatura-saati" value="{{ edit_fatura.fatura_saati if edit_fatura else saat }}">
                 </div>
                 <div class="form-row">
                     <label>{% if irsaliye_modu %}Belge Tipi{% else %}Fatura Tipi{% endif %}</label>
@@ -266,8 +269,8 @@
             <div>
                 <div class="form-row">
                     <label>Müşteri <span style="color:#ffb74d;">*</span></label>
-                    <input type="text" id="musteri-ara" placeholder="Müşteri ara, seçin (ünvan veya kısa ad)…" autocomplete="off" value="{% if secili_musteri %}{{ (secili_musteri.name or secili_musteri.get('display_label') or '') | e }}{% endif %}">
-                    <input type="hidden" id="musteri-id" value="{{ secili_musteri.id if secili_musteri else '' }}">
+                    <input type="text" id="musteri-ara" placeholder="Müşteri ara, seçin (ünvan veya kısa ad)…" autocomplete="off" value="{% if secili_musteri %}{{ (secili_musteri.name or secili_musteri.get('display_label') or '') | e }}{% elif edit_fatura and edit_fatura.musteri_adi %}{{ edit_fatura.musteri_adi | e }}{% endif %}">
+                    <input type="hidden" id="musteri-id" value="{{ secili_musteri.id if secili_musteri else (edit_fatura.musteri_id if edit_fatura and edit_fatura.musteri_id else '') }}">
                 </div>
                 <div id="musteri-sonuclar" style="max-height:180px;overflow-y:auto;margin-bottom:6px;border-radius:4px;border:1px solid #1e3a50;background:#0f2537;display:none;margin-left:110px;max-width:calc(100% - 110px);"></div>
                 <div id="musteri-ozet" class="tag" style="display:none;"></div>
@@ -277,7 +280,7 @@
                 </div>
                 <div class="form-row">
                     <label>Sevk adresi</label>
-                    <textarea id="sevk-adresi" rows="2" placeholder="Teslimat adresi alıcıdan farklıysa yazın; boş bırakılırsa PDF’de gösterilmez"></textarea>
+                    <textarea id="sevk-adresi" rows="2" placeholder="Teslimat adresi alıcıdan farklıysa yazın; boş bırakılırsa PDF’de gösterilmez">{{ edit_fatura.sevk_adresi if edit_fatura else '' }}</textarea>
                 </div>
                 <div class="form-row">
                     <label>Vergi Dairesi</label>
@@ -289,7 +292,7 @@
                 </div>
                 <div class="form-row">
                     <label>Notlar</label>
-                    <textarea id="fatura-not" placeholder="Opsiyonel açıklama / not"></textarea>
+                    <textarea id="fatura-not" placeholder="Opsiyonel açıklama / not">{{ edit_fatura.notlar if edit_fatura else '' }}</textarea>
                 </div>
             </div>
         </div>
@@ -299,7 +302,7 @@
     <div class="panel gib-yeni-panel">
         <h3><i class="fa fa-paper-plane"></i> GİB'e fatura gönder (tekil)</h3>
         <p class="gib-yeni-hint">
-            GİB her zaman <strong>kayıtlı fatura satırına</strong> bağlanır — ekrandaki tutar/müşteri ile karışmaması için önce <strong>Kaydet</strong> edin.
+            GİB her zaman <strong>kayıtlı fatura satırına</strong> bağlanır — ekrandaki tutar/müşteri ile karışmaması için önce <strong>Taslak Kaydet</strong> edin.
             <strong>Fatura ID</strong> alanı bu müşteri için son kayıtla dolar; yeni faturada önce kayıt, sonra GİB.
             <strong>Son Faturayı Getir</strong> yalnızca formdaki müşterinin son faturasını getirir (başka müşterinin ID’si kullanılmaz).
         </p>
@@ -324,7 +327,10 @@
             <h3 style="margin-bottom:0;">{% if irsaliye_modu %}İrsaliye Satırları{% else %}Fatura Satırları{% endif %}</h3>
             <div style="display:inline-flex; align-items:center; gap:8px;">
                 <button type="button" id="btn-kaydet-inline" class="btn-icon" style="background:#2e7d32; color:#fff; border:none; padding:6px 12px; border-radius:4px; font-size:12px; cursor:pointer; display:inline-flex; align-items:center; gap:6px;">
-                    <i class="fa fa-save"></i> Kaydet
+                    <i class="fa fa-save"></i> Taslak Kaydet
+                </button>
+                <button type="button" id="btn-kaydet-inline-taslak" class="btn-icon" style="background:#455a64; color:#fff; border:none; padding:6px 12px; border-radius:4px; font-size:12px; cursor:pointer; display:inline-flex; align-items:center; gap:6px;">
+                    <i class="fa fa-clipboard"></i> Taslak Kaydet
                 </button>
                 <button type="button" id="btn-fatura-olustur" class="btn-icon" style="background:#00bcd4; color:#fff; border:none; padding:6px 12px; border-radius:4px; font-size:12px; cursor:pointer; display:inline-flex; align-items:center; gap:6px;">
                     {% if irsaliye_modu %}
@@ -401,7 +407,10 @@
         const API_GIB_FATURA_OLUSTUR = "{{ url_for('faturalar.api_gib_fatura_olustur') }}";
         const API_GIB_FATURA_ONIZLEME = "{{ url_for('faturalar.api_gib_fatura_onizleme') }}";
         const API_GIB_SON_FATURA = "{{ url_for('faturalar.api_gib_son_fatura') }}";
+        const API_FATURA_MUSTERI_BUL = "/faturalar/api/fatura-musteri-bul";
         const SECILI_MUSTERI = {{ (secili_musteri | tojson) if secili_musteri else 'null' }};
+        const EDIT_FATURA = {{ (edit_fatura | tojson) if edit_fatura else 'null' }};
+        const DUZENLEME_MODU = {{ 'true' if duzenleme_modu else 'false' }};
         const IRSALIYE_MODU = {{ 'true' if irsaliye_modu else 'false' }};
         const DEFAULT_HIZMET_URUN = {{ (default_hizmet_urun or '') | tojson }};
         const DEFAULT_BIRIM_FIYAT = {{ default_birim_fiyat | default(0) }};
@@ -695,6 +704,93 @@
             if (ma && ma.toLowerCase() !== u.toLowerCase()) return u + ' · ' + ma;
             return u;
         }
+        async function musteriSecVeDoldur(id, ad) {
+            if (!id) return;
+            musteriIdEl.value = String(id);
+            if (ad) musteriAra.value = String(ad);
+            musteriSonuclar.style.display = 'none';
+            musteriOzet.style.display = 'none';
+            const adrEl = document.getElementById('musteri-adres');
+            const vdEl = document.getElementById('musteri-vergi-dairesi');
+            const vnEl = document.getElementById('musteri-vergi-no');
+            if (adrEl) adrEl.value = '';
+            if (vdEl) vdEl.value = '';
+            if (vnEl) vnEl.value = '';
+            try {
+                const res2 = await fetch(API_MUSTERI_KYC + '?musteri_id=' + encodeURIComponent(id));
+                const d = await res2.json();
+                if (d) {
+                    const adr = d.yeni_adres || d.address || '';
+                    const vd = d.vergi_dairesi || 'Kavaklıdere';
+                    const vn = d.vergi_no || d.tax_number || '';
+                    if (adrEl) adrEl.value = adr;
+                    if (vdEl) vdEl.value = vd;
+                    if (vnEl) vnEl.value = vn;
+                }
+            } catch(e){}
+        }
+        function musteriNorm(s) {
+            return String(s || '')
+                .toLocaleLowerCase('tr-TR')
+                .replace(/[^a-z0-9ğüşöçıİ]/g, '')
+                .replace(/ı/g, 'i')
+                .replace(/ğ/g, 'g')
+                .replace(/ü/g, 'u')
+                .replace(/ş/g, 's')
+                .replace(/ö/g, 'o')
+                .replace(/ç/g, 'c');
+        }
+        async function musteriyiAdaGoreOtoSec(ad) {
+            const hedef = String(ad || '').trim();
+            if (!hedef || musteriIdEl.value) return false;
+            try {
+                const res = await fetch(API_MUSTERI_ARA + '?q=' + encodeURIComponent(hedef));
+                const rows = await res.json();
+                if (!Array.isArray(rows) || !rows.length) return false;
+                const h = musteriNorm(hedef);
+                let best = null;
+                let bestScore = -1;
+                rows.forEach(function(r){
+                    const n1 = musteriNorm(r && r.name);
+                    const n2 = musteriNorm(r && r.musteri_adi);
+                    [n1, n2].forEach(function(n){
+                        if (!n) return;
+                        let score = 0;
+                        if (n === h) score = 1000;
+                        else if (n.indexOf(h) >= 0 || h.indexOf(n) >= 0) score = Math.min(n.length, h.length) / Math.max(n.length, h.length);
+                        if (score > bestScore) {
+                            bestScore = score;
+                            best = r;
+                        }
+                    });
+                });
+                if (!best) return false;
+                await musteriSecVeDoldur(best.id, faturaMusteriUnvan(best));
+                return true;
+            } catch (e) {
+                return false;
+            }
+        }
+        async function faturadanMusteriOtoBul() {
+            if (musteriIdEl.value || !EDIT_FATURA) return false;
+            const params = new URLSearchParams();
+            if (EDIT_FATURA.id) params.set('fatura_id', EDIT_FATURA.id);
+            if (EDIT_FATURA.fatura_no) params.set('fatura_no', EDIT_FATURA.fatura_no);
+            if (EDIT_FATURA.ettn) params.set('ettn', EDIT_FATURA.ettn);
+            if (!params.toString()) return false;
+            try {
+                const res = await fetch(API_FATURA_MUSTERI_BUL + '?' + params.toString(), { credentials: 'same-origin' });
+                const j = await res.json();
+                if (j && j.ok && j.musteri && j.musteri.id) {
+                    await musteriSecVeDoldur(j.musteri.id, faturaMusteriUnvan(j.musteri));
+                    return true;
+                }
+                if (j && j.musteri_adi && !musteriAra.value.trim()) {
+                    musteriAra.value = j.musteri_adi;
+                }
+            } catch (e) {}
+            return false;
+        }
         async function musteriListeGetir(q, showAllOnEmpty) {
             const query = (q || '').trim();
             if (!query && !showAllOnEmpty) {
@@ -724,30 +820,7 @@
                             try { ad = decodeURIComponent(uv); } catch (eU) { ad = ''; }
                         }
                         if (!ad) ad = (this.textContent || '').trim();
-                        musteriIdEl.value = id;
-                        musteriAra.value = ad;
-                        musteriSonuclar.style.display = 'none';
-                        musteriOzet.style.display = 'none';  // Özet satırı kaldırıldı, bilgiler formda
-                            // Alanları temizle
-                            const adrEl = document.getElementById('musteri-adres');
-                            const vdEl = document.getElementById('musteri-vergi-dairesi');
-                            const vnEl = document.getElementById('musteri-vergi-no');
-                            if (adrEl) adrEl.value = '';
-                            if (vdEl) vdEl.value = '';
-                            if (vnEl) vnEl.value = '';
-                        try {
-                            const res2 = await fetch(API_MUSTERI_KYC + '?musteri_id=' + encodeURIComponent(id));
-                            const d = await res2.json();
-                            let ek = '';
-                                if (d) {
-                                    const adr = d.yeni_adres || d.address || '';
-                                    const vd = d.vergi_dairesi || 'Kavaklıdere';
-                                    const vn = d.vergi_no || d.tax_number || '';
-                                    if (adrEl) adrEl.value = adr;
-                                    if (vdEl) vdEl.value = vd;
-                                    if (vnEl) vnEl.value = vn;
-                                }
-                        } catch(e){}
+                        await musteriSecVeDoldur(id, ad);
                     });
                 });
             } catch(e){
@@ -845,7 +918,41 @@
         }
 
         const prefillRows = consumeSozlesmePrefillRows();
-        if (prefillRows && prefillRows.length) {
+        if (EDIT_FATURA) {
+            if (EDIT_FATURA.fatura_no) document.getElementById('fatura-no').value = EDIT_FATURA.fatura_no;
+            if (EDIT_FATURA.fatura_tarihi) document.getElementById('fatura-tarihi').value = EDIT_FATURA.fatura_tarihi;
+            if (EDIT_FATURA.fatura_saati) document.getElementById('fatura-saati').value = EDIT_FATURA.fatura_saati;
+            if (EDIT_FATURA.fatura_tipi) document.getElementById('fatura-tipi').value = EDIT_FATURA.fatura_tipi;
+            if (EDIT_FATURA.notlar != null) document.getElementById('fatura-not').value = EDIT_FATURA.notlar || '';
+            if (document.getElementById('sevk-adresi') && EDIT_FATURA.sevk_adresi != null) {
+                document.getElementById('sevk-adresi').value = EDIT_FATURA.sevk_adresi || '';
+            }
+            if (Array.isArray(EDIT_FATURA.satirlar) && EDIT_FATURA.satirlar.length) {
+                EDIT_FATURA.satirlar.forEach(function (pr) { addRow(pr); });
+            } else {
+                addRow();
+            }
+            var kaydetLbl = DUZENLEME_MODU === true || DUZENLEME_MODU === 'true' ? 'Taslak Güncelle' : 'Taslak Kaydet';
+            var kaydetBtn = document.getElementById('btn-kaydet');
+            if (kaydetBtn) kaydetBtn.innerHTML = '<i class="fa fa-save"></i> ' + kaydetLbl;
+            var kaydetInline = document.getElementById('btn-kaydet-inline');
+            if (kaydetInline) kaydetInline.innerHTML = '<i class="fa fa-save"></i> ' + kaydetLbl;
+            var gibStatusInit = document.getElementById('yeni-gib-status');
+            var gibIdInit = document.getElementById('yeni-gib-fatura-id');
+            if (gibStatusInit && EDIT_FATURA.id) {
+                gibStatusInit.textContent = 'Düzenleme modu: Fatura ID #' + EDIT_FATURA.id + '. Değiştirip güncelleyebilirsiniz.';
+            } else if (gibStatusInit && EDIT_FATURA.ettn) {
+                gibStatusInit.textContent = 'GİB kaydı ön-dolu açıldı. Satırları düzenleyip ERP kaydı olarak kaydedebilirsiniz.';
+            }
+            if (gibIdInit && EDIT_FATURA.id) gibIdInit.value = String(EDIT_FATURA.id);
+            if (!musteriIdEl.value) {
+                const adayAd = String(EDIT_FATURA.musteri_adi || musteriAra.value || '').trim();
+                if (adayAd) {
+                    musteriyiAdaGoreOtoSec(adayAd);
+                }
+                faturadanMusteriOtoBul();
+            }
+        } else if (prefillRows && prefillRows.length) {
             prefillRows.forEach(function (pr) {
                 addRow(pr);
             });
@@ -892,6 +999,9 @@
         async function kaydet(opts) {
             opts = opts || {};
             var redirectOnSuccess = !!opts.redirectOnSuccess;
+            var mevcutGibDurum = (EDIT_FATURA && EDIT_FATURA.gib_durum) ? String(EDIT_FATURA.gib_durum).toLowerCase() : '';
+            var otomatikErpTaslak = (mevcutGibDurum !== 'imzali');
+            var erpTaslak = (typeof opts.erpTaslak === 'boolean') ? opts.erpTaslak : otomatikErpTaslak;
             const v = validateForm();
             if (!v.ok) {
                 alert('Lütfen zorunlu alanları doldurun.');
@@ -911,6 +1021,7 @@
             const genelToplam = araToplam - toplamIskonto + kdvToplam;
 
             const payload = {
+                fatura_id: EDIT_FATURA && EDIT_FATURA.id ? EDIT_FATURA.id : null,
                 fatura_no: document.getElementById('fatura-no').value.trim() || null,
                 fatura_tarihi: document.getElementById('fatura-tarihi').value,
                 fatura_saati: document.getElementById('fatura-saati').value,
@@ -919,6 +1030,9 @@
                 musteri_adi: musteriAra.value.trim(),
                 notlar: document.getElementById('fatura-not').value.trim() || null,
                 sevk_adresi: (document.getElementById('sevk-adresi') && document.getElementById('sevk-adresi').value.trim()) || null,
+                ettn: EDIT_FATURA && EDIT_FATURA.ettn ? EDIT_FATURA.ettn : null,
+                gib_durum: EDIT_FATURA && EDIT_FATURA.gib_durum ? EDIT_FATURA.gib_durum : null,
+                erp_taslak: erpTaslak,
                 satirlar: rows,
                 ara_toplam: araToplam,
                 toplam_iskonto: toplamIskonto,
@@ -952,9 +1066,11 @@
                     if (gibIdEl) gibIdEl.value = j.fatura_id;
                     var gibStatusEl = document.getElementById('yeni-gib-status');
                     if (gibStatusEl) {
-                        gibStatusEl.textContent = 'Fatura kaydedildi. ID #' + j.fatura_id + ' ile "GİB Taslak Gönder"e basabilirsiniz.';
+                        gibStatusEl.textContent = erpTaslak
+                            ? ('ERP taslağı kaydedildi. ID #' + j.fatura_id + '. Cari ekstreye yansımaz; hazır olduğunuzda "GİB Taslak Gönder"e basabilirsiniz.')
+                            : ('Fatura kaydedildi. ID #' + j.fatura_id + ' ile "GİB Taslak Gönder"e basabilirsiniz.');
                     }
-                    alert((j.mesaj || 'Fatura kaydedildi.') + ' (ID: ' + j.fatura_id + ')');
+                    alert((j.mesaj || (erpTaslak ? 'ERP taslağı kaydedildi.' : 'Fatura kaydedildi.')) + ' (ID: ' + j.fatura_id + ')');
                     return;
                 }
                 if (j.ok) {
@@ -980,10 +1096,22 @@
         document.getElementById('btn-kaydet').addEventListener('click', function(){
             kaydet({ redirectOnSuccess: false });
         });
+        var kaydetTaslakBtn = document.getElementById('btn-kaydet-taslak');
+        if (kaydetTaslakBtn) {
+            kaydetTaslakBtn.addEventListener('click', function(){
+                kaydet({ redirectOnSuccess: false, erpTaslak: true });
+            });
+        }
         var kaydetInlineBtn = document.getElementById('btn-kaydet-inline');
         if (kaydetInlineBtn) {
             kaydetInlineBtn.addEventListener('click', function(){
                 kaydet({ redirectOnSuccess: false });
+            });
+        }
+        var kaydetInlineTaslakBtn = document.getElementById('btn-kaydet-inline-taslak');
+        if (kaydetInlineTaslakBtn) {
+            kaydetInlineTaslakBtn.addEventListener('click', function(){
+                kaydet({ redirectOnSuccess: false, erpTaslak: true });
             });
         }
 
@@ -1017,6 +1145,7 @@
             });
             const genelToplam = araToplam - toplamIskonto + kdvToplam;
             const payload = {
+                fatura_id: EDIT_FATURA && EDIT_FATURA.id ? EDIT_FATURA.id : null,
                 fatura_no: document.getElementById('fatura-no').value.trim() || null,
                 fatura_tarihi: document.getElementById('fatura-tarihi').value,
                 fatura_saati: document.getElementById('fatura-saati').value,
@@ -1025,6 +1154,8 @@
                 musteri_adi: document.getElementById('musteri-ara').value.trim(),
                 notlar: document.getElementById('fatura-not').value.trim() || null,
                 sevk_adresi: (document.getElementById('sevk-adresi') && document.getElementById('sevk-adresi').value.trim()) || null,
+                ettn: EDIT_FATURA && EDIT_FATURA.ettn ? EDIT_FATURA.ettn : null,
+                gib_durum: EDIT_FATURA && EDIT_FATURA.gib_durum ? EDIT_FATURA.gib_durum : null,
                 satirlar: rows,
                 ara_toplam: araToplam,
                 toplam_iskonto: toplamIskonto,

@@ -10,6 +10,9 @@ from db import (
     ensure_customers_quick_edit_columns,
     ensure_customers_kapanis_tarihi,
     ensure_customers_hazir_ofis_oda,
+    ensure_customers_grup2_secimleri,
+    ensure_grup2_bizim_hesap_into_array,
+    ensure_grup2_etiketleri_table,
     ensure_musteri_kyc_hazir_ofis_oda_no,
     ensure_musteri_kyc_kira_banka,
     ensure_musteri_kyc_odeme_duzeni,
@@ -20,6 +23,7 @@ from db import (
 from utils.musteri_arama import customers_arama_sql_giris_genis, customers_arama_params_giris_genis
 import pandas as pd
 import calendar
+import json
 from io import BytesIO
 from datetime import date, datetime, timedelta
 from docx import Document
@@ -378,6 +382,104 @@ WHERE NOT EXISTS (
 """
 
 
+def _musteri_liste_grup2_slugs_from_request():
+    """URL ?grup2=a&grup2=b veya tek parametrede virgül; yalnızca grup2_etiketleri tablosunda kayıtlı slug'lar."""
+    parts = request.args.getlist("grup2")
+    if len(parts) == 1 and parts[0] and "," in parts[0]:
+        parts = [p.strip() for p in parts[0].split(",") if p.strip()]
+    slugs = [str(s).strip() for s in parts if str(s).strip()]
+    if not slugs:
+        return []
+    ensure_grup2_etiketleri_table()
+    rows = fetch_all(
+        "SELECT slug FROM grup2_etiketleri WHERE COALESCE(aktif, TRUE) AND slug = ANY(%s)",
+        (list(slugs),),
+    )
+    allowed = {r["slug"] for r in (rows or [])}
+    return [s for s in slugs if s in allowed]
+
+
+def _musteri_liste_grup2_sql_and_params(table_alias: str):
+    """Müşteri kartındaki Grup 2: seçilen tüm etiketler caride işaretli olmalı (@>). Boş liste = filtre yok."""
+    slugs = _musteri_liste_grup2_slugs_from_request()
+    if not slugs:
+        return "", ()
+    a = f"{table_alias.strip()}." if table_alias and table_alias.strip() else ""
+    # Legacy uyum: grup2_secimleri boş olsa bile bizim_hesap/vergi_dairesi alanlarından türet.
+    sql = (
+        " AND ("
+        f"COALESCE({a}grup2_secimleri, ARRAY[]::text[])"
+        f" || CASE WHEN COALESCE({a}bizim_hesap, FALSE) THEN ARRAY['bizim_hesap']::text[] ELSE ARRAY[]::text[] END"
+        f" || CASE WHEN COALESCE(NULLIF(TRIM(COALESCE({a}vergi_dairesi, '')), ''), '') != ''"
+        " THEN ARRAY['vergi_dairesi']::text[] ELSE ARRAY[]::text[] END"
+        ") @> %s::text[]"
+    )
+    return sql, (list(slugs),)
+
+
+def _musteri_liste_grup2_etiket_rows():
+    ensure_grup2_etiketleri_table()
+    return fetch_all(
+        """
+        SELECT slug, etiket FROM grup2_etiketleri
+        WHERE COALESCE(aktif, TRUE)
+        ORDER BY
+            CASE slug
+                WHEN 'bizim_hesap' THEN 0
+                WHEN 'vergi_dairesi' THEN 1
+                WHEN 'vergi_dairesi_terk' THEN 2
+                ELSE 3
+            END,
+            sira NULLS LAST,
+            etiket
+        """
+    )
+
+
+def _musteri_liste_attach_grup2_display(musteriler, etiket_map):
+    """Satırda gösterilecek etiket metni (müşteri kartı Grup 2 ile aynı sıra anlamı)."""
+    from routes.giris_routes import _parse_pg_text_array_grup2
+
+    rows = musteriler or []
+    ids = [m.get("id") for m in rows if m.get("id") is not None]
+    if ids:
+        try:
+            g2_rows = fetch_all(
+                "SELECT id, grup2_secimleri, bizim_hesap FROM customers WHERE id = ANY(%s)",
+                (list(ids),),
+            )
+            by_id = {int(r["id"]): r for r in (g2_rows or []) if r.get("id") is not None}
+            for m in rows:
+                mid = m.get("id")
+                if mid is None:
+                    continue
+                r = by_id.get(int(mid))
+                if not r:
+                    continue
+                cur_g2 = _parse_pg_text_array_grup2(m.get("grup2_secimleri"))
+                db_g2 = _parse_pg_text_array_grup2(r.get("grup2_secimleri"))
+                merged_g2 = list(dict.fromkeys(cur_g2 + db_g2))
+                if merged_g2:
+                    m["grup2_secimleri"] = merged_g2
+                elif r.get("grup2_secimleri") is not None:
+                    m["grup2_secimleri"] = r.get("grup2_secimleri")
+                m["bizim_hesap"] = bool(m.get("bizim_hesap")) or bool(r.get("bizim_hesap"))
+        except Exception:
+            pass
+
+    for m in rows:
+        g2_list = _parse_pg_text_array_grup2(m.get("grup2_secimleri"))
+        if bool(m.get("bizim_hesap")) and "bizim_hesap" not in g2_list:
+            g2_list = ["bizim_hesap"] + g2_list
+        if (m.get("vergi_dairesi") or "").strip() and "vergi_dairesi" not in g2_list:
+            g2_list.append("vergi_dairesi")
+        if not g2_list and bool(m.get("bizim_hesap")):
+            g2_list = ["bizim_hesap"]
+        g2_list = list(dict.fromkeys(g2_list))
+        parts = [etiket_map.get(str(x), str(x).replace("_", " ").title()) for x in g2_list if x]
+        m["grup2_display"] = ", ".join(parts) if parts else ""
+
+
 def _musteri_liste_data():
     """Müşteri listesi sayfası için ortak veri (ana sayfa ve /list).
 
@@ -393,19 +495,34 @@ def _musteri_liste_data():
         limit = 50
     limit = max(1, min(500, int(limit)))
 
+    ensure_grup2_etiketleri_table()
+    ensure_customers_grup2_secimleri()
+    ensure_grup2_bizim_hesap_into_array()
+    grup2_filter_slugs = _musteri_liste_grup2_slugs_from_request()
+    grup2_etiketler = _musteri_liste_grup2_etiket_rows() or []
+    grup2_etiket_map = {r["slug"]: r["etiket"] for r in grup2_etiketler}
+
     if tum_yillar_odenmis:
-        sql = f"SELECT c.* {_TUM_YILLAR_ODENMIS_FROM} ORDER BY c.name"
-        count_sql = f"SELECT COUNT(*) AS n {_TUM_YILLAR_ODENMIS_FROM}"
-        params = ()
+        g2_sql, g2_params = _musteri_liste_grup2_sql_and_params("c")
+        sql = f"SELECT c.* {_TUM_YILLAR_ODENMIS_FROM}{g2_sql} ORDER BY c.name"
+        count_sql = f"SELECT COUNT(*) AS n {_TUM_YILLAR_ODENMIS_FROM}{g2_sql}"
+        params = tuple(g2_params)
     elif arama:
+        g2_sql, g2_params = _musteri_liste_grup2_sql_and_params("")
         w3 = customers_arama_sql_giris_genis("")
-        sql = f"SELECT * FROM customers WHERE {w3} ORDER BY name"
-        count_sql = f"SELECT COUNT(*) AS n FROM customers WHERE {w3}"
-        params = customers_arama_params_giris_genis(arama)
+        sql = f"SELECT * FROM customers WHERE {w3}{g2_sql} ORDER BY name"
+        count_sql = f"SELECT COUNT(*) AS n FROM customers WHERE {w3}{g2_sql}"
+        params = tuple(customers_arama_params_giris_genis(arama)) + tuple(g2_params)
     else:
-        sql = "SELECT * FROM customers ORDER BY name"
-        count_sql = "SELECT COUNT(*) AS n FROM customers"
-        params = ()
+        g2_sql, g2_params = _musteri_liste_grup2_sql_and_params("")
+        if g2_sql:
+            sql = f"SELECT * FROM customers WHERE 1=1{g2_sql} ORDER BY name"
+            count_sql = f"SELECT COUNT(*) AS n FROM customers WHERE 1=1{g2_sql}"
+            params = tuple(g2_params)
+        else:
+            sql = "SELECT * FROM customers ORDER BY name"
+            count_sql = "SELECT COUNT(*) AS n FROM customers"
+            params = ()
 
     toplam_musteri = None
     toplam_sayfa = None
@@ -430,6 +547,9 @@ def _musteri_liste_data():
         "limit": limit if paginate else None,
         "toplam_musteri": toplam_musteri if paginate else None,
         "toplam_sayfa": toplam_sayfa if paginate else None,
+        "grup2_filter_slugs": grup2_filter_slugs,
+        "grup2_etiketler": grup2_etiketler,
+        "grup2_etiket_map": grup2_etiket_map,
     }
 
 
@@ -563,6 +683,19 @@ def _dedupe_musteri_liste_by_identity(musteriler):
         s = str(kap).strip()
         return bool(s) and s not in ("None", "null", "")
 
+    def _g2_parse(val):
+        if val is None:
+            return []
+        if isinstance(val, (list, tuple)):
+            return [str(x).strip() for x in val if str(x).strip()]
+        s = str(val).strip()
+        if not s or s in ("{}", "[]", "None", "null"):
+            return []
+        if s.startswith("{") and s.endswith("}"):
+            inner = s[1:-1].strip()
+            return [p.strip().strip('"') for p in inner.split(",") if p.strip()] if inner else []
+        return [s]
+
     def score_row(m):
         s = int(m.get("id") or 0)
         if (m.get("durum") or "").strip().lower() == "pasif":
@@ -589,6 +722,16 @@ def _dedupe_musteri_liste_by_identity(musteriler):
         for o in group:
             if o["id"] == best["id"]:
                 continue
+            best_g2 = _g2_parse(best.get("grup2_secimleri"))
+            other_g2 = _g2_parse(o.get("grup2_secimleri"))
+            if bool(o.get("bizim_hesap")) and "bizim_hesap" not in other_g2:
+                other_g2 = ["bizim_hesap"] + other_g2
+            merged = list(dict.fromkeys(best_g2 + other_g2))
+            if merged:
+                best["grup2_secimleri"] = merged
+                best["bizim_hesap"] = "bizim_hesap" in merged or bool(best.get("bizim_hesap")) or bool(
+                    o.get("bizim_hesap")
+                )
             try:
                 best["toplam_borc"] = max(
                     float(best.get("toplam_borc") or 0),
@@ -625,6 +768,8 @@ def list_full():
     try:
         ensure_customers_quick_edit_columns()
         ensure_customers_kapanis_tarihi()
+        ensure_grup2_etiketleri_table()
+        ensure_customers_grup2_secimleri()
     except Exception:
         pass
     data = _musteri_liste_data()
@@ -634,6 +779,7 @@ def list_full():
             musteriler,
             skip_dedupe=bool(data.get("paginate")),
         )
+    _musteri_liste_attach_grup2_display(musteriler, data.get("grup2_etiket_map") or {})
     paginate = bool(data.get("paginate"))
     toplam_musteri = data.get("toplam_musteri") if paginate else len(musteriler)
     toplam_sayfa = data.get("toplam_sayfa") if paginate else 1
@@ -648,6 +794,8 @@ def list_full():
         toplam_musteri=toplam_musteri,
         toplam_sayfa=toplam_sayfa or 1,
         embed=embed,
+        grup2_filter_slugs=data.get("grup2_filter_slugs") or [],
+        grup2_etiketler=data.get("grup2_etiketler") or [],
     )
 
 
@@ -1813,8 +1961,16 @@ def api_bulk_update():
     try:
         ensure_customers_quick_edit_columns()
         ensure_customers_kapanis_tarihi()
+        ensure_grup2_etiketleri_table()
+        ensure_customers_grup2_secimleri()
     except Exception:
         pass
+    allowed_grup2_slugs = set()
+    try:
+        rows = fetch_all("SELECT slug FROM grup2_etiketleri WHERE COALESCE(aktif, TRUE)")
+        allowed_grup2_slugs = {str(r.get("slug") or "").strip() for r in (rows or []) if str(r.get("slug") or "").strip()}
+    except Exception:
+        allowed_grup2_slugs = set()
     data = request.get_json(silent=True) or {}
     updates = data.get("updates") or []
     if not isinstance(updates, list):
@@ -1876,6 +2032,29 @@ def api_bulk_update():
                         val = None
                 sets.append(f"{col} = %s")
                 params.append(val)
+            if "grup2_secimleri" in row:
+                raw = row.get("grup2_secimleri")
+                g2_list = []
+                if isinstance(raw, list):
+                    g2_list = [str(x).strip() for x in raw if str(x).strip()]
+                elif isinstance(raw, str):
+                    s = raw.strip()
+                    if s.startswith("["):
+                        try:
+                            j = json.loads(s)
+                            if isinstance(j, list):
+                                g2_list = [str(x).strip() for x in j if str(x).strip()]
+                        except Exception:
+                            g2_list = []
+                    elif s:
+                        g2_list = [x.strip() for x in s.split("|") if x.strip()]
+                if allowed_grup2_slugs:
+                    g2_list = [s for s in g2_list if s in allowed_grup2_slugs]
+                g2_list = list(dict.fromkeys(g2_list))
+                sets.append("grup2_secimleri = %s")
+                params.append(g2_list)
+                sets.append("bizim_hesap = %s")
+                params.append("bizim_hesap" in g2_list)
             if rent_start_date_val:
                 sets.append("rent_start_year = %s")
                 params.append(rent_start_date_val.year)

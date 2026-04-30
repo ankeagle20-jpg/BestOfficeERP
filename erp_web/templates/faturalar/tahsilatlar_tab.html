@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Tahsilatlar</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    {% include 'partials/erp_page_style.html' %}
     <style>
         * {
             margin: 0;
@@ -15,7 +16,97 @@
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: #0a1929;
             color: #e0f7fa;
-            padding: 15px;
+            min-height: 100vh;
+        }
+        .header {
+            background: #0f2537;
+            border-bottom: 1px solid #1e3a50;
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+        }
+        .header-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0;
+            border-bottom: 1px solid #1e3a50;
+        }
+        .logo {
+            padding: 12px 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .logo:hover { background: rgba(79, 195, 247, 0.05); }
+        .logo i { color: #4fc3f7; font-size: 20px; }
+        .logo-text { color: #4fc3f7; font-size: 16px; font-weight: bold; }
+        .logo-version { color: #546e7a; font-size: 11px; margin-left: 8px; }
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            padding: 12px 20px;
+            border-left: 1px solid #1e3a50;
+        }
+        .user-name { color: #90a4ae; font-size: 13px; }
+        .user-role {
+            background: #1e3a50;
+            color: #4fc3f7;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        .user-actions a {
+            color: #90a4ae;
+            text-decoration: none;
+            font-size: 14px;
+            transition: color 0.2s;
+        }
+        .user-actions a:hover { color: #4fc3f7; }
+        .nav {
+            display: flex;
+            overflow-x: auto;
+            overflow-y: hidden;
+            -webkit-overflow-scrolling: touch;
+        }
+        .nav a {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 16px;
+            color: #90a4ae;
+            text-decoration: none;
+            white-space: nowrap;
+            border-bottom: 3px solid transparent;
+            transition: all 0.2s;
+            font-size: 13px;
+        }
+        .nav a:hover {
+            background: rgba(79, 195, 247, 0.05);
+            color: #4fc3f7;
+        }
+        .nav a.active {
+            background: #1e3a50;
+            color: #4fc3f7;
+            border-bottom-color: #4fc3f7;
+        }
+        .main-content {
+            padding: 20px;
+            max-width: 1920px;
+            margin: 0 auto;
+        }
+        body.layout-embed .main-content { padding-top: 12px; }
+        .erp-page-wrap { padding: 0 15px 15px; }
+        body.layout-embed .erp-page-wrap { padding-top: 0; }
+        @media (max-width: 768px) {
+            .header-top { flex-direction: column; align-items: stretch; }
+            .logo { justify-content: center; border-bottom: 1px solid #1e3a50; }
+            .user-info { justify-content: center; border-left: none; border-bottom: 1px solid #1e3a50; }
+            .main-content { padding: 15px; }
         }
         .header-bar {
             background: #1e3a50;
@@ -256,7 +347,59 @@
         .dyn-sort-desc::after { content: " ▼"; font-size: 10px; color: #4fc3f7; }
     </style>
 </head>
-<body>
+{% set _hide_chrome = (request.args.get('embed') or '').lower() in ('1', 'true', 'yes', 'on') %}
+<body class="{% if _hide_chrome %}layout-embed{% endif %}">
+    {% if not _hide_chrome %}
+    <header class="header">
+        <div class="header-top">
+            <div class="logo" onclick="window.location.href='/'">
+                <i class="fa fa-cube"></i>
+                <div>
+                    <span class="logo-text">OFİSBİR ERP</span>
+                    <span class="logo-version">v2.0.0</span>
+                </div>
+            </div>
+            <div class="user-info">
+                <span class="user-name"><i class="fa fa-user"></i> {{ current_user.username }}</span>
+                <span class="user-role">{{ current_user.role or 'Admin' }}</span>
+                <div class="user-actions">
+                    <a href="{{ url_for('auth.logout') }}" title="Çıkış"><i class="fa fa-sign-out-alt"></i> Çıkış</a>
+                </div>
+            </div>
+        </div>
+        <nav class="nav">
+            <a href="/dashboard/"><i class="fa fa-tachometer-alt"></i> Dashboard</a>
+            <a href="/musteriler/"><i class="fa fa-users"></i> Müşteriler</a>
+            <a href="/faturalar/" class="active"><i class="fa fa-chart-line"></i> Finans</a>
+            <a href="/ofisler/"><i class="fa fa-building"></i> Ofisler</a>
+            <a href="/urunler/"><i class="fa fa-box"></i> Ürünler</a>
+            <a href="/kira/"><i class="fa fa-home"></i> Kira</a>
+            <a href="/kargolar/"><i class="fa fa-truck"></i> Kargolar</a>
+            <a href="/bankalar/"><i class="fa fa-university"></i> Bankalar</a>
+            <a href="/tufe/"><i class="fa fa-chart-line"></i> TÜFE</a>
+            <a href="/personel/"><i class="fa fa-user-tie"></i> Personel</a>
+            <a href="/ilan-robotu/"><i class="fa fa-bullhorn"></i> İlan Robotu</a>
+            <a href="/giris/"><i class="fa fa-user-plus"></i> Giriş</a>
+            <a href="/admin/"><i class="fa fa-folder"></i> Yönetim</a>
+            <a href="/m/" target="_blank" title="Mobil sürüm"><i class="fa fa-mobile-alt"></i> Mobil</a>
+            <a href="/cari-kart/"><i class="fa fa-address-card"></i> Cari Kart</a>
+        </nav>
+    </header>
+    {% endif %}
+    <main class="main-content">
+    <div class="erp-page-wrap">
+    <div class="erp-tab-bar">
+        <a href="{{ url_for('musteriler.index') }}" class="page-title-prefix"><i class="fa fa-arrow-left"></i> Müşteriler</a>
+        <div class="tabs">
+            <a href="{{ url_for('musteriler.index') }}" class="tab"><i class="fa fa-th-large"></i><span>Özet</span></a>
+            <a href="{{ url_for('faturalar.faturalar') }}" class="tab"><i class="fa fa-file-invoice"></i><span>Faturalar</span></a>
+            <a href="{{ url_for('faturalar.faturalar') }}?erp_taslak=1" class="tab"><i class="fa fa-clipboard"></i><span>Taslaklar</span></a>
+            <a href="{{ url_for('faturalar.tahsilatlar') }}" class="tab active"><i class="fa fa-money-bill-wave"></i><span>Tahsilatlar</span></a>
+            <a href="{{ url_for('faturalar.yeni_fatura') }}" class="tab"><i class="fa fa-plus-circle"></i><span>Yeni Fatura</span></a>
+            <a href="{{ url_for('musteriler.list_full', sayfa=1, limit=50) }}" class="tab"><i class="fa fa-users"></i><span>Müşteri listesi</span></a>
+            <a href="{{ url_for('faturalar.index') }}#gib-rapor" class="tab"><i class="fa fa-bar-chart"></i><span>Rapor</span></a>
+        </div>
+    </div>
     <div class="header-bar">
         <h3><i class="fa fa-money-bill-wave"></i> Tahsilatlar</h3>
         <button onclick="tahsilatModalAc()">
@@ -522,7 +665,7 @@
             const sube = (tr.querySelector('input[name="sube"]') || {}).value || '';
             const vade = (tr.querySelector('input[name="vade"]') || {}).value || '';
             const tutarStr = (tr.querySelector('input[name="tutar"]') || {}).value || '';
-            const tutar = parseFloat(String(tutarStr).replace(',', '.')) || 0;
+            const tutar = parseFloat(String(tutarStr).replace(/\./g, '').replace(',', '.')) || 0;
             rows.push({ cek_no, hesap_no, banka, sube, vade, tutar: tutar });
         });
         return rows;
@@ -589,8 +732,8 @@
     function tahsilatFormPayload() {
         const musteriId = document.getElementById('tahsilat-musteri-id').value;
         const musteriAdi = (document.getElementById('tahsilat-musteri-secilen').textContent || '').trim();
-        const tutarStr = (document.getElementById('tahsilat-tutar').value || '').replace(',', '.');
-        let tutar = parseFloat(tutarStr);
+        const tutarRaw = (document.getElementById('tahsilat-tutar').value || '');
+        let tutar = parseFloat(String(tutarRaw).replace(/\./g, '').replace(',', '.'));
         const odemeTuru = document.getElementById('tahsilat-odeme-turu').value;
         const cekList = cekDetayTopla();
         if (odemeTuru === 'cek' && cekList.length) {
@@ -885,5 +1028,7 @@
         })();
     </script>
     <script src="/static/js/erp-tarih-hizli.js"></script>
+    </div>
+    </main>
 </body>
 </html>
