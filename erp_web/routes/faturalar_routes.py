@@ -52,7 +52,6 @@ import io
 import re
 import json
 import uuid
-import traceback
 import concurrent.futures
 from urllib.parse import urlencode
 import logging
@@ -8282,8 +8281,9 @@ def api_gib_taslak():
                 "gonderilen_debug": gonderilen_dbg,
             }), 200
         except Exception as e:
-            print(f"[GİB HATA] {e}")
-            traceback.print_exc()
+            # Windows'ta bozuk stdout'a traceback.print_exc() bazen OSError(22, 'Invalid argument')
+            # fırlatır; gerçek GİB hatası yerine yanıltıcı "GİB hatası" dışarı kaçmasın diye yalnızca logger.
+            logging.getLogger(__name__).exception("GİB taslak iş parçacığı hatası (fut.result): %s", e)
             return jsonify({"ok": False, "mesaj": f"GİB bağlantı hatası: {str(e)}"}), 500
         finally:
             try:
