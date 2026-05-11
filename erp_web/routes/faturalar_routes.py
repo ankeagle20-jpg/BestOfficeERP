@@ -8423,10 +8423,19 @@ def api_gib_taslak():
     except RuntimeError as e:
         return jsonify({"ok": False, "mesaj": str(e)}), 401
     except Exception as e:
-        logging.getLogger(__name__).exception("api_gib_taslak failed")
+        try:
+            logging.getLogger(__name__).exception("api_gib_taslak failed")
+        except Exception:
+            pass
+        msg = "GİB hatası: " + str(e)
+        if isinstance(e, OSError) and getattr(e, "errno", None) == 22:
+            msg += (
+                " Bu genelde Windows ortam hatasıdır (geçersiz argüman), GİB’in metin hata kodu değildir. "
+                "`python app.py` sürecini güncel kodla yeniden başlatın; devam ederse sunucu logundaki tam stack’e bakın."
+            )
         return jsonify({
             "ok": False,
-            "mesaj": "GİB hatası: " + str(e),
+            "mesaj": msg,
             "detay": "Backend exception yakalandı; GİB entegrasyon katmanı yanıtı kontrol edilmeli.",
         }), 200
 
