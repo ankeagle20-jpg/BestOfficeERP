@@ -607,6 +607,7 @@
     {% endif %}
     <main class="main-content">
     <div class="erp-page-wrap">
+    {% if not _hide_chrome %}
     <div class="erp-tab-bar">
         <a href="{{ url_for('musteriler.index') }}" class="page-title-prefix"><i class="fa fa-arrow-left"></i> Müşteriler</a>
         <div class="tabs">
@@ -619,6 +620,7 @@
             <a href="{{ url_for('faturalar.index') }}#gib-rapor" class="tab"><i class="fa fa-bar-chart"></i><span>Rapor</span></a>
         </div>
     </div>
+    {% endif %}
     <div class="filter-bar">
         <label>Yıl:</label>
         <select id="yil">
@@ -1143,6 +1145,15 @@
     }
     // ============================================================
 
+    function _finansIframeEmbedSuffix() {
+        try {
+            var p = new URLSearchParams(window.location.search || '');
+            var e = String(p.get('embed') || '').toLowerCase();
+            if (e === '1' || e === 'true' || e === 'yes' || e === 'on') return '&embed=1';
+        } catch (err) {}
+        return '';
+    }
+
     function filtrele(gibCanliZorla) {
         _taslakCache = null;  // filtre değişti, cache sıfırla
         const yil = document.getElementById('yil').value;
@@ -1161,6 +1172,7 @@
         if (gibDurum && gibDurum.value) url += '&gib_durum=' + encodeURIComponent(gibDurum.value);
         if (gibCanli && gibCanli.value) url += '&gib_canli=1';
         if (erpTaslakModu && erpTaslakModu.value) url += '&erp_taslak=1';
+        url += _finansIframeEmbedSuffix();
         
         window.location.href = url;
     }
@@ -1396,7 +1408,7 @@
         }
         var hedef = (typeof yeniCariHedef !== 'undefined') ? yeniCariHedef : 'fatura';
         var baseUrl = hedef === 'irsaliye' ? '/faturalar/irsaliye/yeni' : '/faturalar/yeni';
-        window.location.href = baseUrl + '?musteri_id=' + encodeURIComponent(cariId);
+        window.location.href = baseUrl + '?musteri_id=' + encodeURIComponent(cariId) + _finansIframeEmbedSuffix();
     }
 
     function faturaKesilecekPanelAc() {

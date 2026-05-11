@@ -627,6 +627,7 @@
     {% endif %}
     <main class="main-content">
     <div class="erp-page-wrap tahsilat-page-compact">
+    {% if not _hide_chrome %}
     <div class="erp-tab-bar">
         <a href="{{ url_for('musteriler.index') }}" class="page-title-prefix"><i class="fa fa-arrow-left"></i> Müşteriler</a>
         <div class="tabs">
@@ -639,6 +640,7 @@
             <a href="{{ url_for('faturalar.index') }}#gib-rapor" class="tab"><i class="fa fa-bar-chart"></i><span>Rapor</span></a>
         </div>
     </div>
+    {% endif %}
     <div class="header-bar">
         <h3><i class="fa fa-money-bill-wave"></i> Tahsilatlar</h3>
         <button onclick="tahsilatModalAc()">
@@ -1207,6 +1209,15 @@
         tahsilatHizmetSecimiKaydet();
         window.location.href = tahsilatFiltreUrlOlustur(__tahsilatHizmetSecili);
     }
+    function _finansIframeEmbedSuffix() {
+        try {
+            var p = new URLSearchParams(window.location.search || '');
+            var e = String(p.get('embed') || '').toLowerCase();
+            if (e === '1' || e === 'true' || e === 'yes' || e === 'on') return '&embed=1';
+        } catch (err) {}
+        return '';
+    }
+
     function tahsilatFiltreUrlOlustur(seciliHizmetler) {
         const basEl = document.getElementById('tahsilat_bas');
         const bitEl = document.getElementById('tahsilat_bitis');
@@ -1219,6 +1230,7 @@
         // Hizmet türü filtresi istemci tarafında uygulanıyor; URL'ye eklemeyelim.
         if (bas) url += '&baslangic=' + encodeURIComponent(bas);
         if (bit) url += '&bitis=' + encodeURIComponent(bit);
+        url += _finansIframeEmbedSuffix();
         return url;
     }
 

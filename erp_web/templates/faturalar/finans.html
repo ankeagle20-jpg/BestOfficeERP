@@ -924,25 +924,25 @@
 <!-- Sekme İçerikleri -->
 <div class="tab-content active" id="tab-0">
     <div class="iframe-wrapper">
-        <iframe src="{{ url_for('faturalar.faturalar') }}?_ts={{ now_ts }}"></iframe>
+        <iframe src="{{ url_for('faturalar.faturalar', _ts=now_ts, embed=1) }}"></iframe>
     </div>
 </div>
 
 <div class="tab-content" id="tab-1">
     <div class="iframe-wrapper">
-        <iframe src="{{ url_for('faturalar.faturalar') }}?erp_taslak=1&amp;_ts={{ now_ts }}"></iframe>
+        <iframe src="{{ url_for('faturalar.faturalar', erp_taslak=1, _ts=now_ts, embed=1) }}"></iframe>
     </div>
 </div>
 
 <div class="tab-content" id="tab-2">
     <div class="iframe-wrapper">
-        <iframe src="{{ url_for('faturalar.tahsilatlar', baslangic=tahsilat_iframe_bas, bitis=tahsilat_iframe_bit, v=now_ts) }}"></iframe>
+        <iframe src="{{ url_for('faturalar.tahsilatlar', baslangic=tahsilat_iframe_bas, bitis=tahsilat_iframe_bit, v=now_ts, embed=1) }}"></iframe>
     </div>
 </div>
 
 <div class="tab-content" id="tab-3">
     <div class="iframe-wrapper">
-        <iframe src="{{ url_for('faturalar.yeni_fatura') }}"></iframe>
+        <iframe src="{{ url_for('faturalar.yeni_fatura', embed=1) }}"></iframe>
     </div>
 </div>
 
