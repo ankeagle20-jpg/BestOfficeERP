@@ -105,6 +105,65 @@ if ilan_robotu_bp is not None:
     app.register_blueprint(ilan_robotu_bp, url_prefix="/ilan-robotu")
 
 
+def _register_gib_dispatch_jp_fallback_routes():
+    """
+    GİB `jp` önizleme (`api_gib_dispatch_onizle`):
+    - Render / bazı süreçlerde blueprint route eksik kalınca `url_for('faturalar.api_gib_dispatch_onizle')` BuildError verir.
+    - Endpoint yoksa aynı view'ı `faturalar.api_gib_dispatch_onizle` adıyla uygulama seviyesinde ekleriz (url_for çalışır).
+    - Endpoint varsa yalnızca kök `/api/gib-dispatch-jp-onizle` alias'ı (farklı endpoint) eklenir.
+    """
+    ep = "faturalar.api_gib_dispatch_onizle"
+    try:
+        from routes import faturalar_routes as fr
+
+        vf = fr.api_gib_dispatch_onizle
+    except Exception as ex:
+        print("[WARN] GİB dispatch jp: api_gib_dispatch_onizle yüklenemedi:", ex)
+        return
+    if not callable(vf):
+        print("[WARN] GİB dispatch jp: faturalar_routes.api_gib_dispatch_onizle tanımsız (dosya sürümü?)")
+        return
+
+    has_ep = ep in app.view_functions
+    try:
+        rule_set = {getattr(r, "rule", None) for r in app.url_map.iter_rules()}
+    except Exception:
+        rule_set = set()
+
+    paths_bp = ("/faturalar/api/gib-dispatch-onizle", "/faturalar/api/gib-jp-onizle")
+    root_path = "/api/gib-dispatch-jp-onizle"
+
+    if not has_ep:
+        for p in (*paths_bp, root_path):
+            if p in rule_set:
+                continue
+            try:
+                app.add_url_rule(p, ep, vf, methods=["GET"])
+                rule_set.add(p)
+            except Exception as ex:
+                print("[WARN] GİB dispatch jp kural eklenemedi (%s):" % p, ex)
+        if ep in app.view_functions:
+            print("[OK] GİB dispatch jp: endpoint", ep, "uygulama yedeğiyle kayıtlı")
+        return
+
+    if root_path not in rule_set:
+        try:
+            app.add_url_rule(
+                root_path,
+                "api_gib_dispatch_jp_onizle__root",
+                vf,
+                methods=["GET"],
+            )
+            print("[OK] GİB dispatch jp kök alias:", root_path)
+        except Exception as ex:
+            print("[WARN] GİB dispatch jp kök:", ex)
+    else:
+        print("[OK] GİB dispatch jp:", ep, "+", root_path)
+
+
+_register_gib_dispatch_jp_fallback_routes()
+
+
 def _g2_slugify(label: str) -> str:
     s = (label or "").strip().lower()
     s = re.sub(r"[^a-z0-9]+", "_", s)

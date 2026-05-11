@@ -15,6 +15,7 @@ from flask_login import login_required, current_user
 from functools import wraps
 from datetime import datetime, date, timedelta
 from db import (
+    db,
     fetch_all,
     fetch_one,
     execute,
@@ -51,6 +52,8 @@ import io
 import re
 import json
 import uuid
+import traceback
+import concurrent.futures
 from urllib.parse import urlencode
 import logging
 import math
@@ -417,24 +420,92 @@ def _parse_amount_flexible(v):
         return 0.0
 
 
+# Sadece rakam makbuzlar (>=1000). Eski '^10[0-9]+$' 1100+ satırları dışarıda bırakıyordu → hep 1000/çakışma.
+_MAKBUZ_MAX_SEQ_SQL = """
+        SELECT COALESCE(MAX(x.n), 999) AS max_seq
+        FROM (
+            SELECT CAST(TRIM(makbuz_no) AS BIGINT) AS n
+            FROM tahsilatlar
+            WHERE makbuz_no IS NOT NULL
+              AND TRIM(makbuz_no) ~ '^[0-9]+$'
+              AND LENGTH(TRIM(makbuz_no)) <= 18
+        ) x
+        WHERE x.n >= 1000
+        """
+
+
 def get_next_makbuz_no():
-    """Bir sonraki makbuz numarası: 1000, 1001, 1002 ..."""
-    row = fetch_one(
-        "SELECT makbuz_no FROM tahsilatlar WHERE makbuz_no IS NOT NULL AND makbuz_no <> '' ORDER BY id DESC LIMIT 1"
-    )
-    if not row or not row.get("makbuz_no"):
-        return "1000"
-    s = str(row.get("makbuz_no") or "").strip()
-    m = re.search(r"(\d+)$", s)
-    if not m:
-        return "1000"
+    """Makbuz serisi sadece 1000 ile başlayan numaralardan ilerler (1000,1001,...)."""
+    row = fetch_one(_MAKBUZ_MAX_SEQ_SQL) or {}
     try:
-        seq = int(m.group(1)) + 1
+        seq = int(row.get("max_seq") or 999) + 1
     except Exception:
         seq = 1000
     if seq < 1000:
         seq = 1000
     return str(seq)
+
+
+def _next_makbuz_no_with_cursor(cur):
+    """Açık transaction + cursor ile MAX(makbuz); get_next_makbuz_no ile aynı mantık."""
+    cur.execute(_MAKBUZ_MAX_SEQ_SQL)
+    row = cur.fetchone() or {}
+    try:
+        seq = int(row.get("max_seq") or 999) + 1
+    except Exception:
+        seq = 1000
+    if seq < 1000:
+        seq = 1000
+    return str(seq)
+
+
+def _makbuz_no_used_cursor(cur, mn):
+    cur.execute(
+        "SELECT id FROM tahsilatlar WHERE TRIM(COALESCE(makbuz_no, '')) = %s LIMIT 1",
+        (mn,),
+    )
+    return cur.fetchone() is not None
+
+
+def _tahsilat_icin_makbuz_no_sec_cursor(cur, istenen_makbuz_no=None):
+    """tahsilat_ekle ile aynı bağlantıda: kilit + INSERT öncesi tek görünürlük."""
+    aday = _normalize_makbuz_no(istenen_makbuz_no)
+    if aday and not _makbuz_no_used_cursor(cur, aday):
+        return aday
+    out = _next_makbuz_no_with_cursor(cur)
+    _guard = 0
+    while out and _makbuz_no_used_cursor(cur, out) and _guard < 10000:
+        _guard += 1
+        try:
+            out = str(int(out) + 1)
+        except Exception:
+            break
+    return out
+
+
+def _normalize_makbuz_no(raw):
+    s = str(raw or "").strip()
+    if not s:
+        return ""
+    return re.sub(r"\s+", "", s)[:40]
+
+
+def _makbuz_no_kullanildi_mi(makbuz_no):
+    mn = _normalize_makbuz_no(makbuz_no)
+    if not mn:
+        return False
+    row = fetch_one(
+        "SELECT id FROM tahsilatlar WHERE TRIM(COALESCE(makbuz_no, '')) = %s LIMIT 1",
+        (mn,),
+    )
+    return bool((row or {}).get("id"))
+
+
+def _tahsilat_icin_makbuz_no_sec(istenen_makbuz_no=None):
+    aday = _normalize_makbuz_no(istenen_makbuz_no)
+    if aday and not _makbuz_no_kullanildi_mi(aday):
+        return aday
+    return get_next_makbuz_no()
 
 
 def _tarih_saat_str(tarih_val, created_at=None):
@@ -466,6 +537,331 @@ def _tarih_saat_str(tarih_val, created_at=None):
     if saat_str:
         return f"{tarih_str} Saat: {saat_str}"
     return tarih_str
+
+
+_TAHSIL_AYLAR_TR = (
+    "Ocak",
+    "Şubat",
+    "Mart",
+    "Nisan",
+    "Mayıs",
+    "Haziran",
+    "Temmuz",
+    "Ağustos",
+    "Eylül",
+    "Ekim",
+    "Kasım",
+    "Aralık",
+)
+
+
+def _ay_ref_iso_list_from_tahsilat_payload(data):
+    """JSON'dan ay referansları: ay_ref_iso_list + tekil ay_ref_iso; YYYY-MM-DD, tekrarsız, sıralı."""
+    if not isinstance(data, dict):
+        return []
+    seen = set()
+    out = []
+    raw_list = data.get("ay_ref_iso_list")
+    if isinstance(raw_list, list):
+        for item in raw_list:
+            s = str(item or "").strip()
+            if re.match(r"^\d{4}-\d{2}-\d{2}$", s) and s not in seen:
+                seen.add(s)
+                out.append(s)
+    single = (data.get("ay_ref_iso") or "").strip()
+    if single and re.match(r"^\d{4}-\d{2}-\d{2}$", single) and single not in seen:
+        seen.add(single)
+        out.append(single)
+    out.sort()
+    return out
+
+
+def _aciklama_with_aylik_markers(aciklama_text, iso_list):
+    text = (aciklama_text or "").strip()
+    for iso in iso_list or []:
+        marker = f"|AYLIK_TAH|{iso}|"
+        if marker not in text:
+            text = f"{text} {marker}".strip()
+    return text
+
+
+def _aciklama_with_aylik_pay_tokens(aciklama_text, pay_items):
+    """Dağıtım tutarını açıklamaya |AYLIK_PAY|YYYY-MM-DD=1234.56| olarak yazar."""
+    text = (aciklama_text or "").strip()
+    if not pay_items:
+        return text
+    for iso, tut in (pay_items or []):
+        try:
+            iso_s = datetime.strptime(str(iso)[:10], "%Y-%m-%d").date().isoformat()
+            v = round(float(tut or 0), 2)
+        except Exception:
+            continue
+        if v <= 0:
+            continue
+        tok = f"|AYLIK_PAY|{iso_s}={v:.2f}|"
+        if tok not in text:
+            text = f"{text} {tok}".strip()
+    return text
+
+
+def _acik_aylik_tutar_ay_set(musteri_id: int) -> set[str]:
+    """Müşterinin açık |AYLIK_TUTAR| faturalarındaki ay anahtarları (YYYY-MM-DD)."""
+    rows = fetch_all(
+        """
+        SELECT COALESCE(notlar, '') AS notlar
+        FROM faturalar
+        WHERE musteri_id = %s
+          AND COALESCE(notlar, '') LIKE '%%|AYLIK_TUTAR|%%'
+          AND COALESCE(durum, '') != 'odendi'
+        """,
+        (musteri_id,),
+    ) or []
+    out: set[str] = set()
+    for r in rows:
+        nt = str((r or {}).get("notlar") or "")
+        for iso in re.findall(r"\|AYLIK_TUTAR\|([0-9]{4}-[0-9]{2}-[0-9]{2})\|", nt):
+            if re.match(r"^\d{4}-\d{2}-\d{2}$", iso):
+                out.add(iso)
+    return out
+
+
+def _auto_allocate_oldest_unpaid_months(musteri_id, tahsil_tutar, borc_listesi=None, start_iso: str | None = None):
+    """
+    Elle tahsilatta ay işaretlenmemişse, cache'teki en eski borçlu aylardan dağıtım yap.
+    Çıktı: (iso_list, [(iso, pay), ...])
+    """
+    try:
+        mid = int(musteri_id or 0)
+        total = round(float(tahsil_tutar or 0), 2)
+    except (TypeError, ValueError):
+        return [], []
+    if mid <= 0 or total <= 0:
+        return [], []
+    start_iso_s = str(start_iso or "").strip()
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", start_iso_s):
+        start_iso_s = ""
+    acik_ay_set = _acik_aylik_tutar_ay_set(mid)
+    unpaid_cache_set = set()
+    try:
+        row_u = fetch_one("SELECT payload FROM musteri_aylik_grid_cache WHERE musteri_id = %s", (mid,))
+        payload_u_raw = (row_u or {}).get("payload")
+        if payload_u_raw:
+            payload_u = json.loads(payload_u_raw) if isinstance(payload_u_raw, str) else payload_u_raw
+            aylar_u = payload_u if isinstance(payload_u, list) else ((payload_u or {}).get("aylar") or [])
+            if isinstance(aylar_u, list):
+                for a in aylar_u:
+                    if not isinstance(a, dict):
+                        continue
+                    if not bool(a.get("acik_aylik_borc_faturasi")):
+                        continue
+                    try:
+                        yy = int(a.get("yil"))
+                        mm = int(a.get("ay"))
+                    except (TypeError, ValueError):
+                        continue
+                    if mm < 1 or mm > 12:
+                        continue
+                    kalan_u = a.get("kalan_tutar_kdv")
+                    if kalan_u is None:
+                        try:
+                            brut_u = float(a.get("brut_tutar_kdv") or a.get("tutar_kdv_dahil") or 0)
+                        except (TypeError, ValueError):
+                            brut_u = 0.0
+                        try:
+                            odenen_u = float(a.get("odenen_tutar_kdv") or 0)
+                        except (TypeError, ValueError):
+                            odenen_u = 0.0
+                        kalan_u = round(max(brut_u - odenen_u, 0), 2)
+                    try:
+                        kalan_u_v = round(float(kalan_u or 0), 2)
+                    except (TypeError, ValueError):
+                        kalan_u_v = 0.0
+                    if kalan_u_v <= 0.01:
+                        continue
+                    unpaid_cache_set.add(date(yy, mm, 1).isoformat())
+    except Exception:
+        unpaid_cache_set = set()
+    # 1) İstemciden gelen canlı grid borç listesi (tercihli kaynak)
+    borclu = []
+    if isinstance(borc_listesi, list):
+        raw_rows = []
+        for it in borc_listesi:
+            if not isinstance(it, dict):
+                continue
+            iso = str(it.get("iso") or "").strip()
+            if not re.match(r"^\d{4}-\d{2}-\d{2}$", iso):
+                continue
+            if start_iso_s and iso < start_iso_s:
+                continue
+            if unpaid_cache_set and iso not in unpaid_cache_set:
+                continue
+            try:
+                kalan_v = round(float(it.get("kalan") or 0), 2)
+            except (TypeError, ValueError):
+                kalan_v = 0.0
+            if kalan_v <= 0.01:
+                continue
+            try:
+                odenen_v = round(float(it.get("odenen") or 0), 2)
+            except (TypeError, ValueError):
+                odenen_v = 0.0
+            raw_rows.append({
+                "iso": iso,
+                "kalan": kalan_v,
+                "acik_borc": bool(it.get("acik_borc")),
+                "odenen": odenen_v,
+            })
+        # İstemciden gelen canlı grid borç listesi birincil kaynak:
+        # açık borç işaretli aylar varsa sadece oradan dağıt.
+        if raw_rows:
+            acik_rows = [r for r in raw_rows if r["acik_borc"]]
+            pick_rows = acik_rows if acik_rows else raw_rows
+            pick_rows.sort(key=lambda r: r["iso"])
+            borclu = [(r["iso"], r["kalan"]) for r in pick_rows]
+    if borclu:
+        rem = total
+        pay_items = []
+        for iso, kalan_v in borclu:
+            if rem <= 0.004:
+                break
+            pay = min(kalan_v, rem)
+            pay = round(pay, 2)
+            if pay <= 0:
+                continue
+            pay_items.append((iso, pay))
+            rem = round(rem - pay, 2)
+        return [iso for iso, _ in pay_items], pay_items
+
+    # 2) Sunucu cache fallback
+    try:
+        row = fetch_one("SELECT payload FROM musteri_aylik_grid_cache WHERE musteri_id = %s", (mid,))
+        payload_raw = (row or {}).get("payload")
+        if not payload_raw:
+            return [], []
+        payload = json.loads(payload_raw) if isinstance(payload_raw, str) else payload_raw
+        aylar = payload if isinstance(payload, list) else ((payload or {}).get("aylar") or [])
+        if not isinstance(aylar, list):
+            return [], []
+        acik_odak_var_cache = any(bool((a or {}).get("acik_aylik_borc_faturasi")) for a in aylar if isinstance(a, dict))
+        sifir_odenen_var_cache = any(
+            isinstance(a, dict) and float(a.get("odenen_tutar_kdv") or 0) <= 0.01
+            for a in aylar
+            if isinstance(a, dict)
+        )
+        borclu = []
+        for a in aylar:
+            if not isinstance(a, dict):
+                continue
+            if acik_odak_var_cache and not bool(a.get("acik_aylik_borc_faturasi")):
+                continue
+            try:
+                yy = int(a.get("yil"))
+                mm = int(a.get("ay"))
+            except (TypeError, ValueError):
+                continue
+            if mm < 1 or mm > 12:
+                continue
+            iso = date(yy, mm, 1).isoformat()
+            if start_iso_s and iso < start_iso_s:
+                continue
+            if acik_ay_set and iso not in acik_ay_set:
+                continue
+            try:
+                odenen_v_cache = round(float(a.get("odenen_tutar_kdv") or 0), 2)
+            except (TypeError, ValueError):
+                odenen_v_cache = 0.0
+            if sifir_odenen_var_cache and odenen_v_cache > 0.01:
+                continue
+            # Kritik: oldest dağıtımda asla "aylık tutarın tamamı"na düşme.
+            # Sadece gerçek kalan borcu kullan (kalan_tutar_kdv yoksa brut-odenen hesapla).
+            kalan = a.get("kalan_tutar_kdv")
+            if kalan is None:
+                try:
+                    brut_v = float(a.get("brut_tutar_kdv") or a.get("tutar_kdv_dahil") or 0)
+                except (TypeError, ValueError):
+                    brut_v = 0.0
+                try:
+                    odenen_v = float(a.get("odenen_tutar_kdv") or 0)
+                except (TypeError, ValueError):
+                    odenen_v = 0.0
+                kalan = round(max(brut_v - odenen_v, 0), 2)
+            try:
+                kalan_v = round(float(kalan or 0), 2)
+            except (TypeError, ValueError):
+                kalan_v = 0.0
+            if kalan_v <= 0.01:
+                continue
+            borclu.append((iso, kalan_v))
+        borclu.sort(key=lambda x: x[0])
+        rem = total
+        pay_items = []
+        for iso, kalan_v in borclu:
+            if rem <= 0.004:
+                break
+            pay = round(min(kalan_v, rem), 2)
+            if pay <= 0:
+                continue
+            pay_items.append((iso, pay))
+            rem = round(rem - pay, 2)
+        return [iso for iso, _ in pay_items], pay_items
+    except Exception:
+        return [], []
+
+
+def _tahsil_rapor_yil_ay_coerce(val):
+    """date/datetime veya 'YYYY-MM-DD' / 'YYYY-MM-DD HH:...' string → (yıl, ay) veya None."""
+    if val is None:
+        return None
+    if hasattr(val, "year") and hasattr(val, "month"):
+        try:
+            return int(val.year), int(val.month)
+        except (TypeError, ValueError):
+            return None
+    s = str(val).strip()[:10]
+    if len(s) >= 7 and s[4:5] == "-":
+        try:
+            y = int(s[0:4])
+            mo = int(s[5:7])
+            if 1 <= mo <= 12:
+                return y, mo
+        except ValueError:
+            pass
+    return None
+
+
+def _tahsilat_rapor_aciklama_ay_metni(aciklama, fatura_tarihi=None, tahsilat_tarihi=None):
+    """Tahsilat açıklamasındaki |AYLIK_TAH|YYYY-MM-DD| işaretçilerinden ay listesi (Türkçe)."""
+    text = str(aciklama or "")
+    matches = re.findall(r"\|AYLIK_TAH\|(\d{4})-(\d{2})-\d{2}\|", text)
+    seen = set()
+    keys = []
+    for y, mo in matches:
+        k = f"{y}-{mo}"
+        if k not in seen:
+            seen.add(k)
+            try:
+                keys.append((y, int(mo, 10)))
+            except ValueError:
+                continue
+    keys.sort(key=lambda t: (t[0], t[1]))
+    if keys:
+        parts = []
+        for y, mo in keys:
+            if 1 <= mo <= 12:
+                parts.append(f"{_TAHSIL_AYLAR_TR[mo - 1]} {y}")
+        if parts:
+            return ", ".join(parts)
+    plain = re.sub(r"\|AYLIK_TAH\|\d{4}-\d{2}-\d{2}\|", " ", text)
+    plain = " ".join(plain.split()).strip()
+    if plain:
+        return plain
+    for alt in (fatura_tarihi, tahsilat_tarihi):
+        ym = _tahsil_rapor_yil_ay_coerce(alt)
+        if ym:
+            y, mo = ym
+            if 1 <= mo <= 12:
+                return f"{_TAHSIL_AYLAR_TR[mo - 1]} {y}"
+    return "—"
 
 
 # A5: 148mm x 210mm (ReportLab A5 = 420x595 pt)
@@ -3501,7 +3897,14 @@ def api_faturalar_grup2_etiket_sil():
 def index():
     """Finans ana sayfası - Faturalar ve Tahsilatlar sekmeleri (/faturalar/ ve /faturalar/finans)"""
     import time
-    return render_template('faturalar/finans.html', now_ts=int(time.time()))
+
+    bugun = date.today()
+    return render_template(
+        "faturalar/finans.html",
+        now_ts=int(time.time()),
+        tahsilat_iframe_bas=bugun.replace(day=1).isoformat(),
+        tahsilat_iframe_bit=bugun.isoformat(),
+    )
 
 
 @bp.route('/yeni')
@@ -3763,6 +4166,13 @@ def yeni_fatura():
             pass
 
     musteri_id = request.args.get('musteri_id', type=int)
+    yeni_gib_bos = str(request.args.get("yeni_gib_bos") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+        "evet",
+    )
     edit_fatura_id = request.args.get('edit_fatura_id', type=int)
     portal_uuid = (request.args.get("portal_uuid") or "").strip()
     portal_fatura_no = (request.args.get("portal_fatura_no") or "").strip()
@@ -3948,7 +4358,7 @@ def yeni_fatura():
         default_gib_fatura_id = None
     # GİB paneli: yalnızca bu müşterinin son faturası (global son ID başka müşteriye GİB gönderilmesine yol açıyordu).
     _son_gib = {}
-    if musteri_id:
+    if musteri_id and not yeni_gib_bos:
         _son_gib = fetch_one(
             "SELECT id FROM faturalar WHERE musteri_id = %s ORDER BY id DESC LIMIT 1",
             (musteri_id,),
@@ -3963,6 +4373,11 @@ def yeni_fatura():
     if edit_fatura and edit_fatura.get("id"):
         default_gib_fatura_id = int(edit_fatura.get("id"))
 
+    # Taslak listesinden "yeni fatura" açılışında GİB ID alanı boş kalsın (yanlışlıkla eski taslağa GİB gitmesin).
+    if yeni_gib_bos and not (edit_fatura and edit_fatura.get("id")):
+        default_gib_fatura_id = None
+        son_fatura_id_for_gib = None
+
     return render_template('faturalar/yeni_fatura.html',
                            bugun=now.strftime("%Y-%m-%d"),
                            saat=now.strftime("%H:%M"),
@@ -3975,7 +4390,8 @@ def yeni_fatura():
                            edit_fatura=_row_serializable(edit_fatura) if edit_fatura else None,
                            duzenleme_modu=duzenleme_modu,
                            default_gib_fatura_id=default_gib_fatura_id,
-                           son_fatura_id_for_gib=son_fatura_id_for_gib)
+                           son_fatura_id_for_gib=son_fatura_id_for_gib,
+                           yeni_gib_bos=yeni_gib_bos)
 
 
 @bp.route('/api/fatura-musteri-bul')
@@ -4356,6 +4772,7 @@ def faturalar():
             row["kaynak"] = "erp_taslak"
             row["gib_durum_rapor"] = "Taslak"
             row["toplam"] = _fatura_satir_tutar(row)
+            row["kdv_tutar"] = _fatura_kdv_liste_gosterim(row)
             row["duzenle_url"] = _fatura_editor_url(row)
             row["odeme_duzeni"] = _odeme_duzeni_norm(row.get("odeme_duzeni"))
             row["odeme_duzeni_manuel"] = (row.get("odeme_duzeni_manuel") or "").strip()
@@ -4533,7 +4950,7 @@ def api_erp_taslaklar():
 
     sql = f"""
         SELECT f.id, f.fatura_no, f.musteri_id, f.musteri_adi, f.fatura_tarihi,
-               f.toplam, f.tutar, f.kdv_tutar, f.durum, f.notlar, f.ettn,
+               f.toplam, f.tutar, f.kdv_tutar, f.durum, f.notlar, f.ettn, f.satirlar_json,
                mk.odeme_duzeni AS odeme_duzeni, mk.odeme_duzeni_manuel AS odeme_duzeni_manuel,
                COALESCE(NULLIF(TRIM(c.name), ''), NULLIF(TRIM(f.musteri_adi), ''), '—') AS musteri_adi_goster
         FROM faturalar f
@@ -4552,6 +4969,8 @@ def api_erp_taslaklar():
     rows = fetch_all(sql, (baslangic, bitis)) or []
     items = []
     for r in rows:
+        rd = dict(r)
+        kdv_goster = _fatura_kdv_liste_gosterim(rd)
         items.append({
             "id": r.get("id"),
             "fatura_no": r.get("fatura_no") or "",
@@ -4559,7 +4978,8 @@ def api_erp_taslaklar():
             "musteri_adi": r.get("musteri_adi_goster") or r.get("musteri_adi") or "—",
             "musteri_id": r.get("musteri_id"),
             "toplam": float(r.get("toplam") or 0),
-            "kdv_tutar": float(r.get("kdv_tutar") or 0),
+            "tutar": float(r.get("tutar") or 0),
+            "kdv_tutar": kdv_goster,
             "durum": r.get("durum") or "",
             "notlar": r.get("notlar") or "",
             "ettn": r.get("ettn") or "",
@@ -4570,7 +4990,14 @@ def api_erp_taslaklar():
             "duzenle_url": "/faturalar/yeni?edit_fatura_id=" + str(r.get("id")) if r.get("id") else "",
         })
     toplam = sum(x["toplam"] for x in items)
-    return jsonify({"ok": True, "items": items, "toplam": round(toplam, 2), "adet": len(items)})
+    kdv_toplam = round(sum(x["kdv_tutar"] for x in items), 2)
+    return jsonify({
+        "ok": True,
+        "items": items,
+        "toplam": round(toplam, 2),
+        "kdv_toplam": kdv_toplam,
+        "adet": len(items),
+    })
 
 
 @bp.route('/api/musteri-odeme-duzeni', methods=['POST'])
@@ -4617,28 +5044,294 @@ def api_musteri_odeme_duzeni():
 @bp.route('/tahsilatlar')
 @faturalar_gerekli
 def tahsilatlar():
-    """Tahsilatlar sekmesi"""
-    yil = request.args.get('yil', datetime.now().year, type=int)
-    
-    # EXTRACT(YEAR …) indeks kullanımını engeller; yıl için tarih aralığı (ix_tahsilatlar_tahsilat_tarihi).
-    _y1 = date(int(yil), 1, 1)
-    _y2 = date(int(yil) + 1, 1, 1)
-    tahsilatlar_raw = fetch_all("""
-        SELECT t.*, c.name as musteri_adi, f.fatura_no
+    """Tahsilatlar sekmesi — tarih aralığı veya (?yil=) tam yıl.
+
+    Tarih filtresi tahsil edildiği güne göre değil, raporun «hangi aya» yazıldığına göre:
+    - |AYLIK_TAH|YYYY-MM-DD| varsa en az bir işaretçi tarihi aralıkta olmalı;
+    - yoksa COALESCE(fatura_tarihi, tahsilat_tarihi) aralıkta olmalı.
+    """
+    today = date.today()
+    bas_s = (request.args.get("baslangic") or "").strip()
+    bit_s = (request.args.get("bitis") or "").strip()
+    d0 = d1 = None
+    if bas_s and bit_s:
+        try:
+            d0 = date.fromisoformat(bas_s[:10])
+            d1 = date.fromisoformat(bit_s[:10])
+        except ValueError:
+            d0 = d1 = None
+    if d0 is not None and d1 is not None:
+        if d0 > d1:
+            d0, d1 = d1, d0
+        yil = d0.year
+    elif "yil" in request.args and not bas_s and not bit_s:
+        yil = request.args.get("yil", type=int) or today.year
+        d0 = date(int(yil), 1, 1)
+        d1 = date(int(yil), 12, 31)
+    else:
+        d0 = today.replace(day=1)
+        d1 = today
+        yil = d0.year
+
+    raw_hizmet = (request.args.get("hizmet_turleri") or "").strip()
+    secili_hizmet_turleri = []
+    if raw_hizmet:
+        seen_ht = set()
+        for part in raw_hizmet.split(","):
+            v = part.strip().lower()
+            if not v or v in seen_ht:
+                continue
+            seen_ht.add(v)
+            secili_hizmet_turleri.append(v)
+
+    sql = """
+        SELECT t.*,
+               c.name as musteri_adi,
+               COALESCE(NULLIF(TRIM(mk.hizmet_turu), ''), NULLIF(TRIM(c.hizmet_turu), ''), '') AS rapor_hizmet_turu,
+               f.fatura_no,
+               f.fatura_tarihi AS fatura_tarihi
         FROM tahsilatlar t
         LEFT JOIN customers c ON COALESCE(t.customer_id, t.musteri_id) = c.id
+        LEFT JOIN LATERAL (
+            SELECT mkx.hizmet_turu
+            FROM musteri_kyc mkx
+            WHERE mkx.musteri_id = c.id
+            ORDER BY mkx.id DESC
+            LIMIT 1
+        ) mk ON TRUE
         LEFT JOIN faturalar f ON t.fatura_id = f.id
-        WHERE t.tahsilat_tarihi::date >= %s AND t.tahsilat_tarihi::date < %s
-        ORDER BY t.tahsilat_tarihi DESC NULLS LAST, t.id DESC
-    """, (_y1, _y2))
+        WHERE (
+            (
+                COALESCE(t.aciklama, '') ~ E'\\|AYLIK_TAH\\|[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}\\|'
+                AND EXISTS (
+                    SELECT 1
+                    FROM generate_series(%s::date, %s::date, '1 day'::interval) AS gs(d)
+                    WHERE strpos(
+                        COALESCE(t.aciklama, ''),
+                        concat('|AYLIK_TAH|', to_char((gs.d)::date, 'YYYY-MM-DD'), '|')
+                    ) > 0
+                )
+            )
+            OR (
+                NOT (COALESCE(t.aciklama, '') ~ E'\\|AYLIK_TAH\\|[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}\\|')
+                AND COALESCE(f.fatura_tarihi::date, t.tahsilat_tarihi::date) >= %s::date
+                AND COALESCE(f.fatura_tarihi::date, t.tahsilat_tarihi::date) <= %s::date
+            )
+        )
+    """
+    params = [d0, d1, d0, d1]
+    if secili_hizmet_turleri:
+        placeholders = ", ".join(["%s"] * len(secili_hizmet_turleri))
+        sql += f" AND LOWER(TRIM(COALESCE(NULLIF(TRIM(mk.hizmet_turu), ''), NULLIF(TRIM(c.hizmet_turu), ''), ''))) IN ({placeholders})"
+        params.extend(secili_hizmet_turleri)
+    sql += " ORDER BY t.tahsilat_tarihi DESC NULLS LAST, t.id DESC"
+    tahsilatlar_raw = fetch_all(sql, tuple(params))
     tahsilatlar_list = [_row_serializable(t) for t in (tahsilatlar_raw or [])]
-    
-    toplam = sum(t.get('tutar') or 0 for t in tahsilatlar_list)
-    
-    return render_template('faturalar/tahsilatlar_tab.html',
-                         yil=yil,
-                         tahsilatlar=tahsilatlar_list,
-                         toplam=toplam)
+    # Ana Tahsilatlar raporu: seçili aralıkta gerçekten tahsil edilmiş/işaretlenmiş ayları göster.
+    # - Marker'lı kayıtlar: marker tarihi aralıkta olmalı VE (cache varsa) aylık gridde görünür aylar içinde olmalı.
+    # - Marker'sız kayıtlar: elle girilmiş kabul edilir, referans tarih (fatura/tahsilat) aralıkta olmalı.
+    def _date_from_val(v):
+        if v is None:
+            return None
+        if hasattr(v, "year") and hasattr(v, "month") and hasattr(v, "day"):
+            try:
+                return date(int(v.year), int(v.month), int(v.day))
+            except Exception:
+                return None
+        s = str(v).strip()[:10]
+        try:
+            return date.fromisoformat(s)
+        except Exception:
+            return None
+
+    mid_set = set()
+    for _t in tahsilatlar_list:
+        try:
+            _mid = int(_t.get("customer_id") or _t.get("musteri_id") or 0)
+        except (TypeError, ValueError):
+            _mid = 0
+        if _mid > 0:
+            mid_set.add(_mid)
+    visible_ym_by_mid = {}
+    if mid_set:
+        try:
+            cache_rows = fetch_all(
+                "SELECT musteri_id, payload FROM musteri_aylik_grid_cache WHERE musteri_id = ANY(%s::bigint[])",
+                (list(mid_set),),
+            ) or []
+            for cr in cache_rows:
+                try:
+                    cmid = int((cr or {}).get("musteri_id") or 0)
+                except (TypeError, ValueError):
+                    continue
+                payload_raw = (cr or {}).get("payload")
+                if not payload_raw:
+                    continue
+                try:
+                    pobj = json.loads(payload_raw) if isinstance(payload_raw, str) else payload_raw
+                except Exception:
+                    continue
+                aylar = pobj if isinstance(pobj, list) else ((pobj or {}).get("aylar") or [])
+                if not isinstance(aylar, list):
+                    continue
+                s = set()
+                for a in aylar:
+                    if not isinstance(a, dict):
+                        continue
+                    try:
+                        yy = int(a.get("yil"))
+                        mm = int(a.get("ay"))
+                    except (TypeError, ValueError):
+                        continue
+                    if 1 <= mm <= 12 and 1900 <= yy <= 2200:
+                        s.add(f"{yy:04d}-{mm:02d}")
+                if s:
+                    visible_ym_by_mid[cmid] = s
+        except Exception:
+            visible_ym_by_mid = {}
+
+    filtered = []
+    for _t in tahsilatlar_list:
+        ac = str(_t.get("aciklama") or "")
+        marker_isos = re.findall(r"\|AYLIK_TAH\|([0-9]{4}-[0-9]{2}-[0-9]{2})\|", ac)
+        try:
+            _mid = int(_t.get("customer_id") or _t.get("musteri_id") or 0)
+        except (TypeError, ValueError):
+            _mid = 0
+        if marker_isos:
+            in_range = False
+            for iso in marker_isos:
+                try:
+                    dd = date.fromisoformat(iso[:10])
+                except Exception:
+                    continue
+                if d0 <= dd <= d1:
+                    in_range = True
+                    break
+            if not in_range:
+                continue
+            vis = visible_ym_by_mid.get(_mid)
+            if isinstance(vis, set) and vis:
+                if not any(iso[:7] in vis for iso in marker_isos):
+                    continue
+        else:
+            ref_d = _date_from_val(_t.get("fatura_tarihi")) or _date_from_val(_t.get("tahsilat_tarihi"))
+            if not ref_d or not (d0 <= ref_d <= d1):
+                continue
+        filtered.append(_t)
+    tahsilatlar_list = filtered
+
+    for _t in tahsilatlar_list:
+        _t["rapor_aciklama_ay"] = _tahsilat_rapor_aciklama_ay_metni(
+            _t.get("aciklama"),
+            fatura_tarihi=_t.get("fatura_tarihi"),
+            tahsilat_tarihi=_t.get("tahsilat_tarihi"),
+        )
+    # Güvenli doldurma: bazı ortamlarda join/alias farklarından dolayı hizmet türü boş gelebiliyor.
+    # Burada müşteri id -> hizmet türü haritasını ayrıca kurup eksik satırları tamamlıyoruz.
+    musteri_idler = []
+    seen_mid = set()
+    for t in tahsilatlar_list:
+        mid = t.get("customer_id") or t.get("musteri_id")
+        try:
+            mid = int(mid)
+        except (TypeError, ValueError):
+            mid = None
+        if not mid or mid in seen_mid:
+            continue
+        seen_mid.add(mid)
+        musteri_idler.append(mid)
+    if musteri_idler:
+        ht_rows = fetch_all(
+            """
+            SELECT c.id AS musteri_id,
+                   COALESCE(NULLIF(TRIM(mk.hizmet_turu), ''), NULLIF(TRIM(c.hizmet_turu), ''), '') AS rapor_hizmet_turu
+            FROM customers c
+            LEFT JOIN LATERAL (
+                SELECT mkx.hizmet_turu
+                FROM musteri_kyc mkx
+                WHERE mkx.musteri_id = c.id
+                ORDER BY mkx.id DESC
+                LIMIT 1
+            ) mk ON TRUE
+            WHERE c.id = ANY(%s::bigint[])
+            """,
+            (musteri_idler,),
+        ) or []
+        ht_map = {}
+        for r in ht_rows:
+            try:
+                rid = int((r or {}).get("musteri_id"))
+            except (TypeError, ValueError):
+                continue
+            ht_map[rid] = str((r or {}).get("rapor_hizmet_turu") or "").strip()
+        for t in tahsilatlar_list:
+            mid = t.get("customer_id") or t.get("musteri_id")
+            try:
+                mid = int(mid)
+            except (TypeError, ValueError):
+                mid = None
+            if not mid:
+                continue
+            if str(t.get("rapor_hizmet_turu") or "").strip():
+                continue
+            t["rapor_hizmet_turu"] = ht_map.get(mid, "")
+
+    toplam = sum(t.get("tutar") or 0 for t in tahsilatlar_list)
+    hizmet_rows = fetch_all(
+        """
+        SELECT DISTINCT hizmet_turu
+        FROM (
+            SELECT TRIM(COALESCE(c.hizmet_turu, '')) AS hizmet_turu
+            FROM customers c
+            WHERE TRIM(COALESCE(c.hizmet_turu, '')) <> ''
+            UNION
+            SELECT TRIM(COALESCE(mk.hizmet_turu, '')) AS hizmet_turu
+            FROM musteri_kyc mk
+            WHERE TRIM(COALESCE(mk.hizmet_turu, '')) <> ''
+        ) x
+        WHERE hizmet_turu <> ''
+        ORDER BY hizmet_turu
+        """
+    ) or []
+    hizmet_turu_options = [str((r or {}).get("hizmet_turu") or "").strip() for r in hizmet_rows]
+    hizmet_turu_options = [x for x in hizmet_turu_options if x]
+
+    return render_template(
+        "faturalar/tahsilatlar_tab.html",
+        yil=yil,
+        baslangic_iso=d0.isoformat(),
+        bitis_iso=d1.isoformat(),
+        hizmet_turu_options=hizmet_turu_options,
+        secili_hizmet_turleri=secili_hizmet_turleri,
+        tahsilatlar=tahsilatlar_list,
+        toplam=toplam,
+    )
+
+
+@bp.route('/api/hizmet-turleri')
+@faturalar_gerekli
+def api_faturalar_hizmet_turleri():
+    rows = fetch_all(
+        """
+        SELECT DISTINCT TRIM(COALESCE(hizmet_turu, '')) AS ad
+        FROM customers
+        WHERE TRIM(COALESCE(hizmet_turu, '')) <> ''
+        ORDER BY TRIM(COALESCE(hizmet_turu, ''))
+        """
+    ) or []
+    turler = []
+    seen = set()
+    for r in rows:
+        ad = str((r or {}).get("ad") or "").strip()
+        if not ad:
+            continue
+        key = turkish_lower(ad)
+        if key in seen:
+            continue
+        seen.add(key)
+        turler.append({"ad": ad})
+    return jsonify({"ok": True, "turler": turler})
 
 
 def _next_fatura_no(prefix="INV"):
@@ -5152,6 +5845,88 @@ def _fatura_satir_tutar(row):
         val = (row or {}).get("tutar")
     try:
         return round(float(val or 0), 2)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _fatura_satir_kdv_tutar_hesapla(ln):
+    """Tek satır için KDV tutarı (satır JSON’da kdv_tutar yoksa kdv_orani + netten hesaplanır)."""
+    if not isinstance(ln, dict):
+        return 0.0
+    try:
+        kt = ln.get("kdv_tutar")
+        if kt is not None and str(kt).strip() != "":
+            return round(max(0.0, float(kt)), 2)
+    except (TypeError, ValueError):
+        pass
+    try:
+        st = float(ln.get("satir_toplam") or 0)
+        mt = float(ln.get("mal_tutar") or ln.get("net") or 0)
+        if st > 0 and mt >= 0 and st >= mt:
+            return round(max(0.0, st - mt), 2)
+    except (TypeError, ValueError):
+        pass
+    try:
+        miktar = float(ln.get("miktar") or 0)
+        birim_fiyat = float(ln.get("birim_fiyat") or 0)
+        isk_oran = float(ln.get("iskonto_orani") or 0)
+        brut = miktar * birim_fiyat
+        isk_tutar_giris = ln.get("iskonto_tutar")
+        if isk_tutar_giris is not None and float(isk_tutar_giris) > 0:
+            isk_tutar = min(float(isk_tutar_giris), brut)
+        else:
+            isk_tutar = brut * isk_oran / 100.0
+        net = brut - isk_tutar
+        kdv_oran = float(ln.get("kdv_orani") or 0)
+        return round(max(0.0, net * kdv_oran / 100.0), 2)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _fatura_kdv_toplam_satirlardan(row):
+    """satirlar_json varsa satır bazlı KDV toplamı; yok veya boşsa None (başlık kdv_tutar kullanılır)."""
+    raw = (row or {}).get("satirlar_json")
+    if not raw:
+        return None
+    try:
+        arr = json.loads(raw) if isinstance(raw, str) else raw
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(arr, list) or len(arr) == 0:
+        return None
+    s = sum(_fatura_satir_kdv_tutar_hesapla(ln) for ln in arr)
+    return round(s, 2)
+
+
+def _fatura_kdv_cikarma_toplam_tutar(row):
+    """Yeni fatura kaydı: tutar = KDV hariç ara, toplam = KDV dahil genel → KDV = toplam - tutar.
+    Bozuk satır/DB kdv_tutar alanlarından bağımsız; taslağın içindeki özet ile aynı mantık."""
+    try:
+        toplam = float((row or {}).get("toplam") or 0)
+        tutar = float((row or {}).get("tutar") or 0)
+    except (TypeError, ValueError):
+        return None
+    if toplam <= 0:
+        return None
+    if tutar < -0.01 or tutar > toplam + 0.02:
+        return None
+    implied = round(max(0.0, toplam - tutar), 2)
+    # Makul üst sınır: KDV, genel toplamın ~yarısından fazla olamaz (veri hatası).
+    if implied > toplam * 0.46:
+        return None
+    return implied
+
+
+def _fatura_kdv_liste_gosterim(row):
+    """ERP taslak listesi / API: önce toplam-tutar (yeni fatura özetiyle aynı), sonra satırlar, sonra DB."""
+    ext = _fatura_kdv_cikarma_toplam_tutar(row)
+    if ext is not None:
+        return ext
+    v = _fatura_kdv_toplam_satirlardan(row)
+    if v is not None:
+        return round(max(0.0, v), 2)
+    try:
+        return round(float((row or {}).get("kdv_tutar") or 0), 2)
     except (TypeError, ValueError):
         return 0.0
 
@@ -6287,83 +7062,66 @@ def tahsilat_ekle():
             tahsilat_tarihi = f"{parts[2]}-{parts[1].zfill(2)}-{parts[0].zfill(2)}"
         else:
             tahsilat_tarihi = raw_tarih[:10] if len(raw_tarih) >= 10 else datetime.now().strftime("%Y-%m-%d")
-        makbuz_no = get_next_makbuz_no()
-        ay_ref_iso = (data.get("ay_ref_iso") or "").strip()
-        ay_ref_tutar = _parse_amount_flexible(data.get("ay_ref_tutar"))
-        aylik_marker = ""
-        if ay_ref_iso and re.match(r"^\d{4}-\d{2}-\d{2}$", ay_ref_iso):
-            aylik_marker = f"|AYLIK_TAH|{ay_ref_iso}|"
-
-        aciklama_text = (data.get('aciklama') or '').strip()
-        if aylik_marker and aylik_marker not in aciklama_text:
-            aciklama_text = (aciklama_text + " " + aylik_marker).strip()
-
-        if aylik_marker:
-            dup_row = fetch_one(
-                """
-                SELECT id, makbuz_no
-                FROM tahsilatlar
-                WHERE (musteri_id = %s OR customer_id = %s)
-                  AND COALESCE(aciklama, '') LIKE %s
-                  AND ABS(COALESCE(tutar, 0) - %s) < 0.01
-                  AND COALESCE(tahsilat_tarihi::text, '') = %s
-                  AND created_at >= (NOW() - INTERVAL '20 seconds')
-                ORDER BY id DESC
-                LIMIT 1
-                """,
-                (musteri_id, musteri_id, f"%{aylik_marker}%", tutar, tahsilat_tarihi),
-            ) or {}
-            if dup_row.get("id"):
-                return jsonify({
-                    'ok': True,
-                    'zaten_var': True,
-                    'mesaj': 'Aynı tahsilat kısa süre içinde zaten kaydedildi.',
-                    'tahsilat_id': int(dup_row.get("id")),
-                    'makbuz_no': dup_row.get("makbuz_no"),
-                })
-            toplam_row = fetch_one(
-                """
-                SELECT COALESCE(SUM(tutar), 0) AS toplam, MAX(id) AS son_id
-                FROM tahsilatlar
-                WHERE (musteri_id = %s OR customer_id = %s)
-                  AND COALESCE(aciklama, '') LIKE %s
-                """,
-                (musteri_id, musteri_id, f"%{aylik_marker}%"),
-            ) or {}
-            mevcut_toplam = float(toplam_row.get("toplam") or 0)
-            son_id = toplam_row.get("son_id")
-            if ay_ref_tutar > 0 and mevcut_toplam >= (ay_ref_tutar - 0.01):
-                return jsonify({
-                    'ok': True,
-                    'zaten_var': True,
-                    'mesaj': 'Bu ay için tahsilat zaten mevcut; çift kayıt yapılmadı.',
-                    'tahsilat_id': int(son_id) if son_id else None,
-                    'makbuz_no': None,
-                })
+        ay_ref_isos = _ay_ref_iso_list_from_tahsilat_payload(data)
+        raw_aciklama = (data.get('aciklama') or '').strip()
+        auto_pay_items = []
+        # Elle tahsilatta kullanıcı ay seçtiyse o seçim korunur.
+        # Ay seçilmemişse en eski açık aylardan otomatik dağıtım yapılır.
+        if not data.get("fatura_id"):
+            try:
+                from .giris_routes import _upsert_aylik_grid_cache as _refresh_aylik_cache_before_alloc
+                _refresh_aylik_cache_before_alloc(int(musteri_id))
+            except Exception:
+                pass
+        if not ay_ref_isos:
+            auto_isos, auto_pay_items = _auto_allocate_oldest_unpaid_months(
+                musteri_id,
+                tutar,
+                data.get("aylik_borc_listesi"),
+                data.get("ay_ref_start_iso"),
+            )
+            if auto_isos:
+                ay_ref_isos = auto_isos
+        aciklama_text = _aciklama_with_aylik_markers(
+            raw_aciklama,
+            ay_ref_isos,
+        )
+        if auto_pay_items:
+            aciklama_text = _aciklama_with_aylik_pay_tokens(aciklama_text, auto_pay_items)
 
         cek_detay_str = json.dumps(cek_list) if cek_list else ""
         havale_banka = (data.get('havale_banka') or "").strip()[:200]
 
         tahsil_eden = (data.get('tahsil_eden') or '').strip()[:120]
-        row = execute_returning("""
-            INSERT INTO tahsilatlar (
-                musteri_id, customer_id, fatura_id, tutar, odeme_turu,
-                tahsilat_tarihi, aciklama, makbuz_no, cek_detay, havale_banka, tahsil_eden
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            RETURNING id, fatura_id, makbuz_no, tutar, odeme_turu, tahsilat_tarihi, aciklama, created_at, cek_detay, havale_banka, tahsil_eden
-        """, (
-            musteri_id,
-            musteri_id,
-            data.get('fatura_id') or None,
-            tutar,
-            odeme_turu,
-            tahsilat_tarihi,
-            aciklama_text,
-            makbuz_no,
-            cek_detay_str or None,
-            havale_banka or None,
-            tahsil_eden or None
-        ))
+        # Makbuz no + INSERT aynı transaction ve global kilitte (çift 1100 / form yenileme yarışı).
+        with db() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT pg_advisory_xact_lock(hashtext('tahsilat_makbuz_no_alloc')::bigint)")
+            makbuz_no = _tahsilat_icin_makbuz_no_sec_cursor(cur, data.get("makbuz_no"))
+            cur.execute(
+                """
+                INSERT INTO tahsilatlar (
+                    musteri_id, customer_id, fatura_id, tutar, odeme_turu,
+                    tahsilat_tarihi, aciklama, makbuz_no, cek_detay, havale_banka, tahsil_eden
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id, fatura_id, makbuz_no, tutar, odeme_turu, tahsilat_tarihi, aciklama, created_at, cek_detay, havale_banka, tahsil_eden
+                """,
+                (
+                    musteri_id,
+                    musteri_id,
+                    data.get("fatura_id") or None,
+                    tutar,
+                    odeme_turu,
+                    tahsilat_tarihi,
+                    aciklama_text,
+                    makbuz_no,
+                    cek_detay_str or None,
+                    havale_banka or None,
+                    tahsil_eden or None,
+                ),
+            )
+            row = cur.fetchone()
+        row = dict(row) if row else None
         if not row:
             return jsonify({'ok': False, 'mesaj': 'Kayıt oluşturulamadı.'}), 500
 
@@ -6392,13 +7150,241 @@ def tahsilat_ekle():
         except Exception:
             pass
 
+        dagitim_items = []
+        if auto_pay_items:
+            dagitim_items = [
+                (str(iso), round(float(pay or 0), 2))
+                for iso, pay in auto_pay_items
+                if re.match(r"^\d{4}-\d{2}-\d{2}$", str(iso or ""))
+            ]
+        elif ay_ref_isos:
+            uniq_isos = []
+            seen_isos = set()
+            for iso in ay_ref_isos:
+                iso_s = str(iso or "").strip()
+                if not re.match(r"^\d{4}-\d{2}-\d{2}$", iso_s):
+                    continue
+                if iso_s in seen_isos:
+                    continue
+                seen_isos.add(iso_s)
+                uniq_isos.append(iso_s)
+            if len(uniq_isos) == 1:
+                dagitim_items = [(uniq_isos[0], round(float(tutar or 0), 2))]
+            elif len(uniq_isos) > 1:
+                cents_total = int(round(float(tutar or 0) * 100))
+                n = len(uniq_isos)
+                base = cents_total // n if n else 0
+                rem = cents_total % n if n else 0
+                dagitim_items = []
+                for i, iso_s in enumerate(uniq_isos):
+                    pay_cents = base + (1 if i < rem else 0)
+                    if pay_cents <= 0:
+                        continue
+                    dagitim_items.append((iso_s, pay_cents / 100.0))
+
         return jsonify({
             'ok': True,
             'mesaj': 'Tahsilat eklendi. Makbuz PDF müşteri dosyalarına kaydedildi.',
             'tahsilat_id': row['id'],
             'makbuz_no': makbuz_no,
-            'pdf_dosya': pdf_filename
+            'pdf_dosya': pdf_filename,
+            'aylik_dagitim': [
+                {'iso': iso, 'tutar': round(float(pay or 0), 2)}
+                for iso, pay in dagitim_items
+            ],
         })
+    except Exception as e:
+        return jsonify({'ok': False, 'mesaj': str(e)}), 500
+
+
+@bp.route('/tahsilat-guncelle', methods=['POST'])
+@faturalar_gerekli
+def tahsilat_guncelle():
+    """Mevcut tahsilat: tutar, tarih, ödeme türü, açıklama, tahsil eden güncellenir (rapor / düzeltme)."""
+    try:
+        _ensure_tahsil_eden_column()
+        data = request.get_json(silent=True) or request.form
+        tahsilat_id = int(data.get('tahsilat_id') or 0)
+        if tahsilat_id <= 0:
+            return jsonify({'ok': False, 'mesaj': 'Geçersiz tahsilat kaydı.'}), 400
+
+        odeme_turu = (data.get('odeme_turu') or 'nakit').strip().lower().replace(" ", "_")
+        if odeme_turu not in ('nakit', 'havale', 'eft', 'banka', 'kredi_karti', 'cek'):
+            return jsonify({'ok': False, 'mesaj': 'Geçersiz ödeme türü.'}), 400
+
+        raw_tarih = (data.get('tahsilat_tarihi') or '').strip()
+        if not raw_tarih:
+            return jsonify({'ok': False, 'mesaj': 'Tahsilat tarihi zorunludur.'}), 400
+        if re.match(r"^\d{1,2}\.\d{1,2}\.\d{4}$", raw_tarih):
+            parts = raw_tarih.split(".")
+            tahsilat_tarihi = f"{parts[2]}-{parts[1].zfill(2)}-{parts[0].zfill(2)}"
+        else:
+            tahsilat_tarihi = raw_tarih[:10]
+        try:
+            datetime.strptime(tahsilat_tarihi, "%Y-%m-%d")
+        except ValueError:
+            return jsonify({'ok': False, 'mesaj': 'Tarih formatı geçersiz.'}), 400
+
+        existing = fetch_one(
+            "SELECT tutar, aciklama, tahsil_eden FROM tahsilatlar WHERE id = %s",
+            (tahsilat_id,),
+        )
+        if not existing:
+            return jsonify({'ok': False, 'mesaj': 'Tahsilat kaydı bulunamadı.'}), 404
+
+        if "tutar" in data and str(data.get("tutar") or "").strip() != "":
+            tutar = _parse_amount_flexible(data.get("tutar"))
+            if tutar <= 0:
+                return jsonify({'ok': False, 'mesaj': 'Tutar 0\'dan büyük olmalıdır.'}), 400
+        else:
+            try:
+                tutar = float(existing.get("tutar") or 0)
+            except (TypeError, ValueError):
+                tutar = 0.0
+            if tutar <= 0:
+                return jsonify({'ok': False, 'mesaj': 'Geçersiz mevcut tutar; tutar alanını gönderin.'}), 400
+
+        if "aciklama" in data:
+            aciklama_text = (data.get("aciklama") or "").strip()
+            if len(aciklama_text) > 4000:
+                aciklama_text = aciklama_text[:4000]
+            aciklama_text = aciklama_text or None
+        else:
+            aciklama_text = existing.get("aciklama")
+
+        if "tahsil_eden" in data:
+            tahsil_eden = (data.get("tahsil_eden") or "").strip()[:120]
+            tahsil_eden = tahsil_eden or None
+        else:
+            tahsil_eden = existing.get("tahsil_eden")
+
+        row = execute_returning(
+            """
+            UPDATE tahsilatlar
+               SET odeme_turu = %s,
+                   tahsilat_tarihi = %s,
+                   tutar = %s,
+                   aciklama = %s,
+                   tahsil_eden = %s
+             WHERE id = %s
+            RETURNING id, COALESCE(customer_id, musteri_id) AS musteri_id
+            """,
+            (
+                odeme_turu,
+                tahsilat_tarihi,
+                tutar,
+                aciklama_text,
+                tahsil_eden,
+                tahsilat_id,
+            ),
+        )
+        if not row:
+            return jsonify({'ok': False, 'mesaj': 'Tahsilat kaydı bulunamadı.'}), 404
+        try:
+            mid = int((row or {}).get("musteri_id") or 0)
+            if mid > 0:
+                from .giris_routes import _upsert_aylik_grid_cache as _refresh_aylik_cache
+                _refresh_aylik_cache(mid)
+        except Exception:
+            pass
+        return jsonify({'ok': True, 'mesaj': 'Tahsilat güncellendi.'})
+    except Exception as e:
+        return jsonify({'ok': False, 'mesaj': str(e)}), 500
+
+
+@bp.route('/tahsilat-hizmet-turu-guncelle', methods=['POST'])
+@faturalar_gerekli
+def tahsilat_hizmet_turu_guncelle():
+    """Tahsilat satırından müşteri hizmet türünü günceller (Cari Kart'a işler)."""
+    try:
+        data = request.get_json(silent=True) or request.form
+        tahsilat_id = int(data.get('tahsilat_id') or 0)
+        musteri_id = int(data.get('musteri_id') or 0)
+        hizmet_turu = str(data.get('hizmet_turu') or '').strip()
+
+        if tahsilat_id <= 0:
+            return jsonify({'ok': False, 'mesaj': 'Geçersiz tahsilat kaydı.'}), 400
+        if not hizmet_turu:
+            return jsonify({'ok': False, 'mesaj': 'Hizmet türü zorunludur.'}), 400
+        if len(hizmet_turu) > 120:
+            return jsonify({'ok': False, 'mesaj': 'Hizmet türü çok uzun.'}), 400
+
+        if musteri_id <= 0:
+            t_row = fetch_one(
+                "SELECT COALESCE(customer_id, musteri_id) AS musteri_id FROM tahsilatlar WHERE id = %s",
+                (tahsilat_id,),
+            ) or {}
+            try:
+                musteri_id = int(t_row.get('musteri_id') or 0)
+            except (TypeError, ValueError):
+                musteri_id = 0
+        if musteri_id <= 0:
+            return jsonify({'ok': False, 'mesaj': 'Müşteri kaydı bulunamadı.'}), 404
+
+        c_row = execute_returning(
+            """
+            UPDATE customers
+               SET hizmet_turu = %s
+             WHERE id = %s
+            RETURNING id
+            """,
+            (hizmet_turu, musteri_id),
+        )
+        if not c_row:
+            return jsonify({'ok': False, 'mesaj': 'Müşteri bulunamadı.'}), 404
+
+        # Cari Kart sözleşme ekranı son KYC kaydını referans alıyor.
+        # Varsa son kaydı da güncelleyelim.
+        execute(
+            """
+            UPDATE musteri_kyc
+               SET hizmet_turu = %s
+             WHERE id = (
+                 SELECT id
+                 FROM musteri_kyc
+                 WHERE musteri_id = %s
+                 ORDER BY id DESC
+                 LIMIT 1
+             )
+            """,
+            (hizmet_turu, musteri_id),
+        )
+
+        return jsonify({'ok': True, 'mesaj': 'Hizmet türü güncellendi.', 'hizmet_turu': hizmet_turu, 'musteri_id': musteri_id})
+    except Exception as e:
+        return jsonify({'ok': False, 'mesaj': str(e)}), 500
+
+
+@bp.route('/tahsilat-sil', methods=['POST'])
+@faturalar_gerekli
+def tahsilat_sil():
+    """Tahsilat kaydını siler."""
+    try:
+        data = request.get_json(silent=True) or request.form
+        tahsilat_id = int(data.get('tahsilat_id') or 0)
+        if tahsilat_id <= 0:
+            return jsonify({'ok': False, 'mesaj': 'Geçersiz tahsilat kaydı.'}), 400
+        pre = fetch_one(
+            "SELECT COALESCE(customer_id, musteri_id) AS mid FROM tahsilatlar WHERE id = %s",
+            (tahsilat_id,),
+        ) or {}
+        try:
+            mid = int(pre.get("mid") or 0)
+        except (TypeError, ValueError):
+            mid = 0
+        row = execute_returning(
+            "DELETE FROM tahsilatlar WHERE id = %s RETURNING id",
+            (tahsilat_id,),
+        )
+        if not row:
+            return jsonify({'ok': False, 'mesaj': 'Tahsilat kaydı bulunamadı.'}), 404
+        if mid > 0:
+            try:
+                from .giris_routes import _upsert_aylik_grid_cache as _refresh_aylik_cache
+                _refresh_aylik_cache(mid)
+            except Exception:
+                pass
+        return jsonify({'ok': True, 'mesaj': 'Tahsilat silindi.'})
     except Exception as e:
         return jsonify({'ok': False, 'mesaj': str(e)}), 500
 
@@ -6406,7 +7392,8 @@ def tahsilat_ekle():
 @bp.route("/api/tahsilat-raporu")
 @faturalar_gerekli
 def api_tahsilat_raporu():
-    """Tahsilat makbuzları: tarih aralığına göre firma + tutar listesi (giriş Tahsilat / Rapor sekmesi)."""
+    """Tahsilat makbuzları: tarih aralığına göre listesi (giriş Tahsilat / Rapor sekmesi). musteri_id ile sadece o cari."""
+    _ensure_tahsil_eden_column()
     bugun = date.today()
     bas_raw = (request.args.get("baslangic") or "").strip()
     bit_raw = (request.args.get("bitis") or "").strip()
@@ -6420,22 +7407,148 @@ def api_tahsilat_raporu():
         bit = bugun
     if bas > bit:
         bas, bit = bit, bas
+    mid = _opt_customer_id(request.args.get("musteri_id")) or 0
+    # Rapor kuralı:
+    # - Marker'lı kayıtta hem marker ay aralığı hem de fiili tahsilat_tarihi aralığı kabul edilir
+    #   (elle kaydettiğim bugünkü makbuzlar marker ayı eski olsa da raporda görünmeli).
+    # - Marker'sız kayıtta tahsilat_tarihi aralığı esas alınır.
+    wh = ["""(
+            (
+                COALESCE(t.aciklama, '') LIKE '%%|AYLIK_TAH|%%'
+                AND (
+                    (
+                        t.tahsilat_tarihi::date >= %s::date
+                        AND t.tahsilat_tarihi::date <= %s::date
+                    )
+                    OR EXISTS (
+                    SELECT 1
+                    FROM regexp_matches(
+                        COALESCE(t.aciklama, ''),
+                        E'\\|AYLIK_TAH\\|([0-9]{4}-[0-9]{2}-[0-9]{2})\\|',
+                        'g'
+                    ) AS rm(mm)
+                    WHERE (mm[1])::date >= %s::date
+                      AND (mm[1])::date <= %s::date
+                )
+                )
+            )
+            OR
+            (
+                COALESCE(t.aciklama, '') NOT LIKE '%%|AYLIK_TAH|%%'
+                AND t.tahsilat_tarihi::date >= %s::date
+                AND t.tahsilat_tarihi::date <= %s::date
+            )
+        )""",
+    ]
+    params = [bas, bit, bas, bit, bas, bit]
+    if mid > 0:
+        wh.insert(0, "(t.musteri_id = %s OR t.customer_id = %s)")
+        params = [mid, mid] + params
     rows = fetch_all(
-        """
-        SELECT t.id, t.makbuz_no, t.tutar, t.odeme_turu, t.tahsilat_tarihi,
-               COALESCE(NULLIF(TRIM(c.name), ''), '—') AS musteri_adi
+        f"""
+        SELECT t.id, t.fatura_id, t.makbuz_no, t.tutar, t.odeme_turu, t.tahsilat_tarihi,
+               t.aciklama, t.tahsil_eden,
+               COALESCE(t.customer_id, t.musteri_id) AS cari_id,
+               COALESCE(NULLIF(TRIM(c.name), ''), '—') AS musteri_adi,
+               COALESCE(
+                   NULLIF(substring(COALESCE(t.aciklama, '') from '\\|AYLIK_TAH\\|([0-9]{4}-[0-9]{2}-[0-9]{2})\\|'), '')::date,
+                   t.tahsilat_tarihi::date
+               ) AS rapor_tarihi
         FROM tahsilatlar t
         LEFT JOIN customers c ON COALESCE(t.customer_id, t.musteri_id) = c.id
-        WHERE (t.tahsilat_tarihi::date) >= %s AND (t.tahsilat_tarihi::date) <= %s
-        ORDER BY t.tahsilat_tarihi DESC NULLS LAST, t.id DESC
+        WHERE {" AND ".join(wh)}
+        ORDER BY rapor_tarihi DESC NULLS LAST, t.id DESC
         """,
-        (bas, bit),
+        tuple(params),
     )
-    items = [_row_serializable(r) for r in (rows or [])]
+    # Sözleşme/Aylık Tutarlar gridinde görünmeyen aylar rapora düşmesin:
+    # marker'lı kayıtlar yalnızca cache.payload.aylar içindeki yıl-ay anahtarlarıyla eşleşirse gösterilir.
+    visible_ym = None  # None => cache yok/okunamadı, düşürme yapma.
+    visible_tutar_by_ym = {}
+    if mid > 0:
+        try:
+            cache_row = fetch_one("SELECT payload FROM musteri_aylik_grid_cache WHERE musteri_id = %s", (mid,))
+            payload_raw = (cache_row or {}).get("payload")
+            if payload_raw:
+                payload = json.loads(payload_raw) if isinstance(payload_raw, str) else payload_raw
+                aylar = payload if isinstance(payload, list) else ((payload or {}).get("aylar") or [])
+                if isinstance(aylar, list):
+                    s = set()
+                    for a in aylar:
+                        if not isinstance(a, dict):
+                            continue
+                        try:
+                            yy = int(a.get("yil"))
+                            mm = int(a.get("ay"))
+                        except (TypeError, ValueError):
+                            continue
+                        if 1 <= mm <= 12 and 1900 <= yy <= 2200:
+                            key = f"{yy:04d}-{mm:02d}"
+                            s.add(key)
+                            try:
+                                tv = float(a.get("tutar_kdv_dahil"))
+                                if tv > 0:
+                                    visible_tutar_by_ym[key] = round(tv, 2)
+                            except (TypeError, ValueError):
+                                pass
+                    visible_ym = s
+        except Exception:
+            visible_ym = None
+
+    filtered_rows = []
+    for r in (rows or []):
+        ac = str((r or {}).get("aciklama") or "")
+        marker_isos = re.findall(r"\|AYLIK_TAH\|([0-9]{4}-[0-9]{2})-[0-9]{2}\|", ac)
+        pay_tokens = re.findall(r"\|AYLIK_PAY\|([0-9]{4}-[0-9]{2}-[0-9]{2})=([0-9]+(?:\.[0-9]+)?)\|", ac)
+        if marker_isos and isinstance(visible_ym, set):
+            # Marker'lı kayıt: görünür ayda değilse normalde düşer;
+            # ancak fiili tahsilat tarihi seçili aralıktaysa (elle bugünden kayıt) raporda kalsın.
+            if not any(ym in visible_ym for ym in marker_isos):
+                td = (r or {}).get("tahsilat_tarihi")
+                td_ok = False
+                if hasattr(td, "year") and hasattr(td, "month") and hasattr(td, "day"):
+                    try:
+                        td_ok = bas <= date(int(td.year), int(td.month), int(td.day)) <= bit
+                    except Exception:
+                        td_ok = False
+                if not td_ok:
+                    continue
+            # Rapor tutarı:
+            # - AYLİK_PAY varsa pay toplamı (manuel oldest dağıtımda gerçek tutar korunur),
+            # - tek marker varsa görünür hücreyle hizalama (net/kdv uyumu),
+            # - çoklu marker'da satır toplamı (tutar) korunur.
+            if pay_tokens:
+                try:
+                    pay_toplam = round(
+                        sum(float((_t or ("", 0))[1] or 0) for _t in (pay_tokens or [])),
+                        2,
+                    )
+                except Exception:
+                    pay_toplam = 0.0
+                if pay_toplam > 0:
+                    r["tutar"] = pay_toplam
+            elif len(marker_isos) == 1:
+                try:
+                    fatura_id = int((r or {}).get("fatura_id") or 0)
+                except (TypeError, ValueError):
+                    fatura_id = 0
+                if fatura_id <= 0:
+                    filtered_rows.append(r)
+                    continue
+                ym0 = marker_isos[0]
+                if ym0 in visible_tutar_by_ym:
+                    try:
+                        r["tutar"] = visible_tutar_by_ym[ym0]
+                    except Exception:
+                        pass
+        filtered_rows.append(r)
+
+    items = [_row_serializable(r) for r in filtered_rows]
     toplam = sum(float(it.get("tutar") or 0) for it in items)
-    return jsonify(
+    ok = jsonify(
         {
             "ok": True,
+            "musteri_id": mid or None,
             "baslangic": bas.strftime("%Y-%m-%d"),
             "bitis": bit.strftime("%Y-%m-%d"),
             "items": items,
@@ -6443,6 +7556,8 @@ def api_tahsilat_raporu():
             "adet": len(items),
         }
     )
+    ok.headers["Cache-Control"] = "no-store, max-age=0"
+    return ok
 
 
 @bp.route("/api/gib-kesilmis-fatura-raporu")
@@ -6618,13 +7733,16 @@ def tahsilat_makbuz_onizle():
             tahsilat_tarihi = f"{parts[2]}-{parts[1].zfill(2)}-{parts[0].zfill(2)}"
         else:
             tahsilat_tarihi = raw_tarih[:10] if len(raw_tarih) >= 10 else datetime.now().strftime("%Y-%m-%d")
-        aciklama = (data.get('aciklama') or '').strip()
+        aciklama = _aciklama_with_aylik_markers(
+            (data.get('aciklama') or '').strip(),
+            _ay_ref_iso_list_from_tahsilat_payload(data),
+        )
         tahsil_eden = (data.get('tahsil_eden') or '').strip()[:120]
         cek_detay_raw = data.get('cek_detay')
         cek_list = cek_detay_raw if isinstance(cek_detay_raw, list) else []
         havale_banka = (data.get('havale_banka') or '').strip()[:200]
         fake_row = {
-            "makbuz_no": get_next_makbuz_no(),
+            "makbuz_no": _tahsilat_icin_makbuz_no_sec(data.get("makbuz_no")),
             "tutar": tutar,
             "odeme_turu": odeme_turu,
             "tahsilat_tarihi": tahsilat_tarihi,
@@ -6646,6 +7764,41 @@ def tahsilat_makbuz_onizle():
         })
     except Exception as e:
         return jsonify({'ok': False, 'mesaj': str(e)}), 500
+
+
+@bp.route('/api/next-makbuz-no', methods=['GET'])
+@faturalar_gerekli
+def api_next_makbuz_no():
+    try:
+        with db() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT pg_advisory_xact_lock(hashtext('tahsilat_makbuz_no_alloc')::bigint)")
+            no = _next_makbuz_no_with_cursor(cur)
+        return jsonify({'ok': True, 'makbuz_no': no})
+    except Exception as e:
+        return jsonify({'ok': False, 'mesaj': str(e)}), 500
+
+
+@bp.route("/api/tahsilat-makbuz-sorgula", methods=["GET"])
+@faturalar_gerekli
+def api_tahsilat_makbuz_sorgula():
+    """Müşteriden alınan makbuz no ile kayıt doğrulama (aynı no birden fazlaysa hepsi listelenir)."""
+    raw = (request.args.get("makbuz_no") or request.args.get("no") or "").strip()
+    no = _normalize_makbuz_no(raw)
+    if not no:
+        return jsonify({"ok": False, "mesaj": "makbuz_no veya no parametresi gerekli."}), 400
+    rows = fetch_all(
+        """
+        SELECT id, musteri_id, tutar, tahsilat_tarihi, odeme_turu,
+               LEFT(COALESCE(aciklama, ''), 200) AS aciklama_ozet
+        FROM tahsilatlar
+        WHERE TRIM(COALESCE(makbuz_no, '')) = %s
+        ORDER BY id DESC
+        LIMIT 50
+        """,
+        (no,),
+    )
+    return jsonify({"ok": True, "makbuz_no": no, "adet": len(rows), "kayitlar": rows})
 
 
 # --- GİB e-Arşiv Fatura (taslak + SMS onay) ---
@@ -6957,7 +8110,7 @@ def _fatura_gib_bilgilerini_yaz(fatura_id, ettn=None, gib_fatura_no=None, gib_as
     )
 
 
-@bp.route('/api/gib-taslak', methods=['POST'])
+@bp.route('/api/gib-taslak', methods=['GET', 'POST'])
 @faturalar_gerekli
 def api_gib_taslak():
     """Fatura ID ile GİB'de taslak oluşturur. Döner: ok, uuid (ETTN), mesaj."""
@@ -6995,8 +8148,14 @@ def api_gib_taslak():
             except Exception:
                 return str(dbg)[:900]
 
-        data = request.get_json() or {}
-        fatura_id = data.get("fatura_id") or request.form.get("fatura_id")
+        data = request.get_json(silent=True) or {}
+        if request.method == "GET":
+            # Bazı istemcilerde POST/XHR status=0 (transport) görüldüğü için GET fallback desteği.
+            data = {
+                "fatura_id": request.args.get("fatura_id"),
+                "beklenen_musteri_id": request.args.get("beklenen_musteri_id"),
+            }
+        fatura_id = data.get("fatura_id") or request.values.get("fatura_id")
         if not fatura_id:
             return jsonify({"ok": False, "mesaj": "fatura_id gerekli."}), 400
         fatura_id = int(fatura_id)
@@ -7006,7 +8165,7 @@ def api_gib_taslak():
         )
         if not f_row:
             return jsonify({"ok": False, "mesaj": "Fatura bulunamadı."}), 404
-        beklenen_mid = data.get("beklenen_musteri_id")
+        beklenen_mid = data.get("beklenen_musteri_id") or request.values.get("beklenen_musteri_id")
         if beklenen_mid is not None and str(beklenen_mid).strip() != "":
             try:
                 em = int(beklenen_mid)
@@ -7058,7 +8217,79 @@ def api_gib_taslak():
                 "ok": False,
                 "mesaj": "GİB modülü kullanılamıyor. .env içinde GIB_USER ve GIB_PASS tanımlayın ve eArsivPortal kurulumunu kontrol edin."
             }), 503
-        uuid = gib.fatura_taslak_olustur(fatura_data)
+        # Bazı GİB çağrıları istemci kütüphanesinde sonsuza yakın bekleyebiliyor.
+        # Endpoint'in "Gönderiliyor..."da takılı kalmaması için üst sınır koyuyoruz.
+        # Varsayılan 120; alt sınır 90 — GİB yoğun + taslak sonrası işlemler için 65 sn sık yetmiyor (.env 65 ise yükseltilir).
+        try:
+            taslak_timeout_s = int(str(os.getenv("GIB_TASLAK_TIMEOUT_S") or "120").strip() or "120")
+        except ValueError:
+            taslak_timeout_s = 120
+        taslak_timeout_s = max(90, min(600, taslak_timeout_s))
+        pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        fut = pool.submit(gib.fatura_taslak_olustur, fatura_data)
+        try:
+            uuid = fut.result(timeout=taslak_timeout_s)
+        except concurrent.futures.TimeoutError:
+            # Önemli: with ThreadPoolExecutor kullanıldığında __exit__ wait=True ile
+            # takılabiliyor ve endpoint fiilen yine dönmüyor. Bu yüzden beklemeden kapat.
+            try:
+                fut.cancel()
+            except Exception:
+                pass
+            try:
+                pool.shutdown(wait=False, cancel_futures=True)
+            except Exception:
+                pass
+            taslak_raw = getattr(gib, "last_taslak_raw", None)
+            gonderilen_payload = getattr(gib, "last_gonderilen_payload", None)
+            try:
+                if isinstance(taslak_raw, (dict, list)):
+                    taslak_raw_text = json.dumps(taslak_raw, ensure_ascii=False)[:700]
+                else:
+                    taslak_raw_text = str(taslak_raw or "")[:700]
+            except Exception:
+                taslak_raw_text = str(taslak_raw or "")[:700]
+            try:
+                if isinstance(gonderilen_payload, dict):
+                    gp = gonderilen_payload
+                    gmh = (gp.get("malHizmetTable") or [{}])[0]
+                    gonderilen_dbg = json.dumps({
+                        "malHizmetTable0": {
+                            "birimFiyat": gmh.get("birimFiyat"),
+                            "fiyat": gmh.get("fiyat"),
+                            "malHizmetTutari": gmh.get("malHizmetTutari"),
+                            "kdvOrani": gmh.get("kdvOrani"),
+                        },
+                        "matrah": gp.get("matrah"),
+                        "odenecekTutar": gp.get("odenecekTutar"),
+                    }, ensure_ascii=False)[:1000]
+                else:
+                    gonderilen_dbg = ""
+            except Exception:
+                gonderilen_dbg = ""
+            return jsonify({
+                "ok": False,
+                "mesaj": (
+                    f"GİB taslak işlemi sunucuda {taslak_timeout_s} sn içinde tamamlanamadı (iş parçacığı zaman aşımı). "
+                    "Bu sürekli «portal yoğun» demek zorunda değil: yanıt gelmeyen HTTP, ağ/VPN/firewall veya "
+                    "arka planda takılı istek olabilir. Hâlâ 65 sn yazıyorsa `app.py` bu klasörden yeniden "
+                    "başlatılmamış veya önde 65 sn kesen bir proxy olabilir. "
+                    "Tekrar deneyin; gerekirse GIB_TASLAK_TIMEOUT_S artırın."
+                ),
+                "taslak_timeout_sn": taslak_timeout_s,
+                "taslak_raw": taslak_raw_text,
+                "payload_debug": payload_debug,
+                "gonderilen_debug": gonderilen_dbg,
+            }), 200
+        except Exception as e:
+            print(f"[GİB HATA] {e}")
+            traceback.print_exc()
+            return jsonify({"ok": False, "mesaj": f"GİB bağlantı hatası: {str(e)}"}), 500
+        finally:
+            try:
+                pool.shutdown(wait=False, cancel_futures=False)
+            except Exception:
+                pass
         taslak_raw = getattr(gib, "last_taslak_raw", None)
         gonderilen_payload = getattr(gib, "last_gonderilen_payload", None)
         raw_type = type(taslak_raw).__name__
@@ -7097,10 +8328,11 @@ def api_gib_taslak():
         if not uuid:
             return jsonify({
                 "ok": False,
-                "mesaj": "GİB taslak oluşturulamadı.",
+                "mesaj": "GİB taslak oluşturulamadı (ETTN dönmedi). Ham yanıtı kontrol edin.",
                 "taslak_raw": taslak_raw_text,
                 "payload_debug": payload_debug,
-            }), 500
+                "gonderilen_debug": gonderilen_dbg,
+            }), 200
         # Önce taslak gerçekten portal listesinde bulunmalı; aksi halde SMS adımına
         # geçmek kullanıcıyı gereksiz hataya sokuyor.
         taslak_dogrulandi = None
@@ -7191,7 +8423,12 @@ def api_gib_taslak():
     except RuntimeError as e:
         return jsonify({"ok": False, "mesaj": str(e)}), 401
     except Exception as e:
-        return jsonify({"ok": False, "mesaj": "GİB hatası: " + str(e)}), 500
+        logging.getLogger(__name__).exception("api_gib_taslak failed")
+        return jsonify({
+            "ok": False,
+            "mesaj": "GİB hatası: " + str(e),
+            "detay": "Backend exception yakalandı; GİB entegrasyon katmanı yanıtı kontrol edilmeli.",
+        }), 200
 
 
 @bp.route('/api/gib-sms-onay', methods=['POST'])
@@ -7282,6 +8519,67 @@ def api_gib_sms_gonder():
         })
     except Exception as e:
         return jsonify({"ok": False, "mesaj": str(e)}), 500
+
+
+@bp.route('/api/gib-jp-onizle', methods=['GET'])
+@bp.route('/api/gib-dispatch-onizle', methods=['GET'])
+@faturalar_gerekli
+def api_gib_dispatch_onizle():
+    """
+    GİB earsiv-services/dispatch için gönderilecek `jp` gövdesini üretir (FATURA_OLUSTUR çağrılmaz).
+    Taslak oluşturmaz; MERNIS + çok satırlı malHizmetTable ile gerçek gönderime eşdeğer sözlük.
+    """
+    from html import escape
+
+    try:
+        from gib_earsiv import BestOfficeGIBManager, build_fatura_data_from_db
+    except ImportError as e:
+        return jsonify({"ok": False, "mesaj": str(e)}), 503
+    fatura_id = request.args.get("fatura_id", type=int)
+    fmt = (request.args.get("format") or "json").strip().lower()
+    if not fatura_id or fatura_id < 1:
+        return jsonify({"ok": False, "mesaj": "fatura_id gerekli."}), 400
+    try:
+        f_data = build_fatura_data_from_db(fatura_id, fetch_one)
+    except ValueError as e:
+        return jsonify({"ok": False, "mesaj": str(e)}), 400
+    gib = BestOfficeGIBManager()
+    if not gib.is_available():
+        return jsonify({"ok": False, "mesaj": "GİB modülü kullanılamıyor."}), 503
+    try:
+        jp = gib.gib_dispatch_jp_onizle(f_data)
+    except Exception as e:
+        logging.getLogger(__name__).exception("api_gib_dispatch_onizle")
+        return jsonify({"ok": False, "mesaj": str(e)}), 500
+    aciklama = (
+        "Bu nesne portalın `jp` alanına `json.dumps` ile gider (cmd=EARSIV_PORTAL_FATURA_OLUSTUR). "
+        "`faturaUuid` önizlemede sabit örnek değerdir; gerçek taslakta her denemede `uuid4()` üretilir."
+    )
+    out = {
+        "ok": True,
+        "mesaj": aciklama,
+        "fatura_id": fatura_id,
+        "fatura_olustur_kwarg_ozet": {
+            "tarih": f_data.get("tarih"),
+            "saat": f_data.get("saat"),
+            "vkn": f_data.get("vkn"),
+            "ad": f_data.get("ad"),
+            "soyad": f_data.get("soyad"),
+            "unvan": (str(f_data.get("unvan") or "")[:120] + ("…" if len(str(f_data.get("unvan") or "")) > 120 else "")),
+            "satir_sayisi": len(f_data.get("items") or []),
+        },
+        "jp": jp,
+    }
+    if fmt == "html":
+        body = (
+            "<!DOCTYPE html><html><head><meta charset='utf-8'><title>GİB dispatch jp önizleme</title>"
+            "<style>body{font-family:Consolas,monospace;background:#0d1117;color:#c9d1d9;padding:16px;}"
+            "pre{white-space:pre-wrap;word-break:break-all;background:#161b22;padding:12px;border-radius:8px;border:1px solid #30363d}"
+            ".note{color:#8b949e;margin-bottom:12px;max-width:900px}</style></head><body>"
+            f"<p class='note'>{escape(aciklama)}</p><pre>{escape(json.dumps(jp, ensure_ascii=False, indent=2))}</pre></body></html>"
+        )
+        return Response(body, mimetype="text/html; charset=utf-8")
+    return jsonify(out)
 
 
 @bp.route('/api/gib-fatura-onizleme')
@@ -7807,7 +9105,12 @@ def api_gib_son_fatura():
             """
         ) or {}
     if not row or row.get("id") is None:
-        return jsonify({"ok": False, "mesaj": "Fatura bulunamadı."}), 404
+        # UI akışında "son fatura" sorgusu bazen yalnızca bilgilendirme amaçlı çağrılıyor.
+        # 404 dönmek tarayıcı konsolunda gereksiz "Failed to load resource" hatasına yol açıyor.
+        mesaj = "Fatura bulunamadı."
+        if mid is not None and mid >= 1:
+            mesaj = f"Bu müşteri için kayıtlı son fatura bulunamadı (musteri_id={mid})."
+        return jsonify({"ok": False, "mesaj": mesaj}), 200
     return jsonify({"ok": True, "fatura": _row_serializable(row)})
 
 
@@ -7955,6 +9258,8 @@ def api_auto_fatura_secili_olustur():
     data = request.get_json(silent=True) or {}
     yil, ay_no = _parse_auto_year_month(data.get("yil"), data.get("ay"))
     run_month_date = date(yil, ay_no, 1)
+    send_gib_raw = str(data.get("send_gib") or "").strip().lower()
+    send_gib = send_gib_raw in ("1", "true", "yes", "on", "evet")
     raw_ids = data.get("musteri_ids") or []
     musteri_ids = []
     for v in raw_ids:
@@ -7972,7 +9277,21 @@ def api_auto_fatura_secili_olustur():
     exists_count = 0
     skip_count = 0
     fail_count = 0
+    gib_sent_count = 0
+    gib_fail_count = 0
+    gib_already_count = 0
     detaylar = []
+    gib = None
+    build_fatura_data_from_db = None
+    if send_gib:
+        try:
+            from gib_earsiv import BestOfficeGIBManager, build_fatura_data_from_db as _build_fatura_data_from_db
+            gib = BestOfficeGIBManager()
+            build_fatura_data_from_db = _build_fatura_data_from_db
+            if not gib.is_available():
+                gib = None
+        except Exception:
+            gib = None
     for mid in musteri_ids:
         try:
             out = _auto_invoice_create_for_customer(mid, run_month_date)
@@ -7985,20 +9304,53 @@ def api_auto_fatura_secili_olustur():
                 skip_count += 1
             else:
                 fail_count += 1
-            detaylar.append({
+            det = {
                 "musteri_id": mid,
                 "status": st or "error",
                 "fatura_id": out.get("fatura_id"),
                 "fatura_no": out.get("fatura_no"),
                 "mesaj": out.get("error") or "",
-            })
+            }
+            fid = int(out.get("fatura_id") or 0)
+            if send_gib and fid > 0:
+                if not gib or not build_fatura_data_from_db:
+                    gib_fail_count += 1
+                    det["gib_status"] = "error"
+                    det["gib_mesaj"] = "GİB servisi kullanılamıyor."
+                else:
+                    try:
+                        row_f = fetch_one("SELECT ettn FROM faturalar WHERE id = %s", (fid,)) or {}
+                        ettn_mevcut = str(row_f.get("ettn") or "").strip()
+                        if ettn_mevcut:
+                            gib_already_count += 1
+                            det["gib_status"] = "already"
+                            det["gib_uuid"] = ettn_mevcut
+                        else:
+                            f_data = build_fatura_data_from_db(fid, fetch_one)
+                            gib_uuid = gib.fatura_taslak_olustur(f_data)
+                            if gib_uuid:
+                                gib_sent_count += 1
+                                det["gib_status"] = "sent"
+                                det["gib_uuid"] = gib_uuid
+                            else:
+                                gib_fail_count += 1
+                                det["gib_status"] = "error"
+                                det["gib_mesaj"] = "GİB taslak gönderilemedi."
+                    except Exception as ge:
+                        gib_fail_count += 1
+                        det["gib_status"] = "error"
+                        det["gib_mesaj"] = str(ge)
+            detaylar.append(det)
         except Exception as e:
             fail_count += 1
-            detaylar.append({
+            det = {
                 "musteri_id": mid,
                 "status": "error",
                 "mesaj": str(e),
-            })
+            }
+            if send_gib:
+                det["gib_status"] = "skip"
+            detaylar.append(det)
 
     return jsonify({
         "ok": True,
@@ -8007,6 +9359,10 @@ def api_auto_fatura_secili_olustur():
         "exists_count": exists_count,
         "skip_count": skip_count,
         "fail_count": fail_count,
+        "send_gib": bool(send_gib),
+        "gib_sent_count": gib_sent_count,
+        "gib_fail_count": gib_fail_count,
+        "gib_already_count": gib_already_count,
         "detaylar": detaylar,
     })
 

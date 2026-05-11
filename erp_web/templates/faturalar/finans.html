@@ -731,7 +731,7 @@
   border-color: rgba(0, 255, 157, 0.55);
 }
 
-/* Finans sekmesi: GİB kesilmiş fatura raporu (tab-4; tahsilat raporu ile aynı kompakt satır düzeni) */
+/* Finans sekmesi: GİB kesilmiş fatura raporu (tab-5; tahsilat raporu ile aynı kompakt satır düzeni) */
 .finans-gib-rapor-wrap { max-width: 920px; margin-top: 12px; }
 .finans-gib-rapor-kutu {
   background: #1e3a50;
@@ -881,6 +881,7 @@
   <div class="tabs">
     <a href="{{ url_for('musteriler.index') }}" class="tab"><i class="fa fa-th-large"></i><span>Özet</span></a>
     <a href="{{ url_for('faturalar.faturalar') }}" class="tab finans-tab"><i class="fa fa-file-invoice"></i><span>Faturalar</span></a>
+    <a href="{{ url_for('faturalar.faturalar') }}?erp_taslak=1" class="tab finans-tab" onclick="event.preventDefault(); if (typeof switchTab === 'function') switchTab(1); return false;"><i class="fa fa-clipboard"></i><span>Taslaklar</span></a>
     <a href="{{ url_for('faturalar.tahsilatlar') }}" class="tab finans-tab"><i class="fa fa-money-bill-wave"></i><span>Tahsilatlar</span></a>
     <a href="{{ url_for('faturalar.yeni_fatura') }}" class="tab finans-tab"><i class="fa fa-plus-circle"></i><span>Yeni Fatura</span></a>
     <a href="{{ url_for('musteriler.list_full', sayfa=1, limit=50) }}" class="tab finans-tab"><i class="fa fa-users"></i><span>Müşteri listesi</span></a>
@@ -929,17 +930,23 @@
 
 <div class="tab-content" id="tab-1">
     <div class="iframe-wrapper">
-        <iframe src="{{ url_for('faturalar.tahsilatlar') }}"></iframe>
+        <iframe src="{{ url_for('faturalar.faturalar') }}?erp_taslak=1&amp;_ts={{ now_ts }}"></iframe>
     </div>
 </div>
 
 <div class="tab-content" id="tab-2">
     <div class="iframe-wrapper">
-        <iframe src="{{ url_for('faturalar.yeni_fatura') }}"></iframe>
+        <iframe src="{{ url_for('faturalar.tahsilatlar', baslangic=tahsilat_iframe_bas, bitis=tahsilat_iframe_bit, v=now_ts) }}"></iframe>
     </div>
 </div>
 
 <div class="tab-content" id="tab-3">
+    <div class="iframe-wrapper">
+        <iframe src="{{ url_for('faturalar.yeni_fatura') }}"></iframe>
+    </div>
+</div>
+
+<div class="tab-content" id="tab-4">
     <div class="fatura-rapor-wrap fatura-rapor-wrap--compact">
         <div class="fatura-rapor-filtre">
             <span id="fatura_rapor_tarih_wrap" style="display:none;">
@@ -1004,7 +1011,6 @@
                         <th>Fatura no</th>
                         <th>Müşteri</th>
                         <th>Satır</th>
-                        <th>Açıklama</th>
                         <th class="num">Miktar</th>
                         <th>Birim</th>
                         <th class="num">Birim fiyat</th>
@@ -1025,7 +1031,7 @@
     </div>
 </div>
 
-<div class="tab-content" id="tab-4">
+<div class="tab-content" id="tab-5">
     <div id="gib-rapor" class="finans-gib-rapor-wrap">
         <div class="finans-gib-rapor-kutu">
             <div class="finans-gib-rapor-filtre">
@@ -1061,7 +1067,7 @@ window.switchTab = function switchTab(index) {
     panes.forEach(function (c, i) {
         c.classList.toggle('active', i === index);
     });
-    if (index === 3) {
+    if (index === 4) {
         if (typeof faturaRaporVarsayilanTarihlerDoldur === 'function') {
             try {
                 faturaRaporVarsayilanTarihlerDoldur();
@@ -1077,7 +1083,7 @@ window.switchTab = function switchTab(index) {
             }
         }
     }
-    if (index === 4) {
+    if (index === 5) {
         var b = document.getElementById('finans_gib_rapor_bas');
         var e = document.getElementById('finans_gib_rapor_bit');
         if (b && e && !b.value && !e.value && typeof finansGibRaporBuguneAyarla === 'function') {
@@ -1182,12 +1188,67 @@ function autoRunNow() {
 
 function fetchJsonWithTimeout(url, options, timeoutMs) {
     var ms = timeoutMs || 25000;
-    var ctrl = new AbortController();
-    var t = setTimeout(function(){ ctrl.abort(); }, ms);
-    var opts = Object.assign({}, options || {}, { signal: ctrl.signal });
-    return fetch(url, opts)
-      .then(function(r){ return r.json(); })
-      .finally(function(){ clearTimeout(t); });
+    return new Promise(function(resolve, reject){
+      var xhr = new XMLHttpRequest();
+      xhr.open(((options && options.method) || 'GET'), url, true);
+      xhr.withCredentials = true;
+      xhr.timeout = ms;
+      var headers = (options && options.headers) || {};
+      Object.keys(headers).forEach(function(k){
+        try { xhr.setRequestHeader(k, headers[k]); } catch(e){}
+      });
+      xhr.onreadystatechange = function(){
+        if (xhr.readyState !== 4) return;
+        if (xhr.status === 0) {
+          var z = new Error('AbortError');
+          z.name = 'AbortError';
+          reject(z);
+          return;
+        }
+        var finalUrl = String(xhr.responseURL || '');
+        if (/\/login(\?|$)/i.test(finalUrl)) {
+          reject(new Error('Oturum süresi dolmuş. Lütfen sayfayı yenileyip tekrar giriş yapın.'));
+          return;
+        }
+        var txt = xhr.responseText || '';
+        var j = {};
+        try { j = txt ? JSON.parse(txt) : {}; } catch (e2) { j = { ok: false, mesaj: txt || ('HTTP ' + xhr.status) }; }
+        if (xhr.status < 200 || xhr.status >= 300) {
+          var err = new Error((j && j.mesaj) || ('HTTP ' + xhr.status));
+          err.httpStatus = xhr.status;
+          err.detay = (j && j.detay) ? String(j.detay) : '';
+          reject(err);
+          return;
+        }
+        resolve(j);
+      };
+      xhr.onerror = function(){ reject(new Error('NetworkError')); };
+      xhr.ontimeout = function(){
+        var e = new Error('AbortError');
+        e.name = 'AbortError';
+        reject(e);
+      };
+      xhr.send((options && options.body) || null);
+    });
+}
+
+function postFormInNewTab(url, dataObj) {
+    var form = document.createElement('form');
+    form.method = 'POST';
+    form.action = url;
+    form.target = '_blank';
+    form.style.display = 'none';
+    var payload = dataObj || {};
+    Object.keys(payload).forEach(function(k){
+      var inp = document.createElement('input');
+      inp.type = 'hidden';
+      inp.name = k;
+      inp.value = String(payload[k] == null ? '' : payload[k]);
+      form.appendChild(inp);
+    });
+    document.body.appendChild(form);
+    form.submit();
+    form.remove();
 }
 
 function gibFaturaKaydetEkraniAc() {
@@ -1221,15 +1282,31 @@ function gibTaslakGonder() {
     }
     var btn = document.getElementById('gib_taslak_btn');
     autoSetBusy(btn, true, 'Gönderiliyor...');
-    var MAX_RETRY = 3;
+    var startedAt = Date.now();
+    document.getElementById('gib_manual_status').textContent = 'Adım 1/3: Talep sunucuya gönderiliyor...';
+    var progressTimer = setInterval(function(){
+      var s = Math.floor((Date.now() - startedAt) / 1000);
+      document.getElementById('gib_manual_status').textContent = 'Adım 2/3: GİB yanıtı bekleniyor... (' + s + ' sn)';
+    }, 8000);
+    var hardGuardHit = false;
+    var hardGuard = setTimeout(function(){
+      hardGuardHit = true;
+      gibTaslakDogrulandi = false;
+      gibSetFlowEnabled(false);
+      document.getElementById('gib_manual_status').textContent =
+        'GİB isteği 150 sn içinde tamamlanamadı; süreç durduruldu. Tekrar deneyin.';
+      autoSetBusy(btn, false);
+    }, 160000);
+    var MAX_RETRY = 1;
     var RETRY_MS = 2500;
     var sleep = function(ms){ return new Promise(function(resolve){ setTimeout(resolve, ms); }); };
-    var requestOnce = function() {
-      return fetchJsonWithTimeout('/faturalar/api/gib-taslak', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({fatura_id: faturaId})
-      }, 30000);
+    var taslakTimeoutMs = [145000];
+    var requestOnce = function(attemptIdx) {
+      var ms = taslakTimeoutMs[Math.min(Math.max(0, attemptIdx - 1), taslakTimeoutMs.length - 1)];
+      var url = '/faturalar/api/gib-taslak?fatura_id=' + encodeURIComponent(String(faturaId));
+      return fetchJsonWithTimeout(url, {
+        method: 'GET'
+      }, ms);
     };
 
     (async function run() {
@@ -1237,18 +1314,23 @@ function gibTaslakGonder() {
       gibSetFlowEnabled(false);
       for (var attempt = 1; attempt <= MAX_RETRY; attempt++) {
         try {
-          var j = await requestOnce();
+          var j = await requestOnce(attempt);
+          if (hardGuardHit) return;
           if (j && j.ok) {
             gibTaslakDogrulandi = true; // pragmatik mod: verify=false olsa da akışa izin
             gibSetFlowEnabled(true);
             document.getElementById('gib_uuid').value = j.uuid || '';
             document.getElementById('gib_oid').value = j.oid || '';
+            var elapsed = Math.floor((Date.now() - startedAt) / 1000);
             document.getElementById('gib_manual_status').textContent =
-              (j.mesaj || 'Taslak oluşturuldu.') + ' UUID: ' + (j.uuid || '-');
+              (j.mesaj || 'Taslak oluşturuldu.') + ' UUID: ' + (j.uuid || '-') + ' (' + elapsed + ' sn)';
             return;
           }
 
           var msg = (j && j.mesaj) || 'Taslak gönderilemedi';
+          if (j && j.taslak_raw) msg += ' | Ham yanıt: ' + j.taslak_raw;
+          if (j && j.payload_debug) msg += ' | Payload: ' + j.payload_debug;
+          if (j && j.gonderilen_debug) msg += ' | Gonderilen: ' + j.gonderilen_debug;
           var beklemeGecikmesi = /portal listesinde bulunamad/i.test(msg) || (j && j.taslak_dogrulandi === false);
           if (beklemeGecikmesi && attempt < MAX_RETRY) {
             document.getElementById('gib_manual_status').textContent =
@@ -1259,6 +1341,7 @@ function gibTaslakGonder() {
           }
           throw new Error(msg);
         } catch (err) {
+          if (hardGuardHit) return;
           if (attempt < MAX_RETRY && err && err.name === 'AbortError') {
             document.getElementById('gib_manual_status').textContent =
               'GİB yanıtı gecikti. ' + attempt + '/' + MAX_RETRY +
@@ -1267,7 +1350,7 @@ function gibTaslakGonder() {
             continue;
           }
           var em = (err && err.name === 'AbortError')
-            ? 'İstek zaman aşımına uğradı. GİB servisinden yanıt gelmedi.'
+            ? 'İstek zaman aşımına uğradı (her denemede daha uzun süre beklendi). GİB gecikiyor olabilir; sonra tekrar deneyin.'
             : ((err && err.message) || err);
           throw new Error(em);
         }
@@ -1275,10 +1358,23 @@ function gibTaslakGonder() {
       throw new Error('Taslak portalda doğrulanamadı. Lütfen kısa süre sonra tekrar deneyin.');
     })()
       .catch(function(err){
+        if (hardGuardHit) return;
+        if (err && Number(err.httpStatus || 0) === 504) {
+          document.getElementById('gib_manual_status').textContent =
+            'GİB servisinden zamanında yanıt alınamadı (504). Birkaç dakika sonra tekrar deneyin.';
+          return;
+        }
+        if (String((err && err.message) || '').indexOf('HTTP 0') >= 0) {
+          document.getElementById('gib_manual_status').textContent =
+            'XHR kanalı koptu (HTTP 0). Sayfa yönlendirilmedi; lütfen tekrar deneyin. Devam ederse tarayıcıyı yenileyip yeniden giriş yapın.';
+          return;
+        }
         document.getElementById('gib_manual_status').textContent = 'GİB taslak hatası: ' + ((err && err.message) || err);
       })
       .finally(function(){
-        autoSetBusy(btn, false);
+        clearInterval(progressTimer);
+        clearTimeout(hardGuard);
+        if (!hardGuardHit) autoSetBusy(btn, false);
       });
 }
 
@@ -2263,7 +2359,7 @@ function faturaRaporFirmaDurumPillDblClick(ev) {
 var FATURA_RAPOR_THEAD_DETAY_HTML = (
     '<th class="ch-n" title="Seç"><input type="checkbox" id="fatura_rapor_hepsini_sec" title="Tümünü seç"></th>' +
     '<th class="goz-n" title="Önizle"></th>' +
-    '<th>Tarih</th><th>Fatura no</th><th>Müşteri</th><th>Satır</th><th>Açıklama</th>' +
+    '<th>Tarih</th><th>Fatura no</th><th>Müşteri</th><th>Satır</th>' +
     '<th class="num">Miktar</th><th>Birim</th><th class="num">Birim fiyat</th><th class="num">İskonto</th>' +
     '<th class="num">KDV %</th><th class="num">Net</th><th class="num">KDV tutarı</th><th class="num">Satır toplam</th>' +
     '<th class="num">Fatura genel</th><th>ETTN</th>'
@@ -3525,7 +3621,6 @@ function faturaRaporYukle() {
                     '<td>' + (s.fatura_no || '') + '</td>' +
                     '<td>' + musEsc + '</td>' +
                     '<td>' + (s.satir_no != null ? s.satir_no : '') + '</td>' +
-                    '<td>' + (s.satir_aciklama || '').replace(/</g, '&lt;') + '</td>' +
                     '<td class="num">' + fmt(s.miktar) + '</td>' +
                     '<td>' + (s.birim || '') + '</td>' +
                     '<td class="num">' + fmt(s.birim_fiyat) + '</td>' +
@@ -3621,9 +3716,9 @@ function faturaRaporSecilenleriSil() {
 
 (function initFaturaRaporSortResizeHelpers() {
     // localStorage: tablo ayarları (sütun genişliği + sıralama)
-    var LS_SORT = 'fatura_rapor_sort_v1';
-    var LS_WIDTHS = 'fatura_rapor_col_width_v1';
-    var NUM_COLS = { 5: true, 7: true, 9: true, 10: true, 11: true, 12: true, 13: true, 14: true, 15: true };
+    var LS_SORT = 'fatura_rapor_sort_v2';
+    var LS_WIDTHS = 'fatura_rapor_col_width_v2';
+    var NUM_COLS = { 5: true, 6: true, 8: true, 9: true, 10: true, 11: true, 12: true, 13: true, 14: true };
 
     window.faturaRaporReadSortCfg = function () {
         if (typeof faturaRaporAyarlariKaydetAktifMi === 'function' && !faturaRaporAyarlariKaydetAktifMi()) return null;
@@ -5165,7 +5260,7 @@ function finansGibRaporYukle(usePortal) {
             else if (typeof faturaRaporGorunumUI === 'function') faturaRaporGorunumUI();
             if (typeof faturaRaporFirmaPrefsHydrateFromServer === 'function') faturaRaporFirmaPrefsHydrateFromServer();
             if ((window.location.hash || '').toLowerCase() === '#gib-rapor' && typeof window.switchTab === 'function') {
-                window.switchTab(4);
+                window.switchTab(5);
             }
         } catch (errInit) {
             console.warn('Finans ilk yükleme:', errInit);

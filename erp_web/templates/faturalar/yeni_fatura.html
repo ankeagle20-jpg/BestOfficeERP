@@ -305,6 +305,7 @@
             GİB her zaman <strong>kayıtlı fatura satırına</strong> bağlanır — ekrandaki tutar/müşteri ile karışmaması için önce <strong>Taslak Kaydet</strong> edin.
             <strong>Fatura ID</strong> alanı bu müşteri için son kayıtla dolar; yeni faturada önce kayıt, sonra GİB.
             <strong>Son Faturayı Getir</strong> yalnızca formdaki müşterinin son faturasını getirir (başka müşterinin ID’si kullanılmaz).
+            <strong>GİB Fatura Önizle</strong> (Fatura ID ile): GİB’e gitmeden önce <code>dispatch</code> için üretilen <code>jp</code> JSON’unu yeni sekmede gösterir (MERNIS + çok satırlı tablo; taslak oluşturmaz). UUID ile: kayıtlı GİB HTML önizlemesi.
         </p>
         <div class="gib-yeni-row">
             <label>Fatura ID <input type="number" id="yeni-gib-fatura-id" min="1" placeholder="örn. 196" value="{% if default_gib_fatura_id %}{{ default_gib_fatura_id }}{% elif son_fatura_id_for_gib %}{{ son_fatura_id_for_gib }}{% endif %}"></label>
@@ -315,7 +316,7 @@
             <label>SMS Kod <input type="text" id="yeni-gib-sms-kod" placeholder="B2Z7V5"></label>
             <button type="button" class="gib-yeni-btn onay" id="yeni-gib-sms-onay-btn">SMS ile Onayla</button>
             <button type="button" class="gib-yeni-btn olustur" id="yeni-gib-fatura-olustur-btn"><i class="fa fa-file-invoice"></i> Fatura Oluştur</button>
-            <button type="button" class="gib-yeni-btn onizleme" id="yeni-gib-onizleme-btn"><i class="fa fa-eye"></i> GİB Fatura Önizle</button>
+            <button type="button" class="gib-yeni-btn onizleme" id="yeni-gib-onizleme-btn" title="Fatura ID: GİB dispatch jp özeti (JSON). UUID: portal HTML."><i class="fa fa-eye"></i> GİB Fatura Önizle</button>
             <input type="hidden" id="yeni-gib-oid" value="">
         </div>
         <div class="gib-yeni-status" id="yeni-gib-status">Fatura ID girip &quot;GİB Taslak Gönder&quot; ile başlayın.</div>
@@ -406,6 +407,8 @@
         const API_GIB_SMS_ONAY = "{{ url_for('faturalar.api_gib_sms_onay') }}";
         const API_GIB_FATURA_OLUSTUR = "{{ url_for('faturalar.api_gib_fatura_olustur') }}";
         const API_GIB_FATURA_ONIZLEME = "{{ url_for('faturalar.api_gib_fatura_onizleme') }}";
+        /* Kök /api/... yolu app.py ile kayıtlı; /faturalar/api/... blueprint’e bağlı kalıp 404 verebiliyor. */
+        const API_GIB_DISPATCH_ONIZLE = "/api/gib-dispatch-jp-onizle";
         const API_GIB_SON_FATURA = "{{ url_for('faturalar.api_gib_son_fatura') }}";
         const API_FATURA_MUSTERI_BUL = "/faturalar/api/fatura-musteri-bul";
         const SECILI_MUSTERI = {{ (secili_musteri | tojson) if secili_musteri else 'null' }};
@@ -418,6 +421,7 @@
         const SATIR_ACIKLAMA_FROM_URL = {{ (satir_aciklama_url or '') | tojson }};
         const PREFILL_KEY = {{ (fatura_prefill_key or '') | tojson }};
         const DEFAULT_GIB_FATURA_ID = {{ default_gib_fatura_id | tojson }};
+        const YENI_GIB_BOS_INIT = {{ (yeni_gib_bos if yeni_gib_bos is defined else false) | tojson }};
 
         const musteriAra = document.getElementById('musteri-ara');
         const musteriSonuclar = document.getElementById('musteri-sonuclar');
@@ -1195,25 +1199,51 @@
 
         function fetchJsonWithTimeoutYeniGib(url, options, timeoutMs) {
             var ms = timeoutMs || 25000;
-            var ctrl = new AbortController();
-            var t = setTimeout(function () { ctrl.abort(); }, ms);
-            var opts = Object.assign({}, options || {}, { signal: ctrl.signal });
-            return fetch(url, opts)
-                .then(function (r) {
-                    return r.text().then(function (txt) {
-                        var j = {};
-                        try { j = txt ? JSON.parse(txt) : {}; } catch (e) { j = { ok: false, mesaj: txt || ('HTTP ' + r.status) }; }
-                        if (!r.ok) {
-                            var err = new Error((j && j.mesaj) || ('HTTP ' + r.status));
-                            err.httpStatus = r.status;
-                            err.detay = (j && j.detay) ? String(j.detay) : '';
-                            err.dispatch_ham = (j && j.dispatch_ham) ? String(j.dispatch_ham) : '';
-                            throw err;
-                        }
-                        return j;
-                    });
-                })
-                .finally(function () { clearTimeout(t); });
+            return new Promise(function (resolve, reject) {
+                var xhr = new XMLHttpRequest();
+                xhr.open(((options && options.method) || 'GET'), url, true);
+                xhr.withCredentials = true;
+                xhr.timeout = ms;
+                var headers = (options && options.headers) || {};
+                Object.keys(headers).forEach(function (k) {
+                    try { xhr.setRequestHeader(k, headers[k]); } catch (e) {}
+                });
+                xhr.onreadystatechange = function () {
+                    if (xhr.readyState !== 4) return;
+                    if (xhr.status === 0) {
+                        var z = new Error('AbortError');
+                        z.name = 'AbortError';
+                        reject(z);
+                        return;
+                    }
+                    var finalUrl = String(xhr.responseURL || '');
+                    if (/\/login(\?|$)/i.test(finalUrl)) {
+                        var authErr = new Error('Oturum süresi dolmuş. Lütfen sayfayı yenileyip tekrar giriş yapın.');
+                        authErr.code = 'AUTH_REDIRECT';
+                        reject(authErr);
+                        return;
+                    }
+                    var txt = xhr.responseText || '';
+                    var j = {};
+                    try { j = txt ? JSON.parse(txt) : {}; } catch (e2) { j = { ok: false, mesaj: txt || ('HTTP ' + xhr.status) }; }
+                    if (xhr.status < 200 || xhr.status >= 300) {
+                        var err = new Error((j && j.mesaj) || ('HTTP ' + xhr.status));
+                        err.httpStatus = xhr.status;
+                        err.detay = (j && j.detay) ? String(j.detay) : '';
+                        err.dispatch_ham = (j && j.dispatch_ham) ? String(j.dispatch_ham) : '';
+                        reject(err);
+                        return;
+                    }
+                    resolve(j);
+                };
+                xhr.onerror = function () { reject(new Error('NetworkError')); };
+                xhr.ontimeout = function () {
+                    var e = new Error('AbortError');
+                    e.name = 'AbortError';
+                    reject(e);
+                };
+                xhr.send((options && options.body) || null);
+            });
         }
 
         async function fetchJsonWithRetryYeniGib(url, options, timeoutList) {
@@ -1230,6 +1260,91 @@
                 }
             }
             throw lastErr || new Error('İstek başarısız.');
+        }
+
+        function postFormViaHiddenIframeYeniGib(url, dataObj, timeoutMs) {
+            var ms = timeoutMs || 45000;
+            return new Promise(function (resolve, reject) {
+                var iframe = document.getElementById('yeni-gib-hidden-iframe');
+                if (!iframe) {
+                    iframe = document.createElement('iframe');
+                    iframe.id = 'yeni-gib-hidden-iframe';
+                    iframe.name = 'yeni-gib-hidden-iframe';
+                    iframe.style.display = 'none';
+                    document.body.appendChild(iframe);
+                }
+                var done = false;
+                var timer = setTimeout(function () {
+                    if (done) return;
+                    done = true;
+                    reject(new Error('HTTP 0'));
+                }, ms);
+
+                var onLoad = function () {
+                    if (done) return;
+                    try {
+                        var loc = iframe.contentWindow && iframe.contentWindow.location ? String(iframe.contentWindow.location.pathname || '') : '';
+                        if (/\/login(\/|$)/i.test(loc)) {
+                            done = true;
+                            clearTimeout(timer);
+                            iframe.removeEventListener('load', onLoad);
+                            reject(new Error('Oturum süresi dolmuş. Lütfen sayfayı yenileyip tekrar giriş yapın.'));
+                            return;
+                        }
+                        var doc = iframe.contentDocument || (iframe.contentWindow && iframe.contentWindow.document);
+                        var raw = '';
+                        if (doc && doc.body) raw = String(doc.body.textContent || doc.body.innerText || '').trim();
+                        var j = {};
+                        try { j = raw ? JSON.parse(raw) : {}; } catch (e) { j = { ok: false, mesaj: raw || 'HTTP 0' }; }
+                        done = true;
+                        clearTimeout(timer);
+                        iframe.removeEventListener('load', onLoad);
+                        resolve(j);
+                    } catch (ex) {
+                        done = true;
+                        clearTimeout(timer);
+                        iframe.removeEventListener('load', onLoad);
+                        reject(ex);
+                    }
+                };
+                iframe.addEventListener('load', onLoad);
+
+                var form = document.createElement('form');
+                form.method = 'POST';
+                form.action = url;
+                form.target = iframe.name;
+                form.style.display = 'none';
+                var payload = dataObj || {};
+                Object.keys(payload).forEach(function (k) {
+                    var inp = document.createElement('input');
+                    inp.type = 'hidden';
+                    inp.name = k;
+                    inp.value = String(payload[k] == null ? '' : payload[k]);
+                    form.appendChild(inp);
+                });
+                document.body.appendChild(form);
+                form.submit();
+                form.remove();
+            });
+        }
+
+        function postFormInNewTabYeniGib(url, dataObj) {
+            var form = document.createElement('form');
+            form.method = 'POST';
+            form.action = url;
+            form.target = '_blank';
+            form.style.display = 'none';
+            var payload = dataObj || {};
+            Object.keys(payload).forEach(function (k) {
+                var inp = document.createElement('input');
+                inp.type = 'hidden';
+                inp.name = k;
+                inp.value = String(payload[k] == null ? '' : payload[k]);
+                form.appendChild(inp);
+            });
+            document.body.appendChild(form);
+            form.submit();
+            form.remove();
         }
 
         function yeniGibSetBusy(btn, busy, textBusy) {
@@ -1259,7 +1374,7 @@
                 if (smsSendBtn) smsSendBtn.disabled = !on;
                 if (smsOnayBtn) smsOnayBtn.disabled = !on;
                 if (faturaOlusturBtn) faturaOlusturBtn.disabled = !on;
-                if (gibOnizlemeBtn) gibOnizlemeBtn.disabled = !on;
+                /* GİB önizleme: Fatura ID ile dispatch jp özeti her zaman kullanılabilir; SMS akışına bağlı değil. */
             }
 
             function yeniGibSonFaturayiGetir(opts) {
@@ -1306,15 +1421,31 @@
                 }
                 var btn = document.getElementById('yeni-gib-taslak-btn');
                 yeniGibSetBusy(btn, true, 'Gönderiliyor...');
+                var startedAt = Date.now();
+                setStatus('Adım 1/3: Talep sunucuya gönderiliyor...');
+                var progressTimer = setInterval(function () {
+                    var s = Math.floor((Date.now() - startedAt) / 1000);
+                    setStatus('Adım 2/3: GİB yanıtı bekleniyor... (' + s + ' sn)');
+                }, 8000);
+                var hardGuardHit = false;
+                var hardGuard = setTimeout(function () {
+                    hardGuardHit = true;
+                    setSmsFlowEnabled(false);
+                    setStatus('GİB isteği 150 sn içinde tamamlanamadı; süreç durduruldu. Tekrar deneyin.');
+                    yeniGibSetBusy(btn, false);
+                }, 160000);
                 var midForm = parseInt(String((document.getElementById('musteri-id') || {}).value || '0'), 10);
                 var taslakBody = { fatura_id: faturaId };
                 if (midForm > 0) taslakBody.beklenen_musteri_id = midForm;
-                fetchJsonWithRetryYeniGib(API_GIB_TASLAK, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(taslakBody)
-                }, [45000, 90000])
+                /* Bazı tarayıcı/proxy kombinasyonlarında JSON POST HTTP 0 verebildiği için GET fallback'i ana akış yapıldı. */
+                var taslakUrl = API_GIB_TASLAK
+                    + '?fatura_id=' + encodeURIComponent(String(faturaId))
+                    + (midForm > 0 ? ('&beklenen_musteri_id=' + encodeURIComponent(String(midForm))) : '');
+                fetchJsonWithRetryYeniGib(taslakUrl, {
+                    method: 'GET'
+                }, [145000])
                     .then(function (j) {
+                        if (hardGuardHit) return;
                         // Her denemede önce SMS akışını kapat; sadece doğrulanan taslakta aç.
                         setSmsFlowEnabled(false);
                         // Backend doğrulama hatası dönse bile uuid/oid geldiyse alanlara yaz.
@@ -1323,23 +1454,40 @@
                         if (!j || !j.ok) {
                             var baseMsg = (j && j.mesaj) || 'Taslak gönderilemedi';
                             if (j && j.taslak_raw) baseMsg += ' | Ham yanıt: ' + j.taslak_raw;
+                            if (j && j.payload_debug) baseMsg += ' | Payload: ' + j.payload_debug;
+                            if (j && j.gonderilen_debug) baseMsg += ' | Gonderilen: ' + j.gonderilen_debug;
                             throw new Error(baseMsg);
                         }
                         document.getElementById('yeni-gib-uuid').value = j.uuid || '';
                         document.getElementById('yeni-gib-oid').value = j.oid || '';
                         setSmsFlowEnabled(true);
+                        var elapsed = Math.floor((Date.now() - startedAt) / 1000);
                         var okMsg = (j.mesaj || 'Taslak oluşturuldu.') + ' UUID: ' + (j.uuid || '-');
                         if (j && j.taslak_raw) okMsg += ' | Ham yanıt: ' + j.taslak_raw;
+                        okMsg += ' (' + elapsed + ' sn)';
                         setStatus(okMsg);
                     })
                     .catch(function (err) {
+                        if (hardGuardHit) return;
                         setSmsFlowEnabled(false);
+                        if (err && Number(err.httpStatus || 0) === 504) {
+                            setStatus('GİB servisinden zamanında yanıt alınamadı (504). Birkaç dakika sonra tekrar deneyin.');
+                            return;
+                        }
+                        if (String((err && err.message) || '').indexOf('HTTP 0') >= 0) {
+                            setStatus('Tarayıcı XHR kanalı koptu (HTTP 0). Sayfa yönlendirilmedi; tekrar deneyin. Devam ederse sayfayı yenileyip yeniden giriş yapın.');
+                            return;
+                        }
                         var msg = (err && err.name === 'AbortError')
-                            ? 'İstek zaman aşımına uğradı. GİB servisi geç yanıt veriyor olabilir; lütfen tekrar deneyin.'
+                            ? 'İstek zaman aşımına uğradı. GİB yoğun olabilir; bir süre sonra tekrar deneyin veya ağ/VPN’i kontrol edin.'
                             : ('GİB taslak hatası: ' + ((err && err.message) || err));
                         setStatus(msg);
                     })
-                    .finally(function () { yeniGibSetBusy(btn, false); });
+                    .finally(function () {
+                        clearInterval(progressTimer);
+                        clearTimeout(hardGuard);
+                        if (!hardGuardHit) yeniGibSetBusy(btn, false);
+                    });
             });
 
             document.getElementById('yeni-gib-sms-send-btn').addEventListener('click', function () {
@@ -1384,6 +1532,8 @@
             if (DEFAULT_GIB_FATURA_ID != null && DEFAULT_GIB_FATURA_ID >= 1) {
                 if (idEl0) idEl0.value = String(DEFAULT_GIB_FATURA_ID);
                 setStatus('Fatura ID #' + DEFAULT_GIB_FATURA_ID + ' (sayfa adresinden). «GİB Taslak Gönder» ile devam edin.');
+            } else if (YENI_GIB_BOS_INIT === true) {
+                setStatus('Yeni fatura: önce «Taslak Kaydet»; GİB için «Son Faturayı Getir» veya kayıttan sonra gelen ID’yi kullanın.');
             } else if (idVal0) {
                 setStatus('Fatura ID #' + idVal0 + ' (bu müşterinin son kaydı). Yeni tutar için önce «Kaydet», sonra GİB.');
             } else {
@@ -1468,20 +1618,20 @@
                 gibOnizlemeBtn.addEventListener('click', function () {
                     var faturaId = parseInt((document.getElementById('yeni-gib-fatura-id') || {}).value || '0', 10);
                     var uuid = ((document.getElementById('yeni-gib-uuid') || {}).value || '').trim();
-                    if (!faturaId && !uuid) {
-                        setStatus('Önizleme için fatura ID veya UUID gerekli.');
+                    if (faturaId && faturaId >= 1) {
+                        var u = API_GIB_DISPATCH_ONIZLE + '?fatura_id=' + encodeURIComponent(String(faturaId)) + '&format=html&_=' + Date.now();
+                        window.open(u, '_blank', 'noopener');
+                        setStatus('GİB dispatch jp özeti yeni sekmede (Fatura #' + faturaId + '). GİB’e bir kez bağlanır; taslak oluşturulmaz.');
                         return;
                     }
-                    var q = [];
-                    // Öncelik her zaman fatura_id: DB'deki en güncel ETTN/UUID ile doğru taslağı aç.
-                    // Eski UUID input'ta kalsa bile yanlış taslağa gitmesin.
-                    if (faturaId) {
-                        q.push('fatura_id=' + encodeURIComponent(String(faturaId)));
-                    } else if (uuid) {
-                        q.push('uuid=' + encodeURIComponent(uuid));
+                    if (!uuid) {
+                        setStatus('Önce Fatura ID girin (dispatch JSON özeti) veya taslak sonrası UUID (portal HTML).');
+                        return;
                     }
+                    var q = ['uuid=' + encodeURIComponent(uuid)];
                     var url = API_GIB_FATURA_ONIZLEME + '?' + q.join('&') + '&_=' + Date.now();
                     window.open(url, '_blank', 'noopener');
+                    setStatus('GİB portal HTML önizlemesi yeni sekmede.');
                 });
             }
         })();

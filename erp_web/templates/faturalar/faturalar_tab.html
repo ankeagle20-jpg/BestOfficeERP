@@ -684,6 +684,10 @@
             <button type="button" style="background:#00bcd4;color:#fff;" onclick="faturaKesilecekAdaylariYukle()">Listeyi yenile</button>
             <button type="button" style="background:#546e7a;color:#fff;" onclick="adayTumunuSec()">Tümünü seç</button>
             <button type="button" style="background:#607d8b;color:#fff;" onclick="adaySecimiKaldir()">Seçimi kaldır</button>
+            <label style="display:inline-flex;align-items:center;gap:6px;color:#cfe8ff;font-size:12px;padding:0 6px;">
+                <input type="checkbox" id="aday_send_gib" style="transform:scale(1.05);">
+                Oluşturma sonrası GİB taslak gönder
+            </label>
             <button type="button" id="aday_olustur_btn" style="background:#4caf50;color:#fff;" onclick="adaySecilenlereFaturaOlustur()">Seçilenlere otomatik fatura oluştur</button>
             <button type="button" style="background:#455a64;color:#fff;" onclick="faturaKesilecekPanelKapat()">Kapat</button>
         </div>
@@ -774,7 +778,7 @@
                         </span>
                     </td>
                     <td data-col-key="musteri">{{ f.musteri_adi_goster or f.customer_name or f.musteri_adi or '—' }}</td>
-                    <td data-col-key="tutar" data-kdv="{{ (f.kdv_tutar|default(0)|float) }}">{{ "{:,.2f}".format((f.toplam|default(0)|float)).replace(",", "X").replace(".", ",").replace("X", ".") }} TL</td>
+                    <td data-col-key="tutar" data-kdv="{{ (f.kdv_tutar|default(0)|float) }}"{% if erp_taslak_modu %} data-kdv-no-estimate="1"{% endif %}>{{ "{:,.2f}".format((f.toplam|default(0)|float)).replace(",", "X").replace(".", ",").replace("X", ".") }} TL</td>
                     <td data-col-key="odeme_durum">
                         {% if f.durum %}
                         <span class="badge badge-{{ 'odendi' if f.durum == 'odendi' else 'odenmedi' }}">
@@ -786,10 +790,18 @@
                     </td>
                     <td data-col-key="islem">
                         {% if f.id %}
+                        <span style="display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap;">
                         <a href="/faturalar/onizleme/{{ f.id }}" target="_blank" title="Faturayı görüntüle"
                            style="display:inline-block;background:#4fc3f7;color:white;border:none;padding:4px 10px;border-radius:3px;cursor:pointer;font-size:11px;text-decoration:none;">
                             <i class="fa fa-eye"></i>
                         </a>
+                        {% if erp_taslak_modu and f.musteri_id %}
+                        <a href="/faturalar/yeni?musteri_id={{ f.musteri_id }}&amp;yeni_gib_bos=1" target="_blank" title="Bu firma için yeni fatura (GİB için önce kaydedin)"
+                           style="display:inline-block;background:#26a69a;color:white;border:none;padding:4px 8px;border-radius:3px;cursor:pointer;font-size:11px;text-decoration:none;white-space:nowrap;">
+                            <i class="fa fa-file-invoice"></i> Fatura oluştur
+                        </a>
+                        {% endif %}
+                        </span>
                         {% elif f.duzenle_url %}
                         <a href="{{ f.duzenle_url }}" target="_blank" title="Faturayı düzenle"
                            style="display:inline-block;background:#26a69a;color:white;border:none;padding:4px 10px;border-radius:3px;cursor:pointer;font-size:11px;text-decoration:none;">
@@ -1034,16 +1046,42 @@
             });
     }
 
+    function _taslakKdvToplamHesapla(j) {
+        if (!j) return null;
+        if (j.kdv_toplam != null && Number.isFinite(Number(j.kdv_toplam))) return Number(j.kdv_toplam);
+        var items = j.items || [];
+        if (!items.length) return 0;
+        var s = 0;
+        for (var i = 0; i < items.length; i++) {
+            var it = items[i];
+            if (!it) continue;
+            var t = Number(it.toplam);
+            var n = Number(it.tutar);
+            if (Number.isFinite(t) && Number.isFinite(n) && t > 0 && n >= 0 && n <= t + 0.02) {
+                var im = Math.round(Math.max(0, t - n) * 100) / 100;
+                if (im <= t * 0.46) { s += im; continue; }
+            }
+            var k = Number(it.kdv_tutar);
+            if (Number.isFinite(k) && k >= 0) s += k;
+        }
+        return Math.round(s * 100) / 100;
+    }
+
     function _taslakRender(j) {
         document.getElementById('stat-toplam-baslik').textContent = 'Taslak Toplam';
         document.getElementById('stat-toplam-deger').textContent = _formatTR(j.toplam);
         var tfoot = document.getElementById('faturalar_toplam_satiri');
         if (tfoot) {
-            var toplamHucre = tfoot.querySelector('[id$="tutar_hucre"]') || tfoot.querySelector('td:last-child');
+            var toplamHucre = tfoot.querySelector('#faturalar_toplam_tutar_hucre') || tfoot.querySelector('[id$="tutar_hucre"]');
             if (toplamHucre) toplamHucre.textContent = _formatTR(j.toplam);
         }
         _taslakTbodyGoster(j.items || []);
         if (typeof toplamSatiriGuncelle === 'function') toplamSatiriGuncelle();
+        var kdvFoot = document.getElementById('faturalar_kdv_toplam_tutar_hucre');
+        if (kdvFoot) {
+            var kdvSum = _taslakKdvToplamHesapla(j);
+            if (kdvSum != null && Number.isFinite(kdvSum)) kdvFoot.textContent = _formatTR(kdvSum);
+        }
     }
 
     var _faturaOrigRows = null;
@@ -1064,13 +1102,22 @@
                 var editLink = f.duzenle_url ? ('<a href="' + f.duzenle_url + '" target="_blank" title="Düzenle" style="color:#e0f7fa;text-decoration:none;border-bottom:1px dotted rgba(224,247,250,.35);">' + (f.fatura_no || '—') + '</a>') : (f.fatura_no || '—');
                 var durumBadge = '<span class="badge badge-gib-taslak">ERP Taslak</span>';
                 var odeBadge = f.durum ? ('<span class="badge badge-' + (f.durum === 'odendi' ? 'odendi' : 'odenmedi') + '">' + f.durum + '</span>') : '<span style="color:#90a4ae;">—</span>';
-                var islemBtn = f.id ? ('<a href="/faturalar/onizleme/' + f.id + '" target="_blank" style="display:inline-block;background:#4fc3f7;color:white;padding:4px 10px;border-radius:3px;font-size:11px;text-decoration:none;"><i class="fa fa-eye"></i></a>') : '—';
+                var mid = parseInt(String(f.musteri_id || '0'), 10);
+                var yeniFaturaBtn = (f.id && mid > 0)
+                  ? ('<a href="/faturalar/yeni?musteri_id=' + encodeURIComponent(String(mid)) + '&yeni_gib_bos=1" target="_blank" title="Bu firma için yeni fatura (GİB için önce kaydedin)" style="display:inline-block;background:#26a69a;color:white;padding:4px 8px;border-radius:3px;font-size:11px;text-decoration:none;white-space:nowrap;"><i class="fa fa-file-invoice"></i> Fatura oluştur</a>')
+                  : '';
+                var islemBtn = f.id
+                  ? ('<span style="display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap;">' +
+                      '<a href="/faturalar/onizleme/' + f.id + '" target="_blank" style="display:inline-block;background:#4fc3f7;color:white;padding:4px 10px;border-radius:3px;font-size:11px;text-decoration:none;"><i class="fa fa-eye"></i></a>' +
+                      yeniFaturaBtn +
+                    '</span>')
+                  : '—';
                 html += '<tr>';
                 html += '<td data-col-key="tarih">' + tarih + '</td>';
                 html += '<td data-col-key="fatura_no">' + editLink + '</td>';
                 html += '<td data-col-key="gib_durum">' + durumBadge + '</td>';
                 html += '<td data-col-key="musteri">' + (f.musteri_adi || '—') + '</td>';
-                html += '<td data-col-key="tutar" data-kdv="' + (f.kdv_tutar||0) + '">' + tutarTR + '</td>';
+                html += '<td data-col-key="tutar" data-kdv="' + (Number(f.kdv_tutar) || 0) + '" data-kdv-no-estimate="1">' + tutarTR + '</td>';
                 html += '<td data-col-key="odeme_durum">' + odeBadge + '</td>';
                 html += '<td data-col-key="islem">' + islemBtn + '</td>';
                 html += '<td data-col-key="odeme_duzeni" class="odeme-duzeni-cell" data-musteri-id="' + (f.musteri_id || '') + '" data-odeme-duzeni="' + (f.odeme_duzeni || 'aylik') + '" data-odeme-duzeni-manuel="' + (f.odeme_duzeni_manuel || '') + '" onclick="odemeDuzeniEditorAc(this);event.stopPropagation();">' + (f.odeme_duzeni_display || '—') + '</td>';
@@ -1399,6 +1446,7 @@
     function adaySecilenlereFaturaOlustur() {
         var yil = document.getElementById('yil').value;
         var ay = document.getElementById('ay').value;
+        var sendGib = !!(document.getElementById('aday_send_gib') && document.getElementById('aday_send_gib').checked);
         var ids = [];
         document.querySelectorAll('.aday-cb:checked').forEach(function(cb){
             ids.push(parseInt(cb.value || '0', 10));
@@ -1408,7 +1456,9 @@
             alert('En az 1 müşteri seçiniz.');
             return;
         }
-        if (!confirm(ids.length + ' müşteri için otomatik fatura oluşturulsun mu?')) return;
+        var msg = ids.length + ' müşteri için otomatik fatura oluşturulsun mu?';
+        if (sendGib) msg += '\nOluşan faturalar için GİB taslak da gönderilecek.';
+        if (!confirm(msg)) return;
         var btn = document.getElementById('aday_olustur_btn');
         btn.disabled = true;
         btn.style.opacity = '0.7';
@@ -1417,11 +1467,15 @@
         fetch('/faturalar/api/auto-fatura/secili-olustur', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({yil: yil, ay: ay, musteri_ids: ids})
+            body: JSON.stringify({yil: yil, ay: ay, musteri_ids: ids, send_gib: sendGib})
         }).then(function(r){ return r.json(); })
           .then(function(j){
             if (!j || !j.ok) throw new Error((j && j.mesaj) || 'İşlem başarısız');
-            alert('Tamamlandı. Oluşan: ' + (j.created_count || 0) + ', mevcut: ' + (j.exists_count || 0) + ', atlanan: ' + (j.skip_count || 0) + ', hatalı: ' + (j.fail_count || 0));
+            var ozet = 'Tamamlandı. Oluşan: ' + (j.created_count || 0) + ', mevcut: ' + (j.exists_count || 0) + ', atlanan: ' + (j.skip_count || 0) + ', hatalı: ' + (j.fail_count || 0);
+            if (sendGib) {
+                ozet += '\nGİB taslak: başarılı ' + (j.gib_sent_count || 0) + ', hatalı ' + (j.gib_fail_count || 0) + ', zaten bağlı ' + (j.gib_already_count || 0);
+            }
+            alert(ozet);
             faturaKesilecekAdaylariYukle();
             filtrele();
           })
@@ -1518,10 +1572,12 @@
                     sum += satirToplam;
                     var kdvRaw = hucre.getAttribute('data-kdv');
                     var satirKdv = Number(kdvRaw || 0);
-                    if (!Number.isFinite(satirKdv) || satirKdv <= 0) {
-                        // GİB portal satırlarında kdv_tutar gelmeyebilir; varsayılan KDV %20.
+                    var noEst = hucre.getAttribute('data-kdv-no-estimate') === '1';
+                    if (!noEst && (!Number.isFinite(satirKdv) || satirKdv <= 0)) {
+                        // GİB portal satırlarında kdv_tutar gelmeyebilir; varsayılan KDV %20 (KDV dahil tutar).
                         satirKdv = satirToplam > 0 ? (satirToplam / 6.0) : 0;
                     }
+                    if (!Number.isFinite(satirKdv) || satirKdv < 0) satirKdv = 0;
                     kdvSum += satirKdv;
                 });
                 toplamEl.textContent = formatNumberTR(sum) + ' TL';

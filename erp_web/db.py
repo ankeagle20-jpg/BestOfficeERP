@@ -1674,19 +1674,22 @@ def ensure_grup2_etiketleri_table():
 
 
 _customers_grup2_migration_done = False
+_customers_grup2_column_ensured = False
 
 
 def ensure_customers_grup2_secimleri():
     """customers.grup2_secimleri: slug listesi (TEXT[]). bizim_hesap ile geriye dönük uyum."""
-    global _customers_grup2_migration_done
+    global _customers_grup2_migration_done, _customers_grup2_column_ensured
     ensure_customers_bizim_hesap()
-    try:
-        execute(
-            "ALTER TABLE customers ADD COLUMN IF NOT EXISTS grup2_secimleri TEXT[] NOT NULL DEFAULT ARRAY[]::text[]"
-        )
-    except Exception as e:
-        print(f"customers.grup2_secimleri: {e}")
-        return
+    if not _customers_grup2_column_ensured:
+        try:
+            execute(
+                "ALTER TABLE customers ADD COLUMN IF NOT EXISTS grup2_secimleri TEXT[] NOT NULL DEFAULT ARRAY[]::text[]"
+            )
+            _customers_grup2_column_ensured = True
+        except Exception as e:
+            print(f"customers.grup2_secimleri: {e}")
+            return
     if _customers_grup2_migration_done:
         return
     try:
@@ -1728,6 +1731,40 @@ def ensure_grup2_bizim_hesap_into_array():
     except Exception as e:
         print(f"grup2 bizim_hesap dizi senkron: {e}")
     _grup2_bh_array_sync_v1_done = True
+
+
+_cari_kart_perf_indexes_done = False
+
+
+def ensure_cari_kart_perf_indexes():
+    """Cari Kart ve müşteri kartı ekranı için kritik indeksler (tek seferlik).
+
+    Not: IF NOT EXISTS ile güvenli; ilk çalıştırma maliyetli olabilir ama sonrasında tıklama hızını ciddi artırır.
+    """
+    global _cari_kart_perf_indexes_done
+    if _cari_kart_perf_indexes_done:
+        return
+    try:
+        # Tahsilatlar: müşteri + tarih filtreleri
+        execute("CREATE INDEX IF NOT EXISTS idx_tahsilatlar_musteri_tarih ON tahsilatlar (musteri_id, tahsilat_tarihi)")
+        execute("CREATE INDEX IF NOT EXISTS idx_tahsilatlar_customer_tarih ON tahsilatlar (customer_id, tahsilat_tarihi)")
+        execute("CREATE INDEX IF NOT EXISTS idx_tahsilatlar_fatura_id ON tahsilatlar (fatura_id)")
+    except Exception as e:
+        print(f"idx_tahsilatlar*: {e}")
+    try:
+        # Faturalar: müşteri + durum + vade/tarih sorguları
+        execute("CREATE INDEX IF NOT EXISTS idx_faturalar_musteri_vade ON faturalar (musteri_id, vade_tarihi)")
+        execute("CREATE INDEX IF NOT EXISTS idx_faturalar_musteri_tarih ON faturalar (musteri_id, fatura_tarihi)")
+        execute("CREATE INDEX IF NOT EXISTS idx_faturalar_musteri_durum ON faturalar (musteri_id, durum)")
+    except Exception as e:
+        print(f"idx_faturalar*: {e}")
+    try:
+        # Sözleşme motoru
+        execute("CREATE INDEX IF NOT EXISTS idx_contracts_musteri ON contracts (musteri_id)")
+        execute("CREATE INDEX IF NOT EXISTS idx_installments_musteri_vade ON contract_installments (musteri_id, vade_tarihi)")
+    except Exception as e:
+        print(f"idx_contracts*: {e}")
+    _cari_kart_perf_indexes_done = True
 
 
 _customers_durum_migration_done = False
@@ -1815,6 +1852,27 @@ def ensure_tahsilatlar_columns():
         execute("ALTER TABLE tahsilatlar ADD COLUMN IF NOT EXISTS tahsil_eden TEXT")
     except Exception as e:
         print(f"tahsilatlar.tahsil_eden: {e}")
+    try:
+        execute("ALTER TABLE tahsilatlar ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ")
+    except Exception as e:
+        print(f"tahsilatlar.created_at: {e}")
+    try:
+        execute("ALTER TABLE tahsilatlar ALTER COLUMN created_at SET DEFAULT NOW()")
+    except Exception as e:
+        print(f"tahsilatlar.created_at default: {e}")
+    try:
+        execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_tahsilatlar_makbuz_no_trim
+            ON tahsilatlar (TRIM(makbuz_no))
+            WHERE makbuz_no IS NOT NULL AND TRIM(makbuz_no) <> ''
+            """
+        )
+    except Exception as e:
+        print(
+            "tahsilatlar.makbuz_no benzersiz indeks atlanıyor (aynı numaralı eski kayıtlar varsa önce düzeltin):",
+            e,
+        )
 
 
 def ensure_banka_hesaplar_columns():

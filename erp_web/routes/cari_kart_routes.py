@@ -131,6 +131,19 @@ def _cari_hareketler(musteri_id):
             "id": "t-" + str(r.get("id")), "belge_no": r.get("belge_no") or "", "tarih": str(r.get("tarih") or "")[:10],
             "tur": "Tahsilat", "borc": 0, "alacak": float(r.get("tutar") or 0), "vade_tarihi": None,
         })
+    try:
+        from routes.giris_routes import _pasif_kapanis_son_dahil_gun, _row_to_plain_dict
+        _kap_row = fetch_one(
+            "SELECT durum, kapanis_tarihi, kapanis_sonrasi_borc_ay FROM customers WHERE id = %s",
+            (musteri_id,),
+        )
+        if _kap_row:
+            _mx = _pasif_kapanis_son_dahil_gun(_row_to_plain_dict(_kap_row))
+            if _mx:
+                _mxs = _mx.isoformat()
+                rows = [x for x in rows if str(x.get("tarih") or "")[:10] <= _mxs]
+    except Exception:
+        logger.debug("cari_kart pasif kapanış süzmesi atlandı", exc_info=True)
     rows.sort(key=lambda x: (x["tarih"], x["tur"] == "Fatura" and 0 or 1))
     bakiye = 0
     for r in rows:
@@ -609,6 +622,121 @@ def api_create_group():
     if not row:
         return jsonify({"ok": False, "mesaj": "Grup oluşturulamadı."}), 500
     return jsonify({"ok": True, "group": row})
+
+
+@bp.route("/api/groups/<int:group_id>", methods=["PUT"])
+@giris_gerekli
+def api_update_group(group_id):
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"ok": False, "mesaj": "Grup adı gerekli."}), 400
+    row = execute_returning(
+        """
+        UPDATE customers
+           SET name = %s,
+               musteri_adi = %s
+         WHERE id = %s
+           AND COALESCE(is_group, FALSE) = TRUE
+        RETURNING id, name
+        """,
+        (name, name, group_id),
+    )
+    if not row:
+        return jsonify({"ok": False, "mesaj": "Grup bulunamadı."}), 404
+    return jsonify({"ok": True, "group": row})
+
+
+@bp.route("/api/groups/<int:group_id>", methods=["DELETE"])
+@giris_gerekli
+def api_delete_group(group_id):
+    child = fetch_one(
+        """
+        SELECT id
+        FROM customers
+        WHERE parent_id = %s
+        LIMIT 1
+        """,
+        (group_id,),
+    )
+    if child:
+        return jsonify({"ok": False, "mesaj": "Bu gruba bağlı cariler var. Önce gruptan çıkarın."}), 400
+    row = execute_returning(
+        """
+        DELETE FROM customers
+        WHERE id = %s
+          AND COALESCE(is_group, FALSE) = TRUE
+        RETURNING id
+        """,
+        (group_id,),
+    )
+    if not row:
+        return jsonify({"ok": False, "mesaj": "Grup bulunamadı."}), 404
+    return jsonify({"ok": True})
+
+
+@bp.route("/api/groups/update", methods=["POST"])
+@giris_gerekli
+def api_update_group_post():
+    data = request.get_json(silent=True) or request.form
+    try:
+        group_id = int(data.get("group_id") or 0)
+    except (TypeError, ValueError):
+        group_id = 0
+    if group_id <= 0:
+        return jsonify({"ok": False, "mesaj": "Geçerli grup seçilmelidir."}), 400
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"ok": False, "mesaj": "Grup adı gerekli."}), 400
+    row = execute_returning(
+        """
+        UPDATE customers
+           SET name = %s,
+               musteri_adi = %s
+         WHERE id = %s
+           AND COALESCE(is_group, FALSE) = TRUE
+        RETURNING id, name
+        """,
+        (name, name, group_id),
+    )
+    if not row:
+        return jsonify({"ok": False, "mesaj": "Grup bulunamadı."}), 404
+    return jsonify({"ok": True, "group": row})
+
+
+@bp.route("/api/groups/delete", methods=["POST"])
+@giris_gerekli
+def api_delete_group_post():
+    data = request.get_json(silent=True) or request.form
+    try:
+        group_id = int(data.get("group_id") or 0)
+    except (TypeError, ValueError):
+        group_id = 0
+    if group_id <= 0:
+        return jsonify({"ok": False, "mesaj": "Geçerli grup seçilmelidir."}), 400
+    child = fetch_one(
+        """
+        SELECT id
+        FROM customers
+        WHERE parent_id = %s
+        LIMIT 1
+        """,
+        (group_id,),
+    )
+    if child:
+        return jsonify({"ok": False, "mesaj": "Bu gruba bağlı cariler var. Önce gruptan çıkarın."}), 400
+    row = execute_returning(
+        """
+        DELETE FROM customers
+        WHERE id = %s
+          AND COALESCE(is_group, FALSE) = TRUE
+        RETURNING id
+        """,
+        (group_id,),
+    )
+    if not row:
+        return jsonify({"ok": False, "mesaj": "Grup bulunamadı."}), 404
+    return jsonify({"ok": True})
 
 
 @bp.route("/api/groups-list")

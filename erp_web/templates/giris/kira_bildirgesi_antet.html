@@ -27,6 +27,13 @@
             text-align: left;
             margin-bottom: 24px;
         }
+        .logo-wrap .logo {
+            display: block;
+            width: 180px;
+            max-width: 55%;
+            height: auto;
+            margin-bottom: 8px;
+        }
         .logo-wrap .unvan {
             font-size: 9pt;
             color: #1a1a1a;
@@ -86,6 +93,9 @@
     <div class="letterhead">
         <!-- Sol üst: resmi ünvan -->
         <div class="logo-wrap">
+            {% if logo_data_uri %}
+            <img class="logo" src="{{ logo_data_uri }}" alt="BestOffice Logo">
+            {% endif %}
             <div class="unvan">Ofisbir Ofis ve Danışmanlık Hizmetleri A.Ş.</div>
         </div>
 
