@@ -4,7 +4,7 @@ Flask + Supabase PostgreSQL
 Deploy: 2026-03-14 (Fatura GIB onizleme, Musteri listesi, Kira suresi oto, Cari Kart Musteri Listesi butonu)
 """
 
-from flask import Flask, render_template, redirect, url_for, request, flash, jsonify
+from flask import Flask, render_template, redirect, url_for, request, flash, jsonify, g
 from flask_login import login_required, current_user, logout_user
 from config import Config
 from auth import login_manager, giris_yap, kullanici_olustur, ROLLER
@@ -14,6 +14,7 @@ import atexit
 import sys
 import socket
 import re
+import threading
 
 from db import (
     fetch_all,
@@ -103,6 +104,75 @@ app.register_blueprint(randevu_bp)
 app.register_blueprint(pdovam_bp, url_prefix="/pdovam")
 if ilan_robotu_bp is not None:
     app.register_blueprint(ilan_robotu_bp, url_prefix="/ilan-robotu")
+
+# ── dev_http.log: her istek için [SRV] / [HTTP] (BESTOFFICE_HTTP_FILE_LOG=0 ile kapat) ──
+_dev_http_file_lock = threading.Lock()
+
+
+def _app_dev_http_log_path() -> str:
+    raw = (os.environ.get("BESTOFFICE_DEV_HTTP_LOG") or "").strip()
+    erp_web = os.path.dirname(os.path.abspath(__file__))
+    return os.path.abspath(raw) if raw else os.path.join(erp_web, "dev_http.log")
+
+
+def _app_dev_http_file_log_disabled() -> bool:
+    return (os.environ.get("BESTOFFICE_HTTP_FILE_LOG") or "").strip().lower() in (
+        "0",
+        "false",
+        "off",
+        "no",
+    )
+
+
+def _app_dev_http_append(line: str) -> None:
+    if _app_dev_http_file_log_disabled():
+        return
+    text = line if str(line).endswith("\n") else f"{line}\n"
+    path = _app_dev_http_log_path()
+    try:
+        with _dev_http_file_lock:
+            with open(path, "a", encoding="utf-8", errors="replace") as lf:
+                lf.write(text)
+    except Exception as ex:
+        try:
+            sys.__stderr__.write(f"[app-dev_http] {ex!r} path={path!r}\n")
+            sys.__stderr__.flush()
+        except Exception:
+            pass
+
+
+@app.before_request
+def _dev_http_log_before():
+    if _app_dev_http_file_log_disabled():
+        g._dev_http_base = None
+        return
+    fp = request.full_path
+    if fp.endswith("?"):
+        fp = fp[:-1]
+    g._dev_http_base = f"{request.remote_addr} {request.method} {fp}"
+    _app_dev_http_append(f"[SRV] {g._dev_http_base}")
+
+
+@app.after_request
+def _dev_http_log_after(response):
+    base = getattr(g, "_dev_http_base", None)
+    if not base:
+        return response
+    try:
+        code = response.status_code
+    except Exception:
+        code = "?"
+    _app_dev_http_append(f"[HTTP] {base} -> {code}")
+    return response
+
+
+try:
+    if not _app_dev_http_file_log_disabled():
+        _app_dev_http_append(
+            f"# [BOOT] app.py yüklendi pid={os.getpid()} dev_http={_app_dev_http_log_path()!r}"
+        )
+except Exception:
+    pass
 
 
 def _register_gib_dispatch_jp_fallback_routes():
@@ -510,6 +580,8 @@ if __name__ == "__main__":
     else:
         print("  Başka PC için: ipconfig ile IPv4 adresini kullanın (örn. 192.168.x.x).")
     print("  Giriş: admin / admin123")
+    if not _app_dev_http_file_log_disabled():
+        print("  İstek günlüğü (dosya): {}".format(_app_dev_http_log_path()))
     print("=" * 50 + "\n")
     # threaded=True: Paralel fetch istekleri birbirini bloklamasın.
     # use_reloader: IDE dosya kaydında sunucu 1–2 sn kapanır → UI'da "Failed to fetch" görülebilir.

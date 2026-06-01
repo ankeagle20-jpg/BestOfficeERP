@@ -10,10 +10,10 @@ Alternatif: pip install eArsivPortal ile farklı API kullanılabilir (adaptör g
 """
 
 import os
+import sys
 import re
 import time
 import json
-import uuid as _uuid_stdlib
 import logging
 import threading
 from dotenv import load_dotenv
@@ -21,6 +21,43 @@ from dotenv import load_dotenv
 _log = logging.getLogger(__name__)
 
 load_dotenv()
+
+_gib_file_log_lock = threading.Lock()
+
+
+def _gib_trace_file_line(text: str) -> None:
+    """GIB_TASLAK_TRACE=1 iken yalnız GİB aşama satırları (dev_http şişmesin)."""
+    if (os.getenv("GIB_TASLAK_TRACE") or "").strip().lower() not in ("1", "true", "evet"):
+        return
+    line = text if str(text).endswith("\n") else f"{text}\n"
+    erp_web = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.join(erp_web, "gib_taslak_trace.log")
+    try:
+        with _gib_file_log_lock:
+            with open(path, "a", encoding="utf-8", errors="replace") as lf:
+                lf.write(line)
+    except Exception:
+        pass
+
+
+def _gib_dev_http_file_line(text: str) -> None:
+    """İş parçacığında da çalışır; Flask request / app.py kancasından bağımsız dev_http.log satırı."""
+    line = text if str(text).endswith("\n") else f"{text}\n"
+    try:
+        sys.stderr.write(line)
+        sys.stderr.flush()
+    except Exception:
+        pass
+    raw = (os.environ.get("BESTOFFICE_DEV_HTTP_LOG") or "").strip()
+    erp_web = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.abspath(raw) if raw else os.path.join(erp_web, "dev_http.log")
+    try:
+        with _gib_file_log_lock:
+            with open(path, "a", encoding="utf-8", errors="replace") as lf:
+                lf.write(line)
+    except Exception:
+        pass
+
 
 # portal_kesilen_fatura_listesi_normalized için kısa TTL önbellek (aynı tarih aralığında GİB’i yormamak)
 _portal_kesilen_list_cache_lock = threading.Lock()
@@ -64,183 +101,6 @@ try:
 except ImportError:
     EArsivPortalClient = None
     _HAS_EARSIV_PORTAL = False
-
-_EARSIVPORTAL_FATURA_OLUSTUR_PATCHED = False
-
-
-def _gib_mal_hizmet_metin(name) -> str:
-    """Portalın aşırı uzun / özel tire karakterlerinde şaşırmasını azalt."""
-    s = str(name or "").strip() or "Hizmet"
-    for a, b in (
-        ("\u2014", "-"),
-        ("\u2013", "-"),
-        ("\u2212", "-"),
-        ("\u00a0", " "),
-    ):
-        s = s.replace(a, b)
-    return s[:500]
-
-
-def _gib_normalize_alici_for_portal(fatura: dict, vkn_veya_tckn) -> None:
-    """
-    Tüzel kişi (10 haneli VKN): aliciAdi/aliciSoyadi bazen fatura satırına bölünür
-    (ör. «Hizmet» + «bedeli — MAYIS …»); em-dash yalnızca soyadda olunca eski heuristik
-    hiç çalışmıyordu. aliciUnvan doluysa GİB şablonu için ad/soyadı her zaman ünvandan üret.
-    """
-    v = str(vkn_veya_tckn or "").replace(" ", "").strip()
-    if len(v) != 10:
-        return
-    unv = str(fatura.get("aliciUnvan") or "").strip()
-    if not unv:
-        return
-    parts = unv.split(None, 1)
-    fatura["aliciAdi"] = (parts[0][:80] if parts else "")[:80]
-    fatura["aliciSoyadi"] = ((parts[1] or "")[:80]) if len(parts) > 1 else ""
-
-
-def _gib_dispatch_fatura_jp(fatura: dict) -> dict:
-    """GİB dispatch jp: faturaUuid doğrula ve JSON anahtar sırasında ilk sırada tut."""
-    fid = str(fatura.get("faturaUuid") or "").strip()
-    if len(fid) != 36:
-        raise ValueError(f"GİB faturaUuid 36 karakter olmalı; len={len(fid)} değer={fid[:48]!r}")
-    out = {"faturaUuid": fid}
-    for k, v in fatura.items():
-        if k != "faturaUuid":
-            out[k] = v
-    return out
-
-
-def _patch_earsivportal_fatura_olustur_loop():
-    """
-    eArsivPortal sürümlerinde fatura_olustur: başarısız yanıtta while True + aynı UUID ile
-    sonsuz deneme yapıyor; GİB yoğun/ETTN geçici hatalarında işlem asla bitmiyor.
-    Sınırlı deneme + her tekrarda yeni faturaUuid (GİB önerisiyle uyumlu).
-    """
-    global _EARSIVPORTAL_FATURA_OLUSTUR_PATCHED
-    if not _HAS_EARSIV_PORTAL or _EARSIVPORTAL_FATURA_OLUSTUR_PATCHED:
-        return
-    import eArsivPortal.Core as _ep_core_mod
-    from datetime import datetime as _dt_mod
-    from pytz import timezone as _tz_tr
-
-    EP_cls = _ep_core_mod.eArsivPortal
-    if getattr(EP_cls, "_bestoffice_ep_patch_applied", False):
-        _EARSIVPORTAL_FATURA_OLUSTUR_PATCHED = True
-        return
-
-    def _bestoffice_fatura_olustur(
-        self,
-        tarih="07/10/1995",
-        saat="14:28:37",
-        para_birimi="TRY",
-        vkn_veya_tckn="11111111111",
-        ad="Ömer Faruk",
-        soyad="Sancak",
-        unvan="",
-        vergi_dairesi="",
-        urun_adi="Python Yazılım Hizmeti",
-        fiyat=100,
-        fatura_notu="— QNB Finansbank —\nTR70 0011 1000 0000 0118 5102 59\nÖmer Faruk Sancak",
-    ):
-        kod = getattr(self, "_eArsivPortal__kod_calistir")
-        nesne = getattr(self, "_eArsivPortal__nesne_ver")
-        kisi_bilgi = self.kisi_getir(vkn_veya_tckn)
-        vkn_c = str(vkn_veya_tckn or "").replace(" ", "").strip()
-        ka = str(getattr(kisi_bilgi, "adi", None) or "").strip()
-        ks = str(getattr(kisi_bilgi, "soyadi", None) or "").strip()
-        ku = str(getattr(kisi_bilgi, "unvan", None) or "").strip()
-        ea, es, eu = (ad or "").strip(), (soyad or "").strip(), (unvan or "").strip()
-        # Tüzel (10 haneli VKN): MERNIS «adi» bazen satır açıklaması gibi geliyor; ERP müşteri kaydı öncelikli.
-        if len(vkn_c) == 10:
-            ad_i, soy_i, un_i = ea or ka, es or ks, eu or ku
-        else:
-            ad_i, soy_i, un_i = ka or ea, ks or es, ku or eu
-        # fatura_taslak_olustur, fatura_ver'i bu modülün globals'ına yazar; Core.fatura_ver değişmez.
-        # Burada Libs'teki ham fatura_ver kullanılırsa çok satırlı payload uygulanmaz → GİB ETTN/validasyon hataları.
-        import sys
-        _gib_mod = sys.modules.get("gib_earsiv")
-        fv = getattr(_gib_mod, "fatura_ver", None) if _gib_mod else None
-        if not callable(fv):
-            fv = _ep_core_mod.fatura_ver
-        from uuid import uuid4
-        yeni_uuid = str(uuid4())  # 36 karakter: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-        print(f"[GİB UUID] faturaUuid={yeni_uuid}, len={len(yeni_uuid)}")
-        fatura = fv(
-            tarih=tarih or _dt_mod.now(_tz_tr("Turkey")).strftime("%d/%m/%Y"),
-            saat=saat,
-            para_birimi=para_birimi,
-            vkn_veya_tckn=vkn_veya_tckn,
-            ad=ad_i,
-            soyad=soy_i,
-            unvan=un_i,
-            vergi_dairesi=kisi_bilgi.vergiDairesi or vergi_dairesi,
-            urun_adi=urun_adi,
-            fiyat=fiyat,
-            fatura_notu=fatura_notu,
-        )
-        fatura["faturaUuid"] = yeni_uuid
-        if len(vkn_c) == 10 and un_i:
-            fatura["aliciUnvan"] = un_i[:255]
-        try:
-            max_try = int((os.getenv("GIB_FATURA_OLUSTUR_MAX_DENEME") or "14").strip() or "14")
-        except ValueError:
-            max_try = 14
-        max_try = max(3, min(max_try, 40))
-        last_data = None
-        for attempt in range(max_try):
-            if attempt:
-                yeni_uuid = str(uuid4())  # 36 karakter: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-                print(f"[GİB UUID] faturaUuid={yeni_uuid}, len={len(yeni_uuid)}")
-                fatura["faturaUuid"] = yeni_uuid
-            _gib_normalize_alici_for_portal(fatura, vkn_veya_tckn)
-            jp = _gib_dispatch_fatura_jp(fatura)
-            import json as _json_dbg
-            _fatura_log = {
-                k: v
-                for k, v in jp.items()
-                if k
-                in (
-                    "faturaUuid",
-                    "aliciAdi",
-                    "aliciSoyadi",
-                    "aliciUnvan",
-                    "vknTckn",
-                    "faturaTarihi",
-                    "matrah",
-                    "odenecekTutar",
-                    "malHizmetTable",
-                )
-            }
-            print(f"[GİB FATURA LOG] {_json_dbg.dumps(_fatura_log, ensure_ascii=False)[:500]}")
-            istek = kod(self.komutlar.FATURA_OLUSTUR, jp)
-            data = istek.get("data")
-            last_data = data
-            if isinstance(data, str) and "Faturanız başarıyla oluşturulmuştur." in data:
-                return nesne("FaturaOlustur", {"ettn": jp.get("faturaUuid")})
-            try:
-                nm = f"{jp.get('aliciAdi')} {jp.get('aliciSoyadi')}"
-            except Exception:
-                nm = "?"
-            _log.warning("GİB FATURA_OLUSTUR deneme %s/%s: %s | %s", attempt + 1, max_try, nm, data)
-            time.sleep(0.18)
-        from eArsivPortal.Core.Hatalar import eArsivPortalHatasi
-
-        tail = str(last_data)[:900] if last_data is not None else ""
-        raise eArsivPortalHatasi(
-            f"GİB taslak {max_try} denemede tamamlanamadı (her denemede yeni ETTN/UUID). Son yanıt: {tail}"
-        )
-
-    EP_cls._bestoffice_ep_orig_fatura_olustur = EP_cls.fatura_olustur
-    EP_cls.fatura_olustur = _bestoffice_fatura_olustur
-    EP_cls._bestoffice_ep_patch_applied = True
-    _EARSIVPORTAL_FATURA_OLUSTUR_PATCHED = True
-
-
-if _HAS_EARSIV_PORTAL:
-    try:
-        _patch_earsivportal_fatura_olustur_loop()
-    except Exception as _ep_patch_ex:
-        _log.warning("eArsivPortal fatura_olustur yaması uygulanamadı: %s", _ep_patch_ex)
 
 
 # Hizmet adı eşlemesi (GİB'de görünecek)
@@ -344,7 +204,9 @@ class BestOfficeGIBManager:
         self.last_sms_error = None
         self.last_sms_debug = None
         self.last_taslak_raw = None
+        self.last_taslak_liste_satir = None
         self.last_gonderilen_payload = None
+        self.last_gib_asama_izle: list = []
         self.init_error = None
         try:
             if _HAS_EARSIV_PORTAL and self.username and self.password:
@@ -352,7 +214,6 @@ class BestOfficeGIBManager:
                 self.client = EArsivPortalClient(self.username, self.password, test_modu=bool(self.test_mode))
                 self.client_type = "earsivportal"
                 self._portal_compat_shim()
-                self._portal_http_timeout_shim()
         except Exception as e:
             self.init_error = str(e)
             self.client = None
@@ -361,6 +222,24 @@ class BestOfficeGIBManager:
     def is_available(self):
         """GİB kütüphanesi ve kimlik bilgileri hazır mı."""
         return self.client is not None
+
+    def _gib_asama(self, adim: str, detay: str | None = None) -> None:
+        """Taslak/SMS akışında API ve isteğe bağlı dosyaya adım kaydı (tıkanma teşhisi)."""
+        try:
+            det = (detay or "")[:800]
+            entry = {"ts_ms": int(time.time() * 1000), "adim": str(adim or "")[:120], "detay": det}
+            if not hasattr(self, "last_gib_asama_izle") or self.last_gib_asama_izle is None:
+                self.last_gib_asama_izle = []
+            self.last_gib_asama_izle.append(entry)
+            if len(self.last_gib_asama_izle) > 120:
+                self.last_gib_asama_izle = self.last_gib_asama_izle[-120:]
+        except Exception:
+            pass
+        try:
+            ts = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+            _gib_trace_file_line(f"{ts}\t{adim}\t{detay or ''}")
+        except Exception:
+            pass
 
     def _ensure_client(self):
         if not self.client:
@@ -374,44 +253,6 @@ class BestOfficeGIBManager:
             if not self.username or not self.password:
                 raise ValueError("GIB_USER ve GIB_PASS .env dosyasında tanımlı olmalı.")
         self._portal_compat_shim()
-        self._portal_http_timeout_shim()
-
-    def _portal_http_timeout_shim(self):
-        """eArsivPortal `requests` oturumunda timeout yok; tek takılı POST saatlerce kilitler."""
-        c = self.client
-        if not c or getattr(c, "_bestoffice_requests_timeout_shim", False):
-            return
-        sess = getattr(c, "oturum", None)
-        if sess is None:
-            return
-        try:
-            read_s = int((os.getenv("GIB_HTTP_READ_TIMEOUT_S") or "90").strip() or "90")
-        except ValueError:
-            read_s = 90
-        try:
-            conn_s = int((os.getenv("GIB_HTTP_CONNECT_TIMEOUT_S") or "15").strip() or "15")
-        except ValueError:
-            conn_s = 15
-        read_s = max(25, min(180, read_s))
-        conn_s = max(5, min(60, conn_s))
-        timeout_tuple = (float(conn_s), float(read_s))
-        orig_post = sess.post
-        orig_request = sess.request
-
-        def post_with_timeout(url, data=None, json=None, **kwargs):
-            if kwargs.get("timeout") is None:
-                kwargs["timeout"] = timeout_tuple
-            return orig_post(url, data=data, json=json, **kwargs)
-
-        def request_with_timeout(method, url, **kwargs):
-            if kwargs.get("timeout") is None and str(method).upper() == "POST":
-                kwargs["timeout"] = timeout_tuple
-            return orig_request(method, url, **kwargs)
-
-        sess.post = post_with_timeout
-        sess.request = request_with_timeout
-        setattr(c, "_bestoffice_requests_timeout_shim", True)
-        _log.info("GİB portal HTTP timeout (connect, read) = (%ss, %ss)", conn_s, read_s)
 
     def _portal_compat_shim(self):
         """
@@ -432,8 +273,32 @@ class BestOfficeGIBManager:
                     setattr(c, "_eArsivPortal__cikis_yap", getattr(c, "cikis_yap"))
                 elif hasattr(c, "logout"):
                     setattr(c, "_eArsivPortal__cikis_yap", getattr(c, "logout"))
+            self._portal_install_kod_calistir_ettn_patch(c)
         except Exception:
             pass
+
+    def _portal_install_kod_calistir_ettn_patch(self, client):
+        """Dispatch öncesi FATURA_OLUSTUR: yeni taslakta faturaUuid boş (GİB Mayıs 2026)."""
+        orig = getattr(client, "_eArsivPortal__kod_calistir", None)
+        if not callable(orig) or getattr(orig, "_gib_ettn_patch", False):
+            return
+
+        def _wrapped(komut=None, jp=None, **kwargs):
+            cmd = getattr(komut, "cmd", None) if komut is not None else None
+            jp_in = jp if jp is not None else kwargs.get("jp")
+            if cmd == "EARSIV_PORTAL_FATURA_OLUSTUR" and isinstance(jp_in, dict):
+                jp_fix = BestOfficeGIBManager._portal_fatura_jp_olustur_duzelt(dict(jp_in))
+                if jp is not None:
+                    jp = jp_fix
+                else:
+                    kwargs["jp"] = jp_fix
+            if jp is not None:
+                return orig(komut=komut, jp=jp, **kwargs)
+            return orig(komut=komut, **kwargs)
+
+        _wrapped._gib_ettn_patch = True
+        client._eArsivPortal__kod_calistir = _wrapped
+        _gib_dev_http_file_line("[GİB] kod_calistir faturaUuid-bos yaması aktif (yeni taslak)")
 
     def _portal_logout(self):
         """Portal oturumunu kapat (method adı sürüme göre değişebilir)."""
@@ -449,19 +314,17 @@ class BestOfficeGIBManager:
 
     def _portal_login(self):
         """Portal oturumunu aç (method adı sürüme göre değişebilir)."""
-        try:
-            if hasattr(self.client, "login"):
-                self.client.login()
-                return
-            self.client.giris_yap()
-        except Exception:
-            print(f"[GİB LOGIN] user={os.getenv('GIB_USER','YOK')[:4]}*** test={os.getenv('GIB_TEST','0')}")
-            raise
+        if hasattr(self.client, "login"):
+            self.client.login()
+            return
+        self.client.giris_yap()
 
     def _fresh_login(self):
         """Her işlemde taze oturum: önce logout, sonra login."""
+        self._gib_asama("fresh_login_basla")
         self._portal_logout()
         self._portal_login()
+        self._gib_asama("fresh_login_tamam")
 
     @staticmethod
     def _to_dict(val):
@@ -483,7 +346,41 @@ class BestOfficeGIBManager:
                 return out if isinstance(out, dict) else {}
             except Exception:
                 pass
+        try:
+            fields = getattr(val, "__fields__", None) or getattr(val, "model_fields", None)
+            if fields:
+                snap = {}
+                for fn in fields:
+                    snap[fn] = getattr(val, fn, None)
+                if snap:
+                    return snap
+        except Exception:
+            pass
         return {}
+
+    @staticmethod
+    def ettn_from_out(out) -> str:
+        """FaturaOlustur (Pydantic) / dict / str → ETTN metni; asla model nesnesi dönmez."""
+        if out is None:
+            return ""
+        if isinstance(out, str):
+            s = out.strip()
+            return s if BestOfficeGIBManager._portal_gecerli_ettn(s) else ""
+        d = BestOfficeGIBManager._to_dict(out)
+        for k in ("ettn", "uuid", "faturaUuid", "fatura_uuid"):
+            v = str(d.get(k) or "").strip()
+            if BestOfficeGIBManager._portal_gecerli_ettn(v):
+                return v
+        for k in ("ettn", "uuid", "faturaUuid"):
+            try:
+                v = getattr(out, k, None)
+                if v is not None:
+                    s = str(v).strip()
+                    if BestOfficeGIBManager._portal_gecerli_ettn(s):
+                        return s
+            except Exception:
+                pass
+        return ""
 
     @staticmethod
     def _parse_tr_amount_portal(val):
@@ -567,6 +464,195 @@ class BestOfficeGIBManager:
             if v is not None and str(v).strip():
                 return str(v).strip()
         return ""
+
+    @staticmethod
+    def _portal_gecerli_ettn(val):
+        s = str(val or "").strip()
+        return len(s) == 36 and "-" in s
+
+    @staticmethod
+    def _portal_vkn_digits(val) -> str:
+        return re.sub(r"\D", "", str(val or "").strip())
+
+    @staticmethod
+    def _portal_row_vkn(d) -> str:
+        """TASLAKLARI_GETIR satırından alıcı VKN/TCKN (rakam)."""
+        if not isinstance(d, dict):
+            return ""
+        for k in (
+            "aliciVknTckn",
+            "aliciVkn",
+            "aliciTckn",
+            "vknTckn",
+            "vkn",
+            "tckn",
+            "kimlikNo",
+            "vergiNo",
+        ):
+            v = d.get(k)
+            if v is not None and str(v).strip():
+                return BestOfficeGIBManager._portal_vkn_digits(v)
+        return ""
+
+    @staticmethod
+    def _portal_belge_serial(belge_no: str) -> int:
+        m = re.search(r"(\d{9})$", str(belge_no or "").strip(), re.IGNORECASE)
+        return int(m.group(1)) if m else 0
+
+    @staticmethod
+    def _portal_ettn_istekten(istek) -> str:
+        """FATURA_OLUSTUR yanıt gövdesinde geçen geçerli UUID'leri tara."""
+        found = []
+
+        def walk(o):
+            if isinstance(o, dict):
+                for v in o.values():
+                    walk(v)
+            elif isinstance(o, list):
+                for x in o:
+                    walk(x)
+            else:
+                s = str(o or "").strip()
+                if BestOfficeGIBManager._portal_gecerli_ettn(s):
+                    found.append(s)
+
+        walk(istek)
+        return found[-1] if found else ""
+
+    def _portal_son_taslak_ettn_bul(
+        self,
+        vkn,
+        tarih,
+        tutar=None,
+        belge_no=None,
+    ):
+        """
+        TASLAKLARI_GETIR ile VKN + tarih eşleşen en güncel taslağın ETTN'sini döndürür.
+        GİB listesinde alan adı aliciVknTckn (vknTckn değil).
+        """
+        vkn_d = self._portal_vkn_digits(vkn)
+        tarih_s = str(tarih or "").strip()
+        if not vkn_d or not tarih_s:
+            return ""
+        try:
+            bekle_ms = int(str(os.getenv("GIB_ETTN_LISTE_BEKLE_MS") or "800").strip() or "800")
+        except ValueError:
+            bekle_ms = 800
+        if bekle_ms > 0:
+            time.sleep(min(bekle_ms, 5000) / 1000.0)
+
+        ht_raw = (os.getenv("GIB_PORTAL_LISTE_HANGI_TIP") or "5000/30000").strip()
+        hangi_tips = [t.strip() for t in ht_raw.split("|") if t.strip()] or ["5000/30000"]
+
+        rows = []
+        for ht in hangi_tips:
+            try:
+                rows.extend(self._portal_taslaklari_data_raw(tarih_s, tarih_s, ht) or [])
+            except Exception as ex:
+                self._gib_asama("ettn_taslak_liste_ex", str(ex)[:160])
+
+        if not rows:
+            try:
+                for r in self.client.faturalari_getir(baslangic_tarihi=tarih_s, bitis_tarihi=tarih_s) or []:
+                    d = self._to_dict(r)
+                    if d:
+                        rows.append(d)
+            except Exception as ex:
+                self._gib_asama("ettn_faturalari_getir_ex", str(ex)[:160])
+
+        tutar_hedef = None
+        if tutar is not None:
+            try:
+                tutar_hedef = round(float(tutar), 2)
+            except (TypeError, ValueError):
+                tutar_hedef = None
+
+        belge_hedef = str(belge_no or "").strip().upper()
+        candidates = []
+        for d in rows:
+            if self._portal_row_vkn(d) != vkn_d:
+                continue
+            et = self._portal_extract_ettn(d)
+            if not self._portal_gecerli_ettn(et):
+                continue
+            bn = self._portal_extract_belge_no(d)
+            if belge_hedef and bn.upper() != belge_hedef:
+                continue
+            if tutar_hedef is not None:
+                row_tut = round(self._portal_odenecek_tutar(d), 2)
+                if row_tut > 0 and abs(row_tut - tutar_hedef) > 0.05:
+                    continue
+            candidates.append((self._portal_belge_serial(bn), et, bn, d))
+
+        if not candidates:
+            self._gib_asama(
+                "ettn_taslak_yok",
+                f"vkn={vkn_d[-4:]} tarih={tarih_s} satir={len(rows)}",
+            )
+            return ""
+
+        candidates.sort(key=lambda x: x[0], reverse=True)
+        serial, et, bn, row = candidates[0]
+        self.last_taslak_liste_satir = row
+        self._gib_asama("ettn_taslak_bulundu", f"{bn} ettn={et[:36]}")
+        return et
+
+    @staticmethod
+    def _portal_fatura_jp_olustur_duzelt(jp, mevcut_ettn=None, mevcut_belge_no=None):
+        """
+        GİB FATURA_OLUSTUR jp düzenlemesi (Mayıs 2026 portal değişikliği).
+        Yeni taslak: faturaUuid ve ettn BOŞ — dolu UUID gönderilirse «Ettn eksik» hatası döner.
+        Güncelleme: mevcut ETTN + belge numarası ile gönderilir.
+        """
+        if not isinstance(jp, dict):
+            return jp
+        guncelle = BestOfficeGIBManager._portal_gecerli_ettn(mevcut_ettn)
+        if guncelle:
+            uid = str(mevcut_ettn).strip()
+            jp["faturaUuid"] = uid
+            jp["ettn"] = uid
+            bn = str(mevcut_belge_no or jp.get("belgeNumarasi") or "").strip()
+            if bn:
+                jp["belgeNumarasi"] = bn
+        else:
+            # Yeni taslak: UUID ve belge no boş — GİB atar (ERP'deki GIB2026… ön atama gönderilmez).
+            jp["faturaUuid"] = ""
+            jp.pop("ettn", None)
+            jp["belgeNumarasi"] = ""
+        return jp
+
+    @staticmethod
+    def _portal_fatura_olustur_sayfa():
+        """Yeni taslak: RG_BASITFATURA + boş faturaUuid (GİB Mayıs 2026). .env ile override."""
+        page_env = (os.getenv("GIB_FATURA_OLUSTUR_PAGE") or "").strip()
+        if page_env:
+            return page_env
+        return "RG_BASITFATURA"
+
+    def _portal_ettn_basari_sonrasi(self, istek, payload, fatura_jp):
+        """Taslak oluşturma başarılı; GİB yanıtı veya TASLAKLARI_GETIR listesinden ETTN bul."""
+        et = self._portal_ettn_istekten(istek)
+        if et:
+            return et
+        if isinstance(istek, dict):
+            data = istek.get("data")
+            if isinstance(data, dict):
+                et = self._portal_extract_ettn(data)
+                if et:
+                    return et
+        vkn = str(
+            (payload or {}).get("vkn_veya_tckn")
+            or (fatura_jp or {}).get("vknTckn")
+            or ""
+        ).strip()
+        tarih = str(
+            (payload or {}).get("tarih")
+            or (fatura_jp or {}).get("faturaTarihi")
+            or ""
+        ).strip()
+        tutar = (payload or {}).get("toplam") or (payload or {}).get("odenecekTutar")
+        belge = (payload or {}).get("belge_no") or (fatura_jp or {}).get("belgeNumarasi")
+        return self._portal_son_taslak_ettn_bul(vkn, tarih, tutar=tutar, belge_no=belge)
 
     @staticmethod
     def _portal_parse_any_date_to_iso(val):
@@ -1129,22 +1215,208 @@ class BestOfficeGIBManager:
         from datetime import datetime, timedelta
         if force_new_session:
             self._fresh_login()
-        bugun = datetime.now().date()
-        bas = (bugun - timedelta(days=max(7, int(days_back or 370)))).strftime("%d/%m/%Y")
-        bit = (bugun + timedelta(days=1)).strftime("%d/%m/%Y")
-        rows = self.client.faturalari_getir(baslangic_tarihi=bas, bitis_tarihi=bit) or []
         uid = str(uuid or "").strip().lower()
+        if not uid:
+            return None, None
+        bugun = datetime.now().date()
+        bas_d = bugun - timedelta(days=max(7, int(days_back or 370)))
+        bit_d = bugun + timedelta(days=1)
+        ht_raw = (os.getenv("GIB_PORTAL_LISTE_HANGI_TIP") or "5000/30000").strip()
+        hangi_tips = [t.strip() for t in ht_raw.split("|") if t.strip()] or ["5000/30000"]
+        cur = bas_d
+        while cur <= bit_d:
+            chunk_end = min(cur + timedelta(days=14), bit_d)
+            bas_s = cur.strftime("%d/%m/%Y")
+            bit_s = chunk_end.strftime("%d/%m/%Y")
+            for ht in hangi_tips:
+                for d in self._portal_taslaklari_data_raw(bas_s, bit_s, ht):
+                    et = self._portal_extract_ettn(d).strip().lower()
+                    if et == uid:
+                        return d, d
+            cur = chunk_end + timedelta(days=1)
+        bas = bas_d.strftime("%d/%m/%Y")
+        bit = bit_d.strftime("%d/%m/%Y")
+        rows = self.client.faturalari_getir(baslangic_tarihi=bas, bitis_tarihi=bit) or []
         for r in rows:
             d = self._to_dict(r)
-            if str(d.get("ettn") or d.get("uuid") or "").strip().lower() == uid:
+            if self._portal_extract_ettn(d).strip().lower() == uid:
                 return r, d
         return None, None
 
-    def _fatura_taslak_dispatch_hazirlik(self, fatura_data):
+    def max_gib_belge_serial_for_year(self, yil: int):
         """
-        fatura_taslak_olustur ile aynı çok satırlı / dinamik fatura_ver sarmalayıcısını kurar.
-        Dönüş: payload, glb, orig_fatura_ver, dyn_fn (patch sonrası fatura_olustur ile uyumlu).
+        GİB listesinde GIByyyy######### (16 karakter) biçimindeki en büyük 9 haneli sıra.
+        Portal çağrısı başarısızsa None; liste boş veya eşleşme yoksa 0.
         """
+        try:
+            y = int(yil)
+        except (TypeError, ValueError):
+            return None
+        try:
+            self._ensure_client()
+            self._fresh_login()
+            bas = f"01/01/{y}"
+            bit = f"31/12/{y}"
+            rows = self.client.faturalari_getir(baslangic_tarihi=bas, bitis_tarihi=bit) or []
+        except Exception:
+            return None
+        mx = 0
+        pat = re.compile(rf"^GIB{y}(\d{{9}})$", re.IGNORECASE)
+        for r in rows:
+            try:
+                d = self._to_dict(r)
+                bn = str(self._portal_extract_belge_no(d) or "").strip()
+                m = pat.match(bn)
+                if not m:
+                    continue
+                mx = max(mx, int(m.group(1)))
+            except Exception:
+                continue
+        return mx
+
+    def _fatura_olustur_earsivportal_bounded(self, client, payload, fatura_ver_fn, mevcut_ettn=None, mevcut_belge_no=None):
+        """
+        eArsivPortal.fatura_olustur ile aynı iş (kisi_getir + fatura_ver + dispatch),
+        ancak kütüphanedeki «while True» sonsuz döngüsü yok — portal yanıtı döngüye girerse
+        GIB_FATURA_OLUSTUR_MAX_DENEME sonunda net hata döner (api_gib_taslak iş parçacığı 120 sn'de takılı kalmaz).
+        """
+        self._gib_asama("bounded_giris", f"max_d={os.getenv('GIB_FATURA_OLUSTUR_MAX_DENEME') or '14'}")
+        _gib_dev_http_file_line("[GİB] fatura_olustur_bounded giriş")
+        kod_calistir = getattr(client, "_eArsivPortal__kod_calistir", None)
+        nesne_ver = getattr(client, "_eArsivPortal__nesne_ver", None)
+        if not callable(kod_calistir) or not callable(nesne_ver):
+            raise RuntimeError("eArsivPortal istemcisi dispatch (kod_calistir) veya nesne_ver bulunamadı.")
+        try:
+            from eArsivPortal.Models.Komutlar import Komut
+        except Exception as ex:
+            raise RuntimeError("eArsivPortal Komut modeli yüklenemedi.") from ex
+
+        km = client.komutlar
+        try:
+            max_d = int(str(os.getenv("GIB_FATURA_OLUSTUR_MAX_DENEME") or "14").strip() or "14")
+        except ValueError:
+            max_d = 14
+        max_d = max(1, min(40, max_d))
+        page = self._portal_fatura_olustur_sayfa()
+        kom = Komut(cmd=km.FATURA_OLUSTUR.cmd, sayfa=page)
+        _gib_dev_http_file_line(f"[GİB] FATURA_OLUSTUR sayfa={page} (kütüphane varsayılanı={km.FATURA_OLUSTUR.sayfa})")
+
+        vkn = str(payload.get("vkn_veya_tckn") or "").strip()
+        self._gib_asama("kisi_getir_once", f"vkn_len={len(vkn)}")
+        kisi_bilgi = client.kisi_getir(vkn)
+        self._gib_asama("kisi_getir_sonra", "ok")
+
+        def _k(attr, pl_key, default=""):
+            v = getattr(kisi_bilgi, attr, None)
+            if v is not None and str(v).strip():
+                return str(v).strip()
+            return str(payload.get(pl_key) or default or "").strip()
+
+        ad_m = _k("adi", "ad")
+        soy_m = _k("soyadi", "soyad")
+        unv_m = _k("unvan", "unvan")
+        vd_m = _k("vergiDairesi", "vergi_dairesi")
+
+        try:
+            from datetime import datetime
+            from pytz import timezone as _tz
+
+            tarih_default = datetime.now(_tz("Turkey")).strftime("%d/%m/%Y")
+        except Exception:
+            from datetime import datetime
+
+            tarih_default = datetime.now().strftime("%d/%m/%Y")
+        tarih_use = str(payload.get("tarih") or "").strip() or tarih_default
+        saat_use = str(payload.get("saat") or "12:00:00").strip()
+        para = str(payload.get("para_birimi") or "TRY").strip() or "TRY"
+
+        last_data_snip = ""
+        for attempt in range(max_d):
+            self._gib_asama("portal_fatura_deneme", f"{attempt + 1}/{max_d} page={page}")
+            _gib_dev_http_file_line(f"[GİB] FATURA_OLUSTUR deneme {attempt + 1}/{max_d} page={page}")
+            fatura = fatura_ver_fn(
+                tarih=tarih_use,
+                saat=saat_use,
+                para_birimi=para,
+                vkn_veya_tckn=vkn,
+                ad=ad_m,
+                soyad=soy_m,
+                unvan=unv_m,
+                vergi_dairesi=vd_m,
+                urun_adi=payload.get("urun_adi") or "Hizmet",
+                fiyat=payload.get("fiyat") or 0,
+                fatura_notu=payload.get("fatura_notu") or "",
+            )
+            if isinstance(fatura, dict):
+                fatura = self._portal_fatura_jp_olustur_duzelt(fatura, mevcut_ettn, mevcut_belge_no)
+                _gib_dev_http_file_line(
+                    f"[GİB] jp faturaUuid={fatura.get('faturaUuid')!r} ettn={fatura.get('ettn', '<yok>')!r} belge={str(fatura.get('belgeNumarasi') or '')[:20]!r}"
+                )
+            try:
+                istek = kod_calistir(komut=kom, jp=fatura)
+            except Exception as ex_dispatch:
+                _gib_dev_http_file_line(f"[GİB] FATURA_OLUSTUR dispatch istisna: {ex_dispatch!r}")
+                self._gib_asama("portal_dispatch_istisna", str(ex_dispatch)[:400])
+                raise
+            if not isinstance(istek, dict):
+                last_data_snip = repr(istek)[:900]
+                continue
+            data = istek.get("data")
+            if isinstance(data, str):
+                blob = data
+            elif data is not None:
+                try:
+                    blob = json.dumps(data, ensure_ascii=False, default=str)
+                except Exception:
+                    blob = str(data)
+            else:
+                blob = ""
+            blob_l = blob.lower() if blob else ""
+            basarili = blob and (
+                "faturanız başarıyla oluşturulmuştur" in blob_l
+                or "basariyla olusturulmustur" in blob_l
+                or "basariyla oluşturulmuştur" in blob_l
+                or "düzenlenen belgeler menüsünden" in blob_l
+                or "duzenlenen belgeler menusunden" in blob_l
+            )
+            if basarili:
+                ettn = self._portal_ettn_basari_sonrasi(istek, payload, fatura)
+                if not ettn and self._portal_gecerli_ettn(mevcut_ettn):
+                    ettn = str(mevcut_ettn).strip()
+                self._gib_asama("portal_fatura_basarili", f"ettn={str(ettn)[:36] if ettn else 'bos'}")
+                return nesne_ver("FaturaOlustur", {"ettn": ettn or ""})
+            last_data_snip = blob[:1600] if blob else json.dumps(istek, ensure_ascii=False, default=str)[:1600]
+
+        _gib_dev_http_file_line(f"[GİB] FATURA_OLUSTUR tükendi ozet={last_data_snip[:900]!r}")
+        self._gib_asama("portal_fatura_tukendi", last_data_snip[:200])
+        raise RuntimeError(
+            f"GİB taslak bu sunucu isteği içinde {max_d} portal denemesi başarısız "
+            f"(üst sınır .env GIB_FATURA_OLUSTUR_MAX_DENEME, varsayılan 14). "
+            f"Son GİB data özeti: {last_data_snip[:1200]}"
+        )
+
+    @_retry_on_connection(max_attempts=3, delay=2.0)
+    def fatura_taslak_olustur(self, fatura_data):
+        """
+        ERP'den gelen verilerle GİB üzerinde taslak fatura oluşturur.
+        fatura_data: tarih (GG/AA/YYYY), saat (SS:DD veya SS:DD:SS), vkn, ad, soyad, unvan, vd,
+                    hizmet_adi, birim_fiyat, items (liste; her biri name, quantity, unit_price, tax_rate),
+                    iban (opsiyonel), note (opsiyonel).
+        Returns: ETTN/UUID veya None (hata).
+        """
+        self.last_gib_asama_izle = []
+        self._gib_asama("taslak_basla", "fatura_taslak_olustur")
+        self._ensure_client()
+        try:
+            # Kullanıcı isteği: her taslak işleminde taze login/token.
+            self._fresh_login()
+        except Exception as e:
+            err = str(e).lower()
+            if "geçersiz kullanıcı" in err or "invalid" in err or "yetkisiz" in err or "kullanıcı adı" in err:
+                raise RuntimeError("GİB geçersiz kullanıcı veya şifre. Lütfen GIB_USER ve GIB_PASS bilgilerinizi kontrol edin.") from e
+            self._gib_asama("taslak_fresh_login_hata", str(e)[:400])
+            raise
+
         items = fatura_data.get("items") or []
         if not items and fatura_data.get("hizmet_adi") is not None:
             items = [{
@@ -1158,7 +1430,7 @@ class BestOfficeGIBManager:
 
         # eArsivPortal API tek satır parametresi alsa da payload override ile çok satır gönderiyoruz.
         first = items[0] if items else {}
-        urun_adi = _gib_mal_hizmet_metin(str(first.get("name") or fatura_data.get("hizmet_adi") or "Hizmet"))
+        urun_adi = str(first.get("name") or fatura_data.get("hizmet_adi") or "Hizmet")
         fiyat = float(first.get("unit_price") or fatura_data.get("birim_fiyat") or fatura_data.get("toplam") or 0)
         kdv_orani = int(first.get("tax_rate") or fatura_data.get("kdv_orani") or 20)
         # eArsivPortal'ın içindeki fatura_ver fonksiyonu bazı sürümlerde %20'ye sabit.
@@ -1166,14 +1438,7 @@ class BestOfficeGIBManager:
         fatura_method = getattr(self.client, "fatura_olustur")
         fn = getattr(fatura_method, "__func__", fatura_method)
         glb = getattr(fn, "__globals__", {})
-        # Her zaman Libs'teki ham fatura_ver ile sarmala; glb["fatura_ver"] önceki taslaktan
-        # dinamik sarmalayıcı kalırsa zincir / yanlış closure oluşabiliyor.
-        try:
-            from eArsivPortal.Libs.FaturaVer import fatura_ver as orig_fatura_ver
-        except Exception:
-            orig_fatura_ver = None
-        if not callable(orig_fatura_ver):
-            orig_fatura_ver = glb.get("fatura_ver")
+        orig_fatura_ver = glb.get("fatura_ver")
         if not callable(orig_fatura_ver):
             raise RuntimeError("eArsivPortal iç fatura_ver fonksiyonu bulunamadı.")
 
@@ -1184,16 +1449,13 @@ class BestOfficeGIBManager:
         toplam_iskonto_signed = 0.0
         for it in items:
             try:
-                nm = _gib_mal_hizmet_metin(it.get("name") or "Hizmet")
+                nm = str(it.get("name") or "Hizmet").strip() or "Hizmet"
                 qty = float(it.get("quantity") or 1.0)
                 if qty <= 0:
                     qty = 1.0
                 up = float(it.get("unit_price") or 0.0)
                 if up < 0:
                     up = 0.0
-                # GIB tarafinda 0 tutarli satirlar taslak olusumunu bozabiliyor.
-                if round(up * qty, 2) <= 0:
-                    continue
                 tax = int(it.get("tax_rate") or kdv_orani or 20)
                 tax = int(max(0, min(100, tax)))
                 disc_rate_signed = float(it.get("discount_rate") or 0.0)
@@ -1233,7 +1495,22 @@ class BestOfficeGIBManager:
         toplam_iskonto_signed = round(toplam_iskonto_signed, 2)
         genel_toplam_hesap = round(toplam_matrah + toplam_kdv, 2)
         erp_toplam = float(fatura_data.get("toplam") or 0)
-        odenecek_yazi_icin = round(erp_toplam, 2) if erp_toplam > 0 else genel_toplam_hesap
+        # DB `toplam` bazen tüm dönem/kira özeti iken satirlar_json tek satır (ör. 250+KDV=300)
+        # kalıyor; GİB `odenecekTutar` satırlardan gelir. YALNIZ yazısı satırla uyumlu olmalı.
+        odenecek_yazi_icin = genel_toplam_hesap
+        if erp_toplam > 0:
+            erp_r = round(erp_toplam, 2)
+            if abs(erp_r - genel_toplam_hesap) <= 0.05:
+                odenecek_yazi_icin = erp_r
+            else:
+                self._gib_asama(
+                    "toplam_db_satir_cakismasi",
+                    f"db_toplam={erp_r} satir_odenecek={genel_toplam_hesap}; tutar_yazi=satir_odenecek",
+                )
+        self._gib_asama(
+            "satirlar_ozet",
+            f"n={len(satirlar_norm)} matrah={toplam_matrah} kdv={toplam_kdv} genel={genel_toplam_hesap} erp_toplam={erp_toplam}",
+        )
 
         def _gib_not_metni():
             """Önizlemedeki gibi YALNIZ:#…# üstte; imza satırı GİB’de genelde altta (aynı alan, boş satırla)."""
@@ -1277,31 +1554,33 @@ class BestOfficeGIBManager:
             "urun_adi": urun_adi,
             "fiyat": fiyat,
             "fatura_notu": gib_not_kisaltilmis,
+            "toplam": fatura_data.get("toplam"),
         }
+        self._gib_asama("payload_ust", f"tarih={payload.get('tarih')} saat={payload.get('saat')} urun={urun_adi[:40]}")
         alici_adres = str(fatura_data.get("adres") or "").strip()
         alici_tel = str(fatura_data.get("telefon") or "").strip()
         alici_email = str(fatura_data.get("email") or "").strip()
+        mevcut_ettn = str(fatura_data.get("mevcut_ettn") or "").strip()
+        mevcut_belge_no = str(fatura_data.get("mevcut_belge_no") or "").strip()
 
         def _fatura_ver_dynamic(**kwargs):
             d = orig_fatura_ver(**kwargs)
             try:
                 mal_tablo = []
                 for r in satirlar_norm:
+                    tip_iskonto = r["disc_signed"] >= 0
+                    orani_abs = abs(r["disc_rate_signed"])
+                    tutari_abs = abs(r["disc_signed"])
                     unit_net = (r["matrah"] / r["quantity"]) if r["quantity"] > 0 else r["matrah"]
-                    qty = float(r["quantity"] or 1.0)
-                    if qty > 0 and abs(qty - round(qty)) < 1e-9 and qty < 1e9:
-                        miktar_val = int(round(qty))
-                    else:
-                        miktar_val = round(qty, 4)
                     mal_tablo.append({
-                        "malHizmet": _gib_mal_hizmet_metin(r["name"]),
-                        "miktar": miktar_val,
+                        "malHizmet": r["name"],
+                        "miktar": round(r["quantity"], 2),
                         "birim": "C62",
-                        "birimFiyat": f"{unit_net:.2f}",
+                        "birimFiyat": f"{r['unit_price']:.2f}",
                         "fiyat": f"{unit_net:.2f}",
-                        "iskontoOrani": 0,
-                        "iskontoTutari": "0",
-                        "iskontoNedeni": "",
+                        "iskontoOrani": f"{orani_abs:.2f}",
+                        "iskontoTutari": f"{tutari_abs:.2f}",
+                        "iskontoNedeni": "İSKONTO" if tip_iskonto else "ARTTIRIM",
                         "malHizmetTutari": f"{r['matrah']:.2f}",
                         "kdvOrani": str(int(r["tax_rate"])),
                         "vergiOrani": 0,
@@ -1309,13 +1588,16 @@ class BestOfficeGIBManager:
                         "vergininKdvTutari": "0",
                         "ozelMatrahTutari": "0",
                         "hesaplananotvtevkifatakatkisi": "0",
+                        # Bazı sürümler bu alan adlarını kullanıyor.
+                        "iskontoArttirimOrani": f"{orani_abs:.2f}",
+                        "iskontoArttirimTutari": f"{tutari_abs:.2f}",
+                        "iskontoArttirimNedeni": "İSKONTO" if tip_iskonto else "ARTTIRIM",
                     })
                 d["malHizmetTable"] = mal_tablo
                 d["matrah"] = f"{toplam_matrah:.2f}"
-                # Portal şablonu: malhizmet toplamı = satır matrahları toplamı (iskonto sonrası), brüt değil.
-                d["malhizmetToplamTutari"] = f"{toplam_matrah:.2f}"
-                d["toplamIskonto"] = "0.00"
-                d["tip"] = "İskonto"
+                d["malhizmetToplamTutari"] = f"{toplam_brut:.2f}"
+                d["toplamIskonto"] = f"{abs(toplam_iskonto_signed):.2f}"
+                d["tip"] = "İskonto" if toplam_iskonto_signed >= 0 else "Arttırım"
                 d["hesaplanankdv"] = f"{toplam_kdv:.2f}"
                 d["vergilerToplami"] = f"{toplam_kdv:.2f}"
                 d["vergilerDahilToplamTutar"] = f"{genel_toplam_hesap:.2f}"
@@ -1327,141 +1609,70 @@ class BestOfficeGIBManager:
                     d["tel"] = alici_tel
                 if alici_email:
                     d["eposta"] = alici_email
+                d = BestOfficeGIBManager._portal_fatura_jp_olustur_duzelt(d, mevcut_ettn, mevcut_belge_no)
                 try:
                     self.last_gonderilen_payload = dict(d)
                 except Exception:
                     self.last_gonderilen_payload = d
             except Exception:
-                pass
+                d = BestOfficeGIBManager._portal_fatura_jp_olustur_duzelt(d, mevcut_ettn, mevcut_belge_no)
             return d
 
-        return {
-            "payload": payload,
-            "glb": glb,
-            "orig_fatura_ver": orig_fatura_ver,
-            "dyn_fn": _fatura_ver_dynamic,
-        }
-
-    def _gib_dispatch_jp_sentezle(self, payload):
-        """fatura_olustur / _bestoffice ile aynı mantıkla portal jp sözlüğünü üretir (dispatch çağrılmaz)."""
-        import sys
-        import eArsivPortal.Core as _ep_core_mod
-        from datetime import datetime as _dt_mod
-        from pytz import timezone as _tz_tr
-
-        kisi_bilgi = self.client.kisi_getir(payload["vkn_veya_tckn"])
-        vkn_c = str(payload.get("vkn_veya_tckn") or "").replace(" ", "").strip()
-        ka = str(getattr(kisi_bilgi, "adi", None) or "").strip()
-        ks = str(getattr(kisi_bilgi, "soyadi", None) or "").strip()
-        ku = str(getattr(kisi_bilgi, "unvan", None) or "").strip()
-        ea = str(payload.get("ad") or "").strip()
-        es = str(payload.get("soyad") or "").strip()
-        eu = str(payload.get("unvan") or "").strip()
-        if len(vkn_c) == 10:
-            ad_i, soy_i, un_i = ea or ka, es or ks, eu or ku
-        else:
-            ad_i, soy_i, un_i = ka or ea, ks or es, ku or eu
-        _gib_mod = sys.modules.get("gib_earsiv")
-        fv = getattr(_gib_mod, "fatura_ver", None) if _gib_mod else None
-        if not callable(fv):
-            fv = _ep_core_mod.fatura_ver
-        ornek_uuid = "00000000-0000-4000-8000-000000000001"
-        fatura = fv(
-            tarih=payload.get("tarih") or _dt_mod.now(_tz_tr("Turkey")).strftime("%d/%m/%Y"),
-            saat=payload.get("saat") or "12:00:00",
-            para_birimi="TRY",
-            vkn_veya_tckn=payload["vkn_veya_tckn"],
-            ad=ad_i,
-            soyad=soy_i,
-            unvan=un_i,
-            vergi_dairesi=kisi_bilgi.vergiDairesi or (payload.get("vergi_dairesi") or ""),
-            urun_adi=payload.get("urun_adi") or "Hizmet",
-            fiyat=payload.get("fiyat") or 0,
-            fatura_notu=payload.get("fatura_notu") or "",
-        )
-        fatura["faturaUuid"] = ornek_uuid
-        if len(vkn_c) == 10 and un_i:
-            fatura["aliciUnvan"] = un_i[:255]
-        _gib_normalize_alici_for_portal(fatura, payload["vkn_veya_tckn"])
-        return _gib_dispatch_fatura_jp(fatura)
-
-    def gib_dispatch_jp_onizle(self, fatura_data):
-        """
-        GİB'e POST edilen `jp` gövdesinin analizi (earsiv-services/dispatch içindeki JSON).
-        Taslak oluşturulmaz; yalnızca MERNIS + fatura_ver + çok satırlı tablo ile aynı yolu izler.
-        """
-        self._ensure_client()
-        self._fresh_login()
-        h = self._fatura_taslak_dispatch_hazirlik(fatura_data)
-        glb = h["glb"]
-        orig = h["orig_fatura_ver"]
-        dyn = h["dyn_fn"]
-        payload = h["payload"]
-        glb["fatura_ver"] = dyn
-        try:
-            return self._gib_dispatch_jp_sentezle(payload)
-        finally:
-            glb["fatura_ver"] = orig
-
-    @_retry_on_connection(max_attempts=3, delay=2.0)
-    def fatura_taslak_olustur(self, fatura_data):
-        """
-        ERP'den gelen verilerle GİB üzerinde taslak fatura oluşturur.
-        fatura_data: tarih (GG/AA/YYYY), saat (SS:DD veya SS:DD:SS), vkn, ad, soyad, unvan, vd,
-                    hizmet_adi, birim_fiyat, items (liste; her biri name, quantity, unit_price, tax_rate),
-                    iban (opsiyonel), note (opsiyonel).
-        Returns: ETTN/UUID veya None (hata).
-        """
-        self._ensure_client()
-        try:
-            self._fresh_login()
-        except Exception as e:
-            err = str(e).lower()
-            if "geçersiz kullanıcı" in err or "invalid" in err or "yetkisiz" in err or "kullanıcı adı" in err:
-                raise RuntimeError("GİB geçersiz kullanıcı veya şifre. Lütfen GIB_USER ve GIB_PASS bilgilerinizi kontrol edin.") from e
-            raise
-
-        h = self._fatura_taslak_dispatch_hazirlik(fatura_data)
-        glb = h["glb"]
-        orig_fatura_ver = h["orig_fatura_ver"]
-        _fatura_ver_dynamic = h["dyn_fn"]
-        payload = h["payload"]
         glb["fatura_ver"] = _fatura_ver_dynamic
+        self._gib_asama("portal_bounded_cagri", "basladi")
         try:
-            import time as _time_dbg
-            _t0 = _time_dbg.time()
-            print(f"[GİB DEBUG] fatura_olustur başlıyor... payload keys={list(payload.keys())}")
-            out = self.client.fatura_olustur(**payload)
-            print(f"[GİB DEBUG] fatura_olustur bitti, süre={_time_dbg.time()-_t0:.1f}s")
+            out = self._fatura_olustur_earsivportal_bounded(
+                self.client, payload, _fatura_ver_dynamic, mevcut_ettn, mevcut_belge_no
+            )
+        except Exception as ex:
+            self._gib_asama("portal_bounded_hata", str(ex)[:500])
+            raise
         finally:
             glb["fatura_ver"] = orig_fatura_ver
-        self.last_taslak_raw = out
-        d = self._to_dict(out)
-        uuid = str(d.get("ettn") or d.get("uuid") or "").strip()
-        if not uuid:
-            self.last_sms_error = "GİB taslak yanıtında ETTN/UUID bulunamadı."
-            return None
-        try:
-            _uuid_stdlib.UUID(uuid)
-        except Exception:
-            self.last_sms_error = f"GİB yanıtında geçersiz ETTN/UUID biçimi: {uuid[:64]!r}"
-            return None
+        self._gib_asama("portal_bounded_tamam", "yanit_alindi")
+        uuid_str = self.ettn_from_out(out)
+        liste_satir = getattr(self, "last_taslak_liste_satir", None)
+        if not self._portal_gecerli_ettn(uuid_str):
+            uuid_str = self._portal_ettn_basari_sonrasi(
+                None,
+                {
+                    "vkn_veya_tckn": (fatura_data.get("vkn") or ""),
+                    "tarih": (fatura_data.get("tarih") or ""),
+                    "toplam": fatura_data.get("toplam"),
+                },
+                self.last_gonderilen_payload,
+            )
+            liste_satir = getattr(self, "last_taslak_liste_satir", None) or liste_satir
+        gib_belge = ""
+        if isinstance(liste_satir, dict):
+            gib_belge = self._portal_extract_belge_no(liste_satir)
+        self.last_taslak_raw = {
+            "ettn": uuid_str,
+            "gib_fatura_no": gib_belge,
+            "raw_type": type(out).__name__ if out is not None else "none",
+        }
+        self._gib_asama("ettn_cikti", uuid_str[:36] if uuid_str else "bos")
 
-        _liste_dogrula = (os.getenv("GIB_TASLAK_LISTE_DOGRULA") or "").strip().lower() in (
-            "1", "true", "evet", "yes",
-        )
-        if not _liste_dogrula:
-            self.last_sms_error = None
-            return uuid
-        try:
-            _, dogrulama = self._find_fatura_by_uuid(uuid, days_back=5, force_new_session=False)
-            if dogrulama:
-                self.last_sms_error = None
-                return dogrulama.get("ettn") or dogrulama.get("uuid") or uuid
-            self.last_sms_error = "Taslak oluşturuldu fakat son 5 günlük listede ETTN doğrulanamadı."
-        except Exception:
-            self.last_sms_error = "Taslak sonrası liste doğrulaması başarısız."
-        return uuid
+        # Kullanıcı isteği: create sonrası son 1 gün listeden ETTN doğrula.
+        if self._portal_gecerli_ettn(uuid_str):
+            try:
+                self._gib_asama("liste_dogrulama_basla", "days_back=1")
+                _, dogrulama = self._find_fatura_by_uuid(uuid_str, days_back=1, force_new_session=False)
+                if dogrulama:
+                    et2 = self._portal_extract_ettn(dogrulama)
+                    if et2:
+                        uuid_str = et2
+                    self._gib_asama("liste_dogrulama_ok", uuid_str[:36])
+                    return uuid_str
+                self.last_sms_error = "Taslak oluşturuldu fakat son 1 günlük listede ETTN doğrulanamadı."
+                self._gib_asama("liste_dogrulama_yok", "1_gun_listede_yok")
+            except Exception as exl:
+                self.last_sms_error = "Taslak sonrası liste doğrulaması başarısız."
+                self._gib_asama("liste_dogrulama_ex", str(exl)[:400])
+            return uuid_str
+        self.last_sms_error = "Taslak GİB'de oluşmuş olabilir; ETTN ERP'ye aktarılamadı. Portal listesinden ETTN kopyalayın."
+        self._gib_asama("ettn_bos", "liste_yedek_basarili_degil")
+        return ""
 
     def sms_onay_ve_imzala(self, uuid, sms_kodu):
         """
@@ -1587,7 +1798,8 @@ def build_fatura_data_from_db(fatura_id, fetch_one_func):
             f.satirlar_json,
             f.musteri_id,
             f.musteri_adi,
-            f.notlar
+            f.notlar,
+            f.ettn
         FROM faturalar f WHERE f.id = %s
         """,
         (fatura_id,),
@@ -1673,7 +1885,7 @@ def build_fatura_data_from_db(fatura_id, fetch_one_func):
             for s in satirlar:
                 try:
                     ad_raw = (s.get("ad") or s.get("mal_hizmet") or s.get("urun_adi") or "").strip()
-                    satir_mal_ad = ad_raw or "Hizmet"
+                    ad = ad_raw or "Hizmet"
                     miktar = float(s.get("miktar") or 0) or 1.0
                     birim_f = float(s.get("birim_fiyat") or s.get("unit_price") or 0)
                     isk_oran = float(s.get("iskonto_orani") or 0)
@@ -1695,7 +1907,7 @@ def build_fatura_data_from_db(fatura_id, fetch_one_func):
                     # Kullanıcının satırda girdiği birim fiyatı öncelikle koru.
                     unit_net = birim_f if birim_f > 0 else ((net / miktar) if miktar > 0 else net)
                     item = {
-                        "name": satir_mal_ad,
+                        "name": ad,
                         "quantity": round(miktar, 2),
                         # Brüt birim fiyatı koru; iskonto GİB alanlarında ayrıca gösterilecek.
                         "unit_price": round(birim_f, 2) if birim_f > 0 else round(unit_net, 2),
@@ -1733,6 +1945,11 @@ def build_fatura_data_from_db(fatura_id, fetch_one_func):
     irsaliye_modu = "IRSALIYE_MODU" in notlar_raw.upper()
     note_clean = notlar_raw.replace("IRSALIYE_MODU", "").replace("||", "|").strip(" |")
 
+    fn_db = str(fatura.get("fatura_no") or "").strip()
+    et_db = str(fatura.get("ettn") or "").strip()
+    mevcut_belge_no = fn_db if fn_db.upper().startswith("GIB") else ""
+    mevcut_ettn_out = et_db if BestOfficeGIBManager._portal_gecerli_ettn(et_db) else ""
+
     return {
         "tarih": tarih_str,
         "saat": saat_str,
@@ -1753,4 +1970,6 @@ def build_fatura_data_from_db(fatura_id, fetch_one_func):
         "iban": "",
         "note": note_clean or "BestOfficeERP",
         "irsaliye_modu": bool(irsaliye_modu),
+        "mevcut_ettn": mevcut_ettn_out,
+        "mevcut_belge_no": mevcut_belge_no,
     }

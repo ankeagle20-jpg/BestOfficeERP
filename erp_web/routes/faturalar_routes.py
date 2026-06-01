@@ -48,10 +48,12 @@ from utils.musteri_arama import (
     customers_arama_sql_params_giris_genis_tokens,
 )
 import os
+import sys
 import io
 import re
 import json
 import uuid
+import threading
 import concurrent.futures
 from urllib.parse import urlencode
 import logging
@@ -2272,6 +2274,57 @@ COALESCE(
 """.strip()
 
 
+def _firma_ozet_giris_tarihi_sql(c_alias: str = "c", mk_alias: str = "mk") -> str:
+    """Giriş tarihi ifadesi (tablo takma adlarıyla)."""
+    s = _FIRMA_OZET_GIRIS_TARIHI_SQL
+    s = s.replace("mk.", f"{mk_alias}.")
+    s = s.replace("c.", f"{c_alias}.")
+    return s
+
+
+def _firma_ozet_sql_alias_c_mk(sql_frag: str, c_alias: str, mk_alias: str) -> str:
+    if not (sql_frag or "").strip():
+        return ""
+    s = sql_frag.replace("mk.", f"{mk_alias}.")
+    s = s.replace("c.", f"{c_alias}.")
+    return s
+
+
+def _firma_ozet_sql_cift_olanlar_giris_gunu_filter(
+    *,
+    musteri_where: str,
+    mk_df_sql: str,
+    giri_ay_sql: str,
+    ho_sql: str,
+    arama_sql: str,
+    hizli: bool,
+) -> str:
+    """Aynı giriş gününde tam 2 veya 3 müşteri kartı olan kayıtlar."""
+    giris_c = _firma_ozet_giris_tarihi_sql("c", "mk")
+    giris_c2 = _firma_ozet_giris_tarihi_sql("c2", "mk")
+    mk_join_c2 = _firma_ozet_mk_join_sql(hizli, c_alias="c2", mk_alias="mk")
+    mw2 = _firma_ozet_sql_alias_c_mk(musteri_where, "c2", "mk")
+    mkdf2 = _firma_ozet_sql_alias_c_mk(mk_df_sql, "c2", "mk")
+    giri2 = _firma_ozet_sql_alias_c_mk(giri_ay_sql, "c2", "mk")
+    ho2 = _firma_ozet_sql_alias_c_mk(ho_sql, "c2", "mk")
+    ar2 = _firma_ozet_sql_alias_c_mk(arama_sql, "c2", "mk")
+    return f"""
+              AND ({giris_c}) IS NOT NULL
+              AND ({giris_c})::date IN (
+                  SELECT dup.giris_gunu
+                  FROM (
+                      SELECT ({giris_c2})::date AS giris_gunu
+                      FROM customers c2
+                      {mk_join_c2}
+                      WHERE {mw2}
+                        {mkdf2}{giri2}{ho2}{ar2}
+                        AND ({giris_c2}) IS NOT NULL
+                      GROUP BY 1
+                      HAVING COUNT(*)::int BETWEEN 2 AND 3
+                  ) dup
+              )"""
+
+
 def _fatura_rapor_giris_aylari_parse(raw) -> list | None:
     """giri_aylar=1,3,12 → benzersiz 1..12. Boş / geçersiz → None (filtre yok)."""
     if raw is None:
@@ -2297,21 +2350,36 @@ def _fatura_rapor_giris_aylari_parse(raw) -> list | None:
     return out or None
 
 
-def _fatura_rapor_musteri_where_sql(pasifleri_dahil: bool, tum_musteriler: bool) -> str:
-    """Müşteri kartı listesi için WHERE parçası (fatura yok satırları).
-
-    - Varsayılan: yalnız aktif kart (is_active) ve customers.durum pasif benzeri değil.
-    - Pasifler Dahil: pasif durum ve is_active=FALSE kayıtlar da listelenir (API pasifte ikisini de günceller).
-    - Tüm Müşteriler: kapsam süzgeci yok (TRUE).
-    """
-    if tum_musteriler:
-        return "TRUE"
-    if pasifleri_dahil:
-        # Önceki hata: yalnızca durum süzgecini kaldırıp is_active=TRUE bırakıyordu; pasif kartlar hiç görünmüyordu.
-        return "TRUE"
+def _fatura_rapor_aktif_musteri_where_clause() -> str:
     durum_sql = _fatura_rapor_aktif_musteri_sql_durum_kosulu().strip()
     base = "COALESCE(c.is_active, TRUE) = TRUE"
     return f"{base} AND {durum_sql}"
+
+
+def _fatura_rapor_pasif_musteri_where_clause() -> str:
+    """Yalnız pasif kartlar: aktif kart koşulunun tümleyeni."""
+    return f"NOT ({_fatura_rapor_aktif_musteri_where_clause()})"
+
+
+def _fatura_rapor_musteri_where_sql(
+    pasifleri_dahil: bool,
+    tum_musteriler: bool,
+    sadece_aktif: bool = False,
+) -> str:
+    """Müşteri kartı listesi için WHERE parçası (fatura yok satırları).
+
+    - sadece_aktif: yalnız aktif kart.
+    - pasifleri_dahil (Pasiflr): yalnız pasif kart.
+    - Tüm Müşteriler: kapsam süzgeci yok (TRUE).
+    - Varsayılan: yalnız aktif kart.
+    """
+    if sadece_aktif:
+        return _fatura_rapor_aktif_musteri_where_clause()
+    if tum_musteriler:
+        return "TRUE"
+    if pasifleri_dahil:
+        return _fatura_rapor_pasif_musteri_where_clause()
+    return _fatura_rapor_aktif_musteri_where_clause()
 
 
 def _fatura_rapor_musteri_where_with_bizim(musteri_where: str, bizim_only: bool) -> str:
@@ -2613,6 +2681,282 @@ def _firma_ozet_expect_borc_env():
         return None
 
 
+def _firma_ozet_liste_hizli_mod() -> bool:
+    """Tekil müşteri listesi: ağır grid yeniden hesabını atla (FIRMA_OZET_LISTE_HIZLI=0 ile kapatılır)."""
+    raw = (os.environ.get("FIRMA_OZET_LISTE_HIZLI") or "1").strip().lower()
+    return raw not in ("0", "false", "no", "off", "hayir", "hayır")
+
+
+_firma_ozet_rapor_schema_ready = False
+_firma_ozet_rapor_schema_lock = threading.Lock()
+_fatura_rapor_firma_resp_cache: dict[str, dict] = {}
+_fatura_rapor_firma_resp_cache_lock = threading.Lock()
+
+
+def _firma_ozet_rapor_schema_ensure_once() -> None:
+    global _firma_ozet_rapor_schema_ready
+    if _firma_ozet_rapor_schema_ready:
+        return
+    with _firma_ozet_rapor_schema_lock:
+        if _firma_ozet_rapor_schema_ready:
+            return
+        ensure_customers_is_active()
+        ensure_customers_durum()
+        ensure_customers_rent_columns()
+        ensure_customers_hazir_ofis_oda()
+        ensure_musteri_kyc_columns()
+        ensure_musteri_kyc_hazir_ofis_oda_no()
+        ensure_musteri_kyc_latest_lookup_index()
+        ensure_customers_grup2_secimleri()
+        ensure_grup2_etiketleri_table()
+        ensure_customers_balance_trigger()
+        _firma_ozet_rapor_schema_ready = True
+
+
+def _firma_ozet_resp_cache_ttl_sec() -> float:
+    try:
+        return max(1.0, float(str(os.getenv("FIRMA_OZET_RESP_CACHE_SEC") or "8").strip() or "8"))
+    except (TypeError, ValueError):
+        return 8.0
+
+
+def _firma_ozet_resp_cache_key() -> str:
+    keys = (
+        "gorunum",
+        "page",
+        "page_size",
+        "baslangic",
+        "bitis",
+        "pasifleri_dahil",
+        "tum_musteriler",
+        "sadece_aktif",
+        "bizim_hesap",
+        "cift_olanlar",
+        "duzenli_fatura",
+        "q",
+        "giri_aylar",
+        "hazir_ofis_oda",
+        "hazir_oda",
+    )
+    return "|".join(f"{k}={request.args.get(k, '')}" for k in keys)
+
+
+def _firma_ozet_resp_cache_get(key: str):
+    now = time.monotonic()
+    ttl = _firma_ozet_resp_cache_ttl_sec()
+    with _fatura_rapor_firma_resp_cache_lock:
+        ent = _fatura_rapor_firma_resp_cache.get(key)
+        if not ent:
+            return None
+        if now - float(ent.get("ts") or 0) > ttl:
+            _fatura_rapor_firma_resp_cache.pop(key, None)
+            return None
+        return ent.get("payload")
+
+
+def _firma_ozet_resp_cache_set(key: str, payload: dict) -> None:
+    with _fatura_rapor_firma_resp_cache_lock:
+        if len(_fatura_rapor_firma_resp_cache) > 96:
+            _fatura_rapor_firma_resp_cache.clear()
+        _fatura_rapor_firma_resp_cache[key] = {"ts": time.monotonic(), "payload": payload}
+
+
+def _firma_ozet_sql_guncel_kdv_dahil_hizli_expr() -> str:
+    """Liste modu: jsonb grid alt sorgusu yok (sayfa başına musteri_aylik_grid_cache taraması kaldırılır)."""
+    return """CASE
+        WHEN mk.aylik_kira IS NOT NULL AND mk.aylik_kira > 0 THEN
+            CASE
+                WHEN COALESCE(mk.kira_nakit, FALSE) THEN round(mk.aylik_kira::numeric, 2)
+                ELSE round(mk.aylik_kira::numeric * (1 + COALESCE(mk.kdv_oran::numeric, 20) / 100), 2)
+            END
+        ELSE COALESCE(NULLIF(c.guncel_kira_bedeli, 0), NULLIF(c.ilk_kira_bedeli, 0))
+    END"""
+
+
+_FIRMA_OZET_MK_SELECT_COLS = """
+    sozlesme_tarihi,
+    sozlesme_bitis,
+    kira_artis_tarihi,
+    kira_suresi_ay,
+    aylik_kira,
+    kira_nakit,
+    kdv_oran,
+    duzenli_fatura,
+    hizmet_turu,
+    hazir_ofis_oda_no,
+    musteri_adi,
+    faaliyet_konusu,
+    vergi_dairesi,
+    yeni_adres,
+    yetkili_ikametgah,
+    yetkili_adsoyad,
+    yetkili_tcno,
+    yetkili_tel,
+    yetkili_tel2,
+    yetkili_email,
+    email,
+    sirket_unvani,
+    unvan,
+    vergi_no
+"""
+
+
+def _firma_ozet_mk_join_sql(hizli: bool, c_alias: str = "c", mk_alias: str = "mk") -> str:
+    cols = _FIRMA_OZET_MK_SELECT_COLS.strip()
+    if hizli:
+        return f"""
+            LEFT JOIN LATERAL (
+                SELECT {cols}
+                FROM musteri_kyc mk_inner
+                WHERE mk_inner.musteri_id = {c_alias}.id
+                ORDER BY mk_inner.id DESC
+                LIMIT 1
+            ) {mk_alias} ON TRUE"""
+    return f"""
+            LEFT JOIN (
+                SELECT DISTINCT ON (musteri_id)
+                    musteri_id,
+                    {cols}
+                FROM musteri_kyc
+                ORDER BY musteri_id, id DESC
+            ) {mk_alias} ON {mk_alias}.musteri_id = {c_alias}.id"""
+
+
+def _firma_ozet_build_rows_firma_sql(
+    *,
+    musteri_where: str,
+    mk_df_sql: str,
+    giri_ay_sql: str,
+    ho_sql: str,
+    arama_sql: str,
+    firma_guncel_sql: str,
+    hizli: bool,
+    cift_sql: str = "",
+) -> str:
+    if hizli:
+        grup2_sql = "''::text AS grup2_etiketler"
+        blob_sql = "''::text AS liste_ara_blob_db"
+    else:
+        grup2_sql = """COALESCE(
+                   (
+                       SELECT string_agg(
+                                  COALESCE(g2.etiket, gs),
+                                  ' | '
+                                  ORDER BY
+                                      CASE gs
+                                          WHEN 'bizim_hesap' THEN 0
+                                          WHEN 'vergi_dairesi' THEN 1
+                                          WHEN 'vergi_dairesi_terk' THEN 2
+                                          ELSE 3
+                                      END,
+                                      COALESCE(g2.etiket, gs)
+                              )
+                       FROM (
+                           SELECT DISTINCT gs
+                           FROM unnest(
+                               COALESCE(c.grup2_secimleri, ARRAY[]::text[]) ||
+                               CASE WHEN COALESCE(c.bizim_hesap, FALSE) THEN ARRAY['bizim_hesap']::text[] ELSE ARRAY[]::text[] END
+                           ) gs
+                       ) gg
+                       LEFT JOIN grup2_etiketleri g2 ON g2.slug = gg.gs
+                   ),
+                   ''
+               ) AS grup2_etiketler"""
+        blob_sql = """CONCAT_WS(' ',
+                       c.name, c.musteri_adi, c.yetkili_kisi, c.phone, c.phone2, c.email,
+                       c.ilk_kira_bedeli::text, c.guncel_kira_bedeli::text, mk.aylik_kira::text,
+                       c.tax_number::text, c.office_code::text,
+                       mk.sirket_unvani, mk.unvan, mk.musteri_adi,
+                       mk.vergi_no::text, mk.vergi_dairesi, mk.faaliyet_konusu, mk.hizmet_turu,
+                       mk.yetkili_adsoyad, mk.yetkili_tcno::text,
+                       mk.yetkili_tel, mk.yetkili_tel2, mk.yetkili_email, mk.email,
+                       mk.yeni_adres, mk.yetkili_ikametgah
+                   ) AS liste_ara_blob_db"""
+    mk_join = _firma_ozet_mk_join_sql(hizli)
+    return f"""
+            SELECT c.id,
+                   c.tax_number,
+                   COALESCE(c.bizim_hesap, FALSE) AS bizim_hesap,
+                   COALESCE(NULLIF(TRIM(c.musteri_adi), ''), NULLIF(TRIM(c.name), ''), '—') AS firma_adi,
+                   COALESCE(NULLIF(TRIM(c.tax_number::text), ''), NULLIF(TRIM(mk.vergi_no::text), ''), '') AS rapor_vergi_no,
+                   COALESCE(NULLIF(TRIM(mk.yetkili_tcno::text), ''), NULLIF(TRIM(c.yetkili_tcno::text), ''), '') AS rapor_kimlik_no,
+                   c.kapanis_tarihi,
+                   TRIM(COALESCE(c.durum, '')) AS musteri_durum,
+                   COALESCE(c.is_active, TRUE) AS is_active_kart,
+                   COALESCE(
+                       NULLIF(TRIM(mk.hizmet_turu), ''),
+                       NULLIF(TRIM(c.hizmet_turu), ''),
+                       ''
+                   ) AS rapor_hizmet_turu,
+                   COALESCE(mk.hazir_ofis_oda_no, c.hazir_ofis_oda_no) AS hazir_ofis_oda_no,
+                   ({_FIRMA_OZET_GIRIS_TARIHI_SQL}) AS giris_raw,
+                   mk.sozlesme_tarihi AS kyc_soz_bas,
+                   mk.sozlesme_bitis AS kyc_soz_bit,
+                   mk.kira_artis_tarihi AS kyc_kira_artis,
+                   mk.kira_suresi_ay AS kyc_kira_suresi_ay,
+                   mk.aylik_kira, mk.kira_nakit, mk.kdv_oran,
+                   CASE
+                       WHEN mk.aylik_kira IS NOT NULL AND mk.aylik_kira > 0 THEN mk.aylik_kira
+                       ELSE COALESCE(c.guncel_kira_bedeli, c.ilk_kira_bedeli, mk.aylik_kira)
+                   END AS firma_grid_aylik_net,
+                   COALESCE(mk.aylik_kira, c.ilk_kira_bedeli) AS ilk_kira_bedeli,
+                   {firma_guncel_sql} AS guncel_ay_grid_kdv_dahil,
+                   COALESCE(c.current_balance, 0) AS current_balance,
+                   (
+                       COALESCE(c.grup2_secimleri, ARRAY[]::text[]) ||
+                       CASE WHEN COALESCE(c.bizim_hesap, FALSE) THEN ARRAY['bizim_hesap']::text[] ELSE ARRAY[]::text[] END
+                   ) AS grup2_secimleri,
+                   {grup2_sql},
+                   {blob_sql}
+            FROM customers c
+            {mk_join}
+            WHERE {musteri_where}
+              {mk_df_sql}{giri_ay_sql}{ho_sql}{arama_sql}{cift_sql}
+            ORDER BY 2
+            """
+
+
+def _firma_ozet_grid_ozet_map_cache_only(rows: list, ref: date | None = None) -> dict[int, dict]:
+    """Disk grid önbelleğinden özet (canlı _aylik_grid_compute yok)."""
+    d = ref or date.today()
+    ref_y, ref_m = int(d.year), int(d.month)
+    mids: list[int] = []
+    seen = set()
+    for row in rows or []:
+        try:
+            mid = int((row or {}).get("id") or (row or {}).get("musteri_id") or 0)
+        except (TypeError, ValueError):
+            continue
+        if mid <= 0 or mid in seen:
+            continue
+        seen.add(mid)
+        mids.append(mid)
+    if not mids:
+        return {}
+    try:
+        from routes.giris_routes import (
+            _firma_ozet_ozet_from_grid_cache_payload,
+            _read_aylik_grid_cache_payload_batch,
+        )
+
+        payloads = _read_aylik_grid_cache_payload_batch(mids, mem_ttl=30.0) or {}
+        out: dict[int, dict] = {}
+        for mid in mids:
+            pl = payloads.get(mid)
+            if not pl:
+                continue
+            fast = _firma_ozet_ozet_from_grid_cache_payload(pl, ref_y, ref_m)
+            if fast:
+                out[mid] = dict(fast)
+        return out
+    except Exception as e:
+        try:
+            current_app.logger.warning("firma_ozet grid ozet cache_only: %r", e)
+        except Exception:
+            pass
+        return {}
+
+
 def _firma_ozet_sql_guncel_grid_kdv_dahil_expr(ay_y: int, ay_m: int) -> str:
     """Tekil rapor referans ayı: musteri_aylik_grid_cache.payload.aylar içindeki tutar_kdv_dahil (Aylık Tutarlar grid).
 
@@ -2727,6 +3071,45 @@ SELECT * FROM winners ORDER BY sk, id LIMIT %s OFFSET %s
 """
     )
     return totals_sql, page_sql
+
+
+def _firma_ozet_sql_winner_ids_query(rows_firma_sql_no_order: str, cift_olanlar: bool) -> str:
+    """Dedupe sonrası tekil müşteri id listesi (tam satır çekmeden)."""
+    _, page_sql = _firma_ozet_sql_paging_queries(rows_firma_sql_no_order, cift_olanlar)
+    return page_sql.replace("SELECT * FROM winners", "SELECT id FROM winners", 1)
+
+
+def _firma_ozet_toplam_borc_grid_for_winner_ids(
+    musteri_ids: list[int],
+    ref: date,
+    *,
+    chunk_size: int = 100,
+) -> float:
+    """Grid kaynaklı toplam borç (aylık grid ile aynı); id listesi üzerinden batch."""
+    if not musteri_ids:
+        return 0.0
+    try:
+        from routes.giris_routes import musteri_firma_ozet_grid_ozet_batch
+
+        total = 0.0
+        n = max(1, int(chunk_size or 100))
+        for i in range(0, len(musteri_ids), n):
+            part = musteri_ids[i : i + n]
+            oz = musteri_firma_ozet_grid_ozet_batch(part, ref) or {}
+            for mid in part:
+                try:
+                    b = float((oz.get(int(mid)) or {}).get("toplam_borc") or 0)
+                    if math.isfinite(b):
+                        total += b
+                except (TypeError, ValueError):
+                    pass
+        return round(total, 2)
+    except Exception as ex:
+        try:
+            current_app.logger.warning("firma_ozet toplam_borc_grid_for_ids: %r", ex)
+        except Exception:
+            pass
+        return 0.0
 
 
 def _firma_ozet_row_to_satir_item(row: dict, pasifleri_dahil: bool, grid_ozet_map: dict | None = None) -> dict:
@@ -2903,7 +3286,6 @@ def _firma_ozet_row_to_satir_item(row: dict, pasifleri_dahil: bool, grid_ozet_ma
                     str(row.get("rapor_kimlik_no") or "").strip(),
                     str(row.get("rapor_hizmet_turu") or "").strip(),
                     str(row.get("grup2_etiketler") or "").strip(),
-                    str(row.get("kyc_arama_blob_tum") or "").strip(),
                     str(row.get("liste_ara_blob_db") or "").strip(),
                 )
                 if part
@@ -3026,35 +3408,50 @@ def api_fatura_rapor():
     )
     pasifleri_dahil = _fatura_rapor_query_truthy(request.args.get("pasifleri_dahil"))
     tum_musteriler = _fatura_rapor_query_truthy(request.args.get("tum_musteriler"))
+    sadece_aktif = _fatura_rapor_query_truthy(request.args.get("sadece_aktif"))
     bizim_hesap = _fatura_rapor_query_truthy(request.args.get("bizim_hesap"))
     cift_olanlar = _fatura_rapor_query_truthy(request.args.get("cift_olanlar"))
     duzenli_fatura = _fatura_rapor_duzenli_fatura_norm(request.args.get("duzenli_fatura"))
     gorunum_firma = _fatura_rapor_firma_ozet_mi(request.args.get("gorunum"))
     if gorunum_firma:
-        # Tekil müşteri listesi: faturalar tablosu gerekmez; şema kontrolleri ve sorgu hafifletildi.
-        ensure_customers_is_active()
-        ensure_customers_durum()
-        ensure_customers_rent_columns()
-        ensure_customers_hazir_ofis_oda()
-        ensure_musteri_kyc_columns()
-        ensure_musteri_kyc_hazir_ofis_oda_no()
-        ensure_musteri_kyc_latest_lookup_index()
-        ensure_customers_grup2_secimleri()
-        ensure_grup2_etiketleri_table()
-        ensure_customers_balance_trigger()
+        liste_hizli = _firma_ozet_liste_hizli_mod()
+        if liste_hizli:
+            _ck = _firma_ozet_resp_cache_key()
+            _cached = None
+            if not pasifleri_dahil and not sadece_aktif:
+                _cached = _firma_ozet_resp_cache_get(_ck)
+            if _cached is not None:
+                return jsonify(_cached)
+            _firma_ozet_rapor_schema_ensure_once()
+        else:
+            ensure_customers_is_active()
+            ensure_customers_durum()
+            ensure_customers_rent_columns()
+            ensure_customers_hazir_ofis_oda()
+            ensure_musteri_kyc_columns()
+            ensure_musteri_kyc_hazir_ofis_oda_no()
+            ensure_musteri_kyc_latest_lookup_index()
+            ensure_customers_grup2_secimleri()
+            ensure_grup2_etiketleri_table()
+            ensure_customers_balance_trigger()
         ref = bugun
         ay_y, ay_m = ref.year, ref.month
         ref_first = date(ay_y, ay_m, 1)
         ay_etiket = f"{_AYLAR_TR_FATURA_RAPOR[ay_m - 1]} {ay_y}"
-        try:
-            from routes.giris_routes import _ensure_aylik_grid_cache_table
+        if not liste_hizli:
+            try:
+                from routes.giris_routes import _ensure_aylik_grid_cache_table
 
-            _ensure_aylik_grid_cache_table()
-        except Exception as _e_agc:
-            current_app.logger.warning("firma_ozet aylik_grid_cache ensure: %r", _e_agc)
-        _firma_guncel_grid_sql = _firma_ozet_sql_guncel_grid_kdv_dahil_expr(ay_y, ay_m)
+                _ensure_aylik_grid_cache_table()
+            except Exception as _e_agc:
+                current_app.logger.warning("firma_ozet aylik_grid_cache ensure: %r", _e_agc)
+        _firma_guncel_grid_sql = (
+            _firma_ozet_sql_guncel_kdv_dahil_hizli_expr()
+            if liste_hizli
+            else _firma_ozet_sql_guncel_grid_kdv_dahil_expr(ay_y, ay_m)
+        )
         musteri_where = _fatura_rapor_musteri_where_with_bizim(
-            _fatura_rapor_musteri_where_sql(pasifleri_dahil, tum_musteriler),
+            _fatura_rapor_musteri_where_sql(pasifleri_dahil, tum_musteriler, sadece_aktif),
             bizim_hesap,
         )
         mk_df_sql = ""
@@ -3123,136 +3520,26 @@ def api_fatura_rapor():
         if hazir_oda_filtre is not None:
             ho_sql = " AND COALESCE(mk.hazir_ofis_oda_no, c.hazir_ofis_oda_no) = %s"
             mk_df_params.append(hazir_oda_filtre)
-        rows_firma_sql = f"""
-            SELECT c.id,
-                   c.tax_number,
-                   COALESCE(c.bizim_hesap, FALSE) AS bizim_hesap,
-                   COALESCE(NULLIF(TRIM(c.musteri_adi), ''), NULLIF(TRIM(c.name), ''), '—') AS firma_adi,
-                   COALESCE(NULLIF(TRIM(c.tax_number::text), ''), NULLIF(TRIM(mk.vergi_no::text), ''), '') AS rapor_vergi_no,
-                   COALESCE(NULLIF(TRIM(mk.yetkili_tcno::text), ''), NULLIF(TRIM(c.yetkili_tcno::text), ''), '') AS rapor_kimlik_no,
-                   c.kapanis_tarihi,
-                   TRIM(COALESCE(c.durum, '')) AS musteri_durum,
-                   COALESCE(c.is_active, TRUE) AS is_active_kart,
-                   COALESCE(
-                       NULLIF(TRIM(mk.hizmet_turu), ''),
-                       NULLIF(TRIM(c.hizmet_turu), ''),
-                       ''
-                   ) AS rapor_hizmet_turu,
-                   COALESCE(mk.hazir_ofis_oda_no, c.hazir_ofis_oda_no) AS hazir_ofis_oda_no,
-                   ({_FIRMA_OZET_GIRIS_TARIHI_SQL}) AS giris_raw,
-                   mk.sozlesme_tarihi AS kyc_soz_bas,
-                   mk.sozlesme_bitis AS kyc_soz_bit,
-                   mk.kira_artis_tarihi AS kyc_kira_artis,
-                   mk.kira_suresi_ay AS kyc_kira_suresi_ay,
-                   mk.aylik_kira, mk.kira_nakit, mk.kdv_oran,
-                   CASE
-                       WHEN mk.aylik_kira IS NOT NULL AND mk.aylik_kira > 0 THEN mk.aylik_kira
-                       ELSE COALESCE(c.guncel_kira_bedeli, c.ilk_kira_bedeli, mk.aylik_kira)
-                   END AS firma_grid_aylik_net,
-                   COALESCE(mk.aylik_kira, c.ilk_kira_bedeli) AS ilk_kira_bedeli,
-                   {_firma_guncel_grid_sql} AS guncel_ay_grid_kdv_dahil,
-                   COALESCE(c.current_balance, 0) AS current_balance,
-                   (
-                       COALESCE(c.grup2_secimleri, ARRAY[]::text[]) ||
-                       CASE WHEN COALESCE(c.bizim_hesap, FALSE) THEN ARRAY['bizim_hesap']::text[] ELSE ARRAY[]::text[] END
-                   ) AS grup2_secimleri,
-                   COALESCE(
-                       (
-                           SELECT string_agg(
-                                      COALESCE(g2.etiket, gs),
-                                      ' | '
-                                      ORDER BY
-                                          CASE gs
-                                              WHEN 'bizim_hesap' THEN 0
-                                              WHEN 'vergi_dairesi' THEN 1
-                                              WHEN 'vergi_dairesi_terk' THEN 2
-                                              ELSE 3
-                                          END,
-                                          COALESCE(g2.etiket, gs)
-                                  )
-                           FROM (
-                               SELECT DISTINCT gs
-                               FROM unnest(
-                                   COALESCE(c.grup2_secimleri, ARRAY[]::text[]) ||
-                                   CASE WHEN COALESCE(c.bizim_hesap, FALSE) THEN ARRAY['bizim_hesap']::text[] ELSE ARRAY[]::text[] END
-                               ) gs
-                           ) gg
-                           LEFT JOIN grup2_etiketleri g2 ON g2.slug = gg.gs
-                       ),
-                       ''
-                   ) AS grup2_etiketler,
-                   (
-                       SELECT string_agg(
-                                  CONCAT_WS(' ',
-                                      mkx.sirket_unvani,
-                                      mkx.unvan,
-                                      mkx.musteri_adi,
-                                      mkx.vergi_no::text,
-                                      mkx.vergi_dairesi,
-                                      mkx.faaliyet_konusu,
-                                      mkx.hizmet_turu,
-                                      mkx.yetkili_adsoyad,
-                                      mkx.yetkili_tcno::text,
-                                      mkx.yetkili_tel,
-                                      mkx.yetkili_tel2,
-                                      mkx.yetkili_email,
-                                      mkx.email,
-                                      mkx.yeni_adres,
-                                      mkx.yetkili_ikametgah,
-                                      mkx.notlar
-                                  ),
-                                  ' '
-                              )
-                       FROM musteri_kyc mkx
-                       WHERE mkx.musteri_id = c.id
-                   ) AS kyc_arama_blob_tum,
-                   /* Geniş yerel arama için birleşik blob: liste tam yüklendikten sonra
-                      arama kutusunun saniyesinden küçük sürede filtreleme yapmasını sağlar. */
-                   CONCAT_WS(' ',
-                       c.name, c.musteri_adi, c.yetkili_kisi, c.phone, c.phone2, c.email,
-                       c.ilk_kira_bedeli::text, c.guncel_kira_bedeli::text, mk.aylik_kira::text,
-                       c.tax_number::text, c.office_code::text,
-                       mk.sirket_unvani, mk.unvan, mk.musteri_adi,
-                       mk.vergi_no::text, mk.vergi_dairesi, mk.faaliyet_konusu, mk.hizmet_turu,
-                       mk.yetkili_adsoyad, mk.yetkili_tcno::text,
-                       mk.yetkili_tel, mk.yetkili_tel2, mk.yetkili_email, mk.email,
-                       mk.yeni_adres, mk.yetkili_ikametgah
-                   ) AS liste_ara_blob_db
-            FROM customers c
-            LEFT JOIN (
-                SELECT DISTINCT ON (musteri_id)
-                    musteri_id,
-                    sozlesme_tarihi,
-                    sozlesme_bitis,
-                    kira_artis_tarihi,
-                    kira_suresi_ay,
-                    aylik_kira,
-                    kira_nakit,
-                    kdv_oran,
-                    duzenli_fatura,
-                    hizmet_turu,
-                    hazir_ofis_oda_no,
-                    musteri_adi,
-                    faaliyet_konusu,
-                    vergi_dairesi,
-                    yeni_adres,
-                    yetkili_ikametgah,
-                    yetkili_adsoyad,
-                    yetkili_tcno,
-                    yetkili_tel,
-                    yetkili_tel2,
-                    yetkili_email,
-                    email,
-                    sirket_unvani,
-                    unvan,
-                    vergi_no
-                FROM musteri_kyc
-                ORDER BY musteri_id, id DESC
-            ) mk ON mk.musteri_id = c.id
-            WHERE {musteri_where}
-              {mk_df_sql}{giri_ay_sql}{ho_sql}{arama_sql}
-            ORDER BY 2
-            """
+        cift_sql = ""
+        if cift_olanlar:
+            cift_sql = _firma_ozet_sql_cift_olanlar_giris_gunu_filter(
+                musteri_where=musteri_where,
+                mk_df_sql=mk_df_sql,
+                giri_ay_sql=giri_ay_sql,
+                ho_sql=ho_sql,
+                arama_sql=arama_sql,
+                hizli=liste_hizli,
+            )
+        rows_firma_sql = _firma_ozet_build_rows_firma_sql(
+            musteri_where=musteri_where,
+            mk_df_sql=mk_df_sql,
+            giri_ay_sql=giri_ay_sql,
+            ho_sql=ho_sql,
+            arama_sql=arama_sql,
+            firma_guncel_sql=_firma_guncel_grid_sql,
+            hizli=liste_hizli,
+            cift_sql=cift_sql,
+        )
         rows_firma_params = tuple(mk_df_params)
         rows_firma_sql_no_order = re.sub(r"\s+ORDER\s+BY\s+2\s*$", "", rows_firma_sql.rstrip(), flags=re.I)
         firma_hizli_degrade = False
@@ -3280,21 +3567,98 @@ def api_fatura_rapor():
                 total_count_firma = int(tot_row.get("cnt") or 0)
                 toplam_borc = round(float(tot_row.get("sum_borc") or 0), 2)
                 toplam_aylik = round(float(tot_row.get("sum_aylik") or 0), 2)
-                page_grid_map = _firma_ozet_grid_ozet_map_for_rows(page_rows, ref_first)
-                satirlar_resp = [_firma_ozet_row_to_satir_item(r, pasifleri_dahil, page_grid_map) for r in page_rows]
+                if liste_hizli:
+                    _t_pg = time.perf_counter()
+                    satirlar_resp = [
+                        _firma_ozet_row_to_satir_item(r, pasifleri_dahil, None)
+                        for r in page_rows
+                    ]
+                    current_app.logger.info(
+                        "firma_ozet_liste_hizli page=%s rows=%s ms=%.2f",
+                        page,
+                        len(page_rows),
+                        (time.perf_counter() - _t_pg) * 1000.0,
+                    )
+                else:
+                    winner_ids_prewarm: list[int] = []
+                    try:
+                        ids_sql_pw = _firma_ozet_sql_winner_ids_query(
+                            rows_firma_sql_no_order, cift_olanlar
+                        )
+                        id_rows_pw = fetch_all(ids_sql_pw, rows_firma_params) or []
+                        winner_ids_prewarm = [
+                            int(r["id"])
+                            for r in id_rows_pw
+                            if r is not None and r.get("id") is not None
+                        ]
+                    except Exception as e_pw_ids:
+                        current_app.logger.warning("firma_ozet prewarm ids err=%r", e_pw_ids)
+                        winner_ids_prewarm = [
+                            int(r["id"])
+                            for r in page_rows
+                            if r is not None and r.get("id") is not None
+                        ]
+                    try:
+                        from routes.giris_routes import prewarm_aylik_grid_cache_for_musteriler
+
+                        _t_pw0 = time.perf_counter()
+                        n_pw = prewarm_aylik_grid_cache_for_musteriler(
+                            winner_ids_prewarm,
+                            ref_first,
+                            max_rebuild=min(50, max(1, len(page_rows))),
+                        )
+                        current_app.logger.info(
+                            "firma_ozet prewarm rebuilt=%s winner_ids=%s ms=%.2f",
+                            n_pw,
+                            len(winner_ids_prewarm),
+                            (time.perf_counter() - _t_pw0) * 1000.0,
+                        )
+                    except Exception as e_pw:
+                        current_app.logger.warning("firma_ozet prewarm err=%r", e_pw)
+                    page_grid_map = _firma_ozet_grid_ozet_map_for_rows(page_rows, ref_first)
+                    satirlar_resp = [
+                        _firma_ozet_row_to_satir_item(r, pasifleri_dahil, page_grid_map)
+                        for r in page_rows
+                    ]
+                    try:
+                        _t_tb = time.perf_counter()
+                        ids_sql = _firma_ozet_sql_winner_ids_query(
+                            rows_firma_sql_no_order, cift_olanlar
+                        )
+                        id_rows = fetch_all(ids_sql, rows_firma_params) or []
+                        winner_ids = [
+                            int(r["id"])
+                            for r in id_rows
+                            if r is not None and r.get("id") is not None
+                        ]
+                        try:
+                            max_ids = int(
+                                str(os.getenv("FIRMA_OZET_TOPLAM_BORC_MAX_IDS") or "800").strip() or "800"
+                            )
+                        except ValueError:
+                            max_ids = 800
+                        if winner_ids and len(winner_ids) <= max(50, max_ids):
+                            toplam_borc = _firma_ozet_toplam_borc_grid_for_winner_ids(
+                                winner_ids, ref_first, chunk_size=100
+                            )
+                        elif winner_ids:
+                            toplam_borc = round(float(tot_row.get("sum_borc") or 0), 2)
+                            current_app.logger.info(
+                                "firma_ozet toplam_borc SQL yedek (winner_ids=%s > max=%s)",
+                                len(winner_ids),
+                                max_ids,
+                            )
+                        current_app.logger.info(
+                            "firma_ozet toplam_borc_grid ids=%s ms=%.2f borc=%.2f",
+                            len(winner_ids),
+                            (time.perf_counter() - _t_tb) * 1000.0,
+                            toplam_borc,
+                        )
+                    except Exception as e_borc:
+                        current_app.logger.warning("firma_ozet grid toplam_borc ids err=%r", e_borc)
                 for _it in satirlar_resp:
                     _it.pop("_dedupe_vergi", None)
                 has_more = off + len(satirlar_resp) < total_count_firma
-                try:
-                    all_rows_for_borc = fetch_all(rows_firma_sql, rows_firma_params) or []
-                    toplam_borc = _firma_ozet_toplam_borc_sum_from_rows(
-                        all_rows_for_borc,
-                        ref_first,
-                        cift_olanlar=cift_olanlar,
-                        pasifleri_dahil=pasifleri_dahil,
-                    )
-                except Exception as e_borc:
-                    current_app.logger.warning("firma_ozet grid toplam_borc fallback err=%r", e_borc)
                 sql_paging_ok = True
                 firma_sunucu_ms = firma_sql_ms
                 current_app.logger.info(
@@ -3341,144 +3705,42 @@ def api_fatura_rapor():
                         continue
                     break
             if _last_firma_err is not None:
-                # Ağ/DB dalgalanmasında raporu tamamen düşürme:
-                # hafif (borç özeti olmayan) sorguya dönüp listeyi yine göster.
+                # Ağ/DB dalgalanmasında raporu tamamen düşürme: minimal SQL ile listeyi göster.
                 firma_hizli_degrade = True
-                rows_firma = fetch_all(
-                    f"""
-                SELECT c.id,
-                       c.tax_number,
-                       COALESCE(c.bizim_hesap, FALSE) AS bizim_hesap,
-                       COALESCE(NULLIF(TRIM(c.musteri_adi), ''), NULLIF(TRIM(c.name), ''), '—') AS firma_adi,
-                       COALESCE(NULLIF(TRIM(c.tax_number::text), ''), NULLIF(TRIM(mk.vergi_no::text), ''), '') AS rapor_vergi_no,
-                       COALESCE(NULLIF(TRIM(mk.yetkili_tcno::text), ''), NULLIF(TRIM(c.yetkili_tcno::text), ''), '') AS rapor_kimlik_no,
-                       c.kapanis_tarihi,
-                       TRIM(COALESCE(c.durum, '')) AS musteri_durum,
-                       COALESCE(c.is_active, TRUE) AS is_active_kart,
-                       COALESCE(
-                           NULLIF(TRIM(mk.hizmet_turu), ''),
-                           NULLIF(TRIM(c.hizmet_turu), ''),
-                           ''
-                       ) AS rapor_hizmet_turu,
-                       COALESCE(mk.hazir_ofis_oda_no, c.hazir_ofis_oda_no) AS hazir_ofis_oda_no,
-                       ({_FIRMA_OZET_GIRIS_TARIHI_SQL}) AS giris_raw,
-                       mk.sozlesme_tarihi AS kyc_soz_bas,
-                       mk.sozlesme_bitis AS kyc_soz_bit,
-                       mk.kira_artis_tarihi AS kyc_kira_artis,
-                       mk.kira_suresi_ay AS kyc_kira_suresi_ay,
-                       mk.aylik_kira, mk.kira_nakit, mk.kdv_oran,
-                       CASE
-                           WHEN mk.aylik_kira IS NOT NULL AND mk.aylik_kira > 0 THEN mk.aylik_kira
-                           ELSE COALESCE(c.guncel_kira_bedeli, c.ilk_kira_bedeli, mk.aylik_kira)
-                       END AS firma_grid_aylik_net,
-                       COALESCE(mk.aylik_kira, c.ilk_kira_bedeli) AS ilk_kira_bedeli,
-                       {_firma_guncel_grid_sql} AS guncel_ay_grid_kdv_dahil,
-                       COALESCE(c.current_balance, 0) AS current_balance,
-                       (
-                           COALESCE(c.grup2_secimleri, ARRAY[]::text[]) ||
-                           CASE WHEN COALESCE(c.bizim_hesap, FALSE) THEN ARRAY['bizim_hesap']::text[] ELSE ARRAY[]::text[] END
-                       ) AS grup2_secimleri,
-                       COALESCE(
-                           (
-                               SELECT string_agg(
-                                          COALESCE(g2.etiket, gs),
-                                          ' | '
-                                          ORDER BY
-                                              CASE gs
-                                                  WHEN 'bizim_hesap' THEN 0
-                                                  WHEN 'vergi_dairesi' THEN 1
-                                                  WHEN 'vergi_dairesi_terk' THEN 2
-                                                  ELSE 3
-                                              END,
-                                              COALESCE(g2.etiket, gs)
-                                      )
-                               FROM (
-                                   SELECT DISTINCT gs
-                                   FROM unnest(
-                                       COALESCE(c.grup2_secimleri, ARRAY[]::text[]) ||
-                                       CASE WHEN COALESCE(c.bizim_hesap, FALSE) THEN ARRAY['bizim_hesap']::text[] ELSE ARRAY[]::text[] END
-                                   ) gs
-                               ) gg
-                               LEFT JOIN grup2_etiketleri g2 ON g2.slug = gg.gs
-                           ),
-                           ''
-                       ) AS grup2_etiketler,
-                       (
-                           SELECT string_agg(
-                                      CONCAT_WS(' ',
-                                          mkx.sirket_unvani,
-                                          mkx.unvan,
-                                          mkx.musteri_adi,
-                                          mkx.vergi_no::text,
-                                          mkx.vergi_dairesi,
-                                          mkx.faaliyet_konusu,
-                                          mkx.hizmet_turu,
-                                          mkx.yetkili_adsoyad,
-                                          mkx.yetkili_tcno::text,
-                                          mkx.yetkili_tel,
-                                          mkx.yetkili_tel2,
-                                          mkx.yetkili_email,
-                                          mkx.email,
-                                          mkx.yeni_adres,
-                                          mkx.yetkili_ikametgah,
-                                          mkx.notlar
-                                      ),
-                                      ' '
-                                  )
-                           FROM musteri_kyc mkx
-                           WHERE mkx.musteri_id = c.id
-                       ) AS kyc_arama_blob_tum,
-                       CONCAT_WS(' ',
-                           c.name, c.musteri_adi, c.yetkili_kisi, c.phone, c.phone2, c.email,
-                           c.ilk_kira_bedeli::text, c.guncel_kira_bedeli::text, mk.aylik_kira::text,
-                           c.tax_number::text, c.office_code::text,
-                           mk.sirket_unvani, mk.unvan, mk.musteri_adi,
-                           mk.vergi_no::text, mk.vergi_dairesi, mk.faaliyet_konusu, mk.hizmet_turu,
-                           mk.yetkili_adsoyad, mk.yetkili_tcno::text,
-                           mk.yetkili_tel, mk.yetkili_tel2, mk.yetkili_email, mk.email,
-                           mk.yeni_adres, mk.yetkili_ikametgah
-                       ) AS liste_ara_blob_db
-                FROM customers c
-                LEFT JOIN (
-                    SELECT DISTINCT ON (musteri_id)
-                        musteri_id,
-                        sozlesme_tarihi,
-                        sozlesme_bitis,
-                        kira_artis_tarihi,
-                        kira_suresi_ay,
-                        aylik_kira,
-                        kira_nakit,
-                        kdv_oran,
-                        duzenli_fatura,
-                        hizmet_turu,
-                        hazir_ofis_oda_no,
-                        sirket_unvani,
-                        unvan,
-                        musteri_adi,
-                        yetkili_tcno,
-                        vergi_no,
-                        vergi_dairesi,
-                        faaliyet_konusu,
-                        yetkili_adsoyad,
-                        yetkili_tel,
-                        yetkili_tel2,
-                        yetkili_email,
-                        email,
-                        yeni_adres,
-                        yetkili_ikametgah
-                    FROM musteri_kyc
-                    ORDER BY musteri_id, id DESC
-                ) mk ON mk.musteri_id = c.id
-                WHERE {musteri_where}
-                  {mk_df_sql}{giri_ay_sql}{ho_sql}{arama_sql}
-                ORDER BY 2
-                    """,
-                    rows_firma_params,
-                ) or []
-            grid_map_all = _firma_ozet_grid_ozet_map_for_rows(rows_firma, ref_first)
+                _deg_sql = _firma_ozet_build_rows_firma_sql(
+                    musteri_where=musteri_where,
+                    mk_df_sql=mk_df_sql,
+                    giri_ay_sql=giri_ay_sql,
+                    ho_sql=ho_sql,
+                    arama_sql=arama_sql,
+                    firma_guncel_sql=_firma_ozet_sql_guncel_kdv_dahil_hizli_expr(),
+                    hizli=True,
+                    cift_sql=cift_sql,
+                )
+                rows_firma = fetch_all(_deg_sql, rows_firma_params) or []
+            if not liste_hizli:
+                try:
+                    from routes.giris_routes import prewarm_aylik_grid_cache_for_musteriler
+
+                    _all_ids = [int(r["id"]) for r in rows_firma if r is not None and r.get("id") is not None]
+                    _t_pw_fb = time.perf_counter()
+                    n_pw_fb = prewarm_aylik_grid_cache_for_musteriler(_all_ids, ref_first)
+                    current_app.logger.info(
+                        "firma_ozet prewarm (fallback) rebuilt=%s ids=%s ms=%.2f",
+                        n_pw_fb,
+                        len(_all_ids),
+                        (time.perf_counter() - _t_pw_fb) * 1000.0,
+                    )
+                except Exception as e_pw_fb:
+                    current_app.logger.warning("firma_ozet prewarm fallback err=%r", e_pw_fb)
+            grid_map_all = (
+                _firma_ozet_grid_ozet_map_for_rows(rows_firma, ref_first) if not liste_hizli else {}
+            )
             satirlar_firma = []
             for row in rows_firma:
-                satirlar_firma.append(_firma_ozet_row_to_satir_item(row, pasifleri_dahil, grid_map_all))
+                satirlar_firma.append(
+                    _firma_ozet_row_to_satir_item(row, pasifleri_dahil, grid_map_all if grid_map_all else None)
+                )
             satirlar_firma.sort(key=lambda x: turkish_lower((x.get("firma_adi") or "").strip()))
             if not cift_olanlar:
                 satirlar_firma = _firma_ozet_dedupe_satirlar(satirlar_firma)
@@ -3528,8 +3790,16 @@ def api_fatura_rapor():
                             "firma_ozet toplam_borc teyit OK (FIRMA_OZET_EXPECT_BORC=%s, python yolu)", exp_b
                         )
             firma_sunucu_ms = (time.perf_counter() - _t_fb) * 1000.0
-        kapsam_etiket = "tum_kayitlar" if tum_musteriler else ("pasif_dahil" if pasifleri_dahil else "aktif")
-        return jsonify({
+        kapsam_etiket = (
+            "aktif"
+            if sadece_aktif
+            else (
+                "tum_kayitlar"
+                if tum_musteriler
+                else ("pasif" if pasifleri_dahil else "aktif")
+            )
+        )
+        _firma_payload = {
             "ok": True,
             "gorunum": "firma_ozet",
             "sunucu_islem_ms": (round(float(firma_sunucu_ms), 2) if firma_sunucu_ms is not None else None),
@@ -3539,6 +3809,7 @@ def api_fatura_rapor():
             "musteri_kapsam": kapsam_etiket,
             "pasifleri_dahil": pasifleri_dahil,
             "tum_musteriler": tum_musteriler,
+            "sadece_aktif": sadece_aktif,
             "bizim_hesap": bizim_hesap,
             "cift_olanlar": cift_olanlar,
             "sadece_faturali": False,
@@ -3561,7 +3832,10 @@ def api_fatura_rapor():
             },
             "degrade_mode": firma_hizli_degrade,
             "mesaj": ("Bağlantı dalgalanması nedeniyle hızlı modda yüklendi (borç özetleri sadeleştirildi)." if firma_hizli_degrade else ""),
-        })
+        }
+        if liste_hizli:
+            _firma_ozet_resp_cache_set(_firma_ozet_resp_cache_key(), _firma_payload)
+        return jsonify(_firma_payload)
     ensure_faturalar_amount_columns()
     ensure_customers_is_active()
     ensure_customers_durum()
@@ -3674,7 +3948,7 @@ def api_fatura_rapor():
     donemde_faturasiz_musteri = 0
     if not sadece_faturali:
         musteri_where = _fatura_rapor_musteri_where_with_bizim(
-            _fatura_rapor_musteri_where_sql(pasifleri_dahil, tum_musteriler),
+            _fatura_rapor_musteri_where_sql(pasifleri_dahil, tum_musteriler, sadece_aktif),
             bizim_hesap,
         )
         mk_df_sql = ""
@@ -3757,7 +4031,15 @@ def api_fatura_rapor():
             )
         )
     toplam_satir = round(sum(s["satir_toplam"] for s in satirlar_out), 2)
-    kapsam_etiket = "tum_kayitlar" if tum_musteriler else ("pasif_dahil" if pasifleri_dahil else "aktif")
+    kapsam_etiket = (
+        "aktif"
+        if sadece_aktif
+        else (
+            "tum_kayitlar"
+            if tum_musteriler
+            else ("pasif" if pasifleri_dahil else "aktif")
+        )
+    )
     return jsonify({
         "ok": True,
         "baslangic": bas.isoformat(),
@@ -3767,6 +4049,7 @@ def api_fatura_rapor():
         "musteri_kapsam": kapsam_etiket,
         "pasifleri_dahil": pasifleri_dahil,
         "tum_musteriler": tum_musteriler,
+        "sadece_aktif": sadece_aktif,
         "bizim_hesap": bizim_hesap,
         "satirlar": satirlar_out,
         "ozet": {
@@ -4704,6 +4987,9 @@ def faturalar():
     gib_durum = (request.args.get('gib_durum') or '').strip().lower()
     gib_canli_kontrol = (request.args.get('gib_canli') or '').strip().lower() in ('1', 'true', 'yes', 'on')
     erp_taslak_modu = (request.args.get('erp_taslak') or '').strip().lower() in ('1', 'true', 'yes', 'on')
+    # Faturalar sekmesi = kesilmiş imzalı rapor; taslaklar ayrı «Taslaklar» sekmesinde.
+    if (not erp_taslak_modu) and gib_durum not in ('iptal', 'taslak'):
+        gib_durum = 'imzali'
     ay_no = None
     if ay_str:
         try:
@@ -4740,12 +5026,7 @@ def faturalar():
     if erp_taslak_modu:
         sql += f" AND {sql_expr_fatura_erp_taslak('f.notlar')}"
     else:
-        sql += (
-            " AND ("
-            + sql_expr_fatura_not_gib_taslak('f.notlar')
-            + " OR UPPER(BTRIM(COALESCE(f.fatura_no::text, ''))) LIKE 'GIB%%'"
-            + ")"
-        )
+        sql += f" AND {sql_expr_fatura_gib_imzalanmis('f.notlar')}"
     
     if ofis_kodu:
         sql += " AND f.ofis_kodu = %s"
@@ -4820,15 +5101,13 @@ def faturalar():
                 row["odeme_duzeni_manuel"] = (row.get("odeme_duzeni_manuel") or "").strip()
                 row["odeme_duzeni_display"] = _odeme_duzeni_label(row.get("odeme_duzeni"), row.get("odeme_duzeni_manuel"))
                 faturalar.append(row)
-    if (not erp_taslak_modu) and gib_durum == 'imzali':
-        faturalar = [f for f in faturalar if (f.get("gib_durum_rapor") or "") == "İmzalı"]
-    elif (not erp_taslak_modu) and gib_durum == 'taslak':
-        faturalar = [
-            f for f in faturalar
-            if (f.get("gib_durum_rapor") or "") in ("Taslak", "İmzasız")
-        ]
-    elif (not erp_taslak_modu) and gib_durum == 'iptal':
-        faturalar = [f for f in faturalar if (f.get("gib_durum_rapor") or "") == "İptal"]
+    if not erp_taslak_modu:
+        if gib_durum == 'iptal':
+            faturalar = [f for f in faturalar if (f.get("gib_durum_rapor") or "") == "İptal"]
+        elif gib_durum == 'taslak':
+            faturalar = []
+        else:
+            faturalar = [f for f in faturalar if (f.get("gib_durum_rapor") or "") == "İmzalı"]
 
     if ay_no:
         # Ay bazında "kesilecek" görünümünde:
@@ -5333,9 +5612,67 @@ def api_faturalar_hizmet_turleri():
     return jsonify({"ok": True, "turler": turler})
 
 
-def _next_fatura_no(prefix="INV"):
-    """Yıla göre artan fatura numarası üret (örn: INV2026000001)."""
+def _fatura_no_default_prefix() -> str:
+    """Varsayılan GİB ile aynı seri: GIByyyy#########. Eski davranış için .env FATURA_NO_PREFIX=INV."""
+    return (os.getenv("FATURA_NO_PREFIX") or "GIB").strip().upper() or "GIB"
+
+
+def _db_max_gib_serial_for_year(yil: int) -> int:
+    """faturalar.fatura_no içinde GIByyyy######### (16 karakter) için en büyük 9 haneli sıra."""
+    row = fetch_one(
+        """
+        SELECT COALESCE(MAX(CAST(SUBSTRING(TRIM(fatura_no) FROM 8 FOR 9) AS BIGINT)), 0) AS mx
+        FROM faturalar
+        WHERE LENGTH(TRIM(fatura_no)) = 16
+          AND UPPER(SUBSTRING(TRIM(fatura_no) FROM 1 FOR 3)) = 'GIB'
+          AND SUBSTRING(TRIM(fatura_no) FROM 4 FOR 4) = %s
+          AND SUBSTRING(TRIM(fatura_no) FROM 8 FOR 9) ~ '^[0-9]{9}$'
+        """,
+        (str(int(yil)),),
+    ) or {}
+    try:
+        return max(0, int(row.get("mx") or 0))
+    except Exception:
+        return 0
+
+
+def _portal_max_gib_serial_for_year_safe(yil: int):
+    """
+    GİB portal listesinden aynı yıl serisinin üst sınırı.
+    .env FATURA_NO_GIB_PORTAL_SYNC=1 değilse dokunulmaz (her kayıtta login maliyeti).
+    """
+    if (os.getenv("FATURA_NO_GIB_PORTAL_SYNC") or "").strip().lower() not in ("1", "true", "evet"):
+        return None
+    try:
+        from gib_earsiv import BestOfficeGIBManager
+
+        gib = BestOfficeGIBManager()
+        if not gib.is_available():
+            return None
+        n = gib.max_gib_belge_serial_for_year(int(yil))
+        return int(n) if n is not None else None
+    except Exception:
+        return None
+
+
+def _next_fatura_no(prefix=None):
+    """
+    Yıla göre artan fatura numarası.
+    - GIB: GIByyyy######### (GİB İnteraktif belge no ile aynı biçim, 9 haneli sıra).
+    - INV (veya başka önek): önceki 6 haneli kuyruk davranışı.
+    Taslak/imza sonrası kesin numara yine portal yanıtıyla _fatura_gib_bilgilerini_yaz üzerinden yazılır.
+    """
     yil = datetime.now().year
+    if prefix is None:
+        prefix = _fatura_no_default_prefix()
+    prefix = (prefix or "GIB").strip().upper()
+    if prefix == "GIB":
+        mx_db = _db_max_gib_serial_for_year(yil)
+        mx_pt = _portal_max_gib_serial_for_year_safe(yil)
+        mx = mx_db
+        if mx_pt is not None:
+            mx = max(mx_db, mx_pt)
+        return f"GIB{yil}{mx + 1:09d}"
     like = f"{prefix}{yil}%"
     row = fetch_one("SELECT fatura_no FROM faturalar WHERE fatura_no LIKE %s ORDER BY id DESC LIMIT 1", (like,))
     if not row or not row.get("fatura_no"):
@@ -5343,7 +5680,7 @@ def _next_fatura_no(prefix="INV"):
     no = str(row["fatura_no"])
     try:
         tail = int(no[-6:])
-        return f"{prefix}{yil}{tail+1:06d}"
+        return f"{prefix}{yil}{tail + 1:06d}"
     except Exception:
         return f"{prefix}{yil}000001"
 
@@ -6228,7 +6565,7 @@ def _gibden_erp_upsert(gib_row):
         ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
-            fatura_no or _next_fatura_no("INV"),
+            fatura_no or _next_fatura_no(),
             musteri_id,
             musteri_adi,
             tutar,
@@ -7066,13 +7403,18 @@ def tahsilat_ekle():
         auto_pay_items = []
         # Elle tahsilatta kullanıcı ay seçtiyse o seçim korunur.
         # Ay seçilmemişse en eski açık aylardan otomatik dağıtım yapılır.
-        if not data.get("fatura_id"):
+        if not data.get("fatura_id") and not ay_ref_isos:
             try:
-                from .giris_routes import _upsert_aylik_grid_cache as _refresh_aylik_cache_before_alloc
-                _refresh_aylik_cache_before_alloc(int(musteri_id))
+                from .giris_routes import (
+                    _read_aylik_grid_cache_payload,
+                    _upsert_aylik_grid_cache as _refresh_aylik_cache_before_alloc,
+                )
+                if not _read_aylik_grid_cache_payload(int(musteri_id)):
+                    _refresh_aylik_cache_before_alloc(int(musteri_id))
             except Exception:
                 pass
-        if not ay_ref_isos:
+        skip_ay_dagitim = bool(data.get("yillik_tek_tahsilat") or data.get("tahsilat_dagitimsiz"))
+        if not ay_ref_isos and not skip_ay_dagitim:
             auto_isos, auto_pay_items = _auto_allocate_oldest_unpaid_months(
                 musteri_id,
                 tutar,
@@ -7131,23 +7473,48 @@ def tahsilat_ekle():
             f = fetch_one("SELECT fatura_no FROM faturalar WHERE id = %s", (row["fatura_id"],))
             fatura_no = (f or {}).get("fatura_no")
 
-        banka_hesaplar = fetch_all(
-            "SELECT banka_adi, hesap_adi, iban FROM banka_hesaplar WHERE COALESCE(is_active::int, 1) = 1 AND (iban IS NOT NULL AND iban != '') ORDER BY banka_adi"
-        )
-        pdf_bytes = build_makbuz_pdf(row, musteri_adi, fatura_no, banka_hesaplar=banka_hesaplar)
         os.makedirs(UPLOAD_MUSTERI_DOSYALARI, exist_ok=True)
         safe_name = re.sub(r'[^\w\s-]', '', musteri_adi)[:40].strip() or "musteri"
         safe_name = re.sub(r'[-\s]+', '_', safe_name)
         pdf_filename = f"Tahsilat_{makbuz_no}_{safe_name}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
         pdf_path = os.path.join(UPLOAD_MUSTERI_DOSYALARI, pdf_filename)
-        with open(pdf_path, "wb") as f:
-            f.write(pdf_bytes)
-
+        pdf_row = dict(row)
         try:
-            from .giris_routes import _upsert_aylik_grid_cache as _refresh_aylik_cache
-            _refresh_aylik_cache(int(musteri_id))
+            app_pdf = current_app._get_current_object()
         except Exception:
-            pass
+            app_pdf = None
+
+        def _makbuz_pdf_arka_plan():
+            if not app_pdf:
+                return
+            with app_pdf.app_context():
+                try:
+                    banka_hesaplar = fetch_all(
+                        "SELECT banka_adi, hesap_adi, iban FROM banka_hesaplar "
+                        "WHERE COALESCE(is_active::int, 1) = 1 AND (iban IS NOT NULL AND iban != '') "
+                        "ORDER BY banka_adi"
+                    )
+                    pdf_bytes = build_makbuz_pdf(
+                        pdf_row, musteri_adi, fatura_no, banka_hesaplar=banka_hesaplar
+                    )
+                    with open(pdf_path, "wb") as f:
+                        f.write(pdf_bytes)
+                except Exception as ex_pdf:
+                    try:
+                        current_app.logger.warning("makbuz pdf arka plan: %r", ex_pdf)
+                    except Exception:
+                        pass
+
+        if app_pdf:
+            threading.Thread(target=_makbuz_pdf_arka_plan, daemon=True).start()
+        else:
+            banka_hesaplar = fetch_all(
+                "SELECT banka_adi, hesap_adi, iban FROM banka_hesaplar "
+                "WHERE COALESCE(is_active::int, 1) = 1 AND (iban IS NOT NULL AND iban != '') "
+                "ORDER BY banka_adi"
+            )
+            with open(pdf_path, "wb") as f:
+                f.write(build_makbuz_pdf(pdf_row, musteri_adi, fatura_no, banka_hesaplar=banka_hesaplar))
 
         dagitim_items = []
         if auto_pay_items:
@@ -7180,6 +7547,33 @@ def tahsilat_ekle():
                     if pay_cents <= 0:
                         continue
                     dagitim_items.append((iso_s, pay_cents / 100.0))
+
+        try:
+            from .giris_routes import (
+                _defer_aylik_grid_cache_rebuild,
+                _read_aylik_grid_cache_payload,
+                sync_musteri_panel_from_tahsil_and_dagitim,
+            )
+            mid_int = int(musteri_id)
+            cache_pl = _read_aylik_grid_cache_payload(mid_int)
+            dagitim_list = [
+                {"iso": iso, "tutar": round(float(pay or 0), 2)}
+                for iso, pay in dagitim_items
+            ]
+            sync_musteri_panel_from_tahsil_and_dagitim(
+                mid_int,
+                dagitim_items=dagitim_list,
+                tahsilat_tarihi=tahsilat_tarihi,
+                payload=cache_pl,
+            )
+            if not cache_pl:
+                _defer_aylik_grid_cache_rebuild(mid_int)
+        except Exception:
+            try:
+                from .giris_routes import _defer_aylik_grid_cache_rebuild
+                _defer_aylik_grid_cache_rebuild(int(musteri_id))
+            except Exception:
+                pass
 
         return jsonify({
             'ok': True,
@@ -7832,6 +8226,13 @@ def _extract_gib_fatura_no_from_obj(obj):
 
 def _extract_gib_ettn_from_obj(obj):
     """GİB yanıt/durum sözlüğünden ETTN/UUID alanını dayanıklı şekilde çıkar."""
+    try:
+        from gib_earsiv import BestOfficeGIBManager
+        s = BestOfficeGIBManager.ettn_from_out(obj)
+        if s:
+            return s
+    except Exception:
+        pass
     if not isinstance(obj, dict):
         return ""
     for k in ("ettn", "uuid", "faturaUuid", "fatura_uuid"):
@@ -8048,10 +8449,16 @@ def _gib_kayit_bekle(gib, uuid, deneme=10, bekleme_s=1.2):
     """UUID için GİB durum kaydını birkaç kez dener; bulunduğunda döndürür."""
     if not gib or not uuid:
         return {}
-    for _ in range(max(1, int(deneme))):
+    n = max(1, int(deneme))
+    _asama = getattr(gib, "_gib_asama", None)
+    for i in range(n):
+        if callable(_asama):
+            _asama("kayit_bekle_deneme", f"{i + 1}/{n}")
         try:
             st = gib.fatura_durum_getir(uuid, days_back=370) or {}
             if st:
+                if callable(_asama):
+                    _asama("kayit_bekle_bulundu", "ok")
                 return st
         except Exception:
             pass
@@ -8060,6 +8467,8 @@ def _gib_kayit_bekle(gib, uuid, deneme=10, bekleme_s=1.2):
             time.sleep(float(bekleme_s))
         except Exception:
             pass
+    if callable(_asama):
+        _asama("kayit_bekle_tukendi", f"uuid={str(uuid)[:12]}")
     return {}
 
 
@@ -8109,12 +8518,58 @@ def _fatura_gib_bilgilerini_yaz(fatura_id, ettn=None, gib_fatura_no=None, gib_as
     )
 
 
+_faturalar_dev_http_lock = threading.Lock()
+
+
+def _faturalar_dev_http_log_path() -> str:
+    """[SRV] hangi dosyaya gidiyorsa aynı yol: BESTOFFICE_DEV_HTTP_LOG veya erp_web/dev_http.log."""
+    raw = (os.environ.get("BESTOFFICE_DEV_HTTP_LOG") or "").strip()
+    erp_web = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.abspath(raw) if raw else os.path.join(erp_web, "dev_http.log")
+
+
+def _faturalar_append_dev_http_line(text: str) -> None:
+    """app.py kancasından bağımsız: GİB tanıları her zaman bu dosyaya düşsün."""
+    line = text if str(text).endswith("\n") else f"{text}\n"
+    try:
+        sys.stderr.write(line)
+        sys.stderr.flush()
+    except Exception:
+        pass
+    path = _faturalar_dev_http_log_path()
+    try:
+        with _faturalar_dev_http_lock:
+            with open(path, "a", encoding="utf-8", errors="replace") as lf:
+                lf.write(line)
+    except Exception as ex:
+        try:
+            sys.__stderr__.write(f"[faturalar-dev_http] {ex!r} path={path!r}\n")
+            sys.__stderr__.flush()
+        except Exception:
+            pass
+
+
+def _gib_http_crumb_route(msg: str) -> None:
+    _faturalar_append_dev_http_line(f"[GIB] {msg}")
+
+
+try:
+    _faturalar_append_dev_http_line(
+        f"# [GIB] faturalar_routes yüklendi pid={os.getpid()} log={_faturalar_dev_http_log_path()!r}"
+    )
+except Exception:
+    pass
+
+
 @bp.route('/api/gib-taslak', methods=['GET', 'POST'])
 @faturalar_gerekli
 def api_gib_taslak():
     """Fatura ID ile GİB'de taslak oluşturur. Döner: ok, uuid (ETTN), mesaj."""
+    _gib_http_crumb_route("api_gib_taslak view girildi")
     try:
         from gib_earsiv import BestOfficeGIBManager, build_fatura_data_from_db
+
+        _gib_http_crumb_route("api_gib_taslak gib_earsiv import tamam")
         def _mask_vkn(v):
             s = str(v or "").strip()
             if len(s) <= 4:
@@ -8158,13 +8613,14 @@ def api_gib_taslak():
         if not fatura_id:
             return jsonify({"ok": False, "mesaj": "fatura_id gerekli."}), 400
         fatura_id = int(fatura_id)
+        beklenen_mid = data.get("beklenen_musteri_id") or request.values.get("beklenen_musteri_id")
+        _gib_http_crumb_route(f"api_gib_taslak fatura_id={fatura_id} beklenen_musteri_id={beklenen_mid!r}")
         f_row = fetch_one(
             "SELECT musteri_id, fatura_tarihi, satirlar_json, notlar FROM faturalar WHERE id = %s",
             (fatura_id,),
         )
         if not f_row:
             return jsonify({"ok": False, "mesaj": "Fatura bulunamadı."}), 404
-        beklenen_mid = data.get("beklenen_musteri_id") or request.values.get("beklenen_musteri_id")
         if beklenen_mid is not None and str(beklenen_mid).strip() != "":
             try:
                 em = int(beklenen_mid)
@@ -8211,24 +8667,39 @@ def api_gib_taslak():
         fatura_data = build_fatura_data_from_db(fatura_id, fetch_one)
         payload_debug = _payload_debug_text(fatura_data)
         gib = BestOfficeGIBManager()
+
+        def _gib_asama_izle_for_resp():
+            li = getattr(gib, "last_gib_asama_izle", None) or []
+            return li[-60:] if isinstance(li, list) else []
+
         if not gib.is_available():
             return jsonify({
                 "ok": False,
-                "mesaj": "GİB modülü kullanılamıyor. .env içinde GIB_USER ve GIB_PASS tanımlayın ve eArsivPortal kurulumunu kontrol edin."
+                "mesaj": "GİB modülü kullanılamıyor. .env içinde GIB_USER ve GIB_PASS tanımlayın ve eArsivPortal kurulumunu kontrol edin.",
+                "gib_asama_izle": _gib_asama_izle_for_resp(),
             }), 503
         # Bazı GİB çağrıları istemci kütüphanesinde sonsuza yakın bekleyebiliyor.
         # Endpoint'in "Gönderiliyor..."da takılı kalmaması için üst sınır koyuyoruz.
-        # Varsayılan 120; alt sınır 90 — GİB yoğun + taslak sonrası işlemler için 65 sn sık yetmiyor (.env 65 ise yükseltilir).
+        # Varsayılan 240 sn; alt sınır 180 — portal çoklu deneme + liste doğrulaması + SMS için 120 sn yetmeyebilir.
         try:
-            taslak_timeout_s = int(str(os.getenv("GIB_TASLAK_TIMEOUT_S") or "120").strip() or "120")
+            taslak_timeout_s = int(str(os.getenv("GIB_TASLAK_TIMEOUT_S") or "240").strip() or "240")
         except ValueError:
-            taslak_timeout_s = 120
-        taslak_timeout_s = max(90, min(600, taslak_timeout_s))
+            taslak_timeout_s = 240
+        taslak_timeout_s = max(180, min(900, taslak_timeout_s))
         pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         fut = pool.submit(gib.fatura_taslak_olustur, fatura_data)
+        _gib_http_crumb_route(
+            f"api_gib_taslak worker basladi fatura_id={fatura_id} timeout_sn={taslak_timeout_s}"
+        )
         try:
             uuid = fut.result(timeout=taslak_timeout_s)
+            uuid = BestOfficeGIBManager.ettn_from_out(uuid) or (
+                str(uuid).strip() if isinstance(uuid, str) else ""
+            )
         except concurrent.futures.TimeoutError:
+            _gib_http_crumb_route(
+                f"api_gib_taslak TIMEOUT fatura_id={fatura_id} sn={taslak_timeout_s}"
+            )
             # Önemli: with ThreadPoolExecutor kullanıldığında __exit__ wait=True ile
             # takılabiliyor ve endpoint fiilen yine dönmüyor. Bu yüzden beklemeden kapat.
             try:
@@ -8273,18 +8744,27 @@ def api_gib_taslak():
                     "Bu sürekli «portal yoğun» demek zorunda değil: yanıt gelmeyen HTTP, ağ/VPN/firewall veya "
                     "arka planda takılı istek olabilir. Hâlâ 65 sn yazıyorsa `app.py` bu klasörden yeniden "
                     "başlatılmamış veya önde 65 sn kesen bir proxy olabilir. "
-                    "Tekrar deneyin; gerekirse GIB_TASLAK_TIMEOUT_S artırın."
+                    "Tekrar deneyin; gerekirse GIB_TASLAK_TIMEOUT_S artırın. "
+                    "Aşama listesi `gib_asama_izle` alanında; dosya için .env: GIB_TASLAK_TRACE=1 → erp_web/gib_taslak_trace.log"
                 ),
                 "taslak_timeout_sn": taslak_timeout_s,
                 "taslak_raw": taslak_raw_text,
                 "payload_debug": payload_debug,
                 "gonderilen_debug": gonderilen_dbg,
+                "gib_asama_izle": _gib_asama_izle_for_resp(),
             }), 200
         except Exception as e:
+            _gib_http_crumb_route(
+                f"api_gib_taslak fut.result fatura_id={fatura_id} hata: {str(e)[:2500]}"
+            )
             # Windows'ta bozuk stdout'a traceback.print_exc() bazen OSError(22, 'Invalid argument')
             # fırlatır; gerçek GİB hatası yerine yanıltıcı "GİB hatası" dışarı kaçmasın diye yalnızca logger.
             logging.getLogger(__name__).exception("GİB taslak iş parçacığı hatası (fut.result): %s", e)
-            return jsonify({"ok": False, "mesaj": f"GİB bağlantı hatası: {str(e)}"}), 500
+            return jsonify({
+                "ok": False,
+                "mesaj": f"GİB bağlantı hatası: {str(e)}",
+                "gib_asama_izle": _gib_asama_izle_for_resp(),
+            }), 500
         finally:
             try:
                 pool.shutdown(wait=False, cancel_futures=False)
@@ -8326,12 +8806,37 @@ def api_gib_taslak():
         except Exception:
             gonderilen_dbg = ""
         if not uuid:
+            try:
+                uuid = gib._portal_son_taslak_ettn_bul(
+                    fatura_data.get("vkn"),
+                    fatura_data.get("tarih"),
+                    tutar=fatura_data.get("toplam"),
+                )
+                uuid = BestOfficeGIBManager.ettn_from_out(uuid) or (
+                    str(uuid).strip() if isinstance(uuid, str) else ""
+                )
+                if uuid:
+                    liste_satir = getattr(gib, "last_taslak_liste_satir", None)
+                    if isinstance(liste_satir, dict):
+                        taslak_raw = {
+                            "ettn": uuid,
+                            "gib_fatura_no": BestOfficeGIBManager._portal_extract_belge_no(liste_satir),
+                            "raw_type": "liste_yedek",
+                        }
+                        try:
+                            taslak_raw_text = json.dumps(taslak_raw, ensure_ascii=False)[:700]
+                        except Exception:
+                            taslak_raw_text = str(taslak_raw)[:700]
+            except Exception:
+                pass
+        if not uuid:
             return jsonify({
                 "ok": False,
                 "mesaj": "GİB taslak oluşturulamadı (ETTN dönmedi). Ham yanıtı kontrol edin.",
                 "taslak_raw": taslak_raw_text,
                 "payload_debug": payload_debug,
                 "gonderilen_debug": gonderilen_dbg,
+                "gib_asama_izle": _gib_asama_izle_for_resp(),
             }), 200
         # Önce taslak gerçekten portal listesinde bulunmalı; aksi halde SMS adımına
         # geçmek kullanıcıyı gereksiz hataya sokuyor.
@@ -8351,7 +8856,9 @@ def api_gib_taslak():
                 pass
         oid = None
         sms_error = None
-        gib_ettn = _extract_gib_ettn_from_obj(taslak_kayit) or uuid
+        gib_ettn = _extract_gib_ettn_from_obj(taslak_kayit) or _extract_gib_ettn_from_obj(taslak_raw) or uuid
+        if not isinstance(gib_ettn, str):
+            gib_ettn = BestOfficeGIBManager.ettn_from_out(gib_ettn) or ""
         gib_fatura_no = (
             _extract_gib_fatura_no_from_obj(taslak_kayit)
             or _extract_gib_fatura_no_from_obj(taslak_raw if isinstance(taslak_raw, dict) else {})
@@ -8385,7 +8892,12 @@ def api_gib_taslak():
             msg += f" Durum: {taslak_onay_durumu}."
         # Taslak gerçekten portalda görünüyorsa SMS akışına geç.
         try:
+            _sms_asama = getattr(gib, "_gib_asama", None)
+            if callable(_sms_asama):
+                _sms_asama("sms_kodu_gonder_basla", str(uuid)[:36])
             oid = gib.sms_kodu_gonder(uuid)
+            if callable(_sms_asama):
+                _sms_asama("sms_kodu_gonder_sonuc", "oid_var" if oid else "oid_yok")
             sms_error = getattr(gib, "last_sms_error", None)
         except Exception:
             oid = None
@@ -8417,12 +8929,14 @@ def api_gib_taslak():
             "payload_debug": payload_debug,
             "gonderilen_debug": gonderilen_dbg,
             "mesaj": msg,
+            "gib_asama_izle": _gib_asama_izle_for_resp(),
         })
     except ValueError as e:
         return jsonify({"ok": False, "mesaj": str(e)}), 400
     except RuntimeError as e:
         return jsonify({"ok": False, "mesaj": str(e)}), 401
     except Exception as e:
+        _gib_http_crumb_route(f"api_gib_taslak DIŞ hata: {str(e)[:2200]}")
         try:
             logging.getLogger(__name__).exception("api_gib_taslak failed")
         except Exception:
@@ -9094,7 +9608,7 @@ def api_gib_son_fatura():
     if mid is not None and mid >= 1:
         row = fetch_one(
             f"""
-            SELECT id, fatura_no, musteri_id, musteri_adi, fatura_tarihi, toplam
+            SELECT id, fatura_no, ettn, musteri_id, musteri_adi, fatura_tarihi, toplam
             FROM faturalar
             WHERE musteri_id = %s
               AND {_nt}
@@ -9106,7 +9620,7 @@ def api_gib_son_fatura():
     else:
         row = fetch_one(
             f"""
-            SELECT id, fatura_no, musteri_id, musteri_adi, fatura_tarihi, toplam
+            SELECT id, fatura_no, ettn, musteri_id, musteri_adi, fatura_tarihi, toplam
             FROM faturalar
             WHERE {_nt}
             ORDER BY id DESC
@@ -9120,6 +9634,22 @@ def api_gib_son_fatura():
         if mid is not None and mid >= 1:
             mesaj = f"Bu müşteri için kayıtlı son fatura bulunamadı (musteri_id={mid})."
         return jsonify({"ok": False, "mesaj": mesaj}), 200
+    return jsonify({"ok": True, "fatura": _row_serializable(row)})
+
+
+@bp.route('/api/gib-fatura-ozet')
+@faturalar_gerekli
+def api_gib_fatura_ozet():
+    """Finans GİB paneli: ERP id ile belge no / ETTN özet (tek satır, hafif)."""
+    fid = request.args.get("fatura_id", type=int)
+    if not fid or fid < 1:
+        return jsonify({"ok": False, "mesaj": "fatura_id gerekli."}), 400
+    row = fetch_one(
+        "SELECT id, fatura_no, ettn, musteri_id, musteri_adi, fatura_tarihi FROM faturalar WHERE id = %s",
+        (fid,),
+    )
+    if not row:
+        return jsonify({"ok": False, "mesaj": "Fatura bulunamadı."}), 404
     return jsonify({"ok": True, "fatura": _row_serializable(row)})
 
 

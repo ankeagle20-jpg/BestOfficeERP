@@ -202,6 +202,72 @@
         .filter-actions button {
             white-space: nowrap;
         }
+        .fatura-gib-serit-toggle {
+            background: #43a047;
+            color: #fff;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+            min-height: 30px;
+            white-space: nowrap;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .fatura-gib-serit-toggle:hover { background: #388e3c; }
+        .fatura-gib-serit-toggle.is-open { background: #2e7d32; }
+        .fatura-gib-ellden-cek-btn {
+            background: #00897b;
+            color: #fff;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+            min-height: 30px;
+            white-space: nowrap;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .fatura-gib-ellden-cek-btn:hover { background: #00695c; }
+        .fatura-gib-serit {
+            margin-top: 0;
+            margin-bottom: 10px;
+        }
+        #faturalar_liste_tablo th[data-col-key="fatura_olustur"],
+        #faturalar_liste_tablo td[data-col-key="fatura_olustur"] {
+            display: none;
+        }
+        #faturalar_liste_tablo.faturalar-tablo--taslak th[data-col-key="fatura_olustur"],
+        #faturalar_liste_tablo.faturalar-tablo--taslak td[data-col-key="fatura_olustur"] {
+            display: table-cell;
+            white-space: nowrap;
+            width: 1%;
+        }
+        .btn-fatura-olustur {
+            background: #26a69a;
+            color: #fff;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: 600;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            white-space: nowrap;
+        }
+        .btn-fatura-olustur:hover {
+            background: #00897b;
+            color: #fff;
+        }
         .aday-panel {
             background: #1e3a50;
             border: 1px solid #2d4060;
@@ -293,10 +359,7 @@
             color: #90a4ae;
         }
         .stats {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 8px;
-            margin-bottom: 10px;
+            display: none;
         }
         .stat-card {
             background: #1e3a50;
@@ -393,6 +456,18 @@
             white-space: normal;
             word-break: break-word;
         }
+        td[data-col-key="musteri"] {
+            max-width: 280px;
+        }
+        .musteri-link {
+            color: #7ec8ff;
+            text-decoration: none;
+            border-bottom: 1px dotted rgba(126, 200, 255, 0.35);
+        }
+        .musteri-link:hover {
+            color: #b3e5ff;
+            border-bottom-color: #b3e5ff;
+        }
         td:nth-child(5),
         th:nth-child(5) {
             white-space: nowrap;
@@ -424,6 +499,80 @@
         .badge-gib-iptal {
             background: rgba(239, 83, 80, 0.22);
             color: #ef9a9a;
+        }
+        .btn-yazdir {
+            background: #00bcd4;
+            color: white;
+            border: none;
+            padding: 4px 8px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 11px;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 2px;
+        }
+        .btn-yazdir:hover { background: #0097a7; color: white; }
+        .btn-pdf {
+            background: #e91e63;
+            color: white;
+            border: none;
+            padding: 4px 8px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 11px;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 2px;
+        }
+        .btn-pdf:hover { color: white; background: #c2185b; }
+        .btn-islem-onizle {
+            background: #7e57c2;
+            color: white;
+            border: none;
+            padding: 4px 8px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 11px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 2px;
+            text-decoration: none;
+        }
+        .btn-islem-onizle:hover { color: white; background: #5e35b1; }
+        .btn-islem-mini {
+            background: #4fc3f7;
+            color: #0a1929;
+            border: none;
+            padding: 4px 8px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 11px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 2px;
+            text-decoration: none;
+        }
+        .btn-islem-mini--sil {
+            background: #f44336;
+            color: #fff;
+        }
+        .btn-islem-mini:hover { filter: brightness(1.08); }
+        td[data-col-key="islem"] {
+            white-space: nowrap;
+            width: 1%;
+        }
+        .fatura-islem-grubu {
+            display: inline-flex;
+            flex-wrap: nowrap;
+            align-items: center;
+            gap: 3px;
         }
         .gib-durum-th-wrap {
             display: flex;
@@ -632,6 +781,9 @@
             <option value="">Tümü</option>
             {% for a in aylar %}<option value="{{ a }}" {{ 'selected' if ay == a else '' }}>{{ a }}</option>{% endfor %}
         </select>
+        <button type="button" id="fatura_gib_serit_toggle" class="fatura-gib-serit-toggle" aria-expanded="false" onclick="faturaGibSeritToggle(event)" title="GİB ve fatura oluşturma araçları">
+            <i class="fa fa-file-invoice" aria-hidden="true"></i> Yeni Fatura Oluştur
+        </button>
         
         <label>Başlangıç:</label>
         <input type="date" id="baslangic" value="{{ baslangic }}">
@@ -643,8 +795,15 @@
             <option value="">Tümü</option>
             {% for o in ofisler %}<option value="{{ o.code|default('') }}" {{ 'selected' if ofis_kodu == (o.code|default('')) else '' }}>{{ o.code|default('') }}</option>{% endfor %}
         </select>
-        
-        <div class="filter-actions">
+        {% if not erp_taslak_modu %}
+        <button type="button" class="fatura-gib-ellden-cek-btn" onclick="gibElleKesilenFaturalariCek(event)" title="GİB portalından elle kesilmiş imzalı faturaları seçili tarih aralığında ERP ye yazar (yalnızca bu butona basınca; rapor açılışında otomatik çekilmez)">
+            <i class="fa fa-cloud-download-alt" aria-hidden="true"></i> GİB den çek
+        </button>
+        {% endif %}
+    </div>
+
+    <div id="fatura_gib_serit" class="filter-bar fatura-gib-serit" style="display:none;">
+        <div class="filter-actions" style="width:100%;">
             <button onclick="filtrele()">
                 <i class="fa fa-filter"></i> Filtrele
             </button>
@@ -729,7 +888,7 @@
     </div>
     
     <div class="faturalar-table-wrap">
-    <table id="faturalar_liste_tablo" class="dyn-resizable">
+    <table id="faturalar_liste_tablo" class="dyn-resizable{% if erp_taslak_modu %} faturalar-tablo--taslak{% endif %}">
         <thead>
             <tr>
                 <th class="dyn-sort-th dyn-draggable-th" data-dyn-type="str" data-col-key="tarih">Tarih</th>
@@ -737,15 +896,13 @@
                 <th class="dyn-sort-th dyn-draggable-th" data-dyn-type="str" data-col-key="gib_durum">
                     <div class="gib-durum-th-wrap">
                         <span>Durum</span>
-                        <input type="hidden" id="gib_durum" value="{{ gib_durum or '' }}">
+                        <input type="hidden" id="gib_durum" value="{{ gib_durum or ('imzali' if not erp_taslak_modu else '') }}">
                         {% if not erp_taslak_modu %}
                         <button type="button" id="gib_durum_toggle" class="gib-durum-toggle" title="GİB durum filtresi" aria-haspopup="menu" aria-expanded="false" onclick="gibDurumMenuToggle(event)">
                             <i class="fa fa-chevron-down"></i>
                         </button>
                         <div id="gib_durum_menu" class="gib-durum-menu" role="menu">
-                            <button type="button" class="{{ 'is-active' if not gib_durum else '' }}" onclick="gibDurumSec('')">Hepsi</button>
-                            <button type="button" class="{{ 'is-active' if gib_durum == 'imzali' else '' }}" onclick="gibDurumSec('imzali')">İmzalı</button>
-                            <button type="button" class="{{ 'is-active' if gib_durum == 'taslak' else '' }}" onclick="gibDurumSec('taslak')">Taslak / İmzasız</button>
+                            <button type="button" class="{{ 'is-active' if gib_durum == 'imzali' or not gib_durum else '' }}" onclick="gibDurumSec('imzali')">İmzalı</button>
                             <button type="button" class="{{ 'is-active' if gib_durum == 'iptal' else '' }}" onclick="gibDurumSec('iptal')">İptal</button>
                         </div>
                         {% endif %}
@@ -753,7 +910,7 @@
                 </th>
                 <th class="dyn-sort-th dyn-draggable-th" data-dyn-type="str" data-col-key="musteri">Müşteri</th>
                 <th class="dyn-sort-th dyn-draggable-th" data-dyn-type="num" data-col-key="tutar">Tutar</th>
-                <th class="dyn-sort-th dyn-draggable-th" data-dyn-type="str" data-col-key="odeme_durum">Durum</th>
+                <th class="dyn-draggable-th" data-col-key="fatura_olustur">Fatura oluştur</th>
                 <th class="dyn-draggable-th" data-col-key="islem">İşlem</th>
                 <th class="dyn-draggable-th" data-col-key="odeme_duzeni">Ödeme Düzeni</th>
             </tr>
@@ -779,30 +936,34 @@
                             {{ _gibdr }}
                         </span>
                     </td>
-                    <td data-col-key="musteri">{{ f.musteri_adi_goster or f.customer_name or f.musteri_adi or '—' }}</td>
+                    <td data-col-key="musteri">
+                        {% set _mad = f.musteri_adi_goster or f.customer_name or f.musteri_adi or '—' %}
+                        {% if f.musteri_id %}
+                        <a class="musteri-link" href="/giris/?mid={{ f.musteri_id }}&amp;kart=1" onclick="return faturaMusteriKartaGit(event, {{ f.musteri_id|int }})">{{ _mad }}</a>
+                        {% else %}
+                        {{ _mad }}
+                        {% endif %}
+                    </td>
                     <td data-col-key="tutar" data-kdv="{{ (f.kdv_tutar|default(0)|float) }}"{% if erp_taslak_modu %} data-kdv-no-estimate="1"{% endif %}>{{ "{:,.2f}".format((f.toplam|default(0)|float)).replace(",", "X").replace(".", ",").replace("X", ".") }} TL</td>
-                    <td data-col-key="odeme_durum">
-                        {% if f.durum %}
-                        <span class="badge badge-{{ 'odendi' if f.durum == 'odendi' else 'odenmedi' }}">
-                            {{ f.durum }}
-                        </span>
+                    <td data-col-key="fatura_olustur">
+                        {% if erp_taslak_modu and f.id %}
+                        <a href="{{ f.duzenle_url or ('/faturalar/yeni?edit_fatura_id=' ~ f.id) }}" target="_blank" rel="noopener" class="btn-fatura-olustur" title="Bu taslaktan GİB fatura oluştur sayfasına git">
+                            <i class="fa fa-file-invoice" aria-hidden="true"></i> Fatura oluştur
+                        </a>
                         {% else %}
                         <span style="color:#90a4ae;">—</span>
                         {% endif %}
                     </td>
                     <td data-col-key="islem">
                         {% if f.id %}
-                        <span style="display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap;">
-                        <a href="/faturalar/onizleme/{{ f.id }}" target="_blank" title="Faturayı görüntüle"
-                           style="display:inline-block;background:#4fc3f7;color:white;border:none;padding:4px 10px;border-radius:3px;cursor:pointer;font-size:11px;text-decoration:none;">
-                            <i class="fa fa-eye"></i>
-                        </a>
-                        {% if erp_taslak_modu and f.musteri_id %}
-                        <a href="/faturalar/yeni?musteri_id={{ f.musteri_id }}&amp;yeni_gib_bos=1" target="_blank" title="Bu firma için yeni fatura (GİB için önce kaydedin)"
-                           style="display:inline-block;background:#26a69a;color:white;border:none;padding:4px 8px;border-radius:3px;cursor:pointer;font-size:11px;text-decoration:none;white-space:nowrap;">
-                            <i class="fa fa-file-invoice"></i> Fatura oluştur
-                        </a>
-                        {% endif %}
+                        <span class="fatura-islem-grubu">
+                        <span class="islem-grubu">
+                        <a href="/faturalar/onizleme/{{ f.id }}" class="btn-pdf" title="PDF indir" download><i class="fa fa-file-pdf" aria-hidden="true"></i></a>
+                        <a href="/faturalar/onizleme/{{ f.id }}" target="_blank" class="btn-yazdir" rel="noopener" title="Yazdır"><i class="fa fa-print" aria-hidden="true"></i></a>
+                        <a href="/faturalar/onizleme/{{ f.id }}" target="_blank" class="btn-islem-onizle" title="Görüntüle"><i class="fa fa-eye" aria-hidden="true"></i></a>
+                        <a href="{{ f.duzenle_url or ('/faturalar/yeni?edit_fatura_id=' ~ f.id) }}" target="_blank" class="btn-islem-mini" title="Düzenle"><i class="fa fa-edit" aria-hidden="true"></i></a>
+                        <button type="button" class="btn-islem-mini btn-islem-mini--sil" title="Sil" onclick="faturaSatirSil({{ f.id }}, this)"><i class="fa fa-trash" aria-hidden="true"></i></button>
+                        </span>
                         </span>
                         {% elif f.duzenle_url %}
                         <a href="{{ f.duzenle_url }}" target="_blank" title="Faturayı düzenle"
@@ -838,7 +999,7 @@
                 <td data-col-key="gib_durum"></td>
                 <td data-col-key="musteri" style="text-align:right;">Toplam:</td>
                 <td data-col-key="tutar" id="faturalar_toplam_tutar_hucre">0,00 TL</td>
-                <td data-col-key="odeme_durum"></td>
+                <td data-col-key="fatura_olustur"></td>
                 <td data-col-key="islem"></td>
                 <td data-col-key="odeme_duzeni"></td>
             </tr>
@@ -848,7 +1009,7 @@
                 <td data-col-key="gib_durum"></td>
                 <td data-col-key="musteri" style="text-align:right;">KDV Toplam:</td>
                 <td data-col-key="tutar" id="faturalar_kdv_toplam_tutar_hucre">0,00 TL</td>
-                <td data-col-key="odeme_durum"></td>
+                <td data-col-key="fatura_olustur"></td>
                 <td data-col-key="islem"></td>
                 <td data-col-key="odeme_duzeni"></td>
             </tr>
@@ -860,7 +1021,55 @@
     var yeniCariHedef = 'fatura';
     var autoAdaylar = [];
 
-    async function gibCekKaydet() {
+    function faturaMusteriKartaGit(ev, musteriId) {
+        if (ev) ev.preventDefault();
+        var mid = parseInt(String(musteriId || '0'), 10);
+        if (!mid) return false;
+        var url = '/giris/?mid=' + encodeURIComponent(String(mid)) + '&kart=1';
+        try {
+            if (window.self !== window.top && window.top) {
+                window.top.location.href = url;
+                return false;
+            }
+        } catch (e) { /* cross-origin */ }
+        window.location.href = url;
+        return false;
+    }
+
+    function faturaMusteriHucreHtml(f) {
+        var ad = f.musteri_adi_goster || f.musteri_adi || '—';
+        var mid = parseInt(String(f.musteri_id || '0'), 10);
+        if (!mid) return ad;
+        var adEsc = String(ad)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+        return '<a class="musteri-link" href="/giris/?mid=' + encodeURIComponent(String(mid)) + '&kart=1" onclick="return faturaMusteriKartaGit(event,' + mid + ')">' + adEsc + '</a>';
+    }
+
+    async function _faturaApiJson(url, opts) {
+        var r = await fetch(url, opts);
+        var txt = await r.text();
+        var j = null;
+        try { j = txt ? JSON.parse(txt) : null; } catch (e) { /* HTML / boş yanıt */ }
+        if (!r.ok) {
+            throw new Error((j && j.mesaj) ? j.mesaj : ('Sunucu hatası (HTTP ' + r.status + ')'));
+        }
+        if (!j) {
+            throw new Error('Sunucudan geçerli yanıt alınamadı. Oturum süresi dolmuş olabilir; sayfayı yenileyip tekrar deneyin.');
+        }
+        return j;
+    }
+
+    async function gibElleKesilenFaturalariCek(ev) {
+        if (ev) ev.preventDefault();
+        var gc = document.getElementById('gib_canli');
+        if (gc) gc.value = '';
+        await gibCekKaydet(ev);
+    }
+
+    async function gibCekKaydet(ev) {
         var inp = document.getElementById('gib_tekil_ref');
         var ref = (inp && inp.value || '').trim();
         if (ref) {
@@ -870,25 +1079,37 @@
         var baslangic = (document.getElementById('baslangic') || {}).value || '';
         var bitis = (document.getElementById('bitis') || {}).value || '';
         if (!baslangic || !bitis) {
-            alert('Toplu aktarım için üstte başlangıç ve bitiş tarihini seçin veya kutuya GİB No / ETTN yazın.');
+            alert('Toplu aktarım için üstte başlangıç ve bitiş tarihini seçin veya gizli şeritte GİB No / ETTN kutusuna yazın.');
             return;
         }
-        if (!confirm('Seçili ' + baslangic + ' — ' + bitis + ' aralığında GİB portalındaki faturaların tamamını ERP\'ye yazayım mı?\n\n(Bu işlem GİB\'e bağlanır; bittikten sonra liste yalnız veritabanından hızlı gelir.)')) {
+        if (!confirm('Seçili ' + baslangic + ' — ' + bitis + ' aralığında GİB portalından elle kesilmiş (imzalı) faturalar ERP ye yazılsın mı?\n\nBu işlem yalnızca siz istediğinizde çalışır; rapor her açılışta GİB e gitmez.')) {
             return;
+        }
+        var btn = (ev && ev.currentTarget) ? ev.currentTarget : document.querySelector('.fatura-gib-ellden-cek-btn');
+        var btnHtml = btn ? btn.innerHTML : '';
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fa fa-spinner fa-spin" aria-hidden="true"></i> Çekiliyor…';
         }
         try {
-            var r = await fetch('/faturalar/api/gib-cek-kaydet-aralik', {
+            var j = await _faturaApiJson('/faturalar/api/gib-cek-kaydet-aralik', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 credentials: 'same-origin',
                 body: JSON.stringify({ baslangic: baslangic, bitis: bitis })
             });
-            var j = await r.json();
-            if (!j || !j.ok) throw new Error((j && j.mesaj) || ('HTTP ' + r.status));
+            if (!j.ok) throw new Error(j.mesaj || 'İşlem başarısız.');
             alert(j.mesaj || 'Tamamlandı.');
-            filtrele();
+            var gc2 = document.getElementById('gib_canli');
+            if (gc2) gc2.value = '';
+            window.location.reload();
         } catch (e) {
             alert('GİB toplu aktarım hatası: ' + (e && e.message ? e.message : e));
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = btnHtml;
+            }
         }
     }
 
@@ -897,16 +1118,15 @@
         if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ref)) body.uuid = ref;
         else body.fatura_no = ref.toUpperCase();
         try {
-            var r = await fetch('/faturalar/api/gib-cek-kaydet', {
+            var j = await _faturaApiJson('/faturalar/api/gib-cek-kaydet', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 credentials: 'same-origin',
                 body: JSON.stringify(body)
             });
-            var j = await r.json();
-            if (!j || !j.ok) throw new Error((j && j.mesaj) || ('HTTP ' + r.status));
+            if (!j.ok) throw new Error(j.mesaj || 'İşlem başarısız.');
             alert((j.mesaj || 'Kaydedildi.') + (j.fatura_id ? (' (ID: ' + j.fatura_id + ')') : ''));
-            filtrele();
+            window.location.reload();
         } catch (e) {
             alert('GİB tekil çekme hatası: ' + (e && e.message ? e.message : e));
         }
@@ -988,6 +1208,10 @@
                 if (linkT0) linkT0.classList.remove('active');
                 var erpFlag0 = document.getElementById('erp_taslak_modu');
                 if (erpFlag0) erpFlag0.value = '';
+                var gdF0 = document.getElementById('gib_durum');
+                if (gdF0) gdF0.value = 'imzali';
+                var faturaTablo0 = document.getElementById('faturalar_liste_tablo');
+                if (faturaTablo0) faturaTablo0.classList.remove('faturalar-tablo--taslak');
                 var gibBtn0 = document.getElementById('gib_durum_toggle');
                 if (gibBtn0) gibBtn0.style.display = '';
                 _taslakGizle();
@@ -1011,6 +1235,9 @@
 
         var gibBtnWrap = document.getElementById('gib_durum_toggle');
         if (gibBtnWrap) gibBtnWrap.style.display = mod === 'taslaklar' ? 'none' : '';
+
+        var faturaTablo = document.getElementById('faturalar_liste_tablo');
+        if (faturaTablo) faturaTablo.classList.toggle('faturalar-tablo--taslak', mod === 'taslaklar');
 
         if (mod === 'taslaklar') _taslakYukle();
         return false;
@@ -1088,6 +1315,65 @@
 
     var _faturaOrigRows = null;
 
+    function faturaOlusturUrl(f) {
+        var id = parseInt(String(f.id || '0'), 10);
+        if (!id) return '';
+        return f.duzenle_url || ('/faturalar/yeni?edit_fatura_id=' + id);
+    }
+
+    function faturaOlusturHucreHtml(f) {
+        var url = faturaOlusturUrl(f);
+        if (!url) return '<span style="color:#90a4ae;">—</span>';
+        return '<a href="' + url + '" target="_blank" rel="noopener" class="btn-fatura-olustur" title="Bu taslaktan GİB fatura oluştur sayfasına git">' +
+            '<i class="fa fa-file-invoice" aria-hidden="true"></i> Fatura oluştur</a>';
+    }
+
+    function faturaIslemHtml(f) {
+        var id = parseInt(String(f.id || '0'), 10);
+        if (!id) return '—';
+        var pdfUrl = '/faturalar/onizleme/' + id;
+        var editUrl = faturaOlusturUrl(f);
+        return '<span class="fatura-islem-grubu"><span class="islem-grubu">' +
+            '<a href="' + pdfUrl + '" class="btn-pdf" title="PDF indir" download><i class="fa fa-file-pdf" aria-hidden="true"></i></a>' +
+            '<a href="' + pdfUrl + '" target="_blank" class="btn-yazdir" rel="noopener" title="Yazdır"><i class="fa fa-print" aria-hidden="true"></i></a>' +
+            '<a href="' + pdfUrl + '" target="_blank" class="btn-islem-onizle" title="Görüntüle"><i class="fa fa-eye" aria-hidden="true"></i></a>' +
+            '<a href="' + editUrl + '" target="_blank" class="btn-islem-mini" title="Düzenle"><i class="fa fa-edit" aria-hidden="true"></i></a>' +
+            '<button type="button" class="btn-islem-mini btn-islem-mini--sil" title="Sil" onclick="faturaSatirSil(' + id + ', this)"><i class="fa fa-trash" aria-hidden="true"></i></button>' +
+            '</span></span>';
+    }
+
+    function faturaSatirSil(fid, btn) {
+        if (!fid) return;
+        if (!confirm('Bu fatura silinecek.\n\nBağlı tahsilatlar da silinir.\nETTN\'li (GİB) faturalar silinmez.\n\nDevam edilsin mi?')) return;
+        if (btn) btn.disabled = true;
+        fetch('/faturalar/api/fatura-sil-toplu', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ fatura_ids: [fid] })
+        })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (!data || !data.ok) {
+                    alert((data && data.mesaj) ? data.mesaj : 'Silinemedi.');
+                    return;
+                }
+                var m = data.mesaj || 'Tamamlandı.';
+                if (data.atlanan && data.atlanan.length) {
+                    m += '\n\nAtlanan: #' + data.atlanan[0].id + (data.atlanan[0].neden === 'ettn_var' ? ' (ETTN)' : '');
+                }
+                alert(m);
+                var tr = btn && btn.closest('tr');
+                if (tr) tr.remove();
+                if (typeof toplamSatiriGuncelle === 'function') toplamSatiriGuncelle();
+            })
+            .catch(function (err) {
+                alert('İstek hatası: ' + (err && err.message ? err.message : err));
+            })
+            .finally(function () {
+                if (btn) btn.disabled = false;
+            });
+    }
+
     function _taslakTbodyGoster(items) {
         var tbody = document.querySelector('#faturalar_liste_tablo tbody');
         if (!tbody) return;
@@ -1103,24 +1389,14 @@
                 var tutarTR = Number(f.toplam || 0).toLocaleString('tr-TR', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' TL';
                 var editLink = f.duzenle_url ? ('<a href="' + f.duzenle_url + '" target="_blank" title="Düzenle" style="color:#e0f7fa;text-decoration:none;border-bottom:1px dotted rgba(224,247,250,.35);">' + (f.fatura_no || '—') + '</a>') : (f.fatura_no || '—');
                 var durumBadge = '<span class="badge badge-gib-taslak">ERP Taslak</span>';
-                var odeBadge = f.durum ? ('<span class="badge badge-' + (f.durum === 'odendi' ? 'odendi' : 'odenmedi') + '">' + f.durum + '</span>') : '<span style="color:#90a4ae;">—</span>';
-                var mid = parseInt(String(f.musteri_id || '0'), 10);
-                var yeniFaturaBtn = (f.id && mid > 0)
-                  ? ('<a href="/faturalar/yeni?musteri_id=' + encodeURIComponent(String(mid)) + '&yeni_gib_bos=1" target="_blank" title="Bu firma için yeni fatura (GİB için önce kaydedin)" style="display:inline-block;background:#26a69a;color:white;padding:4px 8px;border-radius:3px;font-size:11px;text-decoration:none;white-space:nowrap;"><i class="fa fa-file-invoice"></i> Fatura oluştur</a>')
-                  : '';
-                var islemBtn = f.id
-                  ? ('<span style="display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap;">' +
-                      '<a href="/faturalar/onizleme/' + f.id + '" target="_blank" style="display:inline-block;background:#4fc3f7;color:white;padding:4px 10px;border-radius:3px;font-size:11px;text-decoration:none;"><i class="fa fa-eye"></i></a>' +
-                      yeniFaturaBtn +
-                    '</span>')
-                  : '—';
+                var islemBtn = f.id ? faturaIslemHtml(f) : '—';
                 html += '<tr>';
                 html += '<td data-col-key="tarih">' + tarih + '</td>';
                 html += '<td data-col-key="fatura_no">' + editLink + '</td>';
                 html += '<td data-col-key="gib_durum">' + durumBadge + '</td>';
-                html += '<td data-col-key="musteri">' + (f.musteri_adi || '—') + '</td>';
+                html += '<td data-col-key="musteri">' + faturaMusteriHucreHtml(f) + '</td>';
                 html += '<td data-col-key="tutar" data-kdv="' + (Number(f.kdv_tutar) || 0) + '" data-kdv-no-estimate="1">' + tutarTR + '</td>';
-                html += '<td data-col-key="odeme_durum">' + odeBadge + '</td>';
+                html += '<td data-col-key="fatura_olustur">' + (f.id ? faturaOlusturHucreHtml(f) : '—') + '</td>';
                 html += '<td data-col-key="islem">' + islemBtn + '</td>';
                 html += '<td data-col-key="odeme_duzeni" class="odeme-duzeni-cell" data-musteri-id="' + (f.musteri_id || '') + '" data-odeme-duzeni="' + (f.odeme_duzeni || 'aylik') + '" data-odeme-duzeni-manuel="' + (f.odeme_duzeni_manuel || '') + '" onclick="odemeDuzeniEditorAc(this);event.stopPropagation();">' + (f.odeme_duzeni_display || '—') + '</td>';
                 html += '</tr>';
@@ -1154,6 +1430,19 @@
         return '';
     }
 
+    function faturaGibSeritToggle(ev) {
+        if (ev) ev.preventDefault();
+        var serit = document.getElementById('fatura_gib_serit');
+        var btn = document.getElementById('fatura_gib_serit_toggle');
+        if (!serit) return;
+        var acik = serit.style.display === 'none' || serit.style.display === '';
+        serit.style.display = acik ? 'flex' : 'none';
+        if (btn) {
+            btn.classList.toggle('is-open', acik);
+            btn.setAttribute('aria-expanded', acik ? 'true' : 'false');
+        }
+    }
+
     function filtrele(gibCanliZorla) {
         _taslakCache = null;  // filtre değişti, cache sıfırla
         const yil = document.getElementById('yil').value;
@@ -1169,7 +1458,8 @@
         let url = '/faturalar/faturalar?yil=' + yil + '&baslangic=' + encodeURIComponent(baslangic) + '&bitis=' + encodeURIComponent(bitis);
         if (ay) url += '&ay=' + encodeURIComponent(ay);
         if (ofis) url += '&ofis=' + encodeURIComponent(ofis);
-        if (gibDurum && gibDurum.value) url += '&gib_durum=' + encodeURIComponent(gibDurum.value);
+        var gibDurumVal = (gibDurum && gibDurum.value) ? gibDurum.value : ((erpTaslakModu && erpTaslakModu.value) ? '' : 'imzali');
+        if (gibDurumVal) url += '&gib_durum=' + encodeURIComponent(gibDurumVal);
         if (gibCanli && gibCanli.value) url += '&gib_canli=1';
         if (erpTaslakModu && erpTaslakModu.value) url += '&erp_taslak=1';
         url += _finansIframeEmbedSuffix();
@@ -1179,7 +1469,8 @@
 
     function gibCanliKontrolEt() {
         var gd = document.getElementById('gib_durum');
-        if (gd) gd.value = '';
+        var erpT = document.getElementById('erp_taslak_modu');
+        if (gd && !(erpT && erpT.value)) gd.value = 'imzali';
         filtrele(true);
     }
 

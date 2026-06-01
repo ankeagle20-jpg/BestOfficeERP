@@ -30,9 +30,27 @@ from docx import Document
 import os
 import sys
 import re
+import threading
 from services.cari_service import CariService
 
 _HAZIR_OFIS_ODA_MIN, _HAZIR_OFIS_ODA_MAX = 200, 230
+
+_kyc_kaydet_schema_ready = False
+_kyc_kaydet_schema_lock = threading.Lock()
+
+
+def _kyc_kaydet_schema_ensure_once() -> None:
+    global _kyc_kaydet_schema_ready
+    if _kyc_kaydet_schema_ready:
+        return
+    with _kyc_kaydet_schema_lock:
+        if _kyc_kaydet_schema_ready:
+            return
+        ensure_customers_hazir_ofis_oda()
+        ensure_musteri_kyc_hazir_ofis_oda_no()
+        ensure_musteri_kyc_kira_banka()
+        ensure_musteri_kyc_odeme_duzeni()
+        _kyc_kaydet_schema_ready = True
 
 
 def _kyc_optional_money(val):
@@ -2143,10 +2161,7 @@ def api_kyc_kaydet():
     """Giriş formundan KYC kaydı kaydet / güncelle"""
     try:
         data = request.json or request.form
-        ensure_customers_hazir_ofis_oda()
-        ensure_musteri_kyc_hazir_ofis_oda_no()
-        ensure_musteri_kyc_kira_banka()
-        ensure_musteri_kyc_odeme_duzeni()
+        _kyc_kaydet_schema_ensure_once()
         musteri_id = data.get("musteri_id")
         sirket_unvani = (data.get("sirket_unvani") or data.get("unvan") or "").strip()
         musteri_adi = (data.get("musteri_adi") or "").strip() or None
@@ -2426,7 +2441,10 @@ def api_kyc_kaydet():
             kyc_id = row["id"] if row else None
         if musteri_id:
             try:
-                from routes.giris_routes import _ensure_aylik_grid_cache_table, _upsert_aylik_grid_cache
+                from routes.giris_routes import (
+                    _defer_aylik_grid_cache_rebuild,
+                    _ensure_aylik_grid_cache_table,
+                )
 
                 if _odemd == "manuel":
                     _ensure_aylik_grid_cache_table()
@@ -2435,7 +2453,7 @@ def api_kyc_kaydet():
                         (int(musteri_id),),
                     )
                 else:
-                    _upsert_aylik_grid_cache(int(musteri_id))
+                    _defer_aylik_grid_cache_rebuild(int(musteri_id))
             except Exception:
                 pass
         # Opsiyonel: hiyerarşik grup ataması (mevcut update akışına ek alan olarak)

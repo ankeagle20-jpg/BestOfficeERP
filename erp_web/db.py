@@ -1290,7 +1290,7 @@ def ensure_hizmet_turleri_table():
     except Exception as e:
         print(f"hizmet_turleri CREATE: {e}")
     varsayilan = (
-        ("Sanal Ofis", 1),
+        ("Sanal ofis", 1),
         ("Hazır Ofis", 2),
         ("Paylaşımlı Ofis", 3),
         ("Paylaşımlı Masa", 4),
@@ -1303,6 +1303,11 @@ def ensure_hizmet_turleri_table():
             )
         except Exception as e:
             print(f"hizmet_turleri seed {ad}: {e}")
+    # Eski büyük-O varsayılanı listede tutma (silinse bile seed ile geri gelmesin)
+    try:
+        execute("DELETE FROM hizmet_turleri WHERE TRIM(ad) = %s", ("Sanal Ofis",))
+    except Exception as e:
+        print(f"hizmet_turleri Sanal Ofis temizlik: {e}")
 
 
 def ensure_duzenli_fatura_secenekleri_table():
