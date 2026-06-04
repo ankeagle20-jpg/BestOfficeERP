@@ -574,11 +574,18 @@ def api_set_parent_by_hizmet_turu():
     changed = CariService.set_parent_by_hizmet_turu(hizmet_turu, parent_id)
     return jsonify({"ok": True, "updated": int(changed or 0), "hizmet_turu": hizmet_turu, "group_id": parent_id})
 
+_groups_cache: dict = {}
+_GROUPS_CACHE_TTL = 30
+
 
 @bp.route("/api/groups")
 @giris_gerekli
 def api_groups():
     exclude_id = request.args.get("exclude_id", type=int)
+    cache_key = exclude_id
+    cached = _groups_cache.get(cache_key)
+    if cached and time.time() - cached[0] < _GROUPS_CACHE_TTL:
+        return jsonify(cached[1])
     if exclude_id:
         rows = fetch_all(
             """
@@ -601,7 +608,9 @@ def api_groups():
             LIMIT 300
             """
         )
-    return jsonify({"ok": True, "groups": rows or []})
+    result = {"ok": True, "groups": rows or []}
+    _groups_cache[cache_key] = (time.time(), result)
+    return jsonify(result)
 
 
 @bp.route("/api/groups", methods=["POST"])

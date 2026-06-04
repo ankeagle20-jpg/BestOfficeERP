@@ -8158,15 +8158,23 @@ def tahsilat_makbuz_onizle():
     except Exception as e:
         return jsonify({'ok': False, 'mesaj': str(e)}), 500
 
+_next_makbuz_no_cache: list = [0.0, None]  # [timestamp, value]
+_NEXT_MAKBUZ_NO_CACHE_TTL = 30
+
 
 @bp.route('/api/next-makbuz-no', methods=['GET'])
 @faturalar_gerekli
 def api_next_makbuz_no():
     try:
+        now = time.time()
+        if _next_makbuz_no_cache[1] is not None and now - _next_makbuz_no_cache[0] < _NEXT_MAKBUZ_NO_CACHE_TTL:
+            return jsonify({'ok': True, 'makbuz_no': _next_makbuz_no_cache[1]})
         with db() as conn:
             cur = conn.cursor()
             cur.execute("SELECT pg_advisory_xact_lock(hashtext('tahsilat_makbuz_no_alloc')::bigint)")
             no = _next_makbuz_no_with_cursor(cur)
+        _next_makbuz_no_cache[0] = now
+        _next_makbuz_no_cache[1] = no
         return jsonify({'ok': True, 'makbuz_no': no})
     except Exception as e:
         return jsonify({'ok': False, 'mesaj': str(e)}), 500

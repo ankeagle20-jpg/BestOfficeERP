@@ -24888,6 +24888,7 @@ function girisCariEkstreVarsayilanTarihAraligi(m) {
 }
 
 function girisCariEkstreVarsayilanTarihleriYaz(m) {
+    window.__cariEkstreManuelYuklendi = false;
     var eb = document.getElementById('cari_ekstre_baslangic');
     var ebit = document.getElementById('cari_ekstre_bitis');
     var bBas = document.getElementById('cari_ekstre_b_baslangic');
@@ -25007,6 +25008,7 @@ function cariEkstreMusteriIdSec() {
     return v;
 }
 function cariEkstreTablolariniTemizle() {
+    window.__cariEkstreManuelYuklendi = false;
     var tbody = document.getElementById('cari_ekstre_tbody');
     var foot = document.getElementById('cari_ekstre_foot');
     var bos = document.getElementById('cari_ekstre_bos');
@@ -25254,6 +25256,8 @@ function cariEkstreTahsilatDetayAc(mid, idsCsv) {
 
 function cariEkstreYukle(opts) {
     var sessiz = opts && opts.sessiz;
+    if (sessiz && !window.__cariEkstreManuelYuklendi) return;
+    if (!sessiz) window.__cariEkstreManuelYuklendi = true;
     var musteriId = cariEkstreMusteriIdSec();
     if (!musteriId) {
         if (!sessiz) alert('Cari ekstre için önce müşteri seçin (liste veya Tahsilat alanı).');
