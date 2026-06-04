@@ -13911,6 +13911,7 @@ function sozlesmeAylikBorclandir() {
             alert((res.j && res.j.mesaj) ? res.j.mesaj : 'Borçlandırma kaydedilemedi.');
             return;
         }
+        sozlesmeAylikBorclananMid = parseInt(mid, 10);
         (res.j.tahsil_silinen || []).forEach(function (row) {
             var k = (typeof sozlesmeAylikAyKeyFromYilAy === 'function') ? sozlesmeAylikAyKeyFromYilAy(row.yil, row.ay) : null;
             if (!k) return;
@@ -13998,6 +13999,7 @@ function sozlesmeAylikBorclandir() {
             if (typeof girisTahsilatEkstreTazeYenile === 'function') {
                 try { girisTahsilatEkstreTazeYenile(); } catch (_eEkBr) {}
             }
+            sozlesmelerAylikHizliYukle(true);
         }
         var panelPost = (typeof sozlesmeAylikGridBorclandirPanelPost === 'function')
             ? sozlesmeAylikGridBorclandirPanelPost(mid, satirlar)

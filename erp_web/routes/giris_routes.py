@@ -8298,6 +8298,46 @@ def api_aylik_tutarlardan_borclandir():
     else:
         kira_nakit_borc = raw_nakit in (True, 1, "1", "true", "on", "yes")
 
+    # Sözleşme bitiş tarihi kontrolü: bitiş ötesi aylar reddedilir
+    _sozlesme_kyc = fetch_one(
+        """
+        SELECT mk.sozlesme_bitis, mk.kapanis_sonrasi_borc_ay,
+               c.kapanis_tarihi, c.durum
+        FROM customers c
+        LEFT JOIN LATERAL (
+            SELECT sozlesme_bitis, kapanis_sonrasi_borc_ay
+            FROM musteri_kyc
+            WHERE musteri_id = c.id
+            ORDER BY id DESC LIMIT 1
+        ) mk ON true
+        WHERE c.id = %s
+        """,
+        (musteri_id,),
+    ) or {}
+    _bit_eff = _aylik_grid_effective_bitis(
+        _sozlesme_kyc,
+        _aylik_grid_coerce_date(_sozlesme_kyc.get("sozlesme_bitis")),
+    )
+    if _bit_eff is not None:
+        _gecen = [
+            f"{_AY_ADLARI[int(r['ay']) - 1]} {int(r['yil'])}"
+            for r in satirlar
+            if isinstance(r, dict)
+            and str(r.get("yil", "")).lstrip("-").isdigit()
+            and str(r.get("ay", "")).lstrip("-").isdigit()
+            and 1 <= int(r["ay"]) <= 12
+            and 1990 <= int(r["yil"]) <= 2100
+            and date(int(r["yil"]), int(r["ay"]), 1) >= _bit_eff
+        ]
+        if _gecen:
+            return jsonify({
+                "ok": False,
+                "mesaj": (
+                    f"Sözleşme bitiş tarihi ({_bit_eff.strftime('%d.%m.%Y')}) geçildi; "
+                    f"şu aylar borçlandırılamaz: {', '.join(_gecen)}."
+                ),
+            }), 400
+
     olusturulan = []
     atlanan = []
     tahsil_silinen = []
