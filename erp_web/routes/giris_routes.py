@@ -11,8 +11,6 @@ from db import (
     fetch_one,
     execute,
     execute_returning,
-    ensure_hizmet_turleri_table,
-    ensure_duzenli_fatura_secenekleri_table,
     ensure_faturalar_amount_columns,
     ensure_contracts_engine,
     ensure_customer_financial_profile,
@@ -2455,7 +2453,6 @@ def _aylik_grid_effective_bitis(kyc: dict, bit: date | None) -> date | None:
 @giris_gerekli
 def api_hizmet_turleri():
     """Hizmet türü listesi (GET) veya yeni tür ekleme (POST)."""
-    ensure_hizmet_turleri_table()
     if request.method == "GET":
         rows = fetch_all("SELECT id, ad FROM hizmet_turleri ORDER BY sira NULLS LAST, ad")
         return jsonify({"ok": True, "turler": [{"id": r["id"], "ad": r["ad"]} for r in (rows or [])]})
@@ -2498,7 +2495,6 @@ def api_hizmet_turu_guncelle():
 
 def _api_hizmet_turu_guncelle_json(data):
     """Hizmet türü adını güncelle; müşteri/KYC kayıtlarındaki metin de eşlenir."""
-    ensure_hizmet_turleri_table()
     try:
         tid = int(data.get("id") or 0)
     except (TypeError, ValueError):
@@ -2554,7 +2550,6 @@ def api_hizmet_turu_sil():
 
 def _api_hizmet_turu_sil_json(data):
     """Hizmet türünü listeden kaldır (müşteri kartındaki kayıtlı değer korunur)."""
-    ensure_hizmet_turleri_table()
     try:
         tid = int(data.get("id") or 0)
     except (TypeError, ValueError):
@@ -2972,7 +2967,6 @@ def _duzenli_fatura_ekle(etiket: str) -> dict:
 @giris_gerekli
 def api_duzenli_fatura_secenekleri():
     """Düzenli Fatura açılır listesi (GET) veya yeni senaryo (POST)."""
-    ensure_duzenli_fatura_secenekleri_table()
     if request.method == "GET":
         rows = fetch_all(
             "SELECT kod, etiket FROM duzenli_fatura_secenekleri ORDER BY sira NULLS LAST, etiket"

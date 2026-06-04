@@ -1769,6 +1769,21 @@ def ensure_cari_kart_perf_indexes():
         execute("CREATE INDEX IF NOT EXISTS idx_installments_musteri_vade ON contract_installments (musteri_id, vade_tarihi)")
     except Exception as e:
         print(f"idx_contracts*: {e}")
+    try:
+        # musteri_reel_donem_tutar: musteri_id filtresi
+        execute("CREATE INDEX IF NOT EXISTS idx_musteri_reel_donem_tutar_musteri_id ON musteri_reel_donem_tutar (musteri_id)")
+    except Exception as e:
+        print(f"idx_musteri_reel_donem_tutar*: {e}")
+    try:
+        # tahsilatlar: tutar > 0 filtreli partial index (imza sorgusu için)
+        execute("CREATE INDEX IF NOT EXISTS idx_tahsilatlar_musteri_tutar_pos ON tahsilatlar (musteri_id, tutar) WHERE tutar IS NOT NULL AND tutar > 0")
+    except Exception as e:
+        print(f"idx_tahsilatlar_musteri_tutar_pos*: {e}")
+    try:
+        # musteri_tahsilat_panel_detay: musteri_id (PK zaten kapsar; tamamlayıcı)
+        execute("CREATE INDEX IF NOT EXISTS idx_musteri_tahsilat_panel_detay_musteri_id ON musteri_tahsilat_panel_detay (musteri_id)")
+    except Exception as e:
+        print(f"idx_musteri_tahsilat_panel_detay*: {e}")
     _cari_kart_perf_indexes_done = True
 
 
