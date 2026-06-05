@@ -14808,8 +14808,12 @@ function girisAylikSatirYilPanelSatirYenile(p, h, y) {
     if (tp) tp.value = h.toplam > 0 ? String(h.toplam) : '';
     var reelEl = p.querySelector('.aylik-yil-reel');
     if (reelEl) {
-        var reelG = h.reel > 0 ? h.reel : girisAylikSatirYilReelGoster(y);
-        reelEl.value = reelG > 0 ? String(reelG) : '';
+        var rowRe = (window.__aylikSatirYilDetay || {})[String(y)] || {};
+        if (rowRe.__reel_aktif && h.reel > 0) {
+            reelEl.value = String(h.reel);
+        } else {
+            reelEl.value = '';
+        }
     }
     var chk = p.querySelector('.aylik-yil-reel-aktif');
     if (chk) chk.checked = !!((window.__aylikSatirYilDetay || {})[String(y)] || {}).__reel_aktif;
@@ -14838,6 +14842,8 @@ function girisAylikSatirYilReelAktifDegisti(y, aktif) {
         cur.__reel_aktif = true;
     } else {
         cur.__reel_aktif = false;
+        cur.__reel_cleared = true;
+        delete cur.reel;
         var tufeA = girisAylikSatirYilTufeSatirAylikAl(y);
         if (tufeA > 0) cur.aylik = tufeA;
     }
@@ -14886,8 +14892,11 @@ function girisAylikSatirYilSatirDegisti(y, alan, val) {
     if (alan === 'reel') {
         if (n > 0) {
             cur.__reel_aktif = true;
+            cur.__reel_cleared = false;
         } else {
             cur.__reel_aktif = false;
+            cur.__reel_cleared = true;
+            delete cur.reel;
             var tufeA0 = girisAylikSatirYilTufeSatirAylikAl(y);
             if (tufeA0 > 0) cur.aylik = tufeA0;
         }
@@ -16097,12 +16106,20 @@ function girisAylikSatirYilPanelDoldur() {
             }
         }
         var row0 = window.__aylikSatirYilDetay[ov] || {};
-        var reelG = parseFloat(row0.reel);
-        if (isNaN(reelG) || reelG <= 0) reelG = girisAylikSatirYilReelGoster(yy);
-        if (reelG > 0) {
-            row0.__reel_aktif = true;
-            row0.reel = reelG;
-            window.__aylikSatirYilDetay[ov] = row0;
+        var reelG = 0;
+        if (row0.__reel_cleared && !row0.__reel_aktif) {
+            reelG = 0;
+        } else if (row0.__reel_aktif) {
+            reelG = parseFloat(row0.reel);
+            if (isNaN(reelG) || reelG <= 0) reelG = girisAylikSatirYilReelGoster(yy);
+        } else {
+            reelG = parseFloat(row0.reel);
+            if (isNaN(reelG) || reelG <= 0) reelG = girisAylikSatirYilReelGoster(yy);
+            if (reelG > 0) {
+                row0.__reel_aktif = true;
+                row0.reel = reelG;
+                window.__aylikSatirYilDetay[ov] = row0;
+            }
         }
         var reelAktif = !!row0.__reel_aktif;
         var h = girisAylikSatirYilHesapla(yy);

@@ -4635,24 +4635,14 @@ def _date_add_months(d: date, n: int) -> date:
 
 
 def _reel_manual_is_explicit_override(y: int, y_start: int, mv: float, prev_eff) -> bool:
-    """
-    Kayıtlı reel dönem tutarı grid/ekstrede kullanılsın; yalnızca önceki dönemle birebir aynı
-    DB kopyası (434→434) TÜFE zincirine bırakılır. Düşük/ yüksek fark etmez (540, 1008).
-    """
+    """DB'de o yıl için kayıt varsa her zaman override; başlangıç yılı hariç."""
     if y <= y_start:
         return False
-    if prev_eff is None:
-        return True
     try:
-        prev_f = float(prev_eff)
         mv_f = float(mv)
     except (TypeError, ValueError):
         return True
-    if not math.isfinite(prev_f) or prev_f <= 0 or not math.isfinite(mv_f) or mv_f < 0:
-        return math.isfinite(mv_f) and mv_f >= 0
-    if abs(mv_f - prev_f) <= 0.02:
-        return False
-    return True
+    return math.isfinite(mv_f) and mv_f >= 0
 
 
 def _reel_donem_ay_keys_for_period(bas_soz: date, donem_yil: int, artis_month: int, artis_day: int):
@@ -9210,6 +9200,33 @@ def api_reel_donem_tutar_upsert():
     except Exception:
         logging.getLogger(__name__).exception(
             "reel_donem_tutar sonrasi grid cache musteri_id=%s", musteri_id
+        )
+    return jsonify({"ok": True})
+
+
+@bp.route("/api/reel-donem-tutar", methods=["DELETE"])
+@giris_gerekli
+def api_reel_donem_tutar_sil():
+    data = request.get_json(silent=True) or {}
+    try:
+        musteri_id = int(data.get("musteri_id"))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "mesaj": "musteri_id gerekli."}), 400
+    try:
+        yil = int(data.get("yil"))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "mesaj": "yil gerekli."}), 400
+    _ensure_musteri_reel_donem_tutar_table()
+    execute(
+        "DELETE FROM musteri_reel_donem_tutar WHERE musteri_id = %s AND donem_yil = %s",
+        (musteri_id, yil),
+    )
+    try:
+        _invalidate_aylik_grid_payload_mem(musteri_id)
+        _upsert_aylik_grid_cache(musteri_id)
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "reel_donem_tutar_sil sonrasi grid cache musteri_id=%s", musteri_id
         )
     return jsonify({"ok": True})
 
