@@ -1,0 +1,823 @@
+﻿=== sozlesmelerAylikHizliYukle 6669 - 6785 ===
+6669|        sozlesmelerAylikHizliYukle(true);
+6670|    })
+6671|    .catch(function () { alert('Sunucu hatas─▒.'); });
+6672|}
+6673|
+6674|/** Reel: Alan ve Uygula ├Ânizlemesini iptal eder; haritay─▒ sunucudaki kay─▒tl─▒ tutarlara d├Ând├╝r├╝r. */
+6675|function sozlesmelerReelDonemTutarVazgec() {
+6676|    var mid = selectedId;
+6677|    if (!mid) {
+6678|        alert('├ûnce m├╝┼şteri se├ğin.');
+6679|        return;
+6680|    }
+6681|    var sel = document.getElementById('sozlesmeler-reel-yil-select');
+6682|    if (!sel || !sel.value) return;
+6683|    fetch('/giris/api/reel-donem-tutarlar?musteri_id=' + encodeURIComponent(mid), { credentials: 'same-origin' })
+6684|        .then(function (r) { return r.json(); })
+6685|        .then(function (rj) {
+6686|            window.__musteriReelDonemTutarlari = (rj && rj.ok && rj.map && typeof rj.map === 'object') ? rj.map : {};
+6687|            window.__musteriReelDonemDetaylari = (rj && rj.ok && rj.detay_map && typeof rj.detay_map === 'object') ? rj.detay_map : {};
+6688|            if (mid) {
+6689|                window.__musteriReelAyOzelTutarByMid = window.__musteriReelAyOzelTutarByMid || {};
+6690|                delete window.__musteriReelAyOzelTutarByMid[String(mid)];
+6691|            }
+6692|            sozlesmelerReelDonemTutarlariUygula(false);
+6693|            var inp = document.getElementById('sozlesmeler-reel-tutar');
+6694|            if (inp) inp.value = '';
+6695|        })
+6696|        .catch(function () {
+6697|            alert('Kay─▒tl─▒ tutarlar al─▒namad─▒.');
+6698|        });
+6699|}
+6700|
+6701|function sozlesmelerReelDonemTutarKaldir() {
+6702|    var mid = selectedId;
+6703|    if (!mid) { alert('├ûnce m├╝┼şteri se├ğin.'); return; }
+6704|    var sel = document.getElementById('sozlesmeler-reel-yil-select');
+6705|    var yil = sel && sel.value ? parseInt(sel.value, 10) : NaN;
+6706|    if (!yil || isNaN(yil)) { alert('D├Ânem y─▒l─▒ se├ğin.'); return; }
+6707|    if (!confirm(yil + ' d├Ânemi i├ğin kaydedilmi┼ş reel tutar─▒ kald─▒rmak istiyor musunuz?')) return;
+6708|    fetch('/giris/api/reel-donem-tutar', {
+6709|        method: 'DELETE',
+6710|        headers: { 'Content-Type': 'application/json' },
+6711|        credentials: 'same-origin',
+6712|        body: JSON.stringify({ musteri_id: mid, yil: yil })
+6713|    })
+6714|    .then(function(r) { return r.json(); })
+6715|    .then(function(d) {
+6716|        if (!d.ok) { alert(d.mesaj || 'Kald─▒rma ba┼şar─▒s─▒z.'); return; }
+6717|        var inp = document.getElementById('sozlesmeler-reel-tutar');
+6718|        if (inp) inp.value = '';
+6719|        if (typeof sozlesmelerReelHibritAlanlariTemizle === 'function') sozlesmelerReelHibritAlanlariTemizle();
+6720|        if (window.__musteriReelDonemTutarlari) delete window.__musteriReelDonemTutarlari[yil];
+6721|        if (window.__musteriReelDonemDetaylari) delete window.__musteriReelDonemDetaylari[yil];
+6722|        sozlesmelerAylikHizliYukle(true);
+6723|    })
+6724|    .catch(function() { alert('Sunucu hatas─▒.'); });
+6725|}
+6726|
+6727|/** Formdaki ba┼şlang─▒├ğ/biti┼ş veya Kira s├╝resi ay ile beklenen h├╝cre say─▒s─▒ (cache ile kar┼ş─▒la┼şt─▒rma i├ğin). */
+6728|function sozlesmelerAylikBeklenenAySayisiFormdan() {
+6729|    var basEl = document.getElementById('sozlesme_baslangic');
+6730|    var bitEl = document.getElementById('sozlesme_bitis');
+6731|    var sureEl = document.getElementById('kira_suresi_ay');
+6732|    var basStr = basEl && basEl.value ? basEl.value.trim() : '';
+6733|    var bitStr = bitEl && bitEl.value ? bitEl.value.trim() : '';
+6734|    var ay = 0;
+6735|    if (basStr && bitStr) ay = sozlesmeKiraAySayisi(basStr, bitStr);
+6736|    if (ay <= 0 && sureEl && sureEl.value) {
+6737|        var s = parseInt(sureEl.value, 10);
+6738|        if (!isNaN(s) && s >= 1) ay = Math.min(s, 240);
+6739|    }
+6740|    if (basStr) {
+6741|        var horizonAy = sozlesmeAylikHorizonAySayisi(basStr);
+6742|        if (horizonAy > ay) ay = Math.min(horizonAy, 240);
+6743|    }
+6744|    return ay;
+6745|}
+6746|
+6747|/** ├ûnbellek sat─▒r say─▒s─▒ form ile uyu┼şmuyorsa (├Âr. DB k─▒sa biti┼ş, formda uzat─▒lm─▒┼ş biti┼ş) canl─▒ ├ğizim gerekir. */
+6748|function sozlesmelerAylikOnbellekFormlaUyumlu(cacheObj) {
+6749|    // Form alanlar─▒ hen├╝z hidrasyon olmad─▒ysa (s├Âzle┼şme ba┼şlang─▒c─▒ bo┼ş) cache'i
+6750|    // do─şrudan kabul et. Aksi halde yanl─▒┼şl─▒kla canl─▒ ├ğizime d├╝┼ş├╝p aylar─▒
+6751|    // "bug├╝nden itibaren" 12 ay g├Âstererek ge├ğmi┼ş aylar─▒ gizleyebiliyor.
+6752|    var basEl = document.getElementById('sozlesme_baslangic');
+6753|    var formHydrated = !!(basEl && String(basEl.value || '').trim());
+6754|    var hasCacheAylar = !!(cacheObj && Array.isArray(cacheObj.aylar) && cacheObj.aylar.length);
+6755|    if (!formHydrated && hasCacheAylar) return true;
+6756|    if (girisSonMusteriDetayHafifYukleme && hasCacheAylar) return true;
+6757|    var nForm = sozlesmelerAylikBeklenenAySayisiFormdan();
+6758|    var nCache = (cacheObj && Array.isArray(cacheObj.aylar)) ? cacheObj.aylar.length : 0;
+6759|    if (nForm > 0 && nCache > 0 && nForm !== nCache) return false;
+6760|    var cacheNakit = !!(cacheObj && cacheObj.kira_nakit);
+6761|    if (cacheNakit !== kiraNakitMi()) return false;
+6762|    var cKn = parseFloat(String((cacheObj && cacheObj.kira_nakit_tutar != null) ? cacheObj.kira_nakit_tutar : '').replace(',', '.')) || 0;
+6763|    var cKb = parseFloat(String((cacheObj && cacheObj.kira_banka_tutar != null) ? cacheObj.kira_banka_tutar : '').replace(',', '.')) || 0;
+6764|    var elN = document.getElementById('kira_nakit_tutar');
+6765|    var elB = document.getElementById('kira_banka_tutar');
+6766|    var fKn = elN && elN.value ? (parseFloat(String(elN.value).replace(/\s/g, '').replace(',', '.')) || 0) : 0;
+6767|    var fKb = elB && elB.value ? (parseFloat(String(elB.value).replace(/\s/g, '').replace(',', '.')) || 0) : 0;
+6768|    if (Math.round(cKn * 100) !== Math.round(fKn * 100) || Math.round(cKb * 100) !== Math.round(fKb * 100)) return false;
+6769|    return true;
+6770|}
+6771|
+6772|function sozlesmelerAylikGridYilListesiBasAy(basDate, aySayisi) {
+6773|    var ys = {};
+6774|    var n = Math.max(0, parseInt(String(aySayisi), 10) || 0);
+6775|    for (var i = 0; i < n; i++) {
+6776|        var ya = sozlesmeAylikYilAy(basDate, i);
+6777|        ys[ya.y] = true;
+6778|    }
+6779|    return Object.keys(ys).map(function (x) { return parseInt(x, 10); }).filter(function (x) { return !isNaN(x); }).sort(function (a, b) { return a - b; });
+6780|}
+6781|
+6782|function sozlesmelerAylikYilFiltreSonUcYilAyarla(yillarSorted) {
+6783|    if (!yillarSorted || !yillarSorted.length) {
+6784|        window.__sozlesmelerAylikYilFiltre = { hepsi: true, yillar: [] };
+6785|        return;
+
+=== girisTahsilatHizliYuklePanelVeGrid 4723 - 4855 ===
+4723|            if (typeof girisTahsilatHizliYuklePanelVeGrid === 'function') {
+4724|                girisTahsilatHizliYuklePanelVeGrid(cacheForKismi, midNav).then(function () {
+4725|                    if (selToken != null && (window.__girisSelectMusteriToken !== selToken || String(selectedId) !== String(midNav))) return;
+4726|                    if (selToken == null && String(selectedId) !== String(midNav)) return;
+4727|                    sozlesmelerAylikGridVeriSonBoyamaTail(midNav, selToken, cacheForKismi);
+4728|                });
+4729|                return;
+4730|            }
+4731|            sozlesmelerAylikCacheRender(cacheForKismi, true);
+4732|        } else {
+4733|            sozlesmelerAylikGuncelle();
+4734|            cacheForKismi = null;
+4735|        }
+4736|    } else {
+4737|        sozlesmelerAylikGuncelle();
+4738|        cacheForKismi = null;
+4739|    }
+4740|    sozlesmelerAylikGridVeriSonBoyamaTail(midNav, selToken, cacheForKismi);
+4741|}
+4742|
+4743|/** Tahsil durumu + grid cache ayn─▒ anda; m├╝┼şteri se├ğiminde gecikmeyi azalt─▒r. */
+4744|function sozlesmeAylikGridParalelYukle(mid) {
+4745|    if (!mid) return Promise.resolve();
+4746|    if (sozlesmelerOdemeDuzeniManuelMi()) return Promise.resolve();
+4747|    if (!document.getElementById('sozlesmeler-aylik-grid')) return Promise.resolve();
+4748|    sozlesmeAylikBorclananMusteriDegistir(mid);
+4749|    var tUrl = '/giris/api/aylik-tahsil-durum?musteri_id=' + encodeURIComponent(mid);
+4750|    var cUrl = '/giris/api/aylik-grid-cache?musteri_id=' + encodeURIComponent(mid) + '&skip_match=1';
+4751|    var rUrl = '/giris/api/reel-donem-tutarlar?musteri_id=' + encodeURIComponent(mid);
+4752|    var pT = (typeof girisFetchJsonCached === 'function')
+4753|        ? girisFetchJsonCached(tUrl, { ttlMs: 30000, persistMs: 180000 })
+4754|        : fetch(tUrl, { credentials: 'same-origin' }).then(function (r) { return r.json(); });
+4755|    try {
+4756|        if (typeof girisJsonCacheInvalidatePrefix === 'function') {
+4757|            girisJsonCacheInvalidatePrefix('/giris/api/aylik-grid-cache?musteri_id=' + encodeURIComponent(mid));
+4758|            girisJsonCacheInvalidatePrefix('/giris/api/reel-donem-tutarlar?musteri_id=' + encodeURIComponent(mid));
+4759|        }
+4760|    } catch (_eParInv) {}
+4761|    var pC = (typeof girisFetchJsonCached === 'function')
+4762|        ? girisFetchJsonCached(cUrl, { ttlMs: 0, persistMs: 0, swr: false })
+4763|        : fetch(cUrl, { credentials: 'same-origin' }).then(function (r) { return r.json(); });
+4764|    var pR = (typeof girisFetchJsonCached === 'function')
+4765|        ? girisFetchJsonCached(rUrl, { ttlMs: 0, persistMs: 0, swr: false })
+4766|        : fetch(rUrl, { credentials: 'same-origin' }).then(function (r) { return r.json(); });
+4767|    return Promise.all([pT, pC, pR]).then(function (triple) {
+4768|        sozlesmeTahsilSetFromJson(triple[0]);
+4769|        var rj = triple[2];
+4770|        window.__musteriReelDonemTutarlari = (rj && rj.ok && rj.map && typeof rj.map === 'object') ? rj.map : {};
+4771|        window.__musteriReelDonemDetaylari = (rj && rj.ok && rj.detay_map && typeof rj.detay_map === 'object') ? rj.detay_map : {};
+4772|        try {
+4773|            if (typeof girisAylikSatirYilKayitYukle === 'function') girisAylikSatirYilKayitYukle();
+4774|            if (typeof girisAylikSatirYilPanelDoldur === 'function') girisAylikSatirYilPanelDoldur();
+4775|        } catch (_eBrPar) {}
+4776|        try {
+4777|            window.__musteriReelDonemDetayTaslakByMid = window.__musteriReelDonemDetayTaslakByMid || {};
+4778|            if (mid) delete window.__musteriReelDonemDetayTaslakByMid[String(mid)];
+4779|        } catch (eDr) {}
+4780|        var cj = triple[1];
+4781|        if (cj && cj.ok && cj.cache && Array.isArray(cj.cache.aylar) && cj.cache.aylar.length) {
+4782|            if (window.__musteriReelDonemTutarlari && Object.keys(window.__musteriReelDonemTutarlari).length
+4783|                && typeof sozlesmelerAylikCacheReelDbEsasla === 'function') {
+4784|                cj.cache = sozlesmelerAylikCacheReelDbEsasla(cj.cache);
+4785|            }
+4786|            if (!sozlesmelerAylikOnbellekFormlaUyumlu(cj.cache)) return false;
+4787|            try {
+4788|                if (typeof girisTahsilatYilAyGridKismiSonSenkron === 'function') girisTahsilatYilAyGridKismiSonSenkron(cj.cache);
+4789|            } catch (_eTyPar2) {}
+4790|            if (typeof girisTahsilatHizliYuklePanelVeGrid === 'function') {
+4791|                return girisTahsilatHizliYuklePanelVeGrid(cj.cache, mid);
+4792|            }
+4793|            var okRender = sozlesmelerAylikCacheRender(cj.cache, true);
+4794|            return okRender;
+4795|        }
+4796|        return false;
+4797|    }).then(function (ok) {
+4798|        if (!ok) sozlesmelerAylikGuncelle();
+4799|        else {
+4800|            try { sozlesmelerAylikTahsilSetiniGorseleZorla(); } catch (_eParTah) {}
+4801|            try {
+4802|                var scoPar = window.__sozlesmelerAylikSonCacheObj;
+4803|                if (typeof sozlesmelerReelDbSonBoyaSira === 'function') sozlesmelerReelDbSonBoyaSira(scoPar);
+4804|            } catch (_eParKismi) {}
+4805|            function _parKismiTekrar() {
+4806|                if (String(selectedId) !== String(mid)) return;
+4807|                try {
+4808|                    sozlesmelerAylikTahsilSetiniGorseleZorla();
+4809|                    var sco = window.__sozlesmelerAylikSonCacheObj;
+4810|                    if (typeof sozlesmelerReelDbSonBoyaSira === 'function') sozlesmelerReelDbSonBoyaSira(sco);
+4811|                } catch (_eParK2) {}
+4812|            }
+4813|            setTimeout(_parKismiTekrar, 120);
+4814|            setTimeout(_parKismiTekrar, 350);
+4815|        }
+4816|    }).catch(function () {
+4817|        // Paralel y├╝kleme hatas─▒nda da mevcut tahsil setini koru.
+4818|        window.__musteriReelDonemTutarlari = {};
+4819|        window.__musteriReelDonemDetaylari = {};
+4820|        try {
+4821|            window.__musteriReelDonemDetayTaslakByMid = window.__musteriReelDonemDetayTaslakByMid || {};
+4822|            if (mid) delete window.__musteriReelDonemDetayTaslakByMid[String(mid)];
+4823|        } catch (eDr2) {}
+4824|        sozlesmelerAylikGuncelle();
+4825|    });
+4826|}
+4827|
+4828|function sozlesmelerAylikBolumEl() {
+4829|    return document.getElementById('sozlesmeler-aylik-bolum');
+4830|}
+4831|/** Bor├ğland─▒rma / tahsil / ├Âzet: hangi sekme a├ğ─▒ksa o gridÔÇÖdeki tutarlar kullan─▒l─▒r (Reel farkl─▒ olabilir). */
+4832|function sozlesmelerAylikAktifGridEl() {
+4833|    var reelBtn = document.querySelector('#sozlesmeler-aylik-bolum .sozlesmeler-aylik-sekme.active[data-pane="reel"]');
+4834|    if (reelBtn) return document.getElementById('sozlesmeler-reel-aylik-grid');
+4835|    return document.getElementById('sozlesmeler-aylik-grid');
+4836|}
+4837|/** Tek aktif grid + data-ay-key: ├Ânce i┼şlem yap─▒labilir kart, yoksa tutar─▒ >0 olan (Reel/normal uyumu). */
+4838|function sozlesmelerAylikSeciliAyKartiBul(grid, ayKey) {
+4839|    if (!grid || ayKey == null || ayKey === '') return null;
+4840|    var esc = String(ayKey).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+4841|    var card = grid.querySelector('.sozlesmeler-ay-kart[data-ay-key="' + esc + '"][data-secilebilir="1"]');
+4842|    if (card) return card;
+4843|    var all = grid.querySelectorAll('.sozlesmeler-ay-kart[data-ay-key="' + esc + '"]');
+4844|    for (var i = 0; i < all.length; i++) {
+4845|        var c = all[i];
+4846|        var t = (typeof sozlesmelerAyKartHucreTutar === 'function')
+4847|            ? sozlesmelerAyKartHucreTutar(c)
+4848|            : parseFloat(c.getAttribute('data-tutar-kdv'));
+4849|        if (!isNaN(t) && t > 0) return c;
+4850|    }
+4851|    return null;
+4852|}
+4853|/** Fatura / ┬½bor├ğland─▒r┬╗ sat─▒r─▒: data-tutar-kdv k─▒smi aylarda ┬½kalan┬╗ olabilir; hizmet bedeli d├Ânem br├╝t├╝ data-brut-kdv / data-sozlesme-brut-kdv ile uyumlu olmal─▒. */
+4854|function sozlesmelerAylikKartKdvDahilFaturaTutari(card) {
+4855|    if (!card) return NaN;
+
+=== girisTahsilatYilAyPanelDbYukle 7272 - 7450 ===
+7272|        if (mid && typeof girisTahsilatYilAyPanelDbYukle === 'function') {
+7273|            window.__girisMusteriPanelDbZorlaMid = String(mid);
+7274|            girisTahsilatYilAyPanelDbYukle(mid, gridCiz, { ttlMs: 0, persistMs: 0, zorlaUygula: true });
+7275|        } else {
+7276|            gridCiz();
+7277|        }
+7278|    });
+7279|}
+7280|/** A├ğ─▒k olan sekme (0=M├╝┼şteri Ekle, 1=Kira Senaryo, 2=Kira Bildirgesi, 3=Tahsilat, 4=Cari Kart, 5=Potansiyel, 6=S├Âzle┼şmeler, 7=M├╝┼şteri listesi, 8=Randevu, 9=Grup, 10=M├╝┼şteriler 2). M├╝┼şteri se├ğimi bu sekmeye g├Âre forma doldurur. */
+7281|let currentTabIndex = 0;
+7282|
+7283|/** Giri┼ş sayfas─▒ M├╝┼şteriler 2: /musteriler/list; ?embed=1 ile layout ├╝st men├╝s├╝ gizlenir. */
+7284|function girisMusteriListe2IframeYukle() {
+7285|    var fr = document.getElementById('giris-musteri-liste2-iframe');
+7286|    if (!fr) return;
+7287|    var raw = fr.getAttribute('data-ml2-src') || '';
+7288|    if (!raw) return;
+7289|    var want;
+7290|    try {
+7291|        var u = new URL(raw, window.location.origin);
+7292|        u.searchParams.set('embed', '1');
+7293|        want = u.toString();
+7294|    } catch (e) {
+7295|        want = raw + (raw.indexOf('?') >= 0 ? '&' : '?') + 'embed=1';
+7296|    }
+7297|    if (fr.getAttribute('data-ml2-inited') === '1') {
+7298|        var cur = fr.src || '';
+7299|        if (cur.indexOf('embed=1') >= 0 || cur.indexOf('embed=true') >= 0) return;
+7300|        fr.removeAttribute('data-ml2-inited');
+7301|    }
+7302|    fr.setAttribute('data-ml2-inited', '1');
+7303|    fr.src = want;
+7304|}
+7305|
+7306|/** Giri┼ş sayfas─▒ Randevu sekmesi: tam geni┼şlik /randevu/randevu-al iframe; se├ğili m├╝┼şteri URL ile ├Ân doldurulur (iframe i├ğinde ba┼şka m├╝┼şteri aranabilir). */
+7307|function girisRandevuIframeYukle() {
+7308|    var fr = document.getElementById('giris-randevu-iframe');
+7309|    if (!fr) return;
+7310|    var mid = (typeof selectedId !== 'undefined' && selectedId) ? selectedId : null;
+7311|    if (!mid) {
+7312|        var hid = document.getElementById('musteri-id');
+7313|        if (hid && hid.value && /^\d+$/.test(String(hid.value).trim())) mid = parseInt(String(hid.value).trim(), 10);
+7314|    }
+7315|    var url = '/randevu/randevu-al?embed=1' + (mid ? ('&musteri_id=' + mid) : '');
+7316|    var cur = fr.getAttribute('data-ra-src') || '';
+7317|    if (cur === url) return;
+7318|    fr.setAttribute('data-ra-src', url);
+7319|    fr.src = url;
+7320|}
+7321|
+7322|// Sekme de─şi┼ştirme (i├ğerik id: tab-0 .. tab-10; 6 ├Âzel: sol panel tab-0)
+7323|function switchTab(index) {
+7324|    currentTabIndex = index;
+7325|    try {
+7326|        if (index >= 0 && index <= 10) localStorage.setItem('bestoffice_giris_tab_index', String(index));
+7327|    } catch (e) {}
+7328|    // ├£st sekme butonlar─▒n─▒n aktifli─şini index yerine data-index ile kontrol et
+7329|    document.querySelectorAll('.tab').forEach(function(t) {
+7330|        var v = parseInt(t.getAttribute('data-index'), 10);
+7331|        if (!isNaN(v) && v === index) {
+7332|            t.classList.add('active');
+7333|        } else {
+7334|            t.classList.remove('active');
+7335|        }
+7336|    });
+7337|
+7338|    // S├Âzle┼şmeler (6): sol panelde tab-0 g├Âsterilir; Randevu (8) ve M├╝┼şteriler 2 (10) tam geni┼şlik iframe
+7339|    var effectiveIndex = (index === 6 ? 0 : index);
+7340|    var tabId = (index === 6 ? 'tab-0' : 'tab-' + index);
+7341|    var wrapper = document.getElementById('tab-content-wrapper');
+7342|    var sagSoz = document.getElementById('sozlesmeler-sag-alan');
+7343|    if (wrapper) {
+7344|        if (index === 6) {
+7345|            wrapper.classList.remove('giris-randevu-tab');
+7346|            wrapper.classList.add('sozlesmeler-split');
+7347|            if (sagSoz) sagSoz.style.display = '';
+7348|            sozlesmeTahsilatFormunuSeciliMusteridenDoldur();
+7349|            if (selectedId) sozlesmeAylikGridParalelYukle(selectedId);
+7350|            else sozlesmelerAylikGuncelle();
+7351|        } else if (index === 8 || index === 10) {
+7352|            wrapper.classList.remove('sozlesmeler-split');
+7353|            wrapper.classList.add('giris-randevu-tab');
+7354|            if (sagSoz) sagSoz.style.display = '';
+7355|            if (index === 8) girisRandevuIframeYukle();
+7356|            else girisMusteriListe2IframeYukle();
+7357|        } else {
+7358|            wrapper.classList.remove('sozlesmeler-split');
+7359|            wrapper.classList.remove('giris-randevu-tab');
+7360|            if (sagSoz) sagSoz.style.display = '';
+7361|        }
+7362|    }
+7363|    document.querySelectorAll('.tab-content').forEach(function(c) {
+7364|        if (c.id === tabId) {
+7365|            c.classList.add('active');
+7366|            if (effectiveIndex === 3) {
+7367|                var tarihEl = document.getElementById('giris_tahsilat_tarih');
+7368|                if (tarihEl && !tarihEl.value) tarihEl.value = new Date().toISOString().slice(0, 10);
+7369|                girisTahsilatFormunuSeciliMusteridenDoldur();
+7370|                tahsilatMakbuzTutarlariniGuncelleDisardan();
+7371|                if (typeof girisTahsilRaporYukle === 'function') {
+7372|                    var rb = document.getElementById('giris_tahsil_rapor_bas');
+7373|                    var re = document.getElementById('giris_tahsil_rapor_bit');
+7374|                    if (rb && re && !rb.value && !re.value) girisTahsilRaporBuguneAyarla();
+7375|                    girisTahsilRaporYukle();
+7376|                }
+7377|            }
+7378|            if (effectiveIndex === 4) {
+7379|                if (selectedId) {
+7380|                    if (typeof cariKartGecisBosalt === 'function') cariKartGecisBosalt();
+7381|                    cariKartYukle(selectedId);
+7382|                } else {
+7383|                    document.getElementById('cari-kart-musteri-sec').style.display = 'block';
+7384|                    document.getElementById('cari-kart-icerik').style.display = 'none';
+7385|                }
+7386|            }
+7387|            if (effectiveIndex === 5) {
+7388|                potDefaultHatirlatma();
+7389|                potYukle();
+7390|            }
+7391|            if (effectiveIndex === 7) {
+7392|                if (typeof faturaRaporGorunumUI === 'function') faturaRaporGorunumUI();
+7393|                if (typeof faturaRaporVarsayilanTarihlerDoldur === 'function') faturaRaporVarsayilanTarihlerDoldur();
+7394|                var _frTbody = document.getElementById('fatura_rapor_tbody');
+7395|                var _frDur = document.getElementById('fatura_rapor_durum');
+7396|                var _frBosSatir = !_frTbody || !_frTbody.children || _frTbody.children.length === 0;
+7397|                var _frDurBosVeyaIdle = !_frDur || !_frDur.textContent || !_frDur.textContent.trim() ||
+7398|                    (_frDur.className && _frDur.className.indexOf('fatura-rapor-durum--idle') >= 0);
+7399|                if (_frBosSatir && _frDurBosVeyaIdle && typeof faturaRaporDurumGoster === 'function') {
+7400|                    faturaRaporDurumGoster('idle', '');
+7401|                }
+7402|            }
+7403|            if (effectiveIndex === 9) {
+7404|                if (typeof girisGrupFiltreUiInit === 'function') girisGrupFiltreUiInit();
+7405|                if (typeof girisGrupOzetDurumGoster === 'function') {
+7406|                    girisGrupOzetDurumGoster('idle', 'T├╝m gruplar listesinden se├ğim yap─▒p "Uygula" t─▒klay─▒n.');
+7407|                }
+7408|            }
+7409|            if (effectiveIndex === 1) {
+7410|                var midSenaryo = selectedId;
+7411|                if (!midSenaryo) {
+7412|                    try {
+7413|                        var ps = new URLSearchParams(window.location.search);
+7414|                        var mids = ps.get('mid');
+7415|                        if (mids && /^\d+$/.test(String(mids))) midSenaryo = parseInt(mids, 10);
+7416|                    } catch (e2) {}
+7417|                }
+7418|                if (midSenaryo) {
+7419|                    fetch('/giris/api/musteri/' + midSenaryo).then(function(r) { return r.json(); }).then(function(res) {
+7420|                        if (res.ok && res.musteri) senaryoMusteriFormDoldur(res.musteri);
+7421|                    }).catch(function() {});
+7422|                } else if (typeof syncSenaryoHizmetTuruFromMain === 'function') {
+7423|                    syncSenaryoHizmetTuruFromMain();
+7424|                }
+7425|            }
+7426|        } else {
+7427|            c.classList.remove('active');
+7428|        }
+7429|    });
+7430|    // Kira Bildirgesi sekmesine ge├ğince m├╝┼şteri ve s├Âzle┼şme tarihini formdan al; hizmet t├╝r├╝n├╝ m├╝┼şteri kart─▒yla hizala
+7431|    if (effectiveIndex === 2) {
+7432|        const ad = document.getElementById('name');
+7433|        const soz = document.getElementById('sozlesme_baslangic');
+7434|        if (document.getElementById('bildirge_musteri_adi')) document.getElementById('bildirge_musteri_adi').value = ad ? ad.value : '';
+7435|        if (document.getElementById('bildirge_sozlesme_tarihi')) document.getElementById('bildirge_sozlesme_tarihi').value = soz ? soz.value : '';
+7436|        if (typeof syncBildirgeHizmetTuruFromMain === 'function') syncBildirgeHizmetTuruFromMain();
+7437|        if (typeof syncBildirgeKdvFromCariKart === 'function') syncBildirgeKdvFromCariKart();
+7438|    }
+7439|    if ((index === 0 || index === 6) && selectedId && girisSonMusteriDetayHafifYukleme) {
+7440|        girisSonMusteriDetayHafifYukleme = false;
+7441|        setTimeout(function () {
+7442|            if (typeof selectMusteri === 'function') selectMusteri(selectedId);
+7443|        }, 0);
+7444|    }
+7445|    /* Cari ekstre burada ├ğa─şr─▒lmas─▒n: form hen├╝z g├╝ncellenmeden eski tarihlerle istek gidiyordu.
+7446|       Tarihler fillActiveTab + cariEkstreMusteriDegisinceYenile ile ayarlan─▒r. */
+7447|}
+7448|
+7449|function girisGrupOzetDurumGoster(tip, metin) {
+7450|    var el = document.getElementById('giris_grup_ozet_durum');
+
+=== girisFetchJsonCached 4087 - 4165 ===
+4087|function girisFetchJsonCached(url, opts) {
+4088|    opts = opts || {};
+4089|    var ttl = Math.max(0, parseInt(opts.ttlMs == null ? 30000 : opts.ttlMs, 10) || 0);
+4090|    var swr = opts.swr !== false; // varsay─▒lan: stale-while-revalidate
+4091|    var persistMs = Math.max(0, parseInt(opts.persistMs || 0, 10) || 0);
+4092|    var persistKey = String(opts.persistKey || url || '');
+4093|    var now = Date.now();
+4094|    var cached = window.__girisJsonCache.get(url);
+4095|    if (cached && (now - cached.ts) < ttl) {
+4096|        if (swr && (now - cached.ts) > Math.max(1000, ttl / 2)) {
+4097|            // Yar─▒ ├Âmr├╝ ge├ğtiyse arka planda yenile (kullan─▒c─▒ya gecikme yok).
+4098|            if (!window.__girisJsonInflight.has(url)) girisFetchJsonNetwork(url, opts);
+4099|        }
+4100|        return Promise.resolve(cached.data);
+4101|    }
+4102|    if (persistMs > 0) {
+4103|        var persisted = girisJsonPersistRead(persistKey, persistMs);
+4104|        if (persisted != null) {
+4105|            window.__girisJsonCache.set(url, { ts: now, data: persisted });
+4106|            if (swr && !window.__girisJsonInflight.has(url)) girisFetchJsonNetwork(url, opts);
+4107|            return Promise.resolve(persisted);
+4108|        }
+4109|    }
+4110|    var inflight = window.__girisJsonInflight.get(url);
+4111|    if (inflight) return inflight;
+4112|    return girisFetchJsonNetwork(url, opts);
+4113|}
+4114|function girisFetchJsonNetwork(url, opts) {
+4115|    opts = opts || {};
+4116|    var fetchOpts = Object.assign({ credentials: 'same-origin' }, opts.fetch || {});
+4117|    var p = fetch(url, fetchOpts).then(function (r) {
+4118|        if (!r.ok) throw new Error('HTTP ' + r.status);
+4119|        return r.json();
+4120|    }).then(function (data) {
+4121|        window.__girisJsonCache.set(url, { ts: Date.now(), data: data });
+4122|        var pMs = Math.max(0, parseInt(opts.persistMs || 0, 10) || 0);
+4123|        if (pMs > 0) {
+4124|            var pKey = String(opts.persistKey || url || '');
+4125|            girisJsonPersistWrite(pKey, data);
+4126|        }
+4127|        return data;
+4128|    }).finally(function () {
+4129|        window.__girisJsonInflight.delete(url);
+4130|    });
+4131|    window.__girisJsonInflight.set(url, p);
+4132|    return p;
+4133|}
+4134|function girisJsonCacheInvalidatePrefix(prefix) {
+4135|    if (!prefix) return;
+4136|    try {
+4137|        var keys = Array.from(window.__girisJsonCache.keys());
+4138|        for (var i = 0; i < keys.length; i++) {
+4139|            if (keys[i].indexOf(prefix) === 0) window.__girisJsonCache.delete(keys[i]);
+4140|        }
+4141|    } catch (_e) {}
+4142|}
+4143|
+4144|/** fetch yan─▒t─▒: giri┼ş HTML'i JSON san─▒l─▒p sessiz hata veya bo┼ş liste ├╝retmesin (401/oturum). */
+4145|function girisFetchJsonSafely(r) {
+4146|    var ct = (r.headers.get('content-type') || '').toLowerCase();
+4147|    return r.text().then(function (t) {
+4148|        var st = r.status || 0;
+4149|        var looksHtml = !!(t && /^[\s]*</.test(t));
+4150|        if (looksHtml) {
+4151|            if (st === 401 || st === 403) {
+4152|                throw new Error('Oturum s├╝resi doldu veya giri┼ş gerekli. Sayfay─▒ yenileyin.');
+4153|            }
+4154|            if (st >= 500 && st < 600) {
+4155|                throw new Error('Sunucu hata sayfas─▒ d├Ând├╝ (HTTP ' + st + '). Veritaban─▒ veya uygulama hatas─▒ olabilir; konsoldaki Network sekmesinden yan─▒t─▒ kontrol edin.');
+4156|            }
+4157|            throw new Error('Sunucu beklenmeyen HTML yan─▒t d├Ând├╝ (HTTP ' + (st || '?') + '). Bu genelde oturum de─şil, ara katman veya hata sayfas─▒d─▒r.');
+4158|        }
+4159|        var data;
+4160|        try {
+4161|            data = t ? JSON.parse(t) : null;
+4162|        } catch (e) {
+4163|            throw new Error('Sunucu yan─▒t─▒ okunamad─▒.');
+4164|        }
+4165|        if (!r.ok) {
+
+=== girisJsonCacheInvalidatePrefix 4134 - 4155 ===
+4134|function girisJsonCacheInvalidatePrefix(prefix) {
+4135|    if (!prefix) return;
+4136|    try {
+4137|        var keys = Array.from(window.__girisJsonCache.keys());
+4138|        for (var i = 0; i < keys.length; i++) {
+4139|            if (keys[i].indexOf(prefix) === 0) window.__girisJsonCache.delete(keys[i]);
+4140|        }
+4141|    } catch (_e) {}
+4142|}
+4143|
+4144|/** fetch yan─▒t─▒: giri┼ş HTML'i JSON san─▒l─▒p sessiz hata veya bo┼ş liste ├╝retmesin (401/oturum). */
+4145|function girisFetchJsonSafely(r) {
+4146|    var ct = (r.headers.get('content-type') || '').toLowerCase();
+4147|    return r.text().then(function (t) {
+4148|        var st = r.status || 0;
+4149|        var looksHtml = !!(t && /^[\s]*</.test(t));
+4150|        if (looksHtml) {
+4151|            if (st === 401 || st === 403) {
+4152|                throw new Error('Oturum s├╝resi doldu veya giri┼ş gerekli. Sayfay─▒ yenileyin.');
+4153|            }
+4154|            if (st >= 500 && st < 600) {
+4155|                throw new Error('Sunucu hata sayfas─▒ d├Ând├╝ (HTTP ' + st + '). Veritaban─▒ veya uygulama hatas─▒ olabilir; konsoldaki Network sekmesinden yan─▒t─▒ kontrol edin.');
+
+=== cariEkstreYukle 3831 - 3980 ===
+3831|                        <button type="button" class="tahsilat-btn-kaydet" onclick="cariEkstreYukle()"><i class="fa fa-refresh"></i> Ekstre G├Âster</button>
+3832|                    </div>
+3833|                    <div id="cari_ekstre_musteri_bilgi" class="cari-ekstre-musteri" style="display:none;"></div>
+3834|                    <div class="cari-ekstre-tablo-wrap">
+3835|                        <table class="cari-ekstre-tablo" id="cari_ekstre_tablo">
+3836|                            <thead>
+3837|                                <tr>
+3838|                                    <th>Tarih</th>
+3839|                                    <th>A├ğ─▒klama</th>
+3840|                                    <th class="num">Bor├ğ</th>
+3841|                                    <th class="num">Alacak</th>
+3842|                                    <th class="num">Bakiye</th>
+3843|                                    <th class="cari-ekstre-islem">─░┼şlem</th>
+3844|                                </tr>
+3845|                            </thead>
+3846|                            <tbody id="cari_ekstre_tbody"></tbody>
+3847|                            <tfoot id="cari_ekstre_foot" style="display:none;">
+3848|                                <tr class="cari-ekstre-toplam">
+3849|                                    <td colspan="2"><strong>Toplam</strong></td>
+3850|                                    <td class="num" id="cari_ekstre_toplam_borc">0,00</td>
+3851|                                    <td class="num" id="cari_ekstre_toplam_alacak">0,00</td>
+3852|                                    <td class="num" id="cari_ekstre_bakiye">0,00</td>
+3853|                                    <td class="cari-ekstre-islem"></td>
+3854|                                </tr>
+3855|                            </tfoot>
+3856|                        </table>
+3857|                    </div>
+3858|                    <div id="cari_ekstre_bos" class="sozlesmeler-aylik-bos">M├╝┼şteri se├ğin, tarih aral─▒─ş─▒ ve ayl─▒k kira girin, Ekstre G├Âster ile y├╝kleyin.</div>
+3859|                </div>
+3860|                <div id="cari_ekstre_b_panel" class="cari-ekstre-panel" style="display:none;">
+3861|                    <p class="cari-ekstre-aciklama">Bor├ğ: yaln─▒zca G─░BÔÇÖe kesilmi┼ş (ETTNÔÇÖli) faturalar. Alacak: yaln─▒zca havale, EFT, banka, ├ğek ve kredi kart─▒ tahsilatlar─▒. ─░├ğ fatura (INV vb.) ve nakit bu ekstrede yoktur. Fatura sat─▒r─▒na t─▒klay─▒nca G─░B format─▒nda PDF (yazd─▒r / kaydet); tahsilat sat─▒r─▒nda makbuz PDF.</p>
+3862|                    <div class="cari-ekstre-filtre">
+3863|                        <label>Ba┼şlang─▒├ğ</label>
+3864|                        <input type="date" id="cari_ekstre_b_baslangic">
+3865|                        <label>Biti┼ş</label>
+3866|                        <input type="date" id="cari_ekstre_b_bitis">
+3867|                        <button type="button" class="tahsilat-btn-kaydet" onclick="cariEkstreBYukle()"><i class="fa fa-refresh"></i> Ekstre G├Âster</button>
+3868|                    </div>
+3869|                    <div class="cari-ekstre-tablo-wrap">
+3870|                        <table class="cari-ekstre-tablo" id="cari_ekstre_b_tablo">
+3871|                            <thead>
+3872|                                <tr>
+3873|                                    <th>Tarih</th>
+3874|                                    <th>A├ğ─▒klama</th>
+3875|                                    <th class="num">Bor├ğ</th>
+3876|                                    <th class="num">Alacak</th>
+3877|                                    <th class="num">Bakiye</th>
+3878|                                    <th class="cari-ekstre-islem">─░┼şlem</th>
+3879|                                </tr>
+3880|                            </thead>
+3881|                            <tbody id="cari_ekstre_b_tbody"></tbody>
+3882|                            <tfoot id="cari_ekstre_b_foot" style="display:none;">
+3883|                                <tr class="cari-ekstre-toplam">
+3884|                                    <td colspan="2"><strong>Toplam</strong></td>
+3885|                                    <td class="num" id="cari_ekstre_b_toplam_borc">0,00</td>
+3886|                                    <td class="num" id="cari_ekstre_b_toplam_alacak">0,00</td>
+3887|                                    <td class="num" id="cari_ekstre_b_bakiye">0,00</td>
+3888|                                    <td class="cari-ekstre-islem"></td>
+3889|                                </tr>
+3890|                            </tfoot>
+3891|                        </table>
+3892|                    </div>
+3893|                    <div id="cari_ekstre_b_bos" class="sozlesmeler-aylik-bos">M├╝┼şteri se├ğin, tarih aral─▒─ş─▒ girin, Ekstre G├Âster ile y├╝kleyin.</div>
+3894|                </div>
+3895|            </div>
+3896|            <div id="cari_ekstre_tahsilat_modal" class="cari-ekstre-modal-overlay" aria-hidden="true">
+3897|                <div class="cari-ekstre-modal-panel" role="dialog" aria-labelledby="cari_ekstre_tahsilat_modal_baslik">
+3898|                    <div class="cari-ekstre-modal-head">
+3899|                        <h3 id="cari_ekstre_tahsilat_modal_baslik">Tahsilat detay─▒</h3>
+3900|                        <button type="button" class="cari-ekstre-modal-close" onclick="cariEkstreTahsilatModalKapat()" aria-label="Kapat">&times;</button>
+3901|                    </div>
+3902|                    <div id="cari_ekstre_tahsilat_modal_body" class="cari-ekstre-modal-body"></div>
+3903|                </div>
+3904|            </div>
+3905|            
+3906|            <div id="cari_ekstre_duzenle_modal" class="cari-ekstre-modal-overlay" aria-hidden="true">
+3907|                <div class="cari-ekstre-modal-panel" role="dialog" aria-labelledby="cari_ekstre_duzenle_baslik">
+3908|                    <div class="cari-ekstre-modal-head">
+3909|                        <h3 id="cari_ekstre_duzenle_baslik">Kay─▒t d├╝zenle</h3>
+3910|                        <button type="button" class="cari-ekstre-modal-close" onclick="cariEkstreDuzenleModalKapat()" aria-label="Kapat">&times;</button>
+3911|                    </div>
+3912|                    <div class="cari-ekstre-modal-body cari-ekstre-duzenle-form">
+3913|                        <p id="cari_ekstre_duzenle_aciklama" style="margin:0 0 8px;color:#b3e5fc;font-size:13px;"></p>
+3914|                        <label for="cari_ekstre_duzenle_tutar">Tutar (Ôé║, KDV dahil)</label>
+3915|                        <input type="number" step="0.01" id="cari_ekstre_duzenle_tutar">
+3916|                        <label for="cari_ekstre_duzenle_tarih">Tarih</label>
+3917|                        <input type="date" id="cari_ekstre_duzenle_tarih">
+3918|                        <div id="cari_ekstre_duzenle_odeme_wrap" style="display:none;">
+3919|                            <label for="cari_ekstre_duzenle_odeme">├ûdeme t├╝r├╝</label>
+3920|                            <select id="cari_ekstre_duzenle_odeme">
+3921|                                <option value="havale">Havale / EFT / Banka</option>
+3922|                                <option value="nakit">Nakit</option>
+3923|                                <option value="cek">├çek</option>
+3924|                                <option value="kredi_karti">Kredi kart─▒</option>
+3925|                            </select>
+3926|                        </div>
+3927|                        <div class="cari-ekstre-duzenle-actions">
+3928|                            <button type="button" class="tahsilat-btn-kaydet" onclick="cariEkstreDuzenleKaydet()">Kaydet</button>
+3929|                            <button type="button" class="cari-ekstre-modal-close" style="padding:8px 14px;" onclick="cariEkstreDuzenleModalKapat()">─░ptal</button>
+3930|                        </div>
+3931|                    </div>
+3932|                </div>
+3933|            </div>
+3934|
+3935|            <div id="tahsil_rapor_makbuz_modal" class="cari-ekstre-modal-overlay" aria-hidden="true" onclick="if(event.target===this)tahsilRaporMakbuzModalKapat();">
+3936|                <div class="cari-ekstre-modal-panel tahsil-rapor-makbuz-panel" role="dialog" aria-labelledby="tahsil_rapor_makbuz_modal_baslik" onclick="event.stopPropagation();">
+3937|                    <div class="cari-ekstre-modal-head">
+3938|                        <h3 id="tahsil_rapor_makbuz_modal_baslik">Tahsilat makbuzu</h3>
+3939|                        <button type="button" class="cari-ekstre-modal-close" onclick="tahsilRaporMakbuzModalKapat()" aria-label="Kapat">&times;</button>
+3940|                    </div>
+3941|                    <div class="tahsil-rapor-makbuz-toolbar">
+3942|                        <button type="button" class="btn-aylik-sec" onclick="tahsilRaporMakbuzYazdir()">Yazd─▒r</button>
+3943|                        <button type="button" class="btn-aylik-sec" onclick="tahsilRaporMakbuzIndir()">─░ndir / kaydet</button>
+3944|                    </div>
+3945|                    <div class="tahsil-rapor-makbuz-frame-wrap">
+3946|                        <iframe id="tahsil_rapor_makbuz_iframe" title="Makbuz PDF"></iframe>
+3947|                    </div>
+3948|                </div>
+3949|            </div>
+3950|            <div id="giris_group_modal" class="cari-ekstre-modal-overlay" aria-hidden="true">
+3951|                <div class="cari-ekstre-modal-panel" role="dialog" aria-labelledby="giris_group_modal_baslik">
+3952|                    <div class="cari-ekstre-modal-head">
+3953|                        <h3 id="giris_group_modal_baslik">Grup Ayarlar─▒</h3>
+3954|                        <button type="button" class="cari-ekstre-modal-close" onclick="girisGroupModalKapat()" aria-label="Kapat">&times;</button>
+3955|                    </div>
+3956|                    <div class="cari-ekstre-modal-body">
+3957|                        <div style="display:grid;gap:10px;">
+3958|                            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+3959|                                <button type="button" id="giris_group_tab_customer" class="btn-aylik-sec" onclick="girisGroupSekmeAc('customer')" style="min-width:140px;">Cari Bazl─▒</button>
+3960|                                <button type="button" id="giris_group_tab_service" class="btn-aylik-sec" onclick="girisGroupSekmeAc('service')" style="min-width:140px;">Hizmet T├╝r├╝</button>
+3961|                            </div>
+3962|
+3963|                            <div id="giris_group_panel_customer" style="display:grid;gap:10px;">
+3964|                                <div>
+3965|                                    <label style="display:block;font-size:12px;color:#90a4ae;margin-bottom:6px;">Bu Cariyi Bir Gruba Ba─şla</label>
+3966|                                    <input type="text" id="giris_group_parent_search" placeholder="Grup ara..." autocomplete="off" style="width:100%;padding:8px 10px;margin-bottom:6px;border-radius:6px;border:1px solid #2d4060;background:#0f2537;color:#e0f7fa;font-size:13px;">
+3967|                                    <select id="giris_group_parent_select" style="width:100%;padding:9px 10px;border-radius:6px;border:1px solid #2d4060;background:#0f2537;color:#e0f7fa;font-size:13px;">
+3968|                                        <option value="">Grupsuz</option>
+3969|                                    </select>
+3970|                                    <div id="giris_group_current_info" style="margin-top:6px;font-size:12px;color:#90a4ae;">Mevcut: Grupsuz</div>
+3971|                                    <div id="giris_group_preview" style="display:none;margin-top:7px;padding:8px 10px;border-radius:6px;background:rgba(33,150,243,.12);border:1px solid rgba(33,150,243,.35);font-size:12px;color:#d2ecff;"></div>
+3972|                                </div>
+3973|                                <div>
+3974|                                    <label style="display:block;font-size:12px;color:#90a4ae;margin-bottom:6px;">H─▒zl─▒ Grup Olu┼ştur</label>
+3975|                                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+3976|                                        <input type="text" id="giris_group_new_name" placeholder="├ûrn: DUVPAN Grup" style="flex:1;min-width:180px;padding:9px 10px;border-radius:6px;border:1px solid #2d4060;background:#0f2537;color:#e0f7fa;font-size:13px;">
+3977|                                        <button type="button" class="tahsilat-btn-kaydet" onclick="girisGroupOlusturVeBagla()"><i class="fa fa-plus"></i> Yeni Grup Olu┼ştur</button>
+3978|                                    </div>
+3979|                                </div>
+3980|                            </div>
+
+=== girisTahsilatYilAyPanelCacheDenDoldur 6922 - 7050 ===
+6922|        if (typeof girisTahsilatYilAyPanelCacheDenDoldur === 'function') {
+6923|            girisTahsilatYilAyPanelCacheDenDoldur(cacheObj);
+6924|        }
+6925|        if (typeof girisTahsilatYilAyGridOverrideFromCacheObj === 'function') girisTahsilatYilAyGridOverrideFromCacheObj(cacheObj);
+6926|    } catch (_eCrPre) {}
+6927|    var yilSetCache = {};
+6928|    aylar.forEach(function (ac) {
+6929|        var yy = parseInt(ac.yil, 10) || 0;
+6930|        if (yy) yilSetCache[yy] = true;
+6931|    });
+6932|    var yListCache = Object.keys(yilSetCache).map(function (x) { return parseInt(x, 10); }).filter(function (x) { return !isNaN(x); }).sort(function (a, b) { return a - b; });
+6933|    var basCache = String((cacheObj && cacheObj.baslangic) || '').trim();
+6934|    var bitCache = String((cacheObj && cacheObj.bitis) || '').trim();
+6935|    var sigCache = String(typeof selectedId !== 'undefined' ? selectedId : '') + '|' + basCache + '|' + bitCache + '|' + aylar.length;
+6936|    sozlesmelerAylikYilFiltreImzaKontrol(sigCache, yListCache);
+6937|    var html = '';
+6938|    var basFormEl = document.getElementById('sozlesme_baslangic');
+6939|    var bitFormEl = document.getElementById('sozlesme_bitis');
+6940|    var basForm = basFormEl && basFormEl.value ? String(basFormEl.value).trim() : basCache;
+6941|    var bitForm = bitFormEl && bitFormEl.value ? String(bitFormEl.value).trim() : bitCache;
+6942|    if (basCache && basFormEl && !String(basFormEl.value || '').trim()) {
+6943|        basFormEl.value = basCache.length >= 10 ? basCache.slice(0, 10) : basCache;
+6944|        basForm = basCache;
+6945|        if (typeof sozlesmelerReelBaslangicGuncelle === 'function') sozlesmelerReelBaslangicGuncelle();
+6946|    }
+6947|    /* G├Âr├╝n├╝rl├╝k: sunucu ├Ânbelle─şindeki d├Ânem s─▒n─▒rlar─▒n─▒ kullan. Formdaki biti┼ş anl─▒k k─▒sa/eski kal─▒nca
+6948|       (├Ârn. y─▒l alan─▒ odak kayb─▒) 2024+ aylar tamamen eleniyordu ÔÇö grid ┬½kayboldu┬╗ gibi g├Âr├╝n├╝yordu. */
+6949|    var basVis = basCache || basForm;
+6950|    var bitVis = bitCache || bitForm;
+6951|    var effOpts = {
+6952|        durum: (document.getElementById('musteri_durum') || {}).value || (cacheObj && cacheObj.durum) || '',
+6953|        kapanis_tarihi: (document.getElementById('kapanis_tarihi') || {}).value || (cacheObj && cacheObj.kapanis_tarihi) || '',
+6954|        kapanis_sonrasi_borc_ay: formKapanisSonrasiBorcAy() || (cacheObj && cacheObj.kapanis_sonrasi_borc_ay) || ''
+6955|    };
+6956|    var kdvElCache = document.getElementById('kdv_oran');
+6957|    var kdvOranCache = (kdvElCache && kdvElCache.value !== '') ? parseFloat(String(kdvElCache.value).replace(',', '.')) : 20;
+6958|    if (isNaN(kdvOranCache)) kdvOranCache = 20;
+6959|    var formNakitCache = kiraNakitMi();
+6960|    // Eski/uyumsuz cache nakit ├╝retildiyse, form banka modundayken kart de─şerini KDV dahil g├Âster.
+6961|    var cacheNakitFlag = !!(cacheObj && cacheObj.kira_nakit);
+6962|    var cacheBankaTut = parseFloat(String((cacheObj && cacheObj.kira_banka_tutar != null) ? cacheObj.kira_banka_tutar : '').replace(/\s/g, '').replace(',', '.'));
+6963|    if (isNaN(cacheBankaTut)) cacheBankaTut = 0;
+6964|    var bankadaKdvyeCevir = (!formNakitCache) && cacheNakitFlag && cacheBankaTut <= 0;
+6965|    var basYilKart = 0;
+6966|    try {
+6967|        var bdK = parseTarihStr(basVis) || new Date(basVis);
+6968|        if (!isNaN(bdK.getTime())) basYilKart = bdK.getFullYear();
+6969|    } catch (_eBdK) {}
+6970|    var maxYilKart = basYilKart + Math.max(0, Math.floor((aylar.length - 1) / 12));
+6971|    var hucreKartMap = {};
+6972|    try {
+6973|        if (basYilKart && typeof sozlesmelerAylikHucreToplamHaritasi === 'function') {
+6974|            hucreKartMap = sozlesmelerAylikHucreToplamHaritasi(basVis, maxYilKart) || {};
+6975|        }
+6976|    } catch (_eHucreKart) {}
+6977|    aylar.forEach(function(a, idx) {
+6978|        if (sozlesmeAylikDonemBasGecersizMi(basVis, bitVis, idx, effOpts)) return;
+6979|        var yil = parseInt(a.yil, 10) || 0;
+6980|        var ay = parseInt(a.ay, 10) || 0;
+6981|        if (!yil || !ay) return;
+6982|        if (!sozlesmelerAylikYilGoster(yil)) return;
+6983|        var ayAdiTam = SOZLESME_AY_ADLARI[ay - 1] || '';
+6984|        var ayAdi = ayAdiTam ? ayAdiTam.substring(0, 7) : '';
+6985|        var ayKey = String(a.ay_key || (yil + '-' + ay));
+6986|        var ayKeyNorm = sozlesmeAylikAyKeyNormalize(ayKey);
+6987|        var tApi0 = parseFloat(a.tutar_kdv_dahil);
+6988|        try {
+6989|            var _ovByMid = (typeof window !== 'undefined' && window.__tahsilatKismiOverrideByMid) ? window.__tahsilatKismiOverrideByMid : null;
+6990|            var _ovMid = (_ovByMid && typeof selectedId !== 'undefined' && selectedId) ? _ovByMid[String(selectedId)] : null;
+6991|            var _ov = _ovMid ? _ovMid[ayKeyNorm] : null;
+6992|            if (_ov && typeof _ov === 'object') {
+6993|                var _obr = parseFloat(_ov.brut);
+6994|                var _okl = parseFloat(_ov.kalan);
+6995|                var _ood = parseFloat(_ov.odenen);
+6996|                var _tolOv = Number(SOZLESME_TAM_ODENDI_TOLERANS) || 0.05;
+6997|                if (isFinite(_obr) && _obr > _tolOv && isFinite(_okl) && _okl > _tolOv && isFinite(_ood) && _ood > _tolOv) {
+6998|                    a = Object.assign({}, a, {
+6999|                        brut_tutar_kdv: _obr,
+7000|                        tutar_kdv_dahil: _obr,
+7001|                        kalan_tutar_kdv: _okl,
+7002|                        odenen_tutar_kdv: _ood,
+7003|                        kismi_tahsilat: true,
+7004|                        tahsil_edildi: false
+7005|                    });
+7006|                }
+7007|            }
+7008|        } catch (_eOv1) {}
+7009|        var borcKirmizi = (typeof selectedId !== 'undefined'
+7010|            && selectedId
+7011|            && sozlesmeAylikBorclananMid === parseInt(selectedId, 10)
+7012|            && sozlesmeAylikBorclananAyAnahtarlari.has(ayKeyNorm));
+7013|        // Bor├ğland─▒rma vurgusu k─▒rm─▒z─▒y─▒ yaln─▒zca ay hen├╝z tahsil edilmemi┼şken uygula;
+7014|        // tahsil edilmi┼ş (veya canl─▒ tahsil setinde) bor├ğland─▒r─▒lm─▒┼ş ay ye┼şil kalmal─▒.
+7015|        var zorlaBorc = !!(sozlesmeAylikZorlaBorcluAyAnahtarlari && sozlesmeAylikZorlaBorcluAyAnahtarlari.has && sozlesmeAylikZorlaBorcluAyAnahtarlari.has(ayKeyNorm));
+7016|        var odenenNum = parseFloat(a.odenen_tutar_kdv);
+7017|        if (!isFinite(odenenNum)) odenenNum = 0;
+7018|        var brutNumLocal = parseFloat(a.brut_tutar_kdv);
+7019|        if (!isFinite(brutNumLocal) || brutNumLocal <= 0) brutNumLocal = (isFinite(tApi0) && tApi0 > 0) ? tApi0 : 0;
+7020|        var brutGoster = brutNumLocal;
+7021|        var kartUygulandi = false;
+7022|        var reelDbHucre = (typeof sozlesmelerReelDbTutarAyKey === 'function')
+7023|            ? sozlesmelerReelDbTutarAyKey(basVis, ayKey) : null;
+7024|        if (reelDbHucre != null) {
+7025|            brutGoster = reelDbHucre;
+7026|            brutNumLocal = reelDbHucre;
+7027|            kartUygulandi = true;
+7028|        }
+7029|        if (!kartUygulandi && basYilKart && hucreKartMap && typeof hucreKartMap === 'object') {
+7030|            var projYilK = (typeof sozlesmelerAylikKartDonemYili === 'function')
+7031|                ? sozlesmelerAylikKartDonemYili(basVis, yil, ay)
+7032|                : (basYilKart + Math.floor(idx / 12));
+7033|            var kartHucre = parseFloat(hucreKartMap[projYilK]);
+7034|            if (projYilK === basYilKart && typeof girisFormIlkDonemKdvDahilTutar === 'function') {
+7035|                var ilkHucre = girisFormIlkDonemKdvDahilTutar();
+7036|                if (!isNaN(ilkHucre) && ilkHucre > 0) kartHucre = ilkHucre;
+7037|            }
+7038|            if (!isNaN(kartHucre) && kartHucre > 0) {
+7039|                brutGoster = Math.round(kartHucre * 100) / 100;
+7040|                brutNumLocal = brutGoster;
+7041|                kartUygulandi = true;
+7042|            }
+7043|        }
+7044|        if (!kartUygulandi && !isNaN(brutGoster) && brutGoster > 0 && bankadaKdvyeCevir) {
+7045|            brutGoster = Math.round(brutGoster * (1 + kdvOranCache / 100) * 100) / 100;
+7046|        }
+7047|        var brutKapHucre = (brutGoster > 0.01) ? brutGoster : brutNumLocal;
+7048|        var kalanFromOdenen = Math.max(Math.round((brutKapHucre - odenenNum) * 100) / 100, 0);
+7049|        var tolHucre = Number(SOZLESME_TAM_ODENDI_TOLERANS) || 0.05;
+7050|        var t = kalanFromOdenen;
+

@@ -126,6 +126,12 @@ function girisJsonCacheInvalidatePrefix(prefix) {
         for (var i = 0; i < keys.length; i++) {
             if (keys[i].indexOf(prefix) === 0) window.__girisJsonCache.delete(keys[i]);
         }
+        if (window.__girisJsonInflight) {
+            var inflightKeys = Array.from(window.__girisJsonInflight.keys());
+            for (var j = 0; j < inflightKeys.length; j++) {
+                if (inflightKeys[j].indexOf(prefix) === 0) window.__girisJsonInflight.delete(inflightKeys[j]);
+            }
+        }
     } catch (_e) {}
 }
 
@@ -405,7 +411,7 @@ function sozlesmeTahsilSetFromJson(j) {
 /** Grid önbelleğindeki tahsil_aylar → yeşil set (ayrı tahsil-durum isteği gecikse bile). */
 function sozlesmeTahsilSetFromGridCache(cacheObj) {
     if (!cacheObj || !Array.isArray(cacheObj.tahsil_aylar) || !cacheObj.tahsil_aylar.length) return false;
-    if (!sozlesmeTahsilEdilenAyAnahtarlari) sozlesmeTahsilEdilenAyAnahtarlari = new Set();
+    sozlesmeTahsilEdilenAyAnahtarlari = new Set();
     cacheObj.tahsil_aylar.forEach(function (x) {
         var kn = (typeof sozlesmeAylikAyKeyNormalize === 'function') ? sozlesmeAylikAyKeyNormalize(String(x)) : String(x);
         if (kn) sozlesmeTahsilEdilenAyAnahtarlari.add(kn);
@@ -13500,7 +13506,7 @@ function girisTahsilatYilAyDbKaydet(satirlar, donemYil, doneCb) {
                 } catch (_eDbKismi3) {}
             }
             if (typeof cariEkstreYukle === 'function') {
-                try { cariEkstreYukle({ sessiz: true, zorla: true }); } catch (_eEk) {}
+                try { cariEkstreYukle({ sessiz: true, zorla: true, dbEsas: true }); } catch (_eEk) {}
             }
             alert((res.j && res.j.mesaj) ? res.j.mesaj : ('Kayıt tamam. Oluşturulan: ' + o.length + ', atlanan: ' + a.length));
             if (doneCb) doneCb(true, res.j);
@@ -14181,19 +14187,47 @@ function girisTahsilatYilAyPanelGuncelle(donemYil, opts) {
             return;
         }
         var tolPg = Number(SOZLESME_TAM_ODENDI_TOLERANS) || 0.05;
+        function panelBorcBrutKaynak(yilNum) {
+            var ykB = String(yilNum);
+            var rowB = (window.__aylikSatirYilDetay || {})[ykB];
+            if (typeof girisAylikSatirYilHesapla === 'function') {
+                var hB = girisAylikSatirYilHesapla(yilNum);
+                if (hB) {
+                    rowB = Object.assign({}, rowB || {}, hB);
+                    window.__aylikSatirYilDetay = window.__aylikSatirYilDetay || {};
+                    window.__aylikSatirYilDetay[ykB] = Object.assign({}, window.__aylikSatirYilDetay[ykB] || {}, rowB);
+                    rowB = window.__aylikSatirYilDetay[ykB];
+                }
+            }
+            rowB = rowB || {};
+            var reelA = !!rowB.__reel_aktif;
+            var reel = parseFloat(rowB.reel);
+            if (isNaN(reel) || reel < 0) reel = 0;
+            if (reelA && reel > tolPg) {
+                return { label: 'Reel', tutar: Math.round(reel * 100) / 100 };
+            }
+            var toplamB = parseFloat(rowB.toplam);
+            if (isNaN(toplamB) || toplamB <= tolPg) {
+                var kdvDB = parseFloat(rowB.kdv_dahil) || 0;
+                var nakB = parseFloat(rowB.nakit) || 0;
+                toplamB = Math.round((kdvDB + nakB) * 100) / 100;
+            }
+            return { label: 'Aylık', tutar: toplamB > tolPg ? Math.round(toplamB * 100) / 100 : 0 };
+        }
+        var borcKayPg = panelBorcBrutKaynak(donemYil);
+        var colBrutLblPg = borcKayPg.label;
+        var yilBrutKaynak = borcKayPg.tutar;
+        var brutKaynakSig = colBrutLblPg + '|' + String(yilBrutKaynak);
         var yillikAcikHf = !!(window.__tahsilatYillikAcik || {})[k];
         var yillikVarHf = !!document.getElementById('tahsilat_yillik_wrap_' + k);
         var hazirEtiket = p.getAttribute('data-panel-hazir') === '1';
         var hazirAdet = parseInt(p.getAttribute('data-ay-adet') || '0', 10);
-        if (hazirEtiket && hazirAdet >= keys.length && yillikAcikHf === yillikVarHf) {
+        if (hazirEtiket && hazirAdet >= keys.length && yillikAcikHf === yillikVarHf
+            && p.getAttribute('data-brut-kaynak') === brutKaynakSig) {
             window.__tahsilPanelKurBusy = false;
             return;
         }
-        var yilAylikVars = 0;
-        var rowYilPg = (window.__aylikSatirYilDetay || {})[k];
-        if (rowYilPg) {
-            yilAylikVars = parseFloat(rowYilPg.toplam) || parseFloat(rowYilPg.kdv_dahil) || 0;
-        }
+        var yilAylikVars = yilBrutKaynak;
         var scoPg = window.__sozlesmelerAylikSonCacheObj;
         var byIsoPg = (scoPg && scoPg.panel_by_iso) ? scoPg.panel_by_iso : {};
         window.__tahsilatSatirYilAyDetay = window.__tahsilatSatirYilAyDetay || {};
@@ -14209,7 +14243,6 @@ function girisTahsilatYilAyPanelGuncelle(donemYil, opts) {
             + '</div>';
         var gridPg = 'display:grid;grid-template-columns:28px 100px 72px 72px 72px 118px 232px;gap:4px;align-items:center;';
         var inpPg = 'padding:3px 5px;border-radius:4px;border:1px solid #2d4060;background:#0f2537;color:#e0f7fa;font-size:11px;width:100%;box-sizing:border-box;';
-        var colBrutLblPg = (rowYilPg && rowYilPg.__reel_aktif) ? 'Reel' : 'Aylık';
         var hdrPg = '<div class="tahsilat-yil-ay-satir" style="' + gridPg + 'padding:2px 2px 4px;color:#78909c;font-size:10px;">'
             + '<div></div><div>Ay</div><div>' + colBrutLblPg + '</div><div>Kalan</div><div>Tahsil</div><div>Tarih</div><div></div></div>';
         var yillikHtml = '';
@@ -14223,30 +14256,39 @@ function girisTahsilatYilAyPanelGuncelle(donemYil, opts) {
             var dkPg2 = (typeof girisTahsilatYilAyStorageDonemKey === 'function')
                 ? girisTahsilatYilAyStorageDonemKey(akPg2) : String(donemYil);
             var dPg2 = (detPg[dkPg2] || {})[akPg2];
-            var brutPg0 = yilAylikVars;
-            if (dPg2 && parseFloat(dPg2.aylik_tutar) > tolPg) {
-                brutPg0 = parseFloat(dPg2.aylik_tutar);
-            }
+            var brutPg0 = yilBrutKaynak > tolPg ? yilBrutKaynak : 0;
+            brutPg0 = Math.round(brutPg0 * 100) / 100;
             var tahPg0 = dPg2 ? (parseFloat(dPg2.tahsil) || 0) : 0;
             var kalPg0 = dPg2 ? parseFloat(dPg2.kalan) : brutPg0;
             var trPg0 = dPg2 ? String(dPg2.tahsil_tarih || '') : '';
+            var tamOdendiPg = false;
             var yaPg = (typeof girisTahsilatAyKeyToYilAy === 'function') ? girisTahsilatAyKeyToYilAy(akPg2) : null;
             if (yaPg && !isNaN(yaPg.yil) && !isNaN(yaPg.ay)) {
                 var isoPg = yaPg.yil + '-' + String(yaPg.ay).padStart(2, '0') + '-01';
                 var prPg = byIsoPg[isoPg];
                 if (prPg && typeof prPg === 'object') {
-                    brutPg0 = parseFloat(prPg.aylik || prPg.brut) || brutPg0;
                     tahPg0 = parseFloat(prPg.tahsil || prPg.odenen) || 0;
                     kalPg0 = parseFloat(prPg.kalan);
-                    if (!isFinite(kalPg0) || kalPg0 < 0) kalPg0 = Math.max(Math.round((brutPg0 - tahPg0) * 100) / 100, 0);
                     trPg0 = String(prPg.tahsil_tarih || '').slice(0, 10);
-                    if (!!(prPg.tahsil_edildi) && brutPg0 > tolPg && tahPg0 <= tolPg) {
-                        tahPg0 = brutPg0;
-                        kalPg0 = 0;
-                    }
+                    tamOdendiPg = !!prPg.tahsil_edildi;
                 }
             }
-            if (!isFinite(kalPg0) || kalPg0 < 0) kalPg0 = Math.max(Math.round((brutPg0 - tahPg0) * 100) / 100, 0);
+            if (brutPg0 > tolPg) {
+                tahPg0 = Math.round((parseFloat(tahPg0) || 0) * 100) / 100;
+                if (tamOdendiPg || tahPg0 >= brutPg0 - tolPg) {
+                    tahPg0 = brutPg0;
+                    kalPg0 = 0;
+                } else if (tahPg0 <= tolPg) {
+                    tahPg0 = 0;
+                    kalPg0 = brutPg0;
+                } else {
+                    if (tahPg0 > brutPg0) tahPg0 = brutPg0;
+                    kalPg0 = Math.max(Math.round((brutPg0 - tahPg0) * 100) / 100, 0);
+                }
+            } else {
+                tahPg0 = 0;
+                kalPg0 = 0;
+            }
             dPg2 = {
                 aylik_tutar: Math.round(brutPg0 * 100) / 100,
                 tahsil: Math.round(tahPg0 * 100) / 100,
@@ -14259,14 +14301,21 @@ function girisTahsilatYilAyPanelGuncelle(donemYil, opts) {
             };
             if (!detPg[dkPg2]) detPg[dkPg2] = {};
             detPg[dkPg2][akPg2] = dPg2;
-            var brutPg2 = parseFloat(dPg2.aylik_tutar) || yilAylikVars;
-            var tahPg2 = parseFloat(dPg2.tahsil) || 0;
-            var kalPg2 = parseFloat(dPg2.kalan);
-            if (!isFinite(kalPg2) || kalPg2 < 0) {
-                kalPg2 = Math.max(Math.round((brutPg2 - tahPg2) * 100) / 100, 0);
+            var brutPg2 = Math.round((parseFloat(dPg2.aylik_tutar) || yilAylikVars) * 100) / 100;
+            var tahPg2 = Math.round((parseFloat(dPg2.tahsil) || 0) * 100) / 100;
+            var kalPg2 = Math.round((parseFloat(dPg2.kalan) || 0) * 100) / 100;
+            if (brutPg2 > tolPg) {
+                if (tahPg2 >= brutPg2 - tolPg) {
+                    tahPg2 = brutPg2;
+                    kalPg2 = 0;
+                } else if (tahPg2 <= tolPg) {
+                    tahPg2 = 0;
+                    kalPg2 = brutPg2;
+                } else {
+                    if (tahPg2 > brutPg2) tahPg2 = brutPg2;
+                    kalPg2 = Math.max(Math.round((brutPg2 - tahPg2) * 100) / 100, 0);
+                }
             }
-            kalPg2 = Math.round(kalPg2 * 100) / 100;
-            tahPg2 = Math.round(tahPg2 * 100) / 100;
             var kalStPg = ' background:#10293d;color:#81c784;';
             if (kalPg2 > tolPg) {
                 if (tahPg2 <= tolPg && kalPg2 >= brutPg2 - tolPg) kalStPg = ' background:#10293d;color:#ef5350;';
@@ -14306,6 +14355,7 @@ function girisTahsilatYilAyPanelGuncelle(donemYil, opts) {
             p.innerHTML = tb + yillikHtml + hdrPg + ayHtml;
             p.setAttribute('data-panel-hazir', '1');
             p.setAttribute('data-ay-adet', String(keys.length));
+            p.setAttribute('data-brut-kaynak', brutKaynakSig);
         } catch (_eHtml) {
             p.innerHTML = '<div style="padding:6px 8px;color:#ef5350;font-size:11px;">Ay listesi yüklenemedi.</div>';
             try { p.removeAttribute('data-panel-hazir'); } catch (_eRh3) {}
@@ -14794,6 +14844,34 @@ function girisAylikSatirYilHesapla(y) {
     });
     return window.__aylikSatirYilDetay[k];
 }
+function girisAylikSatirYilKdvTutarGoster(h) {
+    if (!h || typeof h !== 'object') return 0;
+    var banka = parseFloat(h.banka);
+    var kdvDahil = parseFloat(h.kdv_dahil);
+    if (!isNaN(banka) && banka > 0 && !isNaN(kdvDahil) && kdvDahil > banka) {
+        return Math.round((kdvDahil - banka) * 100) / 100;
+    }
+    if (!isNaN(banka) && banka > 0) {
+        var kdvEl = document.getElementById('kdv_oran');
+        var kdvOran = (kdvEl && kdvEl.value !== '') ? parseFloat(String(kdvEl.value).replace(',', '.')) : 20;
+        if (isNaN(kdvOran) || kdvOran < 0) kdvOran = 20;
+        return Math.round(banka * kdvOran / 100 * 100) / 100;
+    }
+    return 0;
+}
+function girisAylikSatirYilBankaTutarGoster(h) {
+    if (!h || typeof h !== 'object') return 0;
+    var reelAktif = !!h.__reel_aktif;
+    var reel = parseFloat(h.reel);
+    if (isNaN(reel) || reel < 0) reel = 0;
+    var toplam = parseFloat(h.toplam);
+    var banka = parseFloat(h.banka);
+    if (!reelAktif && reel <= 0 && !isNaN(toplam) && toplam > 0) {
+        return Math.round(toplam * 100) / 100;
+    }
+    if (!isNaN(banka) && banka > 0) return Math.round(banka * 100) / 100;
+    return 0;
+}
 function girisAylikSatirYilPanelSatirYenile(p, h, y) {
     if (!p || !h) return;
     var aylikEl = p.querySelector('.aylik-yil-aylik');
@@ -14803,8 +14881,14 @@ function girisAylikSatirYilPanelSatirYenile(p, h, y) {
     var tp = p.querySelector('.aylik-yil-toplam');
     if (aylikEl) aylikEl.value = h.aylik > 0 ? String(h.aylik) : '';
     if (nakitEl) nakitEl.value = h.nakit > 0 ? String(h.nakit) : '';
-    if (bankaEl) bankaEl.value = h.banka > 0 ? String(h.banka) : '';
-    if (kd) kd.value = h.kdv_dahil > 0 ? String(h.kdv_dahil) : '';
+    if (bankaEl) {
+        var bankaG = girisAylikSatirYilBankaTutarGoster(h);
+        bankaEl.value = bankaG > 0 ? String(bankaG) : '';
+    }
+    if (kd) {
+        var kdvG = girisAylikSatirYilKdvTutarGoster(h);
+        kd.value = kdvG > 0 ? String(kdvG) : '';
+    }
     if (tp) tp.value = h.toplam > 0 ? String(h.toplam) : '';
     var reelEl = p.querySelector('.aylik-yil-reel');
     if (reelEl) {
@@ -15732,10 +15816,10 @@ function girisAylikSatirYilAyPanelSatirYenile(donemYil, ayKey) {
         if (el) el.value = v > 0 ? String(v) : '';
     };
     setInp('.aylik-yil-ay-aylik', d.aylik);
-    setInp('.aylik-yil-ay-kdv', d.kdv_dahil);
+    setInp('.aylik-yil-ay-kdv', girisAylikSatirYilKdvTutarGoster(d));
     setInp('.aylik-yil-ay-toplam', d.toplam);
     setInp('.aylik-yil-ay-nakit', d.nakit);
-    setInp('.aylik-yil-ay-banka', d.banka);
+    setInp('.aylik-yil-ay-banka', girisAylikSatirYilBankaTutarGoster(d));
     setInp('.aylik-yil-ay-reel', d.reel);
     var chk = row.querySelector('.aylik-yil-ay-reel-aktif');
     if (chk) chk.checked = !!d.__reel_aktif;
@@ -15790,7 +15874,7 @@ function girisAylikSatirYilAyPanelHtml(donemYil, ayKeys) {
     var grid = 'display:grid;grid-template-columns:100px 72px 72px 72px 72px 72px 108px 168px;gap:4px;align-items:center;';
     var inp = 'padding:3px 5px;border-radius:4px;border:1px solid #2d4060;background:#0f2537;color:#e0f7fa;font-size:11px;width:100%;box-sizing:border-box;';
     var html = '<div class="aylik-yil-ay-satir" style="' + grid + 'padding:2px 2px 4px;color:#78909c;font-size:10px;">'
-        + '<div>Ay</div><div>Aylık</div><div>KDV Dahil</div><div>Toplam</div><div>Nakit</div><div>Banka</div><div>Reel</div><div></div></div>';
+        + '<div>Ay</div><div>Aylık</div><div>KDV</div><div>Toplam</div><div>Nakit</div><div>Banka</div><div>Reel</div><div></div></div>';
     var mapAy = girisAylikSatirYilAyDetayMap(donemYil);
     var vars = girisAylikSatirYilAyVarsayilan(donemYil);
     for (var i = 0; i < ayKeys.length; i++) {
@@ -15802,6 +15886,8 @@ function girisAylikSatirYilAyPanelHtml(donemYil, ayKeys) {
         if ((d.reel > 0 || vars.reel > 0) && !d.__saved) d.__reel_aktif = true;
         d = girisAylikSatirYilAyHesapla(donemYil, d);
         mapAy[ak] = d;
+        var kdvG1 = girisAylikSatirYilKdvTutarGoster(d);
+        var bankaG1 = girisAylikSatirYilBankaTutarGoster(d);
         var reelAktif = !!d.__reel_aktif;
         var rid = girisAylikSatirYilAyId(donemYil, ak);
         var locked = d.__locked !== false;
@@ -15812,10 +15898,10 @@ function girisAylikSatirYilAyPanelHtml(donemYil, ayKeys) {
         html += '<div id="' + rid + '" class="aylik-yil-ay-satir" style="' + grid + 'padding:3px 2px;border-bottom:1px solid #142a40;">'
             + '<div style="color:#90caf9;white-space:nowrap;">' + girisAylikSatirYilAyAdiGoster(ak) + '</div>'
             + '<input type="number" step="0.01" min="0" class="aylik-yil-ay-inp aylik-yil-ay-aylik" data-alan="aylik" value="' + (d.aylik > 0 ? d.aylik : '') + '"' + ro + ' oninput="girisAylikSatirYilAySatirDegisti(' + donemYil + ',' + akQ + ',\'aylik\',this.value)" style="' + inp + roSt + '">'
-            + '<input type="number" step="0.01" min="0" class="aylik-yil-ay-inp aylik-yil-ay-kdv" data-alan="kdv_dahil" value="' + (d.kdv_dahil > 0 ? d.kdv_dahil : '') + '"' + ro + ' oninput="girisAylikSatirYilAySatirDegisti(' + donemYil + ',' + akQ + ',\'kdv_dahil\',this.value)" style="' + inp + roSt + '">'
+            + '<input type="number" step="0.01" min="0" class="aylik-yil-ay-inp aylik-yil-ay-kdv" data-alan="kdv_dahil" value="' + (kdvG1 > 0 ? kdvG1 : '') + '"' + ro + ' oninput="girisAylikSatirYilAySatirDegisti(' + donemYil + ',' + akQ + ',\'kdv_dahil\',this.value)" style="' + inp + roSt + '">'
             + '<input type="number" step="0.01" min="0" class="aylik-yil-ay-inp aylik-yil-ay-toplam" data-alan="toplam" value="' + (d.toplam > 0 ? d.toplam : '') + '"' + ro + ' oninput="girisAylikSatirYilAySatirDegisti(' + donemYil + ',' + akQ + ',\'toplam\',this.value)" style="' + inp + roSt + '">'
             + '<input type="number" step="0.01" min="0" class="aylik-yil-ay-inp aylik-yil-ay-nakit" data-alan="nakit" value="' + (d.nakit > 0 ? d.nakit : '') + '"' + ro + ' oninput="girisAylikSatirYilAySatirDegisti(' + donemYil + ',' + akQ + ',\'nakit\',this.value)" style="' + inp + roSt + '">'
-            + '<input type="number" step="0.01" min="0" class="aylik-yil-ay-inp aylik-yil-ay-banka" data-alan="banka" value="' + (d.banka > 0 ? d.banka : '') + '"' + ro + ' oninput="girisAylikSatirYilAySatirDegisti(' + donemYil + ',' + akQ + ',\'banka\',this.value)" style="' + inp + roSt + '">'
+            + '<input type="number" step="0.01" min="0" class="aylik-yil-ay-inp aylik-yil-ay-banka" data-alan="banka" value="' + (bankaG1 > 0 ? bankaG1 : '') + '"' + ro + ' oninput="girisAylikSatirYilAySatirDegisti(' + donemYil + ',' + akQ + ',\'banka\',this.value)" style="' + inp + roSt + '">'
             + '<div style="display:flex;align-items:center;gap:3px;min-width:0;">'
             + '<input type="number" step="0.01" min="0" class="aylik-yil-ay-inp aylik-yil-ay-reel" data-alan="reel" value="' + (d.reel > 0 ? d.reel : '') + '"' + ro + ' oninput="girisAylikSatirYilAySatirDegisti(' + donemYil + ',' + akQ + ',\'reel\',this.value)" style="' + inp + 'flex:1;min-width:0;' + roSt + '">'
             + '<input type="checkbox" class="aylik-yil-ay-reel-aktif" title="Bu ay toplam/banka/net reel tutara göre"' + (reelAktif ? ' checked' : '') + ' onchange="girisAylikSatirYilAyReelAktifDegisti(' + donemYil + ',' + akQ + ', this.checked)" style="flex-shrink:0;cursor:pointer;">'
@@ -16123,6 +16209,8 @@ function girisAylikSatirYilPanelDoldur() {
         }
         var reelAktif = !!row0.__reel_aktif;
         var h = girisAylikSatirYilHesapla(yy);
+        var kdvG0 = girisAylikSatirYilKdvTutarGoster(h);
+        var bankaG0 = girisAylikSatirYilBankaTutarGoster(h);
         var kayitli = !!(window.__aylikSatirYilDetay[ov] && window.__aylikSatirYilDetay[ov].__manual_saved);
         var locked = kayitli && row0.__locked !== false;
         var roInp = locked ? ' readonly' : '';
@@ -16132,10 +16220,10 @@ function girisAylikSatirYilPanelDoldur() {
         html += '<div id="aylik_yil_row_' + ov + '" style="display:grid;grid-template-columns:52px 92px 92px 92px 92px 92px 108px 168px;gap:6px;align-items:center;padding:4px 2px;">' +
             '<div class="aylik-yil-yil-tikla" onclick="girisAylikSatirYilYilTikla(' + ov + ', event)" title="12 ayı göster/gizle">' + (acikY ? '▾ ' : '▸ ') + ov + '</div>' +
             '<input type="number" step="0.01" min="0" class="aylik-yil-aylik" value="' + (h.aylik || '') + '"' + roInp + ' oninput="girisAylikSatirYilSatirDegisti(' + ov + ',\'aylik\',this.value)" style="padding:4px 6px;border-radius:4px;border:1px solid #2d4060;' + stInp + 'color:#e0f7fa;">' +
-            '<input type="number" step="0.01" min="0" class="aylik-yil-kdv" value="' + (h.kdv_dahil > 0 ? h.kdv_dahil : '') + '" readonly style="padding:4px 6px;border-radius:4px;border:1px solid #2d4060;background:#10293d;color:#e0f7fa;">' +
+            '<input type="number" step="0.01" min="0" class="aylik-yil-kdv" value="' + (kdvG0 > 0 ? kdvG0 : '') + '" readonly style="padding:4px 6px;border-radius:4px;border:1px solid #2d4060;background:#10293d;color:#e0f7fa;">' +
             '<input type="number" step="0.01" min="0" class="aylik-yil-toplam" value="' + (h.toplam > 0 ? h.toplam : '') + '" readonly style="padding:4px 6px;border-radius:4px;border:1px solid #2d4060;background:#10293d;color:#e0f7fa;">' +
             '<input type="number" step="0.01" min="0" class="aylik-yil-nakit" value="' + (h.nakit || '') + '"' + roInp + ' oninput="girisAylikSatirYilSatirDegisti(' + ov + ',\'nakit\',this.value)" style="padding:4px 6px;border-radius:4px;border:1px solid #2d4060;' + stInp + 'color:#e0f7fa;">' +
-            '<input type="number" step="0.01" min="0" class="aylik-yil-banka" value="' + (h.banka || '') + '" readonly style="padding:4px 6px;border-radius:4px;border:1px solid #2d4060;background:#10293d;color:#e0f7fa;">' +
+            '<input type="number" step="0.01" min="0" class="aylik-yil-banka" value="' + (bankaG0 > 0 ? bankaG0 : '') + '" readonly style="padding:4px 6px;border-radius:4px;border:1px solid #2d4060;background:#10293d;color:#e0f7fa;">' +
             '<div style="display:flex;align-items:center;gap:4px;min-width:0;">' +
             '<input type="number" step="0.01" min="0" class="aylik-yil-reel" value="' + (reelG > 0 ? reelG : '') + '" title="KDV dahil reel tutar (işaretli satırda Toplam = reel)"' + roInp + ' oninput="girisAylikSatirYilSatirDegisti(' + ov + ',\'reel\',this.value)" style="flex:1;min-width:0;padding:4px 6px;border-radius:4px;border:1px solid #2d4060;' + stInp + 'color:#e0f7fa;">' +
             '<input type="checkbox" class="aylik-yil-reel-aktif" title="Toplam, KDV dahil, banka ve aylık (net) reel tutara göre"' + (reelAktif ? ' checked' : '') + (locked ? ' disabled' : '') + ' onchange="girisAylikSatirYilReelAktifDegisti(' + ov + ', this.checked)" style="flex-shrink:0;cursor:pointer;">' +
@@ -16158,7 +16246,7 @@ function girisAylikSatirYilPanelDoldur() {
             + '<button type="button" class="btn-aylik-sec" onclick="girisAylikSatirYilTumunuVazgec(event)">Vazgeç</button>'
             + '</div>';
         html = tb + '<div style="display:grid;grid-template-columns:52px 92px 92px 92px 92px 92px 108px 168px;gap:6px;padding:2px 2px 6px 2px;color:#90a4ae;font-size:11px;">'
-            + '<div>Yıl</div><div>Aylık</div><div>KDV Dahil</div><div>Toplam</div><div>Nakit</div><div>Banka</div><div>Reel</div><div></div></div>' + html;
+            + '<div>Yıl</div><div>Aylık</div><div>KDV</div><div>Toplam</div><div>Nakit</div><div>Banka</div><div>Reel</div><div></div></div>' + html;
     }
     panel.innerHTML = html;
     Object.keys(window.__aylikSatirYilAcik || {}).forEach(function (yk) {
@@ -22717,12 +22805,62 @@ function cariEkstreSatirSil(btn) {
         if (typeof window.__girisEkstreSonIstek !== 'undefined') window.__girisEkstreSonIstek = {};
         var midNum = parseInt(mid, 10);
         var satirlarEk = (synEk && synEk.satir) ? [synEk.satir] : [];
+        if (kind === 'tahsilat' && !satirlarEk.length && btn) {
+            try {
+                var trEkSil = btn.closest ? btn.closest('tr') : null;
+                if (trEkSil) {
+                    var acEkSil = (trEkSil.cells[1] && trEkSil.cells[1].textContent)
+                        ? String(trEkSil.cells[1].textContent).trim() : '';
+                    var adlarEkSil = (typeof FR_GIRIS_AY_ADLARI !== 'undefined' && FR_GIRIS_AY_ADLARI)
+                        ? FR_GIRIS_AY_ADLARI : [];
+                    var yilEkSil = null, ayEkSil = null;
+                    for (var aiEk = 0; aiEk < adlarEkSil.length; aiEk++) {
+                        var mEkSil = acEkSil.match(new RegExp(adlarEkSil[aiEk] + '\\s+(\\d{4})', 'i'));
+                        if (mEkSil) { yilEkSil = parseInt(mEkSil[1], 10); ayEkSil = aiEk + 1; break; }
+                    }
+                    if (yilEkSil && ayEkSil) {
+                        var tolEkSil = Number(SOZLESME_TAM_ODENDI_TOLERANS) || 0.05;
+                        var brutEkSil = 0;
+                        var tbodyEkSil = trEkSil.parentElement;
+                        if (tbodyEkSil) {
+                            var trsEkSil = tbodyEkSil.querySelectorAll('tr');
+                            for (var tiEk = 0; tiEk < trsEkSil.length; tiEk++) {
+                                var trKEk = trsEkSil[tiEk];
+                                var acKEk = (trKEk.cells[1] && trKEk.cells[1].textContent)
+                                    ? String(trKEk.cells[1].textContent).trim() : '';
+                                if (acKEk.indexOf('Kira') < 0) continue;
+                                var ayKiraEk = null;
+                                for (var ajEk = 0; ajEk < adlarEkSil.length; ajEk++) {
+                                    if (new RegExp(adlarEkSil[ajEk] + '\\s+' + yilEkSil, 'i').test(acKEk)) {
+                                        ayKiraEk = ajEk + 1; break;
+                                    }
+                                }
+                                if (!ayKiraEk || ayKiraEk !== ayEkSil) continue;
+                                var borcTxtEk = (trKEk.cells[2] && trKEk.cells[2].textContent)
+                                    ? String(trKEk.cells[2].textContent).trim() : '';
+                                var bValEk = parseFloat(borcTxtEk.replace(/\./g, '').replace(',', '.'));
+                                if (isFinite(bValEk) && bValEk > tolEkSil) {
+                                    brutEkSil = Math.round(bValEk * 100) / 100;
+                                    break;
+                                }
+                            }
+                        }
+                        if (brutEkSil > tolEkSil) {
+                            satirlarEk = [{ yil: yilEkSil, ay: ayEkSil, tutar_kdv_dahil: brutEkSil }];
+                        }
+                    }
+                }
+            } catch (_eEkSat) {}
+        }
         var panelPostEk = (satirlarEk.length && typeof sozlesmeAylikGridBorclandirPanelPost === 'function')
             ? sozlesmeAylikGridBorclandirPanelPost(midNum, satirlarEk)
             : Promise.resolve(true);
         Promise.resolve(panelPostEk).then(function () {
             if (satirlarEk.length && typeof sozlesmeAylikGridCacheBorcluSatirlariGuncelle === 'function') {
                 try { sozlesmeAylikGridCacheBorcluSatirlariGuncelle(satirlarEk); } catch (_eGcEk) {}
+            }
+            if (kind === 'tahsilat') {
+                try { sozlesmeTahsilEdilenAyAnahtarlari = new Set(); } catch (_eClrTah) {}
             }
             var pgS = (typeof girisTahsilatEkstrePanelGridSenkron === 'function')
                 ? girisTahsilatEkstrePanelGridSenkron()

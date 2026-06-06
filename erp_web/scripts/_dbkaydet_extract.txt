@@ -1,0 +1,180 @@
+﻿16520|                a.tutar_kdv_dahil = brut;
+16521|                a.odenen_tutar_kdv = tah;
+16522|                a.kalan_tutar_kdv = 0;
+16523|                a.kismi_tahsilat = false;
+16524|                a.tahsil_edildi = true;
+16525|            });
+16526|        }
+16527|        if (typeof sozlesmelerAylikTahsilSetiniGorseleZorla === 'function') {
+16528|            sozlesmelerAylikTahsilSetiniGorseleZorla();
+16529|        }
+16530|    } catch (_eTamSyn) {}
+16531|}
+16532|function girisTahsilatYilAyDbKaydet(satirlar, donemYil, doneCb) {
+16533|    var mid = (typeof selectedId !== 'undefined' && selectedId != null) ? selectedId : null;
+16534|    if (!mid) {
+16535|        alert('├ûnce soldan bir m├╝┼şteri se├ğin.');
+16536|        if (doneCb) doneCb(false);
+16537|        return;
+16538|    }
+16539|    if (!satirlar || !satirlar.length) {
+16540|        alert('Kaydedilecek i┼şaretli ay yok.');
+16541|        if (doneCb) doneCb(false);
+16542|        return;
+16543|    }
+16544|    if (window.__tahsilatYilAyDbInFlight) {
+16545|        if (doneCb) doneCb(false);
+16546|        return;
+16547|    }
+16548|    window.__tahsilatYilAyDbInFlight = true;
+16549|    girisFetchAgKopmasinaKarsi('/giris/api/aylik-tutarlardan-tahsil-et', {
+16550|        method: 'POST',
+16551|        headers: { 'Content-Type': 'application/json' },
+16552|        credentials: 'same-origin',
+16553|        timeoutMs: 120000,
+16554|        body: JSON.stringify({ musteri_id: mid, satirlar: satirlar, odeme_turu: 'havale' })
+16555|    }, 2).then(function (r) {
+16556|        return r.text().then(function (text) {
+16557|            var j = null;
+16558|            try { j = text ? JSON.parse(text) : null; } catch (_eP) { throw new Error(text ? text.slice(0, 300) : ('HTTP ' + r.status)); }
+16559|            return { ok: r.ok, j: j };
+16560|        });
+16561|    }).then(function (res) {
+16562|        window.__tahsilatYilAyDbInFlight = false;
+16563|        if (!res.j || !res.j.ok) {
+16564|            alert((res.j && res.j.mesaj) ? res.j.mesaj : 'Tahsilat kayd─▒ ba┼şar─▒s─▒z.');
+16565|            if (doneCb) doneCb(false);
+16566|            return;
+16567|        }
+16568|        var o = res.j.olusturulan || [];
+16569|        var a = res.j.atlanan || [];
+16570|        var tolKay = Number(SOZLESME_TAM_ODENDI_TOLERANS) || 0.05;
+16571|        var map = girisTahsilatYilAyDetayMap(donemYil);
+16572|        satirlar.forEach(function (s) {
+16573|            var k = (typeof sozlesmeAylikAyKeyFromYilAy === 'function') ? sozlesmeAylikAyKeyFromYilAy(s.yil, s.ay) : null;
+16574|            if (!k) return;
+16575|            var kn = (typeof sozlesmeAylikAyKeyNormalize === 'function') ? sozlesmeAylikAyKeyNormalize(k) : k;
+16576|            var d = map[k] || girisTahsilatYilAyDetayAl(donemYil, k);
+16577|            d.__saved = true;
+16578|            d.__locked = true;
+16579|            d.__db_saved = true;
+16580|            var rowKay = document.getElementById(girisTahsilatYilAyId(donemYil, k));
+16581|            var brut = girisTahsilatYilAyPanelReelBrutAl(d, donemYil, k, rowKay);
+16582|            if (brut <= 0) {
+16583|                try {
+16584|                    var g0 = document.getElementById('sozlesmeler-aylik-grid') || document.getElementById('sozlesmeler-reel-aylik-grid');
+16585|                    var c0 = (typeof _sozlesmeAyKartBul === 'function') ? _sozlesmeAyKartBul(g0, kn) : null;
+16586|                    if (c0 && typeof sozlesmelerAyKartHucreTutar === 'function') brut = sozlesmelerAyKartHucreTutar(c0);
+16587|                } catch (_eBrK) {}
+16588|            }
+16589|            if (brut > 0) d.aylik_tutar = Math.round(brut * 100) / 100;
+16590|            var tah = d.__kismi_tahsil_girildi ? (parseFloat(s.tutar_kdv_dahil) || 0) : brut;
+16591|            if (!d.__kismi_tahsil_girildi && brut > tolKay) tah = brut;
+16592|            d.tahsil = Math.round(tah * 100) / 100;
+16593|            d.kalan = girisTahsilatYilAyKalanHesapla(d);
+16594|            map[k] = d;
+16595|            var kismi = !!(d.__kismi_tahsil_girildi && tah > tolKay && brut > tah + tolKay);
+16596|            if (kismi) {
+16597|                girisTahsilatYilAyKismiGridSenkron(s.yil, s.ay, brut, tah, s.tahsilat_tarihi);
+16598|                if (typeof sozlesmeTahsilEdilenAyAnahtarlari !== 'undefined' && sozlesmeTahsilEdilenAyAnahtarlari && sozlesmeTahsilEdilenAyAnahtarlari.delete) {
+16599|                    sozlesmeTahsilEdilenAyAnahtarlari.delete(kn);
+16600|                }
+16601|            } else if (tah > tolKay) {
+16602|                if (typeof sozlesmeTahsilEdilenAyAnahtarlari !== 'undefined' && sozlesmeTahsilEdilenAyAnahtarlari && sozlesmeTahsilEdilenAyAnahtarlari.add) {
+16603|                    sozlesmeTahsilEdilenAyAnahtarlari.add(kn);
+16604|                }
+16605|                if (typeof sozlesmeAylikZorlaBorcluAyAnahtarlari !== 'undefined' && sozlesmeAylikZorlaBorcluAyAnahtarlari && sozlesmeAylikZorlaBorcluAyAnahtarlari.delete) {
+16606|                    sozlesmeAylikZorlaBorcluAyAnahtarlari.delete(kn);
+16607|                }
+16608|                if (typeof sozlesmeAylikBorclananAyAnahtarlari !== 'undefined' && sozlesmeAylikBorclananAyAnahtarlari && sozlesmeAylikBorclananAyAnahtarlari.delete) {
+16609|                    sozlesmeAylikBorclananAyAnahtarlari.delete(kn);
+16610|                }
+16611|                d.tahsil_aktif = true;
+16612|                delete d.__borclandir;
+16613|                girisTahsilatYilAyTamGridSenkron(s.yil, s.ay, brut, tah, s.tahsilat_tarihi);
+16614|            }
+16615|        });
+16616|        (a || []).forEach(function (skipRow) {
+16617|            if (!skipRow || skipRow.neden !== 'zaten_tahsil') return;
+16618|            var kSk = (typeof sozlesmeAylikAyKeyFromYilAy === 'function') ? sozlesmeAylikAyKeyFromYilAy(skipRow.yil, skipRow.ay) : null;
+16619|            if (!kSk) return;
+16620|            var knSk = (typeof sozlesmeAylikAyKeyNormalize === 'function') ? sozlesmeAylikAyKeyNormalize(kSk) : kSk;
+16621|            if (typeof sozlesmeTahsilEdilenAyAnahtarlari !== 'undefined' && sozlesmeTahsilEdilenAyAnahtarlari && sozlesmeTahsilEdilenAyAnahtarlari.add) {
+16622|                sozlesmeTahsilEdilenAyAnahtarlari.add(knSk);
+16623|            }
+16624|            if (typeof sozlesmeAylikZorlaBorcluAyAnahtarlari !== 'undefined' && sozlesmeAylikZorlaBorcluAyAnahtarlari && sozlesmeAylikZorlaBorcluAyAnahtarlari.delete) {
+16625|                sozlesmeAylikZorlaBorcluAyAnahtarlari.delete(knSk);
+16626|            }
+16627|            if (typeof sozlesmeAylikBorclananAyAnahtarlari !== 'undefined' && sozlesmeAylikBorclananAyAnahtarlari && sozlesmeAylikBorclananAyAnahtarlari.delete) {
+16628|                sozlesmeAylikBorclananAyAnahtarlari.delete(knSk);
+16629|            }
+16630|            var donemYilSk = (typeof sozlesmeAylikBorcPanelDonemYil === 'function')
+16631|                ? sozlesmeAylikBorcPanelDonemYil(skipRow.yil, skipRow.ay) : skipRow.yil;
+16632|            var mapSk = girisTahsilatYilAyDetayMap(donemYilSk);
+16633|            var dSk = mapSk[kSk] || girisTahsilatYilAyDetayAl(donemYilSk, kSk);
+16634|            dSk.__saved = true;
+16635|            dSk.__locked = true;
+16636|            dSk.__db_saved = true;
+16637|            var rowKaySk = document.getElementById(girisTahsilatYilAyId(donemYilSk, kSk));
+16638|            var brutSk = girisTahsilatYilAyPanelReelBrutAl(dSk, donemYilSk, kSk, rowKaySk);
+16639|            if (brutSk <= 0) {
+16640|                try {
+16641|                    var gSk = document.getElementById('sozlesmeler-aylik-grid') || document.getElementById('sozlesmeler-reel-aylik-grid');
+16642|                    var cSk = (typeof _sozlesmeAyKartBul === 'function') ? _sozlesmeAyKartBul(gSk, knSk) : null;
+16643|                    if (cSk && typeof sozlesmelerAyKartHucreTutar === 'function') brutSk = sozlesmelerAyKartHucreTutar(cSk);
+16644|                } catch (_eBrSkDb) {}
+16645|            }
+16646|            if (brutSk > 0) dSk.aylik_tutar = Math.round(brutSk * 100) / 100;
+16647|            dSk.tahsil = Math.round(brutSk * 100) / 100;
+16648|            dSk.kalan = 0;
+16649|            dSk.tahsil_aktif = true;
+16650|            delete dSk.__borclandir;
+16651|            mapSk[kSk] = dSk;
+16652|            if (brutSk > tolKay && typeof girisTahsilatYilAyTamGridSenkron === 'function') {
+16653|                girisTahsilatYilAyTamGridSenkron(skipRow.yil, skipRow.ay, brutSk, brutSk, '');
+16654|            }
+16655|            if (typeof girisTahsilatYilAyPanelSatirYenile === 'function') {
+16656|                try { girisTahsilatYilAyPanelSatirYenile(donemYilSk, kSk); } catch (_ePsSkDb) {}
+16657|            }
+16658|        });
+16659|        (o || []).forEach(function (row) {
+16660|            var k = (typeof sozlesmeAylikAyKeyFromYilAy === 'function') ? sozlesmeAylikAyKeyFromYilAy(row.yil, row.ay) : null;
+16661|            if (!k) return;
+16662|            var kn = (typeof sozlesmeAylikAyKeyNormalize === 'function') ? sozlesmeAylikAyKeyNormalize(k) : k;
+16663|            if (typeof sozlesmeTahsilEdilenAyAnahtarlari !== 'undefined' && sozlesmeTahsilEdilenAyAnahtarlari && sozlesmeTahsilEdilenAyAnahtarlari.has && sozlesmeTahsilEdilenAyAnahtarlari.has(kn)) {
+16664|                return;
+16665|            }
+16666|            var d2 = map[k];
+16667|            var tah2 = parseFloat(row.tutar_kdv_dahil != null ? row.tutar_kdv_dahil : row.tutar) || 0;
+16668|            var brut2 = (d2 && d2.aylik_tutar) ? parseFloat(d2.aylik_tutar) : 0;
+16669|            if (tah2 > tolKay && brut2 > tah2 + tolKay) return;
+16670|            if (tah2 > tolKay && sozlesmeTahsilEdilenAyAnahtarlari && sozlesmeTahsilEdilenAyAnahtarlari.add) {
+16671|                sozlesmeTahsilEdilenAyAnahtarlari.add(kn);
+16672|            }
+16673|        });
+16674|        girisTahsilatYilAyKayitYaz();
+16675|        if (typeof girisTahsilatPanelOlusturulanSenkron === 'function') {
+16676|            girisTahsilatPanelOlusturulanSenkron(o);
+16677|        }
+16678|        function panelDbKaydetVeYukle(doneAfter) {
+16679|            if (typeof girisTahsilatYilAyPanelDbKaydet !== 'function') {
+16680|                if (doneAfter) doneAfter();
+16681|                return;
+16682|            }
+16683|            girisTahsilatYilAyPanelDbKaydet(function (okPanelDb) {
+16684|                if (!okPanelDb) {
+16685|                    if (doneAfter) doneAfter();
+16686|                    return;
+16687|                }
+16688|                if (typeof girisTahsilatYilAyPanelDbYukle === 'function') {
+16689|                    girisTahsilatYilAyPanelDbYukle(mid, function () {
+16690|                        if (doneAfter) doneAfter();
+16691|                    }, { zorlaUygula: true, ttlMs: 0, persistMs: 0 });
+16692|                } else if (doneAfter) {
+16693|                    doneAfter();
+16694|                }
+16695|            }, { satirlar: satirlar });
+16696|        }
+16697|        function gridVeEkstreYenile() {
+16698|            if (typeof girisJsonCacheInvalidatePrefix === 'function') {
+16699|                girisJsonCacheInvalidatePrefix('/giris/api/tahsilat-panel-detay?musteri_id=' + encodeURIComponent(mid));

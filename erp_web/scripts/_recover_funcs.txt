@@ -1,0 +1,69 @@
+﻿=== girisTahsilatDonemReelAktifMi ===
+function girisTahsilatDonemReelAktifMi(donemYil) {
+    var k = String(donemYil);
+    var row = (window.__aylikSatirYilDetay || {})[k] || {};
+    if (row.__reel_aktif) return true;
+    if (typeof girisAylikSatirYilReelDonemDetay === 'function') {
+        var det = girisAylikSatirYilReelDonemDetay(donemYil);
+        if (det) {
+            var tip = String(det.tip || '').trim().toLowerCase();
+            if (tip === 'hibrit') {
+                var ht = parseFloat(det.hibrit_toplam);
+                return !isNaN(ht) && ht > 0;
+            }
+            if (det.giris_tutar != null) {
+                var gt = parseFloat(det.giris_tutar);
+                return !isNaN(gt) && gt > 0;
+            }
+        }
+    }
+    return false;
+}
+
+=== girisTahsilatDonemReelTutarGoster ===
+function girisTahsilatDonemReelTutarGoster(donemYil) {
+    if (typeof girisAylikSatirYilReelGoster === 'function') {
+        var r = girisAylikSatirYilReelGoster(donemYil);
+        if (r > 0) return Math.round(r * 100) / 100;
+    }
+    return 0;
+}
+
+=== girisTahsilatYilAyPanelBrutGoster ===
+function girisTahsilatYilAyPanelBrutGoster(d, donemYil) {
+    if (girisTahsilatDonemReelAktifMi(donemYil)) {
+        var rt = parseFloat(d.reel_tutar);
+        if (!isNaN(rt) && rt > 0) return Math.round(rt * 100) / 100;
+        var rg = girisTahsilatDonemReelTutarGoster(donemYil);
+        if (rg > 0) return rg;
+    }
+    return Math.round((parseFloat(d.aylik_tutar) || 0) * 100) / 100;
+}
+
+=== girisTahsilatYilAyPanelReelBrutAl ===
+function girisTahsilatYilAyPanelReelBrutAl(d, donemYil, ayKey, rowDom) {
+    var tol = Number(SOZLESME_TAM_ODENDI_TOLERANS) || 0.05;
+    if (rowDom) {
+        var bEl = rowDom.querySelector('.tahsilat-yil-ay-aylik');
+        if (bEl) {
+            var b = parseFloat(String(bEl.value || '').replace(/\s/g, '').replace(',', '.'));
+            if (isFinite(b) && b > tol) return Math.round(b * 100) / 100;
+        }
+    }
+    if (typeof girisTahsilatYilAyPanelBrutGoster === 'function') {
+        var bg = girisTahsilatYilAyPanelBrutGoster(d, donemYil);
+        if (bg > tol) return bg;
+    }
+    return Math.round((parseFloat(d && d.aylik_tutar) || 0) * 100) / 100;
+}
+
+=== girisTahsilatYilAyPanelTahsilNet ===
+function girisTahsilatYilAyPanelTahsilNet(d, donemYil, ayKey, rowDom) {
+    var tol = Number(SOZLESME_TAM_ODENDI_TOLERANS) || 0.05;
+    var brut = girisTahsilatYilAyPanelReelBrutAl(d, donemYil, ayKey, rowDom);
+    var tah = Math.round((parseFloat(d && d.tahsil) || 0) * 100) / 100;
+    if (d && d.__kismi_tahsil_girildi && tah > tol && brut > tah + tol) return tah;
+    if (brut > tol) return brut;
+    return tah > tol ? tah : 0;
+}
+

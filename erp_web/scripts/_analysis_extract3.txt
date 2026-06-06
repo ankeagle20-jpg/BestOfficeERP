@@ -1,0 +1,127 @@
+=== sozlesmeTahsilDurumunuYukle ===
+4614|function sozlesmeTahsilDurumunuYukle() {
+4615|    if (!selectedId) {
+4616|        sozlesmeTahsilEdilenAyAnahtarlari = new Set();
+4617|        return Promise.resolve(null);
+4618|    }
+4619|    /* no-store + ts: tahsil/tahsilden sonrası ardışık GET'lerde önbellekten eski «aylar» gelmesini önle */
+4620|    var bust = '&_ts=' + encodeURIComponent(String(Date.now()));
+4621|    return fetch('/giris/api/aylik-tahsil-durum?musteri_id=' + encodeURIComponent(selectedId) + bust, {
+4622|        credentials: 'same-origin',
+4623|        cache: 'no-store'
+4624|    })
+4625|        .then(function (r) { return r.json(); })
+4626|        .then(function (j) {
+4627|            sozlesmeTahsilSetFromJson(j);
+4628|            return j;
+4629|        })
+4630|        .catch(function () {
+4631|            // Hata anında mevcut tahsil setini koru.
+4632|            return null;
+4633|        });
+4634|}
+4635|
+4636|function sozlesmelerAylikGridVeriSonBoyamaTail(midNav, selToken, cacheForKismi) {
+4637|    try {
+4638|        if (typeof sozlesmelerReelYilSecimineGoreTutarAlani === 'function') sozlesmelerReelYilSecimineGoreTutarAlani();
+4639|        var cacheSon = window.__sozlesmelerAylikSonCacheObj || cacheForKismi;
+4640|        if (typeof sozlesmelerReelDbSonBoyaSira === 'function') {
+4641|            sozlesmelerReelDbSonBoyaSira(cacheSon);
+4642|        }
+4643|        if (typeof sozlesmeAylikSecimOzetGuncelle === 'function') sozlesmeAylikSecimOzetGuncelle();
+4644|        if (typeof sozlesmelerAylikSecilebilirlikYenile === 'function') sozlesmelerAylikSecilebilirlikYenile();
+4645|        if (typeof cariEkstreYukle === 'function' && String(cariEkstreMusteriIdSec()) === String(midNav)) {
+4646|            var __ekMid = String(midNav);
+4647|            requestAnimationFrame(function () {
+4648|                if (String(selectedId) !== __ekMid) return;
+4649|                try { cariEkstreYukle({ sessiz: true, dbEsas: true }); } catch (_eEkSon) {}
+4650|            });
+4651|        }
+4652|    } catch (_eSonBoy) {}
+4653|    var midK = String(midNav);
+4654|    function _sonDuzeltGecikmeli() {
+4655|        if (selToken != null && (window.__girisSelectMusteriToken !== selToken || String(selectedId) !== midK)) return;
+4656|        if (selToken == null && String(selectedId) !== midK) return;
+4657|        try {
+4658|            var cacheGuncel = window.__sozlesmelerAylikSonCacheObj || cacheForKismi;
+4659|            if (typeof sozlesmelerReelDbSonBoyaSira === 'function') {
+4660|                sozlesmelerReelDbSonBoyaSira(cacheGuncel);
+4661|            } else if (typeof girisTahsilatYilAyPaneldenTumGridBoyan === 'function' && !sozlesmelerReelDbKayitliMi()) {
+4662|                girisTahsilatYilAyPaneldenTumGridBoyan();
+4663|            }
+4664|        } catch (_eSonBoy2) {}
+4665|    }
+
+=== sozlesmeTahsilSetFromJson ===
+4407|function sozlesmeTahsilSetFromJson(j) {
+4408|    // Geçersiz/eksik yanıtta mevcut seti koru; anlık ağ hatalarında yeşil durum kırmızıya düşmesin.
+4409|    if (!j || !j.ok || !Array.isArray(j.aylar)) {
+4410|        return false;
+4411|    }
+4412|    sozlesmeTahsilEdilenAyAnahtarlari = new Set(j.aylar.map(function (x) { return sozlesmeAylikAyKeyNormalize(String(x)); }));
+4413|    try { sozlesmelerAylikTahsilSetiniGorseleZorla(); } catch (_eTahsilPaint) {}
+4414|    return true;
+4415|}
+4416|
+4417|/**
+4418| * Fail-safe: tahsil setinde olan aylar render sırası/cache çakışmasından bağımsız yeşil görünür.
+4419| * (Grid/Replay/Reel katmanları birbirini ezdiğinde kırmızıda kalmayı önler.)
+4420| */
+
+=== sozlesmeAylikGridCacheBorcluSatirlariGuncelle ===
+13985|function sozlesmeAylikGridCacheBorcluSatirlariGuncelle(satirlar) {
+13986|    var sco = window.__sozlesmelerAylikSonCacheObj;
+13987|    if (!sco || !Array.isArray(sco.aylar) || !satirlar || !satirlar.length) return;
+13988|    var byKey = {};
+13989|    satirlar.forEach(function (sr) {
+13990|        if (!sr) return;
+13991|        var kn = (typeof sozlesmeAylikAyKeyNormalize === 'function')
+13992|            ? sozlesmeAylikAyKeyNormalize((typeof sozlesmeAylikAyKeyFromYilAy === 'function') ? sozlesmeAylikAyKeyFromYilAy(sr.yil, sr.ay) : '')
+13993|            : '';
+13994|        if (kn) byKey[kn] = sr;
+13995|    });
+13996|    sco.aylar.forEach(function (a) {
+13997|        if (!a) return;
+13998|        var knA = (typeof sozlesmeAylikAyKeyNormalize === 'function')
+13999|            ? sozlesmeAylikAyKeyNormalize(String(a.ay_key || (a.yil + '-' + a.ay)))
+14000|            : '';
+14001|        var srA = byKey[knA];
+14002|        if (!srA) return;
+14003|        var brut = Math.round((parseFloat(srA.tutar_kdv_dahil) || 0) * 100) / 100;
+14004|        if (!(brut > 0)) return;
+14005|        a.brut_tutar_kdv = brut;
+14006|        a.tutar_kdv_dahil = brut;
+14007|        a.odenen_tutar_kdv = 0;
+14008|        a.kalan_tutar_kdv = brut;
+14009|        a.kismi_tahsilat = false;
+14010|        a.tahsil_edildi = false;
+14011|        a.acik_aylik_borc_faturasi = true;
+14012|    });
+14013|}
+14014|
+14015|function sozlesmeAylikBorclandir() {
+14016|    var mid = selectedId;
+14017|    if (!mid) {
+14018|        alert('Önce soldan bir müşteri seçin.');
+14019|        return;
+14020|    }
+14021|    var grid = sozlesmelerAylikAktifGridEl();
+14022|    if (!grid) return;
+14023|    var satirlar = sozlesmelerAylikSecimSatirlariKdvTutarli(grid);
+14024|    if (!satirlar.length) {
+14025|        alert('Borçlandırmak için en az bir ay seçin (tutarı olan hücreler).');
+14026|        return;
+14027|    }
+14028|    var detaySatirlar = [];
+14029|    var toplamHucre = 0;
+14030|    Array.prototype.slice.call(
+14031|        grid.querySelectorAll('.sozlesmeler-ay-kart.sozlesmeler-ay-kart-secili[data-ay-key]')
+14032|    ).forEach(function (card) {
+14033|        if (!card || card.offsetParent === null) return;
+14034|        var yil = parseInt(card.getAttribute('data-yil'), 10);
+14035|        var ay = parseInt(card.getAttribute('data-ay'), 10);
+14036|        var ayAdi = '';
+14037|        var h3 = card.querySelector('h3');
+14038|        if (h3 && String(h3.textContent || '').trim()) ayAdi = String(h3.textContent || '').trim();
+14039|        else if (typeof SOZLESME_AY_ADLARI !== 'undefined' && !isNaN(ay)) ayAdi = SOZLESME_AY_ADLARI[ay - 1] || '';
+14040|        var tut = NaN;
