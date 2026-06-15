@@ -762,6 +762,10 @@ def _apply_panel_by_iso_to_grid_payload(payload: dict, panel_by_iso: dict) -> No
         a["kalan_tutar_kdv"] = kalan
         a["tahsil_edildi"] = kalan <= tol
         a["kismi_tahsilat"] = tah > tol and kalan > tol
+        if kalan > tol and tah <= tol:
+            a["acik_aylik_borc_faturasi"] = True
+        elif tah >= brut - tol and brut > tol:
+            a["acik_aylik_borc_faturasi"] = False
 
 
 def _month_brut_from_grid_payload(payload: dict | None, yil: int, ay: int) -> float:
@@ -2143,6 +2147,24 @@ def _aylik_tahsil_durum_finalize_ay_set(
                 ay_set.discard(nk)
             elif nk in ekstre_ay_only and tahsil_edildi and not kismi_like:
                 ay_set.add(nk)
+    try:
+        tol_p = float(AYLIK_GRID_TAM_ODENDI_TOLERANS)
+        panel_by_iso = _load_musteri_panel_by_iso(mid) or {}
+        for iso_k, prow in panel_by_iso.items():
+            if not isinstance(prow, dict):
+                continue
+            nk_p = _firma_ozet_normalize_tahsil_ay_key(str(iso_k))
+            if not nk_p:
+                continue
+            try:
+                pt = round(float(prow.get("tahsil") or 0), 2)
+                pk = round(max(float(prow.get("kalan") or 0), 0), 2)
+            except (TypeError, ValueError):
+                continue
+            if pk > tol_p and pt <= tol_p:
+                ay_set.discard(nk_p)
+    except Exception:
+        pass
     return sorted(
         ay_set,
         key=lambda s: (int(str(s).split("-")[0]), int(str(s).split("-")[1])),
@@ -8093,6 +8115,38 @@ def _cari_ekstre_varsayilan_son_tam_ay():
     return date(y, m, 1), date(y, m, son)
 
 
+def _cari_ekstre_bitis_panel_tahsil_genislet(musteri_id: int, bit: date) -> date:
+    """Panelde tam tahsil olan son ay, istenen bitişten sonraysa ekstre aralığını uzat."""
+    try:
+        mid = int(musteri_id)
+    except (TypeError, ValueError):
+        return bit
+    panel = _load_musteri_panel_by_iso(mid) or {}
+    if not panel:
+        return bit
+    tol = float(AYLIK_GRID_TAM_ODENDI_TOLERANS)
+    max_bit = bit
+    for iso_k, prow in panel.items():
+        if not isinstance(prow, dict):
+            continue
+        try:
+            pt = round(float(prow.get("tahsil") or 0), 2)
+            pk = round(max(float(prow.get("kalan") or 0), 0), 2)
+        except (TypeError, ValueError):
+            continue
+        if pt <= tol or pk > tol:
+            continue
+        try:
+            dd = datetime.strptime(str(iso_k)[:10], "%Y-%m-%d").date()
+            _, son = calendar.monthrange(dd.year, dd.month)
+            month_end = date(dd.year, dd.month, son)
+            if month_end > max_bit:
+                max_bit = month_end
+        except (TypeError, ValueError):
+            continue
+    return max_bit
+
+
 _cari_ekstre_api_cache: dict = {}
 
 
@@ -8120,6 +8174,7 @@ def api_cari_ekstre():
         bas, bit = def_b, def_bit
     if bas > bit:
         bas, bit = bit, bas
+    bit = _cari_ekstre_bitis_panel_tahsil_genislet(int(musteri_id), bit)
     aylik_kira = request.args.get("aylik_kira", type=float) or 0
     kdv_oran = request.args.get("kdv_oran", type=float) or 20
     kira_nakit_q = request.args.get("kira_nakit", type=str, default="") or ""

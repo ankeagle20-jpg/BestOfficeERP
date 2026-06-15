@@ -4,7 +4,7 @@ Flask + Supabase PostgreSQL
 Deploy: 2026-03-14 (Fatura GIB onizleme, Musteri listesi, Kira suresi oto, Cari Kart Musteri Listesi butonu)
 """
 
-from flask import Flask, render_template, redirect, url_for, request, flash, jsonify, g
+from flask import Flask, render_template, redirect, url_for, request, flash, jsonify, g, send_file
 from flask_login import login_required, current_user, logout_user
 from config import Config
 from auth import login_manager, giris_yap, kullanici_olustur, ROLLER
@@ -387,6 +387,18 @@ def _start_background_jobs():
     print("[OK] Background scheduler aktif: auto_invoice_cycle/15dk")
 
 # ── Sağlık (Render health check / yük dengeleyici) — DB veya giriş gerekmez ───
+@app.route("/favicon.ico")
+def favicon():
+    """Tarayıcı varsayılan isteği; 404 konsol gürültüsünü önler."""
+    static_ico = os.path.join(app.root_path, "static", "favicon.ico")
+    if os.path.isfile(static_ico):
+        return send_file(static_ico, mimetype="image/x-icon", max_age=86400)
+    logo = os.path.join(os.path.dirname(app.root_path), "assets", "Ofisbir Logo.jpg")
+    if os.path.isfile(logo):
+        return send_file(logo, mimetype="image/jpeg", max_age=86400)
+    return "", 204
+
+
 @app.route("/healthz")
 def healthz():
     """Render `healthCheckPath` ve manuel ping için; uygulama ayakta mı kontrol eder."""
