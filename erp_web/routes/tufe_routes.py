@@ -1,6 +1,7 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify
 from auth import yetki_gerekli
 from db import fetch_all, fetch_one, execute
+from routes.giris_routes import _tufe_map_mem_reset
 from datetime import date
 
 bp = Blueprint("tufe", __name__)
@@ -144,6 +145,8 @@ def kaydet():
         f"✓ {len(yillar)} yıl için toplam {kaydedilen} ay kaydedildi.",
         "success",
     )
+    if kaydedilen:
+        _tufe_map_mem_reset()
     return redirect(
         url_for("tufe.index", yillar=",".join(str(y) for y in yillar))
     )
@@ -174,6 +177,8 @@ def sil():
             )
             silinen += 1
     flash(f"{silinen} ay kaydı silindi.", "info")
+    if silinen:
+        _tufe_map_mem_reset()
     return redirect(
         url_for("tufe.index", yillar=",".join(str(y) for y in yillar))
     )
@@ -258,6 +263,8 @@ def tcmb_cek():
                 (yil, ay_adi, oran),
             )
             say += 1
+        if say:
+            _tufe_map_mem_reset()
         return jsonify({"ok": True, "guncellenen": say})
     except Exception as e:
         return jsonify({"ok": False, "hata": str(e)})

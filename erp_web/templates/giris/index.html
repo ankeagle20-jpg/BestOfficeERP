@@ -4732,13 +4732,9 @@ function sozlesmelerAylikGridVeriSonBoyama(midNav, selToken, settled) {
         }
         if (typeof sozlesmeAylikSecimOzetGuncelle === 'function') sozlesmeAylikSecimOzetGuncelle();
         if (typeof sozlesmelerAylikSecilebilirlikYenile === 'function') sozlesmelerAylikSecilebilirlikYenile();
-        if (typeof cariEkstreYukle === 'function' && String(cariEkstreMusteriIdSec()) === String(midNav)) {
-            var __ekMid = String(midNav);
-            requestAnimationFrame(function () {
-                if (String(selectedId) !== __ekMid) return;
-                try { cariEkstreYukle({ sessiz: true, dbEsas: true }); } catch (_eEkSon) {}
-            });
-        }
+        // Ekstre artik musteri seciminde otomatik
+        // yuklenmiyor - performans icin "Ekstre Goster"
+        // butonuna birakildi (grid/panel buna bagimli degil).
     } catch (_eSonBoy) {}
     var midK = String(midNav);
     function _sonDuzeltGecikmeli() {

@@ -601,10 +601,16 @@ if __name__ == "__main__":
     _reload_on = os.environ.get("BESTOFFICE_DEV_RELOAD", "").strip().lower() in ("1", "true", "yes", "on")
     if not _reload_on:
         print("  [DEV] Otomatik yeniden başlatma kapalı (BESTOFFICE_DEV_RELOAD=1 ile açılır).\n")
-    app.run(
-        debug=True,
-        host="0.0.0.0",
-        port=port,
-        threaded=True,
-        use_reloader=_reload_on,
-    )
+    use_waitress = (os.environ.get("BESTOFFICE_USE_WAITRESS", "0") or "").strip().lower() in ("1", "true", "yes")
+    if use_waitress:
+        from waitress import serve
+        print(f"[BOOT] waitress ile baslatiliyor (threads=16) - http://127.0.0.1:{port}")
+        serve(app, host="0.0.0.0", port=port, threads=16)
+    else:
+        app.run(
+            debug=True,
+            host="0.0.0.0",
+            port=port,
+            threaded=True,
+            use_reloader=_reload_on,
+        )
