@@ -1273,8 +1273,14 @@ def ensure_customers_quick_edit_columns():
             print(f"customers.{col}: {e}")
 
 
+_hizmet_turleri_table_ensured = False
+
+
 def ensure_hizmet_turleri_table():
     """Sözleşme / müşteri formunda seçilebilir hizmet türleri (kullanıcı yeni ekleyebilir)."""
+    global _hizmet_turleri_table_ensured
+    if _hizmet_turleri_table_ensured:
+        return
     try:
         execute(
             """
@@ -1308,10 +1314,17 @@ def ensure_hizmet_turleri_table():
         execute("DELETE FROM hizmet_turleri WHERE TRIM(ad) = %s", ("Sanal Ofis",))
     except Exception as e:
         print(f"hizmet_turleri Sanal Ofis temizlik: {e}")
+    _hizmet_turleri_table_ensured = True
+
+
+_duzenli_fatura_secenekleri_table_ensured = False
 
 
 def ensure_duzenli_fatura_secenekleri_table():
     """Giriş formu Düzenli Fatura açılır listesi (varsayılanlar + kullanıcı ekleri)."""
+    global _duzenli_fatura_secenekleri_table_ensured
+    if _duzenli_fatura_secenekleri_table_ensured:
+        return
     try:
         execute(
             """
@@ -1346,6 +1359,7 @@ def ensure_duzenli_fatura_secenekleri_table():
             )
         except Exception as e:
             print(f"duzenli_fatura_secenekleri seed {kod}: {e}")
+    _duzenli_fatura_secenekleri_table_ensured = True
 
 
 def ensure_customers_cari_columns():

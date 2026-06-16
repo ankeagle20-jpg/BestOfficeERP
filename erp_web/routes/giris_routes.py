@@ -6,6 +6,15 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash,
 from flask_login import current_user
 from auth import giris_gerekli
 from collections import defaultdict
+from cache_utils import (
+    CACHE_KEY_DUZENLI_FATURA,
+    CACHE_KEY_HIZMET_TURLERI,
+    CACHE_KEY_TUFE_VERILERI,
+    CACHE_TTL_SEC,
+    simple_cache_get,
+    simple_cache_invalidate,
+    simple_cache_set,
+)
 from db import (
     fetch_all,
     fetch_one,
@@ -985,6 +994,13 @@ def _aylik_grid_cache_matches_kyc(musteri_id, cache_obj):
 
 
 _tufe_map_mem = {"ts": 0.0, "data": None}
+
+
+def _tufe_map_mem_reset():
+    """TÜFE tablosu değişince GET cache ve grid/ekstre haritasını temizle."""
+    simple_cache_invalidate(CACHE_KEY_TUFE_VERILERI)
+    _tufe_map_mem["data"] = None
+    _tufe_map_mem["ts"] = 0.0
 
 
 def _tufe_map_by_year_month():
@@ -2485,8 +2501,13 @@ def api_hizmet_turleri():
     """Hizmet türü listesi (GET) veya yeni tür ekleme (POST)."""
     ensure_hizmet_turleri_table()
     if request.method == "GET":
+        cached = simple_cache_get(CACHE_KEY_HIZMET_TURLERI, CACHE_TTL_SEC)
+        if cached is not None:
+            return jsonify(cached)
         rows = fetch_all("SELECT id, ad FROM hizmet_turleri ORDER BY sira NULLS LAST, ad")
-        return jsonify({"ok": True, "turler": [{"id": r["id"], "ad": r["ad"]} for r in (rows or [])]})
+        payload = {"ok": True, "turler": [{"id": r["id"], "ad": r["ad"]} for r in (rows or [])]}
+        simple_cache_set(CACHE_KEY_HIZMET_TURLERI, payload)
+        return jsonify(payload)
     data = request.get_json(silent=True) or {}
     act = (data.get("action") or "").strip().lower()
     if act in ("sil_hizmet_turu", "delete_hizmet_turu", "delete"):
@@ -2507,6 +2528,7 @@ def api_hizmet_turleri():
     if not ins:
         ins = fetch_one("SELECT id, ad FROM hizmet_turleri WHERE ad = %s", (ad,))
     rows = fetch_all("SELECT id, ad FROM hizmet_turleri ORDER BY sira NULLS LAST, ad")
+    simple_cache_invalidate(CACHE_KEY_HIZMET_TURLERI)
     return jsonify(
         {
             "ok": True,
@@ -2561,6 +2583,7 @@ def _api_hizmet_turu_guncelle_json(data):
             (yeni_ad, eski_ad),
         )
     rows = fetch_all("SELECT id, ad FROM hizmet_turleri ORDER BY sira NULLS LAST, ad")
+    simple_cache_invalidate(CACHE_KEY_HIZMET_TURLERI)
     return jsonify(
         {
             "ok": True,
@@ -2603,6 +2626,7 @@ def _api_hizmet_turu_sil_json(data):
         return jsonify({"ok": False, "mesaj": "Hizmet türü bulunamadı."}), 404
     execute("DELETE FROM hizmet_turleri WHERE id = %s", (tid,))
     rows = fetch_all("SELECT id, ad FROM hizmet_turleri ORDER BY sira NULLS LAST, ad")
+    simple_cache_invalidate(CACHE_KEY_HIZMET_TURLERI)
     return jsonify(
         {
             "ok": True,
@@ -3002,15 +3026,18 @@ def api_duzenli_fatura_secenekleri():
     """Düzenli Fatura açılır listesi (GET) veya yeni senaryo (POST)."""
     ensure_duzenli_fatura_secenekleri_table()
     if request.method == "GET":
+        cached = simple_cache_get(CACHE_KEY_DUZENLI_FATURA, CACHE_TTL_SEC)
+        if cached is not None:
+            return jsonify(cached)
         rows = fetch_all(
             "SELECT kod, etiket FROM duzenli_fatura_secenekleri ORDER BY sira NULLS LAST, etiket"
         )
-        return jsonify(
-            {
-                "ok": True,
-                "secenekler": [{"kod": r["kod"], "etiket": r["etiket"]} for r in (rows or [])],
-            }
-        )
+        payload = {
+            "ok": True,
+            "secenekler": [{"kod": r["kod"], "etiket": r["etiket"]} for r in (rows or [])],
+        }
+        simple_cache_set(CACHE_KEY_DUZENLI_FATURA, payload)
+        return jsonify(payload)
     data = request.get_json(silent=True) or {}
     etiket = (data.get("etiket") or "").strip()
     if not etiket:
@@ -3025,6 +3052,7 @@ def api_duzenli_fatura_secenekleri():
     rows = fetch_all(
         "SELECT kod, etiket FROM duzenli_fatura_secenekleri ORDER BY sira NULLS LAST, etiket"
     )
+    simple_cache_invalidate(CACHE_KEY_DUZENLI_FATURA)
     return jsonify(
         {
             "ok": True,
@@ -3852,6 +3880,9 @@ düzenlenmiş ve taraflarca okunup imzalanarak yürürlüğe girmiştir.
 def api_tufe_verileri():
     """TCMB TÜFE verilerini getir"""
     try:
+        cached = simple_cache_get(CACHE_KEY_TUFE_VERILERI, CACHE_TTL_SEC)
+        if cached is not None:
+            return jsonify(cached)
         veriler = fetch_all("""
             SELECT year as yil, month as ay, oran 
             FROM tufe_verileri 
@@ -3864,6 +3895,8 @@ def api_tufe_verileri():
             END DESC
             LIMIT 60
         """)
+        veriler = veriler or []
+        simple_cache_set(CACHE_KEY_TUFE_VERILERI, veriler)
         return jsonify(veriler)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
