@@ -8115,38 +8115,6 @@ def _cari_ekstre_varsayilan_son_tam_ay():
     return date(y, m, 1), date(y, m, son)
 
 
-def _cari_ekstre_bitis_panel_tahsil_genislet(musteri_id: int, bit: date) -> date:
-    """Panelde tam tahsil olan son ay, istenen bitişten sonraysa ekstre aralığını uzat."""
-    try:
-        mid = int(musteri_id)
-    except (TypeError, ValueError):
-        return bit
-    panel = _load_musteri_panel_by_iso(mid) or {}
-    if not panel:
-        return bit
-    tol = float(AYLIK_GRID_TAM_ODENDI_TOLERANS)
-    max_bit = bit
-    for iso_k, prow in panel.items():
-        if not isinstance(prow, dict):
-            continue
-        try:
-            pt = round(float(prow.get("tahsil") or 0), 2)
-            pk = round(max(float(prow.get("kalan") or 0), 0), 2)
-        except (TypeError, ValueError):
-            continue
-        if pt <= tol or pk > tol:
-            continue
-        try:
-            dd = datetime.strptime(str(iso_k)[:10], "%Y-%m-%d").date()
-            _, son = calendar.monthrange(dd.year, dd.month)
-            month_end = date(dd.year, dd.month, son)
-            if month_end > max_bit:
-                max_bit = month_end
-        except (TypeError, ValueError):
-            continue
-    return max_bit
-
-
 _cari_ekstre_api_cache: dict = {}
 
 
@@ -8155,7 +8123,7 @@ _cari_ekstre_api_cache: dict = {}
 def api_cari_ekstre():
     """
     Sözleşme sayfası cari ekstre: Tarih aralığında aylık kira borç + tahsilat alacak.
-    Query: musteri_id, baslangic, bitis (YYYY-MM-DD; boşsa cari takvim ayı), aylik_kira.
+    Query: musteri_id, baslangic, bitis (YYYY-MM-DD; boşsa sözleşme bitişi, yoksa cari ay), aylik_kira.
     Opsiyonel reel_json: URL-encoded JSON {\"2024\":612,\"2023\":350} — Uygula önizlemesi (Kaydet öncesi) ekstre ile aynı tutarlar.
     """
     musteri_id = request.args.get("musteri_id", type=int)
@@ -8164,7 +8132,12 @@ def api_cari_ekstre():
     cust = fetch_one("SELECT id, name FROM customers WHERE id = %s", (musteri_id,))
     if not cust:
         return jsonify({"ok": False, "mesaj": "Müşteri bulunamadı."}), 404
-    def_b, def_bit = _cari_ekstre_varsayilan_son_tam_ay()
+    def_b, def_bit_cari_ay = _cari_ekstre_varsayilan_son_tam_ay()
+    kyc = _musteri_kyc_grup_for_aylik_grid(int(musteri_id))
+    soz_bit = _aylik_grid_coerce_date((kyc or {}).get("sozlesme_bitis"))
+    if soz_bit:
+        soz_bit = _aylik_grid_effective_bitis(kyc, soz_bit) or soz_bit
+    def_bit = soz_bit or def_bit_cari_ay
     baslangic = request.args.get("baslangic")
     bitis = request.args.get("bitis")
     try:
@@ -8174,7 +8147,7 @@ def api_cari_ekstre():
         bas, bit = def_b, def_bit
     if bas > bit:
         bas, bit = bit, bas
-    bit = _cari_ekstre_bitis_panel_tahsil_genislet(int(musteri_id), bit)
+    # (genislet kaldırıldı - artık sözleşme bitiş tarihi varsayılan bitiş olarak kullanılıyor)
     aylik_kira = request.args.get("aylik_kira", type=float) or 0
     kdv_oran = request.args.get("kdv_oran", type=float) or 20
     kira_nakit_q = request.args.get("kira_nakit", type=str, default="") or ""
@@ -9237,6 +9210,47 @@ def api_reel_donem_tutar_upsert():
     except Exception:
         logging.getLogger(__name__).exception(
             "reel_donem_tutar sonrasi grid cache musteri_id=%s", musteri_id
+        )
+    try:
+        mid_int = int(musteri_id)
+        payload_after = _build_aylik_grid_cache_payload(mid_int)
+        existing_panel = _load_musteri_panel_by_iso(mid_int)
+        patch = {}
+        if payload_after and isinstance(payload_after.get("aylar"), list):
+            for a in payload_after["aylar"]:
+                if not isinstance(a, dict):
+                    continue
+                yil_p = a.get("yil")
+                ay_p = a.get("ay")
+                if not yil_p or not ay_p:
+                    continue
+                iso_k = date(int(yil_p), int(ay_p), 1).isoformat()
+                new_brut = round(float(a.get("brut_tutar_kdv") or 0), 2)
+                if new_brut <= 0:
+                    continue
+                existing_row = existing_panel.get(iso_k) or {}
+                eski_brut = round(float(existing_row.get("aylik") or 0), 2)
+                eski_tahsil = round(float(existing_row.get("tahsil") or 0), 2)
+                tol_p = 0.05
+                if eski_tahsil >= eski_brut - tol_p and eski_brut > tol_p:
+                    yeni_tahsil = new_brut
+                    yeni_kalan = 0.0
+                else:
+                    yeni_tahsil = eski_tahsil
+                    yeni_kalan = max(round(new_brut - eski_tahsil, 2), 0.0)
+                patch[iso_k] = {
+                    "aylik": new_brut,
+                    "tahsil": yeni_tahsil,
+                    "kalan": yeni_kalan,
+                    "tahsil_tarih": existing_row.get("tahsil_tarih"),
+                }
+        if patch:
+            _save_musteri_panel_by_iso(mid_int, patch, prune_no_db_tahsil=False)
+            _invalidate_aylik_grid_payload_mem(mid_int)
+            _upsert_aylik_grid_cache(mid_int)
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "reel_donem_tutar sonrasi panel aylik senkron musteri_id=%s", musteri_id
         )
     return jsonify({"ok": True})
 
