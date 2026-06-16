@@ -14,7 +14,6 @@ from flask import (
 from flask_login import login_required, current_user
 from functools import wraps
 from datetime import datetime, date, timedelta
-from cache_utils import CACHE_KEY_DUZENLI_FATURA, CACHE_TTL_SEC, simple_cache_get, simple_cache_set
 from db import (
     db,
     fetch_all,
@@ -4068,20 +4067,9 @@ def api_fatura_rapor():
 @faturalar_gerekli
 def api_duzenli_fatura_secenekleri():
     ensure_duzenli_fatura_secenekleri_table()
-    cached = simple_cache_get(CACHE_KEY_DUZENLI_FATURA, CACHE_TTL_SEC)
-    if cached is not None:
-        rows = cached.get("secenekler") or []
-    else:
-        rows = fetch_all(
-            "SELECT kod, etiket FROM duzenli_fatura_secenekleri ORDER BY sira NULLS LAST, etiket"
-        ) or []
-        simple_cache_set(
-            CACHE_KEY_DUZENLI_FATURA,
-            {
-                "ok": True,
-                "secenekler": [{"kod": r["kod"], "etiket": r["etiket"]} for r in rows],
-            },
-        )
+    rows = fetch_all(
+        "SELECT kod, etiket FROM duzenli_fatura_secenekleri ORDER BY sira NULLS LAST, etiket"
+    ) or []
     secenekler = []
     for r in rows:
         kod = str(r.get("kod") or "").strip()
