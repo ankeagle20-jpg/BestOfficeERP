@@ -3413,6 +3413,17 @@ def api_musteri_durum_guncelle(mid):
     })
 
 
+@bp.route("/api/tahmini-musteri-no", methods=["GET"])
+@giris_gerekli
+def api_tahmini_musteri_no():
+    """Yeni müşteri formu açılırken id/musteri_no rezerve et (customers_id_seq nextval)."""
+    row = fetch_one("SELECT nextval('customers_id_seq') AS n")
+    if not row or row.get("n") is None:
+        return jsonify({"ok": False, "mesaj": "Müşteri numarası rezerve edilemedi."}), 500
+    n = int(row["n"])
+    return jsonify({"ok": True, "id": n, "musteri_no": n})
+
+
 @bp.route("/api/musteri-cogalt", methods=["POST"])
 @giris_gerekli
 def api_musteri_cogalt():
@@ -3458,8 +3469,7 @@ def api_musteri_cogalt():
     vals = [new_row[c] for c in cols]
     placeholders = ", ".join(["%s"] * len(vals))
     sql_cust = (
-        f"INSERT INTO customers ({','.join(cols)},musteri_no) VALUES ({placeholders},"
-        "nextval('customers_musteri_no_seq')) RETURNING id, musteri_no"
+        f"INSERT INTO customers ({','.join(cols)}) VALUES ({placeholders}) RETURNING id"
     )
 
     try:
@@ -3469,9 +3479,12 @@ def api_musteri_cogalt():
             ins = cur.fetchone()
             if not ins:
                 raise RuntimeError("INSERT RETURNING sonuç dönmedi.")
-            # RealDictCursor: satır anahtarları id / musteri_no (konumla ins[0] kullanılmaz).
             new_id = int(ins["id"])
-            new_mno = ins.get("musteri_no") if hasattr(ins, "get") else ins["musteri_no"]
+            cur.execute(
+                "UPDATE customers SET musteri_no = %s WHERE id = %s",
+                (new_id, new_id),
+            )
+            new_mno = new_id
             if kyc:
                 k2 = {k: v for k, v in kyc.items() if k not in ("id", "created_at", "updated_at")}
                 k2["musteri_id"] = new_id
@@ -3490,7 +3503,7 @@ def api_musteri_cogalt():
             {
                 "ok": False,
                 "mesaj": (
-                    "Çoğaltılamadı: vergi numarası veya başka benzersiz alan çakışıyor. "
+                    "Çoğaltılamadı: vergi numarası, müşteri numarası veya başka benzersiz alan çakışıyor. "
                     "Veritabanında vergi no tekil ise önce kaynak müşterinin vergi numarasını güncelleyin "
                     "veya yöneticiye başvurun."
                 ),
@@ -3592,15 +3605,8 @@ def kaydet():
             ))
             return jsonify({'ok': True, 'mesaj': '✅ Müşteri güncellendi'})
         else:
-            # Yeni kayıt (musteri_no: 1001+ sıra, sequence ile)
-            result = execute_returning("""
-                INSERT INTO customers (
-                    name, musteri_adi, tax_number, phone, email, address,
-                    ev_adres, notes, durum, kapanis_tarihi, kapanis_sonrasi_borc_ay, bizim_hesap, grup2_secimleri, musteri_no, created_at
-                )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, nextval('customers_musteri_no_seq'), NOW())
-                RETURNING id, musteri_no
-            """, (
+            # Yeni kayıt: musteri_no = id (aynı transaction); opsiyonel rezerve_edilen_id
+            insert_params = (
                 data.get('name'),
                 (data.get('musteri_adi') or '').strip() or None,
                 tax_norm,
@@ -3614,7 +3620,81 @@ def kaydet():
                 kap_borc_ay,
                 bizim_hesap,
                 g2_list,
-            ))
+            )
+            rezerve_id = None
+            raw_rez = data.get("rezerve_edilen_id")
+            if raw_rez is not None and str(raw_rez).strip() != "":
+                try:
+                    rezerve_id = int(raw_rez)
+                    if rezerve_id <= 0:
+                        rezerve_id = None
+                except (TypeError, ValueError):
+                    rezerve_id = None
+            try:
+                with get_db() as conn:
+                    cur = conn.cursor()
+                    if rezerve_id is not None:
+                        cur.execute(
+                            "SELECT 1 AS ok FROM customers WHERE id = %s",
+                            (rezerve_id,),
+                        )
+                        if cur.fetchone():
+                            return jsonify(
+                                {
+                                    "ok": False,
+                                    "mesaj": (
+                                        "Rezerve müşteri numarası artık geçerli değil. "
+                                        "«Yeni Müşteri» butonuna tekrar basın."
+                                    ),
+                                }
+                            ), 409
+                        cur.execute(
+                            """
+                            INSERT INTO customers (
+                                id, name, musteri_adi, tax_number, phone, email, address,
+                                ev_adres, notes, durum, kapanis_tarihi, kapanis_sonrasi_borc_ay,
+                                bizim_hesap, grup2_secimleri, created_at
+                            )
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                            RETURNING id
+                            """,
+                            (rezerve_id,) + insert_params,
+                        )
+                    else:
+                        cur.execute(
+                            """
+                            INSERT INTO customers (
+                                name, musteri_adi, tax_number, phone, email, address,
+                                ev_adres, notes, durum, kapanis_tarihi, kapanis_sonrasi_borc_ay,
+                                bizim_hesap, grup2_secimleri, created_at
+                            )
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                            RETURNING id
+                            """,
+                            insert_params,
+                        )
+                    ins = cur.fetchone()
+                    if not ins:
+                        raise RuntimeError("INSERT RETURNING sonuç dönmedi.")
+                    new_id = int(ins["id"])
+                    cur.execute(
+                        "UPDATE customers SET musteri_no = %s WHERE id = %s",
+                        (new_id, new_id),
+                    )
+                    result = {"id": new_id, "musteri_no": new_id}
+            except psycopg2.errors.UniqueViolation as e:
+                logging.warning("kaydet yeni musteri unique violation: %s", e)
+                mesaj = (
+                    "Kayıt oluşturulamadı: vergi numarası veya müşteri numarası "
+                    "benzersizlik kuralıyla çakışıyor. Vergi numarasını kontrol edin; "
+                    "sorun sürerse yöneticiye başvurun."
+                )
+                if rezerve_id is not None:
+                    mesaj = (
+                        "Rezerve müşteri numarası artık geçerli değil veya başka bir alan çakışıyor. "
+                        "«Yeni Müşteri» butonuna tekrar basın."
+                    )
+                return jsonify({"ok": False, "mesaj": mesaj}), 409
             mid = result["id"] if result else None
             mno = result.get("musteri_no") if result else None
             kaydet_mesaj = f"✅ Müşteri kaydedildi (ID: {mid}"
@@ -3622,7 +3702,7 @@ def kaydet():
                 kaydet_mesaj += f", müşteri no: {mno}"
             kaydet_mesaj += ")"
             return jsonify({"ok": True, "mesaj": kaydet_mesaj, "id": mid, "musteri_no": mno})
-            
+
     except Exception as e:
         return jsonify({'ok': False, 'mesaj': f'❌ Hata: {str(e)}'}), 400
 
