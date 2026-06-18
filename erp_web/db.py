@@ -352,6 +352,21 @@ CREATE TABLE IF NOT EXISTS tahsilatlar (
     created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Tediyeler (firmadan müşteriye yapılan ödemeler; tahsilatın tersi)
+CREATE TABLE IF NOT EXISTS tediyeler (
+    id              SERIAL PRIMARY KEY,
+    musteri_id      INTEGER NOT NULL REFERENCES customers(id),
+    tutar           NUMERIC(12,2) NOT NULL CHECK (tutar > 0),
+    odeme_turu      TEXT NOT NULL DEFAULT 'nakit',
+    tediye_tarihi   DATE NOT NULL DEFAULT CURRENT_DATE,
+    aciklama        TEXT,
+    makbuz_no       TEXT,
+    cek_detay       TEXT,
+    havale_banka    TEXT,
+    tediye_yapan    TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- Kargolar
 CREATE TABLE IF NOT EXISTS kargolar (
     id              SERIAL PRIMARY KEY,
@@ -486,6 +501,7 @@ def init_schema():
     ensure_customers_balance_trigger()
     ensure_cari_360_tables()
     ensure_tahsilatlar_columns()
+    ensure_tediyeler_columns()
     ensure_kargolar_durum()
     ensure_faturalar_amount_columns()
     ensure_musteri_kyc_columns()
@@ -1907,6 +1923,60 @@ def ensure_tahsilatlar_columns():
             "tahsilatlar.makbuz_no benzersiz indeks atlanıyor (aynı numaralı eski kayıtlar varsa önce düzeltin):",
             e,
         )
+
+
+def ensure_tediyeler_columns():
+    """tediyeler tablosu ve indeksleri (yeni kurulum + mevcut DB migrasyonu)."""
+    try:
+        execute(
+            """
+            CREATE TABLE IF NOT EXISTS tediyeler (
+                id              SERIAL PRIMARY KEY,
+                musteri_id      INTEGER NOT NULL REFERENCES customers(id),
+                tutar           NUMERIC(12,2) NOT NULL CHECK (tutar > 0),
+                odeme_turu      TEXT NOT NULL DEFAULT 'nakit',
+                tediye_tarihi   DATE NOT NULL DEFAULT CURRENT_DATE,
+                aciklama        TEXT,
+                makbuz_no       TEXT,
+                cek_detay       TEXT,
+                havale_banka    TEXT,
+                tediye_yapan    TEXT,
+                created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+    except Exception as e:
+        print(f"tediyeler tablo: {e}")
+    for stmt in (
+        "ALTER TABLE tediyeler ADD COLUMN IF NOT EXISTS musteri_id INTEGER REFERENCES customers(id)",
+        "ALTER TABLE tediyeler ADD COLUMN IF NOT EXISTS tutar NUMERIC(12,2)",
+        "ALTER TABLE tediyeler ADD COLUMN IF NOT EXISTS odeme_turu TEXT DEFAULT 'nakit'",
+        "ALTER TABLE tediyeler ADD COLUMN IF NOT EXISTS tediye_tarihi DATE DEFAULT CURRENT_DATE",
+        "ALTER TABLE tediyeler ADD COLUMN IF NOT EXISTS aciklama TEXT",
+        "ALTER TABLE tediyeler ADD COLUMN IF NOT EXISTS makbuz_no TEXT",
+        "ALTER TABLE tediyeler ADD COLUMN IF NOT EXISTS cek_detay TEXT",
+        "ALTER TABLE tediyeler ADD COLUMN IF NOT EXISTS havale_banka TEXT",
+        "ALTER TABLE tediyeler ADD COLUMN IF NOT EXISTS tediye_yapan TEXT",
+        "ALTER TABLE tediyeler ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ",
+        "ALTER TABLE tediyeler ALTER COLUMN created_at SET DEFAULT NOW()",
+    ):
+        try:
+            execute(stmt)
+        except Exception as e:
+            print(f"tediyeler şema: {e}")
+    for stmt in (
+        "CREATE INDEX IF NOT EXISTS idx_tediyeler_musteri_id ON tediyeler (musteri_id)",
+        "CREATE INDEX IF NOT EXISTS idx_tediyeler_musteri_tarih ON tediyeler (musteri_id, tediye_tarihi DESC)",
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_tediyeler_makbuz_no_trim
+        ON tediyeler (TRIM(makbuz_no))
+        WHERE makbuz_no IS NOT NULL AND TRIM(makbuz_no) <> ''
+        """,
+    ):
+        try:
+            execute(stmt)
+        except Exception as e:
+            print(f"tediyeler indeks: {e}")
 
 
 def ensure_banka_hesaplar_columns():

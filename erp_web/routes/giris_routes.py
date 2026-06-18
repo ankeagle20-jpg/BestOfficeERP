@@ -79,6 +79,7 @@ from decimal import Decimal
 # Aylık grid «tam ödendi» / tahsil dağıtım mantığı değişince artırın; musteri_aylik_grid_cache yeniden üretilir.
 AYLIK_GRID_COMPUTE_REV = 23
 AYLIK_GRID_TAM_ODENDI_TOLERANS = 0.05  # kurus farklarini (dagitim/yuvarlama) tam odendi say
+PLACEHOLDER_BRUT_MAX = 0.5  # grid min tutar (0.01); gerçek brüt yazılmamış panel
 
 
 # BTUFRT (|BTUFRT|TÜFE borç+tahsil toplu): bu tarihte ve sonrasına ilişkin aylar grid «ödenen» toplamına
@@ -7151,6 +7152,71 @@ def _ekstre_merge_panel_into_grid_maps(
         grid_kismi_by_iso[iso_k] = pt > tol and pk > tol
 
 
+def _ekstre_dev_tediye_borc(musteri_id, bas):
+    """Dönem başlangıcından önceki tediyeler → devreden borç."""
+    row = fetch_one(
+        """
+        SELECT COALESCE(SUM(tutar), 0) AS toplam
+        FROM tediyeler
+        WHERE musteri_id = %s AND tediye_tarihi < %s
+        """,
+        (int(musteri_id), bas),
+    )
+    try:
+        return round(float((row or {}).get("toplam") or 0), 2)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _ekstre_tediye_rows_for_period(musteri_id, bas, bit):
+    """Dönem içi tediye makbuzları (BORÇ sütunu)."""
+    tediye_rows = fetch_all(
+        """
+        SELECT id, COALESCE(makbuz_no, 'T-' || id) AS belge_no,
+               tediye_tarihi AS tarih, tutar, odeme_turu, aciklama, created_at
+        FROM tediyeler
+        WHERE musteri_id = %s
+          AND tediye_tarihi >= %s AND tediye_tarihi <= %s
+        ORDER BY tediye_tarihi, created_at
+        """,
+        (int(musteri_id), bas, bit),
+    )
+    out = []
+    for r in (tediye_rows or []):
+        acik = (r.get("aciklama") or "").strip()
+        if not acik:
+            acik = "Tediye " + str(r.get("belge_no") or "")
+        try:
+            tid = int(r.get("id"))
+        except (TypeError, ValueError):
+            tid = None
+        out.append({
+            "tarih": str(r.get("tarih") or "")[:10],
+            "aciklama": acik,
+            "belge_no": r.get("belge_no") or "",
+            "tur": "Tediye",
+            "borc": round(float(r.get("tutar") or 0), 2),
+            "alacak": 0,
+            "bakiye": None,
+            "tediye_ids": [tid] if tid else [],
+            "created_at": r.get("created_at"),
+        })
+    return out
+
+
+def _ekstre_row_sort_key(x):
+    """Tarih, aynı günde created_at (yoksa boş → ekleme sırası korunur)."""
+    tarih = str(x.get("tarih") or "")[:10]
+    ca = x.get("created_at")
+    if ca is None:
+        ca_s = ""
+    elif hasattr(ca, "isoformat"):
+        ca_s = ca.isoformat()
+    else:
+        ca_s = str(ca)
+    return (tarih, ca_s)
+
+
 def _cari_ekstre_hareketler(
     musteri_id,
     baslangic,
@@ -7614,7 +7680,10 @@ def _cari_ekstre_hareketler(
         fifo_alloc_win = {iso: 0.0 for iso in month_order_all}
         fifo_harf = {iso: "B" for iso in month_order_all}
         fifo_ids = defaultdict(list)
-        floor_pay = soz_floor_iso if soz_floor_iso else "1900-01-01"
+        floor_pay = (
+            soz_first_month.isoformat() if soz_first_month
+            else (soz_floor_iso if soz_floor_iso else "1900-01-01")
+        )
         bit_iso_cmp = bit.isoformat()
         pays_fifo = fetch_all(
             f"""SELECT t.id,
@@ -7727,6 +7796,7 @@ def _cari_ekstre_hareketler(
             acilis_fifo,
             tol=tol_f,
         )
+        dev_borc_r = round(dev_borc_r + _ekstre_dev_tediye_borc(musteri_id, bas), 2)
         if dev_borc_r > tol_f or dev_alacak_r > tol_f:
             rows.append({
                 "tarih": bas.isoformat(),
@@ -7865,6 +7935,7 @@ def _cari_ekstre_hareketler(
             tahsil_map=ekstre_tahsil_map,
             tol=0.01,
         )
+        dev_borc_r = round(dev_borc_r + _ekstre_dev_tediye_borc(musteri_id, bas), 2)
         if dev_borc_r > 0.01 or dev_alacak_r > 0.01:
             rows.append({
                 "tarih": bas.isoformat(),
@@ -7997,12 +8068,9 @@ def _cari_ekstre_hareketler(
             item["tahsilat_ids"] = uniq_ids
             rows.append(item)
 
-    _tur_sira = {"Devir": 0, "Kira": 1, "Tahsilat": 2}
+    rows.extend(_ekstre_tediye_rows_for_period(musteri_id, bas, bit))
 
-    def _ekstre_satir_sira(x):
-        return _tur_sira.get(x.get("tur") or "", 4)
-
-    rows.sort(key=lambda x: (x["tarih"], _ekstre_satir_sira(x)))
+    rows.sort(key=_ekstre_row_sort_key)
     bakiye = 0
     for r in rows:
         bakiye = bakiye + r["borc"] - r["alacak"]
@@ -9344,8 +9412,14 @@ def api_reel_donem_tutar_upsert():
                 existing_row = existing_panel.get(iso_k) or {}
                 eski_brut = round(float(existing_row.get("aylik") or 0), 2)
                 eski_tahsil = round(float(existing_row.get("tahsil") or 0), 2)
-                tol_p = 0.05
-                if eski_tahsil >= eski_brut - tol_p and eski_brut > tol_p:
+                eski_kalan = round(float(existing_row.get("kalan") or 0), 2)
+                tol_p = float(AYLIK_GRID_TAM_ODENDI_TOLERANS)
+                brut_placeholder = eski_brut <= PLACEHOLDER_BRUT_MAX
+                tam_tahsil_sayilir = (
+                    (eski_tahsil >= eski_brut - tol_p and eski_brut > tol_p)
+                    or (brut_placeholder and eski_tahsil > tol_p and eski_kalan <= tol_p)
+                )
+                if tam_tahsil_sayilir:
                     yeni_tahsil = new_brut
                     yeni_kalan = 0.0
                 else:

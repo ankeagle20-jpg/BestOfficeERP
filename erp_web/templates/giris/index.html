@@ -2569,6 +2569,7 @@
             <button class="tab" data-index="1" onclick="switchTab(1)">Kira Senaryo</button>
             <button class="tab" data-index="2" onclick="switchTab(2)">Kira Bildirgesi</button>
             <button class="tab" data-index="3" onclick="switchTab(3)">Tahsilat</button>
+            <button class="tab" data-index="11" onclick="switchTab(11)">Tediye</button>
             <button class="tab" data-index="4" onclick="switchTab(4)">Cari Kart</button>
             <button class="tab" data-index="6" onclick="switchTab(6)">Sözleşmeler</button>
             <button class="tab" data-index="7" onclick="switchTab(7)">Müşteriler</button>
@@ -3577,6 +3578,85 @@
         <div class="tab-content" id="tab-10">
             <iframe id="giris-musteri-liste2-iframe" title="Müşteri listesi (sayfalı)" data-ml2-src="{{ url_for('musteriler.list_full', sayfa=1, limit=50, embed=1) }}"></iframe>
         </div>
+
+        <div class="tab-content" id="tab-11">
+            <div class="tahsilat-makbuz-wrap">
+                <div class="tahsilat-makbuz-baslik">
+                    <h3><i class="fa fa-money"></i> Yeni Tediye Makbuzu</h3>
+                </div>
+                <form id="giris-tediye-form" onsubmit="return girisTediyeKaydet(event)">
+                    <div class="tahsilat-form-grup">
+                        <label>Müşteri <span class="zorunlu">*</span></label>
+                        <input type="text" id="giris_tediye_musteri_ara" placeholder="Müşteri ara, seçin..." autocomplete="off">
+                        <input type="hidden" id="giris_tediye_musteri_id" name="musteri_id">
+                        <div id="giris_tediye_musteri_listesi" class="tahsilat-musteri-dropdown" style="display:none;"></div>
+                        <span id="giris_tediye_musteri_secilen" class="tahsilat-musteri-secilen" style="display:none;"></span>
+                        <div class="tahsilat-musteri-secilen" style="display:block;margin-top:4px;">Makbuz No: <strong id="giris_tediye_makbuz_no_text">—</strong></div>
+                        <input type="hidden" id="giris_tediye_makbuz_no" name="makbuz_no">
+                    </div>
+                    <div class="tahsilat-form-grup">
+                        <label>Tutar (TL) <span class="zorunlu">*</span></label>
+                        <input type="text" id="giris_tediye_tutar" name="tutar" placeholder="0,00" required>
+                    </div>
+                    <div class="tahsilat-form-grup">
+                        <label>Ödeme Türü</label>
+                        <select id="giris_tediye_odeme_turu" name="odeme_turu">
+                            <option value="nakit">Nakit</option>
+                            <option value="havale">Havale/EFT</option>
+                            <option value="kredi_karti">Kredi Kartı</option>
+                            <option value="cek">Çek</option>
+                        </select>
+                    </div>
+                    <div class="tahsilat-form-grup" id="giris_tediye_havale_panel_wrap" style="display:none;">
+                        <label>Havale / Banka</label>
+                        <input type="text" id="giris_tediye_havale_banka" name="havale_banka" placeholder="Banka adı veya referans">
+                    </div>
+                    <div class="tahsilat-form-grup" id="giris_tediye_cek_panel_wrap" style="display:none;">
+                        <label>Çek Detayları</label>
+                        <div class="tahsilat-cek-panel">
+                            <div class="tahsilat-cek-table-wrap">
+                                <table class="tahsilat-cek-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Banka</th>
+                                            <th>Şube</th>
+                                            <th>Hesap No</th>
+                                            <th>Çek No</th>
+                                            <th>Çek Tarihi</th>
+                                            <th>Tutarı</th>
+                                            <th></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="giris_tediye_cek_tbody"></tbody>
+                                </table>
+                            </div>
+                            <div class="tahsilat-cek-toolbar">
+                                <button type="button" class="tahsilat-cek-btn tahsilat-cek-btn-ekle" onclick="tahsilatCekSatirEkle('giris_tediye')"><i class="fa fa-plus"></i> Satır Ekle</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="tahsilat-form-grup">
+                        <label>Tarih</label>
+                        <input type="date" id="giris_tediye_tarih" name="tediye_tarihi">
+                    </div>
+                    <div class="tahsilat-form-grup">
+                        <label>Tediye yapan</label>
+                        <select id="giris_tediye_tediye_yapan" name="tediye_yapan">
+                            <option value="DÖNDÜ GÜLGÖSTEREN" selected>DÖNDÜ GÜLGÖSTEREN</option>
+                        </select>
+                    </div>
+                    <div class="tahsilat-form-grup">
+                        <label>Açıklama</label>
+                        <textarea id="giris_tediye_aciklama" name="aciklama" rows="2" placeholder="Örn: İade / gider ödemesi"></textarea>
+                    </div>
+                    <div class="tahsilat-makbuz-aksiyon">
+                        <button type="button" class="tahsilat-btn-iptal" onclick="girisTediyeIptal()">İptal</button>
+                        <button type="button" class="tahsilat-btn-kaydet" onclick="girisTediyeKaydet(); return false;"><i class="fa fa-save"></i> Kayıt</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
         </div>
         <div class="tab-content-right" id="sozlesmeler-sag-alan">
             <div id="sozlesmeler-aylik-bolum">
@@ -3683,6 +3763,7 @@
                         <div class="cari-ekstre-tab-bar" style="margin:0;">
                             <button type="button" class="cari-ekstre-tab active" id="sozlesme_tahsil_tab_makbuz_btn" onclick="sozlesmeTahsilAltTabAc('makbuz')">Tahsilat Makbuzu</button>
                             <button type="button" class="cari-ekstre-tab" id="sozlesme_tahsil_tab_rapor_btn" onclick="sozlesmeTahsilAltTabAc('rapor')">Tahsilat Raporu</button>
+                            <button type="button" class="cari-ekstre-tab" id="sozlesme_tahsil_tab_tediye_btn" onclick="sozlesmeTahsilAltTabAc('tediye')">Tediye</button>
                         </div>
                     </div>
                     <div class="tahsilat-makbuz-wrap" id="sozlesme_tahsil_panel_makbuz">
@@ -3784,6 +3865,82 @@
                         <p class="giris-tahsil-rapor-aciklama">Tahsilat tarihine göre kayıtlı makbuzlar. Varsayılan: bugün. Tarih aralığı seçip <strong>Listele</strong> ile filtreleyebilirsiniz.</p>
                         <div id="sozlesme_tahsil_rapor_durum" class="giris-tahsil-rapor-durum" role="status" aria-live="polite"></div>
                         <div id="sozlesme_tahsil_rapor_list" class="giris-tahsil-rapor-list"></div>
+                    </div>
+
+                    <div class="tahsilat-makbuz-wrap" id="sozlesme_tediye_panel_makbuz" style="display:none;">
+                        <div class="tahsilat-makbuz-baslik">
+                            <h3><i class="fa fa-money"></i> Yeni Tediye Makbuzu</h3>
+                        </div>
+                        <form id="sozlesme-tediye-form" onsubmit="return sozlesmeTediyeKaydet(event)">
+                            <div class="tahsilat-form-grup">
+                                <label>Müşteri <span class="zorunlu">*</span></label>
+                                <input type="text" id="sozlesme_tediye_musteri_ara" placeholder="Müşteri ara, seçin..." autocomplete="off">
+                                <input type="hidden" id="sozlesme_tediye_musteri_id" name="musteri_id">
+                                <div id="sozlesme_tediye_musteri_listesi" class="tahsilat-musteri-dropdown" style="display:none;"></div>
+                                <span id="sozlesme_tediye_musteri_secilen" class="tahsilat-musteri-secilen" style="display:none;"></span>
+                                <div class="tahsilat-musteri-secilen" style="display:block;margin-top:4px;">Makbuz No: <strong id="sozlesme_tediye_makbuz_no_text">—</strong></div>
+                                <input type="hidden" id="sozlesme_tediye_makbuz_no" name="makbuz_no">
+                            </div>
+                            <div class="tahsilat-form-grup">
+                                <label>Tutar (TL) <span class="zorunlu">*</span></label>
+                                <input type="text" id="sozlesme_tediye_tutar" name="tutar" placeholder="0,00" required>
+                            </div>
+                            <div class="tahsilat-form-grup">
+                                <label>Ödeme Türü</label>
+                                <select id="sozlesme_tediye_odeme_turu" name="odeme_turu">
+                                    <option value="nakit">Nakit</option>
+                                    <option value="havale">Havale/EFT</option>
+                                    <option value="kredi_karti">Kredi Kartı</option>
+                                    <option value="cek">Çek</option>
+                                </select>
+                            </div>
+                            <div class="tahsilat-form-grup" id="sozlesme_tediye_havale_panel_wrap" style="display:none;">
+                                <label>Havale / Banka</label>
+                                <input type="text" id="sozlesme_tediye_havale_banka" name="havale_banka" placeholder="Banka adı veya referans">
+                            </div>
+                            <div class="tahsilat-form-grup" id="sozlesme_tediye_cek_panel_wrap" style="display:none;">
+                                <label>Çek Detayları</label>
+                                <div class="tahsilat-cek-panel">
+                                    <div class="tahsilat-cek-table-wrap">
+                                        <table class="tahsilat-cek-table">
+                                            <thead>
+                                                <tr>
+                                                    <th>Banka</th>
+                                                    <th>Şube</th>
+                                                    <th>Hesap No</th>
+                                                    <th>Çek No</th>
+                                                    <th>Çek Tarihi</th>
+                                                    <th>Tutarı</th>
+                                                    <th></th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="sozlesme_tediye_cek_tbody"></tbody>
+                                        </table>
+                                    </div>
+                                    <div class="tahsilat-cek-toolbar">
+                                        <button type="button" class="tahsilat-cek-btn tahsilat-cek-btn-ekle" onclick="tahsilatCekSatirEkle('sozlesme_tediye')"><i class="fa fa-plus"></i> Satır Ekle</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="tahsilat-form-grup">
+                                <label>Tarih</label>
+                                <input type="date" id="sozlesme_tediye_tarih" name="tediye_tarihi">
+                            </div>
+                            <div class="tahsilat-form-grup">
+                                <label>Tediye yapan</label>
+                                <select id="sozlesme_tediye_tediye_yapan" name="tediye_yapan">
+                                    <option value="DİNDİ GÜLGÜSTEREN" selected>DİNDİ GÜLGÜSTEREN</option>
+                                </select>
+                            </div>
+                            <div class="tahsilat-form-grup">
+                                <label>Açıklama</label>
+                                <textarea id="sozlesme_tediye_aciklama" name="aciklama" rows="2" placeholder="Örn: İade / gider ödemesi"></textarea>
+                            </div>
+                            <div class="tahsilat-makbuz-aksiyon">
+                                <button type="button" class="tahsilat-btn-iptal" onclick="sozlesmeTediyeIptal()">İptal</button>
+                                <button type="button" class="tahsilat-btn-kaydet" onclick="sozlesmeTediyeKaydet(); return false;"><i class="fa fa-save"></i> Kayıt</button>
+                            </div>
+                        </form>
                     </div>
                 </div>
             </div>
@@ -7235,7 +7392,7 @@ function girisRandevuIframeYukle() {
 function switchTab(index) {
     currentTabIndex = index;
     try {
-        if (index >= 0 && index <= 10) localStorage.setItem('bestoffice_giris_tab_index', String(index));
+        if (index >= 0 && index <= 11) localStorage.setItem('bestoffice_giris_tab_index', String(index));
     } catch (e) {}
     // Üst sekme butonlarının aktifliğini index yerine data-index ile kontrol et
     document.querySelectorAll('.tab').forEach(function(t) {
@@ -7286,6 +7443,12 @@ function switchTab(index) {
                     if (rb && re && !rb.value && !re.value) girisTahsilRaporBuguneAyarla();
                     girisTahsilRaporYukle();
                 }
+            }
+            if (effectiveIndex === 11) {
+                var tediyeTarihEl = document.getElementById('giris_tediye_tarih');
+                if (tediyeTarihEl && !tediyeTarihEl.value) tediyeTarihEl.value = new Date().toISOString().slice(0, 10);
+                girisTediyeFormunuSeciliMusteridenDoldur();
+                tediyeMakbuzNoYukle('giris_tediye');
             }
             if (effectiveIndex === 4) {
                 if (selectedId) {
@@ -20952,6 +21115,179 @@ function girisTahsilatFormunuMusteriyleDoldur(m) {
     tahsilatMakbuzNoYukle('giris_tahsilat');
 }
 
+
+function tediyeMakbuzNoYukle(prefix) {
+    fetch(API_NEXT_TEDIYE_NO, { credentials: 'same-origin' })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+            if (j && j.ok && j.makbuz_no != null) tahsilatMakbuzNoSet(prefix, j.makbuz_no);
+        })
+        .catch(function () {});
+}
+
+function girisTediyeOdemeTuruUIUygula() {
+    var prefix = 'giris_tediye';
+    var odemeEl = document.getElementById(prefix + '_odeme_turu');
+    var cekWrap = document.getElementById(prefix + '_cek_panel_wrap');
+    var havWrap = document.getElementById(prefix + '_havale_panel_wrap');
+    var tbody = document.getElementById(prefix + '_cek_tbody');
+    if (!odemeEl) return;
+    var odeme = String(odemeEl.value || '').toLowerCase();
+    var cekSecili = (odeme === 'cek' || odeme === 'çek');
+    var havSecili = (odeme === 'havale' || odeme === 'eft' || odeme === 'banka');
+    if (cekWrap) cekWrap.style.display = cekSecili ? '' : 'none';
+    if (havWrap) havWrap.style.display = havSecili ? '' : 'none';
+    if (cekSecili && tbody && !tbody.children.length) tahsilatCekSatirEkle(prefix);
+}
+
+function girisTediyeFormunuMusteriyleDoldur(m) {
+    if (!m || m.id == null || m.id === '') return;
+    var mid = document.getElementById('giris_tediye_musteri_id');
+    if (!mid) return;
+    mid.value = String(m.id);
+    var ara = document.getElementById('giris_tediye_musteri_ara');
+    if (ara) ara.value = m.name || '';
+    var sec = document.getElementById('giris_tediye_musteri_secilen');
+    if (sec) {
+        sec.textContent = m.name || '';
+        sec.style.display = (m.name && String(m.name).trim()) ? 'block' : 'none';
+    }
+    var list = document.getElementById('giris_tediye_musteri_listesi');
+    if (list) list.style.display = 'none';
+    tediyeMakbuzNoYukle('giris_tediye');
+}
+
+function girisTediyeFormunuSeciliMusteridenDoldur() {
+    if (!selectedId) return;
+    var nameEl = document.getElementById('name');
+    var ad = (nameEl && nameEl.value) ? nameEl.value.trim() : '';
+    if (!ad) {
+        var maEl2 = document.getElementById('musteri_adi');
+        if (maEl2 && maEl2.value) ad = String(maEl2.value).trim();
+    }
+    if (!ad) {
+        var sad = document.getElementById('giris-secili-musteri-ad');
+        if (sad) ad = (sad.textContent || '').trim();
+        if (ad === '—') ad = '';
+    }
+    if (ad) {
+        girisTediyeFormunuMusteriyleDoldur({ id: selectedId, name: ad });
+    } else {
+        fetch('/giris/api/musteri/' + selectedId).then(function (r) { return r.json(); }).then(function (res) {
+            if (res.ok && res.musteri) girisTediyeFormunuMusteriyleDoldur(res.musteri);
+        }).catch(function () {});
+    }
+}
+
+function girisTediyeMusteriListesiGetir(q) {
+    var url = q ? API_TAHSILAT_MUSTERILER + '?q=' + encodeURIComponent(q) : API_TAHSILAT_MUSTERILER;
+    fetch(url)
+        .then(function (r) { return r.json(); })
+        .then(function (arr) {
+            var list = document.getElementById('giris_tediye_musteri_listesi');
+            if (!list) return;
+            list.innerHTML = arr.length ? arr.map(function (m) {
+                return '<div data-id="' + m.id + '" data-name="' + (m.name || '').replace(/"/g, '&quot;') + '">' + (m.name || '—') + '</div>';
+            }).join('') : '<div style="padding:10px;color:#90a4ae;">Müşteri bulunamadı</div>';
+            list.querySelectorAll('div[data-id]').forEach(function (el) {
+                el.onclick = function () {
+                    var id = this.getAttribute('data-id');
+                    var name = this.getAttribute('data-name');
+                    document.getElementById('giris_tediye_musteri_id').value = id;
+                    document.getElementById('giris_tediye_musteri_ara').value = name;
+                    document.getElementById('giris_tediye_musteri_secilen').textContent = '';
+                    document.getElementById('giris_tediye_musteri_secilen').style.display = 'none';
+                    list.style.display = 'none';
+                    tediyeMakbuzNoYukle('giris_tediye');
+                };
+            });
+        })
+        .catch(function () {
+            var list = document.getElementById('giris_tediye_musteri_listesi');
+            if (list) list.innerHTML = '<div style="padding:10px;color:#f44336;">Yüklenemedi</div>';
+        });
+}
+
+function girisTediyeFormPayload() {
+    var musteriId = document.getElementById('giris_tediye_musteri_id').value;
+    var tutarRaw = document.getElementById('giris_tediye_tutar').value || '';
+    var tutar = (typeof parseNumberTR === 'function')
+        ? parseNumberTR(tutarRaw)
+        : (parseFloat(String(tutarRaw).replace(/\./g, '').replace(',', '.')) || 0);
+    var odemeTuru = document.getElementById('giris_tediye_odeme_turu').value || 'nakit';
+    var cekDetay = tahsilatCekDetayTopla('giris_tediye');
+    if (String(odemeTuru).toLowerCase() === 'cek' && cekDetay.length) {
+        tutar = cekDetay.reduce(function (s, r) { return s + (r.tutar || 0); }, 0);
+    }
+    var havaleBanka = '';
+    var havEl = document.getElementById('giris_tediye_havale_banka');
+    if (havEl) havaleBanka = (havEl.value || '').trim();
+    return {
+        musteri_id: musteriId ? parseInt(musteriId, 10) : null,
+        tutar: isNaN(tutar) ? 0 : tutar,
+        odeme_turu: odemeTuru,
+        tediye_tarihi: document.getElementById('giris_tediye_tarih').value,
+        tediye_yapan: (document.getElementById('giris_tediye_tediye_yapan').value || '').trim(),
+        aciklama: (document.getElementById('giris_tediye_aciklama').value || '').trim(),
+        havale_banka: havaleBanka,
+        cek_detay: cekDetay,
+        makbuz_no: (document.getElementById('giris_tediye_makbuz_no') || {}).value || ''
+    };
+}
+
+function girisTediyeKaydet(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    if (window.__girisTediyeKaydetInFlight) return false;
+    var payload = girisTediyeFormPayload();
+    if (!payload.musteri_id) {
+        alert('Lütfen müşteri seçiniz.');
+        return false;
+    }
+    if (payload.tutar <= 0) {
+        alert('Geçerli bir tutar giriniz.');
+        return false;
+    }
+    window.__girisTediyeKaydetInFlight = true;
+    fetch(API_TEDIYE_EKLE, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify(payload)
+    })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            if (data && data.ok) {
+                alert(data.mesaj || 'Tediye eklendi.');
+                if (data.makbuz_no != null) tahsilatMakbuzNoSet('giris_tediye', data.makbuz_no);
+                tediyeMakbuzNoYukle('giris_tediye');
+                var tu = document.getElementById('giris_tediye_tutar');
+                if (tu) tu.value = '';
+                var ac = document.getElementById('giris_tediye_aciklama');
+                if (ac) ac.value = '';
+                var cekBody = document.getElementById('giris_tediye_cek_tbody');
+                if (cekBody) cekBody.innerHTML = '';
+                girisTediyeOdemeTuruUIUygula();
+            } else {
+                alert((data && data.mesaj) || 'Kayıt yapılamadı.');
+            }
+        })
+        .catch(function (err) { alert('İstek gönderilemedi: ' + (err && err.message ? err.message : err)); })
+        .finally(function () { window.__girisTediyeKaydetInFlight = false; });
+    return false;
+}
+
+function girisTediyeIptal() {
+    var tu = document.getElementById('giris_tediye_tutar');
+    if (tu) tu.value = '';
+    var ac = document.getElementById('giris_tediye_aciklama');
+    if (ac) ac.value = '';
+    var hav = document.getElementById('giris_tediye_havale_banka');
+    if (hav) hav.value = '';
+    var cekBody = document.getElementById('giris_tediye_cek_tbody');
+    if (cekBody) cekBody.innerHTML = '';
+    girisTediyeOdemeTuruUIUygula();
+}
+
 /** Seçili müşteri + form alanlarından Tahsilat makbuzunu doldurur (sekme geçişi veya API yoksa). */
 function girisTahsilatFormunuSeciliMusteridenDoldur() {
     if (!selectedId) return;
@@ -22691,6 +23027,42 @@ document.addEventListener('DOMContentLoaded', () => {
     tahsilatOdemeTuruUIUygula('sozlesme_tahsilat');
     tahsilatMakbuzNoYukle('giris_tahsilat');
     tahsilatMakbuzNoYukle('sozlesme_tahsilat');
+    var tOdeme = document.getElementById('giris_tediye_odeme_turu');
+    if (tOdeme) tOdeme.addEventListener('change', function () { girisTediyeOdemeTuruUIUygula(); });
+    girisTediyeOdemeTuruUIUygula();
+    tediyeMakbuzNoYukle('giris_tediye');
+    let sozlesmeTediyeAramaZamanlayici;
+    const sozlesmeTediyeOdeme = document.getElementById('sozlesme_tediye_odeme_turu');
+    if (sozlesmeTediyeOdeme) sozlesmeTediyeOdeme.addEventListener('change', function () { sozlesmeTediyeOdemeTuruUIUygula(); });
+    const sozlesmeTediyeAra = document.getElementById('sozlesme_tediye_musteri_ara');
+    if (sozlesmeTediyeAra) {
+        sozlesmeTediyeAra.addEventListener('focus', function () {
+            if (!this.value) sozlesmeTediyeMusteriListesiGetir('');
+            const list = document.getElementById('sozlesme_tediye_musteri_listesi');
+            if (list) list.style.display = 'block';
+        });
+        sozlesmeTediyeAra.addEventListener('input', function () {
+            clearTimeout(sozlesmeTediyeAramaZamanlayici);
+            sozlesmeTediyeAramaZamanlayici = setTimeout(function () {
+                sozlesmeTediyeMusteriListesiGetir(sozlesmeTediyeAra.value);
+            }, 250);
+        });
+    }
+    let girisTediyeAramaZamanlayici;
+    const tediyeAra = document.getElementById('giris_tediye_musteri_ara');
+    if (tediyeAra) {
+        tediyeAra.addEventListener('focus', function () {
+            if (!this.value) girisTediyeMusteriListesiGetir('');
+            const tlist = document.getElementById('giris_tediye_musteri_listesi');
+            if (tlist) tlist.style.display = 'block';
+        });
+        tediyeAra.addEventListener('input', function () {
+            clearTimeout(girisTediyeAramaZamanlayici);
+            girisTediyeAramaZamanlayici = setTimeout(function () {
+                girisTediyeMusteriListesiGetir(tediyeAra.value);
+            }, 250);
+        });
+    }
     let girisTahsilatAramaZamanlayici;
     const tahsilatAra = document.getElementById('giris_tahsilat_musteri_ara');
     if (tahsilatAra) {
@@ -22710,9 +23082,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const list = document.getElementById('giris_tahsilat_musteri_listesi');
         const ara = document.getElementById('giris_tahsilat_musteri_ara');
         if (list && ara && !list.contains(e.target) && e.target !== ara) list.style.display = 'none';
+        const tediyeList = document.getElementById('giris_tediye_musteri_listesi');
+        const tediyeAraEl = document.getElementById('giris_tediye_musteri_ara');
+        if (tediyeList && tediyeAraEl && !tediyeList.contains(e.target) && e.target !== tediyeAraEl) tediyeList.style.display = 'none';
         const listSoz = document.getElementById('sozlesme_tahsilat_musteri_listesi');
         const araSoz = document.getElementById('sozlesme_tahsilat_musteri_ara');
         if (listSoz && araSoz && !listSoz.contains(e.target) && e.target !== araSoz) listSoz.style.display = 'none';
+        const listSozTed = document.getElementById('sozlesme_tediye_musteri_listesi');
+        const araSozTed = document.getElementById('sozlesme_tediye_musteri_ara');
+        if (listSozTed && araSozTed && !listSozTed.contains(e.target) && e.target !== araSozTed) listSozTed.style.display = 'none';
         const senaryoList = document.getElementById('senaryo_musteri_liste');
         const senaryoInput = document.getElementById('senaryo_musteri_ismi');
         if (senaryoList && senaryoInput && !senaryoList.contains(e.target) && e.target !== senaryoInput) {
@@ -22848,6 +23226,8 @@ const API_TAHSILAT_RAPOR = '/faturalar/api/tahsilat-raporu';
 const API_TAHSILAT_GUNCELLE = '/faturalar/tahsilat-guncelle';
 const API_TAHSILAT_SIL = '/faturalar/tahsilat-sil';
 const API_TAHSILAT_PERSONELLER = '/giris/api/tahsilat-personeller';
+const API_TEDIYE_EKLE = '/faturalar/tediye-ekle';
+const API_NEXT_TEDIYE_NO = '/faturalar/api/next-tediye-no';
 const API_NEXT_MAKBUZ_NO = '/faturalar/api/next-makbuz-no';
 
 window.__girisTahsilAktifAltSekme = 'both';
@@ -22855,6 +23235,7 @@ window.__faturaRaporScrollSyncing = false;
 window.__tahsilatPersonellerLoaded = false;
 window.__girisTahsilKaydetInFlight = false;
 window.__sozlesmeTahsilKaydetInFlight = false;
+window.__girisTediyeKaydetInFlight = false;
 
 function tahsilatMakbuzNoSet(prefix, no) {
     var txt = document.getElementById(prefix + '_makbuz_no_text');
@@ -23018,7 +23399,7 @@ function sozlesmeAylikYilFiltresiniSaglamlastir() {
 
 function tahsilatTahsilEdenSelectDoldur() {
     if (window.__tahsilatPersonellerLoaded) return;
-    var hedefler = ['giris_tahsilat_tahsil_eden', 'sozlesme_tahsilat_tahsil_eden']
+    var hedefler = ['giris_tahsilat_tahsil_eden', 'sozlesme_tahsilat_tahsil_eden', 'giris_tediye_tediye_yapan', 'sozlesme_tediye_tediye_yapan']
         .map(function(id){ return document.getElementById(id); })
         .filter(Boolean);
     if (!hedefler.length) return;
@@ -23978,17 +24359,194 @@ function sozlesmeTahsilRaporYukle() {
     });
 }
 function sozlesmeTahsilAltTabAc(which) {
-    var sec = (which === 'rapor') ? 'rapor' : 'makbuz';
+    var sec = (which === 'rapor') ? 'rapor' : ((which === 'tediye') ? 'tediye' : 'makbuz');
     var bMak = document.getElementById('sozlesme_tahsil_tab_makbuz_btn');
     var bRap = document.getElementById('sozlesme_tahsil_tab_rapor_btn');
+    var bTed = document.getElementById('sozlesme_tahsil_tab_tediye_btn');
     var pMak = document.getElementById('sozlesme_tahsil_panel_makbuz');
     var pRap = document.getElementById('sozlesme_tahsil_rapor_kutu');
+    var pTed = document.getElementById('sozlesme_tediye_panel_makbuz');
     if (bMak) bMak.classList.toggle('active', sec === 'makbuz');
     if (bRap) bRap.classList.toggle('active', sec === 'rapor');
+    if (bTed) bTed.classList.toggle('active', sec === 'tediye');
     if (pMak) pMak.style.display = (sec === 'makbuz') ? '' : 'none';
     if (pRap) pRap.style.display = (sec === 'rapor') ? '' : 'none';
+    if (pTed) pTed.style.display = (sec === 'tediye') ? '' : 'none';
     if (sec === 'rapor') sozlesmeTahsilRaporYukle();
+    if (sec === 'tediye') {
+        sozlesmeTediyeMakbuzNoYukle();
+        sozlesmeTediyeFormunuSeciliMusteridenDoldur();
+    }
 }
+
+
+function sozlesmeTediyeMakbuzNoYukle() {
+    tediyeMakbuzNoYukle('sozlesme_tediye');
+}
+
+function sozlesmeTediyeOdemeTuruUIUygula() {
+    var prefix = 'sozlesme_tediye';
+    var odemeEl = document.getElementById(prefix + '_odeme_turu');
+    var cekWrap = document.getElementById(prefix + '_cek_panel_wrap');
+    var havWrap = document.getElementById(prefix + '_havale_panel_wrap');
+    var tbody = document.getElementById(prefix + '_cek_tbody');
+    if (!odemeEl) return;
+    var odeme = String(odemeEl.value || '').toLowerCase();
+    var cekSecili = (odeme === 'cek' || odeme === 'çek');
+    var havSecili = (odeme === 'havale' || odeme === 'eft' || odeme === 'banka');
+    if (cekWrap) cekWrap.style.display = cekSecili ? '' : 'none';
+    if (havWrap) havWrap.style.display = havSecili ? '' : 'none';
+    if (cekSecili && tbody && !tbody.children.length) tahsilatCekSatirEkle(prefix);
+}
+
+function sozlesmeTediyeFormunuMusteriyleDoldur(m) {
+    if (!m || m.id == null || m.id === '') return;
+    var mid = document.getElementById('sozlesme_tediye_musteri_id');
+    if (!mid) return;
+    mid.value = String(m.id);
+    var ara = document.getElementById('sozlesme_tediye_musteri_ara');
+    if (ara) ara.value = m.name || '';
+    var sec = document.getElementById('sozlesme_tediye_musteri_secilen');
+    if (sec) {
+        sec.textContent = m.name || '';
+        sec.style.display = (m.name && String(m.name).trim()) ? 'block' : 'none';
+    }
+    var list = document.getElementById('sozlesme_tediye_musteri_listesi');
+    if (list) list.style.display = 'none';
+    sozlesmeTediyeMakbuzNoYukle();
+}
+
+function sozlesmeTediyeFormunuSeciliMusteridenDoldur() {
+    if (!selectedId) return;
+    var nameEl = document.getElementById('name');
+    var ad = (nameEl && nameEl.value) ? nameEl.value.trim() : '';
+    if (!ad) {
+        var maEl2 = document.getElementById('musteri_adi');
+        if (maEl2 && maEl2.value) ad = String(maEl2.value).trim();
+    }
+    if (!ad) {
+        var sad = document.getElementById('giris-secili-musteri-ad');
+        if (sad) ad = (sad.textContent || '').trim();
+        if (ad === '—') ad = '';
+    }
+    if (ad) {
+        sozlesmeTediyeFormunuMusteriyleDoldur({ id: selectedId, name: ad });
+    } else {
+        fetch('/giris/api/musteri/' + selectedId).then(function (r) { return r.json(); }).then(function (res) {
+            if (res.ok && res.musteri) sozlesmeTediyeFormunuMusteriyleDoldur(res.musteri);
+        }).catch(function () {});
+    }
+}
+
+function sozlesmeTediyeMusteriListesiGetir(q) {
+    var url = q ? API_TAHSILAT_MUSTERILER + '?q=' + encodeURIComponent(q) : API_TAHSILAT_MUSTERILER;
+    fetch(url)
+        .then(function (r) { return r.json(); })
+        .then(function (arr) {
+            var list = document.getElementById('sozlesme_tediye_musteri_listesi');
+            if (!list) return;
+            list.innerHTML = arr.length ? arr.map(function (m) {
+                return '<div data-id="' + m.id + '" data-name="' + (m.name || '').replace(/"/g, '&quot;') + '">' + (m.name || '—') + '</div>';
+            }).join('') : '<div style="padding:10px;color:#90a4ae;">Müşteri bulunamadı</div>';
+            list.querySelectorAll('div[data-id]').forEach(function (el) {
+                el.onclick = function () {
+                    var id = this.getAttribute('data-id');
+                    var name = this.getAttribute('data-name');
+                    document.getElementById('sozlesme_tediye_musteri_id').value = id;
+                    document.getElementById('sozlesme_tediye_musteri_ara').value = name;
+                    document.getElementById('sozlesme_tediye_musteri_secilen').textContent = '';
+                    document.getElementById('sozlesme_tediye_musteri_secilen').style.display = 'none';
+                    list.style.display = 'none';
+                    sozlesmeTediyeMakbuzNoYukle();
+                };
+            });
+        })
+        .catch(function () {
+            var list = document.getElementById('sozlesme_tediye_musteri_listesi');
+            if (list) list.innerHTML = '<div style="padding:10px;color:#f44336;">Yüklenemedi</div>';
+        });
+}
+
+function sozlesmeTediyeFormPayload() {
+    var musteriId = document.getElementById('sozlesme_tediye_musteri_id').value;
+    var tutarRaw = document.getElementById('sozlesme_tediye_tutar').value || '';
+    var tutar = (typeof parseNumberTR === 'function')
+        ? parseNumberTR(tutarRaw)
+        : (parseFloat(String(tutarRaw).replace(/\./g, '').replace(',', '.')) || 0);
+    var odemeTuru = document.getElementById('sozlesme_tediye_odeme_turu').value || 'nakit';
+    var cekDetay = tahsilatCekDetayTopla('sozlesme_tediye');
+    if (String(odemeTuru).toLowerCase() === 'cek' && cekDetay.length) {
+        tutar = cekDetay.reduce(function (s, r) { return s + (r.tutar || 0); }, 0);
+    }
+    var havaleBanka = '';
+    var havEl = document.getElementById('sozlesme_tediye_havale_banka');
+    if (havEl) havaleBanka = (havEl.value || '').trim();
+    return {
+        musteri_id: musteriId ? parseInt(musteriId, 10) : null,
+        tutar: isNaN(tutar) ? 0 : tutar,
+        odeme_turu: odemeTuru,
+        tediye_tarihi: document.getElementById('sozlesme_tediye_tarih').value,
+        tediye_yapan: (document.getElementById('sozlesme_tediye_tediye_yapan').value || '').trim(),
+        aciklama: (document.getElementById('sozlesme_tediye_aciklama').value || '').trim(),
+        havale_banka: havaleBanka,
+        cek_detay: cekDetay,
+        makbuz_no: (document.getElementById('sozlesme_tediye_makbuz_no') || {}).value || ''
+    };
+}
+
+function sozlesmeTediyeKaydet(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    if (window.__sozlesmeTediyeKaydetInFlight) return false;
+    var payload = sozlesmeTediyeFormPayload();
+    if (!payload.musteri_id) {
+        alert('Lütfen müşteri seçiniz.');
+        return false;
+    }
+    if (payload.tutar <= 0) {
+        alert('Geçerli bir tutar giriniz.');
+        return false;
+    }
+    window.__sozlesmeTediyeKaydetInFlight = true;
+    fetch(API_TEDIYE_EKLE, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify(payload)
+    })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            if (data && data.ok) {
+                alert(data.mesaj || 'Tediye eklendi.');
+                if (data.makbuz_no != null) tahsilatMakbuzNoSet('sozlesme_tediye', data.makbuz_no);
+                sozlesmeTediyeMakbuzNoYukle();
+                var tu = document.getElementById('sozlesme_tediye_tutar');
+                if (tu) tu.value = '';
+                var ac = document.getElementById('sozlesme_tediye_aciklama');
+                if (ac) ac.value = '';
+                var cekBody = document.getElementById('sozlesme_tediye_cek_tbody');
+                if (cekBody) cekBody.innerHTML = '';
+                sozlesmeTediyeOdemeTuruUIUygula();
+            } else {
+                alert((data && data.mesaj) || 'Kayıt yapılamadı.');
+            }
+        })
+        .catch(function (err) { alert('İstek gönderilemedi: ' + (err && err.message ? err.message : err)); })
+        .finally(function () { window.__sozlesmeTediyeKaydetInFlight = false; });
+    return false;
+}
+
+function sozlesmeTediyeIptal() {
+    var tu = document.getElementById('sozlesme_tediye_tutar');
+    if (tu) tu.value = '';
+    var ac = document.getElementById('sozlesme_tediye_aciklama');
+    if (ac) ac.value = '';
+    var hav = document.getElementById('sozlesme_tediye_havale_banka');
+    if (hav) hav.value = '';
+    var cekBody = document.getElementById('sozlesme_tediye_cek_tbody');
+    if (cekBody) cekBody.innerHTML = '';
+    sozlesmeTediyeOdemeTuruUIUygula();
+}
+
 
 function girisTahsilRaporPanelTaze() {
     if (typeof girisTahsilRaporYukle === 'function') girisTahsilRaporYukle();

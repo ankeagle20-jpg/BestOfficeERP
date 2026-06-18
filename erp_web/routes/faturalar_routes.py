@@ -492,6 +492,81 @@ def _normalize_makbuz_no(raw):
     return re.sub(r"\s+", "", s)[:40]
 
 
+_TEDIYE_MAX_SEQ_SQL = """
+        SELECT COALESCE(MAX(x.n), 999) AS max_seq
+        FROM (
+            SELECT CAST(SUBSTRING(TRIM(makbuz_no) FROM 3) AS BIGINT) AS n
+            FROM tediyeler
+            WHERE makbuz_no IS NOT NULL
+              AND TRIM(makbuz_no) ~ '^T-[0-9]+$'
+              AND LENGTH(TRIM(makbuz_no)) <= 20
+        ) x
+        WHERE x.n >= 1000
+        """
+
+
+def _normalize_tediye_makbuz_no(raw):
+    s = re.sub(r"\s+", "", str(raw or "").strip())[:40]
+    if not s:
+        return ""
+    if re.match(r"^[0-9]+$", s):
+        return f"T-{s}"
+    m = re.match(r"^[Tt]-?(\d+)$", s)
+    if m:
+        return f"T-{m.group(1)}"
+    if s.upper().startswith("T-"):
+        return s.upper()
+    return s
+
+
+def get_next_tediye_no():
+    """Tediye makbuz serisi: T-1000, T-1001, ... (tahsilat serisinden bağımsız)."""
+    row = fetch_one(_TEDIYE_MAX_SEQ_SQL) or {}
+    try:
+        seq = int(row.get("max_seq") or 999) + 1
+    except Exception:
+        seq = 1000
+    if seq < 1000:
+        seq = 1000
+    return f"T-{seq}"
+
+
+def _next_tediye_no_with_cursor(cur):
+    cur.execute(_TEDIYE_MAX_SEQ_SQL)
+    row = cur.fetchone() or {}
+    try:
+        seq = int(row.get("max_seq") or 999) + 1
+    except Exception:
+        seq = 1000
+    if seq < 1000:
+        seq = 1000
+    return f"T-{seq}"
+
+
+def _tediye_makbuz_no_used_cursor(cur, mn):
+    cur.execute(
+        "SELECT id FROM tediyeler WHERE TRIM(COALESCE(makbuz_no, '')) = %s LIMIT 1",
+        (mn,),
+    )
+    return cur.fetchone() is not None
+
+
+def _tediye_icin_makbuz_no_sec_cursor(cur, istenen_makbuz_no=None):
+    aday = _normalize_tediye_makbuz_no(istenen_makbuz_no)
+    if aday and not _tediye_makbuz_no_used_cursor(cur, aday):
+        return aday
+    out = _next_tediye_no_with_cursor(cur)
+    _guard = 0
+    while out and _tediye_makbuz_no_used_cursor(cur, out) and _guard < 10000:
+        _guard += 1
+        m = re.match(r"^T-(\d+)$", out or "")
+        if m:
+            out = f"T-{int(m.group(1)) + 1}"
+        else:
+            break
+    return out
+
+
 def _makbuz_no_kullanildi_mi(makbuz_no):
     mn = _normalize_makbuz_no(makbuz_no)
     if not mn:
@@ -7602,6 +7677,97 @@ def tahsilat_ekle():
         return jsonify({'ok': False, 'mesaj': str(e)}), 500
 
 
+@bp.route('/tediye-ekle', methods=['POST'])
+@faturalar_gerekli
+def tediye_ekle():
+    """Yeni tediye ekle (firmadan müşteriye ödeme). PDF ve aylık grid senkronu yok."""
+    try:
+        data = request.get_json(silent=True) or {}
+        musteri_id = data.get('musteri_id')
+        if not musteri_id:
+            return jsonify({'ok': False, 'mesaj': 'Müşteri seçiniz.'}), 400
+        try:
+            musteri_id = int(musteri_id)
+        except (TypeError, ValueError):
+            return jsonify({'ok': False, 'mesaj': 'Geçersiz müşteri.'}), 400
+        if musteri_id <= 0:
+            return jsonify({'ok': False, 'mesaj': 'Geçersiz müşteri.'}), 400
+
+        musteri = fetch_one("SELECT id, name FROM customers WHERE id = %s", (musteri_id,))
+        if not musteri:
+            return jsonify({'ok': False, 'mesaj': 'Müşteri bulunamadı.'}), 404
+
+        cek_detay_raw = data.get('cek_detay')
+        cek_list = cek_detay_raw if isinstance(cek_detay_raw, list) else []
+        odeme_turu = (data.get('odeme_turu') or 'nakit').strip().lower().replace(" ", "_")
+        tutar = _parse_amount_flexible(data.get('tutar'))
+        if odeme_turu == 'cek' and cek_list:
+            tutar = sum(_parse_amount_flexible(c.get("tutar")) for c in cek_list)
+        if tutar <= 0:
+            return jsonify({'ok': False, 'mesaj': 'Tutar 0\'dan büyük olmalıdır veya çek satırları giriniz.'}), 400
+
+        raw_tarih = (
+            (data.get('tediye_tarihi') or data.get('tarih') or "").strip()
+            or datetime.now().strftime("%Y-%m-%d")
+        )
+        if re.match(r"^\d{1,2}\.\d{1,2}\.\d{4}$", raw_tarih):
+            parts = raw_tarih.split(".")
+            tediye_tarihi = f"{parts[2]}-{parts[1].zfill(2)}-{parts[0].zfill(2)}"
+        else:
+            tediye_tarihi = raw_tarih[:10] if len(raw_tarih) >= 10 else datetime.now().strftime("%Y-%m-%d")
+
+        aciklama_text = (data.get('aciklama') or '').strip() or None
+        cek_detay_str = json.dumps(cek_list) if cek_list else ""
+        havale_banka = (data.get('havale_banka') or "").strip()[:200] or None
+        tediye_yapan = (data.get('tediye_yapan') or '').strip()[:120] or None
+
+        with db() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT pg_advisory_xact_lock(hashtext('tediye_makbuz_no_alloc')::bigint)")
+            makbuz_no = _tediye_icin_makbuz_no_sec_cursor(cur, data.get("makbuz_no"))
+            cur.execute(
+                """
+                INSERT INTO tediyeler (
+                    musteri_id, tutar, odeme_turu, tediye_tarihi, aciklama,
+                    makbuz_no, cek_detay, havale_banka, tediye_yapan
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id, makbuz_no, tutar, odeme_turu, tediye_tarihi, aciklama,
+                          created_at, cek_detay, havale_banka, tediye_yapan
+                """,
+                (
+                    musteri_id,
+                    tutar,
+                    odeme_turu,
+                    tediye_tarihi,
+                    aciklama_text,
+                    makbuz_no,
+                    cek_detay_str or None,
+                    havale_banka,
+                    tediye_yapan,
+                ),
+            )
+            row = cur.fetchone()
+        row = dict(row) if row else None
+        if not row:
+            return jsonify({'ok': False, 'mesaj': 'Kayıt oluşturulamadı.'}), 500
+
+        return jsonify({
+            'ok': True,
+            'mesaj': 'Tediye eklendi.',
+            'tediye_id': row['id'],
+            'musteri_id': musteri_id,
+            'musteri_adi': (musteri or {}).get('name'),
+            'makbuz_no': makbuz_no,
+            'tutar': float(row.get('tutar') or 0),
+            'odeme_turu': row.get('odeme_turu'),
+            'tediye_tarihi': str(row.get('tediye_tarihi') or '')[:10],
+            'aciklama': row.get('aciklama'),
+            'tediye_yapan': row.get('tediye_yapan'),
+        })
+    except Exception as e:
+        return jsonify({'ok': False, 'mesaj': str(e)}), 500
+
+
 @bp.route('/tahsilat-guncelle', methods=['POST'])
 @faturalar_gerekli
 def tahsilat_guncelle():
@@ -8172,6 +8338,26 @@ def tahsilat_makbuz_onizle():
 
 _next_makbuz_no_cache: list = [0.0, None]  # [timestamp, value]
 _NEXT_MAKBUZ_NO_CACHE_TTL = 30
+_next_tediye_no_cache: list = [0.0, None]
+_NEXT_TEDIYE_NO_CACHE_TTL = 30
+
+
+@bp.route('/api/next-tediye-no', methods=['GET'])
+@faturalar_gerekli
+def api_next_tediye_no():
+    try:
+        now = time.time()
+        if _next_tediye_no_cache[1] is not None and now - _next_tediye_no_cache[0] < _NEXT_TEDIYE_NO_CACHE_TTL:
+            return jsonify({'ok': True, 'makbuz_no': _next_tediye_no_cache[1]})
+        with db() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT pg_advisory_xact_lock(hashtext('tediye_makbuz_no_alloc')::bigint)")
+            no = _next_tediye_no_with_cursor(cur)
+        _next_tediye_no_cache[0] = now
+        _next_tediye_no_cache[1] = no
+        return jsonify({'ok': True, 'makbuz_no': no})
+    except Exception as e:
+        return jsonify({'ok': False, 'mesaj': str(e)}), 500
 
 
 @bp.route('/api/next-makbuz-no', methods=['GET'])
