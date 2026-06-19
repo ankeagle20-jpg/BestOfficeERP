@@ -486,6 +486,7 @@ def init_schema():
     ensure_customers_excel_columns()
     ensure_customers_quick_edit_columns()
     ensure_customers_durum()
+    ensure_customers_calisma_sekli()
     ensure_customers_kapanis_tarihi()
     ensure_customers_kapanis_sonrasi_borc_ay()
     ensure_customers_bizim_hesap()
@@ -1376,6 +1377,16 @@ def ensure_duzenli_fatura_secenekleri_table():
         except Exception as e:
             print(f"duzenli_fatura_secenekleri seed {kod}: {e}")
     _duzenli_fatura_secenekleri_table_ensured = True
+
+
+def ensure_customers_calisma_sekli():
+    """Müşteri çalışma şekli: sirali (kiracı/grid) veya cari (tahsilat/fatura/tediye)."""
+    try:
+        execute(
+            "ALTER TABLE customers ADD COLUMN IF NOT EXISTS calisma_sekli TEXT DEFAULT 'sirali'"
+        )
+    except Exception as e:
+        print(f"customers.calisma_sekli: {e}")
 
 
 def ensure_customers_cari_columns():

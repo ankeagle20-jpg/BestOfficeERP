@@ -1228,7 +1228,10 @@ def build_makbuz_pdf(tahsilat, musteri_adi, fatura_no=None, banka_hesaplar=None)
         c.setFont(font_name, 9)
 
     # Açıklama + ilgili fatura (alt not)
-    aciklama = (tahsilat.get("aciklama") or "").strip()
+    from .giris_routes import _tahsilat_aciklama_temizle
+    aciklama = _tahsilat_aciklama_temizle(
+        (tahsilat.get("aciklama") or "").strip()
+    )
     if aciklama or fatura_no:
         note_y = foot_y - 8 * mm
         c.setFont(font_name, 8)
