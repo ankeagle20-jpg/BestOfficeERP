@@ -862,6 +862,29 @@
     background: #1976d2;
     color: #fff;
 }
+.sozlesmeler-fatura-btn-satir {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+.btn-gelen-fatura-kisa {
+    display: inline-block;
+    background: #00695c;
+    color: #fff;
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    text-decoration: none;
+    transition: background 0.2s;
+    border: none;
+    cursor: pointer;
+    font-family: inherit;
+}
+.btn-gelen-fatura-kisa:hover {
+    background: #00897b;
+    color: #fff;
+}
 .sozlesmeler-yeni-fatura-not {
     font-size: 11px;
     color: #90a4ae;
@@ -3774,8 +3797,11 @@
                     <strong>Manuel ödeme</strong> — Bu kayıt düzenli aylık kira borçlandırması için değil; günlük fatura ve tahsilat akışındaki bir firmadır. Aylık takvim gizlendi. Fatura ve tahsilatı aşağıdaki formlardan işleyebilirsiniz.
                 </p>
                 <div class="sozlesmeler-yeni-fatura-wrap">
-                    <h4 class="sozlesmeler-sag-baslik"><i class="fa fa-file-text-o"></i> Yeni Fatura Oluştur</h4>
-                    <button type="button" class="btn-yeni-fatura-kisa" onclick="sozlesmeYeniFaturaAc(false)"><i class="fa fa-plus"></i> Fatura Oluştur</button>
+                    <h4 class="sozlesmeler-sag-baslik"><i class="fa fa-file-text-o"></i> Fatura İşlemleri</h4>
+                    <div class="sozlesmeler-fatura-btn-satir">
+                        <button type="button" class="btn-gelen-fatura-kisa" onclick="sozlesmeGelenFaturaAc()"><i class="fa fa-download"></i> Gelen Fatura</button>
+                        <button type="button" class="btn-yeni-fatura-kisa" onclick="sozlesmeYeniFaturaAc(false)"><i class="fa fa-plus"></i> Fatura Oluştur</button>
+                    </div>
                     <p class="sozlesmeler-yeni-fatura-not">Seçili müşteri ile açılır; gridde seçim varsa tutar satıra yazılır. Sadece seçili aylarla açmak için yukarıdaki «Seçilen aylardan fatura oluştur» düğmesini kullanın.</p>
                 </div>
                 <div class="sozlesmeler-tahsilat-wrap">
@@ -7634,29 +7660,31 @@ function girisGrupFiltreSecenekleriYukle() {
     if (!panel) return Promise.resolve();
     if (lbl) lbl.textContent = 'Yükleniyor…';
     panel.innerHTML = '<div style="font-size:12px;color:#90a4ae;">Yükleniyor…</div>';
-    // Müşteri kartındaki grup dropdown'u ile aynı kaynaktan beslenir.
-    return girisFetchAgKopmasinaKarsi('/cari-kart/api/groups', { credentials: 'same-origin' }, 1)
-        .then(function (r) { return girisFetchJsonSafely(r); })
-        .then(function (j) {
-            var arr = (j && j.ok && Array.isArray(j.groups)) ? j.groups : [];
-            window.__girisGrupSecenekler = arr.map(function (g) {
-                var gid = parseInt(g.id, 10);
-                if (isNaN(gid) || gid < 1) return null;
-                var nm = String(g.name || g.musteri_adi || ('Grup #' + gid)).trim();
-                return { id: gid, name: nm || ('Grup #' + gid) };
-            }).filter(function (x) { return !!x; });
-            window.__girisGrupSecenekler.sort(function (a, b) {
-                return String(a.name || '').localeCompare(String(b.name || ''), 'tr');
-            });
-            var validIds = {};
-            window.__girisGrupSecenekler.forEach(function (g) { validIds[g.id] = true; });
-            window.__girisGrupSeciliIds = (window.__girisGrupSeciliIds || []).filter(function (id) { return !!validIds[id]; });
-            if (!window.__girisGrupSeciliIds.length) {
-                window.__girisGrupSeciliIds = window.__girisGrupSecenekler.map(function (g) { return g.id; });
-            }
-            window.__girisGrupSeciliIdsDraft = girisGrupSeciliIdsOku().slice();
-            if (typeof girisGrupMultiPanelRender === 'function') girisGrupMultiPanelRender();
-            if (typeof girisGrupMultiBtnLabelGuncelle === 'function') girisGrupMultiBtnLabelGuncelle();
+
+    function filtreUygula(arr) {
+        window.__girisGrupSecenekler = arr.map(function (g) {
+            var gid = parseInt(g.id, 10);
+            if (isNaN(gid) || gid < 1) return null;
+            var nm = String(g.name || g.musteri_adi || ('Grup #' + gid)).trim();
+            return { id: gid, name: nm || ('Grup #' + gid) };
+        }).filter(function (x) { return !!x; });
+        window.__girisGrupSecenekler.sort(function (a, b) {
+            return String(a.name || '').localeCompare(String(b.name || ''), 'tr');
+        });
+        var validIds = {};
+        window.__girisGrupSecenekler.forEach(function (g) { validIds[g.id] = true; });
+        window.__girisGrupSeciliIds = (window.__girisGrupSeciliIds || []).filter(function (id) { return !!validIds[id]; });
+        if (!window.__girisGrupSeciliIds.length) {
+            window.__girisGrupSeciliIds = window.__girisGrupSecenekler.map(function (g) { return g.id; });
+        }
+        window.__girisGrupSeciliIdsDraft = girisGrupSeciliIdsOku().slice();
+        if (typeof girisGrupMultiPanelRender === 'function') girisGrupMultiPanelRender();
+        if (typeof girisGrupMultiBtnLabelGuncelle === 'function') girisGrupMultiBtnLabelGuncelle();
+    }
+
+    return girisAllGroupsRawAl()
+        .then(function (arrAll) {
+            filtreUygula(arrAll);
         })
         .catch(function () {
             window.__girisGrupSecenekler = [];
@@ -14843,6 +14871,15 @@ function sozlesmeSeciliYilFaturaAc() {
     window.open('/faturalar/yeni?' + params.toString(), '_blank');
 }
 
+function sozlesmeGelenFaturaAc() {
+    var midStr = sozlesmeFaturaMusteriIdStr();
+    if (!midStr) {
+        alert('Önce müşteri seçin (soldan liste veya tahsilat formu).');
+        return;
+    }
+    window.open('/faturalar/gelen/yeni?musteri_id=' + encodeURIComponent(midStr), '_blank');
+}
+
 /**
  * Yeni fatura sekmesi. Tutar: makbuzla aynı kaynak — DOM’daki .sozlesmeler-ay-kart-secili (Set ile değil).
  * @param {boolean} zorunluGridSecimi true ise seçili ay yoksa uyarı; false ise KYC varsayılanıyla açılır.
@@ -20860,7 +20897,7 @@ function selectMusteri(id) {
                     : ((m.parent_customer_id != null && String(m.parent_customer_id).trim() !== '') ? String(m.parent_customer_id).trim() : '');
                 parentHidden.value = pval;
             })();
-            if (window.__girisFormGrupPreWarmedId !== m.id) {
+            if (String(window.__girisFormGrupPreWarmedId || '') !== String(m.id != null ? m.id : '')) {
                 girisFormGrupListeYukle();
             }
             girisGroupStatusBadgeYaz();
@@ -21536,16 +21573,46 @@ function girisGrupAdiHiddendan(hiddenVal) {
     return '';
 }
 
+/** Tüm grup listesi: __girisAllGroupsCache (30 sn) + in-flight dedupe. */
+function girisAllGroupsRawAl() {
+    var TTL_MS = 30000;
+    var now = Date.now();
+    var cached = window.__girisAllGroupsCache;
+    var cachedAt = window.__girisAllGroupsCacheAt || 0;
+
+    if (Array.isArray(cached) && (now - cachedAt) < TTL_MS) {
+        return Promise.resolve(cached.slice());
+    }
+    if (window.__girisAllGroupsFetchPromise) {
+        return window.__girisAllGroupsFetchPromise;
+    }
+
+    window.__girisAllGroupsFetchPromise = girisFetchAgKopmasinaKarsi(
+        '/cari-kart/api/groups',
+        { credentials: 'same-origin' },
+        2
+    )
+        .then(function (r) { return girisFetchJsonSafely(r); })
+        .then(function (j) {
+            var arrAll = (j && j.ok && Array.isArray(j.groups)) ? j.groups.slice() : [];
+            window.__girisAllGroupsCache = arrAll;
+            window.__girisAllGroupsCacheAt = Date.now();
+            return arrAll;
+        })
+        .catch(function () { return []; })
+        .finally(function () {
+            window.__girisAllGroupsFetchPromise = null;
+        });
+
+    return window.__girisAllGroupsFetchPromise;
+}
+
 function girisFormGrupListeYukle() {
     var sel = document.getElementById('giris_form_grup_select');
     if (!sel) return Promise.resolve();
     var hid = document.getElementById('parent_cari_id');
     var want = hid ? String(hid.value || '').trim() : '';
-    /* Gruplar global; her müşteri seçiminde tekrar çekmek yerine bir kez yükle, sonra 30 sn cache'ten kullan
-       ve seçili id'yi client-side dışla. */
-    var now = Date.now();
-    var cachedAll = window.__girisAllGroupsCache;
-    var cachedAt = window.__girisAllGroupsCacheAt || 0;
+
     function cevapUygula(arrAll) {
         var exId = selectedId ? String(selectedId) : '';
         var arr = exId ? arrAll.filter(function (g) { return String(g && g.id) !== exId; }) : arrAll.slice();
@@ -21574,19 +21641,10 @@ function girisFormGrupListeYukle() {
             window.__girisFormGrupProgrammatic = false;
         }
     }
-    if (Array.isArray(cachedAll) && (now - cachedAt) < 30000) {
-        cevapUygula(cachedAll);
-        return Promise.resolve();
-    }
-    return girisFetchAgKopmasinaKarsi('/cari-kart/api/groups', { credentials: 'same-origin' }, 2)
-        .then(function (r) { return girisFetchJsonSafely(r); })
-        .then(function (j) {
-            var arrAll = (j && j.ok && Array.isArray(j.groups)) ? j.groups.slice() : [];
-            window.__girisAllGroupsCache = arrAll;
-            window.__girisAllGroupsCacheAt = Date.now();
-            cevapUygula(arrAll);
-        })
-        .catch(function () {});
+
+    return girisAllGroupsRawAl().then(function (arrAll) {
+        cevapUygula(arrAll);
+    });
 }
 
 /** Grup listesi cache'ini geçersiz kıl (yeni grup eklenince veya grup silinince çağır). */
@@ -23440,13 +23498,49 @@ function tahsilatMakbuzNoSet(prefix, no) {
     if (hid) hid.value = v;
 }
 
+/** Makbuz no'yu her iki tahsilat formuna yazar (element yoksa atlar). */
+function tahsilatMakbuzNoHerIkisineYaz(no) {
+    tahsilatMakbuzNoSet('giris_tahsilat', no);
+    tahsilatMakbuzNoSet('sozlesme_tahsilat', no);
+}
+
 function tahsilatMakbuzNoYukle(prefix) {
-    fetch(API_NEXT_MAKBUZ_NO, { credentials: 'same-origin' })
-        .then(function(r){ return r.json(); })
-        .then(function(j){
-            if (j && j.ok && j.makbuz_no != null) tahsilatMakbuzNoSet(prefix, j.makbuz_no);
+    var TTL_MS = 2000;
+    var now = Date.now();
+    var cachedAt = window.__makbuzNoFetchAt || 0;
+    var cachedNo = window.__makbuzNoCached;
+
+    if (cachedNo != null && (now - cachedAt) < TTL_MS) {
+        tahsilatMakbuzNoHerIkisineYaz(cachedNo);
+        return;
+    }
+
+    if (window.__makbuzNoFetchPromise) {
+        window.__makbuzNoFetchPromise.then(function (no) {
+            if (no != null) tahsilatMakbuzNoHerIkisineYaz(no);
+        }).catch(function () {});
+        return;
+    }
+
+    window.__makbuzNoFetchAt = now;
+    window.__makbuzNoFetchPromise = fetch(API_NEXT_MAKBUZ_NO, { credentials: 'same-origin' })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+            var no = (j && j.ok && j.makbuz_no != null) ? j.makbuz_no : null;
+            if (no != null) {
+                window.__makbuzNoCached = no;
+                window.__makbuzNoFetchAt = Date.now();
+            }
+            return no;
         })
-        .catch(function(){});
+        .catch(function () { return null; })
+        .finally(function () {
+            window.__makbuzNoFetchPromise = null;
+        });
+
+    window.__makbuzNoFetchPromise.then(function (no) {
+        if (no != null) tahsilatMakbuzNoHerIkisineYaz(no);
+    });
 }
 
 function tahsilatTarihTr(tarihRaw) {

@@ -1,0 +1,891 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gelen Fatura Ekle</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #0a1929;
+            color: #e0f7fa;
+            padding: 16px;
+        }
+        .page-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        .page-header h2 {
+            font-size: 18px;
+            color: #4fc3f7;
+        }
+        .page-actions button {
+            background: #00bcd4;
+            color: #fff;
+            border: none;
+            padding: 8px 14px;
+            border-radius: 4px;
+            font-size: 13px;
+            cursor: pointer;
+            margin-left: 8px;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .page-actions button.secondary {
+            background: #7e57c2;
+        }
+        .page-actions button:hover {
+            opacity: 0.9;
+        }
+        .panel {
+            background: #102133;
+            border-radius: 8px;
+            border: 1px solid #1e3a50;
+            padding: 12px 14px;
+            margin-bottom: 12px;
+        }
+        .panel h3 {
+            font-size: 14px;
+            color: #4fc3f7;
+            margin-bottom: 8px;
+        }
+        .grid-2 {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 12px;
+        }
+        .form-row {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 8px;
+            align-items: center;
+        }
+        .form-row label {
+            min-width: 110px;
+            font-size: 12px;
+            color: #b0bec5;
+        }
+        .form-row input,
+        .form-row select,
+        .form-row textarea {
+            flex: 1;
+            background: #1e3a50;
+            border: 1px solid #2d4060;
+            color: #e0f7fa;
+            padding: 6px 10px;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+        .form-row textarea {
+            resize: vertical;
+            min-height: 60px;
+        }
+        .form-row small {
+            font-size: 11px;
+            color: #78909c;
+        }
+        .tag {
+            display: inline-block;
+            background: #0f2537;
+            border-radius: 999px;
+            padding: 2px 8px;
+            font-size: 11px;
+            color: #90a4ae;
+            margin-top: 4px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+            margin-top: 6px;
+        }
+        thead { background: #0f2537; }
+        th, td {
+            padding: 8px 6px;
+            border-bottom: 1px solid #1e3a50;
+        }
+        th {
+            font-size: 11px;
+            color: #4fc3f7;
+            text-align: left;
+        }
+        tbody tr:hover { background: #12263d; }
+        td input, td select {
+            width: 100%;
+            background: #1e3a50;
+            border: 1px solid #2d4060;
+            color: #e0f7fa;
+            padding: 4px 6px;
+            border-radius: 3px;
+            font-size: 12px;
+        }
+        td input[type="number"] { text-align: right; }
+        .btn-icon {
+            background: #c62828;
+            border: none;
+            color: #fff;
+            padding: 4px 8px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 11px;
+        }
+        .btn-add-row { margin-top: 8px; background: #26a69a; }
+        .summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 10px;
+            margin-top: 8px;
+        }
+        .summary-item {
+            background: #102133;
+            border-radius: 6px;
+            border: 1px solid #1e3a50;
+            padding: 8px 10px;
+            font-size: 12px;
+        }
+        .summary-item label {
+            display: block;
+            color: #90a4ae;
+            margin-bottom: 4px;
+        }
+        .summary-item .value {
+            font-size: 16px;
+            font-weight: 600;
+            color: #4fc3f7;
+        }
+        .summary-item .sub { font-size: 11px; color: #78909c; }
+        .summary-item.total .value { color: #69f0ae; }
+        .error { border-color: #e57373 !important; }
+        .musteri-opt { padding: 6px 10px; cursor: pointer; font-size: 13px; color: #e0f7fa; }
+        .musteri-opt:hover { background: #1e3a50; }
+        .musteri-opt-active { background: #264a7a; }
+        .urun-opt { padding: 4px 8px; cursor: pointer; font-size: 12px; color: #e0f7fa; }
+        .urun-opt:hover { background: #1e3a50; }
+            font-size: 12px;
+            color: #90a4ae;
+            margin-bottom: 10px;
+            line-height: 1.45;
+        }
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+        }
+            font-size: 12px;
+            color: #b0bec5;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+            width: auto;
+            min-width: 88px;
+            padding: 6px 8px;
+            border-radius: 4px;
+            border: 1px solid #2d4060;
+            background: #1e3a50;
+            color: #e0f7fa;
+            font-size: 12px;
+        }
+            border: none;
+            border-radius: 4px;
+            padding: 7px 12px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            color: #fff;
+        }
+            margin-top: 8px;
+            font-size: 12px;
+            color: #b0bec5;
+            min-height: 18px;
+        }
+    
+        input.error { border-color: #ef5350 !important; }
+        .gelen-dosya-hint { font-size: 11px; color: #90a4ae; margin-top: 4px; }
+    </style>
+</head>
+<body>
+    <div class="page-header">
+        <h2><i class="fa fa-download"></i> Gelen Fatura Ekle</h2>
+        <div class="page-actions">
+            <button type="button" id="btn-kaydet-gelen" style="background:#00695c;"><i class="fa fa-save"></i> Kaydet</button>
+        </div>
+    </div>
+
+    <div class="panel">
+        <h3>Fatura Bilgileri</h3>
+        <div class="grid-2">
+            <div>
+                <div class="form-row">
+                    <label>Fatura No</label>
+                    <input type="text" id="fatura-no" placeholder="Boş bırakırsanız otomatik atanır (GELEN…)">
+                </div>
+                <div class="form-row">
+                    <label>Fatura Tarihi <span style="color:#ffb74d;">*</span></label>
+                    <input type="date" id="fatura-tarihi" value="{ bugun }">
+                </div>
+                <div class="form-row">
+                    <label>Tedarikçi Adı <span style="color:#ffb74d;">*</span></label>
+                    <input type="text" id="tedarikci-adi" placeholder="Faturayı kesen firma / tedarikçi" autocomplete="off">
+                </div>
+            </div>
+            <div>
+                <div class="form-row">
+                    <label>Cari (Müşteri) <span style="color:#ffb74d;">*</span></label>
+                    <input type="text" id="musteri-ara" placeholder="Müşteri ara, seçin (ünvan veya kısa ad)…" autocomplete="off" value="{ secili_musteri.display_label if secili_musteri else '' }">
+                    <input type="hidden" id="musteri-id" value="{ secili_musteri.id if secili_musteri else '' }">
+                </div>
+                <div id="musteri-sonuclar" style="max-height:180px;overflow-y:auto;margin-bottom:6px;border-radius:4px;border:1px solid #1e3a50;background:#0f2537;display:none;margin-left:110px;max-width:calc(100% - 110px);"></div>
+                <div id="musteri-ozet" style="display:none;"></div>
+                <div class="form-row">
+                    <label>Adres</label>
+                    <input type="text" id="musteri-adres" placeholder="Seçili carinin adresi" readonly value="{ secili_musteri.address if secili_musteri else '' }">
+                </div>
+                <div class="form-row">
+                    <label>Notlar</label>
+                    <textarea id="fatura-not" placeholder="Opsiyonel açıklama / not" rows="2"></textarea>
+                </div>
+                <div class="form-row">
+                    <label>Dosya (PDF / resim)</label>
+                    <input type="file" id="gelen-fatura-dosya" accept=".pdf,.png,.jpg,.jpeg">
+                    <p class="gelen-dosya-hint">Kayıt sonrası otomatik yüklenir (isteğe bağlı).</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="panel">
+        <div class="panel-row-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <h3 style="margin-bottom:0;">Fatura Satırları</h3>
+        </div>
+        <table id="satir-tablo">
+            <thead>
+                <tr>
+                    <th style="width:26%;">Hizmet / Ürün</th>
+                    <th style="width:7%;">Miktar</th>
+                    <th style="width:7%;">Birim</th>
+                    <th style="width:11%;">Birim Fiyat</th>
+                    <th style="width:9%;">Tür</th>
+                    <th style="width:7%;">İsk./Art. %</th>
+                    <th style="width:10%;">İsk./Art. Tutarı</th>
+                    <th style="width:7%;">KDV %</th>
+                    <th style="width:13%;">Satır Toplam (KDV Dahil)</th>
+                    <th style="width:3%;text-align:center;">Sil</th>
+                </tr>
+            </thead>
+            <tbody id="satir-tbody"></tbody>
+        </table>
+        <div id="urun-sonuclar" style="display:none;max-height:200px;overflow-y:auto;border-radius:4px;border:1px solid #1e3a50;background:#0f2537;margin-top:4px;"></div>
+        <button type="button" id="btn-satir-ekle" class="btn-icon btn-add-row"><i class="fa fa-plus"></i> Satır Ekle</button>
+        <button type="button" id="btn-manuel-stok" class="btn-icon btn-add-row" style="background:#00796b;"><i class="fa fa-keyboard"></i> Manuel stok ekle</button>
+
+        <div class="summary">
+            <div class="summary-item">
+                <label>Ara Toplam (KDV Hariç)</label>
+                <div class="value" id="ozet-ara-toplam">0,00 ₺</div>
+            </div>
+            <div class="summary-item">
+                <label>Toplam İskonto</label>
+                <div class="value" id="ozet-iskonto">0,00 ₺</div>
+            </div>
+            <div class="summary-item">
+                <label>KDV Toplamı</label>
+                <div class="value" id="ozet-kdv">0,00 ₺</div>
+            </div>
+            <div class="summary-item total">
+                <label>Genel Toplam</label>
+                <div class="value" id="ozet-genel">0,00 ₺</div>
+                <div class="sub" id="ozet-yazi">#Tutarı girin#</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    (function(){
+        const API_MUSTERI_ARA = "{{ url_for('musteriler.api_musteri_ara') }}";
+        const API_MUSTERI_KYC = "{{ url_for('musteriler.api_kyc_getir') }}";
+        const API_GELEN_FATURA_EKLE = "/faturalar/api/gelen-fatura-ekle";
+        const API_TUTAR_YAZI = "{{ url_for('faturalar.tutar_yazi_api') }}";
+        const SECILI_MUSTERI = {{ (secili_musteri | tojson) if secili_musteri else 'null' }};
+
+        const musteriAra = document.getElementById('musteri-ara');
+        const musteriSonuclar = document.getElementById('musteri-sonuclar');
+        const musteriIdEl = document.getElementById('musteri-id');
+        const musteriOzet = document.getElementById('musteri-ozet');
+        const tbody = document.getElementById('satir-tbody');
+
+        function formatMoney(n) {
+            return (Number(n) || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ₺';
+        }
+        function parseNumber(v) {
+            if (v === null || v === undefined) return 0;
+            if (typeof v === 'number') return (isFinite(v) ? v : 0);
+            let s = String(v).trim().replace(/\s/g, '');
+            if (!s) return 0;
+            // tr-TR: 1.234,56 — virgül varsa noktalar binlik; yoksa nokta ondalık (1212.66) parseFloat ile
+            if (s.indexOf(',') >= 0) {
+                s = s.replace(/\./g, '').replace(',', '.');
+            }
+            const n = parseFloat(s);
+            return isNaN(n) ? 0 : n;
+        }
+
+        /** type=number alanı: yalnızca noktalı ondalık (JSON / JS sayı güvenli). */
+        function birimFiyatInputValue(v) {
+            if (v === null || v === undefined || v === '') return '';
+            const n = typeof v === 'number' && isFinite(v) ? v : parseNumber(v);
+            if (!isFinite(n)) return '';
+            const r = Math.round(n * 100) / 100;
+            return String(r);
+        }
+
+        async function urunSecVeDoldur(tr, q) {
+            try {
+                const query = (q || '').trim();
+                const url = query ? ('/urunler/api/list?q=' + encodeURIComponent(query)) : '/urunler/api/list';
+                const res = await fetch(url);
+                const rows = await res.json();
+                const liste = document.getElementById('urun-sonuclar');
+                if (!liste) return;
+                if (!rows || !rows.length) {
+                    liste.innerHTML = '<div style="padding:6px 8px;font-size:12px;color:#90a4ae;">Ürün bulunamadı.</div>';
+                    liste.style.display = 'block';
+                    return;
+                }
+                liste.innerHTML = rows.map(function(r){
+                    const ad = (r.urun_adi || '');
+                    const kod = (r.stok_kodu || '');
+                    const fiyat = (r.birim_fiyat != null ? r.birim_fiyat : 0);
+                    return '<div class="urun-opt" data-ad="'+ad.replace(/"/g,'&quot;')+'" data-birim="'+(r.birim || '')+'" data-fiyat="'+fiyat+'">'+
+                        (kod ? ('<strong>'+kod+'</strong> - ') : '') + ad +
+                        '</div>';
+                }).join('');
+                liste.style.display = 'block';
+                liste.querySelectorAll('.urun-opt').forEach(function(div){
+                    div.onclick = function() {
+                        const adInp = tr.querySelector('.inp-urun');
+                        const birimInp = tr.querySelector('.inp-birim');
+                        const fiyatInp = tr.querySelector('.inp-birim-fiyat');
+                        const ad = this.getAttribute('data-ad') || this.textContent;
+                        const birim = this.getAttribute('data-birim') || '';
+                        const fiyat = parseFloat(this.getAttribute('data-fiyat') || '0');
+                        if (adInp) adInp.value = ad;
+                        if (birimInp && birim) birimInp.value = birim;
+                        if (fiyatInp) fiyatInp.value = fiyat ? String(fiyat).replace('.', ',') : '';
+                        liste.style.display = 'none';
+                        recalc();
+                    };
+                });
+            } catch (e) {
+                const liste = document.getElementById('urun-sonuclar');
+                if (liste) {
+                    liste.innerHTML = '<div style="padding:6px 8px;font-size:12px;color:#f44336;">Ürünler yüklenemedi.</div>';
+                    liste.style.display = 'block';
+                }
+            }
+        }
+
+        function addRow(initial) {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td>
+                    <div style="display:flex; gap:4px; align-items:center; position:relative;">
+                        <input type="text" class="inp-urun" placeholder="Hizmet / ürün adı" value="${initial && initial.ad || ''}" style="flex:1;">
+                        <button type="button" class="btn-icon btn-urun-sec" title="Ürün seç" style="padding:2px 6px;"><i class="fa fa-box-open"></i></button>
+                    </div>
+                </td>
+                <td><input type="number" step="0.01" min="0" class="inp-miktar" value="${initial && initial.miktar || 1}"></td>
+                <td>
+                    <select class="inp-birim">
+                        <option value="Adet">Adet</option>
+                        <option value="Gün">Gün</option>
+                        <option value="Ay">Ay</option>
+                        <option value="KG">KG</option>
+                    </select>
+                </td>
+                <td><input type="number" step="0.01" min="0" class="inp-birim-fiyat" value="${initial && initial.birim_fiyat != null && initial.birim_fiyat !== '' ? birimFiyatInputValue(initial.birim_fiyat) : ''}"></td>
+                <td>
+                    <select class="inp-iskonto-tipi">
+                        <option value="iskonto">İskonto</option>
+                        <option value="arttirim">Arttırım</option>
+                    </select>
+                </td>
+                <td><input type="number" step="0.01" min="0" max="100" class="inp-iskonto" value="${Math.abs((initial && initial.iskonto_orani) || 0)}" placeholder="% İskonto"></td>
+                <td><input type="number" step="0.01" min="0" class="inp-iskonto-tutar" value="${initial && initial.iskonto_tutar != null ? Math.abs(initial.iskonto_tutar) : ''}" placeholder="İskonto Tutarı"></td>
+                <td>
+                    <select class="inp-kdv">
+                        <option value="0">%0</option>
+                        <option value="1">%1</option>
+                        <option value="10">%10</option>
+                        <option value="20" selected>%20</option>
+                    </select>
+                </td>
+                <td class="satir-toplam" style="text-align:right;">0,00 ₺</td>
+                <td style="text-align:center;"><button type="button" class="btn-icon btn-satir-sil"><i class="fa fa-trash"></i></button></td>
+            `;
+            tbody.appendChild(tr);
+            const birimSel = tr.querySelector('.inp-birim');
+            const kdvSel = tr.querySelector('.inp-kdv');
+            const iskontoTipiSel = tr.querySelector('.inp-iskonto-tipi');
+            const iskontoInp = tr.querySelector('.inp-iskonto');
+            const iskontoTutarInp = tr.querySelector('.inp-iskonto-tutar');
+            if (initial && initial.birim) birimSel.value = initial.birim;
+            if (initial && initial.kdv_orani != null) kdvSel.value = String(initial.kdv_orani);
+            if (iskontoTipiSel) {
+                const tip0 = String((initial && initial.iskonto_tipi) || '').toLowerCase();
+                const oran0 = Number((initial && initial.iskonto_orani) || 0);
+                const tutar0 = Number((initial && initial.iskonto_tutar) || 0);
+                iskontoTipiSel.value = (tip0.startsWith('art') || oran0 < 0 || tutar0 < 0) ? 'arttirim' : 'iskonto';
+            }
+            tr.querySelectorAll('input,select').forEach(inp => {
+                inp.addEventListener('input', recalc);
+                inp.addEventListener('change', recalc);
+            });
+            function _refreshTypeUI() {
+                const tip = (iskontoTipiSel && iskontoTipiSel.value === 'arttirim') ? 'arttirim' : 'iskonto';
+                if (iskontoInp) iskontoInp.placeholder = (tip === 'arttirim') ? '% Arttırım' : '% İskonto';
+                if (iskontoTutarInp) iskontoTutarInp.placeholder = (tip === 'arttirim') ? 'Arttırım Tutarı' : 'İskonto Tutarı';
+            }
+            // Kullanıcının son düzenlediği alanı hatırla: yüzde mi tutar mı?
+            if (iskontoInp) {
+                iskontoInp.addEventListener('input', function(){ tr.dataset.iskontoLastEdit = 'oran'; });
+                iskontoInp.addEventListener('change', function(){ tr.dataset.iskontoLastEdit = 'oran'; });
+            }
+            if (iskontoTutarInp) {
+                iskontoTutarInp.addEventListener('input', function(){ tr.dataset.iskontoLastEdit = 'tutar'; });
+                iskontoTutarInp.addEventListener('change', function(){ tr.dataset.iskontoLastEdit = 'tutar'; });
+            }
+            if (iskontoTipiSel) {
+                iskontoTipiSel.addEventListener('change', function(){
+                    _refreshTypeUI();
+                    recalc();
+                });
+            }
+            _refreshTypeUI();
+            const urunBtn = tr.querySelector('.btn-urun-sec');
+            const urunInp = tr.querySelector('.inp-urun');
+            if (urunBtn) {
+                urunBtn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    urunSecVeDoldur(tr, urunInp ? urunInp.value : '');
+                });
+            }
+            if (urunInp) {
+                let timer = null;
+                urunInp.addEventListener('focus', function() {
+                    urunSecVeDoldur(tr, this.value);
+                });
+                urunInp.addEventListener('input', function() {
+                    const val = this.value;
+                    clearTimeout(timer);
+                    timer = setTimeout(function(){ urunSecVeDoldur(tr, val); }, 250);
+                });
+            }
+            tr.querySelector('.btn-satir-sil').addEventListener('click', function(e){
+                e.stopPropagation();
+                tr.remove();
+                recalc();
+            });
+            recalc();
+        }
+
+        function getRows() {
+            const rows = [];
+            tbody.querySelectorAll('tr').forEach(tr => {
+                const ad = tr.querySelector('.inp-urun').value.trim();
+                const miktar = parseNumber(tr.querySelector('.inp-miktar').value);
+                const birim = tr.querySelector('.inp-birim').value;
+                const birimFiyat = parseNumber(tr.querySelector('.inp-birim-fiyat').value);
+                const iskontoTipi = ((tr.querySelector('.inp-iskonto-tipi') || {}).value || 'iskonto').toLowerCase();
+                const iskonto = Math.abs(parseNumber(tr.querySelector('.inp-iskonto').value));
+                const iskontoTutarVal = tr.querySelector('.inp-iskonto-tutar').value.trim();
+                const iskontoTutarAbs = iskontoTutarVal === '' ? null : Math.abs(parseNumber(iskontoTutarVal));
+                const sign = (iskontoTipi === 'arttirim') ? -1 : 1;
+                const iskonto_orani = iskonto * sign;
+                const iskonto_tutar = (iskontoTutarAbs === null) ? null : (iskontoTutarAbs * sign);
+                const kdv = parseNumber(tr.querySelector('.inp-kdv').value);
+                if (!ad && miktar === 0 && birimFiyat === 0) return;
+                rows.push({ ad, miktar, birim, birim_fiyat: birimFiyat, iskonto_tipi: iskontoTipi, iskonto_orani: iskonto_orani, iskonto_tutar: iskonto_tutar, kdv_orani: kdv });
+            });
+            return rows;
+        }
+
+        let _recalcYaziTimer = null;
+        let _recalcYaziSeq = 0;
+
+        async function recalc() {
+            let araToplam = 0, toplamIskonto = 0, kdvToplam = 0;
+            tbody.querySelectorAll('tr').forEach(tr => {
+                const miktar = parseNumber(tr.querySelector('.inp-miktar').value);
+                const birimFiyat = parseNumber(tr.querySelector('.inp-birim-fiyat').value);
+                const iskontoTipi = ((tr.querySelector('.inp-iskonto-tipi') || {}).value || 'iskonto').toLowerCase();
+                const iskontoInp = tr.querySelector('.inp-iskonto');
+                const iskontoTutarEl = tr.querySelector('.inp-iskonto-tutar');
+                let iskonto = Math.abs(parseNumber(iskontoInp ? iskontoInp.value : 0));
+                let iskontoTutarInp = Math.abs(parseNumber(iskontoTutarEl ? iskontoTutarEl.value : 0));
+                const iskontoLastEdit = tr.dataset.iskontoLastEdit || 'oran';
+                const kdv = parseNumber(tr.querySelector('.inp-kdv').value);
+                const brut = miktar * birimFiyat;
+
+                let iskontoTutarAbs = 0;
+                if (brut > 0) {
+                    if (iskontoLastEdit === 'tutar' && iskontoTutarEl && iskontoTutarEl.value.trim() !== '' && iskontoTutarInp !== 0) {
+                        iskontoTutarAbs = Math.min(iskontoTutarInp, brut);
+                        const yeniYuzde = (iskontoTutarAbs / brut) * 100;
+                        if (Math.abs(iskonto - yeniYuzde) > 0.01) {
+                            iskonto = yeniYuzde;
+                            if (iskontoInp) iskontoInp.value = yeniYuzde.toFixed(2);
+                        }
+                    } else if (iskonto !== 0) {
+                        if (iskonto > 100) iskonto = 100;
+                        if (iskontoInp) iskontoInp.value = String(iskonto);
+                        iskontoTutarAbs = brut * (iskonto / 100);
+                        if (iskontoTutarEl) iskontoTutarEl.value = iskontoTutarAbs.toFixed(2);
+                    } else {
+                        // Oran sıfırlandı/temizlendiğinde tutar alanını da temizle.
+                        if (iskontoTutarEl) iskontoTutarEl.value = '';
+                    }
+                }
+
+                const sign = (iskontoTipi === 'arttirim') ? -1 : 1;
+                const iskontoTutar = iskontoTutarAbs * sign;
+                const net = brut - iskontoTutar;
+                const kdvTutar = net * (kdv / 100);
+                const toplam = net + kdvTutar;
+                araToplam += brut;
+                toplamIskonto += iskontoTutar;
+                kdvToplam += kdvTutar;
+                tr.querySelector('.satir-toplam').textContent = formatMoney(toplam);
+            });
+            const genelToplam = araToplam - toplamIskonto + kdvToplam;
+            document.getElementById('ozet-ara-toplam').textContent = formatMoney(araToplam);
+            document.getElementById('ozet-iskonto').textContent = formatMoney(toplamIskonto);
+            document.getElementById('ozet-kdv').textContent = formatMoney(kdvToplam);
+            document.getElementById('ozet-genel').textContent = formatMoney(genelToplam);
+
+            if (_recalcYaziTimer) clearTimeout(_recalcYaziTimer);
+            const yaziEl = document.getElementById('ozet-yazi');
+            const seq = ++_recalcYaziSeq;
+            _recalcYaziTimer = setTimeout(async function() {
+                try {
+                    const res = await fetch(API_TUTAR_YAZI + '?tutar=' + encodeURIComponent(genelToplam.toFixed(2)));
+                    const j = await res.json();
+                    if (seq !== _recalcYaziSeq) return;
+                    if (j && j.yazi && yaziEl) yaziEl.textContent = '#' + j.yazi + '#';
+                } catch (e) { /* sessiz */ }
+            }, 320);
+        }
+
+        let musteriTimer = null;
+        function escHtmlM(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+        /** Fatura / PDF müşteri satırı: şirket ünvanı (customers.name); ünvan yoksa müşteri adı. */
+        function faturaMusteriUnvan(r) {
+            if (!r) return '';
+            const n = String(r.name || '').trim();
+            if (n) return n;
+            return String(r.musteri_adi || '').trim();
+        }
+        /** Arama listesinde ayırt etmek için: ünvan · müşteri adı (fatura alanına yazılan yalnızca ünvan). */
+        function musteriListeGorunur(r) {
+            if (!r) return '';
+            const u = faturaMusteriUnvan(r);
+            const ma = String(r.musteri_adi || '').trim();
+            if (ma && ma.toLowerCase() !== u.toLowerCase()) return u + ' · ' + ma;
+            return u;
+        }
+        async function musteriSecVeDoldur(id, ad) {
+            if (!id) return;
+            musteriIdEl.value = String(id);
+            if (ad) musteriAra.value = String(ad);
+            musteriSonuclar.style.display = 'none';
+            musteriOzet.style.display = 'none';
+            const adrEl = document.getElementById('musteri-adres');
+            const vdEl = document.getElementById('musteri-vergi-dairesi');
+            const vnEl = document.getElementById('musteri-vergi-no');
+            if (adrEl) adrEl.value = '';
+            if (vdEl) vdEl.value = '';
+            if (vnEl) vnEl.value = '';
+            try {
+                const res2 = await fetch(API_MUSTERI_KYC + '?musteri_id=' + encodeURIComponent(id));
+                const d = await res2.json();
+                if (d) {
+                    const adr = d.yeni_adres || d.address || '';
+                    const vd = d.vergi_dairesi || 'Kavaklıdere';
+                    const vn = d.vergi_no || d.tax_number || '';
+                    if (adrEl) adrEl.value = adr;
+                    if (vdEl) vdEl.value = vd;
+                    if (vnEl) vnEl.value = vn;
+                }
+            } catch(e){}
+        }
+        function musteriNorm(s) {
+            return String(s || '')
+                .toLocaleLowerCase('tr-TR')
+                .replace(/[^a-z0-9ğüşöçıİ]/g, '')
+                .replace(/ı/g, 'i')
+                .replace(/ğ/g, 'g')
+                .replace(/ü/g, 'u')
+                .replace(/ş/g, 's')
+                .replace(/ö/g, 'o')
+                .replace(/ç/g, 'c');
+        }
+        async function musteriyiAdaGoreOtoSec(ad) {
+            const hedef = String(ad || '').trim();
+            if (!hedef || musteriIdEl.value) return false;
+            try {
+                const res = await fetch(API_MUSTERI_ARA + '?q=' + encodeURIComponent(hedef));
+                const rows = await res.json();
+                if (!Array.isArray(rows) || !rows.length) return false;
+                const h = musteriNorm(hedef);
+                let best = null;
+                let bestScore = -1;
+                rows.forEach(function(r){
+                    const n1 = musteriNorm(r && r.name);
+                    const n2 = musteriNorm(r && r.musteri_adi);
+                    [n1, n2].forEach(function(n){
+                        if (!n) return;
+                        let score = 0;
+                        if (n === h) score = 1000;
+                        else if (n.indexOf(h) >= 0 || h.indexOf(n) >= 0) score = Math.min(n.length, h.length) / Math.max(n.length, h.length);
+                        if (score > bestScore) {
+                            bestScore = score;
+                            best = r;
+                        }
+                    });
+                });
+                if (!best) return false;
+                await musteriSecVeDoldur(best.id, faturaMusteriUnvan(best));
+                return true;
+            } catch (e) {
+                return false;
+            }
+        }
+        async function faturadanMusteriOtoBul() {
+            if (musteriIdEl.value || !EDIT_FATURA) return false;
+            const params = new URLSearchParams();
+            if (EDIT_FATURA.id) params.set('fatura_id', EDIT_FATURA.id);
+            if (EDIT_FATURA.fatura_no) params.set('fatura_no', EDIT_FATURA.fatura_no);
+            if (EDIT_FATURA.ettn) params.set('ettn', EDIT_FATURA.ettn);
+            if (!params.toString()) return false;
+            try {
+                const res = await fetch(API_FATURA_MUSTERI_BUL + '?' + params.toString(), { credentials: 'same-origin' });
+                const j = await res.json();
+                if (j && j.ok && j.musteri && j.musteri.id) {
+                    await musteriSecVeDoldur(j.musteri.id, faturaMusteriUnvan(j.musteri));
+                    return true;
+                }
+                if (j && j.musteri_adi && !musteriAra.value.trim()) {
+                    musteriAra.value = j.musteri_adi;
+                }
+            } catch (e) {}
+            return false;
+        }
+        async function musteriListeGetir(q, showAllOnEmpty) {
+            const query = (q || '').trim();
+            if (!query && !showAllOnEmpty) {
+                musteriSonuclar.style.display = 'none';
+                return;
+            }
+            try {
+                const url = query ? (API_MUSTERI_ARA + '?q=' + encodeURIComponent(query)) : API_MUSTERI_ARA;
+                const res = await fetch(url);
+                const rows = await res.json();
+                    if (!rows || !rows.length) {
+                        musteriSonuclar.innerHTML = '<div style="padding:6px 10px;font-size:12px;color:#78909c;">Müşteri bulunamadı.</div>';
+                    } else {
+                        musteriSonuclar.innerHTML = rows.map(function(r){
+                            const gor = musteriListeGorunur(r);
+                            const unvan = faturaMusteriUnvan(r);
+                            return '<div class="musteri-opt" data-id="' + r.id + '" data-unvan="' + encodeURIComponent(unvan) + '">' + escHtmlM(gor) + '</div>';
+                        }).join('');
+                    }
+                musteriSonuclar.style.display = 'block';
+                musteriSonuclar.querySelectorAll('div[data-id]').forEach(function(div){
+                        div.addEventListener('click', async function() {
+                        const id = this.getAttribute('data-id');
+                        var ad = '';
+                        var uv = this.getAttribute('data-unvan');
+                        if (uv) {
+                            try { ad = decodeURIComponent(uv); } catch (eU) { ad = ''; }
+                        }
+                        if (!ad) ad = (this.textContent || '').trim();
+                        await musteriSecVeDoldur(id, ad);
+                    });
+                });
+            } catch(e){
+                musteriSonuclar.style.display = 'none';
+            }
+        }
+
+        musteriAra.addEventListener('input', function() {
+            clearTimeout(musteriTimer);
+            const q = this.value;
+            if (!q.trim()) {
+                // yazı temizlenirse seçimi de temizle ama listeyi gizleme, focus event'i handle eder
+                musteriIdEl.value = '';
+                musteriOzet.style.display = 'none';
+                const adrEl = document.getElementById('musteri-adres');
+                const vdEl = document.getElementById('musteri-vergi-dairesi');
+                const vnEl = document.getElementById('musteri-vergi-no');
+                if (adrEl) adrEl.value = '';
+                if (vdEl) vdEl.value = '';
+                if (vnEl) vnEl.value = '';
+            }
+            musteriTimer = setTimeout(function(){ musteriListeGetir(q, false); }, 300);
+        });
+
+        musteriAra.addEventListener('focus', function() {
+            clearTimeout(musteriTimer);
+            musteriTimer = setTimeout(function(){ musteriListeGetir(musteriAra.value, true); }, 10);
+        });
+
+        document.addEventListener('click', function(e){
+            if (!musteriSonuclar.contains(e.target) && e.target !== musteriAra) {
+                musteriSonuclar.style.display = 'none';
+            }
+        });
+
+        document.getElementById('btn-satir-ekle').addEventListener('click', function() { addRow(); });
+
+        var btnManuel = document.getElementById('btn-manuel-stok');
+        if (btnManuel) {
+            btnManuel.addEventListener('click', function(){
+                var ad = prompt('Manuel ürün / hizmet adı:');
+                if (ad === null) return;
+                ad = ad.trim();
+                if (!ad) return;
+                var fiyatStr = prompt('Birim fiyat (₺):');
+                if (fiyatStr === null) return;
+                var fiyat = parseNumber(String(fiyatStr).trim());
+                if (!fiyat || fiyat < 0) fiyat = 0;
+                addRow({ ad: ad, miktar: 1, birim: 'Adet', birim_fiyat: fiyat, iskonto_orani: 0, iskonto_tutar: null, kdv_orani: 20 });
+            });
+        }
+
+        if (SECILI_MUSTERI) {
+            musteriIdEl.value = SECILI_MUSTERI.id;
+            musteriAra.value = (SECILI_MUSTERI.display_label || SECILI_MUSTERI.name || '').trim();
+            const adrEl = document.getElementById('musteri-adres');
+            if (adrEl) adrEl.value = SECILI_MUSTERI.address || '';
+        }
+        addRow();
+
+        function validateForm() {
+            let ok = true;
+            musteriAra.classList.remove('error');
+            document.getElementById('tedarikci-adi').classList.remove('error');
+            if (!musteriIdEl.value) {
+                musteriAra.classList.add('error');
+                ok = false;
+            }
+            var ted = document.getElementById('tedarikci-adi');
+            if (!ted.value.trim()) {
+                ted.classList.add('error');
+                ok = false;
+            }
+            const rows = getRows();
+            if (!rows.length) {
+                alert('En az bir fatura satırı girmelisiniz.');
+                ok = false;
+            }
+            return { ok, rows };
+        }
+
+        async function fetchWithRetry(url, options, retryCount) {
+            var tries = (typeof retryCount === 'number') ? retryCount : 1;
+            var lastErr = null;
+            for (var i = 0; i <= tries; i++) {
+                try {
+                    return await fetch(url, options);
+                } catch (e) {
+                    lastErr = e;
+                    var msg = (e && e.message) ? String(e.message) : String(e);
+                    var netErr = msg === 'Failed to fetch' || /NetworkError|Load failed/i.test(msg);
+                    if (!netErr || i >= tries) throw e;
+                    await new Promise(function(resolve){ setTimeout(resolve, 700); });
+                }
+            }
+            throw lastErr || new Error('Failed to fetch');
+        }
+
+        async function kaydetGelenFatura() {
+            const v = validateForm();
+            if (!v.ok) {
+                alert('Lütfen zorunlu alanları doldurun (cari, tedarikçi, en az bir satır).');
+                return;
+            }
+            const rows = v.rows;
+            let araToplam = 0, toplamIskonto = 0, kdvToplam = 0;
+            rows.forEach(r => {
+                const brut = r.miktar * r.birim_fiyat;
+                const isk = (r.iskonto_tutar != null && r.iskonto_tutar > 0) ? Math.min(r.iskonto_tutar, brut) : brut * (r.iskonto_orani / 100);
+                const net = brut - isk;
+                const kdv = net * (r.kdv_orani / 100);
+                araToplam += brut;
+                toplamIskonto += isk;
+                kdvToplam += kdv;
+            });
+            const genelToplam = araToplam - toplamIskonto + kdvToplam;
+            const payload = {
+                musteri_id: musteriIdEl.value,
+                tedarikci_adi: document.getElementById('tedarikci-adi').value.trim(),
+                fatura_no: document.getElementById('fatura-no').value.trim() || null,
+                fatura_tarihi: document.getElementById('fatura-tarihi').value,
+                notlar: document.getElementById('fatura-not').value.trim() || null,
+                satirlar: rows,
+                ara_toplam: araToplam,
+                toplam_iskonto: toplamIskonto,
+                kdv_toplam: kdvToplam,
+                toplam: genelToplam
+            };
+            var btn = document.getElementById('btn-kaydet-gelen');
+            if (btn) btn.disabled = true;
+            try {
+                const res = await fetchWithRetry(API_GELEN_FATURA_EKLE, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify(payload)
+                }, 1);
+                const j = await res.json();
+                if (!res.ok || !j.ok) {
+                    alert(j.mesaj || 'Kayıt başarısız.');
+                    return;
+                }
+                var fileEl = document.getElementById('gelen-fatura-dosya');
+                if (fileEl && fileEl.files && fileEl.files[0] && j.fatura_id) {
+                    var fd = new FormData();
+                    fd.append('file', fileEl.files[0]);
+                    var res2 = await fetch('/faturalar/api/gelen-fatura-dosya/' + encodeURIComponent(String(j.fatura_id)), {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        body: fd
+                    });
+                    var j2 = null;
+                    try { j2 = await res2.json(); } catch (e2) { j2 = null; }
+                    if (!res2.ok || !j2 || !j2.ok) {
+                        alert((j.mesaj || 'Fatura kaydedildi.') + ' Ancak dosya yüklenemedi: ' + ((j2 && j2.mesaj) ? j2.mesaj : ('HTTP ' + res2.status)));
+                        return;
+                    }
+                }
+                alert((j.mesaj || 'Gelen fatura kaydedildi.') + (j.fatura_no ? (' (' + j.fatura_no + ')') : ''));
+                if (window.opener) {
+                    try { window.close(); } catch (eC) {}
+                }
+            } catch (e) {
+                alert('Kayıt sırasında hata: ' + ((e && e.message) ? e.message : e));
+            } finally {
+                if (btn) btn.disabled = false;
+            }
+        }
+
+        document.getElementById('btn-kaydet-gelen').addEventListener('click', kaydetGelenFatura);
+    })();
+    </script>
+</body>
+</html>

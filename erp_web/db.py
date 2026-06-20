@@ -505,6 +505,7 @@ def init_schema():
     ensure_tediyeler_columns()
     ensure_kargolar_durum()
     ensure_faturalar_amount_columns()
+    ensure_faturalar_yon_kolon()
     ensure_musteri_kyc_columns()
     ensure_musteri_kyc_arama_kolonlari()
     ensure_musteri_kyc_hazir_ofis_oda_no()
@@ -2089,6 +2090,25 @@ def ensure_faturalar_amount_columns():
     except Exception as e:
         print(f"faturalar.ettn: {e}")
     _faturalar_amount_columns_done = True
+
+
+_faturalar_yon_kolon_done = False
+
+
+def ensure_faturalar_yon_kolon():
+    """faturalar.yon: 'giden' (bizim kestiğimiz) | 'gelen' (tedarikçi faturası)."""
+    global _faturalar_yon_kolon_done
+    if _faturalar_yon_kolon_done:
+        return
+    try:
+        execute("ALTER TABLE faturalar ADD COLUMN IF NOT EXISTS yon TEXT DEFAULT 'giden'")
+    except Exception as e:
+        print(f"faturalar.yon: {e}")
+    try:
+        execute("UPDATE faturalar SET yon = 'giden' WHERE yon IS NULL OR TRIM(yon) = ''")
+    except Exception as e:
+        print(f"faturalar.yon backfill: {e}")
+    _faturalar_yon_kolon_done = True
 
 
 def ensure_user_ui_preferences_table():

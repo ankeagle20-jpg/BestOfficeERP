@@ -23,6 +23,7 @@ from db import (
     ensure_hizmet_turleri_table,
     ensure_duzenli_fatura_secenekleri_table,
     ensure_faturalar_amount_columns,
+    ensure_faturalar_yon_kolon,
     ensure_contracts_engine,
     ensure_customer_financial_profile,
     ensure_customers_durum,
@@ -7240,6 +7241,58 @@ def _ekstre_tediye_rows_for_period(musteri_id, bas, bit):
     return out
 
 
+def _ekstre_gelen_fatura_rows_for_period(musteri_id, bas, bit):
+    """Dönem içi gelen (tedarikçi) faturaları (ALACAK sütunu)."""
+    ensure_faturalar_amount_columns()
+    ensure_faturalar_yon_kolon()
+    gf_rows = fetch_all(
+        """
+        SELECT id, fatura_no, musteri_adi, fatura_tarihi,
+               COALESCE(toplam, tutar, 0) AS toplam, created_at
+        FROM faturalar
+        WHERE musteri_id = %s
+          AND COALESCE(yon, 'giden') = 'gelen'
+          AND (fatura_tarihi::date) >= %s AND (fatura_tarihi::date) <= %s
+        ORDER BY fatura_tarihi::date, id
+        """,
+        (int(musteri_id), bas, bit),
+    )
+    out = []
+    for r in (gf_rows or []):
+        tedarikci = (r.get("musteri_adi") or "").strip()
+        fno = (r.get("fatura_no") or "").strip()
+        acik = tedarikci
+        if fno:
+            acik = (acik + " — " + fno) if acik else fno
+        if not acik:
+            acik = "Gelen Fatura"
+        try:
+            fid = int(r.get("id"))
+        except (TypeError, ValueError):
+            fid = None
+        try:
+            alacak = round(float(r.get("toplam") or 0), 2)
+        except (TypeError, ValueError):
+            alacak = 0.0
+        ft = r.get("fatura_tarihi")
+        if hasattr(ft, "isoformat"):
+            tarih_s = ft.isoformat()[:10]
+        else:
+            tarih_s = str(ft or "")[:10]
+        out.append({
+            "tarih": tarih_s,
+            "aciklama": acik,
+            "belge_no": fno,
+            "tur": "Gelen Fatura",
+            "borc": 0,
+            "alacak": alacak,
+            "bakiye": None,
+            "gelen_fatura_ids": [fid] if fid else [],
+            "created_at": r.get("created_at"),
+        })
+    return out
+
+
 def _ekstre_row_sort_key(x):
     """Tarih, aynı günde created_at (yoksa boş → ekleme sırası korunur)."""
     tarih = str(x.get("tarih") or "")[:10]
@@ -8109,6 +8162,7 @@ def _cari_ekstre_hareketler(
             rows.append(item)
 
     rows.extend(_ekstre_tediye_rows_for_period(musteri_id, bas, bit))
+    rows.extend(_ekstre_gelen_fatura_rows_for_period(musteri_id, bas, bit))
 
     rows.sort(key=_ekstre_row_sort_key)
     bakiye = 0

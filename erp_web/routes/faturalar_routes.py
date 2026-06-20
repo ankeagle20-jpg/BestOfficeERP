@@ -22,6 +22,7 @@ from db import (
     execute,
     execute_returning,
     ensure_faturalar_amount_columns,
+    ensure_faturalar_yon_kolon,
     ensure_auto_invoice_tables,
     ensure_customers_durum,
     ensure_customers_is_active,
@@ -280,6 +281,7 @@ FIRMA_AKBANK_IBAN = os.environ.get("FIRMA_AKBANK_IBAN", "TR590004600153888000173
 UPLOAD_MUSTERI_DOSYALARI = "uploads/musteri_dosyalari"
 # GİB portal HTML: imza sonrası bir kez indirilir; önizlemede tekrar GİB çağrılmaz.
 GIB_PORTAL_HTML_CACHE_DIR = "uploads/gib_portal_html"
+ALLOWED_GELEN_FATURA_EXTENSIONS = {"png", "jpg", "jpeg", "pdf"}
 
 AYLAR = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 
          'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık']
@@ -4766,6 +4768,50 @@ def yeni_fatura():
                            yeni_gib_bos=yeni_gib_bos)
 
 
+@bp.route('/gelen/yeni')
+@faturalar_gerekli
+def gelen_fatura_yeni():
+    """Gelen (tedarikçi) fatura giriş ekranı. ?musteri_id= ile cari ön-doldurulur."""
+    now = datetime.now()
+    secili_musteri = None
+    musteri_id = _opt_customer_id(request.args.get("musteri_id"))
+    if musteri_id:
+        cust = fetch_one(
+            "SELECT id, name, musteri_adi, address, tax_number FROM customers WHERE id = %s",
+            (musteri_id,),
+        )
+        if cust:
+            kyc = fetch_one(
+                "SELECT yeni_adres, vergi_dairesi, vergi_no FROM musteri_kyc WHERE musteri_id = %s ORDER BY id DESC LIMIT 1",
+                (musteri_id,),
+            )
+            address = (kyc and kyc.get("yeni_adres")) or cust.get("address") or ""
+            vergi_dairesi = (kyc and kyc.get("vergi_dairesi")) or ""
+            if not vergi_dairesi:
+                cust_vd = fetch_one("SELECT vergi_dairesi FROM customers WHERE id = %s", (musteri_id,))
+                if cust_vd and cust_vd.get("vergi_dairesi"):
+                    vergi_dairesi = (cust_vd.get("vergi_dairesi") or "").strip()
+            vergi_no = (kyc and kyc.get("vergi_no")) or cust.get("tax_number") or ""
+            if isinstance(vergi_no, float):
+                vergi_no = str(int(vergi_no)) if vergi_no == int(vergi_no) else str(vergi_no)
+            ma = (cust.get("musteri_adi") or "").strip()
+            nm = (cust.get("name") or "").strip()
+            secili_musteri = {
+                "id": cust["id"],
+                "name": cust.get("name") or "",
+                "musteri_adi": ma or None,
+                "display_label": nm or ma or "",
+                "address": address,
+                "vergi_dairesi": vergi_dairesi,
+                "vergi_no": str(vergi_no) if vergi_no else "",
+            }
+    return render_template(
+        "faturalar/gelen_fatura.html",
+        bugun=now.strftime("%Y-%m-%d"),
+        secili_musteri=_row_serializable(secili_musteri) if secili_musteri else None,
+    )
+
+
 @bp.route('/api/fatura-musteri-bul')
 @faturalar_gerekli
 def api_fatura_musteri_bul():
@@ -5773,6 +5819,58 @@ def _next_fatura_no(prefix=None):
         return f"{prefix}{yil}{tail + 1:06d}"
     except Exception:
         return f"{prefix}{yil}000001"
+
+
+def _next_gelen_fatura_no():
+    """Gelen (tedarikçi) faturası için otomatik numara: GELEN{yil}{6 haneli sıra}."""
+    yil = datetime.now().year
+    like = f"GELEN{yil}%"
+    row = fetch_one(
+        "SELECT fatura_no FROM faturalar WHERE fatura_no LIKE %s ORDER BY id DESC LIMIT 1",
+        (like,),
+    )
+    if not row or not row.get("fatura_no"):
+        return f"GELEN{yil}000001"
+    no = str(row["fatura_no"])
+    try:
+        tail = int(no[-6:])
+        return f"GELEN{yil}{tail + 1:06d}"
+    except Exception:
+        return f"GELEN{yil}000001"
+
+
+def _gelen_fatura_allowed_file(filename):
+    return (
+        "." in filename
+        and filename.rsplit(".", 1)[1].lower() in ALLOWED_GELEN_FATURA_EXTENSIONS
+    )
+
+
+def _gelen_fatura_dosya_kaydet(musteri_id, fatura_id, file):
+    """Dosyayı uploads/musteri_dosyalari/ altına yazar; relative path döner."""
+    from werkzeug.utils import secure_filename
+
+    os.makedirs(UPLOAD_MUSTERI_DOSYALARI, exist_ok=True)
+    filename = secure_filename(
+        f"gelen_fatura_{musteri_id}_{fatura_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.filename}"
+    )
+    rel = os.path.join(UPLOAD_MUSTERI_DOSYALARI, filename).replace("\\", "/")
+    file.save(rel)
+    return rel
+
+
+def _gelen_fatura_parse_decimal(val, default=0.0):
+    if val is None:
+        return default
+    s = str(val).strip().replace(" ", "")
+    if not s:
+        return default
+    if "," in s:
+        s = s.replace(".", "").replace(",", ".")
+    try:
+        return float(s)
+    except (TypeError, ValueError):
+        return default
 
 
 _AY_ADLARI_TR = ("Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran",
@@ -7303,6 +7401,177 @@ def fatura_ekle():
         mesaj = "Fatura güncellendi!" if edit_fatura_id else "Fatura eklendi!"
         return jsonify({"ok": True, "mesaj": mesaj, "fatura_id": fatura_id, "earsiv": earsiv_payload})
     except Exception as e:
+        return jsonify({"ok": False, "mesaj": str(e)}), 500
+
+
+@bp.route("/api/gelen-fatura-ekle", methods=["POST"])
+@faturalar_gerekli
+def api_gelen_fatura_ekle():
+    """Tedarikçiden gelen fatura kaydı (JSON: satırlar + toplamlar). Dosya ayrı endpoint."""
+    try:
+        ensure_faturalar_amount_columns()
+        ensure_faturalar_yon_kolon()
+
+        data = request.get_json() or {}
+        musteri_id = _opt_customer_id(data.get("musteri_id"))
+        if not musteri_id:
+            return jsonify({"ok": False, "mesaj": "musteri_id gerekli."}), 400
+
+        cust = fetch_one("SELECT id FROM customers WHERE id = %s", (musteri_id,))
+        if not cust:
+            return jsonify({"ok": False, "mesaj": "Müşteri bulunamadı."}), 404
+
+        tedarikci_adi = (data.get("tedarikci_adi") or "").strip()
+        if not tedarikci_adi:
+            return jsonify({"ok": False, "mesaj": "Tedarikçi adı gerekli."}), 400
+
+        satirlar = data.get("satirlar") or []
+        if not isinstance(satirlar, list) or not satirlar:
+            return jsonify({"ok": False, "mesaj": "En az bir fatura satırı gerekli."}), 400
+
+        ara_toplam = float(data.get("ara_toplam") or 0)
+        toplam_iskonto = float(data.get("toplam_iskonto") or 0)
+        kdv_toplam = float(data.get("kdv_toplam") or 0)
+        toplam = float(data.get("toplam") or 0)
+
+        if satirlar and toplam == 0:
+            ara_toplam = 0.0
+            toplam_iskonto = 0.0
+            kdv_toplam = 0.0
+            for s in satirlar:
+                miktar = float(s.get("miktar") or 0)
+                birim_fiyat = float(s.get("birim_fiyat") or 0)
+                isk_oran = float(s.get("iskonto_orani") or 0)
+                isk_tutar_giris = s.get("iskonto_tutar")
+                kdv = float(s.get("kdv_orani") or 0)
+                brut = miktar * birim_fiyat
+                if isk_tutar_giris is not None and float(isk_tutar_giris or 0) > 0:
+                    isk_tutar = min(abs(float(isk_tutar_giris)), brut)
+                else:
+                    isk_tutar = brut * abs(isk_oran) / 100.0
+                net = brut - isk_tutar
+                kdv_tutar = net * kdv / 100.0
+                ara_toplam += brut
+                toplam_iskonto += isk_tutar
+                kdv_toplam += kdv_tutar
+            toplam = ara_toplam - toplam_iskonto + kdv_toplam
+
+        tutar = round(ara_toplam - toplam_iskonto, 2)
+        kdv_tutar = round(kdv_toplam, 2)
+        toplam = round(toplam, 2)
+        if tutar <= 0 and toplam <= 0:
+            return jsonify({"ok": False, "mesaj": "Tutar sıfırdan büyük olmalı."}), 400
+
+        raw_fat_tarih = (data.get("fatura_tarihi") or "").strip()
+        if not raw_fat_tarih:
+            return jsonify({"ok": False, "mesaj": "Fatura tarihi gerekli."}), 400
+        if re.match(r"^\d{1,2}\.\d{1,2}\.\d{4}$", raw_fat_tarih):
+            g, a, y = raw_fat_tarih.split(".")
+            fatura_tarihi = f"{y}-{a.zfill(2)}-{g.zfill(2)}"
+        else:
+            fatura_tarihi = raw_fat_tarih[:10]
+
+        fatura_no = (data.get("fatura_no") or "").strip() or _next_gelen_fatura_no()
+        dup = fetch_one("SELECT id FROM faturalar WHERE fatura_no = %s LIMIT 1", (fatura_no,))
+        if dup:
+            return jsonify({
+                "ok": False,
+                "mesaj": f"Bu fatura numarası zaten kayıtlı ({fatura_no}).",
+            }), 409
+
+        notlar_raw = (data.get("notlar") or "").strip()
+        notlar_kayit = notlar_raw
+        if notlar_kayit and "GELEN_FATURA" not in notlar_kayit.upper():
+            notlar_kayit = f"{notlar_kayit} | GELEN_FATURA"
+        elif not notlar_kayit:
+            notlar_kayit = "GELEN_FATURA"
+
+        execute(
+            """
+            INSERT INTO faturalar (
+                fatura_no, musteri_id, musteri_adi, tutar, kdv_tutar,
+                toplam, durum, fatura_tarihi, vade_tarihi, notlar, yon, pdf_yolu
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                fatura_no,
+                musteri_id,
+                tedarikci_adi,
+                tutar,
+                kdv_tutar,
+                toplam,
+                "kayit",
+                fatura_tarihi,
+                None,
+                notlar_kayit,
+                "gelen",
+                None,
+            ),
+        )
+        row = fetch_one(
+            "SELECT id FROM faturalar WHERE fatura_no = %s ORDER BY id DESC LIMIT 1",
+            (fatura_no,),
+        )
+        fatura_id = row.get("id") if row else None
+        if not fatura_id:
+            return jsonify({"ok": False, "mesaj": "Kayıt oluşturulamadı."}), 500
+
+        if satirlar:
+            try:
+                execute(
+                    "UPDATE faturalar SET satirlar_json = %s WHERE id = %s",
+                    (json.dumps(satirlar), fatura_id),
+                )
+            except Exception:
+                pass
+
+        return jsonify({
+            "ok": True,
+            "mesaj": "Gelen fatura kaydedildi.",
+            "fatura_id": fatura_id,
+            "fatura_no": fatura_no,
+        })
+    except Exception as e:
+        logging.getLogger(__name__).exception("gelen fatura ekle")
+        return jsonify({"ok": False, "mesaj": str(e)}), 500
+
+
+@bp.route("/api/gelen-fatura-dosya/<int:fatura_id>", methods=["POST"])
+@faturalar_gerekli
+def api_gelen_fatura_dosya(fatura_id):
+    """Gelen faturaya PDF/resim ekler (kayıt sonrası ikinci istek)."""
+    try:
+        ensure_faturalar_yon_kolon()
+        row = fetch_one(
+            "SELECT id, musteri_id, yon FROM faturalar WHERE id = %s",
+            (fatura_id,),
+        )
+        if not row:
+            return jsonify({"ok": False, "mesaj": "Fatura bulunamadı."}), 404
+        if str(row.get("yon") or "").strip().lower() != "gelen":
+            return jsonify({"ok": False, "mesaj": "Bu kayıt gelen fatura değil."}), 400
+
+        file = request.files.get("file")
+        if not file or not file.filename:
+            return jsonify({"ok": False, "mesaj": "Dosya seçilmedi."}), 400
+        if not _gelen_fatura_allowed_file(file.filename):
+            return jsonify({
+                "ok": False,
+                "mesaj": "Geçersiz dosya formatı. İzin verilen: pdf, png, jpg, jpeg.",
+            }), 400
+
+        musteri_id = int(row.get("musteri_id") or 0)
+        pdf_yolu = _gelen_fatura_dosya_kaydet(musteri_id, fatura_id, file)
+        execute("UPDATE faturalar SET pdf_yolu = %s WHERE id = %s", (pdf_yolu, fatura_id))
+
+        return jsonify({
+            "ok": True,
+            "mesaj": "Dosya yüklendi.",
+            "fatura_id": fatura_id,
+            "pdf_yolu": pdf_yolu,
+        })
+    except Exception as e:
+        logging.getLogger(__name__).exception("gelen fatura dosya")
         return jsonify({"ok": False, "mesaj": str(e)}), 500
 
 
