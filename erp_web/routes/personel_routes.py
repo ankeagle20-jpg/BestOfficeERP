@@ -2,13 +2,23 @@
 """
 Personel Devam Takip, İzin Yönetimi, Personel Yönetimi
 """
-from flask import Blueprint, render_template, request, jsonify
+import io
+import os
+import sys
+
+from flask import Blueprint, render_template, request, jsonify, Response
 from flask_login import current_user
 from auth import giris_gerekli
 from db import fetch_all, fetch_one, execute, execute_returning
 from datetime import date, datetime, timedelta
 from utils.devam_bulut_sync import sync_devam_gunu_buluta
 from routes.pdovam_routes import pdovam_toplam_fark_dk_for_personel
+
+_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
+from izin_form_pdf import izin_formu_olustur
 
 
 MESAI_SABAH_DK = 9 * 60
@@ -183,6 +193,19 @@ def _parse_date(s):
         except ValueError:
             continue
     return None
+
+
+def _tr_tarih(val) -> str:
+    """date/datetime/str → dd.mm.yyyy; boşsa ''."""
+    if not val:
+        return ""
+    if hasattr(val, "strftime"):
+        return val.strftime("%d.%m.%Y")
+    s = str(val)[:10]
+    try:
+        return datetime.strptime(s, "%Y-%m-%d").strftime("%d.%m.%Y")
+    except Exception:
+        return s
 
 
 def _izin_hakki_4857(ise_baslama, dogum_tarihi, ref_tarih=None):
@@ -492,6 +515,10 @@ def api_devam_gunluk():
         d["tarih"] = t.isoformat()
         d["durum"] = "Tam" if d.get("cikis_saati") else ("Geç " + str(d.get("gec_dakika") or 0) + " dk" if d.get("gec_dakika") else "Giriş yaptı")
         out.append(d)
+    for item in out:
+        for k in ("giris_saati", "cikis_saati"):
+            if item.get(k) and hasattr(item[k], "isoformat"):
+                item[k] = str(item[k])[:5]
     return jsonify(out)
 
 
@@ -589,12 +616,12 @@ def api_izin_list():
     yil = request.args.get("yil")
     if not pid:
         return jsonify([])
-    sql = "SELECT id, personel_id, izin_turu, baslangic_tarihi, bitis_tarihi, gun_sayisi, aciklama, onay_durumu FROM personel_izin WHERE personel_id=%s"
+    sql = "SELECT id, personel_id, izin_turu, baslangic_tarihi, bitis_tarihi, gun_sayisi, saat_sayisi, aciklama, onay_durumu, created_at FROM personel_izin WHERE personel_id=%s"
     params = [pid]
     if yil:
         sql += " AND (EXTRACT(YEAR FROM baslangic_tarihi::date)=%s OR EXTRACT(YEAR FROM bitis_tarihi::date)=%s)"
         params.extend([yil, yil])
-    sql += " ORDER BY baslangic_tarihi DESC"
+    sql += " ORDER BY baslangic_tarihi ASC, created_at ASC"
     rows = fetch_all(sql, params)
     out = []
     for r in rows:
@@ -602,45 +629,71 @@ def api_izin_list():
         for k in ("baslangic_tarihi", "bitis_tarihi"):
             if d.get(k) and hasattr(d[k], "isoformat"):
                 d[k] = d[k].isoformat()[:10]
+        if d.get("created_at") and hasattr(d["created_at"], "isoformat"):
+            d["created_at"] = d["created_at"].isoformat()
         out.append(d)
     return jsonify(out)
 
 
-@bp.route("/api/izin/ozet")
-@giris_gerekli
-def api_izin_ozet():
-    pid = request.args.get("personel_id")
-    yil = int(request.args.get("yil") or date.today().year)
-    if not pid:
-        return jsonify({"hak": 14, "kullanilan": 0, "kalan": 14})
+def _parse_iso_date(s):
+    if not s:
+        return None
+    try:
+        return datetime.strptime(str(s)[:10], "%Y-%m-%d").date()
+    except Exception:
+        return None
+
+
+def _izin_ozet_hesapla(pid, yil, bas=None, bit=None):
+    """Yıllık izin özeti (api_izin_ozet ile aynı mantık)."""
+    pid = int(pid)
     ozluk = fetch_one(
         "SELECT izin_hakedis_gun, izin_kalan_gun, izin_kalan_saat, ise_giris_tarihi FROM personel_ozluk WHERE personel_id=%s",
         (pid,),
     )
     bilgi = fetch_one(
         "SELECT yillik_izin_hakki, manuel_izin_gun, ise_baslama_tarihi, dogum_tarihi FROM personel_bilgi WHERE personel_id=%s",
-        (pid,)
+        (pid,),
     )
-    p0 = fetch_one("SELECT giris_tarihi FROM personel WHERE id=%s", (pid,))
 
-    # Öncelik: personel_ozluk.izin_hakedis_gun
+    ise_bas = bilgi.get("ise_baslama_tarihi") if bilgi else None
+    if not ise_bas:
+        p_row = fetch_one("SELECT giris_tarihi FROM personel WHERE id=%s", (pid,))
+        if p_row and p_row.get("giris_tarihi"):
+            ise_bas = p_row["giris_tarihi"]
+    dogum = bilgi.get("dogum_tarihi") if bilgi else None
+
+    # Öncelik: personel_ozluk.izin_hakedis_gun (elle girilmiş > 0)
+    ozluk_hak = None
     if ozluk and ozluk.get("izin_hakedis_gun") is not None and str(ozluk.get("izin_hakedis_gun")).strip() != "":
-        hak = int(ozluk.get("izin_hakedis_gun"))
-    # Sonra personel_bilgi.yillik_izin_hakki
-    elif bilgi and bilgi.get("yillik_izin_hakki") is not None and str(bilgi.get("yillik_izin_hakki")).strip() != "":
-        hak = int(bilgi.get("yillik_izin_hakki"))
+        try:
+            ozluk_hak = int(ozluk.get("izin_hakedis_gun"))
+        except (TypeError, ValueError):
+            ozluk_hak = None
+    hak_4857 = _izin_hakki_4857(ise_bas, dogum)
+    if ozluk_hak is not None and ozluk_hak > 0:
+        # Elle girilen değer ile 4857 hesabından büyük olanı al
+        # (4857 minimum hak, altına düşemez)
+        hak = max(ozluk_hak, hak_4857)
     else:
-        hak = _izin_hakki_4857(bilgi.get("ise_baslama_tarihi") if bilgi else None, bilgi.get("dogum_tarihi") if bilgi else None) if bilgi else 14
+        hak = hak_4857
     manuel = int(bilgi.get("manuel_izin_gun") or 0) if bilgi else 0
     r = fetch_one(
-        """SELECT COALESCE(SUM(gun_sayisi), 0) AS toplam FROM personel_izin
-           WHERE personel_id=%s AND izin_turu = 'Yıllık Ücretli İzin'
+        """SELECT COALESCE(SUM(gun_sayisi), 0) AS kullanilan_gun,
+                  COALESCE(SUM(saat_sayisi), 0) AS kullanilan_saat_raw
+           FROM personel_izin
+           WHERE personel_id=%s AND izin_turu IN ('Yıllık Ücretli İzin', 'Saatlik İzin')
            AND (EXTRACT(YEAR FROM baslangic_tarihi::date)=%s OR EXTRACT(YEAR FROM bitis_tarihi::date)=%s)""",
-        (pid, yil, yil)
+        (pid, yil, yil),
     )
-    kullanilan = float(r.get("toplam") or 0)
+    kullanilan_gun_raw = float(r.get("kullanilan_gun") or 0)
+    kullanilan_saat_raw = int(r.get("kullanilan_saat_raw") or 0)
+    kullanilan_saat_toplam = int(kullanilan_gun_raw * 8) + kullanilan_saat_raw
+    kullanilan_gun_net = kullanilan_saat_toplam // 8
+    kullanilan_saat = kullanilan_saat_toplam % 8
+    kullanilan = kullanilan_saat_toplam / 8.0
     toplam_hak = hak + manuel
-    kalan_hesap = max(0, toplam_hak - kullanilan)
+    kalan_hesap = max(0.0, toplam_hak - kullanilan)
 
     # Özlükte kalan gün/saat girildiyse onu öncelikle göster
     kalan_ozluk = None
@@ -661,53 +714,95 @@ def api_izin_ozet():
         devreden = max(devreden, ekstra_from_kalan)
     except (TypeError, ValueError):
         pass
-    # Geç Süre: giriş/çıkış raporundaki Fark mantığına göre;
-    # tarih aralığı verilmezse son 1 ay, verilirse o aralık.
-    bas_raw = request.args.get("bas")
-    bit_raw = request.args.get("bit")
 
-    def _parse_iso(s):
-        if not s:
-            return None
-        try:
-            return datetime.strptime(str(s)[:10], "%Y-%m-%d").date()
-        except Exception:
-            return None
-
-    today = date.today()
-    bas = _parse_iso(bas_raw)
-    bit = _parse_iso(bit_raw)
-    if bas and bit:
-        if bit < bas:
-            bas, bit = bit, bas
-    elif bas and not bit:
-        bit = today
-    elif not bas and bit:
-        bas = bit - timedelta(days=30)
-    else:
-        bit = today
-        bas = today - timedelta(days=30)
-    try:
-        gec_sure_dk = pdovam_toplam_fark_dk_for_personel(int(pid), bas, bit)
-    except Exception:
-        gec_sure_dk = 0
-    # Kalan izin: 1 gün = 8 saat. Geç süre (fark) izin bakiyesinden düşülür.
+    gec_row = fetch_one(
+        """SELECT COALESCE(SUM(gec_dakika), 0) AS toplam_gec_dk
+           FROM devam_kayitlari
+           WHERE personel_id=%s
+           AND EXTRACT(YEAR FROM tarih)=%s
+           AND gec_dakika > 0""",
+        (pid, yil),
+    )
+    gec_sure_dk = int(gec_row.get("toplam_gec_dk") or 0)
+    # Kalan izin: 1 gün = 8 saat. Yıllık geç kalma (dk) izin bakiyesinden düşülür.
     kalan_saat_toplam = max(0.0, float(kalan) * 8.0 - (float(gec_sure_dk) / 60.0))
     kalan_net_gun = max(0.0, kalan_saat_toplam / 8.0)
-    return jsonify({
+    kalan_gun_net = int(kalan_saat_toplam // 8)
+    kalan_saat = int(kalan_saat_toplam % 8)
+    return {
         "hak": hak,
         "manuel_ek": devreden,
         "toplam_hak": toplam_hak,
         "kullanilan": kullanilan,
+        "kullanilan_gun_net": kullanilan_gun_net,
+        "kullanilan_saat": kullanilan_saat,
         "kalan": max(0, kalan),
+        "kalan_gun_net": kalan_gun_net,
+        "kalan_saat": kalan_saat,
         "kalan_net_gun": kalan_net_gun,
         "kalan_net_text": _saat_to_gun_saat_yazi(kalan_saat_toplam),
         "gec_sure_dk": gec_sure_dk,
         "gec_sure_saat": _dk_yazi(gec_sure_dk),
         "gec_sure_gun": _dk_gun_yazi(gec_sure_dk),
-        "tarih_bas": bas.isoformat(),
-        "tarih_bit": bit.isoformat(),
-    })
+        "gec_dakika_yil": gec_sure_dk,
+        "gec_gun_net": int(gec_sure_dk // 480),
+        "gec_saat_net": int((gec_sure_dk % 480) // 60),
+        "tarih_bas": date(yil, 1, 1).isoformat(),
+        "tarih_bit": date(yil, 12, 31).isoformat(),
+    }
+
+
+def _izin_pdf_data_from_row(row: dict, izin_bakiye: dict) -> dict:
+    bitis = row.get("bitis_tarihi")
+    ise_donme = ""
+    if bitis:
+        try:
+            d = bitis if hasattr(bitis, "day") else datetime.strptime(str(bitis)[:10], "%Y-%m-%d").date()
+            ise_donme = _tr_tarih(d + timedelta(days=1))
+        except Exception:
+            pass
+
+    tur = row.get("izin_turu") or ""
+    gun = row.get("gun_sayisi") or 0
+    saat_sayisi = row.get("saat_sayisi") or 0
+    try:
+        yari_gun = tur == "Yarım Gün İzin" or float(gun) <= 0.5
+    except (TypeError, ValueError):
+        yari_gun = tur == "Yarım Gün İzin"
+
+    return {
+        "firma_adi": "BestOffice ERP",
+        "doc_no": f"İK-{row['izin_id']:04d}",
+        "bugun": date.today().strftime("%d.%m.%Y"),
+        "personel_ad": row.get("ad_soyad") or "",
+        "tc_no": row.get("tc_no") or "",
+        "departman": row.get("departman") or "",
+        "unvan": row.get("unvan") or row.get("pozisyon") or "",
+        "ise_baslama": _tr_tarih(row.get("ise_baslama_tarihi") or row.get("giris_tarihi")),
+        "izin_turu": tur,
+        "baslangic": _tr_tarih(row.get("baslangic_tarihi")),
+        "bitis": _tr_tarih(bitis),
+        "ise_donme": ise_donme,
+        "gun_sayisi": gun,
+        "saat_sayisi": saat_sayisi,
+        "yari_gun": yari_gun,
+        "aciklama": row.get("aciklama") or "",
+        "adres": row.get("ikametgah") or "",
+        "telefon": row.get("personel_telefon") or row.get("cep_telefon") or "",
+        "izin_bakiye": izin_bakiye,
+    }
+
+
+@bp.route("/api/izin/ozet")
+@giris_gerekli
+def api_izin_ozet():
+    pid = request.args.get("personel_id")
+    yil = int(request.args.get("yil") or date.today().year)
+    if not pid:
+        return jsonify({"hak": 14, "kullanilan": 0, "kalan": 14})
+    bas = _parse_iso_date(request.args.get("bas"))
+    bit = _parse_iso_date(request.args.get("bit"))
+    return jsonify(_izin_ozet_hesapla(pid, yil, bas=bas, bit=bit))
 
 
 @bp.route("/api/izin/ozet/liste")
@@ -873,15 +968,28 @@ def api_izin_kaydet():
         izin_turu = (data.get("izin_turu") or "Yıllık Ücretli İzin").strip()
         bas = _parse_date(data.get("baslangic_tarihi"))
         bitis = _parse_date(data.get("bitis_tarihi"))
-        if not bas or not bitis:
-            return jsonify({"ok": False, "mesaj": "Başlangıç ve bitiş tarihi zorunlu"}), 400
-        if bitis < bas:
-            bitis, bas = bas, bitis
-        gun_sayisi = (bitis - bas).days + 1
+        if izin_turu == "Saatlik İzin":
+            if not bas:
+                return jsonify({"ok": False, "mesaj": "Tarih zorunlu"}), 400
+            try:
+                saat_sayisi = int(data.get("saat_sayisi") or 0)
+            except (TypeError, ValueError):
+                saat_sayisi = 0
+            if saat_sayisi < 1 or saat_sayisi > 8:
+                return jsonify({"ok": False, "mesaj": "Saat 1-8 arası olmalı"}), 400
+            bitis = bas
+            gun_sayisi = 0
+        else:
+            if not bas or not bitis:
+                return jsonify({"ok": False, "mesaj": "Başlangıç ve bitiş tarihi zorunlu"}), 400
+            if bitis < bas:
+                bitis, bas = bas, bitis
+            gun_sayisi = (bitis - bas).days + 1
+            saat_sayisi = 0
         aciklama = (data.get("aciklama") or "").strip()
         execute(
-            "INSERT INTO personel_izin (personel_id, izin_turu, baslangic_tarihi, bitis_tarihi, gun_sayisi, aciklama) VALUES (%s,%s,%s,%s,%s,%s)",
-            (pid, izin_turu, bas, bitis, gun_sayisi, aciklama)
+            "INSERT INTO personel_izin (personel_id, izin_turu, baslangic_tarihi, bitis_tarihi, gun_sayisi, saat_sayisi, aciklama) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+            (pid, izin_turu, bas, bitis, gun_sayisi, saat_sayisi, aciklama)
         )
         return jsonify({"ok": True})
     except Exception as e:
@@ -899,7 +1007,188 @@ def api_izin_sil():
         return jsonify({"ok": False, "mesaj": str(e)}), 400
 
 
+@bp.route("/api/izin/otomatik-hesapla", methods=["POST"])
+@giris_gerekli
+def api_izin_otomatik_hesapla():
+    """Test / manuel tetikleme: QR hareketlerinden otomatik izin hesabı."""
+    try:
+        from services.izin_otomatik import gunden_otomatik_izin_hesapla
+
+        data = request.get_json(silent=True) or request.form or {}
+        tarih_raw = data.get("tarih")
+        if tarih_raw:
+            hedef = _parse_iso_date(tarih_raw)
+            if not hedef:
+                return jsonify({"ok": False, "mesaj": "Geçersiz tarih (YYYY-MM-DD)"}), 400
+        else:
+            hedef = date.today() - timedelta(days=1)
+        sonuc = gunden_otomatik_izin_hesapla(hedef)
+        return jsonify({"ok": True, **sonuc})
+    except Exception as e:
+        return jsonify({"ok": False, "mesaj": str(e)}), 500
+
+
+@bp.route("/api/izin-pdf/<int:izin_id>")
+@giris_gerekli
+def api_izin_pdf(izin_id):
+    row = fetch_one(
+        """
+        SELECT
+            pi.id              AS izin_id,
+            pi.personel_id,
+            pi.izin_turu,
+            pi.baslangic_tarihi,
+            pi.bitis_tarihi,
+            pi.gun_sayisi,
+            pi.saat_sayisi,
+            pi.aciklama,
+            p.ad_soyad,
+            p.telefon          AS personel_telefon,
+            p.giris_tarihi,
+            p.pozisyon,
+            pb.tc_no,
+            pb.departman,
+            pb.unvan,
+            pb.ise_baslama_tarihi,
+            po.ikametgah,
+            po.cep_telefon
+        FROM personel_izin pi
+        JOIN personel p ON p.id = pi.personel_id
+        LEFT JOIN personel_bilgi pb ON pb.personel_id = pi.personel_id
+        LEFT JOIN personel_ozluk po ON po.personel_id = pi.personel_id
+        WHERE pi.id = %s
+        """,
+        (izin_id,),
+    )
+    if not row:
+        return jsonify({"ok": False, "mesaj": "İzin kaydı bulunamadı."}), 404
+
+    pid = int(row["personel_id"])
+    bas_tarih = row.get("baslangic_tarihi")
+    if hasattr(bas_tarih, "year"):
+        yil = bas_tarih.year
+    else:
+        try:
+            yil = datetime.strptime(str(bas_tarih)[:10], "%Y-%m-%d").year
+        except Exception:
+            yil = date.today().year
+
+    ozet = _izin_ozet_hesapla(pid, yil)
+    izin_bakiye = {
+        "toplam_hak": ozet["toplam_hak"],
+        "yillik_kullanilan": ozet["kullanilan"],
+        "kalan": ozet["kalan"],
+    }
+    data = _izin_pdf_data_from_row(dict(row), izin_bakiye)
+    buf = io.BytesIO()
+    try:
+        izin_formu_olustur(data, buf)
+    except Exception as e:
+        return jsonify({"ok": False, "mesaj": str(e)}), 500
+
+    pdf_bytes = buf.getvalue()
+    import unicodedata
+    ad_raw = str(row.get("ad_soyad") or "izin")
+    ad_slug = unicodedata.normalize('NFKD', ad_raw)
+    ad_slug = ''.join(c for c in ad_slug if not unicodedata.combining(c))
+    ad_slug = ad_slug.replace(' ', '_')
+    # Sadece ASCII alfanumerik + alt çizgi bırak
+    import re
+    ad_slug = re.sub(r'[^A-Za-z0-9_]', '', ad_slug) or "izin"
+    fname = f"izin_{ad_slug}_{izin_id}.pdf"
+    indir = request.args.get("indir", "").lower() in ("1", "true", "yes")
+    disposition = "attachment" if indir else "inline"
+    return Response(
+        pdf_bytes,
+        mimetype="application/pdf",
+        headers={
+            "Content-Disposition": f'{disposition}; filename="{fname}"',
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
+
+
 # ── Geç kalma listesi ───────────────────────────────────────────────────────
+
+_TR_AYLAR = (
+    "Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran",
+    "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık",
+)
+
+
+def _ay_key(y: int, m: int) -> str:
+    return f"{y:04d}-{m:02d}"
+
+
+def _ay_adi(y: int, m: int) -> str:
+    return f"{_TR_AYLAR[m - 1]} {y}"
+
+
+def _gec_dakika_to_gun_saat_dk(toplam_dakika: int) -> dict:
+    """8 saat = 1 gün (480 dk)."""
+    td = max(0, int(toplam_dakika or 0))
+    return {
+        "toplam_dakika": td,
+        "gun": td // 480,
+        "saat": (td % 480) // 60,
+        "dakika": td % 60,
+    }
+
+
+def _iter_ay_aralik(bas: date, adet: int):
+    cur = bas.replace(day=1)
+    for _ in range(adet):
+        yield cur.year, cur.month
+        if cur.month == 12:
+            cur = date(cur.year + 1, 1, 1)
+        else:
+            cur = date(cur.year, cur.month + 1, 1)
+
+
+def _is_is_gunu(d: date) -> bool:
+    """Pazartesi–Cumartesi (Pazar hariç)."""
+    return d.weekday() < 6
+
+
+def _ay_is_gunleri(y: int, m: int) -> list:
+    """Ayın tüm Pzt–Cmt günleri."""
+    if m == 12:
+        son = date(y + 1, 1, 1) - timedelta(days=1)
+    else:
+        son = date(y, m + 1, 1) - timedelta(days=1)
+    cur = date(y, m, 1)
+    out = []
+    while cur <= son:
+        if _is_is_gunu(cur):
+            out.append(cur)
+        cur += timedelta(days=1)
+    return out
+
+
+def _dk_to_hhmm(dk: int) -> str:
+    dk = max(0, int(dk))
+    return f"{dk // 60:02d}:{dk % 60:02d}"
+
+
+def _gec_hesapla_dk(giris_dk: int, mesai_dk: int) -> int:
+    """api_devam_kaydet ile aynı: fark > 5 ise geç, değilse 0."""
+    fark = giris_dk - mesai_dk
+    if fark <= 5:
+        return 0
+    return fark
+
+
+def _gec_row_serialize(d: dict) -> dict:
+    if d.get("tarih") and hasattr(d["tarih"], "isoformat"):
+        d["tarih"] = d["tarih"].isoformat()[:10]
+    if d.get("giris_saati") and hasattr(d["giris_saati"], "isoformat"):
+        d["giris_saati"] = str(d["giris_saati"])[:5]
+    if d.get("cikis_saati") and hasattr(d["cikis_saati"], "isoformat"):
+        d["cikis_saati"] = str(d["cikis_saati"])[:5]
+    return d
+
 
 @bp.route("/api/gec/list")
 @giris_gerekli
@@ -907,17 +1196,242 @@ def api_gec_list():
     pid = request.args.get("personel_id")
     if not pid:
         return jsonify([])
-    rows = fetch_all(
-        "SELECT tarih, giris_saati, cikis_saati, gec_dakika FROM devam_kayitlari WHERE personel_id=%s AND gec_dakika > 0 ORDER BY tarih DESC LIMIT 100",
-        (pid,)
-    )
+    ay = request.args.get("ay")
+    doldur = str(request.args.get("doldur") or "").lower() in ("1", "true", "yes")
+    if ay:
+        parts = str(ay).strip().split("-")
+        if len(parts) < 2:
+            return jsonify([])
+        try:
+            y, m = int(parts[0]), int(parts[1])
+            bas_ay_gun = date(y, m, 1)
+            if m == 12:
+                son_ay_gun = date(y + 1, 1, 1) - timedelta(days=1)
+            else:
+                son_ay_gun = date(y, m + 1, 1) - timedelta(days=1)
+        except (TypeError, ValueError):
+            return jsonify([])
+        rows = fetch_all(
+            """SELECT id, tarih, giris_saati, cikis_saati, gec_dakika
+               FROM devam_kayitlari
+               WHERE personel_id=%s AND tarih >= %s AND tarih <= %s
+               ORDER BY tarih ASC""",
+            (pid, bas_ay_gun, son_ay_gun),
+        )
+        if not doldur:
+            out = []
+            for r in rows:
+                d = _gec_row_serialize(dict(r))
+                d["gercek"] = True
+                out.append(d)
+            return jsonify(out)
+
+        personel = fetch_one("SELECT mesai_baslangic FROM personel WHERE id=%s", (pid,))
+        mesai_dk = _saat_to_minutes((personel or {}).get("mesai_baslangic") or "09:00") or 9 * 60
+        kayit_map = {}
+        giris_dk_list = []
+        for r in rows:
+            d = dict(r)
+            t = d["tarih"]
+            key = t.isoformat()[:10] if hasattr(t, "isoformat") else str(t)[:10]
+            kayit_map[key] = d
+            g_dk = _saat_to_minutes(d.get("giris_saati"))
+            if g_dk is not None:
+                giris_dk_list.append(g_dk)
+        ort_giris_dk = round(sum(giris_dk_list) / len(giris_dk_list)) if giris_dk_list else mesai_dk
+        ort_giris_str = _dk_to_hhmm(ort_giris_dk)
+        ort_gec = _gec_hesapla_dk(ort_giris_dk, mesai_dk)
+        out = []
+        for gun in _ay_is_gunleri(y, m):
+            key = gun.isoformat()
+            if key in kayit_map:
+                d = _gec_row_serialize(dict(kayit_map[key]))
+                d["gercek"] = True
+            else:
+                d = _gec_row_serialize({
+                    "id": None,
+                    "tarih": key,
+                    "giris_saati": ort_giris_str,
+                    "cikis_saati": None,
+                    "gec_dakika": ort_gec,
+                })
+                d["gercek"] = False
+            out.append(d)
+        return jsonify(out)
+    else:
+        rows = fetch_all(
+            "SELECT id, tarih, giris_saati, cikis_saati, gec_dakika FROM devam_kayitlari WHERE personel_id=%s AND gec_dakika > 0 ORDER BY tarih DESC LIMIT 100",
+            (pid,),
+        )
     out = []
     for r in rows:
-        d = dict(r)
-        if d.get("tarih") and hasattr(d["tarih"], "isoformat"):
-            d["tarih"] = d["tarih"].isoformat()[:10]
+        d = _gec_row_serialize(dict(r))
+        d["gercek"] = True
         out.append(d)
     return jsonify(out)
+
+
+@bp.route("/api/gec/guncelle", methods=["POST"])
+@giris_gerekli
+def api_gec_guncelle():
+    try:
+        data = request.json or request.form
+        rid = int(data.get("id"))
+        pid = int(data.get("personel_id"))
+        gec_dakika = int(data.get("gec_dakika") or 0)
+        giris = (data.get("giris_saati") or "").strip()[:8]
+        if gec_dakika < 0:
+            return jsonify({"ok": False, "mesaj": "Geç kalma negatif olamaz"}), 400
+        row = fetch_one(
+            "SELECT id FROM devam_kayitlari WHERE id=%s AND personel_id=%s",
+            (rid, pid),
+        )
+        if not row:
+            return jsonify({"ok": False, "mesaj": "Kayıt bulunamadı"}), 404
+        execute(
+            "UPDATE devam_kayitlari SET gec_dakika=%s, giris_saati=%s WHERE id=%s AND personel_id=%s",
+            (gec_dakika, giris or None, rid, pid),
+        )
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "mesaj": str(e)}), 400
+
+
+@bp.route("/api/gec/sil", methods=["POST"])
+@giris_gerekli
+def api_gec_sil():
+    try:
+        data = request.json or request.form
+        rid = int(data.get("id"))
+        pid = int(data.get("personel_id"))
+        row = fetch_one(
+            "SELECT id FROM devam_kayitlari WHERE id=%s AND personel_id=%s",
+            (rid, pid),
+        )
+        if not row:
+            return jsonify({"ok": False, "mesaj": "Kayıt bulunamadı"}), 404
+        execute("DELETE FROM devam_kayitlari WHERE id=%s AND personel_id=%s", (rid, pid))
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "mesaj": str(e)}), 400
+
+
+@bp.route("/api/gec/aylik-grid")
+@giris_gerekli
+def api_gec_aylik_grid():
+    pid_raw = request.args.get("personel_id")
+    if not pid_raw:
+        return jsonify({"ok": False, "mesaj": "personel_id zorunlu"}), 400
+    pid = int(pid_raw)
+
+    bas_param = _parse_date(request.args.get("baslangic_tarihi"))
+    if bas_param:
+        bas = bas_param
+    else:
+        bilgi = fetch_one(
+            "SELECT ise_baslama_tarihi FROM personel_bilgi WHERE personel_id=%s",
+            (pid,),
+        )
+        bas = None
+        if bilgi and bilgi.get("ise_baslama_tarihi"):
+            v = bilgi["ise_baslama_tarihi"]
+            bas = v if hasattr(v, "year") else _parse_date(v)
+        if not bas:
+            p = fetch_one("SELECT giris_tarihi FROM personel WHERE id=%s", (pid,))
+            if p and p.get("giris_tarihi"):
+                v = p["giris_tarihi"]
+                bas = v if hasattr(v, "year") else _parse_date(v)
+        if not bas:
+            today = date.today()
+            bas = date(today.year, today.month, 1)
+
+    bas_ay_raw = bas.replace(day=1)
+    bugun = date.today()
+    # İşe başlama tarihinin bir önceki yılının aynı ayından başla
+    onceki_yil_bas = bas_ay_raw.replace(year=bugun.year - 1)
+    # Eğer bu ay bugünden büyükse (henüz gelmemiş), bir yıl daha geri
+    if onceki_yil_bas > bugun.replace(day=1):
+        onceki_yil_bas = onceki_yil_bas.replace(year=onceki_yil_bas.year - 1)
+    bas_ay = onceki_yil_bas
+    bitis_ay = bugun.replace(day=1)
+    ay_sayisi = (bitis_ay.year - bas_ay.year) * 12 + (bitis_ay.month - bas_ay.month) + 1
+    ay_sayisi = min(ay_sayisi, 60)
+
+    if bugun.month == 12:
+        bit_exclusive = date(bugun.year + 1, 1, 1)
+    else:
+        bit_exclusive = date(bugun.year, bugun.month + 1, 1)
+
+    rows = fetch_all(
+        """
+        SELECT DATE_TRUNC('month', tarih)::date AS ay,
+               COALESCE(SUM(gec_dakika), 0) AS toplam_dakika,
+               COUNT(*) AS kayit_gun_sayisi
+        FROM devam_kayitlari
+        WHERE personel_id = %s
+          AND tarih >= %s
+          AND tarih < %s
+        GROUP BY 1
+        ORDER BY 1
+        """,
+        (pid, bas_ay, bit_exclusive),
+    ) or []
+
+    ay_map = {}
+    for r in rows:
+        ay_val = r["ay"]
+        if hasattr(ay_val, "year"):
+            key = _ay_key(ay_val.year, ay_val.month)
+        else:
+            d = _parse_date(str(ay_val)[:10])
+            key = _ay_key(d.year, d.month) if d else None
+        if key:
+            ay_map[key] = {
+                "toplam_dakika": int(r.get("toplam_dakika") or 0),
+                "kayit_gun_sayisi": int(r.get("kayit_gun_sayisi") or 0),
+            }
+
+    aylar = []
+    for ay_y, ay_m in _iter_ay_aralik(bas_ay, ay_sayisi):
+        key = _ay_key(ay_y, ay_m)
+        rec = ay_map.get(key, {"toplam_dakika": 0, "kayit_gun_sayisi": 0})
+        gercek_toplam_dakika = rec["toplam_dakika"]
+        kayit_gun_sayisi = rec["kayit_gun_sayisi"]
+        if ay_y == bugun.year and ay_m == bugun.month:
+            is_gunu_sayisi = sum(
+                1 for g in _ay_is_gunleri(ay_y, ay_m)
+                if g <= bugun
+            )
+        else:
+            is_gunu_sayisi = len(_ay_is_gunleri(ay_y, ay_m))
+        if kayit_gun_sayisi > 0:
+            ort_gunluk = gercek_toplam_dakika / kayit_gun_sayisi
+            tahmini_toplam_dakika = round(ort_gunluk * is_gunu_sayisi)
+        else:
+            tahmini_toplam_dakika = 0
+        gercek_parts = _gec_dakika_to_gun_saat_dk(gercek_toplam_dakika)
+        tahmini_parts = _gec_dakika_to_gun_saat_dk(tahmini_toplam_dakika)
+        aylar.append({
+            "ay": key,
+            "ay_adi": _ay_adi(ay_y, ay_m),
+            **gercek_parts,
+            "toplam_dakika": gercek_toplam_dakika,
+            "gercek_toplam_dakika": gercek_toplam_dakika,
+            "tahmini_toplam_dakika": tahmini_toplam_dakika,
+            "kayit_gun_sayisi": kayit_gun_sayisi,
+            "is_gunu_sayisi": is_gunu_sayisi,
+            "tahmini_gun": tahmini_parts["gun"],
+            "tahmini_saat": tahmini_parts["saat"],
+            "tahmini_dakika": tahmini_parts["dakika"],
+        })
+
+    return jsonify({
+        "ok": True,
+        "personel_id": pid,
+        "baslangic_tarihi": bas_ay.isoformat(),
+        "bitis_tarihi": (bit_exclusive - timedelta(days=1)).isoformat(),
+        "aylar": aylar,
+    })
 
 
 # ── Yetki alanları ───────────────────────────────────────────────────────────

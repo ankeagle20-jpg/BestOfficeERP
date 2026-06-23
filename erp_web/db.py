@@ -517,6 +517,8 @@ def init_schema():
     ensure_personel_bilgi_dogum_tarihi()
     ensure_personel_izin_onay_durumu()
     ensure_personel_izin_saat_sayisi()
+    ensure_personel_izin_saat_sayisi_numeric()
+    ensure_personel_izin_otomatik_unique()
     ensure_personel_ozluk()
     ensure_personel_ozluk_izin_columns()
     ensure_contracts_engine()
@@ -727,6 +729,34 @@ def ensure_personel_izin_saat_sayisi():
         execute("ALTER TABLE personel_izin ADD COLUMN IF NOT EXISTS saat_sayisi INTEGER DEFAULT 0")
     except Exception as e:
         print(f"personel_izin.saat_sayisi: {e}")
+
+
+def ensure_personel_izin_saat_sayisi_numeric():
+    """saat_sayisi: tam saat + kesir (örn. 5.5) için NUMERIC(4,1)."""
+    try:
+        execute(
+            """
+            ALTER TABLE personel_izin
+            ALTER COLUMN saat_sayisi TYPE NUMERIC(4,1)
+            USING COALESCE(saat_sayisi, 0)::numeric(4,1)
+            """
+        )
+    except Exception as e:
+        print(f"personel_izin.saat_sayisi numeric: {e}")
+
+
+def ensure_personel_izin_otomatik_unique():
+    """Aynı personel + gün için tek otomatik izin kaydı (aciklama işaretçili)."""
+    try:
+        execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_personel_izin_otomatik_gun
+            ON personel_izin (personel_id, baslangic_tarihi)
+            WHERE aciklama = 'Otomatik - QR'
+            """
+        )
+    except Exception as e:
+        print(f"personel_izin otomatik unique: {e}")
 
 
 def ensure_personel_ozluk():

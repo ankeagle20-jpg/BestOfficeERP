@@ -365,10 +365,11 @@ _register_grup2_fallback_api("/faturalar/api/grup2-etiketleri")
 
 
 def _start_background_jobs():
-    """Opsiyonel arkaplan işler: otomatik fatura döngüsü."""
+    """Opsiyonel arkaplan işler: otomatik fatura döngüsü + gece izin hesabı."""
     try:
         from apscheduler.schedulers.background import BackgroundScheduler
         from routes.faturalar_routes import run_auto_invoice_cycle
+        from services.izin_otomatik import run_gece_otomatik_izin_job
     except Exception as e:
         print("[WARN] Background scheduler devre dışı:", e)
         return
@@ -382,9 +383,20 @@ def _start_background_jobs():
         max_instances=1,
         coalesce=True,
     )
+    scheduler.add_job(
+        run_gece_otomatik_izin_job,
+        "cron",
+        hour=0,
+        minute=5,
+        id="izin_otomatik_gece",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=3600,
+    )
     scheduler.start()
     atexit.register(lambda: scheduler.shutdown(wait=False))
-    print("[OK] Background scheduler aktif: auto_invoice_cycle/15dk")
+    print("[OK] Background scheduler aktif: auto_invoice_cycle/15dk, izin_otomatik_gece/00:05")
 
 # ── Sağlık (Render health check / yük dengeleyici) — DB veya giriş gerekmez ───
 @app.route("/favicon.ico")

@@ -31,11 +31,32 @@
 .wifi-off { color: #e74c3c; font-size: 12px; }
 .izin-kart { background: #0f2537; padding: 10px; border-radius: 4px; display: inline-block; margin-right: 10px; margin-bottom: 8px; }
 .izin-kart .val { font-size: 18px; font-weight: bold; color: #69f0ae; }
+.gec-aylik-kart { background: #0f2537; border-radius: 4px; padding: 8px 6px; text-align: center; font-size: 11px; border: 1px solid #2d4060; }
+.gec-aylik-kart .ay { color: #90a4ae; font-weight: bold; margin-bottom: 4px; }
+.gec-aylik-kart .sure { font-size: 12px; font-weight: bold; }
+.gec-aylik-kart.sifir .sure { color: #69f0ae; }
+.gec-aylik-kart.var .sure { color: #ef9a9a; }
 .ozluk-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
 .ozluk-section { border: 1px solid #2d4060; border-radius: 4px; padding: 10px; margin: 0; }
 .ozluk-section legend { color: #4fc3f7; font-size: 12px; padding: 0 6px; }
 .ozluk-section .frm-row { margin-bottom: 6px; }
-</style>
+.gec-duzenle-modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 12000;
+  display: none; align-items: center; justify-content: center; padding: 16px;
+}
+.gec-duzenle-modal-overlay.is-open { display: flex; }
+.gec-duzenle-modal-panel {
+  background: #1e3a50; color: #e0f7fa; border-radius: 4px; max-width: 420px; width: 100%;
+  border: 1px solid #2d4060; box-shadow: 0 8px 32px rgba(0,0,0,0.45);
+}
+.gec-duzenle-modal-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 14px; border-bottom: 1px solid #2d4060;
+}
+.gec-duzenle-modal-head h4 { margin: 0; color: #4fc3f7; font-size: 13px; }
+.gec-duzenle-modal-close { background: none; border: none; color: #90a4ae; font-size: 20px; cursor: pointer; }
+.gec-duzenle-modal-body { padding: 12px 14px; }
+ </style>
 
 <div class="personel-header">
     <h2>👥 Personel Devam Takip</h2>
@@ -98,11 +119,23 @@
             <div class="panel">
                 <h4>İzin Hakları / Kullanım</h4>
                 <div class="frm-row"><label>Personel:</label><select id="izin-personel" style="flex:1;"></select></div>
-                <div class="frm-row"><label>Yıl:</label><select id="izin-yil" style="width:90px;"></select></div>
+                <div class="frm-row"><label>Yıl:</label><select id="izin-yil" style="width:90px;"></select>
+                    <label style="font-size:12px;color:#90a4ae;margin-left:12px;cursor:pointer;">
+                        <input type="checkbox" id="izin-tahmini-mod" style="margin-right:4px;">
+                        Tahmini
+                    </label></div>
                 <div style="margin-bottom:10px;">
                     <span class="izin-kart"><span class="label">Hak</span><br><span class="val" id="izin-hak">—</span></span>
                     <span class="izin-kart"><span class="label">Kullanılan</span><br><span class="val" id="izin-kullanilan">—</span></span>
                     <span class="izin-kart"><span class="label">Kalan</span><br><span class="val" id="izin-kalan">—</span></span>
+                    <span class="izin-kart" style="border:1px solid #ef9a9a;">
+                        <span class="label" style="color:#ef9a9a;">Geç Kalma</span><br>
+                        <span class="val" id="izin-gec-kalma" style="color:#ef9a9a;">—</span>
+                    </span>
+                    <span class="izin-kart" style="border:1px solid #78909c;">
+                        <span class="label" style="color:#78909c;">Tahmini Geç</span><br>
+                        <span class="val" id="izin-gec-tahmini" style="color:#78909c;">—</span>
+                    </span>
                 </div>
                 <div class="frm-row">
                     <label>Geç kesinti:</label>
@@ -113,7 +146,20 @@
             </div>
             <div class="panel">
                 <h4>İzin Formu (Yeni İzin Girişi)</h4>
-                <div class="frm-row"><label>İzin türü:</label><select id="izin-turu" style="flex:1;"><option value="Yıllık Ücretli İzin">Yıllık Ücretli İzin</option><option value="Sağlık / Rapor">Sağlık / Rapor</option><option value="Ücretsiz İzin">Ücretsiz İzin</option><option value="Mazeret İzni">Mazeret İzni</option><option value="Yarım Gün İzin">Yarım Gün İzin</option></select></div>
+                <div class="frm-row"><label>İzin türü:</label><select id="izin-turu" style="flex:1;"><option value="Yıllık Ücretli İzin">Yıllık Ücretli İzin</option><option value="Sağlık / Rapor">Sağlık / Rapor</option><option value="Ücretsiz İzin">Ücretsiz İzin</option><option value="Mazeret İzni">Mazeret İzni</option><option value="Yarım Gün İzin">Yarım Gün İzin</option><option value="Saatlik İzin">Saatlik İzin</option></select></div>
+                <div id="izin-saat-wrap" class="frm-row" style="display:none;">
+                    <label>Saat:</label>
+                    <select id="izin-saat" style="width:90px;">
+                        <option value="1">1 saat</option>
+                        <option value="2">2 saat</option>
+                        <option value="3">3 saat</option>
+                        <option value="4">4 saat</option>
+                        <option value="5">5 saat</option>
+                        <option value="6">6 saat</option>
+                        <option value="7">7 saat</option>
+                        <option value="8">8 saat</option>
+                    </select>
+                </div>
                 <div class="frm-row"><label>Başlangıç:</label><input type="text" id="izin-bas" placeholder="GG.AA.YYYY"></div>
                 <div class="frm-row"><label>Bitiş:</label><input type="text" id="izin-bit" placeholder="GG.AA.YYYY"></div>
                 <div class="frm-row"><label>Açıklama:</label><input type="text" id="izin-aciklama" placeholder="Opsiyonel"></div>
@@ -121,16 +167,81 @@
             </div>
             <div class="panel">
                 <h4>Kullanılan İzinler</h4>
-                <div style="max-height:200px;overflow-y:auto;"><table class="tbl"><thead><tr><th>Tür</th><th>Başlangıç</th><th>Bitiş</th><th>Gün</th><th></th></tr></thead><tbody id="izin-list-tbody"></tbody></table></div>
+                <div style="max-height:200px;overflow-y:auto;"><table class="tbl"><thead><tr><th>Tür</th><th>Başlangıç</th><th>Bitiş</th><th>Gün</th><th>İşlem</th></tr></thead><tbody id="izin-list-tbody"></tbody></table></div>
             </div>
         </div>
         <div>
-            <div class="panel">
+            <div class="panel" id="gec-aylik-panel">
+                <h4>Aylık Geç Kalma</h4>
+                <div style="margin-bottom:8px; display:flex; align-items:center; gap:8px;">
+                    <label style="font-size:11px; color:#90a4ae;">Başlangıç:</label>
+                    <input type="date" id="gec-aylik-bas-tarih" style="background:#2d4060; border:1px solid #3d5070; color:#e0f7fa; padding:3px 6px; border-radius:3px; font-size:11px;">
+                </div>
+                <div id="gec-aylik-grid" style="display:grid; grid-template-columns:repeat(4,1fr); gap:6px;"></div>
+            </div>
+            <div class="panel" id="gec-listesi-panel">
                 <h4>Geç Kalma Listesi (Seçili Personel)</h4>
-                <div style="max-height:300px;overflow-y:auto;"><table class="tbl"><thead><tr><th>Tarih</th><th>Giriş</th><th>Geç (dk)</th></tr></thead><tbody id="gec-tbody"></tbody></table></div>
+                <div id="gec-detay-filtre" style="display:none;gap:6px;margin-bottom:8px;">
+                    <button type="button" id="gec-filtre-tumu" class="btn-s">Tümü</button>
+                    <button type="button" id="gec-filtre-okutulan" class="btn-p">Sadece Okutulan</button>
+                </div>
+                <div style="max-height:300px;overflow-y:auto;"><table class="tbl"><thead><tr><th>Tarih</th><th>Giriş</th><th>Geç (dk)</th><th>İşlem</th></tr></thead><tbody id="gec-tbody"></tbody></table></div>
             </div>
         </div>
     </div>
+</div>
+
+<!-- Geç Kalma Düzenle Modal -->
+<div id="gec-duzenle-modal" 
+     class="gec-duzenle-modal-overlay" 
+     aria-hidden="true">
+  <div class="gec-duzenle-modal-panel" 
+       role="dialog">
+    <div class="gec-duzenle-modal-head">
+      <h4>Geç Kalma Kaydı Düzenle</h4>
+      <button type="button" 
+              class="gec-duzenle-modal-close"
+              onclick="gecKaydiDuzenleKapat()" 
+              aria-label="Kapat">&times;</button>
+    </div>
+    <div class="gec-duzenle-modal-body">
+      <input type="hidden" id="gec-duzenle-id">
+      <div class="frm-row">
+        <label>Tarih:</label>
+        <input type="text" 
+               id="gec-duzenle-tarih" 
+               readonly 
+               style="flex:1;opacity:0.8;">
+      </div>
+      <div class="frm-row">
+        <label>Giriş saati:</label>
+        <input type="time" 
+               id="gec-duzenle-giris" 
+               style="flex:1;">
+      </div>
+      <div class="frm-row">
+        <label>Geç kalma (dk):</label>
+        <input type="number" 
+               id="gec-duzenle-dk" 
+               min="0" 
+               style="flex:1;width:90px;">
+      </div>
+      <div style="display:flex;
+                  gap:8px;
+                  margin-top:12px;">
+        <button type="button" 
+                class="btn-p" 
+                onclick="gecKaydiDuzenleKaydet()">
+          Kaydet
+        </button>
+        <button type="button" 
+                class="btn-s" 
+                onclick="gecKaydiDuzenleKapat()">
+          İptal
+        </button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- Personel Yönetimi -->
@@ -284,6 +395,9 @@ const API_IZIN_OZET_LISTE = "{{ url_for('personel.api_izin_ozet_liste') }}";
 const API_IZIN_KAYDET = "{{ url_for('personel.api_izin_kaydet') }}";
 const API_IZIN_SIL = "{{ url_for('personel.api_izin_sil') }}";
 const API_GEC_LIST = "{{ url_for('personel.api_gec_list') }}";
+const API_GEC_AYLIK_GRID = "{{ url_for('personel.api_gec_aylik_grid') }}";
+const API_GEC_GUNCELLE = "{{ url_for('personel.api_gec_guncelle') }}";
+const API_GEC_SIL = "{{ url_for('personel.api_gec_sil') }}";
 const API_YETKI_GET = "{{ url_for('personel.api_yetki_get') }}";
 const API_YETKI_KAYDET = "{{ url_for('personel.api_yetki_kaydet') }}";
 
@@ -639,6 +753,8 @@ function personelSec(r) {
   document.querySelectorAll('#personel-tbody tr').forEach(tr => tr.style.background = tr.dataset.id == r.id ? '#00695c' : '');
   var adInp = document.getElementById('ozluk-ad_soyad');
   if (adInp) adInp.value = r.ad_soyad || '';
+  const basEl2 = document.getElementById('gec-aylik-bas-tarih');
+  if (basEl2) basEl2.value = '';
   bilgiYukle(r.id);
   izinOzetYukle(r.id);
   gecListYukle(r.id);
@@ -719,6 +835,11 @@ async function bilgiYukle(pid) {
   const d = await res.json();
   const rad = document.querySelector('input[name="gec_kesinti"][value="'+ (d.gec_kesinti_tipi||'izin') +'"]');
   if (rad) rad.checked = true;
+  const basEl = document.getElementById('gec-aylik-bas-tarih');
+  if (basEl && !basEl.value && d.ise_baslama_tarihi) {
+    basEl.value = d.ise_baslama_tarihi;
+  }
+  await gecAylikGridYukle(pid, d.ise_baslama_tarihi || null);
 }
 
 async function ozlukYukle(pid) {
@@ -748,13 +869,72 @@ async function ozlukYukle(pid) {
   } catch (e) {}
 }
 
+function izinTuruSaatWrapGuncelle() {
+  const turEl = document.getElementById('izin-turu');
+  const wrap = document.getElementById('izin-saat-wrap');
+  const bitEl = document.getElementById('izin-bit');
+  const bitRow = bitEl ? bitEl.closest('.frm-row') : null;
+  const saatlik = turEl && turEl.value === 'Saatlik İzin';
+  if (wrap) wrap.style.display = saatlik ? '' : 'none';
+  if (bitRow) bitRow.style.display = saatlik ? 'none' : '';
+}
+
+function izinGunSaatYazi(gunNet, saat, fallbackGun) {
+  const g = gunNet != null ? parseInt(gunNet, 10) : null;
+  const s = saat != null ? parseInt(saat, 10) : 0;
+  if (g != null && !isNaN(g)) {
+    if (s > 0) return g + ' gün ' + s + ' saat';
+    return g + ' gün';
+  }
+  if (fallbackGun != null && fallbackGun !== '') return fallbackGun + ' gün';
+  return '—';
+}
+
 async function izinOzetYukle(pid) {
   const yil = document.getElementById('izin-yil').value || new Date().getFullYear();
-  const res = await fetch(API_IZIN_OZET + '?personel_id='+pid+'&yil='+yil);
-  const d = await res.json();
+  const yilStr = String(yil);
+  const [resOzet, resGrid] = await Promise.all([
+    fetch(API_IZIN_OZET + '?personel_id=' + pid + '&yil=' + yil),
+    fetch(API_GEC_AYLIK_GRID + '?personel_id=' + encodeURIComponent(pid))
+  ]);
+  const d = await resOzet.json();
+  const gridData = await resGrid.json();
   document.getElementById('izin-hak').textContent = (d.toplam_hak!=null ? d.toplam_hak : d.hak) + ' gün';
-  document.getElementById('izin-kullanilan').textContent = (d.kullanilan||0) + ' gün';
-  document.getElementById('izin-kalan').textContent = (d.kalan != null ? Math.round(d.kalan) : '—') + ' gün';
+  document.getElementById('izin-kullanilan').textContent = izinGunSaatYazi(d.kullanilan_gun_net, d.kullanilan_saat, d.kullanilan);
+  const kalanTxt = izinGunSaatYazi(d.kalan_gun_net, d.kalan_saat, d.kalan != null ? Math.round(d.kalan) : null);
+  document.getElementById('izin-kalan').textContent = kalanTxt;
+  window.__izinKalanOrijinal = kalanTxt;
+  const gecGun = d.gec_gun_net || 0;
+  const gecSaat = d.gec_saat_net || 0;
+  const gecEl = document.getElementById('izin-gec-kalma');
+  if (gecEl) gecEl.textContent = izinGunSaatYazi(gecGun, gecSaat);
+  const tahEl = document.getElementById('izin-gec-tahmini');
+  let kayitGunSayisi = d.kayit_gun_sayisi;
+  if (kayitGunSayisi == null && gridData && gridData.aylar) {
+    kayitGunSayisi = gridData.aylar
+      .filter(a => (a.ay || '').startsWith(yilStr))
+      .reduce((s, a) => s + (a.kayit_gun_sayisi || 0), 0);
+  }
+  if (tahEl) {
+    if (kayitGunSayisi > 0 && d.gec_dakika_yil != null) {
+      const ortDk = d.gec_dakika_yil / kayitGunSayisi;
+      const yilIsGunu = 312;
+      const tahminiDk = ortDk * yilIsGunu;
+      const tGun = Math.floor(tahminiDk / 480);
+      const tSaat = Math.floor((tahminiDk % 480) / 60);
+      tahEl.textContent = izinGunSaatYazi(tGun, tSaat);
+    } else {
+      tahEl.textContent = '—';
+    }
+  }
+}
+
+function izinListGunSaatTxt(r) {
+  if (r.izin_turu === 'Saatlik İzin') {
+    const s = parseInt(r.saat_sayisi, 10) || 0;
+    return s > 0 ? (s + ' saat') : '0 saat';
+  }
+  return String(r.gun_sayisi != null ? r.gun_sayisi : 0);
 }
 
 async function izinListYukle(pid) {
@@ -765,8 +945,13 @@ async function izinListYukle(pid) {
   tbody.innerHTML = '';
   rows.forEach(r => {
     const tr = document.createElement('tr');
-    tr.innerHTML = '<td>'+ (r.izin_turu||'') +'</td><td>'+ (r.baslangic_tarihi||'') +'</td><td>'+ (r.bitis_tarihi||'') +'</td><td>'+ (r.gun_sayisi||0) +'</td><td><button type="button" class="btn-s" data-id="'+r.id+'">Sil</button></td>';
-    tr.querySelector('button').onclick = () => izinSil(r.id);
+    tr.innerHTML = '<td>'+ (r.izin_turu||'') +'</td><td>'+ (r.baslangic_tarihi||'') +'</td><td>'+ (r.bitis_tarihi||'') +'</td><td>'+ izinListGunSaatTxt(r) +'</td><td>' +
+      '<button type="button" class="btn-s btn-izin-pdf" data-id="'+r.id+'">PDF</button> ' +
+      '<button type="button" class="btn-s btn-izin-sil" data-id="'+r.id+'">Sil</button></td>';
+    tr.querySelector('.btn-izin-pdf').onclick = () => {
+      window.open('/personel/api/izin-pdf/' + r.id, '_blank');
+    };
+    tr.querySelector('.btn-izin-sil').onclick = () => izinSil(r.id);
     tbody.appendChild(tr);
   });
 }
@@ -791,6 +976,274 @@ async function gecListYukle(pid) {
     tr.innerHTML = '<td>'+ (r.tarih||'') +'</td><td>'+ (r.giris_saati||'') +'</td><td>'+ (r.gec_dakika||0) +'</td>';
     tbody.appendChild(tr);
   });
+}
+
+function gecAylikSureYazi(r) {
+  const g = r.gun || 0, s = r.saat || 0, d = r.dakika || 0;
+  if (g > 0) return g + ' gün' + (s > 0 ? ' ' + s + ' saat' : '');
+  if (s > 0) return s + ' saat' + (d > 0 ? ' ' + d + ' dk' : '');
+  if (d > 0) return d + ' dk';
+  return '—';
+}
+
+function gecAylikAyKisa(ayKey) {
+  const m = parseInt((ayKey || '').split('-')[1], 10);
+  if (!m || m < 1 || m > 12) return ayKey || '';
+  return (AYLAR[m - 1] || '').slice(0, 3);
+}
+
+
+function gecAyIsGunuSayisi(ayKey) {
+  const [y, m] = ayKey.split('-').map(Number);
+  const sonGun = new Date(y, m, 0).getDate();
+  let n = 0;
+  for (let g = 1; g <= sonGun; g++) {
+    const wd = new Date(y, m - 1, g).getDay();
+    if (wd !== 0) n++;
+  }
+  return n;
+}
+
+let __gecDetayCtx = { ayKey: null, ayAdi: null, pid: null, mod: 'okutulan' };
+
+async function gecAyDetayGoster(ayKey, ayAdi, pid, mod) {
+  mod = mod || 'okutulan';
+  __gecDetayCtx = { ayKey: ayKey, ayAdi: ayAdi, pid: pid, mod: mod };
+
+  const filtreBar = document.getElementById('gec-detay-filtre');
+  if (filtreBar) filtreBar.style.display = 'flex';
+  const btnTumu = document.getElementById('gec-filtre-tumu');
+  const btnOkut = document.getElementById('gec-filtre-okutulan');
+  if (btnTumu) btnTumu.className = mod === 'tumu' ? 'btn-p' : 'btn-s';
+  if (btnOkut) btnOkut.className = mod === 'okutulan' ? 'btn-p' : 'btn-s';
+
+  const tbody = document.getElementById('gec-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="4" style="color:#90a4ae;">Yükleniyor...</td></tr>';
+
+  let url = API_GEC_LIST + '?personel_id=' + encodeURIComponent(pid) + '&ay=' + encodeURIComponent(ayKey);
+  if (mod === 'tumu') url += '&doldur=1';
+  const res = await fetch(url);
+  const rows = await res.json();
+
+  const baslik = document.querySelector('#gec-listesi-panel h4');
+  const isGun = gecAyIsGunuSayisi(ayKey);
+  if (baslik) baslik.innerHTML = 'Geç Kalma Listesi — ' + ayAdi + ' <span style="font-size:11px;color:#90a4ae;font-weight:normal;">(' + isGun + ' iş günü)</span>';
+
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="4" style="color:#69f0ae;">Bu ayda geç kalma yok.</td></tr>';
+    return;
+  }
+
+  let toplamDk = 0;
+  tbody.innerHTML = '';
+  rows.forEach(r => {
+    const gercek = r.gercek !== false;
+    toplamDk += (r.gec_dakika || 0);
+    const tr = document.createElement('tr');
+    if (!gercek) {
+      tr.style.color = '#78909c';
+      tr.style.fontStyle = 'italic';
+    }
+    const saat = Math.floor((r.gec_dakika || 0) / 60);
+    const dk = (r.gec_dakika || 0) % 60;
+    const gecStr = saat > 0 ? saat + ' saat ' + dk + ' dk' : dk + ' dk';
+    const gid = r.id;
+    const gs = String(r.giris_saati || '').replace(/'/g, "\\'");
+    const islemTd = (gercek && gid)
+      ? '<button type="button" class="btn-s" onclick="gecKaydiDuzenleAc(' + gid + ',\'' + (r.tarih || '') + '\',\'' + gs + '\',' + (r.gec_dakika || 0) + ')">Düzenle</button> '
+        + '<button type="button" class="btn-s" style="background:#c62828;" onclick="gecKaydiSil(' + gid + ')">Sil</button>'
+      : '<span style="color:#607d8b;font-size:11px;">—</span>';
+    tr.innerHTML = '<td>' + (r.tarih || '') + '</td><td>' + (r.giris_saati || '—') + '</td><td style="color:' + (gercek ? '#ef9a9a' : '#78909c') + ';">' + gecStr + '</td>'
+      + '<td style="white-space:nowrap;">' + islemTd + '</td>';
+    tbody.appendChild(tr);
+  });
+
+  const topSaat = Math.floor(toplamDk / 60);
+  const topDk = toplamDk % 60;
+  const topStr = topSaat > 0 ? topSaat + ' saat ' + topDk + ' dk' : topDk + ' dk';
+  const trTop = document.createElement('tr');
+  trTop.style.fontWeight = 'bold';
+  trTop.style.borderTop = '1px solid #3d5070';
+  trTop.innerHTML = '<td colspan="3" style="color:#b0bec5;">Toplam</td><td style="color:#ffcc02;">' + topStr + '</td>';
+  tbody.appendChild(trTop);
+
+  const girisDkList = rows.filter(r => r.gercek !== false).map(r => {
+    const gs = (r.giris_saati || '').toString().trim();
+    if (!gs || gs === '—') return null;
+    const p = gs.split(':');
+    if (p.length < 2) return null;
+    const h = parseInt(p[0], 10), m = parseInt(p[1], 10);
+    if (isNaN(h) || isNaN(m)) return null;
+    return h * 60 + m;
+  }).filter(v => v !== null);
+  if (girisDkList.length) {
+    const ortDk = Math.round(girisDkList.reduce((a, b) => a + b, 0) / girisDkList.length);
+    const ortH = Math.floor(ortDk / 60);
+    const ortM = ortDk % 60;
+    const ortStr = String(ortH).padStart(2, '0') + ':' + String(ortM).padStart(2, '0');
+    const trOrt = document.createElement('tr');
+    trOrt.innerHTML = '<td colspan="3" style="color:#90a4ae;font-size:11px;padding-top:4px;">Ortalama giriş: <span style="color:#4fc3f7;font-weight:bold;">' + ortStr + '</span> (' + girisDkList.length + ' kayıt)</td>';
+    tbody.appendChild(trOrt);
+  }
+}
+
+document.getElementById('gec-filtre-tumu')?.addEventListener('click', () => {
+  if (!__gecDetayCtx.ayKey) return;
+  gecAyDetayGoster(__gecDetayCtx.ayKey, __gecDetayCtx.ayAdi, __gecDetayCtx.pid, 'tumu');
+});
+
+document.getElementById('gec-filtre-okutulan')?.addEventListener('click', () => {
+  if (!__gecDetayCtx.ayKey) return;
+  gecAyDetayGoster(__gecDetayCtx.ayKey, __gecDetayCtx.ayAdi, __gecDetayCtx.pid, 'okutulan');
+});
+
+function gecKaydiDuzenleAc(id, tarih, girisSaati, gecDakika) {
+  document.getElementById('gec-duzenle-id').value = id;
+  document.getElementById('gec-duzenle-tarih').value = tarih || '';
+  const gEl = document.getElementById('gec-duzenle-giris');
+  if (gEl) gEl.value = (girisSaati || '').length >= 5 ? String(girisSaati).slice(0, 5) : '';
+  document.getElementById('gec-duzenle-dk').value = gecDakika != null ? gecDakika : 0;
+  const ov = document.getElementById('gec-duzenle-modal');
+  if (ov) { ov.classList.add('is-open'); ov.setAttribute('aria-hidden', 'false'); }
+}
+
+function gecKaydiDuzenleKapat() {
+  const ov = document.getElementById('gec-duzenle-modal');
+  if (ov) { ov.classList.remove('is-open'); ov.setAttribute('aria-hidden', 'true'); }
+}
+
+async function gecKaydiDuzenleKaydet() {
+  const id = document.getElementById('gec-duzenle-id').value;
+  const pid = __gecDetayCtx.pid || seciliPersonelId;
+  if (!id || !pid) return;
+  const giris = document.getElementById('gec-duzenle-giris').value;
+  const gecDk = parseInt(document.getElementById('gec-duzenle-dk').value, 10) || 0;
+  const res = await fetch(API_GEC_GUNCELLE, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: parseInt(id, 10), personel_id: parseInt(pid, 10), giris_saati: giris, gec_dakika: gecDk })
+  });
+  const d = await res.json();
+  if (!d.ok) { alert(d.mesaj || 'Kayıt güncellenemedi'); return; }
+  gecKaydiDuzenleKapat();
+  if (__gecDetayCtx.ayKey) await gecAyDetayGoster(__gecDetayCtx.ayKey, __gecDetayCtx.ayAdi, __gecDetayCtx.pid, __gecDetayCtx.mod || 'okutulan');
+  if (seciliPersonelId) {
+    izinOzetYukle(seciliPersonelId);
+    const basEl = document.getElementById('gec-aylik-bas-tarih');
+    gecAylikGridYukle(seciliPersonelId, basEl && basEl.value ? basEl.value : null);
+  }
+}
+
+async function gecKaydiSil(id) {
+  const pid = __gecDetayCtx.pid || seciliPersonelId;
+  if (!id || !pid) return;
+  if (!confirm('Bu geç kalma kaydını silmek istediğinize emin misiniz?')) return;
+  const res = await fetch(API_GEC_SIL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: parseInt(id, 10), personel_id: parseInt(pid, 10) })
+  });
+  const d = await res.json();
+  if (!d.ok) { alert(d.mesaj || 'Silinemedi'); return; }
+  if (__gecDetayCtx.ayKey) await gecAyDetayGoster(__gecDetayCtx.ayKey, __gecDetayCtx.ayAdi, __gecDetayCtx.pid, __gecDetayCtx.mod || 'okutulan');
+  if (seciliPersonelId) {
+    izinOzetYukle(seciliPersonelId);
+    const basEl = document.getElementById('gec-aylik-bas-tarih');
+    gecAylikGridYukle(seciliPersonelId, basEl && basEl.value ? basEl.value : null);
+  }
+}
+
+function izinKalanTahminiGuncelle() {
+  const cb = document.getElementById('izin-tahmini-mod');
+  if (!cb || !cb.checked) return;
+
+  const hakEl = document.getElementById('izin-hak');
+  const kulEl = document.getElementById('izin-kullanilan');
+  const kalanEl = document.getElementById('izin-kalan');
+  const gecTahEl = document.getElementById('izin-gec-tahmini');
+
+  const hak = parseFloat((hakEl?.textContent || '').replace(/[^0-9.]/g, '')) || 0;
+
+  const kulTxt = kulEl?.textContent || '';
+  const kulGun = parseInt(kulTxt.match(/(\d+)\s*gün/)?.[1] || 0);
+  const kulSaat = parseInt(kulTxt.match(/(\d+)\s*saat/)?.[1] || 0);
+  const kulDk = kulGun * 480 + kulSaat * 60;
+
+  const tahTxt = gecTahEl?.textContent || '';
+  const tahGun = parseInt(tahTxt.match(/(\d+)\s*gün/)?.[1] || 0);
+  const tahSaat = parseInt(tahTxt.match(/(\d+)\s*saat/)?.[1] || 0);
+  const tahDk = tahGun * 480 + tahSaat * 60;
+
+  const hakDk = hak * 480;
+  const kalanDk = Math.max(0, hakDk - kulDk - tahDk);
+  const kGun = Math.floor(kalanDk / 480);
+  const kSaat = Math.floor((kalanDk % 480) / 60);
+
+  if (kalanEl) kalanEl.textContent = izinGunSaatYazi(kGun, kSaat);
+}
+
+async function gecAylikGridYukle(pid, baslangicTarihi) {
+  const grid = document.getElementById('gec-aylik-grid');
+  if (!grid) return;
+  if (!pid) { grid.innerHTML = ''; return; }
+  const inputEl = document.getElementById('gec-aylik-bas-tarih');
+  if (baslangicTarihi && inputEl && !inputEl.value) {
+    inputEl.value = baslangicTarihi;
+  }
+  const kullanilacakTarih = (inputEl && inputEl.value) ? inputEl.value : baslangicTarihi;
+  let url = API_GEC_AYLIK_GRID + '?personel_id=' + encodeURIComponent(pid);
+  if (kullanilacakTarih) url += '&baslangic_tarihi=' + encodeURIComponent(kullanilacakTarih);
+  const res = await fetch(url);
+  const data = await res.json();
+  const rows = data.aylar || [];
+  grid.innerHTML = '';
+  rows.forEach(r => {
+    const td = (r.toplam_dakika || 0) > 0;
+    const div = document.createElement('div');
+    div.className = 'gec-aylik-kart ' + (td ? 'var' : 'sifir');
+    div.style.cursor = 'pointer';
+    div.title = (r.ay_adi || r.ay || '') + ' - detay için çift tıkla';
+    div.innerHTML = '<div class="ay">' + gecAylikAyKisa(r.ay) + '</div><div class="sure">' + gecAylikSureYazi(r) + '</div>'
+      + '<div style="font-size:10px;color:#78909c;margin-top:2px;">Tah: ' + gecAylikSureYazi({
+        gun: r.tahmini_gun || 0,
+        saat: r.tahmini_saat || 0,
+        dakika: r.tahmini_dakika || 0
+      }) + '</div>';
+    div.ondblclick = function() {
+      gecAyDetayGoster(r.ay, r.ay_adi, pid);
+    };
+    grid.appendChild(div);
+  });
+  const yil = document.getElementById('izin-yil')?.value || new Date().getFullYear();
+  const basAyKey = kullanilacakTarih ? String(kullanilacakTarih).slice(0, 7) : null;
+  const yilAylari = rows.filter(r =>
+    r.ay && r.ay.startsWith(yil + '-')
+    && (!basAyKey || r.ay >= basAyKey)
+  );
+  const tahminiToplamDk = yilAylari
+    .reduce((s, r) => s + (r.tahmini_toplam_dakika || 0), 0);
+  const tahminiCb = document.getElementById('izin-tahmini-mod');
+  if (tahminiToplamDk > 0) {
+    const tGun = Math.floor(tahminiToplamDk / 480);
+    const tSaat = Math.floor((tahminiToplamDk % 480) / 60);
+    const tahEl = document.getElementById('izin-gec-tahmini');
+    if (tahEl) tahEl.textContent = izinGunSaatYazi(tGun, tSaat);
+  }
+  if (tahminiCb && !tahminiCb._izinTahminiBound) {
+    tahminiCb._izinTahminiBound = true;
+    tahminiCb.onchange = function() {
+      if (this.checked) {
+        izinKalanTahminiGuncelle();
+      } else {
+        const kalanEl = document.getElementById('izin-kalan');
+        if (kalanEl && window.__izinKalanOrijinal) {
+          kalanEl.textContent = window.__izinKalanOrijinal;
+        }
+      }
+    };
+  }
+  izinKalanTahminiGuncelle();
 }
 
 function yetkiYukle(pid) {
@@ -852,7 +1305,16 @@ if (personelAltTabListeBtn) personelAltTabListeBtn.onclick = function() { person
 var personelAltTabSureBtn = document.getElementById('personel-alt-tab-sure');
 if (personelAltTabSureBtn) personelAltTabSureBtn.onclick = function() { personelAltTabGoster('sure'); };
 
-document.getElementById('izin-personel').onchange = function() { seciliPersonelId = this.value; if (this.value) { bilgiYukle(this.value); izinOzetYukle(this.value); izinListYukle(this.value); gecListYukle(this.value); yetkiYukle(this.value); } };
+document.getElementById('izin-personel').onchange = function() { seciliPersonelId = this.value; if (this.value) { const basEl2 = document.getElementById('gec-aylik-bas-tarih'); if (basEl2) basEl2.value = ''; bilgiYukle(this.value); izinOzetYukle(this.value); izinListYukle(this.value); gecListYukle(this.value); yetkiYukle(this.value); } };
+
+const basInput = document.getElementById('gec-aylik-bas-tarih');
+if (basInput) {
+  basInput.addEventListener('change', function() {
+    if (seciliPersonelId) {
+      gecAylikGridYukle(seciliPersonelId, null);
+    }
+  });
+}
 document.getElementById('izin-yil').onchange = function() {
   var f = document.querySelector('input[name="filtre-p"]:checked');
   var val = f ? f.value : 'aktif';
@@ -868,14 +1330,27 @@ document.getElementById('btn-izin-ozet').onclick = function() {
 
 document.getElementById('btn-izin-kaydet').onclick = async function() {
   if (!seciliPersonelId) { alert('Personel seçin.'); return; }
+  const tur = document.getElementById('izin-turu').value;
   const bas = document.getElementById('izin-bas').value.trim();
-  const bit = document.getElementById('izin-bit').value.trim();
-  if (!bas || !bit) { alert('Başlangıç ve bitiş tarihi girin.'); return; }
-  await fetch(API_IZIN_KAYDET, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ personel_id: seciliPersonelId, izin_turu: document.getElementById('izin-turu').value, baslangic_tarihi: tarihToIso(bas) || bas, bitis_tarihi: tarihToIso(bit) || bit, aciklama: document.getElementById('izin-aciklama').value }) });
+  let bit = document.getElementById('izin-bit').value.trim();
+  let saatSayisi = 0;
+  if (tur === 'Saatlik İzin') {
+    if (!bas) { alert('Tarih girin.'); return; }
+    bit = bas;
+    saatSayisi = parseInt(document.getElementById('izin-saat').value, 10) || 0;
+    if (saatSayisi < 1 || saatSayisi > 8) { alert('Saat 1-8 arası olmalı.'); return; }
+  } else {
+    if (!bas || !bit) { alert('Başlangıç ve bitiş tarihi girin.'); return; }
+  }
+  await fetch(API_IZIN_KAYDET, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ personel_id: seciliPersonelId, izin_turu: tur, baslangic_tarihi: tarihToIso(bas) || bas, bitis_tarihi: tarihToIso(bit) || bit, saat_sayisi: saatSayisi, aciklama: document.getElementById('izin-aciklama').value }) });
   izinListYukle(seciliPersonelId); izinOzetYukle(seciliPersonelId);
   var f = document.querySelector('input[name="filtre-p"]:checked');
   izinSureListeYukle(f ? f.value : 'aktif');
-  document.getElementById('izin-bas').value = ''; document.getElementById('izin-bit').value = ''; document.getElementById('izin-aciklama').value = '';
+  document.getElementById('izin-bas').value = '';
+  document.getElementById('izin-bit').value = '';
+  document.getElementById('izin-aciklama').value = '';
+  document.getElementById('izin-saat').value = '1';
+  izinTuruSaatWrapGuncelle();
 };
 
 document.getElementById('btn-yetki-kaydet').onclick = async function() {
@@ -990,6 +1465,8 @@ document.addEventListener('DOMContentLoaded', function() {
   var fpOpt = { dateFormat: 'd.m.Y', locale: 'tr', allowInput: true };
   flatpickr('#filter-tarih', Object.assign({ defaultDate: 'today' }, fpOpt));
   document.getElementById('filter-tarih').addEventListener('change', function() { devamGunlukYukle(); });
+  document.getElementById('izin-turu').addEventListener('change', izinTuruSaatWrapGuncelle);
+  izinTuruSaatWrapGuncelle();
   flatpickr('#izin-bas', fpOpt);
   flatpickr('#izin-bit', fpOpt);
   var ozlukIseGiris = document.getElementById('ozluk-ise_giris_tarihi');
