@@ -1007,6 +1007,55 @@ def api_izin_sil():
         return jsonify({"ok": False, "mesaj": str(e)}), 400
 
 
+@bp.route("/api/izin/guncelle", methods=["POST"])
+@giris_gerekli
+def api_izin_guncelle():
+    try:
+        data = request.json or request.form
+        iid = int(data.get("izin_id"))
+        pid = int(data.get("personel_id"))
+        izin_turu = (data.get("izin_turu") or "Yıllık Ücretli İzin").strip()
+        bas = _parse_date(data.get("baslangic_tarihi"))
+        bitis = _parse_date(data.get("bitis_tarihi"))
+        if izin_turu == "Saatlik İzin":
+            if not bas:
+                return jsonify({"ok": False, "mesaj": "Tarih zorunlu"}), 400
+            try:
+                saat_sayisi = float(data.get("saat_sayisi") or 0)
+            except (TypeError, ValueError):
+                saat_sayisi = 0
+            if saat_sayisi < 1 or saat_sayisi > 8:
+                return jsonify({"ok": False, "mesaj": "Saat 1-8 arası olmalı"}), 400
+            bitis = bas
+            gun_sayisi = 0
+        else:
+            if not bas or not bitis:
+                return jsonify({"ok": False, "mesaj": "Başlangıç ve bitiş tarihi zorunlu"}), 400
+            if bitis < bas:
+                bitis, bas = bas, bitis
+            gun_sayisi = (bitis - bas).days + 1
+            saat_sayisi = 0
+        aciklama = (data.get("aciklama") or "").strip()
+        row = fetch_one(
+            "SELECT id FROM personel_izin WHERE id=%s AND personel_id=%s",
+            (iid, pid),
+        )
+        if not row:
+            return jsonify({"ok": False, "mesaj": "İzin kaydı bulunamadı"}), 404
+        execute(
+            """
+            UPDATE personel_izin
+            SET izin_turu=%s, baslangic_tarihi=%s, bitis_tarihi=%s,
+                gun_sayisi=%s, saat_sayisi=%s, aciklama=%s
+            WHERE id=%s AND personel_id=%s
+            """,
+            (izin_turu, bas, bitis, gun_sayisi, saat_sayisi, aciklama, iid, pid),
+        )
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "mesaj": str(e)}), 400
+
+
 @bp.route("/api/izin/otomatik-hesapla", methods=["POST"])
 @giris_gerekli
 def api_izin_otomatik_hesapla():
@@ -1074,11 +1123,53 @@ def api_izin_pdf(izin_id):
             yil = date.today().year
 
     ozet = _izin_ozet_hesapla(pid, yil)
+    tahmini = request.args.get("tahmini", "0") == "1"
+    kalan = ozet["kalan"]
     izin_bakiye = {
         "toplam_hak": ozet["toplam_hak"],
-        "yillik_kullanilan": ozet["kullanilan"],
-        "kalan": ozet["kalan"],
+        "yillik_kullanilan": round(float(ozet["kullanilan"]), 1),
+        "kalan": kalan,
+        "tahmini": tahmini,
     }
+    if tahmini:
+        tah_dk_param = request.args.get("tah_dk")
+        if tah_dk_param:
+            try:
+                tah_dk = int(tah_dk_param)
+                gec_gun_equiv = tah_dk / 480.0
+                kalan_tahmini = max(
+                    0.0,
+                    float(ozet["toplam_hak"]) - float(ozet["kullanilan"]) - gec_gun_equiv,
+                )
+                izin_bakiye["kalan"] = kalan_tahmini
+                izin_bakiye["kalan_tahmini"] = kalan_tahmini
+                izin_bakiye["tah_dk"] = tah_dk
+            except (ValueError, TypeError):
+                pass
+        else:
+            gec_gun_net = int(ozet.get("gec_gun_net") or 0)
+            gec_saat_net = int(ozet.get("gec_saat_net") or 0)
+            gec_gun_equiv = gec_gun_net + (gec_saat_net / 8.0)
+            kalan_tahmini = max(
+                0.0,
+                float(ozet["toplam_hak"]) - float(ozet["kullanilan"]) - gec_gun_equiv,
+            )
+            izin_bakiye["kalan"] = kalan_tahmini
+            izin_bakiye["gec_gun_net"] = gec_gun_net
+            izin_bakiye["gec_saat_net"] = gec_saat_net
+            izin_bakiye["kalan_tahmini"] = kalan_tahmini
+    kalan_dk_param = request.args.get("kalan_dk")
+    if kalan_dk_param:
+        try:
+            kalan_dk = int(kalan_dk_param)
+            kalan_gun = kalan_dk // 480
+            kalan_saat = (kalan_dk % 480) // 60
+            if kalan_saat > 0:
+                izin_bakiye["kalan_str"] = f"{kalan_gun} gün {kalan_saat} saat"
+            else:
+                izin_bakiye["kalan_str"] = f"{kalan_gun} gün"
+        except (ValueError, TypeError):
+            pass
     data = _izin_pdf_data_from_row(dict(row), izin_bakiye)
     buf = io.BytesIO()
     try:
