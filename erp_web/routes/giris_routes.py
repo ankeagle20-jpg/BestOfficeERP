@@ -82,6 +82,9 @@ from decimal import Decimal
 AYLIK_GRID_COMPUTE_REV = 23
 AYLIK_GRID_TAM_ODENDI_TOLERANS = 0.05  # kurus farklarini (dagitim/yuvarlama) tam odendi say
 PLACEHOLDER_BRUT_MAX = 0.5  # grid min tutar (0.01); gerçek brüt yazılmamış panel
+# Grid/panel tahsilat aciklama: «Ay YYYY Tahsilat H|AYLIK_TAH|…» (elle makbuz serbest metni haric)
+GRID_TAH_ACIKLAMA_REGEX = r"^.+ \d{4} Tahsilat [A-Z]\|AYLIK_TAH\|"
+GRID_TAH_PATTERN = re.compile(r"^\w[\w\s]+ \d{4} Tahsilat [A-Z]\|AYLIK_TAH\|")
 
 
 # BTUFRT (|BTUFRT|TÜFE borç+tahsil toplu): bu tarihte ve sonrasına ilişkin aylar grid «ödenen» toplamına
@@ -5599,19 +5602,11 @@ def _grid_payload_marker_panel_tam_kapandi(
     mk_t = round(float(mk_t or 0), 2)
     if mk_t <= tol:
         return False
-    reel_kap = 0.0
-    if isinstance(manual_reel_by_year, dict):
-        try:
-            reel_kap = round(float(manual_reel_by_year.get(int(yil)) or 0), 2)
-        except (TypeError, ValueError):
-            reel_kap = 0.0
-    if reel_kap > tol:
-        return mk_t + tol >= reel_kap
-    try:
-        b = round(float(brut or 0), 2)
-    except (TypeError, ValueError):
-        b = 0.0
-    return b > tol and mk_t + tol >= b
+    # |AYLIK_TAH| marker'lı tahsilat varsa
+    # tutar farkına bakmadan tam ödendi say
+    # (reel tutar değişiminden kaynaklanan
+    # farkları kısmi gösterme)
+    return True
 
 
 def _ekstre_payload_odenen_zenginlestir(
@@ -9424,6 +9419,15 @@ def api_reel_donem_tutarlar():
 @giris_gerekli
 def api_reel_donem_tutar_upsert():
     data = request.get_json(silent=True) or {}
+    logging.getLogger(__name__).warning(
+        "reel_upsert çağrıldı musteri_id=%s "
+        "donem_yil=%s tutar=%s referer=%s data=%s",
+        data.get('musteri_id'),
+        data.get('donem_yil'),
+        data.get('tutar_kdv_dahil'),
+        request.headers.get('Referer'),
+        str(data)
+    )
     try:
         musteri_id = int(data.get("musteri_id"))
     except (TypeError, ValueError):
@@ -9458,6 +9462,20 @@ def api_reel_donem_tutar_upsert():
     if not fetch_one("SELECT id FROM customers WHERE id = %s", (musteri_id,)):
         return jsonify({"ok": False, "mesaj": "Müşteri bulunamadı."}), 404
     _ensure_musteri_reel_donem_tutar_table()
+    eski_reel_manual = _musteri_reel_donem_manual_dict_from_db(musteri_id)
+    eski_reel_ay_map = {}
+    try:
+        kyc_reel_pre = _musteri_kyc_grup_for_aylik_grid(musteri_id)
+        bas_soz_pre = _aylik_grid_coerce_date(
+            kyc_reel_pre.get("sozlesme_tarihi") or kyc_reel_pre.get("rent_start_date")
+        )
+        if bas_soz_pre:
+            am_pre, ad_pre = _kyc_reel_anchor_month_day_for_grid(kyc_reel_pre)
+            eski_reel_ay_map = _reel_ay_key_tutar_map_db_flat_only(
+                bas_soz_pre, am_pre, ad_pre, eski_reel_manual
+            )
+    except Exception:
+        eski_reel_ay_map = {}
     execute(
         """
         INSERT INTO musteri_reel_donem_tutar (
@@ -9475,22 +9493,11 @@ def api_reel_donem_tutar_upsert():
         """,
         (musteri_id, donem_yil, tutar, giris_tip, giris_tutar, hibrit_toplam, hibrit_net, hibrit_banka),
     )
-    try:
-        _cari_ekstre_api_cache.clear()
-    except Exception:
-        pass
-    try:
-        _invalidate_aylik_grid_payload_mem(musteri_id)
-        _upsert_aylik_grid_cache(musteri_id)
-    except Exception:
-        logging.getLogger(__name__).exception(
-            "reel_donem_tutar sonrasi grid cache musteri_id=%s", musteri_id
-        )
+    patch = {}
     try:
         mid_int = int(musteri_id)
         payload_after = _build_aylik_grid_cache_payload(mid_int)
         existing_panel = _load_musteri_panel_by_iso(mid_int)
-        patch = {}
         if payload_after and isinstance(payload_after.get("aylar"), list):
             for a in payload_after["aylar"]:
                 if not isinstance(a, dict):
@@ -9509,9 +9516,42 @@ def api_reel_donem_tutar_upsert():
                 eski_kalan = round(float(existing_row.get("kalan") or 0), 2)
                 tol_p = float(AYLIK_GRID_TAM_ODENDI_TOLERANS)
                 brut_placeholder = eski_brut <= PLACEHOLDER_BRUT_MAX
+                eski_reel = 0.0
+                if eski_reel_manual and isinstance(eski_reel_manual, dict):
+                    rk_pre = f"{int(yil_p)}-{int(ay_p)}"
+                    try:
+                        eski_reel = round(float(eski_reel_ay_map.get(rk_pre) or 0), 2)
+                    except (TypeError, ValueError):
+                        eski_reel = 0.0
+                tahsil_like = f"%|AYLIK_TAH|{iso_k}|%"
+                try:
+                    execute(
+                        """UPDATE tahsilatlar
+                           SET tutar = %s
+                           WHERE musteri_id = %s
+                           AND aciklama LIKE %s
+                           AND aciklama ~ %s
+                           AND ABS(tutar - %s) > 0.05
+                           AND tutar < %s""",
+                        (
+                            new_brut,
+                            mid_int,
+                            tahsil_like,
+                            GRID_TAH_ACIKLAMA_REGEX,
+                            new_brut,
+                            new_brut,
+                        ),
+                    )
+                except Exception:
+                    logging.getLogger(__name__).exception(
+                        "tahsilatlar guncelleme hatasi "
+                        "musteri_id=%s iso_k=%s",
+                        mid_int, iso_k
+                    )
                 tam_tahsil_sayilir = (
                     (eski_tahsil >= eski_brut - tol_p and eski_brut > tol_p)
                     or (brut_placeholder and eski_tahsil > tol_p and eski_kalan <= tol_p)
+                    or (eski_reel > tol_p and abs(eski_tahsil - eski_reel) <= tol_p)
                 )
                 if tam_tahsil_sayilir:
                     yeni_tahsil = new_brut
@@ -9525,13 +9565,74 @@ def api_reel_donem_tutar_upsert():
                     "kalan": yeni_kalan,
                     "tahsil_tarih": existing_row.get("tahsil_tarih"),
                 }
-        if patch:
-            _save_musteri_panel_by_iso(mid_int, patch, prune_no_db_tahsil=False)
-            _invalidate_aylik_grid_payload_mem(mid_int)
-            _upsert_aylik_grid_cache(mid_int)
     except Exception:
         logging.getLogger(__name__).exception(
             "reel_donem_tutar sonrasi panel aylik senkron musteri_id=%s", musteri_id
+        )
+    try:
+        _cari_ekstre_api_cache.clear()
+    except Exception:
+        pass
+    app = current_app._get_current_object()
+    patch_bg = patch if patch else None
+    mid_bg = int(musteri_id)
+
+    def _bg_rebuild():
+        with app.app_context():
+            try:
+                _invalidate_aylik_grid_payload_mem(mid_bg)
+                if patch_bg:
+                    _save_musteri_panel_by_iso(
+                        mid_bg, patch_bg, prune_no_db_tahsil=False
+                    )
+                    _invalidate_aylik_grid_payload_mem(mid_bg)
+                _upsert_aylik_grid_cache(mid_bg)
+            except Exception:
+                logging.getLogger(__name__).exception(
+                    "bg_rebuild hata musteri_id=%s", mid_bg
+                )
+
+    threading.Thread(target=_bg_rebuild, daemon=True).start()
+    return jsonify({"ok": True})
+
+
+@bp.route("/api/reel-donem-tutar", methods=["DELETE"])
+@giris_gerekli
+def api_reel_donem_tutar_delete():
+    data = request.get_json(silent=True) or {}
+    try:
+        musteri_id = int(data.get("musteri_id"))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "mesaj": "musteri_id gerekli."}), 400
+    try:
+        donem_yil = int(data.get("donem_yil"))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "mesaj": "donem_yil gerekli."}), 400
+    if not fetch_one("SELECT id FROM customers WHERE id = %s", (musteri_id,)):
+        return jsonify({"ok": False, "mesaj": "Müşteri bulunamadı."}), 404
+    _ensure_musteri_reel_donem_tutar_table()
+    n = execute(
+        "DELETE FROM musteri_reel_donem_tutar WHERE musteri_id = %s AND donem_yil = %s",
+        (musteri_id, donem_yil),
+    )
+    if n <= 0:
+        return jsonify({"ok": False, "mesaj": "Reel dönem kaydı bulunamadı."}), 404
+    try:
+        _cari_ekstre_api_cache.clear()
+    except Exception:
+        pass
+    try:
+        mid_int = int(musteri_id)
+        _invalidate_aylik_grid_payload_mem(mid_int)
+        _ensure_aylik_grid_cache_table()
+        _ensure_tahsilat_panel_detay_table()
+        execute("DELETE FROM musteri_aylik_grid_cache WHERE musteri_id = %s", (mid_int,))
+        execute(
+            "DELETE FROM musteri_tahsilat_panel_detay WHERE musteri_id = %s", (mid_int,)
+        )
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "reel_donem_tutar silme sonrasi cache/panel musteri_id=%s", musteri_id
         )
     return jsonify({"ok": True})
 
