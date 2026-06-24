@@ -4226,7 +4226,7 @@ window.__faturaRaporAktifCtrl = window.__faturaRaporAktifCtrl || null;
 function girisFetchAgKopmasinaKarsi(url, options, denemeSayisi) {
     denemeSayisi = denemeSayisi == null ? 2 : Math.max(1, parseInt(denemeSayisi, 10) || 2);
     var opts = options || {};
-    var timeoutMs = Math.max(1000, parseInt((opts && opts.timeoutMs) || 10000, 10) || 10000);
+    var timeoutMs = Math.max(1000, parseInt((opts && opts.timeoutMs) || 30000, 10) || 30000);
     function dene(kalan) {
         var reqOpts = Object.assign({}, opts);
         delete reqOpts.timeoutMs;
@@ -6933,7 +6933,9 @@ function sozlesmelerAylikOnbellekFormlaUyumlu(cacheObj) {
     if (girisSonMusteriDetayHafifYukleme && hasCacheAylar) return true;
     var nForm = sozlesmelerAylikBeklenenAySayisiFormdan();
     var nCache = (cacheObj && Array.isArray(cacheObj.aylar)) ? cacheObj.aylar.length : 0;
-    if (nForm > 0 && nCache > 0 && nForm !== nCache) return false;
+    // Cache daha az ay üretebilir (horizon kısıtı) - bu uyumsuzluk değil, cache kısmi olabilir
+    // Sadece cache formdan fazla ay üretiyorsa uyumsuz say
+    if (nForm > 0 && nCache > 0 && nCache > nForm) return false;
     var cacheNakit = !!(cacheObj && cacheObj.kira_nakit);
     if (cacheNakit !== kiraNakitMi()) return false;
     var cKn = parseFloat(String((cacheObj && cacheObj.kira_nakit_tutar != null) ? cacheObj.kira_nakit_tutar : '').replace(',', '.')) || 0;
@@ -18723,6 +18725,10 @@ function girisAylikSatirYilDbSonrasi(mid) {
             if (gc && gc.ok && gc.cache && Array.isArray(gc.cache.aylar) && gc.cache.aylar.length) {
                 if (typeof sozlesmelerAylikOnbellekFormlaUyumlu === 'function' && sozlesmelerAylikOnbellekFormlaUyumlu(gc.cache)) {
                     sozlesmelerAylikCacheRender(gc.cache, true);
+                } else {
+                    if (typeof sozlesmelerAylikGuncelle === 'function') {
+                        sozlesmelerAylikGuncelle();
+                    }
                 }
             } else if (typeof sozlesmelerAylikGuncelle === 'function') {
                 sozlesmelerAylikGuncelle();

@@ -9108,6 +9108,14 @@ def api_aylik_tutarlardan_tahsil_et():
             _upsert_aylik_grid_cache(musteri_id, tufe_map=_tufe_map_by_year_month())
         except Exception:
             pass
+    try:
+        _invalidate_aylik_grid_payload_mem(int(musteri_id))
+        execute(
+            "DELETE FROM musteri_aylik_grid_cache WHERE musteri_id=%s",
+            (int(musteri_id),)
+        )
+    except Exception:
+        pass
     _cari_ekstre_api_cache.clear()
     zaten_n = sum(
         1 for x in atlanan if isinstance(x, dict) and x.get("neden") == "zaten_tahsil"
@@ -9462,20 +9470,6 @@ def api_reel_donem_tutar_upsert():
     if not fetch_one("SELECT id FROM customers WHERE id = %s", (musteri_id,)):
         return jsonify({"ok": False, "mesaj": "Müşteri bulunamadı."}), 404
     _ensure_musteri_reel_donem_tutar_table()
-    eski_reel_manual = _musteri_reel_donem_manual_dict_from_db(musteri_id)
-    eski_reel_ay_map = {}
-    try:
-        kyc_reel_pre = _musteri_kyc_grup_for_aylik_grid(musteri_id)
-        bas_soz_pre = _aylik_grid_coerce_date(
-            kyc_reel_pre.get("sozlesme_tarihi") or kyc_reel_pre.get("rent_start_date")
-        )
-        if bas_soz_pre:
-            am_pre, ad_pre = _kyc_reel_anchor_month_day_for_grid(kyc_reel_pre)
-            eski_reel_ay_map = _reel_ay_key_tutar_map_db_flat_only(
-                bas_soz_pre, am_pre, ad_pre, eski_reel_manual
-            )
-    except Exception:
-        eski_reel_ay_map = {}
     execute(
         """
         INSERT INTO musteri_reel_donem_tutar (
@@ -9493,106 +9487,27 @@ def api_reel_donem_tutar_upsert():
         """,
         (musteri_id, donem_yil, tutar, giris_tip, giris_tutar, hibrit_toplam, hibrit_net, hibrit_banka),
     )
-    patch = {}
-    try:
-        mid_int = int(musteri_id)
-        payload_after = _build_aylik_grid_cache_payload(mid_int)
-        existing_panel = _load_musteri_panel_by_iso(mid_int)
-        if payload_after and isinstance(payload_after.get("aylar"), list):
-            for a in payload_after["aylar"]:
-                if not isinstance(a, dict):
-                    continue
-                yil_p = a.get("yil")
-                ay_p = a.get("ay")
-                if not yil_p or not ay_p:
-                    continue
-                iso_k = date(int(yil_p), int(ay_p), 1).isoformat()
-                new_brut = round(float(a.get("brut_tutar_kdv") or 0), 2)
-                if new_brut <= 0:
-                    continue
-                existing_row = existing_panel.get(iso_k) or {}
-                eski_brut = round(float(existing_row.get("aylik") or 0), 2)
-                eski_tahsil = round(float(existing_row.get("tahsil") or 0), 2)
-                eski_kalan = round(float(existing_row.get("kalan") or 0), 2)
-                tol_p = float(AYLIK_GRID_TAM_ODENDI_TOLERANS)
-                brut_placeholder = eski_brut <= PLACEHOLDER_BRUT_MAX
-                eski_reel = 0.0
-                if eski_reel_manual and isinstance(eski_reel_manual, dict):
-                    rk_pre = f"{int(yil_p)}-{int(ay_p)}"
-                    try:
-                        eski_reel = round(float(eski_reel_ay_map.get(rk_pre) or 0), 2)
-                    except (TypeError, ValueError):
-                        eski_reel = 0.0
-                tahsil_like = f"%|AYLIK_TAH|{iso_k}|%"
-                try:
-                    execute(
-                        """UPDATE tahsilatlar
-                           SET tutar = %s
-                           WHERE musteri_id = %s
-                           AND aciklama LIKE %s
-                           AND aciklama ~ %s
-                           AND ABS(tutar - %s) > 0.05
-                           AND tutar < %s""",
-                        (
-                            new_brut,
-                            mid_int,
-                            tahsil_like,
-                            GRID_TAH_ACIKLAMA_REGEX,
-                            new_brut,
-                            new_brut,
-                        ),
-                    )
-                except Exception:
-                    logging.getLogger(__name__).exception(
-                        "tahsilatlar guncelleme hatasi "
-                        "musteri_id=%s iso_k=%s",
-                        mid_int, iso_k
-                    )
-                tam_tahsil_sayilir = (
-                    (eski_tahsil >= eski_brut - tol_p and eski_brut > tol_p)
-                    or (brut_placeholder and eski_tahsil > tol_p and eski_kalan <= tol_p)
-                    or (eski_reel > tol_p and abs(eski_tahsil - eski_reel) <= tol_p)
-                )
-                if tam_tahsil_sayilir:
-                    yeni_tahsil = new_brut
-                    yeni_kalan = 0.0
-                else:
-                    yeni_tahsil = eski_tahsil
-                    yeni_kalan = max(round(new_brut - eski_tahsil, 2), 0.0)
-                patch[iso_k] = {
-                    "aylik": new_brut,
-                    "tahsil": yeni_tahsil,
-                    "kalan": yeni_kalan,
-                    "tahsil_tarih": existing_row.get("tahsil_tarih"),
-                }
-    except Exception:
-        logging.getLogger(__name__).exception(
-            "reel_donem_tutar sonrasi panel aylik senkron musteri_id=%s", musteri_id
-        )
     try:
         _cari_ekstre_api_cache.clear()
     except Exception:
         pass
-    app = current_app._get_current_object()
-    patch_bg = patch if patch else None
-    mid_bg = int(musteri_id)
-
-    def _bg_rebuild():
-        with app.app_context():
-            try:
-                _invalidate_aylik_grid_payload_mem(mid_bg)
-                if patch_bg:
-                    _save_musteri_panel_by_iso(
-                        mid_bg, patch_bg, prune_no_db_tahsil=False
-                    )
-                    _invalidate_aylik_grid_payload_mem(mid_bg)
-                _upsert_aylik_grid_cache(mid_bg)
-            except Exception:
-                logging.getLogger(__name__).exception(
-                    "bg_rebuild hata musteri_id=%s", mid_bg
-                )
-
-    threading.Thread(target=_bg_rebuild, daemon=True).start()
+    patch = {}
+    # Senkron - ama sadece cache sil,
+    # frontend force=1 ile yeniden build eder
+    try:
+        _invalidate_aylik_grid_payload_mem(int(musteri_id))
+        execute(
+            "DELETE FROM musteri_aylik_grid_cache "
+            "WHERE musteri_id=%s",
+            (int(musteri_id),),
+        )
+        if patch:
+            _save_musteri_panel_by_iso(
+                int(musteri_id), patch,
+                prune_no_db_tahsil=False,
+            )
+    except Exception:
+        pass
     return jsonify({"ok": True})
 
 
