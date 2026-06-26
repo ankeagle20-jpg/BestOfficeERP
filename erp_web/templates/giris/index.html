@@ -14514,6 +14514,12 @@ function sozlesmeAylikTahsilEt() {
             try { localStorage.removeItem(lsKey); } catch (_eLs) {}
         }
         setTimeout(function () {
+            try {
+                var lsKey = '__aylik_yil_kayit__|' + String(mid);
+                localStorage.removeItem(lsKey);
+                var lsAyKey = '__aylik_yil_ay_kayit__|' + String(mid);
+                localStorage.removeItem(lsAyKey);
+            } catch (_e) {}
             location.reload();
         }, 1500);
         var o = res.j.olusturulan || [];
@@ -16901,6 +16907,12 @@ function girisTahsilatYilAyDbKaydet(satirlar, donemYil, doneCb) {
             try { localStorage.removeItem(lsKey); } catch (_eLs) {}
         }
         setTimeout(function () {
+            try {
+                var lsKey = '__aylik_yil_kayit__|' + String(mid);
+                localStorage.removeItem(lsKey);
+                var lsAyKey = '__aylik_yil_ay_kayit__|' + String(mid);
+                localStorage.removeItem(lsAyKey);
+            } catch (_e) {}
             location.reload();
         }, 1500);
         var o = res.j.olusturulan || [];
