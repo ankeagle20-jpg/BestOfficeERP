@@ -7333,7 +7333,7 @@ function sozlesmelerAylikHizliYukle(force) {
     if (!document.getElementById('sozlesmeler-aylik-grid')) return Promise.resolve(false);
     var mid = selectedId;
     sozlesmeAylikBorclananMusteriDegistir(mid);
-    var q = '/giris/api/aylik-grid-cache?musteri_id=' + encodeURIComponent(mid);
+    var q = '/giris/api/aylik-grid-cache?musteri_id=' + encodeURIComponent(mid) + '&skip_match=1';
     if (force) q += '&force=1';
     var pCache = fetch(q).then(function (r) { return r.json(); });
     if (force) {
