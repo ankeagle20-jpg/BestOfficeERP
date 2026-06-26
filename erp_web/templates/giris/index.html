@@ -14513,6 +14513,9 @@ function sozlesmeAylikTahsilEt() {
             var lsKey = '__aylik_yil_kayit__|' + String(mid);
             try { localStorage.removeItem(lsKey); } catch (_eLs) {}
         }
+        setTimeout(function () {
+            girisAylikSatirYilDbSonrasi(mid);
+        }, 3000);
         var o = res.j.olusturulan || [];
         var a = res.j.atlanan || [];
         var msg = (res.j.mesaj || '') + '\nOluşturulan: ' + o.length + ', atlanan: ' + a.length;
@@ -16897,6 +16900,9 @@ function girisTahsilatYilAyDbKaydet(satirlar, donemYil, doneCb) {
             var lsKey = '__aylik_yil_kayit__|' + String(mid);
             try { localStorage.removeItem(lsKey); } catch (_eLs) {}
         }
+        setTimeout(function () {
+            girisAylikSatirYilDbSonrasi(mid);
+        }, 3000);
         var o = res.j.olusturulan || [];
         var a = res.j.atlanan || [];
         var tolKay = Number(SOZLESME_TAM_ODENDI_TOLERANS) || 0.05;
