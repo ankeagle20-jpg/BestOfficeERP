@@ -4123,7 +4123,16 @@
                                 <option value="kredi_karti">Kredi kartı</option>
                             </select>
                         </div>
+                        <div id="cari_ekstre_duzenle_aciklama_wrap">
+                            <label for="cari_ekstre_duzenle_aciklama_input">Açıklama</label>
+                            <input type="text" id="cari_ekstre_duzenle_aciklama_input" placeholder="Açıklama">
+                        </div>
+                        <div id="cari_ekstre_duzenle_tahsil_eden_wrap">
+                            <label id="cari_ekstre_duzenle_personel_label" for="cari_ekstre_duzenle_tahsil_eden">Tahsil eden</label>
+                            <input type="text" id="cari_ekstre_duzenle_tahsil_eden" placeholder="Tahsil eden">
+                        </div>
                         <div class="cari-ekstre-duzenle-actions">
+                            <button type="button" id="cari_ekstre_duzenle_donustur_btn" class="tahsilat-btn-iptal" style="display:none;margin-right:auto;" onclick="cariEkstreDonustur()">Dönüştür</button>
                             <button type="button" class="tahsilat-btn-kaydet" onclick="cariEkstreDuzenleKaydet()">Kaydet</button>
                             <button type="button" class="cari-ekstre-modal-close" style="padding:8px 14px;" onclick="cariEkstreDuzenleModalKapat()">İptal</button>
                         </div>
@@ -26742,11 +26751,26 @@ function cariEkstreDuzenleAc(btn) {
     var tarEl = document.getElementById('cari_ekstre_duzenle_tarih');
     var odWrap = document.getElementById('cari_ekstre_duzenle_odeme_wrap');
     var odSel = document.getElementById('cari_ekstre_duzenle_odeme');
+    var acWrap = document.getElementById('cari_ekstre_duzenle_aciklama_wrap');
+    var acIn = document.getElementById('cari_ekstre_duzenle_aciklama_input');
+    var teWrap = document.getElementById('cari_ekstre_duzenle_tahsil_eden_wrap') || document.getElementById('cari_ekstre_duzenle_tediye_yapan_wrap');
+    var teLbl = document.getElementById('cari_ekstre_duzenle_personel_label');
+    var teIn = document.getElementById('cari_ekstre_duzenle_tahsil_eden');
     if (baslik) baslik.textContent = kind === 'fatura' ? 'Borç (kira) düzenle' : (kind === 'tediye' ? 'Tediye düzenle' : 'Tahsilat düzenle');
     if (acEl) acEl.textContent = aciklama;
     if (tutEl) tutEl.value = isFinite(tutar) ? String(Math.round(tutar * 100) / 100) : '';
     if (tarEl) tarEl.value = tarih;
     if (odWrap) odWrap.style.display = (kind === 'tahsilat' || kind === 'tediye') ? 'block' : 'none';
+    if (acWrap) acWrap.style.display = (kind === 'tahsilat' || kind === 'tediye') ? 'block' : 'none';
+    if (teWrap) {
+        teWrap.style.display = (kind === 'tahsilat' || kind === 'tediye') ? 'block' : 'none';
+        if (kind === 'tediye') teWrap.id = 'cari_ekstre_duzenle_tediye_yapan_wrap';
+        else if (kind === 'tahsilat') teWrap.id = 'cari_ekstre_duzenle_tahsil_eden_wrap';
+    }
+    if (teLbl) teLbl.textContent = kind === 'tediye' ? 'Tediye yapan' : 'Tahsil eden';
+    if (teIn) teIn.placeholder = kind === 'tediye' ? 'Tediye yapan' : 'Tahsil eden';
+    if (acIn) acIn.value = (kind === 'tahsilat' || kind === 'tediye') ? aciklama : '';
+    if (teIn) teIn.value = '';
     if (kind === 'tahsilat' && odSel) {
         fetch('/giris/api/tahsilat-detay?musteri_id=' + encodeURIComponent(mid) + '&ids=' + encodeURIComponent(String(rid)), { credentials: 'same-origin' })
             .then(function (r) { return r.json(); })
@@ -26755,6 +26779,8 @@ function cariEkstreDuzenleAc(btn) {
                     var k = data.kayitlar[0];
                     var o = String(k.odeme_turu || 'havale').toLowerCase();
                     if (['nakit', 'havale', 'eft', 'banka', 'cek', 'kredi_karti'].indexOf(o) >= 0) odSel.value = o === 'eft' || o === 'banka' ? 'havale' : o;
+                    if (acIn) acIn.value = k.aciklama || '';
+                    if (teIn) teIn.value = k.tahsil_eden || '';
                 }
             }).catch(function () {});
     }
@@ -26766,8 +26792,22 @@ function cariEkstreDuzenleAc(btn) {
                     var k = data.kayitlar[0];
                     var o = String(k.odeme_turu || 'nakit').toLowerCase();
                     if (['nakit', 'havale', 'eft', 'banka', 'cek', 'kredi_karti'].indexOf(o) >= 0) odSel.value = o === 'eft' || o === 'banka' ? 'havale' : o;
+                    if (acIn) acIn.value = k.aciklama || '';
+                    if (teIn) teIn.value = k.tediye_yapan || k.personel || k.yapan || '';
                 }
             }).catch(function () {});
+    }
+    var donBtn = document.getElementById('cari_ekstre_duzenle_donustur_btn');
+    if (donBtn) {
+        if (kind === 'tediye') {
+            donBtn.style.display = 'inline-block';
+            donBtn.textContent = 'Tahsilata Çevir';
+        } else if (kind === 'tahsilat' && aciklama.indexOf('|AYLIK_TAH|') < 0) {
+            donBtn.style.display = 'inline-block';
+            donBtn.textContent = 'Tediyeye Çevir';
+        } else {
+            donBtn.style.display = 'none';
+        }
     }
     var ov = document.getElementById('cari_ekstre_duzenle_modal');
     if (ov) {
@@ -26775,18 +26815,73 @@ function cariEkstreDuzenleAc(btn) {
         ov.setAttribute('aria-hidden', 'false');
     }
 }
+function cariEkstreDonustur() {
+    var ctx = window.__cariEkstreDuzenleCtx;
+    if (!ctx || (ctx.kind !== 'tahsilat' && ctx.kind !== 'tediye')) return;
+    var onay = ctx.kind === 'tahsilat'
+        ? 'Bu serbest tahsilat kaydı tediyeye çevrilecek. Devam edilsin mi?'
+        : 'Bu tediye kaydı tahsilata çevrilecek. Devam edilsin mi?';
+    if (!confirm(onay)) return;
+    var tutEl = document.getElementById('cari_ekstre_duzenle_tutar');
+    var tarEl = document.getElementById('cari_ekstre_duzenle_tarih');
+    var odSel = document.getElementById('cari_ekstre_duzenle_odeme');
+    var acIn = document.getElementById('cari_ekstre_duzenle_aciklama_input');
+    var teIn = document.getElementById('cari_ekstre_duzenle_tahsil_eden');
+    var tutar = parseFloat((tutEl && tutEl.value) ? String(tutEl.value).replace(',', '.') : '0');
+    if (!isFinite(tutar) || tutar <= 0) { alert('Geçerli bir tutar girin.'); return; }
+    var tarih = tarEl ? tarEl.value : '';
+    var body = {
+        musteri_id: parseInt(ctx.musteri_id, 10),
+        id: ctx.id,
+        kind: ctx.kind,
+        tutar: tutar,
+        tarih: tarih
+    };
+    if (odSel) body.odeme_turu = odSel.value;
+    if (acIn) body.aciklama = acIn.value;
+    if (teIn) {
+        if (ctx.kind === 'tahsilat') body.tahsil_eden = teIn.value;
+        else body.tediye_yapan = teIn.value;
+    }
+    fetch('/giris/api/ekstre-kayit-donustur', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify(body)
+    }).then(function (r) { return r.json(); }).then(function (data) {
+        if (!data.ok) { alert(data.mesaj || 'Dönüştürülemedi.'); return; }
+        cariEkstreDuzenleModalKapat();
+        if (typeof window.__girisEkstreSonIstek !== 'undefined') window.__girisEkstreSonIstek = {};
+        var pgP = (typeof girisTahsilatEkstrePanelGridSenkron === 'function')
+            ? girisTahsilatEkstrePanelGridSenkron()
+            : Promise.resolve(false);
+        Promise.resolve(pgP).then(function () {
+            if (typeof cariEkstreYukle === 'function') cariEkstreYukle({ zorla: true, dbEsas: true });
+            alert(data.mesaj || ('Dönüştürüldü. Yeni makbuz: ' + (data.makbuz_no || '')));
+        });
+    }).catch(function (e) { alert('Hata: ' + (e.message || e)); });
+}
 function cariEkstreDuzenleKaydet() {
     var ctx = window.__cariEkstreDuzenleCtx;
     if (!ctx) return;
     var tutEl = document.getElementById('cari_ekstre_duzenle_tutar');
     var tarEl = document.getElementById('cari_ekstre_duzenle_tarih');
     var odSel = document.getElementById('cari_ekstre_duzenle_odeme');
+    var acIn = document.getElementById('cari_ekstre_duzenle_aciklama_input');
+    var teIn = document.getElementById('cari_ekstre_duzenle_tahsil_eden');
     var tutar = parseFloat((tutEl && tutEl.value) ? String(tutEl.value).replace(',', '.') : '0');
     if (!isFinite(tutar) || tutar <= 0) { alert('Geçerli bir tutar girin.'); return; }
     var tarih = tarEl ? tarEl.value : '';
     var url = ctx.kind === 'fatura' ? '/giris/api/ekstre-fatura-guncelle' : (ctx.kind === 'tediye' ? '/giris/api/ekstre-tediye-guncelle' : '/giris/api/ekstre-tahsilat-guncelle');
     var body = { musteri_id: parseInt(ctx.musteri_id, 10), id: ctx.id, tutar: tutar, tarih: tarih };
     if ((ctx.kind === 'tahsilat' || ctx.kind === 'tediye') && odSel) body.odeme_turu = odSel.value;
+    if (ctx.kind === 'tahsilat') {
+        if (acIn) body.aciklama = acIn.value;
+        if (teIn) body.tahsil_eden = teIn.value;
+    }
+    if (ctx.kind === 'tediye') {
+        if (acIn) body.aciklama = acIn.value;
+    }
     fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

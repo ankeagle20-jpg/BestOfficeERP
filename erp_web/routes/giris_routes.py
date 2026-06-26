@@ -7875,8 +7875,40 @@ def _cari_ekstre_hareketler(
 
         for pr in marker_pays:
             _fifo_pay_alloc(pr, restrict_marker_months=True)
+        fifo_general = []
+        direct_pays = []
         for pr in general_pays:
+            # Fatura bağlı değil ve serbest makbuz ise direkt ekle
+            fid = pr.get("fatura_id")
+            if not fid:
+                direct_pays.append(pr)
+            else:
+                fifo_general.append(pr)
+        for pr in fifo_general:
             _fifo_pay_alloc(pr, restrict_marker_months=False)
+        # Serbest makbuzlar direkt satır
+        for pr in direct_pays:
+            logging.getLogger(__name__).warning(
+                "direct_pay: id=%s tutar=%s aciklama=%s",
+                pr.get("id"), pr.get("tutar"),
+                pr.get("tahsilat_aciklama"),
+            )
+            t_tarih = str(pr.get("tahsilat_tarihi") or pr.get("tarih") or "")[:10]
+            t_tutar = round(float(pr.get("tutar") or 0), 2)
+            if t_tutar <= tol_f:
+                continue
+            t_aciklama = (pr.get("tahsilat_aciklama") or pr.get("aciklama") or "")
+            t_belge = (pr.get("belge_no") or pr.get("makbuz_no") or f"Makbuz-{pr.get('id')}")
+            rows.append({
+                "tarih": t_tarih,
+                "aciklama": t_aciklama,
+                "belge_no": str(t_belge),
+                "tur": "Tahsilat",
+                "borc": 0,
+                "alacak": t_tutar,
+                "bakiye": None,
+                "tahsilat_ids": [pr.get("id")],
+            })
         acilis_fifo = _ekstre_acilis_bakiyesi_fifo(
             full_borc_for_fifo,
             dev_cutoff_iso,
@@ -8077,7 +8109,19 @@ def _cari_ekstre_hareketler(
             except (TypeError, ValueError):
                 fatura_id = 0
             manuel_ekstre_tarih = (fatura_id <= 0) and (has_pay_token or has_marker)
-            tarih = (tarih_giris if manuel_ekstre_tarih else (tarih_eslesme or tarih_giris))
+            try:
+                tid = int(r.get("id"))
+            except (TypeError, ValueError):
+                tid = None
+            # Marker'sız serbest makbuzlar → ID bazlı ayrı satır
+            if not has_marker and not has_pay_token:
+                if not tid:
+                    continue
+                map_key = f"id_{tid}"
+                tarih = tarih_giris
+            else:
+                tarih = (tarih_giris if manuel_ekstre_tarih else (tarih_eslesme or tarih_giris))
+                map_key = tarih
             if not tarih:
                 continue
             if soz_floor_iso and tarih < soz_floor_iso:
@@ -8091,9 +8135,10 @@ def _cari_ekstre_hareketler(
                 tahsilat_tarih=tarih_giris,
                 manuel_ekstre_tarih=manuel_ekstre_tarih,
             )
-            if tarih not in tahsilat_ay_map:
-                tahsilat_ay_map[tarih] = {
-                    "tarih": tarih,
+            row_tarih = tarih_giris if (not has_marker and not has_pay_token) else tarih
+            if map_key not in tahsilat_ay_map:
+                tahsilat_ay_map[map_key] = {
+                    "tarih": row_tarih,
                     "aciklama": aciklama,
                     "belge_no": r.get("belge_no") or "",
                     "tur": "Tahsilat",
@@ -8104,14 +8149,10 @@ def _cari_ekstre_hareketler(
                     "tahsilat_ids": [],
                 }
             if manuel_ekstre_tarih:
-                tahsilat_ay_map[tarih]["manuel_tutar_koru"] = True
-            try:
-                tid = int(r.get("id"))
-            except (TypeError, ValueError):
-                tid = None
+                tahsilat_ay_map[map_key]["manuel_tutar_koru"] = True
             if tid:
-                tahsilat_ay_map[tarih]["tahsilat_ids"].append(tid)
-            tahsilat_ay_map[tarih]["alacak_toplam"] += round(float(r.get("tutar") or 0), 2)
+                tahsilat_ay_map[map_key]["tahsilat_ids"].append(tid)
+            tahsilat_ay_map[map_key]["alacak_toplam"] += round(float(r.get("tutar") or 0), 2)
 
         for tarih, item in tahsilat_ay_map.items():
             alacak_toplam = round(float(item.get("alacak_toplam") or 0), 2)
@@ -10542,7 +10583,11 @@ def api_ekstre_tahsilat_guncelle():
             tahsilat_tarihi = td if isinstance(td, date) else datetime.strptime(str(td)[:10], "%Y-%m-%d").date()
         else:
             tahsilat_tarihi = date.today()
-    if marker:
+    aciklama_in = (data.get("aciklama") or "").strip()
+    tahsil_eden = (data.get("tahsil_eden") or "").strip()[:120] or None
+    if aciklama_in:
+        aciklama = aciklama_in
+    elif marker:
         mm_iso = re.search(r"\|AYLIK_TAH\|([0-9]{4}-[0-9]{2}-[0-9]{2})\|", marker)
         ay_iso = mm_iso.group(1) if mm_iso else date(tahsilat_tarihi.year, tahsilat_tarihi.month, 1).isoformat()
         try:
@@ -10557,14 +10602,14 @@ def api_ekstre_tahsilat_guncelle():
         harf = _odeme_turu_harf(odeme)
         aciklama = f"{ay_adi} {yil} Tahsilat {harf}{marker}"
     else:
-        aciklama = (data.get("aciklama") or ac_old or "Tahsilat").strip() or "Tahsilat"
+        aciklama = ac_old or "Tahsilat"
     execute(
         """
         UPDATE tahsilatlar
-        SET tutar = %s, tahsilat_tarihi = %s, odeme_turu = %s, aciklama = %s
+        SET tutar = %s, tahsilat_tarihi = %s, odeme_turu = %s, aciklama = %s, tahsil_eden = %s
         WHERE id = %s AND (musteri_id = %s OR customer_id = %s)
         """,
-        (tutar, tahsilat_tarihi, odeme, aciklama, tid, musteri_id, musteri_id),
+        (tutar, tahsilat_tarihi, odeme, aciklama, tahsil_eden, tid, musteri_id, musteri_id),
     )
     aff_upd = _iso_from_aylik_tah_marker(aciklama) or affected_iso
     _ekstre_invalidate_after_change(
@@ -10669,6 +10714,226 @@ def api_ekstre_tediye_guncelle():
     )
     _ekstre_invalidate_after_change(musteri_id)
     return jsonify({"ok": True, "id": tid, "mesaj": "Tediye güncellendi."})
+
+
+@bp.route("/api/ekstre-kayit-donustur", methods=["POST"])
+@giris_gerekli
+def api_ekstre_kayit_donustur():
+    """Cari ekstre: marker'sız serbest tahsilat ↔ tediye (sil + hedef tabloya insert, tek transaction)."""
+    try:
+        data = request.get_json(force=True, silent=True) or {}
+    except Exception:
+        data = {}
+    try:
+        musteri_id = int(data.get("musteri_id"))
+        kid = int(data.get("id"))
+        tutar = round(float(data.get("tutar")), 2)
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "mesaj": "musteri_id, id ve tutar gerekli."}), 400
+    if tutar <= 0:
+        return jsonify({"ok": False, "mesaj": "Tutar 0'dan büyük olmalı."}), 400
+    kind = (data.get("kind") or "").strip().lower()
+    if kind not in ("tahsilat", "tediye"):
+        return jsonify({"ok": False, "mesaj": "kind tahsilat veya tediye olmalı."}), 400
+    raw_tarih = (data.get("tarih") or "").strip()[:10]
+    try:
+        kayit_tarihi = (
+            datetime.strptime(raw_tarih, "%Y-%m-%d").date() if raw_tarih else None
+        )
+    except Exception:
+        kayit_tarihi = None
+    odeme = (data.get("odeme_turu") or data.get("odeme") or "nakit").strip().lower()
+    if odeme in ("eft", "banka"):
+        odeme = "havale"
+    if odeme not in ("nakit", "havale", "kredi_karti", "cek"):
+        odeme = "nakit"
+    aciklama_in = (data.get("aciklama") or "").strip()
+
+    if kind == "tahsilat":
+        src = fetch_one(
+            """
+            SELECT id, COALESCE(aciklama, '') AS aciklama, tahsilat_tarihi, fatura_id,
+                   cek_detay, havale_banka, tahsil_eden
+            FROM tahsilatlar
+            WHERE id = %s AND (musteri_id = %s OR customer_id = %s)
+            """,
+            (kid, musteri_id, musteri_id),
+        )
+        if not src:
+            return jsonify({"ok": False, "mesaj": "Tahsilat bulunamadı."}), 404
+        if "|AYLIK_TAH|" in str(src.get("aciklama") or ""):
+            return jsonify({
+                "ok": False,
+                "mesaj": "Aylık tahsilat (|AYLIK_TAH|) kaydı dönüştürülemez.",
+            }), 400
+        if src.get("fatura_id"):
+            return jsonify({
+                "ok": False,
+                "mesaj": "Faturaya bağlı tahsilat dönüştürülemez.",
+            }), 400
+        if not kayit_tarihi:
+            td = src.get("tahsilat_tarihi")
+            if td and hasattr(td, "year"):
+                kayit_tarihi = (
+                    td
+                    if isinstance(td, date)
+                    else datetime.strptime(str(td)[:10], "%Y-%m-%d").date()
+                )
+            else:
+                kayit_tarihi = date.today()
+        aciklama = aciklama_in or str(src.get("aciklama") or "").strip() or "Tediye"
+        tediye_yapan = (
+            (data.get("tahsil_eden") or data.get("tediye_yapan") or src.get("tahsil_eden") or "")
+            .strip()[:120]
+            or None
+        )
+        cek_detay = src.get("cek_detay")
+        havale_banka = src.get("havale_banka")
+    else:
+        src = fetch_one(
+            """
+            SELECT id, COALESCE(aciklama, '') AS aciklama, tediye_tarihi,
+                   cek_detay, havale_banka, tediye_yapan
+            FROM tediyeler
+            WHERE id = %s AND musteri_id = %s
+            """,
+            (kid, musteri_id),
+        )
+        if not src:
+            return jsonify({"ok": False, "mesaj": "Tediye bulunamadı."}), 404
+        if not kayit_tarihi:
+            td = src.get("tediye_tarihi")
+            if td and hasattr(td, "year"):
+                kayit_tarihi = (
+                    td
+                    if isinstance(td, date)
+                    else datetime.strptime(str(td)[:10], "%Y-%m-%d").date()
+                )
+            else:
+                kayit_tarihi = date.today()
+        aciklama = aciklama_in or str(src.get("aciklama") or "").strip() or "Tahsilat"
+        tahsil_eden = (
+            (data.get("tahsil_eden") or data.get("tediye_yapan") or src.get("tediye_yapan") or "")
+            .strip()[:120]
+            or None
+        )
+        cek_detay = src.get("cek_detay")
+        havale_banka = src.get("havale_banka")
+
+    from routes.faturalar_routes import (
+        _tahsilat_icin_makbuz_no_sec_cursor,
+        _tediye_icin_makbuz_no_sec_cursor,
+    )
+
+    yeni_id = None
+    yeni_kind = None
+    makbuz_no = None
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+            if kind == "tahsilat":
+                cur.execute(
+                    "UPDATE banka_hareketleri SET tahsilat_id = NULL WHERE tahsilat_id = %s",
+                    (kid,),
+                )
+                cur.execute(
+                    """
+                    DELETE FROM tahsilatlar
+                    WHERE id = %s AND (musteri_id = %s OR customer_id = %s)
+                    RETURNING id
+                    """,
+                    (kid, musteri_id, musteri_id),
+                )
+                if not cur.fetchone():
+                    raise ValueError("Tahsilat silinemedi.")
+                cur.execute(
+                    "SELECT pg_advisory_xact_lock(hashtext('tediye_makbuz_no_alloc')::bigint)"
+                )
+                makbuz_no = _tediye_icin_makbuz_no_sec_cursor(cur, None)
+                cur.execute(
+                    """
+                    INSERT INTO tediyeler (
+                        musteri_id, tutar, odeme_turu, tediye_tarihi, aciklama,
+                        makbuz_no, cek_detay, havale_banka, tediye_yapan
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id, makbuz_no
+                    """,
+                    (
+                        musteri_id,
+                        tutar,
+                        odeme,
+                        kayit_tarihi,
+                        aciklama,
+                        makbuz_no,
+                        cek_detay,
+                        havale_banka,
+                        tediye_yapan,
+                    ),
+                )
+                ins = cur.fetchone()
+                yeni_id = int(ins["id"])
+                yeni_kind = "tediye"
+                makbuz_no = ins.get("makbuz_no") or makbuz_no
+            else:
+                cur.execute(
+                    """
+                    DELETE FROM tediyeler
+                    WHERE id = %s AND musteri_id = %s
+                    RETURNING id
+                    """,
+                    (kid, musteri_id),
+                )
+                if not cur.fetchone():
+                    raise ValueError("Tediye silinemedi.")
+                cur.execute(
+                    "SELECT pg_advisory_xact_lock(hashtext('tahsilat_makbuz_no_alloc')::bigint)"
+                )
+                makbuz_no = _tahsilat_icin_makbuz_no_sec_cursor(cur, None)
+                cur.execute(
+                    """
+                    INSERT INTO tahsilatlar (
+                        musteri_id, customer_id, fatura_id, tutar, odeme_turu,
+                        aciklama, tahsilat_tarihi, makbuz_no, cek_detay,
+                        havale_banka, tahsil_eden
+                    ) VALUES (%s, %s, NULL, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id, makbuz_no
+                    """,
+                    (
+                        musteri_id,
+                        musteri_id,
+                        tutar,
+                        odeme,
+                        aciklama,
+                        kayit_tarihi,
+                        makbuz_no,
+                        cek_detay,
+                        havale_banka,
+                        tahsil_eden,
+                    ),
+                )
+                ins = cur.fetchone()
+                yeni_id = int(ins["id"])
+                yeni_kind = "tahsilat"
+                makbuz_no = ins.get("makbuz_no") or makbuz_no
+    except ValueError as e:
+        return jsonify({"ok": False, "mesaj": str(e)}), 404
+    except Exception as e:
+        logging.getLogger(__name__).exception("ekstre_kayit_donustur")
+        return jsonify({"ok": False, "mesaj": str(e)}), 500
+
+    _ekstre_invalidate_after_change(musteri_id)
+    mesaj = (
+        "Tahsilat tediyeye çevrildi."
+        if kind == "tahsilat"
+        else "Tediye tahsilata çevrildi."
+    )
+    return jsonify({
+        "ok": True,
+        "yeni_id": yeni_id,
+        "yeni_kind": yeni_kind,
+        "makbuz_no": makbuz_no,
+        "mesaj": mesaj,
+    })
 
 
 @bp.route("/api/ekstre-tediye-sil", methods=["POST"])
@@ -10807,7 +11072,7 @@ def api_tahsilat_detay():
     ph = ",".join(["%s"] * len(ids))
     sql = f"""
         SELECT t.id, t.makbuz_no, t.tutar, t.odeme_turu, t.tahsilat_tarihi, t.aciklama,
-               t.fatura_id, f.fatura_no, t.cek_detay, t.havale_banka
+               t.fatura_id, f.fatura_no, t.cek_detay, t.havale_banka, t.tahsil_eden
         FROM tahsilatlar t
         LEFT JOIN faturalar f ON f.id = t.fatura_id
         WHERE t.id IN ({ph})
