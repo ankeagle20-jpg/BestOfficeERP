@@ -14521,7 +14521,7 @@ function sozlesmeAylikTahsilEt() {
                 localStorage.removeItem(lsAyKey);
             } catch (_e) {}
             location.reload();
-        }, 1500);
+        }, 5000);
         var o = res.j.olusturulan || [];
         var a = res.j.atlanan || [];
         var msg = (res.j.mesaj || '') + '\nOluşturulan: ' + o.length + ', atlanan: ' + a.length;
@@ -16914,7 +16914,7 @@ function girisTahsilatYilAyDbKaydet(satirlar, donemYil, doneCb) {
                 localStorage.removeItem(lsAyKey);
             } catch (_e) {}
             location.reload();
-        }, 1500);
+        }, 5000);
         var o = res.j.olusturulan || [];
         var a = res.j.atlanan || [];
         var tolKay = Number(SOZLESME_TAM_ODENDI_TOLERANS) || 0.05;
