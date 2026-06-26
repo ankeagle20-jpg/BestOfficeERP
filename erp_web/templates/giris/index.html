@@ -14514,8 +14514,8 @@ function sozlesmeAylikTahsilEt() {
             try { localStorage.removeItem(lsKey); } catch (_eLs) {}
         }
         setTimeout(function () {
-            girisAylikSatirYilDbSonrasi(mid);
-        }, 3000);
+            location.reload();
+        }, 1500);
         var o = res.j.olusturulan || [];
         var a = res.j.atlanan || [];
         var msg = (res.j.mesaj || '') + '\nOluşturulan: ' + o.length + ', atlanan: ' + a.length;
@@ -16901,8 +16901,8 @@ function girisTahsilatYilAyDbKaydet(satirlar, donemYil, doneCb) {
             try { localStorage.removeItem(lsKey); } catch (_eLs) {}
         }
         setTimeout(function () {
-            girisAylikSatirYilDbSonrasi(mid);
-        }, 3000);
+            location.reload();
+        }, 1500);
         var o = res.j.olusturulan || [];
         var a = res.j.atlanan || [];
         var tolKay = Number(SOZLESME_TAM_ODENDI_TOLERANS) || 0.05;
