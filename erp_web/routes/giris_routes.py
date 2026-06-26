@@ -9177,6 +9177,7 @@ def api_aylik_tutarlardan_tahsil_et():
         "olusturulan": olusturulan,
         "atlanan": atlanan,
         "mesaj": mesaj,
+        "ls_temizle": True,
     })
 
 

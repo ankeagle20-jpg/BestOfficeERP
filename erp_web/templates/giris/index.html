@@ -14509,6 +14509,10 @@ function sozlesmeAylikTahsilEt() {
             alert((res.j && res.j.mesaj) ? res.j.mesaj : 'İşlem başarısız.');
             return;
         }
+        if (res.j.ls_temizle) {
+            var lsKey = '__aylik_yil_kayit__|' + String(mid);
+            try { localStorage.removeItem(lsKey); } catch (_eLs) {}
+        }
         var o = res.j.olusturulan || [];
         var a = res.j.atlanan || [];
         var msg = (res.j.mesaj || '') + '\nOluşturulan: ' + o.length + ', atlanan: ' + a.length;
@@ -16888,6 +16892,10 @@ function girisTahsilatYilAyDbKaydet(satirlar, donemYil, doneCb) {
             alert((res.j && res.j.mesaj) ? res.j.mesaj : 'Tahsilat kaydı başarısız.');
             if (doneCb) doneCb(false);
             return;
+        }
+        if (res.j.ls_temizle) {
+            var lsKey = '__aylik_yil_kayit__|' + String(mid);
+            try { localStorage.removeItem(lsKey); } catch (_eLs) {}
         }
         var o = res.j.olusturulan || [];
         var a = res.j.atlanan || [];
