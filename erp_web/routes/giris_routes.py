@@ -9157,6 +9157,10 @@ def api_aylik_tutarlardan_tahsil_et():
         )
     except Exception:
         pass
+    try:
+        _upsert_aylik_grid_cache(int(musteri_id))
+    except Exception:
+        pass
     _cari_ekstre_api_cache.clear()
     zaten_n = sum(
         1 for x in atlanan if isinstance(x, dict) and x.get("neden") == "zaten_tahsil"
