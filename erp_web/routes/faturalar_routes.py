@@ -6611,6 +6611,8 @@ def _gib_durum_portal_metni_upsert_asama(gib_durum_raw) -> str:
     # «imzalanmadı» da «imza» içerir; yalnız kesin imzalı / imzalandı ifadeleri.
     if "imzaland" in s or ("imzali" in s and "imzalanmad" not in s):
         return "imzali"
+    if "onaylandi" in s and "onaylanmadi" not in s:
+        return "imzali"
     return "taslak"
 
 
@@ -6621,6 +6623,13 @@ def _gibden_erp_upsert(gib_row):
     ettn = str(gib_row.get("ettn") or "").strip()
     try:
         musteri_adi = str(gib_row.get("musteri_adi") or "").strip() or "—"
+        logging.getLogger(__name__).warning(
+            "upsert: fatura_no=%s ettn=%s "
+            "musteri_vkn=%s musteri_adi=%s",
+            fatura_no, ettn[:8] if ettn else '',
+            gib_row.get('musteri_vkn'),
+            musteri_adi[:20]
+        )
         fatura_tarihi = str(gib_row.get("fatura_tarihi") or "").strip()[:10] or date.today().isoformat()
         toplam = float(gib_row.get("tutar") or 0)
         gib_asama = _gib_durum_portal_metni_upsert_asama(gib_row.get("gib_durum"))
@@ -6662,17 +6671,27 @@ def _gibden_erp_upsert(gib_row):
 
         musteri_id = None
         try:
-            m = fetch_one(
-                """
-                SELECT id
-                FROM customers
-                WHERE LOWER(TRIM(COALESCE(name, ''))) = LOWER(TRIM(%s))
-                   OR LOWER(TRIM(COALESCE(musteri_adi, ''))) = LOWER(TRIM(%s))
-                ORDER BY id DESC
-                LIMIT 1
-                """,
-                (musteri_adi, musteri_adi),
-            )
+            musteri_vkn = str(
+                gib_row.get("musteri_vkn") or
+                "").strip()
+            m = None
+            if musteri_vkn:
+                m = fetch_one(
+                    """SELECT id FROM customers
+                       WHERE TRIM(COALESCE(
+                         tax_number::text,'')) = %s
+                       ORDER BY id DESC LIMIT 1""",
+                    (musteri_vkn,),
+                )
+            if not m:
+                m = fetch_one(
+                    """SELECT id FROM customers
+                       WHERE LOWER(TRIM(
+                         COALESCE(name,''))) =
+                         LOWER(TRIM(%s))
+                       ORDER BY id DESC LIMIT 1""",
+                    (musteri_adi,),
+                )
             if m and m.get("id"):
                 musteri_id = int(m.get("id"))
         except Exception:
@@ -8460,6 +8479,7 @@ def api_gib_kesilmis_fatura_raporu():
                    f.fatura_tarihi,
                    f.fatura_no,
                    f.ettn,
+                   f.notlar,
                    COALESCE(
                        NULLIF(TRIM(f.musteri_adi), ''),
                        NULLIF(TRIM(c.name), ''),
@@ -8815,6 +8835,18 @@ def _merge_gib_kesilmis_portal_ve_erp(portal_items, erp_items):
                 result.append(erp_hit)
                 added_erp_ids.add(eid)
         else:
+            # VKN ile ERP müşteri ara
+            pvkn = str(p.get("musteri_vkn") or "").strip()
+            if pvkn:
+                cm = fetch_one(
+                    """SELECT name FROM customers
+                       WHERE TRIM(COALESCE(
+                         tax_number::text,'')) = %s
+                       LIMIT 1""",
+                    (pvkn,),
+                )
+                if cm and cm.get("name"):
+                    p["musteri_adi"] = cm["name"]
             p["kaynak"] = "gib_portal"
             result.append(p)
 
@@ -9952,6 +9984,7 @@ def api_gib_cek_kaydet_aralik():
                 "fatura_no": str(it.get("fatura_no") or "").strip(),
                 "ettn": str(it.get("ettn") or "").strip(),
                 "musteri_adi": str(it.get("musteri_adi") or "").strip(),
+                "musteri_vkn": str(it.get("musteri_vkn") or "").strip(),
                 "fatura_tarihi": str(it.get("fatura_tarihi") or "").strip(),
                 "tutar": float(it.get("tutar") or 0),
                 "gib_durum": str(it.get("gib_durum") or "Taslak"),

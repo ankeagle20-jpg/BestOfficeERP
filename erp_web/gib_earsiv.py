@@ -885,6 +885,7 @@ class BestOfficeGIBManager:
             "fatura_no": bn,
             "ettn": et,
             "musteri_adi": unvan,
+            "musteri_vkn": self._portal_row_vkn(d),
             "tutar": tut,
             "kaynak": "gib_portal",
             "gib_durum": gib_etiket,
@@ -1013,6 +1014,12 @@ class BestOfficeGIBManager:
                     merged_raw.append(d)
                 time.sleep(0.22)
             cur = chunk_end + timedelta(days=1)
+
+        ham_liste = merged_raw
+        for i, d in enumerate(ham_liste[:2]):
+            logging.getLogger(__name__).warning(
+                "GIB ham satir %d: %s", i, str(d)[:500]
+            )
 
         items = []
         seen_out = set()
