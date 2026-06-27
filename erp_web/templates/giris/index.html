@@ -2598,6 +2598,20 @@
             <h3 style="margin:0;">Müşteri Ekle / Güncelle</h3>
             <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
                 <span id="giris_group_status_badge" style="display:none;padding:4px 9px;border-radius:999px;background:rgba(79,195,247,.16);border:1px solid rgba(79,195,247,.5);color:#b3e5fc;font-size:11px;font-weight:700;white-space:nowrap;">Grup: Grupsuz</span>
+                <button type="button"
+                  id="musteri-form-btn-vazgec"
+                  class="musteri-form-btn-vazgec"
+                  onclick="girisMusteriDuzenleVazgec()"
+                  title="Değişikliklerden vazgeç"
+                  style="display:none;">
+                  ↩️ Vazgeç
+                </button>
+                <button type="button"
+                  class="musteri-form-btn-duzenle"
+                  onclick="girisMusteriDuzenle()"
+                  title="Mevcut müşteriyi düzenle">
+                  ✏️ Düzenle
+                </button>
                 <button type="button" class="musteri-form-btn-cogalt" onclick="girisMusteriCogalt()" title="Yeni müşteri no ile kopya oluştur; eski kartı pasif yapıp yeni planla devam edebilirsiniz"><i class="fa fa-copy" aria-hidden="true"></i> Müşteri çoğalt</button>
                 <button type="button" class="musteri-form-btn-whatsapp" onclick="girisMusteriWhatsAppAc()" title="Formdaki telefon numarası ile WhatsApp aç"><i class="fa-brands fa-whatsapp" aria-hidden="true"></i> WhatsApp</button>
                 <button type="button" class="musteri-form-btn-cogalt" onclick="girisGroupModalAc()" title="Cariyi gruba bağla / gruptan çıkar / hızlı grup oluştur"><i class="fa fa-sitemap" aria-hidden="true"></i> Grup Ayarları</button>
@@ -22837,6 +22851,9 @@ function calismaSekliDegisti() {
 
 async function kaydet(event) {
     event.preventDefault();
+    if (window.__girisDuzenleModu) {
+        girisMusteriDuzenleModuKapat();
+    }
     musteriKaydetDurumGoster('idle');
 
     // Zorunlu alan kontrolleri (boş bırakılamaz)
@@ -23345,6 +23362,128 @@ function bestOfficeWhatsAppWebAc(phoneDigits, plainTextMessage) {
 }
 
 /** Kayıtlı müşteriyi yeni id / müşteri no ile çoğaltır (ör. sanal ofis → hazır ofis). */
+
+
+function girisMusteriAramaAutocompleteEventleriYukle() {
+  var maEl = document.getElementById('musteri_adi');
+  var nameEl = document.getElementById('name');
+  if (maEl) {
+    maEl.oninput = function () { girisMusteriAdiAramaInputFlag(); musteriAdiAutocomplete(); };
+    maEl.onfocus = function () { musteriAdiAutocomplete(); };
+    maEl.onkeydown = function (ev) { girisMusteriAdiAramaKeydown(ev); };
+    maEl.onblur = function () { girisMusteriAdiAramaBlur(); };
+  }
+  if (nameEl) {
+    nameEl.oninput = function () { girisSirketUnvaniAramaInputFlag(); sirketUnvaniAutocomplete(); };
+    nameEl.onfocus = function () { sirketUnvaniAutocomplete(); };
+    nameEl.onkeydown = function (ev) { girisSirketUnvaniAramaKeydown(ev); };
+    nameEl.onblur = function () { girisSirketUnvaniAramaBlur(); };
+    nameEl.onchange = function () { hesaplaYuzde(); };
+  }
+}
+
+function girisMusteriDuzenleModuKapat() {
+  window.__girisDuzenleModu = false;
+  girisMusteriAramaAutocompleteEventleriYukle();
+}
+
+function girisMusteriDuzenle() {
+  var mid = (typeof selectedId !== 'undefined'
+    && selectedId) ? String(selectedId) : '';
+  if (!mid) {
+    alert('Önce bir müşteri seçin.');
+    return;
+  }
+  // selectMusteri formu doldurur + id set eder
+  if (typeof selectMusteri === 'function') {
+    selectMusteri(parseInt(mid, 10));
+  }
+  // Arama flag'lerini temizle -
+  // düzenleme modunda arama değil
+  // direkt yazma aktif olsun
+  window.__girisAramaMusteriAdiAranan = false;
+  window.__girisAramaNameAranan = false;
+  window.__girisAramaSnapshot = null;
+  // Arama alanlarını readonly değil
+  // yap (varsa)
+  var nameEl = document.getElementById('name');
+  var musteriAdiEl = document.getElementById('musteri_adi');
+  if (nameEl) nameEl.removeAttribute('readonly');
+  if (musteriAdiEl) musteriAdiEl.removeAttribute('readonly');
+  // Düzenle modu - autocomplete kapat
+  window.__girisDuzenleModu = true;
+  // musteri_adi ve name inputlarını
+  // düz input'a çevir (autocomplete yok)
+  var maEl = document.getElementById('musteri_adi');
+  if (maEl) {
+    maEl.oninput = null;
+    maEl.onfocus = null;
+    maEl.onkeydown = null;
+    maEl.onblur = null;
+  }
+  if (nameEl) {
+    var origOnchange = nameEl.onchange;
+    nameEl.oninput = null;
+    nameEl.onfocus = null;
+    nameEl.onkeydown = null;
+    nameEl.onblur = null;
+    nameEl.onchange = origOnchange; // hesaplaYuzde kalsın
+  }
+  // Dropdownları kapat
+  var dd1 = document.getElementById('musteri-adi-dropdown');
+  var dd2 = document.getElementById('sirket-unvani-dropdown');
+  if (dd1) dd1.style.display = 'none';
+  if (dd2) dd2.style.display = 'none';
+  // Vazgeç butonunu göster
+  var vazgecBtn = document.getElementById(
+    'musteri-form-btn-vazgec');
+  if (vazgecBtn) vazgecBtn.style.display = 'inline-block';
+  // Genel sekmeye geç (tab 0)
+  if (typeof switchTab === 'function') {
+    switchTab(0);
+  }
+}
+
+
+function girisMusteriDuzenleVazgec() {
+  var mid = (typeof selectedId !== 'undefined'
+    && selectedId) ? String(selectedId) : '';
+
+  // Event'leri geri yükle
+  var maEl = document.getElementById('musteri_adi');
+  var nameEl = document.getElementById('name');
+  if (maEl) {
+    maEl.oninput = function() {
+      girisMusteriAdiAramaInputFlag();
+      musteriAdiAutocomplete();
+    };
+    maEl.onfocus = musteriAdiAutocomplete;
+    maEl.onkeydown = girisMusteriAdiAramaKeydown;
+    maEl.onblur = girisMusteriAdiAramaBlur;
+  }
+  if (nameEl) {
+    nameEl.oninput = function() {
+      girisSirketUnvaniAramaInputFlag();
+      sirketUnvaniAutocomplete();
+    };
+    nameEl.onfocus = sirketUnvaniAutocomplete;
+    nameEl.onkeydown = girisSirketUnvaniAramaKeydown;
+    nameEl.onblur = girisSirketUnvaniAramaBlur;
+  }
+
+  window.__girisDuzenleModu = false;
+
+  // Vazgeç butonunu gizle
+  var vazgecBtn = document.getElementById(
+    'musteri-form-btn-vazgec');
+  if (vazgecBtn) vazgecBtn.style.display = 'none';
+
+  // Orijinal müşteri bilgilerini yeniden yükle
+  if (mid && typeof selectMusteri === 'function') {
+    selectMusteri(parseInt(mid, 10));
+  }
+}
+
 function girisMusteriCogalt() {
     var midEl = document.getElementById('musteri-id');
     var mid = midEl && midEl.value ? String(midEl.value).trim() : '';
