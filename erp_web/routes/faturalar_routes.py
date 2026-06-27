@@ -6619,171 +6619,186 @@ def _gibden_erp_upsert(gib_row):
         return {"ok": False, "mesaj": "GİB satırı bulunamadı."}
     fatura_no = str(gib_row.get("fatura_no") or "").strip()
     ettn = str(gib_row.get("ettn") or "").strip()
-    musteri_adi = str(gib_row.get("musteri_adi") or "").strip() or "—"
-    fatura_tarihi = str(gib_row.get("fatura_tarihi") or "").strip()[:10] or date.today().isoformat()
-    toplam = float(gib_row.get("tutar") or 0)
-    gib_asama = _gib_durum_portal_metni_upsert_asama(gib_row.get("gib_durum"))
-    # Portal liste durum alanı bazı hesaplarda güvenilir olmayabiliyor.
-    # ETTN varsa gerçek GİB HTML filigranından kesin durumu okuyup önceliklendir.
-    if ettn:
-        try:
-            from gib_earsiv import BestOfficeGIBManager, gib_fatura_html_watermark_etiket
+    try:
+        musteri_adi = str(gib_row.get("musteri_adi") or "").strip() or "—"
+        fatura_tarihi = str(gib_row.get("fatura_tarihi") or "").strip()[:10] or date.today().isoformat()
+        toplam = float(gib_row.get("tutar") or 0)
+        gib_asama = _gib_durum_portal_metni_upsert_asama(gib_row.get("gib_durum"))
+        # Portal liste durum alanı bazı hesaplarda güvenilir olmayabiliyor.
+        # ETTN varsa gerçek GİB HTML filigranından kesin durumu okuyup önceliklendir.
+        if ettn:
+            try:
+                from gib_earsiv import BestOfficeGIBManager, gib_fatura_html_watermark_etiket
 
-            g = BestOfficeGIBManager()
-            if g.is_available():
-                h = g.fatura_html_getir(ettn, days_back=370) or ""
-                wm = gib_fatura_html_watermark_etiket(h)
-                wm_map = {"İptal": "iptal", "İmzasız": "taslak", "İmzalı": "imzali"}
-                if wm in wm_map:
-                    gib_asama = wm_map[wm]
-        except Exception:
-            pass
-    if toplam <= 0 and ettn:
+                g = BestOfficeGIBManager()
+                if g.is_available():
+                    h = g.fatura_html_getir(ettn, days_back=370) or ""
+                    wm = gib_fatura_html_watermark_etiket(h)
+                    wm_map = {"İptal": "iptal", "İmzasız": "taslak", "İmzalı": "imzali"}
+                    if wm in wm_map:
+                        gib_asama = wm_map[wm]
+            except Exception:
+                pass
+        if toplam <= 0 and ettn:
+            try:
+                ref = fetch_one(
+                    """
+                    SELECT toplam
+                    FROM faturalar
+                    WHERE (BTRIM(COALESCE(ettn::text,'')) = BTRIM(%s)
+                           OR COALESCE(notlar,'') ILIKE %s)
+                      AND COALESCE(toplam, 0) > 0
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (ettn, f"%{ettn}%"),
+                )
+                if ref and ref.get("toplam") is not None:
+                    toplam = float(ref.get("toplam") or 0)
+            except Exception:
+                pass
+        tutar = round((toplam / 1.2), 2) if toplam > 0 else 0.0
+        kdv_tutar = round(max(0.0, toplam - tutar), 2) if toplam > 0 else 0.0
+
+        musteri_id = None
         try:
-            ref = fetch_one(
+            m = fetch_one(
                 """
-                SELECT toplam
-                FROM faturalar
-                WHERE (BTRIM(COALESCE(ettn::text,'')) = BTRIM(%s)
-                       OR COALESCE(notlar,'') ILIKE %s)
-                  AND COALESCE(toplam, 0) > 0
+                SELECT id
+                FROM customers
+                WHERE LOWER(TRIM(COALESCE(name, ''))) = LOWER(TRIM(%s))
+                   OR LOWER(TRIM(COALESCE(musteri_adi, ''))) = LOWER(TRIM(%s))
                 ORDER BY id DESC
                 LIMIT 1
                 """,
-                (ettn, f"%{ettn}%"),
+                (musteri_adi, musteri_adi),
             )
-            if ref and ref.get("toplam") is not None:
-                toplam = float(ref.get("toplam") or 0)
+            if m and m.get("id"):
+                musteri_id = int(m.get("id"))
         except Exception:
             pass
-    tutar = round((toplam / 1.2), 2) if toplam > 0 else 0.0
-    kdv_tutar = round(max(0.0, toplam - tutar), 2) if toplam > 0 else 0.0
 
-    musteri_id = None
-    try:
-        m = fetch_one(
-            """
-            SELECT id
-            FROM customers
-            WHERE LOWER(TRIM(COALESCE(name, ''))) = LOWER(TRIM(%s))
-               OR LOWER(TRIM(COALESCE(musteri_adi, ''))) = LOWER(TRIM(%s))
-            ORDER BY id DESC
-            LIMIT 1
-            """,
-            (musteri_adi, musteri_adi),
-        )
-        if m and m.get("id"):
-            musteri_id = int(m.get("id"))
-    except Exception:
-        pass
+        mevcut = None
+        if ettn:
+            mevcut = fetch_one(
+                "SELECT id, fatura_no FROM faturalar WHERE BTRIM(COALESCE(ettn::text,'')) = BTRIM(%s) ORDER BY id DESC LIMIT 1",
+                (ettn,),
+            )
+        if (not mevcut) and fatura_no and ettn:
+            # ettn ile bulunamadı ama
+            # fatura_no ile başka kayıt olabilir
+            # → o kaydı güncelle (GİB esas)
+            mevcut = fetch_one(
+                """SELECT id, fatura_no
+                   FROM faturalar
+                   WHERE fatura_no = %s
+                   ORDER BY id DESC LIMIT 1""",
+                (fatura_no,),
+            )
+        elif (not mevcut) and fatura_no and not ettn:
+            # ettn yoksa fatura_no ile ara
+            mevcut = fetch_one(
+                "SELECT id, fatura_no FROM faturalar WHERE fatura_no = %s ORDER BY id DESC LIMIT 1",
+                (fatura_no,),
+            )
 
-    mevcut = None
-    if ettn:
-        mevcut = fetch_one(
-            "SELECT id, fatura_no FROM faturalar WHERE BTRIM(COALESCE(ettn::text,'')) = BTRIM(%s) ORDER BY id DESC LIMIT 1",
-            (ettn,),
-        )
-    if (not mevcut) and fatura_no:
-        mevcut = fetch_one("SELECT id, fatura_no FROM faturalar WHERE fatura_no = %s ORDER BY id DESC LIMIT 1", (fatura_no,))
-
-    if mevcut and mevcut.get("id"):
-        fid = int(mevcut.get("id"))
-        # GİB tarafında iptal/imzasız ise mevcut tutarı/notları zorla değiştirme; sadece durum etiketini güncelle.
-        if gib_asama in ("iptal", "taslak"):
-            _fatura_gib_bilgilerini_yaz(fid, ettn or None, fatura_no or None, gib_asama=gib_asama)
+        if mevcut and mevcut.get("id"):
+            fid = int(mevcut.get("id"))
+            if gib_asama in ("iptal", "taslak"):
+                # Tutar varsa güncelle
+                if toplam > 0:
+                    execute(
+                        """UPDATE faturalar
+                           SET toplam = %s,
+                               tutar = %s,
+                               kdv_tutar = %s
+                           WHERE id = %s""",
+                        (toplam, tutar, kdv_tutar, fid),
+                    )
+                _fatura_gib_bilgilerini_yaz(
+                    fid, ettn or None,
+                    fatura_no or None,
+                    gib_asama=gib_asama,
+                )
+                return {"ok": True, "fatura_id": fid, "islem": "guncellendi"}
+            row_g = fetch_one(
+                "SELECT notlar, ettn, fatura_no FROM faturalar WHERE id = %s",
+                (fid,),
+            ) or {}
+            yeni_notlar, _, _ = _fatura_gib_notlar_uret(
+                row_g, ettn=ettn, gib_fatura_no=fatura_no, gib_asama=gib_asama
+            )
+            ettn_out = (ettn or "").strip() or None
+            fn_upd = (fatura_no or "").strip()
+            execute(
+                """
+                UPDATE faturalar
+                   SET ettn = %s,
+                       fatura_no = CASE WHEN %s != '' THEN %s ELSE fatura_no END,
+                       notlar = %s
+                 WHERE id = %s
+                """,
+                (ettn_out, fn_upd, fn_upd, yeni_notlar, fid),
+            )
             return {"ok": True, "fatura_id": fid, "islem": "guncellendi"}
+
+        # ERP'de eşleşen kayıt yok: yalnızca GİB'de imzalı satırlar yeni fatura olarak ERP'ye eklenir.
+        if gib_asama != "imzali":
+            return {
+                "ok": False,
+                "atlandi": True,
+                "sebep": gib_asama or "imzasiz",
+                "mesaj": (
+                    "GİB tarafında imzalı olmayan satır (durum: " + (gib_asama or "taslak/imzasız")
+                    + "). ERP'ye yeni kayıt oluşturulmadı."
+                ),
+            }
+
         execute(
             """
-            UPDATE faturalar
-               SET fatura_no = COALESCE(NULLIF(%s,''), fatura_no),
-                   musteri_id = COALESCE(%s, musteri_id),
-                   musteri_adi = COALESCE(NULLIF(%s,''), musteri_adi),
-                   tutar = CASE WHEN %s > 0 THEN %s ELSE tutar END,
-                   kdv_tutar = CASE WHEN %s > 0 THEN %s ELSE kdv_tutar END,
-                   toplam = CASE WHEN %s > 0 THEN %s ELSE toplam END,
-                   fatura_tarihi = CASE WHEN NULLIF(%s, '') IS NOT NULL THEN %s ELSE fatura_tarihi END
-             WHERE id = %s
+            INSERT INTO faturalar (
+                fatura_no, musteri_id, musteri_adi, tutar, kdv_tutar, toplam, durum, fatura_tarihi, notlar, ettn, satirlar_json
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
-                fatura_no,
+                fatura_no or _next_fatura_no(),
                 musteri_id,
                 musteri_adi,
-                toplam,
                 tutar,
-                toplam,
                 kdv_tutar,
                 toplam,
-                toplam,
-                (fatura_tarihi or ""),
-                (fatura_tarihi or ""),
-                fid,
+                "odenmedi",
+                fatura_tarihi,
+                None,
+                ettn or None,
+                json.dumps([{
+                    "ad": "Hizmet",
+                    "miktar": 1,
+                    "birim": "Ay",
+                    "birim_fiyat": tutar,
+                    "iskonto_tipi": "iskonto",
+                    "iskonto_orani": 0,
+                    "iskonto_tutar": None,
+                    "kdv_orani": 20,
+                }]) if toplam > 0 else json.dumps([]),
             ),
         )
-        if toplam > 0:
-            satir = [{
-                "ad": "Hizmet",
-                "miktar": 1,
-                "birim": "Ay",
-                "birim_fiyat": tutar,
-                "iskonto_tipi": "iskonto",
-                "iskonto_orani": 0,
-                "iskonto_tutar": None,
-                "kdv_orani": 20,
-            }]
-            execute("UPDATE faturalar SET satirlar_json = %s WHERE id = %s", (json.dumps(satir), fid))
-        _fatura_gib_bilgilerini_yaz(fid, ettn or None, fatura_no or None, gib_asama=gib_asama)
-        return {"ok": True, "fatura_id": fid, "islem": "guncellendi"}
-
-    # ERP'de eşleşen kayıt yok: yalnızca GİB'de imzalı satırlar yeni fatura olarak ERP'ye eklenir.
-    if gib_asama != "imzali":
-        return {
-            "ok": False,
-            "atlandi": True,
-            "sebep": gib_asama or "imzasiz",
-            "mesaj": (
-                "GİB tarafında imzalı olmayan satır (durum: " + (gib_asama or "taslak/imzasız")
-                + "). ERP'ye yeni kayıt oluşturulmadı."
-            ),
-        }
-
-    execute(
-        """
-        INSERT INTO faturalar (
-            fatura_no, musteri_id, musteri_adi, tutar, kdv_tutar, toplam, durum, fatura_tarihi, notlar, ettn, satirlar_json
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """,
-        (
-            fatura_no or _next_fatura_no(),
-            musteri_id,
-            musteri_adi,
-            tutar,
-            kdv_tutar,
-            toplam,
-            "odenmedi",
-            fatura_tarihi,
-            None,
-            ettn or None,
-            json.dumps([{
-                "ad": "Hizmet",
-                "miktar": 1,
-                "birim": "Ay",
-                "birim_fiyat": tutar,
-                "iskonto_tipi": "iskonto",
-                "iskonto_orani": 0,
-                "iskonto_tutar": None,
-                "kdv_orani": 20,
-            }]) if toplam > 0 else json.dumps([]),
-        ),
-    )
-    row = fetch_one("SELECT id FROM faturalar WHERE BTRIM(COALESCE(ettn::text,'')) = BTRIM(%s) ORDER BY id DESC LIMIT 1", (ettn,)) if ettn else None
-    if (not row) and fatura_no:
-        row = fetch_one("SELECT id FROM faturalar WHERE fatura_no = %s ORDER BY id DESC LIMIT 1", (fatura_no,))
-    fid = int((row or {}).get("id") or 0)
-    if fid > 0:
-        _fatura_gib_bilgilerini_yaz(fid, ettn or None, fatura_no or None, gib_asama=gib_asama)
-    return {"ok": True, "fatura_id": (fid or None), "islem": "eklendi"}
+        row = fetch_one("SELECT id FROM faturalar WHERE BTRIM(COALESCE(ettn::text,'')) = BTRIM(%s) ORDER BY id DESC LIMIT 1", (ettn,)) if ettn else None
+        if (not row) and fatura_no:
+            row = fetch_one("SELECT id FROM faturalar WHERE fatura_no = %s ORDER BY id DESC LIMIT 1", (fatura_no,))
+        fid = int((row or {}).get("id") or 0)
+        if fid > 0:
+            _fatura_gib_bilgilerini_yaz(fid, ettn or None, fatura_no or None, gib_asama=gib_asama)
+        return {"ok": True, "fatura_id": (fid or None), "islem": "eklendi"}
 
 
+    except Exception as ex:
+        logging.getLogger(__name__).error(
+            "gibden_erp_upsert hata: %s - "
+            "fatura_no=%s ettn=%s",
+            ex, fatura_no, ettn
+        )
+        raise
 def _fatura_ekran_yerel_inv_satiri_gizlenmeli_mi(row, tum_satirlar):
     """Aynı müşteri+tarih+tutarda resmi GİB izi olan satır varken çıplak INV satırını gizle."""
     if not row:
@@ -8455,11 +8470,10 @@ def api_gib_kesilmis_fatura_raporu():
             LEFT JOIN customers c ON CAST(f.musteri_id AS INTEGER) = c.id
             WHERE (f.fatura_tarihi::date) >= %s
               AND (f.fatura_tarihi::date) <= %s
-              AND f.ettn IS NOT NULL
-              AND BTRIM(COALESCE(f.ettn::text, '')) <> ''
               AND {_nt}
               AND (
-                    {_im}
+                    (f.ettn IS NOT NULL
+                     AND BTRIM(COALESCE(f.ettn::text, '')) <> '')
                     OR UPPER(BTRIM(COALESCE(f.fatura_no::text, ''))) LIKE 'GIB%%'
                   )
             ORDER BY f.fatura_tarihi DESC NULLS LAST, f.id DESC
@@ -8950,21 +8964,11 @@ def _gib_kayit_bekle(gib, uuid, deneme=10, bekleme_s=1.2):
     return {}
 
 
-def _fatura_gib_bilgilerini_yaz(fatura_id, ettn=None, gib_fatura_no=None, gib_asama=None):
-    """GİB ETTN + GİB Fatura No bilgisini faturaya ve notlara tekil şekilde yazar/günceller.
-
-    gib_asama: 'taslak' → «GİB durum: taslak»; 'imzali' → «GİB İMZALANDI»; 'iptal' → «GİB durum: iptal».
-    """
-    try:
-        fid = int(fatura_id)
-    except Exception:
-        return
-    row = fetch_one("SELECT notlar, ettn, fatura_no FROM faturalar WHERE id = %s", (fid,)) or {}
-    notlar = str(row.get("notlar") or "")
-    ettn_val = (ettn or "").strip() or str(row.get("ettn") or "").strip()
-    gib_no_val = (gib_fatura_no or "").strip() or str(row.get("fatura_no") or "").strip()
-
-    # Eski ETTN etiketlerini temizleyip tek bir güncel satır bırak.
+def _fatura_gib_notlar_uret(row, ettn=None, gib_fatura_no=None, gib_asama=None):
+    """GİB etiketli notlar metni (+ ettn/fatura_no değerleri); DB yazmaz."""
+    notlar = str((row or {}).get("notlar") or "")
+    ettn_val = (ettn or "").strip() or str((row or {}).get("ettn") or "").strip()
+    gib_no_val = (gib_fatura_no or "").strip() or str((row or {}).get("fatura_no") or "").strip()
     cleaned = re.sub(r"\s*\|\s*G[İI]B\s*ETTN:\s*[^|]*", "", notlar, flags=re.IGNORECASE).strip()
     cleaned = re.sub(r"\s*\|\s*G[İI]B\s*FATURA\s*NO:\s*[^|]*", "", cleaned, flags=re.IGNORECASE).strip()
     if gib_asama in ("taslak", "imzali", "iptal"):
@@ -8989,10 +8993,26 @@ def _fatura_gib_bilgilerini_yaz(fatura_id, ettn=None, gib_fatura_no=None, gib_as
     yeni = cleaned
     if tags:
         yeni = f"{cleaned} | {' | '.join(tags)}".strip(" |") if cleaned else " | ".join(tags)
+    return yeni, ettn_val or None, gib_no_val
+
+
+def _fatura_gib_bilgilerini_yaz(fatura_id, ettn=None, gib_fatura_no=None, gib_asama=None):
+    """GİB ETTN + GİB Fatura No bilgisini faturaya ve notlara tekil şekilde yazar/günceller.
+
+    gib_asama: 'taslak' → «GİB durum: taslak»; 'imzali' → «GİB İMZALANDI»; 'iptal' → «GİB durum: iptal».
+    """
+    try:
+        fid = int(fatura_id)
+    except Exception:
+        return
+    row = fetch_one("SELECT notlar, ettn, fatura_no FROM faturalar WHERE id = %s", (fid,)) or {}
+    yeni, ettn_val, gib_no_val = _fatura_gib_notlar_uret(
+        row, ettn=ettn, gib_fatura_no=gib_fatura_no, gib_asama=gib_asama
+    )
 
     execute(
         "UPDATE faturalar SET notlar = %s, ettn = %s, fatura_no = %s WHERE id = %s",
-        (yeni, ettn_val or None, gib_no_val or row.get("fatura_no"), fid),
+        (yeni, ettn_val, gib_no_val or row.get("fatura_no"), fid),
     )
 
 

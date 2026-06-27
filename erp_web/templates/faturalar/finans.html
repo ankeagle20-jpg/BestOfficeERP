@@ -1046,6 +1046,14 @@
                 </div>
                 <button type="button" class="auto-btn run" onclick="finansGibRaporYukle(false); return false;"><i class="fa fa-search"></i> Listele (yerel)</button>
                 <button type="button" class="auto-btn" style="background:#546e7a;color:#fff;" onclick="finansGibRaporYukle(true); return false;" title="GİB portalına bağlanır; yavaş olabilir"><i class="fa fa-sync"></i> GİB portal ile karşılaştır</button>
+                <label style="display:flex;
+  align-items:center;gap:6px;
+  cursor:pointer;font-size:13px;">
+  <input type="checkbox"
+    id="gib_rapor_sadece_imzali"
+    checked>
+  İmzalı Olanlar
+</label>
             </div>
             <p class="finans-gib-rapor-aciklama"><strong>Listele (yerel):</strong> Veri ERP’deki <code>faturalar</code> kayıtlarından gelir; GİB’e istek atılmaz. Durum, ERP notları + GIB no/ETTN kurallarıyla hesaplanır. Portal ile birebir eşitlemek için <strong>GİB portal ile karşılaştır</strong> butonunu kullanın (yalnız o anda GİB’e bağlanır).</p>
             <div id="finans_gib_rapor_durum" class="finans-gib-rapor-durum" role="status" aria-live="polite"></div>
@@ -5128,12 +5136,31 @@ function finansGibGetSortedItems(items) {
     return arr;
 }
 
+document.getElementById(
+    'gib_rapor_sadece_imzali')
+    .addEventListener('change',
+        function() {
+            finansGibRaporRenderFromCache();
+        });
+
 function finansGibRaporRenderFromCache() {
     const list = document.getElementById('finans_gib_rapor_list');
     if (!list || !finansGibRaporDataCache) return;
     const j = finansGibRaporDataCache;
     const itemsRaw = Array.isArray(j.items) ? j.items : [];
-    const items = finansGibGetSortedItems(itemsRaw);
+    var sadeceImzali = document
+        .getElementById(
+            'gib_rapor_sadece_imzali')?.checked;
+    var itemsFiltered = sadeceImzali
+        ? itemsRaw.filter(function(it) {
+            var dur = (it.gib_durum || '')
+                .toLowerCase();
+            return dur !== 'taslak' &&
+                   dur !== 'i̇ptal' &&
+                   dur !== 'iptal';
+        })
+        : itemsRaw;
+    const items = finansGibGetSortedItems(itemsFiltered);
     const toplamImzali = j.toplam != null ? Number(j.toplam) : itemsRaw.reduce(function (a, x) {
         if (x && x.gib_durum === 'İmzalı') return a + (parseFloat(x.tutar) || 0);
         return a;
