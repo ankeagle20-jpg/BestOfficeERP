@@ -5487,6 +5487,8 @@ def tahsilatlar():
         d1 = today
         yil = d0.year
 
+    senaryo = str(request.args.get("senaryo", "1") or "1").strip()
+
     raw_hizmet = (request.args.get("hizmet_turleri") or "").strip()
     secili_hizmet_turleri = []
     if raw_hizmet:
@@ -5514,6 +5516,15 @@ def tahsilatlar():
             LIMIT 1
         ) mk ON TRUE
         LEFT JOIN faturalar f ON t.fatura_id = f.id
+    """
+    if senaryo == "0":
+        sql += """
+        WHERE t.created_at::date >= %s::date
+          AND t.created_at::date <= %s::date
+        """
+        params = [d0, d1]
+    else:
+        sql += """
         WHERE (
             (
                 COALESCE(t.aciklama, '') ~ E'\\|AYLIK_TAH\\|[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}\\|'
@@ -5532,8 +5543,8 @@ def tahsilatlar():
                 AND COALESCE(f.fatura_tarihi::date, t.tahsilat_tarihi::date) <= %s::date
             )
         )
-    """
-    params = [d0, d1, d0, d1]
+        """
+        params = [d0, d1, d0, d1]
     if secili_hizmet_turleri:
         placeholders = ", ".join(["%s"] * len(secili_hizmet_turleri))
         sql += f" AND LOWER(TRIM(COALESCE(NULLIF(TRIM(mk.hizmet_turu), ''), NULLIF(TRIM(c.hizmet_turu), ''), ''))) IN ({placeholders})"
@@ -5605,35 +5616,36 @@ def tahsilatlar():
             visible_ym_by_mid = {}
 
     filtered = []
-    for _t in tahsilatlar_list:
-        ac = str(_t.get("aciklama") or "")
-        marker_isos = re.findall(r"\|AYLIK_TAH\|([0-9]{4}-[0-9]{2}-[0-9]{2})\|", ac)
-        try:
-            _mid = int(_t.get("customer_id") or _t.get("musteri_id") or 0)
-        except (TypeError, ValueError):
-            _mid = 0
-        if marker_isos:
-            in_range = False
-            for iso in marker_isos:
-                try:
-                    dd = date.fromisoformat(iso[:10])
-                except Exception:
+    if senaryo != "0":
+        for _t in tahsilatlar_list:
+            ac = str(_t.get("aciklama") or "")
+            marker_isos = re.findall(r"\|AYLIK_TAH\|([0-9]{4}-[0-9]{2}-[0-9]{2})\|", ac)
+            try:
+                _mid = int(_t.get("customer_id") or _t.get("musteri_id") or 0)
+            except (TypeError, ValueError):
+                _mid = 0
+            if marker_isos:
+                in_range = False
+                for iso in marker_isos:
+                    try:
+                        dd = date.fromisoformat(iso[:10])
+                    except Exception:
+                        continue
+                    if d0 <= dd <= d1:
+                        in_range = True
+                        break
+                if not in_range:
                     continue
-                if d0 <= dd <= d1:
-                    in_range = True
-                    break
-            if not in_range:
-                continue
-            vis = visible_ym_by_mid.get(_mid)
-            if isinstance(vis, set) and vis:
-                if not any(iso[:7] in vis for iso in marker_isos):
+                vis = visible_ym_by_mid.get(_mid)
+                if isinstance(vis, set) and vis:
+                    if not any(iso[:7] in vis for iso in marker_isos):
+                        continue
+            else:
+                ref_d = _date_from_val(_t.get("fatura_tarihi")) or _date_from_val(_t.get("tahsilat_tarihi"))
+                if not ref_d or not (d0 <= ref_d <= d1):
                     continue
-        else:
-            ref_d = _date_from_val(_t.get("fatura_tarihi")) or _date_from_val(_t.get("tahsilat_tarihi"))
-            if not ref_d or not (d0 <= ref_d <= d1):
-                continue
-        filtered.append(_t)
-    tahsilatlar_list = filtered
+            filtered.append(_t)
+        tahsilatlar_list = filtered
 
     for _t in tahsilatlar_list:
         _t["rapor_aciklama_ay"] = _tahsilat_rapor_aciklama_ay_metni(
@@ -5718,6 +5730,7 @@ def tahsilatlar():
         bitis_iso=d1.isoformat(),
         hizmet_turu_options=hizmet_turu_options,
         secili_hizmet_turleri=secili_hizmet_turleri,
+        senaryo=senaryo,
         tahsilatlar=tahsilatlar_list,
         toplam=toplam,
     )

@@ -799,6 +799,14 @@
         <button type="button" onclick="filtrele()">
             <i class="fa fa-filter"></i> Filtrele
         </button>
+        <label style="display:flex;
+          align-items:center;gap:6px;
+          cursor:pointer;font-size:13px;">
+          <input type="checkbox"
+            id="tahsilat_senaryo"
+            {% if senaryo is defined and senaryo == '0' %}{% else %}checked{% endif %}>
+          Senaryo
+        </label>
     </div>
     
     <div class="stats">
@@ -1230,6 +1238,9 @@
         // Hizmet türü filtresi istemci tarafında uygulanıyor; URL'ye eklemeyelim.
         if (bas) url += '&baslangic=' + encodeURIComponent(bas);
         if (bit) url += '&bitis=' + encodeURIComponent(bit);
+        url += '&senaryo=' +
+          (document.getElementById(
+            'tahsilat_senaryo').checked ? '1' : '0');
         url += _finansIframeEmbedSuffix();
         return url;
     }
@@ -1433,6 +1444,14 @@
 
     let musteriAramaZamanlayici;
     document.addEventListener('DOMContentLoaded', function() {
+        // Sayfa yüklenince
+        var urlParams = new URLSearchParams(
+          window.location.search);
+        var senaryoParam = urlParams.get('senaryo');
+        if (senaryoParam === '0') {
+          document.getElementById(
+            'tahsilat_senaryo').checked = false;
+        }
         tahsilatHizmetSecimiYukle();
         tahsilatTutarHucresiFormatla();
         tahsilatHizmetTurleriYukle().finally(function () { tahsilatHizmetBtnLabelGuncelle(); });
