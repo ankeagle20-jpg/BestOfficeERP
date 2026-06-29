@@ -378,16 +378,29 @@ class CariService:
         borc_by_mid: dict[int, float] = {}
         alacak_by_mid: dict[int, float] = {}
         if iids:
+            from datetime import date as _d
+
+            bugun = _d.today()
+            bugun_key = f"{bugun.year}-{bugun.month}"
             for r in (
                 fetch_all(
-                    f"""
-                    SELECT musteri_id, COALESCE(SUM(COALESCE(toplam, tutar, 0)), 0) AS t
-                    FROM faturalar
-                    WHERE musteri_id = ANY(%s)
-                      AND {sql_expr_fatura_not_gib_taslak("notlar")}
-                    GROUP BY musteri_id
+                    """
+                    SELECT c.musteri_id,
+                      COALESCE(SUM(
+                        CASE
+                          WHEN (elem->>'tahsil_edildi')::boolean = false
+                           AND to_date(elem->>'ay_key', 'YYYY-MM')
+                               <= to_date(%s, 'YYYY-MM')
+                          THEN (elem->>'tutar_kdv_dahil')::float
+                          ELSE 0
+                        END
+                      ), 0) AS t
+                    FROM musteri_aylik_grid_cache c,
+                    jsonb_array_elements(c.payload::jsonb->'aylar') AS elem
+                    WHERE c.musteri_id = ANY(%s)
+                    GROUP BY c.musteri_id
                     """,
-                    (iids,),
+                    (bugun_key, iids),
                 )
                 or []
             ):

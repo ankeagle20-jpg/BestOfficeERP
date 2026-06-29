@@ -1195,6 +1195,14 @@ def _aylik_grid_contract_core(kyc, tufe_map):
 
     bit = _aylik_grid_coerce_date(bit_raw) if bit_raw is not None and str(bit_raw).strip() != "" else None
     bit = _aylik_grid_effective_bitis(kyc, bit)
+    # Aktif müşteride bitiş geçmişte kaldıysa
+    # otomatik 1 yıl uzat (sözleşme yenilemesi)
+    durum_str = str(kyc.get("durum") or "").strip().lower()
+    if bit is not None and durum_str == "aktif":
+        from datetime import date as _date
+        bugun = _date.today()
+        while bit <= bugun:
+            bit = _add_months(bit, 12)
     bit_kullanici = bit is not None
 
     bugun = date.today()
@@ -2501,7 +2509,7 @@ def _aylik_grid_effective_bitis(kyc: dict, bit: date | None) -> date | None:
         return bit
     # bitiş sınırı dışlayıcı kullanılıyor (donemBas >= bit -> gösterme),
     # bu yüzden kapanış ayı dahil N ay için +ek_ay yeterlidir.
-    sinir = _add_months(date(kap.year, kap.month, 1), ek_ay)
+    sinir = _add_months(date(kap.year, kap.month, 1), ek_ay + 1)
     if bit is None:
         return sinir
     return min(bit, sinir)
