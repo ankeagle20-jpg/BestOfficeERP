@@ -1000,6 +1000,7 @@ def _serialize_group_children_for_api(children: list | None) -> list[dict]:
                     "net_balance": float(ch.get("net_balance") or 0),
                     "geciken_ay": int(ch.get("geciken_ay") or 0),
                     "sozlesme_gun": int(ch.get("sozlesme_gun") or 0),
+                    "hazir_ofis_oda_no": ch.get("hazir_ofis_oda_no"),
                 }
             )
         except (TypeError, ValueError):

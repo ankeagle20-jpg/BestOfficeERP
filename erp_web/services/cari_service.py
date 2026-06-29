@@ -346,7 +346,8 @@ class CariService:
         rows = fetch_all(
             f"""
             SELECT c.id, COALESCE(c.musteri_no::text, '') AS musteri_no,
-                   COALESCE(c.name, '') AS name, COALESCE(c.musteri_adi, '') AS musteri_adi
+                   COALESCE(c.name, '') AS name, COALESCE(c.musteri_adi, '') AS musteri_adi,
+                   c.hazir_ofis_oda_no
             FROM customers c
             WHERE c.parent_id = %s
             {aktif_sql}
@@ -442,6 +443,7 @@ class CariService:
                     "net_balance": s.get("net_balance", 0),
                     "geciken_ay": gec_ex,
                     "sozlesme_gun": gun_ex,
+                    "hazir_ofis_oda_no": r.get("hazir_ofis_oda_no"),
                 }
             )
         return out

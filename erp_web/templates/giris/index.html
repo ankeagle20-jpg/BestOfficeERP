@@ -7913,6 +7913,31 @@ function girisGrupOzetGroupChildrenUrl(gid) {
     return '/cari-kart/api/group-children/' + encodeURIComponent(gid) + '?alt_cari_kapsam=' + encodeURIComponent(k);
 }
 
+
+function girisGrupDetaySirala(th, alan) {
+    var tablo = th.closest('table');
+    if (!tablo) return;
+    var tbody = tablo.querySelector('tbody');
+    if (!tbody) return;
+    var satirlar = Array.from(tbody.querySelectorAll('tr'));
+    var asc = th.dataset.sir !== 'asc';
+    th.dataset.sir = asc ? 'asc' : 'desc';
+    tablo.querySelectorAll('thead th').forEach(function (t) {
+        t.textContent = t.textContent.replace(' ▲', '').replace(' ▼', '');
+    });
+    th.textContent += asc ? ' ▲' : ' ▼';
+    satirlar.sort(function (a, b) {
+        var colIdx = Array.from(tablo.querySelectorAll('thead th')).findIndex(function (t) { return t === th; });
+        var av = a.dataset[alan] || (a.cells[colIdx] ? a.cells[colIdx].textContent : '') || '';
+        var bv = b.dataset[alan] || (b.cells[colIdx] ? b.cells[colIdx].textContent : '') || '';
+        var an = parseFloat(String(av).replace(/[^\d.-]/g, ''));
+        var bn = parseFloat(String(bv).replace(/[^\d.-]/g, ''));
+        if (!isNaN(an) && !isNaN(bn)) return asc ? an - bn : bn - an;
+        return asc ? String(av).localeCompare(String(bv), 'tr') : String(bv).localeCompare(String(av), 'tr');
+    });
+    satirlar.forEach(function (s) { tbody.appendChild(s); });
+}
+
 function girisGrupAnaSatirToggle(ev, tr) {
     if (ev) ev.preventDefault();
     var gid = tr.getAttribute('data-gid');
@@ -7945,8 +7970,15 @@ function girisGrupAnaSatirToggle(ev, tr) {
                 girisGrupHtmlEsc(j.group_name || ('Grup #' + gid)),
                 '</div>',
                 '<table class="giris-grup-detay-tablo fatura-rapor-tablo"><thead><tr>',
-                '<th class="num">Cari no</th><th>Firma</th>',
-                '<th class="num">Aylık borç</th><th class="num">Toplam borç</th><th class="num">Gün</th><th class="num">Geciken ay</th><th class="num">Alacak</th><th class="num">Net</th>',
+                '<th class="num" style="cursor:pointer" onclick="girisGrupDetaySirala(this,\'id\')">Cari no</th>' +
+                '<th style="cursor:pointer" onclick="girisGrupDetaySirala(this,\'name\')">Firma</th>',
+                '<th class="num" style="cursor:pointer" onclick="girisGrupDetaySirala(this,\'borc_month\')">Aylık borç</th>' +
+                '<th class="num" style="cursor:pointer" onclick="girisGrupDetaySirala(this,\'borc_total\')">Toplam borç</th>' +
+                '<th class="num" style="cursor:pointer" onclick="girisGrupDetaySirala(this,\'hazir_ofis_oda_no\')">Oda No</th>' +
+                '<th class="num" style="cursor:pointer" onclick="girisGrupDetaySirala(this,\'sozlesme_gun\')">Gün</th>' +
+                '<th class="num" style="cursor:pointer" onclick="girisGrupDetaySirala(this,\'geciken_ay\')">Geciken ay</th>' +
+                '<th class="num" style="cursor:pointer" onclick="girisGrupDetaySirala(this,\'alacak_total\')">Alacak</th>' +
+                '<th class="num" style="cursor:pointer" onclick="girisGrupDetaySirala(this,\'net_balance\')">Net</th>',
                 '<th class="num">İşlem</th></tr></thead><tbody>'
             ];
             ch.forEach(function (c) {
@@ -7958,6 +7990,7 @@ function girisGrupAnaSatirToggle(ev, tr) {
                     '<td>' + girisGrupHtmlEsc(firma || ('#' + mid)) + '</td>' +
                     '<td class="num">' + girisGrupOzetParaYaz(c.borc_month != null ? c.borc_month : 0) + '</td>' +
                     '<td class="num">' + girisGrupOzetParaYaz(c.borc_total) + '</td>' +
+                    '<td class="num">' + girisGrupHtmlEsc(c.hazir_ofis_oda_no || '—') + '</td>' +
                     '<td class="num">' + girisGrupSozlesmeGunStr(c.sozlesme_gun) + '</td>' +
                     '<td class="num">' + girisGrupGecikenAyStr(c.geciken_ay) + '</td>' +
                     '<td class="num">' + girisGrupOzetParaYaz(c.alacak_total) + '</td>' +
@@ -18670,21 +18703,33 @@ function girisAylikSatirYilKayitYukle() {
     try {
         var raw = localStorage.getItem(girisAylikSatirYilKayitKey());
         if (raw) {
-            var obj = JSON.parse(raw);
-            if (obj && typeof obj === 'object') {
-                Object.keys(obj).forEach(function (k) {
-                    var v = obj[k];
-                    if (!v || typeof v !== 'object') return;
-                    var cur = window.__aylikSatirYilDetay[k] || {};
-                    cur.aylik = parseFloat(v.aylik) || 0;
-                    cur.nakit = parseFloat(v.nakit) || 0;
-                    cur.banka = parseFloat(v.banka) || 0;
-                    if (v.reel != null && v.reel !== '') cur.reel = parseFloat(v.reel) || 0;
-                    cur.__reel_aktif = !!v.reel_aktif;
-                    cur.__manual_saved = true;
-                    cur.__manual_aylik = true;
-                    window.__aylikSatirYilDetay[k] = cur;
-                });
+            var parsed = JSON.parse(raw);
+            // 24 saat TTL kontrolü
+            var TTL_MS = 24 * 60 * 60 * 1000;
+            if (parsed && parsed._ts &&
+                (Date.now() - parsed._ts) > TTL_MS) {
+                localStorage.removeItem(
+                    girisAylikSatirYilKayitKey());
+                raw = null;
+            }
+            var obj = parsed._ts ?
+                (parsed.data || {}) : parsed;
+            if (raw) {
+                if (obj && typeof obj === 'object') {
+                    Object.keys(obj).forEach(function (k) {
+                        var v = obj[k];
+                        if (!v || typeof v !== 'object') return;
+                        var cur = window.__aylikSatirYilDetay[k] || {};
+                        cur.aylik = parseFloat(v.aylik) || 0;
+                        cur.nakit = parseFloat(v.nakit) || 0;
+                        cur.banka = parseFloat(v.banka) || 0;
+                        if (v.reel != null && v.reel !== '') cur.reel = parseFloat(v.reel) || 0;
+                        cur.__reel_aktif = !!v.reel_aktif;
+                        cur.__manual_saved = true;
+                        cur.__manual_aylik = true;
+                        window.__aylikSatirYilDetay[k] = cur;
+                    });
+                }
             }
         }
     } catch (_eYukleKayit) {}
@@ -18809,7 +18854,15 @@ function girisAylikSatirYilKayitYaz() {
             reel_aktif: !!v.reel_aktif
         };
     });
-    try { localStorage.setItem(girisAylikSatirYilKayitKey(), JSON.stringify(out)); } catch (_eYazKayit) {}
+    try {
+        localStorage.setItem(
+            girisAylikSatirYilKayitKey(),
+            JSON.stringify({
+                _ts: Date.now(),
+                data: out
+            })
+        );
+    } catch (_eYazKayit) {}
 }
 function girisAylikSatirYilSnapshotAl(row) {
     if (!row) row = {};

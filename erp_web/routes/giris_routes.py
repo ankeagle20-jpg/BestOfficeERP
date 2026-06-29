@@ -6352,6 +6352,7 @@ def _musteri_aylik_grid_customer_kyc_select_sql():
                mk.kira_nakit_tutar,
                mk.kira_banka_tutar,
                mk.kdv_oran,
+               c.hazir_ofis_oda_no,
                CASE
                    WHEN mk.aylik_kira IS NOT NULL AND mk.aylik_kira > 0 THEN mk.aylik_kira
                    ELSE COALESCE(c.guncel_kira_bedeli, c.ilk_kira_bedeli, mk.aylik_kira)
