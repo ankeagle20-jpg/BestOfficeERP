@@ -6623,16 +6623,17 @@ def _gibden_erp_upsert(gib_row):
     ettn = str(gib_row.get("ettn") or "").strip()
     try:
         musteri_adi = str(gib_row.get("musteri_adi") or "").strip() or "—"
-        logging.getLogger(__name__).warning(
-            "upsert: fatura_no=%s ettn=%s "
-            "musteri_vkn=%s musteri_adi=%s",
-            fatura_no, ettn[:8] if ettn else '',
-            gib_row.get('musteri_vkn'),
-            musteri_adi[:20]
-        )
         fatura_tarihi = str(gib_row.get("fatura_tarihi") or "").strip()[:10] or date.today().isoformat()
         toplam = float(gib_row.get("tutar") or 0)
         gib_asama = _gib_durum_portal_metni_upsert_asama(gib_row.get("gib_durum"))
+        logging.getLogger(__name__).warning(
+            "upsert: fatura_no=%s ettn=%s "
+            "musteri_vkn=%s gib_asama=%s toplam=%s",
+            fatura_no, ettn[:8] if ettn else '',
+            gib_row.get('musteri_vkn'),
+            gib_asama,
+            toplam
+        )
         # Portal liste durum alanı bazı hesaplarda güvenilir olmayabiliyor.
         # ETTN varsa gerçek GİB HTML filigranından kesin durumu okuyup önceliklendir.
         if ettn:
@@ -6656,7 +6657,7 @@ def _gibden_erp_upsert(gib_row):
                     FROM faturalar
                     WHERE (BTRIM(COALESCE(ettn::text,'')) = BTRIM(%s)
                            OR COALESCE(notlar,'') ILIKE %s)
-                      AND COALESCE(toplam, 0) > 0
+                      AND COALESCE(toplam, 0) > 1
                     ORDER BY id DESC
                     LIMIT 1
                     """,
@@ -6723,43 +6724,14 @@ def _gibden_erp_upsert(gib_row):
 
         if mevcut and mevcut.get("id"):
             fid = int(mevcut.get("id"))
-            if gib_asama in ("iptal", "taslak"):
-                # Tutar varsa güncelle
-                if toplam > 0:
-                    execute(
-                        """UPDATE faturalar
-                           SET toplam = %s,
-                               tutar = %s,
-                               kdv_tutar = %s
-                           WHERE id = %s""",
-                        (toplam, tutar, kdv_tutar, fid),
-                    )
-                _fatura_gib_bilgilerini_yaz(
-                    fid, ettn or None,
-                    fatura_no or None,
-                    gib_asama=gib_asama,
-                )
-                return {"ok": True, "fatura_id": fid, "islem": "guncellendi"}
-            row_g = fetch_one(
-                "SELECT notlar, ettn, fatura_no FROM faturalar WHERE id = %s",
-                (fid,),
-            ) or {}
-            yeni_notlar, _, _ = _fatura_gib_notlar_uret(
-                row_g, ettn=ettn, gib_fatura_no=fatura_no, gib_asama=gib_asama
-            )
-            ettn_out = (ettn or "").strip() or None
-            fn_upd = (fatura_no or "").strip()
-            execute(
-                """
-                UPDATE faturalar
-                   SET ettn = %s,
-                       fatura_no = CASE WHEN %s != '' THEN %s ELSE fatura_no END,
-                       notlar = %s
-                 WHERE id = %s
-                """,
-                (ettn_out, fn_upd, fn_upd, yeni_notlar, fid),
-            )
-            return {"ok": True, "fatura_id": fid, "islem": "guncellendi"}
+            # Sadece ettn ve notları güncelle
+            # tutar, musteri vb. dokunma
+            _fatura_gib_bilgilerini_yaz(
+                fid, ettn or None,
+                fatura_no or None,
+                gib_asama=gib_asama)
+            return {"ok": True, "fatura_id": fid,
+                    "islem": "guncellendi"}
 
         # ERP'de eşleşen kayıt yok: yalnızca GİB'de imzalı satırlar yeni fatura olarak ERP'ye eklenir.
         if gib_asama != "imzali":
