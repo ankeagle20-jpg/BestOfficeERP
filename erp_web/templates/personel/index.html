@@ -169,6 +169,26 @@
                 <h4>Kullanılan İzinler</h4>
                 <div style="max-height:200px;overflow-y:auto;"><table class="tbl"><thead><tr><th>Tür</th><th>Başlangıç</th><th>Bitiş</th><th>Gün</th><th>Açıklama</th><th>İşlem</th></tr></thead><tbody id="izin-list-tbody"></tbody></table></div>
             </div>
+            <div class="panel">
+                <h4>QR İzin (Onay Bekliyor)</h4>
+                <div style="max-height:200px;overflow-y:auto;">
+                    <table class="tbl">
+                        <thead><tr>
+                            <th><input type="checkbox"
+                              id="qr-izin-tumunu-sec"
+                              onchange="qrIzinTumunuSecToggle()"></th>
+                            <th>Tür</th><th>Tarih</th>
+                            <th>Gün</th><th>Açıklama</th>
+                        </tr></thead>
+                        <tbody id="qr-izin-bekleyen-tbody"></tbody>
+                    </table>
+                </div>
+                <button type="button" class="btn"
+                    onclick="qrIzinOnayla()"
+                    style="margin-top:8px;">
+                    Seçilenleri İzin Olarak Kaydet
+                </button>
+            </div>
         </div>
         <div>
             <div class="panel" id="gec-aylik-panel">
@@ -454,6 +474,9 @@ const API_IZIN_OZET_LISTE = "{{ url_for('personel.api_izin_ozet_liste') }}";
 const API_IZIN_KAYDET = "{{ url_for('personel.api_izin_kaydet') }}";
 const API_IZIN_SIL = "{{ url_for('personel.api_izin_sil') }}";
 const API_IZIN_GUNCELLE = "{{ url_for('personel.api_izin_guncelle') }}";
+const API_IZIN_QR_BEKLEYEN = "{{ url_for('personel.api_izin_qr_bekleyen') }}";
+const API_IZIN_QR_ONAYLA = "{{ url_for('personel.api_izin_qr_onayla') }}";
+const API_IZIN_QR_GERI_AL = "{{ url_for('personel.api_izin_qr_geri_al') }}";
 const API_GEC_LIST = "{{ url_for('personel.api_gec_list') }}";
 const API_GEC_AYLIK_GRID = "{{ url_for('personel.api_gec_aylik_grid') }}";
 const API_GEC_GUNCELLE = "{{ url_for('personel.api_gec_guncelle') }}";
@@ -973,6 +996,62 @@ function izinListGunSaatTxt(r) {
   return String(r.gun_sayisi != null ? r.gun_sayisi : 0);
 }
 
+
+function qrIzinBekleyenYukle(pid) {
+  if (!pid) return;
+  fetch(API_IZIN_QR_BEKLEYEN + '?personel_id=' + pid)
+    .then(r => r.json())
+    .then(data => {
+      const tbody = document.getElementById('qr-izin-bekleyen-tbody');
+      if (!tbody) return;
+      if (!data.length) {
+        tbody.innerHTML = '<tr><td colspan="5" style="color:#888;">Onay bekleyen QR izin yok.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = data.map(function(it) {
+        return '<tr>' +
+          '<td><input type="checkbox" class="qr-izin-check" value="' + it.id + '"></td>' +
+          '<td>' + it.izin_turu + '</td>' +
+          '<td>' + it.baslangic_tarihi +
+          (it.baslangic_tarihi !== it.bitis_tarihi ? ' - ' + it.bitis_tarihi : '') + '</td>' +
+          '<td>' + it.gun_sayisi + '</td>' +
+          '<td>' + it.aciklama + '</td>' +
+          '</tr>';
+      }).join('');
+    });
+}
+
+function qrIzinTumunuSecToggle() {
+  const all = document.getElementById('qr-izin-tumunu-sec').checked;
+  document.querySelectorAll('.qr-izin-check').forEach(c => c.checked = all);
+}
+
+function qrIzinOnayla() {
+  const ids = Array.from(document.querySelectorAll('.qr-izin-check:checked'))
+    .map(c => parseInt(c.value, 10));
+  if (!ids.length) {
+    alert('Önce izin seçin.');
+    return;
+  }
+  fetch(API_IZIN_QR_ONAYLA, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ids: ids, birlestir: true})
+  })
+  .then(r => r.json())
+  .then(j => {
+    if (j.ok) {
+      alert('İzinler kaydedildi.');
+      if (seciliPersonelId) {
+        izinListYukle(seciliPersonelId);
+        qrIzinBekleyenYukle(seciliPersonelId);
+      }
+    } else {
+      alert('Hata: ' + (j.mesaj || 'Kaydedilemedi'));
+    }
+  });
+}
+
 async function izinListYukle(pid) {
   const yil = document.getElementById('izin-yil').value || new Date().getFullYear();
   const res = await fetch(API_IZIN_LIST + '?personel_id='+pid+'&yil='+yil);
@@ -983,9 +1062,14 @@ async function izinListYukle(pid) {
     const tr = document.createElement('tr');
     const aciklama = (r.aciklama || '');
     const aciklamaKisa = aciklama.length > 30 ? aciklama.slice(0, 30) + '…' : aciklama;
+    const isQr = aciklama.indexOf('Otomatik - QR') >= 0;
+    const qrGeriBtn = isQr ?
+      '<button type="button" class="btn-s btn-izin-qr-geri" data-id="'+r.id+'" style="background:#ff8f00;">QR\'a Geri Al</button> '
+      : '';
     tr.innerHTML = '<td>'+ (r.izin_turu||'') +'</td><td>'+ (r.baslangic_tarihi||'') +'</td><td>'+ (r.bitis_tarihi||'') +'</td><td>'+ izinListGunSaatTxt(r) +'</td><td style="font-size:11px;color:#90a4ae;max-width:150px;overflow:hidden;white-space:nowrap;">'+ aciklamaKisa +'</td><td>' +
       '<button type="button" class="btn-s btn-izin-duzenle" data-id="'+r.id+'">Düzenle</button> ' +
       '<button type="button" class="btn-s btn-izin-pdf" data-id="'+r.id+'">PDF</button> ' +
+      qrGeriBtn +
       '<button type="button" class="btn-s btn-izin-sil" data-id="'+r.id+'">Sil</button></td>';
     tr.querySelector('.btn-izin-duzenle').onclick = () => izinDuzenleAc(r);
     tr.querySelector('.btn-izin-pdf').onclick = () => {
@@ -993,18 +1077,43 @@ async function izinListYukle(pid) {
       const tahmini = cb?.checked ? '1' : '0';
       const tahEl = document.getElementById('izin-gec-tahmini');
       const tahTxt = tahEl ? tahEl.textContent : '';
-      const tahGun = parseInt(tahTxt.match(/(\d+)\s*gün/)?.[1] || 0);
-      const tahSaat = parseInt(tahTxt.match(/(\d+)\s*saat/)?.[1] || 0);
+      const tahGun = parseInt(tahTxt.match(/(-?\d+)\s*gün/)?.[1] || 0);
+      const tahSaat = parseInt(tahTxt.match(/(-?\d+)\s*saat/)?.[1] || 0);
       const tahDk = tahGun * 480 + tahSaat * 60;
       const kalanEl = document.getElementById('izin-kalan');
       const kalanTxt = kalanEl ? kalanEl.textContent : '';
-      const kalanGun = parseInt(kalanTxt.match(/(\d+)\s*gün/)?.[1] || 0);
-      const kalanSaat = parseInt(kalanTxt.match(/(\d+)\s*saat/)?.[1] || 0);
+      const kalanGun = parseInt(kalanTxt.match(/(-?\d+)\s*gün/)?.[1] || 0);
+      const kalanSaatRaw = parseInt(kalanTxt.match(/(-?\d+)\s*saat/)?.[1] || 0);
+      // gün negatifse saat de aynı işarette olmalı
+      const kalanSaat = kalanGun < 0 ? -Math.abs(kalanSaatRaw) : kalanSaatRaw;
       const kalanDk = kalanGun * 480 + kalanSaat * 60;
       window.open('/personel/api/izin-pdf/' + r.id + '?tahmini=' + tahmini + '&tah_dk=' + tahDk + '&kalan_dk=' + kalanDk, '_blank');
     };
+    if (isQr) {
+      tr.querySelector('.btn-izin-qr-geri').onclick = () => izinQrGeriAl(r.id, pid);
+    }
     tr.querySelector('.btn-izin-sil').onclick = () => izinSil(r.id);
     tbody.appendChild(tr);
+  });
+}
+
+
+function izinQrGeriAl(izinId, pid) {
+  if (!confirm('Bu izni QR onay bekleyen listesine geri almak istiyor musunuz?'))
+    return;
+  fetch(API_IZIN_QR_GERI_AL, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({id: izinId})
+  })
+  .then(r => r.json())
+  .then(j => {
+    if (j.ok) {
+      izinListYukle(pid);
+      qrIzinBekleyenYukle(pid);
+    } else {
+      alert('Hata: ' + (j.mesaj || 'Geri alınamadı'));
+    }
   });
 }
 
@@ -1072,6 +1181,7 @@ async function izinDuzenleKaydet() {
   if (!d.ok) { alert(d.mesaj || 'Güncellenemedi'); return; }
   izinDuzenleKapat();
   izinListYukle(seciliPersonelId);
+  qrIzinBekleyenYukle(seciliPersonelId);
   izinOzetYukle(seciliPersonelId);
   const f = document.querySelector('input[name="filtre-p"]:checked');
   izinSureListeYukle(f ? f.value : 'aktif');
@@ -1082,6 +1192,7 @@ async function izinSil(id) {
   await fetch(API_IZIN_SIL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ izin_id: id }) });
   if (seciliPersonelId) {
     izinListYukle(seciliPersonelId);
+    qrIzinBekleyenYukle(seciliPersonelId);
     izinOzetYukle(seciliPersonelId);
     izinSureListeYukle(document.querySelector('input[name="filtre-p"]:checked') ? document.querySelector('input[name="filtre-p"]:checked').value : 'aktif');
   }
@@ -1297,7 +1408,7 @@ function izinKalanTahminiGuncelle() {
   const tahDk = tahGun * 480 + tahSaat * 60;
 
   const hakDk = hak * 480;
-  const kalanDk = Math.max(0, hakDk - kulDk - tahDk);
+  const kalanDk = hakDk - kulDk - tahDk;
   const kGun = Math.floor(kalanDk / 480);
   const kSaat = Math.floor((kalanDk % 480) / 60);
 
@@ -1430,7 +1541,7 @@ if (personelAltTabListeBtn) personelAltTabListeBtn.onclick = function() { person
 var personelAltTabSureBtn = document.getElementById('personel-alt-tab-sure');
 if (personelAltTabSureBtn) personelAltTabSureBtn.onclick = function() { personelAltTabGoster('sure'); };
 
-document.getElementById('izin-personel').onchange = function() { seciliPersonelId = this.value; if (this.value) { const basEl2 = document.getElementById('gec-aylik-bas-tarih'); if (basEl2) basEl2.value = ''; bilgiYukle(this.value); izinOzetYukle(this.value); izinListYukle(this.value); gecListYukle(this.value); yetkiYukle(this.value); } };
+document.getElementById('izin-personel').onchange = function() { seciliPersonelId = this.value; if (this.value) { const basEl2 = document.getElementById('gec-aylik-bas-tarih'); if (basEl2) basEl2.value = ''; bilgiYukle(this.value); izinOzetYukle(this.value); izinListYukle(this.value); qrIzinBekleyenYukle(this.value); gecListYukle(this.value); yetkiYukle(this.value); } };
 
 const basInput = document.getElementById('gec-aylik-bas-tarih');
 if (basInput) {
@@ -1443,13 +1554,13 @@ if (basInput) {
 document.getElementById('izin-yil').onchange = function() {
   var f = document.querySelector('input[name="filtre-p"]:checked');
   var val = f ? f.value : 'aktif';
-  if (seciliPersonelId) { izinOzetYukle(seciliPersonelId); izinListYukle(seciliPersonelId); }
+  if (seciliPersonelId) { izinOzetYukle(seciliPersonelId); izinListYukle(seciliPersonelId); qrIzinBekleyenYukle(seciliPersonelId); }
   izinSureListeYukle(val);
 };
 document.getElementById('btn-izin-ozet').onclick = function() {
   var f = document.querySelector('input[name="filtre-p"]:checked');
   var val = f ? f.value : 'aktif';
-  if (seciliPersonelId) { izinOzetYukle(seciliPersonelId); izinListYukle(seciliPersonelId); }
+  if (seciliPersonelId) { izinOzetYukle(seciliPersonelId); izinListYukle(seciliPersonelId); qrIzinBekleyenYukle(seciliPersonelId); }
   izinSureListeYukle(val);
 };
 
@@ -1468,7 +1579,7 @@ document.getElementById('btn-izin-kaydet').onclick = async function() {
     if (!bas || !bit) { alert('Başlangıç ve bitiş tarihi girin.'); return; }
   }
   await fetch(API_IZIN_KAYDET, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ personel_id: seciliPersonelId, izin_turu: tur, baslangic_tarihi: tarihToIso(bas) || bas, bitis_tarihi: tarihToIso(bit) || bit, saat_sayisi: saatSayisi, aciklama: document.getElementById('izin-aciklama').value }) });
-  izinListYukle(seciliPersonelId); izinOzetYukle(seciliPersonelId);
+  izinListYukle(seciliPersonelId); qrIzinBekleyenYukle(seciliPersonelId); izinOzetYukle(seciliPersonelId);
   var f = document.querySelector('input[name="filtre-p"]:checked');
   izinSureListeYukle(f ? f.value : 'aktif');
   document.getElementById('izin-bas').value = '';
