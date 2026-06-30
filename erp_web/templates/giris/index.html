@@ -2629,6 +2629,7 @@
             <button class="tab" data-index="2" onclick="switchTab(2)">Kira Bildirgesi</button>
             <button class="tab" data-index="3" onclick="switchTab(3)">Tahsilat</button>
             <button class="tab" data-index="11" onclick="switchTab(11)">Tediye</button>
+            <button class="tab" data-index="12" onclick="switchTab(12)">WhatsApp</button>
             <button class="tab" data-index="4" onclick="switchTab(4)">Cari Kart</button>
             <button class="tab" data-index="6" onclick="switchTab(6)">Sözleşmeler</button>
             <button class="tab" data-index="7" onclick="switchTab(7)">Müşteriler</button>
@@ -2921,6 +2922,7 @@
                                 <option value="">Tümü</option>
                             </select>
                             <button type="button" id="giris_form_grup_yeni_btn" class="auto-btn" onclick="girisFormYeniGrupEkle(); return false;" title="Yeni grup oluştur" style="padding:8px 14px;border-radius:4px;border:none;background:#00838f;color:#fff;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">+ Yeni grup</button>
+                            <button type="button" id="giris_form_grup_ayarlar_btn" onclick="girisFormGrupAyarlarAc(); return false;" title="Grup adını düzenle veya sil" style="padding:6px 10px;border-radius:4px;border:1px solid #2d4060;background:#0f2537;color:#e0f7fa;font-size:12px;cursor:pointer;">⚙️</button>
                         </div>
                         <label for="giris_grup2_btn">Grup 2</label>
                         <div class="giris-grup2-row" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;min-width:0;">
@@ -3738,6 +3740,52 @@
         </div>
 
         </div>
+        <div class="tab-content" id="tab-12">
+    <div style="padding:16px;">
+        <h3 style="color:#e0f7fa;margin-bottom:12px;">
+            WhatsApp - Gecikme Hatırlatma
+        </h3>
+        <div style="display:flex;gap:10px;align-items:center;
+            margin-bottom:16px;flex-wrap:wrap;">
+            <button type="button" class="auto-btn run"
+                onclick="whatsappGecikenListeYukle()">
+                <i class="fa fa-refresh"></i> Listeyi Yenile
+            </button>
+            <span id="whatsapp-servis-durum" style="font-size:13px;
+                color:#90a4ae;">Servis durumu kontrol ediliyor...</span>
+        </div>
+        <div id="whatsapp-liste-ozet" style="margin-bottom:12px;
+            font-size:13px;color:#90a4ae;"></div>
+        <div style="max-height:500px;overflow-y:auto;">
+            <table class="tbl" style="width:100%;">
+                <thead>
+                    <tr>
+                        <th style="width:30px;">
+                            <input type="checkbox"
+                                id="whatsapp-tumunu-sec"
+                                onchange="whatsappTumunuSecToggle()">
+                        </th>
+                        <th>Müşteri</th>
+                        <th>Telefon</th>
+                        <th>Gecikme</th>
+                        <th>Tutar</th>
+                        <th style="min-width:300px;">Mesaj (düzenlenebilir)</th>
+                    </tr>
+                </thead>
+                <tbody id="whatsapp-liste-tbody"></tbody>
+            </table>
+        </div>
+        <div style="margin-top:16px;">
+            <button type="button" class="auto-btn run"
+                onclick="whatsappSeciliGonder()"
+                style="background:#25d366;">
+                <i class="fa fa-whatsapp"></i>
+                Seçilenleri Gönder
+            </button>
+        </div>
+    </div>
+</div>
+
         <div class="tab-content-right" id="sozlesmeler-sag-alan">
             <div id="sozlesmeler-aylik-bolum">
                 <div id="sozlesmeler-aylik-kiracı-panel">
@@ -7483,10 +7531,129 @@ function girisRandevuIframeYukle() {
 }
 
 // Sekme değiştirme (içerik id: tab-0 .. tab-10; 6 özel: sol panel tab-0)
+
+let __whatsappGecikenListe = [];
+
+function whatsappServisDurumKontrol() {
+    fetch('/whatsapp/api/servis-durum', {credentials:'same-origin'})
+        .then(r => r.json())
+        .then(d => {
+            const el = document.getElementById('whatsapp-servis-durum');
+            if (!el) return;
+            if (d.bagli) {
+                el.textContent = '✓ WhatsApp bağlı';
+                el.style.color = '#25d366';
+            } else if (d.qr_bekliyor) {
+                el.textContent = '⚠ QR kod taranmamış (http://localhost:3001/qr-goster)';
+                el.style.color = '#ff8f00';
+            } else {
+                el.textContent = '✗ WhatsApp servisi bağlı değil';
+                el.style.color = '#ef5350';
+            }
+        })
+        .catch(() => {
+            const el = document.getElementById('whatsapp-servis-durum');
+            if (el) {
+                el.textContent = '✗ WhatsApp servisine ulaşılamıyor';
+                el.style.color = '#ef5350';
+            }
+        });
+}
+
+function whatsappGecikenListeYukle() {
+    const tbody = document.getElementById('whatsapp-liste-tbody');
+    const ozet = document.getElementById('whatsapp-liste-ozet');
+    if (tbody) tbody.innerHTML = '<tr><td colspan="6" style="color:#90a4ae;">Yükleniyor...</td></tr>';
+
+    whatsappServisDurumKontrol();
+
+    fetch('/whatsapp/api/geciken-liste', {credentials:'same-origin'})
+        .then(r => r.json())
+        .then(d => {
+            if (!d.ok) {
+                if (tbody) tbody.innerHTML = '<tr><td colspan="6" style="color:#ef5350;">Hata: ' + (d.mesaj || 'Liste alınamadı') + '</td></tr>';
+                return;
+            }
+            __whatsappGecikenListe = d.liste || [];
+            if (ozet) {
+                ozet.textContent = __whatsappGecikenListe.length + ' müşteri gecikmiş durumda (' + d.tarih + ')';
+            }
+            if (!tbody) return;
+            if (!__whatsappGecikenListe.length) {
+                tbody.innerHTML = '<tr><td colspan="6" style="color:#90a4ae;">Gecikmiş müşteri yok.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = __whatsappGecikenListe.map((it, idx) => {
+                const tutarTxt = it.tutar ? it.tutar.toLocaleString('tr-TR', {minimumFractionDigits:2}) + ' TL' : '-';
+                return '<tr>' +
+                    '<td><input type="checkbox" class="whatsapp-check" data-idx="' + idx + '"></td>' +
+                    '<td>' + (it.isim || '') + '</td>' +
+                    '<td>' + (it.telefon || '') + '</td>' +
+                    '<td>' + it.gecikme_gun + ' gün</td>' +
+                    '<td>' + tutarTxt + '</td>' +
+                    '<td><textarea data-idx="' + idx + '" class="whatsapp-mesaj-input" ' +
+                    'style="width:100%;min-height:50px;background:#0f2537;color:#e0f7fa;' +
+                    'border:1px solid #2d4060;border-radius:4px;padding:6px;font-size:12px;">' +
+                    (it.mesaj || '') + '</textarea></td>' +
+                    '</tr>';
+            }).join('');
+        })
+        .catch(e => {
+            if (tbody) tbody.innerHTML = '<tr><td colspan="6" style="color:#ef5350;">Hata: ' + e.message + '</td></tr>';
+        });
+}
+
+function whatsappTumunuSecToggle() {
+    const all = document.getElementById('whatsapp-tumunu-sec').checked;
+    document.querySelectorAll('.whatsapp-check').forEach(c => c.checked = all);
+}
+
+function whatsappSeciliGonder() {
+    const secilenler = [];
+    document.querySelectorAll('.whatsapp-check:checked').forEach(c => {
+        const idx = parseInt(c.dataset.idx, 10);
+        const item = __whatsappGecikenListe[idx];
+        if (!item) return;
+        const textarea = document.querySelector(
+            '.whatsapp-mesaj-input[data-idx="' + idx + '"]');
+        const guncelMesaj = textarea ? textarea.value : item.mesaj;
+        secilenler.push({
+            telefon: item.telefon,
+            mesaj: guncelMesaj,
+        });
+    });
+    if (!secilenler.length) {
+        alert('Önce gönderilecek müşterileri seçin.');
+        return;
+    }
+    if (!confirm(secilenler.length + ' müşteriye WhatsApp mesajı gönderilecek. ' +
+        'Mesajlar arası 20-60 saniye bekleme ile gönderilecek. Onaylıyor musunuz?')) {
+        return;
+    }
+    fetch('/whatsapp/api/gonder', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        credentials: 'same-origin',
+        body: JSON.stringify({liste: secilenler})
+    })
+    .then(r => r.json())
+    .then(j => {
+        if (j.ok) {
+            alert('Mesajlar kuyruğa eklendi. ' +
+                (j.servis_yaniti?.eklenen || secilenler.length) +
+                ' mesaj sırayla gönderilecek.');
+            whatsappGecikenListeYukle();
+        } else {
+            alert('Hata: ' + (j.mesaj || 'Gönderilemedi'));
+        }
+    })
+    .catch(e => alert('Hata: ' + e.message));
+}
+
 function switchTab(index) {
     currentTabIndex = index;
     try {
-        if (index >= 0 && index <= 11) localStorage.setItem('bestoffice_giris_tab_index', String(index));
+        if (index >= 0 && index <= 12) localStorage.setItem('bestoffice_giris_tab_index', String(index));
     } catch (e) {}
     // Üst sekme butonlarının aktifliğini index yerine data-index ile kontrol et
     document.querySelectorAll('.tab').forEach(function(t) {
@@ -7543,6 +7710,9 @@ function switchTab(index) {
                 if (tediyeTarihEl && !tediyeTarihEl.value) tediyeTarihEl.value = new Date().toISOString().slice(0, 10);
                 girisTediyeFormunuSeciliMusteridenDoldur();
                 tediyeMakbuzNoYukle('giris_tediye');
+            }
+            if (effectiveIndex === 12) {
+                whatsappGecikenListeYukle();
             }
             if (effectiveIndex === 4) {
                 if (selectedId) {
@@ -7945,16 +8115,20 @@ function girisGrupAnaSatirToggle(ev, tr) {
     var next = tr.nextElementSibling;
     if (next && next.classList && next.classList.contains('giris-grup-nested-row')) {
         next.remove();
+        window.__girisGrupAcikGid = null;
         return;
     }
     var tb = tr.parentNode;
     if (tb) {
         tb.querySelectorAll('tr.giris-grup-nested-row').forEach(function (r) { r.remove(); });
     }
+    window.__girisGrupAcikGid = gid;
     var holder = document.createElement('tr');
     holder.className = 'giris-grup-nested-row';
     holder.innerHTML = '<td colspan="9"><div class="giris-grup-detay-icerik" style="padding:10px 12px 12px 20px;background:rgba(0,0,0,.18);">Alt firmalar yükleniyor…</div></td>';
-    tr.parentNode.insertBefore(holder, tr.nextSibling);
+    if (tr.parentNode) {
+      tr.parentNode.insertBefore(holder, tr.nextSibling);
+    }
     var box = holder.querySelector('.giris-grup-detay-icerik');
     girisFetchAgKopmasinaKarsi(girisGrupOzetGroupChildrenUrl(gid), { credentials: 'same-origin' }, 1)
         .then(function (r) { return girisFetchJsonSafely(r); })
@@ -7999,6 +8173,36 @@ function girisGrupAnaSatirToggle(ev, tr) {
                     '</tr>'
                 );
             });
+            // Toplam satırı hesapla
+            var topAylik = 0, topToplam = 0,
+                topAlacak = 0, topNet = 0;
+            ch.forEach(function(c) {
+              topAylik += parseFloat(c.borc_month || 0);
+              topToplam += parseFloat(c.borc_total || 0);
+              topAlacak += parseFloat(c.alacak_total || 0);
+              topNet += parseFloat(c.net_balance || 0);
+            });
+            h.push(
+              '<tfoot><tr style="font-weight:700;' +
+              'border-top:2px solid #2d4060;' +
+              'background:#0d1f30;">' +
+              '<td class="num" colspan="2" ' +
+              'style="text-align:right;padding:6px 8px;">' +
+              'TOPLAM</td>' +
+              '<td class="num">' +
+              girisGrupOzetParaYaz(topAylik) + '</td>' +
+              '<td class="num">' +
+              girisGrupOzetParaYaz(topToplam) + '</td>' +
+              '<td class="num">—</td>' +
+              '<td class="num">—</td>' +
+              '<td class="num">—</td>' +
+              '<td class="num">' +
+              girisGrupOzetParaYaz(topAlacak) + '</td>' +
+              '<td class="num">' +
+              girisGrupOzetParaYaz(topNet) + '</td>' +
+              '<td class="num"></td>' +
+              '</tr></tfoot>'
+            );
             h.push('</tbody></table>');
             if (box) box.innerHTML = h.join('');
         })
@@ -8088,7 +8292,46 @@ function girisGrupOzetListeJsonUygula(j) {
             '</tr>'
         );
     });
-    tbody.innerHTML = rows.join('');
+    if (window.__girisGrupAcikGid) {
+      // Açık grup varsa satırları tek tek güncelle
+      var mevcutSatirlar = tbody.querySelectorAll(
+          'tr.giris-grup-ana-satir');
+      if (mevcutSatirlar.length > 0) {
+        // Mevcut satırları sil, nested hariç
+        Array.from(tbody.querySelectorAll(
+            'tr:not(.giris-grup-nested-row)'))
+            .forEach(function(r) { r.remove(); });
+        // Yeni satırları nested'dan önce ekle
+        var nested = tbody.querySelector(
+            'tr.giris-grup-nested-row');
+        var anaGidNested = nested &&
+            nested.previousElementSibling ?
+            nested.previousElementSibling
+                .getAttribute('data-gid') : null;
+        var tmp = document.createElement('tbody');
+        tmp.innerHTML = rows.join('');
+        Array.from(tmp.children).forEach(function(tr) {
+          var gid = tr.getAttribute('data-gid');
+          if (nested && gid === anaGidNested) {
+            tbody.insertBefore(tr, nested);
+          } else {
+            tbody.appendChild(tr);
+          }
+        });
+      } else {
+        tbody.innerHTML = rows.join('');
+      }
+    } else {
+      tbody.innerHTML = rows.join('');
+    }
+    if (window.__girisGrupAcikGid) {
+      var _gid = window.__girisGrupAcikGid;
+      setTimeout(function() {
+        var _tr = document.querySelector(
+          '#giris_grup_ozet_tbody tr.giris-grup-ana-satir[data-gid="' + _gid + '"]');
+        if (_tr) girisGrupAnaSatirToggle(null, _tr);
+      }, 300);
+    }
     var kapLbl = meta.alt_cari_kapsam_label ? (' | Kapsam: ' + String(meta.alt_cari_kapsam_label)) : '';
     return '✓ Liste güncellendi. | Grup: ' + String(tot.group_count != null ? tot.group_count : arr.length) +
         ' | Alt cari (bağlantı) toplamı: ' + String(tot.child_count_sum != null ? tot.child_count_sum : '—') +
@@ -8289,10 +8532,7 @@ function girisGrupOzetListeYukle(opt) {
             var j = await girisFetchJsonSafely(r);
             if (!j || !j.ok) throw new Error((j && j.mesaj) || 'Liste alınamadı.');
             birlesen = girisGrupOzetPayloadBirlestir(birlesen, j);
-            var ozetAra = girisGrupOzetListeJsonUygula(birlesen);
-            if (ozetAra) {
-                girisGrupOzetDurumGoster('loading', 'Temel veriler yükleniyor… (' + (ci + 1) + '/' + chunks.length + ')');
-            }
+            girisGrupOzetDurumGoster('loading', 'Temel veriler yükleniyor… (' + (ci + 1) + '/' + chunks.length + ')');
         }
         // Hızlı dalga tamam: kullanıcıyı bekletmeden sonucu göster.
         window.__girisGrupOzetReportCache = birlesen;
@@ -8323,15 +8563,32 @@ function girisGrupOzetListeYukle(opt) {
                         if (!j2 || !j2.ok) continue;
                         detayBirlestik = girisGrupOzetPayloadBirlestir(detayBirlestik, j2);
                     }
-                    girisGrupOzetListeJsonUygula(detayBirlestik);
+
+                }
+                // Döngü bittikten sonra tek seferde güncelle
+                var _acikGid2 = window.__girisGrupAcikGid;
+                // Cache güncelle ama listeyi yenileme
+                window.__girisGrupOzetReportCache = detayBirlestik;
+                girisGrupOzetCacheLsYaz(reqKey, detayBirlestik);
+                if (_acikGid2) {
+                  var _acikTr2 = document.querySelector(
+                    '#giris_grup_ozet_tbody tr.giris-grup-ana-satir[data-gid="' + _acikGid2 + '"]');
+                  if (_acikTr2) {
+                    setTimeout(function() {
+                      girisGrupAnaSatirToggle(null, _acikTr2);
+                    }, 200);
+                  }
                 }
                 if (writeToken !== window.__girisGrupOzetWriteToken) return;
                 if (reqKey !== girisGrupFiltreAnahtariOku()) return;
                 window.__girisGrupOzetReportCache = detayBirlestik;
                 window.__girisGrupOzetReportCacheKey = reqKey;
                 girisGrupOzetCacheLsYaz(reqKey, detayBirlestik);
-                var ozetDetayFinal = girisGrupOzetListeJsonUygula(detayBirlestik);
-                if (ozetDetayFinal) girisGrupOzetDurumGoster('success', ozetDetayFinal);
+
+                // Sadece cache güncelle, listeyi yenileme
+                window.__girisGrupOzetReportCache = detayBirlestik;
+                girisGrupOzetCacheLsYaz(reqKey, detayBirlestik);
+                girisGrupOzetDurumGoster('success', '✓ Detaylar tamamlandı.');
             } catch (eBg) {
                 // Arka plan detay hatası temel raporu bozmasın.
             }
@@ -21906,7 +22163,8 @@ function girisAllGroupsRawAl() {
     return window.__girisAllGroupsFetchPromise;
 }
 
-function girisFormGrupListeYukle() {
+function girisFormGrupListeYukle(zorla) {
+    if (zorla && typeof girisFormGrupCacheInvalidate === 'function') girisFormGrupCacheInvalidate();
     var sel = document.getElementById('giris_form_grup_select');
     if (!sel) return Promise.resolve();
     var hid = document.getElementById('parent_cari_id');
@@ -22010,6 +22268,103 @@ function girisFormYeniGrupEkle() {
         .catch(function (e) {
             alert((e && e.message) ? e.message : 'Grup oluşturulamadı.');
         });
+}
+
+function girisFormGrupAyarlarAc() {
+  fetch('/cari-kart/api/groups',
+    {credentials:'same-origin'})
+  .then(function(r){return r.json();})
+  .then(function(j){
+    var gruplar = Array.isArray(j) ? j :
+      (j.groups || j.data || []);
+    var pop = document.getElementById(
+      '__giris_grup_ayarlar_pop');
+    if (!pop) {
+      pop = document.createElement('div');
+      pop.id = '__giris_grup_ayarlar_pop';
+      pop.style.cssText = 'position:fixed;z-index:9999;' +
+        'background:#1a2f45;border:1px solid #2d4060;' +
+        'border-radius:8px;padding:16px;min-width:320px;' +
+        'max-height:400px;overflow-y:auto;' +
+        'box-shadow:0 4px 20px rgba(0,0,0,.5);color:#e0f7fa;';
+      document.body.appendChild(pop);
+    }
+    var btn = document.getElementById(
+      'giris_form_grup_ayarlar_btn');
+    var rect = btn.getBoundingClientRect();
+    pop.style.top = (rect.bottom + 4) + 'px';
+    pop.style.left = rect.left + 'px';
+
+    var html = '<div style="font-weight:600;' +
+      'margin-bottom:12px;font-size:13px;">Grup Yönetimi</div>';
+    gruplar.forEach(function(g) {
+      var gid = g.id || g.musteri_no || g.cari_id;
+      var gname = g.name || g.ad || '';
+      html += '<div style="display:flex;align-items:center;' +
+        'gap:8px;margin-bottom:8px;">' +
+        '<span style="flex:1;font-size:13px;">' +
+        gname + '</span>' +
+        '<button onclick="girisGrupDuzenle(' + gid +
+        ',\'' + gname.replace(/'/g,"\\'") +
+        '\')" style="padding:4px 8px;font-size:11px;' +
+        'background:#00838f;border:none;border-radius:3px;' +
+        'color:#fff;cursor:pointer;">✏️</button>' +
+        '<button onclick="girisGrupSil(' + gid +
+        ',\'' + gname.replace(/'/g,"\\'") +
+        '\')" style="padding:4px 8px;font-size:11px;' +
+        'background:#c62828;border:none;border-radius:3px;' +
+        'color:#fff;cursor:pointer;">🗑️</button>' +
+        '</div>';
+    });
+    html += '<div style="margin-top:12px;border-top:1px solid #2d4060;' +
+      'padding-top:12px;">' +
+      '<button onclick="document.getElementById(' +
+      '\'__giris_grup_ayarlar_pop\').style.display=\'none\'"' +
+      ' style="padding:6px 12px;font-size:12px;' +
+      'background:#37474f;border:none;border-radius:3px;' +
+      'color:#fff;cursor:pointer;">Kapat</button></div>';
+    pop.innerHTML = html;
+    pop.style.display = 'block';
+  });
+}
+
+function girisGrupDuzenle(gid, gname) {
+  var yeniAd = prompt('Yeni grup adı:', gname);
+  if (!yeniAd || !yeniAd.trim()) return;
+  fetch('/cari-kart/api/groups/' + gid, {
+    method: 'PUT',
+    headers: {'Content-Type':'application/json'},
+    credentials: 'same-origin',
+    body: JSON.stringify({name: yeniAd.trim()})
+  }).then(function(r){return r.json();})
+  .then(function(j){
+    if (j.ok || j.id) {
+      girisFormGrupListeYukle(true);
+      girisFormGrupAyarlarAc();
+      alert('Grup adı güncellendi.');
+    } else {
+      alert('Hata: ' + (j.mesaj || 'Güncellenemedi'));
+    }
+  });
+}
+
+function girisGrupSil(gid, gname) {
+  if (!confirm('"' + gname + '" grubunu silmek istediğinize emin misiniz?\nGruptaki müşteriler gruptan çıkarılacak.'))
+    return;
+  fetch('/cari-kart/api/groups/' + gid, {
+    method: 'DELETE',
+    credentials: 'same-origin'
+  }).then(function(r){return r.json();})
+  .then(function(j){
+    if (j.ok) {
+      girisFormGrupListeYukle(true);
+      var pop = document.getElementById('__giris_grup_ayarlar_pop');
+      if (pop) pop.style.display = 'none';
+      alert('Grup silindi.');
+    } else {
+      alert('Hata: ' + (j.mesaj || 'Silinemedi'));
+    }
+  });
 }
 
 function girisGroupSeciliBilgiYaz() {

@@ -78,6 +78,7 @@ from routes.mobile_routes import bp as mobile_bp
 from routes.cari_kart_routes import bp as cari_kart_bp
 from routes.randevu_routes import bp as randevu_bp
 from routes.pdovam_routes import bp as pdovam_bp
+from routes.whatsapp_routes import bp as whatsapp_bp
 try:
     from routes.ilan_robotu_routes import bp as ilan_robotu_bp
 except Exception as e:
@@ -102,6 +103,7 @@ app.register_blueprint(giris_bp, url_prefix="/giris")
 app.register_blueprint(cari_kart_bp, url_prefix="/cari-kart")
 app.register_blueprint(randevu_bp)
 app.register_blueprint(pdovam_bp, url_prefix="/pdovam")
+app.register_blueprint(whatsapp_bp)
 if ilan_robotu_bp is not None:
     app.register_blueprint(ilan_robotu_bp, url_prefix="/ilan-robotu")
 
