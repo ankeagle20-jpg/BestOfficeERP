@@ -3882,12 +3882,16 @@
                                 onchange="whatsappTumunuSecToggle()">
                         </th>
                         <th>Müşteri</th>
+                        <th>Sözleşme</th>
                         <th><button type="button" class="whatsapp-hizmet-filter-btn"
                             id="whatsapp_hizmet_filter_btn"
                             onclick="whatsappHizmetFilterMenuAc(this)">Hizmet Türü ▾</button></th>
                         <th>Telefon</th>
                         <th>Gecikme</th>
-                        <th>Tutar</th>
+                        <th>Ay</th>
+                        <th>İlk Kira</th>
+                        <th>Güncel</th>
+                        <th>Toplam</th>
                         <th style="min-width:300px;">Mesaj (düzenlenebilir)</th>
                     </tr>
                 </thead>
@@ -7685,7 +7689,7 @@ function whatsappGecikenListeYukle(force, haricGoster) {
     }
     const tbody = document.getElementById('whatsapp-liste-tbody');
     const ozet = document.getElementById('whatsapp-liste-ozet');
-    if (tbody) tbody.innerHTML = '<tr><td colspan="7" style="color:#90a4ae;">Yükleniyor...</td></tr>';
+    if (tbody) tbody.innerHTML = '<tr><td colspan="11" style="color:#90a4ae;">Yükleniyor...</td></tr>';
 
     whatsappServisDurumKontrol();
 
@@ -7693,7 +7697,7 @@ function whatsappGecikenListeYukle(force, haricGoster) {
         .then(r => r.json())
         .then(d => {
             if (!d.ok) {
-                if (tbody) tbody.innerHTML = '<tr><td colspan="7" style="color:#ef5350;">Hata: ' + (d.mesaj || 'Liste alınamadı') + '</td></tr>';
+                if (tbody) tbody.innerHTML = '<tr><td colspan="11" style="color:#ef5350;">Hata: ' + (d.mesaj || 'Liste alınamadı') + '</td></tr>';
                 return;
             }
             __whatsappGecikenListe = d.liste || [];
@@ -7702,7 +7706,7 @@ function whatsappGecikenListeYukle(force, haricGoster) {
             }
             if (!tbody) return;
             if (!__whatsappGecikenListe.length) {
-                tbody.innerHTML = '<tr><td colspan="7" style="color:#90a4ae;">Gecikmiş müşteri yok.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="11" style="color:#90a4ae;">Gecikmiş müşteri yok.</td></tr>';
                 return;
             }
             const hizmetFiltre0 = window.__whatsappHizmetFiltre || [];
@@ -7715,6 +7719,9 @@ function whatsappGecikenListeYukle(force, haricGoster) {
             tbody.innerHTML = gosterilecekListe.map((it) => {
                 const idx = __whatsappGecikenListe.indexOf(it);
                 const tutarTxt = it.tutar ? it.tutar.toLocaleString('tr-TR', {minimumFractionDigits:2}) + ' TL' : '-';
+                const ilkKiraTxt = it.ilk_kira ? it.ilk_kira.toLocaleString('tr-TR', {minimumFractionDigits:2}) + ' TL' : '-';
+                const guncelTxt = it.guncel ? it.guncel.toLocaleString('tr-TR', {minimumFractionDigits:2}) + ' TL' : '-';
+                const toplamTxt = it.toplam ? it.toplam.toLocaleString('tr-TR', {minimumFractionDigits:2}) + ' TL' : '-';
                 const rowStyle = it.haric ? ' style="opacity:0.5;background:#1a1a1a;"' : '';
                 const haricBadge = it.haric
                     ? ' <a href="#" onclick="whatsappTekMusteriGeriAl(event, ' +
@@ -7727,10 +7734,14 @@ function whatsappGecikenListeYukle(force, haricGoster) {
                     JSON.stringify(it.musteri_id) + '); return false;" ' +
                     'style="color:#5eb3f5; text-decoration:underline; cursor:pointer;">' +
                     (it.isim || '') + '</a>' + haricBadge + '</td>' +
+                    '<td>' + (it.sozlesme_tarihi || '') + '</td>' +
                     '<td>' + (it.hizmet_turu || '') + '</td>' +
                     '<td>' + (it.telefon || '') + '</td>' +
                     '<td>' + it.gecikme_gun + ' gün</td>' +
-                    '<td>' + tutarTxt + '</td>' +
+                    '<td>' + it.ay + '</td>' +
+                    '<td>' + ilkKiraTxt + '</td>' +
+                    '<td>' + guncelTxt + '</td>' +
+                    '<td>' + toplamTxt + '</td>' +
                     '<td><textarea data-idx="' + idx + '" class="whatsapp-mesaj-input" ' +
                     'style="width:100%;min-height:50px;background:#0f2537;color:#e0f7fa;' +
                     'border:1px solid #2d4060;border-radius:4px;padding:6px;font-size:12px;">' +
@@ -7739,7 +7750,7 @@ function whatsappGecikenListeYukle(force, haricGoster) {
             }).join('');
         })
         .catch(e => {
-            if (tbody) tbody.innerHTML = '<tr><td colspan="7" style="color:#ef5350;">Hata: ' + e.message + '</td></tr>';
+            if (tbody) tbody.innerHTML = '<tr><td colspan="11" style="color:#ef5350;">Hata: ' + e.message + '</td></tr>';
         });
 }
 
@@ -8011,12 +8022,15 @@ function whatsappGecikenListesiYenidenCiz() {
         gosterilecekListe = gosterilecekListe.filter(it => hizmetFiltre.indexOf(it.hizmet_turu) !== -1);
     }
     if (!gosterilecekListe.length) {
-        tbody.innerHTML = '<tr><td colspan="7" style="color:#90a4ae;">Bu filtreye uyan müşteri yok.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="11" style="color:#90a4ae;">Bu filtreye uyan müşteri yok.</td></tr>';
         return;
     }
     tbody.innerHTML = gosterilecekListe.map((it) => {
         const idx = __whatsappGecikenListe.indexOf(it);
         const tutarTxt = it.tutar ? it.tutar.toLocaleString('tr-TR', {minimumFractionDigits:2}) + ' TL' : '-';
+        const ilkKiraTxt = it.ilk_kira ? it.ilk_kira.toLocaleString('tr-TR', {minimumFractionDigits:2}) + ' TL' : '-';
+        const guncelTxt = it.guncel ? it.guncel.toLocaleString('tr-TR', {minimumFractionDigits:2}) + ' TL' : '-';
+        const toplamTxt = it.toplam ? it.toplam.toLocaleString('tr-TR', {minimumFractionDigits:2}) + ' TL' : '-';
         const rowStyle = it.haric ? ' style="opacity:0.5;background:#1a1a1a;"' : '';
         const haricBadge = it.haric
             ? ' <a href="#" onclick="whatsappTekMusteriGeriAl(event, ' +
@@ -8029,10 +8043,14 @@ function whatsappGecikenListesiYenidenCiz() {
             JSON.stringify(it.musteri_id) + '); return false;" ' +
             'style="color:#5eb3f5; text-decoration:underline; cursor:pointer;">' +
             (it.isim || '') + '</a>' + haricBadge + '</td>' +
+            '<td>' + (it.sozlesme_tarihi || '') + '</td>' +
             '<td>' + (it.hizmet_turu || '') + '</td>' +
             '<td>' + (it.telefon || '') + '</td>' +
             '<td>' + it.gecikme_gun + ' gün</td>' +
-            '<td>' + tutarTxt + '</td>' +
+            '<td>' + it.ay + '</td>' +
+            '<td>' + ilkKiraTxt + '</td>' +
+            '<td>' + guncelTxt + '</td>' +
+            '<td>' + toplamTxt + '</td>' +
             '<td><textarea data-idx="' + idx + '" class="whatsapp-mesaj-input" ' +
             'style="width:100%;min-height:50px;background:#0f2537;color:#e0f7fa;' +
             'border:1px solid #2d4060;border-radius:4px;padding:6px;font-size:12px;">' +
