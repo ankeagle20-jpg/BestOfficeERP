@@ -69,6 +69,13 @@ def _en_yakin_esik(gecikme_gun):
 @giris_gerekli
 def api_geciken_liste():
     bugun = date.today()
+    from routes.giris_routes import (
+        musteri_firma_ozet_grid_ozet_batch,
+        _aylik_grid_contract_core,
+        _musteri_aylik_grid_customer_kyc_select_sql,
+        _firma_ozet_kyc_dict_from_grid_sql_row,
+        _tufe_map_by_year_month_cached,
+    )
     haric_goster = str(request.args.get('haric_goster') or '').strip().lower() in ('1', 'true', 'yes', 'on')
     _ensure_whatsapp_geciken_haric_table()
     bugun_key = f"{bugun.year}-{bugun.month}"
@@ -110,6 +117,33 @@ def api_geciken_liste():
     if haric_goster:
         haric_rows = fetch_all("SELECT musteri_id FROM whatsapp_geciken_haric") or []
         haric_ids = {hr['musteri_id'] for hr in haric_rows}
+
+    musteri_ids_all = [r.get('id') for r in rows if r.get('id')]
+    ozet_batch = musteri_firma_ozet_grid_ozet_batch(musteri_ids_all, bugun) if musteri_ids_all else {}
+
+    ilk_kira_by_mid = {}
+    if musteri_ids_all:
+        tufe_map_local = _tufe_map_by_year_month_cached()
+        base_sql_local = _musteri_aylik_grid_customer_kyc_select_sql()
+        kyc_rows_local = fetch_all(base_sql_local + " WHERE c.id = ANY(%s)", (musteri_ids_all,)) or []
+        for kr in kyc_rows_local:
+            try:
+                mid_k = int(kr.get('id') or 0)
+            except (TypeError, ValueError):
+                continue
+            if mid_k <= 0:
+                continue
+            kyc_for_grid_k = _firma_ozet_kyc_dict_from_grid_sql_row(kr)
+            if not kyc_for_grid_k:
+                continue
+            try:
+                core_k = _aylik_grid_contract_core(kyc_for_grid_k, tufe_map_local)
+                if core_k and isinstance(core_k.get('yillik_map'), dict):
+                    ik = core_k['yillik_map'].get(core_k.get('start_year'))
+                    if ik is not None:
+                        ilk_kira_by_mid[mid_k] = round(float(ik), 2)
+            except Exception:
+                continue
 
     sonuc = []
     for r in rows:
@@ -170,16 +204,27 @@ def api_geciken_liste():
             tutar=f"{tutar:,.2f}".replace(',', '.'),
             gun=gecikme
         )
+        mid_r = r.get('id')
+        ozet_r = ozet_batch.get(mid_r) or {}
         sonuc.append({
-            'musteri_id': r.get('id'),
+            'musteri_id': mid_r,
             'isim': isim,
             'telefon': telefon,
             'hizmet_turu': r.get('hizmet_turu') or '',
-            'haric': r.get('id') in haric_ids,
+            'haric': mid_r in haric_ids,
             'gecikme_gun': gecikme,
             'esik': esik,
             'tutar': tutar,
             'mesaj': sablon,
+            'sozlesme_tarihi': (
+                sozlesme_tarihi.isoformat()[:10]
+                if isinstance(sozlesme_tarihi, date)
+                else (str(sozlesme_tarihi)[:10] if sozlesme_tarihi else '')
+            ),
+            'ilk_kira': ilk_kira_by_mid.get(mid_r, 0),
+            'guncel': round(float(ozet_r.get('borc_month') or 0), 2),
+            'ay': int(ozet_r.get('geciken_ay') or 0),
+            'toplam': round(float(ozet_r.get('toplam_borc') or 0), 2),
         })
 
     sonuc.sort(key=lambda x: -x['gecikme_gun'])
