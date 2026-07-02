@@ -7477,9 +7477,9 @@ function girisTahsilatHizliYuklePanelVeGrid(cache, mid) {
             resolve(ok);
         }
         if (mid && typeof girisTahsilatYilAyPanelDbYukle === 'function') {
-            var dbOpts = null;
+            var dbOpts = { ttlMs: 0, persistMs: 0 };
             if (window.__girisEkstreSilPanelZorla) {
-                dbOpts = { zorlaUygula: true, ttlMs: 0, persistMs: 0 };
+                dbOpts.zorlaUygula = true;
                 window.__girisEkstreSilPanelZorla = false;
             }
             girisTahsilatYilAyPanelDbYukle(mid, gridCiz, dbOpts);
@@ -14650,6 +14650,15 @@ function sozlesmeAylikBorclandir() {
             girisJsonCacheInvalidatePrefix('/giris/api/aylik-grid-cache?musteri_id=' + encodeURIComponent(mid));
             girisJsonCacheInvalidatePrefix('/giris/api/aylik-tahsil-durum?musteri_id=' + encodeURIComponent(mid));
         }
+        setTimeout(function () {
+            try {
+                var lsKey = '__aylik_yil_kayit__|' + String(mid);
+                localStorage.removeItem(lsKey);
+                var lsAyKey = '__aylik_yil_ay_kayit__|' + String(mid);
+                localStorage.removeItem(lsAyKey);
+                localStorage.removeItem('__tahsilat_yil_ay_kayit__|' + String(mid));
+            } catch (_e) {}
+        }, 3000);
         function panelBorcGridSonrasi() {
             sozlesmeAylikSecimiTemizle();
             window.__sozlesmelerAylikYilFiltre = { hepsi: true, yillar: [] };
@@ -14823,9 +14832,10 @@ function sozlesmeAylikTahsilEt() {
                 localStorage.removeItem(lsKey);
                 var lsAyKey = '__aylik_yil_ay_kayit__|' + String(mid);
                 localStorage.removeItem(lsAyKey);
+                localStorage.removeItem('__tahsilat_yil_ay_kayit__|' + String(mid));
             } catch (_e) {}
-            location.reload();
-        }, 5000);
+            selectMusteri(mid);
+        }, 3000);
         var o = res.j.olusturulan || [];
         var a = res.j.atlanan || [];
         var msg = (res.j.mesaj || '') + '\nOluşturulan: ' + o.length + ', atlanan: ' + a.length;
@@ -17216,9 +17226,10 @@ function girisTahsilatYilAyDbKaydet(satirlar, donemYil, doneCb) {
                 localStorage.removeItem(lsKey);
                 var lsAyKey = '__aylik_yil_ay_kayit__|' + String(mid);
                 localStorage.removeItem(lsAyKey);
+                localStorage.removeItem('__tahsilat_yil_ay_kayit__|' + String(mid));
             } catch (_e) {}
-            location.reload();
-        }, 5000);
+            selectMusteri(mid);
+        }, 3000);
         var o = res.j.olusturulan || [];
         var a = res.j.atlanan || [];
         var tolKay = Number(SOZLESME_TAM_ODENDI_TOLERANS) || 0.05;
@@ -17878,6 +17889,15 @@ function girisTahsilatYilAySecilenleriBorclandir(donemYil, ev) {
             girisJsonCacheInvalidatePrefix('/giris/api/aylik-grid-cache?musteri_id=' + encodeURIComponent(mid));
             girisJsonCacheInvalidatePrefix('/giris/api/aylik-tahsil-durum?musteri_id=' + encodeURIComponent(mid));
         }
+        setTimeout(function () {
+            try {
+                var lsKey = '__aylik_yil_kayit__|' + String(mid);
+                localStorage.removeItem(lsKey);
+                var lsAyKey = '__aylik_yil_ay_kayit__|' + String(mid);
+                localStorage.removeItem(lsAyKey);
+                localStorage.removeItem('__tahsilat_yil_ay_kayit__|' + String(mid));
+            } catch (_e) {}
+        }, 3000);
         if (typeof girisTahsilatYilAyPanelSecimleriTemizle === 'function') {
             girisTahsilatYilAyPanelSecimleriTemizle(donemYil, ayKeys);
         }
@@ -21316,6 +21336,10 @@ function selectMusteri(id) {
     window.__aylikSatirYilAyDetay = {};
     window.__aylikSatirYilDetay = {};
     window.__aylikSatirYilDetayMid = '';
+    try {
+        localStorage.removeItem('__aylik_yil_kayit__|' + String(id));
+        localStorage.removeItem('__aylik_yil_ay_kayit__|' + String(id));
+    } catch(_e) {}
     window.__tahsilatSatirYilAyDetay = {};
     window.__tahsilatKismiOverrideByMid = {};
     window.__sozlesmelerAylikSonCacheObj = null;
