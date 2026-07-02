@@ -1,9 +1,30 @@
 from flask import Blueprint, jsonify, request
 from datetime import date, datetime
-from db import fetch_all, fetch_one
+from db import fetch_all, fetch_one, execute
 from auth import giris_gerekli
 
 bp = Blueprint('whatsapp', __name__, url_prefix='/whatsapp')
+
+_WHATSAPP_GECIKEN_HARIC_TABLE_READY = False
+
+
+def _ensure_whatsapp_geciken_haric_table():
+    global _WHATSAPP_GECIKEN_HARIC_TABLE_READY
+    if _WHATSAPP_GECIKEN_HARIC_TABLE_READY:
+        return
+    try:
+        execute(
+            """
+            CREATE TABLE IF NOT EXISTS whatsapp_geciken_haric (
+                musteri_id INTEGER PRIMARY KEY REFERENCES customers(id) ON DELETE CASCADE,
+                created_at TIMESTAMP NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+    except Exception:
+        pass
+    _WHATSAPP_GECIKEN_HARIC_TABLE_READY = True
+
 
 SABLONLAR = {
     0: "Değerli iş ortağımız, bugün vadesi dolan faturanızın hatırlatmasıdır. İş birliğiniz için teşekkür ederiz.",
@@ -47,41 +68,114 @@ def _en_yakin_esik(gecikme_gun):
 @bp.route('/api/geciken-liste')
 @giris_gerekli
 def api_geciken_liste():
-    """Sözleşme gününe göre bugün gecikmiş olan müşterileri listeler"""
     bugun = date.today()
+    haric_goster = str(request.args.get('haric_goster') or '').strip().lower() in ('1', 'true', 'yes', 'on')
+    _ensure_whatsapp_geciken_haric_table()
+    bugun_key = f"{bugun.year}-{bugun.month}"
+
+    # Grid cache'den ödenmemiş geçmiş ayları olan müşterileri çek
+    haric_sql = ""
+    if not haric_goster:
+        haric_sql = """
+        AND NOT EXISTS (
+            SELECT 1 FROM whatsapp_geciken_haric h WHERE h.musteri_id = c.id
+        )
+        """
+
     rows = fetch_all("""
         SELECT c.id, c.name, c.musteri_adi, c.phone, c.phone2,
-               mk.sozlesme_tarihi,
-               COALESCE(c.guncel_kira_bedeli, c.ilk_kira_bedeli, mk.aylik_kira, 0) as aylik_tutar
+               COALESCE(c.guncel_kira_bedeli, c.ilk_kira_bedeli, mk.aylik_kira, 0) as aylik_tutar,
+               mk.sozlesme_tarihi, mk.hizmet_turu
         FROM customers c
         LEFT JOIN LATERAL (
-            SELECT sozlesme_tarihi, aylik_kira
+            SELECT sozlesme_tarihi, aylik_kira, hizmet_turu
             FROM musteri_kyc
             WHERE musteri_id = c.id
             ORDER BY id DESC LIMIT 1
         ) mk ON TRUE
         WHERE c.durum = 'aktif'
-        AND mk.sozlesme_tarihi IS NOT NULL
-    """) or []
+        """ + haric_sql + """
+        AND EXISTS (
+            SELECT 1 FROM musteri_aylik_grid_cache gc,
+            jsonb_array_elements(gc.payload::jsonb->'aylar') AS elem
+            WHERE gc.musteri_id = c.id
+            AND (elem->>'tahsil_edildi')::boolean = false
+            AND to_date(elem->>'ay_key', 'YYYY-MM')
+                <= to_date(%s, 'YYYY-MM')
+            AND (elem->>'tutar_kdv_dahil')::float > 0
+        )
+    """, (bugun_key,)) or []
+
+    haric_ids = set()
+    if haric_goster:
+        haric_rows = fetch_all("SELECT musteri_id FROM whatsapp_geciken_haric") or []
+        haric_ids = {hr['musteri_id'] for hr in haric_rows}
 
     sonuc = []
     for r in rows:
-        gecikme = _odeme_gunu_gecikme_hesapla(r.get('sozlesme_tarihi'), bugun)
-        if gecikme is None or gecikme < 0:
+        # Bu müşterinin en eski ödenmemiş ayını bul
+        odenme_rows = fetch_all("""
+            SELECT elem->>'ay_key' as ay_key
+            FROM musteri_aylik_grid_cache,
+            jsonb_array_elements(payload::jsonb->'aylar') AS elem
+            WHERE musteri_id = %s
+            AND (elem->>'tahsil_edildi')::boolean = false
+            AND to_date(elem->>'ay_key', 'YYYY-MM')
+                <= to_date(%s, 'YYYY-MM')
+            AND (elem->>'tutar_kdv_dahil')::float > 0
+            ORDER BY elem->>'ay_key' ASC
+            LIMIT 1
+        """, (r['id'], bugun_key)) or []
+
+        if not odenme_rows:
             continue
+
+        # En eski ödenmemiş ayın sözleşme gününden gecikme hesapla
+        en_eski_ay_key = odenme_rows[0]['ay_key']  # "2026-5" gibi
+        yil, ay = map(int, en_eski_ay_key.split('-'))
+
+        sozlesme_tarihi = r.get('sozlesme_tarihi')
+        gun = 1
+        if sozlesme_tarihi:
+            if isinstance(sozlesme_tarihi, str):
+                sozlesme_tarihi = datetime.strptime(
+                    sozlesme_tarihi[:10], "%Y-%m-%d").date()
+            gun = sozlesme_tarihi.day
+
+        import calendar
+        son_gun = calendar.monthrange(yil, ay)[1]
+        odeme_gunu = min(gun, son_gun)
+
+        try:
+            odeme_tarihi = date(yil, ay, odeme_gunu)
+        except ValueError:
+            continue
+
+        gecikme = (bugun - odeme_tarihi).days
+        if gecikme < 0:
+            continue
+
         esik = _en_yakin_esik(gecikme)
         if esik is None:
             continue
+
         isim = r.get('name') or r.get('musteri_adi') or ''
         telefon = r.get('phone') or r.get('phone2') or ''
         if not telefon:
             continue
+
         tutar = float(r.get('aylik_tutar') or 0)
-        sablon = SABLONLAR[esik].format(isim=isim, tutar=f"{tutar:,.2f}".replace(',', '.'), gun=gecikme)
+        sablon = SABLONLAR[esik].format(
+            isim=isim,
+            tutar=f"{tutar:,.2f}".replace(',', '.'),
+            gun=gecikme
+        )
         sonuc.append({
             'musteri_id': r.get('id'),
             'isim': isim,
             'telefon': telefon,
+            'hizmet_turu': r.get('hizmet_turu') or '',
+            'haric': r.get('id') in haric_ids,
             'gecikme_gun': gecikme,
             'esik': esik,
             'tutar': tutar,
@@ -89,7 +183,62 @@ def api_geciken_liste():
         })
 
     sonuc.sort(key=lambda x: -x['gecikme_gun'])
-    return jsonify({'ok': True, 'liste': sonuc, 'tarih': bugun.isoformat()})
+    return jsonify({
+        'ok': True,
+        'liste': sonuc,
+        'tarih': bugun.isoformat()
+    })
+
+
+@bp.route('/api/geciken-haric-ekle', methods=['POST'])
+@giris_gerekli
+def api_geciken_haric_ekle():
+    _ensure_whatsapp_geciken_haric_table()
+    data = request.get_json(silent=True) or {}
+    ids = data.get('musteri_ids') or []
+    eklenen = 0
+    for mid in ids:
+        try:
+            mid_int = int(mid)
+        except (TypeError, ValueError):
+            continue
+        try:
+            execute(
+                """
+                INSERT INTO whatsapp_geciken_haric (musteri_id)
+                VALUES (%s)
+                ON CONFLICT (musteri_id) DO NOTHING
+                """,
+                (mid_int,),
+            )
+            eklenen += 1
+        except Exception:
+            continue
+    return jsonify({'ok': True, 'eklenen': eklenen})
+
+
+@bp.route('/api/geciken-haric-cikar', methods=['POST'])
+@giris_gerekli
+def api_geciken_haric_cikar():
+    _ensure_whatsapp_geciken_haric_table()
+    data = request.get_json(silent=True) or {}
+    ids = data.get('musteri_ids') or []
+    cikarilan = 0
+    for mid in ids:
+        try:
+            mid_int = int(mid)
+        except (TypeError, ValueError):
+            continue
+        try:
+            n = execute(
+                "DELETE FROM whatsapp_geciken_haric WHERE musteri_id = %s",
+                (mid_int,),
+            )
+            if n:
+                cikarilan += 1
+        except Exception:
+            continue
+    return jsonify({'ok': True, 'cikarilan': cikarilan})
 
 
 @bp.route('/api/gonder', methods=['POST'])
