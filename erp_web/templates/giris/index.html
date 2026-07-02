@@ -1862,6 +1862,32 @@
 }
 .fatura-rapor-tablo td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .fatura-rapor-tablo tbody tr:hover { background: #243447; }
+.whatsapp-geciken-tablo {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+.whatsapp-geciken-tablo th,
+.whatsapp-geciken-tablo td {
+    padding: 8px 10px;
+    border: 1px solid #2d4060;
+    text-align: left;
+    background: #1a2332;
+    color: #e0f7fa;
+}
+.whatsapp-geciken-tablo th {
+    background: #243447;
+    color: #b3e5fc;
+    font-weight: 600;
+    text-align: center;
+}
+.whatsapp-geciken-tablo td:first-child {
+    text-align: left;
+}
+.whatsapp-geciken-tablo tbody tr:hover {
+    background: #243447;
+}
+
 .fatura-rapor-tablo tbody tr.fatura-rapor-placeholder-row { background: rgba(0,0,0,0.12); }
 .fatura-rapor-tablo tbody tr.fatura-rapor-placeholder-row td { color: #90a4ae; font-style: italic; }
 .fatura-rapor-tablo th .col-resizer {
@@ -3767,7 +3793,7 @@
         <div id="whatsapp-liste-ozet" style="margin-bottom:12px;
             font-size:13px;color:#90a4ae;"></div>
         <div style="max-height:500px;overflow-y:auto;">
-            <table class="tbl" style="width:100%;">
+            <table class="whatsapp-geciken-tablo">
                 <thead>
                     <tr>
                         <th style="width:30px;">
