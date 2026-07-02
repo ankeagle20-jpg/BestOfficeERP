@@ -3748,7 +3748,7 @@
         <div style="display:flex;gap:10px;align-items:center;
             margin-bottom:16px;flex-wrap:wrap;">
             <button type="button" class="auto-btn run"
-                onclick="whatsappGecikenListeYukle()">
+                onclick="whatsappGecikenListeYukle(true)">
                 <i class="fa fa-refresh"></i> Listeyi Yenile
             </button>
             <span id="whatsapp-servis-durum" style="font-size:13px;
@@ -7560,7 +7560,10 @@ function whatsappServisDurumKontrol() {
         });
 }
 
-function whatsappGecikenListeYukle() {
+function whatsappGecikenListeYukle(force) {
+    if (!force && __whatsappGecikenListe && __whatsappGecikenListe.length > 0) {
+        return;
+    }
     const tbody = document.getElementById('whatsapp-liste-tbody');
     const ozet = document.getElementById('whatsapp-liste-ozet');
     if (tbody) tbody.innerHTML = '<tr><td colspan="6" style="color:#90a4ae;">Yükleniyor...</td></tr>';
@@ -7587,7 +7590,10 @@ function whatsappGecikenListeYukle() {
                 const tutarTxt = it.tutar ? it.tutar.toLocaleString('tr-TR', {minimumFractionDigits:2}) + ' TL' : '-';
                 return '<tr>' +
                     '<td><input type="checkbox" class="whatsapp-check" data-idx="' + idx + '"></td>' +
-                    '<td>' + (it.isim || '') + '</td>' +
+                    '<td><a href="#" onclick="whatsappMusteriKartaGit(event, ' +
+                    JSON.stringify(it.musteri_id) + '); return false;" ' +
+                    'style="color:#5eb3f5; text-decoration:underline; cursor:pointer;">' +
+                    (it.isim || '') + '</a></td>' +
                     '<td>' + (it.telefon || '') + '</td>' +
                     '<td>' + it.gecikme_gun + ' gün</td>' +
                     '<td>' + tutarTxt + '</td>' +
@@ -10963,6 +10969,41 @@ function faturaRaporFirmaKartaGit(ev, mid) {
         } catch (e1) {}
         window.__girisFromFaturaRaporKartClick = true;
         switchTab(0);
+        selectMusteri(id);
+        try {
+            setTimeout(function () { window.__girisFromFaturaRaporKartClick = false; }, 0);
+        } catch (eT) {}
+        return;
+    }
+    window.location.href = '/giris/?mid=' + encodeURIComponent(String(id)) + '&kart=1';
+}
+
+/** WhatsApp gecikme listesi: müşteri adına tıklanınca Sözleşmeler kartı (tab 6) açılır. */
+function whatsappMusteriKartaGit(ev, mid) {
+    if (ev && ev.stopPropagation) ev.stopPropagation();
+    if (ev && ev.preventDefault) ev.preventDefault();
+    var id = parseInt(mid, 10);
+    if (isNaN(id) || id < 1) return;
+    if (typeof switchTab === 'function' && typeof selectMusteri === 'function') {
+        try {
+            if (window.parent === window.self) {
+                girisHistoryEnsurePopstateListener();
+                var st = history.state;
+                var payload;
+                if (st && typeof st === 'object') {
+                    try {
+                        payload = JSON.parse(JSON.stringify(st));
+                    } catch (eJ) {
+                        payload = Object.assign({}, st);
+                    }
+                } else {
+                    payload = {};
+                }
+                history.pushState(payload, '', window.location.pathname + window.location.search);
+            }
+        } catch (e1) {}
+        window.__girisFromFaturaRaporKartClick = true;
+        switchTab(6);
         selectMusteri(id);
         try {
             setTimeout(function () { window.__girisFromFaturaRaporKartClick = false; }, 0);
