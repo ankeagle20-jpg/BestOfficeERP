@@ -1880,6 +1880,20 @@
     color: #b3e5fc;
     font-weight: 600;
     text-align: center;
+    position: relative;
+}
+.whatsapp-geciken-tablo th .col-resizer {
+    position: absolute;
+    top: 0;
+    right: 0;
+    height: 100%;
+    width: 6px;
+    cursor: col-resize;
+    z-index: 5;
+    user-select: none;
+}
+.whatsapp-geciken-tablo th .col-resizer:hover {
+    background: rgba(79, 195, 247, 0.25);
 }
 .whatsapp-geciken-tablo td:first-child {
     text-align: left;
@@ -3876,7 +3890,7 @@
         </div>
         <div id="whatsapp-liste-ozet" style="margin-bottom:12px;
             font-size:13px;color:#90a4ae;"></div>
-        <div style="max-height:500px;overflow-y:auto;">
+        <div style="max-height:500px;overflow-y:auto;overflow-x:auto;">
             <table class="whatsapp-geciken-tablo">
                 <thead>
                     <tr>
@@ -7871,6 +7885,7 @@ function whatsappGecikenListeYukle(force, haricGoster) {
                     (it.mesaj || '') + '</textarea></td>' +
                     '</tr>';
             }).join('');
+            try { whatsappTabloResizableKur(); } catch (eResz) {}
         })
         .catch(e => {
             if (tbody) tbody.innerHTML = '<tr><td colspan="11" style="color:#ef5350;">Hata: ' + e.message + '</td></tr>';
@@ -8180,6 +8195,54 @@ function whatsappGecikenListesiYenidenCiz() {
             (it.mesaj || '') + '</textarea></td>' +
             '</tr>';
     }).join('');
+    try { whatsappTabloResizableKur(); } catch (eResz) {}
+}
+
+function whatsappTabloResizableKur() {
+    var table = document.querySelector('.whatsapp-geciken-tablo');
+    if (!table) return;
+    var ths = table.querySelectorAll('thead th');
+    var savedWidths = {};
+    try {
+        savedWidths = JSON.parse(localStorage.getItem('whatsapp_geciken_col_widths') || '{}');
+    } catch (e) {
+        savedWidths = {};
+    }
+    ths.forEach(function (th, idx) {
+        if (savedWidths[idx]) {
+            th.style.width = savedWidths[idx] + 'px';
+        }
+        if (th.querySelector('.col-resizer')) return;
+        var handle = document.createElement('div');
+        handle.className = 'col-resizer';
+        th.appendChild(handle);
+        handle.addEventListener('mousedown', function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            var startX = e.clientX;
+            var startW = th.getBoundingClientRect().width;
+            var colIdx = idx;
+            function onMove(ev) {
+                var delta = ev.clientX - startX;
+                var newW = Math.max(40, startW + delta);
+                table.querySelectorAll('tr').forEach(function (r) {
+                    if (!r.cells || !r.cells[colIdx]) return;
+                    r.cells[colIdx].style.width = newW + 'px';
+                });
+            }
+            function onUp() {
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+                try {
+                    var widths = JSON.parse(localStorage.getItem('whatsapp_geciken_col_widths') || '{}');
+                    widths[colIdx] = th.getBoundingClientRect().width;
+                    localStorage.setItem('whatsapp_geciken_col_widths', JSON.stringify(widths));
+                } catch (e2) {}
+            }
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+        });
+    });
 }
 
 
