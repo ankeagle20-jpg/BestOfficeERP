@@ -8209,6 +8209,8 @@ function switchTab(index) {
             sozlesmeTahsilatFormunuSeciliMusteridenDoldur();
             /* Grid: selectMusteri → SonBoyama; bootstrap'ta selectedId yokken Guncelle yarışıp kartları üst üste bindiriyordu. */
             if (selectedId) sozlesmeAylikGridParalelYukle(selectedId);
+            tahsilatMakbuzNoYukle('sozlesme_tahsilat');
+            tahsilatTahsilEdenSelectDoldur();
         } else if (index === 8 || index === 10) {
             wrapper.classList.remove('sozlesmeler-split');
             wrapper.classList.add('giris-randevu-tab');
@@ -8229,6 +8231,8 @@ function switchTab(index) {
                 if (tarihEl && !tarihEl.value) tarihEl.value = new Date().toISOString().slice(0, 10);
                 girisTahsilatFormunuSeciliMusteridenDoldur();
                 tahsilatMakbuzTutarlariniGuncelleDisardan();
+                tahsilatMakbuzNoYukle('giris_tahsilat');
+                tahsilatTahsilEdenSelectDoldur();
                 if (typeof girisTahsilRaporYukle === 'function') {
                     var rb = document.getElementById('giris_tahsil_rapor_bas');
                     var re = document.getElementById('giris_tahsil_rapor_bit');
@@ -8241,6 +8245,7 @@ function switchTab(index) {
                 if (tediyeTarihEl && !tediyeTarihEl.value) tediyeTarihEl.value = new Date().toISOString().slice(0, 10);
                 girisTediyeFormunuSeciliMusteridenDoldur();
                 tediyeMakbuzNoYukle('giris_tediye');
+                tahsilatTahsilEdenSelectDoldur();
             }
             if (effectiveIndex === 12) {
                 whatsappGecikenListeYukle();
@@ -24640,19 +24645,15 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     } catch (eReelSekme) {}
     // Tahsilat sekmesi: müşteri arama
-    tahsilatTahsilEdenSelectDoldur();
     var gOdeme = document.getElementById('giris_tahsilat_odeme_turu');
     var sOdeme = document.getElementById('sozlesme_tahsilat_odeme_turu');
     if (gOdeme) gOdeme.addEventListener('change', function(){ tahsilatOdemeTuruUIUygula('giris_tahsilat'); });
     if (sOdeme) sOdeme.addEventListener('change', function(){ tahsilatOdemeTuruUIUygula('sozlesme_tahsilat'); });
     tahsilatOdemeTuruUIUygula('giris_tahsilat');
     tahsilatOdemeTuruUIUygula('sozlesme_tahsilat');
-    tahsilatMakbuzNoYukle('giris_tahsilat');
-    tahsilatMakbuzNoYukle('sozlesme_tahsilat');
     var tOdeme = document.getElementById('giris_tediye_odeme_turu');
     if (tOdeme) tOdeme.addEventListener('change', function () { girisTediyeOdemeTuruUIUygula(); });
     girisTediyeOdemeTuruUIUygula();
-    tediyeMakbuzNoYukle('giris_tediye');
     let sozlesmeTediyeAramaZamanlayici;
     const sozlesmeTediyeOdeme = document.getElementById('sozlesme_tediye_odeme_turu');
     if (sozlesmeTediyeOdeme) sozlesmeTediyeOdeme.addEventListener('change', function () { sozlesmeTediyeOdemeTuruUIUygula(); });
