@@ -3853,6 +3853,10 @@
         </h3>
         <div style="display:flex;gap:10px;align-items:center;
             margin-bottom:16px;flex-wrap:wrap;">
+            <button type="button" class="auto-btn run" id="whatsapp-rapor-al-btn"
+                onclick="window.__whatsappSadeceHaricModu = false; whatsappGecikenListeYukle(true, false);">
+                <i class="fa fa-download"></i> Rapor Al
+            </button>
             <button type="button" class="auto-btn run"
                 onclick="window.__whatsappSadeceHaricModu = false; whatsappGecikenListeYukle(true, false);">
                 <i class="fa fa-refresh"></i> Listeyi Yenile
@@ -3895,7 +3899,7 @@
                         <th style="min-width:300px;">Mesaj (düzenlenebilir)</th>
                     </tr>
                 </thead>
-                <tbody id="whatsapp-liste-tbody"></tbody>
+                <tbody id="whatsapp-liste-tbody"><tr><td colspan="11" style="color:#90a4ae;">Raporu görmek için "Rapor Al" butonuna basın.</td></tr></tbody>
             </table>
         </div>
         <div style="margin-top:16px;">
@@ -8246,9 +8250,6 @@ function switchTab(index) {
                 girisTediyeFormunuSeciliMusteridenDoldur();
                 tediyeMakbuzNoYukle('giris_tediye');
                 tahsilatTahsilEdenSelectDoldur();
-            }
-            if (effectiveIndex === 12) {
-                whatsappGecikenListeYukle();
             }
             if (effectiveIndex === 4) {
                 if (selectedId) {
