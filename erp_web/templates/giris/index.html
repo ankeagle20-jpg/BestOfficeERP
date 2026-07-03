@@ -24102,6 +24102,7 @@ async function kaydet(event) {
             } else if (data.id) {
                 girisSonSeciliMusteriKaydet(data.id);
             }
+            var kycBasarisizMesaj = '';
             try {
                 const kycResp = await girisFetchAgKopmasinaKarsi('/musteriler/api/kyc/kaydet', {
                     method: 'POST',
@@ -24118,15 +24119,19 @@ async function kaydet(event) {
                 }
                 if (!kycResp.ok || !kycResult.ok) {
                     console.warn('KYC kaydı sorunlu:', kycResult.mesaj || kycResp.status);
+                    kycBasarisizMesaj = '\n\nUYARI: Sözleşme bilgileri (Düzenli Fatura, Ödeme Düzeni vb.) kaydedilemedi: ' +
+                        (kycResult.mesaj || ('HTTP ' + kycResp.status)) +
+                        '\nLütfen tekrar deneyin.';
                 }
             } catch (e) {
                 console.warn('KYC kaydı sırasında hata:', e);
+                kycBasarisizMesaj = '\n\nUYARI: Sözleşme bilgileri kaydedilirken bağlantı hatası oluştu. Lütfen tekrar deneyin.';
             }
             try {
                 var midDos = parseInt(String(selectedId || result.id || document.getElementById('musteri-id').value || '0'), 10);
                 if (!isNaN(midDos) && midDos > 0) await musteriBekleyenDosyalariYukle(midDos);
             } catch (eDosY) { console.warn(eDosY); }
-            alert(result.mesaj);
+            alert(result.mesaj + kycBasarisizMesaj);
             musteriAra();
             girisHizmetTuruAltFormlaraUygula(kycData.hizmet_turu);
             try {
@@ -24138,6 +24143,33 @@ async function kaydet(event) {
                 }
             } catch (eTahSync) {}
             musteriKaydetDurumGoster('success');
+            try {
+                var midFresh = parseInt(String(selectedId || result.id || document.getElementById('musteri-id').value || '0'), 10);
+                if (!isNaN(midFresh) && midFresh > 0) {
+                    fetch('/giris/api/musteri/' + midFresh + '?force=1')
+                        .then(function (r) { return r.json(); })
+                        .then(function (fresh) {
+                            if (fresh && fresh.ok && fresh.musteri) {
+                                var m = fresh.musteri;
+                                if (m.duzenli_fatura != null && typeof duzenliFaturaSelectSet === 'function') {
+                                    duzenliFaturaSelectSet(m.duzenli_fatura);
+                                }
+                                var odSelFresh = document.getElementById('odeme_duzeni');
+                                if (odSelFresh && m.odeme_duzeni != null) {
+                                    odSelFresh.value = String(m.odeme_duzeni).trim().toLowerCase();
+                                }
+                                var manInpFresh = document.getElementById('odeme_duzeni_manuel');
+                                if (manInpFresh && m.odeme_duzeni_manuel != null) {
+                                    manInpFresh.value = String(m.odeme_duzeni_manuel);
+                                }
+                                if (typeof sozlesmelerOdemeDuzeniManuelUygula === 'function') {
+                                    sozlesmelerOdemeDuzeniManuelUygula();
+                                }
+                            }
+                        })
+                        .catch(function (eFresh) { console.warn('Kaydet sonrası tazeleme hatasi:', eFresh); });
+                }
+            } catch (eFreshOuter) { console.warn(eFreshOuter); }
             if (typeof girisAramaAlanlariKartSnapshotKaydet === 'function') girisAramaAlanlariKartSnapshotKaydet();
         } else {
             var errMsg = result.mesaj || 'Kayıt başarısız.';
