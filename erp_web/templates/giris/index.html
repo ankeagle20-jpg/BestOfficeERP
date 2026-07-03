@@ -24146,6 +24146,13 @@ async function kaydet(event) {
             try {
                 var midFresh = parseInt(String(selectedId || result.id || document.getElementById('musteri-id').value || '0'), 10);
                 if (!isNaN(midFresh) && midFresh > 0) {
+                    try {
+                        var musteriUrlKey = '/giris/api/musteri/' + midFresh;
+                        if (window.__girisJsonCache && typeof window.__girisJsonCache.delete === 'function') {
+                            window.__girisJsonCache.delete(musteriUrlKey);
+                        }
+                        sessionStorage.removeItem('__giris_json_persist__' + musteriUrlKey);
+                    } catch (eCacheClr) { console.warn('Musteri cache temizleme hatasi:', eCacheClr); }
                     fetch('/giris/api/musteri/' + midFresh + '?force=1')
                         .then(function (r) { return r.json(); })
                         .then(function (fresh) {
