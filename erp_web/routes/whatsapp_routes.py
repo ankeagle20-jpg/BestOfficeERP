@@ -92,7 +92,7 @@ def api_geciken_liste():
     rows = fetch_all("""
         SELECT c.id, c.name, c.musteri_adi, c.phone, c.phone2,
                COALESCE(c.guncel_kira_bedeli, c.ilk_kira_bedeli, mk.aylik_kira, 0) as aylik_tutar,
-               mk.sozlesme_tarihi, mk.hizmet_turu
+               mk.sozlesme_tarihi, mk.hizmet_turu, c.grup2_secimleri
         FROM customers c
         LEFT JOIN LATERAL (
             SELECT sozlesme_tarihi, aylik_kira, hizmet_turu
@@ -221,6 +221,7 @@ def api_geciken_liste():
                 if isinstance(sozlesme_tarihi, date)
                 else (str(sozlesme_tarihi)[:10] if sozlesme_tarihi else '')
             ),
+            'grup2_secimleri': list(r.get('grup2_secimleri') or []),
             'ilk_kira': ilk_kira_by_mid.get(mid_r, 0),
             'guncel': round(float(ozet_r.get('borc_month') or 0), 2),
             'ay': int(ozet_r.get('geciken_ay') or 0),
@@ -228,10 +229,19 @@ def api_geciken_liste():
         })
 
     sonuc.sort(key=lambda x: -x['gecikme_gun'])
+    grup2_etiket_map = {}
+    try:
+        etiket_rows = fetch_all(
+            "SELECT slug, etiket FROM grup2_etiketleri WHERE COALESCE(aktif, TRUE)"
+        ) or []
+        grup2_etiket_map = {row['slug']: row['etiket'] for row in etiket_rows}
+    except Exception:
+        grup2_etiket_map = {}
     return jsonify({
         'ok': True,
         'liste': sonuc,
-        'tarih': bugun.isoformat()
+        'tarih': bugun.isoformat(),
+        'grup2_etiket_map': grup2_etiket_map
     })
 
 
