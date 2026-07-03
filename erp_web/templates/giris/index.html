@@ -3904,6 +3904,9 @@
                         <th><button type="button" class="whatsapp-hizmet-filter-btn"
                             id="whatsapp_hizmet_filter_btn"
                             onclick="whatsappHizmetFilterMenuAc(this)">Hizmet Türü ▾</button></th>
+                        <th><button type="button" class="whatsapp-hizmet-filter-btn"
+                            id="whatsapp_grup2_filter_btn"
+                            onclick="whatsappGrup2FilterMenuAc(this)">Grup 2 ▾</button></th>
                         <th>Telefon</th>
                         <th>Gecikme</th>
                         <th>Ay</th>
@@ -3913,7 +3916,7 @@
                         <th style="min-width:300px;">Mesaj (düzenlenebilir)</th>
                     </tr>
                 </thead>
-                <tbody id="whatsapp-liste-tbody"><tr><td colspan="11" style="color:#90a4ae;">Raporu görmek için "Rapor Al" butonuna basın.</td></tr></tbody>
+                <tbody id="whatsapp-liste-tbody"><tr><td colspan="12" style="color:#90a4ae;">Raporu görmek için "Rapor Al" butonuna basın.</td></tr></tbody>
             </table>
         </div>
         <div style="margin-top:16px;">
@@ -7826,7 +7829,7 @@ function whatsappGecikenListeYukle(force, haricGoster) {
     }
     const tbody = document.getElementById('whatsapp-liste-tbody');
     const ozet = document.getElementById('whatsapp-liste-ozet');
-    if (tbody) tbody.innerHTML = '<tr><td colspan="11" style="color:#90a4ae;">Yükleniyor...</td></tr>';
+    if (tbody) tbody.innerHTML = '<tr><td colspan="12" style="color:#90a4ae;">Yükleniyor...</td></tr>';
 
     whatsappServisDurumKontrol();
 
@@ -7834,16 +7837,17 @@ function whatsappGecikenListeYukle(force, haricGoster) {
         .then(r => r.json())
         .then(d => {
             if (!d.ok) {
-                if (tbody) tbody.innerHTML = '<tr><td colspan="11" style="color:#ef5350;">Hata: ' + (d.mesaj || 'Liste alınamadı') + '</td></tr>';
+                if (tbody) tbody.innerHTML = '<tr><td colspan="12" style="color:#ef5350;">Hata: ' + (d.mesaj || 'Liste alınamadı') + '</td></tr>';
                 return;
             }
             __whatsappGecikenListe = d.liste || [];
+            window.__whatsappGrup2EtiketMap = d.grup2_etiket_map || {};
             if (ozet) {
                 ozet.textContent = __whatsappGecikenListe.length + ' müşteri gecikmiş durumda (' + d.tarih + ')';
             }
             if (!tbody) return;
             if (!__whatsappGecikenListe.length) {
-                tbody.innerHTML = '<tr><td colspan="11" style="color:#90a4ae;">Gecikmiş müşteri yok.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="12" style="color:#90a4ae;">Gecikmiş müşteri yok.</td></tr>';
                 return;
             }
             const hizmetFiltre0 = window.__whatsappHizmetFiltre || [];
@@ -7852,6 +7856,13 @@ function whatsappGecikenListeYukle(force, haricGoster) {
                 : __whatsappGecikenListe.filter(it => !it.haric);
             if (hizmetFiltre0.length) {
                 gosterilecekListe = gosterilecekListe.filter(it => hizmetFiltre0.indexOf(it.hizmet_turu) !== -1);
+            }
+            var grup2Filtre0 = window.__whatsappGrup2Filtre || [];
+            if (grup2Filtre0.length) {
+                gosterilecekListe = gosterilecekListe.filter(function (it) {
+                    var itGrup2 = it.grup2_secimleri || [];
+                    return grup2Filtre0.some(function (g) { return itGrup2.indexOf(g) !== -1; });
+                });
             }
             tbody.innerHTML = gosterilecekListe.map((it) => {
                 const idx = __whatsappGecikenListe.indexOf(it);
@@ -7873,6 +7884,9 @@ function whatsappGecikenListeYukle(force, haricGoster) {
                     (it.isim || '') + '</a>' + haricBadge + '</td>' +
                     '<td>' + (it.sozlesme_tarihi || '') + '</td>' +
                     '<td>' + (it.hizmet_turu || '') + '</td>' +
+                    '<td>' + ((it.grup2_secimleri || []).map(function(slug) {
+                        return (window.__whatsappGrup2EtiketMap && window.__whatsappGrup2EtiketMap[slug]) || slug;
+                    }).join(', ')) + '</td>' +
                     '<td>' + (it.telefon || '') + '</td>' +
                     '<td>' + it.gecikme_gun + ' gün</td>' +
                     '<td>' + it.ay + '</td>' +
@@ -7888,7 +7902,7 @@ function whatsappGecikenListeYukle(force, haricGoster) {
             try { whatsappTabloResizableKur(); } catch (eResz) {}
         })
         .catch(e => {
-            if (tbody) tbody.innerHTML = '<tr><td colspan="11" style="color:#ef5350;">Hata: ' + e.message + '</td></tr>';
+            if (tbody) tbody.innerHTML = '<tr><td colspan="12" style="color:#ef5350;">Hata: ' + e.message + '</td></tr>';
         });
 }
 
@@ -8149,6 +8163,110 @@ function whatsappHizmetFilterBtnStilGuncelle() {
         : 'Hizmet Türü ▾';
 }
 
+function whatsappGrup2SecenekleriTopla() {
+    var seen = {};
+    var out = [];
+    (__whatsappGecikenListe || []).forEach(function (it) {
+        (it.grup2_secimleri || []).forEach(function (slug) {
+            if (!slug || seen[slug]) return;
+            seen[slug] = true;
+            out.push(slug);
+        });
+    });
+    out.sort(function (a, b) {
+        var la = (window.__whatsappGrup2EtiketMap && window.__whatsappGrup2EtiketMap[a]) || a;
+        var lb = (window.__whatsappGrup2EtiketMap && window.__whatsappGrup2EtiketMap[b]) || b;
+        return la.localeCompare(lb, 'tr', { sensitivity: 'base', numeric: true });
+    });
+    return out;
+}
+
+function whatsappGrup2FilterMenuAc(anchor) {
+    whatsappHizmetFilterPopClose();
+    var pop = whatsappHizmetFilterPopEnsure();
+    pop.hidden = false;
+    whatsappHizmetFilterPopPosition(anchor, pop);
+    var list = whatsappGrup2SecenekleriTopla();
+    var curDizi = window.__whatsappGrup2Filtre || [];
+    var curSet = {};
+    curDizi.forEach(function (x) { curSet[x] = true; });
+    pop.innerHTML = '';
+    var inn = document.createElement('div');
+    inn.className = 'whatsapp-hizmet-filter-pop-inn';
+    var hepsiCb = null;
+    function grup2Satir(val, label, checked) {
+        var row = document.createElement('label');
+        row.className = 'whatsapp-hizmet-filter-opt-row';
+        var inp = document.createElement('input');
+        inp.type = 'checkbox';
+        inp.setAttribute('data-wa-grup2-f', val);
+        inp.checked = !!checked;
+        var span = document.createElement('span');
+        span.textContent = label;
+        row.appendChild(inp);
+        row.appendChild(span);
+        inn.appendChild(row);
+        if (val !== '__hepsi__') {
+            inp.addEventListener('change', function () {
+                if (inp.checked && hepsiCb) hepsiCb.checked = false;
+            });
+        }
+        return inp;
+    }
+    hepsiCb = grup2Satir('__hepsi__', 'Tüm gruplar (süzgeç yok)', curDizi.length === 0);
+    hepsiCb.addEventListener('change', function () {
+        if (hepsiCb.checked) {
+            inn.querySelectorAll('input[type="checkbox"][data-wa-grup2-f]').forEach(function (c) {
+                if (c.getAttribute('data-wa-grup2-f') !== '__hepsi__') c.checked = false;
+            });
+        }
+    });
+    list.forEach(function (slug) {
+        var label = (window.__whatsappGrup2EtiketMap && window.__whatsappGrup2EtiketMap[slug]) || slug;
+        grup2Satir(slug, label, !!curSet[slug]);
+    });
+    var act = document.createElement('div');
+    act.className = 'whatsapp-hizmet-filter-pop-actions';
+    var btnU = document.createElement('button');
+    btnU.type = 'button';
+    btnU.className = 'whatsapp-hizmet-filter-uygula';
+    btnU.textContent = 'Uygula';
+    btnU.addEventListener('click', function (ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        var picked = [];
+        var h0 = inn.querySelector('input[data-wa-grup2-f="__hepsi__"]');
+        if (h0 && h0.checked) {
+            window.__whatsappGrup2Filtre = [];
+        } else {
+            inn.querySelectorAll('input[type="checkbox"][data-wa-grup2-f]').forEach(function (c) {
+                var k = c.getAttribute('data-wa-grup2-f');
+                if (!k || k === '__hepsi__' || !c.checked) return;
+                picked.push(k);
+            });
+            window.__whatsappGrup2Filtre = picked;
+        }
+        whatsappHizmetFilterPopClose();
+        whatsappGrup2FilterBtnStilGuncelle();
+        whatsappGecikenListesiYenidenCiz();
+    });
+    act.appendChild(btnU);
+    pop.appendChild(inn);
+    pop.appendChild(act);
+    whatsappHizmetFilterPopPosition(anchor, pop);
+    whatsappHizmetFilterPopBindOutsideDeferred();
+}
+
+function whatsappGrup2FilterBtnStilGuncelle() {
+    var btn = document.getElementById('whatsapp_grup2_filter_btn');
+    if (!btn) return;
+    var aktifMi = (window.__whatsappGrup2Filtre || []).length > 0;
+    btn.style.color = aktifMi ? '#4fc3f7' : '';
+    btn.textContent = aktifMi
+        ? 'Grup 2 ▾ (' + window.__whatsappGrup2Filtre.length + ')'
+        : 'Grup 2 ▾';
+}
+
 function whatsappGecikenListesiYenidenCiz() {
     const tbody = document.getElementById('whatsapp-liste-tbody');
     if (!tbody || !__whatsappGecikenListe) return;
@@ -8159,8 +8277,15 @@ function whatsappGecikenListesiYenidenCiz() {
     if (hizmetFiltre.length) {
         gosterilecekListe = gosterilecekListe.filter(it => hizmetFiltre.indexOf(it.hizmet_turu) !== -1);
     }
+    var grup2Filtre = window.__whatsappGrup2Filtre || [];
+    if (grup2Filtre.length) {
+        gosterilecekListe = gosterilecekListe.filter(function (it) {
+            var itGrup2 = it.grup2_secimleri || [];
+            return grup2Filtre.some(function (g) { return itGrup2.indexOf(g) !== -1; });
+        });
+    }
     if (!gosterilecekListe.length) {
-        tbody.innerHTML = '<tr><td colspan="11" style="color:#90a4ae;">Bu filtreye uyan müşteri yok.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="12" style="color:#90a4ae;">Bu filtreye uyan müşteri yok.</td></tr>';
         return;
     }
     tbody.innerHTML = gosterilecekListe.map((it) => {
@@ -8183,6 +8308,9 @@ function whatsappGecikenListesiYenidenCiz() {
             (it.isim || '') + '</a>' + haricBadge + '</td>' +
             '<td>' + (it.sozlesme_tarihi || '') + '</td>' +
             '<td>' + (it.hizmet_turu || '') + '</td>' +
+            '<td>' + ((it.grup2_secimleri || []).map(function(slug) {
+                return (window.__whatsappGrup2EtiketMap && window.__whatsappGrup2EtiketMap[slug]) || slug;
+            }).join(', ')) + '</td>' +
             '<td>' + (it.telefon || '') + '</td>' +
             '<td>' + it.gecikme_gun + ' gün</td>' +
             '<td>' + it.ay + '</td>' +
