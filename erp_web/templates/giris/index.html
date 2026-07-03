@@ -3987,7 +3987,32 @@
                         <button type="button" class="btn-aylik-tahsil" onclick="sozlesmelerReelSecilenlereTutarUygula()">Seçilenlere Uygula</button>
                         <button type="button" class="tahsilat-btn-kaydet" id="sozlesmeler-reel-kaydet-btn" onclick="sozlesmelerReelDonemTutarKaydet()"><i class="fa fa-save"></i> Kaydet</button>
                         <button type="button" class="btn-aylik-sec" onclick="sozlesmelerReelDonemTutarVazgec()"><i class="fa fa-times"></i> Vazgeç</button>
+                        <button type="button" class="btn-aylik-sec"
+                            onclick="sozlesmelerReelTahsilatEsitleOnizleAc()"
+                            style="background:#7e57c2;border-color:#7e57c2;">
+                            <i class="fa fa-balance-scale"></i> Tahsilatları Reel ile Eşitle
+                        </button>
                         <span id="sozlesmeler-reel-kaydet-durum" class="sozlesmeler-reel-kaydet-durum" aria-live="polite"></span>
+                    </div>
+                    <div id="sozlesmeler-reel-esitle-modal" style="display:none;position:fixed;
+                        top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:99999;
+                        align-items:center;justify-content:center;">
+                        <div style="background:#0f2537;border:1px solid #2d4060;border-radius:8px;
+                            padding:20px;max-width:600px;width:90%;max-height:80vh;overflow-y:auto;">
+                            <h3 style="color:#e0f7fa;margin-bottom:12px;">Tahsilatları Reel ile Eşitle — Önizleme</h3>
+                            <div id="sozlesmeler-reel-esitle-ozet" style="color:#e0f7fa;margin-bottom:12px;font-size:13px;"></div>
+                            <div id="sozlesmeler-reel-esitle-liste" style="max-height:300px;overflow-y:auto;
+                                margin-bottom:16px;font-size:12px;color:#b0bec5;"></div>
+                            <div style="display:flex;gap:10px;justify-content:flex-end;">
+                                <button type="button" class="btn-aylik-sec"
+                                    onclick="sozlesmelerReelTahsilatEsitleModalKapat()">Vazgeç</button>
+                                <button type="button" class="tahsilat-btn-kaydet"
+                                    id="sozlesmeler-reel-esitle-uygula-btn"
+                                    onclick="sozlesmelerReelTahsilatEsitleUygula()" disabled>
+                                    <i class="fa fa-check"></i> Onayla ve Uygula
+                                </button>
+                            </div>
+                        </div>
                     </div>
                     <div id="sozlesmeler-reel-aylik-grid" class="sozlesmeler-aylik-grid"></div>
                     <div id="sozlesmeler-reel-aylik-bos" class="sozlesmeler-aylik-bos">Sözleşme tarihleri ve aylık kira girildiğinde ay hücreleri burada görünür.</div>
@@ -7093,6 +7118,100 @@ function sozlesmelerReelDonemTutarVazgec() {
         .catch(function () {
             alert('Kayıtlı tutarlar alınamadı.');
         });
+}
+
+var __sozlesmelerReelEsitleData = null;
+
+function sozlesmelerReelTahsilatEsitleOnizleAc() {
+    var mid = selectedId;
+    if (!mid) {
+        alert('Önce bir müşteri seçin.');
+        return;
+    }
+    var ozetEl = document.getElementById('sozlesmeler-reel-esitle-ozet');
+    var listeEl = document.getElementById('sozlesmeler-reel-esitle-liste');
+    var modal = document.getElementById('sozlesmeler-reel-esitle-modal');
+    var uygulaBtn = document.getElementById('sozlesmeler-reel-esitle-uygula-btn');
+    if (ozetEl) ozetEl.textContent = 'Yükleniyor...';
+    if (listeEl) listeEl.innerHTML = '';
+    if (uygulaBtn) uygulaBtn.disabled = true;
+    if (modal) modal.style.display = 'flex';
+    __sozlesmelerReelEsitleData = null;
+
+    fetch('/giris/api/reel-tahsilat-esitle-onizleme?musteri_id=' + encodeURIComponent(mid),
+        { credentials: 'same-origin' })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+            if (!d.ok) {
+                if (ozetEl) ozetEl.textContent = 'Hata: ' + (d.mesaj || 'Önizleme alınamadı.');
+                return;
+            }
+            __sozlesmelerReelEsitleData = d;
+            if (d.degisecek_sayisi === 0) {
+                if (ozetEl) ozetEl.textContent = 'Değişecek kayıt yok — tahsilatlar zaten reel tutarlarla uyumlu.';
+                if (uygulaBtn) uygulaBtn.disabled = true;
+                return;
+            }
+            if (ozetEl) {
+                ozetEl.textContent = d.degisecek_sayisi + ' tahsilat kaydı değişecek. Toplam fark: ' +
+                    d.toplam_fark.toLocaleString('tr-TR', {minimumFractionDigits: 2}) + ' TL';
+            }
+            if (listeEl) {
+                listeEl.innerHTML = (d.degisecekler || []).map(function (it) {
+                    return '<div style="padding:4px 0;border-bottom:1px solid #1e3a50;">' +
+                        it.ay + ' — ' + it.eski_tutar.toLocaleString('tr-TR', {minimumFractionDigits:2}) +
+                        ' TL &rarr; ' + it.yeni_tutar.toLocaleString('tr-TR', {minimumFractionDigits:2}) +
+                        ' TL (fark: ' + it.fark.toLocaleString('tr-TR', {minimumFractionDigits:2}) + ' TL)</div>';
+                }).join('');
+            }
+            if (uygulaBtn) uygulaBtn.disabled = false;
+        })
+        .catch(function (e) {
+            if (ozetEl) ozetEl.textContent = 'Hata: ' + e.message;
+        });
+}
+
+function sozlesmelerReelTahsilatEsitleModalKapat() {
+    var modal = document.getElementById('sozlesmeler-reel-esitle-modal');
+    if (modal) modal.style.display = 'none';
+    __sozlesmelerReelEsitleData = null;
+}
+
+function sozlesmelerReelTahsilatEsitleUygula() {
+    var mid = selectedId;
+    if (!mid || !__sozlesmelerReelEsitleData) {
+        alert('Önce önizleme yükleyin.');
+        return;
+    }
+    if (!confirm(__sozlesmelerReelEsitleData.degisecek_sayisi +
+        ' tahsilat kaydı kalıcı olarak değiştirilecek. Bu işlem geri alınamaz. Onaylıyor musunuz?')) {
+        return;
+    }
+    var uygulaBtn = document.getElementById('sozlesmeler-reel-esitle-uygula-btn');
+    if (uygulaBtn) uygulaBtn.disabled = true;
+    fetch('/giris/api/reel-tahsilat-esitle-uygula', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        credentials: 'same-origin',
+        body: JSON.stringify({musteri_id: mid, onay: true})
+    })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+        if (d.ok) {
+            alert(d.guncellenen_sayisi + ' tahsilat kaydı güncellendi. Toplam fark: ' +
+                d.toplam_fark.toLocaleString('tr-TR', {minimumFractionDigits:2}) + ' TL');
+            sozlesmelerReelTahsilatEsitleModalKapat();
+            if (typeof girisTahsilatEkstreTazeYenile === 'function') girisTahsilatEkstreTazeYenile();
+            if (typeof sozlesmelerAylikHizliYukle === 'function') sozlesmelerAylikHizliYukle(true);
+        } else {
+            alert('Hata: ' + (d.mesaj || 'İşlem başarısız.'));
+            if (uygulaBtn) uygulaBtn.disabled = false;
+        }
+    })
+    .catch(function (e) {
+        alert('Hata: ' + e.message);
+        if (uygulaBtn) uygulaBtn.disabled = false;
+    });
 }
 
 /** Formdaki başlangıç/bitiş veya Kira süresi ay ile beklenen hücre sayısı (cache ile karşılaştırma için). */
