@@ -2,7 +2,7 @@
 Giriş / Müşteri Kaydı Routes
 Desktop'taki gibi tam fonksiyonel + Sözleşme oluşturma
 """
-from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, send_file, Response, current_app
+from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, send_file, Response, current_app, make_response
 from flask_login import current_user
 from auth import giris_gerekli
 from collections import defaultdict
@@ -8799,6 +8799,14 @@ def api_aylik_tutarlardan_borclandir():
         olusturulan.append({"id": fid, "fatura_no": fatura_no, "yil": yil, "ay": ay, "toplam": toplam, "guncellendi": False})
 
     sync_musteri_panel_borclu_from_satirlar(musteri_id, satirlar)
+    _invalidate_aylik_grid_payload_mem(int(musteri_id))
+    try:
+        execute(
+            "DELETE FROM musteri_aylik_grid_cache WHERE musteri_id=%s",
+            (int(musteri_id),)
+        )
+    except Exception:
+        pass
     _upsert_aylik_grid_cache(musteri_id)
     yeni_n = sum(
         1 for x in olusturulan if isinstance(x, dict) and not x.get("zaten_vardi")
@@ -9166,10 +9174,7 @@ def api_aylik_tutarlardan_tahsil_et():
         )
     except Exception:
         pass
-    try:
-        _upsert_aylik_grid_cache(int(musteri_id))
-    except Exception:
-        pass
+    # Cache rebuild frontend isteğinde yapılacak (force=1)
     _cari_ekstre_api_cache.clear()
     zaten_n = sum(
         1 for x in atlanan if isinstance(x, dict) and x.get("neden") == "zaten_tahsil"
@@ -9191,6 +9196,7 @@ def api_aylik_tutarlardan_tahsil_et():
         "atlanan": atlanan,
         "mesaj": mesaj,
         "ls_temizle": True,
+        "cache_updated": True,
     })
 
 
@@ -9381,12 +9387,19 @@ def api_aylik_tutarlardan_borctan_cikar():
     )
 
 
+def _json_no_cache(payload, status=200):
+    response = make_response(jsonify(payload), status)
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    return response
+
+
 @bp.route('/api/aylik-grid-cache')
 @giris_gerekli
 def api_aylik_grid_cache():
     musteri_id = request.args.get("musteri_id", type=int)
     if not musteri_id:
-        return jsonify({"ok": False, "mesaj": "musteri_id gerekli."}), 400
+        return _json_no_cache({"ok": False, "mesaj": "musteri_id gerekli."}, 400)
     force = str(request.args.get("force") or "").lower() in ("1", "true", "yes", "on")
     skip_match = str(request.args.get("skip_match") or "").lower() in ("1", "true", "yes", "on")
     _ensure_aylik_grid_cache_table()
@@ -9400,7 +9413,7 @@ def api_aylik_grid_cache():
                     _aylik_grid_payload_mem[int(musteri_id)] = (time.time(), mem_payload)
                 except (TypeError, ValueError):
                     pass
-                return jsonify({"ok": True, "cache": mem_payload, "cached": True, "mem": True})
+                return _json_no_cache({"ok": True, "cache": mem_payload, "cached": True, "mem": True})
         except (TypeError, ValueError):
             pass
         row = fetch_one("SELECT payload FROM musteri_aylik_grid_cache WHERE musteri_id = %s", (musteri_id,))
@@ -9428,13 +9441,13 @@ def api_aylik_grid_cache():
                         _aylik_grid_payload_mem[int(musteri_id)] = (time.time(), cache_obj)
                     except (TypeError, ValueError):
                         pass
-                    return jsonify({"ok": True, "cache": cache_obj, "cached": True})
+                    return _json_no_cache({"ok": True, "cache": cache_obj, "cached": True})
             except Exception:
                 pass
     if not fetch_one("SELECT id FROM customers WHERE id = %s", (musteri_id,)):
-        return jsonify({"ok": False, "mesaj": "Müşteri bulunamadı."}), 404
+        return _json_no_cache({"ok": False, "mesaj": "Müşteri bulunamadı."}, 404)
     payload = _upsert_aylik_grid_cache(musteri_id)
-    return jsonify({"ok": True, "cache": payload or {}, "cached": False})
+    return _json_no_cache({"ok": True, "cache": payload or {}, "cached": False})
 
 
 @bp.route("/api/reel-donem-tutarlar")
@@ -9564,6 +9577,101 @@ def api_reel_donem_tutar_upsert():
     except Exception:
         pass
     return jsonify({"ok": True})
+
+
+@bp.route("/api/reel-tahsilat-esitle-onizleme", methods=["GET"])
+@giris_gerekli
+def api_reel_tahsilat_esitle_onizleme():
+    """
+    Bir müşterinin TÜM musteri_reel_donem_tutar kayıtlarını tarar, her
+    donem_yil için 12 aylık periyottaki OTOMATİK (tahsil_eden IS NULL,
+    |AYLIK_TAH| GRID_TAH_PATTERN'e uyan) tahsilat kayıtlarının mevcut
+    tutarını reel tutar ile karşılaştırır. HİÇBİR YAZMA İŞLEMİ YAPMAZ.
+    """
+    musteri_id = request.args.get("musteri_id", type=int)
+    if not musteri_id:
+        return jsonify({"ok": False, "mesaj": "musteri_id gerekli."}), 400
+
+    cust = fetch_one("SELECT id FROM customers WHERE id = %s", (musteri_id,))
+    if not cust:
+        return jsonify({"ok": False, "mesaj": "Müşteri bulunamadı."}), 404
+
+    kyc = _musteri_kyc_grup_for_aylik_grid(musteri_id)
+    if not kyc:
+        return jsonify({"ok": False, "mesaj": "Müşteride sözleşme/KYC kaydı yok."}), 400
+
+    bas_soz = _aylik_grid_coerce_date(kyc.get("sozlesme_tarihi"))
+    if not bas_soz:
+        return jsonify({"ok": False, "mesaj": "Sözleşme başlangıç tarihi yok."}), 400
+
+    artis_d = _aylik_grid_coerce_date(kyc.get("kira_artis_tarihi")) or bas_soz
+    artis_month = int(artis_d.month)
+    artis_day = int(artis_d.day)
+
+    _ensure_musteri_reel_donem_tutar_table()
+    reel_rows = fetch_all(
+        "SELECT donem_yil, tutar_kdv_dahil FROM musteri_reel_donem_tutar WHERE musteri_id = %s ORDER BY donem_yil",
+        (musteri_id,),
+    ) or []
+
+    degisecekler = []
+    toplam_fark = 0.0
+    for rr in reel_rows:
+        try:
+            donem_yil = int(rr.get("donem_yil"))
+            reel_tutar = round(float(rr.get("tutar_kdv_dahil") or 0), 2)
+        except (TypeError, ValueError):
+            continue
+        if reel_tutar <= 0:
+            continue
+        ay_keys = _reel_donem_ay_keys_for_period(bas_soz, donem_yil, artis_month, artis_day)
+        for ay_key in ay_keys:
+            try:
+                yy, mm = ay_key.split("-")
+                yy, mm = int(yy), int(mm)
+                iso = date(yy, mm, 1).isoformat()
+            except (ValueError, TypeError):
+                continue
+            pat = f"%|AYLIK_TAH|{iso}|%"
+            rows = fetch_all(
+                """
+                SELECT id, tahsilat_tarihi, tutar, aciklama
+                FROM tahsilatlar
+                WHERE (musteri_id = %s OR customer_id = %s)
+                  AND tahsil_eden IS NULL
+                  AND COALESCE(aciklama, '') LIKE %s
+                """,
+                (musteri_id, musteri_id, pat),
+            ) or []
+            for r in rows:
+                ac = str(r.get("aciklama") or "")
+                if not GRID_TAH_PATTERN.match(ac):
+                    continue
+                try:
+                    eski_tutar = round(float(r.get("tutar") or 0), 2)
+                except (TypeError, ValueError):
+                    continue
+                fark = round(reel_tutar - eski_tutar, 2)
+                if abs(fark) < 0.01:
+                    continue
+                degisecekler.append({
+                    "tahsilat_id": r.get("id"),
+                    "ay": ay_key,
+                    "donem_yil": donem_yil,
+                    "tahsilat_tarihi": str(r.get("tahsilat_tarihi") or "")[:10],
+                    "eski_tutar": eski_tutar,
+                    "yeni_tutar": reel_tutar,
+                    "fark": fark,
+                })
+                toplam_fark += fark
+
+    return jsonify({
+        "ok": True,
+        "musteri_id": musteri_id,
+        "degisecek_sayisi": len(degisecekler),
+        "toplam_fark": round(toplam_fark, 2),
+        "degisecekler": degisecekler,
+    })
 
 
 @bp.route("/api/reel-donem-tutar", methods=["DELETE"])
@@ -10375,7 +10483,7 @@ def api_aylik_tahsil_durum():
     """Aylık grid ile uyumlu: tam ödenmiş ay anahtarları (YYYY-M). Ödeme tarihi ≠ tam kapatma."""
     musteri_id = request.args.get("musteri_id", type=int)
     if not musteri_id:
-        return jsonify({"ok": False, "mesaj": "musteri_id gerekli."}), 400
+        return _json_no_cache({"ok": False, "mesaj": "musteri_id gerekli."}, 400)
     mid = int(musteri_id)
     # Önce DB önbelleği (grid-cache ile aynı payload); yoksa tek seferlik hesap.
     payload = _read_aylik_grid_cache_payload(mid)
@@ -10393,9 +10501,7 @@ def api_aylik_tahsil_durum():
         marker_ay_only=marker_ay_only,
         ekstre_ay_only=ekstre_ay_only,
     )
-    resp = jsonify({"ok": True, "aylar": aylar})
-    resp.headers["Cache-Control"] = "private, max-age=8"
-    return resp
+    return _json_no_cache({"ok": True, "aylar": aylar})
 
 
 @bp.route('/api/cari-ekstre-b')
