@@ -24162,6 +24162,14 @@ async function kaydet(event) {
                                 if (manInpFresh && m.odeme_duzeni_manuel != null) {
                                     manInpFresh.value = String(m.odeme_duzeni_manuel);
                                 }
+                                if (typeof syncDurumUI === 'function') {
+                                    var dnormFresh = (m.durum && String(m.durum).toLowerCase().trim() === 'pasif') ? 'pasif' : 'aktif';
+                                    if (dnormFresh === 'pasif') {
+                                        syncDurumUI('pasif', { kapanis: m.kapanis_tarihi, kapanisAy: m.kapanis_sonrasi_borc_ay });
+                                    } else {
+                                        syncDurumUI('aktif', {});
+                                    }
+                                }
                                 if (typeof sozlesmelerOdemeDuzeniManuelUygula === 'function') {
                                     sozlesmelerOdemeDuzeniManuelUygula();
                                 }
