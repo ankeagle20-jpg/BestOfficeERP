@@ -2162,6 +2162,7 @@ def _aylik_tahsil_durum_finalize_ay_set(
     payload=None,
     marker_ay_only=None,
     ekstre_ay_only=None,
+    panel_by_iso=None,
 ) -> list[str]:
     """Marker + ekstre birleşimi ve kısmi tahsilat kuralları (grid payload tek kaynak)."""
     mid = int(musteri_id)
@@ -2206,7 +2207,7 @@ def _aylik_tahsil_durum_finalize_ay_set(
                 ay_set.add(nk)
     try:
         tol_p = float(AYLIK_GRID_TAM_ODENDI_TOLERANS)
-        panel_by_iso = _load_musteri_panel_by_iso(mid) or {}
+        panel_by_iso = panel_by_iso if panel_by_iso is not None else (_load_musteri_panel_by_iso(mid) or {})
         for iso_k, prow in panel_by_iso.items():
             if not isinstance(prow, dict):
                 continue
@@ -5707,13 +5708,13 @@ def _ekstre_payload_odenen_zenginlestir(
         a["tutar_kdv_dahil"] = round(max(brut, 0.01), 2)
 
 
-def _aylik_grid_cache_payload_tahsil_guncelle(musteri_id, payload):
+def _aylik_grid_cache_payload_tahsil_guncelle(musteri_id, payload, panel_by_iso=None):
     """Disk önbelleği dönerken tahsil/kısmi alanlarını DB ile yenile (sayfa yenilemesinde turuncu kalan)."""
     if not isinstance(payload, dict):
         return payload
     try:
         mid = int(musteri_id)
-        panel_db = _load_musteri_panel_by_iso(mid)
+        panel_db = panel_by_iso if panel_by_iso is not None else _load_musteri_panel_by_iso(mid)
         tahsil_rows = _ekstre_tahsil_rows_for_musteri(mid)
         tahsil_map = _aylik_tahsil_tutar_map(mid, tahsil_rows=tahsil_rows)
         batch = _ekstre_tahsil_batch_maps_from_rows(tahsil_rows)
@@ -10640,12 +10641,13 @@ def api_aylik_tahsil_durum():
     if not musteri_id:
         return _json_no_cache({"ok": False, "mesaj": "musteri_id gerekli."}, 400)
     mid = int(musteri_id)
+    panel_by_iso = _load_musteri_panel_by_iso(mid)
     # Önce DB önbelleği (grid-cache ile aynı payload); yoksa tek seferlik hesap.
     payload = _read_aylik_grid_cache_payload(mid)
     if payload is None:
         payload = _build_aylik_grid_cache_payload(mid, tufe_map=_tufe_map_by_year_month_cached())
     else:
-        payload = _aylik_grid_cache_payload_tahsil_guncelle(mid, payload)
+        payload = _aylik_grid_cache_payload_tahsil_guncelle(mid, payload, panel_by_iso=panel_by_iso)
     marker_ay_only = _aylik_tahsil_marker_aylar_set_normalized(mid)
     ekstre_ay_only = _aylik_tahsil_ekstre_eslesme_aylar_set_normalized(mid)
     ay_set = _aylik_tahsil_edilen_aylar_from_payload(payload) if payload else set()
@@ -10655,6 +10657,7 @@ def api_aylik_tahsil_durum():
         payload=payload,
         marker_ay_only=marker_ay_only,
         ekstre_ay_only=ekstre_ay_only,
+        panel_by_iso=panel_by_iso,
     )
     return _json_no_cache({"ok": True, "aylar": aylar})
 
