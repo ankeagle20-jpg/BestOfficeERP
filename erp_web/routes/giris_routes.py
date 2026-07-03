@@ -9674,6 +9674,129 @@ def api_reel_tahsilat_esitle_onizleme():
     })
 
 
+@bp.route("/api/reel-tahsilat-esitle-uygula", methods=["POST"])
+@giris_gerekli
+def api_reel_tahsilat_esitle_uygula():
+    """
+    api_reel_tahsilat_esitle_onizleme ile AYNI filtreleme mantığını
+    kullanarak, otomatik (tahsil_eden IS NULL, GRID_TAH_PATTERN'e uyan)
+    tahsilat kayıtlarının tutarını reel tutara günceller. GERÇEK UPDATE
+    YAPAR — güvenlik: body'de onay=true zorunlu, aksi halde çalışmaz.
+    """
+    data = request.get_json(silent=True) or {}
+    musteri_id = data.get("musteri_id")
+    try:
+        musteri_id = int(musteri_id)
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "mesaj": "musteri_id gerekli."}), 400
+
+    onay = data.get("onay")
+    if onay is not True:
+        return jsonify({
+            "ok": False,
+            "mesaj": "Güvenlik: onay=true parametresi zorunlu. Önce önizleme endpoint'ini kullanın."
+        }), 400
+
+    cust = fetch_one("SELECT id FROM customers WHERE id = %s", (musteri_id,))
+    if not cust:
+        return jsonify({"ok": False, "mesaj": "Müşteri bulunamadı."}), 404
+
+    kyc = _musteri_kyc_grup_for_aylik_grid(musteri_id)
+    if not kyc:
+        return jsonify({"ok": False, "mesaj": "Müşteride sözleşme/KYC kaydı yok."}), 400
+
+    bas_soz = _aylik_grid_coerce_date(kyc.get("sozlesme_tarihi"))
+    if not bas_soz:
+        return jsonify({"ok": False, "mesaj": "Sözleşme başlangıç tarihi yok."}), 400
+
+    artis_d = _aylik_grid_coerce_date(kyc.get("kira_artis_tarihi")) or bas_soz
+    artis_month = int(artis_d.month)
+    artis_day = int(artis_d.day)
+
+    _ensure_musteri_reel_donem_tutar_table()
+    reel_rows = fetch_all(
+        "SELECT donem_yil, tutar_kdv_dahil FROM musteri_reel_donem_tutar WHERE musteri_id = %s ORDER BY donem_yil",
+        (musteri_id,),
+    ) or []
+
+    guncellenen = []
+    toplam_fark = 0.0
+
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+            for rr in reel_rows:
+                try:
+                    donem_yil = int(rr.get("donem_yil"))
+                    reel_tutar = round(float(rr.get("tutar_kdv_dahil") or 0), 2)
+                except (TypeError, ValueError):
+                    continue
+                if reel_tutar <= 0:
+                    continue
+                ay_keys = _reel_donem_ay_keys_for_period(bas_soz, donem_yil, artis_month, artis_day)
+                for ay_key in ay_keys:
+                    try:
+                        yy, mm = ay_key.split("-")
+                        yy, mm = int(yy), int(mm)
+                        iso = date(yy, mm, 1).isoformat()
+                    except (ValueError, TypeError):
+                        continue
+                    pat = f"%|AYLIK_TAH|{iso}|%"
+                    cur.execute(
+                        """
+                        SELECT id, tutar, aciklama
+                        FROM tahsilatlar
+                        WHERE (musteri_id = %s OR customer_id = %s)
+                          AND tahsil_eden IS NULL
+                          AND COALESCE(aciklama, '') LIKE %s
+                        """,
+                        (musteri_id, musteri_id, pat),
+                    )
+                    rows = cur.fetchall() or []
+                    for r in rows:
+                        ac = str(r.get("aciklama") or "")
+                        if not GRID_TAH_PATTERN.match(ac):
+                            continue
+                        try:
+                            eski_tutar = round(float(r.get("tutar") or 0), 2)
+                        except (TypeError, ValueError):
+                            continue
+                        fark = round(reel_tutar - eski_tutar, 2)
+                        if abs(fark) < 0.01:
+                            continue
+                        tid = r.get("id")
+                        cur.execute(
+                            "UPDATE tahsilatlar SET tutar = %s WHERE id = %s",
+                            (reel_tutar, tid),
+                        )
+                        guncellenen.append({
+                            "tahsilat_id": tid,
+                            "ay": ay_key,
+                            "eski_tutar": eski_tutar,
+                            "yeni_tutar": reel_tutar,
+                            "fark": fark,
+                        })
+                        toplam_fark += fark
+    except Exception as e:
+        logging.getLogger(__name__).exception(
+            "reel_tahsilat_esitle_uygula musteri_id=%s", musteri_id
+        )
+        return jsonify({"ok": False, "mesaj": f"İşlem başarısız, hiçbir değişiklik kaydedilmedi: {e}"}), 500
+
+    try:
+        _ekstre_invalidate_after_change(musteri_id)
+    except Exception:
+        pass
+
+    return jsonify({
+        "ok": True,
+        "musteri_id": musteri_id,
+        "guncellenen_sayisi": len(guncellenen),
+        "toplam_fark": round(toplam_fark, 2),
+        "guncellenen": guncellenen,
+    })
+
+
 @bp.route("/api/reel-donem-tutar", methods=["DELETE"])
 @giris_gerekli
 def api_reel_donem_tutar_delete():
