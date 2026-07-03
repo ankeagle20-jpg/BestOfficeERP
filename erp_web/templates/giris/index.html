@@ -7898,7 +7898,7 @@ function whatsappGecikenListeYukle(force, haricGoster) {
                     'border:1px solid #2d4060;border-radius:4px;padding:6px;font-size:12px;">' +
                     (it.mesaj || '') + '</textarea></td>' +
                     '</tr>';
-            }).join('');
+            }).join('') + whatsappGecikenToplamSatiriHtml(gosterilecekListe);
             try { whatsappTabloResizableKur(); } catch (eResz) {}
         })
         .catch(e => {
@@ -8267,6 +8267,24 @@ function whatsappGrup2FilterBtnStilGuncelle() {
         : 'Grup 2 ▾';
 }
 
+function whatsappParaFormat(n) {
+    return n ? n.toLocaleString('tr-TR', { minimumFractionDigits: 2 }) + ' TL' : '-';
+}
+
+function whatsappGecikenToplamSatiriHtml(liste) {
+    if (!liste || !liste.length) return '';
+    var sumIlk = liste.reduce(function (s, it) { return s + (Number(it.ilk_kira) || 0); }, 0);
+    var sumGuncel = liste.reduce(function (s, it) { return s + (Number(it.guncel) || 0); }, 0);
+    var sumToplam = liste.reduce(function (s, it) { return s + (Number(it.toplam) || 0); }, 0);
+    return '<tr style="background:#152a3d;font-weight:600;border-top:2px solid #4fc3f7;">' +
+        '<td colspan="8" style="text-align:right;color:#b3e5fc;">TOPLAM (' + liste.length + ' müşteri)</td>' +
+        '<td>' + whatsappParaFormat(sumIlk) + '</td>' +
+        '<td>' + whatsappParaFormat(sumGuncel) + '</td>' +
+        '<td>' + whatsappParaFormat(sumToplam) + '</td>' +
+        '<td></td>' +
+        '</tr>';
+}
+
 function whatsappGecikenListesiYenidenCiz() {
     const tbody = document.getElementById('whatsapp-liste-tbody');
     if (!tbody || !__whatsappGecikenListe) return;
@@ -8322,7 +8340,7 @@ function whatsappGecikenListesiYenidenCiz() {
             'border:1px solid #2d4060;border-radius:4px;padding:6px;font-size:12px;">' +
             (it.mesaj || '') + '</textarea></td>' +
             '</tr>';
-    }).join('');
+    }).join('') + whatsappGecikenToplamSatiriHtml(gosterilecekListe);
     try { whatsappTabloResizableKur(); } catch (eResz) {}
 }
 
