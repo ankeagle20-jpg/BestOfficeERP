@@ -999,6 +999,32 @@ def _aylik_grid_cache_matches_kyc(musteri_id, cache_obj):
     return True
 
 
+def _aylik_grid_cache_horizon_stale(musteri_id, cache_obj):
+    """
+    Aktif müşteride cache'in ufku (bitis) güncel mi? Günde en fazla 1 kez
+    kontrol edilir (updated_at bugünse atlanır, performans için).
+    """
+    if not isinstance(cache_obj, dict):
+        return False
+    try:
+        updated_raw = str(cache_obj.get("updated_at") or "")[:10]
+        bugun_iso = date.today().isoformat()
+        if updated_raw == bugun_iso:
+            return False  # bugün zaten kontrol edildi/inşa edildi, tekrar bakma
+    except Exception:
+        pass
+    row = fetch_one("SELECT durum FROM customers WHERE id = %s", (musteri_id,))
+    if not row or str(row.get("durum") or "").strip().lower() != "aktif":
+        return False
+    cache_bitis = _aylik_grid_coerce_date(cache_obj.get("bitis"))
+    if not cache_bitis:
+        return False
+    bugun = date.today()
+    if cache_bitis <= bugun:
+        return True
+    return False
+
+
 _tufe_map_mem = {"ts": 0.0, "data": None}
 
 
@@ -9407,13 +9433,17 @@ def api_aylik_grid_cache():
         try:
             mem_hit = _aylik_grid_payload_mem.get(int(musteri_id))
             if mem_hit and (time.time() - float(mem_hit[0])) < 60.0 and isinstance(mem_hit[1], dict):
-                mem_payload = _aylik_grid_cache_payload_tahsil_guncelle(musteri_id, mem_hit[1])
-                mem_payload = _aylik_grid_payload_reel_overlay_from_db(musteri_id, mem_payload)
-                try:
-                    _aylik_grid_payload_mem[int(musteri_id)] = (time.time(), mem_payload)
-                except (TypeError, ValueError):
-                    pass
-                return _json_no_cache({"ok": True, "cache": mem_payload, "cached": True, "mem": True})
+                cache_gecerli = True
+                if cache_gecerli and _aylik_grid_cache_horizon_stale(musteri_id, mem_hit[1]):
+                    cache_gecerli = False
+                if cache_gecerli:
+                    mem_payload = _aylik_grid_cache_payload_tahsil_guncelle(musteri_id, mem_hit[1])
+                    mem_payload = _aylik_grid_payload_reel_overlay_from_db(musteri_id, mem_payload)
+                    try:
+                        _aylik_grid_payload_mem[int(musteri_id)] = (time.time(), mem_payload)
+                    except (TypeError, ValueError):
+                        pass
+                    return _json_no_cache({"ok": True, "cache": mem_payload, "cached": True, "mem": True})
         except (TypeError, ValueError):
             pass
         row = fetch_one("SELECT payload FROM musteri_aylik_grid_cache WHERE musteri_id = %s", (musteri_id,))
@@ -9434,6 +9464,8 @@ def api_aylik_grid_cache():
                 if not cache_gecerli and skip_match and isinstance(cache_obj, dict):
                     aylar = cache_obj.get("aylar")
                     cache_gecerli = isinstance(aylar, list) and len(aylar) > 0
+                if cache_gecerli and _aylik_grid_cache_horizon_stale(musteri_id, cache_obj):
+                    cache_gecerli = False
                 if cache_gecerli:
                     cache_obj = _aylik_grid_cache_payload_tahsil_guncelle(musteri_id, cache_obj)
                     cache_obj = _aylik_grid_payload_reel_overlay_from_db(musteri_id, cache_obj)
