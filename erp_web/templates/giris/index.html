@@ -7864,6 +7864,7 @@ function whatsappGecikenListeYukle(force, haricGoster) {
                     return grup2Filtre0.some(function (g) { return itGrup2.indexOf(g) !== -1; });
                 });
             }
+            whatsappOzetGuncelle(gosterilecekListe, __whatsappGecikenListe, d.tarih);
             tbody.innerHTML = gosterilecekListe.map((it) => {
                 const idx = __whatsappGecikenListe.indexOf(it);
                 const tutarTxt = it.tutar ? it.tutar.toLocaleString('tr-TR', {minimumFractionDigits:2}) + ' TL' : '-';
@@ -8285,6 +8286,19 @@ function whatsappGecikenToplamSatiriHtml(liste) {
         '</tr>';
 }
 
+function whatsappOzetGuncelle(gosterilecekListe, toplamListe, tarih) {
+    var ozet = document.getElementById('whatsapp-liste-ozet');
+    if (!ozet) return;
+    var gosterilen = gosterilecekListe.length;
+    var toplam = toplamListe.length;
+    var tarihTxt = tarih ? ' (' + tarih + ')' : '';
+    if (gosterilen === toplam) {
+        ozet.textContent = gosterilen + ' müşteri gecikmiş durumda' + tarihTxt;
+    } else {
+        ozet.textContent = gosterilen + ' / ' + toplam + ' müşteri gösteriliyor (filtre uygulanıyor)' + tarihTxt;
+    }
+}
+
 function whatsappGecikenListesiYenidenCiz() {
     const tbody = document.getElementById('whatsapp-liste-tbody');
     if (!tbody || !__whatsappGecikenListe) return;
@@ -8302,6 +8316,7 @@ function whatsappGecikenListesiYenidenCiz() {
             return grup2Filtre.some(function (g) { return itGrup2.indexOf(g) !== -1; });
         });
     }
+    whatsappOzetGuncelle(gosterilecekListe, __whatsappGecikenListe, null);
     if (!gosterilecekListe.length) {
         tbody.innerHTML = '<tr><td colspan="12" style="color:#90a4ae;">Bu filtreye uyan müşteri yok.</td></tr>';
         return;
