@@ -9592,83 +9592,97 @@ def api_reel_donem_tutar_upsert():
         (musteri_id, donem_yil, tutar, giris_tip, giris_tutar, hibrit_toplam, hibrit_net, hibrit_banka),
     )
     try:
-        _cari_ekstre_api_cache.clear()
+        _reel_tahsilat_esitle_calistir(musteri_id, sadece_donem_yil=donem_yil)
     except Exception:
-        pass
-    patch = {}
-    # Senkron - ama sadece cache sil,
-    # frontend force=1 ile yeniden build eder
-    try:
-        _invalidate_aylik_grid_payload_mem(int(musteri_id))
-        execute(
-            "DELETE FROM musteri_aylik_grid_cache "
-            "WHERE musteri_id=%s",
-            (int(musteri_id),),
+        logging.getLogger(__name__).exception(
+            "reel_upsert esitle musteri_id=%s donem_yil=%s", musteri_id, donem_yil
         )
-        if patch:
-            _save_musteri_panel_by_iso(
-                int(musteri_id), patch,
-                prune_no_db_tahsil=False,
-            )
+    try:
+        _ekstre_invalidate_after_change(musteri_id)
     except Exception:
         pass
     return jsonify({"ok": True})
 
 
-@bp.route("/api/reel-tahsilat-esitle-onizleme", methods=["GET"])
-@giris_gerekli
-def api_reel_tahsilat_esitle_onizleme():
+def _reel_tahsilat_esitle_calistir(
+    musteri_id: int,
+    *,
+    sadece_donem_yil: int | None = None,
+    dry_run: bool = False,
+) -> dict:
     """
-    Bir müşterinin TÜM musteri_reel_donem_tutar kayıtlarını tarar, her
-    donem_yil için 12 aylık periyottaki OTOMATİK (tahsil_eden IS NULL,
-    |AYLIK_TAH| GRID_TAH_PATTERN'e uyan) tahsilat kayıtlarının mevcut
-    tutarını reel tutar ile karşılaştırır. HİÇBİR YAZMA İŞLEMİ YAPMAZ.
+    Otomatik tahsilatları (tahsil_eden IS NULL + GRID_TAH_PATTERN) reel tutara eşitler.
+    dry_run=True  → sadece degisecekler listesi (önizleme)
+    dry_run=False → gerçek UPDATE (transaction içinde)
+    sadece_donem_yil verilirse yalnız o dönem yılı taranır.
+    KYC yoksa boş sonuç döner, hata fırlatmaz.
     """
-    musteri_id = request.args.get("musteri_id", type=int)
-    if not musteri_id:
-        return jsonify({"ok": False, "mesaj": "musteri_id gerekli."}), 400
-
-    cust = fetch_one("SELECT id FROM customers WHERE id = %s", (musteri_id,))
-    if not cust:
-        return jsonify({"ok": False, "mesaj": "Müşteri bulunamadı."}), 404
+    degisecekler = []
+    guncellenen = []
+    toplam_fark = 0.0
 
     kyc = _musteri_kyc_grup_for_aylik_grid(musteri_id)
     if not kyc:
-        return jsonify({"ok": False, "mesaj": "Müşteride sözleşme/KYC kaydı yok."}), 400
+        if dry_run:
+            return {"degisecekler": [], "toplam_fark": 0.0}
+        return {"guncellenen": [], "toplam_fark": 0.0}
 
     bas_soz = _aylik_grid_coerce_date(kyc.get("sozlesme_tarihi"))
     if not bas_soz:
-        return jsonify({"ok": False, "mesaj": "Sözleşme başlangıç tarihi yok."}), 400
+        if dry_run:
+            return {"degisecekler": [], "toplam_fark": 0.0}
+        return {"guncellenen": [], "toplam_fark": 0.0}
 
     artis_d = _aylik_grid_coerce_date(kyc.get("kira_artis_tarihi")) or bas_soz
     artis_month = int(artis_d.month)
     artis_day = int(artis_d.day)
 
     _ensure_musteri_reel_donem_tutar_table()
-    reel_rows = fetch_all(
-        "SELECT donem_yil, tutar_kdv_dahil FROM musteri_reel_donem_tutar WHERE musteri_id = %s ORDER BY donem_yil",
-        (musteri_id,),
-    ) or []
+    if sadece_donem_yil is not None:
+        reel_rows = fetch_all(
+            """
+            SELECT donem_yil, tutar_kdv_dahil
+            FROM musteri_reel_donem_tutar
+            WHERE musteri_id = %s AND donem_yil = %s
+            ORDER BY donem_yil
+            """,
+            (musteri_id, sadece_donem_yil),
+        ) or []
+    else:
+        reel_rows = fetch_all(
+            """
+            SELECT donem_yil, tutar_kdv_dahil
+            FROM musteri_reel_donem_tutar
+            WHERE musteri_id = %s
+            ORDER BY donem_yil
+            """,
+            (musteri_id,),
+        ) or []
 
-    degisecekler = []
-    toplam_fark = 0.0
-    for rr in reel_rows:
-        try:
-            donem_yil = int(rr.get("donem_yil"))
-            reel_tutar = round(float(rr.get("tutar_kdv_dahil") or 0), 2)
-        except (TypeError, ValueError):
-            continue
-        if reel_tutar <= 0:
-            continue
-        ay_keys = _reel_donem_ay_keys_for_period(bas_soz, donem_yil, artis_month, artis_day)
-        for ay_key in ay_keys:
+    def _iter_matches():
+        for rr in reel_rows:
             try:
-                yy, mm = ay_key.split("-")
-                yy, mm = int(yy), int(mm)
-                iso = date(yy, mm, 1).isoformat()
-            except (ValueError, TypeError):
+                donem_yil = int(rr.get("donem_yil"))
+                reel_tutar = round(float(rr.get("tutar_kdv_dahil") or 0), 2)
+            except (TypeError, ValueError):
                 continue
-            pat = f"%|AYLIK_TAH|{iso}|%"
+            if reel_tutar <= 0:
+                continue
+            ay_keys = _reel_donem_ay_keys_for_period(
+                bas_soz, donem_yil, artis_month, artis_day
+            )
+            for ay_key in ay_keys:
+                try:
+                    yy, mm = ay_key.split("-")
+                    yy, mm = int(yy), int(mm)
+                    iso = date(yy, mm, 1).isoformat()
+                except (ValueError, TypeError):
+                    continue
+                pat = f"%|AYLIK_TAH|{iso}|%"
+                yield donem_yil, ay_key, reel_tutar, pat
+
+    if dry_run:
+        for donem_yil, ay_key, reel_tutar, pat in _iter_matches():
             rows = fetch_all(
                 """
                 SELECT id, tahsilat_tarihi, tutar, aciklama
@@ -9700,6 +9714,84 @@ def api_reel_tahsilat_esitle_onizleme():
                     "fark": fark,
                 })
                 toplam_fark += fark
+        return {
+            "degisecekler": degisecekler,
+            "toplam_fark": round(toplam_fark, 2),
+        }
+
+    with get_db() as conn:
+        cur = conn.cursor()
+        for donem_yil, ay_key, reel_tutar, pat in _iter_matches():
+            cur.execute(
+                """
+                SELECT id, tutar, aciklama
+                FROM tahsilatlar
+                WHERE (musteri_id = %s OR customer_id = %s)
+                  AND tahsil_eden IS NULL
+                  AND COALESCE(aciklama, '') LIKE %s
+                """,
+                (musteri_id, musteri_id, pat),
+            )
+            rows = cur.fetchall() or []
+            for r in rows:
+                ac = str(r.get("aciklama") or "")
+                if not GRID_TAH_PATTERN.match(ac):
+                    continue
+                try:
+                    eski_tutar = round(float(r.get("tutar") or 0), 2)
+                except (TypeError, ValueError):
+                    continue
+                fark = round(reel_tutar - eski_tutar, 2)
+                if abs(fark) < 0.01:
+                    continue
+                tid = r.get("id")
+                cur.execute(
+                    "UPDATE tahsilatlar SET tutar = %s WHERE id = %s",
+                    (reel_tutar, tid),
+                )
+                guncellenen.append({
+                    "tahsilat_id": tid,
+                    "ay": ay_key,
+                    "eski_tutar": eski_tutar,
+                    "yeni_tutar": reel_tutar,
+                    "fark": fark,
+                })
+                toplam_fark += fark
+
+    return {
+        "guncellenen": guncellenen,
+        "toplam_fark": round(toplam_fark, 2),
+    }
+
+
+@bp.route("/api/reel-tahsilat-esitle-onizleme", methods=["GET"])
+@giris_gerekli
+def api_reel_tahsilat_esitle_onizleme():
+    """
+    Bir müşterinin TÜM musteri_reel_donem_tutar kayıtlarını tarar, her
+    donem_yil için 12 aylık periyottaki OTOMATİK (tahsil_eden IS NULL,
+    |AYLIK_TAH| GRID_TAH_PATTERN'e uyan) tahsilat kayıtlarının mevcut
+    tutarını reel tutar ile karşılaştırır. HİÇBİR YAZMA İŞLEMİ YAPMAZ.
+    """
+    musteri_id = request.args.get("musteri_id", type=int)
+    if not musteri_id:
+        return jsonify({"ok": False, "mesaj": "musteri_id gerekli."}), 400
+
+    cust = fetch_one("SELECT id FROM customers WHERE id = %s", (musteri_id,))
+    if not cust:
+        return jsonify({"ok": False, "mesaj": "Müşteri bulunamadı."}), 404
+
+    kyc = _musteri_kyc_grup_for_aylik_grid(musteri_id)
+    if not kyc:
+        return jsonify({"ok": False, "mesaj": "Müşteride sözleşme/KYC kaydı yok."}), 400
+
+    bas_soz = _aylik_grid_coerce_date(kyc.get("sozlesme_tarihi"))
+    if not bas_soz:
+        return jsonify({"ok": False, "mesaj": "Sözleşme başlangıç tarihi yok."}), 400
+
+    sonuc = _reel_tahsilat_esitle_calistir(musteri_id, dry_run=True)
+    degisecekler = sonuc.get("degisecekler") or []
+    toplam_fark = sonuc.get("toplam_fark") or 0.0
 
     return jsonify({
         "ok": True,
@@ -9745,79 +9837,16 @@ def api_reel_tahsilat_esitle_uygula():
     if not bas_soz:
         return jsonify({"ok": False, "mesaj": "Sözleşme başlangıç tarihi yok."}), 400
 
-    artis_d = _aylik_grid_coerce_date(kyc.get("kira_artis_tarihi")) or bas_soz
-    artis_month = int(artis_d.month)
-    artis_day = int(artis_d.day)
-
-    _ensure_musteri_reel_donem_tutar_table()
-    reel_rows = fetch_all(
-        "SELECT donem_yil, tutar_kdv_dahil FROM musteri_reel_donem_tutar WHERE musteri_id = %s ORDER BY donem_yil",
-        (musteri_id,),
-    ) or []
-
-    guncellenen = []
-    toplam_fark = 0.0
-
     try:
-        with get_db() as conn:
-            cur = conn.cursor()
-            for rr in reel_rows:
-                try:
-                    donem_yil = int(rr.get("donem_yil"))
-                    reel_tutar = round(float(rr.get("tutar_kdv_dahil") or 0), 2)
-                except (TypeError, ValueError):
-                    continue
-                if reel_tutar <= 0:
-                    continue
-                ay_keys = _reel_donem_ay_keys_for_period(bas_soz, donem_yil, artis_month, artis_day)
-                for ay_key in ay_keys:
-                    try:
-                        yy, mm = ay_key.split("-")
-                        yy, mm = int(yy), int(mm)
-                        iso = date(yy, mm, 1).isoformat()
-                    except (ValueError, TypeError):
-                        continue
-                    pat = f"%|AYLIK_TAH|{iso}|%"
-                    cur.execute(
-                        """
-                        SELECT id, tutar, aciklama
-                        FROM tahsilatlar
-                        WHERE (musteri_id = %s OR customer_id = %s)
-                          AND tahsil_eden IS NULL
-                          AND COALESCE(aciklama, '') LIKE %s
-                        """,
-                        (musteri_id, musteri_id, pat),
-                    )
-                    rows = cur.fetchall() or []
-                    for r in rows:
-                        ac = str(r.get("aciklama") or "")
-                        if not GRID_TAH_PATTERN.match(ac):
-                            continue
-                        try:
-                            eski_tutar = round(float(r.get("tutar") or 0), 2)
-                        except (TypeError, ValueError):
-                            continue
-                        fark = round(reel_tutar - eski_tutar, 2)
-                        if abs(fark) < 0.01:
-                            continue
-                        tid = r.get("id")
-                        cur.execute(
-                            "UPDATE tahsilatlar SET tutar = %s WHERE id = %s",
-                            (reel_tutar, tid),
-                        )
-                        guncellenen.append({
-                            "tahsilat_id": tid,
-                            "ay": ay_key,
-                            "eski_tutar": eski_tutar,
-                            "yeni_tutar": reel_tutar,
-                            "fark": fark,
-                        })
-                        toplam_fark += fark
+        sonuc = _reel_tahsilat_esitle_calistir(musteri_id)
     except Exception as e:
         logging.getLogger(__name__).exception(
             "reel_tahsilat_esitle_uygula musteri_id=%s", musteri_id
         )
         return jsonify({"ok": False, "mesaj": f"İşlem başarısız, hiçbir değişiklik kaydedilmedi: {e}"}), 500
+
+    guncellenen = sonuc.get("guncellenen") or []
+    toplam_fark = sonuc.get("toplam_fark") or 0.0
 
     try:
         _ekstre_invalidate_after_change(musteri_id)
