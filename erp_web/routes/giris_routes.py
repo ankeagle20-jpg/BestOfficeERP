@@ -748,7 +748,11 @@ def apply_makbuz_dagitim_to_panel_db(
 
 
 def _apply_panel_by_iso_to_grid_payload(payload: dict, panel_by_iso: dict) -> None:
-    """Panel DB kaynağı grid önbellek aylarına yazar (yenilemede turuncu/yeşil kalır)."""
+    """Panel DB kaynağı grid önbellek aylarına tahsil/kalan bilgisini uygular.
+    Borç tutarının (brut_tutar_kdv) TEK kaynağı grid'in kendi hesabıdır
+    (TÜFE + reel overlay); panel'deki 'aylik' alanı ARTIK KULLANILMAZ,
+    çünkü stale/eski veri taşıyabilir ve reel overlay sonrası grid'i
+    yanlışlıkla eski değere geri çekebilir."""
     if not isinstance(payload, dict) or not panel_by_iso:
         return
     tol = float(AYLIK_GRID_TAM_ODENDI_TOLERANS)
@@ -763,16 +767,15 @@ def _apply_panel_by_iso_to_grid_payload(payload: dict, panel_by_iso: dict) -> No
         if not prow:
             continue
         try:
-            brut = round(float(prow.get("aylik") or a.get("brut_tutar_kdv") or 0), 2)
+            brut = round(float(a.get("brut_tutar_kdv") or a.get("tutar_kdv_dahil") or 0), 2)
             tah = round(float(prow.get("tahsil") or 0), 2)
-            kalan = round(max(float(prow.get("kalan") or 0), 0), 2)
         except (TypeError, ValueError):
             continue
+        kalan = round(max(brut - tah, 0), 2) if brut > tol else 0.0
         if brut > tol and tah >= brut - tol:
             kalan = 0.0
-        if brut > tol:
-            a["brut_tutar_kdv"] = brut
-            a["tutar_kdv_dahil"] = brut
+        # brut_tutar_kdv / tutar_kdv_dahil'e DOKUNULMAZ - grid'in kendi
+        # hesabi (TÜFE + reel overlay) korunur.
         a["odenen_tutar_kdv"] = tah
         a["kalan_tutar_kdv"] = kalan
         a["tahsil_edildi"] = kalan <= tol
