@@ -28507,7 +28507,9 @@ function cariEkstreYukle(opts) {
         var cmEk = nowEk.getMonth() + 1;
         var sonGunEk = new Date(cyEk, cmEk, 0).getDate();
         var curBitIso = cyEk + '-' + girisCariEkstrePad2(cmEk) + '-' + girisCariEkstrePad2(sonGunEk);
-        var varsayilanBit = sozBitIso || curBitIso;
+        var varsayilanBit = sozBitIso
+            ? (sozBitIso < curBitIso ? sozBitIso : curBitIso)
+            : curBitIso;
         var otomatikBitis = !bitis || window.__cariEkstreBitisOtomatik === true;
         if (otomatikBitis) {
             bitis = varsayilanBit;

@@ -8487,7 +8487,18 @@ def api_cari_ekstre():
     soz_bit = _aylik_grid_coerce_date((kyc or {}).get("sozlesme_bitis"))
     if soz_bit:
         soz_bit = _aylik_grid_effective_bitis(kyc, soz_bit) or soz_bit
-    def_bit = soz_bit or def_bit_cari_ay
+    cust_durum = (kyc or {}).get("durum") or ""
+    if str(cust_durum).strip().lower() == "aktif" and soz_bit:
+        if soz_bit >= date.today():
+            def_bit = min(soz_bit, def_bit_cari_ay)
+        else:
+            # Sözleşme bitişi zaten geçmişte kalmış (örn. yenileme
+            # sonrası KYC güncellenmemiş) - bunu dikkate almadan
+            # cari ay sonunu kullan, aksi halde bas>bit swap'i
+            # aralığı yanlış yönde genişletir.
+            def_bit = def_bit_cari_ay
+    else:
+        def_bit = soz_bit or def_bit_cari_ay
     baslangic = request.args.get("baslangic")
     bitis = request.args.get("bitis")
     try:
