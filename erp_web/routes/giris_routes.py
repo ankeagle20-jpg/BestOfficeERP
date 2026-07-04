@@ -9584,6 +9584,17 @@ def api_reel_donem_tutar_upsert():
     hibrit_banka = _optf(data.get("hibrit_banka"))
     if not fetch_one("SELECT id FROM customers WHERE id = %s", (musteri_id,)):
         return jsonify({"ok": False, "mesaj": "Müşteri bulunamadı."}), 404
+    kyc = _musteri_kyc_grup_for_aylik_grid(musteri_id)
+    bas_soz = _aylik_grid_coerce_date((kyc or {}).get("sozlesme_tarihi"))
+    if not bas_soz:
+        bas_soz = _aylik_grid_coerce_date((kyc or {}).get("rent_start_date"))
+    if bas_soz:
+        start_year = int(bas_soz.year)
+        if donem_yil == start_year:
+            return jsonify({
+                "ok": False,
+                "mesaj": "İlk sözleşme yılı için reel tutar girilemez.",
+            }), 400
     _ensure_musteri_reel_donem_tutar_table()
     execute(
         """

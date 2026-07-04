@@ -5793,14 +5793,14 @@ function sozlesmelerReelYilSecenekleriniDoldur() {
     var yStart = bas.getFullYear();
     var mapRef = (typeof window !== 'undefined' && window.__musteriReelDonemTutarlari) ? window.__musteriReelDonemTutarlari : {};
     var yEnd = sozlesmelerReelDonemYilUfku(v, mapRef);
-    for (var yy = yStart; yy <= yEnd; yy++) {
+    for (var yy = yStart + 1; yy <= yEnd; yy++) {
         var opt = document.createElement('option');
         opt.value = String(yy);
         opt.textContent = String(yy);
         sel.appendChild(opt);
     }
     var pi = parseInt(prev, 10);
-    if (prev && !isNaN(pi) && pi >= yStart && pi <= yEnd) sel.value = prev;
+    if (prev && !isNaN(pi) && pi >= yStart + 1 && pi <= yEnd) sel.value = prev;
     else sel.value = '';
     if (typeof girisAylikSatirYilSecenekDoldur === 'function') girisAylikSatirYilSecenekDoldur();
     sozlesmelerReelYilSecimineGoreTutarAlani();
