@@ -20964,6 +20964,12 @@ function girisKiraNakitTutarDegisti() {
     if (typeof sozlesmelerAylikGuncelle === 'function') sozlesmelerAylikGuncelle();
     girisAylikKiraKdvDahilGuncelle();
     if (typeof syncBildirgeKdvFromCariKart === 'function') syncBildirgeKdvFromCariKart();
+    if (typeof girisAylikSatirYilPanelDoldur === 'function') {
+        try { girisAylikSatirYilPanelDoldur(); } catch (e) {}
+    }
+    if (typeof girisTahsilatOzetGuncelle === 'function') {
+        try { girisTahsilatOzetGuncelle(); } catch (e) {}
+    }
 }
 function girisKiraBankaTutarDegisti() {
     var tBel = document.getElementById('kira_banka_tutar');
@@ -20972,6 +20978,12 @@ function girisKiraBankaTutarDegisti() {
     if (typeof sozlesmelerAylikGuncelle === 'function') sozlesmelerAylikGuncelle();
     girisAylikKiraKdvDahilGuncelle();
     if (typeof syncBildirgeKdvFromCariKart === 'function') syncBildirgeKdvFromCariKart();
+    if (typeof girisAylikSatirYilPanelDoldur === 'function') {
+        try { girisAylikSatirYilPanelDoldur(); } catch (e) {}
+    }
+    if (typeof girisTahsilatOzetGuncelle === 'function') {
+        try { girisTahsilatOzetGuncelle(); } catch (e) {}
+    }
 }
 
 // Tamamlanma yüzdesini hesapla (skipAylikGrid: müşteri yüklenirken grid ayrı paralel çekilir)
