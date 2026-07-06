@@ -7224,6 +7224,13 @@ function sozlesmelerReelTahsilatEsitleUygula() {
             sozlesmelerReelTahsilatEsitleModalKapat();
             if (typeof girisTahsilatEkstreTazeYenile === 'function') girisTahsilatEkstreTazeYenile();
             if (typeof sozlesmelerAylikHizliYukle === 'function') sozlesmelerAylikHizliYukle(true);
+            if (typeof girisTahsilatYilAyPanelGuncelle === 'function' && window.__tahsilatYillikAcik) {
+                Object.keys(window.__tahsilatYillikAcik).forEach(function (yy) {
+                    if (window.__tahsilatYillikAcik[yy]) {
+                        try { girisTahsilatYilAyPanelGuncelle(parseInt(yy, 10)); } catch (e) {}
+                    }
+                });
+            }
         } else {
             alert('Hata: ' + (d.mesaj || 'İşlem başarısız.'));
             if (uygulaBtn) uygulaBtn.disabled = false;
@@ -18834,6 +18841,9 @@ function girisTahsilatYilAyPanelGuncelle(donemYil, opts) {
         + '<button type="button" class="btn-aylik-sec" onclick="girisTahsilatYilAySecilenleriTahsilet(' + donemYil + ', event)" title="İşaretli ayları tahsil et (boşsa tam aylık)">Seçilenleri Tahsilet</button>'
         + '<button type="button" class="btn-aylik-sec" onclick="girisTahsilatYilAySecilenleriBorclandir(' + donemYil + ', event)" title="İşaretli ayları borçlandır (fatura DB, grid kırmızı, ekstre)">Seçilenleri Borçlandır</button>'
         + '<button type="button" class="btn-aylik-sec' + (yillikAcik ? ' is-kaydedildi' : '') + '" onclick="girisTahsilatYillikTahsilToggle(' + donemYil + ', event)">Yıllık Tahsilat</button>'
+        + '<button type="button" class="btn-aylik-sec" onclick="sozlesmelerReelTahsilatEsitleOnizleAc()" '
+        + 'style="background:#7e57c2;border-color:#7e57c2;" title="Otomatik tahsilatları reel tutara eşitle">'
+        + '<i class="fa fa-balance-scale"></i> Eşleştir</button>'
         + '</div>';
     panel.innerHTML = tb + girisTahsilatYillikTahsilHtml(donemYil) + girisTahsilatYilAyPanelHtml(donemYil, keys);
 }
