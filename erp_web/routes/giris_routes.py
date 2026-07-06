@@ -1555,6 +1555,9 @@ def _aylik_grid_apply_reel_donem_overlay_to_payload(
         manual = _musteri_reel_donem_manual_dict_from_db(int(musteri_id))
     elif not isinstance(manual, dict):
         manual = {}
+    y_start = int(bas_soz.year) if bas_soz else None
+    if y_start is not None and isinstance(manual, dict):
+        manual = {k: v for k, v in manual.items() if int(k) != y_start}
     try:
         reel_map = _reel_ay_key_tutar_map_db_flat_only(
             bas_soz, artis_month, artis_day, manual

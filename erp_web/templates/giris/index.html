@@ -19252,7 +19252,10 @@ function girisAylikSatirYilHesapla(y) {
     var banka = 0;
     var kdvDahil = 0;
     var toplam = 0;
-    if (reelAktif && reel > 0) {
+    var yStart = girisAylikSatirBaslangicYili();
+    var yyNum = parseInt(y, 10);
+    var ilkYil = !isNaN(yStart) && !isNaN(yyNum) && yyNum === yStart;
+    if (reelAktif && reel > 0 && !ilkYil) {
         if (nakit > reel) nakit = reel;
         toplam = Math.round(reel * 100) / 100;
         kdvDahil = Math.round(Math.max(0, reel - nakit) * 100) / 100;
