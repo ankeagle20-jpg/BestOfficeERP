@@ -9633,6 +9633,7 @@ def _reel_tahsilat_esitle_calistir(
     musteri_id: int,
     *,
     sadece_donem_yil: int | None = None,
+    sadece_ay_keys: list[str] | None = None,
     dry_run: bool = False,
 ) -> dict:
     """
@@ -9701,6 +9702,17 @@ def _reel_tahsilat_esitle_calistir(
             nk = _firma_ozet_normalize_tahsil_ay_key(k)
             if nk:
                 izinli_ay.add(nk)
+
+    if sadece_ay_keys:
+        explicit = set()
+        for k in sadece_ay_keys:
+            nk = _firma_ozet_normalize_tahsil_ay_key(str(k))
+            if nk:
+                explicit.add(nk)
+        if izinli_ay is not None:
+            izinli_ay = izinli_ay & explicit
+        else:
+            izinli_ay = explicit
 
     def _hedef_tutar_from_aciklama(ac: str) -> tuple[str, float] | None:
         if not GRID_TAH_PATTERN.match(ac):
@@ -9821,7 +9833,12 @@ def api_reel_tahsilat_esitle_onizleme():
     if not bas_soz:
         return jsonify({"ok": False, "mesaj": "Sözleşme başlangıç tarihi yok."}), 400
 
-    sonuc = _reel_tahsilat_esitle_calistir(musteri_id, dry_run=True)
+    ay_keys_raw = request.args.get("ay_keys") or ""
+    sadece_ay_keys = [k.strip() for k in ay_keys_raw.split(",") if k.strip()] or None
+
+    sonuc = _reel_tahsilat_esitle_calistir(
+        musteri_id, dry_run=True, sadece_ay_keys=sadece_ay_keys
+    )
     degisecekler = sonuc.get("degisecekler") or []
     toplam_fark = sonuc.get("toplam_fark") or 0.0
 
@@ -9870,8 +9887,12 @@ def api_reel_tahsilat_esitle_uygula():
     if not bas_soz:
         return jsonify({"ok": False, "mesaj": "Sözleşme başlangıç tarihi yok."}), 400
 
+    sadece_ay_keys = data.get("ay_keys") or None
+    if sadece_ay_keys and not isinstance(sadece_ay_keys, list):
+        sadece_ay_keys = None
+
     try:
-        sonuc = _reel_tahsilat_esitle_calistir(musteri_id)
+        sonuc = _reel_tahsilat_esitle_calistir(musteri_id, sadece_ay_keys=sadece_ay_keys)
     except Exception as e:
         logging.getLogger(__name__).exception(
             "reel_tahsilat_esitle_uygula musteri_id=%s", musteri_id
