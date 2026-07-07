@@ -20061,13 +20061,23 @@ async function girisAylikSatirYilReelSilDirekt(y) {
         }
     } catch (e) {}
 
-    // window map'lerden de sil
+    // window map'ten o yılı tamamen sil, TÜFE'den yeniden kur
     if (window.__aylikSatirYilDetay) {
         var ky = String(y);
-        if (window.__aylikSatirYilDetay[ky]) {
-            window.__aylikSatirYilDetay[ky].reel = 0;
-            window.__aylikSatirYilDetay[ky].__reel_aktif = false;
-            window.__aylikSatirYilDetay[ky].__manual_saved = false;
+        delete window.__aylikSatirYilDetay[ky];
+        try {
+            var tufeAylikMap2 = girisAylikSatirTufeAylikMap();
+            var main2 = girisAylikSatirAnaDegerOku();
+            var aylikY2 = parseFloat(tufeAylikMap2[parseInt(y, 10)]);
+            if (isNaN(aylikY2) || aylikY2 <= 0) aylikY2 = main2.aylik;
+            window.__aylikSatirYilDetay[ky] = {
+                aylik: aylikY2,
+                nakit: main2.nakit,
+                banka: main2.banka,
+                __manual_aylik: false
+            };
+        } catch (e) {
+            console.warn('Reel sil sonrasi TUFE kurulum hatasi:', e);
         }
     }
     if (window.__musteriReelDonemTutarlari) {
