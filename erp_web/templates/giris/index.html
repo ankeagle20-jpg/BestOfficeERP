@@ -7204,12 +7204,10 @@ function sozlesmelerReelTahsilatEsitleUygula() {
         alert('Önce önizleme yükleyin.');
         return;
     }
-    if (!confirm(__sozlesmelerReelEsitleData.degisecek_sayisi +
-        ' tahsilat kaydı kalıcı olarak değiştirilecek. Bu işlem geri alınamaz. Onaylıyor musunuz?')) {
-        return;
-    }
     var uygulaBtn = document.getElementById('sozlesmeler-reel-esitle-uygula-btn');
+    var ozetEl = document.getElementById('sozlesmeler-reel-esitle-ozet');
     if (uygulaBtn) uygulaBtn.disabled = true;
+    if (ozetEl) ozetEl.textContent = 'Uygulanıyor...';
     fetch('/giris/api/reel-tahsilat-esitle-uygula', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -7219,9 +7217,14 @@ function sozlesmelerReelTahsilatEsitleUygula() {
     .then(function (r) { return r.json(); })
     .then(function (d) {
         if (d.ok) {
-            alert(d.guncellenen_sayisi + ' tahsilat kaydı güncellendi. Toplam fark: ' +
-                d.toplam_fark.toLocaleString('tr-TR', {minimumFractionDigits:2}) + ' TL');
-            sozlesmelerReelTahsilatEsitleModalKapat();
+            if (ozetEl) {
+                ozetEl.innerHTML = '<span style="color:#66bb6a;">✅ Onaylandı — ' +
+                    d.guncellenen_sayisi + ' tahsilat kaydı güncellendi. Toplam fark: ' +
+                    d.toplam_fark.toLocaleString('tr-TR', {minimumFractionDigits:2}) + ' TL</span>';
+            }
+            var listeEl = document.getElementById('sozlesmeler-reel-esitle-liste');
+            if (listeEl) listeEl.innerHTML = '';
+            if (uygulaBtn) uygulaBtn.style.display = 'none';
             if (typeof girisTahsilatEkstreTazeYenile === 'function') girisTahsilatEkstreTazeYenile();
             if (typeof sozlesmelerAylikHizliYukle === 'function') sozlesmelerAylikHizliYukle(true);
             if (typeof girisTahsilatYilAyPanelGuncelle === 'function' && window.__tahsilatYillikAcik) {
@@ -7231,13 +7234,17 @@ function sozlesmelerReelTahsilatEsitleUygula() {
                     }
                 });
             }
+            setTimeout(function () {
+                sozlesmelerReelTahsilatEsitleModalKapat();
+                if (uygulaBtn) uygulaBtn.style.display = '';
+            }, 1500);
         } else {
-            alert('Hata: ' + (d.mesaj || 'İşlem başarısız.'));
+            if (ozetEl) ozetEl.textContent = 'Hata: ' + (d.mesaj || 'İşlem başarısız.');
             if (uygulaBtn) uygulaBtn.disabled = false;
         }
     })
     .catch(function (e) {
-        alert('Hata: ' + e.message);
+        if (ozetEl) ozetEl.textContent = 'Hata: ' + e.message;
         if (uygulaBtn) uygulaBtn.disabled = false;
     });
 }
