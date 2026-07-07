@@ -9636,10 +9636,12 @@ def _reel_tahsilat_esitle_calistir(
     dry_run: bool = False,
 ) -> dict:
     """
-    Otomatik tahsilatları (tahsil_eden IS NULL + GRID_TAH_PATTERN) reel tutara eşitler.
+    Otomatik tahsilatları (tahsil_eden IS NULL + GRID_TAH_PATTERN) aylık grid
+    önbelleğindeki brut_tutar_kdv hedefiyle eşitler (ay bazında).
     dry_run=True  → sadece degisecekler listesi (önizleme)
     dry_run=False → gerçek UPDATE (transaction içinde)
-    sadece_donem_yil verilirse yalnız o dönem yılı taranır.
+    sadece_donem_yil verilirse yalnız o dönem yılının 12 aylık aralığındaki
+    marker'lar işlenir.
     KYC yoksa boş sonuç döner, hata fırlatmaz.
     """
     degisecekler = []
@@ -9662,83 +9664,98 @@ def _reel_tahsilat_esitle_calistir(
     artis_month = int(artis_d.month)
     artis_day = int(artis_d.day)
 
-    _ensure_musteri_reel_donem_tutar_table()
-    if sadece_donem_yil is not None:
-        reel_rows = fetch_all(
-            """
-            SELECT donem_yil, tutar_kdv_dahil
-            FROM musteri_reel_donem_tutar
-            WHERE musteri_id = %s AND donem_yil = %s
-            ORDER BY donem_yil
-            """,
-            (musteri_id, sadece_donem_yil),
-        ) or []
-    else:
-        reel_rows = fetch_all(
-            """
-            SELECT donem_yil, tutar_kdv_dahil
-            FROM musteri_reel_donem_tutar
-            WHERE musteri_id = %s
-            ORDER BY donem_yil
-            """,
-            (musteri_id,),
-        ) or []
+    payload = _read_aylik_grid_cache_payload(musteri_id)
+    if not payload or not isinstance(payload.get("aylar"), list):
+        payload = _upsert_aylik_grid_cache(musteri_id)
+    if not payload or not isinstance(payload.get("aylar"), list):
+        if dry_run:
+            return {"degisecekler": [], "toplam_fark": 0.0}
+        return {"guncellenen": [], "toplam_fark": 0.0}
+    try:
+        payload = _aylik_grid_payload_reel_overlay_from_db(musteri_id, payload) or payload
+    except Exception:
+        pass
 
-    def _iter_matches():
-        for rr in reel_rows:
-            try:
-                donem_yil = int(rr.get("donem_yil"))
-                reel_tutar = round(float(rr.get("tutar_kdv_dahil") or 0), 2)
-            except (TypeError, ValueError):
-                continue
-            if reel_tutar <= 0:
-                continue
-            ay_keys = _reel_donem_ay_keys_for_period(
-                bas_soz, donem_yil, artis_month, artis_day
-            )
-            for ay_key in ay_keys:
-                try:
-                    yy, mm = ay_key.split("-")
-                    yy, mm = int(yy), int(mm)
-                    iso = date(yy, mm, 1).isoformat()
-                except (ValueError, TypeError):
-                    continue
-                pat = f"%|AYLIK_TAH|{iso}|%"
-                yield donem_yil, ay_key, reel_tutar, pat
+    ay_hedef: dict[str, float] = {}
+    for a in payload.get("aylar") or []:
+        if not isinstance(a, dict):
+            continue
+        ak = _firma_ozet_normalize_tahsil_ay_key(
+            str(a.get("ay_key") or f"{a.get('yil')}-{a.get('ay')}")
+        )
+        if not ak:
+            continue
+        try:
+            brut = round(float(a.get("brut_tutar_kdv") or a.get("tutar_kdv_dahil") or 0), 2)
+        except (TypeError, ValueError):
+            continue
+        if brut > 0:
+            ay_hedef[ak] = brut
+
+    izinli_ay: set[str] | None = None
+    if sadece_donem_yil is not None:
+        izinli_ay = set()
+        for k in _reel_donem_ay_keys_for_period(
+            bas_soz, int(sadece_donem_yil), artis_month, artis_day
+        ):
+            nk = _firma_ozet_normalize_tahsil_ay_key(k)
+            if nk:
+                izinli_ay.add(nk)
+
+    def _hedef_tutar_from_aciklama(ac: str) -> tuple[str, float] | None:
+        if not GRID_TAH_PATTERN.match(ac):
+            return None
+        iso = _iso_from_aylik_tah_marker(ac)
+        if not iso:
+            return None
+        try:
+            dd = datetime.strptime(iso[:10], "%Y-%m-%d").date()
+        except ValueError:
+            return None
+        ak = _firma_ozet_normalize_tahsil_ay_key(f"{dd.year}-{dd.month}")
+        if not ak:
+            return None
+        if izinli_ay is not None and ak not in izinli_ay:
+            return None
+        hedef = ay_hedef.get(ak)
+        if hedef is None or hedef <= 0:
+            return None
+        return ak, hedef
+
+    rows = fetch_all(
+        """
+        SELECT id, tahsilat_tarihi, tutar, aciklama
+        FROM tahsilatlar
+        WHERE (musteri_id = %s OR customer_id = %s)
+          AND tahsil_eden IS NULL
+        """,
+        (musteri_id, musteri_id),
+    ) or []
 
     if dry_run:
-        for donem_yil, ay_key, reel_tutar, pat in _iter_matches():
-            rows = fetch_all(
-                """
-                SELECT id, tahsilat_tarihi, tutar, aciklama
-                FROM tahsilatlar
-                WHERE (musteri_id = %s OR customer_id = %s)
-                  AND tahsil_eden IS NULL
-                  AND COALESCE(aciklama, '') LIKE %s
-                """,
-                (musteri_id, musteri_id, pat),
-            ) or []
-            for r in rows:
-                ac = str(r.get("aciklama") or "")
-                if not GRID_TAH_PATTERN.match(ac):
-                    continue
-                try:
-                    eski_tutar = round(float(r.get("tutar") or 0), 2)
-                except (TypeError, ValueError):
-                    continue
-                fark = round(reel_tutar - eski_tutar, 2)
-                if abs(fark) < 0.01:
-                    continue
-                degisecekler.append({
-                    "tahsilat_id": r.get("id"),
-                    "ay": ay_key,
-                    "donem_yil": donem_yil,
-                    "tahsilat_tarihi": str(r.get("tahsilat_tarihi") or "")[:10],
-                    "eski_tutar": eski_tutar,
-                    "yeni_tutar": reel_tutar,
-                    "fark": fark,
-                })
-                toplam_fark += fark
+        for r in rows:
+            ac = str(r.get("aciklama") or "")
+            parsed = _hedef_tutar_from_aciklama(ac)
+            if not parsed:
+                continue
+            ay_key, hedef_tutar = parsed
+            try:
+                eski_tutar = round(float(r.get("tutar") or 0), 2)
+            except (TypeError, ValueError):
+                continue
+            fark = round(hedef_tutar - eski_tutar, 2)
+            if abs(fark) < 0.01:
+                continue
+            degisecekler.append({
+                "tahsilat_id": r.get("id"),
+                "ay": ay_key,
+                "donem_yil": sadece_donem_yil,
+                "tahsilat_tarihi": str(r.get("tahsilat_tarihi") or "")[:10],
+                "eski_tutar": eski_tutar,
+                "yeni_tutar": hedef_tutar,
+                "fark": fark,
+            })
+            toplam_fark += fark
         return {
             "degisecekler": degisecekler,
             "toplam_fark": round(toplam_fark, 2),
@@ -9746,42 +9763,32 @@ def _reel_tahsilat_esitle_calistir(
 
     with get_db() as conn:
         cur = conn.cursor()
-        for donem_yil, ay_key, reel_tutar, pat in _iter_matches():
+        for r in rows:
+            ac = str(r.get("aciklama") or "")
+            parsed = _hedef_tutar_from_aciklama(ac)
+            if not parsed:
+                continue
+            ay_key, hedef_tutar = parsed
+            try:
+                eski_tutar = round(float(r.get("tutar") or 0), 2)
+            except (TypeError, ValueError):
+                continue
+            fark = round(hedef_tutar - eski_tutar, 2)
+            if abs(fark) < 0.01:
+                continue
+            tid = r.get("id")
             cur.execute(
-                """
-                SELECT id, tutar, aciklama
-                FROM tahsilatlar
-                WHERE (musteri_id = %s OR customer_id = %s)
-                  AND tahsil_eden IS NULL
-                  AND COALESCE(aciklama, '') LIKE %s
-                """,
-                (musteri_id, musteri_id, pat),
+                "UPDATE tahsilatlar SET tutar = %s WHERE id = %s",
+                (hedef_tutar, tid),
             )
-            rows = cur.fetchall() or []
-            for r in rows:
-                ac = str(r.get("aciklama") or "")
-                if not GRID_TAH_PATTERN.match(ac):
-                    continue
-                try:
-                    eski_tutar = round(float(r.get("tutar") or 0), 2)
-                except (TypeError, ValueError):
-                    continue
-                fark = round(reel_tutar - eski_tutar, 2)
-                if abs(fark) < 0.01:
-                    continue
-                tid = r.get("id")
-                cur.execute(
-                    "UPDATE tahsilatlar SET tutar = %s WHERE id = %s",
-                    (reel_tutar, tid),
-                )
-                guncellenen.append({
-                    "tahsilat_id": tid,
-                    "ay": ay_key,
-                    "eski_tutar": eski_tutar,
-                    "yeni_tutar": reel_tutar,
-                    "fark": fark,
-                })
-                toplam_fark += fark
+            guncellenen.append({
+                "tahsilat_id": tid,
+                "ay": ay_key,
+                "eski_tutar": eski_tutar,
+                "yeni_tutar": hedef_tutar,
+                "fark": fark,
+            })
+            toplam_fark += fark
 
     return {
         "guncellenen": guncellenen,
@@ -9793,10 +9800,10 @@ def _reel_tahsilat_esitle_calistir(
 @giris_gerekli
 def api_reel_tahsilat_esitle_onizleme():
     """
-    Bir müşterinin TÜM musteri_reel_donem_tutar kayıtlarını tarar, her
-    donem_yil için 12 aylık periyottaki OTOMATİK (tahsil_eden IS NULL,
-    |AYLIK_TAH| GRID_TAH_PATTERN'e uyan) tahsilat kayıtlarının mevcut
-    tutarını reel tutar ile karşılaştırır. HİÇBİR YAZMA İŞLEMİ YAPMAZ.
+    Aylık grid önbelleğindeki brut_tutar_kdv hedeflerini kullanarak OTOMATİK
+    (tahsil_eden IS NULL, GRID_TAH_PATTERN + |AYLIK_TAH| marker'lı) tahsilat
+    kayıtlarının mevcut tutarını ay bazında karşılaştırır. HİÇBİR YAZMA
+    İŞLEMİ YAPMAZ.
     """
     musteri_id = request.args.get("musteri_id", type=int)
     if not musteri_id:
@@ -9833,8 +9840,9 @@ def api_reel_tahsilat_esitle_uygula():
     """
     api_reel_tahsilat_esitle_onizleme ile AYNI filtreleme mantığını
     kullanarak, otomatik (tahsil_eden IS NULL, GRID_TAH_PATTERN'e uyan)
-    tahsilat kayıtlarının tutarını reel tutara günceller. GERÇEK UPDATE
-    YAPAR — güvenlik: body'de onay=true zorunlu, aksi halde çalışmaz.
+    tahsilat kayıtlarının tutarını grid önbelleği brut_tutar_kdv hedefine
+    günceller. GERÇEK UPDATE YAPAR — güvenlik: body'de onay=true zorunlu,
+    aksi halde çalışmaz.
     """
     data = request.get_json(silent=True) or {}
     musteri_id = data.get("musteri_id")
