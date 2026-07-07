@@ -20085,8 +20085,19 @@ async function girisAylikSatirYilReelSilDirekt(y) {
         delete lsObj[String(y)];
         localStorage.setItem(lsKey, JSON.stringify(lsObj));
     } catch (e) {}
-    // Sayfayı yenile
-    location.reload();
+    // Sayfayı yenilemeden grid + panel + tahsilat güncelle
+    var __mid = String(selectedId || '');
+    if (typeof girisAylikSatirYilDbSonrasi === 'function') {
+        girisAylikSatirYilDbSonrasi(__mid).then(function () {
+            if (typeof girisAylikSatirYilPanelDoldur === 'function') girisAylikSatirYilPanelDoldur();
+            if (typeof girisTahsilatOzetGuncelle === 'function') girisTahsilatOzetGuncelle();
+        }).catch(function (e) {
+            console.warn('Reel sil sonrasi yenileme hatasi:', e);
+        });
+    } else {
+        if (typeof girisAylikSatirYilPanelDoldur === 'function') girisAylikSatirYilPanelDoldur();
+        if (typeof girisTahsilatOzetGuncelle === 'function') girisTahsilatOzetGuncelle();
+    }
 }
 function girisAylikSatirYilReelTemizleVeKaydet(y) {
     var k = String(y);
