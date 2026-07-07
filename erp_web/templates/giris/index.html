@@ -7143,6 +7143,22 @@ function sozlesmelerReelDonemTutarVazgec() {
 
 var __sozlesmelerReelEsitleData = null;
 
+function girisTahsilatPanelSeciliAyAnahtarlari() {
+    var out = [];
+    var acik = window.__tahsilatSatirYilAcik || {};
+    Object.keys(acik).forEach(function (donemYil) {
+        if (!acik[donemYil]) return;
+        var yy = parseInt(donemYil, 10);
+        if (isNaN(yy)) return;
+        (girisTahsilatYilAyKeysFiltered(yy) || []).forEach(function (ak) {
+            var row = document.getElementById(girisTahsilatYilAyId(yy, ak));
+            var chk = row ? row.querySelector('.tahsilat-yil-ay-aktif') : null;
+            if (chk && chk.checked) out.push(ak);
+        });
+    });
+    return out;
+}
+
 function sozlesmelerReelTahsilatEsitleOnizleAc() {
     var mid = selectedId;
     if (!mid) {
@@ -7158,23 +7174,34 @@ function sozlesmelerReelTahsilatEsitleOnizleAc() {
     if (uygulaBtn) uygulaBtn.disabled = true;
     if (modal) modal.style.display = 'flex';
     __sozlesmelerReelEsitleData = null;
+    window.__sozlesmelerReelEsitleReqId = (window.__sozlesmelerReelEsitleReqId || 0) + 1;
+    var __reqId = window.__sozlesmelerReelEsitleReqId;
 
-    fetch('/giris/api/reel-tahsilat-esitle-onizleme?musteri_id=' + encodeURIComponent(mid),
-        { credentials: 'same-origin' })
+    var __ayKeysSecili = girisTahsilatPanelSeciliAyAnahtarlari();
+    window.__sozlesmelerReelEsitleAyKeys = __ayKeysSecili;
+    var __onizleUrl = '/giris/api/reel-tahsilat-esitle-onizleme?musteri_id=' + encodeURIComponent(mid);
+    if (__ayKeysSecili.length) {
+        __onizleUrl += '&ay_keys=' + encodeURIComponent(__ayKeysSecili.join(','));
+    }
+    fetch(__onizleUrl, { credentials: 'same-origin' })
         .then(function (r) { return r.json(); })
         .then(function (d) {
+            if (__reqId !== window.__sozlesmelerReelEsitleReqId) return;
+            var __seciliNotu = (window.__sozlesmelerReelEsitleAyKeys && window.__sozlesmelerReelEsitleAyKeys.length)
+                ? (' [Sadece seçili ' + window.__sozlesmelerReelEsitleAyKeys.length + ' ay taranıyor]')
+                : '';
             if (!d.ok) {
                 if (ozetEl) ozetEl.textContent = 'Hata: ' + (d.mesaj || 'Önizleme alınamadı.');
                 return;
             }
             __sozlesmelerReelEsitleData = d;
             if (d.degisecek_sayisi === 0) {
-                if (ozetEl) ozetEl.textContent = 'Değişecek kayıt yok — tahsilatlar zaten reel tutarlarla uyumlu.';
+                if (ozetEl) ozetEl.textContent = 'Değişecek kayıt yok — tahsilatlar zaten reel tutarlarla uyumlu.' + __seciliNotu;
                 if (uygulaBtn) uygulaBtn.disabled = true;
                 return;
             }
             if (ozetEl) {
-                ozetEl.textContent = d.degisecek_sayisi + ' tahsilat kaydı değişecek. Toplam fark: ' +
+                ozetEl.textContent = d.degisecek_sayisi + ' tahsilat kaydı değişecek.' + __seciliNotu + ' Toplam fark: ' +
                     d.toplam_fark.toLocaleString('tr-TR', {minimumFractionDigits: 2}) + ' TL';
             }
             if (listeEl) {
@@ -7196,6 +7223,7 @@ function sozlesmelerReelTahsilatEsitleModalKapat() {
     var modal = document.getElementById('sozlesmeler-reel-esitle-modal');
     if (modal) modal.style.display = 'none';
     __sozlesmelerReelEsitleData = null;
+    window.__sozlesmelerReelEsitleAyKeys = null;
 }
 
 function sozlesmelerReelTahsilatEsitleUygula() {
@@ -7212,7 +7240,11 @@ function sozlesmelerReelTahsilatEsitleUygula() {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         credentials: 'same-origin',
-        body: JSON.stringify({musteri_id: mid, onay: true})
+        body: JSON.stringify(
+        (window.__sozlesmelerReelEsitleAyKeys && window.__sozlesmelerReelEsitleAyKeys.length)
+            ? {musteri_id: mid, onay: true, ay_keys: window.__sozlesmelerReelEsitleAyKeys}
+            : {musteri_id: mid, onay: true}
+    )
     })
     .then(function (r) { return r.json(); })
     .then(function (d) {
@@ -22159,6 +22191,10 @@ function selectMusteri(id) {
     window.__musteriReelDonemDbMap = {};
     window.__musteriReelDonemDbKayitli = false;
     selectedId = id;
+    window.__sozlesmelerReelEsitleReqId = (window.__sozlesmelerReelEsitleReqId || 0) + 1;
+    if (typeof sozlesmelerReelTahsilatEsitleModalKapat === 'function') {
+        try { sozlesmelerReelTahsilatEsitleModalKapat(); } catch (e) {}
+    }
     window.__musteriReelDonemTutarlari = {};
     window.__musteriReelDonemDetaylari = {};
     window.__aylikSatirYilAyDetay = {};
