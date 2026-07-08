@@ -2768,6 +2768,16 @@ def _firma_ozet_liste_hizli_mod() -> bool:
     return raw not in ("0", "false", "no", "off", "hayir", "hayır")
 
 
+def _firma_ozet_sayfa_grid_hesapla(liste_hizli: bool, page_size: int, esik: int = 50) -> bool:
+    """Sayfa satirlari icin grid tabanli (dogru) hesaplama yapilsin mi?
+    Hizli mod kapaliysa zaten her zaman yapiliyor. Hizli mod acikken,
+    sayfa kucukse (<=esik) yine de dogru hesaplama yapilir - performans
+    sorunu olmaz cunku sadece o sayfadaki musteriler islenir."""
+    if not liste_hizli:
+        return True
+    return page_size > 0 and page_size <= esik
+
+
 _firma_ozet_rapor_schema_ready = False
 _firma_ozet_rapor_schema_lock = threading.Lock()
 _fatura_rapor_firma_resp_cache: dict[str, dict] = {}
@@ -3648,7 +3658,8 @@ def api_fatura_rapor():
                 total_count_firma = int(tot_row.get("cnt") or 0)
                 toplam_borc = round(float(tot_row.get("sum_borc") or 0), 2)
                 toplam_aylik = round(float(tot_row.get("sum_aylik") or 0), 2)
-                if liste_hizli:
+                grid_hesapla = _firma_ozet_sayfa_grid_hesapla(liste_hizli, page_size)
+                if not grid_hesapla:
                     _t_pg = time.perf_counter()
                     satirlar_resp = [
                         _firma_ozet_row_to_satir_item(r, pasifleri_dahil, None)
@@ -3661,24 +3672,12 @@ def api_fatura_rapor():
                         (time.perf_counter() - _t_pg) * 1000.0,
                     )
                 else:
-                    winner_ids_prewarm: list[int] = []
-                    try:
-                        ids_sql_pw = _firma_ozet_sql_winner_ids_query(
-                            rows_firma_sql_no_order, cift_olanlar
-                        )
-                        id_rows_pw = fetch_all(ids_sql_pw, rows_firma_params) or []
-                        winner_ids_prewarm = [
-                            int(r["id"])
-                            for r in id_rows_pw
-                            if r is not None and r.get("id") is not None
-                        ]
-                    except Exception as e_pw_ids:
-                        current_app.logger.warning("firma_ozet prewarm ids err=%r", e_pw_ids)
-                        winner_ids_prewarm = [
-                            int(r["id"])
-                            for r in page_rows
-                            if r is not None and r.get("id") is not None
-                        ]
+                    # Sayfa satirlari icin prewarm — tum winner listesini SQL ile cekmeye gerek yok.
+                    winner_ids_prewarm = [
+                        int(r["id"])
+                        for r in page_rows
+                        if r is not None and r.get("id") is not None
+                    ]
                     try:
                         from routes.giris_routes import prewarm_aylik_grid_cache_for_musteriler
 
@@ -3814,9 +3813,21 @@ def api_fatura_rapor():
                     )
                 except Exception as e_pw_fb:
                     current_app.logger.warning("firma_ozet prewarm fallback err=%r", e_pw_fb)
-            grid_map_all = (
-                _firma_ozet_grid_ozet_map_for_rows(rows_firma, ref_first) if not liste_hizli else {}
-            )
+            grid_hesapla_fb = _firma_ozet_sayfa_grid_hesapla(liste_hizli, page_size)
+            if not grid_hesapla_fb:
+                grid_map_all = {}
+            elif not liste_hizli:
+                # Hizli mod kapali: mevcut davranis — tum satirlar icin batch.
+                grid_map_all = _firma_ozet_grid_ozet_map_for_rows(rows_firma, ref_first)
+            else:
+                # Hizli mod + kucuk sayfa: yalnizca sayfa dilimi icin batch.
+                if page_size > 0:
+                    _si = (page - 1) * page_size
+                    _ei = _si + page_size
+                    page_slice_rows = rows_firma[_si:_ei]
+                else:
+                    page_slice_rows = rows_firma
+                grid_map_all = _firma_ozet_grid_ozet_map_for_rows(page_slice_rows, ref_first)
             satirlar_firma = []
             for row in rows_firma:
                 satirlar_firma.append(
