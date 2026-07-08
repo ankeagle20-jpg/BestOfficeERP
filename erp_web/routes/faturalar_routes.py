@@ -3814,24 +3814,20 @@ def api_fatura_rapor():
                 except Exception as e_pw_fb:
                     current_app.logger.warning("firma_ozet prewarm fallback err=%r", e_pw_fb)
             grid_hesapla_fb = _firma_ozet_sayfa_grid_hesapla(liste_hizli, page_size)
-            if not grid_hesapla_fb:
-                grid_map_all = {}
-            elif not liste_hizli:
-                # Hizli mod kapali: mevcut davranis — tum satirlar icin batch.
+            # Hizli mod kapaliysa (liste_hizli=False): tum satirlar icin batch — eski davranis.
+            # Hizli mod + kucuk sayfa: once None ile donustur+sirala+dilimle, sonra dilim ID'leri icin batch.
+            if grid_hesapla_fb and not liste_hizli:
                 grid_map_all = _firma_ozet_grid_ozet_map_for_rows(rows_firma, ref_first)
             else:
-                # Hizli mod + kucuk sayfa: yalnizca sayfa dilimi icin batch.
-                if page_size > 0:
-                    _si = (page - 1) * page_size
-                    _ei = _si + page_size
-                    page_slice_rows = rows_firma[_si:_ei]
-                else:
-                    page_slice_rows = rows_firma
-                grid_map_all = _firma_ozet_grid_ozet_map_for_rows(page_slice_rows, ref_first)
+                grid_map_all = {}
             satirlar_firma = []
             for row in rows_firma:
                 satirlar_firma.append(
-                    _firma_ozet_row_to_satir_item(row, pasifleri_dahil, grid_map_all if grid_map_all else None)
+                    _firma_ozet_row_to_satir_item(
+                        row,
+                        pasifleri_dahil,
+                        grid_map_all if grid_map_all else None,
+                    )
                 )
             satirlar_firma.sort(key=lambda x: turkish_lower((x.get("firma_adi") or "").strip()))
             if not cift_olanlar:
@@ -3863,6 +3859,33 @@ def api_fatura_rapor():
                 end_idx = start_idx + page_size
                 satirlar_resp = satirlar_firma[start_idx:end_idx]
                 has_more = end_idx < total_count_firma
+            # Hizli + kucuk sayfa: alfabetik sayfa dilimindeki ID'ler icin grid (sort sonrasi).
+            if grid_hesapla_fb and liste_hizli and satirlar_resp:
+                page_grid_map_fb = _firma_ozet_grid_ozet_map_for_rows(satirlar_resp, ref_first)
+                for _it in satirlar_resp:
+                    try:
+                        _mid = int(_it.get("musteri_id") or 0)
+                    except (TypeError, ValueError):
+                        continue
+                    if _mid <= 0:
+                        continue
+                    _oz = page_grid_map_fb.get(_mid) if isinstance(page_grid_map_fb, dict) else None
+                    if not isinstance(_oz, dict) or not _oz:
+                        continue
+                    try:
+                        _gcur = float(_oz.get("borc_month") or 0)
+                        if math.isfinite(_gcur) and abs(_gcur) > 1e-9:
+                            _it["guncel_kira_bedeli"] = round(_gcur, 2)
+                    except (TypeError, ValueError):
+                        pass
+                    try:
+                        _it["toplam_borc"] = max(0.0, round(float(_oz.get("toplam_borc") or 0), 2))
+                    except (TypeError, ValueError):
+                        pass
+                    try:
+                        _it["geciken_ay"] = max(0, int(_oz.get("geciken_ay") or 0))
+                    except (TypeError, ValueError):
+                        pass
             if page_size > 0:
                 current_app.logger.info(
                     "firma_ozet_python_liste_ms=%.2f (sql_paging devre dışı veya hata)",
