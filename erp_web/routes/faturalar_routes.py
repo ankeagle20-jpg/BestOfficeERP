@@ -2768,7 +2768,7 @@ def _firma_ozet_liste_hizli_mod() -> bool:
     return raw not in ("0", "false", "no", "off", "hayir", "hayır")
 
 
-def _firma_ozet_sayfa_grid_hesapla(liste_hizli: bool, page_size: int, esik: int = 50) -> bool:
+def _firma_ozet_sayfa_grid_hesapla(liste_hizli: bool, page_size: int, esik: int = 500) -> bool:
     """Sayfa satirlari icin grid tabanli (dogru) hesaplama yapilsin mi?
     Hizli mod kapaliysa zaten her zaman yapiliyor. Hizli mod acikken,
     sayfa kucukse (<=esik) yine de dogru hesaplama yapilir - performans
