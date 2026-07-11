@@ -631,12 +631,7 @@
           <button type="button" class="btn-filter dash-sidebar-tile" data-filtre="sozlesme"><span class="filter-icon"><i class="fa fa-calendar"></i></span><span class="filter-label">Sözleşme Bitiş Yakın</span></button>
           <a href="{{ url_for('faturalar.yeni_fatura') }}" class="btn-filter dash-filter-link dash-sidebar-tile" title="Yeni fatura oluştur"><span class="filter-icon"><i class="fa fa-file-invoice"></i></span><span class="filter-label">Yeni Fatura</span></a>
           <a href="{{ url_for('tahsilat.index') }}" class="btn-filter dash-filter-link dash-sidebar-tile" title="Tahsilat / Yeni tahsilat"><span class="filter-icon"><i class="fa fa-money-bill-wave"></i></span><span class="filter-label">Yeni Tahsilat</span></a>
-          <a href="{{ url_for('musteriler.list_full') }}" class="dash-sidebar-tile dash-sidebar-link" title="Müşteri listesi"><span class="filter-icon"><i class="fa fa-list"></i></span><span class="filter-label">Müşteri Listesi</span></a>
-          <a href="{{ url_for('musteriler.ekle') }}" class="dash-sidebar-tile dash-sidebar-link" title="Yeni müşteri ekle"><span class="filter-icon"><i class="fa fa-user-plus"></i></span><span class="filter-label">Müşteri Ekle</span></a>
-          <a href="{{ url_for('musteriler.list_full', filtre='whatsapp') }}" class="dash-sidebar-tile dash-sidebar-link" title="Toplu WhatsApp gönder"><span class="filter-icon"><i class="fa fa-whatsapp"></i></span><span class="filter-label">Toplu WhatsApp</span></a>
-          <a href="{{ url_for('faturalar.index') }}" class="dash-sidebar-tile dash-sidebar-link" title="Toplu faturalama"><span class="filter-icon"><i class="fa fa-file-invoice"></i></span><span class="filter-label">Toplu Faturalama</span></a>
-          <a href="{{ url_for('tufe.index') }}" class="dash-sidebar-tile dash-sidebar-link" title="TÜFE senaryosu / simülasyon"><span class="filter-icon"><i class="fa fa-chart-line"></i></span><span class="filter-label">TÜFE Senaryosu</span></a>
-          <button type="button" id="geri-yenile" class="dash-sidebar-tile dash-sidebar-link dash-geri-btn" title="Geri dönüş bekleyenler listesini yenile"><i class="fa fa-clock-o"></i> Geri Dönüş</button>
+          <div id="dash-kisayol-sidebar-slot" style="display:contents;"></div>
         </div>
         </div>
       </div>
@@ -645,18 +640,7 @@
           <div id="geri-list" class="dash-geri-list-wrap">
             <div style="color:#78909c;font-size:12px;">Liste yükleniyor...</div>
           </div>
-          <a href="{{ url_for('giris.index', tab=11) }}"
-             class="dash-sidebar-tile dash-buttons-tile"
-             title="Yeni tediye makbuzu">
-            <span class="filter-icon"><i class="fa fa-hand-holding-dollar"></i></span>
-            <span class="filter-label">Tediye</span>
-          </a>
-          <a href="{{ url_for('musteriler.ekle') }}"
-             class="dash-sidebar-tile dash-buttons-tile"
-             title="Yeni müşteri ekle">
-            <span class="filter-icon"><i class="fa fa-user-plus"></i></span>
-            <span class="filter-label">Müşteri Ekle</span>
-          </a>
+          <div id="dash-kisayol-buttons-slot" style="display:contents;"></div>
         </div>
       </div>
     </div>
@@ -880,7 +864,53 @@
     });
   }
 
-  document.getElementById('geri-yenile').addEventListener('click', geriListeYenile);
+  function dashKisayolRenderTile(k) {
+    var isLink = !!k.url;
+    var tag = isLink ? 'a' : 'button';
+    var el = document.createElement(tag);
+    el.className = 'dash-sidebar-tile ' + (k.slot_key === 'tediye' || k.slot_key === 'musteri_ekle_1' ? 'dash-buttons-tile' : 'dash-sidebar-link');
+    el.setAttribute('data-slot-key', k.slot_key);
+    if (isLink) {
+      el.href = k.url;
+    } else {
+      el.type = 'button';
+    }
+    if (k.slot_key === 'geri_donus') {
+      el.id = 'geri-yenile';
+      el.classList.add('dash-geri-btn');
+    }
+    el.title = k.label;
+    el.innerHTML = '<span class="filter-icon"><i class="fa ' + k.icon + '"></i></span>' +
+                    '<span class="filter-label">' + k.label + '</span>';
+    return el;
+  }
+
+  function dashKisayollariYukle() {
+    fetch('/dashboard/api/kisayollar', { credentials: 'same-origin' })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d.ok || !Array.isArray(d.kisayollar)) return;
+        var sidebarSlot = document.getElementById('dash-kisayol-sidebar-slot');
+        var buttonsSlot = document.getElementById('dash-kisayol-buttons-slot');
+        if (sidebarSlot) sidebarSlot.innerHTML = '';
+        if (buttonsSlot) buttonsSlot.innerHTML = '';
+        d.kisayollar.forEach(function (k) {
+          var el = dashKisayolRenderTile(k);
+          if (k.slot_key === 'tediye' || k.slot_key === 'musteri_ekle_1') {
+            if (buttonsSlot) buttonsSlot.appendChild(el);
+          } else {
+            if (sidebarSlot) sidebarSlot.appendChild(el);
+          }
+        });
+        var geriBtn = document.getElementById('geri-yenile');
+        if (geriBtn && typeof geriListeYenile === 'function') {
+          geriBtn.addEventListener('click', geriListeYenile);
+        }
+      })
+      .catch(function (e) { console.warn('Kısayollar yüklenemedi:', e); });
+  }
+
+  document.addEventListener('DOMContentLoaded', dashKisayollariYukle);
 
   document.querySelectorAll('.btn-filter').forEach(function(btn) {
     btn.addEventListener('click', function() {
