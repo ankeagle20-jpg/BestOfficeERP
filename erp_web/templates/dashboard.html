@@ -163,6 +163,39 @@
 .dash-sidebar-tile .filter-label { color: #b0bec5; font-weight: 500; }
 .dash-sidebar-tile:hover { background: #2d4060; box-shadow: 0 0 0 1px #4fc3f7; }
 .dash-sidebar-tile:hover .filter-icon { color: #4fc3f7; }
+.dash-kisayol-wrap {
+  position: relative;
+}
+.dash-buttons-row .dash-kisayol-wrap {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.dash-kisayol-wrap .dash-sidebar-tile {
+  width: 100%;
+  height: 100%;
+}
+.dash-kisayol-edit {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  z-index: 5;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  background: rgba(15, 37, 55, 0.85);
+  border: 1px solid #2d4060;
+  border-radius: 4px;
+  color: #78909c;
+  font-size: 9px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.dash-kisayol-edit:hover {
+  color: #4fc3f7;
+  border-color: #4fc3f7;
+}
 .dash-buttons-row {
   display: flex;
   flex-direction: row;
@@ -729,6 +762,23 @@
     </div>
   </div>
 </div>
+
+<div id="dash-kisayol-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9100;align-items:center;justify-content:center;padding:20px;">
+  <div style="background:#1e3a50;border-radius:8px;padding:24px;max-width:420px;width:100%;">
+    <h3 style="color:#e0f7fa;margin-bottom:16px;">Kısayolu Düzenle</h3>
+    <label style="color:#b0bec5;font-size:12px;display:block;margin-bottom:4px;">İsim</label>
+    <input type="text" id="dash-kisayol-label-input" style="width:100%;box-sizing:border-box;padding:8px;margin-bottom:12px;background:#0f2537;border:1px solid #2d4060;border-radius:6px;color:#e0f7fa;">
+    <div id="dash-kisayol-url-wrap">
+      <label style="color:#b0bec5;font-size:12px;display:block;margin-bottom:4px;">Link (URL)</label>
+      <input type="text" id="dash-kisayol-url-input" style="width:100%;box-sizing:border-box;padding:8px;margin-bottom:12px;background:#0f2537;border:1px solid #2d4060;border-radius:6px;color:#e0f7fa;">
+    </div>
+    <div id="dash-kisayol-hata" style="color:#ef4444;font-size:12px;margin-bottom:8px;display:none;"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;">
+      <button type="button" id="dash-kisayol-vazgec" class="btn-filter">Vazgeç</button>
+      <button type="button" id="dash-kisayol-kaydet" class="tahsilat-btn-kaydet">Kaydet</button>
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
@@ -865,11 +915,14 @@
   }
 
   function dashKisayolRenderTile(k) {
+    var wrap = document.createElement('div');
+    wrap.className = 'dash-kisayol-wrap';
+    wrap.setAttribute('data-slot-key', k.slot_key);
+
     var isLink = !!k.url;
     var tag = isLink ? 'a' : 'button';
     var el = document.createElement(tag);
     el.className = 'dash-sidebar-tile ' + (k.slot_key === 'tediye' || k.slot_key === 'musteri_ekle_1' ? 'dash-buttons-tile' : 'dash-sidebar-link');
-    el.setAttribute('data-slot-key', k.slot_key);
     if (isLink) {
       el.href = k.url;
     } else {
@@ -882,7 +935,21 @@
     el.title = k.label;
     el.innerHTML = '<span class="filter-icon"><i class="fa ' + k.icon + '"></i></span>' +
                     '<span class="filter-label">' + k.label + '</span>';
-    return el;
+
+    var editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.className = 'dash-kisayol-edit';
+    editBtn.setAttribute('aria-label', 'Kısayolu düzenle');
+    editBtn.innerHTML = '<i class="fa fa-pencil"></i>';
+    editBtn.addEventListener('click', function (ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      dashKisayolDuzenleAc(k);
+    });
+
+    wrap.appendChild(el);
+    wrap.appendChild(editBtn);
+    return wrap;
   }
 
   function dashKisayollariYukle() {
@@ -910,7 +977,67 @@
       .catch(function (e) { console.warn('Kısayollar yüklenemedi:', e); });
   }
 
+  var __dashKisayolDuzenlenen = null;
+
+  function dashKisayolDuzenleAc(k) {
+    __dashKisayolDuzenlenen = k;
+    document.getElementById('dash-kisayol-label-input').value = k.label || '';
+    document.getElementById('dash-kisayol-url-input').value = k.url || '';
+    var urlWrap = document.getElementById('dash-kisayol-url-wrap');
+    if (urlWrap) urlWrap.style.display = (k.slot_key === 'geri_donus') ? 'none' : 'block';
+    var hataEl = document.getElementById('dash-kisayol-hata');
+    if (hataEl) { hataEl.style.display = 'none'; hataEl.textContent = ''; }
+    document.getElementById('dash-kisayol-modal').style.display = 'flex';
+  }
+
+  function dashKisayolDuzenleKapat() {
+    document.getElementById('dash-kisayol-modal').style.display = 'none';
+    __dashKisayolDuzenlenen = null;
+  }
+
+  function dashKisayolKaydet() {
+    if (!__dashKisayolDuzenlenen) return;
+    var label = document.getElementById('dash-kisayol-label-input').value.trim();
+    var urlInput = document.getElementById('dash-kisayol-url-input').value.trim();
+    var hataEl = document.getElementById('dash-kisayol-hata');
+    if (!label) {
+      if (hataEl) { hataEl.textContent = 'İsim boş olamaz.'; hataEl.style.display = 'block'; }
+      return;
+    }
+    var isGeriDonus = __dashKisayolDuzenlenen.slot_key === 'geri_donus';
+    var body = {
+      slot_key: __dashKisayolDuzenlenen.slot_key,
+      label: label,
+      url: isGeriDonus ? null : urlInput,
+      icon: __dashKisayolDuzenlenen.icon
+    };
+    fetch('/dashboard/api/kisayol-guncelle', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify(body)
+    })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (d.ok) {
+        dashKisayolDuzenleKapat();
+        dashKisayollariYukle();
+      } else {
+        if (hataEl) { hataEl.textContent = d.mesaj || 'Kaydedilemedi.'; hataEl.style.display = 'block'; }
+      }
+    })
+    .catch(function (e) {
+      if (hataEl) { hataEl.textContent = 'Hata: ' + e.message; hataEl.style.display = 'block'; }
+    });
+  }
+
   document.addEventListener('DOMContentLoaded', dashKisayollariYukle);
+  document.addEventListener('DOMContentLoaded', function () {
+    var vazgecBtn = document.getElementById('dash-kisayol-vazgec');
+    var kaydetBtn = document.getElementById('dash-kisayol-kaydet');
+    if (vazgecBtn) vazgecBtn.addEventListener('click', dashKisayolDuzenleKapat);
+    if (kaydetBtn) kaydetBtn.addEventListener('click', dashKisayolKaydet);
+  });
 
   document.querySelectorAll('.btn-filter').forEach(function(btn) {
     btn.addEventListener('click', function() {
