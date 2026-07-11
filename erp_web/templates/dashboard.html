@@ -24,12 +24,12 @@
 .dash-top-row {
   display: flex;
   gap: 16px;
-  align-items: flex-start;
+  align-items: stretch;
   margin-bottom: 0;
 }
 .dash-left-col {
-  width: 520px;
-  flex-shrink: 0;
+  flex: 1 1 auto;
+  min-width: 520px;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -39,20 +39,26 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
+  flex: 1;
+  min-height: 0;
 }
 .dash-cards-and-filters-top {
   display: flex;
   flex-direction: row;
-  align-items: flex-start;
+  align-items: stretch;
   gap: 12px;
+  flex: 1;
+  min-height: 0;
 }
 /* 8 istatistik kartı — 2x4 grid */
 .dash-cards {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
+  grid-auto-rows: 1fr;
   gap: 8px;
   margin-bottom: 0;
-  flex: 0 0 auto;
+  flex: 1;
+  min-height: 0;
 }
 .dash-card {
   background: #1e3a50;
@@ -61,7 +67,6 @@
   border: 1px solid #2d4060;
   transition: box-shadow 0.2s;
   min-height: 50px;
-  height: 50px;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
@@ -105,6 +110,59 @@
   min-height: 50px;
   height: 50px;
 }
+.dash-sidebar-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.dash-sidebar-link {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 6px 10px;
+  background: #1e3a50;
+  border: 1px solid #2d4060;
+  border-radius: 6px;
+  color: #e0f7fa;
+  text-decoration: none;
+  font-size: 12px;
+  cursor: pointer;
+}
+.dash-sidebar-link:hover {
+  box-shadow: 0 0 0 1px #4fc3f7 inset;
+}
+.dash-sidebar-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  min-width: 240px;
+  flex-shrink: 0;
+  align-self: stretch;
+}
+.dash-sidebar-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 50px;
+  padding: 8px 10px;
+  background: #1e3a50;
+  border: 1px solid #2d4060;
+  border-radius: 6px;
+  font-size: 10px;
+  text-align: center;
+  box-sizing: border-box;
+  width: 100%;
+  text-decoration: none;
+  color: #e0f7fa;
+  cursor: pointer;
+}
+.dash-sidebar-tile .filter-icon { font-size: 14px; color: #78909c; display: block; }
+.dash-sidebar-tile .filter-label { color: #b0bec5; font-weight: 500; }
+.dash-sidebar-tile:hover { background: #2d4060; box-shadow: 0 0 0 1px #4fc3f7; }
+.dash-sidebar-tile:hover .filter-icon { color: #4fc3f7; }
 .dash-card-title { color: #b0bec5; font-size: 10px; margin-bottom: 4px; line-height: 1.2; }
 .dash-card-value { font-size: 14px; font-weight: bold; }
 .dash-card-value.green { color: #22c55e; }
@@ -118,6 +176,7 @@
   flex-direction: column;
   align-items: stretch;
   gap: 14px;
+  flex: 0 0 auto;
 }
 /* Filtreler: 8 kartın sağında — sol sütun 5 buton, sağ sütun 2 buton (Boş Ofisler, Sözleşme Bitiş) */
 .dash-filters-wrap {
@@ -258,7 +317,8 @@
 }
 .dash-geri-btn:hover { background: #2d4060; border-color: #4fc3f7; box-shadow: 0 0 0 1px #4fc3f7; }
 .dash-geri-list-wrap {
-  max-height: 180px;
+  flex: none;
+  max-height: 140px;
   overflow-y: auto;
   background: #0f2537;
   border: 1px solid #2d4060;
@@ -278,9 +338,10 @@
   margin-left: auto;
 }
 .dash-musteri-block {
-  flex: 0 0 35vh;
+  flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
+  max-height: calc(100vh - 130px);
   border-radius: 8px;
   border: 1px solid #2d4060;
   overflow: hidden;
@@ -293,7 +354,7 @@
   flex: 1;
   overflow: auto;
   min-height: 0;
-  max-height: 35vh;
+  max-height: none;
 }
 .dash-musteri-block .dash-table { font-size: 12px; min-width: 400px; }
 .dash-musteri-block .dash-table th,
@@ -551,32 +612,23 @@
         <!-- Randevu — kart satırında tek link butonu -->
         <a href="{{ url_for('randevu.randevu_al') }}" class="dash-card dash-card-btn dash-card-link" title="Randevu Al"><span class="filter-icon"><i class="fa fa-calendar"></i></span><span class="filter-label">Randevu</span></a>
         </div>
-        <div class="dash-filters-wrap">
-          <div class="dash-filters-vertical">
-            <button type="button" class="btn-filter active" data-filtre=""><span class="filter-icon"><i class="fa fa-th-large"></i></span><span class="filter-label">Tümü</span></button>
-            <button type="button" class="btn-filter" data-filtre="tam"><span class="filter-icon"><i class="fa fa-check-circle"></i></span><span class="filter-label">Ödemesi Tam</span></button>
-            <a href="{{ url_for('faturalar.yeni_fatura') }}" class="btn-filter dash-filter-link" title="Yeni fatura oluştur"><span class="filter-icon"><i class="fa fa-file-invoice"></i></span><span class="filter-label">Yeni Fatura</span></a>
-          </div>
-          <div class="dash-filters-right">
-            <button type="button" class="btn-filter" data-filtre="bos"><span class="filter-icon"><i class="fa fa-building"></i></span><span class="filter-label">Boş Ofisler</span></button>
-            <button type="button" class="btn-filter" data-filtre="sozlesme"><span class="filter-icon"><i class="fa fa-calendar"></i></span><span class="filter-label">Sözleşme Bitiş Yakın</span></button>
-            <a href="{{ url_for('tahsilat.index') }}" class="btn-filter dash-filter-link" title="Tahsilat / Yeni tahsilat"><span class="filter-icon"><i class="fa fa-money-bill-wave"></i></span><span class="filter-label">Yeni Tahsilat</span></a>
-          </div>
+        <div class="dash-sidebar-grid">
+          <button type="button" class="btn-filter dash-sidebar-tile active" data-filtre=""><span class="filter-icon"><i class="fa fa-th-large"></i></span><span class="filter-label">Tümü</span></button>
+          <button type="button" class="btn-filter dash-sidebar-tile" data-filtre="bos"><span class="filter-icon"><i class="fa fa-building"></i></span><span class="filter-label">Boş Ofisler</span></button>
+          <button type="button" class="btn-filter dash-sidebar-tile" data-filtre="tam"><span class="filter-icon"><i class="fa fa-check-circle"></i></span><span class="filter-label">Ödemesi Tam</span></button>
+          <button type="button" class="btn-filter dash-sidebar-tile" data-filtre="sozlesme"><span class="filter-icon"><i class="fa fa-calendar"></i></span><span class="filter-label">Sözleşme Bitiş Yakın</span></button>
+          <a href="{{ url_for('faturalar.yeni_fatura') }}" class="btn-filter dash-filter-link dash-sidebar-tile" title="Yeni fatura oluştur"><span class="filter-icon"><i class="fa fa-file-invoice"></i></span><span class="filter-label">Yeni Fatura</span></a>
+          <a href="{{ url_for('tahsilat.index') }}" class="btn-filter dash-filter-link dash-sidebar-tile" title="Tahsilat / Yeni tahsilat"><span class="filter-icon"><i class="fa fa-money-bill-wave"></i></span><span class="filter-label">Yeni Tahsilat</span></a>
+          <a href="{{ url_for('musteriler.list_full') }}" class="dash-sidebar-tile dash-sidebar-link" title="Müşteri listesi"><span class="filter-icon"><i class="fa fa-list"></i></span><span class="filter-label">Müşteri Listesi</span></a>
+          <a href="{{ url_for('musteriler.ekle') }}" class="dash-sidebar-tile dash-sidebar-link" title="Yeni müşteri ekle"><span class="filter-icon"><i class="fa fa-user-plus"></i></span><span class="filter-label">Müşteri Ekle</span></a>
+          <a href="{{ url_for('musteriler.list_full', filtre='whatsapp') }}" class="dash-sidebar-tile dash-sidebar-link" title="Toplu WhatsApp gönder"><span class="filter-icon"><i class="fa fa-whatsapp"></i></span><span class="filter-label">Toplu WhatsApp</span></a>
+          <a href="{{ url_for('faturalar.index') }}" class="dash-sidebar-tile dash-sidebar-link" title="Toplu faturalama"><span class="filter-icon"><i class="fa fa-file-invoice"></i></span><span class="filter-label">Toplu Faturalama</span></a>
+          <a href="{{ url_for('tufe.index') }}" class="dash-sidebar-tile dash-sidebar-link" title="TÜFE senaryosu / simülasyon"><span class="filter-icon"><i class="fa fa-chart-line"></i></span><span class="filter-label">TÜFE Senaryosu</span></a>
+          <button type="button" id="geri-yenile" class="dash-sidebar-tile dash-sidebar-link dash-geri-btn" title="Geri dönüş bekleyenler listesini yenile"><i class="fa fa-clock-o"></i> Geri Dönüş</button>
         </div>
-        </div>
-        <!-- Beş buton: resimdeki altı butonun (Yakın Gecikme … Yeni Tahsilat) hemen altında -->
-        <div class="dash-action-row">
-          <a href="{{ url_for('musteriler.list_full') }}" class="dash-card dash-card-btn dash-card-link" title="Müşteri listesi"><span class="filter-icon"><i class="fa fa-list"></i></span><span class="filter-label">Müşteri Listesi</span></a>
-          <a href="{{ url_for('musteriler.ekle') }}" class="dash-card dash-card-btn dash-card-link" title="Yeni müşteri ekle"><span class="filter-icon"><i class="fa fa-user-plus"></i></span><span class="filter-label">Müşteri Ekle</span></a>
-          <a href="{{ url_for('musteriler.list_full', filtre='whatsapp') }}" class="dash-card dash-card-btn dash-card-link" title="Toplu WhatsApp gönder"><span class="filter-icon"><i class="fa fa-whatsapp"></i></span><span class="filter-label">Toplu WhatsApp</span></a>
-          <a href="{{ url_for('faturalar.index') }}" class="dash-card dash-card-btn dash-card-link" title="Toplu faturalama"><span class="filter-icon"><i class="fa fa-file-invoice"></i></span><span class="filter-label">Toplu Faturalama</span></a>
-          <a href="{{ url_for('tufe.index') }}" class="dash-card dash-card-btn dash-card-link" title="TÜFE senaryosu / simülasyon"><span class="filter-icon"><i class="fa fa-chart-line"></i></span><span class="filter-label">TÜFE Senaryosu</span></a>
         </div>
       </div>
       <div class="dash-buttons-area">
-        <div class="dash-under-filters">
-          <button type="button" id="geri-yenile" class="dash-geri-btn" title="Geri dönüş bekleyenler listesini yenile"><i class="fa fa-clock-o"></i> Geri Dönüş</button>
-        </div>
         <div id="geri-list" class="dash-geri-list-wrap">
           <div style="color:#78909c;font-size:12px;">Liste yükleniyor...</div>
         </div>
