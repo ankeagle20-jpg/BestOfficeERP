@@ -4,12 +4,54 @@ Müşteri analizi, ödeme takibi, kargo, sözleşme alarmı, hızlı müdahale.
 """
 from flask import Blueprint, render_template, request, jsonify
 from auth import giris_gerekli
-from db import fetch_all, fetch_one, execute_returning, ensure_faturalar_amount_columns, sql_expr_fatura_not_gib_taslak
+from db import fetch_all, fetch_one, execute, execute_returning, ensure_faturalar_amount_columns, sql_expr_fatura_not_gib_taslak
 from utils.musteri_arama import customers_arama_sql_giris_genis, customers_arama_params_giris_genis
 from datetime import date, timedelta
 from phone_util import format_phone_for_display
 
 bp = Blueprint("dashboard", __name__)
+
+_DASHBOARD_KISAYOL_TABLE_READY = False
+
+
+def _ensure_dashboard_kisayol_table():
+    global _DASHBOARD_KISAYOL_TABLE_READY
+    if _DASHBOARD_KISAYOL_TABLE_READY:
+        return
+    try:
+        execute("""
+            CREATE TABLE IF NOT EXISTS dashboard_kisayollar (
+                slot_key TEXT PRIMARY KEY,
+                label TEXT NOT NULL,
+                url TEXT,
+                icon TEXT NOT NULL,
+                sira INTEGER NOT NULL DEFAULT 0,
+                updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+            )
+        """)
+        defaults = [
+            ("tediye", "Tediye", "/giris/?tab=11", "fa-hand-holding-dollar", 1),
+            ("musteri_ekle_1", "Müşteri Ekle", "/musteriler/ekle", "fa-user-plus", 2),
+            ("musteri_listesi", "Müşteri Listesi", "/musteriler/list", "fa-list", 3),
+            ("musteri_ekle_2", "Müşteri Ekle", "/musteriler/ekle", "fa-user-plus", 4),
+            ("toplu_whatsapp", "Toplu WhatsApp", "/musteriler/list?filtre=whatsapp", "fa-whatsapp", 5),
+            ("toplu_faturalama", "Toplu Faturalama", "/faturalar/", "fa-file-invoice", 6),
+            ("tufe_senaryosu", "TÜFE Senaryosu", "/tufe/", "fa-chart-line", 7),
+            ("geri_donus", "Geri Dönüş", None, "fa-clock-o", 8),
+        ]
+        for slot_key, label, url, icon, sira in defaults:
+            execute(
+                """
+                INSERT INTO dashboard_kisayollar (slot_key, label, url, icon, sira)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (slot_key) DO NOTHING
+                """,
+                (slot_key, label, url, icon, sira),
+            )
+    except Exception as e:
+        print(f"dashboard_kisayollar: {e}")
+    _DASHBOARD_KISAYOL_TABLE_READY = True
+
 
 AYLAR = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran",
          "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"]
@@ -370,3 +412,35 @@ def api_whatsapp_metin():
         metin = "Ödeme yapılmadığı takdirde hukuki işlem başlatılacaktır. Lütfen derhal ödeme yapınız."
     metin += f"\n\nBakiye: {toplam_alacak:,.2f} ₺"
     return jsonify({"ok": True, "metin": metin})
+
+
+@bp.route("/api/kisayollar")
+@giris_gerekli
+def api_dashboard_kisayollar():
+    _ensure_dashboard_kisayol_table()
+    rows = fetch_all("SELECT slot_key, label, url, icon, sira FROM dashboard_kisayollar ORDER BY sira") or []
+    return jsonify({"ok": True, "kisayollar": rows})
+
+
+@bp.route("/api/kisayol-guncelle", methods=["POST"])
+@giris_gerekli
+def api_dashboard_kisayol_guncelle():
+    _ensure_dashboard_kisayol_table()
+    data = request.get_json(silent=True) or {}
+    slot_key = str(data.get("slot_key") or "").strip()
+    if not slot_key:
+        return jsonify({"ok": False, "mesaj": "slot_key gerekli."}), 400
+    label = str(data.get("label") or "").strip()
+    if not label:
+        return jsonify({"ok": False, "mesaj": "İsim boş olamaz."}), 400
+    url = data.get("url")
+    url = str(url).strip() if url else None
+    icon = str(data.get("icon") or "").strip() or "fa-link"
+    row = fetch_one("SELECT slot_key FROM dashboard_kisayollar WHERE slot_key = %s", (slot_key,))
+    if not row:
+        return jsonify({"ok": False, "mesaj": "Kutu bulunamadı."}), 404
+    execute(
+        "UPDATE dashboard_kisayollar SET label = %s, url = %s, icon = %s, updated_at = NOW() WHERE slot_key = %s",
+        (label, url, icon, slot_key),
+    )
+    return jsonify({"ok": True})
