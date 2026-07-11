@@ -163,6 +163,18 @@
 .dash-sidebar-tile .filter-label { color: #b0bec5; font-weight: 500; }
 .dash-sidebar-tile:hover { background: #2d4060; box-shadow: 0 0 0 1px #4fc3f7; }
 .dash-sidebar-tile:hover .filter-icon { color: #4fc3f7; }
+.dash-buttons-row {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 8px;
+  width: 100%;
+}
+.dash-buttons-tile {
+  flex: 1 1 0;
+  min-width: 0;
+  text-decoration: none;
+}
 .dash-card-title { color: #b0bec5; font-size: 10px; margin-bottom: 4px; line-height: 1.2; }
 .dash-card-value { font-size: 14px; font-weight: bold; }
 .dash-card-value.green { color: #22c55e; }
@@ -326,7 +338,7 @@
   padding: 8px;
   font-size: 12px;
   width: 100%;
-  max-width: 932.56px;
+  max-width: 697.42px;
 }
 /* Sağ kolon: müşteri listesi en üstten, kalan alanı doldurur */
 .dash-right-col {
@@ -629,8 +641,22 @@
         </div>
       </div>
       <div class="dash-buttons-area">
-        <div id="geri-list" class="dash-geri-list-wrap">
-          <div style="color:#78909c;font-size:12px;">Liste yükleniyor...</div>
+        <div class="dash-buttons-row">
+          <div id="geri-list" class="dash-geri-list-wrap">
+            <div style="color:#78909c;font-size:12px;">Liste yükleniyor...</div>
+          </div>
+          <a href="{{ url_for('giris.index', tab=11) }}"
+             class="dash-sidebar-tile dash-buttons-tile"
+             title="Yeni tediye makbuzu">
+            <span class="filter-icon"><i class="fa fa-hand-holding-dollar"></i></span>
+            <span class="filter-label">Tediye</span>
+          </a>
+          <a href="{{ url_for('musteriler.ekle') }}"
+             class="dash-sidebar-tile dash-buttons-tile"
+             title="Yeni müşteri ekle">
+            <span class="filter-icon"><i class="fa fa-user-plus"></i></span>
+            <span class="filter-label">Müşteri Ekle</span>
+          </a>
         </div>
       </div>
     </div>
