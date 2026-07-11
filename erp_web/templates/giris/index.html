@@ -4787,11 +4787,15 @@ function girisBootstrapMusteriVeSekme() {
         var kartP = (p.get('kart') || '').trim().toLowerCase();
         var forceMusteriKartTab = kartP === '1' || kartP === 'true' || kartP === 'yes' || kartP === 'on';
         var tabIdx = 0;
-        if (!forceMusteriKartTab) {
+        var urlTab = p.get('tab');
+        if (urlTab != null) {
+            var ut = parseInt(urlTab, 10);
+            if (!isNaN(ut) && ut >= 0 && ut <= 12) tabIdx = ut;
+        } else if (!forceMusteriKartTab) {
             var ts = localStorage.getItem('bestoffice_giris_tab_index');
             if (ts != null) {
                 var ti = parseInt(ts, 10);
-                if (!isNaN(ti) && ti >= 0 && ti <= 10) tabIdx = ti;
+                if (!isNaN(ti) && ti >= 0 && ti <= 12) tabIdx = ti;
             }
         }
         if (typeof switchTab === 'function') switchTab(tabIdx);
