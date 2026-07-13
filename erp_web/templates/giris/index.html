@@ -14498,6 +14498,15 @@ function sozlesmeBitisAktifKiraciIcinUzat(skipAylikGrid) {
     var basEl = document.getElementById('sozlesme_baslangic');
     var bitEl = document.getElementById('sozlesme_bitis');
     if (!basEl || !basEl.value || !bitEl) return;
+    // Mevcut bitis tarihi zaten bugunden ileri (gelecekte) ise,
+    // API'den dogru gelmis demektir - dokunma, sadece kira suresini guncelle.
+    var mevcutBit = bitEl.value ? new Date(bitEl.value + 'T00:00:00') : null;
+    var today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (mevcutBit && !isNaN(mevcutBit.getTime()) && mevcutBit > today) {
+        kiraSuresiAylikOto(!!skipAylikGrid);
+        return;
+    }
     var yeni = sozlesmeBitisYildonumuIso(basEl.value);
     if (yeni) bitEl.value = yeni;
     kiraSuresiAylikOto(!!skipAylikGrid);
