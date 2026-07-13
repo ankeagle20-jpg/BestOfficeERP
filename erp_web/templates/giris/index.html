@@ -4259,6 +4259,7 @@
                         <label>Aylık Kira (₺)</label>
                         <input type="number" step="0.01" id="cari_ekstre_aylik_kira" placeholder="Sol formdan alınır">
                         <button type="button" class="tahsilat-btn-kaydet" onclick="cariEkstreYukle()"><i class="fa fa-refresh"></i> Ekstre Göster</button>
+                        <button type="button" class="tahsilat-btn-kaydet" style="background:#2e7d32;border-color:#2e7d32;" onclick="cariEkstreExcelIndir()" title="Görüntülenen ekstreyi Excel olarak indir"><i class="fa fa-file-excel"></i> Excel'e Aktar</button>
                     </div>
                     <div id="cari_ekstre_musteri_bilgi" class="cari-ekstre-musteri" style="display:none;"></div>
                     <div class="cari-ekstre-tablo-wrap">
@@ -28745,6 +28746,73 @@ function cariEkstreYukle(opts) {
         });
     if (!__ekstreZorla) window.__girisEkstreInflight[__ekstreKey] = ekstrePromise;
     return ekstrePromise;
+}
+
+function cariEkstreExcelIndir() {
+    var musteriId = cariEkstreMusteriIdSec();
+    if (!musteriId) {
+        alert('Önce bir müşteri seçin.');
+        return;
+    }
+    var baslangicInput = document.getElementById('cari_ekstre_baslangic');
+    var bitis = document.getElementById('cari_ekstre_bitis').value;
+    var baslangic = baslangicInput ? baslangicInput.value : '';
+
+    var sozlesmeBasInput = document.getElementById('sozlesme_baslangic');
+    if (sozlesmeBasInput && sozlesmeBasInput.value && baslangic) {
+        var soz = new Date(sozlesmeBasInput.value);
+        var bas = new Date(baslangic);
+        if (bas < soz) {
+            baslangic = sozlesmeBasInput.value;
+            baslangicInput.value = baslangic;
+        }
+    }
+    var bitisEl = document.getElementById('cari_ekstre_bitis');
+    if (bitisEl && baslangic && bitis) {
+        var bA = new Date(baslangic);
+        var bT = new Date(bitis);
+        if (!isNaN(bA.getTime()) && !isNaN(bT.getTime()) && bT < bA) {
+            var yy = bA.getFullYear();
+            var mm = bA.getMonth() + 1;
+            var sg = new Date(yy, mm, 0).getDate();
+            bitis = yy + '-' + girisCariEkstrePad2(mm) + '-' + girisCariEkstrePad2(sg);
+            bitisEl.value = bitis;
+        }
+    }
+    var durumEkEl = document.getElementById('musteri_durum');
+    var pasifEkstre = durumEkEl && String(durumEkEl.value || '').toLowerCase().trim() === 'pasif';
+    if (bitisEl && !pasifEkstre) {
+        var sozBitEl = document.getElementById('sozlesme_bitis');
+        var sozBitIso = (sozBitEl && sozBitEl.value) ? String(sozBitEl.value).trim().substring(0, 10) : '';
+        var nowEk = new Date();
+        var cyEk = nowEk.getFullYear();
+        var cmEk = nowEk.getMonth() + 1;
+        var sonGunEk = new Date(cyEk, cmEk, 0).getDate();
+        var curBitIso = cyEk + '-' + girisCariEkstrePad2(cmEk) + '-' + girisCariEkstrePad2(sonGunEk);
+        var varsayilanBit = sozBitIso
+            ? (sozBitIso < curBitIso ? sozBitIso : curBitIso)
+            : curBitIso;
+        var otomatikBitis = !bitis || window.__cariEkstreBitisOtomatik === true;
+        if (otomatikBitis) {
+            bitis = varsayilanBit;
+            bitisEl.value = bitis;
+            try { window.__cariEkstreBitisOtomatik = true; } catch (_eEkOto2) {}
+        }
+    }
+
+    var aylikKiraEl = document.getElementById('cari_ekstre_aylik_kira');
+    var aylikKira = (aylikKiraEl && aylikKiraEl.value !== '') ? parseFloat((aylikKiraEl.value || '0').replace(',', '.')) : parseFloat((document.getElementById('aylik_kira').value || '0').replace(',', '.'));
+    if (isNaN(aylikKira)) aylikKira = 0;
+    var kdvEl = document.getElementById('kdv_oran');
+    var kdvOran = (kdvEl && kdvEl.value !== '') ? parseFloat(String(kdvEl.value).replace(',', '.')) : 20;
+    if (isNaN(kdvOran)) kdvOran = 20;
+    var params = new URLSearchParams({ musteri_id: musteriId, baslangic: baslangic || '', bitis: bitis || '', aylik_kira: aylikKira, kdv_oran: kdvOran });
+    if (kiraNakitMi()) params.set('kira_nakit', '1');
+    params.set('form_bazli_kira', '1');
+    params.set('tahsilat_borca_hizala', '1');
+    var __dbEsasEkstre = true;
+    params.set('db_esas', __dbEsasEkstre ? '1' : '0');
+    window.open('/giris/api/cari-ekstre-excel?' + params.toString(), '_blank');
 }
 
 // Cari Ekstre / Cari Ekstre B sekme geçişi
