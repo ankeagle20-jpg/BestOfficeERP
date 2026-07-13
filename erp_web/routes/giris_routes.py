@@ -8973,6 +8973,34 @@ def api_aylik_tutarlardan_tahsil_et():
             "tahsilat_tarihi": tahsil_tarih_row,
         })
 
+    caplanan = []
+    try:
+        kyc_cap = _musteri_kyc_grup_for_aylik_grid(musteri_id)
+    except Exception:
+        kyc_cap = None
+    if kyc_cap and bool(kyc_cap.get("kira_nakit")):
+        try:
+            payload_cap = _read_aylik_grid_cache_payload(musteri_id)
+            if not payload_cap:
+                payload_cap = _build_aylik_grid_cache_payload(
+                    musteri_id, tufe_map=_tufe_map_by_year_month_cached()
+                )
+        except Exception:
+            payload_cap = None
+        if payload_cap:
+            CAP_ESIK = 1.0
+            for p in parsed:
+                try:
+                    brut_cap = _month_brut_from_grid_payload(payload_cap, p["yil"], p["ay"])
+                except Exception:
+                    brut_cap = 0
+                if brut_cap > 0 and p["tutar"] > brut_cap + CAP_ESIK:
+                    caplanan.append({
+                        "yil": p["yil"], "ay": p["ay"],
+                        "gelen": p["tutar"], "brut": round(brut_cap, 2)
+                    })
+                    p["tutar"] = round(brut_cap, 2)
+
     def _norm_month_key(v):
         if isinstance(v, datetime):
             return v.date()
@@ -9246,6 +9274,7 @@ def api_aylik_tutarlardan_tahsil_et():
         "ok": True,
         "olusturulan": olusturulan,
         "atlanan": atlanan,
+        "caplanan": caplanan,
         "mesaj": mesaj,
         "ls_temizle": True,
         "cache_updated": True,
