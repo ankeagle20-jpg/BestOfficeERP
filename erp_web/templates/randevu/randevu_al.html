@@ -315,11 +315,11 @@
       </div>
       <label>Başlama saati (en erken)</label>
       <input type="time" id="ra-baslama-saati" value="09:00" min="08:00">
-      <div id="ra-panel-toplanti" class="ra-left-panel active">
       <label>Oda</label>
       <select id="ra-oda">
         <option value="">Seçiniz</option>
       </select>
+      <div id="ra-panel-toplanti" class="ra-left-panel active">
       <label>Müşteri</label>
       <div class="combobox-wrap-ra">
         <input type="text" id="ra-musteri-ara" placeholder="Firma veya müşteri ara, listeden seçin..." autocomplete="off">
@@ -606,6 +606,7 @@ window.RA_EMBED_MUSTERI_ID = {{ embed_musteri_id | tojson }};
     if (selectedDate && odaAdi) loadSlots(selectedDate);
     else document.getElementById('ra-slots').innerHTML = '';
     loadAylikDoluluk();
+    if (selectedDate) loadGunRandevulari();
   });
 
   document.getElementById('ra-tur').addEventListener('change', function() {
