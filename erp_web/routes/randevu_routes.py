@@ -255,32 +255,32 @@ def api_gun_randevulari():
         rows = fetch_all("""
             SELECT r.id, r.baslangic_zamani, r.bitis_zamani, r.randevu_tarihi, r.saat, r.sure_dakika,
                    r.randevu_tipi,
+                   COALESCE(NULLIF(TRIM(r.oda_adi), ''), r.oda) AS oda_adi,
                    c.name AS musteri_adi
             FROM randevular r
             LEFT JOIN customers c ON c.id = r.musteri_id
-            WHERE COALESCE(NULLIF(TRIM(r.oda_adi), ''), r.oda) = %s
-              AND COALESCE(r.durum, '') != 'İptal'
+            WHERE COALESCE(r.durum, '') != 'İptal'
               AND (
                 (r.baslangic_zamani IS NOT NULL AND (r.baslangic_zamani::date) = %s)
                 OR (r.randevu_tarihi = %s)
               )
             ORDER BY COALESCE(r.baslangic_zamani, (r.randevu_tarihi + COALESCE(r.saat, '09:00'::time))::timestamptz)
-        """, (oda_adi, gun, gun))
+        """, (gun, gun))
     except Exception:
         rows = fetch_all("""
             SELECT r.id, r.baslangic_zamani, r.bitis_zamani, r.randevu_tarihi, r.saat, r.sure_dakika,
                    r.randevu_tipi,
+                   COALESCE(NULLIF(TRIM(r.oda_adi), ''), r.oda) AS oda_adi,
                    c.name AS musteri_adi
             FROM randevular r
             LEFT JOIN customers c ON c.id = r.musteri_id
-            WHERE COALESCE(NULLIF(TRIM(r.oda_adi), ''), r.oda) = %s
-              AND COALESCE(r.durum, '') != 'İptal'
+            WHERE COALESCE(r.durum, '') != 'İptal'
               AND (
                 (r.baslangic_zamani IS NOT NULL AND (r.baslangic_zamani::date) = %s)
                 OR (r.randevu_tarihi = %s)
               )
             ORDER BY COALESCE(r.baslangic_zamani, (r.randevu_tarihi + COALESCE(r.saat, '09:00'::time))::timestamptz)
-        """, (oda_adi, gun, gun))
+        """, (gun, gun))
     out = []
     for r in rows:
         b = r.get("baslangic_zamani")
@@ -312,6 +312,7 @@ def api_gun_randevulari():
         out.append({
             "id": r.get("id"),
             "musteri_adi": (r.get("musteri_adi") or "").strip() or "—",
+            "oda_adi": (r.get("oda_adi") or "").strip() or "—",
             "baslangic": bas_str,
             "bitis": bitis_str,
             "sure_metin": sure_metin,

@@ -796,6 +796,7 @@ window.RA_EMBED_MUSTERI_ID = {{ embed_musteri_id | tojson }};
           var sure = (r.sure_metin || '').replace(/</g, '&lt;');
           var bas = (r.baslangic || '').replace(/</g, '&lt;');
           var bit = (r.bitis || '').replace(/</g, '&lt;');
+          var oda = (r.oda_adi || '').replace(/</g, '&lt;');
           var rid = (r.id != null && r.id !== '') ? String(r.id) : '';
           var rt = (r.randevu_tipi === 'gorusme') ? 'gorusme' : 'toplanti';
           var turLabel = (r.tur_etiket || (rt === 'gorusme' ? 'Görüşmeler' : 'Toplantılar')).replace(/</g, '&lt;');
@@ -803,7 +804,7 @@ window.RA_EMBED_MUSTERI_ID = {{ embed_musteri_id | tojson }};
           html += '<div class="randevu-al-firma-item" data-id="' + rid + '" data-baslangic="' + bas + '" data-bitis="' + bit + '" data-randevu-tipi="' + rt + '">';
           html += '<div class="ra-firma-adi">' + ad + (sure ? ' <span class="ra-firma-sure">' + sure + '</span>' : '') + '</div>';
           html += '<div class="ra-tur-satir"><span class="ra-tur-etiket ' + turCls + '">' + turLabel + '</span></div>';
-          html += '<div class="ra-firma-saat">' + (r.baslangic || '') + ' – ' + (r.bitis || '') + '</div>';
+          html += '<div class="ra-firma-saat">' + (r.baslangic || '') + ' – ' + (r.bitis || '') + (oda ? ' <span style="color:#78909c;font-size:11px;">📍 ' + oda + '</span>' : '') + '</div>';
           if (rid) {
             html += '<div class="ra-firma-actions">';
             html += '<button type="button" class="ra-degistir-btn">Değiştir</button>';
