@@ -127,6 +127,13 @@ def calcom():
     return render_template("randevu/calcom.html", cal_com_cal_link=cal_link)
 
 
+@bp.route("/rapor")
+@login_required
+def rapor():
+    """Randevu raporu sayfasi - tarih araligina gore toplanti/gorusme listesi."""
+    return render_template("randevu/rapor.html")
+
+
 @bp.route("/api/list")
 @login_required
 def api_list():
