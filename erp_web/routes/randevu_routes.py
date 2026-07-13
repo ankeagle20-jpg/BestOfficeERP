@@ -180,6 +180,70 @@ def api_list():
     return jsonify(out)
 
 
+@bp.route("/api/rapor")
+@login_required
+def api_rapor():
+    """Tarih araliginda TUM odalardaki toplanti+gorusme kayitlari -
+    rapor sayfasi icin (Musteri, Tur, Saat, Toplanti Yeri)."""
+    bas_str = request.args.get("baslangic")
+    bit_str = request.args.get("bitis")
+    if not bas_str or not bit_str:
+        return jsonify({"ok": False, "mesaj": "baslangic ve bitis gerekli."}), 400
+    try:
+        bas = datetime.strptime(bas_str[:10], "%Y-%m-%d").date()
+        bit = datetime.strptime(bit_str[:10], "%Y-%m-%d").date()
+    except Exception:
+        return jsonify({"ok": False, "mesaj": "Geçersiz tarih formatı."}), 400
+
+    bit_exclusive = bit + timedelta(days=1)
+
+    rows = fetch_all("""
+        SELECT r.id, r.baslangic_zamani, r.bitis_zamani, r.randevu_tarihi,
+               r.saat, r.sure_dakika, r.randevu_tipi,
+               COALESCE(NULLIF(TRIM(r.oda_adi), ''), r.oda) AS oda_adi,
+               c.name AS musteri_adi
+        FROM randevular r
+        LEFT JOIN customers c ON c.id = r.musteri_id
+        WHERE COALESCE(r.durum, '') != 'İptal'
+          AND (
+            (r.baslangic_zamani IS NOT NULL
+               AND r.baslangic_zamani::date >= %s AND r.baslangic_zamani::date < %s)
+            OR (r.baslangic_zamani IS NULL
+               AND r.randevu_tarihi >= %s AND r.randevu_tarihi < %s)
+          )
+        ORDER BY COALESCE(r.baslangic_zamani,
+                 (r.randevu_tarihi::timestamp + COALESCE(r.saat, '00:00'::time)))
+    """, (bas, bit_exclusive, bas, bit_exclusive))
+
+    out = []
+    for r in (rows or []):
+        rt = (r.get("randevu_tipi") or "randevu").strip().lower()
+        tur_label = "Görüşme" if rt == "gorusme" else "Toplantı"
+        bas_zaman = r.get("baslangic_zamani")
+        bit_zaman = r.get("bitis_zamani")
+        tarih_str = ""
+        saat_str = ""
+        if bas_zaman:
+            tarih_str = bas_zaman.strftime("%Y-%m-%d")
+            saat_str = bas_zaman.strftime("%H:%M")
+            if bit_zaman:
+                saat_str += " - " + bit_zaman.strftime("%H:%M")
+        elif r.get("randevu_tarihi"):
+            tarih_str = r["randevu_tarihi"].strftime("%Y-%m-%d")
+            if r.get("saat"):
+                saat_str = str(r["saat"])[:5]
+        out.append({
+            "id": r.get("id"),
+            "tarih": tarih_str,
+            "musteri_adi": r.get("musteri_adi") or "—",
+            "tur": tur_label,
+            "saat": saat_str,
+            "oda_adi": r.get("oda_adi") or "—",
+        })
+
+    return jsonify({"ok": True, "kayitlar": out, "toplam": len(out)})
+
+
 @bp.route("/api/musteriler")
 @login_required
 def api_musteriler():
