@@ -1408,6 +1408,11 @@ window.RA_EMBED_MUSTERI_ID = {{ embed_musteri_id | tojson }};
       var se = document.getElementById('ra-secilen-slot'); if (se) { se.style.display = 'none'; se.textContent = ''; }
       var gs = document.getElementById('ra-gorusme-secilen-slot'); if (gs) { gs.style.display = 'none'; gs.textContent = ''; }
       var gb = document.getElementById('ra-btn-gorusme-randevu-al'); if (gb) gb.disabled = true;
+      // YENİ: form alanlarını temizle
+      var kisiEl = document.getElementById('ra-gorusme-kisi'); if (kisiEl) kisiEl.value = '';
+      var sirketEl = document.getElementById('ra-gorusme-sirket'); if (sirketEl) sirketEl.value = '';
+      var telefonEl = document.getElementById('ra-gorusme-telefon'); if (telefonEl) telefonEl.value = '';
+      var notlarEl = document.getElementById('ra-gorusme-notlar'); if (notlarEl) notlarEl.value = '';
       if (selectedDate && odaAdi) {
         loadSlots(selectedDate, true);
         loadGunRandevulari(true);
