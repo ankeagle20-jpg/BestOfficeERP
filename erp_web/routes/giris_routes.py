@@ -8504,13 +8504,21 @@ def api_cari_ekstre():
         def_bit = soz_bit or def_bit_cari_ay
     baslangic = request.args.get("baslangic")
     bitis = request.args.get("bitis")
+    kullanici_araligi_verildi = bool(baslangic or bitis)
     try:
         bas = datetime.strptime(baslangic[:10], "%Y-%m-%d").date() if baslangic else def_b
         bit = datetime.strptime(bitis[:10], "%Y-%m-%d").date() if bitis else def_bit
     except Exception:
         bas, bit = def_b, def_bit
+        kullanici_araligi_verildi = False
     if bas > bit:
-        bas, bit = bit, bas
+        if kullanici_araligi_verildi:
+            bas, bit = bit, bas
+        elif str(cust_durum).strip().lower() == "pasif":
+            soz_bas = _aylik_grid_coerce_date((kyc or {}).get("sozlesme_tarihi"))
+            bas = soz_bas or bit
+        else:
+            bas, bit = bit, bas
     # (genislet kaldırıldı - artık sözleşme bitiş tarihi varsayılan bitiş olarak kullanılıyor)
     aylik_kira = request.args.get("aylik_kira", type=float) or 0
     kdv_oran = request.args.get("kdv_oran", type=float) or 20
