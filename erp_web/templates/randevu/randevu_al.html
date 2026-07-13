@@ -369,6 +369,12 @@
     </div>
     <div class="randevu-al-firmalar">
       <h3 id="ra-firmalar-title">Randevular</h3>
+      <select id="ra-firma-tur-select" style="width:100%;margin-bottom:8px;padding:6px;background:#0f2537;border:1px solid #2d4060;border-radius:6px;color:#e0f7fa;font-size:12px;">
+        <option value="hepsi">Hepsi</option>
+        <option value="toplanti">Toplantılar</option>
+        <option value="gorusme">Görüşmeler</option>
+      </select>
+      <div id="ra-firma-oda-checkboxes" style="display:none;margin-bottom:8px;padding:8px;background:#0f2537;border:1px solid #2d4060;border-radius:6px;"></div>
       <div id="ra-firmalar-list" class="randevu-al-firmalar-list"></div>
     </div>
   </div>
@@ -765,10 +771,115 @@ window.RA_EMBED_MUSTERI_ID = {{ embed_musteri_id | tojson }};
       });
   }
 
+  var raFirmaFiltreTur = 'hepsi';
+  var raFirmaFiltreOdalar = [];
+  var raSonRandevuVerisi = [];
+
+  function raFirmaOdaCheckboxlariGoster(odalar) {
+    var wrap = document.getElementById('ra-firma-oda-checkboxes');
+    if (!wrap) return;
+    if (raFirmaFiltreTur === 'hepsi' || !odalar.length) {
+      wrap.style.display = 'none';
+      wrap.innerHTML = '';
+      raFirmaFiltreOdalar = [];
+      return;
+    }
+    wrap.style.display = 'block';
+    wrap.innerHTML = odalar.map(function(oda) {
+      var safe = String(oda).replace(/</g, '&lt;').replace(/"/g, '&quot;');
+      return '<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#b0bec5;padding:3px 0;">' +
+        '<input type="checkbox" class="ra-firma-oda-cb" value="' + safe + '"> ' + safe +
+        '</label>';
+    }).join('');
+    wrap.querySelectorAll('.ra-firma-oda-cb').forEach(function(cb) {
+      cb.addEventListener('change', function() {
+        raFirmaFiltreOdalar = Array.from(wrap.querySelectorAll('.ra-firma-oda-cb:checked')).map(function(c) { return c.value; });
+        raFirmalarListesiCiz();
+      });
+    });
+  }
+
+  function raFirmaTurOdalariniGuncelle() {
+    if (raFirmaFiltreTur === 'hepsi') {
+      raFirmaOdaCheckboxlariGoster([]);
+      return;
+    }
+    var odalarBuTur = Array.from(new Set(
+      raSonRandevuVerisi
+        .filter(function(r) {
+          return raFirmaFiltreTur === 'hepsi' || (r.randevu_tipi === raFirmaFiltreTur) || (raFirmaFiltreTur === 'toplanti' && r.randevu_tipi !== 'gorusme');
+        })
+        .map(function(r) { return r.oda_adi; })
+        .filter(Boolean)
+    ));
+    raFirmaOdaCheckboxlariGoster(odalarBuTur);
+  }
+
+  function raFirmaTurSelectBagla() {
+    var turSelect = document.getElementById('ra-firma-tur-select');
+    if (!turSelect || turSelect._raFirmaTurBound) return;
+    turSelect._raFirmaTurBound = true;
+    turSelect.addEventListener('change', function() {
+      raFirmaFiltreTur = this.value;
+      raFirmaFiltreOdalar = [];
+      raFirmaTurOdalariniGuncelle();
+      raFirmalarListesiCiz();
+    });
+  }
+
+  function raFirmalarListesiCiz() {
+    var listEl = document.getElementById('ra-firmalar-list');
+    if (!listEl) return;
+    if (!raSonRandevuVerisi.length) {
+      listEl.innerHTML = '<p style="color:#78909c;font-size:12px;">Bu gün için randevu yok.</p>';
+      return;
+    }
+    var arr = raSonRandevuVerisi.filter(function(r) {
+      if (raFirmaFiltreTur !== 'hepsi') {
+        var rt = (r.randevu_tipi === 'gorusme') ? 'gorusme' : 'toplanti';
+        if (rt !== raFirmaFiltreTur) return false;
+      }
+      if (raFirmaFiltreOdalar.length && raFirmaFiltreOdalar.indexOf(r.oda_adi) === -1) {
+        return false;
+      }
+      return true;
+    });
+    if (!arr.length) {
+      listEl.innerHTML = '<p style="color:#78909c;font-size:12px;">Bu filtreye uyan randevu yok.</p>';
+      return;
+    }
+    var html = '';
+    arr.forEach(function(r) {
+      var ad = (r.musteri_adi || '—').replace(/</g, '&lt;');
+      var sure = (r.sure_metin || '').replace(/</g, '&lt;');
+      var bas = (r.baslangic || '').replace(/</g, '&lt;');
+      var bit = (r.bitis || '').replace(/</g, '&lt;');
+      var oda = (r.oda_adi || '').replace(/</g, '&lt;');
+      var rid = (r.id != null && r.id !== '') ? String(r.id) : '';
+      var rt = (r.randevu_tipi === 'gorusme') ? 'gorusme' : 'toplanti';
+      var turLabel = (r.tur_etiket || (rt === 'gorusme' ? 'Görüşmeler' : 'Toplantılar')).replace(/</g, '&lt;');
+      var turCls = rt === 'gorusme' ? 'ra-tur-gorusme' : 'ra-tur-toplanti';
+      html += '<div class="randevu-al-firma-item" data-id="' + rid + '" data-baslangic="' + bas + '" data-bitis="' + bit + '" data-randevu-tipi="' + rt + '">';
+      html += '<div class="ra-firma-adi">' + ad + (sure ? ' <span class="ra-firma-sure">' + sure + '</span>' : '') + '</div>';
+      html += '<div class="ra-tur-satir"><span class="ra-tur-etiket ' + turCls + '">' + turLabel + '</span></div>';
+      html += '<div class="ra-firma-saat">' + (r.baslangic || '') + ' – ' + (r.bitis || '') + (oda ? ' <span style="color:#78909c;font-size:11px;">📍 ' + oda + '</span>' : '') + '</div>';
+      if (rid) {
+        html += '<div class="ra-firma-actions">';
+        html += '<button type="button" class="ra-degistir-btn">Değiştir</button>';
+        html += '<button type="button" class="ra-sil-btn">Sil</button>';
+        html += '<span class="ra-vazgec-kaydet-wrap"><button type="button" class="ra-vazgec-btn">Vazgeç</button><button type="button" class="ra-kaydet-btn">Kaydet</button></span>';
+        html += '</div>';
+      }
+      html += '</div>';
+    });
+    listEl.innerHTML = html;
+  }
+
   function loadGunRandevulari(silentRefresh) {
     var titleEl = document.getElementById('ra-firmalar-title');
     var listEl = document.getElementById('ra-firmalar-list');
     if (!selectedDate || !odaAdi) {
+      raSonRandevuVerisi = [];
       if (titleEl) titleEl.textContent = 'Randevular';
       if (listEl) listEl.innerHTML = '<p style="color:#78909c;font-size:12px;">Tarih ve oda seçin.</p>';
       return;
@@ -784,42 +895,18 @@ window.RA_EMBED_MUSTERI_ID = {{ embed_musteri_id | tojson }};
     fetch(gunUrl, { headers: { 'Accept': 'application/json' } })
       .then(function(r) { return r.json(); })
       .then(function(data) {
-        var arr = data.randevular || [];
+        raSonRandevuVerisi = data.randevular || [];
         if (!listEl) return;
-        if (arr.length === 0) {
-          listEl.innerHTML = '<p style="color:#78909c;font-size:12px;">Bu gün için randevu yok.</p>';
-          return;
-        }
-        var html = '';
-        arr.forEach(function(r) {
-          var ad = (r.musteri_adi || '—').replace(/</g, '&lt;');
-          var sure = (r.sure_metin || '').replace(/</g, '&lt;');
-          var bas = (r.baslangic || '').replace(/</g, '&lt;');
-          var bit = (r.bitis || '').replace(/</g, '&lt;');
-          var oda = (r.oda_adi || '').replace(/</g, '&lt;');
-          var rid = (r.id != null && r.id !== '') ? String(r.id) : '';
-          var rt = (r.randevu_tipi === 'gorusme') ? 'gorusme' : 'toplanti';
-          var turLabel = (r.tur_etiket || (rt === 'gorusme' ? 'Görüşmeler' : 'Toplantılar')).replace(/</g, '&lt;');
-          var turCls = rt === 'gorusme' ? 'ra-tur-gorusme' : 'ra-tur-toplanti';
-          html += '<div class="randevu-al-firma-item" data-id="' + rid + '" data-baslangic="' + bas + '" data-bitis="' + bit + '" data-randevu-tipi="' + rt + '">';
-          html += '<div class="ra-firma-adi">' + ad + (sure ? ' <span class="ra-firma-sure">' + sure + '</span>' : '') + '</div>';
-          html += '<div class="ra-tur-satir"><span class="ra-tur-etiket ' + turCls + '">' + turLabel + '</span></div>';
-          html += '<div class="ra-firma-saat">' + (r.baslangic || '') + ' – ' + (r.bitis || '') + (oda ? ' <span style="color:#78909c;font-size:11px;">📍 ' + oda + '</span>' : '') + '</div>';
-          if (rid) {
-            html += '<div class="ra-firma-actions">';
-            html += '<button type="button" class="ra-degistir-btn">Değiştir</button>';
-            html += '<button type="button" class="ra-sil-btn">Sil</button>';
-            html += '<span class="ra-vazgec-kaydet-wrap"><button type="button" class="ra-vazgec-btn">Vazgeç</button><button type="button" class="ra-kaydet-btn">Kaydet</button></span>';
-            html += '</div>';
-          }
-          html += '</div>';
-        });
-        listEl.innerHTML = html;
+        raFirmaTurOdalariniGuncelle();
+        raFirmalarListesiCiz();
       })
       .catch(function() {
+        raSonRandevuVerisi = [];
         if (listEl) listEl.innerHTML = '<p style="color:#ef4444;font-size:12px;">Liste yüklenemedi.</p>';
       });
   }
+
+  raFirmaTurSelectBagla();
 
   function loadMevcutRandevu() {
     var midEl = document.getElementById('ra-musteri-id');
