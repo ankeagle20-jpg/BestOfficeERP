@@ -8471,20 +8471,15 @@ def _cari_ekstre_varsayilan_son_tam_ay():
 _cari_ekstre_api_cache: dict = {}
 
 
-@bp.route('/api/cari-ekstre')
-@giris_gerekli
-def api_cari_ekstre():
-    """
-    Sözleşme sayfası cari ekstre: Tarih aralığında aylık kira borç + tahsilat alacak.
-    Query: musteri_id, baslangic, bitis (YYYY-MM-DD; boşsa sözleşme bitişi, yoksa cari ay), aylik_kira.
-    Opsiyonel reel_json: URL-encoded JSON {\"2024\":612,\"2023\":350} — Uygula önizlemesi (Kaydet öncesi) ekstre ile aynı tutarlar.
-    """
+def _cari_ekstre_build_payload_from_request():
+    """api_cari_ekstre ile Excel export'un PAYLAŞTIĞI ortak mantık.
+    Dönüş: (payload_dict, None) başarılıysa, (None, (response, status)) hata varsa."""
     musteri_id = request.args.get("musteri_id", type=int)
     if not musteri_id:
-        return jsonify({"ok": False, "mesaj": "musteri_id gerekli."}), 400
+        return None, (jsonify({"ok": False, "mesaj": "musteri_id gerekli."}), 400)
     cust = fetch_one("SELECT id, name FROM customers WHERE id = %s", (musteri_id,))
     if not cust:
-        return jsonify({"ok": False, "mesaj": "Müşteri bulunamadı."}), 404
+        return None, (jsonify({"ok": False, "mesaj": "Müşteri bulunamadı."}), 404)
     def_b, def_bit_cari_ay = _cari_ekstre_varsayilan_son_tam_ay()
     kyc = _musteri_kyc_grup_for_aylik_grid(int(musteri_id))
     soz_bit = _aylik_grid_coerce_date((kyc or {}).get("sozlesme_bitis"))
@@ -8589,7 +8584,7 @@ def api_cari_ekstre():
     if not panel_by_iso:
         hit = _cari_ekstre_api_cache.get(cache_key)
         if hit and (now - float(hit.get("ts") or 0)) < 300.0 and hit.get("payload"):
-            return jsonify(hit["payload"])
+            return dict(hit["payload"]), None
     try:
         hareketler = _cari_ekstre_hareketler(
             musteri_id,
@@ -8604,7 +8599,7 @@ def api_cari_ekstre():
         )
     except Exception as e:
         logging.getLogger(__name__).exception("api_cari_ekstre musteri_id=%s", musteri_id)
-        return jsonify({"ok": False, "mesaj": f"Ekstre hesaplanamadı: {e}"}), 500
+        return None, (jsonify({"ok": False, "mesaj": f"Ekstre hesaplanamadı: {e}"}), 500)
     toplam_borc = sum(h.get("borc") or 0 for h in hareketler)
     toplam_alacak = sum(h.get("alacak") or 0 for h in hareketler)
     if hareketler:
@@ -8621,6 +8616,8 @@ def api_cari_ekstre():
         "toplam_borc": round(toplam_borc, 2),
         "toplam_alacak": round(toplam_alacak, 2),
         "bakiye": bakiye,
+        "bas_iso": bas.isoformat(),
+        "bit_iso": bit.isoformat(),
     }
     if not panel_by_iso:
         _cari_ekstre_api_cache[cache_key] = {"ts": now, "payload": payload}
@@ -8628,7 +8625,119 @@ def api_cari_ekstre():
         stale = [k for k, v in _cari_ekstre_api_cache.items() if (now - float(v.get("ts") or 0)) > 60.0]
         for k in stale:
             _cari_ekstre_api_cache.pop(k, None)
+    return payload, None
+
+
+def _cari_ekstre_workbook_bytes(payload, bas_iso, bit_iso):
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment, PatternFill
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Cari Ekstre"
+
+    arial = Font(name="Arial", size=11)
+    arial_bold = Font(name="Arial", size=11, bold=True)
+    baslik_font = Font(name="Arial", size=14, bold=True)
+    header_fill = PatternFill(start_color="0097A7", end_color="0097A7", fill_type="solid")
+    header_font = Font(name="Arial", size=11, bold=True, color="FFFFFF")
+
+    ws.merge_cells("A1:E1")
+    ws["A1"] = "CARİ EKSTRE"
+    ws["A1"].font = baslik_font
+    ws["A1"].alignment = Alignment(horizontal="center")
+
+    ws["A2"] = "Müşteri:"
+    ws["B2"] = payload.get("musteri_adi") or ""
+    ws["A3"] = "Dönem:"
+    ws["B3"] = f"{bas_iso} - {bit_iso}"
+    for c in ("A2", "A3"):
+        ws[c].font = arial_bold
+    for c in ("B2", "B3"):
+        ws[c].font = arial
+
+    headers = ["Tarih", "Açıklama", "Borç", "Alacak", "Bakiye"]
+    header_row = 5
+    for i, h in enumerate(headers, start=1):
+        cell = ws.cell(row=header_row, column=i, value=h)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center")
+
+    hareketler = payload.get("hareketler") or []
+    row = header_row + 1
+    for h in hareketler:
+        ws.cell(row=row, column=1, value=h.get("tarih") or "").font = arial
+        ws.cell(row=row, column=2, value=h.get("aciklama") or "").font = arial
+        bc = ws.cell(row=row, column=3, value=float(h.get("borc") or 0))
+        bc.font = arial
+        bc.number_format = "#,##0.00"
+        ac = ws.cell(row=row, column=4, value=float(h.get("alacak") or 0))
+        ac.font = arial
+        ac.number_format = "#,##0.00"
+        kc = ws.cell(row=row, column=5, value=float(h.get("bakiye") or 0))
+        kc.font = arial
+        kc.number_format = "#,##0.00"
+        row += 1
+
+    last_data_row = row - 1
+    if last_data_row >= header_row + 1:
+        toplam_row = row + 1
+        ws.cell(row=toplam_row, column=2, value="TOPLAM").font = arial_bold
+        tb = ws.cell(row=toplam_row, column=3, value=f"=SUM(C{header_row + 1}:C{last_data_row})")
+        tb.font = arial_bold
+        tb.number_format = "#,##0.00"
+        ta = ws.cell(row=toplam_row, column=4, value=f"=SUM(D{header_row + 1}:D{last_data_row})")
+        ta.font = arial_bold
+        ta.number_format = "#,##0.00"
+        tk = ws.cell(row=toplam_row, column=5, value=f"=E{last_data_row}")
+        tk.font = arial_bold
+        tk.number_format = "#,##0.00"
+
+    ws.column_dimensions["A"].width = 12
+    ws.column_dimensions["B"].width = 45
+    ws.column_dimensions["C"].width = 14
+    ws.column_dimensions["D"].width = 14
+    ws.column_dimensions["E"].width = 14
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf
+
+
+@bp.route('/api/cari-ekstre')
+@giris_gerekli
+def api_cari_ekstre():
+    """
+    Sözleşme sayfası cari ekstre: Tarih aralığında aylık kira borç + tahsilat alacak.
+    Query: musteri_id, baslangic, bitis (YYYY-MM-DD; boşsa sözleşme bitişi, yoksa cari ay), aylik_kira.
+    Opsiyonel reel_json: URL-encoded JSON {\"2024\":612,\"2023\":350} — Uygula önizlemesi (Kaydet öncesi) ekstre ile aynı tutarlar.
+    """
+    payload, err = _cari_ekstre_build_payload_from_request()
+    if err:
+        return err
     return jsonify(payload)
+
+
+@bp.route('/api/cari-ekstre-excel')
+@giris_gerekli
+def api_cari_ekstre_excel():
+    """Cari ekstreyi Excel (.xlsx) olarak indir - api_cari_ekstre ile aynı parametreleri kullanır."""
+    payload, err = _cari_ekstre_build_payload_from_request()
+    if err:
+        return err
+    bas_iso = payload.get("bas_iso") or ""
+    bit_iso = payload.get("bit_iso") or ""
+    buf = _cari_ekstre_workbook_bytes(payload, bas_iso, bit_iso)
+    musteri_adi_safe = (payload.get("musteri_adi") or "musteri").replace(" ", "_")
+    filename = f"Cari_Ekstre_{musteri_adi_safe}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    return send_file(
+        buf,
+        as_attachment=True,
+        download_name=filename,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
 
 
 def _next_fatura_no_aylik(prefix=None):
