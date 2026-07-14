@@ -10786,6 +10786,34 @@ def api_tahsilat_panel_detay():
         if not isinstance(by_iso_in, dict):
             return jsonify({"ok": False, "mesaj": "by_iso gerekli."}), 400
         _save_musteri_panel_by_iso(mid, by_iso_in)
+        # KRİTİK DÜZELTME: frontend'in gönderdiği "tahsil" değeri,
+        # o ayın SADECE bu makbuzdaki payı olabilir (kümülatif değil).
+        # Etkilenen ayları gerçek |AYLIK_PAY| toplamından (map) yeniden
+        # senkronize ederek DB'ye yanlış/eksik kümülatif değer
+        # yapışmasını önle.
+        try:
+            if isinstance(by_iso_in, dict) and by_iso_in:
+                tahsil_map = _aylik_tahsil_tutar_map(mid)
+                duzeltilen_by_iso = dict(_load_musteri_panel_by_iso(mid))
+                degisti = False
+                for iso_key in by_iso_in.keys():
+                    dogru_tahsil = round(float(tahsil_map.get(iso_key) or 0), 2)
+                    mevcut = duzeltilen_by_iso.get(iso_key) or {}
+                    mevcut_tahsil = round(float(mevcut.get("tahsil") or 0), 2)
+                    if abs(dogru_tahsil - mevcut_tahsil) > 0.01:
+                        brut = round(float(mevcut.get("aylik") or 0), 2)
+                        tah = min(dogru_tahsil, brut) if brut > 0.01 else dogru_tahsil
+                        kalan = round(max(brut - tah, 0), 2) if brut > 0.01 else 0.0
+                        duzeltilen_by_iso[iso_key] = {
+                            **mevcut,
+                            "tahsil": tah,
+                            "kalan": kalan,
+                        }
+                        degisti = True
+                if degisti:
+                    _save_musteri_panel_by_iso(mid, duzeltilen_by_iso)
+        except Exception:
+            pass
         payload = _read_aylik_grid_cache_payload(mid)
         if payload is None:
             try:
