@@ -58,10 +58,12 @@
 {% block content %}
 <div class="randevu-wrap">
   <div class="randevu-toolbar">
+    {% if not request.args.get('panel') %}
     <a href="{{ url_for('randevu.rapor') }}" style="color:#4fc3f7;text-decoration:none;font-size:13px;"><i class="fa fa-list-alt"></i> Rapor</a>
     <span style="color:#78909c;">Görünüm:</span>
     <button type="button" class="randevu-btn secondary" id="view-list">Liste</button>
     <button type="button" class="randevu-btn secondary" id="view-week">Haftalık</button>
+    {% endif %}
     <div class="randevu-ucret-wrap">
       <span style="color:#78909c;">Saat ücreti (₺):</span>
       <select id="oda-ucret-select" class="randevu-ucret-select">
@@ -417,19 +419,25 @@
       });
   }
 
-  document.getElementById('view-list').addEventListener('click', function() {
-    currentView = 'list';
-    document.getElementById('cal-container').style.display = 'none';
-    document.getElementById('list-container').style.display = 'block';
-    loadList();
-  });
-  document.getElementById('view-week').addEventListener('click', function() {
-    currentView = 'week';
-    calStart = new Date();
-    document.getElementById('list-container').style.display = 'none';
-    document.getElementById('cal-container').style.display = 'block';
-    loadCal();
-  });
+  var viewListBtn = document.getElementById('view-list');
+  if (viewListBtn) {
+    viewListBtn.addEventListener('click', function() {
+      currentView = 'list';
+      document.getElementById('cal-container').style.display = 'none';
+      document.getElementById('list-container').style.display = 'block';
+      loadList();
+    });
+  }
+  var viewWeekBtn = document.getElementById('view-week');
+  if (viewWeekBtn) {
+    viewWeekBtn.addEventListener('click', function() {
+      currentView = 'week';
+      calStart = new Date();
+      document.getElementById('list-container').style.display = 'none';
+      document.getElementById('cal-container').style.display = 'block';
+      loadCal();
+    });
+  }
   document.getElementById('cal-prev').addEventListener('click', function() {
     calStart.setDate(calStart.getDate() - 7);
     loadCal();
@@ -442,7 +450,16 @@
 
   var _v = (new URLSearchParams(window.location.search).get('view') || '').toLowerCase();
   if (_v === 'week') {
-    document.getElementById('view-week').click();
+    if (viewWeekBtn) {
+      viewWeekBtn.click();
+    } else {
+      // panel=1: buton DOM'da yok — aynı haftalık görünüm mantığını doğrudan uygula
+      currentView = 'week';
+      calStart = new Date();
+      document.getElementById('list-container').style.display = 'none';
+      document.getElementById('cal-container').style.display = 'block';
+      loadCal();
+    }
   } else {
     loadList();
   }

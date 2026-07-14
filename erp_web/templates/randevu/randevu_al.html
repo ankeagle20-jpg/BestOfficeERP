@@ -273,6 +273,7 @@
 
 {% block content %}
 <div class="randevu-al-page{% if embed %} randevu-al-embed{% endif %}">
+  {% if not request.args.get('panel') %}
   <div class="randevu-al-back">
     {% if not embed %}
     <a href="{{ url_for('randevu.index') }}"><i class="fa fa-arrow-left"></i> Randevu listesine dön</a>
@@ -280,6 +281,7 @@
     {% endif %}
     <a href="{{ url_for('randevu.rapor') }}" target="_blank"><i class="fa fa-list-alt"></i> Rapor</a>
   </div>
+  {% endif %}
   <div class="randevu-al-grid">
     <div class="randevu-al-left">
       <label>Tür</label>
