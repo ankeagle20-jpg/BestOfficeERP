@@ -7837,7 +7837,7 @@ function girisRandevuIframeYukle() {
         var hid = document.getElementById('musteri-id');
         if (hid && hid.value && /^\d+$/.test(String(hid.value).trim())) mid = parseInt(String(hid.value).trim(), 10);
     }
-    var url = '/randevu/randevu-al?embed=1' + (mid ? ('&musteri_id=' + mid) : '');
+    var url = '/randevu/panel?embed=1' + (mid ? ('&musteri_id=' + mid) : '');
     var cur = fr.getAttribute('data-ra-src') || '';
     if (cur === url) return;
     fr.setAttribute('data-ra-src', url);

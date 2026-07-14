@@ -35,7 +35,9 @@
 
 {% block content %}
 <div class="rrp-page">
+  {% if not request.args.get('embed') %}
   <h1 class="rrp-title">Randevu Panel</h1>
+  {% endif %}
   <div class="rrp-tabs" role="tablist">
     <button type="button" class="rrp-tab active" data-tab="randevu" role="tab" aria-selected="true">Randevu</button>
     <button type="button" class="rrp-tab" data-tab="rapor" role="tab" aria-selected="false">Rapor</button>
@@ -49,8 +51,10 @@
 
 <script>
 (function () {
+  var _midParam = (new URLSearchParams(window.location.search).get('musteri_id') || '').trim();
+  var _midQS = (/^\d+$/.test(_midParam)) ? ('&musteri_id=' + _midParam) : '';
   var SRC = {
-    randevu: '/randevu/randevu-al?embed=1&panel=1',
+    randevu: '/randevu/randevu-al?embed=1&panel=1' + _midQS,
     rapor: '/randevu/rapor?embed=1&panel=1',
     liste: '/randevu/?view=list&embed=1&panel=1',
     haftalik: '/randevu/?view=week&embed=1&panel=1'
