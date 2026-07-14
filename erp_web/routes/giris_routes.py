@@ -446,7 +446,30 @@ def _panel_by_iso_from_tahsil_map(
     tarih_s = str(tahsilat_tarihi or "")[:10] if tahsilat_tarihi else ""
     by_iso = {}
     if not isinstance(payload, dict):
-        return existing
+        # Grid payload yoksa (örn. hesaplama hatasi), yine de mevcut
+        # panel'i gercek tahsilat map'ine gore duzelterek don -
+        # silinen/degisen tahsilatlarin "hayalet" olarak panelde
+        # kalmasini engelle.
+        duzeltilmis = {}
+        for iso_k, prow in (existing or {}).items():
+            if not isinstance(prow, dict):
+                continue
+            try:
+                brut_e = round(float(prow.get("aylik") or 0), 2)
+            except (TypeError, ValueError):
+                brut_e = 0.0
+            tah_e = round(float(tahsil_map.get(iso_k) or 0), 2)
+            if brut_e <= tol and tah_e <= tol:
+                continue
+            kalan_e = round(max(brut_e - tah_e, 0), 2) if brut_e > tol else 0.0
+            prev_e = existing.get(iso_k) or {}
+            duzeltilmis[iso_k] = {
+                "aylik": brut_e,
+                "tahsil": tah_e,
+                "kalan": kalan_e,
+                "tahsil_tarih": prev_e.get("tahsil_tarih") or "",
+            }
+        return duzeltilmis
     dagitim_isos = set()
     for a in payload.get("aylar") or []:
         if not isinstance(a, dict):
