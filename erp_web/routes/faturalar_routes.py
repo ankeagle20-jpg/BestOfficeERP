@@ -719,47 +719,6 @@ def _auto_allocate_oldest_unpaid_months(musteri_id, tahsil_tutar, borc_listesi=N
     start_iso_s = str(start_iso or "").strip()
     if not re.match(r"^\d{4}-\d{2}-\d{2}$", start_iso_s):
         start_iso_s = ""
-    acik_ay_set = _acik_aylik_tutar_ay_set(mid)
-    unpaid_cache_set = set()
-    try:
-        row_u = fetch_one("SELECT payload FROM musteri_aylik_grid_cache WHERE musteri_id = %s", (mid,))
-        payload_u_raw = (row_u or {}).get("payload")
-        if payload_u_raw:
-            payload_u = json.loads(payload_u_raw) if isinstance(payload_u_raw, str) else payload_u_raw
-            aylar_u = payload_u if isinstance(payload_u, list) else ((payload_u or {}).get("aylar") or [])
-            if isinstance(aylar_u, list):
-                for a in aylar_u:
-                    if not isinstance(a, dict):
-                        continue
-                    if not bool(a.get("acik_aylik_borc_faturasi")):
-                        continue
-                    try:
-                        yy = int(a.get("yil"))
-                        mm = int(a.get("ay"))
-                    except (TypeError, ValueError):
-                        continue
-                    if mm < 1 or mm > 12:
-                        continue
-                    kalan_u = a.get("kalan_tutar_kdv")
-                    if kalan_u is None:
-                        try:
-                            brut_u = float(a.get("brut_tutar_kdv") or a.get("tutar_kdv_dahil") or 0)
-                        except (TypeError, ValueError):
-                            brut_u = 0.0
-                        try:
-                            odenen_u = float(a.get("odenen_tutar_kdv") or 0)
-                        except (TypeError, ValueError):
-                            odenen_u = 0.0
-                        kalan_u = round(max(brut_u - odenen_u, 0), 2)
-                    try:
-                        kalan_u_v = round(float(kalan_u or 0), 2)
-                    except (TypeError, ValueError):
-                        kalan_u_v = 0.0
-                    if kalan_u_v <= 0.01:
-                        continue
-                    unpaid_cache_set.add(date(yy, mm, 1).isoformat())
-    except Exception:
-        unpaid_cache_set = set()
     # 1) İstemciden gelen canlı grid borç listesi (tercihli kaynak)
     borclu = []
     if isinstance(borc_listesi, list):
@@ -771,8 +730,6 @@ def _auto_allocate_oldest_unpaid_months(musteri_id, tahsil_tutar, borc_listesi=N
             if not re.match(r"^\d{4}-\d{2}-\d{2}$", iso):
                 continue
             if start_iso_s and iso < start_iso_s:
-                continue
-            if unpaid_cache_set and iso not in unpaid_cache_set:
                 continue
             try:
                 kalan_v = round(float(it.get("kalan") or 0), 2)
@@ -791,12 +748,10 @@ def _auto_allocate_oldest_unpaid_months(musteri_id, tahsil_tutar, borc_listesi=N
                 "odenen": odenen_v,
             })
         # İstemciden gelen canlı grid borç listesi birincil kaynak:
-        # açık borç işaretli aylar varsa sadece oradan dağıt.
+        # kalan > 0 aylar kronolojik sırayla dağıtılır.
         if raw_rows:
-            acik_rows = [r for r in raw_rows if r["acik_borc"]]
-            pick_rows = acik_rows if acik_rows else raw_rows
-            pick_rows.sort(key=lambda r: r["iso"])
-            borclu = [(r["iso"], r["kalan"]) for r in pick_rows]
+            raw_rows.sort(key=lambda r: r["iso"])
+            borclu = [(r["iso"], r["kalan"]) for r in raw_rows]
     if borclu:
         rem = total
         pay_items = []
@@ -821,17 +776,9 @@ def _auto_allocate_oldest_unpaid_months(musteri_id, tahsil_tutar, borc_listesi=N
         aylar = payload if isinstance(payload, list) else ((payload or {}).get("aylar") or [])
         if not isinstance(aylar, list):
             return [], []
-        acik_odak_var_cache = any(bool((a or {}).get("acik_aylik_borc_faturasi")) for a in aylar if isinstance(a, dict))
-        sifir_odenen_var_cache = any(
-            isinstance(a, dict) and float(a.get("odenen_tutar_kdv") or 0) <= 0.01
-            for a in aylar
-            if isinstance(a, dict)
-        )
         borclu = []
         for a in aylar:
             if not isinstance(a, dict):
-                continue
-            if acik_odak_var_cache and not bool(a.get("acik_aylik_borc_faturasi")):
                 continue
             try:
                 yy = int(a.get("yil"))
@@ -842,14 +789,6 @@ def _auto_allocate_oldest_unpaid_months(musteri_id, tahsil_tutar, borc_listesi=N
                 continue
             iso = date(yy, mm, 1).isoformat()
             if start_iso_s and iso < start_iso_s:
-                continue
-            if acik_ay_set and iso not in acik_ay_set:
-                continue
-            try:
-                odenen_v_cache = round(float(a.get("odenen_tutar_kdv") or 0), 2)
-            except (TypeError, ValueError):
-                odenen_v_cache = 0.0
-            if sifir_odenen_var_cache and odenen_v_cache > 0.01:
                 continue
             # Kritik: oldest dağıtımda asla "aylık tutarın tamamı"na düşme.
             # Sadece gerçek kalan borcu kullan (kalan_tutar_kdv yoksa brut-odenen hesapla).
