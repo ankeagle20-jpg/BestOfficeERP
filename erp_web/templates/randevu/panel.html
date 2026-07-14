@@ -1,0 +1,83 @@
+{% extends "layout.html" %}
+{% block page_title %}Randevu Panel — OFİSBİR ERP{% endblock %}
+
+{% block extra_head %}
+<style>
+  .rrp-page { max-width: 1400px; margin: 0 auto; padding: 16px; }
+  .rrp-title { color: #e0f7fa; font-size: 20px; margin: 0 0 14px; }
+  .rrp-tabs {
+    display: flex; flex-wrap: wrap; gap: 8px;
+    background: #1e3a50; border: 1px solid #2d4060; border-radius: 8px;
+    padding: 10px 12px; margin-bottom: 12px;
+  }
+  .rrp-tab {
+    background: #0f2537; color: #b0bec5; border: 1px solid #2d4060;
+    padding: 10px 16px; border-radius: 6px; cursor: pointer; font-size: 13px;
+  }
+  .rrp-tab:hover { background: #2d4060; color: #e0f7fa; }
+  .rrp-tab.active {
+    background: #0d47a1; color: #fff; border-color: #1565c0;
+  }
+  .rrp-frame-wrap {
+    background: #1e3a50; border: 1px solid #2d4060; border-radius: 8px;
+    overflow: hidden;
+  }
+  #panel-iframe {
+    width: 100%;
+    height: calc(100vh - 220px);
+    min-height: 520px;
+    border: 0;
+    display: block;
+    background: #0f2537;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="rrp-page">
+  <h1 class="rrp-title">Randevu Panel</h1>
+  <div class="rrp-tabs" role="tablist">
+    <button type="button" class="rrp-tab active" data-tab="randevu" role="tab" aria-selected="true">Randevu</button>
+    <button type="button" class="rrp-tab" data-tab="rapor" role="tab" aria-selected="false">Rapor</button>
+    <button type="button" class="rrp-tab" data-tab="liste" role="tab" aria-selected="false">Liste</button>
+    <button type="button" class="rrp-tab" data-tab="haftalik" role="tab" aria-selected="false">Haftalık</button>
+  </div>
+  <div class="rrp-frame-wrap">
+    <iframe id="panel-iframe" title="Randevu panel içeriği" src="/randevu/randevu-al?embed=1"></iframe>
+  </div>
+</div>
+
+<script>
+(function () {
+  var SRC = {
+    randevu: '/randevu/randevu-al?embed=1',
+    rapor: '/randevu/rapor',
+    liste: '/randevu/?view=list',
+    haftalik: '/randevu/?view=week'
+  };
+  var iframe = document.getElementById('panel-iframe');
+  var tabs = document.querySelectorAll('.rrp-tab');
+
+  function setTab(name) {
+    var key = SRC[name] ? name : 'randevu';
+    tabs.forEach(function (btn) {
+      var on = btn.getAttribute('data-tab') === key;
+      btn.classList.toggle('active', on);
+      btn.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    iframe.src = SRC[key];
+  }
+
+  tabs.forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      setTab(btn.getAttribute('data-tab'));
+    });
+  });
+
+  var q = (new URLSearchParams(window.location.search).get('tab') || '').toLowerCase();
+  if (q === 'week') q = 'haftalik';
+  if (q === 'list') q = 'liste';
+  setTab(SRC[q] ? q : 'randevu');
+})();
+</script>
+{% endblock %}

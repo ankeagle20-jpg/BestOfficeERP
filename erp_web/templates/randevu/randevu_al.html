@@ -273,13 +273,13 @@
 
 {% block content %}
 <div class="randevu-al-page{% if embed %} randevu-al-embed{% endif %}">
-  {% if not embed %}
   <div class="randevu-al-back">
+    {% if not embed %}
     <a href="{{ url_for('randevu.index') }}"><i class="fa fa-arrow-left"></i> Randevu listesine dön</a>
     <span style="color:#546e7a;margin:0 10px;">|</span>
-    <a href="{{ url_for('randevu.rapor') }}"><i class="fa fa-list-alt"></i> Rapor</a>
+    {% endif %}
+    <a href="{{ url_for('randevu.rapor') }}" target="_blank"><i class="fa fa-list-alt"></i> Rapor</a>
   </div>
-  {% endif %}
   <div class="randevu-al-grid">
     <div class="randevu-al-left">
       <label>Tür</label>

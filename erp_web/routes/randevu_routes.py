@@ -134,6 +134,13 @@ def rapor():
     return render_template("randevu/rapor.html")
 
 
+@bp.route("/panel")
+@login_required
+def panel():
+    """Birlesik randevu paneli - Randevu/Rapor/Liste/Haftalik sekmeleri."""
+    return render_template("randevu/panel.html")
+
+
 @bp.route("/api/list")
 @login_required
 def api_list():
