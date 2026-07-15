@@ -4579,6 +4579,11 @@ function girisJsonCacheInvalidatePrefix(prefix) {
         for (var i = 0; i < keys.length; i++) {
             if (keys[i].indexOf(prefix) === 0) window.__girisJsonCache.delete(keys[i]);
         }
+        var persistPrefix = '__giris_json_persist__' + prefix;
+        for (var si = sessionStorage.length - 1; si >= 0; si--) {
+            var sk = sessionStorage.key(si);
+            if (sk && sk.indexOf(persistPrefix) === 0) sessionStorage.removeItem(sk);
+        }
     } catch (_e) {}
 }
 
