@@ -27906,6 +27906,7 @@ function sozlesmeTahsilatKaydet() {
                 }
             }
             tahsilatAylikDagitimPanelKaliciKaydet(data, payload).then(function () {
+                try { if (typeof girisTahsilatToplamTahsilYukle === 'function') girisTahsilatToplamTahsilYukle(payload.musteri_id); } catch (_eTtS) {}
                 alert(tahsilatKayitBilgiMesaji(data, payload));
                 sozlesmeTahsilatKayitSonrasiTemizlik();
                 try {
