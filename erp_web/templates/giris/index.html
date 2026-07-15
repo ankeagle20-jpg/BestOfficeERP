@@ -26741,6 +26741,36 @@ function tahsilatIsoToAyKeyNorm(isoRaw) {
     return sozlesmeAylikAyKeyNormalize(String(parseInt(m[1], 10)) + '-' + String(parseInt(m[2], 10)));
 }
 
+function tahsilatAylikKismiMutlakDurum(payload, isoRaw, payOverride) {
+    if (!payload) return null;
+    var iso = String(isoRaw || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
+    var brut = parseFloat(payload.ay_ref_tutar || 0);
+    var pay = parseFloat(payOverride != null ? payOverride : payload.tutar);
+    if (!isFinite(brut) || brut <= 0 || !isFinite(pay) || pay <= 0) return null;
+    var oncekiKalan = NaN;
+    var oncekiOdenen = NaN;
+    var borclar = Array.isArray(payload.aylik_borc_listesi) ? payload.aylik_borc_listesi : [];
+    for (var i = 0; i < borclar.length; i++) {
+        var b = borclar[i] || {};
+        if (String(b.iso || '').slice(0, 10) !== iso) continue;
+        oncekiKalan = parseFloat(b.kalan);
+        oncekiOdenen = parseFloat(b.odenen);
+        break;
+    }
+    if (!isFinite(oncekiKalan) || oncekiKalan < 0) {
+        if (isFinite(oncekiOdenen) && oncekiOdenen >= 0) oncekiKalan = Math.max(brut - oncekiOdenen, 0);
+        else oncekiKalan = brut;
+    }
+    oncekiKalan = Math.max(Math.min(Math.round(oncekiKalan * 100) / 100, brut), 0);
+    // Kalan, FIFO payload'?n?n esas de?eridir; stale data-odenen-kdv ile ?eli?irse br?tten yeniden t?ret.
+    oncekiOdenen = Math.max(Math.min(Math.round((brut - oncekiKalan) * 100) / 100, brut), 0);
+    var uygulanan = Math.min(Math.round(pay * 100) / 100, oncekiKalan);
+    var kalan = Math.max(Math.round((oncekiKalan - uygulanan) * 100) / 100, 0);
+    var odenen = Math.min(Math.round((oncekiOdenen + uygulanan) * 100) / 100, brut);
+    return { brut: Math.round(brut * 100) / 100, kalan: kalan, odenen: odenen };
+}
+
 function tahsilatAylikKismiOverrideYaz(payload) {
     try {
         if (!payload || !payload.musteri_id) return;
@@ -26750,17 +26780,15 @@ function tahsilatAylikKismiOverrideYaz(payload) {
         if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return;
         var key = tahsilatIsoToAyKeyNorm(iso);
         if (!key) return;
-        var brut = parseFloat(payload.ay_ref_tutar || 0);
-        var tah = parseFloat(payload.tutar || 0);
-        if (!isFinite(brut) || brut <= 0 || !isFinite(tah) || tah <= 0) return;
-        var kalan = Math.max(Math.round((brut - tah) * 100) / 100, 0);
+        var durum = tahsilatAylikKismiMutlakDurum(payload, iso);
+        if (!durum) return;
         window.__tahsilatKismiOverrideByMid = window.__tahsilatKismiOverrideByMid || {};
         var ms = String(payload.musteri_id);
         var bucket = window.__tahsilatKismiOverrideByMid[ms] = window.__tahsilatKismiOverrideByMid[ms] || {};
         bucket[key] = {
-            brut: Math.round(brut * 100) / 100,
-            kalan: kalan,
-            odenen: Math.max(Math.round((brut - kalan) * 100) / 100, 0),
+            brut: durum.brut,
+            kalan: durum.kalan,
+            odenen: durum.odenen,
             ts: Date.now()
         };
     } catch (eKisOv) {}
@@ -26775,10 +26803,8 @@ function tahsilatAylikSeciliAyKismiDomUygula(payload) {
         if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return;
         var keyNorm = tahsilatIsoToAyKeyNorm(iso);
         if (!keyNorm) return;
-        var brut = parseFloat(payload.ay_ref_tutar || 0);
-        var tah = parseFloat(payload.tutar || 0);
-        if (!isFinite(brut) || brut <= 0 || !isFinite(tah) || tah <= 0) return;
-        var kalan = Math.max(Math.round((brut - tah) * 100) / 100, 0);
+        var durum = tahsilatAylikKismiMutlakDurum(payload, iso);
+        if (!durum) return;
         function paint(grid) {
             if (!grid) return;
             var cards = grid.querySelectorAll('.sozlesmeler-ay-kart[data-ay-key]');
@@ -26786,17 +26812,17 @@ function tahsilatAylikSeciliAyKismiDomUygula(payload) {
                 var c = cards[i];
                 var k = sozlesmeAylikAyKeyNormalize(String(c.getAttribute('data-ay-key') || ''));
                 if (k !== keyNorm) continue;
-                c.setAttribute('data-odenen-kdv', String(Math.round(tah * 100) / 100));
-                c.setAttribute('data-brut-kdv', String(Math.round(brut * 100) / 100));
-                c.setAttribute('data-sozlesme-brut-kdv', String(Math.round(brut * 100) / 100));
-                c.setAttribute('data-tutar-kdv', kalan > 0.01 ? String(kalan) : '');
-                c.setAttribute('data-kismi', kalan > 0.01 ? '1' : '0');
-                c.setAttribute('data-tahsil-kapandi', kalan <= 0.01 ? '1' : '0');
+                c.setAttribute('data-odenen-kdv', String(durum.odenen));
+                c.setAttribute('data-brut-kdv', String(durum.brut));
+                c.setAttribute('data-sozlesme-brut-kdv', String(durum.brut));
+                c.setAttribute('data-tutar-kdv', durum.kalan > 0.01 ? String(durum.kalan) : '');
+                c.setAttribute('data-kismi', durum.kalan > 0.01 ? '1' : '0');
+                c.setAttribute('data-tahsil-kapandi', durum.kalan <= 0.01 ? '1' : '0');
                 c.classList.remove('sozlesmeler-ay-kart-kismi', 'sozlesmeler-ay-kart-odendi', 'sozlesmeler-ay-kart-odenmedi');
-                if (kalan > 0.01) c.classList.add('sozlesmeler-ay-kart-kismi');
+                if (durum.kalan > 0.01) c.classList.add('sozlesmeler-ay-kart-kismi');
                 else c.classList.add('sozlesmeler-ay-kart-odendi');
                 var deg = c.querySelector('.aylik-deger');
-                var gosterKalan = kalan > 0.01 ? kalan : 0;
+                var gosterKalan = durum.kalan > 0.01 ? durum.kalan : 0;
                 if (deg) deg.textContent = (Math.round(gosterKalan * 100) / 100).toFixed(2);
             }
         }
@@ -26807,6 +26833,13 @@ function tahsilatAylikSeciliAyKismiDomUygula(payload) {
 
 function tahsilatAylikDagitimCacheGuncelle(data) {
     try {
+        var tid = data && data.tahsilat_id;
+        if (tid) {
+            window.__tahsilatDagitimCacheUygulananId = window.__tahsilatDagitimCacheUygulananId || {};
+            var tidKey = String(tid);
+            if (window.__tahsilatDagitimCacheUygulananId[tidKey]) return;
+            window.__tahsilatDagitimCacheUygulananId[tidKey] = true;
+        }
         var items = (data && Array.isArray(data.aylik_dagitim)) ? data.aylik_dagitim.slice() : [];
         if (!items.length) return;
         var sco = window.__sozlesmelerAylikSonCacheObj;
@@ -26863,9 +26896,33 @@ function tahsilatAylikDagitimPanelKaliciKaydet(data, payload) {
             ? parseFloat(girisTahsilatYilAyPanelAylikCanon(yil, ak)) || 0
             : 0;
         if (!(brut > tol)) brut = pay;
-        var tah = Math.min(pay, brut);
-        var kalan = Math.max(Math.round((brut - tah) * 100) / 100, 0);
         var isoKey = iso.slice(0, 10);
+        var mutlakPayload = Object.assign({}, payload || {}, { ay_ref_tutar: brut });
+        var mutlakBorclar = Array.isArray(mutlakPayload.aylik_borc_listesi)
+            ? mutlakPayload.aylik_borc_listesi.slice()
+            : [];
+        var mutlakBorcVar = mutlakBorclar.some(function (b) {
+            return String((b && b.iso) || '').slice(0, 10) === isoKey;
+        });
+        if (!mutlakBorcVar) {
+            var mevcutYilMap = (window.__tahsilatSatirYilAyDetay || {})[String(yil)] || {};
+            var mevcutDetay = mevcutYilMap[ak];
+            if (mevcutDetay && typeof mevcutDetay === 'object') {
+                mutlakBorclar.push({
+                    iso: isoKey,
+                    kalan: parseFloat(mevcutDetay.kalan),
+                    odenen: parseFloat(mevcutDetay.tahsil)
+                });
+            }
+        }
+        mutlakPayload.aylik_borc_listesi = mutlakBorclar;
+        var mutlakDurum = (typeof tahsilatAylikKismiMutlakDurum === 'function')
+            ? tahsilatAylikKismiMutlakDurum(mutlakPayload, isoKey, pay)
+            : null;
+        var tah = mutlakDurum ? mutlakDurum.odenen : Math.min(pay, brut);
+        var kalan = mutlakDurum
+            ? mutlakDurum.kalan
+            : Math.max(Math.round((brut - tah) * 100) / 100, 0);
         byIso[isoKey] = {
             aylik: Math.round(brut * 100) / 100,
             tahsil: Math.round(tah * 100) / 100,
@@ -26917,6 +26974,38 @@ function tahsilatAylikDagitimPanelKaliciKaydet(data, payload) {
         body: JSON.stringify({ musteri_id: mid, by_iso: byIso })
     }, 2).then(function (r) {
         return r.json().then(function (j) {
+            if (j && j.ok && j.by_iso && typeof j.by_iso === 'object') {
+                window.__tahsilatSatirYilAyDetay = window.__tahsilatSatirYilAyDetay || {};
+                Object.keys(j.by_iso).forEach(function (isoResp) {
+                    var rowResp = j.by_iso[isoResp];
+                    var mResp = String(isoResp || '').slice(0, 10).match(/^(\d{4})-(\d{2})/);
+                    if (!rowResp || typeof rowResp !== 'object' || !mResp) return;
+                    var yilResp = parseInt(mResp[1], 10);
+                    var ayResp = parseInt(mResp[2], 10);
+                    if (!yilResp || !ayResp) return;
+                    var akResp = (typeof sozlesmeAylikAyKeyFromYilAy === 'function')
+                        ? sozlesmeAylikAyKeyFromYilAy(yilResp, ayResp)
+                        : (yilResp + '-' + ayResp);
+                    var dkResp = String(yilResp);
+                    if (!window.__tahsilatSatirYilAyDetay[dkResp]) window.__tahsilatSatirYilAyDetay[dkResp] = {};
+                    var detayResp = {
+                        aylik_tutar: Math.round((parseFloat(rowResp.aylik) || 0) * 100) / 100,
+                        tahsil: Math.round((parseFloat(rowResp.tahsil) || 0) * 100) / 100,
+                        kalan: Math.max(Math.round((parseFloat(rowResp.kalan) || 0) * 100) / 100, 0),
+                        tahsil_aktif: true,
+                        tahsil_tarih: String(rowResp.tahsil_tarih || '').slice(0, 10),
+                        __panel_secili: false,
+                        __saved: true,
+                        __db_saved: true,
+                        __locked: true
+                    };
+                    if (typeof girisTahsilatYilAyPanelSatirNormalize === 'function') {
+                        girisTahsilatYilAyPanelSatirNormalize(detayResp, yilResp, akResp);
+                    }
+                    window.__tahsilatSatirYilAyDetay[dkResp][akResp] = detayResp;
+                });
+                try { girisTahsilatYilAyKayitYaz(); } catch (_eKyCanon) {}
+            }
             if (j && j.ok && typeof girisJsonCacheInvalidatePrefix === 'function') {
                 girisJsonCacheInvalidatePrefix('/giris/api/tahsilat-panel-detay?musteri_id=' + encodeURIComponent(mid));
                 girisJsonCacheInvalidatePrefix('/giris/api/aylik-grid-cache?musteri_id=' + encodeURIComponent(mid));
@@ -26965,8 +27054,17 @@ function tahsilatAylikDagitimSonrasiSenkron(data, payload) {
 
 function tahsilatAylikDagitimDomUygula(data, payload) {
     try {
+        var tid = data && data.tahsilat_id;
+        if (tid) {
+            window.__tahsilatDagitimDomUygulananId = window.__tahsilatDagitimDomUygulananId || {};
+            var tidKey = String(tid);
+            if (window.__tahsilatDagitimDomUygulananId[tidKey]) return;
+            window.__tahsilatDagitimDomUygulananId[tidKey] = true;
+        }
         var items = (data && Array.isArray(data.aylik_dagitim)) ? data.aylik_dagitim.slice() : [];
         if (!items.length) return;
+        var seciliList = payload && Array.isArray(payload.ay_ref_iso_list) ? payload.ay_ref_iso_list : [];
+        var seciliTekIso = seciliList.length === 1 ? String(seciliList[0] || '').slice(0, 10) : '';
         function paint(grid) {
             if (!grid) return;
             items.forEach(function (it) {
@@ -26981,6 +27079,21 @@ function tahsilatAylikDagitimDomUygula(data, payload) {
                     var c = cards[i];
                     var k = sozlesmeAylikAyKeyNormalize(String(c.getAttribute('data-ay-key') || ''));
                     if (k !== keyNorm) continue;
+                    var mutlak = (seciliTekIso === iso) ? tahsilatAylikKismiMutlakDurum(payload, iso, pay) : null;
+                    if (mutlak) {
+                        c.setAttribute('data-odenen-kdv', String(mutlak.odenen));
+                        c.setAttribute('data-brut-kdv', String(mutlak.brut));
+                        c.setAttribute('data-sozlesme-brut-kdv', String(mutlak.brut));
+                        c.setAttribute('data-tutar-kdv', mutlak.kalan > 0.01 ? String(mutlak.kalan) : '');
+                        c.setAttribute('data-kismi', (mutlak.kalan > 0.01 && mutlak.odenen > 0.01) ? '1' : '0');
+                        c.setAttribute('data-tahsil-kapandi', mutlak.kalan <= 0.01 ? '1' : '0');
+                        c.classList.remove('sozlesmeler-ay-kart-kismi', 'sozlesmeler-ay-kart-odendi', 'sozlesmeler-ay-kart-odenmedi');
+                        if (mutlak.kalan <= 0.01) c.classList.add('sozlesmeler-ay-kart-odendi');
+                        else c.classList.add('sozlesmeler-ay-kart-kismi');
+                        var degMutlak = c.querySelector('.aylik-deger');
+                        if (degMutlak) degMutlak.textContent = (Math.round(mutlak.kalan * 100) / 100).toFixed(2);
+                        continue;
+                    }
                     var brut = parseFloat(c.getAttribute('data-brut-kdv') || c.getAttribute('data-sozlesme-brut-kdv') || c.getAttribute('data-tutar-kdv') || '0');
                     if (!isFinite(brut) || brut <= 0) brut = 0;
                     var odenen = parseFloat(c.getAttribute('data-odenen-kdv') || '0');
@@ -27473,7 +27586,18 @@ function tahsilatKismiOnizlemeGuncelle(kaynakInputId) {
     if (!isFinite(girilen) || girilen <= 0) return;
     var mevcut = parseFloat(s.tutar_kdv_dahil);
     if (!isFinite(mevcut) || mevcut <= 0) return;
-    var kalan = Math.max(Math.round((mevcut - girilen) * 100) / 100, 0);
+    var oncekiKalan = mevcut;
+    try {
+        var isoOn = y + '-' + String(m).padStart(2, '0') + '-01';
+        var borclarOn = tahsilatAylikBorcListesiFromGrid();
+        for (var bi = 0; bi < borclarOn.length; bi++) {
+            if (String((borclarOn[bi] || {}).iso || '').slice(0, 10) !== isoOn) continue;
+            var bk = parseFloat((borclarOn[bi] || {}).kalan);
+            if (isFinite(bk) && bk >= 0) oncekiKalan = bk;
+            break;
+        }
+    } catch (_eOnKalan) {}
+    var kalan = Math.max(Math.round((oncekiKalan - girilen) * 100) / 100, 0);
     var tolTahsil = Number(SOZLESME_TAM_ODENDI_TOLERANS) || 0.05;
     var kismi = girilen > 0 && kalan > tolTahsil;
     var yeniSinif = kismi ? 'sozlesmeler-ay-kart-kismi' : (kalan <= tolTahsil ? 'sozlesmeler-ay-kart-odendi' : 'sozlesmeler-ay-kart-odenmedi');

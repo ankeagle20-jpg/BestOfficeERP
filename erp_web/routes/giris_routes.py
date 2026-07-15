@@ -5459,14 +5459,23 @@ def _aylik_tutar_fatura_id_map(musteri_id: int) -> dict[str, int]:
 
 def _ekstre_invalidate_after_change(
     musteri_id: int, affected_isos: list | None = None
-) -> None:
+) -> dict:
     """Ekstre düzenle/sil: önce panel DB (grid tahsilden-cikar ile aynı), sonra grid önbelleği."""
     _cari_ekstre_api_cache.clear()
     _invalidate_aylik_grid_payload_mem(musteri_id)
+    payload = None
+    panel_now = None
+    grid_hata = False
+    panel_hata = False
     try:
         mid = int(musteri_id)
     except (TypeError, ValueError):
-        return
+        return {
+            "grid": None,
+            "panel": None,
+            "grid_hata": True,
+            "panel_hata": True,
+        }
     try:
         _musteri_kyc_grid_mem.pop(mid, None)
     except (TypeError, ValueError):
@@ -5475,6 +5484,7 @@ def _ekstre_invalidate_after_change(
         payload = _upsert_aylik_grid_cache(mid)
     except Exception:
         payload = None
+        grid_hata = True
         logging.getLogger(__name__).exception(
             "ekstre invalidate grid cache mid=%s", musteri_id
         )
@@ -5528,11 +5538,27 @@ def _ekstre_invalidate_after_change(
                 pass
             _invalidate_aylik_grid_payload_mem(mid)
         else:
-            _upsert_aylik_grid_cache(mid)
+            payload = _upsert_aylik_grid_cache(mid)
+            if isinstance(payload, dict):
+                panel_now = _load_musteri_panel_by_iso(mid)
     except Exception:
+        panel_now = None
+        panel_hata = True
         logging.getLogger(__name__).exception(
             "ekstre invalidate panel sync mid=%s", musteri_id
         )
+    if not isinstance(payload, dict):
+        payload = None
+        grid_hata = True
+    if not isinstance(panel_now, dict):
+        panel_now = None
+        panel_hata = True
+    return {
+        "grid": payload,
+        "panel": panel_now,
+        "grid_hata": grid_hata,
+        "panel_hata": panel_hata,
+    }
 
 
 def _fatura_tutar_kdv_split(toplam_kdv_dahil: float, kira_nakit: bool, kdv_oran: float = 20.0) -> tuple[float, float, float]:
@@ -9791,11 +9817,35 @@ def api_reel_donem_tutar_upsert():
         logging.getLogger(__name__).exception(
             "reel_upsert esitle musteri_id=%s donem_yil=%s", musteri_id, donem_yil
         )
+    guncel_grid = None
+    guncel_panel = None
+    guncel_grid_hata = False
+    guncel_panel_hata = False
     try:
-        _ekstre_invalidate_after_change(musteri_id)
+        guncel_sonuc = _ekstre_invalidate_after_change(musteri_id)
+        if isinstance(guncel_sonuc, dict):
+            guncel_grid = guncel_sonuc.get("grid")
+            guncel_panel = guncel_sonuc.get("panel")
+            guncel_grid_hata = bool(guncel_sonuc.get("grid_hata"))
+            guncel_panel_hata = bool(guncel_sonuc.get("panel_hata"))
+        else:
+            guncel_grid_hata = True
+            guncel_panel_hata = True
     except Exception:
-        pass
-    return jsonify({"ok": True})
+        guncel_grid = None
+        guncel_panel = None
+        guncel_grid_hata = True
+        guncel_panel_hata = True
+        logging.getLogger(__name__).exception(
+            "reel_upsert guncel veri musteri_id=%s donem_yil=%s", musteri_id, donem_yil
+        )
+    return jsonify({
+        "ok": True,
+        "guncel_grid": guncel_grid,
+        "guncel_panel": guncel_panel,
+        "guncel_grid_hata": guncel_grid_hata,
+        "guncel_panel_hata": guncel_panel_hata,
+    })
 
 
 def _reel_tahsilat_esitle_calistir(
@@ -10808,17 +10858,17 @@ def api_tahsilat_panel_detay():
         by_iso_in = data.get("by_iso")
         if not isinstance(by_iso_in, dict):
             return jsonify({"ok": False, "mesaj": "by_iso gerekli."}), 400
-        _save_musteri_panel_by_iso(mid, by_iso_in)
         # KRİTİK DÜZELTME: frontend'in gönderdiği "tahsil" değeri,
         # o ayın SADECE bu makbuzdaki payı olabilir (kümülatif değil).
-        # Etkilenen ayları gerçek |AYLIK_PAY| toplamından (map) yeniden
-        # senkronize ederek DB'ye yanlış/eksik kümülatif değer
-        # yapışmasını önle.
+        # Ham değeri önce DB'ye yazmak yerine, etkilenen ayları gerçek
+        # |AYLIK_PAY| toplamından (map) kanonikleştir ve yalnız bir kez yaz.
+        # Kanonikleştirme hata verirse mevcut ham-payload fallback'i korunur.
+        by_iso_kayit = by_iso_in
         try:
             if isinstance(by_iso_in, dict) and by_iso_in:
                 tahsil_map = _aylik_tahsil_tutar_map(mid)
                 duzeltilen_by_iso = dict(_load_musteri_panel_by_iso(mid))
-                degisti = False
+                duzeltilen_by_iso.update(by_iso_in)
                 for iso_key in by_iso_in.keys():
                     dogru_tahsil = round(float(tahsil_map.get(iso_key) or 0), 2)
                     mevcut = duzeltilen_by_iso.get(iso_key) or {}
@@ -10832,11 +10882,10 @@ def api_tahsilat_panel_detay():
                             "tahsil": tah,
                             "kalan": kalan,
                         }
-                        degisti = True
-                if degisti:
-                    _save_musteri_panel_by_iso(mid, duzeltilen_by_iso)
+                by_iso_kayit = duzeltilen_by_iso
         except Exception:
             pass
+        _save_musteri_panel_by_iso(mid, by_iso_kayit)
         payload = _read_aylik_grid_cache_payload(mid)
         if payload is None:
             try:
