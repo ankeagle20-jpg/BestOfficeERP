@@ -2069,6 +2069,28 @@ def _giris_kaydet_schema_ensure_once() -> None:
         _giris_kaydet_schema_ready = True
 
 
+_giris_cogalt_schema_ready = False
+_giris_cogalt_schema_lock = threading.Lock()
+
+
+def _giris_cogalt_schema_ensure_once() -> None:
+    """api_musteri_cogalt şema ensure'ları — process ömründe bir kez (Kaydet deseni)."""
+    global _giris_cogalt_schema_ready
+    if _giris_cogalt_schema_ready:
+        return
+    with _giris_cogalt_schema_lock:
+        if _giris_cogalt_schema_ready:
+            return
+        ensure_customers_musteri_no()
+        ensure_customers_durum()
+        ensure_customers_is_active()
+        ensure_customers_hazir_ofis_oda()
+        ensure_musteri_kyc_columns()
+        ensure_musteri_kyc_hazir_ofis_oda_no()
+        ensure_musteri_kyc_kira_banka()
+        _giris_cogalt_schema_ready = True
+
+
 def _defer_aylik_grid_cache_rebuild(musteri_id) -> None:
     """Kaydet yanıtını bekletmeden grid önbelleğini arka planda yenile."""
     try:
@@ -3507,13 +3529,7 @@ def api_musteri_cogalt():
     Kayıtlı müşteriyi yeni id + yeni müşteri_no ile kopyalar (plan değişimi: eski kart pasif, yeni kart).
     Fatura/tahsilat kopyalanmaz. Son KYC satırı yeni müşteriye kopyalanır; sözleşme no ve hazır ofis odası temizlenir.
     """
-    ensure_customers_musteri_no()
-    ensure_customers_durum()
-    ensure_customers_is_active()
-    ensure_customers_hazir_ofis_oda()
-    ensure_musteri_kyc_columns()
-    ensure_musteri_kyc_hazir_ofis_oda_no()
-    ensure_musteri_kyc_kira_banka()
+    _giris_cogalt_schema_ensure_once()
     data = request.get_json(silent=True) or {}
     raw_id = data.get("kaynak_id") if data.get("kaynak_id") is not None else data.get("musteri_id")
     try:
