@@ -6687,7 +6687,7 @@ def _gibden_erp_upsert(gib_row):
         mevcut = None
         if ettn:
             mevcut = fetch_one(
-                "SELECT id, fatura_no FROM faturalar WHERE BTRIM(COALESCE(ettn::text,'')) = BTRIM(%s) ORDER BY id DESC LIMIT 1",
+                "SELECT id, fatura_no, fatura_tarihi FROM faturalar WHERE BTRIM(COALESCE(ettn::text,'')) = BTRIM(%s) ORDER BY id DESC LIMIT 1",
                 (ettn,),
             )
         if (not mevcut) and fatura_no and ettn:
@@ -6695,7 +6695,7 @@ def _gibden_erp_upsert(gib_row):
             # fatura_no ile başka kayıt olabilir
             # → o kaydı güncelle (GİB esas)
             mevcut = fetch_one(
-                """SELECT id, fatura_no
+                """SELECT id, fatura_no, fatura_tarihi
                    FROM faturalar
                    WHERE fatura_no = %s
                    ORDER BY id DESC LIMIT 1""",
@@ -6704,20 +6704,48 @@ def _gibden_erp_upsert(gib_row):
         elif (not mevcut) and fatura_no and not ettn:
             # ettn yoksa fatura_no ile ara
             mevcut = fetch_one(
-                "SELECT id, fatura_no FROM faturalar WHERE fatura_no = %s ORDER BY id DESC LIMIT 1",
+                "SELECT id, fatura_no, fatura_tarihi FROM faturalar WHERE fatura_no = %s ORDER BY id DESC LIMIT 1",
                 (fatura_no,),
             )
 
         if mevcut and mevcut.get("id"):
             fid = int(mevcut.get("id"))
             # Sadece ettn ve notları güncelle
-            # tutar, musteri vb. dokunma
-            _fatura_gib_bilgilerini_yaz(
+            # tutar, musteri, fatura_tarihi vb. dokunma
+            yaz = _fatura_gib_bilgilerini_yaz(
                 fid, ettn or None,
                 fatura_no or None,
-                gib_asama=gib_asama)
-            return {"ok": True, "fatura_id": fid,
-                    "islem": "guncellendi"}
+                gib_asama=gib_asama) or {}
+            erp_tar = str(mevcut.get("fatura_tarihi") or "")[:10]
+            return {
+                "ok": True,
+                "fatura_id": fid,
+                "islem": "guncellendi",
+                "fatura_no_cakisti": bool(yaz.get("fatura_no_cakisti")),
+                "erp_fatura_tarihi": erp_tar,
+                "portal_fatura_tarihi": fatura_tarihi,
+            }
+
+        # INSERT öncesi: fatura_no zaten varsa güncelleme yoluna düş (unique çakışmasını önle)
+        if fatura_no:
+            mevcut_no = fetch_one(
+                "SELECT id, fatura_no, fatura_tarihi FROM faturalar WHERE fatura_no = %s ORDER BY id DESC LIMIT 1",
+                (fatura_no,),
+            )
+            if mevcut_no and mevcut_no.get("id"):
+                fid = int(mevcut_no.get("id"))
+                yaz = _fatura_gib_bilgilerini_yaz(
+                    fid, ettn or None, fatura_no or None, gib_asama=gib_asama
+                ) or {}
+                erp_tar = str(mevcut_no.get("fatura_tarihi") or "")[:10]
+                return {
+                    "ok": True,
+                    "fatura_id": fid,
+                    "islem": "guncellendi",
+                    "fatura_no_cakisti": bool(yaz.get("fatura_no_cakisti")),
+                    "erp_fatura_tarihi": erp_tar,
+                    "portal_fatura_tarihi": fatura_tarihi,
+                }
 
         # ERP'de eşleşen kayıt yok: yalnızca GİB'de imzalı satırlar yeni fatura olarak ERP'ye eklenir.
         if gib_asama != "imzali":
@@ -6729,7 +6757,31 @@ def _gibden_erp_upsert(gib_row):
                     "GİB tarafında imzalı olmayan satır (durum: " + (gib_asama or "taslak/imzasız")
                     + "). ERP'ye yeni kayıt oluşturulmadı."
                 ),
+                "fatura_no_cakisti": False,
+                "portal_fatura_tarihi": fatura_tarihi,
             }
+
+        insert_no = fatura_no or _next_fatura_no()
+        # _next_fatura_no sonrası nadir yarış: no doluysa güncelleme yoluna düş
+        if insert_no:
+            mevcut_ins = fetch_one(
+                "SELECT id, fatura_no, fatura_tarihi FROM faturalar WHERE fatura_no = %s ORDER BY id DESC LIMIT 1",
+                (insert_no,),
+            )
+            if mevcut_ins and mevcut_ins.get("id"):
+                fid = int(mevcut_ins.get("id"))
+                yaz = _fatura_gib_bilgilerini_yaz(
+                    fid, ettn or None, insert_no or None, gib_asama=gib_asama
+                ) or {}
+                erp_tar = str(mevcut_ins.get("fatura_tarihi") or "")[:10]
+                return {
+                    "ok": True,
+                    "fatura_id": fid,
+                    "islem": "guncellendi",
+                    "fatura_no_cakisti": bool(yaz.get("fatura_no_cakisti")),
+                    "erp_fatura_tarihi": erp_tar,
+                    "portal_fatura_tarihi": fatura_tarihi,
+                }
 
         execute(
             """
@@ -6738,7 +6790,7 @@ def _gibden_erp_upsert(gib_row):
             ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
-                fatura_no or _next_fatura_no(),
+                insert_no,
                 musteri_id,
                 musteri_adi,
                 tutar,
@@ -6761,13 +6813,21 @@ def _gibden_erp_upsert(gib_row):
             ),
         )
         row = fetch_one("SELECT id FROM faturalar WHERE BTRIM(COALESCE(ettn::text,'')) = BTRIM(%s) ORDER BY id DESC LIMIT 1", (ettn,)) if ettn else None
-        if (not row) and fatura_no:
-            row = fetch_one("SELECT id FROM faturalar WHERE fatura_no = %s ORDER BY id DESC LIMIT 1", (fatura_no,))
+        if (not row) and insert_no:
+            row = fetch_one("SELECT id FROM faturalar WHERE fatura_no = %s ORDER BY id DESC LIMIT 1", (insert_no,))
         fid = int((row or {}).get("id") or 0)
+        cakisti = False
         if fid > 0:
-            _fatura_gib_bilgilerini_yaz(fid, ettn or None, fatura_no or None, gib_asama=gib_asama)
-        return {"ok": True, "fatura_id": (fid or None), "islem": "eklendi"}
-
+            yaz = _fatura_gib_bilgilerini_yaz(fid, ettn or None, insert_no or None, gib_asama=gib_asama) or {}
+            cakisti = bool(yaz.get("fatura_no_cakisti"))
+        return {
+            "ok": True,
+            "fatura_id": (fid or None),
+            "islem": "eklendi",
+            "fatura_no_cakisti": cakisti,
+            "erp_fatura_tarihi": fatura_tarihi,
+            "portal_fatura_tarihi": fatura_tarihi,
+        }
 
     except Exception as ex:
         logging.getLogger(__name__).error(
@@ -8990,20 +9050,47 @@ def _fatura_gib_bilgilerini_yaz(fatura_id, ettn=None, gib_fatura_no=None, gib_as
     """GİB ETTN + GİB Fatura No bilgisini faturaya ve notlara tekil şekilde yazar/günceller.
 
     gib_asama: 'taslak' → «GİB durum: taslak»; 'imzali' → «GİB İMZALANDI»; 'iptal' → «GİB durum: iptal».
+
+    Dönüş: {"ok": bool, "fatura_no_cakisti": bool}. Yeni gib_fatura_no başka bir id'de
+    kayıtlıysa fatura_no ezilmez (yalnızca ettn + notlar güncellenir).
     """
     try:
         fid = int(fatura_id)
     except Exception:
-        return
+        return {"ok": False, "fatura_no_cakisti": False}
     row = fetch_one("SELECT notlar, ettn, fatura_no FROM faturalar WHERE id = %s", (fid,)) or {}
     yeni, ettn_val, gib_no_val = _fatura_gib_notlar_uret(
         row, ettn=ettn, gib_fatura_no=gib_fatura_no, gib_asama=gib_asama
     )
 
+    fatura_no_yaz = gib_no_val or row.get("fatura_no")
+    fatura_no_cakisti = False
+    if gib_no_val:
+        diger = fetch_one(
+            """
+            SELECT id FROM faturalar
+            WHERE BTRIM(COALESCE(fatura_no::text, '')) = BTRIM(%s)
+              AND id <> %s
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (str(gib_no_val).strip(), fid),
+        )
+        if diger and diger.get("id") is not None:
+            fatura_no_cakisti = True
+            fatura_no_yaz = row.get("fatura_no")
+            logging.getLogger(__name__).warning(
+                "fatura_no_cakisti: hedef_id=%s istenen_no=%s mevcut_id=%s; fatura_no ezilmedi",
+                fid,
+                str(gib_no_val).strip(),
+                diger.get("id"),
+            )
+
     execute(
         "UPDATE faturalar SET notlar = %s, ettn = %s, fatura_no = %s WHERE id = %s",
-        (yeni, ettn_val, gib_no_val or row.get("fatura_no"), fid),
+        (yeni, ettn_val, fatura_no_yaz, fid),
     )
+    return {"ok": True, "fatura_no_cakisti": fatura_no_cakisti}
 
 
 _faturalar_dev_http_lock = threading.Lock()
@@ -9936,6 +10023,8 @@ def api_gib_cek_kaydet_aralik():
 
         sonuc = {"eklenen": 0, "guncellenen": 0, "atlanan": 0, "hata_sayisi": 0}
         hatalar = []
+        cakisan_no_sayisi = 0
+        farkli_tarihte_kalan_sayisi = 0
         for it in items:
             it = dict(it or {})
             satir = {
@@ -9960,6 +10049,16 @@ def api_gib_cek_kaydet_aralik():
                 pass
             try:
                 out = _gibden_erp_upsert(satir)
+                cakisti_bu = bool(out.get("fatura_no_cakisti"))
+                # ERP fatura_tarihi'ne dokunulmaz; filtre dışı kalanları sadece tespit et
+                erp_tar_s = str(out.get("erp_fatura_tarihi") or "").strip()[:10]
+                if out.get("ok") and erp_tar_s:
+                    try:
+                        erp_d = datetime.strptime(erp_tar_s, "%Y-%m-%d").date()
+                        if erp_d < bas or erp_d > bit:
+                            farkli_tarihte_kalan_sayisi += 1
+                    except ValueError:
+                        pass
                 if not out.get("ok"):
                     if out.get("atlandi"):
                         sonuc["atlanan"] += 1
@@ -9968,6 +10067,8 @@ def api_gib_cek_kaydet_aralik():
                         hatalar.append(
                             {"ref": satir.get("fatura_no") or satir.get("ettn"), "mesaj": out.get("mesaj") or "bilinmeyen"}
                         )
+                    if cakisti_bu:
+                        cakisan_no_sayisi += 1
                     continue
                 fid = int(out.get("fatura_id") or 0)
                 if float(satir.get("tutar") or 0) <= 0 and fid > 0 and satir.get("ettn"):
@@ -9978,8 +10079,12 @@ def api_gib_cek_kaydet_aralik():
                         if t_cached > 0:
                             satir["tutar"] = t_cached
                             out = _gibden_erp_upsert(satir)
+                            if out.get("fatura_no_cakisti"):
+                                cakisti_bu = True
                     except Exception:
                         pass
+                if cakisti_bu:
+                    cakisan_no_sayisi += 1
                 if out.get("islem") == "guncellendi":
                     sonuc["guncellenen"] += 1
                 else:
@@ -9992,6 +10097,13 @@ def api_gib_cek_kaydet_aralik():
             f"GİB: {len(items)} satır tarandı. ERP eklenen: {sonuc['eklenen']}, güncellenen: {sonuc['guncellenen']}, "
             f"atlanan: {sonuc['atlanan']}, hata: {sonuc['hata_sayisi']}."
         )
+        if cakisan_no_sayisi:
+            mesaj += f" {cakisan_no_sayisi} satırda fatura_no başka kayıtta olduğu için numara ezilmedi."
+        if farkli_tarihte_kalan_sayisi:
+            mesaj += (
+                f" {farkli_tarihte_kalan_sayisi} satır farklı tarihte kayıtlı olduğu için "
+                f"bu liste filtresinde görünmeyebilir."
+            )
         return jsonify(
             {
                 "ok": True,
@@ -10001,6 +10113,8 @@ def api_gib_cek_kaydet_aralik():
                 "hatalar": hatalar[:30],
                 "baslangic": bas.isoformat(),
                 "bitis": bit.isoformat(),
+                "cakisan_no_sayisi": cakisan_no_sayisi,
+                "farkli_tarihte_kalan_sayisi": farkli_tarihte_kalan_sayisi,
             }
         )
     except Exception as e:

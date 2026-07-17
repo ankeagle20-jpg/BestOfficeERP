@@ -1103,7 +1103,16 @@
                 body: JSON.stringify({ baslangic: baslangic, bitis: bitis })
             });
             if (!j.ok) throw new Error(j.mesaj || 'İşlem başarısız.');
-            alert(j.mesaj || 'Tamamlandı.');
+            var msg = j.mesaj || 'Tamamlandı.';
+            var cak = Number(j.cakisan_no_sayisi || 0);
+            var fark = Number(j.farkli_tarihte_kalan_sayisi || 0);
+            if (cak || fark) {
+                var ekstra = [];
+                if (cak) ekstra.push(cak + ' numara çakışması nedeniyle fatura_no ezilmedi');
+                if (fark) ekstra.push(fark + ' tanesi farklı tarihte kayıtlı olduğu için bu listede görünmeyebilir');
+                if (ekstra.length) msg += '\n\nNot: ' + ekstra.join('; ') + '.';
+            }
+            alert(msg);
             var gc2 = document.getElementById('gib_canli');
             if (gc2) gc2.value = '';
             window.location.reload();
