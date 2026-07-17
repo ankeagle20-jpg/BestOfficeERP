@@ -85,6 +85,20 @@ def sql_expr_fatura_gib_imzalanmis(notlar_column: str) -> str:
     )
 
 
+def sql_expr_fatura_gib_no_tasindi_degil(notlar_column: str) -> str:
+    """PostgreSQL koşulu: notlarda ``|GIB_NO_TASINDI|`` olmayan faturalar.
+
+    Kira satırı GİB no'su serbest bırakıldığında (yerine yeni portal satırı)
+    açık/borçlandırılabilir ay taramalarından hariç tutmak için.
+    notlar_column: tam sütun ifadesi, örn. ``f.notlar`` veya ``notlar``.
+    """
+    c = (notlar_column or "").strip()
+    if not c:
+        raise ValueError("notlar_column gerekli")
+    # LIKE içindeki % → psycopg2 execute(..., params) ile birleşince yer tutucu sanılmasın diye %%
+    return "COALESCE(" + c + ", '') NOT LIKE '%%|GIB_NO_TASINDI|%%'"
+
+
 def _db_connect_kwargs_common():
     """Ortak libpq parametreleri (kopmalara karşı keepalive, TLS)."""
     is_prod_like = bool(os.environ.get("GUNICORN_CMD_ARGS") or os.environ.get("RENDER"))

@@ -43,6 +43,7 @@ from db import (
     db as get_db,
     get_conn,
     sql_expr_fatura_not_gib_taslak,
+    sql_expr_fatura_gib_no_tasindi_degil,
 )
 from datetime import datetime, date, timedelta
 import calendar
@@ -10286,6 +10287,7 @@ def api_aylik_kira_guncelle_ve_borclandir_all():
         SELECT musteri_id, notlar FROM faturalar
         WHERE COALESCE(notlar, '') LIKE '%%|AYLIK_TUTAR|%%'
           AND {sql_expr_fatura_not_gib_taslak("notlar")}
+          AND {sql_expr_fatura_gib_no_tasindi_degil("notlar")}
         """
     ) or []
     markers_by_mid = defaultdict(set)
@@ -10485,6 +10487,7 @@ def api_tufe_borclandir_nakit_tahsil_toplu():
         FROM faturalar
         WHERE COALESCE(notlar, '') LIKE '%%|AYLIK_TUTAR|%%'
           AND {sql_expr_fatura_not_gib_taslak("notlar")}
+          AND {sql_expr_fatura_gib_no_tasindi_degil("notlar")}
         """
     ) or []
     borc_keys_by_mid = defaultdict(set)
