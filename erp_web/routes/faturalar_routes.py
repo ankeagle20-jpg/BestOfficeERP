@@ -6602,6 +6602,103 @@ def _gib_durum_portal_metni_upsert_asama(gib_durum_raw) -> str:
     return "taslak"
 
 
+
+def _fatura_aylik_kira_satiri_mi(row) -> bool:
+    """Peşin atanmış kira dönemi satırı: notlarda |AYLIK_TUTAR| işareti."""
+    if not row:
+        return False
+    return "|AYLIK_TUTAR|" in str(row.get("notlar") or "")
+
+
+def _portal_musteri_uyumlu_mu(portal_row, erp_row) -> bool:
+    """Portal satırı ile ERP satırı müşteri uyumu (VKN öncelikli, yoksa normalize ünvan)."""
+    if not portal_row or not erp_row:
+        return False
+
+    def _digits(v):
+        return re.sub(r"[^0-9]", "", str(v or "").strip())
+
+    def _name_norm(v):
+        return re.sub(r"\s+", " ", turkish_lower(str(v or "").strip()))
+
+    p_vkn = _digits(portal_row.get("musteri_vkn"))
+    e_vkn = _digits(erp_row.get("musteri_vkn"))
+    if not e_vkn:
+        try:
+            mid = erp_row.get("musteri_id")
+            if mid is not None and str(mid).strip() != "":
+                cust = fetch_one(
+                    "SELECT tax_number FROM customers WHERE id = %s",
+                    (int(mid),),
+                )
+                e_vkn = _digits((cust or {}).get("tax_number"))
+        except Exception:
+            pass
+    if p_vkn and e_vkn:
+        return p_vkn == e_vkn
+
+    p_ad = _name_norm(portal_row.get("musteri_adi"))
+    e_ad = _name_norm(erp_row.get("musteri_adi"))
+    if p_ad and e_ad and p_ad != "—" and e_ad != "—":
+        if p_ad == e_ad:
+            return True
+        if len(p_ad) >= 8 and len(e_ad) >= 8 and (p_ad in e_ad or e_ad in p_ad):
+            return True
+    return False
+
+
+def _kira_fatura_no_serbest_birak(fid, eski_no, yeni_id=None) -> str | None:
+    """Kira satırındaki GIB fatura_no'yu yerel no ile değiştirir; GIB_NO_TASINDI notu ekler.
+
+    Dönüş: yeni yerel fatura_no veya None.
+    """
+    try:
+        fid_i = int(fid)
+    except (TypeError, ValueError):
+        return None
+    eski = str(eski_no or "").strip()
+    if not eski:
+        row = fetch_one("SELECT fatura_no FROM faturalar WHERE id = %s", (fid_i,)) or {}
+        eski = str(row.get("fatura_no") or "").strip()
+    if not eski:
+        return None
+
+    yerel = f"KIRA|{eski}|{fid_i}"
+    clash = fetch_one(
+        "SELECT id FROM faturalar WHERE fatura_no = %s AND id <> %s LIMIT 1",
+        (yerel, fid_i),
+    )
+    if clash and clash.get("id") is not None:
+        yerel = f"KIRA|{eski}|{fid_i}|{int(time.time())}"
+
+    row = fetch_one("SELECT notlar FROM faturalar WHERE id = %s", (fid_i,)) or {}
+    notlar = str(row.get("notlar") or "")
+    marker = f"|GIB_NO_TASINDI|{eski}|"
+    if yeni_id is not None:
+        marker += f"yeni_id={int(yeni_id)}|"
+    if marker not in notlar:
+        notlar = (notlar.rstrip() + " " + marker).strip() if notlar.strip() else marker
+
+    execute(
+        "UPDATE faturalar SET fatura_no = %s, notlar = %s WHERE id = %s",
+        (yerel, notlar, fid_i),
+    )
+    logging.getLogger(__name__).warning(
+        "kira_fatura_no_serbest_birak: fid=%s eski_no=%s yeni_yerel=%s yeni_id=%s",
+        fid_i,
+        eski,
+        yerel,
+        yeni_id,
+    )
+    return yerel
+
+
+def _gib_upsert_ayni_yil_ay(a, b) -> bool:
+    sa = str(a or "").strip()[:7]
+    sb = str(b or "").strip()[:7]
+    return bool(sa) and bool(sb) and len(sa) == 7 and sa == sb
+
+
 def _gibden_erp_upsert(gib_row):
     if not gib_row:
         return {"ok": False, "mesaj": "GİB satırı bulunamadı."}
@@ -6684,34 +6781,60 @@ def _gibden_erp_upsert(gib_row):
         except Exception:
             pass
 
+
+        _sel_match = (
+            "SELECT id, fatura_no, fatura_tarihi, ettn, notlar, "
+            "musteri_id, musteri_adi, musteri_vkn "
+            "FROM faturalar "
+        )
         mevcut = None
+
+        # 1) ETTN ile bul — kira + müşteri uyumsuzsa hedef SAYMA
         if ettn:
-            mevcut = fetch_one(
-                "SELECT id, fatura_no, fatura_tarihi FROM faturalar WHERE BTRIM(COALESCE(ettn::text,'')) = BTRIM(%s) ORDER BY id DESC LIMIT 1",
+            aday = fetch_one(
+                _sel_match
+                + "WHERE BTRIM(COALESCE(ettn::text,'')) = BTRIM(%s) "
+                + "ORDER BY id DESC LIMIT 1",
                 (ettn,),
             )
-        if (not mevcut) and fatura_no and ettn:
-            # ettn ile bulunamadı ama
-            # fatura_no ile başka kayıt olabilir
-            # → o kaydı güncelle (GİB esas)
-            mevcut = fetch_one(
-                """SELECT id, fatura_no, fatura_tarihi
-                   FROM faturalar
-                   WHERE fatura_no = %s
-                   ORDER BY id DESC LIMIT 1""",
+            if aday and aday.get("id"):
+                if _fatura_aylik_kira_satiri_mi(aday) and (not _portal_musteri_uyumlu_mu(gib_row, aday)):
+                    logging.getLogger(__name__).warning(
+                        "upsert: ettn kira satırında ama müşteri uyumsuz; hedef reddedildi "
+                        "erp_id=%s fatura_no=%s",
+                        aday.get("id"),
+                        aday.get("fatura_no"),
+                    )
+                else:
+                    mevcut = aday
+
+        # 2) fatura_no ile güvenli eşleşme: ettn boş + müşteri uyumlu + (kira değil VEYA aynı ay)
+        if (not mevcut) and fatura_no:
+            aday = fetch_one(
+                _sel_match + "WHERE fatura_no = %s ORDER BY id DESC LIMIT 1",
                 (fatura_no,),
             )
-        elif (not mevcut) and fatura_no and not ettn:
-            # ettn yoksa fatura_no ile ara
-            mevcut = fetch_one(
-                "SELECT id, fatura_no, fatura_tarihi FROM faturalar WHERE fatura_no = %s ORDER BY id DESC LIMIT 1",
-                (fatura_no,),
-            )
+            if aday and aday.get("id"):
+                ettn_bos = not str(aday.get("ettn") or "").strip()
+                uyumlu = _portal_musteri_uyumlu_mu(gib_row, aday)
+                kira = _fatura_aylik_kira_satiri_mi(aday)
+                ayni_ay = _gib_upsert_ayni_yil_ay(aday.get("fatura_tarihi"), fatura_tarihi)
+                if ettn_bos and uyumlu and ((not kira) or ayni_ay):
+                    mevcut = aday
+                else:
+                    logging.getLogger(__name__).warning(
+                        "upsert: fatura_no eşleşmesi güvensiz (ettn_bos=%s uyumlu=%s kira=%s ayni_ay=%s) "
+                        "erp_id=%s",
+                        ettn_bos,
+                        uyumlu,
+                        kira,
+                        ayni_ay,
+                        aday.get("id"),
+                    )
 
         if mevcut and mevcut.get("id"):
             fid = int(mevcut.get("id"))
-            # Sadece ettn ve notları güncelle
-            # tutar, musteri, fatura_tarihi vb. dokunma
+            # Sadece ettn ve notları güncelle — tutar, musteri, fatura_tarihi dokunma
             yaz = _fatura_gib_bilgilerini_yaz(
                 fid, ettn or None,
                 fatura_no or None,
@@ -6726,28 +6849,7 @@ def _gibden_erp_upsert(gib_row):
                 "portal_fatura_tarihi": fatura_tarihi,
             }
 
-        # INSERT öncesi: fatura_no zaten varsa güncelleme yoluna düş (unique çakışmasını önle)
-        if fatura_no:
-            mevcut_no = fetch_one(
-                "SELECT id, fatura_no, fatura_tarihi FROM faturalar WHERE fatura_no = %s ORDER BY id DESC LIMIT 1",
-                (fatura_no,),
-            )
-            if mevcut_no and mevcut_no.get("id"):
-                fid = int(mevcut_no.get("id"))
-                yaz = _fatura_gib_bilgilerini_yaz(
-                    fid, ettn or None, fatura_no or None, gib_asama=gib_asama
-                ) or {}
-                erp_tar = str(mevcut_no.get("fatura_tarihi") or "")[:10]
-                return {
-                    "ok": True,
-                    "fatura_id": fid,
-                    "islem": "guncellendi",
-                    "fatura_no_cakisti": bool(yaz.get("fatura_no_cakisti")),
-                    "erp_fatura_tarihi": erp_tar,
-                    "portal_fatura_tarihi": fatura_tarihi,
-                }
-
-        # ERP'de eşleşen kayıt yok: yalnızca GİB'de imzalı satırlar yeni fatura olarak ERP'ye eklenir.
+        # ERP'de güvenli eşleşme yok: yalnızca imzalı satırlar yeni kayıt olabilir.
         if gib_asama != "imzali":
             return {
                 "ok": False,
@@ -6761,19 +6863,23 @@ def _gibden_erp_upsert(gib_row):
                 "portal_fatura_tarihi": fatura_tarihi,
             }
 
-        insert_no = fatura_no or _next_fatura_no()
-        # _next_fatura_no sonrası nadir yarış: no doluysa güncelleme yoluna düş
-        if insert_no:
-            mevcut_ins = fetch_one(
-                "SELECT id, fatura_no, fatura_tarihi FROM faturalar WHERE fatura_no = %s ORDER BY id DESC LIMIT 1",
-                (insert_no,),
+        # 3) Güvensiz + imzalı: kira satırındaki aynı fatura_no'yu serbest bırak, sonra INSERT
+        kira_serbest_fid = None
+        if fatura_no:
+            holder = fetch_one(
+                _sel_match + "WHERE fatura_no = %s ORDER BY id DESC LIMIT 1",
+                (fatura_no,),
             )
-            if mevcut_ins and mevcut_ins.get("id"):
-                fid = int(mevcut_ins.get("id"))
+            if holder and holder.get("id") and _fatura_aylik_kira_satiri_mi(holder):
+                kira_serbest_fid = int(holder.get("id"))
+                _kira_fatura_no_serbest_birak(kira_serbest_fid, fatura_no)
+            elif holder and holder.get("id"):
+                # Kira değil ama no dolu: unique guard (b98a69c) — constraint'e çarpmadan yaz
+                fid = int(holder.get("id"))
                 yaz = _fatura_gib_bilgilerini_yaz(
-                    fid, ettn or None, insert_no or None, gib_asama=gib_asama
+                    fid, ettn or None, fatura_no or None, gib_asama=gib_asama
                 ) or {}
-                erp_tar = str(mevcut_ins.get("fatura_tarihi") or "")[:10]
+                erp_tar = str(holder.get("fatura_tarihi") or "")[:10]
                 return {
                     "ok": True,
                     "fatura_id": fid,
@@ -6782,6 +6888,32 @@ def _gibden_erp_upsert(gib_row):
                     "erp_fatura_tarihi": erp_tar,
                     "portal_fatura_tarihi": fatura_tarihi,
                 }
+
+        insert_no = fatura_no or _next_fatura_no()
+        # Unique guard (b98a69c): no hâlâ doluysa serbest bırak (kira) veya güncelle
+        if insert_no:
+            mevcut_ins = fetch_one(
+                _sel_match + "WHERE fatura_no = %s ORDER BY id DESC LIMIT 1",
+                (insert_no,),
+            )
+            if mevcut_ins and mevcut_ins.get("id"):
+                if _fatura_aylik_kira_satiri_mi(mevcut_ins):
+                    kira_serbest_fid = int(mevcut_ins.get("id"))
+                    _kira_fatura_no_serbest_birak(kira_serbest_fid, insert_no)
+                else:
+                    fid = int(mevcut_ins.get("id"))
+                    yaz = _fatura_gib_bilgilerini_yaz(
+                        fid, ettn or None, insert_no or None, gib_asama=gib_asama
+                    ) or {}
+                    erp_tar = str(mevcut_ins.get("fatura_tarihi") or "")[:10]
+                    return {
+                        "ok": True,
+                        "fatura_id": fid,
+                        "islem": "guncellendi",
+                        "fatura_no_cakisti": bool(yaz.get("fatura_no_cakisti")),
+                        "erp_fatura_tarihi": erp_tar,
+                        "portal_fatura_tarihi": fatura_tarihi,
+                    }
 
         execute(
             """
@@ -6820,6 +6952,17 @@ def _gibden_erp_upsert(gib_row):
         if fid > 0:
             yaz = _fatura_gib_bilgilerini_yaz(fid, ettn or None, insert_no or None, gib_asama=gib_asama) or {}
             cakisti = bool(yaz.get("fatura_no_cakisti"))
+            if kira_serbest_fid and fatura_no:
+                try:
+                    kr = fetch_one("SELECT notlar FROM faturalar WHERE id = %s", (kira_serbest_fid,)) or {}
+                    nt = str(kr.get("notlar") or "")
+                    tag = f"yeni_id={fid}|"
+                    needle = f"|GIB_NO_TASINDI|{fatura_no}|"
+                    if tag not in nt and needle in nt:
+                        nt = nt.replace(needle, needle + tag, 1)
+                        execute("UPDATE faturalar SET notlar = %s WHERE id = %s", (nt, kira_serbest_fid))
+                except Exception:
+                    pass
         return {
             "ok": True,
             "fatura_id": (fid or None),
