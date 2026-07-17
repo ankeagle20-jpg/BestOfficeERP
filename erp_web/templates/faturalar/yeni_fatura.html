@@ -212,7 +212,6 @@
         .gib-yeni-btn.taslak { background: #1565c0; }
         .gib-yeni-btn.sms { background: #00897b; }
         .gib-yeni-btn.onay { background: #2e7d32; }
-        .gib-yeni-btn.olustur { background: #1565c0; }
         .gib-yeni-btn.onizleme { background: #5e35b1; }
         .gib-yeni-status {
             margin-top: 8px;
@@ -316,7 +315,6 @@
             <button type="button" class="gib-yeni-btn sms" id="yeni-gib-sms-send-btn">SMS Gönder</button>
             <label>SMS Kod <input type="text" id="yeni-gib-sms-kod" placeholder="B2Z7V5"></label>
             <button type="button" class="gib-yeni-btn onay" id="yeni-gib-sms-onay-btn">SMS ile Onayla</button>
-            <button type="button" class="gib-yeni-btn olustur" id="yeni-gib-fatura-olustur-btn"><i class="fa fa-file-invoice"></i> Fatura Oluştur</button>
             <button type="button" class="gib-yeni-btn onizleme" id="yeni-gib-onizleme-btn" title="ERP #: GİB dispatch jp özeti (JSON). UUID: portal HTML."><i class="fa fa-eye"></i> GİB Fatura Önizle</button>
             <input type="hidden" id="yeni-gib-oid" value="">
         </div>
@@ -406,7 +404,6 @@
         const API_GIB_TASLAK = "{{ url_for('faturalar.api_gib_taslak') }}";
         const API_GIB_SMS_GONDER = "{{ url_for('faturalar.api_gib_sms_gonder') }}";
         const API_GIB_SMS_ONAY = "{{ url_for('faturalar.api_gib_sms_onay') }}";
-        const API_GIB_FATURA_OLUSTUR = "{{ url_for('faturalar.api_gib_fatura_olustur') }}";
         const API_GIB_FATURA_ONIZLEME = "{{ url_for('faturalar.api_gib_fatura_onizleme') }}";
         /* Kök /api/... yolu app.py ile kayıtlı; /faturalar/api/... blueprint’e bağlı kalıp 404 verebiliyor. */
         const API_GIB_DISPATCH_ONIZLE = "/api/gib-dispatch-jp-onizle";
@@ -1364,7 +1361,6 @@
             if (!st || IRSALIYE_MODU === true || IRSALIYE_MODU === 'true') return;
             var smsSendBtn = document.getElementById('yeni-gib-sms-send-btn');
             var smsOnayBtn = document.getElementById('yeni-gib-sms-onay-btn');
-            var faturaOlusturBtn = document.getElementById('yeni-gib-fatura-olustur-btn');
             var gibOnizlemeBtn = document.getElementById('yeni-gib-onizleme-btn');
 
             function setStatus(msg) {
@@ -1376,7 +1372,6 @@
                 var on = !!enabled;
                 if (smsSendBtn) smsSendBtn.disabled = !on;
                 if (smsOnayBtn) smsOnayBtn.disabled = !on;
-                if (faturaOlusturBtn) faturaOlusturBtn.disabled = !on;
                 /* GİB önizleme: Fatura ID ile dispatch jp özeti her zaman kullanılabilir; SMS akışına bağlı değil. */
             }
 
@@ -1645,44 +1640,6 @@
                     })
                     .finally(function () { yeniGibSetBusy(btn, false); });
             });
-
-            document.getElementById('yeni-gib-fatura-olustur-btn').addEventListener('click', function () {
-                var idE2 = document.getElementById('yeni-gib-fatura-id');
-                yeniGibErpIdNormalize(idE2, false);
-                var faturaId = parseInt(yeniGibErpIdDigits((idE2 || {}).value || '') || '0', 10);
-                var uuid = ((document.getElementById('yeni-gib-uuid') || {}).value || '').trim();
-                if (!faturaId || faturaId < 1) {
-                    setStatus('Önce geçerli bir ERP # (kayıt id) seçin.');
-                    return;
-                }
-                if (!uuid) {
-                    setStatus('Önce GİB taslağı oluşturun (UUID gerekli).');
-                    return;
-                }
-                var btn = document.getElementById('yeni-gib-fatura-olustur-btn');
-                yeniGibSetBusy(btn, true, 'Oluşturuluyor...');
-                fetchJsonWithTimeoutYeniGib(API_GIB_FATURA_OLUSTUR, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ fatura_id: faturaId, uuid: uuid })
-                }, 30000)
-                    .then(function (j) {
-                        if (!j || !j.ok) throw new Error((j && j.mesaj) || 'Fatura oluşturulamadı');
-                        setStatus(j.mesaj || 'Fatura oluşturuldu.');
-                        yeniGibBelgeOzetYukle();
-                        if (j.onizleme_url) {
-                            window.open(j.onizleme_url, '_blank');
-                        }
-                    })
-                    .catch(function (err) {
-                        var msg = (err && err.name === 'AbortError')
-                            ? 'Fatura oluşturma isteği zaman aşımına uğradı.'
-                            : ('Fatura oluşturma hatası: ' + ((err && err.message) || err));
-                        setStatus(msg);
-                    })
-                    .finally(function () { yeniGibSetBusy(btn, false); });
-            });
-
             if (gibOnizlemeBtn) {
                 gibOnizlemeBtn.addEventListener('click', function () {
                     var idE3 = document.getElementById('yeni-gib-fatura-id');
