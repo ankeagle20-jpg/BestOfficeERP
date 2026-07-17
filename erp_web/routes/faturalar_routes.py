@@ -42,6 +42,7 @@ from db import (
     sql_expr_fatura_not_gib_taslak,
     sql_expr_fatura_erp_taslak,
     sql_expr_fatura_gib_imzalanmis,
+    sql_expr_fatura_gib_no_tasindi_degil,
 )
 from utils.text_utils import turkish_lower
 from utils.musteri_arama import (
@@ -686,12 +687,13 @@ def _aciklama_with_aylik_pay_tokens(aciklama_text, pay_items):
 def _acik_aylik_tutar_ay_set(musteri_id: int) -> set[str]:
     """Müşterinin açık |AYLIK_TUTAR| faturalarındaki ay anahtarları (YYYY-MM-DD)."""
     rows = fetch_all(
-        """
+        f"""
         SELECT COALESCE(notlar, '') AS notlar
         FROM faturalar
         WHERE musteri_id = %s
           AND COALESCE(notlar, '') LIKE '%%|AYLIK_TUTAR|%%'
           AND COALESCE(durum, '') != 'odendi'
+          AND {sql_expr_fatura_gib_no_tasindi_degil("notlar")}
         """,
         (musteri_id,),
     ) or []
@@ -8652,6 +8654,7 @@ def api_gib_kesilmis_fatura_raporu():
             WHERE (f.fatura_tarihi::date) >= %s
               AND (f.fatura_tarihi::date) <= %s
               AND {_nt}
+              AND {sql_expr_fatura_gib_no_tasindi_degil("f.notlar")}
               AND (
                     (f.ettn IS NOT NULL
                      AND BTRIM(COALESCE(f.ettn::text, '')) <> '')

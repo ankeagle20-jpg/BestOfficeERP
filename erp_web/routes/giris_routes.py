@@ -4778,6 +4778,7 @@ def _cari_hareketler(musteri_id, banka_tahsilat_only=False, cari_ekstre_b=False,
     cari_ekstre_b=True ise Cari Ekstre B: borçta yalnızca ETTN’li (GİB kesilmiş) faturalar;
     alacakta yalnızca havale, EFT, banka, çek, kredi kartı (nakit yok)."""
     _nt = sql_expr_fatura_not_gib_taslak("notlar")
+    _td = sql_expr_fatura_gib_no_tasindi_degil("notlar")
     limit_n = None
     if max_rows is not None:
         try:
@@ -4795,6 +4796,7 @@ def _cari_hareketler(musteri_id, banka_tahsilat_only=False, cari_ekstre_b=False,
                WHERE musteri_id = %s
                  AND NULLIF(TRIM(COALESCE(ettn::text, '')), '') IS NOT NULL
                  AND {_nt}
+                 AND {_td}
                ORDER BY fatura_tarihi DESC, id DESC{limit_sql}""",
             ((musteri_id, limit_n) if limit_n else (musteri_id,)),
         )
@@ -4818,7 +4820,7 @@ def _cari_hareketler(musteri_id, banka_tahsilat_only=False, cari_ekstre_b=False,
     else:
         faturalar = fetch_all(
             f"""SELECT id, fatura_no AS belge_no, fatura_tarihi AS tarih, COALESCE(toplam, tutar, 0) AS tutar, 'Fatura' AS tur, vade_tarihi
-               FROM faturalar WHERE musteri_id = %s AND {_nt} ORDER BY fatura_tarihi DESC, id DESC{limit_sql}""",
+               FROM faturalar WHERE musteri_id = %s AND {_nt} AND {_td} ORDER BY fatura_tarihi DESC, id DESC{limit_sql}""",
             ((musteri_id, limit_n) if limit_n else (musteri_id,)),
         )
         if banka_tahsilat_only:
@@ -5419,12 +5421,13 @@ def _firma_ozet_normalize_tahsil_ay_key(k: str) -> str | None:
 def _aylik_grid_acik_tutar_ay_keys_normalized(musteri_id: int) -> set[str]:
     """Bu müşteride açık (durum != odendi) |AYLIK_TUTAR| faturası bulunan aylar (YYYY-M)."""
     rows = fetch_all(
-        """
+        f"""
         SELECT COALESCE(notlar, '') AS notlar
         FROM faturalar
         WHERE musteri_id = %s
           AND COALESCE(notlar, '') LIKE '%%|AYLIK_TUTAR|%%'
           AND COALESCE(durum, '') != 'odendi'
+          AND {sql_expr_fatura_gib_no_tasindi_degil("notlar")}
         """,
         (musteri_id,),
     ) or []
@@ -8403,6 +8406,7 @@ def _api_cari_kart_impl(mid):
         return jsonify({"ok": False, "mesaj": "Müşteri bulunamadı."}), 404
     bugun = date.today()
     nt_expr = sql_expr_fatura_not_gib_taslak("notlar")
+    td_expr = sql_expr_fatura_gib_no_tasindi_degil("notlar")
     ozet_sql = fetch_one(
         f"""
         SELECT
@@ -8416,6 +8420,7 @@ def _api_cari_kart_impl(mid):
         WHERE musteri_id = %s
           AND COALESCE(durum, '') != 'odendi'
           AND {nt_expr}
+          AND {td_expr}
         """,
         (bugun, bugun, bugun, bugun, bugun, bugun, bugun, bugun, bugun, mid),
     ) or {}
