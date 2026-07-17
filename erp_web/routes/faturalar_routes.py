@@ -6742,6 +6742,84 @@ def _gib_upsert_ayni_yil_ay(a, b) -> bool:
     return bool(sa) and bool(sb) and len(sa) == 7 and sa == sb
 
 
+def _gib_upsert_erp_taslak_soft_adaylari(gib_row, musteri_id, fatura_tarihi, toplam):
+    """GİB imzalı satır için ERP taslak soft-match adayları.
+
+    Kriterler (hepsi zorunlu):
+    - ERP durum: taslak
+    - ettn boş
+    - |AYLIK_TUTAR| / |GIB_TASLAK_TAMAMLANDI| / |GIB_NO_TASINDI| yok
+    - aynı takvim günü
+    - abs(toplam farkı) <= 0.05
+    - _portal_musteri_uyumlu_mu (+ musteri_id varsa erp.musteri_id eşleşmesi)
+
+    Dönüş: tutar farkı artan, sonra id ASC sıralı liste.
+    """
+    tar = str(fatura_tarihi or "").strip()[:10]
+    if not tar or not gib_row:
+        return []
+    try:
+        portal_toplam = float(toplam or 0)
+    except (TypeError, ValueError):
+        return []
+    if portal_toplam <= 0:
+        return []
+
+    mid = None
+    if musteri_id is not None and str(musteri_id).strip() != "":
+        try:
+            mid = int(musteri_id)
+        except (TypeError, ValueError):
+            mid = None
+
+    where = [
+        sql_expr_fatura_erp_taslak("notlar"),
+        "(ettn IS NULL OR BTRIM(COALESCE(ettn::text, '')) = '')",
+        "COALESCE(notlar, '') NOT LIKE '%%|AYLIK_TUTAR|%%'",
+        "COALESCE(notlar, '') NOT LIKE '%%|GIB_TASLAK_TAMAMLANDI|%%'",
+        sql_expr_fatura_gib_no_tasindi_degil("notlar"),
+        "DATE(fatura_tarihi) = %s::date",
+        "ABS(COALESCE(toplam, 0) - %s) <= 0.05",
+    ]
+    params = [tar, portal_toplam]
+    if mid is not None:
+        where.append("musteri_id = %s")
+        params.append(mid)
+
+    sql = (
+        "SELECT id, fatura_no, fatura_tarihi, ettn, notlar, "
+        "musteri_id, musteri_adi, musteri_vkn, toplam "
+        "FROM faturalar WHERE "
+        + " AND ".join(where)
+        + " ORDER BY ABS(COALESCE(toplam, 0) - %s) ASC, id ASC"
+    )
+    params.append(portal_toplam)
+
+    try:
+        rows = fetch_all(sql, tuple(params)) or []
+    except Exception:
+        logging.getLogger(__name__).warning(
+            "upsert_erp_taslak_soft_adaylari sorgu hatası",
+            exc_info=True,
+        )
+        return []
+
+    adaylar = []
+    for row in rows:
+        if not row or not row.get("id"):
+            continue
+        if not _portal_musteri_uyumlu_mu(gib_row, row):
+            continue
+        if mid is not None:
+            try:
+                if int(row.get("musteri_id") or 0) != mid:
+                    continue
+            except (TypeError, ValueError):
+                continue
+        adaylar.append(row)
+    return adaylar
+
+
 def _gibden_erp_upsert(gib_row):
     if not gib_row:
         return {"ok": False, "mesaj": "GİB satırı bulunamadı."}
@@ -6905,6 +6983,46 @@ def _gibden_erp_upsert(gib_row):
                 "fatura_no_cakisti": False,
                 "portal_fatura_tarihi": fatura_tarihi,
             }
+
+        # 2b) ERP taslak soft-match: ETTN/no yok, imzalı portal → tek orphan taslağı UPDATE
+        soft_adaylar = _gib_upsert_erp_taslak_soft_adaylari(
+            gib_row, musteri_id, fatura_tarihi, toplam
+        )
+        if len(soft_adaylar) == 1:
+            aday = soft_adaylar[0]
+            fid = int(aday.get("id"))
+            yaz = _fatura_gib_bilgilerini_yaz(
+                fid, ettn or None, fatura_no or None, gib_asama=gib_asama
+            ) or {}
+            erp_tar = str(aday.get("fatura_tarihi") or "")[:10]
+            logging.getLogger(__name__).warning(
+                "upsert_erp_taslak_soft_match: erp_id=%s portal_no=%s "
+                "erp_no=%s fatura_tarihi=%s toplam=%s",
+                fid,
+                fatura_no,
+                aday.get("fatura_no"),
+                fatura_tarihi,
+                toplam,
+            )
+            return {
+                "ok": True,
+                "fatura_id": fid,
+                "islem": "guncellendi",
+                "fatura_no_cakisti": bool(yaz.get("fatura_no_cakisti")),
+                "erp_fatura_tarihi": erp_tar,
+                "portal_fatura_tarihi": fatura_tarihi,
+                "erp_taslak_soft_match": True,
+            }
+        if len(soft_adaylar) > 1:
+            logging.getLogger(__name__).warning(
+                "upsert_erp_taslak_ambiguous: ids=%s portal_no=%s "
+                "fatura_tarihi=%s toplam=%s musteri_id=%s",
+                [int(a.get("id")) for a in soft_adaylar if a and a.get("id")],
+                fatura_no,
+                fatura_tarihi,
+                toplam,
+                musteri_id,
+            )
 
         # 3) Güvensiz + imzalı: kira satırındaki aynı fatura_no'yu serbest bırak, sonra INSERT
         kira_serbest_fid = None
