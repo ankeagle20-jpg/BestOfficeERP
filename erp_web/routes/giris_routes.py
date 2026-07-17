@@ -5451,9 +5451,24 @@ def _aylik_tahsil_edilen_aylar_set_normalized(musteri_id: int, payload=None) -> 
     return _aylik_tahsil_edilen_aylar_from_payload(payload)
 
 
-def _aylik_tutar_fatura_id_map(musteri_id: int) -> dict[str, int]:
-    """|AYLIK_TUTAR|YYYY-MM-DD| → fatura id (ekstre kira satırı düzenle/sil)."""
-    out: dict[str, int] = {}
+def _parse_gib_no_tasindi_yeni_id(notlar: str) -> int | None:
+    """Notlardaki ``|GIB_NO_TASINDI|…|yeni_id=N|`` işaretinden yeni fatura id'sini çıkarır."""
+    m = re.search(r"\|GIB_NO_TASINDI\|[^|]*\|yeni_id=(\d+)\|", str(notlar or ""))
+    if not m:
+        return None
+    try:
+        return int(m.group(1))
+    except (TypeError, ValueError):
+        return None
+
+
+def _aylik_tutar_fatura_meta_by_iso(musteri_id: int) -> dict[str, dict]:
+    """|AYLIK_TUTAR|YYYY-MM-DD| → {id, yerine_gecti, yerine_yeni_id}.
+
+    Aynı ayda hem tasindi hem normal AYLIK varsa normal (non-tasindi) tercih edilir.
+    Yalnızca tasindi varsa o id kalır; yerine_gecti=True ve yeni_id parse edilir.
+    """
+    out: dict[str, dict] = {}
     rows = fetch_all(
         """
         SELECT id, COALESCE(notlar, '') AS notlar
@@ -5471,10 +5486,36 @@ def _aylik_tutar_fatura_id_map(musteri_id: int) -> dict[str, int]:
         if fid <= 0:
             continue
         ac = str(r.get("notlar") or "")
+        tasindi = "|GIB_NO_TASINDI|" in ac
+        yeni_id = _parse_gib_no_tasindi_yeni_id(ac) if tasindi else None
         for iso in re.findall(r"\|AYLIK_TUTAR\|([0-9]{4}-[0-9]{2}-[0-9]{2})\|", ac):
-            if iso not in out:
-                out[iso] = fid
+            cur = out.get(iso)
+            if cur is None:
+                out[iso] = {
+                    "id": fid,
+                    "yerine_gecti": bool(tasindi),
+                    "yerine_yeni_id": yeni_id,
+                }
+            elif cur.get("yerine_gecti") and not tasindi:
+                # Tasindi kaydı vardı; non-tasindi ile değiştir (tercih).
+                out[iso] = {
+                    "id": fid,
+                    "yerine_gecti": False,
+                    "yerine_yeni_id": None,
+                }
     return out
+
+
+def _aylik_tutar_fatura_id_map(musteri_id: int) -> dict[str, int]:
+    """|AYLIK_TUTAR|YYYY-MM-DD| → fatura id (ekstre kira satırı düzenle/sil).
+
+    Non-tasindi AYLIK tercih edilir; ayrıntı için ``_aylik_tutar_fatura_meta_by_iso``.
+    """
+    return {
+        iso: int(meta["id"])
+        for iso, meta in _aylik_tutar_fatura_meta_by_iso(musteri_id).items()
+        if int(meta.get("id") or 0) > 0
+    }
 
 
 def _ekstre_invalidate_after_change(
@@ -7490,7 +7531,12 @@ def _cari_ekstre_hareketler(
 
     # Tek tahsilat sorgusu → batch özet (ay başına tekrarlayan SQL yok).
     tahsil_rows_ek = _ekstre_tahsil_rows_for_musteri(int(musteri_id))
-    aylik_fatura_by_iso = _aylik_tutar_fatura_id_map(int(musteri_id))
+    aylik_fatura_meta_by_iso = _aylik_tutar_fatura_meta_by_iso(int(musteri_id))
+    aylik_fatura_by_iso = {
+        iso: int(meta["id"])
+        for iso, meta in aylik_fatura_meta_by_iso.items()
+        if int(meta.get("id") or 0) > 0
+    }
     ekstre_batch_maps = _ekstre_tahsil_batch_maps_from_rows(tahsil_rows_ek)
     ekstre_tahsil_ids_by_iso = _ekstre_tahsil_ids_by_iso_from_rows(tahsil_rows_ek)
     remaining_fifo = _aylik_remaining_brut_by_iso_from_kyc(kyc, tufe_map)
@@ -7861,9 +7907,22 @@ def _cari_ekstre_hareketler(
                     "bakiye": None,
                 }
                 try:
-                    fid_k = int(aylik_fatura_by_iso.get(tarih_iso) or 0)
+                    meta_k = aylik_fatura_meta_by_iso.get(tarih_iso) or {}
+                    fid_k = int(meta_k.get("id") or aylik_fatura_by_iso.get(tarih_iso) or 0)
                     if fid_k > 0:
                         kira_row["fatura_id"] = fid_k
+                        yerine_gecti = bool(meta_k.get("yerine_gecti"))
+                        kira_row["yerine_gecti"] = yerine_gecti
+                        if yerine_gecti:
+                            yeni_id = meta_k.get("yerine_yeni_id")
+                            try:
+                                yeni_id_i = int(yeni_id) if yeni_id is not None else None
+                            except (TypeError, ValueError):
+                                yeni_id_i = None
+                            if yeni_id_i and yeni_id_i > 0:
+                                kira_row["yerine_yeni_id"] = yeni_id_i
+                                not_ek = f" — Yerine geçti → #{yeni_id_i}"
+                                kira_row["aciklama"] = aciklama + not_ek
                 except (TypeError, ValueError):
                     pass
                 kira_block.append(kira_row)
