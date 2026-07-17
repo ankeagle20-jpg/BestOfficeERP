@@ -6058,9 +6058,50 @@ def run_auto_invoice_cycle(force=False, run_date=None):
                     f_data = build_fatura_data_from_db(fatura_id, fetch_one)
                     gib_uuid = gib.fatura_taslak_olustur(f_data)
                     item_status = "gib_draft" if gib_uuid else "gib_fail"
+                    # ERP faturalar satırına da yaz (auto_invoice_items status/gib_uuid aynı kalır).
+                    if gib_uuid:
+                        try:
+                            st_draft = _gib_kayit_bekle(gib, gib_uuid, deneme=8, bekleme_s=1.5) or {}
+                            if not st_draft:
+                                logging.getLogger(__name__).warning(
+                                    "auto_invoice kayit_bekle_tukendi (taslak) fatura_id=%s uuid=%s",
+                                    fatura_id,
+                                    str(gib_uuid)[:36],
+                                )
+                            gib_ettn = _extract_gib_ettn_from_obj(st_draft) or gib_uuid
+                            gib_fatura_no = _extract_gib_fatura_no_from_obj(st_draft)
+                            _fatura_gib_bilgilerini_yaz(
+                                fatura_id, gib_ettn, gib_fatura_no, gib_asama="taslak"
+                            )
+                        except Exception:
+                            logging.getLogger(__name__).exception(
+                                "auto_invoice ERP taslak yazımı başarısız fatura_id=%s uuid=%s",
+                                fatura_id,
+                                str(gib_uuid)[:36],
+                            )
                     if gib_uuid and auto_sms:
                         ok_sms = gib.sms_onay_ve_imzala(gib_uuid, auto_sms)
                         item_status = "gib_signed" if ok_sms else "gib_sms_fail"
+                        if ok_sms:
+                            try:
+                                st_imza = _gib_kayit_bekle(gib, gib_uuid, deneme=10, bekleme_s=1.2) or {}
+                                if not st_imza:
+                                    logging.getLogger(__name__).warning(
+                                        "auto_invoice kayit_bekle_tukendi (imza) fatura_id=%s uuid=%s",
+                                        fatura_id,
+                                        str(gib_uuid)[:36],
+                                    )
+                                gib_ettn = _extract_gib_ettn_from_obj(st_imza) or gib_uuid
+                                gib_fatura_no = _extract_gib_fatura_no_from_obj(st_imza)
+                                _fatura_gib_bilgilerini_yaz(
+                                    fatura_id, gib_ettn, gib_fatura_no, gib_asama="imzali"
+                                )
+                            except Exception:
+                                logging.getLogger(__name__).exception(
+                                    "auto_invoice ERP imza yazımı başarısız fatura_id=%s uuid=%s",
+                                    fatura_id,
+                                    str(gib_uuid)[:36],
+                                )
                 except Exception as ge:
                     item_status = "gib_fail"
                     err = str(ge)
@@ -9707,22 +9748,47 @@ def api_gib_sms_onay():
             if det:
                 msg += f" Detay: {det}"
             return jsonify({"ok": False, "mesaj": msg}), 400
-        if fatura_id:
-            fid_i = int(fatura_id)
+        erp_yazildi = False
+        try:
+            fid_i = int(fatura_id) if fatura_id not in (None, "", False) else 0
+        except (TypeError, ValueError):
+            fid_i = 0
+        if fid_i > 0:
             ettn_for_cache = uuid
             try:
                 st = _gib_kayit_bekle(gib, uuid, deneme=10, bekleme_s=1.2)
+                if not st:
+                    logging.getLogger(__name__).warning(
+                        "api_gib_sms_onay kayit_bekle_tukendi uuid=%s fatura_id=%s",
+                        str(uuid)[:36],
+                        fid_i,
+                    )
                 gib_ettn = _extract_gib_ettn_from_obj(st) or uuid
                 ettn_for_cache = gib_ettn or uuid
                 gib_fatura_no = _extract_gib_fatura_no_from_obj(st)
                 _fatura_gib_bilgilerini_yaz(fatura_id, gib_ettn, gib_fatura_no, gib_asama="imzali")
+                erp_yazildi = True
             except Exception:
-                pass
+                logging.getLogger(__name__).exception(
+                    "api_gib_sms_onay ERP yazımı başarısız uuid=%s fatura_id=%s",
+                    str(uuid)[:36],
+                    fid_i,
+                )
+                erp_yazildi = False
             try:
                 _gib_portal_html_indir_ve_kaydet(fid_i, ettn_for_cache, gib)
             except Exception:
                 logging.getLogger(__name__).exception("GİB portal HTML önbelleği (SMS onay) fid=%s", fid_i)
-        return jsonify({"ok": True, "mesaj": "Fatura GİB üzerinde imzalandı."})
+        else:
+            logging.getLogger(__name__).warning(
+                "api_gib_sms_onay: fatura_id yok/0; GİB imza OK ama ERP yazılmadı uuid=%s",
+                str(uuid)[:36],
+            )
+        return jsonify({
+            "ok": True,
+            "mesaj": "Fatura GİB üzerinde imzalandı.",
+            "erp_yazildi": erp_yazildi,
+        })
     except Exception as e:
         return jsonify({"ok": False, "mesaj": str(e)}), 500
 
