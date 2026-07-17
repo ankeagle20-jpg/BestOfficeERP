@@ -1646,20 +1646,47 @@
                     yeniGibErpIdNormalize(idE3, false);
                     var faturaId = parseInt(yeniGibErpIdDigits((idE3 || {}).value || '') || '0', 10);
                     var uuid = ((document.getElementById('yeni-gib-uuid') || {}).value || '').trim();
-                    if (faturaId && faturaId >= 1) {
-                        var u = API_GIB_DISPATCH_ONIZLE + '?fatura_id=' + encodeURIComponent(String(faturaId)) + '&format=html&_=' + Date.now();
+
+                    function openPortalHtml(fid, ettnVal) {
+                        var q = [];
+                        if (fid && fid >= 1) q.push('fatura_id=' + encodeURIComponent(String(fid)));
+                        if (ettnVal) q.push('uuid=' + encodeURIComponent(String(ettnVal)));
+                        var url = API_GIB_FATURA_ONIZLEME + '?' + q.join('&') + '&_=' + Date.now();
+                        window.open(url, '_blank', 'noopener');
+                        setStatus('GİB portal HTML önizlemesi yeni sekmede.');
+                    }
+                    function openDispatchJp(fid) {
+                        var u = API_GIB_DISPATCH_ONIZLE + '?fatura_id=' + encodeURIComponent(String(fid)) + '&format=html&_=' + Date.now();
                         window.open(u, '_blank', 'noopener');
-                        setStatus('GİB dispatch jp özeti yeni sekmede (ERP # ' + faturaId + '). GİB’e bir kez bağlanır; taslak oluşturulmaz.');
+                        setStatus('GİB dispatch jp özeti yeni sekmede (ERP # ' + fid + '). GİB’e bir kez bağlanır; taslak oluşturulmaz.');
+                    }
+
+                    if (faturaId && faturaId >= 1) {
+                        var ettn = '';
+                        if (typeof EDIT_FATURA !== 'undefined' && EDIT_FATURA && Number(EDIT_FATURA.id) === faturaId && EDIT_FATURA.ettn) {
+                            ettn = String(EDIT_FATURA.ettn || '').trim();
+                        }
+                        if (!ettn && uuid) ettn = uuid;
+                        if (ettn) {
+                            openPortalHtml(faturaId, ettn);
+                            return;
+                        }
+                        setStatus('ETTN kontrol ediliyor (ERP # ' + faturaId + ')...');
+                        fetch(API_GIB_FATURA_OZET + '?fatura_id=' + encodeURIComponent(String(faturaId)), { credentials: 'same-origin' })
+                            .then(function (r) { return r.json(); })
+                            .then(function (j) {
+                                var e2 = (j && j.ok && j.fatura) ? String(j.fatura.ettn || '').trim() : '';
+                                if (e2) openPortalHtml(faturaId, e2);
+                                else openDispatchJp(faturaId);
+                            })
+                            .catch(function () { openDispatchJp(faturaId); });
                         return;
                     }
                     if (!uuid) {
                         setStatus('Önce ERP # girin (dispatch JSON) veya taslak sonrası UUID (portal HTML).');
                         return;
                     }
-                    var q = ['uuid=' + encodeURIComponent(uuid)];
-                    var url = API_GIB_FATURA_ONIZLEME + '?' + q.join('&') + '&_=' + Date.now();
-                    window.open(url, '_blank', 'noopener');
-                    setStatus('GİB portal HTML önizlemesi yeni sekmede.');
+                    openPortalHtml(null, uuid);
                 });
             }
             window.__yeniGibBelgeOzetYukle = yeniGibBelgeOzetYukle;
