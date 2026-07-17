@@ -7709,7 +7709,7 @@ function sozlesmelerAylikHizliYukleBasarisizsaYedekCiz(ok) {
     if (typeof sozlesmelerAylikGuncelle === 'function') sozlesmelerAylikGuncelle();
 }
 
-function sozlesmelerAylikHizliYukle(force) {
+function sozlesmelerAylikHizliYukle(force, opts) {
     if (!selectedId) return Promise.resolve(false);
     if (!document.getElementById('sozlesmeler-aylik-grid')) return Promise.resolve(false);
     var mid = selectedId;
@@ -7733,7 +7733,7 @@ function sozlesmelerAylikHizliYukle(force) {
             if (!j || !j.ok || !j.cache) return false;
             var uyum = typeof sozlesmelerAylikOnbellekFormlaUyumlu === 'function' && sozlesmelerAylikOnbellekFormlaUyumlu(j.cache);
             if (!uyum && !(j.cache.aylar && j.cache.aylar.length)) return false;
-            return girisTahsilatHizliYuklePanelVeGrid(j.cache, mid);
+            return girisTahsilatHizliYuklePanelVeGrid(j.cache, mid, opts);
         }).catch(function () { return false; });
     }
     return Promise.all([
@@ -7751,11 +7751,11 @@ function sozlesmelerAylikHizliYukle(force) {
         if (!j || !j.ok || !j.cache) return false;
         var uyum2 = typeof sozlesmelerAylikOnbellekFormlaUyumlu === 'function' && sozlesmelerAylikOnbellekFormlaUyumlu(j.cache);
         if (!uyum2 && !(j.cache.aylar && j.cache.aylar.length)) return false;
-        return girisTahsilatHizliYuklePanelVeGrid(j.cache, mid);
+        return girisTahsilatHizliYuklePanelVeGrid(j.cache, mid, opts);
     }).catch(function () { return false; });
 }
 /** Önce panel DB, sonra grid (kısmi tahsil May 1000/500 kaybolmasın). */
-function girisTahsilatHizliYuklePanelVeGrid(cache, mid) {
+function girisTahsilatHizliYuklePanelVeGrid(cache, mid, opts) {
     return new Promise(function (resolve) {
         function gridCiz() {
             try {
@@ -7795,7 +7795,9 @@ function girisTahsilatHizliYuklePanelVeGrid(cache, mid) {
             }
             resolve(ok);
         }
-        if (mid && typeof girisTahsilatYilAyPanelDbYukle === 'function') {
+        if (opts && opts.panelZatenKanonik) {
+            gridCiz();
+        } else if (mid && typeof girisTahsilatYilAyPanelDbYukle === 'function') {
             var dbOpts = { ttlMs: 0, persistMs: 0 };
             if (window.__girisEkstreSilPanelZorla) {
                 dbOpts.zorlaUygula = true;
@@ -27041,7 +27043,7 @@ function tahsilatAylikDagitimPanelSenkron(data, payload) {
     });
 }
 
-function tahsilatAylikDagitimSonrasiSenkron(data, payload) {
+function tahsilatAylikDagitimSonrasiSenkron(data, payload, opts) {
     try {
         var tid = data && data.tahsilat_id;
         if (tid) {
@@ -27053,7 +27055,15 @@ function tahsilatAylikDagitimSonrasiSenkron(data, payload) {
     } catch (_eDgId) {}
     tahsilatAylikDagitimDomUygula(data, payload);
     tahsilatAylikDagitimCacheGuncelle(data);
-    tahsilatAylikDagitimPanelSenkron(data, payload);
+    if (opts && opts.panelZatenKaydedildi) {
+        try {
+            if (payload && payload.musteri_id && typeof girisTahsilatYilAyPanelDbYukle === 'function') {
+                girisTahsilatYilAyPanelDbYukle(payload.musteri_id);
+            }
+        } catch (_eDsP) {}
+    } else {
+        tahsilatAylikDagitimPanelSenkron(data, payload);
+    }
     try { if (typeof girisTahsilatYilAyPaneldenTumGridBoyan === 'function') girisTahsilatYilAyPaneldenTumGridBoyan(); } catch (_eDsG) {}
 }
 
@@ -27898,19 +27908,20 @@ function sozlesmeTahsilatKaydet() {
             tahsilatMakbuzNoYukle('sozlesme_tahsilat');
             sozlesmeAylikZorlaBorcTemizle();
             sozlesmeAylikYilFiltresiTumYillar();
-            function makbuzSonrasiGrid() {
+            function makbuzSonrasiGrid(panelKayitOk) {
+                var panelOpts = { panelZatenKaydedildi: !!panelKayitOk };
                 if (typeof sozlesmelerAylikHizliYukle === 'function') {
-                    sozlesmelerAylikHizliYukle(true).then(function () {
+                    sozlesmelerAylikHizliYukle(true, { panelZatenKanonik: !!panelKayitOk }).then(function () {
                         sozlesmeAylikYilFiltresiniSaglamlastir();
-                        tahsilatAylikDagitimSonrasiSenkron(data, payload);
+                        tahsilatAylikDagitimSonrasiSenkron(data, payload, panelOpts);
                         if (typeof girisTahsilatEkstreTazeYenile === 'function') girisTahsilatEkstreTazeYenile();
                     });
                 } else {
-                    tahsilatAylikDagitimSonrasiSenkron(data, payload);
+                    tahsilatAylikDagitimSonrasiSenkron(data, payload, panelOpts);
                     if (typeof girisTahsilatEkstreTazeYenile === 'function') girisTahsilatEkstreTazeYenile();
                 }
             }
-            tahsilatAylikDagitimPanelKaliciKaydet(data, payload).then(function () {
+            tahsilatAylikDagitimPanelKaliciKaydet(data, payload).then(function (panelKayitOk) {
                 try { if (typeof girisTahsilatToplamTahsilYukle === 'function') girisTahsilatToplamTahsilYukle(payload.musteri_id); } catch (_eTtS) {}
                 alert(tahsilatKayitBilgiMesaji(data, payload));
                 sozlesmeTahsilatKayitSonrasiTemizlik();
@@ -27922,7 +27933,7 @@ function sozlesmeTahsilatKaydet() {
                         girisJsonCacheInvalidatePrefix('/giris/api/aylik-tahsil-durum?musteri_id=' + encodeURIComponent(midInvS));
                     }
                 } catch (_invE2) {}
-                makbuzSonrasiGrid();
+                makbuzSonrasiGrid(panelKayitOk);
                 var odS = String(payload.odeme_turu || '').toLowerCase();
                 if ((odS === 'banka' || odS === 'kredi_karti' || odS === 'kredi kartı') && typeof cariEkstreBYukle === 'function') {
                     try { cariEkstreBYukle(); } catch (eCb2) {}
