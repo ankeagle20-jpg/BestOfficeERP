@@ -1402,28 +1402,11 @@ class BestOfficeGIBManager:
             f"Son GİB data özeti: {last_data_snip[:1200]}"
         )
 
-    @_retry_on_connection(max_attempts=3, delay=2.0)
-    def fatura_taslak_olustur(self, fatura_data):
+    def _taslak_hazirlik_ortak(self, fatura_data):
         """
-        ERP'den gelen verilerle GİB üzerinde taslak fatura oluşturur.
-        fatura_data: tarih (GG/AA/YYYY), saat (SS:DD veya SS:DD:SS), vkn, ad, soyad, unvan, vd,
-                    hizmet_adi, birim_fiyat, items (liste; her biri name, quantity, unit_price, tax_rate),
-                    iban (opsiyonel), note (opsiyonel).
-        Returns: ETTN/UUID veya None (hata).
+        fatura_taslak_olustur ile aynı çok satırlı / dinamik fatura_ver sarmalayıcısını kurar.
+        Dönüş: payload, glb, orig_fatura_ver, dyn_fn, mevcut_ettn, mevcut_belge_no.
         """
-        self.last_gib_asama_izle = []
-        self._gib_asama("taslak_basla", "fatura_taslak_olustur")
-        self._ensure_client()
-        try:
-            # Kullanıcı isteği: her taslak işleminde taze login/token.
-            self._fresh_login()
-        except Exception as e:
-            err = str(e).lower()
-            if "geçersiz kullanıcı" in err or "invalid" in err or "yetkisiz" in err or "kullanıcı adı" in err:
-                raise RuntimeError("GİB geçersiz kullanıcı veya şifre. Lütfen GIB_USER ve GIB_PASS bilgilerinizi kontrol edin.") from e
-            self._gib_asama("taslak_fresh_login_hata", str(e)[:400])
-            raise
-
         items = fatura_data.get("items") or []
         if not items and fatura_data.get("hizmet_adi") is not None:
             items = [{
@@ -1435,13 +1418,10 @@ class BestOfficeGIBManager:
         if not items:
             raise ValueError("Fatura en az bir satır (items veya hizmet_adi+birim_fiyat) içermelidir.")
 
-        # eArsivPortal API tek satır parametresi alsa da payload override ile çok satır gönderiyoruz.
         first = items[0] if items else {}
         urun_adi = str(first.get("name") or fatura_data.get("hizmet_adi") or "Hizmet")
         fiyat = float(first.get("unit_price") or fatura_data.get("birim_fiyat") or fatura_data.get("toplam") or 0)
         kdv_orani = int(first.get("tax_rate") or fatura_data.get("kdv_orani") or 20)
-        # eArsivPortal'ın içindeki fatura_ver fonksiyonu bazı sürümlerde %20'ye sabit.
-        # Bu yüzden fatura_olustur çağrısı öncesi payload üretimini dinamik KDV/fiyat ile override ediyoruz.
         fatura_method = getattr(self.client, "fatura_olustur")
         fn = getattr(fatura_method, "__func__", fatura_method)
         glb = getattr(fn, "__globals__", {})
@@ -1502,8 +1482,6 @@ class BestOfficeGIBManager:
         toplam_iskonto_signed = round(toplam_iskonto_signed, 2)
         genel_toplam_hesap = round(toplam_matrah + toplam_kdv, 2)
         erp_toplam = float(fatura_data.get("toplam") or 0)
-        # DB `toplam` bazen tüm dönem/kira özeti iken satirlar_json tek satır (ör. 250+KDV=300)
-        # kalıyor; GİB `odenecekTutar` satırlardan gelir. YALNIZ yazısı satırla uyumlu olmalı.
         odenecek_yazi_icin = genel_toplam_hesap
         if erp_toplam > 0:
             erp_r = round(erp_toplam, 2)
@@ -1520,7 +1498,6 @@ class BestOfficeGIBManager:
         )
 
         def _gib_not_metni():
-            """Önizlemedeki gibi YALNIZ:#…# üstte; imza satırı GİB’de genelde altta (aynı alan, boş satırla)."""
             try:
                 from routes.faturalar_routes import tutar_yaziya_gib
                 yazi_line = tutar_yaziya_gib(odenecek_yazi_icin)
@@ -1546,7 +1523,6 @@ class BestOfficeGIBManager:
             return "\n\n".join(parcalar)
 
         gib_not_tam = _gib_not_metni()
-        # GİB not alanı çok kısaysa yazı kesilir; önizleme + alt not için ~1.5k güvenli.
         _not_max = 1500
         gib_not_kisaltilmis = (gib_not_tam[:_not_max] if gib_not_tam else "")
 
@@ -1595,7 +1571,6 @@ class BestOfficeGIBManager:
                         "vergininKdvTutari": "0",
                         "ozelMatrahTutari": "0",
                         "hesaplananotvtevkifatakatkisi": "0",
-                        # Bazı sürümler bu alan adlarını kullanıyor.
                         "iskontoArttirimOrani": f"{orani_abs:.2f}",
                         "iskontoArttirimTutari": f"{tutari_abs:.2f}",
                         "iskontoArttirimNedeni": "İSKONTO" if tip_iskonto else "ARTTIRIM",
@@ -1624,6 +1599,107 @@ class BestOfficeGIBManager:
             except Exception:
                 d = BestOfficeGIBManager._portal_fatura_jp_olustur_duzelt(d, mevcut_ettn, mevcut_belge_no)
             return d
+
+        return {
+            "payload": payload,
+            "glb": glb,
+            "orig_fatura_ver": orig_fatura_ver,
+            "dyn_fn": _fatura_ver_dynamic,
+            "mevcut_ettn": mevcut_ettn,
+            "mevcut_belge_no": mevcut_belge_no,
+        }
+
+    def gib_dispatch_jp_onizle(self, fatura_data):
+        """
+        GİB earsiv-services/dispatch için gönderilecek `jp` gövdesini üretir (FATURA_OLUSTUR çağrılmaz).
+        """
+        # DRY-RUN: kod_calistir / _client_dispatch / taslak oluşturma yok; yalnızca önizleme JSON'u.
+        self._ensure_client()
+        self._fresh_login()
+        h = self._taslak_hazirlik_ortak(fatura_data)
+        glb = h["glb"]
+        orig_fatura_ver = h["orig_fatura_ver"]
+        dyn = h["dyn_fn"]
+        payload = h["payload"]
+        mevcut_ettn = h["mevcut_ettn"]
+        mevcut_belge_no = h["mevcut_belge_no"]
+        glb["fatura_ver"] = dyn
+        try:
+            vkn = str(payload.get("vkn_veya_tckn") or "").strip()
+            kisi_bilgi = self.client.kisi_getir(vkn)
+
+            def _k(attr, pl_key, default=""):
+                v = getattr(kisi_bilgi, attr, None)
+                if v is not None and str(v).strip():
+                    return str(v).strip()
+                return str(payload.get(pl_key) or default or "").strip()
+
+            ad_m = _k("adi", "ad")
+            soy_m = _k("soyadi", "soyad")
+            unv_m = _k("unvan", "unvan")
+            vd_m = _k("vergiDairesi", "vergi_dairesi")
+
+            try:
+                from datetime import datetime
+                from pytz import timezone as _tz
+
+                tarih_default = datetime.now(_tz("Turkey")).strftime("%d/%m/%Y")
+            except Exception:
+                from datetime import datetime
+
+                tarih_default = datetime.now().strftime("%d/%m/%Y")
+            tarih_use = str(payload.get("tarih") or "").strip() or tarih_default
+            saat_use = str(payload.get("saat") or "12:00:00").strip()
+            para = str(payload.get("para_birimi") or "TRY").strip() or "TRY"
+
+            fatura = dyn(
+                tarih=tarih_use,
+                saat=saat_use,
+                para_birimi=para,
+                vkn_veya_tckn=vkn,
+                ad=ad_m,
+                soyad=soy_m,
+                unvan=unv_m,
+                vergi_dairesi=vd_m,
+                urun_adi=payload.get("urun_adi") or "Hizmet",
+                fiyat=payload.get("fiyat") or 0,
+                fatura_notu=payload.get("fatura_notu") or "",
+            )
+            if isinstance(fatura, dict):
+                fatura = self._portal_fatura_jp_olustur_duzelt(fatura, mevcut_ettn, mevcut_belge_no)
+            return fatura
+        finally:
+            glb["fatura_ver"] = orig_fatura_ver
+
+    @_retry_on_connection(max_attempts=3, delay=2.0)
+    def fatura_taslak_olustur(self, fatura_data):
+        """
+        ERP'den gelen verilerle GİB üzerinde taslak fatura oluşturur.
+        fatura_data: tarih (GG/AA/YYYY), saat (SS:DD veya SS:DD:SS), vkn, ad, soyad, unvan, vd,
+                    hizmet_adi, birim_fiyat, items (liste; her biri name, quantity, unit_price, tax_rate),
+                    iban (opsiyonel), note (opsiyonel).
+        Returns: ETTN/UUID veya None (hata).
+        """
+        self.last_gib_asama_izle = []
+        self._gib_asama("taslak_basla", "fatura_taslak_olustur")
+        self._ensure_client()
+        try:
+            # Kullanıcı isteği: her taslak işleminde taze login/token.
+            self._fresh_login()
+        except Exception as e:
+            err = str(e).lower()
+            if "geçersiz kullanıcı" in err or "invalid" in err or "yetkisiz" in err or "kullanıcı adı" in err:
+                raise RuntimeError("GİB geçersiz kullanıcı veya şifre. Lütfen GIB_USER ve GIB_PASS bilgilerinizi kontrol edin.") from e
+            self._gib_asama("taslak_fresh_login_hata", str(e)[:400])
+            raise
+
+        h = self._taslak_hazirlik_ortak(fatura_data)
+        payload = h["payload"]
+        glb = h["glb"]
+        orig_fatura_ver = h["orig_fatura_ver"]
+        _fatura_ver_dynamic = h["dyn_fn"]
+        mevcut_ettn = h["mevcut_ettn"]
+        mevcut_belge_no = h["mevcut_belge_no"]
 
         glb["fatura_ver"] = _fatura_ver_dynamic
         self._gib_asama("portal_bounded_cagri", "basladi")
