@@ -9668,7 +9668,7 @@ def api_aylik_tutarlardan_borctan_cikar():
                 pat = f"%|AYLIK_TUTAR|{iso}|%"
                 cur.execute(
                     """
-                    SELECT id, fatura_no FROM faturalar
+                    SELECT id, fatura_no, COALESCE(notlar, '') AS notlar FROM faturalar
                     WHERE musteri_id = %s AND COALESCE(notlar, '') LIKE %s
                     LIMIT 1
                     """,
@@ -9680,6 +9680,20 @@ def api_aylik_tutarlardan_borctan_cikar():
                     continue
                 fid = fr.get("id")
                 fno = fr.get("fatura_no")
+                notlar_fr = str(fr.get("notlar") or "")
+                if "|GIB_NO_TASINDI|" in notlar_fr:
+                    yeni_id = _parse_gib_no_tasindi_yeni_id(notlar_fr)
+                    nid = yeni_id if yeni_id else "?"
+                    atlanan.append({
+                        "atlandi": True,
+                        "neden": "yerine_gecti",
+                        "id": fid,
+                        "fatura_no": fno,
+                        "yil": yil,
+                        "ay": ay,
+                        "mesaj": f"Bu ay GİB'e taşındı (yerine geçti → #{nid}). Silinemez.",
+                    })
+                    continue
                 cur.execute("DELETE FROM tahsilatlar WHERE fatura_id = %s", (fid,))
                 cur.execute(
                     """
@@ -11683,8 +11697,16 @@ def api_ekstre_fatura_guncelle():
     )
     if not fr:
         return jsonify({"ok": False, "mesaj": "Fatura bulunamadı."}), 404
-    if "|AYLIK_TUTAR|" not in str(fr.get("notlar") or ""):
+    notlar_fr = str(fr.get("notlar") or "")
+    if "|AYLIK_TUTAR|" not in notlar_fr:
         return jsonify({"ok": False, "mesaj": "Yalnızca Aylık Tutarlar ile oluşturulan faturalar düzenlenebilir."}), 400
+    if "|GIB_NO_TASINDI|" in notlar_fr:
+        yeni_id = _parse_gib_no_tasindi_yeni_id(notlar_fr)
+        nid = yeni_id if yeni_id else "?"
+        return jsonify({
+            "ok": False,
+            "mesaj": f"Bu kira satırı yerine geçti (bkz. fatura #{nid}). Düzenlenemez / silinemez.",
+        }), 400
     if not fatura_tarihi:
         ft = fr.get("fatura_tarihi")
         if ft and hasattr(ft, "year"):
@@ -11730,11 +11752,22 @@ def api_ekstre_fatura_sil():
     except (TypeError, ValueError):
         return jsonify({"ok": False, "mesaj": "musteri_id ve id gerekli."}), 400
     fr = fetch_one(
-        "SELECT id FROM faturalar WHERE id = %s AND musteri_id = %s AND COALESCE(notlar, '') LIKE '%%|AYLIK_TUTAR|%%'",
+        """
+        SELECT id, COALESCE(notlar, '') AS notlar FROM faturalar
+        WHERE id = %s AND musteri_id = %s AND COALESCE(notlar, '') LIKE '%%|AYLIK_TUTAR|%%'
+        """,
         (fid, musteri_id),
     )
     if not fr:
         return jsonify({"ok": False, "mesaj": "Fatura bulunamadı veya silinemez."}), 404
+    notlar_fr = str(fr.get("notlar") or "")
+    if "|GIB_NO_TASINDI|" in notlar_fr:
+        yeni_id = _parse_gib_no_tasindi_yeni_id(notlar_fr)
+        nid = yeni_id if yeni_id else "?"
+        return jsonify({
+            "ok": False,
+            "mesaj": f"Bu kira satırı yerine geçti (bkz. fatura #{nid}). Düzenlenemez / silinemez.",
+        }), 400
     execute("DELETE FROM tahsilatlar WHERE fatura_id = %s", (fid,))
     execute("DELETE FROM faturalar WHERE id = %s AND musteri_id = %s", (fid, musteri_id))
     _ekstre_invalidate_after_change(musteri_id)
