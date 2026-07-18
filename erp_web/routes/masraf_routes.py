@@ -12,7 +12,7 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, render_template, request
 from flask_login import current_user
 from werkzeug.utils import secure_filename
 
@@ -73,6 +73,13 @@ def _unlink_quiet(path: Path) -> None:
             path.unlink()
     except OSError:
         pass
+
+
+@bp.route("/yeni", methods=["GET"])
+@giris_gerekli
+def yeni():
+    """Mobil uyumlu fiş yükleme ekranı (Aşama B)."""
+    return render_template("fis_masraflari/yeni.html")
 
 
 @bp.route("/api/fis-oku", methods=["POST"])

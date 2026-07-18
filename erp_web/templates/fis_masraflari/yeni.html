@@ -1,0 +1,197 @@
+{% extends "mobile/base.html" %}
+{% block title %}Masraf Fişi{% endblock %}
+{% block extra_css %}
+<style>
+    .fis-hint { color: var(--muted); font-size: 13px; margin-bottom: 14px; line-height: 1.45; }
+    .fis-preview-wrap { display: none; margin: 12px 0; text-align: center; }
+    .fis-preview-wrap.show { display: block; }
+    .fis-preview-wrap img { max-width: 100%; max-height: 220px; border-radius: 10px; border: 1px solid var(--border); }
+    .fis-file-name { font-size: 12px; color: var(--muted); margin-top: 6px; word-break: break-all; }
+    .fis-loading { display: none; align-items: center; gap: 10px; padding: 14px; margin: 12px 0; border-radius: 10px; background: var(--card); border: 1px solid var(--border); color: var(--neon-blue); font-size: 14px; font-weight: 600; }
+    .fis-loading.show { display: flex; }
+    .fis-loading .spin { width: 18px; height: 18px; border: 2px solid var(--border); border-top-color: var(--neon-blue); border-radius: 50%; animation: fis-spin 0.8s linear infinite; }
+    @keyframes fis-spin { to { transform: rotate(360deg); } }
+    .fis-alert { display: none; padding: 12px 14px; border-radius: 10px; margin: 12px 0; font-size: 13px; line-height: 1.4; }
+    .fis-alert.show { display: block; }
+    .fis-alert.ok { background: rgba(34,197,94,0.12); border: 1px solid var(--neon-green); color: var(--neon-green); }
+    .fis-alert.err { background: rgba(239,68,68,0.12); border: 1px solid var(--neon-red); color: #fca5a5; }
+    .fis-ozet { display: none; }
+    .fis-ozet.show { display: block; }
+    .fis-ozet dl { margin: 0; }
+    .fis-ozet dt { font-size: 11px; color: var(--muted); margin-top: 10px; }
+    .fis-ozet dd { font-size: 14px; margin: 2px 0 0; word-break: break-word; }
+    .fis-urunler { margin-top: 10px; padding-left: 18px; font-size: 13px; color: var(--text); }
+    .fis-actions { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+    #fis-file-input { display: none; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="card">
+    <h3><i class="fa fa-receipt"></i> Masraf Fişi Yükle</h3>
+    <p class="fis-hint">Fişin fotoğrafını çekin veya galeriden seçin. Sistem AI ile okuyup onay bekleyen kayıt oluşturur. Düzenleme / onay sonraki aşamada gelecek.</p>
+
+    <input type="file" id="fis-file-input" accept="image/*" capture="environment">
+
+    <div class="fis-actions" id="fis-pick-actions">
+        <button type="button" class="btn btn-green btn-block" id="fis-btn-cek"><i class="fa fa-camera"></i> Fotoğraf Çek / Seç</button>
+    </div>
+
+    <div class="fis-preview-wrap" id="fis-preview-wrap">
+        <img id="fis-preview-img" alt="Fiş önizleme">
+        <div class="fis-file-name" id="fis-file-name"></div>
+        <button type="button" class="btn btn-blue btn-block" id="fis-btn-yukle" style="margin-top:12px;"><i class="fa fa-cloud-upload-alt"></i> Yükle ve Oku</button>
+    </div>
+
+    <div class="fis-loading" id="fis-loading"><span class="spin"></span> Fiş okunuyor…</div>
+    <div class="fis-alert ok" id="fis-msg-ok"></div>
+    <div class="fis-alert err" id="fis-msg-err"></div>
+
+    <div class="fis-ozet" id="fis-ozet">
+        <div class="card">
+            <h3><i class="fa fa-check-circle"></i> Okunan özet (salt okunur)</h3>
+            <dl>
+                <dt>Mağaza</dt><dd id="oz-magaza">—</dd>
+                <dt>Fiş No</dt><dd id="oz-fis-no">—</dd>
+                <dt>Tarih</dt><dd id="oz-tarih">—</dd>
+                <dt>Toplam</dt><dd id="oz-toplam">—</dd>
+                <dt>KDV</dt><dd id="oz-kdv">—</dd>
+                <dt>Kategori</dt><dd id="oz-kategori">—</dd>
+                <dt>Kayıt No</dt><dd id="oz-id">—</dd>
+            </dl>
+            <div style="margin-top:10px; font-size:11px; color:var(--muted);">Ürünler</div>
+            <ul class="fis-urunler" id="oz-urunler"></ul>
+        </div>
+        <button type="button" class="btn btn-gray btn-block" id="fis-btn-yeni" style="margin-top:10px;"><i class="fa fa-redo"></i> Yeni fiş</button>
+    </div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script>
+(function () {
+    var API = {{ url_for("fis_masraflari.api_fis_oku") | tojson }};
+    var input = document.getElementById("fis-file-input");
+    var btnCek = document.getElementById("fis-btn-cek");
+    var btnYukle = document.getElementById("fis-btn-yukle");
+    var btnYeni = document.getElementById("fis-btn-yeni");
+    var previewWrap = document.getElementById("fis-preview-wrap");
+    var previewImg = document.getElementById("fis-preview-img");
+    var fileNameEl = document.getElementById("fis-file-name");
+    var pickActions = document.getElementById("fis-pick-actions");
+    var loading = document.getElementById("fis-loading");
+    var msgOk = document.getElementById("fis-msg-ok");
+    var msgErr = document.getElementById("fis-msg-err");
+    var ozet = document.getElementById("fis-ozet");
+    var selectedFile = null;
+    var objectUrl = null;
+
+    function hideAlerts() {
+        msgOk.classList.remove("show");
+        msgErr.classList.remove("show");
+        msgOk.textContent = "";
+        msgErr.textContent = "";
+    }
+    function showOk(t) { hideAlerts(); msgOk.textContent = t; msgOk.classList.add("show"); }
+    function showErr(t) { hideAlerts(); msgErr.textContent = t; msgErr.classList.add("show"); }
+    function setLoading(on) {
+        loading.classList.toggle("show", !!on);
+        btnCek.disabled = !!on;
+        btnYukle.disabled = !!on;
+        if (btnYeni) btnYeni.disabled = !!on;
+    }
+    function fmtMoney(v) {
+        if (v === null || v === undefined || v === "") return "—";
+        var n = Number(v);
+        if (isNaN(n)) return String(v);
+        return n.toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " TL";
+    }
+    function resetForm() {
+        selectedFile = null;
+        input.value = "";
+        if (objectUrl) { URL.revokeObjectURL(objectUrl); objectUrl = null; }
+        previewImg.removeAttribute("src");
+        previewWrap.classList.remove("show");
+        fileNameEl.textContent = "";
+        pickActions.style.display = "";
+        ozet.classList.remove("show");
+        hideAlerts();
+        setLoading(false);
+    }
+    function fillOzet(data) {
+        document.getElementById("oz-magaza").textContent = data.magaza_adi || "—";
+        document.getElementById("oz-fis-no").textContent = data.fis_no || "—";
+        document.getElementById("oz-tarih").textContent = data.tarih || "—";
+        document.getElementById("oz-toplam").textContent = fmtMoney(data.toplam_tutar);
+        var kdvOran = data.kdv_orani != null ? ("%" + data.kdv_orani) : "—";
+        var kdvTut = fmtMoney(data.kdv_tutari);
+        document.getElementById("oz-kdv").textContent = kdvOran + " / " + kdvTut;
+        document.getElementById("oz-kategori").textContent = data.kategori || "—";
+        document.getElementById("oz-id").textContent = data.masraf_id != null ? String(data.masraf_id) : "—";
+        var ul = document.getElementById("oz-urunler");
+        ul.innerHTML = "";
+        var urunler = data.urunler || [];
+        if (!urunler.length) {
+            var li0 = document.createElement("li");
+            li0.textContent = "—";
+            ul.appendChild(li0);
+        } else {
+            urunler.forEach(function (u) {
+                var li = document.createElement("li");
+                var ad = (u && u.ad) || "?";
+                var adet = (u && u.adet != null) ? u.adet : "?";
+                var bf = (u && u.birim_fiyat != null) ? u.birim_fiyat : "?";
+                li.textContent = ad + " — " + adet + " × " + bf;
+                ul.appendChild(li);
+            });
+        }
+        ozet.classList.add("show");
+    }
+
+    btnCek.addEventListener("click", function () { input.click(); });
+    input.addEventListener("change", function () {
+        hideAlerts();
+        ozet.classList.remove("show");
+        var f = input.files && input.files[0];
+        if (!f) return;
+        selectedFile = f;
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+        objectUrl = URL.createObjectURL(f);
+        previewImg.src = objectUrl;
+        fileNameEl.textContent = f.name || "fis.jpg";
+        previewWrap.classList.add("show");
+    });
+
+    btnYukle.addEventListener("click", function () {
+        if (!selectedFile) { showErr("Önce bir fotoğraf seçin."); return; }
+        var fd = new FormData();
+        fd.append("file", selectedFile, selectedFile.name || "fis.jpg");
+        setLoading(true);
+        hideAlerts();
+        fetch(API, { method: "POST", body: fd, credentials: "same-origin" })
+            .then(function (r) {
+                return r.json().then(function (j) { return { status: r.status, body: j }; })
+                    .catch(function () {
+                        return { status: r.status, body: { ok: false, mesaj: "Yanıt okunamadı (HTTP " + r.status + ")." } };
+                    });
+            })
+            .then(function (res) {
+                setLoading(false);
+                var b = res.body || {};
+                if (b.ok) {
+                    showOk(b.mesaj || "Fiş okundu, onay bekliyor.");
+                    pickActions.style.display = "none";
+                    previewWrap.classList.remove("show");
+                    fillOzet(b);
+                } else {
+                    showErr(b.mesaj || ("Yükleme başarısız (HTTP " + res.status + ")."));
+                }
+            })
+            .catch(function (e) {
+                setLoading(false);
+                showErr("Ağ hatası: " + (e && e.message ? e.message : e));
+            });
+    });
+
+    btnYeni.addEventListener("click", resetForm);
+})();
+</script>
+{% endblock %}
