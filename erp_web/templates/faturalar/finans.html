@@ -886,6 +886,7 @@
     <a href="{{ url_for('faturalar.yeni_fatura') }}" class="tab finans-tab"><i class="fa fa-plus-circle"></i><span>Yeni Fatura</span></a>
     <a href="{{ url_for('musteriler.list_full', sayfa=1, limit=50) }}" class="tab finans-tab"><i class="fa fa-users"></i><span>Müşteri listesi</span></a>
     <a href="{{ url_for('faturalar.index') }}#gib-rapor" class="tab finans-tab"><i class="fa fa-bar-chart"></i><span>Rapor</span></a>
+    <a href="{{ url_for('faturalar.index') }}#masraflar" class="tab finans-tab" onclick="event.preventDefault(); if (typeof switchTab === 'function') switchTab(6); return false;"><i class="fa fa-receipt"></i><span>Masraflar</span></a>
   </div>
 </div>
 
@@ -1062,6 +1063,88 @@
     </div>
 </div>
 
+<div class="tab-content" id="tab-6">
+  <div class="finans-masraf-wrap">
+    <style>
+      .finans-masraf-wrap { margin-top: 12px; background: var(--erp-bg, #0f2537); border: 1px solid #2d4060; border-radius: 8px; padding: 14px 16px; color: #e0f7fa; }
+      .finans-masraf-head { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px; }
+      .finans-masraf-head h3 { margin:0; font-size:15px; color:#4fc3f7; }
+      .finans-masraf-head a { color:#81d4fa; font-size:12px; text-decoration:none; font-weight:600; }
+      .finans-masraf-head a:hover { text-decoration:underline; }
+      .finans-masraf-filtre { display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; margin-bottom:12px; }
+      .finans-masraf-filtre label { display:flex; flex-direction:column; gap:4px; font-size:12px; color:#90a4ae; }
+      .finans-masraf-filtre input[type="date"] { background:#1e3a50; border:1px solid #2d4060; color:#e0f7fa; padding:6px 8px; border-radius:4px; font-size:13px; }
+      .finans-masraf-cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:10px; margin-bottom:12px; }
+      .finans-masraf-card { background:rgba(15,37,55,0.85); border:1px solid #2d4060; border-radius:8px; padding:10px 12px; }
+      .finans-masraf-card .lbl { font-size:11px; color:#90a4ae; margin-bottom:4px; }
+      .finans-masraf-card .val { font-size:18px; font-weight:700; color:#80cbc4; }
+      .finans-masraf-kat { margin-bottom:12px; }
+      .finans-masraf-kat h4 { margin:0 0 8px; font-size:13px; color:#81d4fa; }
+      .finans-masraf-kat-table { width:100%; border-collapse:collapse; font-size:12px; }
+      .finans-masraf-kat-table th, .finans-masraf-kat-table td { padding:6px 8px; border-bottom:1px solid #1e3a50; text-align:left; }
+      .finans-masraf-kat-table th { color:#90a4ae; font-weight:600; }
+      .finans-masraf-kat-table td.num { text-align:right; font-variant-numeric:tabular-nums; }
+      .finans-masraf-chips { display:flex; flex-wrap:wrap; gap:6px; }
+      .finans-masraf-chip { background:#1e3a50; border:1px solid #2d4060; border-radius:999px; padding:4px 10px; font-size:11px; color:#b0bec5; }
+      .finans-masraf-chip strong { color:#80cbc4; }
+      .finans-masraf-durum { min-height:18px; font-size:12px; color:#b0bec5; margin-bottom:8px; }
+      .finans-masraf-durum.err { color:#ef9a9a; }
+      .finans-masraf-durum.ok { color:#a5d6a7; }
+      .finans-masraf-tablo-wrap { overflow-x:auto; max-height:55vh; overflow-y:auto; }
+      .finans-masraf-tablo { width:100%; border-collapse:collapse; font-size:12px; }
+      .finans-masraf-tablo th, .finans-masraf-tablo td { padding:7px 8px; border-bottom:1px solid #1e3a50; vertical-align:middle; }
+      .finans-masraf-tablo th { color:#90a4ae; font-weight:600; position:sticky; top:0; background:#0f2537; }
+      .finans-masraf-tablo td.num { text-align:right; font-variant-numeric:tabular-nums; color:#80cbc4; }
+      .finans-masraf-tablo a { color:#4fc3f7; text-decoration:none; font-weight:600; }
+      .finans-masraf-tablo a:hover { text-decoration:underline; }
+      .finans-masraf-bos { padding:18px; text-align:center; color:#90a4ae; font-size:13px; }
+    </style>
+
+    <div class="finans-masraf-head">
+      <h3><i class="fa fa-receipt"></i> Onaylı Masraflar</h3>
+      <a href="{{ url_for('fis_masraflari.onay_bekleyenler') }}" target="_blank" rel="noopener">Onay bekleyenler →</a>
+    </div>
+
+    <div class="finans-masraf-filtre">
+      <label>Başlangıç <input type="date" id="masraf_ozet_baslangic" autocomplete="off"></label>
+      <label>Bitiş <input type="date" id="masraf_ozet_bitis" autocomplete="off"></label>
+      <button type="button" class="auto-btn run" id="masraf_ozet_btn" onclick="masrafOzetYukle(); return false;"><i class="fa fa-search"></i> Listele</button>
+    </div>
+
+    <div class="finans-masraf-durum" id="masraf_ozet_durum" role="status" aria-live="polite"></div>
+
+    <div class="finans-masraf-cards">
+      <div class="finans-masraf-card"><div class="lbl">Kayıt sayısı</div><div class="val" id="masraf_ozet_adet">—</div></div>
+      <div class="finans-masraf-card"><div class="lbl">Toplam tutar</div><div class="val" id="masraf_ozet_tutar">—</div></div>
+      <div class="finans-masraf-card"><div class="lbl">Toplam KDV</div><div class="val" id="masraf_ozet_kdv">—</div></div>
+    </div>
+
+    <div class="finans-masraf-kat">
+      <h4>Kategori kırılımı</h4>
+      <div id="masraf_ozet_kategoriler" class="finans-masraf-chips"><span class="finans-masraf-bos" style="padding:0;">Listelemek için tarih seçip Listele’ye basın.</span></div>
+    </div>
+
+    <div class="finans-masraf-tablo-wrap">
+      <table class="finans-masraf-tablo" id="masraf_ozet_tablo">
+        <thead>
+          <tr>
+            <th>Mağaza</th>
+            <th>Tarih</th>
+            <th class="num">Tutar</th>
+            <th class="num">KDV</th>
+            <th>Kategori</th>
+            <th>Yükleyen</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="masraf_ozet_tbody">
+          <tr><td colspan="7" class="finans-masraf-bos">Henüz veri yok.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
 </div>
 
 <script>
@@ -1110,7 +1193,159 @@ window.switchTab = function switchTab(index) {
             }
         }
     }
+
+    if (index === 6) {
+        if (typeof masrafOzetVarsayilanTarihlerDoldur === 'function') {
+            try {
+                masrafOzetVarsayilanTarihlerDoldur();
+            } catch (eMasraf1) {
+                console.warn(eMasraf1);
+            }
+        }
+        if (typeof masrafOzetYukle === 'function') {
+            try {
+                masrafOzetYukle();
+            } catch (eMasraf2) {
+                console.warn(eMasraf2);
+            }
+        }
+    }
 };
+
+
+function masrafOzetFmtTutar(v) {
+    if (v === null || v === undefined || v === '') return '—';
+    var n = Number(v);
+    if (isNaN(n)) return String(v);
+    return n.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' TL';
+}
+function masrafOzetEsc(s) {
+    return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+function masrafOzetIsoBugun() {
+    var d = new Date();
+    var m = String(d.getMonth() + 1).padStart(2, '0');
+    var day = String(d.getDate()).padStart(2, '0');
+    return d.getFullYear() + '-' + m + '-' + day;
+}
+function masrafOzetIsoAyBasi() {
+    var d = new Date();
+    var m = String(d.getMonth() + 1).padStart(2, '0');
+    return d.getFullYear() + '-' + m + '-01';
+}
+function masrafOzetVarsayilanTarihlerDoldur() {
+    var bas = document.getElementById('masraf_ozet_baslangic');
+    var bit = document.getElementById('masraf_ozet_bitis');
+    if (bas && !bas.value) bas.value = masrafOzetIsoAyBasi();
+    if (bit && !bit.value) bit.value = masrafOzetIsoBugun();
+}
+function masrafOzetDurum(msg, kind) {
+    var el = document.getElementById('masraf_ozet_durum');
+    if (!el) return;
+    el.textContent = msg || '';
+    el.className = 'finans-masraf-durum' + (kind ? (' ' + kind) : '');
+}
+function masrafOzetYukle() {
+    var basEl = document.getElementById('masraf_ozet_baslangic');
+    var bitEl = document.getElementById('masraf_ozet_bitis');
+    var btn = document.getElementById('masraf_ozet_btn');
+    if (!basEl || !bitEl) return;
+    if (!basEl.value || !bitEl.value) {
+        masrafOzetVarsayilanTarihlerDoldur();
+    }
+    var bas = basEl.value;
+    var bit = bitEl.value;
+    if (!bas || !bit) {
+        masrafOzetDurum('Başlangıç ve bitiş tarihi gerekli.', 'err');
+        return;
+    }
+    if (btn) {
+        btn.disabled = true;
+        if (!btn.dataset.orig) btn.dataset.orig = btn.innerHTML;
+        btn.innerHTML = 'Yükleniyor…';
+    }
+    masrafOzetDurum('Özet yükleniyor…', '');
+    var url = '/fis-masraflari/api/ozet?baslangic=' + encodeURIComponent(bas)
+        + '&bitis=' + encodeURIComponent(bit)
+        + '&durum=onaylandi';
+    fetch(url, { credentials: 'same-origin' })
+        .then(function (r) {
+            return r.json().then(function (b) {
+                return { status: r.status, body: b };
+            }).catch(function () {
+                return { status: r.status, body: { ok: false, mesaj: 'Yanıt okunamadı (HTTP ' + r.status + ').' } };
+            });
+        })
+        .then(function (res) {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = btn.dataset.orig || '<i class="fa fa-search"></i> Listele';
+            }
+            if (!res.body || !res.body.ok) {
+                masrafOzetDurum((res.body && res.body.mesaj) || ('Özet alınamadı (HTTP ' + res.status + ').'), 'err');
+                return;
+            }
+            masrafOzetRender(res.body);
+            var adet = (res.body.ozet && res.body.ozet.adet) || 0;
+            masrafOzetDurum(adet + ' kayıt listelendi (' + bas + ' → ' + bit + ').', 'ok');
+        })
+        .catch(function (e) {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = btn.dataset.orig || '<i class="fa fa-search"></i> Listele';
+            }
+            masrafOzetDurum('Bağlantı hatası: ' + (e && e.message ? e.message : e), 'err');
+        });
+}
+function masrafOzetRender(data) {
+    var ozet = data.ozet || {};
+    var adetEl = document.getElementById('masraf_ozet_adet');
+    var tutarEl = document.getElementById('masraf_ozet_tutar');
+    var kdvEl = document.getElementById('masraf_ozet_kdv');
+    if (adetEl) adetEl.textContent = String(ozet.adet != null ? ozet.adet : '—');
+    if (tutarEl) tutarEl.textContent = masrafOzetFmtTutar(ozet.toplam_tutar);
+    if (kdvEl) kdvEl.textContent = masrafOzetFmtTutar(ozet.toplam_kdv);
+
+    var katWrap = document.getElementById('masraf_ozet_kategoriler');
+    if (katWrap) {
+        var kats = data.kategoriler || [];
+        if (!kats.length) {
+            katWrap.innerHTML = '<span class="finans-masraf-bos" style="padding:0;">Bu aralıkta kategori yok.</span>';
+        } else {
+            katWrap.innerHTML = kats.map(function (k) {
+                return '<span class="finans-masraf-chip">'
+                    + masrafOzetEsc(k.kategori || '—') + ': <strong>'
+                    + masrafOzetEsc(masrafOzetFmtTutar(k.toplam_tutar))
+                    + '</strong> (' + masrafOzetEsc(String(k.adet || 0)) + ')</span>';
+            }).join('');
+        }
+    }
+
+    var tbody = document.getElementById('masraf_ozet_tbody');
+    if (!tbody) return;
+    var kayitlar = data.kayitlar || [];
+    if (!kayitlar.length) {
+        tbody.innerHTML = '<tr><td colspan="7" class="finans-masraf-bos">Bu aralıkta onaylı masraf yok.</td></tr>';
+        return;
+    }
+    tbody.innerHTML = kayitlar.map(function (k) {
+        var id = k.id;
+        var detay = '/fis-masraflari/' + encodeURIComponent(id);
+        return '<tr>'
+            + '<td>' + masrafOzetEsc(k.magaza_adi || '—') + '</td>'
+            + '<td>' + masrafOzetEsc(k.tarih || '—') + '</td>'
+            + '<td class="num">' + masrafOzetEsc(masrafOzetFmtTutar(k.toplam_tutar)) + '</td>'
+            + '<td class="num">' + masrafOzetEsc(masrafOzetFmtTutar(k.kdv_tutari)) + '</td>'
+            + '<td>' + masrafOzetEsc(k.kategori || '—') + '</td>'
+            + '<td>' + masrafOzetEsc(k.olusturan_kullanici || '—') + '</td>'
+            + '<td><a href="' + masrafOzetEsc(detay) + '" target="_blank" rel="noopener">Detay</a></td>'
+            + '</tr>';
+    }).join('');
+}
 
 function autoStatusText(lastRun) {
     if (!lastRun || !lastRun.id) return 'Henüz otomatik çalışma kaydı yok.';
@@ -5337,6 +5572,9 @@ function finansGibRaporYukle(usePortal) {
             if (typeof faturaRaporFirmaPrefsHydrateFromServer === 'function') faturaRaporFirmaPrefsHydrateFromServer();
             if ((window.location.hash || '').toLowerCase() === '#gib-rapor' && typeof window.switchTab === 'function') {
                 window.switchTab(5);
+            }
+            if ((window.location.hash || '').toLowerCase() === '#masraflar' && typeof window.switchTab === 'function') {
+                window.switchTab(6);
             }
         } catch (errInit) {
             console.warn('Finans ilk yükleme:', errInit);
