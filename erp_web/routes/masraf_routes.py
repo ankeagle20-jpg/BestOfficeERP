@@ -6,18 +6,19 @@ Prefix: /fis-masraflari
 from __future__ import annotations
 
 import json
+import mimetypes
 import os
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
-from flask import Blueprint, jsonify, render_template, request
+from flask import Blueprint, jsonify, render_template, request, send_file, url_for
 from flask_login import current_user
 from werkzeug.utils import secure_filename
 
 from auth import giris_gerekli
-from db import ensure_masraflar_table, execute_returning
+from db import ensure_masraflar_table, execute_returning, fetch_all, fetch_one
 from groq_helper import fis_oku
 
 bp = Blueprint("fis_masraflari", __name__)
@@ -226,5 +227,378 @@ def api_fis_oku():
             "urunler": urunler,
             "kategori": kategori,
             "fis_gorsel_path": rel_path,
+        }
+    )
+
+
+# ── Aşama C1: liste / detay / güncelle / onayla / reddet / görsel ─────────────
+
+LISTE_LIMIT = 200
+DURUM_ONAY_BEKLIYOR = "onay_bekliyor"
+DURUM_ONAYLANDI = "onaylandi"
+DURUM_REDDEDILDI = "reddedildi"
+
+
+def _json_num(val):
+    if val is None:
+        return None
+    if isinstance(val, Decimal):
+        return float(val)
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return None
+
+
+def _json_date(val):
+    if val is None:
+        return None
+    if isinstance(val, datetime):
+        return val.date().isoformat()
+    if isinstance(val, date):
+        return val.isoformat()
+    s = str(val).strip()
+    return s[:10] if s else None
+
+
+def _parse_urunler(val):
+    """Body'den ürün listesi; geçersizse hata mesajı döner."""
+    if val is None:
+        return [], None
+    if isinstance(val, str):
+        s = val.strip()
+        if not s:
+            return [], None
+        try:
+            val = json.loads(s)
+        except json.JSONDecodeError:
+            return None, "urunler geçerli JSON dizi olmalı."
+    if not isinstance(val, list):
+        return None, "urunler bir dizi olmalı."
+    out = []
+    for item in val:
+        if not isinstance(item, dict):
+            return None, "urunler öğeleri nesne olmalı."
+        ad = item.get("ad")
+        if ad is not None:
+            ad = str(ad).strip() or None
+        out.append(
+            {
+                "ad": ad,
+                "adet": _json_num(item.get("adet")),
+                "birim_fiyat": _json_num(item.get("birim_fiyat")),
+                "tutar": _json_num(item.get("tutar")),
+            }
+        )
+    return out, None
+
+
+def _urunler_from_row(row: dict) -> list:
+    raw = row.get("urunler_json")
+    if not raw:
+        return []
+    if isinstance(raw, list):
+        return raw
+    try:
+        parsed = json.loads(raw) if isinstance(raw, str) else raw
+        return parsed if isinstance(parsed, list) else []
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+
+def _masraf_to_dict(row: dict, *, include_ai_ham: bool = False) -> dict:
+    mid = row.get("id")
+    d = {
+        "id": mid,
+        "magaza_adi": row.get("magaza_adi"),
+        "fis_no": row.get("fis_no"),
+        "tarih": _json_date(row.get("tarih")),
+        "toplam_tutar": _json_num(row.get("toplam_tutar")),
+        "kdv_orani": _json_num(row.get("kdv_orani")),
+        "kdv_tutari": _json_num(row.get("kdv_tutari")),
+        "urunler": _urunler_from_row(row),
+        "kategori": row.get("kategori"),
+        "fis_gorsel_path": row.get("fis_gorsel_path"),
+        "gorsel_url": url_for("fis_masraflari.gorsel", masraf_id=mid) if mid is not None else None,
+        "durum": row.get("durum"),
+        "olusturan_kullanici_id": row.get("olusturan_kullanici_id"),
+        "olusturan_kullanici": row.get("olusturan_kullanici"),
+        "created_at": row.get("created_at").isoformat() if row.get("created_at") else None,
+        "updated_at": row.get("updated_at").isoformat() if row.get("updated_at") else None,
+    }
+    if include_ai_ham:
+        d["ai_ham_yanit"] = row.get("ai_ham_yanit")
+    return d
+
+
+def _resolve_masraf_gorsel_path(rel_path: str | None) -> Path | None:
+    """
+    fis_gorsel_path'i uploads/masraf_fisleri altında güvenli resolve et.
+    Path traversal veya klasör dışı → None.
+    """
+    if not rel_path or not isinstance(rel_path, str):
+        return None
+    rel = rel_path.replace("\\", "/").strip().lstrip("/")
+    if not rel or ".." in rel.split("/"):
+        return None
+    upload_root = UPLOAD_DIR.resolve()
+    candidate = (_ERP_WEB / rel).resolve()
+    try:
+        candidate.relative_to(upload_root)
+    except ValueError:
+        return None
+    if not candidate.is_file():
+        return None
+    return candidate
+
+
+def _request_json_body() -> dict:
+    data = request.get_json(silent=True)
+    if isinstance(data, dict):
+        return data
+    # form fallback
+    if request.form:
+        return {k: request.form.get(k) for k in request.form}
+    return {}
+
+
+@bp.route("/gorsel/<int:masraf_id>", methods=["GET"])
+@giris_gerekli
+def gorsel(masraf_id: int):
+    """Auth'lu fiş görseli (send_file). Path traversal engelli."""
+    _ensure_masraflar_once()
+    row = fetch_one(
+        "SELECT id, fis_gorsel_path FROM masraflar WHERE id = %s",
+        (masraf_id,),
+    )
+    if not row:
+        return jsonify({"ok": False, "mesaj": "Kayıt bulunamadı."}), 404
+    path = _resolve_masraf_gorsel_path(row.get("fis_gorsel_path"))
+    if path is None:
+        return jsonify({"ok": False, "mesaj": "Görsel bulunamadı."}), 404
+    mime, _ = mimetypes.guess_type(str(path))
+    if not mime or not mime.startswith("image/"):
+        mime = "application/octet-stream"
+    return send_file(path, mimetype=mime, conditional=True)
+
+
+@bp.route("/api/liste", methods=["GET"])
+@giris_gerekli
+def api_liste():
+    """Masraf listesi. Varsayılan durum=onay_bekliyor. LIMIT 200."""
+    _ensure_masraflar_once()
+    durum = (request.args.get("durum") or DURUM_ONAY_BEKLIYOR).strip() or DURUM_ONAY_BEKLIYOR
+    rows = fetch_all(
+        """
+        SELECT id, magaza_adi, fis_no, tarih, toplam_tutar, kdv_orani, kdv_tutari,
+               urunler_json, kategori, fis_gorsel_path, durum,
+               olusturan_kullanici_id, olusturan_kullanici, created_at, updated_at
+        FROM masraflar
+        WHERE durum = %s
+        ORDER BY created_at DESC, id DESC
+        LIMIT %s
+        """,
+        (durum, LISTE_LIMIT),
+    )
+    items = [_masraf_to_dict(dict(r)) for r in (rows or [])]
+    return jsonify({"ok": True, "durum": durum, "adet": len(items), "kayitlar": items})
+
+
+@bp.route("/api/<int:masraf_id>", methods=["GET"])
+@giris_gerekli
+def api_detay(masraf_id: int):
+    """Tek masraf JSON detay (+ gorsel_url)."""
+    _ensure_masraflar_once()
+    row = fetch_one("SELECT * FROM masraflar WHERE id = %s", (masraf_id,))
+    if not row:
+        return jsonify({"ok": False, "mesaj": "Kayıt bulunamadı."}), 404
+    return jsonify({"ok": True, "kayit": _masraf_to_dict(dict(row), include_ai_ham=True)})
+
+
+@bp.route("/api/<int:masraf_id>/guncelle", methods=["POST"])
+@giris_gerekli
+def api_guncelle(masraf_id: int):
+    """Alan güncelle. Yalnızca durum=onay_bekliyor."""
+    _ensure_masraflar_once()
+    row = fetch_one("SELECT * FROM masraflar WHERE id = %s", (masraf_id,))
+    if not row:
+        return jsonify({"ok": False, "mesaj": "Kayıt bulunamadı."}), 404
+    if (row.get("durum") or "") != DURUM_ONAY_BEKLIYOR:
+        return jsonify(
+            {
+                "ok": False,
+                "mesaj": "Yalnızca onay bekleyen kayıtlar güncellenebilir.",
+                "durum": row.get("durum"),
+            }
+        ), 409
+
+    body = _request_json_body()
+    if not body:
+        return jsonify({"ok": False, "mesaj": "Güncellenecek alan yok (JSON body bekleniyor)."}), 400
+
+    magaza_adi = body.get("magaza_adi", row.get("magaza_adi"))
+    if isinstance(magaza_adi, str):
+        magaza_adi = magaza_adi.strip() or None
+
+    fis_no = body.get("fis_no", row.get("fis_no"))
+    if fis_no is not None:
+        fis_no = str(fis_no).strip() or None
+
+    if "tarih" in body:
+        tarih = _to_date_iso(body.get("tarih"))
+        if body.get("tarih") not in (None, "") and tarih is None:
+            return jsonify({"ok": False, "mesaj": "tarih YYYY-MM-DD formatında olmalı."}), 400
+    else:
+        tarih = _json_date(row.get("tarih"))
+
+    if "toplam_tutar" in body:
+        toplam_tutar = _to_decimal(body.get("toplam_tutar"))
+        if body.get("toplam_tutar") not in (None, "") and toplam_tutar is None:
+            return jsonify({"ok": False, "mesaj": "toplam_tutar geçersiz."}), 400
+    else:
+        toplam_tutar = row.get("toplam_tutar")
+
+    if "kdv_orani" in body:
+        kdv_orani = _to_decimal(body.get("kdv_orani"))
+        if body.get("kdv_orani") not in (None, "") and kdv_orani is None:
+            return jsonify({"ok": False, "mesaj": "kdv_orani geçersiz."}), 400
+    else:
+        kdv_orani = row.get("kdv_orani")
+
+    if "kdv_tutari" in body:
+        kdv_tutari = _to_decimal(body.get("kdv_tutari"))
+        if body.get("kdv_tutari") not in (None, "") and kdv_tutari is None:
+            return jsonify({"ok": False, "mesaj": "kdv_tutari geçersiz."}), 400
+    else:
+        kdv_tutari = row.get("kdv_tutari")
+
+    kategori = body.get("kategori", row.get("kategori"))
+    if isinstance(kategori, str):
+        kategori = kategori.strip() or None
+
+    if "urunler" in body:
+        urunler, uerr = _parse_urunler(body.get("urunler"))
+        if uerr:
+            return jsonify({"ok": False, "mesaj": uerr}), 400
+        urunler_json = json.dumps(urunler, ensure_ascii=False)
+    else:
+        urunler_json = row.get("urunler_json")
+
+    try:
+        updated = execute_returning(
+            """
+            UPDATE masraflar SET
+                magaza_adi = %s,
+                fis_no = %s,
+                tarih = %s,
+                toplam_tutar = %s,
+                kdv_orani = %s,
+                kdv_tutari = %s,
+                kategori = %s,
+                urunler_json = %s,
+                updated_at = NOW()
+            WHERE id = %s AND durum = %s
+            RETURNING *
+            """,
+            (
+                magaza_adi,
+                fis_no,
+                tarih,
+                toplam_tutar,
+                kdv_orani,
+                kdv_tutari,
+                kategori,
+                urunler_json,
+                masraf_id,
+                DURUM_ONAY_BEKLIYOR,
+            ),
+        )
+    except Exception as e:
+        return jsonify({"ok": False, "mesaj": f"Güncelleme başarısız: {e}"}), 500
+
+    if not updated:
+        return jsonify(
+            {"ok": False, "mesaj": "Kayıt güncellenemedi (durum değişmiş olabilir)."}
+        ), 409
+
+    return jsonify(
+        {
+            "ok": True,
+            "mesaj": "Kayıt güncellendi.",
+            "kayit": _masraf_to_dict(dict(updated), include_ai_ham=True),
+        }
+    )
+
+
+@bp.route("/api/<int:masraf_id>/onayla", methods=["POST"])
+@giris_gerekli
+def api_onayla(masraf_id: int):
+    """durum=onaylandi. Yalnızca onay_bekliyor."""
+    _ensure_masraflar_once()
+    row = fetch_one("SELECT id, durum FROM masraflar WHERE id = %s", (masraf_id,))
+    if not row:
+        return jsonify({"ok": False, "mesaj": "Kayıt bulunamadı."}), 404
+    if (row.get("durum") or "") != DURUM_ONAY_BEKLIYOR:
+        return jsonify(
+            {
+                "ok": False,
+                "mesaj": "Yalnızca onay bekleyen kayıtlar onaylanabilir.",
+                "durum": row.get("durum"),
+            }
+        ), 409
+
+    updated = execute_returning(
+        """
+        UPDATE masraflar
+        SET durum = %s, updated_at = NOW()
+        WHERE id = %s AND durum = %s
+        RETURNING *
+        """,
+        (DURUM_ONAYLANDI, masraf_id, DURUM_ONAY_BEKLIYOR),
+    )
+    if not updated:
+        return jsonify({"ok": False, "mesaj": "Onaylanamadı (durum değişmiş olabilir)."}), 409
+    return jsonify(
+        {
+            "ok": True,
+            "mesaj": "Masraf onaylandı.",
+            "kayit": _masraf_to_dict(dict(updated), include_ai_ham=True),
+        }
+    )
+
+
+@bp.route("/api/<int:masraf_id>/reddet", methods=["POST"])
+@giris_gerekli
+def api_reddet(masraf_id: int):
+    """durum=reddedildi. Yalnızca onay_bekliyor."""
+    _ensure_masraflar_once()
+    row = fetch_one("SELECT id, durum FROM masraflar WHERE id = %s", (masraf_id,))
+    if not row:
+        return jsonify({"ok": False, "mesaj": "Kayıt bulunamadı."}), 404
+    if (row.get("durum") or "") != DURUM_ONAY_BEKLIYOR:
+        return jsonify(
+            {
+                "ok": False,
+                "mesaj": "Yalnızca onay bekleyen kayıtlar reddedilebilir.",
+                "durum": row.get("durum"),
+            }
+        ), 409
+
+    updated = execute_returning(
+        """
+        UPDATE masraflar
+        SET durum = %s, updated_at = NOW()
+        WHERE id = %s AND durum = %s
+        RETURNING *
+        """,
+        (DURUM_REDDEDILDI, masraf_id, DURUM_ONAY_BEKLIYOR),
+    )
+    if not updated:
+        return jsonify({"ok": False, "mesaj": "Reddedilemedi (durum değişmiş olabilir)."}), 409
+    return jsonify(
+        {
+            "ok": True,
+            "mesaj": "Masraf reddedildi.",
+            "kayit": _masraf_to_dict(dict(updated), include_ai_ham=True),
         }
     )
