@@ -264,6 +264,7 @@ def giris_gerekli(f):
                 "/bankalar/api/",
                 "/faturalar/api/",
                 "/randevu/api/",
+                "/fis-masraflari/api/",
             )
             wants_json401 = path in _json401_exact or any(path.startswith(p) for p in _json401_prefixes)
             if wants_json401:

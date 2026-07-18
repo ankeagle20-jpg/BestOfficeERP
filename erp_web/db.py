@@ -537,6 +537,7 @@ def init_schema():
     ensure_personel_ozluk_izin_columns()
     ensure_contracts_engine()
     ensure_auto_invoice_tables()
+    ensure_masraflar_table()
     ensure_user_ui_preferences_table()
     print("✅ Supabase şema oluşturuldu.")
 
@@ -1051,6 +1052,42 @@ def ensure_contracts_engine():
         )
     except Exception as e:
         print(f"legal_cases: {e}")
+
+
+def ensure_masraflar_table():
+    """Fiş masrafları (AI OCR + onay akışı). Banka /masraflar API'sinden bağımsız."""
+    try:
+        execute(
+            """
+            CREATE TABLE IF NOT EXISTS masraflar (
+                id                    SERIAL PRIMARY KEY,
+                magaza_adi            TEXT,
+                fis_no                TEXT,
+                tarih                 DATE,
+                toplam_tutar          NUMERIC(14, 2),
+                kdv_orani             NUMERIC(6, 2),
+                kdv_tutari            NUMERIC(14, 2),
+                urunler_json          TEXT,
+                kategori              TEXT,
+                fis_gorsel_path       TEXT,
+                durum                 TEXT NOT NULL DEFAULT 'onay_bekliyor',
+                ai_ham_yanit          TEXT,
+                olusturan_kullanici_id INTEGER,
+                olusturan_kullanici   TEXT,
+                created_at            TIMESTAMPTZ DEFAULT NOW(),
+                updated_at            TIMESTAMPTZ
+            )
+            """
+        )
+        execute(
+            "CREATE INDEX IF NOT EXISTS idx_masraflar_durum_created "
+            "ON masraflar (durum, created_at DESC)"
+        )
+        execute(
+            "CREATE INDEX IF NOT EXISTS idx_masraflar_tarih ON masraflar (tarih)"
+        )
+    except Exception as e:
+        print(f"masraflar: {e}")
 
 
 def ensure_auto_invoice_tables():
