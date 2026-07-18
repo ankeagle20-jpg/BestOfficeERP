@@ -8,6 +8,7 @@
 {% block content %}
 <a href="/kargolar/yeni" class="btn btn-orange btn-block" style="margin-bottom:14px;"><i class="fa fa-plus"></i> Kargo Kaydı Ekle</a>
 <a href="{{ url_for('fis_masraflari.yeni') }}" class="btn btn-blue btn-block" style="margin-bottom:14px;"><i class="fa fa-receipt"></i> Masraf Fişi</a>
+<a href="{{ url_for('fis_masraflari.onay_bekleyenler') }}" class="btn btn-green btn-block" style="margin-bottom:14px;"><i class="fa fa-clipboard-check"></i> Onay bekleyenler</a>
 
 <div class="section-title"><i class="fa fa-bolt"></i> Gelen Kargo</div>
 <div class="card">

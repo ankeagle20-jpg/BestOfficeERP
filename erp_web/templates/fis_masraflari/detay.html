@@ -1,0 +1,563 @@
+{% extends "layout.html" %}
+
+{% block page_title %}Masraf Detay{% endblock %}
+
+{% block content %}
+{% include 'partials/erp_page_style.html' %}
+<style>
+.masraf-detay-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+.masraf-detay-head h2 {
+  margin: 0;
+  font-size: 18px;
+  color: #4fc3f7;
+}
+.masraf-detay-head .sub { font-size: 12px; color: #90a4ae; margin-top: 4px; }
+.masraf-banner {
+  display: none;
+  padding: 10px 14px;
+  border-radius: 8px;
+  margin-bottom: 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.masraf-banner.show { display: block; }
+.masraf-banner.err { background: rgba(244, 67, 54, 0.18); color: #ef9a9a; border: 1px solid rgba(244,67,54,0.35); }
+.masraf-banner.ok { background: rgba(76, 175, 80, 0.18); color: #a5d6a7; border: 1px solid rgba(76,175,80,0.35); }
+.masraf-banner.warn { background: rgba(255, 193, 7, 0.15); color: #ffe082; border: 1px solid rgba(255,193,7,0.35); }
+.masraf-banner.info { background: rgba(79, 195, 247, 0.15); color: #81d4fa; border: 1px solid rgba(79,195,247,0.35); }
+.masraf-grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.1fr);
+  gap: 18px;
+  align-items: start;
+}
+@media (max-width: 960px) {
+  .masraf-grid { grid-template-columns: 1fr; }
+}
+.masraf-card {
+  background: rgba(15, 37, 55, 0.65);
+  border: 1px solid #2d4060;
+  border-radius: 10px;
+  padding: 14px;
+}
+.masraf-fis-img {
+  width: 100%;
+  max-height: 75vh;
+  object-fit: contain;
+  border-radius: 8px;
+  background: #0a1929;
+  border: 1px solid #1e3a50;
+}
+.masraf-form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+.masraf-form-row label {
+  font-size: 12px;
+  color: #b0bec5;
+}
+.masraf-form-row input,
+.masraf-form-row select {
+  background: #1e3a50;
+  border: 1px solid #2d4060;
+  color: #e0f7fa;
+  padding: 7px 10px;
+  border-radius: 4px;
+  font-size: 13px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.masraf-form-row input:disabled,
+.masraf-form-row select:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+.masraf-form-2col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.masraf-urun-wrap { margin-top: 8px; }
+.masraf-urun-wrap h3 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: #81d4fa;
+}
+.masraf-urun-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.masraf-urun-table th,
+.masraf-urun-table td {
+  padding: 4px;
+  border-bottom: 1px solid #1e3a50;
+  vertical-align: middle;
+}
+.masraf-urun-table th { color: #90a4ae; font-weight: 600; text-align: left; }
+.masraf-urun-table input {
+  background: #1e3a50;
+  border: 1px solid #2d4060;
+  color: #e0f7fa;
+  padding: 5px 6px;
+  border-radius: 4px;
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 12px;
+}
+.masraf-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+.masraf-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  color: #fff;
+}
+.masraf-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.masraf-btn.save { background: #0288d1; }
+.masraf-btn.save:hover:not(:disabled) { background: #039be5; }
+.masraf-btn.ok { background: #2e7d32; }
+.masraf-btn.ok:hover:not(:disabled) { background: #388e3c; }
+.masraf-btn.danger { background: #c62828; }
+.masraf-btn.danger:hover:not(:disabled) { background: #d32f2f; }
+.masraf-btn.ghost { background: #37474f; color: #eceff1; }
+.masraf-btn.ghost:hover:not(:disabled) { background: #455a64; color: #fff; }
+.masraf-btn.small { padding: 4px 8px; font-size: 11px; }
+.masraf-durum-badge {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+.masraf-durum-badge.bekliyor { background: rgba(255,193,7,0.2); color: #ffe082; }
+.masraf-durum-badge.onaylandi { background: rgba(76,175,80,0.2); color: #a5d6a7; }
+.masraf-durum-badge.reddedildi { background: rgba(244,67,54,0.2); color: #ef9a9a; }
+</style>
+
+<div class="erp-page-wrap">
+  <div class="masraf-detay-head">
+    <div>
+      <h2>
+        <i class="fa fa-receipt"></i> Masraf #{{ masraf_id }}
+        <span class="masraf-durum-badge bekliyor" id="durum-badge">…</span>
+      </h2>
+      <div class="sub" id="detay-sub">Kayıt yükleniyor…</div>
+    </div>
+    <a class="masraf-btn ghost" href="{{ url_for('fis_masraflari.onay_bekleyenler') }}">
+      <i class="fa fa-arrow-left"></i> Listeye dön
+    </a>
+  </div>
+
+  <div class="masraf-banner info show" id="masraf-loading">Kayıt yükleniyor…</div>
+  <div class="masraf-banner err" id="masraf-hata"></div>
+  <div class="masraf-banner ok" id="masraf-ok"></div>
+  <div class="masraf-banner warn" id="masraf-readonly"></div>
+
+  <div class="masraf-grid" id="masraf-panel" style="display:none;">
+    <div class="masraf-card">
+      <img class="masraf-fis-img" id="fis-gorsel" alt="Fiş görseli" style="display:none;">
+      <div id="fis-gorsel-yok" style="color:#90a4ae; font-size:13px; display:none;">Görsel yok.</div>
+    </div>
+
+    <div class="masraf-card">
+      <form id="masraf-form" autocomplete="off" onsubmit="return false;">
+        <div class="masraf-form-row">
+          <label for="f-magaza">Mağaza</label>
+          <input id="f-magaza" type="text">
+        </div>
+        <div class="masraf-form-2col">
+          <div class="masraf-form-row">
+            <label for="f-fisno">Fiş no</label>
+            <input id="f-fisno" type="text">
+          </div>
+          <div class="masraf-form-row">
+            <label for="f-tarih">Tarih</label>
+            <input id="f-tarih" type="date">
+          </div>
+        </div>
+        <div class="masraf-form-2col">
+          <div class="masraf-form-row">
+            <label for="f-toplam">Toplam tutar</label>
+            <input id="f-toplam" type="number" step="0.01">
+          </div>
+          <div class="masraf-form-row">
+            <label for="f-kategori">Kategori</label>
+            <input id="f-kategori" type="text" list="kategori-onerileri">
+            <datalist id="kategori-onerileri">
+              <option value="yakıt"></option>
+              <option value="kırtasiye"></option>
+              <option value="market"></option>
+              <option value="yemek"></option>
+              <option value="ulaşım"></option>
+              <option value="diğer"></option>
+            </datalist>
+          </div>
+        </div>
+        <div class="masraf-form-2col">
+          <div class="masraf-form-row">
+            <label for="f-kdv-orani">KDV oranı (%)</label>
+            <input id="f-kdv-orani" type="number" step="0.01">
+          </div>
+          <div class="masraf-form-row">
+            <label for="f-kdv-tutari">KDV tutarı</label>
+            <input id="f-kdv-tutari" type="number" step="0.01">
+          </div>
+        </div>
+
+        <div class="masraf-urun-wrap">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+            <h3>Ürün kalemleri</h3>
+            <button type="button" class="masraf-btn ghost small" id="btn-urun-ekle"><i class="fa fa-plus"></i> Satır ekle</button>
+          </div>
+          <table class="masraf-urun-table">
+            <thead>
+              <tr>
+                <th>Ad</th>
+                <th style="width:70px;">Adet</th>
+                <th style="width:90px;">Birim</th>
+                <th style="width:90px;">Tutar</th>
+                <th style="width:40px;"></th>
+              </tr>
+            </thead>
+            <tbody id="urun-tbody"></tbody>
+          </table>
+        </div>
+
+        <div class="masraf-actions" id="masraf-actions">
+          <button type="button" class="masraf-btn save" id="btn-kaydet"><i class="fa fa-save"></i> Kaydet</button>
+          <button type="button" class="masraf-btn ok" id="btn-onayla"><i class="fa fa-check"></i> Onayla</button>
+          <button type="button" class="masraf-btn danger" id="btn-reddet"><i class="fa fa-times"></i> Reddet</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+  var MASRAF_ID = {{ masraf_id|int }};
+  var API_DETAY = "/fis-masraflari/api/" + MASRAF_ID;
+  var API_GUNCELLE = "/fis-masraflari/api/" + MASRAF_ID + "/guncelle";
+  var API_ONAYLA = "/fis-masraflari/api/" + MASRAF_ID + "/onayla";
+  var API_REDDET = "/fis-masraflari/api/" + MASRAF_ID + "/reddet";
+  var LISTE_URL = "{{ url_for('fis_masraflari.onay_bekleyenler') }}";
+  var GORSEL_URL = "/fis-masraflari/gorsel/" + MASRAF_ID;
+
+  var elLoading = document.getElementById("masraf-loading");
+  var elHata = document.getElementById("masraf-hata");
+  var elOk = document.getElementById("masraf-ok");
+  var elRo = document.getElementById("masraf-readonly");
+  var elPanel = document.getElementById("masraf-panel");
+  var elBadge = document.getElementById("durum-badge");
+  var elSub = document.getElementById("detay-sub");
+  var elImg = document.getElementById("fis-gorsel");
+  var elImgYok = document.getElementById("fis-gorsel-yok");
+  var urunTbody = document.getElementById("urun-tbody");
+  var btnKaydet = document.getElementById("btn-kaydet");
+  var btnOnayla = document.getElementById("btn-onayla");
+  var btnReddet = document.getElementById("btn-reddet");
+  var btnUrunEkle = document.getElementById("btn-urun-ekle");
+  var actions = document.getElementById("masraf-actions");
+
+  var fields = ["f-magaza", "f-fisno", "f-tarih", "f-toplam", "f-kategori", "f-kdv-orani", "f-kdv-tutari"];
+  var readonlyMode = false;
+  var currentDurum = null;
+
+  function showBanner(el, msg) {
+    if (!msg) {
+      el.classList.remove("show");
+      el.textContent = "";
+      return;
+    }
+    el.textContent = msg;
+    el.classList.add("show");
+  }
+  function clearMsgs() {
+    showBanner(elHata, "");
+    showBanner(elOk, "");
+  }
+  function setBusy(on) {
+    elLoading.classList.toggle("show", !!on);
+    if (on) elLoading.textContent = "İşleniyor…";
+    [btnKaydet, btnOnayla, btnReddet, btnUrunEkle].forEach(function (b) {
+      if (b) b.disabled = !!on || readonlyMode;
+    });
+  }
+
+  function parseJsonResponse(r) {
+    return r.json().then(function (b) {
+      return { status: r.status, body: b };
+    }).catch(function () {
+      return { status: r.status, body: { ok: false, mesaj: "Yanıt okunamadı (HTTP " + r.status + ")." } };
+    });
+  }
+
+  function durumLabel(d) {
+    if (d === "onay_bekliyor") return "Onay bekliyor";
+    if (d === "onaylandi") return "Onaylandı";
+    if (d === "reddedildi") return "Reddedildi";
+    return d || "—";
+  }
+  function durumClass(d) {
+    if (d === "onaylandi") return "onaylandi";
+    if (d === "reddedildi") return "reddedildi";
+    return "bekliyor";
+  }
+
+  function setReadonly(on, durum) {
+    readonlyMode = !!on;
+    fields.forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.disabled = !!on;
+    });
+    urunTbody.querySelectorAll("input,button").forEach(function (el) {
+      el.disabled = !!on;
+    });
+    btnUrunEkle.disabled = !!on;
+    btnUrunEkle.style.display = on ? "none" : "";
+    actions.style.display = on ? "none" : "flex";
+    if (on) {
+      showBanner(
+        elRo,
+        "Bu kayıt " + durumLabel(durum) + "; düzenlenemez. (Backend güncelleme/onay/red 409 ile korunur.)"
+      );
+    } else {
+      showBanner(elRo, "");
+    }
+  }
+
+  function urunSatirHtml(u) {
+    u = u || {};
+    var tr = document.createElement("tr");
+    tr.innerHTML =
+      '<td><input type="text" class="u-ad" value=""></td>' +
+      '<td><input type="number" step="0.01" class="u-adet" value=""></td>' +
+      '<td><input type="number" step="0.01" class="u-birim" value=""></td>' +
+      '<td><input type="number" step="0.01" class="u-tutar" value=""></td>' +
+      '<td><button type="button" class="masraf-btn danger small u-sil" title="Sil"><i class="fa fa-trash"></i></button></td>';
+    tr.querySelector(".u-ad").value = u.ad != null ? u.ad : "";
+    tr.querySelector(".u-adet").value = u.adet != null ? u.adet : "";
+    tr.querySelector(".u-birim").value = u.birim_fiyat != null ? u.birim_fiyat : "";
+    tr.querySelector(".u-tutar").value = u.tutar != null ? u.tutar : "";
+    tr.querySelector(".u-sil").addEventListener("click", function () {
+      if (readonlyMode) return;
+      tr.remove();
+    });
+    if (readonlyMode) {
+      tr.querySelectorAll("input,button").forEach(function (el) { el.disabled = true; });
+    }
+    return tr;
+  }
+
+  function setUrunler(list) {
+    urunTbody.innerHTML = "";
+    (list || []).forEach(function (u) {
+      urunTbody.appendChild(urunSatirHtml(u));
+    });
+    if (!list || !list.length) {
+      urunTbody.appendChild(urunSatirHtml({}));
+    }
+  }
+
+  function collectUrunler() {
+    var out = [];
+    urunTbody.querySelectorAll("tr").forEach(function (tr) {
+      var ad = (tr.querySelector(".u-ad").value || "").trim();
+      var adet = tr.querySelector(".u-adet").value;
+      var birim = tr.querySelector(".u-birim").value;
+      var tutar = tr.querySelector(".u-tutar").value;
+      if (!ad && adet === "" && birim === "" && tutar === "") return;
+      var row = { ad: ad || null };
+      if (adet !== "") row.adet = Number(adet);
+      if (birim !== "") row.birim_fiyat = Number(birim);
+      if (tutar !== "") row.tutar = Number(tutar);
+      out.push(row);
+    });
+    return out;
+  }
+
+  function collectPayload() {
+    return {
+      magaza_adi: document.getElementById("f-magaza").value,
+      fis_no: document.getElementById("f-fisno").value,
+      tarih: document.getElementById("f-tarih").value,
+      toplam_tutar: document.getElementById("f-toplam").value,
+      kategori: document.getElementById("f-kategori").value,
+      kdv_orani: document.getElementById("f-kdv-orani").value,
+      kdv_tutari: document.getElementById("f-kdv-tutari").value,
+      urunler: collectUrunler()
+    };
+  }
+
+  function fillForm(k) {
+    currentDurum = k.durum;
+    elBadge.textContent = durumLabel(k.durum);
+    elBadge.className = "masraf-durum-badge " + durumClass(k.durum);
+    elSub.textContent = (k.magaza_adi || "—") + (k.created_at ? " · oluşturulma: " + k.created_at : "");
+
+    document.getElementById("f-magaza").value = k.magaza_adi || "";
+    document.getElementById("f-fisno").value = k.fis_no || "";
+    document.getElementById("f-tarih").value = k.tarih || "";
+    document.getElementById("f-toplam").value = k.toplam_tutar != null ? k.toplam_tutar : "";
+    document.getElementById("f-kategori").value = k.kategori || "";
+    document.getElementById("f-kdv-orani").value = k.kdv_orani != null ? k.kdv_orani : "";
+    document.getElementById("f-kdv-tutari").value = k.kdv_tutari != null ? k.kdv_tutari : "";
+    setUrunler(k.urunler || []);
+
+    if (k.gorsel_url) {
+      elImg.src = GORSEL_URL;
+      elImg.style.display = "block";
+      elImgYok.style.display = "none";
+    } else {
+      elImg.style.display = "none";
+      elImgYok.style.display = "block";
+    }
+
+    var editable = (k.durum === "onay_bekliyor");
+    setReadonly(!editable, k.durum);
+    elPanel.style.display = "grid";
+  }
+
+  function postJson(url, body) {
+    var opts = { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" } };
+    if (body !== undefined) opts.body = JSON.stringify(body);
+    return fetch(url, opts).then(parseJsonResponse);
+  }
+
+  function yukle() {
+    clearMsgs();
+    showBanner(elRo, "");
+    elLoading.classList.add("show");
+    elLoading.textContent = "Kayıt yükleniyor…";
+    fetch(API_DETAY, { credentials: "same-origin" })
+      .then(parseJsonResponse)
+      .then(function (res) {
+        elLoading.classList.remove("show");
+        if (res.status === 404 || !res.body || !res.body.ok) {
+          showBanner(elHata, (res.body && res.body.mesaj) || ("Kayıt bulunamadı (HTTP " + res.status + ")."));
+          elPanel.style.display = "none";
+          return;
+        }
+        fillForm(res.body.kayit);
+      })
+      .catch(function (e) {
+        elLoading.classList.remove("show");
+        showBanner(elHata, "Bağlantı hatası: " + (e && e.message ? e.message : e));
+      });
+  }
+
+  function kaydet() {
+    if (readonlyMode) return Promise.resolve({ ok: false, skipped: true });
+    clearMsgs();
+    setBusy(true);
+    return postJson(API_GUNCELLE, collectPayload())
+      .then(function (res) {
+        setBusy(false);
+        if (!res.body || !res.body.ok) {
+          showBanner(elHata, (res.body && res.body.mesaj) || ("Güncelleme başarısız (HTTP " + res.status + ")."));
+          return { ok: false, res: res };
+        }
+        showBanner(elOk, res.body.mesaj || "Kayıt güncellendi.");
+        if (res.body.kayit) fillForm(res.body.kayit);
+        return { ok: true, res: res };
+      })
+      .catch(function (e) {
+        setBusy(false);
+        showBanner(elHata, "Bağlantı hatası: " + (e && e.message ? e.message : e));
+        return { ok: false };
+      });
+  }
+
+  btnUrunEkle.addEventListener("click", function () {
+    if (readonlyMode) return;
+    urunTbody.appendChild(urunSatirHtml({}));
+  });
+
+  btnKaydet.addEventListener("click", function () {
+    kaydet();
+  });
+
+  btnOnayla.addEventListener("click", function () {
+    if (readonlyMode) return;
+    if (!window.confirm("Bu masrafı onaylamak istediğinize emin misiniz?")) return;
+    clearMsgs();
+    setBusy(true);
+    // Önce kaydet (kirli alanlar kaybolmasın), sonra onayla
+    postJson(API_GUNCELLE, collectPayload())
+      .then(function (resG) {
+        if (!resG.body || !resG.body.ok) {
+          setBusy(false);
+          showBanner(elHata, (resG.body && resG.body.mesaj) || ("Kaydetme başarısız (HTTP " + resG.status + "). Onaylanmadı."));
+          return null;
+        }
+        return postJson(API_ONAYLA);
+      })
+      .then(function (resO) {
+        if (!resO) return;
+        setBusy(false);
+        if (!resO.body || !resO.body.ok) {
+          showBanner(elHata, (resO.body && resO.body.mesaj) || ("Onay başarısız (HTTP " + resO.status + ")."));
+          if (resO.body && resO.body.kayit) fillForm(resO.body.kayit);
+          else yukle();
+          return;
+        }
+        showBanner(elOk, resO.body.mesaj || "Masraf onaylandı.");
+        window.setTimeout(function () { window.location.href = LISTE_URL; }, 700);
+      })
+      .catch(function (e) {
+        setBusy(false);
+        showBanner(elHata, "Bağlantı hatası: " + (e && e.message ? e.message : e));
+      });
+  });
+
+  btnReddet.addEventListener("click", function () {
+    if (readonlyMode) return;
+    if (!window.confirm("Bu masrafı REDDETMEK istediğinize emin misiniz? Düzenlenmemiş değişiklikler kaydedilmez.")) return;
+    clearMsgs();
+    setBusy(true);
+    postJson(API_REDDET)
+      .then(function (res) {
+        setBusy(false);
+        if (!res.body || !res.body.ok) {
+          showBanner(elHata, (res.body && res.body.mesaj) || ("Red başarısız (HTTP " + res.status + ")."));
+          if (res.body && res.body.durum) yukle();
+          return;
+        }
+        showBanner(elOk, res.body.mesaj || "Masraf reddedildi.");
+        window.setTimeout(function () { window.location.href = LISTE_URL; }, 700);
+      })
+      .catch(function (e) {
+        setBusy(false);
+        showBanner(elHata, "Bağlantı hatası: " + (e && e.message ? e.message : e));
+      });
+  });
+
+  yukle();
+})();
+</script>
+{% endblock %}

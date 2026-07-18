@@ -602,3 +602,20 @@ def api_reddet(masraf_id: int):
             "kayit": _masraf_to_dict(dict(updated), include_ai_ham=True),
         }
     )
+
+
+# --- Aşama C2: HTML sayfaları (API route'larından sonra; <int:id> en sonda) ---
+
+
+@bp.route("/onay-bekleyenler", methods=["GET"])
+@giris_gerekli
+def onay_bekleyenler():
+    """Masaüstü: onay bekleyen masraf listesi."""
+    return render_template("fis_masraflari/onay_bekleyenler.html")
+
+
+@bp.route("/<int:masraf_id>", methods=["GET"])
+@giris_gerekli
+def detay(masraf_id: int):
+    """Masaüstü: masraf detay / düzenleme / onay-red."""
+    return render_template("fis_masraflari/detay.html", masraf_id=masraf_id)
