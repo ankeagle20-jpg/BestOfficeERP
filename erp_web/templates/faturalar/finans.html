@@ -1128,17 +1128,19 @@
       <table class="finans-masraf-tablo" id="masraf_ozet_tablo">
         <thead>
           <tr>
-            <th>Mağaza</th>
             <th>Tarih</th>
-            <th class="num">Tutar</th>
-            <th class="num">KDV</th>
+            <th>Fiş No</th>
+            <th>Mağaza</th>
+            <th class="num">KDV Oranı</th>
+            <th class="num">KDV Tutarı</th>
+            <th class="num">Toplam</th>
             <th>Kategori</th>
             <th>Yükleyen</th>
             <th></th>
           </tr>
         </thead>
         <tbody id="masraf_ozet_tbody">
-          <tr><td colspan="7" class="finans-masraf-bos">Henüz veri yok.</td></tr>
+          <tr><td colspan="9" class="finans-masraf-bos">Henüz veri yok.</td></tr>
         </tbody>
       </table>
     </div>
@@ -1329,17 +1331,22 @@ function masrafOzetRender(data) {
     if (!tbody) return;
     var kayitlar = data.kayitlar || [];
     if (!kayitlar.length) {
-        tbody.innerHTML = '<tr><td colspan="7" class="finans-masraf-bos">Bu aralıkta onaylı masraf yok.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9" class="finans-masraf-bos">Bu aralıkta onaylı masraf yok.</td></tr>';
         return;
     }
     tbody.innerHTML = kayitlar.map(function (k) {
         var id = k.id;
         var detay = '/fis-masraflari/' + encodeURIComponent(id);
+        var kdvOran = (k.kdv_orani === null || k.kdv_orani === undefined || k.kdv_orani === '')
+            ? '—'
+            : ('%' + k.kdv_orani);
         return '<tr>'
-            + '<td>' + masrafOzetEsc(k.magaza_adi || '—') + '</td>'
             + '<td>' + masrafOzetEsc(k.tarih || '—') + '</td>'
-            + '<td class="num">' + masrafOzetEsc(masrafOzetFmtTutar(k.toplam_tutar)) + '</td>'
+            + '<td>' + masrafOzetEsc(k.fis_no || '—') + '</td>'
+            + '<td>' + masrafOzetEsc(k.magaza_adi || '—') + '</td>'
+            + '<td class="num">' + masrafOzetEsc(kdvOran) + '</td>'
             + '<td class="num">' + masrafOzetEsc(masrafOzetFmtTutar(k.kdv_tutari)) + '</td>'
+            + '<td class="num">' + masrafOzetEsc(masrafOzetFmtTutar(k.toplam_tutar)) + '</td>'
             + '<td>' + masrafOzetEsc(k.kategori || '—') + '</td>'
             + '<td>' + masrafOzetEsc(k.olusturan_kullanici || '—') + '</td>'
             + '<td><a href="' + masrafOzetEsc(detay) + '" target="_blank" rel="noopener">Detay</a></td>'

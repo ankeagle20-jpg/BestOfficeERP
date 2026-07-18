@@ -101,8 +101,11 @@
         <thead>
           <tr>
             <th style="width:70px;">Fiş</th>
-            <th>Mağaza</th>
             <th style="width:110px;">Tarih</th>
+            <th style="width:110px;">Fiş No</th>
+            <th>Mağaza</th>
+            <th style="width:90px;">KDV Oranı</th>
+            <th style="width:110px;">KDV Tutarı</th>
             <th style="width:120px;">Toplam</th>
             <th style="width:120px;">Kategori</th>
             <th style="width:110px;"></th>
@@ -173,12 +176,16 @@
       var thumb = k.gorsel_url
         ? '<img class="masraf-thumb" src="' + esc(gorselUrl(id)) + '" alt="fiş">'
         : '<div class="masraf-thumb-ph">yok</div>';
+      var kdvOran = (k.kdv_orani === null || k.kdv_orani === undefined || k.kdv_orani === "")
+        ? "—"
+        : ("%" + k.kdv_orani);
       tr.innerHTML =
         "<td>" + thumb + "</td>" +
-        "<td>" + esc(k.magaza_adi || "—") +
-          (k.fis_no ? '<div style="font-size:11px;color:#78909c;">Fiş: ' + esc(k.fis_no) + "</div>" : "") +
-        "</td>" +
         "<td>" + esc(k.tarih || "—") + "</td>" +
+        "<td>" + esc(k.fis_no || "—") + "</td>" +
+        "<td>" + esc(k.magaza_adi || "—") + "</td>" +
+        "<td>" + esc(kdvOran) + "</td>" +
+        '<td class="masraf-tutar">' + esc(fmtTutar(k.kdv_tutari)) + "</td>" +
         '<td class="masraf-tutar">' + esc(fmtTutar(k.toplam_tutar)) + "</td>" +
         "<td>" + esc(k.kategori || "—") + "</td>" +
         '<td><a class="masraf-btn" href="' + esc(detayUrl(id)) + '"><i class="fa fa-edit"></i> Düzenle</a></td>';

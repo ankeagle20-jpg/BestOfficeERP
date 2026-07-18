@@ -184,18 +184,28 @@
 
     <div class="masraf-card">
       <form id="masraf-form" autocomplete="off" onsubmit="return false;">
+        <div class="masraf-form-2col">
+          <div class="masraf-form-row">
+            <label for="f-tarih">Tarih</label>
+            <input id="f-tarih" type="date">
+          </div>
+          <div class="masraf-form-row">
+            <label for="f-fisno">Fiş no</label>
+            <input id="f-fisno" type="text">
+          </div>
+        </div>
         <div class="masraf-form-row">
           <label for="f-magaza">Mağaza</label>
           <input id="f-magaza" type="text">
         </div>
         <div class="masraf-form-2col">
           <div class="masraf-form-row">
-            <label for="f-fisno">Fiş no</label>
-            <input id="f-fisno" type="text">
+            <label for="f-kdv-orani">KDV oranı (%)</label>
+            <input id="f-kdv-orani" type="number" step="0.01">
           </div>
           <div class="masraf-form-row">
-            <label for="f-tarih">Tarih</label>
-            <input id="f-tarih" type="date">
+            <label for="f-kdv-tutari">KDV tutarı</label>
+            <input id="f-kdv-tutari" type="number" step="0.01">
           </div>
         </div>
         <div class="masraf-form-2col">
@@ -214,16 +224,6 @@
               <option value="ulaşım"></option>
               <option value="diğer"></option>
             </datalist>
-          </div>
-        </div>
-        <div class="masraf-form-2col">
-          <div class="masraf-form-row">
-            <label for="f-kdv-orani">KDV oranı (%)</label>
-            <input id="f-kdv-orani" type="number" step="0.01">
-          </div>
-          <div class="masraf-form-row">
-            <label for="f-kdv-tutari">KDV tutarı</label>
-            <input id="f-kdv-tutari" type="number" step="0.01">
           </div>
         </div>
 
