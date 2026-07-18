@@ -23,11 +23,22 @@
     .fis-urunler { margin-top: 10px; padding-left: 18px; font-size: 13px; color: var(--text); }
     .fis-actions { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
     #fis-file-input { display: none; }
+    .fis-onay-link {
+        display: inline-block;
+        margin: 4px 0 12px;
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--neon-blue);
+        text-decoration: none;
+    }
+    .fis-onay-link:hover { text-decoration: underline; }
+    .fis-onay-link.block { display: block; text-align: center; margin-top: 10px; margin-bottom: 0; }
 </style>
 {% endblock %}
 {% block content %}
 <div class="card">
     <h3><i class="fa fa-receipt"></i> Masraf Fişi Yükle</h3>
+    <a href="{{ url_for('fis_masraflari.onay_bekleyenler') }}" class="fis-onay-link">Onay bekleyenler →</a>
     <p class="fis-hint">Fişin fotoğrafını çekin veya galeriden seçin. Sistem AI ile okuyup onay bekleyen kayıt oluşturur. Düzenleme / onay sonraki aşamada gelecek.</p>
 
     <input type="file" id="fis-file-input" accept="image/*" capture="environment">
@@ -62,6 +73,7 @@
             <ul class="fis-urunler" id="oz-urunler"></ul>
         </div>
         <button type="button" class="btn btn-gray btn-block" id="fis-btn-yeni" style="margin-top:10px;"><i class="fa fa-redo"></i> Yeni fiş</button>
+        <a href="{{ url_for('fis_masraflari.onay_bekleyenler') }}" class="fis-onay-link block">Onay bekleyenler →</a>
     </div>
 </div>
 {% endblock %}
