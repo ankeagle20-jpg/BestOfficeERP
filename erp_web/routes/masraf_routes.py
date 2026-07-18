@@ -234,6 +234,7 @@ def api_fis_oku():
 # ── Aşama C1: liste / detay / güncelle / onayla / reddet / görsel ─────────────
 
 LISTE_LIMIT = 200
+OZET_LIMIT = 500
 DURUM_ONAY_BEKLIYOR = "onay_bekliyor"
 DURUM_ONAYLANDI = "onaylandi"
 DURUM_REDDEDILDI = "reddedildi"
@@ -402,6 +403,106 @@ def api_liste():
     )
     items = [_masraf_to_dict(dict(r)) for r in (rows or [])]
     return jsonify({"ok": True, "durum": durum, "adet": len(items), "kayitlar": items})
+
+
+@bp.route("/api/ozet", methods=["GET"])
+@giris_gerekli
+def api_ozet():
+    """
+    Onaylı (veya durum filtreli) masraf özeti + kategori kırılımı + kayıt listesi.
+    Query: baslangic, bitis (YYYY-MM-DD zorunlu), durum (varsayılan onaylandi).
+    Tarih filtresi: COALESCE(tarih, created_at::date). kayitlar LIMIT OZET_LIMIT.
+    """
+    _ensure_masraflar_once()
+
+    baslangic = _to_date_iso(request.args.get("baslangic"))
+    bitis = _to_date_iso(request.args.get("bitis"))
+    if not baslangic:
+        return jsonify({"ok": False, "mesaj": "baslangic YYYY-MM-DD formatında olmalı."}), 400
+    if not bitis:
+        return jsonify({"ok": False, "mesaj": "bitis YYYY-MM-DD formatında olmalı."}), 400
+    if baslangic > bitis:
+        return jsonify({"ok": False, "mesaj": "baslangic bitis'ten sonra olamaz."}), 400
+
+    durum = (request.args.get("durum") or DURUM_ONAYLANDI).strip() or DURUM_ONAYLANDI
+
+    # Fiş tarihi; yoksa created_at günü
+    tarih_expr = "COALESCE(tarih, (created_at AT TIME ZONE 'UTC')::date)"
+    where_sql = f"""
+        durum = %s
+        AND {tarih_expr} >= %s::date
+        AND {tarih_expr} <= %s::date
+    """
+    where_params = (durum, baslangic, bitis)
+
+    ozet_row = fetch_one(
+        f"""
+        SELECT
+            COUNT(*)::int AS adet,
+            COALESCE(SUM(toplam_tutar), 0) AS toplam_tutar,
+            COALESCE(SUM(kdv_tutari), 0) AS toplam_kdv
+        FROM masraflar
+        WHERE {where_sql}
+        """,
+        where_params,
+    ) or {}
+
+    kat_rows = fetch_all(
+        f"""
+        SELECT
+            COALESCE(NULLIF(TRIM(kategori), ''), '—') AS kategori,
+            COUNT(*)::int AS adet,
+            COALESCE(SUM(toplam_tutar), 0) AS toplam_tutar,
+            COALESCE(SUM(kdv_tutari), 0) AS toplam_kdv
+        FROM masraflar
+        WHERE {where_sql}
+        GROUP BY COALESCE(NULLIF(TRIM(kategori), ''), '—')
+        ORDER BY COALESCE(SUM(toplam_tutar), 0) DESC, kategori ASC
+        """,
+        where_params,
+    ) or []
+
+    kayit_rows = fetch_all(
+        f"""
+        SELECT id, magaza_adi, fis_no, tarih, toplam_tutar, kdv_orani, kdv_tutari,
+               urunler_json, kategori, fis_gorsel_path, durum,
+               olusturan_kullanici_id, olusturan_kullanici, created_at, updated_at
+        FROM masraflar
+        WHERE {where_sql}
+        ORDER BY {tarih_expr} DESC, id DESC
+        LIMIT %s
+        """,
+        where_params + (OZET_LIMIT,),
+    ) or []
+
+    kategoriler = [
+        {
+            "kategori": r.get("kategori"),
+            "adet": int(r.get("adet") or 0),
+            "toplam_tutar": _json_num(r.get("toplam_tutar")),
+            "toplam_kdv": _json_num(r.get("toplam_kdv")),
+        }
+        for r in kat_rows
+    ]
+    kayitlar = [_masraf_to_dict(dict(r)) for r in kayit_rows]
+
+    return jsonify(
+        {
+            "ok": True,
+            "baslangic": baslangic,
+            "bitis": bitis,
+            "durum": durum,
+            "ozet": {
+                "adet": int(ozet_row.get("adet") or 0),
+                "toplam_tutar": _json_num(ozet_row.get("toplam_tutar")) or 0.0,
+                "toplam_kdv": _json_num(ozet_row.get("toplam_kdv")) or 0.0,
+            },
+            "kategoriler": kategoriler,
+            "kayitlar": kayitlar,
+            "kayit_limit": OZET_LIMIT,
+            "kayit_adet": len(kayitlar),
+        }
+    )
 
 
 @bp.route("/api/<int:masraf_id>", methods=["GET"])
