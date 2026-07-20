@@ -7,9 +7,12 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import mimetypes
 import os
 from pathlib import Path
+
+_log = logging.getLogger(__name__)
 
 _web_dir = Path(__file__).resolve().parent
 _root_dir = _web_dir.parent
@@ -94,6 +97,18 @@ def _load_image_data_url(path: Path) -> str:
     return f"data:{_mime_for(path)};base64,{b64}"
 
 
+def _log_groq_issue(image_path, status_code, raw_snippet, *, neden: str) -> None:
+    """Groq hata/yanıt teşhisi — sadece log; davranış değiştirmez."""
+    snippet = (raw_snippet or "")[:2000]
+    _log.warning(
+        "Groq fis_oku sorun: neden=%s status_code=%s image_path=%s raw_body=%s",
+        neden,
+        status_code,
+        image_path,
+        snippet,
+    )
+
+
 def fis_oku(
     image_path,
     *,
@@ -155,6 +170,13 @@ def fis_oku(
         return False, None, f"AI servisine ulaşılamadı: {e}", None
 
     raw_body = (resp.text or "")[:8000]
+    if resp.status_code != 200:
+        _log_groq_issue(
+            str(path),
+            resp.status_code,
+            raw_body,
+            neden=f"http_{resp.status_code}",
+        )
     if resp.status_code == 429:
         return False, None, "AI servisi yoğun; biraz sonra tekrar deneyin.", raw_body
     if resp.status_code == 401:
@@ -177,20 +199,44 @@ def fis_oku(
     try:
         body = resp.json()
     except Exception:
+        _log_groq_issue(
+            str(path),
+            resp.status_code,
+            raw_body,
+            neden="json_parse",
+        )
         return False, None, "AI yanıtı okunamadı.", raw_body
 
     try:
         content = body["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError):
+        _log_groq_issue(
+            str(path),
+            resp.status_code,
+            raw_body,
+            neden="beklenen_icerik_yok",
+        )
         return False, None, "AI yanıtında beklenen içerik yok.", raw_body
 
     raw = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
     try:
         parsed = json.loads(content) if isinstance(content, str) else content
     except (json.JSONDecodeError, TypeError):
+        _log_groq_issue(
+            str(path),
+            resp.status_code,
+            raw,
+            neden="gecersiz_json",
+        )
         return False, None, "Fiş okunamadı (geçersiz JSON).", raw
 
     if not isinstance(parsed, dict):
+        _log_groq_issue(
+            str(path),
+            resp.status_code,
+            raw,
+            neden="beklenmeyen_yanit",
+        )
         return False, None, "Fiş okunamadı (beklenmeyen yanıt).", raw
 
     return True, parsed, None, raw
