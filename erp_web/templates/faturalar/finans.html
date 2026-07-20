@@ -1102,7 +1102,10 @@
 
     <div class="finans-masraf-head">
       <h3><i class="fa fa-receipt"></i> Onaylı Masraflar</h3>
-      <a href="{{ url_for('fis_masraflari.onay_bekleyenler') }}" target="_blank" rel="noopener">Onay bekleyenler →</a>
+      <span style="display:inline-flex; gap:14px; align-items:center; flex-wrap:wrap;">
+        <a href="{{ url_for('fis_masraflari.onay_bekleyenler') }}" target="_blank" rel="noopener">Onay bekleyenler →</a>
+        <a href="{{ url_for('fis_masraflari.yeni') }}" target="_blank" rel="noopener">Yeni fiş yükle</a>
+      </span>
     </div>
 
     <div class="finans-masraf-filtre">
