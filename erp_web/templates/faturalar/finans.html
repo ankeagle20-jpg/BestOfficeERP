@@ -1161,6 +1161,11 @@ window.switchTab = function switchTab(index) {
     panes.forEach(function (c, i) {
         c.classList.toggle('active', i === index);
     });
+    /* Masraflar (tab-6): GİB otomatik/tekil paneli gizle; diğer sekmelerde geri göster */
+    var autoWrap = document.querySelector('.auto-wrap');
+    if (autoWrap) {
+        autoWrap.style.display = (index === 6) ? 'none' : '';
+    }
     if (index === 4) {
         if (typeof faturaRaporVarsayilanTarihlerDoldur === 'function') {
             try {
