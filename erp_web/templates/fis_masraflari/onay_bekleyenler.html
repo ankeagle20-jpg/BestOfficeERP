@@ -78,6 +78,58 @@
 .masraf-btn.ghost:hover { background: #455a64; }
 .masraf-btn:disabled { opacity: 0.55; cursor: not-allowed; }
 .masraf-tutar { font-weight: 700; color: #80cbc4; white-space: nowrap; }
+.masraf-arama {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.masraf-arama label {
+  font-size: 12px;
+  color: #90a4ae;
+  font-weight: 600;
+}
+.masraf-arama input {
+  flex: 1;
+  min-width: 200px;
+  max-width: 420px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid #2d4060;
+  background: #0a1929;
+  color: #e3f2fd;
+  font-size: 13px;
+}
+.masraf-arama input:focus {
+  outline: none;
+  border-color: #0288d1;
+}
+th.masraf-sortable {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+th.masraf-sortable:hover { color: #81d4fa; }
+th.masraf-sortable .sort-ind {
+  display: inline-block;
+  margin-left: 4px;
+  font-size: 10px;
+  color: #607d8b;
+  min-width: 1em;
+}
+th.masraf-sortable.sorted-asc .sort-ind,
+th.masraf-sortable.sorted-desc .sort-ind {
+  color: #4fc3f7;
+}
+#masraf-tfoot td {
+  font-weight: 700;
+  border-top: 2px solid #2d4060;
+  background: rgba(2, 136, 209, 0.08);
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+#masraf-tfoot .masraf-tutar { color: #4db6ac; }
 </style>
 
 <div class="erp-page-wrap">
@@ -92,6 +144,11 @@
     </div>
   </div>
 
+  <div class="masraf-arama">
+    <label for="masraf-arama-input"><i class="fa fa-search"></i> Ara</label>
+    <input type="search" id="masraf-arama-input" placeholder="Mağaza, fiş no veya kategori…" autocomplete="off">
+  </div>
+
   <div class="masraf-banner info" id="masraf-loading">Liste yükleniyor…</div>
   <div class="masraf-banner err" id="masraf-hata"></div>
 
@@ -101,21 +158,30 @@
         <thead>
           <tr>
             <th style="width:70px;">Fiş</th>
-            <th style="width:110px;">Tarih</th>
-            <th style="width:110px;">Fiş No</th>
-            <th>Mağaza</th>
-            <th style="width:90px;">KDV Oranı</th>
-            <th style="width:110px;">KDV Tutarı</th>
-            <th style="width:120px;">Toplam</th>
-            <th style="width:120px;">Kategori</th>
+            <th class="masraf-sortable" data-sort="tarih" style="width:110px;">Tarih <span class="sort-ind"></span></th>
+            <th class="masraf-sortable" data-sort="fis_no" style="width:110px;">Fiş No <span class="sort-ind"></span></th>
+            <th class="masraf-sortable" data-sort="magaza_adi">Mağaza <span class="sort-ind"></span></th>
+            <th class="masraf-sortable" data-sort="kdv_orani" style="width:90px;">KDV Oranı <span class="sort-ind"></span></th>
+            <th class="masraf-sortable" data-sort="kdv_tutari" style="width:110px;">KDV Tutarı <span class="sort-ind"></span></th>
+            <th class="masraf-sortable" data-sort="toplam_tutar" style="width:120px;">Toplam <span class="sort-ind"></span></th>
+            <th class="masraf-sortable" data-sort="kategori" style="width:120px;">Kategori <span class="sort-ind"></span></th>
             <th style="width:110px;"></th>
           </tr>
         </thead>
         <tbody id="masraf-tbody">
         </tbody>
+        <tfoot id="masraf-tfoot" style="display:none;">
+          <tr>
+            <td colspan="5" style="text-align:right; color:#90a4ae;">Görünen toplam</td>
+            <td class="masraf-tutar" id="tfoot-kdv">0,00 TL</td>
+            <td class="masraf-tutar" id="tfoot-toplam">0,00 TL</td>
+            <td colspan="2"></td>
+          </tr>
+        </tfoot>
       </table>
     </div>
     <div class="masraf-empty" id="masraf-bos" style="display:none;">Onay bekleyen masraf yok.</div>
+    <div class="masraf-empty" id="masraf-filtre-bos" style="display:none;">Aramanızla eşleşen kayıt yok.</div>
   </div>
 </div>
 {% endblock %}
@@ -126,9 +192,22 @@
   var API_LISTE = "{{ url_for('fis_masraflari.api_liste') }}";
   var tbody = document.getElementById("masraf-tbody");
   var bos = document.getElementById("masraf-bos");
+  var filtreBos = document.getElementById("masraf-filtre-bos");
   var loading = document.getElementById("masraf-loading");
   var hata = document.getElementById("masraf-hata");
   var btnYenile = document.getElementById("btn-yenile");
+  var aramaInput = document.getElementById("masraf-arama-input");
+  var tfoot = document.getElementById("masraf-tfoot");
+  var tfootKdv = document.getElementById("tfoot-kdv");
+  var tfootToplam = document.getElementById("tfoot-toplam");
+
+  var tumKayitlar = [];
+  var sortKey = null;
+  var sortDir = "asc";
+  var aramaQ = "";
+  var aramaTimer = null;
+
+  var NUMERIC_KEYS = { kdv_orani: 1, kdv_tutari: 1, toplam_tutar: 1 };
 
   function showLoading(on) {
     loading.classList.toggle("show", !!on);
@@ -162,14 +241,111 @@
   function gorselUrl(id) {
     return "/fis-masraflari/gorsel/" + encodeURIComponent(id);
   }
+  function toNum(v) {
+    if (v === null || v === undefined || v === "") return null;
+    var n = Number(v);
+    return isNaN(n) ? null : n;
+  }
+  function normTr(s) {
+    return String(s == null ? "" : s).toLocaleLowerCase("tr-TR");
+  }
+
+  function filtrele(kayitlar) {
+    var q = normTr(aramaQ).trim();
+    if (!q) return kayitlar.slice();
+    return kayitlar.filter(function (k) {
+      return (
+        normTr(k.magaza_adi).indexOf(q) !== -1 ||
+        normTr(k.fis_no).indexOf(q) !== -1 ||
+        normTr(k.kategori).indexOf(q) !== -1
+      );
+    });
+  }
+
+  function sirala(kayitlar) {
+    if (!sortKey) return kayitlar;
+    var key = sortKey;
+    var dir = sortDir === "desc" ? -1 : 1;
+    var numeric = !!NUMERIC_KEYS[key];
+    var out = kayitlar.slice();
+    out.sort(function (a, b) {
+      var va = a[key];
+      var vb = b[key];
+      if (numeric) {
+        var na = toNum(va);
+        var nb = toNum(vb);
+        if (na === null && nb === null) return 0;
+        if (na === null) return 1;
+        if (nb === null) return -1;
+        if (na < nb) return -1 * dir;
+        if (na > nb) return 1 * dir;
+        return 0;
+      }
+      if (key === "tarih") {
+        var ta = va ? String(va) : "";
+        var tb = vb ? String(vb) : "";
+        if (!ta && !tb) return 0;
+        if (!ta) return 1;
+        if (!tb) return -1;
+        if (ta < tb) return -1 * dir;
+        if (ta > tb) return 1 * dir;
+        return 0;
+      }
+      var sa = va == null ? "" : String(va);
+      var sb = vb == null ? "" : String(vb);
+      return sa.localeCompare(sb, "tr", { sensitivity: "base", numeric: true }) * dir;
+    });
+    return out;
+  }
+
+  function updateSortIndicators() {
+    var ths = document.querySelectorAll("th.masraf-sortable");
+    for (var i = 0; i < ths.length; i++) {
+      var th = ths[i];
+      var ind = th.querySelector(".sort-ind");
+      th.classList.remove("sorted-asc", "sorted-desc");
+      if (ind) ind.textContent = "";
+      if (th.getAttribute("data-sort") === sortKey) {
+        th.classList.add(sortDir === "desc" ? "sorted-desc" : "sorted-asc");
+        if (ind) ind.textContent = sortDir === "desc" ? "▼" : "▲";
+      }
+    }
+  }
+
+  function updateFooter(kayitlar) {
+    var sumKdv = 0;
+    var sumTop = 0;
+    (kayitlar || []).forEach(function (k) {
+      var kd = toNum(k.kdv_tutari);
+      var tp = toNum(k.toplam_tutar);
+      if (kd !== null) sumKdv += kd;
+      if (tp !== null) sumTop += tp;
+    });
+    tfootKdv.textContent = fmtTutar(sumKdv);
+    tfootToplam.textContent = fmtTutar(sumTop);
+    tfoot.style.display = "table-footer-group";
+  }
 
   function render(kayitlar) {
     tbody.innerHTML = "";
-    if (!kayitlar || !kayitlar.length) {
+    bos.style.display = "none";
+    filtreBos.style.display = "none";
+
+    var hamBos = !tumKayitlar || !tumKayitlar.length;
+    if (hamBos) {
       bos.style.display = "block";
+      updateFooter([]);
+      updateSortIndicators();
       return;
     }
-    bos.style.display = "none";
+
+    if (!kayitlar || !kayitlar.length) {
+      filtreBos.style.display = "block";
+      updateFooter([]);
+      updateSortIndicators();
+      return;
+    }
+
     kayitlar.forEach(function (k) {
       var id = k.id;
       var tr = document.createElement("tr");
@@ -191,6 +367,12 @@
         '<td><a class="masraf-btn" href="' + esc(detayUrl(id)) + '"><i class="fa fa-edit"></i> Düzenle</a></td>';
       tbody.appendChild(tr);
     });
+    updateFooter(kayitlar);
+    updateSortIndicators();
+  }
+
+  function uygula() {
+    render(sirala(filtrele(tumKayitlar)));
   }
 
   function yukle() {
@@ -208,17 +390,43 @@
         showLoading(false);
         if (!res.body || !res.body.ok) {
           showErr((res.body && res.body.mesaj) || ("Liste alınamadı (HTTP " + res.status + ")."));
+          tumKayitlar = [];
           render([]);
           return;
         }
-        render(res.body.kayitlar || []);
+        tumKayitlar = res.body.kayitlar || [];
+        uygula();
       })
       .catch(function (e) {
         showLoading(false);
         showErr("Bağlantı hatası: " + (e && e.message ? e.message : e));
+        tumKayitlar = [];
         render([]);
       });
   }
+
+  document.querySelectorAll("th.masraf-sortable").forEach(function (th) {
+    th.addEventListener("click", function () {
+      var key = th.getAttribute("data-sort");
+      if (!key) return;
+      if (sortKey === key) {
+        sortDir = sortDir === "asc" ? "desc" : "asc";
+      } else {
+        sortKey = key;
+        sortDir = "asc";
+      }
+      uygula();
+    });
+  });
+
+  aramaInput.addEventListener("input", function () {
+    var val = aramaInput.value;
+    if (aramaTimer) clearTimeout(aramaTimer);
+    aramaTimer = setTimeout(function () {
+      aramaQ = val;
+      uygula();
+    }, 200);
+  });
 
   btnYenile.addEventListener("click", yukle);
   yukle();
