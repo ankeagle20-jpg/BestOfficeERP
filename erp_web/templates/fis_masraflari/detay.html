@@ -250,6 +250,7 @@
           <button type="button" class="masraf-btn save" id="btn-kaydet"><i class="fa fa-save"></i> Kaydet</button>
           <button type="button" class="masraf-btn ok" id="btn-onayla"><i class="fa fa-check"></i> Onayla</button>
           <button type="button" class="masraf-btn danger" id="btn-reddet"><i class="fa fa-times"></i> Reddet</button>
+          <button type="button" class="masraf-btn danger" id="btn-sil"><i class="fa fa-trash"></i> Sil</button>
         </div>
       </form>
     </div>
@@ -265,6 +266,7 @@
   var API_GUNCELLE = "/fis-masraflari/api/" + MASRAF_ID + "/guncelle";
   var API_ONAYLA = "/fis-masraflari/api/" + MASRAF_ID + "/onayla";
   var API_REDDET = "/fis-masraflari/api/" + MASRAF_ID + "/reddet";
+  var API_SIL = "/fis-masraflari/api/" + MASRAF_ID + "/sil";
   var LISTE_URL = "{{ url_for('fis_masraflari.onay_bekleyenler') }}";
   var GORSEL_URL = "/fis-masraflari/gorsel/" + MASRAF_ID;
 
@@ -281,6 +283,7 @@
   var btnKaydet = document.getElementById("btn-kaydet");
   var btnOnayla = document.getElementById("btn-onayla");
   var btnReddet = document.getElementById("btn-reddet");
+  var btnSil = document.getElementById("btn-sil");
   var btnUrunEkle = document.getElementById("btn-urun-ekle");
   var actions = document.getElementById("masraf-actions");
 
@@ -304,7 +307,7 @@
   function setBusy(on) {
     elLoading.classList.toggle("show", !!on);
     if (on) elLoading.textContent = "İşleniyor…";
-    [btnKaydet, btnOnayla, btnReddet, btnUrunEkle].forEach(function (b) {
+    [btnKaydet, btnOnayla, btnReddet, btnSil, btnUrunEkle].forEach(function (b) {
       if (b) b.disabled = !!on || readonlyMode;
     });
   }
@@ -449,8 +452,10 @@
     return fetch(url, opts).then(parseJsonResponse);
   }
 
-  function yukle() {
-    clearMsgs();
+  function yukle(skipClearMsgs) {
+    if (skipClearMsgs !== true) {
+      clearMsgs();
+    }
     showBanner(elRo, "");
     elLoading.classList.add("show");
     elLoading.textContent = "Kayıt yükleniyor…";
@@ -554,6 +559,29 @@
       .catch(function (e) {
         setBusy(false);
         showBanner(elHata, "Bağlantı hatası: " + (e && e.message ? e.message : e));
+      });
+  });
+
+  btnSil.addEventListener("click", function () {
+    if (readonlyMode) return;
+    if (!window.confirm("Bu fişi kalıcı olarak silmek istediğinize emin misiniz? Bu işlem geri alınamaz.")) return;
+    clearMsgs();
+    setBusy(true);
+    postJson(API_SIL)
+      .then(function (res) {
+        setBusy(false);
+        if (!res.body || !res.body.ok) {
+          showBanner(elHata, (res.body && res.body.mesaj) || ("Silinemedi (HTTP " + res.status + ")."));
+          yukle(true);
+          return;
+        }
+        showBanner(elOk, res.body.mesaj || "Fiş silindi.");
+        window.setTimeout(function () { window.location.href = LISTE_URL; }, 700);
+      })
+      .catch(function (e) {
+        setBusy(false);
+        showBanner(elHata, "Bağlantı hatası: " + (e && e.message ? e.message : e));
+        yukle(true);
       });
   });
 
