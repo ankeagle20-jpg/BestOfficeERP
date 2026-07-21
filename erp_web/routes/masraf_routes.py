@@ -5,14 +5,17 @@ Prefix: /fis-masraflari
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import mimetypes
 import os
+import re
 import uuid
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
+import psycopg2
 from flask import Blueprint, jsonify, render_template, request, send_file, url_for
 from flask_login import current_user
 from werkzeug.utils import secure_filename
@@ -74,6 +77,160 @@ def _unlink_quiet(path: Path) -> None:
             path.unlink()
     except OSError:
         pass
+
+
+def _sha256_file(path: Path) -> str | None:
+    """Dosyanın SHA-256 hex özetini döner; okunamazsa None."""
+    try:
+        h = hashlib.sha256()
+        with path.open("rb") as fh:
+            while True:
+                chunk = fh.read(1024 * 1024)
+                if not chunk:
+                    break
+                h.update(chunk)
+        return h.hexdigest()
+    except OSError:
+        return None
+
+
+def _normalize_magaza(s) -> str | None:
+    """Mağaza adı karşılaştırma anahtarı: trim, TR-aware lower, boşluk sadeleştir."""
+    if s is None:
+        return None
+    if not isinstance(s, str):
+        s = str(s)
+    t = s.strip()
+    if not t:
+        return None
+    # Türkçe büyük harfler (lower() önce İ→i yapılmazsa bozulur)
+    t = (
+        t.replace("İ", "i")
+        .replace("I", "ı")
+        .replace("Ş", "ş")
+        .replace("Ğ", "ğ")
+        .replace("Ü", "ü")
+        .replace("Ö", "ö")
+        .replace("Ç", "ç")
+    )
+    t = t.lower()
+    t = re.sub(r"\s+", " ", t).strip()
+    return t or None
+
+
+def _find_duplicate_masraf(
+    file_hash,
+    magaza,
+    fis_no,
+    tarih,
+    toplam_tutar,
+):
+    """
+    Aktif (onay_bekliyor / onaylandi) kayıtlar arasında duplike ara.
+    1) fis_gorsel_hash eşleşmesi
+    2) fis_no doluysa: normalize(magaza) + fis_no + tarih
+    3) fis_no boşsa: normalize(magaza) + tarih + toplam_tutar
+    reddedildi kayıtlar bilinçli olarak hariç.
+    """
+    aktif = ("onay_bekliyor", "onaylandi")
+
+    if file_hash:
+        row = fetch_one(
+            """
+            SELECT id, durum, magaza_adi, fis_no, tarih, toplam_tutar
+            FROM masraflar
+            WHERE durum IN %s
+              AND fis_gorsel_hash = %s
+            ORDER BY id ASC
+            LIMIT 1
+            """,
+            (aktif, file_hash),
+        )
+        if row:
+            return row
+
+    mag_n = _normalize_magaza(magaza)
+    if not tarih or not mag_n:
+        return None
+
+    fis_n = None
+    if fis_no is not None:
+        fis_n = str(fis_no).strip() or None
+
+    if fis_n:
+        rows = (
+            fetch_all(
+                """
+                SELECT id, durum, magaza_adi, fis_no, tarih, toplam_tutar
+                FROM masraflar
+                WHERE durum IN %s
+                  AND tarih = %s
+                  AND fis_no IS NOT NULL
+                  AND TRIM(fis_no) = %s
+                ORDER BY id ASC
+                """,
+                (aktif, tarih, fis_n),
+            )
+            or []
+        )
+        for r in rows:
+            if _normalize_magaza(r.get("magaza_adi")) == mag_n:
+                return r
+        return None
+
+    if toplam_tutar is None:
+        return None
+
+    rows = (
+        fetch_all(
+            """
+            SELECT id, durum, magaza_adi, fis_no, tarih, toplam_tutar
+            FROM masraflar
+            WHERE durum IN %s
+              AND tarih = %s
+              AND toplam_tutar = %s
+            ORDER BY id ASC
+            """,
+            (aktif, tarih, toplam_tutar),
+        )
+        or []
+    )
+    for r in rows:
+        if _normalize_magaza(r.get("magaza_adi")) == mag_n:
+            return r
+    return None
+
+
+def _duplicate_conflict_response(dup_row, *, fallback_magaza=None, fallback_tarih=None, fallback_tutar=None):
+    """HTTP 409 gövdesi — mevcut kayıt bilgisiyle."""
+    mid = dup_row.get("id")
+    mag = dup_row.get("magaza_adi") or fallback_magaza or "—"
+    tar = dup_row.get("tarih") or fallback_tarih or "—"
+    if hasattr(tar, "isoformat"):
+        tar = tar.isoformat()
+    tut = dup_row.get("toplam_tutar")
+    if tut is None:
+        tut = fallback_tutar
+    if tut is None:
+        tut_s = "—"
+    else:
+        try:
+            tut_s = f"{float(tut):.2f}"
+        except (TypeError, ValueError):
+            tut_s = str(tut)
+    mesaj = f"Bu fiş zaten kayıtlı ({mag}, {tar}, {tut_s} TL — #{mid})."
+    return (
+        jsonify(
+            {
+                "ok": False,
+                "mesaj": mesaj,
+                "duplicate": True,
+                "mevcut_masraf_id": mid,
+                "mevcut_durum": dup_row.get("durum"),
+            }
+        ),
+        409,
+    )
 
 
 @bp.route("/yeni", methods=["GET"])
@@ -141,6 +298,13 @@ def api_fis_oku():
             {"ok": False, "mesaj": f"Dosya çok büyük (max {MAX_BYTES // (1024 * 1024)} MB)."}
         ), 400
 
+    # Aynı görsel (hash) — AI'ya gitmeden yakala (TPM tasarrufu + reddedilmemiş aktif kayıt)
+    file_hash = _sha256_file(abs_path)
+    dup_hash = _find_duplicate_masraf(file_hash, None, None, None, None)
+    if dup_hash:
+        _unlink_quiet(abs_path)
+        return _duplicate_conflict_response(dup_hash)
+
     ok, result, err, raw = fis_oku(abs_path)
     if not ok:
         _unlink_quiet(abs_path)
@@ -171,6 +335,19 @@ def api_fis_oku():
     urunler_json = json.dumps(urunler, ensure_ascii=False)
     ai_ham = raw if isinstance(raw, str) else json.dumps(raw, ensure_ascii=False)
 
+    # İş anahtarı (magaza/fis_no/tarih veya magaza/tarih/tutar) — AI sonrası
+    dup = _find_duplicate_masraf(
+        file_hash, magaza_adi, fis_no, tarih, toplam_tutar
+    )
+    if dup:
+        _unlink_quiet(abs_path)
+        return _duplicate_conflict_response(
+            dup,
+            fallback_magaza=magaza_adi,
+            fallback_tarih=tarih,
+            fallback_tutar=toplam_tutar,
+        )
+
     uid = getattr(current_user, "id", None)
     uname = (
         getattr(current_user, "full_name", None)
@@ -183,11 +360,11 @@ def api_fis_oku():
             """
             INSERT INTO masraflar (
                 magaza_adi, fis_no, tarih, toplam_tutar, kdv_orani, kdv_tutari,
-                urunler_json, kategori, fis_gorsel_path, durum, ai_ham_yanit,
+                urunler_json, kategori, fis_gorsel_path, fis_gorsel_hash, durum, ai_ham_yanit,
                 olusturan_kullanici_id, olusturan_kullanici, created_at, updated_at
             ) VALUES (
                 %s, %s, %s, %s, %s, %s,
-                %s, %s, %s, 'onay_bekliyor', %s,
+                %s, %s, %s, %s, 'onay_bekliyor', %s,
                 %s, %s, NOW(), NOW()
             )
             RETURNING id, durum, created_at
@@ -202,10 +379,34 @@ def api_fis_oku():
                 urunler_json,
                 kategori,
                 rel_path,
+                file_hash,
                 ai_ham,
                 uid,
                 uname,
             ),
+        )
+    except psycopg2.IntegrityError:
+        # Race: aynı hash ile eşzamanlı INSERT — UNIQUE partial index
+        _unlink_quiet(abs_path)
+        dup2 = _find_duplicate_masraf(
+            file_hash, magaza_adi, fis_no, tarih, toplam_tutar
+        )
+        if dup2:
+            return _duplicate_conflict_response(
+                dup2,
+                fallback_magaza=magaza_adi,
+                fallback_tarih=tarih,
+                fallback_tutar=toplam_tutar,
+            )
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "mesaj": "Bu fiş zaten kayıtlı (eşzamanlı kayıt çakışması).",
+                    "duplicate": True,
+                }
+            ),
+            409,
         )
     except Exception as e:
         _unlink_quiet(abs_path)

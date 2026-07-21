@@ -1070,6 +1070,7 @@ def ensure_masraflar_table():
                 urunler_json          TEXT,
                 kategori              TEXT,
                 fis_gorsel_path       TEXT,
+                fis_gorsel_hash       TEXT,
                 durum                 TEXT NOT NULL DEFAULT 'onay_bekliyor',
                 ai_ham_yanit          TEXT,
                 olusturan_kullanici_id INTEGER,
@@ -1079,12 +1080,25 @@ def ensure_masraflar_table():
             )
             """
         )
+        # Mevcut tablolara soft migration (veri korunur)
+        execute(
+            "ALTER TABLE masraflar ADD COLUMN IF NOT EXISTS fis_gorsel_hash TEXT"
+        )
         execute(
             "CREATE INDEX IF NOT EXISTS idx_masraflar_durum_created "
             "ON masraflar (durum, created_at DESC)"
         )
         execute(
             "CREATE INDEX IF NOT EXISTS idx_masraflar_tarih ON masraflar (tarih)"
+        )
+        # Eski global unique varsa kaldır (reddedildi yeniden yüklemeyi engelliyordu)
+        execute("DROP INDEX IF EXISTS uq_masraflar_fis_gorsel_hash")
+        # Yalnızca aktif kayıtlarda aynı görsel hash'i tek olsun
+        execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_masraflar_fis_gorsel_hash_aktif "
+            "ON masraflar (fis_gorsel_hash) "
+            "WHERE fis_gorsel_hash IS NOT NULL "
+            "AND durum IN ('onay_bekliyor', 'onaylandi')"
         )
     except Exception as e:
         print(f"masraflar: {e}")
