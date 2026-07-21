@@ -22,7 +22,7 @@
     .fis-ozet dd { font-size: 14px; margin: 2px 0 0; word-break: break-word; }
     .fis-urunler { margin-top: 10px; padding-left: 18px; font-size: 13px; color: var(--text); }
     .fis-actions { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
-    #fis-file-input { display: none; }
+    #fis-file-input, #fis-multi-input { display: none; }
     .fis-onay-link {
         display: inline-block;
         margin: 4px 0 12px;
@@ -33,18 +33,44 @@
     }
     .fis-onay-link:hover { text-decoration: underline; }
     .fis-onay-link.block { display: block; text-align: center; margin-top: 10px; margin-bottom: 0; }
+    .fis-queue-wrap { display: none; margin: 14px 0; }
+    .fis-queue-wrap.show { display: block; }
+    .fis-queue-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+    .fis-queue-progress { font-size: 13px; font-weight: 700; color: var(--neon-blue); }
+    .fis-queue-summary { font-size: 12px; color: var(--muted); margin-bottom: 10px; line-height: 1.4; }
+    .fis-queue-list { display: flex; flex-direction: column; gap: 8px; }
+    .fis-queue-item {
+        display: flex; align-items: flex-start; gap: 10px; padding: 10px;
+        border-radius: 10px; border: 1px solid var(--border); background: var(--card);
+    }
+    .fis-queue-item img { width: 52px; height: 52px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); flex-shrink: 0; }
+    .fis-queue-body { flex: 1; min-width: 0; }
+    .fis-queue-name { font-size: 12px; font-weight: 600; word-break: break-all; }
+    .fis-queue-status { font-size: 12px; margin-top: 4px; color: var(--muted); }
+    .fis-queue-status.waiting { color: var(--muted); }
+    .fis-queue-status.reading { color: var(--neon-blue); font-weight: 600; }
+    .fis-queue-status.done { color: var(--neon-green); font-weight: 600; }
+    .fis-queue-status.error { color: var(--neon-red); }
+    .fis-queue-detail { font-size: 11px; margin-top: 3px; color: var(--muted); word-break: break-word; }
+    .fis-queue-retry {
+        display: inline-block; margin-top: 6px; font-size: 12px; font-weight: 600;
+        color: var(--neon-blue); cursor: pointer; text-decoration: underline; border: none; background: none; padding: 0;
+    }
+    .fis-queue-retry:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>
 {% endblock %}
 {% block content %}
 <div class="card">
     <h3><i class="fa fa-receipt"></i> Masraf Fişi Yükle</h3>
     <a href="{{ url_for('fis_masraflari.onay_bekleyenler') }}" class="fis-onay-link">Onay bekleyenler →</a>
-    <p class="fis-hint">Fişin fotoğrafını çekin veya galeriden seçin. Sistem AI ile okuyup onay bekleyen kayıt oluşturur. Düzenleme / onay sonraki aşamada gelecek.</p>
+    <p class="fis-hint">Fişin fotoğrafını çekin veya galeriden seçin. Sistem AI ile okuyup onay bekleyen kayıt oluşturur. Galeriden birden fazla fiş seçebilirsiniz (en fazla 10). Düzenleme / onay sonraki aşamada gelecek.</p>
 
     <input type="file" id="fis-file-input" accept="image/*" capture="environment">
+    <input type="file" id="fis-multi-input" accept="image/*" multiple>
 
     <div class="fis-actions" id="fis-pick-actions">
         <button type="button" class="btn btn-green btn-block" id="fis-btn-cek"><i class="fa fa-camera"></i> Fotoğraf Çek / Seç</button>
+        <button type="button" class="btn btn-gray btn-block" id="fis-btn-multi"><i class="fa fa-images"></i> Galeriden Çoklu Seç</button>
     </div>
 
     <div class="fis-preview-wrap" id="fis-preview-wrap">
@@ -53,21 +79,30 @@
         <button type="button" class="btn btn-blue btn-block" id="fis-btn-yukle" style="margin-top:12px;"><i class="fa fa-cloud-upload-alt"></i> Yükle ve Oku</button>
     </div>
 
+    <div class="fis-queue-wrap" id="fis-queue-wrap">
+        <div class="fis-queue-head">
+            <div class="fis-queue-progress" id="fis-queue-progress">0/0</div>
+            <button type="button" class="btn btn-blue" id="fis-btn-queue-all"><i class="fa fa-cloud-upload-alt"></i> Hepsini Yükle ve Oku</button>
+        </div>
+        <div class="fis-queue-summary" id="fis-queue-summary"></div>
+        <div class="fis-queue-list" id="fis-queue-list"></div>
+    </div>
+
     <div class="fis-loading" id="fis-loading"><span class="spin"></span> Fiş okunuyor…</div>
     <div class="fis-alert ok" id="fis-msg-ok"></div>
     <div class="fis-alert err" id="fis-msg-err"></div>
 
     <div class="fis-ozet" id="fis-ozet">
         <div class="card">
-            <h3><i class="fa fa-check-circle"></i> Okunan özet (salt okunur)</h3>
+            <h3><i class="fa fa-check-circle"></i> Okunan Özet (salt okunur)</h3>
             <dl>
-                <dt>Mağaza</dt><dd id="oz-magaza">—</dd>
-                <dt>Fiş No</dt><dd id="oz-fis-no">—</dd>
-                <dt>Tarih</dt><dd id="oz-tarih">—</dd>
-                <dt>Toplam</dt><dd id="oz-toplam">—</dd>
-                <dt>KDV</dt><dd id="oz-kdv">—</dd>
-                <dt>Kategori</dt><dd id="oz-kategori">—</dd>
-                <dt>Kayıt No</dt><dd id="oz-id">—</dd>
+                <dt>Mağaza</dt><dd id="oz-magaza">-</dd>
+                <dt>Fiş No</dt><dd id="oz-fis-no">-</dd>
+                <dt>Tarih</dt><dd id="oz-tarih">-</dd>
+                <dt>Toplam</dt><dd id="oz-toplam">-</dd>
+                <dt>KDV</dt><dd id="oz-kdv">-</dd>
+                <dt>Kategori</dt><dd id="oz-kategori">-</dd>
+                <dt>Kayıt No</dt><dd id="oz-id">-</dd>
             </dl>
             <div style="margin-top:10px; font-size:11px; color:var(--muted);">Ürünler</div>
             <ul class="fis-urunler" id="oz-urunler"></ul>
@@ -81,20 +116,36 @@
 <script>
 (function () {
     var API = {{ url_for("fis_masraflari.api_fis_oku") | tojson }};
+    var MAX_FILES = 10;
+    var MAX_BYTES = 10 * 1024 * 1024;
+    var ALLOWED_EXT = { png: 1, jpg: 1, jpeg: 1, webp: 1 };
+    var MAX_429_RETRIES = 2;
+
     var input = document.getElementById("fis-file-input");
+    var multiInput = document.getElementById("fis-multi-input");
     var btnCek = document.getElementById("fis-btn-cek");
+    var btnMulti = document.getElementById("fis-btn-multi");
     var btnYukle = document.getElementById("fis-btn-yukle");
+    var btnQueueAll = document.getElementById("fis-btn-queue-all");
     var btnYeni = document.getElementById("fis-btn-yeni");
     var previewWrap = document.getElementById("fis-preview-wrap");
     var previewImg = document.getElementById("fis-preview-img");
     var fileNameEl = document.getElementById("fis-file-name");
     var pickActions = document.getElementById("fis-pick-actions");
+    var queueWrap = document.getElementById("fis-queue-wrap");
+    var queueProgress = document.getElementById("fis-queue-progress");
+    var queueSummary = document.getElementById("fis-queue-summary");
+    var queueList = document.getElementById("fis-queue-list");
     var loading = document.getElementById("fis-loading");
     var msgOk = document.getElementById("fis-msg-ok");
     var msgErr = document.getElementById("fis-msg-err");
     var ozet = document.getElementById("fis-ozet");
     var selectedFile = null;
     var objectUrl = null;
+    var queue = [];
+    var queueSeq = 0;
+    var queueProcessing = false;
+    var queueStopped = false;
 
     function hideAlerts() {
         msgOk.classList.remove("show");
@@ -104,46 +155,101 @@
     }
     function showOk(t) { hideAlerts(); msgOk.textContent = t; msgOk.classList.add("show"); }
     function showErr(t) { hideAlerts(); msgErr.textContent = t; msgErr.classList.add("show"); }
-    function setLoading(on) {
+    function setLoading(on, text) {
         loading.classList.toggle("show", !!on);
-        btnCek.disabled = !!on;
-        btnYukle.disabled = !!on;
-        if (btnYeni) btnYeni.disabled = !!on;
+        if (text) loading.lastChild.textContent = text;
+        else if (loading.lastChild) loading.lastChild.textContent = " Fiş okunuyor…";
+        btnCek.disabled = !!on || queueProcessing;
+        btnMulti.disabled = !!on || queueProcessing;
+        btnYukle.disabled = !!on || queueProcessing;
+        if (btnQueueAll) btnQueueAll.disabled = !!on || queueProcessing;
+        if (btnYeni) btnYeni.disabled = !!on || queueProcessing;
     }
     function fmtMoney(v) {
-        if (v === null || v === undefined || v === "") return "—";
+        if (v === null || v === undefined || v === "") return "-";
         var n = Number(v);
         if (isNaN(n)) return String(v);
         return n.toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " TL";
     }
-    function resetForm() {
+    function fileExt(name) {
+        var n = (name || "").toLowerCase();
+        var i = n.lastIndexOf(".");
+        return i >= 0 ? n.slice(i + 1) : "";
+    }
+    function validateFileClient(f) {
+        var ext = fileExt(f.name);
+        if (!ALLOWED_EXT[ext]) {
+            return "Geçersiz format (" + (ext || "?") + "). İzin verilen: png, jpg, jpeg, webp.";
+        }
+        if (!f.size) return "Dosya boş.";
+        if (f.size > MAX_BYTES) return "Dosya çok büyük (max 10 MB).";
+        return null;
+    }
+    function isConfigError(status, body) {
+        if (status === 401 || status === 503) return true;
+        var m = ((body && body.mesaj) || "").toLowerCase();
+        return m.indexOf("yapılandır") >= 0 || m.indexOf("yapilandir") >= 0;
+    }
+    function parse429WaitSeconds(body) {
+        var raw = (body && body.ai_ham) || (body && body.mesaj) || "";
+        var m = String(raw).match(/try again in ([0-9.]+)\s*s/i);
+        if (m) return Math.ceil(parseFloat(m[1])) + 2;
+        return 20;
+    }
+    function sleep(ms) {
+        return new Promise(function (resolve) { setTimeout(resolve, ms); });
+    }
+    function revokeQueueUrls() {
+        queue.forEach(function (item) {
+            if (item.previewUrl) {
+                URL.revokeObjectURL(item.previewUrl);
+                item.previewUrl = null;
+            }
+        });
+    }
+    function clearQueue() {
+        revokeQueueUrls();
+        queue = [];
+        queueList.innerHTML = "";
+        queueWrap.classList.remove("show");
+        queueProgress.textContent = "0/0";
+        queueSummary.textContent = "";
+    }
+    function hideSinglePreview() {
         selectedFile = null;
         input.value = "";
         if (objectUrl) { URL.revokeObjectURL(objectUrl); objectUrl = null; }
         previewImg.removeAttribute("src");
         previewWrap.classList.remove("show");
         fileNameEl.textContent = "";
+    }
+    function resetForm() {
+        hideSinglePreview();
+        multiInput.value = "";
+        clearQueue();
         pickActions.style.display = "";
         ozet.classList.remove("show");
         hideAlerts();
         setLoading(false);
+        queueProcessing = false;
+        queueStopped = false;
     }
     function fillOzet(data) {
-        document.getElementById("oz-magaza").textContent = data.magaza_adi || "—";
-        document.getElementById("oz-fis-no").textContent = data.fis_no || "—";
-        document.getElementById("oz-tarih").textContent = data.tarih || "—";
+        document.getElementById("oz-magaza").textContent = data.magaza_adi || "-";
+        document.getElementById("oz-fis-no").textContent = data.fis_no || "-";
+        document.getElementById("oz-tarih").textContent = data.tarih || "-";
         document.getElementById("oz-toplam").textContent = fmtMoney(data.toplam_tutar);
-        var kdvOran = data.kdv_orani != null ? ("%" + data.kdv_orani) : "—";
+        var kdvOran = data.kdv_orani != null ? ("%" + data.kdv_orani) : "-";
         var kdvTut = fmtMoney(data.kdv_tutari);
         document.getElementById("oz-kdv").textContent = kdvOran + " / " + kdvTut;
-        document.getElementById("oz-kategori").textContent = data.kategori || "—";
-        document.getElementById("oz-id").textContent = data.masraf_id != null ? String(data.masraf_id) : "—";
+        document.getElementById("oz-kategori").textContent = data.kategori || "-";
+        document.getElementById("oz-id").textContent = data.masraf_id != null ? String(data.masraf_id) : "-";
         var ul = document.getElementById("oz-urunler");
         ul.innerHTML = "";
         var urunler = data.urunler || [];
         if (!urunler.length) {
             var li0 = document.createElement("li");
-            li0.textContent = "—";
+            li0.textContent = "-";
             ul.appendChild(li0);
         } else {
             urunler.forEach(function (u) {
@@ -157,34 +263,267 @@
         }
         ozet.classList.add("show");
     }
-
-    btnCek.addEventListener("click", function () { input.click(); });
-    input.addEventListener("change", function () {
+    function statusLabel(item) {
+        if (item.status === "waiting") return "Bekliyor";
+        if (item.status === "reading") return item.retryNote || "Okunuyor…";
+        if (item.status === "done") return "Tamamlandı";
+        if (item.status === "error") return "Hata";
+        return item.status;
+    }
+    function renderQueueItem(item) {
+        var row = document.getElementById("fis-queue-row-" + item.id);
+        if (!row) return;
+        var st = row.querySelector(".fis-queue-status");
+        var det = row.querySelector(".fis-queue-detail");
+        var retry = row.querySelector(".fis-queue-retry");
+        st.textContent = statusLabel(item);
+        st.className = "fis-queue-status " + item.status;
+        det.textContent = item.detail || "";
+        if (retry) {
+            retry.style.display = item.status === "error" ? "inline-block" : "none";
+            retry.disabled = queueProcessing;
+        }
+    }
+    function renderQueueAll() {
+        queueList.innerHTML = "";
+        queue.forEach(function (item) {
+            var row = document.createElement("div");
+            row.className = "fis-queue-item";
+            row.id = "fis-queue-row-" + item.id;
+            var img = document.createElement("img");
+            img.src = item.previewUrl || "";
+            img.alt = "Önizleme";
+            var body = document.createElement("div");
+            body.className = "fis-queue-body";
+            var name = document.createElement("div");
+            name.className = "fis-queue-name";
+            name.textContent = item.file.name || "fis.jpg";
+            var st = document.createElement("div");
+            st.className = "fis-queue-status " + item.status;
+            st.textContent = statusLabel(item);
+            var det = document.createElement("div");
+            det.className = "fis-queue-detail";
+            det.textContent = item.detail || "";
+            var retry = document.createElement("button");
+            retry.type = "button";
+            retry.className = "fis-queue-retry";
+            retry.textContent = "Tekrar dene";
+            retry.style.display = item.status === "error" ? "inline-block" : "none";
+            retry.addEventListener("click", function () {
+                if (queueProcessing) return;
+                item.status = "waiting";
+                item.detail = "";
+                item.retryNote = "";
+                renderQueueItem(item);
+                processQueueSequential();
+            });
+            body.appendChild(name);
+            body.appendChild(st);
+            body.appendChild(det);
+            body.appendChild(retry);
+            row.appendChild(img);
+            row.appendChild(body);
+            queueList.appendChild(row);
+        });
+        updateQueueProgress();
+    }
+    function updateQueueProgress() {
+        var total = queue.length;
+        var done = queue.filter(function (q) { return q.status === "done"; }).length;
+        var err = queue.filter(function (q) { return q.status === "error"; }).length;
+        queueProgress.textContent = done + "/" + total + (queueProcessing ? " (işleniyor)" : "");
+        if (total) {
+            var parts = [];
+            if (done) parts.push(done + " tamamlandı");
+            if (err) parts.push(err + " hata");
+            if (queueStopped) parts.push("kuyruk durduruldu");
+            queueSummary.textContent = parts.join(" · ");
+        } else {
+            queueSummary.textContent = "";
+        }
+    }
+    function enterMultiMode(files) {
+        hideSinglePreview();
+        ozet.classList.remove("show");
+        hideAlerts();
+        revokeQueueUrls();
+        queue = [];
+        var rejected = [];
+        Array.prototype.forEach.call(files, function (f) {
+            var err = validateFileClient(f);
+            if (err) {
+                rejected.push((f.name || "dosya") + ": " + err);
+                return;
+            }
+            queue.push({
+                id: ++queueSeq,
+                file: f,
+                previewUrl: URL.createObjectURL(f),
+                status: "waiting",
+                detail: "",
+                retryNote: ""
+            });
+        });
+        if (queue.length > MAX_FILES) {
+            showErr("En fazla " + MAX_FILES + " fiş seçebilirsiniz.");
+            clearQueue();
+            multiInput.value = "";
+            return;
+        }
+        if (!queue.length) {
+            showErr(rejected.length ? rejected.join("\n") : "Geçerli dosya seçilmedi.");
+            multiInput.value = "";
+            return;
+        }
+        if (rejected.length) {
+            showErr("Bazı dosyalar atlandı:\n" + rejected.join("\n"));
+        }
+        queueWrap.classList.add("show");
+        renderQueueAll();
+    }
+    function showSingleFile(f) {
+        clearQueue();
         hideAlerts();
         ozet.classList.remove("show");
-        var f = input.files && input.files[0];
-        if (!f) return;
         selectedFile = f;
         if (objectUrl) URL.revokeObjectURL(objectUrl);
         objectUrl = URL.createObjectURL(f);
         previewImg.src = objectUrl;
         fileNameEl.textContent = f.name || "fis.jpg";
         previewWrap.classList.add("show");
-    });
-
-    btnYukle.addEventListener("click", function () {
-        if (!selectedFile) { showErr("Önce bir fotoğraf seçin."); return; }
+    }
+    function postFisFile(file) {
         var fd = new FormData();
-        fd.append("file", selectedFile, selectedFile.name || "fis.jpg");
-        setLoading(true);
-        hideAlerts();
-        fetch(API, { method: "POST", body: fd, credentials: "same-origin" })
+        fd.append("file", file, file.name || "fis.jpg");
+        return fetch(API, { method: "POST", body: fd, credentials: "same-origin" })
             .then(function (r) {
                 return r.json().then(function (j) { return { status: r.status, body: j }; })
                     .catch(function () {
                         return { status: r.status, body: { ok: false, mesaj: "Yanıt okunamadı (HTTP " + r.status + ")." } };
                     });
-            })
+            });
+    }
+    function uploadQueueItem(item) {
+        var attempt = 0;
+        function run() {
+            if (queueStopped) return Promise.resolve(false);
+            item.status = "reading";
+            item.retryNote = attempt > 0 ? ("Okunuyor… (deneme " + (attempt + 1) + "/3)") : "Okunuyor…";
+            renderQueueItem(item);
+            updateQueueProgress();
+            return postFisFile(item.file).then(function (res) {
+                var b = res.body || {};
+                if (b.ok) {
+                    item.status = "done";
+                    item.retryNote = "";
+                    var bits = [];
+                    if (b.magaza_adi) bits.push(b.magaza_adi);
+                    if (b.toplam_tutar != null) bits.push(fmtMoney(b.toplam_tutar));
+                    if (b.masraf_id != null) bits.push("#" + b.masraf_id);
+                    item.detail = bits.join(" · ") || (b.mesaj || "Kayıt oluşturuldu.");
+                    renderQueueItem(item);
+                    updateQueueProgress();
+                    return true;
+                }
+                if (isConfigError(res.status, b)) {
+                    item.status = "error";
+                    item.detail = b.mesaj || "Yapılandırma hatası.";
+                    renderQueueItem(item);
+                    queueStopped = true;
+                    showErr(item.detail + " Kuyruk durduruldu.");
+                    return false;
+                }
+                if (res.status === 429 && attempt < MAX_429_RETRIES) {
+                    var waitSec = parse429WaitSeconds(b);
+                    item.retryNote = "Yoğunluk — " + waitSec + " sn bekleniyor…";
+                    renderQueueItem(item);
+                    attempt += 1;
+                    return sleep(waitSec * 1000).then(run);
+                }
+                item.status = "error";
+                item.retryNote = "";
+                item.detail = b.mesaj || ("Yükleme başarısız (HTTP " + res.status + ").");
+                renderQueueItem(item);
+                updateQueueProgress();
+                return false;
+            }).catch(function (e) {
+                item.status = "error";
+                item.retryNote = "";
+                item.detail = "Ağ hatası: " + (e && e.message ? e.message : e);
+                renderQueueItem(item);
+                updateQueueProgress();
+                return false;
+            });
+        }
+        return run();
+    }
+    function processQueueSequential() {
+        if (queueProcessing || !queue.length) return;
+        queueProcessing = true;
+        queueStopped = false;
+        setLoading(true, " Fişler sırayla okunuyor…");
+        hideAlerts();
+        ozet.classList.remove("show");
+        var chain = Promise.resolve();
+        queue.forEach(function (item) {
+            chain = chain.then(function () {
+                if (queueStopped) return;
+                if (item.status === "done") return;
+                if (item.status === "waiting" || item.status === "error") {
+                    return uploadQueueItem(item);
+                }
+            });
+        });
+        chain.then(function () {
+            queueProcessing = false;
+            setLoading(false);
+            updateQueueProgress();
+            var done = queue.filter(function (q) { return q.status === "done"; }).length;
+            var err = queue.filter(function (q) { return q.status === "error"; }).length;
+            if (queueStopped) return;
+            if (done && !err) {
+                showOk(done + " fiş okundu, onay bekliyor.");
+            } else if (done && err) {
+                showOk(done + " fiş okundu. " + err + " fiş hata verdi — hatalıları tekrar deneyebilirsiniz.");
+            } else if (!done && err) {
+                showErr(err + " fiş okunamadı. Hatalı satırlardan tekrar deneyin.");
+            }
+        });
+    }
+
+    btnCek.addEventListener("click", function () { input.click(); });
+    btnMulti.addEventListener("click", function () { multiInput.click(); });
+
+    input.addEventListener("change", function () {
+        hideAlerts();
+        ozet.classList.remove("show");
+        var f = input.files && input.files[0];
+        if (!f) return;
+        var err = validateFileClient(f);
+        if (err) { showErr(err); input.value = ""; return; }
+        showSingleFile(f);
+    });
+
+    multiInput.addEventListener("change", function () {
+        var files = multiInput.files;
+        if (!files || !files.length) return;
+        if (files.length === 1) {
+            var f1 = files[0];
+            var err1 = validateFileClient(f1);
+            if (err1) { showErr(err1); multiInput.value = ""; return; }
+            multiInput.value = "";
+            showSingleFile(f1);
+            return;
+        }
+        enterMultiMode(files);
+        multiInput.value = "";
+    });
+
+    btnYukle.addEventListener("click", function () {
+        if (!selectedFile) { showErr("Önce bir fotoğraf seçin."); return; }
+        setLoading(true);
+        hideAlerts();
+        postFisFile(selectedFile)
             .then(function (res) {
                 setLoading(false);
                 var b = res.body || {};
@@ -201,6 +540,11 @@
                 setLoading(false);
                 showErr("Ağ hatası: " + (e && e.message ? e.message : e));
             });
+    });
+
+    btnQueueAll.addEventListener("click", function () {
+        if (!queue.length) { showErr("Önce galeriden fiş seçin."); return; }
+        processQueueSequential();
     });
 
     btnYeni.addEventListener("click", resetForm);
