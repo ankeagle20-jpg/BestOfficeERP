@@ -906,6 +906,44 @@ def api_reddet(masraf_id: int):
     )
 
 
+@bp.route("/api/<int:masraf_id>/sil", methods=["POST"])
+@giris_gerekli
+def api_sil(masraf_id: int):
+    """Kaydı sil. Yalnızca onay_bekliyor. Görsel dosyasını da kaldırır."""
+    _ensure_masraflar_once()
+    row = fetch_one(
+        "SELECT id, durum, fis_gorsel_path FROM masraflar WHERE id = %s",
+        (masraf_id,),
+    )
+    if not row:
+        return jsonify({"ok": False, "mesaj": "Kayıt bulunamadı."}), 404
+    if (row.get("durum") or "") != DURUM_ONAY_BEKLIYOR:
+        return jsonify(
+            {
+                "ok": False,
+                "mesaj": "Yalnızca onay bekleyen kayıtlar silinebilir.",
+                "durum": row.get("durum"),
+            }
+        ), 409
+
+    deleted = execute_returning(
+        """
+        DELETE FROM masraflar
+        WHERE id = %s AND durum = %s
+        RETURNING id, fis_gorsel_path
+        """,
+        (masraf_id, DURUM_ONAY_BEKLIYOR),
+    )
+    if not deleted:
+        return jsonify({"ok": False, "mesaj": "Silinemedi (durum değişmiş olabilir)."}), 409
+
+    path = _resolve_masraf_gorsel_path(deleted.get("fis_gorsel_path"))
+    if path is not None:
+        _unlink_quiet(path)
+
+    return jsonify({"ok": True, "mesaj": "Fiş silindi."})
+
+
 # --- Aşama C2: HTML sayfaları (API route'larından sonra; <int:id> en sonda) ---
 
 
