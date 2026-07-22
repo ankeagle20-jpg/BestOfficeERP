@@ -934,6 +934,43 @@ def api_reddet(masraf_id: int):
     )
 
 
+@bp.route("/api/<int:masraf_id>/geri-al", methods=["POST"])
+@giris_gerekli
+def api_geri_al(masraf_id: int):
+    """durum=onay_bekliyor. Yalnızca onaylandi."""
+    _ensure_masraflar_once()
+    row = fetch_one("SELECT id, durum FROM masraflar WHERE id = %s", (masraf_id,))
+    if not row:
+        return jsonify({"ok": False, "mesaj": "Kayıt bulunamadı."}), 404
+    if (row.get("durum") or "") != DURUM_ONAYLANDI:
+        return jsonify(
+            {
+                "ok": False,
+                "mesaj": "Yalnızca onaylanmış kayıtlar geri alınabilir.",
+                "durum": row.get("durum"),
+            }
+        ), 409
+
+    updated = execute_returning(
+        """
+        UPDATE masraflar
+        SET durum = %s, updated_at = NOW()
+        WHERE id = %s AND durum = %s
+        RETURNING *
+        """,
+        (DURUM_ONAY_BEKLIYOR, masraf_id, DURUM_ONAYLANDI),
+    )
+    if not updated:
+        return jsonify({"ok": False, "mesaj": "Geri alınamadı (durum değişmiş olabilir)."}), 409
+    return jsonify(
+        {
+            "ok": True,
+            "mesaj": "Onay geri alındı.",
+            "kayit": _masraf_to_dict(dict(updated), include_ai_ham=True),
+        }
+    )
+
+
 @bp.route("/api/<int:masraf_id>/sil", methods=["POST"])
 @giris_gerekli
 def api_sil(masraf_id: int):
