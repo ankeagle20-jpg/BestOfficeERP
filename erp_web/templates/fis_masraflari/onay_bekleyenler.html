@@ -80,6 +80,9 @@
 .masraf-btn.danger { background: #c62828; }
 .masraf-btn.danger:hover { background: #e53935; color: #fff; }
 .masraf-btn.danger:disabled { opacity: 0.55; cursor: not-allowed; }
+.masraf-btn.ok { background: #2e7d32; }
+.masraf-btn.ok:hover:not(:disabled) { background: #388e3c; color: #fff; }
+.masraf-btn.ok:disabled { opacity: 0.55; cursor: not-allowed; }
 .masraf-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .masraf-tutar { font-weight: 700; color: #80cbc4; white-space: nowrap; }
 .masraf-arama {
@@ -370,6 +373,8 @@ th.masraf-sortable.sorted-desc .sort-ind {
         "<td>" + esc(k.kategori || "—") + "</td>" +
         '<td><div class="masraf-actions">' +
         '<a class="masraf-btn" href="' + esc(detayUrl(id)) + '"><i class="fa fa-edit"></i> Düzenle</a>' +
+        '<button type="button" class="masraf-btn ok btn-onayla" data-id="' + esc(String(id)) + '">' +
+        '<i class="fa fa-check"></i> Onayla</button>' +
         '<button type="button" class="masraf-btn danger btn-sil" data-id="' + esc(String(id)) + '">' +
         '<i class="fa fa-trash"></i> Sil</button></div></td>';
       tbody.appendChild(tr);
@@ -441,6 +446,10 @@ th.masraf-sortable.sorted-desc .sort-ind {
     return "/fis-masraflari/api/" + encodeURIComponent(id) + "/sil";
   }
 
+  function onaylaUrl(id) {
+    return "/fis-masraflari/api/" + encodeURIComponent(id) + "/onayla";
+  }
+
   function silKayit(id, btn) {
     if (!window.confirm("Bu fişi kalıcı olarak silmek istediğinize emin misiniz? Bu işlem geri alınamaz.")) {
       return;
@@ -477,8 +486,55 @@ th.masraf-sortable.sorted-desc .sort-ind {
       });
   }
 
+
+  function onaylaKayit(id, btn) {
+    if (!window.confirm("Bu masrafı onaylamak istediğinize emin misiniz?")) {
+      return;
+    }
+    if (btn) btn.disabled = true;
+    showErr("");
+    fetch(onaylaUrl(id), {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json", "Accept": "application/json" },
+      body: "{}",
+    })
+      .then(function (r) {
+        return r.json().then(function (b) {
+          return { status: r.status, body: b };
+        }).catch(function () {
+          return { status: r.status, body: { ok: false, mesaj: "Yanıt okunamadı (HTTP " + r.status + ")." } };
+        });
+      })
+      .then(function (res) {
+        if (res.body && res.body.ok) {
+          tumKayitlar = tumKayitlar.filter(function (k) {
+            return String(k.id) !== String(id);
+          });
+          uygula();
+          return;
+        }
+        showErr((res.body && res.body.mesaj) || ("Onaylanamadı (HTTP " + res.status + ")."));
+        yukle(true);
+      })
+      .catch(function (e) {
+        showErr("Bağlantı hatası: " + (e && e.message ? e.message : e));
+        yukle(true);
+      });
+  }
+
   tbody.addEventListener("click", function (ev) {
-    var btn = ev.target && ev.target.closest ? ev.target.closest("button.btn-sil") : null;
+    var t = ev.target;
+    if (!t || !t.closest) return;
+    var btnOnayla = t.closest("button.btn-onayla");
+    if (btnOnayla && tbody.contains(btnOnayla)) {
+      ev.preventDefault();
+      var idO = btnOnayla.getAttribute("data-id");
+      if (!idO) return;
+      onaylaKayit(idO, btnOnayla);
+      return;
+    }
+    var btn = t.closest("button.btn-sil");
     if (!btn || !tbody.contains(btn)) return;
     ev.preventDefault();
     var id = btn.getAttribute("data-id");
