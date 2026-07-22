@@ -143,6 +143,13 @@
 .masraf-btn.ghost { background: #37474f; color: #eceff1; }
 .masraf-btn.ghost:hover:not(:disabled) { background: #455a64; color: #fff; }
 .masraf-btn.small { padding: 4px 8px; font-size: 11px; }
+.masraf-geri-al-bar {
+  display: none;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 8px 0 4px;
+}
 .masraf-durum-badge {
   display: inline-block;
   padding: 3px 8px;
@@ -175,6 +182,9 @@
   <div class="masraf-banner err" id="masraf-hata"></div>
   <div class="masraf-banner ok" id="masraf-ok"></div>
   <div class="masraf-banner warn" id="masraf-readonly"></div>
+  <div class="masraf-geri-al-bar" id="masraf-geri-al-bar">
+    <button type="button" class="masraf-btn ghost" id="btn-geri-al"><i class="fa fa-undo"></i> Onayı Geri Al</button>
+  </div>
 
   <div class="masraf-grid" id="masraf-panel" style="display:none;">
     <div class="masraf-card">
@@ -267,6 +277,7 @@
   var API_ONAYLA = "/fis-masraflari/api/" + MASRAF_ID + "/onayla";
   var API_REDDET = "/fis-masraflari/api/" + MASRAF_ID + "/reddet";
   var API_SIL = "/fis-masraflari/api/" + MASRAF_ID + "/sil";
+  var API_GERI_AL = "/fis-masraflari/api/" + MASRAF_ID + "/geri-al";
   var LISTE_URL = "{{ url_for('fis_masraflari.onay_bekleyenler') }}";
   var GORSEL_URL = "/fis-masraflari/gorsel/" + MASRAF_ID;
 
@@ -284,6 +295,8 @@
   var btnOnayla = document.getElementById("btn-onayla");
   var btnReddet = document.getElementById("btn-reddet");
   var btnSil = document.getElementById("btn-sil");
+  var btnGeriAl = document.getElementById("btn-geri-al");
+  var geriAlBar = document.getElementById("masraf-geri-al-bar");
   var btnUrunEkle = document.getElementById("btn-urun-ekle");
   var actions = document.getElementById("masraf-actions");
 
@@ -310,6 +323,7 @@
     [btnKaydet, btnOnayla, btnReddet, btnSil, btnUrunEkle].forEach(function (b) {
       if (b) b.disabled = !!on || readonlyMode;
     });
+    if (btnGeriAl) btnGeriAl.disabled = !!on;
   }
 
   function parseJsonResponse(r) {
@@ -344,6 +358,10 @@
     btnUrunEkle.disabled = !!on;
     btnUrunEkle.style.display = on ? "none" : "";
     actions.style.display = on ? "none" : "flex";
+    // Action butonları: setBusy sıralamasından bağımsız ikinci güvenlik katmanı
+    [btnKaydet, btnOnayla, btnReddet, btnSil].forEach(function (b) {
+      if (b) b.disabled = !!on;
+    });
     if (on) {
       showBanner(
         elRo,
@@ -352,6 +370,9 @@
     } else {
       showBanner(elRo, "");
     }
+    var showGeriAl = !!on && durum === "onaylandi";
+    if (btnGeriAl) btnGeriAl.style.display = showGeriAl ? "inline-flex" : "none";
+    if (geriAlBar) geriAlBar.style.display = showGeriAl ? "flex" : "none";
   }
 
   function urunSatirHtml(u) {
@@ -584,6 +605,37 @@
         yukle(true);
       });
   });
+
+  if (btnGeriAl) {
+    btnGeriAl.addEventListener("click", function () {
+      if (!window.confirm("Bu masrafı onaydan geri almak istediğinize emin misiniz? Kayıt tekrar 'onay bekleyenler' listesine döner ve düzenlenebilir olur.")) {
+        return;
+      }
+      clearMsgs();
+      setBusy(true);
+      postJson(API_GERI_AL)
+        .then(function (res) {
+          if (!res.body || !res.body.ok) {
+            setBusy(false);
+            showBanner(elHata, (res.body && res.body.mesaj) || ("Geri alınamadı (HTTP " + res.status + ")."));
+            yukle(true);
+            return;
+          }
+          if (res.body.kayit) {
+            fillForm(res.body.kayit);
+          } else {
+            yukle(true);
+          }
+          setBusy(false);
+          showBanner(elOk, res.body.mesaj || "Onay geri alındı.");
+        })
+        .catch(function (e) {
+          setBusy(false);
+          showBanner(elHata, "Bağlantı hatası: " + (e && e.message ? e.message : e));
+          yukle(true);
+        });
+    });
+  }
 
   yukle();
 })();
