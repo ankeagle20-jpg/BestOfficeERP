@@ -118,6 +118,29 @@ def _normalize_magaza(s) -> str | None:
     return t or None
 
 
+
+def _find_duplicate_by_hash_only(file_hash):
+    """
+    Aktif (onay_bekliyor / onaylandi) kayıtlarda yalnızca fis_gorsel_hash eşleşmesi.
+    Groq öncesi erken kontrol için; iş anahtarı (magaza/fis_no/tarih) bakılmaz.
+    reddedildi kayıtlar hariç. Hash yoksa veya eşleşme yoksa None.
+    """
+    if not file_hash:
+        return None
+    aktif = ("onay_bekliyor", "onaylandi")
+    return fetch_one(
+        """
+        SELECT id, durum, magaza_adi, fis_no, tarih, toplam_tutar
+        FROM masraflar
+        WHERE durum IN %s
+          AND fis_gorsel_hash = %s
+        ORDER BY id ASC
+        LIMIT 1
+        """,
+        (aktif, file_hash),
+    )
+
+
 def _find_duplicate_masraf(
     file_hash,
     magaza,
@@ -298,12 +321,17 @@ def api_fis_oku():
             {"ok": False, "mesaj": f"Dosya çok büyük (max {MAX_BYTES // (1024 * 1024)} MB)."}
         ), 400
 
-    # Aynı görsel (hash) — AI'ya gitmeden yakala (TPM tasarrufu + reddedilmemiş aktif kayıt)
+    # Aynı görsel (hash) — Groq/AI'ya gitmeden yakala (TPM tasarrufu)
     file_hash = _sha256_file(abs_path)
-    dup_hash = _find_duplicate_masraf(file_hash, None, None, None, None)
+    dup_hash = _find_duplicate_by_hash_only(file_hash)
     if dup_hash:
         _unlink_quiet(abs_path)
-        return _duplicate_conflict_response(dup_hash)
+        return _duplicate_conflict_response(
+            dup_hash,
+            fallback_magaza=None,
+            fallback_tarih=None,
+            fallback_tutar=None,
+        )
 
     ok, result, err, raw = fis_oku(abs_path)
     if not ok:
