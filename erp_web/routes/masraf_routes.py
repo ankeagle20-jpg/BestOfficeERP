@@ -467,6 +467,8 @@ OZET_LIMIT = 500
 DURUM_ONAY_BEKLIYOR = "onay_bekliyor"
 DURUM_ONAYLANDI = "onaylandi"
 DURUM_REDDEDILDI = "reddedildi"
+# Güncelle/onayla/reddet/sil: reddedildi hariç (onay_bekliyor + onaylandi)
+DURUM_DUZENLENEBILIR = (DURUM_ONAY_BEKLIYOR, DURUM_ONAYLANDI)
 
 
 def _json_num(val):
@@ -748,16 +750,16 @@ def api_detay(masraf_id: int):
 @bp.route("/api/<int:masraf_id>/guncelle", methods=["POST"])
 @giris_gerekli
 def api_guncelle(masraf_id: int):
-    """Alan güncelle. Yalnızca durum=onay_bekliyor."""
+    """Alan güncelle. onay_bekliyor veya onaylandi (reddedildi hariç)."""
     _ensure_masraflar_once()
     row = fetch_one("SELECT * FROM masraflar WHERE id = %s", (masraf_id,))
     if not row:
         return jsonify({"ok": False, "mesaj": "Kayıt bulunamadı."}), 404
-    if (row.get("durum") or "") != DURUM_ONAY_BEKLIYOR:
+    if (row.get("durum") or "") not in DURUM_DUZENLENEBILIR:
         return jsonify(
             {
                 "ok": False,
-                "mesaj": "Yalnızca onay bekleyen kayıtlar güncellenebilir.",
+                "mesaj": "Reddedilmiş kayıtlar düzenlenemez.",
                 "durum": row.get("durum"),
             }
         ), 409
@@ -827,7 +829,7 @@ def api_guncelle(masraf_id: int):
                 kategori = %s,
                 urunler_json = %s,
                 updated_at = NOW()
-            WHERE id = %s AND durum = %s
+            WHERE id = %s AND durum IN %s
             RETURNING *
             """,
             (
@@ -840,7 +842,7 @@ def api_guncelle(masraf_id: int):
                 kategori,
                 urunler_json,
                 masraf_id,
-                DURUM_ONAY_BEKLIYOR,
+                DURUM_DUZENLENEBILIR,
             ),
         )
     except Exception as e:
@@ -863,17 +865,18 @@ def api_guncelle(masraf_id: int):
 @bp.route("/api/<int:masraf_id>/onayla", methods=["POST"])
 @giris_gerekli
 def api_onayla(masraf_id: int):
-    """durum=onaylandi. Yalnızca onay_bekliyor."""
+    """durum=onaylandi. onay_bekliyor veya onaylandi (idempotent; reddedildi hariç)."""
     _ensure_masraflar_once()
     row = fetch_one("SELECT id, durum FROM masraflar WHERE id = %s", (masraf_id,))
     if not row:
         return jsonify({"ok": False, "mesaj": "Kayıt bulunamadı."}), 404
-    if (row.get("durum") or "") != DURUM_ONAY_BEKLIYOR:
+    onceki = row.get("durum") or ""
+    if onceki not in DURUM_DUZENLENEBILIR:
         return jsonify(
             {
                 "ok": False,
-                "mesaj": "Yalnızca onay bekleyen kayıtlar onaylanabilir.",
-                "durum": row.get("durum"),
+                "mesaj": "Reddedilmiş kayıtlar onaylanamaz.",
+                "durum": onceki,
             }
         ), 409
 
@@ -881,17 +884,22 @@ def api_onayla(masraf_id: int):
         """
         UPDATE masraflar
         SET durum = %s, updated_at = NOW()
-        WHERE id = %s AND durum = %s
+        WHERE id = %s AND durum IN %s
         RETURNING *
         """,
-        (DURUM_ONAYLANDI, masraf_id, DURUM_ONAY_BEKLIYOR),
+        (DURUM_ONAYLANDI, masraf_id, DURUM_DUZENLENEBILIR),
     )
     if not updated:
         return jsonify({"ok": False, "mesaj": "Onaylanamadı (durum değişmiş olabilir)."}), 409
+    mesaj = (
+        "Masraf zaten onaylı, tekrar onaylandı."
+        if onceki == DURUM_ONAYLANDI
+        else "Masraf onaylandı."
+    )
     return jsonify(
         {
             "ok": True,
-            "mesaj": "Masraf onaylandı.",
+            "mesaj": mesaj,
             "kayit": _masraf_to_dict(dict(updated), include_ai_ham=True),
         }
     )
@@ -900,16 +908,16 @@ def api_onayla(masraf_id: int):
 @bp.route("/api/<int:masraf_id>/reddet", methods=["POST"])
 @giris_gerekli
 def api_reddet(masraf_id: int):
-    """durum=reddedildi. Yalnızca onay_bekliyor."""
+    """durum=reddedildi. onay_bekliyor veya onaylandi (reddedildi hariç)."""
     _ensure_masraflar_once()
     row = fetch_one("SELECT id, durum FROM masraflar WHERE id = %s", (masraf_id,))
     if not row:
         return jsonify({"ok": False, "mesaj": "Kayıt bulunamadı."}), 404
-    if (row.get("durum") or "") != DURUM_ONAY_BEKLIYOR:
+    if (row.get("durum") or "") not in DURUM_DUZENLENEBILIR:
         return jsonify(
             {
                 "ok": False,
-                "mesaj": "Yalnızca onay bekleyen kayıtlar reddedilebilir.",
+                "mesaj": "Reddedilmiş kayıtlar tekrar reddedilemez.",
                 "durum": row.get("durum"),
             }
         ), 409
@@ -918,10 +926,10 @@ def api_reddet(masraf_id: int):
         """
         UPDATE masraflar
         SET durum = %s, updated_at = NOW()
-        WHERE id = %s AND durum = %s
+        WHERE id = %s AND durum IN %s
         RETURNING *
         """,
-        (DURUM_REDDEDILDI, masraf_id, DURUM_ONAY_BEKLIYOR),
+        (DURUM_REDDEDILDI, masraf_id, DURUM_DUZENLENEBILIR),
     )
     if not updated:
         return jsonify({"ok": False, "mesaj": "Reddedilemedi (durum değişmiş olabilir)."}), 409
@@ -974,7 +982,7 @@ def api_geri_al(masraf_id: int):
 @bp.route("/api/<int:masraf_id>/sil", methods=["POST"])
 @giris_gerekli
 def api_sil(masraf_id: int):
-    """Kaydı sil. Yalnızca onay_bekliyor. Görsel dosyasını da kaldırır."""
+    """Kaydı sil. onay_bekliyor veya onaylandi (reddedildi hariç). Görsel dosyasını da kaldırır."""
     _ensure_masraflar_once()
     row = fetch_one(
         "SELECT id, durum, fis_gorsel_path FROM masraflar WHERE id = %s",
@@ -982,11 +990,11 @@ def api_sil(masraf_id: int):
     )
     if not row:
         return jsonify({"ok": False, "mesaj": "Kayıt bulunamadı."}), 404
-    if (row.get("durum") or "") != DURUM_ONAY_BEKLIYOR:
+    if (row.get("durum") or "") not in DURUM_DUZENLENEBILIR:
         return jsonify(
             {
                 "ok": False,
-                "mesaj": "Yalnızca onay bekleyen kayıtlar silinebilir.",
+                "mesaj": "Reddedilmiş kayıtlar silinemez.",
                 "durum": row.get("durum"),
             }
         ), 409
@@ -994,10 +1002,10 @@ def api_sil(masraf_id: int):
     deleted = execute_returning(
         """
         DELETE FROM masraflar
-        WHERE id = %s AND durum = %s
+        WHERE id = %s AND durum IN %s
         RETURNING id, fis_gorsel_path
         """,
-        (masraf_id, DURUM_ONAY_BEKLIYOR),
+        (masraf_id, DURUM_DUZENLENEBILIR),
     )
     if not deleted:
         return jsonify({"ok": False, "mesaj": "Silinemedi (durum değişmiş olabilir)."}), 409
