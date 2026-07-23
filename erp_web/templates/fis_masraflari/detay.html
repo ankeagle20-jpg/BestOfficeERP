@@ -370,9 +370,13 @@
     } else {
       showBanner(elRo, "");
     }
-    var showGeriAl = !!on && durum === "onaylandi";
-    if (btnGeriAl) btnGeriAl.style.display = showGeriAl ? "inline-flex" : "none";
-    if (geriAlBar) geriAlBar.style.display = showGeriAl ? "flex" : "none";
+  }
+
+  function syncGeriAlBar(durum) {
+    // Readonly'den bağımsız: yalnızca onaylandi iken göster
+    var show = durum === "onaylandi";
+    if (btnGeriAl) btnGeriAl.style.display = show ? "inline-flex" : "none";
+    if (geriAlBar) geriAlBar.style.display = show ? "flex" : "none";
   }
 
   function urunSatirHtml(u) {
@@ -462,8 +466,9 @@
       elImgYok.style.display = "block";
     }
 
-    var editable = (k.durum === "onay_bekliyor");
+    var editable = (k.durum === "onay_bekliyor" || k.durum === "onaylandi");
     setReadonly(!editable, k.durum);
+    syncGeriAlBar(k.durum);
     elPanel.style.display = "grid";
   }
 
