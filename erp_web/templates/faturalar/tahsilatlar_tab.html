@@ -836,6 +836,7 @@
             <tr>
                 <th class="dyn-sort-th" data-dyn-type="str">Makbuz No</th>
                 <th class="dyn-sort-th" data-dyn-type="date">Tarih</th>
+                <th class="dyn-sort-th" data-dyn-type="date">Girildiği Tarih</th>
                 <th class="dyn-sort-th" data-dyn-type="str">Müşteri</th>
                 <th class="dyn-sort-th" data-dyn-type="str">Açıklama</th>
                 <th class="dyn-sort-th" data-dyn-type="str">Fatura No</th>
@@ -864,6 +865,7 @@
                     data-tahsilat-tarihi="{% if t.tahsilat_tarihi %}{% if t.tahsilat_tarihi is string and t.tahsilat_tarihi|length >= 10 %}{{ t.tahsilat_tarihi[:10] }}{% elif t.tahsilat_tarihi is string %}{{ t.tahsilat_tarihi }}{% else %}{{ t.tahsilat_tarihi.strftime('%Y-%m-%d') }}{% endif %}{% else %}{% endif %}">
                     <td>{{ t.makbuz_no or '-' }}</td>
                     <td>{% if t.tahsilat_tarihi %}{% if t.tahsilat_tarihi is string and t.tahsilat_tarihi|length >= 10 %}{{ t.tahsilat_tarihi[8:10] }}.{{ t.tahsilat_tarihi[5:7] }}.{{ t.tahsilat_tarihi[0:4] }}{% elif t.tahsilat_tarihi is string %}{{ t.tahsilat_tarihi }}{% else %}{{ t.tahsilat_tarihi.strftime('%d.%m.%Y') }}{% endif %}{% else %}-{% endif %}</td>
+                    <td class="td-girildigi-tarih"{% if t.created_at %} title="{% if t.created_at is string %}{% if t.created_at|length >= 16 %}{{ t.created_at[8:10] }}.{{ t.created_at[5:7] }}.{{ t.created_at[0:4] }} {{ t.created_at[11:16] }}{% else %}{{ t.created_at }}{% endif %}{% else %}{{ t.created_at.strftime('%d.%m.%Y %H:%M') }}{% endif %}"{% endif %}>{% if t.created_at %}{% if t.created_at is string and t.created_at|length >= 10 %}{{ t.created_at[8:10] }}.{{ t.created_at[5:7] }}.{{ t.created_at[0:4] }}{% elif t.created_at is string %}{{ t.created_at }}{% else %}{{ t.created_at.strftime('%d.%m.%Y') }}{% endif %}{% else %}-{% endif %}</td>
                     <td class="td-musteri" title="{{ (t.musteri_adi or 'Bilinmiyor')|e }}">
                         {% if (t.customer_id or t.musteri_id) %}
                             <a class="musteri-link" href="/giris/?mid={{ t.customer_id or t.musteri_id }}&kart=1">{{ t.musteri_adi or 'Bilinmiyor' }}</a>
@@ -894,7 +896,7 @@
                 {% endfor %}
             {% else %}
                 <tr>
-                    <td colspan="9" style="text-align: center; color: #90a4ae; padding: 30px;">
+                    <td colspan="10" style="text-align: center; color: #90a4ae; padding: 30px;">
                         Tahsilat bulunamadı
                     </td>
                 </tr>
@@ -1398,7 +1400,7 @@
         var toplam = 0;
         Array.prototype.forEach.call(tbody.querySelectorAll('tr'), function (tr) {
             if (tr.classList.contains('tahsilat-empty-row')) return;
-            if (!tr.cells || tr.cells.length < 9) return;
+            if (!tr.cells || tr.cells.length < 10) return;
             var dt = tahsilatParseDateTR(tr.cells[1].textContent || '');
             var hzRaw = String(tr.getAttribute('data-hizmet-turu') || '');
             var goster = true;
@@ -1417,18 +1419,18 @@
             tr.style.display = goster ? '' : 'none';
             if (!goster) return;
             sayi += 1;
-            toplam += tahsilatParseAmountTR(tr.cells[5].textContent || '');
+            toplam += tahsilatParseAmountTR(tr.cells[6].textContent || '');
         });
         tbody.querySelectorAll('tr.tahsilat-empty-row').forEach(function (x) { x.remove(); });
         Array.prototype.forEach.call(tbody.querySelectorAll('tr'), function (tr) {
             if (!tr.cells || tr.cells.length !== 1) return;
             var td = tr.cells[0];
-            if (td && Number(td.colSpan) === 9 && /tahsilat bulunamadı/i.test(td.textContent || '')) tr.remove();
+            if (td && Number(td.colSpan) === 10 && /tahsilat bulunamadı/i.test(td.textContent || '')) tr.remove();
         });
         if (sayi === 0) {
             var bos = document.createElement('tr');
             bos.className = 'tahsilat-empty-row';
-            bos.innerHTML = '<td colspan="9" style="text-align:center;color:#90a4ae;padding:30px;">Bu tarih aralığında tahsilat bulunamadı</td>';
+            bos.innerHTML = '<td colspan="10" style="text-align:center;color:#90a4ae;padding:30px;">Bu tarih aralığında tahsilat bulunamadı</td>';
             tbody.appendChild(bos);
         }
         var ort = sayi > 0 ? (toplam / sayi) : 0;
@@ -1701,10 +1703,10 @@
                     var pr = tarih.slice(0, 10).split('-');
                     if (pr.length === 3) tr.cells[1].textContent = pr[2] + '.' + pr[1] + '.' + pr[0];
                 }
-                if (tr.cells && tr.cells[6]) {
+                if (tr.cells && tr.cells[7]) {
                     var clsKey = tahsilatOdemeNorm(odemeTuru);
                     var label = tahsilatOdemeLabel(odemeTuru);
-                    tr.cells[6].innerHTML = '<span class="badge badge-' + clsKey + '">' + label + '</span>';
+                    tr.cells[7].innerHTML = '<span class="badge badge-' + clsKey + '">' + label + '</span>';
                 }
             }
             tahsilatDuzenleModalKapat();
