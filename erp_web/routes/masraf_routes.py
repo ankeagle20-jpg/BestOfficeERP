@@ -16,7 +16,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 import psycopg2
-from flask import Blueprint, jsonify, render_template, request, send_file, url_for
+from flask import Blueprint, current_app, jsonify, render_template, request, send_file, url_for
 from flask_login import current_user
 from werkzeug.utils import secure_filename
 
@@ -141,17 +141,41 @@ def _find_duplicate_by_hash_only(file_hash):
     )
 
 
+def _tutar_yakin(a, b, tol: Decimal = Decimal("0.05")) -> bool:
+    """Toplam tutar karşılaştırması (±tol TL; OCR/ondalık yuvarlama payı)."""
+    da = a if isinstance(a, Decimal) else _to_decimal(a)
+    db = b if isinstance(b, Decimal) else _to_decimal(b)
+    if da is None or db is None:
+        return False
+    return abs(da - db) <= tol
+
+
+def _kalem_sayisi(urunler) -> int | None:
+    """urunler listesi veya urunler_json string → öğe sayısı; okunamazsa None."""
+    if urunler is None:
+        return None
+    if isinstance(urunler, str):
+        try:
+            urunler = json.loads(urunler)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return None
+    if not isinstance(urunler, list):
+        return None
+    return len(urunler)
+
+
 def _find_duplicate_masraf(
     file_hash,
     magaza,
     fis_no,
     tarih,
     toplam_tutar,
+    urunler=None,
 ):
     """
     Aktif (onay_bekliyor / onaylandi) kayıtlar arasında duplike ara.
     1) fis_gorsel_hash eşleşmesi
-    2) fis_no doluysa: normalize(magaza) + fis_no + tarih
+    2) fis_no doluysa: fis_no + tarih + toplam_tutar (±0.05); mağaza adı bakılmaz
     3) fis_no boşsa: normalize(magaza) + tarih + toplam_tutar
     reddedildi kayıtlar bilinçli olarak hariç.
     """
@@ -172,8 +196,7 @@ def _find_duplicate_masraf(
         if row:
             return row
 
-    mag_n = _normalize_magaza(magaza)
-    if not tarih or not mag_n:
+    if not tarih:
         return None
 
     fis_n = None
@@ -181,10 +204,13 @@ def _find_duplicate_masraf(
         fis_n = str(fis_no).strip() or None
 
     if fis_n:
+        # Fiş no güçlü sinyal: mağaza adına bakılmaz; tutar ±0.05
+        if toplam_tutar is None:
+            return None
         rows = (
             fetch_all(
                 """
-                SELECT id, durum, magaza_adi, fis_no, tarih, toplam_tutar
+                SELECT id, durum, magaza_adi, fis_no, tarih, toplam_tutar, urunler_json
                 FROM masraflar
                 WHERE durum IN %s
                   AND tarih = %s
@@ -197,11 +223,29 @@ def _find_duplicate_masraf(
             or []
         )
         for r in rows:
-            if _normalize_magaza(r.get("magaza_adi")) == mag_n:
-                return r
+            if not _tutar_yakin(r.get("toplam_tutar"), toplam_tutar):
+                continue
+            n_new = _kalem_sayisi(urunler)
+            n_old = _kalem_sayisi(r.get("urunler_json"))
+            if n_new is not None and n_old is not None and n_new != n_old:
+                try:
+                    current_app.logger.info(
+                        "masraf_dup_fisno kalem_farki id=%s fis_no=%s tarih=%s "
+                        "kalem_yeni=%s kalem_mevcut=%s (yine de 409)",
+                        r.get("id"),
+                        fis_n,
+                        tarih,
+                        n_new,
+                        n_old,
+                    )
+                except Exception:
+                    pass
+            return r
         return None
 
-    if toplam_tutar is None:
+    # Fiş no boş: mağaza + tarih + tutar (mevcut yedek mantık)
+    mag_n = _normalize_magaza(magaza)
+    if not mag_n or toplam_tutar is None:
         return None
 
     rows = (
@@ -365,7 +409,7 @@ def api_fis_oku():
 
     # İş anahtarı (magaza/fis_no/tarih veya magaza/tarih/tutar) — AI sonrası
     dup = _find_duplicate_masraf(
-        file_hash, magaza_adi, fis_no, tarih, toplam_tutar
+        file_hash, magaza_adi, fis_no, tarih, toplam_tutar, urunler=urunler
     )
     if dup:
         _unlink_quiet(abs_path)
@@ -417,7 +461,7 @@ def api_fis_oku():
         # Race: aynı hash ile eşzamanlı INSERT — UNIQUE partial index
         _unlink_quiet(abs_path)
         dup2 = _find_duplicate_masraf(
-            file_hash, magaza_adi, fis_no, tarih, toplam_tutar
+            file_hash, magaza_adi, fis_no, tarih, toplam_tutar, urunler=urunler
         )
         if dup2:
             return _duplicate_conflict_response(
