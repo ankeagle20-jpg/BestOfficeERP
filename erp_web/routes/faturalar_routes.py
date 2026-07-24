@@ -884,6 +884,193 @@ def _tahsilat_rapor_aciklama_ay_metni(aciklama, fatura_tarihi=None, tahsilat_tar
     return "—"
 
 
+def _tahsilat_rapor_grupla(rows):
+    """
+    Tahsilatlar raporu görüntü listesi: aynı islem_grubu_id'li satırları (N>=2)
+    tek display satırında birleştirir. NULL gruplar ve N=1 tekil kalır.
+    Sıra korunur (grubun listedeki ilk üyesinin konumunda).
+    """
+    if not rows:
+        return []
+
+    def _as_date(v):
+        if v is None:
+            return None
+        if hasattr(v, "year") and hasattr(v, "month") and hasattr(v, "day"):
+            try:
+                return date(int(v.year), int(v.month), int(v.day))
+            except Exception:
+                return None
+        s = str(v).strip()[:10]
+        try:
+            return date.fromisoformat(s)
+        except Exception:
+            return None
+
+    def _as_dt_key(v):
+        """MIN/MAX için karşılaştırılabilir anahtar (date/datetime/str)."""
+        if v is None:
+            return None
+        if hasattr(v, "timestamp"):
+            try:
+                return v.timestamp()
+            except Exception:
+                pass
+        d = _as_date(v)
+        if d is not None:
+            return d.toordinal()
+        s = str(v).strip()
+        return s or None
+
+    def _month_keys_from_row(r):
+        ac = str((r or {}).get("aciklama") or "")
+        keys = []
+        seen = set()
+        for y, mo in re.findall(r"\|AYLIK_TAH\|(\d{4})-(\d{2})-\d{2}\|", ac):
+            k = f"{y}-{mo}"
+            if k in seen:
+                continue
+            seen.add(k)
+            try:
+                keys.append((y, int(mo, 10)))
+            except ValueError:
+                continue
+        if not keys:
+            ym = _tahsil_rapor_yil_ay_coerce((r or {}).get("tahsilat_tarihi"))
+            if ym:
+                keys.append((str(ym[0]), int(ym[1])))
+        return keys
+
+    def _ay_etiket(y, mo):
+        try:
+            mi = int(mo)
+        except (TypeError, ValueError):
+            return f"{y}-{mo}"
+        if 1 <= mi <= 12:
+            return f"{_TAHSIL_AYLAR_TR[mi - 1]} {y}"
+        return f"{y}-{mo}"
+
+    by_grup = {}
+    for r in rows:
+        gid = str((r or {}).get("islem_grubu_id") or "").strip()
+        if not gid:
+            continue
+        by_grup.setdefault(gid, []).append(r)
+
+    out = []
+    consumed = set()
+    for r in rows:
+        gid = str((r or {}).get("islem_grubu_id") or "").strip()
+        if not gid:
+            out.append(r)
+            continue
+        if gid in consumed:
+            continue
+        members = by_grup.get(gid) or [r]
+        consumed.add(gid)
+        if len(members) == 1:
+            # N=1: tekil gibi bas (grup sarmalama yok)
+            out.append(members[0])
+            continue
+
+        tutar_sum = 0.0
+        for m in members:
+            try:
+                tutar_sum += float(m.get("tutar") or 0)
+            except (TypeError, ValueError):
+                pass
+        tutar_sum = round(tutar_sum, 2)
+        n = len(members)
+
+        tarih_vals = [(m, _as_date(m.get("tahsilat_tarihi"))) for m in members]
+        tarih_dates = [d for _, d in tarih_vals if d is not None]
+        t_min = min(tarih_dates) if tarih_dates else None
+        t_max = max(tarih_dates) if tarih_dates else None
+        # Orijinal değerleri de sakla (template ISO için)
+        t_min_raw = None
+        t_max_raw = None
+        for m in members:
+            d = _as_date(m.get("tahsilat_tarihi"))
+            if d is not None and t_min is not None and d == t_min and t_min_raw is None:
+                t_min_raw = m.get("tahsilat_tarihi")
+            if d is not None and t_max is not None and d == t_max:
+                t_max_raw = m.get("tahsilat_tarihi")
+
+        ca_keys = []
+        for m in members:
+            k = _as_dt_key(m.get("created_at"))
+            if k is not None:
+                ca_keys.append((k, m.get("created_at")))
+        ca_min_raw = min(ca_keys, key=lambda x: x[0])[1] if ca_keys else None
+        ca_max_raw = max(ca_keys, key=lambda x: x[0])[1] if ca_keys else None
+
+        makbuz_list = []
+        seen_mb = set()
+        for m in members:
+            mb = str(m.get("makbuz_no") or "").strip()
+            if not mb or mb in seen_mb:
+                continue
+            seen_mb.add(mb)
+            makbuz_list.append(mb)
+        if len(makbuz_list) >= 2:
+            makbuz_disp = f"{makbuz_list[0]}–{makbuz_list[-1]}"
+        elif len(makbuz_list) == 1:
+            makbuz_disp = makbuz_list[0]
+        else:
+            makbuz_disp = "—"
+
+        month_keys = []
+        seen_mk = set()
+        for m in members:
+            for mk in _month_keys_from_row(m):
+                sk = f"{mk[0]}-{int(mk[1]):02d}"
+                if sk in seen_mk:
+                    continue
+                seen_mk.add(sk)
+                month_keys.append(mk)
+        month_keys.sort(key=lambda t: (str(t[0]), int(t[1])))
+        if n == 12:
+            etiket = "Yıllık Tahsilat"
+        else:
+            etiket = f"{n} Aylık Tahsilat"
+        if month_keys:
+            first_lbl = _ay_etiket(month_keys[0][0], month_keys[0][1])
+            last_lbl = _ay_etiket(month_keys[-1][0], month_keys[-1][1])
+            if first_lbl == last_lbl:
+                etiket = f"{etiket} ({first_lbl})"
+            else:
+                etiket = f"{etiket} ({first_lbl} – {last_lbl})"
+
+        first = members[0]
+        display = {
+            "is_group": True,
+            "islem_grubu_id": gid,
+            "id": None,
+            "tutar": tutar_sum,
+            "grup_adet": n,
+            "rapor_aciklama_ay": etiket,
+            "tahsilat_tarihi": t_min_raw if t_min_raw is not None else (t_min.isoformat() if t_min else first.get("tahsilat_tarihi")),
+            "tahsilat_tarihi_max": t_max_raw if t_max_raw is not None else (t_max.isoformat() if t_max else None),
+            "created_at": ca_min_raw if ca_min_raw is not None else first.get("created_at"),
+            "created_at_max": ca_max_raw,
+            "makbuz_no": makbuz_disp,
+            "makbuz_no_list": makbuz_list,
+            "musteri_adi": first.get("musteri_adi"),
+            "customer_id": first.get("customer_id"),
+            "musteri_id": first.get("musteri_id"),
+            "odeme_turu": first.get("odeme_turu"),
+            "rapor_hizmet_turu": first.get("rapor_hizmet_turu"),
+            "hizmet_turu": first.get("hizmet_turu"),
+            "fatura_no": first.get("fatura_no"),
+            "fatura_id": first.get("fatura_id"),
+            "fatura_tarihi": first.get("fatura_tarihi"),
+            "aciklama": first.get("aciklama"),
+            "grup_uyeleri": list(members),
+        }
+        out.append(display)
+    return out
+
+
 # A5: 148mm x 210mm (ReportLab A5 = 420x595 pt)
 A5_W_MM, A5_H_MM = 148, 210
 MARGIN_MM, RIGHT_MM = 15, A5_W_MM - 15
@@ -5678,7 +5865,11 @@ def tahsilatlar():
                 continue
             t["rapor_hizmet_turu"] = ht_map.get(mid, "")
 
-    toplam = sum(t.get("tutar") or 0 for t in tahsilatlar_list)
+    # Toplam / ham sayı: gruplamadan ÖNCE (çift sayım yok). Display liste Aşama 2a.
+    tahsilatlar_ham = list(tahsilatlar_list)
+    toplam = sum(t.get("tutar") or 0 for t in tahsilatlar_ham)
+    tahsilat_ham_sayi = len(tahsilatlar_ham)
+    tahsilatlar_list = _tahsilat_rapor_grupla(tahsilatlar_ham)
     hizmet_rows = fetch_all(
         """
         SELECT DISTINCT hizmet_turu
@@ -5708,6 +5899,7 @@ def tahsilatlar():
         senaryo=senaryo,
         tahsilatlar=tahsilatlar_list,
         toplam=toplam,
+        tahsilat_ham_sayi=tahsilat_ham_sayi,
     )
 
 
