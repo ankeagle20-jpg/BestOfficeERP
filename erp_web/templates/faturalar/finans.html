@@ -1145,6 +1145,14 @@
         <tbody id="masraf_ozet_tbody">
           <tr><td colspan="9" class="finans-masraf-bos">Henüz veri yok.</td></tr>
         </tbody>
+        <tfoot id="masraf_ozet_tfoot" style="display:none;">
+          <tr>
+            <td colspan="4"><strong>Toplam</strong></td>
+            <td class="num" id="masraf_ozet_tfoot_kdv">—</td>
+            <td class="num" id="masraf_ozet_tfoot_tutar">—</td>
+            <td colspan="3"></td>
+          </tr>
+        </tfoot>
       </table>
     </div>
   </div>
@@ -1305,6 +1313,23 @@ function masrafOzetYukle() {
             masrafOzetDurum('Bağlantı hatası: ' + (e && e.message ? e.message : e), 'err');
         });
 }
+function masrafOzetTfootGuncelle(ozet, show) {
+    var tf = document.getElementById('masraf_ozet_tfoot');
+    var kdvEl = document.getElementById('masraf_ozet_tfoot_kdv');
+    var tutarEl = document.getElementById('masraf_ozet_tfoot_tutar');
+    if (!tf) return;
+    ozet = ozet || {};
+    if (!show) {
+        tf.style.display = 'none';
+        if (kdvEl) kdvEl.textContent = '—';
+        if (tutarEl) tutarEl.textContent = '—';
+        return;
+    }
+    if (kdvEl) kdvEl.textContent = masrafOzetFmtTutar(ozet.toplam_kdv);
+    if (tutarEl) tutarEl.textContent = masrafOzetFmtTutar(ozet.toplam_tutar);
+    tf.style.display = '';
+}
+
 function masrafOzetRender(data) {
     var ozet = data.ozet || {};
     var adetEl = document.getElementById('masraf_ozet_adet');
@@ -1334,6 +1359,7 @@ function masrafOzetRender(data) {
     var kayitlar = data.kayitlar || [];
     if (!kayitlar.length) {
         tbody.innerHTML = '<tr><td colspan="9" class="finans-masraf-bos">Bu aralıkta onaylı masraf yok.</td></tr>';
+        masrafOzetTfootGuncelle(ozet, false);
         return;
     }
     tbody.innerHTML = kayitlar.map(function (k) {
@@ -1354,6 +1380,7 @@ function masrafOzetRender(data) {
             + '<td><a href="' + masrafOzetEsc(detay) + '" target="_blank" rel="noopener">Detay</a></td>'
             + '</tr>';
     }).join('');
+    masrafOzetTfootGuncelle(ozet, true);
 }
 
 function autoStatusText(lastRun) {
