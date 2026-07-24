@@ -35,6 +35,7 @@ except ImportError:
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 MODEL = "qwen/qwen3.6-27b"
+MAX_TOKENS = 4096
 
 SYSTEM_PROMPT = (
     "Sen bir fiş/fatura OCR asistanısın. Sadece geçerli JSON döndür. "
@@ -60,6 +61,12 @@ USER_PROMPT = """Bu fiş görselinden şu alanları çıkar ve SADECE JSON dönd
 kategori_tahmini için kaba sınıflar kullan: market, yakıt, kırtasiye, yemek, diğer.
 Okunamayan sayısal alanlar için null kullan.
 """
+
+USER_PROMPT_RETRY = (
+    USER_PROMPT
+    + "\n\nEğer görselde birden fazla fiş/belge parçası varsa, SADECE en net/en büyük "
+    "olanı işle, diğerlerini tamamen yok say."
+)
 
 
 def _temiz_anahtar(s: str) -> str:
@@ -97,15 +104,40 @@ def _load_image_data_url(path: Path) -> str:
     return f"data:{_mime_for(path)};base64,{b64}"
 
 
-def _log_groq_issue(image_path, status_code, raw_snippet, *, neden: str) -> None:
+def _log_groq_issue(
+    image_path,
+    status_code,
+    raw_snippet,
+    *,
+    neden: str,
+    deneme: int = 1,
+) -> None:
     """Groq hata/yanıt teşhisi — sadece log; davranış değiştirmez."""
     snippet = (raw_snippet or "")[:2000]
     _log.warning(
-        "Groq fis_oku sorun: neden=%s status_code=%s image_path=%s raw_body=%s",
+        "Groq fis_oku sorun: neden=%s status_code=%s image_path=%s deneme=%s raw_body=%s",
         neden,
         status_code,
         image_path,
+        deneme,
         snippet,
+    )
+
+
+def _is_json_validate_failed(status_code: int, raw_body: str) -> bool:
+    """HTTP 400 gövdesinde Groq json_validate_failed kodu var mı?"""
+    if status_code != 400:
+        return False
+    text = raw_body or ""
+    try:
+        obj = json.loads(text)
+        err = obj.get("error") if isinstance(obj, dict) else None
+        if isinstance(err, dict) and err.get("code") == "json_validate_failed":
+            return True
+    except Exception:
+        pass
+    return '"code":"json_validate_failed"' in text.replace(" ", "") or (
+        "json_validate_failed" in text
     )
 
 
@@ -142,101 +174,151 @@ def fis_oku(
         return False, None, "requests kütüphanesi yüklü değil.", None
 
     use_model = (model or MODEL).strip() or MODEL
-    payload = {
-        "model": use_model,
-        "temperature": 0.1,
-        "response_format": {"type": "json_object"},
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": USER_PROMPT},
-                    {"type": "image_url", "image_url": {"url": data_url}},
-                ],
-            },
-        ],
-    }
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
 
-    try:
-        resp = requests.post(GROQ_URL, headers=headers, json=payload, timeout=timeout)
-    except requests.Timeout:
-        return False, None, "AI servisi zaman aşımına uğradı; tekrar deneyin.", None
-    except requests.RequestException as e:
-        return False, None, f"AI servisine ulaşılamadı: {e}", None
+    # deneme 1: normal; deneme 2: yalnızca json_validate_failed sonrası
+    attempt_specs = (
+        {"deneme": 1, "temperature": 0.1, "user_text": USER_PROMPT},
+        {"deneme": 2, "temperature": 0.0, "user_text": USER_PROMPT_RETRY},
+    )
 
-    raw_body = (resp.text or "")[:8000]
-    if resp.status_code != 200:
-        _log_groq_issue(
-            str(path),
-            resp.status_code,
-            raw_body,
-            neden=f"http_{resp.status_code}",
-        )
-    if resp.status_code == 429:
-        return False, None, "AI servisi yoğun; biraz sonra tekrar deneyin.", raw_body
-    if resp.status_code == 401:
-        return False, None, "Fiş okuma yapılandırması geçersiz (API anahtarı).", raw_body
-    if resp.status_code == 404:
-        return (
-            False,
-            None,
-            "Fiş okuma modeli erişilemiyor; yapılandırmayı kontrol edin.",
-            raw_body,
-        )
-    if resp.status_code != 200:
-        return (
-            False,
-            None,
-            f"AI servisi hata döndü (HTTP {resp.status_code}).",
-            raw_body,
-        )
+    last_raw_body: str | None = None
+    last_status: int | None = None
 
-    try:
-        body = resp.json()
-    except Exception:
-        _log_groq_issue(
-            str(path),
-            resp.status_code,
-            raw_body,
-            neden="json_parse",
-        )
-        return False, None, "AI yanıtı okunamadı.", raw_body
+    for attempt_i, spec in enumerate(attempt_specs):
+        deneme = int(spec["deneme"])
+        payload = {
+            "model": use_model,
+            "temperature": spec["temperature"],
+            "max_tokens": MAX_TOKENS,
+            "response_format": {"type": "json_object"},
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": spec["user_text"]},
+                        {"type": "image_url", "image_url": {"url": data_url}},
+                    ],
+                },
+            ],
+        }
 
-    try:
-        content = body["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError):
-        _log_groq_issue(
-            str(path),
-            resp.status_code,
-            raw_body,
-            neden="beklenen_icerik_yok",
-        )
-        return False, None, "AI yanıtında beklenen içerik yok.", raw_body
+        try:
+            resp = requests.post(
+                GROQ_URL, headers=headers, json=payload, timeout=timeout
+            )
+        except requests.Timeout:
+            return False, None, "AI servisi zaman aşımına uğradı; tekrar deneyin.", None
+        except requests.RequestException as e:
+            return False, None, f"AI servisine ulaşılamadı: {e}", None
 
-    raw = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
-    try:
-        parsed = json.loads(content) if isinstance(content, str) else content
-    except (json.JSONDecodeError, TypeError):
-        _log_groq_issue(
-            str(path),
-            resp.status_code,
-            raw,
-            neden="gecersiz_json",
-        )
-        return False, None, "Fiş okunamadı (geçersiz JSON).", raw
+        raw_body = (resp.text or "")[:8000]
+        last_raw_body = raw_body
+        last_status = resp.status_code
 
-    if not isinstance(parsed, dict):
-        _log_groq_issue(
-            str(path),
-            resp.status_code,
-            raw,
-            neden="beklenmeyen_yanit",
-        )
-        return False, None, "Fiş okunamadı (beklenmeyen yanıt).", raw
+        if resp.status_code != 200:
+            _log_groq_issue(
+                str(path),
+                resp.status_code,
+                raw_body,
+                neden=f"http_{resp.status_code}",
+                deneme=deneme,
+            )
+            # 429 / 401 / 404 ve diğer hatalar: retry yok (yalnızca json_validate_failed)
+            if resp.status_code == 429:
+                return (
+                    False,
+                    None,
+                    "AI servisi yoğun; biraz sonra tekrar deneyin.",
+                    raw_body,
+                )
+            if resp.status_code == 401:
+                return (
+                    False,
+                    None,
+                    "Fiş okuma yapılandırması geçersiz (API anahtarı).",
+                    raw_body,
+                )
+            if resp.status_code == 404:
+                return (
+                    False,
+                    None,
+                    "Fiş okuma modeli erişilemiyor; yapılandırmayı kontrol edin.",
+                    raw_body,
+                )
+            if (
+                attempt_i == 0
+                and _is_json_validate_failed(resp.status_code, raw_body)
+            ):
+                continue  # bir kez daha dene
+            return (
+                False,
+                None,
+                f"AI servisi hata döndü (HTTP {resp.status_code}).",
+                raw_body,
+            )
 
-    return True, parsed, None, raw
+        try:
+            body = resp.json()
+        except Exception:
+            _log_groq_issue(
+                str(path),
+                resp.status_code,
+                raw_body,
+                neden="json_parse",
+                deneme=deneme,
+            )
+            return False, None, "AI yanıtı okunamadı.", raw_body
+
+        try:
+            content = body["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError):
+            _log_groq_issue(
+                str(path),
+                resp.status_code,
+                raw_body,
+                neden="beklenen_icerik_yok",
+                deneme=deneme,
+            )
+            return False, None, "AI yanıtında beklenen içerik yok.", raw_body
+
+        raw = (
+            content
+            if isinstance(content, str)
+            else json.dumps(content, ensure_ascii=False)
+        )
+        try:
+            parsed = json.loads(content) if isinstance(content, str) else content
+        except (json.JSONDecodeError, TypeError):
+            _log_groq_issue(
+                str(path),
+                resp.status_code,
+                raw,
+                neden="gecersiz_json",
+                deneme=deneme,
+            )
+            return False, None, "Fiş okunamadı (geçersiz JSON).", raw
+
+        if not isinstance(parsed, dict):
+            _log_groq_issue(
+                str(path),
+                resp.status_code,
+                raw,
+                neden="beklenmeyen_yanit",
+                deneme=deneme,
+            )
+            return False, None, "Fiş okunamadı (beklenmeyen yanıt).", raw
+
+        return True, parsed, None, raw
+
+    # Teorik: döngü bitti (2. deneme de HTTP hata ile continue etmedi)
+    return (
+        False,
+        None,
+        f"AI servisi hata döndü (HTTP {last_status}).",
+        last_raw_body,
+    )
