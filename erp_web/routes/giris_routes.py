@@ -74,6 +74,7 @@ from utils.musteri_arama import (
     musteri_arama_ilike_pattern_email_duz,
 )
 import json
+import uuid
 from pathlib import Path
 import psycopg2
 import secrets
@@ -9311,6 +9312,8 @@ def api_aylik_tutarlardan_tahsil_et():
 
             harf = _odeme_turu_harf(odeme)
             yerel_tahsil_iso = set()
+            # Aynı "Seçilenleri tahsil et" batch'indeki yeni INSERT satırlarını bağlar (rapor gruplama için).
+            islem_grubu_id = str(uuid.uuid4())
 
             def _p_tahsil_tarihi(p_item):
                 t = p_item.get("tahsilat_tarihi")
@@ -9400,8 +9403,8 @@ def api_aylik_tutarlardan_tahsil_et():
                     fatura_id = fatura_by_month.get(p["ay_bir"])
                     cur.execute(
                         """
-                        INSERT INTO tahsilatlar (musteri_id, customer_id, fatura_id, tutar, odeme_turu, aciklama, tahsilat_tarihi, makbuz_no)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        INSERT INTO tahsilatlar (musteri_id, customer_id, fatura_id, tutar, odeme_turu, aciklama, tahsilat_tarihi, makbuz_no, islem_grubu_id)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                         RETURNING id
                         """,
                         (
@@ -9413,6 +9416,7 @@ def api_aylik_tutarlardan_tahsil_et():
                             aciklama,
                             tahsilat_tarihi,
                             makbuz_no,
+                            islem_grubu_id,
                         ),
                     )
                     row_ins = cur.fetchone()
@@ -9448,8 +9452,8 @@ def api_aylik_tutarlardan_tahsil_et():
                 fatura_id = fatura_by_month.get(p["ay_bir"])
                 cur.execute(
                     """
-                    INSERT INTO tahsilatlar (musteri_id, customer_id, fatura_id, tutar, odeme_turu, aciklama, tahsilat_tarihi, makbuz_no)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    INSERT INTO tahsilatlar (musteri_id, customer_id, fatura_id, tutar, odeme_turu, aciklama, tahsilat_tarihi, makbuz_no, islem_grubu_id)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING id
                     """,
                     (
@@ -9461,6 +9465,7 @@ def api_aylik_tutarlardan_tahsil_et():
                         aciklama,
                         tahsilat_tarihi,
                         makbuz_no,
+                        islem_grubu_id,
                     ),
                 )
                 row_ins = cur.fetchone()

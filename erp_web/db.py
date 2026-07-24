@@ -2030,6 +2030,20 @@ def ensure_tahsilatlar_columns():
             "tahsilatlar.makbuz_no benzersiz indeks atlanıyor (aynı numaralı eski kayıtlar varsa önce düzeltin):",
             e,
         )
+    try:
+        execute("ALTER TABLE tahsilatlar ADD COLUMN IF NOT EXISTS islem_grubu_id TEXT")
+    except Exception as e:
+        print(f"tahsilatlar.islem_grubu_id: {e}")
+    try:
+        execute(
+            """
+            CREATE INDEX IF NOT EXISTS ix_tahsilatlar_islem_grubu_id
+            ON tahsilatlar (islem_grubu_id)
+            WHERE islem_grubu_id IS NOT NULL
+            """
+        )
+    except Exception as e:
+        print(f"tahsilatlar.islem_grubu_id indeks: {e}")
 
 
 def ensure_tediyeler_columns():
