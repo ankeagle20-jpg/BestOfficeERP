@@ -801,11 +801,12 @@
         </button>
         <label style="display:flex;
           align-items:center;gap:6px;
-          cursor:pointer;font-size:13px;">
+          cursor:pointer;font-size:13px;"
+          title="İşaretliyse Başlangıç/Bitiş, Girildiği Tarih (created_at) alanına göre uygulanır.">
           <input type="checkbox"
             id="tahsilat_senaryo"
-            {% if senaryo is defined and senaryo == '0' %}{% else %}checked{% endif %}>
-          Senaryo
+            {% if senaryo is defined and senaryo == '0' %}checked{% endif %}>
+          Girildiği Tarih'e göre filtrele
         </label>
     </div>
     
@@ -1240,9 +1241,11 @@
         // Hizmet türü filtresi istemci tarafında uygulanıyor; URL'ye eklemeyelim.
         if (bas) url += '&baslangic=' + encodeURIComponent(bas);
         if (bit) url += '&bitis=' + encodeURIComponent(bit);
+        // İşaretli = Girildiği Tarih (created_at) → senaryo=0
+        // İşaretsiz = dönem/marker (varsayılan) → senaryo=1
         url += '&senaryo=' +
           (document.getElementById(
-            'tahsilat_senaryo').checked ? '1' : '0');
+            'tahsilat_senaryo').checked ? '0' : '1');
         url += _finansIframeEmbedSuffix();
         return url;
     }
@@ -1401,7 +1404,9 @@
         Array.prototype.forEach.call(tbody.querySelectorAll('tr'), function (tr) {
             if (tr.classList.contains('tahsilat-empty-row')) return;
             if (!tr.cells || tr.cells.length < 10) return;
-            var dt = tahsilatParseDateTR(tr.cells[1].textContent || '');
+            var cbGir = document.getElementById('tahsilat_senaryo');
+            var cellIdx = (cbGir && cbGir.checked) ? 2 : 1;
+            var dt = tahsilatParseDateTR(tr.cells[cellIdx].textContent || '');
             var hzRaw = String(tr.getAttribute('data-hizmet-turu') || '');
             var goster = true;
             if (dt && bas && dt < bas) goster = false;
@@ -1450,9 +1455,11 @@
         var urlParams = new URLSearchParams(
           window.location.search);
         var senaryoParam = urlParams.get('senaryo');
-        if (senaryoParam === '0') {
-          document.getElementById(
-            'tahsilat_senaryo').checked = false;
+        // senaryo=0 → Girildiği Tarih modu → checkbox işaretli
+        // parametre yok / 1 → varsayılan dönem modu → işaretsiz
+        var cbSen = document.getElementById('tahsilat_senaryo');
+        if (cbSen) {
+          cbSen.checked = (senaryoParam === '0');
         }
         tahsilatHizmetSecimiYukle();
         tahsilatTutarHucresiFormatla();
