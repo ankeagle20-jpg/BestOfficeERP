@@ -559,6 +559,7 @@
             queueProcessing = false;
             setLoading(false);
             updateQueueProgress();
+            renderQueueAll();
             var done = queue.filter(function (q) { return q.status === "done"; }).length;
             var err = queue.filter(function (q) { return q.status === "error"; }).length;
             if (queueStopped) return;
