@@ -5,7 +5,7 @@
     .fis-hint { color: var(--muted); font-size: 13px; margin-bottom: 14px; line-height: 1.45; }
     .fis-preview-wrap { display: none; margin: 12px 0; text-align: center; }
     .fis-preview-wrap.show { display: block; }
-    .fis-preview-wrap img { max-width: 100%; max-height: 220px; border-radius: 10px; border: 1px solid var(--border); }
+    .fis-preview-wrap img { max-width: 100%; max-height: 220px; border-radius: 10px; border: 1px solid var(--border); cursor: zoom-in; }
     .fis-file-name { font-size: 12px; color: var(--muted); margin-top: 6px; word-break: break-all; }
     .fis-loading { display: none; align-items: center; gap: 10px; padding: 14px; margin: 12px 0; border-radius: 10px; background: var(--card); border: 1px solid var(--border); color: var(--neon-blue); font-size: 14px; font-weight: 600; }
     .fis-loading.show { display: flex; }
@@ -43,7 +43,7 @@
         display: flex; align-items: flex-start; gap: 10px; padding: 10px;
         border-radius: 10px; border: 1px solid var(--border); background: var(--card);
     }
-    .fis-queue-item img { width: 52px; height: 52px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); flex-shrink: 0; }
+    .fis-queue-item img { width: 52px; height: 52px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); flex-shrink: 0; cursor: zoom-in; }
     .fis-queue-body { flex: 1; min-width: 0; }
     .fis-queue-name { font-size: 12px; font-weight: 600; word-break: break-all; }
     .fis-queue-status { font-size: 12px; margin-top: 4px; color: var(--muted); }
@@ -57,6 +57,75 @@
         color: var(--neon-blue); cursor: pointer; text-decoration: underline; border: none; background: none; padding: 0;
     }
     .fis-queue-retry:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.fis-lightbox {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 10050;
+  background: rgba(0, 0, 0, 0.82);
+  align-items: stretch;
+  justify-content: stretch;
+}
+.fis-lightbox.is-open {
+  display: flex;
+  flex-direction: column;
+}
+.fis-lightbox-toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 14px;
+  background: rgba(10, 25, 41, 0.92);
+  border-bottom: 1px solid #2d4060;
+  position: relative;
+  z-index: 2;
+}
+.fis-lightbox-toolbar button {
+  background: #1e3a50;
+  border: 1px solid #2d4060;
+  color: #e0f7fa;
+  min-width: 36px;
+  height: 34px;
+  border-radius: 6px;
+  font-size: 16px;
+  cursor: pointer;
+  line-height: 1;
+}
+.fis-lightbox-toolbar button:hover {
+  background: #274a66;
+}
+.fis-lightbox-toolbar #fis-lightbox-pct {
+  min-width: 56px;
+  text-align: center;
+  font-size: 13px;
+  color: #b0bec5;
+  user-select: none;
+}
+.fis-lightbox-stage {
+  flex: 1 1 auto;
+  position: relative;
+  overflow: hidden;
+  cursor: grab;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: none;
+}
+.fis-lightbox-stage.is-dragging {
+  cursor: grabbing;
+}
+.fis-lightbox-stage img {
+  max-width: min(92vw, 1200px);
+  max-height: 82vh;
+  object-fit: contain;
+  transform-origin: center center;
+  user-select: none;
+  -webkit-user-drag: none;
+  pointer-events: none;
+}
 </style>
 {% endblock %}
 {% block content %}
@@ -110,6 +179,18 @@
         <button type="button" class="btn btn-gray btn-block" id="fis-btn-yeni" style="margin-top:10px;"><i class="fa fa-redo"></i> Yeni fiş</button>
         <a href="{{ url_for('fis_masraflari.onay_bekleyenler') }}" class="fis-onay-link block">Onay bekleyenler →</a>
     </div>
+</div>
+
+<div id="fis-lightbox" class="fis-lightbox" aria-hidden="true">
+  <div class="fis-lightbox-toolbar" id="fis-lightbox-toolbar">
+    <button type="button" id="fis-lightbox-zoom-out" title="Uzaklaştır">−</button>
+    <span id="fis-lightbox-pct">%100</span>
+    <button type="button" id="fis-lightbox-zoom-in" title="Yakınlaştır">+</button>
+    <button type="button" id="fis-lightbox-close" title="Kapat">×</button>
+  </div>
+  <div class="fis-lightbox-stage" id="fis-lightbox-stage">
+    <img id="fis-lightbox-img" alt="Fiş görseli (büyük)">
+  </div>
 </div>
 {% endblock %}
 {% block extra_js %}
@@ -548,6 +629,177 @@
     });
 
     btnYeni.addEventListener("click", resetForm);
+})();
+
+(function () {
+  var elLb = document.getElementById("fis-lightbox");
+  var elStage = document.getElementById("fis-lightbox-stage");
+  var elImg = document.getElementById("fis-lightbox-img");
+  var elPct = document.getElementById("fis-lightbox-pct");
+  var elToolbar = document.getElementById("fis-lightbox-toolbar");
+  var btnClose = document.getElementById("fis-lightbox-close");
+  var btnIn = document.getElementById("fis-lightbox-zoom-in");
+  var btnOut = document.getElementById("fis-lightbox-zoom-out");
+  var elPreview = document.getElementById("fis-preview-img");
+  var elQueueList = document.getElementById("fis-queue-list");
+  if (!elLb || !elStage || !elImg) return;
+
+  var MIN_Z = 0.5;
+  var MAX_Z = 4;
+  var STEP = 1.15;
+  var zoom = 1;
+  var panX = 0;
+  var panY = 0;
+  var dragging = false;
+  var lastX = 0;
+  var lastY = 0;
+  var activePointer = null;
+  var prevOverflow = "";
+  var dragMoved = false;
+
+  function clamp(z) {
+    return Math.max(MIN_Z, Math.min(MAX_Z, z));
+  }
+
+  function applyTransform() {
+    elImg.style.transform = "translate(" + panX + "px," + panY + "px) scale(" + zoom + ")";
+    elPct.textContent = "%" + Math.round(zoom * 100);
+  }
+
+  function setZoom(z) {
+    zoom = clamp(z);
+    if (zoom <= 1) {
+      panX = 0;
+      panY = 0;
+    }
+    applyTransform();
+  }
+
+  function openLb(src) {
+    src = src || "";
+    if (!src) return;
+    elImg.src = src;
+    zoom = 1;
+    panX = 0;
+    panY = 0;
+    applyTransform();
+    elLb.classList.add("is-open");
+    elLb.setAttribute("aria-hidden", "false");
+    prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+  }
+
+  function closeLb() {
+    if (!elLb.classList.contains("is-open")) return;
+    elLb.classList.remove("is-open");
+    elLb.setAttribute("aria-hidden", "true");
+    document.body.style.overflow = prevOverflow || "";
+    dragging = false;
+    activePointer = null;
+    elStage.classList.remove("is-dragging");
+  }
+
+  window.openFisLightbox = openLb;
+
+  if (elPreview) {
+    elPreview.addEventListener("click", function () {
+      openLb(elPreview.getAttribute("src") || "");
+    });
+  }
+
+  if (elQueueList) {
+    elQueueList.addEventListener("click", function (ev) {
+      var t = ev.target;
+      if (!t || !t.closest) return;
+      // "Tekrar dene" / diğer butonlar lightbox açmasın
+      if (t.closest("button")) return;
+      var img = t.closest("img");
+      if (!img || !elQueueList.contains(img)) return;
+      ev.preventDefault();
+      openLb(img.getAttribute("src") || "");
+    });
+  }
+
+  btnClose.addEventListener("click", function (e) {
+    e.stopPropagation();
+    closeLb();
+  });
+  btnIn.addEventListener("click", function (e) {
+    e.stopPropagation();
+    setZoom(zoom * STEP);
+  });
+  btnOut.addEventListener("click", function (e) {
+    e.stopPropagation();
+    setZoom(zoom / STEP);
+  });
+
+  elToolbar.addEventListener("click", function (e) {
+    e.stopPropagation();
+  });
+
+  // Overlay / stage boş alanına tıklayınca kapat; görselin üzerine tıklayınca kapatma.
+  // (img pointer-events:none olduğu için koordinat kontrolü gerekir)
+  elLb.addEventListener("click", function (e) {
+    if (e.target === elToolbar || elToolbar.contains(e.target)) return;
+    if (dragMoved) {
+      dragMoved = false;
+      return;
+    }
+    var r = elImg.getBoundingClientRect();
+    var onImg = (
+      e.clientX >= r.left && e.clientX <= r.right &&
+      e.clientY >= r.top && e.clientY <= r.bottom
+    );
+    if (!onImg) closeLb();
+  });
+
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && elLb.classList.contains("is-open")) {
+      e.preventDefault();
+      closeLb();
+    }
+  });
+
+  elStage.addEventListener("wheel", function (e) {
+    if (!elLb.classList.contains("is-open")) return;
+    e.preventDefault();
+    if (e.deltaY < 0) setZoom(zoom * STEP);
+    else setZoom(zoom / STEP);
+  }, { passive: false });
+
+  elStage.addEventListener("pointerdown", function (e) {
+    if (!elLb.classList.contains("is-open")) return;
+    if (zoom <= 1) return;
+    dragging = true;
+    dragMoved = false;
+    activePointer = e.pointerId;
+    lastX = e.clientX;
+    lastY = e.clientY;
+    elStage.classList.add("is-dragging");
+    try { elStage.setPointerCapture(e.pointerId); } catch (err) {}
+    e.preventDefault();
+  });
+
+  elStage.addEventListener("pointermove", function (e) {
+    if (!dragging || activePointer !== e.pointerId) return;
+    var dx = e.clientX - lastX;
+    var dy = e.clientY - lastY;
+    if (dx || dy) dragMoved = true;
+    panX += dx;
+    panY += dy;
+    lastX = e.clientX;
+    lastY = e.clientY;
+    applyTransform();
+  });
+
+  function endDrag(e) {
+    if (activePointer !== null && e && e.pointerId !== activePointer) return;
+    dragging = false;
+    activePointer = null;
+    elStage.classList.remove("is-dragging");
+  }
+  elStage.addEventListener("pointerup", endDrag);
+  elStage.addEventListener("pointercancel", endDrag);
 })();
 </script>
 {% endblock %}
