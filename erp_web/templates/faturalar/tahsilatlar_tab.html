@@ -2049,30 +2049,81 @@
             function applySort(colIndex, dir) {
                 var tbody = table.querySelector('tbody');
                 if (!tbody) return;
-                var trs = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
+                var all = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
                 var sign = (dir === 'desc') ? -1 : 1;
                 var th = table.querySelector('thead th:nth-child(' + (colIndex + 1) + ')');
                 var type = (th && th.getAttribute) ? (th.getAttribute('data-dyn-type') || 'str') : 'str';
-                trs.sort(function(a,b){
-                    var ca = a.cells && a.cells[colIndex] ? a.cells[colIndex].textContent.trim() : '';
-                    var cb = b.cells && b.cells[colIndex] ? b.cells[colIndex].textContent.trim() : '';
+                var tops = [];
+                var emptyRows = [];
+                var childrenByParent = {};
+                var orphanChildren = [];
+                all.forEach(function (tr) {
+                    if (tr.classList && tr.classList.contains('tahsilat-empty-row')) {
+                        emptyRows.push(tr);
+                        return;
+                    }
+                    if (tr.getAttribute('data-grup-child') === '1') {
+                        var pg = tr.getAttribute('data-parent-grup') || '';
+                        if (pg) {
+                            if (!childrenByParent[pg]) childrenByParent[pg] = [];
+                            childrenByParent[pg].push(tr);
+                        } else {
+                            orphanChildren.push(tr);
+                        }
+                        return;
+                    }
+                    tops.push(tr);
+                });
+                function sortCellText(tr) {
+                    return (tr.cells && tr.cells[colIndex]) ? String(tr.cells[colIndex].textContent || '').trim() : '';
+                }
+                function sortDateValue(tr) {
+                    var isoAttr = '';
+                    if (colIndex === 1) {
+                        isoAttr = tr.getAttribute('data-tahsilat-tarihi') || '';
+                    } else if (colIndex === 2) {
+                        isoAttr = tr.getAttribute('data-girildigi-tarihi') || '';
+                    }
+                    if (isoAttr && /^\d{4}-\d{2}-\d{2}/.test(isoAttr)) {
+                        return parseDateTR(isoAttr.slice(0, 10));
+                    }
+                    return parseDateTR(sortCellText(tr));
+                }
+                tops.sort(function (a, b) {
                     if (type === 'num') {
-                        var na = parseNumberTR(ca);
-                        var nb = parseNumberTR(cb);
+                        var na = parseNumberTR(sortCellText(a));
+                        var nb = parseNumberTR(sortCellText(b));
                         if (na === nb) return 0;
                         return (na - nb) * sign;
                     }
                     if (type === 'date') {
-                        var da = parseDateTR(ca);
-                        var db = parseDateTR(cb);
+                        var da = sortDateValue(a);
+                        var db = sortDateValue(b);
                         if (da === db) return 0;
                         if (!Number.isFinite(da)) return 1;
                         if (!Number.isFinite(db)) return -1;
                         return (da - db) * sign;
                     }
+                    var ca = sortCellText(a);
+                    var cb = sortCellText(b);
                     return ca.localeCompare(cb, 'tr', { sensitivity: 'base', numeric: true }) * sign;
                 });
-                trs.forEach(function(tr){ tbody.appendChild(tr); });
+                var usedParents = {};
+                tops.forEach(function (tr) {
+                    tbody.appendChild(tr);
+                    var gid = tr.getAttribute('data-islem-grubu-id') || '';
+                    if (!gid) return;
+                    var kids = childrenByParent[gid];
+                    if (!kids || !kids.length) return;
+                    usedParents[gid] = true;
+                    kids.forEach(function (ch) { tbody.appendChild(ch); });
+                });
+                Object.keys(childrenByParent).forEach(function (gid) {
+                    if (usedParents[gid]) return;
+                    childrenByParent[gid].forEach(function (ch) { tbody.appendChild(ch); });
+                });
+                orphanChildren.forEach(function (ch) { tbody.appendChild(ch); });
+                emptyRows.forEach(function (tr) { tbody.appendChild(tr); });
             }
 
             var ths = table.querySelectorAll('thead th.dyn-sort-th');
