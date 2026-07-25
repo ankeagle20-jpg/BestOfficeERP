@@ -1012,6 +1012,13 @@ def _tahsilat_rapor_grupla(rows):
                 continue
             seen_mb.add(mb)
             makbuz_list.append(mb)
+        def _makbuz_sort_key(mb):
+            mm = re.search(r"(\d+)$", str(mb))
+            try:
+                return (int(mm.group(1)) if mm else 0, str(mb))
+            except Exception:
+                return (0, str(mb))
+        makbuz_list.sort(key=_makbuz_sort_key)
         if len(makbuz_list) >= 2:
             makbuz_disp = f"{makbuz_list[0]}–{makbuz_list[-1]}"
         elif len(makbuz_list) == 1:

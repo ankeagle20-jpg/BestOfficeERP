@@ -300,6 +300,27 @@
             color: #8df58f;
             white-space: nowrap;
         }
+
+        .tahsilat-grup-satir {
+            background: #f5f9fc;
+            font-weight: 600;
+        }
+        .tahsilat-grup-child td:first-child {
+            padding-left: 18px;
+        }
+        .tahsilat-grup-child {
+            background: #fafbfc;
+        }
+        .btn-grup-detay {
+            border: 1px solid #90caf9;
+            background: #e3f2fd;
+            color: #1565c0;
+            border-radius: 4px;
+            padding: 4px 10px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        .btn-grup-detay:hover { background: #bbdefb; }
         tr:hover td {
             background: rgba(79, 195, 247, 0.05);
         }
@@ -817,13 +838,14 @@
         </div>
         <div class="stat-card" style="border-left-color: #4fc3f7;">
             <h4>Tahsilat Sayısı</h4>
-            <div class="value" id="tahsilat_stat_sayi" style="color: #4fc3f7;">{{ tahsilatlar|length }}</div>
+            <div class="value" id="tahsilat_stat_sayi" style="color: #4fc3f7;">{{ tahsilat_ham_sayi if tahsilat_ham_sayi is defined else (tahsilatlar|length) }}</div>
         </div>
         <div class="stat-card" style="border-left-color: #ff9800;">
             <h4>Ortalama Tutar</h4>
             <div class="value" id="tahsilat_stat_ort" style="color: #ff9800;">
-                {% if tahsilatlar|length > 0 %}
-                    {{ (toplam / tahsilatlar|length)|round(2) }}
+                {% set _ham_n = tahsilat_ham_sayi if tahsilat_ham_sayi is defined else (tahsilatlar|length) %}
+                {% if _ham_n and _ham_n > 0 %}
+                    {{ (toplam / _ham_n)|round(2) }}
                 {% else %}
                     0.00
                 {% endif %}
@@ -859,11 +881,98 @@
         <tbody>
             {% if tahsilatlar %}
                 {% for t in tahsilatlar %}
+                {% if t.is_group %}
+                {% set _tmin = t.tahsilat_tarihi %}
+                {% set _tmax = t.tahsilat_tarihi_max or t.tahsilat_tarihi %}
+                {% set _tmin_iso = (_tmin[:10] if _tmin is string and _tmin|length >= 10 else (_tmin.strftime('%Y-%m-%d') if _tmin and _tmin is not string else '')) %}
+                {% set _tmax_iso = (_tmax[:10] if _tmax is string and _tmax|length >= 10 else (_tmax.strftime('%Y-%m-%d') if _tmax and _tmax is not string else _tmin_iso)) %}
+                {% set _cmin = t.created_at %}
+                {% set _cmax = t.created_at_max or t.created_at %}
+                {% set _cmin_iso = (_cmin[:10] if _cmin is string and _cmin|length >= 10 else (_cmin.strftime('%Y-%m-%d') if _cmin and _cmin is not string else '')) %}
+                {% set _cmax_iso = (_cmax[:10] if _cmax is string and _cmax|length >= 10 else (_cmax.strftime('%Y-%m-%d') if _cmax and _cmax is not string else _cmin_iso)) %}
+                <tr class="tahsilat-grup-satir"
+                    data-is-group="1"
+                    data-islem-grubu-id="{{ t.islem_grubu_id }}"
+                    data-grup-adet="{{ t.grup_adet or 0 }}"
+                    data-grup-expanded="0"
+                    data-musteri-id="{{ t.customer_id or t.musteri_id or '' }}"
+                    data-odeme-turu="{{ (t.odeme_turu or 'nakit')|lower }}"
+                    data-hizmet-turu="{{ (t.rapor_hizmet_turu or t.hizmet_turu or '')|lower }}"
+                    data-tahsilat-tarihi="{{ _tmin_iso }}"
+                    data-girildigi-tarihi="{{ _cmin_iso }}">
+                    <td>{{ t.makbuz_no or '-' }}</td>
+                    <td>{% if _tmin_iso %}{% if _tmax_iso and _tmax_iso != _tmin_iso %}{{ _tmin_iso[8:10] }}.{{ _tmin_iso[5:7] }}.{{ _tmin_iso[0:4] }} – {{ _tmax_iso[8:10] }}.{{ _tmax_iso[5:7] }}.{{ _tmax_iso[0:4] }}{% else %}{{ _tmin_iso[8:10] }}.{{ _tmin_iso[5:7] }}.{{ _tmin_iso[0:4] }}{% endif %}{% else %}-{% endif %}</td>
+                    <td class="td-girildigi-tarih"{% if _cmin_iso %} title="{% if _cmax_iso and _cmax_iso != _cmin_iso %}{{ _cmin_iso[8:10] }}.{{ _cmin_iso[5:7] }}.{{ _cmin_iso[0:4] }} – {{ _cmax_iso[8:10] }}.{{ _cmax_iso[5:7] }}.{{ _cmax_iso[0:4] }}{% else %}{{ _cmin_iso[8:10] }}.{{ _cmin_iso[5:7] }}.{{ _cmin_iso[0:4] }}{% endif %}"{% endif %}>{% if _cmin_iso %}{% if _cmax_iso and _cmax_iso != _cmin_iso %}{{ _cmin_iso[8:10] }}.{{ _cmin_iso[5:7] }}.{{ _cmin_iso[0:4] }} – {{ _cmax_iso[8:10] }}.{{ _cmax_iso[5:7] }}.{{ _cmax_iso[0:4] }}{% else %}{{ _cmin_iso[8:10] }}.{{ _cmin_iso[5:7] }}.{{ _cmin_iso[0:4] }}{% endif %}{% else %}-{% endif %}</td>
+                    <td class="td-musteri" title="{{ (t.musteri_adi or 'Bilinmiyor')|e }}">
+                        {% if (t.customer_id or t.musteri_id) %}
+                            <a class="musteri-link" href="/giris/?mid={{ t.customer_id or t.musteri_id }}&kart=1">{{ t.musteri_adi or 'Bilinmiyor' }}</a>
+                        {% else %}
+                            {{ t.musteri_adi or 'Bilinmiyor' }}
+                        {% endif %}
+                    </td>
+                    <td class="td-aciklama-ay" title="{{ (t.rapor_aciklama_ay or '')|e }}">{{ t.rapor_aciklama_ay or '—' }}</td>
+                    <td>{{ t.fatura_no or '-' }}</td>
+                    <td class="td-tutar">{{ (t.tutar|default(0))|round(2) }} TL</td>
+                    <td>
+                        {% set _od = (t.odeme_turu or 'nakit')|lower %}
+                        <span class="badge badge-{% if _od in ['havale','eft','banka','havale/eft'] %}banka{% elif _od in ['kredi_karti','kredi kartı','kredi_kartı'] %}kredi_karti{% elif _od in ['cek','çek'] %}cek{% else %}nakit{% endif %}">
+                            {% if _od in ['havale','eft','banka','havale/eft'] %}Banka{% elif _od in ['kredi_karti','kredi kartı','kredi_kartı'] %}Kredi Kartı{% elif _od in ['cek','çek'] %}Çek{% else %}Nakit{% endif %}
+                        </span>
+                    </td>
+                    <td class="td-hizmet-turu">{{ t.rapor_hizmet_turu or t.hizmet_turu or '-' }}</td>
+                    <td class="td-islem">
+                        <button type="button" class="btn-grup-detay" data-grup-id="{{ t.islem_grubu_id }}" onclick="tahsilatGrupDetayToggle(this)">Detaylar</button>
+                    </td>
+                </tr>
+                {% for u in (t.grup_uyeleri or []) %}
+                <tr class="tahsilat-grup-child"
+                    style="display:none;"
+                    data-grup-child="1"
+                    data-parent-grup="{{ t.islem_grubu_id }}"
+                    data-tahsilat-id="{{ u.id }}"
+                    data-musteri-id="{{ u.customer_id or u.musteri_id or '' }}"
+                    data-odeme-turu="{{ (u.odeme_turu or 'nakit')|lower }}"
+                    data-hizmet-turu="{{ (u.rapor_hizmet_turu or u.hizmet_turu or '')|lower }}"
+                    data-tahsilat-tarihi="{% if u.tahsilat_tarihi %}{% if u.tahsilat_tarihi is string and u.tahsilat_tarihi|length >= 10 %}{{ u.tahsilat_tarihi[:10] }}{% elif u.tahsilat_tarihi is string %}{{ u.tahsilat_tarihi }}{% else %}{{ u.tahsilat_tarihi.strftime('%Y-%m-%d') }}{% endif %}{% else %}{% endif %}"
+                    data-girildigi-tarihi="{% if u.created_at %}{% if u.created_at is string and u.created_at|length >= 10 %}{{ u.created_at[:10] }}{% elif u.created_at is string %}{{ u.created_at }}{% else %}{{ u.created_at.strftime('%Y-%m-%d') }}{% endif %}{% else %}{% endif %}">
+                    <td>{{ u.makbuz_no or '-' }}</td>
+                    <td>{% if u.tahsilat_tarihi %}{% if u.tahsilat_tarihi is string and u.tahsilat_tarihi|length >= 10 %}{{ u.tahsilat_tarihi[8:10] }}.{{ u.tahsilat_tarihi[5:7] }}.{{ u.tahsilat_tarihi[0:4] }}{% elif u.tahsilat_tarihi is string %}{{ u.tahsilat_tarihi }}{% else %}{{ u.tahsilat_tarihi.strftime('%d.%m.%Y') }}{% endif %}{% else %}-{% endif %}</td>
+                    <td class="td-girildigi-tarih"{% if u.created_at %} title="{% if u.created_at is string %}{% if u.created_at|length >= 16 %}{{ u.created_at[8:10] }}.{{ u.created_at[5:7] }}.{{ u.created_at[0:4] }} {{ u.created_at[11:16] }}{% else %}{{ u.created_at }}{% endif %}{% else %}{{ u.created_at.strftime('%d.%m.%Y %H:%M') }}{% endif %}"{% endif %}>{% if u.created_at %}{% if u.created_at is string and u.created_at|length >= 10 %}{{ u.created_at[8:10] }}.{{ u.created_at[5:7] }}.{{ u.created_at[0:4] }}{% elif u.created_at is string %}{{ u.created_at }}{% else %}{{ u.created_at.strftime('%d.%m.%Y') }}{% endif %}{% else %}-{% endif %}</td>
+                    <td class="td-musteri" title="{{ (u.musteri_adi or t.musteri_adi or 'Bilinmiyor')|e }}">
+                        {% if (u.customer_id or u.musteri_id or t.customer_id or t.musteri_id) %}
+                            <a class="musteri-link" href="/giris/?mid={{ u.customer_id or u.musteri_id or t.customer_id or t.musteri_id }}&kart=1">{{ u.musteri_adi or t.musteri_adi or 'Bilinmiyor' }}</a>
+                        {% else %}
+                            {{ u.musteri_adi or t.musteri_adi or 'Bilinmiyor' }}
+                        {% endif %}
+                    </td>
+                    <td class="td-aciklama-ay" title="{{ (u.rapor_aciklama_ay or '')|e }}">{{ u.rapor_aciklama_ay or '—' }}</td>
+                    <td>{{ u.fatura_no or '-' }}</td>
+                    <td class="td-tutar">{{ (u.tutar|default(0))|round(2) }} TL</td>
+                    <td>
+                        {% set _od = (u.odeme_turu or 'nakit')|lower %}
+                        <span class="badge badge-{% if _od in ['havale','eft','banka','havale/eft'] %}banka{% elif _od in ['kredi_karti','kredi kartı','kredi_kartı'] %}kredi_karti{% elif _od in ['cek','çek'] %}cek{% else %}nakit{% endif %}">
+                            {% if _od in ['havale','eft','banka','havale/eft'] %}Banka{% elif _od in ['kredi_karti','kredi kartı','kredi_kartı'] %}Kredi Kartı{% elif _od in ['cek','çek'] %}Çek{% else %}Nakit{% endif %}
+                        </span>
+                    </td>
+                    <td class="td-hizmet-turu" title="Tıklayıp düzenleyin">{{ u.rapor_hizmet_turu or u.hizmet_turu or t.rapor_hizmet_turu or '-' }}</td>
+                    <td class="td-islem">
+                        <span class="islem-grubu">
+                        <a href="/faturalar/tahsilat-pdf/{{ u.id }}?indir=1" class="btn-pdf" title="PDF indir" download><i class="fa fa-file-pdf" aria-hidden="true"></i><span class="btn-lbl"> PDF</span></a>
+                        <a href="/faturalar/tahsilat-pdf/{{ u.id }}" target="_blank" class="btn-yazdir" rel="noopener" title="Yazdır / önizle"><i class="fa fa-print" aria-hidden="true"></i><span class="btn-lbl"> Yazdır</span></a>
+                        <button type="button" class="btn-islem-onizle" title="Önizle" onclick="pdfOnizleAc({{ u.id }})"><i class="fa fa-eye" aria-hidden="true"></i><span class="btn-lbl"> Önizle</span></button>
+                        <button type="button" class="btn-islem-mini" title="Düzenle" onclick="tahsilatDuzenleModalAc(this)"><i class="fa fa-edit" aria-hidden="true"></i></button>
+                        <button type="button" class="btn-islem-mini btn-islem-mini--sil" title="Sil" onclick="tahsilatSil(this)"><i class="fa fa-trash" aria-hidden="true"></i></button>
+                        </span>
+                    </td>
+                </tr>
+                {% endfor %}
+                {% else %}
                 <tr data-tahsilat-id="{{ t.id }}"
                     data-musteri-id="{{ t.customer_id or t.musteri_id or '' }}"
                     data-odeme-turu="{{ (t.odeme_turu or 'nakit')|lower }}"
                     data-hizmet-turu="{{ (t.rapor_hizmet_turu or t.hizmet_turu or '')|lower }}"
-                    data-tahsilat-tarihi="{% if t.tahsilat_tarihi %}{% if t.tahsilat_tarihi is string and t.tahsilat_tarihi|length >= 10 %}{{ t.tahsilat_tarihi[:10] }}{% elif t.tahsilat_tarihi is string %}{{ t.tahsilat_tarihi }}{% else %}{{ t.tahsilat_tarihi.strftime('%Y-%m-%d') }}{% endif %}{% else %}{% endif %}">
+                    data-tahsilat-tarihi="{% if t.tahsilat_tarihi %}{% if t.tahsilat_tarihi is string and t.tahsilat_tarihi|length >= 10 %}{{ t.tahsilat_tarihi[:10] }}{% elif t.tahsilat_tarihi is string %}{{ t.tahsilat_tarihi }}{% else %}{{ t.tahsilat_tarihi.strftime('%Y-%m-%d') }}{% endif %}{% else %}{% endif %}"
+                    data-girildigi-tarihi="{% if t.created_at %}{% if t.created_at is string and t.created_at|length >= 10 %}{{ t.created_at[:10] }}{% elif t.created_at is string %}{{ t.created_at }}{% else %}{{ t.created_at.strftime('%Y-%m-%d') }}{% endif %}{% else %}{% endif %}">
                     <td>{{ t.makbuz_no or '-' }}</td>
                     <td>{% if t.tahsilat_tarihi %}{% if t.tahsilat_tarihi is string and t.tahsilat_tarihi|length >= 10 %}{{ t.tahsilat_tarihi[8:10] }}.{{ t.tahsilat_tarihi[5:7] }}.{{ t.tahsilat_tarihi[0:4] }}{% elif t.tahsilat_tarihi is string %}{{ t.tahsilat_tarihi }}{% else %}{{ t.tahsilat_tarihi.strftime('%d.%m.%Y') }}{% endif %}{% else %}-{% endif %}</td>
                     <td class="td-girildigi-tarih"{% if t.created_at %} title="{% if t.created_at is string %}{% if t.created_at|length >= 16 %}{{ t.created_at[8:10] }}.{{ t.created_at[5:7] }}.{{ t.created_at[0:4] }} {{ t.created_at[11:16] }}{% else %}{{ t.created_at }}{% endif %}{% else %}{{ t.created_at.strftime('%d.%m.%Y %H:%M') }}{% endif %}"{% endif %}>{% if t.created_at %}{% if t.created_at is string and t.created_at|length >= 10 %}{{ t.created_at[8:10] }}.{{ t.created_at[5:7] }}.{{ t.created_at[0:4] }}{% elif t.created_at is string %}{{ t.created_at }}{% else %}{{ t.created_at.strftime('%d.%m.%Y') }}{% endif %}{% else %}-{% endif %}</td>
@@ -894,6 +1003,7 @@
                         </span>
                     </td>
                 </tr>
+                {% endif %}
                 {% endfor %}
             {% else %}
                 <tr>
@@ -1388,6 +1498,33 @@
             td.textContent = tahsilatFmtMoney(n) + ' TL';
         });
     }
+    function tahsilatGrupDetayToggle(btn) {
+        if (!btn) return;
+        var gid = btn.getAttribute('data-grup-id') || '';
+        if (!gid) return;
+        var table = document.getElementById('tahsilatlar_liste_tablo');
+        if (!table) return;
+        var parentTr = btn.closest('tr');
+        var expanded = parentTr && parentTr.getAttribute('data-grup-expanded') === '1';
+        var next = !expanded;
+        if (parentTr) parentTr.setAttribute('data-grup-expanded', next ? '1' : '0');
+        btn.textContent = next ? 'Gizle' : 'Detaylar';
+        Array.prototype.forEach.call(
+            table.querySelectorAll('tr[data-grup-child="1"][data-parent-grup="' + gid + '"]'),
+            function (tr) {
+                if (!next) {
+                    tr.style.display = 'none';
+                    return;
+                }
+                var parentHidden = parentTr && parentTr.style.display === 'none';
+                tr.style.display = parentHidden ? 'none' : '';
+            }
+        );
+        if (typeof tahsilatTarihAraligiRaporuUygula === 'function') {
+            tahsilatTarihAraligiRaporuUygula();
+        }
+    }
+
     function tahsilatTarihAraligiRaporuUygula() {
         var table = document.getElementById('tahsilatlar_liste_tablo');
         if (!table) return;
@@ -1401,12 +1538,23 @@
         if (bit) bit.setHours(23, 59, 59, 999);
         var sayi = 0;
         var toplam = 0;
+        var cbGir = document.getElementById('tahsilat_senaryo');
+        var useGirildigi = !!(cbGir && cbGir.checked);
         Array.prototype.forEach.call(tbody.querySelectorAll('tr'), function (tr) {
             if (tr.classList.contains('tahsilat-empty-row')) return;
             if (!tr.cells || tr.cells.length < 10) return;
-            var cbGir = document.getElementById('tahsilat_senaryo');
-            var cellIdx = (cbGir && cbGir.checked) ? 2 : 1;
-            var dt = tahsilatParseDateTR(tr.cells[cellIdx].textContent || '');
+            var isChild = tr.getAttribute('data-grup-child') === '1';
+            var isGroup = tr.getAttribute('data-is-group') === '1';
+            var isoAttr = useGirildigi
+                ? (tr.getAttribute('data-girildigi-tarihi') || tr.getAttribute('data-tahsilat-tarihi') || '')
+                : (tr.getAttribute('data-tahsilat-tarihi') || '');
+            var dt = null;
+            if (isoAttr && /^\d{4}-\d{2}-\d{2}/.test(isoAttr)) {
+                dt = new Date(isoAttr.slice(0, 10) + 'T00:00:00');
+            } else {
+                var cellIdx = useGirildigi ? 2 : 1;
+                dt = tahsilatParseDateTR(tr.cells[cellIdx].textContent || '');
+            }
             var hzRaw = String(tr.getAttribute('data-hizmet-turu') || '');
             var goster = true;
             if (dt && bas && dt < bas) goster = false;
@@ -1421,9 +1569,25 @@
                 }
                 if (!bulundu) goster = false;
             }
+            if (isChild) {
+                var gid = tr.getAttribute('data-parent-grup') || '';
+                var parentTr = gid
+                    ? tbody.querySelector('tr[data-is-group="1"][data-islem-grubu-id="' + gid + '"]')
+                    : null;
+                var parentExpanded = parentTr && parentTr.getAttribute('data-grup-expanded') === '1';
+                var parentVisible = parentTr && parentTr.style.display !== 'none';
+                tr.style.display = (goster && parentExpanded && parentVisible) ? '' : 'none';
+                return;
+            }
             tr.style.display = goster ? '' : 'none';
             if (!goster) return;
-            sayi += 1;
+            if (isGroup) {
+                var adet = parseInt(tr.getAttribute('data-grup-adet') || '0', 10);
+                if (!(adet > 0)) adet = 1;
+                sayi += adet;
+            } else {
+                sayi += 1;
+            }
             toplam += tahsilatParseAmountTR(tr.cells[6].textContent || '');
         });
         tbody.querySelectorAll('tr.tahsilat-empty-row').forEach(function (x) { x.remove(); });
@@ -1432,7 +1596,15 @@
             var td = tr.cells[0];
             if (td && Number(td.colSpan) === 10 && /tahsilat bulunamadı/i.test(td.textContent || '')) tr.remove();
         });
-        if (sayi === 0) {
+        var visibleMain = 0;
+        Array.prototype.forEach.call(tbody.querySelectorAll('tr'), function (tr) {
+            if (tr.classList.contains('tahsilat-empty-row')) return;
+            if (!tr.cells || tr.cells.length < 10) return;
+            if (tr.getAttribute('data-grup-child') === '1') return;
+            if (tr.style.display === 'none') return;
+            visibleMain += 1;
+        });
+        if (visibleMain === 0) {
             var bos = document.createElement('tr');
             bos.className = 'tahsilat-empty-row';
             bos.innerHTML = '<td colspan="10" style="text-align:center;color:#90a4ae;padding:30px;">Bu tarih aralığında tahsilat bulunamadı</td>';
