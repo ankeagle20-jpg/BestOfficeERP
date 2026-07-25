@@ -307,16 +307,10 @@
         .tahsilat-grup-child td:first-child {
             padding-left: 18px;
         }
-        .btn-grup-detay {
-            border: 1px solid #90caf9;
-            background: #e3f2fd;
-            color: #1565c0;
-            border-radius: 4px;
-            padding: 4px 10px;
+        .btn-grup-detay-global {
+            /* Filtrele ile ayni toolbar butonu gorunumu */
             cursor: pointer;
-            font-size: 12px;
         }
-        .btn-grup-detay:hover { background: #bbdefb; }
         tr:hover td {
             background: rgba(79, 195, 247, 0.05);
         }
@@ -816,6 +810,9 @@
         <button type="button" onclick="filtrele()">
             <i class="fa fa-filter"></i> Filtrele
         </button>
+        <button type="button" id="tahsilat_grup_detay_global" class="btn-grup-detay-global" onclick="tahsilatTumGruplariAcKapat()">
+            <i class="fa fa-list"></i> Detayları Göster
+        </button>
         <label style="display:flex;
           align-items:center;gap:6px;
           cursor:pointer;font-size:13px;"
@@ -916,9 +913,7 @@
                         </span>
                     </td>
                     <td class="td-hizmet-turu">{{ t.rapor_hizmet_turu or t.hizmet_turu or '-' }}</td>
-                    <td class="td-islem">
-                        <button type="button" class="btn-grup-detay" data-grup-id="{{ t.islem_grubu_id }}" onclick="tahsilatGrupDetayToggle(this)">Detaylar</button>
-                    </td>
+                    <td class="td-islem"></td>
                 </tr>
                 {% for u in (t.grup_uyeleri or []) %}
                 <tr class="tahsilat-grup-child"
@@ -1494,28 +1489,38 @@
             td.textContent = tahsilatFmtMoney(n) + ' TL';
         });
     }
-    function tahsilatGrupDetayToggle(btn) {
-        if (!btn) return;
-        var gid = btn.getAttribute('data-grup-id') || '';
-        if (!gid) return;
+    function tahsilatTumGruplariAcKapat() {
         var table = document.getElementById('tahsilatlar_liste_tablo');
         if (!table) return;
-        var parentTr = btn.closest('tr');
-        var expanded = parentTr && parentTr.getAttribute('data-grup-expanded') === '1';
-        var next = !expanded;
-        if (parentTr) parentTr.setAttribute('data-grup-expanded', next ? '1' : '0');
-        btn.textContent = next ? 'Gizle' : 'Detaylar';
-        Array.prototype.forEach.call(
-            table.querySelectorAll('tr[data-grup-child="1"][data-parent-grup="' + gid + '"]'),
-            function (tr) {
-                if (!next) {
-                    tr.style.display = 'none';
-                    return;
+        var groups = table.querySelectorAll('tr[data-is-group="1"]');
+        if (!groups.length) return;
+        var allOpen = true;
+        Array.prototype.forEach.call(groups, function (tr) {
+            if (tr.getAttribute('data-grup-expanded') !== '1') allOpen = false;
+        });
+        var next = !allOpen;
+        Array.prototype.forEach.call(groups, function (tr) {
+            tr.setAttribute('data-grup-expanded', next ? '1' : '0');
+            var gid = tr.getAttribute('data-islem-grubu-id') || '';
+            if (!gid) return;
+            var parentHidden = tr.style.display === 'none';
+            Array.prototype.forEach.call(
+                table.querySelectorAll('tr[data-grup-child="1"][data-parent-grup="' + gid + '"]'),
+                function (child) {
+                    if (!next || parentHidden) {
+                        child.style.display = 'none';
+                    } else {
+                        child.style.display = '';
+                    }
                 }
-                var parentHidden = parentTr && parentTr.style.display === 'none';
-                tr.style.display = parentHidden ? 'none' : '';
-            }
-        );
+            );
+        });
+        var gbtn = document.getElementById('tahsilat_grup_detay_global');
+        if (gbtn) {
+            gbtn.innerHTML = next
+                ? '<i class="fa fa-list"></i> Detayları Gizle'
+                : '<i class="fa fa-list"></i> Detayları Göster';
+        }
         if (typeof tahsilatTarihAraligiRaporuUygula === 'function') {
             tahsilatTarihAraligiRaporuUygula();
         }
