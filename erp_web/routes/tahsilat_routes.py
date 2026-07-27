@@ -151,9 +151,9 @@ def api_tahsilat_save():
                 fatura_id = None
 
         row = execute_returning(
-            """INSERT INTO tahsilatlar (musteri_id, customer_id, fatura_id, tutar, odeme_turu, aciklama, tahsilat_tarihi)
-               VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id""",
-            (musteri_id, musteri_id, fatura_id, tutar, odeme, aciklama, tarih)
+            """INSERT INTO tahsilatlar (musteri_id, customer_id, fatura_id, tutar, odeme_turu, aciklama, tahsilat_tarihi, kaynak)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+            (musteri_id, musteri_id, fatura_id, tutar, odeme, aciklama, tarih, "legacy")
         )
         if fatura_id:
             execute("UPDATE faturalar SET durum = 'odendi' WHERE id = %s", (fatura_id,))
