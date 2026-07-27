@@ -430,23 +430,23 @@ def api_oto_eslestir():
                 if not esles:
                     continue
                 # Eşleştir: tahsilat oluştur, hareketi güncelle
-                    tarih = h.get("hareket_tarihi") or date.today()
-                    if hasattr(tarih, "isoformat"):
-                        tarih = tarih
-                    else:
-                        tarih = _parse_date(str(tarih)[:10]) or date.today()
-                    row = execute_returning(
-                        """INSERT INTO tahsilatlar (musteri_id, customer_id, tutar, odeme_turu, aciklama, tahsilat_tarihi)
-                           VALUES (%s, %s, %s, 'banka', %s, %s) RETURNING id""",
-                        (m["id"], m["id"], float(h.get("tutar") or 0), "Banka eşleşme: " + (h.get("aciklama") or "")[:100], tarih),
+                tarih = h.get("hareket_tarihi") or date.today()
+                if hasattr(tarih, "isoformat"):
+                    tarih = tarih
+                else:
+                    tarih = _parse_date(str(tarih)[:10]) or date.today()
+                row = execute_returning(
+                    """INSERT INTO tahsilatlar (musteri_id, customer_id, tutar, odeme_turu, aciklama, tahsilat_tarihi, kaynak)
+                       VALUES (%s, %s, %s, 'banka', %s, %s, %s) RETURNING id""",
+                    (m["id"], m["id"], float(h.get("tutar") or 0), "Banka eşleşme: " + (h.get("aciklama") or "")[:100], tarih, "banka_otomatik"),
+                )
+                if row:
+                    execute(
+                        "UPDATE banka_hareketleri SET durum = 'eslesti', musteri_id = %s, tahsilat_id = %s WHERE id = %s",
+                        (m["id"], row["id"], h["id"]),
                     )
-                    if row:
-                        execute(
-                            "UPDATE banka_hareketleri SET durum = 'eslesti', musteri_id = %s, tahsilat_id = %s WHERE id = %s",
-                            (m["id"], row["id"], h["id"]),
-                        )
-                        eslesti += 1
-                    break
+                    eslesti += 1
+                break
         return jsonify({"ok": True, "eslesti": eslesti})
     except Exception as e:
         return jsonify({"ok": False, "mesaj": str(e)}), 400
@@ -479,9 +479,9 @@ def api_eslestir():
             tarih = _parse_date(str(tarih)[:10]) or date.today()
         aciklama = "Banka eşleşme: " + (h.get("aciklama") or "")[:100]
         row = execute_returning(
-            """INSERT INTO tahsilatlar (musteri_id, customer_id, tutar, odeme_turu, aciklama, tahsilat_tarihi)
-               VALUES (%s, %s, %s, 'banka', %s, %s) RETURNING id""",
-            (musteri_id, musteri_id, tutar, aciklama, tarih),
+            """INSERT INTO tahsilatlar (musteri_id, customer_id, tutar, odeme_turu, aciklama, tahsilat_tarihi, kaynak)
+               VALUES (%s, %s, %s, 'banka', %s, %s, %s) RETURNING id""",
+            (musteri_id, musteri_id, tutar, aciklama, tarih, "banka_eslestirme"),
         )
         if not row:
             return jsonify({"ok": False, "mesaj": "Tahsilat kaydı oluşturulamadı"}), 500
@@ -1225,9 +1225,9 @@ def api_akbank_tahsilat_commit():
             cur.execute(
                 """INSERT INTO tahsilatlar (
                     musteri_id, customer_id, fatura_id, tutar, odeme_turu,
-                    aciklama, tahsilat_tarihi, makbuz_no, banka_referans_no
-                ) VALUES (%s, %s, NULL, %s, %s, %s, %s::date, NULL, %s)""",
-                (mid, mid, round(tutar, 2), "havale", aciklama, tah_str, ref),
+                    aciklama, tahsilat_tarihi, makbuz_no, banka_referans_no, kaynak
+                ) VALUES (%s, %s, NULL, %s, %s, %s, %s::date, NULL, %s, %s)""",
+                (mid, mid, round(tutar, 2), "havale", aciklama, tah_str, ref, "banka_import"),
             )
             eklendi += 1
             if it.get("manuel_musteri") and aciklama:
