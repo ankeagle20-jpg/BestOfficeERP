@@ -1,3 +1,5 @@
+import logging
+
 from flask import Blueprint, render_template, request, jsonify
 from auth import giris_gerekli, admin_gerekli
 from db import fetch_all, fetch_one, execute, execute_returning, sql_expr_fatura_not_gib_taslak
@@ -192,7 +194,23 @@ def api_tahsilat_delete():
     """Sadece admin silebilir."""
     try:
         tid = int(request.form.get("tahsilat_id") or request.json.get("tahsilat_id"))
+        pre = fetch_one(
+            "SELECT COALESCE(customer_id, musteri_id) AS mid FROM tahsilatlar WHERE id = %s",
+            (tid,),
+        ) or {}
+        try:
+            mid = int(pre.get("mid") or 0)
+        except (TypeError, ValueError):
+            mid = 0
         execute("DELETE FROM tahsilatlar WHERE id = %s", (tid,))
+        if mid > 0:
+            try:
+                from .giris_routes import resync_panel_and_grid_after_tahsil_change
+                resync_panel_and_grid_after_tahsil_change(mid)
+            except Exception:
+                logging.getLogger(__name__).exception(
+                    "api_tahsilat_delete panel/grid resync musteri_id=%s", mid
+                )
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"ok": False, "mesaj": str(e)}), 400

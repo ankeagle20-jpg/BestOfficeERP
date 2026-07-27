@@ -8687,10 +8687,13 @@ def tahsilat_guncelle():
         try:
             mid = int((row or {}).get("musteri_id") or 0)
             if mid > 0:
-                from .giris_routes import _upsert_aylik_grid_cache as _refresh_aylik_cache
-                _refresh_aylik_cache(mid)
+                from .giris_routes import resync_panel_and_grid_after_tahsil_change
+                resync_panel_and_grid_after_tahsil_change(mid)
         except Exception:
-            pass
+            logging.getLogger(__name__).exception(
+                "tahsilat_guncelle panel/grid resync musteri_id=%s",
+                (row or {}).get("musteri_id"),
+            )
         return jsonify({'ok': True, 'mesaj': 'Tahsilat güncellendi.'})
     except Exception as e:
         return jsonify({'ok': False, 'mesaj': str(e)}), 500
