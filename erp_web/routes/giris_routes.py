@@ -10578,11 +10578,12 @@ def api_aylik_kira_guncelle_ve_borclandir_all():
     """
     Aktif müşteriler için:
     1) TÜFE hesaplı güncel kira bedelini customers.guncel_kira_bedeli alanına yazar.
-    2) Bugüne kadar eksik aylık borç faturalarını (AYLIK_TUTAR marker) toplu oluşturur.
+    2) Peşin ufka kadar (max(bugün, peşin tam ödenen ay), cap=12) eksik aylık borç
+       faturalarını (AYLIK_TUTAR marker) toplu oluşturur; AUTO_INV/AYLIK_TUTAR varsa atlar.
 
     POST JSON (isteğe bağlı): musteri_ids: [1,2,3] → yalnız bu müşteri kartları.
 
-    Performans: TÜFE ve KYC tek seferde; tahsilat sorgusu atlanır; fatura INSERT tek bağlantıda toplu.
+    Performans: TÜFE ve KYC tek seferde; peşin max ay tek toplu yükleme; fatura INSERT tek bağlantıda toplu.
     """
     ensure_faturalar_amount_columns()
     try:
@@ -10663,6 +10664,11 @@ def api_aylik_kira_guncelle_ve_borclandir_all():
     customer_updates = []
     insert_rows = []
 
+    # Peşin ufuk: tek seferlik yükleme (müşteri döngüsünde tekrar sorgu yok).
+    max_by_mid = _load_max_aylik_tah_iso_by_musteri(
+        exclude_btufrt=True, only_fully_paid=True
+    )
+
     for r in rows:
         mid = int(r.get("id") or 0)
         if mid <= 0:
@@ -10693,13 +10699,16 @@ def api_aylik_kira_guncelle_ve_borclandir_all():
 
         marker_set = set(markers_by_mid[mid])
         musteri_adi = (r.get("name") or "—").strip() or "—"
+        horizon = _pesin_borclandirma_horizon_for_musteri(
+            mid, max_by_mid=max_by_mid, today=today
+        )
 
         for a in aylar:
             try:
                 yil_a = int(a.get("yil"))
                 ay = int(a.get("ay"))
                 ay_bir = date(yil_a, ay, 1)
-                if ay_bir > today.replace(day=1):
+                if ay_bir > horizon:
                     continue
                 toplam = round(float(a.get("tutar_kdv_dahil") or 0), 2)
             except Exception:
@@ -10710,6 +10719,10 @@ def api_aylik_kira_guncelle_ve_borclandir_all():
                 continue
             key = ay_bir.isoformat()
             if key in marker_set:
+                atlanan += 1
+                continue
+            # Çapraz: aynı ayda AUTO_INV veya (preload dışı) AYLIK_TUTAR varsa mükerrer açma.
+            if _ay_has_aylik_borc_faturasi(mid, yil_a, ay):
                 atlanan += 1
                 continue
 
