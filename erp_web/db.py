@@ -363,6 +363,7 @@ CREATE TABLE IF NOT EXISTS tahsilatlar (
     odeme_turu      TEXT DEFAULT 'nakit',
     tahsilat_tarihi DATE DEFAULT CURRENT_DATE,
     aciklama        TEXT,
+    kaynak          TEXT,
     created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -2030,6 +2031,10 @@ def ensure_tahsilatlar_columns():
             "tahsilatlar.makbuz_no benzersiz indeks atlanıyor (aynı numaralı eski kayıtlar varsa önce düzeltin):",
             e,
         )
+    try:
+        execute("ALTER TABLE tahsilatlar ADD COLUMN IF NOT EXISTS kaynak TEXT")
+    except Exception as e:
+        print(f"tahsilatlar.kaynak: {e}")
     try:
         execute("ALTER TABLE tahsilatlar ADD COLUMN IF NOT EXISTS islem_grubu_id TEXT")
     except Exception as e:
