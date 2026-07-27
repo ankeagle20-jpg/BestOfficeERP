@@ -2029,6 +2029,233 @@ def _load_aylik_tahsil_ay_keys_by_musteri():
     return by_mid
 
 
+# Peşin ufuk: otomatik borçlandırma/fatura catch-up üst sınırı (bugün + N ay).
+PESIN_BORCLANDIRMA_UFUK_CAP_AY = 12
+
+
+def _brut_by_iso_from_aylik_grid_payload(payload) -> dict:
+    """Grid cache payload → {YYYY-MM-DD: brut_kdv_dahil}."""
+    out = {}
+    if payload is None:
+        return out
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except Exception:
+            return out
+    aylar = payload if isinstance(payload, list) else ((payload or {}).get("aylar") or [])
+    if not isinstance(aylar, list):
+        return out
+    for a in aylar:
+        if not isinstance(a, dict):
+            continue
+        try:
+            y = int(a.get("yil"))
+            m = int(a.get("ay"))
+            if m < 1 or m > 12:
+                continue
+            brut = float(a.get("brut_tutar_kdv") or a.get("tutar_kdv_dahil") or 0)
+        except (TypeError, ValueError):
+            continue
+        if brut <= 0 or not math.isfinite(brut):
+            continue
+        out[date(y, m, 1).isoformat()] = round(brut, 2)
+    return out
+
+
+def _load_max_aylik_tah_iso_by_musteri(exclude_btufrt=True, only_fully_paid=True):
+    """
+    Peşin/aylık tahsil marker'larından müşteri bazlı en ileri ay.
+
+    Döner: {musteri_id: date(y, m, 1)}
+
+    - Tek toplu tahsilat sorgusu (+ varsa tek toplu grid cache); müşteri başına N+1 yok.
+    - exclude_btufrt=True: açıklamada |BTUFRT| olan satırlar ufka girmez (sentetik TÜFE).
+    - only_fully_paid=True: ay «tam ödendi» sayılır ↔
+      _aylik_tahsil_tutar_map dağıtımı ≥ grid brüt − AYLIK_GRID_TAM_ODENDI_TOLERANS.
+      Brüt, musteri_aylik_grid_cache payload'dan okunur; cache/brüt yoksa ay ufka alınmaz.
+    """
+    rows = fetch_all(
+        """
+        SELECT COALESCE(t.musteri_id, t.customer_id) AS mid,
+               t.id,
+               COALESCE(t.aciklama, '') AS aciklama,
+               COALESCE(t.tutar, 0) AS tutar,
+               t.tahsilat_tarihi,
+               f.fatura_tarihi
+        FROM tahsilatlar t
+        LEFT JOIN faturalar f ON f.id = t.fatura_id
+        WHERE COALESCE(t.aciklama, '') LIKE '%%|AYLIK_TAH|%%'
+          AND COALESCE(t.tutar, 0) > 0
+        """
+    ) or []
+
+    by_mid_rows = defaultdict(list)
+    marker_isos_by_mid = defaultdict(set)
+    for r in rows:
+        try:
+            mid = int(r.get("mid") or 0)
+        except (TypeError, ValueError):
+            continue
+        if mid <= 0:
+            continue
+        ac = str(r.get("aciklama") or "")
+        if exclude_btufrt and "|BTUFRT|" in ac:
+            continue
+        isos = re.findall(r"\|AYLIK_TAH\|([0-9]{4}-[0-9]{2}-[0-9]{2})\|", ac)
+        if not isos:
+            continue
+        by_mid_rows[mid].append(r)
+        for iso_raw in isos:
+            try:
+                dd = datetime.strptime(iso_raw[:10], "%Y-%m-%d").date()
+                marker_isos_by_mid[mid].add(date(dd.year, dd.month, 1).isoformat())
+            except ValueError:
+                continue
+
+    if not by_mid_rows:
+        return {}
+
+    if not only_fully_paid:
+        out = {}
+        for mid, isos in marker_isos_by_mid.items():
+            dates = []
+            for iso in isos:
+                try:
+                    dates.append(datetime.strptime(iso[:10], "%Y-%m-%d").date().replace(day=1))
+                except ValueError:
+                    continue
+            if dates:
+                out[mid] = max(dates)
+        return out
+
+    mid_list = list(by_mid_rows.keys())
+    cache_rows = fetch_all(
+        """
+        SELECT musteri_id, payload
+        FROM musteri_aylik_grid_cache
+        WHERE musteri_id = ANY(%s)
+        """,
+        (mid_list,),
+    ) or []
+    brut_by_mid = {}
+    for cr in cache_rows:
+        try:
+            cm = int(cr.get("musteri_id") or 0)
+        except (TypeError, ValueError):
+            continue
+        if cm <= 0:
+            continue
+        brut_by_mid[cm] = _brut_by_iso_from_aylik_grid_payload(cr.get("payload"))
+
+    tol = float(AYLIK_GRID_TAM_ODENDI_TOLERANS)
+    out = {}
+    for mid, mid_rows in by_mid_rows.items():
+        brut_by_iso = brut_by_mid.get(mid) or {}
+        if not brut_by_iso:
+            continue
+        try:
+            tahsil_map = _aylik_tahsil_tutar_map(
+                mid,
+                tahsil_rows=mid_rows,
+                remaining_by_iso=dict(brut_by_iso),
+            ) or {}
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "_load_max_aylik_tah_iso_by_musteri tahsil_map mid=%s", mid
+            )
+            continue
+        paid_dates = []
+        for iso in marker_isos_by_mid.get(mid) or ():
+            try:
+                brut = float(brut_by_iso.get(iso) or 0)
+                odenen = float(tahsil_map.get(iso) or 0)
+            except (TypeError, ValueError):
+                continue
+            if brut <= 0:
+                continue
+            # Tam ödendi: kalan <= tol  ⇔  odenen >= brut - tol
+            if odenen + 1e-9 >= (brut - tol):
+                try:
+                    paid_dates.append(datetime.strptime(iso[:10], "%Y-%m-%d").date().replace(day=1))
+                except ValueError:
+                    continue
+        if paid_dates:
+            out[mid] = max(paid_dates)
+    return out
+
+
+def _pesin_borclandirma_horizon_ay(musteri_max_odenen_ay=None, today=None) -> date:
+    """
+    Peşin ufuk ayı (ayın 1'i):
+      max(bugün_ay, min(musteri_max_odenen_ay, bugün_ay + PESIN_BORCLANDIRMA_UFUK_CAP_AY))
+    musteri_max yok/geçersizse → bugün_ay.
+    """
+    bugun = today if isinstance(today, date) else date.today()
+    bugun_ay = date(bugun.year, bugun.month, 1)
+    if musteri_max_odenen_ay is None:
+        return bugun_ay
+    try:
+        if isinstance(musteri_max_odenen_ay, date):
+            mx = date(musteri_max_odenen_ay.year, musteri_max_odenen_ay.month, 1)
+        else:
+            dd = datetime.strptime(str(musteri_max_odenen_ay)[:10], "%Y-%m-%d").date()
+            mx = date(dd.year, dd.month, 1)
+    except Exception:
+        return bugun_ay
+    cap_ay = _add_months(bugun_ay, int(PESIN_BORCLANDIRMA_UFUK_CAP_AY))
+    capped = mx if mx <= cap_ay else cap_ay
+    return bugun_ay if capped <= bugun_ay else capped
+
+
+def _pesin_borclandirma_horizon_for_musteri(musteri_id, max_by_mid=None, today=None) -> date:
+    """
+    horizon(mid): önceden yüklenmiş max_by_mid dict'inden peşin max ayı okur,
+    _pesin_borclandirma_horizon_ay uygular. max_by_mid verilmezse peşin yok sayılır
+    (bugün_ay) — N+1 olmaması için çağıran job tek sefer _load_max_... yapmalı.
+    """
+    try:
+        mid = int(musteri_id)
+    except (TypeError, ValueError):
+        mid = 0
+    mx = None
+    if mid > 0 and isinstance(max_by_mid, dict):
+        mx = max_by_mid.get(mid)
+    return _pesin_borclandirma_horizon_ay(mx, today=today)
+
+
+def _ay_has_aylik_borc_faturasi(musteri_id, yil, ay) -> bool:
+    """
+    Çapraz duplike kontrolü: bu ay için |AYLIK_TUTAR|YYYY-MM-01| veya
+    |AUTO_INV|YYYY-MM| marker'lı fatura var mı?
+    """
+    try:
+        mid = int(musteri_id)
+        y = int(yil)
+        m = int(ay)
+    except (TypeError, ValueError):
+        return False
+    if mid <= 0 or m < 1 or m > 12 or y < 1990 or y > 2100:
+        return False
+    ay_bir = date(y, m, 1)
+    tutar_pat = f"%|AYLIK_TUTAR|{ay_bir.isoformat()}|%"
+    auto_pat = f"%|AUTO_INV|{ay_bir.strftime('%Y-%m')}|%"
+    row = fetch_one(
+        """
+        SELECT id
+        FROM faturalar
+        WHERE musteri_id = %s
+          AND (
+                COALESCE(notlar, '') LIKE %s
+             OR COALESCE(notlar, '') LIKE %s
+          )
+        LIMIT 1
+        """,
+        (mid, tutar_pat, auto_pat),
+    )
+    return bool(row)
+
+
 def _load_manual_fatura_ay_by_musteri():
     """AYLIK_TUTAR işaretçisi olmayan faturalar: müşteri + ay başı (manuel / dış kayıt)."""
     rows = fetch_all(
