@@ -8888,6 +8888,24 @@ def _cari_ekstre_build_payload_from_request():
     baslangic = request.args.get("baslangic")
     bitis = request.args.get("bitis")
     kullanici_araligi_verildi = bool(baslangic or bitis)
+    # Peşin ufuk: yalnız açık bitis YOKSA varsayılan bitişi peşin ödenen aya kadar uzat.
+    # (Kullanıcı bitis verdiyse dokunma — C kuralı.)
+    if not (bitis and str(bitis).strip()):
+        try:
+            max_by_mid = _load_max_aylik_tah_iso_by_musteri(
+                exclude_btufrt=True, only_fully_paid=True
+            )
+            horizon_ay = _pesin_borclandirma_horizon_for_musteri(
+                int(musteri_id), max_by_mid=max_by_mid
+            )
+            _, son_gun = calendar.monthrange(horizon_ay.year, horizon_ay.month)
+            horizon_bit = date(horizon_ay.year, horizon_ay.month, son_gun)
+            if horizon_bit > def_bit:
+                def_bit = horizon_bit
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "cari ekstre peşin ufuk bitiş musteri_id=%s", musteri_id
+            )
     try:
         bas = datetime.strptime(baslangic[:10], "%Y-%m-%d").date() if baslangic else def_b
         bit = datetime.strptime(bitis[:10], "%Y-%m-%d").date() if bitis else def_bit
@@ -11385,6 +11403,23 @@ def api_cari_ekstre_b():
     def_b, def_bit = _cari_ekstre_varsayilan_son_tam_ay()
     baslangic = request.args.get("baslangic")
     bitis = request.args.get("bitis")
+    # Peşin ufuk: yalnız açık bitis YOKSA varsayılan bitişi peşin ödenen aya kadar uzat.
+    if not (bitis and str(bitis).strip()):
+        try:
+            max_by_mid = _load_max_aylik_tah_iso_by_musteri(
+                exclude_btufrt=True, only_fully_paid=True
+            )
+            horizon_ay = _pesin_borclandirma_horizon_for_musteri(
+                int(musteri_id), max_by_mid=max_by_mid
+            )
+            _, son_gun = calendar.monthrange(horizon_ay.year, horizon_ay.month)
+            horizon_bit = date(horizon_ay.year, horizon_ay.month, son_gun)
+            if horizon_bit > def_bit:
+                def_bit = horizon_bit
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "cari ekstre B peşin ufuk bitiş musteri_id=%s", musteri_id
+            )
     try:
         bas = datetime.strptime(baslangic[:10], "%Y-%m-%d").date() if baslangic else def_b
         bit = datetime.strptime(bitis[:10], "%Y-%m-%d").date() if bitis else def_bit
