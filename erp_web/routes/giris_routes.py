@@ -10881,12 +10881,12 @@ def api_tufe_borclandir_nakit_tahsil_toplu():
                 """,
                 (tuple(mids_tah),),
             )
-            for fid, fmid, fm in cur.fetchall() or []:
-                fmap[(int(fmid), fm)] = int(fid)
+            for row in cur.fetchall() or []:
+                fmap[(int(row["musteri_id"]), row["m"])] = int(row["id"])
 
         ins_tah = """
-            INSERT INTO tahsilatlar (musteri_id, customer_id, fatura_id, tutar, odeme_turu, aciklama, tahsilat_tarihi, makbuz_no)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO tahsilatlar (musteri_id, customer_id, fatura_id, tutar, odeme_turu, aciklama, tahsilat_tarihi, makbuz_no, kaynak)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
         tahsil_rows = []
         for t in tahsil_plan:
@@ -10905,6 +10905,7 @@ def api_tufe_borclandir_nakit_tahsil_toplu():
                     t["aciklama"],
                     t["tahsilat_tarihi"],
                     makbuz_no,
+                    "tufe_otomasyon",
                 )
             )
         for i in range(0, len(tahsil_rows), chunk):
@@ -11608,8 +11609,8 @@ def api_ekstre_kayit_donustur():
                     INSERT INTO tahsilatlar (
                         musteri_id, customer_id, fatura_id, tutar, odeme_turu,
                         aciklama, tahsilat_tarihi, makbuz_no, cek_detay,
-                        havale_banka, tahsil_eden
-                    ) VALUES (%s, %s, NULL, %s, %s, %s, %s, %s, %s, %s, %s)
+                        havale_banka, tahsil_eden, kaynak
+                    ) VALUES (%s, %s, NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING id, makbuz_no
                     """,
                     (
@@ -11623,6 +11624,7 @@ def api_ekstre_kayit_donustur():
                         cek_detay,
                         havale_banka,
                         tahsil_eden,
+                        "ekstre_donusum",
                     ),
                 )
                 ins = cur.fetchone()
