@@ -6148,6 +6148,10 @@ def _auto_month_amount_resolved(musteri_id, run_month_date):
 
 
 def _auto_invoice_create_for_customer(musteri_id, run_month_date):
+    try:
+        run_month_date = date(int(run_month_date.year), int(run_month_date.month), 1)
+    except Exception:
+        run_month_date = date.today().replace(day=1)
     marker = f"|AUTO_INV|{run_month_date.strftime('%Y-%m')}|"
     mevcut = fetch_one(
         """SELECT id, fatura_no FROM faturalar
@@ -6158,6 +6162,20 @@ def _auto_invoice_create_for_customer(musteri_id, run_month_date):
     )
     if mevcut:
         return {"status": "exists", "fatura_id": mevcut.get("id"), "fatura_no": mevcut.get("fatura_no")}
+    # Çapraz: aynı ayda AYLIK_TUTAR (veya başka AUTO_INV) varsa mükerrer açma.
+    try:
+        from .giris_routes import _ay_has_aylik_borc_faturasi
+        if _ay_has_aylik_borc_faturasi(musteri_id, run_month_date.year, run_month_date.month):
+            return {
+                "status": "exists",
+                "error": "Ay için AYLIK_TUTAR/AUTO_INV faturası zaten var.",
+            }
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "auto_invoice çapraz borç kontrolü musteri_id=%s ay=%s",
+            musteri_id,
+            run_month_date.strftime("%Y-%m"),
+        )
     cust = fetch_one("SELECT id, name FROM customers WHERE id = %s", (musteri_id,))
     if not cust:
         return {"status": "error", "error": "Müşteri bulunamadı."}
@@ -6198,6 +6216,7 @@ def run_auto_invoice_cycle(force=False, run_date=None):
     if (not force) and int(now.day) != int(settings["run_day"]):
         return {"ok": True, "skipped": True, "mesaj": "Bugün planlanan gün değil."}
     period_key = now.strftime("%Y-%m")
+    bugun_ay = date(now.year, now.month, 1)
     var = fetch_one("SELECT id, status FROM auto_invoice_runs WHERE period_key = %s", (period_key,))
     if var and str(var.get("status") or "").lower() == "success" and not force:
         return {"ok": True, "skipped": True, "mesaj": "Bu dönem zaten çalıştırılmış."}
@@ -6224,6 +6243,17 @@ def run_auto_invoice_cycle(force=False, run_date=None):
             gib = None
             send_gib = False
 
+    from .giris_routes import (
+        _add_months,
+        _load_max_aylik_tah_iso_by_musteri,
+        _pesin_borclandirma_horizon_for_musteri,
+    )
+
+    # Peşin ufuk: tek seferlik yükleme (müşteri döngüsünde tekrar sorgu yok).
+    max_by_mid = _load_max_aylik_tah_iso_by_musteri(
+        exclude_btufrt=True, only_fully_paid=True
+    )
+
     musteri_rows = fetch_all(
         """
         SELECT c.id
@@ -6236,85 +6266,119 @@ def run_auto_invoice_cycle(force=False, run_date=None):
     for mr in musteri_rows:
         mid = int(mr.get("id"))
         try:
-            created = _auto_invoice_create_for_customer(mid, now.replace(day=1))
-            if created.get("status") in ("skip", "exists"):
-                execute(
-                    """INSERT INTO auto_invoice_items (run_id, musteri_id, fatura_id, period_key, status, error_message)
-                       VALUES (%s,%s,%s,%s,%s,%s)""",
-                    (run_id, mid, created.get("fatura_id"), period_key, created.get("status"), created.get("error")),
-                )
-                continue
-            if created.get("status") != "created":
-                fail_count += 1
-                execute(
-                    """INSERT INTO auto_invoice_items (run_id, musteri_id, period_key, status, error_message)
-                       VALUES (%s,%s,%s,'error',%s)""",
-                    (run_id, mid, period_key, created.get("error") or "Fatura oluşturulamadı."),
-                )
-                continue
-            fatura_id = int(created.get("fatura_id"))
-            gib_uuid = None
-            item_status = "created"
-            err = None
-            if send_gib and gib and gib.is_available():
+            horizon = _pesin_borclandirma_horizon_for_musteri(
+                mid, max_by_mid=max_by_mid, today=now
+            )
+            # Catch-up: yalnız bugün → horizon (geçmişe gitme).
+            month = bugun_ay
+            while month <= horizon:
+                item_period_key = month.strftime("%Y-%m")
                 try:
-                    from gib_earsiv import build_fatura_data_from_db
-                    f_data = build_fatura_data_from_db(fatura_id, fetch_one)
-                    gib_uuid = gib.fatura_taslak_olustur(f_data)
-                    item_status = "gib_draft" if gib_uuid else "gib_fail"
-                    # ERP faturalar satırına da yaz (auto_invoice_items status/gib_uuid aynı kalır).
-                    if gib_uuid:
+                    created = _auto_invoice_create_for_customer(mid, month)
+                    if created.get("status") in ("skip", "exists"):
+                        execute(
+                            """INSERT INTO auto_invoice_items (run_id, musteri_id, fatura_id, period_key, status, error_message)
+                               VALUES (%s,%s,%s,%s,%s,%s)""",
+                            (
+                                run_id,
+                                mid,
+                                created.get("fatura_id"),
+                                item_period_key,
+                                created.get("status"),
+                                created.get("error"),
+                            ),
+                        )
+                        month = _add_months(month, 1)
+                        continue
+                    if created.get("status") != "created":
+                        fail_count += 1
+                        execute(
+                            """INSERT INTO auto_invoice_items (run_id, musteri_id, period_key, status, error_message)
+                               VALUES (%s,%s,%s,'error',%s)""",
+                            (
+                                run_id,
+                                mid,
+                                item_period_key,
+                                created.get("error") or "Fatura oluşturulamadı.",
+                            ),
+                        )
+                        month = _add_months(month, 1)
+                        continue
+                    fatura_id = int(created.get("fatura_id"))
+                    gib_uuid = None
+                    item_status = "created"
+                    err = None
+                    # Altın kural: GİB yalnız bugünün ayı; peşin/gelecek aylar fail-closed.
+                    allow_gib_for_month = bool(send_gib) and (month == bugun_ay)
+                    if month > bugun_ay:
+                        allow_gib_for_month = False
+                    if allow_gib_for_month and gib and gib.is_available():
                         try:
-                            st_draft = _gib_kayit_bekle(gib, gib_uuid, deneme=8, bekleme_s=1.5) or {}
-                            if not st_draft:
-                                logging.getLogger(__name__).warning(
-                                    "auto_invoice kayit_bekle_tukendi (taslak) fatura_id=%s uuid=%s",
-                                    fatura_id,
-                                    str(gib_uuid)[:36],
-                                )
-                            gib_ettn = _extract_gib_ettn_from_obj(st_draft) or gib_uuid
-                            gib_fatura_no = _extract_gib_fatura_no_from_obj(st_draft)
-                            _fatura_gib_bilgilerini_yaz(
-                                fatura_id, gib_ettn, gib_fatura_no, gib_asama="taslak"
-                            )
-                        except Exception:
-                            logging.getLogger(__name__).exception(
-                                "auto_invoice ERP taslak yazımı başarısız fatura_id=%s uuid=%s",
-                                fatura_id,
-                                str(gib_uuid)[:36],
-                            )
-                    if gib_uuid and auto_sms:
-                        ok_sms = gib.sms_onay_ve_imzala(gib_uuid, auto_sms)
-                        item_status = "gib_signed" if ok_sms else "gib_sms_fail"
-                        if ok_sms:
-                            try:
-                                st_imza = _gib_kayit_bekle(gib, gib_uuid, deneme=10, bekleme_s=1.2) or {}
-                                if not st_imza:
-                                    logging.getLogger(__name__).warning(
-                                        "auto_invoice kayit_bekle_tukendi (imza) fatura_id=%s uuid=%s",
+                            from gib_earsiv import build_fatura_data_from_db
+                            f_data = build_fatura_data_from_db(fatura_id, fetch_one)
+                            gib_uuid = gib.fatura_taslak_olustur(f_data)
+                            item_status = "gib_draft" if gib_uuid else "gib_fail"
+                            # ERP faturalar satırına da yaz (auto_invoice_items status/gib_uuid aynı kalır).
+                            if gib_uuid:
+                                try:
+                                    st_draft = _gib_kayit_bekle(gib, gib_uuid, deneme=8, bekleme_s=1.5) or {}
+                                    if not st_draft:
+                                        logging.getLogger(__name__).warning(
+                                            "auto_invoice kayit_bekle_tukendi (taslak) fatura_id=%s uuid=%s",
+                                            fatura_id,
+                                            str(gib_uuid)[:36],
+                                        )
+                                    gib_ettn = _extract_gib_ettn_from_obj(st_draft) or gib_uuid
+                                    gib_fatura_no = _extract_gib_fatura_no_from_obj(st_draft)
+                                    _fatura_gib_bilgilerini_yaz(
+                                        fatura_id, gib_ettn, gib_fatura_no, gib_asama="taslak"
+                                    )
+                                except Exception:
+                                    logging.getLogger(__name__).exception(
+                                        "auto_invoice ERP taslak yazımı başarısız fatura_id=%s uuid=%s",
                                         fatura_id,
                                         str(gib_uuid)[:36],
                                     )
-                                gib_ettn = _extract_gib_ettn_from_obj(st_imza) or gib_uuid
-                                gib_fatura_no = _extract_gib_fatura_no_from_obj(st_imza)
-                                _fatura_gib_bilgilerini_yaz(
-                                    fatura_id, gib_ettn, gib_fatura_no, gib_asama="imzali"
-                                )
-                            except Exception:
-                                logging.getLogger(__name__).exception(
-                                    "auto_invoice ERP imza yazımı başarısız fatura_id=%s uuid=%s",
-                                    fatura_id,
-                                    str(gib_uuid)[:36],
-                                )
-                except Exception as ge:
-                    item_status = "gib_fail"
-                    err = str(ge)
-            execute(
-                """INSERT INTO auto_invoice_items (run_id, musteri_id, fatura_id, period_key, status, gib_uuid, error_message)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s)""",
-                (run_id, mid, fatura_id, period_key, item_status, gib_uuid, err),
-            )
-            success_count += 1
+                            if gib_uuid and auto_sms:
+                                ok_sms = gib.sms_onay_ve_imzala(gib_uuid, auto_sms)
+                                item_status = "gib_signed" if ok_sms else "gib_sms_fail"
+                                if ok_sms:
+                                    try:
+                                        st_imza = _gib_kayit_bekle(gib, gib_uuid, deneme=10, bekleme_s=1.2) or {}
+                                        if not st_imza:
+                                            logging.getLogger(__name__).warning(
+                                                "auto_invoice kayit_bekle_tukendi (imza) fatura_id=%s uuid=%s",
+                                                fatura_id,
+                                                str(gib_uuid)[:36],
+                                            )
+                                        gib_ettn = _extract_gib_ettn_from_obj(st_imza) or gib_uuid
+                                        gib_fatura_no = _extract_gib_fatura_no_from_obj(st_imza)
+                                        _fatura_gib_bilgilerini_yaz(
+                                            fatura_id, gib_ettn, gib_fatura_no, gib_asama="imzali"
+                                        )
+                                    except Exception:
+                                        logging.getLogger(__name__).exception(
+                                            "auto_invoice ERP imza yazımı başarısız fatura_id=%s uuid=%s",
+                                            fatura_id,
+                                            str(gib_uuid)[:36],
+                                        )
+                        except Exception as ge:
+                            item_status = "gib_fail"
+                            err = str(ge)
+                    execute(
+                        """INSERT INTO auto_invoice_items (run_id, musteri_id, fatura_id, period_key, status, gib_uuid, error_message)
+                           VALUES (%s,%s,%s,%s,%s,%s,%s)""",
+                        (run_id, mid, fatura_id, item_period_key, item_status, gib_uuid, err),
+                    )
+                    success_count += 1
+                except Exception as e:
+                    fail_count += 1
+                    execute(
+                        """INSERT INTO auto_invoice_items (run_id, musteri_id, period_key, status, error_message)
+                           VALUES (%s,%s,%s,'error',%s)""",
+                        (run_id, mid, item_period_key, str(e)),
+                    )
+                month = _add_months(month, 1)
         except Exception as e:
             fail_count += 1
             execute(
