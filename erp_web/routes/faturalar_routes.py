@@ -8357,8 +8357,8 @@ def tahsilat_ekle():
                 """
                 INSERT INTO tahsilatlar (
                     musteri_id, customer_id, fatura_id, tutar, odeme_turu,
-                    tahsilat_tarihi, aciklama, makbuz_no, cek_detay, havale_banka, tahsil_eden
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    tahsilat_tarihi, aciklama, makbuz_no, cek_detay, havale_banka, tahsil_eden, kaynak
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id, fatura_id, makbuz_no, tutar, odeme_turu, tahsilat_tarihi, aciklama, created_at, cek_detay, havale_banka, tahsil_eden
                 """,
                 (
@@ -8373,6 +8373,7 @@ def tahsilat_ekle():
                     cek_detay_str or None,
                     havale_banka or None,
                     tahsil_eden or None,
+                    "manuel_makbuz",
                 ),
             )
             row = cur.fetchone()

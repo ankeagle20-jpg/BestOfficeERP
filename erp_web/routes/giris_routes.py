@@ -9403,8 +9403,8 @@ def api_aylik_tutarlardan_tahsil_et():
                     fatura_id = fatura_by_month.get(p["ay_bir"])
                     cur.execute(
                         """
-                        INSERT INTO tahsilatlar (musteri_id, customer_id, fatura_id, tutar, odeme_turu, aciklama, tahsilat_tarihi, makbuz_no, islem_grubu_id)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        INSERT INTO tahsilatlar (musteri_id, customer_id, fatura_id, tutar, odeme_turu, aciklama, tahsilat_tarihi, makbuz_no, islem_grubu_id, kaynak)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         RETURNING id
                         """,
                         (
@@ -9417,6 +9417,7 @@ def api_aylik_tutarlardan_tahsil_et():
                             tahsilat_tarihi,
                             makbuz_no,
                             islem_grubu_id,
+                            "grid_toplu",
                         ),
                     )
                     row_ins = cur.fetchone()
@@ -9452,8 +9453,8 @@ def api_aylik_tutarlardan_tahsil_et():
                 fatura_id = fatura_by_month.get(p["ay_bir"])
                 cur.execute(
                     """
-                    INSERT INTO tahsilatlar (musteri_id, customer_id, fatura_id, tutar, odeme_turu, aciklama, tahsilat_tarihi, makbuz_no, islem_grubu_id)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    INSERT INTO tahsilatlar (musteri_id, customer_id, fatura_id, tutar, odeme_turu, aciklama, tahsilat_tarihi, makbuz_no, islem_grubu_id, kaynak)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING id
                     """,
                     (
@@ -9466,6 +9467,7 @@ def api_aylik_tutarlardan_tahsil_et():
                         tahsilat_tarihi,
                         makbuz_no,
                         islem_grubu_id,
+                        "grid_toplu",
                     ),
                 )
                 row_ins = cur.fetchone()
