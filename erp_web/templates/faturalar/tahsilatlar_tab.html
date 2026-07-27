@@ -822,6 +822,15 @@
             {% if senaryo is defined and senaryo == '0' %}checked{% endif %}>
           Girildiği Tarih'e göre filtrele
         </label>
+        <label style="display:flex;
+          align-items:center;gap:6px;
+          cursor:pointer;font-size:13px;"
+          title="Sadece kaynak etiketi yazılmaya başlandıktan sonraki Tahsilat Makbuzu kayıtlarını gösterir; daha eski kayıtlar bu filtrede görünmez.">
+          <input type="checkbox"
+            id="tahsilat_manuel_makbuz"
+            {% if sadece_manuel_makbuz is defined and sadece_manuel_makbuz %}checked{% endif %}>
+          Tahsilat Makbuzu
+        </label>
     </div>
     
     <div class="stats">
@@ -1347,6 +1356,10 @@
         url += '&senaryo=' +
           (document.getElementById(
             'tahsilat_senaryo').checked ? '0' : '1');
+        var cbMakbuz = document.getElementById('tahsilat_manuel_makbuz');
+        if (cbMakbuz && cbMakbuz.checked) {
+          url += '&sadece_manuel_makbuz=1';
+        }
         url += _finansIframeEmbedSuffix();
         return url;
     }
@@ -1626,6 +1639,12 @@
         var cbSen = document.getElementById('tahsilat_senaryo');
         if (cbSen) {
           cbSen.checked = (senaryoParam === '0');
+        }
+        var mmParam = urlParams.get('sadece_manuel_makbuz');
+        var cbMakbuz = document.getElementById('tahsilat_manuel_makbuz');
+        if (cbMakbuz) {
+          var mmOn = (mmParam === '1' || mmParam === 'true' || mmParam === 'yes' || mmParam === 'on');
+          cbMakbuz.checked = mmOn;
         }
         tahsilatHizmetSecimiYukle();
         tahsilatTutarHucresiFormatla();

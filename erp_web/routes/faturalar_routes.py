@@ -5657,6 +5657,8 @@ def tahsilatlar():
         yil = d0.year
 
     senaryo = str(request.args.get("senaryo", "1") or "1").strip()
+    _mm_raw = str(request.args.get("sadece_manuel_makbuz") or "").strip().lower()
+    sadece_manuel_makbuz = _mm_raw in ("1", "true", "yes", "on")
 
     raw_hizmet = (request.args.get("hizmet_turleri") or "").strip()
     secili_hizmet_turleri = []
@@ -5718,6 +5720,8 @@ def tahsilatlar():
         placeholders = ", ".join(["%s"] * len(secili_hizmet_turleri))
         sql += f" AND LOWER(TRIM(COALESCE(NULLIF(TRIM(mk.hizmet_turu), ''), NULLIF(TRIM(c.hizmet_turu), ''), ''))) IN ({placeholders})"
         params.extend(secili_hizmet_turleri)
+    if sadece_manuel_makbuz:
+        sql += " AND t.kaynak = 'manuel_makbuz'"
     sql += " ORDER BY t.tahsilat_tarihi DESC NULLS LAST, t.id DESC"
     tahsilatlar_raw = fetch_all(sql, tuple(params))
     tahsilatlar_list = [_row_serializable(t) for t in (tahsilatlar_raw or [])]
@@ -5904,6 +5908,7 @@ def tahsilatlar():
         hizmet_turu_options=hizmet_turu_options,
         secili_hizmet_turleri=secili_hizmet_turleri,
         senaryo=senaryo,
+        sadece_manuel_makbuz=sadece_manuel_makbuz,
         tahsilatlar=tahsilatlar_list,
         toplam=toplam,
         tahsilat_ham_sayi=tahsilat_ham_sayi,
