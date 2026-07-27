@@ -8784,10 +8784,12 @@ def tahsilat_sil():
             return jsonify({'ok': False, 'mesaj': 'Tahsilat kaydı bulunamadı.'}), 404
         if mid > 0:
             try:
-                from .giris_routes import _upsert_aylik_grid_cache as _refresh_aylik_cache
-                _refresh_aylik_cache(mid)
+                from .giris_routes import resync_panel_and_grid_after_tahsil_change
+                resync_panel_and_grid_after_tahsil_change(mid)
             except Exception:
-                pass
+                logging.getLogger(__name__).exception(
+                    "tahsilat_sil panel/grid resync musteri_id=%s", mid
+                )
         return jsonify({'ok': True, 'mesaj': 'Tahsilat silindi.'})
     except Exception as e:
         return jsonify({'ok': False, 'mesaj': str(e)}), 500

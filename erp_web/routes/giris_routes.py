@@ -697,6 +697,36 @@ def sync_musteri_panel_from_tahsil_and_dagitim(
     return by_iso
 
 
+def resync_panel_and_grid_after_tahsil_change(musteri_id: int) -> bool:
+    """
+    Tahsilat silme/değişim sonrası: panel DB'yi canlı tahsil map ile yeniden yaz
+    (bayat ödendi kayıtlarını prune et), ardından grid önbelleğini TEK KEZ yenile.
+
+    Sıra kritik: önce panel (trust_grid_odenen=False), sonra upsert — aksi halde
+    _upsert_aylik_grid_cache bayat paneli grid'e geri basar.
+    """
+    try:
+        mid = int(musteri_id)
+    except (TypeError, ValueError):
+        return False
+    if mid <= 0:
+        return False
+    try:
+        _invalidate_aylik_grid_payload_mem(mid)
+        payload = _build_aylik_grid_cache_payload(mid)
+        by_iso = _panel_by_iso_from_tahsil_map(
+            mid, payload, tahsilat_tarihi=None, trust_grid_odenen=False
+        )
+        _save_musteri_panel_by_iso(mid, by_iso, prune_no_db_tahsil=True)
+        _upsert_aylik_grid_cache(mid)
+        return True
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "resync_panel_and_grid_after_tahsil_change musteri_id=%s", mid
+        )
+        return False
+
+
 def apply_makbuz_dagitim_to_panel_db(
     musteri_id: int,
     dagitim_items: list | None,
