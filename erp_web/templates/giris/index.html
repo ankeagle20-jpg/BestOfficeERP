@@ -5208,9 +5208,20 @@ function sozlesmelerAylikGridVeriSonBoyama(midNav, selToken, settled) {
         }
         if (typeof sozlesmeAylikSecimOzetGuncelle === 'function') sozlesmeAylikSecimOzetGuncelle();
         if (typeof sozlesmelerAylikSecilebilirlikYenile === 'function') sozlesmelerAylikSecilebilirlikYenile();
-        // Ekstre artik musteri seciminde otomatik
-        // yuklenmiyor - performans icin "Ekstre Goster"
-        // butonuna birakildi (grid/panel buna bagimli degil).
+        if (typeof cariEkstreYukle === 'function' && String(cariEkstreMusteriIdSec()) === String(midNav)) {
+            var __ekMid = String(midNav);
+            try {
+                if (window.__cariEkstreHorizonMid !== __ekMid) {
+                    window.__cariEkstreHorizonMid = __ekMid;
+                    window.__cariEkstreBitisKullaniciDokundu = false;
+                    window.__cariEkstreBitisOtomatik = true;
+                }
+            } catch (_eHorMid) {}
+            requestAnimationFrame(function () {
+                if (String(selectedId) !== __ekMid) return;
+                try { cariEkstreYukle({ sessiz: true, dbEsas: true, otomatikVarsayilan: true }); } catch (_eEkSon) {}
+            });
+        }
     } catch (_eSonBoy) {}
     var midK = String(midNav);
     function _sonDuzeltGecikmeli() {
@@ -22232,6 +22243,13 @@ function selectMusteri(id) {
     girisHistoryMaybeClearFaturaRaporListFlag();
     window.__musteriReelDonemDbMap = {};
     window.__musteriReelDonemDbKayitli = false;
+    try {
+        if (window.__cariEkstreHorizonMid !== String(id)) {
+            window.__cariEkstreHorizonMid = String(id);
+            window.__cariEkstreBitisKullaniciDokundu = false;
+            window.__cariEkstreBitisOtomatik = true;
+        }
+    } catch (_eHorSel) {}
     selectedId = id;
     window.__sozlesmelerReelEsitleReqId = (window.__sozlesmelerReelEsitleReqId || 0) + 1;
     if (typeof sozlesmelerReelTahsilatEsitleModalKapat === 'function') {
@@ -23824,15 +23842,10 @@ function girisCariEkstrePrefetch(mid) {
         var bitEl = document.getElementById('cari_ekstre_bitis');
         var sozBas = document.getElementById('sozlesme_baslangic');
         var bas = (basEl && basEl.value) ? basEl.value : ((sozBas && sozBas.value) ? sozBas.value : '');
+        // Peşin ufuk: kullanıcı bitişi elle değiştirmediyse bitis gönderme (backend hesaplasın).
         var bit = '';
-        if (bitEl && bitEl.value) {
+        if (window.__cariEkstreBitisKullaniciDokundu && bitEl && bitEl.value) {
             bit = bitEl.value;
-        } else {
-            var now = new Date();
-            var cy = now.getFullYear();
-            var cm = now.getMonth() + 1;
-            var sg = new Date(cy, cm, 0).getDate();
-            bit = cy + '-' + String(cm).padStart(2, '0') + '-' + String(sg).padStart(2, '0');
         }
         var aylikKira = 0;
         var ekKira = document.getElementById('cari_ekstre_aylik_kira');
@@ -23845,12 +23858,13 @@ function girisCariEkstrePrefetch(mid) {
         var params = new URLSearchParams({
             musteri_id: k,
             baslangic: bas,
-            bitis: bit,
             aylik_kira: String(isFinite(aylikKira) ? aylikKira : 0),
             kdv_oran: String(kdvOran),
             form_bazli_kira: '1',
             tahsilat_borca_hizala: '1'
         });
+        if (bit) params.set('bitis', bit);
+        else params.set('bitis', '');
         if (typeof kiraNakitMi === 'function' && kiraNakitMi()) params.set('kira_nakit', '1');
         girisFetchJsonCached('/giris/api/cari-ekstre?' + params.toString(), {
             ttlMs: 120000,
@@ -28346,12 +28360,19 @@ function cariEkstreMusteriDegisinceYenile() {
         cariEkstreTablolariniTemizle();
         return;
     }
+    try {
+        if (window.__cariEkstreHorizonMid !== String(mid)) {
+            window.__cariEkstreHorizonMid = String(mid);
+            window.__cariEkstreBitisKullaniciDokundu = false;
+            window.__cariEkstreBitisOtomatik = true;
+        }
+    } catch (_eHorMid2) {}
     var aktifTab = document.querySelector('.cari-ekstre-tab.active');
     var tabAd = aktifTab ? (aktifTab.getAttribute('data-tab') || 'cari_ekstre') : 'cari_ekstre';
     if (tabAd === 'cari_ekstre_b') {
         cariEkstreBYukle({ sessiz: true });
     } else {
-        cariEkstreYukle({ sessiz: true });
+        cariEkstreYukle({ sessiz: true, otomatikVarsayilan: true });
     }
 }
 function cariEkstreEscAttr(s) {
@@ -28710,6 +28731,12 @@ function girisCariEkstreSonTahsilAySonuIso(baslangicYil, baslangicAy) {
 
 function cariEkstreYukle(opts) {
     var sessiz = opts && opts.sessiz;
+    var otomatikVarsayilan = !!(opts && opts.otomatikVarsayilan);
+    try {
+        if (otomatikVarsayilan && window.__cariEkstreBitisKullaniciDokundu) {
+            otomatikVarsayilan = false;
+        }
+    } catch (_eOvDok) {}
     var musteriId = cariEkstreMusteriIdSec();
     if (!musteriId) {
         if (!sessiz) alert('Cari ekstre için önce müşteri seçin (liste veya Tahsilat alanı).');
@@ -28743,7 +28770,8 @@ function cariEkstreYukle(opts) {
     }
     var durumEkEl = document.getElementById('musteri_durum');
     var pasifEkstre = durumEkEl && String(durumEkEl.value || '').toLowerCase().trim() === 'pasif';
-    if (bitisEl && !pasifEkstre) {
+    // otomatikVarsayilan: FE bitiş zorlamasını atla — backend peşin ufku kullanılsın
+    if (!otomatikVarsayilan && bitisEl && !pasifEkstre) {
         var sozBitEl = document.getElementById('sozlesme_bitis');
         var sozBitIso = (sozBitEl && sozBitEl.value) ? String(sozBitEl.value).trim().substring(0, 10) : '';
         var nowEk = new Date();
@@ -28768,7 +28796,13 @@ function cariEkstreYukle(opts) {
     var kdvEl = document.getElementById('kdv_oran');
     var kdvOran = (kdvEl && kdvEl.value !== '') ? parseFloat(String(kdvEl.value).replace(',', '.')) : 20;
     if (isNaN(kdvOran)) kdvOran = 20;
-    var params = new URLSearchParams({ musteri_id: musteriId, baslangic: baslangic || '', bitis: bitis || '', aylik_kira: aylikKira, kdv_oran: kdvOran });
+    var params = new URLSearchParams({ musteri_id: musteriId, baslangic: baslangic || '', aylik_kira: aylikKira, kdv_oran: kdvOran });
+    if (!otomatikVarsayilan) {
+        params.set('bitis', bitis || '');
+    } else {
+        // Backend varsayılan bitiş (peşin ufku dahil); bitis boş
+        params.set('bitis', '');
+    }
     if (kiraNakitMi()) params.set('kira_nakit', '1');
     params.set('form_bazli_kira', '1');
     params.set('tahsilat_borca_hizala', '1');
@@ -28859,6 +28893,22 @@ function cariEkstreYukle(opts) {
             if (!data.ok) {
                 alert(data.mesaj || 'Ekstre yüklenemedi.');
                 return;
+            }
+            // İlk yükleme / peşin ufuk: backend'in hesapladığı aralığı input'lara yaz
+            if (otomatikVarsayilan) {
+                try {
+                    var basIso = data.bas_iso ? String(data.bas_iso).substring(0, 10) : '';
+                    var bitIso = data.bit_iso ? String(data.bit_iso).substring(0, 10) : '';
+                    var basElFill = document.getElementById('cari_ekstre_baslangic');
+                    var bitElFill = document.getElementById('cari_ekstre_bitis');
+                    if (basIso && basElFill && /^\d{4}-\d{2}-\d{2}$/.test(basIso)) {
+                        basElFill.value = basIso;
+                    }
+                    if (bitIso && bitElFill && /^\d{4}-\d{2}-\d{2}$/.test(bitIso)) {
+                        bitElFill.value = bitIso;
+                        try { window.__cariEkstreBitisOtomatik = true; } catch (_eEkOtoFill) {}
+                    }
+                } catch (_eIsoFill) {}
             }
             var tbody = document.getElementById('cari_ekstre_tbody');
             var foot = document.getElementById('cari_ekstre_foot');
@@ -29001,6 +29051,7 @@ function cariEkstreFormdanGuncelleDebounced() {
         var handler = function () {
             if (opts.ekstreBitisManuel) {
                 try { window.__cariEkstreBitisOtomatik = false; } catch (_eEkMan) {}
+                try { window.__cariEkstreBitisKullaniciDokundu = true; } catch (_eDok) {}
             }
             if (opts.aylikYansit) girisCariEkstreAylikKiraAnaFormdan();
             cariEkstreFormdanGuncelleDebounced();
@@ -29010,6 +29061,7 @@ function cariEkstreFormdanGuncelleDebounced() {
             el.addEventListener('input', function () {
                 if (opts.ekstreBitisManuel) {
                     try { window.__cariEkstreBitisOtomatik = false; } catch (_eEkManIn) {}
+                    try { window.__cariEkstreBitisKullaniciDokundu = true; } catch (_eDokIn) {}
                 }
                 if (opts.aylikYansit) girisCariEkstreAylikKiraAnaFormdan();
                 cariEkstreFormdanGuncelleDebounced();
