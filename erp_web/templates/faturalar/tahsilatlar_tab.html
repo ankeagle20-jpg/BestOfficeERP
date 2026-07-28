@@ -1502,6 +1502,18 @@
             td.textContent = tahsilatFmtMoney(n) + ' TL';
         });
     }
+
+    function tahsilatGrupDetayGlobalBtnGuncelle() {
+        var btn = document.getElementById('tahsilat_grup_detay_global');
+        if (!btn) return;
+        var table = document.getElementById('tahsilatlar_liste_tablo');
+        var n = 0;
+        if (table) {
+            n = table.querySelectorAll('tr[data-is-group="1"]').length;
+        }
+        btn.style.display = n > 0 ? '' : 'none';
+    }
+
     function tahsilatTumGruplariAcKapat() {
         var table = document.getElementById('tahsilatlar_liste_tablo');
         if (!table) return;
@@ -1691,6 +1703,7 @@
             const ara = document.getElementById('tahsilat-musteri-ara');
             if (list && !list.contains(e.target) && e.target !== ara) list.style.display = 'none';
         });
+        if (typeof tahsilatGrupDetayGlobalBtnGuncelle === 'function') tahsilatGrupDetayGlobalBtnGuncelle();
     });
 
     function musteriListesiGetir(q) {
