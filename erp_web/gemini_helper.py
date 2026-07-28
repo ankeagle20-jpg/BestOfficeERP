@@ -62,9 +62,9 @@ if not GEMINI_API_KEY:
 GEMINI_AVAILABLE = bool(GEMINI_API_KEY)
 
 # Yeni SDK (google-genai) model listesi
-GEMINI_MODELS = ("gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash")
+GEMINI_MODELS = ("gemini-flash-latest", "gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash")
 # Eski SDK (google-generativeai) fallback modeli
-GEMINI_LEGACY_MODELS = ("gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro")
+GEMINI_LEGACY_MODELS = ("gemini-flash-latest", "gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro")
 
 
 def _analiz_yeni_sdk(api_key: str, prompt: str):
@@ -129,7 +129,7 @@ def _analiz_rest_api(api_key: str, prompt: str, modeller=None):
     """Doğrudan Gemini REST API çağrısı (SDK bağımlılığı yok). modeller verilirse sadece onlar denenir."""
     last_err = ""
     key_style_err = False
-    model_list = modeller if modeller else ("gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash", "gemini-1.5-pro")
+    model_list = modeller if modeller else ("gemini-flash-latest", "gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash", "gemini-1.5-pro")
     for model in model_list:
         try:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
@@ -196,14 +196,14 @@ def analiz_yap(context_metni: str, kullanici_sorusu: str = "", tek_istek: bool =
     # Ücretsiz planda tek istek: sadece REST ile 1 model dene (kota aşımı riskini azaltır)
     # v1beta'da gemini-1.5-flash 404 verebiliyor; önce gemini-2.0-flash dene
     if tek_istek:
-        ok, out = _analiz_rest_api(api_key, prompt, modeller=("gemini-2.0-flash", "gemini-1.5-flash"))
+        ok, out = _analiz_rest_api(api_key, prompt, modeller=("gemini-flash-latest", "gemini-2.0-flash", "gemini-1.5-flash"))
         if ok:
             return True, out
         if out == "quota_exceeded":
             # Bir kez 5 sn bekleyip tekrar dene (dakikalık limit bazen hemen açılır)
             import time
             time.sleep(5)
-            ok2, out2 = _analiz_rest_api(api_key, prompt, modeller=("gemini-2.0-flash",))
+            ok2, out2 = _analiz_rest_api(api_key, prompt, modeller=("gemini-flash-latest", "gemini-2.0-flash"))
             if ok2:
                 return True, out2
             return False, (
