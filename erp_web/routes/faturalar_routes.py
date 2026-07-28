@@ -1065,6 +1065,7 @@ def _tahsilat_rapor_grupla(rows):
             "musteri_adi": first.get("musteri_adi"),
             "customer_id": first.get("customer_id"),
             "musteri_id": first.get("musteri_id"),
+            "hazir_ofis_oda_no": first.get("hazir_ofis_oda_no"),
             "odeme_turu": first.get("odeme_turu"),
             "rapor_hizmet_turu": first.get("rapor_hizmet_turu"),
             "hizmet_turu": first.get("hizmet_turu"),
@@ -5675,12 +5676,13 @@ def tahsilatlar():
         SELECT t.*,
                c.name as musteri_adi,
                COALESCE(NULLIF(TRIM(mk.hizmet_turu), ''), NULLIF(TRIM(c.hizmet_turu), ''), '') AS rapor_hizmet_turu,
+               COALESCE(mk.hazir_ofis_oda_no, c.hazir_ofis_oda_no) AS hazir_ofis_oda_no,
                f.fatura_no,
                f.fatura_tarihi AS fatura_tarihi
         FROM tahsilatlar t
         LEFT JOIN customers c ON COALESCE(t.customer_id, t.musteri_id) = c.id
         LEFT JOIN LATERAL (
-            SELECT mkx.hizmet_turu
+            SELECT mkx.hizmet_turu, mkx.hazir_ofis_oda_no
             FROM musteri_kyc mkx
             WHERE mkx.musteri_id = c.id
             ORDER BY mkx.id DESC
