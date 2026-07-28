@@ -344,6 +344,15 @@ def _load_musteri_panel_by_iso(musteri_id: int) -> dict:
     if not isinstance(obj, dict):
         return {}
     tol = float(AYLIK_GRID_TAM_ODENDI_TOLERANS)
+    # Kural A: |AYLIK_TAH| marker varsa kayıtlı kalan=0'ı tutarlılık
+    # düzeltmesiyle yeniden açma (FIFO/tarih map'i değil).
+    try:
+        _mk_batch = _ekstre_tahsil_batch_maps_from_rows(
+            _ekstre_tahsil_rows_for_musteri(mid)
+        )
+        marker_by_iso = (_mk_batch or {}).get("marker") or {}
+    except Exception:
+        marker_by_iso = {}
     out = {}
     for iso_raw, prow in obj.items():
         if not isinstance(prow, dict):
@@ -363,7 +372,14 @@ def _load_musteri_panel_by_iso(musteri_id: int) -> dict:
             pt = pb
             pk = 0.0
         elif pb > tol and pk <= tol and pt + tol < pb:
-            pk = round(max(pb - pt, 0), 2)
+            try:
+                yy_m = int(str(iso_key)[:4])
+            except (TypeError, ValueError):
+                yy_m = 0
+            mk_t = round(float(marker_by_iso.get(iso_key) or 0), 2)
+            # Marker + Kural A → kayıtlı pk'ye güven, düzeltmeyi atla.
+            if not _grid_payload_marker_panel_tam_kapandi(mk_t, pb, yy_m, None, tol):
+                pk = round(max(pb - pt, 0), 2)
         out[iso_key] = {
             "aylik": pb,
             "tahsil": pt,
@@ -444,6 +460,12 @@ def _panel_by_iso_from_tahsil_map(
         return {}
     tol = float(AYLIK_GRID_TAM_ODENDI_TOLERANS)
     tahsil_map = _aylik_tahsil_tutar_map(mid)
+    # Kural A: yalnızca |AYLIK_TAH| dağıtımı (FIFO/tarih map'i değil).
+    try:
+        _mk_batch = _ekstre_tahsil_batch_maps_from_rows(_ekstre_tahsil_rows_for_musteri(mid))
+        marker_by_iso = (_mk_batch or {}).get("marker") or {}
+    except Exception:
+        marker_by_iso = {}
     existing = _load_musteri_panel_by_iso(mid)
     tarih_s = str(tahsilat_tarihi or "")[:10] if tahsilat_tarihi else ""
     by_iso = {}
@@ -463,7 +485,15 @@ def _panel_by_iso_from_tahsil_map(
             tah_e = round(float(tahsil_map.get(iso_k) or 0), 2)
             if brut_e <= tol and tah_e <= tol:
                 continue
-            kalan_e = round(max(brut_e - tah_e, 0), 2) if brut_e > tol else 0.0
+            try:
+                yy_e = int(str(iso_k)[:4])
+            except (TypeError, ValueError):
+                yy_e = 0
+            mk_e = round(float(marker_by_iso.get(iso_k) or 0), 2)
+            if _grid_payload_marker_panel_tam_kapandi(mk_e, brut_e, yy_e, None, tol):
+                kalan_e = 0.0
+            else:
+                kalan_e = round(max(brut_e - tah_e, 0), 2) if brut_e > tol else 0.0
             prev_e = existing.get(iso_k) or {}
             duzeltilmis[iso_k] = {
                 "aylik": brut_e,
@@ -477,7 +507,9 @@ def _panel_by_iso_from_tahsil_map(
         if not isinstance(a, dict):
             continue
         try:
-            iso_m = date(int(a.get("yil")), int(a.get("ay")), 1).isoformat()
+            yy_m = int(a.get("yil"))
+            mm_m = int(a.get("ay"))
+            iso_m = date(yy_m, mm_m, 1).isoformat()
         except (TypeError, ValueError):
             continue
         brut = round(float(a.get("brut_tutar_kdv") or a.get("tutar_kdv_dahil") or 0), 2)
@@ -490,19 +522,24 @@ def _panel_by_iso_from_tahsil_map(
             tah = odenen_g
         if brut <= tol and tah <= tol:
             continue
-        try:
-            kalan_g = round(max(float(a.get("kalan_tutar_kdv") or 0), 0), 2)
-        except (TypeError, ValueError):
-            kalan_g = -1.0
-        kalan_calc = round(max(brut - tah, 0), 2) if brut > tol else 0.0
-        if brut > tol and tah >= brut - tol:
+        mk_t = round(float(marker_by_iso.get(iso_m) or 0), 2)
+        # Kural A: |AYLIK_TAH| marker varsa tutar farkına bakmadan kalan=0.
+        if _grid_payload_marker_panel_tam_kapandi(mk_t, brut, yy_m, None, tol):
             kalan = 0.0
         else:
-            kismi_g = bool(a.get("kismi_tahsilat")) or (tah > tol and kalan_g > tol)
-            if kismi_g and kalan_g >= 0:
-                kalan = kalan_g
+            try:
+                kalan_g = round(max(float(a.get("kalan_tutar_kdv") or 0), 0), 2)
+            except (TypeError, ValueError):
+                kalan_g = -1.0
+            kalan_calc = round(max(brut - tah, 0), 2) if brut > tol else 0.0
+            if brut > tol and tah >= brut - tol:
+                kalan = 0.0
             else:
-                kalan = kalan_calc
+                kismi_g = bool(a.get("kismi_tahsilat")) or (tah > tol and kalan_g > tol)
+                if kismi_g and kalan_g >= 0:
+                    kalan = kalan_g
+                else:
+                    kalan = kalan_calc
         prev = existing.get(iso_m) or {}
         th = tarih_s or prev.get("tahsil_tarih") or ""
         by_iso[iso_m] = {
@@ -811,11 +848,27 @@ def _apply_panel_by_iso_to_grid_payload(payload: dict, panel_by_iso: dict) -> No
     if not isinstance(payload, dict) or not panel_by_iso:
         return
     tol = float(AYLIK_GRID_TAM_ODENDI_TOLERANS)
+    # Kural A: panel kalan'ına körü körüne güvenme; kendi |AYLIK_TAH| map'i.
+    marker_by_iso = {}
+    try:
+        mid_pl = int(payload.get("musteri_id") or 0)
+    except (TypeError, ValueError):
+        mid_pl = 0
+    if mid_pl > 0:
+        try:
+            _mk_batch = _ekstre_tahsil_batch_maps_from_rows(
+                _ekstre_tahsil_rows_for_musteri(mid_pl)
+            )
+            marker_by_iso = (_mk_batch or {}).get("marker") or {}
+        except Exception:
+            marker_by_iso = {}
     for a in payload.get("aylar") or []:
         if not isinstance(a, dict):
             continue
         try:
-            iso_m = date(int(a.get("yil")), int(a.get("ay")), 1).isoformat()
+            yy_m = int(a.get("yil"))
+            mm_m = int(a.get("ay"))
+            iso_m = date(yy_m, mm_m, 1).isoformat()
         except (TypeError, ValueError):
             continue
         prow = panel_by_iso.get(iso_m)
@@ -825,6 +878,18 @@ def _apply_panel_by_iso_to_grid_payload(payload: dict, panel_by_iso: dict) -> No
             brut = round(float(a.get("brut_tutar_kdv") or a.get("tutar_kdv_dahil") or 0), 2)
             tah = round(float(prow.get("tahsil") or 0), 2)
         except (TypeError, ValueError):
+            continue
+        mk_t = round(float(marker_by_iso.get(iso_m) or 0), 2)
+        # Kural A: |AYLIK_TAH| marker varsa brut-tah farkını yok say, kalan=0.
+        if _grid_payload_marker_panel_tam_kapandi(mk_t, brut, yy_m, None, tol):
+            kalan = 0.0
+            # brut_tutar_kdv / tutar_kdv_dahil'e DOKUNULMAZ - grid'in kendi
+            # hesabi (TÜFE + reel overlay) korunur.
+            a["odenen_tutar_kdv"] = tah
+            a["kalan_tutar_kdv"] = 0.0
+            a["tahsil_edildi"] = True
+            a["kismi_tahsilat"] = False
+            a["acik_aylik_borc_faturasi"] = False
             continue
         kalan = round(max(brut - tah, 0), 2) if brut > tol else 0.0
         if brut > tol and tah >= brut - tol:
