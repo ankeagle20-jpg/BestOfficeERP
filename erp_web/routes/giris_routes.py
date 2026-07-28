@@ -8970,8 +8970,10 @@ def _cari_ekstre_build_payload_from_request():
         ptj_raw = (request.args.get("panel_tahsil_json") or "").strip()
         if ptj_raw and len(ptj_raw) < 32000:
             panel_by_iso = _panel_tahsil_by_iso_parse(ptj_raw)
-    if not panel_by_iso:
-        panel_by_iso = _load_musteri_panel_by_iso(int(musteri_id))
+        # db_esas=0 önizleme: FE json yoksa panel DB; db_esas=1'de panel hiç yüklenmez
+        # (bayat musteri_tahsilat_panel_detay ekstre tahsil satırını ezmesin).
+        if not panel_by_iso:
+            panel_by_iso = _load_musteri_panel_by_iso(int(musteri_id))
     if panel_by_iso:
         panel_by_iso = _ekstre_panel_filter_db_tahsil(int(musteri_id), panel_by_iso)
     cache_key = (
