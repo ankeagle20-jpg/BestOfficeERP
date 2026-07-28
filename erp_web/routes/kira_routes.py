@@ -30,14 +30,14 @@ def _tufe_yukle():
 
 
 @bp.route("/")
-@yetki_gerekli("kira_senaryo")
+@yetki_gerekli("admin", "muhasebe", "personel")
 def index():
     musteriler = fetch_all("SELECT id, name, musteri_adi FROM customers ORDER BY name")
     return render_template("kira/index.html", musteriler=musteriler)
 
 
 @bp.route("/hesapla", methods=["POST"])
-@yetki_gerekli("kira_senaryo")
+@yetki_gerekli("admin", "muhasebe", "personel")
 def hesapla():
     """TÜFE bazlı kira hesaplama API."""
     data = request.get_json() or {}
@@ -60,7 +60,7 @@ def hesapla():
 
 
 @bp.route("/excel")
-@yetki_gerekli("kira_senaryo")
+@yetki_gerekli("admin", "muhasebe", "personel")
 def excel_cikti():
     """Hesaplama sonucunu Excel olarak indir."""
     try:

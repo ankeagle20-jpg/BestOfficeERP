@@ -38,7 +38,7 @@ def _parse_secili_yillar():
 
 
 @bp.route("/")
-@yetki_gerekli("tufe")
+@yetki_gerekli("admin", "muhasebe")
 def index():
     bugun = date.today()
     secili_yillar = _parse_secili_yillar()
@@ -107,7 +107,7 @@ def index():
 
 
 @bp.route("/kaydet", methods=["POST"])
-@yetki_gerekli("tufe")
+@yetki_gerekli("admin", "muhasebe")
 def kaydet():
     bugun = date.today()
     yillar = sorted(
@@ -153,7 +153,7 @@ def kaydet():
 
 
 @bp.route("/sil", methods=["POST"])
-@yetki_gerekli("tufe")
+@yetki_gerekli("admin", "muhasebe")
 def sil():
     yillar = sorted(
         {
@@ -185,7 +185,7 @@ def sil():
 
 
 @bp.route("/api/ay-ozeti")
-@yetki_gerekli("tufe")
+@yetki_gerekli("admin", "muhasebe")
 def api_ay_ozeti():
     """Tek bir ay adı için tüm yıllardaki TÜFE oranları (kronolojik)."""
     ay = (request.args.get("ay") or "").strip()
@@ -202,7 +202,7 @@ def api_ay_ozeti():
 
 
 @bp.route("/api/yillar-ay-oranlari")
-@yetki_gerekli("tufe")
+@yetki_gerekli("admin", "muhasebe")
 def api_yillar_ay_oranlari():
     """Seçilen yıllar + ay için veritabanındaki TÜFE oranları (simülasyon)."""
     ay = (request.args.get("ay") or "").strip()
@@ -230,7 +230,7 @@ def api_yillar_ay_oranlari():
 
 
 @bp.route("/tcmb-cek")
-@yetki_gerekli("tufe")
+@yetki_gerekli("admin", "muhasebe")
 def tcmb_cek():
     """TCMB'den TÜFE verilerini çek ve DB'ye kaydet."""
     try:
