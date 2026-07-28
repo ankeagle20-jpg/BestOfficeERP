@@ -650,9 +650,15 @@ function sozlesmelerAylikGridVeriSonBoyamaTail(midNav, selToken, cacheForKismi) 
         if (typeof sozlesmelerAylikSecilebilirlikYenile === 'function') sozlesmelerAylikSecilebilirlikYenile();
         if (typeof cariEkstreYukle === 'function' && String(cariEkstreMusteriIdSec()) === String(midNav)) {
             var __ekMid = String(midNav);
+            try {
+                if (window.__cariEkstreHorizonMid !== __ekMid) {
+                    window.__cariEkstreHorizonMid = __ekMid;
+                    window.__cariEkstreBitisKullaniciDokundu = false;
+                }
+            } catch (_eHorMid) {}
             requestAnimationFrame(function () {
                 if (String(selectedId) !== __ekMid) return;
-                try { cariEkstreYukle({ sessiz: true, dbEsas: true }); } catch (_eEkSon) {}
+                try { cariEkstreYukle({ sessiz: true, dbEsas: true, otomatikVarsayilan: true }); } catch (_eEkSon) {}
             });
         }
     } catch (_eSonBoy) {}
@@ -10991,9 +10997,37 @@ async function sozlesmeYeniFaturaAc(zorunluGridSecimi) {
     window.open('/faturalar/yeni?' + params.toString(), '_blank');
 }
 
+/** Elle girilen makbuz tutarını otomatik önerinin ezmemesi için dokundu bayrakları (Cari Ekstre deseni). */
+window.__girisTahsilatTutarKullaniciDokundu = window.__girisTahsilatTutarKullaniciDokundu || false;
+window.__sozlesmeTahsilatTutarKullaniciDokundu = window.__sozlesmeTahsilatTutarKullaniciDokundu || false;
+
+function tahsilatTutarDokunduMu(prefix) {
+    try {
+        if (prefix === 'giris_tahsilat') return !!window.__girisTahsilatTutarKullaniciDokundu;
+        if (prefix === 'sozlesme_tahsilat') return !!window.__sozlesmeTahsilatTutarKullaniciDokundu;
+    } catch (_eDokMu) {}
+    return false;
+}
+
+function tahsilatTutarDokunduIsaretle(prefix) {
+    try {
+        if (prefix === 'giris_tahsilat') window.__girisTahsilatTutarKullaniciDokundu = true;
+        else if (prefix === 'sozlesme_tahsilat') window.__sozlesmeTahsilatTutarKullaniciDokundu = true;
+    } catch (_eDokIs) {}
+}
+
+function tahsilatTutarDokunduSifirla(prefix) {
+    try {
+        if (prefix === 'giris_tahsilat') window.__girisTahsilatTutarKullaniciDokundu = false;
+        else if (prefix === 'sozlesme_tahsilat') window.__sozlesmeTahsilatTutarKullaniciDokundu = false;
+    } catch (_eDokSf) {}
+}
+
 /** Seçili kira hücrelerinin KDV dahil tutarlarını toplayıp her iki tahsilat makbuz alanına yazar.
  *  Toplam yalnızca sozlesmeAylikSeciliAnahtarlar içindeki ay anahtarlarından (DOM’da çift sayım yok). */
-function tahsilatMakbuzTutarlariniGridSeciminden() {
+function tahsilatMakbuzTutarlariniGridSeciminden(opts) {
+    opts = opts || {};
+    var saygiDokundu = !!opts.saygiDokundu;
     var grid = sozlesmelerAylikAktifGridEl();
     var gt = document.getElementById('giris_tahsilat_tutar');
     var st = document.getElementById('sozlesme_tahsilat_tutar');
@@ -11008,11 +11042,16 @@ function tahsilatMakbuzTutarlariniGridSeciminden() {
     });
     toplam = Math.round(toplam * 100) / 100;
     var s = toplam > 0 ? formatTutarTrSayi(toplam) : '';
-    if (gt) gt.value = s;
-    if (st) st.value = s;
+    if (gt && (!saygiDokundu || !tahsilatTutarDokunduMu('giris_tahsilat'))) {
+        gt.value = s;
+        if (!saygiDokundu) tahsilatTutarDokunduIsaretle('giris_tahsilat');
+    }
+    if (st && (!saygiDokundu || !tahsilatTutarDokunduMu('sozlesme_tahsilat'))) {
+        st.value = s;
+        if (!saygiDokundu) tahsilatTutarDokunduIsaretle('sozlesme_tahsilat');
+    }
 }
 
-/** Makbuz tarihindeki ay için Aylık Tutarlar ile aynı KDV dahil tutar (grid ile uyumlu). */
 function tahsilatMakbuzTekAyKdvDahil(hedefDate, ctx, yilMap, tufeListe) {
     if (!ctx || ctx.aylikKira <= 0) return null;
     var basM = new Date(ctx.bas.getFullYear(), ctx.bas.getMonth(), 1);
@@ -11040,11 +11079,12 @@ function tahsilatMakbuzTutarlariniGuncelle(yilMap, tufeListe) {
     var gt = document.getElementById('giris_tahsilat_tutar');
     var st = document.getElementById('sozlesme_tahsilat_tutar');
     if (!ctx || ctx.aylikKira <= 0) {
-        if (gt) gt.value = '';
-        if (st) st.value = '';
+        if (gt && !tahsilatTutarDokunduMu('giris_tahsilat')) gt.value = '';
+        if (st && !tahsilatTutarDokunduMu('sozlesme_tahsilat')) st.value = '';
         return;
     }
-    function applyOne(tarihElId, tutarElId) {
+    function applyOne(tarihElId, tutarElId, prefix) {
+        if (prefix && tahsilatTutarDokunduMu(prefix)) return;
         var te = document.getElementById(tarihElId);
         var tu = document.getElementById(tutarElId);
         if (!tu) return;
@@ -11062,21 +11102,20 @@ function tahsilatMakbuzTutarlariniGuncelle(yilMap, tufeListe) {
         tu.value = formatTutarTrSayi(val);
     }
     if (sozlesmeAylikGridSecilebilirVarMi()) {
-        if (gt) gt.value = '';
-        if (st) st.value = '';
-        tahsilatMakbuzTutarlariniGridSeciminden();
+        if (gt && !tahsilatTutarDokunduMu('giris_tahsilat')) gt.value = '';
+        if (st && !tahsilatTutarDokunduMu('sozlesme_tahsilat')) st.value = '';
+        tahsilatMakbuzTutarlariniGridSeciminden({ saygiDokundu: true });
         var gtv = gt && String(gt.value || '').trim();
         if (!gtv) {
-            applyOne('giris_tahsilat_tarih', 'giris_tahsilat_tutar');
-            applyOne('sozlesme_tahsilat_tarih', 'sozlesme_tahsilat_tutar');
+            applyOne('giris_tahsilat_tarih', 'giris_tahsilat_tutar', 'giris_tahsilat');
+            applyOne('sozlesme_tahsilat_tarih', 'sozlesme_tahsilat_tutar', 'sozlesme_tahsilat');
         }
     } else {
-        applyOne('giris_tahsilat_tarih', 'giris_tahsilat_tutar');
-        applyOne('sozlesme_tahsilat_tarih', 'sozlesme_tahsilat_tutar');
+        applyOne('giris_tahsilat_tarih', 'giris_tahsilat_tutar', 'giris_tahsilat');
+        applyOne('sozlesme_tahsilat_tarih', 'sozlesme_tahsilat_tutar', 'sozlesme_tahsilat');
     }
 }
 
-/** Grid güncellemesi dışında (ör. Tahsilat sekmesi) TÜFE çekip tutarları yazar. */
 function tahsilatMakbuzTutarlariniGuncelleDisardan() {
     var ctx = readSozlesmeContextForTahsilatTutar();
     if (!ctx || ctx.aylikKira <= 0) {
@@ -17978,6 +18017,7 @@ function selectMusteri(id) {
 /** Tahsilat makbuzu: müşteri id / ad / telefon (Giriş sekmesindeki seçimle aynı). */
 function girisTahsilatFormunuMusteriyleDoldur(m) {
     if (!m || m.id == null || m.id === '') return;
+    tahsilatTutarDokunduSifirla('giris_tahsilat');
     var mid = document.getElementById('giris_tahsilat_musteri_id');
     if (!mid) return;
     mid.value = String(m.id);
@@ -18023,6 +18063,7 @@ function girisTahsilatFormunuSeciliMusteridenDoldur() {
 function fillSozlesmeTahsilatMusteri(id, musteri) {
     var hid = document.getElementById('sozlesme_tahsilat_musteri_id');
     if (!hid) return;
+    tahsilatTutarDokunduSifirla('sozlesme_tahsilat');
     hid.value = id;
     document.getElementById('sozlesme_tahsilat_musteri_phone').value = (musteri.phone || '').replace(/\D/g, '');
     document.getElementById('sozlesme_tahsilat_musteri_ara').value = musteri.name || '';
@@ -18864,15 +18905,10 @@ function girisCariEkstrePrefetch(mid) {
         var bitEl = document.getElementById('cari_ekstre_bitis');
         var sozBas = document.getElementById('sozlesme_baslangic');
         var bas = (basEl && basEl.value) ? basEl.value : ((sozBas && sozBas.value) ? sozBas.value : '');
+        // Peşin ufuk: kullanıcı bitişi elle değiştirmediyse bitis gönderme (backend hesaplasın).
         var bit = '';
-        if (bitEl && bitEl.value) {
+        if (window.__cariEkstreBitisKullaniciDokundu && bitEl && bitEl.value) {
             bit = bitEl.value;
-        } else {
-            var now = new Date();
-            var cy = now.getFullYear();
-            var cm = now.getMonth() + 1;
-            var sg = new Date(cy, cm, 0).getDate();
-            bit = cy + '-' + String(cm).padStart(2, '0') + '-' + String(sg).padStart(2, '0');
         }
         var aylikKira = 0;
         var ekKira = document.getElementById('cari_ekstre_aylik_kira');
@@ -18885,12 +18921,13 @@ function girisCariEkstrePrefetch(mid) {
         var params = new URLSearchParams({
             musteri_id: k,
             baslangic: bas,
-            bitis: bit,
             aylik_kira: String(isFinite(aylikKira) ? aylikKira : 0),
             kdv_oran: String(kdvOran),
             form_bazli_kira: '1',
             tahsilat_borca_hizala: '1'
         });
+        if (bit) params.set('bitis', bit);
+        else params.set('bitis', '');
         if (typeof kiraNakitMi === 'function' && kiraNakitMi()) params.set('kira_nakit', '1');
         girisFetchJsonCached('/giris/api/cari-ekstre?' + params.toString(), {
             ttlMs: 120000,
@@ -19770,6 +19807,18 @@ document.addEventListener('DOMContentLoaded', () => {
         sozlesmeTahsilatTarih.addEventListener('change', tahsilatTarihDegisinceTutar);
         sozlesmeTahsilatTarih.addEventListener('input', tahsilatTarihDegisinceTutar);
     }
+    (function tahsilatTutarKullaniciDokunduDinle() {
+        function bindTutarDokundu(elId, prefix) {
+            var el = document.getElementById(elId);
+            if (!el) return;
+            var mark = function () { tahsilatTutarDokunduIsaretle(prefix); };
+            el.addEventListener('input', mark);
+            el.addEventListener('change', mark);
+        }
+        bindTutarDokundu('giris_tahsilat_tutar', 'giris_tahsilat');
+        bindTutarDokundu('sozlesme_tahsilat_tutar', 'sozlesme_tahsilat');
+    })();
+
     // Cari ekstre: ilk açılışta sözleşme başı → cari ay (tarih alanları boşsa)
     if (typeof girisCariEkstreVarsayilanTarihleriYaz === 'function') {
         var eb0 = document.getElementById('cari_ekstre_baslangic');
@@ -21927,6 +21976,7 @@ function girisTahsilatYazdir() {
 }
 
 function girisTahsilatIptal() {
+    tahsilatTutarDokunduSifirla('giris_tahsilat');
     tahsilMakbuzDuzenleModuTemizle('giris_tahsilat');
     document.getElementById('giris_tahsilat_musteri_id').value = '';
     document.getElementById('giris_tahsilat_musteri_phone').value = '';
@@ -22205,6 +22255,7 @@ function sozlesmeTahsilatKaydet() {
 }
 
 function sozlesmeTahsilatKayitSonrasiTemizlik() {
+    tahsilatTutarDokunduSifirla('sozlesme_tahsilat');
     tahsilatKismiOnizlemeSifirla();
     document.getElementById('sozlesme_tahsilat_tutar').value = '';
     document.getElementById('sozlesme_tahsilat_aciklama').value = '';
@@ -22275,6 +22326,7 @@ function sozlesmeTahsilatYazdir() {
 }
 
 function sozlesmeTahsilatIptal() {
+    tahsilatTutarDokunduSifirla('sozlesme_tahsilat');
     tahsilMakbuzDuzenleModuTemizle('sozlesme_tahsilat');
     document.getElementById('sozlesme_tahsilat_musteri_id').value = '';
     document.getElementById('sozlesme_tahsilat_musteri_phone').value = '';
@@ -22653,12 +22705,18 @@ function cariEkstreMusteriDegisinceYenile() {
         cariEkstreTablolariniTemizle();
         return;
     }
+    try {
+        if (window.__cariEkstreHorizonMid !== String(mid)) {
+            window.__cariEkstreHorizonMid = String(mid);
+            window.__cariEkstreBitisKullaniciDokundu = false;
+        }
+    } catch (_eHorMid2) {}
     var aktifTab = document.querySelector('.cari-ekstre-tab.active');
     var tabAd = aktifTab ? (aktifTab.getAttribute('data-tab') || 'cari_ekstre') : 'cari_ekstre';
     if (tabAd === 'cari_ekstre_b') {
         cariEkstreBYukle({ sessiz: true });
     } else {
-        cariEkstreYukle({ sessiz: true });
+        cariEkstreYukle({ sessiz: true, otomatikVarsayilan: true });
     }
 }
 function cariEkstreEscAttr(s) {
@@ -22917,6 +22975,12 @@ function cariEkstreTahsilatDetayAc(mid, idsCsv) {
 
 function cariEkstreYukle(opts) {
     var sessiz = opts && opts.sessiz;
+    var otomatikVarsayilan = !!(opts && opts.otomatikVarsayilan);
+    try {
+        if (otomatikVarsayilan && window.__cariEkstreBitisKullaniciDokundu) {
+            otomatikVarsayilan = false;
+        }
+    } catch (_eOvDok) {}
     var musteriId = cariEkstreMusteriIdSec();
     if (!musteriId) {
         if (!sessiz) alert('Cari ekstre için önce müşteri seçin (liste veya Tahsilat alanı).');
@@ -22950,7 +23014,8 @@ function cariEkstreYukle(opts) {
     }
     var durumEkEl = document.getElementById('musteri_durum');
     var pasifEkstre = durumEkEl && String(durumEkEl.value || '').toLowerCase().trim() === 'pasif';
-    if (bitisEl && !pasifEkstre) {
+    // otomatikVarsayilan: aktif müşteride bitişi cari ay sonuna zorlama — backend peşin ufku kullanılsın
+    if (!otomatikVarsayilan && bitisEl && !pasifEkstre) {
         var nowEk = new Date();
         var cyEk = nowEk.getFullYear();
         var cmEk = nowEk.getMonth() + 1;
@@ -22968,7 +23033,13 @@ function cariEkstreYukle(opts) {
     var kdvEl = document.getElementById('kdv_oran');
     var kdvOran = (kdvEl && kdvEl.value !== '') ? parseFloat(String(kdvEl.value).replace(',', '.')) : 20;
     if (isNaN(kdvOran)) kdvOran = 20;
-    var params = new URLSearchParams({ musteri_id: musteriId, baslangic: baslangic || '', bitis: bitis || '', aylik_kira: aylikKira, kdv_oran: kdvOran });
+    var params = new URLSearchParams({ musteri_id: musteriId, baslangic: baslangic || '', aylik_kira: aylikKira, kdv_oran: kdvOran });
+    if (!otomatikVarsayilan) {
+        params.set('bitis', bitis || '');
+    } else {
+        // Backend varsayılan bitiş (peşin ufku dahil); bitis gönderilmez
+        params.set('bitis', '');
+    }
     if (kiraNakitMi()) params.set('kira_nakit', '1');
     params.set('form_bazli_kira', '1');
     params.set('tahsilat_borca_hizala', '1');
@@ -23060,6 +23131,21 @@ function cariEkstreYukle(opts) {
                 alert(data.mesaj || 'Ekstre yüklenemedi.');
                 return;
             }
+            // İlk yükleme / peşin ufuk: backend'in hesapladığı aralığı input'lara yaz
+            if (otomatikVarsayilan) {
+                try {
+                    var basIso = data.bas_iso ? String(data.bas_iso).substring(0, 10) : '';
+                    var bitIso = data.bit_iso ? String(data.bit_iso).substring(0, 10) : '';
+                    var basElFill = document.getElementById('cari_ekstre_baslangic');
+                    var bitElFill = document.getElementById('cari_ekstre_bitis');
+                    if (basIso && basElFill && /^\d{4}-\d{2}-\d{2}$/.test(basIso)) {
+                        basElFill.value = basIso;
+                    }
+                    if (bitIso && bitElFill && /^\d{4}-\d{2}-\d{2}$/.test(bitIso)) {
+                        bitElFill.value = bitIso;
+                    }
+                } catch (_eIsoFill) {}
+            }
             var tbody = document.getElementById('cari_ekstre_tbody');
             var foot = document.getElementById('cari_ekstre_foot');
             var bos = document.getElementById('cari_ekstre_bos');
@@ -23145,6 +23231,16 @@ function cariEkstreFormdanGuncelleDebounced() {
     }
     onFormAlan('cari_ekstre_baslangic', { inputToo: true });
     onFormAlan('cari_ekstre_bitis', { inputToo: true });
+    // Kullanıcı bitişi elle değiştirirse otomatikVarsayilan bir daha ezmesin
+    (function cariEkstreBitisKullaniciDokunduDinle() {
+        var bitDok = document.getElementById('cari_ekstre_bitis');
+        if (!bitDok) return;
+        var markDokundu = function () {
+            try { window.__cariEkstreBitisKullaniciDokundu = true; } catch (_eDok) {}
+        };
+        bitDok.addEventListener('change', markDokundu);
+        bitDok.addEventListener('input', markDokundu);
+    })();
     onFormAlan('cari_ekstre_aylik_kira', { inputToo: true });
     onFormAlan('aylik_kira', { inputToo: true, aylikYansit: true });
     onFormAlan('kdv_oran');
