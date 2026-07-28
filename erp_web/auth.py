@@ -257,6 +257,18 @@ def muhasebe_gerekli(f):
         if not current_user.is_authenticated:
             flash("Bu sayfaya erişmek için giriş yapmalısınız.", "warning")
             return redirect(url_for("auth.login"))
+        if getattr(current_user, "role", None) not in ("admin", "muhasebe"):
+            # Blueprint altındaki API'ler /bankalar/api/... gibi; "/api/" içerir.
+            path = request.path or ""
+            if "/api/" in path:
+                return jsonify(
+                    {
+                        "ok": False,
+                        "mesaj": "Bu işlem için yetkiniz yok.",
+                    }
+                ), 403
+            flash("Bu işlem için yetkiniz yok.", "danger")
+            return redirect(url_for("index"))
         return f(*args, **kwargs)
     return decorated_function
 
