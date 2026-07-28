@@ -57,7 +57,7 @@ def rol_degistir(uid):
     if yeni_rol not in ROLLER:
         flash("Geçersiz rol.", "danger")
         return redirect(url_for("admin.index"))
-    execute("UPDATE users SET rol=%s WHERE id=%s", (yeni_rol, uid))
+    execute("UPDATE users SET role=%s WHERE id=%s", (yeni_rol, uid))
     flash("Rol güncellendi.", "success")
     return redirect(url_for("admin.index"))
 
