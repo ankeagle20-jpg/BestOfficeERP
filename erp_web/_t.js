@@ -1779,6 +1779,8 @@ function sozlesmelerReelDbGridVePanelSonBoya() {
     }
     if (typeof sozlesmelerReelKayitliTumYillariGridaUygula === 'function') sozlesmelerReelKayitliTumYillariGridaUygula();
     if (typeof girisAylikSatirYilKayitDbdenUygula === 'function') girisAylikSatirYilKayitDbdenUygula();
+    if (typeof girisAylikSatirYilKayitYaz === 'function') girisAylikSatirYilKayitYaz();
+    if (typeof girisAylikSatirYilPanelDoldur === 'function') girisAylikSatirYilPanelDoldur();
     try {
         if (typeof girisAylikGridTahsilYesilSonBoya === 'function') girisAylikGridTahsilYesilSonBoya();
     } catch (_eReelTy) {}
