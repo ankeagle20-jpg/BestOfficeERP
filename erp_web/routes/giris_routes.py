@@ -81,7 +81,7 @@ import secrets
 from decimal import Decimal
 
 # Aylık grid «tam ödendi» / tahsil dağıtım mantığı değişince artırın; musteri_aylik_grid_cache yeniden üretilir.
-AYLIK_GRID_COMPUTE_REV = 23
+AYLIK_GRID_COMPUTE_REV = 24
 AYLIK_GRID_TAM_ODENDI_TOLERANS = 0.05  # kurus farklarini (dagitim/yuvarlama) tam odendi say
 PLACEHOLDER_BRUT_MAX = 0.5  # grid min tutar (0.01); gerçek brüt yazılmamış panel
 # Grid/panel tahsilat aciklama: «Ay YYYY Tahsilat H|AYLIK_TAH|…» (elle makbuz serbest metni haric)
@@ -1070,8 +1070,35 @@ def _aylik_grid_cache_matches_kyc(musteri_id, cache_obj):
     d_bit = _aylik_grid_coerce_date(kyc.get("sozlesme_bitis"))
     if d_bit is not None:
         bit_eff = _aylik_grid_effective_bitis(kyc, d_bit) or d_bit
-        if cache_obj.get("bitis") != bit_eff.isoformat():
+        cache_bitis_m = _aylik_grid_coerce_date(cache_obj.get("bitis"))
+        if cache_bitis_m is None:
             return False
+        durum_m = str(kyc.get("durum") or "").strip().lower()
+        if durum_m == "aktif":
+            # Rolling uzatma: cache.bitis KYC efektif bitişten kısa olamaz;
+            # eşitlik zorunlu değil. Ayrıca ufuk bugün+11 ayı kapsamalı.
+            if cache_bitis_m < bit_eff:
+                return False
+            bugun_m = date.today()
+            y_roll_m, m_roll_m = bugun_m.year, bugun_m.month + 11
+            while m_roll_m > 12:
+                m_roll_m -= 12
+                y_roll_m += 1
+            roll_son_m = date(y_roll_m, m_roll_m, 1)
+            aylar_m = cache_obj.get("aylar") if isinstance(cache_obj.get("aylar"), list) else []
+            if aylar_m:
+                try:
+                    ly_m = int(aylar_m[-1].get("yil"))
+                    lm_m = int(aylar_m[-1].get("ay"))
+                    if date(ly_m, lm_m, 1) < roll_son_m:
+                        return False
+                except (TypeError, ValueError, AttributeError):
+                    return False
+            elif cache_bitis_m <= roll_son_m:
+                return False
+        else:
+            if cache_obj.get("bitis") != bit_eff.isoformat():
+                return False
     # KYC'de bitiş yok: önbellek sentetik bitiş tutar; bitis alanını zorlamayız.
 
     kap_db = _aylik_grid_coerce_date(kyc.get("kapanis_tarihi"))
@@ -1124,16 +1151,25 @@ def _aylik_grid_cache_matches_kyc(musteri_id, cache_obj):
 
 def _aylik_grid_cache_horizon_stale(musteri_id, cache_obj):
     """
-    Aktif müşteride cache'in ufku (bitis) güncel mi? Günde en fazla 1 kez
-    kontrol edilir (updated_at bugünse atlanır, performans için).
+    Aktif müşteride cache'in ufku güncel mi?
+    - Eski kural: cache.bitis <= bugün → stale
+    - Aşama 1: son ay < (bugün_ayı+11) → stale (rolling ufuk)
+    Kısa devre: updated_at bugün VE aynı takvim ayındaysa atlanır;
+    ay değiştiyse (updated ayı != bugünün ayı) kısa devre uygulanmaz.
     """
     if not isinstance(cache_obj, dict):
         return False
+    bugun = date.today()
     try:
         updated_raw = str(cache_obj.get("updated_at") or "")[:10]
-        bugun_iso = date.today().isoformat()
-        if updated_raw == bugun_iso:
-            return False  # bugün zaten kontrol edildi/inşa edildi, tekrar bakma
+        upd = date.fromisoformat(updated_raw)
+        # Aynı ay + aynı gün → kısa devre. Ay değiştiyse rolling kontrolüne düş.
+        if (
+            upd.year == bugun.year
+            and upd.month == bugun.month
+            and updated_raw == bugun.isoformat()
+        ):
+            return False
     except Exception:
         pass
     row = fetch_one("SELECT durum FROM customers WHERE id = %s", (musteri_id,))
@@ -1142,8 +1178,23 @@ def _aylik_grid_cache_horizon_stale(musteri_id, cache_obj):
     cache_bitis = _aylik_grid_coerce_date(cache_obj.get("bitis"))
     if not cache_bitis:
         return False
-    bugun = date.today()
     if cache_bitis <= bugun:
+        return True
+    y_roll, m_roll = bugun.year, bugun.month + 11
+    while m_roll > 12:
+        m_roll -= 12
+        y_roll += 1
+    roll_son = date(y_roll, m_roll, 1)
+    aylar = cache_obj.get("aylar") if isinstance(cache_obj.get("aylar"), list) else []
+    if aylar:
+        try:
+            ly = int(aylar[-1].get("yil"))
+            lm = int(aylar[-1].get("ay"))
+            if date(ly, lm, 1) < roll_son:
+                return True
+        except (TypeError, ValueError, AttributeError):
+            return True
+    elif cache_bitis <= roll_son:
         return True
     return False
 
@@ -1398,6 +1449,13 @@ def _aylik_grid_contract_core(kyc, tufe_map):
             _aylik_grid_months_inclusive_from(bas_first, roll_son),
         )
         ay_sayisi = min(240, max(ay_sayisi, horizon_need))
+    # Aşama 1: aktif müşteride minimum ufuk = bugünün ayı + 11 ay (yalnız ileri uzatma).
+    # Pasif müşteride atlanır. Geçmiş aylar kısaltılmaz.
+    if durum_str == "aktif":
+        need_roll = _aylik_grid_months_inclusive_from(bas_first, roll_son)
+        if need_roll > ay_sayisi:
+            ay_sayisi = min(240, need_roll)
+            bit = _add_months(bas_first, ay_sayisi)
     aylik_net = _aylik_grid_coerce_money(kyc.get("aylik_kira"))
     try:
         kdv_oran = float(kyc.get("kdv_oran") if kyc.get("kdv_oran") is not None else 20)
