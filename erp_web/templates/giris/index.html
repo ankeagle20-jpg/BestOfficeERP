@@ -5175,7 +5175,7 @@ function sozlesmelerAylikGridVeriSonBoyama(midNav, selToken, settled) {
     try { sozlesmeTahsilSetPanelBorcTemizle(); } catch (_eGsPb) {}
     window.__girisTahsilDurumBuSecim = true;
     window.__musteriReelDonemTutarlari = (rRes && rRes.ok && rRes.map && typeof rRes.map === 'object') ? rRes.map : {};
-    window.__musteriReelDonemDbMap = rRes.map || {};
+    window.__musteriReelDonemDbMap = Object.assign({}, rRes.map || {});
     window.__musteriReelDonemDbKayitli = !!(window.__musteriReelDonemDbMap && Object.keys(window.__musteriReelDonemDbMap).length > 0);
     if (typeof sozlesmelerReelDbMapYenile === 'function') sozlesmelerReelDbMapYenile();
     window.__musteriReelDonemDetaylari = (rRes && rRes.ok && rRes.detay_map && typeof rRes.detay_map === 'object') ? rRes.detay_map : {};
@@ -5267,7 +5267,7 @@ function sozlesmeAylikGridParalelYukle(mid) {
         sozlesmeTahsilSetFromJson(triple[0]);
         var rj = triple[2];
         window.__musteriReelDonemTutarlari = (rj && rj.ok && rj.map && typeof rj.map === 'object') ? rj.map : {};
-        window.__musteriReelDonemDbMap = rj.map || {};
+        window.__musteriReelDonemDbMap = Object.assign({}, rj.map || {});
         window.__musteriReelDonemDbKayitli = !!(window.__musteriReelDonemDbMap && Object.keys(window.__musteriReelDonemDbMap).length > 0);
         window.__musteriReelDonemDetaylari = (rj && rj.ok && rj.detay_map && typeof rj.detay_map === 'object') ? rj.detay_map : {};
         try {
@@ -7044,7 +7044,7 @@ function sozlesmelerReelDonemTutarKaydet() {
         reelKaydetBtnReset();
         if (rj && rj.ok && rj.map && typeof rj.map === 'object') {
             window.__musteriReelDonemTutarlari = rj.map;
-            window.__musteriReelDonemDbMap = rj.map || {};
+            window.__musteriReelDonemDbMap = Object.assign({}, rj.map || {});
             window.__musteriReelDonemDbKayitli = !!(window.__musteriReelDonemDbMap && Object.keys(window.__musteriReelDonemDbMap).length > 0);
         }
         window.__musteriReelDonemDetaylari = (rj && rj.ok && rj.detay_map && typeof rj.detay_map === 'object') ? rj.detay_map : (window.__musteriReelDonemDetaylari || {});
@@ -7147,7 +7147,7 @@ function sozlesmelerReelDonemTutarVazgec() {
         .then(function (r) { return r.json(); })
         .then(function (rj) {
             window.__musteriReelDonemTutarlari = (rj && rj.ok && rj.map && typeof rj.map === 'object') ? rj.map : {};
-            window.__musteriReelDonemDbMap = rj.map || {};
+            window.__musteriReelDonemDbMap = Object.assign({}, rj.map || {});
             window.__musteriReelDonemDbKayitli = !!(window.__musteriReelDonemDbMap && Object.keys(window.__musteriReelDonemDbMap).length > 0);
             window.__musteriReelDonemDetaylari = (rj && rj.ok && rj.detay_map && typeof rj.detay_map === 'object') ? rj.detay_map : {};
             if (mid) {
@@ -7739,7 +7739,7 @@ function sozlesmelerAylikHizliYukle(force, opts) {
             var j = triple[1];
             var rj = triple[2];
             window.__musteriReelDonemTutarlari = (rj && rj.ok && rj.map && typeof rj.map === 'object') ? rj.map : {};
-            window.__musteriReelDonemDbMap = rj.map || {};
+            window.__musteriReelDonemDbMap = Object.assign({}, rj.map || {});
             window.__musteriReelDonemDbKayitli = !!(window.__musteriReelDonemDbMap && Object.keys(window.__musteriReelDonemDbMap).length > 0);
             window.__musteriReelDonemDetaylari = (rj && rj.ok && rj.detay_map && typeof rj.detay_map === 'object') ? rj.detay_map : {};
             if (!j || !j.ok || !j.cache) return false;
@@ -7757,7 +7757,7 @@ function sozlesmelerAylikHizliYukle(force, opts) {
         var j = triple[1];
         var rj = triple[2];
         window.__musteriReelDonemTutarlari = (rj && rj.ok && rj.map && typeof rj.map === 'object') ? rj.map : {};
-        window.__musteriReelDonemDbMap = rj.map || {};
+        window.__musteriReelDonemDbMap = Object.assign({}, rj.map || {});
         window.__musteriReelDonemDbKayitli = !!(window.__musteriReelDonemDbMap && Object.keys(window.__musteriReelDonemDbMap).length > 0);
         window.__musteriReelDonemDetaylari = (rj && rj.ok && rj.detay_map && typeof rj.detay_map === 'object') ? rj.detay_map : {};
         if (!j || !j.ok || !j.cache) return false;
@@ -19997,7 +19997,7 @@ function girisAylikSatirYilDbSonrasi(mid) {
         .then(function (rj) {
             if (rj && rj.ok && rj.map && typeof rj.map === 'object') {
                 window.__musteriReelDonemTutarlari = rj.map;
-                window.__musteriReelDonemDbMap = rj.map || {};
+                window.__musteriReelDonemDbMap = Object.assign({}, rj.map || {});
                 window.__musteriReelDonemDbKayitli = !!(window.__musteriReelDonemDbMap && Object.keys(window.__musteriReelDonemDbMap).length > 0);
                 window.__musteriReelDonemDetaylari = (rj.detay_map && typeof rj.detay_map === 'object') ? rj.detay_map : {};
             }
