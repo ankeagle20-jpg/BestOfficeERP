@@ -92,7 +92,7 @@ def yeni():
             
             ofis = execute_returning("""
                 INSERT INTO offices (code, type, unit_no, monthly_price, status, is_active)
-                VALUES (%s, %s, %s, %s, 'bos', TRUE)
+                VALUES (%s, %s, %s, %s, 'bos', 1)
                 RETURNING id
             """, (code, tur, unit_no, monthly_price))
             
