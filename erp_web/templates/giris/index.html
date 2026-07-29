@@ -20839,18 +20839,23 @@ function girisAylikSatirYilPanelDoldur() {
             }
         }
         var row0 = window.__aylikSatirYilDetay[ov] || {};
-        var reelG = parseFloat(row0.reel);
-        var dbMap = window.__musteriReelDonemDbMap || window.__musteriReelDonemTutarlari || {};
+        /* Aşama 3: Reel sütunu yalnızca gerçek DB map (__musteriReelDonemDbMap). */
+        var dbMap = (window.__musteriReelDonemDbMap && typeof window.__musteriReelDonemDbMap === 'object')
+            ? window.__musteriReelDonemDbMap : {};
         var dbReel = parseFloat(dbMap[ov] != null ? dbMap[ov] : dbMap[yy]);
-        if (isNaN(reelG) || reelG <= 0) {
-            reelG = (!isNaN(dbReel) && dbReel > 0) ? dbReel : 0;
-        }
-        if (reelG > 0) {
+        var hasDbReel = !isNaN(dbReel) && dbReel > 0;
+        var reelG = 0;
+        if (hasDbReel) {
+            reelG = dbReel;
             row0.__reel_aktif = true;
-            row0.reel = reelG;
-            window.__aylikSatirYilDetay[ov] = row0;
+            row0.reel = dbReel;
+        } else {
+            reelG = 0;
+            row0.__reel_aktif = false;
+            delete row0.reel;
         }
-        var reelAktif = !!row0.__reel_aktif;
+        window.__aylikSatirYilDetay[ov] = row0;
+        var reelAktif = !!hasDbReel;
         var h = girisAylikSatirYilHesapla(yy);
         var kayitli = !!(window.__aylikSatirYilDetay[ov] && window.__aylikSatirYilDetay[ov].__manual_saved);
         var kayitliReel = kayitli && reelG > 0;

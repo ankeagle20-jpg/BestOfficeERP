@@ -710,6 +710,7 @@ function sozlesmelerAylikGridVeriSonBoyama(midNav, selToken, settled) {
     sozlesmeTahsilSetFromJson(tRes);
     window.__girisTahsilDurumBuSecim = true;
     window.__musteriReelDonemTutarlari = (rRes && rRes.ok && rRes.map && typeof rRes.map === 'object') ? rRes.map : {};
+    window.__musteriReelDonemDbMap = Object.assign({}, rRes.map || {});
     if (typeof sozlesmelerReelDbMapYenile === 'function') sozlesmelerReelDbMapYenile();
     window.__musteriReelDonemDetaylari = (rRes && rRes.ok && rRes.detay_map && typeof rRes.detay_map === 'object') ? rRes.detay_map : {};
     try {
@@ -780,6 +781,7 @@ function sozlesmeAylikGridParalelYukle(mid) {
         sozlesmeTahsilSetFromJson(triple[0]);
         var rj = triple[2];
         window.__musteriReelDonemTutarlari = (rj && rj.ok && rj.map && typeof rj.map === 'object') ? rj.map : {};
+        window.__musteriReelDonemDbMap = Object.assign({}, rj.map || {});
         window.__musteriReelDonemDetaylari = (rj && rj.ok && rj.detay_map && typeof rj.detay_map === 'object') ? rj.detay_map : {};
         try {
             if (typeof girisAylikSatirYilKayitYukle === 'function') girisAylikSatirYilKayitYukle();
@@ -2546,6 +2548,7 @@ function sozlesmelerReelDonemTutarKaydet() {
         reelKaydetBtnReset();
         if (rj && rj.ok && rj.map && typeof rj.map === 'object') {
             window.__musteriReelDonemTutarlari = rj.map;
+            window.__musteriReelDonemDbMap = Object.assign({}, rj.map || {});
         }
         window.__musteriReelDonemDetaylari = (rj && rj.ok && rj.detay_map && typeof rj.detay_map === 'object') ? rj.detay_map : (window.__musteriReelDonemDetaylari || {});
         window.__musteriReelAyOzelTutarByMid = window.__musteriReelAyOzelTutarByMid || {};
@@ -2647,6 +2650,7 @@ function sozlesmelerReelDonemTutarVazgec() {
         .then(function (r) { return r.json(); })
         .then(function (rj) {
             window.__musteriReelDonemTutarlari = (rj && rj.ok && rj.map && typeof rj.map === 'object') ? rj.map : {};
+            window.__musteriReelDonemDbMap = Object.assign({}, rj.map || {});
             window.__musteriReelDonemDetaylari = (rj && rj.ok && rj.detay_map && typeof rj.detay_map === 'object') ? rj.detay_map : {};
             if (mid) {
                 window.__musteriReelAyOzelTutarByMid = window.__musteriReelAyOzelTutarByMid || {};
@@ -3133,6 +3137,7 @@ function sozlesmelerAylikHizliYukle(force) {
             var j = triple[1];
             var rj = triple[2];
             window.__musteriReelDonemTutarlari = (rj && rj.ok && rj.map && typeof rj.map === 'object') ? rj.map : {};
+            window.__musteriReelDonemDbMap = Object.assign({}, rj.map || {});
             window.__musteriReelDonemDetaylari = (rj && rj.ok && rj.detay_map && typeof rj.detay_map === 'object') ? rj.detay_map : {};
             if (!j || !j.ok || !j.cache) return false;
             var uyum = typeof sozlesmelerAylikOnbellekFormlaUyumlu === 'function' && sozlesmelerAylikOnbellekFormlaUyumlu(j.cache);
@@ -3149,6 +3154,7 @@ function sozlesmelerAylikHizliYukle(force) {
         var j = triple[1];
         var rj = triple[2];
         window.__musteriReelDonemTutarlari = (rj && rj.ok && rj.map && typeof rj.map === 'object') ? rj.map : {};
+        window.__musteriReelDonemDbMap = Object.assign({}, rj.map || {});
         window.__musteriReelDonemDetaylari = (rj && rj.ok && rj.detay_map && typeof rj.detay_map === 'object') ? rj.detay_map : {};
         if (!j || !j.ok || !j.cache) return false;
         var uyum2 = typeof sozlesmelerAylikOnbellekFormlaUyumlu === 'function' && sozlesmelerAylikOnbellekFormlaUyumlu(j.cache);
@@ -15420,7 +15426,9 @@ function girisAylikSatirYilKayitDbdenUygula() {
     if (window.__kayitDbdenBusy) return;
     window.__kayitDbdenBusy = true;
     try {
-    var map = (typeof window !== 'undefined' && window.__musteriReelDonemTutarlari) ? window.__musteriReelDonemTutarlari : {};
+    // Aşama 3 mirror: yalnızca DbMap (yoksa boş). Tutarlari fallback yok.
+    var map = (typeof window !== 'undefined' && window.__musteriReelDonemDbMap && typeof window.__musteriReelDonemDbMap === 'object')
+        ? window.__musteriReelDonemDbMap : {};
     if (!map || typeof map !== 'object') return;
     var detMap = (typeof window !== 'undefined' && window.__musteriReelDonemDetaylari) ? window.__musteriReelDonemDetaylari : {};
     window.__aylikSatirYilDetay = window.__aylikSatirYilDetay || {};
@@ -15532,6 +15540,7 @@ function girisAylikSatirYilDbSonrasi(mid) {
         .then(function (rj) {
             if (rj && rj.ok && rj.map && typeof rj.map === 'object') {
                 window.__musteriReelDonemTutarlari = rj.map;
+                window.__musteriReelDonemDbMap = Object.assign({}, rj.map || {});
                 window.__musteriReelDonemDetaylari = (rj.detay_map && typeof rj.detay_map === 'object') ? rj.detay_map : {};
             }
             girisAylikSatirYilKayitDbdenUygula();
@@ -16225,22 +16234,23 @@ function girisAylikSatirYilPanelDoldur() {
             }
         }
         var row0 = window.__aylikSatirYilDetay[ov] || {};
+        /* Aşama 3: Reel sütunu yalnızca gerçek DB map (__musteriReelDonemDbMap). */
+        var dbMap = (window.__musteriReelDonemDbMap && typeof window.__musteriReelDonemDbMap === 'object')
+            ? window.__musteriReelDonemDbMap : {};
+        var dbReel = parseFloat(dbMap[ov] != null ? dbMap[ov] : dbMap[yy]);
+        var hasDbReel = !isNaN(dbReel) && dbReel > 0;
         var reelG = 0;
-        if (row0.__reel_cleared && !row0.__reel_aktif) {
-            reelG = 0;
-        } else if (row0.__reel_aktif) {
-            reelG = parseFloat(row0.reel);
-            if (isNaN(reelG) || reelG <= 0) reelG = girisAylikSatirYilReelGoster(yy);
+        if (hasDbReel) {
+            reelG = dbReel;
+            row0.__reel_aktif = true;
+            row0.reel = dbReel;
         } else {
-            reelG = parseFloat(row0.reel);
-            if (isNaN(reelG) || reelG <= 0) reelG = girisAylikSatirYilReelGoster(yy);
-            if (reelG > 0) {
-                row0.__reel_aktif = true;
-                row0.reel = reelG;
-                window.__aylikSatirYilDetay[ov] = row0;
-            }
+            reelG = 0;
+            row0.__reel_aktif = false;
+            delete row0.reel;
         }
-        var reelAktif = !!row0.__reel_aktif;
+        window.__aylikSatirYilDetay[ov] = row0;
+        var reelAktif = !!hasDbReel;
         var h = girisAylikSatirYilHesapla(yy);
         var kdvG0 = girisAylikSatirYilKdvTutarGoster(h);
         var bankaG0 = girisAylikSatirYilBankaTutarGoster(h);
@@ -17617,6 +17627,8 @@ function girisMusteriGecisAnlikGuncelle(id, activeTab) {
 
 // Müşteri seç — hangi sekme açıksa o sekmeye göre forma doldurur (liste veya API'den)
 function selectMusteri(id) {
+    window.__musteriReelDonemDbMap = {};
+    window.__musteriReelDonemDbKayitli = false;
     girisHistoryMaybeClearFaturaRaporListFlag();
     selectedId = id;
     window.__girisPanelDbArkaPlanMid = null;
