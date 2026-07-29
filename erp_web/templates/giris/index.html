@@ -7300,15 +7300,21 @@ function sozlesmelerAylikBeklenenAySayisiFormdan() {
     var basEl = document.getElementById('sozlesme_baslangic');
     var bitEl = document.getElementById('sozlesme_bitis');
     var sureEl = document.getElementById('kira_suresi_ay');
+    var durEl = document.getElementById('musteri_durum');
     var basStr = basEl && basEl.value ? basEl.value.trim() : '';
     var bitStr = bitEl && bitEl.value ? bitEl.value.trim() : '';
+    var durum = durEl ? String(durEl.value || '').toLowerCase().trim() : '';
     var ay = 0;
     if (basStr && bitStr) ay = sozlesmeKiraAySayisi(basStr, bitStr);
     if (ay <= 0 && sureEl && sureEl.value) {
         var s = parseInt(sureEl.value, 10);
         if (!isNaN(s) && s >= 1) ay = Math.min(s, 240);
     }
-    if (basStr) {
+    /* Aşama 2: aktif → backend rolling (roll_son) floor; aksi halde bitişsiz horizon. */
+    if (basStr && durum === 'aktif') {
+        var rollAy = sozlesmeAylikRollSonAySayisi(basStr);
+        if (rollAy > ay) ay = Math.min(rollAy, 240);
+    } else if (basStr && !bitStr) {
         var horizonAy = sozlesmeAylikHorizonAySayisi(basStr);
         if (horizonAy > ay) ay = Math.min(horizonAy, 240);
     }
@@ -7521,6 +7527,11 @@ function sozlesmelerAylikCacheRender(cacheObj, preferLiveTahsil) {
        (örn. yıl alanı odak kaybı) 2024+ aylar tamamen eleniyordu — grid «kayboldu» gibi görünüyordu. */
     var basVis = basCache || basForm;
     var bitVis = bitCache || bitForm;
+    /* Aşama 2: cache bitiş yoksa bile aktifte form bitişini roll_son'a uzat; cache varsa olduğu gibi kullan. */
+    if (!bitCache && basVis && typeof sozlesmeAylikAktifRollBitisStr === 'function') {
+        var durVis = String(((document.getElementById('musteri_durum') || {}).value) || (cacheObj && cacheObj.durum) || '').toLowerCase().trim();
+        if (durVis === 'aktif') bitVis = sozlesmeAylikAktifRollBitisStr(basVis, bitVis) || bitVis;
+    }
     var effOpts = {
         durum: (document.getElementById('musteri_durum') || {}).value || (cacheObj && cacheObj.durum) || '',
         kapanis_tarihi: (document.getElementById('kapanis_tarihi') || {}).value || (cacheObj && cacheObj.kapanis_tarihi) || '',
@@ -14619,11 +14630,16 @@ function sozlesmelerAylikGorunmezAyKartlariniTemizle() {
     var basStr = '';
     var bitStr = '';
     if (sco && !isNaN(scoMid) && !isNaN(mid) && mid === scoMid && sco.baslangic && sco.bitis) {
+        /* Aşama 2: görünürlükte backend cache bitişini öncelikle kullan (uzatılmış ufuk). */
         basStr = String(sco.baslangic).trim();
         bitStr = String(sco.bitis).trim();
     }
     if (!basStr) basStr = basForm;
     if (!bitStr) bitStr = bitForm;
+    var durumGz = durEl ? String(durEl.value || '').toLowerCase().trim() : '';
+    if ((!sco || isNaN(scoMid) || mid !== scoMid) && basStr && durumGz === 'aktif' && typeof sozlesmeAylikAktifRollBitisStr === 'function') {
+        bitStr = sozlesmeAylikAktifRollBitisStr(basStr, bitStr) || bitStr;
+    }
     var effOpts = {
         durum: durEl ? durEl.value : '',
         kapanis_tarihi: kapEl ? kapEl.value : '',
@@ -14687,6 +14703,39 @@ function sozlesmeAylikHorizonAySayisi(basStr) {
         return (targetFirst.getFullYear() - basFirst.getFullYear()) * 12 + (targetFirst.getMonth() - basFirst.getMonth()) + 1;
     }
     return Math.max(spanTo(decSon), spanTo(rollSon), 0);
+}
+
+/** Backend Aşama 1 aktif rolling: yalnız bugün_ayı+11 (roll_son), yıl sonu (dec) zorlamaz. */
+function sozlesmeAylikRollSonAySayisi(basStr) {
+    var bas = parseTarihStr(basStr) || new Date(basStr);
+    if (isNaN(bas.getTime())) return 0;
+    var basFirst = new Date(bas.getFullYear(), bas.getMonth(), 1);
+    var today = new Date();
+    var rollSon = new Date(today.getFullYear(), today.getMonth() + 11, 1);
+    if (rollSon < basFirst) return 0;
+    return (rollSon.getFullYear() - basFirst.getFullYear()) * 12 + (rollSon.getMonth() - basFirst.getMonth()) + 1;
+}
+
+/** Aktif müşteride form bitişini roll_son dışlayıcı sınırına kadar uzat (kısalma yok). */
+function sozlesmeAylikAktifRollBitisStr(basStr, bitStr) {
+    if (!basStr) return bitStr || '';
+    var rollAy = sozlesmeAylikRollSonAySayisi(basStr);
+    if (rollAy <= 0) return bitStr || '';
+    var bas = parseTarihStr(basStr) || new Date(basStr);
+    if (isNaN(bas.getTime())) return bitStr || '';
+    var basFirst = new Date(bas.getFullYear(), bas.getMonth(), 1);
+    var excl = sozlesmeAylikAddMonths(basFirst, rollAy);
+    var exclIso = (typeof tarihISOYerel === 'function') ? tarihISOYerel(excl) : '';
+    if (!exclIso) {
+        var y = excl.getFullYear();
+        var m = excl.getMonth() + 1;
+        var d = excl.getDate();
+        exclIso = y + '-' + (m < 10 ? '0' : '') + m + '-' + (d < 10 ? '0' : '') + d;
+    }
+    if (!bitStr) return exclIso;
+    var bit = parseTarihStr(bitStr) || new Date(bitStr);
+    if (isNaN(bit.getTime()) || excl > bit) return exclIso;
+    return bitStr;
 }
 
 /** Sözleşme başlangıç/bitiş tarihine göre Kira Süresi Aylık'ı otomatik doldurur. Geçersizse varsayılan 12. */
@@ -14765,6 +14814,8 @@ function sozlesmelerAylikGuncelle() {
     var aylikKira = kiraEl && kiraEl.value ? parseFloat(String(kiraEl.value).replace(',','.')) : 0;
     if (isNaN(aylikKira)) aylikKira = 0;
     var aySayisi = 0;
+    var durElG = document.getElementById('musteri_durum');
+    var durumG = durElG ? String(durElG.value || '').toLowerCase().trim() : '';
     if (basStr && bitStr) {
         aySayisi = sozlesmeKiraAySayisi(basStr, bitStr);
     }
@@ -14774,9 +14825,17 @@ function sozlesmelerAylikGuncelle() {
             aySayisi = Math.min(sureAy, 240);
         }
     }
-    if (basStr && !bitStr) {
+    /* Aşama 2: aktifte bitiş dolu olsa bile roll_son floor (backend Aşama 1 ile uyum). */
+    if (basStr && durumG === 'aktif') {
+        var rollAyG = sozlesmeAylikRollSonAySayisi(basStr);
+        if (rollAyG > aySayisi) aySayisi = Math.min(rollAyG, 240);
+    } else if (basStr && !bitStr) {
         var horizonAy = sozlesmeAylikHorizonAySayisi(basStr);
         if (horizonAy > aySayisi) aySayisi = Math.min(horizonAy, 240);
+    }
+    var bitStrGrid = bitStr;
+    if (basStr && durumG === 'aktif' && typeof sozlesmeAylikAktifRollBitisStr === 'function') {
+        bitStrGrid = sozlesmeAylikAktifRollBitisStr(basStr, bitStr) || bitStr;
     }
     if (aySayisi <= 0) {
         sozlesmelerAylikTwinGridHtml('');
@@ -14855,7 +14914,7 @@ function sozlesmelerAylikGuncelle() {
             }
         } catch (_eAtC) {}
         for (var i = 0; i < aySayisi; i++) {
-            if (sozlesmeAylikDonemBasGecersizMi(basStr, bitStr, i, effOpts)) continue;
+            if (sozlesmeAylikDonemBasGecersizMi(basStr, bitStrGrid, i, effOpts)) continue;
             var ya = sozlesmeAylikYilAy(bas, i);
             var yil = ya.y;
             var ayNum = ya.m;
