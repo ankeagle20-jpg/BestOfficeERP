@@ -6399,17 +6399,9 @@ function sozlesmelerReelYilSecimineGoreTutarAlani() {
             kdvDahilGoster = baseKdv;
         }
         if (typeof sozlesmelerReelHibritKdvGuncelle === 'function') sozlesmelerReelHibritKdvGuncelle();
-        if (kdvDahilGoster != null) {
-            _sozlesmelerReelYilSecimiGridAnlikUygula(yNum, kdvDahilGoster);
-            window.__musteriReelDonemTutarlari = window.__musteriReelDonemTutarlari || {};
-            window.__musteriReelDonemTutarlari[String(yNum)] = Math.round(parseFloat(kdvDahilGoster) * 100) / 100;
-            if (typeof sozlesmelerReelDbMapYenile === 'function') sozlesmelerReelDbMapYenile();
-            if (typeof sozlesmelerReelTahsilPanelSenkron === 'function') sozlesmelerReelTahsilPanelSenkron();
-            if (window.__tahsilatSatirYilAcik && window.__tahsilatSatirYilAcik[String(yNum)]
-                && typeof girisTahsilatYilAyPanelGuncelle === 'function') {
-                girisTahsilatYilAyPanelGuncelle(yNum);
-            }
-        }
+        /* Aşama 2: yıl seçiminde TÜFE/fallback yalnızca input/hibrit önizlemesi.
+           __musteriReelDonemTutarlari'ye yazma, grid anlık boyama ve tahsilat
+           paneli senkronu yok — Kaydet öncesi hayalet kayıt oluşmasın. */
     } finally {
         window.__reelDetayHydrating = false;
     }
