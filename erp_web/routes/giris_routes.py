@@ -8971,6 +8971,13 @@ def _cari_ekstre_build_payload_from_request():
             logging.getLogger(__name__).exception(
                 "cari ekstre peşin ufuk bitiş musteri_id=%s", musteri_id
             )
+        # Pasif cap: peşin ufku uzatabilir ama efektif bitişi ASLA aşamaz.
+        # (Kullanıcı açık bitis verdiyse bu blok zaten çalışmaz.)
+        # Grid bitiş dışlayıcı (donem < cap); ekstre inclusive (<= bit) → cap-1 gün.
+        if str(cust_durum).strip().lower() == "pasif":
+            cap = _aylik_grid_effective_bitis(kyc, def_bit)
+            if isinstance(cap, date):
+                def_bit = min(def_bit, cap - timedelta(days=1))
     try:
         bas = datetime.strptime(baslangic[:10], "%Y-%m-%d").date() if baslangic else def_b
         bit = datetime.strptime(bitis[:10], "%Y-%m-%d").date() if bitis else def_bit
@@ -11486,6 +11493,19 @@ def api_cari_ekstre_b():
         except Exception:
             logging.getLogger(__name__).exception(
                 "cari ekstre B peşin ufuk bitiş musteri_id=%s", musteri_id
+            )
+        # Pasif cap: peşin ufku uzatabilir ama efektif bitişi ASLA aşamaz.
+        # (Kullanıcı açık bitis verdiyse bu blok zaten çalışmaz.)
+        # Grid bitiş dışlayıcı (donem < cap); ekstre inclusive (<= bit) → cap-1 gün.
+        try:
+            kyc_b = _musteri_kyc_grup_for_aylik_grid(int(musteri_id))
+            if str((kyc_b or {}).get("durum") or "").strip().lower() == "pasif":
+                cap = _aylik_grid_effective_bitis(kyc_b, def_bit)
+                if isinstance(cap, date):
+                    def_bit = min(def_bit, cap - timedelta(days=1))
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "cari ekstre B pasif bitiş cap musteri_id=%s", musteri_id
             )
     try:
         bas = datetime.strptime(baslangic[:10], "%Y-%m-%d").date() if baslangic else def_b
