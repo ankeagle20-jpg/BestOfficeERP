@@ -4805,7 +4805,6 @@ function girisBootstrapMusteriVeSekme() {
             }
         }
         if (typeof switchTab === 'function') switchTab(tabIdx);
-        if (chosen && typeof girisMusteriPrefetch === 'function') girisMusteriPrefetch(chosen);
         if (chosen && typeof selectMusteri === 'function') selectMusteri(chosen);
     } catch (e) {}
 }
@@ -22418,7 +22417,6 @@ function selectMusteri(id) {
         try { cariKartYukle(id); } catch (_eCkHizli) {}
     }
     try {
-        girisMusteriPrefetch(id);
         girisCariKartPrefetch(id);
     } catch (_eSelPf) {}
     try { window.__musteriDosyaSirasi = []; dosyaListesiGuncelle(); } catch (eDos) {}
