@@ -17127,6 +17127,42 @@ function girisTahsilatYilAyPaneldenHucreDurumCacheDen(yNum, mNum) {
     }
     return null;
 }
+/** FE Kural A: |AYLIK_TAH| / tahsil set / cache tahsil_edildi → tutar farkına bakmadan tam kapalı. */
+function sozlesmeAylikMarkerTamKapandiMi(yil, ay) {
+    var yNum = parseInt(yil, 10);
+    var mNum = parseInt(ay, 10);
+    if (isNaN(yNum) || isNaN(mNum) || mNum < 1 || mNum > 12) return false;
+    var ayKey = (typeof sozlesmeAylikAyKeyFromYilAy === 'function')
+        ? sozlesmeAylikAyKeyFromYilAy(yNum, mNum)
+        : (yNum + '-' + mNum);
+    var ayKeyNorm = (typeof sozlesmeAylikAyKeyNormalize === 'function')
+        ? sozlesmeAylikAyKeyNormalize(ayKey)
+        : ayKey;
+    if (!ayKeyNorm) return false;
+    try {
+        if (typeof sozlesmeTahsilEdilenAyAnahtarlari !== 'undefined'
+            && sozlesmeTahsilEdilenAyAnahtarlari
+            && sozlesmeTahsilEdilenAyAnahtarlari.has
+            && sozlesmeTahsilEdilenAyAnahtarlari.has(ayKeyNorm)) {
+            return true;
+        }
+    } catch (_eSet) {}
+    try {
+        var sco = (typeof window !== 'undefined') ? window.__sozlesmelerAylikSonCacheObj : null;
+        var aylar = sco && Array.isArray(sco.aylar) ? sco.aylar : null;
+        if (aylar) {
+            for (var i = 0; i < aylar.length; i++) {
+                var a = aylar[i];
+                if (!a || !a.tahsil_edildi) continue;
+                var akn = (typeof sozlesmeAylikAyKeyNormalize === 'function')
+                    ? sozlesmeAylikAyKeyNormalize(String(a.ay_key || (a.yil + '-' + a.ay)))
+                    : String(a.ay_key || (a.yil + '-' + a.ay));
+                if (akn === ayKeyNorm) return true;
+            }
+        }
+    } catch (_eSco) {}
+    return false;
+}
 function girisTahsilatYilAyPaneldenHucreDurum(yil, ay) {
     var tol = Number(SOZLESME_TAM_ODENDI_TOLERANS) || 0.05;
     var yNum = parseInt(yil, 10);
@@ -17211,6 +17247,18 @@ function girisTahsilatYilAyPaneldenHucreDurum(yil, ay) {
     kalan = Math.round(kalan * 100) / 100;
     if (brut > tol && tah + tol >= brut) kalan = 0;
     var odenen = tah > tol ? tah : Math.max(Math.round((brut - kalan) * 100) / 100, 0);
+    /* FE Kural A: marker/tahsil set/cache tahsil_edildi → tutar farkını yok say (bilinçli kısmi hariç). */
+    if (!d.__kismi_tahsil_girildi && typeof sozlesmeAylikMarkerTamKapandiMi === 'function'
+        && sozlesmeAylikMarkerTamKapandiMi(yNum, mNum)) {
+        return {
+            tip: 'yesil',
+            brut: brut,
+            kalan: 0,
+            tahsil: tah > tol ? tah : brut,
+            goster: brut,
+            odenen: brut
+        };
+    }
     if (kalan <= tol) {
         return { tip: 'yesil', brut: brut, kalan: 0, tahsil: tah > tol ? tah : brut, goster: brut, odenen: brut };
     }
