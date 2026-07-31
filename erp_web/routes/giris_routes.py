@@ -10313,7 +10313,7 @@ def api_musteri_kart_bundle():
             data.setdefault("mesaj", f"HTTP {status}")
         return data
 
-    def _call_view(path, query, view_fn, *view_args):
+    def _call_view(path, query, view_fn, *view_args, **view_kwargs):
         qs_items = []
         for k, v in (query or {}).items():
             if v is None or v is False:
@@ -10324,7 +10324,7 @@ def api_musteri_kart_bundle():
                 qs_items.append((k, str(v)))
         qs = urlencode(qs_items)
         with current_app.test_request_context(path, query_string=qs, method="GET"):
-            return _parse_view_result(_unwrap(view_fn)(*view_args))
+            return _parse_view_result(_unwrap(view_fn)(*view_args, **view_kwargs))
 
     out = {
         "ok": False,
@@ -10346,8 +10346,7 @@ def api_musteri_kart_bundle():
     except Exception as ex:
         out["musteri"] = {"ok": False, "mesaj": str(ex) or "musteri hata"}
 
-    # 2) grid — skip_match + force yalnızca burada
-    # Aşama 2a: grid tahsil_durum'dan ÖNCE (payload paylaşımı yok; sıra ile çift build riski azalır)
+    # 2) grid — skip_match + force yalnızca burada (tahsil_durum'dan önce; Aşama 2a)
     try:
         grid_q = {"musteri_id": mid}
         if skip_match:
@@ -10362,12 +10361,21 @@ def api_musteri_kart_bundle():
     except Exception as ex:
         out["grid"] = {"ok": False, "mesaj": str(ex) or "grid hata"}
 
-    # 3) tahsil_durum — kendi grid hesabını bağımsız yapar (Aşama 2b payload paylaşımı yok)
+    # 3) tahsil_durum — Aşama 2b: grid cache başarılıysa paylaş (yoksa eski bağımsız yol)
     try:
+        tahsil_kw = {}
+        gpart = out.get("grid")
+        if (
+            isinstance(gpart, dict)
+            and gpart.get("ok")
+            and isinstance(gpart.get("cache"), dict)
+        ):
+            tahsil_kw["onceden_hesaplanmis_grid"] = gpart.get("cache")
         out["tahsil_durum"] = _call_view(
             "/giris/api/aylik-tahsil-durum",
             {"musteri_id": mid},
             api_aylik_tahsil_durum,
+            **tahsil_kw,
         )
     except Exception as ex:
         out["tahsil_durum"] = {"ok": False, "mesaj": str(ex) or "tahsil_durum hata"}
@@ -11636,19 +11644,27 @@ def api_tahsilat_panel_detay():
 
 @bp.route('/api/aylik-tahsil-durum')
 @giris_gerekli
-def api_aylik_tahsil_durum():
-    """Aylık grid ile uyumlu: tam ödenmiş ay anahtarları (YYYY-M). Ödeme tarihi ≠ tam kapatma."""
+def api_aylik_tahsil_durum(onceden_hesaplanmis_grid=None):
+    """Aylık grid ile uyumlu: tam ödenmiş ay anahtarları (YYYY-M). Ödeme tarihi ≠ tam kapatma.
+
+    onceden_hesaplanmis_grid: Bundle (Aşama 2b) grid cache'ini paylaşırsa
+    read/build/tahsil_guncelle atlanır; HTTP/hover yolları parametresiz kalır.
+    """
     musteri_id = request.args.get("musteri_id", type=int)
     if not musteri_id:
         return _json_no_cache({"ok": False, "mesaj": "musteri_id gerekli."}, 400)
     mid = int(musteri_id)
     panel_by_iso = _load_musteri_panel_by_iso(mid)
-    # Önce DB önbelleği (grid-cache ile aynı payload); yoksa tek seferlik hesap.
-    payload = _read_aylik_grid_cache_payload(mid)
-    if payload is None:
-        payload = _build_aylik_grid_cache_payload(mid, tufe_map=_tufe_map_by_year_month_cached())
+    if onceden_hesaplanmis_grid is not None:
+        # Aşama 2b: hazır grid payload — ikinci build/tahsil_guncelle yok
+        payload = onceden_hesaplanmis_grid
     else:
-        payload = _aylik_grid_cache_payload_tahsil_guncelle(mid, payload, panel_by_iso=panel_by_iso)
+        # Önce DB önbelleği (grid-cache ile aynı payload); yoksa tek seferlik hesap.
+        payload = _read_aylik_grid_cache_payload(mid)
+        if payload is None:
+            payload = _build_aylik_grid_cache_payload(mid, tufe_map=_tufe_map_by_year_month_cached())
+        else:
+            payload = _aylik_grid_cache_payload_tahsil_guncelle(mid, payload, panel_by_iso=panel_by_iso)
     marker_ay_only = _aylik_tahsil_marker_aylar_set_normalized(mid)
     ekstre_ay_only = _aylik_tahsil_ekstre_eslesme_aylar_set_normalized(mid)
     ay_set = _aylik_tahsil_edilen_aylar_from_payload(payload) if payload else set()
