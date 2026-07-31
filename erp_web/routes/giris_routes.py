@@ -10346,17 +10346,8 @@ def api_musteri_kart_bundle():
     except Exception as ex:
         out["musteri"] = {"ok": False, "mesaj": str(ex) or "musteri hata"}
 
-    # 2) tahsil_durum — kendi grid hesabını bağımsız yapar (Aşama 2 paylaşımı yok)
-    try:
-        out["tahsil_durum"] = _call_view(
-            "/giris/api/aylik-tahsil-durum",
-            {"musteri_id": mid},
-            api_aylik_tahsil_durum,
-        )
-    except Exception as ex:
-        out["tahsil_durum"] = {"ok": False, "mesaj": str(ex) or "tahsil_durum hata"}
-
-    # 3) grid — skip_match + force yalnızca burada
+    # 2) grid — skip_match + force yalnızca burada
+    # Aşama 2a: grid tahsil_durum'dan ÖNCE (payload paylaşımı yok; sıra ile çift build riski azalır)
     try:
         grid_q = {"musteri_id": mid}
         if skip_match:
@@ -10370,6 +10361,16 @@ def api_musteri_kart_bundle():
         )
     except Exception as ex:
         out["grid"] = {"ok": False, "mesaj": str(ex) or "grid hata"}
+
+    # 3) tahsil_durum — kendi grid hesabını bağımsız yapar (Aşama 2b payload paylaşımı yok)
+    try:
+        out["tahsil_durum"] = _call_view(
+            "/giris/api/aylik-tahsil-durum",
+            {"musteri_id": mid},
+            api_aylik_tahsil_durum,
+        )
+    except Exception as ex:
+        out["tahsil_durum"] = {"ok": False, "mesaj": str(ex) or "tahsil_durum hata"}
 
     # 4) reel
     try:
