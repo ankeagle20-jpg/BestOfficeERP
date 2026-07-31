@@ -22755,10 +22755,9 @@ function selectMusteri(id) {
                 girisJsonCacheInvalidatePrefix('/giris/api/reel-donem-tutarlar?musteri_id=' + encodeURIComponent(midNav));
             }
         } catch (_eSelInv) {}
-        var pMusteri = girisFetchJsonCached('/giris/api/musteri/' + midNav, { ttlMs: 60000, persistMs: 300000, swr: false });
-        var pTahsil = girisFetchJsonCached('/giris/api/aylik-tahsil-durum?musteri_id=' + encodeURIComponent(midNav), { ttlMs: 30000, persistMs: 180000, swr: false });
-        var pGrid = girisFetchJsonCached('/giris/api/aylik-grid-cache?musteri_id=' + encodeURIComponent(midNav) + '&skip_match=1', { ttlMs: 0, persistMs: 0, swr: false });
-        var pReel = girisFetchJsonCached('/giris/api/reel-donem-tutarlar?musteri_id=' + encodeURIComponent(midNav), { ttlMs: 0, persistMs: 0, swr: false });
+        /* Aşama 1b: 4 ayrı endpoint yerine tek bundle; SonBoyama settled formatı korunur. */
+        var bundleUrl = '/giris/api/musteri-kart-bundle?musteri_id=' + encodeURIComponent(midNav) + '&skip_match=1';
+        var pBundle = girisFetchJsonCached(bundleUrl, { ttlMs: 0, persistMs: 0, swr: false });
         sozlesmeAylikBorclananMusteriDegistir(midNav);
         window.__sozlesmelerAylikYilFiltre = { hepsi: true, yillar: [] };
         window.__sozlesmelerAylikYilSig = null;
@@ -22766,18 +22765,29 @@ function selectMusteri(id) {
         function __selStillCurrent() {
             return window.__girisSelectMusteriToken === __selToken && String(selectedId) === String(midNav);
         }
-        pMusteri.then(function (res) {
+        function __bundlePartToSettled(part) {
+            if (part && part.ok) return { status: 'fulfilled', value: part };
+            return { status: 'rejected', reason: (part && part.mesaj) ? part.mesaj : 'bundle_part_failed' };
+        }
+        pBundle.then(function (bundle) {
             if (!__selStillCurrent()) return;
+            var mPart = (bundle && bundle.musteri) ? bundle.musteri : null;
             girisSonMusteriDetayHafifYukleme = false;
-            if (res && res.ok && res.musteri) fillActiveTab(res.musteri);
+            if (mPart && mPart.ok && mPart.musteri) fillActiveTab(mPart.musteri);
             else if (musteri) fillActiveTab(musteri);
         }).catch(function () {
             if (!__selStillCurrent()) return;
             if (musteri) fillActiveTab(musteri);
         });
-        Promise.allSettled([pMusteri, pTahsil, pGrid, pReel]).then(function (rs) {
+        pBundle.then(function (bundle) {
             if (!__selStillCurrent()) return;
-            sozlesmelerAylikGridVeriSonBoyama(midNav, __selToken, rs);
+            var settled = [
+                __bundlePartToSettled(bundle && bundle.musteri),
+                __bundlePartToSettled(bundle && bundle.tahsil_durum),
+                __bundlePartToSettled(bundle && bundle.grid),
+                __bundlePartToSettled(bundle && bundle.reel)
+            ];
+            sozlesmelerAylikGridVeriSonBoyama(midNav, __selToken, settled);
         }).catch(function () {
             if (!__selStillCurrent()) return;
             sozlesmeAylikGridParalelYukle(midNav);
