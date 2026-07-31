@@ -10245,6 +10245,149 @@ def api_reel_donem_tutarlar():
     return jsonify({"ok": True, "map": m, "detay_map": detay_map})
 
 
+@bp.route("/api/musteri-kart-bundle")
+@giris_gerekli
+def api_musteri_kart_bundle():
+    """
+    Müşteri kartı (selectMusteri / Yenile) için tek HTTP paketi.
+
+    Alt parçalar mevcut view fonksiyonlarının iç mantığını çağırır
+    (api_musteri_detay / api_aylik_tahsil_durum / api_aylik_grid_cache /
+    api_reel_donem_tutarlar). Route'lar AYNEN kalır; burada yalnızca
+    birleştirilir.
+
+    Query:
+      - musteri_id (zorunlu)
+      - skip_match → yalnızca grid alt yoluna
+      - force → yalnızca grid alt yoluna (musteri detay cache'ine force YOK)
+      - odemeler → musteri detayına (varsayılan 1)
+
+    Kısmi başarı: her alt çağrı ayrı try/except; biri düşse diğerleri döner.
+    Üst ok=true en az bir alt ok=true ise.
+    """
+    from urllib.parse import urlencode
+
+    musteri_id = request.args.get("musteri_id", type=int)
+    if not musteri_id:
+        return _json_no_cache(
+            {
+                "ok": False,
+                "mesaj": "musteri_id gerekli.",
+                "musteri_id": None,
+                "musteri": {"ok": False, "mesaj": "musteri_id gerekli."},
+                "tahsil_durum": {"ok": False, "mesaj": "musteri_id gerekli."},
+                "grid": {"ok": False, "mesaj": "musteri_id gerekli."},
+                "reel": {"ok": False, "mesaj": "musteri_id gerekli."},
+            },
+            400,
+        )
+    mid = int(musteri_id)
+    skip_match = str(request.args.get("skip_match") or "").lower() in ("1", "true", "yes", "on")
+    force_grid = str(request.args.get("force") or "").lower() in ("1", "true", "yes", "on")
+    odemeler = str(request.args.get("odemeler", "1") or "1")
+
+    def _unwrap(fn):
+        return getattr(fn, "__wrapped__", fn)
+
+    def _parse_view_result(result):
+        status = 200
+        resp = result
+        if isinstance(result, tuple):
+            resp = result[0]
+            if len(result) > 1:
+                try:
+                    status = int(result[1])
+                except (TypeError, ValueError):
+                    status = 200
+        data = None
+        if resp is not None and hasattr(resp, "get_json"):
+            try:
+                data = resp.get_json(silent=True)
+            except Exception:
+                data = None
+        if not isinstance(data, dict):
+            data = {"ok": False, "mesaj": "Geçersiz yanıt."}
+        if status >= 400 and data.get("ok") is not False:
+            data = dict(data)
+            data["ok"] = False
+            data.setdefault("mesaj", f"HTTP {status}")
+        return data
+
+    def _call_view(path, query, view_fn, *view_args):
+        qs_items = []
+        for k, v in (query or {}).items():
+            if v is None or v is False:
+                continue
+            if v is True:
+                qs_items.append((k, "1"))
+            else:
+                qs_items.append((k, str(v)))
+        qs = urlencode(qs_items)
+        with current_app.test_request_context(path, query_string=qs, method="GET"):
+            return _parse_view_result(_unwrap(view_fn)(*view_args))
+
+    out = {
+        "ok": False,
+        "musteri_id": mid,
+        "musteri": {"ok": False, "mesaj": "çalıştırılmadı"},
+        "tahsil_durum": {"ok": False, "mesaj": "çalıştırılmadı"},
+        "grid": {"ok": False, "mesaj": "çalıştırılmadı"},
+        "reel": {"ok": False, "mesaj": "çalıştırılmadı"},
+    }
+
+    # 1) musteri — force uygulanmaz
+    try:
+        out["musteri"] = _call_view(
+            f"/giris/api/musteri/{mid}",
+            {"odemeler": odemeler},
+            api_musteri_detay,
+            mid,
+        )
+    except Exception as ex:
+        out["musteri"] = {"ok": False, "mesaj": str(ex) or "musteri hata"}
+
+    # 2) tahsil_durum — kendi grid hesabını bağımsız yapar (Aşama 2 paylaşımı yok)
+    try:
+        out["tahsil_durum"] = _call_view(
+            "/giris/api/aylik-tahsil-durum",
+            {"musteri_id": mid},
+            api_aylik_tahsil_durum,
+        )
+    except Exception as ex:
+        out["tahsil_durum"] = {"ok": False, "mesaj": str(ex) or "tahsil_durum hata"}
+
+    # 3) grid — skip_match + force yalnızca burada
+    try:
+        grid_q = {"musteri_id": mid}
+        if skip_match:
+            grid_q["skip_match"] = "1"
+        if force_grid:
+            grid_q["force"] = "1"
+        out["grid"] = _call_view(
+            "/giris/api/aylik-grid-cache",
+            grid_q,
+            api_aylik_grid_cache,
+        )
+    except Exception as ex:
+        out["grid"] = {"ok": False, "mesaj": str(ex) or "grid hata"}
+
+    # 4) reel
+    try:
+        out["reel"] = _call_view(
+            "/giris/api/reel-donem-tutarlar",
+            {"musteri_id": mid},
+            api_reel_donem_tutarlar,
+        )
+    except Exception as ex:
+        out["reel"] = {"ok": False, "mesaj": str(ex) or "reel hata"}
+
+    out["ok"] = any(
+        isinstance(out[k], dict) and bool(out[k].get("ok"))
+        for k in ("musteri", "tahsil_durum", "grid", "reel")
+    )
+    return _json_no_cache(out)
+
+
 @bp.route("/api/reel-donem-tutar", methods=["POST"])
 @giris_gerekli
 def api_reel_donem_tutar_upsert():
