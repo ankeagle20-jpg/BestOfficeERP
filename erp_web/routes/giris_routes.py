@@ -1927,6 +1927,334 @@ def _aylik_tahsil_cache_imza(musteri_id):
     return f"{cnt}|{toplam:.2f}|{mx}"
 
 
+def _aylik_grid_freshness_ts_str(val) -> str:
+    if val is None:
+        return "1970-01-01T00:00:00"
+    if hasattr(val, "isoformat"):
+        return str(val.isoformat())
+    return str(val or "1970-01-01T00:00:00")
+
+
+def _aylik_grid_freshness_k_from_kyc_row(kyc) -> str:
+    """KYC kritik alan özeti (canlı satır → K bileşeni).
+
+    Not: bitis/durum bilinçli hariç — rolling ufuk payload.bitis'i KYC efektif
+    bitişten uzun tutabilir; Aşama 0'da sürekli k_same=False üretmesin.
+    """
+    if not isinstance(kyc, dict):
+        return "none"
+    taban = round(_aylik_grid_coerce_money(kyc.get("aylik_kira")), 2)
+    nakit = 1 if bool(kyc.get("kira_nakit")) else 0
+    nakit_t = round(_aylik_grid_coerce_money(kyc.get("kira_nakit_tutar")), 2)
+    banka_t = round(_aylik_grid_coerce_money(kyc.get("kira_banka_tutar")), 2)
+    bas_k = _aylik_grid_coerce_date(kyc.get("sozlesme_tarihi"))
+    bas = bas_k.isoformat() if bas_k else ""
+    artis_b = _aylik_grid_coerce_date(kyc.get("kira_artis_tarihi")) or bas_k
+    try:
+        artis_ay = int(artis_b.month) if artis_b else 0
+    except Exception:
+        artis_ay = 0
+    try:
+        sure = int(kyc.get("kira_suresi_ay")) if kyc.get("kira_suresi_ay") not in (None, "") else None
+    except (TypeError, ValueError):
+        sure = None
+    kap = _kyc_date_iso(_aylik_grid_coerce_date(kyc.get("kapanis_tarihi"))) or ""
+    try:
+        ek = int(kyc.get("kapanis_sonrasi_borc_ay") or 0)
+    except (TypeError, ValueError):
+        ek = 0
+    return (
+        f"{taban:.2f}|{nakit}|{nakit_t:.2f}|{banka_t:.2f}|{bas}|"
+        f"{artis_ay}|{sure}|{AYLIK_GRID_COMPUTE_REV}|{kap}|{ek}"
+    )
+
+
+def _aylik_grid_freshness_k_from_payload(payload) -> str:
+    """Payload içindeki KYC snapshot alanlarından K bileşeni (saklı taraf)."""
+    if not isinstance(payload, dict):
+        return "none"
+    taban = round(_aylik_grid_coerce_money(payload.get("taban_aylik_net")), 2)
+    nakit = 1 if bool(payload.get("kira_nakit")) else 0
+    nakit_t = round(_aylik_grid_coerce_money(payload.get("kira_nakit_tutar")), 2)
+    banka_t = round(_aylik_grid_coerce_money(payload.get("kira_banka_tutar")), 2)
+    bas = str(payload.get("baslangic") or "")[:10]
+    try:
+        artis_ay = int(payload.get("artis_ay") or 0)
+    except (TypeError, ValueError):
+        artis_ay = 0
+    try:
+        sure = int(payload.get("kira_suresi_ay")) if payload.get("kira_suresi_ay") not in (None, "") else None
+    except (TypeError, ValueError):
+        sure = None
+    try:
+        rev = int(payload.get("compute_rev") or 0)
+    except (TypeError, ValueError):
+        rev = 0
+    kap = str(payload.get("kapanis_tarihi") or "")[:10]
+    try:
+        ek = int(payload.get("kapanis_sonrasi_borc_ay") or 0)
+    except (TypeError, ValueError):
+        ek = 0
+    return (
+        f"{taban:.2f}|{nakit}|{nakit_t:.2f}|{banka_t:.2f}|{bas}|"
+        f"{artis_ay}|{sure}|{rev}|{kap}|{ek}"
+    )
+
+
+def _aylik_grid_freshness_parse_parts(fp: str) -> dict:
+    """T=/R=/P=/K= biçimindeki fingerprint'i parçala (bileşen içi | korunur)."""
+    out = {"T": "", "R": "", "P": "", "K": ""}
+    if not fp:
+        return out
+    s = str(fp)
+    try:
+        t_i = s.find("T=")
+        r_i = s.find("|R=")
+        p_i = s.find("|P=")
+        k_i = s.find("|K=")
+        if t_i == 0 and r_i > 0 and p_i > r_i and k_i > p_i:
+            out["T"] = s[2:r_i]
+            out["R"] = s[r_i + 3 : p_i]
+            out["P"] = s[p_i + 3 : k_i]
+            out["K"] = s[k_i + 3 :]
+    except Exception:
+        pass
+    return out
+
+
+def _aylik_grid_freshness_fingerprint(musteri_id) -> str:
+    """
+    Genişletilmiş freshness: T (tahsilat) + R (reel) + P (panel) + K (KYC özeti).
+    Aşama 0: yalnızca ölçüm; skip uygulanmaz.
+    """
+    try:
+        mid = int(musteri_id)
+    except (TypeError, ValueError):
+        return "T=|R=|P=|K="
+
+    try:
+        t_part = str(_aylik_tahsil_cache_imza(mid) or "")
+    except Exception:
+        t_part = "ERR"
+
+    try:
+        _ensure_musteri_reel_donem_tutar_table()
+        rrow = fetch_one(
+            """
+            SELECT
+                COUNT(*)::bigint AS cnt,
+                COALESCE(SUM(COALESCE(tutar_kdv_dahil, 0)), 0)::numeric AS toplam,
+                COALESCE(MAX(updated_at), TIMESTAMP '1970-01-01') AS mx
+            FROM musteri_reel_donem_tutar
+            WHERE musteri_id = %s
+            """,
+            (mid,),
+        ) or {}
+        try:
+            rc = int(rrow.get("cnt") or 0)
+        except (TypeError, ValueError):
+            rc = 0
+        try:
+            rt = round(float(rrow.get("toplam") or 0), 2)
+        except (TypeError, ValueError):
+            rt = 0.0
+        r_part = f"{rc}|{rt:.2f}|{_aylik_grid_freshness_ts_str(rrow.get('mx'))}"
+    except Exception:
+        r_part = "ERR"
+
+    try:
+        _ensure_tahsilat_panel_detay_table()
+        prow = fetch_one(
+            """
+            SELECT updated_at
+            FROM musteri_tahsilat_panel_detay
+            WHERE musteri_id = %s
+            """,
+            (mid,),
+        ) or {}
+        p_part = _aylik_grid_freshness_ts_str(prow.get("updated_at")) if prow else "none"
+    except Exception:
+        p_part = "ERR"
+
+    try:
+        kyc = fetch_one(
+            """
+            SELECT mk.sozlesme_tarihi, mk.sozlesme_bitis, mk.kira_suresi_ay, mk.aylik_kira, mk.kira_nakit,
+                   mk.kira_artis_tarihi, mk.kira_nakit_tutar, mk.kira_banka_tutar,
+                   c.kapanis_tarihi, c.kapanis_sonrasi_borc_ay, c.durum
+            FROM customers c
+            LEFT JOIN LATERAL (
+                SELECT sozlesme_tarihi, sozlesme_bitis, kira_suresi_ay, aylik_kira, kira_nakit,
+                       kira_artis_tarihi, kira_nakit_tutar, kira_banka_tutar
+                FROM musteri_kyc
+                WHERE musteri_id = c.id
+                ORDER BY id DESC
+                LIMIT 1
+            ) mk ON TRUE
+            WHERE c.id = %s
+            """,
+            (mid,),
+        )
+        k_part = _aylik_grid_freshness_k_from_kyc_row(kyc) if kyc else "none"
+    except Exception:
+        k_part = "ERR"
+
+    return f"T={t_part}|R={r_part}|P={p_part}|K={k_part}"
+
+
+def _aylik_grid_freshness_stored_from_payload(payload) -> tuple[str, dict]:
+    """
+    Saklı fingerprint: payload.freshness_imza varsa onu kullan;
+    yoksa T=tahsilat_imza + K=payload KYC snapshot; R/P=NA (henüz persist yok).
+    Dönüş: (fp_string, parts_meta: r_known/p_known bool)
+    """
+    meta = {"r_known": False, "p_known": False, "source": "synth"}
+    if not isinstance(payload, dict):
+        return "T=|R=NA|P=NA|K=", meta
+    raw = payload.get("freshness_imza")
+    if raw:
+        meta["source"] = "payload"
+        meta["r_known"] = True
+        meta["p_known"] = True
+        return str(raw), meta
+    t_part = str(payload.get("tahsilat_imza") or "")
+    k_part = _aylik_grid_freshness_k_from_payload(payload)
+    return f"T={t_part}|R=NA|P=NA|K={k_part}", meta
+
+
+def _aylik_grid_freshness_money_sig(payload) -> tuple:
+    """Ucuz alan imzası: refresh öncesi/sonrası 'değişir miydi' kıyası."""
+    if not isinstance(payload, dict):
+        return ()
+    rows = []
+    for a in payload.get("aylar") or []:
+        if not isinstance(a, dict):
+            continue
+        try:
+            brut = round(float(a.get("brut_tutar_kdv") or a.get("tutar_kdv_dahil") or 0), 2)
+        except (TypeError, ValueError):
+            brut = 0.0
+        try:
+            odenen = round(float(a.get("odenen_tutar_kdv") or 0), 2)
+        except (TypeError, ValueError):
+            odenen = 0.0
+        try:
+            kalan = round(float(a.get("kalan_tutar_kdv") or 0), 2)
+        except (TypeError, ValueError):
+            kalan = 0.0
+        rows.append(
+            (
+                str(a.get("ay_key") or f"{a.get('yil')}-{a.get('ay')}"),
+                brut,
+                odenen,
+                kalan,
+                bool(a.get("tahsil_edildi")),
+                bool(a.get("kismi_tahsilat")),
+            )
+        )
+    return (
+        str(payload.get("tahsilat_imza") or ""),
+        round(_aylik_grid_coerce_money(payload.get("taban_aylik_net")), 2),
+        str(payload.get("baslangic") or ""),
+        str(payload.get("bitis") or ""),
+        tuple(rows),
+    )
+
+
+def _aylik_grid_freshness_shadow_log_enabled() -> bool:
+    try:
+        if str(os.getenv("GRID_FRESHNESS_SHADOW_LOG") or "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        ):
+            return True
+    except Exception:
+        pass
+    try:
+        return str(request.args.get("debug_timing") or "").lower() in ("1", "true", "yes", "on")
+    except Exception:
+        return False
+
+
+def _aylik_grid_freshness_shadow_begin(musteri_id, payload, hit_kind: str) -> dict | None:
+    """Ölçüm başlangıcı (refresh ÖNCESİ). Hata → None."""
+    if not _aylik_grid_freshness_shadow_log_enabled():
+        return None
+    live = _aylik_grid_freshness_fingerprint(musteri_id)
+    stored, meta = _aylik_grid_freshness_stored_from_payload(payload)
+    live_p = _aylik_grid_freshness_parse_parts(live)
+    stor_p = _aylik_grid_freshness_parse_parts(stored)
+    t_same = live_p.get("T") == stor_p.get("T")
+    k_same = live_p.get("K") == stor_p.get("K")
+    if meta.get("r_known"):
+        r_same = live_p.get("R") == stor_p.get("R")
+    else:
+        r_same = None
+    if meta.get("p_known"):
+        p_same = live_p.get("P") == stor_p.get("P")
+    else:
+        p_same = None
+    # Tam would_skip: bilinen tüm bileşenler aynı; R/P henüz NA ise yalnızca T+K
+    if meta.get("r_known") and meta.get("p_known"):
+        would_skip = bool(t_same and r_same and p_same and k_same)
+    else:
+        would_skip = bool(t_same and k_same)
+    return {
+        "musteri_id": int(musteri_id),
+        "hit_kind": str(hit_kind or ""),
+        "live": live,
+        "stored": stored,
+        "stored_source": meta.get("source"),
+        "t_same": t_same,
+        "r_same": r_same,
+        "p_same": p_same,
+        "k_same": k_same,
+        "would_skip": would_skip,
+        "before_sig": _aylik_grid_freshness_money_sig(payload),
+    }
+
+
+def _aylik_grid_freshness_shadow_end(shadow: dict | None, after_payload, refresh_ms: float) -> None:
+    """Refresh sonrası log (print+flush). Ana yolu etkilemez."""
+    if not isinstance(shadow, dict):
+        return
+    after_sig = _aylik_grid_freshness_money_sig(after_payload)
+    payload_changed = after_sig != shadow.get("before_sig")
+    # would_skip True iken payload değiştiyse → false-positive adayı
+    fp_risk = bool(shadow.get("would_skip")) and payload_changed
+    print(
+        "[grid-freshness-shadow] mid=%s hit=%s would_skip=%s "
+        "t_same=%s r_same=%s p_same=%s k_same=%s "
+        "refresh_ms=%.1f payload_changed=%s fp_risk=%s src=%s"
+        % (
+            shadow.get("musteri_id"),
+            shadow.get("hit_kind"),
+            shadow.get("would_skip"),
+            shadow.get("t_same"),
+            shadow.get("r_same"),
+            shadow.get("p_same"),
+            shadow.get("k_same"),
+            float(refresh_ms or 0),
+            payload_changed,
+            fp_risk,
+            shadow.get("stored_source"),
+        ),
+        flush=True,
+    )
+    print(
+        "[grid-freshness-shadow] mid=%s live=%s"
+        % (shadow.get("musteri_id"), shadow.get("live")),
+        flush=True,
+    )
+    print(
+        "[grid-freshness-shadow] mid=%s stored=%s"
+        % (shadow.get("musteri_id"), shadow.get("stored")),
+        flush=True,
+    )
+
+
 def _aylik_remaining_brut_by_iso_from_kyc(kyc, tufe_map=None) -> dict[str, float]:
     """FIFO dağıtımı için ay başına sözleşme brüt borç (cache okumadan)."""
     remaining_by_iso: dict[str, float] = {}
@@ -10159,8 +10487,25 @@ def api_aylik_grid_cache():
                 if cache_gecerli and _aylik_grid_cache_horizon_stale(musteri_id, mem_hit[1]):
                     cache_gecerli = False
                 if cache_gecerli:
+                    # Aşama 0: davranış değişmez; yalnızca shadow ölçüm (opsiyonel log).
+                    _fresh_shadow = None
+                    try:
+                        _fresh_shadow = _aylik_grid_freshness_shadow_begin(
+                            musteri_id, mem_hit[1], "mem"
+                        )
+                    except Exception:
+                        _fresh_shadow = None
+                    _t_refresh0 = time.perf_counter()
                     mem_payload = _aylik_grid_cache_payload_tahsil_guncelle(musteri_id, mem_hit[1])
                     mem_payload = _aylik_grid_payload_reel_overlay_from_db(musteri_id, mem_payload)
+                    try:
+                        _aylik_grid_freshness_shadow_end(
+                            _fresh_shadow,
+                            mem_payload,
+                            (time.perf_counter() - _t_refresh0) * 1000.0,
+                        )
+                    except Exception:
+                        pass
                     try:
                         _aylik_grid_payload_mem[int(musteri_id)] = (time.time(), mem_payload)
                     except (TypeError, ValueError):
@@ -10189,8 +10534,25 @@ def api_aylik_grid_cache():
                 if cache_gecerli and _aylik_grid_cache_horizon_stale(musteri_id, cache_obj):
                     cache_gecerli = False
                 if cache_gecerli:
+                    # Aşama 0: davranış değişmez; yalnızca shadow ölçüm (opsiyonel log).
+                    _fresh_shadow = None
+                    try:
+                        _fresh_shadow = _aylik_grid_freshness_shadow_begin(
+                            musteri_id, cache_obj, "db"
+                        )
+                    except Exception:
+                        _fresh_shadow = None
+                    _t_refresh0 = time.perf_counter()
                     cache_obj = _aylik_grid_cache_payload_tahsil_guncelle(musteri_id, cache_obj)
                     cache_obj = _aylik_grid_payload_reel_overlay_from_db(musteri_id, cache_obj)
+                    try:
+                        _aylik_grid_freshness_shadow_end(
+                            _fresh_shadow,
+                            cache_obj,
+                            (time.perf_counter() - _t_refresh0) * 1000.0,
+                        )
+                    except Exception:
+                        pass
                     try:
                         _aylik_grid_payload_mem[int(musteri_id)] = (time.time(), cache_obj)
                     except (TypeError, ValueError):
@@ -10361,6 +10723,8 @@ def api_musteri_kart_bundle():
             grid_q["skip_match"] = "1"
         if force_grid:
             grid_q["force"] = "1"
+        if debug_timing:
+            grid_q["debug_timing"] = "1"
         out["grid"] = _call_view(
             "/giris/api/aylik-grid-cache",
             grid_q,
