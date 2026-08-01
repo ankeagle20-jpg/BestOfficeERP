@@ -2196,40 +2196,155 @@ def _aylik_grid_freshness_shadow_log_enabled() -> bool:
         return False
 
 
+def _aylik_grid_cache_skip_refresh_enabled() -> bool:
+    """GRID_CACHE_SKIP_REFRESH env — varsayılan KAPALI. Gerçek mem-only atlama."""
+    try:
+        return str(os.getenv("GRID_CACHE_SKIP_REFRESH") or "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        )
+    except Exception:
+        return False
+
+
+def _aylik_grid_freshness_should_skip(musteri_id, payload) -> tuple[bool, dict]:
+    """
+    Gerçek atlama kararı (katı):
+      - source != "payload" (synth) → False
+      - r_known/p_known False → False
+      - herhangi bir T/R/P/K eksik, NA, ERR, None → False
+      - SADECE dördü de biliniyor VE dördü de aynı → True
+    Bilmiyorum = her zaman güvenli tarafta kal (yenile).
+    """
+    info: dict = {
+        "musteri_id": None,
+        "would_skip": False,
+        "reason": "init",
+        "live": "",
+        "stored": "",
+        "stored_source": "synth",
+        "t_same": None,
+        "r_same": None,
+        "p_same": None,
+        "k_same": None,
+        "r_known": False,
+        "p_known": False,
+    }
+    try:
+        mid = int(musteri_id)
+        info["musteri_id"] = mid
+    except (TypeError, ValueError):
+        info["reason"] = "bad_mid"
+        return False, info
+    if not isinstance(payload, dict):
+        info["reason"] = "bad_payload"
+        return False, info
+
+    try:
+        live = _aylik_grid_freshness_fingerprint(mid)
+    except Exception:
+        info["reason"] = "live_fp_err"
+        return False, info
+    info["live"] = str(live or "")
+    if not live or "ERR" in str(live):
+        info["reason"] = "live_fp_err"
+        return False, info
+
+    try:
+        stored, meta = _aylik_grid_freshness_stored_from_payload(payload)
+    except Exception:
+        info["reason"] = "stored_fp_err"
+        return False, info
+    info["stored"] = str(stored or "")
+    info["stored_source"] = str((meta or {}).get("source") or "synth")
+    info["r_known"] = bool((meta or {}).get("r_known"))
+    info["p_known"] = bool((meta or {}).get("p_known"))
+
+    live_p = _aylik_grid_freshness_parse_parts(str(live))
+    stor_p = _aylik_grid_freshness_parse_parts(str(stored))
+
+    # Synth / bilinmeyen R-P → asla atlama (T+K yeter sayılmaz)
+    if info["stored_source"] != "payload":
+        info["t_same"] = live_p.get("T") == stor_p.get("T")
+        info["k_same"] = live_p.get("K") == stor_p.get("K")
+        info["r_same"] = None
+        info["p_same"] = None
+        info["reason"] = "synth"
+        return False, info
+    if not info["r_known"] or not info["p_known"]:
+        info["t_same"] = live_p.get("T") == stor_p.get("T")
+        info["k_same"] = live_p.get("K") == stor_p.get("K")
+        info["r_same"] = None
+        info["p_same"] = None
+        info["reason"] = "rp_unknown"
+        return False, info
+    if "R=NA" in str(stored) or "P=NA" in str(stored):
+        info["reason"] = "rp_na"
+        return False, info
+
+    for part in ("T", "R", "P", "K"):
+        lv = str(live_p.get(part) or "")
+        sv = str(stor_p.get(part) or "")
+        if not lv or not sv:
+            info["reason"] = f"missing_{part}"
+            return False, info
+        if "ERR" in lv or "ERR" in sv:
+            info["reason"] = f"err_{part}"
+            return False, info
+        if sv == "NA" or lv == "NA":
+            info["reason"] = f"na_{part}"
+            return False, info
+
+    t_same = live_p.get("T") == stor_p.get("T")
+    r_same = live_p.get("R") == stor_p.get("R")
+    p_same = live_p.get("P") == stor_p.get("P")
+    k_same = live_p.get("K") == stor_p.get("K")
+    info["t_same"] = bool(t_same)
+    info["r_same"] = bool(r_same)
+    info["p_same"] = bool(p_same)
+    info["k_same"] = bool(k_same)
+
+    if not (t_same and r_same and p_same and k_same):
+        reasons = []
+        if not t_same:
+            reasons.append("t_diff")
+        if not r_same:
+            reasons.append("r_diff")
+        if not p_same:
+            reasons.append("p_diff")
+        if not k_same:
+            reasons.append("k_diff")
+        info["reason"] = "+".join(reasons) if reasons else "diff"
+        info["would_skip"] = False
+        return False, info
+
+    info["reason"] = "all_same"
+    info["would_skip"] = True
+    return True, info
+
+
 def _aylik_grid_freshness_shadow_begin(musteri_id, payload, hit_kind: str) -> dict | None:
-    """Ölçüm başlangıcı (refresh ÖNCESİ). Hata → None."""
+    """Ölçüm başlangıcı (refresh ÖNCESİ). would_skip = katı should_skip ile aynı."""
     if not _aylik_grid_freshness_shadow_log_enabled():
         return None
-    live = _aylik_grid_freshness_fingerprint(musteri_id)
-    stored, meta = _aylik_grid_freshness_stored_from_payload(payload)
-    live_p = _aylik_grid_freshness_parse_parts(live)
-    stor_p = _aylik_grid_freshness_parse_parts(stored)
-    t_same = live_p.get("T") == stor_p.get("T")
-    k_same = live_p.get("K") == stor_p.get("K")
-    if meta.get("r_known"):
-        r_same = live_p.get("R") == stor_p.get("R")
-    else:
-        r_same = None
-    if meta.get("p_known"):
-        p_same = live_p.get("P") == stor_p.get("P")
-    else:
-        p_same = None
-    # Tam would_skip: bilinen tüm bileşenler aynı; R/P henüz NA ise yalnızca T+K
-    if meta.get("r_known") and meta.get("p_known"):
-        would_skip = bool(t_same and r_same and p_same and k_same)
-    else:
-        would_skip = bool(t_same and k_same)
+    try:
+        _skip, info = _aylik_grid_freshness_should_skip(musteri_id, payload)
+    except Exception:
+        return None
     return {
-        "musteri_id": int(musteri_id),
+        "musteri_id": int(info.get("musteri_id") or musteri_id or 0),
         "hit_kind": str(hit_kind or ""),
-        "live": live,
-        "stored": stored,
-        "stored_source": meta.get("source"),
-        "t_same": t_same,
-        "r_same": r_same,
-        "p_same": p_same,
-        "k_same": k_same,
-        "would_skip": would_skip,
+        "live": info.get("live") or "",
+        "stored": info.get("stored") or "",
+        "stored_source": info.get("stored_source") or "synth",
+        "t_same": info.get("t_same"),
+        "r_same": info.get("r_same"),
+        "p_same": info.get("p_same"),
+        "k_same": info.get("k_same"),
+        "would_skip": bool(_skip),
+        "skip_reason": info.get("reason"),
         "before_sig": _aylik_grid_freshness_money_sig(payload),
     }
 
@@ -10505,7 +10620,7 @@ def api_aylik_grid_cache():
                 if cache_gecerli and _aylik_grid_cache_horizon_stale(musteri_id, mem_hit[1]):
                     cache_gecerli = False
                 if cache_gecerli:
-                    # Aşama 0: davranış değişmez; yalnızca shadow ölçüm (opsiyonel log).
+                    # Shadow ölçüm (opsiyonel) + mem-only gerçek atlama (flag).
                     _fresh_shadow = None
                     try:
                         _fresh_shadow = _aylik_grid_freshness_shadow_begin(
@@ -10513,24 +10628,98 @@ def api_aylik_grid_cache():
                         )
                     except Exception:
                         _fresh_shadow = None
+                    _skip_flag = _aylik_grid_cache_skip_refresh_enabled()
+                    _did_skip = False
+                    _skip_info = None
                     _t_refresh0 = time.perf_counter()
+                    if _skip_flag:
+                        try:
+                            if isinstance(_fresh_shadow, dict):
+                                _did_skip = bool(_fresh_shadow.get("would_skip"))
+                                _skip_info = _fresh_shadow
+                            else:
+                                _did_skip, _skip_info = _aylik_grid_freshness_should_skip(
+                                    musteri_id, mem_hit[1]
+                                )
+                        except Exception:
+                            _did_skip = False
+                            _skip_info = {"reason": "skip_eval_err", "would_skip": False}
+                    if _did_skip:
+                        _refresh_ms = (time.perf_counter() - _t_refresh0) * 1000.0
+                        try:
+                            _reason = (
+                                (_skip_info or {}).get("skip_reason")
+                                or (_skip_info or {}).get("reason")
+                                or "all_same"
+                            )
+                            print(
+                                "[grid-skip] mid=%s skipped=True reason=%s refresh_ms=%.1f"
+                                % (musteri_id, _reason, float(_refresh_ms)),
+                                flush=True,
+                            )
+                        except Exception:
+                            pass
+                        try:
+                            _aylik_grid_freshness_shadow_end(
+                                _fresh_shadow, mem_hit[1], _refresh_ms
+                            )
+                        except Exception:
+                            pass
+                        try:
+                            _aylik_grid_payload_mem[int(musteri_id)] = (
+                                time.time(),
+                                mem_hit[1],
+                            )
+                        except (TypeError, ValueError):
+                            pass
+                        return _json_no_cache(
+                            {
+                                "ok": True,
+                                "cache": mem_hit[1],
+                                "cached": True,
+                                "mem": True,
+                            }
+                        )
                     mem_payload = _aylik_grid_cache_payload_tahsil_guncelle(musteri_id, mem_hit[1])
                     mem_payload = _aylik_grid_payload_reel_overlay_from_db(musteri_id, mem_payload)
-                    # Seçenek A: yalnızca shadow/debug açıkken tam FP damgası (mem; DB yok).
+                    # Isınma: flag veya shadow açıkken tam FP damgası (mem; DB yok).
                     try:
-                        if isinstance(_fresh_shadow, dict) and _fresh_shadow.get("live"):
+                        if _skip_flag or _aylik_grid_freshness_shadow_log_enabled():
+                            _fp_reuse = None
+                            if isinstance(_fresh_shadow, dict) and _fresh_shadow.get("live"):
+                                _fp_reuse = _fresh_shadow.get("live")
+                            elif isinstance(_skip_info, dict) and _skip_info.get("live"):
+                                _fp_reuse = _skip_info.get("live")
                             mem_payload = _aylik_grid_freshness_stamp(
-                                musteri_id, mem_payload, fp=_fresh_shadow.get("live")
+                                musteri_id, mem_payload, fp=_fp_reuse
                             )
-                        elif _aylik_grid_freshness_shadow_log_enabled():
-                            mem_payload = _aylik_grid_freshness_stamp(musteri_id, mem_payload)
                     except Exception:
                         pass
+                    _refresh_ms = (time.perf_counter() - _t_refresh0) * 1000.0
+                    if _skip_flag:
+                        try:
+                            _reason = (
+                                (_skip_info or {}).get("skip_reason")
+                                or (_skip_info or {}).get("reason")
+                                or (
+                                    (_fresh_shadow or {}).get("skip_reason")
+                                    if isinstance(_fresh_shadow, dict)
+                                    else None
+                                )
+                                or "refresh"
+                            )
+                            print(
+                                "[grid-skip] mid=%s skipped=False reason=%s refresh_ms=%.1f"
+                                % (musteri_id, _reason, float(_refresh_ms)),
+                                flush=True,
+                            )
+                        except Exception:
+                            pass
                     try:
                         _aylik_grid_freshness_shadow_end(
                             _fresh_shadow,
                             mem_payload,
-                            (time.perf_counter() - _t_refresh0) * 1000.0,
+                            _refresh_ms,
                         )
                     except Exception:
                         pass
@@ -10562,7 +10751,7 @@ def api_aylik_grid_cache():
                 if cache_gecerli and _aylik_grid_cache_horizon_stale(musteri_id, cache_obj):
                     cache_gecerli = False
                 if cache_gecerli:
-                    # Aşama 0: davranış değişmez; yalnızca shadow ölçüm (opsiyonel log).
+                    # DB-hit: Seçenek A — asla gerçek atlama yok; shadow + stamp (ısınma).
                     _fresh_shadow = None
                     try:
                         _fresh_shadow = _aylik_grid_freshness_shadow_begin(
@@ -10570,24 +10759,41 @@ def api_aylik_grid_cache():
                         )
                     except Exception:
                         _fresh_shadow = None
+                    _skip_flag = _aylik_grid_cache_skip_refresh_enabled()
                     _t_refresh0 = time.perf_counter()
                     cache_obj = _aylik_grid_cache_payload_tahsil_guncelle(musteri_id, cache_obj)
                     cache_obj = _aylik_grid_payload_reel_overlay_from_db(musteri_id, cache_obj)
-                    # Seçenek A: yalnızca shadow/debug açıkken tam FP damgası (mem; DB yok).
+                    # Isınma: flag veya shadow açıkken tam FP damgası (mem; DB yok).
                     try:
-                        if isinstance(_fresh_shadow, dict) and _fresh_shadow.get("live"):
+                        if _skip_flag or _aylik_grid_freshness_shadow_log_enabled():
+                            _fp_reuse = None
+                            if isinstance(_fresh_shadow, dict) and _fresh_shadow.get("live"):
+                                _fp_reuse = _fresh_shadow.get("live")
                             cache_obj = _aylik_grid_freshness_stamp(
-                                musteri_id, cache_obj, fp=_fresh_shadow.get("live")
+                                musteri_id, cache_obj, fp=_fp_reuse
                             )
-                        elif _aylik_grid_freshness_shadow_log_enabled():
-                            cache_obj = _aylik_grid_freshness_stamp(musteri_id, cache_obj)
                     except Exception:
                         pass
+                    _refresh_ms = (time.perf_counter() - _t_refresh0) * 1000.0
+                    if _skip_flag:
+                        try:
+                            _reason = (
+                                (_fresh_shadow or {}).get("skip_reason")
+                                if isinstance(_fresh_shadow, dict)
+                                else None
+                            ) or "db_hit_no_skip"
+                            print(
+                                "[grid-skip] mid=%s skipped=False reason=%s refresh_ms=%.1f"
+                                % (musteri_id, _reason, float(_refresh_ms)),
+                                flush=True,
+                            )
+                        except Exception:
+                            pass
                     try:
                         _aylik_grid_freshness_shadow_end(
                             _fresh_shadow,
                             cache_obj,
-                            (time.perf_counter() - _t_refresh0) * 1000.0,
+                            _refresh_ms,
                         )
                     except Exception:
                         pass
