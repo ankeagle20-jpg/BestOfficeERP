@@ -2102,16 +2102,34 @@ def _aylik_grid_freshness_fingerprint(musteri_id) -> str:
     return f"T={t_part}|R={r_part}|P={p_part}|K={k_part}"
 
 
+def _aylik_grid_freshness_stamp(musteri_id, payload, fp=None):
+    """
+    Refresh sonrası tam freshness fingerprint'i payload'a yazar (Seçenek A: mem).
+    Hata olursa payload'a dokunmaz. fp verilirse yeniden SQL çalıştırmaz.
+    """
+    try:
+        if not isinstance(payload, dict):
+            return payload
+        if fp is None:
+            fp = _aylik_grid_freshness_fingerprint(musteri_id)
+        if fp is None or str(fp).strip() == "":
+            return payload
+        payload["freshness_fingerprint"] = str(fp)
+    except Exception:
+        pass
+    return payload
+
+
 def _aylik_grid_freshness_stored_from_payload(payload) -> tuple[str, dict]:
     """
-    Saklı fingerprint: payload.freshness_imza varsa onu kullan;
-    yoksa T=tahsilat_imza + K=payload KYC snapshot; R/P=NA (henüz persist yok).
+    Saklı fingerprint: payload.freshness_fingerprint (tam T+R+P+K) varsa onu kullan;
+    yoksa T=tahsilat_imza + K=payload KYC snapshot; R/P=NA (eski/synth).
     Dönüş: (fp_string, parts_meta: r_known/p_known bool)
     """
     meta = {"r_known": False, "p_known": False, "source": "synth"}
     if not isinstance(payload, dict):
         return "T=|R=NA|P=NA|K=", meta
-    raw = payload.get("freshness_imza")
+    raw = payload.get("freshness_fingerprint") or payload.get("freshness_imza")
     if raw:
         meta["source"] = "payload"
         meta["r_known"] = True
@@ -10498,6 +10516,16 @@ def api_aylik_grid_cache():
                     _t_refresh0 = time.perf_counter()
                     mem_payload = _aylik_grid_cache_payload_tahsil_guncelle(musteri_id, mem_hit[1])
                     mem_payload = _aylik_grid_payload_reel_overlay_from_db(musteri_id, mem_payload)
+                    # Seçenek A: yalnızca shadow/debug açıkken tam FP damgası (mem; DB yok).
+                    try:
+                        if isinstance(_fresh_shadow, dict) and _fresh_shadow.get("live"):
+                            mem_payload = _aylik_grid_freshness_stamp(
+                                musteri_id, mem_payload, fp=_fresh_shadow.get("live")
+                            )
+                        elif _aylik_grid_freshness_shadow_log_enabled():
+                            mem_payload = _aylik_grid_freshness_stamp(musteri_id, mem_payload)
+                    except Exception:
+                        pass
                     try:
                         _aylik_grid_freshness_shadow_end(
                             _fresh_shadow,
@@ -10545,6 +10573,16 @@ def api_aylik_grid_cache():
                     _t_refresh0 = time.perf_counter()
                     cache_obj = _aylik_grid_cache_payload_tahsil_guncelle(musteri_id, cache_obj)
                     cache_obj = _aylik_grid_payload_reel_overlay_from_db(musteri_id, cache_obj)
+                    # Seçenek A: yalnızca shadow/debug açıkken tam FP damgası (mem; DB yok).
+                    try:
+                        if isinstance(_fresh_shadow, dict) and _fresh_shadow.get("live"):
+                            cache_obj = _aylik_grid_freshness_stamp(
+                                musteri_id, cache_obj, fp=_fresh_shadow.get("live")
+                            )
+                        elif _aylik_grid_freshness_shadow_log_enabled():
+                            cache_obj = _aylik_grid_freshness_stamp(musteri_id, cache_obj)
+                    except Exception:
+                        pass
                     try:
                         _aylik_grid_freshness_shadow_end(
                             _fresh_shadow,
