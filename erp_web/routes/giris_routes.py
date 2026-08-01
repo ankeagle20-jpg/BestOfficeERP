@@ -10261,6 +10261,7 @@ def api_musteri_kart_bundle():
       - skip_match → yalnızca grid alt yoluna
       - force → yalnızca grid alt yoluna (musteri detay cache'ine force YOK)
       - odemeler → musteri detayına (varsayılan 1)
+      - debug_timing → 1/true/yes/on ise alt-adım süreleri log + timings_ms
 
     Kısmi başarı: her alt çağrı ayrı try/except; biri düşse diğerleri döner.
     Üst ok=true en az bir alt ok=true ise.
@@ -10285,6 +10286,7 @@ def api_musteri_kart_bundle():
     skip_match = str(request.args.get("skip_match") or "").lower() in ("1", "true", "yes", "on")
     force_grid = str(request.args.get("force") or "").lower() in ("1", "true", "yes", "on")
     odemeler = str(request.args.get("odemeler", "1") or "1")
+    debug_timing = str(request.args.get("debug_timing") or "").lower() in ("1", "true", "yes", "on")
 
     def _unwrap(fn):
         return getattr(fn, "__wrapped__", fn)
@@ -10334,8 +10336,11 @@ def api_musteri_kart_bundle():
         "grid": {"ok": False, "mesaj": "çalıştırılmadı"},
         "reel": {"ok": False, "mesaj": "çalıştırılmadı"},
     }
+    timings_ms = {"musteri": 0.0, "grid": 0.0, "tahsil_durum": 0.0, "reel": 0.0, "total": 0.0}
+    t_bundle0 = time.perf_counter()
 
     # 1) musteri — force uygulanmaz
+    _t0 = time.perf_counter()
     try:
         out["musteri"] = _call_view(
             f"/giris/api/musteri/{mid}",
@@ -10345,8 +10350,11 @@ def api_musteri_kart_bundle():
         )
     except Exception as ex:
         out["musteri"] = {"ok": False, "mesaj": str(ex) or "musteri hata"}
+    finally:
+        timings_ms["musteri"] = round((time.perf_counter() - _t0) * 1000, 1)
 
     # 2) grid — skip_match + force yalnızca burada (tahsil_durum'dan önce; Aşama 2a)
+    _t0 = time.perf_counter()
     try:
         grid_q = {"musteri_id": mid}
         if skip_match:
@@ -10360,8 +10368,11 @@ def api_musteri_kart_bundle():
         )
     except Exception as ex:
         out["grid"] = {"ok": False, "mesaj": str(ex) or "grid hata"}
+    finally:
+        timings_ms["grid"] = round((time.perf_counter() - _t0) * 1000, 1)
 
     # 3) tahsil_durum — Aşama 2b: grid cache başarılıysa paylaş (yoksa eski bağımsız yol)
+    _t0 = time.perf_counter()
     try:
         tahsil_kw = {}
         gpart = out.get("grid")
@@ -10379,8 +10390,11 @@ def api_musteri_kart_bundle():
         )
     except Exception as ex:
         out["tahsil_durum"] = {"ok": False, "mesaj": str(ex) or "tahsil_durum hata"}
+    finally:
+        timings_ms["tahsil_durum"] = round((time.perf_counter() - _t0) * 1000, 1)
 
     # 4) reel
+    _t0 = time.perf_counter()
     try:
         out["reel"] = _call_view(
             "/giris/api/reel-donem-tutarlar",
@@ -10389,11 +10403,46 @@ def api_musteri_kart_bundle():
         )
     except Exception as ex:
         out["reel"] = {"ok": False, "mesaj": str(ex) or "reel hata"}
+    finally:
+        timings_ms["reel"] = round((time.perf_counter() - _t0) * 1000, 1)
 
     out["ok"] = any(
         isinstance(out[k], dict) and bool(out[k].get("ok"))
         for k in ("musteri", "tahsil_durum", "grid", "reel")
     )
+    timings_ms["total"] = round((time.perf_counter() - t_bundle0) * 1000, 1)
+    if debug_timing:
+        try:
+            logging.getLogger(__name__).info(
+                "bundle_timing mid=%s musteri=%.1f grid=%.1f tahsil_durum=%.1f reel=%.1f total=%.1f",
+                mid,
+                float(timings_ms["musteri"]),
+                float(timings_ms["grid"]),
+                float(timings_ms["tahsil_durum"]),
+                float(timings_ms["reel"]),
+                float(timings_ms["total"]),
+            )
+            print(
+                "bundle_timing mid=%s musteri=%.1f grid=%.1f tahsil_durum=%.1f reel=%.1f total=%.1f"
+                % (
+                    mid,
+                    float(timings_ms["musteri"]),
+                    float(timings_ms["grid"]),
+                    float(timings_ms["tahsil_durum"]),
+                    float(timings_ms["reel"]),
+                    float(timings_ms["total"]),
+                ),
+                flush=True,
+            )
+            out["timings_ms"] = {
+                "musteri": timings_ms["musteri"],
+                "grid": timings_ms["grid"],
+                "tahsil_durum": timings_ms["tahsil_durum"],
+                "reel": timings_ms["reel"],
+                "total": timings_ms["total"],
+            }
+        except Exception:
+            pass
     return _json_no_cache(out)
 
 
