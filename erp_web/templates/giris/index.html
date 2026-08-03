@@ -23946,10 +23946,10 @@ function girisApiMusteriDurumSinifi(m) {
     return d === 'pasif' ? 'sirket-durum-etiket sirket-durum-etiket--pasif' : 'sirket-durum-etiket sirket-durum-etiket--aktif';
 }
 
-/* Müşteri kartı için hover-prefetch: kullanıcı dropdown'da bir satıra geldiğinde
-   arka planda /api/musteri ve /api/aylik-grid-cache sorularını başlatırız.
-   Tıkladığında cache'den anında dolduğu için sayfa salisede açılır. */
+/* Müşteri kartı için hover-prefetch (A1): sadece hafif /api/musteri.
+   Grid/tahsil/reel tıklamada musteri-kart-bundle ile gelir; hover'da tetiklenmez. */
 function girisMusteriPrefetch(mid) {
+    /* A1 hover-dedupe: sadece hafif musteri; grid/tahsil/reel tıklamada bundle ile gelir. */
     if (mid == null || mid === '') return;
     if (!window.__girisMusteriPrefetched) window.__girisMusteriPrefetched = new Set();
     var k = String(mid);
@@ -23958,9 +23958,6 @@ function girisMusteriPrefetch(mid) {
     try {
         if (typeof girisFetchJsonCached === 'function') {
             girisFetchJsonCached('/giris/api/musteri/' + k, { ttlMs: 60000, persistMs: 300000 });
-            girisFetchJsonCached('/giris/api/aylik-grid-cache?musteri_id=' + encodeURIComponent(k) + '&skip_match=1', { ttlMs: 60000, persistMs: 300000 });
-            girisFetchJsonCached('/giris/api/aylik-tahsil-durum?musteri_id=' + encodeURIComponent(k), { ttlMs: 30000, persistMs: 180000 });
-            girisFetchJsonCached('/giris/api/reel-donem-tutarlar?musteri_id=' + encodeURIComponent(k), { ttlMs: 60000, persistMs: 300000 });
         }
     } catch (_pfE) {}
 }
