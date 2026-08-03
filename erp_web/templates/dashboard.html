@@ -207,6 +207,22 @@
   color: #4fc3f7;
   border-color: #4fc3f7;
 }
+.dash-kisayol-badge {
+  position: absolute;
+  left: 2px;
+  top: 2px;
+  z-index: 5;
+  font-size: 8px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 3px;
+  background: #0d47a1;
+  border: 1px solid #4fc3f7;
+  color: #e0f7fa;
+  font-weight: 600;
+  pointer-events: none;
+  letter-spacing: 0.02em;
+}
 .dash-buttons-row {
   display: flex;
   flex-direction: row;
@@ -781,8 +797,20 @@
       <label style="color:#b0bec5;font-size:12px;display:block;margin-bottom:4px;">Link (URL)</label>
       <input type="text" id="dash-kisayol-url-input" style="width:100%;box-sizing:border-box;padding:8px;margin-bottom:12px;background:#0f2537;border:1px solid #2d4060;border-radius:6px;color:#e0f7fa;">
     </div>
+    <div id="dash-kisayol-kapsam-wrap" style="margin-bottom:12px;">
+      <label style="color:#b0bec5;font-size:12px;display:block;margin-bottom:6px;">Kayıt kapsamı</label>
+      <label id="dash-kisayol-kapsam-global-label" style="color:#e0f7fa;font-size:12px;display:flex;align-items:center;gap:6px;margin-bottom:4px;cursor:pointer;">
+        <input type="radio" name="dash-kisayol-kapsam" id="dash-kisayol-kapsam-global" value="global">
+        Herkes için (Global)
+      </label>
+      <label style="color:#e0f7fa;font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer;">
+        <input type="radio" name="dash-kisayol-kapsam" id="dash-kisayol-kapsam-kisisel" value="kisisel" checked>
+        Sadece benim için (Kişisel)
+      </label>
+    </div>
     <div id="dash-kisayol-hata" style="color:#ef4444;font-size:12px;margin-bottom:8px;display:none;"></div>
-    <div style="display:flex;gap:10px;justify-content:flex-end;">
+    <div style="display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;">
+      <button type="button" id="dash-kisayol-varsayilan" class="btn-filter" style="display:none;margin-right:auto;">Varsayılana Dön</button>
       <button type="button" id="dash-kisayol-vazgec" class="btn-filter">Vazgeç</button>
       <button type="button" id="dash-kisayol-kaydet" class="tahsilat-btn-kaydet">Kaydet</button>
     </div>
@@ -923,10 +951,13 @@
     });
   }
 
+  window.__dashKisayolIsAdmin = {{ 'true' if current_user.is_authenticated and current_user.role == 'admin' else 'false' }};
+
   function dashKisayolRenderTile(k) {
     var wrap = document.createElement('div');
     wrap.className = 'dash-kisayol-wrap';
     wrap.setAttribute('data-slot-key', k.slot_key);
+    if (k.kisilestirilmis) wrap.setAttribute('data-kisilestirilmis', '1');
 
     var isLink = !!k.url;
     var tag = isLink ? 'a' : 'button';
@@ -962,6 +993,13 @@
 
     wrap.appendChild(el);
     wrap.appendChild(editBtn);
+    if (k.kisilestirilmis) {
+      var badge = document.createElement('span');
+      badge.className = 'dash-kisayol-badge';
+      badge.textContent = 'Kişisel';
+      badge.title = 'Bu kısayol kişisel ayarınızla özelleştirilmiş';
+      wrap.appendChild(badge);
+    }
     return wrap;
   }
 
@@ -1004,6 +1042,26 @@
     if (urlWrap) urlWrap.style.display = (k.slot_key === 'geri_donus') ? 'none' : 'block';
     var hataEl = document.getElementById('dash-kisayol-hata');
     if (hataEl) { hataEl.style.display = 'none'; hataEl.textContent = ''; }
+
+    var kapsamWrap = document.getElementById('dash-kisayol-kapsam-wrap');
+    var globalLabel = document.getElementById('dash-kisayol-kapsam-global-label');
+    var globalRadio = document.getElementById('dash-kisayol-kapsam-global');
+    var kisiselRadio = document.getElementById('dash-kisayol-kapsam-kisisel');
+    if (kapsamWrap) kapsamWrap.style.display = 'block';
+    if (__dashKisayolIsAdmin) {
+      if (globalLabel) globalLabel.style.display = 'flex';
+      if (kisiselRadio) kisiselRadio.checked = true;
+      if (globalRadio) globalRadio.checked = false;
+    } else {
+      if (globalLabel) globalLabel.style.display = 'none';
+      if (globalRadio) globalRadio.checked = false;
+      if (kisiselRadio) kisiselRadio.checked = true;
+    }
+
+    var varsayilanBtn = document.getElementById('dash-kisayol-varsayilan');
+    if (varsayilanBtn) {
+      varsayilanBtn.style.display = k.kisilestirilmis ? 'inline-block' : 'none';
+    }
     document.getElementById('dash-kisayol-modal').style.display = 'flex';
   }
 
@@ -1028,11 +1086,43 @@
       url: isGeriDonus ? null : urlInput,
       icon: __dashKisayolDuzenlenen.icon
     };
-    fetch('/dashboard/api/kisayol-guncelle', {
+    var kapsamGlobal = document.getElementById('dash-kisayol-kapsam-global');
+    var isGlobal = !!(__dashKisayolIsAdmin && kapsamGlobal && kapsamGlobal.checked);
+    var endpoint = isGlobal
+      ? '/dashboard/api/kisayol-guncelle'
+      : '/dashboard/api/kisayol-kisisel-guncelle';
+    fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'same-origin',
       body: JSON.stringify(body)
+    })
+    .then(function (r) { return r.json().then(function (d) { return { status: r.status, d: d }; }); })
+    .then(function (res) {
+      var d = res.d || {};
+      if (d.ok) {
+        dashKisayolDuzenleKapat();
+        dashKisayollariYukle();
+      } else {
+        if (hataEl) {
+          hataEl.textContent = d.mesaj || (res.status === 403 ? 'Bu işlem için yetkiniz yok.' : 'Kaydedilemedi.');
+          hataEl.style.display = 'block';
+        }
+      }
+    })
+    .catch(function (e) {
+      if (hataEl) { hataEl.textContent = 'Bağlantı hatası.'; hataEl.style.display = 'block'; }
+    });
+  }
+
+  function dashKisayolVarsayilanaDon() {
+    if (!__dashKisayolDuzenlenen) return;
+    var hataEl = document.getElementById('dash-kisayol-hata');
+    fetch('/dashboard/api/kisayol-varsayilana-don', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ slot_key: __dashKisayolDuzenlenen.slot_key })
     })
     .then(function (r) { return r.json(); })
     .then(function (d) {
@@ -1040,20 +1130,23 @@
         dashKisayolDuzenleKapat();
         dashKisayollariYukle();
       } else {
-        if (hataEl) { hataEl.textContent = d.mesaj || 'Kaydedilemedi.'; hataEl.style.display = 'block'; }
+        if (hataEl) { hataEl.textContent = d.mesaj || 'Sıfırlanamadı.'; hataEl.style.display = 'block'; }
       }
     })
     .catch(function (e) {
-      if (hataEl) { hataEl.textContent = 'Hata: ' + e.message; hataEl.style.display = 'block'; }
+      if (hataEl) { hataEl.textContent = 'Bağlantı hatası.'; hataEl.style.display = 'block'; }
     });
   }
+
 
   document.addEventListener('DOMContentLoaded', dashKisayollariYukle);
   document.addEventListener('DOMContentLoaded', function () {
     var vazgecBtn = document.getElementById('dash-kisayol-vazgec');
     var kaydetBtn = document.getElementById('dash-kisayol-kaydet');
+    var varsayilanBtn = document.getElementById('dash-kisayol-varsayilan');
     if (vazgecBtn) vazgecBtn.addEventListener('click', dashKisayolDuzenleKapat);
     if (kaydetBtn) kaydetBtn.addEventListener('click', dashKisayolKaydet);
+    if (varsayilanBtn) varsayilanBtn.addEventListener('click', dashKisayolVarsayilanaDon);
   });
 
   document.querySelectorAll('.btn-filter').forEach(function(btn) {
