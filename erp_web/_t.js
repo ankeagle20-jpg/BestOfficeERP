@@ -648,19 +648,7 @@ function sozlesmelerAylikGridVeriSonBoyamaTail(midNav, selToken, cacheForKismi) 
         }
         if (typeof sozlesmeAylikSecimOzetGuncelle === 'function') sozlesmeAylikSecimOzetGuncelle();
         if (typeof sozlesmelerAylikSecilebilirlikYenile === 'function') sozlesmelerAylikSecilebilirlikYenile();
-        if (typeof cariEkstreYukle === 'function' && String(cariEkstreMusteriIdSec()) === String(midNav)) {
-            var __ekMid = String(midNav);
-            try {
-                if (window.__cariEkstreHorizonMid !== __ekMid) {
-                    window.__cariEkstreHorizonMid = __ekMid;
-                    window.__cariEkstreBitisKullaniciDokundu = false;
-                }
-            } catch (_eHorMid) {}
-            requestAnimationFrame(function () {
-                if (String(selectedId) !== __ekMid) return;
-                try { cariEkstreYukle({ sessiz: true, dbEsas: true, otomatikVarsayilan: true }); } catch (_eEkSon) {}
-            });
-        }
+        /* Ekstre: selectMusteri pMusteri.then erken tetikler (Aşama 1 b′); burada çift çağrı yok. */
     } catch (_eSonBoy) {}
     var midK = String(midNav);
     function _sonDuzeltGecikmeli() {
@@ -18102,6 +18090,8 @@ function selectMusteri(id) {
         /* Aşama 1b: 4 ayrı endpoint yerine tek bundle; SonBoyama settled formatı korunur. */
         var bundleUrl = '/giris/api/musteri-kart-bundle?musteri_id=' + encodeURIComponent(midNav) + '&skip_match=1';
         var pBundle = girisFetchJsonCached(bundleUrl, { ttlMs: 0, persistMs: 0, swr: false });
+        /* Aşama 1 b′: hafif musteri isteği bundle ile paralel — form+ekstre grid beklemeden. */
+        var pMusteri = girisFetchJsonCached('/giris/api/musteri/' + midNav, { ttlMs: 60000, persistMs: 300000, swr: false });
         sozlesmeAylikBorclananMusteriDegistir(midNav);
         window.__sozlesmelerAylikYilFiltre = { hepsi: true, yillar: [] };
         window.__sozlesmelerAylikYilSig = null;
@@ -18113,6 +18103,18 @@ function selectMusteri(id) {
             if (part && part.ok) return { status: 'fulfilled', value: part };
             return { status: 'rejected', reason: (part && part.mesaj) ? part.mesaj : 'bundle_part_failed' };
         }
+        pMusteri.then(function (res) {
+            if (!__selStillCurrent()) return;
+            girisSonMusteriDetayHafifYukleme = false;
+            if (res && res.ok && res.musteri) fillActiveTab(res.musteri);
+            else if (musteri) fillActiveTab(musteri);
+            if (typeof cariEkstreYukle === 'function' && String(cariEkstreMusteriIdSec()) === String(midNav)) {
+                try { cariEkstreYukle({ sessiz: true, dbEsas: true, otomatikVarsayilan: true }); } catch (_eEkEarly) {}
+            }
+        }).catch(function () {
+            if (!__selStillCurrent()) return;
+            if (musteri) fillActiveTab(musteri);
+        });
         pBundle.then(function (bundle) {
             if (!__selStillCurrent()) return;
             var mPart = (bundle && bundle.musteri) ? bundle.musteri : null;
