@@ -331,6 +331,16 @@ function girisTabIndexFromParam(raw) {
 }
 
 /** Sekme değişince ?tab=<key> yaz; mid varsa koru, selectedId varsa mid güncelle (silme yok). */
+/** mid gerektirmeyen (bağımsız) Giriş sekmeleri — bu sekmelerde URL mid silinir */
+var GIRIS_MID_BAGIMSIZ_TAB_KEYLERI = {
+    musteriler: true,
+    randevu: true,
+    grup: true,
+    musteriler_2: true,
+    potansiyel: true,
+    whatsapp: true
+};
+
 function girisStandaloneTabQueryGuncelle(index) {
     try {
         if (window.parent !== window.self) return;
@@ -342,16 +352,24 @@ function girisStandaloneTabQueryGuncelle(index) {
             p.set('tab', key);
             changed = true;
         }
-        var midN = null;
-        try {
-            if (typeof selectedId !== 'undefined' && selectedId != null) {
-                var sn = parseInt(selectedId, 10);
-                if (!isNaN(sn) && sn > 0) midN = sn;
+        var midBagimsiz = !!GIRIS_MID_BAGIMSIZ_TAB_KEYLERI[key];
+        if (midBagimsiz) {
+            if (p.has('mid')) {
+                p.delete('mid');
+                changed = true;
             }
-        } catch (eMid) {}
-        if (midN != null && p.get('mid') !== String(midN)) {
-            p.set('mid', String(midN));
-            changed = true;
+        } else {
+            var midN = null;
+            try {
+                if (typeof selectedId !== 'undefined' && selectedId != null) {
+                    var sn = parseInt(selectedId, 10);
+                    if (!isNaN(sn) && sn > 0) midN = sn;
+                }
+            } catch (eMid) {}
+            if (midN != null && p.get('mid') !== String(midN)) {
+                p.set('mid', String(midN));
+                changed = true;
+            }
         }
         if (!changed) return;
         var path = window.location.pathname || '/giris/';
