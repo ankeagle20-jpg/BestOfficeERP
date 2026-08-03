@@ -73,6 +73,15 @@
   justify-content: center;
 }
 .dash-card:hover { box-shadow: 0 0 0 1px #4fc3f7; }
+a.dash-stat-card {
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+}
+a.dash-stat-card:hover { box-shadow: 0 0 0 1px #4fc3f7; }
+.dash-stat-wrap {
+  min-width: 0;
+}
 /* Kart boyutundaki filtre butonları (Tahsilat/TÜFE/Sözleşme kartlarının altında) */
 .dash-card-btn {
   cursor: pointer;
@@ -645,37 +654,53 @@
       <div class="dash-cards-and-filters">
         <div class="dash-cards-and-filters-top">
         <div class="dash-cards">
-        <div class="dash-card">
-          <div class="dash-card-title">📦 Bugün Gelen Kargolar</div>
-          <div class="dash-card-value cyan" id="stat-bugun-kargo">{{ bugun_kargo_say }}</div>
+        <div class="dash-kisayol-wrap dash-stat-wrap" data-slot-key="stat_bugun_kargo">
+          <a class="dash-card dash-stat-card" href="/dashboard/?filtre=kargo">
+            <div class="dash-card-title">📦 Bugün Gelen Kargolar</div>
+            <div class="dash-card-value cyan" id="stat-bugun-kargo">{{ bugun_kargo_say }}</div>
+          </a>
         </div>
-        <div class="dash-card">
-          <div class="dash-card-title">💰 Geciken Toplam Alacak</div>
-          <div class="dash-card-value red" id="stat-geciken">₺ {{ "{:,.0f}".format(geciken_toplam) }}</div>
+        <div class="dash-kisayol-wrap dash-stat-wrap" data-slot-key="stat_geciken_toplam">
+          <a class="dash-card dash-stat-card" href="/dashboard/?filtre=kritik">
+            <div class="dash-card-title">💰 Geciken Toplam Alacak</div>
+            <div class="dash-card-value red" id="stat-geciken">₺ {{ "{:,.0f}".format(geciken_toplam) }}</div>
+          </a>
         </div>
-        <div class="dash-card">
-          <div class="dash-card-title">⚠ Kritik Geciken (30+ gün)</div>
-          <div class="dash-card-value red" id="stat-kritik">{{ kritik_geciken_say }}</div>
+        <div class="dash-kisayol-wrap dash-stat-wrap" data-slot-key="stat_kritik">
+          <a class="dash-card dash-stat-card" href="/dashboard/?filtre=kritik">
+            <div class="dash-card-title">⚠ Kritik Geciken (30+ gün)</div>
+            <div class="dash-card-value red" id="stat-kritik">{{ kritik_geciken_say }}</div>
+          </a>
         </div>
-        <div class="dash-card">
-          <div class="dash-card-title">⏳ Yakın Geciken (1–30 gün)</div>
-          <div class="dash-card-value yellow" id="stat-yakin">{{ yakin_geciken_say }}</div>
+        <div class="dash-kisayol-wrap dash-stat-wrap" data-slot-key="stat_yakin">
+          <a class="dash-card dash-stat-card" href="/dashboard/?filtre=yakin">
+            <div class="dash-card-title">⏳ Yakın Geciken (1–30 gün)</div>
+            <div class="dash-card-value yellow" id="stat-yakin">{{ yakin_geciken_say }}</div>
+          </a>
         </div>
-        <div class="dash-card">
-          <div class="dash-card-title">✅ Bugün Beklenen Tahsilat</div>
-          <div class="dash-card-value {% if bugun_tahsilat > 0 %}red{% else %}green{% endif %}" id="stat-tahsilat">₺ {{ "{:,.0f}".format(bugun_tahsilat) }}</div>
+        <div class="dash-kisayol-wrap dash-stat-wrap" data-slot-key="stat_bugun_tahsilat">
+          <a class="dash-card dash-stat-card" href="/tahsilat/">
+            <div class="dash-card-title">✅ Bugün Beklenen Tahsilat</div>
+            <div class="dash-card-value {% if bugun_tahsilat > 0 %}red{% else %}green{% endif %}" id="stat-tahsilat">₺ {{ "{:,.0f}".format(bugun_tahsilat) }}</div>
+          </a>
         </div>
-        <div class="dash-card">
-          <div class="dash-card-title">📈 TÜFE Güncel / Oran</div>
-          <div class="dash-card-value {% if tufe_oran > 50 %}red{% else %}cyan{% endif %}" id="stat-tufe">% {{ "{:.2f}".format(tufe_oran) }}</div>
+        <div class="dash-kisayol-wrap dash-stat-wrap" data-slot-key="stat_tufe">
+          <a class="dash-card dash-stat-card" href="/tufe/">
+            <div class="dash-card-title">📈 TÜFE Güncel / Oran</div>
+            <div class="dash-card-value {% if tufe_oran > 50 %}red{% else %}cyan{% endif %}" id="stat-tufe">% {{ "{:.2f}".format(tufe_oran) }}</div>
+          </a>
         </div>
-        <div class="dash-card">
-          <div class="dash-card-title">📅 Sözleşmesi Bitecekler</div>
-          <div class="dash-card-value yellow" id="stat-sozlesme">{{ sozlesme_bitecek_say }}</div>
+        <div class="dash-kisayol-wrap dash-stat-wrap" data-slot-key="stat_sozlesme">
+          <a class="dash-card dash-stat-card" href="/dashboard/?filtre=sozlesme">
+            <div class="dash-card-title">📅 Sözleşmesi Bitecekler</div>
+            <div class="dash-card-value yellow" id="stat-sozlesme">{{ sozlesme_bitecek_say }}</div>
+          </a>
         </div>
-        <div class="dash-card">
-          <div class="dash-card-title">🏢 Boş Ofis</div>
-          <div class="dash-card-value cyan" id="stat-bos">{{ bos_ofis_say }} <small style="font-size:9px;color:#78909c;">(Hazır: {{ bos_hazir }}, Sanal: {{ bos_sanal }})</small></div>
+        <div class="dash-kisayol-wrap dash-stat-wrap" data-slot-key="stat_bos">
+          <a class="dash-card dash-stat-card" href="/dashboard/?filtre=bos">
+            <div class="dash-card-title">🏢 Boş Ofis</div>
+            <div class="dash-card-value cyan" id="stat-bos">{{ bos_ofis_say }} <small style="font-size:9px;color:#78909c;">(Hazır: {{ bos_hazir }}, Sanal: {{ bos_sanal }})</small></div>
+          </a>
         </div>
         <!-- 3 filtre butonu: yukarıdaki 3 kartın (Tahsilat, TÜFE, Sözleşmesi Bitecekler) altında, aynı boyutta -->
         <button type="button" class="dash-card dash-card-btn btn-filter" data-filtre="yakin"><span class="filter-icon"><i class="fa fa-hourglass-half"></i></span><span class="filter-label">Yakın Gecikme</span></button>
@@ -1003,6 +1028,53 @@
     return wrap;
   }
 
+  function dashStatKartBagula(k) {
+    var wrap = document.querySelector('.dash-stat-wrap[data-slot-key="' + k.slot_key + '"]');
+    if (!wrap) return;
+    wrap.setAttribute('data-slot-key', k.slot_key);
+    if (k.kisilestirilmis) wrap.setAttribute('data-kisilestirilmis', '1');
+    else wrap.removeAttribute('data-kisilestirilmis');
+
+    var link = wrap.querySelector('a.dash-stat-card');
+    if (link) {
+      if (k.url) {
+        link.setAttribute('href', k.url);
+        link.style.pointerEvents = '';
+        link.style.cursor = 'pointer';
+      } else {
+        link.removeAttribute('href');
+        link.style.pointerEvents = 'none';
+        link.style.cursor = 'default';
+      }
+      var title = link.querySelector('.dash-card-title');
+      if (title && k.label) title.textContent = k.label;
+    }
+
+    wrap.querySelectorAll('.dash-kisayol-edit, .dash-kisayol-badge').forEach(function (el) {
+      el.remove();
+    });
+
+    var editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.className = 'dash-kisayol-edit';
+    editBtn.setAttribute('aria-label', 'Kısayolu düzenle');
+    editBtn.innerHTML = '<i class="fa fa-pencil"></i>';
+    editBtn.addEventListener('click', function (ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      dashKisayolDuzenleAc(k);
+    });
+    wrap.appendChild(editBtn);
+
+    if (k.kisilestirilmis) {
+      var badge = document.createElement('span');
+      badge.className = 'dash-kisayol-badge';
+      badge.textContent = 'Kişisel';
+      badge.title = 'Bu kısayol kişisel ayarınızla özelleştirilmiş';
+      wrap.appendChild(badge);
+    }
+  }
+
   function dashKisayollariYukle() {
     fetch('/dashboard/api/kisayollar', { credentials: 'same-origin' })
       .then(function (r) { return r.json(); })
@@ -1015,6 +1087,10 @@
         if (buttonsSlot) buttonsSlot.innerHTML = '';
         if (cardsSlot) cardsSlot.innerHTML = '';
         d.kisayollar.forEach(function (k) {
+          if (k.slot_key && String(k.slot_key).indexOf('stat_') === 0) {
+            dashStatKartBagula(k);
+            return;
+          }
           var el = dashKisayolRenderTile(k);
           if (k.slot_key === 'randevu') {
             if (cardsSlot) cardsSlot.appendChild(el);
@@ -1156,6 +1232,25 @@
       tabloYenile();
     });
   });
+
+  // ?filtre=... deep-link: mevcut btn-filter motoruna bağla
+  (function dashFiltreFromQuery() {
+    try {
+      var params = new URLSearchParams(window.location.search || '');
+      var f = (params.get('filtre') || '').trim();
+      if (!f) return;
+      var btn = null;
+      document.querySelectorAll('.btn-filter').forEach(function (b) {
+        if ((b.getAttribute('data-filtre') || '') === f) btn = b;
+      });
+      if (!btn) return;
+      document.querySelectorAll('.btn-filter').forEach(function (b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      tabloYenile();
+    } catch (e) {
+      console.warn('Filtre query uygulanamadı:', e);
+    }
+  })();
   document.getElementById('dash-search').addEventListener('input', function() {
     clearTimeout(window._searchTimer);
     window._searchTimer = setTimeout(tabloYenile, 300);

@@ -48,6 +48,15 @@ def _ensure_dashboard_kisayol_table():
             ("toplu_faturalama", "Toplu Faturalama", "/faturalar/", "fa-file-invoice", 6),
             ("tufe_senaryosu", "TÜFE Senaryosu", "/tufe/", "fa-chart-line", 7),
             ("geri_donus", "Geri Dönüş", None, "fa-clock-o", 8),
+            # İstatistik kartları (Aşama 3) — sira 100+; UI dash-stat-wrap ile bağlanır
+            ("stat_bugun_kargo", "📦 Bugün Gelen Kargolar", "/dashboard/?filtre=kargo", "fa-truck", 100),
+            ("stat_geciken_toplam", "💰 Geciken Toplam Alacak", "/dashboard/?filtre=kritik", "fa-money-bill", 101),
+            ("stat_kritik", "⚠ Kritik Geciken (30+ gün)", "/dashboard/?filtre=kritik", "fa-exclamation-triangle", 102),
+            ("stat_yakin", "⏳ Yakın Geciken (1–30 gün)", "/dashboard/?filtre=yakin", "fa-hourglass-half", 103),
+            ("stat_bugun_tahsilat", "✅ Bugün Beklenen Tahsilat", "/tahsilat/", "fa-hand-holding-usd", 104),
+            ("stat_tufe", "📈 TÜFE Güncel / Oran", "/tufe/", "fa-chart-line", 105),
+            ("stat_sozlesme", "📅 Sözleşmesi Bitecekler", "/dashboard/?filtre=sozlesme", "fa-calendar", 106),
+            ("stat_bos", "🏢 Boş Ofis", "/dashboard/?filtre=bos", "fa-building", 107),
         ]
         for slot_key, label, url, icon, sira in defaults:
             execute(
