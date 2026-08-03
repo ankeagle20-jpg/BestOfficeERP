@@ -1179,6 +1179,76 @@
 
 <script>
 /** Finans sekmeleri — en üstte tanımlı; aşağıdaki scriptte oluşabilecek hatalar tıklamayı engellemesin. */
+
+/** Finans üst sekmeleri: stabil URL key <-> switchTab index */
+var FINANS_TAB_KEY_BY_INDEX = {
+    0: 'faturalar',
+    1: 'taslaklar',
+    2: 'tahsilatlar',
+    3: 'yeni_fatura',
+    4: 'fatura_rapor',
+    5: 'gib_rapor',
+    6: 'masraflar'
+};
+var FINANS_TAB_INDEX_BY_KEY = {
+    faturalar: 0,
+    taslaklar: 1,
+    tahsilatlar: 2,
+    yeni_fatura: 3,
+    fatura_rapor: 4,
+    gib_rapor: 5,
+    masraflar: 6
+};
+
+function finansTabKeyFromIndex(index) {
+    var n = parseInt(index, 10);
+    if (isNaN(n)) return null;
+    return Object.prototype.hasOwnProperty.call(FINANS_TAB_KEY_BY_INDEX, n) ? FINANS_TAB_KEY_BY_INDEX[n] : null;
+}
+
+function finansTabIndexFromParam(raw) {
+    if (raw == null) return null;
+    var s = String(raw).trim();
+    if (!s) return null;
+    if (/^\d+$/.test(s)) {
+        var n = parseInt(s, 10);
+        if (!isNaN(n) && n >= 0 && n <= 6) return n;
+        return null;
+    }
+    var key = s.toLowerCase();
+    if (Object.prototype.hasOwnProperty.call(FINANS_TAB_INDEX_BY_KEY, key)) return FINANS_TAB_INDEX_BY_KEY[key];
+    return null;
+}
+
+/** Sekme değişince ?tab=<key> yaz (mid yok); diğer query'leri koru; hash temizle. */
+function finansStandaloneTabQueryGuncelle(index) {
+    try {
+        if (window.parent !== window.self) return;
+        var key = finansTabKeyFromIndex(index);
+        if (!key) return;
+        var p = new URLSearchParams(window.location.search);
+        var changed = false;
+        if (p.get('tab') !== key) {
+            p.set('tab', key);
+            changed = true;
+        }
+        var path = window.location.pathname || '/faturalar/';
+        var qs = p.toString();
+        var next = path + (qs ? '?' + qs : '');
+        // Tek kaynak: hash varsa temizle (eski #gib-rapor / #masraflar ile çakışmasın)
+        if ((window.location.hash || '') !== '') {
+            changed = true;
+        }
+        if (!changed && (window.location.search || '') === (qs ? '?' + qs : '')) return;
+        var st = history.state;
+        if (st != null && typeof st === 'object') {
+            history.replaceState(st, '', next);
+        } else {
+            history.replaceState(null, '', next);
+        }
+    } catch (e) {}
+}
+
 window.switchTab = function switchTab(index) {
     var root = document.querySelector('.erp-page-wrap');
     var tabs = root ? root.querySelectorAll('.finans-tab') : document.querySelectorAll('.finans-tab');
@@ -1239,6 +1309,10 @@ window.switchTab = function switchTab(index) {
         }
         // Otomatik liste yok: tarihler dolu gelir, veri yalnızca Listele ile çekilir
     }
+
+    try {
+        if (typeof finansStandaloneTabQueryGuncelle === 'function') finansStandaloneTabQueryGuncelle(index);
+    } catch (_eTabUrl) {}
 };
 
 
@@ -5713,11 +5787,22 @@ function finansGibRaporYukle(usePortal) {
             if (typeof faturaRaporFiltreStateUygula === 'function') faturaRaporFiltreStateUygula();
             else if (typeof faturaRaporGorunumUI === 'function') faturaRaporGorunumUI();
             if (typeof faturaRaporFirmaPrefsHydrateFromServer === 'function') faturaRaporFirmaPrefsHydrateFromServer();
-            if ((window.location.hash || '').toLowerCase() === '#gib-rapor' && typeof window.switchTab === 'function') {
-                window.switchTab(5);
+            /* Öncelik: ?tab= > hash (#gib-rapor/#masraflar) > varsayılan (switchTab çağrılmaz = 0) */
+            var _finansTabResolved = null;
+            try {
+                var _fps = new URLSearchParams(window.location.search);
+                var _ftab = _fps.get('tab');
+                if (_ftab != null && typeof finansTabIndexFromParam === 'function') {
+                    _finansTabResolved = finansTabIndexFromParam(_ftab);
+                }
+            } catch (_eTabP) {}
+            if (_finansTabResolved == null) {
+                var _fh = (window.location.hash || '').toLowerCase();
+                if (_fh === '#gib-rapor') _finansTabResolved = 5;
+                else if (_fh === '#masraflar') _finansTabResolved = 6;
             }
-            if ((window.location.hash || '').toLowerCase() === '#masraflar' && typeof window.switchTab === 'function') {
-                window.switchTab(6);
+            if (_finansTabResolved != null && typeof window.switchTab === 'function') {
+                window.switchTab(_finansTabResolved);
             }
         } catch (errInit) {
             console.warn('Finans ilk yükleme:', errInit);
