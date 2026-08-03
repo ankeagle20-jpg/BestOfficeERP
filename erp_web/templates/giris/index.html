@@ -4451,6 +4451,7 @@
    </div>
 </div>
 <script>
+window.__ERP_USER_ID__ = {{ current_user.id if current_user.is_authenticated else 'null' }};
 let selectedId = null;
 /** Sekme 7 müşteri listesinde ?odemeler=0 ile yüklenen forma geçince tam detay yenilensin diye işaret. */
 var girisSonMusteriDetayHafifYukleme = false;
@@ -4635,25 +4636,32 @@ function girisSunucuBaglantiUyariMetni(err) {
     return 'Sunucuya bağlanılamadı.';
 }
 
-var GIRIS_SON_MUSTERI_STORAGE_KEY = 'bestoffice_giris_son_musteri_id';
+function girisSonMusteriStorageKey() {
+    var uid = (typeof window !== 'undefined') ? window.__ERP_USER_ID__ : null;
+    var n = parseInt(uid, 10);
+    if (uid == null || uid === '' || isNaN(n)) {
+        return 'bestoffice_giris_son_musteri_id';
+    }
+    return 'bestoffice_giris_son_musteri_id_' + String(n);
+}
 
 function girisSonSeciliMusteriKaydet(id) {
     try {
         var n = parseInt(id, 10);
         if (isNaN(n) || n < 1) return;
-        localStorage.setItem(GIRIS_SON_MUSTERI_STORAGE_KEY, String(n));
+        localStorage.setItem(girisSonMusteriStorageKey(), String(n));
     } catch (e) {}
 }
 
 function girisSonSeciliMusteriSil() {
     try {
-        localStorage.removeItem(GIRIS_SON_MUSTERI_STORAGE_KEY);
+        localStorage.removeItem(girisSonMusteriStorageKey());
     } catch (e) {}
 }
 
 function girisSonSeciliMusteriOku() {
     try {
-        var s = localStorage.getItem(GIRIS_SON_MUSTERI_STORAGE_KEY);
+        var s = localStorage.getItem(girisSonMusteriStorageKey());
         if (!s) return null;
         var n = parseInt(s, 10);
         return (isNaN(n) || n < 1) ? null : n;
@@ -4690,15 +4698,18 @@ function girisIsNavigationReload() {
 }
 
 /**
- * İlk girişte ?mid= öncelikli; sayfa YENİLEME (F5) ise son çalışılan müşteri (localStorage) kazanır —
- * Müşteri Kartı iframe'inde Önceki/Sonraki ile değişince URL güncellenmezse bile yenilemede doğru firma gelir.
+ * ?mid= varsa onu kullan; yalnızca gerçek sayfa YENİLEME (F5) ise user-scoped localStorage son müşteri
+ * geri yüklenir. Taze/ilk açılışta (yeni sekme, mid yok) otomatik müşteri seçilmez.
  */
 function girisResolveInitialMusteriId(urlId) {
     var storedId = girisSonSeciliMusteriOku();
     var reload = girisIsNavigationReload();
+    // F5/reload: kendi (user-scoped) son müşteri
     if (reload && storedId && (!urlId || urlId !== storedId)) return storedId;
+    // URL ?mid= varsa
     if (urlId && !isNaN(urlId) && urlId > 0) return urlId;
-    return storedId;
+    // Taze/ilk açılış (mid yok): otomatik yükleme yok
+    return null;
 }
 
 function girisStandaloneMidQueryGuncelle(mid) {
