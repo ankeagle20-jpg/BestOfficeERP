@@ -3,7 +3,7 @@ Sekreterya & Yönetim Dashboard — Tüm modülleri tek ekranda toplar.
 Müşteri analizi, ödeme takibi, kargo, sözleşme alarmı, hızlı müdahale.
 """
 from flask import Blueprint, render_template, request, jsonify
-from auth import giris_gerekli
+from auth import giris_gerekli, admin_gerekli
 from db import fetch_all, fetch_one, execute, execute_returning, ensure_faturalar_amount_columns, sql_expr_fatura_not_gib_taslak
 from utils.musteri_arama import customers_arama_sql_giris_genis, customers_arama_params_giris_genis
 from datetime import date, timedelta
@@ -29,7 +29,16 @@ def _ensure_dashboard_kisayol_table():
                 updated_at TIMESTAMP NOT NULL DEFAULT NOW()
             )
         """)
+        # URL'ler url_for ile çözülmüş path'ler:
+        # faturalar.yeni_fatura -> /faturalar/yeni
+        # tahsilat.index -> /tahsilat/
+        # randevu.panel -> /randevu/panel
+        # sira: yeni_fatura/yeni_tahsilat sidebar'da mevcut dinamik kutulardan önce;
+        # randevu kart satırına (cards-slot) gider.
         defaults = [
+            ("yeni_fatura", "Yeni Fatura", "/faturalar/yeni", "fa-file-invoice", 0),
+            ("yeni_tahsilat", "Yeni Tahsilat", "/tahsilat/", "fa-money-bill-wave", 1),
+            ("randevu", "Randevu", "/randevu/panel", "fa-calendar", 0),
             ("tediye", "Tediye", "/giris/?tab=11", "fa-hand-holding-dollar", 1),
             ("musteri_ekle_1", "Müşteri Ekle", "/musteriler/ekle", "fa-user-plus", 2),
             ("musteri_listesi", "Müşteri Listesi", "/musteriler/list", "fa-list", 3),
@@ -423,7 +432,7 @@ def api_dashboard_kisayollar():
 
 
 @bp.route("/api/kisayol-guncelle", methods=["POST"])
-@giris_gerekli
+@admin_gerekli
 def api_dashboard_kisayol_guncelle():
     _ensure_dashboard_kisayol_table()
     data = request.get_json(silent=True) or {}

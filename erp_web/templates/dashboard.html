@@ -166,6 +166,17 @@
 .dash-kisayol-wrap {
   position: relative;
 }
+.dash-cards .dash-kisayol-wrap {
+  display: flex;
+  min-width: 0;
+}
+.dash-cards .dash-kisayol-wrap > a.dash-card,
+.dash-cards .dash-kisayol-wrap > button.dash-card {
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+}
 .dash-buttons-row .dash-kisayol-wrap {
   flex: 1 1 0;
   min-width: 0;
@@ -654,16 +665,14 @@
         <button type="button" class="dash-card dash-card-btn btn-filter" data-filtre="yakin"><span class="filter-icon"><i class="fa fa-hourglass-half"></i></span><span class="filter-label">Yakın Gecikme</span></button>
         <button type="button" class="dash-card dash-card-btn btn-filter" data-filtre="kritik"><span class="filter-icon"><i class="fa fa-exclamation-triangle"></i></span><span class="filter-label">Kritik Gecikme</span></button>
         <button type="button" class="dash-card dash-card-btn btn-filter" data-filtre="kargo"><span class="filter-icon"><i class="fa fa-truck"></i></span><span class="filter-label">Kargosu Bekleyen</span></button>
-        <!-- Randevu — kart satırında tek link butonu -->
-        <a href="{{ url_for('randevu.panel') }}" class="dash-card dash-card-btn dash-card-link" title="Randevu Al"><span class="filter-icon"><i class="fa fa-calendar"></i></span><span class="filter-label">Randevu</span></a>
+        <!-- Randevu — dinamik kisayol (cards-slot) -->
+        <div id="dash-kisayol-cards-slot" style="display:contents;"></div>
         </div>
         <div class="dash-sidebar-grid">
           <button type="button" class="btn-filter dash-sidebar-tile active" data-filtre=""><span class="filter-icon"><i class="fa fa-th-large"></i></span><span class="filter-label">Tümü</span></button>
           <button type="button" class="btn-filter dash-sidebar-tile" data-filtre="bos"><span class="filter-icon"><i class="fa fa-building"></i></span><span class="filter-label">Boş Ofisler</span></button>
           <button type="button" class="btn-filter dash-sidebar-tile" data-filtre="tam"><span class="filter-icon"><i class="fa fa-check-circle"></i></span><span class="filter-label">Ödemesi Tam</span></button>
           <button type="button" class="btn-filter dash-sidebar-tile" data-filtre="sozlesme"><span class="filter-icon"><i class="fa fa-calendar"></i></span><span class="filter-label">Sözleşme Bitiş Yakın</span></button>
-          <a href="{{ url_for('faturalar.yeni_fatura') }}" class="btn-filter dash-filter-link dash-sidebar-tile" title="Yeni fatura oluştur"><span class="filter-icon"><i class="fa fa-file-invoice"></i></span><span class="filter-label">Yeni Fatura</span></a>
-          <a href="{{ url_for('tahsilat.index') }}" class="btn-filter dash-filter-link dash-sidebar-tile" title="Tahsilat / Yeni tahsilat"><span class="filter-icon"><i class="fa fa-money-bill-wave"></i></span><span class="filter-label">Yeni Tahsilat</span></a>
           <div id="dash-kisayol-sidebar-slot" style="display:contents;"></div>
         </div>
         </div>
@@ -922,7 +931,11 @@
     var isLink = !!k.url;
     var tag = isLink ? 'a' : 'button';
     var el = document.createElement(tag);
-    el.className = 'dash-sidebar-tile ' + (k.slot_key === 'tediye' || k.slot_key === 'musteri_ekle_1' ? 'dash-buttons-tile' : 'dash-sidebar-link');
+    if (k.slot_key === 'randevu') {
+      el.className = 'dash-card dash-card-btn dash-card-link';
+    } else {
+      el.className = 'dash-sidebar-tile ' + (k.slot_key === 'tediye' || k.slot_key === 'musteri_ekle_1' ? 'dash-buttons-tile' : 'dash-sidebar-link');
+    }
     if (isLink) {
       el.href = k.url;
     } else {
@@ -959,11 +972,15 @@
         if (!d.ok || !Array.isArray(d.kisayollar)) return;
         var sidebarSlot = document.getElementById('dash-kisayol-sidebar-slot');
         var buttonsSlot = document.getElementById('dash-kisayol-buttons-slot');
+        var cardsSlot = document.getElementById('dash-kisayol-cards-slot');
         if (sidebarSlot) sidebarSlot.innerHTML = '';
         if (buttonsSlot) buttonsSlot.innerHTML = '';
+        if (cardsSlot) cardsSlot.innerHTML = '';
         d.kisayollar.forEach(function (k) {
           var el = dashKisayolRenderTile(k);
-          if (k.slot_key === 'tediye' || k.slot_key === 'musteri_ekle_1') {
+          if (k.slot_key === 'randevu') {
+            if (cardsSlot) cardsSlot.appendChild(el);
+          } else if (k.slot_key === 'tediye' || k.slot_key === 'musteri_ekle_1') {
             if (buttonsSlot) buttonsSlot.appendChild(el);
           } else {
             if (sidebarSlot) sidebarSlot.appendChild(el);
