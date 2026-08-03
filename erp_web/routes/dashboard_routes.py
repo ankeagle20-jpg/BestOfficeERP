@@ -93,6 +93,18 @@ def _bugun():
     return date.today()
 
 
+def _as_date(vd):
+    """vade_tarihi / benzeri değeri date'e çevir; parse edilemezse None."""
+    if vd is None:
+        return None
+    if hasattr(vd, "year"):
+        return vd.date() if hasattr(vd, "hour") else vd
+    try:
+        return date(*[int(x) for x in str(vd)[:10].split("-")])
+    except Exception:
+        return None
+
+
 def _dashboard_istatistikler():
     """8 kart için istatistikler."""
     bugun = _bugun()
@@ -297,11 +309,15 @@ def _dashboard_tablo_data(arama="", filtre=None):
     # Filtre uygula
     if filtre == "kritik":
         musteriler = [m for m in musteriler if fat_by_cid.get(m["musteri_id"]) and any(
-            (f.get("vade_tarihi") or date.min) <= (bugun - timedelta(days=30)) for f in fat_by_cid[m["musteri_id"]]
+            (vd := (_as_date(f.get("vade_tarihi")) if f.get("vade_tarihi") else date.min)) is not None
+            and vd <= (bugun - timedelta(days=30))
+            for f in fat_by_cid[m["musteri_id"]]
         )]
     elif filtre == "yakin":
         musteriler = [m for m in musteriler if fat_by_cid.get(m["musteri_id"]) and any(
-            (f.get("vade_tarihi") or date.min) > (bugun - timedelta(days=30)) and (f.get("vade_tarihi") or date.min) < bugun
+            (vd := (_as_date(f.get("vade_tarihi")) if f.get("vade_tarihi") else date.min)) is not None
+            and vd > (bugun - timedelta(days=30))
+            and vd < bugun
             for f in fat_by_cid[m["musteri_id"]]
         )]
     elif filtre == "tam":
