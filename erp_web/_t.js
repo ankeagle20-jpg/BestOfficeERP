@@ -278,6 +278,94 @@ function girisStandaloneMidQueryGuncelle(mid) {
     } catch (e) {}
 }
 
+/** Giriş üst sekmeleri: stabil URL key <-> data-index */
+var GIRIS_TAB_KEY_BY_INDEX = {
+    0: 'musteri_ekle',
+    1: 'kira_senaryo',
+    2: 'kira_bildirge',
+    3: 'tahsilat',
+    4: 'cari_kart',
+    5: 'potansiyel',
+    6: 'sozlesmeler',
+    7: 'musteriler',
+    8: 'randevu',
+    9: 'grup',
+    10: 'musteriler_2',
+    11: 'tediye',
+    12: 'whatsapp'
+};
+var GIRIS_TAB_INDEX_BY_KEY = {
+    musteri_ekle: 0,
+    kira_senaryo: 1,
+    kira_bildirge: 2,
+    tahsilat: 3,
+    cari_kart: 4,
+    potansiyel: 5,
+    sozlesmeler: 6,
+    musteriler: 7,
+    randevu: 8,
+    grup: 9,
+    musteriler_2: 10,
+    tediye: 11,
+    whatsapp: 12
+};
+
+function girisTabKeyFromIndex(index) {
+    var n = parseInt(index, 10);
+    if (isNaN(n)) return null;
+    return Object.prototype.hasOwnProperty.call(GIRIS_TAB_KEY_BY_INDEX, n) ? GIRIS_TAB_KEY_BY_INDEX[n] : null;
+}
+
+function girisTabIndexFromParam(raw) {
+    if (raw == null) return null;
+    var s = String(raw).trim();
+    if (!s) return null;
+    if (/^\d+$/.test(s)) {
+        var n = parseInt(s, 10);
+        if (!isNaN(n) && n >= 0 && n <= 12) return n;
+        return null;
+    }
+    var key = s.toLowerCase();
+    if (Object.prototype.hasOwnProperty.call(GIRIS_TAB_INDEX_BY_KEY, key)) return GIRIS_TAB_INDEX_BY_KEY[key];
+    return null;
+}
+
+/** Sekme değişince ?tab=<key> yaz; mid varsa koru, selectedId varsa mid güncelle (silme yok). */
+function girisStandaloneTabQueryGuncelle(index) {
+    try {
+        if (window.parent !== window.self) return;
+        var key = girisTabKeyFromIndex(index);
+        if (!key) return;
+        var p = new URLSearchParams(window.location.search);
+        var changed = false;
+        if (p.get('tab') !== key) {
+            p.set('tab', key);
+            changed = true;
+        }
+        var midN = null;
+        try {
+            if (typeof selectedId !== 'undefined' && selectedId != null) {
+                var sn = parseInt(selectedId, 10);
+                if (!isNaN(sn) && sn > 0) midN = sn;
+            }
+        } catch (eMid) {}
+        if (midN != null && p.get('mid') !== String(midN)) {
+            p.set('mid', String(midN));
+            changed = true;
+        }
+        if (!changed) return;
+        var path = window.location.pathname || '/giris/';
+        var qs = p.toString();
+        var st = history.state;
+        if (st != null && typeof st === 'object') {
+            history.replaceState(st, '', path + (qs ? '?' + qs : ''));
+        } else {
+            history.replaceState(null, '', path + (qs ? '?' + qs : ''));
+        }
+    } catch (e) {}
+}
+
+
 /** Tekil müşteri listesi yüklendi: geri tuşu ile bu sekmeye dönebilmek için history state işaretle. */
 function girisHistoryMarkFaturaRaporListesi() {
     try {
@@ -351,11 +439,21 @@ function girisBootstrapMusteriVeSekme() {
         var kartP = (p.get('kart') || '').trim().toLowerCase();
         var forceMusteriKartTab = kartP === '1' || kartP === 'true' || kartP === 'yes' || kartP === 'on';
         var tabIdx = 0;
-        if (!forceMusteriKartTab) {
+        var urlTab = p.get('tab');
+        if (urlTab != null) {
+            var resolvedTab = (typeof girisTabIndexFromParam === 'function')
+                ? girisTabIndexFromParam(urlTab)
+                : null;
+            if (resolvedTab == null) {
+                var ut = parseInt(urlTab, 10);
+                if (!isNaN(ut) && ut >= 0 && ut <= 12) resolvedTab = ut;
+            }
+            if (resolvedTab != null) tabIdx = resolvedTab;
+        } else if (!forceMusteriKartTab) {
             var ts = localStorage.getItem('bestoffice_giris_tab_index');
             if (ts != null) {
                 var ti = parseInt(ts, 10);
-                if (!isNaN(ti) && ti >= 0 && ti <= 10) tabIdx = ti;
+                if (!isNaN(ti) && ti >= 0 && ti <= 12) tabIdx = ti;
             }
         }
         if (typeof switchTab === 'function') switchTab(tabIdx);
@@ -3394,6 +3492,9 @@ function switchTab(index) {
             if (typeof selectMusteri === 'function') selectMusteri(selectedId);
         }, 0);
     }
+    try {
+        if (typeof girisStandaloneTabQueryGuncelle === 'function') girisStandaloneTabQueryGuncelle(index);
+    } catch (_eTabUrl) {}
     /* Cari ekstre burada çağrılmasın: form henüz güncellenmeden eski tarihlerle istek gidiyordu.
        Tarihler fillActiveTab + cariEkstreMusteriDegisinceYenile ile ayarlanır. */
 }
