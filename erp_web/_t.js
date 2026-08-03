@@ -18087,7 +18087,6 @@ function selectMusteri(id) {
             return;
         }
         /* Form hemen; grid tek seferde (tahsil + cache + reel) — parça parça boyama tutarsızlık yapıyordu. */
-        try { girisTahsilatPanelDetayPrefetch(midNav); } catch (_ePanPf) {}
         try {
             if (typeof girisJsonCacheInvalidatePrefix === 'function') {
                 girisJsonCacheInvalidatePrefix('/giris/api/aylik-grid-cache?musteri_id=' + encodeURIComponent(midNav));
