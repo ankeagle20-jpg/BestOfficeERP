@@ -24210,9 +24210,7 @@ function genelMusteriAraDropdownDoldur(sonuclar) {
 }
 
 function genelMusteriAraSec(id) {
-    var midEl = document.getElementById('musteri-id');
-    var midVal = midEl ? String(midEl.value || '').trim() : '';
-    if ((!midVal && !selectedId) || window.__rezerveEdilenMusteriId) {
+    if (window.__rezerveEdilenMusteriId) {
         var ddBlock = document.getElementById('genel-musteri-ara-dropdown');
         if (ddBlock) ddBlock.style.display = 'none';
         alert('Yeni müşteri formundasınız. Mevcut bir müşteriye geçmek için önce sol listeden veya üst aramadan seçin.');
@@ -24245,16 +24243,6 @@ function genelMusteriAraKeydown(ev) {
 
 
 function musteriAdiSec(id) {
-    var midEl = document.getElementById('musteri-id');
-    var midVal = midEl ? String(midEl.value || '').trim() : '';
-    if (!midVal && !selectedId) {
-        var dropdown = document.getElementById('musteri-adi-dropdown');
-        if (dropdown) dropdown.style.display = 'none';
-        var su = document.getElementById('sirket-unvani-dropdown');
-        if (su) su.style.display = 'none';
-        alert('Yeni müşteri formundasınız. Mevcut bir müşteriye geçmek için önce sol listeden veya üst aramadan seçin.');
-        return;
-    }
     var dropdown = document.getElementById('musteri-adi-dropdown');
     if (dropdown) dropdown.style.display = 'none';
     var su = document.getElementById('sirket-unvani-dropdown');
@@ -24262,16 +24250,6 @@ function musteriAdiSec(id) {
     selectMusteri(parseInt(id, 10));
 }
 function sirketUnvaniSec(id) {
-    var midEl = document.getElementById('musteri-id');
-    var midVal = midEl ? String(midEl.value || '').trim() : '';
-    if (!midVal && !selectedId) {
-        var dropdown = document.getElementById('sirket-unvani-dropdown');
-        if (dropdown) dropdown.style.display = 'none';
-        var ma = document.getElementById('musteri-adi-dropdown');
-        if (ma) ma.style.display = 'none';
-        alert('Yeni müşteri formundasınız. Mevcut bir müşteriye geçmek için önce sol listeden veya üst aramadan seçin.');
-        return;
-    }
     var dropdown = document.getElementById('sirket-unvani-dropdown');
     if (dropdown) dropdown.style.display = 'none';
     var ma = document.getElementById('musteri-adi-dropdown');
