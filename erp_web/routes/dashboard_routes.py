@@ -3,6 +3,7 @@ Sekreterya & Yönetim Dashboard — Tüm modülleri tek ekranda toplar.
 Müşteri analizi, ödeme takibi, kargo, sözleşme alarmı, hızlı müdahale.
 """
 from flask import Blueprint, render_template, request, jsonify
+from flask_login import current_user
 from auth import giris_gerekli, admin_gerekli
 from db import fetch_all, fetch_one, execute, execute_returning, ensure_faturalar_amount_columns, sql_expr_fatura_not_gib_taslak
 from utils.musteri_arama import customers_arama_sql_giris_genis, customers_arama_params_giris_genis
@@ -57,6 +58,19 @@ def _ensure_dashboard_kisayol_table():
                 """,
                 (slot_key, label, url, icon, sira),
             )
+        execute("""
+            CREATE TABLE IF NOT EXISTS dashboard_kisayollar_user (
+                user_id INTEGER NOT NULL,
+                slot_key TEXT NOT NULL,
+                label TEXT NULL,
+                url TEXT NULL,
+                icon TEXT NULL,
+                sira INTEGER NULL,
+                gorunur_mu BOOLEAN NOT NULL DEFAULT TRUE,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (user_id, slot_key)
+            )
+        """)
     except Exception as e:
         print(f"dashboard_kisayollar: {e}")
     _DASHBOARD_KISAYOL_TABLE_READY = True
@@ -427,7 +441,24 @@ def api_whatsapp_metin():
 @giris_gerekli
 def api_dashboard_kisayollar():
     _ensure_dashboard_kisayol_table()
-    rows = fetch_all("SELECT slot_key, label, url, icon, sira FROM dashboard_kisayollar ORDER BY sira") or []
+    user_id = int(current_user.id)
+    rows = fetch_all(
+        """
+        SELECT g.slot_key,
+               COALESCE(u.label, g.label) AS label,
+               COALESCE(u.url, g.url) AS url,
+               COALESCE(u.icon, g.icon) AS icon,
+               COALESCE(u.sira, g.sira) AS sira,
+               COALESCE(u.gorunur_mu, TRUE) AS gorunur_mu,
+               (u.user_id IS NOT NULL) AS kisilestirilmis
+        FROM dashboard_kisayollar g
+        LEFT JOIN dashboard_kisayollar_user u
+          ON u.slot_key = g.slot_key AND u.user_id = %s
+        WHERE COALESCE(u.gorunur_mu, TRUE) = TRUE
+        ORDER BY COALESCE(u.sira, g.sira), g.slot_key
+        """,
+        (user_id,),
+    ) or []
     return jsonify({"ok": True, "kisayollar": rows})
 
 
@@ -451,5 +482,68 @@ def api_dashboard_kisayol_guncelle():
     execute(
         "UPDATE dashboard_kisayollar SET label = %s, url = %s, icon = %s, updated_at = NOW() WHERE slot_key = %s",
         (label, url, icon, slot_key),
+    )
+    return jsonify({"ok": True})
+
+
+@bp.route("/api/kisayol-kisisel-guncelle", methods=["POST"])
+@giris_gerekli
+def api_dashboard_kisayol_kisisel_guncelle():
+    """Kişisel override UPSERT — yalnızca current_user.id (request user_id kabul edilmez)."""
+    _ensure_dashboard_kisayol_table()
+    data = request.get_json(silent=True) or {}
+    # Güvenlik: request'teki user_id / kullanıcı kimliği ASLA kullanılmaz.
+    user_id = int(current_user.id)
+    slot_key = str(data.get("slot_key") or "").strip()
+    if not slot_key:
+        return jsonify({"ok": False, "mesaj": "slot_key gerekli."}), 400
+    label = str(data.get("label") or "").strip()
+    if not label:
+        return jsonify({"ok": False, "mesaj": "İsim boş olamaz."}), 400
+    url = data.get("url")
+    url = str(url).strip() if url else None
+    icon = str(data.get("icon") or "").strip() or "fa-link"
+    sira = data.get("sira", None)
+    if sira is not None and sira != "":
+        try:
+            sira = int(sira)
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "mesaj": "sira sayı olmalı."}), 400
+    else:
+        sira = None
+    row = fetch_one("SELECT slot_key FROM dashboard_kisayollar WHERE slot_key = %s", (slot_key,))
+    if not row:
+        return jsonify({"ok": False, "mesaj": "Kutu bulunamadı."}), 404
+    execute(
+        """
+        INSERT INTO dashboard_kisayollar_user
+            (user_id, slot_key, label, url, icon, sira, gorunur_mu, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, TRUE, NOW())
+        ON CONFLICT (user_id, slot_key) DO UPDATE SET
+            label = EXCLUDED.label,
+            url = EXCLUDED.url,
+            icon = EXCLUDED.icon,
+            sira = EXCLUDED.sira,
+            updated_at = NOW()
+        """,
+        (user_id, slot_key, label, url, icon, sira),
+    )
+    return jsonify({"ok": True})
+
+
+@bp.route("/api/kisayol-varsayilana-don", methods=["POST"])
+@giris_gerekli
+def api_dashboard_kisayol_varsayilana_don():
+    """Kişisel override sil — yalnızca current_user.id (request user_id kabul edilmez)."""
+    _ensure_dashboard_kisayol_table()
+    data = request.get_json(silent=True) or {}
+    # Güvenlik: request'teki user_id / kullanıcı kimliği ASLA kullanılmaz.
+    user_id = int(current_user.id)
+    slot_key = str(data.get("slot_key") or "").strip()
+    if not slot_key:
+        return jsonify({"ok": False, "mesaj": "slot_key gerekli."}), 400
+    execute(
+        "DELETE FROM dashboard_kisayollar_user WHERE user_id = %s AND slot_key = %s",
+        (user_id, slot_key),
     )
     return jsonify({"ok": True})
