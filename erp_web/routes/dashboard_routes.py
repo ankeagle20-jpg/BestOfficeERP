@@ -57,6 +57,14 @@ def _ensure_dashboard_kisayol_table():
             ("stat_tufe", "📈 TÜFE Güncel / Oran", "/tufe/", "fa-chart-line", 105),
             ("stat_sozlesme", "📅 Sözleşmesi Bitecekler", "/dashboard/?filtre=sozlesme", "fa-calendar", 106),
             ("stat_bos", "🏢 Boş Ofis", "/dashboard/?filtre=bos", "fa-building", 107),
+            # Filtre butonları — url daima NULL; data-filtre HTML'de sabit kalır
+            ("filtre_tumu", "Tümü", None, "fa-th-large", 50),
+            ("filtre_bos", "Boş Ofisler", None, "fa-building", 51),
+            ("filtre_tam", "Ödemesi Tam", None, "fa-check-circle", 52),
+            ("filtre_sozlesme", "Sözleşme Bitiş Yakın", None, "fa-calendar", 53),
+            ("filtre_yakin", "Yakın Gecikme", None, "fa-hourglass-half", 54),
+            ("filtre_kritik", "Kritik Gecikme", None, "fa-exclamation-triangle", 55),
+            ("filtre_kargo", "Kargosu Bekleyen", None, "fa-truck", 56),
         ]
         for slot_key, label, url, icon, sira in defaults:
             execute(
@@ -91,6 +99,17 @@ AYLAR = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran",
 
 def _bugun():
     return date.today()
+
+
+def _kisayol_url_zorla(slot_key, url):
+    """geri_donus ve filtre_* slot'larında url her zaman NULL (navigasyon yok)."""
+    sk = str(slot_key or "").strip()
+    if sk == "geri_donus" or sk.startswith("filtre_"):
+        return None
+    if url is None:
+        return None
+    url = str(url).strip()
+    return url or None
 
 
 def _as_date(vd):
@@ -498,8 +517,7 @@ def api_dashboard_kisayol_guncelle():
     label = str(data.get("label") or "").strip()
     if not label:
         return jsonify({"ok": False, "mesaj": "İsim boş olamaz."}), 400
-    url = data.get("url")
-    url = str(url).strip() if url else None
+    url = _kisayol_url_zorla(slot_key, data.get("url"))
     icon = str(data.get("icon") or "").strip() or "fa-link"
     row = fetch_one("SELECT slot_key FROM dashboard_kisayollar WHERE slot_key = %s", (slot_key,))
     if not row:
@@ -525,8 +543,7 @@ def api_dashboard_kisayol_kisisel_guncelle():
     label = str(data.get("label") or "").strip()
     if not label:
         return jsonify({"ok": False, "mesaj": "İsim boş olamaz."}), 400
-    url = data.get("url")
-    url = str(url).strip() if url else None
+    url = _kisayol_url_zorla(slot_key, data.get("url"))
     icon = str(data.get("icon") or "").strip() or "fa-link"
     sira = data.get("sira", None)
     if sira is not None and sira != "":

@@ -194,6 +194,17 @@ a.dash-stat-card:hover { box-shadow: 0 0 0 1px #4fc3f7; }
   width: 100%;
   height: 100%;
 }
+.dash-sidebar-grid > .dash-kisayol-wrap {
+  display: flex;
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+}
+.dash-sidebar-grid > .dash-kisayol-wrap > .btn-filter {
+  width: 100%;
+  height: 100%;
+}
+
 .dash-kisayol-edit {
   position: absolute;
   top: 2px;
@@ -703,17 +714,31 @@ a.dash-stat-card:hover { box-shadow: 0 0 0 1px #4fc3f7; }
           </a>
         </div>
         <!-- 3 filtre butonu: yukarıdaki 3 kartın (Tahsilat, TÜFE, Sözleşmesi Bitecekler) altında, aynı boyutta -->
-        <button type="button" class="dash-card dash-card-btn btn-filter" data-filtre="yakin"><span class="filter-icon"><i class="fa fa-hourglass-half"></i></span><span class="filter-label">Yakın Gecikme</span></button>
-        <button type="button" class="dash-card dash-card-btn btn-filter" data-filtre="kritik"><span class="filter-icon"><i class="fa fa-exclamation-triangle"></i></span><span class="filter-label">Kritik Gecikme</span></button>
-        <button type="button" class="dash-card dash-card-btn btn-filter" data-filtre="kargo"><span class="filter-icon"><i class="fa fa-truck"></i></span><span class="filter-label">Kargosu Bekleyen</span></button>
+        <div class="dash-kisayol-wrap" data-slot-key="filtre_yakin">
+          <button type="button" class="dash-card dash-card-btn btn-filter" data-slot-key="filtre_yakin" data-filtre="yakin"><span class="filter-icon"><i class="fa fa-hourglass-half"></i></span><span class="filter-label">Yakın Gecikme</span></button>
+        </div>
+        <div class="dash-kisayol-wrap" data-slot-key="filtre_kritik">
+          <button type="button" class="dash-card dash-card-btn btn-filter" data-slot-key="filtre_kritik" data-filtre="kritik"><span class="filter-icon"><i class="fa fa-exclamation-triangle"></i></span><span class="filter-label">Kritik Gecikme</span></button>
+        </div>
+        <div class="dash-kisayol-wrap" data-slot-key="filtre_kargo">
+          <button type="button" class="dash-card dash-card-btn btn-filter" data-slot-key="filtre_kargo" data-filtre="kargo"><span class="filter-icon"><i class="fa fa-truck"></i></span><span class="filter-label">Kargosu Bekleyen</span></button>
+        </div>
         <!-- Randevu — dinamik kisayol (cards-slot) -->
         <div id="dash-kisayol-cards-slot" style="display:contents;"></div>
         </div>
         <div class="dash-sidebar-grid">
-          <button type="button" class="btn-filter dash-sidebar-tile active" data-filtre=""><span class="filter-icon"><i class="fa fa-th-large"></i></span><span class="filter-label">Tümü</span></button>
-          <button type="button" class="btn-filter dash-sidebar-tile" data-filtre="bos"><span class="filter-icon"><i class="fa fa-building"></i></span><span class="filter-label">Boş Ofisler</span></button>
-          <button type="button" class="btn-filter dash-sidebar-tile" data-filtre="tam"><span class="filter-icon"><i class="fa fa-check-circle"></i></span><span class="filter-label">Ödemesi Tam</span></button>
-          <button type="button" class="btn-filter dash-sidebar-tile" data-filtre="sozlesme"><span class="filter-icon"><i class="fa fa-calendar"></i></span><span class="filter-label">Sözleşme Bitiş Yakın</span></button>
+          <div class="dash-kisayol-wrap" data-slot-key="filtre_tumu">
+            <button type="button" class="btn-filter dash-sidebar-tile active" data-slot-key="filtre_tumu" data-filtre=""><span class="filter-icon"><i class="fa fa-th-large"></i></span><span class="filter-label">Tümü</span></button>
+          </div>
+          <div class="dash-kisayol-wrap" data-slot-key="filtre_bos">
+            <button type="button" class="btn-filter dash-sidebar-tile" data-slot-key="filtre_bos" data-filtre="bos"><span class="filter-icon"><i class="fa fa-building"></i></span><span class="filter-label">Boş Ofisler</span></button>
+          </div>
+          <div class="dash-kisayol-wrap" data-slot-key="filtre_tam">
+            <button type="button" class="btn-filter dash-sidebar-tile" data-slot-key="filtre_tam" data-filtre="tam"><span class="filter-icon"><i class="fa fa-check-circle"></i></span><span class="filter-label">Ödemesi Tam</span></button>
+          </div>
+          <div class="dash-kisayol-wrap" data-slot-key="filtre_sozlesme">
+            <button type="button" class="btn-filter dash-sidebar-tile" data-slot-key="filtre_sozlesme" data-filtre="sozlesme"><span class="filter-icon"><i class="fa fa-calendar"></i></span><span class="filter-label">Sözleşme Bitiş Yakın</span></button>
+          </div>
           <div id="dash-kisayol-sidebar-slot" style="display:contents;"></div>
         </div>
         </div>
@@ -1075,6 +1100,48 @@ a.dash-stat-card:hover { box-shadow: 0 0 0 1px #4fc3f7; }
     }
   }
 
+  function dashFiltreButonBagula(k) {
+    var wrap = document.querySelector('.dash-kisayol-wrap[data-slot-key="' + k.slot_key + '"]');
+    if (!wrap) return;
+    var btn = wrap.querySelector('button.btn-filter');
+    if (!btn) return;
+    // data-filtre / class / listener korunur — sadece label/icon + kalem
+    var labelEl = btn.querySelector('.filter-label');
+    if (labelEl && k.label) labelEl.textContent = k.label;
+    var iconEl = btn.querySelector('.filter-icon i');
+    if (iconEl && k.icon) {
+      var ic = String(k.icon).replace(/^fa\s+/, '');
+      iconEl.className = 'fa ' + ic;
+    }
+    btn.title = k.label || '';
+    if (k.kisilestirilmis) wrap.setAttribute('data-kisilestirilmis', '1');
+    else wrap.removeAttribute('data-kisilestirilmis');
+
+    wrap.querySelectorAll('.dash-kisayol-edit, .dash-kisayol-badge').forEach(function (el) {
+      el.remove();
+    });
+
+    var editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.className = 'dash-kisayol-edit';
+    editBtn.setAttribute('aria-label', 'Kısayolu düzenle');
+    editBtn.innerHTML = '<i class="fa fa-pencil"></i>';
+    editBtn.addEventListener('click', function (ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      dashKisayolDuzenleAc(k);
+    });
+    wrap.appendChild(editBtn);
+
+    if (k.kisilestirilmis) {
+      var badge = document.createElement('span');
+      badge.className = 'dash-kisayol-badge';
+      badge.textContent = 'Kişisel';
+      badge.title = 'Bu kısayol kişisel ayarınızla özelleştirilmiş';
+      wrap.appendChild(badge);
+    }
+  }
+
   function dashKisayollariYukle() {
     fetch('/dashboard/api/kisayollar', { credentials: 'same-origin' })
       .then(function (r) { return r.json(); })
@@ -1089,6 +1156,10 @@ a.dash-stat-card:hover { box-shadow: 0 0 0 1px #4fc3f7; }
         d.kisayollar.forEach(function (k) {
           if (k.slot_key && String(k.slot_key).indexOf('stat_') === 0) {
             dashStatKartBagula(k);
+            return;
+          }
+          if (k.slot_key && String(k.slot_key).indexOf('filtre_') === 0) {
+            dashFiltreButonBagula(k);
             return;
           }
           var el = dashKisayolRenderTile(k);
@@ -1115,7 +1186,8 @@ a.dash-stat-card:hover { box-shadow: 0 0 0 1px #4fc3f7; }
     document.getElementById('dash-kisayol-label-input').value = k.label || '';
     document.getElementById('dash-kisayol-url-input').value = k.url || '';
     var urlWrap = document.getElementById('dash-kisayol-url-wrap');
-    if (urlWrap) urlWrap.style.display = (k.slot_key === 'geri_donus') ? 'none' : 'block';
+    var noUrl = (k.slot_key === 'geri_donus') || (String(k.slot_key || '').indexOf('filtre_') === 0);
+    if (urlWrap) urlWrap.style.display = noUrl ? 'none' : 'block';
     var hataEl = document.getElementById('dash-kisayol-hata');
     if (hataEl) { hataEl.style.display = 'none'; hataEl.textContent = ''; }
 
@@ -1155,11 +1227,12 @@ a.dash-stat-card:hover { box-shadow: 0 0 0 1px #4fc3f7; }
       if (hataEl) { hataEl.textContent = 'İsim boş olamaz.'; hataEl.style.display = 'block'; }
       return;
     }
-    var isGeriDonus = __dashKisayolDuzenlenen.slot_key === 'geri_donus';
+    var sk = __dashKisayolDuzenlenen.slot_key || '';
+    var noUrl = (sk === 'geri_donus') || (String(sk).indexOf('filtre_') === 0);
     var body = {
-      slot_key: __dashKisayolDuzenlenen.slot_key,
+      slot_key: sk,
       label: label,
-      url: isGeriDonus ? null : urlInput,
+      url: noUrl ? null : urlInput,
       icon: __dashKisayolDuzenlenen.icon
     };
     var kapsamGlobal = document.getElementById('dash-kisayol-kapsam-global');
