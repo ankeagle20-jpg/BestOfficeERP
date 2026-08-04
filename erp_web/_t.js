@@ -19531,7 +19531,33 @@ async function kaydet(event) {
                     console.warn('KYC yanıtı JSON değil:', kycResp.status);
                 }
                 if (!kycResp.ok || !kycResult.ok) {
-                    console.warn('KYC kaydı sorunlu:', kycResult.mesaj || kycResp.status);
+                    if (kycResult && kycResult.kod === 'sozlesme_ileri_tarih_onay_gerekli') {
+                        var _onayMsg = (kycResult.mesaj || 'Sözleşme başlangıcı çok ileride görünüyor. Devam edilsin mi?');
+                        if (window.confirm(_onayMsg)) {
+                            var kycDataOnay = Object.assign({}, kycData, { sozlesme_ileri_tarih_onay: true });
+                            const kycResp2 = await girisFetchAgKopmasinaKarsi('/musteriler/api/kyc/kaydet', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                credentials: 'same-origin',
+                                body: JSON.stringify(kycDataOnay)
+                            }, 3);
+                            const kycText2 = await kycResp2.text();
+                            let kycResult2 = {};
+                            try {
+                                kycResult2 = kycText2 ? JSON.parse(kycText2) : {};
+                            } catch (eK2) {
+                                console.warn('KYC onay yanıtı JSON değil:', kycResp2.status);
+                            }
+                            if (!kycResp2.ok || !kycResult2.ok) {
+                                console.warn('KYC kaydı (onaylı) sorunlu:', kycResult2.mesaj || kycResp2.status);
+                            }
+                        } else {
+                            console.warn('KYC kaydı iptal: sözleşme bilgileri kaydedilmedi (sözleşme başlangıç tarihi çok ileri görünüyor, onaylanmadı). Tarihi kontrol edip tekrar deneyin.');
+                        }
+                        // İptal: sözleşme kaydı yapılmaz; kullanıcı formda kalır.
+                    } else {
+                        console.warn('KYC kaydı sorunlu:', kycResult.mesaj || kycResp.status);
+                    }
                 }
             } catch (e) {
                 console.warn('KYC kaydı sırasında hata:', e);
