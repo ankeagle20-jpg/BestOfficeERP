@@ -1443,7 +1443,7 @@
             const sube = (tr.querySelector('input[name="sube"]') || {}).value || '';
             const vade = (tr.querySelector('input[name="vade"]') || {}).value || '';
             const tutarStr = (tr.querySelector('input[name="tutar"]') || {}).value || '';
-            const tutar = parseFloat(String(tutarStr).replace(/\./g, '').replace(',', '.')) || 0;
+            const tutar = tahsilatParseAmountTR(tutarStr) || 0;
             rows.push({ cek_no, hesap_no, banka, sube, vade, tutar: tutar });
         });
         return rows;
@@ -1496,17 +1496,33 @@
     function tahsilatParseAmountTR(s) {
         s = String(s || '').replace(/TL/gi, '').replace(/\s/g, '');
         if (!s) return 0;
-        // 1) "1.234,56"  -> 1234.56
-        // 2) "1234.56"   -> 1234.56
-        // 3) "1,234.56"  -> 1234.56
-        if (s.indexOf(',') >= 0 && s.indexOf('.') >= 0) {
-            if (s.lastIndexOf(',') > s.lastIndexOf('.')) {
+        // Esnek: son '.' veya ',' ondalık; öncekiler binlik.
+        // Tek '.' + 1-2 hane → ondalık ("83000.40"); tam 3 hane → binlik ("83.000").
+        var hasDot = s.indexOf('.') >= 0;
+        var hasComma = s.indexOf(',') >= 0;
+        if (hasDot && hasComma) {
+            var lastDot = s.lastIndexOf('.');
+            var lastComma = s.lastIndexOf(',');
+            if (lastComma > lastDot) {
                 s = s.replace(/\./g, '').replace(',', '.');
             } else {
                 s = s.replace(/,/g, '');
             }
-        } else if (s.indexOf(',') >= 0) {
+        } else if (hasComma) {
             s = s.replace(/\./g, '').replace(',', '.');
+        } else if (hasDot) {
+            var last = s.lastIndexOf('.');
+            var frac = s.slice(last + 1);
+            var intPart = s.slice(0, last);
+            if (/^\d+$/.test(frac) && frac.length === 3) {
+                // "83.000" / "1.234.567" → binlik
+                s = s.replace(/\./g, '');
+            } else if (/^\d+$/.test(frac) && frac.length <= 2) {
+                // "83000.40" / "1.234.56" → son nokta ondalık, öncekiler binlik
+                s = intPart.replace(/\./g, '') + '.' + frac;
+            } else {
+                s = s.replace(/\./g, '');
+            }
         } else {
             s = s.replace(/,/g, '');
         }
@@ -1764,7 +1780,7 @@
         const musteriId = document.getElementById('tahsilat-musteri-id').value;
         const musteriAdi = (document.getElementById('tahsilat-musteri-secilen').textContent || '').trim();
         const tutarRaw = (document.getElementById('tahsilat-tutar').value || '');
-        let tutar = parseFloat(String(tutarRaw).replace(/\./g, '').replace(',', '.'));
+        let tutar = tahsilatParseAmountTR(tutarRaw);
         const odemeTuru = document.getElementById('tahsilat-odeme-turu').value;
         const cekList = cekDetayTopla();
         if (odemeTuru === 'cek' && cekList.length) {
