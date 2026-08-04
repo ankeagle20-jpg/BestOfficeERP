@@ -1,7 +1,7 @@
 """
 Ofis yönetimi routes'ları
 """
-from flask import Blueprint, render_template, request, flash, redirect, url_for, jsonify
+from flask import Blueprint, render_template, request, flash, redirect, url_for, jsonify, current_app
 from auth import giris_gerekli, admin_gerekli
 from db import fetch_all, fetch_one, execute, execute_returning
 
@@ -30,9 +30,9 @@ def index():
             params.append(durum)
         
         if aktif == 'true':
-            sql += " AND is_active = TRUE"
+            sql += " AND is_active = 1"
         elif aktif == 'false':
-            sql += " AND is_active = FALSE"
+            sql += " AND is_active = 0"
         
         sql += " ORDER BY code"
         
@@ -71,8 +71,17 @@ def index():
                                aktif=aktif)
     
     except Exception as e:
+        current_app.logger.exception(e)
         flash(f"Hata: {e}", "danger")
-        return render_template('ofisler/index.html', ofisler=[], istatistikler={})
+        return render_template(
+            'ofisler/index.html',
+            ofisler=[],
+            istatistikler={
+                'hazir': {'toplam': 0, 'dolu': 0},
+                'paylasimli': {'toplam': 0, 'dolu': 0},
+                'sanal': {'toplam': 0, 'dolu': 0},
+            },
+        )
 
 
 @bp.route('/yeni', methods=['GET', 'POST'])
