@@ -1354,7 +1354,23 @@
         const ay = document.getElementById('ay').value;
         let url = '/faturalar/tahsilatlar?yil=' + encodeURIComponent(yil);
         if (ay) url += '&ay=' + encodeURIComponent(ay);
-        // Hizmet türü filtresi istemci tarafında uygulanıyor; URL'ye eklemeyelim.
+        // Hizmet türü: backend request.args.get("hizmet_turleri") (virgülle, lower)
+        var _hzArr = [];
+        try {
+            var _hzSrc = (seciliHizmetler != null) ? seciliHizmetler : (typeof __tahsilatHizmetSecili !== 'undefined' ? __tahsilatHizmetSecili : []);
+            if (Array.isArray(_hzSrc)) {
+                var _seen = {};
+                _hzSrc.forEach(function (x) {
+                    var k = (typeof tahsilatHizmetKey === 'function') ? tahsilatHizmetKey(x) : String(x != null ? x : '').trim().toLowerCase();
+                    if (!k || _seen[k]) return;
+                    _seen[k] = true;
+                    _hzArr.push(k);
+                });
+            }
+        } catch (_eHz) {}
+        if (_hzArr.length) {
+            url += '&hizmet_turleri=' + encodeURIComponent(_hzArr.join(','));
+        }
         if (bas) url += '&baslangic=' + encodeURIComponent(bas);
         if (bit) url += '&bitis=' + encodeURIComponent(bit);
         // İşaretli = Girildiği Tarih (created_at) → senaryo=0
