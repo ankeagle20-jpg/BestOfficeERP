@@ -2029,17 +2029,56 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         })
-        .then(r => r.json())
-        .then(data => {
-            if (data.ok) {
+        .then(function (r) {
+            // 400 soft-confirm body'si de okunabilsin (r.ok kontrolü yok)
+            return r.text().then(function (txt) {
+                var data = {};
+                try { data = txt ? JSON.parse(txt) : {}; } catch (eJ) { data = {}; }
+                return data;
+            });
+        })
+        .then(function (data) {
+            if (data && data.ok) {
                 alert(data.mesaj || 'Tahsilat eklendi.');
                 tahsilatModalKapat();
                 window.location.reload();
-            } else {
-                alert(data.mesaj || 'Kayıt yapılamadı.');
+                return;
             }
+            if (data && data.kod === 'asiri_tutar_onay_gerekli') {
+                var onayMsg = (data.mesaj || 'Girilen tutar açık ayları aşıyor. Devam edilsin mi?');
+                if (window.confirm(onayMsg)) {
+                    var payloadOnay = Object.assign({}, payload, { asiri_tutar_onay: true });
+                    fetch(API_TAHSILAT_EKLE, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payloadOnay)
+                    })
+                    .then(function (r2) {
+                        return r2.text().then(function (txt2) {
+                            var data2 = {};
+                            try { data2 = txt2 ? JSON.parse(txt2) : {}; } catch (eJ2) { data2 = {}; }
+                            return data2;
+                        });
+                    })
+                    .then(function (data2) {
+                        if (data2 && data2.ok) {
+                            alert(data2.mesaj || 'Tahsilat eklendi.');
+                            tahsilatModalKapat();
+                            window.location.reload();
+                        } else {
+                            alert((data2 && data2.mesaj) ? data2.mesaj : 'Kayıt yapılamadı.');
+                        }
+                    })
+                    .catch(function (err2) {
+                        alert('İstek gönderilemedi: ' + err2.message);
+                    });
+                }
+                // İptal: ek istek yok, kullanıcı formda kalır
+                return;
+            }
+            alert((data && data.mesaj) ? data.mesaj : 'Kayıt yapılamadı.');
         })
-        .catch(err => {
+        .catch(function (err) {
             alert('İstek gönderilemedi: ' + err.message);
         });
         return false;
