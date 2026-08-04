@@ -4731,6 +4731,58 @@ function girisStandaloneMidQueryGuncelle(mid) {
     } catch (e) {}
 }
 
+function girisHizmetTuruUrlOku() {
+    try {
+        var raw = new URLSearchParams(window.location.search).get('hizmet_turu');
+        if (raw == null || String(raw).trim() === '') return [];
+        var seen = {};
+        var out = [];
+        String(raw).split(',').forEach(function (part) {
+            var t = String(part != null ? part : '').trim();
+            if (!t || seen[t]) return;
+            seen[t] = true;
+            out.push(t);
+        });
+        return out;
+    } catch (e) {
+        return [];
+    }
+}
+
+function girisStandaloneHizmetTuruQueryGuncelle(seciliDizi) {
+    try {
+        if (window.parent !== window.self) return;
+        var p = new URLSearchParams(window.location.search);
+        var arr = [];
+        var seen = {};
+        if (Array.isArray(seciliDizi)) {
+            seciliDizi.forEach(function (x) {
+                var t = String(x != null ? x : '').trim();
+                if (!t || seen[t]) return;
+                seen[t] = true;
+                arr.push(t);
+            });
+        }
+        var next = arr.length ? arr.join(',') : '';
+        var cur = p.get('hizmet_turu');
+        if (!next) {
+            if (cur == null) return;
+            p.delete('hizmet_turu');
+        } else {
+            if (cur === next) return;
+            p.set('hizmet_turu', next);
+        }
+        var path = window.location.pathname || '/giris/';
+        var qs = p.toString();
+        var st = history.state;
+        if (st != null && typeof st === 'object') {
+            history.replaceState(st, '', path + (qs ? '?' + qs : ''));
+        } else {
+            history.replaceState(null, '', path + (qs ? '?' + qs : ''));
+        }
+    } catch (e) {}
+}
+
 /** Giriş üst sekmeleri: stabil URL key <-> data-index */
 var GIRIS_TAB_KEY_BY_INDEX = {
     0: 'musteri_ekle',
@@ -10472,6 +10524,12 @@ function faturaRaporFirmaFilterMenuHizmetAc(anchor) {
             }
             faturaRaporFirmaFilterPopClose();
             if (typeof faturaRaporFiltreStateKaydet === 'function') faturaRaporFiltreStateKaydet();
+            if (typeof girisStandaloneHizmetTuruQueryGuncelle === 'function') {
+                girisStandaloneHizmetTuruQueryGuncelle(
+                    (typeof faturaRaporFirmaFiltreHizmetDiziOku === 'function')
+                        ? faturaRaporFirmaFiltreHizmetDiziOku() : []
+                );
+            }
             if (typeof faturaRaporHizmetBtnStilGuncelle === 'function') faturaRaporHizmetBtnStilGuncelle();
             var ps = window.__faturaRaporFirmaPagingState || null;
             var allLoader = (picked.length > 0 && ps && ps.hasMore && typeof window.__faturaRaporFirmaPagingFetch === 'function')
@@ -25261,8 +25319,28 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (typeof faturaRaporFiltreStateUygula === 'function') faturaRaporFiltreStateUygula();
         else if (typeof faturaRaporGorunumUI === 'function') faturaRaporGorunumUI();
+        // URL hizmet_turu varsa LS'deki hizmet filtresini override et (deep-link / F5).
+        if (typeof girisHizmetTuruUrlOku === 'function'
+            && typeof faturaRaporFirmaFiltreHizmetYaz === 'function') {
+            try {
+                var _hzUrl = girisHizmetTuruUrlOku();
+                var _hzParam = new URLSearchParams(window.location.search).get('hizmet_turu');
+                if (_hzParam != null) {
+                    faturaRaporFirmaFiltreHizmetYaz(_hzUrl);
+                }
+            } catch (_eHzUrl) {}
+        }
         if (typeof faturaRaporFirmaPrefsHydrateFromServer === 'function') faturaRaporFirmaPrefsHydrateFromServer();
         if (typeof girisBootstrapMusteriVeSekme === 'function') girisBootstrapMusteriVeSekme();
+        // Müşteriler sekmesinde URL/LS hizmet filtresi buton + listeye yansısın.
+        try {
+            var _tabP = (new URLSearchParams(window.location.search).get('tab') || '').trim().toLowerCase();
+            var _tabIsMusteriler = (_tabP === 'musteriler' || _tabP === '7');
+            if (_tabIsMusteriler) {
+                if (typeof faturaRaporHizmetBtnStilGuncelle === 'function') faturaRaporHizmetBtnStilGuncelle();
+                if (typeof faturaRaporListeAraUygula === 'function') faturaRaporListeAraUygula();
+            }
+        } catch (_eHzUi) {}
     })();
     musteriAra();
     setTimeout(function () {
