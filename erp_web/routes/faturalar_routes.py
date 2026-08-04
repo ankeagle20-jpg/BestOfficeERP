@@ -8408,6 +8408,41 @@ def tahsilat_ekle():
             )
             if auto_isos:
                 ay_ref_isos = auto_isos
+            # Soft-confirm: tutar açık aylara dağıtılandan fazlaysa (eşleşmeyen kısım)
+            # onay flag'i olmadan INSERT etme. Fazla ay/avans yazılmaz; sadece uyarı.
+            dagitilacak = round(
+                sum(float(p or 0) for _iso, p in (auto_pay_items or [])),
+                2,
+            )
+            eslesmeyen = round(float(tutar or 0) - dagitilacak, 2)
+            if eslesmeyen > 0.01:
+                _onay_raw = data.get("asiri_tutar_onay")
+                _onay = _onay_raw in (True, 1, "1", "true", "True", "yes", "on")
+                if not _onay:
+                    def _fmt_tl(n):
+                        return (
+                            f"{float(n):,.2f}"
+                            .replace(",", "X")
+                            .replace(".", ",")
+                            .replace("X", ".")
+                        )
+                    return jsonify({
+                        "ok": False,
+                        "kod": "asiri_tutar_onay_gerekli",
+                        "mesaj": (
+                            "Girilen %s TL'nin %s TL'si açık aylara dağıtılacak; "
+                            "%s TL hiçbir aya eşleşmeyecek. Devam edilsin mi?"
+                            % (
+                                _fmt_tl(tutar),
+                                _fmt_tl(dagitilacak),
+                                _fmt_tl(eslesmeyen),
+                            )
+                        ),
+                        "tutar": round(float(tutar or 0), 2),
+                        "dagitilacak": dagitilacak,
+                        "eslesmeyen": eslesmeyen,
+                        "acik_ay_sayisi": len(auto_pay_items or []),
+                    }), 400
         aciklama_text = _aciklama_with_aylik_markers(
             raw_aciklama,
             ay_ref_isos,
