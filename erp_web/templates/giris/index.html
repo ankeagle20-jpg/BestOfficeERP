@@ -8643,6 +8643,214 @@ function whatsappTabloResizableKur() {
 
 
 
+
+/* ========== Aşama 0: Sözleşmeler sessiz grid poll (DOM yok, yalnız log) ========== */
+if (typeof window.__SOZ_GRID_POLL_MS === 'undefined') {
+    window.__SOZ_GRID_POLL_MS = 25000; /* 0 = kapalı */
+}
+window.__sozGridPoll = window.__sozGridPoll || {
+    timer: null,
+    inFlight: false,
+    abort: null,
+    mid: null,
+    visBound: false
+};
+
+function sozlesmelerAylikSessizPollMs() {
+    var n = parseInt(window.__SOZ_GRID_POLL_MS, 10);
+    if (isNaN(n) || n <= 0) return 0;
+    return n;
+}
+
+function sozlesmelerAylikSessizPollJitterDelay() {
+    var base = sozlesmelerAylikSessizPollMs();
+    if (base <= 0) return 0;
+    var j = base * 0.1;
+    return Math.max(1000, Math.round(base - j + Math.random() * (2 * j)));
+}
+
+function sozlesmelerAylikSessizPollStop(reason) {
+    var st = window.__sozGridPoll;
+    if (!st) return;
+    if (st.timer) {
+        try { clearTimeout(st.timer); } catch (_eT) {}
+        st.timer = null;
+    }
+    if (st.abort) {
+        try { st.abort.abort(); } catch (_eA) {}
+        st.abort = null;
+    }
+    st.inFlight = false;
+    if (reason) {
+        try { console.debug('[soz-grid-poll] stop', reason); } catch (_eL) {}
+    }
+}
+
+function sozlesmelerAylikSessizPollSchedule(immediate) {
+    var st = window.__sozGridPoll;
+    if (!st) return;
+    if (st.timer) {
+        try { clearTimeout(st.timer); } catch (_eT) {}
+        st.timer = null;
+    }
+    if (sozlesmelerAylikSessizPollMs() <= 0) return;
+    var delay = immediate ? 0 : sozlesmelerAylikSessizPollJitterDelay();
+    st.timer = setTimeout(function () {
+        st.timer = null;
+        sozlesmelerAylikSessizPollTick();
+    }, delay);
+}
+
+function sozlesmelerAylikSessizPollGatesOk() {
+    try {
+        if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return false;
+    } catch (_eV) { return false; }
+    try {
+        if (typeof getActiveTabIndex === 'function' && getActiveTabIndex() !== 6) return false;
+    } catch (_eTab) { return false; }
+    try {
+        if (typeof selectedId === 'undefined' || selectedId == null || selectedId === '') return false;
+    } catch (_eMid) { return false; }
+    return true;
+}
+
+function sozlesmelerAylikSessizPollEnsureVisListener() {
+    var st = window.__sozGridPoll;
+    if (!st || st.visBound) return;
+    st.visBound = true;
+    document.addEventListener('visibilitychange', function () {
+        if (sozlesmelerAylikSessizPollMs() <= 0) return;
+        if (document.visibilityState === 'visible') {
+            if (!sozlesmelerAylikSessizPollGatesOk()) return;
+            try { console.debug('[soz-grid-poll] visible — catch-up'); } catch (_eL) {}
+            sozlesmelerAylikSessizPollSchedule(true);
+        } else {
+            if (st.timer) {
+                try { clearTimeout(st.timer); } catch (_eT) {}
+                st.timer = null;
+            }
+            if (st.abort) {
+                try { st.abort.abort(); } catch (_eA) {}
+                st.abort = null;
+                st.inFlight = false;
+            }
+            try { console.debug('[soz-grid-poll] hidden — paused'); } catch (_eL2) {}
+        }
+    });
+}
+
+function sozlesmelerAylikSessizPollStart(reason) {
+    if (sozlesmelerAylikSessizPollMs() <= 0) {
+        sozlesmelerAylikSessizPollStop('flag_off');
+        return;
+    }
+    sozlesmelerAylikSessizPollEnsureVisListener();
+    var st = window.__sozGridPoll;
+    st.mid = (typeof selectedId !== 'undefined') ? selectedId : null;
+    try { console.debug('[soz-grid-poll] start', reason || '', 'mid=', st.mid, 'ms=', sozlesmelerAylikSessizPollMs()); } catch (_eL) {}
+    sozlesmelerAylikSessizPollSchedule(false);
+}
+
+/** Tab/müşteri değişiminde: eski poll abort + koşullar uygunsa yeniden planla. */
+function sozlesmelerAylikSessizPollOnTabOrMusteri(reason) {
+    sozlesmelerAylikSessizPollEnsureVisListener();
+    sozlesmelerAylikSessizPollStop(null);
+    if (sozlesmelerAylikSessizPollMs() <= 0) return;
+    if (sozlesmelerAylikSessizPollGatesOk()) {
+        sozlesmelerAylikSessizPollStart(reason || 'tab_or_musteri');
+    } else {
+        try {
+            console.debug('[soz-grid-poll] idle (gates)', {
+                vis: (typeof document !== 'undefined') ? document.visibilityState : null,
+                tab: (typeof getActiveTabIndex === 'function') ? getActiveTabIndex() : null,
+                mid: (typeof selectedId !== 'undefined') ? selectedId : null
+            });
+        } catch (_eL) {}
+    }
+}
+
+function sozlesmelerAylikSessizPollTick() {
+    sozlesmelerAylikSessizPollEnsureVisListener();
+    var st = window.__sozGridPoll;
+    if (!st) return;
+    if (sozlesmelerAylikSessizPollMs() <= 0) return;
+
+    if (!sozlesmelerAylikSessizPollGatesOk()) {
+        try {
+            console.debug('[soz-grid-poll] skip gate', {
+                vis: document.visibilityState,
+                tab: (typeof getActiveTabIndex === 'function') ? getActiveTabIndex() : null,
+                mid: (typeof selectedId !== 'undefined') ? selectedId : null,
+                inFlight: !!st.inFlight
+            });
+        } catch (_eL) {}
+        /* Tab/mid uygun değilse yeniden planlama yok — start() bekler.
+           hidden ise visibilitychange catch-up yapar. */
+        return;
+    }
+
+    if (st.inFlight) {
+        try { console.debug('[soz-grid-poll] skip inFlight'); } catch (_eL2) {}
+        sozlesmelerAylikSessizPollSchedule(false);
+        return;
+    }
+
+    var mid = selectedId;
+    st.mid = mid;
+    st.inFlight = true;
+    var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    st.abort = ctrl;
+    var url = '/giris/api/musteri-kart-bundle?musteri_id=' + encodeURIComponent(mid) + '&skip_match=1';
+    var t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    var fetchOpts = { credentials: 'same-origin', cache: 'no-store' };
+    if (ctrl) fetchOpts.signal = ctrl.signal;
+
+    fetch(url, fetchOpts)
+        .then(function (r) {
+            return r.text().then(function (txt) {
+                var data = {};
+                try { data = txt ? JSON.parse(txt) : {}; } catch (_eJ) { data = { _parse_err: true }; }
+                return { status: r.status, data: data };
+            });
+        })
+        .then(function (pack) {
+            var t1 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+            var data = pack.data || {};
+            var grid = data.grid || {};
+            var skipHint = null;
+            if (grid && (grid.mem != null || grid.cached != null)) {
+                skipHint = { cached: grid.cached, mem: grid.mem };
+            }
+            /* Aşama 0: DOM'A DOKUNMA — render yok */
+            try {
+                console.debug('[soz-grid-poll] tick', {
+                    mid: mid,
+                    ms: Math.round(t1 - t0),
+                    http: pack.status,
+                    ok: !!data.ok,
+                    grid_ok: !!(grid && grid.ok),
+                    skip: skipHint,
+                    timings_ms: data.timings_ms || null
+                });
+            } catch (_eLog) {}
+        })
+        .catch(function (err) {
+            if (err && err.name === 'AbortError') {
+                try { console.debug('[soz-grid-poll] aborted', mid); } catch (_eA) {}
+                return;
+            }
+            try { console.debug('[soz-grid-poll] error', mid, String((err && err.message) || err)); } catch (_eE) {}
+        })
+        .then(function () {
+            if (st.abort === ctrl) st.abort = null;
+            st.inFlight = false;
+            if (sozlesmelerAylikSessizPollMs() > 0 && sozlesmelerAylikSessizPollGatesOk()) {
+                sozlesmelerAylikSessizPollSchedule(false);
+            }
+        });
+}
+/* ========== /Aşama 0 sessiz poll ========== */
+
 function switchTab(index) {
     currentTabIndex = index;
     try {
@@ -8779,6 +8987,11 @@ function switchTab(index) {
     try {
         if (typeof girisStandaloneTabQueryGuncelle === 'function') girisStandaloneTabQueryGuncelle(index);
     } catch (_eTabUrl) {}
+    try {
+        if (typeof sozlesmelerAylikSessizPollOnTabOrMusteri === 'function') {
+            sozlesmelerAylikSessizPollOnTabOrMusteri('switchTab');
+        }
+    } catch (_ePollTab) {}
     /* Cari ekstre burada çağrılmasın: form henüz güncellenmeden eski tarihlerle istek gidiyordu.
        Tarihler fillActiveTab + cariEkstreMusteriDegisinceYenile ile ayarlanır. */
 }
@@ -22559,6 +22772,11 @@ function selectMusteri(id) {
         }
     } catch (_eHorSel) {}
     selectedId = id;
+    try {
+        if (typeof sozlesmelerAylikSessizPollOnTabOrMusteri === 'function') {
+            sozlesmelerAylikSessizPollOnTabOrMusteri('selectMusteri');
+        }
+    } catch (_ePollSel) {}
     window.__sozlesmelerReelEsitleReqId = (window.__sozlesmelerReelEsitleReqId || 0) + 1;
     if (typeof sozlesmelerReelTahsilatEsitleModalKapat === 'function') {
         try { sozlesmelerReelTahsilatEsitleModalKapat(); } catch (e) {}
