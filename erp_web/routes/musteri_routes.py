@@ -2234,6 +2234,39 @@ def api_kyc_kaydet():
         kira_artis_tarihi = parse_date(kira_artis_tarihi)
         kapanis_tarihi = parse_date(data.get("kapanis_tarihi")) if durum_m == "pasif" else None
 
+        # Sözleşme başlangıcı bugünden >3 ay ilerideyse soft-onay gerekir
+        # (FE: confirm → sozlesme_ileri_tarih_onay=true). Kesin üst sınır yok.
+        if sozlesme_tarihi:
+            _bugun = date.today()
+            _m = _bugun.month - 1 + 3
+            _y = _bugun.year + _m // 12
+            _mo = _m % 12 + 1
+            _limit = date(_y, _mo, min(_bugun.day, calendar.monthrange(_y, _mo)[1]))
+            if sozlesme_tarihi > _limit:
+                _onay_raw = data.get("sozlesme_ileri_tarih_onay")
+                _onay = _onay_raw in (True, 1, "1", "true", "True", "yes", "on")
+                if not _onay:
+                    # Yaklaşık ay farkı (mesaj için)
+                    _ay_approx = (
+                        (sozlesme_tarihi.year - _bugun.year) * 12
+                        + (sozlesme_tarihi.month - _bugun.month)
+                    )
+                    if sozlesme_tarihi.day > _bugun.day:
+                        _ay_approx += 1
+                    if _ay_approx < 4:
+                        _ay_approx = 4
+                    return jsonify({
+                        "ok": False,
+                        "kod": "sozlesme_ileri_tarih_onay_gerekli",
+                        "mesaj": (
+                            "Sözleşme başlangıcı yaklaşık %s ay ileride görünüyor (%s). "
+                            "Bu normal mi? Onaylarsanız devam edin."
+                            % (_ay_approx, sozlesme_tarihi.isoformat())
+                        ),
+                        "sozlesme_tarihi": sozlesme_tarihi.isoformat(),
+                        "esik_ay": 3,
+                    }), 400
+
         durum_pasif = durum_m == "pasif"
         hazir_oda_val = _coerce_hazir_ofis_oda_no(data, hizmet_turu, durum_pasif)
         if hazir_oda_val is False:
