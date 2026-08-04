@@ -3389,7 +3389,7 @@ function girisRandevuIframeYukle() {
 
 // Sekme değiştirme (içerik id: tab-0 .. tab-10; 6 özel: sol panel tab-0)
 
-/* ========== Aşama 0/1: Sözleşmeler sessiz grid poll (imza + güvenli boyama) ========== */
+/* ========== Aşama 0/1/2: Sözleşmeler sessiz grid poll (grid-cache only) ========== */
 if (typeof window.__SOZ_GRID_POLL_MS === 'undefined') {
     window.__SOZ_GRID_POLL_MS = 25000; /* 0 = kapalı */
 }
@@ -3732,20 +3732,20 @@ function sozlesmelerAylikSessizPollInPlaceBoya(cacheObj) {
 }
 
 /**
- * Bundle grid cache'ini uygula: imza aynıysa no-op; yasak varsa ertele;
+ * Aşama 2: aylik-grid-cache cevabını uygula: imza aynıysa no-op; yasak varsa ertele;
  * horizon aynıysa in-place; değilse guard'lı CacheRender + restore.
  * fillActiveTab / form reset / yıl filtre bilinçli çağrılmaz (CacheRender kendi iç yolunda kalır).
  */
-function sozlesmelerAylikSessizPollApplyFromBundle(pack, ctx) {
+function sozlesmelerAylikSessizPollApplyFromGrid(pack, ctx) {
+    /* Aşama 2: pack.data = aylik-grid-cache cevabı ({ok, cache, cached, mem}) — bundle.grid değil. */
     var data = (pack && pack.data) || {};
-    var grid = data.grid || {};
-    var cache = grid.cache || null;
+    var cache = data.cache || null;
     var mid = ctx && ctx.mid;
     var selToken = ctx && ctx.selToken;
     var t0 = ctx && ctx.t0;
     var skipHint = null;
-    if (grid && (grid.mem != null || grid.cached != null)) {
-        skipHint = { cached: grid.cached, mem: grid.mem };
+    if (data && (data.mem != null || data.cached != null)) {
+        skipHint = { cached: data.cached, mem: data.mem };
     }
     var t1 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
     var baseLog = {
@@ -3753,11 +3753,12 @@ function sozlesmelerAylikSessizPollApplyFromBundle(pack, ctx) {
         ms: Math.round(t1 - (t0 || t1)),
         http: pack && pack.status,
         ok: !!data.ok,
-        grid_ok: !!(grid && grid.ok),
-        skip: skipHint
+        grid_ok: !!data.ok,
+        skip: skipHint,
+        source: 'aylik-grid-cache'
     };
 
-    if (!(grid && grid.ok && cache && Array.isArray(cache.aylar))) {
+    if (!(data.ok && cache && Array.isArray(cache.aylar))) {
         try { console.debug('[soz-grid-poll] tick', Object.assign({}, baseLog, { apply: 'no_cache' })); } catch (_e0) {}
         return;
     }
@@ -3865,7 +3866,7 @@ function sozlesmelerAylikSessizPollTick() {
     var selToken = window.__girisSelectMusteriToken;
     var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
     st.abort = ctrl;
-    var url = '/giris/api/musteri-kart-bundle?musteri_id=' + encodeURIComponent(mid) + '&skip_match=1';
+    var url = '/giris/api/aylik-grid-cache?musteri_id=' + encodeURIComponent(mid) + '&skip_match=1';
     var t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
     var fetchOpts = { credentials: 'same-origin', cache: 'no-store' };
     if (ctrl) fetchOpts.signal = ctrl.signal;
@@ -3879,8 +3880,8 @@ function sozlesmelerAylikSessizPollTick() {
             });
         })
         .then(function (pack) {
-            /* Aşama 1: imza / yasak / in-place veya guard'lı CacheRender — fillActiveTab yok */
-            sozlesmelerAylikSessizPollApplyFromBundle(pack, { mid: mid, selToken: selToken, t0: t0 });
+            /* Aşama 2: yalnız grid-cache; imza/yasak/in-place/CacheRender aynı — fillActiveTab yok */
+            sozlesmelerAylikSessizPollApplyFromGrid(pack, { mid: mid, selToken: selToken, t0: t0 });
         })
         .catch(function (err) {
             if (err && err.name === 'AbortError') {
@@ -3897,7 +3898,7 @@ function sozlesmelerAylikSessizPollTick() {
             }
         });
 }
-/* ========== /Aşama 0/1 sessiz poll ========== */
+/* ========== /Aşama 0/1/2 sessiz poll ========== */
 
 function switchTab(index) {
     currentTabIndex = index;
