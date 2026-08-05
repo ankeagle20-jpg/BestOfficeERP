@@ -81,7 +81,7 @@ import secrets
 from decimal import Decimal
 
 # Aylık grid «tam ödendi» / tahsil dağıtım mantığı değişince artırın; musteri_aylik_grid_cache yeniden üretilir.
-AYLIK_GRID_COMPUTE_REV = 24
+AYLIK_GRID_COMPUTE_REV = 25
 AYLIK_GRID_TAM_ODENDI_TOLERANS = 0.05  # kurus farklarini (dagitim/yuvarlama) tam odendi say
 PLACEHOLDER_BRUT_MAX = 0.5  # grid min tutar (0.01); gerçek brüt yazılmamış panel
 # Grid/panel tahsilat aciklama: «Ay YYYY Tahsilat H|AYLIK_TAH|…» (elle makbuz serbest metni haric)
@@ -887,7 +887,8 @@ def _apply_panel_by_iso_to_grid_payload(payload: dict, panel_by_iso: dict) -> No
             # hesabi (TÜFE + reel overlay) korunur.
             a["odenen_tutar_kdv"] = tah
             a["kalan_tutar_kdv"] = 0.0
-            a["tahsil_edildi"] = True
+            # brut≈0 iken marker olsa bile «tam ödendi» sayma (güvenlik freni).
+            a["tahsil_edildi"] = brut > tol
             a["kismi_tahsilat"] = False
             a["acik_aylik_borc_faturasi"] = False
             continue
@@ -898,7 +899,7 @@ def _apply_panel_by_iso_to_grid_payload(payload: dict, panel_by_iso: dict) -> No
         # hesabi (TÜFE + reel overlay) korunur.
         a["odenen_tutar_kdv"] = tah
         a["kalan_tutar_kdv"] = kalan
-        a["tahsil_edildi"] = kalan <= tol
+        a["tahsil_edildi"] = brut > tol and kalan <= tol
         a["kismi_tahsilat"] = tah > tol and kalan > tol
         if kalan > tol and tah <= tol:
             a["acik_aylik_borc_faturasi"] = True
@@ -1562,7 +1563,8 @@ def _aylik_grid_single_month_kdv_from_core(core, ref_y, ref_m) -> float:
 def _aylik_grid_compute(musteri_id, kyc, tufe_map, tahsil_tutar_map=None):
     """
     KYC satırı + önceden yüklenmiş TÜFE haritası ile aylık grid payload üretir.
-    Tam ödendi: yalnızca o aya dağıtılan tahsilatların KDV dahil kiraya göre kalanı ≤ 0,01 TL.
+    Tam ödendi: brut > tol ve o aya dağıtılan tahsilatların KDV dahil kiraya göre kalanı ≤ tol.
+    (brut≈0 iken kalan=0 «tam ödendi» sayılmaz — güvenlik freni.)
     (Eski: fatura/tahsil ayında herhangi bir ödeme olsa «tam ödendi» sayılıyordu — kısmi/yanlış yeşil.)
     """
     core = _aylik_grid_contract_core(kyc, tufe_map)
@@ -1593,7 +1595,8 @@ def _aylik_grid_compute(musteri_id, kyc, tufe_map, tahsil_tutar_map=None):
         kalan = max(round(tutar - odenen, 2), 0.0)
         tol = float(AYLIK_GRID_TAM_ODENDI_TOLERANS)
         kismi = odenen > 0 and kalan > tol
-        tam_odendi = kalan <= tol
+        # Güvenlik freni: brut≈0 iken kalan=0 «tam ödendi» sayılmaz.
+        tam_odendi = tutar > tol and kalan <= tol
         # Hücre metni: her ay sözleşme taban KDV dahil tutarı (yıl içi tutarlı); kalan ayrı alanda.
         gosterim_tutar = tutar
         aylar.append({
@@ -1775,7 +1778,8 @@ def _aylik_grid_apply_reel_donem_overlay_to_payload(
         a["tutar_kdv_dahil"] = new_t
         a["odenen_tutar_kdv"] = round(odenen, 2)
         a["kalan_tutar_kdv"] = kalan
-        a["tahsil_edildi"] = kalan <= tol
+        # Güvenlik freni: brut≈0 iken «tam ödendi» yok.
+        a["tahsil_edildi"] = new_t > tol and kalan <= tol
         a["kismi_tahsilat"] = odenen > tol and kalan > tol
 
 
@@ -1854,19 +1858,20 @@ def _build_aylik_grid_cache_payload(musteri_id, tufe_map=None, kyc_row=None, man
             if _grid_payload_marker_panel_tam_kapandi(mk_t, brut, yy, manual_reel_by_year, tol):
                 a["odenen_tutar_kdv"] = round(mk_t, 2)
                 a["kalan_tutar_kdv"] = 0.0
-                a["tahsil_edildi"] = True
+                # Güvenlik freni: brut≈0 iken marker olsa bile «tam ödendi» yok.
+                a["tahsil_edildi"] = brut > tol
                 a["kismi_tahsilat"] = False
             elif mk_t > tol and kap_b > tol:
                 kalan_p = round(max(kap_b - mk_t, 0), 2)
                 a["odenen_tutar_kdv"] = round(mk_t, 2)
                 a["kalan_tutar_kdv"] = kalan_p
-                a["tahsil_edildi"] = kalan_p <= tol
+                a["tahsil_edildi"] = brut > tol and kalan_p <= tol
                 a["kismi_tahsilat"] = kalan_p > tol
             else:
                 kalan = round(max(brut - odenen, 0), 2)
                 a["odenen_tutar_kdv"] = round(odenen, 2)
                 a["kalan_tutar_kdv"] = kalan
-                a["tahsil_edildi"] = kalan <= tol
+                a["tahsil_edildi"] = brut > tol and kalan <= tol
                 a["kismi_tahsilat"] = odenen > tol and kalan > tol
             a["tutar_kdv_dahil"] = round(max(brut, 0.01), 2)
         if acik_aylik_tutar_aylari:
@@ -6649,19 +6654,20 @@ def _ekstre_payload_odenen_zenginlestir(
         if _grid_payload_marker_panel_tam_kapandi(mk_t, brut, yy_en, manual_reel_by_year, tol):
             a["odenen_tutar_kdv"] = round(mk_t, 2)
             a["kalan_tutar_kdv"] = 0.0
-            a["tahsil_edildi"] = True
+            # Güvenlik freni: brut≈0 iken marker olsa bile «tam ödendi» yok.
+            a["tahsil_edildi"] = brut > tol
             a["kismi_tahsilat"] = False
         elif mk_t > tol and kap > tol:
             kalan_p = round(max(kap - mk_t, 0), 2)
             a["odenen_tutar_kdv"] = round(mk_t, 2)
             a["kalan_tutar_kdv"] = kalan_p
-            a["tahsil_edildi"] = kalan_p <= tol
+            a["tahsil_edildi"] = brut > tol and kalan_p <= tol
             a["kismi_tahsilat"] = kalan_p > tol
         else:
             kalan = round(max(brut - odenen, 0), 2)
             a["odenen_tutar_kdv"] = round(odenen, 2)
             a["kalan_tutar_kdv"] = kalan
-            a["tahsil_edildi"] = kalan <= tol
+            a["tahsil_edildi"] = brut > tol and kalan <= tol
             a["kismi_tahsilat"] = odenen > tol and kalan > tol
         a["tutar_kdv_dahil"] = round(max(brut, 0.01), 2)
 
