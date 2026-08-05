@@ -765,6 +765,17 @@
         Kaydet / Sil / TCMB / müşteri / grid verisine yazılmaz. Excel ve kira bildirgesi yok.
     </p>
     <div class="tufe-kontrol-grid">
+        <label class="required">Başlangıç Tarihi</label>
+        <input type="date" id="tufe_kontrol_baslangic_tarih">
+
+        <label>Artış Ayı</label>
+        <select id="tufe_kontrol_artis_ay" aria-label="TÜFE artış ayı">
+            <option value="">(Başlangıç tarihinin ayı)</option>
+            {% for ay in aylar %}
+            <option value="{{ ay }}">{{ ay }}</option>
+            {% endfor %}
+        </select>
+
         <label>Başlangıç Tutar (₺)</label>
         <div>
             <input type="number" step="0.01" id="tufe_kontrol_baslangic_tutar" placeholder="Örn: 5000" oninput="tufeKontrolKdvDokumGuncelle()">
@@ -796,17 +807,6 @@
                 <input type="number" step="0.01" id="tufe_kontrol_reel_banka" placeholder="Reel banka (net)" oninput="tufeKontrolReelKdvDokumGuncelle()">
             </div>
         </div>
-
-        <label class="required">Başlangıç Tarihi</label>
-        <input type="date" id="tufe_kontrol_baslangic_tarih">
-
-        <label>Artış Ayı</label>
-        <select id="tufe_kontrol_artis_ay" aria-label="TÜFE artış ayı">
-            <option value="">(Başlangıç tarihinin ayı)</option>
-            {% for ay in aylar %}
-            <option value="{{ ay }}">{{ ay }}</option>
-            {% endfor %}
-        </select>
     </div>
 
     <div class="tufe-kontrol-actions">
