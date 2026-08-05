@@ -1573,10 +1573,17 @@ function tufeKontrolAyAdiFromDate(iso) {
 function tufeKontrolHesapla() {
     tufeKontrolErr(null);
     var basNet = tufeKontrolEffectiveNet();
+    var reelNet = tufeKontrolEffectiveReelNet();
     var basTarihEl = document.getElementById('tufe_kontrol_baslangic_tarih');
     var basTarih = basTarihEl ? (basTarihEl.value || '').trim() : '';
-    if (basNet == null || basNet <= 0 || !basTarih) {
-        tufeKontrolErr('Başlangıç tutarı ve başlangıç tarihi zorunlu.');
+    if (!basTarih) {
+        tufeKontrolErr('Başlangıç tarihi zorunlu.');
+        return;
+    }
+    var hasBas = (basNet != null && basNet > 0);
+    var hasReel = (reelNet != null && reelNet > 0);
+    if (!hasBas && !hasReel) {
+        tufeKontrolErr('Başlangıç tutarı veya Reel tutardan en az biri girilmeli.');
         return;
     }
     var ys = tufeKontrolSeciliYillar();
@@ -1615,16 +1622,18 @@ function tufeKontrolHesapla() {
     yillarFetch.sort(function (a, b) { return a - b; });
 
     var hibritBas = tufeKontrolHibritBaslangic();
-    var hbDom = hibritBas ? tufeKontrolHibritNB('tufe_kontrol_bas_nakit', 'tufe_kontrol_bas_banka') : null;
-    if (hibritBas && !hbDom) {
-        tufeKontrolErr('Hibrit için nakit ve banka tutarları (ikisi de > 0) gerekli.');
-        return;
+    var hbDom = null;
+    if (hasBas && hibritBas) {
+        hbDom = tufeKontrolHibritNB('tufe_kontrol_bas_nakit', 'tufe_kontrol_bas_banka');
+        if (!hbDom) {
+            tufeKontrolErr('Hibrit için nakit ve banka tutarları (ikisi de > 0) gerekli.');
+            return;
+        }
     }
     var nakitBas = tufeKontrolNakitBaslangic();
-    var reelNet = tufeKontrolEffectiveReelNet();
     var hibritReel = tufeKontrolHibritReel();
     var hbReel = null;
-    if (reelNet != null && reelNet > 0 && hibritReel) {
+    if (hasReel && hibritReel) {
         hbReel = tufeKontrolHibritNB('tufe_kontrol_reel_nakit', 'tufe_kontrol_reel_banka')
             || tufeKontrolHibritNB('tufe_kontrol_bas_nakit', 'tufe_kontrol_bas_banka');
         if (!hbReel) {
@@ -1651,21 +1660,38 @@ function tufeKontrolHesapla() {
                 }
             });
 
-            var sonuc = tufeKontrolProjeksiyonTabloUret(
-                basNet, baslangicYil, donguSayisi, maxGosterilebilirYil,
-                tufeListe, sozlesmeAyAdi, nakitBas && !hibritBas, hibritBas ? hbDom : null
-            );
             var tb = document.getElementById('tufe_kontrol_tbody_bas');
             var tbl = document.getElementById('tufe_kontrol_tablo_bas');
-            if (tb) tb.innerHTML = sonuc.tablo;
-            if (tbl) tbl.classList.toggle('nakit', !!(sonuc.hideKdv));
             var ty = document.getElementById('tufe_kontrol_toplam_yil');
             var tt = document.getElementById('tufe_kontrol_toplam_tutar');
-            if (ty) ty.textContent = String(sonuc.projeksiyonSatirSayisi);
-            if (tt) tt.textContent = tufeKontrolPara(sonuc.toplamYilliklar);
+            var basWrap = tbl ? tbl.parentElement : null;
+            var basH4 = basWrap && basWrap.previousElementSibling && basWrap.previousElementSibling.tagName === 'H4'
+                ? basWrap.previousElementSibling : null;
+            var basP = basWrap && basWrap.nextElementSibling && basWrap.nextElementSibling.tagName === 'P'
+                ? basWrap.nextElementSibling : null;
+            if (hasBas) {
+                var sonuc = tufeKontrolProjeksiyonTabloUret(
+                    basNet, baslangicYil, donguSayisi, maxGosterilebilirYil,
+                    tufeListe, sozlesmeAyAdi, nakitBas && !hibritBas, hibritBas ? hbDom : null
+                );
+                if (tb) tb.innerHTML = sonuc.tablo;
+                if (tbl) tbl.classList.toggle('nakit', !!(sonuc.hideKdv));
+                if (ty) ty.textContent = String(sonuc.projeksiyonSatirSayisi);
+                if (tt) tt.textContent = tufeKontrolPara(sonuc.toplamYilliklar);
+                if (basH4) basH4.style.display = '';
+                if (basWrap) basWrap.style.display = '';
+                if (basP) basP.style.display = '';
+            } else {
+                if (tb) tb.innerHTML = '';
+                if (ty) ty.textContent = '—';
+                if (tt) tt.textContent = '—';
+                if (basH4) basH4.style.display = 'none';
+                if (basWrap) basWrap.style.display = 'none';
+                if (basP) basP.style.display = 'none';
+            }
 
             var reelBolum = document.getElementById('tufe_kontrol_reel_bolum');
-            if (reelNet != null && reelNet > 0) {
+            if (hasReel) {
                 var nakitReel = tufeKontrolNakitReel();
                 var reelSonuc = tufeKontrolReelKisaProjeksiyonTabloUret(
                     reelNet, baslangicYil, maxGosterilebilirYil, tufeListe, sozlesmeAyAdi,
