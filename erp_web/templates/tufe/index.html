@@ -491,6 +491,152 @@
         grid-template-columns: repeat(3, 1fr);
     }
 }
+/* --- TÜFE Kontrol (müşteriden bağımsız hesap makinesi) --- */
+.tufe-kontrol-wrap {
+    margin: 18px 0 24px;
+    padding: 16px 18px;
+    border: 1px solid #2d4060;
+    border-radius: 6px;
+    background: #0f2537;
+}
+.tufe-kontrol-wrap h2 {
+    margin: 0 0 8px;
+    color: #4fc3f7;
+    font-size: 18px;
+}
+.tufe-kontrol-aciklama {
+    color: #90a4ae;
+    font-size: 12px;
+    margin: 0 0 14px;
+    line-height: 1.45;
+}
+.tufe-kontrol-grid {
+    display: grid;
+    grid-template-columns: 160px 1fr;
+    gap: 10px 14px;
+    align-items: start;
+    margin-bottom: 12px;
+}
+.tufe-kontrol-grid > label {
+    color: #90a4ae;
+    font-size: 13px;
+    padding-top: 8px;
+}
+.tufe-kontrol-grid input[type="number"],
+.tufe-kontrol-grid input[type="date"],
+.tufe-kontrol-grid select {
+    width: 100%;
+    max-width: 320px;
+    background: #2d4060;
+    border: 1px solid #3d5070;
+    color: #e0f7fa;
+    padding: 8px 10px;
+    border-radius: 3px;
+    font-size: 13px;
+    box-sizing: border-box;
+}
+.tufe-kontrol-kdv-switch {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 14px;
+    margin: 6px 0;
+}
+.tufe-kontrol-kdv-switch label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    color: #90a4ae;
+    font-size: 12px;
+}
+.tufe-kontrol-dokum {
+    font-size: 11px;
+    color: #4fc3f7;
+    margin-top: 4px;
+}
+.tufe-kontrol-hibrit {
+    display: none;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+}
+.tufe-kontrol-hibrit.is-open {
+    display: flex;
+}
+.tufe-kontrol-hibrit input {
+    width: 140px;
+    max-width: 46%;
+}
+.tufe-kontrol-actions {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    margin: 14px 0 8px;
+}
+.tufe-kontrol-actions button {
+    background: #00bcd4;
+    color: #fff;
+    border: none;
+    padding: 10px 28px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: bold;
+}
+.tufe-kontrol-actions button.secondary {
+    background: #6b7280;
+}
+.tufe-kontrol-sonuc {
+    display: none;
+    margin-top: 12px;
+}
+.tufe-kontrol-sonuc h4 {
+    color: #4fc3f7;
+    margin: 12px 0 8px;
+    font-size: 14px;
+}
+.tufe-kontrol-tablo {
+    width: 100%;
+    border-collapse: collapse;
+    background: #0a1e2e;
+    border-radius: 3px;
+    font-size: 11px;
+}
+.tufe-kontrol-tablo th {
+    background: #0097a7;
+    color: #fff;
+    padding: 8px;
+    text-align: right;
+}
+.tufe-kontrol-tablo th:first-child {
+    text-align: left;
+}
+.tufe-kontrol-tablo td {
+    padding: 8px;
+    border-bottom: 1px solid #2d4060;
+    color: #e0f7fa;
+    text-align: right;
+}
+.tufe-kontrol-tablo td:first-child {
+    text-align: left;
+}
+.tufe-kontrol-tablo tr.foot {
+    background: #0097a7;
+    font-weight: bold;
+}
+.tufe-kontrol-tablo tr.foot td {
+    color: #fff;
+    border-bottom: none;
+}
+.tufe-kontrol-tablo.nakit .tk-kdv {
+    display: none;
+}
+.tufe-kontrol-err {
+    color: #ef5350;
+    font-size: 12px;
+    margin: 8px 0;
+}
 </style>
 
 <div class="tufe-header">
@@ -610,6 +756,112 @@
 </form>
 
 <div id="tufe-sim-panel" class="tufe-sim-panel" style="display:none;" aria-live="polite"></div>
+<!-- ========== TÜFE Kontrol (salt görüntüleme; DB yazmaz) ========== -->
+<div class="tufe-kontrol-wrap" id="tufe-kontrol-wrap">
+    <h2>🎯 TÜFE Kontrol</h2>
+    <p class="tufe-kontrol-aciklama">
+        Müşteriden bağımsız hesap makinesi. Giriş → Kira Senaryosu mantığının izole kopyası.
+        Üstteki <strong>yıl checkbox</strong> seçimini kullanır. Sonuç yalnızca ekranda;
+        Kaydet / Sil / TCMB / müşteri / grid verisine yazılmaz. Excel ve kira bildirgesi yok.
+    </p>
+    <div class="tufe-kontrol-grid">
+        <label>Başlangıç Tutar (₺)</label>
+        <div>
+            <input type="number" step="0.01" id="tufe_kontrol_baslangic_tutar" placeholder="Örn: 5000" oninput="tufeKontrolKdvDokumGuncelle()">
+            <div class="tufe-kontrol-kdv-switch">
+                <label><input type="radio" name="tufe_kontrol_kdv_tip" value="dahil" onchange="tufeKontrolKdvDokumGuncelle(); tufeKontrolHibritGoster();"> KDV Dahil</label>
+                <label><input type="radio" name="tufe_kontrol_kdv_tip" value="net" checked onchange="tufeKontrolKdvDokumGuncelle(); tufeKontrolHibritGoster();"> Net</label>
+                <label><input type="radio" name="tufe_kontrol_kdv_tip" value="nakit" onchange="tufeKontrolKdvDokumGuncelle(); tufeKontrolHibritGoster();"> Nakit</label>
+                <label><input type="radio" name="tufe_kontrol_kdv_tip" value="hibrit" onchange="tufeKontrolKdvDokumGuncelle(); tufeKontrolHibritGoster();"> Hibrit</label>
+            </div>
+            <div id="tufe_kontrol_kdv_dokum" class="tufe-kontrol-dokum">Net: — ₺ | KDV Dahil: — ₺</div>
+            <div id="tufe_kontrol_bas_hibrit" class="tufe-kontrol-hibrit">
+                <input type="number" step="0.01" id="tufe_kontrol_bas_nakit" placeholder="Nakit (net)" oninput="tufeKontrolKdvDokumGuncelle()">
+                <input type="number" step="0.01" id="tufe_kontrol_bas_banka" placeholder="Banka (net)" oninput="tufeKontrolKdvDokumGuncelle()">
+            </div>
+        </div>
+
+        <label>Reel Tutar (₺)</label>
+        <div>
+            <input type="number" step="0.01" id="tufe_kontrol_reel_tutar" placeholder="Opsiyonel güncel / reel aylık" oninput="tufeKontrolReelKdvDokumGuncelle()">
+            <div class="tufe-kontrol-kdv-switch">
+                <label><input type="radio" name="tufe_kontrol_reel_kdv_tip" value="dahil" onchange="tufeKontrolReelKdvDokumGuncelle(); tufeKontrolHibritGoster();"> KDV Dahil</label>
+                <label><input type="radio" name="tufe_kontrol_reel_kdv_tip" value="net" checked onchange="tufeKontrolReelKdvDokumGuncelle(); tufeKontrolHibritGoster();"> Net</label>
+                <label><input type="radio" name="tufe_kontrol_reel_kdv_tip" value="nakit" onchange="tufeKontrolReelKdvDokumGuncelle(); tufeKontrolHibritGoster();"> Nakit</label>
+                <label><input type="radio" name="tufe_kontrol_reel_kdv_tip" value="hibrit" onchange="tufeKontrolReelKdvDokumGuncelle(); tufeKontrolHibritGoster();"> Hibrit</label>
+            </div>
+            <div id="tufe_kontrol_reel_kdv_dokum" class="tufe-kontrol-dokum">Net: — ₺ | KDV Dahil: — ₺</div>
+            <div id="tufe_kontrol_reel_hibrit" class="tufe-kontrol-hibrit">
+                <input type="number" step="0.01" id="tufe_kontrol_reel_nakit" placeholder="Reel nakit (net)" oninput="tufeKontrolReelKdvDokumGuncelle()">
+                <input type="number" step="0.01" id="tufe_kontrol_reel_banka" placeholder="Reel banka (net)" oninput="tufeKontrolReelKdvDokumGuncelle()">
+            </div>
+        </div>
+
+        <label class="required">Başlangıç Tarihi</label>
+        <input type="date" id="tufe_kontrol_baslangic_tarih">
+
+        <label>Artış Ayı</label>
+        <select id="tufe_kontrol_artis_ay" aria-label="TÜFE artış ayı">
+            <option value="">(Başlangıç tarihinin ayı)</option>
+            {% for ay in aylar %}
+            <option value="{{ ay }}">{{ ay }}</option>
+            {% endfor %}
+        </select>
+    </div>
+
+    <div class="tufe-kontrol-actions">
+        <button type="button" onclick="tufeKontrolHesapla()">📊 Hesapla</button>
+        <button type="button" class="secondary" onclick="tufeKontrolTemizle()">Temizle</button>
+    </div>
+    <div id="tufe_kontrol_err" class="tufe-kontrol-err" style="display:none;"></div>
+
+    <div id="tufe_kontrol_sonuc" class="tufe-kontrol-sonuc">
+        <h4>Başlangıç tutar projeksiyonu</h4>
+        <div style="overflow-x:auto;">
+            <table class="tufe-kontrol-tablo" id="tufe_kontrol_tablo_bas">
+                <thead>
+                    <tr>
+                        <th>Yıl</th>
+                        <th>Aylık</th>
+                        <th class="tk-kdv">KDV Dahil</th>
+                        <th>Artış %</th>
+                        <th>Yıllık</th>
+                        <th class="tk-kdv">Yıllık KDV Dahil</th>
+                        <th>Artış ₺</th>
+                    </tr>
+                </thead>
+                <tbody id="tufe_kontrol_tbody_bas"></tbody>
+            </table>
+        </div>
+        <p style="color:#90a4ae;font-size:12px;margin:8px 0 0;">
+            Satır: <span id="tufe_kontrol_toplam_yil">—</span> · Toplam yıllık: <span id="tufe_kontrol_toplam_tutar">—</span> TL
+        </p>
+
+        <div id="tufe_kontrol_reel_bolum" style="display:none;">
+            <h4>Reel tutar projeksiyonu</h4>
+            <div style="overflow-x:auto;">
+                <table class="tufe-kontrol-tablo" id="tufe_kontrol_tablo_reel">
+                    <thead>
+                        <tr>
+                            <th>Yıl</th>
+                            <th>Aylık</th>
+                            <th class="tk-kdv">KDV Dahil</th>
+                            <th>Artış %</th>
+                            <th>Yıllık</th>
+                            <th class="tk-kdv">Yıllık KDV Dahil</th>
+                            <th>Artış ₺</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tufe_kontrol_tbody_reel"></tbody>
+                </table>
+            </div>
+            <p style="color:#90a4ae;font-size:12px;margin:8px 0 0;">
+                Satır: <span id="tufe_kontrol_toplam_yil_reel">—</span> · Toplam yıllık: <span id="tufe_kontrol_toplam_tutar_reel">—</span> TL
+            </p>
+        </div>
+    </div>
+</div>
+
 
 <script>
 const TUFE_INDEX_URL = "{{ url_for('tufe.index') }}";
@@ -957,5 +1209,520 @@ setTimeout(function () { tufeSimGuncelle(); }, 30);
 {% else %}
 setTimeout(tufeSimZamanla, 200);
 {% endif %}
+
+/* ========== TÜFE Kontrol — Kira Senaryosu mantığının izole kopyası ========== */
+const TUFE_KONTROL_KDV_ORAN = 0.20;
+
+function tufeKontrolPara(n) {
+    return (typeof n === 'number' && !isNaN(n) ? n : 0).toLocaleString('tr-TR', {
+        minimumFractionDigits: 2, maximumFractionDigits: 2
+    });
+}
+function tufeKontrolParseNum(elOrVal) {
+    var s = (typeof elOrVal === 'string') ? elOrVal : ((elOrVal && elOrVal.value) || '');
+    var n = parseFloat(String(s).replace(/\s/g, '').replace(',', '.'));
+    return (isNaN(n) ? null : n);
+}
+function tufeKontrolTip(name) {
+    var el = document.querySelector('input[name="' + name + '"]:checked');
+    return el ? el.value : 'net';
+}
+function tufeKontrolSeciliYillar() {
+    var ys = [];
+    document.querySelectorAll('input[name="tufe-yil-cb"]:checked').forEach(function (c) {
+        var n = parseInt(c.value, 10);
+        if (!isNaN(n)) ys.push(n);
+    });
+    ys.sort(function (a, b) { return a - b; });
+    return ys;
+}
+function tufeKontrolHibritNB(nakitId, bankaId) {
+    var n = tufeKontrolParseNum(document.getElementById(nakitId));
+    var b = tufeKontrolParseNum(document.getElementById(bankaId));
+    if (n == null || b == null || n <= 0 || b <= 0) return null;
+    return { n: Math.round(n * 100) / 100, b: Math.round(b * 100) / 100 };
+}
+function tufeKontrolHibritGoster() {
+    var basH = document.getElementById('tufe_kontrol_bas_hibrit');
+    var reelH = document.getElementById('tufe_kontrol_reel_hibrit');
+    if (basH) basH.classList.toggle('is-open', tufeKontrolTip('tufe_kontrol_kdv_tip') === 'hibrit');
+    if (reelH) reelH.classList.toggle('is-open', tufeKontrolTip('tufe_kontrol_reel_kdv_tip') === 'hibrit');
+}
+function tufeKontrolHibritBaslangic() {
+    return tufeKontrolTip('tufe_kontrol_kdv_tip') === 'hibrit';
+}
+function tufeKontrolHibritReel() {
+    return tufeKontrolTip('tufe_kontrol_reel_kdv_tip') === 'hibrit';
+}
+function tufeKontrolNakitBaslangic() {
+    return tufeKontrolTip('tufe_kontrol_kdv_tip') === 'nakit';
+}
+function tufeKontrolNakitReel() {
+    return tufeKontrolTip('tufe_kontrol_reel_kdv_tip') === 'nakit';
+}
+
+function tufeKontrolEffectiveNet() {
+    var val = tufeKontrolParseNum(document.getElementById('tufe_kontrol_baslangic_tutar'));
+    if (tufeKontrolHibritBaslangic()) {
+        var hb = tufeKontrolHibritNB('tufe_kontrol_bas_nakit', 'tufe_kontrol_bas_banka');
+        if (hb) return hb.n + hb.b;
+        if (val == null || val <= 0) return null;
+        return val;
+    }
+    if (val == null || val <= 0) return null;
+    var tip = tufeKontrolTip('tufe_kontrol_kdv_tip');
+    if (tip === 'dahil') return val / (1 + TUFE_KONTROL_KDV_ORAN);
+    return val;
+}
+function tufeKontrolEffectiveReelNet() {
+    var val = tufeKontrolParseNum(document.getElementById('tufe_kontrol_reel_tutar'));
+    if (val == null || val <= 0) return null;
+    var tip = tufeKontrolTip('tufe_kontrol_reel_kdv_tip');
+    if (tip === 'dahil') return val / (1 + TUFE_KONTROL_KDV_ORAN);
+    return val;
+}
+
+function tufeKontrolKdvDokumGuncelle() {
+    var val = tufeKontrolParseNum(document.getElementById('tufe_kontrol_baslangic_tutar'));
+    var el = document.getElementById('tufe_kontrol_kdv_dokum');
+    if (!el) return;
+    var tip = tufeKontrolTip('tufe_kontrol_kdv_tip');
+    if (val == null || val <= 0) {
+        el.textContent = tip === 'nakit' ? 'Aylık tutar (KDV yok): — ₺'
+            : (tip === 'hibrit' ? 'Hibrit: nakit — | banka (net) — | KDV dahil toplam: — ₺' : 'Net: — ₺ | KDV Dahil: — ₺');
+        return;
+    }
+    if (tip === 'nakit') {
+        el.textContent = 'Aylık tutar (KDV yok): ' + tufeKontrolPara(val) + ' ₺';
+        return;
+    }
+    if (tip === 'hibrit') {
+        var hb = tufeKontrolHibritNB('tufe_kontrol_bas_nakit', 'tufe_kontrol_bas_banka');
+        if (!hb) {
+            el.textContent = 'Hibrit: nakit ve banka tutarlarını girin (ikisi de > 0). Toplam alanı: ' + tufeKontrolPara(val) + ' ₺';
+            return;
+        }
+        var td = hb.n + hb.b * (1 + TUFE_KONTROL_KDV_ORAN);
+        el.textContent = 'Hibrit — Nakit: ' + tufeKontrolPara(hb.n) + ' ₺ | Banka (net): ' + tufeKontrolPara(hb.b)
+            + ' ₺ | KDV dahil toplam: ' + tufeKontrolPara(td) + ' ₺';
+        return;
+    }
+    var net, dahil;
+    if (tip === 'dahil') { dahil = val; net = val / (1 + TUFE_KONTROL_KDV_ORAN); }
+    else { net = val; dahil = val * (1 + TUFE_KONTROL_KDV_ORAN); }
+    el.textContent = 'Net: ' + tufeKontrolPara(net) + ' ₺ | KDV Dahil: ' + tufeKontrolPara(dahil) + ' ₺';
+}
+
+function tufeKontrolReelKdvDokumGuncelle() {
+    var val = tufeKontrolParseNum(document.getElementById('tufe_kontrol_reel_tutar'));
+    var el = document.getElementById('tufe_kontrol_reel_kdv_dokum');
+    if (!el) return;
+    var tip = tufeKontrolTip('tufe_kontrol_reel_kdv_tip');
+    if (val == null || val <= 0) {
+        el.textContent = tip === 'nakit' ? 'Aylık tutar (KDV yok): — ₺'
+            : (tip === 'hibrit' ? 'Hibrit: nakit — | banka (net) — | KDV dahil toplam: — ₺' : 'Net: — ₺ | KDV Dahil: — ₺');
+        return;
+    }
+    if (tip === 'nakit') {
+        el.textContent = 'Aylık tutar (KDV yok): ' + tufeKontrolPara(val) + ' ₺';
+        return;
+    }
+    if (tip === 'hibrit') {
+        var hb0 = tufeKontrolHibritNB('tufe_kontrol_reel_nakit', 'tufe_kontrol_reel_banka');
+        if (!hb0) {
+            /* Oran için bas hibrit alanlarını yedekle */
+            hb0 = tufeKontrolHibritNB('tufe_kontrol_bas_nakit', 'tufe_kontrol_bas_banka');
+        }
+        if (!hb0) {
+            el.textContent = 'Hibrit: reel (veya başlangıç) nakit/banka girin; reel toplam: ' + tufeKontrolPara(val) + ' ₺';
+            return;
+        }
+        var sum0 = hb0.n + hb0.b;
+        var rn = val * (hb0.n / sum0);
+        var rb = val * (hb0.b / sum0);
+        var tdR = rn + rb * (1 + TUFE_KONTROL_KDV_ORAN);
+        el.textContent = 'Reel hibrit — Nakit: ' + tufeKontrolPara(rn) + ' ₺ | Banka (net): ' + tufeKontrolPara(rb)
+            + ' ₺ | KDV dahil toplam: ' + tufeKontrolPara(tdR) + ' ₺';
+        return;
+    }
+    var net, dahil;
+    if (tip === 'dahil') { dahil = val; net = val / (1 + TUFE_KONTROL_KDV_ORAN); }
+    else { net = val; dahil = val * (1 + TUFE_KONTROL_KDV_ORAN); }
+    el.textContent = 'Net: ' + tufeKontrolPara(net) + ' ₺ | KDV Dahil: ' + tufeKontrolPara(dahil) + ' ₺';
+}
+
+/**
+ * Tam TÜFE zinciri tablosu (bildirge sütunu yok).
+ * tufeListe: { yil: { AyAdi: oran% } }
+ */
+function tufeKontrolProjeksiyonTabloUret(baslangicKiraNet, baslangicYil, donguSayisi, maxGosterilebilirYil, tufeListe, sozlesmeAyAdi, nakitModu, hibritNB) {
+    nakitModu = !!nakitModu;
+    hibritNB = hibritNB && typeof hibritNB.n === 'number' && typeof hibritNB.b === 'number' && hibritNB.n >= 0 && hibritNB.b > 0
+        ? { n: Math.round(hibritNB.n * 100) / 100, b: Math.round(hibritNB.b * 100) / 100 }
+        : null;
+    var hideKdv = nakitModu && !hibritNB;
+    var html = '';
+    var toplamYilliklar = 0;
+    var toplamArtislar = 0;
+    var projeksiyonSatirSayisi = 0;
+    var mevcutKira = baslangicKiraNet;
+    var mevcutN = null;
+    var mevcutB = null;
+    if (hibritNB) {
+        mevcutN = hibritNB.n;
+        mevcutB = hibritNB.b;
+        mevcutKira = mevcutN + mevcutB;
+    }
+    var hibritKdvYilToplam = 0;
+    var i;
+    for (i = 0; i < donguSayisi; i++) {
+        var yil = baslangicYil + i;
+        if (yil > maxGosterilebilirYil) break;
+        if (hibritNB) mevcutKira = mevcutN + mevcutB;
+        var yillikToplam = mevcutKira * 12;
+        toplamYilliklar += yillikToplam;
+        var artisOran = 0;
+        var artisTutar = 0;
+        if (i > 0) {
+            var tufeOran = 0;
+            if (sozlesmeAyAdi && tufeListe[yil] && tufeListe[yil][sozlesmeAyAdi] != null) {
+                tufeOran = tufeListe[yil][sozlesmeAyAdi] / 100;
+            }
+            if (hibritNB) {
+                var eskiN = tufeOran ? mevcutN / (1 + tufeOran) : mevcutN;
+                var eskiB = tufeOran ? mevcutB / (1 + tufeOran) : mevcutB;
+                artisOran = tufeOran * 100;
+                artisTutar = (mevcutN + mevcutB) - (eskiN + eskiB);
+                toplamArtislar += artisTutar;
+            } else {
+                var eskiKira = tufeOran ? mevcutKira / (1 + tufeOran) : mevcutKira;
+                artisOran = tufeOran * 100;
+                artisTutar = mevcutKira - eskiKira;
+                toplamArtislar += artisTutar;
+            }
+        }
+        var kdvDahil = null;
+        var kdvDahilYillik = null;
+        if (!hideKdv) {
+            if (hibritNB) {
+                kdvDahil = mevcutN + mevcutB * (1 + TUFE_KONTROL_KDV_ORAN);
+                kdvDahilYillik = kdvDahil * 12;
+                hibritKdvYilToplam += kdvDahilYillik;
+            } else {
+                kdvDahil = mevcutKira * (1 + TUFE_KONTROL_KDV_ORAN);
+                kdvDahilYillik = yillikToplam * (1 + TUFE_KONTROL_KDV_ORAN);
+            }
+        }
+        var kdvHucre = hideKdv ? '—' : tufeKontrolPara(kdvDahil) + ' TL';
+        var kdvYilHucre = hideKdv ? '—' : tufeKontrolPara(kdvDahilYillik) + ' TL';
+        projeksiyonSatirSayisi += 1;
+        html += '<tr>'
+            + '<td>' + yil + '</td>'
+            + '<td>' + tufeKontrolPara(mevcutKira) + ' TL</td>'
+            + '<td class="tk-kdv">' + kdvHucre + '</td>'
+            + '<td style="color:#ff9800;">' + artisOran.toFixed(2) + '%</td>'
+            + '<td style="color:#4fc3f7;font-weight:bold;">' + tufeKontrolPara(yillikToplam) + ' TL</td>'
+            + '<td class="tk-kdv">' + kdvYilHucre + '</td>'
+            + '<td style="color:#4caf50;">' + tufeKontrolPara(artisTutar) + ' TL</td>'
+            + '</tr>';
+        if (yil < maxGosterilebilirYil) {
+            var sonrakiYil = yil + 1;
+            var tufeOran2 = 0;
+            if (sozlesmeAyAdi && tufeListe[sonrakiYil] && tufeListe[sonrakiYil][sozlesmeAyAdi] != null) {
+                tufeOran2 = tufeListe[sonrakiYil][sozlesmeAyAdi] / 100;
+            }
+            if (hibritNB) {
+                mevcutN = Math.round(mevcutN * (1 + tufeOran2) * 100) / 100;
+                mevcutB = Math.round(mevcutB * (1 + tufeOran2) * 100) / 100;
+            } else {
+                mevcutKira = Math.round(mevcutKira * (1 + tufeOran2) * 100) / 100;
+            }
+        }
+    }
+    var toplamKdvDahilYillik = null;
+    if (!hideKdv) {
+        toplamKdvDahilYillik = hibritNB ? hibritKdvYilToplam : (toplamYilliklar * (1 + TUFE_KONTROL_KDV_ORAN));
+    }
+    var footKdv = hideKdv ? '—' : (toplamKdvDahilYillik != null ? tufeKontrolPara(toplamKdvDahilYillik) : '—') + ' TL';
+    html += '<tr class="foot">'
+        + '<td>TOPLAM</td><td>—</td><td class="tk-kdv">—</td><td>—</td>'
+        + '<td>' + tufeKontrolPara(toplamYilliklar) + ' TL</td>'
+        + '<td class="tk-kdv">' + footKdv + '</td>'
+        + '<td>' + tufeKontrolPara(toplamArtislar) + ' TL</td></tr>';
+    return {
+        tablo: html,
+        toplamYilliklar: toplamYilliklar,
+        toplamArtislar: toplamArtislar,
+        projeksiyonSatirSayisi: projeksiyonSatirSayisi,
+        toplamKdvDahilYillik: toplamKdvDahilYillik,
+        hideKdv: hideKdv
+    };
+}
+
+/** Kısa reel projeksiyon (bildirge yok): oncekiYil=reel, sonYil=reel×TÜFE. */
+function tufeKontrolReelKisaProjeksiyonTabloUret(reelNet, baslangicYil, maxGosterilebilirYil, tufeListe, sozlesmeAyAdi, nakitModu, hibritNB) {
+    nakitModu = !!nakitModu;
+    hibritNB = hibritNB && typeof hibritNB.n === 'number' && typeof hibritNB.b === 'number' && hibritNB.n >= 0 && hibritNB.b > 0
+        ? { n: Math.round(hibritNB.n * 100) / 100, b: Math.round(hibritNB.b * 100) / 100 }
+        : null;
+    var hideKdv = nakitModu && !hibritNB;
+    var sonYil = maxGosterilebilirYil;
+    var oncekiYil = sonYil - 1;
+    var html = '';
+    var toplamYilliklar = 0;
+    var toplamArtislar = 0;
+    var projeksiyonSatirSayisi = 0;
+    var hibritKdvYilToplam = 0;
+
+    function satirEkle(yil, mevcutKira, artisOranYuzde, artisTutar, nPart, bPart) {
+        var useH = !!(hibritNB && nPart != null && bPart != null);
+        var tot = useH ? (nPart + bPart) : mevcutKira;
+        var yillikToplam = tot * 12;
+        toplamYilliklar += yillikToplam;
+        toplamArtislar += artisTutar;
+        projeksiyonSatirSayisi += 1;
+        var kdvDahil = null;
+        var kdvDahilYillik = null;
+        if (!hideKdv) {
+            if (useH) {
+                kdvDahil = nPart + bPart * (1 + TUFE_KONTROL_KDV_ORAN);
+                kdvDahilYillik = kdvDahil * 12;
+                hibritKdvYilToplam += kdvDahilYillik;
+            } else {
+                kdvDahil = mevcutKira * (1 + TUFE_KONTROL_KDV_ORAN);
+                kdvDahilYillik = yillikToplam * (1 + TUFE_KONTROL_KDV_ORAN);
+            }
+        }
+        var kdvHucre = hideKdv ? '—' : tufeKontrolPara(kdvDahil) + ' TL';
+        var kdvYilHucre = hideKdv ? '—' : tufeKontrolPara(kdvDahilYillik) + ' TL';
+        html += '<tr>'
+            + '<td>' + yil + '</td>'
+            + '<td>' + tufeKontrolPara(tot) + ' TL</td>'
+            + '<td class="tk-kdv">' + kdvHucre + '</td>'
+            + '<td style="color:#ff9800;">' + artisOranYuzde.toFixed(2) + '%</td>'
+            + '<td style="color:#4fc3f7;font-weight:bold;">' + tufeKontrolPara(yillikToplam) + ' TL</td>'
+            + '<td class="tk-kdv">' + kdvYilHucre + '</td>'
+            + '<td style="color:#4caf50;">' + tufeKontrolPara(artisTutar) + ' TL</td>'
+            + '</tr>';
+    }
+
+    if (hibritNB) {
+        var sum0 = hibritNB.n + hibritNB.b;
+        var rN = sum0 > 0 ? Math.round(reelNet * (hibritNB.n / sum0) * 100) / 100 : reelNet;
+        var rB = sum0 > 0 ? Math.round((reelNet - rN) * 100) / 100 : 0;
+        if (oncekiYil >= baslangicYil) {
+            satirEkle(oncekiYil, rN + rB, 0, 0, rN, rB);
+            var tufeOran = 0;
+            if (sozlesmeAyAdi && tufeListe[sonYil] && tufeListe[sonYil][sozlesmeAyAdi] != null) {
+                tufeOran = tufeListe[sonYil][sozlesmeAyAdi] / 100;
+            }
+            var n1 = tufeOran ? Math.round(rN * (1 + tufeOran) * 100) / 100 : rN;
+            var b1 = tufeOran ? Math.round(rB * (1 + tufeOran) * 100) / 100 : rB;
+            satirEkle(sonYil, n1 + b1, tufeOran * 100, (n1 + b1) - (rN + rB), n1, b1);
+        } else {
+            satirEkle(sonYil, rN + rB, 0, 0, rN, rB);
+        }
+    } else if (oncekiYil >= baslangicYil) {
+        satirEkle(oncekiYil, reelNet, 0, 0, null, null);
+        var tufeOran2 = 0;
+        if (sozlesmeAyAdi && tufeListe[sonYil] && tufeListe[sonYil][sozlesmeAyAdi] != null) {
+            tufeOran2 = tufeListe[sonYil][sozlesmeAyAdi] / 100;
+        }
+        var sonKira = tufeOran2 ? Math.round(reelNet * (1 + tufeOran2) * 100) / 100 : reelNet;
+        satirEkle(sonYil, sonKira, tufeOran2 * 100, sonKira - reelNet, null, null);
+    } else {
+        satirEkle(sonYil, reelNet, 0, 0, null, null);
+    }
+
+    var toplamKdvDahilYillik = hideKdv ? null : (hibritNB ? hibritKdvYilToplam : toplamYilliklar * (1 + TUFE_KONTROL_KDV_ORAN));
+    var footKdv = hideKdv ? '—' : tufeKontrolPara(toplamKdvDahilYillik) + ' TL';
+    html += '<tr class="foot">'
+        + '<td>TOPLAM</td><td>—</td><td class="tk-kdv">—</td><td>—</td>'
+        + '<td>' + tufeKontrolPara(toplamYilliklar) + ' TL</td>'
+        + '<td class="tk-kdv">' + footKdv + '</td>'
+        + '<td>' + tufeKontrolPara(toplamArtislar) + ' TL</td></tr>';
+    return {
+        tablo: html,
+        toplamYilliklar: toplamYilliklar,
+        toplamArtislar: toplamArtislar,
+        projeksiyonSatirSayisi: projeksiyonSatirSayisi,
+        hideKdv: hideKdv
+    };
+}
+
+function tufeKontrolErr(msg) {
+    var el = document.getElementById('tufe_kontrol_err');
+    if (!el) return;
+    if (!msg) {
+        el.style.display = 'none';
+        el.textContent = '';
+        return;
+    }
+    el.style.display = 'block';
+    el.textContent = msg;
+}
+
+function tufeKontrolAyAdiFromDate(iso) {
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return null;
+    var aylar = (typeof TUFE_AYLAR_LIST !== 'undefined' && TUFE_AYLAR_LIST) ? TUFE_AYLAR_LIST
+        : ['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
+    return aylar[d.getMonth()] || null;
+}
+
+function tufeKontrolHesapla() {
+    tufeKontrolErr(null);
+    var basNet = tufeKontrolEffectiveNet();
+    var basTarihEl = document.getElementById('tufe_kontrol_baslangic_tarih');
+    var basTarih = basTarihEl ? (basTarihEl.value || '').trim() : '';
+    if (basNet == null || basNet <= 0 || !basTarih) {
+        tufeKontrolErr('Başlangıç tutarı ve başlangıç tarihi zorunlu.');
+        return;
+    }
+    var ys = tufeKontrolSeciliYillar();
+    if (!ys.length) {
+        tufeKontrolErr('Üstteki yıl seçiciden en az bir yıl işaretleyin.');
+        return;
+    }
+    var bas = new Date(basTarih);
+    if (isNaN(bas.getTime())) {
+        tufeKontrolErr('Geçersiz başlangıç tarihi.');
+        return;
+    }
+    var baslangicYil = bas.getFullYear();
+    var aySel = document.getElementById('tufe_kontrol_artis_ay');
+    var sozlesmeAyAdi = (aySel && aySel.value) ? aySel.value.trim() : '';
+    if (!sozlesmeAyAdi) sozlesmeAyAdi = tufeKontrolAyAdiFromDate(basTarih) || '';
+    if (!sozlesmeAyAdi) {
+        tufeKontrolErr('Artış ayı seçilemedi.');
+        return;
+    }
+
+    var maxGosterilebilirYil = Math.max.apply(null, ys);
+    if (maxGosterilebilirYil < baslangicYil) {
+        tufeKontrolErr('Seçili yıllar, başlangıç yılından küçük olamaz.');
+        return;
+    }
+    var donguSayisi = maxGosterilebilirYil - baslangicYil + 1;
+
+    /* Zincir yılları: baslangicYil .. max; oran API için tüm bu yıllar + seçili yıllar birleşimi */
+    var yillarFetch = [];
+    var y;
+    for (y = baslangicYil; y <= maxGosterilebilirYil; y++) yillarFetch.push(y);
+    ys.forEach(function (yy) {
+        if (yillarFetch.indexOf(yy) < 0) yillarFetch.push(yy);
+    });
+    yillarFetch.sort(function (a, b) { return a - b; });
+
+    var hibritBas = tufeKontrolHibritBaslangic();
+    var hbDom = hibritBas ? tufeKontrolHibritNB('tufe_kontrol_bas_nakit', 'tufe_kontrol_bas_banka') : null;
+    if (hibritBas && !hbDom) {
+        tufeKontrolErr('Hibrit için nakit ve banka tutarları (ikisi de > 0) gerekli.');
+        return;
+    }
+    var nakitBas = tufeKontrolNakitBaslangic();
+    var reelNet = tufeKontrolEffectiveReelNet();
+    var hibritReel = tufeKontrolHibritReel();
+    var hbReel = null;
+    if (reelNet != null && reelNet > 0 && hibritReel) {
+        hbReel = tufeKontrolHibritNB('tufe_kontrol_reel_nakit', 'tufe_kontrol_reel_banka')
+            || tufeKontrolHibritNB('tufe_kontrol_bas_nakit', 'tufe_kontrol_bas_banka');
+        if (!hbReel) {
+            tufeKontrolErr('Reel hibrit için nakit/banka tutarları gerekli.');
+            return;
+        }
+    }
+
+    var url = TUFE_SIM_ORAN_URL + '?ay=' + encodeURIComponent(sozlesmeAyAdi) + '&yillar=' + yillarFetch.join(',');
+    fetch(url)
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            if (!data || !data.ok) {
+                tufeKontrolErr('TÜFE oranları alınamadı.');
+                return;
+            }
+            var oranlar = data.oranlar || {};
+            var tufeListe = {};
+            yillarFetch.forEach(function (yy) {
+                tufeListe[yy] = {};
+                var or = oranlar[String(yy)];
+                if (or != null && !isNaN(parseFloat(or))) {
+                    tufeListe[yy][sozlesmeAyAdi] = parseFloat(or);
+                }
+            });
+
+            var sonuc = tufeKontrolProjeksiyonTabloUret(
+                basNet, baslangicYil, donguSayisi, maxGosterilebilirYil,
+                tufeListe, sozlesmeAyAdi, nakitBas && !hibritBas, hibritBas ? hbDom : null
+            );
+            var tb = document.getElementById('tufe_kontrol_tbody_bas');
+            var tbl = document.getElementById('tufe_kontrol_tablo_bas');
+            if (tb) tb.innerHTML = sonuc.tablo;
+            if (tbl) tbl.classList.toggle('nakit', !!(sonuc.hideKdv));
+            var ty = document.getElementById('tufe_kontrol_toplam_yil');
+            var tt = document.getElementById('tufe_kontrol_toplam_tutar');
+            if (ty) ty.textContent = String(sonuc.projeksiyonSatirSayisi);
+            if (tt) tt.textContent = tufeKontrolPara(sonuc.toplamYilliklar);
+
+            var reelBolum = document.getElementById('tufe_kontrol_reel_bolum');
+            if (reelNet != null && reelNet > 0) {
+                var nakitReel = tufeKontrolNakitReel();
+                var reelSonuc = tufeKontrolReelKisaProjeksiyonTabloUret(
+                    reelNet, baslangicYil, maxGosterilebilirYil, tufeListe, sozlesmeAyAdi,
+                    nakitReel && !hibritReel, hibritReel ? hbReel : null
+                );
+                var tbr = document.getElementById('tufe_kontrol_tbody_reel');
+                var tblr = document.getElementById('tufe_kontrol_tablo_reel');
+                if (tbr) tbr.innerHTML = reelSonuc.tablo;
+                if (tblr) tblr.classList.toggle('nakit', !!(reelSonuc.hideKdv));
+                var tyr = document.getElementById('tufe_kontrol_toplam_yil_reel');
+                var ttr = document.getElementById('tufe_kontrol_toplam_tutar_reel');
+                if (tyr) tyr.textContent = String(reelSonuc.projeksiyonSatirSayisi);
+                if (ttr) ttr.textContent = tufeKontrolPara(reelSonuc.toplamYilliklar);
+                if (reelBolum) reelBolum.style.display = 'block';
+            } else if (reelBolum) {
+                reelBolum.style.display = 'none';
+            }
+
+            var son = document.getElementById('tufe_kontrol_sonuc');
+            if (son) {
+                son.style.display = 'block';
+                try { son.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (e) {}
+            }
+        })
+        .catch(function () {
+            tufeKontrolErr('TÜFE oranları isteği başarısız.');
+        });
+}
+
+function tufeKontrolTemizle() {
+    ['tufe_kontrol_baslangic_tutar', 'tufe_kontrol_reel_tutar', 'tufe_kontrol_baslangic_tarih',
+     'tufe_kontrol_bas_nakit', 'tufe_kontrol_bas_banka', 'tufe_kontrol_reel_nakit', 'tufe_kontrol_reel_banka'
+    ].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (el) el.value = '';
+    });
+    var ay = document.getElementById('tufe_kontrol_artis_ay');
+    if (ay) ay.value = '';
+    var netBas = document.querySelector('input[name="tufe_kontrol_kdv_tip"][value="net"]');
+    var netReel = document.querySelector('input[name="tufe_kontrol_reel_kdv_tip"][value="net"]');
+    if (netBas) netBas.checked = true;
+    if (netReel) netReel.checked = true;
+    tufeKontrolHibritGoster();
+    tufeKontrolKdvDokumGuncelle();
+    tufeKontrolReelKdvDokumGuncelle();
+    tufeKontrolErr(null);
+    var son = document.getElementById('tufe_kontrol_sonuc');
+    if (son) son.style.display = 'none';
+    var rb = document.getElementById('tufe_kontrol_reel_bolum');
+    if (rb) rb.style.display = 'none';
+}
+
+/* Init */
+try {
+    tufeKontrolHibritGoster();
+    tufeKontrolKdvDokumGuncelle();
+    tufeKontrolReelKdvDokumGuncelle();
+} catch (_eTkInit) {}
 </script>
 {% endblock %}
