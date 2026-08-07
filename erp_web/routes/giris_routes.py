@@ -351,8 +351,10 @@ def _load_musteri_panel_by_iso(musteri_id: int) -> dict:
             _ekstre_tahsil_rows_for_musteri(mid)
         )
         marker_by_iso = (_mk_batch or {}).get("marker") or {}
+        pay_by_iso = (_mk_batch or {}).get("pay") or {}
     except Exception:
         marker_by_iso = {}
+        pay_by_iso = {}
     out = {}
     for iso_raw, prow in obj.items():
         if not isinstance(prow, dict):
@@ -377,8 +379,13 @@ def _load_musteri_panel_by_iso(musteri_id: int) -> dict:
             except (TypeError, ValueError):
                 yy_m = 0
             mk_t = round(float(marker_by_iso.get(iso_key) or 0), 2)
+            _pay_raw = pay_by_iso.get(iso_key) if isinstance(pay_by_iso, dict) else None
+            try:
+                pay_t = round(float(_pay_raw), 2) if _pay_raw is not None else None
+            except (TypeError, ValueError):
+                pay_t = None
             # Marker + Kural A → kayıtlı pk'ye güven, düzeltmeyi atla.
-            if not _grid_payload_marker_panel_tam_kapandi(mk_t, pb, yy_m, None, tol):
+            if not _grid_payload_marker_panel_tam_kapandi(mk_t, pb, yy_m, None, tol, pay_t=pay_t):
                 pk = round(max(pb - pt, 0), 2)
         out[iso_key] = {
             "aylik": pb,
@@ -464,8 +471,10 @@ def _panel_by_iso_from_tahsil_map(
     try:
         _mk_batch = _ekstre_tahsil_batch_maps_from_rows(_ekstre_tahsil_rows_for_musteri(mid))
         marker_by_iso = (_mk_batch or {}).get("marker") or {}
+        pay_by_iso = (_mk_batch or {}).get("pay") or {}
     except Exception:
         marker_by_iso = {}
+        pay_by_iso = {}
     existing = _load_musteri_panel_by_iso(mid)
     tarih_s = str(tahsilat_tarihi or "")[:10] if tahsilat_tarihi else ""
     by_iso = {}
@@ -490,7 +499,12 @@ def _panel_by_iso_from_tahsil_map(
             except (TypeError, ValueError):
                 yy_e = 0
             mk_e = round(float(marker_by_iso.get(iso_k) or 0), 2)
-            if _grid_payload_marker_panel_tam_kapandi(mk_e, brut_e, yy_e, None, tol):
+            _pay_raw_e = pay_by_iso.get(iso_k) if isinstance(pay_by_iso, dict) else None
+            try:
+                pay_e = round(float(_pay_raw_e), 2) if _pay_raw_e is not None else None
+            except (TypeError, ValueError):
+                pay_e = None
+            if _grid_payload_marker_panel_tam_kapandi(mk_e, brut_e, yy_e, None, tol, pay_t=pay_e):
                 kalan_e = 0.0
             else:
                 kalan_e = round(max(brut_e - tah_e, 0), 2) if brut_e > tol else 0.0
@@ -523,8 +537,13 @@ def _panel_by_iso_from_tahsil_map(
         if brut <= tol and tah <= tol:
             continue
         mk_t = round(float(marker_by_iso.get(iso_m) or 0), 2)
+        _pay_raw_m = pay_by_iso.get(iso_m) if isinstance(pay_by_iso, dict) else None
+        try:
+            pay_tm = round(float(_pay_raw_m), 2) if _pay_raw_m is not None else None
+        except (TypeError, ValueError):
+            pay_tm = None
         # Kural A: |AYLIK_TAH| marker varsa tutar farkına bakmadan kalan=0.
-        if _grid_payload_marker_panel_tam_kapandi(mk_t, brut, yy_m, None, tol):
+        if _grid_payload_marker_panel_tam_kapandi(mk_t, brut, yy_m, None, tol, pay_t=pay_tm):
             kalan = 0.0
         else:
             try:
@@ -850,6 +869,7 @@ def _apply_panel_by_iso_to_grid_payload(payload: dict, panel_by_iso: dict) -> No
     tol = float(AYLIK_GRID_TAM_ODENDI_TOLERANS)
     # Kural A: panel kalan'ına körü körüne güvenme; kendi |AYLIK_TAH| map'i.
     marker_by_iso = {}
+    pay_by_iso = {}
     try:
         mid_pl = int(payload.get("musteri_id") or 0)
     except (TypeError, ValueError):
@@ -860,8 +880,10 @@ def _apply_panel_by_iso_to_grid_payload(payload: dict, panel_by_iso: dict) -> No
                 _ekstre_tahsil_rows_for_musteri(mid_pl)
             )
             marker_by_iso = (_mk_batch or {}).get("marker") or {}
+            pay_by_iso = (_mk_batch or {}).get("pay") or {}
         except Exception:
             marker_by_iso = {}
+            pay_by_iso = {}
     for a in payload.get("aylar") or []:
         if not isinstance(a, dict):
             continue
@@ -880,8 +902,13 @@ def _apply_panel_by_iso_to_grid_payload(payload: dict, panel_by_iso: dict) -> No
         except (TypeError, ValueError):
             continue
         mk_t = round(float(marker_by_iso.get(iso_m) or 0), 2)
+        _pay_raw_a = pay_by_iso.get(iso_m) if isinstance(pay_by_iso, dict) else None
+        try:
+            pay_ta = round(float(_pay_raw_a), 2) if _pay_raw_a is not None else None
+        except (TypeError, ValueError):
+            pay_ta = None
         # Kural A: |AYLIK_TAH| marker varsa brut-tah farkını yok say, kalan=0.
-        if _grid_payload_marker_panel_tam_kapandi(mk_t, brut, yy_m, None, tol):
+        if _grid_payload_marker_panel_tam_kapandi(mk_t, brut, yy_m, None, tol, pay_t=pay_ta):
             kalan = 0.0
             # brut_tutar_kdv / tutar_kdv_dahil'e DOKUNULMAZ - grid'in kendi
             # hesabi (TÜFE + reel overlay) korunur.
@@ -1925,7 +1952,14 @@ def _build_aylik_grid_cache_payload(musteri_id, tufe_map=None, kyc_row=None, man
                 except (TypeError, ValueError):
                     reel_kap_b = 0.0
             kap_b = reel_kap_b if reel_kap_b > tol else round(brut, 2)
-            if _grid_payload_marker_panel_tam_kapandi(mk_t, brut, yy, manual_reel_by_year, tol):
+            _pay_raw_b = (batch_grid.get("pay") or {}).get(iso_m1) if iso_m1 else None
+            try:
+                pay_tb = round(float(_pay_raw_b), 2) if _pay_raw_b is not None else None
+            except (TypeError, ValueError):
+                pay_tb = None
+            if _grid_payload_marker_panel_tam_kapandi(
+                mk_t, brut, yy, manual_reel_by_year, tol, pay_t=pay_tb
+            ):
                 a["odenen_tutar_kdv"] = round(mk_t, 2)
                 a["kalan_tutar_kdv"] = 0.0
                 # Güvenlik freni: brut≈0 iken marker olsa bile «tam ödendi» yok.
@@ -6579,6 +6613,7 @@ def _ekstre_tahsil_rows_for_musteri(musteri_id: int) -> list:
 def _ekstre_tahsil_batch_maps_from_rows(rows) -> dict:
     """Marker / eslesme / tahsilat-tarihi-ay toplamları — ay başına tekrarlayan SQL yok."""
     marker: dict[str, float] = {}
+    pay: dict[str, float] = {}
     eslesme: dict[str, float] = {}
     tarih_ay: dict[str, float] = {}
     for r in rows or []:
@@ -6606,6 +6641,8 @@ def _ekstre_tahsil_batch_maps_from_rows(rows) -> dict:
                 if pv <= 0:
                     continue
                 marker[iso_m] = round(float(marker.get(iso_m, 0)) + pv, 2)
+                # Ayrı pay haritası: yalnızca |AYLIK_PAY| (Kural A kısmi istisnası).
+                pay[iso_m] = round(float(pay.get(iso_m, 0)) + pv, 2)
         else:
             marker_isos = re.findall(r"\|AYLIK_TAH\|([0-9]{4}-[0-9]{2}-[0-9]{2})\|", ac)
             if len(marker_isos) == 1:
@@ -6645,7 +6682,7 @@ def _ekstre_tahsil_batch_maps_from_rows(rows) -> dict:
                 iso_t = None
         if iso_t:
             tarih_ay[iso_t] = round(float(tarih_ay.get(iso_t, 0)) + tut, 2)
-    return {"marker": marker, "eslesme": eslesme, "tarih_ay": tarih_ay}
+    return {"marker": marker, "pay": pay, "eslesme": eslesme, "tarih_ay": tarih_ay}
 
 
 def _grid_payload_ay_odenen_kdv(brut, odenen_mevcut, mk_t, tm_t, te_t, tt_t, tol=None):
@@ -6664,12 +6701,33 @@ def _grid_payload_ay_odenen_kdv(brut, odenen_mevcut, mk_t, tm_t, te_t, tt_t, tol
 
 
 def _grid_payload_marker_panel_tam_kapandi(
-    mk_t: float, brut: float, yil: int, manual_reel_by_year: dict | None, tol: float
+    mk_t: float,
+    brut: float,
+    yil: int,
+    manual_reel_by_year: dict | None,
+    tol: float,
+    pay_t: float | None = None,
 ) -> bool:
-    """|AYLIK_TAH| marker reel dönem tutarını (panel) karşılıyorsa grid tam ödendi say."""
+    """|AYLIK_TAH| marker reel dönem tutarını (panel) karşılıyorsa grid tam ödendi say.
+
+    İstisna: açık |AYLIK_PAY| tutarı (pay_t) verilmiş ve brütten tol dışında
+    azsa bilinçli kısmi sayılır — Kural A tam kapama uygulanmaz.
+    """
     mk_t = round(float(mk_t or 0), 2)
     if mk_t <= tol:
         return False
+    if pay_t is not None:
+        try:
+            pay_v = round(float(pay_t), 2)
+        except (TypeError, ValueError):
+            pay_v = 0.0
+        try:
+            brut_v = round(float(brut or 0), 2)
+        except (TypeError, ValueError):
+            brut_v = 0.0
+        # 0 < pay_t < (brut - tol) → kısmi; Kural A'yı uygulama.
+        if pay_v > tol and brut_v > tol and pay_v < (brut_v - float(tol)):
+            return False
     # |AYLIK_TAH| marker'lı tahsilat varsa
     # tutar farkına bakmadan tam ödendi say
     # (reel tutar değişiminden kaynaklanan
@@ -6721,7 +6779,15 @@ def _ekstre_payload_odenen_zenginlestir(
                 reel_kap = 0.0
         kap = reel_kap if reel_kap > tol else round(brut, 2)
         odenen = _grid_payload_ay_odenen_kdv(brut, odenen, mk_t, tm_t, te_t, tt_t, tol)
-        if _grid_payload_marker_panel_tam_kapandi(mk_t, brut, yy_en, manual_reel_by_year, tol):
+        _pay_map_z = (batch_maps or {}).get("pay") or {}
+        _pay_raw_z = _pay_map_z.get(iso_m1) if isinstance(_pay_map_z, dict) else None
+        try:
+            pay_tz = round(float(_pay_raw_z), 2) if _pay_raw_z is not None else None
+        except (TypeError, ValueError):
+            pay_tz = None
+        if _grid_payload_marker_panel_tam_kapandi(
+            mk_t, brut, yy_en, manual_reel_by_year, tol, pay_t=pay_tz
+        ):
             a["odenen_tutar_kdv"] = round(mk_t, 2)
             a["kalan_tutar_kdv"] = 0.0
             # Güvenlik freni: brut≈0 iken marker olsa bile «tam ödendi» yok.
