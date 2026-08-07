@@ -81,7 +81,7 @@ import secrets
 from decimal import Decimal
 
 # Aylık grid «tam ödendi» / tahsil dağıtım mantığı değişince artırın; musteri_aylik_grid_cache yeniden üretilir.
-AYLIK_GRID_COMPUTE_REV = 25
+AYLIK_GRID_COMPUTE_REV = 26
 AYLIK_GRID_TAM_ODENDI_TOLERANS = 0.05  # kurus farklarini (dagitim/yuvarlama) tam odendi say
 PLACEHOLDER_BRUT_MAX = 0.5  # grid min tutar (0.01); gerçek brüt yazılmamış panel
 # Grid/panel tahsilat aciklama: «Ay YYYY Tahsilat H|AYLIK_TAH|…» (elle makbuz serbest metni haric)
@@ -1706,7 +1706,12 @@ def _reel_manual_merge_db_and_client(musteri_id: int, client: dict | None) -> di
 def _aylik_grid_apply_reel_donem_overlay_to_payload(
     musteri_id: int, kyc: dict, tufe_map: dict, payload: dict, manual_reel_by_year=None
 ) -> None:
-    """musteri_reel_donem_tutar (DB) → 12 ay sabit KDV dahil; grid önbelleğinde TÜFE zinciri kullanılmaz."""
+    """musteri_reel_donem_tutar (DB) → 12 ay sabit KDV dahil (flat).
+
+    A-dar: flat sonrası yalnızca brut≤tol (veya flat'te olmayan) aylara
+    _reel_ay_key_tutar_map_musteri (ekstre TÜFE zinciri) ile tutar doldurulur;
+    pozitif brut'lu aylara dokunulmaz.
+    """
     if not payload or not isinstance(payload.get("aylar"), list) or not kyc:
         return
     bas_soz = _aylik_grid_coerce_date(kyc.get("sozlesme_tarihi"))
@@ -1779,6 +1784,71 @@ def _aylik_grid_apply_reel_donem_overlay_to_payload(
         a["odenen_tutar_kdv"] = round(odenen, 2)
         a["kalan_tutar_kdv"] = kalan
         # Güvenlik freni: brut≈0 iken «tam ödendi» yok.
+        a["tahsil_edildi"] = new_t > tol and kalan <= tol
+        a["kismi_tahsilat"] = odenen > tol and kalan > tol
+
+    # A-dar: flat dışı veya brut≤tol aylara ekstre zinciri (pozitif brut'a dokunma).
+    try:
+        chain_map = _reel_ay_key_tutar_map_musteri(
+            int(musteri_id),
+            bas_soz,
+            artis_month,
+            artis_day,
+            tufe_map or {},
+            int(y_end),
+            manual_by_year=manual,
+            kyc_for_yilmap=kyc,
+        )
+    except Exception:
+        chain_map = {}
+    if not isinstance(chain_map, dict) or not chain_map:
+        return
+    for a in payload["aylar"]:
+        if not isinstance(a, dict):
+            continue
+        key = str(a.get("ay_key") or "").strip()
+        if not key:
+            try:
+                key = f"{int(a.get('yil'))}-{int(a.get('ay'))}"
+            except (TypeError, ValueError):
+                continue
+        nk = _firma_ozet_normalize_tahsil_ay_key(key)
+        if not nk:
+            continue
+        try:
+            brut_raw = a.get("brut_tutar_kdv")
+            if brut_raw is None:
+                brut_raw = a.get("tutar_kdv_dahil") or 0
+            brut_cur = float(brut_raw)
+        except (TypeError, ValueError):
+            brut_cur = 0.0
+        if not math.isfinite(brut_cur):
+            brut_cur = 0.0
+        # Kritik: flat'te dolu (pozitif) ayları değiştirme.
+        if nk in reel_map and brut_cur > tol:
+            continue
+        if brut_cur > tol:
+            continue
+        if nk not in chain_map:
+            continue
+        try:
+            new_t = round(float(chain_map[nk]), 2)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(new_t) or new_t <= tol:
+            continue
+        try:
+            odenen = float(a.get("odenen_tutar_kdv") or 0)
+        except (TypeError, ValueError):
+            odenen = 0.0
+        if not math.isfinite(odenen):
+            odenen = 0.0
+        odenen = round(min(max(odenen, 0.0), new_t), 2)
+        kalan = max(round(new_t - odenen, 2), 0.0)
+        a["brut_tutar_kdv"] = new_t
+        a["tutar_kdv_dahil"] = new_t
+        a["odenen_tutar_kdv"] = round(odenen, 2)
+        a["kalan_tutar_kdv"] = kalan
         a["tahsil_edildi"] = new_t > tol and kalan <= tol
         a["kismi_tahsilat"] = odenen > tol and kalan > tol
 
