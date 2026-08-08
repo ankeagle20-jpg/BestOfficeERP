@@ -10759,6 +10759,12 @@ def api_aylik_grid_cache():
             mem_hit = _aylik_grid_payload_mem.get(int(musteri_id))
             if mem_hit and (time.time() - float(mem_hit[0])) < 60.0 and isinstance(mem_hit[1], dict):
                 cache_gecerli = True
+                # Mem hit: REV uyuşmuyorsa bayat payload'u 60 sn servis etme → DB/rebuild yoluna düş.
+                try:
+                    if int(mem_hit[1].get("compute_rev") or 0) != AYLIK_GRID_COMPUTE_REV:
+                        cache_gecerli = False
+                except (TypeError, ValueError):
+                    cache_gecerli = False
                 if cache_gecerli and _aylik_grid_cache_horizon_stale(musteri_id, mem_hit[1]):
                     cache_gecerli = False
                 if cache_gecerli:
@@ -10887,9 +10893,14 @@ def api_aylik_grid_cache():
                 )
                 cache_gecerli = skip_izinli or _aylik_grid_cache_matches_kyc(musteri_id, cache_obj)
                 # Kart yenileme: KYC alanları formdan henüz gelmemiş olsa bile tam rebuild yapma.
+                # Ancak compute_rev uyuşmuyorsa (mantık bump'ı) bayat cache'i geçerli sayma → rebuild.
                 if not cache_gecerli and skip_match and isinstance(cache_obj, dict):
                     aylar = cache_obj.get("aylar")
-                    cache_gecerli = isinstance(aylar, list) and len(aylar) > 0
+                    try:
+                        rev_ok = int(cache_obj.get("compute_rev") or 0) == AYLIK_GRID_COMPUTE_REV
+                    except (TypeError, ValueError):
+                        rev_ok = False
+                    cache_gecerli = rev_ok and isinstance(aylar, list) and len(aylar) > 0
                 if cache_gecerli and _aylik_grid_cache_horizon_stale(musteri_id, cache_obj):
                     cache_gecerli = False
                 if cache_gecerli:
