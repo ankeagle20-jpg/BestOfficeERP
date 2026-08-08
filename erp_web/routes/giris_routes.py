@@ -858,15 +858,121 @@ def apply_makbuz_dagitim_to_panel_db(
     return by_iso
 
 
-def _apply_panel_by_iso_to_grid_payload(payload: dict, panel_by_iso: dict) -> None:
+def _effective_panel_tahsil(panel_t, map_t, brut, tol=None):
+    """Panel/map birleşimi: understatement yok — tah = min(brut, max(panel_t, map_t)).
+
+    panel_t > map_t ise panel (elle / panel-esas) korunur; map daha yüksekse map kullanılır.
+    """
+    if tol is None:
+        tol = float(AYLIK_GRID_TAM_ODENDI_TOLERANS)
+    try:
+        pt = round(float(panel_t or 0), 2)
+    except (TypeError, ValueError):
+        pt = 0.0
+    try:
+        mt = round(float(map_t or 0), 2)
+    except (TypeError, ValueError):
+        mt = 0.0
+    try:
+        bt = round(float(brut or 0), 2)
+    except (TypeError, ValueError):
+        bt = 0.0
+    if bt < 0:
+        bt = 0.0
+    if pt < 0:
+        pt = 0.0
+    if mt < 0:
+        mt = 0.0
+    if bt <= tol:
+        return round(min(bt, max(pt, mt)), 2) if bt > 0 else 0.0
+    return round(min(bt, max(pt, mt)), 2)
+
+
+def _heal_panel_understatement_from_map(
+    musteri_id,
+    payload,
+    tahsil_map=None,
+    panel_by_iso=None,
+) -> bool:
+    """Panel tahsil < map olan ayları panel DB'de yükselt (asla düşürme, prune yok).
+
+    Dönüş: en az bir ay yazıldıysa True.
+    """
+    try:
+        mid = int(musteri_id)
+    except (TypeError, ValueError):
+        return False
+    if mid <= 0 or not isinstance(payload, dict):
+        return False
+    tol = float(AYLIK_GRID_TAM_ODENDI_TOLERANS)
+    if not isinstance(tahsil_map, dict):
+        try:
+            tahsil_map = _aylik_tahsil_tutar_map(mid)
+        except Exception:
+            return False
+    panel_db = panel_by_iso if isinstance(panel_by_iso, dict) else _load_musteri_panel_by_iso(mid)
+    if not panel_db:
+        return False
+    heal = {}
+    for a in payload.get("aylar") or []:
+        if not isinstance(a, dict):
+            continue
+        try:
+            yy_m = int(a.get("yil"))
+            mm_m = int(a.get("ay"))
+            iso_m = date(yy_m, mm_m, 1).isoformat()
+        except (TypeError, ValueError):
+            continue
+        prow = panel_db.get(iso_m)
+        if not isinstance(prow, dict):
+            continue
+        try:
+            brut = round(float(a.get("brut_tutar_kdv") or a.get("tutar_kdv_dahil") or 0), 2)
+            panel_t = round(float(prow.get("tahsil") or 0), 2)
+            map_t = round(float(tahsil_map.get(iso_m) or 0), 2)
+        except (TypeError, ValueError):
+            continue
+        if map_t <= panel_t + tol:
+            continue
+        eff = _effective_panel_tahsil(panel_t, map_t, brut, tol=tol)
+        if eff <= panel_t + tol:
+            continue
+        pb = brut
+        if pb <= tol:
+            try:
+                pb = round(float(prow.get("aylik") or prow.get("brut") or 0), 2)
+            except (TypeError, ValueError):
+                pb = 0.0
+        kalan = round(max(pb - eff, 0), 2) if pb > tol else 0.0
+        if pb > tol and eff >= pb - tol:
+            kalan = 0.0
+        heal[iso_m] = {
+            "aylik": pb,
+            "tahsil": eff,
+            "kalan": kalan,
+            "tahsil_tarih": str(prow.get("tahsil_tarih") or "")[:10] or None,
+        }
+    if not heal:
+        return False
+    # merge, prune'suz — yalnızca yükselen aylar
+    _save_musteri_panel_by_iso(mid, heal, prune_no_db_tahsil=False)
+    return True
+
+
+def _apply_panel_by_iso_to_grid_payload(payload: dict, panel_by_iso: dict, tahsil_map=None) -> None:
     """Panel DB kaynağı grid önbellek aylarına tahsil/kalan bilgisini uygular.
     Borç tutarının (brut_tutar_kdv) TEK kaynağı grid'in kendi hesabıdır
     (TÜFE + reel overlay); panel'deki 'aylik' alanı ARTIK KULLANILMAZ,
     çünkü stale/eski veri taşıyabilir ve reel overlay sonrası grid'i
-    yanlışlıkla eski değere geri çekebilir."""
+    yanlışlıkla eski değere geri çekebilir.
+
+    tahsil_map verilirse understatement engellenir:
+    tah = min(brut, max(panel.tahsil, map)).
+    """
     if not isinstance(payload, dict) or not panel_by_iso:
         return
     tol = float(AYLIK_GRID_TAM_ODENDI_TOLERANS)
+    map_src = tahsil_map if isinstance(tahsil_map, dict) else {}
     # Kural A: panel kalan'ına körü körüne güvenme; kendi |AYLIK_TAH| map'i.
     marker_by_iso = {}
     pay_by_iso = {}
@@ -898,9 +1004,11 @@ def _apply_panel_by_iso_to_grid_payload(payload: dict, panel_by_iso: dict) -> No
             continue
         try:
             brut = round(float(a.get("brut_tutar_kdv") or a.get("tutar_kdv_dahil") or 0), 2)
-            tah = round(float(prow.get("tahsil") or 0), 2)
+            panel_t = round(float(prow.get("tahsil") or 0), 2)
+            map_t = round(float(map_src.get(iso_m) or 0), 2)
         except (TypeError, ValueError):
             continue
+        tah = _effective_panel_tahsil(panel_t, map_t, brut, tol=tol)
         mk_t = round(float(marker_by_iso.get(iso_m) or 0), 2)
         _pay_raw_a = pay_by_iso.get(iso_m) if isinstance(pay_by_iso, dict) else None
         try:
@@ -6879,12 +6987,16 @@ def _aylik_grid_cache_payload_tahsil_guncelle(musteri_id, payload, panel_by_iso=
         manual_reel = _musteri_reel_donem_manual_dict_from_db(mid)
         _ekstre_payload_odenen_zenginlestir(payload, tahsil_map, batch, manual_reel_by_year=manual_reel)
         if panel_db:
-            _apply_panel_by_iso_to_grid_payload(payload, panel_db)
+            _apply_panel_by_iso_to_grid_payload(payload, panel_db, tahsil_map=tahsil_map)
+            # Bayat panel understatement: map daha yüksekse paneli yükselt (prune yok).
+            _heal_panel_understatement_from_map(
+                mid, payload, tahsil_map=tahsil_map, panel_by_iso=panel_db
+            )
         else:
             by_iso = _panel_by_iso_from_tahsil_map(mid, payload, None)
             if by_iso:
                 _save_musteri_panel_by_iso(mid, by_iso)
-                _apply_panel_by_iso_to_grid_payload(payload, by_iso)
+                _apply_panel_by_iso_to_grid_payload(payload, by_iso, tahsil_map=tahsil_map)
         payload["tahsilat_imza"] = _aylik_tahsil_cache_imza(mid)
     except Exception:
         logging.getLogger(__name__).exception(
