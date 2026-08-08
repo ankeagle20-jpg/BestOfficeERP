@@ -433,7 +433,9 @@ class CariService:
             iid = int(cid)
             bt = float(borc_by_mid.get(iid, 0.0))
             at = float(alacak_by_mid.get(iid, 0.0))
-            s = {"borc_total": round(bt, 2), "alacak_total": round(at, 2), "net_balance": round(bt - at, 2)}
+            # Net = açık borç (bt). Alacak (at) ayrı sütunda; bt zaten ödenmemiş aylar
+            # olduğu için at'yi tekrar çıkarmak çift düşüm olur.
+            s = {"borc_total": round(bt, 2), "alacak_total": round(at, 2), "net_balance": round(bt, 2)}
             bm = float((grid_ozet_map.get(iid) or {}).get("borc_month") or 0.0)
             eg = grid_ozet_map.get(iid) or {}
             try:
