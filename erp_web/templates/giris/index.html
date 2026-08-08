@@ -17845,8 +17845,14 @@ function girisTahsilatYilAyPanelDbYukle(musteriId, doneCb, opts) {
             var ay = parseInt(m[2], 10);
             if (!yil || !ay) return;
             var ak = (typeof sozlesmeAylikAyKeyFromYilAy === 'function') ? sozlesmeAylikAyKeyFromYilAy(yil, ay) : (yil + '-' + ay);
-            var dk = String(yil);
+            var donemYilDb = (typeof sozlesmeAylikBorcPanelDonemYil === 'function')
+                ? sozlesmeAylikBorcPanelDonemYil(yil, ay) : yil;
+            var dk = String(donemYilDb);
             if (!window.__tahsilatSatirYilAyDetay[dk]) window.__tahsilatSatirYilAyDetay[dk] = {};
+            var dkCalDb = String(yil);
+            if (dkCalDb !== dk && window.__tahsilatSatirYilAyDetay[dkCalDb] && window.__tahsilatSatirYilAyDetay[dkCalDb][ak]) {
+                delete window.__tahsilatSatirYilAyDetay[dkCalDb][ak];
+            }
             var dLoc = (window.__tahsilatSatirYilAyDetay[dk] || {})[ak];
             var rowDet = {
                 aylik_tutar: Math.round((parseFloat(row.aylik) || 0) * 100) / 100,
@@ -18556,6 +18562,10 @@ function girisTahsilatYilAyPanelCacheDenDoldur(cacheObj) {
         if (!isFinite(kalan) || kalan < 0) kalan = Math.max(Math.round((brut - odenen) * 100) / 100, 0);
         var tam = (!!a.tahsil_edildi && kalan <= tol) || (brut > tol && kalan <= tol && odenen <= tol);
         var kismi = (odenen > tol && kalan > tol) || (!!a.kismi_tahsilat && kalan > tol);
+        /* Backend açıkça kısmi dediyse tam kapama zorlama (CacheDenDoldur) */
+        if (a.kismi_tahsilat === true) {
+            tam = false;
+        }
         if (!tam && !kismi && odenen <= tol) return;
         if (tam && odenen <= tol) odenen = brut;
         var ak = (typeof sozlesmeAylikAyKeyFromYilAy === 'function') ? sozlesmeAylikAyKeyFromYilAy(yil, ay) : (yil + '-' + ay);
@@ -18732,6 +18742,33 @@ function girisTahsilatYilAyDetayMap(donemYil) {
     var dk = String(donemYil);
     if (!window.__tahsilatSatirYilAyDetay[dk]) window.__tahsilatSatirYilAyDetay[dk] = {};
     return window.__tahsilatSatirYilAyDetay[dk];
+}
+/** Donem yili anahtarinda yoksa / bayat tahsil~0 ise takvim yili anahtarindan oku. */
+function girisTahsilatYilAyDetaySatirFallbackOku(donemYil, ayKey) {
+    window.__tahsilatSatirYilAyDetay = window.__tahsilatSatirYilAyDetay || {};
+    var tolFb = Number(SOZLESME_TAM_ODENDI_TOLERANS) || 0.05;
+    var dk = String(donemYil);
+    var d0 = (window.__tahsilatSatirYilAyDetay[dk] || {})[ayKey];
+    var ya = (typeof girisTahsilatAyKeyToYilAy === 'function') ? girisTahsilatAyKeyToYilAy(ayKey) : null;
+    var dCal = null;
+    if (ya && !isNaN(ya.yil)) {
+        var dkCal = String(ya.yil);
+        if (dkCal !== dk) {
+            var rawCal = (window.__tahsilatSatirYilAyDetay[dkCal] || {})[ayKey];
+            if (rawCal && typeof rawCal === 'object') dCal = rawCal;
+        }
+    }
+    if (d0 && typeof d0 === 'object') {
+        var t0 = parseFloat(d0.tahsil) || 0;
+        if (t0 > tolFb) return d0;
+        // Donem key tahsil~0: takvim key daha yuksek tahsil sunuyorsa onu tercih et.
+        if (dCal) {
+            var tCal = parseFloat(dCal.tahsil) || 0;
+            if (tCal > t0 + tolFb) return dCal;
+        }
+        return d0;
+    }
+    return dCal;
 }
 function girisTahsilatYilAyId(donemYil, ayKey) {
     return 'tahsilat_yil_ay_' + String(donemYil) + '_' + String(ayKey).replace(/-/g, '_');
@@ -18954,6 +18991,13 @@ function girisTahsilatYilAyVarsayilan(donemYil, ayKey) {
 function girisTahsilatYilAyDetayAl(donemYil, ayKey) {
     var map = girisTahsilatYilAyDetayMap(donemYil);
     if (map[ayKey]) return map[ayKey];
+    if (typeof girisTahsilatYilAyDetaySatirFallbackOku === 'function') {
+        var dFbAl = girisTahsilatYilAyDetaySatirFallbackOku(donemYil, ayKey);
+        if (dFbAl) {
+            map[ayKey] = dFbAl;
+            return map[ayKey];
+        }
+    }
     var v = girisTahsilatYilAyVarsayilan(donemYil, ayKey);
     v.__saved = false;
     v.__locked = true;
@@ -19040,6 +19084,24 @@ function girisTahsilatYilAyPanelHtml(donemYil, ayKeys) {
     for (var i = 0; i < ayKeys.length; i++) {
         var ak = ayKeys[i];
         var d = mapAy[ak];
+        if (typeof girisTahsilatYilAyDetaySatirFallbackOku === 'function') {
+            var tolPhFb = Number(SOZLESME_TAM_ODENDI_TOLERANS) || 0.05;
+            var tCurPh = d ? (parseFloat(d.tahsil) || 0) : 0;
+            var needFbPh = !d || !d.__saved || tCurPh <= tolPhFb;
+            if (needFbPh) {
+                var dFbPh = girisTahsilatYilAyDetaySatirFallbackOku(donemYil, ak);
+                if (dFbPh && typeof dFbPh === 'object') {
+                    var tFbPh = parseFloat(dFbPh.tahsil) || 0;
+                    if ((!d || !d.__saved) && dFbPh.__saved) {
+                        d = Object.assign({}, dFbPh);
+                        mapAy[ak] = d;
+                    } else if (tFbPh > tCurPh + tolPhFb) {
+                        d = Object.assign({}, dFbPh);
+                        mapAy[ak] = d;
+                    }
+                }
+            }
+        }
         if (!d || !d.__saved) {
             d = Object.assign({}, girisTahsilatYilAyVarsayilan(donemYil, ak), d || {}, { __saved: false, __locked: (d && d.__locked === false) ? false : true });
         }
@@ -20052,6 +20114,8 @@ function girisTahsilatYilAyPanelGuncelle(donemYil, opts) {
             if (mapPg0[akPg]) mapPg0[akPg].__panel_secili = false;
         });
     } catch (_ePgSel0) {}
+    // sunucuPanelYuklendi=true: asagida DOM yeniden kurulur (erken return yok).
+    // Flag false iken once cache/DB senkronu tetiklenir; true iken dogrudan boya.
     if (!opts.sunucuPanelYuklendi) {
         try {
             var coPg = window.__sozlesmelerAylikSonCacheObj;
