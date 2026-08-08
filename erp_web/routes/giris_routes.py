@@ -10110,6 +10110,27 @@ def api_aylik_tutarlardan_borclandir():
     except Exception:
         pass
     _upsert_aylik_grid_cache(musteri_id)
+    # Ekstre 5 dk mem cache: Borçlandır sonrası bayat 600/kısmi payload servis edilmesin
+    # (düzenle/sil/toplu tahsil ile aynı invalidate yolu).
+    try:
+        affected_isos = []
+        for sr in satirlar:
+            if not isinstance(sr, dict):
+                continue
+            try:
+                y_a = int(sr.get("yil"))
+                m_a = int(sr.get("ay"))
+                affected_isos.append(date(y_a, m_a, 1).isoformat())
+            except (TypeError, ValueError):
+                continue
+        _ekstre_invalidate_after_change(
+            int(musteri_id), affected_isos if affected_isos else None
+        )
+    except Exception:
+        try:
+            _cari_ekstre_api_cache.clear()
+        except Exception:
+            pass
     yeni_n = sum(
         1 for x in olusturulan if isinstance(x, dict) and not x.get("zaten_vardi")
     )
