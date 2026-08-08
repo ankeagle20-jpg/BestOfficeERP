@@ -8,6 +8,7 @@ from auth import giris_gerekli
 from db import fetch_all, fetch_one, db as get_db, execute_returning, sql_expr_fatura_not_gib_taslak
 from utils.text_utils import turkish_lower
 from utils.musteri_arama import customers_arama_sql_giris_genis, customers_arama_params_giris_genis
+from utils.musteri_gorunur import musteri_gorunur_sql
 from services.cari_service import CariService, build_customer_levels
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -488,18 +489,22 @@ def api_360(mid):
 @giris_gerekli
 def api_musteriler():
     """Müşteri listesi; kart + KYC alanlarında geniş metin araması."""
+    from db import ensure_customers_arsivli
+
+    ensure_customers_arsivli()
     q = request.args.get("q", "").strip()
+    gor = musteri_gorunur_sql("")
     base = (
         "SELECT id, name, musteri_adi, tax_number, office_code, durum, "
         "parent_id, COALESCE(is_group, FALSE) AS is_group "
         "FROM customers "
     )
     if not q:
-        rows = fetch_all(base + "ORDER BY name LIMIT 200")
+        rows = fetch_all(base + f"WHERE {gor} ORDER BY name LIMIT 200")
     else:
         w = customers_arama_sql_giris_genis("")
         rows = fetch_all(
-            base + f"WHERE {w} ORDER BY name LIMIT 200",
+            base + f"WHERE {w} AND {gor} ORDER BY name LIMIT 200",
             customers_arama_params_giris_genis(q),
         )
     return jsonify(build_customer_levels(rows or []))

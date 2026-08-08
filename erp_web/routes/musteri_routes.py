@@ -7,6 +7,7 @@ from db import (
     execute_returning,
     ensure_faturalar_amount_columns,
     ensure_customers_durum,
+    ensure_customers_arsivli,
     ensure_customers_quick_edit_columns,
     ensure_customers_kapanis_tarihi,
     ensure_customers_hazir_ofis_oda,
@@ -21,6 +22,7 @@ from db import (
     get_conn,
 )
 from utils.musteri_arama import customers_arama_sql_giris_genis, customers_arama_params_giris_genis
+from utils.musteri_gorunur import musteri_gorunur_and
 import pandas as pd
 import calendar
 import json
@@ -516,30 +518,33 @@ def _musteri_liste_data():
     ensure_grup2_etiketleri_table()
     ensure_customers_grup2_secimleri()
     ensure_grup2_bizim_hesap_into_array()
+    ensure_customers_arsivli()
+    gor_c = musteri_gorunur_and("c")
+    gor = musteri_gorunur_and("")
     grup2_filter_slugs = _musteri_liste_grup2_slugs_from_request()
     grup2_etiketler = _musteri_liste_grup2_etiket_rows() or []
     grup2_etiket_map = {r["slug"]: r["etiket"] for r in grup2_etiketler}
 
     if tum_yillar_odenmis:
         g2_sql, g2_params = _musteri_liste_grup2_sql_and_params("c")
-        sql = f"SELECT c.* {_TUM_YILLAR_ODENMIS_FROM}{g2_sql} ORDER BY c.name"
-        count_sql = f"SELECT COUNT(*) AS n {_TUM_YILLAR_ODENMIS_FROM}{g2_sql}"
+        sql = f"SELECT c.* {_TUM_YILLAR_ODENMIS_FROM}{gor_c}{g2_sql} ORDER BY c.name"
+        count_sql = f"SELECT COUNT(*) AS n {_TUM_YILLAR_ODENMIS_FROM}{gor_c}{g2_sql}"
         params = tuple(g2_params)
     elif arama:
         g2_sql, g2_params = _musteri_liste_grup2_sql_and_params("")
         w3 = customers_arama_sql_giris_genis("")
-        sql = f"SELECT * FROM customers WHERE {w3}{g2_sql} ORDER BY name"
-        count_sql = f"SELECT COUNT(*) AS n FROM customers WHERE {w3}{g2_sql}"
+        sql = f"SELECT * FROM customers WHERE {w3}{gor}{g2_sql} ORDER BY name"
+        count_sql = f"SELECT COUNT(*) AS n FROM customers WHERE {w3}{gor}{g2_sql}"
         params = tuple(customers_arama_params_giris_genis(arama)) + tuple(g2_params)
     else:
         g2_sql, g2_params = _musteri_liste_grup2_sql_and_params("")
         if g2_sql:
-            sql = f"SELECT * FROM customers WHERE 1=1{g2_sql} ORDER BY name"
-            count_sql = f"SELECT COUNT(*) AS n FROM customers WHERE 1=1{g2_sql}"
+            sql = f"SELECT * FROM customers WHERE 1=1{gor}{g2_sql} ORDER BY name"
+            count_sql = f"SELECT COUNT(*) AS n FROM customers WHERE 1=1{gor}{g2_sql}"
             params = tuple(g2_params)
         else:
-            sql = "SELECT * FROM customers ORDER BY name"
-            count_sql = "SELECT COUNT(*) AS n FROM customers"
+            sql = f"SELECT * FROM customers WHERE 1=1{gor} ORDER BY name"
+            count_sql = f"SELECT COUNT(*) AS n FROM customers WHERE 1=1{gor}"
             params = ()
 
     toplam_musteri = None

@@ -32,17 +32,21 @@ AND (
 )
 """.strip()
 
+# Arşiv: pasif kapsamından bağımsız her zaman gizle (liste/grup).
+_GRUP_ALT_CARI_ARSIV_SQL = "COALESCE(c.arsivli, FALSE) = FALSE"
+
 
 def _fallback_one_group_financials(
     parent_uuid: str, pasifleri_dahil: bool
 ) -> tuple[list[int], int, float, float, float]:
     """fn_group_financial_aggregate kullanılamazsa: aynı aktif/pasif filtresiyle borç–alacak + alt cari id listesi."""
     aktif_sql = "" if pasifleri_dahil else f" AND ({_GRUP_ALT_CARI_AKTIF_SQL})"
+    arsiv_sql = f" AND ({_GRUP_ALT_CARI_ARSIV_SQL})"
     child_rows = (
         fetch_all(
             f"""
             SELECT c.id FROM customers c
-            WHERE c.parent_id = %s {aktif_sql}
+            WHERE c.parent_id = %s {aktif_sql}{arsiv_sql}
             ORDER BY c.id
             """,
             (parent_uuid,),
@@ -95,11 +99,18 @@ class CariService:
         Alt cariler kendi hareketleriyle çalışmaya devam eder; burada sadece konsolidasyon yapılır.
         """
         parent_uuid = str(cls.customer_uuid(group_cari_id))
+        try:
+            from db import ensure_customers_arsivli
+
+            ensure_customers_arsivli()
+        except Exception:
+            pass
         row = fetch_one(
             """
             SELECT COALESCE(SUM(COALESCE(current_balance, 0)), 0) AS total
             FROM customers
             WHERE parent_id = %s
+              AND COALESCE(arsivli, FALSE) = FALSE
             """,
             (parent_uuid,),
         )
@@ -111,8 +122,17 @@ class CariService:
         Grup altındaki carilerin toplam borç/alacak/netini döndürür.
         """
         parent_uuid = str(cls.customer_uuid(group_cari_id))
+        try:
+            from db import ensure_customers_arsivli
+
+            ensure_customers_arsivli()
+        except Exception:
+            pass
         child_rows = fetch_all(
-            "SELECT id FROM customers WHERE parent_id = %s",
+            """
+            SELECT id FROM customers
+            WHERE parent_id = %s AND COALESCE(arsivli, FALSE) = FALSE
+            """,
             (parent_uuid,),
         ) or []
         mids = [int(r.get("id")) for r in child_rows if r.get("id") is not None]
@@ -164,8 +184,17 @@ class CariService:
     def get_group_monthly_invoice_borc(cls, group_cari_id: int, ref: date | None = None) -> float:
         """Grup: alt carilerin grid tabanlı aylık borçları toplamı (fatura tarihi toplamı değil)."""
         parent_uuid = str(cls.customer_uuid(group_cari_id))
+        try:
+            from db import ensure_customers_arsivli
+
+            ensure_customers_arsivli()
+        except Exception:
+            pass
         child_rows = fetch_all(
-            "SELECT id FROM customers WHERE parent_id = %s",
+            """
+            SELECT id FROM customers
+            WHERE parent_id = %s AND COALESCE(arsivli, FALSE) = FALSE
+            """,
             (parent_uuid,),
         ) or []
         mids = [int(r.get("id")) for r in child_rows if r.get("id") is not None]
@@ -296,6 +325,57 @@ class CariService:
             sg = _coerce_sql_int_id(r.get("sozlesme_gun"))
             out[gid]["sozlesme_gun"] = int(sg or 0)
 
+        # A1: arsivli mid filtre (fn_group_financial_aggregate sonrasi)
+        try:
+            from db import ensure_customers_arsivli
+
+            ensure_customers_arsivli()
+        except Exception:
+            pass
+        if all_mids:
+            _alive_rows = (
+                fetch_all(
+                    """
+                    SELECT id FROM customers
+                    WHERE id = ANY(%s) AND COALESCE(arsivli, FALSE) = FALSE
+                    """,
+                    (all_mids,),
+                )
+                or []
+            )
+            _alive = {int(r["id"]) for r in _alive_rows if r.get("id") is not None}
+            if len(_alive) != len(all_mids):
+                all_mids = [m for m in all_mids if m in _alive]
+                for _gid in list(gid_to_mids.keys()):
+                    _old = gid_to_mids[_gid]
+                    _new = [m for m in _old if m in _alive]
+                    if len(_new) == len(_old):
+                        continue
+                    gid_to_mids[_gid] = _new
+                    out[_gid]["child_count"] = len(_new)
+                    if not _new:
+                        out[_gid]["borc_total"] = 0.0
+                        out[_gid]["alacak_total"] = 0.0
+                        out[_gid]["net_balance"] = 0.0
+                        continue
+                    _borc = fetch_one(
+                        (
+                            "SELECT COALESCE(SUM(COALESCE(toplam, tutar, 0)), 0) AS t FROM faturalar "
+                            "WHERE musteri_id = ANY(%s) AND "
+                            + sql_expr_fatura_not_gib_taslak("notlar")
+                        ),
+                        (_new,),
+                    ) or {}
+                    _alacak = fetch_one(
+                        "SELECT COALESCE(SUM(tutar), 0) AS t FROM tahsilatlar WHERE musteri_id = ANY(%s)",
+                        (_new,),
+                    ) or {}
+                    _bt = float(_borc.get("t") or 0)
+                    _at = float(_alacak.get("t") or 0)
+                    out[_gid]["borc_total"] = round(_bt, 2)
+                    out[_gid]["alacak_total"] = round(_at, 2)
+                    out[_gid]["net_balance"] = round(_bt - _at, 2)
+
         grid_ozet_by_mid = {}
         if include_grid and all_mids:
             from routes.giris_routes import musteri_firma_ozet_grid_ozet_batch
@@ -342,7 +422,14 @@ class CariService:
     ) -> list[dict]:
         """Grup altındaki cariler ve her biri için borç/alacak/aylık grid (KDV dahil) özeti."""
         parent_uuid = str(cls.customer_uuid(group_cari_id))
+        try:
+            from db import ensure_customers_arsivli
+
+            ensure_customers_arsivli()
+        except Exception:
+            pass
         aktif_sql = "" if pasifleri_dahil else f" AND ({_GRUP_ALT_CARI_AKTIF_SQL})"
+        arsiv_sql = f" AND ({_GRUP_ALT_CARI_ARSIV_SQL})"
         rows = fetch_all(
             f"""
             SELECT c.id, COALESCE(c.musteri_no::text, '') AS musteri_no,
@@ -350,7 +437,7 @@ class CariService:
                    c.hazir_ofis_oda_no
             FROM customers c
             WHERE c.parent_id = %s
-            {aktif_sql}
+            {aktif_sql}{arsiv_sql}
             ORDER BY COALESCE(c.name, c.musteri_adi, '') NULLS LAST, c.id
             """,
             (parent_uuid,),

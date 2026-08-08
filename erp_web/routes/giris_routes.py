@@ -73,6 +73,7 @@ from utils.musteri_arama import (
     customers_arama_sql_params_giris_genis_tokens,
     musteri_arama_ilike_pattern_email_duz,
 )
+from utils.musteri_gorunur import musteri_gorunur_and, musteri_gorunur_sql
 import json
 import uuid
 from pathlib import Path
@@ -3590,7 +3591,11 @@ def _api_musteriler_row_json(row):
 @giris_gerekli
 def api_musteriler():
     """Müşteri listesi - AJAX; ünvan, müşteri adı, vergi, adres, yetkili iletişim, KYC alanları."""
+    from db import ensure_customers_arsivli
+
+    ensure_customers_arsivli()
     arama = (request.args.get('q') or '').strip()
+    gor = musteri_gorunur_sql("")
     base = (
         "SELECT id, name, musteri_adi, musteri_no, tax_number, phone, email, office_code, yetkili_kisi, "
         "NULLIF(TRIM(COALESCE(durum, '')), '') AS durum, "
@@ -3603,13 +3608,13 @@ def api_musteriler():
     # Autocomplete dropdown için 100 yeterli; dar aramada zaten eşleşenler üste gelir.
     limit_n = 100 if arama else 1000
     if not arama:
-        rows = fetch_all(base + f"ORDER BY name LIMIT {limit_n}")
+        rows = fetch_all(base + f"WHERE {gor} ORDER BY name LIMIT {limit_n}")
     else:
         # Boşlukla ayrılmış her kelime tüm alanlarda aranır, kelimeler AND ile birleştirilir.
         # «Mehmet Erdoğdu» ve «Erdoğdu Mehmet» aynı kartı bulur.
         w, p = customers_arama_sql_params_giris_genis_tokens(arama, "")
         rows = fetch_all(
-            base + f"WHERE {w} ORDER BY name LIMIT {limit_n}",
+            base + f"WHERE {w} AND {gor} ORDER BY name LIMIT {limit_n}",
             p,
         )
         # Geniş WHERE bazen e-postayı kaçırır (@, normalizasyon); boşsa sadece e-posta kolonlarında düz ILIKE dene
@@ -3623,7 +3628,7 @@ def api_musteriler():
                 "))"
             )
             rows = fetch_all(
-                base + f"WHERE ({fb}) ORDER BY name LIMIT {limit_n}",
+                base + f"WHERE ({fb}) AND {gor} ORDER BY name LIMIT {limit_n}",
                 (pat, pat, pat),
             )
     out = [_api_musteriler_row_json(r) for r in (rows or [])]

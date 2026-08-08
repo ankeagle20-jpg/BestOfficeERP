@@ -50,6 +50,7 @@ from utils.musteri_arama import (
     customers_arama_params_giris_genis,
     customers_arama_sql_params_giris_genis_tokens,
 )
+from utils.musteri_gorunur import musteri_gorunur_sql
 import os
 import sys
 import io
@@ -2587,16 +2588,28 @@ def _fatura_rapor_musteri_where_sql(
 
     - sadece_aktif: yalnız aktif kart.
     - pasifleri_dahil (Pasiflr): yalnız pasif kart.
-    - Tüm Müşteriler: kapsam süzgeci yok (TRUE).
+    - Tüm Müşteriler: aktif/pasif kapsamı yok; arşivli her zaman gizli.
     - Varsayılan: yalnız aktif kart.
+    Arşivli kayıtlar tüm kapsamda gizlenir (deep-link değil).
     """
+    try:
+        from db import ensure_customers_arsivli
+
+        ensure_customers_arsivli()
+    except Exception:
+        pass
+    gor = musteri_gorunur_sql("c")
     if sadece_aktif:
-        return _fatura_rapor_aktif_musteri_where_clause()
-    if tum_musteriler:
-        return "TRUE"
-    if pasifleri_dahil:
-        return _fatura_rapor_pasif_musteri_where_clause()
-    return _fatura_rapor_aktif_musteri_where_clause()
+        base = _fatura_rapor_aktif_musteri_where_clause()
+    elif tum_musteriler:
+        base = "TRUE"
+    elif pasifleri_dahil:
+        base = _fatura_rapor_pasif_musteri_where_clause()
+    else:
+        base = _fatura_rapor_aktif_musteri_where_clause()
+    if (base or "").strip().upper() == "TRUE":
+        return gor
+    return f"({base}) AND {gor}"
 
 
 def _fatura_rapor_musteri_where_with_bizim(musteri_where: str, bizim_only: bool) -> str:

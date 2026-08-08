@@ -1326,6 +1326,26 @@ def ensure_customers_is_active():
         print(f"customers.is_active: {e}")
 
 
+_customers_arsivli_column_done = False
+
+
+def ensure_customers_arsivli():
+    """customers.arsivli (+ meta) — liste/arama gizleme; mevcut satırlar DEFAULT FALSE."""
+    global _customers_arsivli_column_done
+    if _customers_arsivli_column_done:
+        return
+    try:
+        execute(
+            "ALTER TABLE customers ADD COLUMN IF NOT EXISTS arsivli BOOLEAN NOT NULL DEFAULT FALSE"
+        )
+        execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS arsiv_nedeni TEXT")
+        execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS arsiv_at TIMESTAMPTZ")
+        execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS arsiv_kanonik_id INTEGER")
+        _customers_arsivli_column_done = True
+    except Exception as e:
+        print(f"customers.arsivli: {e}")
+
+
 def ensure_customers_notes():
     """Customers tablosuna notes ve ev_adres sütunlarını ekle."""
     try:
