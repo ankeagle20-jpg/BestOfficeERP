@@ -17885,7 +17885,31 @@ async function potSozlesme() {
 var musteriAraTimer = null;
 var musteriAraAbort = null;
 var musteriAraToken = 0;
+
+function girisPasifleriDahilAktif() {
+    var el = document.getElementById('giris-pasifleri-dahil');
+    return !!(el && el.checked);
+}
+function girisMusteriApiUrl(q) {
+    var params = [];
+    if (q != null && String(q).length) params.push('q=' + encodeURIComponent(String(q)));
+    if (girisPasifleriDahilAktif()) params.push('pasifleri_dahil=1');
+    return '/giris/api/musteriler' + (params.length ? ('?' + params.join('&')) : '');
+}
+function girisPasifleriDahilBind() {
+    var el = document.getElementById('giris-pasifleri-dahil');
+    if (!el || el._a2bound) return;
+    el._a2bound = true;
+    el.addEventListener('change', function () {
+        if (typeof musteriAra === 'function') musteriAra();
+    });
+}
+document.addEventListener('DOMContentLoaded', function () {
+    try { girisPasifleriDahilBind(); } catch (e) {}
+});
+
 async function musteriAra() {
+
     const headerInput = document.getElementById('header-arama-input');
     const aramaInput = document.getElementById('arama-input');
     let arama = '';
@@ -17911,7 +17935,7 @@ async function musteriAra() {
         }
         musteriAraAbort = new AbortController();
         try {
-            var url = '/giris/api/musteriler?q=' + encodeURIComponent(arama);
+            var url = girisMusteriApiUrl(arama);
             var data = null;
             if (typeof girisFetchJsonCached === 'function') {
                 data = await girisFetchJsonCached(url, { ttlMs: 15000, fetch: { credentials: 'same-origin', signal: musteriAraAbort.signal } });

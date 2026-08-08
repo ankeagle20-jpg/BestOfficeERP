@@ -73,7 +73,7 @@ from utils.musteri_arama import (
     customers_arama_sql_params_giris_genis_tokens,
     musteri_arama_ilike_pattern_email_duz,
 )
-from utils.musteri_gorunur import musteri_gorunur_and, musteri_gorunur_sql
+from utils.musteri_gorunur import musteri_liste_gorunur_sql, request_pasifleri_dahil
 import json
 import uuid
 from pathlib import Path
@@ -3595,7 +3595,8 @@ def api_musteriler():
 
     ensure_customers_arsivli()
     arama = (request.args.get('q') or '').strip()
-    gor = musteri_gorunur_sql("")
+    pasifleri_dahil = request_pasifleri_dahil()
+    gor = musteri_liste_gorunur_sql("", pasifleri_dahil=pasifleri_dahil)
     base = (
         "SELECT id, name, musteri_adi, musteri_no, tax_number, phone, email, office_code, yetkili_kisi, "
         "NULLIF(TRIM(COALESCE(durum, '')), '') AS durum, "

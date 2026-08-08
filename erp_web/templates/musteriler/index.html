@@ -9,19 +9,21 @@
 {%- endmacro %}
 {% macro ml_list_href_page(sayfa, limit) -%}
 {%- set tu = ('1' if tum_yillar_odenmis else none) -%}
+{%- set pd = ('1' if pasifleri_dahil|default(false) else none) -%}
 {%- if embed|default(false) -%}
-{{- url_for('musteriler.list_full', sayfa=sayfa, limit=limit, q=arama or none, tum_yillar_odenmis=tu, embed=1) -}}
+{{- url_for('musteriler.list_full', sayfa=sayfa, limit=limit, q=arama or none, tum_yillar_odenmis=tu, pasifleri_dahil=pd, embed=1) -}}
 {%- else -%}
-{{- url_for('musteriler.list_full', sayfa=sayfa, limit=limit, q=arama or none, tum_yillar_odenmis=tu) -}}
+{{- url_for('musteriler.list_full', sayfa=sayfa, limit=limit, q=arama or none, tum_yillar_odenmis=tu, pasifleri_dahil=pd) -}}
 {%- endif -%}
 {{- ml_list_suffix_grup2() -}}
 {%- endmacro %}
 {% macro ml_list_href_unpaged() -%}
 {%- set tu = ('1' if tum_yillar_odenmis else none) -%}
+{%- set pd = ('1' if pasifleri_dahil|default(false) else none) -%}
 {%- if embed|default(false) -%}
-{{- url_for('musteriler.list_full', q=arama or none, tum_yillar_odenmis=tu, embed=1) -}}
+{{- url_for('musteriler.list_full', q=arama or none, tum_yillar_odenmis=tu, pasifleri_dahil=pd, embed=1) -}}
 {%- else -%}
-{{- url_for('musteriler.list_full', q=arama or none, tum_yillar_odenmis=tu) -}}
+{{- url_for('musteriler.list_full', q=arama or none, tum_yillar_odenmis=tu, pasifleri_dahil=pd) -}}
 {%- endif -%}
 {{- ml_list_suffix_grup2() -}}
 {%- endmacro %}
@@ -361,6 +363,10 @@ window.setActiveTab = function(tabId) {
       <option value="pasif">Durum: Pasif</option>
       <option value="geciken">Sadece Geciken</option>
     </select>
+    <label class="ml-filter-sel" id="mlPasifleriDahilLbl" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;user-select:none;padding:4px 8px;">
+      <input type="checkbox" id="mlPasifleriDahil" {% if pasifleri_dahil|default(false) %}checked{% endif %}>
+      <span>Pasifleri göster</span>
+    </label>
     <select class="ml-filter-sel ml-sel-hizmet-turu" id="mlHizmetTop" title="Hizmet türü veya ofis seçin">
       {{ ml_select_hizmet_ofis('Hizmet Türü')|safe }}
     </select>
@@ -1141,6 +1147,47 @@ function mlGetSozBasTarihFiltreIso(inp) {
   return '';
 }
 
+function mlPasifleriDahilAktif() {
+  var el = document.getElementById('mlPasifleriDahil');
+  return !!(el && el.checked);
+}
+function mlUrlPasifleriDahilUygula(u) {
+  try {
+    if (mlPasifleriDahilAktif()) u.searchParams.set('pasifleri_dahil', '1');
+    else u.searchParams.delete('pasifleri_dahil');
+  } catch (e) {}
+  return u;
+}
+function mlPasifleriDahilToggleInit() {
+  var el = document.getElementById('mlPasifleriDahil');
+  if (!el || el._a2Bound) return;
+  el._a2Bound = true;
+  el.addEventListener('change', function () {
+    try {
+      var u = new URL(window.location.href);
+      mlUrlPasifleriDahilUygula(u);
+      if (u.searchParams.has('sayfa')) u.searchParams.set('sayfa', '1');
+      // Pasifler sunucudan gelsin: istemci Durum filtresi engellemesin
+      if (el.checked) {
+        var dH = document.getElementById('mlDurum');
+        var dT = document.getElementById('mlDurumTop');
+        if (dH) dH.value = 'hepsi';
+        if (dT) dT.value = 'hepsi';
+      }
+      window.location.href = u.toString();
+    } catch (e) {
+      console.warn(e);
+    }
+  });
+  if (el.checked) {
+    var dH2 = document.getElementById('mlDurum');
+    var dT2 = document.getElementById('mlDurumTop');
+    if (dH2) dH2.value = 'hepsi';
+    if (dT2) dT2.value = 'hepsi';
+  }
+}
+mlPasifleriDahilToggleInit();
+
 function filterTable(){
   var qRaw = (document.getElementById('mlQ').value || '').trim();
   var q = qRaw ? mlAramaFoldTr(qRaw) : '';
@@ -1469,6 +1516,7 @@ function mlInitSozBasTarihFiltre() {
       u.searchParams.delete('grup2');
       u.searchParams.delete('q');
       u.searchParams.delete('tum_yillar_odenmis');
+      u.searchParams.delete('pasifleri_dahil');
       // Temizle sonrası ilk sayfaya dön.
       if (u.searchParams.has('sayfa')) u.searchParams.set('sayfa', '1');
       window.location.href = u.toString();
@@ -1485,6 +1533,7 @@ window.addEventListener('load', function() {
 
 function mlNavigateWithServerSearch(qVal) {
   var u = new URL(window.location.href);
+  mlUrlPasifleriDahilUygula(u);
   var q = String(qVal || '').trim();
   if (q) u.searchParams.set('q', q);
   else u.searchParams.delete('q');

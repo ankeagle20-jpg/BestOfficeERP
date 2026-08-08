@@ -22,7 +22,7 @@ from db import (
     get_conn,
 )
 from utils.musteri_arama import customers_arama_sql_giris_genis, customers_arama_params_giris_genis
-from utils.musteri_gorunur import musteri_gorunur_and
+from utils.musteri_gorunur import musteri_liste_gorunur_and, request_pasifleri_dahil
 import pandas as pd
 import calendar
 import json
@@ -519,8 +519,9 @@ def _musteri_liste_data():
     ensure_customers_grup2_secimleri()
     ensure_grup2_bizim_hesap_into_array()
     ensure_customers_arsivli()
-    gor_c = musteri_gorunur_and("c")
-    gor = musteri_gorunur_and("")
+    pasifleri_dahil = request_pasifleri_dahil()
+    gor_c = musteri_liste_gorunur_and("c", pasifleri_dahil=pasifleri_dahil)
+    gor = musteri_liste_gorunur_and("", pasifleri_dahil=pasifleri_dahil)
     grup2_filter_slugs = _musteri_liste_grup2_slugs_from_request()
     grup2_etiketler = _musteri_liste_grup2_etiket_rows() or []
     grup2_etiket_map = {r["slug"]: r["etiket"] for r in grup2_etiketler}
@@ -565,6 +566,7 @@ def _musteri_liste_data():
         "musteriler": musteriler,
         "arama": arama,
         "tum_yillar_odenmis": tum_yillar_odenmis,
+        "pasifleri_dahil": pasifleri_dahil,
         "paginate": paginate,
         "sayfa": sayfa if paginate else 1,
         "limit": limit if paginate else None,
@@ -811,6 +813,7 @@ def list_full():
         musteriler=musteriler,
         arama=data["arama"],
         tum_yillar_odenmis=data["tum_yillar_odenmis"],
+        pasifleri_dahil=data.get("pasifleri_dahil", False),
         paginate=paginate,
         sayfa=data.get("sayfa", 1),
         limit=data.get("limit") or 50,

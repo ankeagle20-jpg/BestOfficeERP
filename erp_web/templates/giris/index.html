@@ -2680,8 +2680,12 @@
 <div class="giris-header" id="giris-musteri-arama-panel">
     <div class="giris-header-left">
         <h2>Müşteri Listesi</h2>
-        <div class="giris-header-search">
-            <input type="text" id="header-arama-input" placeholder="Müşteri adı / vergi no ara..." onkeyup="headerMusteriAra()">
+        <div class="giris-header-search" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <input type="text" id="header-arama-input" placeholder="Müşteri adı / vergi no ara..." onkeyup="headerMusteriAra()" style="flex:1;min-width:180px;">
+            <label style="display:inline-flex;align-items:center;gap:6px;color:#b0bec5;font-size:12px;cursor:pointer;user-select:none;white-space:nowrap;">
+                <input type="checkbox" id="giris-pasifleri-dahil">
+                <span>Pasifleri göster</span>
+            </label>
         </div>
     </div>
     <div class="giris-buttons">
@@ -22574,7 +22578,31 @@ async function potSozlesme() {
 var musteriAraTimer = null;
 var musteriAraAbort = null;
 var musteriAraToken = 0;
+
+function girisPasifleriDahilAktif() {
+    var el = document.getElementById('giris-pasifleri-dahil');
+    return !!(el && el.checked);
+}
+function girisMusteriApiUrl(q) {
+    var params = [];
+    if (q != null && String(q).length) params.push('q=' + encodeURIComponent(String(q)));
+    if (girisPasifleriDahilAktif()) params.push('pasifleri_dahil=1');
+    return '/giris/api/musteriler' + (params.length ? ('?' + params.join('&')) : '');
+}
+function girisPasifleriDahilBind() {
+    var el = document.getElementById('giris-pasifleri-dahil');
+    if (!el || el._a2bound) return;
+    el._a2bound = true;
+    el.addEventListener('change', function () {
+        if (typeof musteriAra === 'function') musteriAra();
+    });
+}
+document.addEventListener('DOMContentLoaded', function () {
+    try { girisPasifleriDahilBind(); } catch (e) {}
+});
+
 async function musteriAra() {
+
     const headerInput = document.getElementById('header-arama-input');
     const aramaInput = document.getElementById('arama-input');
     let arama = '';
@@ -22600,7 +22628,7 @@ async function musteriAra() {
         }
         musteriAraAbort = new AbortController();
         try {
-            var url = '/giris/api/musteriler?q=' + encodeURIComponent(arama);
+            var url = girisMusteriApiUrl(arama);
             var data = null;
             if (typeof girisFetchJsonCached === 'function') {
                 data = await girisFetchJsonCached(url, { ttlMs: 15000, fetch: { credentials: 'same-origin', signal: musteriAraAbort.signal } });

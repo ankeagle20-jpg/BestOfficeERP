@@ -8,7 +8,7 @@ from auth import giris_gerekli
 from db import fetch_all, fetch_one, db as get_db, execute_returning, sql_expr_fatura_not_gib_taslak
 from utils.text_utils import turkish_lower
 from utils.musteri_arama import customers_arama_sql_giris_genis, customers_arama_params_giris_genis
-from utils.musteri_gorunur import musteri_gorunur_sql
+from utils.musteri_gorunur import musteri_liste_gorunur_sql, request_pasifleri_dahil
 from services.cari_service import CariService, build_customer_levels
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -493,7 +493,8 @@ def api_musteriler():
 
     ensure_customers_arsivli()
     q = request.args.get("q", "").strip()
-    gor = musteri_gorunur_sql("")
+    pasifleri_dahil = request_pasifleri_dahil()
+    gor = musteri_liste_gorunur_sql("", pasifleri_dahil=pasifleri_dahil)
     base = (
         "SELECT id, name, musteri_adi, tax_number, office_code, durum, "
         "parent_id, COALESCE(is_group, FALSE) AS is_group "
