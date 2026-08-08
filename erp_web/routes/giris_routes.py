@@ -2531,6 +2531,7 @@ def _aylik_tahsil_tutar_map(musteri_id, tahsil_rows=None, remaining_by_iso=None,
     - |BTUFRT|: yalnızca BTUFRT_GRID_ODENME_DAHIL_DEGIL (2026-01-01) ve sonrası ayları hedefliyorsa grid
       ödemesinden sayılmaz; önceki ay muhasebe çiftleri gridde yeşilde kalır.
     - Birden fazla |AYLIK_TAH| varsa tutar aylara bölünür.
+    - İki geçiş: önce marker'lı (TAH/PAY remaining düşer), sonra marker'sız oldest-open.
     tahsil_rows / remaining_by_iso / kyc_row: ekstre gibi sıcak yollarda tekrarlayan SQL'i keser.
     """
     if tahsil_rows is not None:
@@ -2622,8 +2623,45 @@ def _aylik_tahsil_tutar_map(musteri_id, tahsil_rows=None, remaining_by_iso=None,
             remaining_by_iso[iso] = round(acik - pay, 2)
             rem = round(rem - pay, 2)
         return out_alloc
-    out = defaultdict(float)
+
+    def _remaining_drop(iso, pv):
+        if iso not in remaining_by_iso:
+            return
+        try:
+            pv = round(float(pv or 0), 2)
+        except (TypeError, ValueError):
+            return
+        if pv <= 0:
+            return
+        remaining_by_iso[iso] = round(max(float(remaining_by_iso.get(iso) or 0) - pv, 0), 2)
+
+    # Two-pass: (1) marker'lı TAH/PAY/BTUFRT — remaining düş;
+    # (2) marker'sız — güncel remaining ile oldest-open.
+    # Tek geçişte marker'sız, sonraki ayların TAH'ından önce gelebilir (mid=128).
+    marked_rows = []
+    unmarked_rows = []
     for r in rows:
+        ac = str(r.get("aciklama") or "")
+        try:
+            tut = float(r.get("tutar") or 0)
+        except (TypeError, ValueError):
+            tut = 0.0
+        if tut <= 0:
+            continue
+        marker_isos = re.findall(r"\|AYLIK_TAH\|([0-9]{4}-[0-9]{2}-[0-9]{2})\|", ac)
+        pay_tokens = re.findall(r"\|AYLIK_PAY\|([0-9]{4}-[0-9]{2}-[0-9]{2})=([0-9]+(?:\.[0-9]+)?)\|", ac)
+        if (
+            _aylik_btufrt_row_skip_grid_odeme(ac, marker_isos, r)
+            or pay_tokens
+            or marker_isos
+        ):
+            marked_rows.append(r)
+        else:
+            unmarked_rows.append(r)
+
+    out = defaultdict(float)
+    # --- Geçiş 1: marker'lı ---
+    for r in marked_rows:
         ac = str(r.get("aciklama") or "")
         tut = float(r.get("tutar") or 0)
         if tut <= 0:
@@ -2649,21 +2687,9 @@ def _aylik_tahsil_tutar_map(musteri_id, tahsil_rows=None, remaining_by_iso=None,
                 if pv <= 0:
                     continue
                 out[iso] += pv
-                if iso in remaining_by_iso:
-                    remaining_by_iso[iso] = round(max(float(remaining_by_iso.get(iso) or 0) - pv, 0), 2)
+                _remaining_drop(iso, pv)
                 used_any = True
             if used_any:
-                continue
-        # Marker yoksa oldest-open dağıt (manuel/legacy markersız kayıtlar).
-        # Marker varsa o aya/aylara sadık kal.
-        ac_plain = re.sub(r"\|AYLIK_TAH\|[0-9]{4}-[0-9]{2}-[0-9]{2}\|", " ", ac)
-        ac_plain = re.sub(r"\|AYLIK_PAY\|[0-9]{4}-[0-9]{2}-[0-9]{2}=[0-9]+(?:\.[0-9]+)?\|", " ", ac_plain)
-        ac_plain = " ".join(ac_plain.split()).strip()
-        if not marker_isos:
-            al = _alloc_oldest(tut)
-            if al:
-                for iso, pv in al:
-                    out[iso] += pv
                 continue
         if marker_isos:
             n = len(marker_isos)
@@ -2681,7 +2707,39 @@ def _aylik_tahsil_tutar_map(musteri_id, tahsil_rows=None, remaining_by_iso=None,
                     iso = date(dd.year, dd.month, 1).isoformat()
                 except ValueError:
                     continue
-                out[iso] += share_cents / 100.0
+                share = share_cents / 100.0
+                out[iso] += share
+                _remaining_drop(iso, share)
+            continue
+        # pay_tokens vardı ama geçerli değil + TAH yok: eski tek-geçiş fallthrough
+        al = _alloc_oldest(tut)
+        if al:
+            for iso, pv in al:
+                out[iso] += pv
+            continue
+        d = r.get("fatura_tarihi") or r.get("tahsilat_tarihi")
+        if hasattr(d, "year"):
+            iso = date(int(d.year), int(d.month), 1).isoformat()
+            out[iso] += tut
+        elif d:
+            try:
+                ds = str(d)[:10]
+                dd = datetime.strptime(ds, "%Y-%m-%d").date()
+                iso = date(dd.year, dd.month, 1).isoformat()
+                out[iso] += tut
+            except Exception:
+                pass
+
+    # --- Geçiş 2: marker'sız (geçiş 1 sonrası remaining) ---
+    for r in unmarked_rows:
+        tut = float(r.get("tutar") or 0)
+        if tut <= 0:
+            continue
+        # Marker yoksa oldest-open dağıt (manuel/legacy markersız kayıtlar).
+        al = _alloc_oldest(tut)
+        if al:
+            for iso, pv in al:
+                out[iso] += pv
             continue
         # Eski kayıtlar marker'sız olabilir: önce fatura ayı, yoksa tahsilat ayı.
         d = r.get("fatura_tarihi") or r.get("tahsilat_tarihi")
