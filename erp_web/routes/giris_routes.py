@@ -7744,8 +7744,14 @@ def _firma_ozet_ozet_from_grid_cache_payload(payload, ref_y: int, ref_m: int) ->
         odenen = float(a.get("odenen_tutar_kdv") or 0) if a.get("odenen_tutar_kdv") is not None else 0.0
         kismi = bool(a.get("kismi_tahsilat")) or (odenen > tol and kalan > tol)
         if (not tahsil) or kismi:
-            if tut > tol:
-                total_borc += tut
+            # Kısmi ay: ödenmemiş kalan; tam açık ay: brüt (kalan≈brüt).
+            # Güvenlik: tutarsız kalan>brüt ise brüt ile sınırla.
+            if kismi:
+                add = min(tut, max(kalan, 0.0)) if math.isfinite(kalan) else tut
+            else:
+                add = tut
+            if add > tol:
+                total_borc += add
                 geciken += 1
     return {
         "borc_month": borc_month,
