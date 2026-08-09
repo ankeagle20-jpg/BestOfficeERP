@@ -278,6 +278,7 @@ def _fetch_customer_rows() -> list[dict]:
                COALESCE(c.musteri_no::text, '') AS musteri_no,
                c.name, c.tax_number, c.phone, c.address, c.durum, c.is_active,
                c.created_at, c.yetkili_kisi, c.rent_start_date,
+               c.kapanis_tarihi,
                COALESCE(c.current_rent, 0) AS current_rent,
                COALESCE(c.ilk_kira_bedeli, 0) AS ilk_kira_bedeli,
                COALESCE(c.arsivli, FALSE) AS arsivli,
@@ -362,6 +363,7 @@ def _enrich(rows: list[dict]) -> list[dict]:
                 "odeme_duzeni": odeme,
                 "sozlesme_baslangic": soz,
                 "sozlesme_src": soz_src,
+                "kapanis_tarihi": norm_date(r.get("kapanis_tarihi")),
                 "aylik_kira": aylik,
                 "son_islem_at": son_parts[0] if son_parts else None,
             }
@@ -467,6 +469,7 @@ def build_mukerrer_groups(guven: str | None = None) -> dict[str, Any]:
                     "yetkili": m.get("yetkili"),
                     "odeme_duzeni": m.get("odeme_duzeni"),
                     "sozlesme_baslangic": norm_date(m.get("sozlesme_baslangic")),
+                    "kapanis_tarihi": norm_date(m.get("kapanis_tarihi")),
                     "aylik_kira": round(kira, 2),
                     "kira_dolu": kira > 0,
                     "tahsilat_n": int(m.get("tahsilat_n") or 0),

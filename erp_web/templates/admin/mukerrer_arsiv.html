@@ -217,6 +217,8 @@
           '<td>' + esc(m.musteri_no) + '</td>' +
           '<td><a class="mk-musteri-link" href="/giris/?tab=sozlesmeler&mid=' + m.id + '" target="_blank" rel="noopener" onclick="event.stopPropagation()">' + esc(m.name) + '</a>' + (isCanon ? ' <span class="mk-score">(önerilen kanonik)</span>' : '') + '</td>' +
           '<td>' + esc(m.durum) + '</td>' +
+          '<td>' + esc(m.sozlesme_baslangic || '—') + '</td>' +
+          '<td>' + (String(m.durum || '').toLowerCase() === 'pasif' ? esc(m.kapanis_tarihi || '—') : '—') + '</td>' +
           '<td>' + (m.kira_dolu ? esc(m.aylik_kira) : '—') + '</td>' +
           '<td>' + (m.tahsilat_n || 0) + ' / ' + (m.fatura_n || 0) + '</td>' +
           '<td>' + esc(m.son_islem_at || '—') + '</td>' +
@@ -244,6 +246,7 @@
         '<table>' +
           '<thead><tr>' +
             '<th>Kanonik</th><th>Arşivle</th><th>ID</th><th>No</th><th>Ad</th><th>Durum</th>' +
+            '<th>Sözleşme Başlangıç</th><th>Kapanış Tarihi</th>' +
             '<th>Kira</th><th>Tahsilat/Fatura</th><th>Son işlem</th><th>Skor</th>' +
           '</tr></thead>' +
           '<tbody>' + rows + '</tbody>' +
