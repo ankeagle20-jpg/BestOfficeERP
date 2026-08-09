@@ -12,7 +12,7 @@
   .mk-nav a { text-decoration:none; }
   .mk-nav .mk-tab {
     padding:6px 12px; border-radius:6px; border:1px solid #1e3a5f;
-    color:#90caf9; background:#0a1929; font-size:.85rem;
+    color:#90caf9; background:#0a1929; font-size:.85rem; cursor:pointer;
   }
   .mk-nav .mk-tab.active { background:#1565c0; color:#fff; border-color:#1565c0; }
   .mk-toolbar { display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin-bottom:16px; }
@@ -41,42 +41,88 @@
   .mk-card th, .mk-card td { border-bottom:1px solid #1e3a5f; padding:6px 8px; text-align:left; }
   .mk-card th { color:#90caf9; font-weight:600; }
   .mk-card tr.is-canon { background:rgba(38,166,154,.12); }
-  .mk-card tr.is-canon td:first-child { font-weight:700; }
   .mk-actions { margin-top:10px; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-  .mk-btn-disabled {
-    opacity:.55; cursor:not-allowed; background:#37474f !important;
-    border-color:#455a64 !important; color:#b0bec5 !important;
-  }
   .mk-note { color:#78909c; font-size:.78rem; }
   .mk-err { color:#ef9a9a; margin:10px 0; }
+  .mk-ok { color:#a5d6a7; margin:10px 0; }
   .mk-score { color:#80cbc4; font-size:.75rem; }
+  .mk-panel { display:none; }
+  .mk-panel.active { display:block; }
+  .mk-modal-bg {
+    display:none; position:fixed; inset:0; background:rgba(0,0,0,.55);
+    z-index:9999; align-items:center; justify-content:center;
+  }
+  .mk-modal-bg.open { display:flex; }
+  .mk-modal {
+    background:#0b1e30; border:1px solid #1e3a5f; border-radius:10px;
+    padding:18px 20px; max-width:480px; width:92%; color:#e0f7fa;
+  }
+  .mk-modal input[type=text] {
+    width:100%; margin:10px 0; padding:8px; background:#0a1929;
+    border:1px solid #1e3a5f; color:#e0f7fa; border-radius:6px;
+  }
+  .mk-modal .mk-modal-actions { display:flex; gap:8px; justify-content:flex-end; margin-top:12px; }
+  .mk-batch-table { width:100%; border-collapse:collapse; font-size:.82rem; }
+  .mk-batch-table th, .mk-batch-table td {
+    border-bottom:1px solid #1e3a5f; padding:8px; text-align:left;
+  }
+  .mk-batch-table th { color:#90caf9; }
 </style>
 
 <div class="mk-nav">
   <a class="mk-tab" href="{{ url_for('admin.index') }}">Kullanıcılar</a>
-  <a class="mk-tab active" href="{{ url_for('admin_mukerrer.mukerrer_arsiv_page') }}">Mükerrer Arşiv</a>
+  <span class="mk-tab active" id="mk-tab-analiz" role="button">Analiz / Onay</span>
+  <span class="mk-tab" id="mk-tab-batch" role="button">Son işlemler / Geri al</span>
 </div>
 
-<div class="card-erp">
-  <p style="color:#90caf9;margin:0 0 12px;font-size:.9rem;">
-    Salt görüntüleme (A4). Analiz canlı DB üzerinden okunur; bu ekranda arşivleme yazması yoktur.
-  </p>
-
-  <div class="mk-toolbar">
-    <label>
-      Güven filtresi
-      <select id="mk-guven">
-        <option value="hepsi" selected>ÇOK YÜKSEK + YÜKSEK</option>
-        <option value="cok_yuksek">Sadece ÇOK YÜKSEK</option>
-        <option value="yuksek">Sadece YÜKSEK</option>
-      </select>
-    </label>
-    <button type="button" class="btn-erp btn-erp-sm" id="mk-yenile">Yenile</button>
+<div id="mk-panel-analiz" class="mk-panel active">
+  <div class="card-erp">
+    <p style="color:#90caf9;margin:0 0 12px;font-size:.9rem;">
+      Grupları tek tek inceleyin. Onay, yalnızca seçilen kopyaların arşiv meta alanlarını günceller (finans dokunulmaz).
+    </p>
+    <div class="mk-toolbar">
+      <label>
+        Güven filtresi
+        <select id="mk-guven">
+          <option value="hepsi" selected>ÇOK YÜKSEK + YÜKSEK</option>
+          <option value="cok_yuksek">Sadece ÇOK YÜKSEK</option>
+          <option value="yuksek">Sadece YÜKSEK</option>
+        </select>
+      </label>
+      <button type="button" class="btn-erp btn-erp-sm" id="mk-yenile">Yenile</button>
+      <span class="mk-note" id="mk-session">Bu oturum: 0 grup / 0 kayıt arşivlendi</span>
+    </div>
+    <div class="mk-meta" id="mk-meta">Yükleniyor…</div>
+    <div class="mk-err" id="mk-err" style="display:none;"></div>
+    <div class="mk-ok" id="mk-ok" style="display:none;"></div>
+    <div id="mk-groups"></div>
   </div>
+</div>
 
-  <div class="mk-meta" id="mk-meta">Yükleniyor…</div>
-  <div class="mk-err" id="mk-err" style="display:none;"></div>
-  <div id="mk-groups"></div>
+<div id="mk-panel-batch" class="mk-panel">
+  <div class="card-erp">
+    <div class="mk-toolbar">
+      <button type="button" class="btn-erp btn-erp-sm" id="mk-batch-yenile">Batch listesini yenile</button>
+    </div>
+    <div class="mk-err" id="mk-batch-err" style="display:none;"></div>
+    <div id="mk-batches">Yükleniyor…</div>
+  </div>
+</div>
+
+<div class="mk-modal-bg" id="mk-modal">
+  <div class="mk-modal">
+    <h3 style="margin:0 0 8px;font-size:1.05rem;">Arşivlemeyi onayla</h3>
+    <p id="mk-modal-text" style="margin:0;font-size:.9rem;color:#b0bec5;"></p>
+    <p class="mk-note">İkinci fren: kutuya büyük harfle <strong>ONAYLA</strong> yazın.</p>
+    <input type="text" id="mk-modal-input" placeholder="ONAYLA" autocomplete="off">
+    <label class="mk-note" style="display:flex;gap:8px;align-items:center;">
+      <input type="checkbox" id="mk-modal-check"> Bu işlemi anladığımı onaylıyorum
+    </label>
+    <div class="mk-modal-actions">
+      <button type="button" class="btn-erp btn-erp-sm btn-outline-erp" id="mk-modal-cancel">Vazgeç</button>
+      <button type="button" class="btn-erp btn-erp-sm" id="mk-modal-go" disabled>Onayla ve arşivle</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -84,7 +130,20 @@
   const elGroups = document.getElementById('mk-groups');
   const elMeta = document.getElementById('mk-meta');
   const elErr = document.getElementById('mk-err');
+  const elOk = document.getElementById('mk-ok');
   const elGuven = document.getElementById('mk-guven');
+  const elSession = document.getElementById('mk-session');
+  const elBatches = document.getElementById('mk-batches');
+  const elBatchErr = document.getElementById('mk-batch-err');
+  const modal = document.getElementById('mk-modal');
+  const modalText = document.getElementById('mk-modal-text');
+  const modalInput = document.getElementById('mk-modal-input');
+  const modalCheck = document.getElementById('mk-modal-check');
+  const modalGo = document.getElementById('mk-modal-go');
+
+  let sessionGroups = 0, sessionRecords = 0;
+  let pending = null;
+  let groupsCache = [];
 
   function esc(s) {
     return String(s == null ? '' : s)
@@ -92,10 +151,52 @@
       .replace(/"/g, '&quot;');
   }
 
+  function showErr(el, msg) {
+    el.style.display = msg ? 'block' : 'none';
+    el.textContent = msg || '';
+  }
+
   function tierBadge(tier) {
     if (tier === 'COK_YUKSEK') return '<span class="mk-badge cok">ÇOK YÜKSEK</span>';
     if (tier === 'YUKSEK') return '<span class="mk-badge yuk">YÜKSEK</span>';
     return '<span class="mk-badge">' + esc(tier) + '</span>';
+  }
+
+  function updateSession() {
+    elSession.textContent = 'Bu oturum: ' + sessionGroups + ' grup / ' + sessionRecords + ' kayıt arşivlendi';
+  }
+
+  function selectedCanon(groupKey) {
+    const el = document.querySelector('input[name="canon-' + groupKey + '"]:checked');
+    return el ? parseInt(el.value, 10) : null;
+  }
+
+  function selectedArsivIds(groupKey, canonId) {
+    const boxes = document.querySelectorAll('.mk-arsiv-cb[data-gid="' + groupKey + '"]:checked');
+    const ids = [];
+    boxes.forEach(function (b) {
+      const id = parseInt(b.value, 10);
+      if (id && id !== canonId) ids.push(id);
+    });
+    return ids;
+  }
+
+  function syncCanonDisable(groupKey) {
+    const canonId = selectedCanon(groupKey);
+    document.querySelectorAll('.mk-arsiv-cb[data-gid="' + groupKey + '"]').forEach(function (b) {
+      const id = parseInt(b.value, 10);
+      if (id === canonId) {
+        b.checked = false;
+        b.disabled = true;
+      } else {
+        b.disabled = false;
+      }
+    });
+    document.querySelectorAll('.mk-card[data-group-key="' + groupKey + '"] tr').forEach(function (tr) {
+      const radio = tr.querySelector('input[type=radio]');
+      if (!radio) return;
+      tr.classList.toggle('is-canon', parseInt(radio.value, 10) === canonId);
+    });
   }
 
   function renderGroup(g) {
@@ -146,17 +247,39 @@
           '<tbody>' + rows + '</tbody>' +
         '</table>' +
         '<div class="mk-actions">' +
-          '<button type="button" class="btn-erp btn-erp-sm mk-btn-disabled" disabled title="A5 aşamasında aktif olacak">' +
-            'Bu grubu onayla (A5 — yakında)' +
+          '<button type="button" class="btn-erp btn-erp-sm mk-approve" data-gid="' + esc(g.group_key) + '">' +
+            'Bu grubu onayla' +
           '</button>' +
-          '<span class="mk-note">A4: onay/yazma kapalı. Radio ve checkbox seçimleri önizlemedir.</span>' +
+          '<span class="mk-note">Kanonik radio ile değişir; arşivlenecekler checkbox.</span>' +
         '</div>' +
       '</div>'
     );
   }
 
-  function load() {
-    elErr.style.display = 'none';
+  function openModal(p) {
+    pending = p;
+    modalText.textContent = p.arsiv_ids.length + ' kayıt arşivlenecek → kanonik #' + p.kanonik_id +
+      ' (group ' + p.group_key + ')';
+    modalInput.value = '';
+    modalCheck.checked = false;
+    modalGo.disabled = true;
+    modal.classList.add('open');
+    modalInput.focus();
+  }
+
+  function closeModal() {
+    pending = null;
+    modal.classList.remove('open');
+  }
+
+  function refreshModalGo() {
+    const ok = (modalInput.value || '').trim() === 'ONAYLA' && modalCheck.checked;
+    modalGo.disabled = !ok;
+  }
+
+  function loadAnaliz() {
+    showErr(elErr, '');
+    showErr(elOk, '');
     elMeta.textContent = 'Yükleniyor…';
     elGroups.innerHTML = '';
     const guven = elGuven.value || 'hepsi';
@@ -167,8 +290,7 @@
       .then(function (r) { return r.json().then(function (j) { return { status: r.status, j: j }; }); })
       .then(function (x) {
         if (!x.j || !x.j.ok) {
-          elErr.style.display = 'block';
-          elErr.textContent = (x.j && x.j.mesaj) || ('Hata HTTP ' + x.status);
+          showErr(elErr, (x.j && x.j.mesaj) || ('Hata HTTP ' + x.status));
           elMeta.textContent = '';
           return;
         }
@@ -176,26 +298,175 @@
         const counts = meta.counts || {};
         elMeta.textContent =
           'Dönen grup: ' + (meta.returned_n != null ? meta.returned_n : (x.j.groups || []).length) +
-          ' · ÇOK YÜKSEK (DB): ' + (counts.COK_YUKSEK || 0) +
-          ' · YÜKSEK (DB): ' + (counts.YUKSEK || 0) +
-          ' · salt okunur: ' + (meta.readonly ? 'evet' : '?');
-        const groups = x.j.groups || [];
-        if (!groups.length) {
+          ' · ÇOK YÜKSEK: ' + (counts.COK_YUKSEK || 0) +
+          ' · YÜKSEK: ' + (counts.YUKSEK || 0);
+        groupsCache = x.j.groups || [];
+        if (!groupsCache.length) {
           elGroups.innerHTML = '<p class="mk-note">Filtreden geçen grup yok.</p>';
           return;
         }
-        elGroups.innerHTML = groups.map(renderGroup).join('');
+        elGroups.innerHTML = groupsCache.map(renderGroup).join('');
       })
       .catch(function (e) {
-        elErr.style.display = 'block';
-        elErr.textContent = String(e);
+        showErr(elErr, String(e));
         elMeta.textContent = '';
       });
   }
 
-  document.getElementById('mk-yenile').addEventListener('click', load);
-  elGuven.addEventListener('change', load);
-  load();
+  function loadBatches() {
+    showErr(elBatchErr, '');
+    elBatches.textContent = 'Yükleniyor…';
+    fetch('/admin/api/mukerrer-arsiv-batchlar?limit=50', {
+      credentials: 'same-origin',
+      headers: { 'Accept': 'application/json' }
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (!j || !j.ok) {
+          showErr(elBatchErr, (j && j.mesaj) || 'Batch listesi alınamadı');
+          elBatches.textContent = '';
+          return;
+        }
+        const batches = j.batches || [];
+        if (!batches.length) {
+          elBatches.innerHTML = '<p class="mk-note">Henüz batch yok.</p>';
+          return;
+        }
+        const rows = batches.map(function (b) {
+          const undoBtn = b.can_undo
+            ? '<button type="button" class="btn-erp btn-erp-sm mk-undo" data-bid="' + b.id + '">Geri al</button>'
+            : '<span class="mk-note">geri alındı ' + esc(b.undone_at || '') + '</span>';
+          return '<tr>' +
+            '<td>#' + b.id + '</td>' +
+            '<td>' + esc(b.created_at) + '</td>' +
+            '<td>' + esc(b.username || b.user_id) + '</td>' +
+            '<td>' + esc(b.tier) + '</td>' +
+            '<td>kanonik #' + b.kanonik_id + '</td>' +
+            '<td>' + b.archived_n + ' id: ' + esc((b.archived_ids || []).join(', ')) + '</td>' +
+            '<td>' + undoBtn + '</td>' +
+          '</tr>';
+        }).join('');
+        elBatches.innerHTML =
+          '<table class="mk-batch-table"><thead><tr>' +
+          '<th>Batch</th><th>Zaman</th><th>Kullanıcı</th><th>Tier</th><th>Kanonik</th><th>Arşivlenen</th><th>İşlem</th>' +
+          '</tr></thead><tbody>' + rows + '</tbody></table>';
+      })
+      .catch(function (e) { showErr(elBatchErr, String(e)); elBatches.textContent = ''; });
+  }
+
+  function doArchive() {
+    if (!pending) return;
+    modalGo.disabled = true;
+    fetch('/admin/api/mukerrer-arsivle', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({
+        onay: true,
+        group_key: pending.group_key,
+        kanonik_id: pending.kanonik_id,
+        arsiv_ids: pending.arsiv_ids
+      })
+    })
+      .then(function (r) { return r.json().then(function (j) { return { status: r.status, j: j }; }); })
+      .then(function (x) {
+        closeModal();
+        if (!x.j || !x.j.ok) {
+          showErr(elErr, (x.j && x.j.mesaj) || ('Arşivleme hatası HTTP ' + x.status));
+          return;
+        }
+        sessionGroups += 1;
+        sessionRecords += (x.j.archived_n || 0);
+        updateSession();
+        showErr(elOk, 'OK: batch #' + x.j.batch_id + ' — ' + x.j.archived_n + ' kayıt arşivlendi (kanonik #' + x.j.kanonik_id + ')');
+        loadAnaliz();
+      })
+      .catch(function (e) {
+        closeModal();
+        showErr(elErr, String(e));
+      });
+  }
+
+  function doUndo(batchId) {
+    if (!window.confirm('Batch #' + batchId + ' geri alınacak. Devam?')) return;
+    fetch('/admin/api/mukerrer-geri-al', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({ onay: true, batch_id: batchId })
+    })
+      .then(function (r) { return r.json().then(function (j) { return { status: r.status, j: j }; }); })
+      .then(function (x) {
+        if (!x.j || !x.j.ok) {
+          showErr(elBatchErr, (x.j && x.j.mesaj) || ('Geri alma hatası HTTP ' + x.status));
+          return;
+        }
+        showErr(elBatchErr, '');
+        loadBatches();
+        loadAnaliz();
+      })
+      .catch(function (e) { showErr(elBatchErr, String(e)); });
+  }
+
+  document.getElementById('mk-yenile').addEventListener('click', loadAnaliz);
+  elGuven.addEventListener('change', loadAnaliz);
+  document.getElementById('mk-batch-yenile').addEventListener('click', loadBatches);
+
+  document.getElementById('mk-tab-analiz').addEventListener('click', function () {
+    document.getElementById('mk-tab-analiz').classList.add('active');
+    document.getElementById('mk-tab-batch').classList.remove('active');
+    document.getElementById('mk-panel-analiz').classList.add('active');
+    document.getElementById('mk-panel-batch').classList.remove('active');
+  });
+  document.getElementById('mk-tab-batch').addEventListener('click', function () {
+    document.getElementById('mk-tab-batch').classList.add('active');
+    document.getElementById('mk-tab-analiz').classList.remove('active');
+    document.getElementById('mk-panel-batch').classList.add('active');
+    document.getElementById('mk-panel-analiz').classList.remove('active');
+    loadBatches();
+  });
+
+  elGroups.addEventListener('change', function (ev) {
+    const t = ev.target;
+    if (t && t.name && String(t.name).indexOf('canon-') === 0) {
+      syncCanonDisable(String(t.name).slice(6));
+    }
+  });
+
+  elGroups.addEventListener('click', function (ev) {
+    const btn = ev.target.closest('.mk-approve');
+    if (!btn) return;
+    const gid = btn.getAttribute('data-gid');
+    const canonId = selectedCanon(gid);
+    if (!canonId) {
+      showErr(elErr, 'Kanonik seçilmedi.');
+      return;
+    }
+    const arsivIds = selectedArsivIds(gid, canonId);
+    if (!arsivIds.length) {
+      showErr(elErr, 'Arşivlenecek kayıt seçilmedi.');
+      return;
+    }
+    showErr(elErr, '');
+    openModal({ group_key: gid, kanonik_id: canonId, arsiv_ids: arsivIds });
+  });
+
+  elBatches.addEventListener('click', function (ev) {
+    const btn = ev.target.closest('.mk-undo');
+    if (!btn) return;
+    doUndo(parseInt(btn.getAttribute('data-bid'), 10));
+  });
+
+  modalInput.addEventListener('input', refreshModalGo);
+  modalCheck.addEventListener('change', refreshModalGo);
+  document.getElementById('mk-modal-cancel').addEventListener('click', closeModal);
+  modalGo.addEventListener('click', doArchive);
+  modal.addEventListener('click', function (ev) {
+    if (ev.target === modal) closeModal();
+  });
+
+  updateSession();
+  loadAnaliz();
 })();
 </script>
 {% endblock %}

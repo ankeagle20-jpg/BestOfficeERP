@@ -1346,6 +1346,42 @@ def ensure_customers_arsivli():
         print(f"customers.arsivli: {e}")
 
 
+_mukerrer_arsiv_batch_done = False
+
+
+def ensure_mukerrer_arsiv_batch():
+    """mukerrer_arsiv_batch — A5 grup arşiv audit / geri alma (IF NOT EXISTS)."""
+    global _mukerrer_arsiv_batch_done
+    if _mukerrer_arsiv_batch_done:
+        return
+    try:
+        execute(
+            """
+            CREATE TABLE IF NOT EXISTS mukerrer_arsiv_batch (
+                id            SERIAL PRIMARY KEY,
+                user_id       INTEGER,
+                created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                group_key     TEXT NOT NULL,
+                tier          TEXT,
+                kanonik_id    INTEGER NOT NULL,
+                archived_ids  INTEGER[] NOT NULL,
+                payload_json  JSONB,
+                undone_at     TIMESTAMPTZ,
+                undone_by     INTEGER
+            )
+            """
+        )
+        execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_mukerrer_arsiv_batch_created_at
+                ON mukerrer_arsiv_batch (created_at DESC)
+            """
+        )
+        _mukerrer_arsiv_batch_done = True
+    except Exception as e:
+        print(f"mukerrer_arsiv_batch: {e}")
+
+
 def ensure_customers_notes():
     """Customers tablosuna notes ve ev_adres sütunlarını ekle."""
     try:
