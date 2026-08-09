@@ -45,6 +45,8 @@
   .mk-note { color:#78909c; font-size:.78rem; }
   .mk-err { color:#ef9a9a; margin:10px 0; }
   .mk-ok { color:#a5d6a7; margin:10px 0; }
+  a.mk-musteri-link { color:#90caf9; text-decoration:underline; }
+  a.mk-musteri-link:hover { color:#bbdefb; }
   .mk-score { color:#80cbc4; font-size:.75rem; }
   .mk-panel { display:none; }
   .mk-panel.active { display:block; }
@@ -213,7 +215,7 @@
           '<td><input type="checkbox" class="mk-arsiv-cb" data-gid="' + esc(g.group_key) + '" value="' + m.id + '"' + checked + disabledCb + '></td>' +
           '<td>' + m.id + '</td>' +
           '<td>' + esc(m.musteri_no) + '</td>' +
-          '<td>' + esc(m.name) + (isCanon ? ' <span class="mk-score">(önerilen kanonik)</span>' : '') + '</td>' +
+          '<td><a class="mk-musteri-link" href="/giris/?tab=sozlesmeler&mid=' + m.id + '" target="_blank" rel="noopener" onclick="event.stopPropagation()">' + esc(m.name) + '</a>' + (isCanon ? ' <span class="mk-score">(önerilen kanonik)</span>' : '') + '</td>' +
           '<td>' + esc(m.durum) + '</td>' +
           '<td>' + (m.kira_dolu ? esc(m.aylik_kira) : '—') + '</td>' +
           '<td>' + (m.tahsilat_n || 0) + ' / ' + (m.fatura_n || 0) + '</td>' +
