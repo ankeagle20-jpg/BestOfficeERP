@@ -1,0 +1,201 @@
+{% extends "layout.html" %}
+{% block title %}Mükerrer Arşiv{% endblock %}
+{% block page_title %}Mükerrer Müşteri Arşiv Aracı{% endblock %}
+
+{% block topbar_actions %}
+  <a class="btn-erp btn-erp-sm btn-outline-erp" href="{{ url_for('admin.index') }}">Kullanıcılar</a>
+{% endblock %}
+
+{% block content %}
+<style>
+  .mk-nav { display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap; align-items:center; }
+  .mk-nav a { text-decoration:none; }
+  .mk-nav .mk-tab {
+    padding:6px 12px; border-radius:6px; border:1px solid #1e3a5f;
+    color:#90caf9; background:#0a1929; font-size:.85rem;
+  }
+  .mk-nav .mk-tab.active { background:#1565c0; color:#fff; border-color:#1565c0; }
+  .mk-toolbar { display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin-bottom:16px; }
+  .mk-toolbar label { color:#90caf9; font-size:.85rem; }
+  .mk-toolbar select, .mk-toolbar button {
+    background:#0a1929; border:1px solid #1e3a5f; color:#e0f7fa;
+    padding:6px 10px; border-radius:6px; font-size:.85rem;
+  }
+  .mk-meta { color:#888; font-size:.82rem; margin-bottom:14px; }
+  .mk-card {
+    border:1px solid #1e3a5f; border-radius:10px; padding:14px 16px;
+    margin-bottom:14px; background:#0b1e30;
+  }
+  .mk-card-head { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:10px; }
+  .mk-badge {
+    display:inline-block; padding:3px 8px; border-radius:999px;
+    font-size:.72rem; font-weight:700; letter-spacing:.02em;
+  }
+  .mk-badge.cok { background:#1b5e20; color:#c8e6c9; }
+  .mk-badge.yuk { background:#0d47a1; color:#bbdefb; }
+  .mk-canon {
+    background:#263238; border-left:3px solid #26a69a; padding:8px 10px;
+    margin-bottom:10px; border-radius:4px; font-size:.86rem;
+  }
+  .mk-card table { width:100%; border-collapse:collapse; font-size:.8rem; }
+  .mk-card th, .mk-card td { border-bottom:1px solid #1e3a5f; padding:6px 8px; text-align:left; }
+  .mk-card th { color:#90caf9; font-weight:600; }
+  .mk-card tr.is-canon { background:rgba(38,166,154,.12); }
+  .mk-card tr.is-canon td:first-child { font-weight:700; }
+  .mk-actions { margin-top:10px; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .mk-btn-disabled {
+    opacity:.55; cursor:not-allowed; background:#37474f !important;
+    border-color:#455a64 !important; color:#b0bec5 !important;
+  }
+  .mk-note { color:#78909c; font-size:.78rem; }
+  .mk-err { color:#ef9a9a; margin:10px 0; }
+  .mk-score { color:#80cbc4; font-size:.75rem; }
+</style>
+
+<div class="mk-nav">
+  <a class="mk-tab" href="{{ url_for('admin.index') }}">Kullanıcılar</a>
+  <a class="mk-tab active" href="{{ url_for('admin_mukerrer.mukerrer_arsiv_page') }}">Mükerrer Arşiv</a>
+</div>
+
+<div class="card-erp">
+  <p style="color:#90caf9;margin:0 0 12px;font-size:.9rem;">
+    Salt görüntüleme (A4). Analiz canlı DB üzerinden okunur; bu ekranda arşivleme yazması yoktur.
+  </p>
+
+  <div class="mk-toolbar">
+    <label>
+      Güven filtresi
+      <select id="mk-guven">
+        <option value="hepsi" selected>ÇOK YÜKSEK + YÜKSEK</option>
+        <option value="cok_yuksek">Sadece ÇOK YÜKSEK</option>
+        <option value="yuksek">Sadece YÜKSEK</option>
+      </select>
+    </label>
+    <button type="button" class="btn-erp btn-erp-sm" id="mk-yenile">Yenile</button>
+  </div>
+
+  <div class="mk-meta" id="mk-meta">Yükleniyor…</div>
+  <div class="mk-err" id="mk-err" style="display:none;"></div>
+  <div id="mk-groups"></div>
+</div>
+
+<script>
+(function () {
+  const elGroups = document.getElementById('mk-groups');
+  const elMeta = document.getElementById('mk-meta');
+  const elErr = document.getElementById('mk-err');
+  const elGuven = document.getElementById('mk-guven');
+
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function tierBadge(tier) {
+    if (tier === 'COK_YUKSEK') return '<span class="mk-badge cok">ÇOK YÜKSEK</span>';
+    if (tier === 'YUKSEK') return '<span class="mk-badge yuk">YÜKSEK</span>';
+    return '<span class="mk-badge">' + esc(tier) + '</span>';
+  }
+
+  function renderGroup(g) {
+    const sug = g.suggested_canonical_id;
+    const sugMem = (g.members || []).find(m => m.id === sug) || {};
+    const rows = (g.members || []).map(function (m) {
+      const isCanon = !!m.is_suggested_canonical || m.id === sug;
+      const checked = isCanon ? '' : ' checked';
+      const disabledCb = isCanon ? ' disabled' : '';
+      const radioChecked = isCanon ? ' checked' : '';
+      return (
+        '<tr class="' + (isCanon ? 'is-canon' : '') + '">' +
+          '<td><input type="radio" name="canon-' + esc(g.group_key) + '" value="' + m.id + '"' + radioChecked + '></td>' +
+          '<td><input type="checkbox" class="mk-arsiv-cb" data-gid="' + esc(g.group_key) + '" value="' + m.id + '"' + checked + disabledCb + '></td>' +
+          '<td>' + m.id + '</td>' +
+          '<td>' + esc(m.musteri_no) + '</td>' +
+          '<td>' + esc(m.name) + (isCanon ? ' <span class="mk-score">(önerilen kanonik)</span>' : '') + '</td>' +
+          '<td>' + esc(m.durum) + '</td>' +
+          '<td>' + (m.kira_dolu ? esc(m.aylik_kira) : '—') + '</td>' +
+          '<td>' + (m.tahsilat_n || 0) + ' / ' + (m.fatura_n || 0) + '</td>' +
+          '<td>' + esc(m.son_islem_at || '—') + '</td>' +
+          '<td><span class="mk-score">' + esc(m.canonical_score) +
+            (m.score_reasons && m.score_reasons.length ? ' · ' + esc(m.score_reasons.join(', ')) : '') +
+          '</span></td>' +
+        '</tr>'
+      );
+    }).join('');
+
+    return (
+      '<div class="mk-card" data-group-key="' + esc(g.group_key) + '">' +
+        '<div class="mk-card-head">' +
+          tierBadge(g.tier) +
+          '<span style="color:#b0bec5;font-size:.85rem;">' + esc(g.match_summary || '') +
+          ' · ' + (g.member_count || 0) + ' kayıt · key ' + esc(g.group_key) + '</span>' +
+        '</div>' +
+        '<div class="mk-canon">' +
+          '<strong>Önerilen kanonik:</strong> #' + esc(sug) +
+          ' — ' + esc(sugMem.name || '') +
+          ' <span class="mk-score">(skor ' + esc(sugMem.canonical_score) +
+          (sugMem.score_reasons && sugMem.score_reasons.length ? ': ' + esc(sugMem.score_reasons.join(', ')) : '') +
+          ')</span>' +
+        '</div>' +
+        '<table>' +
+          '<thead><tr>' +
+            '<th>Kanonik</th><th>Arşivle</th><th>ID</th><th>No</th><th>Ad</th><th>Durum</th>' +
+            '<th>Kira</th><th>Tahsilat/Fatura</th><th>Son işlem</th><th>Skor</th>' +
+          '</tr></thead>' +
+          '<tbody>' + rows + '</tbody>' +
+        '</table>' +
+        '<div class="mk-actions">' +
+          '<button type="button" class="btn-erp btn-erp-sm mk-btn-disabled" disabled title="A5 aşamasında aktif olacak">' +
+            'Bu grubu onayla (A5 — yakında)' +
+          '</button>' +
+          '<span class="mk-note">A4: onay/yazma kapalı. Radio ve checkbox seçimleri önizlemedir.</span>' +
+        '</div>' +
+      '</div>'
+    );
+  }
+
+  function load() {
+    elErr.style.display = 'none';
+    elMeta.textContent = 'Yükleniyor…';
+    elGroups.innerHTML = '';
+    const guven = elGuven.value || 'hepsi';
+    fetch('/admin/api/mukerrer-analiz?guven=' + encodeURIComponent(guven), {
+      credentials: 'same-origin',
+      headers: { 'Accept': 'application/json' }
+    })
+      .then(function (r) { return r.json().then(function (j) { return { status: r.status, j: j }; }); })
+      .then(function (x) {
+        if (!x.j || !x.j.ok) {
+          elErr.style.display = 'block';
+          elErr.textContent = (x.j && x.j.mesaj) || ('Hata HTTP ' + x.status);
+          elMeta.textContent = '';
+          return;
+        }
+        const meta = x.j.meta || {};
+        const counts = meta.counts || {};
+        elMeta.textContent =
+          'Dönen grup: ' + (meta.returned_n != null ? meta.returned_n : (x.j.groups || []).length) +
+          ' · ÇOK YÜKSEK (DB): ' + (counts.COK_YUKSEK || 0) +
+          ' · YÜKSEK (DB): ' + (counts.YUKSEK || 0) +
+          ' · salt okunur: ' + (meta.readonly ? 'evet' : '?');
+        const groups = x.j.groups || [];
+        if (!groups.length) {
+          elGroups.innerHTML = '<p class="mk-note">Filtreden geçen grup yok.</p>';
+          return;
+        }
+        elGroups.innerHTML = groups.map(renderGroup).join('');
+      })
+      .catch(function (e) {
+        elErr.style.display = 'block';
+        elErr.textContent = String(e);
+        elMeta.textContent = '';
+      });
+  }
+
+  document.getElementById('mk-yenile').addEventListener('click', load);
+  elGuven.addEventListener('change', load);
+  load();
+})();
+</script>
+{% endblock %}

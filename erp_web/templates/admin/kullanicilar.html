@@ -9,6 +9,14 @@
 {% endblock %}
 
 {% block content %}
+
+<div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;">
+  <a href="{{ url_for('admin.index') }}"
+     style="padding:6px 12px;border-radius:6px;border:1px solid #1565c0;background:#1565c0;color:#fff;text-decoration:none;font-size:.85rem;">Kullanıcılar</a>
+  <a href="{{ url_for('admin_mukerrer.mukerrer_arsiv_page') }}"
+     style="padding:6px 12px;border-radius:6px;border:1px solid #1e3a5f;background:#0a1929;color:#90caf9;text-decoration:none;font-size:.85rem;">Mükerrer Arşiv</a>
+</div>
+
 <div class="card-erp">
   <table class="table-erp">
     <thead>

@@ -62,6 +62,7 @@ login_manager.init_app(app)
 # ── Blueprint'leri kaydet ────────────────────────────────────────────────────
 from routes.auth_routes    import bp as auth_bp
 from routes.admin_routes   import bp as admin_bp
+from routes.admin_mukerrer_routes import bp as admin_mukerrer_bp
 from routes.musteri_routes import bp as musteri_bp
 from routes.faturalar_routes import bp as faturalar_bp
 from routes.kargo_routes   import bp as kargo_bp
@@ -90,6 +91,7 @@ app.register_blueprint(auth_bp)
 app.register_blueprint(dashboard_bp, url_prefix="/dashboard")
 app.register_blueprint(mobile_bp)
 app.register_blueprint(admin_bp,   url_prefix="/admin")
+app.register_blueprint(admin_mukerrer_bp, url_prefix="/admin")
 app.register_blueprint(musteri_bp, url_prefix="/musteriler")
 app.register_blueprint(faturalar_bp,  url_prefix="/faturalar")
 app.register_blueprint(kargo_bp,   url_prefix="/kargolar")
