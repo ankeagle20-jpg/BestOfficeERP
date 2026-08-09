@@ -7879,6 +7879,34 @@ def prewarm_aylik_grid_cache_for_musteriler(
     return rebuilt
 
 
+def _firma_ozet_classify_borc_month(tut, brut_raw) -> tuple[float, bool]:
+    """Aylık borç hücresi: (gösterilecek tutar, placeholder mı?).
+
+    Grid bazen brüt=0 iken tutar_kdv_dahil'i max(brut, 0.01) ile 0,01 yazar.
+    Bu yanıltıcı zemin tutarını 0 + flag olarak işaretleriz; gerçek küçük brüt
+    (örn. 0,01 / 0,50) korunur.
+    """
+    try:
+        tut_f = float(tut or 0)
+    except (TypeError, ValueError):
+        tut_f = 0.0
+    if not math.isfinite(tut_f):
+        tut_f = 0.0
+    try:
+        if brut_raw is None or brut_raw == "":
+            brut_f = 0.0
+        else:
+            brut_f = float(brut_raw)
+    except (TypeError, ValueError):
+        brut_f = 0.0
+    if not math.isfinite(brut_f):
+        brut_f = 0.0
+    # Brüt gerçekten boş/sıfır iken tutar yalnızca 0.01 zemininden geliyorsa placeholder.
+    if tut_f > 0 and tut_f < float(PLACEHOLDER_BRUT_MAX) and brut_f <= 0.001:
+        return 0.0, True
+    return round(tut_f, 2), False
+
+
 def _firma_ozet_ozet_from_grid_cache_payload(payload, ref_y: int, ref_m: int) -> dict | None:
     """
     musteri_aylik_grid_cache payload'ından rapor özet alanları (tam grid yeniden hesap yok).
@@ -7891,6 +7919,7 @@ def _firma_ozet_ozet_from_grid_cache_payload(payload, ref_y: int, ref_m: int) ->
     ref_first = date(int(ref_y), int(ref_m), 1)
     tol = float(AYLIK_GRID_TAM_ODENDI_TOLERANS)
     borc_month = 0.0
+    borc_month_placeholder = False
     total_borc = 0.0
     geciken = 0
     for a in payload.get("aylar") or []:
@@ -7909,7 +7938,9 @@ def _firma_ozet_ozet_from_grid_cache_payload(payload, ref_y: int, ref_m: int) ->
         if not math.isfinite(tut):
             tut = 0.0
         if cur.year == ref_y and cur.month == ref_m:
-            borc_month = round(tut, 2)
+            borc_month, borc_month_placeholder = _firma_ozet_classify_borc_month(
+                tut, a.get("brut_tutar_kdv")
+            )
         if cur > ref_first:
             continue
         tahsil = bool(a.get("tahsil_edildi"))
@@ -7931,6 +7962,7 @@ def _firma_ozet_ozet_from_grid_cache_payload(payload, ref_y: int, ref_m: int) ->
                 geciken += 1
     return {
         "borc_month": borc_month,
+        "borc_month_placeholder": bool(borc_month_placeholder),
         "toplam_borc": round(total_borc, 2),
         "geciken_ay": int(geciken),
         "sozlesme_gun": 0,
@@ -8061,7 +8093,13 @@ def musteri_firma_ozet_grid_ozet_batch(musteri_ids: list, ref: date | None = Non
             cache[(int(mid), ref_y, ref_m)] = (now_ts, dict(fast))
             continue
         if not kyc_for_grid:
-            out[mid] = {"borc_month": 0.0, "toplam_borc": 0.0, "geciken_ay": 0, "sozlesme_gun": gun}
+            out[mid] = {
+                "borc_month": 0.0,
+                "borc_month_placeholder": False,
+                "toplam_borc": 0.0,
+                "geciken_ay": 0,
+                "sozlesme_gun": gun,
+            }
             cache[(int(mid), ref_y, ref_m)] = (now_ts, dict(out[mid]))
             continue
         reel_manual = dict(reel_by_mid.get(mid) or {})
@@ -8079,6 +8117,22 @@ def musteri_firma_ozet_grid_ozet_batch(musteri_ids: list, ref: date | None = Non
                     skip_reel_overlay=False,
                 )
             )
+            if not math.isfinite(borc_month):
+                borc_month = 0.0
+            borc_month_placeholder = False
+            # Canlı hücre 0.01 zeminini, cache ay satırındaki gerçek brüt ile ayır.
+            if 0 < borc_month < float(PLACEHOLDER_BRUT_MAX) and isinstance(cached_pl, dict):
+                for _a in cached_pl.get("aylar") or []:
+                    if not isinstance(_a, dict):
+                        continue
+                    try:
+                        if int(_a.get("yil")) == ref_y and int(_a.get("ay")) == ref_m:
+                            borc_month, borc_month_placeholder = _firma_ozet_classify_borc_month(
+                                borc_month, _a.get("brut_tutar_kdv")
+                            )
+                            break
+                    except (TypeError, ValueError):
+                        continue
             tborc, gec = firma_ozet_toplam_borc_ve_geciken_ay(
                 mid,
                 ref_y,
@@ -8090,13 +8144,20 @@ def musteri_firma_ozet_grid_ozet_batch(musteri_ids: list, ref: date | None = Non
                 skip_disk_cache_for_months=False,
             )
             out[mid] = {
-                "borc_month": round(borc_month, 2) if math.isfinite(borc_month) else 0.0,
+                "borc_month": round(borc_month, 2),
+                "borc_month_placeholder": bool(borc_month_placeholder),
                 "toplam_borc": round(float(tborc or 0.0), 2),
                 "geciken_ay": int(gec or 0),
                 "sozlesme_gun": gun,
             }
         except Exception:
-            out[mid] = {"borc_month": 0.0, "toplam_borc": 0.0, "geciken_ay": 0, "sozlesme_gun": gun}
+            out[mid] = {
+                "borc_month": 0.0,
+                "borc_month_placeholder": False,
+                "toplam_borc": 0.0,
+                "geciken_ay": 0,
+                "sozlesme_gun": gun,
+            }
         cache[(int(mid), ref_y, ref_m)] = (now_ts, dict(out[mid]))
     out.update(cached_out)
     return out

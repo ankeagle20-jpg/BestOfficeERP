@@ -238,6 +238,7 @@ class CariService:
             "alacak_total": 0.0,
             "net_balance": 0.0,
             "borc_month": 0.0,
+            "borc_month_placeholder": False,
             "geciken_ay": 0,
             "sozlesme_gun": 0,
         }
@@ -393,12 +394,24 @@ class CariService:
         for gid in gids:
             mids = gid_to_mids.get(gid) or []
             bm = 0.0
+            any_ph = False
+            any_real_bm = False
             max_gec = 0
             max_gun = 0
             if include_grid and mids:
                 for m in mids:
                     eg = grid_ozet_by_mid.get(m) or {}
-                    bm += float(eg.get("borc_month") or 0.0)
+                    if eg.get("borc_month_placeholder"):
+                        any_ph = True
+                        # placeholder tutarı (0.01) toplamaya katılmaz
+                    else:
+                        try:
+                            v = float(eg.get("borc_month") or 0.0)
+                        except (TypeError, ValueError):
+                            v = 0.0
+                        bm += v
+                        if v > 0.001:
+                            any_real_bm = True
                     try:
                         gec = int(eg.get("geciken_ay") or 0)
                     except (TypeError, ValueError):
@@ -412,6 +425,8 @@ class CariService:
                     if 1 <= gn <= 31 and gn > max_gun:
                         max_gun = gn
             out[gid]["borc_month"] = round(bm, 2)
+            # Grup satırı: yalnızca placeholder (yanıltıcı 0,01) çocuklar varsa "—" için flag.
+            out[gid]["borc_month_placeholder"] = bool(any_ph and not any_real_bm and bm <= 0.001)
             out[gid]["geciken_ay"] = max_gec
             out[gid]["sozlesme_gun"] = max_gun
         return out
@@ -523,8 +538,12 @@ class CariService:
             # Net = açık borç (bt). Alacak (at) ayrı sütunda; bt zaten ödenmemiş aylar
             # olduğu için at'yi tekrar çıkarmak çift düşüm olur.
             s = {"borc_total": round(bt, 2), "alacak_total": round(at, 2), "net_balance": round(bt, 2)}
-            bm = float((grid_ozet_map.get(iid) or {}).get("borc_month") or 0.0)
             eg = grid_ozet_map.get(iid) or {}
+            ph = bool(eg.get("borc_month_placeholder"))
+            try:
+                bm = 0.0 if ph else float(eg.get("borc_month") or 0.0)
+            except (TypeError, ValueError):
+                bm = 0.0
             try:
                 gec_ex = int(eg.get("geciken_ay") or 0)
             except (TypeError, ValueError):
@@ -540,6 +559,7 @@ class CariService:
                     "name": (r.get("name") or "").strip(),
                     "musteri_adi": (r.get("musteri_adi") or "").strip(),
                     "borc_month": round(float(bm or 0), 2),
+                    "borc_month_placeholder": ph,
                     "borc_total": s.get("borc_total", 0),
                     "alacak_total": s.get("alacak_total", 0),
                     "net_balance": s.get("net_balance", 0),

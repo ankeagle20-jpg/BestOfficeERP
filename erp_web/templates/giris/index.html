@@ -9627,6 +9627,12 @@ function girisGrupOzetParaYaz(v) {
     return n.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ₺';
 }
 
+/** Aylık borç: boş/placeholder (yanıltıcı 0,01) ise "—"; aksi halde tutar. */
+function girisGrupOzetAylikBorcYaz(v, placeholder) {
+    if (placeholder) return '—';
+    return girisGrupOzetParaYaz(v != null ? v : 0);
+}
+
 function girisGrupSozlesmeGunStr(v) {
     var n = parseInt(v, 10);
     if (isNaN(n) || n < 1 || n > 31) return '—';
@@ -9981,7 +9987,7 @@ function girisGrupAnaSatirToggle(ev, tr) {
                     '<tr>' +
                     '<td class="num">' + girisGrupHtmlEsc(c.musteri_no || '—') + '</td>' +
                     '<td>' + girisGrupHtmlEsc(firma || ('#' + mid)) + '</td>' +
-                    '<td class="num">' + girisGrupOzetParaYaz(c.borc_month != null ? c.borc_month : 0) + '</td>' +
+                    '<td class="num">' + girisGrupOzetAylikBorcYaz(c.borc_month, c.borc_month_placeholder) + '</td>' +
                     '<td class="num">' + girisGrupOzetParaYaz(c.borc_total) + '</td>' +
                     '<td class="num">' + girisGrupHtmlEsc(c.hazir_ofis_oda_no || '—') + '</td>' +
                     '<td class="num">' + girisGrupSozlesmeGunStr(c.sozlesme_gun) + '</td>' +
@@ -10102,7 +10108,7 @@ function girisGrupOzetListeJsonUygula(j) {
             '<td class="num">' + String(g.id) + '</td>' +
             '<td>' + nm + '</td>' +
             '<td class="num">' + String(g.child_count != null ? g.child_count : 0) + '</td>' +
-            '<td class="num">' + girisGrupOzetParaYaz(g.borc_month != null ? g.borc_month : 0) + '</td>' +
+            '<td class="num">' + girisGrupOzetAylikBorcYaz(g.borc_month, g.borc_month_placeholder) + '</td>' +
             '<td class="num">' + girisGrupOzetParaYaz(g.borc_total) + '</td>' +
             '<td class="num">' + girisGrupSozlesmeGunStr(g.sozlesme_gun) + '</td>' +
             '<td class="num">' + girisGrupGecikenAyStr(g.geciken_ay) + '</td>' +

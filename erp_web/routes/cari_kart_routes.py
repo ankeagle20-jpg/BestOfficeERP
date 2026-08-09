@@ -901,6 +901,7 @@ def api_groups_consolidated_report():
             "alacak_total": 0.0,
             "net_balance": 0.0,
             "borc_month": 0.0,
+            "borc_month_placeholder": False,
             "geciken_ay": 0,
             "sozlesme_gun": 0,
         }
@@ -916,9 +917,12 @@ def api_groups_consolidated_report():
             borc_month = float(s.get("borc_month") or 0)
         except (TypeError, ValueError):
             borc_month = 0.0
+        borc_month_ph = bool(s.get("borc_month_placeholder"))
         sum_borc += borc
         sum_alacak += alacak
-        sum_borc_month += borc_month
+        # Placeholder grup satırı (yanıltıcı 0,01 çocuk toplamı) üst toplama katılmaz.
+        if not borc_month_ph:
+            sum_borc_month += borc_month
         try:
             net_b = float(s.get("net_balance") or 0)
         except (TypeError, ValueError):
@@ -942,6 +946,7 @@ def api_groups_consolidated_report():
                 "name": (r.get("name") or "").strip(),
                 "child_count": cc_out,
                 "borc_month": round(borc_month, 2),
+                "borc_month_placeholder": borc_month_ph,
                 "borc_total": round(borc, 2),
                 "alacak_total": round(alacak, 2),
                 "net_balance": net_b,
@@ -1001,6 +1006,7 @@ def _serialize_group_children_for_api(children: list | None) -> list[dict]:
                     "name": str(ch.get("name") or ""),
                     "musteri_adi": str(ch.get("musteri_adi") or ""),
                     "borc_month": float(ch.get("borc_month") or 0),
+                    "borc_month_placeholder": bool(ch.get("borc_month_placeholder")),
                     "borc_total": float(ch.get("borc_total") or 0),
                     "alacak_total": float(ch.get("alacak_total") or 0),
                     "net_balance": float(ch.get("net_balance") or 0),
