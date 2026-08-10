@@ -115,8 +115,6 @@
   <div class="mk-modal">
     <h3 style="margin:0 0 8px;font-size:1.05rem;">Arşivlemeyi onayla</h3>
     <p id="mk-modal-text" style="margin:0;font-size:.9rem;color:#b0bec5;"></p>
-    <p class="mk-note">İkinci fren: kutuya büyük harfle <strong>ONAYLA</strong> yazın.</p>
-    <input type="text" id="mk-modal-input" placeholder="ONAYLA" autocomplete="off">
     <label class="mk-note" style="display:flex;gap:8px;align-items:center;">
       <input type="checkbox" id="mk-modal-check"> Bu işlemi anladığımı onaylıyorum
     </label>
@@ -139,7 +137,6 @@
   const elBatchErr = document.getElementById('mk-batch-err');
   const modal = document.getElementById('mk-modal');
   const modalText = document.getElementById('mk-modal-text');
-  const modalInput = document.getElementById('mk-modal-input');
   const modalCheck = document.getElementById('mk-modal-check');
   const modalGo = document.getElementById('mk-modal-go');
 
@@ -265,11 +262,10 @@
     pending = p;
     modalText.textContent = p.arsiv_ids.length + ' kayıt arşivlenecek → kanonik #' + p.kanonik_id +
       ' (group ' + p.group_key + ')';
-    modalInput.value = '';
     modalCheck.checked = false;
     modalGo.disabled = true;
     modal.classList.add('open');
-    modalInput.focus();
+    modalCheck.focus();
   }
 
   function closeModal() {
@@ -278,8 +274,7 @@
   }
 
   function refreshModalGo() {
-    const ok = (modalInput.value || '').trim() === 'ONAYLA' && modalCheck.checked;
-    modalGo.disabled = !ok;
+    modalGo.disabled = !modalCheck.checked;
   }
 
   function loadAnaliz() {
@@ -462,7 +457,6 @@
     doUndo(parseInt(btn.getAttribute('data-bid'), 10));
   });
 
-  modalInput.addEventListener('input', refreshModalGo);
   modalCheck.addEventListener('change', refreshModalGo);
   document.getElementById('mk-modal-cancel').addEventListener('click', closeModal);
   modalGo.addEventListener('click', doArchive);
