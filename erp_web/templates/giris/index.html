@@ -23707,9 +23707,11 @@ function selectMusteri(id) {
     if (activeTabGecis === 4) {
         try { cariKartYukle(id); } catch (_eCkHizli) {}
     }
-    try {
-        girisCariKartPrefetch(id, __selSignal ? { signal: __selSignal } : null);
-    } catch (_eSelPf) {}
+    if (activeTabGecis === 4) {
+        try {
+            girisCariKartPrefetch(id, __selSignal ? { signal: __selSignal } : null);
+        } catch (_eSelPf) {}
+    }
     try { window.__musteriDosyaSirasi = []; dosyaListesiGuncelle(); } catch (eDos) {}
     girisSeciliMusteriTekilListeNotTemizle();
     girisSonSeciliMusteriKaydet(id);

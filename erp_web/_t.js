@@ -18982,7 +18982,9 @@ function selectMusteri(id) {
     }
     try {
         girisMusteriPrefetch(id, __selSignal ? { signal: __selSignal } : null);
-        girisCariKartPrefetch(id, __selSignal ? { signal: __selSignal } : null);
+        if (activeTabGecis === 4) {
+            girisCariKartPrefetch(id, __selSignal ? { signal: __selSignal } : null);
+        }
     } catch (_eSelPf) {}
     try { window.__musteriDosyaSirasi = []; dosyaListesiGuncelle(); } catch (eDos) {}
     girisSeciliMusteriTekilListeNotTemizle();
