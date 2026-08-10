@@ -4556,12 +4556,23 @@ function girisFetchJsonCached(url, opts) {
         }
     }
     var inflight = window.__girisJsonInflight.get(url);
-    if (inflight) return inflight;
+    if (inflight) {
+        /* Select abort sinyali olan çağrı, eski/abort edilmiş inflight'a bağlanmasın. */
+        if (opts.fetch && opts.fetch.signal) {
+            try { window.__girisJsonInflight.delete(url); } catch (_eInf) {}
+        } else {
+            return inflight;
+        }
+    }
     return girisFetchJsonNetwork(url, opts);
 }
 function girisFetchJsonNetwork(url, opts) {
     opts = opts || {};
     var fetchOpts = Object.assign({ credentials: 'same-origin' }, opts.fetch || {});
+    if (fetchOpts.signal && fetchOpts.signal.aborted) {
+        try { console.debug('[giris-select-fetch] skip already-aborted', url); } catch (_eSk) {}
+        return Promise.reject(typeof DOMException !== 'undefined' ? new DOMException('Aborted', 'AbortError') : Object.assign(new Error('Aborted'), { name: 'AbortError' }));
+    }
     var p = fetch(url, fetchOpts).then(function (r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.json();
@@ -4573,6 +4584,11 @@ function girisFetchJsonNetwork(url, opts) {
             girisJsonPersistWrite(pKey, data);
         }
         return data;
+    }).catch(function (err) {
+        if (typeof girisSelectFetchAbortIs === 'function' && girisSelectFetchAbortIs(err)) {
+            try { console.debug('[giris-select-fetch] network aborted', url); } catch (_eDbg) {}
+        }
+        throw err;
     }).finally(function () {
         window.__girisJsonInflight.delete(url);
     });
@@ -4592,6 +4608,38 @@ function girisJsonCacheInvalidatePrefix(prefix) {
             if (sk && sk.indexOf(persistPrefix) === 0) sessionStorage.removeItem(sk);
         }
     } catch (_e) {}
+}
+
+
+/** A1: selectMusteri kaynaklı fetch ortak abort (hover/poll/cariKartYukle hariç). */
+window.__girisSelectFetch = window.__girisSelectFetch || { token: 0, controller: null, mid: null };
+function girisSelectFetchAbortIs(err) {
+    if (!err) return false;
+    try {
+        if (err.name === 'AbortError') return true;
+        if (typeof DOMException !== 'undefined' && err instanceof DOMException && err.name === 'AbortError') return true;
+        if (String(err.message || '').indexOf('AbortError') >= 0) return true;
+    } catch (_e) {}
+    return false;
+}
+function girisSelectFetchSignal() {
+    try {
+        var st = window.__girisSelectFetch;
+        return (st && st.controller) ? st.controller.signal : null;
+    } catch (_eSig) {
+        return null;
+    }
+}
+function girisSelectFetchBegin(mid) {
+    var st = window.__girisSelectFetch || (window.__girisSelectFetch = { token: 0, controller: null, mid: null });
+    try {
+        if (st.controller) st.controller.abort();
+    } catch (_eAb) {}
+    st.controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    st.mid = mid;
+    var tok = (window.__girisSelectMusteriToken = (window.__girisSelectMusteriToken || 0) + 1);
+    st.token = tok;
+    return { token: tok, signal: st.controller ? st.controller.signal : null, mid: mid };
 }
 
 /** fetch yanıtı: giriş HTML'i JSON sanılıp sessiz hata veya boş liste üretmesin (401/oturum). */
@@ -23629,6 +23677,8 @@ function selectMusteri(id) {
             sozlesmelerAylikSessizPollOnTabOrMusteri('selectMusteri');
         }
     } catch (_ePollSel) {}
+    var __selFetch = (typeof girisSelectFetchBegin === 'function') ? girisSelectFetchBegin(id) : null;
+    var __selSignal = __selFetch ? __selFetch.signal : null;
     window.__sozlesmelerReelEsitleReqId = (window.__sozlesmelerReelEsitleReqId || 0) + 1;
     if (typeof sozlesmelerReelTahsilatEsitleModalKapat === 'function') {
         try { sozlesmelerReelTahsilatEsitleModalKapat(); } catch (e) {}
@@ -23658,7 +23708,7 @@ function selectMusteri(id) {
         try { cariKartYukle(id); } catch (_eCkHizli) {}
     }
     try {
-        girisCariKartPrefetch(id);
+        girisCariKartPrefetch(id, __selSignal ? { signal: __selSignal } : null);
     } catch (_eSelPf) {}
     try { window.__musteriDosyaSirasi = []; dosyaListesiGuncelle(); } catch (eDos) {}
     girisSeciliMusteriTekilListeNotTemizle();
@@ -23997,13 +24047,15 @@ function selectMusteri(id) {
         } catch (_eSelInv) {}
         /* Aşama 1b: 4 ayrı endpoint yerine tek bundle; SonBoyama settled formatı korunur. */
         var bundleUrl = '/giris/api/musteri-kart-bundle?musteri_id=' + encodeURIComponent(midNav) + '&skip_match=1';
-        var pBundle = girisFetchJsonCached(bundleUrl, { ttlMs: 0, persistMs: 0, swr: false });
+        var __selSigFetch = __selSignal ? { signal: __selSignal } : {};
+        var pBundle = girisFetchJsonCached(bundleUrl, { ttlMs: 0, persistMs: 0, swr: false, fetch: Object.assign({ credentials: 'same-origin' }, __selSigFetch) });
         /* Aşama 1 b′: hafif musteri isteği bundle ile paralel — form+ekstre grid beklemeden. */
-        var pMusteri = girisFetchJsonCached('/giris/api/musteri/' + midNav, { ttlMs: 60000, persistMs: 300000, swr: false });
+        var pMusteri = girisFetchJsonCached('/giris/api/musteri/' + midNav, { ttlMs: 60000, persistMs: 300000, swr: false, fetch: Object.assign({ credentials: 'same-origin' }, __selSigFetch) });
         sozlesmeAylikBorclananMusteriDegistir(midNav);
         window.__sozlesmelerAylikYilFiltre = { hepsi: true, yillar: [] };
         window.__sozlesmelerAylikYilSig = null;
-        var __selToken = (window.__girisSelectMusteriToken = (window.__girisSelectMusteriToken || 0) + 1);
+        /* Token select başında girisSelectFetchBegin ile artırıldı (kemer+askı). */
+        var __selToken = window.__girisSelectMusteriToken;
         function __selStillCurrent() {
             return window.__girisSelectMusteriToken === __selToken && String(selectedId) === String(midNav);
         }
@@ -24017,9 +24069,13 @@ function selectMusteri(id) {
             if (res && res.ok && res.musteri) fillActiveTab(res.musteri);
             else if (musteri) fillActiveTab(musteri);
             if (typeof cariEkstreYukle === 'function' && String(cariEkstreMusteriIdSec()) === String(midNav)) {
-                try { cariEkstreYukle({ sessiz: true, dbEsas: true, otomatikVarsayilan: true }); } catch (_eEkEarly) {}
+                try { cariEkstreYukle({ sessiz: true, dbEsas: true, otomatikVarsayilan: true, signal: __selSignal }); } catch (_eEkEarly) {}
             }
-        }).catch(function () {
+        }).catch(function (err) {
+            if (typeof girisSelectFetchAbortIs === 'function' && girisSelectFetchAbortIs(err)) {
+                try { console.debug('[giris-select-fetch] pMusteri aborted', midNav); } catch (_eDbg) {}
+                return;
+            }
             if (!__selStillCurrent()) return;
             if (musteri) fillActiveTab(musteri);
         });
@@ -24029,7 +24085,11 @@ function selectMusteri(id) {
             girisSonMusteriDetayHafifYukleme = false;
             if (mPart && mPart.ok && mPart.musteri) fillActiveTab(mPart.musteri);
             else if (musteri) fillActiveTab(musteri);
-        }).catch(function () {
+        }).catch(function (err) {
+            if (typeof girisSelectFetchAbortIs === 'function' && girisSelectFetchAbortIs(err)) {
+                try { console.debug('[giris-select-fetch] pBundle/form aborted', midNav); } catch (_eDbg) {}
+                return;
+            }
             if (!__selStillCurrent()) return;
             if (musteri) fillActiveTab(musteri);
         });
@@ -24042,7 +24102,11 @@ function selectMusteri(id) {
                 __bundlePartToSettled(bundle && bundle.reel)
             ];
             sozlesmelerAylikGridVeriSonBoyama(midNav, __selToken, settled);
-        }).catch(function () {
+        }).catch(function (err) {
+            if (typeof girisSelectFetchAbortIs === 'function' && girisSelectFetchAbortIs(err)) {
+                try { console.debug('[giris-select-fetch] pBundle/grid aborted', midNav); } catch (_eDbg) {}
+                return;
+            }
             if (!__selStillCurrent()) return;
             sozlesmeAylikGridParalelYukle(midNav);
         });
@@ -25190,7 +25254,7 @@ function girisApiMusteriDurumSinifi(m) {
 
 /* Müşteri kartı için hover-prefetch (A1): sadece hafif /api/musteri.
    Grid/tahsil/reel tıklamada musteri-kart-bundle ile gelir; hover'da tetiklenmez. */
-function girisMusteriPrefetch(mid) {
+function girisMusteriPrefetch(mid, opts) {
     /* A1 hover-dedupe: sadece hafif musteri; grid/tahsil/reel tıklamada bundle ile gelir. */
     if (mid == null || mid === '') return;
     if (!window.__girisMusteriPrefetched) window.__girisMusteriPrefetched = new Set();
@@ -25199,11 +25263,19 @@ function girisMusteriPrefetch(mid) {
     window.__girisMusteriPrefetched.add(k);
     try {
         if (typeof girisFetchJsonCached === 'function') {
-            girisFetchJsonCached('/giris/api/musteri/' + k, { ttlMs: 60000, persistMs: 300000 });
+            var pfOpts = { ttlMs: 60000, persistMs: 300000 };
+            if (opts && opts.signal) pfOpts.fetch = { signal: opts.signal };
+            girisFetchJsonCached('/giris/api/musteri/' + k, pfOpts).catch(function (err) {
+                if (typeof girisSelectFetchAbortIs === 'function' && girisSelectFetchAbortIs(err)) {
+                    try { window.__girisMusteriPrefetched.delete(k); } catch (_eDel) {}
+                    try { console.debug('[giris-select-fetch] musteri prefetch aborted', k); } catch (_eDbg) {}
+                    return;
+                }
+            });
         }
     } catch (_pfE) {}
 }
-function girisCariKartPrefetch(mid) {
+function girisCariKartPrefetch(mid, opts) {
     if (mid == null || mid === '') return;
     if (!window.__girisCariKartPrefetched) window.__girisCariKartPrefetched = new Set();
     var k = String(mid);
@@ -25211,9 +25283,17 @@ function girisCariKartPrefetch(mid) {
     window.__girisCariKartPrefetched.add(k);
     try {
         if (typeof girisFetchJsonCached === 'function') {
+            var ckFetch = { credentials: 'include' };
+            if (opts && opts.signal) ckFetch.signal = opts.signal;
             girisFetchJsonCached('/giris/api/cari-kart/' + encodeURIComponent(k), {
                 ttlMs: 45000,
-                fetch: { credentials: 'include' }
+                fetch: ckFetch
+            }).catch(function (err) {
+                if (typeof girisSelectFetchAbortIs === 'function' && girisSelectFetchAbortIs(err)) {
+                    try { window.__girisCariKartPrefetched.delete(k); } catch (_eDel) {}
+                    try { console.debug('[giris-select-fetch] cari-kart prefetch aborted', k); } catch (_eDbg) {}
+                    return;
+                }
             });
         }
     } catch (_pfCk) {}
@@ -30307,6 +30387,9 @@ function cariEkstreYukle(opts) {
             swr: false,
             fetch: { credentials: 'same-origin' }
         };
+        if (opts && opts.signal) {
+            ekstreCacheOpts.fetch.signal = opts.signal;
+        }
         if (__ekstreZorla || __dbEsasEkstre) {
             ekstreCacheOpts.ttlMs = 0;
             ekstreCacheOpts.persistMs = 0;
@@ -30316,7 +30399,7 @@ function cariEkstreYukle(opts) {
         }
         ekstreReq = girisFetchJsonCached(ekstreUrl, ekstreCacheOpts);
     } else {
-        ekstreReq = fetch(ekstreUrl, { credentials: 'same-origin' })
+        ekstreReq = fetch(ekstreUrl, (opts && opts.signal) ? { credentials: 'same-origin', signal: opts.signal } : { credentials: 'same-origin' })
             .then(function (r) {
                 if (!r.ok) {
                     return r.text().then(function (t) {
