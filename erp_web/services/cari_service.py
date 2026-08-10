@@ -239,6 +239,8 @@ class CariService:
             "net_balance": 0.0,
             "borc_month": 0.0,
             "borc_month_placeholder": False,
+            "ilk_kira": 0.0,
+            "donem_kira": 0.0,
             "geciken_ay": 0,
             "sozlesme_gun": 0,
         }
@@ -398,6 +400,8 @@ class CariService:
             any_real_bm = False
             max_gec = 0
             max_gun = 0
+            sum_ilk = 0.0
+            sum_donem = 0.0
             if include_grid and mids:
                 for m in mids:
                     eg = grid_ozet_by_mid.get(m) or {}
@@ -413,6 +417,14 @@ class CariService:
                         if v > 0.001:
                             any_real_bm = True
                     try:
+                        sum_ilk += float(eg.get("ilk_kira") or 0.0)
+                    except (TypeError, ValueError):
+                        pass
+                    try:
+                        sum_donem += float(eg.get("donem_kira") or 0.0)
+                    except (TypeError, ValueError):
+                        pass
+                    try:
                         gec = int(eg.get("geciken_ay") or 0)
                     except (TypeError, ValueError):
                         gec = 0
@@ -427,6 +439,9 @@ class CariService:
             out[gid]["borc_month"] = round(bm, 2)
             # Grup satırı: yalnızca placeholder (yanıltıcı 0,01) çocuklar varsa "—" için flag.
             out[gid]["borc_month_placeholder"] = bool(any_ph and not any_real_bm and bm <= 0.001)
+            # Bilgi amaçlı (borc_month / net / alacak toplamlarına KATILMAZ)
+            out[gid]["ilk_kira"] = round(sum_ilk, 2)
+            out[gid]["donem_kira"] = round(sum_donem, 2)
             out[gid]["geciken_ay"] = max_gec
             out[gid]["sozlesme_gun"] = max_gun
         return out
@@ -552,6 +567,14 @@ class CariService:
                 gun_ex = int(eg.get("sozlesme_gun") or 0)
             except (TypeError, ValueError):
                 gun_ex = 0
+            try:
+                ilk_v = float(eg.get("ilk_kira") or 0)
+            except (TypeError, ValueError):
+                ilk_v = 0.0
+            try:
+                donem_v = float(eg.get("donem_kira") or 0)
+            except (TypeError, ValueError):
+                donem_v = 0.0
             out.append(
                 {
                     "id": iid,
@@ -560,6 +583,8 @@ class CariService:
                     "musteri_adi": (r.get("musteri_adi") or "").strip(),
                     "borc_month": round(float(bm or 0), 2),
                     "borc_month_placeholder": ph,
+                    "ilk_kira": round(ilk_v, 2),
+                    "donem_kira": round(donem_v, 2),
                     "borc_total": s.get("borc_total", 0),
                     "alacak_total": s.get("alacak_total", 0),
                     "net_balance": s.get("net_balance", 0),

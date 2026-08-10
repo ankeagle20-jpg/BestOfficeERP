@@ -4359,6 +4359,12 @@ function girisGrupOzetParaYaz(v) {
 }
 
 /** Aylık borç: boş/placeholder (yanıltıcı 0,01) ise "—"; aksi halde tutar. */
+/** İlk / Dönem kira (bilgi): 0 veya boşsa —; toplamlara karışmaz. */
+function girisGrupOzetIlkDonemYaz(v) {
+    var n = parseFloat(v);
+    if (!isFinite(n) || n <= 0.0000001) return '—';
+    return girisGrupOzetParaYaz(n);
+}
 function girisGrupOzetAylikBorcYaz(v, placeholder) {
     if (placeholder) return '—';
     return girisGrupOzetParaYaz(v != null ? v : 0);
@@ -4670,7 +4676,7 @@ function girisGrupAnaSatirToggle(ev, tr) {
                 '</div>',
                 '<table class="giris-grup-detay-tablo fatura-rapor-tablo"><thead><tr>',
                 '<th class="num">Cari no</th><th>Firma</th>',
-                '<th class="num">Aylık borç</th><th class="num">Toplam borç</th><th class="num">Gün</th><th class="num">Geciken ay</th><th class="num">Alacak</th><th class="num">Net</th>',
+                '<th class="num">Aylık borç</th><th class="num" title="Net taban kira (KYC aylik_kira veya customers.ilk_kira_bedeli). Gerçek tahsilat borcu değildir.">İlk Kira</th><th class="num" title="İlk kira + TÜFE zinciri (reel/manuel hariç), KDV dahil. Aylık borçtan (reel varsa) farklı olabilir.">Dönem Kira</th><th class="num">Toplam borç</th><th class="num">Gün</th><th class="num">Geciken ay</th><th class="num">Alacak</th><th class="num">Net</th>',
                 '<th class="num">İşlem</th></tr></thead><tbody>'
             ];
             ch.forEach(function (c) {
@@ -4681,6 +4687,8 @@ function girisGrupAnaSatirToggle(ev, tr) {
                     '<td class="num">' + girisGrupHtmlEsc(c.musteri_no || '—') + '</td>' +
                     '<td>' + girisGrupHtmlEsc(firma || ('#' + mid)) + '</td>' +
                     '<td class="num">' + girisGrupOzetAylikBorcYaz(c.borc_month, c.borc_month_placeholder) + '</td>' +
+                    '<td class="num">' + girisGrupOzetIlkDonemYaz(c.ilk_kira) + '</td>' +
+                    '<td class="num">' + girisGrupOzetIlkDonemYaz(c.donem_kira) + '</td>' +
                     '<td class="num">' + girisGrupOzetParaYaz(c.borc_total) + '</td>' +
                     '<td class="num">' + girisGrupSozlesmeGunStr(c.sozlesme_gun) + '</td>' +
                     '<td class="num">' + girisGrupGecikenAyStr(c.geciken_ay) + '</td>' +
@@ -4771,6 +4779,8 @@ function girisGrupOzetListeJsonUygula(j) {
             '<td>' + nm + '</td>' +
             '<td class="num">' + String(g.child_count != null ? g.child_count : 0) + '</td>' +
             '<td class="num">' + girisGrupOzetAylikBorcYaz(g.borc_month, g.borc_month_placeholder) + '</td>' +
+            '<td class="num">' + girisGrupOzetIlkDonemYaz(g.ilk_kira) + '</td>' +
+            '<td class="num">' + girisGrupOzetIlkDonemYaz(g.donem_kira) + '</td>' +
             '<td class="num">' + girisGrupOzetParaYaz(g.borc_total) + '</td>' +
             '<td class="num">' + girisGrupSozlesmeGunStr(g.sozlesme_gun) + '</td>' +
             '<td class="num">' + girisGrupGecikenAyStr(g.geciken_ay) + '</td>' +
@@ -25986,4 +25996,3 @@ async function kiraBildirgesiWhatsApp() {
         'Kira bildirgemiz ekte yer almaktadır. İncelemenizi rica ederiz.\n\nİyi günler dileriz.\nBESTOFFICE';
     bestOfficeWhatsAppWebAc(num, metin);
 }
-

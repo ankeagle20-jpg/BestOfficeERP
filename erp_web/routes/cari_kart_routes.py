@@ -902,6 +902,8 @@ def api_groups_consolidated_report():
             "net_balance": 0.0,
             "borc_month": 0.0,
             "borc_month_placeholder": False,
+            "ilk_kira": 0.0,
+            "donem_kira": 0.0,
             "geciken_ay": 0,
             "sozlesme_gun": 0,
         }
@@ -940,6 +942,14 @@ def api_groups_consolidated_report():
         except (TypeError, ValueError):
             cc_out = 0
         sum_children += cc_out
+        try:
+            ilk_g = float(s.get("ilk_kira") or 0)
+        except (TypeError, ValueError):
+            ilk_g = 0.0
+        try:
+            donem_g = float(s.get("donem_kira") or 0)
+        except (TypeError, ValueError):
+            donem_g = 0.0
         groups_out.append(
             {
                 "id": gid,
@@ -947,6 +957,8 @@ def api_groups_consolidated_report():
                 "child_count": cc_out,
                 "borc_month": round(borc_month, 2),
                 "borc_month_placeholder": borc_month_ph,
+                "ilk_kira": round(ilk_g, 2),
+                "donem_kira": round(donem_g, 2),
                 "borc_total": round(borc, 2),
                 "alacak_total": round(alacak, 2),
                 "net_balance": net_b,
@@ -1007,6 +1019,8 @@ def _serialize_group_children_for_api(children: list | None) -> list[dict]:
                     "musteri_adi": str(ch.get("musteri_adi") or ""),
                     "borc_month": float(ch.get("borc_month") or 0),
                     "borc_month_placeholder": bool(ch.get("borc_month_placeholder")),
+                    "ilk_kira": float(ch.get("ilk_kira") or 0),
+                    "donem_kira": float(ch.get("donem_kira") or 0),
                     "borc_total": float(ch.get("borc_total") or 0),
                     "alacak_total": float(ch.get("alacak_total") or 0),
                     "net_balance": float(ch.get("net_balance") or 0),

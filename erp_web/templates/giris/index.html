@@ -3769,6 +3769,8 @@
                                 <th>Grup adı</th>
                                 <th class="num" title="Bu gruba bağlı cari sayısı">Alt cari</th>
                                 <th class="num" id="giris_grup_ozet_th_aylik" title="Alt carilerde fatura tarihi bu takvim ayı içindeki faturaların toplamı">Aylık borç</th>
+                                <th class="num" id="giris_grup_ozet_th_ilk" title="Alt cariler net taban kira toplamı (KYC veya ilk_kira_bedeli). Tahsilat borcu değildir; Aylık borç / Net hesaplarına katılmaz.">İlk Kira</th>
+                                <th class="num" id="giris_grup_ozet_th_donem" title="İlk kira + TÜFE zinciri (reel/manuel hariç), KDV dahil. Aylık borçtan (reel varsa) farklı olabilir; Net/toplam borç hesaplarına katılmaz.">Dönem Kira</th>
                                 <th class="num">Toplam borç (fatura)</th>
                                 <th class="num" title="Alt carilerde sözleşme başlangıç (giriş) günü; grupta en büyük gün">Gün</th>
                                 <th class="num" title="Firma özeti ile aynı grid mantığı; grupta alt cariler arası en yüksek geciken ay">Geciken ay</th>
@@ -9628,6 +9630,12 @@ function girisGrupOzetParaYaz(v) {
 }
 
 /** Aylık borç: boş/placeholder (yanıltıcı 0,01) ise "—"; aksi halde tutar. */
+/** İlk / Dönem kira (bilgi): 0 veya boşsa —; toplamlara karışmaz. */
+function girisGrupOzetIlkDonemYaz(v) {
+    var n = parseFloat(v);
+    if (!isFinite(n) || n <= 0.0000001) return '—';
+    return girisGrupOzetParaYaz(n);
+}
 function girisGrupOzetAylikBorcYaz(v, placeholder) {
     if (placeholder) return '—';
     return girisGrupOzetParaYaz(v != null ? v : 0);
@@ -9950,7 +9958,7 @@ function girisGrupAnaSatirToggle(ev, tr) {
     window.__girisGrupAcikGid = gid;
     var holder = document.createElement('tr');
     holder.className = 'giris-grup-nested-row';
-    holder.innerHTML = '<td colspan="9"><div class="giris-grup-detay-icerik" style="padding:10px 12px 12px 20px;background:rgba(0,0,0,.18);">Alt firmalar yükleniyor…</div></td>';
+    holder.innerHTML = '<td colspan="11"><div class="giris-grup-detay-icerik" style="padding:10px 12px 12px 20px;background:rgba(0,0,0,.18);">Alt firmalar yükleniyor…</div></td>';
     if (tr.parentNode) {
       tr.parentNode.insertBefore(holder, tr.nextSibling);
     }
@@ -9972,6 +9980,8 @@ function girisGrupAnaSatirToggle(ev, tr) {
                 '<th class="num" style="cursor:pointer" onclick="girisGrupDetaySirala(this,\'id\')">Cari no</th>' +
                 '<th style="cursor:pointer" onclick="girisGrupDetaySirala(this,\'name\')">Firma</th>',
                 '<th class="num" style="cursor:pointer" onclick="girisGrupDetaySirala(this,\'borc_month\')">Aylık borç</th>' +
+                '<th class="num" style="cursor:pointer" title="Net taban kira (KYC aylik_kira veya customers.ilk_kira_bedeli). Gerçek tahsilat borcu değildir." onclick="girisGrupDetaySirala(this,\'ilk_kira\')">İlk Kira</th>' +
+                '<th class="num" style="cursor:pointer" title="İlk kira + TÜFE zinciri (reel/manuel hariç), KDV dahil. Aylık borçtan (reel varsa) farklı olabilir." onclick="girisGrupDetaySirala(this,\'donem_kira\')">Dönem Kira</th>' +
                 '<th class="num" style="cursor:pointer" onclick="girisGrupDetaySirala(this,\'borc_total\')">Toplam borç</th>' +
                 '<th class="num" style="cursor:pointer" onclick="girisGrupDetaySirala(this,\'hazir_ofis_oda_no\')">Oda No</th>' +
                 '<th class="num" style="cursor:pointer" onclick="girisGrupDetaySirala(this,\'sozlesme_gun\')">Gün</th>' +
@@ -9988,6 +9998,8 @@ function girisGrupAnaSatirToggle(ev, tr) {
                     '<td class="num">' + girisGrupHtmlEsc(c.musteri_no || '—') + '</td>' +
                     '<td>' + girisGrupHtmlEsc(firma || ('#' + mid)) + '</td>' +
                     '<td class="num">' + girisGrupOzetAylikBorcYaz(c.borc_month, c.borc_month_placeholder) + '</td>' +
+                    '<td class="num">' + girisGrupOzetIlkDonemYaz(c.ilk_kira) + '</td>' +
+                    '<td class="num">' + girisGrupOzetIlkDonemYaz(c.donem_kira) + '</td>' +
                     '<td class="num">' + girisGrupOzetParaYaz(c.borc_total) + '</td>' +
                     '<td class="num">' + girisGrupHtmlEsc(c.hazir_ofis_oda_no || '—') + '</td>' +
                     '<td class="num">' + girisGrupSozlesmeGunStr(c.sozlesme_gun) + '</td>' +
@@ -10016,6 +10028,8 @@ function girisGrupAnaSatirToggle(ev, tr) {
               'TOPLAM</td>' +
               '<td class="num">' +
               girisGrupOzetParaYaz(topAylik) + '</td>' +
+              '<td class="num">—</td>' +
+              '<td class="num">—</td>' +
               '<td class="num">' +
               girisGrupOzetParaYaz(topToplam) + '</td>' +
               '<td class="num">—</td>' +
@@ -10109,6 +10123,8 @@ function girisGrupOzetListeJsonUygula(j) {
             '<td>' + nm + '</td>' +
             '<td class="num">' + String(g.child_count != null ? g.child_count : 0) + '</td>' +
             '<td class="num">' + girisGrupOzetAylikBorcYaz(g.borc_month, g.borc_month_placeholder) + '</td>' +
+            '<td class="num">' + girisGrupOzetIlkDonemYaz(g.ilk_kira) + '</td>' +
+            '<td class="num">' + girisGrupOzetIlkDonemYaz(g.donem_kira) + '</td>' +
             '<td class="num">' + girisGrupOzetParaYaz(g.borc_total) + '</td>' +
             '<td class="num">' + girisGrupSozlesmeGunStr(g.sozlesme_gun) + '</td>' +
             '<td class="num">' + girisGrupGecikenAyStr(g.geciken_ay) + '</td>' +

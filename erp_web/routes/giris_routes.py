@@ -7969,6 +7969,30 @@ def _firma_ozet_ozet_from_grid_cache_payload(payload, ref_y: int, ref_m: int) ->
     }
 
 
+
+def _grup_rapor_ilk_ve_donem_kira(kyc_for_grid, tufe_map, ref_y: int, ref_m: int) -> tuple[float, float]:
+    """Grup raporu bilgi alanları: ilk_kira (net taban) + donem_kira (saf TÜFE, KDV dahil).
+
+    Reel/manuel overlay YOK. borc_month / toplam_borc hesabına KATILMAZ.
+    """
+    if not kyc_for_grid:
+        return 0.0, 0.0
+    try:
+        ilk = float(kyc_for_grid.get("aylik_kira") or 0)
+    except (TypeError, ValueError):
+        ilk = 0.0
+    if not math.isfinite(ilk) or ilk < 0:
+        ilk = 0.0
+    core = _aylik_grid_contract_core(kyc_for_grid, tufe_map or {})
+    try:
+        donem = float(_aylik_grid_single_month_kdv_from_core(core, ref_y, ref_m) or 0) if core else 0.0
+    except (TypeError, ValueError):
+        donem = 0.0
+    if not math.isfinite(donem) or donem < 0:
+        donem = 0.0
+    return round(ilk, 2), round(donem, 2)
+
+
 def musteri_firma_ozet_grid_ozet_batch(musteri_ids: list, ref: date | None = None) -> dict[int, dict]:
     """
     Grup raporları için tek geçişte:
@@ -8009,6 +8033,28 @@ def musteri_firma_ozet_grid_ozet_batch(musteri_ids: list, ref: date | None = Non
         else:
             need_mids.append(mid)
     if not need_mids:
+        # Cache hit-only: eski önbellekte yoksa ilk_kira/donem_kira bilgisini (saf TÜFE) ekle.
+        if all(("ilk_kira" in (cached_out.get(m) or {}) and "donem_kira" in (cached_out.get(m) or {})) for m in mids):
+            return cached_out
+        tufe_map_hit = _tufe_map_by_year_month_cached()
+        base_sql_hit = _musteri_aylik_grid_customer_kyc_select_sql()
+        rows_hit = fetch_all(base_sql_hit + " WHERE c.id = ANY(%s)", (mids,)) or []
+        row_hit: dict[int, dict] = {}
+        for r in rows_hit:
+            try:
+                rid = int(r.get("id") or 0)
+            except (TypeError, ValueError):
+                continue
+            if rid > 0:
+                row_hit[rid] = r
+        for mid in mids:
+            o = dict(cached_out.get(mid) or {})
+            kyc_h = _firma_ozet_kyc_dict_from_grid_sql_row(row_hit.get(mid)) if mid in row_hit else None
+            ilk_h, donem_h = _grup_rapor_ilk_ve_donem_kira(kyc_h, tufe_map_hit, ref_y, ref_m)
+            o["ilk_kira"] = ilk_h
+            o["donem_kira"] = donem_h
+            cached_out[mid] = o
+            cache[(int(mid), ref_y, ref_m)] = (now_ts, dict(o))
         return cached_out
 
     try:
@@ -8160,6 +8206,31 @@ def musteri_firma_ozet_grid_ozet_batch(musteri_ids: list, ref: date | None = Non
             }
         cache[(int(mid), ref_y, ref_m)] = (now_ts, dict(out[mid]))
     out.update(cached_out)
+    # ATTACH_ILK_DONEM_PASS — bilgi alanları (borc_month / net / alacak toplamlarına karışmaz)
+    missing_row_ids = [m for m in mids if m not in row_by_id]
+    if missing_row_ids:
+        rows_more = fetch_all(base_sql + " WHERE c.id = ANY(%s)", (missing_row_ids,)) or []
+        for r in rows_more:
+            try:
+                rid = int(r.get("id") or 0)
+            except (TypeError, ValueError):
+                continue
+            if rid > 0:
+                row_by_id[rid] = r
+    for mid in mids:
+        o = dict(out.get(mid) or {
+            "borc_month": 0.0,
+            "borc_month_placeholder": False,
+            "toplam_borc": 0.0,
+            "geciken_ay": 0,
+            "sozlesme_gun": 0,
+        })
+        kyc_a = _firma_ozet_kyc_dict_from_grid_sql_row(row_by_id.get(mid)) if mid in row_by_id else None
+        ilk_a, donem_a = _grup_rapor_ilk_ve_donem_kira(kyc_a, tufe_map, ref_y, ref_m)
+        o["ilk_kira"] = ilk_a
+        o["donem_kira"] = donem_a
+        out[mid] = o
+        cache[(int(mid), ref_y, ref_m)] = (now_ts, dict(o))
     return out
 
 
