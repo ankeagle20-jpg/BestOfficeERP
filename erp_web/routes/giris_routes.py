@@ -11357,6 +11357,11 @@ def api_musteri_kart_bundle():
       - odemeler → musteri detayına (varsayılan 1)
       - debug_timing → 1/true/yes/on ise alt-adım süreleri log + timings_ms
 
+    Env:
+      - BUNDLE_PARALLEL_MG=1/true/yes/on → musteri ∥ grid (Aşama B1);
+        kapalı/yoksa mevcut sıralı musteri→grid. tahsil_durum/reel her zaman
+        grid join sonrası sıralı kalır.
+
     Kısmi başarı: her alt çağrı ayrı try/except; biri düşse diğerleri döner.
     Üst ok=true en az bir alt ok=true ise.
     """
@@ -11381,6 +11386,12 @@ def api_musteri_kart_bundle():
     force_grid = str(request.args.get("force") or "").lower() in ("1", "true", "yes", "on")
     odemeler = str(request.args.get("odemeler", "1") or "1")
     debug_timing = str(request.args.get("debug_timing") or "").lower() in ("1", "true", "yes", "on")
+    parallel_mg = str(os.getenv("BUNDLE_PARALLEL_MG") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
 
     def _unwrap(fn):
         return getattr(fn, "__wrapped__", fn)
@@ -11433,39 +11444,131 @@ def api_musteri_kart_bundle():
     timings_ms = {"musteri": 0.0, "grid": 0.0, "tahsil_durum": 0.0, "reel": 0.0, "total": 0.0}
     t_bundle0 = time.perf_counter()
 
-    # 1) musteri — force uygulanmaz
-    _t0 = time.perf_counter()
-    try:
-        out["musteri"] = _call_view(
-            f"/giris/api/musteri/{mid}",
-            {"odemeler": odemeler},
-            api_musteri_detay,
-            mid,
-        )
-    except Exception as ex:
-        out["musteri"] = {"ok": False, "mesaj": str(ex) or "musteri hata"}
-    finally:
-        timings_ms["musteri"] = round((time.perf_counter() - _t0) * 1000, 1)
+    grid_q = {"musteri_id": mid}
+    if skip_match:
+        grid_q["skip_match"] = "1"
+    if force_grid:
+        grid_q["force"] = "1"
+    if debug_timing:
+        grid_q["debug_timing"] = "1"
 
-    # 2) grid — skip_match + force yalnızca burada (tahsil_durum'dan önce; Aşama 2a)
-    _t0 = time.perf_counter()
-    try:
-        grid_q = {"musteri_id": mid}
-        if skip_match:
-            grid_q["skip_match"] = "1"
-        if force_grid:
-            grid_q["force"] = "1"
-        if debug_timing:
-            grid_q["debug_timing"] = "1"
-        out["grid"] = _call_view(
-            "/giris/api/aylik-grid-cache",
-            grid_q,
-            api_aylik_grid_cache,
-        )
-    except Exception as ex:
-        out["grid"] = {"ok": False, "mesaj": str(ex) or "grid hata"}
-    finally:
-        timings_ms["grid"] = round((time.perf_counter() - _t0) * 1000, 1)
+    if parallel_mg:
+        # Aşama B1: musteri ∥ grid — tahsil_durum/reel sırası değişmez.
+        from concurrent.futures import ThreadPoolExecutor, wait
+
+        app_obj = current_app._get_current_object()
+        _mg_timeout_sec = 60.0
+
+        def _worker_musteri():
+            with app_obj.app_context():
+                _t0w = time.perf_counter()
+                try:
+                    data = _call_view(
+                        f"/giris/api/musteri/{mid}",
+                        {"odemeler": odemeler},
+                        api_musteri_detay,
+                        mid,
+                    )
+                except Exception as ex:
+                    data = {"ok": False, "mesaj": str(ex) or "musteri hata"}
+                return (
+                    "musteri",
+                    data,
+                    round((time.perf_counter() - _t0w) * 1000, 1),
+                )
+
+        def _worker_grid():
+            with app_obj.app_context():
+                _t0w = time.perf_counter()
+                try:
+                    data = _call_view(
+                        "/giris/api/aylik-grid-cache",
+                        grid_q,
+                        api_aylik_grid_cache,
+                    )
+                except Exception as ex:
+                    data = {"ok": False, "mesaj": str(ex) or "grid hata"}
+                return (
+                    "grid",
+                    data,
+                    round((time.perf_counter() - _t0w) * 1000, 1),
+                )
+
+        with ThreadPoolExecutor(max_workers=2) as _ex:
+            fut_m = _ex.submit(_worker_musteri)
+            fut_g = _ex.submit(_worker_grid)
+            done, not_done = wait([fut_m, fut_g], timeout=_mg_timeout_sec)
+            if not_done:
+                try:
+                    logging.getLogger(__name__).error(
+                        "bundle_parallel_mg_timeout mid=%s timeout_sec=%.1f "
+                        "pending=%s",
+                        mid,
+                        _mg_timeout_sec,
+                        ",".join(
+                            "musteri" if f is fut_m else "grid" for f in not_done
+                        ),
+                    )
+                    print(
+                        "bundle_parallel_mg_timeout mid=%s timeout_sec=%.1f pending=%s"
+                        % (
+                            mid,
+                            _mg_timeout_sec,
+                            ",".join(
+                                "musteri" if f is fut_m else "grid" for f in not_done
+                            ),
+                        ),
+                        flush=True,
+                    )
+                except Exception:
+                    pass
+            for _name, _fut in (("musteri", fut_m), ("grid", fut_g)):
+                if _fut in not_done:
+                    out[_name] = {
+                        "ok": False,
+                        "mesaj": "bundle parallel timeout (%.0fs)" % _mg_timeout_sec,
+                    }
+                    timings_ms[_name] = round(_mg_timeout_sec * 1000, 1)
+                    continue
+                try:
+                    _k, _data, _ms = _fut.result(timeout=0)
+                    out[_k] = _data if isinstance(_data, dict) else {
+                        "ok": False,
+                        "mesaj": "Geçersiz yanıt.",
+                    }
+                    timings_ms[_k] = float(_ms)
+                except Exception as ex:
+                    out[_name] = {
+                        "ok": False,
+                        "mesaj": str(ex) or ("%s hata" % _name),
+                    }
+    else:
+        # 1) musteri — force uygulanmaz (flag kapalı: mevcut sıralı yol)
+        _t0 = time.perf_counter()
+        try:
+            out["musteri"] = _call_view(
+                f"/giris/api/musteri/{mid}",
+                {"odemeler": odemeler},
+                api_musteri_detay,
+                mid,
+            )
+        except Exception as ex:
+            out["musteri"] = {"ok": False, "mesaj": str(ex) or "musteri hata"}
+        finally:
+            timings_ms["musteri"] = round((time.perf_counter() - _t0) * 1000, 1)
+
+        # 2) grid — skip_match + force yalnızca burada (tahsil_durum'dan önce; Aşama 2a)
+        _t0 = time.perf_counter()
+        try:
+            out["grid"] = _call_view(
+                "/giris/api/aylik-grid-cache",
+                grid_q,
+                api_aylik_grid_cache,
+            )
+        except Exception as ex:
+            out["grid"] = {"ok": False, "mesaj": str(ex) or "grid hata"}
+        finally:
+            timings_ms["grid"] = round((time.perf_counter() - _t0) * 1000, 1)
 
     # 3) tahsil_durum — Aşama 2b: grid cache başarılıysa paylaş (yoksa eski bağımsız yol)
     _t0 = time.perf_counter()
