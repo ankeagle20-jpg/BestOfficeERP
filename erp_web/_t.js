@@ -19345,9 +19345,24 @@ function selectMusteri(id) {
             girisSonMusteriDetayHafifYukleme = false;
             if (res && res.ok && res.musteri) fillActiveTab(res.musteri);
             else if (musteri) fillActiveTab(musteri);
-            if (typeof cariEkstreYukle === 'function' && String(cariEkstreMusteriIdSec()) === String(midNav)) {
-                try { cariEkstreYukle({ sessiz: true, dbEsas: true, otomatikVarsayilan: true, signal: __selSignal }); } catch (_eEkEarly) {}
-            }
+            /* A3: erken ekstre warm-up — pMusteri sonrası idle'a ertele; stale ise atlama. */
+            (function () {
+                function __ekEarlyRun() {
+                    if (!__selStillCurrent()) return;
+                    if (typeof cariEkstreYukle === 'function' && String(cariEkstreMusteriIdSec()) === String(midNav)) {
+                        try { cariEkstreYukle({ sessiz: true, dbEsas: true, otomatikVarsayilan: true, signal: __selSignal }); } catch (_eEkEarly) {}
+                    }
+                }
+                try {
+                    if (typeof requestIdleCallback === 'function') {
+                        requestIdleCallback(function () { __ekEarlyRun(); }, { timeout: 2000 });
+                    } else {
+                        setTimeout(__ekEarlyRun, 0);
+                    }
+                } catch (_eEkSched) {
+                    setTimeout(__ekEarlyRun, 0);
+                }
+            })();
         }).catch(function (err) {
             if (typeof girisSelectFetchAbortIs === 'function' && girisSelectFetchAbortIs(err)) {
                 try { console.debug('[giris-select-fetch] pMusteri aborted', midNav); } catch (_eDbg) {}
