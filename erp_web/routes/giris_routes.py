@@ -11359,8 +11359,11 @@ def api_musteri_kart_bundle():
 
     Env:
       - BUNDLE_PARALLEL_MG=1/true/yes/on → musteri ∥ grid (Aşama B1);
-        kapalı/yoksa mevcut sıralı musteri→grid. tahsil_durum/reel her zaman
-        grid join sonrası sıralı kalır.
+        kapalı/yoksa mevcut sıralı musteri→grid.
+      - BUNDLE_PARALLEL_TR=1/true/yes/on → tahsil_durum ∥ reel (Aşama B2),
+        YALNIZCA grid join SONRASI; MG'den BAĞIMSIZ flag (varsayılan KAPALI).
+        tahsil_durum grid.cache'i paylaşır; reel bağımsız. Flag kapalıysa
+        tahsil_durum→reel sıralı kalır.
 
     Kısmi başarı: her alt çağrı ayrı try/except; biri düşse diğerleri döner.
     Üst ok=true en az bir alt ok=true ise.
@@ -11387,6 +11390,12 @@ def api_musteri_kart_bundle():
     odemeler = str(request.args.get("odemeler", "1") or "1")
     debug_timing = str(request.args.get("debug_timing") or "").lower() in ("1", "true", "yes", "on")
     parallel_mg = str(os.getenv("BUNDLE_PARALLEL_MG") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    parallel_tr = str(os.getenv("BUNDLE_PARALLEL_TR") or "").strip().lower() in (
         "1",
         "true",
         "yes",
@@ -11570,40 +11579,135 @@ def api_musteri_kart_bundle():
         finally:
             timings_ms["grid"] = round((time.perf_counter() - _t0) * 1000, 1)
 
-    # 3) tahsil_durum — Aşama 2b: grid cache başarılıysa paylaş (yoksa eski bağımsız yol)
-    _t0 = time.perf_counter()
-    try:
-        tahsil_kw = {}
-        gpart = out.get("grid")
-        if (
-            isinstance(gpart, dict)
-            and gpart.get("ok")
-            and isinstance(gpart.get("cache"), dict)
-        ):
-            tahsil_kw["onceden_hesaplanmis_grid"] = gpart.get("cache")
-        out["tahsil_durum"] = _call_view(
-            "/giris/api/aylik-tahsil-durum",
-            {"musteri_id": mid},
-            api_aylik_tahsil_durum,
-            **tahsil_kw,
-        )
-    except Exception as ex:
-        out["tahsil_durum"] = {"ok": False, "mesaj": str(ex) or "tahsil_durum hata"}
-    finally:
-        timings_ms["tahsil_durum"] = round((time.perf_counter() - _t0) * 1000, 1)
+    # 3–4) tahsil_durum + reel — grid join SONRASI (Aşama B2 opsiyonel paralel)
+    tahsil_kw = {}
+    gpart = out.get("grid")
+    if (
+        isinstance(gpart, dict)
+        and gpart.get("ok")
+        and isinstance(gpart.get("cache"), dict)
+    ):
+        tahsil_kw["onceden_hesaplanmis_grid"] = gpart.get("cache")
 
-    # 4) reel
-    _t0 = time.perf_counter()
-    try:
-        out["reel"] = _call_view(
-            "/giris/api/reel-donem-tutarlar",
-            {"musteri_id": mid},
-            api_reel_donem_tutarlar,
-        )
-    except Exception as ex:
-        out["reel"] = {"ok": False, "mesaj": str(ex) or "reel hata"}
-    finally:
-        timings_ms["reel"] = round((time.perf_counter() - _t0) * 1000, 1)
+    if parallel_tr:
+        # Aşama B2: tahsil_durum ∥ reel (MG'den bağımsız; her zaman grid join sonrası)
+        from concurrent.futures import ThreadPoolExecutor, wait
+
+        app_obj_tr = current_app._get_current_object()
+        _tr_timeout_sec = 60.0
+
+        def _worker_tahsil_durum():
+            with app_obj_tr.app_context():
+                _t0w = time.perf_counter()
+                try:
+                    data = _call_view(
+                        "/giris/api/aylik-tahsil-durum",
+                        {"musteri_id": mid},
+                        api_aylik_tahsil_durum,
+                        **tahsil_kw,
+                    )
+                except Exception as ex:
+                    data = {"ok": False, "mesaj": str(ex) or "tahsil_durum hata"}
+                return (
+                    "tahsil_durum",
+                    data,
+                    round((time.perf_counter() - _t0w) * 1000, 1),
+                )
+
+        def _worker_reel():
+            with app_obj_tr.app_context():
+                _t0w = time.perf_counter()
+                try:
+                    data = _call_view(
+                        "/giris/api/reel-donem-tutarlar",
+                        {"musteri_id": mid},
+                        api_reel_donem_tutarlar,
+                    )
+                except Exception as ex:
+                    data = {"ok": False, "mesaj": str(ex) or "reel hata"}
+                return (
+                    "reel",
+                    data,
+                    round((time.perf_counter() - _t0w) * 1000, 1),
+                )
+
+        with ThreadPoolExecutor(max_workers=2) as _ex_tr:
+            fut_t = _ex_tr.submit(_worker_tahsil_durum)
+            fut_r = _ex_tr.submit(_worker_reel)
+            done_tr, not_done_tr = wait([fut_t, fut_r], timeout=_tr_timeout_sec)
+            if not_done_tr:
+                try:
+                    logging.getLogger(__name__).error(
+                        "bundle_parallel_tr_timeout mid=%s timeout_sec=%.1f "
+                        "pending=%s",
+                        mid,
+                        _tr_timeout_sec,
+                        ",".join(
+                            "tahsil_durum" if f is fut_t else "reel"
+                            for f in not_done_tr
+                        ),
+                    )
+                    print(
+                        "bundle_parallel_tr_timeout mid=%s timeout_sec=%.1f pending=%s"
+                        % (
+                            mid,
+                            _tr_timeout_sec,
+                            ",".join(
+                                "tahsil_durum" if f is fut_t else "reel"
+                                for f in not_done_tr
+                            ),
+                        ),
+                        flush=True,
+                    )
+                except Exception:
+                    pass
+            for _name, _fut in (("tahsil_durum", fut_t), ("reel", fut_r)):
+                if _fut in not_done_tr:
+                    out[_name] = {
+                        "ok": False,
+                        "mesaj": "bundle parallel timeout (%.0fs)" % _tr_timeout_sec,
+                    }
+                    timings_ms[_name] = round(_tr_timeout_sec * 1000, 1)
+                    continue
+                try:
+                    _k, _data, _ms = _fut.result(timeout=0)
+                    out[_k] = _data if isinstance(_data, dict) else {
+                        "ok": False,
+                        "mesaj": "Geçersiz yanıt.",
+                    }
+                    timings_ms[_k] = float(_ms)
+                except Exception as ex:
+                    out[_name] = {
+                        "ok": False,
+                        "mesaj": str(ex) or ("%s hata" % _name),
+                    }
+    else:
+        # 3) tahsil_durum — Aşama 2b: grid cache başarılıysa paylaş (flag kapalı: sıralı)
+        _t0 = time.perf_counter()
+        try:
+            out["tahsil_durum"] = _call_view(
+                "/giris/api/aylik-tahsil-durum",
+                {"musteri_id": mid},
+                api_aylik_tahsil_durum,
+                **tahsil_kw,
+            )
+        except Exception as ex:
+            out["tahsil_durum"] = {"ok": False, "mesaj": str(ex) or "tahsil_durum hata"}
+        finally:
+            timings_ms["tahsil_durum"] = round((time.perf_counter() - _t0) * 1000, 1)
+
+        # 4) reel
+        _t0 = time.perf_counter()
+        try:
+            out["reel"] = _call_view(
+                "/giris/api/reel-donem-tutarlar",
+                {"musteri_id": mid},
+                api_reel_donem_tutarlar,
+            )
+        except Exception as ex:
+            out["reel"] = {"ok": False, "mesaj": str(ex) or "reel hata"}
+        finally:
+            timings_ms["reel"] = round((time.perf_counter() - _t0) * 1000, 1)
 
     out["ok"] = any(
         isinstance(out[k], dict) and bool(out[k].get("ok"))
