@@ -23973,7 +23973,7 @@ function girisTahsilatEkstreTazeYenile() {
     } catch (_eEkInv) {}
     if (typeof cariEkstreYukle !== 'function') return;
     if (!cariEkstreMusteriIdSec()) return;
-    cariEkstreYukle({ sessiz: true, zorla: true });
+    cariEkstreYukle({ sessiz: true, zorla: true, kullaniciAraligiKoru: true });
 }
 /** Ekstre düzenle/sil sonrası: panel DB + grid (tahsilatlar ile hizalı). */
 /** Ekstre tahsil sil → panel borçlu + grid kırmızı (borçlandır ile aynı mantık). */
@@ -24416,6 +24416,7 @@ function cariEkstreTahsilatDetayAc(mid, idsCsv) {
 function cariEkstreYukle(opts) {
     var sessiz = opts && opts.sessiz;
     var otomatikVarsayilan = !!(opts && opts.otomatikVarsayilan);
+    var kullaniciAraligiKoru = !!(opts && opts.kullaniciAraligiKoru);
     try {
         if (otomatikVarsayilan && window.__cariEkstreBitisKullaniciDokundu) {
             otomatikVarsayilan = false;
@@ -24455,7 +24456,7 @@ function cariEkstreYukle(opts) {
     var durumEkEl = document.getElementById('musteri_durum');
     var pasifEkstre = durumEkEl && String(durumEkEl.value || '').toLowerCase().trim() === 'pasif';
     // otomatikVarsayilan: aktif müşteride bitişi cari ay sonuna zorlama — backend peşin ufku kullanılsın
-    if (!otomatikVarsayilan && bitisEl && !pasifEkstre) {
+    if (!otomatikVarsayilan && !kullaniciAraligiKoru && bitisEl && !pasifEkstre) {
         var nowEk = new Date();
         var cyEk = nowEk.getFullYear();
         var cmEk = nowEk.getMonth() + 1;
