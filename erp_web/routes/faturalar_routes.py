@@ -3197,6 +3197,148 @@ def _firma_ozet_grid_ozet_map_cache_only(rows: list, ref: date | None = None) ->
         return {}
 
 
+def _firma_ozet_referans_ay_grid_tutar_map(musteri_ids, ref: date | None = None) -> dict[int, float]:
+    """Grid cache'ten referans ayın geçerli KDV dahil tutarını tek batch sorguyla okur.
+
+    Güncel object payload'larda compute_rev doğrulanır. Compute rev taşımayan legacy
+    array payload'lar yalnızca geçerli ay/brüt-tutar verisi içeriyorsa kabul edilir.
+    Grid'in ``brut=0 / tutar=0.01`` görsel zemini gerçek kira sayılmaz.
+    """
+    mids: list[int] = []
+    seen: set[int] = set()
+    for raw_mid in musteri_ids or []:
+        try:
+            mid = int(raw_mid)
+        except (TypeError, ValueError):
+            continue
+        if mid <= 0 or mid in seen:
+            continue
+        seen.add(mid)
+        mids.append(mid)
+    if not mids:
+        return {}
+
+    d = ref or date.today()
+    try:
+        ref_y, ref_m = int(d.year), int(d.month)
+    except (TypeError, ValueError, AttributeError):
+        return {}
+    if ref_m < 1 or ref_m > 12:
+        return {}
+
+    try:
+        from routes.giris_routes import (
+            AYLIK_GRID_COMPUTE_REV,
+            _firma_ozet_classify_borc_month,
+        )
+
+        rows = fetch_all(
+            """
+            WITH parsed AS MATERIALIZED (
+                SELECT agc.musteri_id,
+                       agc.payload::jsonb AS payload
+                FROM musteri_aylik_grid_cache agc
+                WHERE agc.musteri_id = ANY(%s::bigint[])
+            )
+            SELECT parsed.musteri_id,
+                   jsonb_typeof(parsed.payload) AS payload_tipi,
+                   CASE
+                       WHEN jsonb_typeof(parsed.payload) = 'object'
+                           THEN parsed.payload->>'compute_rev'
+                       ELSE NULL
+                   END AS compute_rev,
+                   elem->>'tutar_kdv_dahil' AS tutar_kdv_dahil,
+                   elem->>'brut_tutar_kdv' AS brut_tutar_kdv
+            FROM parsed
+            CROSS JOIN LATERAL jsonb_array_elements(
+                CASE
+                    WHEN jsonb_typeof(parsed.payload) = 'array'
+                        THEN parsed.payload
+                    WHEN jsonb_typeof(parsed.payload->'aylar') = 'array'
+                        THEN parsed.payload->'aylar'
+                    ELSE '[]'::jsonb
+                END
+            ) AS elem
+            WHERE COALESCE(elem->>'yil', '') ~ '^[0-9]{4}$'
+              AND COALESCE(elem->>'ay', '') ~ '^[0-9]{1,2}$'
+              AND (elem->>'yil')::int = %s
+              AND (elem->>'ay')::int = %s
+            """,
+            (mids, ref_y, ref_m),
+        ) or []
+
+        out: dict[int, float] = {}
+        for row in rows:
+            try:
+                mid = int(row.get("musteri_id") or 0)
+            except (TypeError, ValueError):
+                continue
+            if mid <= 0:
+                continue
+
+            payload_tipi = str(row.get("payload_tipi") or "").strip().lower()
+            if payload_tipi == "object":
+                try:
+                    if int(row.get("compute_rev") or 0) != int(AYLIK_GRID_COMPUTE_REV):
+                        continue
+                except (TypeError, ValueError):
+                    continue
+            elif payload_tipi != "array":
+                continue
+
+            tutar_raw = row.get("tutar_kdv_dahil")
+            brut_raw = row.get("brut_tutar_kdv")
+            if tutar_raw is None or str(tutar_raw).strip() == "":
+                tutar_raw = brut_raw
+            tutar, placeholder = _firma_ozet_classify_borc_month(tutar_raw, brut_raw)
+            if placeholder or tutar <= 0:
+                continue
+            if tutar > float(out.get(mid) or 0):
+                out[mid] = round(float(tutar), 2)
+        return out
+    except Exception as exc:
+        try:
+            current_app.logger.warning("firma_ozet referans ay grid tutar map: %r", exc)
+        except Exception:
+            pass
+        return {}
+
+
+def _firma_ozet_satirlara_referans_ay_guncel_uygula(satirlar, ref: date | None = None):
+    """Geçerli Grid cache tutarı varsa yalnızca satırın Güncel kira alanını değiştirir."""
+    if not isinstance(satirlar, list) or not satirlar:
+        return satirlar
+
+    mids: list[int] = []
+    seen: set[int] = set()
+    for item in satirlar:
+        if not isinstance(item, dict):
+            continue
+        try:
+            mid = int(item.get("musteri_id") or 0)
+        except (TypeError, ValueError):
+            continue
+        if mid <= 0 or mid in seen:
+            continue
+        seen.add(mid)
+        mids.append(mid)
+
+    guncel_by_mid = _firma_ozet_referans_ay_grid_tutar_map(mids, ref)
+    if not guncel_by_mid:
+        return satirlar
+
+    for item in satirlar:
+        if not isinstance(item, dict):
+            continue
+        try:
+            mid = int(item.get("musteri_id") or 0)
+        except (TypeError, ValueError):
+            continue
+        if mid in guncel_by_mid:
+            item["guncel_kira_bedeli"] = guncel_by_mid[mid]
+    return satirlar
+
+
 def _firma_ozet_sql_guncel_grid_kdv_dahil_expr(ay_y: int, ay_m: int) -> str:
     """Tekil rapor referans ayı: musteri_aylik_grid_cache.payload.aylar içindeki tutar_kdv_dahil (Aylık Tutarlar grid).
 
@@ -4063,6 +4205,7 @@ def api_fatura_rapor():
                 else ("pasif" if pasifleri_dahil else "aktif")
             )
         )
+        _firma_ozet_satirlara_referans_ay_guncel_uygula(satirlar_resp, ref_first)
         _firma_payload = {
             "ok": True,
             "gorunum": "firma_ozet",
