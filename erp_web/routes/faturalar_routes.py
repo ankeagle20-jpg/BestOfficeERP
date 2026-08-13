@@ -6519,13 +6519,20 @@ def _satir_adindan_ay_yil_cikar(ad):
     return out
 
 
-def _fatura_kira_donemleri_topla(satirlar, fatura_tarihi_iso, notlar):
-    """Ay birimi, satır metni ve |AYLIK_TUTAR| işaretinden (yıl, ay) kümesi."""
+def _fatura_kira_donemleri_topla(
+    satirlar,
+    fatura_tarihi_iso,
+    notlar,
+    guvenilirlik_dondur=False,
+):
+    """Dönem kümesini ve istenirse gerçek veriden tespit edilip edilmediğini döndürür."""
     donemler = set()
+    donem_guvenilir = False
     for m in re.finditer(r"\|AYLIK_TUTAR\|(\d{4}-\d{2}-\d{2})\|", notlar or ""):
         try:
             d = datetime.strptime(m.group(1), "%Y-%m-%d").date()
             donemler.add((d.year, d.month))
+            donem_guvenilir = True
         except Exception:
             pass
     ay_birimi = False
@@ -6539,13 +6546,226 @@ def _fatura_kira_donemleri_topla(satirlar, fatura_tarihi_iso, notlar):
                 ay_birimi = True
             for pair in _satir_adindan_ay_yil_cikar(ad):
                 donemler.add(pair)
+                donem_guvenilir = True
     if ay_birimi and not donemler and fatura_tarihi_iso:
         try:
             d = datetime.strptime(str(fatura_tarihi_iso)[:10], "%Y-%m-%d").date()
             donemler.add((d.year, d.month))
         except Exception:
             pass
+    if guvenilirlik_dondur:
+        return donemler, donem_guvenilir
     return donemler
+
+
+_MUKERRER_AY_ONAY_RE = re.compile(
+    r"\|MUKERRER_AY_ONAY\|([0-9]{4}-[0-9]{2}-[0-9]{2})\|"
+)
+_MUKERRER_AY_TUTAR_RE = re.compile(
+    r"\|MUKERRER_AY_TUTAR\|([0-9]{4}-[0-9]{2}-[0-9]{2})=([0-9]+(?:\.[0-9]+)?)\|"
+)
+_MUKERRER_AY_ANY_RE = re.compile(
+    r"\|MUKERRER_AY_(?:ONAY|TUTAR)\|[^|]*\|"
+)
+
+
+def _fatura_mukerrer_ay_onay_true(value):
+    """Soft-confirm boolean alanlarını projedeki mevcut desenle aynı yorumlar."""
+    return value in (True, 1, "1", "true", "True", "yes", "on")
+
+
+def _fatura_mukerrer_ay_iso(value):
+    """Tarih/anahtar değerini ayın ilk gününe normalize eder."""
+    try:
+        d = datetime.strptime(str(value or "")[:10], "%Y-%m-%d").date()
+        if d.year < 1990 or d.year > 2100:
+            return None
+        return date(d.year, d.month, 1).isoformat()
+    except (TypeError, ValueError):
+        return None
+
+
+def _fatura_mukerrer_marker_tutar_map(notlar):
+    """Yalnız ONAY+TUTAR çifti tam olan kalıcı marker'ları döndürür."""
+    text = str(notlar or "")
+    onay_isos = {
+        iso_n
+        for iso_n in (
+            _fatura_mukerrer_ay_iso(m.group(1))
+            for m in _MUKERRER_AY_ONAY_RE.finditer(text)
+        )
+        if iso_n
+    }
+    tutarlar = {}
+    for m in _MUKERRER_AY_TUTAR_RE.finditer(text):
+        iso_n = _fatura_mukerrer_ay_iso(m.group(1))
+        if not iso_n:
+            continue
+        try:
+            tutar = round(float(m.group(2)), 2)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(tutar) and tutar > 0:
+            tutarlar[iso_n] = tutar
+    return {iso: tutarlar[iso] for iso in sorted(onay_isos) if iso in tutarlar}
+
+
+def _fatura_mukerrer_markerlari_temizle(notlar):
+    """İstemciden gelen mükerrer marker'larını atar; başka not/marker'lara dokunmaz."""
+    text = _MUKERRER_AY_ANY_RE.sub("", str(notlar or ""))
+    return re.sub(r"[ \t]{2,}", " ", text).strip()
+
+
+def _fatura_mukerrer_notlari_kanoniklestir(
+    gelen_notlar,
+    mevcut_notlar,
+    aktif_isos,
+    yeni_tutar_by_iso,
+):
+    """Mevcut yetkili marker'ları korur; request marker'larını server verisiyle yeniden yazar."""
+    aktif = {
+        iso
+        for iso in (aktif_isos or set())
+        if _fatura_mukerrer_ay_iso(iso)
+    }
+    merged = {
+        iso: tutar
+        for iso, tutar in _fatura_mukerrer_marker_tutar_map(mevcut_notlar).items()
+        if iso in aktif
+    }
+    for iso_raw, tutar_raw in (yeni_tutar_by_iso or {}).items():
+        iso = _fatura_mukerrer_ay_iso(iso_raw)
+        try:
+            tutar = round(float(tutar_raw), 2)
+        except (TypeError, ValueError):
+            continue
+        if iso and iso in aktif and math.isfinite(tutar) and tutar > 0:
+            merged[iso] = tutar
+    base = _fatura_mukerrer_markerlari_temizle(gelen_notlar)
+    tokens = []
+    for iso in sorted(merged):
+        tokens.append(f"|MUKERRER_AY_ONAY|{iso}|")
+        tokens.append(f"|MUKERRER_AY_TUTAR|{iso}={merged[iso]:.2f}|")
+    if not tokens:
+        return base or None
+    marker_text = "".join(tokens)
+    return ((base + " ") if base else "") + marker_text
+
+
+def _fatura_mukerrer_satir_kdv_dahil_tutar(satir):
+    """Yeni fatura formundaki tek satırın iskonto sonrası KDV dahil toplamı."""
+    if not isinstance(satir, dict):
+        return 0.0
+    try:
+        miktar = float(satir.get("miktar") or 0)
+        birim_fiyat = float(satir.get("birim_fiyat") or 0)
+        isk_oran = float(satir.get("iskonto_orani") or 0)
+        kdv_oran = float(satir.get("kdv_orani") or 0)
+        brut = miktar * birim_fiyat
+        isk_raw = satir.get("iskonto_tutar")
+        if isk_raw is not None and float(isk_raw) > 0:
+            iskonto = min(float(isk_raw), brut)
+        else:
+            iskonto = brut * isk_oran / 100.0
+        net = max(brut - iskonto, 0.0)
+        toplam = net * (1.0 + kdv_oran / 100.0)
+        return round(toplam, 2) if math.isfinite(toplam) and toplam > 0 else 0.0
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _fatura_mukerrer_acik_donem_tutar_map(raw):
+    """Frontend'in açık dönem-tutar sözlüğünü normalize eder; geçersizde ValueError."""
+    if raw in (None, ""):
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError("fatura_donem_tutarlari nesne olmalıdır.")
+    out = {}
+    for iso_raw, tutar_raw in raw.items():
+        iso = _fatura_mukerrer_ay_iso(iso_raw)
+        try:
+            tutar = round(float(tutar_raw), 2)
+        except (TypeError, ValueError):
+            tutar = 0.0
+        if not iso or not math.isfinite(tutar) or tutar <= 0:
+            raise ValueError(
+                "fatura_donem_tutarlari geçerli ay ve pozitif tutarlar içermelidir."
+            )
+        out[iso] = round(float(out.get(iso) or 0) + tutar, 2)
+    return out
+
+
+def _fatura_mukerrer_donem_tutar_map(
+    satirlar,
+    donemler,
+    toplam,
+    acik_tutar_map=None,
+    donem_guvenilir=False,
+):
+    """Fatura toplamını dönemlere kanonik dağıtır; belirsiz çoklu dönemde fail-closed."""
+    aktif_isos = {
+        date(int(y), int(m), 1).isoformat()
+        for y, m in (donemler or set())
+    }
+    if not aktif_isos:
+        return {}
+    try:
+        toplam_v = round(float(toplam or 0), 2)
+    except (TypeError, ValueError):
+        toplam_v = 0.0
+    if not math.isfinite(toplam_v) or toplam_v <= 0:
+        raise ValueError("Mükerrer dönem tutarı için fatura genel toplamı pozitif olmalıdır.")
+    explicit = dict(acik_tutar_map or {})
+    if explicit:
+        if set(explicit) != aktif_isos:
+            raise ValueError(
+                "fatura_donem_tutarlari faturanın bütün dönemlerini eksiksiz içermelidir."
+            )
+        explicit_sum = round(sum(float(v or 0) for v in explicit.values()), 2)
+        if abs(explicit_sum - toplam_v) > 0.05:
+            raise ValueError(
+                "Dönem tutarları toplamı fatura genel toplamıyla eşleşmiyor."
+            )
+        return {iso: round(float(explicit[iso]), 2) for iso in sorted(explicit)}
+    satir_map = {}
+    if isinstance(satirlar, list):
+        for satir in satirlar:
+            if not isinstance(satir, dict):
+                continue
+            ad = (
+                satir.get("ad")
+                or satir.get("name")
+                or satir.get("hizmet")
+                or ""
+            ).strip()
+            pairs = set(_satir_adindan_ay_yil_cikar(ad))
+            if len(pairs) != 1:
+                continue
+            y, m = next(iter(pairs))
+            iso = date(int(y), int(m), 1).isoformat()
+            if iso not in aktif_isos:
+                continue
+            satir_tutar = _fatura_mukerrer_satir_kdv_dahil_tutar(satir)
+            if satir_tutar > 0:
+                satir_map[iso] = round(
+                    float(satir_map.get(iso) or 0) + satir_tutar,
+                    2,
+                )
+    if set(satir_map) == aktif_isos:
+        satir_sum = round(sum(satir_map.values()), 2)
+        if abs(satir_sum - toplam_v) <= 0.05:
+            return {iso: satir_map[iso] for iso in sorted(satir_map)}
+    if len(aktif_isos) == 1 and donem_guvenilir:
+        return {next(iter(aktif_isos)): toplam_v}
+    if len(aktif_isos) == 1:
+        raise ValueError(
+            "Bu faturanın hangi ayları kapsadığı güvenle tespit edilemedi; "
+            "fatura_donem_tutarlari gereklidir."
+        )
+    raise ValueError(
+        "Çok dönemli faturanın ay bazlı tutarı güvenle ayrıştırılamadı; "
+        "fatura_donem_tutarlari gerekli."
+    )
 
 
 def _musteri_icin_ayda_baska_fatura(musteri_id, y, m, exclude_fatura_id=None):
@@ -7738,6 +7958,55 @@ def _fatura_ay_icin_mukerrer_engel_var_mi(dup_row):
     return _fatura_gib_imzalanmis_sayilir(dup_row)
 
 
+def _fatura_mukerrer_ay_cakismalari(musteri_id, donemler, exclude_fatura_id=None):
+    """GİB'de imzalı aynı-ay faturalarını yapılandırılmış soft-confirm listesine çevirir."""
+    out = []
+    for yy, mm in sorted(donemler or set()):
+        dup = _musteri_icin_ayda_baska_fatura(
+            int(musteri_id),
+            int(yy),
+            int(mm),
+            exclude_fatura_id=exclude_fatura_id,
+        )
+        if not (dup and _fatura_ay_icin_mukerrer_engel_var_mi(dup)):
+            continue
+        out.append({
+            "yil": int(yy),
+            "ay": int(mm),
+            "ay_iso": date(int(yy), int(mm), 1).isoformat(),
+            "fatura_no": dup.get("fatura_no"),
+            "fatura_id": dup.get("id"),
+        })
+    return out
+
+
+def _fatura_mukerrer_onay_response(cakismalar, gib_taslak=False):
+    """Her iki backend kapısı için aynı kod/alanlarla 409 soft-confirm yanıtı."""
+    detaylar = []
+    for c in cakismalar or []:
+        ref = c.get("fatura_no") or (
+            ("#" + str(c.get("fatura_id")))
+            if c.get("fatura_id") is not None
+            else "mevcut fatura"
+        )
+        detaylar.append(
+            f"{int(c.get('ay') or 0):02d}.{int(c.get('yil') or 0)} ({ref})"
+        )
+    hedef = "GİB'e gönderilsin" if gib_taslak else "fatura oluşturulsun"
+    mesaj = (
+        "Bu müşteri için seçilen dönemlerde GİB'de imzalanmış fatura var: "
+        + ", ".join(detaylar)
+        + f". Yine de {hedef} mi?"
+    )
+    return jsonify({
+        "ok": False,
+        "kod": "mukerrer_ay_onay_gerekli",
+        "onay_gerekli": True,
+        "mesaj": mesaj,
+        "cakismalar": cakismalar or [],
+    }), 409
+
+
 @bp.route("/api/secilen-aylar-fatura-kontrol", methods=["POST"])
 @faturalar_gerekli
 def api_secilen_aylar_fatura_kontrol():
@@ -7803,8 +8072,17 @@ def fatura_ekle():
     try:
         ensure_faturalar_amount_columns()
         data = request.get_json() or {}
+        mukerrer_ay_onay = _fatura_mukerrer_ay_onay_true(
+            data.get("mukerrer_ay_onay")
+        )
         erp_taslak_kayit = str(data.get("erp_taslak") or "").strip().lower() in ("1", "true", "yes", "on")
         satirlar = data.get("satirlar") or []
+        try:
+            acik_donem_tutar_map = _fatura_mukerrer_acik_donem_tutar_map(
+                data.get("fatura_donem_tutarlari")
+            )
+        except ValueError as e_map:
+            return jsonify({"ok": False, "mesaj": str(e_map)}), 422
         irsaliye_modu = str(data.get("irsaliye_modu") or "").lower() in ("1", "true", "yes")
         ara_toplam = float(data.get("ara_toplam") or 0)
         toplam_iskonto = float(data.get("toplam_iskonto") or 0)
@@ -7912,30 +8190,104 @@ def fatura_ekle():
             except Exception:
                 pass
 
+        donemler = set()
+        mukerrer_cakismalar = []
+        yeni_mukerrer_tutar_by_iso = {}
+        mevcut_mukerrer_tutar_map = _fatura_mukerrer_marker_tutar_map(
+            (mevcut_fatura or {}).get("notlar")
+        )
         if musteri_id:
             try:
                 mid = int(musteri_id)
-                donemler = _fatura_kira_donemleri_topla(satirlar, fatura_tarihi, data.get("notlar"))
+                donemler, donem_guvenilir = _fatura_kira_donemleri_topla(
+                    satirlar,
+                    fatura_tarihi,
+                    data.get("notlar"),
+                    guvenilirlik_dondur=True,
+                )
+                if not donem_guvenilir:
+                    for iso_existing in mevcut_mukerrer_tutar_map:
+                        d_existing = datetime.strptime(
+                            iso_existing,
+                            "%Y-%m-%d",
+                        ).date()
+                        donemler.add((d_existing.year, d_existing.month))
+                    if mevcut_mukerrer_tutar_map:
+                        donem_guvenilir = True
+                for iso_exp in acik_donem_tutar_map:
+                    d_exp = datetime.strptime(iso_exp, "%Y-%m-%d").date()
+                    donemler.add((d_exp.year, d_exp.month))
+                if acik_donem_tutar_map:
+                    donem_guvenilir = True
                 if donemler:
-                    for yy, mm in sorted(donemler):
-                        dup = _musteri_icin_ayda_baska_fatura(mid, yy, mm, exclude_fatura_id=edit_fatura_id)
-                        if dup and _fatura_ay_icin_mukerrer_engel_var_mi(dup):
-                            fn = dup.get("fatura_no") or ""
-                            fid = dup.get("id")
+                    mukerrer_cakismalar = _fatura_mukerrer_ay_cakismalari(
+                        mid,
+                        donemler,
+                        exclude_fatura_id=edit_fatura_id,
+                    )
+                    onaysiz_cakismalar = [
+                        c
+                        for c in mukerrer_cakismalar
+                        if c.get("ay_iso") not in mevcut_mukerrer_tutar_map
+                    ]
+                    if onaysiz_cakismalar and not mukerrer_ay_onay:
+                        return _fatura_mukerrer_onay_response(onaysiz_cakismalar)
+                    if onaysiz_cakismalar:
+                        try:
+                            tum_donem_tutar_map = _fatura_mukerrer_donem_tutar_map(
+                                satirlar,
+                                donemler,
+                                toplam,
+                                acik_tutar_map=acik_donem_tutar_map,
+                                donem_guvenilir=donem_guvenilir,
+                            )
+                        except ValueError as e_tutar:
                             return jsonify({
                                 "ok": False,
+                                "kod": "mukerrer_ay_tutar_dagilimi_gecersiz",
+                                "mesaj": str(e_tutar),
+                            }), 422
+                        yeni_mukerrer_tutar_by_iso = {
+                            c["ay_iso"]: tum_donem_tutar_map[c["ay_iso"]]
+                            for c in onaysiz_cakismalar
+                            if c["ay_iso"] in tum_donem_tutar_map
+                        }
+                        if len(yeni_mukerrer_tutar_by_iso) != len(
+                            onaysiz_cakismalar
+                        ):
+                            return jsonify({
+                                "ok": False,
+                                "kod": "mukerrer_ay_tutar_dagilimi_gecersiz",
                                 "mesaj": (
-                                    f"Bu müşteri için {mm:02d}.{yy} döneminde GİB'de imzalanmış fatura var "
-                                    f"({fn or ('#' + str(fid))}). "
-                                    "Aynı ay için ikinci kesin fatura oluşturulamaz; yalnızca ERP kaydı veya "
-                                    "GİB taslağı varsa aynı ay tekrar açılabilir."
+                                    "Onaylanan bütün mükerrer aylar için "
+                                    "tutar çözülemedi."
                                 ),
-                            }), 409
+                            }), 422
             except Exception as ex_dup:
                 logging.getLogger(__name__).exception("fatura mükerrer ay kontrolü: %s", ex_dup)
+                return jsonify({
+                    "ok": False,
+                    "mesaj": (
+                        "Mükerrer ay kontrolü tamamlanamadı; "
+                        "fatura kaydedilmedi."
+                    ),
+                }), 500
 
         sevk_adresi_kayit = (data.get("sevk_adresi") or "").strip() or None
-        notlar_kayit = _fatura_notlara_erp_taslak_etiketi_uygula(data.get("notlar"), aktif=erp_taslak_kayit)
+        aktif_isos = {
+            date(int(y), int(m), 1).isoformat()
+            for y, m in donemler
+        }
+        notlar_normal = _fatura_notlara_erp_taslak_etiketi_uygula(
+            _fatura_mukerrer_markerlari_temizle(data.get("notlar")),
+            aktif=erp_taslak_kayit,
+        )
+        notlar_kayit = _fatura_mukerrer_notlari_kanoniklestir(
+            notlar_normal,
+            (mevcut_fatura or {}).get("notlar"),
+            aktif_isos,
+            yeni_mukerrer_tutar_by_iso,
+        )
         if edit_fatura_id:
             execute(
                 """
@@ -8038,7 +8390,20 @@ def fatura_ekle():
         }
 
         mesaj = "Fatura güncellendi!" if edit_fatura_id else "Fatura eklendi!"
-        return jsonify({"ok": True, "mesaj": mesaj, "fatura_id": fatura_id, "earsiv": earsiv_payload})
+        return jsonify({
+            "ok": True,
+            "mesaj": mesaj,
+            "fatura_id": fatura_id,
+            "earsiv": earsiv_payload,
+            "mukerrer_ay_onayli": bool(
+                (set(mevcut_mukerrer_tutar_map) | set(yeni_mukerrer_tutar_by_iso))
+                & aktif_isos
+            ),
+            "mukerrer_aylar": sorted(
+                (set(mevcut_mukerrer_tutar_map) | set(yeni_mukerrer_tutar_by_iso))
+                & aktif_isos
+            ),
+        })
     except Exception as e:
         return jsonify({"ok": False, "mesaj": str(e)}), 500
 
@@ -9812,7 +10177,11 @@ def api_gib_taslak():
             data = {
                 "fatura_id": request.args.get("fatura_id"),
                 "beklenen_musteri_id": request.args.get("beklenen_musteri_id"),
+                "mukerrer_ay_onay": request.args.get("mukerrer_ay_onay"),
             }
+        mukerrer_ay_onay = _fatura_mukerrer_ay_onay_true(
+            data.get("mukerrer_ay_onay")
+        )
         fatura_id = data.get("fatura_id") or request.values.get("fatura_id")
         if not fatura_id:
             return jsonify({"ok": False, "mesaj": "fatura_id gerekli."}), 400
@@ -9820,7 +10189,12 @@ def api_gib_taslak():
         beklenen_mid = data.get("beklenen_musteri_id") or request.values.get("beklenen_musteri_id")
         _gib_http_crumb_route(f"api_gib_taslak fatura_id={fatura_id} beklenen_musteri_id={beklenen_mid!r}")
         f_row = fetch_one(
-            "SELECT musteri_id, fatura_tarihi, satirlar_json, notlar FROM faturalar WHERE id = %s",
+            """
+            SELECT musteri_id, fatura_tarihi, satirlar_json, notlar,
+                   COALESCE(toplam, tutar, 0) AS toplam
+            FROM faturalar
+            WHERE id = %s
+            """,
             (fatura_id,),
         )
         if not f_row:
@@ -9847,26 +10221,92 @@ def api_gib_taslak():
             satirlar_db = []
         ft = f_row.get("fatura_tarihi")
         ft_iso = ft.strftime("%Y-%m-%d") if hasattr(ft, "strftime") else str(ft)[:10]
-        donemler_gib = _fatura_kira_donemleri_topla(satirlar_db, ft_iso, f_row.get("notlar") or "")
+        donemler_gib, donem_guvenilir_gib = _fatura_kira_donemleri_topla(
+            satirlar_db,
+            ft_iso,
+            f_row.get("notlar") or "",
+            guvenilirlik_dondur=True,
+        )
+        mevcut_mukerrer_tutar_map = _fatura_mukerrer_marker_tutar_map(
+            f_row.get("notlar")
+        )
+        for iso_m in mevcut_mukerrer_tutar_map:
+            d_m = datetime.strptime(iso_m, "%Y-%m-%d").date()
+            donemler_gib.add((d_m.year, d_m.month))
+        if mevcut_mukerrer_tutar_map:
+            donem_guvenilir_gib = True
         mid_gib = f_row.get("musteri_id")
         if donemler_gib and mid_gib:
             try:
                 mid_i = int(mid_gib)
-                for yy, mm in sorted(donemler_gib):
-                    dup = _musteri_icin_ayda_baska_fatura(mid_i, yy, mm, exclude_fatura_id=fatura_id)
-                    if dup and _fatura_gib_imzalanmis_sayilir(dup):
-                        fn = dup.get("fatura_no") or ""
-                        fid = dup.get("id")
+                cakismalar_gib = _fatura_mukerrer_ay_cakismalari(
+                    mid_i,
+                    donemler_gib,
+                    exclude_fatura_id=fatura_id,
+                )
+                marker_eksik = [
+                    c
+                    for c in cakismalar_gib
+                    if c.get("ay_iso") not in mevcut_mukerrer_tutar_map
+                ]
+                if marker_eksik and not mukerrer_ay_onay:
+                    return _fatura_mukerrer_onay_response(
+                        marker_eksik,
+                        gib_taslak=True,
+                    )
+                if marker_eksik:
+                    try:
+                        tum_tutar_gib = _fatura_mukerrer_donem_tutar_map(
+                            satirlar_db,
+                            donemler_gib,
+                            f_row.get("toplam"),
+                            acik_tutar_map=None,
+                            donem_guvenilir=donem_guvenilir_gib,
+                        )
+                    except ValueError as e_gib_tutar:
                         return jsonify({
                             "ok": False,
+                            "kod": "mukerrer_ay_tutar_dagilimi_gecersiz",
+                            "mesaj": str(e_gib_tutar),
+                        }), 422
+                    yeni_gib_tutar_map = {
+                        c["ay_iso"]: tum_tutar_gib[c["ay_iso"]]
+                        for c in marker_eksik
+                        if c["ay_iso"] in tum_tutar_gib
+                    }
+                    if len(yeni_gib_tutar_map) != len(marker_eksik):
+                        return jsonify({
+                            "ok": False,
+                            "kod": "mukerrer_ay_tutar_dagilimi_gecersiz",
                             "mesaj": (
-                                f"Bu müşteri için {mm:02d}.{yy} döneminde GİB'de imzalanmış başka fatura var "
-                                f"({fn or ('#' + str(fid))}). Aynı ay için ikinci e-Arşiv açılamaz. "
-                                "Gerekirse mali müşavir ile iptal sürecini görün."
+                                "GİB'e gönderilecek bütün mükerrer aylar "
+                                "için tutar çözülemedi."
                             ),
-                        }), 409
+                        }), 422
+                    aktif_gib_isos = {
+                        date(int(y), int(m), 1).isoformat()
+                        for y, m in donemler_gib
+                    }
+                    notlar_gib = _fatura_mukerrer_notlari_kanoniklestir(
+                        f_row.get("notlar"),
+                        f_row.get("notlar"),
+                        aktif_gib_isos,
+                        yeni_gib_tutar_map,
+                    )
+                    execute(
+                        "UPDATE faturalar SET notlar = %s WHERE id = %s",
+                        (notlar_gib, fatura_id),
+                    )
+                    f_row["notlar"] = notlar_gib
             except Exception as ex_gib_dup:
                 logging.getLogger(__name__).exception("gib-taslak mükerrer kontrol: %s", ex_gib_dup)
+                return jsonify({
+                    "ok": False,
+                    "mesaj": (
+                        "GİB mükerrer ay kontrolü tamamlanamadı; "
+                        "taslak gönderilmedi."
+                    ),
+                }), 500
 
         fatura_data = build_fatura_data_from_db(fatura_id, fetch_one)
         payload_debug = _payload_debug_text(fatura_data)
