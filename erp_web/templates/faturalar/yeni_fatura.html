@@ -917,10 +917,25 @@
                 const birim = ['Adet', 'Gün', 'Ay', 'KG'].indexOf(r.birim) >= 0 ? r.birim : 'Ay';
                 out.push({ ad, miktar: mik, birim, birim_fiyat: bf, iskonto_orani: 0, iskonto_tutar: null, kdv_orani: kdv });
             }
-            return out.length ? out : null;
+            if (!out.length) return null;
+            const donemTutarlari = {};
+            if (o.donem_tutarlari && typeof o.donem_tutarlari === 'object' && !Array.isArray(o.donem_tutarlari)) {
+                Object.keys(o.donem_tutarlari).forEach(function (iso) {
+                    if (!/^\d{4}-\d{2}-01$/.test(iso)) return;
+                    const tutar = Math.round(parseNumber(o.donem_tutarlari[iso]) * 100) / 100;
+                    if (!isFinite(tutar) || tutar <= 0) return;
+                    donemTutarlari[iso] = tutar;
+                });
+            }
+            return {
+                rows: out,
+                donemTutarlari: Object.keys(donemTutarlari).length ? donemTutarlari : null
+            };
         }
 
-        const prefillRows = consumeSozlesmePrefillRows();
+        const sozlesmePrefill = consumeSozlesmePrefillRows();
+        const prefillRows = sozlesmePrefill && sozlesmePrefill.rows;
+        const faturaDonemTutarlari = sozlesmePrefill && sozlesmePrefill.donemTutarlari;
         if (EDIT_FATURA) {
             if (EDIT_FATURA.fatura_no) document.getElementById('fatura-no').value = EDIT_FATURA.fatura_no;
             if (EDIT_FATURA.fatura_tarihi) document.getElementById('fatura-tarihi').value = EDIT_FATURA.fatura_tarihi;
@@ -999,8 +1014,22 @@
             throw lastErr || new Error('Failed to fetch');
         }
 
+        let kaydetInFlight = false;
+        function setKaydetBusy(busy) {
+            [
+                'btn-kaydet',
+                'btn-kaydet-taslak',
+                'btn-kaydet-inline',
+                'btn-kaydet-inline-taslak'
+            ].forEach(function (id) {
+                const btn = document.getElementById(id);
+                if (btn) btn.disabled = !!busy;
+            });
+        }
+
         async function kaydet(opts) {
             opts = opts || {};
+            if (kaydetInFlight) return;
             var redirectOnSuccess = !!opts.redirectOnSuccess;
             var mevcutGibDurum = (EDIT_FATURA && EDIT_FATURA.gib_durum) ? String(EDIT_FATURA.gib_durum).toLowerCase() : '';
             var otomatikErpTaslak = (mevcutGibDurum !== 'imzali');
@@ -1043,21 +1072,45 @@
                 toplam: genelToplam,
                 irsaliye_modu: !!(IRSALIYE_MODU === true || IRSALIYE_MODU === 'true')
             };
+            if (faturaDonemTutarlari && Object.keys(faturaDonemTutarlari).length) {
+                payload.fatura_donem_tutarlari = Object.assign({}, faturaDonemTutarlari);
+            }
+            var mukerrerRetry = !!opts.mukerrerRetry;
+            if (opts.mukerrerAyOnay === true) payload.mukerrer_ay_onay = true;
 
+            kaydetInFlight = true;
+            setKaydetBusy(true);
             try {
-                const res = await fetchWithRetry(API_FATURA_EKLE, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    credentials: 'same-origin',
-                    body: JSON.stringify(payload)
-                }, 1);
-                const raw = await res.text();
+                var res;
+                var raw;
                 let j;
-                try {
-                    j = raw ? JSON.parse(raw) : {};
-                } catch (parseErr) {
-                    alert('Sunucu yanıtı JSON değil (' + res.status + '). Oturum süresi dolmuş olabilir veya sunucu hata sayfası döndü. Sayfayı yenileyip tekrar deneyin.\n\n' + (raw || '').slice(0, 280));
-                    return;
+                for (var istekNo = 0; istekNo < 2; istekNo++) {
+                    res = await fetchWithRetry(API_FATURA_EKLE, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'same-origin',
+                        body: JSON.stringify(payload)
+                    }, 0);
+                    raw = await res.text();
+                    try {
+                        j = raw ? JSON.parse(raw) : {};
+                    } catch (parseErr) {
+                        alert('Sunucu yanıtı JSON değil (' + res.status + '). Oturum süresi dolmuş olabilir veya sunucu hata sayfası döndü. Sayfayı yenileyip tekrar deneyin.\n\n' + (raw || '').slice(0, 280));
+                        return;
+                    }
+                    if (j && j.kod === 'mukerrer_ay_onay_gerekli') {
+                        if (mukerrerRetry) {
+                            alert(j.mesaj || 'Mükerrer ay onayı doğrulanamadı; yeni bir istek gönderilmedi.');
+                            return;
+                        }
+                        if (!window.confirm(j.mesaj || 'Bu ayda GİB’de imzalanmış başka bir fatura var. Yine de devam edilsin mi?')) {
+                            return;
+                        }
+                        mukerrerRetry = true;
+                        payload.mukerrer_ay_onay = true;
+                        continue;
+                    }
+                    break;
                 }
                 if (j.ok && j.fatura_id) {
                     if (redirectOnSuccess) {
@@ -1089,6 +1142,9 @@
                 } else {
                     alert('Fatura kaydedilirken hata: ' + m);
                 }
+            } finally {
+                kaydetInFlight = false;
+                setKaydetBusy(false);
             }
         }
 
@@ -1229,6 +1285,8 @@
                     if (xhr.status < 200 || xhr.status >= 300) {
                         var err = new Error((j && j.mesaj) || ('HTTP ' + xhr.status));
                         err.httpStatus = xhr.status;
+                        err.kod = (j && j.kod) ? String(j.kod) : '';
+                        err.response = j;
                         err.detay = (j && j.detay) ? String(j.detay) : '';
                         err.dispatch_ham = (j && j.dispatch_ham) ? String(j.dispatch_ham) : '';
                         reject(err);
@@ -1362,6 +1420,7 @@
             var smsSendBtn = document.getElementById('yeni-gib-sms-send-btn');
             var smsOnayBtn = document.getElementById('yeni-gib-sms-onay-btn');
             var gibOnizlemeBtn = document.getElementById('yeni-gib-onizleme-btn');
+            var yeniGibTaslakInFlight = false;
 
             function setStatus(msg) {
                 var el = document.getElementById('yeni-gib-status');
@@ -1455,6 +1514,7 @@
             }
 
             document.getElementById('yeni-gib-taslak-btn').addEventListener('click', async function () {
+                if (yeniGibTaslakInFlight) return;
                 var idEl = document.getElementById('yeni-gib-fatura-id');
                 yeniGibErpIdNormalize(idEl, false);
                 var faturaId = parseInt(yeniGibErpIdDigits((idEl || {}).value || '') || '0', 10);
@@ -1463,6 +1523,7 @@
                     return;
                 }
                 var btn = document.getElementById('yeni-gib-taslak-btn');
+                yeniGibTaslakInFlight = true;
                 yeniGibSetBusy(btn, true, 'Gönderiliyor...');
                 var startedAt = Date.now();
                 setStatus('Adım 1/3: Talep sunucuya gönderiliyor...');
@@ -1478,65 +1539,88 @@
                     yeniGibSetBusy(btn, false);
                 }, 330000);
                 var midForm = parseInt(String((document.getElementById('musteri-id') || {}).value || '0'), 10);
-                var taslakBody = { fatura_id: faturaId };
-                if (midForm > 0) taslakBody.beklenen_musteri_id = midForm;
-                /* Bazı tarayıcı/proxy kombinasyonlarında JSON POST HTTP 0 verebildiği için GET fallback'i ana akış yapıldı. */
-                var taslakUrl = API_GIB_TASLAK
-                    + '?fatura_id=' + encodeURIComponent(String(faturaId))
-                    + (midForm > 0 ? ('&beklenen_musteri_id=' + encodeURIComponent(String(midForm))) : '');
-                fetchJsonWithRetryYeniGib(taslakUrl, {
-                    method: 'GET'
-                }, [290000])
-                    .then(function (j) {
-                        if (hardGuardHit) return;
-                        // Her denemede önce SMS akışını kapat; sadece doğrulanan taslakta aç.
-                        setSmsFlowEnabled(false);
-                        // Backend doğrulama hatası dönse bile uuid/oid geldiyse alanlara yaz.
-                        if (j && j.uuid) document.getElementById('yeni-gib-uuid').value = j.uuid || '';
-                        if (j && j.oid) document.getElementById('yeni-gib-oid').value = j.oid || '';
-                        if (!j || !j.ok) {
-                            var baseMsg = (j && j.mesaj) || 'Taslak gönderilemedi';
-                            if (j && j.taslak_raw) baseMsg += ' | Ham yanıt: ' + j.taslak_raw;
-                            if (j && j.payload_debug) baseMsg += ' | Payload: ' + j.payload_debug;
-                            if (j && j.gonderilen_debug) baseMsg += ' | Gonderilen: ' + j.gonderilen_debug;
-                            throw new Error(baseMsg);
+                function taslakIstek(mukerrerOnay) {
+                    /* GET fallback ana akıştır; onay yalnız kullanıcı confirm verdikten sonra query'ye eklenir. */
+                    var taslakUrl = API_GIB_TASLAK
+                        + '?fatura_id=' + encodeURIComponent(String(faturaId))
+                        + (midForm > 0 ? ('&beklenen_musteri_id=' + encodeURIComponent(String(midForm))) : '')
+                        + (mukerrerOnay ? '&mukerrer_ay_onay=true' : '');
+                    return fetchJsonWithRetryYeniGib(taslakUrl, { method: 'GET' }, [290000]);
+                }
+                try {
+                    var j;
+                    try {
+                        j = await taslakIstek(false);
+                    } catch (ilkErr) {
+                        if (
+                            ilkErr
+                            && Number(ilkErr.httpStatus || 0) === 409
+                            && ilkErr.kod === 'mukerrer_ay_onay_gerekli'
+                        ) {
+                            if (!window.confirm(ilkErr.message || 'Bu ayda GİB’de imzalanmış başka bir fatura var. Yine de GİB taslağı oluşturulsun mu?')) {
+                                setStatus('GİB taslak gönderimi kullanıcı tarafından iptal edildi.');
+                                return;
+                            }
+                            setStatus('Mükerrer ay onaylandı; GİB taslağı yeniden gönderiliyor...');
+                            j = await taslakIstek(true);
+                        } else {
+                            throw ilkErr;
                         }
-                        document.getElementById('yeni-gib-uuid').value = j.uuid || '';
-                        document.getElementById('yeni-gib-oid').value = j.oid || '';
-                        setSmsFlowEnabled(true);
-                        var belgeOut = document.getElementById('yeni-gib-belge-no');
-                        if (belgeOut) {
-                            var gn = String(j.gib_fatura_no || '').trim();
-                            belgeOut.value = gn || belgeOut.value;
-                        }
-                        if (!((j.gib_fatura_no || '').trim())) yeniGibBelgeOzetYukle();
-                        var elapsed = Math.floor((Date.now() - startedAt) / 1000);
-                        var okMsg = (j.mesaj || 'Taslak oluşturuldu.') + ' UUID: ' + (j.uuid || '-');
-                        if (j && j.taslak_raw) okMsg += ' | Ham yanıt: ' + j.taslak_raw;
-                        okMsg += ' (' + elapsed + ' sn)';
-                        setStatus(okMsg);
-                    })
-                    .catch(function (err) {
-                        if (hardGuardHit) return;
-                        setSmsFlowEnabled(false);
-                        if (err && Number(err.httpStatus || 0) === 504) {
-                            setStatus('GİB servisinden zamanında yanıt alınamadı (504). Birkaç dakika sonra tekrar deneyin.');
-                            return;
-                        }
-                        if (String((err && err.message) || '').indexOf('HTTP 0') >= 0) {
-                            setStatus('Tarayıcı XHR kanalı koptu (HTTP 0). Sayfa yönlendirilmedi; tekrar deneyin. Devam ederse sayfayı yenileyip yeniden giriş yapın.');
-                            return;
-                        }
-                        var msg = (err && err.name === 'AbortError')
-                            ? 'İstek zaman aşımına uğradı. GİB yoğun olabilir; bir süre sonra tekrar deneyin veya ağ/VPN’i kontrol edin.'
-                            : ('GİB taslak hatası: ' + ((err && err.message) || err));
-                        setStatus(msg);
-                    })
-                    .finally(function () {
-                        clearInterval(progressTimer);
-                        clearTimeout(hardGuard);
-                        if (!hardGuardHit) yeniGibSetBusy(btn, false);
-                    });
+                    }
+                    if (hardGuardHit) return;
+                    setSmsFlowEnabled(false);
+                    if (j && j.uuid) document.getElementById('yeni-gib-uuid').value = j.uuid || '';
+                    if (j && j.oid) document.getElementById('yeni-gib-oid').value = j.oid || '';
+                    if (!j || !j.ok) {
+                        var baseMsg = (j && j.mesaj) || 'Taslak gönderilemedi';
+                        if (j && j.taslak_raw) baseMsg += ' | Ham yanıt: ' + j.taslak_raw;
+                        if (j && j.payload_debug) baseMsg += ' | Payload: ' + j.payload_debug;
+                        if (j && j.gonderilen_debug) baseMsg += ' | Gonderilen: ' + j.gonderilen_debug;
+                        throw new Error(baseMsg);
+                    }
+                    document.getElementById('yeni-gib-uuid').value = j.uuid || '';
+                    document.getElementById('yeni-gib-oid').value = j.oid || '';
+                    setSmsFlowEnabled(true);
+                    var belgeOut = document.getElementById('yeni-gib-belge-no');
+                    if (belgeOut) {
+                        var gn = String(j.gib_fatura_no || '').trim();
+                        belgeOut.value = gn || belgeOut.value;
+                    }
+                    if (!((j.gib_fatura_no || '').trim())) yeniGibBelgeOzetYukle();
+                    var elapsed = Math.floor((Date.now() - startedAt) / 1000);
+                    var okMsg = (j.mesaj || 'Taslak oluşturuldu.') + ' UUID: ' + (j.uuid || '-');
+                    if (j && j.taslak_raw) okMsg += ' | Ham yanıt: ' + j.taslak_raw;
+                    okMsg += ' (' + elapsed + ' sn)';
+                    setStatus(okMsg);
+                } catch (err) {
+                    if (hardGuardHit) return;
+                    setSmsFlowEnabled(false);
+                    if (
+                        err
+                        && Number(err.httpStatus || 0) === 409
+                        && err.kod === 'mukerrer_ay_onay_gerekli'
+                    ) {
+                        setStatus('Mükerrer ay onayı ikinci istekte de kabul edilmedi; üçüncü istek gönderilmedi. ' + (err.message || ''));
+                        return;
+                    }
+                    if (err && Number(err.httpStatus || 0) === 504) {
+                        setStatus('GİB servisinden zamanında yanıt alınamadı (504). Birkaç dakika sonra tekrar deneyin.');
+                        return;
+                    }
+                    if (String((err && err.message) || '').indexOf('HTTP 0') >= 0) {
+                        setStatus('Tarayıcı XHR kanalı koptu (HTTP 0). Sayfa yönlendirilmedi; tekrar deneyin. Devam ederse sayfayı yenileyip yeniden giriş yapın.');
+                        return;
+                    }
+                    var msg = (err && err.name === 'AbortError')
+                        ? 'İstek zaman aşımına uğradı. GİB yoğun olabilir; bir süre sonra tekrar deneyin veya ağ/VPN’i kontrol edin.'
+                        : ('GİB taslak hatası: ' + ((err && err.message) || err));
+                    setStatus(msg);
+                } finally {
+                    clearInterval(progressTimer);
+                    clearTimeout(hardGuard);
+                    yeniGibTaslakInFlight = false;
+                    if (!hardGuardHit) yeniGibSetBusy(btn, false);
+                }
             });
 
             document.getElementById('yeni-gib-sms-send-btn').addEventListener('click', function () {

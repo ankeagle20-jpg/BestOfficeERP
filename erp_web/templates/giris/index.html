@@ -17266,7 +17266,7 @@ async function sozlesmeYeniFaturaAc(zorunluGridSecimi) {
         window.open('/faturalar/yeni?' + params.toString(), '_blank');
         return;
     }
-    /* Açılmadan önce: seçilen aylar bu müşteri için zaten faturalı mı? */
+    /* Açılmadan önce bilgi ver; kesin onay, son fatura içeriği görüldükten sonra Kaydet aşamasındadır. */
     try {
         var aylarKontrol = [];
         var seenK = {};
@@ -17303,11 +17303,10 @@ async function sozlesmeYeniFaturaAc(zorunluGridSecimi) {
                         : ('Ay ' + c.ay);
                     msg += '\n• ' + ayAd + ' ' + c.yil + ' → ' + (c.fatura_no || ('#' + c.fatura_id));
                 }
-                msg += '\n\nMükerrer fatura oluşturulamaz. Önce mevcut faturayı kontrol edin.';
+                msg += '\n\nFatura ekranı açılacak. Son tutar ve satırları kontrol ettikten sonra Kaydet sırasında devam onayı istenecektir.';
                 msg += '\n\nNot: Bu uyarı yalnızca o ay için GİB’de kesinleşmiş fatura (notlarda «GİB İMZALANDI» veya GİB durum: imzalı) varken çıkar. ';
                 msg += 'Sadece ERP’de INV… ile kayıtlı veya GİB’e henüz imzalanmamış taslak varsa aynı ay için yeni fatura açabilirsiniz.';
                 alert(msg);
-                return;
             }
         }
     } catch (eChk) {
@@ -17345,6 +17344,43 @@ async function sozlesmeYeniFaturaAc(zorunluGridSecimi) {
             kdv_orani: kdvOranForm,
             birim_fiyat: Math.round((brutKdvDahil / (1 + kdvOranForm / 100)) * 100) / 100
         };
+    }
+
+    function sozlesmeFaturaDonemIso(r) {
+        var yy = parseInt(r && r.yil, 10);
+        var mm = parseInt(r && r.ay, 10);
+        if (isNaN(yy) || yy < 1990 || yy > 2100 || isNaN(mm) || mm < 1 || mm > 12) return '';
+        return String(yy) + '-' + String(mm).padStart(2, '0') + '-01';
+    }
+
+    function sozlesmeFaturaDonemTutarlariHazirla(rows, hedefToplam) {
+        var out = {};
+        var siraliIsolar = [];
+        for (var di = 0; di < rows.length; di++) {
+            var dr = rows[di];
+            var iso = sozlesmeFaturaDonemIso(dr);
+            var brut = parseFloat(dr && dr.tutar_kdv_dahil);
+            if (!iso || isNaN(brut) || brut <= 0) continue;
+            var net = sozlesmeFaturaNetSatir(Math.round(brut * 100) / 100);
+            var donemBrut = Math.round(
+                Number(net.birim_fiyat || 0) * (1 + Number(net.kdv_orani || 0) / 100) * 100
+            ) / 100;
+            if (!isFinite(donemBrut) || donemBrut <= 0) continue;
+            if (!Object.prototype.hasOwnProperty.call(out, iso)) siraliIsolar.push(iso);
+            out[iso] = Math.round((Number(out[iso] || 0) + donemBrut) * 100) / 100;
+        }
+        if (!siraliIsolar.length) return {};
+        var hedef = Math.round(Number(hedefToplam || 0) * 100) / 100;
+        var dagitilan = Math.round(siraliIsolar.reduce(function (sum, iso) {
+            return sum + Number(out[iso] || 0);
+        }, 0) * 100) / 100;
+        var fark = Math.round((hedef - dagitilan) * 100) / 100;
+        if (hedef > 0 && Math.abs(fark) > 0) {
+            var sonIso = siraliIsolar[siraliIsolar.length - 1];
+            var sonTutar = Math.round((Number(out[sonIso] || 0) + fark) * 100) / 100;
+            if (sonTutar > 0) out[sonIso] = sonTutar;
+        }
+        return out;
     }
 
     if (yillikTekSatir) {
@@ -17397,10 +17433,21 @@ async function sozlesmeYeniFaturaAc(zorunluGridSecimi) {
         alert('Seçili ayların tutarı okunamadı; lütfen gridi yenileyip tekrar seçin.');
         return;
     }
+    var prefillGenelToplam = Math.round(prefillRows.reduce(function (sum, pr) {
+        return sum + Number(pr.miktar || 0)
+            * Number(pr.birim_fiyat || 0)
+            * (1 + Number(pr.kdv_orani || 0) / 100);
+    }, 0) * 100) / 100;
+    var donemTutarlari = sozlesmeFaturaDonemTutarlariHazirla(satirlar, prefillGenelToplam);
     var prefillKey = 'bo_fp_' + Date.now() + '_' + Math.random().toString(36).slice(2, 14);
     try {
         if (typeof localStorage === 'undefined') throw new Error('no ls');
-        localStorage.setItem(prefillKey, JSON.stringify({ v: 1, rows: prefillRows, ts: Date.now() }));
+        localStorage.setItem(prefillKey, JSON.stringify({
+            v: 1,
+            rows: prefillRows,
+            ts: Date.now(),
+            donem_tutarlari: donemTutarlari
+        }));
     } catch (eLs) {
         alert('Tarayıcı yerel depolama kullanılamadığı için çoklu satır aktarılamıyor. Özel pencere / gizli mod kapalı mı deneyin.');
         return;
