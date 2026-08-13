@@ -8738,6 +8738,140 @@ def _ekstre_gelen_fatura_rows_for_period(musteri_id, bas, bit):
     return out
 
 
+def _ekstre_mukerrer_fatura_gib_imzali_mi(notlar):
+    """Yalnız açık GİB imza izi taşıyan, ERP taslağı olmayan faturaları kabul eder."""
+    text = str(notlar or "")
+    norm = text.replace("İ", "I").replace("ı", "i").replace("�", "I")
+    if re.search(r"ERP\s+durum\s*:\s*taslak", norm, flags=re.IGNORECASE):
+        return False
+    if "GİB İMZALANDI" in text:
+        return True
+    if re.search(r"G.?B\s+IMZALANDI", norm, flags=re.IGNORECASE):
+        return True
+    return bool(
+        re.search(
+            r"G.?B\s+durum\s*:\s*imzal[ıi]?\b",
+            norm,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _ekstre_mukerrer_onay_fatura_rows(musteri_id, bas, bit):
+    """Onaylı ve GİB imzalı mükerrer faturaların görünür satırları + tüm FIFO borç haritası."""
+    try:
+        mid = int(musteri_id)
+    except (TypeError, ValueError):
+        return [], {}
+    try:
+        bas_d = bas if isinstance(bas, date) else datetime.strptime(str(bas)[:10], "%Y-%m-%d").date()
+        bit_d = bit if isinstance(bit, date) else datetime.strptime(str(bit)[:10], "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        return [], {}
+    ensure_faturalar_amount_columns()
+    ensure_faturalar_yon_kolon()
+    fatura_rows = fetch_all(
+        """
+        SELECT id, fatura_no, notlar, created_at
+        FROM faturalar
+        WHERE musteri_id = %s
+          AND COALESCE(yon, 'giden') = 'giden'
+          AND COALESCE(notlar, '') LIKE %s
+        ORDER BY id
+        """,
+        (mid, "%|MUKERRER_AY_ONAY|%"),
+    ) or []
+    visible_rows = []
+    extra_by_iso = {}
+    seen = set()
+    bas_month = date(bas_d.year, bas_d.month, 1)
+    bit_month = date(bit_d.year, bit_d.month, 1)
+    logger = logging.getLogger(__name__)
+    for fr in fatura_rows:
+        try:
+            fid = int(fr.get("id") or 0)
+        except (TypeError, ValueError):
+            fid = 0
+        if fid <= 0:
+            continue
+        notlar = str(fr.get("notlar") or "")
+        if "|GIB_NO_TASINDI|" in notlar:
+            continue
+        if not _ekstre_mukerrer_fatura_gib_imzali_mi(notlar):
+            continue
+        onay_raw = re.findall(
+            r"\|MUKERRER_AY_ONAY\|([0-9]{4}-[0-9]{2}-[0-9]{2})\|",
+            notlar,
+        )
+        tutar_raw_by_iso = defaultdict(list)
+        for iso_raw, tutar_raw in re.findall(
+            r"\|MUKERRER_AY_TUTAR\|([0-9]{4}-[0-9]{2}-[0-9]{2})=([^|]+)\|",
+            notlar,
+        ):
+            try:
+                dd_t = datetime.strptime(iso_raw[:10], "%Y-%m-%d").date()
+                iso_t = date(dd_t.year, dd_t.month, 1).isoformat()
+            except ValueError:
+                continue
+            tutar_raw_by_iso[iso_t].append(tutar_raw)
+        for iso_raw in onay_raw:
+            try:
+                dd = datetime.strptime(iso_raw[:10], "%Y-%m-%d").date()
+                marker_month = date(dd.year, dd.month, 1)
+            except ValueError:
+                logger.warning(
+                    "Ekstre mükerrer marker tarihi geçersiz; satır atlandı fatura_id=%s iso=%r",
+                    fid,
+                    iso_raw,
+                )
+                continue
+            iso = marker_month.isoformat()
+            dedup_key = (fid, iso)
+            if dedup_key in seen:
+                continue
+            seen.add(dedup_key)
+            raw_values = tutar_raw_by_iso.get(iso) or []
+            if len(raw_values) != 1:
+                logger.warning(
+                    "Ekstre mükerrer tutar marker eksik/tekrarlı; satır atlandı fatura_id=%s iso=%s adet=%s",
+                    fid,
+                    iso,
+                    len(raw_values),
+                )
+                continue
+            try:
+                tutar = round(float(raw_values[0]), 2)
+            except (TypeError, ValueError):
+                tutar = 0.0
+            if not math.isfinite(tutar) or tutar <= 0:
+                logger.warning(
+                    "Ekstre mükerrer tutar marker geçersiz; satır atlandı fatura_id=%s iso=%s tutar=%r",
+                    fid,
+                    iso,
+                    raw_values[0],
+                )
+                continue
+            if marker_month > bit_month:
+                continue
+            extra_by_iso[iso] = round(float(extra_by_iso.get(iso) or 0) + tutar, 2)
+            if marker_month < bas_month:
+                continue
+            fno = str(fr.get("fatura_no") or "").strip()
+            visible_rows.append({
+                "tarih": iso,
+                "aciklama": "Onaylı mükerrer fatura — " + (fno or f"#{fid}"),
+                "belge_no": fno,
+                "tur": "Onaylı Mükerrer Fatura",
+                "borc": tutar,
+                "alacak": 0,
+                "bakiye": None,
+                "fatura_id": fid,
+                "mukerrer_ay_onayli": True,
+                "created_at": fr.get("created_at"),
+            })
+    return visible_rows, extra_by_iso
+
+
 def _ekstre_row_sort_key(x):
     """Tarih, aynı günde created_at (yoksa boş → ekleme sırası korunur)."""
     tarih = str(x.get("tarih") or "")[:10]
@@ -8784,6 +8918,9 @@ def _cari_ekstre_hareketler(
         cust_cs.get("calisma_sekli") or "sirali"
     ).strip().lower()
     is_cari_mod = calisma_sekli_val == "cari"
+    mukerrer_fatura_rows, mukerrer_extra_borc_by_iso = (
+        _ekstre_mukerrer_onay_fatura_rows(musteri_id, bas, bit)
+    )
 
     # Aylık grid ile aynı kaynak: customers + son KYC (ekstre öncesi yalnızca mk çekilmesi grid'i bozuyordu).
     kyc = _musteri_kyc_grup_for_aylik_grid(musteri_id)
@@ -9228,6 +9365,20 @@ def _cari_ekstre_hareketler(
             if m > 12:
                 m, y = 1, y + 1
 
+    # Onaylı mükerrer fatura sentetik Kira satırını değiştirmez; yalnız sıralı mod FIFO hedefini genişletir.
+    if not is_cari_mod:
+        for iso, extra_borc in mukerrer_extra_borc_by_iso.items():
+            try:
+                extra_v = round(float(extra_borc or 0), 2)
+            except (TypeError, ValueError):
+                extra_v = 0.0
+            if extra_v <= 0:
+                continue
+            full_borc_for_fifo[iso] = round(
+                float(full_borc_for_fifo.get(iso) or 0) + extra_v,
+                2,
+            )
+
     # 3) Tahsilat (alacak): varsayılan FIFO — ödeme en eski açık aydan başlayarak kapatır;
     #    AYLIK_PAY ile çok aya bölünmüş görünüm yerine tek kısmi ay + dolu aylar.
     _eslesme_sql = """COALESCE(
@@ -9402,8 +9553,25 @@ def _cari_ekstre_hareketler(
                 "bakiye": None,
             })
         rows.extend(kira_block)
-        for iso in sorted(borc_by_tarih.keys()):
-            hedef_grid = round(float(borc_by_tarih.get(iso) or full_borc_for_fifo.get(iso) or 0), 2)
+        tahsil_hedef_isos = set(borc_by_tarih.keys())
+        tahsil_hedef_isos.update(
+            iso
+            for iso in mukerrer_extra_borc_by_iso
+            if bas_month_iso <= iso <= bit.isoformat()
+        )
+        for iso in sorted(tahsil_hedef_isos):
+            extra_borc_iso = round(
+                float(mukerrer_extra_borc_by_iso.get(iso) or 0),
+                2,
+            )
+            hedef_grid = round(
+                float(
+                    full_borc_for_fifo.get(iso)
+                    or borc_by_tarih.get(iso)
+                    or 0
+                ),
+                2,
+            )
             fifo_amt = round(float(fifo_alloc_win.get(iso) or 0), 2)
             fifo_pay = fifo_amt > tol_f
             panel_pt = None
@@ -9412,7 +9580,7 @@ def _cari_ekstre_hareketler(
                     panel_pt = round(float(panel_tahsil_by_iso[iso].get("tahsil") or 0), 2)
                 except (TypeError, ValueError):
                     panel_pt = 0.0
-            if panel_pt is not None:
+            if panel_pt is not None and extra_borc_iso <= tol_f:
                 if panel_pt <= tol_f:
                     continue
                 db_tah_iso = 0.0
@@ -9423,7 +9591,20 @@ def _cari_ekstre_hareketler(
                         db_tah_iso = 0.0
                 if db_tah_iso <= tol_f and not (fifo_ids.get(iso) or []):
                     panel_pt = None
-            if panel_pt is not None:
+            if extra_borc_iso > tol_f:
+                # Panel yalnız normal kira tabanını bilir; ekstra fatura tahsilatını ezmesine izin verme.
+                panel_pt = None
+                alacak_iso = _ekstre_tahsil_alacak_hucre(
+                    int(musteri_id),
+                    iso,
+                    fifo_amt,
+                    hedef_grid,
+                    tahsil_map=ekstre_tahsil_map,
+                    grid_odenen=None,
+                    grid_kalan=None,
+                    batch_maps=ekstre_batch_maps,
+                )
+            elif panel_pt is not None:
                 alacak_iso = panel_pt
             elif fifo_pay and hedef_grid > tol_f:
                 if fifo_amt + tol_f >= hedef_grid - tol_f:
@@ -9529,6 +9710,19 @@ def _cari_ekstre_hareketler(
             tahsil_map=ekstre_tahsil_map,
             tol=0.01,
         )
+        # Legacy (=0) devir helper'ı grid tabanını tercih eder; yalnız marker'lı aylarda ezilen ekstra borcu geri ekle.
+        legacy_dev_extra = 0.0
+        for iso, extra_borc in mukerrer_extra_borc_by_iso.items():
+            if iso >= dev_cutoff_iso:
+                continue
+            try:
+                grid_base = round(float(grid_tutar_by_iso.get(iso) or 0), 2)
+                extra_v = round(float(extra_borc or 0), 2)
+            except (TypeError, ValueError):
+                continue
+            if grid_base > 0.01 and extra_v > 0.01:
+                legacy_dev_extra += extra_v
+        dev_borc_r = round(dev_borc_r + legacy_dev_extra, 2)
         dev_borc_r = round(dev_borc_r + _ekstre_dev_tediye_borc(musteri_id, bas), 2)
         if dev_borc_r > 0.01 or dev_alacak_r > 0.01:
             rows.append({
@@ -9665,6 +9859,7 @@ def _cari_ekstre_hareketler(
             item["tahsilat_ids"] = uniq_ids
             rows.append(item)
 
+    rows.extend(mukerrer_fatura_rows)
     rows.extend(_ekstre_tediye_rows_for_period(musteri_id, bas, bit))
     rows.extend(_ekstre_gelen_fatura_rows_for_period(musteri_id, bas, bit))
 
@@ -9897,6 +10092,22 @@ def _cari_ekstre_varsayilan_son_tam_ay():
 
 
 _cari_ekstre_api_cache: dict = {}
+
+
+def _cari_ekstre_cache_invalidate_musteri(musteri_id):
+    """Yalnız verilen müşterinin Cari Ekstre API cache anahtarlarını temizler."""
+    try:
+        mid = int(musteri_id)
+    except (TypeError, ValueError):
+        return 0
+    silinecek = [
+        key
+        for key in list(_cari_ekstre_api_cache.keys())
+        if isinstance(key, tuple) and key and key[0] == mid
+    ]
+    for key in silinecek:
+        _cari_ekstre_api_cache.pop(key, None)
+    return len(silinecek)
 
 
 def _cari_ekstre_build_payload_from_request():

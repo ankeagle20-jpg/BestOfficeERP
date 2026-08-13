@@ -10052,7 +10052,10 @@ def _fatura_gib_bilgilerini_yaz(fatura_id, ettn=None, gib_fatura_no=None, gib_as
         fid = int(fatura_id)
     except Exception:
         return {"ok": False, "fatura_no_cakisti": False}
-    row = fetch_one("SELECT notlar, ettn, fatura_no FROM faturalar WHERE id = %s", (fid,)) or {}
+    row = fetch_one(
+        "SELECT notlar, ettn, fatura_no, musteri_id FROM faturalar WHERE id = %s",
+        (fid,),
+    ) or {}
     yeni, ettn_val, gib_no_val = _fatura_gib_notlar_uret(
         row, ettn=ettn, gib_fatura_no=gib_fatura_no, gib_asama=gib_asama
     )
@@ -10084,6 +10087,17 @@ def _fatura_gib_bilgilerini_yaz(fatura_id, ettn=None, gib_fatura_no=None, gib_as
         "UPDATE faturalar SET notlar = %s, ettn = %s, fatura_no = %s WHERE id = %s",
         (yeni, ettn_val, fatura_no_yaz, fid),
     )
+    if gib_asama == "imzali" and row.get("musteri_id") is not None:
+        try:
+            from routes.giris_routes import _cari_ekstre_cache_invalidate_musteri
+
+            _cari_ekstre_cache_invalidate_musteri(row.get("musteri_id"))
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "GİB imza sonrası Cari Ekstre cache temizlenemedi fatura_id=%s musteri_id=%s",
+                fid,
+                row.get("musteri_id"),
+            )
     return {"ok": True, "fatura_no_cakisti": fatura_no_cakisti}
 
 
