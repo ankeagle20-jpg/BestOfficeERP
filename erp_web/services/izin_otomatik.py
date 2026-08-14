@@ -1,5 +1,11 @@
 # -*- coding: utf-8 -*-
-"""Gece yarısı QR hareketlerinden otomatik izin hesabı."""
+"""Gece yarısı QR hareketlerinden otomatik izin hesabı.
+
+Ürün kararı (PDevam AŞAMA 0 — otomatik mesai çıkışı ile koordinasyon):
+Otomatik çıkış SADECE açık giriş VARSA yazılır; hiç giriş YOKSA çıkış YAZILMAZ.
+(Bu modül çıkış yazmaz; yalnızca dünün hareketlerinden personel_izin üretir.
+ Anlık 'izinli' gösterimi personel_izin'e yazmaz — çift sayım yok.)
+"""
 from __future__ import annotations
 
 import logging
@@ -150,7 +156,7 @@ def _otomatik_kayit_yaz(personel_id: int, tarih: date, payload: dict) -> None:
             INSERT INTO personel_izin
               (personel_id, izin_turu, baslangic_tarihi, bitis_tarihi,
                gun_sayisi, saat_sayisi, aciklama, onay_durumu)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,'onaylandi')
+            VALUES (%s,%s,%s,%s,%s,%s,%s,'qr_bekliyor')
             """,
             (
                 int(personel_id),

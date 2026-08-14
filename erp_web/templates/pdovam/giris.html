@@ -94,6 +94,7 @@ body{margin:0;}
             <th style="padding:8px 10px;text-align:left;">İzin</th>
             <th style="padding:8px 10px;text-align:left;">Mola</th>
             <th style="padding:8px 10px;text-align:left;">Durum</th>
+            <th style="padding:8px 10px;text-align:left;">Canlı</th>
             {% if is_admin %}
             <th style="padding:8px 10px;text-align:left;">İşlem</th>
             {% endif %}
@@ -126,6 +127,18 @@ body{margin:0;}
             <td style="padding:8px 10px;color:#e0f7fa;">{{ p.gun_izin_str or '--' }}</td>
             <td style="padding:8px 10px;color:#e0f7fa;">1.50</td>
             <td data-col="durum" style="padding:8px 10px;color:#e0f7fa;">{{ p.durum or "--" }}</td>
+            <td data-col="canli" style="padding:8px 10px;color:#e0f7fa;white-space:nowrap;"
+                title="{% if p.son_hareket_tip %}Son: {{ p.son_hareket_tip }} {{ p.son_hareket_saat or '' }}{% endif %}">
+              {% if p.canli_durum == 'izinli_disarida' %}
+              <span style="color:#ffb74d;font-weight:600;">{{ p.canli_durum_str }}</span>
+              {% elif p.canli_durum == 'iceride' %}
+              <span style="color:#81c784;font-weight:600;">{{ p.canli_durum_str }}</span>
+              {% elif p.canli_durum == 'mesai_sonrasi_cikis' %}
+              <span style="color:#90a4ae;">{{ p.canli_durum_str }}</span>
+              {% else %}
+              <span style="color:#78909c;">{{ p.canli_durum_str or '—' }}</span>
+              {% endif %}
+            </td>
             {% if is_admin %}
             <td style="padding:6px 4px;color:#e0f7fa;white-space:nowrap;">
               <button type="button" class="pdovam-btn pdovam-btn-duzenle">Düzenle</button>
@@ -135,12 +148,13 @@ body{margin:0;}
             {% endif %}
           </tr>
         {% else %}
-          <tr><td colspan="{{ 9 + (1 if is_admin else 0) }}" style="padding:12px 10px;text-align:center;color:#78909c;">Aktif personel bulunamadı.</td></tr>
+          <tr><td colspan="{{ 10 + (1 if is_admin else 0) }}" style="padding:12px 10px;text-align:center;color:#78909c;">Aktif personel bulunamadı.</td></tr>
         {% endfor %}
         </tbody>
       </table>
     </div>
 
+    <div style="margin-top:10px;font-size:11px;color:#90a4ae;"><strong style="color:#4fc3f7;">Canlı:</strong> çıkış sonrası “şu an dışarıda (X dk)” (ara izin); tekrar girişte “içeride”. Kesin izin hesabı gece otomatik onay paneline düşer — bu sütun yalnızca anlık gösterimdir.</div>
     <div style="margin-top:8px;font-size:11px;color:#90a4ae;">Bu işlem sadece ofis WiFi / yerel ağından yapılabilir.</div>
   </div>
 
@@ -574,13 +588,22 @@ body{margin:0;}
     var girisTd = tr.querySelector('td[data-col="giris"]');
     var cikisTd = tr.querySelector('td[data-col="cikis"]');
     var durumTd = tr.querySelector('td[data-col="durum"]');
+    var canliTd = tr.querySelector('td[data-col="canli"]');
     if (data.islem === 'giris') {
       if (girisTd) girisTd.textContent = data.saat || '--';
       if (cikisTd) cikisTd.textContent = '--';
       if (durumTd) durumTd.textContent = 'giris';
+      if (canliTd) {
+        canliTd.innerHTML = '<span style="color:#81c784;font-weight:600;">içeride</span>';
+        canliTd.title = 'Son: giris ' + (data.saat || '');
+      }
     } else if (data.islem === 'cikis') {
       if (cikisTd) cikisTd.textContent = data.saat || '--';
       if (durumTd) durumTd.textContent = 'cikis';
+      if (canliTd) {
+        canliTd.innerHTML = '<span style="color:#ffb74d;font-weight:600;">şu an dışarıda (0 dk)</span>';
+        canliTd.title = 'Son: cikis ' + (data.saat || '');
+      }
     }
     pdovamFarkYenile(tr);
   }

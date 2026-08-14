@@ -7,6 +7,11 @@ app.py'ye ekle:
     app.register_blueprint(pdovam_bp, url_prefix="/pdovam")
 
 pip install qrcode[pil]
+
+Ürün kararı (AŞAMA 0 — otomatik mesai çıkışı sözleşmesi):
+Otomatik çıkış SADECE açık giriş VARSA yazılır; hiç giriş YOKSA çıkış YAZILMAZ.
+(AŞAMA 1: anlık canli_durum / disarida_dk yalnızca personel_hareketleri'nden
+ türetilir; DB'ye izin/çıkış yazılmaz. pdovam_isle toggle'a dokunulmaz.)
 """
 
 from collections import defaultdict
@@ -31,6 +36,10 @@ except ImportError:  # supabase-python yüklü değilse, entegrasyon sessizce de
     create_client = None
 
 bp = Blueprint("pdovam", __name__)
+
+# Ürün kararı (AŞAMA 0): otomatik çıkış yalnızca açık giriş varken; giriş yoksa yazılmaz.
+# Ayrıntı: routes/_NOT_pdevam_anlik_izin_a0.txt
+PDOVAM_OTOMATIK_CIKIS_SADECE_ACIK_GIRIS = True
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS devam_kayitlari (
@@ -213,6 +222,96 @@ def _personel_row_to_json_serializable(row):
 VARSAYILAN_CIKIS_SAATI = "18:30:00"
 MESAI_SABAH_DK = 9 * 60
 VARSAYILAN_CIKIS_DK = 18 * 60 + 30
+
+
+def _pdovam_saat_val_to_minutes(val):
+    """TIME / HH:MM / HH:MM:SS → gün içi dakika; parse edilemezse None."""
+    if val is None:
+        return None
+    if hasattr(val, "hour"):
+        try:
+            return int(val.hour) * 60 + int(val.minute)
+        except Exception:
+            return None
+    s = str(val or "").strip()
+    parts = s.split(":")
+    if len(parts) < 2:
+        return None
+    try:
+        return int(parts[0]) * 60 + int(parts[1])
+    except (TypeError, ValueError):
+        return None
+
+
+def _pdovam_saat_display(val) -> str:
+    if val is None:
+        return ""
+    if hasattr(val, "strftime"):
+        try:
+            return val.strftime("%H:%M")
+        except Exception:
+            pass
+    s = str(val or "").strip()
+    if len(s) >= 5 and ":" in s:
+        return s[:5]
+    return s
+
+
+def _pdovam_canli_durum_hesapla(hareketler: list, *, now_dk: int, mesai_bitis_dk: int) -> dict:
+    """personel_hareketleri listesinden anlık durum (salt okuma / türetim).
+
+    Yazmaz. Değerler:
+      canli_durum: hareket_yok | iceride | izinli_disarida | mesai_sonrasi_cikis
+      disarida_dk: dışarıdaysa şimdi−son çıkış (dk)
+      son_hareket_tip / son_hareket_saat
+    """
+    events = []
+    for h in hareketler or []:
+        tip = (h.get("tip") or "").strip().lower()
+        if tip not in ("giris", "cikis"):
+            continue
+        dk = _pdovam_saat_val_to_minutes(h.get("saat"))
+        if dk is None:
+            continue
+        events.append({"tip": tip, "dk": dk, "saat": h.get("saat")})
+    events.sort(key=lambda e: (e["dk"], 0 if e["tip"] == "giris" else 1))
+
+    if not events:
+        return {
+            "canli_durum": "hareket_yok",
+            "disarida_dk": 0,
+            "son_hareket_tip": None,
+            "son_hareket_saat": None,
+            "canli_durum_str": "—",
+        }
+
+    last = events[-1]
+    son_tip = last["tip"]
+    son_saat = _pdovam_saat_display(last.get("saat"))
+    if son_tip == "giris":
+        return {
+            "canli_durum": "iceride",
+            "disarida_dk": 0,
+            "son_hareket_tip": "giris",
+            "son_hareket_saat": son_saat,
+            "canli_durum_str": "içeride",
+        }
+
+    # son = cikis
+    disarida = max(0, int(now_dk) - int(last["dk"]))
+    if int(now_dk) < int(mesai_bitis_dk):
+        durum = "izinli_disarida"
+        label = f"şu an dışarıda ({disarida} dk)"
+    else:
+        durum = "mesai_sonrasi_cikis"
+        label = f"mesai çıkışı ({son_saat or '—'})"
+    return {
+        "canli_durum": durum,
+        "disarida_dk": disarida,
+        "son_hareket_tip": "cikis",
+        "son_hareket_saat": son_saat,
+        "canli_durum_str": label,
+    }
 
 
 def _devam_row_personel_id(val):
@@ -907,6 +1006,40 @@ def api_hareket_son():
     return jsonify({"ok": True, "data": out})
 
 
+@bp.route("/api/canli-durum")
+def api_canli_durum():
+    """AŞAMA 1: anlık durum — yalnızca personel_hareketleri okur; DB yazmaz."""
+    pid_raw = request.args.get("personel_id")
+    if not pid_raw:
+        return jsonify({"ok": False, "mesaj": "personel_id gerekli"}), 400
+    try:
+        pid = int(pid_raw)
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "mesaj": "Geçersiz personel_id"}), 400
+    bugun = _turkey_now().date()
+    p = fetch_one(
+        "SELECT id, mesai_bitis FROM personel WHERE id=%s AND is_active = true",
+        (pid,),
+    )
+    if not p:
+        return jsonify({"ok": False, "mesaj": "Personel bulunamadı"}), 404
+    rows = fetch_all(
+        """
+        SELECT saat, tip
+        FROM personel_hareketleri
+        WHERE personel_id=%s AND tarih=%s
+          AND tip IN ('giris', 'cikis')
+        ORDER BY saat ASC, id ASC
+        """,
+        (pid, bugun),
+    ) or []
+    now = _turkey_now()
+    now_dk = now.hour * 60 + now.minute
+    bit_dk = _pdovam_saat_val_to_minutes(p.get("mesai_bitis")) or VARSAYILAN_CIKIS_DK
+    canli = _pdovam_canli_durum_hesapla(rows, now_dk=now_dk, mesai_bitis_dk=int(bit_dk))
+    return jsonify({"ok": True, "personel_id": pid, "tarih": bugun.isoformat(), **canli})
+
+
 @bp.route("/")
 def pdovam_anasayfa():
     """Personelin telefondan açacağı sayfa — login gerektirmez."""
@@ -1055,6 +1188,35 @@ def pdovam_anasayfa():
                 d["gun_izin_str"] = f"{m} dk"
         else:
             d["gun_izin_str"] = ""
+
+    # AŞAMA 1: anlık canli_durum (salt türetim; personel_izin / devam'a YAZMAZ)
+    _now_tr = _turkey_now()
+    _now_dk = _now_tr.hour * 60 + _now_tr.minute
+    for d in personeller_all:
+        pid = d.get("id")
+        # liste_gun bugün; tarih objesi veya iso
+        tar = d.get("tarih")
+        if tar is None:
+            key = (pid, liste_gun)
+        else:
+            key = (pid, tar)
+        evs = hareket_by_key.get(key) or []
+        # tarih tipi DB date vs Python date uyumsuzluğunda boş kalmasın
+        if not evs:
+            for (k_pid, k_tar), evlist in hareket_by_key.items():
+                if k_pid != pid:
+                    continue
+                k_iso = k_tar.isoformat()[:10] if hasattr(k_tar, "isoformat") else str(k_tar)[:10]
+                if k_iso == liste_gun.isoformat():
+                    evs = evlist
+                    break
+        bit_dk = _pdovam_saat_val_to_minutes(d.get("mesai_bitis")) or VARSAYILAN_CIKIS_DK
+        canli = _pdovam_canli_durum_hesapla(evs, now_dk=_now_dk, mesai_bitis_dk=int(bit_dk))
+        d["canli_durum"] = canli["canli_durum"]
+        d["disarida_dk"] = canli["disarida_dk"]
+        d["son_hareket_tip"] = canli["son_hareket_tip"]
+        d["son_hareket_saat"] = canli["son_hareket_saat"]
+        d["canli_durum_str"] = canli["canli_durum_str"]
     # personeller_list / personeller_json: fark eşlemesinden sonra (aşağıda)
     # Üst başlık: liste her zaman bugün (barkod ekranında gün karışmasın)
     bugun = liste_gun.strftime("%d.%m.%Y")
