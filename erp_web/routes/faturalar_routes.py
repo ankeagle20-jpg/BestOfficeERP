@@ -3200,8 +3200,10 @@ def _firma_ozet_grid_ozet_map_cache_only(rows: list, ref: date | None = None) ->
 def _firma_ozet_referans_ay_grid_tutar_map(musteri_ids, ref: date | None = None) -> dict[int, float]:
     """Grid cache'ten referans ayın geçerli KDV dahil tutarını tek batch sorguyla okur.
 
-    Güncel object payload'larda compute_rev doğrulanır. Compute rev taşımayan legacy
-    array payload'lar yalnızca geçerli ay/brüt-tutar verisi içeriyorsa kabul edilir.
+    Object payload: compute_rev 27 veya 28 kabul (27→28 sentetik KYC bump'ı;
+    KYC'li formül aynı). 23 ve daha eski reddedilir. Placeholder
+    (_firma_ozet_classify_borc_month) AYNEN durur.
+    Legacy array payload: yalnız geçerli ay/brüt-tutar varsa kabul.
     Grid'in ``brut=0 / tutar=0.01`` görsel zemini gerçek kira sayılmaz.
     """
     mids: list[int] = []
@@ -3279,9 +3281,12 @@ def _firma_ozet_referans_ay_grid_tutar_map(musteri_ids, ref: date | None = None)
             payload_tipi = str(row.get("payload_tipi") or "").strip().lower()
             if payload_tipi == "object":
                 try:
-                    if int(row.get("compute_rev") or 0) != int(AYLIK_GRID_COMPUTE_REV):
-                        continue
+                    rev = int(row.get("compute_rev") or 0)
                 except (TypeError, ValueError):
+                    continue
+                # Dar B: yalnız 27 veya güncel 28. Daha eski (örn. 23) reddedilir.
+                # Placeholder sınıflandırması aşağıda değişmez.
+                if rev not in (27, int(AYLIK_GRID_COMPUTE_REV)):
                     continue
             elif payload_tipi != "array":
                 continue
