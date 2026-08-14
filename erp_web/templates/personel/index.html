@@ -406,6 +406,8 @@
             </fieldset>
             <fieldset class="ozluk-section"><legend>3. İş ve Bordro</legend>
                 <div class="frm-row"><label>İşe Giriş Tarihi</label><input type="text" id="ozluk-ise_giris_tarihi" placeholder="GG.AA.YYYY"></div>
+                <div class="frm-row"><label>Mesai başlangıç</label><input type="text" id="ozluk-mesai_baslangic" placeholder="09:00" maxlength="5" style="width:70px;"></div>
+                <div class="frm-row"><label>Mesai bitiş</label><input type="text" id="ozluk-mesai_bitis" placeholder="18:30" maxlength="5" style="width:70px;" title="Boş bırakılırsa rapor/izin hesabında 18:30 kullanılır"></div>
                 <div class="frm-row"><label>İzin hakediş (gün/saat)</label><input type="number" id="ozluk-izin_hakedis_gun" min="0" placeholder="gün" style="width:56px;"> gün <input type="number" id="ozluk-izin_hakedis_saat" min="0" placeholder="saat" style="width:56px;"> saat</div>
                 <div class="frm-row"><label>İzin kalan (gün/saat)</label><input type="number" id="ozluk-izin_kalan_gun" min="0" placeholder="gün" style="width:56px;"> gün <input type="number" id="ozluk-izin_kalan_saat" min="0" placeholder="saat" style="width:56px;"> saat</div>
                 <div class="frm-row"><label>Departman</label><input type="text" id="ozluk-departman"></div>
@@ -554,7 +556,7 @@ async function personelListeYukle(filtre) {
     const tr = document.createElement('tr');
     tr.dataset.id = r.id;
     const notKisa = (r.notlar || '').toString().substring(0, 30);
-    tr.innerHTML = '<td>'+(r.ad_soyad||'')+'</td><td>'+(r.mesai_baslangic||'09:00')+'</td><td>'+(r.is_active ? 'Aktif' : 'Pasif')+'</td><td>'+notKisa+'</td><td style="white-space:nowrap;"></td>';
+    tr.innerHTML = '<td>'+(r.ad_soyad||'')+'</td><td>'+(r.mesai_baslangic||'09:00')+'-'+(r.mesai_bitis_effective||r.mesai_bitis||'18:30')+'</td><td>'+(r.is_active ? 'Aktif' : 'Pasif')+'</td><td>'+notKisa+'</td><td style="white-space:nowrap;"></td>';
     const tdBtn = tr.lastElementChild;
     const btnDuzenle = document.createElement('button'); btnDuzenle.type = 'button'; btnDuzenle.className = 'btn-p'; btnDuzenle.style.cssText = 'padding:4px 8px;font-size:11px;margin:0 2px;background:#2e7d32;'; btnDuzenle.textContent = 'Düzenle'; btnDuzenle.onclick = (e) => { e.stopPropagation(); personelSec(r); };
     const btnSil = document.createElement('button'); btnSil.type = 'button'; btnSil.className = 'btn-s'; btnSil.style.cssText = 'padding:4px 8px;font-size:11px;margin:0 2px;background:#c62828;'; btnSil.textContent = 'Sil'; btnSil.onclick = (e) => { e.stopPropagation(); personelSil(r.id); };
@@ -664,7 +666,7 @@ function renderSurePersonelTablosu() {
     tr.style.cursor = 'pointer';
     if (secili) tr.style.background = '#00695c';
     tr.innerHTML = '<td style="text-align:left;">' + (p.ad_soyad || '') + '</td>'
-      + '<td style="text-align:center;">' + (p.mesai_baslangic || '09:00') + '</td>'
+      + '<td style="text-align:center;">' + (p.mesai_baslangic || '09:00') + '-' + (p.mesai_bitis_effective || p.mesai_bitis || '18:30') + '</td>'
       + '<td style="text-align:center;">' + (p.is_active ? 'Aktif' : 'Pasif') + '</td>';
     tr.onclick = function() {
       seciliSurePersonelId = p.id;
@@ -836,6 +838,10 @@ function personelSec(r) {
   document.querySelectorAll('#personel-tbody tr').forEach(tr => tr.style.background = tr.dataset.id == r.id ? '#00695c' : '');
   var adInp = document.getElementById('ozluk-ad_soyad');
   if (adInp) adInp.value = r.ad_soyad || '';
+  var mb = document.getElementById('ozluk-mesai_baslangic');
+  if (mb) mb.value = r.mesai_baslangic || '09:00';
+  var mbit = document.getElementById('ozluk-mesai_bitis');
+  if (mbit) mbit.value = (r.mesai_bitis != null && String(r.mesai_bitis).trim()) ? String(r.mesai_bitis).trim().substr(0,5) : '';
   const basEl2 = document.getElementById('gec-aylik-bas-tarih');
   if (basEl2) basEl2.value = '';
   bilgiYukle(r.id);
@@ -1615,7 +1621,8 @@ if (btnOzlukKaydet) btnOzlukKaydet.onclick = async function() {
           telefon: (document.getElementById('ozluk-cep_telefon') || {}).value || '',
           email: (document.getElementById('ozluk-email') || {}).value || '',
           giris_tarihi: tarihToIso((document.getElementById('ozluk-ise_giris_tarihi') || {}).value) || null,
-          mesai_baslangic: '09:00',
+          mesai_baslangic: ((document.getElementById('ozluk-mesai_baslangic') || {}).value || '09:00').trim() || '09:00',
+          mesai_bitis: ((document.getElementById('ozluk-mesai_bitis') || {}).value || '').trim(),
           mac_adres: (document.getElementById('ozluk-mac_adres') || {}).value || '',
           notlar: (document.getElementById('ozluk-notlar') || {}).value || ''
         })
@@ -1642,6 +1649,28 @@ if (btnOzlukKaydet) btnOzlukKaydet.onclick = async function() {
     var res = await fetch(API_OZLUK_KAYDET, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
     var d = await res.json();
     if (d && d.ok) {
+      try {
+        await fetch(API_PERSONEL_KAYDET, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: parseInt(pid, 10),
+            ad_soyad: (adInp && adInp.value.trim()) ? adInp.value.trim() : (adSoyad || ''),
+            telefon: (document.getElementById('ozluk-cep_telefon') || {}).value || '',
+            email: (document.getElementById('ozluk-email') || {}).value || '',
+            giris_tarihi: tarihToIso((document.getElementById('ozluk-ise_giris_tarihi') || {}).value) || null,
+            mesai_baslangic: ((document.getElementById('ozluk-mesai_baslangic') || {}).value || '09:00').trim() || '09:00',
+            mesai_bitis: ((document.getElementById('ozluk-mesai_bitis') || {}).value || '').trim(),
+            mac_adres: (document.getElementById('ozluk-mac_adres') || {}).value || '',
+            notlar: (document.getElementById('ozluk-notlar') || {}).value || '',
+            is_active: true
+          })
+        }).then(function(rr){ return rr.json(); }).then(function(dj){
+          if (dj && !dj.ok) { alert(dj.mesaj || 'Mesai kaydedilemedi.'); }
+          var f2 = document.querySelector('input[name="filtre-p"]:checked');
+          personelListeYukle(f2 ? f2.value : 'aktif');
+        });
+      } catch (eMesai) {}
       if (adInp && adInp.value.trim()) {
         try {
           await fetch(API_PERSONEL_AD_GUNCELLE, {

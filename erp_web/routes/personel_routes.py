@@ -23,6 +23,8 @@ from izin_form_pdf import izin_formu_olustur
 
 MESAI_SABAH_DK = 9 * 60
 VARSAYILAN_CIKIS_DK = 18 * 60 + 30
+VARSAYILAN_MESAI_BITIS = "18:30"
+VARSAYILAN_MESAI_BASLANGIC = "09:00"
 
 
 def _saat_to_minutes(val):
@@ -43,6 +45,66 @@ def _saat_to_minutes(val):
         return int(p[0]) * 60 + int(p[1])
     except Exception:
         return None
+
+
+def _normalize_hhmm(val, *, required_default: str | None = None) -> str | None:
+    """HH:MM normalize. Boş → required_default veya None. Geçersiz → ValueError."""
+    if val is None:
+        s = ""
+    elif hasattr(val, "strftime"):
+        try:
+            s = val.strftime("%H:%M")
+        except Exception:
+            s = str(val).strip()
+    else:
+        s = str(val).strip()
+    if not s:
+        return required_default
+    # HH:MM or HH:MM:SS
+    parts = s.split(":")
+    if len(parts) < 2:
+        raise ValueError("Mesai saati HH:MM formatında olmalı (örn. 18:30).")
+    try:
+        h = int(parts[0])
+        m = int(parts[1])
+    except ValueError as e:
+        raise ValueError("Mesai saati HH:MM formatında olmalı (örn. 18:30).") from e
+    if h < 0 or h > 23 or m < 0 or m > 59:
+        raise ValueError("Mesai saati geçersiz (saat 0–23, dakika 0–59).")
+    return f"{h:02d}:{m:02d}"
+
+
+def _parse_mesai_pair(data) -> tuple[str, str | None]:
+    """mesai_baslangic (zorunlu varsayılan 09:00) + mesai_bitis (boş=None → rapor 18:30).
+
+    Aynı gün: bitiş > başlangıç.
+    """
+    try:
+        bas = _normalize_hhmm(
+            data.get("mesai_baslangic"),
+            required_default=VARSAYILAN_MESAI_BASLANGIC,
+        )
+    except ValueError as e:
+        raise ValueError(f"mesai_baslangic: {e}") from e
+    raw_bit = data.get("mesai_bitis")
+    if raw_bit is None or str(raw_bit).strip() == "":
+        bit = None
+    else:
+        try:
+            bit = _normalize_hhmm(raw_bit, required_default=None)
+        except ValueError as e:
+            raise ValueError(f"mesai_bitis: {e}") from e
+    if bit is not None:
+        bdk = _saat_to_minutes(bas)
+        xdk = _saat_to_minutes(bit)
+        if bdk is None or xdk is None:
+            raise ValueError("Mesai saatleri çözülemedi.")
+        if xdk <= bdk:
+            raise ValueError(
+                "Mesai bitiş, aynı gün içinde başlangıçtan sonra olmalı "
+                f"(başlangıç {bas}, bitiş {bit})."
+            )
+    return bas, bit
 
 
 def _dk_yazi(dk: int) -> str:
@@ -251,7 +313,7 @@ def index():
 @giris_gerekli
 def api_list():
     filtre = request.args.get("filtre", "aktif")  # tumu, aktif, pasif
-    sql = "SELECT id, ad_soyad, pozisyon, telefon, email, giris_tarihi, mesai_baslangic, mac_adres, notlar, is_active FROM personel WHERE 1=1"
+    sql = "SELECT id, ad_soyad, pozisyon, telefon, email, giris_tarihi, mesai_baslangic, mesai_bitis, mac_adres, notlar, is_active FROM personel WHERE 1=1"
     params = []
     if filtre == "aktif":
         sql += " AND is_active = TRUE"
@@ -264,6 +326,24 @@ def api_list():
         d = dict(r)
         if d.get("giris_tarihi"):
             d["giris_tarihi"] = d["giris_tarihi"].isoformat()[:10] if hasattr(d["giris_tarihi"], "isoformat") else str(d["giris_tarihi"])[:10]
+        # UI gösterim: boş bitiş → fallback 18:30 (DB NULL kalabilir)
+        mb = d.get("mesai_baslangic")
+        if hasattr(mb, "strftime"):
+            d["mesai_baslangic"] = mb.strftime("%H:%M")
+        elif mb:
+            d["mesai_baslangic"] = str(mb).strip()[:5]
+        else:
+            d["mesai_baslangic"] = VARSAYILAN_MESAI_BASLANGIC
+        mbit = d.get("mesai_bitis")
+        if hasattr(mbit, "strftime"):
+            d["mesai_bitis"] = mbit.strftime("%H:%M")
+            d["mesai_bitis_effective"] = d["mesai_bitis"]
+        elif mbit and str(mbit).strip():
+            d["mesai_bitis"] = str(mbit).strip()[:5]
+            d["mesai_bitis_effective"] = d["mesai_bitis"]
+        else:
+            d["mesai_bitis"] = None
+            d["mesai_bitis_effective"] = VARSAYILAN_MESAI_BITIS
         out.append(d)
     return jsonify(out)
 
@@ -280,7 +360,10 @@ def api_personel_kaydet():
         telefon = (data.get("telefon") or "").strip()
         email = (data.get("email") or "").strip()
         giris_tarihi = _parse_date(data.get("giris_tarihi"))
-        mesai_baslangic = (data.get("mesai_baslangic") or "09:00").strip()[:5]
+        try:
+            mesai_baslangic, mesai_bitis = _parse_mesai_pair(data)
+        except ValueError as ve:
+            return jsonify({"ok": False, "mesaj": str(ve)}), 400
         mac_adres = (data.get("mac_adres") or "").strip()
         notlar = (data.get("notlar") or "").strip()
         is_active = data.get("is_active") not in (False, 0, "0", "false")
@@ -288,16 +371,29 @@ def api_personel_kaydet():
         pid = data.get("id") or data.get("personel_id")
         if pid:
             execute(
-                """UPDATE personel SET ad_soyad=%s, pozisyon=%s, telefon=%s, email=%s, giris_tarihi=%s, mesai_baslangic=%s, mac_adres=%s, notlar=%s, is_active=%s WHERE id=%s""",
-                (ad_soyad, pozisyon, telefon, email, giris_tarihi, mesai_baslangic, mac_adres, notlar, is_active, pid)
+                """UPDATE personel SET ad_soyad=%s, pozisyon=%s, telefon=%s, email=%s, giris_tarihi=%s,
+                   mesai_baslangic=%s, mesai_bitis=%s, mac_adres=%s, notlar=%s, is_active=%s WHERE id=%s""",
+                (ad_soyad, pozisyon, telefon, email, giris_tarihi, mesai_baslangic, mesai_bitis, mac_adres, notlar, is_active, pid)
             )
-            return jsonify({"ok": True, "id": int(pid)})
+            return jsonify({
+                "ok": True,
+                "id": int(pid),
+                "mesai_baslangic": mesai_baslangic,
+                "mesai_bitis": mesai_bitis,
+                "mesai_bitis_effective": mesai_bitis or VARSAYILAN_MESAI_BITIS,
+            })
         row = execute_returning(
-            """INSERT INTO personel (ad_soyad, pozisyon, telefon, email, giris_tarihi, mesai_baslangic, mac_adres, notlar, is_active)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
-            (ad_soyad, pozisyon, telefon, email, giris_tarihi, mesai_baslangic, mac_adres, notlar, is_active)
+            """INSERT INTO personel (ad_soyad, pozisyon, telefon, email, giris_tarihi, mesai_baslangic, mesai_bitis, mac_adres, notlar, is_active)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+            (ad_soyad, pozisyon, telefon, email, giris_tarihi, mesai_baslangic, mesai_bitis, mac_adres, notlar, is_active)
         )
-        return jsonify({"ok": True, "id": row["id"]})
+        return jsonify({
+            "ok": True,
+            "id": row["id"],
+            "mesai_baslangic": mesai_baslangic,
+            "mesai_bitis": mesai_bitis,
+            "mesai_bitis_effective": mesai_bitis or VARSAYILAN_MESAI_BITIS,
+        })
     except Exception as e:
         return jsonify({"ok": False, "mesaj": str(e)}), 400
 

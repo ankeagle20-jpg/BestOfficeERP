@@ -218,10 +218,51 @@ def _personel_row_to_json_serializable(row):
     return d
 
 
-# Rapor: gün sonu varsayılan çıkış (mesai içinde hâlâ işyerinde sayılır)
+# Rapor: gün sonu varsayılan çıkış (personel.mesai_bitis yoksa 18:30)
 VARSAYILAN_CIKIS_SAATI = "18:30:00"
 MESAI_SABAH_DK = 9 * 60
 VARSAYILAN_CIKIS_DK = 18 * 60 + 30
+
+
+def _pdovam_mesai_bitis_saat_str(dk: int) -> str:
+    """Dakikadan HH:MM:SS (rapor cikis_display)."""
+    try:
+        dk = int(dk)
+    except (TypeError, ValueError):
+        dk = VARSAYILAN_CIKIS_DK
+    dk = max(0, min(24 * 60 - 1, dk))
+    h, m = divmod(dk, 60)
+    return f"{h:02d}:{m:02d}:00"
+
+
+def _pdovam_load_mesai_bitis_dk_map(personel_ids=None) -> dict:
+    """personel_id → mesai_bitis dk (boş/NULL → VARSAYILAN_CIKIS_DK=18:30)."""
+    if personel_ids is not None:
+        ids = []
+        for x in personel_ids:
+            try:
+                ids.append(int(x))
+            except (TypeError, ValueError):
+                continue
+        ids = list({i for i in ids})
+        if not ids:
+            return {}
+        ph = ",".join(["%s"] * len(ids))
+        rows = fetch_all(
+            f"SELECT id, mesai_bitis FROM personel WHERE id IN ({ph})",
+            tuple(ids),
+        ) or []
+    else:
+        rows = fetch_all("SELECT id, mesai_bitis FROM personel WHERE is_active = true") or []
+    out = {}
+    for r in rows:
+        try:
+            pid = int(r["id"])
+        except (TypeError, ValueError, KeyError):
+            continue
+        dk = _pdovam_saat_val_to_minutes(r.get("mesai_bitis"))
+        out[pid] = int(dk) if dk is not None else VARSAYILAN_CIKIS_DK
+    return out
 
 
 def _pdovam_saat_val_to_minutes(val):
@@ -653,18 +694,26 @@ def pdovam_toplam_fark_dk_for_personel(pid: int, bas_tarih, bit_tarih) -> int:
         devam_raw = tmp + list(local_events)
 
     devam_raw = _pdovam_merge_unique_events(devam_raw)
-    kons = _consolidate_pdovam_gunluk(devam_raw)
+    pids = {
+        _devam_row_personel_id(r.get("personel_id"))
+        for r in (devam_raw or [])
+    }
+    pids.discard(None)
+    mesai_map = _pdovam_load_mesai_bitis_dk_map(pids)
+    kons = _consolidate_pdovam_gunluk(devam_raw, mesai_bitis_dk_by_pid=mesai_map)
     return sum(int(r.get("fark_toplam_dk") or 0) for r in (kons or []))
 
 
-def _consolidate_pdovam_gunluk(rows):
+def _consolidate_pdovam_gunluk(rows, mesai_bitis_dk_by_pid=None):
     """Her personel + gün tek satır.
 
     - Mesai 09:00: daha erken girişte geç kalma 0 (first_min < 9:00 ise gec_sabah_dk = 0).
     - Gün içi çıkış→tekrar giriş arası dakikalar izin_disari_dk.
-    - Son kayıt gerçek çıkışsa: 18:30 − çıkış = erken_cikis_izin_dk (tam gün mesaiye göre eksik kalan süre).
-    - Son çıkış yoksa çıkış 18:30 varsayılan; erken izin 0.
+    - Son kayıt gerçek çıkışsa: mesai_bitis − çıkış = erken_cikis_izin_dk
+      (personel.mesai_bitis; yoksa 18:30).
+    - Son çıkış yoksa çıkış mesai_bitis varsayılan; erken izin 0.
     """
+    mesai_map = mesai_bitis_dk_by_pid if isinstance(mesai_bitis_dk_by_pid, dict) else {}
     groups = defaultdict(list)
     for r in rows or []:
         pid = _devam_row_personel_id(r.get("personel_id"))
@@ -734,26 +783,28 @@ def _consolidate_pdovam_gunluk(rows):
                 elif not inside and pending is None:
                     inside = True
 
+        bit_dk = int(mesai_map.get(pid, VARSAYILAN_CIKIS_DK) or VARSAYILAN_CIKIS_DK)
+        bit_saat_str = _pdovam_mesai_bitis_saat_str(bit_dk)
+
         if pending is not None:
             cikis_min_raw = pending
-            # Gün sonu raporunda 18:30 üstünü kırp:
-            # personel 19:00'da çıkmış olsa da rapor çıkışı 18:30 görünür,
-            # fark sadece gün içi çıkış->giriş aralarından ve (varsa) erken çıkıştan gelir.
-            cikis_min = min(cikis_min_raw, VARSAYILAN_CIKIS_DK)
+            # Gün sonu raporunda mesai_bitis üstünü kırp (yoksa 18:30):
+            # personel daha geç çıkmış olsa da rapor çıkışı mesai bitişinde görünür.
+            cikis_min = min(cikis_min_raw, bit_dk)
             cikis_varsayilan = False
             craw = (last_cikis_raw or "").strip()
-            if cikis_min_raw > VARSAYILAN_CIKIS_DK:
-                cikis_display = VARSAYILAN_CIKIS_SAATI
+            if cikis_min_raw > bit_dk:
+                cikis_display = bit_saat_str
             elif craw and ":" in craw:
                 cikis_display = (craw + ":00")[:8] if craw.count(":") == 1 and len(craw) <= 5 else craw[:8]
             else:
                 cikis_display = _pdovam_minutes_clock(cikis_min)
-            # Mesai bitişi 18:30 kabulü: gerçek çıkıştan 18:30’a kadar eksik süre = izin
-            erken_cikis_izin_dk = max(0, VARSAYILAN_CIKIS_DK - cikis_min)
+            # Mesai bitişi (personel.mesai_bitis / 18:30): gerçek çıkıştan bitişe eksik = izin
+            erken_cikis_izin_dk = max(0, bit_dk - cikis_min)
         else:
-            cikis_min = VARSAYILAN_CIKIS_DK
+            cikis_min = bit_dk
             cikis_varsayilan = True
-            cikis_display = VARSAYILAN_CIKIS_SAATI
+            cikis_display = bit_saat_str
             erken_cikis_izin_dk = 0
 
         # 09:00 öncesi giriş: geç kalma 0 (mesai 9’da başlar)
@@ -780,7 +831,10 @@ def _consolidate_pdovam_gunluk(rows):
         if izin_disari_dk > 0:
             detay_lines.append("Gün içi dışarı (çıkış → tekrar giriş): " + _pdovam_dk_yazi(izin_disari_dk))
         if erken_cikis_izin_dk > 0:
-            detay_lines.append("Erken çıkış (18:30’a kadar eksik mesai): " + _pdovam_dk_yazi(erken_cikis_izin_dk))
+            detay_lines.append(
+                f"Erken çıkış ({bit_saat_str[:5]}’a kadar eksik mesai): "
+                + _pdovam_dk_yazi(erken_cikis_izin_dk)
+            )
         if not detay_lines:
             detay_lines.append("Bu gün için hesaplanan fark yok.")
 
@@ -806,11 +860,11 @@ def _consolidate_pdovam_gunluk(rows):
                     aktif_giris = None
         if aktif_giris is not None:
             gmin = int(aktif_giris.get("min") or 0)
-            cmin = max(gmin, VARSAYILAN_CIKIS_DK)
+            cmin = max(gmin, bit_dk)
             sure_dk = max(0, cmin - gmin)
             hareket_ciftleri.append({
                 "giris": _pdovam_saat_display_from_event(aktif_giris),
-                "cikis": VARSAYILAN_CIKIS_SAATI,
+                "cikis": bit_saat_str,
                 "sure": _pdovam_dk_yazi(sure_dk) if sure_dk > 0 else "0 dk",
                 "cikis_varsayilan": True,
             })
@@ -933,7 +987,18 @@ def _pdovam_fark_gun_sonrasi(personel_id: int, t: date, ad_soyad: str):
             filtered_hareket.append(ev)
         devam_raw = list(filtered_hareket) + list(local_events)
     devam_raw = _pdovam_merge_unique_events(devam_raw)
-    cons = _consolidate_pdovam_gunluk(devam_raw)
+    pids = {
+        _devam_row_personel_id(r.get("personel_id"))
+        for r in (devam_raw or [])
+    }
+    pids.discard(None)
+    if pid is not None:
+        try:
+            pids.add(int(pid))
+        except (TypeError, ValueError):
+            pass
+    mesai_map = _pdovam_load_mesai_bitis_dk_map(pids)
+    cons = _consolidate_pdovam_gunluk(devam_raw, mesai_bitis_dk_by_pid=mesai_map)
     if not cons:
         return "—", ["Bu gün için hesaplanan fark yok."]
     c0 = cons[0]
@@ -1329,7 +1394,20 @@ def pdovam_anasayfa():
         devam_kayitlari = tmp + list(local_events)
     devam_kayitlari = _pdovam_merge_unique_events(devam_kayitlari)
 
-    devam_kayitlari = _consolidate_pdovam_gunluk(devam_kayitlari)
+    pids = {
+        _devam_row_personel_id(r.get("personel_id"))
+        for r in (devam_kayitlari or [])
+    }
+    pids.discard(None)
+    for p in tum_personeller or []:
+        try:
+            pids.add(int(p["id"]))
+        except (TypeError, ValueError, KeyError):
+            pass
+    mesai_map = _pdovam_load_mesai_bitis_dk_map(pids)
+    devam_kayitlari = _consolidate_pdovam_gunluk(
+        devam_kayitlari, mesai_bitis_dk_by_pid=mesai_map
+    )
     toplam_gec_dk = sum((r.get("fark_toplam_dk") or 0) for r in devam_kayitlari)
 
     # Giriş/Çıkış sekmesi tablosu: raporla aynı fark (tek sütun)
