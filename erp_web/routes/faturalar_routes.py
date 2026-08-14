@@ -6240,22 +6240,45 @@ def _auto_inv_settings():
 
 
 def _auto_month_amount_from_cache(musteri_id, run_month_date):
+    """Hedef ay grid tutarı; placeholder hücrede None (sıkı fren).
+
+    Dönüş:
+      - float > 0: güvenilir tutar_kdv_dahil
+      - None: ay hücresi bulundu ama placeholder (brut≈0, tutar<0.5 zemin)
+      - 0.0: ay yok / güvenilir tutar yok (KYC net×1.2 yedek veya boş)
+    """
     try:
-        from routes.giris_routes import _build_aylik_grid_cache_payload
+        from routes.giris_routes import (
+            _build_aylik_grid_cache_payload,
+            _firma_ozet_classify_borc_month,
+        )
     except Exception:
         _build_aylik_grid_cache_payload = None
+        _firma_ozet_classify_borc_month = None
     if _build_aylik_grid_cache_payload:
         payload = _build_aylik_grid_cache_payload(int(musteri_id))
         if payload and isinstance(payload.get("aylar"), list):
             key = f"{run_month_date.year}-{run_month_date.month}"
             for a in payload["aylar"]:
-                if str(a.get("ay_key")) == key:
+                if str(a.get("ay_key")) != key:
+                    continue
+                tutar_raw = a.get("tutar_kdv_dahil")
+                brut_raw = a.get("brut_tutar_kdv")
+                if _firma_ozet_classify_borc_month is not None:
+                    tutar, is_ph = _firma_ozet_classify_borc_month(tutar_raw, brut_raw)
+                    if is_ph:
+                        # Placeholder (örn. 0.01 / brüt 0): geçersiz — tahmini tutar yok.
+                        return None
+                    if tutar > 0:
+                        return round(float(tutar), 2)
+                else:
                     try:
-                        v = float(a.get("tutar_kdv_dahil") or 0)
+                        v = float(tutar_raw or 0)
                         if v > 0:
                             return round(v, 2)
                     except Exception:
                         pass
+                break
     kyc = fetch_one(
         "SELECT aylik_kira FROM musteri_kyc WHERE musteri_id = %s ORDER BY id DESC LIMIT 1",
         (musteri_id,),
@@ -6265,9 +6288,21 @@ def _auto_month_amount_from_cache(musteri_id, run_month_date):
 
 
 def _auto_month_amount_resolved(musteri_id, run_month_date):
-    """Aylık tutarı cache -> kyc -> son fatura toplam fallback zinciriyle bul."""
+    """Aylık tutar: cache → (gerekirse) son fatura → ilk_kira_bedeli.
+
+    Sıkı fren yalnız from_cache None (placeholder tespit) iken:
+    hiçbir fallback'e düşülmez, 0 döner.
+    from_cache 0 / veri yok ise eski son fatura / ilk_kira zinciri korunur.
+    """
     try:
-        v = float(_auto_month_amount_from_cache(musteri_id, run_month_date) or 0)
+        raw = _auto_month_amount_from_cache(musteri_id, run_month_date)
+    except Exception:
+        raw = 0.0
+    # Placeholder hücresi: tahmini tutar yok — fallback yok.
+    if raw is None:
+        return 0.0
+    try:
+        v = float(raw or 0)
     except Exception:
         v = 0.0
     if v > 0:
@@ -6339,6 +6374,16 @@ def _auto_invoice_create_for_customer(musteri_id, run_month_date):
         return {"status": "error", "error": "Müşteri bulunamadı."}
     toplam = _auto_month_amount_resolved(musteri_id, run_month_date)
     if toplam <= 0:
+        # Placeholder (from_cache None) → aynı skip; izlenebilirlik için WARNING.
+        try:
+            if _auto_month_amount_from_cache(musteri_id, run_month_date) is None:
+                logging.getLogger(__name__).warning(
+                    "auto_invoice skip placeholder musteri_id=%s ay=%s",
+                    musteri_id,
+                    run_month_date.strftime("%Y-%m"),
+                )
+        except Exception:
+            pass
         return {"status": "skip", "error": "Aylık tutar bulunamadı veya 0."}
     fatura_no = _next_fatura_no()
     ay_ad = _AY_ADLARI_TR[run_month_date.month - 1]
