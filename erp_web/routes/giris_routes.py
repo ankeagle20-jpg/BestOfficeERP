@@ -7717,10 +7717,57 @@ COALESCE(
 """.strip()
 
 
+def _firma_ozet_sql_row_to_helper_input(row: dict) -> dict:
+    """Grup SQL alias'larını _aylik_grid_effective_kyc_for_compute girdi şekline çevir."""
+    kid = row.get("musteri_kyc_id")
+    has = row.get("has_musteri_kyc")
+    if has is None:
+        has = kid is not None and str(kid).strip() != ""
+    return {
+        "has_musteri_kyc": bool(has),
+        "musteri_kyc_id": kid,
+        "sozlesme_tarihi": row.get("kyc_soz_bas"),
+        "sozlesme_bitis": row.get("kyc_soz_bit"),
+        "aylik_kira": row.get("aylik_kira"),
+        "kira_artis_tarihi": row.get("kyc_kira_artis"),
+        "kira_suresi_ay": row.get("kyc_kira_suresi_ay"),
+        "kira_nakit": row.get("kira_nakit"),
+        "kira_nakit_tutar": row.get("kira_nakit_tutar"),
+        "kira_banka_tutar": row.get("kira_banka_tutar"),
+        "kdv_oran": row.get("kdv_oran"),
+        "kapanis_tarihi": row.get("kapanis_tarihi"),
+        "kapanis_sonrasi_borc_ay": row.get("kapanis_sonrasi_borc_ay"),
+        "durum": row.get("durum"),
+        "rent_start_date": row.get("rent_start_date"),
+        "ilk_kira_bedeli": row.get("ilk_kira_bedeli"),
+    }
+
+
 def _firma_ozet_kyc_dict_from_grid_sql_row(row) -> dict | None:
-    """musteri_aylik_grid_* SELECT satırından firma_ozet_aylik_grid_hucre_kdv_dahil için kyc dict."""
+    """musteri_aylik_grid_* SELECT satırından firma_ozet_aylik_grid_hucre_kdv_dahil için kyc dict.
+
+    SENTETIK_KYC_ENABLED açıkken: Grid ile AYNI politika
+    (_aylik_grid_effective_kyc_for_compute — KYC satırı varsa mk aynen;
+    yoksa yalnız ilk_kira_bedeli, guncel'e düşmeden).
+    Kapalıyken: eski Grup CASE (firma_grid_aylik_net) — üretim değişmez.
+    """
     if not row or row.get("id") is None:
         return None
+    if SENTETIK_KYC_ENABLED:
+        eff = _aylik_grid_effective_kyc_for_compute(_firma_ozet_sql_row_to_helper_input(row))
+        if not eff:
+            return None
+        if not _aylik_grid_coerce_date(eff.get("sozlesme_tarihi")):
+            giris_sql = row.get("giris_raw")
+            if giris_sql is not None:
+                eff["sozlesme_tarihi"] = giris_sql
+        raw_soz_bit = row.get("kyc_soz_bit")
+        bit_parsed = _aylik_grid_coerce_date(raw_soz_bit)
+        if eff.get("sozlesme_bitis") is None and raw_soz_bit is not None:
+            eff["sozlesme_bitis"] = bit_parsed if bit_parsed is not None else raw_soz_bit
+        if "kira_banka" not in eff:
+            eff["kira_banka"] = row.get("kira_banka")
+        return eff
     raw_soz_bas = row.get("kyc_soz_bas")
     raw_soz_bit = row.get("kyc_soz_bit")
     giris_sql = row.get("giris_raw")
@@ -7748,14 +7795,27 @@ def _firma_ozet_kyc_dict_from_grid_sql_row(row) -> dict | None:
 def _musteri_aylik_grid_customer_kyc_select_sql():
     """Tek müşteri veya ANY(musteri_ids) için ortak FROM; WHERE dışarıda eklenir."""
     gsql = _FIRMA_OZET_GIRIS_TARIHI_SQL
+    if SENTETIK_KYC_ENABLED:
+        net_case = """CASE
+                   WHEN mk.id IS NOT NULL THEN mk.aylik_kira
+                   ELSE c.ilk_kira_bedeli
+               END AS firma_grid_aylik_net"""
+    else:
+        net_case = """CASE
+                   WHEN mk.aylik_kira IS NOT NULL AND mk.aylik_kira > 0 THEN mk.aylik_kira
+                   ELSE COALESCE(c.guncel_kira_bedeli, c.ilk_kira_bedeli, mk.aylik_kira)
+               END AS firma_grid_aylik_net"""
     return f"""
         SELECT c.id,
                ({gsql}) AS giris_raw,
                c.guncel_kira_bedeli,
                c.ilk_kira_bedeli,
+               c.rent_start_date,
                c.durum,
                c.kapanis_tarihi,
                c.kapanis_sonrasi_borc_ay,
+               mk.id AS musteri_kyc_id,
+               (mk.id IS NOT NULL) AS has_musteri_kyc,
                mk.sozlesme_tarihi AS kyc_soz_bas,
                mk.sozlesme_bitis AS kyc_soz_bit,
                mk.kira_artis_tarihi AS kyc_kira_artis,
@@ -7767,14 +7827,12 @@ def _musteri_aylik_grid_customer_kyc_select_sql():
                mk.kira_banka_tutar,
                mk.kdv_oran,
                c.hazir_ofis_oda_no,
-               CASE
-                   WHEN mk.aylik_kira IS NOT NULL AND mk.aylik_kira > 0 THEN mk.aylik_kira
-                   ELSE COALESCE(c.guncel_kira_bedeli, c.ilk_kira_bedeli, mk.aylik_kira)
-               END AS firma_grid_aylik_net
+               {net_case}
         FROM customers c
         LEFT JOIN (
             SELECT DISTINCT ON (musteri_id)
                 musteri_id,
+                id,
                 sozlesme_tarihi,
                 sozlesme_bitis,
                 kira_artis_tarihi,
