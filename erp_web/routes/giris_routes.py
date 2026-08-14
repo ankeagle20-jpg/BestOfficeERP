@@ -82,9 +82,21 @@ import secrets
 from decimal import Decimal
 
 # Aylık grid «tam ödendi» / tahsil dağıtım mantığı değişince artırın; musteri_aylik_grid_cache yeniden üretilir.
-AYLIK_GRID_COMPUTE_REV = 27
+AYLIK_GRID_COMPUTE_REV = 28
 AYLIK_GRID_TAM_ODENDI_TOLERANS = 0.05  # kurus farklarini (dagitim/yuvarlama) tam odendi say
 PLACEHOLDER_BRUT_MAX = 0.5  # grid min tutar (0.01); gerçek brüt yazılmamış panel
+
+
+def _env_flag_true(name: str, default: bool = False) -> bool:
+    raw = str(os.environ.get(name, "") or "").strip().lower()
+    if not raw:
+        return default
+    return raw in ("1", "true", "yes", "on", "evet")
+
+
+# AŞAMA 1: varsayılan KAPALI. Açılmadan üretim yolları sentetik KYC helper'ını ÇAĞIRMAZ.
+SENTETIK_KYC_ENABLED = _env_flag_true("SENTETIK_KYC_ENABLED", default=False)
+
 # Grid/panel tahsilat aciklama: «Ay YYYY Tahsilat H|AYLIK_TAH|…» (elle makbuz serbest metni haric)
 GRID_TAH_ACIKLAMA_REGEX = r"^.+ \d{4} Tahsilat [A-Z]\|AYLIK_TAH\|"
 GRID_TAH_PATTERN = re.compile(r"^\w[\w\s]+ \d{4} Tahsilat [A-Z]\|AYLIK_TAH\|")
@@ -1156,15 +1168,17 @@ def _kyc_date_iso(v):
 def _aylik_grid_cache_matches_kyc(musteri_id, cache_obj):
     if not isinstance(cache_obj, dict):
         return False
-    kyc = fetch_one(
+    kyc_row = fetch_one(
         """
-        SELECT mk.sozlesme_tarihi, mk.sozlesme_bitis, mk.kira_suresi_ay, mk.aylik_kira, mk.kira_nakit, mk.kira_artis_tarihi,
-               mk.kira_nakit_tutar, mk.kira_banka_tutar,
-               c.kapanis_tarihi, c.kapanis_sonrasi_borc_ay, c.durum
+        SELECT mk.id AS musteri_kyc_id,
+               mk.sozlesme_tarihi, mk.sozlesme_bitis, mk.kira_suresi_ay, mk.aylik_kira, mk.kira_nakit, mk.kira_artis_tarihi,
+               mk.kira_nakit_tutar, mk.kira_banka_tutar, mk.kdv_oran,
+               c.kapanis_tarihi, c.kapanis_sonrasi_borc_ay, c.durum, c.rent_start_date,
+               c.ilk_kira_bedeli
         FROM customers c
         LEFT JOIN LATERAL (
-            SELECT sozlesme_tarihi, sozlesme_bitis, kira_suresi_ay, aylik_kira, kira_nakit, kira_artis_tarihi,
-                   kira_nakit_tutar, kira_banka_tutar
+            SELECT id, sozlesme_tarihi, sozlesme_bitis, kira_suresi_ay, aylik_kira, kira_nakit, kira_artis_tarihi,
+                   kira_nakit_tutar, kira_banka_tutar, kdv_oran
             FROM musteri_kyc
             WHERE musteri_id = c.id
             ORDER BY id DESC
@@ -1174,8 +1188,17 @@ def _aylik_grid_cache_matches_kyc(musteri_id, cache_obj):
         """,
         (musteri_id,),
     )
-    if not kyc:
+    if not kyc_row:
         return False
+    kyc_row = dict(kyc_row)
+    kyc_row["has_musteri_kyc"] = kyc_row.get("musteri_kyc_id") is not None
+    # Flag açık: effective taban/tarih (sentetik dahil). Kapalı: ham mk satırı (eski davranış).
+    if SENTETIK_KYC_ENABLED:
+        kyc = _aylik_grid_effective_kyc_for_compute(kyc_row)
+        if not kyc:
+            return False
+    else:
+        kyc = kyc_row
 
     # Eski payload'lar: taban kirası yok → Sözleşmeler güncellense bile rapor 0 kalabiliyordu
     if "taban_aylik_net" not in cache_obj:
@@ -1199,6 +1222,8 @@ def _aylik_grid_cache_matches_kyc(musteri_id, cache_obj):
         return False
 
     bas_k = _aylik_grid_coerce_date(kyc.get("sozlesme_tarihi"))
+    if not bas_k and SENTETIK_KYC_ENABLED:
+        bas_k = _aylik_grid_coerce_date(kyc.get("rent_start_date"))
     if not bas_k:
         return False
     if cache_obj.get("baslangic") != bas_k.isoformat():
@@ -1768,8 +1793,71 @@ def _aylik_grid_compute(musteri_id, kyc, tufe_map, tahsil_tutar_map=None):
 _musteri_kyc_grid_mem: dict[int, dict] = {}
 
 
+def _aylik_grid_effective_kyc_for_compute(row) -> dict | None:
+    """Grid hesabı için etkili KYC dict (AŞAMA 0 politikası).
+
+    - has_musteri_kyc True (veya musteri_kyc_id dolu): mk alanları AYNEN; sentetik yok.
+    - KYC yok + ilk_kira_bedeli > 0 + rent_start_date dolu: sentetik
+      aylik_kira=ilk, sozlesme_tarihi=rent_start, kdv_oran=20, nakit/banka default boş.
+    - Aksi: None (boş ufuk).
+
+    AŞAMA 2: SENTETIK_KYC_ENABLED açıkken loader/matches_kyc bu helper'ı kullanır;
+    kapalıyken (varsayılan) üretim yolları ham KYC satırıyla devam eder.
+    """
+    if not isinstance(row, dict) or not row:
+        return None
+    has_kyc = row.get("has_musteri_kyc")
+    if has_kyc is None:
+        kid = row.get("musteri_kyc_id")
+        has_kyc = kid is not None and str(kid).strip() != ""
+    if has_kyc:
+        return {
+            "sozlesme_tarihi": row.get("sozlesme_tarihi"),
+            "sozlesme_bitis": row.get("sozlesme_bitis"),
+            "aylik_kira": row.get("aylik_kira"),
+            "kira_artis_tarihi": row.get("kira_artis_tarihi"),
+            "kira_suresi_ay": row.get("kira_suresi_ay"),
+            "kira_nakit": row.get("kira_nakit"),
+            "kira_nakit_tutar": row.get("kira_nakit_tutar"),
+            "kira_banka_tutar": row.get("kira_banka_tutar"),
+            "kdv_oran": row.get("kdv_oran"),
+            "kapanis_tarihi": row.get("kapanis_tarihi"),
+            "kapanis_sonrasi_borc_ay": row.get("kapanis_sonrasi_borc_ay"),
+            "durum": row.get("durum"),
+            "rent_start_date": row.get("rent_start_date"),
+        }
+    try:
+        ilk = float(row.get("ilk_kira_bedeli") or 0)
+    except (TypeError, ValueError):
+        ilk = 0.0
+    if (not math.isfinite(ilk)) or ilk <= 0:
+        return None
+    bas = _aylik_grid_coerce_date(row.get("rent_start_date"))
+    if not bas:
+        return None
+    return {
+        "sozlesme_tarihi": bas,
+        "sozlesme_bitis": None,
+        "aylik_kira": round(ilk, 2),
+        "kira_artis_tarihi": None,
+        "kira_suresi_ay": None,
+        "kira_nakit": None,
+        "kira_nakit_tutar": None,
+        "kira_banka_tutar": None,
+        "kdv_oran": 20,
+        "kapanis_tarihi": row.get("kapanis_tarihi"),
+        "kapanis_sonrasi_borc_ay": row.get("kapanis_sonrasi_borc_ay"),
+        "durum": row.get("durum"),
+        "rent_start_date": bas,
+    }
+
+
 def _musteri_kyc_grup_for_aylik_grid(musteri_id: int):
-    """customers + son musteri_kyc — aylık grid / cari ekstre aynı satır."""
+    """customers + son musteri_kyc — aylık grid / cari ekstre aynı satır.
+
+    SENTETIK_KYC_ENABLED açıkken: _aylik_grid_effective_kyc_for_compute sonucu.
+    Kapalıyken: ham SQL satırı (ek alanlar dahil; aylik_kira/mk davranışı eski).
+    """
     try:
         mid = int(musteri_id)
     except (TypeError, ValueError):
@@ -1782,12 +1870,14 @@ def _musteri_kyc_grup_for_aylik_grid(musteri_id: int):
         return dict(hit["row"])
     row = fetch_one(
         """
-        SELECT mk.sozlesme_tarihi, mk.sozlesme_bitis, mk.aylik_kira, mk.kira_artis_tarihi, mk.kira_suresi_ay, mk.kira_nakit,
+        SELECT mk.id AS musteri_kyc_id,
+               mk.sozlesme_tarihi, mk.sozlesme_bitis, mk.aylik_kira, mk.kira_artis_tarihi, mk.kira_suresi_ay, mk.kira_nakit,
                mk.kira_nakit_tutar, mk.kira_banka_tutar, mk.kdv_oran,
-               c.kapanis_tarihi, c.kapanis_sonrasi_borc_ay, c.durum, c.rent_start_date
+               c.kapanis_tarihi, c.kapanis_sonrasi_borc_ay, c.durum, c.rent_start_date,
+               c.ilk_kira_bedeli
         FROM customers c
         LEFT JOIN LATERAL (
-            SELECT sozlesme_tarihi, sozlesme_bitis, aylik_kira, kira_artis_tarihi, kira_suresi_ay, kira_nakit,
+            SELECT id, sozlesme_tarihi, sozlesme_bitis, aylik_kira, kira_artis_tarihi, kira_suresi_ay, kira_nakit,
                    kira_nakit_tutar, kira_banka_tutar, kdv_oran
             FROM musteri_kyc
             WHERE musteri_id = c.id
@@ -1798,12 +1888,20 @@ def _musteri_kyc_grup_for_aylik_grid(musteri_id: int):
         """,
         (mid,),
     ) or {}
-    _musteri_kyc_grid_mem[mid] = {"ts": now, "row": dict(row) if row else {}}
+    row = dict(row) if row else {}
+    if row:
+        row["has_musteri_kyc"] = row.get("musteri_kyc_id") is not None
+    if SENTETIK_KYC_ENABLED:
+        eff = _aylik_grid_effective_kyc_for_compute(row) if row else None
+        out = dict(eff) if eff else {}
+    else:
+        out = row
+    _musteri_kyc_grid_mem[mid] = {"ts": now, "row": dict(out) if out else {}}
     if len(_musteri_kyc_grid_mem) > 200:
         stale = [k for k, v in _musteri_kyc_grid_mem.items() if (now - float(v.get("ts") or 0)) > 90.0]
         for k in stale:
             _musteri_kyc_grid_mem.pop(k, None)
-    return row
+    return out
 
 
 def _musteri_reel_donem_manual_dict_from_db(musteri_id: int) -> dict[int, float]:
@@ -2689,22 +2787,27 @@ def _aylik_tahsil_tutar_map(musteri_id, tahsil_rows=None, remaining_by_iso=None,
                 remaining_by_iso = _aylik_remaining_brut_by_iso_from_kyc(kyc_row, tufe_map)
             else:
                 try:
-                    kyc = fetch_one(
-                        """
-                        SELECT mk.sozlesme_tarihi, mk.sozlesme_bitis, mk.aylik_kira, mk.kira_artis_tarihi,
-                               mk.kira_suresi_ay, mk.kira_nakit, mk.kira_nakit_tutar, mk.kira_banka_tutar
-                        FROM customers c
-                        LEFT JOIN LATERAL (
-                            SELECT *
-                            FROM musteri_kyc
-                            WHERE musteri_id = c.id
-                            ORDER BY id DESC
-                            LIMIT 1
-                        ) mk ON TRUE
-                        WHERE c.id = %s
-                        """,
-                        (musteri_id,),
-                    ) or {}
+                    # Flag açıkken loader zaten effective KYC döner; kapalıyken ham satır.
+                    # Ayrı SELECT yerine tek kaynak → sentetik/ham sapması olmasın.
+                    if SENTETIK_KYC_ENABLED:
+                        kyc = _musteri_kyc_grup_for_aylik_grid(int(musteri_id))
+                    else:
+                        kyc = fetch_one(
+                            """
+                            SELECT mk.sozlesme_tarihi, mk.sozlesme_bitis, mk.aylik_kira, mk.kira_artis_tarihi,
+                                   mk.kira_suresi_ay, mk.kira_nakit, mk.kira_nakit_tutar, mk.kira_banka_tutar
+                            FROM customers c
+                            LEFT JOIN LATERAL (
+                                SELECT *
+                                FROM musteri_kyc
+                                WHERE musteri_id = c.id
+                                ORDER BY id DESC
+                                LIMIT 1
+                            ) mk ON TRUE
+                            WHERE c.id = %s
+                            """,
+                            (musteri_id,),
+                        ) or {}
                     remaining_by_iso = _aylik_remaining_brut_by_iso_from_kyc(kyc, tufe_map)
                 except Exception:
                     pass
