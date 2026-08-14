@@ -199,6 +199,8 @@ class BestOfficeGIBManager:
         self.username = os.getenv("GIB_USER", "").strip()
         self.password = os.getenv("GIB_PASS", "").strip()
         self.test_mode = test_mode if test_mode is not None else (os.getenv("GIB_TEST", "0").strip().lower() in ("1", "true", "evet"))
+        # Lazy client: EArsivPortalClient ctor zorunlu giris_yap yapar; erken login yok.
+        # İlk gerçek GİB işleminde _materialize_client / _fresh_login ile oluşur.
         self.client = None
         self.client_type = None
         self.last_sms_error = None
@@ -208,20 +210,13 @@ class BestOfficeGIBManager:
         self.last_gonderilen_payload = None
         self.last_gib_asama_izle: list = []
         self.init_error = None
-        try:
-            if _HAS_EARSIV_PORTAL and self.username and self.password:
-                # eArsivPortal test_modu=True iken test ortamını kullanır.
-                self.client = EArsivPortalClient(self.username, self.password, test_modu=bool(self.test_mode))
-                self.client_type = "earsivportal"
-                self._portal_compat_shim()
-        except Exception as e:
-            self.init_error = str(e)
-            self.client = None
-            self.client_type = None
+        # Materialize (ctor girişi) henüz "taze oturum" sayılır; hemen sonraki
+        # _fresh_login logout+login ile ikinci tur yapmasın.
+        self._client_born_fresh = False
 
     def is_available(self):
-        """GİB kütüphanesi ve kimlik bilgileri hazır mı."""
-        return self.client is not None
+        """GİB paketi + kimlik hazır mı (GİB'e giriş denemesi yok; lazy client)."""
+        return bool(_HAS_EARSIV_PORTAL and self.username and self.password)
 
     def _gib_asama(self, adim: str, detay: str | None = None) -> None:
         """Taslak/SMS akışında API ve isteğe bağlı dosyaya adım kaydı (tıkanma teşhisi)."""
@@ -241,17 +236,37 @@ class BestOfficeGIBManager:
         except Exception:
             pass
 
+    def _materialize_client(self):
+        """İlk ihtiyaçta EArsivPortalClient oluştur (kütüphane ctor = 1 giris_yap)."""
+        if self.client is not None:
+            return
+        if self.init_error:
+            raise RuntimeError(f"GİB istemcisi başlatılamadı: {self.init_error}")
+        if not _HAS_EARSIV_PORTAL or EArsivPortalClient is None:
+            raise RuntimeError(
+                "GİB e-Arşiv için eArsivPortal kütüphanesi yüklü değil. "
+                "Örn: pip install eArsivPortal"
+            )
+        if not self.username or not self.password:
+            raise ValueError("GIB_USER ve GIB_PASS .env dosyasında tanımlı olmalı.")
+        try:
+            # eArsivPortal test_modu=True iken test ortamını kullanır; ctor giris_yap çağırır.
+            self.client = EArsivPortalClient(
+                self.username, self.password, test_modu=bool(self.test_mode)
+            )
+            self.client_type = "earsivportal"
+            self._client_born_fresh = True
+            self._portal_compat_shim()
+        except Exception as e:
+            self.init_error = str(e)
+            self.client = None
+            self.client_type = None
+            self._client_born_fresh = False
+            raise
+
     def _ensure_client(self):
         if not self.client:
-            if self.init_error:
-                raise RuntimeError(f"GİB istemcisi başlatılamadı: {self.init_error}")
-            if not _HAS_EARSIV_PORTAL:
-                raise RuntimeError(
-                    "GİB e-Arşiv için eArsivPortal kütüphanesi yüklü değil. "
-                    "Örn: pip install eArsivPortal"
-                )
-            if not self.username or not self.password:
-                raise ValueError("GIB_USER ve GIB_PASS .env dosyasında tanımlı olmalı.")
+            self._materialize_client()
         self._portal_compat_shim()
 
     def _portal_compat_shim(self):
@@ -302,6 +317,8 @@ class BestOfficeGIBManager:
 
     def _portal_logout(self):
         """Portal oturumunu kapat (method adı sürüme göre değişebilir)."""
+        if not self.client:
+            return
         try:
             if hasattr(self.client, "logout"):
                 self.client.logout()
@@ -314,14 +331,30 @@ class BestOfficeGIBManager:
 
     def _portal_login(self):
         """Portal oturumunu aç (method adı sürüme göre değişebilir)."""
+        if not self.client:
+            return
         if hasattr(self.client, "login"):
             self.client.login()
             return
         self.client.giris_yap()
 
     def _fresh_login(self):
-        """Her işlemde taze oturum: önce logout, sonra login."""
+        """Her işlemde taze oturum: önce logout, sonra login.
+
+        Lazy client: client henüz yoksa materialize (ctor girişi = doğum/taze oturum)
+        yeterli. _ensure_client hemen önce materialize ettiyse (_client_born_fresh)
+        ikinci logout+login atlanır. Client zaten eskiyse: logout + login.
+        """
         self._gib_asama("fresh_login_basla")
+        if self.client is None:
+            self._materialize_client()
+            self._client_born_fresh = False
+            self._gib_asama("fresh_login_tamam", "dogum_materialize")
+            return
+        if self._client_born_fresh:
+            self._client_born_fresh = False
+            self._gib_asama("fresh_login_tamam", "dogum_zaten_taze")
+            return
         self._portal_logout()
         self._portal_login()
         self._gib_asama("fresh_login_tamam")
