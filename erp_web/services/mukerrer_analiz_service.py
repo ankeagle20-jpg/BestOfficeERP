@@ -282,12 +282,14 @@ def _fetch_customer_rows() -> list[dict]:
                COALESCE(c.current_rent, 0) AS current_rent,
                COALESCE(c.ilk_kira_bedeli, 0) AS ilk_kira_bedeli,
                COALESCE(c.arsivli, FALSE) AS arsivli,
+               c.hizmet_turu AS c_hizmet_turu,
                mk.id AS kyc_id,
                mk.yetkili_adsoyad AS kyc_yetkili,
                mk.odeme_duzeni AS kyc_odeme,
                mk.odeme_duzeni_manuel AS kyc_odeme_manuel,
                mk.sozlesme_tarihi AS kyc_sozlesme,
                COALESCE(mk.aylik_kira, 0) AS kyc_aylik_kira,
+               mk.hizmet_turu AS mk_hizmet_turu,
                COALESCE(t.n, 0) AS tahsilat_n,
                COALESCE(f.n, 0) AS fatura_n,
                t.son_tahsilat AS son_tahsilat,
@@ -295,7 +297,7 @@ def _fetch_customer_rows() -> list[dict]:
         FROM customers c
         LEFT JOIN LATERAL (
             SELECT id, yetkili_adsoyad, odeme_duzeni, odeme_duzeni_manuel,
-                   sozlesme_tarihi, aylik_kira
+                   sozlesme_tarihi, aylik_kira, hizmet_turu
             FROM musteri_kyc
             WHERE musteri_id = c.id
             ORDER BY id DESC NULLS LAST
@@ -348,6 +350,12 @@ def _enrich(rows: list[dict]) -> list[dict]:
             _float_or_0(r.get("current_rent")),
             _float_or_0(r.get("ilk_kira_bedeli")),
         )
+        # Fatura Raporu ile aynı: KYC öncelik, customers fallback
+        hizmet_turu = (
+            (r.get("mk_hizmet_turu") or "").strip()
+            or (r.get("c_hizmet_turu") or "").strip()
+            or ""
+        )
         son_parts = []
         for key in ("son_tahsilat", "son_fatura"):
             v = r.get(key)
@@ -365,18 +373,26 @@ def _enrich(rows: list[dict]) -> list[dict]:
                 "sozlesme_src": soz_src,
                 "kapanis_tarihi": norm_date(r.get("kapanis_tarihi")),
                 "aylik_kira": aylik,
+                "hizmet_turu": hizmet_turu,
                 "son_islem_at": son_parts[0] if son_parts else None,
             }
         )
     return out
 
 
-def build_mukerrer_groups(guven: str | None = None) -> dict[str, Any]:
+def build_mukerrer_groups(
+    guven: str | None = None,
+    hizmet_turu: str | None = None,
+) -> dict[str, Any]:
     """Salt okunur mükerrer grup listesi. Sadece COK_YUKSEK / YUKSEK döner.
 
     guven: 'cok_yuksek' | 'yuksek' | 'hepsi' (varsayılan hepsi = iki güvenli tier)
+    hizmet_turu: boş/hepsi = filtre yok; aksi halde en az bir üyesi bu türe
+      sahip gruplar (eşleştirme/skor sonrası).
     """
     guven_norm = (guven or "hepsi").strip().lower()
+    ht_raw = (hizmet_turu or "").strip()
+    ht_filter = "" if ht_raw.lower() in ("", "hepsi", "tumu", "tümü", "all") else ht_raw
     if guven_norm in ("cok_yuksek", "cok-yuksek", "cozyuksek"):
         tier_filter = frozenset({"COK_YUKSEK"})
     elif guven_norm in ("yuksek",):
@@ -472,6 +488,7 @@ def build_mukerrer_groups(guven: str | None = None) -> dict[str, Any]:
                     "kapanis_tarihi": norm_date(m.get("kapanis_tarihi")),
                     "aylik_kira": round(kira, 2),
                     "kira_dolu": kira > 0,
+                    "hizmet_turu": (m.get("hizmet_turu") or "").strip(),
                     "tahsilat_n": int(m.get("tahsilat_n") or 0),
                     "fatura_n": int(m.get("fatura_n") or 0),
                     "son_islem_at": m.get("son_islem_at"),
@@ -515,12 +532,35 @@ def build_mukerrer_groups(guven: str | None = None) -> dict[str, Any]:
         )
     )
 
+    # Dropdown seçenekleri: güven filtresinden geçen grupların üyelerinden (hizmet filtresi öncesi)
+    ht_opts: set[str] = set()
+    for g in groups_out:
+        for m in g.get("members") or []:
+            v = (m.get("hizmet_turu") or "").strip()
+            if v:
+                ht_opts.add(v)
+    hizmet_turu_options = sorted(ht_opts, key=lambda s: s.casefold())
+
+    # Hizmet türü filtresi: eşleştirme/skor SONRASI — en az bir üye eşleşirse grup kalır
+    if ht_filter:
+        needle = ht_filter.casefold()
+        groups_out = [
+            g
+            for g in groups_out
+            if any(
+                ((m.get("hizmet_turu") or "").strip().casefold() == needle)
+                for m in (g.get("members") or [])
+            )
+        ]
+
     return {
         "ok": True,
         "meta": {
             "ref": "live",
             "readonly": True,
             "guven_filter": guven_norm if guven_norm in ("cok_yuksek", "yuksek", "hepsi") else "hepsi",
+            "hizmet_turu_filter": ht_filter or "hepsi",
+            "hizmet_turu_options": hizmet_turu_options,
             "counts": {
                 "COK_YUKSEK": int(raw_counts.get("COK_YUKSEK") or 0),
                 "YUKSEK": int(raw_counts.get("YUKSEK") or 0),

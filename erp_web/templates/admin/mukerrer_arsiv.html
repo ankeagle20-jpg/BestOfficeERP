@@ -91,6 +91,12 @@
           <option value="yuksek">Sadece YÜKSEK</option>
         </select>
       </label>
+      <label>
+        Hizmet Türü
+        <select id="mk-hizmet-turu">
+          <option value="" selected>Tümü</option>
+        </select>
+      </label>
       <button type="button" class="btn-erp btn-erp-sm" id="mk-yenile">Yenile</button>
       <span class="mk-note" id="mk-session">Bu oturum: 0 grup / 0 kayıt arşivlendi</span>
     </div>
@@ -132,6 +138,7 @@
   const elErr = document.getElementById('mk-err');
   const elOk = document.getElementById('mk-ok');
   const elGuven = document.getElementById('mk-guven');
+  const elHizmet = document.getElementById('mk-hizmet-turu');
   const elSession = document.getElementById('mk-session');
   const elBatches = document.getElementById('mk-batches');
   const elBatchErr = document.getElementById('mk-batch-err');
@@ -214,6 +221,7 @@
           '<td>' + esc(m.musteri_no) + '</td>' +
           '<td><a class="mk-musteri-link" href="/giris/?tab=sozlesmeler&mid=' + m.id + '" target="_blank" rel="noopener" onclick="event.stopPropagation()">' + esc(m.name) + '</a>' + (isCanon ? ' <span class="mk-score">(önerilen kanonik)</span>' : '') + '</td>' +
           '<td>' + esc(m.durum) + '</td>' +
+          '<td>' + esc(m.hizmet_turu || '—') + '</td>' +
           '<td>' + esc(m.sozlesme_baslangic || '—') + '</td>' +
           '<td>' + (String(m.durum || '').toLowerCase() === 'pasif' ? esc(m.kapanis_tarihi || '—') : '—') + '</td>' +
           '<td>' + (m.kira_dolu ? esc(m.aylik_kira) : '—') + '</td>' +
@@ -243,6 +251,7 @@
         '<table>' +
           '<thead><tr>' +
             '<th>Kanonik</th><th>Arşivle</th><th>ID</th><th>No</th><th>Ad</th><th>Durum</th>' +
+            '<th>Hizmet Türü</th>' +
             '<th>Sözleşme Başlangıç</th><th>Kapanış Tarihi</th>' +
             '<th>Kira</th><th>Tahsilat/Fatura</th><th>Son işlem</th><th>Skor</th>' +
           '</tr></thead>' +
@@ -283,7 +292,12 @@
     elMeta.textContent = 'Yükleniyor…';
     elGroups.innerHTML = '';
     const guven = elGuven.value || 'hepsi';
-    fetch('/admin/api/mukerrer-analiz?guven=' + encodeURIComponent(guven), {
+    const hizmet = (elHizmet && elHizmet.value) ? elHizmet.value : '';
+    let url = '/admin/api/mukerrer-analiz?guven=' + encodeURIComponent(guven);
+    if (hizmet) {
+      url += '&hizmet_turu=' + encodeURIComponent(hizmet);
+    }
+    fetch(url, {
       credentials: 'same-origin',
       headers: { 'Accept': 'application/json' }
     })
@@ -300,6 +314,20 @@
           'Dönen grup: ' + (meta.returned_n != null ? meta.returned_n : (x.j.groups || []).length) +
           ' · ÇOK YÜKSEK: ' + (counts.COK_YUKSEK || 0) +
           ' · YÜKSEK: ' + (counts.YUKSEK || 0);
+        const curHt = (elHizmet && elHizmet.value) ? elHizmet.value : '';
+        const opts = (meta.hizmet_turu_options || []);
+        if (elHizmet) {
+          elHizmet.innerHTML = '<option value="">Tümü</option>' +
+            opts.map(function (o) {
+              const sel = (o === curHt) ? ' selected' : '';
+              return '<option value="' + esc(o) + '"' + sel + '>' + esc(o) + '</option>';
+            }).join('');
+          if (curHt && !opts.some(function (o) { return o === curHt; })) {
+            elHizmet.value = '';
+          } else {
+            elHizmet.value = curHt;
+          }
+        }
         groupsCache = x.j.groups || [];
         if (!groupsCache.length) {
           elGroups.innerHTML = '<p class="mk-note">Filtreden geçen grup yok.</p>';
@@ -410,6 +438,7 @@
 
   document.getElementById('mk-yenile').addEventListener('click', loadAnaliz);
   elGuven.addEventListener('change', loadAnaliz);
+  if (elHizmet) elHizmet.addEventListener('change', loadAnaliz);
   document.getElementById('mk-batch-yenile').addEventListener('click', loadBatches);
 
   document.getElementById('mk-tab-analiz').addEventListener('click', function () {

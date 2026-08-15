@@ -31,7 +31,8 @@ def api_mukerrer_analiz():
         from services.mukerrer_analiz_service import build_mukerrer_groups
 
         guven = (request.args.get("guven") or "hepsi").strip()
-        payload = build_mukerrer_groups(guven=guven)
+        hizmet_turu = (request.args.get("hizmet_turu") or "").strip()
+        payload = build_mukerrer_groups(guven=guven, hizmet_turu=hizmet_turu)
         safe_groups = []
         for g in payload.get("groups") or []:
             if (g.get("tier") or "") not in ("COK_YUKSEK", "YUKSEK"):
