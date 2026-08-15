@@ -82,7 +82,7 @@ import secrets
 from decimal import Decimal
 
 # Aylık grid «tam ödendi» / tahsil dağıtım mantığı değişince artırın; musteri_aylik_grid_cache yeniden üretilir.
-AYLIK_GRID_COMPUTE_REV = 29
+AYLIK_GRID_COMPUTE_REV = 30
 AYLIK_GRID_TAM_ODENDI_TOLERANS = 0.05  # kurus farklarini (dagitim/yuvarlama) tam odendi say
 PLACEHOLDER_BRUT_MAX = 0.5  # grid min tutar (0.01); gerçek brüt yazılmamış panel
 
@@ -3776,7 +3776,7 @@ def _normalize_calisma_sekli(data) -> str:
 
 
 def _normalize_kapanis_sonrasi_borc_ay(data, durum: str | None = None):
-    """Pasif müşteri için kapanıştan sonra ek borç ayı: 1-12, aksi halde None (Hepsi)."""
+    """Pasif: kapanış sonrası ek ay (0=sadece kapanış, 1..=kapanış+N), boş/None=Hepsi."""
     dr = (durum or data.get("durum") or "aktif").strip().lower()
     if dr != "pasif":
         return None
@@ -3790,14 +3790,16 @@ def _normalize_kapanis_sonrasi_borc_ay(data, durum: str | None = None):
         val = int(s)
     except (TypeError, ValueError):
         return None
-    return val if 1 <= val <= 12 else None
+    return val if 0 <= val <= 12 else None
 
 
 def _aylik_grid_effective_bitis(kyc: dict, bit: date | None) -> date | None:
     """Pasif müşteride kapanış + ek ay seçimi varsa, sözleşme bitişini buna göre kısaltır.
 
-    Kural: kapanış ayı DAHIL sayılır.
-    Örn. kapanış=2026-03-01, ek_ay=3 -> borçlanacak aylar: Mart, Nisan, Mayıs.
+    Semantik (D2): N = kapanıştan SONRA ek ay sayısı.
+    N=0 -> sadece kapanış ayı; N=1 -> kapanış + 1 ay; N=2 -> kapanış + 2 ay.
+    Örn. kapanış=2026-03-xx, N=2 -> Mart, Nisan, Mayıs.
+    Boş/None = Hepsi (cap yok).
     """
     src = dict(kyc or {})
     durum = str(src.get("durum") or src.get("musteri_durum") or "").strip().lower()
@@ -3806,15 +3808,17 @@ def _aylik_grid_effective_bitis(kyc: dict, bit: date | None) -> date | None:
     kap = _aylik_grid_coerce_date(src.get("kapanis_tarihi"))
     if not kap:
         return bit
-    try:
-        ek_ay = int(src.get("kapanis_sonrasi_borc_ay") or 0)
-    except (TypeError, ValueError):
-        ek_ay = 0
-    if ek_ay <= 0:
+    raw = src.get("kapanis_sonrasi_borc_ay")
+    if raw is None or str(raw).strip() == "":
         return bit
-    # bitiş sınırı dışlayıcı kullanılıyor (donemBas >= bit -> gösterme),
-    # bu yüzden kapanış ayı dahil N ay için +ek_ay yeterlidir.
-    sinir = _add_months(date(kap.year, kap.month, 1), ek_ay)
+    try:
+        ek_ay = int(raw)
+    except (TypeError, ValueError):
+        return bit
+    if ek_ay < 0 or ek_ay > 12:
+        return bit
+    # Dışlayıcı bitiş: kapanış ayı + N ek ay => close_first + (N+1)
+    sinir = _add_months(date(kap.year, kap.month, 1), ek_ay + 1)
     if bit is None:
         return sinir
     return min(bit, sinir)

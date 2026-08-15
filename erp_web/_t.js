@@ -3196,7 +3196,7 @@ function sozlesmelerAylikCacheRender(cacheObj, preferLiveTahsil) {
     var effOpts = {
         durum: (document.getElementById('musteri_durum') || {}).value || (cacheObj && cacheObj.durum) || '',
         kapanis_tarihi: (document.getElementById('kapanis_tarihi') || {}).value || (cacheObj && cacheObj.kapanis_tarihi) || '',
-        kapanis_sonrasi_borc_ay: formKapanisSonrasiBorcAy() || (cacheObj && cacheObj.kapanis_sonrasi_borc_ay) || ''
+        kapanis_sonrasi_borc_ay: (function () { var v = formKapanisSonrasiBorcAy(); if (v !== null && v !== undefined) return v; if (cacheObj && cacheObj.kapanis_sonrasi_borc_ay !== null && cacheObj.kapanis_sonrasi_borc_ay !== undefined && String(cacheObj.kapanis_sonrasi_borc_ay).trim() !== '') return cacheObj.kapanis_sonrasi_borc_ay; return ''; })()
     };
     var kdvElCache = document.getElementById('kdv_oran');
     var kdvOranCache = (kdvElCache && kdvElCache.value !== '') ? parseFloat(String(kdvElCache.value).replace(',', '.')) : 20;
@@ -10208,10 +10208,10 @@ function sozlesmeAylikEfektifBitisTarihi(basStr, bitStr, opts) {
     var kap = opts.kapanis_tarihi ? (parseTarihStr(opts.kapanis_tarihi) || new Date(opts.kapanis_tarihi)) : null;
     var durum = String(opts.durum || '').toLowerCase().trim();
     var ekAy = kapanisSonrasiBorcAyDegeri(opts.kapanis_sonrasi_borc_ay);
-    if (durum === 'pasif' && kap && !isNaN(kap.getTime()) && ekAy > 0) {
-        // Kapanış ayı dahil N ay borçlandır: 03/2026 + 3 => Mart,Nisan,Mayıs.
-        // Aşağıdaki sınır dışlayıcı olduğu için +ekAy kullanılır.
-        var sinir = new Date(kap.getFullYear(), kap.getMonth() + ekAy, 1);
+    if (durum === 'pasif' && kap && !isNaN(kap.getTime()) && ekAy !== null && ekAy !== undefined) {
+        // D2: N = kapanıştan sonra ek ay. 0=sadece kapanış; 1=kapanış+1.
+        // Dışlayıcı sınır: close_month + (N+1).
+        var sinir = new Date(kap.getFullYear(), kap.getMonth() + ekAy + 1, 1);
         if (!bit || isNaN(bit.getTime()) || sinir < bit) bit = sinir;
     }
     return (bit && !isNaN(bit.getTime())) ? bit : null;
@@ -18728,14 +18728,17 @@ function tarihISOYerel(d) {
 }
 
 function kapanisSonrasiBorcAyDegeri(raw) {
-    if (raw == null) return 0;
-    var n = parseInt(String(raw).trim(), 10);
-    return (!isNaN(n) && n >= 1 && n <= 12) ? n : 0;
+    /* D2: null/'' = Hepsi (cap yok); 0..12 = kapanış sonrası ek ay (0=sadece kapanış). */
+    if (raw == null) return null;
+    var s = String(raw).trim();
+    if (!s) return null;
+    var n = parseInt(s, 10);
+    return (!isNaN(n) && n >= 0 && n <= 12) ? n : null;
 }
 
 function formKapanisSonrasiBorcAy() {
     var el = document.getElementById('kapanis_ay_secim');
-    return el ? kapanisSonrasiBorcAyDegeri(el.value) : 0;
+    return el ? kapanisSonrasiBorcAyDegeri(el.value) : null;
 }
 
 /** opts.kapanis: API'den gelen kayıtlı tarih (YYYY-MM-DD), opts.kapanisAy: 1-12|0 */
@@ -18763,7 +18766,7 @@ function syncDurumUI(d, opts) {
     if (aySel) {
         if (showKap) {
             var kapAy = kapanisSonrasiBorcAyDegeri(opts.kapanisAy);
-            aySel.value = kapAy > 0 ? String(kapAy) : '';
+            aySel.value = (kapAy !== null && kapAy !== undefined) ? String(kapAy) : '';
         } else {
             aySel.value = '';
         }
@@ -20603,7 +20606,7 @@ async function kaydet(event) {
     var mdVal = (mdEl && mdEl.value === 'pasif') ? 'pasif' : 'aktif';
     var kapInp = document.getElementById('kapanis_tarihi');
     var kapAySel = document.getElementById('kapanis_ay_secim');
-    var kapBorcAy = (mdVal === 'pasif' && kapAySel) ? kapanisSonrasiBorcAyDegeri(kapAySel.value) : 0;
+    var kapBorcAy = (mdVal === 'pasif' && kapAySel) ? kapanisSonrasiBorcAyDegeri(kapAySel.value) : null;
     if (mdVal === 'pasif' && kapInp && (!kapInp.value || !String(kapInp.value).trim())) {
         kapInp.value = bugunISO();
     }
@@ -20622,7 +20625,7 @@ async function kaydet(event) {
         notes: document.getElementById('notes').value,
         durum: mdVal,
         kapanis_tarihi: (kapInp && mdVal === 'pasif') ? kapInp.value : '',
-        kapanis_sonrasi_borc_ay: (mdVal === 'pasif' && kapBorcAy > 0) ? kapBorcAy : '',
+        kapanis_sonrasi_borc_ay: (mdVal === 'pasif' && kapBorcAy !== null && kapBorcAy !== undefined) ? kapBorcAy : '',
         grup2_secimleri: (typeof girisGrup2SeciliOku === 'function') ? girisGrup2SeciliOku() : [],
         bizim_hesap: (function () {
             var sl = (typeof girisGrup2SeciliOku === 'function') ? girisGrup2SeciliOku() : [];
@@ -20636,7 +20639,7 @@ async function kaydet(event) {
         musteri_adi: aramaGuvenli ? aramaGuvenli.musteri_adi : (document.getElementById('musteri_adi') ? document.getElementById('musteri_adi').value : ''),
         durum: mdVal,
         kapanis_tarihi: (kapInp && mdVal === 'pasif') ? kapInp.value : '',
-        kapanis_sonrasi_borc_ay: (mdVal === 'pasif' && kapBorcAy > 0) ? kapBorcAy : '',
+        kapanis_sonrasi_borc_ay: (mdVal === 'pasif' && kapBorcAy !== null && kapBorcAy !== undefined) ? kapBorcAy : '',
         sirket_unvani: aramaGuvenli ? aramaGuvenli.name : document.getElementById('name').value,
         vergi_no: vergiNo,
         vergi_dairesi: (function () {
