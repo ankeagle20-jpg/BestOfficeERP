@@ -4175,15 +4175,203 @@ def _senaryo01_parse_yil(raw, default: int) -> int:
     return y
 
 
+def _senaryo01_grid_tutar_map(
+    mids: list[int], yil_bas: int, yil_bit: int
+) -> tuple[dict[int, dict[str, float]], dict]:
+    """Senaryo 01: grid cache'ten yıl aralığındaki KDV dahil tutarları tek batch okur.
+
+    Fatura Raporu ``_firma_ozet_referans_ay_grid_tutar_map`` deseni:
+    WITH parsed AS MATERIALIZED + jsonb_array_elements; compute_rev ∈ {27,28,29,30};
+    placeholder ``_firma_ozet_classify_borc_month`` ile elenir.
+    Yazma / rebuild / prewarm YOK — yalnız SELECT.
+    Dönüş: (tutarlar[mid][ay_key]=float, meta).
+    """
+    meta = {
+        "cache_var_adet": 0,
+        "cache_eksik_adet": 0,
+        "cache_rev_uyumsuz_adet": 0,
+        "placeholder_atlanan_adet": 0,
+        "tutar_satir_adet": 0,
+    }
+    clean: list[int] = []
+    seen: set[int] = set()
+    for raw in mids or []:
+        try:
+            mid = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if mid <= 0 or mid in seen:
+            continue
+        seen.add(mid)
+        clean.append(mid)
+    if not clean:
+        return {}, meta
+
+    y_bas = int(yil_bas)
+    y_bit = int(yil_bit)
+    if y_bit < y_bas:
+        y_bas, y_bit = y_bit, y_bas
+
+    try:
+        _ensure_aylik_grid_cache_table()
+    except Exception:
+        pass
+
+    # Cache varlığı (tek batch; N+1 değil) — meta için
+    try:
+        present_rows = (
+            fetch_all(
+                """
+                SELECT agc.musteri_id,
+                       CASE
+                           WHEN jsonb_typeof(agc.payload::jsonb) = 'object'
+                               THEN agc.payload::jsonb->>'compute_rev'
+                           ELSE NULL
+                       END AS compute_rev,
+                       jsonb_typeof(agc.payload::jsonb) AS payload_tipi
+                FROM musteri_aylik_grid_cache agc
+                WHERE agc.musteri_id = ANY(%s::bigint[])
+                """,
+                (clean,),
+            )
+            or []
+        )
+    except Exception:
+        present_rows = []
+
+    cache_mids: set[int] = set()
+    rev_uyumsuz: set[int] = set()
+    for pr in present_rows:
+        try:
+            pmid = int(pr.get("musteri_id") or 0)
+        except (TypeError, ValueError):
+            continue
+        if pmid <= 0:
+            continue
+        cache_mids.add(pmid)
+        tip = str(pr.get("payload_tipi") or "").strip().lower()
+        if tip == "object":
+            try:
+                rev = int(pr.get("compute_rev") or 0)
+            except (TypeError, ValueError):
+                rev_uyumsuz.add(pmid)
+                continue
+            if rev not in (27, 28, 29, int(AYLIK_GRID_COMPUTE_REV)):
+                rev_uyumsuz.add(pmid)
+        elif tip != "array":
+            rev_uyumsuz.add(pmid)
+
+    meta["cache_var_adet"] = len(cache_mids)
+    meta["cache_eksik_adet"] = sum(1 for m in clean if m not in cache_mids)
+    meta["cache_rev_uyumsuz_adet"] = len(rev_uyumsuz)
+
+    try:
+        rows = (
+            fetch_all(
+                """
+                WITH parsed AS MATERIALIZED (
+                    SELECT agc.musteri_id,
+                           agc.payload::jsonb AS payload
+                    FROM musteri_aylik_grid_cache agc
+                    WHERE agc.musteri_id = ANY(%s::bigint[])
+                )
+                SELECT parsed.musteri_id,
+                       jsonb_typeof(parsed.payload) AS payload_tipi,
+                       CASE
+                           WHEN jsonb_typeof(parsed.payload) = 'object'
+                               THEN parsed.payload->>'compute_rev'
+                           ELSE NULL
+                       END AS compute_rev,
+                       (elem->>'yil')::int AS yil,
+                       (elem->>'ay')::int AS ay,
+                       elem->>'tutar_kdv_dahil' AS tutar_kdv_dahil,
+                       elem->>'brut_tutar_kdv' AS brut_tutar_kdv
+                FROM parsed
+                CROSS JOIN LATERAL jsonb_array_elements(
+                    CASE
+                        WHEN jsonb_typeof(parsed.payload) = 'array'
+                            THEN parsed.payload
+                        WHEN jsonb_typeof(parsed.payload->'aylar') = 'array'
+                            THEN parsed.payload->'aylar'
+                        ELSE '[]'::jsonb
+                    END
+                ) AS elem
+                WHERE COALESCE(elem->>'yil', '') ~ '^[0-9]{4}$'
+                  AND COALESCE(elem->>'ay', '') ~ '^[0-9]{1,2}$'
+                  AND (elem->>'yil')::int BETWEEN %s AND %s
+                """,
+                (clean, y_bas, y_bit),
+            )
+            or []
+        )
+    except Exception as exc:
+        try:
+            logging.getLogger(__name__).warning("senaryo01 grid tutar map: %r", exc)
+        except Exception:
+            pass
+        return {}, meta
+
+    tutarlar: dict[int, dict[str, float]] = {}
+    placeholder_n = 0
+    for row in rows:
+        try:
+            mid = int(row.get("musteri_id") or 0)
+        except (TypeError, ValueError):
+            continue
+        if mid <= 0:
+            continue
+
+        payload_tipi = str(row.get("payload_tipi") or "").strip().lower()
+        if payload_tipi == "object":
+            try:
+                rev = int(row.get("compute_rev") or 0)
+            except (TypeError, ValueError):
+                continue
+            if rev not in (27, 28, 29, int(AYLIK_GRID_COMPUTE_REV)):
+                continue
+        elif payload_tipi != "array":
+            continue
+
+        try:
+            yy = int(row.get("yil"))
+            mm = int(row.get("ay"))
+        except (TypeError, ValueError):
+            continue
+        if mm < 1 or mm > 12:
+            continue
+
+        tutar_raw = row.get("tutar_kdv_dahil")
+        brut_raw = row.get("brut_tutar_kdv")
+        if tutar_raw is None or str(tutar_raw).strip() == "":
+            tutar_raw = brut_raw
+        tutar, placeholder = _firma_ozet_classify_borc_month(tutar_raw, brut_raw)
+        if placeholder:
+            placeholder_n += 1
+            continue
+        if tutar <= 0:
+            continue
+
+        ay_key = _senaryo01_ay_key(yy, mm)
+        bucket = tutarlar.setdefault(mid, {})
+        prev = float(bucket.get(ay_key) or 0)
+        if tutar > prev:
+            bucket[ay_key] = round(float(tutar), 2)
+
+    meta["placeholder_atlanan_adet"] = int(placeholder_n)
+    meta["tutar_satir_adet"] = sum(len(v) for v in tutarlar.values())
+    return tutarlar, meta
+
+
 @bp.route("/api/senaryo-01", methods=["GET"])
 @giris_gerekli
 def api_senaryo_01():
     """Senaryo 01: müşteri × ay kiracı aktiflik (salt okuma, tek batch SQL).
 
     Query: yil_bas, yil_bit, durum=aktif|pasif|tumu
-    Yanıt: { ok, aylar, satirlar: [{id, ad, durum, bas, bit}] }
+    Yanıt: { ok, aylar, satirlar, tutarlar: {mid: {ay_key: tutar}}, meta }
     - bas/bit: ISO tarih (bit=null → kapanış yok, aralık sonuna kadar aktif sayılır)
     - kapanis_sonrasi_borc_ay KULLANILMAZ
+    - tutarlar: disk grid cache salt okuma; placeholder yazılmaz; rebuild YOK
     """
     try:
         ensure_customers_arsivli()
@@ -4252,6 +4440,7 @@ def api_senaryo_01():
 
     aylar = _senaryo01_aylar_listesi(yil_bas, yil_bit)
     satirlar = []
+    mids: list[int] = []
     for r in rows:
         try:
             mid = int(r.get("id") or 0)
@@ -4275,6 +4464,15 @@ def api_senaryo_01():
                 "bit": bit_d.isoformat() if bit_d else None,
             }
         )
+        mids.append(mid)
+
+    tutarlar_map, tutar_meta = _senaryo01_grid_tutar_map(mids, yil_bas, yil_bit)
+    # JSON anahtarları string mid
+    tutarlar_out = {
+        str(mid): {ak: float(tv) for ak, tv in (aymap or {}).items()}
+        for mid, aymap in (tutarlar_map or {}).items()
+        if aymap
+    }
 
     return jsonify(
         {
@@ -4284,6 +4482,15 @@ def api_senaryo_01():
             "durum": durum_raw,
             "aylar": aylar,
             "satirlar": satirlar,
+            "tutarlar": tutarlar_out,
+            "meta": {
+                "satir_adet": len(satirlar),
+                "cache_var_adet": int(tutar_meta.get("cache_var_adet") or 0),
+                "cache_eksik_adet": int(tutar_meta.get("cache_eksik_adet") or 0),
+                "cache_rev_uyumsuz_adet": int(tutar_meta.get("cache_rev_uyumsuz_adet") or 0),
+                "placeholder_atlanan_adet": int(tutar_meta.get("placeholder_atlanan_adet") or 0),
+                "tutar_satir_adet": int(tutar_meta.get("tutar_satir_adet") or 0),
+            },
         }
     )
 

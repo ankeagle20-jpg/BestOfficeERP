@@ -15,6 +15,7 @@
             --s01-aktif-border: #176b3a;
             --s01-sticky-bg: #132f45;
             --s01-head-bg: #1a3a55;
+            --s01-tutar: #f4fff8;
         }
         * { box-sizing: border-box; }
         body {
@@ -87,9 +88,18 @@
             border-bottom: 1px solid transparent;
         }
         .s01-status.err { color: #ff8f8f; }
+        .s01-cache-note {
+            display: none;
+            padding: 0.45rem 1rem;
+            font-size: 0.8rem;
+            color: #f0d58a;
+            background: #2a2410;
+            border-bottom: 1px solid #5a4a1a;
+        }
+        .s01-cache-note.show { display: block; }
         .s01-wrap {
             overflow: auto;
-            max-height: calc(100vh - 88px);
+            max-height: calc(100vh - 120px);
             -webkit-overflow-scrolling: touch;
         }
         .s01-table {
@@ -121,9 +131,9 @@
             padding: 0.15rem 0.1rem;
         }
         .s01-table th.s01-ay {
-            width: 28px;
-            min-width: 28px;
-            max-width: 28px;
+            width: 64px;
+            min-width: 64px;
+            max-width: 64px;
         }
         .s01-table th.s01-musteri,
         .s01-table td.s01-musteri {
@@ -146,14 +156,27 @@
             background: var(--s01-head-bg);
         }
         .s01-table td.s01-hucre {
-            width: 28px;
-            min-width: 28px;
-            max-width: 28px;
+            width: 64px;
+            min-width: 64px;
+            max-width: 64px;
             background: transparent;
+            text-align: center;
+            font-variant-numeric: tabular-nums;
+            font-size: 0.62rem;
+            line-height: 1.1;
+            padding: 0 1px;
+            color: transparent;
         }
         .s01-table td.s01-hucre.aktif {
             background: var(--s01-aktif);
             box-shadow: inset 0 0 0 1px var(--s01-aktif-border);
+            color: var(--s01-tutar);
+            font-weight: 600;
+        }
+        .s01-table td.s01-hucre.aktif.eksik {
+            color: #ffe082;
+            font-size: 0.85rem;
+            font-weight: 700;
         }
         .s01-id {
             color: var(--s01-muted);
@@ -187,6 +210,7 @@
         <div class="s01-meta" id="s01_meta"></div>
     </div>
     <div class="s01-status" id="s01_status">Yıl seç → yükle</div>
+    <div class="s01-cache-note" id="s01_cache_note" aria-live="polite"></div>
     <div class="s01-wrap" id="s01_wrap"></div>
 
 <script>
@@ -249,6 +273,20 @@
         return { y: y, m: m };
     }
 
+    /** Grid ile aynı TR para: 75969.55 → "75.969,55" */
+    function s01FormatTutar(n) {
+        var x = Number(n);
+        if (!isFinite(x)) return '';
+        var neg = x < 0;
+        x = Math.abs(x);
+        var fixed = x.toFixed(2);
+        var parts = fixed.split('.');
+        var intPart = parts[0];
+        var decPart = parts[1] || '00';
+        var withDots = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+        return (neg ? '-' : '') + withDots + ',' + decPart;
+    }
+
     function s01Esc(s) {
         return String(s == null ? '' : s)
             .replace(/&/g, '&amp;')
@@ -261,6 +299,27 @@
         var el = document.getElementById('s01_status');
         el.textContent = msg || '';
         el.className = 's01-status' + (isErr ? ' err' : '');
+    }
+
+    function s01CacheNotuGoster(meta) {
+        var el = document.getElementById('s01_cache_note');
+        meta = meta || {};
+        var eksik = parseInt(meta.cache_eksik_adet, 10) || 0;
+        var rev = parseInt(meta.cache_rev_uyumsuz_adet, 10) || 0;
+        var parts = [];
+        if (eksik > 0) {
+            parts.push(eksik + ' müşteride grid cache eksik (aktif hücrelerde "?" görünebilir)');
+        }
+        if (rev > 0) {
+            parts.push(rev + ' müşteride cache rev uyumsuz (eski hesap; tutar gösterilmez)');
+        }
+        if (!parts.length) {
+            el.className = 's01-cache-note';
+            el.textContent = '';
+            return;
+        }
+        el.className = 's01-cache-note show';
+        el.textContent = parts.join(' · ');
     }
 
     function s01AyBaslikHtml(aylar) {
@@ -282,22 +341,26 @@
         var wrap = document.getElementById('s01_wrap');
         var aylar = payload.aylar || [];
         var satirlar = payload.satirlar || [];
+        var tutarlar = payload.tutarlar || {};
         if (!satirlar.length) {
             wrap.innerHTML = '<div class="s01-empty">Bu filtre/aralıkta gösterilecek müşteri yok.</div>';
             document.getElementById('s01_meta').textContent = '0 satır · ' + aylar.length + ' ay';
+            s01CacheNotuGoster(payload.meta);
             return;
         }
 
         var thead = '<thead><tr>' + s01AyBaslikHtml(aylar) + '</tr></thead>';
         var parts = ['<table class="s01-table" id="s01_table">', thead, '<tbody>'];
-        var r, c, ayP, aktif, ad, mid, bas, bit, title;
+        var r, c, ayP, aktif, ad, mid, bas, bit, title, midKey, ayMap, rawTut, cellTxt, cellCls, cellTitle;
 
         for (r = 0; r < satirlar.length; r++) {
             c = satirlar[r];
             mid = c.id;
+            midKey = String(mid);
             ad = c.ad || ('#' + mid);
             bas = c.bas || null;
             bit = c.bit || null;
+            ayMap = tutarlar[midKey] || tutarlar[mid] || {};
             title = '#' + mid + ' · ' + ad + (bit ? (' · kapanış ' + bit) : '');
             parts.push('<tr data-mid="' + mid + '">');
             parts.push(
@@ -308,11 +371,28 @@
             for (var a = 0; a < aylar.length; a++) {
                 ayP = s01ParseAyKey(aylar[a]);
                 aktif = ayP ? senaryo01HucreAktif(bas, bit, ayP.y, ayP.m) : false;
+                cellTxt = '';
+                cellCls = 's01-hucre';
+                cellTitle = aylar[a];
+                if (aktif) {
+                    cellCls += ' aktif';
+                    rawTut = ayMap[aylar[a]];
+                    if (rawTut != null && rawTut !== '' && isFinite(Number(rawTut)) && Number(rawTut) > 0) {
+                        cellTxt = s01FormatTutar(rawTut);
+                        cellTitle = cellTxt + ' ₺ (KDV dahil)';
+                    } else {
+                        cellTxt = '?';
+                        cellCls += ' eksik';
+                        cellTitle = 'Tutar yok (cache eksik / rev uyumsuz / placeholder)';
+                    }
+                }
                 parts.push(
-                    '<td class="s01-hucre' + (aktif ? ' aktif' : '') +
+                    '<td class="' + cellCls +
                     '" data-ay="' + s01Esc(aylar[a]) + '"' +
                     (aktif ? ' data-aktif="1"' : ' data-aktif="0"') +
-                    '></td>'
+                    ' title="' + s01Esc(cellTitle) + '">' +
+                    s01Esc(cellTxt) +
+                    '</td>'
                 );
             }
             parts.push('</tr>');
@@ -321,6 +401,7 @@
         wrap.innerHTML = parts.join('');
         document.getElementById('s01_meta').textContent =
             satirlar.length + ' satır · ' + aylar.length + ' ay';
+        s01CacheNotuGoster(payload.meta);
     }
 
     function s01Yukle() {
@@ -357,6 +438,7 @@
                 if (!pack.okHttp || !j.ok) {
                     s01SetStatus((j && j.mesaj) ? j.mesaj : ('Hata HTTP ' + pack.status), true);
                     document.getElementById('s01_wrap').innerHTML = '';
+                    s01CacheNotuGoster(null);
                     return;
                 }
                 s01SetStatus(
@@ -378,6 +460,7 @@
         s01InitYilDropdownlari();
         document.getElementById('s01_yukle_btn').addEventListener('click', s01Yukle);
         window.senaryo01HucreAktif = senaryo01HucreAktif;
+        window.s01FormatTutar = s01FormatTutar;
         window.s01Yukle = s01Yukle;
     });
 })();
