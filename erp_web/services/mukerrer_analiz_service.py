@@ -383,16 +383,27 @@ def _enrich(rows: list[dict]) -> list[dict]:
 def build_mukerrer_groups(
     guven: str | None = None,
     hizmet_turu: str | None = None,
+    durum: str | None = None,
 ) -> dict[str, Any]:
     """Salt okunur mükerrer grup listesi. Sadece COK_YUKSEK / YUKSEK döner.
 
     guven: 'cok_yuksek' | 'yuksek' | 'hepsi' (varsayılan hepsi = iki güvenli tier)
     hizmet_turu: boş/hepsi = filtre yok; aksi halde en az bir üyesi bu türe
       sahip gruplar (eşleştirme/skor sonrası).
+    durum: boş/hepsi/tumu = filtre yok; 'aktif'|'pasif' → en az bir üyesi
+      bu durumda olan gruplar (eşleştirme/skor sonrası).
     """
     guven_norm = (guven or "hepsi").strip().lower()
     ht_raw = (hizmet_turu or "").strip()
     ht_filter = "" if ht_raw.lower() in ("", "hepsi", "tumu", "tümü", "all") else ht_raw
+    durum_raw = (durum or "").strip().lower()
+    if durum_raw in ("", "hepsi", "tumu", "tümü", "all"):
+        durum_filter = ""
+    elif durum_raw in ("aktif", "pasif"):
+        durum_filter = durum_raw
+    else:
+        # Tanınmayan değer → eşleşen grup yok (güvenli no-op değil, boş sonuç)
+        durum_filter = durum_raw
     if guven_norm in ("cok_yuksek", "cok-yuksek", "cozyuksek"):
         tier_filter = frozenset({"COK_YUKSEK"})
     elif guven_norm in ("yuksek",):
@@ -553,6 +564,18 @@ def build_mukerrer_groups(
             )
         ]
 
+    # Durum filtresi: eşleştirme/skor SONRASI — en az bir üye seçilen durumda ise grup kalır
+    if durum_filter:
+        needle_d = durum_filter.casefold()
+        groups_out = [
+            g
+            for g in groups_out
+            if any(
+                ((m.get("durum") or "").strip().casefold() == needle_d)
+                for m in (g.get("members") or [])
+            )
+        ]
+
     return {
         "ok": True,
         "meta": {
@@ -561,6 +584,7 @@ def build_mukerrer_groups(
             "guven_filter": guven_norm if guven_norm in ("cok_yuksek", "yuksek", "hepsi") else "hepsi",
             "hizmet_turu_filter": ht_filter or "hepsi",
             "hizmet_turu_options": hizmet_turu_options,
+            "durum_filter": durum_filter or "hepsi",
             "counts": {
                 "COK_YUKSEK": int(raw_counts.get("COK_YUKSEK") or 0),
                 "YUKSEK": int(raw_counts.get("YUKSEK") or 0),

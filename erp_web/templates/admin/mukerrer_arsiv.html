@@ -97,6 +97,14 @@
           <option value="" selected>Tümü</option>
         </select>
       </label>
+      <label>
+        Durum
+        <select id="mk-durum">
+          <option value="" selected>Tümü</option>
+          <option value="aktif">Aktif</option>
+          <option value="pasif">Pasif</option>
+        </select>
+      </label>
       <button type="button" class="btn-erp btn-erp-sm" id="mk-yenile">Yenile</button>
       <span class="mk-note" id="mk-session">Bu oturum: 0 grup / 0 kayıt arşivlendi</span>
     </div>
@@ -139,6 +147,7 @@
   const elOk = document.getElementById('mk-ok');
   const elGuven = document.getElementById('mk-guven');
   const elHizmet = document.getElementById('mk-hizmet-turu');
+  const elDurum = document.getElementById('mk-durum');
   const elSession = document.getElementById('mk-session');
   const elBatches = document.getElementById('mk-batches');
   const elBatchErr = document.getElementById('mk-batch-err');
@@ -293,9 +302,13 @@
     elGroups.innerHTML = '';
     const guven = elGuven.value || 'hepsi';
     const hizmet = (elHizmet && elHizmet.value) ? elHizmet.value : '';
+    const durum = (elDurum && elDurum.value) ? elDurum.value : '';
     let url = '/admin/api/mukerrer-analiz?guven=' + encodeURIComponent(guven);
     if (hizmet) {
       url += '&hizmet_turu=' + encodeURIComponent(hizmet);
+    }
+    if (durum) {
+      url += '&durum=' + encodeURIComponent(durum);
     }
     fetch(url, {
       credentials: 'same-origin',
@@ -439,6 +452,7 @@
   document.getElementById('mk-yenile').addEventListener('click', loadAnaliz);
   elGuven.addEventListener('change', loadAnaliz);
   if (elHizmet) elHizmet.addEventListener('change', loadAnaliz);
+  if (elDurum) elDurum.addEventListener('change', loadAnaliz);
   document.getElementById('mk-batch-yenile').addEventListener('click', loadBatches);
 
   document.getElementById('mk-tab-analiz').addEventListener('click', function () {
