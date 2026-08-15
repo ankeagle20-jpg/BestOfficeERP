@@ -204,37 +204,83 @@
     elSession.textContent = 'Bu oturum: ' + sessionGroups + ' grup / ' + sessionRecords + ' kayıt arşivlendi';
   }
 
-  function selectedCanon(groupKey) {
-    const el = document.querySelector('input[name="canon-' + groupKey + '"]:checked');
-    return el ? parseInt(el.value, 10) : null;
-  }
-
-  function selectedArsivIds(groupKey, canonId) {
-    const boxes = document.querySelectorAll('.mk-arsiv-cb[data-gid="' + groupKey + '"]:checked');
+  function selectedKalsinIds(groupKey) {
+    const boxes = document.querySelectorAll('.mk-kalsin-cb[data-gid="' + groupKey + '"]:checked');
     const ids = [];
     boxes.forEach(function (b) {
       const id = parseInt(b.value, 10);
-      if (id && id !== canonId) ids.push(id);
+      if (id) ids.push(id);
     });
     return ids;
   }
 
-  function syncCanonDisable(groupKey) {
-    const canonId = selectedCanon(groupKey);
-    document.querySelectorAll('.mk-arsiv-cb[data-gid="' + groupKey + '"]').forEach(function (b) {
+  function selectedArsivIds(groupKey) {
+    const boxes = document.querySelectorAll('.mk-arsiv-cb[data-gid="' + groupKey + '"]:checked');
+    const ids = [];
+    boxes.forEach(function (b) {
       const id = parseInt(b.value, 10);
-      if (id === canonId) {
-        b.checked = false;
-        b.disabled = true;
-      } else {
-        b.disabled = false;
-      }
+      if (id) ids.push(id);
     });
-    document.querySelectorAll('.mk-card[data-group-key="' + groupKey + '"] tr').forEach(function (tr) {
-      const radio = tr.querySelector('input[type=radio]');
-      if (!radio) return;
-      tr.classList.toggle('is-canon', parseInt(radio.value, 10) === canonId);
-    });
+    return ids;
+  }
+
+  function resolveKanonikId(gid, kalsinIds, suggested) {
+    const ids = (kalsinIds || []).map(function (x) { return parseInt(x, 10); }).filter(function (x) { return !!x; });
+    if (!ids.length) return null;
+    const sug = suggested != null ? parseInt(suggested, 10) : null;
+    if (sug && ids.indexOf(sug) >= 0) return sug;
+    return Math.min.apply(null, ids);
+  }
+
+  function suggestedForGroup(groupKey) {
+    const g = (groupsCache || []).find(function (x) { return String(x.group_key) === String(groupKey); });
+    return g ? g.suggested_canonical_id : null;
+  }
+
+  function syncKeepArchiveMutex(tr, changed) {
+    if (!tr) return;
+    const kalsin = tr.querySelector('.mk-kalsin-cb');
+    const arsiv = tr.querySelector('.mk-arsiv-cb');
+    if (!kalsin || !arsiv) return;
+    if (changed === 'kalsin' && kalsin.checked) {
+      arsiv.checked = false;
+    } else if (changed === 'arsiv' && arsiv.checked) {
+      kalsin.checked = false;
+    }
+    const keepOn = !!(kalsin && kalsin.checked);
+    tr.classList.toggle('is-canon', keepOn);
+    tr.classList.toggle('is-keep', keepOn);
+  }
+
+  function buildGroupPayload(gid) {
+    const kalsinIds = selectedKalsinIds(gid);
+    const arsivIds = selectedArsivIds(gid);
+    if (!kalsinIds.length) {
+      return { ok: false, neden: 'En az bir kayıt Kalsın olmalı.' };
+    }
+    if (!arsivIds.length) {
+      return { ok: false, neden: 'Arşivlenecek kayıt seçilmedi.' };
+    }
+    // Safety: exclude any accidental overlap
+    const keepSet = {};
+    kalsinIds.forEach(function (id) { keepSet[id] = true; });
+    const cleanArsiv = arsivIds.filter(function (id) { return !keepSet[id]; });
+    if (!cleanArsiv.length) {
+      return { ok: false, neden: 'Arşivlenecek kayıt seçilmedi (Kalsın ile çakışma).' };
+    }
+    const suggested = suggestedForGroup(gid);
+    const kanonikId = resolveKanonikId(gid, kalsinIds, suggested);
+    if (!kanonikId) {
+      return { ok: false, neden: 'Kanonik çözülemedi.' };
+    }
+    return {
+      ok: true,
+      group_key: gid,
+      kanonik_id: kanonikId,
+      arsiv_ids: cleanArsiv,
+      kalsin_ids: kalsinIds,
+      suggested_canonical_id: suggested
+    };
   }
 
   function renderGroup(g) {
@@ -242,13 +288,12 @@
     const sugMem = (g.members || []).find(m => m.id === sug) || {};
     const rows = (g.members || []).map(function (m) {
       const isCanon = !!m.is_suggested_canonical || m.id === sug;
-      const checked = isCanon ? '' : ' checked';
-      const disabledCb = isCanon ? ' disabled' : '';
-      const radioChecked = isCanon ? ' checked' : '';
+      const kalsinChecked = isCanon ? ' checked' : '';
+      const arsivChecked = isCanon ? '' : ' checked';
       return (
-        '<tr class="' + (isCanon ? 'is-canon' : '') + '">' +
-          '<td><input type="radio" name="canon-' + esc(g.group_key) + '" value="' + m.id + '"' + radioChecked + '></td>' +
-          '<td><input type="checkbox" class="mk-arsiv-cb" data-gid="' + esc(g.group_key) + '" value="' + m.id + '"' + checked + disabledCb + '></td>' +
+        '<tr class="' + (isCanon ? 'is-canon is-keep' : '') + '" data-mid="' + m.id + '">' +
+          '<td><input type="checkbox" class="mk-kalsin-cb" data-gid="' + esc(g.group_key) + '" value="' + m.id + '"' + kalsinChecked + '></td>' +
+          '<td><input type="checkbox" class="mk-arsiv-cb" data-gid="' + esc(g.group_key) + '" value="' + m.id + '"' + arsivChecked + '></td>' +
           '<td>' + m.id + '</td>' +
           '<td>' + esc(m.musteri_no) + '</td>' +
           '<td><a class="mk-musteri-link" href="/giris/?tab=sozlesmeler&mid=' + m.id + '" target="_blank" rel="noopener" onclick="event.stopPropagation()">' + esc(m.name) + '</a>' + (isCanon ? ' <span class="mk-score">(önerilen kanonik)</span>' : '') + '</td>' +
@@ -285,7 +330,7 @@
         '</div>' +
         '<table>' +
           '<thead><tr>' +
-            '<th>Kanonik</th><th>Arşivle</th><th>ID</th><th>No</th><th>Ad</th><th>Durum</th>' +
+            '<th>Kalsın</th><th>Arşivle</th><th>ID</th><th>No</th><th>Ad</th><th>Durum</th>' +
             '<th>Hizmet Türü</th>' +
             '<th>Sözleşme Başlangıç</th><th>Kapanış Tarihi</th>' +
             '<th>Kira</th><th>Tahsilat/Fatura</th><th>Son işlem</th><th>Skor</th>' +
@@ -296,7 +341,7 @@
           '<button type="button" class="btn-erp btn-erp-sm mk-approve" data-gid="' + esc(g.group_key) + '">' +
             'Bu grubu onayla' +
           '</button>' +
-          '<span class="mk-note">Kanonik radio ile değişir; arşivlenecekler checkbox.</span>' +
+          '<span class="mk-note">Kalsın / Arşivle bağımsız checkbox; aynı satırda ikisi birden işaretlenemez. İşaretsiz satıra dokunulmaz.</span>' +
         '</div>' +
       '</div>'
     );
@@ -304,7 +349,9 @@
 
   function openModal(p) {
     pending = p;
-    modalText.textContent = p.arsiv_ids.length + ' kayıt arşivlenecek → kanonik #' + p.kanonik_id +
+    var keepN = (p.kalsin_ids && p.kalsin_ids.length) ? p.kalsin_ids.length : 1;
+    modalText.textContent = keepN + ' kayıt kalsın, ' + p.arsiv_ids.length +
+      ' kayıt arşivlenecek → meta kanonik #' + p.kanonik_id +
       ' (group ' + p.group_key + ')';
     modalCheck.checked = false;
     modalGo.disabled = true;
@@ -443,17 +490,16 @@
     const jobs = [];
     const skipped = [];
     selectedGroupKeys().forEach(function (gid) {
-      const canonId = selectedCanon(gid);
-      if (!canonId) {
-        skipped.push({ group_key: gid, neden: 'Kanonik seçilmedi.' });
+      const payload = buildGroupPayload(gid);
+      if (!payload.ok) {
+        skipped.push({ group_key: gid, neden: payload.neden });
         return;
       }
-      const arsivIds = selectedArsivIds(gid, canonId);
-      if (!arsivIds.length) {
-        skipped.push({ group_key: gid, neden: 'Arşivlenecek kayıt seçilmedi.' });
-        return;
-      }
-      jobs.push({ group_key: gid, kanonik_id: canonId, arsiv_ids: arsivIds });
+      jobs.push({
+        group_key: payload.group_key,
+        kanonik_id: payload.kanonik_id,
+        arsiv_ids: payload.arsiv_ids
+      });
     });
     return { jobs: jobs, skipped: skipped };
   }
@@ -674,8 +720,13 @@
       updateSecimSayac();
       return;
     }
-    if (t && t.name && String(t.name).indexOf('canon-') === 0) {
-      syncCanonDisable(String(t.name).slice(6));
+    if (t && t.classList && t.classList.contains('mk-kalsin-cb')) {
+      syncKeepArchiveMutex(t.closest('tr'), 'kalsin');
+      return;
+    }
+    if (t && t.classList && t.classList.contains('mk-arsiv-cb')) {
+      syncKeepArchiveMutex(t.closest('tr'), 'arsiv');
+      return;
     }
   });
 
@@ -683,18 +734,18 @@
     const btn = ev.target.closest('.mk-approve');
     if (!btn) return;
     const gid = btn.getAttribute('data-gid');
-    const canonId = selectedCanon(gid);
-    if (!canonId) {
-      showErr(elErr, 'Kanonik seçilmedi.');
-      return;
-    }
-    const arsivIds = selectedArsivIds(gid, canonId);
-    if (!arsivIds.length) {
-      showErr(elErr, 'Arşivlenecek kayıt seçilmedi.');
+    const payload = buildGroupPayload(gid);
+    if (!payload.ok) {
+      showErr(elErr, payload.neden);
       return;
     }
     showErr(elErr, '');
-    openModal({ group_key: gid, kanonik_id: canonId, arsiv_ids: arsivIds });
+    openModal({
+      group_key: payload.group_key,
+      kanonik_id: payload.kanonik_id,
+      arsiv_ids: payload.arsiv_ids,
+      kalsin_ids: payload.kalsin_ids
+    });
   });
 
   elBatches.addEventListener('click', function (ev) {
