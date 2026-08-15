@@ -82,7 +82,7 @@ import secrets
 from decimal import Decimal
 
 # Aylık grid «tam ödendi» / tahsil dağıtım mantığı değişince artırın; musteri_aylik_grid_cache yeniden üretilir.
-AYLIK_GRID_COMPUTE_REV = 28
+AYLIK_GRID_COMPUTE_REV = 29
 AYLIK_GRID_TAM_ODENDI_TOLERANS = 0.05  # kurus farklarini (dagitim/yuvarlama) tam odendi say
 PLACEHOLDER_BRUT_MAX = 0.5  # grid min tutar (0.01); gerçek brüt yazılmamış panel
 
@@ -3814,7 +3814,7 @@ def _aylik_grid_effective_bitis(kyc: dict, bit: date | None) -> date | None:
         return bit
     # bitiş sınırı dışlayıcı kullanılıyor (donemBas >= bit -> gösterme),
     # bu yüzden kapanış ayı dahil N ay için +ek_ay yeterlidir.
-    sinir = _add_months(date(kap.year, kap.month, 1), ek_ay + 1)
+    sinir = _add_months(date(kap.year, kap.month, 1), ek_ay)
     if bit is None:
         return sinir
     return min(bit, sinir)
