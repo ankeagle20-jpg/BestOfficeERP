@@ -26,6 +26,7 @@ from db import (
     ensure_faturalar_yon_kolon,
     ensure_contracts_engine,
     ensure_customer_financial_profile,
+    ensure_customers_arsivli,
     ensure_customers_durum,
     ensure_customers_is_active,
     ensure_customers_kapanis_sonrasi_borc_ay,
@@ -73,7 +74,11 @@ from utils.musteri_arama import (
     customers_arama_sql_params_giris_genis_tokens,
     musteri_arama_ilike_pattern_email_duz,
 )
-from utils.musteri_gorunur import musteri_liste_gorunur_sql, request_pasifleri_dahil
+from utils.musteri_gorunur import (
+    musteri_gorunur_sql,
+    musteri_liste_gorunur_sql,
+    request_pasifleri_dahil,
+)
 import json
 import uuid
 from pathlib import Path
@@ -3514,6 +3519,14 @@ def index():
     return render_template('giris/index.html', embed=embed)
 
 
+@bp.route('/senaryo-01')
+@giris_gerekli
+def senaryo_01_page():
+    """Senaryo 01 rapor kabuğu (iframe); matris UI Aşama 3'te."""
+    embed = str(request.args.get('embed') or '').lower() in ('1', 'true', 'yes', 'on')
+    return render_template('giris/senaryo_01.html', embed=embed)
+
+
 @bp.route('/api/potansiyel', methods=['GET', 'POST'])
 @giris_gerekli
 def api_potansiyel():
@@ -4083,6 +4096,196 @@ def api_vergi_daireleri():
         lim = 400
     lim = max(1, min(lim, 600))
     return jsonify({"ok": True, "liste": rows[:lim]})
+
+
+# Senaryo 01 (salt okuma): kiracı aktiflik matrisi — Grid/D1/D2 borç ufkundan BAĞIMSIZ.
+# Başlangıç: KYC sozlesme_tarihi → rent_start_date (created_at YOK; başlangıçsız satır atlanır).
+_SENARYO01_BASLANGIC_SQL = """
+COALESCE(
+    CASE
+        WHEN mk.sozlesme_tarihi IS NULL THEN NULL
+        WHEN BTRIM(mk.sozlesme_tarihi::text) = '' THEN NULL
+        WHEN BTRIM(mk.sozlesme_tarihi::text) ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+            THEN (SUBSTRING(BTRIM(mk.sozlesme_tarihi::text) FROM 1 FOR 10))::date
+        WHEN BTRIM(mk.sozlesme_tarihi::text) ~ '^[0-9]{1,2}\\.[0-9]{1,2}\\.[0-9]{4}'
+            THEN TO_DATE(
+                REGEXP_REPLACE(BTRIM(mk.sozlesme_tarihi::text), ' .*$', ''),
+                'DD.MM.YYYY'
+            )
+        WHEN BTRIM(mk.sozlesme_tarihi::text) ~ '^[0-9]{1,2}-[0-9]{1,2}-[0-9]{4}'
+            THEN TO_DATE(
+                REGEXP_REPLACE(BTRIM(mk.sozlesme_tarihi::text), ' .*$', ''),
+                'DD-MM-YYYY'
+            )
+        ELSE NULL
+    END,
+    c.rent_start_date::date
+)
+""".strip()
+
+
+def _senaryo01_ay_key(y: int, m: int) -> str:
+    return f"{int(y)}-{int(m)}"
+
+
+def _senaryo01_aylar_listesi(yil_bas: int, yil_bit: int) -> list[str]:
+    """[yil_bas..yil_bit] her ay, kronolojik 'YYYY-M' (M 1-12, sıfırsız)."""
+    out: list[str] = []
+    for y in range(int(yil_bas), int(yil_bit) + 1):
+        for m in range(1, 13):
+            out.append(_senaryo01_ay_key(y, m))
+    return out
+
+
+def _senaryo01_ay_basi(d: date | None) -> date | None:
+    if d is None:
+        return None
+    return date(int(d.year), int(d.month), 1)
+
+
+def senaryo01_hucre_aktif(bas: date | None, bit: date | None, yil: int, ay: int) -> bool:
+    """Kapanış ayı DAHİL; sonraki ay hariç. bit=None → açık uç (sınırsız)."""
+    if bas is None:
+        return False
+    bas_m = _senaryo01_ay_basi(bas)
+    hedef = date(int(yil), int(ay), 1)
+    if bas_m is None or hedef < bas_m:
+        return False
+    if bit is None:
+        return True
+    bit_m = _senaryo01_ay_basi(bit)
+    if bit_m is None:
+        return True
+    return hedef <= bit_m
+
+
+def _senaryo01_varsayilan_yillar(bugun: date | None = None) -> tuple[int, int]:
+    d = bugun or date.today()
+    y_bit = int(d.year)
+    return y_bit - 2, y_bit
+
+
+def _senaryo01_parse_yil(raw, default: int) -> int:
+    try:
+        y = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return default
+    if y < 1990 or y > 2100:
+        return default
+    return y
+
+
+@bp.route("/api/senaryo-01", methods=["GET"])
+@giris_gerekli
+def api_senaryo_01():
+    """Senaryo 01: müşteri × ay kiracı aktiflik (salt okuma, tek batch SQL).
+
+    Query: yil_bas, yil_bit, durum=aktif|pasif|tumu
+    Yanıt: { ok, aylar, satirlar: [{id, ad, durum, bas, bit}] }
+    - bas/bit: ISO tarih (bit=null → kapanış yok, aralık sonuna kadar aktif sayılır)
+    - kapanis_sonrasi_borc_ay KULLANILMAZ
+    """
+    try:
+        ensure_customers_arsivli()
+    except Exception:
+        pass
+    try:
+        ensure_customers_durum()
+    except Exception:
+        pass
+
+    y_def_bas, y_def_bit = _senaryo01_varsayilan_yillar()
+    yil_bas = _senaryo01_parse_yil(request.args.get("yil_bas"), y_def_bas)
+    yil_bit = _senaryo01_parse_yil(request.args.get("yil_bit"), y_def_bit)
+    if yil_bit < yil_bas:
+        yil_bas, yil_bit = yil_bit, yil_bas
+    # Üst sınır: 10 yıl (performans)
+    if yil_bit - yil_bas > 9:
+        yil_bit = yil_bas + 9
+
+    durum_raw = (request.args.get("durum") or "tumu").strip().lower()
+    if durum_raw in ("", "hepsi", "all", "tum"):
+        durum_raw = "tumu"
+    if durum_raw not in ("aktif", "pasif", "tumu"):
+        return jsonify({"ok": False, "mesaj": "durum aktif|pasif|tumu olmalı."}), 400
+
+    where = [musteri_gorunur_sql("c"), f"({_SENARYO01_BASLANGIC_SQL}) IS NOT NULL"]
+    params: list = []
+    if durum_raw == "aktif":
+        where.append("LOWER(TRIM(COALESCE(c.durum, 'aktif'))) <> 'pasif'")
+    elif durum_raw == "pasif":
+        where.append("LOWER(TRIM(COALESCE(c.durum, ''))) = 'pasif'")
+
+    # Aralıkla örtüşmeyenleri ele (bit açık veya kesişim var)
+    range_bas = date(yil_bas, 1, 1)
+    range_bit = date(yil_bit, 12, 1)
+    where.append(
+        f"""
+        date_trunc('month', ({_SENARYO01_BASLANGIC_SQL}))::date <= %s
+        AND (
+            c.kapanis_tarihi IS NULL
+            OR date_trunc('month', c.kapanis_tarihi::date)::date >= %s
+        )
+        """.strip()
+    )
+    params.extend([range_bit, range_bas])
+
+    sql = f"""
+        SELECT
+            c.id,
+            COALESCE(NULLIF(TRIM(c.musteri_adi), ''), NULLIF(TRIM(c.name), ''), '') AS ad,
+            LOWER(TRIM(COALESCE(c.durum, 'aktif'))) AS durum,
+            ({_SENARYO01_BASLANGIC_SQL}) AS bas,
+            c.kapanis_tarihi::date AS bit
+        FROM customers c
+        LEFT JOIN (
+            SELECT DISTINCT ON (musteri_id)
+                musteri_id,
+                sozlesme_tarihi
+            FROM musteri_kyc
+            ORDER BY musteri_id, id DESC
+        ) mk ON mk.musteri_id = c.id
+        WHERE {" AND ".join(where)}
+        ORDER BY ad ASC NULLS LAST, c.id ASC
+    """
+    rows = fetch_all(sql, tuple(params)) or []
+
+    aylar = _senaryo01_aylar_listesi(yil_bas, yil_bit)
+    satirlar = []
+    for r in rows:
+        try:
+            mid = int(r.get("id") or 0)
+        except (TypeError, ValueError):
+            continue
+        if mid <= 0:
+            continue
+        bas_d = _aylik_grid_coerce_date(r.get("bas"))
+        if bas_d is None:
+            continue
+        bit_d = _aylik_grid_coerce_date(r.get("bit"))
+        durum_s = str(r.get("durum") or "aktif").strip().lower() or "aktif"
+        if durum_s != "pasif":
+            durum_s = "aktif"
+        satirlar.append(
+            {
+                "id": mid,
+                "ad": str(r.get("ad") or "").strip() or f"#{mid}",
+                "durum": durum_s,
+                "bas": bas_d.isoformat(),
+                "bit": bit_d.isoformat() if bit_d else None,
+            }
+        )
+
+    return jsonify(
+        {
+            "ok": True,
+            "yil_bas": yil_bas,
+            "yil_bit": yil_bit,
+            "durum": durum_raw,
+            "aylar": aylar,
+            "satirlar": satirlar,
+        }
+    )
 
 
 @bp.route("/api/grup2-etiketleri", methods=["GET", "POST", "PUT", "DELETE"])

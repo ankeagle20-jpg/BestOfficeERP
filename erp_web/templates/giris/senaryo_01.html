@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Senaryo 01</title>
+    <style>
+        :root {
+            --s01-bg: #0f2537;
+            --s01-panel: #16324a;
+            --s01-border: #2a4a66;
+            --s01-text: #e8eef4;
+            --s01-muted: #9bb0c3;
+            --s01-aktif: #1f8a4c;
+            --s01-aktif-border: #176b3a;
+            --s01-sticky-bg: #132f45;
+            --s01-head-bg: #1a3a55;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: Segoe UI, Tahoma, sans-serif;
+            background: var(--s01-bg);
+            color: var(--s01-text);
+            min-height: 100vh;
+        }
+        .s01-toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem 1rem;
+            align-items: flex-end;
+            padding: 0.85rem 1rem;
+            background: var(--s01-panel);
+            border-bottom: 1px solid var(--s01-border);
+            position: sticky;
+            top: 0;
+            z-index: 30;
+        }
+        .s01-toolbar h1 {
+            margin: 0;
+            font-size: 1.05rem;
+            font-weight: 600;
+            margin-right: 0.5rem;
+            align-self: center;
+        }
+        .s01-field {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+            font-size: 0.78rem;
+            color: var(--s01-muted);
+        }
+        .s01-field select {
+            min-width: 6.5rem;
+            padding: 0.35rem 0.45rem;
+            border: 1px solid var(--s01-border);
+            border-radius: 4px;
+            background: #0c1f2e;
+            color: var(--s01-text);
+            font-size: 0.9rem;
+        }
+        .s01-btn {
+            padding: 0.45rem 1rem;
+            border: none;
+            border-radius: 4px;
+            background: #2d7dd2;
+            color: #fff;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .s01-btn:hover { background: #246bb5; }
+        .s01-btn:disabled {
+            opacity: 0.55;
+            cursor: wait;
+        }
+        .s01-meta {
+            margin-left: auto;
+            font-size: 0.8rem;
+            color: var(--s01-muted);
+            align-self: center;
+        }
+        .s01-status {
+            padding: 0.5rem 1rem;
+            font-size: 0.85rem;
+            color: var(--s01-muted);
+            border-bottom: 1px solid transparent;
+        }
+        .s01-status.err { color: #ff8f8f; }
+        .s01-wrap {
+            overflow: auto;
+            max-height: calc(100vh - 88px);
+            -webkit-overflow-scrolling: touch;
+        }
+        .s01-table {
+            border-collapse: separate;
+            border-spacing: 0;
+            font-size: 0.72rem;
+            table-layout: fixed;
+            width: max-content;
+            min-width: 100%;
+        }
+        .s01-table th,
+        .s01-table td {
+            border-right: 1px solid var(--s01-border);
+            border-bottom: 1px solid var(--s01-border);
+            padding: 0;
+            height: 22px;
+            vertical-align: middle;
+        }
+        .s01-table thead th {
+            position: sticky;
+            top: 0;
+            z-index: 12;
+            background: var(--s01-head-bg);
+            color: var(--s01-muted);
+            font-weight: 600;
+            text-align: center;
+            height: 44px;
+            line-height: 1.15;
+            padding: 0.15rem 0.1rem;
+        }
+        .s01-table th.s01-ay {
+            width: 28px;
+            min-width: 28px;
+            max-width: 28px;
+        }
+        .s01-table th.s01-musteri,
+        .s01-table td.s01-musteri {
+            position: sticky;
+            left: 0;
+            z-index: 11;
+            width: 220px;
+            min-width: 220px;
+            max-width: 220px;
+            background: var(--s01-sticky-bg);
+            text-align: left;
+            padding: 0 0.5rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            border-right: 2px solid var(--s01-border);
+        }
+        .s01-table thead th.s01-musteri {
+            z-index: 20;
+            background: var(--s01-head-bg);
+        }
+        .s01-table td.s01-hucre {
+            width: 28px;
+            min-width: 28px;
+            max-width: 28px;
+            background: transparent;
+        }
+        .s01-table td.s01-hucre.aktif {
+            background: var(--s01-aktif);
+            box-shadow: inset 0 0 0 1px var(--s01-aktif-border);
+        }
+        .s01-id {
+            color: var(--s01-muted);
+            font-size: 0.68rem;
+            margin-right: 0.35rem;
+        }
+        .s01-empty {
+            padding: 2rem 1rem;
+            text-align: center;
+            color: var(--s01-muted);
+        }
+    </style>
+</head>
+<body>
+    <div class="s01-toolbar">
+        <h1>Senaryo 01</h1>
+        <label class="s01-field">Başlangıç yılı
+            <select id="s01_yil_bas" aria-label="Başlangıç yılı"></select>
+        </label>
+        <label class="s01-field">Bitiş yılı
+            <select id="s01_yil_bit" aria-label="Bitiş yılı"></select>
+        </label>
+        <label class="s01-field">Durum
+            <select id="s01_durum" aria-label="Durum filtresi">
+                <option value="tumu" selected>Tümü</option>
+                <option value="aktif">Aktif</option>
+                <option value="pasif">Pasif</option>
+            </select>
+        </label>
+        <button type="button" class="s01-btn" id="s01_yukle_btn">Yükle</button>
+        <div class="s01-meta" id="s01_meta"></div>
+    </div>
+    <div class="s01-status" id="s01_status">Yıl seç → yükle</div>
+    <div class="s01-wrap" id="s01_wrap"></div>
+
+<script>
+(function () {
+    'use strict';
+
+    var AY_KISA = ['Oca', 'Şub', 'Mar', 'Nis', 'May', 'Haz', 'Tem', 'Ağu', 'Eyl', 'Eki', 'Kas', 'Ara'];
+
+    function s01BugunYil() {
+        return (new Date()).getFullYear();
+    }
+
+    function s01VarsayilanYillar() {
+        var yBit = s01BugunYil();
+        return { bas: yBit - 2, bit: yBit };
+    }
+
+    function s01YilOptionDoldur(sel, fromY, toY, selected) {
+        sel.innerHTML = '';
+        var y;
+        for (y = fromY; y <= toY; y++) {
+            var opt = document.createElement('option');
+            opt.value = String(y);
+            opt.textContent = String(y);
+            if (y === selected) opt.selected = true;
+            sel.appendChild(opt);
+        }
+    }
+
+    function s01InitYilDropdownlari() {
+        var now = s01BugunYil();
+        var def = s01VarsayilanYillar();
+        var elBas = document.getElementById('s01_yil_bas');
+        var elBit = document.getElementById('s01_yil_bit');
+        s01YilOptionDoldur(elBas, now - 15, now + 2, def.bas);
+        s01YilOptionDoldur(elBit, now - 15, now + 2, def.bit);
+    }
+
+    /** Backend senaryo01_hucre_aktif ile aynı: kapanış ayı DAHİL, sonraki BOŞ; bit yoksa açık uç. */
+    function senaryo01HucreAktif(basIso, bitIso, yil, ay) {
+        if (!basIso) return false;
+        var bas = new Date(String(basIso).slice(0, 10) + 'T00:00:00');
+        if (isNaN(bas.getTime())) return false;
+        var basM = new Date(bas.getFullYear(), bas.getMonth(), 1);
+        var hedef = new Date(yil, ay - 1, 1);
+        if (hedef < basM) return false;
+        if (!bitIso) return true;
+        var bit = new Date(String(bitIso).slice(0, 10) + 'T00:00:00');
+        if (isNaN(bit.getTime())) return true;
+        var bitM = new Date(bit.getFullYear(), bit.getMonth(), 1);
+        return hedef <= bitM;
+    }
+
+    function s01ParseAyKey(key) {
+        var p = String(key || '').split('-');
+        if (p.length !== 2) return null;
+        var y = parseInt(p[0], 10);
+        var m = parseInt(p[1], 10);
+        if (isNaN(y) || isNaN(m) || m < 1 || m > 12) return null;
+        return { y: y, m: m };
+    }
+
+    function s01Esc(s) {
+        return String(s == null ? '' : s)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+
+    function s01SetStatus(msg, isErr) {
+        var el = document.getElementById('s01_status');
+        el.textContent = msg || '';
+        el.className = 's01-status' + (isErr ? ' err' : '');
+    }
+
+    function s01AyBaslikHtml(aylar) {
+        var html = '<th class="s01-musteri">Müşteri</th>';
+        var i, p;
+        for (i = 0; i < aylar.length; i++) {
+            p = s01ParseAyKey(aylar[i]);
+            if (!p) {
+                html += '<th class="s01-ay">' + s01Esc(aylar[i]) + '</th>';
+                continue;
+            }
+            html += '<th class="s01-ay" title="' + p.y + '-' + p.m + '">' +
+                AY_KISA[p.m - 1] + '<br>' + String(p.y).slice(2) + '</th>';
+        }
+        return html;
+    }
+
+    function s01TabloCiz(payload) {
+        var wrap = document.getElementById('s01_wrap');
+        var aylar = payload.aylar || [];
+        var satirlar = payload.satirlar || [];
+        if (!satirlar.length) {
+            wrap.innerHTML = '<div class="s01-empty">Bu filtre/aralıkta gösterilecek müşteri yok.</div>';
+            document.getElementById('s01_meta').textContent = '0 satır · ' + aylar.length + ' ay';
+            return;
+        }
+
+        var thead = '<thead><tr>' + s01AyBaslikHtml(aylar) + '</tr></thead>';
+        var parts = ['<table class="s01-table" id="s01_table">', thead, '<tbody>'];
+        var r, c, ayP, aktif, ad, mid, bas, bit, title;
+
+        for (r = 0; r < satirlar.length; r++) {
+            c = satirlar[r];
+            mid = c.id;
+            ad = c.ad || ('#' + mid);
+            bas = c.bas || null;
+            bit = c.bit || null;
+            title = '#' + mid + ' · ' + ad + (bit ? (' · kapanış ' + bit) : '');
+            parts.push('<tr data-mid="' + mid + '">');
+            parts.push(
+                '<td class="s01-musteri" title="' + s01Esc(title) + '">' +
+                '<span class="s01-id">#' + mid + '</span>' + s01Esc(ad) +
+                '</td>'
+            );
+            for (var a = 0; a < aylar.length; a++) {
+                ayP = s01ParseAyKey(aylar[a]);
+                aktif = ayP ? senaryo01HucreAktif(bas, bit, ayP.y, ayP.m) : false;
+                parts.push(
+                    '<td class="s01-hucre' + (aktif ? ' aktif' : '') +
+                    '" data-ay="' + s01Esc(aylar[a]) + '"' +
+                    (aktif ? ' data-aktif="1"' : ' data-aktif="0"') +
+                    '></td>'
+                );
+            }
+            parts.push('</tr>');
+        }
+        parts.push('</tbody></table>');
+        wrap.innerHTML = parts.join('');
+        document.getElementById('s01_meta').textContent =
+            satirlar.length + ' satır · ' + aylar.length + ' ay';
+    }
+
+    function s01Yukle() {
+        var elBas = document.getElementById('s01_yil_bas');
+        var elBit = document.getElementById('s01_yil_bit');
+        var elDurum = document.getElementById('s01_durum');
+        var btn = document.getElementById('s01_yukle_btn');
+        var yBas = parseInt(elBas.value, 10);
+        var yBit = parseInt(elBit.value, 10);
+        if (isNaN(yBas) || isNaN(yBit)) {
+            s01SetStatus('Geçerli yıl seçin.', true);
+            return;
+        }
+        if (yBit < yBas) {
+            var tmp = yBas; yBas = yBit; yBit = tmp;
+            elBas.value = String(yBas);
+            elBit.value = String(yBit);
+        }
+        var durum = elDurum.value || 'tumu';
+        var url = '/giris/api/senaryo-01?yil_bas=' + encodeURIComponent(yBas) +
+            '&yil_bit=' + encodeURIComponent(yBit) +
+            '&durum=' + encodeURIComponent(durum);
+
+        btn.disabled = true;
+        s01SetStatus('Yükleniyor…');
+        fetch(url, { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
+            .then(function (res) {
+                return res.json().then(function (j) {
+                    return { okHttp: res.ok, status: res.status, body: j };
+                });
+            })
+            .then(function (pack) {
+                var j = pack.body || {};
+                if (!pack.okHttp || !j.ok) {
+                    s01SetStatus((j && j.mesaj) ? j.mesaj : ('Hata HTTP ' + pack.status), true);
+                    document.getElementById('s01_wrap').innerHTML = '';
+                    return;
+                }
+                s01SetStatus(
+                    'Yüklendi: ' + j.yil_bas + '–' + j.yil_bit +
+                    ' · durum=' + j.durum +
+                    ' · ' + (j.satirlar || []).length + ' müşteri'
+                );
+                s01TabloCiz(j);
+            })
+            .catch(function (err) {
+                s01SetStatus('İstek başarısız: ' + String((err && err.message) || err), true);
+            })
+            .then(function () {
+                btn.disabled = false;
+            });
+    }
+
+    document.addEventListener('DOMContentLoaded', function () {
+        s01InitYilDropdownlari();
+        document.getElementById('s01_yukle_btn').addEventListener('click', s01Yukle);
+        window.senaryo01HucreAktif = senaryo01HucreAktif;
+        window.s01Yukle = s01Yukle;
+    });
+})();
+</script>
+</body>
+</html>

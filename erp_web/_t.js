@@ -340,7 +340,8 @@ var GIRIS_TAB_KEY_BY_INDEX = {
     9: 'grup',
     10: 'musteriler_2',
     11: 'tediye',
-    12: 'whatsapp'
+    12: 'whatsapp',
+    13: 'senaryo_01'
 };
 var GIRIS_TAB_INDEX_BY_KEY = {
     musteri_ekle: 0,
@@ -355,7 +356,8 @@ var GIRIS_TAB_INDEX_BY_KEY = {
     grup: 9,
     musteriler_2: 10,
     tediye: 11,
-    whatsapp: 12
+    whatsapp: 12,
+    senaryo_01: 13
 };
 
 function girisTabKeyFromIndex(index) {
@@ -370,7 +372,7 @@ function girisTabIndexFromParam(raw) {
     if (!s) return null;
     if (/^\d+$/.test(s)) {
         var n = parseInt(s, 10);
-        if (!isNaN(n) && n >= 0 && n <= 12) return n;
+        if (!isNaN(n) && n >= 0 && n <= 13) return n;
         return null;
     }
     var key = s.toLowerCase();
@@ -386,7 +388,8 @@ var GIRIS_MID_BAGIMSIZ_TAB_KEYLERI = {
     grup: true,
     musteriler_2: true,
     potansiyel: true,
-    whatsapp: true
+    whatsapp: true,
+    senaryo_01: true
 };
 
 function girisStandaloneTabQueryGuncelle(index) {
@@ -3563,6 +3566,29 @@ function girisMusteriListe2IframeYukle() {
     fr.src = want;
 }
 
+/** Giriş sayfası Senaryo 01: /giris/senaryo-01; ?embed=1 ile layout üst menüsü gizlenir (lazy). */
+function girisSenaryo01IframeYukle() {
+    var fr = document.getElementById('giris-senaryo01-iframe');
+    if (!fr) return;
+    var raw = fr.getAttribute('data-s01-src') || '';
+    if (!raw) return;
+    var want;
+    try {
+        var u = new URL(raw, window.location.origin);
+        u.searchParams.set('embed', '1');
+        want = u.toString();
+    } catch (e) {
+        want = raw + (raw.indexOf('?') >= 0 ? '&' : '?') + 'embed=1';
+    }
+    if (fr.getAttribute('data-s01-inited') === '1') {
+        var cur = fr.src || '';
+        if (cur.indexOf('embed=1') >= 0 || cur.indexOf('embed=true') >= 0) return;
+        fr.removeAttribute('data-s01-inited');
+    }
+    fr.setAttribute('data-s01-inited', '1');
+    fr.src = want;
+}
+
 /** Giriş sayfası Randevu sekmesi: tam genişlik /randevu/randevu-al iframe; seçili müşteri URL ile ön doldurulur (iframe içinde başka müşteri aranabilir). */
 function girisRandevuIframeYukle() {
     var fr = document.getElementById('giris-randevu-iframe');
@@ -4252,7 +4278,7 @@ function sozlesmelerAylikSessizPollTick() {
 function switchTab(index) {
     currentTabIndex = index;
     try {
-        if (index >= 0 && index <= 10) localStorage.setItem('bestoffice_giris_tab_index', String(index));
+        if (index >= 0 && index <= 13) localStorage.setItem('bestoffice_giris_tab_index', String(index));
     } catch (e) {}
     // Üst sekme butonlarının aktifliğini index yerine data-index ile kontrol et
     document.querySelectorAll('.tab').forEach(function(t) {
@@ -4277,12 +4303,13 @@ function switchTab(index) {
             sozlesmeTahsilatFormunuSeciliMusteridenDoldur();
             if (selectedId) sozlesmeAylikGridParalelYukle(selectedId);
             else sozlesmelerAylikGuncelle();
-        } else if (index === 8 || index === 10) {
+        } else if (index === 8 || index === 10 || index === 13) {
             wrapper.classList.remove('sozlesmeler-split');
             wrapper.classList.add('giris-randevu-tab');
             if (sagSoz) sagSoz.style.display = '';
             if (index === 8) girisRandevuIframeYukle();
-            else girisMusteriListe2IframeYukle();
+            else if (index === 10) girisMusteriListe2IframeYukle();
+            else girisSenaryo01IframeYukle();
         } else {
             wrapper.classList.remove('sozlesmeler-split');
             wrapper.classList.remove('giris-randevu-tab');
