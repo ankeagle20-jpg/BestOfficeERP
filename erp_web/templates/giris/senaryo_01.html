@@ -4,8 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Senaryo 01</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"
-            integrity="sha384-vtjasyidUo0kW94K5MXDXntzOJpQgBKXmE7e2Ga4LG0skTTLeBi97eFAXsqewJjw"
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"
+            integrity="sha384-Pqp51FUN2/qzfxZxBCtF0stpc9ONI6MYZpVqmo8m20SoaQCzf+arZvACkLkirlPz"
             crossorigin="anonymous" defer></script>
     <style>
         :root {
@@ -544,8 +544,34 @@
         return parts.join('_') + '.xlsx';
     }
 
-    function s01ExcelAktar() {
-        if (typeof XLSX === 'undefined' || !XLSX || !XLSX.utils || !XLSX.writeFile) {
+    function s01ExcelHucreYaz(sheet, rowNo, colNo, val, stil) {
+        var cell = sheet.getRow(rowNo).getCell(colNo);
+        cell.value = (val === '') ? null : val;
+        if (typeof val === 'number') {
+            cell.numFmt = (val % 1 === 0) ? '0' : '#,##0.00';
+        }
+        if (stil === 'aktif') {
+            cell.fill = {
+                type: 'pattern',
+                pattern: 'solid',
+                fgColor: { argb: 'FF1F8A4C' }
+            };
+            cell.font = { color: { argb: 'FFF4FFF8' } };
+        } else if (stil === 'baslik') {
+            cell.fill = {
+                type: 'pattern',
+                pattern: 'solid',
+                fgColor: { argb: 'FF1A3A55' }
+            };
+            cell.font = { bold: true, color: { argb: 'FFE8EEF4' } };
+        }
+        return cell;
+    }
+
+    async function s01ExcelAktar() {
+        var btn = document.getElementById('s01_excel_btn');
+        if (btn && btn.disabled) return;
+        if (typeof ExcelJS === 'undefined' || !ExcelJS || !ExcelJS.Workbook) {
             s01SetStatus('Excel kütüphanesi yüklenemedi (CDN). İnternet bağlantısını kontrol edin.', true);
             return;
         }
@@ -553,75 +579,109 @@
             s01SetStatus("Önce yıl seçip Yükle'ye tıklayın.", true);
             return;
         }
-        var payload = s01LastPayload;
-        var aylar = payload.aylar || [];
-        var satirlar = s01SiraliSatirlar(payload);
-        var tutarlar = payload.tutarlar || {};
-        var header = ['Müşteri'];
-        var i, p, ay, a, r, c, mid, ad, bas, bit, ayP, aktif, t, row;
-        var ayAktifSay = [];
-        var ayTutarToplam = [];
-        for (i = 0; i < aylar.length; i++) {
-            ay = aylar[i];
-            p = s01ParseAyKey(ay);
-            if (!p) header.push(ay);
-            else header.push(AY_KISA[p.m - 1] + ' ' + String(p.y).slice(2));
-            ayAktifSay[i] = 0;
-            ayTutarToplam[i] = 0;
-        }
-        var dataRows = [];
-        for (r = 0; r < satirlar.length; r++) {
-            c = satirlar[r];
-            mid = c.id;
-            ad = c.ad || ('#' + mid);
-            bas = c.bas || null;
-            bit = c.bit || null;
-            row = ['#' + mid + ' ' + ad];
+        if (btn) btn.disabled = true;
+        try {
+            var payload = s01LastPayload;
+            var aylar = payload.aylar || [];
+            var satirlar = s01SiraliSatirlar(payload);
+            var tutarlar = payload.tutarlar || {};
+            var header = ['Müşteri'];
+            var i, p, ay, a, r, c, mid, ad, bas, bit, ayP, aktif, t, row, aktifRow;
+            var ayAktifSay = [];
+            var ayTutarToplam = [];
+            for (i = 0; i < aylar.length; i++) {
+                ay = aylar[i];
+                p = s01ParseAyKey(ay);
+                if (!p) header.push(ay);
+                else header.push(AY_KISA[p.m - 1] + ' ' + String(p.y).slice(2));
+                ayAktifSay[i] = 0;
+                ayTutarToplam[i] = 0;
+            }
+            var dataRows = [];
+            var aktifMat = [];
+            for (r = 0; r < satirlar.length; r++) {
+                c = satirlar[r];
+                mid = c.id;
+                ad = c.ad || ('#' + mid);
+                bas = c.bas || null;
+                bit = c.bit || null;
+                row = ['#' + mid + ' ' + ad];
+                aktifRow = [];
+                for (a = 0; a < aylar.length; a++) {
+                    ayP = s01ParseAyKey(aylar[a]);
+                    aktif = ayP ? senaryo01HucreAktif(bas, bit, ayP.y, ayP.m) : false;
+                    if (!aktif) {
+                        row.push('');
+                        aktifRow.push(false);
+                        continue;
+                    }
+                    ayAktifSay[a] += 1;
+                    t = s01SatirTutar(c, tutarlar, aylar[a]);
+                    if (t == null) {
+                        row.push('?');
+                    } else {
+                        row.push(t);
+                        ayTutarToplam[a] += t;
+                    }
+                    aktifRow.push(true);
+                }
+                dataRows.push(row);
+                aktifMat.push(aktifRow);
+            }
+            var sayRow = ['Müşteri Sayısı'];
+            var topRow = ['Toplam'];
             for (a = 0; a < aylar.length; a++) {
-                ayP = s01ParseAyKey(aylar[a]);
-                aktif = ayP ? senaryo01HucreAktif(bas, bit, ayP.y, ayP.m) : false;
-                if (!aktif) {
-                    row.push('');
-                    continue;
-                }
-                ayAktifSay[a] += 1;
-                t = s01SatirTutar(c, tutarlar, aylar[a]);
-                if (t == null) {
-                    row.push('?');
-                } else {
-                    row.push(t);
-                    ayTutarToplam[a] += t;
+                sayRow.push(ayAktifSay[a]);
+                topRow.push(ayTutarToplam[a]);
+            }
+
+            var wb = new ExcelJS.Workbook();
+            var sheet = wb.addWorksheet('Senaryo 01');
+            var colCount = header.length;
+            var rr, cc, stil;
+            for (cc = 0; cc < colCount; cc++) {
+                s01ExcelHucreYaz(sheet, 1, cc + 1, header[cc], 'baslik');
+            }
+            for (cc = 0; cc < colCount; cc++) {
+                s01ExcelHucreYaz(sheet, 2, cc + 1, sayRow[cc], 'baslik');
+            }
+            for (rr = 0; rr < dataRows.length; rr++) {
+                row = dataRows[rr];
+                aktifRow = aktifMat[rr] || [];
+                s01ExcelHucreYaz(sheet, rr + 3, 1, row[0], null);
+                for (cc = 1; cc < colCount; cc++) {
+                    stil = aktifRow[cc - 1] ? 'aktif' : null;
+                    s01ExcelHucreYaz(sheet, rr + 3, cc + 1, row[cc], stil);
                 }
             }
-            dataRows.push(row);
-        }
-        var sayRow = ['Müşteri Sayısı'];
-        var topRow = ['Toplam'];
-        for (a = 0; a < aylar.length; a++) {
-            sayRow.push(ayAktifSay[a]);
-            topRow.push(ayTutarToplam[a]);
-        }
-        var aoa = [header, sayRow].concat(dataRows);
-        aoa.push(topRow);
-        var ws = XLSX.utils.aoa_to_sheet(aoa);
-        var addr, cell;
-        for (addr in ws) {
-            if (!Object.prototype.hasOwnProperty.call(ws, addr)) continue;
-            if (addr.charAt(0) === '!') continue;
-            cell = ws[addr];
-            if (cell && typeof cell.v === 'number') {
-                cell.z = (cell.v % 1 === 0) ? '0' : '#,##0.00';
+            var topRowNo = dataRows.length + 3;
+            for (cc = 0; cc < colCount; cc++) {
+                s01ExcelHucreYaz(sheet, topRowNo, cc + 1, topRow[cc], 'baslik');
             }
+            sheet.getColumn(1).width = 36;
+            for (i = 0; i < aylar.length; i++) {
+                sheet.getColumn(i + 2).width = 12;
+            }
+
+            var fname = s01ExcelDosyaAdi();
+            var buf = await wb.xlsx.writeBuffer();
+            var blob = new Blob([buf], {
+                type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            });
+            var url = URL.createObjectURL(blob);
+            var a = document.createElement('a');
+            a.href = url;
+            a.download = fname;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            setTimeout(function () { URL.revokeObjectURL(url); }, 1500);
+            s01SetStatus('Excel indirildi: ' + fname, false);
+        } catch (err) {
+            s01SetStatus('Excel oluşturulamadı: ' + (err && err.message ? err.message : err), true);
+        } finally {
+            if (btn) btn.disabled = false;
         }
-        if (ws['!ref']) {
-            ws['!cols'] = [{ wch: 36 }];
-            for (i = 0; i < aylar.length; i++) ws['!cols'].push({ wch: 12 });
-        }
-        var wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, 'Senaryo 01');
-        var fname = s01ExcelDosyaAdi();
-        XLSX.writeFile(wb, fname);
-        s01SetStatus('Excel indirildi: ' + fname, false);
     }
 
     function s01IsoToAyKey(iso) {
