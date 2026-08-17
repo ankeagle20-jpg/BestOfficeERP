@@ -183,6 +183,21 @@
             font-size: 0.68rem;
             margin-right: 0.35rem;
         }
+        .s01-table a.s01-musteri-link {
+            color: var(--s01-text);
+            text-decoration: none;
+            cursor: pointer;
+        }
+        .s01-table a.s01-musteri-link:hover {
+            color: #9fd4ff;
+            text-decoration: underline;
+        }
+        .s01-table a.s01-musteri-link .s01-id {
+            color: var(--s01-muted);
+        }
+        .s01-table a.s01-musteri-link:hover .s01-id {
+            color: #9fd4ff;
+        }
         .s01-empty {
             padding: 2rem 1rem;
             text-align: center;
@@ -409,8 +424,10 @@
             bodyParts.push('<tr data-mid="' + mid + '">');
             bodyParts.push(
                 '<td class="s01-musteri" title="' + s01Esc(title) + '">' +
+                '<a class="s01-musteri-link" href="/giris/?tab=sozlesmeler&mid=' + mid +
+                '" target="_blank" rel="noopener" onclick="event.stopPropagation()">' +
                 '<span class="s01-id">#' + mid + '</span>' + s01Esc(ad) +
-                '</td>'
+                '</a></td>'
             );
             for (a = 0; a < aylar.length; a++) {
                 ayP = s01ParseAyKey(aylar[a]);
