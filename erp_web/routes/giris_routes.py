@@ -4175,6 +4175,39 @@ def _senaryo01_parse_yil(raw, default: int) -> int:
     return y
 
 
+# Fatura Raporu / Mukerrer ile ayni: KYC oncelik, customers fallback.
+_SENARYO01_HIZMET_TURU_SQL = """
+COALESCE(NULLIF(TRIM(mk.hizmet_turu), ''), NULLIF(TRIM(c.hizmet_turu), ''), '')
+""".strip()
+
+
+def senaryo01_hizmet_turu_etkin(mk_ht, c_ht) -> str:
+    """KYC (mk) doluysa o; bos/None ise customers; ikisi bos → ''."""
+    mk = str(mk_ht or "").strip()
+    if mk:
+        return mk
+    return str(c_ht or "").strip()
+
+
+def senaryo01_hizmet_turu_filtre_norm(raw) -> str:
+    """Bos / tumu / hepsi / all → filtre yok ('')."""
+    s = str(raw or "").strip()
+    if not s:
+        return ""
+    key = s.casefold()
+    if key in ("tumu", "hepsi", "all") or key == "tümü".casefold():
+        return ""
+    return s
+
+
+def senaryo01_hizmet_turu_eslesir(etkin: str, filtre: str) -> bool:
+    """Filtre yoksa True. Filtre varken yalnizca casefold esitlik (bos etkin haric)."""
+    f = senaryo01_hizmet_turu_filtre_norm(filtre)
+    if not f:
+        return True
+    return str(etkin or "").strip().casefold() == f.casefold()
+
+
 def _senaryo01_grid_tutar_map(
     mids: list[int], yil_bas: int, yil_bit: int
 ) -> tuple[dict[int, dict[str, float]], dict]:
@@ -4367,7 +4400,7 @@ def _senaryo01_grid_tutar_map(
 def api_senaryo_01():
     """Senaryo 01: müşteri × ay kiracı aktiflik (salt okuma, tek batch SQL).
 
-    Query: yil_bas, yil_bit, durum=aktif|pasif|tumu
+    Query: yil_bas, yil_bit, durum=aktif|pasif|tumu, hizmet_turu= (opsiyonel)
     Yanıt: { ok, aylar, satirlar, tutarlar: {mid: {ay_key: tutar}}, meta }
     - bas/bit: ISO tarih (bit=null → kapanış yok, aralık sonuna kadar aktif sayılır)
     - kapanis_sonrasi_borc_ay KULLANILMAZ
@@ -4397,6 +4430,8 @@ def api_senaryo_01():
     if durum_raw not in ("aktif", "pasif", "tumu"):
         return jsonify({"ok": False, "mesaj": "durum aktif|pasif|tumu olmalı."}), 400
 
+    ht_filter = senaryo01_hizmet_turu_filtre_norm(request.args.get("hizmet_turu"))
+
     where = [musteri_gorunur_sql("c"), f"({_SENARYO01_BASLANGIC_SQL}) IS NOT NULL"]
     params: list = []
     if durum_raw == "aktif":
@@ -4424,12 +4459,14 @@ def api_senaryo_01():
             COALESCE(NULLIF(TRIM(c.musteri_adi), ''), NULLIF(TRIM(c.name), ''), '') AS ad,
             LOWER(TRIM(COALESCE(c.durum, 'aktif'))) AS durum,
             ({_SENARYO01_BASLANGIC_SQL}) AS bas,
-            c.kapanis_tarihi::date AS bit
+            c.kapanis_tarihi::date AS bit,
+            ({_SENARYO01_HIZMET_TURU_SQL}) AS hizmet_turu
         FROM customers c
         LEFT JOIN (
             SELECT DISTINCT ON (musteri_id)
                 musteri_id,
-                sozlesme_tarihi
+                sozlesme_tarihi,
+                hizmet_turu
             FROM musteri_kyc
             ORDER BY musteri_id, id DESC
         ) mk ON mk.musteri_id = c.id
@@ -4437,6 +4474,21 @@ def api_senaryo_01():
         ORDER BY ad ASC NULLS LAST, c.id ASC
     """
     rows = fetch_all(sql, tuple(params)) or []
+
+    ht_opts: list[str] = []
+    seen_ht: set[str] = set()
+    rows_ht: list = []
+    for r0 in rows:
+        ht0 = str((r0 or {}).get("hizmet_turu") or "").strip()
+        if ht0:
+            k0 = ht0.casefold()
+            if k0 not in seen_ht:
+                seen_ht.add(k0)
+                ht_opts.append(ht0)
+        if senaryo01_hizmet_turu_eslesir(ht0, ht_filter):
+            rows_ht.append(r0)
+    ht_opts.sort(key=lambda s: s.casefold())
+    rows = rows_ht
 
     aylar = _senaryo01_aylar_listesi(yil_bas, yil_bit)
     satirlar = []
@@ -4462,6 +4514,7 @@ def api_senaryo_01():
                 "durum": durum_s,
                 "bas": bas_d.isoformat(),
                 "bit": bit_d.isoformat() if bit_d else None,
+                "hizmet_turu": str(r.get("hizmet_turu") or "").strip(),
             }
         )
         mids.append(mid)
@@ -4480,11 +4533,13 @@ def api_senaryo_01():
             "yil_bas": yil_bas,
             "yil_bit": yil_bit,
             "durum": durum_raw,
+            "hizmet_turu": ht_filter or "tumu",
             "aylar": aylar,
             "satirlar": satirlar,
             "tutarlar": tutarlar_out,
             "meta": {
                 "satir_adet": len(satirlar),
+                "hizmet_turu_options": ht_opts,
                 "cache_var_adet": int(tutar_meta.get("cache_var_adet") or 0),
                 "cache_eksik_adet": int(tutar_meta.get("cache_eksik_adet") or 0),
                 "cache_rev_uyumsuz_adet": int(tutar_meta.get("cache_rev_uyumsuz_adet") or 0),

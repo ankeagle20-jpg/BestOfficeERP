@@ -60,6 +60,10 @@
             color: var(--s01-text);
             font-size: 0.9rem;
         }
+        .s01-field select#s01_hizmet_turu {
+            min-width: 10rem;
+            max-width: 16rem;
+        }
         .s01-btn {
             padding: 0.45rem 1rem;
             border: none;
@@ -259,6 +263,11 @@
                 <option value="pasif">Pasif</option>
             </select>
         </label>
+        <label class="s01-field">Hizmet Türü
+            <select id="s01_hizmet_turu" aria-label="Hizmet türü filtresi">
+                <option value="" selected>Tümü</option>
+            </select>
+        </label>
         <button type="button" class="s01-btn" id="s01_yukle_btn">Yükle</button>
         <div class="s01-meta" id="s01_meta"></div>
     </div>
@@ -421,7 +430,9 @@
             bit = c.bit || null;
             ayMap = tutarlar[midKey] || tutarlar[mid] || {};
             title = '#' + mid + ' · ' + ad + (bit ? (' · kapanış ' + bit) : '');
-            bodyParts.push('<tr data-mid="' + mid + '">');
+            bodyParts.push(
+                '<tr data-mid="' + mid + '" data-ht="' + s01Esc(c.hizmet_turu || '') + '">'
+            );
             bodyParts.push(
                 '<td class="s01-musteri" title="' + s01Esc(title) + '">' +
                 '<a class="s01-musteri-link" href="/giris/?tab=sozlesmeler&mid=' + mid +
@@ -498,10 +509,42 @@
         s01CacheNotuGoster(payload.meta);
     }
 
+    function s01HizmetTurleriDoldur(opts, keepVal) {
+        var sel = document.getElementById('s01_hizmet_turu');
+        var cur = (keepVal != null) ? String(keepVal) : (sel.value || '');
+        sel.innerHTML = '';
+        var o0 = document.createElement('option');
+        o0.value = '';
+        o0.textContent = 'Tümü';
+        sel.appendChild(o0);
+        var i, v, o, found = !cur;
+        for (i = 0; i < (opts || []).length; i++) {
+            v = String(opts[i] || '').trim();
+            if (!v) continue;
+            o = document.createElement('option');
+            o.value = v;
+            o.textContent = v;
+            if (cur && v === cur) {
+                o.selected = true;
+                found = true;
+            }
+            sel.appendChild(o);
+        }
+        if (cur && !found) {
+            o = document.createElement('option');
+            o.value = cur;
+            o.textContent = cur;
+            o.selected = true;
+            sel.appendChild(o);
+        }
+        if (!cur) sel.value = '';
+    }
+
     function s01Yukle() {
         var elBas = document.getElementById('s01_yil_bas');
         var elBit = document.getElementById('s01_yil_bit');
         var elDurum = document.getElementById('s01_durum');
+        var elHt = document.getElementById('s01_hizmet_turu');
         var btn = document.getElementById('s01_yukle_btn');
         var yBas = parseInt(elBas.value, 10);
         var yBit = parseInt(elBit.value, 10);
@@ -515,9 +558,13 @@
             elBit.value = String(yBit);
         }
         var durum = elDurum.value || 'tumu';
+        var hizmet = (elHt && elHt.value) ? elHt.value : '';
         var url = '/giris/api/senaryo-01?yil_bas=' + encodeURIComponent(yBas) +
             '&yil_bit=' + encodeURIComponent(yBit) +
             '&durum=' + encodeURIComponent(durum);
+        if (hizmet) {
+            url += '&hizmet_turu=' + encodeURIComponent(hizmet);
+        }
 
         btn.disabled = true;
         s01SetStatus('Yükleniyor…');
@@ -535,9 +582,14 @@
                     s01CacheNotuGoster(null);
                     return;
                 }
+                s01HizmetTurleriDoldur(
+                    (j.meta && j.meta.hizmet_turu_options) || [],
+                    hizmet
+                );
                 s01SetStatus(
                     'Yüklendi: ' + j.yil_bas + '–' + j.yil_bit +
                     ' · durum=' + j.durum +
+                    (hizmet ? (' · hizmet=' + hizmet) : '') +
                     ' · ' + (j.satirlar || []).length + ' müşteri'
                 );
                 s01TabloCiz(j);
@@ -553,6 +605,7 @@
     document.addEventListener('DOMContentLoaded', function () {
         s01InitYilDropdownlari();
         document.getElementById('s01_yukle_btn').addEventListener('click', s01Yukle);
+        document.getElementById('s01_hizmet_turu').addEventListener('change', s01Yukle);
         window.senaryo01HucreAktif = senaryo01HucreAktif;
         window.s01FormatTutar = s01FormatTutar;
         window.s01Yukle = s01Yukle;
