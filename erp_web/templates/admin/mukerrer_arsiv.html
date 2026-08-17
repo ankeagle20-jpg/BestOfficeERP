@@ -253,6 +253,10 @@
   }
 
   function buildGroupPayload(gid) {
+    const ginfo = (groupsCache || []).find(function (x) { return String(x.group_key) === String(gid); });
+    if (ginfo && ginfo.archive_allowed === false) {
+      return { ok: false, neden: 'Hareketli kopya arşivlenemez.' };
+    }
     const kalsinIds = selectedKalsinIds(gid);
     const arsivIds = selectedArsivIds(gid);
     if (!kalsinIds.length) {
@@ -264,7 +268,12 @@
     // Safety: exclude any accidental overlap
     const keepSet = {};
     kalsinIds.forEach(function (id) { keepSet[id] = true; });
-    const cleanArsiv = arsivIds.filter(function (id) { return !keepSet[id]; });
+    const cleanArsiv = arsivIds.filter(function (id) {
+      if (keepSet[id]) return false;
+      const mem = ((ginfo && ginfo.members) || []).find(function (m) { return Number(m.id) === Number(id); });
+      if (mem && ((Number(mem.tahsilat_n) || 0) > 0 || (Number(mem.fatura_n) || 0) > 0)) return false;
+      return true;
+    });
     if (!cleanArsiv.length) {
       return { ok: false, neden: 'Arşivlenecek kayıt seçilmedi (Kalsın ile çakışma).' };
     }
@@ -286,14 +295,17 @@
   function renderGroup(g) {
     const sug = g.suggested_canonical_id;
     const sugMem = (g.members || []).find(m => m.id === sug) || {};
+    const allowArsiv = g.archive_allowed !== false;
     const rows = (g.members || []).map(function (m) {
       const isCanon = !!m.is_suggested_canonical || m.id === sug;
+      const hareketli = (Number(m.tahsilat_n) || 0) > 0 || (Number(m.fatura_n) || 0) > 0;
       const kalsinChecked = isCanon ? ' checked' : '';
-      const arsivChecked = isCanon ? '' : ' checked';
+      const arsivDisabled = !allowArsiv || hareketli || isCanon;
+      const arsivChecked = (!isCanon && allowArsiv && !hareketli) ? ' checked' : '';
       return (
         '<tr class="' + (isCanon ? 'is-canon is-keep' : '') + '" data-mid="' + m.id + '">' +
           '<td><input type="checkbox" class="mk-kalsin-cb" data-gid="' + esc(g.group_key) + '" value="' + m.id + '"' + kalsinChecked + '></td>' +
-          '<td><input type="checkbox" class="mk-arsiv-cb" data-gid="' + esc(g.group_key) + '" value="' + m.id + '"' + arsivChecked + '></td>' +
+          '<td><input type="checkbox" class="mk-arsiv-cb" data-gid="' + esc(g.group_key) + '" value="' + m.id + '"' + arsivChecked + (arsivDisabled ? ' disabled' : '') + '></td>' +
           '<td>' + m.id + '</td>' +
           '<td>' + esc(m.musteri_no) + '</td>' +
           '<td><a class="mk-musteri-link" href="/giris/?tab=sozlesmeler&mid=' + m.id + '" target="_blank" rel="noopener" onclick="event.stopPropagation()">' + esc(m.name) + '</a>' + (isCanon ? ' <span class="mk-score">(önerilen kanonik)</span>' : '') + '</td>' +
@@ -314,8 +326,8 @@
     return (
       '<div class="mk-card" data-group-key="' + esc(g.group_key) + '">' +
         '<div class="mk-card-head">' +
-          '<label class="mk-note" style="display:inline-flex;align-items:center;gap:6px;margin-right:10px;cursor:pointer;">' +
-            '<input type="checkbox" class="mk-grup-sec" data-gid="' + esc(g.group_key) + '"> Bu grubu SEÇ' +
+          '<label class="mk-note" style="display:inline-flex;align-items:center;gap:6px;margin-right:10px;cursor:' + (allowArsiv ? 'pointer' : 'default') + ';">' +
+            '<input type="checkbox" class="mk-grup-sec" data-gid="' + esc(g.group_key) + '"' + (allowArsiv ? '' : ' disabled') + '> Bu grubu SEÇ' +
           '</label>' +
           tierBadge(g.tier) +
           '<span style="color:#b0bec5;font-size:.85rem;">' + esc(g.match_summary || '') +
@@ -338,10 +350,12 @@
           '<tbody>' + rows + '</tbody>' +
         '</table>' +
         '<div class="mk-actions">' +
-          '<button type="button" class="btn-erp btn-erp-sm mk-approve" data-gid="' + esc(g.group_key) + '">' +
+          '<button type="button" class="btn-erp btn-erp-sm mk-approve" data-gid="' + esc(g.group_key) + '"' + (allowArsiv ? '' : ' disabled') + '>' +
             'Bu grubu onayla' +
           '</button>' +
-          '<span class="mk-note">Kalsın / Arşivle bağımsız checkbox; aynı satırda ikisi birden işaretlenemez. İşaretsiz satıra dokunulmaz.</span>' +
+          (allowArsiv
+            ? '<span class="mk-note">Kalsın / Arşivle bağımsız checkbox; aynı satırda ikisi birden işaretlenemez. İşaretsiz satıra dokunulmaz.</span>'
+            : '<span class="mk-note" style="color:#ffb74d;">Hareketli kopya arşivlenemez</span>') +
         '</div>' +
       '</div>'
     );

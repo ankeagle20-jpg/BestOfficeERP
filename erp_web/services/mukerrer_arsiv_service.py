@@ -67,6 +67,44 @@ def _find_group_containing(payload: dict, musteri_id: int) -> dict | None:
     return None
 
 
+def _ids_with_finance(ids: list[int]) -> list[int]:
+    """tahsilat (tutar>0) veya fatura kaydı olan id'ler — SALT SELECT."""
+    if not ids:
+        return []
+    rows = fetch_all(
+        """
+        SELECT c.id
+        FROM customers c
+        WHERE c.id = ANY(%s)
+          AND (
+            EXISTS (
+                SELECT 1 FROM tahsilatlar t
+                WHERE COALESCE(t.musteri_id, t.customer_id) = c.id
+                  AND COALESCE(t.tutar, 0) > 0
+            )
+            OR EXISTS (
+                SELECT 1 FROM faturalar f
+                WHERE f.musteri_id = c.id
+            )
+          )
+        ORDER BY c.id
+        """,
+        (ids,),
+    ) or []
+    return [int(r["id"]) for r in rows]
+
+
+def _reject_hareketli_archive(ids: list[int]) -> None:
+    """Son savunma: hareketli müşteri arşivlenemez (403, yazma yok)."""
+    hareketli = _ids_with_finance(ids)
+    if hareketli:
+        raise MukerrerArsivError(
+            "Hareketli kopya arşivlenemez (tahsilat/fatura kaydı var).",
+            403,
+            extra={"kod": "hareketli_arsiv_yasak", "hareketli_ids": hareketli},
+        )
+
+
 def arsivle_grup(
     *,
     group_key: str,
@@ -115,6 +153,8 @@ def arsivle_grup(
     for aid in ids:
         if aid not in member_ids:
             raise MukerrerArsivError(f"arsiv id={aid} bu grupta değil.", 400)
+
+    _reject_hareketli_archive(ids)
 
     # Henüz arşivlenmemiş olmalı
     rows = fetch_all(
@@ -228,6 +268,8 @@ def arsivle_tek(
         raise MukerrerArsivError(f"Kayıt bulunamadı: id={mid}", 400)
     if row.get("arsivli"):
         raise MukerrerArsivError(f"Kayıt zaten arşivli: id={mid}", 400)
+
+    _reject_hareketli_archive([mid])
 
     live = build_mukerrer_groups(guven="hepsi")
     group = _find_group_containing(live, mid)

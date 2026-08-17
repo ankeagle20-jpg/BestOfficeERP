@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 """Mükerrer müşteri analizi — SALT OKUNUR.
 
-Dünkü scan_mukerrer_genis_alanlar_ro mantığı: boş kabuk kümeleme (union-find),
-tier sınıflandırma, kanonik skor. INSERT/UPDATE/DELETE yok.
+Dünkü scan_mukerrer_genis_alanlar_ro mantığı: arşivsiz müşteri kümeleme
+(union-find), tier sınıflandırma, kanonik skor. INSERT/UPDATE/DELETE yok.
 """
 from __future__ import annotations
 
 import hashlib
+import math
 import re
 from collections import defaultdict
 from typing import Any
@@ -294,6 +295,19 @@ def score_canonical(member: dict, peers: list[dict]) -> tuple[int, list[str]]:
         score += 10
         reasons.append("odeme_dolu")
 
+    tahsilat_n = int(member.get("tahsilat_n") or 0)
+    fatura_n = int(member.get("fatura_n") or 0)
+    if tahsilat_n > 0:
+        score += 80
+        reasons.append("tahsilat_var")
+        adet_bonus = min(20, int(math.log1p(tahsilat_n)))
+        if adet_bonus:
+            score += adet_bonus
+            reasons.append("tahsilat_adet")
+    if fatura_n > 0:
+        score += 80
+        reasons.append("fatura_var")
+
     # Daha eski created_at → +10 (grup içi en eski)
     created_keys = []
     for m in peers:
@@ -315,6 +329,29 @@ def _match_summary(fields_same: dict) -> str:
 def _group_key(ids: list[int]) -> str:
     raw = ",".join(str(i) for i in sorted(ids))
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def archive_allowed_for_group(members: list[dict], canonical_id: int) -> bool:
+    """True yalnızca kanonik OLMAYAN kopyaların hepsi boş kabuksa.
+
+    Kanonik hareketli olabilir. Kopya yoksa veya herhangi bir kopyada
+    tahsilat/fatura varsa False (kart yine görünür; arşiv yok).
+    """
+    try:
+        kid = int(canonical_id)
+    except (TypeError, ValueError):
+        return False
+    copies = []
+    for m in members:
+        try:
+            mid = int(m.get("id"))
+        except (TypeError, ValueError):
+            continue
+        if mid != kid:
+            copies.append(m)
+    if not copies:
+        return False
+    return all(is_empty_shell(m) for m in copies)
 
 
 def _fetch_customer_rows() -> list[dict]:
@@ -460,12 +497,11 @@ def build_mukerrer_groups(
 
     enriched = _enrich(_fetch_customer_rows())
     by_id = {int(r["id"]): r for r in enriched}
-    empty = [r for r in enriched if is_empty_shell(r)]
 
     tax_b: dict = defaultdict(list)
     phone_b: dict = defaultdict(list)
     name_b: dict = defaultdict(list)
-    for r in empty:
+    for r in enriched:
         tk, pk, nk = (
             norm_tax(r.get("tax_number")),
             norm_phone(r.get("phone")),
@@ -500,15 +536,15 @@ def build_mukerrer_groups(
             for i in ids[1:]:
                 union(ids[0], i)
 
-    empty_in: set[int] = set()
+    in_buckets: set[int] = set()
     for buckets in (tax_b, phone_b, name_b):
         for members in buckets.values():
             if len(members) >= 2:
                 for m in members:
-                    empty_in.add(int(m["id"]))
+                    in_buckets.add(int(m["id"]))
 
     clusters: dict[int, list] = defaultdict(list)
-    for mid in empty_in:
+    for mid in in_buckets:
         clusters[find(mid)].append(by_id[mid])
 
     raw_counts: dict[str, int] = defaultdict(int)
@@ -616,7 +652,7 @@ def build_mukerrer_groups(
             {
                 "group_key": _group_key(ids),
                 "tier": tier,
-                "archive_allowed": True,
+                "archive_allowed": archive_allowed_for_group(scored_members, suggested),
                 "vergi_uyusmazligi": vergi_uyusmazligi,
                 "match": cls["fields_same"],
                 "match_summary": match_summary,
