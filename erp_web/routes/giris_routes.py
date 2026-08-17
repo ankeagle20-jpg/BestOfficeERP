@@ -4208,6 +4208,53 @@ def senaryo01_hizmet_turu_eslesir(etkin: str, filtre: str) -> bool:
     return str(etkin or "").strip().casefold() == f.casefold()
 
 
+S01_KAYIT_YILI_ILK = 2019
+
+
+def senaryo01_kayit_yillari_parse(raw) -> list[int]:
+    """Virgulle ayrilmis kayit (sozlesme baslangic) yillari.
+
+    Bos / tumu / hepsi / all → [] (filtre yok).
+    2019 (sirket kurulusu) ile icinde bulunulan yil disindakiler atilir.
+    """
+    s = str(raw or "").strip()
+    if not s:
+        return []
+    key = s.casefold()
+    if key in ("tumu", "hepsi", "all") or key == "tümü".casefold():
+        return []
+    yil_min = int(S01_KAYIT_YILI_ILK)
+    yil_max = int(date.today().year)
+    out: list[int] = []
+    seen: set[int] = set()
+    for part in s.split(","):
+        p = part.strip()
+        if not p:
+            continue
+        try:
+            y = int(p)
+        except (TypeError, ValueError):
+            continue
+        if y < yil_min or y > yil_max:
+            continue
+        if y in seen:
+            continue
+        seen.add(y)
+        out.append(y)
+    return out
+
+
+def senaryo01_kayit_yili_eslesir(bas, yillar) -> bool:
+    """Filtre yoksa True. Varken bas yili listede olmali; bas yoksa haric."""
+    ys = list(yillar or [])
+    if not ys:
+        return True
+    d = _aylik_grid_coerce_date(bas)
+    if d is None:
+        return False
+    return int(d.year) in set(ys)
+
+
 def _senaryo01_grid_tutar_map(
     mids: list[int], yil_bas: int, yil_bit: int
 ) -> tuple[dict[int, dict[str, float]], dict]:
@@ -4400,7 +4447,8 @@ def _senaryo01_grid_tutar_map(
 def api_senaryo_01():
     """Senaryo 01: müşteri × ay kiracı aktiflik (salt okuma, tek batch SQL).
 
-    Query: yil_bas, yil_bit, durum=aktif|pasif|tumu, hizmet_turu= (opsiyonel)
+    Query: yil_bas, yil_bit, durum=aktif|pasif|tumu, hizmet_turu= (opsiyonel),
+           kayit_yillari= virgulle yillar (opsiyonel, ornek 2022,2023)
     Yanıt: { ok, aylar, satirlar, tutarlar: {mid: {ay_key: tutar}}, meta }
     - bas/bit: ISO tarih (bit=null → kapanış yok, aralık sonuna kadar aktif sayılır)
     - kapanis_sonrasi_borc_ay KULLANILMAZ
@@ -4431,6 +4479,7 @@ def api_senaryo_01():
         return jsonify({"ok": False, "mesaj": "durum aktif|pasif|tumu olmalı."}), 400
 
     ht_filter = senaryo01_hizmet_turu_filtre_norm(request.args.get("hizmet_turu"))
+    ky_filter = senaryo01_kayit_yillari_parse(request.args.get("kayit_yillari"))
 
     where = [musteri_gorunur_sql("c"), f"({_SENARYO01_BASLANGIC_SQL}) IS NOT NULL"]
     params: list = []
@@ -4485,7 +4534,9 @@ def api_senaryo_01():
             if k0 not in seen_ht:
                 seen_ht.add(k0)
                 ht_opts.append(ht0)
-        if senaryo01_hizmet_turu_eslesir(ht0, ht_filter):
+        if senaryo01_hizmet_turu_eslesir(ht0, ht_filter) and senaryo01_kayit_yili_eslesir(
+            (r0 or {}).get("bas"), ky_filter
+        ):
             rows_ht.append(r0)
     ht_opts.sort(key=lambda s: s.casefold())
     rows = rows_ht
@@ -4534,6 +4585,7 @@ def api_senaryo_01():
             "yil_bit": yil_bit,
             "durum": durum_raw,
             "hizmet_turu": ht_filter or "tumu",
+            "kayit_yillari": ky_filter,
             "aylar": aylar,
             "satirlar": satirlar,
             "tutarlar": tutarlar_out,

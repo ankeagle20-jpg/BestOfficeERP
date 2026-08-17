@@ -67,6 +67,32 @@
             min-width: 10rem;
             max-width: 16rem;
         }
+        .s01-kayit-yili-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.15rem 0.55rem;
+            max-width: 22rem;
+            max-height: 5.4rem;
+            overflow-y: auto;
+            padding: 0.28rem 0.45rem;
+            border: 1px solid var(--s01-border);
+            border-radius: 4px;
+            background: #0c1f2e;
+        }
+        .s01-kayit-yili-list label {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.22rem;
+            color: var(--s01-text);
+            font-size: 0.82rem;
+            cursor: pointer;
+            white-space: nowrap;
+            user-select: none;
+        }
+        .s01-kayit-yili-list input {
+            margin: 0;
+            accent-color: #2d7dd2;
+        }
         .s01-btn {
             padding: 0.45rem 1rem;
             border: none;
@@ -433,6 +459,10 @@
                 <option value="" selected>Tümü</option>
             </select>
         </label>
+        <div class="s01-field">Kayıt Yılı
+            <div class="s01-kayit-yili-list" id="s01_kayit_yili" role="group"
+                 aria-label="Kayıt yılı filtresi"></div>
+        </div>
         <button type="button" class="s01-btn" id="s01_yukle_btn">Yükle</button>
         <button type="button" class="s01-btn s01-btn-excel" id="s01_excel_btn">Excel'e Aktar</button>
         <div class="s01-meta" id="s01_meta"></div>
@@ -455,6 +485,64 @@
 
     function s01BugunYil() {
         return (new Date()).getFullYear();
+    }
+
+    var S01_KAYIT_YILI_ILK = 2019;
+
+    function s01KayitYiliDoldur() {
+        var wrap = document.getElementById('s01_kayit_yili');
+        if (!wrap) return;
+        wrap.innerHTML = '';
+        function addCb(id, cls, val, text, checked) {
+            var lab = document.createElement('label');
+            var inp = document.createElement('input');
+            inp.type = 'checkbox';
+            if (id) inp.id = id;
+            if (cls) inp.className = cls;
+            if (val != null && val !== '') inp.value = String(val);
+            inp.checked = !!checked;
+            lab.appendChild(inp);
+            lab.appendChild(document.createTextNode(' ' + text));
+            wrap.appendChild(lab);
+        }
+        addCb('s01_kayit_yili_tumu', '', '', 'Tümü', true);
+        var y, yNow = s01BugunYil();
+        for (y = S01_KAYIT_YILI_ILK; y <= yNow; y++) {
+            addCb('', 's01-kayit-yili-cb', y, String(y), false);
+        }
+    }
+
+    function s01KayitYillariSecilen() {
+        var cbs = document.querySelectorAll('#s01_kayit_yili .s01-kayit-yili-cb:checked');
+        var out = [];
+        var i;
+        for (i = 0; i < cbs.length; i++) {
+            out.push(cbs[i].value);
+        }
+        return out;
+    }
+
+    function s01KayitYiliChange(ev) {
+        var t = ev && ev.target;
+        if (!t || t.type !== 'checkbox') return;
+        var tumu = document.getElementById('s01_kayit_yili_tumu');
+        if (t.id === 's01_kayit_yili_tumu') {
+            if (tumu && tumu.checked) {
+                var cbs = document.querySelectorAll('#s01_kayit_yili .s01-kayit-yili-cb');
+                var i;
+                for (i = 0; i < cbs.length; i++) cbs[i].checked = false;
+            } else if (tumu && !document.querySelector('#s01_kayit_yili .s01-kayit-yili-cb:checked')) {
+                tumu.checked = true;
+                return;
+            }
+            s01Yukle();
+            return;
+        }
+        if (t.checked && tumu) tumu.checked = false;
+        if (!document.querySelector('#s01_kayit_yili .s01-kayit-yili-cb:checked') && tumu) {
+            tumu.checked = true;
+        }
+        s01Yukle();
     }
 
     function s01VarsayilanYillar() {
@@ -1213,11 +1301,15 @@
         }
         var durum = elDurum.value || 'tumu';
         var hizmet = (elHt && elHt.value) ? elHt.value : '';
+        var kayitYillar = s01KayitYillariSecilen();
         var url = '/giris/api/senaryo-01?yil_bas=' + encodeURIComponent(yBas) +
             '&yil_bit=' + encodeURIComponent(yBit) +
             '&durum=' + encodeURIComponent(durum);
         if (hizmet) {
             url += '&hizmet_turu=' + encodeURIComponent(hizmet);
+        }
+        if (kayitYillar.length) {
+            url += '&kayit_yillari=' + encodeURIComponent(kayitYillar.join(','));
         }
 
         btn.disabled = true;
@@ -1244,6 +1336,7 @@
                     'Yüklendi: ' + j.yil_bas + '–' + j.yil_bit +
                     ' · durum=' + j.durum +
                     (hizmet ? (' · hizmet=' + hizmet) : '') +
+                    (kayitYillar.length ? (' · kayit=' + kayitYillar.join(',')) : '') +
                     ' · ' + (j.satirlar || []).length + ' müşteri'
                 );
                 s01SortSifirla();
@@ -1260,9 +1353,11 @@
 
     document.addEventListener('DOMContentLoaded', function () {
         s01InitYilDropdownlari();
+        s01KayitYiliDoldur();
         document.getElementById('s01_yukle_btn').addEventListener('click', s01Yukle);
         document.getElementById('s01_excel_btn').addEventListener('click', s01ExcelAktar);
         document.getElementById('s01_hizmet_turu').addEventListener('change', s01Yukle);
+        document.getElementById('s01_kayit_yili').addEventListener('change', s01KayitYiliChange);
         document.getElementById('s01_wrap').addEventListener('click', function (ev) {
             var filtreBtn = ev.target.closest ? ev.target.closest('.s01-filtre-btn') : null;
             if (filtreBtn) {
