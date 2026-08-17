@@ -255,6 +255,20 @@
         .s01-table tr.s01-ozet-sayi td.s01-musteri {
             z-index: 11;
         }
+        .s01-table tr.s01-ozet-sayi td[data-ozet-val="sayi"] {
+            cursor: pointer;
+            user-select: none;
+        }
+        .s01-table tr.s01-ozet-sayi td[data-ozet-val="sayi"]:hover {
+            background: #2a5a7a;
+            color: #fff;
+        }
+        .s01-table tr.s01-ozet-sayi td[data-ozet-val="sayi"].s01-sort-desc,
+        .s01-table tr.s01-ozet-sayi td[data-ozet-val="sayi"].s01-sort-asc {
+            background: #246080;
+            color: #9fd4ff;
+            box-shadow: inset 0 -2px 0 #9fd4ff;
+        }
         .s01-table tr.s01-ozet-toplam td {
             background: #0d2a3f;
             border-top: 2px solid #3d6f95;
@@ -581,9 +595,13 @@
             '<td class="s01-musteri">Müşteri Sayısı</td>'
         ];
         for (a = 0; a < aylar.length; a++) {
+            var sayCls = '';
+            if (s01SortAy === aylar[a] && s01SortMod === 1) sayCls = ' s01-sort-desc';
+            else if (s01SortAy === aylar[a] && s01SortMod === 2) sayCls = ' s01-sort-asc';
             sayParts.push(
-                '<td data-ay="' + s01Esc(aylar[a]) + '" data-ozet-val="sayi" title="' +
-                s01Esc(aylar[a] + ': ' + ayAktifSay[a] + ' aktif müşteri') + '">' +
+                '<td class="' + sayCls.trim() + '" data-ay="' + s01Esc(aylar[a]) +
+                '" data-ozet-val="sayi" title="' +
+                s01Esc(aylar[a] + ': ' + ayAktifSay[a] + ' aktif müşteri · tıkla: sırala') + '">' +
                 s01Esc(s01FormatTutar(ayAktifSay[a])) +
                 '</td>'
             );
@@ -713,8 +731,10 @@
         document.getElementById('s01_hizmet_turu').addEventListener('change', s01Yukle);
         document.getElementById('s01_wrap').addEventListener('click', function (ev) {
             var th = ev.target.closest ? ev.target.closest('th.s01-ay') : null;
-            if (!th) return;
-            var ay = th.getAttribute('data-ay');
+            var tdSay = ev.target.closest ? ev.target.closest('td[data-ozet-val="sayi"]') : null;
+            var el = th || tdSay;
+            if (!el) return;
+            var ay = el.getAttribute('data-ay');
             if (ay) s01AyTikla(ay);
         });
         window.senaryo01HucreAktif = senaryo01HucreAktif;
