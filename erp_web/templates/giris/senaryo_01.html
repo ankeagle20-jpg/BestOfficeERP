@@ -264,6 +264,25 @@
             background: var(--s01-head-bg);
             color: var(--s01-text);
             font-weight: 700;
+            cursor: pointer;
+            user-select: none;
+        }
+        .s01-table thead th.s01-baslangic:hover {
+            background: #1e4a68;
+        }
+        .s01-table thead th.s01-baslangic .s01-sort-ok {
+            display: block;
+            height: 10px;
+            font-size: 0.58rem;
+            line-height: 10px;
+            color: transparent;
+        }
+        .s01-table thead th.s01-baslangic:hover .s01-sort-ok {
+            color: #7aa3c4;
+        }
+        .s01-table thead th.s01-baslangic.s01-sort-desc .s01-sort-ok,
+        .s01-table thead th.s01-baslangic.s01-sort-asc .s01-sort-ok {
+            color: #9fd4ff;
         }
         .s01-table tr.s01-ozet td.s01-baslangic {
             background: #1e4560;
@@ -541,6 +560,7 @@
     var s01SortAy = null;
     var s01SortMod = 0;
     var s01SortIsimMod = 0;
+    var s01SortBaslangicMod = 0;
     var s01FiltreAy = null;
     var s01FiltreMod = null;
 
@@ -550,6 +570,7 @@
         s01SortAy = null;
         s01SortMod = 0;
         s01SortIsimMod = 0;
+        s01SortBaslangicMod = 0;
     }
 
     function s01FiltreSifirla() {
@@ -872,10 +893,35 @@
         return satirlar;
     }
 
+    function s01BaslangicAnahtar(satir) {
+        var s = (satir && satir.bas) ? String(satir.bas).trim() : '';
+        if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+        return '';
+    }
+
+    function s01BaslangicSirala(satirlar, desc) {
+        satirlar.sort(function (a, b) {
+            var ka = s01BaslangicAnahtar(a);
+            var kb = s01BaslangicAnahtar(b);
+            var aMiss = !ka;
+            var bMiss = !kb;
+            if (aMiss && bMiss) return s01AdKarsilastir(a, b);
+            if (aMiss) return 1;
+            if (bMiss) return -1;
+            if (ka === kb) return s01AdKarsilastir(a, b);
+            var cmp = (ka < kb) ? -1 : 1;
+            return desc ? -cmp : cmp;
+        });
+        return satirlar;
+    }
+
     function s01SiraliSatirlar(payload) {
         var satirlar = s01FiltrelenmisSatirlar(payload);
         if (s01SortIsimMod === 1 || s01SortIsimMod === 2) {
             return s01IsimMukerrerSirala(satirlar, s01SortIsimMod === 1);
+        }
+        if (s01SortBaslangicMod === 1 || s01SortBaslangicMod === 2) {
+            return s01BaslangicSirala(satirlar, s01SortBaslangicMod === 1);
         }
         if (!s01SortAy || !s01SortMod) return satirlar;
         var tutarlar = (payload && payload.tutarlar) || {};
@@ -898,6 +944,7 @@
         if (!s01LastPayload) return;
         s01SortAy = null;
         s01SortMod = 0;
+        s01SortBaslangicMod = 0;
         s01SortIsimMod += 1;
         if (s01SortIsimMod > 2) s01SortIsimMod = 0;
         s01TabloCiz(s01LastPayload);
@@ -906,6 +953,7 @@
     function s01AyTikla(ayKey) {
         if (!ayKey || !s01LastPayload) return;
         s01SortIsimMod = 0;
+        s01SortBaslangicMod = 0;
         if (s01SortAy === ayKey) {
             s01SortMod += 1;
             if (s01SortMod > 2) {
@@ -919,9 +967,32 @@
         s01TabloCiz(s01LastPayload);
     }
 
+    function s01BaslangicTikla() {
+        if (!s01LastPayload) return;
+        s01SortAy = null;
+        s01SortMod = 0;
+        s01SortIsimMod = 0;
+        s01SortBaslangicMod += 1;
+        if (s01SortBaslangicMod > 2) s01SortBaslangicMod = 0;
+        s01TabloCiz(s01LastPayload);
+    }
+
     function s01AyBaslikHtml(aylar) {
+        var basCls = 's01-baslangic';
+        var basOk = '⇅';
+        var basTitle = 'Başlangıç tarihine göre sırala (yeni → eski)';
+        if (s01SortBaslangicMod === 1) {
+            basCls += ' s01-sort-desc';
+            basOk = '▼';
+            basTitle = 'Azalan · tekrar tıkla: artan';
+        } else if (s01SortBaslangicMod === 2) {
+            basCls += ' s01-sort-asc';
+            basOk = '▲';
+            basTitle = 'Artan · tekrar tıkla: orijinal sıra';
+        }
         var html = '<th class="s01-musteri">Müşteri</th>' +
-            '<th class="s01-baslangic">Başlangıç</th>';
+            '<th class="' + basCls + '" title="' + s01Esc(basTitle) + '">Başlangıç' +
+            '<span class="s01-sort-ok">' + basOk + '</span></th>';
         var i, p, ay, cls, ok, title;
         for (i = 0; i < aylar.length; i++) {
             ay = aylar[i];
@@ -1207,6 +1278,12 @@
             if (tdIsim) {
                 ev.preventDefault();
                 s01IsimTikla();
+                return;
+            }
+            var thBas = ev.target.closest ? ev.target.closest('th.s01-baslangic') : null;
+            if (thBas) {
+                ev.preventDefault();
+                s01BaslangicTikla();
                 return;
             }
             var th = ev.target.closest ? ev.target.closest('th.s01-ay') : null;
