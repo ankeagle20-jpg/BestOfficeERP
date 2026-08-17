@@ -4036,6 +4036,14 @@
                             style="background:#7e57c2;border-color:#7e57c2;">
                             <i class="fa fa-balance-scale"></i> Tahsilatları Reel ile Eşitle
                         </button>
+                        {% if current_user.role == 'admin' %}
+                        <button type="button" class="btn-aylik-sec" id="sozlesmeler-musteri-arsivle-btn"
+                            onclick="sozlesmelerMusteriArsivleAc()"
+                            style="background:#546e7a;border-color:#546e7a;"
+                            title="Bu müşteriyi arşivle (listeden gizle)">
+                            <i class="fa fa-archive"></i> Arşivle
+                        </button>
+                        {% endif %}
                         <span id="sozlesmeler-reel-kaydet-durum" class="sozlesmeler-reel-kaydet-durum" aria-live="polite"></span>
                     </div>
                     <div id="sozlesmeler-reel-esitle-modal" style="display:none;position:fixed;
@@ -4058,6 +4066,32 @@
                             </div>
                         </div>
                     </div>
+                    {% if current_user.role == 'admin' %}
+                    <div id="sozlesmeler-musteri-arsivle-modal" style="display:none;position:fixed;
+                        top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:99999;
+                        align-items:center;justify-content:center;">
+                        <div style="background:#0f2537;border:1px solid #2d4060;border-radius:8px;
+                            padding:20px;max-width:520px;width:90%;max-height:80vh;overflow-y:auto;">
+                            <h3 style="color:#e0f7fa;margin-bottom:12px;">Müşteriyi arşivle</h3>
+                            <p id="sozlesmeler-musteri-arsivle-text" style="color:#b0bec5;margin-bottom:12px;font-size:13px;"></p>
+                            <label style="display:flex;align-items:center;gap:8px;color:#e0f7fa;font-size:13px;margin-bottom:16px;cursor:pointer;">
+                                <input type="checkbox" id="sozlesmeler-musteri-arsivle-check"
+                                    onchange="var g=document.getElementById('sozlesmeler-musteri-arsivle-go'); if(g) g.disabled=!this.checked;">
+                                Bu işlemi anladığımı onaylıyorum
+                            </label>
+                            <div style="display:flex;gap:10px;justify-content:flex-end;">
+                                <button type="button" class="btn-aylik-sec"
+                                    id="sozlesmeler-musteri-arsivle-cancel"
+                                    onclick="sozlesmelerMusteriArsivleModalKapat()">Vazgeç</button>
+                                <button type="button" class="tahsilat-btn-kaydet"
+                                    id="sozlesmeler-musteri-arsivle-go"
+                                    onclick="sozlesmelerMusteriArsivleUygula()" disabled>
+                                    <i class="fa fa-check"></i> Onayla ve arşivle
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
                     <div id="sozlesmeler-reel-aylik-grid" class="sozlesmeler-aylik-grid"></div>
                     <div id="sozlesmeler-reel-aylik-bos" class="sozlesmeler-aylik-bos">Sözleşme tarihleri ve aylık kira girildiğinde ay hücreleri burada görünür.</div>
                 </div>
@@ -7661,6 +7695,115 @@ function sozlesmelerReelTahsilatEsitleUygula() {
 }
 
 /** Formdaki başlangıç/bitiş veya Kira süresi ay ile beklenen hücre sayısı (cache ile karşılaştırma için). */
+
+function sozlesmelerMusteriArsivleModalKapat() {
+    var modal = document.getElementById('sozlesmeler-musteri-arsivle-modal');
+    if (modal) modal.style.display = 'none';
+    var chk = document.getElementById('sozlesmeler-musteri-arsivle-check');
+    if (chk) chk.checked = false;
+    var go = document.getElementById('sozlesmeler-musteri-arsivle-go');
+    if (go) { go.disabled = true; go.dataset.busy = ''; }
+}
+
+function sozlesmelerMusteriArsivleAc() {
+    var mid = selectedId;
+    if (!mid) {
+        alert('Önce bir müşteri seçin.');
+        return;
+    }
+    var modal = document.getElementById('sozlesmeler-musteri-arsivle-modal');
+    if (!modal) {
+        alert('Arşivleme yalnızca yönetici (admin) içindir.');
+        return;
+    }
+    var adEl = document.getElementById('name') || document.getElementById('musteri_adi');
+    var ad = (adEl && adEl.value) ? String(adEl.value).trim() : '';
+    var textEl = document.getElementById('sozlesmeler-musteri-arsivle-text');
+    if (textEl) {
+        textEl.textContent = (ad ? (ad + ' (id=' + mid + ')') : ('Müşteri id=' + mid)) +
+            ' arşivlenecek. Listede ve aramada gizlenir; tahsilat/fatura kaydı silinmez.';
+    }
+    var chk = document.getElementById('sozlesmeler-musteri-arsivle-check');
+    if (chk) chk.checked = false;
+    var go = document.getElementById('sozlesmeler-musteri-arsivle-go');
+    if (go) { go.disabled = true; go.dataset.busy = ''; }
+    modal.style.display = 'flex';
+}
+
+function sozlesmelerMusteriArsivleIstek(mid, grupOnay) {
+    var body = { musteri_id: mid, onay: true };
+    if (grupOnay) body.onay_gerekli = true;
+    return fetch('/admin/api/musteri-arsivle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify(body)
+    }).then(function (r) {
+        return r.json().then(function (d) {
+            return { status: r.status, body: d || {} };
+        }).catch(function () {
+            return { status: r.status, body: { ok: false, mesaj: 'Yanıt okunamadı.' } };
+        });
+    });
+}
+
+function sozlesmelerMusteriArsivleBasarili(mid) {
+    sozlesmelerMusteriArsivleModalKapat();
+    alert('Müşteri arşivlendi (id=' + mid + '). Listede artık görünmeyecek.');
+    if (typeof temizle === 'function') {
+        try { temizle(); } catch (eT) {}
+    } else {
+        selectedId = null;
+    }
+    if (typeof girisMusteriListe2IframeYukle === 'function') {
+        try { girisMusteriListe2IframeYukle(); } catch (eL) {}
+    }
+}
+
+function sozlesmelerMusteriArsivleUygula() {
+    var mid = selectedId;
+    if (!mid) {
+        alert('Önce bir müşteri seçin.');
+        return;
+    }
+    var chk = document.getElementById('sozlesmeler-musteri-arsivle-check');
+    if (!chk || !chk.checked) {
+        alert('Onay kutusunu işaretleyin.');
+        return;
+    }
+    var go = document.getElementById('sozlesmeler-musteri-arsivle-go');
+    if (go && go.dataset.busy === '1') return;
+    if (go) { go.disabled = true; go.dataset.busy = '1'; }
+    sozlesmelerMusteriArsivleIstek(mid, false).then(function (res) {
+        var d = res.body || {};
+        if (res.status === 409 && d.kod === 'mukerrer_grup_onay_gerekli') {
+            var msg = d.mesaj || 'Bu müşteri mükerrer grupta GÖRÜNÜYOR, yine de TEK BAŞINA arşivlensin mi?';
+            if (!window.confirm(msg)) {
+                if (go) { go.disabled = !chk.checked; go.dataset.busy = ''; }
+                return;
+            }
+            return sozlesmelerMusteriArsivleIstek(mid, true).then(function (res2) {
+                var d2 = res2.body || {};
+                if (res2.status === 200 && d2.ok) {
+                    sozlesmelerMusteriArsivleBasarili(mid);
+                    return;
+                }
+                alert(d2.mesaj || ('Arşivleme başarısız (HTTP ' + res2.status + ').'));
+                if (go) { go.disabled = !chk.checked; go.dataset.busy = ''; }
+            });
+        }
+        if (res.status === 200 && d.ok) {
+            sozlesmelerMusteriArsivleBasarili(mid);
+            return;
+        }
+        alert(d.mesaj || ('Arşivleme başarısız (HTTP ' + res.status + ').'));
+        if (go) { go.disabled = !chk.checked; go.dataset.busy = ''; }
+    }).catch(function (e) {
+        alert('Hata: ' + (e && e.message ? e.message : e));
+        if (go) { go.disabled = !chk.checked; go.dataset.busy = ''; }
+    });
+}
+
 function sozlesmelerAylikBeklenenAySayisiFormdan() {
     var basEl = document.getElementById('sozlesme_baslangic');
     var bitEl = document.getElementById('sozlesme_bitis');

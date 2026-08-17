@@ -14,10 +14,11 @@ from services.mukerrer_analiz_service import ALLOWED_TIERS, build_mukerrer_group
 
 
 class MukerrerArsivError(Exception):
-    def __init__(self, mesaj: str, status: int = 400):
+    def __init__(self, mesaj: str, status: int = 400, extra: dict | None = None):
         super().__init__(mesaj)
         self.mesaj = mesaj
         self.status = status
+        self.extra = extra or {}
 
 
 def _as_int_list(raw) -> list[int]:
@@ -36,10 +37,33 @@ def _as_int_list(raw) -> list[int]:
     return out
 
 
+def _truthy(value) -> bool:
+    """Soft-confirm boolean — fatura/sözleşme ileri tarih deseniyle aynı."""
+    return value in (True, 1, "1", "true", "True", "yes", "on")
+
+
 def _find_group(payload: dict, group_key: str) -> dict | None:
     for g in payload.get("groups") or []:
         if (g.get("group_key") or "") == group_key:
             return g
+    return None
+
+
+def _find_group_containing(payload: dict, musteri_id: int) -> dict | None:
+    """COK_YUKSEK / YUKSEK grupta bu müşteri var mı? (salt okuma sonucu)."""
+    try:
+        mid = int(musteri_id)
+    except (TypeError, ValueError):
+        return None
+    for g in payload.get("groups") or []:
+        if (g.get("tier") or "").strip() not in ALLOWED_TIERS:
+            continue
+        for m in g.get("members") or []:
+            try:
+                if int(m.get("id")) == mid:
+                    return g
+            except (TypeError, ValueError):
+                continue
     return None
 
 
@@ -166,6 +190,92 @@ def arsivle_grup(
         "batch_id": batch_id,
         "tier": tier,
         "group_key": gk,
+    }
+
+
+def arsivle_tek(
+    *,
+    musteri_id: int,
+    user_id: int | None,
+    onay: bool,
+    onay_gerekli=False,
+) -> dict[str, Any]:
+    """Tek müşteriyi kanoniksiz arşivle (yalnızca customers arşiv meta).
+
+    Finans tablolarına dokunulmaz. Mükerrer grup üyesi ise ilk istekte
+    409 + onay_gerekli; flag ile ikinci istekte arşivlenir.
+    """
+    if not _truthy(onay):
+        raise MukerrerArsivError("Onay zorunlu (onay=true).", 400)
+    try:
+        mid = int(musteri_id)
+    except (TypeError, ValueError):
+        raise MukerrerArsivError("musteri_id geçersiz.", 400)
+    if mid <= 0:
+        raise MukerrerArsivError("musteri_id geçersiz.", 400)
+
+    ensure_customers_arsivli()
+
+    row = fetch_one(
+        """
+        SELECT id, name, COALESCE(arsivli, FALSE) AS arsivli
+        FROM customers
+        WHERE id = %s
+        """,
+        (mid,),
+    )
+    if not row:
+        raise MukerrerArsivError(f"Kayıt bulunamadı: id={mid}", 400)
+    if row.get("arsivli"):
+        raise MukerrerArsivError(f"Kayıt zaten arşivli: id={mid}", 400)
+
+    live = build_mukerrer_groups(guven="hepsi")
+    group = _find_group_containing(live, mid)
+    if group and not _truthy(onay_gerekli):
+        gname = (row.get("name") or "").strip() or f"id={mid}"
+        raise MukerrerArsivError(
+            "Bu müşteri mükerrer grupta GÖRÜNÜYOR, yine de TEK BAŞINA arşivlensin mi?",
+            409,
+            extra={
+                "kod": "mukerrer_grup_onay_gerekli",
+                "onay_gerekli": True,
+                "musteri_id": mid,
+                "musteri_adi": gname,
+                "group_key": group.get("group_key") or "",
+                "tier": (group.get("tier") or "").strip(),
+                "member_count": int(group.get("member_count") or 0),
+            },
+        )
+
+    with db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE customers
+            SET arsivli = TRUE,
+                arsiv_nedeni = 'tek_musteri',
+                arsiv_at = NOW(),
+                arsiv_kanonik_id = NULL
+            WHERE id = %s
+              AND COALESCE(arsivli, FALSE) = FALSE
+            """,
+            (mid,),
+        )
+        updated = int(cur.rowcount or 0)
+        if updated != 1:
+            raise MukerrerArsivError(
+                f"Beklenen 1 güncelleme, olan {updated}. İşlem iptal.",
+                409,
+            )
+
+    return {
+        "ok": True,
+        "archived_n": 1,
+        "archived_ids": [mid],
+        "musteri_id": mid,
+        "arsiv_nedeni": "tek_musteri",
+        "arsiv_kanonik_id": None,
+        "mukerrer_grup_uyesi": bool(group),
     }
 
 

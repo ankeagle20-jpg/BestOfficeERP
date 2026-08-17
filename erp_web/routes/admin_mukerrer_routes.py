@@ -14,6 +14,16 @@ logger = logging.getLogger(__name__)
 bp = Blueprint("admin_mukerrer", __name__)
 
 
+def _arsiv_error_json(e):
+    """MukerrerArsivError → JSON (extra alanlar: kod / onay_gerekli)."""
+    body = {"ok": False, "mesaj": e.mesaj}
+    extra = getattr(e, "extra", None) or {}
+    for k, v in extra.items():
+        if k not in body:
+            body[k] = v
+    return jsonify(body), e.status
+
+
 @bp.route("/mukerrer-arsiv")
 @admin_gerekli
 def mukerrer_arsiv_page():
@@ -68,9 +78,34 @@ def api_mukerrer_arsivle():
         )
         return jsonify(sonuc)
     except MukerrerArsivError as e:
-        return jsonify({"ok": False, "mesaj": e.mesaj}), e.status
+        return _arsiv_error_json(e)
     except Exception:
         logger.exception("api_mukerrer_arsivle")
+        return jsonify({"ok": False, "mesaj": "Arşivleme başarısız."}), 500
+
+
+@bp.route("/api/musteri-arsivle", methods=["POST"])
+@admin_gerekli
+def api_musteri_arsivle():
+    """Tek müşteri arşiv meta (kanoniksiz). Finans dokunulmaz.
+
+    Mükerrer grup üyesi ise ilk istek 409 + onay_gerekli; flag ile devam.
+    """
+    from services.mukerrer_arsiv_service import MukerrerArsivError, arsivle_tek
+
+    try:
+        body = request.get_json(silent=True) or {}
+        sonuc = arsivle_tek(
+            musteri_id=body.get("musteri_id"),
+            user_id=getattr(current_user, "id", None),
+            onay=body.get("onay"),
+            onay_gerekli=body.get("onay_gerekli"),
+        )
+        return jsonify(sonuc)
+    except MukerrerArsivError as e:
+        return _arsiv_error_json(e)
+    except Exception:
+        logger.exception("api_musteri_arsivle")
         return jsonify({"ok": False, "mesaj": "Arşivleme başarısız."}), 500
 
 
@@ -89,7 +124,7 @@ def api_mukerrer_geri_al():
         )
         return jsonify(sonuc)
     except MukerrerArsivError as e:
-        return jsonify({"ok": False, "mesaj": e.mesaj}), e.status
+        return _arsiv_error_json(e)
     except Exception:
         logger.exception("api_mukerrer_geri_al")
         return jsonify({"ok": False, "mesaj": "Geri alma başarısız."}), 500
