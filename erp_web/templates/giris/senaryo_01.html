@@ -248,6 +248,29 @@
             z-index: 20;
             background: var(--s01-head-bg);
         }
+        .s01-table th.s01-baslangic,
+        .s01-table td.s01-baslangic {
+            width: 88px;
+            min-width: 88px;
+            max-width: 88px;
+            text-align: center;
+            font-variant-numeric: tabular-nums;
+            font-size: 0.72rem;
+            white-space: nowrap;
+            padding: 0 0.35rem;
+            color: var(--s01-muted);
+        }
+        .s01-table thead th.s01-baslangic {
+            background: var(--s01-head-bg);
+            color: var(--s01-text);
+            font-weight: 700;
+        }
+        .s01-table tr.s01-ozet td.s01-baslangic {
+            background: #1e4560;
+        }
+        .s01-table tr.s01-ozet-toplam td.s01-baslangic {
+            background: #0d2a3f;
+        }
         .s01-table td.s01-hucre {
             width: 64px;
             min-width: 64px;
@@ -607,8 +630,8 @@
             var aylar = payload.aylar || [];
             var satirlar = s01SiraliSatirlar(payload);
             var tutarlar = payload.tutarlar || {};
-            var header = ['Müşteri'];
-            var i, p, ay, a, r, c, mid, ad, bas, bit, ayP, aktif, t, row, aktifRow;
+            var header = ['Müşteri', 'Başlangıç'];
+            var i, p, ay, a, r, c, mid, ad, bas, bit, ayP, aktif, t, row, aktifRow, basTxt;
             var ayAktifSay = [];
             var ayTutarToplam = [];
             for (i = 0; i < aylar.length; i++) {
@@ -627,7 +650,7 @@
                 ad = c.ad || ('#' + mid);
                 bas = c.bas || null;
                 bit = c.bit || null;
-                row = ['#' + mid + ' ' + ad];
+                row = ['#' + mid + ' ' + ad, s01IsoToTrDate(bas)];
                 aktifRow = [];
                 for (a = 0; a < aylar.length; a++) {
                     ayP = s01ParseAyKey(aylar[a]);
@@ -650,8 +673,8 @@
                 dataRows.push(row);
                 aktifMat.push(aktifRow);
             }
-            var sayRow = ['Müşteri Sayısı'];
-            var topRow = ['Toplam'];
+            var sayRow = ['Müşteri Sayısı', ''];
+            var topRow = ['Toplam', ''];
             for (a = 0; a < aylar.length; a++) {
                 sayRow.push(ayAktifSay[a]);
                 topRow.push(ayTutarToplam[a]);
@@ -671,8 +694,9 @@
                 row = dataRows[rr];
                 aktifRow = aktifMat[rr] || [];
                 s01ExcelHucreYaz(sheet, rr + 3, 1, row[0], null);
-                for (cc = 1; cc < colCount; cc++) {
-                    stil = aktifRow[cc - 1] ? 'aktif' : null;
+                s01ExcelHucreYaz(sheet, rr + 3, 2, row[1], null);
+                for (cc = 2; cc < colCount; cc++) {
+                    stil = aktifRow[cc - 2] ? 'aktif' : null;
                     s01ExcelHucreYaz(sheet, rr + 3, cc + 1, row[cc], stil);
                 }
             }
@@ -681,8 +705,9 @@
                 s01ExcelHucreYaz(sheet, topRowNo, cc + 1, topRow[cc], 'baslik');
             }
             sheet.getColumn(1).width = 36;
+            sheet.getColumn(2).width = 12;
             for (i = 0; i < aylar.length; i++) {
-                sheet.getColumn(i + 2).width = 12;
+                sheet.getColumn(i + 3).width = 12;
             }
 
             var fname = s01ExcelDosyaAdi();
@@ -704,6 +729,18 @@
         } finally {
             if (btn) btn.disabled = false;
         }
+    }
+
+    function s01IsoToTrDate(iso) {
+        if (!iso) return '';
+        var s = String(iso).trim();
+        if (/^\d{2}\.\d{2}\.\d{4}/.test(s)) return s.slice(0, 10);
+        var d = s.slice(0, 10);
+        var p = d.split('-');
+        if (p.length >= 3 && p[0].length === 4 && p[1].length === 2 && p[2].length === 2) {
+            return p[2] + '.' + p[1] + '.' + p[0];
+        }
+        return '';
     }
 
     function s01IsoToAyKey(iso) {
@@ -883,7 +920,8 @@
     }
 
     function s01AyBaslikHtml(aylar) {
-        var html = '<th class="s01-musteri">Müşteri</th>';
+        var html = '<th class="s01-musteri">Müşteri</th>' +
+            '<th class="s01-baslangic">Başlangıç</th>';
         var i, p, ay, cls, ok, title;
         for (i = 0; i < aylar.length; i++) {
             ay = aylar[i];
@@ -933,7 +971,7 @@
 
         var thead = '<thead><tr>' + s01AyBaslikHtml(aylar) + '</tr></thead>';
         var bodyParts = [];
-        var r, c, ayP, aktif, ad, mid, bas, bit, title, midKey, ayMap, rawTut, cellTxt, cellCls, cellTitle, a;
+        var r, c, ayP, aktif, ad, mid, bas, bit, basTxt, title, midKey, ayMap, rawTut, cellTxt, cellCls, cellTitle, a;
         var ayAktifSay = [];
         var ayTutarToplam = [];
         for (a = 0; a < aylar.length; a++) {
@@ -960,6 +998,11 @@
                 '" target="_blank" rel="noopener" onclick="event.stopPropagation()">' +
                 '<span class="s01-id">#' + mid + '</span>' + s01Esc(ad) +
                 '</a></td>'
+            );
+            basTxt = s01IsoToTrDate(bas);
+            bodyParts.push(
+                '<td class="s01-baslangic" title="' + s01Esc(basTxt || '') + '">' +
+                s01Esc(basTxt) + '</td>'
             );
             for (a = 0; a < aylar.length; a++) {
                 ayP = s01ParseAyKey(aylar[a]);
@@ -1008,7 +1051,8 @@
         var sayParts = [
             '<tr class="s01-ozet s01-ozet-sayi" data-ozet="musteri-sayisi">',
             '<td class="' + isimCls + '" data-ozet-val="isim" title="' + s01Esc(isimTitle) + '">' +
-            'Müşteri Sayısı<span class="s01-sort-ok">' + isimOk + '</span></td>'
+            'Müşteri Sayısı<span class="s01-sort-ok">' + isimOk + '</span></td>',
+            '<td class="s01-baslangic"></td>'
         ];
         for (a = 0; a < aylar.length; a++) {
             var sayCls = '';
@@ -1026,7 +1070,8 @@
 
         var topParts = [
             '<tr class="s01-ozet s01-ozet-toplam" data-ozet="toplam">',
-            '<td class="s01-musteri">Toplam</td>'
+            '<td class="s01-musteri">Toplam</td>',
+            '<td class="s01-baslangic"></td>'
         ];
         for (a = 0; a < aylar.length; a++) {
             topParts.push(
