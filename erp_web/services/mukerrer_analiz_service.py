@@ -96,6 +96,16 @@ def is_empty_shell(r) -> bool:
     return int(r.get("tahsilat_n") or 0) == 0 and int(r.get("fatura_n") or 0) == 0
 
 
+def _identity_triple(m: dict) -> tuple[str, str, str] | None:
+    """İsim+vergi+telefon üçlüsü (üçü de dolu). Kirli bileşen parçalama anahtarı."""
+    n = norm_name(m.get("name"))
+    t = norm_tax(m.get("tax_number"))
+    p = norm_phone(m.get("phone"))
+    if n and t and p:
+        return (n, t, p)
+    return None
+
+
 def all_same(vals) -> bool:
     vals = list(vals)
     if any(v is None for v in vals):
@@ -466,6 +476,7 @@ def build_mukerrer_groups(
 
     raw_counts: dict[str, int] = defaultdict(int)
     groups_out: list[dict] = []
+    emit_queue: list[tuple[list, dict]] = []
 
     for members in clusters.values():
         if len(members) < 2:
@@ -474,6 +485,28 @@ def build_mukerrer_groups(
         tier = cls["tier"]
         raw_counts[tier] += 1
 
+        if tier in ALLOWED_TIERS:
+            # Temiz bileşen: mevcut davranış — tek grup, aynı üyeler / group_key
+            emit_queue.append((members, cls))
+            continue
+
+        # Kirli bileşen: union-find'e dokunmadan kimlik üçlüsü alt gruplarını ayır
+        by_triple: dict[tuple[str, str, str], list] = defaultdict(list)
+        for m in members:
+            trip = _identity_triple(m)
+            if trip:
+                by_triple[trip].append(m)
+        for grp in by_triple.values():
+            if len(grp) < 2:
+                continue
+            sub_cls = classify_tier(grp)
+            sub_tier = sub_cls["tier"]
+            raw_counts[sub_tier] += 1
+            if sub_tier in ALLOWED_TIERS:
+                emit_queue.append((grp, sub_cls))
+
+    for members, cls in emit_queue:
+        tier = cls["tier"]
         # Tehlikeli / elle tier'lar A4 cevabına HİÇ girmez
         if tier not in ALLOWED_TIERS:
             continue
