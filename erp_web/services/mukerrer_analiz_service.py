@@ -114,6 +114,35 @@ def _identity_triple(m: dict) -> tuple[str, str, str] | None:
     return None
 
 
+def _identity_name_phone(m: dict) -> tuple[str, str] | None:
+    """İsim+telefon ikilisi (ikisi de dolu). Kirli kalıntı parçalama anahtarı."""
+    n = norm_name(m.get("name"))
+    p = norm_phone(m.get("phone"))
+    if n and p:
+        return (n, p)
+    return None
+
+
+def _tax_filled_disagree(members: list[dict]) -> bool:
+    """Dolu vergi numaraları birbirinden farklıysa True."""
+    return any_filled_disagree([norm_tax(m.get("tax_number")) for m in members])
+
+
+def _apply_tax_mismatch_cap(cls: dict, members: list[dict]) -> dict:
+    """Vergi uyuşmazlığında COK_YUKSEK'i YUKSEK'e çek; bayrağı cls'e yaz.
+
+    classify_tier sonucunu değiştirmez; yalnızca kirli kalıntı ikili kartlarında
+    güven tavanı uygular. ALLOWED_TIERS kümesine dokunulmaz.
+    """
+    if not _tax_filled_disagree(members):
+        return cls
+    out = dict(cls)
+    out["vergi_uyusmazligi"] = True
+    if out.get("tier") == "COK_YUKSEK":
+        out["tier"] = "YUKSEK"
+    return out
+
+
 def all_same(vals) -> bool:
     vals = list(vals)
     if any(v is None for v in vals):
@@ -504,10 +533,29 @@ def build_mukerrer_groups(
             trip = _identity_triple(m)
             if trip:
                 by_triple[trip].append(m)
+        used_triple_ids: set[int] = set()
         for grp in by_triple.values():
             if len(grp) < 2:
                 continue
             sub_cls = classify_tier(grp)
+            sub_tier = sub_cls["tier"]
+            raw_counts[sub_tier] += 1
+            if sub_tier in ALLOWED_TIERS:
+                emit_queue.append((grp, sub_cls))
+            # Üçlüde kullanılan üyeler ikili havuza girmez (kart çakışması yok)
+            used_triple_ids.update(int(m["id"]) for m in grp)
+
+        # Kirli kalıntı: üçlüden sonra kalan üyelerde isim+telefon (vergi hariç)
+        leftover = [m for m in members if int(m["id"]) not in used_triple_ids]
+        by_pair: dict[tuple[str, str], list] = defaultdict(list)
+        for m in leftover:
+            pair = _identity_name_phone(m)
+            if pair:
+                by_pair[pair].append(m)
+        for grp in by_pair.values():
+            if len(grp) < 2:
+                continue
+            sub_cls = _apply_tax_mismatch_cap(classify_tier(grp), grp)
             sub_tier = sub_cls["tier"]
             raw_counts[sub_tier] += 1
             if sub_tier in ALLOWED_TIERS:
@@ -559,13 +607,19 @@ def build_mukerrer_groups(
             sm["is_suggested_canonical"] = sm["id"] == suggested
         scored_members.sort(key=lambda x: int(x["id"]))
 
+        vergi_uyusmazligi = bool(cls.get("vergi_uyusmazligi"))
+        match_summary = _match_summary(cls["fields_same"])
+        if vergi_uyusmazligi:
+            match_summary = f"{match_summary}!vergi" if match_summary else "!vergi"
+
         groups_out.append(
             {
                 "group_key": _group_key(ids),
                 "tier": tier,
                 "archive_allowed": True,
+                "vergi_uyusmazligi": vergi_uyusmazligi,
                 "match": cls["fields_same"],
-                "match_summary": _match_summary(cls["fields_same"]),
+                "match_summary": match_summary,
                 "six_match": cls["six_match"],
                 "core3_match": cls["core3_match"],
                 "suggested_canonical_id": suggested,
