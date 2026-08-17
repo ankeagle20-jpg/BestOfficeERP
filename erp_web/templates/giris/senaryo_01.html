@@ -324,6 +324,26 @@
         .s01-table tr.s01-ozet-sayi td.s01-musteri {
             z-index: 11;
         }
+        .s01-table tr.s01-ozet-sayi td.s01-musteri[data-ozet-val="isim"] {
+            cursor: pointer;
+            user-select: none;
+        }
+        .s01-table tr.s01-ozet-sayi td.s01-musteri[data-ozet-val="isim"]:hover {
+            background: #2a5a7a;
+            color: #fff;
+        }
+        .s01-table tr.s01-ozet-sayi td.s01-musteri.s01-sort-desc,
+        .s01-table tr.s01-ozet-sayi td.s01-musteri.s01-sort-asc {
+            background: #246080;
+            color: #9fd4ff;
+            box-shadow: inset 0 -2px 0 #9fd4ff;
+        }
+        .s01-table tr.s01-ozet-sayi td.s01-musteri .s01-sort-ok {
+            display: inline;
+            margin-left: 0.35em;
+            font-size: 0.7rem;
+            opacity: 0.85;
+        }
         .s01-table tr.s01-ozet-sayi td[data-ozet-val="sayi"] {
             cursor: pointer;
             user-select: none;
@@ -497,6 +517,7 @@
     var s01LastPayload = null;
     var s01SortAy = null;
     var s01SortMod = 0;
+    var s01SortIsimMod = 0;
     var s01FiltreAy = null;
     var s01FiltreMod = null;
 
@@ -505,6 +526,7 @@
     function s01SortSifirla() {
         s01SortAy = null;
         s01SortMod = 0;
+        s01SortIsimMod = 0;
     }
 
     function s01FiltreSifirla() {
@@ -790,8 +812,34 @@
         return ia - ib;
     }
 
+    function s01AdAnahtar(ad) {
+        return String(ad || '').toLocaleLowerCase('tr');
+    }
+
+    function s01IsimMukerrerSirala(satirlar, desc) {
+        var counts = {};
+        var i, k;
+        for (i = 0; i < satirlar.length; i++) {
+            k = s01AdAnahtar(satirlar[i] && satirlar[i].ad);
+            counts[k] = (counts[k] || 0) + 1;
+        }
+        satirlar.sort(function (a, b) {
+            var ka = s01AdAnahtar(a && a.ad);
+            var kb = s01AdAnahtar(b && b.ad);
+            var da = (counts[ka] > 1) ? 0 : 1;
+            var db = (counts[kb] > 1) ? 0 : 1;
+            if (da !== db) return da - db;
+            var cmp = s01AdKarsilastir(a, b);
+            return desc ? -cmp : cmp;
+        });
+        return satirlar;
+    }
+
     function s01SiraliSatirlar(payload) {
         var satirlar = s01FiltrelenmisSatirlar(payload);
+        if (s01SortIsimMod === 1 || s01SortIsimMod === 2) {
+            return s01IsimMukerrerSirala(satirlar, s01SortIsimMod === 1);
+        }
         if (!s01SortAy || !s01SortMod) return satirlar;
         var tutarlar = (payload && payload.tutarlar) || {};
         var desc = s01SortMod === 1;
@@ -809,8 +857,18 @@
         return satirlar;
     }
 
+    function s01IsimTikla() {
+        if (!s01LastPayload) return;
+        s01SortAy = null;
+        s01SortMod = 0;
+        s01SortIsimMod += 1;
+        if (s01SortIsimMod > 2) s01SortIsimMod = 0;
+        s01TabloCiz(s01LastPayload);
+    }
+
     function s01AyTikla(ayKey) {
         if (!ayKey || !s01LastPayload) return;
+        s01SortIsimMod = 0;
         if (s01SortAy === ayKey) {
             s01SortMod += 1;
             if (s01SortMod > 2) {
@@ -935,9 +993,22 @@
             bodyParts.push('</tr>');
         }
 
+        var isimCls = 's01-musteri';
+        var isimOk = '⇅';
+        var isimTitle = 'İsme göre sırala: mükerrer önce (Z→A)';
+        if (s01SortIsimMod === 1) {
+            isimCls += ' s01-sort-desc';
+            isimOk = '▼';
+            isimTitle = 'Mükerrer önce · azalan · tekrar tıkla: artan';
+        } else if (s01SortIsimMod === 2) {
+            isimCls += ' s01-sort-asc';
+            isimOk = '▲';
+            isimTitle = 'Mükerrer önce · artan · tekrar tıkla: orijinal sıra';
+        }
         var sayParts = [
             '<tr class="s01-ozet s01-ozet-sayi" data-ozet="musteri-sayisi">',
-            '<td class="s01-musteri">Müşteri Sayısı</td>'
+            '<td class="' + isimCls + '" data-ozet-val="isim" title="' + s01Esc(isimTitle) + '">' +
+            'Müşteri Sayısı<span class="s01-sort-ok">' + isimOk + '</span></td>'
         ];
         for (a = 0; a < aylar.length; a++) {
             var sayCls = '';
@@ -1083,6 +1154,14 @@
                 ev.stopPropagation();
                 var fay = filtreBtn.getAttribute('data-ay');
                 if (fay) s01FiltreMenuAc(filtreBtn, fay);
+                return;
+            }
+            var tdIsim = ev.target.closest
+                ? ev.target.closest('tr[data-ozet="musteri-sayisi"] > td.s01-musteri')
+                : null;
+            if (tdIsim) {
+                ev.preventDefault();
+                s01IsimTikla();
                 return;
             }
             var th = ev.target.closest ? ev.target.closest('th.s01-ay') : null;
