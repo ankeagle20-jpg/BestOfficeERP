@@ -188,6 +188,44 @@
             text-align: center;
             color: var(--s01-muted);
         }
+        .s01-table tr.s01-ozet td {
+            background: #1e4560;
+            color: var(--s01-text);
+            font-weight: 700;
+            text-align: center;
+            font-variant-numeric: tabular-nums;
+            font-size: 0.62rem;
+            line-height: 1.1;
+            padding: 0 1px;
+            height: 26px;
+        }
+        .s01-table tr.s01-ozet td.s01-musteri {
+            background: #1e4560;
+            text-align: left;
+            font-size: 0.75rem;
+            letter-spacing: 0.01em;
+        }
+        .s01-table tr.s01-ozet-sayi {
+            position: sticky;
+            top: 44px;
+            z-index: 10;
+        }
+        .s01-table tr.s01-ozet-sayi td {
+            box-shadow: 0 1px 0 var(--s01-border);
+        }
+        .s01-table tr.s01-ozet-sayi td.s01-musteri {
+            z-index: 11;
+        }
+        .s01-table tr.s01-ozet-toplam td {
+            background: #0d2a3f;
+            border-top: 2px solid #3d6f95;
+            color: #d7f5e4;
+            height: 28px;
+            font-size: 0.64rem;
+        }
+        .s01-table tr.s01-ozet-toplam td.s01-musteri {
+            background: #0d2a3f;
+        }
     </style>
 </head>
 <body>
@@ -350,8 +388,14 @@
         }
 
         var thead = '<thead><tr>' + s01AyBaslikHtml(aylar) + '</tr></thead>';
-        var parts = ['<table class="s01-table" id="s01_table">', thead, '<tbody>'];
-        var r, c, ayP, aktif, ad, mid, bas, bit, title, midKey, ayMap, rawTut, cellTxt, cellCls, cellTitle;
+        var bodyParts = [];
+        var r, c, ayP, aktif, ad, mid, bas, bit, title, midKey, ayMap, rawTut, cellTxt, cellCls, cellTitle, a;
+        var ayAktifSay = [];
+        var ayTutarToplam = [];
+        for (a = 0; a < aylar.length; a++) {
+            ayAktifSay[a] = 0;
+            ayTutarToplam[a] = 0;
+        }
 
         for (r = 0; r < satirlar.length; r++) {
             c = satirlar[r];
@@ -362,22 +406,24 @@
             bit = c.bit || null;
             ayMap = tutarlar[midKey] || tutarlar[mid] || {};
             title = '#' + mid + ' · ' + ad + (bit ? (' · kapanış ' + bit) : '');
-            parts.push('<tr data-mid="' + mid + '">');
-            parts.push(
+            bodyParts.push('<tr data-mid="' + mid + '">');
+            bodyParts.push(
                 '<td class="s01-musteri" title="' + s01Esc(title) + '">' +
                 '<span class="s01-id">#' + mid + '</span>' + s01Esc(ad) +
                 '</td>'
             );
-            for (var a = 0; a < aylar.length; a++) {
+            for (a = 0; a < aylar.length; a++) {
                 ayP = s01ParseAyKey(aylar[a]);
                 aktif = ayP ? senaryo01HucreAktif(bas, bit, ayP.y, ayP.m) : false;
                 cellTxt = '';
                 cellCls = 's01-hucre';
                 cellTitle = aylar[a];
                 if (aktif) {
+                    ayAktifSay[a] += 1;
                     cellCls += ' aktif';
                     rawTut = ayMap[aylar[a]];
                     if (rawTut != null && rawTut !== '' && isFinite(Number(rawTut)) && Number(rawTut) > 0) {
+                        ayTutarToplam[a] += Number(rawTut);
                         cellTxt = s01FormatTutar(rawTut);
                         cellTitle = cellTxt + ' ₺ (KDV dahil)';
                     } else {
@@ -386,7 +432,7 @@
                         cellTitle = 'Tutar yok (cache eksik / rev uyumsuz / placeholder)';
                     }
                 }
-                parts.push(
+                bodyParts.push(
                     '<td class="' + cellCls +
                     '" data-ay="' + s01Esc(aylar[a]) + '"' +
                     (aktif ? ' data-aktif="1"' : ' data-aktif="0"') +
@@ -395,8 +441,39 @@
                     '</td>'
                 );
             }
-            parts.push('</tr>');
+            bodyParts.push('</tr>');
         }
+
+        var sayParts = [
+            '<tr class="s01-ozet s01-ozet-sayi" data-ozet="musteri-sayisi">',
+            '<td class="s01-musteri">Müşteri Sayısı</td>'
+        ];
+        for (a = 0; a < aylar.length; a++) {
+            sayParts.push(
+                '<td data-ay="' + s01Esc(aylar[a]) + '" data-ozet-val="sayi" title="' +
+                s01Esc(aylar[a] + ': ' + ayAktifSay[a] + ' aktif müşteri') + '">' +
+                s01Esc(s01FormatTutar(ayAktifSay[a])) +
+                '</td>'
+            );
+        }
+        sayParts.push('</tr>');
+
+        var topParts = [
+            '<tr class="s01-ozet s01-ozet-toplam" data-ozet="toplam">',
+            '<td class="s01-musteri">Toplam</td>'
+        ];
+        for (a = 0; a < aylar.length; a++) {
+            topParts.push(
+                '<td data-ay="' + s01Esc(aylar[a]) + '" data-ozet-val="toplam" title="' +
+                s01Esc(aylar[a] + ': ' + s01FormatTutar(ayTutarToplam[a]) + ' ₺') + '">' +
+                s01Esc(s01FormatTutar(ayTutarToplam[a])) +
+                '</td>'
+            );
+        }
+        topParts.push('</tr>');
+
+        var parts = ['<table class="s01-table" id="s01_table">', thead, '<tbody>'];
+        parts = parts.concat(sayParts).concat(bodyParts).concat(topParts);
         parts.push('</tbody></table>');
         wrap.innerHTML = parts.join('');
         document.getElementById('s01_meta').textContent =
