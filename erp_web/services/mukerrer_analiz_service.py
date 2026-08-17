@@ -39,8 +39,16 @@ def norm_text(s) -> str:
     return s
 
 
+def _tr_lower(s: str) -> str:
+    """Türkçe locale lower: İ→i, I→ı, sonra Unicode .lower(). JS toLocaleLowerCase('tr')."""
+    s = str(s or "")
+    s = s.replace("İ", "i").replace("I", "ı")
+    return s.lower()
+
+
 def norm_name(s):
-    n = norm_text(s)
+    n = _tr_lower(str(s or "").strip())
+    n = re.sub(r"\s+", " ", n)
     return n if len(n) >= 3 else None
 
 
