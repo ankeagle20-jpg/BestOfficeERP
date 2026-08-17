@@ -4,6 +4,9 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Senaryo 01</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"
+            integrity="sha384-vtjasyidUo0kW94K5MXDXntzOJpQgBKXmE7e2Ga4LG0skTTLeBi97eFAXsqewJjw"
+            crossorigin="anonymous" defer></script>
     <style>
         :root {
             --s01-bg: #0f2537;
@@ -75,6 +78,10 @@
             cursor: pointer;
         }
         .s01-btn:hover { background: #246bb5; }
+        .s01-btn-excel {
+            background: #2a6b4a;
+        }
+        .s01-btn-excel:hover { background: #245c40; }
         .s01-btn:disabled {
             opacity: 0.55;
             cursor: wait;
@@ -365,6 +372,7 @@
             </select>
         </label>
         <button type="button" class="s01-btn" id="s01_yukle_btn">Yükle</button>
+        <button type="button" class="s01-btn s01-btn-excel" id="s01_excel_btn">Excel'e Aktar</button>
         <div class="s01-meta" id="s01_meta"></div>
     </div>
     <div class="s01-status" id="s01_status">Yıl seç → yükle</div>
@@ -503,6 +511,117 @@
         s01FiltreAy = null;
         s01FiltreMod = null;
         s01FiltreMenuKapat();
+    }
+
+    function s01ExcelSlug(s) {
+        s = String(s == null ? '' : s);
+        var tr = {
+            'ç': 'c', 'Ç': 'C', 'ğ': 'g', 'Ğ': 'G', 'ı': 'i', 'İ': 'I',
+            'ö': 'o', 'Ö': 'O', 'ş': 's', 'Ş': 'S', 'ü': 'u', 'Ü': 'U'
+        };
+        s = s.replace(/[çÇğĞıİöÖşŞüÜ]/g, function (ch) { return tr[ch] || ch; });
+        s = s.replace(/[^A-Za-z0-9._-]+/g, '_');
+        s = s.replace(/_+/g, '_').replace(/^_|_$/g, '');
+        return s;
+    }
+
+    function s01ExcelDosyaAdi() {
+        var elBas = document.getElementById('s01_yil_bas');
+        var elBit = document.getElementById('s01_yil_bit');
+        var elDurum = document.getElementById('s01_durum');
+        var elHt = document.getElementById('s01_hizmet_turu');
+        var yBas = elBas ? String(elBas.value || '') : '';
+        var yBit = elBit ? String(elBit.value || '') : '';
+        var durum = (elDurum && elDurum.value) ? elDurum.value : 'tumu';
+        var ht = (elHt && elHt.value) ? elHt.value : '';
+        var yil = (yBas && yBit && yBas !== yBit) ? (yBas + '-' + yBit) : (yBas || yBit || 'yil');
+        var parts = ['senaryo01', s01ExcelSlug(yil), s01ExcelSlug(durum) || 'tumu'];
+        if (ht) parts.push(s01ExcelSlug(ht));
+        if (s01FiltreMod && s01FiltreAy) {
+            parts.push(s01ExcelSlug(s01FiltreMod));
+            parts.push(s01ExcelSlug(s01FiltreAy));
+        }
+        return parts.join('_') + '.xlsx';
+    }
+
+    function s01ExcelAktar() {
+        if (typeof XLSX === 'undefined' || !XLSX || !XLSX.utils || !XLSX.writeFile) {
+            s01SetStatus('Excel kütüphanesi yüklenemedi (CDN). İnternet bağlantısını kontrol edin.', true);
+            return;
+        }
+        if (!s01LastPayload) {
+            s01SetStatus("Önce yıl seçip Yükle'ye tıklayın.", true);
+            return;
+        }
+        var payload = s01LastPayload;
+        var aylar = payload.aylar || [];
+        var satirlar = s01SiraliSatirlar(payload);
+        var tutarlar = payload.tutarlar || {};
+        var header = ['Müşteri'];
+        var i, p, ay, a, r, c, mid, ad, bas, bit, ayP, aktif, t, row;
+        var ayAktifSay = [];
+        var ayTutarToplam = [];
+        for (i = 0; i < aylar.length; i++) {
+            ay = aylar[i];
+            p = s01ParseAyKey(ay);
+            if (!p) header.push(ay);
+            else header.push(AY_KISA[p.m - 1] + ' ' + String(p.y).slice(2));
+            ayAktifSay[i] = 0;
+            ayTutarToplam[i] = 0;
+        }
+        var dataRows = [];
+        for (r = 0; r < satirlar.length; r++) {
+            c = satirlar[r];
+            mid = c.id;
+            ad = c.ad || ('#' + mid);
+            bas = c.bas || null;
+            bit = c.bit || null;
+            row = ['#' + mid + ' ' + ad];
+            for (a = 0; a < aylar.length; a++) {
+                ayP = s01ParseAyKey(aylar[a]);
+                aktif = ayP ? senaryo01HucreAktif(bas, bit, ayP.y, ayP.m) : false;
+                if (!aktif) {
+                    row.push('');
+                    continue;
+                }
+                ayAktifSay[a] += 1;
+                t = s01SatirTutar(c, tutarlar, aylar[a]);
+                if (t == null) {
+                    row.push('?');
+                } else {
+                    row.push(t);
+                    ayTutarToplam[a] += t;
+                }
+            }
+            dataRows.push(row);
+        }
+        var sayRow = ['Müşteri Sayısı'];
+        var topRow = ['Toplam'];
+        for (a = 0; a < aylar.length; a++) {
+            sayRow.push(ayAktifSay[a]);
+            topRow.push(ayTutarToplam[a]);
+        }
+        var aoa = [header, sayRow].concat(dataRows);
+        aoa.push(topRow);
+        var ws = XLSX.utils.aoa_to_sheet(aoa);
+        var addr, cell;
+        for (addr in ws) {
+            if (!Object.prototype.hasOwnProperty.call(ws, addr)) continue;
+            if (addr.charAt(0) === '!') continue;
+            cell = ws[addr];
+            if (cell && typeof cell.v === 'number') {
+                cell.z = (cell.v % 1 === 0) ? '0' : '#,##0.00';
+            }
+        }
+        if (ws['!ref']) {
+            ws['!cols'] = [{ wch: 36 }];
+            for (i = 0; i < aylar.length; i++) ws['!cols'].push({ wch: 12 });
+        }
+        var wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Senaryo 01');
+        var fname = s01ExcelDosyaAdi();
+        XLSX.writeFile(wb, fname);
+        s01SetStatus('Excel indirildi: ' + fname, false);
     }
 
     function s01IsoToAyKey(iso) {
@@ -895,6 +1014,7 @@
     document.addEventListener('DOMContentLoaded', function () {
         s01InitYilDropdownlari();
         document.getElementById('s01_yukle_btn').addEventListener('click', s01Yukle);
+        document.getElementById('s01_excel_btn').addEventListener('click', s01ExcelAktar);
         document.getElementById('s01_hizmet_turu').addEventListener('change', s01Yukle);
         document.getElementById('s01_wrap').addEventListener('click', function (ev) {
             var filtreBtn = ev.target.closest ? ev.target.closest('.s01-filtre-btn') : null;
