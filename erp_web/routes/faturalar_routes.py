@@ -10827,7 +10827,7 @@ def api_gib_sms_onay():
         gib = BestOfficeGIBManager()
         if not gib.is_available():
             return jsonify({"ok": False, "mesaj": "GİB modülü kullanılamıyor."}), 503
-        if oid and getattr(gib, "client_type", "") == "earsivportal":
+        if oid:
             success = gib.sms_onay_earsivportal(uuid, sms_kodu, oid)
         else:
             success = gib.sms_onay_ve_imzala(uuid, sms_kodu)
