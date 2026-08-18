@@ -16899,7 +16899,9 @@ function sozlesmeAylikBorclandir() {
                     if (typeof girisTahsilatYilAyPaneldenTumGridBoyan === 'function') girisTahsilatYilAyPaneldenTumGridBoyan();
                 } catch (_ePb0) {}
                 if (typeof girisTahsilatEkstreTazeYenile === 'function') {
-                    try { girisTahsilatEkstreTazeYenile(); } catch (_eEkBr) {}
+                    try {
+                        setTimeout(function () { girisTahsilatEkstreTazeYenile(); }, 0);
+                    } catch (_eEkBr) {}
                 }
             }
             gridBorcSonBoya();
@@ -16917,16 +16919,13 @@ function sozlesmeAylikBorclandir() {
                 }).catch(function () { gridBorcSonBoya(); });
             }
         }
-        var panelPost = (typeof sozlesmeAylikGridBorclandirPanelPost === 'function')
-            ? sozlesmeAylikGridBorclandirPanelPost(mid, satirlar)
-            : Promise.resolve(true);
-        panelPost.then(function () {
-            if (typeof girisTahsilatYilAyPanelDbYukle === 'function') {
-                girisTahsilatYilAyPanelDbYukle(mid, panelBorcGridSonrasi, { ttlMs: 0, persistMs: 0 });
-            } else {
-                panelBorcGridSonrasi();
-            }
-        });
+        if (typeof sozlesmeAylikGridBorclandirPanelPost === 'function') {
+            sozlesmeAylikGridBorclandirPanelPost(mid, satirlar);
+        }
+        panelBorcGridSonrasi();
+        if (typeof girisTahsilatYilAyPanelDbYukle === 'function') {
+            girisTahsilatYilAyPanelDbYukle(mid, null, { ttlMs: 0, persistMs: 0 });
+        }
     }).catch(function (err) {
         alert(typeof girisSunucuBaglantiUyariMetni === 'function' ? girisSunucuBaglantiUyariMetni(err) : String(err));
     }).finally(function () {

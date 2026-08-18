@@ -13978,13 +13978,10 @@ def api_tahsilat_panel_detay():
         _save_musteri_panel_by_iso(mid, by_iso_kayit)
         payload = _read_aylik_grid_cache_payload(mid)
         if payload is None:
-            try:
-                payload = _build_aylik_grid_cache_payload(
-                    mid, tufe_map=_tufe_map_by_year_month_cached()
-                )
-            except Exception:
-                payload = None
-        if isinstance(payload, dict):
+            # Kaydet/Borçlandır deseni: cache yokken senkron tam rebuild
+            # yanıtı bekletmesin; panel kaydı yukarıda bitti.
+            _defer_aylik_grid_cache_rebuild(mid)
+        elif isinstance(payload, dict):
             _persist_grid_cache_with_panel(mid, payload)
         else:
             _upsert_aylik_grid_cache(mid)
