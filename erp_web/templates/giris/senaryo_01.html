@@ -67,17 +67,49 @@
             min-width: 10rem;
             max-width: 16rem;
         }
-        .s01-kayit-yili-list {
+        .s01-kayit-yili-wrap {
+            position: relative;
             display: flex;
-            flex-wrap: wrap;
-            gap: 0.15rem 0.55rem;
-            max-width: 22rem;
-            max-height: 5.4rem;
-            overflow-y: auto;
-            padding: 0.28rem 0.45rem;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+        .s01-btn-kayit-yili {
+            min-width: 7.5rem;
+            padding: 0.35rem 0.55rem;
             border: 1px solid var(--s01-border);
             border-radius: 4px;
             background: #0c1f2e;
+            color: var(--s01-text);
+            font-size: 0.9rem;
+            cursor: pointer;
+            text-align: left;
+        }
+        .s01-btn-kayit-yili:hover {
+            background: #16324a;
+        }
+        .s01-btn-kayit-yili[aria-expanded="true"] {
+            border-color: #3d6f95;
+        }
+        .s01-kayit-yili-list {
+            display: none;
+            position: absolute;
+            left: 0;
+            top: calc(100% + 2px);
+            z-index: 80;
+            flex-wrap: wrap;
+            gap: 0.15rem 0.55rem;
+            min-width: 12rem;
+            max-width: 18rem;
+            max-height: 12rem;
+            overflow-y: auto;
+            padding: 0.4rem 0.55rem;
+            border: 1px solid var(--s01-border);
+            border-radius: 4px;
+            background: #16324a;
+            box-shadow: 0 6px 18px rgba(0,0,0,0.45);
+        }
+        .s01-kayit-yili-list.show {
+            display: flex;
         }
         .s01-kayit-yili-list label {
             display: inline-flex;
@@ -470,8 +502,12 @@
                 <option value="" selected>Tümü</option>
             </select>
         </label>
-        <div class="s01-field">Kayıt Yılı
-            <div class="s01-kayit-yili-list" id="s01_kayit_yili" role="group"
+        <div class="s01-kayit-yili-wrap">
+            <button type="button" class="s01-btn-kayit-yili" id="s01_kayit_yili_btn"
+                    aria-expanded="false" aria-haspopup="true" aria-controls="s01_kayit_yili">
+                <span id="s01_kayit_yili_btn_txt">Kayıt Yılı</span>
+            </button>
+            <div class="s01-kayit-yili-list" id="s01_kayit_yili" role="group" hidden
                  aria-label="Kayıt yılı filtresi"></div>
         </div>
         <button type="button" class="s01-btn" id="s01_yukle_btn">Yükle</button>
@@ -521,6 +557,44 @@
         for (y = S01_KAYIT_YILI_ILK; y <= yNow; y++) {
             addCb('', 's01-kayit-yili-cb', y, String(y), false);
         }
+        s01KayitYiliButonEtiketGuncelle();
+    }
+
+    function s01KayitYiliButonEtiketGuncelle() {
+        var el = document.getElementById('s01_kayit_yili_btn_txt');
+        if (!el) return;
+        var n = s01KayitYillariSecilen().length;
+        el.textContent = n ? ('Kayıt Yılı (' + n + ')') : 'Kayıt Yılı';
+    }
+
+    function s01KayitYiliMenuKapat() {
+        var list = document.getElementById('s01_kayit_yili');
+        var btn = document.getElementById('s01_kayit_yili_btn');
+        if (list) {
+            list.classList.remove('show');
+            list.hidden = true;
+        }
+        if (btn) btn.setAttribute('aria-expanded', 'false');
+    }
+
+    function s01KayitYiliMenuAc() {
+        var list = document.getElementById('s01_kayit_yili');
+        var btn = document.getElementById('s01_kayit_yili_btn');
+        if (list) {
+            list.hidden = false;
+            list.classList.add('show');
+        }
+        if (btn) btn.setAttribute('aria-expanded', 'true');
+    }
+
+    function s01KayitYiliMenuToggle(ev) {
+        if (ev) {
+            ev.preventDefault();
+            ev.stopPropagation();
+        }
+        var list = document.getElementById('s01_kayit_yili');
+        if (list && !list.hidden && list.classList.contains('show')) s01KayitYiliMenuKapat();
+        else s01KayitYiliMenuAc();
     }
 
     function s01KayitYillariSecilen() {
@@ -1399,6 +1473,11 @@
         document.getElementById('s01_excel_btn').addEventListener('click', s01ExcelAktar);
         document.getElementById('s01_hizmet_turu').addEventListener('change', s01Yukle);
         document.getElementById('s01_kayit_yili').addEventListener('change', s01KayitYiliChange);
+        document.getElementById('s01_kayit_yili').addEventListener('change', s01KayitYiliButonEtiketGuncelle);
+        document.getElementById('s01_kayit_yili_btn').addEventListener('click', s01KayitYiliMenuToggle);
+        document.getElementById('s01_kayit_yili').addEventListener('click', function (ev) {
+            ev.stopPropagation();
+        });
         document.getElementById('s01_wrap').addEventListener('click', function (ev) {
             var filtreBtn = ev.target.closest ? ev.target.closest('.s01-filtre-btn') : null;
             if (filtreBtn) {
@@ -1442,6 +1521,9 @@
             if (ev.target.closest && ev.target.closest('#s01_filtre_menu')) return;
             if (ev.target.closest && ev.target.closest('.s01-filtre-btn')) return;
             s01FiltreMenuKapat();
+            if (ev.target.closest && ev.target.closest('#s01_kayit_yili')) return;
+            if (ev.target.closest && ev.target.closest('#s01_kayit_yili_btn')) return;
+            s01KayitYiliMenuKapat();
         });
         window.senaryo01HucreAktif = senaryo01HucreAktif;
         window.s01FormatTutar = s01FormatTutar;
