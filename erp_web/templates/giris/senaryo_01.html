@@ -426,6 +426,17 @@
             color: #9fd4ff;
             box-shadow: inset 0 -2px 0 #9fd4ff;
         }
+        .s01-table tr.s01-ozet-yeni {
+            position: sticky;
+            top: 78px;
+            z-index: 10;
+        }
+        .s01-table tr.s01-ozet-yeni td {
+            box-shadow: 0 1px 0 var(--s01-border);
+        }
+        .s01-table tr.s01-ozet-yeni td.s01-musteri {
+            z-index: 11;
+        }
         .s01-table tr.s01-ozet-toplam td {
             background: #0d2a3f;
             border-top: 2px solid #3d6f95;
@@ -743,6 +754,7 @@
             var i, p, ay, a, r, c, mid, ad, bas, bit, ayP, aktif, t, row, aktifRow, basTxt;
             var ayAktifSay = [];
             var ayTutarToplam = [];
+            var ayYeniKayitSay = [];
             for (i = 0; i < aylar.length; i++) {
                 ay = aylar[i];
                 p = s01ParseAyKey(ay);
@@ -750,6 +762,7 @@
                 else header.push(AY_KISA[p.m - 1] + ' ' + String(p.y).slice(2));
                 ayAktifSay[i] = 0;
                 ayTutarToplam[i] = 0;
+                ayYeniKayitSay[i] = 0;
             }
             var dataRows = [];
             var aktifMat = [];
@@ -764,6 +777,9 @@
                 for (a = 0; a < aylar.length; a++) {
                     ayP = s01ParseAyKey(aylar[a]);
                     aktif = ayP ? senaryo01HucreAktif(bas, bit, ayP.y, ayP.m) : false;
+                    if (s01IsoToAyKey(bas) === aylar[a]) {
+                        ayYeniKayitSay[a] += 1;
+                    }
                     if (!aktif) {
                         row.push('');
                         aktifRow.push(false);
@@ -783,9 +799,11 @@
                 aktifMat.push(aktifRow);
             }
             var sayRow = ['Müşteri Sayısı', ''];
+            var yeniRow = ['Aylık Müşteri Sayısı', ''];
             var topRow = ['Toplam', ''];
             for (a = 0; a < aylar.length; a++) {
                 sayRow.push(ayAktifSay[a]);
+                yeniRow.push(ayYeniKayitSay[a]);
                 topRow.push(ayTutarToplam[a]);
             }
 
@@ -799,17 +817,20 @@
             for (cc = 0; cc < colCount; cc++) {
                 s01ExcelHucreYaz(sheet, 2, cc + 1, sayRow[cc], 'baslik');
             }
+            for (cc = 0; cc < colCount; cc++) {
+                s01ExcelHucreYaz(sheet, 3, cc + 1, yeniRow[cc], 'baslik');
+            }
             for (rr = 0; rr < dataRows.length; rr++) {
                 row = dataRows[rr];
                 aktifRow = aktifMat[rr] || [];
-                s01ExcelHucreYaz(sheet, rr + 3, 1, row[0], null);
-                s01ExcelHucreYaz(sheet, rr + 3, 2, row[1], null);
+                s01ExcelHucreYaz(sheet, rr + 4, 1, row[0], null);
+                s01ExcelHucreYaz(sheet, rr + 4, 2, row[1], null);
                 for (cc = 2; cc < colCount; cc++) {
                     stil = aktifRow[cc - 2] ? 'aktif' : null;
-                    s01ExcelHucreYaz(sheet, rr + 3, cc + 1, row[cc], stil);
+                    s01ExcelHucreYaz(sheet, rr + 4, cc + 1, row[cc], stil);
                 }
             }
-            var topRowNo = dataRows.length + 3;
+            var topRowNo = dataRows.length + 4;
             for (cc = 0; cc < colCount; cc++) {
                 s01ExcelHucreYaz(sheet, topRowNo, cc + 1, topRow[cc], 'baslik');
             }
@@ -1133,9 +1154,11 @@
         var r, c, ayP, aktif, ad, mid, bas, bit, basTxt, title, midKey, ayMap, rawTut, cellTxt, cellCls, cellTitle, a;
         var ayAktifSay = [];
         var ayTutarToplam = [];
+        var ayYeniKayitSay = [];
         for (a = 0; a < aylar.length; a++) {
             ayAktifSay[a] = 0;
             ayTutarToplam[a] = 0;
+            ayYeniKayitSay[a] = 0;
         }
 
         for (r = 0; r < satirlar.length; r++) {
@@ -1166,6 +1189,9 @@
             for (a = 0; a < aylar.length; a++) {
                 ayP = s01ParseAyKey(aylar[a]);
                 aktif = ayP ? senaryo01HucreAktif(bas, bit, ayP.y, ayP.m) : false;
+                if (s01IsoToAyKey(bas) === aylar[a]) {
+                    ayYeniKayitSay[a] += 1;
+                }
                 cellTxt = '';
                 cellCls = 's01-hucre';
                 cellTitle = aylar[a];
@@ -1227,6 +1253,21 @@
         }
         sayParts.push('</tr>');
 
+        var yeniParts = [
+            '<tr class="s01-ozet s01-ozet-yeni" data-ozet="aylik-musteri-sayisi">',
+            '<td class="s01-musteri">Aylık Müşteri Sayısı</td>',
+            '<td class="s01-baslangic"></td>'
+        ];
+        for (a = 0; a < aylar.length; a++) {
+            yeniParts.push(
+                '<td data-ay="' + s01Esc(aylar[a]) + '" data-ozet-val="yeni-kayit" title="' +
+                s01Esc(aylar[a] + ': ' + ayYeniKayitSay[a] + ' yeni kayıt') + '">' +
+                s01Esc(s01FormatTutar(ayYeniKayitSay[a])) +
+                '</td>'
+            );
+        }
+        yeniParts.push('</tr>');
+
         var topParts = [
             '<tr class="s01-ozet s01-ozet-toplam" data-ozet="toplam">',
             '<td class="s01-musteri">Toplam</td>',
@@ -1243,7 +1284,7 @@
         topParts.push('</tr>');
 
         var parts = ['<table class="s01-table" id="s01_table">', thead, '<tbody>'];
-        parts = parts.concat(sayParts).concat(bodyParts).concat(topParts);
+        parts = parts.concat(sayParts).concat(yeniParts).concat(bodyParts).concat(topParts);
         parts.push('</tbody></table>');
         wrap.innerHTML = parts.join('');
         document.getElementById('s01_meta').textContent =
