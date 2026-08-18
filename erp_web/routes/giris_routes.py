@@ -7821,6 +7821,29 @@ def _ekstre_tahsil_alacak_hucre(
             out = round(max(out, tt), 2)
     if out >= hedef - tol:
         return hedef
+    # C3: Kural A tam kapandı → görünen alacak = hedef (yedek yollar).
+    try:
+        yy_c3 = int(str(iso)[:4])
+    except (TypeError, ValueError):
+        yy_c3 = 0
+    pay_c3 = None
+    if batch_maps is not None:
+        _pay_raw_c3 = (batch_maps.get("pay") or {}).get(iso)
+        try:
+            pay_c3 = (
+                round(float(_pay_raw_c3), 2) if _pay_raw_c3 is not None else None
+            )
+        except (TypeError, ValueError):
+            pay_c3 = None
+    if _grid_payload_marker_panel_tam_kapandi(
+        mk,
+        hedef,
+        yy_c3,
+        None,
+        tol,
+        pay_t=pay_c3,
+    ):
+        return hedef
     return round(min(out, hedef), 2)
 
 
@@ -9188,6 +9211,8 @@ def _ekstre_acilis_bakiyesi_fifo(
     pays_fifo,
     floor_pay,
     tol=0.01,
+    batch_maps=None,
+    manual_reel_by_year=None,
 ):
     """Dönem başlangıcı öncesi net bakiye: FIFO ile yalnızca bas öncesi ödemeler mahsup edilir."""
     if not isinstance(full_borc_for_fifo, dict):
@@ -9252,6 +9277,34 @@ def _ekstre_acilis_bakiyesi_fifo(
                 if take <= tol:
                     continue
                 need[iso_m] = round(rem - take, 2)
+                # C2: Kural A tam kapandı → need artığı 0 (nakit take değişmez).
+                try:
+                    yy_c2 = int(str(iso_m)[:4])
+                    mk_c2 = round(
+                        float(((batch_maps or {}).get("marker") or {}).get(iso_m) or 0),
+                        2,
+                    )
+                    _pay_raw_c2 = ((batch_maps or {}).get("pay") or {}).get(iso_m)
+                    pay_c2 = (
+                        round(float(_pay_raw_c2), 2)
+                        if _pay_raw_c2 is not None
+                        else None
+                    )
+                    brut_c2 = round(float(full_borc_for_fifo.get(iso_m) or 0), 2)
+                except (TypeError, ValueError):
+                    yy_c2 = 0
+                    mk_c2 = 0.0
+                    pay_c2 = None
+                    brut_c2 = 0.0
+                if _grid_payload_marker_panel_tam_kapandi(
+                    mk_c2,
+                    brut_c2,
+                    yy_c2,
+                    manual_reel_by_year,
+                    float(AYLIK_GRID_TAM_ODENDI_TOLERANS),
+                    pay_t=pay_c2,
+                ):
+                    need[iso_m] = 0.0
             return
         for iso in month_order_all:
             if v <= tol:
@@ -10205,6 +10258,34 @@ def _cari_ekstre_hareketler(
                     fifo_harf[iso_m] = harf_p
                     if tid_p:
                         fifo_ids[iso_m].append(tid_p)
+                    # C2: Kural A tam kapandı → need artığı 0 (fifo_alloc_win nakit kalır).
+                    try:
+                        yy_c2 = int(str(iso_m)[:4])
+                        mk_c2 = round(
+                            float(((ekstre_batch_maps or {}).get("marker") or {}).get(iso_m) or 0),
+                            2,
+                        )
+                        _pay_raw_c2 = ((ekstre_batch_maps or {}).get("pay") or {}).get(iso_m)
+                        pay_c2 = (
+                            round(float(_pay_raw_c2), 2)
+                            if _pay_raw_c2 is not None
+                            else None
+                        )
+                        brut_c2 = round(float(full_borc_for_fifo.get(iso_m) or 0), 2)
+                    except (TypeError, ValueError):
+                        yy_c2 = 0
+                        mk_c2 = 0.0
+                        pay_c2 = None
+                        brut_c2 = 0.0
+                    if _grid_payload_marker_panel_tam_kapandi(
+                        mk_c2,
+                        brut_c2,
+                        yy_c2,
+                        manual_reel_pass,
+                        float(AYLIK_GRID_TAM_ODENDI_TOLERANS),
+                        pay_t=pay_c2,
+                    ):
+                        need[iso_m] = 0.0
                 return
             for iso in month_order_all:
                 if v <= tol_f:
@@ -10264,6 +10345,8 @@ def _cari_ekstre_hareketler(
             pays_fifo,
             floor_pay,
             tol=tol_f,
+            batch_maps=ekstre_batch_maps,
+            manual_reel_by_year=manual_reel_pass,
         )
         dev_borc_r, dev_alacak_r = _ekstre_devreden_satir_toplamlari(
             full_borc_for_fifo,
@@ -10321,6 +10404,28 @@ def _cari_ekstre_hareketler(
                         db_tah_iso = 0.0
                 if db_tah_iso <= tol_f and not (fifo_ids.get(iso) or []):
                     panel_pt = None
+            try:
+                yy_c1 = int(str(iso)[:4])
+                mk_c1 = round(
+                    float(((ekstre_batch_maps or {}).get("marker") or {}).get(iso) or 0),
+                    2,
+                )
+                _pay_raw_c1 = ((ekstre_batch_maps or {}).get("pay") or {}).get(iso)
+                pay_c1 = (
+                    round(float(_pay_raw_c1), 2) if _pay_raw_c1 is not None else None
+                )
+            except (TypeError, ValueError):
+                yy_c1 = 0
+                mk_c1 = 0.0
+                pay_c1 = None
+            kural_a_tam_c1 = _grid_payload_marker_panel_tam_kapandi(
+                mk_c1,
+                hedef_grid,
+                yy_c1,
+                manual_reel_pass,
+                float(AYLIK_GRID_TAM_ODENDI_TOLERANS),
+                pay_t=pay_c1,
+            )
             if extra_borc_iso > tol_f:
                 # Panel yalnız normal kira tabanını bilir; ekstra fatura tahsilatını ezmesine izin verme.
                 panel_pt = None
@@ -10334,6 +10439,9 @@ def _cari_ekstre_hareketler(
                     grid_kalan=None,
                     batch_maps=ekstre_batch_maps,
                 )
+            elif kural_a_tam_c1:
+                # C1: Kural A tam kapandı → görünen alacak = kira (panel/fifo_amt'ı ez).
+                alacak_iso = hedef_grid
             elif panel_pt is not None:
                 alacak_iso = panel_pt
             elif fifo_pay and hedef_grid > tol_f:
@@ -10577,6 +10685,18 @@ def _cari_ekstre_hareketler(
                             grid_odenen=og_nl if og_nl and og_nl > 0 else None,
                             batch_maps=ekstre_batch_maps,
                         )
+            else:
+                # C3: hizala=0 yedek yol — aynı helper / Kural A (id_* serbest makbuzlar hariç).
+                hedef_borc = round(float(borc_by_tarih.get(tarih) or 0), 2)
+                if hedef_borc > 0:
+                    alacak_toplam = _ekstre_tahsil_alacak_hucre(
+                        int(musteri_id),
+                        tarih,
+                        alacak_toplam,
+                        hedef_borc,
+                        tahsil_map=ekstre_tahsil_map,
+                        batch_maps=ekstre_batch_maps,
+                    )
             item["alacak"] = alacak_toplam
             item.pop("alacak_toplam", None)
             item.pop("manuel_tutar_koru", None)
