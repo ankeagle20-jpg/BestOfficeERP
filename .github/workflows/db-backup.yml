@@ -18,7 +18,7 @@ jobs:
           sudo apt-get install -y postgresql-common
           sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
           sudo apt-get install -y postgresql-client-17
-          pg_dump --version
+          /usr/lib/postgresql/17/bin/pg_dump --version
 
       - name: Dump, compress, upload to R2
         env:
@@ -35,7 +35,7 @@ jobs:
           TS="$(date -u +%Y%m%d-%H%M)"
           FILE="postgres-${TS}.sql.gz"
           KEY="bestofficeerp/${FILE}"
-          pg_dump --no-owner --no-acl -d "$SUPABASE_DB_URL" | gzip -9 > "$FILE"
+          /usr/lib/postgresql/17/bin/pg_dump --no-owner --no-acl -d "$SUPABASE_DB_URL" | gzip -9 > "$FILE"
           BYTES="$(stat -c%s "$FILE")"
           echo "dump_bytes=${BYTES}"
           aws s3 cp "$FILE" "s3://${R2_BUCKET}/${KEY}" --endpoint-url "${R2_ENDPOINT_URL}"
