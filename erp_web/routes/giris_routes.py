@@ -11868,6 +11868,21 @@ def api_aylik_tutarlardan_tahsilden_cikar():
         borc_satirlar.append(row)
     sync_musteri_panel_borclu_from_satirlar(musteri_id, borc_satirlar)
     _upsert_aylik_grid_cache(musteri_id)
+    try:
+        affected_isos = []
+        for yil, ay in aylar:
+            try:
+                affected_isos.append(date(yil, ay, 1).isoformat())
+            except (TypeError, ValueError):
+                continue
+        _ekstre_invalidate_after_change(
+            int(musteri_id), affected_isos if affected_isos else None
+        )
+    except Exception:
+        try:
+            _cari_ekstre_api_cache.clear()
+        except Exception:
+            pass
     return jsonify(
         {
             "ok": True,
