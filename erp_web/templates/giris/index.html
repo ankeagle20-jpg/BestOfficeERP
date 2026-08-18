@@ -17021,7 +17021,6 @@ function sozlesmeAylikTahsilEt() {
                 localStorage.removeItem(lsAyKey);
                 localStorage.removeItem('__tahsilat_yil_ay_kayit__|' + String(mid));
             } catch (_e) {}
-            selectMusteri(mid);
         }, 3000);
         var o = res.j.olusturulan || [];
         var a = res.j.atlanan || [];
@@ -19657,7 +19656,6 @@ function girisTahsilatYilAyDbKaydet(satirlar, donemYil, doneCb) {
                 localStorage.removeItem(lsAyKey);
                 localStorage.removeItem('__tahsilat_yil_ay_kayit__|' + String(mid));
             } catch (_e) {}
-            selectMusteri(mid);
         }, 3000);
         var o = res.j.olusturulan || [];
         var a = res.j.atlanan || [];
