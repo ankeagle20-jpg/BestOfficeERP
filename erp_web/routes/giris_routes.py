@@ -1992,6 +1992,15 @@ def _aylik_grid_apply_reel_donem_overlay_to_payload(
     if not reel_map:
         return
     tol = float(AYLIK_GRID_TAM_ODENDI_TOLERANS)
+    try:
+        _batch_overlay = _ekstre_tahsil_batch_maps_from_rows(
+            _ekstre_tahsil_rows_for_musteri(int(musteri_id))
+        )
+        batch_marker = (_batch_overlay or {}).get("marker") or {}
+        batch_pay = (_batch_overlay or {}).get("pay") or {}
+    except Exception:
+        batch_marker = {}
+        batch_pay = {}
     for a in payload["aylar"]:
         if not isinstance(a, dict):
             continue
@@ -2017,14 +2026,34 @@ def _aylik_grid_apply_reel_donem_overlay_to_payload(
         if not math.isfinite(odenen):
             odenen = 0.0
         odenen = round(min(max(odenen, 0.0), new_t), 2)
-        kalan = max(round(new_t - odenen, 2), 0.0)
         a["brut_tutar_kdv"] = new_t
         a["tutar_kdv_dahil"] = new_t
-        a["odenen_tutar_kdv"] = round(odenen, 2)
-        a["kalan_tutar_kdv"] = kalan
-        # Güvenlik freni: brut≈0 iken «tam ödendi» yok.
-        a["tahsil_edildi"] = new_t > tol and kalan <= tol
-        a["kismi_tahsilat"] = odenen > tol and kalan > tol
+        try:
+            yy_m = int(a.get("yil"))
+            mm_m = int(a.get("ay"))
+            iso_m = date(yy_m, mm_m, 1).isoformat()
+            mk_t = round(float((batch_marker or {}).get(iso_m) or 0), 2)
+            _pay_raw = (batch_pay or {}).get(iso_m)
+            pay_t = round(float(_pay_raw), 2) if _pay_raw is not None else None
+        except (TypeError, ValueError):
+            yy_m = 0
+            mk_t = 0.0
+            pay_t = None
+        if _grid_payload_marker_panel_tam_kapandi(
+            mk_t, new_t, yy_m, manual, tol, pay_t=pay_t
+        ):
+            a["odenen_tutar_kdv"] = round(odenen, 2)
+            a["kalan_tutar_kdv"] = 0.0
+            # Güvenlik freni: brut≈0 iken «tam ödendi» yok.
+            a["tahsil_edildi"] = new_t > tol
+            a["kismi_tahsilat"] = False
+        else:
+            kalan = max(round(new_t - odenen, 2), 0.0)
+            a["odenen_tutar_kdv"] = round(odenen, 2)
+            a["kalan_tutar_kdv"] = kalan
+            # Güvenlik freni: brut≈0 iken «tam ödendi» yok.
+            a["tahsil_edildi"] = new_t > tol and kalan <= tol
+            a["kismi_tahsilat"] = odenen > tol and kalan > tol
 
     # A-dar: flat dışı veya brut≤tol aylara ekstre zinciri (pozitif brut'a dokunma).
     try:
@@ -2083,13 +2112,32 @@ def _aylik_grid_apply_reel_donem_overlay_to_payload(
         if not math.isfinite(odenen):
             odenen = 0.0
         odenen = round(min(max(odenen, 0.0), new_t), 2)
-        kalan = max(round(new_t - odenen, 2), 0.0)
         a["brut_tutar_kdv"] = new_t
         a["tutar_kdv_dahil"] = new_t
-        a["odenen_tutar_kdv"] = round(odenen, 2)
-        a["kalan_tutar_kdv"] = kalan
-        a["tahsil_edildi"] = new_t > tol and kalan <= tol
-        a["kismi_tahsilat"] = odenen > tol and kalan > tol
+        try:
+            yy_m = int(a.get("yil"))
+            mm_m = int(a.get("ay"))
+            iso_m = date(yy_m, mm_m, 1).isoformat()
+            mk_t = round(float((batch_marker or {}).get(iso_m) or 0), 2)
+            _pay_raw = (batch_pay or {}).get(iso_m)
+            pay_t = round(float(_pay_raw), 2) if _pay_raw is not None else None
+        except (TypeError, ValueError):
+            yy_m = 0
+            mk_t = 0.0
+            pay_t = None
+        if _grid_payload_marker_panel_tam_kapandi(
+            mk_t, new_t, yy_m, manual, tol, pay_t=pay_t
+        ):
+            a["odenen_tutar_kdv"] = round(odenen, 2)
+            a["kalan_tutar_kdv"] = 0.0
+            a["tahsil_edildi"] = new_t > tol
+            a["kismi_tahsilat"] = False
+        else:
+            kalan = max(round(new_t - odenen, 2), 0.0)
+            a["odenen_tutar_kdv"] = round(odenen, 2)
+            a["kalan_tutar_kdv"] = kalan
+            a["tahsil_edildi"] = new_t > tol and kalan <= tol
+            a["kismi_tahsilat"] = odenen > tol and kalan > tol
 
 
 def _aylik_grid_payload_reel_overlay_from_db(musteri_id: int, payload: dict | None) -> dict | None:
