@@ -1,0 +1,53 @@
+name: Daily database backup
+
+on:
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Install PostgreSQL 17 client
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y postgresql-client-17
+          pg_dump --version
+
+      - name: Dump, compress, upload to R2
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
+        run: |
+          set -euo pipefail
+          TS="$(date -u +%Y%m%d-%H%M)"
+          FILE="postgres-${TS}.sql.gz"
+          KEY="bestofficeerp/${FILE}"
+          pg_dump --no-owner --no-acl -d "$SUPABASE_DB_URL" | gzip -9 > "$FILE"
+          BYTES="$(stat -c%s "$FILE")"
+          echo "dump_bytes=${BYTES}"
+          aws s3 cp "$FILE" "s3://${R2_BUCKET}/${KEY}" --endpoint-url "${R2_ENDPOINT_URL}"
+          echo "uploaded_key=${KEY}"
+          aws s3 ls "s3://${R2_BUCKET}/${KEY}" --endpoint-url "${R2_ENDPOINT_URL}"
+          CUTOFF="$(date -u -d '30 days ago' +%Y%m%d)"
+          aws s3 ls "s3://${R2_BUCKET}/bestofficeerp/" --endpoint-url "${R2_ENDPOINT_URL}" | awk '{print $4}' | while read -r name; do
+            [ -z "${name}" ] && continue
+            day="$(printf '%s' "${name}" | sed -n 's/^postgres-\([0-9]\{8\}\)-[0-9]\{4\}\.sql\.gz$/\1/p')"
+            [ -z "${day}" ] && continue
+            if [ "${day}" -lt "${CUTOFF}" ]; then
+              aws s3 rm "s3://${R2_BUCKET}/bestofficeerp/${name}" --endpoint-url "${R2_ENDPOINT_URL}"
+              echo "deleted_old=${name}"
+            fi
+          done
