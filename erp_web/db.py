@@ -3,6 +3,7 @@ Supabase PostgreSQL Bağlantı Katmanı
 """
 import logging
 import os
+import re
 import time
 import threading
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -10,9 +11,36 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import psycopg2
 import psycopg2.extras
 import psycopg2.pool
+from psycopg2 import sql as psql
 from psycopg2.extras import RealDictCursor
 from contextlib import contextmanager
 from config import Config
+
+# Kiracı şema adı: yalnızca tenant_ + [a-z0-9_] (SQL enjeksiyonuna kapalı).
+_TENANT_SCHEMA_RE = re.compile(r"^tenant_[a-z0-9_]+$")
+
+
+def _tenant_schema_for_request():
+    """Flask g.tenant_schema tanımlı değilse None — production'da tam no-op.
+
+    Request / app context yoksa (defer thread, CLI) da None döner; ekstra SQL yok.
+    Geçersiz bir değer set edilmişse fail-closed (public'e sessiz düşülmez).
+    """
+    try:
+        from flask import g, has_app_context
+    except Exception:
+        return None
+    if not has_app_context():
+        return None
+    raw = getattr(g, "tenant_schema", None)
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    if not _TENANT_SCHEMA_RE.fullmatch(s):
+        raise ValueError("geçersiz tenant_schema")
+    return s
 
 logger = logging.getLogger(__name__)
 _POOL = None
@@ -249,9 +277,21 @@ def get_conn():
 
 @contextmanager
 def db():
-    """Context manager: otomatik commit/rollback."""
+    """Context manager: otomatik commit/rollback.
+
+    g.tenant_schema yoksa: search_path'e dokunulmaz, ek SQL yok (bugünkü production).
+    g.tenant_schema varsa: transaction başında SET LOCAL search_path (havuz sızıntısı yok).
+    """
     conn = get_conn()
     try:
+        schema = _tenant_schema_for_request()
+        if schema is not None:
+            cur = conn.cursor()
+            cur.execute(
+                psql.SQL("SET LOCAL search_path TO {}, pg_catalog").format(
+                    psql.Identifier(schema)
+                )
+            )
         yield conn
         conn.commit()
     except BaseException:

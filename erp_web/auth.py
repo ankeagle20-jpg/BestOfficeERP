@@ -6,9 +6,7 @@ from flask_login import LoginManager, UserMixin, login_user, current_user
 from werkzeug.security import check_password_hash, generate_password_hash
 from functools import wraps
 from flask import abort, flash, jsonify, redirect, request, url_for
-from db import fetch_one, fetch_all
-import psycopg2
-from config import Config
+from db import fetch_one, fetch_all, execute, execute_returning
 
 login_manager = LoginManager()
 login_manager.login_view = 'auth.login'
@@ -205,22 +203,16 @@ def kullanici_olustur(username, password, full_name, role="personel"):
         # Şifre hash'le
         hashed = generate_password_hash(password)
         
-        # Veritabanına ekle
-        conn = psycopg2.connect(Config.SUPABASE_DB_URL)
-        cur = conn.cursor()
-        cur.execute(
+        # Veritabanına ekle (db() — g.tenant_schema yoksa production no-op)
+        row = execute_returning(
             """
             INSERT INTO users (username, password_hash, full_name, role, is_active)
             VALUES (%s, %s, %s, %s, %s)
             RETURNING id
             """,
-            (username, hashed, full_name, role, True)
+            (username, hashed, full_name, role, True),
         )
-        user_id = cur.fetchone()[0]
-        conn.commit()
-        cur.close()
-        conn.close()
-        
+        user_id = row["id"] if row else None
         return {"ok": True, "mesaj": f"✅ Kullanıcı oluşturuldu (ID: {user_id})"}
         
     except Exception as e:
@@ -345,13 +337,7 @@ def sifre_degistir(user_id, yeni_sifre):
     """
     try:
         hashed = generate_password_hash(yeni_sifre)
-        conn = psycopg2.connect(Config.SUPABASE_DB_URL)
-        cur = conn.cursor()
-        cur.execute("UPDATE users SET password_hash = %s WHERE id = %s", (hashed, user_id))
-        conn.commit()
-        cur.close()
-        conn.close()
-        
+        execute("UPDATE users SET password_hash = %s WHERE id = %s", (hashed, user_id))
         return {"ok": True, "mesaj": "✅ Şifre değiştirildi"}
     except Exception as e:
         return {"ok": False, "mesaj": f"❌ Hata: {e}"}
@@ -417,14 +403,7 @@ def kullanici_guncelle(user_id, username=None, password=None, full_name=None, ro
         
         params.append(user_id)
         sql = f"UPDATE users SET {', '.join(updates)} WHERE id = %s"
-        
-        conn = psycopg2.connect(Config.SUPABASE_DB_URL)
-        cur = conn.cursor()
-        cur.execute(sql, params)
-        conn.commit()
-        cur.close()
-        conn.close()
-        
+        execute(sql, params)
         return {"ok": True, "mesaj": "✅ Kullanıcı güncellendi"}
         
     except Exception as e:
@@ -443,13 +422,7 @@ def kullanici_sil(user_id):
         dict: {"ok": True/False, "mesaj": "..."}
     """
     try:
-        conn = psycopg2.connect(Config.SUPABASE_DB_URL)
-        cur = conn.cursor()
-        cur.execute("UPDATE users SET is_active = FALSE WHERE id = %s", (user_id,))
-        conn.commit()
-        cur.close()
-        conn.close()
-        
+        execute("UPDATE users SET is_active = FALSE WHERE id = %s", (user_id,))
         return {"ok": True, "mesaj": "✅ Kullanıcı silindi"}
         
     except Exception as e:
