@@ -28,6 +28,14 @@ app = Flask(__name__)
 app.config.from_object(Config)
 
 
+@app.before_request
+def _tenant_bind_and_session_lock():
+    """Host/debug-header → g.tenant_schema; session slug kilidi. Ana domain no-op."""
+    from tenant_identity import bind_request_tenant
+
+    return bind_request_tenant()
+
+
 def _format_tr_number(value, decimals=2):
     """1.234,56 biçiminde TR sayı gösterimi."""
     try:

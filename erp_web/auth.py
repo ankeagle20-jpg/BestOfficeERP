@@ -174,6 +174,12 @@ def giris_yap(username, password):
             aktif_mi=row["is_active"]
         )
         login_user(user, remember=True)
+        try:
+            from tenant_identity import stamp_session_tenant_slug
+
+            stamp_session_tenant_slug()
+        except Exception:
+            pass
         return user
         
     except Exception as e:
