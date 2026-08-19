@@ -580,6 +580,7 @@ def init_schema():
     ensure_auto_invoice_tables()
     ensure_masraflar_table()
     ensure_user_ui_preferences_table()
+    ensure_platform_tenants_table()
     print("✅ Supabase şema oluşturuldu.")
 
 
@@ -2337,6 +2338,32 @@ def ensure_user_ui_preferences_table():
         )
     except Exception as e:
         print(f"user_ui_preferences: {e}")
+
+
+def ensure_platform_tenants_table():
+    """Platform katalogu: yalnız public.tenants.
+
+    Kiracı customers/faturalar tablolarına karışmaz. İsim her zaman
+    ``public.tenants`` — search_path tenant_* olsa bile yanlış şemaya yazılmaz.
+    Bu tablo SCHEMA_SQL / kiracı DDL replay içine KONMAZ.
+    """
+    execute(
+        """
+        CREATE TABLE IF NOT EXISTS public.tenants (
+            id            SERIAL PRIMARY KEY,
+            slug          TEXT NOT NULL UNIQUE,
+            schema_name   TEXT NOT NULL UNIQUE,
+            plan          TEXT NOT NULL DEFAULT 'trial',
+            status        TEXT NOT NULL DEFAULT 'active',
+            created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT tenants_slug_format CHECK (slug ~ '^[a-z0-9_]+$'),
+            CONSTRAINT tenants_schema_format CHECK (schema_name ~ '^tenant_[a-z0-9_]+$'),
+            CONSTRAINT tenants_status_ok CHECK (
+                status IN ('provisioning', 'active', 'suspended')
+            )
+        )
+        """
+    )
 
 
 def clear_all_customers():
