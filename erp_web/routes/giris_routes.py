@@ -2,7 +2,7 @@
 Giriş / Müşteri Kaydı Routes
 Desktop'taki gibi tam fonksiyonel + Sözleşme oluşturma
 """
-from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, send_file, Response, current_app, make_response
+from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, send_file, Response, current_app, make_response, g, has_app_context
 from flask_login import current_user
 from auth import giris_gerekli
 from collections import defaultdict
@@ -43,6 +43,7 @@ from db import (
     ensure_cari_kart_perf_indexes,
     db as get_db,
     get_conn,
+    _tenant_schema_for_request,
     sql_expr_fatura_not_gib_taslak,
     sql_expr_fatura_gib_no_tasindi_degil,
 )
@@ -764,7 +765,7 @@ def sync_musteri_panel_from_tahsil_and_dagitim(
             (mid, json.dumps(payload, ensure_ascii=False)),
         )
         try:
-            _aylik_grid_payload_mem[mid] = (time.time(), payload)
+            _aylik_grid_mem_set(mid, payload)
         except (TypeError, ValueError):
             pass
         _invalidate_aylik_grid_payload_mem(mid)
@@ -1154,7 +1155,7 @@ def _persist_grid_cache_with_panel(musteri_id: int, payload: dict | None = None)
         (mid, json.dumps(payload, ensure_ascii=False)),
     )
     try:
-        _aylik_grid_payload_mem[mid] = (time.time(), payload)
+        _aylik_grid_mem_set(mid, payload)
     except (TypeError, ValueError):
         pass
     _invalidate_aylik_grid_payload_mem(mid)
@@ -3314,12 +3315,42 @@ def _upsert_aylik_grid_cache(musteri_id, tufe_map=None):
 _aylik_grid_payload_mem: dict = {}
 
 
+def _tenant_cache_part():
+    """Production isteklerinde None (g.tenant_schema yok); kiracı aktifse şema adı."""
+    return _tenant_schema_for_request()
+
+
+def _aylik_grid_mem_key(musteri_id):
+    return (_tenant_cache_part(), int(musteri_id))
+
+
+def _aylik_grid_mem_get(musteri_id):
+    try:
+        return _aylik_grid_payload_mem.get(_aylik_grid_mem_key(musteri_id))
+    except (TypeError, ValueError):
+        return None
+
+
+def _aylik_grid_mem_set(musteri_id, payload, ts=None) -> None:
+    try:
+        _aylik_grid_payload_mem[_aylik_grid_mem_key(musteri_id)] = (
+            time.time() if ts is None else ts,
+            payload,
+        )
+    except (TypeError, ValueError):
+        pass
+
+
 def _invalidate_aylik_grid_payload_mem(musteri_id=None) -> None:
     if musteri_id is None:
         _aylik_grid_payload_mem.clear()
         return
     try:
-        _aylik_grid_payload_mem.pop(int(musteri_id), None)
+        mid = int(musteri_id)
+        tenant = _tenant_cache_part()
+        _aylik_grid_payload_mem.pop((tenant, mid), None)
+        if tenant is None:
+            _aylik_grid_payload_mem.pop(mid, None)
     except (TypeError, ValueError):
         pass
 
@@ -3374,6 +3405,12 @@ def _defer_aylik_grid_cache_rebuild(musteri_id) -> None:
         return
     if mid <= 0:
         return
+    captured_tenant = None
+    try:
+        if has_app_context():
+            captured_tenant = getattr(g, "tenant_schema", None)
+    except Exception:
+        captured_tenant = None
     _invalidate_aylik_grid_payload_mem(mid)
     try:
         app = current_app._get_current_object()
@@ -3382,6 +3419,8 @@ def _defer_aylik_grid_cache_rebuild(musteri_id) -> None:
 
     def _work():
         with app.app_context():
+            if captured_tenant is not None:
+                g.tenant_schema = captured_tenant
             try:
                 _upsert_aylik_grid_cache(mid)
             except Exception as ex:
@@ -3410,7 +3449,7 @@ def _read_aylik_grid_cache_payload(musteri_id, mem_ttl: float = 12.0):
     except (TypeError, ValueError):
         return None
     now = time.time()
-    hit = _aylik_grid_payload_mem.get(mid)
+    hit = _aylik_grid_mem_get(mid)
     if hit and (now - float(hit[0] or 0)) < mem_ttl:
         return hit[1]
     row = fetch_one(
@@ -3419,7 +3458,7 @@ def _read_aylik_grid_cache_payload(musteri_id, mem_ttl: float = 12.0):
     )
     payload = _parse_aylik_grid_cache_payload_raw((row or {}).get("payload"))
     if payload:
-        _aylik_grid_payload_mem[mid] = (now, payload)
+        _aylik_grid_mem_set(mid, payload, now)
     return payload
 
 
@@ -3442,7 +3481,7 @@ def _read_aylik_grid_cache_payload_batch(musteri_ids, mem_ttl: float = 12.0) -> 
     out: dict = {}
     need_db: list[int] = []
     for mid in mids:
-        hit = _aylik_grid_payload_mem.get(mid)
+        hit = _aylik_grid_mem_get(mid)
         if hit and (now - float(hit[0] or 0)) < mem_ttl:
             if hit[1]:
                 out[mid] = hit[1]
@@ -3463,7 +3502,7 @@ def _read_aylik_grid_cache_payload_batch(musteri_ids, mem_ttl: float = 12.0) -> 
             payload = _parse_aylik_grid_cache_payload_raw(r.get("payload"))
             if payload:
                 out[mid] = payload
-                _aylik_grid_payload_mem[mid] = (now, payload)
+                _aylik_grid_mem_set(mid, payload, now)
     return out
 
 
@@ -7389,7 +7428,7 @@ def _ekstre_invalidate_after_change(
                 (mid, json.dumps(payload, ensure_ascii=False)),
             )
             try:
-                _aylik_grid_payload_mem[mid] = (time.time(), payload)
+                _aylik_grid_mem_set(mid, payload)
             except (TypeError, ValueError):
                 pass
             _invalidate_aylik_grid_payload_mem(mid)
@@ -9850,7 +9889,7 @@ def _cari_ekstre_hareketler(
         live_pl = _read_aylik_grid_cache_payload(int(musteri_id))
         if live_pl is None:
             try:
-                mem_hit = _aylik_grid_payload_mem.get(int(musteri_id))
+                mem_hit = _aylik_grid_mem_get(musteri_id)
                 if mem_hit and isinstance(mem_hit[1], dict):
                     live_pl = mem_hit[1]
             except (TypeError, ValueError):
@@ -10950,11 +10989,15 @@ def _cari_ekstre_cache_invalidate_musteri(musteri_id):
         mid = int(musteri_id)
     except (TypeError, ValueError):
         return 0
-    silinecek = [
-        key
-        for key in list(_cari_ekstre_api_cache.keys())
-        if isinstance(key, tuple) and key and key[0] == mid
-    ]
+    tenant = _tenant_cache_part()
+    silinecek = []
+    for key in list(_cari_ekstre_api_cache.keys()):
+        if not isinstance(key, tuple) or not key:
+            continue
+        if key[0] == tenant and len(key) > 1 and key[1] == mid:
+            silinecek.append(key)
+        elif tenant is None and key[0] == mid:
+            silinecek.append(key)
     for key in silinecek:
         _cari_ekstre_api_cache.pop(key, None)
     return len(silinecek)
@@ -11085,6 +11128,7 @@ def _cari_ekstre_build_payload_from_request():
     if panel_by_iso:
         panel_by_iso = _ekstre_panel_filter_db_tahsil(int(musteri_id), panel_by_iso)
     cache_key = (
+        _tenant_cache_part(),
         int(musteri_id),
         bas.isoformat(),
         bit.isoformat(),
@@ -12152,7 +12196,7 @@ def api_aylik_grid_cache():
     _ensure_aylik_grid_cache_table()
     if not force:
         try:
-            mem_hit = _aylik_grid_payload_mem.get(int(musteri_id))
+            mem_hit = _aylik_grid_mem_get(musteri_id)
             if mem_hit and (time.time() - float(mem_hit[0])) < 60.0 and isinstance(mem_hit[1], dict):
                 cache_gecerli = True
                 # Mem hit: REV uyuşmuyorsa bayat payload'u 60 sn servis etme → DB/rebuild yoluna düş.
@@ -12210,10 +12254,7 @@ def api_aylik_grid_cache():
                         except Exception:
                             pass
                         try:
-                            _aylik_grid_payload_mem[int(musteri_id)] = (
-                                time.time(),
-                                mem_hit[1],
-                            )
+                            _aylik_grid_mem_set(musteri_id, mem_hit[1])
                         except (TypeError, ValueError):
                             pass
                         return _json_no_cache(
@@ -12268,7 +12309,7 @@ def api_aylik_grid_cache():
                     except Exception:
                         pass
                     try:
-                        _aylik_grid_payload_mem[int(musteri_id)] = (time.time(), mem_payload)
+                        _aylik_grid_mem_set(musteri_id, mem_payload)
                     except (TypeError, ValueError):
                         pass
                     return _json_no_cache({"ok": True, "cache": mem_payload, "cached": True, "mem": True})
@@ -12347,7 +12388,7 @@ def api_aylik_grid_cache():
                     except Exception:
                         pass
                     try:
-                        _aylik_grid_payload_mem[int(musteri_id)] = (time.time(), cache_obj)
+                        _aylik_grid_mem_set(musteri_id, cache_obj)
                     except (TypeError, ValueError):
                         pass
                     return _json_no_cache({"ok": True, "cache": cache_obj, "cached": True})
