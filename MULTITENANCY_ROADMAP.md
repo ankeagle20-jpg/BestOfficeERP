@@ -106,39 +106,42 @@ açabilecek.
   self-servis kayıt akışı için bu yolun psycopg2 üzerinden çalışacak şekilde
   uyarlanması gerekecek (Checkpoint 6'nın bir parçası)
 
-## Kalan İş: Checkpoint 6 (henüz başlanmadı)
+## ✅ Checkpoint 6 (KISMEN tamamlandı) — Gerçek domain + DNS + uçtan
+uca production testi
 
-Bu checkpoint, GERÇEK dış hizmetlere bağlanmayı gerektiriyor — kullanıcının kendisinin
-tamamlaması gereken adımlar var:
+- Alan adı satın alındı: payafin.com (İhs.com.tr)
+- Render'da özel alan adı + wildcard (*.payafin.com) EKLENDİ, DNS
+  yapılandırıldı, SSL sertifikası (Let's Encrypt, TLSv1.3) OTOMATIK
+  çıkarıldı
+- PUBLIC_APP_URL VE TENANT_APEX_DOMAINS ortam DEĞİŞKENLERİ Render'DA
+  GÜNCELLENDİ (payafin.com)
+- GERÇEK production'DA uçtan uca TEST BAŞARILI: provision_new_tenant("test")
+  İLE tenant_test OLUŞTURULDU, https://test.payafin.com ÜZERİNDEN
+  GİRİŞ yapıldı, TEST müşterisi EKLENDİ - SADECE tenant_test şemasına
+  YAZILDI, public/tenant_demo/tenant_test2 HİÇ ETKİLENMEDİ
+- REGRESYON doğrulandı: payafin.com (KÖK) VE bestofficeerp.onrender.com
+  (ESKİ adres), HÂLÂ 'public' (ANA şirket) olarak DAVRANIYOR - kiracı
+  kullanıcısı BURADA giriş YAPAMIYOR
+- www.payafin.com → payafin.com YÖNLENDİRMESİ doğrulandı, güvenlik
+  sorunu YOK
 
-### Kullanıcının yapması gerekenler (Claude/Cursor yapamaz):
-1. **Alan adı satın alma** — önerilen: Cloudflare Registrar (zaten Cloudflare hesabı
-   var, R2 yedekleme için açılmıştı) veya Namecheap
-2. **Stripe hesabı açma** — ücretsiz, stripe.com üzerinden
-3. **Fiyatlandırma katmanlarını netleştirme** — kullanıcı "müşteri/kayıt sayısına
-   göre" fiyatlandırma istedi (örn. 0-100 müşteri = X$/ay, 100-500 = Y$/ay gibi) —
-   tam sayılar henüz belirlenmedi
-
-### Kullanıcı + Claude/Cursor birlikte yapacak:
-4. **DNS'i Render'a bağlama** — satın alınan alan adı için Render'da "Custom Domain"
-   + wildcard subdomain (`*.alanadi.com`) ayarı. `TENANT_APEX_DOMAINS` env
-   değişkeninin gerçek alan adıyla güncellenmesi gerekecek (Checkpoint 4'te
-   varsayılan `bestofficeerp.com` idi — gerçek alan adı farklıysa değiştirilmeli)
-5. **Kayıt formu + Stripe ödeme entegrasyonu** — yeni bir sayfa (fiyatlandırma +
-   kayıt formu), Stripe Checkout/Payment Intent entegrasyonu
-6. **Stripe webhook** — ödeme başarılı olduğunda otomatik olarak
-   `provision_new_tenant()` çağıracak bir webhook endpoint'i
-7. **`tenant_provisioning.py`'nin production/Render ortamına uyarlanması** — psql
-   subprocess yerine psycopg2 üzerinden DDL çalıştırma (Windows'a bağımlılığı
-   kaldırma)
-8. **İkinci GERÇEK kiracı testi** — tüm akışın (kayıt → ödeme → otomatik hesap açma →
-   giriş) uçtan uca gerçek bir senaryoyla test edilmesi
+### Kalan iş (SADECE ticari/iş katmanı):
+1. Fiyatlandırma katmanlarını NETLEŞTİRME (müşteri/kayıt sayısına göre)
+2. Stripe entegrasyonu (Checkout/Payment Intent)
+3. Kayıt formu (fiyatlandırma sayfası + kayıt akışı)
+4. Stripe webhook - ÖDEME başarılı OLDUĞUNDA otomatik provision_new_tenant()
+   ÇAĞRISI
+5. tenant_provisioning.py'NİN production/Render ORTAMINA uyarlanması
+   (psql yerine psycopg2 - hâlâ Windows'a özel)
+6. GERÇEK bir ÖDEME yapan MÜŞTERİYLE tam uçtan uca TEST (kayıt →
+   ödeme → otomatik hesap AÇMA → giriş)
 
 ## Önemli Teknik Notlar (Yeni Bir Sohbette Hatırlanması Gerekenler)
 
 - Ana branch: `main`, repo: `https://github.com/ankeagle20-jpg/BestOfficeERP.git`
 - Production: `https://bestofficeerp.onrender.com` (Render, otomatik deploy `main`
   branch'inden)
+- Alan adı: payafin.com (aktif, DNS+SSL çalışıyor)
 - Veritabanı: Supabase (free tier), ~27 MB, PostgreSQL 17.6
 - Günlük otomatik yedekleme zaten kurulu: GitHub Actions → Cloudflare R2 (her gece
   00:00 UTC / 03:00 TR saati) — bu, multi-tenant projesinden BAĞIMSIZ, zaten çalışıyor
