@@ -9,8 +9,7 @@ from flask import current_app, g, has_request_context, jsonify, request, session
 from flask_login import logout_user
 
 from db import _TENANT_SCHEMA_RE
-
-RESERVED_SUBDOMAINS = frozenset({"www", "app"})
+from tenant_reserved_slugs import RESERVED_TENANT_SLUGS
 TENANT_HEADER = "X-BestOffice-Tenant"
 _SLUG_RE = re.compile(r"^[a-z0-9_]+$")
 _IPV4_RE = re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}$")
@@ -82,7 +81,7 @@ def _subdomain_from_host(host: str | None) -> str | None:
         rest = raw[: -len(suffix)]
         if not rest or "." in rest:
             return None
-        if rest in RESERVED_SUBDOMAINS:
+        if rest in RESERVED_TENANT_SLUGS:
             return None
         if not _SLUG_RE.fullmatch(rest):
             return None
@@ -105,7 +104,7 @@ def resolve_tenant_slug(*, debug: bool | None = None) -> str | None:
         if hdr:
             if hdr.startswith("tenant_"):
                 hdr = hdr[len("tenant_"):]
-            if _SLUG_RE.fullmatch(hdr) and hdr not in RESERVED_SUBDOMAINS:
+            if _SLUG_RE.fullmatch(hdr) and hdr not in RESERVED_TENANT_SLUGS:
                 slug = hdr
     if not slug:
         return None

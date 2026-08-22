@@ -2365,6 +2365,20 @@ def ensure_platform_tenants_table():
         )
         """
     )
+    ensure_platform_tenants_signup_columns()
+
+
+def ensure_platform_tenants_signup_columns():
+    """public.tenants: kayıt formu metadata (B0 signup — yalnız platform katalog)."""
+    try:
+        execute(
+            "ALTER TABLE public.tenants ADD COLUMN IF NOT EXISTS company_name TEXT"
+        )
+        execute(
+            "ALTER TABLE public.tenants ADD COLUMN IF NOT EXISTS country_code TEXT"
+        )
+    except Exception as e:
+        print(f"public.tenants signup columns: {e}")
 
 
 def ensure_pricing_tables():

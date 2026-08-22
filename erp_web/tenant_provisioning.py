@@ -19,6 +19,7 @@ from db import (
     execute,
     fetch_one,
 )
+from tenant_reserved_slugs import RESERVED_TENANT_SLUGS
 
 BACKUP_TABLE = "musteri_tahsilat_panel_detay_backup_20260617"
 PLATFORM_STRIP_TABLES = (
@@ -28,17 +29,6 @@ PLATFORM_STRIP_TABLES = (
     "pricing_overage_rules",
 )
 _SLUG_RE = re.compile(r"^[a-z0-9_]+$")
-_RESERVED_SLUGS = frozenset(
-    {
-        "www",
-        "app",
-        "public",
-        "postgres",
-        "pg_catalog",
-        "information_schema",
-        "pg_toast",
-    }
-)
 _DEFAULT_DUMP = (
     Path(__file__).resolve().parent
     / "_tmp_multitenancy_checkpoint0"
@@ -57,7 +47,7 @@ def _normalize_slug(slug: str) -> str:
     s = str(slug or "").strip().lower()
     if not s or not _SLUG_RE.fullmatch(s):
         raise TenantProvisionError("geçersiz slug")
-    if s in _RESERVED_SLUGS:
+    if s in RESERVED_TENANT_SLUGS:
         raise TenantProvisionError("rezerve slug")
     schema = schema_name_for_slug(s)
     if not _TENANT_SCHEMA_RE.fullmatch(schema):
