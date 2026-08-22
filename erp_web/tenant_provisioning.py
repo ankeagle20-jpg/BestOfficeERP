@@ -37,7 +37,7 @@ _SLUG_RE = re.compile(r"^[a-z0-9_]+$")
 _ADMIN_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _DEFAULT_DUMP = (
     Path(__file__).resolve().parent
-    / "_tmp_multitenancy_checkpoint0"
+    / "tenant_ddl"
     / "schema_only_public.sql"
 )
 
