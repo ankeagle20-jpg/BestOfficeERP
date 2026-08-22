@@ -12,6 +12,7 @@ from flask_login import current_user
 from auth import admin_gerekli
 from db import execute, fetch_all, fetch_one
 from pricing_engine import PricingEngineError, calculate_tenant_bill
+from pricing_public_cache import invalidate_public_pricing_cache
 
 logger = logging.getLogger(__name__)
 
@@ -283,6 +284,7 @@ def api_pricing_tier_update(tier_id: int):
         """,
         (tier_id,),
     )
+    invalidate_public_pricing_cache(row["country_code"])
     return jsonify({"ok": True, "tier": _tier_row_to_json(updated)})
 
 
@@ -373,6 +375,7 @@ def api_pricing_overage():
         """,
         (row["id"],),
     )
+    invalidate_public_pricing_cache(cc)
     return jsonify(
         {
             "ok": True,
