@@ -583,6 +583,7 @@ def init_schema():
     ensure_platform_tenants_table()
     ensure_pricing_tables()
     ensure_tenant_user_lookup_table()
+    ensure_password_reset_tokens_table()
     print("✅ Supabase şema oluşturuldu.")
 
 
@@ -2420,6 +2421,39 @@ def ensure_tenant_user_lookup_table():
         )
     except Exception as e:
         print(f"tenant_user_lookup_slug_idx: {e}")
+
+
+def ensure_password_reset_tokens_table():
+    """Şifre sıfırlama tokenları — public.users FK (Ofisbir / public şema)."""
+    execute(
+        """
+        CREATE TABLE IF NOT EXISTS public.password_reset_tokens (
+            id          BIGSERIAL PRIMARY KEY,
+            user_id     INTEGER NOT NULL
+                REFERENCES public.users (id) ON DELETE CASCADE,
+            token_hash  TEXT NOT NULL,
+            expires_at  TIMESTAMPTZ NOT NULL,
+            used_at     TIMESTAMPTZ,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            request_ip  TEXT,
+            CONSTRAINT password_reset_tokens_token_hash_key UNIQUE (token_hash)
+        )
+        """
+    )
+    try:
+        execute(
+            "CREATE INDEX IF NOT EXISTS password_reset_tokens_user_id_idx "
+            "ON public.password_reset_tokens (user_id)"
+        )
+        execute(
+            """
+            CREATE INDEX IF NOT EXISTS password_reset_tokens_expires_at_idx
+            ON public.password_reset_tokens (expires_at)
+            WHERE used_at IS NULL
+            """
+        )
+    except Exception as e:
+        print(f"password_reset_tokens indexes: {e}")
 
 
 def ensure_pricing_tables():
