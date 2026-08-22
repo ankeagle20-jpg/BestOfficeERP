@@ -56,6 +56,18 @@ def send_randevu_hatirlatma(to_email, musteri_adi, oda_adi, baslangic_str, bitis
     return send_mail(to_email, subject, text)
 
 
+def send_password_reset_email(to_email, reset_url):
+    """Şifre sıfırlama bağlantısı — Payafin forgot-password akışı."""
+    subject = "Payafin — Şifre sıfırlama"
+    text = (
+        "Merhaba,\n\n"
+        "Şifrenizi sıfırlamak için aşağıdaki bağlantıya tıklayın (1 saat geçerlidir):\n"
+        f"{reset_url}\n\n"
+        "Bu isteği siz yapmadıysanız bu e-postayı yok sayın."
+    )
+    return send_mail(to_email, subject, text)
+
+
 def trigger_randevu_webhook(event, payload):
     """Randevu oluştur/iptal webhook — RANDEVU_WEBHOOK_URL tanımlıysa POST edilir."""
     try:

@@ -44,5 +44,6 @@ class Config:
     MAIL_PASSWORD = os.environ.get("MAIL_PASSWORD", "")
     MAIL_DEFAULT_SENDER = os.environ.get("MAIL_DEFAULT_SENDER", MAIL_USERNAME or "noreply@example.com")
     APP_URL = os.environ.get("APP_URL", "http://127.0.0.1:5000")  # Onay maillerindeki linkler için
+    PASSWORD_RESET_TTL_SEC = int(os.environ.get("PASSWORD_RESET_TTL_SEC", "3600"))
     RANDEVU_WEBHOOK_URL = os.environ.get("RANDEVU_WEBHOOK_URL", "").strip()  # Randevu oluştur/iptal webhook
     RANDEVU_BOOKING_TITLE = os.environ.get("RANDEVU_BOOKING_TITLE", "Randevu Al")  # Beyaz etiket: sayfa başlığı
