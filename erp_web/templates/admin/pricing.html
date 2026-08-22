@@ -1,0 +1,346 @@
+{% extends "layout.html" %}
+{% block title %}Fiyatlandırma Yönetimi{% endblock %}
+{% block page_title %}Payafin Fiyatlandırma Yönetimi{% endblock %}
+
+{% block topbar_actions %}
+  <a class="btn-erp btn-erp-sm btn-outline-erp" href="{{ url_for('admin.index') }}">Kullanıcılar</a>
+{% endblock %}
+
+{% block content %}
+<style>
+  .pr-nav { display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap; align-items:center; }
+  .pr-nav a {
+    padding:6px 12px; border-radius:6px; border:1px solid #1e3a5f;
+    color:#90caf9; background:#0a1929; text-decoration:none; font-size:.85rem;
+  }
+  .pr-nav a.active { background:#1565c0; color:#fff; border-color:#1565c0; }
+  .pr-toolbar { display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin-bottom:16px; }
+  .pr-toolbar label { color:#90caf9; font-size:.85rem; }
+  .pr-toolbar select, .pr-toolbar input {
+    background:#0a1929; border:1px solid #1e3a5f; color:#e0f7fa;
+    padding:6px 10px; border-radius:6px; font-size:.85rem;
+  }
+  .pr-meta { color:#888; font-size:.82rem; margin-bottom:10px; }
+  .pr-err { color:#ef9a9a; margin:8px 0; display:none; }
+  .pr-ok { color:#a5d6a7; margin:8px 0; display:none; }
+  .pr-table { width:100%; border-collapse:collapse; font-size:.8rem; }
+  .pr-table th, .pr-table td { border-bottom:1px solid #1e3a5f; padding:6px 8px; text-align:left; vertical-align:middle; }
+  .pr-table th { color:#90caf9; font-weight:600; white-space:nowrap; }
+  .pr-table input[type=text], .pr-table input[type=number] {
+    width:100%; min-width:70px; background:#0a1929; border:1px solid #1e3a5f;
+    color:#e0f7fa; padding:4px 6px; border-radius:4px; font-size:.78rem;
+  }
+  .pr-table input[type=checkbox] { transform:scale(1.1); }
+  .pr-section { margin-bottom:22px; }
+  .pr-section h3 { color:#90caf9; font-size:.95rem; margin:0 0 10px; font-weight:600; }
+  .pr-preview {
+    border:1px solid #1e3a5f; border-radius:8px; padding:14px 16px; background:#0b1e30;
+    max-width:520px;
+  }
+  .pr-preview-result { margin-top:10px; color:#80cbc4; font-size:.9rem; min-height:1.4em; }
+  .pr-row-msg { font-size:.72rem; margin-left:6px; }
+  .pr-row-msg.ok { color:#a5d6a7; }
+  .pr-row-msg.err { color:#ef9a9a; }
+</style>
+
+<div class="pr-nav">
+  <a href="{{ url_for('admin.index') }}">Kullanıcılar</a>
+  <a href="{{ url_for('admin_mukerrer.mukerrer_arsiv_page') }}">Mükerrer Arşiv</a>
+  <a href="{{ url_for('admin_pricing.pricing_page') }}" class="active">Fiyatlandırma</a>
+</div>
+
+<div class="card-erp">
+  <p style="color:#90caf9;margin:0 0 12px;font-size:.9rem;">
+    Platform fiyat kademeleri ve overage kuralları. Değişiklikler anında veritabanına yazılır; önizleme calculate_tenant_bill() ile hesaplanır.
+  </p>
+
+  <div class="pr-toolbar">
+    <label>
+      Ülke
+      <select id="pr-country"></select>
+    </label>
+    <button type="button" class="btn-erp btn-erp-sm" id="pr-yenile">Yenile</button>
+  </div>
+  <div class="pr-meta" id="pr-meta">Yükleniyor...</div>
+  <div class="pr-err" id="pr-err"></div>
+  <div class="pr-ok" id="pr-ok"></div>
+
+  <div class="pr-section">
+    <h3>A — Kademeler</h3>
+    <div style="overflow-x:auto;">
+      <table class="pr-table" id="pr-tiers-table">
+        <thead>
+          <tr>
+            <th>tier_key</th>
+            <th>Ad</th>
+            <th>Min müşteri</th>
+            <th>Max müşteri</th>
+            <th>Taban (aylık)</th>
+            <th>Müşteri başı</th>
+            <th>Dahil kullanıcı</th>
+            <th>Ek kullanıcı ücreti</th>
+            <th>Aktif</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="pr-tiers-body">
+          <tr><td colspan="10" style="color:#78909c;">Yükleniyor...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="pr-section">
+    <h3>B — Overage kuralı</h3>
+    <div style="overflow-x:auto;">
+      <table class="pr-table" id="pr-overage-table">
+        <thead>
+          <tr>
+            <th>Eşik (müşteri)</th>
+            <th>Paket boyutu</th>
+            <th>Paket fiyatı</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="pr-overage-body">
+          <tr><td colspan="4" style="color:#78909c;">Yükleniyor...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="pr-section">
+    <h3>Önizleme</h3>
+    <div class="pr-preview">
+      <div class="pr-toolbar" style="margin-bottom:0;">
+        <label>Müşteri sayısı <input type="number" id="pr-prev-musteri" min="0" value="50" style="width:90px;"></label>
+        <label>Kullanıcı sayısı <input type="number" id="pr-prev-kullanici" min="0" value="1" style="width:90px;"></label>
+        <button type="button" class="btn-erp btn-erp-sm" id="pr-preview-btn">Hesapla</button>
+      </div>
+      <div class="pr-preview-result" id="pr-preview-result">—</div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var countrySel = document.getElementById('pr-country');
+  var metaEl = document.getElementById('pr-meta');
+  var errEl = document.getElementById('pr-err');
+  var okEl = document.getElementById('pr-ok');
+  var tiersBody = document.getElementById('pr-tiers-body');
+  var overageBody = document.getElementById('pr-overage-body');
+  var previewResult = document.getElementById('pr-preview-result');
+
+  function escHtml(s) {
+    return String(s || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function showErr(msg) {
+    errEl.style.display = msg ? 'block' : 'none';
+    errEl.textContent = msg || '';
+    if (msg) okEl.style.display = 'none';
+  }
+  function showOk(msg) {
+    okEl.style.display = msg ? 'block' : 'none';
+    okEl.textContent = msg || '';
+    if (msg) errEl.style.display = 'none';
+  }
+
+  function api(path, opts) {
+    opts = opts || {};
+    return fetch(path, Object.assign({ headers: { 'Content-Type': 'application/json' } }, opts))
+      .then(function (r) { return r.json().then(function (j) { return { status: r.status, json: j }; }); });
+  }
+
+  function currentCountry() {
+    return (countrySel.value || 'TR').toUpperCase();
+  }
+
+  function loadRegions() {
+    return api('/admin/api/pricing/regions').then(function (res) {
+      if (!res.json.ok) throw new Error(res.json.mesaj || 'Bölgeler yüklenemedi');
+      countrySel.innerHTML = '';
+      (res.json.regions || []).forEach(function (r) {
+        if (!r.is_active) return;
+        var opt = document.createElement('option');
+        opt.value = r.country_code;
+        opt.textContent = r.country_code + ' — ' + (r.name || r.currency || '');
+        countrySel.appendChild(opt);
+      });
+      if (!countrySel.options.length) {
+        var fallback = document.createElement('option');
+        fallback.value = 'TR';
+        fallback.textContent = 'TR';
+        countrySel.appendChild(fallback);
+      }
+      var hasTr = false;
+      for (var i = 0; i < countrySel.options.length; i++) {
+        if (countrySel.options[i].value === 'TR') { hasTr = true; break; }
+      }
+      if (hasTr) countrySel.value = 'TR';
+    });
+  }
+
+  function tierRowHtml(t) {
+    var maxVal = t.max_customers == null ? '' : t.max_customers;
+    return '<tr data-tier-id="' + t.id + '">' +
+      '<td><code>' + escHtml(t.tier_key) + '</code></td>' +
+      '<td><input type="text" class="pr-f-display_name" value="' + escHtml(t.display_name) + '"></td>' +
+      '<td><input type="number" class="pr-f-min_customers" min="0" value="' + t.min_customers + '"></td>' +
+      '<td><input type="number" class="pr-f-max_customers" min="0" value="' + maxVal + '" placeholder="+"></td>' +
+      '<td><input type="number" class="pr-f-base_monthly" min="0" step="0.01" value="' + t.base_monthly + '"></td>' +
+      '<td><input type="number" class="pr-f-price_per_customer" min="0" step="0.0001" value="' + t.price_per_customer + '"></td>' +
+      '<td><input type="number" class="pr-f-included_users" min="0" value="' + t.included_users + '"></td>' +
+      '<td><input type="number" class="pr-f-price_per_extra_user" min="0" step="0.01" value="' + t.price_per_extra_user + '"></td>' +
+      '<td><input type="checkbox" class="pr-f-is_active" ' + (t.is_active ? 'checked' : '') + '></td>' +
+      '<td><button type="button" class="btn-erp btn-erp-sm pr-save-tier">Kaydet</button><span class="pr-row-msg"></span></td>' +
+      '</tr>';
+  }
+
+  function loadTiers() {
+    var cc = currentCountry();
+    return api('/admin/api/pricing/tiers?country=' + encodeURIComponent(cc)).then(function (res) {
+      if (!res.json.ok) throw new Error(res.json.mesaj || 'Kademeler yüklenemedi');
+      var tiers = res.json.tiers || [];
+      if (!tiers.length) {
+        tiersBody.innerHTML = '<tr><td colspan="10" style="color:#78909c;">Kayıt yok</td></tr>';
+      } else {
+        tiersBody.innerHTML = tiers.map(tierRowHtml).join('');
+      }
+      metaEl.textContent = cc + ' — ' + tiers.length + ' kademe';
+    });
+  }
+
+  function loadOverage() {
+    var cc = currentCountry();
+    return api('/admin/api/pricing/overage?country=' + encodeURIComponent(cc)).then(function (res) {
+      if (!res.json.ok) throw new Error(res.json.mesaj || 'Overage yuklenemedi');
+      var o = res.json.overage;
+      if (!o) {
+        overageBody.innerHTML = '<tr><td colspan="4" style="color:#78909c;">Kural yok</td></tr>';
+        return;
+      }
+      overageBody.innerHTML = '<tr data-overage-id="' + o.id + '">' +
+        '<td><input type="number" class="pr-o-threshold" min="0" value="' + o.threshold_customers + '"></td>' +
+        '<td><input type="number" class="pr-o-pack_size" min="1" value="' + o.pack_size + '"></td>' +
+        '<td><input type="number" class="pr-o-pack_price" min="0" step="0.01" value="' + o.pack_price + '"></td>' +
+        '<td><button type="button" class="btn-erp btn-erp-sm" id="pr-save-overage">Kaydet</button><span class="pr-row-msg"></span></td>' +
+        '</tr>';
+    });
+  }
+
+  function readTierRow(tr) {
+    var maxRaw = tr.querySelector('.pr-f-max_customers').value.trim();
+    return {
+      display_name: tr.querySelector('.pr-f-display_name').value.trim(),
+      min_customers: parseInt(tr.querySelector('.pr-f-min_customers').value, 10),
+      max_customers: maxRaw === '' ? null : parseInt(maxRaw, 10),
+      base_monthly: parseFloat(tr.querySelector('.pr-f-base_monthly').value),
+      price_per_customer: parseFloat(tr.querySelector('.pr-f-price_per_customer').value),
+      included_users: parseInt(tr.querySelector('.pr-f-included_users').value, 10),
+      price_per_extra_user: parseFloat(tr.querySelector('.pr-f-price_per_extra_user').value),
+      is_active: tr.querySelector('.pr-f-is_active').checked
+    };
+  }
+
+  function saveTier(tr) {
+    var id = tr.getAttribute('data-tier-id');
+    var msgEl = tr.querySelector('.pr-row-msg');
+    msgEl.textContent = '...';
+    msgEl.className = 'pr-row-msg';
+    api('/admin/api/pricing/tiers/' + id, { method: 'PUT', body: JSON.stringify(readTierRow(tr)) })
+      .then(function (res) {
+        if (!res.json.ok) {
+          msgEl.textContent = res.json.mesaj || ('Hata ' + res.status);
+          msgEl.className = 'pr-row-msg err';
+          return;
+        }
+        msgEl.textContent = 'OK';
+        msgEl.className = 'pr-row-msg ok';
+        showOk('Kademe kaydedildi: ' + (res.json.tier && res.json.tier.tier_key));
+      })
+      .catch(function (e) {
+        msgEl.textContent = e.message || 'Hata';
+        msgEl.className = 'pr-row-msg err';
+      });
+  }
+
+  function saveOverage() {
+    var tr = overageBody.querySelector('tr[data-overage-id]');
+    if (!tr) return;
+    var msgEl = tr.querySelector('.pr-row-msg');
+    msgEl.textContent = '...';
+    var cc = currentCountry();
+    var body = {
+      threshold_customers: parseInt(tr.querySelector('.pr-o-threshold').value, 10),
+      pack_size: parseInt(tr.querySelector('.pr-o-pack_size').value, 10),
+      pack_price: parseFloat(tr.querySelector('.pr-o-pack_price').value),
+      is_active: true
+    };
+    api('/admin/api/pricing/overage?country=' + encodeURIComponent(cc), { method: 'PUT', body: JSON.stringify(body) })
+      .then(function (res) {
+        if (!res.json.ok) {
+          msgEl.textContent = res.json.mesaj || ('Hata ' + res.status);
+          msgEl.className = 'pr-row-msg err';
+          return;
+        }
+        msgEl.textContent = 'OK';
+        msgEl.className = 'pr-row-msg ok';
+        showOk('Overage kuralı kaydedildi');
+      });
+  }
+
+  function runPreview() {
+    previewResult.textContent = 'Hesaplanıyor...';
+    var body = {
+      country_code: currentCountry(),
+      musteri_sayisi: parseInt(document.getElementById('pr-prev-musteri').value, 10) || 0,
+      kullanici_sayisi: parseInt(document.getElementById('pr-prev-kullanici').value, 10) || 0
+    };
+    api('/admin/api/pricing/preview', { method: 'POST', body: JSON.stringify(body) })
+      .then(function (res) {
+        if (!res.json.ok) {
+          previewResult.textContent = res.json.mesaj || 'Hata';
+          return;
+        }
+        var b = res.json.bill || {};
+        var lines = b.lines || [];
+        var lastLine = lines.length ? lines[lines.length - 1] : null;
+        previewResult.textContent = (lastLine && lastLine.text)
+          ? lastLine.text
+          : (b.total_monthly != null ? (b.total_monthly + ' ' + (b.currency || '')) : JSON.stringify(b));
+      })
+      .catch(function (e) {
+        previewResult.textContent = e.message || 'Hata';
+      });
+  }
+
+  function reloadAll() {
+    showErr('');
+    showOk('');
+    loadTiers().then(loadOverage).catch(function (e) { showErr(e.message); });
+  }
+
+  document.getElementById('pr-yenile').addEventListener('click', reloadAll);
+  countrySel.addEventListener('change', reloadAll);
+  tiersBody.addEventListener('click', function (ev) {
+    if (ev.target.classList.contains('pr-save-tier')) {
+      saveTier(ev.target.closest('tr'));
+    }
+  });
+  overageBody.addEventListener('click', function (ev) {
+    if (ev.target.id === 'pr-save-overage') saveOverage();
+  });
+  document.getElementById('pr-preview-btn').addEventListener('click', runPreview);
+  document.getElementById('pr-prev-musteri').addEventListener('change', runPreview);
+  document.getElementById('pr-prev-kullanici').addEventListener('change', runPreview);
+
+  loadRegions().then(reloadAll).catch(function (e) { showErr(e.message); });
+})();
+</script>
+{% endblock %}
