@@ -6,10 +6,12 @@ public.customers / faturalar satırlarına dokunmaz.
 """
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 
 from psycopg2 import sql as psql
+from psycopg2.errors import UniqueViolation
 from werkzeug.security import generate_password_hash
 
 from db import (
@@ -21,6 +23,8 @@ from db import (
 )
 from tenant_reserved_slugs import RESERVED_TENANT_SLUGS
 
+logger = logging.getLogger(__name__)
+
 BACKUP_TABLE = "musteri_tahsilat_panel_detay_backup_20260617"
 PLATFORM_STRIP_TABLES = (
     "tenants",
@@ -29,6 +33,7 @@ PLATFORM_STRIP_TABLES = (
     "pricing_overage_rules",
 )
 _SLUG_RE = re.compile(r"^[a-z0-9_]+$")
+_ADMIN_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _DEFAULT_DUMP = (
     Path(__file__).resolve().parent
     / "_tmp_multitenancy_checkpoint0"
@@ -39,8 +44,102 @@ class TenantProvisionError(RuntimeError):
     """Provizyon durdu (mevcut şema/kayıt, geçersiz slug, DDL hatası)."""
 
 
+class TenantSlugReserveError(RuntimeError):
+    """Slug rezervasyonu başarısız (çakışma veya geçersiz slug)."""
+
+
+class TenantSlugConflictError(TenantSlugReserveError):
+    """Slug veya şema adı zaten alınmış."""
+
+
 def schema_name_for_slug(slug: str) -> str:
     return "tenant_" + str(slug).strip().lower()
+
+
+def _valid_admin_username(user: str) -> bool:
+    u = str(user or "").strip()
+    if not u:
+        return False
+    if _ADMIN_EMAIL_RE.fullmatch(u):
+        return True
+    return bool(_SLUG_RE.fullmatch(u.replace("-", "_")))
+
+
+def _fetch_tenant_row(slug: str, schema: str) -> dict | None:
+    return fetch_one(
+        "SELECT id, slug, schema_name, plan, status FROM public.tenants "
+        "WHERE slug=%s OR schema_name=%s",
+        (slug, schema),
+    )
+
+
+def reserve_tenant_slug(
+    slug: str,
+    *,
+    company_name: str | None = None,
+    country_code: str | None = None,
+    plan: str = "trial",
+) -> dict:
+    """Asenkron signup: slug'ı hemen status='provisioning' ile rezerve et.
+
+    UNIQUE(slug)/UNIQUE(schema_name) yarışını DB'ye bırakır.
+    """
+    slug = _normalize_slug(slug)
+    schema = schema_name_for_slug(slug)
+    plan_s = str(plan or "trial").strip() or "trial"
+    if not re.fullmatch(r"[a-z0-9_]{1,32}", plan_s):
+        raise TenantSlugReserveError("geçersiz plan")
+
+    ensure_platform_tenants_table()
+
+    if _schema_exists(schema):
+        raise TenantSlugConflictError(f"şema zaten var: {schema}")
+
+    existing = _fetch_tenant_row(slug, schema)
+    if existing:
+        raise TenantSlugConflictError(f"slug zaten kayıtlı: {slug}")
+
+    company = (company_name or "").strip() or None
+    country = (country_code or "").strip().upper() or None
+    if country and (len(country) != 2 or not country.isalpha()):
+        raise TenantSlugReserveError("geçersiz country_code")
+
+    try:
+        execute(
+            """
+            INSERT INTO public.tenants
+                (slug, schema_name, plan, status, company_name, country_code)
+            VALUES (%s, %s, %s, 'provisioning', %s, %s)
+            """,
+            (slug, schema, plan_s, company, country),
+        )
+    except UniqueViolation as e:
+        raise TenantSlugConflictError(f"slug çakışması: {slug}") from e
+
+    row = fetch_one(
+        "SELECT id, slug, schema_name, plan, status, company_name, country_code "
+        "FROM public.tenants WHERE slug=%s",
+        (slug,),
+    )
+    return {"ok": True, "slug": slug, "schema_name": schema, "status": "provisioning", "tenant": row}
+
+
+def mark_tenant_provision_failed(slug: str, *, reason: str | None = None) -> None:
+    """Arka plan provizyon hatasında status='failed' (poll endpoint için)."""
+    slug_s = str(slug or "").strip().lower()
+    if not slug_s:
+        return
+    try:
+        execute(
+            """
+            UPDATE public.tenants
+            SET status = 'failed'
+            WHERE slug = %s AND status = 'provisioning'
+            """,
+            (slug_s,),
+        )
+    except Exception:
+        logger.exception("mark_tenant_provision_failed slug=%s reason=%s", slug_s, reason)
 
 
 def _normalize_slug(slug: str) -> str:
@@ -273,11 +372,7 @@ def _schema_exists(schema: str) -> bool:
 
 
 def _tenants_row_exists(slug: str, schema: str) -> bool:
-    row = fetch_one(
-        "SELECT 1 AS ok FROM public.tenants WHERE slug=%s OR schema_name=%s",
-        (slug, schema),
-    )
-    return bool(row)
+    return bool(_fetch_tenant_row(slug, schema))
 
 
 def _insert_admin(schema: str, username: str, password: str, full_name: str) -> int:
@@ -306,10 +401,13 @@ def provision_new_tenant(
     admin_password: str | None = None,
     admin_full_name: str | None = None,
     dump_path: Path | None = None,
+    allow_existing_provisioning_row: bool = False,
 ) -> dict:
     """Yeni kiracı: şema + DDL replay + admin + public.tenants kaydı.
 
     slug veya şema zaten varsa hata verir (ikinci kez provision yok).
+    allow_existing_provisioning_row=True: status='provisioning' satırı varsa
+    devam eder ve sonunda INSERT yerine UPDATE status='active' yapar.
     """
     slug = _normalize_slug(slug)
     schema = schema_name_for_slug(slug)
@@ -317,7 +415,7 @@ def provision_new_tenant(
     if not re.fullmatch(r"[a-z0-9_]{1,32}", plan_s):
         raise TenantProvisionError("geçersiz plan")
     user = (admin_username or (slug + "_admin")).strip()
-    if not user or not _SLUG_RE.fullmatch(user.replace("-", "_")):
+    if not _valid_admin_username(user):
         raise TenantProvisionError("geçersiz admin kullanıcı adı")
     password = admin_password
     if not password or len(str(password)) < 10:
@@ -330,7 +428,16 @@ def provision_new_tenant(
 
     ensure_platform_tenants_table()
 
-    if _schema_exists(schema) or _tenants_row_exists(slug, schema):
+    existing_row = _fetch_tenant_row(slug, schema)
+    resume_provisioning = False
+    if allow_existing_provisioning_row and existing_row:
+        if existing_row.get("status") == "provisioning":
+            resume_provisioning = True
+        else:
+            raise TenantProvisionError(
+                f"kiracı zaten var (slug={slug} status={existing_row.get('status')})"
+            )
+    elif _schema_exists(schema) or existing_row:
         raise TenantProvisionError(
             f"kiracı zaten var (slug={slug} schema={schema}); ikinci provision engellendi"
         )
@@ -347,15 +454,26 @@ def provision_new_tenant(
     sql_path.write_text(header + body, encoding="utf-8")
 
     try:
-        _apply_tenant_ddl(sql_path)
+        if not resume_provisioning or not _schema_exists(schema):
+            _apply_tenant_ddl(sql_path)
         admin_id = _insert_admin(schema, user, str(password), full_name)
-        execute(
-            """
-            INSERT INTO public.tenants (slug, schema_name, plan, status)
-            VALUES (%s, %s, %s, 'active')
-            """,
-            (slug, schema, plan_s),
-        )
+        if resume_provisioning:
+            execute(
+                """
+                UPDATE public.tenants
+                SET plan = %s, status = 'active'
+                WHERE slug = %s AND status = 'provisioning'
+                """,
+                (plan_s, slug),
+            )
+        else:
+            execute(
+                """
+                INSERT INTO public.tenants (slug, schema_name, plan, status)
+                VALUES (%s, %s, %s, 'active')
+                """,
+                (slug, schema, plan_s),
+            )
     except Exception:
         # Kısmi şema bırakılabilir; tekrar çağrı mevcut şema yüzünden durur (fail-closed).
         raise

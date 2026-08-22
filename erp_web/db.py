@@ -2360,7 +2360,7 @@ def ensure_platform_tenants_table():
             CONSTRAINT tenants_slug_format CHECK (slug ~ '^[a-z0-9_]+$'),
             CONSTRAINT tenants_schema_format CHECK (schema_name ~ '^tenant_[a-z0-9_]+$'),
             CONSTRAINT tenants_status_ok CHECK (
-                status IN ('provisioning', 'active', 'suspended')
+                status IN ('provisioning', 'active', 'suspended', 'failed')
             )
         )
         """
@@ -2379,6 +2379,17 @@ def ensure_platform_tenants_signup_columns():
         )
     except Exception as e:
         print(f"public.tenants signup columns: {e}")
+    try:
+        execute("ALTER TABLE public.tenants DROP CONSTRAINT IF EXISTS tenants_status_ok")
+        execute(
+            """
+            ALTER TABLE public.tenants ADD CONSTRAINT tenants_status_ok CHECK (
+                status IN ('provisioning', 'active', 'suspended', 'failed')
+            )
+            """
+        )
+    except Exception as e:
+        print(f"public.tenants status constraint: {e}")
 
 
 def ensure_pricing_tables():
