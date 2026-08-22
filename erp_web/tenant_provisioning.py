@@ -6,16 +6,12 @@ public.customers / faturalar satırlarına dokunmaz.
 """
 from __future__ import annotations
 
-import os
 import re
-import subprocess
 from pathlib import Path
-from urllib.parse import unquote, urlparse
 
 from psycopg2 import sql as psql
 from werkzeug.security import generate_password_hash
 
-from config import Config
 from db import (
     _TENANT_SCHEMA_RE,
     db,
@@ -48,8 +44,6 @@ _DEFAULT_DUMP = (
     / "_tmp_multitenancy_checkpoint0"
     / "schema_only_public.sql"
 )
-_PSQL = Path(r"C:\Program Files\PostgreSQL\17\bin\psql.exe")
-
 
 class TenantProvisionError(RuntimeError):
     """Provizyon durdu (mevcut şema/kayıt, geçersiz slug, DDL hatası)."""
@@ -71,11 +65,138 @@ def _normalize_slug(slug: str) -> str:
     return s
 
 
-def _db_url() -> str:
-    return (
-        (os.environ.get("DATABASE_URL") or os.environ.get("SUPABASE_DB_URL") or "").strip()
-        or (Config.SUPABASE_DB_URL or "").strip()
-    )
+def _is_executable_statement(stmt: str) -> bool:
+    """Yorum/boşluk-only parçaları atla (psql bunları sessizce geçer)."""
+    body = stmt.strip()
+    if not body:
+        return False
+    for line in body.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith("--"):
+            continue
+        return True
+    return False
+
+
+def _split_ddl_statements(sql: str) -> list[str]:
+    """pg_dump DDL metnini dollar-quote güvenli şekilde statement'lara böl."""
+    statements: list[str] = []
+    buf: list[str] = []
+    i = 0
+    n = len(sql)
+    in_line_comment = False
+    dollar_tag: str | None = None
+    in_single = False
+    in_double = False
+
+    while i < n:
+        ch = sql[i]
+        nxt = sql[i + 1] if i + 1 < n else ""
+
+        if in_line_comment:
+            buf.append(ch)
+            if ch == "\n":
+                in_line_comment = False
+            i += 1
+            continue
+
+        if dollar_tag is not None:
+            if ch == "$":
+                end = f"${dollar_tag}$"
+                if sql.startswith(end, i):
+                    buf.append(end)
+                    i += len(end)
+                    dollar_tag = None
+                    continue
+            buf.append(ch)
+            i += 1
+            continue
+
+        if in_single:
+            buf.append(ch)
+            if ch == "'" and nxt == "'":
+                buf.append(nxt)
+                i += 2
+                continue
+            if ch == "'":
+                in_single = False
+            i += 1
+            continue
+
+        if in_double:
+            buf.append(ch)
+            if ch == '"':
+                in_double = False
+            i += 1
+            continue
+
+        if ch == "-" and nxt == "-":
+            in_line_comment = True
+            buf.extend((ch, nxt))
+            i += 2
+            continue
+
+        if ch == "'":
+            in_single = True
+            buf.append(ch)
+            i += 1
+            continue
+
+        if ch == '"':
+            in_double = True
+            buf.append(ch)
+            i += 1
+            continue
+
+        if ch == "$":
+            j = i + 1
+            while j < n and sql[j] != "$" and (sql[j].isalnum() or sql[j] == "_"):
+                j += 1
+            if j < n and sql[j] == "$":
+                dollar_tag = sql[i + 1 : j]
+                buf.append(sql[i : j + 1])
+                i = j + 1
+                continue
+
+        if ch == ";":
+            stmt = "".join(buf).strip()
+            if stmt:
+                statements.append(stmt)
+            buf = []
+            i += 1
+            continue
+
+        buf.append(ch)
+        i += 1
+
+    tail = "".join(buf).strip()
+    if tail:
+        statements.append(tail)
+    return statements
+
+
+def _execute_ddl_script(sql_text: str) -> None:
+    """Dönüştürülmüş kiracı DDL'ini psycopg2 ile uygula (tek transaction, hata → rollback)."""
+    statements = [s for s in _split_ddl_statements(sql_text) if _is_executable_statement(s)]
+    if not statements:
+        raise TenantProvisionError("uygulanacak DDL statement yok")
+    idx = 0
+    try:
+        with db() as conn:
+            cur = conn.cursor()
+            for idx, stmt in enumerate(statements, start=1):
+                cur.execute(stmt)
+    except Exception as e:
+        raise TenantProvisionError(
+            f"DDL uygulama hatası (statement {idx}/{len(statements)}): {e}"
+        ) from e
+
+
+def _apply_tenant_ddl(sql_path: Path) -> None:
+    sql_text = sql_path.read_text(encoding="utf-8")
+    _execute_ddl_script(sql_text)
 
 
 def _strip_named_table_block(text: str, table: str) -> str:
@@ -154,39 +275,6 @@ def transform_public_dump(src: str, schema: str) -> str:
         text,
     )
     return text
-
-
-def _apply_psql(sql_path: Path) -> None:
-    raw = _db_url()
-    if not raw:
-        raise TenantProvisionError("DATABASE_URL / SUPABASE_DB_URL yok")
-    u = urlparse(raw)
-    dbname = (u.path or "/postgres").lstrip("/").split("?")[0] or "postgres"
-    env = os.environ.copy()
-    env["PGPASSWORD"] = unquote(u.password or "")
-    env["PGSSLMODE"] = "require"
-    psql_bin = Path(os.environ.get("BESTOFFICE_PSQL") or _PSQL)
-    if not psql_bin.is_file():
-        raise TenantProvisionError(f"psql bulunamadı: {psql_bin}")
-    cmd = [
-        str(psql_bin),
-        "-v",
-        "ON_ERROR_STOP=1",
-        "-h",
-        u.hostname or "",
-        "-p",
-        str(u.port or 5432),
-        "-U",
-        unquote(u.username or ""),
-        "-d",
-        dbname,
-        "-f",
-        str(sql_path),
-    ]
-    proc = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=180)
-    if proc.returncode != 0:
-        err = (proc.stderr or "")[-4000:]
-        raise TenantProvisionError(f"psql başarısız rc={proc.returncode}: {err}")
 
 
 def _schema_exists(schema: str) -> bool:
@@ -269,7 +357,7 @@ def provision_new_tenant(
     sql_path.write_text(header + body, encoding="utf-8")
 
     try:
-        _apply_psql(sql_path)
+        _apply_tenant_ddl(sql_path)
         admin_id = _insert_admin(schema, user, str(password), full_name)
         execute(
             """
