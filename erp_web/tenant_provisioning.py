@@ -25,7 +25,12 @@ from db import (
 )
 
 BACKUP_TABLE = "musteri_tahsilat_panel_detay_backup_20260617"
-PLATFORM_TABLE = "tenants"
+PLATFORM_STRIP_TABLES = (
+    "tenants",
+    "pricing_regions",
+    "pricing_tiers",
+    "pricing_overage_rules",
+)
 _SLUG_RE = re.compile(r"^[a-z0-9_]+$")
 _RESERVED_SLUGS = frozenset(
     {
@@ -99,11 +104,15 @@ def transform_public_dump(src: str, schema: str) -> str:
         count=1,
     )
     text = _strip_named_table_block(text, BACKUP_TABLE)
-    text = _strip_named_table_block(text, PLATFORM_TABLE)
+    for platform_table in PLATFORM_STRIP_TABLES:
+        text = _strip_named_table_block(text, platform_table)
     if BACKUP_TABLE in text:
         raise TenantProvisionError("yedek tablo hâlâ dönüştürülmüş DDL içinde")
-    if re.search(r"CREATE TABLE public\.tenants\b", text):
-        raise TenantProvisionError("public.tenants kiracı dump'ına sızdı")
+    for platform_table in PLATFORM_STRIP_TABLES:
+        if re.search(rf"CREATE TABLE public\.{re.escape(platform_table)}\b", text):
+            raise TenantProvisionError(
+                f"public.{platform_table} kiracı dump'ına sızdı"
+            )
     if "information_schema" in text.lower():
         raise TenantProvisionError("beklenmeyen information_schema")
     text = text.replace("public.", schema + ".")

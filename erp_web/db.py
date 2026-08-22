@@ -581,6 +581,7 @@ def init_schema():
     ensure_masraflar_table()
     ensure_user_ui_preferences_table()
     ensure_platform_tenants_table()
+    ensure_pricing_tables()
     print("✅ Supabase şema oluşturuldu.")
 
 
@@ -2362,6 +2363,221 @@ def ensure_platform_tenants_table():
                 status IN ('provisioning', 'active', 'suspended')
             )
         )
+        """
+    )
+
+
+def ensure_pricing_tables():
+    """Platform fiyatlandırması: yalnız public.pricing_*.
+
+    Kiracı şemalarına karışmaz; tenant_provisioning DDL strip listesinde.
+    """
+    execute(
+        """
+        CREATE TABLE IF NOT EXISTS public.pricing_regions (
+            country_code   TEXT PRIMARY KEY,
+            currency       TEXT NOT NULL,
+            name           TEXT NOT NULL,
+            is_active      BOOLEAN NOT NULL DEFAULT TRUE,
+            sort_order     INTEGER NOT NULL DEFAULT 0,
+            created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT pricing_regions_country_code_format
+                CHECK (country_code ~ '^[A-Z]{2}$'),
+            CONSTRAINT pricing_regions_currency_format
+                CHECK (currency ~ '^[A-Z]{3}$')
+        )
+        """
+    )
+    execute(
+        """
+        CREATE TABLE IF NOT EXISTS public.pricing_tiers (
+            id                   SERIAL PRIMARY KEY,
+            country_code         TEXT NOT NULL
+                REFERENCES public.pricing_regions(country_code) ON DELETE RESTRICT,
+            currency             TEXT NOT NULL,
+            tier_key             TEXT NOT NULL,
+            display_name         TEXT NOT NULL,
+            min_customers        INTEGER NOT NULL,
+            max_customers        INTEGER,
+            base_monthly         NUMERIC(12,2) NOT NULL,
+            price_per_customer   NUMERIC(12,4) NOT NULL,
+            included_users       INTEGER NOT NULL,
+            price_per_extra_user NUMERIC(12,2) NOT NULL,
+            sort_order           INTEGER NOT NULL DEFAULT 0,
+            is_active            BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT pricing_tiers_country_tier_key_unique
+                UNIQUE (country_code, tier_key),
+            CONSTRAINT pricing_tiers_tier_key_format
+                CHECK (tier_key ~ '^[a-z0-9_]+$'),
+            CONSTRAINT pricing_tiers_currency_format
+                CHECK (currency ~ '^[A-Z]{3}$'),
+            CONSTRAINT pricing_tiers_min_customers_nonneg
+                CHECK (min_customers >= 0),
+            CONSTRAINT pricing_tiers_max_customers_ok
+                CHECK (max_customers IS NULL OR max_customers >= min_customers),
+            CONSTRAINT pricing_tiers_included_users_nonneg
+                CHECK (included_users >= 0),
+            CONSTRAINT pricing_tiers_base_monthly_nonneg
+                CHECK (base_monthly >= 0),
+            CONSTRAINT pricing_tiers_price_per_customer_nonneg
+                CHECK (price_per_customer >= 0),
+            CONSTRAINT pricing_tiers_price_per_extra_user_nonneg
+                CHECK (price_per_extra_user >= 0)
+        )
+        """
+    )
+    execute(
+        """
+        CREATE TABLE IF NOT EXISTS public.pricing_overage_rules (
+            id                   SERIAL PRIMARY KEY,
+            country_code         TEXT NOT NULL
+                REFERENCES public.pricing_regions(country_code) ON DELETE RESTRICT,
+            tier_key             TEXT NOT NULL,
+            threshold_customers  INTEGER NOT NULL,
+            pack_size            INTEGER NOT NULL,
+            pack_price           NUMERIC(12,2) NOT NULL,
+            currency             TEXT NOT NULL,
+            is_active            BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT pricing_overage_rules_country_tier_unique
+                UNIQUE (country_code, tier_key),
+            CONSTRAINT pricing_overage_rules_tier_key_format
+                CHECK (tier_key ~ '^[a-z0-9_]+$'),
+            CONSTRAINT pricing_overage_rules_currency_format
+                CHECK (currency ~ '^[A-Z]{3}$'),
+            CONSTRAINT pricing_overage_rules_threshold_nonneg
+                CHECK (threshold_customers >= 0),
+            CONSTRAINT pricing_overage_rules_pack_size_positive
+                CHECK (pack_size > 0),
+            CONSTRAINT pricing_overage_rules_pack_price_nonneg
+                CHECK (pack_price >= 0)
+        )
+        """
+    )
+    _seed_pricing_tr()
+
+
+def _seed_pricing_tr() -> None:
+    """TR / TRY başlangıç fiyatlandırması — idempotent."""
+    execute(
+        """
+        INSERT INTO public.pricing_regions
+            (country_code, currency, name, is_active, sort_order)
+        VALUES ('TR', 'TRY', 'Türkiye', TRUE, 0)
+        ON CONFLICT (country_code) DO NOTHING
+        """
+    )
+    tiers = (
+        (
+            "starter",
+            "Başlangıç",
+            1,
+            100,
+            "1000",
+            "10",
+            1,
+            "1000",
+            1,
+        ),
+        (
+            "professional",
+            "Profesyonel",
+            101,
+            500,
+            "4000",
+            "8",
+            3,
+            "1000",
+            2,
+        ),
+        (
+            "growth",
+            "Büyüme",
+            501,
+            1000,
+            "6400",
+            "6.40",
+            5,
+            "1000",
+            3,
+        ),
+        (
+            "advanced",
+            "İleri Düzey",
+            1001,
+            2000,
+            "10240",
+            "5.12",
+            7,
+            "1000",
+            4,
+        ),
+        (
+            "enterprise",
+            "Kurumsal",
+            2001,
+            None,
+            "10240",
+            "3",
+            10,
+            "1000",
+            5,
+        ),
+    )
+    for (
+        tier_key,
+        display_name,
+        min_c,
+        max_c,
+        base,
+        per_cust,
+        included_users,
+        per_extra_user,
+        sort_order,
+    ) in tiers:
+        execute(
+            """
+            INSERT INTO public.pricing_tiers (
+                country_code, currency, tier_key, display_name,
+                min_customers, max_customers,
+                base_monthly, price_per_customer,
+                included_users, price_per_extra_user,
+                sort_order, is_active
+            )
+            VALUES (
+                'TR', 'TRY', %s, %s,
+                %s, %s,
+                %s, %s,
+                %s, %s,
+                %s, TRUE
+            )
+            ON CONFLICT (country_code, tier_key) DO NOTHING
+            """,
+            (
+                tier_key,
+                display_name,
+                min_c,
+                max_c,
+                base,
+                per_cust,
+                included_users,
+                per_extra_user,
+                sort_order,
+            ),
+        )
+    execute(
+        """
+        INSERT INTO public.pricing_overage_rules (
+            country_code, tier_key,
+            threshold_customers, pack_size, pack_price,
+            currency, is_active
+        )
+        VALUES ('TR', 'enterprise', 2000, 100, 300, 'TRY', TRUE)
+        ON CONFLICT (country_code, tier_key) DO NOTHING
         """
     )
 
