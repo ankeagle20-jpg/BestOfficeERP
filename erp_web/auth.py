@@ -5,8 +5,14 @@ Flask-Login + Supabase PostgreSQL
 from flask_login import LoginManager, UserMixin, login_user, current_user
 from werkzeug.security import check_password_hash, generate_password_hash
 from functools import wraps
-from flask import abort, flash, jsonify, redirect, request, url_for
+from flask import abort, flash, g, jsonify, redirect, request, url_for
 from db import fetch_one, fetch_all, execute, execute_returning
+from login_lockout import (
+    LoginLockedOut,
+    check_login_lockout,
+    record_login_failure,
+    record_login_success,
+)
 
 login_manager = LoginManager()
 login_manager.login_view = 'auth.login'
@@ -146,8 +152,15 @@ def giris_yap(username, password):
     
     Returns:
         User: Giriş başarılıysa User nesnesi, değilse None
+    
+    Raises:
+        LoginLockedOut: Çok fazla başarısız deneme sonrası geçici kilit
     """
+    tenant_schema = getattr(g, "tenant_schema", None)
+    username_key = str(username or "").strip().lower()
     try:
+        check_login_lockout(tenant_schema, username_key)
+
         row = fetch_one(
             "SELECT id, username, password_hash, full_name, role, is_active FROM users WHERE username=%s",
             (username,)
@@ -155,17 +168,21 @@ def giris_yap(username, password):
         
         # Kullanıcı bulunamadı
         if not row:
+            record_login_failure(tenant_schema, username_key)
             return None
         
         # Kullanıcı aktif değil
         if not row["is_active"]:
+            record_login_failure(tenant_schema, username_key)
             return None
         
         # Şifre yanlış
         if not check_password_hash(row["password_hash"], password):
+            record_login_failure(tenant_schema, username_key)
             return None
         
         # Giriş başarılı
+        record_login_success(tenant_schema, username_key)
         user = User(
             id=row["id"],
             username=row["username"],
@@ -182,6 +199,8 @@ def giris_yap(username, password):
             pass
         return user
         
+    except LoginLockedOut:
+        raise
     except Exception as e:
         print(f"❌ giris_yap hatası: {e}")
         return None

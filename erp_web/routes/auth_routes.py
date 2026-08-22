@@ -2,6 +2,7 @@ import os
 from flask import Blueprint, render_template, request, redirect, url_for, flash
 from flask_login import login_required, logout_user, current_user
 from auth import giris_yap, sifre_degistir
+from login_lockout import LoginLockedOut
 from db import fetch_one, execute
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -55,7 +56,11 @@ def login():
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
         
-        user = giris_yap(username, password)
+        try:
+            user = giris_yap(username, password)
+        except LoginLockedOut as exc:
+            flash(exc.message, "danger")
+            return render_template("login.html")
         
         if user:
             flash(f"Hoş geldiniz, {user.full_name}!", "success")

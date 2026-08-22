@@ -7,7 +7,7 @@ import time
 
 from flask import request
 
-_SIGNUP_POST_LIMIT = 3
+_SIGNUP_POST_LIMIT = 10
 _SIGNUP_POST_WINDOW_SEC = 3600.0
 _SLUG_AVAILABLE_LIMIT = 30
 _SLUG_AVAILABLE_WINDOW_SEC = 60.0
@@ -44,7 +44,7 @@ def _check_limit(key: str, limit: int, window_sec: float) -> tuple[bool, int]:
 
 
 def check_signup_post_rate(ip: str | None = None) -> tuple[bool, int]:
-    """POST /api/signup: saatte 3 istek / IP."""
+    """POST /api/signup: saatte 10 gerçek provizyon denemesi / IP."""
     addr = ip or client_ip()
     return _check_limit(f"signup:post:{addr}", _SIGNUP_POST_LIMIT, _SIGNUP_POST_WINDOW_SEC)
 

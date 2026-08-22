@@ -227,14 +227,6 @@ def api_signup_status():
 @bp.route("/api/signup", methods=["POST"])
 @platform_public_only
 def api_signup():
-    allowed, retry_after = check_signup_post_rate()
-    if not allowed:
-        return (
-            jsonify({"ok": False, "mesaj": "Çok fazla deneme, lütfen bekleyin."}),
-            429,
-            {"Retry-After": str(retry_after)},
-        )
-
     data = request.get_json(silent=True) or {}
     slug = normalize_slug_input(data.get("slug"))
     website = data.get("website")
@@ -268,6 +260,14 @@ def api_signup():
     conflict = _slug_conflict_response(slug)
     if conflict:
         return conflict
+
+    allowed, retry_after = check_signup_post_rate()
+    if not allowed:
+        return (
+            jsonify({"ok": False, "mesaj": "Çok fazla deneme, lütfen bekleyin."}),
+            429,
+            {"Retry-After": str(retry_after)},
+        )
 
     try:
         reserve_tenant_slug(
