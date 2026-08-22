@@ -2447,7 +2447,8 @@ CREATE TABLE public.users (
     created_at timestamp with time zone DEFAULT now(),
     last_login timestamp with time zone,
     aktif boolean DEFAULT true,
-    son_giris timestamp with time zone
+    son_giris timestamp with time zone,
+    security_stamp text NOT NULL
 );
 
 

@@ -14,6 +14,8 @@ from psycopg2 import sql as psql
 from psycopg2.errors import UniqueViolation
 from werkzeug.security import generate_password_hash
 
+from auth import generate_security_stamp
+
 from db import (
     _TENANT_SCHEMA_RE,
     db,
@@ -391,10 +393,10 @@ def _insert_admin(schema: str, username: str, password: str, full_name: str) -> 
         cur.execute(
             psql.SQL(
                 "INSERT INTO {}.users "
-                "(username, password_hash, full_name, role, is_active) "
-                "VALUES (%s, %s, %s, %s, %s) RETURNING id"
+                "(username, password_hash, full_name, role, is_active, security_stamp) "
+                "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id"
             ).format(psql.Identifier(schema)),
-            (username, hashed, full_name, "admin", True),
+            (username, hashed, full_name, "admin", True, generate_security_stamp()),
         )
         row = cur.fetchone()
     if not row:

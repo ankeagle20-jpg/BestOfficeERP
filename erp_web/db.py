@@ -584,6 +584,7 @@ def init_schema():
     ensure_pricing_tables()
     ensure_tenant_user_lookup_table()
     ensure_password_reset_tokens_table()
+    ensure_users_security_stamp_column()
     print("✅ Supabase şema oluşturuldu.")
 
 
@@ -2454,6 +2455,22 @@ def ensure_password_reset_tokens_table():
         )
     except Exception as e:
         print(f"password_reset_tokens indexes: {e}")
+
+
+def ensure_users_security_stamp_column():
+    """Oturum geçersiz kılma — users.security_stamp (R2.5-S1, public şema)."""
+    execute("ALTER TABLE public.users ADD COLUMN IF NOT EXISTS security_stamp TEXT")
+    execute(
+        """
+        UPDATE public.users
+        SET security_stamp = encode(gen_random_bytes(24), 'base64')
+        WHERE security_stamp IS NULL OR btrim(security_stamp) = ''
+        """
+    )
+    try:
+        execute("ALTER TABLE public.users ALTER COLUMN security_stamp SET NOT NULL")
+    except Exception as e:
+        print(f"users.security_stamp NOT NULL: {e}")
 
 
 def ensure_pricing_tables():

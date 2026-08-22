@@ -1,7 +1,7 @@
 import os
 from flask import Blueprint, render_template, request, redirect, url_for, flash
 from flask_login import login_required, logout_user, current_user
-from auth import giris_yap, sifre_degistir
+from auth import giris_yap, sifre_degistir, generate_security_stamp
 from login_lockout import LoginLockedOut
 from db import fetch_one, execute
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -36,8 +36,9 @@ def setup_admin():
             )
         hashed = generate_password_hash("admin123")
         execute(
-            "INSERT INTO users (username, password_hash, full_name, role, is_active) VALUES (%s, %s, %s, %s, %s)",
-            ("admin", hashed, "Sistem Yöneticisi", "admin", True),
+            "INSERT INTO users (username, password_hash, full_name, role, is_active, security_stamp) "
+            "VALUES (%s, %s, %s, %s, %s, %s)",
+            ("admin", hashed, "Sistem Yöneticisi", "admin", True, generate_security_stamp()),
         )
         return (
             "<h1>Admin oluşturuldu</h1><p><b>Giriş:</b> admin / admin123</p>"

@@ -2,6 +2,7 @@
 Kimlik doğrulama ve yetkilendirme modülü
 Flask-Login + Supabase PostgreSQL
 """
+import secrets
 from flask_login import LoginManager, UserMixin, login_user, current_user
 from werkzeug.security import check_password_hash, generate_password_hash
 from functools import wraps
@@ -18,6 +19,12 @@ login_manager = LoginManager()
 login_manager.login_view = 'auth.login'
 login_manager.login_message = "Bu sayfaya erişmek için giriş yapmalısınız."
 login_manager.login_message_category = "warning"
+
+
+def generate_security_stamp() -> str:
+    """Yeni kullanıcı / oturum geçersiz kılma için rastgele stamp."""
+    return secrets.token_urlsafe(32)
+
 
 # ── Roller ───────────────────────────────────────────────────────────────────
 ROLLER = {
@@ -231,11 +238,11 @@ def kullanici_olustur(username, password, full_name, role="personel"):
         # Veritabanına ekle (db() — g.tenant_schema yoksa production no-op)
         row = execute_returning(
             """
-            INSERT INTO users (username, password_hash, full_name, role, is_active)
-            VALUES (%s, %s, %s, %s, %s)
+            INSERT INTO users (username, password_hash, full_name, role, is_active, security_stamp)
+            VALUES (%s, %s, %s, %s, %s, %s)
             RETURNING id
             """,
-            (username, hashed, full_name, role, True),
+            (username, hashed, full_name, role, True, generate_security_stamp()),
         )
         user_id = row["id"] if row else None
         return {"ok": True, "mesaj": f"✅ Kullanıcı oluşturuldu (ID: {user_id})"}

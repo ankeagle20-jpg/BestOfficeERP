@@ -556,6 +556,7 @@ def ilk_kurulum():
     try:
         from db import init_schema, fetch_one, execute
         from werkzeug.security import generate_password_hash
+        from auth import generate_security_stamp
 
         # Şema oluştur
         init_schema()
@@ -565,8 +566,9 @@ def ilk_kurulum():
         if not admin:
             hashed = generate_password_hash("admin123")
             execute(
-                "INSERT INTO users (username, password_hash, full_name, role, is_active) VALUES (%s, %s, %s, %s, %s)",
-                ("admin", hashed, "Sistem Yöneticisi", "admin", True),
+                "INSERT INTO users (username, password_hash, full_name, role, is_active, security_stamp) "
+                "VALUES (%s, %s, %s, %s, %s, %s)",
+                ("admin", hashed, "Sistem Yöneticisi", "admin", True, generate_security_stamp()),
             )
             print("Admin user created: admin / admin123")
         else:
