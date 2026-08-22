@@ -125,14 +125,35 @@ uca production testi
 - www.payafin.com → payafin.com YÖNLENDİRMESİ doğrulandı, güvenlik
   sorunu YOK
 
-### Kalan iş (SADECE ticari/iş katmanı):
-1. Fiyatlandırma katmanlarını NETLEŞTİRME (müşteri/kayıt sayısına göre)
-2. Stripe entegrasyonu (Checkout/Payment Intent)
-3. Kayıt formu (fiyatlandırma sayfası + kayıt akışı)
-4. Stripe webhook - ÖDEME başarılı OLDUĞUNDA otomatik provision_new_tenant()
-   ÇAĞRISI
-5. tenant_provisioning.py'NİN production/Render ORTAMINA uyarlanması
-   (psql yerine psycopg2 - hâlâ Windows'a özel)
+## ✅ Payafin Fiyatlandırma Motoru (P0-P3, TAMAMEN tamamlandı)
+
+Checkpoint 6'nın TİCARİ katmanının İLK parçası - HİBRİT (hacim BAZLI
+kademe + kullanıcı BAZLI ek ücret), ÜLKE bazlı DİNAMİK fiyatlandırma
+sistemi.
+
+- P0 (commit `0a15b72`): `public.pricing_regions` / `pricing_tiers` /
+  `pricing_overage_rules` TABLOLARI + TÜRKİYE İÇİN 5 kademelik seed
+  VERİSİ (Başlangıç / Profesyonel / Büyüme / İleri Düzey / Kurumsal,
+  2000+ İÇİN otomatik PAKET aşım kuralı)
+- P1 (commit `47c872a`): `pricing_engine.py` → `calculate_tenant_bill()`
+  — Decimal HASSASİYETLİ, matematiksel DOĞRULANMIŞ hesaplama motoru
+- P2 (commit `4a94df2`): `/admin/pricing` YÖNETİM paneli — fiyatları kod
+  DEĞİŞTİRMEDEN, CANLI olarak düzenleyebilme, PLATFORM-only host
+  KORUMASI (kiracı subdomain'İNDEN erişilemez)
+- P3 (commit `e703219`): `GET /api/pricing/public` — herkese AÇIK, kısa
+  cache'Lİ, salt-okuma API — gelecekteki fiyatlandırma SAYFASI / kayıt
+  formu BUNU kullanacak
+
+### Kalan iş (Checkpoint 6'nın geri kalanı — ticari/iş katmanı):
+1. payafin.com'da GERÇEK bir fiyatlandırma SAYFASI (UI) —
+   `/api/pricing/public`'İ TÜKETEN
+2. Kayıt formu (şirket bilgisi + ülke SEÇİMİ + plan SEÇİMİ) — ödeme
+   HAZIR olana kadar TRIAL hesap AÇACAK (dünkü kullanıcı KARARI)
+3. iyzico başvurusu / entegrasyonu (Stripe TÜRKİYE'DE doğrudan
+   DESTEKLENMİYOR — dünkü ARAŞTIRMA bulgusu)
+4. Ödeme SONRASI otomatik `provision_new_tenant()` ÇAĞIRACAK webhook
+5. `tenant_provisioning.py`'NİN production / Render ortamına UYARLANMASI
+   (psql yerine psycopg2 — hâlâ Windows'a özel)
 6. GERÇEK bir ÖDEME yapan MÜŞTERİYLE tam uçtan uca TEST (kayıt →
    ödeme → otomatik hesap AÇMA → giriş)
 
