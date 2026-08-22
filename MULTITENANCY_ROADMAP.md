@@ -141,21 +141,47 @@ sistemi.
   DEĞİŞTİRMEDEN, CANLI olarak düzenleyebilme, PLATFORM-only host
   KORUMASI (kiracı subdomain'İNDEN erişilemez)
 - P3 (commit `e703219`): `GET /api/pricing/public` — herkese AÇIK, kısa
-  cache'Lİ, salt-okuma API — gelecekteki fiyatlandırma SAYFASI / kayıt
-  formu BUNU kullanacak
+  cache'Lİ, salt-okuma API — fiyatlandırma SAYFASI ve kayıt formu BUNU
+  kullanıyor
 
-### Kalan iş (Checkpoint 6'nın geri kalanı — ticari/iş katmanı):
-1. payafin.com'da GERÇEK bir fiyatlandırma SAYFASI (UI) —
-   `/api/pricing/public`'İ TÜKETEN
-2. Kayıt formu (şirket bilgisi + ülke SEÇİMİ + plan SEÇİMİ) — ödeme
-   HAZIR olana kadar TRIAL hesap AÇACAK (dünkü kullanıcı KARARI)
-3. iyzico başvurusu / entegrasyonu (Stripe TÜRKİYE'DE doğrudan
-   DESTEKLENMİYOR — dünkü ARAŞTIRMA bulgusu)
-4. Ödeme SONRASI otomatik `provision_new_tenant()` ÇAĞIRACAK webhook
-5. `tenant_provisioning.py`'NİN production / Render ortamına UYARLANMASI
-   (psql yerine psycopg2 — hâlâ Windows'a özel)
+## ✅ Payafin Kayıt Formu (B0-B3, TAMAMEN tamamlandı - UÇTAN UCA
+ÇALIŞIYOR)
+
+Payafin ARTIK GERÇEK bir SaaS ürünü - HERKES internetten https://payafin.com/signup
+adresine GİDİP, kendi izole ERP hesabını OLUŞTURABİLİYOR.
+
+- B0 (commit `234c699`): public.tenants metadata GENİŞLETMESİ
+  (company_name, country_code) + birleşik rezerve SLUG listesi
+- B1 (commit `0aa41c5`): Backend signup API'leri - GET /api/signup/slug-available,
+  POST /api/signup (ASENKRON provisioning, Render timeout RİSKİNE
+  karşı), GET /api/signup/status (poll) - IP bazlı hız SINIRLAMASI,
+  honeypot, e-posta/şifre doğrulaması
+- B2a (commit `07e656f`): Provizyon SERTLEŞTİRME - güvenli hata
+  mesajları (İÇ detay ASLA sızmaz), enumeration KORUMASI, retry-FROM-failed
+  BİLİNÇLİ olarak DESTEKLENMİYOR (kötüye kullanım YÜZEYİ), süre
+  loglama
+- B3 (commit `cb29aa3`): Frontend /signup SAYFASI - TAM uçtan uca akış:
+  form → CANLI slug KONTROLÜ → submit → "hazırlanıyor" ekranı → POLLING
+  → BAŞARI (otomatik yönlendirme) VEYA hata mesajı
+
+UÇTAN UCA DOĞRULANDI (Selenium, GERÇEK tarayıcı): form DOLDURULDU,
+kayıt OLUŞTU, YENİ kiracının subdomain'İNDE (https://<slug>.payafin.com/login)
+GİRİŞ YAPILDI - TAMAMEN otomatik, hiçbir manuel MÜDAHALE olmadan.
+
+### Kalan iş (Checkpoint 6'nın SON parçası — ticari/iş katmanı):
+1. OAuth/sosyal giriş (Google, Facebook, Instagram, Apple) — kullanıcı
+   BİLİNÇLİ olarak SONRAYA BIRAKTI (her platform AYRI geliştirici
+   HESABI/onay süreci GEREKTİRİYOR)
+2. iyzico (VEYA benzeri Türk ödeme SAĞLAYICISI) başvurusu/entegrasyonu
+   — kullanıcı BAŞVURUYU yaptı, CEVAP bekleniyor (Stripe TÜRKİYE'DE
+   doğrudan DESTEKLENMİYOR)
+3. Ödeme SONRASI, trial'DAN ücretli plana GEÇİŞ akışı
+4. Fiyatlandırma landing SAYFASI (payafin.com/fiyatlandirma — dünkü
+   `/api/pricing/public`'İ TÜKETEN, GÖRSEL bir sayfa)
+5. E-posta doğrulaması (ŞU AN yok — kayıt OLAN kişinin e-postası
+   DOĞRULANMIYOR)
 6. GERÇEK bir ÖDEME yapan MÜŞTERİYLE tam uçtan uca TEST (kayıt →
-   ödeme → otomatik hesap AÇMA → giriş)
+   ödeme → ücretli plana geçiş → giriş)
 
 ## Önemli Teknik Notlar (Yeni Bir Sohbette Hatırlanması Gerekenler)
 
