@@ -402,6 +402,32 @@ def _insert_admin(schema: str, username: str, password: str, full_name: str) -> 
     return int(row["id"] if isinstance(row, dict) else row[0])
 
 
+def _register_tenant_user_lookup(slug: str, username: str) -> None:
+    """Signup/login yönlendirme indeksine e-posta kaydı (yalnız @ içeren admin)."""
+    from db import ensure_tenant_user_lookup_table
+
+    email = str(username or "").strip().lower()
+    if "@" not in email or not _ADMIN_EMAIL_RE.fullmatch(email):
+        return
+    ensure_tenant_user_lookup_table()
+    try:
+        execute(
+            """
+            INSERT INTO public.tenant_user_lookup (email, tenant_slug)
+            VALUES (%s, %s)
+            """,
+            (email, slug),
+        )
+    except UniqueViolation:
+        logger.warning(
+            "tenant_user_lookup email already registered email=%s slug=%s",
+            email,
+            slug,
+        )
+    except Exception:
+        logger.exception("tenant_user_lookup insert failed slug=%s", slug)
+
+
 def provision_new_tenant(
     slug: str,
     *,
@@ -483,6 +509,7 @@ def provision_new_tenant(
                 """,
                 (slug, schema, plan_s),
             )
+        _register_tenant_user_lookup(slug, user)
     except Exception:
         # Kısmi şema bırakılabilir; tekrar çağrı mevcut şema yüzünden durur (fail-closed).
         raise

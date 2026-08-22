@@ -582,6 +582,7 @@ def init_schema():
     ensure_user_ui_preferences_table()
     ensure_platform_tenants_table()
     ensure_pricing_tables()
+    ensure_tenant_user_lookup_table()
     print("✅ Supabase şema oluşturuldu.")
 
 
@@ -2393,6 +2394,32 @@ def ensure_platform_tenants_signup_columns():
         )
     except Exception as e:
         print(f"public.tenants status constraint: {e}")
+
+
+def ensure_tenant_user_lookup_table():
+    """E-posta → kiracı slug yönlendirme indeksi (yalnız public; şifre/PII yok)."""
+    ensure_platform_tenants_table()
+    execute(
+        """
+        CREATE TABLE IF NOT EXISTS public.tenant_user_lookup (
+            id          BIGSERIAL PRIMARY KEY,
+            email       TEXT NOT NULL,
+            tenant_slug TEXT NOT NULL,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT tenant_user_lookup_email_key UNIQUE (email),
+            CONSTRAINT tenant_user_lookup_slug_fkey
+                FOREIGN KEY (tenant_slug) REFERENCES public.tenants (slug)
+                ON DELETE CASCADE
+        )
+        """
+    )
+    try:
+        execute(
+            "CREATE INDEX IF NOT EXISTS tenant_user_lookup_slug_idx "
+            "ON public.tenant_user_lookup (tenant_slug)"
+        )
+    except Exception as e:
+        print(f"tenant_user_lookup_slug_idx: {e}")
 
 
 def ensure_pricing_tables():
