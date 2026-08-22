@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from functools import wraps
 
 from flask import Blueprint, current_app, jsonify, request
 from db import fetch_one
+from signup_provision_errors import map_provision_error
 from signup_rate_limit import check_signup_post_rate, check_slug_available_rate
 from signup_validation import (
     honeypot_triggered,
@@ -35,6 +37,9 @@ logger = logging.getLogger(__name__)
 
 bp = Blueprint("signup", __name__)
 
+MSG_SLUG_TAKEN = "Bu adres zaten kullanılıyor."
+MSG_SLUG_FAILED = "Bu adres kullanılamıyor; farklı bir subdomain deneyin."
+
 
 def _json403(msg: str):
     return jsonify({"ok": False, "mesaj": msg}), 403
@@ -57,23 +62,42 @@ def _login_url(slug: str) -> str:
     return f"https://{slug}.{apex}/login"
 
 
-def _slug_taken(slug: str) -> bool:
+def _tenant_catalog_row(slug: str) -> dict | None:
     schema = schema_name_for_slug(slug)
     if not schema:
-        return True
-    row = fetch_one(
+        return None
+    return fetch_one(
         """
-        SELECT 1 AS ok
+        SELECT slug, schema_name, status, error_message
         FROM public.tenants
         WHERE slug = %s OR schema_name = %s
         LIMIT 1
         """,
         (slug, schema),
     )
-    if row:
+
+
+def _slug_is_taken(slug: str) -> bool:
+    if _tenant_catalog_row(slug):
+        return True
+    schema = schema_name_for_slug(slug)
+    if not schema:
         return True
     ns = fetch_one("SELECT 1 AS ok FROM pg_namespace WHERE nspname = %s", (schema,))
     return bool(ns)
+
+
+def _slug_conflict_response(slug: str):
+    """Slug alınmışsa (failed/active/provisioning/orphan şema) 409 yanıtı."""
+    row = _tenant_catalog_row(slug)
+    if row:
+        if row.get("status") == "failed":
+            return jsonify({"ok": False, "mesaj": MSG_SLUG_FAILED}), 409
+        return jsonify({"ok": False, "mesaj": MSG_SLUG_TAKEN}), 409
+    schema = schema_name_for_slug(slug)
+    if schema and fetch_one("SELECT 1 AS ok FROM pg_namespace WHERE nspname = %s", (schema,)):
+        return jsonify({"ok": False, "mesaj": MSG_SLUG_TAKEN}), 409
+    return None
 
 
 def _fake_success_payload(slug: str) -> dict:
@@ -94,6 +118,7 @@ def _provision_worker(
     admin_full_name: str,
     plan: str,
 ) -> None:
+    t0 = time.monotonic()
     with app.app_context():
         try:
             provision_new_tenant(
@@ -104,9 +129,20 @@ def _provision_worker(
                 admin_full_name=admin_full_name,
                 allow_existing_provisioning_row=True,
             )
-        except Exception:
-            logger.exception("async provision failed slug=%s", slug)
-            mark_tenant_provision_failed(slug)
+            logger.info(
+                "signup_provision ok slug=%s duration_sec=%.1f",
+                slug,
+                time.monotonic() - t0,
+            )
+        except Exception as exc:
+            duration = time.monotonic() - t0
+            user_msg = map_provision_error(exc)
+            logger.exception(
+                "signup_provision failed slug=%s duration_sec=%.1f",
+                slug,
+                duration,
+            )
+            mark_tenant_provision_failed(slug, reason=str(exc), error_message=user_msg)
 
 
 @bp.route("/api/signup/slug-available", methods=["GET"])
@@ -132,7 +168,7 @@ def api_signup_slug_available():
             }
         )
 
-    taken = _slug_taken(slug)
+    taken = _slug_is_taken(slug)
     return jsonify(
         {
             "ok": True,
@@ -151,12 +187,16 @@ def api_signup_status():
         return jsonify({"ok": False, "mesaj": "Geçersiz slug."}), 400
 
     row = fetch_one(
-        "SELECT slug, schema_name, status, plan FROM public.tenants WHERE slug=%s",
+        """
+        SELECT slug, schema_name, status, plan, error_message
+        FROM public.tenants WHERE slug=%s
+        """,
         (slug,),
     )
     if not row:
         return jsonify({"ok": False, "mesaj": "Kayıt bulunamadı."}), 404
 
+    err = row.get("error_message") if row["status"] == "failed" else None
     return jsonify(
         {
             "ok": True,
@@ -164,6 +204,7 @@ def api_signup_status():
             "schema_name": row["schema_name"],
             "status": row["status"],
             "plan": row["plan"],
+            "error_message": err,
             "login_url": _login_url(slug) if row["status"] == "active" else None,
         }
     )
@@ -210,8 +251,9 @@ def api_signup():
     if errors:
         return jsonify({"ok": False, "mesaj": "Doğrulama hatası.", "errors": errors}), 400
 
-    if _slug_taken(slug):
-        return jsonify({"ok": False, "mesaj": "Bu adres zaten kullanılıyor."}), 409
+    conflict = _slug_conflict_response(slug)
+    if conflict:
+        return conflict
 
     try:
         reserve_tenant_slug(
@@ -221,7 +263,10 @@ def api_signup():
             plan="trial",
         )
     except TenantSlugConflictError:
-        return jsonify({"ok": False, "mesaj": "Bu adres zaten kullanılıyor."}), 409
+        retry = _slug_conflict_response(slug)
+        if retry:
+            return retry
+        return jsonify({"ok": False, "mesaj": MSG_SLUG_TAKEN}), 409
     except (TenantSlugReserveError, TenantProvisionError) as e:
         logger.warning("reserve_tenant_slug failed slug=%s: %s", slug, e)
         return jsonify({"ok": False, "mesaj": "Kayıt tamamlanamadı, bilgileri kontrol edin."}), 400

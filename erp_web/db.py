@@ -2377,6 +2377,9 @@ def ensure_platform_tenants_signup_columns():
         execute(
             "ALTER TABLE public.tenants ADD COLUMN IF NOT EXISTS country_code TEXT"
         )
+        execute(
+            "ALTER TABLE public.tenants ADD COLUMN IF NOT EXISTS error_message TEXT"
+        )
     except Exception as e:
         print(f"public.tenants signup columns: {e}")
     try:

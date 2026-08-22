@@ -21,6 +21,7 @@ from db import (
     execute,
     fetch_one,
 )
+from signup_provision_errors import MSG_GENERIC, sanitize_public_error_message
 from tenant_reserved_slugs import RESERVED_TENANT_SLUGS
 
 logger = logging.getLogger(__name__)
@@ -124,22 +125,30 @@ def reserve_tenant_slug(
     return {"ok": True, "slug": slug, "schema_name": schema, "status": "provisioning", "tenant": row}
 
 
-def mark_tenant_provision_failed(slug: str, *, reason: str | None = None) -> None:
-    """Arka plan provizyon hatasında status='failed' (poll endpoint için)."""
+def mark_tenant_provision_failed(
+    slug: str,
+    *,
+    reason: str | None = None,
+    error_message: str | None = None,
+) -> None:
+    """Arka plan provizyon hatasında status='failed' + kullanıcıya güvenli özet."""
     slug_s = str(slug or "").strip().lower()
     if not slug_s:
         return
+    public_msg = sanitize_public_error_message(error_message or reason) or MSG_GENERIC
     try:
         execute(
             """
             UPDATE public.tenants
-            SET status = 'failed'
+            SET status = 'failed', error_message = %s
             WHERE slug = %s AND status = 'provisioning'
             """,
-            (slug_s,),
+            (public_msg, slug_s),
         )
     except Exception:
-        logger.exception("mark_tenant_provision_failed slug=%s reason=%s", slug_s, reason)
+        logger.exception(
+            "mark_tenant_provision_failed slug=%s reason=%s", slug_s, reason
+        )
 
 
 def _normalize_slug(slug: str) -> str:
@@ -461,7 +470,7 @@ def provision_new_tenant(
             execute(
                 """
                 UPDATE public.tenants
-                SET plan = %s, status = 'active'
+                SET plan = %s, status = 'active', error_message = NULL
                 WHERE slug = %s AND status = 'provisioning'
                 """,
                 (plan_s, slug),
