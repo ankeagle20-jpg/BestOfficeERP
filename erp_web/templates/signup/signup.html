@@ -1,0 +1,302 @@
+{% extends "signup/signup_layout.html" %}
+{% block title %}Payafin — Kayıt{% endblock %}
+{% block content %}
+<div id="panel-form" class="panel active">
+  <div class="signup-brand">
+    <div class="logo">PAYAFIN</div>
+    <h1>Payafin'e KAYDOLUN</h1>
+    <p>14 gün deneme — işletmeniz için bulut ERP</p>
+  </div>
+  <div id="global-error" class="global-error" style="display:none" role="alert"></div>
+  <form id="signup-form" novalidate>
+    <div class="field">
+      <label for="company_name">Şirket adı</label>
+      <input id="company_name" name="company_name" type="text" autocomplete="organization" required maxlength="200">
+      <div class="field-error" data-error-for="company_name"></div>
+    </div>
+    <div class="field">
+      <label for="slug">İşletme adresi (subdomain)</label>
+      <input id="slug" name="slug" type="text" autocomplete="off" required maxlength="32" placeholder="ornek">
+      <div class="slug-preview"><span id="slug-preview-text"><strong>ornek</strong>.{{ apex_domain }}</span></div>
+      <div id="slug-status" class="slug-status"></div>
+      <div class="field-error" data-error-for="slug"></div>
+    </div>
+    <div class="field">
+      <label for="admin_username">E-posta (giriş için)</label>
+      <input id="admin_username" name="admin_username" type="email" autocomplete="email" required>
+      <div class="field-error" data-error-for="admin_username"></div>
+    </div>
+    <div class="field">
+      <label for="admin_password">Şifre</label>
+      <input id="admin_password" name="admin_password" type="password" autocomplete="new-password" required>
+      <div class="field-error" data-error-for="admin_password"></div>
+    </div>
+    <div class="field">
+      <label for="password_confirm">Şifre (tekrar)</label>
+      <input id="password_confirm" name="password_confirm" type="password" autocomplete="new-password" required>
+      <div class="field-error" data-error-for="password_confirm"></div>
+    </div>
+    <div class="field">
+      <label for="admin_full_name">Ad soyad</label>
+      <input id="admin_full_name" name="admin_full_name" type="text" autocomplete="name" required maxlength="120">
+      <div class="field-error" data-error-for="admin_full_name"></div>
+    </div>
+    <div class="field">
+      <label for="country_code">Ülke</label>
+      <select id="country_code" name="country_code" disabled>
+        <option value="TR" selected>Türkiye</option>
+      </select>
+      <input type="hidden" name="country_code" value="TR">
+      <div id="pricing-box" class="pricing-box" style="display:none"></div>
+      <div class="field-error" data-error-for="country_code"></div>
+    </div>
+    <div class="hp-field" aria-hidden="true">
+      <label for="website">Website</label>
+      <input id="website" name="website" type="text" tabindex="-1" autocomplete="off">
+    </div>
+    <button type="submit" class="btn-primary" id="btn-submit">Kaydı tamamla</button>
+  </form>
+</div>
+
+<div id="panel-provisioning" class="panel center-text">
+  <div class="spinner" aria-hidden="true"></div>
+  <h2>Hesabınız hazırlanıyor…</h2>
+  <p style="color:var(--muted)">Kurulum 30 saniye sürebilir. Lütfen bu sayfayı kapatmayın.</p>
+</div>
+
+<div id="panel-success" class="panel center-text">
+  <div class="success-icon" aria-hidden="true">✓</div>
+  <h2>Hesabınız oluşturuldu!</h2>
+  <p>Adresiniz: <strong id="success-url"></strong></p>
+  <p id="redirect-countdown" style="color:var(--muted)"></p>
+  <a id="success-login-link" href="#" class="btn-primary" style="display:inline-block;text-decoration:none;margin-top:12px">Giriş sayfasına git</a>
+</div>
+
+<div id="panel-failed" class="panel center-text">
+  <div class="fail-icon" aria-hidden="true">!</div>
+  <h2>Kurulum tamamlanamadı</h2>
+  <p id="failed-message" style="color:var(--err)"></p>
+  <button type="button" class="btn-primary" id="btn-retry">Farklı bir adres ile tekrar dene</button>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const APEX = {{ apex_domain|tojson }};
+  const TR_MAP = {"ı":"i","İ":"i","ş":"s","Ş":"s","ğ":"g","Ğ":"g","ü":"u","Ü":"u","ö":"o","Ö":"o","ç":"c","Ç":"c"};
+  const FIELD_MSG = {
+    company_name: { invalid_company_name: "Şirket adı en az 2 karakter olmalı." },
+    slug: {
+      invalid_format: "Adres yalnızca küçük harf, rakam ve alt çizgi içerebilir (3-32 karakter).",
+      reserved: "Bu adres rezerve edilmiş.",
+      taken: "Bu adres zaten kullanılıyor."
+    },
+    admin_username: { invalid_email: "Geçerli bir e-posta adresi girin." },
+    admin_password: {
+      password_too_short: "Şifre en az 10 karakter olmalı.",
+      password_needs_upper: "Şifre en az bir büyük harf içermeli.",
+      password_needs_lower: "Şifre en az bir küçük harf içermeli.",
+      password_needs_digit: "Şifre en az bir rakam içermeli."
+    },
+    password_confirm: { password_mismatch: "Şifreler eşleşmiyor." },
+    admin_full_name: { invalid_full_name: "Ad soyad en az 2 karakter olmalı." },
+    country_code: { invalid_country: "Geçersiz ülke kodu." }
+  };
+
+  const form = document.getElementById("signup-form");
+  const slugInput = document.getElementById("slug");
+  const slugPreview = document.getElementById("slug-preview-text");
+  const slugStatus = document.getElementById("slug-status");
+  const globalError = document.getElementById("global-error");
+  const btnSubmit = document.getElementById("btn-submit");
+  const pricingBox = document.getElementById("pricing-box");
+
+  let slugTimer = null;
+  let slugOk = false;
+  let pollTimer = null;
+
+  function normalizeSlug(raw) {
+    let s = String(raw || "").trim().toLowerCase();
+    s = s.split("").map(ch => TR_MAP[ch] || ch).join("");
+    s = s.replace(/[^a-z0-9_]+/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "");
+    return s;
+  }
+
+  function showPanel(id) {
+    document.querySelectorAll(".panel").forEach(p => p.classList.remove("active"));
+    document.getElementById(id).classList.add("active");
+  }
+
+  function clearErrors() {
+    globalError.style.display = "none";
+    globalError.textContent = "";
+    document.querySelectorAll(".field-error").forEach(el => { el.textContent = ""; });
+  }
+
+  function setFieldErrors(errors) {
+    if (!errors) return;
+    Object.keys(errors).forEach(key => {
+      const el = document.querySelector('[data-error-for="' + key + '"]');
+      if (!el) return;
+      const code = errors[key];
+      const map = FIELD_MSG[key] || {};
+      el.textContent = map[code] || "Bu alanı kontrol edin.";
+    });
+  }
+
+  function updateSlugPreview(slug) {
+    const s = slug || "ornek";
+    slugPreview.innerHTML = "<strong>" + s + "</strong>." + APEX;
+  }
+
+  async function checkSlugAvailable(slug) {
+    if (!slug || slug.length < 3) {
+      slugStatus.textContent = "";
+      slugStatus.className = "slug-status";
+      slugOk = false;
+      return;
+    }
+    slugStatus.textContent = "Kontrol ediliyor…";
+    slugStatus.className = "slug-status";
+    try {
+      const res = await fetch("/api/signup/slug-available?slug=" + encodeURIComponent(slug));
+      const data = await res.json();
+      if (data.available) {
+        slugStatus.textContent = "✓ Bu adres müsait";
+        slugStatus.className = "slug-status ok";
+        slugOk = true;
+      } else {
+        const reason = data.reason || "taken";
+        const msg = (FIELD_MSG.slug[reason]) || "Bu adres kullanılamıyor.";
+        slugStatus.textContent = "✗ " + msg;
+        slugStatus.className = "slug-status bad";
+        slugOk = false;
+      }
+    } catch (e) {
+      slugStatus.textContent = "";
+      slugOk = false;
+    }
+  }
+
+  slugInput.addEventListener("input", function () {
+    const norm = normalizeSlug(slugInput.value);
+    if (slugInput.value !== norm) slugInput.value = norm;
+    updateSlugPreview(norm || "ornek");
+    clearTimeout(slugTimer);
+    slugTimer = setTimeout(() => checkSlugAvailable(norm), 400);
+  });
+
+  async function loadPricing() {
+    try {
+      const res = await fetch("/api/pricing/public?country=TR");
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!data.tiers || !data.tiers.length) return;
+      const min = Math.min.apply(null, data.tiers.map(t => Number(t.base_monthly || 0)));
+      const cur = data.currency === "TRY" ? "₺" : (data.currency || "");
+      const fmt = min.toLocaleString("tr-TR", { maximumFractionDigits: 0 });
+      pricingBox.textContent = "Başlangıç planı: " + cur + fmt + "/ay'dan başlıyor";
+      pricingBox.style.display = "block";
+    } catch (e) { /* opsiyonel */ }
+  }
+
+  function startPoll(slug, loginUrl) {
+    const poll = async () => {
+      try {
+        const res = await fetch("/api/signup/status?slug=" + encodeURIComponent(slug));
+        const data = await res.json();
+        if (!data.ok) return;
+        if (data.status === "active") {
+          clearInterval(pollTimer);
+          const url = data.login_url || loginUrl || ("https://" + slug + "." + APEX + "/login");
+          document.getElementById("success-url").textContent = slug + "." + APEX;
+          const link = document.getElementById("success-login-link");
+          link.href = url;
+          showPanel("panel-success");
+          let sec = 5;
+          const cd = document.getElementById("redirect-countdown");
+          cd.textContent = sec + " saniye içinde giriş sayfasına yönlendirileceksiniz…";
+          const iv = setInterval(() => {
+            sec -= 1;
+            if (sec <= 0) {
+              clearInterval(iv);
+              window.location.href = url;
+            } else {
+              cd.textContent = sec + " saniye içinde giriş sayfasına yönlendirileceksiniz…";
+            }
+          }, 1000);
+        } else if (data.status === "failed") {
+          clearInterval(pollTimer);
+          document.getElementById("failed-message").textContent =
+            data.error_message || "Kurulum sırasında teknik bir hata oluştu.";
+          showPanel("panel-failed");
+        }
+      } catch (e) { /* poll devam */ }
+    };
+    pollTimer = setInterval(poll, 2000);
+    poll();
+  }
+
+  form.addEventListener("submit", async function (ev) {
+    ev.preventDefault();
+    clearErrors();
+    btnSubmit.disabled = true;
+    const slug = normalizeSlug(slugInput.value);
+    const body = {
+      company_name: document.getElementById("company_name").value.trim(),
+      slug: slug,
+      admin_username: document.getElementById("admin_username").value.trim().toLowerCase(),
+      admin_password: document.getElementById("admin_password").value,
+      password_confirm: document.getElementById("password_confirm").value,
+      admin_full_name: document.getElementById("admin_full_name").value.trim(),
+      country_code: "TR",
+      website: document.getElementById("website").value
+    };
+    try {
+      const res = await fetch("/api/signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Accept": "application/json" },
+        body: JSON.stringify(body)
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 202 && data.ok) {
+        showPanel("panel-provisioning");
+        startPoll(data.slug || slug, data.login_url);
+        return;
+      }
+      if (res.status === 400 && data.errors) {
+        setFieldErrors(data.errors);
+        if (data.mesaj) {
+          globalError.textContent = data.mesaj;
+          globalError.style.display = "block";
+        }
+      } else if (res.status === 409) {
+        globalError.textContent = data.mesaj || "Bu adres zaten kullanılıyor.";
+        globalError.style.display = "block";
+      } else if (res.status === 429) {
+        globalError.textContent = data.mesaj || "Çok fazla deneme. Lütfen bekleyin.";
+        globalError.style.display = "block";
+      } else {
+        globalError.textContent = data.mesaj || "Kayıt tamamlanamadı.";
+        globalError.style.display = "block";
+      }
+    } catch (e) {
+      globalError.textContent = "Bağlantı hatası. Lütfen tekrar deneyin.";
+      globalError.style.display = "block";
+    } finally {
+      btnSubmit.disabled = false;
+    }
+  });
+
+  document.getElementById("btn-retry").addEventListener("click", function () {
+    clearInterval(pollTimer);
+    showPanel("panel-form");
+    slugInput.focus();
+  });
+
+  loadPricing();
+  updateSlugPreview("");
+})();
+</script>
+{% endblock %}

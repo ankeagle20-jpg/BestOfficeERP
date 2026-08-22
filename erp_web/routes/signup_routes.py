@@ -7,7 +7,7 @@ import threading
 import time
 from functools import wraps
 
-from flask import Blueprint, current_app, jsonify, request
+from flask import Blueprint, current_app, jsonify, render_template, request
 from db import fetch_one
 from signup_provision_errors import map_provision_error
 from signup_rate_limit import check_signup_post_rate, check_slug_available_rate
@@ -51,7 +51,13 @@ def platform_public_only(f):
     @wraps(f)
     def _guard(*args, **kwargs):
         if resolve_tenant_slug():
-            return _json403("Kayıt yalnızca ana (public) host üzerinden yapılabilir.")
+            path = request.path or ""
+            msg = "Kayıt yalnızca ana (public) host üzerinden yapılabilir."
+            if "/api/" in path or request.is_json or (
+                request.accept_mimetypes.best == "application/json"
+            ):
+                return _json403(msg)
+            return msg, 403
         return f(*args, **kwargs)
 
     return _guard
@@ -143,6 +149,14 @@ def _provision_worker(
                 duration,
             )
             mark_tenant_provision_failed(slug, reason=str(exc), error_message=user_msg)
+
+
+@bp.route("/signup", methods=["GET"])
+@platform_public_only
+def signup_page():
+    """Herkese açık kayıt formu (apex-only, kimlik doğrulama yok)."""
+    apex = (_tenant_apex_domains() or ("payafin.com",))[0]
+    return render_template("signup/signup.html", apex_domain=apex)
 
 
 @bp.route("/api/signup/slug-available", methods=["GET"])
