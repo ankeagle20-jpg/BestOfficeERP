@@ -38,6 +38,18 @@ def _public_hosts() -> tuple[str, ...]:
     return _csv_env("PUBLIC_HOSTS", _DEFAULT_PUBLIC_HOSTS)
 
 
+def _marketing_apex_hosts() -> tuple[str, ...]:
+    return _csv_env("MARKETING_APEX_HOSTS", "payafin.com,www.payafin.com")
+
+
+def is_payafin_marketing_host(host: str | None) -> bool:
+    """payafin.com / www.payafin.com marketing ana sayfa host'ları."""
+    raw = _normalize_host(host)
+    if not raw:
+        return False
+    return raw in _marketing_apex_hosts()
+
+
 def schema_name_for_slug(slug: str | None) -> str | None:
     if not slug:
         return None

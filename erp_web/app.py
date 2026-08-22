@@ -8,7 +8,6 @@ from flask import Flask, render_template, redirect, url_for, request, flash, jso
 from flask_login import login_required, current_user, logout_user
 from config import Config
 from auth import login_manager, giris_yap, kullanici_olustur, ROLLER
-from flask_login import current_user
 import os
 import atexit
 import sys
@@ -456,9 +455,14 @@ def healthz():
 
 # ── Ana sayfa ────────────────────────────────────────────────────────────────
 @app.route("/")
-@login_required
 def index():
-    """Sekreterya Dashboard — tek ekranda tüm operasyonlar."""
+    """Marketing apex → Payafin ana sayfa; diğer hostlar → mevcut ERP giriş akışı."""
+    from tenant_identity import is_payafin_marketing_host
+
+    if is_payafin_marketing_host(request.host or request.headers.get("Host")):
+        return render_template("marketing/home.html")
+    if not current_user.is_authenticated:
+        return login_manager.unauthorized()
     return redirect(url_for("dashboard.index"))
 
 # ── Hata sayfaları ───────────────────────────────────────────────────────────

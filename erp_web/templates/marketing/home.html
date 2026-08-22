@@ -1,0 +1,88 @@
+{% extends "marketing/marketing_layout.html" %}
+{% block title %}Payafin — Bulut ERP{% endblock %}
+{% block content %}
+<div class="marketing-brand">
+  <div class="logo">PAYAFIN</div>
+  <h1>Payafin ile işletmenizi yönetin</h1>
+  <p>14 gün deneme — bulut ERP</p>
+</div>
+
+<section aria-labelledby="login-heading">
+  <h2 id="login-heading" class="section-title">Giriş Yap</h2>
+  <form id="login-lookup-form" novalidate>
+    <div class="field">
+      <label for="login-email">E-posta adresiniz</label>
+      <input id="login-email" name="email" type="email" autocomplete="email" required placeholder="ornek@sirket.com">
+    </div>
+    <div id="login-error" class="field-error" role="alert"></div>
+    <button type="submit" class="btn-primary" id="btn-login-lookup">Devam et</button>
+  </form>
+</section>
+
+<div class="divider" aria-hidden="true">veya</div>
+
+<section aria-labelledby="signup-heading">
+  <h2 id="signup-heading" class="section-title">Yeni hesap</h2>
+  <a href="/signup" class="btn-secondary">Kayıt ol</a>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const form = document.getElementById("login-lookup-form");
+  const emailInput = document.getElementById("login-email");
+  const errEl = document.getElementById("login-error");
+  const btn = document.getElementById("btn-login-lookup");
+
+  function showError(html) {
+    errEl.innerHTML = html;
+    errEl.style.display = "block";
+  }
+
+  form.addEventListener("submit", async function (ev) {
+    ev.preventDefault();
+    errEl.style.display = "none";
+    errEl.textContent = "";
+    const email = emailInput.value.trim().toLowerCase();
+    if (!email) {
+      showError("Geçerli bir e-posta adresi girin.");
+      return;
+    }
+    btn.disabled = true;
+    try {
+      const res = await fetch("/api/login-lookup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Accept": "application/json" },
+        body: JSON.stringify({ email: email })
+      });
+      const data = await res.json().catch(function () { return {}; });
+      if (res.status === 429) {
+        showError(data.mesaj || "Çok fazla deneme, lütfen bekleyin.");
+        return;
+      }
+      if (res.status === 400) {
+        showError(data.mesaj || "Geçersiz e-posta.");
+        return;
+      }
+      if (res.status === 403) {
+        showError(data.mesaj || "Bu işlem yalnızca ana sitede kullanılabilir.");
+        return;
+      }
+      if (data.found && data.login_url) {
+        window.location.href = data.login_url;
+        return;
+      }
+      showError(
+        (data.mesaj || "Bu e-posta ile kayıtlı bir hesap bulunamadı.") +
+        ' <a href="/signup">Kayıt ol</a>'
+      );
+    } catch (e) {
+      showError("Bağlantı hatası. Lütfen tekrar deneyin.");
+    } finally {
+      btn.disabled = false;
+    }
+  });
+})();
+</script>
+{% endblock %}

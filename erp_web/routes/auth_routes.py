@@ -49,6 +49,11 @@ def setup_admin():
 
 @bp.route("/login", methods=["GET", "POST"])
 def login():
+    from tenant_identity import is_payafin_marketing_host
+
+    if is_payafin_marketing_host(request.host or request.headers.get("Host")):
+        return redirect(url_for("index"))
+
     if current_user.is_authenticated:
         return redirect(url_for("index"))
     
