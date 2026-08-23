@@ -157,10 +157,12 @@ def _security_stamps_match(db_stamp: str | None, token_stamp: str | None) -> boo
 
 @login_manager.user_loader
 def load_user(user_id):
-    """Oturum açık kullanıcıyı veritabanından yükler (permissive stamp modu)."""
+    """Oturum açık kullanıcıyı veritabanından yükler (strict stamp modu)."""
     try:
         user_id_str, expected_stamp = _parse_user_token(user_id)
         if not user_id_str or not str(user_id_str).isdigit():
+            return None
+        if expected_stamp is None:
             return None
         row = fetch_one(
             """
@@ -171,9 +173,8 @@ def load_user(user_id):
         )
         if not row or not row["is_active"]:
             return None
-        if expected_stamp is not None:
-            if not _security_stamps_match(row.get("security_stamp"), expected_stamp):
-                return None
+        if not _security_stamps_match(row.get("security_stamp"), expected_stamp):
+            return None
         return User(
             id=row["id"],
             username=row["username"],
