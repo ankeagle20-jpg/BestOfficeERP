@@ -68,6 +68,16 @@
       font-size: .88rem;
     }
     .alert-danger  { background: #3a1a1a; color: #ff8a80; border: 1px solid #6a2d2d; }
+    .forgot-link {
+      display: block;
+      text-align: right;
+      margin-top: -10px;
+      margin-bottom: 12px;
+      color: #5a8fa8;
+      font-size: .82rem;
+      text-decoration: none;
+    }
+    .forgot-link:hover { color: #4fc3f7; text-decoration: underline; }
     .footer-text {
       text-align: center;
       margin-top: 20px;
@@ -98,6 +108,8 @@
       <label>Şifre</label>
       <input type="password" name="password" autocomplete="current-password"
              placeholder="••••••••" required>
+
+      <a class="forgot-link" href="{{ url_for('forgot_password.forgot_password') }}">Şifremi unuttum</a>
 
       <button type="submit">🔐 Giriş Yap</button>
     </form>
