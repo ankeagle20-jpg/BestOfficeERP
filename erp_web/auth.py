@@ -411,7 +411,11 @@ def sifre_degistir(user_id, yeni_sifre):
     """
     try:
         hashed = generate_password_hash(yeni_sifre)
-        execute("UPDATE users SET password_hash = %s WHERE id = %s", (hashed, user_id))
+        new_stamp = generate_security_stamp()
+        execute(
+            "UPDATE users SET password_hash = %s, security_stamp = %s WHERE id = %s",
+            (hashed, new_stamp, user_id),
+        )
         return {"ok": True, "mesaj": "✅ Şifre değiştirildi"}
     except Exception as e:
         return {"ok": False, "mesaj": f"❌ Hata: {e}"}
@@ -459,6 +463,8 @@ def kullanici_guncelle(user_id, username=None, password=None, full_name=None, ro
         if password:
             updates.append("password_hash = %s")
             params.append(generate_password_hash(password))
+            updates.append("security_stamp = %s")
+            params.append(generate_security_stamp())
         
         if full_name:
             updates.append("full_name = %s")
