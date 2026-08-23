@@ -38,12 +38,13 @@ ROLLER = {
 class User:
     """Flask-Login ile uyumlu kullanıcı sınıfı."""
     
-    def __init__(self, id, username, full_name, role, aktif_mi=True):
+    def __init__(self, id, username, full_name, role, aktif_mi=True, security_stamp=None):
         self.id = id
         self.username = username
         self.full_name = full_name
         self.role = role
         self.aktif_mi = aktif_mi
+        self.security_stamp = security_stamp
         
         # Rol bilgisi
         self.rol_bilgi = {"label": ROLLER.get(role, role)}
@@ -113,7 +114,9 @@ class User:
         return self.aktif_mi
 
     def get_id(self):
-        """Flask-Login: Kullanıcı ID'si."""
+        """Flask-Login: composite id:stamp (remember çerezi dahil oturum doğrulama)."""
+        if self.security_stamp:
+            return f"{self.id}:{_stamp_token_form(self.security_stamp)}"
         return str(self.id)
 
     def is_authenticated(self):
@@ -128,22 +131,57 @@ class User:
         return f"<User {self.username} ({self.role})>"
 
 # ── Flask-Login user_loader ──────────────────────────────────────────────────
+def _parse_user_token(token: str) -> tuple[str | None, str | None]:
+    """Composite 'id:stamp' veya legacy sayısal id."""
+    raw = str(token or "").strip()
+    if not raw:
+        return None, None
+    if ":" in raw:
+        user_id, stamp = raw.split(":", 1)
+        return user_id, stamp
+    return raw, None
+
+
+def _stamp_token_form(stamp: str | None) -> str:
+    """Cookie/session için base64 → base64url (R2.5 backfill '+'/'/' kırılmasın)."""
+    return str(stamp or "").replace("+", "-").replace("/", "_")
+
+
+def _security_stamps_match(db_stamp: str | None, token_stamp: str | None) -> bool:
+    a = str(db_stamp or "")
+    b = str(token_stamp or "")
+    if a == b:
+        return True
+    return _stamp_token_form(a) == _stamp_token_form(b) or _stamp_token_form(a) == b
+
+
 @login_manager.user_loader
 def load_user(user_id):
-    """Oturum açık kullanıcıyı veritabanından yükler."""
+    """Oturum açık kullanıcıyı veritabanından yükler (permissive stamp modu)."""
     try:
+        user_id_str, expected_stamp = _parse_user_token(user_id)
+        if not user_id_str or not str(user_id_str).isdigit():
+            return None
         row = fetch_one(
-            "SELECT id, username, full_name, role, is_active FROM users WHERE id=%s",
-            (user_id,)
+            """
+            SELECT id, username, full_name, role, is_active, security_stamp
+            FROM users WHERE id=%s
+            """,
+            (int(user_id_str),),
         )
-        if row and row["is_active"]:
-            return User(
-                id=row["id"],
-                username=row["username"],
-                full_name=row["full_name"],
-                role=row["role"],
-                aktif_mi=row["is_active"]
-            )
+        if not row or not row["is_active"]:
+            return None
+        if expected_stamp is not None:
+            if not _security_stamps_match(row.get("security_stamp"), expected_stamp):
+                return None
+        return User(
+            id=row["id"],
+            username=row["username"],
+            full_name=row["full_name"],
+            role=row["role"],
+            aktif_mi=row["is_active"],
+            security_stamp=row.get("security_stamp"),
+        )
     except Exception as e:
         print(f"❌ load_user hatası: {e}")
     return None
@@ -169,8 +207,11 @@ def giris_yap(username, password):
         check_login_lockout(tenant_schema, username_key)
 
         row = fetch_one(
-            "SELECT id, username, password_hash, full_name, role, is_active FROM users WHERE username=%s",
-            (username,)
+            """
+            SELECT id, username, password_hash, full_name, role, is_active, security_stamp
+            FROM users WHERE username=%s
+            """,
+            (username,),
         )
         
         # Kullanıcı bulunamadı
@@ -195,7 +236,8 @@ def giris_yap(username, password):
             username=row["username"],
             full_name=row["full_name"],
             role=row["role"],
-            aktif_mi=row["is_active"]
+            aktif_mi=row["is_active"],
+            security_stamp=row.get("security_stamp"),
         )
         login_user(user, remember=True)
         try:
