@@ -179,26 +179,19 @@ UÇTAN UCA DOĞRULANDI (Selenium, GERÇEK tarayıcı): form DOLDURULDU,
 kayıt OLUŞTU, YENİ kiracının subdomain'İNDE (https://<slug>.payafin.com/login)
 GİRİŞ YAPILDI - TAMAMEN otomatik, hiçbir manuel MÜDAHALE olmadan.
 
-## ✅ Şifremi Unuttum + Oturum Güvenliği (R0-R3, ÇEKİRDEK tamamlandı)
+## ✅ Şifremi Unuttum + Oturum Güvenliği (R0-R2.6-S4, TAMAMEN
+tamamlandı, STRICT MOD AKTİF)
 
-- Gerçek Gmail SMTP altyapısı KURULDU VE doğrulandı (payafin.destek@gmail.com)
-- HER kiracı şemasında (VE gelecekteki TÜM yeni kiracılarda) password_reset_tokens
-  VE users.security_stamp altyapısı
-- ARTIK: kullanıcı şifresini SIFIRLADIĞINDA, TÜM cihazlardaki eski
-  oturumlar (BENİ hatırla çerezi DAHİL) ANINDA geçersiz KILINIYOR
-- KRİTİK iki bulgu bu OTURUMDA yakalanıp DÜZELTİLDİ: (1) base64
-  stamp'lerin cookie-safe OLMAMASI, (2) transaction İÇİNDE 'return
-  False'un commit'İ ENGELLEMEMESİ (GERÇEK eşzamanlı YARIŞ testiyle
-  doğrulandı)
-- Commit'ler: 62f48c9 (R1 tablo), 8f31631 (R2 forgot-password),
-  34e88d8 (R2.5 stamp altyapısı), 39db536 (R2.6 login BAĞLAMA),
-  6413434 (R3 reset-password)
+TÜM adımlar tamamlandı: R0 (mail), R1 (token TABLOSU), R2
+(forgot-password), R2.5 (stamp altyapısı), R2.6 (login BAĞLAMA,
+permissive), R3 (reset-password), R4 (UI linki), R5 (profil şifre
+değişiminde de rotate), R2.6-S4 (STRICT mod - commit 1a15f24).
 
-### Kalan iş (düşük risk, İSTEĞE bağlı):
-1. Login sayfasına 'Şifremi UNUTTUM' linki (R4)
-2. Profil şifre değişiminde de stamp ROTATE (R5)
-3. Strict mod geçişi (R2.6-S4) - ESKİ, deploy ÖNCESİ oturumların
-   tek seferlik yeniden GİRİŞ yapması GEREKECEK bir bakım penceresi
+Sistem ARTIK: şifre SIFIRLANDIĞINDA/DEĞİŞTİRİLDİĞİNDE, TÜM
+cihazlardaki eski OTURUMLAR (beni HATIRLA çerezi DAHİL) ANINDA
+geçersiz KILINIYOR. Legacy (deploy ÖNCESİ) oturumlar ARTIK KABUL
+edilmiyor - HERKESİN (senin ŞİRKETİNİZ DAHİL) BİR kerelik tekrar
+giriş yapması GEREKTİ (1a15f24 deploy'U SIRASINDA).
 
 ### Kalan iş (Checkpoint 6'nın SON parçası — ticari/iş katmanı):
 1. OAuth/sosyal giriş (Google, Facebook, Instagram, Apple) — kullanıcı
