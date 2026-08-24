@@ -182,6 +182,12 @@
     padding: 8px 10px;
     font-size: 1rem;
   }
+  button.btn-contact {
+    font: inherit;
+    width: 100%;
+    cursor: pointer;
+    border: 0;
+  }
   .btn-contact {
     display: inline-block;
     text-align: center;
@@ -202,6 +208,116 @@
     border: 0;
     border-top: 1px solid var(--border);
     margin: 28px 0;
+  }
+
+  .mp-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.45);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    z-index: 80;
+  }
+  .mp-modal-backdrop.is-open { display: flex; }
+  .mp-modal {
+    width: min(520px, 100%);
+    max-height: min(90vh, 760px);
+    overflow: auto;
+    background: #fff;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    padding: 20px 18px 16px;
+    box-shadow: 0 18px 40px rgba(15, 23, 42, 0.18);
+  }
+  .mp-modal h3 {
+    margin: 0 0 6px;
+    font-size: 1.1rem;
+    color: #0f172a;
+  }
+  .mp-modal-sub {
+    margin: 0 0 14px;
+    color: var(--muted);
+    font-size: 0.88rem;
+  }
+  .mp-form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .mp-form-grid label {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #334155;
+  }
+  .mp-form-grid label.full { grid-column: 1 / -1; }
+  .mp-form-grid input,
+  .mp-form-grid select,
+  .mp-form-grid textarea {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 0.95rem;
+    font-weight: 500;
+  }
+  .mp-form-grid textarea { min-height: 84px; resize: vertical; }
+  .mp-hp {
+    position: absolute;
+    left: -10000px;
+    top: auto;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+  }
+  .mp-form-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+    margin-top: 14px;
+  }
+  .mp-form-actions button {
+    border-radius: 8px;
+    padding: 9px 14px;
+    font-weight: 700;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: #fff;
+    color: #334155;
+  }
+  .mp-form-actions button.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+  .mp-form-actions button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  .mp-form-status {
+    display: none;
+    margin-top: 10px;
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 0.88rem;
+  }
+  .mp-form-status.is-ok {
+    display: block;
+    background: #ecfdf5;
+    border: 1px solid #a7f3d0;
+    color: #065f46;
+  }
+  .mp-form-status.is-err {
+    display: block;
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    color: var(--err);
+  }
+  @media (max-width: 560px) {
+    .mp-form-grid { grid-template-columns: 1fr; }
   }
 </style>
 {% endblock %}
@@ -248,6 +364,55 @@
 <div id="module-pricing-error" class="pricing-error" role="alert"></div>
 <div id="module-pricing-loading" class="pricing-loading">Personel planları yükleniyor…</div>
 <div id="module-pricing-grid" class="pricing-grid" hidden></div>
+
+
+<div id="mp-contact-modal" class="mp-modal-backdrop" hidden aria-hidden="true">
+  <div class="mp-modal" role="dialog" aria-modal="true" aria-labelledby="mp-contact-title">
+    <h3 id="mp-contact-title">Enterprise — Bize Ulaşın</h3>
+    <p class="mp-modal-sub">Personel Yönetimi için özel teklif. Formu doldurun; satış ekibimiz sizinle iletişime geçecek.</p>
+    <form id="mp-contact-form" novalidate>
+      <div class="mp-hp" aria-hidden="true">
+        <label>Website
+          <input type="text" name="website" id="mp-contact-website" tabindex="-1" autocomplete="off" />
+        </label>
+      </div>
+      <div class="mp-form-grid">
+        <label class="full">Şirket adı
+          <input type="text" name="company_name" id="mp-contact-company" required maxlength="200" />
+        </label>
+        <label class="full">Ad soyad
+          <input type="text" name="contact_name" id="mp-contact-name" required maxlength="120" />
+        </label>
+        <label>E-posta
+          <input type="email" name="email" id="mp-contact-email" required maxlength="200" />
+        </label>
+        <label>Telefon
+          <input type="tel" name="phone" id="mp-contact-phone" maxlength="32" />
+        </label>
+        <label>Ülke
+          <select name="country_code" id="mp-contact-country" required>
+            <option value="TR" selected>Türkiye (TR)</option>
+            <option value="US">United States (US)</option>
+          </select>
+        </label>
+        <label>Tahmini personel
+          <input type="number" name="estimated_personnel" id="mp-contact-personnel" min="0" step="1" value="51" required />
+        </label>
+        <label>Tahmini şube
+          <input type="number" name="estimated_branches" id="mp-contact-branches" min="1" step="1" value="1" required />
+        </label>
+        <label class="full">Mesaj
+          <textarea name="message" id="mp-contact-message" maxlength="4000" placeholder="İhtiyaçlarınızı kısaca yazın (isteğe bağlı)"></textarea>
+        </label>
+      </div>
+      <div class="mp-form-actions">
+        <button type="button" id="mp-contact-cancel">Vazgeç</button>
+        <button type="submit" class="primary" id="mp-contact-submit">Gönder</button>
+      </div>
+      <div id="mp-contact-status" class="mp-form-status" role="status"></div>
+    </form>
+  </div>
+</div>
 
 <div class="pricing-cta">
   <a href="/signup" class="btn-primary">Kayıt Ol</a>
@@ -432,8 +597,8 @@
         "<li>Self-servis sınırlarının ötesi</li>" +
         "<li>Özel kurulum ve destek</li>" +
         "</ul>" +
-        "<a class=\"btn-contact" + (recommended ? " is-emphasized" : "") +
-        "\" href=\"mailto:info@payafin.com?subject=Personel%20Mod%C3%BCl%C3%BC%20Enterprise\">Bize Ulaşın</a>";
+        "<button type=\"button\" class=\"btn-contact" + (recommended ? " is-emphasized" : "") +
+        "\" data-mp-contact-open>Bize Ulaşın</button>";
       return card;
     }
 
@@ -568,6 +733,107 @@
   mpAnnualBtn.addEventListener("click", function () { setPeriod("annual"); });
   mpPersonnelEl.addEventListener("input", renderModuleGrid);
   mpBranchesEl.addEventListener("input", renderModuleGrid);
+
+
+  const mpContactModal = document.getElementById("mp-contact-modal");
+  const mpContactForm = document.getElementById("mp-contact-form");
+  const mpContactStatus = document.getElementById("mp-contact-status");
+  const mpContactSubmit = document.getElementById("mp-contact-submit");
+  const mpContactCancel = document.getElementById("mp-contact-cancel");
+
+  function openContactModal() {
+    if (!mpContactModal) return;
+    mpContactStatus.className = "mp-form-status";
+    mpContactStatus.textContent = "";
+    mpContactModal.hidden = false;
+    mpContactModal.classList.add("is-open");
+    mpContactModal.setAttribute("aria-hidden", "false");
+    const company = document.getElementById("mp-contact-company");
+    if (company) company.focus();
+  }
+
+  function closeContactModal() {
+    if (!mpContactModal) return;
+    mpContactModal.classList.remove("is-open");
+    mpContactModal.hidden = true;
+    mpContactModal.setAttribute("aria-hidden", "true");
+  }
+
+  if (mpGridEl) {
+    mpGridEl.addEventListener("click", function (ev) {
+      const btn = ev.target && ev.target.closest
+        ? ev.target.closest("[data-mp-contact-open]")
+        : null;
+      if (!btn) return;
+      ev.preventDefault();
+      openContactModal();
+    });
+  }
+
+  if (mpContactCancel) {
+    mpContactCancel.addEventListener("click", closeContactModal);
+  }
+  if (mpContactModal) {
+    mpContactModal.addEventListener("click", function (ev) {
+      if (ev.target === mpContactModal) closeContactModal();
+    });
+  }
+  document.addEventListener("keydown", function (ev) {
+    if (ev.key === "Escape" && mpContactModal && mpContactModal.classList.contains("is-open")) {
+      closeContactModal();
+    }
+  });
+
+  if (mpContactForm) {
+    mpContactForm.addEventListener("submit", async function (ev) {
+      ev.preventDefault();
+      mpContactStatus.className = "mp-form-status";
+      mpContactStatus.textContent = "";
+      mpContactSubmit.disabled = true;
+      const payload = {
+        module_key: "personnel",
+        company_name: document.getElementById("mp-contact-company").value,
+        contact_name: document.getElementById("mp-contact-name").value,
+        email: document.getElementById("mp-contact-email").value,
+        phone: document.getElementById("mp-contact-phone").value,
+        country_code: document.getElementById("mp-contact-country").value,
+        estimated_personnel: document.getElementById("mp-contact-personnel").value,
+        estimated_branches: document.getElementById("mp-contact-branches").value,
+        message: document.getElementById("mp-contact-message").value,
+        website: document.getElementById("mp-contact-website").value
+      };
+      try {
+        const res = await fetch("/api/module-pricing/contact", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json"
+          },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json().catch(function () { return {}; });
+        if (!res.ok || !data.ok) {
+          mpContactStatus.className = "mp-form-status is-err";
+          mpContactStatus.textContent =
+            data.mesaj || "Gönderilemedi. Lütfen bilgileri kontrol edip tekrar deneyin.";
+          return;
+        }
+        mpContactStatus.className = "mp-form-status is-ok";
+        mpContactStatus.textContent =
+          data.mesaj || "Teşekkürler, sizinle iletişime geçeceğiz.";
+        mpContactForm.reset();
+        document.getElementById("mp-contact-country").value = "TR";
+        document.getElementById("mp-contact-personnel").value = "51";
+        document.getElementById("mp-contact-branches").value = "1";
+      } catch (e) {
+        mpContactStatus.className = "mp-form-status is-err";
+        mpContactStatus.textContent =
+          "Bağlantı hatası. Lütfen internet bağlantınızı kontrol edip tekrar deneyin.";
+      } finally {
+        mpContactSubmit.disabled = false;
+      }
+    });
+  }
 
   loadPricing();
   loadModulePricing();

@@ -589,6 +589,7 @@ def init_schema():
     ensure_email_verification_tokens_table()
     ensure_tenant_module_entitlements_table()
     ensure_module_pricing_tiers_table()
+    ensure_module_pricing_leads_table()
     print("✅ Supabase şema oluşturuldu.")
 
 
@@ -2995,6 +2996,62 @@ def _seed_module_pricing_personnel() -> None:
                 sort_order,
             ),
         )
+
+
+def ensure_module_pricing_leads_table():
+    """Platform Enterprise iletişim formları: yalnız public.module_pricing_leads.
+
+    Kiracı şemalarına karışmaz; PLATFORM_STRIP_TABLES listesinde.
+    """
+    execute(
+        """
+        CREATE TABLE IF NOT EXISTS public.module_pricing_leads (
+            id                      SERIAL PRIMARY KEY,
+            module_key              TEXT NOT NULL,
+            country_code            TEXT NOT NULL
+                REFERENCES public.pricing_regions(country_code) ON DELETE RESTRICT,
+            company_name            TEXT NOT NULL,
+            contact_name            TEXT NOT NULL,
+            email                   TEXT NOT NULL,
+            phone                   TEXT,
+            estimated_personnel     INTEGER,
+            estimated_branches      INTEGER,
+            message                 TEXT,
+            status                  TEXT NOT NULL DEFAULT 'new',
+            created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+            CONSTRAINT module_pricing_leads_module_key_format
+                CHECK (module_key ~ '^[a-z0-9_]+$'),
+            CONSTRAINT module_pricing_leads_status_ok
+                CHECK (status IN ('new', 'contacted', 'closed')),
+            CONSTRAINT module_pricing_leads_personnel_nonneg
+                CHECK (estimated_personnel IS NULL OR estimated_personnel >= 0),
+            CONSTRAINT module_pricing_leads_branches_nonneg
+                CHECK (estimated_branches IS NULL OR estimated_branches >= 0)
+        )
+        """
+    )
+    try:
+        execute(
+            """
+            CREATE INDEX IF NOT EXISTS module_pricing_leads_created_idx
+            ON public.module_pricing_leads (created_at DESC)
+            """
+        )
+        execute(
+            """
+            CREATE INDEX IF NOT EXISTS module_pricing_leads_status_idx
+            ON public.module_pricing_leads (status, created_at DESC)
+            """
+        )
+        execute(
+            """
+            CREATE INDEX IF NOT EXISTS module_pricing_leads_module_country_idx
+            ON public.module_pricing_leads (module_key, country_code, created_at DESC)
+            """
+        )
+    except Exception as e:
+        print(f"module_pricing_leads indexes: {e}")
 
 
 def clear_all_customers():
