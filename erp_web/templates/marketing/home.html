@@ -1,5 +1,71 @@
 {% extends "marketing/marketing_layout.html" %}
 {% block title %}Payafin — Bulut ERP{% endblock %}
+
+{% block head_extra %}
+<style>
+  .marketing-shell { align-items: flex-start; padding-top: 32px; padding-bottom: 48px; }
+  .marketing-card { max-width: 960px; }
+  .packages-intro {
+    margin: 0 0 16px;
+    color: var(--muted);
+    font-size: 0.92rem;
+    text-align: center;
+  }
+  .packages-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+    margin-top: 8px;
+  }
+  .package-card {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 16px;
+    background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-height: 100%;
+  }
+  .package-card h3 {
+    margin: 0;
+    font-size: 1.05rem;
+    color: #0f172a;
+  }
+  .package-card p {
+    margin: 0;
+    font-size: 0.9rem;
+    color: #334155;
+    flex: 1;
+  }
+  .package-price {
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: var(--accent);
+    line-height: 1.35;
+  }
+  .package-card .btn-package {
+    width: 100%;
+    padding: 10px 14px;
+    background: #f8fafc;
+    color: var(--accent);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    text-align: center;
+    text-decoration: none;
+    display: inline-block;
+    margin-top: 4px;
+  }
+  .package-card .btn-package:hover { background: #f1f5f9; }
+  .packages-section .section-title { text-align: center; margin-bottom: 6px; }
+  @media (max-width: 640px) {
+    .packages-grid { grid-template-columns: 1fr; }
+  }
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="marketing-brand">
   <div class="logo">PAYAFIN</div>
@@ -31,6 +97,33 @@
 <section aria-labelledby="signup-heading">
   <h2 id="signup-heading" class="section-title">Yeni hesap</h2>
   <a href="/signup" class="btn-secondary">Kayıt ol</a>
+</section>
+
+<div class="divider" aria-hidden="true">&nbsp;</div>
+
+<section class="packages-section" aria-labelledby="packages-heading">
+  <h2 id="packages-heading" class="section-title">Neler sunuyoruz</h2>
+  <p class="packages-intro">Modüler bulut ERP — ihtiyacınıza göre başlayın, büyüdükçe genişletin.</p>
+  <div class="packages-grid">
+    <article class="package-card">
+      <h3>Core ERP</h3>
+      <p>Cari kart, fatura, tahsilat ve ofis operasyonlarını tek panelden yönetin. Payafin omurgası tüm modüllerin temelidir.</p>
+      <div class="package-price">Başlangıç fiyatları için detaylara bakın</div>
+      <a href="/fiyatlandirma" class="btn-package">Detaylar</a>
+    </article>
+    <article class="package-card">
+      <h3>Personel Yönetimi</h3>
+      <p>Personel kartı, izin, devam takibi ve özlük süreçlerini dijitalleştirin. Şube ve personel sayınıza göre esnek paketler.</p>
+      <div class="package-price">Başlangıç fiyatları için detaylara bakın</div>
+      <a href="/fiyatlandirma" class="btn-package">Detaylar</a>
+    </article>
+    <article class="package-card">
+      <h3>Randevu Yönetimi</h3>
+      <p>Toplantı odası rezervasyonu, takvim ve müşteri self-service booking ile randevularınızı kolayca planlayın.</p>
+      <div class="package-price">Başlangıç fiyatları için detaylara bakın</div>
+      <a href="/fiyatlandirma" class="btn-package">Detaylar</a>
+    </article>
+  </div>
 </section>
 {% endblock %}
 
