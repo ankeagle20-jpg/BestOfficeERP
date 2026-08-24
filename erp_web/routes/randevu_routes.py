@@ -5,6 +5,7 @@ Toplantı Odası ve Randevu Takip Sistemi
 """
 from flask import Blueprint, render_template, request, jsonify, flash, redirect, url_for, current_app
 from flask_login import login_required
+from tenant_module_access import module_required
 from db import fetch_all, fetch_one, execute, execute_returning
 from utils.musteri_arama import customers_arama_sql_randevu, customers_arama_params_6_randevu
 from datetime import datetime, date, time, timedelta
@@ -112,6 +113,7 @@ def _parse_ts(s):
 
 @bp.route("/")
 @login_required
+@module_required("randevu")
 def index():
     """Randevu Takip ana sayfa: takvim + liste."""
     return render_template("randevu/index.html", durumlar=DURUMLAR, durum_renk=DURUM_RENK)
@@ -119,6 +121,7 @@ def index():
 
 @bp.route("/calcom")
 @login_required
+@module_required("randevu")
 def calcom():
     """Cal.com inline embed sayfası — Dashboard Randevu butonu buraya açılır."""
     import os
@@ -129,6 +132,7 @@ def calcom():
 
 @bp.route("/rapor")
 @login_required
+@module_required("randevu")
 def rapor():
     """Randevu raporu sayfasi - tarih araligina gore toplanti/gorusme listesi."""
     return render_template("randevu/rapor.html")
@@ -136,6 +140,7 @@ def rapor():
 
 @bp.route("/panel")
 @login_required
+@module_required("randevu")
 def panel():
     """Birlesik randevu paneli - Randevu/Rapor/Liste/Haftalik sekmeleri."""
     return render_template("randevu/panel.html")
@@ -143,6 +148,7 @@ def panel():
 
 @bp.route("/api/list")
 @login_required
+@module_required("randevu")
 def api_list():
     """Tarih aralığına göre randevu listesi (takvim için)."""
     bas = request.args.get("bas")  # YYYY-MM-DD
@@ -196,6 +202,7 @@ def api_list():
 
 @bp.route("/api/rapor")
 @login_required
+@module_required("randevu")
 def api_rapor():
     """Tarih araliginda TUM odalardaki toplanti+gorusme kayitlari -
     rapor sayfasi icin (Musteri, Tur, Saat, Toplanti Yeri)."""
@@ -260,6 +267,7 @@ def api_rapor():
 
 @bp.route("/api/musteriler")
 @login_required
+@module_required("randevu")
 def api_musteriler():
     """Müşteri/firma arama: geniş kart+KYC alanları + notlar (customers.notes)."""
     q = (request.args.get("q") or "").strip()[:80]
@@ -286,6 +294,7 @@ def api_musteriler():
 
 @bp.route("/randevu-al")
 @login_required
+@module_required("randevu")
 def randevu_al():
     """Kendi randevu sayfamız: takvim + müsait slotlar + form (ERP teması)."""
     embed = request.args.get("embed", "").strip().lower() in ("1", "true", "yes", "on")
@@ -302,6 +311,7 @@ def randevu_al():
 
 @bp.route("/api/musait-slotlar")
 @login_required
+@module_required("randevu")
 def api_musait_slotlar():
     """Seçilen tarih ve oda için müsait 30 dk'lık slotları döner (08:00–17:00). tip=gorusme ise sadece görüşmeler dikkate alınır."""
     tarih_str = request.args.get("tarih")
@@ -319,6 +329,7 @@ def api_musait_slotlar():
 
 @bp.route("/api/gun-randevulari")
 @login_required
+@module_required("randevu")
 def api_gun_randevulari():
     """Seçilen tarih ve oda için o günkü tüm randevular (toplantı + görüşme). tip=gorusme artık yok sayılır."""
     tarih_str = request.args.get("tarih")
@@ -402,6 +413,7 @@ def api_gun_randevulari():
 
 @bp.route("/api/aylik-doluluk")
 @login_required
+@module_required("randevu")
 def api_aylik_doluluk():
     """Aydaki her gün için toplam dolu saat. Seçili oda. tip=gorusme ise sadece görüşmeler."""
     yil = request.args.get("yil")
@@ -485,6 +497,7 @@ def api_aylik_doluluk():
 
 @bp.route("/api/odalar")
 @login_required
+@module_required("randevu")
 def api_odalar():
     """Oda listesi ve saatlik ücret. Sabit liste: turkuaz, hazır oda, makam odası, masa kullanımı."""
     for oda in ODALAR:
@@ -647,6 +660,7 @@ def api_public_iptal(rid):
 
 @bp.route("/api/odalar/guncelle", methods=["POST"], endpoint="api_odalar_guncelle")
 @login_required
+@module_required("randevu")
 def api_odalar_guncelle():
     """Oda saatlik ücretini güncelle."""
     data = request.get_json() or {}
@@ -685,6 +699,7 @@ def _cakisma_var(oda_adi, baslangic, bitis, haric_id=None):
 
 @bp.route("/api/ekle", methods=["POST"])
 @login_required
+@module_required("randevu")
 def api_ekle():
     """Yeni randevu ekle: başlangıç<bitiş, çakışma, ücret hesaplama."""
     data = request.get_json() or {}
@@ -837,6 +852,7 @@ def api_ekle():
 
 @bp.route("/api/mevcut-randevu")
 @login_required
+@module_required("randevu")
 def api_mevcut_randevu():
     """Seçilen tarih + oda + müşteri için o güne ait (iptal olmayan) tek randevu varsa döner."""
     tarih_str = request.args.get("tarih")
@@ -881,6 +897,7 @@ def api_mevcut_randevu():
 
 @bp.route("/api/saat-guncelle/<int:rid>", methods=["POST"])
 @login_required
+@module_required("randevu")
 def api_saat_guncelle(rid):
     """Randevunun başlangıç/bitiş saatini günceller (aynı gün taşıma)."""
     data = request.get_json() or {}
@@ -919,6 +936,7 @@ def api_saat_guncelle(rid):
 
 @bp.route("/api/sil/<int:rid>", methods=["POST"])
 @login_required
+@module_required("randevu")
 def api_sil(rid):
     """Randevuyu tamamen siler (iptal / kayıt silme). İptal e-postası gönderilir."""
     r = fetch_one("SELECT musteri_id, oda_adi, oda, baslangic_zamani, bitis_zamani FROM randevular WHERE id = %s", (rid,))
@@ -975,6 +993,7 @@ def cron_hatirlatma():
 
 @bp.route("/api/guncelle/<int:rid>", methods=["POST"])
 @login_required
+@module_required("randevu")
 def api_guncelle(rid):
     """Randevu güncelle (durum vb.). Tamamlandı -> Faturalandırılacak Hizmetler listesine ekle."""
     data = request.get_json() or {}
