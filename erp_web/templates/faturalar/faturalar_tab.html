@@ -745,7 +745,9 @@
             <a href="/kargolar/"><i class="fa fa-truck"></i> Kargolar</a>
             <a href="/bankalar/"><i class="fa fa-university"></i> Bankalar</a>
             <a href="/tufe/"><i class="fa fa-chart-line"></i> TÜFE</a>
+            {% if has_module('personnel') %}
             <a href="/personel/"><i class="fa fa-user-tie"></i> Personel</a>
+            {% endif %}
             <a href="/ilan-robotu/"><i class="fa fa-bullhorn"></i> İlan Robotu</a>
             <a href="/giris/"><i class="fa fa-user-plus"></i> Giriş</a>
             <a href="/admin/"><i class="fa fa-folder"></i> Yönetim</a>

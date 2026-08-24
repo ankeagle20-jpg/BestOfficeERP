@@ -514,6 +514,26 @@ def server_error(e):
 
 # ── Context processor — her template'e gönderilir ────────────────────────────
 @app.context_processor
+def inject_module_access():
+    """Faz 4: template'lerde {% if has_module('personnel') %} için."""
+    from tenant_module_access import (
+        has_module_entitlement,
+        resolve_request_tenant_id,
+    )
+
+    def has_module(module_key: str) -> bool:
+        try:
+            tid = resolve_request_tenant_id()
+            if tid is None:
+                return False
+            return bool(has_module_entitlement(int(tid), str(module_key or "").strip()))
+        except Exception:
+            return False
+
+    return {"has_module": has_module}
+
+
+@app.context_processor
 def inject_globals():
     """Template'lere global değişkenler ekle."""
     # Güvenli menü oluştur: current_user.gorunen_menu içindeki endpoint'ler url_for ile çözülemeyebilir.

@@ -277,9 +277,11 @@
             <a href="/tufe/" class="{% if request.path.startswith('/tufe') %}active{% endif %}">
                 <i class="fa fa-chart-line"></i> TÜFE
             </a>
+            {% if has_module('personnel') %}
             <a href="/personel/" class="{% if request.path.startswith('/personel') %}active{% endif %}">
                 <i class="fa fa-user-tie"></i> Personel
             </a>
+            {% endif %}
             <a href="/ilan-robotu/" class="{% if request.path.startswith('/ilan-robotu') %}active{% endif %}">
                 <i class="fa fa-bullhorn"></i> İlan Robotu
             </a>
