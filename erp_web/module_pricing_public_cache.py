@@ -6,10 +6,11 @@ from cache_utils import simple_cache_get, simple_cache_invalidate, simple_cache_
 from db import fetch_all, fetch_one
 
 PUBLIC_MODULE_PRICING_CACHE_TTL_SEC = 60.0
-_PUBLIC_CACHE_PREFIX = "module_pricing:public:v1:"
+# v2: included_monthly_appointments / included_personnel public alanları
+_PUBLIC_CACHE_PREFIX = "module_pricing:public:v2:"
 
-# Aşama D: şimdilik yalnız Personel Yönetimi
-PUBLIC_MODULE_KEYS = frozenset({"personnel"})
+# Personel + Randevu (public gösterim)
+PUBLIC_MODULE_KEYS = frozenset({"personnel", "randevu"})
 
 
 def public_module_pricing_cache_key(module_key: str, country_code: str) -> str:
@@ -41,6 +42,16 @@ def _self_serve_public(row: dict) -> dict:
         ),
         "included_branches": int(row["included_branches"]),
         "price_per_extra_branch": float(row["price_per_extra_branch"]),
+        "included_monthly_appointments": (
+            None
+            if row.get("included_monthly_appointments") is None
+            else int(row["included_monthly_appointments"])
+        ),
+        "included_personnel": (
+            None
+            if row.get("included_personnel") is None
+            else int(row["included_personnel"])
+        ),
         "annual_discount_months": int(row["annual_discount_months"]),
         "contact_sales": False,
     }
@@ -75,6 +86,7 @@ def _load_public_module_pricing_from_db(
         SELECT tier_key, display_name, currency,
                base_monthly, price_per_personnel, max_personnel,
                included_branches, price_per_extra_branch,
+               included_monthly_appointments, included_personnel,
                annual_discount_months, sort_order
         FROM public.module_pricing_tiers
         WHERE module_key = %s

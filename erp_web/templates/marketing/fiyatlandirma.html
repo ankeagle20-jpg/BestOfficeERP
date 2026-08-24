@@ -366,6 +366,30 @@
 <div id="module-pricing-grid" class="pricing-grid" hidden></div>
 
 
+
+<hr class="core-divider" />
+
+<h2 class="pricing-section-title">Randevu Yönetimi Modülü</h2>
+<p class="pricing-section-sub">Taban ücret + dahil randevu/personel + ek personel. Yıllıkta 2 ay bedava.</p>
+
+<div class="period-toggle" role="group" aria-label="Randevu faturalama dönemi">
+  <button type="button" id="rv-period-monthly" class="active" data-period="monthly">Aylık</button>
+  <button type="button" id="rv-period-annual" data-period="annual">Yıllık</button>
+</div>
+
+<div class="module-calc">
+  <label>Personel sayısı
+    <input type="number" id="rv-personnel" min="0" step="1" value="1" />
+  </label>
+  <label>Aylık randevu sayısı
+    <input type="number" id="rv-appointments" min="0" step="1" value="100" />
+  </label>
+</div>
+
+<div id="rv-pricing-error" class="pricing-error" role="alert"></div>
+<div id="rv-pricing-loading" class="pricing-loading">Randevu planları yükleniyor…</div>
+<div id="rv-pricing-grid" class="pricing-grid" hidden></div>
+
 <div id="mp-contact-modal" class="mp-modal-backdrop" hidden aria-hidden="true">
   <div class="mp-modal" role="dialog" aria-modal="true" aria-labelledby="mp-contact-title">
     <h3 id="mp-contact-title">Enterprise — Bize Ulaşın</h3>
@@ -435,12 +459,25 @@
   const mpMonthlyBtn = document.getElementById("mp-period-monthly");
   const mpAnnualBtn = document.getElementById("mp-period-annual");
 
+  const rvGridEl = document.getElementById("rv-pricing-grid");
+  const rvLoadingEl = document.getElementById("rv-pricing-loading");
+  const rvErrorEl = document.getElementById("rv-pricing-error");
+  const rvPersonnelEl = document.getElementById("rv-personnel");
+  const rvAppointmentsEl = document.getElementById("rv-appointments");
+  const rvMonthlyBtn = document.getElementById("rv-period-monthly");
+  const rvAnnualBtn = document.getElementById("rv-period-annual");
+
   let moduleTiers = [];
   let moduleCurrency = "TRY";
+  let rvTiers = [];
+  let rvCurrency = "TRY";
   let billingPeriod = "monthly";
+  let contactModuleKey = "personnel";
 
   const INSUFFICIENT_MSG =
     "Bu personel sayısı için yetersiz — üst pakete geçmeniz gerekir";
+  const RV_INSUFFICIENT_MSG =
+    "Bu personel/randevu sayısı için yetersiz — üst pakete geçmeniz gerekir";
 
   function currencySymbol(code) {
     if (code === "TRY") return "₺";
@@ -523,6 +560,220 @@
    * personnel <= max_personnel olan İLK kademeyi seç.
    * Hiçbiri uymazsa contact (Enterprise).
    */
+
+  /**
+   * Sunucu resolve_required_tier(..., appointment_count) ile birebir:
+   * self-servis sırasıyla gezin; (max_personnel == null VEYA n <= max)
+   * VE (included_monthly_appointments == null VEYA a <= included)
+   * olan İLK kademeyi seç. Hiçbiri uymazsa contact (Enterprise).
+   */
+  function resolveRequiredRandevuTiers(tiers, personnelCount, appointmentCount) {
+    const n = Math.max(0, parseInt(personnelCount, 10) || 0);
+    const a = Math.max(0, parseInt(appointmentCount, 10) || 0);
+    const selfServe = [];
+    let enterprise = null;
+    for (let i = 0; i < tiers.length; i++) {
+      const t = tiers[i];
+      if (t && t.contact_sales) {
+        if (!enterprise) enterprise = t;
+      } else if (t) {
+        selfServe.push(t);
+      }
+    }
+    for (let i = 0; i < selfServe.length; i++) {
+      const tier = selfServe[i];
+      const mx = tier.max_personnel;
+      if (!(mx == null || n <= Number(mx))) continue;
+      const incl = tier.included_monthly_appointments;
+      if (!(incl == null || a <= Number(incl))) continue;
+      return {
+        kind: "match",
+        tierKey: String(tier.tier_key || ""),
+        recommended_tier_key: String(tier.tier_key || ""),
+        tier: tier
+      };
+    }
+    return {
+      kind: "contact",
+      tierKey: "enterprise",
+      recommended_tier_key: "enterprise",
+      tier: enterprise
+    };
+  }
+
+  function isRandevuSelfServeInsufficient(tier, personnelCount, appointmentCount) {
+    if (!tier || tier.contact_sales) return false;
+    const n = Math.max(0, parseInt(personnelCount, 10) || 0);
+    const a = Math.max(0, parseInt(appointmentCount, 10) || 0);
+    const mx = tier.max_personnel;
+    const persOk = mx == null || n <= Number(mx);
+    const incl = tier.included_monthly_appointments;
+    const apptOk = incl == null || a <= Number(incl);
+    return !(persOk && apptOk);
+  }
+
+  function randevuRange(tier) {
+    const parts = [];
+    const appt = tier.included_monthly_appointments;
+    if (appt == null) parts.push("Sınırsız aylık randevu");
+    else parts.push("En fazla " + appt + " aylık randevu");
+    const maxP = tier.max_personnel;
+    if (maxP == null) parts.push("sınırsız personel");
+    else parts.push("en fazla " + maxP + " personel");
+    return parts.join(" · ");
+  }
+
+  function estimateRandevuTier(tier, personnel) {
+    const base = Number(tier.base_monthly) || 0;
+    const perP = Number(tier.price_per_personnel) || 0;
+    const includedP = Number(tier.included_personnel) || 0;
+    const discount = Number(tier.annual_discount_months) || 0;
+    const extra = Math.max(0, personnel - includedP);
+    const monthly = base + extra * perP;
+    if (billingPeriod === "annual") {
+      return monthly * (12 - discount);
+    }
+    return monthly;
+  }
+
+  function renderRandevuTier(tier, currency, resolved, personnel, appointments) {
+    const card = document.createElement("article");
+    card.className = "tier-card";
+
+    if (tier.contact_sales) {
+      const recommended = resolved && resolved.kind === "contact";
+      if (recommended) {
+        card.classList.add("is-recommended");
+      }
+      card.dataset.tierKey = "enterprise";
+      card.dataset.contactSales = "1";
+      card.innerHTML =
+        (recommended ? "<span class=\"tier-badge\">Önerilen</span>" : "") +
+        "<h3>" + escapeHtml(tier.display_name) + "</h3>" +
+        "<div class=\"tier-range\">Kurumsal / özel teklif</div>" +
+        "<div class=\"tier-price\">Özel fiyat<small>satış ile iletişime geçin</small></div>" +
+        "<ul class=\"tier-details\">" +
+        "<li>Self-servis sınırlarının ötesi</li>" +
+        "<li>Özel kurulum ve destek</li>" +
+        "</ul>" +
+        "<button type=\"button\" class=\"btn-contact" + (recommended ? " is-emphasized" : "") +
+        "\" data-rv-contact-open>Bize Ulaşın</button>";
+      return card;
+    }
+
+    const insufficient = isRandevuSelfServeInsufficient(tier, personnel, appointments);
+    const recommended =
+      resolved &&
+      resolved.kind === "match" &&
+      String(resolved.tierKey) === String(tier.tier_key || "");
+
+    if (insufficient) card.classList.add("is-insufficient");
+    if (recommended) card.classList.add("is-recommended");
+    card.dataset.tierKey = tier.tier_key || "";
+    card.dataset.insufficient = insufficient ? "1" : "0";
+    card.dataset.recommended = recommended ? "1" : "0";
+
+    const discount = Number(tier.annual_discount_months) || 0;
+    const baseShow = billingPeriod === "annual"
+      ? (Number(tier.base_monthly) || 0) * (12 - discount)
+      : (Number(tier.base_monthly) || 0);
+    const perPShow = billingPeriod === "annual"
+      ? (Number(tier.price_per_personnel) || 0) * (12 - discount)
+      : (Number(tier.price_per_personnel) || 0);
+    const periodLabel = billingPeriod === "annual" ? "yıllık taban" : "taban aylık ücret";
+    const perLabel = billingPeriod === "annual"
+      ? "Ek personel ücreti (yıl)"
+      : "Ek personel ücreti (ay)";
+    const inclAppt = tier.included_monthly_appointments == null
+      ? "Sınırsız"
+      : String(tier.included_monthly_appointments);
+    const inclPers = tier.included_personnel == null
+      ? "—"
+      : String(tier.included_personnel);
+
+    let estimateHtml;
+    if (insufficient) {
+      estimateHtml =
+        "<div class=\"tier-estimate is-blocked\" data-estimate-wrap>" +
+        "<span data-estimate>" + escapeHtml(RV_INSUFFICIENT_MSG) + "</span></div>";
+    } else {
+      const total = estimateRandevuTier(tier, personnel);
+      const suffix = billingPeriod === "annual" ? " / yıl" : " / ay";
+      estimateHtml =
+        "<div class=\"tier-estimate\" data-estimate-wrap>" +
+        "Tahmini: <span data-estimate>" +
+        escapeHtml(formatMoney(total, currency) + suffix) +
+        "</span></div>";
+    }
+
+    card.innerHTML =
+      (recommended ? "<span class=\"tier-badge\">Önerilen</span>" : "") +
+      "<h3>" + escapeHtml(tier.display_name) + "</h3>" +
+      "<div class=\"tier-range\">" + escapeHtml(randevuRange(tier)) + "</div>" +
+      "<div class=\"tier-price\">" + formatMoney(baseShow, currency) +
+      "<small>" + escapeHtml(periodLabel) +
+      (billingPeriod === "annual" && discount ? " (" + discount + " ay bedava)" : "") +
+      "</small></div>" +
+      "<ul class=\"tier-details\">" +
+      "<li>Dahil aylık randevu: <strong>" + escapeHtml(inclAppt) + "</strong></li>" +
+      "<li>Dahil personel: <strong>" + escapeHtml(inclPers) + "</strong></li>" +
+      "<li>" + escapeHtml(perLabel) + ": <strong>" + formatMoney(perPShow, currency) + "</strong></li>" +
+      "</ul>" +
+      estimateHtml;
+    return card;
+  }
+
+  function currentRvPersonnel() {
+    return Math.max(0, parseInt(rvPersonnelEl.value, 10) || 0);
+  }
+
+  function currentRvAppointments() {
+    return Math.max(0, parseInt(rvAppointmentsEl.value, 10) || 0);
+  }
+
+  function renderRandevuGrid() {
+    if (!rvGridEl) return;
+    const personnel = currentRvPersonnel();
+    const appointments = currentRvAppointments();
+    const resolved = resolveRequiredRandevuTiers(rvTiers, personnel, appointments);
+    rvGridEl.innerHTML = "";
+    rvTiers.forEach(function (tier) {
+      rvGridEl.appendChild(
+        renderRandevuTier(tier, rvCurrency, resolved, personnel, appointments)
+      );
+    });
+  }
+
+  function showRandevuError(message) {
+    if (!rvErrorEl) return;
+    rvErrorEl.textContent = message;
+    rvErrorEl.style.display = "block";
+    if (rvLoadingEl) rvLoadingEl.style.display = "none";
+    if (rvGridEl) rvGridEl.hidden = true;
+  }
+
+  async function loadRandevuPricing() {
+    if (!rvGridEl) return;
+    try {
+      const res = await fetch("/api/module-pricing/public?module=randevu&country=TR", {
+        headers: { Accept: "application/json" }
+      });
+      const data = await res.json().catch(function () { return {}; });
+      if (!res.ok || !data.ok || !Array.isArray(data.tiers) || !data.tiers.length) {
+        showRandevuError(data.mesaj || "Randevu modülü fiyatları yüklenemedi.");
+        return;
+      }
+      rvTiers = data.tiers;
+      rvCurrency = data.currency || "TRY";
+      if (rvLoadingEl) rvLoadingEl.style.display = "none";
+      rvGridEl.hidden = false;
+      renderRandevuGrid();
+    } catch (e) {
+      showRandevuError("Bağlantı hatası. Lütfen internet bağlantınızı kontrol edip tekrar deneyin.");
+    }
+  }
+
+
   function resolveRequiredTier(tiers, personnelCount) {
     const n = Math.max(0, parseInt(personnelCount, 10) || 0);
     const selfServe = [];
@@ -684,7 +935,10 @@
     billingPeriod = period === "annual" ? "annual" : "monthly";
     mpMonthlyBtn.classList.toggle("active", billingPeriod === "monthly");
     mpAnnualBtn.classList.toggle("active", billingPeriod === "annual");
+    if (rvMonthlyBtn) rvMonthlyBtn.classList.toggle("active", billingPeriod === "monthly");
+    if (rvAnnualBtn) rvAnnualBtn.classList.toggle("active", billingPeriod === "annual");
     renderModuleGrid();
+    renderRandevuGrid();
   }
 
   async function loadPricing() {
@@ -733,6 +987,10 @@
   mpAnnualBtn.addEventListener("click", function () { setPeriod("annual"); });
   mpPersonnelEl.addEventListener("input", renderModuleGrid);
   mpBranchesEl.addEventListener("input", renderModuleGrid);
+  if (rvMonthlyBtn) rvMonthlyBtn.addEventListener("click", function () { setPeriod("monthly"); });
+  if (rvAnnualBtn) rvAnnualBtn.addEventListener("click", function () { setPeriod("annual"); });
+  if (rvPersonnelEl) rvPersonnelEl.addEventListener("input", renderRandevuGrid);
+  if (rvAppointmentsEl) rvAppointmentsEl.addEventListener("input", renderRandevuGrid);
 
 
   const mpContactModal = document.getElementById("mp-contact-modal");
@@ -741,8 +999,9 @@
   const mpContactSubmit = document.getElementById("mp-contact-submit");
   const mpContactCancel = document.getElementById("mp-contact-cancel");
 
-  function openContactModal() {
+  function openContactModal(moduleKey) {
     if (!mpContactModal) return;
+    contactModuleKey = moduleKey || "personnel";
     mpContactStatus.className = "mp-form-status";
     mpContactStatus.textContent = "";
     mpContactModal.hidden = false;
@@ -766,7 +1025,17 @@
         : null;
       if (!btn) return;
       ev.preventDefault();
-      openContactModal();
+      openContactModal("personnel");
+    });
+  }
+  if (rvGridEl) {
+    rvGridEl.addEventListener("click", function (ev) {
+      const btn = ev.target && ev.target.closest
+        ? ev.target.closest("[data-rv-contact-open]")
+        : null;
+      if (!btn) return;
+      ev.preventDefault();
+      openContactModal("randevu");
     });
   }
 
@@ -791,7 +1060,7 @@
       mpContactStatus.textContent = "";
       mpContactSubmit.disabled = true;
       const payload = {
-        module_key: "personnel",
+        module_key: contactModuleKey || "personnel",
         company_name: document.getElementById("mp-contact-company").value,
         contact_name: document.getElementById("mp-contact-name").value,
         email: document.getElementById("mp-contact-email").value,
@@ -837,6 +1106,7 @@
 
   loadPricing();
   loadModulePricing();
+  loadRandevuPricing();
 })();
 </script>
 {% endblock %}
