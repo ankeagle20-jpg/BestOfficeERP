@@ -133,6 +133,10 @@ def bind_request_tenant():
     schema = schema_name_for_slug(slug)
     if schema is not None:
         g.tenant_schema = schema
+    else:
+        # Public/apex host: önceki request'ten (veya test app_context'ten) kalmış
+        # tenant_schema sızıntısını temizle — platform-only guard'lar buna bağlı.
+        g.pop("tenant_schema", None)
     g.tenant_slug = slug or ""
 
     if "_user_id" not in session and "tenant_slug" not in session:

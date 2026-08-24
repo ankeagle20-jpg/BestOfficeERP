@@ -1,0 +1,280 @@
+{% extends "layout.html" %}
+{% block title %}Modül Yönetimi{% endblock %}
+{% block page_title %}Payafin Modül Yönetimi{% endblock %}
+
+{% block topbar_actions %}
+  <a class="btn-erp btn-erp-sm btn-outline-erp" href="{{ url_for('admin.index') }}">Kullanıcılar</a>
+{% endblock %}
+
+{% block content %}
+<style>
+  .mod-nav { display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap; align-items:center; }
+  .mod-nav a {
+    padding:6px 12px; border-radius:6px; border:1px solid #1e3a5f;
+    color:#90caf9; background:#0a1929; text-decoration:none; font-size:.85rem;
+  }
+  .mod-nav a.active { background:#1565c0; color:#fff; border-color:#1565c0; }
+  .mod-toolbar { display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin-bottom:16px; }
+  .mod-toolbar label { color:#90caf9; font-size:.85rem; }
+  .mod-toolbar select {
+    background:#0a1929; border:1px solid #1e3a5f; color:#e0f7fa;
+    padding:6px 10px; border-radius:6px; font-size:.85rem; min-width:220px;
+  }
+  .mod-meta { color:#888; font-size:.82rem; margin-bottom:10px; }
+  .mod-err { color:#ef9a9a; margin:8px 0; display:none; }
+  .mod-ok { color:#a5d6a7; margin:8px 0; display:none; }
+  .mod-table { width:100%; border-collapse:collapse; font-size:.8rem; }
+  .mod-table th, .mod-table td {
+    border-bottom:1px solid #1e3a5f; padding:8px; text-align:left; vertical-align:middle;
+  }
+  .mod-table th { color:#90caf9; font-weight:600; white-space:nowrap; }
+  .mod-table select {
+    background:#0a1929; border:1px solid #1e3a5f; color:#e0f7fa;
+    padding:4px 6px; border-radius:4px; font-size:.78rem; min-width:120px;
+  }
+  .mod-badge {
+    display:inline-block; font-size:.7rem; padding:2px 6px; border-radius:4px;
+    background:#1e3a5f; color:#90caf9; margin-left:6px;
+  }
+  .mod-badge.warn { background:#5d4037; color:#ffcc80; }
+  .mod-row-msg { font-size:.72rem; margin-left:6px; }
+  .mod-row-msg.ok { color:#a5d6a7; }
+  .mod-row-msg.err { color:#ef9a9a; }
+</style>
+
+<div class="mod-nav">
+  <a href="{{ url_for('admin.index') }}">Kullanıcılar</a>
+  <a href="{{ url_for('admin_mukerrer.mukerrer_arsiv_page') }}">Mükerrer Arşiv</a>
+  <a href="{{ url_for('admin_pricing.pricing_page') }}">Fiyatlandırma</a>
+  <a href="{{ url_for('admin_modules.modules_page') }}" class="active">Modüller</a>
+</div>
+
+<div class="card-erp">
+  <p style="color:#90caf9;margin:0 0 12px;font-size:.9rem;">
+    Kiracı bazlı modül entitlement yönetimi. Kayıt sonrası cache anında temizlenir;
+    Personel/Pdovam gibi korumalı route’lar yeni durumu bekletmeden uygular.
+  </p>
+
+  <div class="mod-toolbar">
+    <label>
+      Kiracı
+      <select id="mod-tenant"></select>
+    </label>
+    <button type="button" class="btn-erp btn-erp-sm" id="mod-yenile">Yenile</button>
+  </div>
+  <div class="mod-meta" id="mod-meta">Yükleniyor...</div>
+  <div class="mod-err" id="mod-err"></div>
+  <div class="mod-ok" id="mod-ok"></div>
+
+  <div style="overflow-x:auto;">
+    <table class="mod-table" id="mod-table">
+      <thead>
+        <tr>
+          <th>Modül</th>
+          <th>Durum</th>
+          <th>Billing mode</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="mod-body">
+        <tr><td colspan="4" style="color:#78909c;">Kiracı seçin...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+(function () {
+  var STATUSES = {{ statuses|tojson }};
+  var BILLING = {{ billing_modes|tojson }};
+  var tenantSel = document.getElementById('mod-tenant');
+  var metaEl = document.getElementById('mod-meta');
+  var errEl = document.getElementById('mod-err');
+  var okEl = document.getElementById('mod-ok');
+  var bodyEl = document.getElementById('mod-body');
+
+  function escHtml(s) {
+    return String(s || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function showErr(msg) {
+    errEl.style.display = msg ? 'block' : 'none';
+    errEl.textContent = msg || '';
+    if (msg) okEl.style.display = 'none';
+  }
+  function showOk(msg) {
+    okEl.style.display = msg ? 'block' : 'none';
+    okEl.textContent = msg || '';
+    if (msg) errEl.style.display = 'none';
+  }
+
+  function api(path, opts) {
+    opts = opts || {};
+    var headers = Object.assign({ 'Accept': 'application/json' }, opts.headers || {});
+    if (opts.method && opts.method !== 'GET') {
+      headers['Content-Type'] = 'application/json';
+    }
+    return fetch(path, Object.assign({}, opts, { headers: headers }))
+      .then(function (r) {
+        return r.json().then(function (j) {
+          return { status: r.status, json: j };
+        }).catch(function () {
+          return { status: r.status, json: { ok: false, mesaj: 'JSON parse hatası' } };
+        });
+      });
+  }
+
+  function statusOptions(current) {
+    var opts = '';
+    if (current === 'not_granted') {
+      opts += '<option value="not_granted" selected>not_granted</option>';
+    }
+    STATUSES.forEach(function (s) {
+      opts += '<option value="' + s + '"' + (s === current ? ' selected' : '') + '>' + s + '</option>';
+    });
+    return opts;
+  }
+
+  function billingOptions(current) {
+    var cur = current || 'included';
+    var opts = '';
+    BILLING.forEach(function (s) {
+      opts += '<option value="' + s + '"' + (s === cur ? ' selected' : '') + '>' + s + '</option>';
+    });
+    return opts;
+  }
+
+  function loadTenants() {
+    return api('/admin/api/modules/tenants').then(function (res) {
+      if (!res.json.ok) throw new Error(res.json.mesaj || 'Kiracılar yüklenemedi');
+      tenantSel.innerHTML = '';
+      var opt0 = document.createElement('option');
+      opt0.value = '';
+      opt0.textContent = '— seçin —';
+      tenantSel.appendChild(opt0);
+      (res.json.tenants || []).forEach(function (t) {
+        var opt = document.createElement('option');
+        opt.value = String(t.id);
+        var label = t.slug;
+        if (t.company_name) label += ' — ' + t.company_name;
+        if (t.slug === 'public') label += ' (platform)';
+        opt.textContent = label;
+        tenantSel.appendChild(opt);
+      });
+      metaEl.textContent = (res.json.n || 0) + ' aktif kiracı';
+    });
+  }
+
+  function rowHtml(e) {
+    var badge = e.granted
+      ? ''
+      : '<span class="mod-badge warn">henüz yok</span>';
+    return '<tr data-module-key="' + escHtml(e.module_key) + '">' +
+      '<td><strong>' + escHtml(e.display_name) + '</strong>' +
+      ' <code style="color:#78909c;">' + escHtml(e.module_key) + '</code>' + badge + '</td>' +
+      '<td><select class="mod-f-status">' + statusOptions(e.status) + '</select></td>' +
+      '<td><select class="mod-f-billing">' + billingOptions(e.billing_mode) + '</select></td>' +
+      '<td><button type="button" class="btn-erp btn-erp-sm mod-save">Kaydet</button>' +
+      '<span class="mod-row-msg"></span></td>' +
+      '</tr>';
+  }
+
+  function loadEntitlements() {
+    var tid = tenantSel.value;
+    showErr('');
+    showOk('');
+    if (!tid) {
+      bodyEl.innerHTML = '<tr><td colspan="4" style="color:#78909c;">Kiracı seçin...</td></tr>';
+      return Promise.resolve();
+    }
+    bodyEl.innerHTML = '<tr><td colspan="4" style="color:#78909c;">Yükleniyor...</td></tr>';
+    return api('/admin/api/modules/entitlements?tenant_id=' + encodeURIComponent(tid))
+      .then(function (res) {
+        if (!res.json.ok) throw new Error(res.json.mesaj || 'Entitlement yüklenemedi');
+        var list = res.json.entitlements || [];
+        bodyEl.innerHTML = list.map(rowHtml).join('');
+        var t = res.json.tenant || {};
+        metaEl.textContent = 'Kiracı: ' + (t.slug || '') +
+          (t.company_name ? ' — ' + t.company_name : '') +
+          ' · ' + list.length + ' modül';
+      });
+  }
+
+  function saveRow(tr) {
+    var tid = tenantSel.value;
+    var msg = tr.querySelector('.mod-row-msg');
+    var status = tr.querySelector('.mod-f-status').value;
+    var billing = tr.querySelector('.mod-f-billing').value;
+    var moduleKey = tr.getAttribute('data-module-key');
+    msg.className = 'mod-row-msg';
+    msg.textContent = '';
+    if (!tid) {
+      msg.className = 'mod-row-msg err';
+      msg.textContent = 'kiracı seçin';
+      return;
+    }
+    if (status === 'not_granted') {
+      msg.className = 'mod-row-msg err';
+      msg.textContent = 'gerçek bir status seçin';
+      return;
+    }
+    api('/admin/api/modules/entitlements', {
+      method: 'PUT',
+      body: JSON.stringify({
+        tenant_id: parseInt(tid, 10),
+        module_key: moduleKey,
+        status: status,
+        billing_mode: billing
+      })
+    }).then(function (res) {
+      if (!res.json.ok) {
+        msg.className = 'mod-row-msg err';
+        msg.textContent = res.json.mesaj || ('HTTP ' + res.status);
+        return;
+      }
+      msg.className = 'mod-row-msg ok';
+      msg.textContent = 'kaydedildi';
+      showOk(moduleKey + ' → ' + status + ' / ' + billing);
+      return loadEntitlements();
+    }).catch(function (e) {
+      msg.className = 'mod-row-msg err';
+      msg.textContent = String(e.message || e);
+    });
+  }
+
+  bodyEl.addEventListener('click', function (ev) {
+    var btn = ev.target.closest('.mod-save');
+    if (!btn) return;
+    var tr = btn.closest('tr');
+    if (tr) saveRow(tr);
+  });
+
+  tenantSel.addEventListener('change', function () {
+    loadEntitlements().catch(function (e) { showErr(String(e.message || e)); });
+  });
+  document.getElementById('mod-yenile').addEventListener('click', function () {
+    loadTenants()
+      .then(loadEntitlements)
+      .then(function () { showOk('Yenilendi'); })
+      .catch(function (e) { showErr(String(e.message || e)); });
+  });
+
+  loadTenants()
+    .then(function () {
+      for (var j = 0; j < tenantSel.options.length; j++) {
+        var t = tenantSel.options[j].textContent || '';
+        if (t === 'test' || t.indexOf('test —') === 0 || t.indexOf('test ') === 0) {
+          tenantSel.selectedIndex = j;
+          break;
+        }
+      }
+      return loadEntitlements();
+    })
+    .catch(function (e) { showErr(String(e.message || e)); });
+})();
+</script>
+{% endblock %}
