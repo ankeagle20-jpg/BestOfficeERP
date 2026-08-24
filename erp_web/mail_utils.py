@@ -68,6 +68,21 @@ def send_password_reset_email(to_email, reset_url):
     return send_mail(to_email, subject, text)
 
 
+def send_verification_email(to_email, verify_url):
+    """Kayıt sonrası e-posta doğrulama bağlantısı."""
+    subject = "Payafin — E-postanızı doğrulayın"
+    text = (
+        "Merhaba,\n\n"
+        "Payafin hesabınız oluşturuldu. E-posta adresinizi doğrulamak için "
+        "aşağıdaki bağlantıya tıklayın:\n"
+        f"{verify_url}\n\n"
+        "Hesabınızı kullanmaya hemen başlayabilirsiniz; doğrulama yalnızca "
+        "e-posta adresinizin size ait olduğunu teyit eder.\n\n"
+        "Bu hesabı siz oluşturmadıysanız bu e-postayı yok sayın."
+    )
+    return send_mail(to_email, subject, text)
+
+
 def trigger_randevu_webhook(event, payload):
     """Randevu oluştur/iptal webhook — RANDEVU_WEBHOOK_URL tanımlıysa POST edilir."""
     try:

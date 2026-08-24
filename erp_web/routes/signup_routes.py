@@ -127,7 +127,7 @@ def _provision_worker(
     t0 = time.monotonic()
     with app.app_context():
         try:
-            provision_new_tenant(
+            result = provision_new_tenant(
                 slug,
                 plan=plan,
                 admin_username=admin_username,
@@ -140,6 +140,18 @@ def _provision_worker(
                 slug,
                 time.monotonic() - t0,
             )
+            try:
+                from email_verification import send_signup_verification_email
+
+                send_signup_verification_email(
+                    slug,
+                    int(result["admin_id"]),
+                    str(result["admin_username"]),
+                )
+            except Exception:
+                logger.exception(
+                    "signup verification email failed slug=%s", slug
+                )
         except Exception as exc:
             duration = time.monotonic() - t0
             user_msg = map_provision_error(exc)

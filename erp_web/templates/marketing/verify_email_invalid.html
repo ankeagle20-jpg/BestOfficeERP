@@ -1,0 +1,10 @@
+{% extends "marketing/marketing_layout.html" %}
+{% block title %}E-posta Doğrulama — Payafin{% endblock %}
+{% block content %}
+<div class="marketing-brand">
+  <div class="logo">PAYAFIN</div>
+  <h1>Doğrulama başarısız</h1>
+  <p style="text-align:center;color:#64748b;margin:16px 0 24px;">{{ message }}</p>
+  <a href="{{ login_url }}" class="btn-secondary">Giriş sayfasına dön</a>
+</div>
+{% endblock %}

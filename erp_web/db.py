@@ -585,6 +585,8 @@ def init_schema():
     ensure_tenant_user_lookup_table()
     ensure_password_reset_tokens_table()
     ensure_users_security_stamp_column()
+    ensure_users_email_verified_at_column()
+    ensure_email_verification_tokens_table()
     print("✅ Supabase şema oluşturuldu.")
 
 
@@ -2455,6 +2457,45 @@ def ensure_password_reset_tokens_table():
         )
     except Exception as e:
         print(f"password_reset_tokens indexes: {e}")
+
+
+def ensure_users_email_verified_at_column():
+    """E-posta doğrulama zaman damgası — users.email_verified_at (nullable, public)."""
+    execute(
+        "ALTER TABLE public.users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ"
+    )
+
+
+def ensure_email_verification_tokens_table():
+    """E-posta doğrulama tokenları — public.users FK."""
+    execute(
+        """
+        CREATE TABLE IF NOT EXISTS public.email_verification_tokens (
+            id          BIGSERIAL PRIMARY KEY,
+            user_id     INTEGER NOT NULL
+                REFERENCES public.users (id) ON DELETE CASCADE,
+            token_hash  TEXT NOT NULL,
+            expires_at  TIMESTAMPTZ NOT NULL,
+            used_at     TIMESTAMPTZ,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT email_verification_tokens_token_hash_key UNIQUE (token_hash)
+        )
+        """
+    )
+    try:
+        execute(
+            "CREATE INDEX IF NOT EXISTS email_verification_tokens_user_id_idx "
+            "ON public.email_verification_tokens (user_id)"
+        )
+        execute(
+            """
+            CREATE INDEX IF NOT EXISTS email_verification_tokens_expires_at_idx
+            ON public.email_verification_tokens (expires_at)
+            WHERE used_at IS NULL
+            """
+        )
+    except Exception as e:
+        print(f"email_verification_tokens indexes: {e}")
 
 
 def ensure_users_security_stamp_column():

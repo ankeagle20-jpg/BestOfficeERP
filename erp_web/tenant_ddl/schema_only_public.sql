@@ -2448,7 +2448,8 @@ CREATE TABLE public.users (
     last_login timestamp with time zone,
     aktif boolean DEFAULT true,
     son_giris timestamp with time zone,
-    security_stamp text NOT NULL
+    security_stamp text NOT NULL,
+    email_verified_at timestamp with time zone
 );
 
 
@@ -2504,6 +2505,39 @@ CREATE SEQUENCE public.password_reset_tokens_id_seq
 --
 
 ALTER SEQUENCE public.password_reset_tokens_id_seq OWNED BY public.password_reset_tokens.id;
+
+
+--
+-- Name: email_verification_tokens; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.email_verification_tokens (
+    id bigint NOT NULL,
+    user_id integer NOT NULL,
+    token_hash text NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    used_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: email_verification_tokens_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.email_verification_tokens_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: email_verification_tokens_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.email_verification_tokens_id_seq OWNED BY public.email_verification_tokens.id;
 
 
 --
@@ -2900,6 +2934,13 @@ ALTER TABLE ONLY public.users ALTER COLUMN id SET DEFAULT nextval('public.users_
 --
 
 ALTER TABLE ONLY public.password_reset_tokens ALTER COLUMN id SET DEFAULT nextval('public.password_reset_tokens_id_seq'::regclass);
+
+
+--
+-- Name: email_verification_tokens id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.email_verification_tokens ALTER COLUMN id SET DEFAULT nextval('public.email_verification_tokens_id_seq'::regclass);
 
 
 --
@@ -3566,6 +3607,22 @@ ALTER TABLE ONLY public.password_reset_tokens
 
 
 --
+-- Name: email_verification_tokens email_verification_tokens_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.email_verification_tokens
+    ADD CONSTRAINT email_verification_tokens_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: email_verification_tokens email_verification_tokens_token_hash_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.email_verification_tokens
+    ADD CONSTRAINT email_verification_tokens_token_hash_key UNIQUE (token_hash);
+
+
+--
 -- Name: web_users web_users_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3727,6 +3784,20 @@ CREATE INDEX password_reset_tokens_expires_at_idx ON public.password_reset_token
 --
 
 CREATE INDEX password_reset_tokens_user_id_idx ON public.password_reset_tokens USING btree (user_id);
+
+
+--
+-- Name: email_verification_tokens_expires_at_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX email_verification_tokens_expires_at_idx ON public.email_verification_tokens USING btree (expires_at) WHERE (used_at IS NULL);
+
+
+--
+-- Name: email_verification_tokens_user_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX email_verification_tokens_user_id_idx ON public.email_verification_tokens USING btree (user_id);
 
 
 --
@@ -4202,6 +4273,14 @@ ALTER TABLE ONLY public.tediyeler
 
 ALTER TABLE ONLY public.password_reset_tokens
     ADD CONSTRAINT password_reset_tokens_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: email_verification_tokens email_verification_tokens_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.email_verification_tokens
+    ADD CONSTRAINT email_verification_tokens_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
 
 
 --
