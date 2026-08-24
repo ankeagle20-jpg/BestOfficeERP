@@ -393,7 +393,7 @@
 <div id="mp-contact-modal" class="mp-modal-backdrop" hidden aria-hidden="true">
   <div class="mp-modal" role="dialog" aria-modal="true" aria-labelledby="mp-contact-title">
     <h3 id="mp-contact-title">Enterprise — Bize Ulaşın</h3>
-    <p class="mp-modal-sub">Personel Yönetimi için özel teklif. Formu doldurun; satış ekibimiz sizinle iletişime geçecek.</p>
+    <p class="mp-modal-sub" id="mp-contact-sub">Personel Yönetimi için özel teklif. Formu doldurun; satış ekibimiz sizinle iletişime geçecek.</p>
     <form id="mp-contact-form" novalidate>
       <div class="mp-hp" aria-hidden="true">
         <label>Website
@@ -419,11 +419,14 @@
             <option value="US">United States (US)</option>
           </select>
         </label>
-        <label>Tahmini personel
+        <label id="mp-contact-personnel-wrap">Tahmini personel
           <input type="number" name="estimated_personnel" id="mp-contact-personnel" min="0" step="1" value="51" required />
         </label>
-        <label>Tahmini şube
+        <label id="mp-contact-branches-wrap">Tahmini şube
           <input type="number" name="estimated_branches" id="mp-contact-branches" min="1" step="1" value="1" required />
+        </label>
+        <label id="mp-contact-appointments-wrap" style="display:none;">Tahmini aylık randevu
+          <input type="number" name="estimated_monthly_appointments" id="mp-contact-appointments" min="0" step="1" value="2500" />
         </label>
         <label class="full">Mesaj
           <textarea name="message" id="mp-contact-message" maxlength="4000" placeholder="İhtiyaçlarınızı kısaca yazın (isteğe bağlı)"></textarea>
@@ -999,9 +1002,41 @@
   const mpContactSubmit = document.getElementById("mp-contact-submit");
   const mpContactCancel = document.getElementById("mp-contact-cancel");
 
+  function syncContactFormFields() {
+    const isRv = contactModuleKey === "randevu";
+    const branchesWrap = document.getElementById("mp-contact-branches-wrap");
+    const apptWrap = document.getElementById("mp-contact-appointments-wrap");
+    const branchesEl = document.getElementById("mp-contact-branches");
+    const apptEl = document.getElementById("mp-contact-appointments");
+    const persEl = document.getElementById("mp-contact-personnel");
+    const subEl = document.getElementById("mp-contact-sub");
+    if (branchesWrap) branchesWrap.style.display = isRv ? "none" : "";
+    if (apptWrap) apptWrap.style.display = isRv ? "" : "none";
+    if (branchesEl) {
+      branchesEl.required = !isRv;
+      if (isRv) branchesEl.value = "0";
+    }
+    if (apptEl) {
+      apptEl.required = isRv;
+    }
+    if (subEl) {
+      subEl.textContent = isRv
+        ? "Randevu Yönetimi için özel teklif. Formu doldurun; satış ekibimiz sizinle iletişime geçecek."
+        : "Personel Yönetimi için özel teklif. Formu doldurun; satış ekibimiz sizinle iletişime geçecek.";
+    }
+    if (isRv) {
+      if (persEl && rvPersonnelEl) persEl.value = String(currentRvPersonnel());
+      if (apptEl && rvAppointmentsEl) apptEl.value = String(currentRvAppointments());
+    } else {
+      if (persEl && mpPersonnelEl) persEl.value = String(currentPersonnel());
+      if (branchesEl && mpBranchesEl) branchesEl.value = String(Math.max(1, currentBranches()));
+    }
+  }
+
   function openContactModal(moduleKey) {
     if (!mpContactModal) return;
     contactModuleKey = moduleKey || "personnel";
+    syncContactFormFields();
     mpContactStatus.className = "mp-form-status";
     mpContactStatus.textContent = "";
     mpContactModal.hidden = false;
@@ -1059,18 +1094,25 @@
       mpContactStatus.className = "mp-form-status";
       mpContactStatus.textContent = "";
       mpContactSubmit.disabled = true;
+      const mk = contactModuleKey || "personnel";
       const payload = {
-        module_key: contactModuleKey || "personnel",
+        module_key: mk,
         company_name: document.getElementById("mp-contact-company").value,
         contact_name: document.getElementById("mp-contact-name").value,
         email: document.getElementById("mp-contact-email").value,
         phone: document.getElementById("mp-contact-phone").value,
         country_code: document.getElementById("mp-contact-country").value,
         estimated_personnel: document.getElementById("mp-contact-personnel").value,
-        estimated_branches: document.getElementById("mp-contact-branches").value,
+        estimated_branches: mk === "randevu"
+          ? "0"
+          : document.getElementById("mp-contact-branches").value,
         message: document.getElementById("mp-contact-message").value,
         website: document.getElementById("mp-contact-website").value
       };
+      if (mk === "randevu") {
+        payload.estimated_monthly_appointments =
+          document.getElementById("mp-contact-appointments").value;
+      }
       try {
         const res = await fetch("/api/module-pricing/contact", {
           method: "POST",
@@ -1094,6 +1136,9 @@
         document.getElementById("mp-contact-country").value = "TR";
         document.getElementById("mp-contact-personnel").value = "51";
         document.getElementById("mp-contact-branches").value = "1";
+        const apptReset = document.getElementById("mp-contact-appointments");
+        if (apptReset) apptReset.value = "2500";
+        syncContactFormFields();
       } catch (e) {
         mpContactStatus.className = "mp-form-status is-err";
         mpContactStatus.textContent =

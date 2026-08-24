@@ -21,6 +21,11 @@ bp = Blueprint("public_pricing", __name__)
 
 _PHONE_RE = re.compile(r"^[\d\s+\-().]{7,32}$")
 
+_MODULE_CONTACT_LABELS = {
+    "personnel": "Personel",
+    "randevu": "Randevu",
+}
+
 
 def _country_query_param() -> str:
     cc = (request.args.get("country") or request.args.get("country_code") or "TR").strip().upper()
@@ -141,20 +146,49 @@ def api_module_pricing_contact():
     if not message:
         message = None
 
+    estimated_monthly_appointments = None
     try:
         estimated_personnel = _parse_nonneg_int(
             "estimated_personnel", body.get("estimated_personnel"), required=True
         )
-        estimated_branches = _parse_nonneg_int(
-            "estimated_branches", body.get("estimated_branches"), required=True
-        )
+        if mk == "randevu":
+            # Randevu: personel + aylık randevu zorunlu; şube yok (0 kaydedilir)
+            estimated_monthly_appointments = _parse_nonneg_int(
+                "estimated_monthly_appointments",
+                body.get("estimated_monthly_appointments"),
+                required=True,
+            )
+            estimated_branches = _parse_nonneg_int(
+                "estimated_branches",
+                body.get("estimated_branches"),
+                required=False,
+            )
+            if estimated_branches is None:
+                estimated_branches = 0
+        else:
+            estimated_branches = _parse_nonneg_int(
+                "estimated_branches", body.get("estimated_branches"), required=True
+            )
+            # Personel formu appointments göndermeyebilir
+            if body.get("estimated_monthly_appointments") not in (None, ""):
+                estimated_monthly_appointments = _parse_nonneg_int(
+                    "estimated_monthly_appointments",
+                    body.get("estimated_monthly_appointments"),
+                    required=False,
+                )
     except ValueError as e:
         errors["estimates"] = str(e)
         estimated_personnel = None
         estimated_branches = None
+        estimated_monthly_appointments = None
 
     if errors:
         return jsonify({"ok": False, "mesaj": "Doğrulama hatası.", "errors": errors}), 400
+
+    # Randevu tahmini randevu sayısını lead mesajında da sakla (mevcut şema)
+    if mk == "randevu" and estimated_monthly_appointments is not None:
+        appt_line = f"Tahmini aylık randevu: {estimated_monthly_appointments}"
+        message = f"{appt_line}\n\n{message}" if message else appt_line
 
     region = fetch_one(
         """
@@ -210,19 +244,26 @@ def api_module_pricing_contact():
     ).strip()
     mail_ok = False
     if sales_to and lead_id is not None:
-        subject = f"[Payafin] Personel Enterprise talebi #{lead_id} ({cc})"
+        mod_label = _MODULE_CONTACT_LABELS.get(mk, mk)
+        subject = f"[Payafin] {mod_label} Enterprise talebi #{lead_id} ({cc})"
+        estimate_lines = f"Tahmini personel: {estimated_personnel}\n"
+        if mk == "randevu":
+            estimate_lines += (
+                f"Tahmini aylık randevu: {estimated_monthly_appointments}\n"
+            )
+        else:
+            estimate_lines += f"Tahmini şube: {estimated_branches}\n"
         body_text = (
             f"Yeni Enterprise iletişim talebi\n"
             f"────────────────────────────\n"
             f"Lead ID: {lead_id}\n"
-            f"Modül: {mk}\n"
+            f"Modül: {mk} ({mod_label})\n"
             f"Ülke: {cc}\n"
             f"Şirket: {company_name}\n"
             f"Yetkili: {contact_name}\n"
             f"E-posta: {email}\n"
             f"Telefon: {phone or '—'}\n"
-            f"Tahmini personel: {estimated_personnel}\n"
-            f"Tahmini şube: {estimated_branches}\n"
+            f"{estimate_lines}"
             f"Mesaj:\n{message or '—'}\n"
         )
         try:
