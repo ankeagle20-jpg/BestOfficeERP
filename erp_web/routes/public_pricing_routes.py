@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import logging
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, render_template, request
 
 from pricing_public_cache import get_public_pricing
+from routes.signup_routes import platform_public_only
 
 logger = logging.getLogger(__name__)
 
@@ -38,3 +39,10 @@ def api_pricing_public():
         return jsonify({"ok": False, "mesaj": f"bilinmeyen veya pasif ülke: {cc}"}), 404
 
     return jsonify(payload)
+
+
+@bp.route("/fiyatlandirma", methods=["GET"])
+@platform_public_only
+def fiyatlandirma_page():
+    """Payafin apex — görsel fiyatlandırma sayfası (herkese açık)."""
+    return render_template("marketing/fiyatlandirma.html")

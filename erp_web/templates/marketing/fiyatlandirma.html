@@ -1,0 +1,214 @@
+{% extends "marketing/marketing_layout.html" %}
+{% block title %}Fiyatlandırma — Payafin{% endblock %}
+
+{% block head_extra %}
+<style>
+  .marketing-shell { align-items: flex-start; padding-top: 32px; padding-bottom: 48px; }
+  .marketing-card { max-width: 1080px; }
+  .marketing-nav {
+    display: flex;
+    justify-content: center;
+    gap: 20px;
+    margin-bottom: 20px;
+    font-size: 0.92rem;
+  }
+  .marketing-nav a {
+    color: var(--accent);
+    text-decoration: none;
+    font-weight: 600;
+  }
+  .marketing-nav a:hover { text-decoration: underline; }
+  .pricing-intro { text-align: center; margin-bottom: 28px; }
+  .pricing-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+  .tier-card {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 16px;
+    background: #fafbfc;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .tier-card h3 {
+    margin: 0;
+    font-size: 1.05rem;
+    color: #0f172a;
+  }
+  .tier-range {
+    font-size: 0.85rem;
+    color: var(--muted);
+    font-weight: 600;
+  }
+  .tier-price {
+    font-size: 1.35rem;
+    font-weight: 800;
+    color: var(--accent);
+    line-height: 1.2;
+  }
+  .tier-price small {
+    display: block;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--muted);
+    margin-top: 4px;
+  }
+  .tier-details {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: 0.88rem;
+    color: #334155;
+  }
+  .tier-details li { margin-bottom: 6px; }
+  .tier-details li strong { color: #0f172a; }
+  .overage-note {
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    border-radius: 8px;
+    padding: 14px 16px;
+    font-size: 0.9rem;
+    color: #1e3a8a;
+    margin-bottom: 24px;
+  }
+  .pricing-error {
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    color: var(--err);
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin-bottom: 20px;
+    display: none;
+  }
+  .pricing-loading {
+    text-align: center;
+    color: var(--muted);
+    padding: 32px 0;
+  }
+  .pricing-cta { text-align: center; margin-top: 8px; }
+  .pricing-cta .btn-primary { max-width: 320px; margin-left: auto; margin-right: auto; }
+</style>
+{% endblock %}
+
+{% block content %}
+<nav class="marketing-nav" aria-label="Ana menü">
+  <a href="/">Ana sayfa</a>
+  <a href="/signup">Kayıt ol</a>
+</nav>
+
+<div class="marketing-brand">
+  <div class="logo">PAYAFIN</div>
+  <h1>Fiyatlandırma</h1>
+  <p class="pricing-intro">Türkiye — müşteri hacmine göre esnek planlar. 14 gün deneme.</p>
+</div>
+
+<div id="pricing-error" class="pricing-error" role="alert"></div>
+<div id="pricing-loading" class="pricing-loading">Planlar yükleniyor…</div>
+<div id="pricing-grid" class="pricing-grid" hidden></div>
+<div id="overage-note" class="overage-note" hidden></div>
+
+<div class="pricing-cta">
+  <a href="/signup" class="btn-primary">Kayıt Ol</a>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const gridEl = document.getElementById("pricing-grid");
+  const loadingEl = document.getElementById("pricing-loading");
+  const errorEl = document.getElementById("pricing-error");
+  const overageEl = document.getElementById("overage-note");
+
+  function currencySymbol(code) {
+    if (code === "TRY") return "₺";
+    return code || "";
+  }
+
+  function formatMoney(value, currency) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return "—";
+    const sym = currencySymbol(currency);
+    return n.toLocaleString("tr-TR", { maximumFractionDigits: 2 }) + " " + sym;
+  }
+
+  function customerRange(tier) {
+    const min = tier.min_customers;
+    const max = tier.max_customers;
+    if (max == null || max >= 999999) {
+      return min + "+ müşteri";
+    }
+    return min + "-" + max + " müşteri";
+  }
+
+  function showError(message) {
+    errorEl.textContent = message;
+    errorEl.style.display = "block";
+    loadingEl.style.display = "none";
+    gridEl.hidden = true;
+    overageEl.hidden = true;
+  }
+
+  function renderTier(tier, currency) {
+    const card = document.createElement("article");
+    card.className = "tier-card";
+    card.innerHTML =
+      "<h3>" + escapeHtml(tier.display_name) + "</h3>" +
+      "<div class=\"tier-range\">" + escapeHtml(customerRange(tier)) + "</div>" +
+      "<div class=\"tier-price\">" + formatMoney(tier.base_monthly, currency) +
+      "<small>taban aylık ücret</small></div>" +
+      "<ul class=\"tier-details\">" +
+      "<li>Müşteri başı: <strong>" + formatMoney(tier.price_per_customer, currency) + "</strong></li>" +
+      "<li>Dahil kullanıcı: <strong>" + escapeHtml(String(tier.included_users)) + "</strong></li>" +
+      "<li>Ek kullanıcı: <strong>" + formatMoney(tier.price_per_extra_user, currency) + "</strong></li>" +
+      "</ul>";
+    return card;
+  }
+
+  function escapeHtml(text) {
+    const d = document.createElement("div");
+    d.textContent = text == null ? "" : String(text);
+    return d.innerHTML;
+  }
+
+  function renderOverage(overage, currency) {
+    if (!overage) return;
+    const sym = currencySymbol(currency);
+    const pack = Number(overage.pack_price);
+    const packFmt = pack.toLocaleString("tr-TR", { maximumFractionDigits: 2 }) + " " + sym;
+    overageEl.textContent =
+      overage.threshold_customers + "+ müşteri için otomatik paket: " +
+      overage.pack_size + " müşteri / " + packFmt + " (aylık ek paket).";
+    overageEl.hidden = false;
+  }
+
+  async function loadPricing() {
+    try {
+      const res = await fetch("/api/pricing/public?country=TR", {
+        headers: { Accept: "application/json" }
+      });
+      const data = await res.json().catch(function () { return {}; });
+      if (!res.ok || !data.ok || !Array.isArray(data.tiers) || !data.tiers.length) {
+        showError(data.mesaj || "Fiyatlandırma bilgisi şu an yüklenemedi. Lütfen daha sonra tekrar deneyin.");
+        return;
+      }
+      loadingEl.style.display = "none";
+      gridEl.hidden = false;
+      gridEl.innerHTML = "";
+      data.tiers.forEach(function (tier) {
+        gridEl.appendChild(renderTier(tier, data.currency));
+      });
+      renderOverage(data.overage, data.currency);
+    } catch (e) {
+      showError("Bağlantı hatası. Lütfen internet bağlantınızı kontrol edip tekrar deneyin.");
+    }
+  }
+
+  loadPricing();
+})();
+</script>
+{% endblock %}
