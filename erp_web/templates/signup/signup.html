@@ -1,5 +1,15 @@
 {% extends "signup/signup_layout.html" %}
 {% block title %}Payafin — Kayıt{% endblock %}
+{% block head_extra %}
+<style>
+  .module-pick-label { display:block; font-size:0.875rem; font-weight:600; margin-bottom:8px; color:#334155; }
+  .module-option { display:flex; align-items:center; gap:8px; font-size:0.95rem; font-weight:500; margin-bottom:8px; cursor:pointer; color:#334155; }
+  .module-option input { width:auto; margin:0; }
+  .module-pick { background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:12px 14px; margin-bottom:16px; }
+  .module-pick-hint { font-size:0.8rem; color:#64748b; margin:0 0 10px; }
+</style>
+{% endblock %}
+
 {% block content %}
 <div id="panel-form" class="panel active">
   <div class="signup-brand">
@@ -50,6 +60,19 @@
       <div id="pricing-box" class="pricing-box" style="display:none"></div>
       <div class="field-error" data-error-for="country_code"></div>
     </div>
+    <div class="field module-pick">
+      <span class="module-pick-label">Hangi modülleri denemek istersiniz?</span>
+      <p class="module-pick-hint">14 günlük deneme — istediğiniz modülleri seçin (temel ERP her zaman dahildir).</p>
+      <label class="module-option" for="mod_personnel">
+        <input type="checkbox" id="mod_personnel" name="selected_modules" value="personnel" checked>
+        Personel Yönetimi
+      </label>
+      <label class="module-option" for="mod_randevu">
+        <input type="checkbox" id="mod_randevu" name="selected_modules" value="randevu" checked>
+        Randevu Yönetimi
+      </label>
+    </div>
+
     <div class="hp-field" aria-hidden="true">
       <label for="website">Website</label>
       <input id="website" name="website" type="text" tabindex="-1" autocomplete="off">
@@ -115,6 +138,15 @@
   let slugTimer = null;
   let slugOk = false;
   let pollTimer = null;
+
+  function collectSelectedModules() {
+    const out = [];
+    document.querySelectorAll('input[name="selected_modules"]:checked').forEach(function (el) {
+      if (el.value) out.push(el.value);
+    });
+    return out;
+  }
+
 
   function normalizeSlug(raw) {
     let s = String(raw || "").trim().toLowerCase();
@@ -251,7 +283,8 @@
       password_confirm: document.getElementById("password_confirm").value,
       admin_full_name: document.getElementById("admin_full_name").value.trim(),
       country_code: "TR",
-      website: document.getElementById("website").value
+      website: document.getElementById("website").value,
+      selected_modules: collectSelectedModules()
     };
     try {
       const res = await fetch("/api/signup", {

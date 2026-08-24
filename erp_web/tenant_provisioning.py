@@ -20,6 +20,7 @@ from db import (
     _TENANT_SCHEMA_RE,
     db,
     ensure_platform_tenants_table,
+    ensure_tenant_module_entitlements_table,
     execute,
     fetch_one,
 )
@@ -27,6 +28,9 @@ from signup_provision_errors import MSG_GENERIC, sanitize_public_error_message
 from tenant_reserved_slugs import RESERVED_TENANT_SLUGS
 
 logger = logging.getLogger(__name__)
+
+BASELINE_MODULE_KEY = "core_erp"
+SIGNUP_SELECTABLE_MODULE_KEYS: frozenset[str] = frozenset({"personnel", "randevu"})
 
 BACKUP_TABLE = "musteri_tahsilat_panel_detay_backup_20260617"
 PLATFORM_STRIP_TABLES = (
@@ -433,6 +437,81 @@ def _register_tenant_user_lookup(slug: str, username: str) -> None:
         logger.exception("tenant_user_lookup insert failed slug=%s", slug)
 
 
+def normalize_signup_selected_modules(selected_module_keys) -> list[str]:
+    """Signup body selected_modules → izinli, benzersiz module_key listesi."""
+    if not selected_module_keys:
+        return []
+    out: list[str] = []
+    for raw in selected_module_keys:
+        mk = str(raw or "").strip().lower()
+        if mk in SIGNUP_SELECTABLE_MODULE_KEYS and mk not in out:
+            out.append(mk)
+    return out
+
+
+def grant_default_module_entitlements(
+    tenant_id: int,
+    tenant_slug: str,
+    selected_module_keys: list | tuple | None = None,
+) -> int:
+    """Yeni kiracı: core_erp (baseline) + seçilen modüller için trial entitlement."""
+    ensure_tenant_module_entitlements_table()
+    tid = int(tenant_id)
+    slug = str(tenant_slug).strip()
+    selected = normalize_signup_selected_modules(selected_module_keys)
+
+    modules_to_grant: list[tuple[str, str]] = [
+        (BASELINE_MODULE_KEY, "included"),
+    ]
+    for mk in selected:
+        modules_to_grant.append((mk, "standalone"))
+
+    inserted = 0
+    for module_key, billing_mode in modules_to_grant:
+        before = fetch_one(
+            """
+            SELECT 1 AS ok
+            FROM public.tenant_module_entitlements
+            WHERE tenant_id = %s AND module_key = %s
+            """,
+            (tid, module_key),
+        )
+        execute(
+            """
+            INSERT INTO public.tenant_module_entitlements (
+                tenant_id, tenant_slug, module_key, status, billing_mode,
+                source_plan, source_reference, metadata
+            )
+            VALUES (
+                %s, %s, %s, 'trial', %s,
+                'trial', 'signup_provision',
+                '{"note": "Signup provisioning — baseline + selected modules"}'::jsonb
+            )
+            ON CONFLICT (tenant_id, module_key) DO NOTHING
+            """,
+            (tid, slug, module_key, billing_mode),
+        )
+        after = fetch_one(
+            """
+            SELECT 1 AS ok
+            FROM public.tenant_module_entitlements
+            WHERE tenant_id = %s AND module_key = %s
+            """,
+            (tid, module_key),
+        )
+        if after and not before:
+            inserted += 1
+
+    logger.info(
+        "grant_default_module_entitlements tenant_id=%s slug=%s selected=%s inserted=%s",
+        tid,
+        slug,
+        selected,
+        inserted,
+    )
+    return inserted
+
+
 def provision_new_tenant(
     slug: str,
     *,
@@ -442,6 +521,7 @@ def provision_new_tenant(
     admin_full_name: str | None = None,
     dump_path: Path | None = None,
     allow_existing_provisioning_row: bool = False,
+    selected_module_keys: list | tuple | None = None,
 ) -> dict:
     """Yeni kiracı: şema + DDL replay + admin + public.tenants kaydı.
 
@@ -520,6 +600,13 @@ def provision_new_tenant(
         raise
 
     row = fetch_one("SELECT id, slug, schema_name, plan, status FROM public.tenants WHERE slug=%s", (slug,))
+    if not row:
+        raise TenantProvisionError("kiracı kaydı okunamadı")
+    ent_inserted = grant_default_module_entitlements(
+        int(row["id"]),
+        slug,
+        selected_module_keys,
+    )
     return {
         "ok": True,
         "slug": slug,
@@ -529,4 +616,6 @@ def provision_new_tenant(
         "admin_id": admin_id,
         "tenant": row,
         "ddl_path": str(sql_path),
+        "module_entitlements_inserted": ent_inserted,
+        "selected_module_keys": normalize_signup_selected_modules(selected_module_keys),
     }

@@ -28,6 +28,7 @@ from tenant_provisioning import (
     TenantSlugConflictError,
     TenantSlugReserveError,
     mark_tenant_provision_failed,
+    normalize_signup_selected_modules,
     provision_new_tenant,
     reserve_tenant_slug,
     schema_name_for_slug,
@@ -115,6 +116,16 @@ def _fake_success_payload(slug: str) -> dict:
     }
 
 
+def _parse_selected_modules(data: dict) -> list[str]:
+    """Request body selected_modules — geçersiz değerler sessizce elenir."""
+    raw = data.get("selected_modules")
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        return []
+    return normalize_signup_selected_modules(raw)
+
+
 def _provision_worker(
     app,
     slug: str,
@@ -123,6 +134,7 @@ def _provision_worker(
     admin_password: str,
     admin_full_name: str,
     plan: str,
+    selected_module_keys: list[str] | None = None,
 ) -> None:
     t0 = time.monotonic()
     with app.app_context():
@@ -134,6 +146,7 @@ def _provision_worker(
                 admin_password=admin_password,
                 admin_full_name=admin_full_name,
                 allow_existing_provisioning_row=True,
+                selected_module_keys=selected_module_keys or [],
             )
             logger.info(
                 "signup_provision ok slug=%s duration_sec=%.1f",
@@ -298,6 +311,7 @@ def api_signup():
         return jsonify({"ok": False, "mesaj": "Kayıt tamamlanamadı, bilgileri kontrol edin."}), 400
 
     app_obj = current_app._get_current_object()
+    selected_modules = _parse_selected_modules(data)
     thread = threading.Thread(
         target=_provision_worker,
         kwargs={
@@ -307,6 +321,7 @@ def api_signup():
             "admin_password": str(password),
             "admin_full_name": str(data.get("admin_full_name") or "").strip(),
             "plan": "trial",
+            "selected_module_keys": selected_modules,
         },
         name=f"provision-{slug}",
         daemon=True,
