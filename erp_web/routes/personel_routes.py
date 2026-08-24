@@ -13,6 +13,7 @@ from db import fetch_all, fetch_one, execute, execute_returning
 from datetime import date, datetime, timedelta
 from utils.devam_bulut_sync import sync_devam_gunu_buluta
 from routes.pdovam_routes import pdovam_toplam_fark_dk_for_personel
+from tenant_module_access import check_module_access
 
 _PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if _PROJECT_ROOT not in sys.path:
@@ -243,6 +244,12 @@ def _fark_toplam_dk_from_events(events: list[dict]) -> int:
     return int(total)
 
 bp = Blueprint("personel", __name__)
+
+
+@bp.before_request
+def _require_personnel_module():
+    """Faz 3 pilot: tüm /personel/* için personnel entitlement."""
+    return check_module_access("personnel")
 
 
 def _parse_date(s):

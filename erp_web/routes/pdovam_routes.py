@@ -20,6 +20,7 @@ from utils.devam_bulut_sync import insert_devam_bulut_satir, sync_devam_gunu_bul
 from flask_login import login_required, current_user
 from db import fetch_all, fetch_one, execute
 from datetime import date, datetime
+from tenant_module_access import check_module_access
 try:
     from zoneinfo import ZoneInfo
 except ImportError:
@@ -36,6 +37,13 @@ except ImportError:  # supabase-python yüklü değilse, entegrasyon sessizce de
     create_client = None
 
 bp = Blueprint("pdovam", __name__)
+
+
+@bp.before_request
+def _require_personnel_module():
+    """Faz 3 pilot: tüm /pdovam/* için personnel entitlement."""
+    return check_module_access("personnel")
+
 
 # Ürün kararı (AŞAMA 0): otomatik çıkış yalnızca açık giriş varken; giriş yoksa yazılmaz.
 # Ayrıntı: routes/_NOT_pdevam_anlik_izin_a0.txt

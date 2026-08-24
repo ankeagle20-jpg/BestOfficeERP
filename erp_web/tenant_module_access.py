@@ -131,39 +131,55 @@ def _deny_response(message: str):
     return message, 403
 
 
+def check_module_access(module_key: str):
+    """before_request / dekoratör ortak guard.
+
+    İzin varsa None; yoksa JSON/HTML 403 yanıtı.
+    OPTIONS istekleri geçirilir (CORS preflight).
+    """
+    if request.method == "OPTIONS":
+        return None
+
+    mk = str(module_key or "").strip()
+    if not mk:
+        logger.warning("check_module_access empty module_key path=%s", request.path)
+        return _deny_response(MSG_MODULE_DENIED)
+
+    tenant_id = resolve_request_tenant_id()
+    if tenant_id is None:
+        logger.warning(
+            "check_module_access tenant unresolved module=%s path=%s schema=%s",
+            mk,
+            request.path,
+            getattr(g, "tenant_schema", None),
+        )
+        return _deny_response(MSG_TENANT_UNRESOLVED)
+
+    if not has_module_entitlement(tenant_id, mk):
+        logger.info(
+            "check_module_access denied tenant_id=%s module=%s path=%s",
+            tenant_id,
+            mk,
+            request.path,
+        )
+        return _deny_response(MSG_MODULE_DENIED)
+
+    return None
+
+
 def module_required(module_key: str):
     """Route guard: geçerli entitlement yoksa 403.
 
-    Faz 3'e kadar üretim route'larına uygulanmaz — yalnızca altyapı sözleşmesi.
+    Blueprint genelinde koruma için check_module_access + @bp.before_request tercih edilir.
     """
     mk = str(module_key or "").strip()
 
     def decorator(f):
         @wraps(f)
         def wrapped(*args, **kwargs):
-            if not mk:
-                logger.warning("module_required empty module_key path=%s", request.path)
-                return _deny_response(MSG_MODULE_DENIED)
-
-            tenant_id = resolve_request_tenant_id()
-            if tenant_id is None:
-                logger.warning(
-                    "module_required tenant unresolved module=%s path=%s schema=%s",
-                    mk,
-                    request.path,
-                    getattr(g, "tenant_schema", None),
-                )
-                return _deny_response(MSG_TENANT_UNRESOLVED)
-
-            if not has_module_entitlement(tenant_id, mk):
-                logger.info(
-                    "module_required denied tenant_id=%s module=%s path=%s",
-                    tenant_id,
-                    mk,
-                    request.path,
-                )
-                return _deny_response(MSG_MODULE_DENIED)
-
+            denied = check_module_access(mk)
+            if denied is not None:
+                return denied
             return f(*args, **kwargs)
 
         return wrapped
