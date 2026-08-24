@@ -22,11 +22,21 @@ MSG_PLATFORM_ONLY = (
     "Platform modül fiyatlandırması yalnızca ana (public) host'ta kullanılabilir."
 )
 
-# Aşama C: şimdilik yalnız Personel Yönetimi
+# Personel + Randevu (genişletme; Personel davranışı aynen)
 MODULE_OPTIONS: tuple[tuple[str, str], ...] = (
     ("personnel", "Personel Yönetimi"),
+    ("randevu", "Randevu Yönetimi"),
 )
 MODULE_KEYS = frozenset(k for k, _ in MODULE_OPTIONS)
+
+_TIER_SELECT_COLS = """
+        id, module_key, country_code, currency, tier_key, display_name,
+        base_monthly, price_per_personnel, max_personnel,
+        included_branches, price_per_extra_branch,
+        included_monthly_appointments, included_personnel,
+        is_contact_sales, annual_discount_months, setup_fee,
+        sort_order, is_active
+"""
 
 
 def _json403(msg: str):
@@ -89,6 +99,16 @@ def _tier_row_to_json(row: dict) -> dict:
         ),
         "included_branches": int(row["included_branches"]),
         "price_per_extra_branch": float(row["price_per_extra_branch"]),
+        "included_monthly_appointments": (
+            None
+            if row.get("included_monthly_appointments") is None
+            else int(row["included_monthly_appointments"])
+        ),
+        "included_personnel": (
+            None
+            if row.get("included_personnel") is None
+            else int(row["included_personnel"])
+        ),
         "is_contact_sales": bool(row["is_contact_sales"]),
         "annual_discount_months": int(row["annual_discount_months"]),
         "setup_fee": float(row["setup_fee"]),
@@ -146,12 +166,8 @@ def api_module_pricing_tiers():
         return jsonify({"ok": False, "mesaj": "geçersiz country"}), 400
 
     rows = fetch_all(
-        """
-        SELECT id, module_key, country_code, currency, tier_key, display_name,
-               base_monthly, price_per_personnel, max_personnel,
-               included_branches, price_per_extra_branch,
-               is_contact_sales, annual_discount_months, setup_fee,
-               sort_order, is_active
+        f"""
+        SELECT {_TIER_SELECT_COLS}
         FROM public.module_pricing_tiers
         WHERE module_key = %s AND country_code = %s
         ORDER BY sort_order, id
@@ -187,6 +203,7 @@ def api_module_pricing_tier_update(tier_id: int):
     if str(row["module_key"]) not in MODULE_KEYS:
         return jsonify({"ok": False, "mesaj": "bu modül yönetilemez"}), 400
 
+    mk = str(row["module_key"])
     try:
         base_monthly = _parse_decimal("base_monthly", body.get("base_monthly"))
         price_per_personnel = _parse_decimal(
@@ -211,38 +228,77 @@ def api_module_pricing_tier_update(tier_id: int):
             annual_discount_months=annual_discount_months,
             is_contact_sales=is_contact_sales,
         )
+        # Randevu kolonları: negatif olamaz veya NULL (Personel UPDATE'ine dokunulmaz)
+        included_monthly_appointments = None
+        included_personnel = None
+        if mk == "randevu":
+            included_monthly_appointments = _parse_int_nonneg(
+                "included_monthly_appointments",
+                body.get("included_monthly_appointments"),
+                allow_null=True,
+            )
+            included_personnel = _parse_int_nonneg(
+                "included_personnel",
+                body.get("included_personnel"),
+                allow_null=True,
+            )
     except ValueError as e:
         return jsonify({"ok": False, "mesaj": str(e)}), 400
 
-    execute(
-        """
-        UPDATE public.module_pricing_tiers
-        SET base_monthly = %s,
-            price_per_personnel = %s,
-            max_personnel = %s,
-            price_per_extra_branch = %s,
-            annual_discount_months = %s,
-            is_active = %s,
-            updated_at = NOW()
-        WHERE id = %s
-        """,
-        (
-            str(base_monthly),
-            str(price_per_personnel),
-            max_personnel,
-            str(price_per_extra_branch),
-            annual_discount_months,
-            is_active,
-            tier_id,
-        ),
-    )
+    if mk == "randevu":
+        execute(
+            """
+            UPDATE public.module_pricing_tiers
+            SET base_monthly = %s,
+                price_per_personnel = %s,
+                max_personnel = %s,
+                price_per_extra_branch = %s,
+                annual_discount_months = %s,
+                included_monthly_appointments = %s,
+                included_personnel = %s,
+                is_active = %s,
+                updated_at = NOW()
+            WHERE id = %s
+            """,
+            (
+                str(base_monthly),
+                str(price_per_personnel),
+                max_personnel,
+                str(price_per_extra_branch),
+                annual_discount_months,
+                included_monthly_appointments,
+                included_personnel,
+                is_active,
+                tier_id,
+            ),
+        )
+    else:
+        # Personel: mevcut kolon seti aynen (included_* dokunulmaz)
+        execute(
+            """
+            UPDATE public.module_pricing_tiers
+            SET base_monthly = %s,
+                price_per_personnel = %s,
+                max_personnel = %s,
+                price_per_extra_branch = %s,
+                annual_discount_months = %s,
+                is_active = %s,
+                updated_at = NOW()
+            WHERE id = %s
+            """,
+            (
+                str(base_monthly),
+                str(price_per_personnel),
+                max_personnel,
+                str(price_per_extra_branch),
+                annual_discount_months,
+                is_active,
+                tier_id,
+            ),
+        )
     updated = fetch_one(
-        """
-        SELECT id, module_key, country_code, currency, tier_key, display_name,
-               base_monthly, price_per_personnel, max_personnel,
-               included_branches, price_per_extra_branch,
-               is_contact_sales, annual_discount_months, setup_fee,
-               sort_order, is_active
+        f"""
+        SELECT {_TIER_SELECT_COLS}
         FROM public.module_pricing_tiers
         WHERE id = %s
         """,
@@ -276,6 +332,17 @@ def api_module_pricing_preview():
             if tier_key_raw is None or str(tier_key_raw).strip() == ""
             else str(tier_key_raw).strip()
         )
+        appointment_count = None
+        if mk == "randevu":
+            appointment_count = _parse_int_nonneg(
+                "appointment_count", body.get("appointment_count")
+            )
+        elif body.get("appointment_count") is not None and body.get(
+            "appointment_count"
+        ) != "":
+            appointment_count = _parse_int_nonneg(
+                "appointment_count", body.get("appointment_count")
+            )
         bill = calculate_module_bill(
             mk,
             cc,
@@ -283,6 +350,7 @@ def api_module_pricing_preview():
             branch_count,
             billing_period=billing_period,
             tier_key=tier_key,
+            appointment_count=appointment_count,
         )
         return jsonify({"ok": True, "bill": bill})
     except ValueError as e:
