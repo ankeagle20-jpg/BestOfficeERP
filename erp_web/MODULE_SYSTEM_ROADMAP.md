@@ -7,7 +7,10 @@
 
 > **NOT:** Sprint 1 (entitlement veri + okuma + Personel/Pdovam pilotu +
 > `/admin/modules` paneli + UI gating) **TAMAMEN tamamlandı**. Sprint 2
-> (ikinci pilot / fiyatlandırma / signup modül seçimi) için ayrı onay gerekir.
+> kapsamında Randevu ikinci pilot (route-bazlı koruma), kritik signup
+> entitlement düzeltmesi + kayıt formu modül seçimi **TAMAMLANDI**;
+> fiyatlandırma genişlemelerinin bir kısmı da tamamlandı (Personel +
+> Randevu hibrit fiyatlandırma A–E).
 
 ## Genel Hedef
 
@@ -1327,7 +1330,7 @@ Bitti kriteri:
 
 - “hangi tenant hangi modülü alabilir?” sorusuna yazılı, net cevap verilebilir
 
-### Sprint 2 — Backend guard + UI gating pilotu
+### Sprint 2 — Backend guard + UI gating pilotu + signup entitlement
 
 Tahmini süre:
 
@@ -1335,25 +1338,28 @@ Tahmini süre:
 
 Kapsam:
 
-- entitlement lookup katmanı
-- backend guard
-- menü / UI filtreleme
-- pilot modül rollout’u
+- entitlement lookup katmanı ✅
+- backend guard ✅ (Personel: blueprint `before_request`; Randevu: route-bazlı `@module_required`)
+- menü / UI filtreleme ✅ (Sprint 1)
+- pilot modül rollout’u ✅ (`personnel` + `randevu` yönetim route’ları)
+- signup modül seçimi + provizyon sonrası entitlement seed ✅ (e7c782c)
 
 Önerilen pilot:
 
-- önce `personnel`
-- sonra `randevu` yönetim route’ları
+- önce `personnel` ✅
+- sonra `randevu` yönetim route’ları ✅
 
 Ana riskler:
 
 - backend ve UI davranışı uyumsuz olabilir
-- public route’larda yanlış kapama yaşanabilir
+- public route’larda yanlış kapama yaşanabilir — Randevu’da route-bazlı koruma ile giderildi
 - cache / stale entitlement problemi çıkabilir
+- yeni signup kiracılarına entitlement verilmemesi — **kapatıldı** (e7c782c)
 
 Bitti kriteri:
 
-- en az bir modül tenant bazlı güvenli aç/kapa yapılabiliyor olmalı
+- en az bir modül tenant bazlı güvenli aç/kapa yapılabiliyor olmalı ✅
+- yeni kayıt olan kiracı seçtiği modüllere trial erişim almalı ✅
 
 ### Sprint 3 — Pricing + signup/provision entegrasyonu
 
@@ -1411,11 +1417,16 @@ HERHANGİ bir kiracının HERHANGİ bir modülünü (personnel İLK pilot
 olarak) AÇIP/kapatabiliyoruz, DEĞİŞİKLİK ANINDA (cache invalidation
 İLE) hem backend hem UI'DA etkili OLUYOR.
 
-### Sprint 2 (SONRAKİ, AYRI onay gerektiren):
-1. İKİNCİ pilot modül (Randevu YÖNETİM route'ları)
-2. Fiyatlandırma GENİŞLEMESİ (modül BAZLI add-on/standalone
-   ücretlendirme)
-3. Signup akışına modül SEÇİMİ EKLEME
+### Sprint 2 — kalan / sonraki adımlar
+
+Tamamlanan Sprint 2 kalemleri yol haritasının alt bölümlerinde işaretlendi
+(Randevu 2. pilot, signup entitlement düzeltmesi, Personel/Randevu fiyatlandırma).
+
+Kalan veya ileri faz adımlar:
+
+1. Üçüncü pilot modül (`attendance` ayrıştırması veya başka modül)
+2. Fiyatlandırma ↔ entitlement otomatik eşlemesi (satın alınan paket → entitlement)
+3. Signup sonrası e-posta / onboarding iyileştirmeleri
 
 ## ✅ Personel Modülü Hibrit Fiyatlandırması TAMAMEN tamamlandı
 (Aşama A-E)
@@ -1442,3 +1453,37 @@ sunucu↔istemci TUTARLILIĞI KANITLANMIŞ, ecb35d9), E (Enterprise
 Payafin ARTIK, HEM Personel HEM Randevu modülleri İÇİN, TAMAMEN
 bağımsız, GERÇEK dünyada kullanılmaya HAZIR hibrit fiyatlandırma
 modellerine SAHİP.
+
+## ✅ Randevu modülü İKİNCİ pilot (route-bazlı koruma) - TAMAMLANDI
+
+18 yönetim route'u `@module_required('randevu')` İLE korundu (commit
+`5ad6460`) - PUBLIC booking route'ları (7 adet) BİLİNÇLİ olarak
+dokunulmadan bırakıldı.
+
+Personel pilotundan **FARKLI** koruma deseni: blueprint genelinde
+`@bp.before_request` **KULLANILMADI**; bunun yerine 18 yönetim route'u
+**tek tek** `@module_required("randevu")` ile işaretlendi (`login_required`
+sonrası). Bu, public booking route'larına yanlışlıkla dokunma riskini
+ortadan kaldıran daha ayrıntılı ama daha güvenli bir yaklaşımdır.
+
+Korunan 18 route: yönetim sayfaları + yönetim API'leri. Dokunulmayan 7
+route: `book`, `api_public_odalar`, `api_public_slotlar`, `api_public_ekle`,
+`iptal_sayfa`, `api_public_iptal`, `cron_hatirlatma`.
+
+## ✅ KRİTİK DÜZELTME: Signup modül entitlement boşluğu KAPATILDI +
+kayıt formuna modül seçimi eklendi
+
+ACİL bulgu VE DÜZELTME (commit `e7c782c`): YENİ kayıt olan kiracılar,
+Sprint 1 backfill'İNDEN BERİ, HİÇBİR modüle erişemiyordu (kayıt
+OLMUŞ ama modül GÖREMEYEN, fiilen KİLİTLİ hesap). ARTIK: HER YENİ
+kiracı, `core_erp` BASELINE + kayıt SIRASINDA SEÇİLEN modülleri
+(Personel/Randevu, checkbox'LARLA) OTOMATIK olarak `trial` OLARAK
+ALIYOR. Production'da BU boşluktan ETKİLENEN GERÇEK bir müşteri
+OLMADIĞI DOĞRULANDI (SADECE bilinen test kiracıları VARDI).
+
+Teknik özet:
+
+- `grant_default_module_entitlements()` — provizyon sonunda otomatik seed
+- `provision_new_tenant(..., selected_module_keys=...)` — signup'tan gelen seçim
+- Kayıt formu: "Hangi modülleri denemek istersiniz?" (Personel + Randevu,
+  varsayılan ikisi de işaretli) → `POST /api/signup` body `selected_modules`
