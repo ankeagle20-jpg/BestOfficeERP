@@ -1,0 +1,339 @@
+{% extends "layout.html" %}
+{% block title %}Modül Fiyatlandırma{% endblock %}
+{% block page_title %}Payafin Modül Hibrit Fiyatlandırma{% endblock %}
+
+{% block topbar_actions %}
+  <a class="btn-erp btn-erp-sm btn-outline-erp" href="{{ url_for('admin.index') }}">Kullanıcılar</a>
+{% endblock %}
+
+{% block content %}
+<style>
+  .mp-nav { display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap; align-items:center; }
+  .mp-nav a {
+    padding:6px 12px; border-radius:6px; border:1px solid #1e3a5f;
+    color:#90caf9; background:#0a1929; text-decoration:none; font-size:.85rem;
+  }
+  .mp-nav a.active { background:#1565c0; color:#fff; border-color:#1565c0; }
+  .mp-toolbar { display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin-bottom:16px; }
+  .mp-toolbar label { color:#90caf9; font-size:.85rem; }
+  .mp-toolbar select, .mp-toolbar input {
+    background:#0a1929; border:1px solid #1e3a5f; color:#e0f7fa;
+    padding:6px 10px; border-radius:6px; font-size:.85rem;
+  }
+  .mp-meta { color:#888; font-size:.82rem; margin-bottom:10px; }
+  .mp-err { color:#ef9a9a; margin:8px 0; display:none; }
+  .mp-ok { color:#a5d6a7; margin:8px 0; display:none; }
+  .mp-table { width:100%; border-collapse:collapse; font-size:.8rem; }
+  .mp-table th, .mp-table td { border-bottom:1px solid #1e3a5f; padding:6px 8px; text-align:left; vertical-align:middle; }
+  .mp-table th { color:#90caf9; font-weight:600; white-space:nowrap; }
+  .mp-table input[type=text], .mp-table input[type=number] {
+    width:100%; min-width:70px; background:#0a1929; border:1px solid #1e3a5f;
+    color:#e0f7fa; padding:4px 6px; border-radius:4px; font-size:.78rem;
+  }
+  .mp-table input[type=checkbox] { transform:scale(1.1); }
+  .mp-section { margin-bottom:22px; }
+  .mp-section h3 { color:#90caf9; font-size:.95rem; margin:0 0 10px; font-weight:600; }
+  .mp-preview {
+    border:1px solid #1e3a5f; border-radius:8px; padding:14px 16px; background:#0b1e30;
+    max-width:640px;
+  }
+  .mp-preview-result { margin-top:10px; color:#80cbc4; font-size:.9rem; min-height:1.4em; white-space:pre-wrap; }
+  .mp-row-msg { font-size:.72rem; margin-left:6px; }
+  .mp-row-msg.ok { color:#a5d6a7; }
+  .mp-row-msg.err { color:#ef9a9a; }
+  .mp-badge { font-size:.7rem; color:#ffcc80; margin-left:4px; }
+</style>
+
+<div class="mp-nav">
+  <a href="{{ url_for('admin.index') }}">Kullanıcılar</a>
+  <a href="{{ url_for('admin_pricing.pricing_page') }}">ERP Fiyatlandırma</a>
+  <a href="{{ url_for('admin_modules.modules_page') }}">Modüller</a>
+  <a href="{{ url_for('admin_module_pricing.module_pricing_page') }}" class="active">Modül Fiyatlandırma</a>
+</div>
+
+<div class="card-erp">
+  <p style="color:#90caf9;margin:0 0 12px;font-size:.9rem;">
+    Personel modülü hibrit kademeleri (taban + personel başı + ek şube). Değişiklikler anında veritabanına yazılır; önizleme calculate_module_bill() ile hesaplanır.
+  </p>
+
+  <div class="mp-toolbar">
+    <label>
+      Ülke
+      <select id="mp-country"></select>
+    </label>
+    <label>
+      Modül
+      <select id="mp-module">
+        {% for m in module_options %}
+        <option value="{{ m.key }}">{{ m.label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button type="button" class="btn-erp btn-erp-sm" id="mp-yenile">Yenile</button>
+  </div>
+  <div class="mp-meta" id="mp-meta">Yükleniyor...</div>
+  <div class="mp-err" id="mp-err"></div>
+  <div class="mp-ok" id="mp-ok"></div>
+
+  <div class="mp-section">
+    <h3>Kademeler</h3>
+    <div style="overflow-x:auto;">
+      <table class="mp-table" id="mp-tiers-table">
+        <thead>
+          <tr>
+            <th>tier_key</th>
+            <th>Ad</th>
+            <th>Taban (aylık)</th>
+            <th>Personel başı</th>
+            <th>Max personel</th>
+            <th>Ek şube ücreti</th>
+            <th>Yıllık indirim (ay)</th>
+            <th>Aktif</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="mp-tiers-body">
+          <tr><td colspan="9" style="color:#78909c;">Yükleniyor...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="mp-section">
+    <h3>Önizleme</h3>
+    <div class="mp-preview">
+      <div class="mp-toolbar" style="margin-bottom:0;">
+        <label>Personel <input type="number" id="mp-prev-personnel" min="0" value="3" style="width:90px;"></label>
+        <label>Şube <input type="number" id="mp-prev-branch" min="0" value="1" style="width:90px;"></label>
+        <label>Dönem
+          <select id="mp-prev-period">
+            <option value="monthly" selected>Aylık</option>
+            <option value="annual">Yıllık</option>
+          </select>
+        </label>
+        <label>Kademe (opsiyonel)
+          <select id="mp-prev-tier">
+            <option value="">Otomatik (zorunlu min)</option>
+          </select>
+        </label>
+        <button type="button" class="btn-erp btn-erp-sm" id="mp-preview-btn">Hesapla</button>
+      </div>
+      <div class="mp-preview-result" id="mp-preview-result">-</div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var countrySel = document.getElementById('mp-country');
+  var moduleSel = document.getElementById('mp-module');
+  var metaEl = document.getElementById('mp-meta');
+  var errEl = document.getElementById('mp-err');
+  var okEl = document.getElementById('mp-ok');
+  var tiersBody = document.getElementById('mp-tiers-body');
+  var previewResult = document.getElementById('mp-preview-result');
+  var prevTierSel = document.getElementById('mp-prev-tier');
+
+  function escHtml(s) {
+    return String(s || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function showErr(msg) {
+    errEl.style.display = msg ? 'block' : 'none';
+    errEl.textContent = msg || '';
+    if (msg) okEl.style.display = 'none';
+  }
+  function showOk(msg) {
+    okEl.style.display = msg ? 'block' : 'none';
+    okEl.textContent = msg || '';
+    if (msg) errEl.style.display = 'none';
+  }
+
+  function api(path, opts) {
+    opts = opts || {};
+    return fetch(path, Object.assign({ headers: { 'Content-Type': 'application/json' } }, opts))
+      .then(function (r) { return r.json().then(function (j) { return { status: r.status, json: j }; }); });
+  }
+
+  function currentCountry() {
+    return (countrySel.value || 'TR').toUpperCase();
+  }
+  function currentModule() {
+    return moduleSel.value || 'personnel';
+  }
+
+  function loadRegions() {
+    return api('/admin/api/pricing/regions').then(function (res) {
+      if (!res.json.ok) throw new Error(res.json.mesaj || 'Bölgeler yüklenemedi');
+      countrySel.innerHTML = '';
+      (res.json.regions || []).forEach(function (r) {
+        if (!r.is_active) return;
+        var opt = document.createElement('option');
+        opt.value = r.country_code;
+        opt.textContent = r.country_code + ' - ' + (r.name || r.currency || '');
+        countrySel.appendChild(opt);
+      });
+      if (!countrySel.options.length) {
+        var fallback = document.createElement('option');
+        fallback.value = 'TR';
+        fallback.textContent = 'TR';
+        countrySel.appendChild(fallback);
+      }
+      var prefer = ['TR', 'US'];
+      for (var p = 0; p < prefer.length; p++) {
+        for (var i = 0; i < countrySel.options.length; i++) {
+          if (countrySel.options[i].value === prefer[p]) {
+            countrySel.value = prefer[p];
+            return;
+          }
+        }
+      }
+    });
+  }
+
+  function fillPreviewTiers(tiers) {
+    var cur = prevTierSel.value;
+    prevTierSel.innerHTML = '<option value="">Otomatik (zorunlu min)</option>';
+    (tiers || []).forEach(function (t) {
+      if (t.is_contact_sales) return;
+      var opt = document.createElement('option');
+      opt.value = t.tier_key;
+      opt.textContent = t.display_name + ' (' + t.tier_key + ')';
+      prevTierSel.appendChild(opt);
+    });
+    if (cur) prevTierSel.value = cur;
+  }
+
+  function tierRowHtml(t) {
+    var maxVal = t.max_personnel == null ? '' : t.max_personnel;
+    var contactBadge = t.is_contact_sales ? '<span class="mp-badge">contact</span>' : '';
+    var maxDisabled = t.is_contact_sales ? ' disabled' : '';
+    return '<tr data-tier-id="' + t.id + '" data-contact="' + (t.is_contact_sales ? '1' : '0') + '">' +
+      '<td><code>' + escHtml(t.tier_key) + '</code>' + contactBadge + '</td>' +
+      '<td>' + escHtml(t.display_name) + '</td>' +
+      '<td><input type="number" class="mp-f-base_monthly" min="0" step="0.01" value="' + t.base_monthly + '"></td>' +
+      '<td><input type="number" class="mp-f-price_per_personnel" min="0" step="0.0001" value="' + t.price_per_personnel + '"></td>' +
+      '<td><input type="number" class="mp-f-max_personnel" min="1" value="' + maxVal + '" placeholder="∞"' + maxDisabled + '></td>' +
+      '<td><input type="number" class="mp-f-price_per_extra_branch" min="0" step="0.01" value="' + t.price_per_extra_branch + '"></td>' +
+      '<td><input type="number" class="mp-f-annual_discount_months" min="0" max="11" value="' + t.annual_discount_months + '"></td>' +
+      '<td><input type="checkbox" class="mp-f-is_active" ' + (t.is_active ? 'checked' : '') + '></td>' +
+      '<td><button type="button" class="btn-erp btn-erp-sm mp-save-tier">Kaydet</button><span class="mp-row-msg"></span></td>' +
+      '</tr>';
+  }
+
+  function loadTiers() {
+    var cc = currentCountry();
+    var mk = currentModule();
+    var q = '?module=' + encodeURIComponent(mk) + '&country=' + encodeURIComponent(cc);
+    return api('/admin/api/module-pricing/tiers' + q).then(function (res) {
+      if (!res.json.ok) throw new Error(res.json.mesaj || 'Kademeler yüklenemedi');
+      var tiers = res.json.tiers || [];
+      if (!tiers.length) {
+        tiersBody.innerHTML = '<tr><td colspan="9" style="color:#78909c;">Kayıt yok</td></tr>';
+      } else {
+        tiersBody.innerHTML = tiers.map(tierRowHtml).join('');
+      }
+      fillPreviewTiers(tiers);
+      metaEl.textContent = mk + ' / ' + cc + ' — ' + tiers.length + ' kademe';
+    });
+  }
+
+  function readTierRow(tr) {
+    var maxRaw = tr.querySelector('.mp-f-max_personnel').value.trim();
+    var isContact = tr.getAttribute('data-contact') === '1';
+    return {
+      base_monthly: parseFloat(tr.querySelector('.mp-f-base_monthly').value),
+      price_per_personnel: parseFloat(tr.querySelector('.mp-f-price_per_personnel').value),
+      max_personnel: isContact ? null : (maxRaw === '' ? null : parseInt(maxRaw, 10)),
+      price_per_extra_branch: parseFloat(tr.querySelector('.mp-f-price_per_extra_branch').value),
+      annual_discount_months: parseInt(tr.querySelector('.mp-f-annual_discount_months').value, 10),
+      is_active: tr.querySelector('.mp-f-is_active').checked
+    };
+  }
+
+  function saveTier(tr) {
+    var id = tr.getAttribute('data-tier-id');
+    var msgEl = tr.querySelector('.mp-row-msg');
+    msgEl.textContent = '...';
+    msgEl.className = 'mp-row-msg';
+    api('/admin/api/module-pricing/tiers/' + id, { method: 'PUT', body: JSON.stringify(readTierRow(tr)) })
+      .then(function (res) {
+        if (!res.json.ok) {
+          msgEl.textContent = res.json.mesaj || ('Hata ' + res.status);
+          msgEl.className = 'mp-row-msg err';
+          return;
+        }
+        msgEl.textContent = 'OK';
+        msgEl.className = 'mp-row-msg ok';
+        showOk('Kademe kaydedildi: ' + (res.json.tier && res.json.tier.tier_key));
+      })
+      .catch(function (e) {
+        msgEl.textContent = e.message || 'Hata';
+        msgEl.className = 'mp-row-msg err';
+      });
+  }
+
+  function runPreview() {
+    previewResult.textContent = 'Hesaplanıyor...';
+    var tierVal = (prevTierSel.value || '').trim();
+    var body = {
+      module_key: currentModule(),
+      country_code: currentCountry(),
+      personnel_count: parseInt(document.getElementById('mp-prev-personnel').value, 10) || 0,
+      branch_count: parseInt(document.getElementById('mp-prev-branch').value, 10) || 0,
+      billing_period: document.getElementById('mp-prev-period').value || 'monthly',
+      tier_key: tierVal === '' ? null : tierVal
+    };
+    api('/admin/api/module-pricing/preview', { method: 'POST', body: JSON.stringify(body) })
+      .then(function (res) {
+        if (!res.json.ok) {
+          previewResult.textContent = res.json.mesaj || 'Hata';
+          return;
+        }
+        var b = res.json.bill || {};
+        if (b.requires_contact_sales) {
+          previewResult.textContent = 'İletişim gerekli (Enterprise). Önerilen: ' + (b.recommended_tier_key || 'enterprise');
+          return;
+        }
+        var lines = b.lines || [];
+        var texts = lines.map(function (l) { return l.text; }).filter(Boolean);
+        if (texts.length) {
+          previewResult.textContent = texts.join('\\n');
+          return;
+        }
+        var period = b.billing_period || 'monthly';
+        var amt = period === 'annual' ? b.total_annual : b.total_monthly;
+        previewResult.textContent = (b.tier_name || b.tier_key || '') + ' — ' + amt + ' ' + (b.currency || '');
+      })
+      .catch(function (e) {
+        previewResult.textContent = e.message || 'Hata';
+      });
+  }
+
+  function reloadAll() {
+    showErr('');
+    showOk('');
+    loadTiers().then(function () { runPreview(); }).catch(function (e) { showErr(e.message); });
+  }
+
+  document.getElementById('mp-yenile').addEventListener('click', reloadAll);
+  countrySel.addEventListener('change', reloadAll);
+  moduleSel.addEventListener('change', reloadAll);
+  tiersBody.addEventListener('click', function (ev) {
+    if (ev.target.classList.contains('mp-save-tier')) {
+      saveTier(ev.target.closest('tr'));
+    }
+  });
+  document.getElementById('mp-preview-btn').addEventListener('click', runPreview);
+  ['mp-prev-personnel', 'mp-prev-branch', 'mp-prev-period', 'mp-prev-tier'].forEach(function (id) {
+    document.getElementById(id).addEventListener('change', runPreview);
+  });
+
+  loadRegions().then(reloadAll).catch(function (e) { showErr(e.message); });
+})();
+</script>
+{% endblock %}
