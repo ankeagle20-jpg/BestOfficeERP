@@ -19,6 +19,18 @@
   }
   .marketing-nav a:hover { text-decoration: underline; }
   .pricing-intro { text-align: center; margin-bottom: 28px; }
+  .pricing-section-title {
+    margin: 36px 0 8px;
+    font-size: 1.15rem;
+    color: #0f172a;
+    text-align: center;
+  }
+  .pricing-section-sub {
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.92rem;
+    margin: 0 0 18px;
+  }
   .pricing-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -33,11 +45,34 @@
     display: flex;
     flex-direction: column;
     gap: 10px;
+    position: relative;
+    transition: opacity 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
   }
   .tier-card h3 {
     margin: 0;
     font-size: 1.05rem;
     color: #0f172a;
+  }
+  .tier-card.is-insufficient {
+    opacity: 0.55;
+    background: #f1f5f9;
+  }
+  .tier-card.is-recommended {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent);
+  }
+  .tier-badge {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    background: var(--accent);
+    color: #fff;
+    border-radius: 6px;
+    padding: 4px 8px;
   }
   .tier-range {
     font-size: 0.85rem;
@@ -66,6 +101,21 @@
   }
   .tier-details li { margin-bottom: 6px; }
   .tier-details li strong { color: #0f172a; }
+  .tier-estimate {
+    margin-top: auto;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+    font-size: 0.9rem;
+    color: #0f172a;
+    font-weight: 700;
+  }
+  .tier-estimate span { color: var(--accent); }
+  .tier-estimate.is-blocked {
+    color: #9a3412;
+    font-weight: 600;
+    font-size: 0.86rem;
+  }
+  .tier-estimate.is-blocked span { color: inherit; }
   .overage-note {
     background: #eff6ff;
     border: 1px solid #bfdbfe;
@@ -91,6 +141,68 @@
   }
   .pricing-cta { text-align: center; margin-top: 8px; }
   .pricing-cta .btn-primary { max-width: 320px; margin-left: auto; margin-right: auto; }
+  .period-toggle {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 18px;
+  }
+  .period-toggle button {
+    border: 1px solid var(--border);
+    background: #fff;
+    color: #334155;
+    border-radius: 8px;
+    padding: 8px 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .period-toggle button.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+  .module-calc {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+    margin: 0 auto 18px;
+    max-width: 480px;
+  }
+  .module-calc label {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 0.85rem;
+    color: #334155;
+    font-weight: 600;
+  }
+  .module-calc input {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 1rem;
+  }
+  .btn-contact {
+    display: inline-block;
+    text-align: center;
+    margin-top: auto;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: var(--accent);
+    color: #fff;
+    text-decoration: none;
+    font-weight: 700;
+  }
+  .btn-contact:hover { opacity: 0.92; }
+  .btn-contact.is-emphasized {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+    transform: translateY(-1px);
+  }
+  .core-divider {
+    border: 0;
+    border-top: 1px solid var(--border);
+    margin: 28px 0;
+  }
 </style>
 {% endblock %}
 
@@ -106,10 +218,36 @@
   <p class="pricing-intro">Türkiye — müşteri hacmine göre esnek planlar. 14 gün deneme.</p>
 </div>
 
+<h2 class="pricing-section-title">ERP çekirdek planları</h2>
+<p class="pricing-section-sub">Müşteri sayısına göre taban + müşteri başı ücret.</p>
+
 <div id="pricing-error" class="pricing-error" role="alert"></div>
 <div id="pricing-loading" class="pricing-loading">Planlar yükleniyor…</div>
 <div id="pricing-grid" class="pricing-grid" hidden></div>
 <div id="overage-note" class="overage-note" hidden></div>
+
+<hr class="core-divider" />
+
+<h2 class="pricing-section-title">Personel Yönetimi Modülü</h2>
+<p class="pricing-section-sub">Taban ücret + personel başı + ek şube. Yıllıkta 2 ay bedava.</p>
+
+<div class="period-toggle" role="group" aria-label="Faturalama dönemi">
+  <button type="button" id="mp-period-monthly" class="active" data-period="monthly">Aylık</button>
+  <button type="button" id="mp-period-annual" data-period="annual">Yıllık</button>
+</div>
+
+<div class="module-calc">
+  <label>Personel sayısı
+    <input type="number" id="mp-personnel" min="0" step="1" value="3" />
+  </label>
+  <label>Şube sayısı
+    <input type="number" id="mp-branches" min="1" step="1" value="1" />
+  </label>
+</div>
+
+<div id="module-pricing-error" class="pricing-error" role="alert"></div>
+<div id="module-pricing-loading" class="pricing-loading">Personel planları yükleniyor…</div>
+<div id="module-pricing-grid" class="pricing-grid" hidden></div>
 
 <div class="pricing-cta">
   <a href="/signup" class="btn-primary">Kayıt Ol</a>
@@ -123,6 +261,21 @@
   const loadingEl = document.getElementById("pricing-loading");
   const errorEl = document.getElementById("pricing-error");
   const overageEl = document.getElementById("overage-note");
+
+  const mpGridEl = document.getElementById("module-pricing-grid");
+  const mpLoadingEl = document.getElementById("module-pricing-loading");
+  const mpErrorEl = document.getElementById("module-pricing-error");
+  const mpPersonnelEl = document.getElementById("mp-personnel");
+  const mpBranchesEl = document.getElementById("mp-branches");
+  const mpMonthlyBtn = document.getElementById("mp-period-monthly");
+  const mpAnnualBtn = document.getElementById("mp-period-annual");
+
+  let moduleTiers = [];
+  let moduleCurrency = "TRY";
+  let billingPeriod = "monthly";
+
+  const INSUFFICIENT_MSG =
+    "Bu personel sayısı için yetersiz — üst pakete geçmeniz gerekir";
 
   function currencySymbol(code) {
     if (code === "TRY") return "₺";
@@ -153,6 +306,19 @@
     overageEl.hidden = true;
   }
 
+  function showModuleError(message) {
+    mpErrorEl.textContent = message;
+    mpErrorEl.style.display = "block";
+    mpLoadingEl.style.display = "none";
+    mpGridEl.hidden = true;
+  }
+
+  function escapeHtml(text) {
+    const d = document.createElement("div");
+    d.textContent = text == null ? "" : String(text);
+    return d.innerHTML;
+  }
+
   function renderTier(tier, currency) {
     const card = document.createElement("article");
     card.className = "tier-card";
@@ -169,12 +335,6 @@
     return card;
   }
 
-  function escapeHtml(text) {
-    const d = document.createElement("div");
-    d.textContent = text == null ? "" : String(text);
-    return d.innerHTML;
-  }
-
   function renderOverage(overage, currency) {
     if (!overage) return;
     const sym = currencySymbol(currency);
@@ -184,6 +344,182 @@
       overage.threshold_customers + "+ müşteri için otomatik paket: " +
       overage.pack_size + " müşteri / " + packFmt + " (aylık ek paket).";
     overageEl.hidden = false;
+  }
+
+  function personnelRange(tier) {
+    const max = tier.max_personnel;
+    if (max == null) return "Sınırsız personel";
+    return "En fazla " + max + " personel";
+  }
+
+  /**
+   * Sunucu resolve_required_tier() ile birebir:
+   * self-servis sırasıyla gezin; max_personnel == null VEYA
+   * personnel <= max_personnel olan İLK kademeyi seç.
+   * Hiçbiri uymazsa contact (Enterprise).
+   */
+  function resolveRequiredTier(tiers, personnelCount) {
+    const n = Math.max(0, parseInt(personnelCount, 10) || 0);
+    const selfServe = [];
+    let enterprise = null;
+    for (let i = 0; i < tiers.length; i++) {
+      const t = tiers[i];
+      if (t && t.contact_sales) {
+        if (!enterprise) enterprise = t;
+      } else if (t) {
+        selfServe.push(t);
+      }
+    }
+    for (let i = 0; i < selfServe.length; i++) {
+      const tier = selfServe[i];
+      const mx = tier.max_personnel;
+      if (mx == null || n <= Number(mx)) {
+        return {
+          kind: "match",
+          tierKey: String(tier.tier_key || ""),
+          recommended_tier_key: String(tier.tier_key || ""),
+          tier: tier
+        };
+      }
+    }
+    return {
+      kind: "contact",
+      tierKey: "enterprise",
+      recommended_tier_key: "enterprise",
+      tier: enterprise
+    };
+  }
+
+  function isSelfServeInsufficient(tier, personnelCount) {
+    if (!tier || tier.contact_sales) return false;
+    const mx = tier.max_personnel;
+    if (mx == null) return false;
+    const n = Math.max(0, parseInt(personnelCount, 10) || 0);
+    return n > Number(mx);
+  }
+
+  function estimateTier(tier, personnel, branches) {
+    const base = Number(tier.base_monthly) || 0;
+    const perP = Number(tier.price_per_personnel) || 0;
+    const included = Number(tier.included_branches) || 0;
+    const perB = Number(tier.price_per_extra_branch) || 0;
+    const discount = Number(tier.annual_discount_months) || 0;
+    const extraBranches = Math.max(0, branches - included);
+    const monthly = base + personnel * perP + extraBranches * perB;
+    if (billingPeriod === "annual") {
+      return monthly * (12 - discount);
+    }
+    return monthly;
+  }
+
+  function renderModuleTier(tier, currency, resolved, personnel, branches) {
+    const card = document.createElement("article");
+    card.className = "tier-card";
+
+    if (tier.contact_sales) {
+      const recommended = resolved && resolved.kind === "contact";
+      if (recommended) {
+        card.classList.add("is-recommended");
+      }
+      card.dataset.tierKey = "enterprise";
+      card.dataset.contactSales = "1";
+      card.innerHTML =
+        (recommended ? "<span class=\"tier-badge\">Önerilen</span>" : "") +
+        "<h3>" + escapeHtml(tier.display_name) + "</h3>" +
+        "<div class=\"tier-range\">Kurumsal / özel teklif</div>" +
+        "<div class=\"tier-price\">Özel fiyat<small>satış ile iletişime geçin</small></div>" +
+        "<ul class=\"tier-details\">" +
+        "<li>Self-servis sınırlarının ötesi</li>" +
+        "<li>Özel kurulum ve destek</li>" +
+        "</ul>" +
+        "<a class=\"btn-contact" + (recommended ? " is-emphasized" : "") +
+        "\" href=\"mailto:info@payafin.com?subject=Personel%20Mod%C3%BCl%C3%BC%20Enterprise\">Bize Ulaşın</a>";
+      return card;
+    }
+
+    const insufficient = isSelfServeInsufficient(tier, personnel);
+    const recommended =
+      resolved &&
+      resolved.kind === "match" &&
+      String(resolved.tierKey) === String(tier.tier_key || "");
+
+    if (insufficient) card.classList.add("is-insufficient");
+    if (recommended) card.classList.add("is-recommended");
+    card.dataset.tierKey = tier.tier_key || "";
+    card.dataset.insufficient = insufficient ? "1" : "0";
+    card.dataset.recommended = recommended ? "1" : "0";
+
+    const discount = Number(tier.annual_discount_months) || 0;
+    const baseShow = billingPeriod === "annual"
+      ? (Number(tier.base_monthly) || 0) * (12 - discount)
+      : (Number(tier.base_monthly) || 0);
+    const perPShow = billingPeriod === "annual"
+      ? (Number(tier.price_per_personnel) || 0) * (12 - discount)
+      : (Number(tier.price_per_personnel) || 0);
+    const perBShow = billingPeriod === "annual"
+      ? (Number(tier.price_per_extra_branch) || 0) * (12 - discount)
+      : (Number(tier.price_per_extra_branch) || 0);
+    const periodLabel = billingPeriod === "annual" ? "yıllık taban" : "taban aylık ücret";
+    const perLabel = billingPeriod === "annual" ? "Personel başı (yıl)" : "Personel başı (ay)";
+    const branchLabel = billingPeriod === "annual" ? "Ek şube (yıl)" : "Ek şube (ay)";
+
+    let estimateHtml;
+    if (insufficient) {
+      estimateHtml =
+        "<div class=\"tier-estimate is-blocked\" data-estimate-wrap>" +
+        "<span data-estimate>" + escapeHtml(INSUFFICIENT_MSG) + "</span></div>";
+    } else {
+      const total = estimateTier(tier, personnel, branches);
+      const suffix = billingPeriod === "annual" ? " / yıl" : " / ay";
+      estimateHtml =
+        "<div class=\"tier-estimate\" data-estimate-wrap>" +
+        "Tahmini: <span data-estimate>" +
+        escapeHtml(formatMoney(total, currency) + suffix) +
+        "</span></div>";
+    }
+
+    card.innerHTML =
+      (recommended ? "<span class=\"tier-badge\">Önerilen</span>" : "") +
+      "<h3>" + escapeHtml(tier.display_name) + "</h3>" +
+      "<div class=\"tier-range\">" + escapeHtml(personnelRange(tier)) + "</div>" +
+      "<div class=\"tier-price\">" + formatMoney(baseShow, currency) +
+      "<small>" + escapeHtml(periodLabel) +
+      (billingPeriod === "annual" && discount ? " (" + discount + " ay bedava)" : "") +
+      "</small></div>" +
+      "<ul class=\"tier-details\">" +
+      "<li>" + escapeHtml(perLabel) + ": <strong>" + formatMoney(perPShow, currency) + "</strong></li>" +
+      "<li>Dahil şube: <strong>" + escapeHtml(String(tier.included_branches)) + "</strong></li>" +
+      "<li>" + escapeHtml(branchLabel) + ": <strong>" + formatMoney(perBShow, currency) + "</strong></li>" +
+      "</ul>" +
+      estimateHtml;
+    return card;
+  }
+
+  function currentPersonnel() {
+    return Math.max(0, parseInt(mpPersonnelEl.value, 10) || 0);
+  }
+
+  function currentBranches() {
+    return Math.max(0, parseInt(mpBranchesEl.value, 10) || 0);
+  }
+
+  function renderModuleGrid() {
+    const personnel = currentPersonnel();
+    const branches = currentBranches();
+    const resolved = resolveRequiredTier(moduleTiers, personnel);
+    mpGridEl.innerHTML = "";
+    moduleTiers.forEach(function (tier) {
+      mpGridEl.appendChild(
+        renderModuleTier(tier, moduleCurrency, resolved, personnel, branches)
+      );
+    });
+  }
+
+  function setPeriod(period) {
+    billingPeriod = period === "annual" ? "annual" : "monthly";
+    mpMonthlyBtn.classList.toggle("active", billingPeriod === "monthly");
+    mpAnnualBtn.classList.toggle("active", billingPeriod === "annual");
+    renderModuleGrid();
   }
 
   async function loadPricing() {
@@ -208,7 +544,33 @@
     }
   }
 
+  async function loadModulePricing() {
+    try {
+      const res = await fetch("/api/module-pricing/public?module=personnel&country=TR", {
+        headers: { Accept: "application/json" }
+      });
+      const data = await res.json().catch(function () { return {}; });
+      if (!res.ok || !data.ok || !Array.isArray(data.tiers) || !data.tiers.length) {
+        showModuleError(data.mesaj || "Personel modülü fiyatları yüklenemedi.");
+        return;
+      }
+      moduleTiers = data.tiers;
+      moduleCurrency = data.currency || "TRY";
+      mpLoadingEl.style.display = "none";
+      mpGridEl.hidden = false;
+      renderModuleGrid();
+    } catch (e) {
+      showModuleError("Bağlantı hatası. Lütfen internet bağlantınızı kontrol edip tekrar deneyin.");
+    }
+  }
+
+  mpMonthlyBtn.addEventListener("click", function () { setPeriod("monthly"); });
+  mpAnnualBtn.addEventListener("click", function () { setPeriod("annual"); });
+  mpPersonnelEl.addEventListener("input", renderModuleGrid);
+  mpBranchesEl.addEventListener("input", renderModuleGrid);
+
   loadPricing();
+  loadModulePricing();
 })();
 </script>
 {% endblock %}

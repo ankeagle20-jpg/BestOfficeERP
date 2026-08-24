@@ -12,6 +12,7 @@ from flask_login import current_user
 from auth import admin_gerekli
 from db import execute, fetch_all, fetch_one
 from module_pricing_engine import ModulePricingEngineError, calculate_module_bill
+from module_pricing_public_cache import invalidate_public_module_pricing_cache
 
 logger = logging.getLogger(__name__)
 
@@ -246,6 +247,9 @@ def api_module_pricing_tier_update(tier_id: int):
         WHERE id = %s
         """,
         (tier_id,),
+    )
+    invalidate_public_module_pricing_cache(
+        str(row["module_key"]), str(row["country_code"])
     )
     return jsonify({"ok": True, "tier": _tier_row_to_json(updated)})
 

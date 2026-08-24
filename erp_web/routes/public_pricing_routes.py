@@ -6,6 +6,7 @@ import logging
 
 from flask import Blueprint, jsonify, render_template, request
 
+from module_pricing_public_cache import get_public_module_pricing
 from pricing_public_cache import get_public_pricing
 from routes.signup_routes import platform_public_only
 
@@ -37,6 +38,32 @@ def api_pricing_public():
 
     if payload is None:
         return jsonify({"ok": False, "mesaj": f"bilinmeyen veya pasif ülke: {cc}"}), 404
+
+    return jsonify(payload)
+
+
+@bp.route("/api/module-pricing/public", methods=["GET"])
+def api_module_pricing_public():
+    """Herkesin erişebileceği aktif modül kademeleri (salt okuma, kimlik yok)."""
+    mk = (request.args.get("module") or request.args.get("module_key") or "").strip()
+    try:
+        cc = _country_query_param()
+        if not mk:
+            raise ValueError("module gerekli")
+        payload = get_public_module_pricing(mk, cc)
+    except ValueError as e:
+        return jsonify({"ok": False, "mesaj": str(e)}), 400
+    except Exception:
+        logger.exception("api_module_pricing_public module=%s", mk)
+        return jsonify({"ok": False, "mesaj": "Modül fiyatlandırması yüklenemedi."}), 404
+
+    if payload is None:
+        return jsonify(
+            {
+                "ok": False,
+                "mesaj": f"bilinmeyen/pasif ülke veya kademe yok: {mk}/{cc}",
+            }
+        ), 404
 
     return jsonify(payload)
 
