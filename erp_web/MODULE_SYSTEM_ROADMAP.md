@@ -5,8 +5,9 @@
 > "modül sistemi planına kaldığımız yerden devam edelim" de — bugüne kadar alınan
 > mimari kararlar, riskler, rollout yaklaşımı ve ürünleme önerileri burada toplandı.
 
-> **NOT:** Bu proje HENÜZ BAŞLAMADI (SADECE planlama AŞAMASINDA) - Sprint 1'E
-> başlamak İÇİN, kullanıcının ONAYI GEREKİYOR.
+> **NOT:** Sprint 1 (entitlement veri + okuma + Personel/Pdovam pilotu +
+> `/admin/modules` paneli + UI gating) **TAMAMEN tamamlandı**. Sprint 2
+> (ikinci pilot / fiyatlandırma / signup modül seçimi) için ayrı onay gerekir.
 
 ## Genel Hedef
 
@@ -1395,13 +1396,23 @@ Bugünkü planlamanın vardığı net kararlar:
 - `public.tenants` ARTIK HEM gerçek SaaS kiracılarını HEM platform sahibini (`public`) İÇERİYOR — İLERİDE “TÜM kiracıları LİSTELE / müşteri SAYISI” GİBİ bir özellik YAZILIRSA, `schema_name ~ '^tenant_'` FİLTRESİ eklenmeyi UNUTMAMALI.
 - `backfill_tenant_user_lookup.py` İÇİNDEKİ `_admin_email_for_schema()`, ŞU AN SADECE `tenant_*` formatını İŞLİYOR (`public`’İ BİLİNÇLİ olarak ATLIYOR) — BU davranış İLERİDE değiştirilirse, `public` slug’ının REZERVE olduğunu (login-lookup URL üretiminde SORUN ÇIKARABİLECEĞİNİ) hatırla.
 
-## Bir Sonraki Doğal Adım
+## ✅ Sprint 1 TAMAMEN tamamlandı - Modül sistemi UÇTAN UCA çalışıyor
 
-Bu proje henüz planlama aşamasında. Sprint 1’e geçmeden önce kullanıcıdan ayrıca açık onay alınmalıdır.
+- Entitlement VERİ katmanı (e3a4016)
+- Entitlement OKUMA katmanı (eee7ab1)
+- İLK pilot: Personel+Pdovam KORUMASI (1bd6887)
+- Admin YÖNETİM paneli /admin/modules (4256f07) - hangi kiracıya
+  hangi modül VERİLDİĞİNİ GÖRÜP anlık DEĞİŞTİREBİLME
+- UI gating (f4f2c0f) - modül YOKSA, menü LİNKİ (TÜM kopyalarıyla
+  BİRLİKTE) GİZLENİYOR
 
-Sprint 1 başladığında ilk üretilecek somut uygulama artefaktları:
+Payafin ARTIK GERÇEK bir MODÜLER SaaS ürünü - admin PANELİNDEN,
+HERHANGİ bir kiracının HERHANGİ bir modülünü (personnel İLK pilot
+olarak) AÇIP/kapatabiliyoruz, DEĞİŞİKLİK ANINDA (cache invalidation
+İLE) hem backend hem UI'DA etkili OLUYOR.
 
-- tenant entitlement veri modeli
-- route-level guard sözleşmesi
-- menu-item -> module_key eşlemesi
-- pilot rollout test checklist’i
+### Sprint 2 (SONRAKİ, AYRI onay gerektiren):
+1. İKİNCİ pilot modül (Randevu YÖNETİM route'ları)
+2. Fiyatlandırma GENİŞLEMESİ (modül BAZLI add-on/standalone
+   ücretlendirme)
+3. Signup akışına modül SEÇİMİ EKLEME
