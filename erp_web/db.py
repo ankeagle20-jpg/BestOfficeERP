@@ -2861,6 +2861,9 @@ def ensure_module_pricing_tiers_table():
             included_branches          INTEGER NOT NULL DEFAULT 1,
             price_per_extra_branch     NUMERIC(12,2) NOT NULL,
 
+            included_monthly_appointments INTEGER,
+            included_personnel         INTEGER,
+
             is_contact_sales           BOOLEAN NOT NULL DEFAULT FALSE,
             annual_discount_months     INTEGER NOT NULL DEFAULT 2,
             setup_fee                  NUMERIC(12,2) NOT NULL DEFAULT 0,
@@ -2900,6 +2903,22 @@ def ensure_module_pricing_tiers_table():
         )
         """
     )
+    # Mevcut kurulumlar: CREATE TABLE IF NOT EXISTS sütun eklemez — idempotent ALTER.
+    try:
+        execute(
+            """
+            ALTER TABLE public.module_pricing_tiers
+            ADD COLUMN IF NOT EXISTS included_monthly_appointments INTEGER
+            """
+        )
+        execute(
+            """
+            ALTER TABLE public.module_pricing_tiers
+            ADD COLUMN IF NOT EXISTS included_personnel INTEGER
+            """
+        )
+    except Exception as e:
+        print(f"module_pricing_tiers appointment/personnel columns: {e}")
     try:
         execute(
             """
@@ -2911,6 +2930,7 @@ def ensure_module_pricing_tiers_table():
     except Exception as e:
         print(f"module_pricing_tiers indexes: {e}")
     _seed_module_pricing_personnel()
+    _seed_module_pricing_randevu()
 
 
 def _seed_module_pricing_personnel() -> None:
@@ -2992,6 +3012,100 @@ def _seed_module_pricing_personnel() -> None:
                 price_per_personnel,
                 max_personnel,
                 price_per_extra_branch,
+                is_contact_sales,
+                sort_order,
+            ),
+        )
+
+
+def _seed_module_pricing_randevu() -> None:
+    """randevu modülü TR/US hibrit kademeleri — idempotent.
+
+    Eksen: dahil aylık randevu + dahil/ek personel (şube yok).
+    price_per_personnel = ek personel birim ücreti (dahil sonrası).
+    """
+    rows = (
+        # module_key, country, currency, tier_key, display,
+        # base, per_extra_person, max_p, incl_appts, incl_personnel,
+        # contact, sort
+        (
+            "randevu", "TR", "TRY", "starter", "Starter",
+            "499", "499", 5, 100, 1, False, 1,
+        ),
+        (
+            "randevu", "TR", "TRY", "pro", "Pro",
+            "2999", "399", 15, 500, 5, False, 2,
+        ),
+        (
+            "randevu", "TR", "TRY", "growth", "Growth",
+            "7499", "299", None, 2000, 15, False, 3,
+        ),
+        (
+            "randevu", "TR", "TRY", "enterprise", "Enterprise",
+            "0", "0", None, None, None, True, 4,
+        ),
+        (
+            "randevu", "US", "USD", "starter", "Starter",
+            "19", "19.9", 5, 100, 1, False, 1,
+        ),
+        (
+            "randevu", "US", "USD", "pro", "Pro",
+            "59", "11.9", 15, 500, 5, False, 2,
+        ),
+        (
+            "randevu", "US", "USD", "growth", "Growth",
+            "149", "9.9", None, 2000, 15, False, 3,
+        ),
+        (
+            "randevu", "US", "USD", "enterprise", "Enterprise",
+            "0", "0", None, None, None, True, 4,
+        ),
+    )
+    for (
+        module_key,
+        country_code,
+        currency,
+        tier_key,
+        display_name,
+        base_monthly,
+        price_per_personnel,
+        max_personnel,
+        included_monthly_appointments,
+        included_personnel,
+        is_contact_sales,
+        sort_order,
+    ) in rows:
+        execute(
+            """
+            INSERT INTO public.module_pricing_tiers (
+                module_key, country_code, currency, tier_key, display_name,
+                base_monthly, price_per_personnel, max_personnel,
+                included_branches, price_per_extra_branch,
+                included_monthly_appointments, included_personnel,
+                is_contact_sales, annual_discount_months, setup_fee,
+                sort_order, is_active
+            )
+            VALUES (
+                %s, %s, %s, %s, %s,
+                %s, %s, %s,
+                0, 0,
+                %s, %s,
+                %s, 2, 0,
+                %s, TRUE
+            )
+            ON CONFLICT (module_key, country_code, tier_key) DO NOTHING
+            """,
+            (
+                module_key,
+                country_code,
+                currency,
+                tier_key,
+                display_name,
+                base_monthly,
+                price_per_personnel,
+                max_personnel,
+                included_monthly_appointments,
+                included_personnel,
                 is_contact_sales,
                 sort_order,
             ),
