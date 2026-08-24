@@ -292,4 +292,8 @@ def api_module_pricing_contact():
 @platform_public_only
 def fiyatlandirma_page():
     """Payafin apex — görsel fiyatlandırma sayfası (herkese açık)."""
-    return render_template("marketing/fiyatlandirma.html")
+    from flask import make_response
+
+    resp = make_response(render_template("marketing/fiyatlandirma.html"))
+    resp.headers["Cache-Control"] = "no-cache, must-revalidate, max-age=0"
+    return resp

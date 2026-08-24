@@ -180,8 +180,12 @@ def _provision_worker(
 @platform_public_only
 def signup_page():
     """Herkese açık kayıt formu (apex-only, kimlik doğrulama yok)."""
+    from flask import make_response
+
     apex = (_tenant_apex_domains() or ("payafin.com",))[0]
-    return render_template("signup/signup.html", apex_domain=apex)
+    resp = make_response(render_template("signup/signup.html", apex_domain=apex))
+    resp.headers["Cache-Control"] = "no-cache, must-revalidate, max-age=0"
+    return resp
 
 
 @bp.route("/api/signup/slug-available", methods=["GET"])

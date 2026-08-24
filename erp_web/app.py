@@ -468,7 +468,9 @@ def index():
     from tenant_identity import is_payafin_marketing_host
 
     if is_payafin_marketing_host(request.host or request.headers.get("Host")):
-        return render_template("marketing/home.html")
+        resp = app.make_response(render_template("marketing/home.html"))
+        resp.headers["Cache-Control"] = "no-cache, must-revalidate, max-age=0"
+        return resp
     if not current_user.is_authenticated:
         return login_manager.unauthorized()
     return redirect(url_for("dashboard.index"))
