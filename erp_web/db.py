@@ -588,6 +588,7 @@ def init_schema():
     ensure_users_email_verified_at_column()
     ensure_email_verification_tokens_table()
     ensure_tenant_module_entitlements_table()
+    ensure_module_pricing_tiers_table()
     print("✅ Supabase şema oluşturuldu.")
 
 
@@ -2825,6 +2826,175 @@ def _seed_pricing_tr() -> None:
         ON CONFLICT (country_code, tier_key) DO NOTHING
         """
     )
+
+
+def ensure_module_pricing_tiers_table():
+    """Platform modül hibrit fiyatlandırması: yalnız public.module_pricing_tiers.
+
+    Çekirdek pricing_tiers'ten ayrı (personel + şube ekseni).
+    Kiracı şemalarına karışmaz; PLATFORM_STRIP_TABLES listesinde.
+    """
+    ensure_pricing_tables()
+    execute(
+        """
+        INSERT INTO public.pricing_regions
+            (country_code, currency, name, is_active, sort_order)
+        VALUES ('US', 'USD', 'United States', TRUE, 1)
+        ON CONFLICT (country_code) DO NOTHING
+        """
+    )
+    execute(
+        """
+        CREATE TABLE IF NOT EXISTS public.module_pricing_tiers (
+            id                         SERIAL PRIMARY KEY,
+            module_key                 TEXT NOT NULL,
+            country_code               TEXT NOT NULL
+                REFERENCES public.pricing_regions(country_code) ON DELETE RESTRICT,
+            currency                   TEXT NOT NULL,
+            tier_key                   TEXT NOT NULL,
+            display_name               TEXT NOT NULL,
+
+            base_monthly               NUMERIC(12,2) NOT NULL,
+            price_per_personnel        NUMERIC(12,4) NOT NULL,
+            max_personnel              INTEGER,
+            included_branches          INTEGER NOT NULL DEFAULT 1,
+            price_per_extra_branch     NUMERIC(12,2) NOT NULL,
+
+            is_contact_sales           BOOLEAN NOT NULL DEFAULT FALSE,
+            annual_discount_months     INTEGER NOT NULL DEFAULT 2,
+            setup_fee                  NUMERIC(12,2) NOT NULL DEFAULT 0,
+
+            sort_order                 INTEGER NOT NULL DEFAULT 0,
+            is_active                  BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at                 TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at                 TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+            CONSTRAINT module_pricing_tiers_module_country_tier_uniq
+                UNIQUE (module_key, country_code, tier_key),
+            CONSTRAINT module_pricing_tiers_module_key_format
+                CHECK (module_key ~ '^[a-z0-9_]+$'),
+            CONSTRAINT module_pricing_tiers_tier_key_format
+                CHECK (tier_key ~ '^[a-z0-9_]+$'),
+            CONSTRAINT module_pricing_tiers_currency_format
+                CHECK (currency ~ '^[A-Z]{3}$'),
+            CONSTRAINT module_pricing_tiers_base_nonneg
+                CHECK (base_monthly >= 0),
+            CONSTRAINT module_pricing_tiers_per_personnel_nonneg
+                CHECK (price_per_personnel >= 0),
+            CONSTRAINT module_pricing_tiers_max_personnel_ok
+                CHECK (max_personnel IS NULL OR max_personnel > 0),
+            CONSTRAINT module_pricing_tiers_included_branches_pos
+                CHECK (included_branches >= 0),
+            CONSTRAINT module_pricing_tiers_extra_branch_nonneg
+                CHECK (price_per_extra_branch >= 0),
+            CONSTRAINT module_pricing_tiers_annual_discount_ok
+                CHECK (annual_discount_months >= 0 AND annual_discount_months < 12),
+            CONSTRAINT module_pricing_tiers_setup_nonneg
+                CHECK (setup_fee >= 0),
+            CONSTRAINT module_pricing_tiers_enterprise_shape
+                CHECK (
+                    (is_contact_sales = FALSE)
+                    OR (is_contact_sales = TRUE AND max_personnel IS NULL)
+                )
+        )
+        """
+    )
+    try:
+        execute(
+            """
+            CREATE INDEX IF NOT EXISTS module_pricing_tiers_lookup_idx
+            ON public.module_pricing_tiers
+                (module_key, country_code, is_active, sort_order)
+            """
+        )
+    except Exception as e:
+        print(f"module_pricing_tiers indexes: {e}")
+    _seed_module_pricing_personnel()
+
+
+def _seed_module_pricing_personnel() -> None:
+    """personnel modülü TR/US hibrit kademeleri — idempotent."""
+    rows = (
+        # module_key, country, currency, tier_key, display,
+        # base, per_person, max_p, extra_branch, contact, sort
+        (
+            "personnel", "TR", "TRY", "starter", "Starter",
+            "499", "149", 5, "299", False, 1,
+        ),
+        (
+            "personnel", "TR", "TRY", "pro", "Pro",
+            "1999", "119", 15, "249", False, 2,
+        ),
+        (
+            "personnel", "TR", "TRY", "growth", "Growth",
+            "4999", "89", 50, "199", False, 3,
+        ),
+        (
+            "personnel", "TR", "TRY", "enterprise", "Enterprise",
+            "0", "0", None, "0", True, 4,
+        ),
+        (
+            "personnel", "US", "USD", "starter", "Starter",
+            "19", "4.9", 5, "15", False, 1,
+        ),
+        (
+            "personnel", "US", "USD", "pro", "Pro",
+            "79", "3.9", 15, "12", False, 2,
+        ),
+        (
+            "personnel", "US", "USD", "growth", "Growth",
+            "189", "2.9", 50, "10", False, 3,
+        ),
+        (
+            "personnel", "US", "USD", "enterprise", "Enterprise",
+            "0", "0", None, "0", True, 4,
+        ),
+    )
+    for (
+        module_key,
+        country_code,
+        currency,
+        tier_key,
+        display_name,
+        base_monthly,
+        price_per_personnel,
+        max_personnel,
+        price_per_extra_branch,
+        is_contact_sales,
+        sort_order,
+    ) in rows:
+        execute(
+            """
+            INSERT INTO public.module_pricing_tiers (
+                module_key, country_code, currency, tier_key, display_name,
+                base_monthly, price_per_personnel, max_personnel,
+                included_branches, price_per_extra_branch,
+                is_contact_sales, annual_discount_months, setup_fee,
+                sort_order, is_active
+            )
+            VALUES (
+                %s, %s, %s, %s, %s,
+                %s, %s, %s,
+                1, %s,
+                %s, 2, 0,
+                %s, TRUE
+            )
+            ON CONFLICT (module_key, country_code, tier_key) DO NOTHING
+            """,
+            (
+                module_key,
+                country_code,
+                currency,
+                tier_key,
+                display_name,
+                base_monthly,
+                price_per_personnel,
+                max_personnel,
+                price_per_extra_branch,
+                is_contact_sales,
+                sort_order,
+            ),
+        )
 
 
 def clear_all_customers():
