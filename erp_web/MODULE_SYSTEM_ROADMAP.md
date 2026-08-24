@@ -1390,6 +1390,11 @@ Bugünkü planlamanın vardığı net kararlar:
 5. **`personnel` ticari olarak ayrı paketlenebilir, ama ilk rollout’ta `attendance` ile bundle etmek daha güvenli**
 6. **Faz 7’deki küçük DDL / overlay yaklaşımı ancak çok sonra değerlendirilmeli**
 
+## Bilinen küçük RİSKLER
+
+- `public.tenants` ARTIK HEM gerçek SaaS kiracılarını HEM platform sahibini (`public`) İÇERİYOR — İLERİDE “TÜM kiracıları LİSTELE / müşteri SAYISI” GİBİ bir özellik YAZILIRSA, `schema_name ~ '^tenant_'` FİLTRESİ eklenmeyi UNUTMAMALI.
+- `backfill_tenant_user_lookup.py` İÇİNDEKİ `_admin_email_for_schema()`, ŞU AN SADECE `tenant_*` formatını İŞLİYOR (`public`’İ BİLİNÇLİ olarak ATLIYOR) — BU davranış İLERİDE değiştirilirse, `public` slug’ının REZERVE olduğunu (login-lookup URL üretiminde SORUN ÇIKARABİLECEĞİNİ) hatırla.
+
 ## Bir Sonraki Doğal Adım
 
 Bu proje henüz planlama aşamasında. Sprint 1’e geçmeden önce kullanıcıdan ayrıca açık onay alınmalıdır.

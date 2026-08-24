@@ -587,6 +587,7 @@ def init_schema():
     ensure_users_security_stamp_column()
     ensure_users_email_verified_at_column()
     ensure_email_verification_tokens_table()
+    ensure_tenant_module_entitlements_table()
     print("✅ Supabase şema oluşturuldu.")
 
 
@@ -2363,7 +2364,9 @@ def ensure_platform_tenants_table():
             status        TEXT NOT NULL DEFAULT 'active',
             created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             CONSTRAINT tenants_slug_format CHECK (slug ~ '^[a-z0-9_]+$'),
-            CONSTRAINT tenants_schema_format CHECK (schema_name ~ '^tenant_[a-z0-9_]+$'),
+            CONSTRAINT tenants_schema_format CHECK (
+                schema_name ~ '^tenant_[a-z0-9_]+$' OR schema_name = 'public'
+            ),
             CONSTRAINT tenants_status_ok CHECK (
                 status IN ('provisioning', 'active', 'suspended', 'failed')
             )
@@ -2512,6 +2515,101 @@ def ensure_users_security_stamp_column():
         execute("ALTER TABLE public.users ALTER COLUMN security_stamp SET NOT NULL")
     except Exception as e:
         print(f"users.security_stamp NOT NULL: {e}")
+
+
+def ensure_tenant_module_entitlements_table():
+    """Platform modül entitlement: yalnız public.tenant_module_entitlements.
+
+    Kiracı şemalarına karışmaz; tenant_provisioning PLATFORM_STRIP_TABLES listesinde.
+    tenant_id tipi public.tenants.id (SERIAL/INTEGER) ile eşleşir.
+    """
+    ensure_platform_tenants_table()
+    execute(
+        """
+        CREATE TABLE IF NOT EXISTS public.tenant_module_entitlements (
+            id                  BIGSERIAL PRIMARY KEY,
+
+            tenant_id           INTEGER NOT NULL,
+            tenant_slug         TEXT NOT NULL,
+
+            module_key          TEXT NOT NULL,
+            status              TEXT NOT NULL DEFAULT 'active',
+
+            billing_mode        TEXT NOT NULL DEFAULT 'included',
+            source_plan         TEXT,
+            source_reference    TEXT,
+
+            starts_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            ends_at             TIMESTAMPTZ,
+            granted_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            revoked_at          TIMESTAMPTZ,
+
+            granted_by_user_id  BIGINT,
+            granted_by_note     TEXT,
+
+            metadata            JSONB NOT NULL DEFAULT '{}'::jsonb,
+
+            created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+            CONSTRAINT tenant_module_entitlements_status_chk
+                CHECK (status IN ('trial', 'active', 'suspended', 'expired', 'revoked')),
+
+            CONSTRAINT tenant_module_entitlements_billing_mode_chk
+                CHECK (billing_mode IN ('included', 'addon', 'standalone', 'promo', 'manual')),
+
+            CONSTRAINT tenant_module_entitlements_module_key_chk
+                CHECK (length(trim(module_key)) > 0),
+
+            CONSTRAINT tenant_module_entitlements_tenant_slug_chk
+                CHECK (length(trim(tenant_slug)) > 0),
+
+            CONSTRAINT tenant_module_entitlements_dates_chk
+                CHECK (ends_at IS NULL OR ends_at >= starts_at),
+
+            CONSTRAINT tenant_module_entitlements_tenant_module_key_uniq
+                UNIQUE (tenant_id, module_key),
+
+            CONSTRAINT tenant_module_entitlements_tenant_id_fkey
+                FOREIGN KEY (tenant_id)
+                REFERENCES public.tenants (id)
+                ON DELETE CASCADE
+        )
+        """
+    )
+    try:
+        execute(
+            "CREATE INDEX IF NOT EXISTS tenant_module_entitlements_tenant_id_idx "
+            "ON public.tenant_module_entitlements (tenant_id)"
+        )
+        execute(
+            "CREATE INDEX IF NOT EXISTS tenant_module_entitlements_tenant_slug_idx "
+            "ON public.tenant_module_entitlements (tenant_slug)"
+        )
+        execute(
+            "CREATE INDEX IF NOT EXISTS tenant_module_entitlements_module_key_idx "
+            "ON public.tenant_module_entitlements (module_key)"
+        )
+        execute(
+            "CREATE INDEX IF NOT EXISTS tenant_module_entitlements_status_idx "
+            "ON public.tenant_module_entitlements (status)"
+        )
+        execute(
+            """
+            CREATE INDEX IF NOT EXISTS tenant_module_entitlements_active_window_idx
+            ON public.tenant_module_entitlements (tenant_id, module_key, starts_at, ends_at)
+            WHERE status IN ('trial', 'active')
+            """
+        )
+        execute(
+            """
+            CREATE INDEX IF NOT EXISTS tenant_module_entitlements_metadata_gin_idx
+            ON public.tenant_module_entitlements
+            USING GIN (metadata)
+            """
+        )
+    except Exception as e:
+        print(f"tenant_module_entitlements indexes: {e}")
 
 
 def ensure_pricing_tables():
