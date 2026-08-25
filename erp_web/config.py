@@ -36,6 +36,19 @@ class Config:
     # Gemini AI (opsiyonel; .env içinde GEMINI_API_KEY=...)
     GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 
+    # Browserless.io — uzak Chrome (İlan Robotu Selenium Remote)
+    BROWSERLESS_API_KEY = os.environ.get("BROWSERLESS_API_KEY", "").strip()
+    # Selenium WebDriver HTTPS endpoint (shared fleet'te genelde Not Implemented / Auth)
+    BROWSERLESS_URL = os.environ.get(
+        "BROWSERLESS_URL",
+        "https://chrome.browserless.io/webdriver",
+    ).strip()
+    # Playwright/Puppeteer CDP WebSocket host (token bağlanırken ?token= eklenir)
+    BROWSERLESS_WS_HOST = os.environ.get(
+        "BROWSERLESS_WS_HOST",
+        "wss://production-sfo.browserless.io",
+    ).strip()
+
     # E-posta (randevu onay/iptal/hatırlatma)
     MAIL_SERVER = os.environ.get("MAIL_SERVER", "smtp.gmail.com")
     MAIL_PORT = int(os.environ.get("MAIL_PORT", 587))
