@@ -208,6 +208,28 @@ giriş yapması GEREKTİ (1a15f24 deploy'U SIRASINDA).
 6. GERÇEK bir ÖDEME yapan MÜŞTERİYLE tam uçtan uca TEST (kayıt →
    ödeme → ücretli plana geçiş → giriş)
 
+## 🔬 İlan Robotu araştırması (Selenium→Playwright, Browserless,
+TR proxy) - KEŞİF tamamlandı, TAM otomasyon HENÜZ ÇÖZÜLMEDİ
+
+- Selenium'DAN Playwright+Browserless'A geçiş TAMAMLANDI (commit
+  e85c148) - Render'DA çalışabilir HALE geldi
+- TR residential proxy (Browserless YERLEŞİK özelliği) BAŞARIYLA
+  entegre edildi - GERÇEKTEN Türkiye IP'sinden ÇIKTIĞI doğrulandı
+- AMA: Sahibinden'İN Cloudflare bot TESPİTİ, TR proxy'yle BİLE
+  HÂLÂ giriş AKIŞINI ENGELLİYOR - TAM otomasyon HENÜZ BAŞARILAMADI
+- Hepsiemlak, AYRICA kendi Cloudflare koruma DUVARINA takılıyor
+- SONRAKİ adım (AYRI onay): TAZE çerezlerle/güncel şifreyle TEKRAR
+  deneme, VEYA farklı bir stealth YAKLAŞIMI
+
+## ✅ Platform Credentials Vault (Faz 1+2) - şifreli kimlik bilgisi
+deposu
+
+- YENİ /admin/credentials paneli (commit ab0ea81) - TÜM üçüncü
+  parti kimlik BİLGİLERİNİ (Mail/GİB/AI/Robot/Ops), Fernet
+  ŞİFRELEMESİYLE TEK bir yerden YÖNETME
+- SONRAKİ FAZ (AYRI onay): MEVCUT entegrasyonların (Mail'DEN
+  başlayarak) BU sisteme TAŞINMASI
+
 ## Önemli Teknik Notlar (Yeni Bir Sohbette Hatırlanması Gerekenler)
 
 - Ana branch: `main`, repo: `https://github.com/ankeagle20-jpg/BestOfficeERP.git`
