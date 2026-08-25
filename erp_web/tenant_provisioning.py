@@ -449,16 +449,38 @@ def normalize_signup_selected_modules(selected_module_keys) -> list[str]:
     return out
 
 
+def normalize_module_tier_preferences(prefs) -> dict[str, str]:
+    """Signup body module_tier_preferences → {module_key: tier_key} (geçersizler elenir)."""
+    if not isinstance(prefs, dict):
+        return {}
+    out: dict[str, str] = {}
+    for raw_mk, raw_tier in prefs.items():
+        mk = str(raw_mk or "").strip().lower()
+        tier = str(raw_tier or "").strip().lower()
+        if mk not in SIGNUP_SELECTABLE_MODULE_KEYS:
+            continue
+        if not re.fullmatch(r"[a-z0-9_]{1,32}", tier):
+            continue
+        if tier == "enterprise":
+            continue
+        out[mk] = tier
+    return out
+
+
 def grant_default_module_entitlements(
     tenant_id: int,
     tenant_slug: str,
     selected_module_keys: list | tuple | None = None,
+    module_tier_preferences: dict | None = None,
 ) -> int:
     """Yeni kiracı: core_erp (baseline) + seçilen modüller için trial entitlement."""
+    import json
+
     ensure_tenant_module_entitlements_table()
     tid = int(tenant_id)
     slug = str(tenant_slug).strip()
     selected = normalize_signup_selected_modules(selected_module_keys)
+    tier_prefs = normalize_module_tier_preferences(module_tier_preferences)
 
     modules_to_grant: list[tuple[str, str]] = [
         (BASELINE_MODULE_KEY, "included"),
@@ -476,6 +498,11 @@ def grant_default_module_entitlements(
             """,
             (tid, module_key),
         )
+        meta: dict = {
+            "note": "Signup provisioning — baseline + selected modules",
+        }
+        if module_key in tier_prefs:
+            meta["selected_tier"] = tier_prefs[module_key]
         execute(
             """
             INSERT INTO public.tenant_module_entitlements (
@@ -485,11 +512,11 @@ def grant_default_module_entitlements(
             VALUES (
                 %s, %s, %s, 'trial', %s,
                 'trial', 'signup_provision',
-                '{"note": "Signup provisioning — baseline + selected modules"}'::jsonb
+                %s::jsonb
             )
             ON CONFLICT (tenant_id, module_key) DO NOTHING
             """,
-            (tid, slug, module_key, billing_mode),
+            (tid, slug, module_key, billing_mode, json.dumps(meta, ensure_ascii=False)),
         )
         after = fetch_one(
             """
@@ -503,10 +530,11 @@ def grant_default_module_entitlements(
             inserted += 1
 
     logger.info(
-        "grant_default_module_entitlements tenant_id=%s slug=%s selected=%s inserted=%s",
+        "grant_default_module_entitlements tenant_id=%s slug=%s selected=%s tiers=%s inserted=%s",
         tid,
         slug,
         selected,
+        tier_prefs,
         inserted,
     )
     return inserted
@@ -522,6 +550,7 @@ def provision_new_tenant(
     dump_path: Path | None = None,
     allow_existing_provisioning_row: bool = False,
     selected_module_keys: list | tuple | None = None,
+    module_tier_preferences: dict | None = None,
 ) -> dict:
     """Yeni kiracı: şema + DDL replay + admin + public.tenants kaydı.
 
@@ -606,6 +635,7 @@ def provision_new_tenant(
         int(row["id"]),
         slug,
         selected_module_keys,
+        module_tier_preferences,
     )
     return {
         "ok": True,
@@ -618,4 +648,5 @@ def provision_new_tenant(
         "ddl_path": str(sql_path),
         "module_entitlements_inserted": ent_inserted,
         "selected_module_keys": normalize_signup_selected_modules(selected_module_keys),
+        "module_tier_preferences": normalize_module_tier_preferences(module_tier_preferences),
     }

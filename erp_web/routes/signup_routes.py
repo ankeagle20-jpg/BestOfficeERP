@@ -28,6 +28,7 @@ from tenant_provisioning import (
     TenantSlugConflictError,
     TenantSlugReserveError,
     mark_tenant_provision_failed,
+    normalize_module_tier_preferences,
     normalize_signup_selected_modules,
     provision_new_tenant,
     reserve_tenant_slug,
@@ -126,6 +127,14 @@ def _parse_selected_modules(data: dict) -> list[str]:
     return normalize_signup_selected_modules(raw)
 
 
+def _parse_module_tier_preferences(data: dict) -> dict[str, str]:
+    """Request body module_tier_preferences — geçersiz anahtar/değer sessizce elenir."""
+    raw = data.get("module_tier_preferences")
+    if raw is None:
+        return {}
+    return normalize_module_tier_preferences(raw)
+
+
 def _provision_worker(
     app,
     slug: str,
@@ -135,6 +144,7 @@ def _provision_worker(
     admin_full_name: str,
     plan: str,
     selected_module_keys: list[str] | None = None,
+    module_tier_preferences: dict[str, str] | None = None,
 ) -> None:
     t0 = time.monotonic()
     with app.app_context():
@@ -147,6 +157,7 @@ def _provision_worker(
                 admin_full_name=admin_full_name,
                 allow_existing_provisioning_row=True,
                 selected_module_keys=selected_module_keys or [],
+                module_tier_preferences=module_tier_preferences or {},
             )
             logger.info(
                 "signup_provision ok slug=%s duration_sec=%.1f",
@@ -316,6 +327,7 @@ def api_signup():
 
     app_obj = current_app._get_current_object()
     selected_modules = _parse_selected_modules(data)
+    tier_prefs = _parse_module_tier_preferences(data)
     thread = threading.Thread(
         target=_provision_worker,
         kwargs={
@@ -326,6 +338,7 @@ def api_signup():
             "admin_full_name": str(data.get("admin_full_name") or "").strip(),
             "plan": "trial",
             "selected_module_keys": selected_modules,
+            "module_tier_preferences": tier_prefs,
         },
         name=f"provision-{slug}",
         daemon=True,

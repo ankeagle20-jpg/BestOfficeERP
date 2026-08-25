@@ -147,6 +147,26 @@
     return out;
   }
 
+  const ALLOWED_MODULES = { personnel: true, randevu: true };
+  let moduleTierPreferences = {};
+
+  function applyUrlModuleTier() {
+    try {
+      const params = new URLSearchParams(window.location.search || "");
+      const mod = String(params.get("module") || "").trim().toLowerCase();
+      const tier = String(params.get("tier") || "").trim().toLowerCase();
+      if (mod && ALLOWED_MODULES[mod]) {
+        const pers = document.getElementById("mod_personnel");
+        const rand = document.getElementById("mod_randevu");
+        if (pers) pers.checked = (mod === "personnel");
+        if (rand) rand.checked = (mod === "randevu");
+        if (tier && /^[a-z0-9_]{1,32}$/.test(tier) && tier !== "enterprise") {
+          moduleTierPreferences[mod] = tier;
+        }
+      }
+    } catch (e) { /* ignore */ }
+  }
+
 
   function normalizeSlug(raw) {
     let s = String(raw || "").trim().toLowerCase();
@@ -284,7 +304,8 @@
       admin_full_name: document.getElementById("admin_full_name").value.trim(),
       country_code: "TR",
       website: document.getElementById("website").value,
-      selected_modules: collectSelectedModules()
+      selected_modules: collectSelectedModules(),
+      module_tier_preferences: moduleTierPreferences
     };
     try {
       const res = await fetch("/api/signup", {
@@ -328,6 +349,7 @@
     slugInput.focus();
   });
 
+  applyUrlModuleTier();
   loadPricing();
   updateSlugPreview("");
 })();

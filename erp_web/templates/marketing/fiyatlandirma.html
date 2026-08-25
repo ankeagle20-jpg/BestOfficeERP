@@ -204,6 +204,29 @@
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
     transform: translateY(-1px);
   }
+  .btn-select {
+    display: inline-block;
+    width: 100%;
+    box-sizing: border-box;
+    text-align: center;
+    margin-top: auto;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--accent);
+    background: #fff;
+    color: var(--accent);
+    text-decoration: none;
+    font-weight: 700;
+    font: inherit;
+  }
+  .btn-select:hover { background: #eff6ff; }
+  .btn-select.is-emphasized {
+    background: var(--accent);
+    color: #fff;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+  }
+  .btn-select.is-emphasized:hover { opacity: 0.92; background: var(--accent); }
+  .tier-card .btn-select { margin-top: 12px; }
   .core-divider {
     border: 0;
     border-top: 1px solid var(--border);
@@ -722,7 +745,10 @@
       "<li>Dahil personel: <strong>" + escapeHtml(inclPers) + "</strong></li>" +
       "<li>" + escapeHtml(perLabel) + ": <strong>" + formatMoney(perPShow, currency) + "</strong></li>" +
       "</ul>" +
-      estimateHtml;
+      estimateHtml +
+      "<a class=\"btn-select" + (recommended ? " is-emphasized" : "") +
+      "\" href=\"/signup?module=randevu&tier=" + encodeURIComponent(String(tier.tier_key || "")) +
+      "\">Bu Paketi Seç</a>";
     return card;
   }
 
@@ -910,7 +936,10 @@
       "<li>Dahil şube: <strong>" + escapeHtml(String(tier.included_branches)) + "</strong></li>" +
       "<li>" + escapeHtml(branchLabel) + ": <strong>" + formatMoney(perBShow, currency) + "</strong></li>" +
       "</ul>" +
-      estimateHtml;
+      estimateHtml +
+      "<a class=\"btn-select" + (recommended ? " is-emphasized" : "") +
+      "\" href=\"/signup?module=personnel&tier=" + encodeURIComponent(String(tier.tier_key || "")) +
+      "\">Bu Paketi Seç</a>";
     return card;
   }
 
