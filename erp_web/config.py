@@ -11,6 +11,9 @@ class Config:
     # Flask
     SECRET_KEY = os.environ.get("SECRET_KEY", "degistir-bunu-uretimde")
     SESSION_TYPE = "filesystem"
+
+    # Platform credentials vault (Fernet) — tek ana anahtar; diğer sırlar DB'de
+    CREDENTIALS_MASTER_KEY = os.environ.get("CREDENTIALS_MASTER_KEY", "").strip()
     
     # Supabase
     SUPABASE_URL = os.environ.get("SUPABASE_URL", "")

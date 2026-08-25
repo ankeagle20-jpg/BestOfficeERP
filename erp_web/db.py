@@ -590,6 +590,7 @@ def init_schema():
     ensure_tenant_module_entitlements_table()
     ensure_module_pricing_tiers_table()
     ensure_module_pricing_leads_table()
+    ensure_platform_credentials_table()
     print("✅ Supabase şema oluşturuldu.")
 
 
@@ -3166,6 +3167,66 @@ def ensure_module_pricing_leads_table():
         )
     except Exception as e:
         print(f"module_pricing_leads indexes: {e}")
+
+
+def ensure_platform_credentials_table():
+    """Platform entegrasyon sırları vault: yalnız public.platform_credentials.
+
+    Kiracı şemalarına karışmaz; PLATFORM_STRIP_TABLES listesinde.
+    Değerler Fernet ile şifreli saklanır (credentials_vault.py).
+    """
+    execute(
+        """
+        CREATE TABLE IF NOT EXISTS public.platform_credentials (
+            credential_key   TEXT PRIMARY KEY,
+            encrypted_value  TEXT NOT NULL DEFAULT '',
+            value_hint       TEXT,
+            description      TEXT,
+            category         TEXT NOT NULL,
+            is_secret        BOOLEAN NOT NULL DEFAULT TRUE,
+            is_configured    BOOLEAN NOT NULL DEFAULT FALSE,
+            updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_by       TEXT,
+            metadata         JSONB NOT NULL DEFAULT '{}'::jsonb,
+            CONSTRAINT platform_credentials_key_format
+                CHECK (credential_key ~ '^[a-z0-9_.]+$'),
+            CONSTRAINT platform_credentials_category_format
+                CHECK (category ~ '^[a-z0-9_]+$')
+        )
+        """
+    )
+    execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_platform_credentials_category
+        ON public.platform_credentials (category)
+        """
+    )
+    # Başlangıç kataloğu — boş değerler (is_configured=FALSE)
+    catalog = (
+        ("mail.username", "mail", "SMTP kullanıcı adı / Gmail", True),
+        ("mail.password", "mail", "SMTP uygulama şifresi", True),
+        ("gib.user", "gib", "GİB e-Arşiv kullanıcı kodu", True),
+        ("gib.pass", "gib", "GİB e-Arşiv şifresi", True),
+        ("ai.gemini_api_key", "ai", "Google Gemini API anahtarı", True),
+        ("ai.groq_api_key", "ai", "Groq API anahtarı (fiş okuma)", True),
+        ("robot.browserless_api_key", "robot", "Browserless.io API token", True),
+        ("robot.sahibinden_email", "robot", "Sahibinden hesap e-posta", True),
+        ("robot.sahibinden_password", "robot", "Sahibinden hesap şifresi", True),
+        ("robot.sahibinden_cookies_b64", "robot", "Sahibinden oturum çerezleri (B64 JSON)", True),
+        ("robot.hepsiemlak_email", "robot", "Hepsiemlak hesap e-posta", True),
+        ("robot.hepsiemlak_password", "robot", "Hepsiemlak hesap şifresi", True),
+        ("ops.cron_token", "ops", "Cron endpoint koruma tokeni", True),
+    )
+    for key, cat, desc, is_secret in catalog:
+        execute(
+            """
+            INSERT INTO public.platform_credentials
+                (credential_key, encrypted_value, description, category, is_secret, is_configured)
+            VALUES (%s, '', %s, %s, %s, FALSE)
+            ON CONFLICT (credential_key) DO NOTHING
+            """,
+            (key, desc, cat, is_secret),
+        )
 
 
 def clear_all_customers():
