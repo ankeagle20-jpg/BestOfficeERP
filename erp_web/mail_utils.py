@@ -6,15 +6,26 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from flask import current_app
 
+from credentials_vault import get_credential
+
+
+def _mail_credentials():
+    """SMTP kullanıcı/şifre: vault → .env fallback (get_credential zinciri)."""
+    user = (get_credential("mail.username") or "").strip()
+    password = (get_credential("mail.password") or "").strip()
+    return user, password
+
 
 def send_mail(to_email, subject, body_text, body_html=None):
-    """Tek alıcıya e-posta gönder. MAIL_* config gerekli."""
-    if not to_email or not (current_app.config.get("MAIL_USERNAME") and current_app.config.get("MAIL_PASSWORD")):
+    """Tek alıcıya e-posta gönder. mail.username / mail.password (vault veya .env) gerekli."""
+    user, password = _mail_credentials()
+    if not to_email or not (user and password):
         return False
     try:
         msg = MIMEMultipart("alternative")
         msg["Subject"] = subject
-        msg["From"] = current_app.config.get("MAIL_DEFAULT_SENDER", "noreply@example.com")
+        default_sender = (current_app.config.get("MAIL_DEFAULT_SENDER") or "").strip()
+        msg["From"] = default_sender or user or "noreply@example.com"
         msg["To"] = to_email
         msg.attach(MIMEText(body_text, "plain", "utf-8"))
         if body_html:
@@ -22,12 +33,12 @@ def send_mail(to_email, subject, body_text, body_html=None):
         with smtplib.SMTP(current_app.config.get("MAIL_SERVER", "smtp.gmail.com"), current_app.config.get("MAIL_PORT", 587)) as s:
             if current_app.config.get("MAIL_USE_TLS"):
                 s.starttls()
-            s.login(current_app.config["MAIL_USERNAME"], current_app.config["MAIL_PASSWORD"])
+            s.login(user, password)
             s.sendmail(msg["From"], to_email, msg.as_string())
         return True
     except Exception as e:
         if current_app.debug:
-            print("send_mail error:", e)
+            print("send_mail error:", type(e).__name__)
         return False
 
 
