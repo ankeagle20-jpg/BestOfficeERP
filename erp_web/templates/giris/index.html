@@ -2789,7 +2789,7 @@
                         <h4 style="margin:0;">Şirket Bilgileri</h4>
                         <label for="uyruk_secimi" style="display:flex;align-items:center;gap:8px;margin:0;font-size:12px;color:#90caf9;font-weight:600;">
                             Uyruğu
-                            <select id="uyruk_secimi" onchange="girisUyrukDegisti()" title="TC: mevcut doğrulamalar. Yabancı: vergi/TC/telefon formatı gevşer (yalnız bu oturum)." style="min-width:110px;background:#0a1929;border:1px solid #1e3a5f;color:#e0f7fa;padding:4px 8px;border-radius:4px;font-size:12px;">
+                            <select id="uyruk_secimi" onchange="girisUyrukDegisti()" title="TC: mevcut doğrulamalar. Yabancı: vergi/TC/telefon formatı gevşer (kayıtlı)." style="min-width:110px;background:#0a1929;border:1px solid #1e3a5f;color:#e0f7fa;padding:4px 8px;border-radius:4px;font-size:12px;">
                                 <option value="tc" selected>TC</option>
                                 <option value="yabanci">Yabancı</option>
                             </select>
@@ -24021,6 +24021,7 @@ function selectMusteri(id) {
             set('nace', m.nace_kodu != null ? m.nace_kodu : m.nace);
             set('yetkili_ad', m.yetkili_kisi != null ? m.yetkili_kisi : m.yetkili_ad);
             set('yetkili_tc', m.yetkili_tc);
+            if (typeof girisUyrukKayittanUygula === 'function') girisUyrukKayittanUygula(m);
             set('phone2', m.phone2);
             set('phone_kime', m.phone_kime != null ? m.phone_kime : m.yetkili_tel_aciklama);
             set('phone2_kime', m.phone2_kime != null ? m.phone2_kime : m.yetkili_tel2_aciklama);
@@ -24645,6 +24646,21 @@ function sozlesmeTahsilatFormunuSeciliMusteridenDoldur() {
 
 /** Uyruğu: TC (varsayılan) / Yabancı — yalnız form oturumu; DB'ye yazılmaz. */
 window.__girisUyrukTcAttrs = null;
+
+
+function girisUyrukKayittanUygula(m) {
+    var el = document.getElementById('uyruk_secimi');
+    if (!el) return;
+    var raw = (m && (m.uyruk != null ? m.uyruk : m.uyruk_yabanci));
+    var yab = false;
+    if (typeof raw === 'boolean') yab = raw;
+    else {
+        var s = String(raw == null ? '' : raw).trim().toLowerCase();
+        yab = (s === 'yabanci' || s === 'yabancı' || s === 'foreign' || s === '1' || s === 'true');
+    }
+    el.value = yab ? 'yabanci' : 'tc';
+    if (typeof girisUyrukUygula === 'function') girisUyrukUygula();
+}
 
 function girisUyrukYabanciMi() {
     var el = document.getElementById('uyruk_secimi');
@@ -26559,6 +26575,9 @@ function temizle() {
 
 function temizleForm() {
     document.getElementById('musteri-form').reset();
+    var _uyr = document.getElementById('uyruk_secimi');
+    if (_uyr) _uyr.value = 'tc';
+    if (typeof girisUyrukUygula === 'function') girisUyrukUygula();
     if (typeof girisGrup2SeciliYaz === 'function') girisGrup2SeciliYaz([]);
     else {
         var g2h = document.getElementById('giris_grup2_secili_json');

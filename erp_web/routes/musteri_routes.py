@@ -9,6 +9,7 @@ from db import (
     ensure_customers_durum,
     ensure_customers_arsivli,
     ensure_customers_quick_edit_columns,
+    ensure_musteri_kyc_uyruk_column,
     ensure_customers_kapanis_tarihi,
     ensure_customers_hazir_ofis_oda,
     ensure_customers_grup2_secimleri,
@@ -130,6 +131,10 @@ def _vergi_no_normalize_veya_hata_kyc(tax_raw, yetkili_tc_raw, uyruk_yabanci=Fal
         return "Vergi no 11 hane yalnızca Yetkili T.C. Kimlik No ile aynı olduğunda kabul edilir.", None
     return "Vergi no 10 haneli VKN veya Yetkili T.C. ile aynı 11 haneli T.C. olmalıdır.", None
 
+
+
+def _uyruk_db_value_kyc(uyruk_yabanci: bool) -> str:
+    return "Yabanci" if uyruk_yabanci else "TC"
 
 def _request_uyruk_yabanci_kyc(data) -> bool:
     if not isinstance(data, dict):
@@ -2208,6 +2213,8 @@ def api_kyc_kaydet():
         yetkili_adsoyad = (data.get("yetkili_adsoyad") or "").strip()
         yetkili_tcno = (data.get("yetkili_tcno") or "").strip()
         uyruk_yabanci = _request_uyruk_yabanci_kyc(data if isinstance(data, dict) else {})
+        ensure_musteri_kyc_uyruk_column()
+        uyruk_val = _uyruk_db_value_kyc(uyruk_yabanci)
         vergi_err, vergi_no_norm = _vergi_no_normalize_veya_hata_kyc(
             vergi_no, yetkili_tcno, uyruk_yabanci=uyruk_yabanci
         )
@@ -2408,6 +2415,7 @@ def api_kyc_kaydet():
                    sirket_unvani=%s, unvan=%s, musteri_adi=%s, vergi_no=%s, vergi_dairesi=%s, mersis_no=%s, ticaret_sicil_no=%s,
                    kurulus_tarihi=%s, faaliyet_konusu=%s, nace_kodu=%s, eski_adres=%s, yeni_adres=%s, sube_merkez=%s,
                    yetkili_adsoyad=%s, yetkili_tcno=%s, yetkili_dogum=%s, yetkili_ikametgah=%s,
+                   uyruk=%s,
                    yetkili_tel=%s, yetkili_tel2=%s, yetkili_tel_aciklama=%s, yetkili_tel2_aciklama=%s, yetkili_email=%s, email=%s,
                    hizmet_turu=%s, duzenli_fatura=%s, aylik_kira=%s, yillik_kira=%s, sozlesme_no=%s, sozlesme_tarihi=%s, sozlesme_bitis=%s,
                    kira_artis_tarihi=%s, kira_suresi_ay=%s, kira_nakit=%s, kira_banka=%s, kira_nakit_tutar=%s, kira_banka_tutar=%s, hazir_ofis_oda_no=%s,
@@ -2418,6 +2426,7 @@ def api_kyc_kaydet():
                 (sirket_unvani, sirket_unvani, musteri_adi, vergi_no, vergi_dairesi, mersis_no, ticaret_sicil_no,
                  kurulus_tarihi, faaliyet_konusu, nace_kodu, eski_adres, yeni_adres, sube_merkez,
                  yetkili_adsoyad, yetkili_tcno, yetkili_dogum, yetkili_ikametgah,
+                 uyruk_val,
                  yetkili_tel, yetkili_tel2, yetkili_tel_aciklama, yetkili_tel2_aciklama, yetkili_email, email,
                  hizmet_turu, duzenli_fatura, aylik_kira, yillik_kira, sozlesme_no, sozlesme_tarihi, sozlesme_bitis,
                  kira_artis_tarihi, kira_suresi_ay, kira_nakit, kira_banka, kira_nakit_tutar, kira_banka_tutar, hazir_oda_val,
@@ -2483,7 +2492,7 @@ def api_kyc_kaydet():
                 """INSERT INTO musteri_kyc (
                    musteri_id, sirket_unvani, unvan, musteri_adi, vergi_no, vergi_dairesi, mersis_no, ticaret_sicil_no,
                    kurulus_tarihi, faaliyet_konusu, nace_kodu, eski_adres, yeni_adres, sube_merkez,
-                   yetkili_adsoyad, yetkili_tcno, yetkili_dogum, yetkili_ikametgah,
+                   yetkili_adsoyad, yetkili_tcno, yetkili_dogum, yetkili_ikametgah, uyruk,
                    yetkili_tel, yetkili_tel2, yetkili_tel_aciklama, yetkili_tel2_aciklama, yetkili_email, email,
                    hizmet_turu, duzenli_fatura, odeme_duzeni, odeme_duzeni_manuel, aylik_kira, yillik_kira, sozlesme_no, sozlesme_tarihi, sozlesme_bitis,
                    kira_artis_tarihi, kira_suresi_ay, kira_nakit, kira_banka, kira_nakit_tutar, kira_banka_tutar, hazir_ofis_oda_no,
@@ -2491,13 +2500,13 @@ def api_kyc_kaydet():
                    evrak_kimlik_fotokopi, evrak_ikametgah, evrak_kase, notlar, tamamlanma_yuzdesi
                 ) VALUES (
                    %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
-                   %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
+                   %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
                    %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
                    %s,%s,%s,%s,%s,%s,%s
                 ) RETURNING id""",
                 (musteri_id, sirket_unvani, sirket_unvani, musteri_adi, vergi_no, vergi_dairesi, mersis_no, ticaret_sicil_no,
                  kurulus_tarihi, faaliyet_konusu, nace_kodu, eski_adres, yeni_adres, sube_merkez,
-                 yetkili_adsoyad, yetkili_tcno, yetkili_dogum, yetkili_ikametgah,
+                 yetkili_adsoyad, yetkili_tcno, yetkili_dogum, yetkili_ikametgah, uyruk_val,
                  yetkili_tel, yetkili_tel2, yetkili_tel_aciklama, yetkili_tel2_aciklama, yetkili_email, email,
                  hizmet_turu, duzenli_fatura, _odemd, odeme_duzeni_manuel_txt or None, aylik_kira, yillik_kira, sozlesme_no, sozlesme_tarihi, sozlesme_bitis,
                  kira_artis_tarihi, kira_suresi_ay, kira_nakit, kira_banka, kira_nakit_tutar, kira_banka_tutar, hazir_oda_val,

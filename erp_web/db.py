@@ -564,6 +564,7 @@ def init_schema():
     ensure_musteri_kyc_columns()
     ensure_musteri_kyc_arama_kolonlari()
     ensure_musteri_kyc_hazir_ofis_oda_no()
+    ensure_musteri_kyc_uyruk_column()
     ensure_hizmet_turleri_table()
     ensure_duzenli_fatura_secenekleri_table()
     ensure_office_rentals()
@@ -988,6 +989,21 @@ def ensure_musteri_kyc_hazir_ofis_oda_no():
     except Exception as e:
         print(f"musteri_kyc.hazir_ofis_oda_no: {e}")
 
+
+
+
+def ensure_musteri_kyc_uyruk_column():
+    """Musteri kimlik uyrugu (TC / Yabanci) — musteri_kyc.uyruk.
+
+    Formdaki Uyrugu secimi; yetkili_tcno / vergi_no ile ayni KYC satirinda.
+    Idempotent ALTER; ensure_musteri_kyc_columns tek-seferlik oldugu icin ayridir.
+    """
+    try:
+        execute(
+            "ALTER TABLE musteri_kyc ADD COLUMN IF NOT EXISTS uyruk TEXT DEFAULT 'TC'"
+        )
+    except Exception as e:
+        print(f"musteri_kyc.uyruk: {e}")
 
 def ensure_musteri_kyc_odeme_duzeni():
     """Ödeme düzeni (aylık / manuel vb.) — aylık grid dışı müşteriler için."""

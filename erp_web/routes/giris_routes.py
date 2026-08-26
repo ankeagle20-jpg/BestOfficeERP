@@ -33,6 +33,7 @@ from db import (
     ensure_customers_musteri_no,
     ensure_customers_hazir_ofis_oda,
     ensure_musteri_kyc_columns,
+    ensure_musteri_kyc_uyruk_column,
     ensure_musteri_kyc_hazir_ofis_oda_no,
     ensure_musteri_kyc_kira_banka,
     ensure_customers_bizim_hesap,
@@ -5081,6 +5082,7 @@ def api_musteri_detay(mid):
     ensure_customers_kapanis_sonrasi_borc_ay()
     ensure_grup2_etiketleri_table()
     ensure_grup2_bizim_hesap_into_array()
+    ensure_musteri_kyc_uyruk_column()
     # Tek round-trip: customers + en son musteri_kyc + tahsilat toplamı birlikte.
     combined = fetch_all(
         """
@@ -5144,6 +5146,9 @@ def api_musteri_detay(mid):
             pass
     if not kyc and out.get("yetkili_tcno"):
         out["yetkili_tc"] = out["yetkili_tcno"]
+    if "uyruk" not in out:
+        out["uyruk"] = "TC"
+        out["uyruk_yabanci"] = False
     # KYC alanlarını forma uyumlu anahtarlarla birleştir (KYC öncelikli)
     if kyc:
         out["musteri_adi"] = _musteri_serialize_val(out.get("musteri_adi")) or _musteri_serialize_val(
@@ -5159,6 +5164,8 @@ def api_musteri_detay(mid):
         out["yetkili_kisi"] = _musteri_serialize_val(kyc.get("yetkili_adsoyad"))
         out["yetkili_ad"] = out["yetkili_kisi"]
         out["yetkili_tc"] = _musteri_serialize_val(kyc.get("yetkili_tcno"))
+        out["uyruk"] = _uyruk_from_stored(kyc.get("uyruk"))
+        out["uyruk_yabanci"] = out["uyruk"] == "Yabanci"
         out["phone"] = out.get("phone") or _musteri_serialize_val(kyc.get("yetkili_tel"))
         out["phone2"] = _musteri_serialize_val(kyc.get("yetkili_tel2"))
         out["phone_kime"] = _musteri_serialize_val(kyc.get("yetkili_tel_aciklama"))
@@ -5481,6 +5488,32 @@ def _vergi_no_normalize_veya_hata(tax_raw, yetkili_tc_raw, uyruk_yabanci=False):
     return "Vergi no 10 haneli VKN veya Yetkili T.C. ile aynı 11 haneli T.C. olmalıdır.", None
 
 
+
+def _uyruk_db_value(uyruk_yabanci: bool) -> str:
+    """Kalici DB degeri: 'TC' | 'Yabanci'."""
+    return "Yabanci" if uyruk_yabanci else "TC"
+
+
+def _uyruk_from_stored(raw) -> str:
+    s = str(raw or "").strip()
+    if s.lower() in ("yabanci", "yabancı", "foreign"):
+        return "Yabanci"
+    return "TC"
+
+
+def _persist_musteri_kyc_uyruk(musteri_id, uyruk_yabanci: bool) -> None:
+    """Varsa musteri_kyc satir(lar)ina uyruk yazar (KYC henuz yoksa no-op)."""
+    if not musteri_id:
+        return
+    try:
+        ensure_musteri_kyc_uyruk_column()
+        execute(
+            "UPDATE musteri_kyc SET uyruk = %s WHERE musteri_id = %s",
+            (_uyruk_db_value(bool(uyruk_yabanci)), int(musteri_id)),
+        )
+    except Exception as e:
+        print(f"persist musteri_kyc.uyruk: {e}")
+
 def _request_uyruk_yabanci(data) -> bool:
     """POST body: uyruk_yabanci bool veya uyruk=yabanci."""
     if not isinstance(data, dict):
@@ -5561,6 +5594,7 @@ def kaydet():
                 calisma_sekli,
                 musteri_id
             ))
+            _persist_musteri_kyc_uyruk(musteri_id, uyruk_yabanci)
             return jsonify({'ok': True, 'mesaj': '✅ Müşteri güncellendi'})
         else:
             # Yeni kayıt: musteri_no = id (aynı transaction); opsiyonel rezerve_edilen_id
@@ -5660,6 +5694,7 @@ def kaydet():
             if mno is not None:
                 kaydet_mesaj += f", müşteri no: {mno}"
             kaydet_mesaj += ")"
+            _persist_musteri_kyc_uyruk(mid, uyruk_yabanci)
             return jsonify({"ok": True, "mesaj": kaydet_mesaj, "id": mid, "musteri_no": mno})
 
     except Exception as e:

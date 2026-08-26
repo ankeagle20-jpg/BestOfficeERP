@@ -1686,7 +1686,8 @@ CREATE TABLE public.musteri_kyc (
     kira_nakit_tutar numeric(14,2),
     kira_banka_tutar numeric(14,2),
     odeme_duzeni text,
-    odeme_duzeni_manuel text
+    odeme_duzeni_manuel text,
+    uyruk text DEFAULT 'TC'::text
 );
 
 
