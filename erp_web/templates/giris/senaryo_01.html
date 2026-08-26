@@ -121,19 +121,6 @@
             letter-spacing: 0.03em;
             color: var(--s01-muted);
         }
-        .s01-yil-panel-dropdowns {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 0.5rem 0.75rem;
-        }
-        .s01-field-inline {
-            min-width: 0;
-        }
-        .s01-yil-panel-ayrac {
-            margin: 0;
-            border: none;
-            border-top: 1px solid var(--s01-border);
-        }
         .s01-kayit-yili-list {
             display: flex;
             flex-wrap: wrap;
@@ -521,23 +508,11 @@
                 <span id="s01_yil_panel_btn_txt">Yıl</span>
             </button>
             <div class="s01-yil-panel" id="s01_yil_panel" role="group" hidden
-                 aria-label="Yıl aralığı ve kayıt yılı filtresi">
-                <div class="s01-yil-panel-bolum s01-yil-panel-sutun">
-                    <div class="s01-yil-panel-baslik">Sütun aralığı</div>
-                    <div class="s01-yil-panel-dropdowns">
-                        <label class="s01-field s01-field-inline">Başlangıç yılı
-                            <select id="s01_yil_bas" aria-label="Başlangıç yılı"></select>
-                        </label>
-                        <label class="s01-field s01-field-inline">Bitiş yılı
-                            <select id="s01_yil_bit" aria-label="Bitiş yılı"></select>
-                        </label>
-                    </div>
-                </div>
-                <hr class="s01-yil-panel-ayrac" />
-                <div class="s01-yil-panel-bolum s01-yil-panel-kayit">
-                    <div class="s01-yil-panel-baslik">Kayıt yılı filtresi</div>
+                 aria-label="Yıl filtresi">
+                <div class="s01-yil-panel-bolum">
+                    <div class="s01-yil-panel-baslik">Yıl Filtresi</div>
                     <div class="s01-kayit-yili-list" id="s01_kayit_yili" role="group"
-                         aria-label="Kayıt yılı filtresi"></div>
+                         aria-label="Yıl filtresi"></div>
                 </div>
             </div>
         </div>
@@ -606,21 +581,14 @@
     function s01YilPanelButonEtiketGuncelle() {
         var el = document.getElementById('s01_yil_panel_btn_txt');
         if (!el) return;
-        var elBas = document.getElementById('s01_yil_bas');
-        var elBit = document.getElementById('s01_yil_bit');
-        var yBas = elBas ? parseInt(elBas.value, 10) : NaN;
-        var yBit = elBit ? parseInt(elBit.value, 10) : NaN;
         var kayit = s01KayitYillariSecilen();
-        var parts = [];
-        if (!isNaN(yBas) && !isNaN(yBit)) {
-            parts.push(yBas === yBit ? String(yBas) : (yBas + '–' + yBit));
+        if (!kayit.length) {
+            el.textContent = 'Yıl';
+            return;
         }
-        if (kayit.length === 1) {
-            parts.push('Kayıt: ' + kayit[0]);
-        } else if (kayit.length > 1) {
-            parts.push('Kayıt: ' + kayit.length);
-        }
-        el.textContent = parts.length ? ('Yıl (' + parts.join(' · ') + ')') : 'Yıl';
+        var yrs = kayit.slice();
+        yrs.sort(function (a, b) { return parseInt(a, 10) - parseInt(b, 10); });
+        el.textContent = 'Yıl (' + yrs.join(', ') + ')';
     }
 
     function s01YilPanelKapat() {
@@ -651,11 +619,6 @@
         var panel = document.getElementById('s01_yil_panel');
         if (panel && !panel.hidden && panel.classList.contains('show')) s01YilPanelKapat();
         else s01YilPanelAc();
-    }
-
-    function s01YilDropdownChange() {
-        s01YilPanelButonEtiketGuncelle();
-        s01Yukle();
     }
 
     function s01KayitYillariSecilen() {
@@ -696,26 +659,23 @@
         return { bas: yBit - 2, bit: yBit };
     }
 
-    function s01YilOptionDoldur(sel, fromY, toY, selected) {
-        sel.innerHTML = '';
-        var y;
-        for (y = fromY; y <= toY; y++) {
-            var opt = document.createElement('option');
-            opt.value = String(y);
-            opt.textContent = String(y);
-            if (y === selected) opt.selected = true;
-            sel.appendChild(opt);
-        }
-    }
-
-    function s01InitYilDropdownlari() {
-        var now = s01BugunYil();
+    function s01YilAraligiVeKayit() {
+        var kayitRaw = s01KayitYillariSecilen();
         var def = s01VarsayilanYillar();
-        var elBas = document.getElementById('s01_yil_bas');
-        var elBit = document.getElementById('s01_yil_bit');
-        s01YilOptionDoldur(elBas, now - 15, now + 2, def.bas);
-        s01YilOptionDoldur(elBit, now - 15, now + 2, def.bit);
-        s01YilPanelButonEtiketGuncelle();
+        if (!kayitRaw.length) {
+            return { yBas: def.bas, yBit: def.bit, kayitYillar: [] };
+        }
+        var yrs = [];
+        var i;
+        for (i = 0; i < kayitRaw.length; i++) {
+            var y = parseInt(kayitRaw[i], 10);
+            if (!isNaN(y)) yrs.push(y);
+        }
+        yrs.sort(function (a, b) { return a - b; });
+        if (!yrs.length) {
+            return { yBas: def.bas, yBit: def.bit, kayitYillar: [] };
+        }
+        return { yBas: yrs[0], yBit: yrs[yrs.length - 1], kayitYillar: kayitRaw };
     }
 
     /** Backend senaryo01_hucre_aktif ile aynı: kapanış ayı DAHİL, sonraki BOŞ; bit yoksa açık uç. */
@@ -827,12 +787,11 @@
     }
 
     function s01ExcelDosyaAdi() {
-        var elBas = document.getElementById('s01_yil_bas');
-        var elBit = document.getElementById('s01_yil_bit');
+        var aralik = s01YilAraligiVeKayit();
         var elDurum = document.getElementById('s01_durum');
         var elHt = document.getElementById('s01_hizmet_turu');
-        var yBas = elBas ? String(elBas.value || '') : '';
-        var yBit = elBit ? String(elBit.value || '') : '';
+        var yBas = String(aralik.yBas || '');
+        var yBit = String(aralik.yBit || '');
         var durum = (elDurum && elDurum.value) ? elDurum.value : 'tumu';
         var ht = (elHt && elHt.value) ? elHt.value : '';
         var yil = (yBas && yBit && yBas !== yBit) ? (yBas + '-' + yBit) : (yBas || yBit || 'yil');
@@ -1468,25 +1427,15 @@
     }
 
     function s01Yukle() {
-        var elBas = document.getElementById('s01_yil_bas');
-        var elBit = document.getElementById('s01_yil_bit');
         var elDurum = document.getElementById('s01_durum');
         var elHt = document.getElementById('s01_hizmet_turu');
         var btn = document.getElementById('s01_yukle_btn');
-        var yBas = parseInt(elBas.value, 10);
-        var yBit = parseInt(elBit.value, 10);
-        if (isNaN(yBas) || isNaN(yBit)) {
-            s01SetStatus('Geçerli yıl seçin.', true);
-            return;
-        }
-        if (yBit < yBas) {
-            var tmp = yBas; yBas = yBit; yBit = tmp;
-            elBas.value = String(yBas);
-            elBit.value = String(yBit);
-        }
+        var aralik = s01YilAraligiVeKayit();
+        var yBas = aralik.yBas;
+        var yBit = aralik.yBit;
         var durum = elDurum.value || 'tumu';
         var hizmet = (elHt && elHt.value) ? elHt.value : '';
-        var kayitYillar = s01KayitYillariSecilen();
+        var kayitYillar = aralik.kayitYillar;
         var url = '/giris/api/senaryo-01?yil_bas=' + encodeURIComponent(yBas) +
             '&yil_bit=' + encodeURIComponent(yBit) +
             '&durum=' + encodeURIComponent(durum);
@@ -1537,13 +1486,10 @@
     }
 
     document.addEventListener('DOMContentLoaded', function () {
-        s01InitYilDropdownlari();
         s01KayitYiliDoldur();
         document.getElementById('s01_yukle_btn').addEventListener('click', s01Yukle);
         document.getElementById('s01_excel_btn').addEventListener('click', s01ExcelAktar);
         document.getElementById('s01_hizmet_turu').addEventListener('change', s01Yukle);
-        document.getElementById('s01_yil_bas').addEventListener('change', s01YilDropdownChange);
-        document.getElementById('s01_yil_bit').addEventListener('change', s01YilDropdownChange);
         document.getElementById('s01_kayit_yili').addEventListener('change', s01KayitYiliChange);
         document.getElementById('s01_kayit_yili').addEventListener('change', s01YilPanelButonEtiketGuncelle);
         document.getElementById('s01_yil_panel_btn').addEventListener('click', s01YilPanelToggle);
