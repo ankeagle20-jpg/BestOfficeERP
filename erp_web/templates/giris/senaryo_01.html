@@ -121,6 +121,26 @@
             letter-spacing: 0.03em;
             color: var(--s01-muted);
         }
+        .s01-yil-mod-sec {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem 0.85rem;
+            margin-bottom: 0.15rem;
+        }
+        .s01-yil-mod-label {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.3rem;
+            color: var(--s01-text);
+            font-size: 0.82rem;
+            cursor: pointer;
+            user-select: none;
+            white-space: nowrap;
+        }
+        .s01-yil-mod-label input {
+            margin: 0;
+            accent-color: #2d7dd2;
+        }
         .s01-kayit-yili-list {
             display: flex;
             flex-wrap: wrap;
@@ -511,6 +531,16 @@
                  aria-label="Yıl filtresi">
                 <div class="s01-yil-panel-bolum">
                     <div class="s01-yil-panel-baslik">Yıl Filtresi</div>
+                    <div class="s01-yil-mod-sec" id="s01_yil_mod" role="radiogroup" aria-label="Yıl filtresi modu">
+                        <label class="s01-yil-mod-label">
+                            <input type="radio" name="s01_yil_mod" id="s01_yil_mod_kayit" value="kayit" checked>
+                            Kayıt Yılı
+                        </label>
+                        <label class="s01-yil-mod-label">
+                            <input type="radio" name="s01_yil_mod" id="s01_yil_mod_baslangic" value="baslangic">
+                            Başlangıç Yılı
+                        </label>
+                    </div>
                     <div class="s01-kayit-yili-list" id="s01_kayit_yili" role="group"
                          aria-label="Yıl filtresi"></div>
                 </div>
@@ -578,17 +608,34 @@
         s01YilPanelButonEtiketGuncelle();
     }
 
+    function s01YilModSecili() {
+        var el = document.querySelector('#s01_yil_mod input[name="s01_yil_mod"]:checked');
+        var v = el ? String(el.value || '').trim() : 'kayit';
+        return v === 'baslangic' ? 'baslangic' : 'kayit';
+    }
+
+    function s01YilModChange() {
+        s01YilPanelButonEtiketGuncelle();
+        s01Yukle();
+    }
+
     function s01YilPanelButonEtiketGuncelle() {
         var el = document.getElementById('s01_yil_panel_btn_txt');
         if (!el) return;
-        var kayit = s01KayitYillariSecilen();
-        if (!kayit.length) {
+        var mod = s01YilModSecili();
+        var secili = s01KayitYillariSecilen();
+        if (!secili.length) {
             el.textContent = 'Yıl';
             return;
         }
-        var yrs = kayit.slice();
+        var yrs = secili.slice();
         yrs.sort(function (a, b) { return parseInt(a, 10) - parseInt(b, 10); });
-        el.textContent = 'Yıl (' + yrs.join(', ') + ')';
+        if (mod === 'baslangic') {
+            var aralik = yrs.length === 1 ? yrs[0] : (yrs[0] + '–' + yrs[yrs.length - 1]);
+            el.textContent = 'Başlangıç: ' + aralik;
+            return;
+        }
+        el.textContent = 'Kayıt: ' + yrs.join(', ');
     }
 
     function s01YilPanelKapat() {
@@ -662,6 +709,10 @@
     function s01YilAraligiVeKayit() {
         var kayitRaw = s01KayitYillariSecilen();
         var def = s01VarsayilanYillar();
+        var mod = s01YilModSecili();
+        if (mod === 'kayit') {
+            return { yBas: def.bas, yBit: def.bit, kayitYillar: kayitRaw.slice() };
+        }
         if (!kayitRaw.length) {
             return { yBas: def.bas, yBit: def.bit, kayitYillar: [] };
         }
@@ -675,7 +726,7 @@
         if (!yrs.length) {
             return { yBas: def.bas, yBit: def.bit, kayitYillar: [] };
         }
-        return { yBas: yrs[0], yBit: yrs[yrs.length - 1], kayitYillar: kayitRaw };
+        return { yBas: yrs[0], yBit: yrs[yrs.length - 1], kayitYillar: [] };
     }
 
     /** Backend senaryo01_hucre_aktif ile aynı: kapanış ayı DAHİL, sonraki BOŞ; bit yoksa açık uç. */
@@ -1490,6 +1541,7 @@
         document.getElementById('s01_yukle_btn').addEventListener('click', s01Yukle);
         document.getElementById('s01_excel_btn').addEventListener('click', s01ExcelAktar);
         document.getElementById('s01_hizmet_turu').addEventListener('change', s01Yukle);
+        document.getElementById('s01_yil_mod').addEventListener('change', s01YilModChange);
         document.getElementById('s01_kayit_yili').addEventListener('change', s01KayitYiliChange);
         document.getElementById('s01_kayit_yili').addEventListener('change', s01YilPanelButonEtiketGuncelle);
         document.getElementById('s01_yil_panel_btn').addEventListener('click', s01YilPanelToggle);
