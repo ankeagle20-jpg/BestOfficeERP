@@ -848,17 +848,15 @@
 
     function s01AyAktifSayKayitModu(satirlar, yBas, yBit) {
         var out = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-        var r, c, bas, bit, m;
+        var r, c, bas, basAyP;
         satirlar = satirlar || [];
         for (r = 0; r < satirlar.length; r++) {
             c = satirlar[r];
             bas = c.bas || null;
-            bit = c.bit || null;
-            for (m = 1; m <= 12; m++) {
-                if (s01HucreAktifKayitAgg(bas, bit, m, yBas, yBit)) {
-                    out[m - 1] += 1;
-                }
-            }
+            basAyP = s01ParseAyKey(s01IsoToAyKey(bas));
+            if (!basAyP) continue;
+            if (basAyP.y < yBas || basAyP.y > yBit) continue;
+            out[basAyP.m - 1] += 1;
         }
         return out;
     }
