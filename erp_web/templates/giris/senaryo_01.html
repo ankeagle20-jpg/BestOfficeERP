@@ -618,9 +618,7 @@
     }
 
     function s01YilModChange() {
-        s01FiltreSifirla();
         s01YilPanelButonEtiketGuncelle();
-        s01Yukle();
     }
 
     function s01YilPanelButonEtiketGuncelle() {
@@ -695,14 +693,14 @@
                 tumu.checked = true;
                 return;
             }
-            s01Yukle();
+            s01YilPanelButonEtiketGuncelle();
             return;
         }
         if (t.checked && tumu) tumu.checked = false;
         if (!document.querySelector('#s01_kayit_yili .s01-kayit-yili-cb:checked') && tumu) {
             tumu.checked = true;
         }
-        s01Yukle();
+        s01YilPanelButonEtiketGuncelle();
     }
 
     function s01VarsayilanYillar() {
@@ -764,9 +762,29 @@
         return { yBas: yBas, yBit: yBit };
     }
 
+    function s01OzetAyAktifSayToplam() {
+        if (!s01OzetAyAktifSayOk || !s01OzetAyAktifSay) return 0;
+        var tot = 0;
+        for (var i = 0; i < s01OzetAyAktifSay.length; i++) {
+            tot += Number(s01OzetAyAktifSay[i]) || 0;
+        }
+        return tot;
+    }
+
     function s01AyBaslikMetni(colKey) {
         var agg = s01ParseAggAyKey(colKey);
-        if (agg) return AY_UZUN[agg.m - 1];
+        if (agg) {
+            var txt = AY_UZUN[agg.m - 1];
+            if (s01KayitModuMu() && s01OzetAyAktifSayOk && s01OzetAyAktifSay) {
+                var tot = s01OzetAyAktifSayToplam();
+                if (tot > 0) {
+                    var val = Number(s01OzetAyAktifSay[agg.m - 1]) || 0;
+                    var pct = Math.round((val / tot) * 100);
+                    txt += ' (%' + pct + ')';
+                }
+            }
+            return txt;
+        }
         var p = s01ParseAyKey(colKey);
         if (!p) return String(colKey || '');
         return AY_KISA[p.m - 1] + ' ' + String(p.y).slice(2);
@@ -1460,7 +1478,7 @@
             if (aggH) {
                 html += '<th class="' + cls + '" data-ay="' + s01Esc(ay) +
                     '" title="' + s01Esc(title) + '">' +
-                    s01Esc(AY_UZUN[aggH.m - 1]) + ics + '</th>';
+                    s01Esc(s01AyBaslikMetni(ay)) + ics + '</th>';
                 continue;
             }
             if (!p) {
