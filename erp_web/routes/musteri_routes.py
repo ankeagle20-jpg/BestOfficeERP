@@ -106,8 +106,18 @@ except ImportError:
         return False, "Gemini modülü yüklenemedi."
 
 
-def _vergi_no_normalize_veya_hata_kyc(tax_raw, yetkili_tc_raw):
-    """10 hane VKN veya Yetkili T.C. ile birebir aynı 11 hane T.C. (Giriş / kaydet ile aynı kural)."""
+def _vergi_no_normalize_veya_hata_kyc(tax_raw, yetkili_tc_raw, uyruk_yabanci=False):
+    """10 hane VKN veya Yetkili T.C. ile birebir aynı 11 hane T.C. (Giriş / kaydet ile aynı kural).
+
+    uyruk_yabanci=True: sıkı VKN/TC formatı atlanır; boş olmamalı, en fazla 50 karakter.
+    """
+    if uyruk_yabanci:
+        raw = str(tax_raw or "").strip()
+        if not raw:
+            return "Vergi numarası zorunludur.", None
+        if len(raw) > 50:
+            return "Vergi numarası çok uzun (en fazla 50 karakter).", None
+        return None, raw
     v = "".join(c for c in str(tax_raw or "") if c.isdigit())
     tc = "".join(c for c in str(yetkili_tc_raw or "") if c.isdigit())
     if not v:
@@ -119,6 +129,18 @@ def _vergi_no_normalize_veya_hata_kyc(tax_raw, yetkili_tc_raw):
     if len(v) == 11:
         return "Vergi no 11 hane yalnızca Yetkili T.C. Kimlik No ile aynı olduğunda kabul edilir.", None
     return "Vergi no 10 haneli VKN veya Yetkili T.C. ile aynı 11 haneli T.C. olmalıdır.", None
+
+
+def _request_uyruk_yabanci_kyc(data) -> bool:
+    if not isinstance(data, dict):
+        return False
+    raw = data.get("uyruk_yabanci")
+    if isinstance(raw, bool):
+        return raw
+    if raw is not None and str(raw).strip().lower() in ("1", "true", "yes", "evet", "on"):
+        return True
+    u = str(data.get("uyruk") or data.get("uyruk_secimi") or "").strip().lower()
+    return u in ("yabanci", "yabancı", "foreign")
 
 # helper month names (Turkish)
 MONTHS_TR = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"]
@@ -2185,7 +2207,10 @@ def api_kyc_kaydet():
         sube_merkez = (data.get("sube_merkez") or "Merkez").strip()
         yetkili_adsoyad = (data.get("yetkili_adsoyad") or "").strip()
         yetkili_tcno = (data.get("yetkili_tcno") or "").strip()
-        vergi_err, vergi_no_norm = _vergi_no_normalize_veya_hata_kyc(vergi_no, yetkili_tcno)
+        uyruk_yabanci = _request_uyruk_yabanci_kyc(data if isinstance(data, dict) else {})
+        vergi_err, vergi_no_norm = _vergi_no_normalize_veya_hata_kyc(
+            vergi_no, yetkili_tcno, uyruk_yabanci=uyruk_yabanci
+        )
         if vergi_err:
             return jsonify({"ok": False, "mesaj": vergi_err}), 400
         vergi_no = vergi_no_norm

@@ -2785,7 +2785,16 @@
                 
                 <!-- Şirket Bilgileri -->
                 <div class="form-section">
-                    <h4>Şirket Bilgileri</h4>
+                    <div class="giris-sirket-baslik-satiri" style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;margin:0 0 10px;">
+                        <h4 style="margin:0;">Şirket Bilgileri</h4>
+                        <label for="uyruk_secimi" style="display:flex;align-items:center;gap:8px;margin:0;font-size:12px;color:#90caf9;font-weight:600;">
+                            Uyruğu
+                            <select id="uyruk_secimi" onchange="girisUyrukDegisti()" title="TC: mevcut doğrulamalar. Yabancı: vergi/TC/telefon formatı gevşer (yalnız bu oturum)." style="min-width:110px;background:#0a1929;border:1px solid #1e3a5f;color:#e0f7fa;padding:4px 8px;border-radius:4px;font-size:12px;">
+                                <option value="tc" selected>TC</option>
+                                <option value="yabanci">Yabancı</option>
+                            </select>
+                        </label>
+                    </div>
                     <div class="form-grid">
 
                         <label for="genel-musteri-ara">Müşteri Ara</label>
@@ -24633,7 +24642,111 @@ function sozlesmeTahsilatFormunuSeciliMusteridenDoldur() {
 }
 
 // Sadece rakam girişine izin ver (maxLen opsiyonel)
+
+/** Uyruğu: TC (varsayılan) / Yabancı — yalnız form oturumu; DB'ye yazılmaz. */
+window.__girisUyrukTcAttrs = null;
+
+function girisUyrukYabanciMi() {
+    var el = document.getElementById('uyruk_secimi');
+    return !!(el && String(el.value || '').toLowerCase() === 'yabanci');
+}
+
+function girisUyrukMaxLenSoft(input, maxLen) {
+    if (!input) return;
+    var v = String(input.value || '');
+    if (v.length > maxLen) input.value = v.slice(0, maxLen);
+}
+
+function girisUyrukSnapshotTcAttrs() {
+    if (window.__girisUyrukTcAttrs) return;
+    var tax = document.getElementById('tax_number');
+    var tc = document.getElementById('yetkili_tc');
+    var phone = document.getElementById('phone');
+    var phone2 = document.getElementById('phone2');
+    window.__girisUyrukTcAttrs = {
+        tax: tax ? { maxlength: tax.getAttribute('maxlength'), placeholder: tax.getAttribute('placeholder'), inputmode: tax.getAttribute('inputmode') } : null,
+        tc: tc ? { maxlength: tc.getAttribute('maxlength'), placeholder: tc.getAttribute('placeholder'), inputmode: tc.getAttribute('inputmode') } : null,
+        phone: phone ? { maxlength: phone.getAttribute('maxlength'), placeholder: phone.getAttribute('placeholder'), inputmode: phone.getAttribute('inputmode') } : null,
+        phone2: phone2 ? { maxlength: phone2.getAttribute('maxlength'), placeholder: phone2.getAttribute('placeholder'), inputmode: phone2.getAttribute('inputmode') } : null
+    };
+}
+
+function girisUyrukUygula() {
+    girisUyrukSnapshotTcAttrs();
+    var yab = girisUyrukYabanciMi();
+    var tax = document.getElementById('tax_number');
+    var tc = document.getElementById('yetkili_tc');
+    var phone = document.getElementById('phone');
+    var phone2 = document.getElementById('phone2');
+    var snap = window.__girisUyrukTcAttrs || {};
+
+    if (yab) {
+        if (tax) {
+            tax.setAttribute('maxlength', '50');
+            tax.setAttribute('placeholder', 'Yabancı: serbest (en fazla 50)');
+            tax.removeAttribute('inputmode');
+            tax.oninput = function () { girisUyrukMaxLenSoft(tax, 50); hesaplaYuzde(); };
+        }
+        if (tc) {
+            tc.setAttribute('maxlength', '50');
+            tc.setAttribute('placeholder', 'Yabancı kimlik no (serbest, en fazla 50)');
+            tc.removeAttribute('inputmode');
+            tc.oninput = function () { girisUyrukMaxLenSoft(tc, 50); hesaplaYuzde(); };
+        }
+        if (phone) {
+            phone.setAttribute('maxlength', '50');
+            phone.setAttribute('placeholder', 'Uluslararası / serbest (en fazla 50)');
+            phone.removeAttribute('inputmode');
+            phone.oninput = function () { girisUyrukMaxLenSoft(phone, 50); hesaplaYuzde(); };
+            phone.onpaste = null;
+        }
+        if (phone2) {
+            phone2.setAttribute('maxlength', '50');
+            phone2.setAttribute('placeholder', 'Uluslararası / serbest (en fazla 50)');
+            phone2.removeAttribute('inputmode');
+            phone2.oninput = function () { girisUyrukMaxLenSoft(phone2, 50); hesaplaYuzde(); };
+            phone2.onpaste = null;
+        }
+    } else {
+        if (tax && snap.tax) {
+            if (snap.tax.maxlength != null) tax.setAttribute('maxlength', snap.tax.maxlength); else tax.removeAttribute('maxlength');
+            if (snap.tax.placeholder != null) tax.setAttribute('placeholder', snap.tax.placeholder);
+            if (snap.tax.inputmode != null) tax.setAttribute('inputmode', snap.tax.inputmode);
+            tax.oninput = function () { vergiNoRakamGiris(tax); };
+        }
+        if (tc && snap.tc) {
+            if (snap.tc.maxlength != null) tc.setAttribute('maxlength', snap.tc.maxlength); else tc.removeAttribute('maxlength');
+            if (snap.tc.placeholder != null) tc.setAttribute('placeholder', snap.tc.placeholder);
+            if (snap.tc.inputmode != null) tc.setAttribute('inputmode', snap.tc.inputmode);
+            tc.oninput = function () { sadeceRakam(tc, 11); };
+        }
+        if (phone && snap.phone) {
+            if (snap.phone.maxlength != null) phone.setAttribute('maxlength', snap.phone.maxlength); else phone.removeAttribute('maxlength');
+            if (snap.phone.placeholder != null) phone.setAttribute('placeholder', snap.phone.placeholder);
+            if (snap.phone.inputmode != null) phone.setAttribute('inputmode', snap.phone.inputmode);
+            phone.oninput = function () { telefonInput(phone); };
+            phone.onpaste = function (ev) { telefonPasteTr(ev); };
+        }
+        if (phone2 && snap.phone2) {
+            if (snap.phone2.maxlength != null) phone2.setAttribute('maxlength', snap.phone2.maxlength); else phone2.removeAttribute('maxlength');
+            if (snap.phone2.placeholder != null) phone2.setAttribute('placeholder', snap.phone2.placeholder);
+            if (snap.phone2.inputmode != null) phone2.setAttribute('inputmode', snap.phone2.inputmode);
+            phone2.oninput = function () { telefonInput(phone2); };
+            phone2.onpaste = function (ev) { telefonPasteTr(ev); };
+        }
+    }
+}
+
+function girisUyrukDegisti() {
+    girisUyrukUygula();
+    try { if (typeof hesaplaYuzde === 'function') hesaplaYuzde(); } catch (e) {}
+}
+
 function sadeceRakam(input, maxLen) {
+    if (typeof girisUyrukYabanciMi === 'function' && girisUyrukYabanciMi()) {
+        girisUyrukMaxLenSoft(input, maxLen || 50);
+        return;
+    }
     let v = (input.value || '').replace(/\D/g, '');
     if (maxLen) v = v.slice(0, maxLen);
     input.value = v;
@@ -24642,6 +24755,10 @@ function sadeceRakam(input, maxLen) {
 /** Vergi no: en fazla 11 rakam; 11 hane yalnızca Yetkili T.C. ile aynı olduğunda geçerli (kaydet sırasında kontrol edilir). */
 function vergiNoRakamGiris(input) {
     if (!input) return;
+    if (typeof girisUyrukYabanciMi === 'function' && girisUyrukYabanciMi()) {
+        girisUyrukMaxLenSoft(input, 50);
+        return;
+    }
     var v = (input.value || '').replace(/\D/g, '').slice(0, 11);
     input.value = v;
 }
@@ -24677,6 +24794,10 @@ function telefonNormalizeTr10(raw) {
 // Telefon inputu: yapıştırma / yazımda 10 hane (başında 0 yok)
 function telefonInput(input) {
     if (!input) return;
+    if (typeof girisUyrukYabanciMi === 'function' && girisUyrukYabanciMi()) {
+        girisUyrukMaxLenSoft(input, 50);
+        return;
+    }
     input.value = telefonNormalizeTr10(input.value);
 }
 
@@ -24684,6 +24805,16 @@ function telefonPasteTr(ev) {
     var e = ev || window.event;
     var input = e.target;
     if (!input || (input.id !== 'phone' && input.id !== 'phone2')) return;
+    if (typeof girisUyrukYabanciMi === 'function' && girisUyrukYabanciMi()) {
+        var pastedY = (e.clipboardData || window.clipboardData || {}).getData('text');
+        if (pastedY == null || pastedY === '') return;
+        e.preventDefault();
+        var curY = input.value || '';
+        var startY = typeof input.selectionStart === 'number' ? input.selectionStart : curY.length;
+        var endY = typeof input.selectionEnd === 'number' ? input.selectionEnd : curY.length;
+        input.value = (curY.slice(0, startY) + pastedY + curY.slice(endY)).slice(0, 50);
+        return;
+    }
     var pasted = (e.clipboardData || window.clipboardData || {}).getData('text');
     if (pasted == null || pasted === '') return;
     e.preventDefault();
@@ -25940,10 +26071,35 @@ async function kaydet(event) {
         }
     }
     
-    // Strict sayısal doğrulamalar
-    const vergiNo = (document.getElementById('tax_number').value || '').replace(/\D/g, '');
-    const tcNo = (document.getElementById('yetkili_tc').value || '').replace(/\D/g, '');
-    if (vergiNo.length === 10) {
+    // Strict sayısal doğrulamalar (TC modu). Yabancı: format atlanır, makul uzunluk.
+    var uyrukYabanci = (typeof girisUyrukYabanciMi === 'function') ? girisUyrukYabanciMi() : false;
+    var vergiRaw = (document.getElementById('tax_number').value || '').trim();
+    var tcRaw = (document.getElementById('yetkili_tc').value || '').trim();
+    var vergiNo = uyrukYabanci ? vergiRaw.slice(0, 50) : vergiRaw.replace(/\D/g, '');
+    var tcNo = uyrukYabanci ? tcRaw.slice(0, 50) : tcRaw.replace(/\D/g, '');
+    if (uyrukYabanci) {
+        if (!vergiNo) {
+            alert('Vergi No zorunlu alandır.');
+            document.getElementById('tax_number').focus();
+            return;
+        }
+        if (vergiNo.length > 50 || (tcNo && tcNo.length > 50)) {
+            alert('Vergi / kimlik alanı en fazla 50 karakter olabilir.');
+            return;
+        }
+        var telY = (document.getElementById('phone').value || '').trim();
+        if (telY && telY.length > 50) {
+            alert('Telefon en fazla 50 karakter olabilir.');
+            document.getElementById('phone').focus();
+            return;
+        }
+        var tel2Y = ((document.getElementById('phone2') || {}).value || '').trim();
+        if (tel2Y && tel2Y.length > 50) {
+            alert('Telefon 2 en fazla 50 karakter olabilir.');
+            document.getElementById('phone2').focus();
+            return;
+        }
+    } else if (vergiNo.length === 10) {
         // VKN
     } else if (vergiNo.length === 11 && tcNo.length === 11 && vergiNo === tcNo) {
         // Şahıs: vergi no = T.C. kimlik no
@@ -25957,17 +26113,19 @@ async function kaydet(event) {
         return;
     }
 
-    if (tcNo && !/^\d{11}$/.test(tcNo) && !/^\d{12}$/.test(tcNo)) {
-        alert('TC Kimlik No 11 hane (veya yabancı için 12 hane) olmalıdır.');
-        document.getElementById('yetkili_tc').focus();
-        return;
-    }
+    if (!uyrukYabanci) {
+        if (tcNo && !/^\d{11}$/.test(tcNo) && !/^\d{12}$/.test(tcNo)) {
+            alert('TC Kimlik No 11 hane (veya yabancı için 12 hane) olmalıdır.');
+            document.getElementById('yetkili_tc').focus();
+            return;
+        }
 
-    const tel = (document.getElementById('phone').value || '').trim();
-    if (tel && !/^\d{10}$/.test(tel)) {
-        alert('Telefon numarasını başında 0 olmadan 10 hane olarak giriniz.');
-        document.getElementById('phone').focus();
-        return;
+        const tel = (document.getElementById('phone').value || '').trim();
+        if (tel && !/^\d{10}$/.test(tel)) {
+            alert('Telefon numarasını başında 0 olmadan 10 hane olarak giriniz.');
+            document.getElementById('phone').focus();
+            return;
+        }
     }
 
     var mdEl = document.getElementById('musteri_durum');
@@ -25985,8 +26143,10 @@ async function kaydet(event) {
         name: aramaGuvenli ? aramaGuvenli.name : document.getElementById('name').value,
         musteri_adi: aramaGuvenli ? aramaGuvenli.musteri_adi : (document.getElementById('musteri_adi') ? document.getElementById('musteri_adi').value : ''),
         tax_number: vergiNo,
-        yetkili_tc: document.getElementById('yetkili_tc').value,
-        phone: document.getElementById('phone').value,
+        yetkili_tc: uyrukYabanci ? tcRaw.slice(0, 50) : document.getElementById('yetkili_tc').value,
+        uyruk_yabanci: !!uyrukYabanci,
+        uyruk: uyrukYabanci ? 'yabanci' : 'tc',
+        phone: uyrukYabanci ? ((document.getElementById('phone').value || '').trim().slice(0, 50)) : document.getElementById('phone').value,
         email: document.getElementById('email').value,
         address: document.getElementById('address').value,
         ev_adres: document.getElementById('ev_adres').value,
@@ -26018,6 +26178,8 @@ async function kaydet(event) {
         kapanis_sonrasi_borc_ay: (mdVal === 'pasif' && kapBorcAy !== null && kapBorcAy !== undefined) ? kapBorcAy : '',
         sirket_unvani: aramaGuvenli ? aramaGuvenli.name : document.getElementById('name').value,
         vergi_no: vergiNo,
+        uyruk_yabanci: !!uyrukYabanci,
+        uyruk: uyrukYabanci ? 'yabanci' : 'tc',
         vergi_dairesi: (function () {
             var el = document.getElementById('vergi_dairesi');
             return el ? String(el.value || '').trim() : '';
@@ -26031,9 +26193,9 @@ async function kaydet(event) {
         yeni_adres: document.getElementById('address').value,
         sube_merkez: document.getElementById('sube_merkez').value,
         yetkili_adsoyad: document.getElementById('yetkili_ad').value,
-        yetkili_tcno: document.getElementById('yetkili_tc').value,
+        yetkili_tcno: uyrukYabanci ? tcRaw.slice(0, 50) : document.getElementById('yetkili_tc').value,
         yetkili_ikametgah: document.getElementById('ev_adres').value,
-        yetkili_tel: document.getElementById('phone').value,
+        yetkili_tel: uyrukYabanci ? ((document.getElementById('phone').value || '').trim().slice(0, 50)) : document.getElementById('phone').value,
         yetkili_tel2: (document.getElementById('phone2') || {}).value || '',
         yetkili_tel_aciklama: (document.getElementById('phone_kime') || {}).value || '',
         yetkili_tel2_aciklama: (document.getElementById('phone2_kime') || {}).value || '',

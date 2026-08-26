@@ -5456,8 +5456,18 @@ def _digits_only(s):
     return "".join(c for c in str(s or "") if c.isdigit())
 
 
-def _vergi_no_normalize_veya_hata(tax_raw, yetkili_tc_raw):
-    """10 hane VKN veya Yetkili T.C. ile birebir aynı 11 hane T.C. (şahıs vergi no) kabul edilir."""
+def _vergi_no_normalize_veya_hata(tax_raw, yetkili_tc_raw, uyruk_yabanci=False):
+    """10 hane VKN veya Yetkili T.C. ile birebir aynı 11 hane T.C. (şahıs vergi no) kabul edilir.
+
+    uyruk_yabanci=True: sıkı VKN/TC formatı atlanır; boş olmamalı, en fazla 50 karakter.
+    """
+    if uyruk_yabanci:
+        raw = str(tax_raw or "").strip()
+        if not raw:
+            return "Vergi numarası zorunludur.", None
+        if len(raw) > 50:
+            return "Vergi numarası çok uzun (en fazla 50 karakter).", None
+        return None, raw
     v = _digits_only(tax_raw)
     tc = _digits_only(yetkili_tc_raw)
     if not v:
@@ -5471,6 +5481,19 @@ def _vergi_no_normalize_veya_hata(tax_raw, yetkili_tc_raw):
     return "Vergi no 10 haneli VKN veya Yetkili T.C. ile aynı 11 haneli T.C. olmalıdır.", None
 
 
+def _request_uyruk_yabanci(data) -> bool:
+    """POST body: uyruk_yabanci bool veya uyruk=yabanci."""
+    if not isinstance(data, dict):
+        return False
+    raw = data.get("uyruk_yabanci")
+    if isinstance(raw, bool):
+        return raw
+    if raw is not None and str(raw).strip().lower() in ("1", "true", "yes", "evet", "on"):
+        return True
+    u = str(data.get("uyruk") or data.get("uyruk_secimi") or "").strip().lower()
+    return u in ("yabanci", "yabancı", "foreign")
+
+
 @bp.route('/kaydet', methods=['POST'])
 @giris_gerekli
 def kaydet():
@@ -5478,7 +5501,12 @@ def kaydet():
     try:
         _giris_kaydet_schema_ensure_once()
         data = request.get_json()
-        vergi_err, tax_norm = _vergi_no_normalize_veya_hata(data.get("tax_number"), data.get("yetkili_tc"))
+        uyruk_yabanci = _request_uyruk_yabanci(data or {})
+        vergi_err, tax_norm = _vergi_no_normalize_veya_hata(
+            data.get("tax_number"),
+            data.get("yetkili_tc"),
+            uyruk_yabanci=uyruk_yabanci,
+        )
         if vergi_err:
             return jsonify({"ok": False, "mesaj": vergi_err}), 400
 
