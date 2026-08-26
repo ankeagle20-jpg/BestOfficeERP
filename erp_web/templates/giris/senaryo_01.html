@@ -577,6 +577,9 @@
     'use strict';
 
     var AY_KISA = ['Oca', 'Şub', 'Mar', 'Nis', 'May', 'Haz', 'Tem', 'Ağu', 'Eyl', 'Eki', 'Kas', 'Ara'];
+    var AY_UZUN = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+    var S01_AGG_AY_PREFIX = 'm:';
+    var S01_AGG_AY_KEYS = ['m:1', 'm:2', 'm:3', 'm:4', 'm:5', 'm:6', 'm:7', 'm:8', 'm:9', 'm:10', 'm:11', 'm:12'];
 
     function s01BugunYil() {
         return (new Date()).getFullYear();
@@ -615,6 +618,7 @@
     }
 
     function s01YilModChange() {
+        s01FiltreSifirla();
         s01YilPanelButonEtiketGuncelle();
         s01Yukle();
     }
@@ -727,6 +731,115 @@
             return { yBas: def.bas, yBit: def.bit, kayitYillar: [] };
         }
         return { yBas: yrs[0], yBit: yrs[yrs.length - 1], kayitYillar: [] };
+    }
+
+    function s01KayitModuMu() {
+        return s01YilModSecili() === 'kayit';
+    }
+
+    function s01ParseAggAyKey(key) {
+        var s = String(key || '');
+        if (s.indexOf(S01_AGG_AY_PREFIX) !== 0) return null;
+        var m = parseInt(s.slice(S01_AGG_AY_PREFIX.length), 10);
+        if (isNaN(m) || m < 1 || m > 12) return null;
+        return { m: m };
+    }
+
+    function s01AggAyKey(m) {
+        return S01_AGG_AY_PREFIX + String(m);
+    }
+
+    function s01GorunumAylar(payload) {
+        if (s01KayitModuMu()) return S01_AGG_AY_KEYS.slice();
+        return (payload && payload.aylar) || [];
+    }
+
+    function s01PayloadYilAraligi(payload) {
+        var yBas = parseInt(payload && payload.yil_bas, 10);
+        var yBit = parseInt(payload && payload.yil_bit, 10);
+        if (isNaN(yBas) || isNaN(yBit)) {
+            var def = s01VarsayilanYillar();
+            return { yBas: def.bas, yBit: def.bit };
+        }
+        return { yBas: yBas, yBit: yBit };
+    }
+
+    function s01AyBaslikMetni(colKey) {
+        var agg = s01ParseAggAyKey(colKey);
+        if (agg) return AY_UZUN[agg.m - 1];
+        var p = s01ParseAyKey(colKey);
+        if (!p) return String(colKey || '');
+        return AY_KISA[p.m - 1] + ' ' + String(p.y).slice(2);
+    }
+
+    function s01HucreAktifKayitAgg(basIso, bitIso, ay, yBas, yBit) {
+        var y;
+        for (y = yBas; y <= yBit; y++) {
+            if (senaryo01HucreAktif(basIso, bitIso, y, ay)) return true;
+        }
+        return false;
+    }
+
+    function s01SatirTutarKayitAgg(c, tutarlar, ay, yBas, yBit) {
+        if (!c) return { aktif: false, tutar: null };
+        var bas = c.bas || null;
+        var bit = c.bit || null;
+        var ayMap = tutarlar[String(c.id)] || tutarlar[c.id] || {};
+        var y, key, raw, hasActive = false, sum = 0;
+        for (y = yBas; y <= yBit; y++) {
+            if (!senaryo01HucreAktif(bas, bit, y, ay)) continue;
+            hasActive = true;
+            key = String(y) + '-' + String(ay);
+            raw = ayMap[key];
+            if (raw != null && raw !== '' && isFinite(Number(raw)) && Number(raw) > 0) {
+                sum += Number(raw);
+            } else {
+                return { aktif: true, tutar: null };
+            }
+        }
+        if (!hasActive) return { aktif: false, tutar: null };
+        return { aktif: true, tutar: sum };
+    }
+
+    function s01HucreAktifGosterim(bas, bit, colKey, yBas, yBit) {
+        if (s01KayitModuMu()) {
+            var aggA = s01ParseAggAyKey(colKey);
+            if (!aggA) return false;
+            return s01HucreAktifKayitAgg(bas, bit, aggA.m, yBas, yBit);
+        }
+        var pA = s01ParseAyKey(colKey);
+        if (!pA) return false;
+        return senaryo01HucreAktif(bas, bit, pA.y, pA.m);
+    }
+
+    function s01SatirTutarGosterim(c, tutarlar, colKey, yBas, yBit) {
+        if (s01KayitModuMu()) {
+            var aggT = s01ParseAggAyKey(colKey);
+            if (!aggT) return null;
+            var pack = s01SatirTutarKayitAgg(c, tutarlar, aggT.m, yBas, yBit);
+            if (!pack.aktif) return null;
+            return pack.tutar;
+        }
+        return s01SatirTutar(c, tutarlar, colKey);
+    }
+
+    function s01HucrePaket(c, tutarlar, colKey, yBas, yBit) {
+        var bas = c.bas || null;
+        var bit = c.bit || null;
+        var aktif = s01HucreAktifGosterim(bas, bit, colKey, yBas, yBit);
+        var out = { aktif: aktif, txt: '', tutar: null, eksik: false, title: colKey };
+        if (!aktif) return out;
+        var t = s01SatirTutarGosterim(c, tutarlar, colKey, yBas, yBit);
+        if (t != null && isFinite(Number(t)) && Number(t) > 0) {
+            out.tutar = Number(t);
+            out.txt = s01FormatTutar(t);
+            out.title = out.txt + ' ₺ (KDV dahil)';
+        } else {
+            out.eksik = true;
+            out.txt = '?';
+            out.title = 'Tutar yok (cache eksik / rev uyumsuz / placeholder)';
+        }
+        return out;
     }
 
     /** Backend senaryo01_hucre_aktif ile aynı: kapanış ayı DAHİL, sonraki BOŞ; bit yoksa açık uç. */
@@ -893,20 +1006,22 @@
         if (btn) btn.disabled = true;
         try {
             var payload = s01LastPayload;
-            var aylar = payload.aylar || [];
+            var kayitModX = s01KayitModuMu();
+            var aylar = s01GorunumAylar(payload);
+            var yArX = s01PayloadYilAraligi(payload);
+            var yBasX = yArX.yBas;
+            var yBitX = yArX.yBit;
             var satirlar = s01SiraliSatirlar(payload);
             var tutarlar = payload.tutarlar || {};
             var header = ['Müşteri', 'Başlangıç'];
-            var i, p, ay, a, r, c, mid, ad, bas, bit, ayP, basAyP, aktif, t, row, aktifRow, basTxt;
+            var i, p, ay, a, r, c, mid, ad, bas, bit, ayP, basAyP, aktif, t, row, aktifRow, basTxt, hucreX;
             var ayAktifSay = [];
             var ayTutarToplam = [];
             var ayYeniKayitSay = [];
             var ayAyBazliToplam = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
             for (i = 0; i < aylar.length; i++) {
                 ay = aylar[i];
-                p = s01ParseAyKey(ay);
-                if (!p) header.push(ay);
-                else header.push(AY_KISA[p.m - 1] + ' ' + String(p.y).slice(2));
+                header.push(s01AyBaslikMetni(ay));
                 ayAktifSay[i] = 0;
                 ayTutarToplam[i] = 0;
                 ayYeniKayitSay[i] = 0;
@@ -924,20 +1039,19 @@
                 basAyP = s01ParseAyKey(s01IsoToAyKey(bas));
                 if (basAyP) ayAyBazliToplam[basAyP.m - 1] += 1;
                 for (a = 0; a < aylar.length; a++) {
-                    ayP = s01ParseAyKey(aylar[a]);
-                    aktif = ayP ? senaryo01HucreAktif(bas, bit, ayP.y, ayP.m) : false;
+                    hucreX = s01HucrePaket(c, tutarlar, aylar[a], yBasX, yBitX);
+                    aktif = hucreX.aktif;
                     if (!aktif) {
                         row.push('');
                         aktifRow.push(false);
                         continue;
                     }
                     ayAktifSay[a] += 1;
-                    t = s01SatirTutar(c, tutarlar, aylar[a]);
-                    if (t == null) {
-                        row.push('?');
+                    if (hucreX.tutar != null && hucreX.tutar > 0) {
+                        row.push(hucreX.tutar);
+                        ayTutarToplam[a] += hucreX.tutar;
                     } else {
-                        row.push(t);
-                        ayTutarToplam[a] += t;
+                        row.push('?');
                     }
                     aktifRow.push(true);
                 }
@@ -945,8 +1059,12 @@
                 aktifMat.push(aktifRow);
             }
             for (a = 0; a < aylar.length; a++) {
-                ayP = s01ParseAyKey(aylar[a]);
-                ayYeniKayitSay[a] = ayP ? ayAyBazliToplam[ayP.m - 1] : 0;
+                ayP = s01ParseAggAyKey(aylar[a]);
+                if (ayP) ayYeniKayitSay[a] = ayAyBazliToplam[ayP.m - 1];
+                else {
+                    ayP = s01ParseAyKey(aylar[a]);
+                    ayYeniKayitSay[a] = ayP ? ayAyBazliToplam[ayP.m - 1] : 0;
+                }
             }
             var sayRow = ['Müşteri Sayısı', ''];
             var yeniRow = ['Aylık Müşteri Sayısı', ''];
@@ -1053,6 +1171,7 @@
 
     function s01FiltrelenmisSatirlar(payload) {
         var satirlar = ((payload && payload.satirlar) || []).slice();
+        if (s01KayitModuMu()) return satirlar;
         if (!s01FiltreAy || !s01FiltreMod) return satirlar;
         var out = [];
         var i;
@@ -1184,10 +1303,11 @@
         }
         if (!s01SortAy || !s01SortMod) return satirlar;
         var tutarlar = (payload && payload.tutarlar) || {};
+        var yArS = s01PayloadYilAraligi(payload);
         var desc = s01SortMod === 1;
         satirlar.sort(function (a, b) {
-            var ta = s01SatirTutar(a, tutarlar, s01SortAy);
-            var tb = s01SatirTutar(b, tutarlar, s01SortAy);
+            var ta = s01SatirTutarGosterim(a, tutarlar, s01SortAy, yArS.yBas, yArS.yBit);
+            var tb = s01SatirTutarGosterim(b, tutarlar, s01SortAy, yArS.yBas, yArS.yBit);
             var aMiss = (ta == null);
             var bMiss = (tb == null);
             if (aMiss && bMiss) return s01AdKarsilastir(a, b);
@@ -1236,7 +1356,7 @@
         s01TabloCiz(s01LastPayload);
     }
 
-    function s01AyBaslikHtml(aylar) {
+    function s01AyBaslikHtml(aylar, kayitMod) {
         var basCls = 's01-baslangic';
         var basOk = '⇅';
         var basTitle = 'Başlangıç tarihine göre sırala (yeni → eski)';
@@ -1269,11 +1389,20 @@
                 title = 'Artan · tekrar tıkla: isim sırası';
             }
             if (s01FiltreAy === ay && s01FiltreMod) cls += ' s01-filtre-on';
+            var aggH = s01ParseAggAyKey(ay);
             var ics = '<span class="s01-th-ics">' +
-                '<span class="s01-sort-ok">' + ok + '</span>' +
-                '<span class="s01-filtre-btn" data-ay="' + s01Esc(ay) +
-                '" title="Ay filtresi (Aktif / Açılan / Kapanan)">' + S01_HUNI_SVG + '</span>' +
-                '</span>';
+                '<span class="s01-sort-ok">' + ok + '</span>';
+            if (!kayitMod) {
+                ics += '<span class="s01-filtre-btn" data-ay="' + s01Esc(ay) +
+                    '" title="Ay filtresi (Aktif / Açılan / Kapanan)">' + S01_HUNI_SVG + '</span>';
+            }
+            ics += '</span>';
+            if (aggH) {
+                html += '<th class="' + cls + '" data-ay="' + s01Esc(ay) +
+                    '" title="' + s01Esc(title) + '">' +
+                    s01Esc(AY_UZUN[aggH.m - 1]) + ics + '</th>';
+                continue;
+            }
             if (!p) {
                 html += '<th class="' + cls + '" data-ay="' + s01Esc(ay) +
                     '" title="' + s01Esc(title) + '">' + s01Esc(ay) + ics + '</th>';
@@ -1289,7 +1418,11 @@
     function s01TabloCiz(payload) {
         var wrap = document.getElementById('s01_wrap');
         s01LastPayload = payload;
-        var aylar = payload.aylar || [];
+        var kayitMod = s01KayitModuMu();
+        var aylar = s01GorunumAylar(payload);
+        var yAr = s01PayloadYilAraligi(payload);
+        var yBas = yAr.yBas;
+        var yBit = yAr.yBit;
         var satirlar = s01SiraliSatirlar(payload);
         var tutarlar = payload.tutarlar || {};
         if (!(payload.satirlar || []).length) {
@@ -1299,7 +1432,7 @@
             return;
         }
 
-        var thead = '<thead><tr>' + s01AyBaslikHtml(aylar) + '</tr></thead>';
+        var thead = '<thead><tr>' + s01AyBaslikHtml(aylar, kayitMod) + '</tr></thead>';
         var bodyParts = [];
         var r, c, ayP, basAyP, aktif, ad, mid, bas, bit, basTxt, title, midKey, ayMap, rawTut, cellTxt, cellCls, cellTitle, a;
         var ayAktifSay = [];
@@ -1340,23 +1473,15 @@
                 s01Esc(basTxt) + '</td>'
             );
             for (a = 0; a < aylar.length; a++) {
-                ayP = s01ParseAyKey(aylar[a]);
-                aktif = ayP ? senaryo01HucreAktif(bas, bit, ayP.y, ayP.m) : false;
-                cellTxt = '';
-                cellCls = 's01-hucre';
-                cellTitle = aylar[a];
+                var hucre = s01HucrePaket(c, tutarlar, aylar[a], yBas, yBit);
+                aktif = hucre.aktif;
+                cellTxt = hucre.txt;
+                cellCls = 's01-hucre' + (aktif ? ' aktif' : '') + (hucre.eksik ? ' eksik' : '');
+                cellTitle = hucre.title;
                 if (aktif) {
                     ayAktifSay[a] += 1;
-                    cellCls += ' aktif';
-                    rawTut = ayMap[aylar[a]];
-                    if (rawTut != null && rawTut !== '' && isFinite(Number(rawTut)) && Number(rawTut) > 0) {
-                        ayTutarToplam[a] += Number(rawTut);
-                        cellTxt = s01FormatTutar(rawTut);
-                        cellTitle = cellTxt + ' ₺ (KDV dahil)';
-                    } else {
-                        cellTxt = '?';
-                        cellCls += ' eksik';
-                        cellTitle = 'Tutar yok (cache eksik / rev uyumsuz / placeholder)';
+                    if (hucre.tutar != null && hucre.tutar > 0) {
+                        ayTutarToplam[a] += hucre.tutar;
                     }
                 }
                 bodyParts.push(
@@ -1404,8 +1529,12 @@
         sayParts.push('</tr>');
 
         for (a = 0; a < aylar.length; a++) {
-            ayP = s01ParseAyKey(aylar[a]);
-            ayYeniKayitSay[a] = ayP ? ayAyBazliToplam[ayP.m - 1] : 0;
+            ayP = s01ParseAggAyKey(aylar[a]);
+            if (ayP) ayYeniKayitSay[a] = ayAyBazliToplam[ayP.m - 1];
+            else {
+                ayP = s01ParseAyKey(aylar[a]);
+                ayYeniKayitSay[a] = ayP ? ayAyBazliToplam[ayP.m - 1] : 0;
+            }
         }
         var yeniParts = [
             '<tr class="s01-ozet s01-ozet-yeni" data-ozet="aylik-musteri-sayisi">',
