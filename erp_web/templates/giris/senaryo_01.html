@@ -825,10 +825,11 @@
             var satirlar = s01SiraliSatirlar(payload);
             var tutarlar = payload.tutarlar || {};
             var header = ['Müşteri', 'Başlangıç'];
-            var i, p, ay, a, r, c, mid, ad, bas, bit, ayP, aktif, t, row, aktifRow, basTxt;
+            var i, p, ay, a, r, c, mid, ad, bas, bit, ayP, basAyP, aktif, t, row, aktifRow, basTxt;
             var ayAktifSay = [];
             var ayTutarToplam = [];
             var ayYeniKayitSay = [];
+            var ayAyBazliToplam = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
             for (i = 0; i < aylar.length; i++) {
                 ay = aylar[i];
                 p = s01ParseAyKey(ay);
@@ -848,12 +849,11 @@
                 bit = c.bit || null;
                 row = ['#' + mid + ' ' + ad, s01IsoToTrDate(bas)];
                 aktifRow = [];
+                basAyP = s01ParseAyKey(s01IsoToAyKey(bas));
+                if (basAyP) ayAyBazliToplam[basAyP.m - 1] += 1;
                 for (a = 0; a < aylar.length; a++) {
                     ayP = s01ParseAyKey(aylar[a]);
                     aktif = ayP ? senaryo01HucreAktif(bas, bit, ayP.y, ayP.m) : false;
-                    if (s01IsoToAyKey(bas) === aylar[a]) {
-                        ayYeniKayitSay[a] += 1;
-                    }
                     if (!aktif) {
                         row.push('');
                         aktifRow.push(false);
@@ -871,6 +871,10 @@
                 }
                 dataRows.push(row);
                 aktifMat.push(aktifRow);
+            }
+            for (a = 0; a < aylar.length; a++) {
+                ayP = s01ParseAyKey(aylar[a]);
+                ayYeniKayitSay[a] = ayP ? ayAyBazliToplam[ayP.m - 1] : 0;
             }
             var sayRow = ['Müşteri Sayısı', ''];
             var yeniRow = ['Aylık Müşteri Sayısı', ''];
@@ -1225,10 +1229,11 @@
 
         var thead = '<thead><tr>' + s01AyBaslikHtml(aylar) + '</tr></thead>';
         var bodyParts = [];
-        var r, c, ayP, aktif, ad, mid, bas, bit, basTxt, title, midKey, ayMap, rawTut, cellTxt, cellCls, cellTitle, a;
+        var r, c, ayP, basAyP, aktif, ad, mid, bas, bit, basTxt, title, midKey, ayMap, rawTut, cellTxt, cellCls, cellTitle, a;
         var ayAktifSay = [];
         var ayTutarToplam = [];
         var ayYeniKayitSay = [];
+        var ayAyBazliToplam = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         for (a = 0; a < aylar.length; a++) {
             ayAktifSay[a] = 0;
             ayTutarToplam[a] = 0;
@@ -1242,6 +1247,8 @@
             ad = c.ad || ('#' + mid);
             bas = c.bas || null;
             bit = c.bit || null;
+            basAyP = s01ParseAyKey(s01IsoToAyKey(bas));
+            if (basAyP) ayAyBazliToplam[basAyP.m - 1] += 1;
             ayMap = tutarlar[midKey] || tutarlar[mid] || {};
             title = '#' + mid + ' · ' + ad + (bit ? (' · kapanış ' + bit) : '');
             bodyParts.push(
@@ -1263,9 +1270,6 @@
             for (a = 0; a < aylar.length; a++) {
                 ayP = s01ParseAyKey(aylar[a]);
                 aktif = ayP ? senaryo01HucreAktif(bas, bit, ayP.y, ayP.m) : false;
-                if (s01IsoToAyKey(bas) === aylar[a]) {
-                    ayYeniKayitSay[a] += 1;
-                }
                 cellTxt = '';
                 cellCls = 's01-hucre';
                 cellTitle = aylar[a];
@@ -1327,6 +1331,10 @@
         }
         sayParts.push('</tr>');
 
+        for (a = 0; a < aylar.length; a++) {
+            ayP = s01ParseAyKey(aylar[a]);
+            ayYeniKayitSay[a] = ayP ? ayAyBazliToplam[ayP.m - 1] : 0;
+        }
         var yeniParts = [
             '<tr class="s01-ozet s01-ozet-yeni" data-ozet="aylik-musteri-sayisi">',
             '<td class="s01-musteri">Aylık Müşteri Sayısı</td>',
