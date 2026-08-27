@@ -24,3 +24,11 @@ def simple_cache_set(key, val):
 
 def simple_cache_invalidate(key):
     _SIMPLE_CACHE.pop(key, None)
+
+
+def simple_cache_invalidate_prefix(prefix: str):
+    """Belirtilen önek ile başlayan tüm cache anahtarlarını siler."""
+    keys_to_del = [k for k in _SIMPLE_CACHE if str(k).startswith(prefix)]
+    for k in keys_to_del:
+        _SIMPLE_CACHE.pop(k, None)
+

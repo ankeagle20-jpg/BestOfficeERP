@@ -14,6 +14,8 @@ from flask_login import current_user
 
 from auth import admin_gerekli
 from db import execute, execute_returning, fetch_all, fetch_one
+from module_pricing_public_cache import invalidate_public_module_pricing_cache
+from pricing_public_cache import invalidate_public_pricing_cache
 from services.exchange_rate_service import fetch_and_store_exchange_rates
 
 logger = logging.getLogger(__name__)
@@ -62,6 +64,12 @@ def _parse_iso_datetime(value_str: str, field_name: str) -> datetime.datetime:
         return dt
     except Exception as e:
         raise ValueError(f"{field_name} geçersiz tarih formatı (ISO bekleniyor).") from e
+
+
+def _invalidate_all_pricing_caches():
+    """Kampanya veya kur değişikliğinde tüm public fiyat cache'lerini anında temizler."""
+    invalidate_public_pricing_cache()
+    invalidate_public_module_pricing_cache()
 
 
 def _campaign_row_to_dict(row: dict) -> dict[str, Any]:
@@ -230,6 +238,7 @@ def api_campaigns_create():
             raise RuntimeError("Kampanya kaydedilemedi.")
 
         logger.info(f"Yeni kampanya oluşturuldu: id={row['id']}, name='{name}'")
+        _invalidate_all_pricing_caches()
         return jsonify({"ok": True, "campaign": _campaign_row_to_dict(row)})
 
     except ValueError as e:
@@ -324,6 +333,7 @@ def api_campaigns_update(campaign_id: int):
             ),
         )
 
+        _invalidate_all_pricing_caches()
         return jsonify({"ok": True, "campaign": _campaign_row_to_dict(row)})
 
     except ValueError as e:
@@ -352,6 +362,7 @@ def api_campaigns_toggle(campaign_id: int):
         if not row:
             return jsonify({"ok": False, "mesaj": "Kampanya bulunamadı."}), 404
 
+        _invalidate_all_pricing_caches()
         return jsonify({
             "ok": True,
             "campaign": _campaign_row_to_dict(row),
@@ -387,6 +398,7 @@ def api_campaigns_extend(campaign_id: int):
         if not row:
             return jsonify({"ok": False, "mesaj": "Kampanya bulunamadı."}), 404
 
+        _invalidate_all_pricing_caches()
         return jsonify({
             "ok": True,
             "campaign": _campaign_row_to_dict(row),
@@ -414,6 +426,7 @@ def api_campaigns_delete(campaign_id: int):
             return jsonify({"ok": False, "mesaj": "Kampanya bulunamadı."}), 404
 
         logger.info(f"Kampanya silindi: id={row['id']}, name='{row['name']}'")
+        _invalidate_all_pricing_caches()
         return jsonify({"ok": True, "mesaj": "Kampanya başarıyla silindi."})
     except Exception as e:
         logger.exception("api_campaigns_delete")
@@ -471,6 +484,7 @@ def api_exchange_rates_refresh():
         if not res.get("ok"):
             return jsonify({"ok": False, "mesaj": f"Döviz kurları güncellenemedi: {res.get('error')}"}), 502
 
+        _invalidate_all_pricing_caches()
         # Güncel durumu çek
         status_resp = api_exchange_rates_status()
         status_data = status_resp.get_json() if hasattr(status_resp, "get_json") else status_resp[0].get_json()

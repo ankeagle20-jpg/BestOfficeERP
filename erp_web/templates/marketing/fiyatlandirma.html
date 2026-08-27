@@ -85,12 +85,52 @@
     color: var(--accent);
     line-height: 1.2;
   }
+  .tier-price del {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--muted);
+    margin-right: 6px;
+    text-decoration: line-through;
+  }
+  .tier-price .discount-badge-inline {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 800;
+    background: #16a34a;
+    color: #fff;
+    padding: 2px 6px;
+    border-radius: 4px;
+    vertical-align: middle;
+    margin-left: 4px;
+  }
   .tier-price small {
     display: block;
     font-size: 0.78rem;
     font-weight: 600;
     color: var(--muted);
     margin-top: 4px;
+  }
+  .campaign-hero-banner {
+    background: linear-gradient(135deg, #0284c7, #0369a1);
+    color: #fff;
+    border-radius: 10px;
+    padding: 12px 18px;
+    margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    box-shadow: 0 4px 12px rgba(2, 132, 199, 0.2);
+    font-size: 0.95rem;
+  }
+  .campaign-hero-badge {
+    background: #f59e0b;
+    color: #000;
+    font-weight: 800;
+    font-size: 0.8rem;
+    padding: 3px 8px;
+    border-radius: 6px;
+    text-transform: uppercase;
+    margin-right: 8px;
   }
   .tier-details {
     margin: 0;
@@ -357,6 +397,15 @@
   <p class="pricing-intro">Türkiye — müşteri hacmine göre esnek planlar. 14 gün deneme.</p>
 </div>
 
+<!-- Dinamik Kampanya Hero Banner -->
+<div id="pricing-campaign-banner" class="campaign-hero-banner" style="display:none;">
+  <div style="display:flex; align-items:center;">
+    <span class="campaign-hero-badge">KAMPANYA</span>
+    <span id="pricing-campaign-title"></span>
+  </div>
+  <div id="pricing-campaign-days" style="font-size:0.85rem; font-weight:600; background:rgba(0,0,0,0.2); padding:4px 10px; border-radius:6px;"></div>
+</div>
+
 <h2 class="pricing-section-title">ERP çekirdek planları</h2>
 <p class="pricing-section-sub">Müşteri sayısına göre taban + müşteri başı ücret.</p>
 
@@ -550,15 +599,43 @@
   function renderTier(tier, currency) {
     const card = document.createElement("article");
     card.className = "tier-card";
+    
+    let priceHtml = "";
+    if (tier.has_discount && tier.raw_base_monthly > tier.base_monthly) {
+      priceHtml =
+        "<del>" + formatMoney(tier.raw_base_monthly, currency) + "</del>" +
+        formatMoney(tier.base_monthly, currency) +
+        "<span class=\"discount-badge-inline\">İNDİRİMLİ</span>" +
+        "<small>taban aylık ücret (kampanya fırsatı)</small>";
+    } else {
+      priceHtml =
+        formatMoney(tier.base_monthly, currency) +
+        "<small>taban aylık ücret</small>";
+    }
+
+    let ppcHtml = "";
+    if (tier.has_discount && tier.raw_price_per_customer > tier.price_per_customer) {
+      ppcHtml = "<del style=\"color:var(--muted);font-weight:normal;\">" + formatMoney(tier.raw_price_per_customer, currency) + "</del> <strong>" + formatMoney(tier.price_per_customer, currency) + "</strong>";
+    } else {
+      ppcHtml = "<strong>" + formatMoney(tier.price_per_customer, currency) + "</strong>";
+    }
+
+    let extraUHtml = "";
+    if (tier.has_discount && tier.raw_price_per_extra_user > tier.price_per_extra_user) {
+      extraUHtml = "<del style=\"color:var(--muted);font-weight:normal;\">" + formatMoney(tier.raw_price_per_extra_user, currency) + "</del> <strong>" + formatMoney(tier.price_per_extra_user, currency) + "</strong>";
+    } else {
+      extraUHtml = "<strong>" + formatMoney(tier.price_per_extra_user, currency) + "</strong>";
+    }
+
     card.innerHTML =
+      (tier.has_discount ? "<span class=\"tier-badge\" style=\"background:#16a34a;\">Fırsat</span>" : "") +
       "<h3>" + escapeHtml(tier.display_name) + "</h3>" +
       "<div class=\"tier-range\">" + escapeHtml(customerRange(tier)) + "</div>" +
-      "<div class=\"tier-price\">" + formatMoney(tier.base_monthly, currency) +
-      "<small>taban aylık ücret</small></div>" +
+      "<div class=\"tier-price\">" + priceHtml + "</div>" +
       "<ul class=\"tier-details\">" +
-      "<li>Müşteri başı: <strong>" + formatMoney(tier.price_per_customer, currency) + "</strong></li>" +
+      "<li>Müşteri başı: " + ppcHtml + "</li>" +
       "<li>Dahil kullanıcı: <strong>" + escapeHtml(String(tier.included_users)) + "</strong></li>" +
-      "<li>Ek kullanıcı: <strong>" + formatMoney(tier.price_per_extra_user, currency) + "</strong></li>" +
+      "<li>Ek kullanıcı: " + extraUHtml + "</li>" +
       "</ul>";
     return card;
   }
@@ -700,12 +777,42 @@
     card.dataset.recommended = recommended ? "1" : "0";
 
     const discount = Number(tier.annual_discount_months) || 0;
+    const rawBase = Number(tier.raw_base_monthly != null ? tier.raw_base_monthly : tier.base_monthly) || 0;
+    const finalBase = Number(tier.base_monthly) || 0;
+    const rawPerP = Number(tier.raw_price_per_personnel != null ? tier.raw_price_per_personnel : tier.price_per_personnel) || 0;
+    const finalPerP = Number(tier.price_per_personnel) || 0;
+
     const baseShow = billingPeriod === "annual"
-      ? (Number(tier.base_monthly) || 0) * (12 - discount)
-      : (Number(tier.base_monthly) || 0);
+      ? finalBase * (12 - discount)
+      : finalBase;
+    const rawBaseShow = billingPeriod === "annual"
+      ? rawBase * (12 - discount)
+      : rawBase;
+
     const perPShow = billingPeriod === "annual"
-      ? (Number(tier.price_per_personnel) || 0) * (12 - discount)
-      : (Number(tier.price_per_personnel) || 0);
+      ? finalPerP * (12 - discount)
+      : finalPerP;
+    const rawPerPShow = billingPeriod === "annual"
+      ? rawPerP * (12 - discount)
+      : rawPerP;
+
+    let priceHtml = "";
+    if (tier.has_discount && rawBaseShow > baseShow) {
+      priceHtml =
+        "<del>" + formatMoney(rawBaseShow, currency) + "</del>" +
+        formatMoney(baseShow, currency) +
+        "<span class=\"discount-badge-inline\">İNDİRİMLİ</span>";
+    } else {
+      priceHtml = formatMoney(baseShow, currency);
+    }
+
+    let perPHtml = "";
+    if (tier.has_discount && rawPerPShow > perPShow) {
+      perPHtml = "<del style=\"color:var(--muted);font-weight:normal;\">" + formatMoney(rawPerPShow, currency) + "</del> <strong>" + formatMoney(perPShow, currency) + "</strong>";
+    } else {
+      perPHtml = "<strong>" + formatMoney(perPShow, currency) + "</strong>";
+    }
+
     const periodLabel = billingPeriod === "annual" ? "yıllık taban" : "taban aylık ücret";
     const perLabel = billingPeriod === "annual"
       ? "Ek personel ücreti (yıl)"
@@ -736,14 +843,14 @@
       (recommended ? "<span class=\"tier-badge\">Önerilen</span>" : "") +
       "<h3>" + escapeHtml(tier.display_name) + "</h3>" +
       "<div class=\"tier-range\">" + escapeHtml(randevuRange(tier)) + "</div>" +
-      "<div class=\"tier-price\">" + formatMoney(baseShow, currency) +
+      "<div class=\"tier-price\">" + priceHtml +
       "<small>" + escapeHtml(periodLabel) +
       (billingPeriod === "annual" && discount ? " (" + discount + " ay bedava)" : "") +
       "</small></div>" +
       "<ul class=\"tier-details\">" +
       "<li>Dahil aylık randevu: <strong>" + escapeHtml(inclAppt) + "</strong></li>" +
       "<li>Dahil personel: <strong>" + escapeHtml(inclPers) + "</strong></li>" +
-      "<li>" + escapeHtml(perLabel) + ": <strong>" + formatMoney(perPShow, currency) + "</strong></li>" +
+      "<li>" + escapeHtml(perLabel) + ": " + perPHtml + "</li>" +
       "</ul>" +
       estimateHtml +
       "<a class=\"btn-select" + (recommended ? " is-emphasized" : "") +
@@ -794,6 +901,11 @@
       }
       rvTiers = data.tiers;
       rvCurrency = data.currency || "TRY";
+
+      if (data.campaign && (!document.getElementById("pricing-campaign-banner") || document.getElementById("pricing-campaign-banner").style.display === "none")) {
+        updateCampaignBanner(data.campaign);
+      }
+
       if (rvLoadingEl) rvLoadingEl.style.display = "none";
       rvGridEl.hidden = false;
       renderRandevuGrid();
@@ -895,15 +1007,58 @@
     card.dataset.recommended = recommended ? "1" : "0";
 
     const discount = Number(tier.annual_discount_months) || 0;
+    const rawBase = Number(tier.raw_base_monthly != null ? tier.raw_base_monthly : tier.base_monthly) || 0;
+    const finalBase = Number(tier.base_monthly) || 0;
+    const rawPerP = Number(tier.raw_price_per_personnel != null ? tier.raw_price_per_personnel : tier.price_per_personnel) || 0;
+    const finalPerP = Number(tier.price_per_personnel) || 0;
+    const rawPerB = Number(tier.raw_price_per_extra_branch != null ? tier.raw_price_per_extra_branch : tier.price_per_extra_branch) || 0;
+    const finalPerB = Number(tier.price_per_extra_branch) || 0;
+
     const baseShow = billingPeriod === "annual"
-      ? (Number(tier.base_monthly) || 0) * (12 - discount)
-      : (Number(tier.base_monthly) || 0);
+      ? finalBase * (12 - discount)
+      : finalBase;
+    const rawBaseShow = billingPeriod === "annual"
+      ? rawBase * (12 - discount)
+      : rawBase;
+
     const perPShow = billingPeriod === "annual"
-      ? (Number(tier.price_per_personnel) || 0) * (12 - discount)
-      : (Number(tier.price_per_personnel) || 0);
+      ? finalPerP * (12 - discount)
+      : finalPerP;
+    const rawPerPShow = billingPeriod === "annual"
+      ? rawPerP * (12 - discount)
+      : rawPerP;
+
     const perBShow = billingPeriod === "annual"
-      ? (Number(tier.price_per_extra_branch) || 0) * (12 - discount)
-      : (Number(tier.price_per_extra_branch) || 0);
+      ? finalPerB * (12 - discount)
+      : finalPerB;
+    const rawPerBShow = billingPeriod === "annual"
+      ? rawPerB * (12 - discount)
+      : rawPerB;
+
+    let priceHtml = "";
+    if (tier.has_discount && rawBaseShow > baseShow) {
+      priceHtml =
+        "<del>" + formatMoney(rawBaseShow, currency) + "</del>" +
+        formatMoney(baseShow, currency) +
+        "<span class=\"discount-badge-inline\">İNDİRİMLİ</span>";
+    } else {
+      priceHtml = formatMoney(baseShow, currency);
+    }
+
+    let perPHtml = "";
+    if (tier.has_discount && rawPerPShow > perPShow) {
+      perPHtml = "<del style=\"color:var(--muted);font-weight:normal;\">" + formatMoney(rawPerPShow, currency) + "</del> <strong>" + formatMoney(perPShow, currency) + "</strong>";
+    } else {
+      perPHtml = "<strong>" + formatMoney(perPShow, currency) + "</strong>";
+    }
+
+    let perBHtml = "";
+    if (tier.has_discount && rawPerBShow > perBShow) {
+      perBHtml = "<del style=\"color:var(--muted);font-weight:normal;\">" + formatMoney(rawPerBShow, currency) + "</del> <strong>" + formatMoney(perBShow, currency) + "</strong>";
+    } else {
+      perBHtml = "<strong>" + formatMoney(perBShow, currency) + "</strong>";
+    }
+
     const periodLabel = billingPeriod === "annual" ? "yıllık taban" : "taban aylık ücret";
     const perLabel = billingPeriod === "annual" ? "Personel başı (yıl)" : "Personel başı (ay)";
     const branchLabel = billingPeriod === "annual" ? "Ek şube (yıl)" : "Ek şube (ay)";
@@ -927,14 +1082,14 @@
       (recommended ? "<span class=\"tier-badge\">Önerilen</span>" : "") +
       "<h3>" + escapeHtml(tier.display_name) + "</h3>" +
       "<div class=\"tier-range\">" + escapeHtml(personnelRange(tier)) + "</div>" +
-      "<div class=\"tier-price\">" + formatMoney(baseShow, currency) +
+      "<div class=\"tier-price\">" + priceHtml +
       "<small>" + escapeHtml(periodLabel) +
       (billingPeriod === "annual" && discount ? " (" + discount + " ay bedava)" : "") +
       "</small></div>" +
       "<ul class=\"tier-details\">" +
-      "<li>" + escapeHtml(perLabel) + ": <strong>" + formatMoney(perPShow, currency) + "</strong></li>" +
+      "<li>" + escapeHtml(perLabel) + ": " + perPHtml + "</li>" +
       "<li>Dahil şube: <strong>" + escapeHtml(String(tier.included_branches)) + "</strong></li>" +
-      "<li>" + escapeHtml(branchLabel) + ": <strong>" + formatMoney(perBShow, currency) + "</strong></li>" +
+      "<li>" + escapeHtml(branchLabel) + ": " + perBHtml + "</li>" +
       "</ul>" +
       estimateHtml +
       "<a class=\"btn-select" + (recommended ? " is-emphasized" : "") +
@@ -973,6 +1128,26 @@
     renderRandevuGrid();
   }
 
+  function updateCampaignBanner(campaign) {
+    const banner = document.getElementById("pricing-campaign-banner");
+    const titleEl = document.getElementById("pricing-campaign-title");
+    const daysEl = document.getElementById("pricing-campaign-days");
+    if (!banner || !titleEl || !daysEl) return;
+
+    if (campaign && campaign.name) {
+      banner.style.display = "flex";
+      titleEl.innerHTML = "<strong>" + escapeHtml(campaign.name) + "</strong> — Tüm planlarda <strong>%" + campaign.discount_percent + " İndirim!</strong>";
+      if (campaign.days_left != null) {
+        daysEl.textContent = "Kalan Süre: " + campaign.days_left + " gün";
+        daysEl.style.display = "block";
+      } else {
+        daysEl.style.display = "none";
+      }
+    } else {
+      banner.style.display = "none";
+    }
+  }
+
   async function loadPricing() {
     try {
       const res = await fetch("/api/pricing/public?country=TR", {
@@ -986,6 +1161,11 @@
       loadingEl.style.display = "none";
       gridEl.hidden = false;
       gridEl.innerHTML = "";
+      
+      if (data.campaign) {
+        updateCampaignBanner(data.campaign);
+      }
+
       data.tiers.forEach(function (tier) {
         gridEl.appendChild(renderTier(tier, data.currency));
       });
@@ -1007,6 +1187,11 @@
       }
       moduleTiers = data.tiers;
       moduleCurrency = data.currency || "TRY";
+      
+      if (data.campaign && (!document.getElementById("pricing-campaign-banner") || document.getElementById("pricing-campaign-banner").style.display === "none")) {
+        updateCampaignBanner(data.campaign);
+      }
+
       mpLoadingEl.style.display = "none";
       mpGridEl.hidden = false;
       renderModuleGrid();
