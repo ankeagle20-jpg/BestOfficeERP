@@ -230,6 +230,25 @@ deposu
 - SONRAKİ FAZ (AYRI onay): MEVCUT entegrasyonların (Mail'DEN
   başlayarak) BU sisteme TAŞINMASI
 
+## ✅ USD Master Fiyatlandırma Mimarisi (TAMAMEN tamamlandı, 4/4 Aşama)
+
+- Aşama 1 (059c4ab): Döviz kuru (open.er-api.com) + kampanya
+  ALTYAPISI (public.exchange_rates, public.discount_campaigns)
+- Aşama 2 (b5a852a): calculate_tenant_bill()/calculate_module_bill()
+  motorları, override/US-türetme + kampanya PIPELINE'INA geçti -
+  MEVCUT TR fiyatları KURUŞU kuruşuna KORUNDU
+- Aşama 3 (12156e4): /admin/campaigns YÖNETİM ekranı (TAM CRUD),
+  mevcut fiyatlandırma PANELLERİNİN sadeleşmesi, 8/8 admin sayfası
+  tutarlı NAVİGASYON
+- Aşama 4 (0077e1d): PUBLIC /fiyatlandirma SAYFASINDA kampanya
+  BANNER'I + üstü ÇİZİLİ fiyat gösterimi, ANINDA cache invalidation
+
+Payafin ARTIK, ABD (USD) fiyatını ANA referans OLARAK KULLANAN, TÜM
+diğer ülkeleri OTOMATIK döviz KURUYLA türeten, İSTENİLEN ülke/ülkeler
+İÇİN GEÇİCİ kampanya İNDİRİMLERİ TANIMLANABİLEN, TAM UÇTAN uca çalışan
+bir fiyatlandırma sistemine SAHİP - TÜM SÜREÇTE, MEVCUT TR
+müşterilerinin fiyatları HİÇ değişmedi (SIFIR regresyon).
+
 ## Önemli Teknik Notlar (Yeni Bir Sohbette Hatırlanması Gerekenler)
 
 - Ana branch: `main`, repo: `https://github.com/ankeagle20-jpg/BestOfficeERP.git`
