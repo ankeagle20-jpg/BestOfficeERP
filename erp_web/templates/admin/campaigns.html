@@ -1,0 +1,545 @@
+{% extends "layout.html" %}
+{% block title %}İndirim Kampanyaları Yönetimi{% endblock %}
+{% block page_title %}İndirim Kampanyaları Yönetimi{% endblock %}
+
+{% block topbar_actions %}
+  <button class="btn-erp btn-erp-sm btn-primary-erp" onclick="openCreateModal()">
+    <i class="fa fa-plus"></i> Yeni Kampanya Oluştur
+  </button>
+{% endblock %}
+
+{% block content %}
+<style>
+  .mod-nav { display:flex; gap:10px; margin-bottom:18px; flex-wrap:wrap; align-items:center; }
+  .mod-nav a {
+    padding:6px 12px; border-radius:6px; border:1px solid #1e3a5f;
+    color:#90caf9; background:#0a1929; text-decoration:none; font-size:.85rem;
+  }
+  .mod-nav a.active { background:#1565c0; color:#fff; border-color:#1565c0; font-weight:600; }
+  .mod-nav a:hover { background:#132f4c; color:#fff; }
+
+  /* Döviz Kuru Bilgi Çubuğu */
+  .fx-bar {
+    background: #0a1929; border: 1px solid #1e3a5f; border-radius: 8px;
+    padding: 12px 18px; margin-bottom: 20px; display: flex;
+    justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;
+  }
+  .fx-info { display: flex; align-items: center; gap: 14px; font-size: 0.86rem; color: #b0bec5; }
+  .fx-rates { display: flex; gap: 12px; flex-wrap: wrap; }
+  .fx-badge {
+    background: #0f2537; border: 1px solid #254b77; padding: 3px 8px;
+    border-radius: 4px; font-size: 0.8rem; color: #90caf9; font-family: monospace;
+  }
+
+  /* Filtre Sekmeleri */
+  .filter-tabs { display: flex; gap: 8px; margin-bottom: 16px; border-bottom: 1px solid #1e3a5f; padding-bottom: 10px; }
+  .filter-tab {
+    background: transparent; border: 1px solid transparent; color: #90a4ae;
+    padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 0.85rem;
+    transition: all .15s ease;
+  }
+  .filter-tab.active { background: #1e3a5f; color: #fff; border-color: #2b5687; font-weight: 600; }
+  .filter-tab .tab-badge {
+    background: rgba(0,0,0,0.3); padding: 1px 6px; border-radius: 10px;
+    font-size: 0.75rem; margin-left: 5px;
+  }
+
+  /* Kampanya Tablosu */
+  .camp-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+  .camp-table th {
+    background: #0a1929; color: #90caf9; text-align: left; padding: 10px 14px;
+    border-bottom: 2px solid #1e3a5f; font-weight: 600;
+  }
+  .camp-table td {
+    padding: 12px 14px; border-bottom: 1px solid #132f4c; color: #e0e0e0; vertical-align: middle;
+  }
+  .camp-table tr:hover td { background: rgba(19, 47, 76, 0.4); }
+
+  .status-badge {
+    padding: 3px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase;
+  }
+  .status-active { background: #1b5e20; color: #a5d6a7; border: 1px solid #2e7d32; }
+  .status-upcoming { background: #0d47a1; color: #90caf9; border: 1px solid #1976d2; }
+  .status-expired { background: #37474f; color: #b0bec5; border: 1px solid #546e7a; }
+  .status-inactive { background: #b71c1c; color: #ef9a9a; border: 1px solid #d32f2f; }
+
+  .pct-badge {
+    background: rgba(255, 152, 0, 0.15); border: 1px solid #ff9800; color: #ffb74d;
+    font-weight: 700; font-size: 0.95rem; padding: 2px 8px; border-radius: 4px;
+  }
+  .country-tag {
+    background: #1e3a5f; color: #90caf9; padding: 2px 6px; border-radius: 3px;
+    font-size: 0.75rem; margin-right: 4px; display: inline-block;
+  }
+
+  /* Aksiyon Butonları */
+  .action-btn {
+    padding: 4px 8px; border-radius: 4px; border: 1px solid #2b5687;
+    background: #0a1929; color: #90caf9; cursor: pointer; font-size: 0.8rem;
+    margin-right: 4px; transition: all .15s ease;
+  }
+  .action-btn:hover { background: #1565c0; color: #fff; }
+  .action-btn.btn-danger-alt:hover { background: #c62828; border-color: #e53935; color: #fff; }
+
+  /* Modal */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: none;
+    align-items: center; justify-content: center; z-index: 9999;
+  }
+  .modal-box {
+    background: #0a1929; border: 1px solid #1e3a5f; border-radius: 10px;
+    width: 90%; max-width: 580px; padding: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  }
+  .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
+  .modal-header h3 { color: #e0f7fa; font-size: 1.15rem; margin: 0; }
+  .modal-close { background: none; border: none; color: #90a4ae; font-size: 1.3rem; cursor: pointer; }
+  .form-group { margin-bottom: 14px; }
+  .form-group label { display: block; color: #90caf9; font-size: 0.82rem; margin-bottom: 5px; font-weight: 500; }
+  .form-control-erp {
+    width: 100%; padding: 8px 12px; background: #07131e; border: 1px solid #1e3a5f;
+    border-radius: 6px; color: #fff; font-size: 0.88rem; box-sizing: border-box;
+  }
+  .form-control-erp:focus { border-color: #4fc3f7; outline: none; }
+  .form-row { display: flex; gap: 12px; }
+  .form-row .form-group { flex: 1; }
+  .modal-footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+</style>
+
+<!-- 8'li Tutarlı mod-nav Çubuğu -->
+<div class="mod-nav">
+  <a href="{{ url_for('admin.yonetim_hub') }}"><i class="fa fa-th-large"></i> Yönetim Hub</a>
+  <a href="{{ url_for('admin.index') }}"><i class="fa fa-users"></i> Kullanıcılar</a>
+  <a href="{{ url_for('admin_pricing.pricing_page') }}"><i class="fa fa-tags"></i> Fiyatlandırma</a>
+  <a href="{{ url_for('admin_module_pricing.module_pricing_page') }}"><i class="fa fa-layer-group"></i> Modül Fiyatlandırma</a>
+  <a href="{{ url_for('admin_modules.modules_page') }}"><i class="fa fa-puzzle-piece"></i> Modül Yönetimi</a>
+  <a href="{{ url_for('admin_campaigns.campaigns_page') }}" class="active"><i class="fa fa-percent"></i> Kampanyalar</a>
+  <a href="{{ url_for('admin_credentials.credentials_page') }}"><i class="fa fa-key"></i> Kimlik Bilgileri Kasası</a>
+  <a href="{{ url_for('admin_mukerrer.mukerrer_arsiv_page') }}"><i class="fa fa-archive"></i> Mükerrer Arşiv</a>
+</div>
+
+<!-- Döviz Kuru ve Otomatik Fiyat Durum Çubuğu -->
+<div class="fx-bar">
+  <div class="fx-info">
+    <span><i class="fa fa-globe" style="color:#4fc3f7;"></i> <strong>Master Referans:</strong> USD ($)</span>
+    <span id="fxLastFetch"><i class="fa fa-clock"></i> Kurlar yükleniyor...</span>
+  </div>
+  <div class="fx-rates" id="fxRatesContainer">
+    <!-- Dinamik kurlar buraya gelecek -->
+  </div>
+  <div>
+    <button class="btn-erp btn-erp-xs btn-outline-erp" onclick="refreshExchangeRates()" id="btnRefreshFx">
+      <i class="fa fa-sync-alt"></i> Kurları Şimdi Güncelle
+    </button>
+  </div>
+</div>
+
+<div class="card-erp">
+  <!-- Filtre Sekmeleri -->
+  <div class="filter-tabs">
+    <button class="filter-tab active" onclick="setFilter('all')">
+      Tümü <span class="tab-badge" id="badgeAll">0</span>
+    </button>
+    <button class="filter-tab" onclick="setFilter('active')">
+      Aktif Kampanyalar <span class="tab-badge" id="badgeActive" style="background:#1b5e20;color:#a5d6a7;">0</span>
+    </button>
+    <button class="filter-tab" onclick="setFilter('upcoming')">
+      Planlananlar <span class="tab-badge" id="badgeUpcoming" style="background:#0d47a1;color:#90caf9;">0</span>
+    </button>
+    <button class="filter-tab" onclick="setFilter('expired')">
+      Süresi Dolanlar / Pasif <span class="tab-badge" id="badgeExpired" style="background:#37474f;color:#b0bec5;">0</span>
+    </button>
+  </div>
+
+  <!-- Kampanya Listesi Tablosu -->
+  <div style="overflow-x:auto;">
+    <table class="camp-table">
+      <thead>
+        <tr>
+          <th>Kampanya Adı & Kod</th>
+          <th>İndirim</th>
+          <th>Hedef Sistem</th>
+          <th>Hedef Ülkeler</th>
+          <th>Geçerlilik Tarihleri</th>
+          <th>Durum</th>
+          <th>Öncelik</th>
+          <th style="text-align:right;">İşlemler</th>
+        </tr>
+      </thead>
+      <tbody id="campTableBody">
+        <tr>
+          <td colspan="8" style="text-align:center; padding:30px; color:#90a4ae;">
+            <i class="fa fa-spinner fa-spin"></i> Kampanyalar yükleniyor...
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Kampanya Oluştur / Düzenle Modal -->
+<div class="modal-overlay" id="campModal">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3 id="modalTitle">Yeni Kampanya Oluştur</h3>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <form id="campForm" onsubmit="saveCampaign(event)">
+      <input type="hidden" id="editCampId" value="">
+
+      <div class="form-group">
+        <label>Kampanya Adı *</label>
+        <input type="text" id="campName" class="form-control-erp" placeholder="Örn: Bahar İndirimi 2026" required maxlength="120">
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Kupon / Referans Kodu (Opsiyonel)</label>
+          <input type="text" id="campCode" class="form-control-erp" placeholder="Örn: BAHAR26" maxlength="40">
+        </div>
+        <div class="form-group">
+          <label>İndirim Oranı (%) *</label>
+          <input type="number" id="campPercent" class="form-control-erp" min="0.01" max="100" step="0.01" placeholder="Örn: 25.00" required>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Uygulanacağı Sistem *</label>
+          <select id="campAppliesTo" class="form-control-erp" required>
+            <option value="all">Tüm Sistem (Çekirdek ERP + Modüller)</option>
+            <option value="core_erp">Yalnız Çekirdek ERP</option>
+            <option value="modules">Tüm Modüller</option>
+            <option value="module:personel">Yalnız Personel Modülü</option>
+            <option value="module:randevu">Yalnız Randevu Modülü</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Hedef Ülkeler * (Virgülle veya ALL)</label>
+          <input type="text" id="campCountries" class="form-control-erp" placeholder="Örn: ALL veya TR, AZ, DE" required value="ALL">
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Başlangıç Tarihi/Saati *</label>
+          <input type="datetime-local" id="campStartDate" class="form-control-erp" required>
+        </div>
+        <div class="form-group">
+          <label>Bitiş Tarihi/Saati *</label>
+          <input type="datetime-local" id="campEndDate" class="form-control-erp" required>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Öncelik (Priority - yüksek olan önce uygulanır)</label>
+          <input type="number" id="campPriority" class="form-control-erp" value="10" min="1" max="999">
+        </div>
+        <div class="form-group" style="display:flex; align-items:center; margin-top:22px;">
+          <label style="cursor:pointer; display:flex; align-items:center; gap:8px; margin:0;">
+            <input type="checkbox" id="campIsActive" checked style="width:18px; height:18px;">
+            <span>Kampanya Aktif</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn-erp btn-outline-erp" onclick="closeModal()">İptal</button>
+        <button type="submit" class="btn-erp btn-primary-erp" id="btnSubmitModal">
+          <i class="fa fa-save"></i> Kaydet
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+  let currentFilter = 'all';
+  let campaignsData = [];
+
+  function formatDateIso(dateObj) {
+    const pad = n => n < 10 ? '0' + n : n;
+    return dateObj.getFullYear() + '-' + pad(dateObj.getMonth() + 1) + '-' + pad(dateObj.getDate()) +
+           'T' + pad(dateObj.getHours()) + ':' + pad(dateObj.getMinutes());
+  }
+
+  function formatDisplayDate(isoStr) {
+    if (!isoStr) return '-';
+    try {
+      const d = new Date(isoStr);
+      return d.toLocaleDateString('tr-TR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' });
+    } catch(e) { return isoStr; }
+  }
+
+  async function loadExchangeRateStatus() {
+    try {
+      const res = await fetch('/admin/api/exchange-rates/status');
+      const data = await res.json();
+      if (data.ok) {
+        const lastDt = data.last_fetched ? formatDisplayDate(data.last_fetched) : 'Bilinmiyor';
+        document.getElementById('fxLastFetch').innerHTML = `<i class="fa fa-clock"></i> Son Kur Güncelleme: <strong>${lastDt}</strong>`;
+        
+        const container = document.getElementById('fxRatesContainer');
+        container.innerHTML = '';
+        if (data.sample_rates) {
+          for (const [curr, info] of Object.entries(data.sample_rates)) {
+            const badge = document.createElement('span');
+            badge.className = 'fx-badge';
+            badge.textContent = `1 USD = ${info.rate} ${curr}`;
+            container.appendChild(badge);
+          }
+        }
+      }
+    } catch (e) {
+      console.error("Döviz kuru yüklenemedi", e);
+    }
+  }
+
+  async function refreshExchangeRates() {
+    const btn = document.getElementById('btnRefreshFx');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Güncelleniyor...';
+    try {
+      const res = await fetch('/admin/api/exchange-rates/refresh', { method: 'POST' });
+      const data = await res.json();
+      if (data.ok) {
+        alert(data.mesaj);
+        loadExchangeRateStatus();
+      } else {
+        alert("Hata: " + data.mesaj);
+      }
+    } catch (e) {
+      alert("Döviz kurları güncellenirken bağlantı hatası oluştu.");
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fa fa-sync-alt"></i> Kurları Şimdi Güncelle';
+    }
+  }
+
+  async function loadCampaigns() {
+    try {
+      const res = await fetch(`/admin/api/campaigns?filter=${currentFilter}`);
+      const data = await res.json();
+      if (!data.ok) {
+        document.getElementById('campTableBody').innerHTML = `<tr><td colspan="8" style="color:#ef5350; text-align:center;">${data.mesaj}</td></tr>`;
+        return;
+      }
+
+      campaignsData = data.campaigns || [];
+      if (data.counts) {
+        document.getElementById('badgeAll').textContent = data.counts.all || 0;
+        document.getElementById('badgeActive').textContent = data.counts.active || 0;
+        document.getElementById('badgeUpcoming').textContent = data.counts.upcoming || 0;
+        document.getElementById('badgeExpired').textContent = data.counts.expired || 0;
+      }
+
+      renderTable(campaignsData);
+    } catch (e) {
+      document.getElementById('campTableBody').innerHTML = `<tr><td colspan="8" style="color:#ef5350; text-align:center;">Bağlantı hatası: Kampanyalar yüklenemedi.</td></tr>`;
+    }
+  }
+
+  function renderTable(items) {
+    const tbody = document.getElementById('campTableBody');
+    if (!items || items.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:30px; color:#90a4ae;">Bu filtreye uygun kampanya bulunamadı.</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = items.map(c => {
+      let statusClass = 'status-inactive';
+      if (c.status === 'active') statusClass = 'status-active';
+      else if (c.status === 'upcoming') statusClass = 'status-upcoming';
+      else if (c.status === 'expired') statusClass = 'status-expired';
+
+      let appLabel = 'Tüm Sistem';
+      if (c.applies_to === 'core_erp') appLabel = 'Çekirdek ERP';
+      else if (c.applies_to === 'modules') appLabel = 'Tüm Modüller';
+      else if (c.applies_to === 'module:personel' || c.applies_to === 'module:personnel') appLabel = 'Personel Modülü';
+      else if (c.applies_to === 'module:randevu') appLabel = 'Randevu Modülü';
+
+      const countriesHtml = (c.target_countries || []).map(cc => `<span class="country-tag">${cc}</span>`).join('');
+      const daysInfo = c.days_left !== null ? `<span style="font-size:0.75rem; color:#4fc3f7; display:block;">(${c.days_left} gün kaldı)</span>` : '';
+
+      return `
+        <tr>
+          <td>
+            <strong>${c.name}</strong>
+            ${c.code ? `<div style="font-size:0.78rem; color:#90caf9; font-family:monospace;"><i class="fa fa-ticket-alt"></i> ${c.code}</div>` : ''}
+          </td>
+          <td><span class="pct-badge">%${c.discount_percent}</span></td>
+          <td><span style="color:#b0bec5; font-size:0.83rem;">${appLabel}</span></td>
+          <td>${countriesHtml}</td>
+          <td>
+            <div style="font-size:0.82rem;">${formatDisplayDate(c.start_date)} - ${formatDisplayDate(c.end_date)}</div>
+            ${daysInfo}
+          </td>
+          <td><span class="status-badge ${statusClass}">${c.status_label}</span></td>
+          <td><span style="color:#90a4ae; font-size:0.8rem;">P:${c.priority}</span></td>
+          <td style="text-align:right; white-space:nowrap;">
+            <button class="action-btn" onclick="toggleCampaign(${c.id})" title="${c.is_active ? 'Durdur' : 'Aktif Et'}">
+              <i class="fa ${c.is_active ? 'fa-pause' : 'fa-play'}"></i>
+            </button>
+            <button class="action-btn" onclick="extendCampaign(${c.id})" title="+30 Gün Uzat">
+              +30g
+            </button>
+            <button class="action-btn" onclick="openEditModal(${c.id})" title="Düzenle">
+              <i class="fa fa-edit"></i>
+            </button>
+            <button class="action-btn btn-danger-alt" onclick="deleteCampaign(${c.id}, '${c.name}')" title="Sil">
+              <i class="fa fa-trash"></i>
+            </button>
+          </td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  function setFilter(filterKey) {
+    currentFilter = filterKey;
+    document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+    event.target.closest('.filter-tab').classList.add('active');
+    loadCampaigns();
+  }
+
+  function openCreateModal() {
+    document.getElementById('modalTitle').textContent = 'Yeni Kampanya Oluştur';
+    document.getElementById('editCampId').value = '';
+    document.getElementById('campName').value = '';
+    document.getElementById('campCode').value = '';
+    document.getElementById('campPercent').value = '';
+    document.getElementById('campAppliesTo').value = 'all';
+    document.getElementById('campCountries').value = 'ALL';
+    document.getElementById('campPriority').value = '10';
+    document.getElementById('campIsActive').checked = true;
+
+    const now = new Date();
+    const in30Days = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+    document.getElementById('campStartDate').value = formatDateIso(now);
+    document.getElementById('campEndDate').value = formatDateIso(in30Days);
+
+    document.getElementById('campModal').style.display = 'flex';
+  }
+
+  function openEditModal(campId) {
+    const c = campaignsData.find(x => x.id === campId);
+    if (!c) return;
+
+    document.getElementById('modalTitle').textContent = 'Kampanyayı Düzenle: ' + c.name;
+    document.getElementById('editCampId').value = c.id;
+    document.getElementById('campName').value = c.name;
+    document.getElementById('campCode').value = c.code || '';
+    document.getElementById('campPercent').value = c.discount_percent;
+    document.getElementById('campAppliesTo').value = c.applies_to;
+    document.getElementById('campCountries').value = (c.target_countries || []).join(', ');
+    document.getElementById('campPriority').value = c.priority;
+    document.getElementById('campIsActive').checked = c.is_active;
+
+    if (c.start_date) document.getElementById('campStartDate').value = formatDateIso(new Date(c.start_date));
+    if (c.end_date) document.getElementById('campEndDate').value = formatDateIso(new Date(c.end_date));
+
+    document.getElementById('campModal').style.display = 'flex';
+  }
+
+  function closeModal() {
+    document.getElementById('campModal').style.display = 'none';
+  }
+
+  async function saveCampaign(e) {
+    e.preventDefault();
+    const campId = document.getElementById('editCampId').value;
+    const isEdit = Boolean(campId);
+
+    const payload = {
+      name: document.getElementById('campName').value.trim(),
+      code: document.getElementById('campCode').value.trim() || null,
+      discount_percent: parseFloat(document.getElementById('campPercent').value),
+      applies_to: document.getElementById('campAppliesTo').value,
+      target_countries: document.getElementById('campCountries').value.split(',').map(s => s.trim().toUpperCase()).filter(Boolean),
+      start_date: document.getElementById('campStartDate').value,
+      end_date: document.getElementById('campEndDate').value,
+      priority: parseInt(document.getElementById('campPriority').value) || 10,
+      is_active: document.getElementById('campIsActive').checked,
+    };
+
+    const btn = document.getElementById('btnSubmitModal');
+    btn.disabled = true;
+
+    try {
+      const url = isEdit ? `/admin/api/campaigns/${campId}` : '/admin/api/campaigns';
+      const method = isEdit ? 'PUT' : 'POST';
+
+      const res = await fetch(url, {
+        method: method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        closeModal();
+        loadCampaigns();
+      } else {
+        alert("Hata: " + data.mesaj);
+      }
+    } catch (err) {
+      alert("Kaydetme işlemi sırasında bağlantı hatası oluştu.");
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  async function toggleCampaign(campId) {
+    try {
+      const res = await fetch(`/admin/api/campaigns/${campId}/toggle`, { method: 'POST' });
+      const data = await res.json();
+      if (data.ok) {
+        loadCampaigns();
+      } else {
+        alert("Hata: " + data.mesaj);
+      }
+    } catch (e) {
+      alert("İşlem gerçekleştirilemedi.");
+    }
+  }
+
+  async function extendCampaign(campId) {
+    if (!confirm("Bu kampanyanın bitiş tarihini 30 gün uzatmak istiyor musunuz?")) return;
+    try {
+      const res = await fetch(`/admin/api/campaigns/${campId}/extend`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ days: 30 })
+      });
+      const data = await res.json();
+      if (data.ok) {
+        loadCampaigns();
+      } else {
+        alert("Hata: " + data.mesaj);
+      }
+    } catch (e) {
+      alert("Uzatma işlemi sırasında hata oluştu.");
+    }
+  }
+
+  async function deleteCampaign(campId, name) {
+    if (!confirm(`'${name}' kampanyasını silmek istediğinize emin misiniz? Bu işlem geri alınamaz.`)) return;
+    try {
+      const res = await fetch(`/admin/api/campaigns/${campId}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.ok) {
+        loadCampaigns();
+      } else {
+        alert("Hata: " + data.mesaj);
+      }
+    } catch (e) {
+      alert("Silme işlemi sırasında hata oluştu.");
+    }
+  }
+
+  // İlk yükleme
+  document.addEventListener('DOMContentLoaded', () => {
+    loadExchangeRateStatus();
+    loadCampaigns();
+  });
+</script>
+{% endblock %}

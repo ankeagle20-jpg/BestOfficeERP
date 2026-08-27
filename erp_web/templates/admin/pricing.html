@@ -15,6 +15,26 @@
   }
   .mod-nav a.active { background:#1565c0; color:#fff; border-color:#1565c0; font-weight:600; }
   .mod-nav a:hover { background:#132f4c; color:#fff; }
+
+  /* Döviz Kuru ve Master Bilgilendirme Çubuğu */
+  .fx-bar {
+    background: #0a1929; border: 1px solid #1e3a5f; border-radius: 8px;
+    padding: 10px 16px; margin-bottom: 16px; display: flex;
+    justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;
+  }
+  .fx-info { display: flex; align-items: center; gap: 12px; font-size: 0.84rem; color: #b0bec5; }
+  .fx-badge {
+    background: #0f2537; border: 1px solid #254b77; padding: 2px 7px;
+    border-radius: 4px; font-size: 0.78rem; color: #90caf9; font-family: monospace;
+  }
+
+  .country-status-banner {
+    padding: 8px 12px; border-radius: 6px; margin-bottom: 14px; font-size: 0.85rem; display: flex; align-items: center; gap: 10px;
+  }
+  .status-banner-master { background: rgba(21, 101, 192, 0.15); border: 1px solid #1565c0; color: #90caf9; }
+  .status-banner-override { background: rgba(255, 152, 0, 0.12); border: 1px solid #f57c00; color: #ffb74d; }
+  .status-banner-derived { background: rgba(46, 125, 50, 0.15); border: 1px solid #2e7d32; color: #a5d6a7; }
+
   .pr-toolbar { display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin-bottom:16px; }
   .pr-toolbar label { color:#90caf9; font-size:.85rem; }
   .pr-toolbar select, .pr-toolbar input {
@@ -36,7 +56,7 @@
   .pr-section h3 { color:#90caf9; font-size:.95rem; margin:0 0 10px; font-weight:600; }
   .pr-preview {
     border:1px solid #1e3a5f; border-radius:8px; padding:14px 16px; background:#0b1e30;
-    max-width:520px;
+    max-width:580px;
   }
   .pr-preview-result { margin-top:10px; color:#80cbc4; font-size:.9rem; min-height:1.4em; }
   .pr-row-msg { font-size:.72rem; margin-left:6px; }
@@ -50,14 +70,29 @@
   <a href="{{ url_for('admin_pricing.pricing_page') }}" class="active"><i class="fa fa-tags"></i> Fiyatlandırma</a>
   <a href="{{ url_for('admin_module_pricing.module_pricing_page') }}"><i class="fa fa-layer-group"></i> Modül Fiyatlandırma</a>
   <a href="{{ url_for('admin_modules.modules_page') }}"><i class="fa fa-puzzle-piece"></i> Modül Yönetimi</a>
+  <a href="{{ url_for('admin_campaigns.campaigns_page') }}"><i class="fa fa-percent"></i> Kampanyalar</a>
   <a href="{{ url_for('admin_credentials.credentials_page') }}"><i class="fa fa-key"></i> Kimlik Bilgileri Kasası</a>
   <a href="{{ url_for('admin_mukerrer.mukerrer_arsiv_page') }}"><i class="fa fa-archive"></i> Mükerrer Arşiv</a>
 </div>
 
+<!-- Döviz Kuru Bilgi Çubuğu -->
+<div class="fx-bar">
+  <div class="fx-info">
+    <span><i class="fa fa-globe" style="color:#4fc3f7;"></i> <strong>Master Referans:</strong> USD ($)</span>
+    <span id="fxStatusTxt"><i class="fa fa-clock"></i> Kurlar yükleniyor...</span>
+  </div>
+  <div style="display:flex; gap:8px; align-items:center;" id="fxSampleRates"></div>
+  <div>
+    <button class="btn-erp btn-erp-xs btn-outline-erp" onclick="quickRefreshFx(this)">
+      <i class="fa fa-sync-alt"></i> Kurları Güncelle
+    </button>
+  </div>
+</div>
+
 <div class="card-erp">
-  <p style="color:#90caf9;margin:0 0 12px;font-size:.9rem;">
-    Platform fiyat kademeleri ve overage kuralları. Değişiklikler anında veritabanına yazılır; önizleme calculate_tenant_bill() ile hesaplanır.
-  </p>
+  <div class="country-status-banner" id="countryBanner">
+    <i class="fa fa-info-circle"></i> <span id="countryBannerText">Yükleniyor...</span>
+  </div>
 
   <div class="pr-toolbar">
     <label>
@@ -115,7 +150,7 @@
   </div>
 
   <div class="pr-section">
-    <h3>Önizleme</h3>
+    <h3>Canlı Simülasyon / Önizleme</h3>
     <div class="pr-preview">
       <div class="pr-toolbar" style="margin-bottom:0;">
         <label>Müşteri sayısı <input type="number" id="pr-prev-musteri" min="0" value="50" style="width:90px;"></label>
@@ -136,6 +171,8 @@
   var tiersBody = document.getElementById('pr-tiers-body');
   var overageBody = document.getElementById('pr-overage-body');
   var previewResult = document.getElementById('pr-preview-result');
+  var bannerEl = document.getElementById('countryBanner');
+  var bannerTxt = document.getElementById('countryBannerText');
 
   function escHtml(s) {
     return String(s || '')
@@ -165,6 +202,57 @@
   function currentCountry() {
     return (countrySel.value || 'TR').toUpperCase();
   }
+
+  function updateCountryBanner() {
+    var cc = currentCountry();
+    bannerEl.className = 'country-status-banner';
+    if (cc === 'US') {
+      bannerEl.classList.add('status-banner-master');
+      bannerTxt.innerHTML = '⭐ <strong>ANA MASTER FİYATLANDIRMA (USD):</strong> Bu fiyatlar platformun küresel ana referansıdır. Bağımsız fiyatı olmayan tüm ülkeler bu kademeleri döviz kuruyla otomatik takip eder.';
+    } else if (cc === 'TR') {
+      bannerEl.classList.add('status-banner-override');
+      bannerTxt.innerHTML = '⚠️ <strong>MANUEL ÖZEL FİYAT (OVERRIDE):</strong> Türkiye için elle girilmiş bağımsız TL kademeleri geçerlidir. USD değişikliklerinden veya kur dalgalanmalarından etkilenmez.';
+    } else {
+      bannerEl.classList.add('status-banner-derived');
+      bannerTxt.innerHTML = '🌐 <strong>ÜLKE ÖZEL AYARLARI:</strong> Bu ülke için özel satır tanımlanabilir veya US Master fiyatından otomatik döviz çevrimi kullanılabilir.';
+    }
+  }
+
+  function loadFxStatus() {
+    api('/admin/api/exchange-rates/status').then(function(res) {
+      if (!res.json.ok) return;
+      var d = res.json;
+      document.getElementById('fxStatusTxt').innerHTML = '<i class="fa fa-clock"></i> Kur Kaynağı: <strong>open.er-api.com</strong>';
+      var c = document.getElementById('fxSampleRates');
+      c.innerHTML = '';
+      if (d.sample_rates) {
+        ['TRY', 'EUR', 'AZN'].forEach(function(curr) {
+          if (d.sample_rates[curr]) {
+            var span = document.createElement('span');
+            span.className = 'fx-badge';
+            span.textContent = '1 USD = ' + d.sample_rates[curr].rate + ' ' + curr;
+            c.appendChild(span);
+          }
+        });
+      }
+    }).catch(function(){});
+  }
+
+  window.quickRefreshFx = function(btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa fa-spinner fa-spin"></i>';
+    api('/admin/api/exchange-rates/refresh', { method: 'POST' }).then(function(res) {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fa fa-sync-alt"></i> Kurları Güncelle';
+      if (res.json.ok) {
+        loadFxStatus();
+        runPreview();
+        showOk('Döviz kurları başarıyla güncellendi.');
+      } else {
+        showErr(res.json.mesaj);
+      }
+    });
+  };
 
   function loadRegions() {
     return api('/admin/api/pricing/regions').then(function (res) {
@@ -209,11 +297,12 @@
 
   function loadTiers() {
     var cc = currentCountry();
+    updateCountryBanner();
     return api('/admin/api/pricing/tiers?country=' + encodeURIComponent(cc)).then(function (res) {
       if (!res.json.ok) throw new Error(res.json.mesaj || 'Kademeler yüklenemedi');
       var tiers = res.json.tiers || [];
       if (!tiers.length) {
-        tiersBody.innerHTML = '<tr><td colspan="10" style="color:#78909c;">Kayıt yok</td></tr>';
+        tiersBody.innerHTML = '<tr><td colspan="10" style="color:#78909c;">Bu ülke için özel kademe tanımlı değil (US Master kademeleri kullanılır).</td></tr>';
       } else {
         tiersBody.innerHTML = tiers.map(tierRowHtml).join('');
       }
@@ -227,7 +316,7 @@
       if (!res.json.ok) throw new Error(res.json.mesaj || 'Overage yuklenemedi');
       var o = res.json.overage;
       if (!o) {
-        overageBody.innerHTML = '<tr><td colspan="4" style="color:#78909c;">Kural yok</td></tr>';
+        overageBody.innerHTML = '<tr><td colspan="4" style="color:#78909c;">Özel aşım kuralı yok (US Master kuralı kullanılır).</td></tr>';
         return;
       }
       overageBody.innerHTML = '<tr data-overage-id="' + o.id + '">' +
@@ -268,6 +357,7 @@
         msgEl.textContent = 'OK';
         msgEl.className = 'pr-row-msg ok';
         showOk('Kademe kaydedildi: ' + (res.json.tier && res.json.tier.tier_key));
+        runPreview();
       })
       .catch(function (e) {
         msgEl.textContent = e.message || 'Hata';
@@ -297,11 +387,12 @@
         msgEl.textContent = 'OK';
         msgEl.className = 'pr-row-msg ok';
         showOk('Overage kuralı kaydedildi');
+        runPreview();
       });
   }
 
   function runPreview() {
-    previewResult.textContent = 'Hesaplanıyor...';
+    previewResult.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Hesaplanıyor...';
     var body = {
       country_code: currentCountry(),
       musteri_sayisi: parseInt(document.getElementById('pr-prev-musteri').value, 10) || 0,
@@ -314,11 +405,24 @@
           return;
         }
         var b = res.json.bill || {};
-        var lines = b.lines || [];
-        var lastLine = lines.length ? lines[lines.length - 1] : null;
-        previewResult.textContent = (lastLine && lastLine.text)
-          ? lastLine.text
-          : (b.total_monthly != null ? (b.total_monthly + ' ' + (b.currency || '')) : JSON.stringify(b));
+        var html = '<div style="background:#07131e; padding:10px 12px; border-radius:6px; border:1px solid #1e3a5f;">';
+        
+        if (b.is_derived) {
+          html += '<div style="color:#a5d6a7; font-size:0.8rem; margin-bottom:6px;"><i class="fa fa-globe"></i> <strong>Dinamik Çeviri:</strong> US Master kademesi ' + b.exchange_rate + ' kuru ile dönüştürüldü.</div>';
+        } else {
+          html += '<div style="color:#ffb74d; font-size:0.8rem; margin-bottom:6px;"><i class="fa fa-shield-alt"></i> <strong>Özel Override:</strong> ' + b.country_code + ' için bağımsız fiyat satırları kullanıldı.</div>';
+        }
+
+        (b.lines || []).forEach(function(l) {
+          var color = '#e0f7fa';
+          if (l.key === 'total') color = '#4fc3f7; font-weight:700; font-size:1.05rem; border-top:1px solid #1e3a5f; padding-top:6px; margin-top:6px;';
+          else if (l.key === 'campaign_discount') color = '#81c784; font-weight:600;';
+          else if (l.key === 'subtotal') color = '#b0bec5;';
+          html += '<div style="color:' + color + '; line-height:1.5;">' + escHtml(l.text) + '</div>';
+        });
+
+        html += '</div>';
+        previewResult.innerHTML = html;
       })
       .catch(function (e) {
         previewResult.textContent = e.message || 'Hata';
@@ -328,7 +432,7 @@
   function reloadAll() {
     showErr('');
     showOk('');
-    loadTiers().then(loadOverage).catch(function (e) { showErr(e.message); });
+    loadTiers().then(loadOverage).then(runPreview).catch(function (e) { showErr(e.message); });
   }
 
   document.getElementById('pr-yenile').addEventListener('click', reloadAll);
@@ -345,6 +449,7 @@
   document.getElementById('pr-prev-musteri').addEventListener('change', runPreview);
   document.getElementById('pr-prev-kullanici').addEventListener('change', runPreview);
 
+  loadFxStatus();
   loadRegions().then(reloadAll).catch(function (e) { showErr(e.message); });
 })();
 </script>

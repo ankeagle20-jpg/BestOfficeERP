@@ -159,6 +159,7 @@
   <a href="{{ url_for('admin_pricing.pricing_page') }}"><i class="fa fa-tags"></i> Fiyatlandırma</a>
   <a href="{{ url_for('admin_module_pricing.module_pricing_page') }}"><i class="fa fa-layer-group"></i> Modül Fiyatlandırma</a>
   <a href="{{ url_for('admin_modules.modules_page') }}"><i class="fa fa-puzzle-piece"></i> Modül Yönetimi</a>
+  <a href="{{ url_for('admin_campaigns.campaigns_page') }}"><i class="fa fa-percent"></i> Kampanyalar</a>
   <a href="{{ url_for('admin_credentials.credentials_page') }}"><i class="fa fa-key"></i> Kimlik Bilgileri Kasası</a>
   <a href="{{ url_for('admin_mukerrer.mukerrer_arsiv_page') }}"><i class="fa fa-archive"></i> Mükerrer Arşiv</a>
 </div>
@@ -227,7 +228,26 @@
       </div>
     </a>
 
-    <!-- Kart 4: Kimlik Bilgileri Kasası -->
+    <!-- Kart 4: İndirim Kampanyaları -->
+    <a href="{{ url_for('admin_campaigns.campaigns_page') }}" class="hub-card">
+      <div class="hub-card-top">
+        <div class="hub-icon-box">
+          <i class="fa fa-percent"></i>
+        </div>
+        <div>
+          <div class="hub-card-title">İndirim Kampanyaları</div>
+          <div class="hub-card-desc">
+            Ülke ve sistem bazlı dönemsel indirim kampanyaları tanımlayın, tek tıkla durdurun, uzatın ve döviz kurlarını güncelleyin.
+          </div>
+        </div>
+      </div>
+      <div class="hub-card-footer">
+        <span class="hub-badge">/admin/campaigns</span>
+        <span class="hub-link-text">Panele Git <i class="fa fa-arrow-right"></i></span>
+      </div>
+    </a>
+
+    <!-- Kart 5: Kimlik Bilgileri Kasası -->
     <a href="{{ url_for('admin_credentials.credentials_page') }}" class="hub-card">
       <div class="hub-card-top">
         <div class="hub-icon-box">
