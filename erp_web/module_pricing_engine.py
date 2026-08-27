@@ -7,10 +7,13 @@ Kaynak: public.module_pricing_tiers + public.pricing_regions.
 """
 from __future__ import annotations
 
+import logging
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
 
 from db import fetch_all, fetch_one
+from services.exchange_rate_service import get_exchange_rate
+from services.discount_campaign_service import find_active_campaign
 
 _Q2 = Decimal("0.01")
 _Q4 = Decimal("0.0001")
@@ -73,56 +76,181 @@ def _load_region(country_code: str) -> dict:
     return row
 
 
-def _load_self_serve_tiers(module_key: str, country_code: str) -> list[dict]:
-    mk = str(module_key or "").strip()
+def _normalize_module_keys(module_key: str) -> list[str]:
+    """personel / personnel gibi eşanlamlı modül anahtarlarını normalize eder."""
+    mk = str(module_key or "").strip().lower()
+    if mk in ("personel", "personnel"):
+        return ["personel", "personnel"]
+    return [mk]
+
+
+def _has_module_country_tiers(module_key: str, country_code: str) -> bool:
+    """Belirtilen modül ve ülke için doğrudan satır olup olmadığını kontrol eder."""
     cc = str(country_code or "").strip().upper()
-    rows = fetch_all(
+    keys = _normalize_module_keys(module_key)
+    row = fetch_one(
+        """
+        SELECT 1 AS ok
+        FROM public.module_pricing_tiers
+        WHERE module_key = ANY(%s) AND country_code = %s AND is_active = TRUE
+        LIMIT 1
+        """,
+        (keys, cc),
+    )
+    return bool(row and row.get("ok"))
+
+
+def _convert_tier_currency(
+    tier_row: dict,
+    target_country: str,
+    target_currency: str,
+    rate: Decimal,
+) -> dict:
+    """US master kademe satırını hedef ülkenin para birimine çevirir."""
+    t = dict(tier_row)
+    t["country_code"] = target_country
+    t["currency"] = target_currency
+    t["base_monthly"] = (Decimal(str(tier_row["base_monthly"])) * rate).quantize(
+        _Q2, rounding=ROUND_HALF_UP
+    )
+    t["price_per_personnel"] = (
+        Decimal(str(tier_row["price_per_personnel"])) * rate
+    ).quantize(_Q4, rounding=ROUND_HALF_UP)
+    t["price_per_extra_branch"] = (
+        Decimal(str(tier_row["price_per_extra_branch"])) * rate
+    ).quantize(_Q2, rounding=ROUND_HALF_UP)
+    t["setup_fee"] = (
+        Decimal(str(tier_row.get("setup_fee") or 0)) * rate
+    ).quantize(_Q2, rounding=ROUND_HALF_UP)
+    t["_is_derived"] = True
+    t["_exchange_rate"] = rate
+    return t
+
+
+def _load_self_serve_tiers(
+    module_key: str,
+    country_code: str,
+    target_currency: str | None = None,
+) -> list[dict]:
+    cc = str(country_code or "").strip().upper()
+    keys = _normalize_module_keys(module_key)
+    if _has_module_country_tiers(module_key, cc):
+        rows = fetch_all(
+            f"""
+            SELECT {_TIER_SELECT}
+            FROM public.module_pricing_tiers
+            WHERE module_key = ANY(%s)
+              AND country_code = %s
+              AND is_active = TRUE
+              AND is_contact_sales = FALSE
+            ORDER BY sort_order, id
+            """,
+            (keys, cc),
+        ) or []
+        return list(rows)
+
+    # US Master'dan türetme
+    t_curr = target_currency or "USD"
+    rate = get_exchange_rate("USD", t_curr)
+    us_rows = fetch_all(
         f"""
         SELECT {_TIER_SELECT}
         FROM public.module_pricing_tiers
-        WHERE module_key = %s
-          AND country_code = %s
+        WHERE module_key = ANY(%s)
+          AND country_code = 'US'
           AND is_active = TRUE
           AND is_contact_sales = FALSE
         ORDER BY sort_order, id
         """,
-        (mk, cc),
+        (keys,),
     ) or []
-    return list(rows)
+    return [_convert_tier_currency(r, cc, t_curr, rate) for r in us_rows]
 
 
 def _load_tier(
     module_key: str,
     country_code: str,
     tier_key: str,
+    target_currency: str | None = None,
 ) -> dict | None:
-    return fetch_one(
+    cc = str(country_code).strip().upper()
+    tk = str(tier_key).strip()
+    keys = _normalize_module_keys(module_key)
+
+    if _has_module_country_tiers(module_key, cc):
+        return fetch_one(
+            f"""
+            SELECT {_TIER_SELECT}
+            FROM public.module_pricing_tiers
+            WHERE module_key = ANY(%s)
+              AND country_code = %s
+              AND tier_key = %s
+              AND is_active = TRUE
+            """,
+            (keys, cc, tk),
+        )
+
+    # US Master'dan türetme
+    t_curr = target_currency or "USD"
+    rate = get_exchange_rate("USD", t_curr)
+    us_row = fetch_one(
         f"""
         SELECT {_TIER_SELECT}
         FROM public.module_pricing_tiers
-        WHERE module_key = %s
-          AND country_code = %s
+        WHERE module_key = ANY(%s)
+          AND country_code = 'US'
           AND tier_key = %s
           AND is_active = TRUE
         """,
-        (str(module_key).strip(), str(country_code).strip().upper(), str(tier_key).strip()),
+        (keys, tk),
     )
+    if not us_row:
+        return None
+    return _convert_tier_currency(us_row, cc, t_curr, rate)
 
 
-def _load_enterprise_tier(module_key: str, country_code: str) -> dict | None:
-    return fetch_one(
+def _load_enterprise_tier(
+    module_key: str,
+    country_code: str,
+    target_currency: str | None = None,
+) -> dict | None:
+    cc = str(country_code).strip().upper()
+    keys = _normalize_module_keys(module_key)
+
+    if _has_module_country_tiers(module_key, cc):
+        return fetch_one(
+            f"""
+            SELECT {_TIER_SELECT}
+            FROM public.module_pricing_tiers
+            WHERE module_key = ANY(%s)
+              AND country_code = %s
+              AND is_active = TRUE
+              AND is_contact_sales = TRUE
+            ORDER BY sort_order, id
+            LIMIT 1
+            """,
+            (keys, cc),
+        )
+
+    # US Master'dan türetme
+    t_curr = target_currency or "USD"
+    rate = get_exchange_rate("USD", t_curr)
+    us_row = fetch_one(
         f"""
         SELECT {_TIER_SELECT}
         FROM public.module_pricing_tiers
-        WHERE module_key = %s
-          AND country_code = %s
+        WHERE module_key = ANY(%s)
+          AND country_code = 'US'
           AND is_active = TRUE
           AND is_contact_sales = TRUE
         ORDER BY sort_order, id
         LIMIT 1
         """,
-        (str(module_key).strip(), str(country_code).strip().upper()),
+        (keys,),
     )
+    if not us_row:
+        return None
+    return _convert_tier_currency(us_row, cc, t_curr, rate)
 
 
 def _tier_fits_personnel(tier: dict, personnel_count: int) -> bool:
@@ -140,6 +268,7 @@ def resolve_required_tier(
     country_code: str,
     personnel_count: int,
     appointment_count: int | None = None,
+    target_currency: str | None = None,
 ) -> dict:
     """Self-servis kademeler arasında zorunlu minimum kademeyi bul.
 
@@ -169,10 +298,10 @@ def resolve_required_tier(
         if appt < 0:
             raise ModulePricingEngineError("appointment_count negatif olamaz")
 
-    tiers = _load_self_serve_tiers(mk, country_code)
+    tiers = _load_self_serve_tiers(mk, country_code, target_currency=target_currency)
     if not tiers:
         # Hiç self-serve yoksa doğrudan contact
-        ent = _load_enterprise_tier(mk, country_code)
+        ent = _load_enterprise_tier(mk, country_code, target_currency=target_currency)
         if ent:
             return {
                 "kind": "contact",
@@ -190,7 +319,7 @@ def resolve_required_tier(
             continue
         return {"kind": "match", "tier": tier}
 
-    ent = _load_enterprise_tier(mk, country_code)
+    ent = _load_enterprise_tier(mk, country_code, target_currency=target_currency)
     return {
         "kind": "contact",
         "tier": ent,
@@ -240,6 +369,12 @@ def _contact_response(
         "total_monthly": 0.0,
         "total_annual": 0.0,
         "annual_savings": 0.0,
+        "raw_total_monthly": 0.0,
+        "raw_total_annual": 0.0,
+        "applied_campaign": None,
+        "discount_amount": 0.0,
+        "is_derived": bool(tier.get("_is_derived")) if tier else False,
+        "exchange_rate": float(tier["_exchange_rate"]) if tier and tier.get("_exchange_rate") is not None else None,
         "requires_contact_sales": True,
         "recommended_tier_key": recommended_tier_key,
         "lines": [
@@ -312,6 +447,23 @@ def _build_bill_randevu(
         _Q2, rounding=ROUND_HALF_UP
     )
 
+    # Kampanya kontrolü
+    cc = str(tier["country_code"])
+    campaign = find_active_campaign(country_code=cc, applies_to_target="module:randevu")
+    monthly_discount = Decimal("0.00")
+    annual_discount = Decimal("0.00")
+    if campaign is not None:
+        disc_pct = Decimal(str(campaign["discount_percent"]))
+        monthly_discount = (monthly * (disc_pct / Decimal("100"))).quantize(
+            _Q2, rounding=ROUND_HALF_UP
+        )
+        annual_discount = (annual_due * (disc_pct / Decimal("100"))).quantize(
+            _Q2, rounding=ROUND_HALF_UP
+        )
+
+    final_monthly = max(Decimal("0.00"), monthly - monthly_discount)
+    final_annual_due = max(Decimal("0.00"), annual_due - annual_discount)
+
     lines: list[dict[str, str]] = [
         {
             "key": "base",
@@ -323,8 +475,10 @@ def _build_bill_randevu(
     if included_personnel > 0:
         lines.append(
             {
-                "key": "included_personnel",
-                "label": f"Dahil personel ({included_personnel})",
+                "key": "included_quota",
+                "label": (
+                    f"Dahil personel: {included_personnel} (ücretsiz)"
+                ),
                 "amount": "0.00",
                 "text": (
                     f"Dahil personel: {included_personnel} "
@@ -369,15 +523,38 @@ def _build_bill_randevu(
             ),
         }
     )
-    lines.append(
-        {
-            "key": "total_monthly",
-            "label": "Toplam aylık",
-            "amount": str(monthly),
-            "text": f"Toplam aylık: {_money(monthly, currency)}",
-        }
-    )
-    if billing_period == "annual":
+
+    if billing_period == "monthly":
+        if campaign is not None and monthly_discount > 0:
+            disc_pct_str = f"{campaign['discount_percent']:g}"
+            lines.append(
+                {
+                    "key": "subtotal_monthly",
+                    "label": "Ara toplam aylık",
+                    "amount": str(monthly),
+                    "text": f"Ara toplam aylık: {_money(monthly, currency)}",
+                }
+            )
+            lines.append(
+                {
+                    "key": "campaign_discount",
+                    "label": f"Kampanya indirimi ({campaign['name']} - %{disc_pct_str})",
+                    "amount": f"-{monthly_discount}",
+                    "text": (
+                        f"Kampanya indirimi ({campaign['name']} - %{disc_pct_str}): "
+                        f"-{_money(monthly_discount, currency)}"
+                    ),
+                }
+            )
+        lines.append(
+            {
+                "key": "total_monthly",
+                "label": "Toplam aylık",
+                "amount": str(final_monthly),
+                "text": f"Toplam aylık: {_money(final_monthly, currency)}",
+            }
+        )
+    else:
         lines.append(
             {
                 "key": "annual_savings",
@@ -389,17 +566,47 @@ def _build_bill_randevu(
                 ),
             }
         )
+        if campaign is not None and annual_discount > 0:
+            disc_pct_str = f"{campaign['discount_percent']:g}"
+            lines.append(
+                {
+                    "key": "subtotal_annual",
+                    "label": "Ara toplam yıllık tahsil",
+                    "amount": str(annual_due),
+                    "text": f"Ara toplam yıllık tahsil: {_money(annual_due, currency)}",
+                }
+            )
+            lines.append(
+                {
+                    "key": "campaign_discount",
+                    "label": f"Kampanya indirimi ({campaign['name']} - %{disc_pct_str})",
+                    "amount": f"-{annual_discount}",
+                    "text": (
+                        f"Kampanya indirimi ({campaign['name']} - %{disc_pct_str}): "
+                        f"-{_money(annual_discount, currency)}"
+                    ),
+                }
+            )
         lines.append(
             {
                 "key": "total_annual",
                 "label": "Yıllık tahsil",
-                "amount": str(annual_due),
+                "amount": str(final_annual_due),
                 "text": (
                     f"Yıllık tahsil (efektif aylık {_money(effective_monthly, currency)}): "
-                    f"{_money(annual_due, currency)}"
+                    f"{_money(final_annual_due, currency)}"
                 ),
             }
         )
+
+    applied_campaign_info = None
+    if campaign is not None:
+        applied_campaign_info = {
+            "id": campaign["id"],
+            "name": campaign["name"],
+            "code": campaign.get("code"),
+            "discount_percent": float(campaign["discount_percent"]),
+        }
 
     return {
         "module_key": str(tier["module_key"]),
@@ -417,9 +624,15 @@ def _build_bill_randevu(
         "included_personnel": included_personnel,
         "extra_branch_count": 0,
         "extra_branch_fee": 0.0,
-        "total_monthly": float(monthly),
-        "total_annual": float(annual_due),
+        "total_monthly": float(final_monthly),
+        "total_annual": float(final_annual_due),
         "annual_savings": float(annual_savings),
+        "raw_total_monthly": float(monthly),
+        "raw_total_annual": float(annual_due),
+        "applied_campaign": applied_campaign_info,
+        "discount_amount": float(monthly_discount if billing_period == "monthly" else annual_discount),
+        "is_derived": bool(tier.get("_is_derived")),
+        "exchange_rate": float(tier["_exchange_rate"]) if tier.get("_exchange_rate") is not None else None,
         "requires_contact_sales": False,
         "recommended_tier_key": recommended_tier_key or str(tier["tier_key"]),
         "lines": lines,
@@ -502,6 +715,24 @@ def _build_bill(
         _Q2, rounding=ROUND_HALF_UP
     )
 
+    # Kampanya kontrolü
+    mk = str(tier["module_key"])
+    cc = str(tier["country_code"])
+    campaign = find_active_campaign(country_code=cc, applies_to_target=f"module:{mk}")
+    monthly_discount = Decimal("0.00")
+    annual_discount = Decimal("0.00")
+    if campaign is not None:
+        disc_pct = Decimal(str(campaign["discount_percent"]))
+        monthly_discount = (monthly * (disc_pct / Decimal("100"))).quantize(
+            _Q2, rounding=ROUND_HALF_UP
+        )
+        annual_discount = (annual_due * (disc_pct / Decimal("100"))).quantize(
+            _Q2, rounding=ROUND_HALF_UP
+        )
+
+    final_monthly = max(Decimal("0.00"), monthly - monthly_discount)
+    final_annual_due = max(Decimal("0.00"), annual_due - annual_discount)
+
     lines: list[dict[str, str]] = [
         {
             "key": "base",
@@ -537,15 +768,38 @@ def _build_bill(
                 ),
             }
         )
-    lines.append(
-        {
-            "key": "total_monthly",
-            "label": "Toplam aylık",
-            "amount": str(monthly),
-            "text": f"Toplam aylık: {_money(monthly, currency)}",
-        }
-    )
-    if billing_period == "annual":
+
+    if billing_period == "monthly":
+        if campaign is not None and monthly_discount > 0:
+            disc_pct_str = f"{campaign['discount_percent']:g}"
+            lines.append(
+                {
+                    "key": "subtotal_monthly",
+                    "label": "Ara toplam aylık",
+                    "amount": str(monthly),
+                    "text": f"Ara toplam aylık: {_money(monthly, currency)}",
+                }
+            )
+            lines.append(
+                {
+                    "key": "campaign_discount",
+                    "label": f"Kampanya indirimi ({campaign['name']} - %{disc_pct_str})",
+                    "amount": f"-{monthly_discount}",
+                    "text": (
+                        f"Kampanya indirimi ({campaign['name']} - %{disc_pct_str}): "
+                        f"-{_money(monthly_discount, currency)}"
+                    ),
+                }
+            )
+        lines.append(
+            {
+                "key": "total_monthly",
+                "label": "Toplam aylık",
+                "amount": str(final_monthly),
+                "text": f"Toplam aylık: {_money(final_monthly, currency)}",
+            }
+        )
+    else:
         lines.append(
             {
                 "key": "annual_savings",
@@ -557,17 +811,47 @@ def _build_bill(
                 ),
             }
         )
+        if campaign is not None and annual_discount > 0:
+            disc_pct_str = f"{campaign['discount_percent']:g}"
+            lines.append(
+                {
+                    "key": "subtotal_annual",
+                    "label": "Ara toplam yıllık tahsil",
+                    "amount": str(annual_due),
+                    "text": f"Ara toplam yıllık tahsil: {_money(annual_due, currency)}",
+                }
+            )
+            lines.append(
+                {
+                    "key": "campaign_discount",
+                    "label": f"Kampanya indirimi ({campaign['name']} - %{disc_pct_str})",
+                    "amount": f"-{annual_discount}",
+                    "text": (
+                        f"Kampanya indirimi ({campaign['name']} - %{disc_pct_str}): "
+                        f"-{_money(annual_discount, currency)}"
+                    ),
+                }
+            )
         lines.append(
             {
                 "key": "total_annual",
                 "label": "Yıllık tahsil",
-                "amount": str(annual_due),
+                "amount": str(final_annual_due),
                 "text": (
                     f"Yıllık tahsil (efektif aylık {_money(effective_monthly, currency)}): "
-                    f"{_money(annual_due, currency)}"
+                    f"{_money(final_annual_due, currency)}"
                 ),
             }
         )
+
+    applied_campaign_info = None
+    if campaign is not None:
+        applied_campaign_info = {
+            "id": campaign["id"],
+            "name": campaign["name"],
+            "code": campaign.get("code"),
+            "discount_percent": float(campaign["discount_percent"]),
+        }
 
     return {
         "module_key": str(tier["module_key"]),
@@ -582,9 +866,15 @@ def _build_bill(
         "personnel_fee": float(personnel_fee),
         "extra_branch_count": extra_branch_count,
         "extra_branch_fee": float(extra_branch_fee),
-        "total_monthly": float(monthly),
-        "total_annual": float(annual_due),
+        "total_monthly": float(final_monthly),
+        "total_annual": float(final_annual_due),
         "annual_savings": float(annual_savings),
+        "raw_total_monthly": float(monthly),
+        "raw_total_annual": float(annual_due),
+        "applied_campaign": applied_campaign_info,
+        "discount_amount": float(monthly_discount if billing_period == "monthly" else annual_discount),
+        "is_derived": bool(tier.get("_is_derived")),
+        "exchange_rate": float(tier["_exchange_rate"]) if tier.get("_exchange_rate") is not None else None,
         "requires_contact_sales": False,
         "recommended_tier_key": recommended_tier_key or str(tier["tier_key"]),
         "lines": lines,
@@ -627,7 +917,7 @@ def calculate_module_bill(
     if b < 0:
         raise ModulePricingEngineError("branch_count negatif olamaz")
 
-    appt: int | None = None
+    appt: int | None
     if mk == "randevu":
         if appointment_count is None:
             raise ModulePricingEngineError(
@@ -641,33 +931,20 @@ def calculate_module_bill(
             ) from e
         if appt < 0:
             raise ModulePricingEngineError("appointment_count negatif olamaz")
-    elif appointment_count is not None:
-        # Personel vb.: verilen değeri resolve'a ilet (ileriye dönük); fatura şube formülü aynı.
-        try:
-            appt = int(appointment_count)
-        except (TypeError, ValueError) as e:
-            raise ModulePricingEngineError(
-                "appointment_count sayı olmalı"
-            ) from e
-        if appt < 0:
-            raise ModulePricingEngineError("appointment_count negatif olamaz")
+    else:
+        appt = None
 
-    # Aktif kademe var mı? (self-serve veya contact)
-    any_tier = fetch_one(
-        """
-        SELECT 1 AS ok
-        FROM public.module_pricing_tiers
-        WHERE module_key = %s AND country_code = %s AND is_active = TRUE
-        LIMIT 1
-        """,
-        (mk, cc),
-    )
-    if not any_tier:
+    # Aktif kademe var mı? (Hedef ülke veya US master)
+    has_target_tiers = _has_module_country_tiers(mk, cc)
+    has_us_tiers = _has_module_country_tiers(mk, "US")
+    if not has_target_tiers and not has_us_tiers:
         raise ModulePricingEngineError(
             f"aktif kademe bulunamadı (module={mk}, country={cc})"
         )
 
-    required = resolve_required_tier(mk, cc, n, appointment_count=appt)
+    required = resolve_required_tier(
+        mk, cc, n, appointment_count=appt, target_currency=currency
+    )
 
     def _bill_kwargs(tier_row: dict, recommended: str | None) -> dict:
         return {
@@ -716,7 +993,7 @@ def calculate_module_bill(
 
     # Gönüllü / açıkça seçilmiş kademe
     selected_key = str(tier_key).strip()
-    selected = _load_tier(mk, cc, selected_key)
+    selected = _load_tier(mk, cc, selected_key, target_currency=currency)
     if not selected:
         raise ModulePricingEngineError(
             f"bilinmeyen veya pasif kademe: {selected_key} (module={mk}, country={cc})"
