@@ -8,12 +8,13 @@
 
 {% block content %}
 <style>
-  .mp-nav { display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap; align-items:center; }
-  .mp-nav a {
+  .mod-nav { display:flex; gap:10px; margin-bottom:18px; flex-wrap:wrap; align-items:center; }
+  .mod-nav a {
     padding:6px 12px; border-radius:6px; border:1px solid #1e3a5f;
     color:#90caf9; background:#0a1929; text-decoration:none; font-size:.85rem;
   }
-  .mp-nav a.active { background:#1565c0; color:#fff; border-color:#1565c0; }
+  .mod-nav a.active { background:#1565c0; color:#fff; border-color:#1565c0; font-weight:600; }
+  .mod-nav a:hover { background:#132f4c; color:#fff; }
   .mp-toolbar { display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin-bottom:16px; }
   .mp-toolbar label { color:#90caf9; font-size:.85rem; }
   .mp-toolbar select, .mp-toolbar input {
@@ -44,11 +45,14 @@
   .mp-badge { font-size:.7rem; color:#ffcc80; margin-left:4px; }
 </style>
 
-<div class="mp-nav">
-  <a href="{{ url_for('admin.index') }}">Kullanıcılar</a>
-  <a href="{{ url_for('admin_pricing.pricing_page') }}">ERP Fiyatlandırma</a>
-  <a href="{{ url_for('admin_modules.modules_page') }}">Modüller</a>
-  <a href="{{ url_for('admin_module_pricing.module_pricing_page') }}" class="active">Modül Fiyatlandırma</a>
+<div class="mod-nav">
+  <a href="{{ url_for('admin.yonetim_hub') }}"><i class="fa fa-th-large"></i> Yönetim Hub</a>
+  <a href="{{ url_for('admin.index') }}"><i class="fa fa-users"></i> Kullanıcılar</a>
+  <a href="{{ url_for('admin_pricing.pricing_page') }}"><i class="fa fa-tags"></i> Fiyatlandırma</a>
+  <a href="{{ url_for('admin_module_pricing.module_pricing_page') }}" class="active"><i class="fa fa-layer-group"></i> Modül Fiyatlandırma</a>
+  <a href="{{ url_for('admin_modules.modules_page') }}"><i class="fa fa-puzzle-piece"></i> Modül Yönetimi</a>
+  <a href="{{ url_for('admin_credentials.credentials_page') }}"><i class="fa fa-key"></i> Kimlik Bilgileri Kasası</a>
+  <a href="{{ url_for('admin_mukerrer.mukerrer_arsiv_page') }}"><i class="fa fa-archive"></i> Mükerrer Arşiv</a>
 </div>
 
 <div class="card-erp">
