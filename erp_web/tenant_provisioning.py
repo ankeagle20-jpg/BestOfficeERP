@@ -42,6 +42,8 @@ PLATFORM_STRIP_TABLES = (
     "module_pricing_tiers",
     "module_pricing_leads",
     "platform_credentials",
+    "exchange_rates",
+    "discount_campaigns",
 )
 _SLUG_RE = re.compile(r"^[a-z0-9_]+$")
 _ADMIN_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")

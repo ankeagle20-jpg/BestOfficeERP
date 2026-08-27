@@ -592,6 +592,8 @@ def init_schema():
     ensure_module_pricing_tiers_table()
     ensure_module_pricing_leads_table()
     ensure_platform_credentials_table()
+    ensure_exchange_rates_table()
+    ensure_discount_campaigns_table()
     print("✅ Supabase şema oluşturuldu.")
 
 
@@ -2723,6 +2725,7 @@ def ensure_pricing_tables():
         """
     )
     _seed_pricing_tr()
+    _seed_pricing_us()
 
 
 def _seed_pricing_tr() -> None:
@@ -2841,6 +2844,127 @@ def _seed_pricing_tr() -> None:
             currency, is_active
         )
         VALUES ('TR', 'enterprise', 2000, 100, 300, 'TRY', TRUE)
+        ON CONFLICT (country_code, tier_key) DO NOTHING
+        """
+    )
+
+
+def _seed_pricing_us() -> None:
+    """US / USD master başlangıç fiyatlandırması — idempotent."""
+    execute(
+        """
+        INSERT INTO public.pricing_regions
+            (country_code, currency, name, is_active, sort_order)
+        VALUES ('US', 'USD', 'United States', TRUE, 1)
+        ON CONFLICT (country_code) DO NOTHING
+        """
+    )
+    tiers = (
+        (
+            "starter",
+            "Starter",
+            1,
+            100,
+            "49",
+            "0.49",
+            1,
+            "29",
+            1,
+        ),
+        (
+            "professional",
+            "Professional",
+            101,
+            500,
+            "149",
+            "0.39",
+            3,
+            "29",
+            2,
+        ),
+        (
+            "growth",
+            "Growth",
+            501,
+            1000,
+            "249",
+            "0.29",
+            5,
+            "29",
+            3,
+        ),
+        (
+            "scale",
+            "Scale",
+            1001,
+            2000,
+            "399",
+            "0.25",
+            7,
+            "29",
+            4,
+        ),
+        (
+            "enterprise",
+            "Enterprise",
+            2001,
+            None,
+            "599",
+            "0.19",
+            10,
+            "29",
+            5,
+        ),
+    )
+    for (
+        tier_key,
+        display_name,
+        min_c,
+        max_c,
+        base,
+        per_cust,
+        included_users,
+        per_extra_user,
+        sort_order,
+    ) in tiers:
+        execute(
+            """
+            INSERT INTO public.pricing_tiers (
+                country_code, currency, tier_key, display_name,
+                min_customers, max_customers,
+                base_monthly, price_per_customer,
+                included_users, price_per_extra_user,
+                sort_order, is_active
+            )
+            VALUES (
+                'US', 'USD', %s, %s,
+                %s, %s,
+                %s, %s,
+                %s, %s,
+                %s, TRUE
+            )
+            ON CONFLICT (country_code, tier_key) DO NOTHING
+            """,
+            (
+                tier_key,
+                display_name,
+                min_c,
+                max_c,
+                base,
+                per_cust,
+                included_users,
+                per_extra_user,
+                sort_order,
+            ),
+        )
+    execute(
+        """
+        INSERT INTO public.pricing_overage_rules (
+            country_code, tier_key,
+            threshold_customers, pack_size, pack_price,
+            currency, is_active
+        )
+        VALUES ('US', 'enterprise', 2000, 100, 15, 'USD', TRUE)
         ON CONFLICT (country_code, tier_key) DO NOTHING
         """
     )
@@ -3243,6 +3367,83 @@ def ensure_platform_credentials_table():
             """,
             (key, desc, cat, is_secret),
         )
+
+
+def ensure_exchange_rates_table():
+    """Döviz kurları tablosu: yalnız public.exchange_rates.
+
+    USD bazlı kurları saklar (open.er-api.com vb.).
+    Kiracı şemalarına kopyalanmaz; PLATFORM_STRIP_TABLES listesinde.
+    """
+    execute(
+        """
+        CREATE TABLE IF NOT EXISTS public.exchange_rates (
+            base_currency   VARCHAR(3) NOT NULL,
+            target_currency VARCHAR(3) NOT NULL,
+            rate            NUMERIC(14, 6) NOT NULL,
+            fetched_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            source          VARCHAR(64) NOT NULL DEFAULT 'open.er-api.com',
+            PRIMARY KEY (base_currency, target_currency),
+            CONSTRAINT exchange_rates_base_format CHECK (base_currency ~ '^[A-Z]{3}$'),
+            CONSTRAINT exchange_rates_target_format CHECK (target_currency ~ '^[A-Z]{3}$'),
+            CONSTRAINT exchange_rates_rate_positive CHECK (rate > 0)
+        )
+        """
+    )
+    # İlk varsayılan sabit kurları ekle
+    initial_rates = (
+        ("USD", "TRY", "34.000000", "seed_fallback"),
+        ("USD", "EUR", "0.920000", "seed_fallback"),
+        ("USD", "GBP", "0.780000", "seed_fallback"),
+        ("USD", "USD", "1.000000", "seed_fallback"),
+    )
+    for base, target, rate_str, src in initial_rates:
+        execute(
+            """
+            INSERT INTO public.exchange_rates (base_currency, target_currency, rate, fetched_at, source)
+            VALUES (%s, %s, %s::numeric, NOW(), %s)
+            ON CONFLICT (base_currency, target_currency) DO NOTHING
+            """,
+            (base, target, rate_str, src),
+        )
+
+
+def ensure_discount_campaigns_table():
+    """İndirim kampanyaları tablosu: yalnız public.discount_campaigns.
+
+    Ülke ve modül bazlı dinamik indirim kampanyalarını saklar.
+    Kiracı şemalarına kopyalanmaz; PLATFORM_STRIP_TABLES listesinde.
+    """
+    execute(
+        """
+        CREATE TABLE IF NOT EXISTS public.discount_campaigns (
+            id               SERIAL PRIMARY KEY,
+            name             VARCHAR(120) NOT NULL,
+            code             VARCHAR(40) UNIQUE,
+            discount_percent NUMERIC(5, 2) NOT NULL,
+            applies_to       VARCHAR(32) NOT NULL DEFAULT 'all',
+            target_countries TEXT[] NOT NULL DEFAULT '{"ALL"}',
+            start_date       TIMESTAMPTZ NOT NULL,
+            end_date         TIMESTAMPTZ NOT NULL,
+            is_active        BOOLEAN NOT NULL DEFAULT TRUE,
+            priority         INT NOT NULL DEFAULT 10,
+            created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT discount_campaigns_percent_range CHECK (discount_percent > 0 AND discount_percent <= 100),
+            CONSTRAINT discount_campaigns_date_order CHECK (end_date > start_date),
+            CONSTRAINT discount_campaigns_applies_to_format CHECK (applies_to ~ '^[a-z0-9_:]+$')
+        )
+        """
+    )
+    try:
+        execute(
+            """
+            CREATE INDEX IF NOT EXISTS discount_campaigns_lookup_idx
+            ON public.discount_campaigns (is_active, start_date, end_date)
+            """
+        )
+    except Exception as e:
+        print(f"discount_campaigns index error: {e}")
 
 
 def clear_all_customers():
