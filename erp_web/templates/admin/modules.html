@@ -14,6 +14,45 @@
     color:#90caf9; background:#0a1929; text-decoration:none; font-size:.85rem;
   }
   .mod-nav a.active { background:#1565c0; color:#fff; border-color:#1565c0; }
+
+  /* Sekmeler */
+  .mod-tab-bar {
+    display:flex; gap:8px; border-bottom:1px solid #1e3a5f; padding-bottom:8px; margin-bottom:16px;
+  }
+  .mod-tab-btn {
+    background:#0a1929; border:1px solid #1e3a5f; color:#90caf9;
+    padding:6px 14px; border-radius:6px; font-size:.85rem; cursor:pointer;
+    transition:all .15s ease;
+  }
+  .mod-tab-btn:hover { background:#132f4c; color:#fff; }
+  .mod-tab-btn.active {
+    background:#1565c0; color:#fff; border-color:#1565c0; font-weight:600;
+  }
+  .mod-tab-pane { display:none; }
+  .mod-tab-pane.active { display:block; }
+
+  /* Genel Bakış & Toplu İşlem */
+  .bulk-box {
+    background:rgba(10, 25, 41, 0.7); border:1px solid #1e3a5f; border-radius:8px;
+    padding:14px; margin-bottom:18px;
+  }
+  .bulk-title {
+    color:#90caf9; font-weight:600; font-size:.9rem; margin-bottom:10px; display:flex; align-items:center; gap:6px;
+  }
+  .bulk-form {
+    display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end;
+  }
+  .bulk-field {
+    display:flex; flex-direction:column; gap:4px;
+  }
+  .bulk-field label {
+    color:#90caf9; font-size:.8rem; font-weight:500;
+  }
+  .bulk-field select {
+    background:#0a1929; border:1px solid #1e3a5f; color:#e0f7fa;
+    padding:6px 10px; border-radius:6px; font-size:.85rem; min-width:140px;
+  }
+
   .mod-toolbar { display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin-bottom:16px; }
   .mod-toolbar label { color:#90caf9; font-size:.85rem; }
   .mod-toolbar select {
@@ -23,15 +62,30 @@
   .mod-meta { color:#888; font-size:.82rem; margin-bottom:10px; }
   .mod-err { color:#ef9a9a; margin:8px 0; display:none; }
   .mod-ok { color:#a5d6a7; margin:8px 0; display:none; }
+
+  /* Tablolar */
   .mod-table { width:100%; border-collapse:collapse; font-size:.8rem; }
   .mod-table th, .mod-table td {
-    border-bottom:1px solid #1e3a5f; padding:8px; text-align:left; vertical-align:middle;
+    border-bottom:1px solid #1e3a5f; padding:8px 10px; text-align:left; vertical-align:middle;
   }
-  .mod-table th { color:#90caf9; font-weight:600; white-space:nowrap; }
+  .mod-table th { color:#90caf9; font-weight:600; white-space:nowrap; background:rgba(19, 47, 76, 0.4); }
   .mod-table select {
     background:#0a1929; border:1px solid #1e3a5f; color:#e0f7fa;
     padding:4px 6px; border-radius:4px; font-size:.78rem; min-width:120px;
   }
+
+  /* Durum Rozetleri */
+  .status-badge {
+    display:inline-block; font-size:.72rem; padding:2px 8px; border-radius:4px;
+    font-weight:500; text-align:center; white-space:nowrap;
+  }
+  .status-badge.st-active { background:#1b5e20; color:#a5d6a7; border:1px solid #2e7d32; }
+  .status-badge.st-trial { background:#0d47a1; color:#90caf9; border:1px solid #1976d2; }
+  .status-badge.st-suspended { background:#e65100; color:#ffcc80; border:1px solid #f57c00; }
+  .status-badge.st-expired { background:#424242; color:#bdbdbd; border:1px solid #616161; }
+  .status-badge.st-revoked { background:#b71c1c; color:#ef9a9a; border:1px solid #d32f2f; }
+  .status-badge.st-not_granted { background:#263238; color:#78909c; border:1px solid #37474f; }
+
   .mod-badge {
     display:inline-block; font-size:.7rem; padding:2px 6px; border-radius:4px;
     background:#1e3a5f; color:#90caf9; margin-left:6px;
@@ -51,35 +105,117 @@
 
 <div class="card-erp">
   <p style="color:#90caf9;margin:0 0 12px;font-size:.9rem;">
-    Kiracı bazlı modül entitlement yönetimi. Kayıt sonrası cache anında temizlenir;
-    Personel/Pdovam gibi korumalı route’lar yeni durumu bekletmeden uygular.
+    Kiracı bazlı modül entitlement yönetimi. Kayıt ve toplu işlemler sonrası cache anında temizlenir;
+    korumalı route’lar yeni durumu anında uygular.
   </p>
 
-  <div class="mod-toolbar">
-    <label>
-      Kiracı
-      <select id="mod-tenant"></select>
-    </label>
-    <button type="button" class="btn-erp btn-erp-sm" id="mod-yenile">Yenile</button>
+  <!-- Sekme Başlıkları -->
+  <div class="mod-tab-bar">
+    <button type="button" class="mod-tab-btn active" id="tab-btn-overview" data-target="tab-pane-overview">
+      📊 Genel Bakış (Matris)
+    </button>
+    <button type="button" class="mod-tab-btn" id="tab-btn-single" data-target="tab-pane-single">
+      ⚙️ Tek Kiracı Yönetimi
+    </button>
   </div>
-  <div class="mod-meta" id="mod-meta">Yükleniyor...</div>
+
   <div class="mod-err" id="mod-err"></div>
   <div class="mod-ok" id="mod-ok"></div>
 
-  <div style="overflow-x:auto;">
-    <table class="mod-table" id="mod-table">
-      <thead>
-        <tr>
-          <th>Modül</th>
-          <th>Durum</th>
-          <th>Billing mode</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody id="mod-body">
-        <tr><td colspan="4" style="color:#78909c;">Kiracı seçin...</td></tr>
-      </tbody>
-    </table>
+  <!-- 1. SEKME: Genel Bakış (Matris) -->
+  <div class="mod-tab-pane active" id="tab-pane-overview">
+    <!-- Toplu İşlem Kartı -->
+    <div class="bulk-box">
+      <div class="bulk-title">
+        <span>⚡ Toplu Modül İşlemi</span>
+        <span style="font-size:.75rem;font-weight:normal;color:#78909c;">(Birden fazla veya tüm kiracılara aynı anda modül ver / durum güncelle)</span>
+      </div>
+      <div class="bulk-form">
+        <div class="bulk-field">
+          <label for="bulk-module">Modül</label>
+          <select id="bulk-module">
+            {% for m in module_catalog %}
+              <option value="{{ m.key }}">{{ m.label }} ({{ m.key }})</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="bulk-field">
+          <label for="bulk-status">Durum</label>
+          <select id="bulk-status">
+            {% for s in statuses %}
+              <option value="{{ s }}" {% if s == 'active' %}selected{% endif %}>{{ s }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="bulk-field">
+          <label for="bulk-billing">Fatura Modu</label>
+          <select id="bulk-billing">
+            {% for b in billing_modes %}
+              <option value="{{ b }}" {% if b == 'included' %}selected{% endif %}>{{ b }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="bulk-field">
+          <label for="bulk-target">Hedef Kiracılar</label>
+          <select id="bulk-target">
+            <option value="all">🌟 TÜM Aktif Kiracılar</option>
+          </select>
+        </div>
+        <button type="button" class="btn-erp btn-erp-sm" id="bulk-apply-btn" style="background:#1565c0;height:33px;">
+          Toplu Uygula
+        </button>
+        <button type="button" class="btn-erp btn-erp-sm btn-outline-erp" id="overview-refresh-btn" style="height:33px;">
+          Yenile
+        </button>
+      </div>
+    </div>
+
+    <div class="mod-meta" id="overview-meta">Matris yükleniyor...</div>
+
+    <!-- Matris Tablosu -->
+    <div style="overflow-x:auto;">
+      <table class="mod-table" id="overview-table">
+        <thead id="overview-thead">
+          <tr>
+            <th>Kiracı</th>
+            <th>Şema</th>
+            <!-- Modül sütunları dinamik render edilir -->
+            <th>İşlem</th>
+          </tr>
+        </thead>
+        <tbody id="overview-tbody">
+          <tr><td colspan="7" style="color:#78909c;">Matris yükleniyor...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 2. SEKME: Tek Kiracı Yönetimi (Mevcut Görünüm) -->
+  <div class="mod-tab-pane" id="tab-pane-single">
+    <div class="mod-toolbar">
+      <label>
+        Kiracı
+        <select id="mod-tenant"></select>
+      </label>
+      <button type="button" class="btn-erp btn-erp-sm" id="mod-yenile">Yenile</button>
+    </div>
+    <div class="mod-meta" id="mod-meta">Yükleniyor...</div>
+
+    <div style="overflow-x:auto;">
+      <table class="mod-table" id="mod-table">
+        <thead>
+          <tr>
+            <th>Modül</th>
+            <th>Durum</th>
+            <th>Billing mode</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="mod-body">
+          <tr><td colspan="4" style="color:#78909c;">Kiracı seçin...</td></tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 </div>
 
@@ -87,11 +223,23 @@
 (function () {
   var STATUSES = {{ statuses|tojson }};
   var BILLING = {{ billing_modes|tojson }};
+  var MODULE_CATALOG = {{ module_catalog|tojson }};
+
   var tenantSel = document.getElementById('mod-tenant');
   var metaEl = document.getElementById('mod-meta');
   var errEl = document.getElementById('mod-err');
   var okEl = document.getElementById('mod-ok');
   var bodyEl = document.getElementById('mod-body');
+
+  var overviewThead = document.getElementById('overview-thead');
+  var overviewTbody = document.getElementById('overview-tbody');
+  var overviewMeta = document.getElementById('overview-meta');
+  var bulkTargetSel = document.getElementById('bulk-target');
+  var bulkModuleSel = document.getElementById('bulk-module');
+  var bulkStatusSel = document.getElementById('bulk-status');
+  var bulkBillingSel = document.getElementById('bulk-billing');
+  var bulkApplyBtn = document.getElementById('bulk-apply-btn');
+  var overviewRefreshBtn = document.getElementById('overview-refresh-btn');
 
   function escHtml(s) {
     return String(s || '')
@@ -128,6 +276,152 @@
       });
   }
 
+  // --- Sekme Yönetimi ---
+  document.querySelectorAll('.mod-tab-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var targetId = this.getAttribute('data-target');
+      document.querySelectorAll('.mod-tab-btn').forEach(function (b) { b.classList.remove('active'); });
+      document.querySelectorAll('.mod-tab-pane').forEach(function (p) { p.classList.remove('active'); });
+      this.classList.add('active');
+      var targetPane = document.getElementById(targetId);
+      if (targetPane) targetPane.classList.add('active');
+
+      if (targetId === 'tab-pane-overview') {
+        loadOverview().catch(function (e) { showErr(String(e.message || e)); });
+      }
+    });
+  });
+
+  function badgeHtml(st, billing) {
+    var cls = 'st-' + (st || 'not_granted');
+    var label = st || 'not_granted';
+    var billText = (billing && billing !== 'included') ? ' <span style="opacity:0.8;font-size:0.65rem;">(' + escHtml(billing) + ')</span>' : '';
+    return '<span class="status-badge ' + cls + '">' + escHtml(label) + billText + '</span>';
+  }
+
+  // --- 1. Genel Bakış (Matris) Yükleme ---
+  function loadOverview() {
+    overviewMeta.textContent = 'Matris yükleniyor...';
+    return api('/admin/api/modules/overview').then(function (res) {
+      if (!res.json.ok) throw new Error(res.json.mesaj || 'Matris yüklenemedi');
+      var catalog = res.json.catalog || [];
+      var tenants = res.json.tenants || [];
+
+      // Başlıkları oluştur
+      var thHtml = '<tr><th>Kiracı</th><th>Şema</th>';
+      catalog.forEach(function (c) {
+        thHtml += '<th style="text-align:center;">' + escHtml(c.label) + '<br><span style="font-size:0.7rem;color:#78909c;font-weight:normal;">' + escHtml(c.key) + '</span></th>';
+      });
+      thHtml += '<th>İşlem</th></tr>';
+      overviewThead.innerHTML = thHtml;
+
+      // Satırları oluştur
+      if (tenants.length === 0) {
+        overviewTbody.innerHTML = '<tr><td colspan="' + (catalog.length + 3) + '" style="color:#78909c;">Aktif kiracı bulunamadı.</td></tr>';
+      } else {
+        var trs = tenants.map(function (t) {
+          var row = '<tr>';
+          var slugLabel = '<strong>' + escHtml(t.slug) + '</strong>';
+          if (t.company_name) slugLabel += ' <span style="color:#78909c;font-size:0.75rem;">(' + escHtml(t.company_name) + ')</span>';
+          if (t.slug === 'public') slugLabel += ' <span class="mod-badge">platform</span>';
+          row += '<td>' + slugLabel + '</td>';
+          row += '<td><code style="color:#78909c;font-size:0.75rem;">' + escHtml(t.schema_name) + '</code></td>';
+
+          catalog.forEach(function (c) {
+            var mInfo = (t.modules && t.modules[c.key]) ? t.modules[c.key] : { status: 'not_granted', billing_mode: 'included' };
+            row += '<td style="text-align:center;">' + badgeHtml(mInfo.status, mInfo.billing_mode) + '</td>';
+          });
+
+          row += '<td><button type="button" class="btn-erp btn-erp-sm btn-outline-erp mod-goto-single" data-tenant-id="' + t.id + '" style="font-size:0.75rem;padding:2px 8px;">Düzenle</button></td>';
+          row += '</tr>';
+          return row;
+        });
+        overviewTbody.innerHTML = trs.join('');
+      }
+
+      // Hedef Kiracı select'ini güncelle
+      bulkTargetSel.innerHTML = '<option value="all">🌟 TÜM Aktif Kiracılar (' + tenants.length + ')</option>';
+      tenants.forEach(function (t) {
+        var opt = document.createElement('option');
+        opt.value = String(t.id);
+        var lbl = t.slug;
+        if (t.company_name) lbl += ' — ' + t.company_name;
+        if (t.slug === 'public') lbl += ' (platform)';
+        opt.textContent = lbl;
+        bulkTargetSel.appendChild(opt);
+      });
+
+      overviewMeta.textContent = tenants.length + ' aktif kiracı · ' + catalog.length + ' modül matrisi';
+    });
+  }
+
+  // Matristen Tek Kiracı sekmesine geçiş
+  overviewTbody.addEventListener('click', function (ev) {
+    var btn = ev.target.closest('.mod-goto-single');
+    if (!btn) return;
+    var tid = btn.getAttribute('data-tenant-id');
+    if (!tid) return;
+
+    // Tek Kiracı sekmesini aktif et
+    document.querySelectorAll('.mod-tab-btn').forEach(function (b) { b.classList.remove('active'); });
+    document.querySelectorAll('.mod-tab-pane').forEach(function (p) { p.classList.remove('active'); });
+    document.getElementById('tab-btn-single').classList.add('active');
+    document.getElementById('tab-pane-single').classList.add('active');
+
+    // Tenant select'te seç ve yükle
+    tenantSel.value = tid;
+    loadEntitlements().catch(function (e) { showErr(String(e.message || e)); });
+  });
+
+  // Toplu İşlem Uygula
+  bulkApplyBtn.addEventListener('click', function () {
+    var modKey = bulkModuleSel.value;
+    var st = bulkStatusSel.value;
+    var bill = bulkBillingSel.value;
+    var target = bulkTargetSel.value;
+
+    var targetText = (target === 'all') ? 'TÜM aktif kiracılara' : (bulkTargetSel.options[bulkTargetSel.selectedIndex].text + ' kiracısına');
+    var conf = confirm("DİKKAT: '" + modKey + "' modülü " + targetText + " '" + st + " (" + bill + ")' olarak uygulanacak. Onaylıyor musunuz?");
+    if (!conf) return;
+
+    showErr('');
+    showOk('');
+    bulkApplyBtn.disabled = true;
+    bulkApplyBtn.textContent = 'Uygulanıyor...';
+
+    var payload = {
+      module_key: modKey,
+      status: st,
+      billing_mode: bill,
+      tenant_ids: (target === 'all') ? 'all' : [parseInt(target, 10)]
+    };
+
+    api('/admin/api/modules/bulk-grant', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }).then(function (res) {
+      bulkApplyBtn.disabled = false;
+      bulkApplyBtn.textContent = 'Toplu Uygula';
+      if (!res.json.ok) {
+        showErr(res.json.mesaj || ('Toplu işlem hatası (HTTP ' + res.status + ')'));
+        return;
+      }
+      showOk(res.json.mesaj || 'Toplu işlem başarıyla uygulandı.');
+      return loadOverview();
+    }).catch(function (e) {
+      bulkApplyBtn.disabled = false;
+      bulkApplyBtn.textContent = 'Toplu Uygula';
+      showErr(String(e.message || e));
+    });
+  });
+
+  overviewRefreshBtn.addEventListener('click', function () {
+    loadOverview()
+      .then(function () { showOk('Genel bakış matrisi yenilendi'); })
+      .catch(function (e) { showErr(String(e.message || e)); });
+  });
+
+  // --- 2. Tek Kiracı Yönetimi Fonksiyonları (Mevcut) ---
   function statusOptions(current) {
     var opts = '';
     if (current === 'not_granted') {
@@ -263,7 +557,8 @@
       .catch(function (e) { showErr(String(e.message || e)); });
   });
 
-  loadTenants()
+  // İlk yüklemede hem Genel Bakış matrisini hem Tek Kiracı listesini başlat
+  Promise.all([loadOverview(), loadTenants()])
     .then(function () {
       for (var j = 0; j < tenantSel.options.length; j++) {
         var t = tenantSel.options[j].textContent || '';
@@ -272,7 +567,6 @@
           break;
         }
       }
-      return loadEntitlements();
     })
     .catch(function (e) { showErr(String(e.message || e)); });
 })();
