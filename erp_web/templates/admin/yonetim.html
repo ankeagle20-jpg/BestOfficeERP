@@ -1,0 +1,260 @@
+{% extends "layout.html" %}
+{% block title %}Yönetim Merkezi{% endblock %}
+{% block page_title %}Payafin Platform Yönetim Merkezi{% endblock %}
+
+{% block topbar_actions %}
+  <a class="btn-erp btn-erp-sm btn-outline-erp" href="{{ url_for('admin.index') }}">Kullanıcılar</a>
+{% endblock %}
+
+{% block content %}
+<style>
+  .mod-nav { display:flex; gap:10px; margin-bottom:18px; flex-wrap:wrap; align-items:center; }
+  .mod-nav a {
+    padding:6px 12px; border-radius:6px; border:1px solid #1e3a5f;
+    color:#90caf9; background:#0a1929; text-decoration:none; font-size:.85rem;
+  }
+  .mod-nav a.active { background:#1565c0; color:#fff; border-color:#1565c0; font-weight:600; }
+  .mod-nav a:hover { background:#132f4c; color:#fff; }
+
+  .hub-hero {
+    margin-bottom: 24px;
+  }
+  .hub-hero h2 {
+    color: #e0f7fa;
+    font-size: 1.35rem;
+    font-weight: 600;
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .hub-hero p {
+    color: #90caf9;
+    font-size: 0.9rem;
+    margin: 0;
+  }
+
+  .hub-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 18px;
+    margin-bottom: 24px;
+  }
+
+  .hub-card {
+    background: rgba(15, 37, 55, 0.7);
+    border: 1px solid #1e3a5f;
+    border-radius: 10px;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    text-decoration: none;
+    transition: transform .15s ease, border-color .15s ease, background .15s ease, box-shadow .15s ease;
+  }
+  .hub-card:hover {
+    transform: translateY(-2px);
+    border-color: #1976d2;
+    background: rgba(21, 101, 192, 0.15);
+    box-shadow: 0 6px 16px rgba(0,0,0,0.3);
+  }
+
+  .hub-card-top {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    margin-bottom: 12px;
+  }
+  .hub-icon-box {
+    width: 44px;
+    height: 44px;
+    border-radius: 8px;
+    background: #0a1929;
+    border: 1px solid #1e3a5f;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    color: #4fc3f7;
+    flex-shrink: 0;
+  }
+  .hub-card:hover .hub-icon-box {
+    border-color: #4fc3f7;
+    color: #90caf9;
+  }
+
+  .hub-card-title {
+    color: #e0f7fa;
+    font-size: 1.05rem;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+  .hub-card-desc {
+    color: #90a4ae;
+    font-size: 0.83rem;
+    line-height: 1.45;
+  }
+
+  .hub-card-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-top: 14px;
+    border-top: 1px solid rgba(30, 58, 95, 0.6);
+    margin-top: 10px;
+  }
+  .hub-badge {
+    font-size: 0.72rem;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: #1e3a5f;
+    color: #90caf9;
+    font-weight: 500;
+  }
+  .hub-link-text {
+    font-size: 0.82rem;
+    color: #4fc3f7;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+
+  .hub-quick-section {
+    background: rgba(10, 25, 41, 0.6);
+    border: 1px solid #1e3a5f;
+    border-radius: 8px;
+    padding: 16px 20px;
+  }
+  .hub-quick-title {
+    color: #90caf9;
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin-bottom: 10px;
+  }
+  .hub-quick-links {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .hub-quick-link {
+    color: #90a4ae;
+    font-size: 0.82rem;
+    text-decoration: none;
+    padding: 4px 10px;
+    border-radius: 4px;
+    background: #0f2537;
+    border: 1px solid #1e3a5f;
+    transition: all .15s ease;
+  }
+  .hub-quick-link:hover {
+    color: #4fc3f7;
+    border-color: #4fc3f7;
+  }
+</style>
+
+<div class="mod-nav">
+  <a href="{{ url_for('admin.yonetim_hub') }}" class="active"><i class="fa fa-th-large"></i> Yönetim Hub</a>
+  <a href="{{ url_for('admin.index') }}"><i class="fa fa-users"></i> Kullanıcılar</a>
+  <a href="{{ url_for('admin_pricing.pricing_page') }}"><i class="fa fa-tags"></i> Fiyatlandırma</a>
+  <a href="{{ url_for('admin_module_pricing.module_pricing_page') }}"><i class="fa fa-layer-group"></i> Modül Fiyatlandırma</a>
+  <a href="{{ url_for('admin_modules.modules_page') }}"><i class="fa fa-puzzle-piece"></i> Modül Yönetimi</a>
+  <a href="{{ url_for('admin_credentials.credentials_page') }}"><i class="fa fa-key"></i> Kimlik Bilgileri Kasası</a>
+  <a href="{{ url_for('admin_mukerrer.mukerrer_arsiv_page') }}"><i class="fa fa-archive"></i> Mükerrer Arşiv</a>
+</div>
+
+<div class="card-erp">
+  <div class="hub-hero">
+    <h2><i class="fa fa-shield-alt" style="color:#4fc3f7;"></i> Payafin Platform Yönetim Merkezi</h2>
+    <p>Platform fiyatlandırması, modül yetkileri, API kasası ve sistem yönetimi için merkezi erişim paneli.</p>
+  </div>
+
+  <div class="hub-grid">
+    <!-- Kart 1: Platform Fiyatlandırması -->
+    <a href="{{ url_for('admin_pricing.pricing_page') }}" class="hub-card">
+      <div class="hub-card-top">
+        <div class="hub-icon-box">
+          <i class="fa fa-tags"></i>
+        </div>
+        <div>
+          <div class="hub-card-title">Platform Fiyatlandırması</div>
+          <div class="hub-card-desc">
+            Ülke ve para birimi bazlı taban fiyatlar, KDV oranları, dahil/ekstra kullanıcı ve şube ücretlerini yönetin.
+          </div>
+        </div>
+      </div>
+      <div class="hub-card-footer">
+        <span class="hub-badge">/admin/pricing</span>
+        <span class="hub-link-text">Panele Git <i class="fa fa-arrow-right"></i></span>
+      </div>
+    </a>
+
+    <!-- Kart 2: Modül Fiyatlandırması -->
+    <a href="{{ url_for('admin_module_pricing.module_pricing_page') }}" class="hub-card">
+      <div class="hub-card-top">
+        <div class="hub-icon-box">
+          <i class="fa fa-layer-group"></i>
+        </div>
+        <div>
+          <div class="hub-card-title">Modül Fiyatlandırması</div>
+          <div class="hub-card-desc">
+            Personel ve Randevu modülleri için paket (tier), kota ve kademeli personel/şube fiyatlandırma modellerini yapılandırın.
+          </div>
+        </div>
+      </div>
+      <div class="hub-card-footer">
+        <span class="hub-badge">/admin/module-pricing</span>
+        <span class="hub-link-text">Panele Git <i class="fa fa-arrow-right"></i></span>
+      </div>
+    </a>
+
+    <!-- Kart 3: Modül Yönetimi -->
+    <a href="{{ url_for('admin_modules.modules_page') }}" class="hub-card">
+      <div class="hub-card-top">
+        <div class="hub-icon-box">
+          <i class="fa fa-puzzle-piece"></i>
+        </div>
+        <div>
+          <div class="hub-card-title">Modül Yetkilendirme & Matris</div>
+          <div class="hub-card-desc">
+            Kiracıların modül haklarını genel bakış matrisinde görüntüleyin ve tüm aktif kiracılara toplu modül ataması yapın.
+          </div>
+        </div>
+      </div>
+      <div class="hub-card-footer">
+        <span class="hub-badge">/admin/modules</span>
+        <span class="hub-link-text">Panele Git <i class="fa fa-arrow-right"></i></span>
+      </div>
+    </a>
+
+    <!-- Kart 4: Kimlik Bilgileri Kasası -->
+    <a href="{{ url_for('admin_credentials.credentials_page') }}" class="hub-card">
+      <div class="hub-card-top">
+        <div class="hub-icon-box">
+          <i class="fa fa-key"></i>
+        </div>
+        <div>
+          <div class="hub-card-title">Kimlik Bilgileri Kasası</div>
+          <div class="hub-card-desc">
+            Mail SMTP, GİB e-Arşiv, Gemini AI, Sahibinden robotu ve güvenli platform API anahtarlarını yapılandırın.
+          </div>
+        </div>
+      </div>
+      <div class="hub-card-footer">
+        <span class="hub-badge">/admin/credentials</span>
+        <span class="hub-link-text">Panele Git <i class="fa fa-arrow-right"></i></span>
+      </div>
+    </a>
+  </div>
+
+  <!-- Hızlı İşlemler Alt Bölümü -->
+  <div class="hub-quick-section">
+    <div class="hub-quick-title">Ek Yönetim Araçları</div>
+    <div class="hub-quick-links">
+      <a href="{{ url_for('admin.index') }}" class="hub-quick-link"><i class="fa fa-users"></i> Kullanıcı Yönetimi</a>
+      <a href="{{ url_for('admin_mukerrer.mukerrer_arsiv_page') }}" class="hub-quick-link"><i class="fa fa-archive"></i> Mükerrer Müşteri Arşivi</a>
+      <a href="/dashboard/" class="hub-quick-link"><i class="fa fa-tachometer-alt"></i> Ana Dashboard</a>
+    </div>
+  </div>
+</div>
+{% endblock %}
