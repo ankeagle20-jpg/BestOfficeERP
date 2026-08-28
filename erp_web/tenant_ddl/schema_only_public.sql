@@ -1526,6 +1526,86 @@ ALTER SEQUENCE public.legal_cases_id_seq OWNED BY public.legal_cases.id;
 
 
 --
+-- Name: ledger_parties; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.ledger_parties (
+    id bigint NOT NULL,
+    name text NOT NULL,
+    type text DEFAULT 'person'::text NOT NULL,
+    phone text,
+    email text,
+    country text,
+    notes text,
+    is_active boolean DEFAULT true NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ledger_parties_name_chk CHECK ((length(TRIM(BOTH FROM name)) > 0)),
+    CONSTRAINT ledger_parties_type_chk CHECK ((type = ANY (ARRAY['person'::text, 'company'::text])))
+);
+
+
+--
+-- Name: ledger_parties_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.ledger_parties_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: ledger_parties_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.ledger_parties_id_seq OWNED BY public.ledger_parties.id;
+
+
+--
+-- Name: ledger_transactions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.ledger_transactions (
+    id bigint NOT NULL,
+    party_id bigint NOT NULL,
+    direction text NOT NULL,
+    amount numeric(18,2) NOT NULL,
+    currency text DEFAULT 'TRY'::text NOT NULL,
+    occurred_at timestamp with time zone DEFAULT now() NOT NULL,
+    note text,
+    created_by integer,
+    is_void boolean DEFAULT false NOT NULL,
+    metadata jsonb DEFAULT '{}'::jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ledger_transactions_amount_chk CHECK ((amount > (0)::numeric)),
+    CONSTRAINT ledger_transactions_currency_chk CHECK ((currency ~ '^[A-Z]{3}$'::text)),
+    CONSTRAINT ledger_transactions_direction_chk CHECK ((direction = ANY (ARRAY['give'::text, 'receive'::text])))
+);
+
+
+--
+-- Name: ledger_transactions_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.ledger_transactions_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: ledger_transactions_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.ledger_transactions_id_seq OWNED BY public.ledger_transactions.id;
+
+
+--
 -- Name: masraflar; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -2798,6 +2878,20 @@ ALTER TABLE ONLY public.legal_cases ALTER COLUMN id SET DEFAULT nextval('public.
 
 
 --
+-- Name: ledger_parties id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ledger_parties ALTER COLUMN id SET DEFAULT nextval('public.ledger_parties_id_seq'::regclass);
+
+
+--
+-- Name: ledger_transactions id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ledger_transactions ALTER COLUMN id SET DEFAULT nextval('public.ledger_transactions_id_seq'::regclass);
+
+
+--
 -- Name: masraflar id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -3320,6 +3414,22 @@ ALTER TABLE ONLY public.legal_cases
 
 
 --
+-- Name: ledger_parties ledger_parties_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ledger_parties
+    ADD CONSTRAINT ledger_parties_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: ledger_transactions ledger_transactions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ledger_transactions
+    ADD CONSTRAINT ledger_transactions_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: masraflar masraflar_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3809,6 +3919,34 @@ CREATE INDEX idx_installments_musteri_vade ON public.contract_installments USING
 
 
 --
+-- Name: idx_ledger_parties_is_active; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_ledger_parties_is_active ON public.ledger_parties USING btree (is_active);
+
+
+--
+-- Name: idx_ledger_parties_name; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_ledger_parties_name ON public.ledger_parties USING btree (lower(TRIM(BOTH FROM name)));
+
+
+--
+-- Name: idx_ledger_tx_party_currency_occurred; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_ledger_tx_party_currency_occurred ON public.ledger_transactions USING btree (party_id, currency, occurred_at DESC);
+
+
+--
+-- Name: idx_ledger_tx_party_void; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_ledger_tx_party_void ON public.ledger_transactions USING btree (party_id, is_void);
+
+
+--
 -- Name: idx_masraflar_durum_created; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -4282,6 +4420,14 @@ ALTER TABLE ONLY public.password_reset_tokens
 
 ALTER TABLE ONLY public.email_verification_tokens
     ADD CONSTRAINT email_verification_tokens_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: ledger_transactions ledger_transactions_party_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ledger_transactions
+    ADD CONSTRAINT ledger_transactions_party_id_fkey FOREIGN KEY (party_id) REFERENCES public.ledger_parties(id) ON DELETE RESTRICT;
 
 
 --

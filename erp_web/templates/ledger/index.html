@@ -1,8 +1,424 @@
 {% extends "layout.html" %}
 {% block title %}Payafin Cari{% endblock %}
 {% block content %}
-<div class="container" style="padding: 2rem 1rem; max-width: 40rem;">
-    <h1 style="margin: 0 0 0.5rem; font-size: 1.5rem;">Payafin Cari</h1>
-    <p style="margin: 0; opacity: 0.85;">Yakında — borç/alacak takip modülü hazırlanıyor.</p>
+<style>
+  .pc-wrap {
+    --pc-bg: #f4f6f8;
+    --pc-ink: #1a2332;
+    --pc-muted: #5c6b7a;
+    --pc-line: #d8dee6;
+    --pc-accent: #0d7a5f;
+    --pc-give: #b45309;
+    --pc-recv: #0d7a5f;
+    --pc-card: #ffffff;
+    max-width: 28rem;
+    margin: 0 auto;
+    padding: 1.25rem 1rem 3.5rem;
+    color: var(--pc-ink);
+    font-family: "Segoe UI", system-ui, sans-serif;
+  }
+  .pc-wrap h1 {
+    margin: 0 0 0.25rem;
+    font-size: 1.55rem;
+    font-weight: 650;
+    letter-spacing: -0.02em;
+  }
+  .pc-sub {
+    margin: 0 0 1.25rem;
+    color: var(--pc-muted);
+    font-size: 0.92rem;
+  }
+  .pc-toolbar {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+  }
+  .pc-toolbar input {
+    flex: 1;
+    min-width: 0;
+    border: 1px solid var(--pc-line);
+    border-radius: 10px;
+    padding: 0.7rem 0.85rem;
+    font-size: 1rem;
+    background: var(--pc-card);
+  }
+  .pc-btn {
+    border: none;
+    border-radius: 10px;
+    padding: 0.7rem 1rem;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .pc-btn-primary { background: var(--pc-accent); color: #fff; }
+  .pc-btn-give { background: #fff7ed; color: var(--pc-give); border: 1px solid #fdba74; }
+  .pc-btn-recv { background: #ecfdf5; color: var(--pc-recv); border: 1px solid #6ee7b7; }
+  .pc-btn-ghost { background: transparent; color: var(--pc-muted); border: 1px solid var(--pc-line); }
+  .pc-btn-danger { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+  .pc-list { display: flex; flex-direction: column; gap: 0.55rem; }
+  .pc-item {
+    background: var(--pc-card);
+    border: 1px solid var(--pc-line);
+    border-radius: 12px;
+    padding: 0.9rem 1rem;
+    cursor: pointer;
+    text-align: left;
+    width: 100%;
+  }
+  .pc-item:hover { border-color: #a8b8c8; }
+  .pc-item-top {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+    align-items: baseline;
+  }
+  .pc-name { font-weight: 600; font-size: 1.02rem; }
+  .pc-bal { font-variant-numeric: tabular-nums; font-weight: 650; }
+  .pc-bal.pos { color: var(--pc-give); }
+  .pc-bal.neg { color: var(--pc-recv); }
+  .pc-bal.zero { color: var(--pc-muted); }
+  .pc-meta { margin-top: 0.25rem; font-size: 0.8rem; color: var(--pc-muted); }
+  .pc-empty {
+    text-align: center;
+    padding: 2.5rem 1rem;
+    color: var(--pc-muted);
+    border: 1px dashed var(--pc-line);
+    border-radius: 12px;
+    background: rgba(255,255,255,0.5);
+  }
+  .pc-panel {
+    display: none;
+    background: var(--pc-card);
+    border: 1px solid var(--pc-line);
+    border-radius: 14px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+  }
+  .pc-panel.open { display: block; }
+  .pc-panel h2 { margin: 0 0 0.75rem; font-size: 1.1rem; }
+  .pc-field { margin-bottom: 0.65rem; }
+  .pc-field label {
+    display: block;
+    font-size: 0.78rem;
+    color: var(--pc-muted);
+    margin-bottom: 0.2rem;
+  }
+  .pc-field input, .pc-field select, .pc-field textarea {
+    width: 100%;
+    box-sizing: border-box;
+    border: 1px solid var(--pc-line);
+    border-radius: 8px;
+    padding: 0.6rem 0.7rem;
+    font-size: 1rem;
+    background: #fff;
+  }
+  .pc-actions { display: flex; flex-wrap: wrap; gap: 0.45rem; margin: 0.75rem 0; }
+  .pc-tx {
+    border-top: 1px solid var(--pc-line);
+    padding: 0.65rem 0;
+    font-size: 0.9rem;
+  }
+  .pc-tx.voided { opacity: 0.45; text-decoration: line-through; }
+  .pc-tx-row { display: flex; justify-content: space-between; gap: 0.5rem; }
+  .pc-err { color: #b91c1c; font-size: 0.88rem; margin: 0.4rem 0; }
+  .pc-back { margin-bottom: 0.75rem; }
+</style>
+
+<div class="pc-wrap" id="pc-app">
+  <h1>Payafin Cari</h1>
+  <p class="pc-sub">Basit borç / alacak takibi</p>
+
+  <div id="pc-list-view">
+    <div class="pc-toolbar">
+      <input type="search" id="pc-q" placeholder="Ara…" autocomplete="off">
+      <button type="button" class="pc-btn pc-btn-primary" id="pc-btn-new">Yeni Cari</button>
+    </div>
+
+    <div class="pc-panel" id="pc-new-panel">
+      <h2>Yeni cari</h2>
+      <div class="pc-field">
+        <label>Ad</label>
+        <input id="pc-new-name" maxlength="200" placeholder="Kişi veya şirket">
+      </div>
+      <div class="pc-field">
+        <label>Tür</label>
+        <select id="pc-new-type">
+          <option value="person">Kişi</option>
+          <option value="company">Şirket</option>
+        </select>
+      </div>
+      <div class="pc-field">
+        <label>Telefon</label>
+        <input id="pc-new-phone" maxlength="64">
+      </div>
+      <div class="pc-field">
+        <label>E-posta</label>
+        <input id="pc-new-email" type="email" maxlength="120">
+      </div>
+      <div id="pc-new-err" class="pc-err" hidden></div>
+      <div class="pc-actions">
+        <button type="button" class="pc-btn pc-btn-primary" id="pc-new-save">Kaydet</button>
+        <button type="button" class="pc-btn pc-btn-ghost" id="pc-new-cancel">Vazgeç</button>
+      </div>
+    </div>
+
+    <div id="pc-list" class="pc-list"></div>
+  </div>
+
+  <div id="pc-detail-view" hidden>
+    <button type="button" class="pc-btn pc-btn-ghost pc-back" id="pc-back">← Liste</button>
+    <h1 id="pc-detail-name">—</h1>
+    <p class="pc-sub" id="pc-detail-bal">—</p>
+    <div class="pc-actions">
+      <button type="button" class="pc-btn pc-btn-give" id="pc-btn-give">Verdim</button>
+      <button type="button" class="pc-btn pc-btn-recv" id="pc-btn-recv">Aldım</button>
+    </div>
+
+    <div class="pc-panel" id="pc-tx-panel">
+      <h2 id="pc-tx-title">Hareket</h2>
+      <div class="pc-field">
+        <label>Tutar</label>
+        <input id="pc-tx-amount" type="number" min="0.01" step="0.01" inputmode="decimal">
+      </div>
+      <div class="pc-field">
+        <label>Para birimi</label>
+        <input id="pc-tx-currency" value="TRY" maxlength="3" style="text-transform:uppercase">
+      </div>
+      <div class="pc-field">
+        <label>Not</label>
+        <input id="pc-tx-note" maxlength="300">
+      </div>
+      <div id="pc-tx-err" class="pc-err" hidden></div>
+      <div class="pc-actions">
+        <button type="button" class="pc-btn pc-btn-primary" id="pc-tx-save">Kaydet</button>
+        <button type="button" class="pc-btn pc-btn-ghost" id="pc-tx-cancel">Vazgeç</button>
+      </div>
+    </div>
+
+    <div id="pc-tx-list"></div>
+  </div>
 </div>
+
+<script>
+(function () {
+  var state = { parties: [], partyId: null, direction: null };
+
+  function fmtMoney(n, cur) {
+    var v = Number(n || 0);
+    try {
+      return new Intl.NumberFormat("tr-TR", {
+        style: "currency",
+        currency: cur || "TRY",
+        maximumFractionDigits: 2
+      }).format(v);
+    } catch (e) {
+      return v.toFixed(2) + " " + (cur || "");
+    }
+  }
+
+  function balLabel(primary) {
+    if (!primary) return "Bakiye yok";
+    var b = Number(primary.balance || 0);
+    var cur = primary.currency || "TRY";
+    if (Math.abs(b) < 0.005) return "Bakiye: " + fmtMoney(0, cur) + " (denk)";
+    if (b > 0) return "Bize borçlu: " + fmtMoney(b, cur);
+    return "Biz borçluyuz: " + fmtMoney(Math.abs(b), cur);
+  }
+
+  function balClass(primary) {
+    if (!primary) return "zero";
+    var b = Number(primary.balance || 0);
+    if (Math.abs(b) < 0.005) return "zero";
+    return b > 0 ? "pos" : "neg";
+  }
+
+  function api(path, opts) {
+    opts = opts || {};
+    return fetch(path, {
+      method: opts.method || "GET",
+      headers: opts.body ? { "Content-Type": "application/json" } : undefined,
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+      credentials: "same-origin"
+    }).then(function (r) {
+      return r.json().then(function (j) {
+        if (!r.ok || !j.ok) {
+          var err = new Error((j && j.mesaj) || ("HTTP " + r.status));
+          err.status = r.status;
+          throw err;
+        }
+        return j;
+      });
+    });
+  }
+
+  function renderList() {
+    var q = (document.getElementById("pc-q").value || "").trim().toLowerCase();
+    var el = document.getElementById("pc-list");
+    var rows = state.parties.filter(function (p) {
+      if (!q) return true;
+      return String(p.name || "").toLowerCase().indexOf(q) >= 0;
+    });
+    if (!rows.length) {
+      el.innerHTML = '<div class="pc-empty">Henüz cari yok.<br>Yeni Cari ile başlayın.</div>';
+      return;
+    }
+    el.innerHTML = rows.map(function (p) {
+      var pr = p.primary_balance;
+      var amt = pr ? fmtMoney(pr.balance, pr.currency) : "—";
+      var cls = balClass(pr);
+      var tip = (p.type === "company") ? "Şirket" : "Kişi";
+      return (
+        '<button type="button" class="pc-item" data-id="' + p.id + '">' +
+          '<div class="pc-item-top">' +
+            '<span class="pc-name"></span>' +
+            '<span class="pc-bal ' + cls + '"></span>' +
+          "</div>" +
+          '<div class="pc-meta"></div>' +
+        "</button>"
+      );
+    }).join("");
+    Array.prototype.forEach.call(el.querySelectorAll(".pc-item"), function (btn, i) {
+      var p = rows[i];
+      var pr = p.primary_balance;
+      btn.querySelector(".pc-name").textContent = p.name;
+      btn.querySelector(".pc-bal").textContent = pr ? fmtMoney(pr.balance, pr.currency) : "—";
+      btn.querySelector(".pc-meta").textContent =
+        ((p.type === "company") ? "Şirket" : "Kişi") + (pr ? " · " + balLabel(pr) : "");
+      btn.addEventListener("click", function () { openDetail(p.id); });
+    });
+  }
+
+  function loadList() {
+    return api("/ledger/api/parties").then(function (j) {
+      state.parties = j.parties || [];
+      renderList();
+    });
+  }
+
+  function openDetail(id) {
+    state.partyId = id;
+    document.getElementById("pc-list-view").hidden = true;
+    document.getElementById("pc-detail-view").hidden = false;
+    document.getElementById("pc-tx-panel").classList.remove("open");
+    return api("/ledger/api/parties/" + id).then(function (j) {
+      var p = j.party;
+      document.getElementById("pc-detail-name").textContent = p.name;
+      document.getElementById("pc-detail-bal").textContent = balLabel(p.primary_balance);
+      var box = document.getElementById("pc-tx-list");
+      var txs = j.transactions || [];
+      if (!txs.length) {
+        box.innerHTML = '<div class="pc-empty">Henüz hareket yok.</div>';
+        return;
+      }
+      box.innerHTML = txs.map(function (t) {
+        var dir = t.direction === "give" ? "Verdim" : "Aldım";
+        var voided = t.is_void ? " voided" : "";
+        var voidBtn = t.is_void
+          ? ""
+          : ('<button type="button" class="pc-btn pc-btn-danger pc-void" data-id="' + t.id + '">İptal</button>');
+        return (
+          '<div class="pc-tx' + voided + '">' +
+            '<div class="pc-tx-row">' +
+              "<strong>" + dir + " " + fmtMoney(t.amount, t.currency) + "</strong>" +
+              voidBtn +
+            "</div>" +
+            '<div class="pc-meta">' + (t.note || "") + "</div>" +
+          "</div>"
+        );
+      }).join("");
+      Array.prototype.forEach.call(box.querySelectorAll(".pc-void"), function (b) {
+        b.addEventListener("click", function () {
+          if (!confirm("Bu hareketi iptal et (void)?")) return;
+          api("/ledger/api/transactions/" + b.getAttribute("data-id") + "/void", {
+            method: "POST",
+            body: { reason: "ui" }
+          }).then(function () {
+            return openDetail(state.partyId);
+          }).then(loadList).catch(function (e) { alert(e.message); });
+        });
+      });
+    });
+  }
+
+  document.getElementById("pc-btn-new").addEventListener("click", function () {
+    document.getElementById("pc-new-panel").classList.add("open");
+    document.getElementById("pc-new-err").hidden = true;
+    document.getElementById("pc-new-name").focus();
+  });
+  document.getElementById("pc-new-cancel").addEventListener("click", function () {
+    document.getElementById("pc-new-panel").classList.remove("open");
+  });
+  document.getElementById("pc-new-save").addEventListener("click", function () {
+    var err = document.getElementById("pc-new-err");
+    err.hidden = true;
+    api("/ledger/api/parties", {
+      method: "POST",
+      body: {
+        name: document.getElementById("pc-new-name").value,
+        type: document.getElementById("pc-new-type").value,
+        phone: document.getElementById("pc-new-phone").value,
+        email: document.getElementById("pc-new-email").value
+      }
+    }).then(function () {
+      document.getElementById("pc-new-panel").classList.remove("open");
+      document.getElementById("pc-new-name").value = "";
+      document.getElementById("pc-new-phone").value = "";
+      document.getElementById("pc-new-email").value = "";
+      return loadList();
+    }).catch(function (e) {
+      err.textContent = e.message;
+      err.hidden = false;
+    });
+  });
+
+  document.getElementById("pc-q").addEventListener("input", renderList);
+  document.getElementById("pc-back").addEventListener("click", function () {
+    document.getElementById("pc-detail-view").hidden = true;
+    document.getElementById("pc-list-view").hidden = false;
+    loadList();
+  });
+
+  function openTx(dir) {
+    state.direction = dir;
+    document.getElementById("pc-tx-title").textContent = dir === "give" ? "Verdim" : "Aldım";
+    document.getElementById("pc-tx-panel").classList.add("open");
+    document.getElementById("pc-tx-err").hidden = true;
+    document.getElementById("pc-tx-amount").value = "";
+    document.getElementById("pc-tx-currency").value = "TRY";
+    document.getElementById("pc-tx-note").value = "";
+    document.getElementById("pc-tx-amount").focus();
+  }
+  document.getElementById("pc-btn-give").addEventListener("click", function () { openTx("give"); });
+  document.getElementById("pc-btn-recv").addEventListener("click", function () { openTx("receive"); });
+  document.getElementById("pc-tx-cancel").addEventListener("click", function () {
+    document.getElementById("pc-tx-panel").classList.remove("open");
+  });
+  document.getElementById("pc-tx-save").addEventListener("click", function () {
+    var err = document.getElementById("pc-tx-err");
+    err.hidden = true;
+    api("/ledger/api/transactions", {
+      method: "POST",
+      body: {
+        party_id: state.partyId,
+        direction: state.direction,
+        amount: document.getElementById("pc-tx-amount").value,
+        currency: (document.getElementById("pc-tx-currency").value || "TRY").toUpperCase(),
+        note: document.getElementById("pc-tx-note").value
+      }
+    }).then(function () {
+      document.getElementById("pc-tx-panel").classList.remove("open");
+      return openDetail(state.partyId);
+    }).then(loadList).catch(function (e) {
+      err.textContent = e.message;
+      err.hidden = false;
+    });
+  });
+
+  loadList().catch(function (e) {
+    document.getElementById("pc-list").innerHTML =
+      '<div class="pc-empty">' + (e.message || "Yüklenemedi") + "</div>";
+  });
+})();
+</script>
 {% endblock %}

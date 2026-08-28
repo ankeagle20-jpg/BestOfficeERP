@@ -596,6 +596,7 @@ def init_schema():
     ensure_discount_campaigns_table()
     ensure_platform_tenant_billing_tables()
     ensure_platform_support_tables()
+    ensure_ledger_tables()
     print("✅ Supabase şema oluşturuldu.")
 
 
@@ -3671,6 +3672,75 @@ def ensure_platform_support_tables():
             execute(stmt)
         except Exception as e:
             print(f"platform support index: {e}")
+
+
+def ensure_ledger_tables():
+    """Payafin Cari (ledger) — taraflar + hareketler (kiracı search_path).
+
+    KRİTİK: bakiye kolonu/cache YOK. Bakiye her zaman
+    ledger_transactions üzerinden canlı SUM ile hesaplanır (is_void=FALSE).
+    """
+    execute(
+        """
+        CREATE TABLE IF NOT EXISTS ledger_parties (
+            id              BIGSERIAL PRIMARY KEY,
+            name            TEXT NOT NULL,
+            type            TEXT NOT NULL DEFAULT 'person',
+            phone           TEXT,
+            email           TEXT,
+            country         TEXT,
+            notes           TEXT,
+            is_active       BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT ledger_parties_name_chk
+                CHECK (length(trim(name)) > 0),
+            CONSTRAINT ledger_parties_type_chk
+                CHECK (type IN ('person', 'company'))
+        )
+        """
+    )
+    execute(
+        """
+        CREATE TABLE IF NOT EXISTS ledger_transactions (
+            id              BIGSERIAL PRIMARY KEY,
+            party_id        BIGINT NOT NULL,
+            direction       TEXT NOT NULL,
+            amount          NUMERIC(18, 2) NOT NULL,
+            currency        TEXT NOT NULL DEFAULT 'TRY',
+            occurred_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            note            TEXT,
+            created_by      INTEGER,
+            is_void         BOOLEAN NOT NULL DEFAULT FALSE,
+            metadata        JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT ledger_transactions_direction_chk
+                CHECK (direction IN ('give', 'receive')),
+            CONSTRAINT ledger_transactions_amount_chk
+                CHECK (amount > 0),
+            CONSTRAINT ledger_transactions_currency_chk
+                CHECK (currency ~ '^[A-Z]{3}$'),
+            CONSTRAINT ledger_transactions_party_id_fkey
+                FOREIGN KEY (party_id)
+                REFERENCES ledger_parties (id)
+                ON DELETE RESTRICT
+        )
+        """
+    )
+    for stmt in (
+        "CREATE INDEX IF NOT EXISTS idx_ledger_parties_is_active "
+        "ON ledger_parties (is_active)",
+        "CREATE INDEX IF NOT EXISTS idx_ledger_parties_name "
+        "ON ledger_parties (lower(trim(name)))",
+        "CREATE INDEX IF NOT EXISTS idx_ledger_tx_party_currency_occurred "
+        "ON ledger_transactions (party_id, currency, occurred_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_ledger_tx_party_void "
+        "ON ledger_transactions (party_id, is_void)",
+    ):
+        try:
+            execute(stmt)
+        except Exception as e:
+            print(f"ledger index: {e}")
 
 
 def clear_all_customers():
