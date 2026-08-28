@@ -595,6 +595,7 @@ def init_schema():
     ensure_exchange_rates_table()
     ensure_discount_campaigns_table()
     ensure_platform_tenant_billing_tables()
+    ensure_platform_support_tables()
     print("✅ Supabase şema oluşturuldu.")
 
 
@@ -3587,6 +3588,89 @@ def ensure_platform_tenant_billing_tables():
             execute(stmt)
         except Exception as e:
             print(f"platform billing index: {e}")
+
+
+def ensure_platform_support_tables():
+    """Platform destek talepleri: tickets + events (yalnız public) — Sistem 2 / S1.
+
+    Kiracı şemalarına kopyalanmaz; PLATFORM_STRIP_TABLES listesinde.
+    """
+    ensure_platform_tenants_table()
+    execute(
+        """
+        CREATE TABLE IF NOT EXISTS public.platform_support_tickets (
+            id                  BIGSERIAL PRIMARY KEY,
+            tenant_id           INTEGER NOT NULL,
+            tenant_slug         TEXT NOT NULL,
+            subject             TEXT NOT NULL,
+            body                TEXT NOT NULL DEFAULT '',
+            priority            TEXT NOT NULL DEFAULT 'normal',
+            status              TEXT NOT NULL DEFAULT 'open',
+            source              TEXT NOT NULL DEFAULT 'admin',
+            created_by_email    TEXT NOT NULL DEFAULT '',
+            assignee_admin_id   INTEGER,
+            resolved_at         TIMESTAMPTZ,
+            metadata            JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT platform_support_tickets_priority_chk
+                CHECK (priority IN ('low', 'normal', 'high', 'urgent')),
+            CONSTRAINT platform_support_tickets_status_chk
+                CHECK (status IN ('open', 'in_progress', 'waiting', 'resolved', 'closed')),
+            CONSTRAINT platform_support_tickets_source_chk
+                CHECK (source IN ('tenant', 'admin')),
+            CONSTRAINT platform_support_tickets_slug_chk
+                CHECK (length(trim(tenant_slug)) > 0),
+            CONSTRAINT platform_support_tickets_subject_chk
+                CHECK (length(trim(subject)) > 0),
+            CONSTRAINT platform_support_tickets_resolved_chk
+                CHECK (
+                    resolved_at IS NULL
+                    OR status IN ('resolved', 'closed')
+                ),
+            CONSTRAINT platform_support_tickets_tenant_id_fkey
+                FOREIGN KEY (tenant_id) REFERENCES public.tenants (id) ON DELETE CASCADE,
+            CONSTRAINT platform_support_tickets_assignee_admin_id_fkey
+                FOREIGN KEY (assignee_admin_id) REFERENCES public.users (id) ON DELETE SET NULL
+        )
+        """
+    )
+    execute(
+        """
+        CREATE TABLE IF NOT EXISTS public.platform_support_ticket_events (
+            id                  BIGSERIAL PRIMARY KEY,
+            ticket_id           BIGINT NOT NULL,
+            event_type          TEXT NOT NULL,
+            body                TEXT,
+            actor_email         TEXT,
+            created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT platform_support_ticket_events_type_chk
+                CHECK (event_type IN ('created', 'comment', 'status', 'assign')),
+            CONSTRAINT platform_support_ticket_events_ticket_id_fkey
+                FOREIGN KEY (ticket_id)
+                REFERENCES public.platform_support_tickets (id)
+                ON DELETE CASCADE
+        )
+        """
+    )
+    for stmt in (
+        "CREATE INDEX IF NOT EXISTS platform_support_tickets_tenant_id_idx "
+        "ON public.platform_support_tickets (tenant_id)",
+        "CREATE INDEX IF NOT EXISTS platform_support_tickets_status_idx "
+        "ON public.platform_support_tickets (status)",
+        "CREATE INDEX IF NOT EXISTS platform_support_tickets_priority_idx "
+        "ON public.platform_support_tickets (priority)",
+        "CREATE INDEX IF NOT EXISTS platform_support_tickets_assignee_idx "
+        "ON public.platform_support_tickets (assignee_admin_id)",
+        "CREATE INDEX IF NOT EXISTS platform_support_ticket_events_ticket_id_idx "
+        "ON public.platform_support_ticket_events (ticket_id)",
+        "CREATE INDEX IF NOT EXISTS platform_support_ticket_events_created_at_idx "
+        "ON public.platform_support_ticket_events (created_at DESC)",
+    ):
+        try:
+            execute(stmt)
+        except Exception as e:
+            print(f"platform support index: {e}")
 
 
 def clear_all_customers():

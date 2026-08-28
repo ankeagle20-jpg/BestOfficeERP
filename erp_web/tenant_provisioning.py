@@ -47,6 +47,8 @@ PLATFORM_STRIP_TABLES = (
     "platform_tenant_subscriptions",
     "platform_tenant_invoices",
     "platform_tenant_payments",
+    "platform_support_tickets",
+    "platform_support_ticket_events",
 )
 _SLUG_RE = re.compile(r"^[a-z0-9_]+$")
 _ADMIN_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
