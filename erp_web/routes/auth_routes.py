@@ -56,6 +56,9 @@ def login():
         return redirect(url_for("index"))
 
     if current_user.is_authenticated:
+        # S3: zaten girişli ledger-only → /ledger/ (S2 allowlist ile tutarlı)
+        if _login_redirect_is_ledger_only():
+            return redirect("/ledger/")
         return redirect(url_for("index"))
     
     if request.method == "POST":
@@ -72,17 +75,65 @@ def login():
             flash(f"Hoş geldiniz, {user.full_name}!", "success")
             # next: GET'ten veya form POST'tan (mobilde giriş sonrası /m/dashboard'a dönmek için)
             next_url = (request.args.get("next") or request.form.get("next") or "").strip()
-            # Sadece güvenli (relative) next kabul et; açık yönlendirme engelle
-            if next_url and not next_url.startswith("//") and next_url.startswith("/"):
-                from urllib.parse import urlparse
-                p = urlparse(next_url)
-                if not p.netloc:
-                    return redirect(next_url)
+            safe_next = _login_safe_next_url(next_url)
+
+            # S3: ledger-only → next yok/güvensiz/allowlist dışı ise /ledger/
+            if _login_redirect_is_ledger_only():
+                if safe_next and _login_next_allowed_for_ledger_only(safe_next):
+                    return redirect(safe_next)
+                return redirect("/ledger/")
+
+            # Tam ERP: mevcut davranış (güvenli next veya index)
+            if safe_next:
+                return redirect(safe_next)
             return redirect(url_for("index"))
         else:
             flash("Kullanıcı adı veya şifre hatalı!", "danger")
     
     return render_template("login.html")
+
+
+def _login_safe_next_url(next_url: str) -> str | None:
+    """Açık yönlendirme engeli: yalnız relative, netloc'suz path."""
+    if not next_url or next_url.startswith("//") or not next_url.startswith("/"):
+        return None
+    from urllib.parse import urlparse
+
+    p = urlparse(next_url)
+    if p.netloc:
+        return None
+    return next_url
+
+
+def _login_redirect_is_ledger_only() -> bool:
+    """Fail-open: hata/kiracı yok → False (tam ERP yönlendirmesi bozulmaz)."""
+    try:
+        from tenant_module_access import (
+            is_ledger_only_tenant,
+            resolve_request_tenant_id,
+        )
+
+        tid = resolve_request_tenant_id()
+        if tid is None:
+            return False
+        return bool(is_ledger_only_tenant(int(tid)))
+    except Exception:
+        return False
+
+
+def _login_next_allowed_for_ledger_only(next_url: str) -> bool:
+    """S2 allowlist ile tutarlı: next path izinli mi?"""
+    from urllib.parse import urlparse
+
+    path = urlparse(next_url).path or "/"
+    try:
+        # Lazy import: app ↔ auth_routes döngüsünü önler
+        from app import _ledger_only_path_allowed
+
+        return bool(_ledger_only_path_allowed(path))
+    except Exception:
+        # Fail-safe: allowlist okunamazsa ledger-only next kabul etme → /ledger/
+        return False
 
 @bp.route("/logout")
 @login_required
