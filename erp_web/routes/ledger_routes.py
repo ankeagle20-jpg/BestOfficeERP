@@ -29,7 +29,97 @@ from reportlab.platypus import Table, TableStyle
 from auth import giris_gerekli
 from db import ensure_ledger_tables, execute, execute_returning, fetch_all, fetch_one
 from services.exchange_rate_service import get_exchange_rate
-from tenant_module_access import module_required
+from tenant_module_access import module_required, resolve_request_tenant_id
+
+
+def _ledger_active_party_count() -> int:
+    row = fetch_one(
+        "SELECT COUNT(*)::int AS c FROM ledger_parties WHERE is_active = TRUE"
+    )
+    return int((row or {}).get("c") or 0)
+
+
+def _ledger_party_quota_block_message() -> str | None:
+    """Aktif cari kart sayısı kademe max_personnel (max_parties alias) aşıyorsa mesaj.
+
+    selected_tier yoksa starter varsayılır (fail-closed). max NULL = sınırsız.
+    """
+    tid = resolve_request_tenant_id()
+    if tid is None:
+        return "Kiracı doğrulanamadı; cari kart oluşturulamaz."
+
+    ent = fetch_one(
+        """
+        SELECT metadata, status
+        FROM public.tenant_module_entitlements
+        WHERE tenant_id = %s AND module_key = 'ledger'
+        """,
+        (int(tid),),
+    )
+    if not ent:
+        return "Payafin Cari yetkisi yok; cari kart oluşturulamaz."
+
+    meta = ent.get("metadata") or {}
+    if isinstance(meta, str):
+        try:
+            meta = json.loads(meta)
+        except Exception:
+            meta = {}
+    if not isinstance(meta, dict):
+        meta = {}
+    tier_key = str(meta.get("selected_tier") or "starter").strip().lower() or "starter"
+
+    tenant = fetch_one(
+        """
+        SELECT COALESCE(NULLIF(TRIM(country_code), ''), 'TR') AS country_code
+        FROM public.tenants
+        WHERE id = %s
+        """,
+        (int(tid),),
+    )
+    cc = str((tenant or {}).get("country_code") or "TR").strip().upper() or "TR"
+
+    tier = fetch_one(
+        """
+        SELECT max_personnel, display_name, is_contact_sales, tier_key
+        FROM public.module_pricing_tiers
+        WHERE module_key = 'ledger'
+          AND country_code = %s
+          AND tier_key = %s
+          AND is_active = TRUE
+        """,
+        (cc, tier_key),
+    )
+    if not tier and cc != "US":
+        tier = fetch_one(
+            """
+            SELECT max_personnel, display_name, is_contact_sales, tier_key
+            FROM public.module_pricing_tiers
+            WHERE module_key = 'ledger'
+              AND country_code = 'US'
+              AND tier_key = %s
+              AND is_active = TRUE
+            """,
+            (tier_key,),
+        )
+    if not tier:
+        # Kademe satırı yoksa oluşturmayı engelleme (seed henüz yüklenmemiş olabilir)
+        return None
+
+    mx = tier.get("max_personnel")
+    if mx is None:
+        return None
+
+    active = _ledger_active_party_count()
+    limit_n = int(mx)
+    if active >= limit_n:
+        disp = str(tier.get("display_name") or tier_key)
+        return (
+            f"Aktif cari kart limitine ulaşıldı ({active}/{limit_n}, kademe: {disp}). "
+            "Yeni cari kart oluşturmak için kademenizi yükseltin "
+            "(Pro / Growth / Enterprise) veya mevcut kartları pasifleştirin."
+        )
+    return None
 
 
 def _ledger_register_arial():
@@ -225,6 +315,9 @@ def api_parties_list():
 @module_required("ledger")
 def api_parties_create():
     ensure_ledger_tables()
+    quota_msg = _ledger_party_quota_block_message()
+    if quota_msg:
+        return _json_err(quota_msg, 403)
     data = request.get_json(silent=True) or {}
     name = str(data.get("name") or "").strip()
     if not name:

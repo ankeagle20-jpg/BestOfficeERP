@@ -71,6 +71,10 @@
         <input type="checkbox" id="mod_randevu" name="selected_modules" value="randevu" checked>
         Randevu Yönetimi
       </label>
+      <label class="module-option" for="mod_ledger">
+        <input type="checkbox" id="mod_ledger" name="selected_modules" value="ledger" checked>
+        Payafin Cari
+      </label>
     </div>
 
     <div class="hp-field" aria-hidden="true">
@@ -147,7 +151,7 @@
     return out;
   }
 
-  const ALLOWED_MODULES = { personnel: true, randevu: true };
+  const ALLOWED_MODULES = { personnel: true, randevu: true, ledger: true };
   let moduleTierPreferences = {};
 
   function applyUrlModuleTier() {
@@ -158,8 +162,10 @@
       if (mod && ALLOWED_MODULES[mod]) {
         const pers = document.getElementById("mod_personnel");
         const rand = document.getElementById("mod_randevu");
+        const led = document.getElementById("mod_ledger");
         if (pers) pers.checked = (mod === "personnel");
         if (rand) rand.checked = (mod === "randevu");
+        if (led) led.checked = (mod === "ledger");
         if (tier && /^[a-z0-9_]{1,32}$/.test(tier) && tier !== "enterprise") {
           moduleTierPreferences[mod] = tier;
         }

@@ -462,6 +462,26 @@
 <div id="rv-pricing-loading" class="pricing-loading">Randevu planları yükleniyor…</div>
 <div id="rv-pricing-grid" class="pricing-grid" hidden></div>
 
+<hr class="core-divider" />
+
+<h2 class="pricing-section-title">Payafin Cari Modülü</h2>
+<p class="pricing-section-sub">Taban ücret + aktif cari kart başı. Yıllıkta 2 ay bedava.</p>
+
+<div class="period-toggle" role="group" aria-label="Payafin Cari faturalama dönemi">
+  <button type="button" id="ld-period-monthly" class="active" data-period="monthly">Aylık</button>
+  <button type="button" id="ld-period-annual" data-period="annual">Yıllık</button>
+</div>
+
+<div class="module-calc">
+  <label>Aktif cari kart sayısı
+    <input type="number" id="ld-parties" min="0" step="1" value="20" />
+  </label>
+</div>
+
+<div id="ld-pricing-error" class="pricing-error" role="alert"></div>
+<div id="ld-pricing-loading" class="pricing-loading">Payafin Cari planları yükleniyor…</div>
+<div id="ld-pricing-grid" class="pricing-grid" hidden></div>
+
 <div id="mp-contact-modal" class="mp-modal-backdrop" hidden aria-hidden="true">
   <div class="mp-modal" role="dialog" aria-modal="true" aria-labelledby="mp-contact-title">
     <h3 id="mp-contact-title">Enterprise — Bize Ulaşın</h3>
@@ -542,10 +562,19 @@
   const rvMonthlyBtn = document.getElementById("rv-period-monthly");
   const rvAnnualBtn = document.getElementById("rv-period-annual");
 
+  const ldGridEl = document.getElementById("ld-pricing-grid");
+  const ldLoadingEl = document.getElementById("ld-pricing-loading");
+  const ldErrorEl = document.getElementById("ld-pricing-error");
+  const ldPartiesEl = document.getElementById("ld-parties");
+  const ldMonthlyBtn = document.getElementById("ld-period-monthly");
+  const ldAnnualBtn = document.getElementById("ld-period-annual");
+
   let moduleTiers = [];
   let moduleCurrency = "TRY";
   let rvTiers = [];
   let rvCurrency = "TRY";
+  let ldTiers = [];
+  let ldCurrency = "TRY";
   let billingPeriod = "monthly";
   let contactModuleKey = "personnel";
 
@@ -553,6 +582,8 @@
     "Bu personel sayısı için yetersiz — üst pakete geçmeniz gerekir";
   const RV_INSUFFICIENT_MSG =
     "Bu personel/randevu sayısı için yetersiz — üst pakete geçmeniz gerekir";
+  const LD_INSUFFICIENT_MSG =
+    "Bu aktif cari kart sayısı için yetersiz — üst pakete geçmeniz gerekir";
 
   function currencySymbol(code) {
     if (code === "TRY") return "₺";
@@ -888,6 +919,121 @@
     if (rvGridEl) rvGridEl.hidden = true;
   }
 
+  function partyRange(tier) {
+    const max = tier.max_personnel;
+    if (max == null) return "Sınırsız aktif cari kart";
+    return "En fazla " + max + " aktif cari kart";
+  }
+
+  function estimateLedgerTier(tier, parties) {
+    const n = Math.max(0, parseInt(parties, 10) || 0);
+    const months = billingPeriod === "annual"
+      ? Math.max(0, 12 - (parseInt(tier.annual_discount_months, 10) || 0))
+      : 1;
+    const base = Number(tier.base_monthly) || 0;
+    const per = Number(tier.price_per_personnel) || 0;
+    return (base + n * per) * months;
+  }
+
+  function renderLedgerTier(tier, currency, resolved, parties) {
+    const card = document.createElement("article");
+    card.className = "tier-card";
+    const isContact = !!tier.is_contact_sales;
+    const recommended = resolved && resolved.tier_key === tier.tier_key;
+    const insufficient = !isContact && resolved
+      && (tier.max_personnel != null)
+      && parties > Number(tier.max_personnel);
+    const discount = parseInt(tier.annual_discount_months, 10) || 0;
+    let priceHtml = formatMoney(tier.base_monthly, currency);
+    const periodLabel = billingPeriod === "annual" ? "yıllık taban" : "taban aylık ücret";
+    const perLabel = billingPeriod === "annual" ? "Cari kart başı (yıl)" : "Cari kart başı (ay)";
+    const perShow = billingPeriod === "annual"
+      ? (Number(tier.price_per_personnel) || 0) * Math.max(0, 12 - discount)
+      : (Number(tier.price_per_personnel) || 0);
+
+    let estimateHtml;
+    if (isContact) {
+      estimateHtml =
+        "<div class=\"tier-estimate\" data-estimate-wrap>" +
+        "<button type=\"button\" class=\"btn-select\" data-ld-contact-open>Bize Ulaşın</button></div>";
+    } else if (insufficient) {
+      estimateHtml =
+        "<div class=\"tier-estimate is-blocked\" data-estimate-wrap>" +
+        "<span data-estimate>" + escapeHtml(LD_INSUFFICIENT_MSG) + "</span></div>";
+    } else {
+      const total = estimateLedgerTier(tier, parties);
+      const suffix = billingPeriod === "annual" ? " / yıl" : " / ay";
+      estimateHtml =
+        "<div class=\"tier-estimate\" data-estimate-wrap>" +
+        "Tahmini: <span data-estimate>" +
+        escapeHtml(formatMoney(total, currency) + suffix) +
+        "</span></div>";
+    }
+
+    card.innerHTML =
+      (recommended ? "<span class=\"tier-badge\">Önerilen</span>" : "") +
+      "<h3>" + escapeHtml(tier.display_name) + "</h3>" +
+      "<div class=\"tier-range\">" + escapeHtml(partyRange(tier)) + "</div>" +
+      "<div class=\"tier-price\">" + priceHtml +
+      "<small>" + escapeHtml(periodLabel) +
+      (billingPeriod === "annual" && discount ? " (" + discount + " ay bedava)" : "") +
+      "</small></div>" +
+      "<ul class=\"tier-details\">" +
+      "<li>" + escapeHtml(perLabel) + ": <strong>" +
+      escapeHtml(formatMoney(perShow, currency)) + "</strong></li>" +
+      "</ul>" +
+      estimateHtml +
+      (isContact
+        ? ""
+        : ("<a class=\"btn-select" + (recommended ? " is-emphasized" : "") +
+          "\" href=\"/signup?module=ledger&tier=" + encodeURIComponent(String(tier.tier_key || "")) +
+          "\">Bu Paketi Seç</a>"));
+    return card;
+  }
+
+  function currentLdParties() {
+    return Math.max(0, parseInt(ldPartiesEl && ldPartiesEl.value, 10) || 0);
+  }
+
+  function renderLedgerGrid() {
+    if (!ldGridEl) return;
+    const parties = currentLdParties();
+    const resolved = resolveRequiredTier(ldTiers, parties);
+    ldGridEl.innerHTML = "";
+    ldTiers.forEach(function (tier) {
+      ldGridEl.appendChild(renderLedgerTier(tier, ldCurrency, resolved, parties));
+    });
+  }
+
+  function showLedgerError(message) {
+    if (!ldErrorEl) return;
+    ldErrorEl.textContent = message;
+    ldErrorEl.style.display = "block";
+    if (ldLoadingEl) ldLoadingEl.style.display = "none";
+    if (ldGridEl) ldGridEl.hidden = true;
+  }
+
+  async function loadLedgerPricing() {
+    if (!ldGridEl) return;
+    try {
+      const res = await fetch("/api/module-pricing/public?module=ledger&country=TR", {
+        headers: { Accept: "application/json" }
+      });
+      const data = await res.json().catch(function () { return {}; });
+      if (!res.ok || !data.ok || !Array.isArray(data.tiers) || !data.tiers.length) {
+        showLedgerError(data.mesaj || "Payafin Cari fiyatları yüklenemedi.");
+        return;
+      }
+      ldTiers = data.tiers;
+      ldCurrency = data.currency || "TRY";
+      if (ldLoadingEl) ldLoadingEl.style.display = "none";
+      ldGridEl.hidden = false;
+      renderLedgerGrid();
+    } catch (e) {
+      showLedgerError("Bağlantı hatası. Lütfen internet bağlantınızı kontrol edip tekrar deneyin.");
+    }
+  }
+
   async function loadRandevuPricing() {
     if (!rvGridEl) return;
     try {
@@ -1124,8 +1270,11 @@
     mpAnnualBtn.classList.toggle("active", billingPeriod === "annual");
     if (rvMonthlyBtn) rvMonthlyBtn.classList.toggle("active", billingPeriod === "monthly");
     if (rvAnnualBtn) rvAnnualBtn.classList.toggle("active", billingPeriod === "annual");
+    if (ldMonthlyBtn) ldMonthlyBtn.classList.toggle("active", billingPeriod === "monthly");
+    if (ldAnnualBtn) ldAnnualBtn.classList.toggle("active", billingPeriod === "annual");
     renderModuleGrid();
     renderRandevuGrid();
+    renderLedgerGrid();
   }
 
   function updateCampaignBanner(campaign) {
@@ -1208,6 +1357,9 @@
   if (rvAnnualBtn) rvAnnualBtn.addEventListener("click", function () { setPeriod("annual"); });
   if (rvPersonnelEl) rvPersonnelEl.addEventListener("input", renderRandevuGrid);
   if (rvAppointmentsEl) rvAppointmentsEl.addEventListener("input", renderRandevuGrid);
+  if (ldMonthlyBtn) ldMonthlyBtn.addEventListener("click", function () { setPeriod("monthly"); });
+  if (ldAnnualBtn) ldAnnualBtn.addEventListener("click", function () { setPeriod("annual"); });
+  if (ldPartiesEl) ldPartiesEl.addEventListener("input", renderLedgerGrid);
 
 
   const mpContactModal = document.getElementById("mp-contact-modal");
@@ -1218,29 +1370,42 @@
 
   function syncContactFormFields() {
     const isRv = contactModuleKey === "randevu";
+    const isLd = contactModuleKey === "ledger";
     const branchesWrap = document.getElementById("mp-contact-branches-wrap");
     const apptWrap = document.getElementById("mp-contact-appointments-wrap");
     const branchesEl = document.getElementById("mp-contact-branches");
     const apptEl = document.getElementById("mp-contact-appointments");
+    const persWrap = document.getElementById("mp-contact-personnel-wrap");
     const persEl = document.getElementById("mp-contact-personnel");
     const subEl = document.getElementById("mp-contact-sub");
-    if (branchesWrap) branchesWrap.style.display = isRv ? "none" : "";
+    if (branchesWrap) branchesWrap.style.display = (isRv || isLd) ? "none" : "";
     if (apptWrap) apptWrap.style.display = isRv ? "" : "none";
     if (branchesEl) {
-      branchesEl.required = !isRv;
-      if (isRv) branchesEl.value = "0";
+      branchesEl.required = !(isRv || isLd);
+      if (isRv || isLd) branchesEl.value = "0";
     }
     if (apptEl) {
       apptEl.required = isRv;
     }
+    if (persWrap && persWrap.childNodes[0]) {
+      persWrap.childNodes[0].textContent = isLd
+        ? "Tahmini aktif cari kart "
+        : "Tahmini personel ";
+    }
     if (subEl) {
-      subEl.textContent = isRv
-        ? "Randevu Yönetimi için özel teklif. Formu doldurun; satış ekibimiz sizinle iletişime geçecek."
-        : "Personel Yönetimi için özel teklif. Formu doldurun; satış ekibimiz sizinle iletişime geçecek.";
+      if (isRv) {
+        subEl.textContent = "Randevu Yönetimi için özel teklif. Formu doldurun; satış ekibimiz sizinle iletişime geçecek.";
+      } else if (isLd) {
+        subEl.textContent = "Payafin Cari için özel teklif. Formu doldurun; satış ekibimiz sizinle iletişime geçecek.";
+      } else {
+        subEl.textContent = "Personel Yönetimi için özel teklif. Formu doldurun; satış ekibimiz sizinle iletişime geçecek.";
+      }
     }
     if (isRv) {
       if (persEl && rvPersonnelEl) persEl.value = String(currentRvPersonnel());
       if (apptEl && rvAppointmentsEl) apptEl.value = String(currentRvAppointments());
+    } else if (isLd) {
+      if (persEl) persEl.value = String(currentLdParties());
     } else {
       if (persEl && mpPersonnelEl) persEl.value = String(currentPersonnel());
       if (branchesEl && mpBranchesEl) branchesEl.value = String(Math.max(1, currentBranches()));
@@ -1287,6 +1452,16 @@
       openContactModal("randevu");
     });
   }
+  if (ldGridEl) {
+    ldGridEl.addEventListener("click", function (ev) {
+      const btn = ev.target && ev.target.closest
+        ? ev.target.closest("[data-ld-contact-open]")
+        : null;
+      if (!btn) return;
+      ev.preventDefault();
+      openContactModal("ledger");
+    });
+  }
 
   if (mpContactCancel) {
     mpContactCancel.addEventListener("click", closeContactModal);
@@ -1317,7 +1492,7 @@
         phone: document.getElementById("mp-contact-phone").value,
         country_code: document.getElementById("mp-contact-country").value,
         estimated_personnel: document.getElementById("mp-contact-personnel").value,
-        estimated_branches: mk === "randevu"
+        estimated_branches: (mk === "randevu" || mk === "ledger")
           ? "0"
           : document.getElementById("mp-contact-branches").value,
         message: document.getElementById("mp-contact-message").value,
@@ -1366,6 +1541,7 @@
   loadPricing();
   loadModulePricing();
   loadRandevuPricing();
+  loadLedgerPricing();
 })();
 </script>
 {% endblock %}

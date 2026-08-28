@@ -22,10 +22,11 @@ MSG_PLATFORM_ONLY = (
     "Platform modül fiyatlandırması yalnızca ana (public) host'ta kullanılabilir."
 )
 
-# Personel + Randevu (genişletme; Personel davranışı aynen)
+# Personel + Randevu + Ledger (Personel davranışı aynen; ledger=cari kart ekseni)
 MODULE_OPTIONS: tuple[tuple[str, str], ...] = (
     ("personnel", "Personel Yönetimi"),
     ("randevu", "Randevu Yönetimi"),
+    ("ledger", "Payafin Cari"),
 )
 MODULE_KEYS = frozenset(k for k, _ in MODULE_OPTIONS)
 

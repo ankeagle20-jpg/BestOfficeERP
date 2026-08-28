@@ -24,6 +24,7 @@ _PHONE_RE = re.compile(r"^[\d\s+\-().]{7,32}$")
 _MODULE_CONTACT_LABELS = {
     "personnel": "Personel",
     "randevu": "Randevu",
+    "ledger": "Payafin Cari",
 }
 
 
@@ -165,6 +166,15 @@ def api_module_pricing_contact():
             )
             if estimated_branches is None:
                 estimated_branches = 0
+        elif mk == "ledger":
+            # Ledger: estimated_personnel = aktif cari kart tahmini; şube yok
+            estimated_branches = _parse_nonneg_int(
+                "estimated_branches",
+                body.get("estimated_branches"),
+                required=False,
+            )
+            if estimated_branches is None:
+                estimated_branches = 0
         else:
             estimated_branches = _parse_nonneg_int(
                 "estimated_branches", body.get("estimated_branches"), required=True
@@ -251,6 +261,8 @@ def api_module_pricing_contact():
             estimate_lines += (
                 f"Tahmini aylık randevu: {estimated_monthly_appointments}\n"
             )
+        elif mk == "ledger":
+            estimate_lines = f"Tahmini aktif cari kart: {estimated_personnel}\n"
         else:
             estimate_lines += f"Tahmini şube: {estimated_branches}\n"
         body_text = (

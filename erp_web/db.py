@@ -3075,6 +3075,7 @@ def ensure_module_pricing_tiers_table():
         print(f"module_pricing_tiers indexes: {e}")
     _seed_module_pricing_personnel()
     _seed_module_pricing_randevu()
+    _seed_module_pricing_ledger()
 
 
 def _seed_module_pricing_personnel() -> None:
@@ -3250,6 +3251,93 @@ def _seed_module_pricing_randevu() -> None:
                 max_personnel,
                 included_monthly_appointments,
                 included_personnel,
+                is_contact_sales,
+                sort_order,
+            ),
+        )
+
+
+def _seed_module_pricing_ledger() -> None:
+    """ledger (Payafin Cari) TR/US — aktif cari kart sayısı ekseni (max_personnel alias).
+
+    Şema değişikliği yok: max_personnel = max aktif ledger_parties;
+    price_per_personnel = cari kart başı ücret. Şube yok (included_branches=0).
+    """
+    rows = (
+        # module_key, country, currency, tier_key, display,
+        # base, per_party, max_parties, contact, sort
+        (
+            "ledger", "TR", "TRY", "starter", "Starter",
+            "299", "9.9", 50, False, 1,
+        ),
+        (
+            "ledger", "TR", "TRY", "pro", "Pro",
+            "999", "7.9", 200, False, 2,
+        ),
+        (
+            "ledger", "TR", "TRY", "growth", "Growth",
+            "2499", "4.9", 1000, False, 3,
+        ),
+        (
+            "ledger", "TR", "TRY", "enterprise", "Enterprise",
+            "0", "0", None, True, 4,
+        ),
+        (
+            "ledger", "US", "USD", "starter", "Starter",
+            "12", "0.39", 50, False, 1,
+        ),
+        (
+            "ledger", "US", "USD", "pro", "Pro",
+            "39", "0.29", 200, False, 2,
+        ),
+        (
+            "ledger", "US", "USD", "growth", "Growth",
+            "99", "0.19", 1000, False, 3,
+        ),
+        (
+            "ledger", "US", "USD", "enterprise", "Enterprise",
+            "0", "0", None, True, 4,
+        ),
+    )
+    for (
+        module_key,
+        country_code,
+        currency,
+        tier_key,
+        display_name,
+        base_monthly,
+        price_per_personnel,
+        max_personnel,
+        is_contact_sales,
+        sort_order,
+    ) in rows:
+        execute(
+            """
+            INSERT INTO public.module_pricing_tiers (
+                module_key, country_code, currency, tier_key, display_name,
+                base_monthly, price_per_personnel, max_personnel,
+                included_branches, price_per_extra_branch,
+                is_contact_sales, annual_discount_months, setup_fee,
+                sort_order, is_active
+            )
+            VALUES (
+                %s, %s, %s, %s, %s,
+                %s, %s, %s,
+                0, 0,
+                %s, 2, 0,
+                %s, TRUE
+            )
+            ON CONFLICT (module_key, country_code, tier_key) DO NOTHING
+            """,
+            (
+                module_key,
+                country_code,
+                currency,
+                tier_key,
+                display_name,
+                base_monthly,
+                price_per_personnel,
+                max_personnel,
                 is_contact_sales,
                 sort_order,
             ),

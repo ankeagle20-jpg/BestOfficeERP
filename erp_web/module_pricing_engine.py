@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """Payafin modül hibrit fiyatlandırma motoru — Flask/ödeme bağımsız saf hesaplama.
 
-Personel (+ şube) ve Randevu (+ personel + aylık randevu) eksenleri;
+Personel (+ şube), Randevu (+ personel + aylık randevu) ve Ledger
+(+ aktif cari kart; max_personnel alias) eksenleri;
 çekirdek pricing_engine'den ayrı.
 Kaynak: public.module_pricing_tiers + public.pricing_regions.
 """
@@ -348,6 +349,11 @@ def _contact_response(
             f"Personel ({personnel_count}) / aylık randevu ({appointment_count}) "
             f"self-servis kademe sınırlarını aşıyor; önerilen: {recommended_tier_key}"
         )
+    elif str(module_key or "") == "ledger":
+        reason = (
+            f"Aktif cari kart sayısı ({personnel_count}) self-servis "
+            f"kademe sınırlarını aşıyor; önerilen: {recommended_tier_key}"
+        )
     else:
         reason = (
             f"Personel sayısı ({personnel_count}) self-servis "
@@ -680,7 +686,10 @@ def _build_bill(
         )
 
     n = int(personnel_count)
-    b = int(branch_count)
+    mk = str(tier["module_key"])
+    is_ledger = mk == "ledger"
+    # Ledger: şube yok (aktif cari kart ekseni); branch ücreti 0
+    b = 0 if is_ledger else int(branch_count)
     currency = region_currency
 
     base = _d(tier["base_monthly"])
@@ -716,7 +725,6 @@ def _build_bill(
     )
 
     # Kampanya kontrolü
-    mk = str(tier["module_key"])
     cc = str(tier["country_code"])
     campaign = find_active_campaign(country_code=cc, applies_to_target=f"module:{mk}")
     monthly_discount = Decimal("0.00")
@@ -733,6 +741,8 @@ def _build_bill(
     final_monthly = max(Decimal("0.00"), monthly - monthly_discount)
     final_annual_due = max(Decimal("0.00"), annual_due - annual_discount)
 
+    unit_label = "cari kart" if is_ledger else "personel"
+    unit_key = "parties" if is_ledger else "personnel"
     lines: list[dict[str, str]] = [
         {
             "key": "base",
@@ -741,13 +751,13 @@ def _build_bill(
             "text": f"Taban ücret: {_money(base, currency)}",
         },
         {
-            "key": "personnel",
+            "key": unit_key,
             "label": (
-                f"{n} personel × {_money(price_per_personnel, currency)}"
+                f"{n} {unit_label} × {_money(price_per_personnel, currency)}"
             ),
             "amount": str(personnel_fee),
             "text": (
-                f"{n} personel × {_money(price_per_personnel, currency)}: "
+                f"{n} {unit_label} × {_money(price_per_personnel, currency)}: "
                 f"{_money(personnel_fee, currency)}"
             ),
         },
@@ -946,12 +956,14 @@ def calculate_module_bill(
         mk, cc, n, appointment_count=appt, target_currency=currency
     )
 
+    bill_branches = 0 if mk in ("randevu", "ledger") else b
+
     def _bill_kwargs(tier_row: dict, recommended: str | None) -> dict:
         return {
             "tier": tier_row,
             "region_currency": currency,
             "personnel_count": n,
-            "branch_count": b if mk != "randevu" else 0,
+            "branch_count": bill_branches,
             "billing_period": period,
             "recommended_tier_key": recommended,
             "appointment_count": appt,
@@ -963,7 +975,7 @@ def calculate_module_bill(
             country_code=cc,
             currency=currency,
             personnel_count=n,
-            branch_count=b if mk != "randevu" else 0,
+            branch_count=bill_branches,
             billing_period=period,
             recommended_tier_key=required["recommended_tier_key"],
             tier=required.get("tier"),
@@ -978,7 +990,7 @@ def calculate_module_bill(
                 country_code=cc,
                 currency=currency,
                 personnel_count=n,
-                branch_count=b if mk != "randevu" else 0,
+                branch_count=bill_branches,
                 billing_period=period,
                 recommended_tier_key=required.get("recommended_tier_key")
                 or "enterprise",
@@ -1005,7 +1017,7 @@ def calculate_module_bill(
             country_code=cc,
             currency=currency,
             personnel_count=n,
-            branch_count=b if mk != "randevu" else 0,
+            branch_count=bill_branches,
             billing_period=period,
             recommended_tier_key=str(selected["tier_key"]),
             tier=selected,

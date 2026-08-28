@@ -30,7 +30,9 @@ from tenant_reserved_slugs import RESERVED_TENANT_SLUGS
 logger = logging.getLogger(__name__)
 
 BASELINE_MODULE_KEY = "core_erp"
-SIGNUP_SELECTABLE_MODULE_KEYS: frozenset[str] = frozenset({"personnel", "randevu"})
+SIGNUP_SELECTABLE_MODULE_KEYS: frozenset[str] = frozenset(
+    {"personnel", "randevu", "ledger"}
+)
 
 BACKUP_TABLE = "musteri_tahsilat_panel_detay_backup_20260617"
 PLATFORM_STRIP_TABLES = (

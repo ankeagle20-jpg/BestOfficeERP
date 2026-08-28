@@ -134,7 +134,7 @@
     <div class="mp-preview">
       <div class="mp-toolbar" style="margin-bottom:0;">
         <label id="mp-prev-appt-wrap" style="display:none;">Tahmini aylık randevu <input type="number" id="mp-prev-appointments" min="0" value="100" style="width:90px;"></label>
-        <label>Personel <input type="number" id="mp-prev-personnel" min="0" value="3" style="width:90px;"></label>
+        <label id="mp-prev-personnel-wrap">Personel <input type="number" id="mp-prev-personnel" min="0" value="3" style="width:90px;"></label>
         <label id="mp-prev-branch-wrap">Şube <input type="number" id="mp-prev-branch" min="0" value="1" style="width:90px;"></label>
         <label>Dönem
           <select id="mp-prev-period">
@@ -205,6 +205,10 @@
     return currentModule() === 'randevu';
   }
 
+  function isLedger() {
+    return currentModule() === 'ledger';
+  }
+
   function updateCountryBanner() {
     var cc = currentCountry();
     bannerEl.className = 'country-status-banner';
@@ -258,10 +262,16 @@
 
   function syncPreviewUi() {
     var rand = isRandevu();
+    var led = isLedger();
     var apptWrap = document.getElementById('mp-prev-appt-wrap');
     var brWrap = document.getElementById('mp-prev-branch-wrap');
+    var persWrap = document.getElementById('mp-prev-personnel-wrap');
     if (apptWrap) apptWrap.style.display = rand ? 'inline-block' : 'none';
-    if (brWrap) brWrap.style.display = rand ? 'none' : 'inline-block';
+    if (brWrap) brWrap.style.display = (rand || led) ? 'none' : 'inline-block';
+    if (persWrap) {
+      persWrap.style.display = 'inline-block';
+      persWrap.childNodes[0].textContent = led ? 'Aktif cari kart ' : 'Personel ';
+    }
   }
 
   function renderTableHead() {
@@ -274,6 +284,17 @@
         '<th>Dahil personel</th>' +
         '<th>Ek personel ücreti</th>' +
         '<th>Personel max</th>' +
+        '<th>Yıllık indirim (ay)</th>' +
+        '<th>Aktif</th>' +
+        '<th></th>';
+    } else if (isLedger()) {
+      tiersHead.innerHTML =
+        '<th>tier_key</th>' +
+        '<th>Ad</th>' +
+        '<th>Taban (aylık)</th>' +
+        '<th>Cari kart başı</th>' +
+        '<th>Max cari kart</th>' +
+        '<th>Ek şube ücreti</th>' +
         '<th>Yıllık indirim (ay)</th>' +
         '<th>Aktif</th>' +
         '<th></th>';
@@ -464,6 +485,9 @@
     if (isRandevu()) {
       body.appointment_count = parseInt(document.getElementById('mp-prev-appointments').value, 10) || 0;
       if (!body.branch_count) body.branch_count = 1;
+    }
+    if (isLedger()) {
+      body.branch_count = 0;
     }
     api('/admin/api/module-pricing/preview', { method: 'POST', body: JSON.stringify(body) })
       .then(function (res) {

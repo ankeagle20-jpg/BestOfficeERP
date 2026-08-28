@@ -18,7 +18,7 @@ from services.exchange_rate_service import get_exchange_rate
 PUBLIC_MODULE_PRICING_CACHE_TTL_SEC = 60.0
 _PUBLIC_CACHE_PREFIX = "module_pricing:public:v2:"
 
-PUBLIC_MODULE_KEYS = frozenset({"personnel", "randevu"})
+PUBLIC_MODULE_KEYS = frozenset({"personnel", "randevu", "ledger"})
 
 _Q2 = Decimal("0.01")
 _Q4 = Decimal("0.0001")
