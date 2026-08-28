@@ -2962,10 +2962,10 @@
                             <span id="odeme_duzeni_manuel_wrap" style="display:none;">
                                 <input type="text" id="odeme_duzeni_manuel" placeholder="Örn: 2 aylık, 9 aylık" style="max-width: 140px;">
                             </span>
-                            <input type="number" step="0.01" id="aylik_kira" value="0.00" required onchange="girisAylikKiraBankaOtoSenkron(); hesaplaYuzde();" oninput="girisAylikKiraBankaOtoSenkron(); sozlesmelerAylikGuncelle();" style="max-width:140px;width:9em;flex-shrink:0;">
+                            <input type="number" step="0.01" id="aylik_kira" value="0.00" required onchange="girisAylikKiraNetKaynaktanSenkron('change');" oninput="girisAylikKiraNetKaynaktanSenkron('input');" style="max-width:140px;width:9em;flex-shrink:0;">
                             <span style="display:inline-flex;align-items:center;gap:6px;color:#e0f7fa;font-size:13px;white-space:nowrap;">
                                 <span>KDV Dahil</span>
-                                <input type="number" step="0.01" min="0" id="aylik_kira_kdv_dahil" placeholder="₺" readonly title="Aylık kira + %20 KDV (otomatik)" style="max-width:110px;width:7em;flex-shrink:0;padding:4px 6px;border-radius:4px;border:1px solid #2d4060;background:#10293d;color:#e0f7fa;font-size:13px;">
+                                <input type="number" step="0.01" min="0" id="aylik_kira_kdv_dahil" placeholder="₺" title="KDV dahil tutar yazınca net = tutar / (1 + KDV%); net yazınca bu alan otomatik güncellenir" inputmode="decimal" oninput="girisAylikKiraKdvDahilInputDegisti();" onchange="girisAylikKiraKdvDahilInputDegisti();" style="max-width:110px;width:7em;flex-shrink:0;padding:4px 6px;border-radius:4px;border:1px solid #2d4060;background:#0f2537;color:#e0f7fa;font-size:13px;">
                             </span>
                             <span style="display:inline-flex;align-items:center;gap:6px;color:#e0f7fa;font-size:13px;white-space:nowrap;">
                                 <span>Toplam</span>
@@ -3021,7 +3021,7 @@
                         </div>
 
                         <label>KDV %</label>
-                        <input type="number" id="kdv_oran" value="20" min="0" max="100" step="0.01" placeholder="20" onchange="hesaplaYuzde(); sozlesmelerAylikGuncelle(); if (typeof syncBildirgeKdvFromCariKart === 'function') syncBildirgeKdvFromCariKart(); if (typeof sozlesmelerReelHibritKdvGuncelle === 'function') sozlesmelerReelHibritKdvGuncelle();">
+                        <input type="number" id="kdv_oran" value="20" min="0" max="100" step="0.01" placeholder="20" onchange="hesaplaYuzde(); sozlesmelerAylikGuncelle(); if (typeof girisAylikKiraKdvDahilGuncelle === 'function') girisAylikKiraKdvDahilGuncelle(); if (typeof syncBildirgeKdvFromCariKart === 'function') syncBildirgeKdvFromCariKart(); if (typeof sozlesmelerReelHibritKdvGuncelle === 'function') sozlesmelerReelHibritKdvGuncelle();">
                         
                         <label>Kira Süresi Aylık</label>
                         <input type="number" id="kira_suresi_ay" value="12" min="1" max="240" step="1" placeholder="12" onchange="hesaplaYuzde()" oninput="sozlesmelerAylikGuncelle()" title="Sözleşme süresi (ay). Tıklayıp manuel girebilirsiniz.">
@@ -17834,9 +17834,25 @@ function girisKiraNakitBankaTutarInputDoldur(el, raw) {
 }
 
 /**
- * Aylık kira değişince: nakit tutarı yoksa tamamı banka; varsa banka = toplam − nakit (karma ödeme).
+ * #kdv_oran → { oran, carpan }. Geçersiz/boşta çarpan 1 (sabit %20 yok).
+ */
+function girisKdvOranCarpanOku() {
+    var kdvEl = document.getElementById('kdv_oran');
+    var oran = kdvEl ? parseFloat(String(kdvEl.value != null ? kdvEl.value : '').replace(/\s/g, '').replace(',', '.')) : NaN;
+    if (isNaN(oran) || oran < 0) oran = 0;
+    return { oran: oran, carpan: 1 + oran / 100 };
+}
+
+/**
+ * Aylık kira (net) → banka net üzerinden KDV dahil kutusu.
+ * Kaynak «kdv_dahil» iken dokunma (ters hesap döngüsünü keser).
+ * Not: banka senkronu (girisAylikKiraBankaOtoSenkron) nakit yoksa tamamı bankaya yazar.
  */
 function girisAylikKiraKdvDahilGuncelle() {
+    if (window.__girisKiraTutarEditKaynak === 'kdv_dahil') {
+        girisAylikKiraToplamGuncelle();
+        return;
+    }
     var tB = document.getElementById('kira_banka_tutar');
     var kd = document.getElementById('aylik_kira_kdv_dahil');
     if (!kd) return;
@@ -17847,9 +17863,52 @@ function girisAylikKiraKdvDahilGuncelle() {
         girisAylikKiraToplamGuncelle();
         return;
     }
-    var kdvDahil = Math.round(bankaNet * 1.20 * 100) / 100;
+    var carpan = girisKdvOranCarpanOku().carpan;
+    if (!(carpan > 0)) carpan = 1;
+    var kdvDahil = Math.round(bankaNet * carpan * 100) / 100;
     kd.value = String(kdvDahil);
     girisAylikKiraToplamGuncelle();
+}
+
+/** #aylik_kira kullanıcı düzenlemesi: net → KDV dahil (kaynak=net). */
+function girisAylikKiraNetKaynaktanSenkron(kind) {
+    window.__girisKiraTutarEditKaynak = 'net';
+    try {
+        girisAylikKiraBankaOtoSenkron();
+        if (kind === 'change') {
+            if (typeof hesaplaYuzde === 'function') hesaplaYuzde();
+        } else if (typeof sozlesmelerAylikGuncelle === 'function') {
+            sozlesmelerAylikGuncelle();
+        }
+    } finally {
+        window.__girisKiraTutarEditKaynak = null;
+    }
+}
+
+/** #aylik_kira_kdv_dahil kullanıcı düzenlemesi: KDV dahil → net = brut/(1+oran/100). */
+function girisAylikKiraKdvDahilInputDegisti() {
+    window.__girisKiraTutarEditKaynak = 'kdv_dahil';
+    try {
+        var kd = document.getElementById('aylik_kira_kdv_dahil');
+        var ak = document.getElementById('aylik_kira');
+        if (!kd || !ak) return;
+        var raw = String(kd.value != null ? kd.value : '').trim();
+        var brut = raw ? girisTrSayiParse(raw) : NaN;
+        if (!raw || isNaN(brut) || brut <= 0) {
+            girisAylikKiraToplamGuncelle();
+            return;
+        }
+        var carpan = girisKdvOranCarpanOku().carpan;
+        if (!(carpan > 0)) carpan = 1;
+        var net = Math.round((brut / carpan) * 100) / 100;
+        ak.value = String(net);
+        if (typeof girisAylikKiraBankaOtoSenkron === 'function') girisAylikKiraBankaOtoSenkron();
+        if (typeof hesaplaYuzde === 'function') hesaplaYuzde();
+        else if (typeof sozlesmelerAylikGuncelle === 'function') sozlesmelerAylikGuncelle();
+        girisAylikKiraToplamGuncelle();
+    } finally {
+        window.__girisKiraTutarEditKaynak = null;
+    }
 }
 function girisAylikKiraToplamGuncelle() {
     var kd = document.getElementById('aylik_kira_kdv_dahil');
