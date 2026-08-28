@@ -3,7 +3,6 @@
 {% block content %}
 <style>
   .pc-wrap {
-    --pc-bg: #f4f6f8;
     --pc-ink: #1a2332;
     --pc-muted: #5c6b7a;
     --pc-line: #d8dee6;
@@ -23,33 +22,27 @@
     font-weight: 650;
     letter-spacing: -0.02em;
   }
-  .pc-sub {
-    margin: 0 0 1.25rem;
-    color: var(--pc-muted);
-    font-size: 0.92rem;
-  }
-  .pc-toolbar {
-    display: flex;
-    gap: 0.5rem;
-    margin-bottom: 1rem;
-  }
-  .pc-toolbar input {
+  .pc-sub { margin: 0 0 1rem; color: var(--pc-muted); font-size: 0.92rem; }
+  .pc-tabs { display: flex; gap: 0.35rem; margin-bottom: 1rem; }
+  .pc-tab {
     flex: 1;
-    min-width: 0;
     border: 1px solid var(--pc-line);
+    background: #fff;
     border-radius: 10px;
-    padding: 0.7rem 0.85rem;
-    font-size: 1rem;
-    background: var(--pc-card);
-  }
-  .pc-btn {
-    border: none;
-    border-radius: 10px;
-    padding: 0.7rem 1rem;
-    font-size: 0.95rem;
+    padding: 0.55rem;
     font-weight: 600;
     cursor: pointer;
-    white-space: nowrap;
+    color: var(--pc-muted);
+  }
+  .pc-tab.active { background: var(--pc-accent); color: #fff; border-color: var(--pc-accent); }
+  .pc-toolbar { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+  .pc-toolbar input {
+    flex: 1; min-width: 0; border: 1px solid var(--pc-line); border-radius: 10px;
+    padding: 0.7rem 0.85rem; font-size: 1rem; background: var(--pc-card);
+  }
+  .pc-btn {
+    border: none; border-radius: 10px; padding: 0.7rem 1rem; font-size: 0.95rem;
+    font-weight: 600; cursor: pointer; white-space: nowrap;
   }
   .pc-btn-primary { background: var(--pc-accent); color: #fff; }
   .pc-btn-give { background: #fff7ed; color: var(--pc-give); border: 1px solid #fdba74; }
@@ -58,21 +51,11 @@
   .pc-btn-danger { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
   .pc-list { display: flex; flex-direction: column; gap: 0.55rem; }
   .pc-item {
-    background: var(--pc-card);
-    border: 1px solid var(--pc-line);
-    border-radius: 12px;
-    padding: 0.9rem 1rem;
-    cursor: pointer;
-    text-align: left;
-    width: 100%;
+    background: var(--pc-card); border: 1px solid var(--pc-line); border-radius: 12px;
+    padding: 0.9rem 1rem; cursor: pointer; text-align: left; width: 100%;
   }
   .pc-item:hover { border-color: #a8b8c8; }
-  .pc-item-top {
-    display: flex;
-    justify-content: space-between;
-    gap: 0.75rem;
-    align-items: baseline;
-  }
+  .pc-item-top { display: flex; justify-content: space-between; gap: 0.75rem; align-items: baseline; }
   .pc-name { font-weight: 600; font-size: 1.02rem; }
   .pc-bal { font-variant-numeric: tabular-nums; font-weight: 650; }
   .pc-bal.pos { color: var(--pc-give); }
@@ -80,90 +63,83 @@
   .pc-bal.zero { color: var(--pc-muted); }
   .pc-meta { margin-top: 0.25rem; font-size: 0.8rem; color: var(--pc-muted); }
   .pc-empty {
-    text-align: center;
-    padding: 2.5rem 1rem;
-    color: var(--pc-muted);
-    border: 1px dashed var(--pc-line);
-    border-radius: 12px;
-    background: rgba(255,255,255,0.5);
+    text-align: center; padding: 2.5rem 1rem; color: var(--pc-muted);
+    border: 1px dashed var(--pc-line); border-radius: 12px; background: rgba(255,255,255,0.5);
   }
   .pc-panel {
-    display: none;
-    background: var(--pc-card);
-    border: 1px solid var(--pc-line);
-    border-radius: 14px;
-    padding: 1rem;
-    margin-bottom: 1rem;
+    display: none; background: var(--pc-card); border: 1px solid var(--pc-line);
+    border-radius: 14px; padding: 1rem; margin-bottom: 1rem;
   }
   .pc-panel.open { display: block; }
   .pc-panel h2 { margin: 0 0 0.75rem; font-size: 1.1rem; }
   .pc-field { margin-bottom: 0.65rem; }
-  .pc-field label {
-    display: block;
-    font-size: 0.78rem;
-    color: var(--pc-muted);
-    margin-bottom: 0.2rem;
-  }
+  .pc-field label { display: block; font-size: 0.78rem; color: var(--pc-muted); margin-bottom: 0.2rem; }
   .pc-field input, .pc-field select, .pc-field textarea {
-    width: 100%;
-    box-sizing: border-box;
-    border: 1px solid var(--pc-line);
-    border-radius: 8px;
-    padding: 0.6rem 0.7rem;
-    font-size: 1rem;
-    background: #fff;
+    width: 100%; box-sizing: border-box; border: 1px solid var(--pc-line);
+    border-radius: 8px; padding: 0.6rem 0.7rem; font-size: 1rem; background: #fff;
   }
   .pc-actions { display: flex; flex-wrap: wrap; gap: 0.45rem; margin: 0.75rem 0; }
-  .pc-tx {
-    border-top: 1px solid var(--pc-line);
-    padding: 0.65rem 0;
-    font-size: 0.9rem;
-  }
+  .pc-tx { border-top: 1px solid var(--pc-line); padding: 0.65rem 0; font-size: 0.9rem; }
   .pc-tx.voided { opacity: 0.45; text-decoration: line-through; }
   .pc-tx-row { display: flex; justify-content: space-between; gap: 0.5rem; }
   .pc-err { color: #b91c1c; font-size: 0.88rem; margin: 0.4rem 0; }
   .pc-back { margin-bottom: 0.75rem; }
+  .pc-member {
+    display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;
+    border-top: 1px solid var(--pc-line); padding: 0.55rem 0; font-size: 0.92rem;
+  }
 </style>
 
 <div class="pc-wrap" id="pc-app">
   <h1>Payafin Cari</h1>
   <p class="pc-sub">Basit borç / alacak takibi</p>
 
+  <div class="pc-tabs" id="pc-home-tabs">
+    <button type="button" class="pc-tab active" data-tab="parties">Cariler</button>
+    <button type="button" class="pc-tab" data-tab="groups">Gruplar</button>
+  </div>
+
   <div id="pc-list-view">
-    <div class="pc-toolbar">
-      <input type="search" id="pc-q" placeholder="Ara…" autocomplete="off">
-      <button type="button" class="pc-btn pc-btn-primary" id="pc-btn-new">Yeni Cari</button>
+    <div id="pc-parties-home">
+      <div class="pc-toolbar">
+        <input type="search" id="pc-q" placeholder="Ara…" autocomplete="off">
+        <button type="button" class="pc-btn pc-btn-primary" id="pc-btn-new">Yeni Cari</button>
+      </div>
+      <div class="pc-panel" id="pc-new-panel">
+        <h2>Yeni cari</h2>
+        <div class="pc-field"><label>Ad</label><input id="pc-new-name" maxlength="200"></div>
+        <div class="pc-field">
+          <label>Tür</label>
+          <select id="pc-new-type"><option value="person">Kişi</option><option value="company">Şirket</option></select>
+        </div>
+        <div class="pc-field"><label>Telefon</label><input id="pc-new-phone" maxlength="64"></div>
+        <div class="pc-field"><label>E-posta</label><input id="pc-new-email" type="email" maxlength="120"></div>
+        <div id="pc-new-err" class="pc-err" hidden></div>
+        <div class="pc-actions">
+          <button type="button" class="pc-btn pc-btn-primary" id="pc-new-save">Kaydet</button>
+          <button type="button" class="pc-btn pc-btn-ghost" id="pc-new-cancel">Vazgeç</button>
+        </div>
+      </div>
+      <div id="pc-list" class="pc-list"></div>
     </div>
 
-    <div class="pc-panel" id="pc-new-panel">
-      <h2>Yeni cari</h2>
-      <div class="pc-field">
-        <label>Ad</label>
-        <input id="pc-new-name" maxlength="200" placeholder="Kişi veya şirket">
+    <div id="pc-groups-home" hidden>
+      <div class="pc-toolbar">
+        <input type="search" id="pc-gq" placeholder="Grup ara…" autocomplete="off">
+        <button type="button" class="pc-btn pc-btn-primary" id="pc-btn-new-group">Yeni Grup</button>
       </div>
-      <div class="pc-field">
-        <label>Tür</label>
-        <select id="pc-new-type">
-          <option value="person">Kişi</option>
-          <option value="company">Şirket</option>
-        </select>
+      <div class="pc-panel" id="pc-new-group-panel">
+        <h2>Yeni grup</h2>
+        <div class="pc-field"><label>Ad</label><input id="pc-ng-name" maxlength="200"></div>
+        <div class="pc-field"><label>Not</label><input id="pc-ng-notes" maxlength="300"></div>
+        <div id="pc-ng-err" class="pc-err" hidden></div>
+        <div class="pc-actions">
+          <button type="button" class="pc-btn pc-btn-primary" id="pc-ng-save">Kaydet</button>
+          <button type="button" class="pc-btn pc-btn-ghost" id="pc-ng-cancel">Vazgeç</button>
+        </div>
       </div>
-      <div class="pc-field">
-        <label>Telefon</label>
-        <input id="pc-new-phone" maxlength="64">
-      </div>
-      <div class="pc-field">
-        <label>E-posta</label>
-        <input id="pc-new-email" type="email" maxlength="120">
-      </div>
-      <div id="pc-new-err" class="pc-err" hidden></div>
-      <div class="pc-actions">
-        <button type="button" class="pc-btn pc-btn-primary" id="pc-new-save">Kaydet</button>
-        <button type="button" class="pc-btn pc-btn-ghost" id="pc-new-cancel">Vazgeç</button>
-      </div>
+      <div id="pc-group-list" class="pc-list"></div>
     </div>
-
-    <div id="pc-list" class="pc-list"></div>
   </div>
 
   <div id="pc-detail-view" hidden>
@@ -173,22 +149,14 @@
     <div class="pc-actions">
       <button type="button" class="pc-btn pc-btn-give" id="pc-btn-give">Verdim</button>
       <button type="button" class="pc-btn pc-btn-recv" id="pc-btn-recv">Aldım</button>
+      <button type="button" class="pc-btn pc-btn-ghost" id="pc-btn-stmt">Ekstre</button>
     </div>
 
     <div class="pc-panel" id="pc-tx-panel">
       <h2 id="pc-tx-title">Hareket</h2>
-      <div class="pc-field">
-        <label>Tutar</label>
-        <input id="pc-tx-amount" type="number" min="0.01" step="0.01" inputmode="decimal">
-      </div>
-      <div class="pc-field">
-        <label>Para birimi</label>
-        <input id="pc-tx-currency" value="TRY" maxlength="3" style="text-transform:uppercase">
-      </div>
-      <div class="pc-field">
-        <label>Not</label>
-        <input id="pc-tx-note" maxlength="300">
-      </div>
+      <div class="pc-field"><label>Tutar</label><input id="pc-tx-amount" type="number" min="0.01" step="0.01" inputmode="decimal"></div>
+      <div class="pc-field"><label>Para birimi</label><input id="pc-tx-currency" value="TRY" maxlength="3" style="text-transform:uppercase"></div>
+      <div class="pc-field"><label>Not</label><input id="pc-tx-note" maxlength="300"></div>
       <div id="pc-tx-err" class="pc-err" hidden></div>
       <div class="pc-actions">
         <button type="button" class="pc-btn pc-btn-primary" id="pc-tx-save">Kaydet</button>
@@ -196,21 +164,52 @@
       </div>
     </div>
 
+    <div class="pc-panel" id="pc-stmt-panel">
+      <h2>Ekstre</h2>
+      <div class="pc-field"><label>Başlangıç</label><input type="date" id="pc-stmt-from"></div>
+      <div class="pc-field"><label>Bitiş</label><input type="date" id="pc-stmt-to"></div>
+      <div id="pc-stmt-err" class="pc-err" hidden></div>
+      <div class="pc-actions">
+        <button type="button" class="pc-btn pc-btn-primary" id="pc-stmt-preview">Önizle</button>
+        <button type="button" class="pc-btn pc-btn-ghost" id="pc-stmt-pdf">PDF indir</button>
+        <button type="button" class="pc-btn pc-btn-ghost" id="pc-stmt-cancel">Kapat</button>
+      </div>
+      <div id="pc-stmt-preview-box" class="pc-meta"></div>
+    </div>
+
     <div id="pc-tx-list"></div>
+  </div>
+
+  <div id="pc-group-detail-view" hidden>
+    <button type="button" class="pc-btn pc-btn-ghost pc-back" id="pc-gback">← Gruplar</button>
+    <h1 id="pc-gdetail-name">—</h1>
+    <p class="pc-sub" id="pc-gdetail-bal">—</p>
+    <div class="pc-panel open">
+      <h2>Üye ekle</h2>
+      <div class="pc-field">
+        <label>Cari</label>
+        <select id="pc-g-add-party"></select>
+      </div>
+      <div class="pc-actions">
+        <button type="button" class="pc-btn pc-btn-primary" id="pc-g-add-btn">Ekle</button>
+      </div>
+    </div>
+    <h2 style="font-size:1.05rem;margin:0.5rem 0;">Üyeler</h2>
+    <div id="pc-g-members"></div>
   </div>
 </div>
 
 <script>
 (function () {
-  var state = { parties: [], partyId: null, direction: null };
+  var state = {
+    parties: [], groups: [], partyId: null, groupId: null, direction: null, tab: "parties"
+  };
 
   function fmtMoney(n, cur) {
     var v = Number(n || 0);
     try {
       return new Intl.NumberFormat("tr-TR", {
-        style: "currency",
-        currency: cur || "TRY",
-        maximumFractionDigits: 2
+        style: "currency", currency: cur || "TRY", maximumFractionDigits: 2
       }).format(v);
     } catch (e) {
       return v.toFixed(2) + " " + (cur || "");
@@ -241,48 +240,62 @@
       body: opts.body ? JSON.stringify(opts.body) : undefined,
       credentials: "same-origin"
     }).then(function (r) {
-      return r.json().then(function (j) {
-        if (!r.ok || !j.ok) {
-          var err = new Error((j && j.mesaj) || ("HTTP " + r.status));
-          err.status = r.status;
-          throw err;
-        }
-        return j;
-      });
+      var ct = r.headers.get("content-type") || "";
+      if (ct.indexOf("application/json") >= 0 || opts.expectJson !== false) {
+        return r.json().then(function (j) {
+          if (!r.ok || (j && j.ok === false)) {
+            var err = new Error((j && j.mesaj) || ("HTTP " + r.status));
+            err.status = r.status;
+            throw err;
+          }
+          return j;
+        });
+      }
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r;
     });
+  }
+
+  function todayISO() {
+    var d = new Date();
+    return d.toISOString().slice(0, 10);
+  }
+  function monthStartISO() {
+    var d = new Date();
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-01";
+  }
+
+  function setTab(tab) {
+    state.tab = tab;
+    Array.prototype.forEach.call(document.querySelectorAll(".pc-tab"), function (b) {
+      b.classList.toggle("active", b.getAttribute("data-tab") === tab);
+    });
+    document.getElementById("pc-parties-home").hidden = tab !== "parties";
+    document.getElementById("pc-groups-home").hidden = tab !== "groups";
+    if (tab === "groups") loadGroups();
+    else loadList();
   }
 
   function renderList() {
     var q = (document.getElementById("pc-q").value || "").trim().toLowerCase();
     var el = document.getElementById("pc-list");
     var rows = state.parties.filter(function (p) {
-      if (!q) return true;
-      return String(p.name || "").toLowerCase().indexOf(q) >= 0;
+      return !q || String(p.name || "").toLowerCase().indexOf(q) >= 0;
     });
     if (!rows.length) {
       el.innerHTML = '<div class="pc-empty">Henüz cari yok.<br>Yeni Cari ile başlayın.</div>';
       return;
     }
-    el.innerHTML = rows.map(function (p) {
-      var pr = p.primary_balance;
-      var amt = pr ? fmtMoney(pr.balance, pr.currency) : "—";
-      var cls = balClass(pr);
-      var tip = (p.type === "company") ? "Şirket" : "Kişi";
-      return (
-        '<button type="button" class="pc-item" data-id="' + p.id + '">' +
-          '<div class="pc-item-top">' +
-            '<span class="pc-name"></span>' +
-            '<span class="pc-bal ' + cls + '"></span>' +
-          "</div>" +
-          '<div class="pc-meta"></div>' +
-        "</button>"
-      );
+    el.innerHTML = rows.map(function () {
+      return '<button type="button" class="pc-item"><div class="pc-item-top"><span class="pc-name"></span><span class="pc-bal"></span></div><div class="pc-meta"></div></button>';
     }).join("");
     Array.prototype.forEach.call(el.querySelectorAll(".pc-item"), function (btn, i) {
       var p = rows[i];
       var pr = p.primary_balance;
       btn.querySelector(".pc-name").textContent = p.name;
-      btn.querySelector(".pc-bal").textContent = pr ? fmtMoney(pr.balance, pr.currency) : "—";
+      var balEl = btn.querySelector(".pc-bal");
+      balEl.textContent = pr ? fmtMoney(pr.balance, pr.currency) : "—";
+      balEl.className = "pc-bal " + balClass(pr);
       btn.querySelector(".pc-meta").textContent =
         ((p.type === "company") ? "Şirket" : "Kişi") + (pr ? " · " + balLabel(pr) : "");
       btn.addEventListener("click", function () { openDetail(p.id); });
@@ -293,14 +306,59 @@
     return api("/ledger/api/parties").then(function (j) {
       state.parties = j.parties || [];
       renderList();
+      fillGroupPartySelect();
+    });
+  }
+
+  function renderGroups() {
+    var q = (document.getElementById("pc-gq").value || "").trim().toLowerCase();
+    var el = document.getElementById("pc-group-list");
+    var rows = state.groups.filter(function (g) {
+      return !q || String(g.name || "").toLowerCase().indexOf(q) >= 0;
+    });
+    if (!rows.length) {
+      el.innerHTML = '<div class="pc-empty">Henüz grup yok.</div>';
+      return;
+    }
+    el.innerHTML = rows.map(function () {
+      return '<button type="button" class="pc-item"><div class="pc-item-top"><span class="pc-name"></span><span class="pc-bal"></span></div><div class="pc-meta"></div></button>';
+    }).join("");
+    Array.prototype.forEach.call(el.querySelectorAll(".pc-item"), function (btn, i) {
+      var g = rows[i];
+      btn.querySelector(".pc-name").textContent = g.name;
+      btn.querySelector(".pc-bal").textContent = (g.member_count || 0) + " üye";
+      btn.querySelector(".pc-meta").textContent = g.notes || "Grup";
+      btn.addEventListener("click", function () { openGroup(g.id); });
+    });
+  }
+
+  function loadGroups() {
+    return api("/ledger/api/groups").then(function (j) {
+      state.groups = j.groups || [];
+      renderGroups();
+    });
+  }
+
+  function fillGroupPartySelect() {
+    var sel = document.getElementById("pc-g-add-party");
+    if (!sel) return;
+    sel.innerHTML = "";
+    state.parties.forEach(function (p) {
+      var o = document.createElement("option");
+      o.value = String(p.id);
+      o.textContent = p.name;
+      sel.appendChild(o);
     });
   }
 
   function openDetail(id) {
     state.partyId = id;
+    document.getElementById("pc-home-tabs").hidden = true;
     document.getElementById("pc-list-view").hidden = true;
+    document.getElementById("pc-group-detail-view").hidden = true;
     document.getElementById("pc-detail-view").hidden = false;
     document.getElementById("pc-tx-panel").classList.remove("open");
+    document.getElementById("pc-stmt-panel").classList.remove("open");
     return api("/ledger/api/parties/" + id).then(function (j) {
       var p = j.party;
       document.getElementById("pc-detail-name").textContent = p.name;
@@ -314,37 +372,66 @@
       box.innerHTML = txs.map(function (t) {
         var dir = t.direction === "give" ? "Verdim" : "Aldım";
         var voided = t.is_void ? " voided" : "";
-        var voidBtn = t.is_void
-          ? ""
-          : ('<button type="button" class="pc-btn pc-btn-danger pc-void" data-id="' + t.id + '">İptal</button>');
-        return (
-          '<div class="pc-tx' + voided + '">' +
-            '<div class="pc-tx-row">' +
-              "<strong>" + dir + " " + fmtMoney(t.amount, t.currency) + "</strong>" +
-              voidBtn +
-            "</div>" +
-            '<div class="pc-meta">' + (t.note || "") + "</div>" +
-          "</div>"
-        );
+        var voidBtn = t.is_void ? "" : ('<button type="button" class="pc-btn pc-btn-danger pc-void" data-id="' + t.id + '">İptal</button>');
+        return '<div class="pc-tx' + voided + '"><div class="pc-tx-row"><strong>' + dir + " " + fmtMoney(t.amount, t.currency) + "</strong>" + voidBtn + '</div><div class="pc-meta"></div></div>';
       }).join("");
+      Array.prototype.forEach.call(box.querySelectorAll(".pc-tx"), function (row, i) {
+        row.querySelector(".pc-meta").textContent = txs[i].note || "";
+      });
       Array.prototype.forEach.call(box.querySelectorAll(".pc-void"), function (b) {
         b.addEventListener("click", function () {
           if (!confirm("Bu hareketi iptal et (void)?")) return;
           api("/ledger/api/transactions/" + b.getAttribute("data-id") + "/void", {
-            method: "POST",
-            body: { reason: "ui" }
-          }).then(function () {
-            return openDetail(state.partyId);
-          }).then(loadList).catch(function (e) { alert(e.message); });
+            method: "POST", body: { reason: "ui" }
+          }).then(function () { return openDetail(state.partyId); }).then(loadList)
+            .catch(function (e) { alert(e.message); });
         });
       });
     });
   }
 
+  function openGroup(id) {
+    state.groupId = id;
+    document.getElementById("pc-home-tabs").hidden = true;
+    document.getElementById("pc-list-view").hidden = true;
+    document.getElementById("pc-detail-view").hidden = true;
+    document.getElementById("pc-group-detail-view").hidden = false;
+    return Promise.all([loadList(), api("/ledger/api/groups/" + id)]).then(function (res) {
+      var j = res[1];
+      document.getElementById("pc-gdetail-name").textContent = j.group.name;
+      document.getElementById("pc-gdetail-bal").textContent =
+        "Konsolide: " + balLabel(j.primary_balance);
+      fillGroupPartySelect();
+      var box = document.getElementById("pc-g-members");
+      var members = j.members || [];
+      if (!members.length) {
+        box.innerHTML = '<div class="pc-empty">Üye yok.</div>';
+        return;
+      }
+      box.innerHTML = members.map(function (m) {
+        return '<div class="pc-member"><div><strong class="pc-mn"></strong><div class="pc-meta pc-mb"></div></div><button type="button" class="pc-btn pc-btn-danger pc-g-rm">Çıkar</button></div>';
+      }).join("");
+      Array.prototype.forEach.call(box.querySelectorAll(".pc-member"), function (row, i) {
+        var m = members[i];
+        row.querySelector(".pc-mn").textContent = m.name;
+        row.querySelector(".pc-mb").textContent = balLabel(m.primary_balance);
+        row.querySelector(".pc-g-rm").addEventListener("click", function () {
+          api("/ledger/api/groups/" + state.groupId + "/members", {
+            method: "POST", body: { party_id: m.id, action: "remove" }
+          }).then(function () { return openGroup(state.groupId); })
+            .catch(function (e) { alert(e.message); });
+        });
+      });
+    });
+  }
+
+  Array.prototype.forEach.call(document.querySelectorAll(".pc-tab"), function (b) {
+    b.addEventListener("click", function () { setTab(b.getAttribute("data-tab")); });
+  });
+
   document.getElementById("pc-btn-new").addEventListener("click", function () {
     document.getElementById("pc-new-panel").classList.add("open");
     document.getElementById("pc-new-err").hidden = true;
-    document.getElementById("pc-new-name").focus();
   });
   document.getElementById("pc-new-cancel").addEventListener("click", function () {
     document.getElementById("pc-new-panel").classList.remove("open");
@@ -366,28 +453,66 @@
       document.getElementById("pc-new-phone").value = "";
       document.getElementById("pc-new-email").value = "";
       return loadList();
-    }).catch(function (e) {
-      err.textContent = e.message;
-      err.hidden = false;
-    });
+    }).catch(function (e) { err.textContent = e.message; err.hidden = false; });
+  });
+
+  document.getElementById("pc-btn-new-group").addEventListener("click", function () {
+    document.getElementById("pc-new-group-panel").classList.add("open");
+  });
+  document.getElementById("pc-ng-cancel").addEventListener("click", function () {
+    document.getElementById("pc-new-group-panel").classList.remove("open");
+  });
+  document.getElementById("pc-ng-save").addEventListener("click", function () {
+    var err = document.getElementById("pc-ng-err");
+    err.hidden = true;
+    api("/ledger/api/groups", {
+      method: "POST",
+      body: {
+        name: document.getElementById("pc-ng-name").value,
+        notes: document.getElementById("pc-ng-notes").value
+      }
+    }).then(function () {
+      document.getElementById("pc-new-group-panel").classList.remove("open");
+      document.getElementById("pc-ng-name").value = "";
+      document.getElementById("pc-ng-notes").value = "";
+      return loadGroups();
+    }).catch(function (e) { err.textContent = e.message; err.hidden = false; });
   });
 
   document.getElementById("pc-q").addEventListener("input", renderList);
+  document.getElementById("pc-gq").addEventListener("input", renderGroups);
+
   document.getElementById("pc-back").addEventListener("click", function () {
     document.getElementById("pc-detail-view").hidden = true;
     document.getElementById("pc-list-view").hidden = false;
-    loadList();
+    document.getElementById("pc-home-tabs").hidden = false;
+    setTab("parties");
+  });
+  document.getElementById("pc-gback").addEventListener("click", function () {
+    document.getElementById("pc-group-detail-view").hidden = true;
+    document.getElementById("pc-list-view").hidden = false;
+    document.getElementById("pc-home-tabs").hidden = false;
+    setTab("groups");
+  });
+
+  document.getElementById("pc-g-add-btn").addEventListener("click", function () {
+    var pid = document.getElementById("pc-g-add-party").value;
+    if (!pid) return;
+    api("/ledger/api/groups/" + state.groupId + "/members", {
+      method: "POST", body: { party_id: Number(pid), action: "add" }
+    }).then(function () { return openGroup(state.groupId); })
+      .catch(function (e) { alert(e.message); });
   });
 
   function openTx(dir) {
     state.direction = dir;
     document.getElementById("pc-tx-title").textContent = dir === "give" ? "Verdim" : "Aldım";
+    document.getElementById("pc-stmt-panel").classList.remove("open");
     document.getElementById("pc-tx-panel").classList.add("open");
     document.getElementById("pc-tx-err").hidden = true;
     document.getElementById("pc-tx-amount").value = "";
     document.getElementById("pc-tx-currency").value = "TRY";
     document.getElementById("pc-tx-note").value = "";
-    document.getElementById("pc-tx-amount").focus();
   }
   document.getElementById("pc-btn-give").addEventListener("click", function () { openTx("give"); });
   document.getElementById("pc-btn-recv").addEventListener("click", function () { openTx("receive"); });
@@ -409,10 +534,41 @@
     }).then(function () {
       document.getElementById("pc-tx-panel").classList.remove("open");
       return openDetail(state.partyId);
-    }).then(loadList).catch(function (e) {
-      err.textContent = e.message;
-      err.hidden = false;
-    });
+    }).then(loadList).catch(function (e) { err.textContent = e.message; err.hidden = false; });
+  });
+
+  document.getElementById("pc-btn-stmt").addEventListener("click", function () {
+    document.getElementById("pc-tx-panel").classList.remove("open");
+    document.getElementById("pc-stmt-panel").classList.add("open");
+    document.getElementById("pc-stmt-from").value = monthStartISO();
+    document.getElementById("pc-stmt-to").value = todayISO();
+    document.getElementById("pc-stmt-preview-box").textContent = "";
+    document.getElementById("pc-stmt-err").hidden = true;
+  });
+  document.getElementById("pc-stmt-cancel").addEventListener("click", function () {
+    document.getElementById("pc-stmt-panel").classList.remove("open");
+  });
+  document.getElementById("pc-stmt-preview").addEventListener("click", function () {
+    var err = document.getElementById("pc-stmt-err");
+    err.hidden = true;
+    var fr = document.getElementById("pc-stmt-from").value;
+    var to = document.getElementById("pc-stmt-to").value;
+    api("/ledger/api/parties/" + state.partyId + "/statement?from=" + encodeURIComponent(fr) + "&to=" + encodeURIComponent(to))
+      .then(function (j) {
+        var s = j.statement || {};
+        var lines = ["Hareket: " + (s.row_count || 0)];
+        (s.period_totals || []).forEach(function (t) {
+          lines.push(t.currency + " net " + fmtMoney(t.net, t.currency));
+        });
+        document.getElementById("pc-stmt-preview-box").textContent = lines.join(" · ");
+      }).catch(function (e) { err.textContent = e.message; err.hidden = false; });
+  });
+  document.getElementById("pc-stmt-pdf").addEventListener("click", function () {
+    var fr = document.getElementById("pc-stmt-from").value;
+    var to = document.getElementById("pc-stmt-to").value;
+    var url = "/ledger/api/parties/" + state.partyId + "/statement/pdf?from=" +
+      encodeURIComponent(fr) + "&to=" + encodeURIComponent(to) + "&indir=1";
+    window.open(url, "_blank");
   });
 
   loadList().catch(function (e) {

@@ -3741,6 +3741,56 @@ def ensure_ledger_tables():
             execute(stmt)
         except Exception as e:
             print(f"ledger index: {e}")
+    ensure_ledger_group_tables()
+
+
+def ensure_ledger_group_tables():
+    """Payafin Cari L1.5 — gruplar + üyelik (kiracı search_path)."""
+    execute(
+        """
+        CREATE TABLE IF NOT EXISTS ledger_groups (
+            id              BIGSERIAL PRIMARY KEY,
+            name            TEXT NOT NULL,
+            notes           TEXT,
+            is_active       BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT ledger_groups_name_chk
+                CHECK (length(trim(name)) > 0)
+        )
+        """
+    )
+    execute(
+        """
+        CREATE TABLE IF NOT EXISTS ledger_group_members (
+            id              BIGSERIAL PRIMARY KEY,
+            group_id        BIGINT NOT NULL,
+            party_id        BIGINT NOT NULL,
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT ledger_group_members_group_party_uq
+                UNIQUE (group_id, party_id),
+            CONSTRAINT ledger_group_members_group_id_fkey
+                FOREIGN KEY (group_id)
+                REFERENCES ledger_groups (id)
+                ON DELETE CASCADE,
+            CONSTRAINT ledger_group_members_party_id_fkey
+                FOREIGN KEY (party_id)
+                REFERENCES ledger_parties (id)
+                ON DELETE RESTRICT
+        )
+        """
+    )
+    for stmt in (
+        "CREATE INDEX IF NOT EXISTS idx_ledger_groups_is_active "
+        "ON ledger_groups (is_active)",
+        "CREATE INDEX IF NOT EXISTS idx_ledger_group_members_group "
+        "ON ledger_group_members (group_id)",
+        "CREATE INDEX IF NOT EXISTS idx_ledger_group_members_party "
+        "ON ledger_group_members (party_id)",
+    ):
+        try:
+            execute(stmt)
+        except Exception as e:
+            print(f"ledger group index: {e}")
 
 
 def clear_all_customers():

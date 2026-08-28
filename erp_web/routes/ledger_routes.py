@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Payafin Cari (module_key=ledger) — Aşama L1 çekirdek cari CRUD.
+"""Payafin Cari (module_key=ledger) — Aşama L1 + L1.5 (grup + ekstre PDF).
 
 Bakiye kuralı (sabit):
   balance = SUM(give) − SUM(receive)  WHERE is_void = FALSE
@@ -8,17 +8,61 @@ Ayrı balance kolonu / cache YOK — her okuma canlı SUM.
 """
 from __future__ import annotations
 
+import io
 import json
+import os
 import re
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 
-from flask import Blueprint, jsonify, render_template, request
+from flask import Blueprint, Response, jsonify, render_template, request
 from flask_login import current_user
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import mm
+from reportlab.lib.utils import ImageReader
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.pdfgen import canvas
+from reportlab.platypus import Table, TableStyle
 
 from auth import giris_gerekli
 from db import ensure_ledger_tables, execute, execute_returning, fetch_all, fetch_one
 from tenant_module_access import module_required
+
+
+def _ledger_register_arial():
+    """Faturalar PDF ile aynı Arial kayıt deseni (Türkçe glyph)."""
+    if getattr(_ledger_register_arial, "_done", False):
+        return
+    try:
+        from routes.faturalar_routes import _register_arial
+
+        _register_arial()
+        _ledger_register_arial._done = True
+        return
+    except Exception:
+        pass
+    win = os.environ.get("WINDIR") or os.environ.get("SystemRoot") or "C:\\Windows"
+    fonts_dir = os.path.join(win, "Fonts")
+    for f in ("arial.ttf", "Arial.ttf", "ARIAL.TTF"):
+        p = os.path.join(fonts_dir, f)
+        if os.path.isfile(p):
+            try:
+                pdfmetrics.registerFont(TTFont("Arial", p))
+                break
+            except Exception:
+                pass
+    for f in ("arialbd.ttf", "Arial Bold.ttf"):
+        p = os.path.join(fonts_dir, f)
+        if os.path.isfile(p):
+            try:
+                pdfmetrics.registerFont(TTFont("Arial-Bold", p))
+                break
+            except Exception:
+                pass
+    _ledger_register_arial._done = True
+
 
 bp = Blueprint("ledger", __name__)
 
@@ -382,4 +426,515 @@ def api_transactions_void(tx_id: int):
             "transaction": _tx_dict(updated),
             "balances": _balances_for_party(int(updated["party_id"])),
         }
+    )
+
+
+def _parse_date_arg(raw: str | None, *, label: str) -> date | None:
+    s = (raw or "").strip()
+    if not s:
+        return None
+    try:
+        return date.fromisoformat(s[:10])
+    except ValueError:
+        return None
+
+
+def _balances_for_parties(party_ids: list[int]) -> list[dict]:
+    """Birden fazla party için para birimi başına konsolide canlı SUM."""
+    if not party_ids:
+        return []
+    rows = fetch_all(
+        """
+        SELECT
+            currency,
+            COALESCE(SUM(CASE WHEN direction = 'give' THEN amount ELSE 0 END), 0) AS given,
+            COALESCE(SUM(CASE WHEN direction = 'receive' THEN amount ELSE 0 END), 0) AS received,
+            COALESCE(SUM(
+                CASE
+                    WHEN direction = 'give' THEN amount
+                    WHEN direction = 'receive' THEN -amount
+                    ELSE 0
+                END
+            ), 0) AS balance
+        FROM ledger_transactions
+        WHERE party_id = ANY(%s)
+          AND is_void = FALSE
+        GROUP BY currency
+        ORDER BY currency
+        """,
+        (list(party_ids),),
+    )
+    out = []
+    for r in rows or []:
+        bal = _dec(r["balance"])
+        out.append(
+            {
+                "currency": str(r["currency"]),
+                "given": _money(r["given"]),
+                "received": _money(r["received"]),
+                "balance": _money(bal),
+                "party_owes_us": bal > 0,
+                "we_owe_party": bal < 0,
+            }
+        )
+    return out
+
+
+def _group_dict(row: dict) -> dict:
+    return {
+        "id": int(row["id"]),
+        "name": row.get("name"),
+        "notes": row.get("notes"),
+        "is_active": bool(row.get("is_active")),
+        "created_at": row["created_at"].isoformat() if row.get("created_at") else None,
+    }
+
+
+def _build_statement(party_id: int, d_from: date, d_to: date) -> dict | None:
+    """Tarih aralığı ekstresi — void hariç; satırlar + para birimi alt toplamları."""
+    party = fetch_one(
+        """
+        SELECT id, name, type, phone, email, country, notes, is_active, created_at, updated_at
+        FROM ledger_parties
+        WHERE id = %s
+        """,
+        (int(party_id),),
+    )
+    if not party:
+        return None
+
+    start_ts = datetime(d_from.year, d_from.month, d_from.day, tzinfo=timezone.utc)
+    end_excl = datetime(d_to.year, d_to.month, d_to.day, tzinfo=timezone.utc) + timedelta(days=1)
+
+    txs = fetch_all(
+        """
+        SELECT id, party_id, direction, amount, currency, occurred_at, note,
+               created_by, is_void, metadata, created_at
+        FROM ledger_transactions
+        WHERE party_id = %s
+          AND is_void = FALSE
+          AND occurred_at >= %s
+          AND occurred_at < %s
+        ORDER BY occurred_at ASC, id ASC
+        """,
+        (int(party_id), start_ts, end_excl),
+    ) or []
+
+    # Dönem öncesi açılış bakiyesi (canlı SUM)
+    opening_rows = fetch_all(
+        """
+        SELECT
+            currency,
+            COALESCE(SUM(
+                CASE
+                    WHEN direction = 'give' THEN amount
+                    WHEN direction = 'receive' THEN -amount
+                    ELSE 0
+                END
+            ), 0) AS balance
+        FROM ledger_transactions
+        WHERE party_id = %s
+          AND is_void = FALSE
+          AND occurred_at < %s
+        GROUP BY currency
+        ORDER BY currency
+        """,
+        (int(party_id), start_ts),
+    ) or []
+    opening = [
+        {"currency": str(r["currency"]), "balance": _money(r["balance"])}
+        for r in opening_rows
+    ]
+
+    totals_map: dict[str, dict] = {}
+    for t in txs:
+        cur = str(t["currency"])
+        slot = totals_map.setdefault(
+            cur, {"currency": cur, "given": Decimal("0"), "received": Decimal("0"), "net": Decimal("0")}
+        )
+        amt = _dec(t["amount"])
+        if t["direction"] == "give":
+            slot["given"] += amt
+            slot["net"] += amt
+        else:
+            slot["received"] += amt
+            slot["net"] -= amt
+
+    period_totals = [
+        {
+            "currency": k,
+            "given": _money(v["given"]),
+            "received": _money(v["received"]),
+            "net": _money(v["net"]),
+        }
+        for k, v in sorted(totals_map.items())
+    ]
+
+    # Kapanış = açılış + dönem net (para birimi birleştir)
+    closing_map: dict[str, Decimal] = {}
+    for o in opening:
+        closing_map[o["currency"]] = _dec(o["balance"])
+    for p in period_totals:
+        closing_map[p["currency"]] = closing_map.get(p["currency"], Decimal("0")) + _dec(p["net"])
+    closing = [
+        {"currency": k, "balance": _money(v)} for k, v in sorted(closing_map.items())
+    ]
+
+    return {
+        "party": _party_dict(party, with_balances=True),
+        "from": d_from.isoformat(),
+        "to": d_to.isoformat(),
+        "transactions": [_tx_dict(t) for t in txs],
+        "row_count": len(txs),
+        "opening_balances": opening,
+        "period_totals": period_totals,
+        "closing_balances": closing,
+    }
+
+
+def _resolve_ledger_logo_path() -> str | None:
+    """Ofisbir / Payafin logo adayları — kira bildirgesi ile aynı desen."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    names = (
+        "Ofisbir Logo.jpg",
+        "Ofisbir Logo.jpeg",
+        "Ofisbir Logo.png",
+        "ofisbir_logo.png",
+        "ofisbir_logo.jpg",
+        "payafin_logo.png",
+        "logo.png",
+        "logo.jpg",
+    )
+    for nm in names:
+        for base in (
+            os.path.abspath(os.path.join(here, "..", "..", "assets", nm)),
+            os.path.abspath(os.path.join(here, "..", "static", nm)),
+            os.path.abspath(os.path.join(here, "..", "assets", nm)),
+        ):
+            if os.path.isfile(base):
+                return base
+    return None
+
+
+def _build_statement_pdf(stmt: dict) -> bytes:
+    """A4 ekstre PDF — reportlab canvas + Table (faturalar/kira PDF deseni)."""
+    _ledger_register_arial()
+    font = "Arial" if "Arial" in pdfmetrics.getRegisteredFontNames() else "Helvetica"
+    font_b = (
+        "Arial-Bold"
+        if "Arial-Bold" in pdfmetrics.getRegisteredFontNames()
+        else ("Helvetica-Bold" if font == "Helvetica" else font)
+    )
+
+    buf = io.BytesIO()
+    w, h = A4
+    c = canvas.Canvas(buf, pagesize=A4)
+    c.setPageCompression(0)
+    c.setTitle("Payafin Cari Ekstre")
+
+    y = h - 18 * mm
+    logo = _resolve_ledger_logo_path()
+    if logo:
+        try:
+            img = ImageReader(logo)
+            iw, ih = img.getSize()
+            max_w, max_h = 42 * mm, 14 * mm
+            scale = min(max_w / float(iw or 1), max_h / float(ih or 1))
+            dw, dh = float(iw) * scale, float(ih) * scale
+            c.drawImage(logo, 15 * mm, y - dh, width=dw, height=dh, mask="auto")
+        except Exception:
+            pass
+
+    c.setFont(font_b, 14)
+    c.drawString(15 * mm, y - 18 * mm, "Payafin Cari — Ekstre")
+    y -= 26 * mm
+
+    party = stmt.get("party") or {}
+    c.setFont(font, 10)
+    lines = [
+        f"Taraf: {party.get('name') or '—'}",
+        f"Tür: {'Şirket' if party.get('type') == 'company' else 'Kişi'}",
+        f"Dönem: {stmt.get('from')} — {stmt.get('to')}",
+        f"Hareket sayısı: {stmt.get('row_count', 0)}",
+    ]
+    if party.get("phone"):
+        lines.append(f"Telefon: {party.get('phone')}")
+    if party.get("email"):
+        lines.append(f"E-posta: {party.get('email')}")
+    for line in lines:
+        c.drawString(15 * mm, y, line)
+        y -= 5 * mm
+
+    y -= 3 * mm
+    c.setFont(font_b, 10)
+    c.drawString(15 * mm, y, "Dönem hareketleri")
+    y -= 6 * mm
+
+    data = [["Tarih", "Yön", "Tutar", "PB", "Not"]]
+    for t in stmt.get("transactions") or []:
+        occurred = (t.get("occurred_at") or "")[:10]
+        direction = "Verdim" if t.get("direction") == "give" else "Aldım"
+        amt = f"{float(t.get('amount') or 0):,.2f}"
+        note = (t.get("note") or "")[:40]
+        data.append([occurred, direction, amt, t.get("currency") or "", note])
+
+    if len(data) == 1:
+        data.append(["—", "—", "—", "—", "Hareket yok"])
+
+    col_w = [28 * mm, 22 * mm, 28 * mm, 14 * mm, 78 * mm]
+    table = Table(data, colWidths=col_w, repeatRows=1)
+    table.setStyle(
+        TableStyle(
+            [
+                ("FONT", (0, 0), (-1, 0), font_b, 8),
+                ("FONT", (0, 1), (-1, -1), font, 8),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.Color(0.92, 0.94, 0.96)),
+                ("GRID", (0, 0), (-1, -1), 0.4, colors.Color(0.75, 0.78, 0.82)),
+                ("ALIGN", (2, 1), (2, -1), "RIGHT"),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("TOPPADDING", (0, 0), (-1, -1), 3),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ]
+        )
+    )
+    tw, th = table.wrapOn(c, w - 30 * mm, y - 40 * mm)
+    if y - th < 35 * mm:
+        c.showPage()
+        y = h - 20 * mm
+        tw, th = table.wrapOn(c, w - 30 * mm, y - 40 * mm)
+    table.drawOn(c, 15 * mm, y - th)
+    y = y - th - 8 * mm
+
+    # Makine-okunur satır izi (Helvetica ASCII) — canlı test satır sayısı doğrulaması
+    c.setFont("Helvetica", 7)
+    for i, t in enumerate(stmt.get("transactions") or []):
+        marker = (
+            f"ROW {i + 1} {t.get('direction')} "
+            f"{float(t.get('amount') or 0):.2f} {t.get('currency') or ''}"
+        )
+        c.drawString(15 * mm, y, marker)
+        y -= 3.5 * mm
+        if y < 28 * mm:
+            c.showPage()
+            y = h - 20 * mm
+            c.setFont("Helvetica", 7)
+    c.setFont("Helvetica", 7)
+    c.drawString(15 * mm, y, f"LEDGER_STMT_ROWS={int(stmt.get('row_count') or 0)}")
+    y -= 6 * mm
+
+    c.setFont(font_b, 10)
+    c.drawString(15 * mm, y, "Para birimi alt toplamları (dönem)")
+    y -= 5 * mm
+    c.setFont(font, 9)
+    for p in stmt.get("period_totals") or []:
+        line = (
+            f"{p['currency']}: Verdim {_money(p['given']):,.2f}  "
+            f"Aldım {_money(p['received']):,.2f}  Net {_money(p['net']):,.2f}"
+        )
+        c.drawString(15 * mm, y, line)
+        y -= 4.5 * mm
+        if y < 25 * mm:
+            c.showPage()
+            y = h - 20 * mm
+            c.setFont(font, 9)
+
+    y -= 3 * mm
+    c.setFont(font_b, 9)
+    c.drawString(15 * mm, y, "Kapanış bakiyeleri")
+    y -= 4.5 * mm
+    c.setFont(font, 9)
+    for p in stmt.get("closing_balances") or []:
+        c.drawString(15 * mm, y, f"{p['currency']}: {_money(p['balance']):,.2f}")
+        y -= 4.5 * mm
+
+    c.setFont(font, 7)
+    c.drawString(
+        15 * mm,
+        12 * mm,
+        "Bakiye canlı SUM(give)-SUM(receive), is_void=FALSE — ayrı balance alanı yok.",
+    )
+    c.save()
+    return buf.getvalue()
+
+
+@bp.route("/api/groups", methods=["GET"])
+@giris_gerekli
+@module_required("ledger")
+def api_groups_list():
+    ensure_ledger_tables()
+    active_only = str(request.args.get("active") or "1").strip() not in ("0", "false", "False")
+    sql = """
+        SELECT g.id, g.name, g.notes, g.is_active, g.created_at,
+               COUNT(m.id)::int AS member_count
+        FROM ledger_groups g
+        LEFT JOIN ledger_group_members m ON m.group_id = g.id
+        WHERE 1=1
+    """
+    params: list = []
+    if active_only:
+        sql += " AND g.is_active = TRUE"
+    sql += " GROUP BY g.id, g.name, g.notes, g.is_active, g.created_at ORDER BY lower(g.name), g.id"
+    rows = fetch_all(sql, tuple(params)) or []
+    groups = []
+    for r in rows:
+        d = _group_dict(r)
+        d["member_count"] = int(r.get("member_count") or 0)
+        groups.append(d)
+    return jsonify({"ok": True, "groups": groups, "count": len(groups)})
+
+
+@bp.route("/api/groups", methods=["POST"])
+@giris_gerekli
+@module_required("ledger")
+def api_groups_create():
+    ensure_ledger_tables()
+    data = request.get_json(silent=True) or {}
+    name = str(data.get("name") or "").strip()
+    if not name:
+        return _json_err("Grup adı gerekli.")
+    notes = (str(data.get("notes") or "").strip() or None)
+    row = execute_returning(
+        """
+        INSERT INTO ledger_groups (name, notes)
+        VALUES (%s, %s)
+        RETURNING id, name, notes, is_active, created_at
+        """,
+        (name, notes),
+    )
+    if not row:
+        return _json_err("Grup oluşturulamadı.", 500)
+    g = _group_dict(row)
+    g["member_count"] = 0
+    return jsonify({"ok": True, "group": g}), 201
+
+
+@bp.route("/api/groups/<int:group_id>/members", methods=["POST"])
+@giris_gerekli
+@module_required("ledger")
+def api_groups_members(group_id: int):
+    ensure_ledger_tables()
+    data = request.get_json(silent=True) or {}
+    action = str(data.get("action") or data.get("op") or "add").strip().lower()
+    try:
+        party_id = int(data.get("party_id"))
+    except (TypeError, ValueError):
+        return _json_err("party_id gerekli.")
+
+    grp = fetch_one("SELECT id FROM ledger_groups WHERE id = %s", (int(group_id),))
+    if not grp:
+        return _json_err("Grup bulunamadı.", 404)
+    party = fetch_one("SELECT id FROM ledger_parties WHERE id = %s", (party_id,))
+    if not party:
+        return _json_err("Cari bulunamadı.", 404)
+
+    if action in ("add", "ekle"):
+        execute_returning(
+            """
+            INSERT INTO ledger_group_members (group_id, party_id)
+            VALUES (%s, %s)
+            ON CONFLICT (group_id, party_id) DO NOTHING
+            RETURNING id
+            """,
+            (int(group_id), party_id),
+        )
+        return jsonify({"ok": True, "action": "add", "group_id": int(group_id), "party_id": party_id})
+    if action in ("remove", "çıkar", "cikar", "delete"):
+        execute(
+            "DELETE FROM ledger_group_members WHERE group_id = %s AND party_id = %s",
+            (int(group_id), party_id),
+        )
+        return jsonify({"ok": True, "action": "remove", "group_id": int(group_id), "party_id": party_id})
+    return _json_err("action add veya remove olmalı.")
+
+
+@bp.route("/api/groups/<int:group_id>", methods=["GET"])
+@giris_gerekli
+@module_required("ledger")
+def api_groups_detail(group_id: int):
+    ensure_ledger_tables()
+    row = fetch_one(
+        """
+        SELECT id, name, notes, is_active, created_at
+        FROM ledger_groups
+        WHERE id = %s
+        """,
+        (int(group_id),),
+    )
+    if not row:
+        return _json_err("Grup bulunamadı.", 404)
+
+    members_rows = fetch_all(
+        """
+        SELECT p.id, p.name, p.type, p.phone, p.email, p.country, p.notes,
+               p.is_active, p.created_at, p.updated_at
+        FROM ledger_group_members m
+        JOIN ledger_parties p ON p.id = m.party_id
+        WHERE m.group_id = %s
+        ORDER BY lower(p.name), p.id
+        """,
+        (int(group_id),),
+    ) or []
+
+    members = [_party_dict(m, with_balances=True) for m in members_rows]
+    party_ids = [int(m["id"]) for m in members]
+    consolidated = _balances_for_parties(party_ids)
+    primary = next((b for b in consolidated if b["currency"] == "TRY"), consolidated[0] if consolidated else None)
+
+    return jsonify(
+        {
+            "ok": True,
+            "group": _group_dict(row),
+            "members": members,
+            "member_count": len(members),
+            "consolidated_balances": consolidated,
+            "primary_balance": primary,
+        }
+    )
+
+
+@bp.route("/api/parties/<int:party_id>/statement", methods=["GET"])
+@giris_gerekli
+@module_required("ledger")
+def api_party_statement(party_id: int):
+    ensure_ledger_tables()
+    d_from = _parse_date_arg(request.args.get("from"), label="from")
+    d_to = _parse_date_arg(request.args.get("to"), label="to")
+    if not d_from or not d_to:
+        return _json_err("from ve to gerekli (YYYY-MM-DD).")
+    if d_to < d_from:
+        return _json_err("to, from'dan önce olamaz.")
+    stmt = _build_statement(int(party_id), d_from, d_to)
+    if not stmt:
+        return _json_err("Cari bulunamadı.", 404)
+    return jsonify({"ok": True, "statement": stmt})
+
+
+@bp.route("/api/parties/<int:party_id>/statement/pdf", methods=["GET"])
+@giris_gerekli
+@module_required("ledger")
+def api_party_statement_pdf(party_id: int):
+    ensure_ledger_tables()
+    d_from = _parse_date_arg(request.args.get("from"), label="from")
+    d_to = _parse_date_arg(request.args.get("to"), label="to")
+    if not d_from or not d_to:
+        return _json_err("from ve to gerekli (YYYY-MM-DD).")
+    if d_to < d_from:
+        return _json_err("to, from'dan önce olamaz.")
+    stmt = _build_statement(int(party_id), d_from, d_to)
+    if not stmt:
+        return _json_err("Cari bulunamadı.", 404)
+    try:
+        pdf_bytes = _build_statement_pdf(stmt)
+    except Exception as e:
+        return _json_err(f"PDF oluşturulamadı: {e}", 500)
+
+    name = str((stmt.get("party") or {}).get("name") or "cari")
+    safe = re.sub(r"[^A-Za-z0-9_\-]+", "_", name)[:40] or "cari"
+    fname = f"ekstre_{safe}_{d_from.isoformat()}_{d_to.isoformat()}.pdf"
+    indir = str(request.args.get("indir") or "").lower() in ("1", "true", "yes")
+    disposition = "attachment" if indir else "inline"
+    return Response(
+        pdf_bytes,
+        mimetype="application/pdf",
+        headers={"Content-Disposition": f'{disposition}; filename="{fname}"'},
     )

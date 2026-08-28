@@ -1606,6 +1606,70 @@ ALTER SEQUENCE public.ledger_transactions_id_seq OWNED BY public.ledger_transact
 
 
 --
+-- Name: ledger_groups; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.ledger_groups (
+    id bigint NOT NULL,
+    name text NOT NULL,
+    notes text,
+    is_active boolean DEFAULT true NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ledger_groups_name_chk CHECK ((length(TRIM(BOTH FROM name)) > 0))
+);
+
+
+--
+-- Name: ledger_groups_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.ledger_groups_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: ledger_groups_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.ledger_groups_id_seq OWNED BY public.ledger_groups.id;
+
+
+--
+-- Name: ledger_group_members; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.ledger_group_members (
+    id bigint NOT NULL,
+    group_id bigint NOT NULL,
+    party_id bigint NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: ledger_group_members_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.ledger_group_members_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: ledger_group_members_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.ledger_group_members_id_seq OWNED BY public.ledger_group_members.id;
+
+
+--
 -- Name: masraflar; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -2892,6 +2956,20 @@ ALTER TABLE ONLY public.ledger_transactions ALTER COLUMN id SET DEFAULT nextval(
 
 
 --
+-- Name: ledger_groups id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ledger_groups ALTER COLUMN id SET DEFAULT nextval('public.ledger_groups_id_seq'::regclass);
+
+
+--
+-- Name: ledger_group_members id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ledger_group_members ALTER COLUMN id SET DEFAULT nextval('public.ledger_group_members_id_seq'::regclass);
+
+
+--
 -- Name: masraflar id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -3430,6 +3508,30 @@ ALTER TABLE ONLY public.ledger_transactions
 
 
 --
+-- Name: ledger_groups ledger_groups_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ledger_groups
+    ADD CONSTRAINT ledger_groups_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: ledger_group_members ledger_group_members_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ledger_group_members
+    ADD CONSTRAINT ledger_group_members_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: ledger_group_members ledger_group_members_group_party_uq; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ledger_group_members
+    ADD CONSTRAINT ledger_group_members_group_party_uq UNIQUE (group_id, party_id);
+
+
+--
 -- Name: masraflar masraflar_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3947,6 +4049,27 @@ CREATE INDEX idx_ledger_tx_party_void ON public.ledger_transactions USING btree 
 
 
 --
+-- Name: idx_ledger_groups_is_active; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_ledger_groups_is_active ON public.ledger_groups USING btree (is_active);
+
+
+--
+-- Name: idx_ledger_group_members_group; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_ledger_group_members_group ON public.ledger_group_members USING btree (group_id);
+
+
+--
+-- Name: idx_ledger_group_members_party; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_ledger_group_members_party ON public.ledger_group_members USING btree (party_id);
+
+
+--
 -- Name: idx_masraflar_durum_created; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -4428,6 +4551,22 @@ ALTER TABLE ONLY public.email_verification_tokens
 
 ALTER TABLE ONLY public.ledger_transactions
     ADD CONSTRAINT ledger_transactions_party_id_fkey FOREIGN KEY (party_id) REFERENCES public.ledger_parties(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: ledger_group_members ledger_group_members_group_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ledger_group_members
+    ADD CONSTRAINT ledger_group_members_group_id_fkey FOREIGN KEY (group_id) REFERENCES public.ledger_groups(id) ON DELETE CASCADE;
+
+
+--
+-- Name: ledger_group_members ledger_group_members_party_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ledger_group_members
+    ADD CONSTRAINT ledger_group_members_party_id_fkey FOREIGN KEY (party_id) REFERENCES public.ledger_parties(id) ON DELETE RESTRICT;
 
 
 --
