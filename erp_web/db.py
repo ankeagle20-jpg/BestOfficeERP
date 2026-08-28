@@ -594,6 +594,7 @@ def init_schema():
     ensure_platform_credentials_table()
     ensure_exchange_rates_table()
     ensure_discount_campaigns_table()
+    ensure_platform_tenant_billing_tables()
     print("✅ Supabase şema oluşturuldu.")
 
 
@@ -3444,6 +3445,148 @@ def ensure_discount_campaigns_table():
         )
     except Exception as e:
         print(f"discount_campaigns index error: {e}")
+
+
+def ensure_platform_tenant_billing_tables():
+    """Platform kiracı faturalama: subscriptions / invoices / payments (yalnız public).
+
+    Kiracı ERP faturalarından bağımsızdır. PLATFORM_STRIP_TABLES listesinde.
+    """
+    ensure_platform_tenants_table()
+    execute(
+        """
+        CREATE TABLE IF NOT EXISTS public.platform_tenant_subscriptions (
+            id                  BIGSERIAL PRIMARY KEY,
+            tenant_id           INTEGER NOT NULL,
+            tenant_slug         TEXT NOT NULL,
+            plan_code           TEXT NOT NULL DEFAULT 'standard',
+            status              TEXT NOT NULL DEFAULT 'active',
+            currency            CHAR(3) NOT NULL DEFAULT 'TRY',
+            billing_cycle       TEXT NOT NULL DEFAULT 'monthly',
+            amount_net          NUMERIC(14, 2) NOT NULL DEFAULT 0,
+            amount_gross        NUMERIC(14, 2) NOT NULL DEFAULT 0,
+            payment_method      TEXT NOT NULL DEFAULT 'manual',
+            next_invoice_at     TIMESTAMPTZ,
+            started_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            ended_at            TIMESTAMPTZ,
+            metadata            JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT platform_tenant_subscriptions_status_chk
+                CHECK (status IN ('trial', 'active', 'past_due', 'suspended', 'cancelled')),
+            CONSTRAINT platform_tenant_subscriptions_cycle_chk
+                CHECK (billing_cycle IN ('monthly', 'yearly', 'one_time')),
+            CONSTRAINT platform_tenant_subscriptions_method_chk
+                CHECK (payment_method IN ('bank_transfer', 'card', 'manual', 'other')),
+            CONSTRAINT platform_tenant_subscriptions_currency_chk
+                CHECK (currency ~ '^[A-Z]{3}$'),
+            CONSTRAINT platform_tenant_subscriptions_slug_chk
+                CHECK (length(trim(tenant_slug)) > 0),
+            CONSTRAINT platform_tenant_subscriptions_plan_chk
+                CHECK (length(trim(plan_code)) > 0),
+            CONSTRAINT platform_tenant_subscriptions_amounts_chk
+                CHECK (amount_net >= 0 AND amount_gross >= 0),
+            CONSTRAINT platform_tenant_subscriptions_dates_chk
+                CHECK (ended_at IS NULL OR ended_at >= started_at),
+            CONSTRAINT platform_tenant_subscriptions_tenant_id_fkey
+                FOREIGN KEY (tenant_id) REFERENCES public.tenants (id) ON DELETE CASCADE
+        )
+        """
+    )
+    execute(
+        """
+        CREATE TABLE IF NOT EXISTS public.platform_tenant_invoices (
+            id                  BIGSERIAL PRIMARY KEY,
+            tenant_id           INTEGER NOT NULL,
+            tenant_slug         TEXT NOT NULL,
+            subscription_id     BIGINT,
+            invoice_no          TEXT NOT NULL,
+            status              TEXT NOT NULL DEFAULT 'draft',
+            currency            CHAR(3) NOT NULL DEFAULT 'TRY',
+            total_gross         NUMERIC(14, 2) NOT NULL DEFAULT 0,
+            issued_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            due_at              TIMESTAMPTZ,
+            paid_at             TIMESTAMPTZ,
+            source              TEXT NOT NULL DEFAULT 'manual',
+            external_ref        TEXT,
+            metadata            JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT platform_tenant_invoices_status_chk
+                CHECK (status IN ('draft', 'sent', 'paid', 'overdue', 'void')),
+            CONSTRAINT platform_tenant_invoices_source_chk
+                CHECK (source IN ('manual', 'stripe', 'iyzico', 'other')),
+            CONSTRAINT platform_tenant_invoices_currency_chk
+                CHECK (currency ~ '^[A-Z]{3}$'),
+            CONSTRAINT platform_tenant_invoices_slug_chk
+                CHECK (length(trim(tenant_slug)) > 0),
+            CONSTRAINT platform_tenant_invoices_no_chk
+                CHECK (length(trim(invoice_no)) > 0),
+            CONSTRAINT platform_tenant_invoices_amount_chk
+                CHECK (total_gross >= 0),
+            CONSTRAINT platform_tenant_invoices_invoice_no_uniq
+                UNIQUE (invoice_no),
+            CONSTRAINT platform_tenant_invoices_tenant_id_fkey
+                FOREIGN KEY (tenant_id) REFERENCES public.tenants (id) ON DELETE CASCADE,
+            CONSTRAINT platform_tenant_invoices_subscription_id_fkey
+                FOREIGN KEY (subscription_id)
+                REFERENCES public.platform_tenant_subscriptions (id)
+                ON DELETE SET NULL
+        )
+        """
+    )
+    execute(
+        """
+        CREATE TABLE IF NOT EXISTS public.platform_tenant_payments (
+            id                  BIGSERIAL PRIMARY KEY,
+            tenant_id           INTEGER NOT NULL,
+            tenant_slug         TEXT NOT NULL,
+            invoice_id          BIGINT,
+            amount              NUMERIC(14, 2) NOT NULL,
+            currency            CHAR(3) NOT NULL DEFAULT 'TRY',
+            paid_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            method              TEXT NOT NULL DEFAULT 'manual',
+            reference           TEXT,
+            metadata            JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT platform_tenant_payments_method_chk
+                CHECK (method IN ('bank_transfer', 'card', 'manual', 'other')),
+            CONSTRAINT platform_tenant_payments_currency_chk
+                CHECK (currency ~ '^[A-Z]{3}$'),
+            CONSTRAINT platform_tenant_payments_slug_chk
+                CHECK (length(trim(tenant_slug)) > 0),
+            CONSTRAINT platform_tenant_payments_amount_chk
+                CHECK (amount > 0),
+            CONSTRAINT platform_tenant_payments_tenant_id_fkey
+                FOREIGN KEY (tenant_id) REFERENCES public.tenants (id) ON DELETE CASCADE,
+            CONSTRAINT platform_tenant_payments_invoice_id_fkey
+                FOREIGN KEY (invoice_id)
+                REFERENCES public.platform_tenant_invoices (id)
+                ON DELETE SET NULL
+        )
+        """
+    )
+    for stmt in (
+        "CREATE INDEX IF NOT EXISTS platform_tenant_subscriptions_tenant_id_idx "
+        "ON public.platform_tenant_subscriptions (tenant_id)",
+        "CREATE INDEX IF NOT EXISTS platform_tenant_subscriptions_status_idx "
+        "ON public.platform_tenant_subscriptions (status)",
+        "CREATE INDEX IF NOT EXISTS platform_tenant_invoices_tenant_id_idx "
+        "ON public.platform_tenant_invoices (tenant_id)",
+        "CREATE INDEX IF NOT EXISTS platform_tenant_invoices_status_idx "
+        "ON public.platform_tenant_invoices (status)",
+        "CREATE INDEX IF NOT EXISTS platform_tenant_invoices_due_at_idx "
+        "ON public.platform_tenant_invoices (due_at)",
+        "CREATE INDEX IF NOT EXISTS platform_tenant_payments_tenant_id_idx "
+        "ON public.platform_tenant_payments (tenant_id)",
+        "CREATE INDEX IF NOT EXISTS platform_tenant_payments_invoice_id_idx "
+        "ON public.platform_tenant_payments (invoice_id)",
+    ):
+        try:
+            execute(stmt)
+        except Exception as e:
+            print(f"platform billing index: {e}")
 
 
 def clear_all_customers():
