@@ -3,6 +3,8 @@
 
 Sözleşme:
 - has_module_entitlement(tenant_id, module_key) → bool
+- has_core_erp(tenant_id) → bool (baseline çekirdek entitlement)
+- is_ledger_only_tenant(tenant_id) → bool (ledger aktif ∧ core_erp yok/pasif)
 - 60 sn bellek içi cache (cache_utils / pricing_public_cache deseni)
 - invalidate_module_entitlement_cache(tenant_id, module_key=None)
 - module_required(module_key) → yoksa 403 (JSON/HTML, platform_public_only deseni)
@@ -29,6 +31,8 @@ logger = logging.getLogger(__name__)
 
 MODULE_ENTITLEMENT_CACHE_TTL_SEC = 60.0
 _CACHE_PREFIX = "modent:v1:"
+BASELINE_MODULE_KEY = "core_erp"
+LEDGER_MODULE_KEY = "ledger"
 
 MSG_MODULE_DENIED = "Bu modül hesabınızda aktif değil."
 MSG_TENANT_UNRESOLVED = "Kiracı kimliği çözülemedi; modül erişimi reddedildi."
@@ -89,6 +93,25 @@ def has_module_entitlement(tenant_id: int, module_key: str) -> bool:
     allowed = _load_entitlement_from_db(tid, mk)
     simple_cache_set(key, allowed)
     return allowed
+
+
+def has_core_erp(tenant_id: int) -> bool:
+    """Kiracının aktif/trial core_erp (çekirdek ERP) entitlement'ı var mı?"""
+    return has_module_entitlement(int(tenant_id), BASELINE_MODULE_KEY)
+
+
+def is_ledger_only_tenant(tenant_id: int) -> bool:
+    """Sadece Payafin Cari kabuğu: ledger aktif ve core_erp yok/pasif.
+
+    Tam ERP (+ ledger add-on) kiracılarında False — core_erp olduğu sürece
+    menü/yönlendirme davranışı değişmemeli (S1+ bu bayrağı kullanır).
+    """
+    tid = int(tenant_id)
+    if not has_module_entitlement(tid, LEDGER_MODULE_KEY):
+        return False
+    if has_core_erp(tid):
+        return False
+    return True
 
 
 def resolve_request_tenant_id() -> int | None:
