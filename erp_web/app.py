@@ -74,6 +74,7 @@ from routes.admin_pricing_routes import bp as admin_pricing_bp
 from routes.admin_module_routes import bp as admin_modules_bp
 from routes.admin_module_pricing_routes import bp as admin_module_pricing_bp
 from routes.admin_campaign_routes import bp as admin_campaigns_bp
+from routes.admin_customers_routes import bp as admin_customers_bp
 from routes.admin_credentials_routes import bp as admin_credentials_bp
 from routes.public_pricing_routes import bp as public_pricing_bp
 from routes.signup_routes import bp as signup_bp
@@ -113,6 +114,7 @@ app.register_blueprint(admin_pricing_bp, url_prefix="/admin")
 app.register_blueprint(admin_modules_bp, url_prefix="/admin")
 app.register_blueprint(admin_module_pricing_bp, url_prefix="/admin")
 app.register_blueprint(admin_campaigns_bp, url_prefix="/admin")
+app.register_blueprint(admin_customers_bp, url_prefix="/admin")
 app.register_blueprint(admin_credentials_bp, url_prefix="/admin")
 app.register_blueprint(public_pricing_bp)
 app.register_blueprint(signup_bp)

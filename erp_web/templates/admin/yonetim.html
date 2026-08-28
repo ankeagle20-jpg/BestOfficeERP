@@ -162,6 +162,7 @@
   <a href="{{ url_for('admin_campaigns.campaigns_page') }}"><i class="fa fa-percent"></i> Kampanyalar</a>
   <a href="{{ url_for('admin_credentials.credentials_page') }}"><i class="fa fa-key"></i> Kimlik Bilgileri Kasası</a>
   <a href="{{ url_for('admin_mukerrer.mukerrer_arsiv_page') }}"><i class="fa fa-archive"></i> Mükerrer Arşiv</a>
+  <a href="{{ url_for('admin_customers.customers_page') }}"><i class="fa fa-globe"></i> Küresel Müşteri Portföyü</a>
 </div>
 
 <div class="card-erp">
@@ -265,6 +266,25 @@
         <span class="hub-link-text">Panele Git <i class="fa fa-arrow-right"></i></span>
       </div>
     </a>
+
+    <!-- Kart 6: Küresel Müşteri Portföyü -->
+    <a href="{{ url_for('admin_customers.customers_page') }}" class="hub-card">
+      <div class="hub-card-top">
+        <div class="hub-icon-box">
+          <i class="fa fa-globe"></i>
+        </div>
+        <div>
+          <div class="hub-card-title">Küresel Müşteri Portföyü</div>
+          <div class="hub-card-desc">
+            Tüm kiracıları tek ekranda görün: ülke, hesap statüsü, sahip oldukları modüller/kademeler ve admin iletişim e-postası.
+          </div>
+        </div>
+      </div>
+      <div class="hub-card-footer">
+        <span class="hub-badge">/admin/customers</span>
+        <span class="hub-link-text">Panele Git <i class="fa fa-arrow-right"></i></span>
+      </div>
+    </a>
   </div>
 
   <!-- Hızlı İşlemler Alt Bölümü -->
@@ -272,6 +292,7 @@
     <div class="hub-quick-title">Ek Yönetim Araçları</div>
     <div class="hub-quick-links">
       <a href="{{ url_for('admin.index') }}" class="hub-quick-link"><i class="fa fa-users"></i> Kullanıcı Yönetimi</a>
+      <a href="{{ url_for('admin_customers.customers_page') }}" class="hub-quick-link"><i class="fa fa-globe"></i> Küresel Müşteri Portföyü</a>
       <a href="{{ url_for('admin_mukerrer.mukerrer_arsiv_page') }}" class="hub-quick-link"><i class="fa fa-archive"></i> Mükerrer Müşteri Arşivi</a>
       <a href="/dashboard/" class="hub-quick-link"><i class="fa fa-tachometer-alt"></i> Ana Dashboard</a>
     </div>

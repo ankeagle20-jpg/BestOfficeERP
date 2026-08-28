@@ -1,0 +1,300 @@
+{% extends "layout.html" %}
+{% block title %}Küresel Müşteri Portföyü{% endblock %}
+{% block page_title %}Küresel Müşteri Portföyü{% endblock %}
+
+{% block topbar_actions %}
+  <button class="btn-erp btn-erp-sm btn-outline-erp" type="button" onclick="loadCustomers()">
+    <i class="fa fa-sync"></i> Yenile
+  </button>
+{% endblock %}
+
+{% block content %}
+<style>
+  .mod-nav { display:flex; gap:10px; margin-bottom:18px; flex-wrap:wrap; align-items:center; }
+  .mod-nav a {
+    padding:6px 12px; border-radius:6px; border:1px solid #1e3a5f;
+    color:#90caf9; background:#0a1929; text-decoration:none; font-size:.85rem;
+  }
+  .mod-nav a.active { background:#1565c0; color:#fff; border-color:#1565c0; font-weight:600; }
+  .mod-nav a:hover { background:#132f4c; color:#fff; }
+
+  .cust-filters {
+    display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end;
+    margin-bottom:16px; padding:14px 16px;
+    background:#0a1929; border:1px solid #1e3a5f; border-radius:8px;
+  }
+  .cust-filters label {
+    display:flex; flex-direction:column; gap:4px;
+    font-size:.78rem; color:#90a4ae; font-weight:600;
+  }
+  .cust-filters select {
+    background:#0f2537; border:1px solid #1e3a5f; color:#e0f7fa;
+    border-radius:6px; padding:7px 10px; min-width:140px; font-size:.88rem;
+  }
+  .cust-stats { color:#90caf9; font-size:.85rem; margin-left:auto; align-self:center; }
+
+  .cust-table-wrap { overflow-x:auto; }
+  .cust-table { width:100%; border-collapse:collapse; font-size:.88rem; }
+  .cust-table th {
+    text-align:left; padding:10px 12px; color:#90caf9;
+    border-bottom:1px solid #1e3a5f; font-weight:600; white-space:nowrap;
+    background:#0a1929;
+  }
+  .cust-table td {
+    padding:12px; border-bottom:1px solid rgba(30,58,95,.5);
+    color:#cfd8dc; vertical-align:top;
+  }
+  .cust-table tr:hover td { background:rgba(21,101,192,.08); }
+
+  .cust-firm { color:#e0f7fa; font-weight:600; }
+  .cust-slug { color:#90a4ae; font-size:.8rem; font-family:monospace; margin-top:2px; }
+  .cust-id { color:#546e7a; font-size:.75rem; }
+
+  .st-badge {
+    display:inline-block; padding:2px 8px; border-radius:4px;
+    font-size:.72rem; font-weight:700; text-transform:uppercase; letter-spacing:.02em;
+  }
+  .st-active { background:#1b5e20; color:#a5d6a7; }
+  .st-provisioning { background:#0d47a1; color:#90caf9; }
+  .st-suspended { background:#e65100; color:#ffe0b2; }
+  .st-failed { background:#b71c1c; color:#ffcdd2; }
+
+  .mod-chips { display:flex; flex-wrap:wrap; gap:5px; }
+  .mod-chip {
+    display:inline-flex; align-items:center; gap:4px;
+    background:#0f2537; border:1px solid #254b77; border-radius:4px;
+    padding:2px 7px; font-size:.72rem; color:#b0bec5;
+  }
+  .mod-chip strong { color:#e0f7fa; }
+  .mod-chip .tier { color:#4fc3f7; font-family:monospace; }
+  .mod-chip.is-trial { border-color:#1565c0; }
+  .mod-chip.is-suspended { border-color:#ef6c00; opacity:.7; }
+
+  .cust-empty { text-align:center; padding:40px; color:#78909c; }
+  .cust-err {
+    background:#3a1a1a; border:1px solid #6a2d2d; color:#ff8a80;
+    border-radius:8px; padding:12px 14px; margin-bottom:14px; display:none;
+  }
+</style>
+
+<div class="mod-nav">
+  <a href="{{ url_for('admin.yonetim_hub') }}"><i class="fa fa-th-large"></i> Yönetim Hub</a>
+  <a href="{{ url_for('admin.index') }}"><i class="fa fa-users"></i> Kullanıcılar</a>
+  <a href="{{ url_for('admin_pricing.pricing_page') }}"><i class="fa fa-tags"></i> Fiyatlandırma</a>
+  <a href="{{ url_for('admin_module_pricing.module_pricing_page') }}"><i class="fa fa-layer-group"></i> Modül Fiyatlandırma</a>
+  <a href="{{ url_for('admin_modules.modules_page') }}"><i class="fa fa-puzzle-piece"></i> Modül Yönetimi</a>
+  <a href="{{ url_for('admin_campaigns.campaigns_page') }}"><i class="fa fa-percent"></i> Kampanyalar</a>
+  <a href="{{ url_for('admin_credentials.credentials_page') }}"><i class="fa fa-key"></i> Kimlik Bilgileri Kasası</a>
+  <a href="{{ url_for('admin_mukerrer.mukerrer_arsiv_page') }}"><i class="fa fa-archive"></i> Mükerrer Arşiv</a>
+  <a href="{{ url_for('admin_customers.customers_page') }}" class="active"><i class="fa fa-globe"></i> Küresel Müşteri Portföyü</a>
+</div>
+
+<div class="card-erp">
+  <div id="cust-err" class="cust-err" role="alert"></div>
+
+  <div class="cust-filters">
+    <label>Ülke
+      <select id="f-country">
+        <option value="">Tümü</option>
+      </select>
+    </label>
+    <label>Hesap Statüsü
+      <select id="f-status">
+        <option value="all">Tümü</option>
+        <option value="active" selected>Active</option>
+        <option value="provisioning">Provisioning</option>
+        <option value="suspended">Suspended</option>
+        <option value="failed">Failed</option>
+      </select>
+    </label>
+    <label>Modül
+      <select id="f-module">
+        <option value="">Tümü</option>
+      </select>
+    </label>
+    <div class="cust-stats" id="cust-stats">Yükleniyor…</div>
+  </div>
+
+  <div class="cust-table-wrap">
+    <table class="cust-table">
+      <thead>
+        <tr>
+          <th>Firma / Slug</th>
+          <th>Ülke</th>
+          <th>Statü</th>
+          <th>Plan</th>
+          <th>Modüller / Kademe</th>
+          <th>Admin E-posta</th>
+          <th>Kayıt Tarihi</th>
+        </tr>
+      </thead>
+      <tbody id="cust-tbody">
+        <tr><td colspan="7" class="cust-empty">Yükleniyor…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+(function () {
+  const tbody = document.getElementById("cust-tbody");
+  const errEl = document.getElementById("cust-err");
+  const statsEl = document.getElementById("cust-stats");
+  const fCountry = document.getElementById("f-country");
+  const fStatus = document.getElementById("f-status");
+  const fModule = document.getElementById("f-module");
+
+  let countriesBootstrapped = false;
+  let modulesBootstrapped = false;
+
+  function esc(t) {
+    const d = document.createElement("div");
+    d.textContent = t == null ? "" : String(t);
+    return d.innerHTML;
+  }
+
+  function statusBadge(st) {
+    const cls = ({
+      active: "st-active",
+      provisioning: "st-provisioning",
+      suspended: "st-suspended",
+      failed: "st-failed"
+    })[st] || "st-provisioning";
+    return '<span class="st-badge ' + cls + '">' + esc(st) + "</span>";
+  }
+
+  function moduleChips(modules) {
+    if (!modules || !modules.length) {
+      return '<span style="color:#546e7a;">—</span>';
+    }
+    return '<div class="mod-chips">' + modules.map(function (m) {
+      const chipCls = m.status === "trial" ? " is-trial"
+        : (m.status === "suspended" || m.status === "revoked" || m.status === "expired" ? " is-suspended" : "");
+      const tier = m.selected_tier
+        ? ' <span class="tier">(' + esc(m.selected_tier) + ")</span>"
+        : "";
+      return '<span class="mod-chip' + chipCls + '"><strong>' + esc(m.display_name || m.module_key) +
+        "</strong>" + tier + " · " + esc(m.status) + "</span>";
+    }).join("") + "</div>";
+  }
+
+  function fmtDate(iso) {
+    if (!iso) return "—";
+    try {
+      const d = new Date(iso);
+      return d.toLocaleString("tr-TR", {
+        year: "numeric", month: "2-digit", day: "2-digit",
+        hour: "2-digit", minute: "2-digit"
+      });
+    } catch (e) {
+      return esc(iso);
+    }
+  }
+
+  function showErr(msg) {
+    errEl.textContent = msg;
+    errEl.style.display = "block";
+  }
+  function clearErr() {
+    errEl.style.display = "none";
+    errEl.textContent = "";
+  }
+
+  function bootstrapFilters(data) {
+    if (!countriesBootstrapped) {
+      (data.countries || []).forEach(function (c) {
+        const opt = document.createElement("option");
+        opt.value = c;
+        opt.textContent = c;
+        fCountry.appendChild(opt);
+      });
+      const noneOpt = document.createElement("option");
+      noneOpt.value = "__NONE__";
+      noneOpt.textContent = "(ülke yok)";
+      fCountry.appendChild(noneOpt);
+      countriesBootstrapped = true;
+    }
+    if (!modulesBootstrapped) {
+      (data.module_catalog || []).forEach(function (m) {
+        const opt = document.createElement("option");
+        opt.value = m.key;
+        opt.textContent = m.label;
+        fModule.appendChild(opt);
+      });
+      modulesBootstrapped = true;
+    }
+  }
+
+  function renderRows(customers) {
+    if (!customers.length) {
+      tbody.innerHTML = '<tr><td colspan="7" class="cust-empty">Filtreye uyan kiracı yok.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = customers.map(function (c) {
+      const firm = c.company_name || c.slug || "—";
+      const country = c.country_code || "—";
+      return "<tr>" +
+        "<td><div class=\"cust-firm\">" + esc(firm) + "</div>" +
+        "<div class=\"cust-slug\">" + esc(c.slug) + "</div>" +
+        "<div class=\"cust-id\">#" + esc(String(c.id)) + " · " + esc(c.schema_name) + "</div></td>" +
+        "<td>" + esc(country) + "</td>" +
+        "<td>" + statusBadge(c.status) + "</td>" +
+        "<td>" + esc(c.plan || "—") + "</td>" +
+        "<td>" + moduleChips(c.modules) + "</td>" +
+        "<td>" + esc(c.admin_email || "—") + "</td>" +
+        "<td>" + fmtDate(c.created_at) + "</td>" +
+        "</tr>";
+    }).join("");
+  }
+
+  async function loadCustomers() {
+    clearErr();
+    const params = new URLSearchParams();
+    const st = fStatus.value || "all";
+    params.set("status", st);
+    const country = fCountry.value;
+    if (country && country !== "__NONE__") params.set("country", country);
+    const mod = fModule.value;
+    if (mod) params.set("module", mod);
+
+    try {
+      const res = await fetch("/admin/api/customers?" + params.toString(), {
+        headers: { Accept: "application/json" }
+      });
+      const data = await res.json().catch(function () { return {}; });
+      if (!res.ok || !data.ok) {
+        showErr(data.mesaj || "Liste yüklenemedi (" + res.status + ")");
+        tbody.innerHTML = '<tr><td colspan="7" class="cust-empty">Hata</td></tr>';
+        return;
+      }
+
+      bootstrapFilters(data);
+
+      let rows = data.customers || [];
+      if (country === "__NONE__") {
+        rows = rows.filter(function (c) { return !c.country_code; });
+      }
+
+      const sc = data.status_counts || {};
+      statsEl.textContent =
+        "Gösterilen: " + rows.length + " / Toplam kiracı: " + (data.total_tenants || 0) +
+        "  ·  active " + (sc.active || 0) +
+        " · suspended " + (sc.suspended || 0) +
+        " · provisioning " + (sc.provisioning || 0) +
+        " · failed " + (sc.failed || 0);
+
+      renderRows(rows);
+    } catch (e) {
+      showErr("Bağlantı hatası.");
+      tbody.innerHTML = '<tr><td colspan="7" class="cust-empty">Bağlantı hatası</td></tr>';
+    }
+  }
+
+  window.loadCustomers = loadCustomers;
+  fCountry.addEventListener("change", loadCustomers);
+  fStatus.addEventListener("change", loadCustomers);
+  fModule.addEventListener("change", loadCustomers);
+  loadCustomers();
+})();
+</script>
+{% endblock %}
