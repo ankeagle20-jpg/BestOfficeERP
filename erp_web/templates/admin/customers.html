@@ -70,10 +70,67 @@
   .mod-chip.is-trial { border-color:#1565c0; }
   .mod-chip.is-suspended { border-color:#ef6c00; opacity:.7; }
 
+  .bill-cell { display:flex; flex-direction:column; gap:6px; align-items:flex-start; }
+  .bill-bal { color:#e0f7fa; font-weight:600; font-variant-numeric:tabular-nums; }
+  .bill-bal.is-zero { color:#546e7a; font-weight:500; }
+  .bill-overdue {
+    display:inline-block; padding:2px 8px; border-radius:4px;
+    background:#b71c1c; color:#ffcdd2; font-size:.72rem; font-weight:700;
+    letter-spacing:.02em; white-space:nowrap;
+  }
+
+  .cust-detail-btn {
+    background:#0f2537; border:1px solid #254b77; color:#90caf9;
+    border-radius:6px; padding:5px 10px; font-size:.78rem; cursor:pointer;
+  }
+  .cust-detail-btn:hover { background:#1565c0; color:#fff; border-color:#1565c0; }
+
   .cust-empty { text-align:center; padding:40px; color:#78909c; }
   .cust-err {
     background:#3a1a1a; border:1px solid #6a2d2d; color:#ff8a80;
     border-radius:8px; padding:12px 14px; margin-bottom:14px; display:none;
+  }
+
+  .cust-modal-backdrop {
+    display:none; position:fixed; inset:0; z-index:1200;
+    background:rgba(0,0,0,.55); align-items:center; justify-content:center;
+    padding:20px;
+  }
+  .cust-modal-backdrop.is-open { display:flex; }
+  .cust-modal {
+    width:min(920px, 100%); max-height:90vh; overflow:auto;
+    background:#0a1929; border:1px solid #1e3a5f; border-radius:10px;
+    box-shadow:0 12px 40px rgba(0,0,0,.45);
+  }
+  .cust-modal-hd {
+    display:flex; align-items:flex-start; justify-content:space-between; gap:12px;
+    padding:14px 16px; border-bottom:1px solid #1e3a5f; position:sticky; top:0;
+    background:#0a1929; z-index:1;
+  }
+  .cust-modal-hd h3 { margin:0; color:#e0f7fa; font-size:1.05rem; }
+  .cust-modal-hd .sub { color:#90a4ae; font-size:.82rem; margin-top:4px; font-family:monospace; }
+  .cust-modal-close {
+    background:transparent; border:1px solid #1e3a5f; color:#90caf9;
+    border-radius:6px; padding:4px 10px; cursor:pointer;
+  }
+  .cust-modal-bd { padding:16px; }
+  .cust-modal-sec { margin-bottom:18px; }
+  .cust-modal-sec h4 {
+    margin:0 0 8px; color:#90caf9; font-size:.85rem; font-weight:700;
+    text-transform:uppercase; letter-spacing:.03em;
+  }
+  .cust-mini-table { width:100%; border-collapse:collapse; font-size:.82rem; }
+  .cust-mini-table th {
+    text-align:left; padding:7px 8px; color:#90a4ae; border-bottom:1px solid #1e3a5f;
+    font-weight:600; white-space:nowrap;
+  }
+  .cust-mini-table td {
+    padding:8px; border-bottom:1px solid rgba(30,58,95,.45); color:#cfd8dc;
+  }
+  .cust-modal-loading, .cust-modal-empty { color:#78909c; padding:8px 0; font-size:.88rem; }
+  .cust-modal-err {
+    background:#3a1a1a; border:1px solid #6a2d2d; color:#ff8a80;
+    border-radius:6px; padding:10px 12px; margin-bottom:12px;
   }
 </style>
 
@@ -126,12 +183,29 @@
           <th>Modüller / Kademe</th>
           <th>Admin E-posta</th>
           <th>Kayıt Tarihi</th>
+          <th>Bakiye / Gecikme</th>
+          <th></th>
         </tr>
       </thead>
       <tbody id="cust-tbody">
-        <tr><td colspan="7" class="cust-empty">Yükleniyor…</td></tr>
+        <tr><td colspan="9" class="cust-empty">Yükleniyor…</td></tr>
       </tbody>
     </table>
+  </div>
+</div>
+
+<div id="cust-detail-backdrop" class="cust-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="cust-detail-title">
+  <div class="cust-modal">
+    <div class="cust-modal-hd">
+      <div>
+        <h3 id="cust-detail-title">Kiracı faturalama detayı</h3>
+        <div class="sub" id="cust-detail-sub"></div>
+      </div>
+      <button type="button" class="cust-modal-close" id="cust-detail-close" aria-label="Kapat">Kapat</button>
+    </div>
+    <div class="cust-modal-bd" id="cust-detail-body">
+      <div class="cust-modal-loading">Yükleniyor…</div>
+    </div>
   </div>
 </div>
 
@@ -143,6 +217,11 @@
   const fCountry = document.getElementById("f-country");
   const fStatus = document.getElementById("f-status");
   const fModule = document.getElementById("f-module");
+  const detailBackdrop = document.getElementById("cust-detail-backdrop");
+  const detailBody = document.getElementById("cust-detail-body");
+  const detailTitle = document.getElementById("cust-detail-title");
+  const detailSub = document.getElementById("cust-detail-sub");
+  const detailClose = document.getElementById("cust-detail-close");
 
   let countriesBootstrapped = false;
   let modulesBootstrapped = false;
@@ -191,6 +270,41 @@
     }
   }
 
+  function fmtMoney(n, currency) {
+    const num = Number(n || 0);
+    const cur = currency || "TRY";
+    try {
+      return new Intl.NumberFormat("tr-TR", {
+        style: "currency",
+        currency: cur,
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      }).format(num);
+    } catch (e) {
+      return num.toFixed(2) + " " + cur;
+    }
+  }
+
+  function billingCell(c) {
+    const bal = Number(c.balance_due || 0);
+    const hasBal = bal > 0.0001;
+    let html = '<div class="bill-cell">';
+    if (hasBal) {
+      html += '<span class="bill-bal">' + esc(fmtMoney(bal, "TRY")) + "</span>";
+    } else {
+      html += '<span class="bill-bal is-zero">—</span>';
+    }
+    if (c.has_overdue) {
+      const days = c.overdue_days != null ? Number(c.overdue_days) : null;
+      const label = days != null && days > 0
+        ? (days + " gün GECİKMİŞ")
+        : "GECİKMİŞ";
+      html += '<span class="bill-overdue">' + esc(label) + "</span>";
+    }
+    html += "</div>";
+    return html;
+  }
+
   function showErr(msg) {
     errEl.textContent = msg;
     errEl.style.display = "block";
@@ -227,13 +341,14 @@
 
   function renderRows(customers) {
     if (!customers.length) {
-      tbody.innerHTML = '<tr><td colspan="7" class="cust-empty">Filtreye uyan kiracı yok.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="9" class="cust-empty">Filtreye uyan kiracı yok.</td></tr>';
       return;
     }
     tbody.innerHTML = customers.map(function (c) {
       const firm = c.company_name || c.slug || "—";
       const country = c.country_code || "—";
-      return "<tr>" +
+      const tid = Number(c.id);
+      return "<tr data-tenant-id=\"" + esc(String(tid)) + "\">" +
         "<td><div class=\"cust-firm\">" + esc(firm) + "</div>" +
         "<div class=\"cust-slug\">" + esc(c.slug) + "</div>" +
         "<div class=\"cust-id\">#" + esc(String(c.id)) + " · " + esc(c.schema_name) + "</div></td>" +
@@ -243,9 +358,145 @@
         "<td>" + moduleChips(c.modules) + "</td>" +
         "<td>" + esc(c.admin_email || "—") + "</td>" +
         "<td>" + fmtDate(c.created_at) + "</td>" +
+        "<td>" + billingCell(c) + "</td>" +
+        "<td><button type=\"button\" class=\"cust-detail-btn\" data-detail-id=\"" +
+          esc(String(tid)) + "\" data-detail-slug=\"" + esc(c.slug || "") +
+          "\" data-detail-name=\"" + esc(firm) + "\">Detay</button></td>" +
         "</tr>";
     }).join("");
   }
+
+  function closeDetail() {
+    detailBackdrop.classList.remove("is-open");
+    detailBody.innerHTML = '<div class="cust-modal-loading">Yükleniyor…</div>';
+  }
+
+  function miniTable(headers, rowsHtml) {
+    return '<table class="cust-mini-table"><thead><tr>' +
+      headers.map(function (h) { return "<th>" + esc(h) + "</th>"; }).join("") +
+      "</tr></thead><tbody>" + rowsHtml + "</tbody></table>";
+  }
+
+  function renderDetailSections(subs, invs, pays) {
+    let html = "";
+
+    html += '<div class="cust-modal-sec"><h4>Abonelikler</h4>';
+    if (!subs.length) {
+      html += '<div class="cust-modal-empty">Abonelik kaydı yok.</div>';
+    } else {
+      html += miniTable(
+        ["ID", "Plan", "Durum", "Döngü", "Net", "Brüt", "Başlangıç"],
+        subs.map(function (s) {
+          return "<tr>" +
+            "<td>" + esc(String(s.id)) + "</td>" +
+            "<td>" + esc(s.plan_code || "—") + "</td>" +
+            "<td>" + esc(s.status || "—") + "</td>" +
+            "<td>" + esc(s.billing_cycle || "—") + "</td>" +
+            "<td>" + esc(fmtMoney(s.amount_net, s.currency)) + "</td>" +
+            "<td>" + esc(fmtMoney(s.amount_gross, s.currency)) + "</td>" +
+            "<td>" + fmtDate(s.started_at) + "</td>" +
+            "</tr>";
+        }).join("")
+      );
+    }
+    html += "</div>";
+
+    html += '<div class="cust-modal-sec"><h4>Faturalar</h4>';
+    if (!invs.length) {
+      html += '<div class="cust-modal-empty">Fatura kaydı yok.</div>';
+    } else {
+      html += miniTable(
+        ["No", "Durum", "Tutar", "Vade", "Ödeme"],
+        invs.map(function (inv) {
+          return "<tr>" +
+            "<td>" + esc(inv.invoice_no || "—") + "</td>" +
+            "<td>" + esc(inv.status || "—") + "</td>" +
+            "<td>" + esc(fmtMoney(inv.total_gross, inv.currency)) + "</td>" +
+            "<td>" + fmtDate(inv.due_at) + "</td>" +
+            "<td>" + (inv.paid_at ? fmtDate(inv.paid_at) : "—") + "</td>" +
+            "</tr>";
+        }).join("")
+      );
+    }
+    html += "</div>";
+
+    html += '<div class="cust-modal-sec"><h4>Ödemeler</h4>';
+    if (!pays.length) {
+      html += '<div class="cust-modal-empty">Ödeme kaydı yok.</div>';
+    } else {
+      html += miniTable(
+        ["ID", "Tutar", "Yöntem", "Referans", "Tarih", "Fatura"],
+        pays.map(function (p) {
+          return "<tr>" +
+            "<td>" + esc(String(p.id)) + "</td>" +
+            "<td>" + esc(fmtMoney(p.amount, p.currency)) + "</td>" +
+            "<td>" + esc(p.method || "—") + "</td>" +
+            "<td>" + esc(p.reference || "—") + "</td>" +
+            "<td>" + fmtDate(p.paid_at) + "</td>" +
+            "<td>" + esc(p.invoice_id != null ? String(p.invoice_id) : "—") + "</td>" +
+            "</tr>";
+        }).join("")
+      );
+    }
+    html += "</div>";
+
+    return html;
+  }
+
+  async function openDetail(tenantId, slug, name) {
+    detailTitle.textContent = name || ("Kiracı #" + tenantId);
+    detailSub.textContent = "#" + tenantId + " · " + (slug || "—");
+    detailBody.innerHTML = '<div class="cust-modal-loading">Abonelik, fatura ve ödemeler yükleniyor…</div>';
+    detailBackdrop.classList.add("is-open");
+
+    const q = "tenant_id=" + encodeURIComponent(String(tenantId));
+    try {
+      const [rSub, rInv, rPay] = await Promise.all([
+        fetch("/admin/api/billing/subscriptions?" + q, { headers: { Accept: "application/json" } }),
+        fetch("/admin/api/billing/invoices?" + q, { headers: { Accept: "application/json" } }),
+        fetch("/admin/api/billing/payments?" + q, { headers: { Accept: "application/json" } })
+      ]);
+      const jSub = await rSub.json().catch(function () { return {}; });
+      const jInv = await rInv.json().catch(function () { return {}; });
+      const jPay = await rPay.json().catch(function () { return {}; });
+
+      if (!rSub.ok || !jSub.ok || !rInv.ok || !jInv.ok || !rPay.ok || !jPay.ok) {
+        const msg = (jSub.mesaj || jInv.mesaj || jPay.mesaj || "Detay yüklenemedi");
+        detailBody.innerHTML = '<div class="cust-modal-err">' + esc(msg) + "</div>";
+        return;
+      }
+
+      detailBody.innerHTML = renderDetailSections(
+        jSub.items || [],
+        jInv.items || [],
+        jPay.items || []
+      );
+    } catch (e) {
+      detailBody.innerHTML = '<div class="cust-modal-err">Bağlantı hatası.</div>';
+    }
+  }
+
+  tbody.addEventListener("click", function (ev) {
+    const btn = ev.target.closest("[data-detail-id]");
+    if (!btn) return;
+    const tid = Number(btn.getAttribute("data-detail-id"));
+    if (!tid) return;
+    openDetail(
+      tid,
+      btn.getAttribute("data-detail-slug") || "",
+      btn.getAttribute("data-detail-name") || ""
+    );
+  });
+
+  detailClose.addEventListener("click", closeDetail);
+  detailBackdrop.addEventListener("click", function (ev) {
+    if (ev.target === detailBackdrop) closeDetail();
+  });
+  document.addEventListener("keydown", function (ev) {
+    if (ev.key === "Escape" && detailBackdrop.classList.contains("is-open")) {
+      closeDetail();
+    }
+  });
 
   async function loadCustomers() {
     clearErr();
@@ -264,7 +515,7 @@
       const data = await res.json().catch(function () { return {}; });
       if (!res.ok || !data.ok) {
         showErr(data.mesaj || "Liste yüklenemedi (" + res.status + ")");
-        tbody.innerHTML = '<tr><td colspan="7" class="cust-empty">Hata</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9" class="cust-empty">Hata</td></tr>';
         return;
       }
 
@@ -286,7 +537,7 @@
       renderRows(rows);
     } catch (e) {
       showErr("Bağlantı hatası.");
-      tbody.innerHTML = '<tr><td colspan="7" class="cust-empty">Bağlantı hatası</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="9" class="cust-empty">Bağlantı hatası</td></tr>';
     }
   }
 

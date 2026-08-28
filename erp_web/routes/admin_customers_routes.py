@@ -2,7 +2,8 @@
 """Admin: Küresel Müşteri Portföyü (yalnız public host).
 
 v1 — mevcut public.tenants + tenant_module_entitlements + tenant_user_lookup
-verilerini tek ekranda gösterir. Yeni tablo yok.
+verilerini tek ekranda gösterir.
+B2 — platform_tenant_* faturalama özeti (balance_due / has_overdue) + detay UI.
 """
 from __future__ import annotations
 
@@ -112,6 +113,58 @@ def _entitlements_by_tenant() -> dict[int, list[dict]]:
     return out
 
 
+def _billing_summary_by_tenant() -> dict[int, dict]:
+    """Açık (sent/overdue, paid_at NULL) faturalardan bakiye + gecikme özeti.
+
+    balance_due  — açık fatura total_gross toplamı
+    has_overdue  — due_at < bugün (UTC) olan açık fatura var mı
+    overdue_days — en uzun gecikme günü (yoksa None)
+    """
+    rows = fetch_all(
+        """
+        SELECT
+            tenant_id,
+            COALESCE(SUM(total_gross), 0) AS balance_due,
+            BOOL_OR(
+                due_at IS NOT NULL
+                AND (due_at AT TIME ZONE 'UTC')::date < (NOW() AT TIME ZONE 'UTC')::date
+            ) AS has_overdue,
+            MAX(
+                CASE
+                    WHEN due_at IS NOT NULL
+                     AND (due_at AT TIME ZONE 'UTC')::date
+                         < (NOW() AT TIME ZONE 'UTC')::date
+                    THEN (
+                        (NOW() AT TIME ZONE 'UTC')::date
+                        - (due_at AT TIME ZONE 'UTC')::date
+                    )
+                    ELSE NULL
+                END
+            ) AS overdue_days
+        FROM public.platform_tenant_invoices
+        WHERE status IN ('sent', 'overdue')
+          AND paid_at IS NULL
+        GROUP BY tenant_id
+        """
+    ) or []
+    out: dict[int, dict] = {}
+    for r in rows:
+        tid = int(r["tenant_id"])
+        bal = r.get("balance_due")
+        try:
+            balance_due = float(bal or 0)
+        except (TypeError, ValueError):
+            balance_due = 0.0
+        overdue_raw = r.get("overdue_days")
+        overdue_days = int(overdue_raw) if overdue_raw is not None else None
+        out[tid] = {
+            "balance_due": round(balance_due, 2),
+            "has_overdue": bool(r.get("has_overdue")),
+            "overdue_days": overdue_days,
+        }
+    return out
+
+
 @bp.route("/customers", methods=["GET"])
 @platform_customers_admin
 def customers_page():
@@ -153,6 +206,7 @@ def api_customers_list():
 
         email_map = _admin_email_map()
         ent_map = _entitlements_by_tenant()
+        billing_map = _billing_summary_by_tenant()
 
         items: list[dict] = []
         countries_seen: set[str] = set()
@@ -166,6 +220,10 @@ def api_customers_list():
                 countries_seen.add(country)
 
             modules = ent_map.get(tid, [])
+            billing = billing_map.get(
+                tid,
+                {"balance_due": 0.0, "has_overdue": False, "overdue_days": None},
+            )
 
             if status_q != "all" and status != status_q:
                 continue
@@ -195,6 +253,9 @@ def api_customers_list():
                     "error_message": t.get("error_message"),
                     "modules": modules,
                     "module_count": len(modules),
+                    "balance_due": billing["balance_due"],
+                    "has_overdue": billing["has_overdue"],
+                    "overdue_days": billing["overdue_days"],
                 }
             )
 
