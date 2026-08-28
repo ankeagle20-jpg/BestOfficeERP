@@ -35,6 +35,98 @@ def _tenant_bind_and_session_lock():
     return bind_request_tenant()
 
 
+# ── S2: "Sadece Payafin Cari" URL allowlist (sert güvenlik) ──────────────────
+_LEDGER_ONLY_EXACT_PATHS = frozenset(
+    {
+        "/login",
+        "/logout",
+        "/profile",
+        "/healthz",
+        "/favicon.ico",
+        "/sw.js",
+        "/offline",
+    }
+)
+_LEDGER_ONLY_DENY_MSG = "Bu hesap yalnızca Payafin Cari kullanır; bu sayfaya erişim yok."
+
+
+def _ledger_only_path_allowed(path: str) -> bool:
+    """Ledger-only kiracıda izinli yollar (UI + PWA + auth + static + health)."""
+    p = path or "/"
+    if p.startswith("/static/") or p == "/static":
+        return True
+    # /ledger, /ledger/, /ledger/api/..., manifest/sw/offline (blueprint prefix)
+    if p == "/ledger" or p.startswith("/ledger/"):
+        return True
+    if p in _LEDGER_ONLY_EXACT_PATHS:
+        return True
+    if p.startswith("/manifest"):
+        return True
+    return False
+
+
+def _ledger_only_is_api_path(path: str) -> bool:
+    """Ledger dışı API: /api/... veya .../api/... → 403 JSON (yönlendirme değil)."""
+    p = path or ""
+    if p == "/api" or p.startswith("/api/"):
+        return True
+    return "/api/" in p
+
+
+def _compute_request_is_ledger_only() -> bool:
+    """İstek başına bir kez: is_ledger_only_tenant (modül cache) → g.is_ledger_only.
+
+    Fail-open: hata / kiracı yok / public host → False (tam ERP asla kilitlenmez).
+    """
+    if hasattr(g, "is_ledger_only"):
+        return bool(g.is_ledger_only)
+    try:
+        # Yalnız gerçek kiracı şemasında zorunlu; apex/public host'a dokunma
+        if not getattr(g, "tenant_schema", None):
+            g.is_ledger_only = False
+            return False
+        from tenant_module_access import (
+            is_ledger_only_tenant,
+            resolve_request_tenant_id,
+        )
+
+        tid = resolve_request_tenant_id()
+        if tid is None:
+            g.is_ledger_only = False
+            return False
+        g.is_ledger_only = bool(is_ledger_only_tenant(int(tid)))
+        return bool(g.is_ledger_only)
+    except Exception:
+        g.is_ledger_only = False
+        return False
+
+
+@app.before_request
+def _ledger_only_url_guard():
+    """S2: ledger-only ise allowlist dışı HTML → /ledger/; ledger-dışı API → 403 JSON.
+
+    Tam ERP (core_erp aktif) kiracılarında no-op. OPTIONS serbest.
+    """
+    if request.method == "OPTIONS":
+        return None
+    try:
+        if not _compute_request_is_ledger_only():
+            return None
+        path = request.path or "/"
+        if _ledger_only_path_allowed(path):
+            return None
+        if _ledger_only_is_api_path(path):
+            return jsonify({"ok": False, "mesaj": _LEDGER_ONLY_DENY_MSG}), 403
+        return redirect("/ledger/")
+    except Exception:
+        # Fail-open: beklenmeyen hata → ERP müşterisini kilitleme
+        try:
+            g.is_ledger_only = False
+        except Exception:
+            pass
+        return None
+
+
 def _format_tr_number(value, decimals=2):
     """1.234,56 biçiminde TR sayı gösterimi."""
     try:
@@ -531,7 +623,7 @@ def server_error(e):
 # ── Context processor — her template'e gönderilir ────────────────────────────
 @app.context_processor
 def inject_module_access():
-    """Faz 4 / S1: has_module + is_ledger_only (Payafin Cari kabuğu)."""
+    """Faz 4 / S1–S2: has_module + is_ledger_only (Payafin Cari kabuğu)."""
     from tenant_module_access import (
         has_module_entitlement,
         is_ledger_only_tenant,
@@ -547,13 +639,17 @@ def inject_module_access():
         except Exception:
             return False
 
-    is_ledger_only = False
-    try:
-        tid = resolve_request_tenant_id()
-        if tid is not None:
-            is_ledger_only = bool(is_ledger_only_tenant(int(tid)))
-    except Exception:
+    # S2 before_request g.is_ledger_only set ettiyse tekrar DB'ye gitme
+    if hasattr(g, "is_ledger_only"):
+        is_ledger_only = bool(g.is_ledger_only)
+    else:
         is_ledger_only = False
+        try:
+            tid = resolve_request_tenant_id()
+            if tid is not None:
+                is_ledger_only = bool(is_ledger_only_tenant(int(tid)))
+        except Exception:
+            is_ledger_only = False
 
     return {"has_module": has_module, "is_ledger_only": is_ledger_only}
 
