@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
-"""Admin: Platform kiracı faturalama API (yalnız public host) — B1."""
+"""Admin: Platform kiracı faturalama API (yalnız public host) — B1/B3."""
 from __future__ import annotations
 
+import csv
 import datetime as dt
+import io
 import json
 import logging
 import re
@@ -10,7 +12,7 @@ from decimal import Decimal, InvalidOperation
 from functools import wraps
 from typing import Any
 
-from flask import Blueprint, g, jsonify, request
+from flask import Blueprint, Response, g, jsonify, request
 
 from auth import admin_gerekli
 from db import execute, execute_returning, fetch_all, fetch_one
@@ -153,6 +155,89 @@ def _aging_bucket(days_overdue: int) -> str:
     if days_overdue <= 90:
         return "61-90"
     return "90+"
+
+
+def _csv_response(filename: str, header: list[str], rows: list[list[Any]]) -> Response:
+    """UTF-8 BOM'lu CSV (Excel Türkçe karakter uyumu)."""
+    buf = io.StringIO()
+    writer = csv.writer(buf, delimiter=",", quoting=csv.QUOTE_MINIMAL, lineterminator="\r\n")
+    writer.writerow(header)
+    for row in rows:
+        writer.writerow(row)
+    data = buf.getvalue().encode("utf-8-sig")
+    return Response(
+        data,
+        mimetype="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+def _fmt_csv_money(val: Any) -> str:
+    try:
+        return f"{float(val or 0):.2f}"
+    except (TypeError, ValueError):
+        return "0.00"
+
+
+def _fmt_csv_dt(val: Any) -> str:
+    if val is None:
+        return ""
+    if isinstance(val, dt.datetime):
+        if val.tzinfo is None:
+            val = val.replace(tzinfo=dt.timezone.utc)
+        return val.isoformat()
+    if isinstance(val, dt.date):
+        return val.isoformat()
+    return str(val)
+
+
+def _collect_aging_items(tenant_id: int | None = None) -> tuple[dt.datetime, list[dict]]:
+    """Açık gecikmiş faturaları aging bucket'larıyla toplar (JSON + CSV ortak)."""
+    now = dt.datetime.now(dt.timezone.utc)
+    where = ["status IN %s", "due_at IS NOT NULL", "paid_at IS NULL"]
+    sql_params: list[Any] = [tuple(OPEN_INV_STATUSES)]
+    if tenant_id is not None:
+        where.append("tenant_id=%s")
+        sql_params.append(int(tenant_id))
+    rows = fetch_all(
+        f"""
+        SELECT id, tenant_id, tenant_slug, invoice_no, status, currency,
+               total_gross, due_at, issued_at
+        FROM public.platform_tenant_invoices
+        WHERE {' AND '.join(where)}
+        ORDER BY due_at ASC NULLS LAST, id ASC
+        """,
+        tuple(sql_params),
+    ) or []
+
+    items_out: list[dict] = []
+    for r in rows:
+        due = r["due_at"]
+        if due.tzinfo is None:
+            due = due.replace(tzinfo=dt.timezone.utc)
+        days = max(0, (now.date() - due.date()).days)
+        if due.date() >= now.date():
+            continue
+        bucket = _aging_bucket(days)
+        gross = float(r["total_gross"] or 0)
+        items_out.append(
+            {
+                "id": int(r["id"]),
+                "tenant_id": int(r["tenant_id"]),
+                "tenant_slug": str(r["tenant_slug"]),
+                "invoice_no": str(r["invoice_no"]),
+                "status": str(r["status"]),
+                "currency": str(r["currency"]),
+                "total_gross": gross,
+                "due_at": due.isoformat(),
+                "days_overdue": days,
+                "bucket": bucket,
+            }
+        )
+    return now, items_out
 
 
 # ── Subscriptions ──────────────────────────────────────────────
@@ -447,25 +532,9 @@ def api_payments_create():
 def api_billing_aging():
     """Açık (sent/overdue) faturaları vade gecikmesine göre 0-30 / 31-60 / 61-90 / 90+ kırar."""
     try:
-        tid = request.args.get("tenant_id")
-        now = dt.datetime.now(dt.timezone.utc)
-        params: list[Any] = list(OPEN_INV_STATUSES)
-        where = ["status IN %s", "due_at IS NOT NULL", "paid_at IS NULL"]
-        # psycopg2 needs tuple for IN
-        sql_params: list[Any] = [tuple(OPEN_INV_STATUSES)]
-        if tid:
-            where.append("tenant_id=%s")
-            sql_params.append(int(tid))
-        rows = fetch_all(
-            f"""
-            SELECT id, tenant_id, tenant_slug, invoice_no, status, currency,
-                   total_gross, due_at, issued_at
-            FROM public.platform_tenant_invoices
-            WHERE {' AND '.join(where)}
-            ORDER BY due_at ASC NULLS LAST, id ASC
-            """,
-            tuple(sql_params),
-        ) or []
+        tid_raw = request.args.get("tenant_id")
+        tid = int(tid_raw) if tid_raw not in (None, "") else None
+        now, items_out = _collect_aging_items(tid)
 
         buckets = {
             "0-30": {"count": 0, "total_gross": 0.0, "items": []},
@@ -473,35 +542,13 @@ def api_billing_aging():
             "61-90": {"count": 0, "total_gross": 0.0, "items": []},
             "90+": {"count": 0, "total_gross": 0.0, "items": []},
         }
-        items_out = []
-        for r in rows:
-            due = r["due_at"]
-            if due.tzinfo is None:
-                due = due.replace(tzinfo=dt.timezone.utc)
-            days = max(0, (now.date() - due.date()).days)
-            # henüz vadesi gelmemiş → aging dışı
-            if due.date() >= now.date():
-                continue
-            bucket = _aging_bucket(days)
-            gross = float(r["total_gross"] or 0)
-            item = {
-                "id": int(r["id"]),
-                "tenant_id": int(r["tenant_id"]),
-                "tenant_slug": str(r["tenant_slug"]),
-                "invoice_no": str(r["invoice_no"]),
-                "status": str(r["status"]),
-                "currency": str(r["currency"]),
-                "total_gross": gross,
-                "due_at": due.isoformat(),
-                "days_overdue": days,
-                "bucket": bucket,
-            }
+        for item in items_out:
+            bucket = item["bucket"]
             buckets[bucket]["count"] += 1
             buckets[bucket]["total_gross"] = round(
-                buckets[bucket]["total_gross"] + gross, 2
+                buckets[bucket]["total_gross"] + float(item["total_gross"] or 0), 2
             )
             buckets[bucket]["items"].append(item)
-            items_out.append(item)
 
         return jsonify(
             {
@@ -517,4 +564,112 @@ def api_billing_aging():
         )
     except Exception as e:
         logger.exception("billing aging")
+        return jsonify({"ok": False, "mesaj": str(e)}), 500
+
+
+@bp.route("/api/billing/aging/export", methods=["GET"])
+@platform_billing_admin
+def api_billing_aging_export():
+    """Aging sonuçlarını UTF-8 BOM'lu CSV olarak indirir (Excel TR uyumlu)."""
+    try:
+        tid_raw = request.args.get("tenant_id")
+        tid = int(tid_raw) if tid_raw not in (None, "") else None
+        _now, items = _collect_aging_items(tid)
+        header = [
+            "Kiracı",
+            "Fatura No",
+            "Tutar",
+            "Vade Tarihi",
+            "Gecikme Günü",
+            "Bucket",
+        ]
+        rows: list[list[Any]] = []
+        for it in items:
+            rows.append(
+                [
+                    it.get("tenant_slug") or "",
+                    it.get("invoice_no") or "",
+                    _fmt_csv_money(it.get("total_gross")),
+                    it.get("due_at") or "",
+                    int(it.get("days_overdue") or 0),
+                    it.get("bucket") or "",
+                ]
+            )
+        stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d_%H%M%S")
+        return _csv_response(f"billing_aging_{stamp}.csv", header, rows)
+    except Exception as e:
+        logger.exception("billing aging export")
+        return jsonify({"ok": False, "mesaj": str(e)}), 500
+
+
+@bp.route("/api/billing/invoices/export", methods=["GET"])
+@platform_billing_admin
+def api_billing_invoices_export():
+    """Tüm (veya tenant_id filtreli) faturaları UTF-8 BOM'lu CSV olarak indirir."""
+    try:
+        tid_raw = request.args.get("tenant_id")
+        status = str(request.args.get("status") or "").strip().lower()
+        where = ["1=1"]
+        sql_params: list[Any] = []
+        if tid_raw not in (None, ""):
+            where.append("tenant_id=%s")
+            sql_params.append(int(tid_raw))
+        if status:
+            if status not in INV_STATUSES:
+                return jsonify({"ok": False, "mesaj": "geçersiz status"}), 400
+            where.append("status=%s")
+            sql_params.append(status)
+        rows_db = fetch_all(
+            f"""
+            SELECT id, tenant_id, tenant_slug, subscription_id, invoice_no, status,
+                   currency, total_gross, issued_at, due_at, paid_at, source,
+                   external_ref, created_at
+            FROM public.platform_tenant_invoices
+            WHERE {' AND '.join(where)}
+            ORDER BY id DESC
+            LIMIT 5000
+            """,
+            tuple(sql_params),
+        ) or []
+
+        header = [
+            "ID",
+            "Kiracı ID",
+            "Kiracı",
+            "Abonelik ID",
+            "Fatura No",
+            "Durum",
+            "Para Birimi",
+            "Tutar",
+            "Düzenleme Tarihi",
+            "Vade Tarihi",
+            "Ödeme Tarihi",
+            "Kaynak",
+            "Harici Ref",
+            "Oluşturulma",
+        ]
+        rows: list[list[Any]] = []
+        for r in rows_db:
+            rows.append(
+                [
+                    int(r["id"]),
+                    int(r["tenant_id"]),
+                    str(r.get("tenant_slug") or ""),
+                    r["subscription_id"] if r.get("subscription_id") is not None else "",
+                    str(r.get("invoice_no") or ""),
+                    str(r.get("status") or ""),
+                    str(r.get("currency") or ""),
+                    _fmt_csv_money(r.get("total_gross")),
+                    _fmt_csv_dt(r.get("issued_at")),
+                    _fmt_csv_dt(r.get("due_at")),
+                    _fmt_csv_dt(r.get("paid_at")),
+                    str(r.get("source") or ""),
+                    str(r.get("external_ref") or ""),
+                    _fmt_csv_dt(r.get("created_at")),
+                ]
+            )
+        stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d_%H%M%S")
+        return _csv_response(f"billing_invoices_{stamp}.csv", header, rows)
+    except Exception as e:
+        logger.exception("billing invoices export")
         return jsonify({"ok": False, "mesaj": str(e)}), 500

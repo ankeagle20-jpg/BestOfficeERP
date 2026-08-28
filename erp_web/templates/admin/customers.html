@@ -32,6 +32,12 @@
     border-radius:6px; padding:7px 10px; min-width:140px; font-size:.88rem;
   }
   .cust-stats { color:#90caf9; font-size:.85rem; margin-left:auto; align-self:center; }
+  .cust-csv-btn {
+    background:#0f2537; border:1px solid #254b77; color:#90caf9;
+    border-radius:6px; padding:7px 12px; font-size:.82rem; cursor:pointer;
+    align-self:center; white-space:nowrap;
+  }
+  .cust-csv-btn:hover { background:#1565c0; color:#fff; border-color:#1565c0; }
 
   .cust-table-wrap { overflow-x:auto; }
   .cust-table { width:100%; border-collapse:collapse; font-size:.88rem; }
@@ -169,6 +175,9 @@
         <option value="">Tümü</option>
       </select>
     </label>
+    <button type="button" class="cust-csv-btn" id="btn-aging-csv" onclick="downloadAgingCsv()">
+      <i class="fa fa-download"></i> CSV İndir
+    </button>
     <div class="cust-stats" id="cust-stats">Yükleniyor…</div>
   </div>
 
@@ -542,6 +551,9 @@
   }
 
   window.loadCustomers = loadCustomers;
+  window.downloadAgingCsv = function () {
+    window.location.href = "/admin/api/billing/aging/export";
+  };
   fCountry.addEventListener("change", loadCustomers);
   fStatus.addEventListener("change", loadCustomers);
   fModule.addEventListener("change", loadCustomers);
