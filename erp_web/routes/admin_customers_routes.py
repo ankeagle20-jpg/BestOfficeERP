@@ -26,6 +26,7 @@ MODULE_CATALOG: tuple[tuple[str, str], ...] = (
     ("randevu", "Randevu"),
     ("personnel", "Personel"),
     ("attendance", "Attendance"),
+    ("ledger", "Payafin Cari"),
 )
 MODULE_LABELS = {k: lab for k, lab in MODULE_CATALOG}
 MODULE_KEYS = frozenset(MODULE_LABELS)

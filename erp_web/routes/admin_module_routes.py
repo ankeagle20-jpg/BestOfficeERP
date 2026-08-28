@@ -23,6 +23,7 @@ MODULE_CATALOG: tuple[tuple[str, str], ...] = (
     ("randevu", "Randevu"),
     ("personnel", "Personel / Devam"),
     ("attendance", "Attendance"),
+    ("ledger", "Payafin Cari"),
 )
 MODULE_KEYS = frozenset(k for k, _ in MODULE_CATALOG)
 

@@ -282,6 +282,11 @@
                 <i class="fa fa-user-tie"></i> Personel
             </a>
             {% endif %}
+            {% if has_module('ledger') %}
+            <a href="/ledger/" class="{% if request.path.startswith('/ledger') %}active{% endif %}">
+                <i class="fa fa-book"></i> Payafin Cari
+            </a>
+            {% endif %}
             <a href="/ilan-robotu/" class="{% if request.path.startswith('/ilan-robotu') %}active{% endif %}">
                 <i class="fa fa-bullhorn"></i> İlan Robotu
             </a>
