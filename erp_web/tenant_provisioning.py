@@ -482,8 +482,15 @@ def grant_default_module_entitlements(
     tenant_slug: str,
     selected_module_keys: list | tuple | None = None,
     module_tier_preferences: dict | None = None,
+    *,
+    ledger_only: bool = False,
 ) -> int:
-    """Yeni kiracı: core_erp (baseline) + seçilen modüller için trial entitlement."""
+    """Yeni kiracı entitlement.
+
+    ledger_only=False (varsayılan): core_erp (baseline) + seçilen modüller.
+    ledger_only=True: yalnız ledger; core_erp verilmez. selected yalnızca
+    ['ledger'] olmalı — aksi halde TenantProvisionError (fail-closed).
+    """
     import json
 
     ensure_tenant_module_entitlements_table()
@@ -492,11 +499,22 @@ def grant_default_module_entitlements(
     selected = normalize_signup_selected_modules(selected_module_keys)
     tier_prefs = normalize_module_tier_preferences(module_tier_preferences)
 
-    modules_to_grant: list[tuple[str, str]] = [
-        (BASELINE_MODULE_KEY, "included"),
-    ]
-    for mk in selected:
-        modules_to_grant.append((mk, "standalone"))
+    if ledger_only:
+        # Fail-closed: boş veya ledger dışı / ekstra modül → hata (core_erp'ye düşme)
+        if set(selected) != {"ledger"}:
+            raise TenantProvisionError(
+                "ledger_only için selected_modules yalnızca ['ledger'] olmalı"
+            )
+        selected = ["ledger"]
+        modules_to_grant: list[tuple[str, str]] = [
+            ("ledger", "standalone"),
+        ]
+    else:
+        modules_to_grant = [
+            (BASELINE_MODULE_KEY, "included"),
+        ]
+        for mk in selected:
+            modules_to_grant.append((mk, "standalone"))
 
     inserted = 0
     for module_key, billing_mode in modules_to_grant:
@@ -509,8 +527,14 @@ def grant_default_module_entitlements(
             (tid, module_key),
         )
         meta: dict = {
-            "note": "Signup provisioning — baseline + selected modules",
+            "note": (
+                "Signup provisioning — ledger_only"
+                if ledger_only
+                else "Signup provisioning — baseline + selected modules"
+            ),
         }
+        if ledger_only:
+            meta["signup_mode"] = "ledger_only"
         if module_key in tier_prefs:
             meta["selected_tier"] = tier_prefs[module_key]
         execute(
@@ -540,9 +564,10 @@ def grant_default_module_entitlements(
             inserted += 1
 
     logger.info(
-        "grant_default_module_entitlements tenant_id=%s slug=%s selected=%s tiers=%s inserted=%s",
+        "grant_default_module_entitlements tenant_id=%s slug=%s ledger_only=%s selected=%s tiers=%s inserted=%s",
         tid,
         slug,
+        bool(ledger_only),
         selected,
         tier_prefs,
         inserted,
@@ -561,6 +586,7 @@ def provision_new_tenant(
     allow_existing_provisioning_row: bool = False,
     selected_module_keys: list | tuple | None = None,
     module_tier_preferences: dict | None = None,
+    ledger_only: bool = False,
 ) -> dict:
     """Yeni kiracı: şema + DDL replay + admin + public.tenants kaydı.
 
@@ -646,6 +672,7 @@ def provision_new_tenant(
         slug,
         selected_module_keys,
         module_tier_preferences,
+        ledger_only=bool(ledger_only),
     )
     return {
         "ok": True,
@@ -659,4 +686,5 @@ def provision_new_tenant(
         "module_entitlements_inserted": ent_inserted,
         "selected_module_keys": normalize_signup_selected_modules(selected_module_keys),
         "module_tier_preferences": normalize_module_tier_preferences(module_tier_preferences),
+        "ledger_only": bool(ledger_only),
     }

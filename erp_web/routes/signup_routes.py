@@ -135,6 +135,16 @@ def _parse_module_tier_preferences(data: dict) -> dict[str, str]:
     return normalize_module_tier_preferences(raw)
 
 
+def _parse_ledger_only(data: dict) -> bool:
+    """Request body ledger_only — yalnız açık true benzeri değerler; varsayılan False."""
+    raw = data.get("ledger_only")
+    if raw is True or raw == 1:
+        return True
+    if isinstance(raw, str) and raw.strip().lower() in ("1", "true", "yes", "on"):
+        return True
+    return False
+
+
 def _provision_worker(
     app,
     slug: str,
@@ -145,6 +155,7 @@ def _provision_worker(
     plan: str,
     selected_module_keys: list[str] | None = None,
     module_tier_preferences: dict[str, str] | None = None,
+    ledger_only: bool = False,
 ) -> None:
     t0 = time.monotonic()
     with app.app_context():
@@ -158,10 +169,12 @@ def _provision_worker(
                 allow_existing_provisioning_row=True,
                 selected_module_keys=selected_module_keys or [],
                 module_tier_preferences=module_tier_preferences or {},
+                ledger_only=bool(ledger_only),
             )
             logger.info(
-                "signup_provision ok slug=%s duration_sec=%.1f",
+                "signup_provision ok slug=%s ledger_only=%s duration_sec=%.1f",
                 slug,
+                bool(ledger_only),
                 time.monotonic() - t0,
             )
             try:
@@ -297,6 +310,24 @@ def api_signup():
     if errors:
         return jsonify({"ok": False, "mesaj": "Doğrulama hatası.", "errors": errors}), 400
 
+    selected_modules = _parse_selected_modules(data)
+    tier_prefs = _parse_module_tier_preferences(data)
+    ledger_only = _parse_ledger_only(data)
+    # S4.1: ledger_only sunucuda doğrulanır — boş/ledger-dışı → 400 (fail-closed, reserve öncesi)
+    if ledger_only and set(selected_modules) != {"ledger"}:
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "mesaj": "Sadece Payafin Cari kaydı için selected_modules yalnızca ['ledger'] olmalı.",
+                    "errors": {"selected_modules": "ledger_only_requires_ledger"},
+                }
+            ),
+            400,
+        )
+    if ledger_only:
+        selected_modules = ["ledger"]
+
     conflict = _slug_conflict_response(slug)
     if conflict:
         return conflict
@@ -326,8 +357,6 @@ def api_signup():
         return jsonify({"ok": False, "mesaj": "Kayıt tamamlanamadı, bilgileri kontrol edin."}), 400
 
     app_obj = current_app._get_current_object()
-    selected_modules = _parse_selected_modules(data)
-    tier_prefs = _parse_module_tier_preferences(data)
     thread = threading.Thread(
         target=_provision_worker,
         kwargs={
@@ -339,6 +368,7 @@ def api_signup():
             "plan": "trial",
             "selected_module_keys": selected_modules,
             "module_tier_preferences": tier_prefs,
+            "ledger_only": ledger_only,
         },
         name=f"provision-{slug}",
         daemon=True,
