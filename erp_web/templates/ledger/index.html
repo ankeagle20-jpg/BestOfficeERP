@@ -88,15 +88,49 @@
     display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;
     border-top: 1px solid var(--pc-line); padding: 0.55rem 0; font-size: 0.92rem;
   }
+  .pc-summary {
+    background: linear-gradient(135deg, #eef6f3 0%, #f7fafc 100%);
+    border: 1px solid var(--pc-line);
+    border-radius: 14px;
+    padding: 0.85rem 1rem;
+    margin-bottom: 1rem;
+  }
+  .pc-summary-row {
+    display: flex; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap;
+    font-size: 0.9rem; margin-top: 0.35rem;
+  }
+  .pc-summary strong { font-variant-numeric: tabular-nums; }
+  .pc-warn {
+    margin-top: 0.45rem; font-size: 0.8rem; color: #b45309;
+    background: #fff7ed; border-radius: 8px; padding: 0.4rem 0.55rem;
+  }
+  .pc-fx-select { max-width: 5.5rem; display: inline-block; margin-left: 0.35rem; }
 </style>
 
 <div class="pc-wrap" id="pc-app">
   <h1>Payafin Cari</h1>
   <p class="pc-sub">Basit borç / alacak takibi</p>
 
+  <div class="pc-summary" id="pc-summary">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+      <strong>Özet</strong>
+      <label class="pc-meta" style="margin:0;">Gösterim
+        <select id="pc-fx-cur" class="pc-fx-select">
+          <option value="">—</option>
+          <option value="TRY" selected>TRY</option>
+          <option value="USD">USD</option>
+          <option value="EUR">EUR</option>
+        </select>
+      </label>
+    </div>
+    <div id="pc-summary-body" class="pc-meta">Yükleniyor…</div>
+    <div id="pc-summary-warn" class="pc-warn" hidden></div>
+  </div>
+
   <div class="pc-tabs" id="pc-home-tabs">
     <button type="button" class="pc-tab active" data-tab="parties">Cariler</button>
     <button type="button" class="pc-tab" data-tab="groups">Gruplar</button>
+    <button type="button" class="pc-tab" data-tab="reminders">Hatırlatma</button>
   </div>
 
   <div id="pc-list-view">
@@ -139,6 +173,31 @@
         </div>
       </div>
       <div id="pc-group-list" class="pc-list"></div>
+    </div>
+
+    <div id="pc-reminders-home" hidden>
+      <div class="pc-toolbar">
+        <button type="button" class="pc-btn pc-btn-primary" id="pc-btn-new-rem">Yeni Hatırlatma</button>
+      </div>
+      <div class="pc-panel" id="pc-new-rem-panel">
+        <h2>Hatırlatma</h2>
+        <div class="pc-field">
+          <label>Cari</label>
+          <select id="pc-rem-party"></select>
+        </div>
+        <div class="pc-field"><label>Vade</label><input type="datetime-local" id="pc-rem-due"></div>
+        <div class="pc-field">
+          <label>Kanal</label>
+          <select id="pc-rem-channel"><option value="in_app">Uygulama</option><option value="email">E-posta</option></select>
+        </div>
+        <div class="pc-field"><label>Not</label><input id="pc-rem-note" maxlength="300"></div>
+        <div id="pc-rem-err" class="pc-err" hidden></div>
+        <div class="pc-actions">
+          <button type="button" class="pc-btn pc-btn-primary" id="pc-rem-save">Kaydet</button>
+          <button type="button" class="pc-btn pc-btn-ghost" id="pc-rem-cancel">Vazgeç</button>
+        </div>
+      </div>
+      <div id="pc-rem-list" class="pc-list"></div>
     </div>
   </div>
 
@@ -272,8 +331,90 @@
     });
     document.getElementById("pc-parties-home").hidden = tab !== "parties";
     document.getElementById("pc-groups-home").hidden = tab !== "groups";
+    document.getElementById("pc-reminders-home").hidden = tab !== "reminders";
     if (tab === "groups") loadGroups();
+    else if (tab === "reminders") loadReminders();
     else loadList();
+  }
+
+  function loadSummary() {
+    var cur = document.getElementById("pc-fx-cur").value || "";
+    var q = cur ? ("?display_currency=" + encodeURIComponent(cur)) : "";
+    return api("/ledger/api/summary" + q).then(function (j) {
+      var body = document.getElementById("pc-summary-body");
+      var warn = document.getElementById("pc-summary-warn");
+      var lines = [];
+      (j.by_currency || []).forEach(function (c) {
+        lines.push(
+          c.currency + ": net " + fmtMoney(c.balance, c.currency) +
+          " (alacak " + fmtMoney(c.receivable, c.currency) +
+          " / borç " + fmtMoney(c.payable, c.currency) + ")"
+        );
+      });
+      if (!lines.length) lines.push("Hareket yok");
+      if (j.converted && j.converted.complete) {
+        lines.push(
+          "→ " + j.converted.currency + " toplam " +
+          fmtMoney(j.converted.balance, j.converted.currency) +
+          " · alacak " + fmtMoney(j.converted.receivable, j.converted.currency) +
+          " · borç " + fmtMoney(j.converted.payable, j.converted.currency)
+        );
+      }
+      body.innerHTML = lines.map(function (t) {
+        return '<div class="pc-summary-row"><span></span></div>';
+      }).join("");
+      Array.prototype.forEach.call(body.querySelectorAll(".pc-summary-row span"), function (el, i) {
+        el.textContent = lines[i];
+      });
+      if (j.fx_warnings && j.fx_warnings.length) {
+        warn.hidden = false;
+        warn.textContent = "Kur uyarısı: " + j.fx_warnings.join(" · ");
+      } else if (j.converted && j.converted.complete === false) {
+        warn.hidden = false;
+        warn.textContent = "Çeviri tamamlanamadı — tek toplam gösterilmedi (yanlış kur yok).";
+      } else {
+        warn.hidden = true;
+        warn.textContent = "";
+      }
+    }).catch(function (e) {
+      document.getElementById("pc-summary-body").textContent = e.message || "Özet yüklenemedi";
+    });
+  }
+
+  function fillRemPartySelect() {
+    var sel = document.getElementById("pc-rem-party");
+    if (!sel) return;
+    sel.innerHTML = "";
+    state.parties.forEach(function (p) {
+      var o = document.createElement("option");
+      o.value = String(p.id);
+      o.textContent = p.name;
+      sel.appendChild(o);
+    });
+  }
+
+  function loadReminders() {
+    return api("/ledger/api/reminders?filter=upcoming&days=14").then(function (j) {
+      var el = document.getElementById("pc-rem-list");
+      var rows = j.reminders || [];
+      fillRemPartySelect();
+      if (!rows.length) {
+        el.innerHTML = '<div class="pc-empty">Yakın vadeli hatırlatma yok.</div>';
+        return;
+      }
+      el.innerHTML = rows.map(function () {
+        return '<div class="pc-item" style="cursor:default"><div class="pc-item-top"><span class="pc-name"></span><button type="button" class="pc-btn pc-btn-ghost pc-rem-dismiss">Kapat</button></div><div class="pc-meta"></div></div>';
+      }).join("");
+      Array.prototype.forEach.call(el.querySelectorAll(".pc-item"), function (row, i) {
+        var r = rows[i];
+        row.querySelector(".pc-name").textContent = (r.party_name || "Cari") + " · " + (r.due_at || "").slice(0, 16).replace("T", " ");
+        row.querySelector(".pc-meta").textContent = (r.channel || "") + (r.note ? " — " + r.note : "");
+        row.querySelector(".pc-rem-dismiss").addEventListener("click", function () {
+          api("/ledger/api/reminders/" + r.id + "/dismiss", { method: "POST", body: {} })
+            .then(loadReminders).catch(function (e) { alert(e.message); });
+        });
+      });
+    });
   }
 
   function renderList() {
@@ -307,6 +448,7 @@
       state.parties = j.parties || [];
       renderList();
       fillGroupPartySelect();
+      fillRemPartySelect();
     });
   }
 
@@ -479,6 +621,36 @@
     }).catch(function (e) { err.textContent = e.message; err.hidden = false; });
   });
 
+  document.getElementById("pc-btn-new-rem").addEventListener("click", function () {
+    fillRemPartySelect();
+    document.getElementById("pc-new-rem-panel").classList.add("open");
+    document.getElementById("pc-rem-err").hidden = true;
+  });
+  document.getElementById("pc-rem-cancel").addEventListener("click", function () {
+    document.getElementById("pc-new-rem-panel").classList.remove("open");
+  });
+  document.getElementById("pc-rem-save").addEventListener("click", function () {
+    var err = document.getElementById("pc-rem-err");
+    err.hidden = true;
+    var dueLocal = document.getElementById("pc-rem-due").value;
+    var dueIso = dueLocal ? new Date(dueLocal).toISOString() : "";
+    api("/ledger/api/reminders", {
+      method: "POST",
+      body: {
+        party_id: Number(document.getElementById("pc-rem-party").value),
+        due_at: dueIso,
+        channel: document.getElementById("pc-rem-channel").value,
+        note: document.getElementById("pc-rem-note").value
+      }
+    }).then(function () {
+      document.getElementById("pc-new-rem-panel").classList.remove("open");
+      document.getElementById("pc-rem-note").value = "";
+      return loadReminders();
+    }).catch(function (e) { err.textContent = e.message; err.hidden = false; });
+  });
+
+  document.getElementById("pc-fx-cur").addEventListener("change", loadSummary);
+
   document.getElementById("pc-q").addEventListener("input", renderList);
   document.getElementById("pc-gq").addEventListener("input", renderGroups);
 
@@ -571,7 +743,8 @@
     window.open(url, "_blank");
   });
 
-  loadList().catch(function (e) {
+  loadSummary();
+  loadList().then(loadSummary).catch(function (e) {
     document.getElementById("pc-list").innerHTML =
       '<div class="pc-empty">' + (e.message || "Yüklenemedi") + "</div>";
   });

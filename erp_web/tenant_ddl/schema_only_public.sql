@@ -1670,6 +1670,42 @@ ALTER SEQUENCE public.ledger_group_members_id_seq OWNED BY public.ledger_group_m
 
 
 --
+-- Name: ledger_reminders; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.ledger_reminders (
+    id bigint NOT NULL,
+    party_id bigint NOT NULL,
+    due_at timestamp with time zone NOT NULL,
+    note text,
+    status text DEFAULT 'pending'::text NOT NULL,
+    channel text DEFAULT 'in_app'::text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ledger_reminders_channel_chk CHECK ((channel = ANY (ARRAY['email'::text, 'in_app'::text]))),
+    CONSTRAINT ledger_reminders_status_chk CHECK ((status = ANY (ARRAY['pending'::text, 'sent'::text, 'dismissed'::text])))
+);
+
+
+--
+-- Name: ledger_reminders_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.ledger_reminders_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: ledger_reminders_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.ledger_reminders_id_seq OWNED BY public.ledger_reminders.id;
+
+
+--
 -- Name: masraflar; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -2970,6 +3006,13 @@ ALTER TABLE ONLY public.ledger_group_members ALTER COLUMN id SET DEFAULT nextval
 
 
 --
+-- Name: ledger_reminders id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ledger_reminders ALTER COLUMN id SET DEFAULT nextval('public.ledger_reminders_id_seq'::regclass);
+
+
+--
 -- Name: masraflar id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -3532,6 +3575,14 @@ ALTER TABLE ONLY public.ledger_group_members
 
 
 --
+-- Name: ledger_reminders ledger_reminders_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ledger_reminders
+    ADD CONSTRAINT ledger_reminders_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: masraflar masraflar_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4070,6 +4121,27 @@ CREATE INDEX idx_ledger_group_members_party ON public.ledger_group_members USING
 
 
 --
+-- Name: idx_ledger_reminders_due_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_ledger_reminders_due_at ON public.ledger_reminders USING btree (due_at);
+
+
+--
+-- Name: idx_ledger_reminders_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_ledger_reminders_status ON public.ledger_reminders USING btree (status);
+
+
+--
+-- Name: idx_ledger_reminders_party; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_ledger_reminders_party ON public.ledger_reminders USING btree (party_id);
+
+
+--
 -- Name: idx_masraflar_durum_created; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -4567,6 +4639,14 @@ ALTER TABLE ONLY public.ledger_group_members
 
 ALTER TABLE ONLY public.ledger_group_members
     ADD CONSTRAINT ledger_group_members_party_id_fkey FOREIGN KEY (party_id) REFERENCES public.ledger_parties(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: ledger_reminders ledger_reminders_party_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ledger_reminders
+    ADD CONSTRAINT ledger_reminders_party_id_fkey FOREIGN KEY (party_id) REFERENCES public.ledger_parties(id) ON DELETE CASCADE;
 
 
 --

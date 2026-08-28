@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Payafin Cari (module_key=ledger) — Aşama L1 + L1.5 (grup + ekstre PDF).
+"""Payafin Cari (module_key=ledger) — L1 + L1.5 + L2 (hatırlatma + FX özet).
 
 Bakiye kuralı (sabit):
   balance = SUM(give) − SUM(receive)  WHERE is_void = FALSE
@@ -13,7 +13,7 @@ import json
 import os
 import re
 from datetime import date, datetime, timedelta, timezone
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from flask import Blueprint, Response, jsonify, render_template, request
 from flask_login import current_user
@@ -28,6 +28,7 @@ from reportlab.platypus import Table, TableStyle
 
 from auth import giris_gerekli
 from db import ensure_ledger_tables, execute, execute_returning, fetch_all, fetch_one
+from services.exchange_rate_service import get_exchange_rate
 from tenant_module_access import module_required
 
 
@@ -69,6 +70,8 @@ bp = Blueprint("ledger", __name__)
 _CURRENCY_RE = re.compile(r"^[A-Z]{3}$")
 _PARTY_TYPES = frozenset({"person", "company"})
 _DIRECTIONS = frozenset({"give", "receive"})
+_REMINDER_STATUSES = frozenset({"pending", "sent", "dismissed"})
+_REMINDER_CHANNELS = frozenset({"email", "in_app"})
 
 
 def _json_err(message: str, status: int = 400):
@@ -937,4 +940,271 @@ def api_party_statement_pdf(party_id: int):
         pdf_bytes,
         mimetype="application/pdf",
         headers={"Content-Disposition": f'{disposition}; filename="{fname}"'},
+    )
+
+
+def _convert_via_usd(amount: Decimal, from_cur: str, to_cur: str) -> tuple[Decimal | None, str | None]:
+    """USD hub ile çevir. Başarısızsa (None, uyarı) — sessiz yanlış çeviri yok."""
+    fc = str(from_cur or "").strip().upper()
+    tc = str(to_cur or "").strip().upper()
+    if not fc or not tc:
+        return None, "Para birimi eksik."
+    if fc == tc:
+        return amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP), None
+    try:
+        usd_to_from = get_exchange_rate("USD", fc)
+        usd_to_to = get_exchange_rate("USD", tc)
+        if usd_to_from <= 0 or usd_to_to <= 0:
+            return None, f"Geçersiz kur: USD/{fc} veya USD/{tc}"
+        usd_amt = amount / usd_to_from
+        converted = (usd_amt * usd_to_to).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        return converted, None
+    except Exception as e:
+        return None, f"Kur alınamadı ({fc}→{tc}): {e}"
+
+
+def _reminder_dict(row: dict) -> dict:
+    return {
+        "id": int(row["id"]),
+        "party_id": int(row["party_id"]),
+        "party_name": row.get("party_name"),
+        "due_at": row["due_at"].isoformat() if row.get("due_at") else None,
+        "note": row.get("note"),
+        "status": row.get("status"),
+        "channel": row.get("channel"),
+        "created_at": row["created_at"].isoformat() if row.get("created_at") else None,
+    }
+
+
+@bp.route("/api/reminders", methods=["GET"])
+@giris_gerekli
+@module_required("ledger")
+def api_reminders_list():
+    ensure_ledger_tables()
+    # filter: upcoming (default) = pending + due within horizon; today; all
+    filt = str(request.args.get("filter") or "upcoming").strip().lower()
+    try:
+        days = int(request.args.get("days") or 7)
+    except (TypeError, ValueError):
+        days = 7
+    days = max(0, min(days, 90))
+
+    now = datetime.now(timezone.utc)
+    sql = """
+        SELECT r.id, r.party_id, r.due_at, r.note, r.status, r.channel, r.created_at,
+               p.name AS party_name
+        FROM ledger_reminders r
+        JOIN ledger_parties p ON p.id = r.party_id
+        WHERE 1=1
+    """
+    params: list = []
+    if filt == "today":
+        day0 = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
+        day1 = day0 + timedelta(days=1)
+        sql += " AND r.status = 'pending' AND r.due_at >= %s AND r.due_at < %s"
+        params.extend([day0, day1])
+    elif filt == "all":
+        pass
+    else:
+        # upcoming: pending, due_at <= now+days (includes overdue)
+        horizon = now + timedelta(days=days)
+        sql += " AND r.status = 'pending' AND r.due_at <= %s"
+        params.append(horizon)
+
+    sql += " ORDER BY r.due_at ASC, r.id ASC LIMIT 200"
+    rows = fetch_all(sql, tuple(params)) or []
+    return jsonify(
+        {
+            "ok": True,
+            "filter": filt,
+            "days": days,
+            "reminders": [_reminder_dict(r) for r in rows],
+            "count": len(rows),
+        }
+    )
+
+
+@bp.route("/api/reminders", methods=["POST"])
+@giris_gerekli
+@module_required("ledger")
+def api_reminders_create():
+    ensure_ledger_tables()
+    data = request.get_json(silent=True) or {}
+    try:
+        party_id = int(data.get("party_id"))
+    except (TypeError, ValueError):
+        return _json_err("party_id gerekli.")
+    party = fetch_one("SELECT id, name FROM ledger_parties WHERE id = %s", (party_id,))
+    if not party:
+        return _json_err("Cari bulunamadı.", 404)
+
+    due_at = _parse_occurred_at(data.get("due_at"))
+    if due_at is None:
+        return _json_err("due_at geçersiz (ISO tarih/saat).")
+
+    channel = str(data.get("channel") or "in_app").strip().lower()
+    if channel not in _REMINDER_CHANNELS:
+        return _json_err("channel email veya in_app olmalı.")
+    note = (str(data.get("note") or "").strip() or None)
+
+    row = execute_returning(
+        """
+        INSERT INTO ledger_reminders (party_id, due_at, note, status, channel)
+        VALUES (%s, %s, %s, 'pending', %s)
+        RETURNING id, party_id, due_at, note, status, channel, created_at
+        """,
+        (party_id, due_at, note, channel),
+    )
+    if not row:
+        return _json_err("Hatırlatma oluşturulamadı.", 500)
+    d = _reminder_dict(row)
+    d["party_name"] = party.get("name")
+    return jsonify({"ok": True, "reminder": d}), 201
+
+
+@bp.route("/api/reminders/<int:reminder_id>/dismiss", methods=["POST"])
+@giris_gerekli
+@module_required("ledger")
+def api_reminders_dismiss(reminder_id: int):
+    ensure_ledger_tables()
+    row = fetch_one(
+        """
+        SELECT r.id, r.party_id, r.due_at, r.note, r.status, r.channel, r.created_at,
+               p.name AS party_name
+        FROM ledger_reminders r
+        JOIN ledger_parties p ON p.id = r.party_id
+        WHERE r.id = %s
+        """,
+        (int(reminder_id),),
+    )
+    if not row:
+        return _json_err("Hatırlatma bulunamadı.", 404)
+    if row.get("status") == "dismissed":
+        return jsonify({"ok": True, "reminder": _reminder_dict(row), "mesaj": "Zaten kapatıldı."})
+
+    updated = execute_returning(
+        """
+        UPDATE ledger_reminders
+        SET status = 'dismissed'
+        WHERE id = %s AND status <> 'dismissed'
+        RETURNING id, party_id, due_at, note, status, channel, created_at
+        """,
+        (int(reminder_id),),
+    )
+    if not updated:
+        return _json_err("Kapatılamadı.", 500)
+    d = _reminder_dict(updated)
+    d["party_name"] = row.get("party_name")
+    return jsonify({"ok": True, "reminder": d})
+
+
+@bp.route("/api/summary", methods=["GET"])
+@giris_gerekli
+@module_required("ledger")
+def api_summary():
+    """Tüm taraflar — para birimi başına canlı SUM; isteğe bağlı display_currency çevirisi."""
+    ensure_ledger_tables()
+    rows = fetch_all(
+        """
+        SELECT
+            currency,
+            COALESCE(SUM(CASE WHEN direction = 'give' THEN amount ELSE 0 END), 0) AS given,
+            COALESCE(SUM(CASE WHEN direction = 'receive' THEN amount ELSE 0 END), 0) AS received,
+            COALESCE(SUM(
+                CASE
+                    WHEN direction = 'give' THEN amount
+                    WHEN direction = 'receive' THEN -amount
+                    ELSE 0
+                END
+            ), 0) AS balance
+        FROM ledger_transactions
+        WHERE is_void = FALSE
+        GROUP BY currency
+        ORDER BY currency
+        """
+    ) or []
+
+    by_currency = []
+    for r in rows:
+        bal = _dec(r["balance"])
+        by_currency.append(
+            {
+                "currency": str(r["currency"]),
+                "given": _money(r["given"]),
+                "received": _money(r["received"]),
+                "balance": _money(bal),
+                "receivable": _money(bal if bal > 0 else Decimal("0")),
+                "payable": _money((-bal) if bal < 0 else Decimal("0")),
+                "party_owes_us": bal > 0,
+                "we_owe_party": bal < 0,
+            }
+        )
+
+    display = str(request.args.get("display_currency") or "").strip().upper()
+    converted = None
+    fx_warnings: list[str] = []
+    if display:
+        if not _CURRENCY_RE.fullmatch(display):
+            return _json_err("display_currency 3 harfli ISO kod olmalı.")
+        total = Decimal("0")
+        receivable = Decimal("0")
+        payable = Decimal("0")
+        ok_all = True
+        parts = []
+        for item in by_currency:
+            amt = _dec(item["balance"])
+            conv, err = _convert_via_usd(amt, item["currency"], display)
+            if err or conv is None:
+                ok_all = False
+                fx_warnings.append(err or f"{item['currency']} çevrilemedi")
+                parts.append(
+                    {
+                        "currency": item["currency"],
+                        "balance": item["balance"],
+                        "converted": None,
+                        "error": err,
+                    }
+                )
+                continue
+            total += conv
+            if conv > 0:
+                receivable += conv
+            elif conv < 0:
+                payable += -conv
+            parts.append(
+                {
+                    "currency": item["currency"],
+                    "balance": item["balance"],
+                    "converted": _money(conv),
+                    "error": None,
+                }
+            )
+        if ok_all:
+            converted = {
+                "currency": display,
+                "balance": _money(total),
+                "receivable": _money(receivable),
+                "payable": _money(payable),
+                "parts": parts,
+                "complete": True,
+            }
+        else:
+            # Kısmi/başarısız: tek toplam üretme (sessiz yanlış yok)
+            converted = {
+                "currency": display,
+                "balance": None,
+                "receivable": None,
+                "payable": None,
+                "parts": parts,
+                "complete": False,
+            }
+
+    return jsonify(
+        {
+            "ok": True,
+            "by_currency": by_currency,
+            "display_currency": display or None,
+            "converted": converted,
+            "fx_warnings": fx_warnings,
+        }
     )

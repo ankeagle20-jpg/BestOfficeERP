@@ -3791,6 +3791,44 @@ def ensure_ledger_group_tables():
             execute(stmt)
         except Exception as e:
             print(f"ledger group index: {e}")
+    ensure_ledger_reminder_tables()
+
+
+def ensure_ledger_reminder_tables():
+    """Payafin Cari L2 — hatırlatmalar (kiracı search_path)."""
+    execute(
+        """
+        CREATE TABLE IF NOT EXISTS ledger_reminders (
+            id              BIGSERIAL PRIMARY KEY,
+            party_id        BIGINT NOT NULL,
+            due_at          TIMESTAMPTZ NOT NULL,
+            note            TEXT,
+            status          TEXT NOT NULL DEFAULT 'pending',
+            channel         TEXT NOT NULL DEFAULT 'in_app',
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT ledger_reminders_status_chk
+                CHECK (status IN ('pending', 'sent', 'dismissed')),
+            CONSTRAINT ledger_reminders_channel_chk
+                CHECK (channel IN ('email', 'in_app')),
+            CONSTRAINT ledger_reminders_party_id_fkey
+                FOREIGN KEY (party_id)
+                REFERENCES ledger_parties (id)
+                ON DELETE CASCADE
+        )
+        """
+    )
+    for stmt in (
+        "CREATE INDEX IF NOT EXISTS idx_ledger_reminders_due_at "
+        "ON ledger_reminders (due_at)",
+        "CREATE INDEX IF NOT EXISTS idx_ledger_reminders_status "
+        "ON ledger_reminders (status)",
+        "CREATE INDEX IF NOT EXISTS idx_ledger_reminders_party "
+        "ON ledger_reminders (party_id)",
+    ):
+        try:
+            execute(stmt)
+        except Exception as e:
+            print(f"ledger reminder index: {e}")
 
 
 def clear_all_customers():
