@@ -1,5 +1,13 @@
 {% extends "layout.html" %}
 {% block title %}Payafin Cari{% endblock %}
+{% block extra_head %}
+<link rel="manifest" href="/ledger/manifest.webmanifest">
+<meta name="theme-color" content="#0d7a5f">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Payafin Cari">
+<link rel="apple-touch-icon" href="/static/ledger/icon-192.png">
+{% endblock %}
 {% block content %}
 <style>
   .pc-wrap {
@@ -748,6 +756,12 @@
     document.getElementById("pc-list").innerHTML =
       '<div class="pc-empty">' + (e.message || "Yüklenemedi") + "</div>";
   });
+
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("/ledger/sw.js", { scope: "/ledger/" }).catch(function () {
+      /* sessiz — PWA opsiyonel */
+    });
+  }
 })();
 </script>
 {% endblock %}
