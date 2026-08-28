@@ -3304,7 +3304,23 @@ def _load_manual_fatura_ay_by_musteri():
     return by_mid
 
 
+def _invalidate_musteri_kyc_grid_mem(musteri_id) -> None:
+    """KYC bellek anlık görüntüsünü sil — sonraki okuma DB'den taze gelir."""
+    try:
+        mid = int(musteri_id)
+    except (TypeError, ValueError):
+        return
+    if mid <= 0:
+        return
+    try:
+        _musteri_kyc_grid_mem.pop(mid, None)
+    except Exception:
+        pass
+
+
 def _upsert_aylik_grid_cache(musteri_id, tufe_map=None):
+    # Her tam rebuild DB'deki güncel KYC'yi görsün (45 sn'lik mem yarışını kapat).
+    _invalidate_musteri_kyc_grid_mem(musteri_id)
     payload = _build_aylik_grid_cache_payload(musteri_id, tufe_map=tufe_map)
     if not payload:
         return None
@@ -3399,7 +3415,11 @@ def _giris_cogalt_schema_ensure_once() -> None:
 
 
 def _defer_aylik_grid_cache_rebuild(musteri_id) -> None:
-    """Kaydet yanıtını bekletmeden grid önbelleğini arka planda yenile."""
+    """Kaydet yanıtını bekletmeden grid önbelleğini arka planda yenile.
+
+    Thread çalıştığı anda _musteri_kyc_grid_mem temizlenir; upsert DB'den taze KYC okur.
+    Böylece KYC kaydı sonrası rebuild bayat nakit/banka anlık görüntüsü kullanmaz.
+    """
     try:
         mid = int(musteri_id)
     except (TypeError, ValueError):
@@ -3413,6 +3433,7 @@ def _defer_aylik_grid_cache_rebuild(musteri_id) -> None:
     except Exception:
         captured_tenant = None
     _invalidate_aylik_grid_payload_mem(mid)
+    _invalidate_musteri_kyc_grid_mem(mid)
     try:
         app = current_app._get_current_object()
     except Exception:
@@ -3422,6 +3443,8 @@ def _defer_aylik_grid_cache_rebuild(musteri_id) -> None:
         with app.app_context():
             if captured_tenant is not None:
                 g.tenant_schema = captured_tenant
+            # Thread anı: tekrar temizle (istek thread'i ile yarışa karşı).
+            _invalidate_musteri_kyc_grid_mem(mid)
             try:
                 _upsert_aylik_grid_cache(mid)
             except Exception as ex:
@@ -12270,6 +12293,13 @@ def api_aylik_grid_cache():
                     cache_gecerli = False
                 if cache_gecerli and _aylik_grid_cache_horizon_stale(musteri_id, mem_hit[1]):
                     cache_gecerli = False
+                # KYC uyumsuzsa skip_match / SKIP_REFRESH fark etmeksizin mem'i servis etme → rebuild.
+                if cache_gecerli:
+                    try:
+                        if not _aylik_grid_cache_matches_kyc(musteri_id, mem_hit[1]):
+                            cache_gecerli = False
+                    except Exception:
+                        cache_gecerli = False
                 if cache_gecerli:
                     # Shadow ölçüm (opsiyonel) + mem-only gerçek atlama (flag).
                     _fresh_shadow = None
@@ -12382,25 +12412,20 @@ def api_aylik_grid_cache():
         if row and row.get("payload"):
             try:
                 cache_obj = json.loads(row["payload"])
-                # Hızlı yol: skip_match ile çağrıldıysa normalde kyc-uyum kontrolünü
-                # atlayıp önbelleği döndürürüz. Ancak imzasız (eski şema) payload'larda
-                # bu davranış stale veriyi sonsuza kadar tutabilir.
-                skip_izinli = bool(
-                    skip_match
-                    and isinstance(cache_obj, dict)
-                    and cache_obj.get("tahsilat_imza")
-                    and int(cache_obj.get("compute_rev") or 0) == AYLIK_GRID_COMPUTE_REV
-                )
-                cache_gecerli = skip_izinli or _aylik_grid_cache_matches_kyc(musteri_id, cache_obj)
-                # Kart yenileme: KYC alanları formdan henüz gelmemiş olsa bile tam rebuild yapma.
-                # Ancak compute_rev uyuşmuyorsa (mantık bump'ı) bayat cache'i geçerli sayma → rebuild.
-                if not cache_gecerli and skip_match and isinstance(cache_obj, dict):
-                    aylar = cache_obj.get("aylar")
+                # KYC uyumu zorunlu: skip_match / GRID_CACHE_SKIP_REFRESH uyumsuz cache'i
+                # sonsuza kadar tutamaz. Uyumsuzlukta en az bir kez tam rebuild (self-heal).
+                # skip_match yalnızca KYC hâlâ uyuyorken tahsil-yenileme kısayoluna izin verir.
+                try:
+                    kyc_uyumlu = _aylik_grid_cache_matches_kyc(musteri_id, cache_obj)
+                except Exception:
+                    kyc_uyumlu = False
+                cache_gecerli = bool(kyc_uyumlu)
+                if cache_gecerli:
                     try:
-                        rev_ok = int(cache_obj.get("compute_rev") or 0) == AYLIK_GRID_COMPUTE_REV
+                        if int(cache_obj.get("compute_rev") or 0) != AYLIK_GRID_COMPUTE_REV:
+                            cache_gecerli = False
                     except (TypeError, ValueError):
-                        rev_ok = False
-                    cache_gecerli = rev_ok and isinstance(aylar, list) and len(aylar) > 0
+                        cache_gecerli = False
                 if cache_gecerli and _aylik_grid_cache_horizon_stale(musteri_id, cache_obj):
                     cache_gecerli = False
                 if cache_gecerli:
