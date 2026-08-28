@@ -531,9 +531,10 @@ def server_error(e):
 # ── Context processor — her template'e gönderilir ────────────────────────────
 @app.context_processor
 def inject_module_access():
-    """Faz 4: template'lerde {% if has_module('personnel') %} için."""
+    """Faz 4 / S1: has_module + is_ledger_only (Payafin Cari kabuğu)."""
     from tenant_module_access import (
         has_module_entitlement,
+        is_ledger_only_tenant,
         resolve_request_tenant_id,
     )
 
@@ -546,7 +547,15 @@ def inject_module_access():
         except Exception:
             return False
 
-    return {"has_module": has_module}
+    is_ledger_only = False
+    try:
+        tid = resolve_request_tenant_id()
+        if tid is not None:
+            is_ledger_only = bool(is_ledger_only_tenant(int(tid)))
+    except Exception:
+        is_ledger_only = False
+
+    return {"has_module": has_module, "is_ledger_only": is_ledger_only}
 
 
 @app.context_processor

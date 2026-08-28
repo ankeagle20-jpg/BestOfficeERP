@@ -229,10 +229,10 @@
     {% if not _layout_hide_chrome %}
     <header class="header">
         <div class="header-top">
-            <div class="logo" onclick="window.location.href='/'">
+            <div class="logo" onclick="window.location.href='{% if is_ledger_only %}/ledger/{% else %}/{% endif %}'">
                 <i class="fa fa-cube"></i>
                 <div>
-                    <span class="logo-text">OFİSBİR ERP</span>
+                    <span class="logo-text">{% if is_ledger_only %}Payafin Cari{% else %}OFİSBİR ERP{% endif %}</span>
                     <span class="logo-version">v2.0.0</span>
                 </div>
             </div>
@@ -242,6 +242,11 @@
                 </span>
                 <span class="user-role">{{ current_user.role or 'Admin' }}</span>
                 <div class="user-actions">
+                    {% if is_ledger_only %}
+                    <a href="{{ url_for('auth.profile') }}" title="Profil">
+                        <i class="fa fa-id-badge"></i> Profil
+                    </a>
+                    {% endif %}
                     <a href="{{ url_for('auth.logout') }}" title="Çıkış">
                         <i class="fa fa-sign-out-alt"></i> Çıkış
                     </a>
@@ -250,6 +255,11 @@
         </div>
         
         <nav class="nav">
+            {% if is_ledger_only %}
+            <a href="/ledger/" class="{% if request.path.startswith('/ledger') %}active{% endif %}">
+                <i class="fa fa-book"></i> Payafin Cari
+            </a>
+            {% else %}
             <a href="/dashboard/" class="{% if request.path.startswith('/dashboard') %}active{% endif %}">
                 <i class="fa fa-tachometer-alt"></i> Dashboard
             </a>
@@ -304,6 +314,7 @@
             <a href="/cari-kart/" id="nav-tab-cari-kart" class="nav-tab-link {% if request.path.startswith('/cari-kart') %}active{% endif %}" data-tab="cari-kart">
                 <i class="fa fa-address-card"></i> Cari Kart
             </a>
+            {% endif %}
         </nav>
     </header>
     {% endif %}
