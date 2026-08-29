@@ -10,7 +10,10 @@ from flask_login import current_user
 
 from auth import admin_gerekli
 from db import execute, fetch_all, fetch_one
-from tenant_module_access import invalidate_module_entitlement_cache
+from tenant_module_access import (
+    has_module_entitlement,
+    invalidate_module_entitlement_cache,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +38,60 @@ BILLING_MODES = frozenset(
 MSG_PLATFORM_ONLY = (
     "Platform modül yönetimi yalnızca ana (public) host'ta kullanılabilir."
 )
+MSG_LEDGER_REQUIRED = (
+    "Önce Payafin Cari'yi açın (ledger trial|active olmalı)."
+)
+MSG_PUBLIC_FORBIDDEN = "Platform (public) kiracısı dönüştürülemez."
+MSG_CONFIRM_REQUIRED = "Onay gerekli (confirm=true)."
+MSG_UNDERSTOOD_REQUIRED = "Anladım onay kutusu gerekli (understood=true)."
+
+
+def _upsert_module_entitlement(
+    *,
+    tenant_id: int,
+    slug: str,
+    module_key: str,
+    status: str,
+    billing_mode: str,
+    source_reference: str,
+    via: str,
+) -> None:
+    """Admin shell dönüşüm / geri alma için tek satır upsert."""
+    execute(
+        """
+        INSERT INTO public.tenant_module_entitlements (
+            tenant_id, tenant_slug, module_key, status, billing_mode,
+            source_plan, source_reference, metadata,
+            revoked_at, updated_at
+        )
+        VALUES (
+            %s, %s, %s, %s, %s,
+            'admin_panel', %s,
+            jsonb_build_object('via', %s),
+            CASE WHEN %s = 'revoked' THEN NOW() ELSE NULL END,
+            NOW()
+        )
+        ON CONFLICT (tenant_id, module_key) DO UPDATE SET
+            status = EXCLUDED.status,
+            billing_mode = EXCLUDED.billing_mode,
+            tenant_slug = EXCLUDED.tenant_slug,
+            source_plan = EXCLUDED.source_plan,
+            source_reference = EXCLUDED.source_reference,
+            metadata = EXCLUDED.metadata,
+            revoked_at = EXCLUDED.revoked_at,
+            updated_at = NOW()
+        """,
+        (
+            tenant_id,
+            slug,
+            module_key,
+            status,
+            billing_mode,
+            source_reference,
+            via,
+            status,
+        ),
+    )
 
 
 def _json403(msg: str):
@@ -445,6 +502,130 @@ def api_modules_bulk_grant():
             "count": len(applied_ids),
             "applied_tenant_ids": applied_ids,
             "applied_slugs": applied_slugs,
+        }
+    )
+
+
+@bp.route(
+    "/api/modules/convert-to-ledger-only/<int:tenant_id>",
+    methods=["POST"],
+)
+@platform_modules_admin
+def api_convert_to_ledger_only(tenant_id: int):
+    """Kiracıyı 'Sadece Payafin Cari' kabuğuna dönüştür (core_erp → revoked).
+
+    Ön koşul: ledger entitlement geçerli (trial|active + tarih penceresi).
+    """
+    body = request.get_json(silent=True) or {}
+    if not body.get("confirm"):
+        return jsonify({"ok": False, "mesaj": MSG_CONFIRM_REQUIRED}), 400
+    if not body.get("understood"):
+        return jsonify({"ok": False, "mesaj": MSG_UNDERSTOOD_REQUIRED}), 400
+
+    tenant = fetch_one(
+        """
+        SELECT id, slug, status
+        FROM public.tenants
+        WHERE id = %s AND status = 'active'
+        """,
+        (tenant_id,),
+    )
+    if not tenant:
+        return jsonify({"ok": False, "mesaj": "Kiracı bulunamadı."}), 404
+
+    slug = str(tenant["slug"] or "")
+    if slug.lower() == "public":
+        return jsonify({"ok": False, "mesaj": MSG_PUBLIC_FORBIDDEN}), 400
+
+    if not has_module_entitlement(int(tenant_id), "ledger"):
+        return jsonify({"ok": False, "mesaj": MSG_LEDGER_REQUIRED}), 400
+
+    _upsert_module_entitlement(
+        tenant_id=int(tenant_id),
+        slug=slug,
+        module_key="core_erp",
+        status="revoked",
+        billing_mode="included",
+        source_reference="admin_convert_to_ledger_only",
+        via="admin/modules/convert-to-ledger-only",
+    )
+    invalidate_module_entitlement_cache(int(tenant_id))
+
+    logger.info(
+        "admin convert-to-ledger-only tenant_id=%s slug=%s by=%s",
+        tenant_id,
+        slug,
+        getattr(current_user, "username", None),
+    )
+    return jsonify(
+        {
+            "ok": True,
+            "mesaj": (
+                f"'{slug}' kiracısı Sadece Payafin Cari kabuğuna dönüştürüldü "
+                "(core_erp revoked)."
+            ),
+            "tenant_id": int(tenant_id),
+            "slug": slug,
+            "shell": "ledger_only",
+            "core_erp": "revoked",
+        }
+    )
+
+
+@bp.route(
+    "/api/modules/restore-full-erp/<int:tenant_id>",
+    methods=["POST"],
+)
+@platform_modules_admin
+def api_restore_full_erp(tenant_id: int):
+    """Kiracıyı tam ERP kabuğuna geri al (core_erp → active)."""
+    body = request.get_json(silent=True) or {}
+    if not body.get("confirm"):
+        return jsonify({"ok": False, "mesaj": MSG_CONFIRM_REQUIRED}), 400
+
+    tenant = fetch_one(
+        """
+        SELECT id, slug, status
+        FROM public.tenants
+        WHERE id = %s AND status = 'active'
+        """,
+        (tenant_id,),
+    )
+    if not tenant:
+        return jsonify({"ok": False, "mesaj": "Kiracı bulunamadı."}), 404
+
+    slug = str(tenant["slug"] or "")
+    if slug.lower() == "public":
+        return jsonify({"ok": False, "mesaj": MSG_PUBLIC_FORBIDDEN}), 400
+
+    _upsert_module_entitlement(
+        tenant_id=int(tenant_id),
+        slug=slug,
+        module_key="core_erp",
+        status="active",
+        billing_mode="included",
+        source_reference="admin_restore_full_erp",
+        via="admin/modules/restore-full-erp",
+    )
+    invalidate_module_entitlement_cache(int(tenant_id))
+
+    logger.info(
+        "admin restore-full-erp tenant_id=%s slug=%s by=%s",
+        tenant_id,
+        slug,
+        getattr(current_user, "username", None),
+    )
+    return jsonify(
+        {
+            "ok": True,
+            "mesaj": (
+                f"'{slug}' kiracısı Tam ERP kabuğuna geri alındı "
+                "(core_erp active)."
+            ),
+            "tenant_id": int(tenant_id),
+            "slug": slug,
+            "shell": "full_erp",
+            "core_erp": "active",
         }
     )
 

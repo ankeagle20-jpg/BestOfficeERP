@@ -95,6 +95,40 @@
   .mod-row-msg { font-size:.72rem; margin-left:6px; }
   .mod-row-msg.ok { color:#a5d6a7; }
   .mod-row-msg.err { color:#ef9a9a; }
+
+  .shell-actions { display:flex; flex-direction:column; gap:4px; align-items:flex-start; }
+  .btn-shell-convert {
+    background:#b71c1c; border:1px solid #d32f2f; color:#fff;
+    font-size:0.72rem; padding:3px 8px; border-radius:4px; cursor:pointer;
+  }
+  .btn-shell-convert:hover { background:#c62828; }
+  .btn-shell-restore {
+    background:#1b5e20; border:1px solid #2e7d32; color:#fff;
+    font-size:0.72rem; padding:3px 8px; border-radius:4px; cursor:pointer;
+  }
+  .btn-shell-restore:hover { background:#2e7d32; }
+
+  .lo-modal-overlay {
+    display:none; position:fixed; inset:0; z-index:9999;
+    background:rgba(0,0,0,0.65); align-items:center; justify-content:center;
+  }
+  .lo-modal-overlay.open { display:flex; }
+  .lo-modal {
+    background:#0a1929; border:1px solid #1e3a5f; border-radius:10px;
+    max-width:520px; width:92%; padding:20px 22px; color:#e0f7fa;
+    box-shadow:0 12px 40px rgba(0,0,0,0.45);
+  }
+  .lo-modal h3 { margin:0 0 10px; color:#ef9a9a; font-size:1.05rem; }
+  .lo-modal h3.restore { color:#a5d6a7; }
+  .lo-modal p { margin:0 0 12px; font-size:.88rem; line-height:1.45; color:#cfd8dc; }
+  .lo-modal .lo-tenant { color:#90caf9; font-weight:600; margin-bottom:8px; }
+  .lo-modal label.check {
+    display:flex; gap:8px; align-items:flex-start; font-size:.85rem;
+    color:#ffcc80; margin:14px 0 18px; cursor:pointer;
+  }
+  .lo-modal label.check input { margin-top:3px; }
+  .lo-modal-actions { display:flex; gap:10px; justify-content:flex-end; flex-wrap:wrap; }
+  .lo-modal-actions button:disabled { opacity:0.45; cursor:not-allowed; }
 </style>
 
 <div class="mod-nav">
@@ -193,6 +227,23 @@
           <tr><td colspan="7" style="color:#78909c;">Matris yükleniyor...</td></tr>
         </tbody>
       </table>
+    </div>
+  </div>
+
+  <!-- Sadece Cari / Tam ERP dönüşüm onay modalı -->
+  <div class="lo-modal-overlay" id="lo-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="lo-modal-title">
+    <div class="lo-modal">
+      <h3 id="lo-modal-title">Sadece Payafin Cari'ye Dönüştür</h3>
+      <div class="lo-tenant" id="lo-modal-tenant"></div>
+      <p id="lo-modal-body"></p>
+      <label class="check" id="lo-modal-check-wrap">
+        <input type="checkbox" id="lo-modal-understood">
+        <span id="lo-modal-check-label">Anladım, dönüştür</span>
+      </label>
+      <div class="lo-modal-actions">
+        <button type="button" class="btn-erp btn-erp-sm btn-outline-erp" id="lo-modal-cancel">İptal</button>
+        <button type="button" class="btn-erp btn-erp-sm" id="lo-modal-confirm" disabled style="background:#b71c1c;">Dönüştür</button>
+      </div>
     </div>
   </div>
 
@@ -305,6 +356,126 @@
     return '<span class="status-badge ' + cls + '">' + escHtml(label) + billText + '</span>';
   }
 
+  function isEntitlementOn(st) {
+    return st === 'active' || st === 'trial';
+  }
+
+  function shellActionHtml(t) {
+    if (!t || t.slug === 'public') return '';
+    var core = (t.modules && t.modules.core_erp) || {};
+    var led = (t.modules && t.modules.ledger) || {};
+    var coreOn = isEntitlementOn(core.status);
+    var ledOn = isEntitlementOn(led.status);
+    var bits = [];
+    bits.push('<button type="button" class="btn-erp btn-erp-sm btn-outline-erp mod-goto-single" data-tenant-id="' + t.id + '" style="font-size:0.75rem;padding:2px 8px;">Düzenle</button>');
+    if (ledOn && coreOn) {
+      bits.push(
+        '<button type="button" class="btn-shell-convert mod-convert-lo" data-tenant-id="' + t.id +
+        '" data-slug="' + escHtml(t.slug) + '">Sadece Cari\'ye Dönüştür</button>'
+      );
+    } else if (ledOn && !coreOn) {
+      bits.push(
+        '<button type="button" class="btn-shell-restore mod-restore-erp" data-tenant-id="' + t.id +
+        '" data-slug="' + escHtml(t.slug) + '">Tam ERP\'ye Geri Al</button>'
+      );
+    }
+    return '<div class="shell-actions">' + bits.join('') + '</div>';
+  }
+
+  // --- Kabuk dönüşüm modalı ---
+  var loOverlay = document.getElementById('lo-modal-overlay');
+  var loTitle = document.getElementById('lo-modal-title');
+  var loTenant = document.getElementById('lo-modal-tenant');
+  var loBody = document.getElementById('lo-modal-body');
+  var loCheck = document.getElementById('lo-modal-understood');
+  var loCheckLabel = document.getElementById('lo-modal-check-label');
+  var loCheckWrap = document.getElementById('lo-modal-check-wrap');
+  var loCancel = document.getElementById('lo-modal-cancel');
+  var loConfirm = document.getElementById('lo-modal-confirm');
+  var loPending = null; // { mode: 'convert'|'restore', tenantId, slug }
+
+  function closeLoModal() {
+    loOverlay.classList.remove('open');
+    loPending = null;
+    loCheck.checked = false;
+    loConfirm.disabled = true;
+  }
+
+  function openConvertModal(tenantId, slug) {
+    loPending = { mode: 'convert', tenantId: tenantId, slug: slug };
+    loTitle.textContent = "Sadece Payafin Cari'ye Dönüştür";
+    loTitle.className = '';
+    loTenant.textContent = 'Kiracı: ' + slug + ' (#' + tenantId + ')';
+    loBody.textContent =
+      "Bu işlem kiracının menü ve erişimini Sadece Payafin Cari'ye daraltır. " +
+      "Dashboard, Finans, Müşteriler vb. URL'ler engellenir. Emin misiniz?";
+    loCheckWrap.style.display = 'flex';
+    loCheckLabel.textContent = 'Anladım, dönüştür';
+    loConfirm.textContent = 'Dönüştür';
+    loConfirm.style.background = '#b71c1c';
+    loCheck.checked = false;
+    loConfirm.disabled = true;
+    loOverlay.classList.add('open');
+  }
+
+  function openRestoreModal(tenantId, slug) {
+    loPending = { mode: 'restore', tenantId: tenantId, slug: slug };
+    loTitle.textContent = "Tam ERP'ye Geri Al";
+    loTitle.className = 'restore';
+    loTenant.textContent = 'Kiracı: ' + slug + ' (#' + tenantId + ')';
+    loBody.textContent =
+      "Bu işlem core_erp'yi yeniden active yapar; kiracı tam ERP menü ve URL erişimine döner. Devam edilsin mi?";
+    loCheckWrap.style.display = 'none';
+    loCheck.checked = true;
+    loConfirm.disabled = false;
+    loConfirm.textContent = 'Geri Al';
+    loConfirm.style.background = '#1b5e20';
+    loOverlay.classList.add('open');
+  }
+
+  loCheck.addEventListener('change', function () {
+    if (!loPending || loPending.mode !== 'convert') return;
+    loConfirm.disabled = !loCheck.checked;
+  });
+  loCancel.addEventListener('click', closeLoModal);
+  loOverlay.addEventListener('click', function (ev) {
+    if (ev.target === loOverlay) closeLoModal();
+  });
+
+  loConfirm.addEventListener('click', function () {
+    if (!loPending) return;
+    if (loPending.mode === 'convert' && !loCheck.checked) return;
+    var tid = loPending.tenantId;
+    var mode = loPending.mode;
+    var path = mode === 'convert'
+      ? '/admin/api/modules/convert-to-ledger-only/' + tid
+      : '/admin/api/modules/restore-full-erp/' + tid;
+    var payload = mode === 'convert'
+      ? { confirm: true, understood: true }
+      : { confirm: true };
+
+    loConfirm.disabled = true;
+    showErr('');
+    showOk('');
+    api(path, { method: 'POST', body: JSON.stringify(payload) })
+      .then(function (res) {
+        closeLoModal();
+        if (!res.json.ok) {
+          showErr(res.json.mesaj || ('HTTP ' + res.status));
+          return;
+        }
+        showOk(res.json.mesaj || 'İşlem tamamlandı');
+        return Promise.all([
+          loadOverview(),
+          tenantSel.value ? loadEntitlements() : Promise.resolve()
+        ]);
+      })
+      .catch(function (e) {
+        closeLoModal();
+        showErr(String(e.message || e));
+      });
+  });
+
   // --- 1. Genel Bakış (Matris) Yükleme ---
   function loadOverview() {
     overviewMeta.textContent = 'Matris yükleniyor...';
@@ -338,7 +509,7 @@
             row += '<td style="text-align:center;">' + badgeHtml(mInfo.status, mInfo.billing_mode) + '</td>';
           });
 
-          row += '<td><button type="button" class="btn-erp btn-erp-sm btn-outline-erp mod-goto-single" data-tenant-id="' + t.id + '" style="font-size:0.75rem;padding:2px 8px;">Düzenle</button></td>';
+          row += '<td>' + shellActionHtml(t) + '</td>';
           row += '</tr>';
           return row;
         });
@@ -361,8 +532,25 @@
     });
   }
 
-  // Matristen Tek Kiracı sekmesine geçiş
+  // Matristen Tek Kiracı sekmesine geçiş + kabuk dönüşüm butonları
   overviewTbody.addEventListener('click', function (ev) {
+    var convertBtn = ev.target.closest('.mod-convert-lo');
+    if (convertBtn) {
+      openConvertModal(
+        parseInt(convertBtn.getAttribute('data-tenant-id'), 10),
+        convertBtn.getAttribute('data-slug') || ''
+      );
+      return;
+    }
+    var restoreBtn = ev.target.closest('.mod-restore-erp');
+    if (restoreBtn) {
+      openRestoreModal(
+        parseInt(restoreBtn.getAttribute('data-tenant-id'), 10),
+        restoreBtn.getAttribute('data-slug') || ''
+      );
+      return;
+    }
+
     var btn = ev.target.closest('.mod-goto-single');
     if (!btn) return;
     var tid = btn.getAttribute('data-tenant-id');
