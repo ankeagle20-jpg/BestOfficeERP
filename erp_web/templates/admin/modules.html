@@ -129,6 +129,23 @@
   .lo-modal label.check input { margin-top:3px; }
   .lo-modal-actions { display:flex; gap:10px; justify-content:flex-end; flex-wrap:wrap; }
   .lo-modal-actions button:disabled { opacity:0.45; cursor:not-allowed; }
+
+  .mod-cell {
+    display:flex; flex-direction:column; align-items:center; gap:4px;
+    min-width:88px;
+  }
+  .mod-cell-btn {
+    font-size:0.68rem; padding:1px 7px; border-radius:3px; cursor:pointer;
+    border:1px solid #1e3a5f; background:#132f4c; color:#90caf9;
+    opacity:0.55; transition:opacity .12s ease, background .12s ease;
+  }
+  .mod-cell:hover .mod-cell-btn,
+  .mod-cell:focus-within .mod-cell-btn { opacity:1; }
+  .mod-cell-btn.mod-cell-grant { border-color:#2e7d32; color:#a5d6a7; }
+  .mod-cell-btn.mod-cell-grant:hover { background:#1b5e20; color:#fff; opacity:1; }
+  .mod-cell-btn.mod-cell-revoke { border-color:#d32f2f; color:#ef9a9a; }
+  .mod-cell-btn.mod-cell-revoke:hover { background:#b71c1c; color:#fff; opacity:1; }
+  .mod-cell-btn:disabled { opacity:0.35; cursor:wait; }
 </style>
 
 <div class="mod-nav">
@@ -360,6 +377,85 @@
     return st === 'active' || st === 'trial';
   }
 
+  /** Matris hücresi: rozet + Ekle/Kaldır (public hariç). */
+  function matrixCellHtml(t, moduleKey, mInfo) {
+    var st = (mInfo && mInfo.status) || 'not_granted';
+    var bill = (mInfo && mInfo.billing_mode) || 'included';
+    var html = '<div class="mod-cell"' +
+      ' data-tenant-id="' + t.id + '"' +
+      ' data-slug="' + escHtml(t.slug) + '"' +
+      ' data-module-key="' + escHtml(moduleKey) + '"' +
+      ' data-status="' + escHtml(st) + '"' +
+      ' data-billing="' + escHtml(bill) + '">';
+    html += badgeHtml(st, bill);
+    if (t.slug !== 'public') {
+      if (isEntitlementOn(st)) {
+        html += '<button type="button" class="mod-cell-btn mod-cell-revoke">Kaldır</button>';
+      } else {
+        html += '<button type="button" class="mod-cell-btn mod-cell-grant">Ekle</button>';
+      }
+    }
+    html += '</div>';
+    return html;
+  }
+
+  var overviewState = { catalog: [], tenants: [] };
+
+  function findOverviewTenant(tid) {
+    for (var i = 0; i < overviewState.tenants.length; i++) {
+      if (String(overviewState.tenants[i].id) === String(tid)) return overviewState.tenants[i];
+    }
+    return null;
+  }
+
+  function patchOverviewTenantModule(tid, moduleKey, status, billing) {
+    var t = findOverviewTenant(tid);
+    if (!t) return null;
+    if (!t.modules) t.modules = {};
+    t.modules[moduleKey] = {
+      module_key: moduleKey,
+      status: status,
+      billing_mode: billing || 'included',
+      granted: status !== 'not_granted'
+    };
+    return t;
+  }
+
+  function refreshRowShellActions(tid) {
+    var t = findOverviewTenant(tid);
+    if (!t) return;
+    var cell = overviewTbody.querySelector(
+      '.mod-goto-single[data-tenant-id="' + tid + '"], .mod-convert-lo[data-tenant-id="' + tid + '"], .mod-restore-erp[data-tenant-id="' + tid + '"]'
+    );
+    var tr = null;
+    if (cell) tr = cell.closest('tr');
+    if (!tr) {
+      var cells = overviewTbody.querySelectorAll('.mod-cell[data-tenant-id="' + tid + '"]');
+      if (cells.length) tr = cells[0].closest('tr');
+    }
+    if (!tr || !tr.cells || tr.cells.length < 1) return;
+    tr.cells[tr.cells.length - 1].innerHTML = shellActionHtml(t);
+  }
+
+  function applyCellEntitlement(cellWrap, ent) {
+    var tid = cellWrap.getAttribute('data-tenant-id');
+    var slug = cellWrap.getAttribute('data-slug') || '';
+    var mk = (ent && ent.module_key) || cellWrap.getAttribute('data-module-key');
+    var st = (ent && ent.status) || 'not_granted';
+    var bill = (ent && ent.billing_mode) || cellWrap.getAttribute('data-billing') || 'included';
+    var t = patchOverviewTenantModule(tid, mk, st, bill) || {
+      id: tid, slug: slug, modules: {}
+    };
+    if (!t.modules[mk]) {
+      t.modules[mk] = { module_key: mk, status: st, billing_mode: bill, granted: true };
+    }
+    var td = cellWrap.closest('td');
+    if (td) td.innerHTML = matrixCellHtml(t, mk, t.modules[mk]);
+    if (mk === 'core_erp' || mk === 'ledger') {
+      refreshRowShellActions(tid);
+    }
+  }
+
   function shellActionHtml(t) {
     if (!t || t.slug === 'public') return '';
     var core = (t.modules && t.modules.core_erp) || {};
@@ -483,6 +579,8 @@
       if (!res.json.ok) throw new Error(res.json.mesaj || 'Matris yüklenemedi');
       var catalog = res.json.catalog || [];
       var tenants = res.json.tenants || [];
+      overviewState.catalog = catalog;
+      overviewState.tenants = tenants;
 
       // Başlıkları oluştur
       var thHtml = '<tr><th>Kiracı</th><th>Şema</th>';
@@ -497,7 +595,7 @@
         overviewTbody.innerHTML = '<tr><td colspan="' + (catalog.length + 3) + '" style="color:#78909c;">Aktif kiracı bulunamadı.</td></tr>';
       } else {
         var trs = tenants.map(function (t) {
-          var row = '<tr>';
+          var row = '<tr data-tenant-id="' + t.id + '">';
           var slugLabel = '<strong>' + escHtml(t.slug) + '</strong>';
           if (t.company_name) slugLabel += ' <span style="color:#78909c;font-size:0.75rem;">(' + escHtml(t.company_name) + ')</span>';
           if (t.slug === 'public') slugLabel += ' <span class="mod-badge">platform</span>';
@@ -506,7 +604,7 @@
 
           catalog.forEach(function (c) {
             var mInfo = (t.modules && t.modules[c.key]) ? t.modules[c.key] : { status: 'not_granted', billing_mode: 'included' };
-            row += '<td style="text-align:center;">' + badgeHtml(mInfo.status, mInfo.billing_mode) + '</td>';
+            row += '<td style="text-align:center;">' + matrixCellHtml(t, c.key, mInfo) + '</td>';
           });
 
           row += '<td>' + shellActionHtml(t) + '</td>';
@@ -532,8 +630,56 @@
     });
   }
 
-  // Matristen Tek Kiracı sekmesine geçiş + kabuk dönüşüm butonları
+  // Matristen Tek Kiracı sekmesine geçiş + kabuk dönüşüm + hücre Ekle/Kaldır
   overviewTbody.addEventListener('click', function (ev) {
+    var grantBtn = ev.target.closest('.mod-cell-grant, .mod-cell-revoke');
+    if (grantBtn) {
+      var wrap = grantBtn.closest('.mod-cell');
+      if (!wrap) return;
+      var tid = parseInt(wrap.getAttribute('data-tenant-id'), 10);
+      var slug = wrap.getAttribute('data-slug') || '';
+      var mk = wrap.getAttribute('data-module-key') || '';
+      var curBill = wrap.getAttribute('data-billing') || 'included';
+      var isGrant = grantBtn.classList.contains('mod-cell-grant');
+      var nextStatus = isGrant ? 'active' : 'revoked';
+      var nextBill = isGrant
+        ? (curBill && curBill !== 'included' ? curBill : 'included')
+        : curBill;
+      var confMsg = isGrant
+        ? ("'" + slug + "' kiracısına '" + mk + "' modülünü EKLE (active). Onaylıyor musunuz?")
+        : ("'" + slug + "' kiracısından '" + mk + "' modülünü KALDIR (revoked). Onaylıyor musunuz?");
+      if (!confirm(confMsg)) return;
+
+      grantBtn.disabled = true;
+      showErr('');
+      showOk('');
+      api('/admin/api/modules/entitlements', {
+        method: 'PUT',
+        body: JSON.stringify({
+          tenant_id: tid,
+          module_key: mk,
+          status: nextStatus,
+          billing_mode: nextBill || 'included'
+        })
+      }).then(function (res) {
+        if (!res.json.ok) {
+          grantBtn.disabled = false;
+          showErr(res.json.mesaj || ('HTTP ' + res.status));
+          return;
+        }
+        applyCellEntitlement(wrap, res.json.entitlement || {
+          module_key: mk,
+          status: nextStatus,
+          billing_mode: nextBill
+        });
+        showOk(slug + ' · ' + mk + ' → ' + nextStatus);
+      }).catch(function (e) {
+        grantBtn.disabled = false;
+        showErr(String(e.message || e));
+      });
+      return;
+    }
+
     var convertBtn = ev.target.closest('.mod-convert-lo');
     if (convertBtn) {
       openConvertModal(
