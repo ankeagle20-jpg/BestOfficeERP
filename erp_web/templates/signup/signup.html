@@ -5,8 +5,30 @@
   .module-pick-label { display:block; font-size:0.875rem; font-weight:600; margin-bottom:8px; color:#334155; }
   .module-option { display:flex; align-items:center; gap:8px; font-size:0.95rem; font-weight:500; margin-bottom:8px; cursor:pointer; color:#334155; }
   .module-option input { width:auto; margin:0; }
+  .module-option.is-disabled { opacity:0.55; cursor:not-allowed; }
   .module-pick { background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:12px 14px; margin-bottom:16px; }
   .module-pick-hint { font-size:0.8rem; color:#64748b; margin:0 0 10px; }
+  .signup-mode-label { display:block; font-size:0.875rem; font-weight:600; margin-bottom:8px; color:#334155; }
+  .signup-mode-seg { display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap; }
+  .signup-mode-opt {
+    flex:1 1 140px; display:flex; align-items:flex-start; gap:8px;
+    border:1px solid #e2e8f0; border-radius:8px; padding:10px 12px;
+    background:#fff; cursor:pointer; font-size:0.9rem; font-weight:500; color:#334155;
+  }
+  .signup-mode-opt input { width:auto; margin:2px 0 0; flex-shrink:0; }
+  .signup-mode-opt:has(input:checked) { border-color:#0d7a5f; background:#f0fdf8; }
+  .signup-mode-hint-ledger {
+    display:none; font-size:0.8rem; color:#0f766e; background:#ecfdf5;
+    border:1px solid #a7f3d0; border-radius:6px; padding:8px 10px; margin:0 0 10px;
+  }
+  .signup-mode-hint-ledger.is-visible { display:block; }
+  .ledger-only-tier-wrap { display:none; margin-top:4px; margin-bottom:4px; }
+  .ledger-only-tier-wrap.is-visible { display:block; }
+  .ledger-only-tier-wrap label { display:block; font-size:0.85rem; font-weight:600; margin-bottom:6px; color:#334155; }
+  .ledger-only-tier-wrap select {
+    width:100%; padding:8px 10px; border:1px solid #e2e8f0; border-radius:6px;
+    font-size:0.95rem; background:#fff; color:#0f172a;
+  }
 </style>
 {% endblock %}
 
@@ -60,21 +82,46 @@
       <div id="pricing-box" class="pricing-box" style="display:none"></div>
       <div class="field-error" data-error-for="country_code"></div>
     </div>
-    <div class="field module-pick">
-      <span class="module-pick-label">Hangi modülleri denemek istersiniz?</span>
-      <p class="module-pick-hint">14 günlük deneme — istediğiniz modülleri seçin (temel ERP her zaman dahildir).</p>
-      <label class="module-option" for="mod_personnel">
-        <input type="checkbox" id="mod_personnel" name="selected_modules" value="personnel" checked>
-        Personel Yönetimi
-      </label>
-      <label class="module-option" for="mod_randevu">
-        <input type="checkbox" id="mod_randevu" name="selected_modules" value="randevu" checked>
-        Randevu Yönetimi
-      </label>
-      <label class="module-option" for="mod_ledger">
-        <input type="checkbox" id="mod_ledger" name="selected_modules" value="ledger" checked>
-        Payafin Cari
-      </label>
+
+    <div class="field module-pick" id="signup-mode-pick">
+      <span class="signup-mode-label">Ne denemek istersiniz?</span>
+      <div class="signup-mode-seg" role="radiogroup" aria-label="Kayıt ürün modu">
+        <label class="signup-mode-opt" for="mode_full_erp">
+          <input type="radio" name="signup_mode" id="mode_full_erp" value="full_erp" checked>
+          <span>Tam ERP denemesi<br><small style="font-weight:400;color:#64748b">Temel ERP + istediğiniz modüller</small></span>
+        </label>
+        <label class="signup-mode-opt" for="mode_ledger_only">
+          <input type="radio" name="signup_mode" id="mode_ledger_only" value="ledger_only">
+          <span>Sadece Payafin Cari<br><small style="font-weight:400;color:#64748b">ERP olmadan — bağımsız cari</small></span>
+        </label>
+      </div>
+      <p id="ledger-only-hint" class="signup-mode-hint-ledger" role="note">
+        Ofis / fatura / kira menüsü açılmaz; yalnızca Payafin Cari.
+      </p>
+      <div id="ledger-only-tier-wrap" class="ledger-only-tier-wrap">
+        <label for="ledger_only_tier">Payafin Cari paketi</label>
+        <select id="ledger_only_tier" name="ledger_only_tier">
+          <option value="starter">Starter</option>
+          <option value="pro">Pro</option>
+          <option value="growth">Growth</option>
+        </select>
+      </div>
+      <div id="full-erp-modules">
+        <span class="module-pick-label">Hangi modülleri denemek istersiniz?</span>
+        <p class="module-pick-hint" id="full-erp-hint">14 günlük deneme — istediğiniz modülleri seçin (temel ERP her zaman dahildir).</p>
+        <label class="module-option" for="mod_personnel">
+          <input type="checkbox" id="mod_personnel" name="selected_modules" value="personnel" checked>
+          Personel Yönetimi
+        </label>
+        <label class="module-option" for="mod_randevu">
+          <input type="checkbox" id="mod_randevu" name="selected_modules" value="randevu" checked>
+          Randevu Yönetimi
+        </label>
+        <label class="module-option" for="mod_ledger">
+          <input type="checkbox" id="mod_ledger" name="selected_modules" value="ledger" checked>
+          Payafin Cari
+        </label>
+      </div>
     </div>
 
     <div class="hp-field" aria-hidden="true">
@@ -138,10 +185,21 @@
   const globalError = document.getElementById("global-error");
   const btnSubmit = document.getElementById("btn-submit");
   const pricingBox = document.getElementById("pricing-box");
+  const modeFull = document.getElementById("mode_full_erp");
+  const modeLedger = document.getElementById("mode_ledger_only");
+  const ledgerHint = document.getElementById("ledger-only-hint");
+  const ledgerTierWrap = document.getElementById("ledger-only-tier-wrap");
+  const ledgerTierSelect = document.getElementById("ledger_only_tier");
+  const fullErpModules = document.getElementById("full-erp-modules");
+  const modPersonnel = document.getElementById("mod_personnel");
+  const modRandevu = document.getElementById("mod_randevu");
+  const modLedger = document.getElementById("mod_ledger");
 
   let slugTimer = null;
   let slugOk = false;
   let pollTimer = null;
+  let savedFullErpChecks = { personnel: true, randevu: true, ledger: true };
+  let modeLockedByUrl = false;
 
   function collectSelectedModules() {
     const out = [];
@@ -151,21 +209,96 @@
     return out;
   }
 
+  function isLedgerOnlyMode() {
+    return !!(modeLedger && modeLedger.checked);
+  }
+
   const ALLOWED_MODULES = { personnel: true, randevu: true, ledger: true };
   let moduleTierPreferences = {};
+
+  function applySignupModeUI() {
+    const lo = isLedgerOnlyMode();
+    if (ledgerHint) ledgerHint.classList.toggle("is-visible", lo);
+    if (ledgerTierWrap) ledgerTierWrap.classList.toggle("is-visible", lo);
+    if (fullErpModules) fullErpModules.style.display = lo ? "none" : "";
+
+    [modPersonnel, modRandevu, modLedger].forEach(function (el) {
+      if (!el) return;
+      const lab = el.closest(".module-option");
+      if (lo) {
+        el.checked = false;
+        el.disabled = true;
+        if (lab) lab.classList.add("is-disabled");
+      } else {
+        el.disabled = false;
+        if (lab) lab.classList.remove("is-disabled");
+      }
+    });
+
+    if (!lo) {
+      if (modPersonnel) modPersonnel.checked = !!savedFullErpChecks.personnel;
+      if (modRandevu) modRandevu.checked = !!savedFullErpChecks.randevu;
+      if (modLedger) modLedger.checked = !!savedFullErpChecks.ledger;
+    }
+
+    if (modeLockedByUrl && modeLedger) {
+      modeLedger.checked = true;
+      if (modeFull) modeFull.disabled = true;
+      modeLedger.disabled = true;
+    }
+  }
+
+  function onModeChange() {
+    if (!isLedgerOnlyMode()) {
+      savedFullErpChecks = {
+        personnel: !!(modPersonnel && modPersonnel.checked),
+        randevu: !!(modRandevu && modRandevu.checked),
+        ledger: !!(modLedger && modLedger.checked)
+      };
+    }
+    applySignupModeUI();
+  }
 
   function applyUrlModuleTier() {
     try {
       const params = new URLSearchParams(window.location.search || "");
+      const mode = String(params.get("mode") || "").trim().toLowerCase();
       const mod = String(params.get("module") || "").trim().toLowerCase();
       const tier = String(params.get("tier") || "").trim().toLowerCase();
+
+      if (mode === "ledger_only") {
+        modeLockedByUrl = true;
+        if (modeLedger) modeLedger.checked = true;
+        if (modeFull) modeFull.checked = false;
+        if (tier && /^[a-z0-9_]{1,32}$/.test(tier) && tier !== "enterprise") {
+          if (ledgerTierSelect) {
+            var optExists = false;
+            Array.prototype.forEach.call(ledgerTierSelect.options, function (o) {
+              if (o.value === tier) optExists = true;
+            });
+            if (!optExists) {
+              var o = document.createElement("option");
+              o.value = tier;
+              o.textContent = tier;
+              ledgerTierSelect.appendChild(o);
+            }
+            ledgerTierSelect.value = tier;
+          }
+          moduleTierPreferences.ledger = tier;
+        }
+        applySignupModeUI();
+        return;
+      }
+
       if (mod && ALLOWED_MODULES[mod]) {
-        const pers = document.getElementById("mod_personnel");
-        const rand = document.getElementById("mod_randevu");
-        const led = document.getElementById("mod_ledger");
-        if (pers) pers.checked = (mod === "personnel");
-        if (rand) rand.checked = (mod === "randevu");
-        if (led) led.checked = (mod === "ledger");
+        if (modPersonnel) modPersonnel.checked = (mod === "personnel");
+        if (modRandevu) modRandevu.checked = (mod === "randevu");
+        if (modLedger) modLedger.checked = (mod === "ledger");
+        savedFullErpChecks = {
+          personnel: !!(modPersonnel && modPersonnel.checked),
+          randevu: !!(modRandevu && modRandevu.checked),
+          ledger: !!(modLedger && modLedger.checked)
+        };
         if (tier && /^[a-z0-9_]{1,32}$/.test(tier) && tier !== "enterprise") {
           moduleTierPreferences[mod] = tier;
         }
@@ -301,6 +434,20 @@
     clearErrors();
     btnSubmit.disabled = true;
     const slug = normalizeSlug(slugInput.value);
+    const ledgerOnly = isLedgerOnlyMode();
+    let selectedModules;
+    let tierPrefs = Object.assign({}, moduleTierPreferences);
+    if (ledgerOnly) {
+      selectedModules = ["ledger"];
+      const tier = ledgerTierSelect
+        ? String(ledgerTierSelect.value || "starter").trim().toLowerCase()
+        : "starter";
+      if (tier && /^[a-z0-9_]{1,32}$/.test(tier) && tier !== "enterprise") {
+        tierPrefs.ledger = tier;
+      }
+    } else {
+      selectedModules = collectSelectedModules();
+    }
     const body = {
       company_name: document.getElementById("company_name").value.trim(),
       slug: slug,
@@ -310,8 +457,9 @@
       admin_full_name: document.getElementById("admin_full_name").value.trim(),
       country_code: "TR",
       website: document.getElementById("website").value,
-      selected_modules: collectSelectedModules(),
-      module_tier_preferences: moduleTierPreferences
+      selected_modules: selectedModules,
+      module_tier_preferences: tierPrefs,
+      ledger_only: ledgerOnly
     };
     try {
       const res = await fetch("/api/signup", {
@@ -355,7 +503,23 @@
     slugInput.focus();
   });
 
+  if (modeFull) modeFull.addEventListener("change", onModeChange);
+  if (modeLedger) modeLedger.addEventListener("change", onModeChange);
+  [modPersonnel, modRandevu, modLedger].forEach(function (el) {
+    if (!el) return;
+    el.addEventListener("change", function () {
+      if (!isLedgerOnlyMode()) {
+        savedFullErpChecks = {
+          personnel: !!(modPersonnel && modPersonnel.checked),
+          randevu: !!(modRandevu && modRandevu.checked),
+          ledger: !!(modLedger && modLedger.checked)
+        };
+      }
+    });
+  });
+
   applyUrlModuleTier();
+  applySignupModeUI();
   loadPricing();
   updateSlugPreview("");
 })();
