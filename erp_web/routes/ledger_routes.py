@@ -267,11 +267,28 @@ def _money(v) -> float:
         return 0.0
 
 
-def _balances_for_party(party_id: int) -> list[dict]:
-    """Para birimi başına canlı SUM — cache yok."""
+def _format_balance_row(r: dict) -> dict:
+    bal = _dec(r["balance"])
+    return {
+        "currency": str(r["currency"]),
+        "given": _money(r["given"]),
+        "received": _money(r["received"]),
+        "balance": _money(bal),
+        "party_owes_us": bal > 0,
+        "we_owe_party": bal < 0,
+    }
+
+
+def _balances_by_party_ids(party_ids: list[int]) -> dict[int, list[dict]]:
+    """Taraf başına bakiyeler — tek GROUP BY (party_id, currency); liste N+1 önler."""
+    ids = sorted({int(p) for p in party_ids if p is not None})
+    out: dict[int, list[dict]] = {i: [] for i in ids}
+    if not ids:
+        return out
     rows = fetch_all(
         """
         SELECT
+            party_id,
             currency,
             COALESCE(SUM(CASE WHEN direction = 'give' THEN amount ELSE 0 END), 0) AS given,
             COALESCE(SUM(CASE WHEN direction = 'receive' THEN amount ELSE 0 END), 0) AS received,
@@ -283,30 +300,30 @@ def _balances_for_party(party_id: int) -> list[dict]:
                 END
             ), 0) AS balance
         FROM ledger_transactions
-        WHERE party_id = %s
-          AND is_void = FALSE
-        GROUP BY currency
-        ORDER BY currency
+        WHERE is_void = FALSE
+          AND party_id IN %s
+        GROUP BY party_id, currency
+        ORDER BY party_id, currency
         """,
-        (int(party_id),),
-    )
-    out = []
-    for r in rows or []:
-        bal = _dec(r["balance"])
-        out.append(
-            {
-                "currency": str(r["currency"]),
-                "given": _money(r["given"]),
-                "received": _money(r["received"]),
-                "balance": _money(bal),
-                "party_owes_us": bal > 0,
-                "we_owe_party": bal < 0,
-            }
-        )
+        (tuple(ids),),
+    ) or []
+    for r in rows:
+        pid = int(r["party_id"])
+        out.setdefault(pid, []).append(_format_balance_row(r))
     return out
 
 
-def _party_dict(row: dict, *, with_balances: bool = True) -> dict:
+def _balances_for_party(party_id: int) -> list[dict]:
+    """Para birimi başına canlı SUM — cache yok."""
+    return _balances_by_party_ids([int(party_id)]).get(int(party_id), [])
+
+
+def _party_dict(
+    row: dict,
+    *,
+    with_balances: bool = True,
+    balances: list[dict] | None = None,
+) -> dict:
     pid = int(row["id"])
     d = {
         "id": pid,
@@ -321,7 +338,7 @@ def _party_dict(row: dict, *, with_balances: bool = True) -> dict:
         "updated_at": row["updated_at"].isoformat() if row.get("updated_at") else None,
     }
     if with_balances:
-        bals = _balances_for_party(pid)
+        bals = balances if balances is not None else _balances_for_party(pid)
         d["balances"] = bals
         # UI kısayolu: TRY varsa onu, yoksa ilk para birimi
         primary = next((b for b in bals if b["currency"] == "TRY"), bals[0] if bals else None)
@@ -447,7 +464,16 @@ def api_parties_list():
         params.extend([like, like, like])
     sql += " ORDER BY lower(name), id"
     rows = fetch_all(sql, tuple(params)) or []
-    parties = [_party_dict(r, with_balances=True) for r in rows]
+    ids = [int(r["id"]) for r in rows]
+    bals_by = _balances_by_party_ids(ids)
+    parties = [
+        _party_dict(
+            r,
+            with_balances=True,
+            balances=bals_by.get(int(r["id"]), []),
+        )
+        for r in rows
+    ]
     return jsonify({"ok": True, "parties": parties, "count": len(parties)})
 
 
@@ -677,7 +703,7 @@ def _parse_date_arg(raw: str | None, *, label: str) -> date | None:
 
 
 def _balances_for_parties(party_ids: list[int]) -> list[dict]:
-    """Birden fazla party için para birimi başına konsolide canlı SUM."""
+    """Birden fazla party için para birimi başına konsolide canlı SUM (grup detay)."""
     if not party_ids:
         return []
     rows = fetch_all(
@@ -701,20 +727,7 @@ def _balances_for_parties(party_ids: list[int]) -> list[dict]:
         """,
         (list(party_ids),),
     )
-    out = []
-    for r in rows or []:
-        bal = _dec(r["balance"])
-        out.append(
-            {
-                "currency": str(r["currency"]),
-                "given": _money(r["given"]),
-                "received": _money(r["received"]),
-                "balance": _money(bal),
-                "party_owes_us": bal > 0,
-                "we_owe_party": bal < 0,
-            }
-        )
-    return out
+    return [_format_balance_row(r) for r in (rows or [])]
 
 
 def _group_dict(row: dict) -> dict:

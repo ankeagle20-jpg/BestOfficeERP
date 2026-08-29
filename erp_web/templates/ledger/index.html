@@ -501,6 +501,77 @@
     });
   }
 
+  function primaryFromBalances(balances) {
+    var bals = balances || [];
+    return bals.find(function (b) { return b.currency === "TRY"; }) || bals[0] || null;
+  }
+
+  function applyBalancesToUi(balances) {
+    var bals = balances || [];
+    var primary = primaryFromBalances(bals);
+    var el = document.getElementById("pc-detail-bal");
+    if (el) el.textContent = balLabel(primary);
+    if (!state.partyId) return;
+    for (var i = 0; i < state.parties.length; i++) {
+      if (state.parties[i].id === state.partyId) {
+        state.parties[i].balances = bals;
+        state.parties[i].primary_balance = primary;
+        break;
+      }
+    }
+  }
+
+  function deferLoadList() {
+    setTimeout(function () {
+      loadList().catch(function () {});
+    }, 0);
+  }
+
+  function txRowHtml(t) {
+    var dir = t.direction === "give" ? "Verdim" : "Aldım";
+    var voided = t.is_void ? " voided" : "";
+    var voidBtn = t.is_void
+      ? ""
+      : ('<button type="button" class="pc-btn pc-btn-danger pc-void" data-id="' + t.id + '">İptal</button>');
+    return '<div class="pc-tx' + voided + '" data-tx-id="' + t.id + '"><div class="pc-tx-row"><strong>' +
+      dir + " " + fmtMoney(t.amount, t.currency) + "</strong>" + voidBtn +
+      '</div><div class="pc-meta"></div></div>';
+  }
+
+  function bindVoidButtons(box) {
+    if (!box || box._pcVoidBound) return;
+    box._pcVoidBound = true;
+    box.addEventListener("click", function (ev) {
+      var b = ev.target.closest ? ev.target.closest(".pc-void") : null;
+      if (!b || !box.contains(b)) return;
+      if (!confirm("Bu hareketi iptal et (void)?")) return;
+      api("/ledger/api/transactions/" + b.getAttribute("data-id") + "/void", {
+        method: "POST", body: { reason: "ui" }
+      }).then(function (j) {
+        applyBalancesToUi(j.balances || []);
+        if (j.transaction) applyTxToDetailList(j.transaction);
+        deferLoadList();
+      }).catch(function (e) { alert(e.message); });
+    });
+  }
+
+  function applyTxToDetailList(t) {
+    var box = document.getElementById("pc-tx-list");
+    if (!box || !t) return;
+    var wrap = document.createElement("div");
+    wrap.innerHTML = txRowHtml(t);
+    var row = wrap.firstChild;
+    row.querySelector(".pc-meta").textContent = t.note || "";
+    var existing = box.querySelector('[data-tx-id="' + t.id + '"]');
+    if (existing) {
+      existing.replaceWith(row);
+    } else {
+      if (box.querySelector(".pc-empty")) box.innerHTML = "";
+      box.insertBefore(row, box.firstChild);
+    }
+    bindVoidButtons(box);
+  }
+
   function openDetail(id) {
     state.partyId = id;
     document.getElementById("pc-home-tabs").hidden = true;
@@ -519,24 +590,11 @@
         box.innerHTML = '<div class="pc-empty">Henüz hareket yok.</div>';
         return;
       }
-      box.innerHTML = txs.map(function (t) {
-        var dir = t.direction === "give" ? "Verdim" : "Aldım";
-        var voided = t.is_void ? " voided" : "";
-        var voidBtn = t.is_void ? "" : ('<button type="button" class="pc-btn pc-btn-danger pc-void" data-id="' + t.id + '">İptal</button>');
-        return '<div class="pc-tx' + voided + '"><div class="pc-tx-row"><strong>' + dir + " " + fmtMoney(t.amount, t.currency) + "</strong>" + voidBtn + '</div><div class="pc-meta"></div></div>';
-      }).join("");
+      box.innerHTML = txs.map(txRowHtml).join("");
       Array.prototype.forEach.call(box.querySelectorAll(".pc-tx"), function (row, i) {
         row.querySelector(".pc-meta").textContent = txs[i].note || "";
       });
-      Array.prototype.forEach.call(box.querySelectorAll(".pc-void"), function (b) {
-        b.addEventListener("click", function () {
-          if (!confirm("Bu hareketi iptal et (void)?")) return;
-          api("/ledger/api/transactions/" + b.getAttribute("data-id") + "/void", {
-            method: "POST", body: { reason: "ui" }
-          }).then(function () { return openDetail(state.partyId); }).then(loadList)
-            .catch(function (e) { alert(e.message); });
-        });
-      });
+      bindVoidButtons(box);
     });
   }
 
@@ -711,10 +769,12 @@
         currency: (document.getElementById("pc-tx-currency").value || "TRY").toUpperCase(),
         note: document.getElementById("pc-tx-note").value
       }
-    }).then(function () {
+    }).then(function (j) {
       document.getElementById("pc-tx-panel").classList.remove("open");
-      return openDetail(state.partyId);
-    }).then(loadList).catch(function (e) { err.textContent = e.message; err.hidden = false; });
+      applyBalancesToUi(j.balances || []);
+      if (j.transaction) applyTxToDetailList(j.transaction);
+      deferLoadList();
+    }).catch(function (e) { err.textContent = e.message; err.hidden = false; });
   });
 
   document.getElementById("pc-btn-stmt").addEventListener("click", function () {
