@@ -21,7 +21,7 @@ import re
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
-from flask import Blueprint, Response, jsonify, render_template, request
+from flask import Blueprint, Response, g, jsonify, render_template, request
 from flask_login import current_user
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
@@ -36,6 +36,29 @@ from auth import giris_gerekli
 from db import ensure_ledger_tables, execute, execute_returning, fetch_all, fetch_one
 from services.exchange_rate_service import get_exchange_rate
 from tenant_module_access import module_required, resolve_request_tenant_id
+
+import threading
+
+# Process-ömürlü DDL kapısı: şema başına ensure_ledger_tables SADECE bir kez.
+# Finansal veri cache'i DEĞİL — yalnızca "CREATE IF NOT EXISTS zaten koştu mu".
+_LEDGER_ENSURED_SCHEMAS: set[str] = set()
+_LEDGER_ENSURE_LOCK = threading.Lock()
+
+
+def _ensure_ledger_tables_once() -> None:
+    """İstek yolunda DDL'i şema başına process ömründe tek sefere indirger.
+
+    İlk istek: ensure_ledger_tables() (CREATE IF NOT EXISTS zinciri).
+    Sonraki: no-op. Başarısız olursa set'e yazılmaz → sonraki istek yeniden dener.
+    """
+    schema = getattr(g, "tenant_schema", None) or "__no_tenant__"
+    if schema in _LEDGER_ENSURED_SCHEMAS:
+        return
+    with _LEDGER_ENSURE_LOCK:
+        if schema in _LEDGER_ENSURED_SCHEMAS:
+            return
+        ensure_ledger_tables()
+        _LEDGER_ENSURED_SCHEMAS.add(schema)
 
 
 def _ledger_active_party_count() -> int:
@@ -343,7 +366,7 @@ def _parse_occurred_at(raw) -> datetime | None:
 @giris_gerekli
 @module_required("ledger")
 def index():
-    ensure_ledger_tables()
+    _ensure_ledger_tables_once()
     return render_template("ledger/index.html")
 
 
@@ -407,7 +430,7 @@ def pwa_offline():
 @giris_gerekli
 @module_required("ledger")
 def api_parties_list():
-    ensure_ledger_tables()
+    _ensure_ledger_tables_once()
     active_only = str(request.args.get("active") or "1").strip() not in ("0", "false", "False")
     q = (request.args.get("q") or "").strip()
     sql = """
@@ -432,7 +455,7 @@ def api_parties_list():
 @giris_gerekli
 @module_required("ledger")
 def api_parties_create():
-    ensure_ledger_tables()
+    _ensure_ledger_tables_once()
     quota_msg = _ledger_party_quota_block_message()
     if quota_msg:
         return _json_err(quota_msg, 403)
@@ -465,7 +488,7 @@ def api_parties_create():
 @giris_gerekli
 @module_required("ledger")
 def api_parties_detail(party_id: int):
-    ensure_ledger_tables()
+    _ensure_ledger_tables_once()
     row = fetch_one(
         """
         SELECT id, name, type, phone, email, country, notes, is_active, created_at, updated_at
@@ -503,7 +526,7 @@ def api_parties_detail(party_id: int):
 @giris_gerekli
 @module_required("ledger")
 def api_transactions_create():
-    ensure_ledger_tables()
+    _ensure_ledger_tables_once()
     data = request.get_json(silent=True) or {}
     try:
         party_id = int(data.get("party_id"))
@@ -586,7 +609,7 @@ def api_transactions_create():
 @giris_gerekli
 @module_required("ledger")
 def api_transactions_void(tx_id: int):
-    ensure_ledger_tables()
+    _ensure_ledger_tables_once()
     row = fetch_one(
         """
         SELECT id, party_id, direction, amount, currency, occurred_at, note,
@@ -975,7 +998,7 @@ def _build_statement_pdf(stmt: dict) -> bytes:
 @giris_gerekli
 @module_required("ledger")
 def api_groups_list():
-    ensure_ledger_tables()
+    _ensure_ledger_tables_once()
     active_only = str(request.args.get("active") or "1").strip() not in ("0", "false", "False")
     sql = """
         SELECT g.id, g.name, g.notes, g.is_active, g.created_at,
@@ -1001,7 +1024,7 @@ def api_groups_list():
 @giris_gerekli
 @module_required("ledger")
 def api_groups_create():
-    ensure_ledger_tables()
+    _ensure_ledger_tables_once()
     data = request.get_json(silent=True) or {}
     name = str(data.get("name") or "").strip()
     if not name:
@@ -1026,7 +1049,7 @@ def api_groups_create():
 @giris_gerekli
 @module_required("ledger")
 def api_groups_members(group_id: int):
-    ensure_ledger_tables()
+    _ensure_ledger_tables_once()
     data = request.get_json(silent=True) or {}
     action = str(data.get("action") or data.get("op") or "add").strip().lower()
     try:
@@ -1065,7 +1088,7 @@ def api_groups_members(group_id: int):
 @giris_gerekli
 @module_required("ledger")
 def api_groups_detail(group_id: int):
-    ensure_ledger_tables()
+    _ensure_ledger_tables_once()
     row = fetch_one(
         """
         SELECT id, name, notes, is_active, created_at
@@ -1110,7 +1133,7 @@ def api_groups_detail(group_id: int):
 @giris_gerekli
 @module_required("ledger")
 def api_party_statement(party_id: int):
-    ensure_ledger_tables()
+    _ensure_ledger_tables_once()
     d_from = _parse_date_arg(request.args.get("from"), label="from")
     d_to = _parse_date_arg(request.args.get("to"), label="to")
     if not d_from or not d_to:
@@ -1127,7 +1150,7 @@ def api_party_statement(party_id: int):
 @giris_gerekli
 @module_required("ledger")
 def api_party_statement_pdf(party_id: int):
-    ensure_ledger_tables()
+    _ensure_ledger_tables_once()
     d_from = _parse_date_arg(request.args.get("from"), label="from")
     d_to = _parse_date_arg(request.args.get("to"), label="to")
     if not d_from or not d_to:
@@ -1191,7 +1214,7 @@ def _reminder_dict(row: dict) -> dict:
 @giris_gerekli
 @module_required("ledger")
 def api_reminders_list():
-    ensure_ledger_tables()
+    _ensure_ledger_tables_once()
     # filter: upcoming (default) = pending + due within horizon; today; all
     filt = str(request.args.get("filter") or "upcoming").strip().lower()
     try:
@@ -1239,7 +1262,7 @@ def api_reminders_list():
 @giris_gerekli
 @module_required("ledger")
 def api_reminders_create():
-    ensure_ledger_tables()
+    _ensure_ledger_tables_once()
     data = request.get_json(silent=True) or {}
     try:
         party_id = int(data.get("party_id"))
@@ -1277,7 +1300,7 @@ def api_reminders_create():
 @giris_gerekli
 @module_required("ledger")
 def api_reminders_dismiss(reminder_id: int):
-    ensure_ledger_tables()
+    _ensure_ledger_tables_once()
     row = fetch_one(
         """
         SELECT r.id, r.party_id, r.due_at, r.note, r.status, r.channel, r.created_at,
@@ -1314,7 +1337,7 @@ def api_reminders_dismiss(reminder_id: int):
 @module_required("ledger")
 def api_summary():
     """Tüm taraflar — para birimi başına canlı SUM; isteğe bağlı display_currency çevirisi."""
-    ensure_ledger_tables()
+    _ensure_ledger_tables_once()
     rows = fetch_all(
         """
         SELECT
