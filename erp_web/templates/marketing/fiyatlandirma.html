@@ -267,6 +267,28 @@
   }
   .btn-select.is-emphasized:hover { opacity: 0.92; background: var(--accent); }
   .tier-card .btn-select { margin-top: 12px; }
+  .ld-cta-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 12px;
+  }
+  .ld-cta-item { display: flex; flex-direction: column; gap: 4px; }
+  .ld-cta-item .btn-select { margin-top: 0; }
+  .ld-cta-caption {
+    margin: 0;
+    font-size: 0.75rem;
+    line-height: 1.35;
+    color: var(--muted);
+    text-align: center;
+  }
+  .btn-select.is-secondary {
+    border-color: #94a3b8;
+    color: #334155;
+    background: #fff;
+    font-weight: 650;
+  }
+  .btn-select.is-secondary:hover { background: #f8fafc; }
   .core-divider {
     border: 0;
     border-top: 1px solid var(--border);
@@ -465,7 +487,8 @@
 <hr class="core-divider" />
 
 <h2 id="payafin-cari" class="pricing-section-title">Payafin Cari Modülü</h2>
-<p class="pricing-section-sub">Taban ücret + aktif cari kart başı. Yıllıkta 2 ay bedava.</p>
+<p class="pricing-section-sub">Taban ücret + aktif cari kart başı. Yıllıkta 2 ay bedava.<br>
+  İki yol: <strong>bağımsız ürün</strong> (ERP gerekmez) veya <strong>Tam ERP’ye eklenti</strong>.</p>
 
 <div class="period-toggle" role="group" aria-label="Payafin Cari faturalama dönemi">
   <button type="button" id="ld-period-monthly" class="active" data-period="monthly">Aylık</button>
@@ -970,6 +993,26 @@
         "</span></div>";
     }
 
+    const tierKeyEnc = encodeURIComponent(String(tier.tier_key || ""));
+    const dualCta = isContact
+      ? ""
+      : (
+        "<div class=\"ld-cta-stack\">" +
+          "<div class=\"ld-cta-item\">" +
+            "<a class=\"btn-select" + (recommended ? " is-emphasized" : "") +
+            "\" href=\"/signup?mode=ledger_only&amp;tier=" + tierKeyEnc +
+            "\">Sadece Cari Al</a>" +
+            "<p class=\"ld-cta-caption\">Bağımsız ürün — ERP gerekmez</p>" +
+          "</div>" +
+          "<div class=\"ld-cta-item\">" +
+            "<a class=\"btn-select is-secondary\" href=\"/signup?module=ledger&amp;tier=" +
+            tierKeyEnc +
+            "\">ERP’ye Cari Ekle</a>" +
+            "<p class=\"ld-cta-caption\">Tam ERP’ye eklenti (temel ERP dahildir)</p>" +
+          "</div>" +
+        "</div>"
+      );
+
     card.innerHTML =
       (recommended ? "<span class=\"tier-badge\">Önerilen</span>" : "") +
       "<h3>" + escapeHtml(tier.display_name) + "</h3>" +
@@ -983,11 +1026,7 @@
       escapeHtml(formatMoney(perShow, currency)) + "</strong></li>" +
       "</ul>" +
       estimateHtml +
-      (isContact
-        ? ""
-        : ("<a class=\"btn-select" + (recommended ? " is-emphasized" : "") +
-          "\" href=\"/signup?module=ledger&tier=" + encodeURIComponent(String(tier.tier_key || "")) +
-          "\">Bu Paketi Seç</a>"));
+      dualCta;
     return card;
   }
 
