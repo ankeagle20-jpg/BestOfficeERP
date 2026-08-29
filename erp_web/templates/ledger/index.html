@@ -165,6 +165,34 @@
     color: var(--pc-ink);
     min-width: 0;
   }
+  /* WCAG: beyaz metin — yeşil #166534 ≈7.1:1, kırmızı #991b1b ≈8.3:1 */
+  .pc-sum-box-alacak,
+  .pc-sum-box-bakiye.pc-sum-bal-pos {
+    background: #166534;
+    border-color: #14532d;
+    color: #ffffff;
+  }
+  .pc-sum-box-borc,
+  .pc-sum-box-bakiye.pc-sum-bal-neg {
+    background: #991b1b;
+    border-color: #7f1d1d;
+    color: #ffffff;
+  }
+  .pc-sum-box-bakiye.pc-sum-bal-zero {
+    background: #475569;
+    border-color: #334155;
+    color: #ffffff;
+  }
+  .pc-sum-box-alacak .pc-sum-label,
+  .pc-sum-box-borc .pc-sum-label,
+  .pc-sum-box-bakiye .pc-sum-label {
+    color: rgba(255, 255, 255, 0.9);
+  }
+  .pc-sum-box-alacak .pc-sum-value,
+  .pc-sum-box-borc .pc-sum-value,
+  .pc-sum-box-bakiye .pc-sum-value {
+    color: #ffffff;
+  }
   .pc-sum-label {
     font-size: 0.75rem;
     font-weight: 600;
@@ -179,9 +207,6 @@
     word-break: break-word;
     line-height: 1.25;
   }
-  .pc-sum-bal-pos { color: #15803d; }
-  .pc-sum-bal-neg { color: #b91c1c; }
-  .pc-sum-bal-zero { color: var(--pc-muted); }
   .pc-summary-err {
     margin-top: 0.5rem;
     font-size: 0.88rem;
@@ -211,17 +236,17 @@
       </label>
     </div>
     <div class="pc-summary-boxes" id="pc-summary-boxes">
-      <div class="pc-sum-box" id="pc-sum-alacak">
+      <div class="pc-sum-box pc-sum-box-alacak" id="pc-sum-alacak">
         <div class="pc-sum-label">Alacak</div>
         <div class="pc-sum-value" id="pc-sum-alacak-val">—</div>
       </div>
-      <div class="pc-sum-box" id="pc-sum-borc">
+      <div class="pc-sum-box pc-sum-box-borc" id="pc-sum-borc">
         <div class="pc-sum-label">Borç</div>
         <div class="pc-sum-value" id="pc-sum-borc-val">—</div>
       </div>
-      <div class="pc-sum-box" id="pc-sum-bakiye">
+      <div class="pc-sum-box pc-sum-box-bakiye pc-sum-bal-zero" id="pc-sum-bakiye">
         <div class="pc-sum-label">Bakiye</div>
-        <div class="pc-sum-value pc-sum-bal-zero" id="pc-sum-bakiye-val">—</div>
+        <div class="pc-sum-value" id="pc-sum-bakiye-val">—</div>
       </div>
     </div>
     <div id="pc-summary-err" class="pc-summary-err" hidden></div>
@@ -481,12 +506,13 @@
       var alacakEl = document.getElementById("pc-sum-alacak-val");
       var borcEl = document.getElementById("pc-sum-borc-val");
       var bakiyeEl = document.getElementById("pc-sum-bakiye-val");
+      var bakiyeBox = document.getElementById("pc-sum-bakiye");
 
       if (!row) {
         alacakEl.textContent = "—";
         borcEl.textContent = "—";
         bakiyeEl.textContent = "—";
-        bakiyeEl.className = "pc-sum-value pc-sum-bal-zero";
+        bakiyeBox.className = "pc-sum-box pc-sum-box-bakiye pc-sum-bal-zero";
       } else {
         // Alacak = given, Borç = received (API alanları); satırın kendi para birimi
         alacakEl.textContent = fmtMoney(row.given, row.currency);
@@ -499,7 +525,7 @@
         }
         var signed = fmtBalanceBox(bal, balCur);
         bakiyeEl.textContent = signed.text;
-        bakiyeEl.className = "pc-sum-value " + signed.cls;
+        bakiyeBox.className = "pc-sum-box pc-sum-box-bakiye " + signed.cls;
       }
 
       if (j.fx_warnings && j.fx_warnings.length) {
