@@ -131,19 +131,62 @@
     padding: 0.75rem 1rem; font-size: 0.92rem; color: var(--pc-ink);
   }
   .pc-summary {
-    background: linear-gradient(135deg, #eef6f3 0%, #f7fafc 100%);
-    border: 1px solid var(--pc-line);
-    border-radius: 14px;
-    padding: 0.85rem 1rem;
     margin-bottom: 1rem;
     color: var(--pc-ink);
   }
-  .pc-summary-row {
-    display: flex; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap;
-    font-size: 0.9rem; margin-top: 0.35rem;
+  .pc-summary-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.65rem;
   }
-  .pc-summary strong { font-variant-numeric: tabular-nums; }
-  .pc-summary .pc-meta { color: var(--pc-muted); }
+  .pc-summary-head > strong {
+    color: var(--pc-on-dark);
+    font-size: 1.05rem;
+  }
+  .pc-summary-head .pc-meta {
+    color: var(--pc-on-dark-muted);
+  }
+  .pc-summary-boxes {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.55rem;
+  }
+  @media (min-width: 360px) {
+    .pc-summary-boxes { grid-template-columns: repeat(3, 1fr); }
+  }
+  .pc-sum-box {
+    background: var(--pc-card);
+    border: 1px solid var(--pc-line);
+    border-radius: 12px;
+    padding: 0.75rem 0.85rem;
+    color: var(--pc-ink);
+    min-width: 0;
+  }
+  .pc-sum-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--pc-muted);
+    letter-spacing: 0.02em;
+    margin-bottom: 0.35rem;
+  }
+  .pc-sum-value {
+    font-size: 0.95rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    word-break: break-word;
+    line-height: 1.25;
+  }
+  .pc-sum-bal-pos { color: #15803d; }
+  .pc-sum-bal-neg { color: #b91c1c; }
+  .pc-sum-bal-zero { color: var(--pc-muted); }
+  .pc-summary-err {
+    margin-top: 0.5rem;
+    font-size: 0.88rem;
+    color: #fecaca;
+  }
   .pc-warn {
     margin-top: 0.45rem; font-size: 0.8rem; color: #b45309;
     background: #fff7ed; border-radius: 8px; padding: 0.4rem 0.55rem;
@@ -156,7 +199,7 @@
   <p class="pc-sub">Basit borç / alacak takibi</p>
 
   <div class="pc-summary" id="pc-summary">
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+    <div class="pc-summary-head">
       <strong>Özet</strong>
       <label class="pc-meta" style="margin:0;">Gösterim
         <select id="pc-fx-cur" class="pc-fx-select">
@@ -167,7 +210,21 @@
         </select>
       </label>
     </div>
-    <div id="pc-summary-body" class="pc-meta">Yükleniyor…</div>
+    <div class="pc-summary-boxes" id="pc-summary-boxes">
+      <div class="pc-sum-box" id="pc-sum-alacak">
+        <div class="pc-sum-label">Alacak</div>
+        <div class="pc-sum-value" id="pc-sum-alacak-val">—</div>
+      </div>
+      <div class="pc-sum-box" id="pc-sum-borc">
+        <div class="pc-sum-label">Borç</div>
+        <div class="pc-sum-value" id="pc-sum-borc-val">—</div>
+      </div>
+      <div class="pc-sum-box" id="pc-sum-bakiye">
+        <div class="pc-sum-label">Bakiye</div>
+        <div class="pc-sum-value pc-sum-bal-zero" id="pc-sum-bakiye-val">—</div>
+      </div>
+    </div>
+    <div id="pc-summary-err" class="pc-summary-err" hidden></div>
     <div id="pc-summary-warn" class="pc-warn" hidden></div>
   </div>
 
@@ -381,35 +438,70 @@
     else loadList();
   }
 
+  function fmtBalanceBox(n, cur) {
+    var v = Number(n || 0);
+    if (Math.abs(v) < 0.005) {
+      return { text: fmtMoney(0, cur), cls: "pc-sum-bal-zero" };
+    }
+    if (v > 0) {
+      return { text: "+" + fmtMoney(v, cur), cls: "pc-sum-bal-pos" };
+    }
+    return { text: "−" + fmtMoney(Math.abs(v), cur), cls: "pc-sum-bal-neg" };
+  }
+
+  function pickSummarySource(j) {
+    var cur = (document.getElementById("pc-fx-cur").value || "").toUpperCase();
+    var rows = j.by_currency || [];
+    var row = null;
+    if (cur) {
+      for (var i = 0; i < rows.length; i++) {
+        if (rows[i].currency === cur) { row = rows[i]; break; }
+      }
+    }
+    if (!row && rows.length === 1) row = rows[0];
+    if (!row && rows.length) {
+      for (var j2 = 0; j2 < rows.length; j2++) {
+        if (rows[j2].currency === "TRY") { row = rows[j2]; break; }
+      }
+      if (!row) row = rows[0];
+    }
+    return row;
+  }
+
   function loadSummary() {
     var cur = document.getElementById("pc-fx-cur").value || "";
     var q = cur ? ("?display_currency=" + encodeURIComponent(cur)) : "";
     return api("/ledger/api/summary" + q).then(function (j) {
-      var body = document.getElementById("pc-summary-body");
       var warn = document.getElementById("pc-summary-warn");
-      var lines = [];
-      (j.by_currency || []).forEach(function (c) {
-        lines.push(
-          c.currency + ": net " + fmtMoney(c.balance, c.currency) +
-          " (alacak " + fmtMoney(c.receivable, c.currency) +
-          " / borç " + fmtMoney(c.payable, c.currency) + ")"
-        );
-      });
-      if (!lines.length) lines.push("Hareket yok");
-      if (j.converted && j.converted.complete) {
-        lines.push(
-          "→ " + j.converted.currency + " toplam " +
-          fmtMoney(j.converted.balance, j.converted.currency) +
-          " · alacak " + fmtMoney(j.converted.receivable, j.converted.currency) +
-          " · borç " + fmtMoney(j.converted.payable, j.converted.currency)
-        );
+      var errEl = document.getElementById("pc-summary-err");
+      errEl.hidden = true;
+      errEl.textContent = "";
+
+      var row = pickSummarySource(j);
+      var alacakEl = document.getElementById("pc-sum-alacak-val");
+      var borcEl = document.getElementById("pc-sum-borc-val");
+      var bakiyeEl = document.getElementById("pc-sum-bakiye-val");
+
+      if (!row) {
+        alacakEl.textContent = "—";
+        borcEl.textContent = "—";
+        bakiyeEl.textContent = "—";
+        bakiyeEl.className = "pc-sum-value pc-sum-bal-zero";
+      } else {
+        // Alacak = given, Borç = received (API alanları); satırın kendi para birimi
+        alacakEl.textContent = fmtMoney(row.given, row.currency);
+        borcEl.textContent = fmtMoney(row.received, row.currency);
+        var bal = row.balance;
+        var balCur = row.currency;
+        if (j.converted && j.converted.complete && j.converted.balance != null) {
+          bal = j.converted.balance;
+          balCur = j.converted.currency;
+        }
+        var signed = fmtBalanceBox(bal, balCur);
+        bakiyeEl.textContent = signed.text;
+        bakiyeEl.className = "pc-sum-value " + signed.cls;
       }
-      body.innerHTML = lines.map(function (t) {
-        return '<div class="pc-summary-row"><span></span></div>';
-      }).join("");
-      Array.prototype.forEach.call(body.querySelectorAll(".pc-summary-row span"), function (el, i) {
-        el.textContent = lines[i];
-      });
+
       if (j.fx_warnings && j.fx_warnings.length) {
         warn.hidden = false;
         warn.textContent = "Kur uyarısı: " + j.fx_warnings.join(" · ");
@@ -421,7 +513,9 @@
         warn.textContent = "";
       }
     }).catch(function (e) {
-      document.getElementById("pc-summary-body").textContent = e.message || "Özet yüklenemedi";
+      var errEl = document.getElementById("pc-summary-err");
+      errEl.hidden = false;
+      errEl.textContent = e.message || "Özet yüklenemedi";
     });
   }
 
