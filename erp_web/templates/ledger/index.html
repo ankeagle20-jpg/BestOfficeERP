@@ -217,6 +217,43 @@
     background: #fff7ed; border-radius: 8px; padding: 0.4rem 0.55rem;
   }
   .pc-fx-select { max-width: 5.5rem; display: inline-block; margin-left: 0.35rem; }
+  .pc-stmt-table-wrap {
+    margin-top: 0.75rem;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .pc-stmt-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.78rem;
+    background: var(--pc-card);
+    color: var(--pc-ink);
+    border: 1px solid var(--pc-line);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .pc-stmt-table th,
+  .pc-stmt-table td {
+    padding: 0.4rem 0.45rem;
+    border-bottom: 1px solid var(--pc-line);
+    text-align: left;
+    vertical-align: top;
+  }
+  .pc-stmt-table th {
+    background: #eef2f6;
+    font-weight: 650;
+    color: var(--pc-ink);
+    white-space: nowrap;
+  }
+  .pc-stmt-table td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .pc-stmt-table tr.opening { background: #f1f5f9; font-weight: 600; }
+  .pc-stmt-table .bal-pos { color: #166534; }
+  .pc-stmt-table .bal-neg { color: #991b1b; }
+  .pc-stmt-meta {
+    margin-top: 0.5rem;
+    font-size: 0.8rem;
+    color: var(--pc-muted);
+  }
 </style>
 
 <div class="pc-wrap" id="pc-app">
@@ -938,7 +975,7 @@
     document.getElementById("pc-stmt-panel").classList.add("open");
     document.getElementById("pc-stmt-from").value = monthStartISO();
     document.getElementById("pc-stmt-to").value = todayISO();
-    document.getElementById("pc-stmt-preview-box").textContent = "";
+    document.getElementById("pc-stmt-preview-box").innerHTML = "";
     document.getElementById("pc-stmt-err").hidden = true;
   });
   document.getElementById("pc-stmt-cancel").addEventListener("click", function () {
@@ -949,15 +986,55 @@
     err.hidden = true;
     var fr = document.getElementById("pc-stmt-from").value;
     var to = document.getElementById("pc-stmt-to").value;
+    var box = document.getElementById("pc-stmt-preview-box");
+    box.innerHTML = "<div class='pc-meta'>Yükleniyor…</div>";
     api("/ledger/api/parties/" + state.partyId + "/statement?from=" + encodeURIComponent(fr) + "&to=" + encodeURIComponent(to))
       .then(function (j) {
         var s = j.statement || {};
-        var lines = ["Hareket: " + (s.row_count || 0)];
-        (s.period_totals || []).forEach(function (t) {
-          lines.push(t.currency + " net " + fmtMoney(t.net, t.currency));
+        var lines = s.lines || [];
+        function fmtCell(v, cur) {
+          if (v === null || v === undefined) return "";
+          return fmtMoney(v, cur || "TRY");
+        }
+        var html = '<div class="pc-stmt-table-wrap"><table class="pc-stmt-table"><thead><tr>' +
+          "<th>Tarih</th><th>Açıklama</th><th>Borç</th><th>Alacak</th><th>Bakiye</th>" +
+          "</tr></thead><tbody>";
+        if (!lines.length) {
+          html += '<tr><td colspan="5">Bu dönemde hareket yok.</td></tr>';
+        } else {
+          lines.forEach(function (ln) {
+            var trClass = ln.row_type === "opening" ? "opening" : "";
+            var bal = Number(ln.balance || 0);
+            var balCls = Math.abs(bal) < 0.005 ? "" : (bal > 0 ? " bal-pos" : " bal-neg");
+            html += '<tr class="' + trClass + '">' +
+              "<td>" + (ln.date || "") + "</td>" +
+              "<td></td>" +
+              '<td class="num">' + (ln.borc != null ? fmtCell(ln.borc, ln.currency) : "") + "</td>" +
+              '<td class="num">' + (ln.alacak != null ? fmtCell(ln.alacak, ln.currency) : "") + "</td>" +
+              '<td class="num' + balCls + '"></td>' +
+              "</tr>";
+          });
+        }
+        html += "</tbody></table></div>";
+        html += '<div class="pc-stmt-meta">Hareket: ' + (s.row_count || 0) +
+          " · Satır: " + (s.line_count || lines.length) + "</div>";
+        box.innerHTML = html;
+        var rows = box.querySelectorAll("tbody tr");
+        var li = 0;
+        Array.prototype.forEach.call(rows, function (tr) {
+          if (!lines[li]) return;
+          var ln = lines[li++];
+          var tds = tr.querySelectorAll("td");
+          if (tds.length >= 5) {
+            tds[1].textContent = ln.description || "";
+            tds[4].textContent = ln.balance_label || "";
+          }
         });
-        document.getElementById("pc-stmt-preview-box").textContent = lines.join(" · ");
-      }).catch(function (e) { err.textContent = e.message; err.hidden = false; });
+      }).catch(function (e) {
+        box.innerHTML = "";
+        err.textContent = e.message;
+        err.hidden = false;
+      });
   });
   document.getElementById("pc-stmt-pdf").addEventListener("click", function () {
     var fr = document.getElementById("pc-stmt-from").value;

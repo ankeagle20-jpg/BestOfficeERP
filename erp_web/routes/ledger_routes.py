@@ -740,8 +740,24 @@ def _group_dict(row: dict) -> dict:
     }
 
 
+def _fmt_amount_tr(v) -> str:
+    """PDF/UI için 1.234,56 biçimi."""
+    return f"{_money(v):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def _balance_sign_label(bal: Decimal, *, currency: str | None = None) -> str:
+    """Koşan bakiye metni: + = müşteri bize borçlu, − = biz müşteriye borçluyuz."""
+    cur = (currency or "").strip().upper()
+    suffix = f" {cur}" if cur else ""
+    if abs(bal) < Decimal("0.005"):
+        return f"0,00{suffix} (denk)"
+    if bal > 0:
+        return f"+{_fmt_amount_tr(bal)}{suffix} (Bize borçlu)"
+    return f"−{_fmt_amount_tr(abs(bal))}{suffix} (Biz borçluyuz)"
+
+
 def _build_statement(party_id: int, d_from: date, d_to: date) -> dict | None:
-    """Tarih aralığı ekstresi — void hariç; satırlar + para birimi alt toplamları."""
+    """Tarih aralığı ekstresi — açılış + koşan bakiye; Borç=receive, Alacak=give."""
     party = fetch_one(
         """
         SELECT id, name, type, phone, email, country, notes, is_active, created_at, updated_at
@@ -826,9 +842,78 @@ def _build_statement(party_id: int, d_from: date, d_to: date) -> dict | None:
         closing_map[o["currency"]] = _dec(o["balance"])
     for p in period_totals:
         closing_map[p["currency"]] = closing_map.get(p["currency"], Decimal("0")) + _dec(p["net"])
+    # Tx'te olup açılışta olmayan para birimleri
+    for t in txs:
+        cur = str(t["currency"])
+        closing_map.setdefault(cur, Decimal("0"))
     closing = [
         {"currency": k, "balance": _money(v)} for k, v in sorted(closing_map.items())
     ]
+
+    # --- Klasik ekstre satırları: Açılış + koşan bakiye ---
+    running: dict[str, Decimal] = {o["currency"]: _dec(o["balance"]) for o in opening}
+    currencies_needed = sorted(
+        set(running.keys()) | {str(t["currency"]) for t in txs}
+    )
+    for cur in currencies_needed:
+        running.setdefault(cur, Decimal("0"))
+
+    lines: list[dict] = []
+    for cur in currencies_needed:
+        bal0 = running[cur]
+        lines.append(
+            {
+                "row_type": "opening",
+                "date": d_from.isoformat(),
+                "description": "Açılış bakiyesi",
+                "direction": None,
+                "borc": None,
+                "alacak": None,
+                "amount": None,
+                "currency": cur,
+                "balance": _money(bal0),
+                "balance_label": _balance_sign_label(bal0, currency=cur),
+                "tx_id": None,
+                "note": None,
+            }
+        )
+
+    for t in txs:
+        cur = str(t["currency"])
+        amt = _dec(t["amount"])
+        direction = str(t.get("direction") or "")
+        if direction == "give":
+            running[cur] = running.get(cur, Decimal("0")) + amt
+            borc = None
+            alacak = _money(amt)
+            desc = "Verdim"
+        else:
+            running[cur] = running.get(cur, Decimal("0")) - amt
+            borc = _money(amt)
+            alacak = None
+            desc = "Aldım"
+        note = (str(t.get("note") or "").strip() or None)
+        if note:
+            desc = f"{desc} — {note}"
+        occurred = t.get("occurred_at")
+        date_s = occurred.date().isoformat() if hasattr(occurred, "date") else str(occurred or "")[:10]
+        bal = running[cur]
+        lines.append(
+            {
+                "row_type": "tx",
+                "date": date_s,
+                "description": desc,
+                "direction": direction,
+                "borc": borc,
+                "alacak": alacak,
+                "amount": _money(amt),
+                "currency": cur,
+                "balance": _money(bal),
+                "balance_label": _balance_sign_label(bal, currency=cur),
+                "tx_id": int(t["id"]),
+                "note": note,
+            }
+        )
 
     return {
         "party": _party_dict(party, with_balances=True),
@@ -839,6 +924,8 @@ def _build_statement(party_id: int, d_from: date, d_to: date) -> dict | None:
         "opening_balances": opening,
         "period_totals": period_totals,
         "closing_balances": closing,
+        "lines": lines,
+        "line_count": len(lines),
     }
 
 
@@ -917,36 +1004,60 @@ def _build_statement_pdf(stmt: dict) -> bytes:
 
     y -= 3 * mm
     c.setFont(font_b, 10)
-    c.drawString(15 * mm, y, "Dönem hareketleri")
+    c.drawString(15 * mm, y, "Hesap ekstresi (Tarih / Açıklama / Borç / Alacak / Bakiye)")
     y -= 6 * mm
 
-    data = [["Tarih", "Yön", "Tutar", "PB", "Not"]]
-    for t in stmt.get("transactions") or []:
-        occurred = (t.get("occurred_at") or "")[:10]
-        direction = "Verdim" if t.get("direction") == "give" else "Aldım"
-        amt = f"{float(t.get('amount') or 0):,.2f}"
-        note = (t.get("note") or "")[:40]
-        data.append([occurred, direction, amt, t.get("currency") or "", note])
+    data = [["Tarih", "Açıklama", "Borç", "Alacak", "Bakiye"]]
+    stmt_lines = stmt.get("lines") or []
+    for ln in stmt_lines:
+        borc = _fmt_amount_tr(ln["borc"]) if ln.get("borc") is not None else ""
+        alacak = _fmt_amount_tr(ln["alacak"]) if ln.get("alacak") is not None else ""
+        data.append(
+            [
+                str(ln.get("date") or "")[:10],
+                str(ln.get("description") or "")[:48],
+                borc,
+                alacak,
+                str(ln.get("balance_label") or "")[:42],
+            ]
+        )
 
     if len(data) == 1:
-        data.append(["—", "—", "—", "—", "Hareket yok"])
+        data.append(["—", "Hareket yok", "", "", ""])
 
-    col_w = [28 * mm, 22 * mm, 28 * mm, 14 * mm, 78 * mm]
+    col_w = [22 * mm, 58 * mm, 28 * mm, 28 * mm, 44 * mm]
     table = Table(data, colWidths=col_w, repeatRows=1)
     table.setStyle(
         TableStyle(
             [
                 ("FONT", (0, 0), (-1, 0), font_b, 8),
-                ("FONT", (0, 1), (-1, -1), font, 8),
+                ("FONT", (0, 1), (-1, -1), font, 7),
                 ("BACKGROUND", (0, 0), (-1, 0), colors.Color(0.92, 0.94, 0.96)),
                 ("GRID", (0, 0), (-1, -1), 0.4, colors.Color(0.75, 0.78, 0.82)),
-                ("ALIGN", (2, 1), (2, -1), "RIGHT"),
+                ("ALIGN", (2, 1), (3, -1), "RIGHT"),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                 ("TOPPADDING", (0, 0), (-1, -1), 3),
                 ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
             ]
         )
     )
+    # Açılış satırlarını hafif vurgula
+    for i, ln in enumerate(stmt_lines):
+        if ln.get("row_type") == "opening":
+            table.setStyle(
+                TableStyle(
+                    [
+                        (
+                            "BACKGROUND",
+                            (0, i + 1),
+                            (-1, i + 1),
+                            colors.Color(0.95, 0.97, 0.99),
+                        ),
+                        ("FONT", (0, i + 1), (-1, i + 1), font_b, 7),
+                    ]
+                )
+            )
+
     tw, th = table.wrapOn(c, w - 30 * mm, y - 40 * mm)
     if y - th < 35 * mm:
         c.showPage()
@@ -955,12 +1066,14 @@ def _build_statement_pdf(stmt: dict) -> bytes:
     table.drawOn(c, 15 * mm, y - th)
     y = y - th - 8 * mm
 
-    # Makine-okunur satır izi (Helvetica ASCII) — canlı test satır sayısı doğrulaması
+    # Makine-okunur satır izi
     c.setFont("Helvetica", 7)
-    for i, t in enumerate(stmt.get("transactions") or []):
+    tx_only = [ln for ln in stmt_lines if ln.get("row_type") == "tx"]
+    for i, ln in enumerate(tx_only):
         marker = (
-            f"ROW {i + 1} {t.get('direction')} "
-            f"{float(t.get('amount') or 0):.2f} {t.get('currency') or ''}"
+            f"ROW {i + 1} {ln.get('direction')} "
+            f"{float(ln.get('amount') or 0):.2f} {ln.get('currency') or ''} "
+            f"bal={float(ln.get('balance') or 0):.2f}"
         )
         c.drawString(15 * mm, y, marker)
         y -= 3.5 * mm
@@ -970,6 +1083,8 @@ def _build_statement_pdf(stmt: dict) -> bytes:
             c.setFont("Helvetica", 7)
     c.setFont("Helvetica", 7)
     c.drawString(15 * mm, y, f"LEDGER_STMT_ROWS={int(stmt.get('row_count') or 0)}")
+    y -= 4 * mm
+    c.drawString(15 * mm, y, f"LEDGER_STMT_LINES={int(stmt.get('line_count') or 0)}")
     y -= 6 * mm
 
     c.setFont(font_b, 10)
@@ -978,8 +1093,8 @@ def _build_statement_pdf(stmt: dict) -> bytes:
     c.setFont(font, 9)
     for p in stmt.get("period_totals") or []:
         line = (
-            f"{p['currency']}: Verdim {_money(p['given']):,.2f}  "
-            f"Aldım {_money(p['received']):,.2f}  Net {_money(p['net']):,.2f}"
+            f"{p['currency']}: Alacak {_fmt_amount_tr(p['given'])}  "
+            f"Borç {_fmt_amount_tr(p['received'])}  Net {_fmt_amount_tr(p['net'])}"
         )
         c.drawString(15 * mm, y, line)
         y -= 4.5 * mm
@@ -994,14 +1109,15 @@ def _build_statement_pdf(stmt: dict) -> bytes:
     y -= 4.5 * mm
     c.setFont(font, 9)
     for p in stmt.get("closing_balances") or []:
-        c.drawString(15 * mm, y, f"{p['currency']}: {_money(p['balance']):,.2f}")
+        lab = _balance_sign_label(_dec(p["balance"]), currency=str(p["currency"]))
+        c.drawString(15 * mm, y, f"{p['currency']}: {lab}")
         y -= 4.5 * mm
 
     c.setFont(font, 7)
     c.drawString(
         15 * mm,
         12 * mm,
-        "Bakiye canlı SUM(give)-SUM(receive), is_void=FALSE — ayrı balance alanı yok.",
+        "Borç=Aldım (receive), Alacak=Verdim (give). Bakiye=koşan SUM(give)-SUM(receive), is_void=FALSE.",
     )
     c.save()
     return buf.getvalue()
