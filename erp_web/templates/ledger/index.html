@@ -720,6 +720,12 @@
     }, 0);
   }
 
+  function deferLoadSummary() {
+    setTimeout(function () {
+      loadSummary().catch(function () {});
+    }, 0);
+  }
+
   function txRowHtml(t) {
     var dir = t.direction === "give" ? "Verdim" : "Aldım";
     var voided = t.is_void ? " voided" : "";
@@ -744,6 +750,7 @@
         applyBalancesToUi(j.balances || []);
         if (j.transaction) applyTxToDetailList(j.transaction);
         deferLoadList();
+        deferLoadSummary();
       }).catch(function (e) { alert(e.message); });
     });
   }
@@ -967,6 +974,7 @@
       applyBalancesToUi(j.balances || []);
       if (j.transaction) applyTxToDetailList(j.transaction);
       deferLoadList();
+      deferLoadSummary();
     }).catch(function (e) { err.textContent = e.message; err.hidden = false; });
   });
 
