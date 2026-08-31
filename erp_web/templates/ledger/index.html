@@ -121,6 +121,7 @@
   }
   .pc-tx.voided { opacity: 0.55; text-decoration: line-through; }
   .pc-tx-row { display: flex; justify-content: space-between; gap: 0.5rem; align-items: center; }
+  .pc-tx-date { color: var(--pc-muted); font-size: 0.82rem; font-weight: 500; white-space: nowrap; margin-right: 0.45rem; }
   .pc-tx .pc-meta { color: var(--pc-muted); }
   .pc-err { color: #fecaca; font-size: 0.88rem; margin: 0.4rem 0; }
   .pc-panel .pc-err { color: #b91c1c; }
@@ -438,6 +439,13 @@
     }
   }
 
+  /** occurred_at (ISO) → gün.ay.yıl; takvim günü (TZ kayması yok). */
+  function fmtTxDate(iso) {
+    var m = String(iso || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!m) return "";
+    return m[3] + "." + m[2] + "." + m[1];
+  }
+
   function balLabel(primary) {
     if (!primary) return "Bakiye yok";
     var b = Number(primary.balance || 0);
@@ -732,8 +740,10 @@
     var voidBtn = t.is_void
       ? ""
       : ('<button type="button" class="pc-btn pc-btn-danger pc-void" data-id="' + t.id + '">İptal</button>');
-    return '<div class="pc-tx' + voided + '" data-tx-id="' + t.id + '"><div class="pc-tx-row"><strong>' +
-      dir + " " + fmtMoney(t.amount, t.currency) + "</strong>" + voidBtn +
+    var dateS = fmtTxDate(t.occurred_at);
+    var dateHtml = dateS ? ('<span class="pc-tx-date">' + dateS + "</span>") : "";
+    return '<div class="pc-tx' + voided + '" data-tx-id="' + t.id + '"><div class="pc-tx-row"><div class="pc-tx-main">' +
+      dateHtml + "<strong>" + dir + " " + fmtMoney(t.amount, t.currency) + "</strong></div>" + voidBtn +
       '</div><div class="pc-meta"></div></div>';
   }
 
