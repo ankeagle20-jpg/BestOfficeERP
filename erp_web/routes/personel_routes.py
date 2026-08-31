@@ -15,7 +15,10 @@ from utils.devam_bulut_sync import sync_devam_gunu_buluta
 from routes.pdovam_routes import pdovam_toplam_fark_dk_for_personel
 from tenant_module_access import check_module_access
 from pwa_kit import (
+    build_navigate_offline_sw,
     build_web_manifest,
+    render_offline_page,
+    service_worker_response,
     standard_png_icons,
     web_manifest_response,
 )
@@ -32,11 +35,16 @@ VARSAYILAN_CIKIS_DK = 18 * 60 + 30
 VARSAYILAN_MESAI_BITIS = "18:30"
 VARSAYILAN_MESAI_BASLANGIC = "09:00"
 
-# M2 PWA — pwa_kit; start_url mobil shell (SW/offline M3'te)
+# M2/M3 PWA — pwa_kit; start_url mobil shell
 _PERSONEL_PWA_SCOPE = "/personel/"
 _PERSONEL_PWA_START = "/personel/m/"
 _PERSONEL_THEME = "#00bcd4"
 _PERSONEL_BG = "#e0f7fa"
+_PERSONEL_SW_JS = build_navigate_offline_sw(
+    cache_name="payafin-personel-m3-v1",
+    offline_url="/personel/offline",
+    product_label="Payafin Personel",
+)
 
 
 def _saat_to_minutes(val):
@@ -261,9 +269,13 @@ bp = Blueprint("personel", __name__)
 def _require_personnel_module():
     """Faz 3 pilot: tüm /personel/* için personnel entitlement.
 
-    M2: manifest keşfi (Ana ekrana ekle) giriş/modül gerektirmez — Randevu M2.
+    M2/M3: PWA manifest/SW/offline keşfi giriş/modül gerektirmez — Randevu ile aynı.
     """
-    if request.endpoint == "personel.pwa_manifest":
+    if request.endpoint in (
+        "personel.pwa_manifest",
+        "personel.pwa_service_worker",
+        "personel.pwa_offline",
+    ):
         return None
     return check_module_access("personnel")
 
@@ -351,6 +363,18 @@ def pwa_manifest():
         icons=standard_png_icons("static/personel"),
     )
     return web_manifest_response(payload)
+
+
+@bp.route("/sw.js")
+def pwa_service_worker():
+    """M3 service worker — scope /personel/; giriş gerekmez."""
+    return service_worker_response(_PERSONEL_SW_JS, allowed_scope=_PERSONEL_PWA_SCOPE)
+
+
+@bp.route("/offline")
+def pwa_offline():
+    """M3 çevrimdışı fallback sayfası (tam offline çalışma değil)."""
+    return render_offline_page("personel/offline.html")
 
 
 # ── Personel listesi ────────────────────────────────────────────────────────

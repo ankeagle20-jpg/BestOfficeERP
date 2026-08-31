@@ -252,6 +252,12 @@
   }
 
   loadToday();
+
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("/personel/sw.js", { scope: "/personel/" }).catch(function () {
+      /* sessiz — PWA opsiyonel */
+    });
+  }
 })();
 </script>
 {% endblock %}
