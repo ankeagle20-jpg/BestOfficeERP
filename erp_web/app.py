@@ -567,18 +567,19 @@ def healthz():
 
 @app.route("/_tmp_r2_a0_smoke", methods=["POST"])
 def _tmp_r2_a0_smoke():
-    """GEÇİCİ A0: R2 put/get/delete. SETUP_SECRET ile korumalı; test sonrası kaldırılacak."""
+    """GEÇİCİ A0: R2 put/get/delete. Tek kullanımlık smoke token; test sonrası kaldırılacak."""
     import os
 
     from flask import jsonify
 
+    # Geçici sabit token (endpoint silinince geçersiz). SETUP_SECRET Render'da farklı olabiliyor.
+    expected = "payafin-a0-r2-smoke"
     secret = (
         request.args.get("secret")
-        or request.headers.get("X-Setup-Secret")
+        or request.headers.get("X-A0-Smoke-Token")
         or ""
     ).strip()
-    expected = (os.environ.get("SETUP_SECRET") or "").strip()
-    if not expected or secret != expected:
+    if secret != expected:
         return jsonify({"ok": False, "mesaj": "auth"}), 403
 
     needed = (
