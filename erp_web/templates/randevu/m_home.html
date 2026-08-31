@@ -291,6 +291,12 @@
   });
 
   loadToday();
+
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("/randevu/sw.js", { scope: "/randevu/" }).catch(function () {
+      /* sessiz — PWA opsiyonel */
+    });
+  }
 })();
 </script>
 {% endblock %}

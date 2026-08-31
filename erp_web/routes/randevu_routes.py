@@ -8,7 +8,10 @@ from flask_login import login_required
 from tenant_module_access import module_required
 from db import fetch_all, fetch_one, execute, execute_returning
 from pwa_kit import (
+    build_navigate_offline_sw,
     build_web_manifest,
+    render_offline_page,
+    service_worker_response,
     standard_png_icons,
     web_manifest_response,
 )
@@ -18,11 +21,16 @@ from decimal import Decimal
 
 bp = Blueprint("randevu", __name__, url_prefix="/randevu")
 
-# M2 PWA — pwa_kit; start_url mobil shell
+# M2/M3 PWA — pwa_kit; start_url mobil shell
 _RANDEVU_PWA_SCOPE = "/randevu/"
 _RANDEVU_PWA_START = "/randevu/m/"
 _RANDEVU_THEME = "#0d47a1"  # m_home CTA / mevcut mavi şema
 _RANDEVU_BG = "#eef4fb"
+_RANDEVU_SW_JS = build_navigate_offline_sw(
+    cache_name="payafin-randevu-m3-v1",
+    offline_url="/randevu/offline",
+    product_label="Payafin Randevu",
+)
 
 
 def _get_musait_slotlar(tarih_str, oda_adi, tip=""):
@@ -152,6 +160,18 @@ def pwa_manifest():
         icons=standard_png_icons("static/randevu"),
     )
     return web_manifest_response(payload)
+
+
+@bp.route("/sw.js")
+def pwa_service_worker():
+    """M3 service worker — scope /randevu/; giriş gerekmez."""
+    return service_worker_response(_RANDEVU_SW_JS, allowed_scope=_RANDEVU_PWA_SCOPE)
+
+
+@bp.route("/offline")
+def pwa_offline():
+    """M3 çevrimdışı fallback sayfası (tam offline çalışma değil)."""
+    return render_offline_page("randevu/offline.html")
 
 
 @bp.route("/calcom")
