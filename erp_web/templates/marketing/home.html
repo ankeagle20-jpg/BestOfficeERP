@@ -72,6 +72,12 @@
     line-height: 1.35;
     padding-top: 4px;
   }
+  .package-card .package-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 4px;
+  }
   .package-card .btn-package {
     width: 100%;
     padding: 10px 14px;
@@ -84,10 +90,92 @@
     text-align: center;
     text-decoration: none;
     display: inline-block;
-    margin-top: 4px;
+    box-sizing: border-box;
+    cursor: pointer;
   }
   .package-card .btn-package:hover { background: #f1f5f9; }
+  .package-card .btn-package-primary {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+  }
+  .package-card .btn-package-primary:hover {
+    background: var(--accent-hover, #1d4ed8);
+    color: #fff;
+  }
   .packages-section .section-title { text-align: center; margin-bottom: 6px; }
+
+  /* L1 — Hesabıma git modal */
+  .hg-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+    z-index: 1000;
+    box-sizing: border-box;
+  }
+  .hg-backdrop[hidden] { display: none !important; }
+  .hg-modal {
+    width: 100%;
+    max-width: 22rem;
+    background: #fff;
+    border-radius: 12px;
+    border: 1px solid #cbd5e1;
+    padding: 1.25rem 1.15rem 1.1rem;
+    box-shadow: 0 16px 40px rgba(15, 23, 42, 0.2);
+  }
+  .hg-modal h3 {
+    margin: 0 0 0.35rem;
+    font-size: 1.1rem;
+    color: #0f172a;
+  }
+  .hg-modal .hg-sub {
+    margin: 0 0 1rem;
+    font-size: 0.88rem;
+    color: #64748b;
+  }
+  .hg-modal .field { margin-bottom: 0.75rem; }
+  .hg-modal .field label {
+    display: block;
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin-bottom: 0.35rem;
+    color: #334155;
+  }
+  .hg-modal .field input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.6rem 0.7rem;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    font-size: 0.95rem;
+  }
+  .hg-actions {
+    display: flex;
+    gap: 0.5rem;
+    justify-content: flex-end;
+    margin-top: 0.5rem;
+  }
+  .hg-actions button {
+    padding: 0.55rem 0.95rem;
+    border-radius: 8px;
+    font-size: 0.92rem;
+    font-weight: 600;
+    cursor: pointer;
+    border: 1px solid #cbd5e1;
+    background: #fff;
+    color: #334155;
+  }
+  .hg-actions button.hg-submit {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+  .hg-actions button:disabled { opacity: 0.55; cursor: not-allowed; }
+
   @media (max-width: 640px) {
     .home-top-compact { max-width: 100%; }
     .packages-grid { grid-template-columns: 1fr; }
@@ -138,69 +226,108 @@
       <h3>Core ERP</h3>
       <p>Cari kart, fatura, tahsilat ve ofis operasyonlarını tek panelden yönetin. Payafin omurgası tüm modüllerin temelidir.</p>
       <div class="package-price">Başlangıç fiyatları için detaylara bakın</div>
-      <a href="/fiyatlandirma" class="btn-package">Detaylar</a>
+      <div class="package-actions">
+        <a href="/fiyatlandirma" class="btn-package">Detaylar</a>
+        <button type="button" class="btn-package btn-package-primary btn-hesabima-git" data-module="core" data-label="Core ERP">Hesabıma git</button>
+      </div>
     </article>
     <article class="package-card">
       <h3>Personel Yönetimi</h3>
       <p>Personel kartı, izin, devam takibi ve özlük süreçlerini dijitalleştirin. Şube ve personel sayınıza göre esnek paketler.</p>
       <div class="package-price">Başlangıç fiyatları için detaylara bakın</div>
-      <a href="/fiyatlandirma" class="btn-package">Detaylar</a>
+      <div class="package-actions">
+        <a href="/fiyatlandirma" class="btn-package">Detaylar</a>
+        <button type="button" class="btn-package btn-package-primary btn-hesabima-git" data-module="personnel" data-label="Personel Yönetimi">Hesabıma git</button>
+      </div>
     </article>
     <article class="package-card">
       <h3>Randevu Yönetimi</h3>
       <p>Toplantı odası rezervasyonu, takvim ve müşteri self-service booking ile randevularınızı kolayca planlayın.</p>
       <div class="package-price">Başlangıç fiyatları için detaylara bakın</div>
-      <a href="/fiyatlandirma" class="btn-package">Detaylar</a>
+      <div class="package-actions">
+        <a href="/fiyatlandirma" class="btn-package">Detaylar</a>
+        <button type="button" class="btn-package btn-package-primary btn-hesabima-git" data-module="randevu" data-label="Randevu Yönetimi">Hesabıma git</button>
+      </div>
     </article>
     <article class="package-card">
       <h3>Payafin Cari</h3>
       <p>Kişi/şirket bazlı cari hesap, verdim/aldım kaydı, otomatik bakiye, grup konsolidasyonu ve PDF ekstre ile borç-alacak takibinizi basitleştirin.</p>
       <div class="package-price">Başlangıç fiyatları için detaylara bakın</div>
-      <a href="/fiyatlandirma#payafin-cari" class="btn-package">Detaylar</a>
+      <div class="package-actions">
+        <a href="/fiyatlandirma#payafin-cari" class="btn-package">Detaylar</a>
+        <button type="button" class="btn-package btn-package-primary btn-hesabima-git" data-module="ledger" data-label="Payafin Cari">Hesabıma git</button>
+      </div>
     </article>
   </div>
 </section>
+
+<div id="hg-backdrop" class="hg-backdrop" hidden>
+  <div class="hg-modal" role="dialog" aria-modal="true" aria-labelledby="hg-title">
+    <h3 id="hg-title">Hesabıma git</h3>
+    <p class="hg-sub" id="hg-sub">E-posta adresinizi girin; sizi hesabınıza yönlendirelim.</p>
+    <form id="hg-form" novalidate>
+      <input type="hidden" id="hg-module" name="module" value="">
+      <div class="field">
+        <label for="hg-email">E-posta adresiniz</label>
+        <input id="hg-email" name="email" type="email" autocomplete="email" required placeholder="ornek@sirket.com">
+      </div>
+      <div id="hg-error" class="field-error" role="alert"></div>
+      <div class="hg-actions">
+        <button type="button" id="hg-cancel">Vazgeç</button>
+        <button type="submit" class="hg-submit" id="hg-submit">Hesabıma git</button>
+      </div>
+    </form>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
 <script>
 (function () {
-  const form = document.getElementById("login-lookup-form");
-  const emailInput = document.getElementById("login-email");
-  const errEl = document.getElementById("login-error");
-  const btn = document.getElementById("btn-login-lookup");
+  var form = document.getElementById("login-lookup-form");
+  var emailInput = document.getElementById("login-email");
+  var errEl = document.getElementById("login-error");
+  var btn = document.getElementById("btn-login-lookup");
 
   function showError(html) {
     errEl.innerHTML = html;
     errEl.style.display = "block";
   }
 
+  async function postLoginLookup(email, moduleKey) {
+    var body = { email: email };
+    if (moduleKey) body.module = moduleKey;
+    var res = await fetch("/api/login-lookup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(body)
+    });
+    var data = await res.json().catch(function () { return {}; });
+    return { status: res.status, data: data };
+  }
+
   form.addEventListener("submit", async function (ev) {
     ev.preventDefault();
     errEl.style.display = "none";
     errEl.textContent = "";
-    const email = emailInput.value.trim().toLowerCase();
+    var email = emailInput.value.trim().toLowerCase();
     if (!email) {
       showError("Geçerli bir e-posta adresi girin.");
       return;
     }
     btn.disabled = true;
     try {
-      const res = await fetch("/api/login-lookup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Accept": "application/json" },
-        body: JSON.stringify({ email: email })
-      });
-      const data = await res.json().catch(function () { return {}; });
-      if (res.status === 429) {
+      var result = await postLoginLookup(email, null);
+      var data = result.data;
+      if (result.status === 429) {
         showError(data.mesaj || "Çok fazla deneme, lütfen bekleyin.");
         return;
       }
-      if (res.status === 400) {
+      if (result.status === 400) {
         showError(data.mesaj || "Geçersiz e-posta.");
         return;
       }
-      if (res.status === 403) {
+      if (result.status === 403) {
         showError(data.mesaj || "Bu işlem yalnızca ana sitede kullanılabilir.");
         return;
       }
@@ -216,6 +343,88 @@
       showError("Bağlantı hatası. Lütfen tekrar deneyin.");
     } finally {
       btn.disabled = false;
+    }
+  });
+
+  /* L1 — paket kartı Hesabıma git */
+  var backdrop = document.getElementById("hg-backdrop");
+  var hgForm = document.getElementById("hg-form");
+  var hgEmail = document.getElementById("hg-email");
+  var hgModule = document.getElementById("hg-module");
+  var hgSub = document.getElementById("hg-sub");
+  var hgErr = document.getElementById("hg-error");
+  var hgSubmit = document.getElementById("hg-submit");
+  var hgCancel = document.getElementById("hg-cancel");
+
+  function openHgModal(moduleKey, label) {
+    hgModule.value = moduleKey || "";
+    hgSub.textContent = (label || "Bu modül") +
+      " için e-posta adresinizi girin; sizi hesabınıza yönlendirelim.";
+    hgErr.style.display = "none";
+    hgErr.textContent = "";
+    hgEmail.value = "";
+    backdrop.hidden = false;
+    setTimeout(function () { hgEmail.focus(); }, 0);
+  }
+
+  function closeHgModal() {
+    backdrop.hidden = true;
+    hgSubmit.disabled = false;
+  }
+
+  function showHgError(msg) {
+    hgErr.textContent = msg || "";
+    hgErr.style.display = msg ? "block" : "none";
+  }
+
+  document.querySelectorAll(".btn-hesabima-git").forEach(function (el) {
+    el.addEventListener("click", function () {
+      openHgModal(el.getAttribute("data-module") || "", el.getAttribute("data-label") || "");
+    });
+  });
+
+  hgCancel.addEventListener("click", closeHgModal);
+  backdrop.addEventListener("click", function (ev) {
+    if (ev.target === backdrop) closeHgModal();
+  });
+  document.addEventListener("keydown", function (ev) {
+    if (ev.key === "Escape" && !backdrop.hidden) closeHgModal();
+  });
+
+  hgForm.addEventListener("submit", async function (ev) {
+    ev.preventDefault();
+    showHgError("");
+    var email = hgEmail.value.trim().toLowerCase();
+    var moduleKey = (hgModule.value || "").trim();
+    if (!email) {
+      showHgError("Geçerli bir e-posta adresi girin.");
+      return;
+    }
+    hgSubmit.disabled = true;
+    try {
+      var result = await postLoginLookup(email, moduleKey || null);
+      var data = result.data;
+      if (result.status === 429) {
+        showHgError(data.mesaj || "Çok fazla deneme, lütfen bekleyin.");
+        return;
+      }
+      if (result.status === 400) {
+        showHgError(data.mesaj || "Geçersiz e-posta.");
+        return;
+      }
+      if (result.status === 403) {
+        showHgError(data.mesaj || "Bu işlem yalnızca ana sitede kullanılabilir.");
+        return;
+      }
+      if (data.found && data.login_url) {
+        window.location.href = data.login_url;
+        return;
+      }
+      window.location.href = data.signup_url || "/signup";
+    } catch (e) {
+      showHgError("Bağlantı hatası. Lütfen tekrar deneyin.");
+    } finally {
+      hgSubmit.disabled = false;
     }
   });
 })();
