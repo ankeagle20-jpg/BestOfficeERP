@@ -99,6 +99,9 @@
     <a href="{{ url_for('mobile.tahsilat') }}" class="hizli-tile tile-tahsilat"><div class="left"><i class="fa fa-wallet"></i><span>Tahsilat</span></div><div class="right"><i class="fa fa-chevron-right"></i></div></a>
     <a href="{{ url_for('mobile.operasyon') }}" class="hizli-tile tile-operasyon"><div class="left"><i class="fa fa-box"></i><span>Operasyon</span></div><div class="right"><i class="fa fa-chevron-right"></i></div></a>
     <a href="{{ url_for('mobile.yonetim') }}" class="hizli-tile tile-yonetim"><div class="left"><i class="fa fa-chart-pie"></i><span>Yönetim</span></div><div class="right"><i class="fa fa-chevron-right"></i></div></a>
+    {% if has_module('ledger') %}
+    <a href="/ledger/" class="hizli-tile tile-ledger"><div class="left"><i class="fa fa-book"></i><span>Payafin Cari</span></div><div class="right"><i class="fa fa-chevron-right"></i></div></a>
+    {% endif %}
 </div>
 
 <div class="aktif-wrap">

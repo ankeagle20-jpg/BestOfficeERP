@@ -70,6 +70,21 @@
         .filter-tabs { display: flex; gap: 8px; margin-bottom: 12px; overflow-x: auto; padding-bottom: 4px; }
         .filter-tabs a { padding: 8px 14px; border-radius: 8px; background: var(--card); color: var(--muted); text-decoration: none; font-size: 12px; white-space: nowrap; border: 1px solid var(--border); }
         .filter-tabs a.active { background: var(--neon-blue); color: var(--bg); border-color: var(--neon-blue); }
+        /* Modül kısayolları (layout has_module deseni) */
+        .mobile-module-bar {
+            display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 14px;
+            background: var(--card); border-bottom: 1px solid var(--border);
+        }
+        .mobile-module-bar a {
+            display: inline-flex; align-items: center; gap: 8px;
+            padding: 8px 12px; border-radius: 8px; font-size: 13px; font-weight: 600;
+            text-decoration: none; color: var(--text);
+            background: rgba(13, 122, 95, 0.15); border: 1px solid rgba(13, 122, 95, 0.45);
+        }
+        .mobile-module-bar a i { color: #0d7a5f; }
+        .mobile-module-bar a:active { opacity: 0.85; }
+        .hizli-tile.tile-ledger { background: rgba(13, 122, 95, 0.12); border-color: rgba(13, 122, 95, 0.4); }
+        .hizli-tile.tile-ledger .left i { color: #0d7a5f; }
     </style>
     {% block extra_css %}{% endblock %}
 </head>
@@ -88,6 +103,12 @@
             <a href="/auth/profile" class="avatar" title="Profil"><i class="fa fa-user"></i></a>
         </div>
     </header>
+
+    {% if has_module('ledger') %}
+    <div class="mobile-module-bar" role="navigation" aria-label="Modüller">
+        <a href="/ledger/"><i class="fa fa-book"></i> Payafin Cari</a>
+    </div>
+    {% endif %}
 
     {% block header %}{% endblock %}
     {% block search %}{% endblock %}
