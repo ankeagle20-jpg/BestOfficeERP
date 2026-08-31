@@ -18,10 +18,11 @@ import io
 import json
 import os
 import re
+import uuid
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
-from flask import Blueprint, Response, g, jsonify, render_template, request
+from flask import Blueprint, Response, g, jsonify, redirect, render_template, request
 from flask_login import current_user
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
@@ -34,6 +35,7 @@ from reportlab.platypus import Table, TableStyle
 
 from auth import giris_gerekli
 from db import ensure_ledger_tables, execute, execute_returning, fetch_all, fetch_one
+from r2_storage import R2StorageError, delete as r2_delete, put_bytes, presign_get
 from pwa_kit import (
     build_navigate_offline_sw,
     build_web_manifest,
@@ -200,6 +202,10 @@ _DIRECTIONS = frozenset({"give", "receive"})
 _REMINDER_STATUSES = frozenset({"pending", "sent", "dismissed"})
 _REMINDER_CHANNELS = frozenset({"email", "in_app"})
 
+# A3 — hareket ekleri (magic-byte; Content-Type'a güvenilmez)
+_ATTACH_MAX_BYTES = 5 * 1024 * 1024  # 5 MiB (DB CHECK ile uyumlu)
+_ATTACH_PRESIGN_SECONDS = 300
+
 
 def _json_err(message: str, status: int = 400):
     return jsonify({"ok": False, "mesaj": message}), status
@@ -211,6 +217,68 @@ def _json_ok(payload: dict | None = None, status: int = 200):
     if payload:
         body.update(payload)
     return jsonify(body), status
+
+
+def _detect_image_magic(data: bytes) -> tuple[str, str] | None:
+    """Gerçek magic byte → (content_type, ext). Sahte uzantı/Content-Type yok sayılır."""
+    if not data or len(data) < 12:
+        return None
+    if data.startswith(b"\xff\xd8\xff"):
+        return ("image/jpeg", "jpg")
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ("image/png", "png")
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return ("image/webp", "webp")
+    return None
+
+
+def _sanitize_original_filename(name: str | None) -> str | None:
+    raw = (name or "").strip().replace("\\", "/")
+    base = os.path.basename(raw).strip()
+    if not base or base in (".", ".."):
+        return None
+    if len(base) > 255:
+        base = base[:255]
+    return base
+
+
+def _tenant_slug_for_object_key() -> str | None:
+    slug = (getattr(g, "tenant_slug", None) or "").strip().lower()
+    if slug and re.fullmatch(r"[a-z0-9_]+", slug):
+        return slug
+    return None
+
+
+def _attachment_dict(row: dict) -> dict:
+    return {
+        "id": int(row["id"]),
+        "transaction_id": int(row["transaction_id"]),
+        "content_type": row.get("content_type"),
+        "byte_size": int(row["byte_size"]) if row.get("byte_size") is not None else None,
+        "original_filename": row.get("original_filename"),
+        "created_at": row["created_at"].isoformat() if row.get("created_at") else None,
+        "is_deleted": bool(row.get("is_deleted")),
+    }
+
+
+def _active_attachment_ids_by_tx(tx_ids: list[int]) -> dict[int, int]:
+    """tx_id → aktif attachment id (is_deleted=FALSE)."""
+    ids = sorted({int(t) for t in tx_ids if t is not None})
+    if not ids:
+        return {}
+    rows = fetch_all(
+        """
+        SELECT id, transaction_id
+        FROM ledger_transaction_attachments
+        WHERE is_deleted = FALSE
+          AND transaction_id IN %s
+        """,
+        (tuple(ids),),
+    ) or []
+    out: dict[int, int] = {}
+    for r in rows:
+        out[int(r["transaction_id"])] = int(r["id"])
+    return out
 
 
 # Payafin Cari PWA — pwa_kit (L4 gövdesi birebir)
@@ -315,7 +383,28 @@ def _party_dict(
     return d
 
 
-def _tx_dict(row: dict) -> dict:
+def _tx_dict(
+    row: dict,
+    *,
+    has_attachment: bool | None = None,
+    attachment_id: int | None = None,
+) -> dict:
+    if has_attachment is None and attachment_id is None:
+        raw_aid = row.get("attachment_id")
+        if raw_aid is not None:
+            attachment_id = int(raw_aid)
+            has_attachment = True
+        elif "has_attachment" in row:
+            has_attachment = bool(row.get("has_attachment"))
+            attachment_id = None
+        else:
+            has_attachment = False
+            attachment_id = None
+    elif has_attachment is None:
+        has_attachment = attachment_id is not None
+    elif attachment_id is None and not has_attachment:
+        attachment_id = None
+
     return {
         "id": int(row["id"]),
         "party_id": int(row["party_id"]),
@@ -328,6 +417,8 @@ def _tx_dict(row: dict) -> dict:
         "is_void": bool(row.get("is_void")),
         "metadata": row.get("metadata") or {},
         "created_at": row["created_at"].isoformat() if row.get("created_at") else None,
+        "has_attachment": bool(has_attachment),
+        "attachment_id": int(attachment_id) if attachment_id is not None else None,
     }
 
 
@@ -479,12 +570,20 @@ def api_parties_detail(party_id: int):
         (int(party_id),),
     ) or []
 
+    att_map = _active_attachment_ids_by_tx([int(t["id"]) for t in txs])
     party = _party_dict(row, with_balances=True)
     return jsonify(
         {
             "ok": True,
             "party": party,
-            "transactions": [_tx_dict(t) for t in txs],
+            "transactions": [
+                _tx_dict(
+                    t,
+                    has_attachment=int(t["id"]) in att_map,
+                    attachment_id=att_map.get(int(t["id"])),
+                )
+                for t in txs
+            ],
         }
     )
 
@@ -629,6 +728,197 @@ def api_transactions_void(tx_id: int):
             "ok": True,
             "transaction": _tx_dict(updated),
             "balances": _balances_for_party(int(updated["party_id"])),
+        }
+    )
+
+
+@bp.route("/api/transactions/<int:tx_id>/attachments", methods=["POST"])
+@giris_gerekli
+@module_required("ledger")
+def api_transactions_attachment_upload(tx_id: int):
+    """Multipart dosya → magic-byte doğrulama → R2 put → DB kayıt.
+
+    Faz 1: aktif ek varsa soft-delete + yenisi (replace UX).
+    """
+    _ensure_ledger_tables_once()
+    slug = _tenant_slug_for_object_key()
+    if not slug:
+        return _json_err("Kiracı bağlamı yok.", 403)
+
+    tx = fetch_one(
+        """
+        SELECT id, party_id, direction, amount, currency, occurred_at, note,
+               created_by, is_void, metadata, created_at
+        FROM ledger_transactions
+        WHERE id = %s
+        """,
+        (int(tx_id),),
+    )
+    if not tx:
+        return _json_err("Hareket bulunamadı.", 404)
+
+    party_id = int(tx["party_id"])
+    # Taraf bu kiracı şemasında yoksa (search_path) zaten görünmez; ek doğrulama:
+    party = fetch_one("SELECT id FROM ledger_parties WHERE id = %s", (party_id,))
+    if not party:
+        return _json_err("Hareket bulunamadı.", 404)
+
+    upload = request.files.get("file") or request.files.get("attachment")
+    if upload is None or not getattr(upload, "filename", None):
+        return _json_err("Dosya gerekli (multipart alan: file).")
+
+    raw = upload.read(_ATTACH_MAX_BYTES + 1)
+    if not raw:
+        return _json_err("Dosya boş.")
+    if len(raw) > _ATTACH_MAX_BYTES:
+        return _json_err("Dosya en fazla 5 MB olabilir.")
+
+    detected = _detect_image_magic(raw)
+    if not detected:
+        return _json_err(
+            "Geçersiz dosya: yalnızca gerçek JPEG/PNG/WEBP kabul edilir."
+        )
+    content_type, ext = detected
+    original_filename = _sanitize_original_filename(upload.filename)
+
+    object_key = (
+        f"{slug}/ledger/{party_id}/{int(tx_id)}/{uuid.uuid4().hex}.{ext}"
+    )
+
+    # Faz 1 replace: mevcut aktif ekleri soft-delete (kısmi unique için)
+    old_rows = fetch_all(
+        """
+        SELECT id, object_key
+        FROM ledger_transaction_attachments
+        WHERE transaction_id = %s AND is_deleted = FALSE
+        """,
+        (int(tx_id),),
+    ) or []
+    for old in old_rows:
+        execute(
+            """
+            UPDATE ledger_transaction_attachments
+            SET is_deleted = TRUE
+            WHERE id = %s AND is_deleted = FALSE
+            """,
+            (int(old["id"]),),
+        )
+
+    try:
+        put_bytes(object_key, raw, content_type=content_type)
+    except R2StorageError:
+        return _json_err("Dosya depolanamadı.", 503)
+
+    created_by = None
+    try:
+        if current_user and getattr(current_user, "is_authenticated", False):
+            created_by = int(current_user.id)
+    except (TypeError, ValueError, AttributeError):
+        created_by = None
+
+    try:
+        att = execute_returning(
+            """
+            INSERT INTO ledger_transaction_attachments (
+                transaction_id, object_key, content_type, byte_size,
+                original_filename, created_by
+            ) VALUES (%s, %s, %s, %s, %s, %s)
+            RETURNING id, transaction_id, object_key, content_type, byte_size,
+                      original_filename, created_by, created_at, is_deleted
+            """,
+            (
+                int(tx_id),
+                object_key,
+                content_type,
+                len(raw),
+                original_filename,
+                created_by,
+            ),
+        )
+    except Exception:
+        try:
+            r2_delete(object_key)
+        except R2StorageError:
+            pass
+        return _json_err("Ek kaydı oluşturulamadı.", 500)
+
+    if not att:
+        try:
+            r2_delete(object_key)
+        except R2StorageError:
+            pass
+        return _json_err("Ek kaydı oluşturulamadı.", 500)
+
+    # Eski R2 nesnelerini best-effort sil (DB soft-delete zaten yapıldı)
+    for old in old_rows:
+        old_key = (old.get("object_key") or "").strip()
+        if old_key and old_key != object_key:
+            try:
+                r2_delete(old_key)
+            except R2StorageError:
+                pass
+
+    return (
+        jsonify(
+            {
+                "ok": True,
+                "attachment": _attachment_dict(att),
+                "transaction": _tx_dict(
+                    tx,
+                    has_attachment=True,
+                    attachment_id=int(att["id"]),
+                ),
+                "replaced": len(old_rows) > 0,
+            }
+        ),
+        201,
+    )
+
+
+@bp.route("/api/attachments/<int:att_id>", methods=["GET"])
+@giris_gerekli
+@module_required("ledger")
+def api_attachment_get(att_id: int):
+    """Aktif ek için kısa ömürlü imzalı URL (JSON) veya ?redirect=1 ile 302."""
+    _ensure_ledger_tables_once()
+    slug = _tenant_slug_for_object_key()
+    if not slug:
+        return _json_err("Kiracı bağlamı yok.", 403)
+
+    row = fetch_one(
+        """
+        SELECT a.id, a.transaction_id, a.object_key, a.content_type, a.byte_size,
+               a.original_filename, a.created_by, a.created_at, a.is_deleted,
+               t.party_id
+        FROM ledger_transaction_attachments a
+        JOIN ledger_transactions t ON t.id = a.transaction_id
+        WHERE a.id = %s
+        """,
+        (int(att_id),),
+    )
+    if not row or row.get("is_deleted"):
+        return _json_err("Ek bulunamadı.", 404)
+
+    object_key = (row.get("object_key") or "").strip()
+    # Savunma derinliği: key bu kiracı prefix'i ile başlamalı
+    if not object_key.startswith(f"{slug}/ledger/"):
+        return _json_err("Ek bulunamadı.", 404)
+
+    try:
+        url = presign_get(object_key, expires_seconds=_ATTACH_PRESIGN_SECONDS)
+    except R2StorageError:
+        return _json_err("Ek URL üretilemedi.", 503)
+
+    if str(request.args.get("redirect") or "").strip() in ("1", "true", "yes"):
+        return redirect(url, code=302)
+
+    return jsonify(
+        {
+            "ok": True,
+            "url": url,
+            "expires_in": _ATTACH_PRESIGN_SECONDS,
+            "content_type": row.get("content_type"),
+            "attachment": _attachment_dict(row),
         }
     )
 
