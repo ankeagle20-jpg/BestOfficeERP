@@ -15,7 +15,7 @@ services:
       - key: SECRET_KEY
         generateValue: true
       - key: TENANT_APEX_DOMAINS
-        value: "bestofficeerp.com,bestofficeerp.local,payafin.com"
+        value: "payafin.com,bestofficeerp.com,bestofficeerp.local"
       - key: DB_HOST
         sync: false
       - key: DB_PORT
