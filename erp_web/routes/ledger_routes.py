@@ -34,6 +34,14 @@ from reportlab.platypus import Table, TableStyle
 
 from auth import giris_gerekli
 from db import ensure_ledger_tables, execute, execute_returning, fetch_all, fetch_one
+from pwa_kit import (
+    build_navigate_offline_sw,
+    build_web_manifest,
+    render_offline_page,
+    service_worker_response,
+    standard_png_icons,
+    web_manifest_response,
+)
 from services.exchange_rate_service import get_exchange_rate
 from tenant_module_access import module_required, resolve_request_tenant_id
 
@@ -205,52 +213,13 @@ def _json_ok(payload: dict | None = None, status: int = 200):
     return jsonify(body), status
 
 
-_LEDGER_SW_JS = r"""/* Payafin Cari L4 — basit offline fallback (tam offline çalışma değil) */
-const CACHE = 'payafin-cari-l4-v1';
-const OFFLINE_URL = '/ledger/offline';
-
-self.addEventListener('install', function (event) {
-  event.waitUntil(
-    caches.open(CACHE).then(function (cache) {
-      return cache.addAll([OFFLINE_URL]);
-    }).then(function () {
-      return self.skipWaiting();
-    })
-  );
-});
-
-self.addEventListener('activate', function (event) {
-  event.waitUntil(
-    caches.keys().then(function (keys) {
-      return Promise.all(keys.map(function (k) {
-        if (k !== CACHE) return caches.delete(k);
-      }));
-    }).then(function () {
-      return self.clients.claim();
-    })
-  );
-});
-
-self.addEventListener('fetch', function (event) {
-  var req = event.request;
-  if (req.method !== 'GET') return;
-  // Yalnızca sayfa gezintilerinde offline mesajı; API/cache yok
-  if (req.mode === 'navigate') {
-    event.respondWith(
-      fetch(req).catch(function () {
-        return caches.match(OFFLINE_URL).then(function (cached) {
-          return cached || new Response(
-            '<!doctype html><meta charset=utf-8><title>Çevrimdışı</title>' +
-            '<body style="font-family:system-ui;padding:2rem;text-align:center">' +
-            '<h1>Bağlantı yok</h1><p>Payafin Cari için internet bağlantısı gerekli.</p></body>',
-            { headers: { 'Content-Type': 'text/html; charset=utf-8' } }
-          );
-        });
-      })
-    );
-  }
-});
-"""
+# Payafin Cari PWA — pwa_kit (L4 gövdesi birebir)
+_LEDGER_PWA_SCOPE = "/ledger/"
+_LEDGER_SW_JS = build_navigate_offline_sw(
+    cache_name="payafin-cari-l4-v1",
+    offline_url="/ledger/offline",
+    product_label="Payafin Cari",
+)
 
 
 def _dec(v) -> Decimal:
@@ -390,57 +359,29 @@ def index():
 @bp.route("/manifest.webmanifest")
 def pwa_manifest():
     """PWA manifest — giriş gerekmez (Ana ekrana ekle keşfi için)."""
-    payload = {
-        "name": "Payafin Cari",
-        "short_name": "Payafin Cari",
-        "description": "Payafin Cari — basit cari takip (ledger)",
-        "start_url": "/ledger/",
-        "scope": "/ledger/",
-        "display": "standalone",
-        "orientation": "portrait-primary",
-        "background_color": "#f4f7f6",
-        "theme_color": "#0d7a5f",
-        "lang": "tr",
-        "icons": [
-            {
-                "src": "/static/ledger/icon-192.png",
-                "sizes": "192x192",
-                "type": "image/png",
-                "purpose": "any",
-            },
-            {
-                "src": "/static/ledger/icon-512.png",
-                "sizes": "512x512",
-                "type": "image/png",
-                "purpose": "any maskable",
-            },
-        ],
-    }
-    body = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-    return Response(
-        body,
-        mimetype="application/manifest+json",
-        headers={"Cache-Control": "public, max-age=3600"},
+    payload = build_web_manifest(
+        name="Payafin Cari",
+        short_name="Payafin Cari",
+        description="Payafin Cari — basit cari takip (ledger)",
+        start_url=_LEDGER_PWA_SCOPE,
+        scope=_LEDGER_PWA_SCOPE,
+        theme_color="#0d7a5f",
+        background_color="#f4f7f6",
+        icons=standard_png_icons("static/ledger"),
     )
+    return web_manifest_response(payload)
 
 
 @bp.route("/sw.js")
 def pwa_service_worker():
     """Service worker — scope /ledger/; giriş gerekmez."""
-    return Response(
-        _LEDGER_SW_JS,
-        mimetype="application/javascript; charset=utf-8",
-        headers={
-            "Cache-Control": "no-cache",
-            "Service-Worker-Allowed": "/ledger/",
-        },
-    )
+    return service_worker_response(_LEDGER_SW_JS, allowed_scope=_LEDGER_PWA_SCOPE)
 
 
 @bp.route("/offline")
 def pwa_offline():
     """Çevrimdışı fallback sayfası (tam offline çalışma değil)."""
-    return render_template("ledger/offline.html")
+    return render_offline_page("ledger/offline.html")
 
 
 @bp.route("/api/parties", methods=["GET"])
