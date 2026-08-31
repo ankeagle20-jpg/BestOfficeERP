@@ -123,6 +123,29 @@
   .pc-tx-row { display: flex; justify-content: space-between; gap: 0.5rem; align-items: center; }
   .pc-tx-date { color: var(--pc-muted); font-size: 0.82rem; font-weight: 500; white-space: nowrap; margin-right: 0.45rem; }
   .pc-tx .pc-meta { color: var(--pc-muted); }
+  .pc-tx-actions { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; }
+  .pc-attach-view {
+    font-size: 1.05rem; line-height: 1; padding: 0.35rem 0.5rem; min-width: 2.25rem;
+  }
+  .pc-lightbox {
+    position: fixed; inset: 0; z-index: 80;
+    background: rgba(15, 23, 42, 0.82);
+    display: flex; align-items: center; justify-content: center;
+    padding: 1rem;
+  }
+  .pc-lightbox[hidden] { display: none !important; }
+  .pc-lightbox-inner {
+    position: relative; max-width: min(96vw, 720px); max-height: 90vh;
+  }
+  .pc-lightbox img {
+    display: block; max-width: 100%; max-height: 85vh;
+    border-radius: 10px; background: #fff;
+  }
+  .pc-lightbox-close {
+    position: absolute; top: -0.35rem; right: -0.35rem;
+    border: none; border-radius: 999px; width: 2.25rem; height: 2.25rem;
+    background: #0f172a; color: #fff; font-size: 1.25rem; cursor: pointer;
+  }
   .pc-err { color: #fecaca; font-size: 0.88rem; margin: 0.4rem 0; }
   .pc-panel .pc-err { color: #b91c1c; }
   .pc-back { margin-bottom: 0.75rem; }
@@ -380,6 +403,10 @@
       <div class="pc-field"><label>Tutar</label><input id="pc-tx-amount" type="number" min="0.01" step="0.01" inputmode="decimal"></div>
       <div class="pc-field"><label>Para birimi</label><input id="pc-tx-currency" value="TRY" maxlength="3" style="text-transform:uppercase"></div>
       <div class="pc-field"><label>Not</label><input id="pc-tx-note" maxlength="300"></div>
+      <div class="pc-field">
+        <label for="pc-tx-file">Senet/makbuz fotoğrafı ekle (isteğe bağlı)</label>
+        <input id="pc-tx-file" type="file" accept="image/*" capture="environment">
+      </div>
       <div id="pc-tx-err" class="pc-err" hidden></div>
       <div class="pc-actions">
         <button type="button" class="pc-btn pc-btn-primary" id="pc-tx-save">Kaydet</button>
@@ -419,6 +446,13 @@
     </div>
     <h2 style="font-size:1.05rem;margin:0.5rem 0;">Üyeler</h2>
     <div id="pc-g-members"></div>
+  </div>
+
+  <div id="pc-lightbox" class="pc-lightbox" hidden>
+    <div class="pc-lightbox-inner">
+      <button type="button" class="pc-lightbox-close" id="pc-lightbox-close" aria-label="Kapat">×</button>
+      <img id="pc-lightbox-img" alt="Senet / makbuz">
+    </div>
   </div>
 </div>
 
@@ -484,6 +518,41 @@
       if (!r.ok) throw new Error("HTTP " + r.status);
       return r;
     });
+  }
+
+  function apiUpload(path, formData) {
+    return fetch(path, {
+      method: "POST",
+      body: formData,
+      credentials: "same-origin"
+    }).then(function (r) {
+      return r.json().then(function (j) {
+        if (!r.ok || (j && j.ok === false)) {
+          var err = new Error((j && j.mesaj) || ("HTTP " + r.status));
+          err.status = r.status;
+          throw err;
+        }
+        return j;
+      });
+    });
+  }
+
+  function closeLightbox() {
+    var box = document.getElementById("pc-lightbox");
+    var img = document.getElementById("pc-lightbox-img");
+    if (box) box.hidden = true;
+    if (img) img.removeAttribute("src");
+  }
+
+  function openAttachmentLightbox(attId) {
+    if (!attId) return;
+    api("/ledger/api/attachments/" + attId).then(function (j) {
+      var img = document.getElementById("pc-lightbox-img");
+      var box = document.getElementById("pc-lightbox");
+      if (!img || !box || !j.url) throw new Error("Görüntü URL alınamadı.");
+      img.src = j.url;
+      box.hidden = false;
+    }).catch(function (e) { alert(e.message || "Ek açılamadı."); });
   }
 
   function todayISO() {
@@ -740,10 +809,17 @@
     var voidBtn = t.is_void
       ? ""
       : ('<button type="button" class="pc-btn pc-btn-danger pc-void" data-id="' + t.id + '">İptal</button>');
+    var attId = t.attachment_id || null;
+    var hasAtt = !!(t.has_attachment && attId);
+    var attBtn = hasAtt
+      ? ('<button type="button" class="pc-btn pc-btn-ghost pc-attach-view" data-att-id="' +
+        attId + '" title="Senet/makbuz görüntüle" aria-label="Senet/makbuz görüntüle">📎</button>')
+      : "";
     var dateS = fmtTxDate(t.occurred_at);
     var dateHtml = dateS ? ('<span class="pc-tx-date">' + dateS + "</span>") : "";
     return '<div class="pc-tx' + voided + '" data-tx-id="' + t.id + '"><div class="pc-tx-row"><div class="pc-tx-main">' +
-      dateHtml + "<strong>" + dir + " " + fmtMoney(t.amount, t.currency) + "</strong></div>" + voidBtn +
+      dateHtml + "<strong>" + dir + " " + fmtMoney(t.amount, t.currency) + "</strong></div>" +
+      '<div class="pc-tx-actions">' + attBtn + voidBtn + "</div>" +
       '</div><div class="pc-meta"></div></div>';
   }
 
@@ -751,6 +827,11 @@
     if (!box || box._pcVoidBound) return;
     box._pcVoidBound = true;
     box.addEventListener("click", function (ev) {
+      var att = ev.target.closest ? ev.target.closest(".pc-attach-view") : null;
+      if (att && box.contains(att)) {
+        openAttachmentLightbox(att.getAttribute("data-att-id"));
+        return;
+      }
       var b = ev.target.closest ? ev.target.closest(".pc-void") : null;
       if (!b || !box.contains(b)) return;
       if (!confirm("Bu hareketi iptal et (void)?")) return;
@@ -961,15 +1042,22 @@
     document.getElementById("pc-tx-amount").value = "";
     document.getElementById("pc-tx-currency").value = "TRY";
     document.getElementById("pc-tx-note").value = "";
+    document.getElementById("pc-tx-file").value = "";
   }
   document.getElementById("pc-btn-give").addEventListener("click", function () { openTx("give"); });
   document.getElementById("pc-btn-recv").addEventListener("click", function () { openTx("receive"); });
   document.getElementById("pc-tx-cancel").addEventListener("click", function () {
     document.getElementById("pc-tx-panel").classList.remove("open");
   });
+  document.getElementById("pc-lightbox-close").addEventListener("click", closeLightbox);
+  document.getElementById("pc-lightbox").addEventListener("click", function (ev) {
+    if (ev.target === document.getElementById("pc-lightbox")) closeLightbox();
+  });
   document.getElementById("pc-tx-save").addEventListener("click", function () {
     var err = document.getElementById("pc-tx-err");
     err.hidden = true;
+    var fileInput = document.getElementById("pc-tx-file");
+    var file = (fileInput.files && fileInput.files[0]) || null;
     api("/ledger/api/transactions", {
       method: "POST",
       body: {
@@ -980,7 +1068,26 @@
         note: document.getElementById("pc-tx-note").value
       }
     }).then(function (j) {
+      var tx = j.transaction;
+      if (!file || !tx || !tx.id) return j;
+      var fd = new FormData();
+      fd.append("file", file);
+      return apiUpload("/ledger/api/transactions/" + tx.id + "/attachments", fd).then(function (aj) {
+        if (aj.transaction) j.transaction = aj.transaction;
+        else if (aj.attachment && j.transaction) {
+          j.transaction.has_attachment = true;
+          j.transaction.attachment_id = aj.attachment.id;
+        }
+        return j;
+      }).catch(function (e) {
+        // Hareket oluştu; ek yüklenemedi — kullanıcıya bildir, satırı yine göster
+        err.textContent = "Hareket kaydedildi; fotoğraf yüklenemedi: " + (e.message || "");
+        err.hidden = false;
+        return j;
+      });
+    }).then(function (j) {
       document.getElementById("pc-tx-panel").classList.remove("open");
+      fileInput.value = "";
       applyBalancesToUi(j.balances || []);
       if (j.transaction) applyTxToDetailList(j.transaction);
       deferLoadList();
