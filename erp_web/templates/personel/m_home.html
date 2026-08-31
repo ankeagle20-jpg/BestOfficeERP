@@ -1,5 +1,13 @@
 {% extends "layout.html" %}
 {% block title %}Personel - Mobil{% endblock %}
+{% block extra_head %}
+<link rel="manifest" href="/personel/manifest.webmanifest">
+<meta name="theme-color" content="#00bcd4">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Payafin Personel">
+<link rel="apple-touch-icon" href="/static/personel/icon-192.png">
+{% endblock %}
 {% block content %}
 <style>
   .pm-wrap {
