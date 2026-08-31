@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from functools import wraps
+from urllib.parse import urlencode
 
 from flask import Blueprint, jsonify, request
 
@@ -18,6 +19,14 @@ bp = Blueprint("login_lookup", __name__)
 
 MSG_NOT_FOUND = "Bu e-posta ile kayıtlı bir hesap bulunamadı."
 MSG_TENANT_HOST = "Bu endpoint yalnızca ana (public) host üzerinden kullanılabilir."
+
+# L0: istemci yalnız module key gönderir; kanonik next sunucuda üretilir (ham path yok).
+# core / bilinmeyen / boş → next yok (eski /login davranışı).
+_MODULE_NEXT: dict[str, str] = {
+    "ledger": "/ledger/",
+    "randevu": "/randevu/m/",
+    "personnel": "/personel/m/",
+}
 
 
 def _json403(msg: str):
@@ -41,9 +50,27 @@ def marketing_public_only(f):
     return _guard
 
 
-def _login_url(slug: str) -> str:
+def _canonical_next_for_module(module_raw) -> str | None:
+    """Whitelist module → relative next path. Geçersiz/core/boş → None (next yok)."""
+    key = str(module_raw or "").strip().lower()
+    if not key or key == "core":
+        return None
+    return _MODULE_NEXT.get(key)
+
+
+def _login_url(slug: str, next_path: str | None = None) -> str:
     apex = (_tenant_apex_domains() or ("payafin.com",))[0]
-    return f"https://{slug}.{apex}/login"
+    base = f"https://{slug}.{apex}/login"
+    if not next_path:
+        return base
+    # S3 ile uyumlu: yalnız relative path; netloc / // kabul etme
+    if (
+        not next_path.startswith("/")
+        or next_path.startswith("//")
+        or "://" in next_path
+    ):
+        return base
+    return f"{base}?{urlencode({'next': next_path})}"
 
 
 @bp.route("/api/login-lookup", methods=["POST"])
@@ -62,6 +89,9 @@ def api_login_lookup():
     if validate_email(email):
         return jsonify({"ok": False, "mesaj": "Geçersiz e-posta."}), 400
 
+    # Ham "next" / path alanlarını bilerek yok say — yalnız whitelist module
+    next_path = _canonical_next_for_module(data.get("module"))
+
     row = fetch_one(
         """
         SELECT l.tenant_slug
@@ -76,14 +106,15 @@ def api_login_lookup():
 
     if row:
         slug = row["tenant_slug"]
-        return jsonify(
-            {
-                "ok": True,
-                "found": True,
-                "tenant_slug": slug,
-                "login_url": _login_url(slug),
-            }
-        )
+        payload = {
+            "ok": True,
+            "found": True,
+            "tenant_slug": slug,
+            "login_url": _login_url(slug, next_path),
+        }
+        if next_path:
+            payload["next"] = next_path
+        return jsonify(payload)
 
     return jsonify(
         {
