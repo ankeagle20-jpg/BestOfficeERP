@@ -14,8 +14,9 @@ TENANT_HEADER = "X-BestOffice-Tenant"
 _SLUG_RE = re.compile(r"^[a-z0-9_]+$")
 _IPV4_RE = re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}$")
 
-# Kiracı slug YALNIZ bu apex'lerin bir alt adında: acme.bestofficeerp.com
-_DEFAULT_TENANT_APEX = "bestofficeerp.com,bestofficeerp.local"
+# Kiracı slug YALNIZ bu apex'lerin bir alt adında: acme.bestofficeerp.com / acme.payafin.com
+# www.payafin.com marketing host'tur (MARKETING_APEX_HOSTS); tenant apex DEĞİL.
+_DEFAULT_TENANT_APEX = "bestofficeerp.com,bestofficeerp.local,payafin.com"
 # Bu sonekte (PaaS) asla tenant çıkarılmaz: bestofficeerp.onrender.com
 _DEFAULT_NO_TENANT_SUFFIXES = "onrender.com"
 _DEFAULT_PUBLIC_HOSTS = "bestofficeerp.onrender.com"
