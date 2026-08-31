@@ -1706,6 +1706,46 @@ ALTER SEQUENCE public.ledger_reminders_id_seq OWNED BY public.ledger_reminders.i
 
 
 --
+-- Name: ledger_transaction_attachments; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.ledger_transaction_attachments (
+    id bigint NOT NULL,
+    transaction_id bigint NOT NULL,
+    object_key text NOT NULL,
+    content_type text NOT NULL,
+    byte_size integer NOT NULL,
+    original_filename text,
+    created_by integer,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    is_deleted boolean DEFAULT false NOT NULL,
+    CONSTRAINT ledger_tx_attach_byte_size_chk CHECK (((byte_size > 0) AND (byte_size <= 5242880))),
+    CONSTRAINT ledger_tx_attach_content_type_chk CHECK ((content_type = ANY (ARRAY['image/jpeg'::text, 'image/png'::text, 'image/webp'::text]))),
+    CONSTRAINT ledger_tx_attach_object_key_chk CHECK (((length(TRIM(BOTH FROM object_key)) > 0) AND (length(object_key) <= 1024) AND (POSITION(('..'::text) IN object_key) = 0))),
+    CONSTRAINT ledger_tx_attach_original_filename_chk CHECK (((original_filename IS NULL) OR ((length(TRIM(BOTH FROM original_filename)) > 0) AND (length(original_filename) <= 255))))
+);
+
+
+--
+-- Name: ledger_transaction_attachments_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.ledger_transaction_attachments_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: ledger_transaction_attachments_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.ledger_transaction_attachments_id_seq OWNED BY public.ledger_transaction_attachments.id;
+
+
+--
 -- Name: masraflar; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -3013,6 +3053,13 @@ ALTER TABLE ONLY public.ledger_reminders ALTER COLUMN id SET DEFAULT nextval('pu
 
 
 --
+-- Name: ledger_transaction_attachments id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ledger_transaction_attachments ALTER COLUMN id SET DEFAULT nextval('public.ledger_transaction_attachments_id_seq'::regclass);
+
+
+--
 -- Name: masraflar id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -3583,6 +3630,14 @@ ALTER TABLE ONLY public.ledger_reminders
 
 
 --
+-- Name: ledger_transaction_attachments ledger_transaction_attachments_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ledger_transaction_attachments
+    ADD CONSTRAINT ledger_transaction_attachments_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: masraflar masraflar_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4142,6 +4197,27 @@ CREATE INDEX idx_ledger_reminders_party ON public.ledger_reminders USING btree (
 
 
 --
+-- Name: idx_ledger_tx_attach_transaction; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_ledger_tx_attach_transaction ON public.ledger_transaction_attachments USING btree (transaction_id);
+
+
+--
+-- Name: idx_ledger_tx_attach_created_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_ledger_tx_attach_created_at ON public.ledger_transaction_attachments USING btree (created_at DESC);
+
+
+--
+-- Name: uq_ledger_tx_attach_one_active; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_ledger_tx_attach_one_active ON public.ledger_transaction_attachments USING btree (transaction_id) WHERE (is_deleted = false);
+
+
+--
 -- Name: idx_masraflar_durum_created; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -4647,6 +4723,14 @@ ALTER TABLE ONLY public.ledger_group_members
 
 ALTER TABLE ONLY public.ledger_reminders
     ADD CONSTRAINT ledger_reminders_party_id_fkey FOREIGN KEY (party_id) REFERENCES public.ledger_parties(id) ON DELETE CASCADE;
+
+
+--
+-- Name: ledger_transaction_attachments ledger_tx_attach_transaction_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ledger_transaction_attachments
+    ADD CONSTRAINT ledger_tx_attach_transaction_id_fkey FOREIGN KEY (transaction_id) REFERENCES public.ledger_transactions(id) ON DELETE CASCADE;
 
 
 --

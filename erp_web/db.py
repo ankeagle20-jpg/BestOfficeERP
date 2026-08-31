@@ -3917,6 +3917,64 @@ def ensure_ledger_reminder_tables():
             execute(stmt)
         except Exception as e:
             print(f"ledger reminder index: {e}")
+    ensure_ledger_attachment_tables()
+
+
+def ensure_ledger_attachment_tables():
+    """Payafin Cari A2 — hareket ekleri (R2 object_key meta; kiracı search_path).
+
+    Faz 1: hareket başına en fazla 1 aktif ek (kısmi unique: is_deleted=FALSE).
+    """
+    execute(
+        """
+        CREATE TABLE IF NOT EXISTS ledger_transaction_attachments (
+            id                  BIGSERIAL PRIMARY KEY,
+            transaction_id      BIGINT NOT NULL,
+            object_key          TEXT NOT NULL,
+            content_type        TEXT NOT NULL,
+            byte_size           INTEGER NOT NULL,
+            original_filename   TEXT,
+            created_by          INTEGER,
+            created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            is_deleted          BOOLEAN NOT NULL DEFAULT FALSE,
+            CONSTRAINT ledger_tx_attach_transaction_id_fkey
+                FOREIGN KEY (transaction_id)
+                REFERENCES ledger_transactions (id)
+                ON DELETE CASCADE,
+            CONSTRAINT ledger_tx_attach_content_type_chk
+                CHECK (content_type IN ('image/jpeg', 'image/png', 'image/webp')),
+            CONSTRAINT ledger_tx_attach_byte_size_chk
+                CHECK (byte_size > 0 AND byte_size <= 5242880),
+            CONSTRAINT ledger_tx_attach_object_key_chk
+                CHECK (
+                    length(trim(object_key)) > 0
+                    AND length(object_key) <= 1024
+                    AND position('..' in object_key) = 0
+                ),
+            CONSTRAINT ledger_tx_attach_original_filename_chk
+                CHECK (
+                    original_filename IS NULL
+                    OR (
+                        length(trim(original_filename)) > 0
+                        AND length(original_filename) <= 255
+                    )
+                )
+        )
+        """
+    )
+    for stmt in (
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_ledger_tx_attach_one_active "
+        "ON ledger_transaction_attachments (transaction_id) "
+        "WHERE is_deleted = FALSE",
+        "CREATE INDEX IF NOT EXISTS idx_ledger_tx_attach_transaction "
+        "ON ledger_transaction_attachments (transaction_id)",
+        "CREATE INDEX IF NOT EXISTS idx_ledger_tx_attach_created_at "
+        "ON ledger_transaction_attachments (created_at DESC)",
+    ):
+        try:
+            execute(stmt)
+        except Exception as e:
+            print(f"ledger attachment index: {e}")
 
 
 def clear_all_customers():
