@@ -565,6 +565,71 @@ def healthz():
     return "ok\n", 200, {"Content-Type": "text/plain; charset=utf-8"}
 
 
+@app.route("/_tmp_r2_a0_smoke", methods=["POST"])
+def _tmp_r2_a0_smoke():
+    """GEÇİCİ A0: R2 put/get/delete. SETUP_SECRET ile korumalı; test sonrası kaldırılacak."""
+    import os
+
+    from flask import jsonify
+
+    secret = (
+        request.args.get("secret")
+        or request.headers.get("X-Setup-Secret")
+        or ""
+    ).strip()
+    expected = (os.environ.get("SETUP_SECRET") or "").strip()
+    if not expected or secret != expected:
+        return jsonify({"ok": False, "mesaj": "auth"}), 403
+
+    needed = (
+        "R2_ENDPOINT_URL",
+        "R2_ATTACHMENTS_BUCKET",
+        "R2_ACCESS_KEY_ID",
+        "R2_SECRET_ACCESS_KEY",
+    )
+    if any(not (os.environ.get(k) or "").strip() for k in needed):
+        return jsonify({"ok": False, "mesaj": "missing_env"}), 500
+
+    try:
+        import boto3
+        from botocore.client import Config
+    except Exception:
+        return jsonify({"ok": False, "mesaj": "boto3"}), 500
+
+    bucket = os.environ["R2_ATTACHMENTS_BUCKET"].strip()
+    key = "_smoke/test-render.txt"
+    body = b"payafin-a0-render-smoke-ok"
+    steps = {"put": False, "get": False, "delete": False}
+
+    try:
+        client = boto3.client(
+            "s3",
+            endpoint_url=os.environ["R2_ENDPOINT_URL"].strip(),
+            aws_access_key_id=os.environ["R2_ACCESS_KEY_ID"].strip(),
+            aws_secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"].strip(),
+            region_name="auto",
+            config=Config(signature_version="s3v4"),
+        )
+        client.put_object(Bucket=bucket, Key=key, Body=body, ContentType="text/plain")
+        steps["put"] = True
+        data = client.get_object(Bucket=bucket, Key=key)["Body"].read()
+        if data != body:
+            return jsonify({"ok": False, "steps": steps, "mesaj": "get_mismatch"}), 500
+        steps["get"] = True
+        client.delete_object(Bucket=bucket, Key=key)
+        try:
+            client.head_object(Bucket=bucket, Key=key)
+            return jsonify({"ok": False, "steps": steps, "mesaj": "delete_still_exists"}), 500
+        except Exception:
+            steps["delete"] = True
+    except Exception as e:
+        return jsonify(
+            {"ok": False, "steps": steps, "mesaj": type(e).__name__}
+        ), 500
+
+    return jsonify({"ok": True, "steps": steps})
+
+
 # ── Ana sayfa ────────────────────────────────────────────────────────────────
 @app.route("/")
 def index():
