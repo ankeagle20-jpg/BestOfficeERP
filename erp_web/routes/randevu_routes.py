@@ -7,11 +7,22 @@ from flask import Blueprint, render_template, request, jsonify, flash, redirect,
 from flask_login import login_required
 from tenant_module_access import module_required
 from db import fetch_all, fetch_one, execute, execute_returning
+from pwa_kit import (
+    build_web_manifest,
+    standard_png_icons,
+    web_manifest_response,
+)
 from utils.musteri_arama import customers_arama_sql_randevu, customers_arama_params_6_randevu
 from datetime import datetime, date, time, timedelta
 from decimal import Decimal
 
 bp = Blueprint("randevu", __name__, url_prefix="/randevu")
+
+# M2 PWA — pwa_kit; start_url mobil shell
+_RANDEVU_PWA_SCOPE = "/randevu/"
+_RANDEVU_PWA_START = "/randevu/m/"
+_RANDEVU_THEME = "#0d47a1"  # m_home CTA / mevcut mavi şema
+_RANDEVU_BG = "#eef4fb"
 
 
 def _get_musait_slotlar(tarih_str, oda_adi, tip=""):
@@ -125,6 +136,22 @@ def index():
 def m_home():
     """M1 — mobil-öncelikli giriş shell (PWA değil; masaüstü /randevu/ dokunulmaz)."""
     return render_template("randevu/m_home.html", durumlar=DURUMLAR, durum_renk=DURUM_RENK)
+
+
+@bp.route("/manifest.webmanifest")
+def pwa_manifest():
+    """M2 PWA manifest — giriş gerekmez (Ana ekrana ekle keşfi)."""
+    payload = build_web_manifest(
+        name="Payafin Randevu",
+        short_name="Payafin Randevu",
+        description="Payafin Randevu — toplantı odası ve randevu takibi",
+        start_url=_RANDEVU_PWA_START,
+        scope=_RANDEVU_PWA_SCOPE,
+        theme_color=_RANDEVU_THEME,
+        background_color=_RANDEVU_BG,
+        icons=standard_png_icons("static/randevu"),
+    )
+    return web_manifest_response(payload)
 
 
 @bp.route("/calcom")
