@@ -119,6 +119,14 @@ def index():
     return render_template("randevu/index.html", durumlar=DURUMLAR, durum_renk=DURUM_RENK)
 
 
+@bp.route("/m/")
+@login_required
+@module_required("randevu")
+def m_home():
+    """M1 — mobil-öncelikli giriş shell (PWA değil; masaüstü /randevu/ dokunulmaz)."""
+    return render_template("randevu/m_home.html", durumlar=DURUMLAR, durum_renk=DURUM_RENK)
+
+
 @bp.route("/calcom")
 @login_required
 @module_required("randevu")

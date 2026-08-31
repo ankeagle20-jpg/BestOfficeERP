@@ -1,0 +1,288 @@
+{% extends "layout.html" %}
+{% block title %}Randevu — Mobil{% endblock %}
+{% block content %}
+<style>
+  .rm-wrap {
+    --rm-ink: #1a2332;
+    --rm-muted: #5c6b7a;
+    --rm-line: #d8dee6;
+    --rm-accent: #0d47a1;
+    --rm-card: #ffffff;
+    --rm-on-dark: #e8eef4;
+    --rm-on-dark-muted: #a8b8c8;
+    max-width: 28rem;
+    margin: 0 auto;
+    padding: 1.25rem 1rem 3.5rem;
+    color: var(--rm-ink);
+    font-family: "Segoe UI", system-ui, sans-serif;
+  }
+  .rm-wrap > h1 {
+    margin: 0 0 0.25rem;
+    font-size: 1.55rem;
+    font-weight: 650;
+    letter-spacing: -0.02em;
+    color: var(--rm-on-dark);
+  }
+  .rm-sub {
+    margin: 0 0 1rem;
+    font-size: 0.92rem;
+    color: var(--rm-on-dark-muted);
+  }
+  .rm-cta {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    text-align: center;
+    text-decoration: none;
+    border: none;
+    border-radius: 12px;
+    padding: 1rem 1.1rem;
+    font-size: 1.05rem;
+    font-weight: 700;
+    cursor: pointer;
+    background: var(--rm-accent);
+    color: #fff;
+    margin-bottom: 1.15rem;
+  }
+  .rm-cta:active { opacity: 0.9; }
+  .rm-section {
+    margin: 0 0 0.55rem;
+    font-size: 0.85rem;
+    font-weight: 650;
+    color: var(--rm-on-dark-muted);
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+  }
+  .rm-list { display: flex; flex-direction: column; gap: 0.55rem; }
+  .rm-card {
+    background: var(--rm-card);
+    border: 1px solid var(--rm-line);
+    border-radius: 12px;
+    padding: 0.9rem 1rem;
+    color: var(--rm-ink);
+    text-align: left;
+    width: 100%;
+    box-sizing: border-box;
+    cursor: pointer;
+  }
+  .rm-card:hover { border-color: #a8b8c8; }
+  .rm-card.open { border-color: #4fc3f7; }
+  .rm-card-top {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+    align-items: baseline;
+  }
+  .rm-time {
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    font-size: 1.02rem;
+  }
+  .rm-oda { margin-top: 0.2rem; font-size: 0.9rem; font-weight: 600; }
+  .rm-meta { margin-top: 0.25rem; font-size: 0.8rem; color: var(--rm-muted); }
+  .rm-badge {
+    display: inline-block;
+    padding: 0.2rem 0.45rem;
+    border-radius: 6px;
+    font-size: 0.72rem;
+    font-weight: 650;
+    white-space: nowrap;
+  }
+  .rm-badge.Beklemede { background: #eab308; color: #000; }
+  .rm-badge.Onaylandı { background: #22c55e; color: #fff; }
+  .rm-badge.Tamamlandı { background: #4fc3f7; color: #000; }
+  .rm-badge.İptal { background: #ef4444; color: #fff; }
+  .rm-actions {
+    display: none;
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--rm-line);
+    gap: 0.45rem;
+    flex-wrap: wrap;
+  }
+  .rm-card.open .rm-actions { display: flex; }
+  .rm-btn {
+    border-radius: 10px;
+    padding: 0.55rem 0.85rem;
+    font-size: 0.88rem;
+    font-weight: 600;
+    text-decoration: none;
+    border: 1px solid var(--rm-line);
+    background: #f8fafc;
+    color: var(--rm-ink);
+    cursor: pointer;
+  }
+  .rm-btn-primary { background: #e3f2fd; color: #0d47a1; border-color: #90caf9; }
+  .rm-btn-danger { background: #fef2f2; color: #b91c1c; border-color: #fecaca; }
+  .rm-empty {
+    text-align: center;
+    padding: 2rem 1rem;
+    color: var(--rm-muted);
+    border: 1px dashed var(--rm-line);
+    border-radius: 12px;
+    background: var(--rm-card);
+  }
+  .rm-err {
+    margin-bottom: 0.75rem;
+    padding: 0.65rem 0.75rem;
+    border-radius: 10px;
+    background: #fef2f2;
+    color: #b91c1c;
+    font-size: 0.88rem;
+  }
+  .rm-foot {
+    margin-top: 1.25rem;
+    font-size: 0.85rem;
+  }
+  .rm-foot a { color: var(--rm-on-dark-muted); }
+</style>
+
+<div class="rm-wrap" id="rm-app">
+  <h1>Randevu</h1>
+  <p class="rm-sub" id="rm-today-label">Bugün</p>
+
+  <a class="rm-cta" href="/randevu/randevu-al" id="rm-cta-new">Yeni Randevu</a>
+
+  <div class="rm-section">Bugünküler</div>
+  <div id="rm-err" class="rm-err" hidden></div>
+  <div class="rm-list" id="rm-list">
+    <div class="rm-empty">Yükleniyor…</div>
+  </div>
+
+  <p class="rm-foot">
+    <a href="/randevu/panel">Masaüstü panel</a>
+  </p>
+</div>
+
+<script>
+(function () {
+  function todayISO() {
+    var d = new Date();
+    var m = d.getMonth() + 1;
+    var day = d.getDate();
+    return d.getFullYear() + "-" + (m < 10 ? "0" : "") + m + "-" + (day < 10 ? "0" : "") + day;
+  }
+
+  function fmtHM(iso) {
+    if (!iso) return "—";
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) {
+      var m = String(iso).match(/T(\d{2}:\d{2})/);
+      return m ? m[1] : "—";
+    }
+    var h = d.getHours();
+    var mi = d.getMinutes();
+    return (h < 10 ? "0" : "") + h + ":" + (mi < 10 ? "0" : "") + mi;
+  }
+
+  function escapeHtml(s) {
+    return String(s || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  var label = document.getElementById("rm-today-label");
+  var day = todayISO();
+  try {
+    label.textContent = "Bugün · " + new Date(day + "T12:00:00").toLocaleDateString("tr-TR", {
+      day: "numeric", month: "short", year: "numeric"
+    });
+  } catch (e) {
+    label.textContent = "Bugün · " + day;
+  }
+
+  var listEl = document.getElementById("rm-list");
+  var errEl = document.getElementById("rm-err");
+
+  function showErr(msg) {
+    errEl.hidden = !msg;
+    errEl.textContent = msg || "";
+  }
+
+  function render(rows) {
+    rows = rows || [];
+    if (!rows.length) {
+      listEl.innerHTML = '<div class="rm-empty">Bugün için randevu yok.</div>';
+      return;
+    }
+    listEl.innerHTML = rows.map(function (r) {
+      var durum = r.durum || "Beklemede";
+      var saat = fmtHM(r.baslangic_zamani) + "–" + fmtHM(r.bitis_zamani);
+      var oda = r.oda_adi || "—";
+      var musteri = r.musteri_adi || "Müşteri yok";
+      var id = r.id;
+      return (
+        '<div class="rm-card" data-id="' + id + '" role="button" tabindex="0">' +
+          '<div class="rm-card-top">' +
+            '<span class="rm-time">' + escapeHtml(saat) + "</span>" +
+            '<span class="rm-badge ' + escapeHtml(durum) + '">' + escapeHtml(durum) + "</span>" +
+          "</div>" +
+          '<div class="rm-oda">' + escapeHtml(oda) + "</div>" +
+          '<div class="rm-meta">' + escapeHtml(musteri) + "</div>" +
+          '<div class="rm-actions">' +
+            '<a class="rm-btn rm-btn-primary" href="/randevu/randevu-al">Değiştir</a>' +
+            '<button type="button" class="rm-btn rm-btn-danger rm-cancel" data-id="' + id + '">İptal</button>' +
+          "</div>" +
+        "</div>"
+      );
+    }).join("");
+  }
+
+  function loadToday() {
+    showErr("");
+    listEl.innerHTML = '<div class="rm-empty">Yükleniyor…</div>';
+    var url = "/randevu/api/list?bas=" + encodeURIComponent(day) + "&bitis=" + encodeURIComponent(day);
+    fetch(url, { headers: { Accept: "application/json" }, credentials: "same-origin" })
+      .then(function (r) {
+        if (!r.ok) throw new Error("Liste yüklenemedi (" + r.status + ")");
+        return r.json();
+      })
+      .then(function (data) {
+        if (data && data.error) throw new Error(data.error);
+        render(Array.isArray(data) ? data : []);
+      })
+      .catch(function (e) {
+        listEl.innerHTML = "";
+        showErr(e.message || "Yüklenemedi");
+      });
+  }
+
+  listEl.addEventListener("click", function (ev) {
+    var cancel = ev.target.closest ? ev.target.closest(".rm-cancel") : null;
+    if (cancel) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      var rid = cancel.getAttribute("data-id");
+      if (!rid || !confirm("Bu randevuyu iptal etmek (silmek) istediğinize emin misiniz?")) return;
+      fetch("/randevu/api/sil/" + rid, {
+        method: "POST",
+        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: "{}"
+      })
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+        .then(function (res) {
+          if (!res.ok || !(res.j && res.j.ok)) {
+            throw new Error((res.j && (res.j.error || res.j.mesaj)) || "İptal başarısız");
+          }
+          loadToday();
+        })
+        .catch(function (e) { alert(e.message || "İptal başarısız"); });
+      return;
+    }
+    if (ev.target.closest && ev.target.closest("a")) return;
+    var card = ev.target.closest ? ev.target.closest(".rm-card") : null;
+    if (!card || !listEl.contains(card)) return;
+    var wasOpen = card.classList.contains("open");
+    Array.prototype.forEach.call(listEl.querySelectorAll(".rm-card.open"), function (c) {
+      c.classList.remove("open");
+    });
+    if (!wasOpen) card.classList.add("open");
+  });
+
+  loadToday();
+})();
+</script>
+{% endblock %}
