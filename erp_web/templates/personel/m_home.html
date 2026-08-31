@@ -1,0 +1,249 @@
+{% extends "layout.html" %}
+{% block title %}Personel - Mobil{% endblock %}
+{% block content %}
+<style>
+  .pm-wrap {
+    --pm-ink: #1a2332;
+    --pm-muted: #5c6b7a;
+    --pm-line: #d8dee6;
+    --pm-accent: #00bcd4;
+    --pm-accent-dark: #0097a7;
+    --pm-card: #ffffff;
+    --pm-on-dark: #e8eef4;
+    --pm-on-dark-muted: #a8b8c8;
+    max-width: 28rem;
+    margin: 0 auto;
+    padding: 1.25rem 1rem 3.5rem;
+    color: var(--pm-ink);
+    font-family: "Segoe UI", system-ui, sans-serif;
+  }
+  .pm-wrap > h1 {
+    margin: 0 0 0.25rem;
+    font-size: 1.55rem;
+    font-weight: 650;
+    letter-spacing: -0.02em;
+    color: var(--pm-on-dark);
+  }
+  .pm-sub {
+    margin: 0 0 1rem;
+    font-size: 0.92rem;
+    color: var(--pm-on-dark-muted);
+  }
+  .pm-cta {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    text-align: center;
+    text-decoration: none;
+    border: none;
+    border-radius: 12px;
+    padding: 1rem 1.1rem;
+    font-size: 1.05rem;
+    font-weight: 700;
+    cursor: pointer;
+    background: var(--pm-accent);
+    color: #001018;
+    margin-bottom: 0.65rem;
+  }
+  .pm-cta:active { opacity: 0.9; }
+  .pm-cta-secondary {
+    background: transparent;
+    color: var(--pm-on-dark);
+    border: 2px solid var(--pm-accent-dark);
+    margin-bottom: 1.15rem;
+  }
+  .pm-section {
+    margin: 0 0 0.55rem;
+    font-size: 0.85rem;
+    font-weight: 650;
+    color: var(--pm-on-dark-muted);
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+  }
+  .pm-list { display: flex; flex-direction: column; gap: 0.55rem; }
+  .pm-card {
+    background: var(--pm-card);
+    border: 1px solid var(--pm-line);
+    border-radius: 12px;
+    padding: 0.9rem 1rem;
+    color: var(--pm-ink);
+    text-align: left;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .pm-card-top {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+    align-items: baseline;
+  }
+  .pm-name {
+    font-weight: 700;
+    font-size: 1.02rem;
+  }
+  .pm-meta {
+    margin-top: 0.35rem;
+    font-size: 0.88rem;
+    color: var(--pm-muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .pm-badge {
+    display: inline-block;
+    padding: 0.2rem 0.45rem;
+    border-radius: 6px;
+    font-size: 0.72rem;
+    font-weight: 650;
+    white-space: nowrap;
+    background: #e0f7fa;
+    color: #006064;
+  }
+  .pm-badge.warn {
+    background: #fff3cd;
+    color: #856404;
+  }
+  .pm-badge.ok {
+    background: #d1fae5;
+    color: #065f46;
+  }
+  .pm-empty {
+    text-align: center;
+    padding: 2rem 1rem;
+    color: var(--pm-muted);
+    border: 1px dashed var(--pm-line);
+    border-radius: 12px;
+    background: var(--pm-card);
+  }
+  .pm-err {
+    margin-bottom: 0.75rem;
+    padding: 0.65rem 0.75rem;
+    border-radius: 10px;
+    background: #fef2f2;
+    color: #b91c1c;
+    font-size: 0.88rem;
+  }
+  .pm-foot {
+    margin-top: 1.25rem;
+    font-size: 0.85rem;
+  }
+  .pm-foot a { color: var(--pm-on-dark-muted); }
+</style>
+
+<div class="pm-wrap" id="pm-app">
+  <h1>Personel</h1>
+  <p class="pm-sub" id="pm-today-label">Bugün</p>
+
+  <a class="pm-cta" href="/personel/#izin" id="pm-cta-izin">Yeni İzin</a>
+  <a class="pm-cta pm-cta-secondary" href="/personel/#personel" id="pm-cta-personel">Personeller</a>
+
+  <div class="pm-section">Bugünkü devam</div>
+  <div id="pm-err" class="pm-err" hidden></div>
+  <div class="pm-list" id="pm-list">
+    <div class="pm-empty">Yükleniyor…</div>
+  </div>
+
+  <p class="pm-foot">
+    <a href="/personel/">Masaüstü Personel</a>
+  </p>
+</div>
+
+<script>
+(function () {
+  function todayISO() {
+    var d = new Date();
+    var m = d.getMonth() + 1;
+    var day = d.getDate();
+    return d.getFullYear() + "-" + (m < 10 ? "0" : "") + m + "-" + (day < 10 ? "0" : "") + day;
+  }
+
+  function fmtHM(val) {
+    if (val == null || val === "") return "—";
+    var s = String(val);
+    var m = s.match(/(\d{1,2}):(\d{2})/);
+    if (m) {
+      var h = parseInt(m[1], 10);
+      return (h < 10 ? "0" : "") + h + ":" + m[2];
+    }
+    return s.slice(0, 5) || "—";
+  }
+
+  function escapeHtml(s) {
+    return String(s || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function badgeClass(durum) {
+    var d = String(durum || "");
+    if (/^Tam/i.test(d)) return "ok";
+    if (/Geç/i.test(d)) return "warn";
+    return "";
+  }
+
+  var label = document.getElementById("pm-today-label");
+  var day = todayISO();
+  try {
+    label.textContent = "Bugün · " + new Date(day + "T12:00:00").toLocaleDateString("tr-TR", {
+      day: "numeric", month: "short", year: "numeric"
+    });
+  } catch (e) {
+    label.textContent = "Bugün · " + day;
+  }
+
+  var listEl = document.getElementById("pm-list");
+  var errEl = document.getElementById("pm-err");
+
+  function showErr(msg) {
+    errEl.hidden = !msg;
+    errEl.textContent = msg || "";
+  }
+
+  function render(rows) {
+    rows = rows || [];
+    if (!rows.length) {
+      listEl.innerHTML = '<div class="pm-empty">Bugün için devam kaydı yok.</div>';
+      return;
+    }
+    listEl.innerHTML = rows.map(function (r) {
+      var ad = r.ad_soyad || "—";
+      var durum = r.durum || "—";
+      var giris = fmtHM(r.giris_saati);
+      var cikis = fmtHM(r.cikis_saati);
+      var bc = badgeClass(durum);
+      return (
+        '<div class="pm-card">' +
+          '<div class="pm-card-top">' +
+            '<span class="pm-name">' + escapeHtml(ad) + "</span>" +
+            '<span class="pm-badge' + (bc ? " " + bc : "") + '">' + escapeHtml(durum) + "</span>" +
+          "</div>" +
+          '<div class="pm-meta">Giriş ' + escapeHtml(giris) + " · Çıkış " + escapeHtml(cikis) + "</div>" +
+        "</div>"
+      );
+    }).join("");
+  }
+
+  function loadToday() {
+    showErr("");
+    listEl.innerHTML = '<div class="pm-empty">Yükleniyor…</div>';
+    var url = "/personel/api/devam/gunluk?tarih=" + encodeURIComponent(day);
+    fetch(url, { headers: { Accept: "application/json" }, credentials: "same-origin" })
+      .then(function (r) {
+        if (!r.ok) throw new Error("Liste yüklenemedi (" + r.status + ")");
+        return r.json();
+      })
+      .then(function (data) {
+        if (data && data.error) throw new Error(data.error);
+        if (data && data.ok === false) throw new Error(data.mesaj || "Liste yüklenemedi");
+        render(Array.isArray(data) ? data : []);
+      })
+      .catch(function (e) {
+        listEl.innerHTML = "";
+        showErr(e.message || "Yüklenemedi");
+      });
+  }
+
+  loadToday();
+})();
+</script>
+{% endblock %}

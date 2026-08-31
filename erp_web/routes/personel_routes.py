@@ -314,6 +314,13 @@ def index():
     return render_template("personel/index.html", is_admin=is_admin)
 
 
+@bp.route("/m/")
+@giris_gerekli
+def m_home():
+    """M1 — mobil-öncelikli giriş shell (PWA değil; masaüstü /personel/ dokunulmaz)."""
+    return render_template("personel/m_home.html")
+
+
 # ── Personel listesi ────────────────────────────────────────────────────────
 
 @bp.route("/api/list")
