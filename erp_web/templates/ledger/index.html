@@ -28,12 +28,10 @@
   }
   /* layout.html koyu body (#0a1929) üstünde düz metinler okunaklı olsun */
   .pc-wrap > h1,
-  #pc-detail-name,
   #pc-gdetail-name {
     color: var(--pc-on-dark);
   }
   .pc-wrap > .pc-sub,
-  #pc-detail-bal,
   #pc-gdetail-bal {
     color: var(--pc-on-dark-muted);
   }
@@ -47,9 +45,50 @@
     display: flex;
     align-items: center;
     gap: 0.45rem;
-    margin-bottom: 0.25rem;
+    margin-bottom: 0;
   }
   .pc-detail-head h1 { margin: 0; flex: 1; min-width: 0; }
+  .pc-detail-cards {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.55rem;
+    margin-bottom: 1rem;
+  }
+  @media (min-width: 360px) {
+    .pc-detail-cards { grid-template-columns: 1fr 1fr; }
+  }
+  .pc-detail-name-box {
+    background: var(--pc-card);
+    border: 1px solid var(--pc-line);
+    border-radius: 12px;
+    padding: 0.9rem 1rem;
+    color: var(--pc-ink);
+    min-width: 0;
+  }
+  .pc-detail-name-box #pc-detail-name {
+    color: var(--pc-ink);
+    font-size: 1.12rem;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+  }
+  .pc-detail-name-box .pc-edit-party {
+    color: var(--pc-muted);
+    border-color: var(--pc-line);
+  }
+  .pc-detail-name-box .pc-edit-party:hover {
+    color: var(--pc-ink);
+    background: #f1f5f9;
+  }
+  .pc-detail-bal-box {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-width: 0;
+  }
+  .pc-detail-bal-box .pc-sum-value {
+    font-size: 0.92rem;
+    line-height: 1.35;
+  }
   .pc-edit-party {
     flex: 0 0 auto;
     padding: 0.45rem 0.55rem;
@@ -426,13 +465,20 @@
 
   <div id="pc-detail-view" hidden>
     <button type="button" class="pc-btn pc-btn-ghost pc-back" id="pc-back">← Liste</button>
-    <div class="pc-detail-head">
-      <h1 id="pc-detail-name">—</h1>
-      <button type="button" class="pc-btn pc-btn-ghost pc-edit-party" id="pc-btn-edit-party" title="Cari düzenle" aria-label="Cari düzenle">
-        <i class="fa-solid fa-pen" aria-hidden="true"></i>
-      </button>
+    <div class="pc-detail-cards">
+      <div class="pc-detail-name-box">
+        <div class="pc-detail-head">
+          <h1 id="pc-detail-name">—</h1>
+          <button type="button" class="pc-btn pc-btn-ghost pc-edit-party" id="pc-btn-edit-party" title="Cari düzenle" aria-label="Cari düzenle">
+            <i class="fa-solid fa-pen" aria-hidden="true"></i>
+          </button>
+        </div>
+      </div>
+      <div class="pc-detail-bal-box pc-sum-box pc-sum-box-bakiye pc-sum-bal-zero" id="pc-detail-bal-box">
+        <div class="pc-sum-label">Bakiye</div>
+        <div class="pc-sum-value" id="pc-detail-bal">—</div>
+      </div>
     </div>
-    <p class="pc-sub" id="pc-detail-bal">—</p>
     <div class="pc-actions">
       <button type="button" class="pc-btn pc-btn-give" id="pc-btn-give">Verdim</button>
       <button type="button" class="pc-btn pc-btn-recv" id="pc-btn-recv">Aldım</button>
@@ -914,8 +960,7 @@
   function applyBalancesToUi(balances) {
     var bals = balances || [];
     var primary = primaryFromBalances(bals);
-    var el = document.getElementById("pc-detail-bal");
-    if (el) el.textContent = balLabel(primary);
+    applyDetailBalBox(primary);
     if (!state.partyId) return;
     for (var i = 0; i < state.parties.length; i++) {
       if (state.parties[i].id === state.partyId) {
@@ -1019,11 +1064,23 @@
     document.getElementById("pc-edit-panel").classList.add("open");
   }
 
+  function applyDetailBalBox(primary) {
+    var box = document.getElementById("pc-detail-bal-box");
+    var el = document.getElementById("pc-detail-bal");
+    if (!box || !el) return;
+    el.textContent = balLabel(primary);
+    box.className = "pc-detail-bal-box pc-sum-box pc-sum-box-bakiye";
+    var cls = balClass(primary);
+    if (cls === "pos") box.classList.add("pc-sum-bal-pos");
+    else if (cls === "neg") box.classList.add("pc-sum-bal-neg");
+    else box.classList.add("pc-sum-bal-zero");
+  }
+
   function applyPartyDetailUi(p) {
     state.partyFull = p;
     state.partyDetail = { name: p.name, phone: p.phone, country: p.country };
     document.getElementById("pc-detail-name").textContent = p.name;
-    document.getElementById("pc-detail-bal").textContent = balLabel(p.primary_balance);
+    applyDetailBalBox(p.primary_balance);
   }
 
   function openDetail(id) {
