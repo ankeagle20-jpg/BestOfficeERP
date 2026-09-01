@@ -613,7 +613,9 @@
   var state = {
     parties: [], groups: [], partyId: null, groupId: null, direction: null, tab: "parties",
     partyDetail: null, partyFull: null,
-    listFilter: { kind: null, dir: null }
+    listFilter: { kind: null, dir: null },
+    detailFilter: { kind: null, dir: null },
+    detailTxs: []
   };
 
   function fmtMoney(n, cur) {
@@ -754,25 +756,41 @@
     return state.tab === "parties" && listView && !listView.hidden && detailView && detailView.hidden;
   }
 
-  function listFilterChipLabel() {
-    var lf = state.listFilter;
-    if (lf.kind === "alacak") return "Alacak · bize borçlular";
-    if (lf.kind === "borc") return "Borç · biz borçluyuz";
+  function isDetailFilterContext() {
+    var detailView = document.getElementById("pc-detail-view");
+    return state.tab === "parties" && detailView && !detailView.hidden && !!state.partyId;
+  }
+
+  function currentSummaryFilter() {
+    if (isDetailFilterContext()) return state.detailFilter;
+    if (isListFilterContext()) return state.listFilter;
+    return { kind: null, dir: null };
+  }
+
+  function filterChipLabel(lf, detailCtx) {
+    if (detailCtx) {
+      if (lf.kind === "alacak") return "Alacak · Verdim hareketleri";
+      if (lf.kind === "borc") return "Borç · Aldım hareketleri";
+    } else {
+      if (lf.kind === "alacak") return "Alacak · bize borçlular";
+      if (lf.kind === "borc") return "Borç · biz borçluyuz";
+    }
     if (lf.kind === "bakiye" && lf.dir === "desc") return "Bakiye · yüksek → düşük";
     if (lf.kind === "bakiye" && lf.dir === "asc") return "Bakiye · düşük → yüksek";
     return "";
   }
 
-  function updateListFilterUi() {
-    var lf = state.listFilter;
+  function updateSummaryFilterUi() {
+    var lf = currentSummaryFilter();
     var active = !!(lf.kind && (lf.kind !== "bakiye" || lf.dir));
+    var detailCtx = isDetailFilterContext();
     var bar = document.getElementById("pc-list-filter-bar");
     var chip = document.getElementById("pc-list-filter-chip");
     var alacakBtn = document.getElementById("pc-sum-alacak");
     var borcBtn = document.getElementById("pc-sum-borc");
     var bakiyeBtn = document.getElementById("pc-sum-bakiye");
-    if (bar) bar.hidden = !(active && isListFilterContext());
-    if (chip) chip.textContent = listFilterChipLabel();
+    if (bar) bar.hidden = !(active && (isListFilterContext() || detailCtx));
+    if (chip) chip.textContent = filterChipLabel(lf, detailCtx);
     if (alacakBtn) {
       alacakBtn.classList.toggle("is-active", lf.kind === "alacak");
       alacakBtn.setAttribute("aria-pressed", lf.kind === "alacak" ? "true" : "false");
@@ -789,12 +807,76 @@
 
   function setListFilter(kind, dir) {
     state.listFilter = { kind: kind || null, dir: dir || null };
-    updateListFilterUi();
+    updateSummaryFilterUi();
     if (state.tab === "parties") renderList();
   }
 
   function clearListFilter() {
     setListFilter(null, null);
+  }
+
+  function setDetailFilter(kind, dir) {
+    state.detailFilter = { kind: kind || null, dir: dir || null };
+    updateSummaryFilterUi();
+    renderDetailTxList();
+  }
+
+  function clearDetailFilter() {
+    setDetailFilter(null, null);
+  }
+
+  function txAmount(t) {
+    return Number((t && t.amount) || 0);
+  }
+
+  function applyDetailFilterTxs(rows) {
+    var lf = state.detailFilter;
+    var out = (rows || []).slice();
+    if (lf.kind === "alacak") {
+      out = out.filter(function (t) { return t.direction === "give"; });
+    } else if (lf.kind === "borc") {
+      out = out.filter(function (t) { return t.direction === "receive"; });
+    } else if (lf.kind === "bakiye" && lf.dir) {
+      out.sort(function (a, b) {
+        var aa = txAmount(a);
+        var bb = txAmount(b);
+        return lf.dir === "desc" ? (bb - aa) : (aa - bb);
+      });
+    }
+    return out;
+  }
+
+  function renderDetailTxList() {
+    var box = document.getElementById("pc-tx-list");
+    if (!box || !isDetailFilterContext()) return;
+    var all = state.detailTxs || [];
+    var txs = applyDetailFilterTxs(all);
+    updateSummaryFilterUi();
+    if (!txs.length) {
+      if (all.length && state.detailFilter.kind) {
+        box.innerHTML = '<div class="pc-empty">Bu filtrede hareket yok.</div>';
+      } else {
+        box.innerHTML = '<div class="pc-empty">Henüz hareket yok.</div>';
+      }
+      return;
+    }
+    box.innerHTML = txs.map(txRowHtml).join("");
+    Array.prototype.forEach.call(box.querySelectorAll(".pc-tx"), function (row, i) {
+      row.querySelector(".pc-meta").textContent = txs[i].note || "";
+    });
+    bindVoidButtons(box);
+  }
+
+  function upsertDetailTx(t) {
+    if (!t) return;
+    var txs = (state.detailTxs || []).slice();
+    var idx = -1;
+    for (var i = 0; i < txs.length; i++) {
+      if (Number(txs[i].id) === Number(t.id)) { idx = i; break; }
+    }
+    if (idx >= 0) txs[idx] = t;
+    else txs.unshift(t);
+    state.detailTxs = txs;
   }
 
   function applyListFilterRows(rows) {
@@ -816,24 +898,44 @@
     return out;
   }
 
-  function onListFilterAlacakClick() {
-    if (!isListFilterContext()) return;
-    if (state.listFilter.kind === "alacak") clearListFilter();
-    else setListFilter("alacak", null);
+  function onSumAlacakClick() {
+    if (isDetailFilterContext()) {
+      if (state.detailFilter.kind === "alacak") clearDetailFilter();
+      else setDetailFilter("alacak", null);
+    } else if (isListFilterContext()) {
+      if (state.listFilter.kind === "alacak") clearListFilter();
+      else setListFilter("alacak", null);
+    }
   }
 
-  function onListFilterBorcClick() {
-    if (!isListFilterContext()) return;
-    if (state.listFilter.kind === "borc") clearListFilter();
-    else setListFilter("borc", null);
+  function onSumBorcClick() {
+    if (isDetailFilterContext()) {
+      if (state.detailFilter.kind === "borc") clearDetailFilter();
+      else setDetailFilter("borc", null);
+    } else if (isListFilterContext()) {
+      if (state.listFilter.kind === "borc") clearListFilter();
+      else setListFilter("borc", null);
+    }
   }
 
-  function onListFilterBakiyeClick() {
-    if (!isListFilterContext()) return;
-    var lf = state.listFilter;
-    if (lf.kind !== "bakiye") setListFilter("bakiye", "desc");
-    else if (lf.dir === "desc") setListFilter("bakiye", "asc");
-    else clearListFilter();
+  function onSumBakiyeClick() {
+    var lf;
+    if (isDetailFilterContext()) {
+      lf = state.detailFilter;
+      if (lf.kind !== "bakiye") setDetailFilter("bakiye", "desc");
+      else if (lf.dir === "desc") setDetailFilter("bakiye", "asc");
+      else clearDetailFilter();
+    } else if (isListFilterContext()) {
+      lf = state.listFilter;
+      if (lf.kind !== "bakiye") setListFilter("bakiye", "desc");
+      else if (lf.dir === "desc") setListFilter("bakiye", "asc");
+      else clearListFilter();
+    }
+  }
+
+  function onFilterClearClick() {
+    if (isDetailFilterContext()) clearDetailFilter();
+    else if (isListFilterContext()) clearListFilter();
   }
 
   function api(path, opts) {
@@ -1042,7 +1144,7 @@
       return !q || String(p.name || "").toLowerCase().indexOf(q) >= 0;
     });
     var rows = applyListFilterRows(searched);
-    updateListFilterUi();
+    updateSummaryFilterUi();
     if (!rows.length) {
       if (state.parties.length && (q || state.listFilter.kind)) {
         el.innerHTML = '<div class="pc-empty">Bu filtrede cari yok.</div>';
@@ -1199,20 +1301,9 @@
   }
 
   function applyTxToDetailList(t) {
-    var box = document.getElementById("pc-tx-list");
-    if (!box || !t) return;
-    var wrap = document.createElement("div");
-    wrap.innerHTML = txRowHtml(t);
-    var row = wrap.firstChild;
-    row.querySelector(".pc-meta").textContent = t.note || "";
-    var existing = box.querySelector('[data-tx-id="' + t.id + '"]');
-    if (existing) {
-      existing.replaceWith(row);
-    } else {
-      if (box.querySelector(".pc-empty")) box.innerHTML = "";
-      box.insertBefore(row, box.firstChild);
-    }
-    bindVoidButtons(box);
+    if (!t) return;
+    upsertDetailTx(t);
+    renderDetailTxList();
   }
 
   function openEditPartyPanel() {
@@ -1250,7 +1341,9 @@
   }
 
   function openDetail(id) {
+    var newParty = state.partyId !== id;
     state.partyId = id;
+    if (newParty) state.detailFilter = { kind: null, dir: null };
     document.getElementById("pc-home-tabs").hidden = true;
     document.getElementById("pc-list-view").hidden = true;
     document.getElementById("pc-group-detail-view").hidden = true;
@@ -1261,17 +1354,8 @@
     return api("/ledger/api/parties/" + id).then(function (j) {
       var p = j.party;
       applyPartyDetailUi(p);
-      var box = document.getElementById("pc-tx-list");
-      var txs = j.transactions || [];
-      if (!txs.length) {
-        box.innerHTML = '<div class="pc-empty">Henüz hareket yok.</div>';
-        return;
-      }
-      box.innerHTML = txs.map(txRowHtml).join("");
-      Array.prototype.forEach.call(box.querySelectorAll(".pc-tx"), function (row, i) {
-        row.querySelector(".pc-meta").textContent = txs[i].note || "";
-      });
-      bindVoidButtons(box);
+      state.detailTxs = j.transactions || [];
+      renderDetailTxList();
     });
   }
 
@@ -1394,10 +1478,10 @@
 
   document.getElementById("pc-fx-cur").addEventListener("change", loadSummary);
 
-  document.getElementById("pc-sum-alacak").addEventListener("click", onListFilterAlacakClick);
-  document.getElementById("pc-sum-borc").addEventListener("click", onListFilterBorcClick);
-  document.getElementById("pc-sum-bakiye").addEventListener("click", onListFilterBakiyeClick);
-  document.getElementById("pc-list-filter-clear").addEventListener("click", clearListFilter);
+  document.getElementById("pc-sum-alacak").addEventListener("click", onSumAlacakClick);
+  document.getElementById("pc-sum-borc").addEventListener("click", onSumBorcClick);
+  document.getElementById("pc-sum-bakiye").addEventListener("click", onSumBakiyeClick);
+  document.getElementById("pc-list-filter-clear").addEventListener("click", onFilterClearClick);
 
   document.getElementById("pc-q").addEventListener("input", renderList);
   document.getElementById("pc-gq").addEventListener("input", renderGroups);
@@ -1407,6 +1491,7 @@
     document.getElementById("pc-list-view").hidden = false;
     document.getElementById("pc-home-tabs").hidden = false;
     setTab("parties");
+    updateSummaryFilterUi();
   });
   document.getElementById("pc-btn-edit-party").addEventListener("click", openEditPartyPanel);
   document.getElementById("pc-edit-cancel").addEventListener("click", function () {
@@ -1434,12 +1519,8 @@
       var rows = box.querySelectorAll(".pc-tx");
       if (rows.length) {
         return api("/ledger/api/parties/" + state.partyId).then(function (detail) {
-          var txs = detail.transactions || [];
-          box.innerHTML = txs.map(txRowHtml).join("");
-          Array.prototype.forEach.call(box.querySelectorAll(".pc-tx"), function (row, i) {
-            row.querySelector(".pc-meta").textContent = txs[i].note || "";
-          });
-          bindVoidButtons(box);
+          state.detailTxs = detail.transactions || [];
+          renderDetailTxList();
         });
       }
     }).then(function () {
