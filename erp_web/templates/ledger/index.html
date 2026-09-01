@@ -716,11 +716,36 @@
     partyDetail: null, partyFull: null,
     listFilter: { kind: null, dir: null },
     assetFilter: null,
+    summaryByCurrency: [],
+    summaryConverted: null,
+    summaryFxWarnings: [],
     detailFilter: { kind: null, dir: null },
     detailTxs: [],
     selectMode: false,
     selectedPartyIds: {}
   };
+
+  var ASSET_LABELS = {
+    XAU: "Altın",
+    XAG: "Gümüş",
+    TRY: "TL",
+    USD: "Dolar",
+    EUR: "Euro"
+  };
+
+  function assetLabel(code) {
+    var c = String(code || "").trim().toUpperCase();
+    if (!c) return "";
+    return ASSET_LABELS[c] || c;
+  }
+
+  function assetOptionLabel(code) {
+    var c = String(code || "").trim().toUpperCase();
+    if (!c) return "";
+    var lab = ASSET_LABELS[c];
+    if (lab && lab !== c) return c + " (" + lab + ")";
+    return c;
+  }
 
   function fmtMoney(n, cur) {
     var v = Number(n || 0);
@@ -879,7 +904,7 @@
     sorted.forEach(function (c) {
       var o = document.createElement("option");
       o.value = c;
-      o.textContent = c;
+      o.textContent = assetOptionLabel(c);
       sel.appendChild(o);
     });
     if (prev && seen[prev]) {
@@ -1209,53 +1234,81 @@
     return row;
   }
 
+  function summaryRowForAsset(byCurrency, assetCode) {
+    var rows = byCurrency || [];
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i].currency === assetCode) return rows[i];
+    }
+    return null;
+  }
+
+  function applySummaryBoxes() {
+    var byCurrency = state.summaryByCurrency || [];
+    var converted = state.summaryConverted;
+    var fxWarnings = state.summaryFxWarnings || [];
+    var warn = document.getElementById("pc-summary-warn");
+    var alacakEl = document.getElementById("pc-sum-alacak-val");
+    var borcEl = document.getElementById("pc-sum-borc-val");
+    var bakiyeEl = document.getElementById("pc-sum-bakiye-val");
+    var bakiyeBox = document.getElementById("pc-sum-bakiye");
+    var row = null;
+    var useConverted = false;
+
+    if (state.assetFilter) {
+      row = summaryRowForAsset(byCurrency, state.assetFilter);
+    } else {
+      row = pickSummarySource({ by_currency: byCurrency, converted: converted });
+      useConverted = true;
+    }
+
+    if (!row) {
+      alacakEl.textContent = "—";
+      borcEl.textContent = "—";
+      bakiyeEl.textContent = "—";
+      bakiyeBox.className = "pc-sum-box pc-sum-box-bakiye pc-sum-bal-zero pc-sum-box-btn";
+    } else {
+      alacakEl.textContent = fmtMoney(row.given, row.currency);
+      borcEl.textContent = fmtMoney(row.received, row.currency);
+      var bal = row.balance;
+      var balCur = row.currency;
+      if (useConverted && converted && converted.complete && converted.balance != null) {
+        bal = converted.balance;
+        balCur = converted.currency;
+      }
+      var signed = fmtBalanceBox(bal, balCur);
+      bakiyeEl.textContent = signed.text;
+      bakiyeBox.className = "pc-sum-box pc-sum-box-bakiye pc-sum-box-btn " + signed.cls;
+    }
+
+    if (state.assetFilter) {
+      warn.hidden = true;
+      warn.textContent = "";
+    } else if (fxWarnings.length) {
+      warn.hidden = false;
+      warn.textContent = "Kur uyarısı: " + fxWarnings.join(" · ");
+    } else if (converted && converted.complete === false) {
+      warn.hidden = false;
+      warn.textContent = "Çeviri tamamlanamadı — tek toplam gösterilmedi (yanlış kur yok).";
+    } else {
+      warn.hidden = true;
+      warn.textContent = "";
+    }
+  }
+
   function loadSummary() {
     var cur = document.getElementById("pc-fx-cur").value || "";
     var q = cur ? ("?display_currency=" + encodeURIComponent(cur)) : "";
     return api("/ledger/api/summary" + q).then(function (j) {
-      var warn = document.getElementById("pc-summary-warn");
       var errEl = document.getElementById("pc-summary-err");
       errEl.hidden = true;
       errEl.textContent = "";
 
-      populateAssetFilterDropdown(j.by_currency || []);
+      state.summaryByCurrency = j.by_currency || [];
+      state.summaryConverted = j.converted || null;
+      state.summaryFxWarnings = j.fx_warnings || [];
 
-      var row = pickSummarySource(j);
-      var alacakEl = document.getElementById("pc-sum-alacak-val");
-      var borcEl = document.getElementById("pc-sum-borc-val");
-      var bakiyeEl = document.getElementById("pc-sum-bakiye-val");
-      var bakiyeBox = document.getElementById("pc-sum-bakiye");
-
-      if (!row) {
-        alacakEl.textContent = "—";
-        borcEl.textContent = "—";
-        bakiyeEl.textContent = "—";
-        bakiyeBox.className = "pc-sum-box pc-sum-box-bakiye pc-sum-bal-zero pc-sum-box-btn";
-      } else {
-        // Alacak = given, Borç = received (API alanları); satırın kendi para birimi
-        alacakEl.textContent = fmtMoney(row.given, row.currency);
-        borcEl.textContent = fmtMoney(row.received, row.currency);
-        var bal = row.balance;
-        var balCur = row.currency;
-        if (j.converted && j.converted.complete && j.converted.balance != null) {
-          bal = j.converted.balance;
-          balCur = j.converted.currency;
-        }
-        var signed = fmtBalanceBox(bal, balCur);
-        bakiyeEl.textContent = signed.text;
-        bakiyeBox.className = "pc-sum-box pc-sum-box-bakiye pc-sum-box-btn " + signed.cls;
-      }
-
-      if (j.fx_warnings && j.fx_warnings.length) {
-        warn.hidden = false;
-        warn.textContent = "Kur uyarısı: " + j.fx_warnings.join(" · ");
-      } else if (j.converted && j.converted.complete === false) {
-        warn.hidden = false;
-        warn.textContent = "Çeviri tamamlanamadı — tek toplam gösterilmedi (yanlış kur yok).";
-      } else {
-        warn.hidden = true;
-        warn.textContent = "";
-      }
+      populateAssetFilterDropdown(state.summaryByCurrency);
+      applySummaryBoxes();
     }).catch(function (e) {
       var errEl = document.getElementById("pc-summary-err");
       errEl.hidden = false;
@@ -1792,6 +1845,7 @@
   document.getElementById("pc-asset-filter").addEventListener("change", function () {
     var v = (document.getElementById("pc-asset-filter").value || "").trim().toUpperCase();
     state.assetFilter = v || null;
+    applySummaryBoxes();
     renderList();
   });
 
