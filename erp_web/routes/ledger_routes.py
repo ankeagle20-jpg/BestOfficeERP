@@ -1937,3 +1937,66 @@ def api_assets_create():
     if not row:
         return _json_err("Varlık kaydedilemedi.", 500)
     return jsonify({"ok": True, "asset": _registered_asset_dict(row)}), 201
+
+
+@bp.route("/api/assets/<int:asset_id>", methods=["PUT"])
+@giris_gerekli
+@module_required("ledger")
+def api_assets_update(asset_id: int):
+    """Kayıtlı varlık etiketini güncelle (kod değişmez)."""
+    _ensure_ledger_tables_once()
+    data = request.get_json(silent=True) or {}
+    if "label" not in data:
+        return _json_err("label gerekli.")
+    label_raw = data.get("label")
+    label = None
+    if label_raw is not None:
+        label = str(label_raw).strip() or None
+    if label and len(label) > 64:
+        return _json_err("label en fazla 64 karakter olabilir.")
+
+    existing = fetch_one(
+        "SELECT id FROM ledger_registered_assets WHERE id = %s",
+        (int(asset_id),),
+    )
+    if not existing:
+        return _json_err("Varlık bulunamadı.", 404)
+
+    row = execute_returning(
+        """
+        UPDATE ledger_registered_assets
+        SET label = %s
+        WHERE id = %s
+        RETURNING id, code, label, created_at
+        """,
+        (label, int(asset_id)),
+    )
+    if not row:
+        return _json_err("Varlık güncellenemedi.", 500)
+    return jsonify({"ok": True, "asset": _registered_asset_dict(row)})
+
+
+@bp.route("/api/assets/<int:asset_id>", methods=["DELETE"])
+@giris_gerekli
+@module_required("ledger")
+def api_assets_delete(asset_id: int):
+    """Kayıtlı varlığı listeden kaldır — mevcut hareketlere dokunmaz."""
+    _ensure_ledger_tables_once()
+    row = fetch_one(
+        """
+        SELECT id, code, label, created_at
+        FROM ledger_registered_assets
+        WHERE id = %s
+        """,
+        (int(asset_id),),
+    )
+    if not row:
+        return _json_err("Varlık bulunamadı.", 404)
+
+    execute("DELETE FROM ledger_registered_assets WHERE id = %s", (int(asset_id),))
+    return jsonify(
+        {
+            "ok": True,
+            "deleted": _registered_asset_dict(row),
+        }
+    )
