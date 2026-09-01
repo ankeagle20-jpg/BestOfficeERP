@@ -355,6 +355,24 @@ def _balances_for_party(party_id: int) -> list[dict]:
     return _balances_by_party_ids([int(party_id)]).get(int(party_id), [])
 
 
+def _last_occurred_by_party_ids(party_ids: list[int]) -> dict[int, datetime | None]:
+    """Taraf başına en son void olmayan hareket tarihi (MAX(occurred_at))."""
+    ids = sorted({int(p) for p in party_ids if p is not None})
+    if not ids:
+        return {}
+    rows = fetch_all(
+        """
+        SELECT party_id, MAX(occurred_at) AS last_occurred_at
+        FROM ledger_transactions
+        WHERE is_void = FALSE
+          AND party_id IN %s
+        GROUP BY party_id
+        """,
+        (tuple(ids),),
+    ) or []
+    return {int(r["party_id"]): r.get("last_occurred_at") for r in rows}
+
+
 def _party_dict(
     row: dict,
     *,
@@ -498,14 +516,18 @@ def api_parties_list():
     rows = fetch_all(sql, tuple(params)) or []
     ids = [int(r["id"]) for r in rows]
     bals_by = _balances_by_party_ids(ids)
-    parties = [
-        _party_dict(
+    last_by = _last_occurred_by_party_ids(ids)
+    parties = []
+    for r in rows:
+        pid = int(r["id"])
+        d = _party_dict(
             r,
             with_balances=True,
-            balances=bals_by.get(int(r["id"]), []),
+            balances=bals_by.get(pid, []),
         )
-        for r in rows
-    ]
+        last_dt = last_by.get(pid)
+        d["last_occurred_at"] = last_dt.isoformat() if last_dt else None
+        parties.append(d)
     return jsonify({"ok": True, "parties": parties, "count": len(parties)})
 
 

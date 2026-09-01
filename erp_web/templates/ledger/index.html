@@ -726,6 +726,24 @@
     return Number(p.primary_balance.balance || 0);
   }
 
+  function partyLastOccurredMs(p) {
+    var s = p && p.last_occurred_at;
+    if (!s) return null;
+    var t = Date.parse(s);
+    return isNaN(t) ? null : t;
+  }
+
+  function sortByLastOccurredDesc(rows) {
+    return rows.sort(function (a, b) {
+      var ta = partyLastOccurredMs(a);
+      var tb = partyLastOccurredMs(b);
+      if (ta == null && tb == null) return 0;
+      if (ta == null) return 1;
+      if (tb == null) return -1;
+      return tb - ta;
+    });
+  }
+
   function isListFilterContext() {
     var listView = document.getElementById("pc-list-view");
     var detailView = document.getElementById("pc-detail-view");
@@ -780,8 +798,10 @@
     var out = rows.slice();
     if (lf.kind === "alacak") {
       out = out.filter(function (p) { return partyPrimaryBalance(p) > 0.005; });
+      sortByLastOccurredDesc(out);
     } else if (lf.kind === "borc") {
       out = out.filter(function (p) { return partyPrimaryBalance(p) < -0.005; });
+      sortByLastOccurredDesc(out);
     } else if (lf.kind === "bakiye" && lf.dir) {
       out.sort(function (a, b) {
         var ba = partyPrimaryBalance(a);
