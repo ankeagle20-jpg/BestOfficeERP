@@ -128,10 +128,26 @@
     font-size: 1.05rem; line-height: 1; padding: 0.35rem 0.5rem; min-width: 2.25rem;
   }
   .pc-wa {
-    font-size: 1.05rem; line-height: 1; padding: 0.35rem 0.5rem; min-width: 2.25rem;
-    color: #128c7e; text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1rem;
+    line-height: 1;
+    padding: 0.4rem 0.5rem;
+    min-width: 2.25rem;
+    min-height: 2.25rem;
+    background: #25d366;
+    color: #fff;
+    border: none;
+    border-radius: 0.45rem;
+    text-decoration: none;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
   }
-  .pc-wa:hover { background: rgba(18, 140, 126, 0.12); }
+  .pc-wa:hover {
+    background: #1da851;
+    color: #fff;
+  }
+  .pc-wa .fa-whatsapp { font-size: 1.15rem; }
   .pc-lightbox {
     position: fixed; inset: 0; z-index: 80;
     background: rgba(15, 23, 42, 0.82);
@@ -898,8 +914,9 @@
       : "";
     var waUrl = whatsAppUrl(t);
     var waBtn = waUrl
-      ? ('<a class="pc-btn pc-btn-ghost pc-wa" href="' + waUrl +
-        '" target="_blank" rel="noopener noreferrer" title="WhatsApp ile gönder" aria-label="WhatsApp ile gönder">💬</a>')
+      ? ('<a class="pc-btn pc-wa" href="' + waUrl +
+        '" target="payafin_whatsapp" rel="noopener noreferrer" title="WhatsApp ile gönder" aria-label="WhatsApp ile gönder">' +
+        '<i class="fa-brands fa-whatsapp" aria-hidden="true"></i></a>')
       : "";
     var dateS = fmtTxDate(t.occurred_at);
     var dateHtml = dateS ? ('<span class="pc-tx-date">' + dateS + "</span>") : "";
