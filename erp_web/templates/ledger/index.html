@@ -326,6 +326,18 @@
     align-items: center;
     gap: 0.5rem 0.75rem;
   }
+  .pc-asset-filter-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    margin-left: 0.35rem;
+  }
+  .pc-btn-asset-add {
+    min-width: 1.85rem;
+    padding: 0.2rem 0.45rem;
+    font-size: 1rem;
+    line-height: 1;
+  }
   .pc-summary-boxes {
     display: grid;
     grid-template-columns: 1fr;
@@ -481,9 +493,12 @@
       <strong>Özet</strong>
       <div class="pc-summary-filters">
         <label class="pc-meta" style="margin:0;">Varlık
-          <select id="pc-asset-filter" class="pc-fx-select" aria-label="Varlık filtresi">
-            <option value="">Tümü</option>
-          </select>
+          <span class="pc-asset-filter-row">
+            <select id="pc-asset-filter" class="pc-fx-select" aria-label="Varlık filtresi">
+              <option value="">Tümü</option>
+            </select>
+            <button type="button" class="pc-btn pc-btn-ghost pc-btn-asset-add" id="pc-btn-new-asset" title="Yeni varlık kaydet" aria-label="Yeni varlık">+</button>
+          </span>
         </label>
         <label class="pc-meta" style="margin:0;">Gösterim
           <select id="pc-fx-cur" class="pc-fx-select">
@@ -707,6 +722,25 @@
       </div>
     </div>
   </div>
+
+  <div id="pc-asset-modal" class="pc-modal" hidden>
+    <div class="pc-modal-card">
+      <h2>Yeni varlık</h2>
+      <div class="pc-field" style="margin-bottom:0.5rem;">
+        <label for="pc-asset-code">Kod (3 harf)</label>
+        <input id="pc-asset-code" maxlength="3" autocomplete="off" style="text-transform:uppercase" placeholder="XPT">
+      </div>
+      <div class="pc-field" style="margin-bottom:0.5rem;">
+        <label for="pc-asset-label">Etiket (isteğe bağlı)</label>
+        <input id="pc-asset-label" maxlength="64" autocomplete="off" placeholder="Platin">
+      </div>
+      <div id="pc-asset-err" class="pc-err" hidden></div>
+      <div class="pc-modal-actions">
+        <button type="button" class="pc-btn pc-btn-primary" id="pc-asset-save">Kaydet</button>
+        <button type="button" class="pc-btn pc-btn-ghost" id="pc-asset-cancel">Vazgeç</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -719,6 +753,7 @@
     summaryByCurrency: [],
     summaryConverted: null,
     summaryFxWarnings: [],
+    registeredAssets: [],
     detailFilter: { kind: null, dir: null },
     detailTxs: [],
     selectMode: false,
@@ -736,13 +771,24 @@
   function assetLabel(code) {
     var c = String(code || "").trim().toUpperCase();
     if (!c) return "";
+    var regLab = registeredAssetLabel(c);
+    if (regLab) return regLab;
     return ASSET_LABELS[c] || c;
+  }
+
+  function registeredAssetLabel(code) {
+    var c = String(code || "").trim().toUpperCase();
+    var assets = state.registeredAssets || [];
+    for (var i = 0; i < assets.length; i++) {
+      if (assets[i].code === c && assets[i].label) return String(assets[i].label);
+    }
+    return null;
   }
 
   function assetOptionLabel(code) {
     var c = String(code || "").trim().toUpperCase();
     if (!c) return "";
-    var lab = ASSET_LABELS[c];
+    var lab = registeredAssetLabel(c) || ASSET_LABELS[c];
     if (lab && lab !== c) return c + " (" + lab + ")";
     return c;
   }
@@ -889,6 +935,12 @@
     var prev = state.assetFilter || sel.value || "";
     var seen = {};
     var sorted = [];
+    (state.registeredAssets || []).forEach(function (a) {
+      var c = String((a && a.code) || "").trim().toUpperCase();
+      if (!c || seen[c]) return;
+      seen[c] = true;
+      sorted.push(c);
+    });
     (byCurrency || []).forEach(function (r) {
       var c = String((r && r.currency) || "").trim().toUpperCase();
       if (!c || seen[c]) return;
@@ -914,6 +966,60 @@
       sel.value = "";
       state.assetFilter = null;
     }
+  }
+
+  function loadRegisteredAssets() {
+    return api("/ledger/api/assets").then(function (j) {
+      state.registeredAssets = j.assets || [];
+      populateAssetFilterDropdown(state.summaryByCurrency || []);
+      return j;
+    });
+  }
+
+  function openAssetModal() {
+    var modal = document.getElementById("pc-asset-modal");
+    var codeInp = document.getElementById("pc-asset-code");
+    var labelInp = document.getElementById("pc-asset-label");
+    var err = document.getElementById("pc-asset-err");
+    if (err) { err.hidden = true; err.textContent = ""; }
+    if (codeInp) { codeInp.value = ""; codeInp.focus(); }
+    if (labelInp) labelInp.value = "";
+    if (modal) modal.hidden = false;
+  }
+
+  function closeAssetModal() {
+    var modal = document.getElementById("pc-asset-modal");
+    if (modal) modal.hidden = true;
+  }
+
+  function saveRegisteredAsset() {
+    var err = document.getElementById("pc-asset-err");
+    var code = (document.getElementById("pc-asset-code").value || "").trim().toUpperCase();
+    var label = (document.getElementById("pc-asset-label").value || "").trim();
+    if (err) { err.hidden = true; err.textContent = ""; }
+    if (!/^[A-Z]{3}$/.test(code)) {
+      if (err) { err.textContent = "Kod tam 3 harf olmalı (örn. XPT)."; err.hidden = false; }
+      return Promise.reject(new Error("Kod tam 3 harf olmalı."));
+    }
+    return api("/ledger/api/assets", {
+      method: "POST",
+      body: { code: code, label: label || null }
+    }).then(function (j) {
+      closeAssetModal();
+      return loadRegisteredAssets().then(function () {
+        var sel = document.getElementById("pc-asset-filter");
+        if (sel && j.asset && j.asset.code) {
+          sel.value = j.asset.code;
+          state.assetFilter = j.asset.code;
+          applySummaryBoxes();
+          renderList();
+        }
+        return j;
+      });
+    }).catch(function (e) {
+      if (err) { err.textContent = e.message || "Varlık kaydedilemedi."; err.hidden = false; }
+      throw e;
+    });
   }
 
   function partyLastOccurredMs(p) {
@@ -1841,6 +1947,21 @@
     }
   });
 
+  document.getElementById("pc-btn-new-asset").addEventListener("click", openAssetModal);
+  document.getElementById("pc-asset-cancel").addEventListener("click", closeAssetModal);
+  document.getElementById("pc-asset-save").addEventListener("click", function () {
+    saveRegisteredAsset().catch(function () {});
+  });
+  document.getElementById("pc-asset-modal").addEventListener("click", function (ev) {
+    if (ev.target === document.getElementById("pc-asset-modal")) closeAssetModal();
+  });
+  document.getElementById("pc-asset-code").addEventListener("keydown", function (ev) {
+    if (ev.key === "Enter") {
+      ev.preventDefault();
+      saveRegisteredAsset().catch(function () {});
+    }
+  });
+
   document.getElementById("pc-fx-cur").addEventListener("change", loadSummary);
   document.getElementById("pc-asset-filter").addEventListener("change", function () {
     var v = (document.getElementById("pc-asset-filter").value || "").trim().toUpperCase();
@@ -2055,8 +2176,9 @@
     window.open(url, "_blank");
   });
 
-  loadSummary();
-  loadList().then(loadSummary).catch(function (e) {
+  loadRegisteredAssets().then(function () {
+    return loadList();
+  }).then(loadSummary).catch(function (e) {
     document.getElementById("pc-list").innerHTML =
       '<div class="pc-empty">' + (e.message || "Yüklenemedi") + "</div>";
   });

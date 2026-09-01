@@ -3975,6 +3975,41 @@ def ensure_ledger_attachment_tables():
             execute(stmt)
         except Exception as e:
             print(f"ledger attachment index: {e}")
+    ensure_ledger_registered_asset_tables()
+
+
+def ensure_ledger_registered_asset_tables():
+    """Payafin Cari — kayıtlı varlık kodları (işlem olmadan dropdown için)."""
+    execute(
+        """
+        CREATE TABLE IF NOT EXISTS ledger_registered_assets (
+            id              BIGSERIAL PRIMARY KEY,
+            code            TEXT NOT NULL,
+            label           TEXT,
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT ledger_registered_assets_code_uq
+                UNIQUE (code),
+            CONSTRAINT ledger_registered_assets_code_chk
+                CHECK (code ~ '^[A-Z]{3}$'),
+            CONSTRAINT ledger_registered_assets_label_chk
+                CHECK (
+                    label IS NULL
+                    OR (
+                        length(trim(label)) > 0
+                        AND length(label) <= 64
+                    )
+                )
+        )
+        """
+    )
+    for stmt in (
+        "CREATE INDEX IF NOT EXISTS idx_ledger_registered_assets_code "
+        "ON ledger_registered_assets (code)",
+    ):
+        try:
+            execute(stmt)
+        except Exception as e:
+            print(f"ledger registered asset index: {e}")
 
 
 def clear_all_customers():

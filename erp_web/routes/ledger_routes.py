@@ -401,6 +401,15 @@ def _party_dict(
     return d
 
 
+def _registered_asset_dict(row: dict) -> dict:
+    return {
+        "id": int(row["id"]),
+        "code": str(row["code"]),
+        "label": row.get("label"),
+        "created_at": row["created_at"].isoformat() if row.get("created_at") else None,
+    }
+
+
 def _tx_dict(
     row: dict,
     *,
@@ -1874,3 +1883,57 @@ def api_summary():
             "fx_warnings": fx_warnings,
         }
     )
+
+
+@bp.route("/api/assets", methods=["GET"])
+@giris_gerekli
+@module_required("ledger")
+def api_assets_list():
+    """Kayıtlı varlık kodları — işlem olmadan dropdown için."""
+    _ensure_ledger_tables_once()
+    rows = fetch_all(
+        """
+        SELECT id, code, label, created_at
+        FROM ledger_registered_assets
+        ORDER BY code
+        """
+    ) or []
+    assets = [_registered_asset_dict(r) for r in rows]
+    return jsonify({"ok": True, "assets": assets, "count": len(assets)})
+
+
+@bp.route("/api/assets", methods=["POST"])
+@giris_gerekli
+@module_required("ledger")
+def api_assets_create():
+    """Yeni varlık kodu (+ isteğe bağlı etiket) kaydet."""
+    _ensure_ledger_tables_once()
+    data = request.get_json(silent=True) or {}
+    code = str(data.get("code") or "").strip().upper()
+    if not _CURRENCY_RE.fullmatch(code):
+        return _json_err("code 3 harfli ISO kod olmalı (örn. XPT).")
+    label_raw = data.get("label")
+    label = None
+    if label_raw is not None:
+        label = str(label_raw).strip() or None
+    if label and len(label) > 64:
+        return _json_err("label en fazla 64 karakter olabilir.")
+
+    existing = fetch_one(
+        "SELECT id FROM ledger_registered_assets WHERE code = %s",
+        (code,),
+    )
+    if existing:
+        return _json_err(f"{code} kodu zaten kayıtlı.", 409)
+
+    row = execute_returning(
+        """
+        INSERT INTO ledger_registered_assets (code, label)
+        VALUES (%s, %s)
+        RETURNING id, code, label, created_at
+        """,
+        (code, label),
+    )
+    if not row:
+        return _json_err("Varlık kaydedilemedi.", 500)
+    return jsonify({"ok": True, "asset": _registered_asset_dict(row)}), 201

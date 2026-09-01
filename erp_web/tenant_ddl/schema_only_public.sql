@@ -1746,6 +1746,40 @@ ALTER SEQUENCE public.ledger_transaction_attachments_id_seq OWNED BY public.ledg
 
 
 --
+-- Name: ledger_registered_assets; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.ledger_registered_assets (
+    id bigint NOT NULL,
+    code text NOT NULL,
+    label text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ledger_registered_assets_code_chk CHECK ((code ~ '^[A-Z]{3}$'::text)),
+    CONSTRAINT ledger_registered_assets_code_uq UNIQUE (code),
+    CONSTRAINT ledger_registered_assets_label_chk CHECK (((label IS NULL) OR ((length(TRIM(BOTH FROM label)) > 0) AND (length(label) <= 64))))
+);
+
+
+--
+-- Name: ledger_registered_assets_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.ledger_registered_assets_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: ledger_registered_assets_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.ledger_registered_assets_id_seq OWNED BY public.ledger_registered_assets.id;
+
+
+--
 -- Name: masraflar; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -3060,6 +3094,13 @@ ALTER TABLE ONLY public.ledger_transaction_attachments ALTER COLUMN id SET DEFAU
 
 
 --
+-- Name: ledger_registered_assets id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ledger_registered_assets ALTER COLUMN id SET DEFAULT nextval('public.ledger_registered_assets_id_seq'::regclass);
+
+
+--
 -- Name: masraflar id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -3635,6 +3676,14 @@ ALTER TABLE ONLY public.ledger_reminders
 
 ALTER TABLE ONLY public.ledger_transaction_attachments
     ADD CONSTRAINT ledger_transaction_attachments_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: ledger_registered_assets ledger_registered_assets_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ledger_registered_assets
+    ADD CONSTRAINT ledger_registered_assets_pkey PRIMARY KEY (id);
 
 
 --
@@ -4215,6 +4264,13 @@ CREATE INDEX idx_ledger_tx_attach_created_at ON public.ledger_transaction_attach
 --
 
 CREATE UNIQUE INDEX uq_ledger_tx_attach_one_active ON public.ledger_transaction_attachments USING btree (transaction_id) WHERE (is_deleted = false);
+
+
+--
+-- Name: idx_ledger_registered_assets_code; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_ledger_registered_assets_code ON public.ledger_registered_assets USING btree (code);
 
 
 --
