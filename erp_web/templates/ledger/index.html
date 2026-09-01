@@ -17,6 +17,8 @@
     --pc-accent: #0d7a5f;
     --pc-give: #b45309;
     --pc-recv: #0d7a5f;
+    --pc-bal-pos: #166534;
+    --pc-bal-neg: #991b1b;
     --pc-card: #ffffff;
     --pc-on-dark: #e8eef4;
     --pc-on-dark-muted: #a8b8c8;
@@ -135,8 +137,8 @@
   .pc-item-top { display: flex; justify-content: space-between; gap: 0.75rem; align-items: baseline; }
   .pc-name { font-weight: 600; font-size: 1.02rem; }
   .pc-bal { font-variant-numeric: tabular-nums; font-weight: 650; }
-  .pc-bal.pos { color: var(--pc-give); }
-  .pc-bal.neg { color: var(--pc-recv); }
+  .pc-bal.pos { color: var(--pc-bal-pos); }
+  .pc-bal.neg { color: var(--pc-bal-neg); }
   .pc-bal.zero { color: var(--pc-muted); }
   .pc-meta { margin-top: 0.25rem; font-size: 0.8rem; color: var(--pc-muted); }
   .pc-empty {
@@ -176,6 +178,8 @@
   .pc-tx.voided { opacity: 0.55; text-decoration: line-through; }
   .pc-tx-row { display: flex; justify-content: space-between; gap: 0.5rem; align-items: center; }
   .pc-tx-date { color: var(--pc-muted); font-size: 0.82rem; font-weight: 500; white-space: nowrap; margin-right: 0.45rem; }
+  .pc-tx-dir-give { color: var(--pc-bal-pos); }
+  .pc-tx-dir-recv { color: var(--pc-bal-neg); }
   .pc-tx .pc-meta { color: var(--pc-muted); }
   .pc-tx-actions { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; }
   .pc-attach-view {
@@ -1146,6 +1150,7 @@
 
   function txRowHtml(t) {
     var dir = t.direction === "give" ? "Verdim" : "Aldım";
+    var dirCls = t.direction === "give" ? "pc-tx-dir-give" : "pc-tx-dir-recv";
     var voided = t.is_void ? " voided" : "";
     var voidBtn = t.is_void
       ? ""
@@ -1165,7 +1170,7 @@
     var dateS = fmtTxDate(t.occurred_at);
     var dateHtml = dateS ? ('<span class="pc-tx-date">' + dateS + "</span>") : "";
     return '<div class="pc-tx' + voided + '" data-tx-id="' + t.id + '"><div class="pc-tx-row"><div class="pc-tx-main">' +
-      dateHtml + "<strong>" + dir + " " + fmtMoney(t.amount, t.currency) + "</strong></div>" +
+      dateHtml + '<strong class="' + dirCls + '">' + dir + " " + fmtMoney(t.amount, t.currency) + "</strong></div>" +
       '<div class="pc-tx-actions">' + waBtn + attBtn + voidBtn + "</div>" +
       '</div><div class="pc-meta"></div></div>';
   }
