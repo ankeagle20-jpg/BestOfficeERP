@@ -127,6 +127,11 @@
   .pc-attach-view {
     font-size: 1.05rem; line-height: 1; padding: 0.35rem 0.5rem; min-width: 2.25rem;
   }
+  .pc-wa {
+    font-size: 1.05rem; line-height: 1; padding: 0.35rem 0.5rem; min-width: 2.25rem;
+    color: #128c7e; text-decoration: none;
+  }
+  .pc-wa:hover { background: rgba(18, 140, 126, 0.12); }
   .pc-lightbox {
     position: fixed; inset: 0; z-index: 80;
     background: rgba(15, 23, 42, 0.82);
@@ -459,7 +464,8 @@
 <script>
 (function () {
   var state = {
-    parties: [], groups: [], partyId: null, groupId: null, direction: null, tab: "parties"
+    parties: [], groups: [], partyId: null, groupId: null, direction: null, tab: "parties",
+    partyDetail: null
   };
 
   function fmtMoney(n, cur) {
@@ -478,6 +484,81 @@
     var m = String(iso || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
     if (!m) return "";
     return m[3] + "." + m[2] + "." + m[1];
+  }
+
+  /** occurred_at (ISO) → HH:MM (yerel saat). */
+  function fmtTxTime(iso) {
+    if (!iso) return "";
+    try {
+      var d = new Date(iso);
+      if (isNaN(d.getTime())) {
+        var m = String(iso).match(/T(\d{2}):(\d{2})/);
+        return m ? (m[1] + ":" + m[2]) : "";
+      }
+      return d.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit", hour12: false });
+    } catch (e) {
+      return "";
+    }
+  }
+
+  function fmtAmount(n) {
+    var v = Number(n || 0);
+    try {
+      return new Intl.NumberFormat("tr-TR", {
+        minimumFractionDigits: 2, maximumFractionDigits: 2
+      }).format(v);
+    } catch (e) {
+      return v.toFixed(2);
+    }
+  }
+
+  /** wa.me için: yalnız rakamlar, ülke kodu dahil (+ / boşluk / tire yok). */
+  function normalizeWaPhone(raw, country) {
+    var s = String(raw || "").trim();
+    if (!s) return null;
+    var digits = s.replace(/\D/g, "");
+    if (!digits) return null;
+    if (digits.indexOf("00") === 0) digits = digits.slice(2);
+    var cc = String(country || "TR").trim().toUpperCase() || "TR";
+    if (cc === "TR") {
+      if (digits.length === 11 && digits.charAt(0) === "0") {
+        digits = "90" + digits.slice(1);
+      } else if (digits.length === 10 && digits.charAt(0) === "5") {
+        digits = "90" + digits;
+      }
+    }
+    if (digits.length < 8 || digits.length > 15) return null;
+    return digits;
+  }
+
+  function buildWhatsAppMessage(t, partyName) {
+    var name = String(partyName || "").trim() || " ";
+    var dateS = fmtTxDate(t.occurred_at);
+    var timeS = fmtTxTime(t.occurred_at);
+    var cur = String(t.currency || "TRY").trim().toUpperCase() || "TRY";
+    var amt = fmtAmount(t.amount);
+    var noteRaw = String(t.note || "").trim();
+    var notePart = noteRaw ? (" Not: " + noteRaw + ".") : "";
+    if (t.direction === "give") {
+      return (
+        "Merhaba " + name + ", " + dateS + " tarihinde saat " + timeS +
+        "'de size " + amt + " " + cur + " ödeme yaptım." + notePart +
+        " İyi günler dileriz. — Payafin Cari"
+      );
+    }
+    return (
+      "Merhaba " + name + ", " + dateS + " tarihinde saat " + timeS +
+      "'de sizden " + amt + " " + cur + " ödeme aldım." + notePart +
+      " Teşekkür ederiz. — Payafin Cari"
+    );
+  }
+
+  function whatsAppUrl(t) {
+    var p = state.partyDetail;
+    if (!p || !p.phone) return null;
+    var phone = normalizeWaPhone(p.phone, p.country);
+    if (!phone) return null;
+    return "https://wa.me/" + phone + "?text=" + encodeURIComponent(buildWhatsAppMessage(t, p.name));
   }
 
   function balLabel(primary) {
@@ -815,11 +896,16 @@
       ? ('<button type="button" class="pc-btn pc-btn-ghost pc-attach-view" data-att-id="' +
         attId + '" title="Senet/makbuz görüntüle" aria-label="Senet/makbuz görüntüle">📎</button>')
       : "";
+    var waUrl = whatsAppUrl(t);
+    var waBtn = waUrl
+      ? ('<a class="pc-btn pc-btn-ghost pc-wa" href="' + waUrl +
+        '" target="_blank" rel="noopener noreferrer" title="WhatsApp ile gönder" aria-label="WhatsApp ile gönder">💬</a>')
+      : "";
     var dateS = fmtTxDate(t.occurred_at);
     var dateHtml = dateS ? ('<span class="pc-tx-date">' + dateS + "</span>") : "";
     return '<div class="pc-tx' + voided + '" data-tx-id="' + t.id + '"><div class="pc-tx-row"><div class="pc-tx-main">' +
       dateHtml + "<strong>" + dir + " " + fmtMoney(t.amount, t.currency) + "</strong></div>" +
-      '<div class="pc-tx-actions">' + attBtn + voidBtn + "</div>" +
+      '<div class="pc-tx-actions">' + waBtn + attBtn + voidBtn + "</div>" +
       '</div><div class="pc-meta"></div></div>';
   }
 
@@ -873,6 +959,7 @@
     document.getElementById("pc-stmt-panel").classList.remove("open");
     return api("/ledger/api/parties/" + id).then(function (j) {
       var p = j.party;
+      state.partyDetail = { name: p.name, phone: p.phone, country: p.country };
       document.getElementById("pc-detail-name").textContent = p.name;
       document.getElementById("pc-detail-bal").textContent = balLabel(p.primary_balance);
       var box = document.getElementById("pc-tx-list");
