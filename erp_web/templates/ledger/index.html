@@ -113,11 +113,79 @@
     color: var(--pc-muted);
   }
   .pc-tab.active { background: var(--pc-accent); color: #fff; border-color: var(--pc-accent); }
-  .pc-toolbar { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+  .pc-toolbar { display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap; }
   .pc-toolbar input {
     flex: 1; min-width: 0; border: 1px solid var(--pc-line); border-radius: 10px;
     padding: 0.7rem 0.85rem; font-size: 1rem; background: var(--pc-card);
   }
+  .pc-btn-select-mode.is-active {
+    background: rgba(232, 238, 244, 0.12);
+    color: var(--pc-on-dark);
+    border-color: #93c5fd;
+  }
+  .pc-item-selectable {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.65rem;
+    cursor: pointer;
+    text-align: left;
+    width: 100%;
+  }
+  .pc-item-selectable .pc-item-check {
+    flex: 0 0 auto;
+    width: 1.15rem;
+    height: 1.15rem;
+    margin-top: 0.2rem;
+    accent-color: var(--pc-accent);
+    cursor: pointer;
+  }
+  .pc-item-selectable .pc-item-body { flex: 1; min-width: 0; }
+  .pc-item-selectable.is-selected {
+    border-color: #93c5fd;
+    box-shadow: 0 0 0 1px rgba(147, 197, 253, 0.35);
+  }
+  .pc-select-bar {
+    position: fixed;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: 0;
+    width: min(28rem, 100%);
+    padding: 0.65rem 1rem calc(0.65rem + env(safe-area-inset-bottom, 0px));
+    background: rgba(15, 23, 42, 0.96);
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.25);
+    z-index: 40;
+    box-sizing: border-box;
+  }
+  .pc-select-bar[hidden] { display: none !important; }
+  .pc-select-bar .pc-btn { width: 100%; }
+  .pc-select-bar .pc-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  .pc-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    background: rgba(15, 23, 42, 0.72);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+  }
+  .pc-modal[hidden] { display: none !important; }
+  .pc-modal-card {
+    width: min(22rem, 100%);
+    background: var(--pc-card);
+    border: 1px solid var(--pc-line);
+    border-radius: 14px;
+    padding: 1rem;
+    color: var(--pc-ink);
+  }
+  .pc-modal-card h2 { margin: 0 0 0.75rem; font-size: 1.1rem; }
+  .pc-modal-card input {
+    width: 100%; box-sizing: border-box; border: 1px solid var(--pc-line);
+    border-radius: 8px; padding: 0.6rem 0.7rem; font-size: 1rem;
+  }
+  .pc-modal-actions { display: flex; gap: 0.45rem; margin-top: 0.75rem; flex-wrap: wrap; }
+  body.pc-select-mode-on .pc-wrap { padding-bottom: 5.25rem; }
   .pc-btn {
     border: none; border-radius: 10px; padding: 0.7rem 1rem; font-size: 0.95rem;
     font-weight: 600; cursor: pointer; white-space: nowrap;
@@ -446,6 +514,7 @@
     <div id="pc-parties-home">
       <div class="pc-toolbar">
         <input type="search" id="pc-q" placeholder="Ara…" autocomplete="off">
+        <button type="button" class="pc-btn pc-btn-ghost pc-btn-select-mode" id="pc-btn-select-mode">Seç</button>
         <button type="button" class="pc-btn pc-btn-primary" id="pc-btn-new">Yeni Cari</button>
       </div>
       <div class="pc-panel" id="pc-new-panel">
@@ -606,6 +675,25 @@
       <img id="pc-lightbox-img" alt="Senet / makbuz">
     </div>
   </div>
+
+  <div id="pc-select-bar" class="pc-select-bar" hidden>
+    <button type="button" class="pc-btn pc-btn-primary" id="pc-btn-create-group-sel" disabled>Grup Oluştur (0)</button>
+  </div>
+
+  <div id="pc-grup-modal" class="pc-modal" hidden>
+    <div class="pc-modal-card">
+      <h2>Grup oluştur</h2>
+      <div class="pc-field" style="margin-bottom:0.5rem;">
+        <label for="pc-grup-sel-name">Grup adı</label>
+        <input id="pc-grup-sel-name" maxlength="200" autocomplete="off">
+      </div>
+      <div id="pc-grup-sel-err" class="pc-err" hidden></div>
+      <div class="pc-modal-actions">
+        <button type="button" class="pc-btn pc-btn-primary" id="pc-grup-sel-create">Oluştur</button>
+        <button type="button" class="pc-btn pc-btn-ghost" id="pc-grup-sel-cancel">Vazgeç</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -615,7 +703,9 @@
     partyDetail: null, partyFull: null,
     listFilter: { kind: null, dir: null },
     detailFilter: { kind: null, dir: null },
-    detailTxs: []
+    detailTxs: [],
+    selectMode: false,
+    selectedPartyIds: {}
   };
 
   function fmtMoney(n, cur) {
@@ -1007,6 +1097,7 @@
   }
 
   function setTab(tab) {
+    if (tab !== "parties" && state.selectMode) exitSelectMode(true);
     state.tab = tab;
     Array.prototype.forEach.call(document.querySelectorAll(".pc-tab"), function (b) {
       b.classList.toggle("active", b.getAttribute("data-tab") === tab);
@@ -1137,6 +1228,113 @@
     });
   }
 
+  function selectedPartyCount() {
+    return Object.keys(state.selectedPartyIds).length;
+  }
+
+  function isPartySelected(id) {
+    return !!state.selectedPartyIds[String(id)];
+  }
+
+  function togglePartySelected(id, on) {
+    var key = String(id);
+    if (on) state.selectedPartyIds[key] = true;
+    else delete state.selectedPartyIds[key];
+    updateSelectBarUi();
+  }
+
+  function updateSelectBarUi() {
+    var bar = document.getElementById("pc-select-bar");
+    var btn = document.getElementById("pc-btn-create-group-sel");
+    var modeBtn = document.getElementById("pc-btn-select-mode");
+    var n = selectedPartyCount();
+    if (bar) bar.hidden = !state.selectMode;
+    if (btn) {
+      btn.textContent = "Grup Oluştur (" + n + ")";
+      btn.disabled = n < 1;
+    }
+    if (modeBtn) {
+      modeBtn.textContent = state.selectMode ? "İptal" : "Seç";
+      modeBtn.classList.toggle("is-active", state.selectMode);
+      modeBtn.setAttribute("aria-pressed", state.selectMode ? "true" : "false");
+    }
+    document.body.classList.toggle("pc-select-mode-on", state.selectMode);
+  }
+
+  function exitSelectMode(clearSelection) {
+    state.selectMode = false;
+    if (clearSelection) state.selectedPartyIds = {};
+    var modal = document.getElementById("pc-grup-modal");
+    if (modal) modal.hidden = true;
+    updateSelectBarUi();
+    if (state.tab === "parties") renderList();
+  }
+
+  function toggleSelectMode() {
+    if (state.selectMode) exitSelectMode(true);
+    else {
+      state.selectMode = true;
+      state.selectedPartyIds = {};
+      updateSelectBarUi();
+      renderList();
+    }
+  }
+
+  function openGrupSelModal() {
+    if (selectedPartyCount() < 1) return;
+    var modal = document.getElementById("pc-grup-modal");
+    var inp = document.getElementById("pc-grup-sel-name");
+    var err = document.getElementById("pc-grup-sel-err");
+    if (err) { err.hidden = true; err.textContent = ""; }
+    if (inp) { inp.value = ""; inp.focus(); }
+    if (modal) modal.hidden = false;
+  }
+
+  function closeGrupSelModal() {
+    var modal = document.getElementById("pc-grup-modal");
+    if (modal) modal.hidden = true;
+  }
+
+  function addMembersToGroupSeq(groupId, partyIds) {
+    return partyIds.reduce(function (chain, pid) {
+      return chain.then(function () {
+        return api("/ledger/api/groups/" + groupId + "/members", {
+          method: "POST",
+          body: { party_id: pid, action: "add" }
+        });
+      });
+    }, Promise.resolve());
+  }
+
+  function createGroupFromSelection() {
+    var err = document.getElementById("pc-grup-sel-err");
+    var name = (document.getElementById("pc-grup-sel-name").value || "").trim();
+    if (err) { err.hidden = true; err.textContent = ""; }
+    if (!name) {
+      if (err) { err.textContent = "Grup adı gerekli."; err.hidden = false; }
+      return Promise.reject(new Error("Grup adı gerekli."));
+    }
+    var ids = Object.keys(state.selectedPartyIds).map(function (k) { return Number(k); });
+    if (!ids.length) return Promise.reject(new Error("Cari seçilmedi."));
+    return api("/ledger/api/groups", {
+      method: "POST",
+      body: { name: name }
+    }).then(function (j) {
+      var gid = j.group && j.group.id;
+      if (!gid) throw new Error("Grup oluşturulamadı.");
+      return addMembersToGroupSeq(gid, ids).then(function () { return gid; });
+    }).then(function (gid) {
+      closeGrupSelModal();
+      exitSelectMode(true);
+      alert("Grup oluşturuldu: " + name);
+      setTab("groups");
+      return loadGroups().then(function () { return gid; });
+    }).catch(function (e) {
+      if (err) { err.textContent = e.message || "Grup oluşturulamadı."; err.hidden = false; }
+      throw e;
+    });
+  }
+
   function renderList() {
     var q = (document.getElementById("pc-q").value || "").trim().toLowerCase();
     var el = document.getElementById("pc-list");
@@ -1154,6 +1352,9 @@
       return;
     }
     el.innerHTML = rows.map(function () {
+      if (state.selectMode) {
+        return '<div class="pc-item pc-item-selectable"><input type="checkbox" class="pc-item-check" aria-label="Cari seç"><div class="pc-item-body"><div class="pc-item-top"><span class="pc-name"></span><span class="pc-bal"></span></div><div class="pc-meta"></div></div></div>';
+      }
       return '<button type="button" class="pc-item"><div class="pc-item-top"><span class="pc-name"></span><span class="pc-bal"></span></div><div class="pc-meta"></div></button>';
     }).join("");
     Array.prototype.forEach.call(el.querySelectorAll(".pc-item"), function (btn, i) {
@@ -1165,8 +1366,31 @@
       balEl.className = "pc-bal " + balClass(pr);
       btn.querySelector(".pc-meta").textContent =
         ((p.type === "company") ? "Şirket" : "Kişi") + (pr ? " · " + balLabel(pr) : "");
-      btn.addEventListener("click", function () { openDetail(p.id); });
+      if (state.selectMode) {
+        var chk = btn.querySelector(".pc-item-check");
+        var sel = isPartySelected(p.id);
+        if (chk) {
+          chk.checked = sel;
+          chk.addEventListener("click", function (ev) { ev.stopPropagation(); });
+          chk.addEventListener("change", function () {
+            togglePartySelected(p.id, chk.checked);
+            btn.classList.toggle("is-selected", chk.checked);
+          });
+        }
+        btn.classList.toggle("is-selected", sel);
+        btn.addEventListener("click", function (ev) {
+          if (ev.target && ev.target.classList && ev.target.classList.contains("pc-item-check")) return;
+          if (chk) {
+            chk.checked = !chk.checked;
+            togglePartySelected(p.id, chk.checked);
+            btn.classList.toggle("is-selected", chk.checked);
+          }
+        });
+      } else {
+        btn.addEventListener("click", function () { openDetail(p.id); });
+      }
     });
+    updateSelectBarUi();
   }
 
   function loadList() {
@@ -1474,6 +1698,22 @@
       document.getElementById("pc-rem-note").value = "";
       return loadReminders();
     }).catch(function (e) { err.textContent = e.message; err.hidden = false; });
+  });
+
+  document.getElementById("pc-btn-select-mode").addEventListener("click", toggleSelectMode);
+  document.getElementById("pc-btn-create-group-sel").addEventListener("click", openGrupSelModal);
+  document.getElementById("pc-grup-sel-cancel").addEventListener("click", closeGrupSelModal);
+  document.getElementById("pc-grup-sel-create").addEventListener("click", function () {
+    createGroupFromSelection().catch(function () {});
+  });
+  document.getElementById("pc-grup-modal").addEventListener("click", function (ev) {
+    if (ev.target === document.getElementById("pc-grup-modal")) closeGrupSelModal();
+  });
+  document.getElementById("pc-grup-sel-name").addEventListener("keydown", function (ev) {
+    if (ev.key === "Enter") {
+      ev.preventDefault();
+      createGroupFromSelection().catch(function () {});
+    }
   });
 
   document.getElementById("pc-fx-cur").addEventListener("change", loadSummary);
