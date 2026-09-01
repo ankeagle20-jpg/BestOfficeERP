@@ -320,6 +320,12 @@
   .pc-summary-head .pc-meta {
     color: var(--pc-on-dark-muted);
   }
+  .pc-summary-filters {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 0.75rem;
+  }
   .pc-summary-boxes {
     display: grid;
     grid-template-columns: 1fr;
@@ -473,14 +479,21 @@
   <div class="pc-summary" id="pc-summary">
     <div class="pc-summary-head">
       <strong>Özet</strong>
-      <label class="pc-meta" style="margin:0;">Gösterim
-        <select id="pc-fx-cur" class="pc-fx-select">
-          <option value="">—</option>
-          <option value="TRY" selected>TRY</option>
-          <option value="USD">USD</option>
-          <option value="EUR">EUR</option>
-        </select>
-      </label>
+      <div class="pc-summary-filters">
+        <label class="pc-meta" style="margin:0;">Varlık
+          <select id="pc-asset-filter" class="pc-fx-select" aria-label="Varlık filtresi">
+            <option value="">Tümü</option>
+          </select>
+        </label>
+        <label class="pc-meta" style="margin:0;">Gösterim
+          <select id="pc-fx-cur" class="pc-fx-select">
+            <option value="">—</option>
+            <option value="TRY" selected>TRY</option>
+            <option value="USD">USD</option>
+            <option value="EUR">EUR</option>
+          </select>
+        </label>
+      </div>
     </div>
     <div class="pc-summary-boxes" id="pc-summary-boxes">
       <button type="button" class="pc-sum-box pc-sum-box-alacak pc-sum-box-btn" id="pc-sum-alacak" aria-pressed="false" title="Bize borçlu carileri filtrele">
@@ -702,6 +715,7 @@
     parties: [], groups: [], partyId: null, groupId: null, direction: null, tab: "parties",
     partyDetail: null, partyFull: null,
     listFilter: { kind: null, dir: null },
+    assetFilter: null,
     detailFilter: { kind: null, dir: null },
     detailTxs: [],
     selectMode: false,
@@ -820,6 +834,61 @@
   function partyPrimaryBalance(p) {
     if (!p || !p.primary_balance) return 0;
     return Number(p.primary_balance.balance || 0);
+  }
+
+  function balanceForAsset(p, assetCode) {
+    if (!p || !assetCode) return null;
+    var bals = p.balances || [];
+    for (var i = 0; i < bals.length; i++) {
+      if (bals[i].currency === assetCode) return bals[i];
+    }
+    return null;
+  }
+
+  function partyHasAsset(p, assetCode) {
+    if (!assetCode) return true;
+    return !!balanceForAsset(p, assetCode);
+  }
+
+  function partyFilterBalance(p) {
+    if (state.assetFilter) {
+      var b = balanceForAsset(p, state.assetFilter);
+      return b ? Number(b.balance || 0) : 0;
+    }
+    return partyPrimaryBalance(p);
+  }
+
+  function populateAssetFilterDropdown(byCurrency) {
+    var sel = document.getElementById("pc-asset-filter");
+    if (!sel) return;
+    var prev = state.assetFilter || sel.value || "";
+    var seen = {};
+    var sorted = [];
+    (byCurrency || []).forEach(function (r) {
+      var c = String((r && r.currency) || "").trim().toUpperCase();
+      if (!c || seen[c]) return;
+      seen[c] = true;
+      sorted.push(c);
+    });
+    sorted.sort(function (a, b) {
+      if (a === "TRY") return -1;
+      if (b === "TRY") return 1;
+      return a.localeCompare(b);
+    });
+    sel.innerHTML = '<option value="">Tümü</option>';
+    sorted.forEach(function (c) {
+      var o = document.createElement("option");
+      o.value = c;
+      o.textContent = c;
+      sel.appendChild(o);
+    });
+    if (prev && seen[prev]) {
+      sel.value = prev;
+      state.assetFilter = prev;
+    } else {
+      sel.value = "";
+      state.assetFilter = null;
+    }
   }
 
   function partyLastOccurredMs(p) {
@@ -973,15 +1042,15 @@
     var lf = state.listFilter;
     var out = rows.slice();
     if (lf.kind === "alacak") {
-      out = out.filter(function (p) { return partyPrimaryBalance(p) > 0.005; });
+      out = out.filter(function (p) { return partyFilterBalance(p) > 0.005; });
       sortByLastOccurredDesc(out);
     } else if (lf.kind === "borc") {
-      out = out.filter(function (p) { return partyPrimaryBalance(p) < -0.005; });
+      out = out.filter(function (p) { return partyFilterBalance(p) < -0.005; });
       sortByLastOccurredDesc(out);
     } else if (lf.kind === "bakiye" && lf.dir) {
       out.sort(function (a, b) {
-        var ba = partyPrimaryBalance(a);
-        var bb = partyPrimaryBalance(b);
+        var ba = partyFilterBalance(a);
+        var bb = partyFilterBalance(b);
         return lf.dir === "desc" ? (bb - ba) : (ba - bb);
       });
     }
@@ -1148,6 +1217,8 @@
       var errEl = document.getElementById("pc-summary-err");
       errEl.hidden = true;
       errEl.textContent = "";
+
+      populateAssetFilterDropdown(j.by_currency || []);
 
       var row = pickSummarySource(j);
       var alacakEl = document.getElementById("pc-sum-alacak-val");
@@ -1341,10 +1412,11 @@
     var searched = state.parties.filter(function (p) {
       return !q || String(p.name || "").toLowerCase().indexOf(q) >= 0;
     });
-    var rows = applyListFilterRows(searched);
+    var byAsset = searched.filter(function (p) { return partyHasAsset(p, state.assetFilter); });
+    var rows = applyListFilterRows(byAsset);
     updateSummaryFilterUi();
     if (!rows.length) {
-      if (state.parties.length && (q || state.listFilter.kind)) {
+      if (state.parties.length && (q || state.listFilter.kind || state.assetFilter)) {
         el.innerHTML = '<div class="pc-empty">Bu filtrede cari yok.</div>';
       } else {
         el.innerHTML = '<div class="pc-empty">Henüz cari yok.<br>Yeni Cari ile başlayın.</div>';
@@ -1359,7 +1431,7 @@
     }).join("");
     Array.prototype.forEach.call(el.querySelectorAll(".pc-item"), function (btn, i) {
       var p = rows[i];
-      var pr = p.primary_balance;
+      var pr = state.assetFilter ? balanceForAsset(p, state.assetFilter) : p.primary_balance;
       btn.querySelector(".pc-name").textContent = p.name;
       var balEl = btn.querySelector(".pc-bal");
       balEl.textContent = pr ? fmtMoney(pr.balance, pr.currency) : "—";
@@ -1717,6 +1789,11 @@
   });
 
   document.getElementById("pc-fx-cur").addEventListener("change", loadSummary);
+  document.getElementById("pc-asset-filter").addEventListener("change", function () {
+    var v = (document.getElementById("pc-asset-filter").value || "").trim().toUpperCase();
+    state.assetFilter = v || null;
+    renderList();
+  });
 
   document.getElementById("pc-sum-alacak").addEventListener("click", onSumAlacakClick);
   document.getElementById("pc-sum-borc").addEventListener("click", onSumBorcClick);
