@@ -306,6 +306,45 @@
     word-break: break-word;
     line-height: 1.25;
   }
+  .pc-sum-box-btn {
+    width: 100%;
+    text-align: left;
+    cursor: pointer;
+    font: inherit;
+    display: block;
+    box-sizing: border-box;
+    transition: box-shadow 0.15s ease;
+  }
+  .pc-sum-box-btn:focus-visible {
+    outline: 2px solid #93c5fd;
+    outline-offset: 2px;
+  }
+  .pc-sum-box-btn.is-active {
+    box-shadow: 0 0 0 2px #fff, 0 0 0 4px rgba(255, 255, 255, 0.55);
+  }
+  .pc-list-filter-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-top: 0.55rem;
+  }
+  .pc-list-filter-bar[hidden] { display: none !important; }
+  .pc-list-filter-chip {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--pc-on-dark);
+    background: rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    border-radius: 999px;
+    padding: 0.35rem 0.75rem;
+  }
+  .pc-list-filter-clear {
+    padding: 0.35rem 0.65rem !important;
+    font-size: 0.82rem !important;
+  }
   .pc-summary-err {
     margin-top: 0.5rem;
     font-size: 0.88rem;
@@ -372,18 +411,22 @@
       </label>
     </div>
     <div class="pc-summary-boxes" id="pc-summary-boxes">
-      <div class="pc-sum-box pc-sum-box-alacak" id="pc-sum-alacak">
+      <button type="button" class="pc-sum-box pc-sum-box-alacak pc-sum-box-btn" id="pc-sum-alacak" aria-pressed="false" title="Bize borçlu carileri filtrele">
         <div class="pc-sum-label">Alacak</div>
         <div class="pc-sum-value" id="pc-sum-alacak-val">—</div>
-      </div>
-      <div class="pc-sum-box pc-sum-box-borc" id="pc-sum-borc">
+      </button>
+      <button type="button" class="pc-sum-box pc-sum-box-borc pc-sum-box-btn" id="pc-sum-borc" aria-pressed="false" title="Biz borçlu olduğumuz carileri filtrele">
         <div class="pc-sum-label">Borç</div>
         <div class="pc-sum-value" id="pc-sum-borc-val">—</div>
-      </div>
-      <div class="pc-sum-box pc-sum-box-bakiye pc-sum-bal-zero" id="pc-sum-bakiye">
+      </button>
+      <button type="button" class="pc-sum-box pc-sum-box-bakiye pc-sum-bal-zero pc-sum-box-btn" id="pc-sum-bakiye" aria-pressed="false" title="Carileri bakiyeye göre sırala">
         <div class="pc-sum-label">Bakiye</div>
         <div class="pc-sum-value" id="pc-sum-bakiye-val">—</div>
-      </div>
+      </button>
+    </div>
+    <div id="pc-list-filter-bar" class="pc-list-filter-bar" hidden>
+      <span id="pc-list-filter-chip" class="pc-list-filter-chip"></span>
+      <button type="button" class="pc-btn pc-btn-ghost pc-list-filter-clear" id="pc-list-filter-clear">Temizle</button>
     </div>
     <div id="pc-summary-err" class="pc-summary-err" hidden></div>
     <div id="pc-summary-warn" class="pc-warn" hidden></div>
@@ -565,7 +608,8 @@
 (function () {
   var state = {
     parties: [], groups: [], partyId: null, groupId: null, direction: null, tab: "parties",
-    partyDetail: null, partyFull: null
+    partyDetail: null, partyFull: null,
+    listFilter: { kind: null, dir: null }
   };
 
   function fmtMoney(n, cur) {
@@ -675,6 +719,97 @@
     var b = Number(primary.balance || 0);
     if (Math.abs(b) < 0.005) return "zero";
     return b > 0 ? "pos" : "neg";
+  }
+
+  function partyPrimaryBalance(p) {
+    if (!p || !p.primary_balance) return 0;
+    return Number(p.primary_balance.balance || 0);
+  }
+
+  function isListFilterContext() {
+    var listView = document.getElementById("pc-list-view");
+    var detailView = document.getElementById("pc-detail-view");
+    return state.tab === "parties" && listView && !listView.hidden && detailView && detailView.hidden;
+  }
+
+  function listFilterChipLabel() {
+    var lf = state.listFilter;
+    if (lf.kind === "alacak") return "Alacak · bize borçlular";
+    if (lf.kind === "borc") return "Borç · biz borçluyuz";
+    if (lf.kind === "bakiye" && lf.dir === "desc") return "Bakiye · yüksek → düşük";
+    if (lf.kind === "bakiye" && lf.dir === "asc") return "Bakiye · düşük → yüksek";
+    return "";
+  }
+
+  function updateListFilterUi() {
+    var lf = state.listFilter;
+    var active = !!(lf.kind && (lf.kind !== "bakiye" || lf.dir));
+    var bar = document.getElementById("pc-list-filter-bar");
+    var chip = document.getElementById("pc-list-filter-chip");
+    var alacakBtn = document.getElementById("pc-sum-alacak");
+    var borcBtn = document.getElementById("pc-sum-borc");
+    var bakiyeBtn = document.getElementById("pc-sum-bakiye");
+    if (bar) bar.hidden = !(active && isListFilterContext());
+    if (chip) chip.textContent = listFilterChipLabel();
+    if (alacakBtn) {
+      alacakBtn.classList.toggle("is-active", lf.kind === "alacak");
+      alacakBtn.setAttribute("aria-pressed", lf.kind === "alacak" ? "true" : "false");
+    }
+    if (borcBtn) {
+      borcBtn.classList.toggle("is-active", lf.kind === "borc");
+      borcBtn.setAttribute("aria-pressed", lf.kind === "borc" ? "true" : "false");
+    }
+    if (bakiyeBtn) {
+      bakiyeBtn.classList.toggle("is-active", lf.kind === "bakiye" && !!lf.dir);
+      bakiyeBtn.setAttribute("aria-pressed", lf.kind === "bakiye" && !!lf.dir ? "true" : "false");
+    }
+  }
+
+  function setListFilter(kind, dir) {
+    state.listFilter = { kind: kind || null, dir: dir || null };
+    updateListFilterUi();
+    if (state.tab === "parties") renderList();
+  }
+
+  function clearListFilter() {
+    setListFilter(null, null);
+  }
+
+  function applyListFilterRows(rows) {
+    var lf = state.listFilter;
+    var out = rows.slice();
+    if (lf.kind === "alacak") {
+      out = out.filter(function (p) { return partyPrimaryBalance(p) > 0.005; });
+    } else if (lf.kind === "borc") {
+      out = out.filter(function (p) { return partyPrimaryBalance(p) < -0.005; });
+    } else if (lf.kind === "bakiye" && lf.dir) {
+      out.sort(function (a, b) {
+        var ba = partyPrimaryBalance(a);
+        var bb = partyPrimaryBalance(b);
+        return lf.dir === "desc" ? (bb - ba) : (ba - bb);
+      });
+    }
+    return out;
+  }
+
+  function onListFilterAlacakClick() {
+    if (!isListFilterContext()) return;
+    if (state.listFilter.kind === "alacak") clearListFilter();
+    else setListFilter("alacak", null);
+  }
+
+  function onListFilterBorcClick() {
+    if (!isListFilterContext()) return;
+    if (state.listFilter.kind === "borc") clearListFilter();
+    else setListFilter("borc", null);
+  }
+
+  function onListFilterBakiyeClick() {
+    if (!isListFilterContext()) return;
+    var lf = state.listFilter;
+    if (lf.kind !== "bakiye") setListFilter("bakiye", "desc");
+    else if (lf.dir === "desc") setListFilter("bakiye", "asc");
+    else clearListFilter();
   }
 
   function api(path, opts) {
@@ -807,7 +942,7 @@
         alacakEl.textContent = "—";
         borcEl.textContent = "—";
         bakiyeEl.textContent = "—";
-        bakiyeBox.className = "pc-sum-box pc-sum-box-bakiye pc-sum-bal-zero";
+        bakiyeBox.className = "pc-sum-box pc-sum-box-bakiye pc-sum-bal-zero pc-sum-box-btn";
       } else {
         // Alacak = given, Borç = received (API alanları); satırın kendi para birimi
         alacakEl.textContent = fmtMoney(row.given, row.currency);
@@ -820,7 +955,7 @@
         }
         var signed = fmtBalanceBox(bal, balCur);
         bakiyeEl.textContent = signed.text;
-        bakiyeBox.className = "pc-sum-box pc-sum-box-bakiye " + signed.cls;
+        bakiyeBox.className = "pc-sum-box pc-sum-box-bakiye pc-sum-box-btn " + signed.cls;
       }
 
       if (j.fx_warnings && j.fx_warnings.length) {
@@ -879,11 +1014,17 @@
   function renderList() {
     var q = (document.getElementById("pc-q").value || "").trim().toLowerCase();
     var el = document.getElementById("pc-list");
-    var rows = state.parties.filter(function (p) {
+    var searched = state.parties.filter(function (p) {
       return !q || String(p.name || "").toLowerCase().indexOf(q) >= 0;
     });
+    var rows = applyListFilterRows(searched);
+    updateListFilterUi();
     if (!rows.length) {
-      el.innerHTML = '<div class="pc-empty">Henüz cari yok.<br>Yeni Cari ile başlayın.</div>';
+      if (state.parties.length && (q || state.listFilter.kind)) {
+        el.innerHTML = '<div class="pc-empty">Bu filtrede cari yok.</div>';
+      } else {
+        el.innerHTML = '<div class="pc-empty">Henüz cari yok.<br>Yeni Cari ile başlayın.</div>';
+      }
       return;
     }
     el.innerHTML = rows.map(function () {
@@ -1227,6 +1368,11 @@
   });
 
   document.getElementById("pc-fx-cur").addEventListener("change", loadSummary);
+
+  document.getElementById("pc-sum-alacak").addEventListener("click", onListFilterAlacakClick);
+  document.getElementById("pc-sum-borc").addEventListener("click", onListFilterBorcClick);
+  document.getElementById("pc-sum-bakiye").addEventListener("click", onListFilterBakiyeClick);
+  document.getElementById("pc-list-filter-clear").addEventListener("click", clearListFilter);
 
   document.getElementById("pc-q").addEventListener("input", renderList);
   document.getElementById("pc-gq").addEventListener("input", renderGroups);
