@@ -43,6 +43,21 @@
     font-weight: 650;
     letter-spacing: -0.02em;
   }
+  .pc-detail-head {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    margin-bottom: 0.25rem;
+  }
+  .pc-detail-head h1 { margin: 0; flex: 1; min-width: 0; }
+  .pc-edit-party {
+    flex: 0 0 auto;
+    padding: 0.45rem 0.55rem;
+    min-width: 2.25rem;
+    color: var(--pc-on-dark-muted);
+    border-color: #3d5166;
+  }
+  .pc-edit-party:hover { color: var(--pc-on-dark); background: rgba(232, 238, 244, 0.08); }
   .pc-sub { margin: 0 0 1rem; color: var(--pc-muted); font-size: 0.92rem; }
   .pc-wrap > .pc-sub { color: var(--pc-on-dark-muted); }
   .pc-tabs { display: flex; gap: 0.35rem; margin-bottom: 1rem; }
@@ -411,12 +426,35 @@
 
   <div id="pc-detail-view" hidden>
     <button type="button" class="pc-btn pc-btn-ghost pc-back" id="pc-back">← Liste</button>
-    <h1 id="pc-detail-name">—</h1>
+    <div class="pc-detail-head">
+      <h1 id="pc-detail-name">—</h1>
+      <button type="button" class="pc-btn pc-btn-ghost pc-edit-party" id="pc-btn-edit-party" title="Cari düzenle" aria-label="Cari düzenle">
+        <i class="fa-solid fa-pen" aria-hidden="true"></i>
+      </button>
+    </div>
     <p class="pc-sub" id="pc-detail-bal">—</p>
     <div class="pc-actions">
       <button type="button" class="pc-btn pc-btn-give" id="pc-btn-give">Verdim</button>
       <button type="button" class="pc-btn pc-btn-recv" id="pc-btn-recv">Aldım</button>
       <button type="button" class="pc-btn pc-btn-ghost" id="pc-btn-stmt">Ekstre</button>
+    </div>
+
+    <div class="pc-panel" id="pc-edit-panel">
+      <h2>Cari düzenle</h2>
+      <div class="pc-field"><label>Ad</label><input id="pc-edit-name" maxlength="200"></div>
+      <div class="pc-field">
+        <label>Tür</label>
+        <select id="pc-edit-type"><option value="person">Kişi</option><option value="company">Şirket</option></select>
+      </div>
+      <div class="pc-field"><label>Telefon</label><input id="pc-edit-phone" maxlength="64"></div>
+      <div class="pc-field"><label>E-posta</label><input id="pc-edit-email" type="email" maxlength="120"></div>
+      <div class="pc-field"><label>Ülke</label><input id="pc-edit-country" maxlength="8" placeholder="TR"></div>
+      <div class="pc-field"><label>Not</label><textarea id="pc-edit-notes" maxlength="500" rows="2"></textarea></div>
+      <div id="pc-edit-err" class="pc-err" hidden></div>
+      <div class="pc-actions">
+        <button type="button" class="pc-btn pc-btn-primary" id="pc-edit-save">Kaydet</button>
+        <button type="button" class="pc-btn pc-btn-ghost" id="pc-edit-cancel">Vazgeç</button>
+      </div>
     </div>
 
     <div class="pc-panel" id="pc-tx-panel">
@@ -481,7 +519,7 @@
 (function () {
   var state = {
     parties: [], groups: [], partyId: null, groupId: null, direction: null, tab: "parties",
-    partyDetail: null
+    partyDetail: null, partyFull: null
   };
 
   function fmtMoney(n, cur) {
@@ -966,6 +1004,28 @@
     bindVoidButtons(box);
   }
 
+  function openEditPartyPanel() {
+    var p = state.partyFull;
+    if (!p) return;
+    document.getElementById("pc-tx-panel").classList.remove("open");
+    document.getElementById("pc-stmt-panel").classList.remove("open");
+    document.getElementById("pc-edit-name").value = p.name || "";
+    document.getElementById("pc-edit-type").value = p.type || "person";
+    document.getElementById("pc-edit-phone").value = p.phone || "";
+    document.getElementById("pc-edit-email").value = p.email || "";
+    document.getElementById("pc-edit-country").value = p.country || "";
+    document.getElementById("pc-edit-notes").value = p.notes || "";
+    document.getElementById("pc-edit-err").hidden = true;
+    document.getElementById("pc-edit-panel").classList.add("open");
+  }
+
+  function applyPartyDetailUi(p) {
+    state.partyFull = p;
+    state.partyDetail = { name: p.name, phone: p.phone, country: p.country };
+    document.getElementById("pc-detail-name").textContent = p.name;
+    document.getElementById("pc-detail-bal").textContent = balLabel(p.primary_balance);
+  }
+
   function openDetail(id) {
     state.partyId = id;
     document.getElementById("pc-home-tabs").hidden = true;
@@ -974,11 +1034,10 @@
     document.getElementById("pc-detail-view").hidden = false;
     document.getElementById("pc-tx-panel").classList.remove("open");
     document.getElementById("pc-stmt-panel").classList.remove("open");
+    document.getElementById("pc-edit-panel").classList.remove("open");
     return api("/ledger/api/parties/" + id).then(function (j) {
       var p = j.party;
-      state.partyDetail = { name: p.name, phone: p.phone, country: p.country };
-      document.getElementById("pc-detail-name").textContent = p.name;
-      document.getElementById("pc-detail-bal").textContent = balLabel(p.primary_balance);
+      applyPartyDetailUi(p);
       var box = document.getElementById("pc-tx-list");
       var txs = j.transactions || [];
       if (!txs.length) {
@@ -1121,6 +1180,47 @@
     document.getElementById("pc-home-tabs").hidden = false;
     setTab("parties");
   });
+  document.getElementById("pc-btn-edit-party").addEventListener("click", openEditPartyPanel);
+  document.getElementById("pc-edit-cancel").addEventListener("click", function () {
+    document.getElementById("pc-edit-panel").classList.remove("open");
+    document.getElementById("pc-edit-err").hidden = true;
+  });
+  document.getElementById("pc-edit-save").addEventListener("click", function () {
+    var err = document.getElementById("pc-edit-err");
+    err.hidden = true;
+    if (!state.partyId) return;
+    api("/ledger/api/parties/" + state.partyId, {
+      method: "PUT",
+      body: {
+        name: document.getElementById("pc-edit-name").value,
+        type: document.getElementById("pc-edit-type").value,
+        phone: document.getElementById("pc-edit-phone").value,
+        email: document.getElementById("pc-edit-email").value,
+        country: document.getElementById("pc-edit-country").value,
+        notes: document.getElementById("pc-edit-notes").value
+      }
+    }).then(function (j) {
+      document.getElementById("pc-edit-panel").classList.remove("open");
+      applyPartyDetailUi(j.party);
+      var box = document.getElementById("pc-tx-list");
+      var rows = box.querySelectorAll(".pc-tx");
+      if (rows.length) {
+        return api("/ledger/api/parties/" + state.partyId).then(function (detail) {
+          var txs = detail.transactions || [];
+          box.innerHTML = txs.map(txRowHtml).join("");
+          Array.prototype.forEach.call(box.querySelectorAll(".pc-tx"), function (row, i) {
+            row.querySelector(".pc-meta").textContent = txs[i].note || "";
+          });
+          bindVoidButtons(box);
+        });
+      }
+    }).then(function () {
+      deferLoadList();
+    }).catch(function (e) {
+      err.textContent = e.message;
+      err.hidden = false;
+    });
+  });
   document.getElementById("pc-gback").addEventListener("click", function () {
     document.getElementById("pc-group-detail-view").hidden = true;
     document.getElementById("pc-list-view").hidden = false;
@@ -1141,6 +1241,7 @@
     state.direction = dir;
     document.getElementById("pc-tx-title").textContent = dir === "give" ? "Verdim" : "Aldım";
     document.getElementById("pc-stmt-panel").classList.remove("open");
+    document.getElementById("pc-edit-panel").classList.remove("open");
     document.getElementById("pc-tx-panel").classList.add("open");
     document.getElementById("pc-tx-err").hidden = true;
     document.getElementById("pc-tx-amount").value = "";
@@ -1201,6 +1302,7 @@
 
   document.getElementById("pc-btn-stmt").addEventListener("click", function () {
     document.getElementById("pc-tx-panel").classList.remove("open");
+    document.getElementById("pc-edit-panel").classList.remove("open");
     document.getElementById("pc-stmt-panel").classList.add("open");
     document.getElementById("pc-stmt-from").value = monthStartISO();
     document.getElementById("pc-stmt-to").value = todayISO();

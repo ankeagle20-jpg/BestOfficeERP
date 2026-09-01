@@ -588,6 +588,56 @@ def api_parties_detail(party_id: int):
     )
 
 
+@bp.route("/api/parties/<int:party_id>", methods=["PUT"])
+@giris_gerekli
+@module_required("ledger")
+def api_parties_update(party_id: int):
+    _ensure_ledger_tables_once()
+    existing = fetch_one(
+        """
+        SELECT id, name, type, phone, email, country, notes, is_active, created_at, updated_at
+        FROM ledger_parties
+        WHERE id = %s
+        """,
+        (int(party_id),),
+    )
+    if not existing:
+        return _json_err("Cari bulunamadı.", 404)
+    if not existing.get("is_active"):
+        return _json_err("Pasif cari güncellenemez.", 400)
+
+    data = request.get_json(silent=True) or {}
+    name = str(data.get("name") or "").strip()
+    if not name:
+        return _json_err("Ad gerekli.")
+    ptype = str(data.get("type") or existing.get("type") or "person").strip().lower()
+    if ptype not in _PARTY_TYPES:
+        return _json_err("type person veya company olmalı.")
+    phone = (str(data.get("phone") or "").strip() or None)
+    email = (str(data.get("email") or "").strip() or None)
+    country = (str(data.get("country") or "").strip() or None)
+    notes = (str(data.get("notes") or "").strip() or None)
+
+    row = execute_returning(
+        """
+        UPDATE ledger_parties
+        SET name = %s,
+            type = %s,
+            phone = %s,
+            email = %s,
+            country = %s,
+            notes = %s,
+            updated_at = NOW()
+        WHERE id = %s
+        RETURNING id, name, type, phone, email, country, notes, is_active, created_at, updated_at
+        """,
+        (name, ptype, phone, email, country, notes, int(party_id)),
+    )
+    if not row:
+        return _json_err("Güncelleme başarısız.", 500)
+    return jsonify({"ok": True, "party": _party_dict(row, with_balances=True)})
+
+
 @bp.route("/api/transactions", methods=["POST"])
 @giris_gerekli
 @module_required("ledger")
