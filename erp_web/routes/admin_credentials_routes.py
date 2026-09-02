@@ -26,7 +26,7 @@ MSG_PLATFORM_ONLY = (
     "Platform kimlik bilgileri yalnızca ana (public) host'ta kullanılabilir."
 )
 
-CATEGORY_ORDER = ("mail", "gib", "ai", "robot", "ops")
+CATEGORY_ORDER = ("mail", "gib", "ai", "robot", "ops", "paytr")
 
 
 def _json403(msg: str):

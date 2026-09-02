@@ -28,6 +28,10 @@ ENV_ALIAS: dict[str, str] = {
     "robot.hepsiemlak_email": "HEPSIEMLAK_EMAIL",
     "robot.hepsiemlak_password": "HEPSIEMLAK_PASSWORD",
     "ops.cron_token": "CRON_TOKEN",
+    "paytr.merchant_id": "PAYTR_MERCHANT_ID",
+    "paytr.merchant_key": "PAYTR_MERCHANT_KEY",
+    "paytr.merchant_salt": "PAYTR_MERCHANT_SALT",
+    "paytr.mode": "PAYTR_MODE",
 }
 
 CATEGORY_LABELS: dict[str, str] = {
@@ -36,6 +40,7 @@ CATEGORY_LABELS: dict[str, str] = {
     "ai": "AI",
     "robot": "Robot",
     "ops": "Ops",
+    "paytr": "PayTR",
 }
 
 

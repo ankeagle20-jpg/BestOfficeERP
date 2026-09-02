@@ -3447,6 +3447,10 @@ def ensure_platform_credentials_table():
         ("robot.hepsiemlak_email", "robot", "Hepsiemlak hesap e-posta", True),
         ("robot.hepsiemlak_password", "robot", "Hepsiemlak hesap şifresi", True),
         ("ops.cron_token", "ops", "Cron endpoint koruma tokeni", True),
+        ("paytr.merchant_id", "paytr", "PayTR merchant_id (Mağaza No)", True),
+        ("paytr.merchant_key", "paytr", "PayTR merchant_key", True),
+        ("paytr.merchant_salt", "paytr", "PayTR merchant_salt", True),
+        ("paytr.mode", "paytr", "PayTR ortamı: test veya live", False),
     )
     for key, cat, desc, is_secret in catalog:
         execute(
