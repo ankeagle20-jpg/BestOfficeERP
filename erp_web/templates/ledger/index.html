@@ -385,9 +385,16 @@
   }
   .pc-asset-picker-panel[hidden] { display: none !important; }
   .pc-asset-picker-list { display: flex; flex-direction: column; }
+  .pc-asset-pick-row-wrap {
+    display: flex;
+    align-items: stretch;
+    border-bottom: 1px solid var(--pc-line);
+  }
+  .pc-asset-pick-row-wrap:last-child { border-bottom: none; }
   .pc-asset-pick-row {
     display: block;
-    width: 100%;
+    flex: 1 1 auto;
+    min-width: 0;
     text-align: left;
     border: none;
     background: transparent;
@@ -396,18 +403,73 @@
     color: var(--pc-ink);
     cursor: pointer;
     min-height: 44px;
-    border-bottom: 1px solid var(--pc-line);
     box-sizing: border-box;
   }
-  .pc-asset-pick-row:last-child { border-bottom: none; }
-  .pc-asset-pick-row[aria-selected="true"] {
+  .pc-asset-pick-edit {
+    flex: 0 0 auto;
+    border: none;
+    background: transparent;
+    padding: 0.65rem 0.75rem;
+    min-height: 44px;
+    min-width: 44px;
+    font-size: 1rem;
+    line-height: 1;
+    cursor: pointer;
+    color: var(--pc-muted);
+  }
+  .pc-asset-pick-edit:hover,
+  .pc-asset-pick-edit:focus {
+    color: var(--pc-ink);
+    background: rgba(13, 122, 95, 0.08);
+    outline: none;
+  }
+  .pc-asset-pick-row-wrap[aria-selected="true"] .pc-asset-pick-row {
     background: rgba(13, 122, 95, 0.12);
     font-weight: 600;
   }
-  .pc-asset-pick-row:hover,
-  .pc-asset-pick-row:focus {
+  .pc-asset-pick-row-wrap:hover .pc-asset-pick-row,
+  .pc-asset-pick-row-wrap:focus-within .pc-asset-pick-row {
     background: rgba(13, 122, 95, 0.08);
-    outline: none;
+  }
+  .pc-asset-pick-row-wrap[aria-selected="true"]:hover .pc-asset-pick-row {
+    background: rgba(13, 122, 95, 0.12);
+  }
+  .pc-asset-edit-sheet {
+    position: fixed;
+    inset: 0;
+    z-index: 55;
+    background: rgba(15, 23, 42, 0.72);
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    padding: 0;
+  }
+  .pc-asset-edit-sheet[hidden] { display: none !important; }
+  .pc-asset-edit-sheet-card {
+    width: 100%;
+    max-width: 28rem;
+    background: var(--pc-card);
+    border: 1px solid var(--pc-line);
+    border-radius: 14px 14px 0 0;
+    padding: 1rem 1rem calc(1rem + env(safe-area-inset-bottom, 0px));
+    color: var(--pc-ink);
+    max-height: 85vh;
+    overflow-y: auto;
+  }
+  .pc-asset-edit-sheet-card h2 { margin: 0 0 0.5rem; font-size: 1.1rem; }
+  .pc-asset-edit-note {
+    font-size: 0.82rem;
+    color: var(--pc-muted);
+    margin: 0 0 0.65rem;
+    line-height: 1.4;
+  }
+  .pc-asset-edit-sheet-card input {
+    width: 100%;
+    box-sizing: border-box;
+    border: 1px solid var(--pc-line);
+    border-radius: 8px;
+    padding: 0.6rem 0.7rem;
+    font-size: 1rem;
   }
   .pc-btn-asset-add {
     min-width: 1.85rem;
@@ -874,6 +936,23 @@
       </div>
     </div>
   </div>
+
+  <div id="pc-asset-edit-sheet" class="pc-asset-edit-sheet" hidden>
+    <div class="pc-asset-edit-sheet-card">
+      <h2 id="pc-asset-edit-title">Varlık</h2>
+      <p class="pc-asset-edit-note">Etiketi düzenleyebilir veya kayıtlı listeden kaldırabilirsiniz. Silme işlemi mevcut hareketleri etkilemez; kod hâlâ işlemlerde kullanılıyorsa Varlık listesinde görünmeye devam eder.</p>
+      <div class="pc-field" style="margin-bottom:0.5rem;">
+        <label for="pc-asset-edit-label">Etiket (isteğe bağlı)</label>
+        <input id="pc-asset-edit-label" maxlength="64" autocomplete="off" placeholder="Platin">
+      </div>
+      <div id="pc-asset-edit-err" class="pc-err" hidden></div>
+      <div class="pc-modal-actions">
+        <button type="button" class="pc-btn pc-btn-primary" id="pc-asset-edit-save">Kaydet</button>
+        <button type="button" class="pc-btn pc-btn-danger" id="pc-asset-edit-delete">Sil</button>
+        <button type="button" class="pc-btn pc-btn-ghost" id="pc-asset-edit-close">Vazgeç</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -1062,6 +1141,47 @@
     return partyPrimaryBalance(p);
   }
 
+  function registeredAssetByCode(code) {
+    var c = String(code || "").trim().toUpperCase();
+    var assets = state.registeredAssets || [];
+    for (var i = 0; i < assets.length; i++) {
+      if (String(assets[i].code || "").toUpperCase() === c && assets[i].id != null) {
+        return assets[i];
+      }
+    }
+    return null;
+  }
+
+  function assetEditErrEl() {
+    var sheet = document.getElementById("pc-asset-edit-sheet");
+    if (sheet && !sheet.hidden) return document.getElementById("pc-asset-edit-err");
+    return document.getElementById("pc-asset-manage-err");
+  }
+
+  function closeAssetEditSheet() {
+    var sheet = document.getElementById("pc-asset-edit-sheet");
+    var err = document.getElementById("pc-asset-edit-err");
+    if (err) { err.hidden = true; err.textContent = ""; }
+    if (sheet) sheet.hidden = true;
+  }
+
+  function openAssetEditSheet(asset) {
+    closeAssetPickerPanel();
+    var sheet = document.getElementById("pc-asset-edit-sheet");
+    var err = document.getElementById("pc-asset-edit-err");
+    var title = document.getElementById("pc-asset-edit-title");
+    var inp = document.getElementById("pc-asset-edit-label");
+    if (err) { err.hidden = true; err.textContent = ""; }
+    if (title) title.textContent = assetOptionLabel(asset.code);
+    if (inp) inp.value = asset.label || "";
+    if (sheet) {
+      sheet.dataset.assetId = String(asset.id);
+      sheet.dataset.assetCode = asset.code;
+      sheet.hidden = false;
+    }
+    if (inp) inp.focus();
+  }
+
   function assetPickerTriggerLabel(code) {
     if (!code) return "Tümü";
     return assetOptionLabel(code) || code;
@@ -1133,18 +1253,34 @@
     updateAssetPickerTrigger();
     list.innerHTML = "";
     function addRow(code, label) {
+      var reg = code ? registeredAssetByCode(code) : null;
+      var wrap = document.createElement("div");
+      wrap.className = "pc-asset-pick-row-wrap";
+      wrap.setAttribute("role", "option");
+      wrap.setAttribute("data-code", code);
+      var selected = (code ? state.assetFilter === code : !state.assetFilter);
+      wrap.setAttribute("aria-selected", selected ? "true" : "false");
       var btn = document.createElement("button");
       btn.type = "button";
       btn.className = "pc-asset-pick-row";
-      btn.setAttribute("role", "option");
-      btn.setAttribute("data-code", code);
-      var selected = (code ? state.assetFilter === code : !state.assetFilter);
-      btn.setAttribute("aria-selected", selected ? "true" : "false");
       btn.textContent = label;
       btn.addEventListener("click", function () {
         selectAsset(code);
       });
-      list.appendChild(btn);
+      wrap.appendChild(btn);
+      if (reg) {
+        var editBtn = document.createElement("button");
+        editBtn.type = "button";
+        editBtn.className = "pc-asset-pick-edit";
+        editBtn.setAttribute("aria-label", reg.code + " düzenle");
+        editBtn.textContent = "\u270F\uFE0F";
+        editBtn.addEventListener("click", function (ev) {
+          ev.stopPropagation();
+          openAssetEditSheet(reg);
+        });
+        wrap.appendChild(editBtn);
+      }
+      list.appendChild(wrap);
     }
     addRow("", "Tümü");
     sorted.forEach(function (c) {
@@ -1266,7 +1402,7 @@
   }
 
   function updateRegisteredAssetLabel(assetId, labelRaw) {
-    var err = document.getElementById("pc-asset-manage-err");
+    var err = assetEditErrEl();
     var label = String(labelRaw || "").trim();
     if (err) { err.hidden = true; err.textContent = ""; }
     if (label.length > 64) {
@@ -1279,6 +1415,8 @@
     }).then(function () {
       return loadRegisteredAssets().then(function () {
         renderAssetManageList();
+        closeAssetEditSheet();
+        renderAssetPicker(state.summaryByCurrency || []);
         applySummaryBoxes();
         renderList();
       });
@@ -1289,7 +1427,7 @@
   }
 
   function deleteRegisteredAsset(asset) {
-    var err = document.getElementById("pc-asset-manage-err");
+    var err = assetEditErrEl();
     if (err) { err.hidden = true; err.textContent = ""; }
     var used = assetUsedInTransactions(asset.code);
     var msg =
@@ -1305,9 +1443,10 @@
       return loadRegisteredAssets().then(function () {
         if (wasFilter && !assetUsedInTransactions(asset.code)) {
           state.assetFilter = null;
-          updateAssetPickerTrigger();
-          renderAssetPicker(state.summaryByCurrency || []);
         }
+        updateAssetPickerTrigger();
+        renderAssetPicker(state.summaryByCurrency || []);
+        closeAssetEditSheet();
         renderAssetManageList();
         applySummaryBoxes();
         renderList();
@@ -2275,7 +2414,35 @@
     if (picker && !picker.contains(ev.target)) closeAssetPickerPanel();
   });
   document.addEventListener("keydown", function (ev) {
-    if (ev.key === "Escape") closeAssetPickerPanel();
+    if (ev.key === "Escape") {
+      closeAssetPickerPanel();
+      closeAssetEditSheet();
+    }
+  });
+
+  document.getElementById("pc-asset-edit-close").addEventListener("click", closeAssetEditSheet);
+  document.getElementById("pc-asset-edit-sheet").addEventListener("click", function (ev) {
+    if (ev.target === document.getElementById("pc-asset-edit-sheet")) closeAssetEditSheet();
+  });
+  document.getElementById("pc-asset-edit-save").addEventListener("click", function () {
+    var sheet = document.getElementById("pc-asset-edit-sheet");
+    var assetId = parseInt(sheet && sheet.dataset.assetId, 10);
+    var label = document.getElementById("pc-asset-edit-label").value;
+    if (!assetId) return;
+    updateRegisteredAssetLabel(assetId, label).catch(function () {});
+  });
+  document.getElementById("pc-asset-edit-delete").addEventListener("click", function () {
+    var sheet = document.getElementById("pc-asset-edit-sheet");
+    var code = sheet && sheet.dataset.assetCode;
+    var reg = code ? registeredAssetByCode(code) : null;
+    if (!reg) return;
+    deleteRegisteredAsset(reg).catch(function () {});
+  });
+  document.getElementById("pc-asset-edit-label").addEventListener("keydown", function (ev) {
+    if (ev.key === "Enter") {
+      ev.preventDefault();
+      document.getElementById("pc-asset-edit-save").click();
+    }
   });
 
   document.getElementById("pc-sum-alacak").addEventListener("click", onSumAlacakClick);
