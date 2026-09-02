@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import re
 
-from flask import current_app, g, has_request_context, jsonify, request, session
+from flask import current_app, g, has_request_context, jsonify, redirect, request, session
 from flask_login import logout_user
 
 from db import _TENANT_SCHEMA_RE
@@ -147,16 +147,29 @@ def bind_request_tenant():
     resolved_norm = slug or ""
     if stored_norm == resolved_norm:
         return None
+    # Güvenlik: uyuşmayan oturumu İPTAL ET (başka kiracı/host cookie'si kullanılamaz).
+    # UX: 403 ile kilitlenmek yerine temiz session ile /login'e yönlendir —
+    # böylece /login dahil tüm sayfalar "engel" olmadan yeniden girişe açılır.
     try:
         logout_user()
     except Exception:
         pass
     session.clear()
     session.modified = True
-    path = request.path or ""
-    if "/api/" in path:
-        return jsonify({"ok": False, "mesaj": "Oturum kiracı uyuşmazlığı."}), 403
-    return "Oturum kiracı uyuşmazlığı.", 403
+    path = (request.path or "").rstrip("/") or "/"
+    # Zaten giriş/çıkış sayfasındaysak redirect döngüsü yok; temiz session ile devam.
+    if path in ("/login", "/logout"):
+        return None
+    if "/api/" in (request.path or ""):
+        return (
+            jsonify({
+                "ok": False,
+                "mesaj": "Oturum kiracı uyuşmazlığı; oturum temizlendi. Tekrar giriş yapın.",
+                "login_url": "/login",
+            }),
+            401,
+        )
+    return redirect("/login")
 
 
 def stamp_session_tenant_slug() -> None:
