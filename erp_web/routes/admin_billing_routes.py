@@ -109,8 +109,8 @@ def _meta(val: Any) -> dict:
 
 
 def _paytr_merchant_oid(invoice_id: int) -> str:
-    """PayTR merchant_oid: INV-{invoice_id}-{8 hex nonce} (≤64, eşleştirme anahtarı)."""
-    return f"INV-{int(invoice_id)}-{secrets.token_hex(4)}"
+    """PayTR merchant_oid: INV{invoice_id}{8 hex} — saf alfanümerik (tire yok, ≤64)."""
+    return f"INV{int(invoice_id)}{secrets.token_hex(4)}"
 
 
 def _stamp_paytr_invoice_metadata(row: dict) -> dict:
