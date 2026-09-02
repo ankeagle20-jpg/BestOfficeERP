@@ -328,9 +328,86 @@
   }
   .pc-asset-filter-row {
     display: inline-flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 0.25rem;
     margin-left: 0.35rem;
+    flex: 1 1 8rem;
+    min-width: 0;
+  }
+  .pc-asset-picker {
+    position: relative;
+    display: inline-block;
+    flex: 1 1 6.5rem;
+    min-width: 6.5rem;
+    max-width: 11rem;
+  }
+  .pc-asset-picker-trigger {
+    width: 100%;
+    box-sizing: border-box;
+    text-align: left;
+    border: 1px solid #3d5166;
+    border-radius: 8px;
+    padding: 0.35rem 1.5rem 0.35rem 0.55rem;
+    font-size: 0.92rem;
+    background: #1a2a3a;
+    color: var(--pc-on-dark-muted);
+    cursor: pointer;
+    position: relative;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .pc-asset-picker-trigger::after {
+    content: "▾";
+    position: absolute;
+    right: 0.45rem;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 0.75rem;
+    opacity: 0.75;
+    pointer-events: none;
+  }
+  .pc-asset-picker-panel {
+    position: absolute;
+    z-index: 40;
+    top: calc(100% + 2px);
+    left: 0;
+    min-width: 100%;
+    width: max-content;
+    max-width: min(100vw - 2rem, 18rem);
+    max-height: min(50vh, 16rem);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    background: var(--pc-card);
+    border: 1px solid var(--pc-line);
+    border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
+  }
+  .pc-asset-picker-panel[hidden] { display: none !important; }
+  .pc-asset-picker-list { display: flex; flex-direction: column; }
+  .pc-asset-pick-row {
+    display: block;
+    width: 100%;
+    text-align: left;
+    border: none;
+    background: transparent;
+    padding: 0.65rem 0.75rem;
+    font-size: 0.92rem;
+    color: var(--pc-ink);
+    cursor: pointer;
+    min-height: 44px;
+    border-bottom: 1px solid var(--pc-line);
+    box-sizing: border-box;
+  }
+  .pc-asset-pick-row:last-child { border-bottom: none; }
+  .pc-asset-pick-row[aria-selected="true"] {
+    background: rgba(13, 122, 95, 0.12);
+    font-weight: 600;
+  }
+  .pc-asset-pick-row:hover,
+  .pc-asset-pick-row:focus {
+    background: rgba(13, 122, 95, 0.08);
+    outline: none;
   }
   .pc-btn-asset-add {
     min-width: 1.85rem;
@@ -534,9 +611,12 @@
       <div class="pc-summary-filters">
         <label class="pc-meta" style="margin:0;">Varlık
           <span class="pc-asset-filter-row">
-            <select id="pc-asset-filter" class="pc-fx-select" aria-label="Varlık filtresi">
-              <option value="">Tümü</option>
-            </select>
+            <span class="pc-asset-picker" id="pc-asset-picker">
+              <button type="button" class="pc-asset-picker-trigger" id="pc-asset-picker-trigger" aria-haspopup="listbox" aria-expanded="false" aria-controls="pc-asset-picker-panel" aria-label="Varlık filtresi: Tümü">Tümü</button>
+              <div id="pc-asset-picker-panel" class="pc-asset-picker-panel" hidden role="listbox" aria-label="Varlık filtresi">
+                <div id="pc-asset-picker-list" class="pc-asset-picker-list"></div>
+              </div>
+            </span>
             <button type="button" class="pc-btn pc-btn-ghost pc-btn-asset-add" id="pc-btn-new-asset" title="Yeni varlık kaydet" aria-label="Yeni varlık">+</button>
           </span>
           <button type="button" class="pc-link-btn" id="pc-btn-manage-assets">Varlıkları yönet</button>
@@ -982,10 +1062,48 @@
     return partyPrimaryBalance(p);
   }
 
-  function populateAssetFilterDropdown(byCurrency) {
-    var sel = document.getElementById("pc-asset-filter");
-    if (!sel) return;
-    var prev = state.assetFilter || sel.value || "";
+  function assetPickerTriggerLabel(code) {
+    if (!code) return "Tümü";
+    return assetOptionLabel(code) || code;
+  }
+
+  function updateAssetPickerTrigger() {
+    var trigger = document.getElementById("pc-asset-picker-trigger");
+    if (!trigger) return;
+    var label = assetPickerTriggerLabel(state.assetFilter || "");
+    trigger.textContent = label;
+    trigger.setAttribute("aria-label", "Varlık filtresi: " + label);
+  }
+
+  function closeAssetPickerPanel() {
+    var panel = document.getElementById("pc-asset-picker-panel");
+    var trigger = document.getElementById("pc-asset-picker-trigger");
+    if (panel) panel.hidden = true;
+    if (trigger) trigger.setAttribute("aria-expanded", "false");
+  }
+
+  function openAssetPickerPanel() {
+    var panel = document.getElementById("pc-asset-picker-panel");
+    var trigger = document.getElementById("pc-asset-picker-trigger");
+    if (panel) panel.hidden = false;
+    if (trigger) trigger.setAttribute("aria-expanded", "true");
+  }
+
+  function selectAsset(codeRaw) {
+    var code = String(codeRaw || "").trim().toUpperCase();
+    state.assetFilter = code || null;
+    updateAssetPickerTrigger();
+    renderAssetPicker(state.summaryByCurrency || [], { keepOpen: false, lockFilter: true });
+    closeAssetPickerPanel();
+    applySummaryBoxes();
+    renderList();
+  }
+
+  function renderAssetPicker(byCurrency, opts) {
+    opts = opts || {};
+    var list = document.getElementById("pc-asset-picker-list");
+    if (!list) return;
+    var prev = state.assetFilter || "";
     var seen = {};
     var sorted = [];
     (state.registeredAssets || []).forEach(function (a) {
@@ -1005,20 +1123,38 @@
       if (b === "TRY") return 1;
       return a.localeCompare(b);
     });
-    sel.innerHTML = '<option value="">Tümü</option>';
-    sorted.forEach(function (c) {
-      var o = document.createElement("option");
-      o.value = c;
-      o.textContent = assetOptionLabel(c);
-      sel.appendChild(o);
-    });
-    if (prev && seen[prev]) {
-      sel.value = prev;
+    if (opts.lockFilter) {
+      /* Kullanıcı seçimi — state.assetFilter korunur */
+    } else if (prev && seen[prev]) {
       state.assetFilter = prev;
     } else {
-      sel.value = "";
       state.assetFilter = null;
     }
+    updateAssetPickerTrigger();
+    list.innerHTML = "";
+    function addRow(code, label) {
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "pc-asset-pick-row";
+      btn.setAttribute("role", "option");
+      btn.setAttribute("data-code", code);
+      var selected = (code ? state.assetFilter === code : !state.assetFilter);
+      btn.setAttribute("aria-selected", selected ? "true" : "false");
+      btn.textContent = label;
+      btn.addEventListener("click", function () {
+        selectAsset(code);
+      });
+      list.appendChild(btn);
+    }
+    addRow("", "Tümü");
+    sorted.forEach(function (c) {
+      addRow(c, assetOptionLabel(c));
+    });
+    if (!opts.keepOpen) closeAssetPickerPanel();
+  }
+
+  function populateAssetFilterDropdown(byCurrency) {
+    renderAssetPicker(byCurrency);
   }
 
   function loadRegisteredAssets() {
@@ -1060,10 +1196,10 @@
     }).then(function (j) {
       closeAssetModal();
       return loadRegisteredAssets().then(function () {
-        var sel = document.getElementById("pc-asset-filter");
-        if (sel && j.asset && j.asset.code) {
-          sel.value = j.asset.code;
+        if (j.asset && j.asset.code) {
           state.assetFilter = j.asset.code;
+          updateAssetPickerTrigger();
+          renderAssetPicker(state.summaryByCurrency || []);
           applySummaryBoxes();
           renderList();
         }
@@ -1169,8 +1305,8 @@
       return loadRegisteredAssets().then(function () {
         if (wasFilter && !assetUsedInTransactions(asset.code)) {
           state.assetFilter = null;
-          var sel = document.getElementById("pc-asset-filter");
-          if (sel) sel.value = "";
+          updateAssetPickerTrigger();
+          renderAssetPicker(state.summaryByCurrency || []);
         }
         renderAssetManageList();
         applySummaryBoxes();
@@ -2128,11 +2264,18 @@
   });
 
   document.getElementById("pc-fx-cur").addEventListener("change", loadSummary);
-  document.getElementById("pc-asset-filter").addEventListener("change", function () {
-    var v = (document.getElementById("pc-asset-filter").value || "").trim().toUpperCase();
-    state.assetFilter = v || null;
-    applySummaryBoxes();
-    renderList();
+  document.getElementById("pc-asset-picker-trigger").addEventListener("click", function (ev) {
+    ev.stopPropagation();
+    var panel = document.getElementById("pc-asset-picker-panel");
+    if (panel && panel.hidden) openAssetPickerPanel();
+    else closeAssetPickerPanel();
+  });
+  document.addEventListener("click", function (ev) {
+    var picker = document.getElementById("pc-asset-picker");
+    if (picker && !picker.contains(ev.target)) closeAssetPickerPanel();
+  });
+  document.addEventListener("keydown", function (ev) {
+    if (ev.key === "Escape") closeAssetPickerPanel();
   });
 
   document.getElementById("pc-sum-alacak").addEventListener("click", onSumAlacakClick);
