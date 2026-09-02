@@ -477,46 +477,6 @@
     font-size: 1rem;
     line-height: 1;
   }
-  .pc-link-btn {
-    background: none;
-    border: none;
-    padding: 0;
-    margin: 0.15rem 0 0 0.35rem;
-    font-size: 0.78rem;
-    color: var(--pc-on-dark-muted);
-    cursor: pointer;
-    text-decoration: underline;
-    display: block;
-  }
-  .pc-modal-card-wide { width: min(28rem, 100%); max-height: 80vh; overflow: auto; }
-  .pc-asset-manage-note {
-    font-size: 0.82rem;
-    color: var(--pc-muted);
-    margin: 0 0 0.65rem;
-    line-height: 1.4;
-  }
-  .pc-asset-manage-list { display: flex; flex-direction: column; gap: 0.45rem; }
-  .pc-asset-manage-row {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.35rem 0.5rem;
-    padding: 0.55rem 0;
-    border-bottom: 1px solid var(--pc-line);
-  }
-  .pc-asset-manage-row:last-child { border-bottom: none; }
-  .pc-asset-manage-code { font-weight: 600; min-width: 5.5rem; }
-  .pc-asset-manage-label-inp {
-    flex: 1 1 8rem;
-    min-width: 6rem;
-    box-sizing: border-box;
-    border: 1px solid var(--pc-line);
-    border-radius: 8px;
-    padding: 0.45rem 0.55rem;
-    font-size: 0.92rem;
-  }
-  .pc-asset-manage-actions { display: flex; gap: 0.35rem; flex-wrap: wrap; }
-  .pc-asset-manage-empty { color: var(--pc-muted); font-size: 0.9rem; padding: 0.5rem 0; }
   .pc-summary-boxes {
     display: grid;
     grid-template-columns: 1fr;
@@ -681,7 +641,6 @@
             </span>
             <button type="button" class="pc-btn pc-btn-ghost pc-btn-asset-add" id="pc-btn-new-asset" title="Yeni varlık kaydet" aria-label="Yeni varlık">+</button>
           </span>
-          <button type="button" class="pc-link-btn" id="pc-btn-manage-assets">Varlıkları yönet</button>
         </label>
         <label class="pc-meta" style="margin:0;">Gösterim
           <select id="pc-fx-cur" class="pc-fx-select">
@@ -925,18 +884,6 @@
     </div>
   </div>
 
-  <div id="pc-asset-manage-modal" class="pc-modal" hidden>
-    <div class="pc-modal-card pc-modal-card-wide">
-      <h2>Varlıkları yönet</h2>
-      <p class="pc-asset-manage-note">Kayıtlı varlıkların etiketini düzenleyebilir veya kayıtlı listeden kaldırabilirsiniz. Silme işlemi mevcut hareketleri etkilemez; kod hâlâ işlemlerde kullanılıyorsa Varlık dropdown'unda görünmeye devam eder.</p>
-      <div id="pc-asset-manage-list" class="pc-asset-manage-list"></div>
-      <div id="pc-asset-manage-err" class="pc-err" hidden></div>
-      <div class="pc-modal-actions">
-        <button type="button" class="pc-btn pc-btn-ghost" id="pc-asset-manage-close">Kapat</button>
-      </div>
-    </div>
-  </div>
-
   <div id="pc-asset-edit-sheet" class="pc-asset-edit-sheet" hidden>
     <div class="pc-asset-edit-sheet-card">
       <h2 id="pc-asset-edit-title">Varlık</h2>
@@ -1153,9 +1100,7 @@
   }
 
   function assetEditErrEl() {
-    var sheet = document.getElementById("pc-asset-edit-sheet");
-    if (sheet && !sheet.hidden) return document.getElementById("pc-asset-edit-err");
-    return document.getElementById("pc-asset-manage-err");
+    return document.getElementById("pc-asset-edit-err");
   }
 
   function closeAssetEditSheet() {
@@ -1354,53 +1299,6 @@
     });
   }
 
-  function renderAssetManageList() {
-    var box = document.getElementById("pc-asset-manage-list");
-    if (!box) return;
-    var assets = state.registeredAssets || [];
-    if (!assets.length) {
-      box.innerHTML = '<div class="pc-asset-manage-empty">Henüz kayıtlı varlık yok. "+" ile yeni ekleyebilirsiniz.</div>';
-      return;
-    }
-    box.innerHTML = assets.map(function () {
-      return '<div class="pc-asset-manage-row">' +
-        '<span class="pc-asset-manage-code"></span>' +
-        '<input type="text" class="pc-asset-manage-label-inp" maxlength="64" placeholder="Etiket (isteğe bağlı)">' +
-        '<span class="pc-asset-manage-actions">' +
-        '<button type="button" class="pc-btn pc-btn-ghost pc-asset-manage-save">Kaydet</button>' +
-        '<button type="button" class="pc-btn pc-btn-danger pc-asset-manage-del">Sil</button>' +
-        '</span></div>';
-    }).join("");
-    Array.prototype.forEach.call(box.querySelectorAll(".pc-asset-manage-row"), function (row, i) {
-      var a = assets[i];
-      row.querySelector(".pc-asset-manage-code").textContent = assetOptionLabel(a.code);
-      row.querySelector(".pc-asset-manage-label-inp").value = a.label || "";
-      row.querySelector(".pc-asset-manage-save").addEventListener("click", function () {
-        updateRegisteredAssetLabel(a.id, row.querySelector(".pc-asset-manage-label-inp").value);
-      });
-      row.querySelector(".pc-asset-manage-del").addEventListener("click", function () {
-        deleteRegisteredAsset(a);
-      });
-    });
-  }
-
-  function openAssetManageModal() {
-    var modal = document.getElementById("pc-asset-manage-modal");
-    var err = document.getElementById("pc-asset-manage-err");
-    if (err) { err.hidden = true; err.textContent = ""; }
-    loadRegisteredAssets().then(function () {
-      renderAssetManageList();
-      if (modal) modal.hidden = false;
-    }).catch(function (e) {
-      if (err) { err.textContent = e.message || "Varlıklar yüklenemedi."; err.hidden = false; }
-    });
-  }
-
-  function closeAssetManageModal() {
-    var modal = document.getElementById("pc-asset-manage-modal");
-    if (modal) modal.hidden = true;
-  }
-
   function updateRegisteredAssetLabel(assetId, labelRaw) {
     var err = assetEditErrEl();
     var label = String(labelRaw || "").trim();
@@ -1414,7 +1312,6 @@
       body: { label: label || null }
     }).then(function () {
       return loadRegisteredAssets().then(function () {
-        renderAssetManageList();
         closeAssetEditSheet();
         renderAssetPicker(state.summaryByCurrency || []);
         applySummaryBoxes();
@@ -1447,7 +1344,6 @@
         updateAssetPickerTrigger();
         renderAssetPicker(state.summaryByCurrency || []);
         closeAssetEditSheet();
-        renderAssetManageList();
         applySummaryBoxes();
         renderList();
       });
@@ -2383,17 +2279,12 @@
   });
 
   document.getElementById("pc-btn-new-asset").addEventListener("click", openAssetModal);
-  document.getElementById("pc-btn-manage-assets").addEventListener("click", openAssetManageModal);
   document.getElementById("pc-asset-cancel").addEventListener("click", closeAssetModal);
-  document.getElementById("pc-asset-manage-close").addEventListener("click", closeAssetManageModal);
   document.getElementById("pc-asset-save").addEventListener("click", function () {
     saveRegisteredAsset().catch(function () {});
   });
   document.getElementById("pc-asset-modal").addEventListener("click", function (ev) {
     if (ev.target === document.getElementById("pc-asset-modal")) closeAssetModal();
-  });
-  document.getElementById("pc-asset-manage-modal").addEventListener("click", function (ev) {
-    if (ev.target === document.getElementById("pc-asset-manage-modal")) closeAssetManageModal();
   });
   document.getElementById("pc-asset-code").addEventListener("keydown", function (ev) {
     if (ev.key === "Enter") {
