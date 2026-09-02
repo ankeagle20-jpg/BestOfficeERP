@@ -8,6 +8,7 @@ import io
 import json
 import logging
 import re
+import secrets
 from decimal import Decimal, InvalidOperation
 from functools import wraps
 from typing import Any
@@ -27,9 +28,10 @@ MSG_PLATFORM_ONLY = (
 
 SUB_STATUSES = frozenset({"trial", "active", "past_due", "suspended", "cancelled"})
 SUB_CYCLES = frozenset({"monthly", "yearly", "one_time"})
-PAY_METHODS = frozenset({"bank_transfer", "card", "manual", "other"})
+# paytr: gateway semantiği (card = kart enstrümanı; stripe/iyzico kaynağı gibi ayrışır)
+PAY_METHODS = frozenset({"bank_transfer", "card", "manual", "other", "paytr"})
 INV_STATUSES = frozenset({"draft", "sent", "paid", "overdue", "void"})
-INV_SOURCES = frozenset({"manual", "stripe", "iyzico", "other"})
+INV_SOURCES = frozenset({"manual", "stripe", "iyzico", "other", "paytr"})
 OPEN_INV_STATUSES = frozenset({"sent", "overdue"})
 
 _CURRENCY_RE = re.compile(r"^[A-Z]{3}$")
@@ -104,6 +106,29 @@ def _meta(val: Any) -> dict:
         except json.JSONDecodeError:
             return {}
     return {}
+
+
+def _paytr_merchant_oid(invoice_id: int) -> str:
+    """PayTR merchant_oid: INV-{invoice_id}-{8 hex nonce} (≤64, eşleştirme anahtarı)."""
+    return f"INV-{int(invoice_id)}-{secrets.token_hex(4)}"
+
+
+def _stamp_paytr_invoice_metadata(row: dict) -> dict:
+    """source=paytr faturasına metadata.merchant_oid yazar; satırı günceller."""
+    inv_id = int(row["id"])
+    meta = _meta(row.get("metadata"))
+    merchant_oid = _paytr_merchant_oid(inv_id)
+    meta["merchant_oid"] = merchant_oid
+    updated = execute_returning(
+        """
+        UPDATE public.platform_tenant_invoices
+        SET metadata=%s::jsonb, updated_at=NOW()
+        WHERE id=%s
+        RETURNING *
+        """,
+        (json.dumps(meta), inv_id),
+    )
+    return updated or row
 
 
 def _serialize_row(row: dict | None) -> dict | None:
@@ -429,6 +454,8 @@ def api_invoices_create():
                 json.dumps(meta),
             ),
         )
+        if row and source == "paytr":
+            row = _stamp_paytr_invoice_metadata(row)
         return jsonify({"ok": True, "item": _serialize_row(row)}), 201
     except ValueError as e:
         return jsonify({"ok": False, "mesaj": str(e)}), 400

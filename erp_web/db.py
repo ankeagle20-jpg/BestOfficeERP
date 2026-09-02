@@ -3571,7 +3571,7 @@ def ensure_platform_tenant_billing_tables():
             CONSTRAINT platform_tenant_subscriptions_cycle_chk
                 CHECK (billing_cycle IN ('monthly', 'yearly', 'one_time')),
             CONSTRAINT platform_tenant_subscriptions_method_chk
-                CHECK (payment_method IN ('bank_transfer', 'card', 'manual', 'other')),
+                CHECK (payment_method IN ('bank_transfer', 'card', 'manual', 'other', 'paytr')),
             CONSTRAINT platform_tenant_subscriptions_currency_chk
                 CHECK (currency ~ '^[A-Z]{3}$'),
             CONSTRAINT platform_tenant_subscriptions_slug_chk
@@ -3609,7 +3609,7 @@ def ensure_platform_tenant_billing_tables():
             CONSTRAINT platform_tenant_invoices_status_chk
                 CHECK (status IN ('draft', 'sent', 'paid', 'overdue', 'void')),
             CONSTRAINT platform_tenant_invoices_source_chk
-                CHECK (source IN ('manual', 'stripe', 'iyzico', 'other')),
+                CHECK (source IN ('manual', 'stripe', 'iyzico', 'other', 'paytr')),
             CONSTRAINT platform_tenant_invoices_currency_chk
                 CHECK (currency ~ '^[A-Z]{3}$'),
             CONSTRAINT platform_tenant_invoices_slug_chk
@@ -3645,7 +3645,7 @@ def ensure_platform_tenant_billing_tables():
             created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             CONSTRAINT platform_tenant_payments_method_chk
-                CHECK (method IN ('bank_transfer', 'card', 'manual', 'other')),
+                CHECK (method IN ('bank_transfer', 'card', 'manual', 'other', 'paytr')),
             CONSTRAINT platform_tenant_payments_currency_chk
                 CHECK (currency ~ '^[A-Z]{3}$'),
             CONSTRAINT platform_tenant_payments_slug_chk
@@ -3681,6 +3681,42 @@ def ensure_platform_tenant_billing_tables():
             execute(stmt)
         except Exception as e:
             print(f"platform billing index: {e}")
+
+    # PayTR Aşama 2: CHECK listelerine 'paytr' ekle (CREATE IF NOT EXISTS mevcut
+    # constraint'i güncellemez). DROP+ADD mevcut satır değerlerine dokunmaz;
+    # yalnızca izin verilen değer kümesini genişletir.
+    for stmt in (
+        "ALTER TABLE public.platform_tenant_invoices "
+        "DROP CONSTRAINT IF EXISTS platform_tenant_invoices_source_chk",
+        """
+        ALTER TABLE public.platform_tenant_invoices
+        ADD CONSTRAINT platform_tenant_invoices_source_chk
+            CHECK (source IN ('manual', 'stripe', 'iyzico', 'other', 'paytr'))
+        """,
+        "ALTER TABLE public.platform_tenant_subscriptions "
+        "DROP CONSTRAINT IF EXISTS platform_tenant_subscriptions_method_chk",
+        """
+        ALTER TABLE public.platform_tenant_subscriptions
+        ADD CONSTRAINT platform_tenant_subscriptions_method_chk
+            CHECK (payment_method IN (
+                'bank_transfer', 'card', 'manual', 'other', 'paytr'
+            ))
+        """,
+        # PAY_METHODS paytr içeriyor; payments CHECK aynı olmalı (Aşama 3 hazırlığı)
+        "ALTER TABLE public.platform_tenant_payments "
+        "DROP CONSTRAINT IF EXISTS platform_tenant_payments_method_chk",
+        """
+        ALTER TABLE public.platform_tenant_payments
+        ADD CONSTRAINT platform_tenant_payments_method_chk
+            CHECK (method IN (
+                'bank_transfer', 'card', 'manual', 'other', 'paytr'
+            ))
+        """,
+    ):
+        try:
+            execute(stmt)
+        except Exception as e:
+            print(f"platform billing paytr chk migrate: {e}")
 
 
 def ensure_platform_support_tables():
