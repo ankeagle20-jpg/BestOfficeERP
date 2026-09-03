@@ -2,6 +2,7 @@
 """Admin: Platform kiracı faturalama API (yalnız public host) — B1/B3."""
 from __future__ import annotations
 
+import base64
 import csv
 import datetime as dt
 import io
@@ -9,14 +10,24 @@ import json
 import logging
 import re
 import secrets
+import urllib.error
+import urllib.parse
+import urllib.request
 from decimal import Decimal, InvalidOperation
 from functools import wraps
 from typing import Any
 
 from flask import Blueprint, Response, g, jsonify, request
+from flask_login import current_user
 
 from auth import admin_gerekli
+from credentials_vault import get_credential
 from db import execute, execute_returning, fetch_all, fetch_one
+from paytr_client import (
+    PAYTR_GET_TOKEN_URL,
+    PaytrClientError,
+    build_get_token_request,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +140,73 @@ def _stamp_paytr_invoice_metadata(row: dict) -> dict:
         (json.dumps(meta), inv_id),
     )
     return updated or row
+
+
+def _client_ip() -> str:
+    xff = (request.headers.get("X-Forwarded-For") or "").strip()
+    if xff:
+        return (xff.split(",")[0].strip() or "127.0.0.1")[:39]
+    return (request.remote_addr or "127.0.0.1")[:39]
+
+
+def _paytr_currency_for_api(db_currency: str) -> str:
+    """DB TRY → PayTR TL; diğerleri olduğu gibi."""
+    c = (db_currency or "TRY").strip().upper()
+    if c == "TRY":
+        return "TL"
+    return c
+
+
+def _paytr_test_mode_from_vault() -> str:
+    """paytr.mode: live→0, aksi/test/boş→1 (güvenli varsayılan: test)."""
+    mode = (get_credential("paytr.mode") or "").strip().lower()
+    if mode in ("live", "production", "prod"):
+        return "0"
+    return "1"
+
+
+def _paytr_payer_fields(invoice: dict, data: dict) -> dict[str, str]:
+    """Plan önceliği: istek body → tenant contact → placeholder."""
+    slug = str(invoice.get("tenant_slug") or "").strip() or "tenant"
+    email = str(data.get("email") or "").strip()
+    user_name = str(data.get("user_name") or "").strip()
+    user_address = str(data.get("user_address") or "").strip()
+    user_phone = str(data.get("user_phone") or "").strip()
+
+    tenant = fetch_one(
+        "SELECT slug, company_name FROM public.tenants WHERE id=%s",
+        (int(invoice["tenant_id"]),),
+    )
+    if not user_name:
+        user_name = str((tenant or {}).get("company_name") or "").strip() or slug
+
+    if not email:
+        lu = fetch_one(
+            """
+            SELECT email FROM public.tenant_user_lookup
+            WHERE tenant_slug=%s
+            ORDER BY id ASC
+            LIMIT 1
+            """,
+            (slug,),
+        )
+        email = str((lu or {}).get("email") or "").strip()
+    if not email:
+        email = str(getattr(current_user, "email", None) or "").strip()
+    if not email:
+        email = f"billing+{slug}@payafin.com"
+
+    if not user_address:
+        user_address = "TR"
+    if not user_phone:
+        user_phone = "05000000000"
+
+    return {
+        "email": email,
+        "user_name": user_name[:60],
+        "user_address": user_address[:200],
+        "user_phone": user_phone[:20],
+    }
 
 
 def _serialize_row(row: dict | None) -> dict | None:
@@ -462,6 +540,132 @@ def api_invoices_create():
     except Exception as e:
         logger.exception("invoices create")
         return jsonify({"ok": False, "mesaj": str(e)}), 500
+
+
+@bp.route("/api/billing/invoices/<int:invoice_id>/paytr-init", methods=["POST"])
+@platform_billing_admin
+def api_invoices_paytr_init(invoice_id: int):
+    """PayTR Aşama 3.2: faturadan get-token; secret dönmez; ödeme onayı değil."""
+    try:
+        row = fetch_one(
+            "SELECT * FROM public.platform_tenant_invoices WHERE id=%s",
+            (invoice_id,),
+        )
+        if not row:
+            return jsonify({"ok": False, "mesaj": "fatura bulunamadı"}), 404
+
+        source = str(row.get("source") or "").strip().lower()
+        status = str(row.get("status") or "").strip().lower()
+        if source != "paytr":
+            return jsonify({"ok": False, "mesaj": "fatura source paytr olmalı"}), 400
+        if status in ("paid", "void"):
+            return jsonify({"ok": False, "mesaj": f"fatura durumu init için uygun değil: {status}"}), 409
+
+        meta = _meta(row.get("metadata"))
+        merchant_oid = str(meta.get("merchant_oid") or "").strip()
+        if not merchant_oid:
+            return jsonify({"ok": False, "mesaj": "metadata.merchant_oid yok (A2 damgası gerekli)"}), 400
+        if not merchant_oid.isalnum():
+            return jsonify({"ok": False, "mesaj": "merchant_oid alfanümerik olmalı"}), 400
+
+        total_gross = Decimal(str(row.get("total_gross") or 0))
+        kurus = int(round(float(total_gross) * 100))
+        if kurus <= 0:
+            return jsonify({"ok": False, "mesaj": "total_gross sıfırdan büyük olmalı"}), 400
+        payment_amount_kurus = str(kurus)
+
+        data = request.get_json(silent=True) or {}
+        payer = _paytr_payer_fields(row, data)
+        test_mode = _paytr_test_mode_from_vault()
+        currency = _paytr_currency_for_api(str(row.get("currency") or "TRY"))
+        invoice_no = str(row.get("invoice_no") or "Payafin fatura").strip() or "Payafin fatura"
+        display_amt = f"{total_gross.quantize(Decimal('0.01'))}"
+        user_basket = base64.b64encode(
+            json.dumps([[invoice_no, display_amt, 1]], ensure_ascii=False).encode()
+        ).decode()
+
+        form = build_get_token_request(
+            merchant_oid=merchant_oid,
+            payment_amount_kurus=payment_amount_kurus,
+            currency=currency,
+            user_ip=_client_ip(),
+            email=payer["email"],
+            user_basket=user_basket,
+            user_name=payer["user_name"],
+            user_address=payer["user_address"],
+            user_phone=payer["user_phone"],
+            merchant_ok_url="https://payafin.com/billing/paytr/ok",
+            merchant_fail_url="https://payafin.com/billing/paytr/fail",
+            test_mode=test_mode,
+            no_installment="0",
+            max_installment="0",
+            timeout_limit="30",
+            debug_on="1" if test_mode == "1" else "0",
+            lang="tr",
+        )
+
+        try:
+            body = urllib.parse.urlencode(form).encode()
+            req = urllib.request.Request(
+                PAYTR_GET_TOKEN_URL,
+                data=body,
+                method="POST",
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+            with urllib.request.urlopen(req, timeout=25) as resp:
+                raw = resp.read().decode("utf-8", errors="replace")
+            paytr_json = json.loads(raw) if raw else {}
+        except urllib.error.HTTPError as e:
+            raw = ""
+            try:
+                raw = e.read().decode("utf-8", errors="replace")
+                paytr_json = json.loads(raw) if raw else {}
+            except Exception:
+                paytr_json = {}
+            logger.warning(
+                "paytr-init HTTPError invoice_id=%s code=%s",
+                invoice_id,
+                getattr(e, "code", None),
+            )
+        except Exception as e:
+            logger.exception("paytr-init network invoice_id=%s", invoice_id)
+            return jsonify({"ok": False, "mesaj": f"PayTR bağlantı hatası: {type(e).__name__}"}), 502
+
+        paytr_status = str(paytr_json.get("status") or "").strip().lower()
+        reason = paytr_json.get("reason")
+        token = paytr_json.get("token")
+
+        if paytr_status != "success" or not token:
+            mesaj = str(reason).strip() if reason is not None else "PayTR token alınamadı"
+            return jsonify({"ok": False, "mesaj": mesaj, "paytr_status": paytr_status or "failed"}), 400
+
+        meta["paytr_init_at"] = dt.datetime.now(dt.timezone.utc).isoformat()
+        meta["payment_amount_kurus"] = payment_amount_kurus
+        execute(
+            """
+            UPDATE public.platform_tenant_invoices
+            SET metadata=%s::jsonb, updated_at=NOW()
+            WHERE id=%s
+            """,
+            (json.dumps(meta), invoice_id),
+        )
+
+        return jsonify(
+            {
+                "ok": True,
+                "token": str(token),
+                "merchant_oid": merchant_oid,
+                "payment_amount_kurus": payment_amount_kurus,
+                "test_mode": test_mode,
+            }
+        )
+    except PaytrClientError as e:
+        return jsonify({"ok": False, "mesaj": str(e)}), 400
+    except ValueError as e:
+        return jsonify({"ok": False, "mesaj": str(e)}), 400
+    except Exception as e:
+        logger.exception("paytr-init invoice_id=%s", invoice_id)
+        return jsonify({"ok": False, "mesaj": type(e).__name__}), 500
 
 
 # ── Payments ────────────────────────────────────────────────────
