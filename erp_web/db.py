@@ -3718,6 +3718,20 @@ def ensure_platform_tenant_billing_tables():
         except Exception as e:
             print(f"platform billing paytr chk migrate: {e}")
 
+    # PayTR Aşama 3.5: aynı merchant_oid için çift payment INSERT'e karşı
+    # son savunma (race: iki callback aynı anda). Yalnız method='paytr'.
+    try:
+        execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS
+                platform_tenant_payments_paytr_reference_uidx
+            ON public.platform_tenant_payments (reference)
+            WHERE method = 'paytr'
+            """
+        )
+    except Exception as e:
+        print(f"platform billing paytr reference uidx: {e}")
+
 
 def ensure_platform_support_tables():
     """Platform destek talepleri: tickets + events (yalnız public) — Sistem 2 / S1.

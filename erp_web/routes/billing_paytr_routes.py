@@ -1,7 +1,12 @@
 # -*- coding: utf-8 -*-
-"""PayTR ödeme sayfaları + callback dry-run — yalnızca public host."""
+"""PayTR ödeme sayfaları + callback — yalnızca public host.
+
+Aşama 3.5: PAYTR_CALLBACK_APPLY=true iken tek transaction ile payment+paid;
+varsayılan false → dry-run (yalnız log, yazma yok).
+"""
 from __future__ import annotations
 
+import json
 import logging
 import os
 from decimal import Decimal
@@ -9,8 +14,10 @@ from functools import wraps
 
 from flask import Blueprint, Response, abort, g, render_template, request
 from flask_login import current_user
+from psycopg2.errors import UniqueViolation
 
 from auth import admin_gerekli
+from db import db as db_tx
 from db import fetch_one
 from paytr_client import verify_callback_signature
 from routes.admin_billing_routes import run_paytr_init
@@ -46,8 +53,6 @@ def _meta_dict(val) -> dict:
     if isinstance(val, dict):
         return val
     if isinstance(val, str):
-        import json
-
         try:
             parsed = json.loads(val)
             return parsed if isinstance(parsed, dict) else {}
@@ -56,8 +61,70 @@ def _meta_dict(val) -> dict:
     return {}
 
 
+def _oid_mask(oid: str) -> str:
+    if not oid:
+        return "(empty)"
+    if len(oid) >= 8:
+        return oid[:8] + "***"
+    return "(short)"
+
+
 def _plain_ok() -> Response:
     return Response("OK", status=200, mimetype="text/plain")
+
+
+def _record_paytr_paid(inv: dict, merchant_oid: str, status: str) -> str:
+    """Tek transaction: payment INSERT + invoice paid. Dönüş: recorded|already.
+
+    UniqueViolation (race) → already (idempotent, hata yükseltmez).
+    """
+    payment_type = (request.form.get("payment_type") or "").strip() or None
+    test_mode = (request.form.get("test_mode") or "").strip() or None
+    pay_meta = {
+        "merchant_oid": merchant_oid,
+        "status": status,
+    }
+    if test_mode is not None:
+        pay_meta["test_mode"] = test_mode
+    if payment_type is not None:
+        pay_meta["payment_type"] = payment_type
+
+    try:
+        with db_tx() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO public.platform_tenant_payments (
+                    tenant_id, tenant_slug, invoice_id, amount, currency,
+                    paid_at, method, reference, metadata
+                ) VALUES (
+                    %s, %s, %s, %s, %s,
+                    NOW(), 'paytr', %s, %s::jsonb
+                )
+                """,
+                (
+                    inv["tenant_id"],
+                    inv["tenant_slug"],
+                    inv["id"],
+                    inv["total_gross"],
+                    inv.get("currency") or "TRY",
+                    merchant_oid,
+                    json.dumps(pay_meta),
+                ),
+            )
+            cur.execute(
+                """
+                UPDATE public.platform_tenant_invoices
+                SET status = 'paid',
+                    paid_at = NOW(),
+                    updated_at = NOW()
+                WHERE id = %s
+                """,
+                (inv["id"],),
+            )
+        return "recorded"
+    except UniqueViolation:
+        return "already"
 
 
 @bp.route("/billing/paytr/pay/<int:invoice_id>", methods=["GET"])
@@ -153,10 +220,12 @@ def paytr_fail_page():
 @bp.route("/billing/paytr/callback", methods=["POST"])
 @platform_host_only
 def paytr_callback():
-    """PayTR bildirim URL — Aşama 3.4 dry-run: yazma YOK, her zaman düz metin OK.
+    """PayTR bildirim URL — Aşama 3.5.
 
     Auth yok (PayTR sunucu→sunucu). CSRF yok (form POST, session taşımaz).
-    PAYTR_CALLBACK_APPLY=true olsa bile 3.4'te INSERT/UPDATE yapılmaz (3.5).
+    Varsayılan PAYTR_CALLBACK_APPLY=false → dry-run (yalnız log).
+    true → tek transaction payment INSERT + invoice paid; UniqueViolation → OK.
+    Her durumda düz metin OK (PayTR yeniden denemesini kesmek için).
     """
     merchant_oid = (request.form.get("merchant_oid") or "").strip()
     status = (request.form.get("status") or "").strip()
@@ -177,7 +246,7 @@ def paytr_callback():
     if not verify_callback_signature(merchant_oid, status, total_amount, received_hash):
         logger.warning(
             "paytr_callback WOULD_REJECT_BAD_HASH oid_prefix=%s status=%s",
-            (merchant_oid[:8] + "***") if len(merchant_oid) >= 8 else "(short)",
+            _oid_mask(merchant_oid),
             status or "(empty)",
         )
         return _plain_ok()
@@ -198,7 +267,7 @@ def paytr_callback():
     if not inv:
         logger.warning(
             "paytr_callback WOULD_SKIP_INVOICE_NOT_FOUND oid_prefix=%s",
-            merchant_oid[:8] + "***",
+            _oid_mask(merchant_oid),
         )
         return _plain_ok()
 
@@ -229,7 +298,7 @@ def paytr_callback():
         logger.info(
             "paytr_callback WOULD_SKIP_ALREADY_PAID invoice_id=%s oid_prefix=%s",
             inv_id,
-            merchant_oid[:8] + "***",
+            _oid_mask(merchant_oid),
         )
         return _plain_ok()
 
@@ -258,14 +327,27 @@ def paytr_callback():
         )
         return _plain_ok()
 
-    # Başarılı yol — 3.4: yalnızca log (DB yazma yok)
+    # Başarılı yol — feature flag: yazım veya dry-run
     if apply_flag:
-        logger.warning(
-            "paytr_callback PAYTR_CALLBACK_APPLY=true ama 3.4 dry-run; "
-            "yazım 3.5'te açılacak. WOULD_MARK_PAID invoice_id=%s amount_kurus=%s",
+        logger.info(
+            "paytr_callback WOULD_MARK_PAID invoice_id=%s amount_kurus=%s apply_flag=true",
             inv_id,
             total_amount,
         )
+        outcome = _record_paytr_paid(inv, merchant_oid, status)
+        if outcome == "already":
+            logger.info(
+                "paytr_callback ALREADY_PROCESSED (unique race) invoice_id=%s oid_prefix=%s",
+                inv_id,
+                _oid_mask(merchant_oid),
+            )
+        else:
+            logger.info(
+                "paytr_callback PAID_RECORDED invoice_id=%s tenant_id=%s oid_prefix=%s",
+                inv_id,
+                inv.get("tenant_id"),
+                _oid_mask(merchant_oid),
+            )
     else:
         logger.info(
             "paytr_callback WOULD_MARK_PAID invoice_id=%s tenant_id=%s "
