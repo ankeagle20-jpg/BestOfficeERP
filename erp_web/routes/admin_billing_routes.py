@@ -546,35 +546,56 @@ def api_invoices_create():
 @platform_billing_admin
 def api_invoices_paytr_init(invoice_id: int):
     """PayTR Aşama 3.2: faturadan get-token; secret dönmez; ödeme onayı değil."""
+    _ok, http_status, payload = run_paytr_init(
+        invoice_id, data=request.get_json(silent=True) or {}
+    )
+    return jsonify(payload), http_status
+
+
+def run_paytr_init(
+    invoice_id: int, *, data: dict | None = None
+) -> tuple[bool, int, dict[str, Any]]:
+    """PayTR get-token + metadata damgası. (ok, http_status, payload) — secret yok.
+
+    HTML ödeme sayfası ve JSON init API ortak kullanır.
+    """
+    data = data or {}
     try:
         row = fetch_one(
             "SELECT * FROM public.platform_tenant_invoices WHERE id=%s",
             (invoice_id,),
         )
         if not row:
-            return jsonify({"ok": False, "mesaj": "fatura bulunamadı"}), 404
+            return False, 404, {"ok": False, "mesaj": "fatura bulunamadı"}
 
         source = str(row.get("source") or "").strip().lower()
         status = str(row.get("status") or "").strip().lower()
         if source != "paytr":
-            return jsonify({"ok": False, "mesaj": "fatura source paytr olmalı"}), 400
+            return False, 400, {"ok": False, "mesaj": "fatura source paytr olmalı"}
         if status in ("paid", "void"):
-            return jsonify({"ok": False, "mesaj": f"fatura durumu init için uygun değil: {status}"}), 409
+            return (
+                False,
+                409,
+                {"ok": False, "mesaj": f"fatura durumu init için uygun değil: {status}"},
+            )
 
         meta = _meta(row.get("metadata"))
         merchant_oid = str(meta.get("merchant_oid") or "").strip()
         if not merchant_oid:
-            return jsonify({"ok": False, "mesaj": "metadata.merchant_oid yok (A2 damgası gerekli)"}), 400
+            return (
+                False,
+                400,
+                {"ok": False, "mesaj": "metadata.merchant_oid yok (A2 damgası gerekli)"},
+            )
         if not merchant_oid.isalnum():
-            return jsonify({"ok": False, "mesaj": "merchant_oid alfanümerik olmalı"}), 400
+            return False, 400, {"ok": False, "mesaj": "merchant_oid alfanümerik olmalı"}
 
         total_gross = Decimal(str(row.get("total_gross") or 0))
         kurus = int(round(float(total_gross) * 100))
         if kurus <= 0:
-            return jsonify({"ok": False, "mesaj": "total_gross sıfırdan büyük olmalı"}), 400
+            return False, 400, {"ok": False, "mesaj": "total_gross sıfırdan büyük olmalı"}
         payment_amount_kurus = str(kurus)
 
-        data = request.get_json(silent=True) or {}
         payer = _paytr_payer_fields(row, data)
         test_mode = _paytr_test_mode_from_vault()
         currency = _paytr_currency_for_api(str(row.get("currency") or "TRY"))
@@ -616,7 +637,6 @@ def api_invoices_paytr_init(invoice_id: int):
                 raw = resp.read().decode("utf-8", errors="replace")
             paytr_json = json.loads(raw) if raw else {}
         except urllib.error.HTTPError as e:
-            raw = ""
             try:
                 raw = e.read().decode("utf-8", errors="replace")
                 paytr_json = json.loads(raw) if raw else {}
@@ -629,7 +649,11 @@ def api_invoices_paytr_init(invoice_id: int):
             )
         except Exception as e:
             logger.exception("paytr-init network invoice_id=%s", invoice_id)
-            return jsonify({"ok": False, "mesaj": f"PayTR bağlantı hatası: {type(e).__name__}"}), 502
+            return (
+                False,
+                502,
+                {"ok": False, "mesaj": f"PayTR bağlantı hatası: {type(e).__name__}"},
+            )
 
         paytr_status = str(paytr_json.get("status") or "").strip().lower()
         reason = paytr_json.get("reason")
@@ -637,7 +661,15 @@ def api_invoices_paytr_init(invoice_id: int):
 
         if paytr_status != "success" or not token:
             mesaj = str(reason).strip() if reason is not None else "PayTR token alınamadı"
-            return jsonify({"ok": False, "mesaj": mesaj, "paytr_status": paytr_status or "failed"}), 400
+            return (
+                False,
+                400,
+                {
+                    "ok": False,
+                    "mesaj": mesaj,
+                    "paytr_status": paytr_status or "failed",
+                },
+            )
 
         meta["paytr_init_at"] = dt.datetime.now(dt.timezone.utc).isoformat()
         meta["payment_amount_kurus"] = payment_amount_kurus
@@ -650,22 +682,32 @@ def api_invoices_paytr_init(invoice_id: int):
             (json.dumps(meta), invoice_id),
         )
 
-        return jsonify(
+        return (
+            True,
+            200,
             {
                 "ok": True,
                 "token": str(token),
                 "merchant_oid": merchant_oid,
                 "payment_amount_kurus": payment_amount_kurus,
                 "test_mode": test_mode,
-            }
+                "invoice": {
+                    "id": int(row["id"]),
+                    "invoice_no": invoice_no,
+                    "currency": str(row.get("currency") or "TRY"),
+                    "total_gross": float(total_gross),
+                    "status": status,
+                    "tenant_slug": str(row.get("tenant_slug") or ""),
+                },
+            },
         )
     except PaytrClientError as e:
-        return jsonify({"ok": False, "mesaj": str(e)}), 400
+        return False, 400, {"ok": False, "mesaj": str(e)}
     except ValueError as e:
-        return jsonify({"ok": False, "mesaj": str(e)}), 400
+        return False, 400, {"ok": False, "mesaj": str(e)}
     except Exception as e:
         logger.exception("paytr-init invoice_id=%s", invoice_id)
-        return jsonify({"ok": False, "mesaj": type(e).__name__}), 500
+        return False, 500, {"ok": False, "mesaj": type(e).__name__}
 
 
 # ── Payments ────────────────────────────────────────────────────

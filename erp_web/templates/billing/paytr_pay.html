@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Payafin — Ödeme</title>
+  <style>
+    :root {
+      --bg: #0b1220;
+      --panel: #f8fafc;
+      --text: #0f172a;
+      --muted: #64748b;
+      --accent: #1d4ed8;
+      --warn-bg: #fff7ed;
+      --warn-border: #fdba74;
+      --warn-text: #9a3412;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: linear-gradient(160deg, #0b1220 0%, #1e293b 50%, #0b1220 100%);
+      color: var(--text);
+    }
+    .wrap {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 28px 16px 48px;
+    }
+    .brand {
+      color: #e2e8f0;
+      font-size: 1.75rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin: 0 0 8px;
+    }
+    .sub {
+      color: #94a3b8;
+      font-size: 0.95rem;
+      margin: 0 0 20px;
+    }
+    .panel {
+      background: var(--panel);
+      border-radius: 14px;
+      padding: 20px 18px 28px;
+      box-shadow: 0 12px 40px rgba(0,0,0,.25);
+    }
+    .meta {
+      display: grid;
+      gap: 8px;
+      margin-bottom: 16px;
+      font-size: 0.95rem;
+    }
+    .meta strong { font-weight: 600; }
+    .oid {
+      font-family: ui-monospace, Consolas, monospace;
+      font-size: 0.8rem;
+      color: var(--muted);
+      word-break: break-all;
+    }
+    .warn {
+      background: var(--warn-bg);
+      border: 1px solid var(--warn-border);
+      color: var(--warn-text);
+      border-radius: 10px;
+      padding: 12px 14px;
+      font-size: 0.9rem;
+      margin-bottom: 18px;
+      line-height: 1.45;
+    }
+    #paytriframe {
+      width: 100%;
+      min-height: 480px;
+      border: 0;
+      background: #fff;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <p class="brand">Payafin</p>
+    <p class="sub">Platform fatura ödemesi</p>
+    <div class="panel">
+      <div class="warn">
+        Ödeme onayı bu sayfada değil; banka/PayTR bildirimi sonrası sistemde görünür.
+        Bu ekran yalnızca kart girişini gösterir.
+      </div>
+      <div class="meta">
+        <div><strong>Fatura:</strong> {{ invoice_no }}</div>
+        <div><strong>Tutar:</strong> {{ '%.2f'|format(total_gross or 0) }} {{ currency }}</div>
+        <div class="oid">merchant_oid: {{ merchant_oid }}</div>
+      </div>
+      <iframe
+        src="https://www.paytr.com/odeme/guvenli/{{ token }}"
+        id="paytriframe"
+        frameborder="0"
+        scrolling="no"
+        allowfullscreen
+        title="PayTR ödeme"
+      ></iframe>
+    </div>
+  </div>
+  <script src="https://www.paytr.com/js/iframeResizer.min.js"></script>
+  <script>
+    if (typeof iFrameResize === "function") {
+      iFrameResize({ log: false, checkOrigin: false }, "#paytriframe");
+    }
+  </script>
+</body>
+</html>
