@@ -542,25 +542,6 @@ def api_invoices_create():
         return jsonify({"ok": False, "mesaj": str(e)}), 500
 
 
-# TEMP — PayTR mode doğrulama (init/ödeme YOK). Doğrulama sonrası KALDIRILACAK.
-@bp.route("/api/billing/paytr-mode-check", methods=["GET"])
-@platform_billing_admin
-def api_billing_paytr_mode_check():
-    """Salt okuma: paytr.mode + test_mode bayrağı. PayTR API çağrısı yok."""
-    mode_raw = (get_credential("paytr.mode") or "").strip()
-    test_mode = _paytr_test_mode_from_vault()
-    return jsonify(
-        {
-            "ok": True,
-            "paytr_mode": mode_raw or None,
-            "paytr_mode_normalized": (mode_raw or "").strip().lower() or None,
-            "test_mode": test_mode,
-            "is_live": test_mode == "0",
-            "paytr_api_called": False,
-        }
-    )
-
-
 @bp.route("/api/billing/invoices/<int:invoice_id>/paytr-init", methods=["POST"])
 @platform_billing_admin
 def api_invoices_paytr_init(invoice_id: int):
