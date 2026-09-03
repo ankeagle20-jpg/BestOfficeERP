@@ -138,6 +138,19 @@
     background:#3a1a1a; border:1px solid #6a2d2d; color:#ff8a80;
     border-radius:6px; padding:10px 12px; margin-bottom:12px;
   }
+
+  /* PayTR Aşama 3.6 — fatura satırı aksiyonu */
+  .paytr-pay-btn {
+    display:inline-block; background:#0f2537; border:1px solid #254b77; color:#90caf9;
+    border-radius:6px; padding:4px 10px; font-size:.75rem; font-weight:600;
+    text-decoration:none; white-space:nowrap; cursor:pointer;
+  }
+  .paytr-pay-btn:hover { background:#1565c0; color:#fff; border-color:#1565c0; }
+  .paytr-paid-badge {
+    display:inline-block; padding:2px 8px; border-radius:4px;
+    background:#1b5e20; color:#a5d6a7; font-size:.72rem; font-weight:700;
+    letter-spacing:.02em; white-space:nowrap;
+  }
 </style>
 
 <div class="mod-nav">
@@ -386,6 +399,27 @@
       "</tr></thead><tbody>" + rowsHtml + "</tbody></table>";
   }
 
+  /** PayTR Aşama 3.6: ödenebilir → link (yeni sekme); paid → rozet. */
+  function paytrInvoiceActionCell(inv) {
+    const src = String(inv.source || "").trim().toLowerCase();
+    const st = String(inv.status || "").trim().toLowerCase();
+    if (src !== "paytr") {
+      return "—";
+    }
+    if (st === "paid") {
+      return '<span class="paytr-paid-badge">Ödendi (PayTR)</span>';
+    }
+    if (st === "void") {
+      return "—";
+    }
+    const id = inv.id;
+    if (id == null || id === "") {
+      return "—";
+    }
+    return '<a class="paytr-pay-btn" href="/billing/paytr/pay/' + encodeURIComponent(String(id)) +
+      '" target="_blank" rel="noopener noreferrer">PayTR ile Öde</a>';
+  }
+
   function renderDetailSections(subs, invs, pays) {
     let html = "";
 
@@ -415,14 +449,16 @@
       html += '<div class="cust-modal-empty">Fatura kaydı yok.</div>';
     } else {
       html += miniTable(
-        ["No", "Durum", "Tutar", "Vade", "Ödeme"],
+        ["No", "Durum", "Kaynak", "Tutar", "Vade", "Ödeme", "PayTR"],
         invs.map(function (inv) {
           return "<tr>" +
             "<td>" + esc(inv.invoice_no || "—") + "</td>" +
             "<td>" + esc(inv.status || "—") + "</td>" +
+            "<td>" + esc(inv.source || "—") + "</td>" +
             "<td>" + esc(fmtMoney(inv.total_gross, inv.currency)) + "</td>" +
             "<td>" + fmtDate(inv.due_at) + "</td>" +
             "<td>" + (inv.paid_at ? fmtDate(inv.paid_at) : "—") + "</td>" +
+            "<td>" + paytrInvoiceActionCell(inv) + "</td>" +
             "</tr>";
         }).join("")
       );
