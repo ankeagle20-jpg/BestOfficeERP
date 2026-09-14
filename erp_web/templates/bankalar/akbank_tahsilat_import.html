@@ -38,6 +38,19 @@
 .ak-msg { padding: 10px 14px; border-radius: 4px; font-size: 13px; margin-bottom: 12px; display: none; }
 .ak-msg.err { display: block; background: #3e1a1a; color: #ffcdd2; border: 1px solid #b71c1c; }
 .ak-msg.ok { display: block; background: #1b3d2f; color: #a5d6a7; border: 1px solid #2e7d32; }
+.ak-makbuz-panel {
+    display: none;
+    padding: 10px 14px;
+    border-radius: 4px;
+    font-size: 13px;
+    margin-bottom: 12px;
+    background: #0d3d4a;
+    color: #b2ebf2;
+    border: 1px solid #00838f;
+    line-height: 1.6;
+}
+.ak-makbuz-panel.show { display: block; }
+.ak-makbuz-panel .ak-makbuz-title { font-weight: 600; margin-bottom: 6px; color: #e0f7fa; }
 .ak-scroll { overflow: auto; max-height: 62vh; border: 1px solid #1e3a50; border-radius: 4px; }
 .ak-grid {
     width: 100%;
@@ -286,6 +299,7 @@ td.ak-td-sira {
     </div>
 
     <div id="akMsg" class="ak-msg"></div>
+    <div id="akMakbuzPanel" class="ak-makbuz-panel" style="display:none;" role="region" aria-label="Makbuz PDF linkleri"></div>
     <div id="akOzet" class="ak-ozet"></div>
 
     <div id="akFilterBar" class="ak-filter-bar">
@@ -528,6 +542,38 @@ td.ak-td-sira {
                 id + '?indir=1" target="_blank" rel="noopener">Makbuz PDF #' + mn + "</a>" +
                 (ref ? '<span class="muted" style="font-size:11px;">ref ' + ref + "</span> " : "");
         }).filter(Boolean).join(" ");
+    }
+
+    /** Commit sonrası makbuz linkleri — tabloyuYenile / showMsg (#akMsg) bu paneli ezmez. */
+    function showMakbuzPanel(kayitlar) {
+        const panel = document.getElementById("akMakbuzPanel");
+        if (!panel) return;
+        const links = makbuzPdfLinksHtml(kayitlar);
+        if (!links) {
+            panel.classList.remove("show");
+            panel.style.display = "none";
+            panel.innerHTML = "";
+            return;
+        }
+        const nos = (Array.isArray(kayitlar) ? kayitlar : [])
+            .map(function (k) { return k && k.makbuz_no; })
+            .filter(Boolean)
+            .join(", ");
+        panel.innerHTML =
+            '<div class="ak-makbuz-title">Makbuz PDF (yeni sekmede açılır)' +
+            (nos ? " — no: " + escapeHtml(nos) : "") +
+            "</div>" +
+            '<div class="ak-makbuz-links">' + links + "</div>";
+        panel.classList.add("show");
+        panel.style.display = "block";
+    }
+
+    function clearMakbuzPanel() {
+        const panel = document.getElementById("akMakbuzPanel");
+        if (!panel) return;
+        panel.classList.remove("show");
+        panel.style.display = "none";
+        panel.innerHTML = "";
     }
 
     /** Manuel gönderici→müşteri eşlemesini DB’ye yazar (tahsilat onayı gerekmez). */
@@ -1578,8 +1624,12 @@ td.ak-td-sira {
             if (kayitlar.length) {
                 t += " Makbuz no: " + kayitlar.map(function (k) { return k.makbuz_no; }).filter(Boolean).join(", ") + ".";
             }
-            showMsg(t, true, makbuzPdfLinksHtml(kayitlar));
+            /* Linkler ayrı kalıcı panelde: tabloyuYenile() #akMsg'yi ezse bile makbuzlar kalır. */
+            showMakbuzPanel(kayitlar);
+            showMsg(t, true);
             await tabloyuYenile();
+            /* Yenileme showMsg'yi temizleyebilir — makbuz panelini yeniden vurgula (zaten dolu). */
+            if (kayitlar.length) showMakbuzPanel(kayitlar);
         } catch (e) {
             showMsg("Ağ hatası: " + e, false);
         } finally {
