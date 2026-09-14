@@ -500,12 +500,13 @@ _register_grup2_fallback_api("/faturalar/api/grup2-etiketleri")
 
 
 def _start_background_jobs():
-    """Opsiyonel arkaplan işler: otomatik fatura döngüsü + gece izin + mesai çıkış."""
+    """Opsiyonel arkaplan işler: otomatik fatura döngüsü + gece izin + mesai çıkış + pending_payment sweep."""
     try:
         from apscheduler.schedulers.background import BackgroundScheduler
         from routes.faturalar_routes import run_auto_invoice_cycle
         from services.izin_otomatik import run_gece_otomatik_izin_job
         from services.mesai_otomatik_cikis import run_mesai_otomatik_cikis_job
+        from pending_payment_sweep import run_pending_payment_sweep_job
     except Exception as e:
         print("[WARN] Background scheduler devre dışı:", e)
         return
@@ -540,11 +541,28 @@ def _start_background_jobs():
         max_instances=1,
         coalesce=True,
     )
+    # A2.5: süresi dolmuş Satın Al (pending_payment) rezervasyonlarını temizle.
+    # slug-available'a bağlanmıyor — public endpoint gecikmesi / yük yok.
+    scheduler.add_job(
+        run_pending_payment_sweep_job,
+        "interval",
+        minutes=30,
+        id="pending_payment_sweep",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
     scheduler.start()
     atexit.register(lambda: scheduler.shutdown(wait=False))
+    # Boot: bir kez hemen çalıştır (scheduler ilk tick'i 30 dk bekler)
+    try:
+        run_pending_payment_sweep_job()
+    except Exception as e:
+        print("[WARN] pending_payment_sweep boot:", e)
     print(
         "[OK] Background scheduler aktif: auto_invoice_cycle/15dk, "
-        "izin_otomatik_gece/00:05, mesai_otomatik_cikis/1dk "
+        "izin_otomatik_gece/00:05, mesai_otomatik_cikis/1dk, "
+        "pending_payment_sweep/30dk+boot "
         "(MESAI_OTOMATIK_CIKIS_ENABLED varsayılan KAPALI)"
     )
 
