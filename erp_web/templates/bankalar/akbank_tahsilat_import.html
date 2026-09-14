@@ -332,6 +332,7 @@ td.ak-td-sira {
                 <tr>
                     <th style="width:36px;">Onay</th>
                     <th>Durum</th>
+                    <th style="width:72px;">Makbuz</th>
                     <th class="ak-sort-th" data-sort="tarih" title="Tık 1: en yeni üstte (bugünden geçmişe, ▼). Tık 2: en eski üstte (kronolojik, ▲).">Tarih<span class="ak-sort-hint"></span></th>
                     <th class="ak-sort-th ak-sort-num" data-sort="tutar" title="Sırala">Tutar<span class="ak-sort-hint"></span></th>
                     <th>Fiş / Dekont</th>
@@ -893,7 +894,7 @@ td.ak-td-sira {
             if (fa && fm) msg = "Bu açıklama ve müşteri filtresine uyan satır yok.";
             else if (fa) msg = "Bu metne uyan açıklama yok. Filtreyi temizleyin veya başka kelime deneyin.";
             else if (fm) msg = "Uygulanan müşteri filtresine uyan satır yok veya bu satırlarda müşteri atanmamış.";
-            tb.innerHTML = "<tr><td colspan=\"8\" style=\"padding:24px;text-align:center;color:#90a4ae;\">" + msg + "</td></tr>";
+            tb.innerHTML = "<tr><td colspan=\"9\" style=\"padding:24px;text-align:center;color:#90a4ae;\">" + msg + "</td></tr>";
             return;
         }
         tb.innerHTML = displayRows.map((r, i) => {
@@ -905,6 +906,18 @@ td.ak-td-sira {
             const dis = !canCheck ? " disabled" : "";
             const mid = r.musteri_id || "";
             const midNum = mid ? Number(mid) : NaN;
+            const canMakbuz = (
+                !dup && !giden
+                && r.ui_status === "matched"
+                && mid
+                && Number(r.tutar) > 0
+                && String(r.banka_referans_no || "").trim()
+            );
+            const makbuzCell = canMakbuz
+                ? ("<button type=\"button\" class=\"ak-btn secondary ak-row-makbuz\" data-i=\"" + i + "\" " +
+                    "style=\"padding:3px 8px;font-size:11px;white-space:nowrap;\" " +
+                    "title=\"Bu satır için banka ödeme türüyle makbuz oluştur ve PDF aç\">Makbuz</button>")
+                : "<span class=\"muted\" style=\"font-size:11px;\">—</span>";
             const siraCell = dup || giden || !mid
                 ? "—"
                 : ("<label class=\"ak-sira-lab\" title=\"Seç — uygulamak için üstteki Sırala başlığına tıklayın\"><input type=\"checkbox\" class=\"ak-mus-filter-cb\" data-mid=\"" + mid + "\""
@@ -913,6 +926,7 @@ td.ak-td-sira {
 <tr class="${rowClass(r.ui_status)}" data-i="${i}">
   <td><input type="checkbox" class="ak-cb"${checked}${dis} title="${giden ? "Giden satırlar tahsilata aktarılamaz" : ""}" /></td>
   <td>${durumHucre(r)}</td>
+  <td>${makbuzCell}</td>
   <td>${(r.tarih || "").slice(0, 10)}</td>
   <td style="text-align:right;">${Number(r.tutar).toLocaleString("tr-TR", { minimumFractionDigits: 2 })}</td>
   <td style="font-family:monospace;font-size:11px;">${escapeHtml(r.banka_referans_no || "")}</td>
@@ -938,6 +952,15 @@ td.ak-td-sira {
                 displayRows[i]._onay = cb.checked;
                 guncelleSecilenOnayButonu();
             });
+
+            const btnMak = tr.querySelector(".ak-row-makbuz");
+            if (btnMak) {
+                btnMak.addEventListener("click", function (ev) {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    satirMakbuzOlustur(displayRows[i], btnMak);
+                });
+            }
 
             const hid = tr.querySelector(".ak-mid");
             const q = tr.querySelector(".ak-mus-q");
@@ -1539,6 +1562,70 @@ td.ak-td-sira {
             }
         });
     })();
+
+    async function satirMakbuzOlustur(row, btnEl) {
+        if (!row) return;
+        syncFromDom();
+        if (row.ui_status === "duplicate" || isGidenRow(row)) {
+            showMsg("Bu satır için makbuz oluşturulamaz (mükerrer veya giden).", false);
+            return;
+        }
+        if (row.ui_status !== "matched" || !row.musteri_id) {
+            showMsg("Makbuz için satır «Eşleşti» olmalı ve müşteri atanmış olmalı.", false);
+            return;
+        }
+        const ref = String(row.banka_referans_no || "").trim();
+        const tutar = Number(row.tutar);
+        if (!ref || !(tutar > 0)) {
+            showMsg("Makbuz için geçerli fiş/dekont ve tutar gerekli.", false);
+            return;
+        }
+        const acHam = String(row.aciklama || "").trim() || "Banka tahsilat";
+        const payload = {
+            satirlar: [{
+                onay: true,
+                banka_referans_no: ref,
+                musteri_id: row.musteri_id,
+                tutar: tutar,
+                tip: row.tip || row.yon || "gelen",
+                odeme_turu: "banka",
+                aciklama: acHam,
+                tahsilat_tarihi: row.tarih,
+                manuel_musteri: !!row._manuelMusteri,
+            }],
+        };
+        if (btnEl) btnEl.disabled = true;
+        try {
+            const res = await fetch(URL_COMMIT, {
+                method: "POST",
+                credentials: "same-origin",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+            });
+            const data = await res.json();
+            if (!data || !data.ok || !(data.eklendi > 0) || !Array.isArray(data.kayitlar) || !data.kayitlar.length) {
+                const uy = (data && data.uyarilar && data.uyarilar.length) ? (" " + data.uyarilar.join(" ")) : "";
+                showMsg((data && data.mesaj) || ("Makbuz oluşturulamadı." + uy), false);
+                return;
+            }
+            const k0 = data.kayitlar[0];
+            showMakbuzPanel(data.kayitlar);
+            showMsg(
+                "Makbuz oluşturuldu (#" + (k0.makbuz_no || "") + ", odeme_turu=banka). PDF yeni sekmede açılıyor.",
+                true
+            );
+            const tid = Number(k0.tahsilat_id);
+            if (Number.isFinite(tid)) {
+                window.open("/faturalar/tahsilat-pdf/" + tid + "?indir=1", "_blank", "noopener");
+            }
+            await tabloyuYenile();
+            if (data.kayitlar.length) showMakbuzPanel(data.kayitlar);
+        } catch (e) {
+            showMsg("Ağ hatası: " + e, false);
+        } finally {
+            if (btnEl) btnEl.disabled = false;
+        }
+    }
 
     async function secilenleriOnaylaVeKaydet() {
         syncFromDom();

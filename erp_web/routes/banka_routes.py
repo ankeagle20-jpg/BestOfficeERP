@@ -1251,6 +1251,15 @@ def api_akbank_tahsilat_commit():
             if len(tah_str) < 10:
                 atlandi += 1
                 continue
+            # Varsayılan havale (toplu «Eşleşenleri aktar»); tek satır Makbuz «banka» gönderebilir.
+            odeme_raw = (
+                it.get("odeme_turu")
+                if it.get("odeme_turu") is not None and str(it.get("odeme_turu")).strip() != ""
+                else data.get("odeme_turu")
+            )
+            odeme_turu = str(odeme_raw or "havale").strip().lower().replace(" ", "_")
+            if odeme_turu not in ("havale", "banka"):
+                odeme_turu = "havale"
             cur.execute(
                 "SELECT 1 FROM tahsilatlar WHERE banka_referans_no = %s LIMIT 1",
                 (ref,),
@@ -1273,12 +1282,13 @@ def api_akbank_tahsilat_commit():
                     musteri_id, customer_id, fatura_id, tutar, odeme_turu,
                     aciklama, tahsilat_tarihi, makbuz_no, banka_referans_no, kaynak
                 ) VALUES (%s, %s, NULL, %s, %s, %s, %s::date, %s, %s, %s)
-                RETURNING id, makbuz_no""",
-                (mid, mid, round(tutar, 2), "havale", aciklama, tah_str, makbuz_no, ref, "banka_import"),
+                RETURNING id, makbuz_no, odeme_turu""",
+                (mid, mid, round(tutar, 2), odeme_turu, aciklama, tah_str, makbuz_no, ref, "banka_import"),
             )
             row = cur.fetchone() or {}
             tid = row.get("id") if isinstance(row, dict) else (row[0] if row else None)
             mn = row.get("makbuz_no") if isinstance(row, dict) else (row[1] if row and len(row) > 1 else makbuz_no)
+            odeme_out = row.get("odeme_turu") if isinstance(row, dict) else odeme_turu
             if tid is None:
                 atlandi += 1
                 hatalar.append(f"Ref {ref}: tahsilat kaydı dönmedi.")
@@ -1290,6 +1300,8 @@ def api_akbank_tahsilat_commit():
                 "banka_referans_no": ref,
                 "musteri_id": mid,
                 "tutar": round(tutar, 2),
+                "odeme_turu": str(odeme_out or odeme_turu),
+                "aciklama": aciklama,
             })
             # Varsa aynı dekont/referanslı hesap hareketini tahsilata bağla (Hareketler → Makbuz).
             try:
