@@ -570,11 +570,26 @@ def eslestir_musteri(
     return _eslestir_musteri_cekirdek(hay, digit_hay, mm, ids_all, hay_words)
 
 
-def dataframe_hareket_satirlari(df: pd.DataFrame) -> tuple[list[dict[str, Any]], dict[str, int]]:
+def _normalize_yon_filtre(yon: object) -> str:
+    """gelen (varsayılan) | giden | hepsi."""
+    s = str(yon or "").strip().lower().replace("İ", "i").replace("I", "i")
+    if s in ("giden", "out", "borc", "borç"):
+        return "giden"
+    if s in ("hepsi", "tumu", "tümü", "all", "both"):
+        return "hepsi"
+    return "gelen"
+
+
+def dataframe_hareket_satirlari(
+    df: pd.DataFrame,
+    yon: str = "gelen",
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
     """
-    Borç/Alacak = A satırlarını dict listesine çevirir.
-    Dönüş: (satirlar, ozet_sayac)
+    Borç/Alacak sütunundan yön filtreli ham satırlar.
+    Varsayılan yon=gelen: yalnızca A (Alacak) — mevcut davranış.
+    yon=giden: B (Borç); yon=hepsi: A+B.
     """
+    yon_f = _normalize_yon_filtre(yon)
     col_tarih = col(df, "tarih")
     col_saat = col(df, "saat")
     col_tutar = pick_tutar_column(df)
@@ -591,15 +606,37 @@ def dataframe_hareket_satirlari(df: pd.DataFrame) -> tuple[list[dict[str, Any]],
     if eksik:
         raise ValueError(f"Eksik sütunlar: {eksik}. Mevcut: {list(df.columns)}")
 
-    ozet = {"excel_satir": 0, "a_degil": 0, "ref_bos": 0, "tutar_sifir": 0, "tarih_yok": 0, "islenen": 0}
+    ozet: dict[str, Any] = {
+        "excel_satir": 0,
+        "a_degil": 0,
+        "ref_bos": 0,
+        "tutar_sifir": 0,
+        "tarih_yok": 0,
+        "islenen": 0,
+        "yon": yon_f,
+    }
     satirlar: list[dict[str, Any]] = []
 
     for sira, (idx, row) in enumerate(df.iterrows(), start=1):
         ozet["excel_satir"] += 1
         ba = str(row[col_ba] if col_ba else "").strip().upper()
-        if ba != "A":
-            ozet["a_degil"] += 1
-            continue
+        is_gelen = ba == "A"
+        is_giden = ba == "B"
+        if yon_f == "gelen":
+            if not is_gelen:
+                ozet["a_degil"] += 1
+                continue
+            tip = "gelen"
+        elif yon_f == "giden":
+            if not is_giden:
+                ozet["a_degil"] += 1
+                continue
+            tip = "giden"
+        else:
+            if not (is_gelen or is_giden):
+                ozet["a_degil"] += 1
+                continue
+            tip = "gelen" if is_gelen else "giden"
         ref_raw = row[col_fis] if col_fis else None
         if ref_raw is None or (isinstance(ref_raw, float) and pd.isna(ref_raw)):
             ozet["ref_bos"] += 1
@@ -633,6 +670,8 @@ def dataframe_hareket_satirlari(df: pd.DataFrame) -> tuple[list[dict[str, Any]],
             "tutar": round(tutar, 2),
             "aciklama": acik,
             "banka_referans_no": ref,
+            "tip": tip,
+            "yon": tip,
         })
     return satirlar, ozet
 

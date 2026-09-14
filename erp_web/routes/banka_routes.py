@@ -48,6 +48,28 @@ def _request_bank_type_tahsilat() -> str:
     )
 
 
+def _normalize_yon_filtre(yon: object) -> str:
+    """Excel önizleme / hareket listesi: gelen (varsayılan) | giden | hepsi."""
+    s = str(yon or "").strip().lower().replace("İ", "i").replace("I", "i")
+    if s in ("giden", "out", "borc", "borç"):
+        return "giden"
+    if s in ("hepsi", "tumu", "tümü", "all", "both"):
+        return "hepsi"
+    return "gelen"
+
+
+def _request_yon_filtre(data: dict | None = None) -> str:
+    """form / JSON / query: yon veya tip. Varsayılan gelen."""
+    raw = None
+    if data and isinstance(data, dict):
+        raw = data.get("yon") if data.get("yon") is not None else data.get("tip")
+    if raw is None or str(raw).strip() == "":
+        raw = request.form.get("yon") or request.form.get("tip")
+    if raw is None or str(raw).strip() == "":
+        raw = request.args.get("yon") or request.args.get("tip")
+    return _normalize_yon_filtre(raw)
+
+
 def _infer_tahsilat_bank_type_from_filename(fname: object) -> str | None:
     """Orijinal dosya adından TF ekstresi sezgisel tespit (kayıtlı analiz + yanlış dropdown)."""
     s = str(fname or "").strip()
@@ -153,9 +175,10 @@ def api_ozet():
 @bp.route("/api/hareketler")
 @giris_gerekli
 def api_hareketler():
-    """Banka hareketleri listesi (hesap, durum filtreli)."""
+    """Banka hareketleri listesi (hesap, durum, yön filtreli). Varsayılan tip/yon=gelen."""
     hesap_id = request.args.get("hesap_id")
     durum = request.args.get("durum", "tumu").strip().lower()
+    yon = _request_yon_filtre()
 
     sql = """
     SELECT h.id, h.banka_hesap_id, h.hareket_tarihi, h.aciklama, h.gonderici, h.tutar, h.tip, h.durum,
@@ -172,6 +195,11 @@ def api_hareketler():
     if durum and durum != "tumu":
         sql += " AND h.durum = %s"
         params.append(durum)
+    if yon == "gelen":
+        sql += " AND (LOWER(COALESCE(h.tip, 'gelen')) = 'gelen')"
+    elif yon == "giden":
+        sql += " AND (LOWER(COALESCE(h.tip, '')) = 'giden' OR h.tutar < 0)"
+    # hepsi: yön filtresi yok
     sql += " ORDER BY h.hareket_tarihi DESC, h.id DESC LIMIT 500"
     rows = fetch_all(sql, tuple(params) if params else None)
     for r in rows:
@@ -863,6 +891,7 @@ def api_akbank_tahsilat_analyze():
         return jsonify({"ok": False, "mesaj": "Excel dosyası seçin (.xlsx)."}), 400
     bank_type_req = _request_bank_type_tahsilat()
     bank_type = _effective_tahsilat_bank_type(bank_type_req, getattr(f, "filename", None))
+    yon = _request_yon_filtre()
     fn = str(f.filename).lower()
     if bank_type == "TURKIYE_FINANS":
         if not fn.endswith(".xlsx"):
@@ -875,10 +904,10 @@ def api_akbank_tahsilat_analyze():
     try:
         if bank_type == "TURKIYE_FINANS":
             txs = upload_bank_excel(raw, bank_type)
-            ham, ozet = standard_transactions_to_tahsilat_ham(txs)
+            ham, ozet = standard_transactions_to_tahsilat_ham(txs, yon=yon)
         else:
             df = read_akbank_excel(raw)
-            ham, ozet = dataframe_hareket_satirlari(df)
+            ham, ozet = dataframe_hareket_satirlari(df, yon=yon)
     except ValueError as e:
         return jsonify({"ok": False, "mesaj": str(e)}), 400
     except Exception as e:
@@ -1057,6 +1086,7 @@ def api_akbank_tahsilat_analyze_kayitli():
 
     data = request.get_json(silent=True) or {}
     bank_type = _normalize_tahsilat_bank_type(data.get("bank_type") or request.args.get("bank_type"))
+    yon = _request_yon_filtre(data)
     ids = data.get("file_ids")
     if not isinstance(ids, list) or not ids:
         return jsonify({"ok": False, "mesaj": "En az bir kayıtlı dosya seçin."}), 400
@@ -1080,7 +1110,7 @@ def api_akbank_tahsilat_analyze_kayitli():
         return jsonify({"ok": False, "mesaj": "Bazı dosyalar bulunamadı."}), 400
 
     hams: list = []
-    ozet_top = {"excel_satir": 0, "a_degil": 0, "ref_bos": 0, "tutar_sifir": 0, "tarih_yok": 0, "islenen": 0}
+    ozet_top = {"excel_satir": 0, "a_degil": 0, "ref_bos": 0, "tutar_sifir": 0, "tarih_yok": 0, "islenen": 0, "yon": yon}
     meta_list: list[dict] = []
     for fid in clean_ids:
         row = found[fid]
@@ -1089,14 +1119,16 @@ def api_akbank_tahsilat_analyze_kayitli():
         try:
             if eff == "TURKIYE_FINANS":
                 txs = upload_bank_excel(raw, eff)
-                ham, ozet = standard_transactions_to_tahsilat_ham(txs)
+                ham, ozet = standard_transactions_to_tahsilat_ham(txs, yon=yon)
             else:
                 df = read_akbank_excel(raw)
-                ham, ozet = dataframe_hareket_satirlari(df)
+                ham, ozet = dataframe_hareket_satirlari(df, yon=yon)
         except Exception as e:
             return jsonify({"ok": False, "mesaj": f"Dosya okunamadı ({row.get('ad_gosterim')}): {e}"}), 400
         hams.append(ham)
         for k in ozet_top:
+            if k == "yon":
+                continue
             ozet_top[k] = ozet_top.get(k, 0) + int(ozet.get(k, 0) or 0)
         meta_list.append({"id": row["id"], "ad_gosterim": row["ad_gosterim"]})
 
@@ -1200,6 +1232,11 @@ def api_akbank_tahsilat_commit():
                 continue
             if tutar <= 0:
                 atlandi += 1
+                continue
+            tip_s = str(it.get("tip") or it.get("yon") or "gelen").strip().lower()
+            if tip_s == "giden":
+                atlandi += 1
+                hatalar.append(f"Ref {ref}: giden satır tahsilata yazılmaz (atlandı).")
                 continue
             aciklama = (it.get("aciklama") or "").strip() or "Banka tahsilat"
             tah_str = (it.get("tahsilat_tarihi") or it.get("tarih") or "")[:10]

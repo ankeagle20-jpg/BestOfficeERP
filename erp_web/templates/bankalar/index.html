@@ -118,6 +118,7 @@
 <div class="banka-header">
     <div class="banka-tabs">
         <button type="button" class="banka-tab-btn active" data-tab="excel">Banka Excel</button>
+        <button type="button" class="banka-tab-btn" data-tab="hareketler">Hareketler</button>
         <button type="button" class="banka-tab-btn" data-tab="hesaplar">Bankalar</button>
     </div>
     <div class="banka-buttons">
@@ -135,6 +136,39 @@
             src="{{ url_for('banka.akbank_tahsilat_import_sayfa') }}?embed=1"
             loading="lazy"
             title="Hesap Aktar ve Eşleştirme Paneli"></iframe>
+    </div>
+</div>
+
+<div class="banka-tab-panel" id="banka_tab_hareketler">
+    <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin-bottom:12px;">
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:#90a4ae;">Yön
+            <select id="bhYonFilter" style="min-width:120px;padding:6px 8px;border-radius:4px;border:1px solid #455a64;background:#0d1f2d;color:#eceff1;font-size:12px;">
+                <option value="gelen" selected>Gelen</option>
+                <option value="giden">Giden</option>
+                <option value="hepsi">Hepsi</option>
+            </select>
+        </label>
+        <button type="button" class="banka-tab-btn" id="bhYenileBtn" style="padding:6px 12px;">Listeyi yenile</button>
+        <span id="bhFilterInfo" style="font-size:12px;color:#90a4ae;"></span>
+    </div>
+    <div style="overflow:auto;max-height:560px;">
+        <table class="banka-grid" id="bhGrid">
+            <thead>
+                <tr>
+                    <th>Tarih</th>
+                    <th>Banka / Hesap</th>
+                    <th>Yön</th>
+                    <th style="text-align:right;">Tutar</th>
+                    <th>Gönderici</th>
+                    <th>Açıklama</th>
+                    <th>Durum</th>
+                    <th>Müşteri</th>
+                </tr>
+            </thead>
+            <tbody id="bhTbody">
+                <tr><td colspan="8" style="text-align:center;padding:28px;color:#6b7280;">Sekme açılınca yüklenir…</td></tr>
+            </tbody>
+        </table>
     </div>
 </div>
 
@@ -190,9 +224,10 @@ function duzenle(id) {
     window.location.href = "/bankalar/" + id + "/duzenle";
 }
 (function bankaTabsInit() {
-    var btns = Array.prototype.slice.call(document.querySelectorAll('.banka-tab-btn'));
+    var btns = Array.prototype.slice.call(document.querySelectorAll('.banka-tab-btn[data-tab]'));
     var panels = {
         excel: document.getElementById('banka_tab_excel'),
+        hareketler: document.getElementById('banka_tab_hareketler'),
         hesaplar: document.getElementById('banka_tab_hesaplar')
     };
     function activate(tab) {
@@ -202,12 +237,96 @@ function duzenle(id) {
         Object.keys(panels).forEach(function (k) {
             if (panels[k]) panels[k].classList.toggle('active', k === tab);
         });
+        if (tab === 'hareketler') {
+            loadBankaHareketleri();
+        }
     }
     btns.forEach(function (b) {
         b.addEventListener('click', function () {
             activate(b.getAttribute('data-tab'));
         });
     });
+})();
+
+(function bankaHareketListesiInit() {
+    var yonEl = document.getElementById('bhYonFilter');
+    var btn = document.getElementById('bhYenileBtn');
+    var info = document.getElementById('bhFilterInfo');
+    var tbody = document.getElementById('bhTbody');
+    var KEY = 'bankaHareketYon_v1';
+
+    function getYon() {
+        var v = (yonEl && yonEl.value) ? String(yonEl.value).trim().toLowerCase() : 'gelen';
+        if (v === 'giden' || v === 'hepsi') return v;
+        return 'gelen';
+    }
+    function persist() {
+        try { sessionStorage.setItem(KEY, getYon()); } catch (e) {}
+    }
+    function restore() {
+        try {
+            var v = sessionStorage.getItem(KEY);
+            if (yonEl && (v === 'gelen' || v === 'giden' || v === 'hepsi')) yonEl.value = v;
+        } catch (e) {}
+    }
+    function esc(s) {
+        var d = document.createElement('div');
+        d.textContent = s == null ? '' : String(s);
+        return d.innerHTML;
+    }
+    function tipBadge(tip) {
+        var t = String(tip || 'gelen').toLowerCase();
+        if (t === 'giden') return '<span style="display:inline-block;padding:2px 6px;border-radius:3px;background:#546e7a;color:#eceff1;font-size:11px;">Giden</span>';
+        if (t === 'transfer') return '<span style="display:inline-block;padding:2px 6px;border-radius:3px;background:#6a1b9a;color:#f3e5f5;font-size:11px;">Transfer</span>';
+        return '<span style="display:inline-block;padding:2px 6px;border-radius:3px;background:#1565c0;color:#e3f2fd;font-size:11px;">Gelen</span>';
+    }
+    function fmtMoney(n) {
+        var x = Number(n);
+        if (!Number.isFinite(x)) return '—';
+        return x.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    window.loadBankaHareketleri = function loadBankaHareketleri() {
+        if (!tbody) return;
+        var yon = getYon();
+        persist();
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:28px;color:#6b7280;">Yükleniyor…</td></tr>';
+        if (info) info.textContent = 'Yön: ' + yon;
+        fetch('/bankalar/api/hareketler?tip=' + encodeURIComponent(yon) + '&durum=tumu', { credentials: 'same-origin' })
+            .then(function (r) { return r.json(); })
+            .then(function (rows) {
+                if (!Array.isArray(rows)) {
+                    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:28px;color:#ef9a9a;">Liste alınamadı.</td></tr>';
+                    return;
+                }
+                if (info) info.textContent = 'Yön: ' + yon + ' · ' + rows.length + ' kayıt';
+                if (!rows.length) {
+                    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:28px;color:#6b7280;">Bu yönde hareket yok.</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = rows.map(function (h) {
+                    var banka = [h.banka_adi, h.hesap_adi].filter(Boolean).join(' / ') || '—';
+                    var mus = h.musteri_adi ? ('#' + (h.musteri_id || '') + ' · ' + h.musteri_adi) : '—';
+                    return '<tr>' +
+                        '<td>' + esc(h.hareket_tarihi || '') + '</td>' +
+                        '<td>' + esc(banka) + '</td>' +
+                        '<td>' + tipBadge(h.tip) + '</td>' +
+                        '<td style="text-align:right;">' + fmtMoney(h.tutar) + '</td>' +
+                        '<td>' + esc(h.gonderici || '') + '</td>' +
+                        '<td style="max-width:280px;word-break:break-word;">' + esc(h.aciklama || '') + '</td>' +
+                        '<td>' + esc(h.durum || '') + '</td>' +
+                        '<td>' + esc(mus) + '</td>' +
+                        '</tr>';
+                }).join('');
+            })
+            .catch(function () {
+                tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:28px;color:#ef9a9a;">Ağ hatası.</td></tr>';
+            });
+    };
+
+    restore();
+    if (yonEl) yonEl.addEventListener('change', function () { loadBankaHareketleri(); });
+    if (btn) btn.addEventListener('click', function () { loadBankaHareketleri(); });
 })();
 (function hesapAktarEmbedAutoHeight() {
     var fr = document.getElementById("hesap_aktar_iframe");

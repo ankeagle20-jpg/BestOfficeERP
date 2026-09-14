@@ -473,13 +473,26 @@ class BankProcessor:
 _default_processor = BankProcessor()
 
 
+def _normalize_yon_filtre(yon: object) -> str:
+    """gelen (varsayılan) | giden | hepsi."""
+    s = str(yon or "").strip().lower().replace("İ", "i").replace("I", "i")
+    if s in ("giden", "out", "borc", "borç"):
+        return "giden"
+    if s in ("hepsi", "tumu", "tümü", "all", "both"):
+        return "hepsi"
+    return "gelen"
+
+
 def standard_transactions_to_tahsilat_ham(
     transactions: List[StandardTransaction],
+    yon: str = "gelen",
 ) -> tuple[List[dict], dict]:
     """
     `banka_ak_import` tahsilat önizleme boru hattı için ham satırlar (Akbank dataframe_hareket_satirlari ile uyumlu).
-    Yalnızca pozitif tutar (gelen) ve dolu dekont/referans satırları tahsilat adayıdır.
+    Varsayılan yon=gelen: yalnızca pozitif tutar (mevcut davranış).
+    yon=giden: negatif tutarlar (mutlak + tip=giden); yon=hepsi: ikisi.
     """
+    yon_f = _normalize_yon_filtre(yon)
     ozet: dict = {
         "excel_satir": 0,
         "a_degil": 0,
@@ -487,6 +500,7 @@ def standard_transactions_to_tahsilat_ham(
         "tutar_sifir": 0,
         "tarih_yok": 0,
         "islenen": 0,
+        "yon": yon_f,
     }
     satirlar: List[dict] = []
     for sira, t in enumerate(transactions, start=1):
@@ -496,9 +510,28 @@ def standard_transactions_to_tahsilat_ham(
             ozet["ref_bos"] += 1
             continue
         amt = float(t.amount)
-        if amt <= 0:
-            ozet["a_degil"] += 1
-            continue
+        if yon_f == "gelen":
+            # Mevcut davranış birebir: amt<=0 → a_degil
+            if amt <= 0:
+                ozet["a_degil"] += 1
+                continue
+            tip = "gelen"
+            tutar = amt
+        elif yon_f == "giden":
+            if amt >= 0:
+                if amt == 0:
+                    ozet["tutar_sifir"] += 1
+                else:
+                    ozet["a_degil"] += 1
+                continue
+            tip = "giden"
+            tutar = abs(amt)
+        else:
+            if amt == 0:
+                ozet["tutar_sifir"] += 1
+                continue
+            tip = "gelen" if amt > 0 else "giden"
+            tutar = abs(amt)
         d = t.date
         if d is None:
             ozet["tarih_yok"] += 1
@@ -516,9 +549,11 @@ def standard_transactions_to_tahsilat_ham(
                 "excel_index": str(sira),
                 "tarih": tarih_str,
                 "saat": "",
-                "tutar": round(amt, 2),
+                "tutar": round(float(tutar), 2),
                 "aciklama": acik,
                 "banka_referans_no": ref,
+                "tip": tip,
+                "yon": tip,
             }
         )
     return satirlar, ozet
