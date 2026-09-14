@@ -3,16 +3,22 @@
 
 Aşama 3.5: PAYTR_CALLBACK_APPLY=true iken tek transaction ile payment+paid;
 varsayılan false → dry-run (yalnız log, yazma yok).
+
+A3.3: PAYTR_PURCHASE_PROVISION=true + metadata.intent=purchase iken
+_record_paytr_paid(outcome=recorded) sonrası async daemon thread ile
+provision_new_tenant(admin_password_hash=...). Varsayılan false → yalnız paid.
 """
 from __future__ import annotations
 
 import json
 import logging
 import os
+import threading
+import time
 from decimal import Decimal
 from functools import wraps
 
-from flask import Blueprint, Response, abort, g, render_template, request
+from flask import Blueprint, Response, abort, current_app, g, render_template, request
 from flask_login import current_user
 from psycopg2.errors import UniqueViolation
 
@@ -44,6 +50,12 @@ def platform_host_only(f):
 def _callback_apply_enabled() -> bool:
     """3.5'te yazım açılacak. Varsayılan false — 3.4 dry-run asla yazmaz."""
     v = (os.environ.get("PAYTR_CALLBACK_APPLY") or "").strip().lower()
+    return v in ("1", "true", "yes", "on")
+
+
+def _purchase_provision_enabled() -> bool:
+    """A3.3: Satın Al ödeme sonrası gerçek provizyon. Varsayılan false."""
+    v = (os.environ.get("PAYTR_PURCHASE_PROVISION") or "").strip().lower()
     return v in ("1", "true", "yes", "on")
 
 
@@ -125,6 +137,198 @@ def _record_paytr_paid(inv: dict, merchant_oid: str, status: str) -> str:
         return "recorded"
     except UniqueViolation:
         return "already"
+
+
+def _jsonb_list(val) -> list:
+    if val is None:
+        return []
+    if isinstance(val, list):
+        return val
+    if isinstance(val, str):
+        try:
+            parsed = json.loads(val)
+            return parsed if isinstance(parsed, list) else []
+        except json.JSONDecodeError:
+            return []
+    return []
+
+
+def _jsonb_dict(val) -> dict:
+    if val is None:
+        return {}
+    if isinstance(val, dict):
+        return val
+    if isinstance(val, str):
+        try:
+            parsed = json.loads(val)
+            return parsed if isinstance(parsed, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+def _fetch_signup_intent_for_invoice(invoice_id: int) -> dict | None:
+    """platform_signup_intents — password_hash dahil; çağıran log'a yazmamalı."""
+    return fetch_one(
+        """
+        SELECT id, tenant_id, email, admin_full_name, module_key, tier_key,
+               password_hash, selected_module_keys, module_tier_preferences,
+               ledger_only, invoice_id
+        FROM public.platform_signup_intents
+        WHERE invoice_id = %s
+        LIMIT 1
+        """,
+        (int(invoice_id),),
+    )
+
+
+def _purchase_provision_worker(
+    app,
+    *,
+    slug: str,
+    invoice_id: int,
+    admin_username: str,
+    admin_password_hash: str,
+    admin_full_name: str,
+    selected_module_keys: list | None,
+    module_tier_preferences: dict | None,
+    ledger_only: bool,
+) -> None:
+    """A3.3 async: trial _provision_worker deseni; plaintext şifre yok."""
+    t0 = time.monotonic()
+    with app.app_context():
+        try:
+            from tenant_provisioning import provision_new_tenant
+
+            result = provision_new_tenant(
+                slug,
+                plan="purchase",
+                admin_username=admin_username,
+                admin_password_hash=admin_password_hash,
+                admin_full_name=admin_full_name,
+                allow_existing_provisioning_row=True,
+                selected_module_keys=selected_module_keys or [],
+                module_tier_preferences=module_tier_preferences or {},
+                ledger_only=bool(ledger_only),
+            )
+            logger.info(
+                "PURCHASE_PROVISION_SUCCESS slug=%s invoice_id=%s "
+                "already_active=%s admin_id=%s duration_sec=%.1f",
+                slug,
+                invoice_id,
+                bool(result.get("already_active")),
+                result.get("admin_id"),
+                time.monotonic() - t0,
+            )
+        except Exception as exc:
+            duration = time.monotonic() - t0
+            logger.exception(
+                "PURCHASE_PROVISION_FAILED slug=%s invoice_id=%s duration_sec=%.1f",
+                slug,
+                invoice_id,
+                duration,
+            )
+            try:
+                from signup_provision_errors import map_provision_error
+                from tenant_provisioning import mark_tenant_provision_failed
+
+                user_msg = map_provision_error(exc)
+                mark_tenant_provision_failed(
+                    slug, reason=str(exc), error_message=user_msg
+                )
+            except Exception:
+                logger.exception(
+                    "PURCHASE_PROVISION_FAILED mark_failed also failed slug=%s",
+                    slug,
+                )
+
+
+def _maybe_trigger_purchase_provision(inv: dict, meta: dict) -> None:
+    """outcome==recorded sonrası: flag + intent=purchase → daemon thread.
+
+    Callback yanıtını bekletmez; hash/şifre loglanmaz.
+    """
+    if not _purchase_provision_enabled():
+        return
+    intent = str((meta or {}).get("intent") or "").strip().lower()
+    if intent != "purchase":
+        return
+
+    inv_id = int(inv["id"])
+    slug = str(inv.get("tenant_slug") or "").strip().lower()
+    if not slug:
+        logger.error(
+            "PURCHASE_PROVISION_FAILED invoice_id=%s reason=missing_tenant_slug",
+            inv_id,
+        )
+        return
+
+    try:
+        row = _fetch_signup_intent_for_invoice(inv_id)
+    except Exception:
+        logger.exception(
+            "PURCHASE_PROVISION_FAILED invoice_id=%s slug=%s reason=intent_lookup",
+            inv_id,
+            slug,
+        )
+        return
+
+    if not row:
+        logger.error(
+            "PURCHASE_PROVISION_FAILED invoice_id=%s slug=%s reason=intent_not_found",
+            inv_id,
+            slug,
+        )
+        return
+
+    password_hash = str(row.get("password_hash") or "").strip()
+    email = str(row.get("email") or "").strip().lower()
+    if not password_hash or len(password_hash) <= 20 or not email:
+        logger.error(
+            "PURCHASE_PROVISION_FAILED invoice_id=%s slug=%s reason=intent_incomplete",
+            inv_id,
+            slug,
+        )
+        return
+
+    selected = _jsonb_list(row.get("selected_module_keys"))
+    tier_prefs = _jsonb_dict(row.get("module_tier_preferences"))
+    # Tek modül satın alımında prefs boşsa module_key/tier_key ile tamamla
+    mk = str(row.get("module_key") or "").strip().lower()
+    tk = str(row.get("tier_key") or "").strip().lower()
+    if mk and tk and mk not in tier_prefs:
+        tier_prefs = dict(tier_prefs)
+        tier_prefs[mk] = tk
+    if mk and mk not in ("core",) and mk not in selected:
+        selected = list(selected) + [mk]
+    ledger_only = bool(row.get("ledger_only"))
+    if ledger_only:
+        selected = ["ledger"]
+
+    app_obj = current_app._get_current_object()
+    thread = threading.Thread(
+        target=_purchase_provision_worker,
+        kwargs={
+            "app": app_obj,
+            "slug": slug,
+            "invoice_id": inv_id,
+            "admin_username": email,
+            "admin_password_hash": password_hash,
+            "admin_full_name": str(row.get("admin_full_name") or "").strip() or slug,
+            "selected_module_keys": selected,
+            "module_tier_preferences": tier_prefs,
+            "ledger_only": ledger_only,
+        },
+        name=f"purchase-provision-{slug}",
+        daemon=True,
+    )
+    thread.start()
+    logger.info(
+        "PURCHASE_PROVISION_STARTED slug=%s invoice_id=%s thread=%s",
+        slug,
+        inv_id,
+        thread.name,
+    )
 
 
 @bp.route("/billing/paytr/pay/<int:invoice_id>", methods=["GET"])
@@ -460,6 +664,14 @@ def paytr_callback():
                 inv.get("tenant_id"),
                 _oid_mask(merchant_oid),
             )
+            # A3.3: yalnız ilk kayıtta; already'de tekrar tetikleme yok
+            try:
+                _maybe_trigger_purchase_provision(inv, meta)
+            except Exception:
+                logger.exception(
+                    "PURCHASE_PROVISION_FAILED invoice_id=%s reason=trigger_exception",
+                    inv_id,
+                )
     else:
         logger.info(
             "paytr_callback WOULD_MARK_PAID invoice_id=%s tenant_id=%s "
