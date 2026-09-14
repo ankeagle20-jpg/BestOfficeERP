@@ -163,10 +163,11 @@
                     <th>Açıklama</th>
                     <th>Durum</th>
                     <th>Müşteri</th>
+                    <th>Makbuz</th>
                 </tr>
             </thead>
             <tbody id="bhTbody">
-                <tr><td colspan="8" style="text-align:center;padding:28px;color:#6b7280;">Sekme açılınca yüklenir…</td></tr>
+                <tr><td colspan="9" style="text-align:center;padding:28px;color:#6b7280;">Sekme açılınca yüklenir…</td></tr>
             </tbody>
         </table>
     </div>
@@ -280,6 +281,21 @@ function duzenle(id) {
         if (t === 'transfer') return '<span style="display:inline-block;padding:2px 6px;border-radius:3px;background:#6a1b9a;color:#f3e5f5;font-size:11px;">Transfer</span>';
         return '<span style="display:inline-block;padding:2px 6px;border-radius:3px;background:#1565c0;color:#e3f2fd;font-size:11px;">Gelen</span>';
     }
+    function makbuzHucre(h) {
+        var tip = String(h.tip || 'gelen').toLowerCase();
+        var tid = h.tahsilat_id != null ? Number(h.tahsilat_id) : NaN;
+        if (tip === 'giden') {
+            return '<span style="font-size:11px;color:#78909c;">—</span>';
+        }
+        if (Number.isFinite(tid) && tid > 0) {
+            var mn = esc(h.tahsilat_makbuz_no || tid);
+            return '<a href="/faturalar/tahsilat-pdf/' + tid + '?indir=1" target="_blank" rel="noopener" ' +
+                'style="display:inline-block;padding:3px 8px;border-radius:3px;background:#00838f;color:#e0f7fa;font-size:11px;text-decoration:none;">Makbuz #' + mn + '</a>';
+        }
+        return '<span title="Önce Excel’den cariye aktarın (veya hareketi eşleştirin)" ' +
+            'style="display:inline-block;padding:3px 8px;border-radius:3px;background:#37474f;color:#90a4ae;font-size:11px;cursor:not-allowed;">Makbuz</span>' +
+            '<div style="font-size:10px;color:#78909c;margin-top:2px;max-width:140px;line-height:1.25;">Önce Excel’den cariye aktarın</div>';
+    }
     function fmtMoney(n) {
         var x = Number(n);
         if (!Number.isFinite(x)) return '—';
@@ -290,18 +306,18 @@ function duzenle(id) {
         if (!tbody) return;
         var yon = getYon();
         persist();
-        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:28px;color:#6b7280;">Yükleniyor…</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:28px;color:#6b7280;">Yükleniyor…</td></tr>';
         if (info) info.textContent = 'Yön: ' + yon;
         fetch('/bankalar/api/hareketler?tip=' + encodeURIComponent(yon) + '&durum=tumu', { credentials: 'same-origin' })
             .then(function (r) { return r.json(); })
             .then(function (rows) {
                 if (!Array.isArray(rows)) {
-                    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:28px;color:#ef9a9a;">Liste alınamadı.</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:28px;color:#ef9a9a;">Liste alınamadı.</td></tr>';
                     return;
                 }
                 if (info) info.textContent = 'Yön: ' + yon + ' · ' + rows.length + ' kayıt';
                 if (!rows.length) {
-                    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:28px;color:#6b7280;">Bu yönde hareket yok.</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:28px;color:#6b7280;">Bu yönde hareket yok.</td></tr>';
                     return;
                 }
                 tbody.innerHTML = rows.map(function (h) {
@@ -316,11 +332,12 @@ function duzenle(id) {
                         '<td style="max-width:280px;word-break:break-word;">' + esc(h.aciklama || '') + '</td>' +
                         '<td>' + esc(h.durum || '') + '</td>' +
                         '<td>' + esc(mus) + '</td>' +
+                        '<td>' + makbuzHucre(h) + '</td>' +
                         '</tr>';
                 }).join('');
             })
             .catch(function () {
-                tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:28px;color:#ef9a9a;">Ağ hatası.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:28px;color:#ef9a9a;">Ağ hatası.</td></tr>';
             });
     };
 

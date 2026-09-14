@@ -182,10 +182,13 @@ def api_hareketler():
 
     sql = """
     SELECT h.id, h.banka_hesap_id, h.hareket_tarihi, h.aciklama, h.gonderici, h.tutar, h.tip, h.durum,
-           h.musteri_id, h.tahsilat_id, c.name as musteri_adi, b.banka_adi, b.hesap_adi
+           h.musteri_id, h.tahsilat_id, h.referans_no,
+           c.name as musteri_adi, b.banka_adi, b.hesap_adi,
+           t.makbuz_no AS tahsilat_makbuz_no
     FROM banka_hareketleri h
     LEFT JOIN banka_hesaplar b ON b.id = h.banka_hesap_id
     LEFT JOIN customers c ON c.id = h.musteri_id
+    LEFT JOIN tahsilatlar t ON t.id = h.tahsilat_id
     WHERE 1=1
     """
     params = []
@@ -1198,7 +1201,9 @@ def api_akbank_tahsilat_gonderici_kaydet():
 @bp.route("/api/akbank-tahsilat/commit", methods=["POST"])
 @giris_gerekli
 def api_akbank_tahsilat_commit():
-    """Aşama 2: Onaylanan satırları tahsilatlar tablosuna yazar."""
+    """Aşama 2: Onaylanan satırları tahsilatlar tablosuna yazar (Faturalar ile aynı makbuz serisi)."""
+    from routes.faturalar_routes import _tahsilat_icin_makbuz_no_sec_cursor
+
     data = request.get_json(silent=True) or {}
     items = data.get("satirlar")
     if not isinstance(items, list) or not items:
@@ -1209,9 +1214,12 @@ def api_akbank_tahsilat_commit():
     eklendi = 0
     atlandi = 0
     hatalar: list[str] = []
+    kayitlar: list[dict] = []
 
     with db() as conn:
         cur = conn.cursor()
+        # Faturalar tahsilat_ekle ile aynı global makbuz kilidi (çift numara yarışı engeli).
+        cur.execute("SELECT pg_advisory_xact_lock(hashtext('tahsilat_makbuz_no_alloc')::bigint)")
         for it in items:
             if not it.get("onay"):
                 continue
@@ -1259,14 +1267,50 @@ def api_akbank_tahsilat_commit():
                 atlandi += 1
                 hatalar.append(f"Ref {ref}: müşteri yok (id={mid}).")
                 continue
+            makbuz_no = _tahsilat_icin_makbuz_no_sec_cursor(cur, None)
             cur.execute(
                 """INSERT INTO tahsilatlar (
                     musteri_id, customer_id, fatura_id, tutar, odeme_turu,
                     aciklama, tahsilat_tarihi, makbuz_no, banka_referans_no, kaynak
-                ) VALUES (%s, %s, NULL, %s, %s, %s, %s::date, NULL, %s, %s)""",
-                (mid, mid, round(tutar, 2), "havale", aciklama, tah_str, ref, "banka_import"),
+                ) VALUES (%s, %s, NULL, %s, %s, %s, %s::date, %s, %s, %s)
+                RETURNING id, makbuz_no""",
+                (mid, mid, round(tutar, 2), "havale", aciklama, tah_str, makbuz_no, ref, "banka_import"),
             )
+            row = cur.fetchone() or {}
+            tid = row.get("id") if isinstance(row, dict) else (row[0] if row else None)
+            mn = row.get("makbuz_no") if isinstance(row, dict) else (row[1] if row and len(row) > 1 else makbuz_no)
+            if tid is None:
+                atlandi += 1
+                hatalar.append(f"Ref {ref}: tahsilat kaydı dönmedi.")
+                continue
             eklendi += 1
+            kayitlar.append({
+                "tahsilat_id": int(tid),
+                "makbuz_no": str(mn or makbuz_no),
+                "banka_referans_no": ref,
+                "musteri_id": mid,
+                "tutar": round(tutar, 2),
+            })
+            # Varsa aynı dekont/referanslı hesap hareketini tahsilata bağla (Hareketler → Makbuz).
+            try:
+                cur.execute(
+                    """
+                    UPDATE banka_hareketleri
+                    SET tahsilat_id = %s,
+                        musteri_id = COALESCE(musteri_id, %s),
+                        durum = CASE
+                            WHEN LOWER(COALESCE(durum, '')) IN ('bekleyen', '') THEN 'eslesti'
+                            ELSE durum
+                        END
+                    WHERE referans_no IS NOT NULL
+                      AND btrim(referans_no) <> ''
+                      AND btrim(referans_no) = %s
+                      AND tahsilat_id IS NULL
+                    """,
+                    (int(tid), mid, ref),
+                )
+            except Exception:
+                pass
             if it.get("manuel_musteri") and aciklama:
                 sk = akbank_sender_key(aciklama)
                 if sk:
@@ -1287,6 +1331,7 @@ def api_akbank_tahsilat_commit():
         "eklendi": eklendi,
         "atlandi": atlandi,
         "uyarilar": hatalar[:30],
+        "kayitlar": kayitlar,
     })
 
 

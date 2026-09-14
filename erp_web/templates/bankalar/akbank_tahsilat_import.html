@@ -495,11 +495,39 @@ td.ak-td-sira {
         }
     });
 
-    function showMsg(text, ok) {
+    function showMsg(text, ok, htmlSuffix) {
         const el = document.getElementById("akMsg");
-        el.textContent = text || "";
         el.className = "ak-msg " + (ok ? "ok" : "err");
-        el.style.display = text ? "block" : "none";
+        if (!text && !htmlSuffix) {
+            el.style.display = "none";
+            el.textContent = "";
+            return;
+        }
+        el.style.display = "block";
+        el.textContent = "";
+        const span = document.createElement("span");
+        span.textContent = text || "";
+        el.appendChild(span);
+        if (htmlSuffix) {
+            const wrap = document.createElement("div");
+            wrap.style.marginTop = "8px";
+            wrap.style.lineHeight = "1.6";
+            wrap.innerHTML = htmlSuffix;
+            el.appendChild(wrap);
+        }
+    }
+
+    function makbuzPdfLinksHtml(kayitlar) {
+        if (!Array.isArray(kayitlar) || !kayitlar.length) return "";
+        return kayitlar.map(function (k) {
+            const id = Number(k.tahsilat_id);
+            if (!Number.isFinite(id)) return "";
+            const mn = escapeHtml(String(k.makbuz_no || id));
+            const ref = escapeHtml(String(k.banka_referans_no || ""));
+            return '<a class="ak-btn secondary" style="display:inline-block;padding:4px 10px;font-size:12px;margin:2px 6px 2px 0;text-decoration:none;" href="/faturalar/tahsilat-pdf/' +
+                id + '?indir=1" target="_blank" rel="noopener">Makbuz PDF #' + mn + "</a>" +
+                (ref ? '<span class="muted" style="font-size:11px;">ref ' + ref + "</span> " : "");
+        }).filter(Boolean).join(" ");
     }
 
     /** Manuel gönderici→müşteri eşlemesini DB’ye yazar (tahsilat onayı gerekmez). */
@@ -1546,7 +1574,11 @@ td.ak-td-sira {
             } else {
                 t += " Tahsilatlar havale olarak kaydedildi; Cari Ekstre B’de (tarih aralığında) görünür.";
             }
-            showMsg(t, true);
+            const kayitlar = Array.isArray(data.kayitlar) ? data.kayitlar : [];
+            if (kayitlar.length) {
+                t += " Makbuz no: " + kayitlar.map(function (k) { return k.makbuz_no; }).filter(Boolean).join(", ") + ".";
+            }
+            showMsg(t, true, makbuzPdfLinksHtml(kayitlar));
             await tabloyuYenile();
         } catch (e) {
             showMsg("Ağ hatası: " + e, false);
