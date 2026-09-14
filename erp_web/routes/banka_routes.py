@@ -7,7 +7,6 @@ from db import fetch_all, fetch_one, execute, execute_returning, db, ensure_bank
 from services.banka_ak_import import (
     akbank_sender_key,
     dataframe_hareket_satirlari,
-    ham_tahsilatta_olanlari_cikar,
     onizleme_satirlari,
     read_akbank_excel,
 )
@@ -770,15 +769,43 @@ def _musteriler_akbank_listesi():
 
 
 def _tahsilatta_refler_for_ham(ham: list) -> set[str]:
+    """Excel ham satırlarındaki banka_referans_no'ların tahsilatlar'da olanları (set)."""
+    return set(_tahsilat_by_ref_for_ham(ham).keys())
+
+
+def _tahsilat_by_ref_for_ham(ham: list) -> dict[str, dict]:
+    """
+    banka_referans_no → {tahsilat_id, makbuz_no}.
+    Aynı ref için birden fazla tahsilat varsa en küçük id (ilk kayıt) alınır.
+    """
     refs = [str(r.get("banka_referans_no") or "").strip() for r in ham if r.get("banka_referans_no")]
     refs_u = [x for x in dict.fromkeys(refs) if x]
     if not refs_u:
-        return set()
+        return {}
     rows = fetch_all(
-        "SELECT banka_referans_no FROM tahsilatlar WHERE banka_referans_no IN %s",
+        """
+        SELECT banka_referans_no, id, makbuz_no
+        FROM tahsilatlar
+        WHERE banka_referans_no IN %s
+        ORDER BY id ASC
+        """,
         (tuple(refs_u),),
     )
-    return {str(x["banka_referans_no"]) for x in (rows or []) if x.get("banka_referans_no")}
+    out: dict[str, dict] = {}
+    for x in rows or []:
+        ref = str(x.get("banka_referans_no") or "").strip()
+        if not ref or ref in out:
+            continue
+        try:
+            tid = int(x["id"])
+        except (TypeError, ValueError, KeyError):
+            continue
+        mn = x.get("makbuz_no")
+        out[ref] = {
+            "tahsilat_id": tid,
+            "makbuz_no": str(mn) if mn is not None and str(mn).strip() != "" else None,
+        }
+    return out
 
 
 def _manual_map_for_ham(ham: list) -> dict[str, int]:
@@ -821,16 +848,32 @@ def _ham_birlestir_dedupe(ham_parcalar: list[list]) -> list:
 
 
 def _json_akbank_analyze_ham(ham: list, ozet: dict, kayit_dosya: dict | None) -> dict:
-    """Tahsilatta olan satırları çıkarır; kalan için önizleme (mükerrer satır yok)."""
+    """Önizleme: tahsilatta olan satırlar listede kalır; satırda tahsilatta + id/makbuz_no."""
     _ensure_tahsilat_banka_referans_no()
     _ensure_akbank_dekont_musteri_map()
-    mevcut = _tahsilatta_refler_for_ham(ham)
-    ham_goster, cikarilan = ham_tahsilatta_olanlari_cikar(ham, mevcut)
-    ozet_out = dict(ozet)
-    ozet_out["tahsilatta_gizlenen"] = cikarilan
+    by_ref = _tahsilat_by_ref_for_ham(ham)
+    # Eşleşme (ui_status) müşteri önerisi için; tahsilat durumu ayrı bayrakta taşınır.
+    # mevcut_refler boş: satırlar «duplicate» olup listeden düşmesin / kırmızı Mükerrer olmasın.
     musteriler = _musteriler_akbank_listesi()
-    manual_by_key = _manual_map_for_ham(ham_goster)
-    satirlar = onizleme_satirlari(ham_goster, musteriler, set(), manual_by_key)
+    manual_by_key = _manual_map_for_ham(ham)
+    satirlar = onizleme_satirlari(ham, musteriler, set(), manual_by_key)
+    tahsilatta_adet = 0
+    for s in satirlar:
+        ref = str(s.get("banka_referans_no") or "").strip()
+        info = by_ref.get(ref) if ref else None
+        if info:
+            tahsilatta_adet += 1
+            s["tahsilatta"] = True
+            s["tahsilat_id"] = info.get("tahsilat_id")
+            s["makbuz_no"] = info.get("makbuz_no")
+        else:
+            s["tahsilatta"] = False
+            s["tahsilat_id"] = None
+            s["makbuz_no"] = None
+    ozet_out = dict(ozet)
+    # Eski alan adı geriye uyumluluk; anlamı artık «listede / cariye işlenmiş adedi».
+    ozet_out["tahsilatta_gizlenen"] = tahsilatta_adet
+    ozet_out["tahsilatta_olan"] = tahsilatta_adet
     out: dict = {"ok": True, "ozet": ozet_out, "satirlar": satirlar}
     if kayit_dosya:
         out["kayit_dosya"] = kayit_dosya
@@ -886,7 +929,7 @@ def _iso_or_str(v):
 @bp.route("/api/akbank-tahsilat/analyze", methods=["POST"])
 @giris_gerekli
 def api_akbank_tahsilat_analyze():
-    """Yeni Excel yükle: dosyayı ERP'ye kaydet + önizleme (cariye işlenmiş fişler listelenmez)."""
+    """Yeni Excel yükle: dosyayı ERP'ye kaydet + önizleme (cariye işlenmiş fişler listede kalır, tahsilatta bayrağı ile)."""
     from services.bank_processor import standard_transactions_to_tahsilat_ham, upload_bank_excel
 
     f = request.files.get("file")
