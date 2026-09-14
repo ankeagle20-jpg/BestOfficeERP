@@ -22,6 +22,7 @@ from db import (
     ensure_platform_tenants_table,
     ensure_tenant_module_entitlements_table,
     execute,
+    execute_returning,
     fetch_one,
 )
 from signup_provision_errors import MSG_GENERIC, sanitize_public_error_message
@@ -417,8 +418,25 @@ def _tenants_row_exists(slug: str, schema: str) -> bool:
     return bool(_fetch_tenant_row(slug, schema))
 
 
-def _insert_admin(schema: str, username: str, password: str, full_name: str) -> int:
-    hashed = generate_password_hash(password)
+def _insert_admin(
+    schema: str,
+    username: str,
+    password: str,
+    full_name: str,
+    *,
+    password_already_hashed: bool = False,
+) -> int:
+    """Admin kullanıcı ekle.
+
+    password_already_hashed=True: password parametresi zaten werkzeug hash'i;
+    generate_password_hash tekrar çağrılmaz (A3.2 Satın Al / platform_signup_intents).
+    """
+    if password_already_hashed:
+        hashed = str(password or "").strip()
+        if len(hashed) <= 20:
+            raise TenantProvisionError("geçersiz admin_password_hash")
+    else:
+        hashed = generate_password_hash(password)
     with db() as conn:
         cur = conn.cursor()
         cur.execute(
@@ -433,6 +451,86 @@ def _insert_admin(schema: str, username: str, password: str, full_name: str) -> 
     if not row:
         raise TenantProvisionError("admin kullanıcısı yazılamadı")
     return int(row["id"] if isinstance(row, dict) else row[0])
+
+
+def _claim_pending_payment_tenant(slug: str) -> dict | None:
+    """pending_payment → provisioning atomik claim (tek kazanan)."""
+    return execute_returning(
+        """
+        UPDATE public.tenants
+        SET status = 'provisioning', error_message = NULL
+        WHERE slug = %s AND status = 'pending_payment'
+        RETURNING id, slug, schema_name, plan, status
+        """,
+        (slug,),
+    )
+
+
+def _fetch_schema_admin_id(schema: str, username: str | None = None) -> int | None:
+    with db() as conn:
+        cur = conn.cursor()
+        if username:
+            cur.execute(
+                psql.SQL(
+                    "SELECT id FROM {}.users WHERE username=%s ORDER BY id ASC LIMIT 1"
+                ).format(psql.Identifier(schema)),
+                (username,),
+            )
+            row = cur.fetchone()
+            if row:
+                return int(row["id"] if isinstance(row, dict) else row[0])
+        cur.execute(
+            psql.SQL(
+                "SELECT id FROM {}.users WHERE role=%s ORDER BY id ASC LIMIT 1"
+            ).format(psql.Identifier(schema)),
+            ("admin",),
+        )
+        row = cur.fetchone()
+    if not row:
+        return None
+    return int(row["id"] if isinstance(row, dict) else row[0])
+
+
+def _active_provision_noop(
+    *,
+    slug: str,
+    schema: str,
+    plan_s: str,
+    user: str,
+    selected_module_keys,
+    module_tier_preferences,
+    ledger_only: bool,
+) -> dict:
+    """status='active' iken ikinci çağrı — şema/admin tekrar oluşturulmaz."""
+    row = fetch_one(
+        "SELECT id, slug, schema_name, plan, status FROM public.tenants WHERE slug=%s",
+        (slug,),
+    )
+    if not row:
+        raise TenantProvisionError("kiracı kaydı okunamadı")
+    admin_id = None
+    if _schema_exists(schema):
+        try:
+            admin_id = _fetch_schema_admin_id(schema, user)
+        except Exception:
+            logger.exception("active noop admin lookup failed slug=%s", slug)
+    return {
+        "ok": True,
+        "already_active": True,
+        "slug": slug,
+        "schema_name": schema,
+        "plan": str(row.get("plan") or plan_s),
+        "admin_username": user,
+        "admin_id": admin_id,
+        "tenant": row,
+        "ddl_path": None,
+        "module_entitlements_inserted": 0,
+        "selected_module_keys": normalize_signup_selected_modules(selected_module_keys),
+        "module_tier_preferences": normalize_module_tier_preferences(
+            module_tier_preferences
+        ),
+        "ledger_only": bool(ledger_only),
+    }
 
 
 def _register_tenant_user_lookup(slug: str, username: str) -> None:
@@ -595,6 +693,7 @@ def provision_new_tenant(
     plan: str = "trial",
     admin_username: str | None = None,
     admin_password: str | None = None,
+    admin_password_hash: str | None = None,
     admin_full_name: str | None = None,
     dump_path: Path | None = None,
     allow_existing_provisioning_row: bool = False,
@@ -604,9 +703,17 @@ def provision_new_tenant(
 ) -> dict:
     """Yeni kiracı: şema + DDL replay + admin + public.tenants kaydı.
 
-    slug veya şema zaten varsa hata verir (ikinci kez provision yok).
-    allow_existing_provisioning_row=True: status='provisioning' satırı varsa
-    devam eder ve sonunda INSERT yerine UPDATE status='active' yapar.
+    slug veya şema zaten varsa hata verir (ikinci kez provision yok),
+    ancak status='active' ise idempotent no-op başarı döner.
+
+    allow_existing_provisioning_row=True:
+      - status='provisioning' satırı varsa devam eder
+      - status='pending_payment' satırını atomik claim ile
+        provisioning'e çeker, sonra aynı resume yolunu kullanır
+      - sonunda UPDATE status='active'
+
+    admin_password_hash verilirse plaintext admin_password yerine bu hash
+    doğrudan users.password_hash'e yazılır (generate_password_hash yok).
     """
     slug = _normalize_slug(slug)
     schema = schema_name_for_slug(slug)
@@ -616,22 +723,68 @@ def provision_new_tenant(
     user = (admin_username or (slug + "_admin")).strip()
     if not _valid_admin_username(user):
         raise TenantProvisionError("geçersiz admin kullanıcı adı")
-    password = admin_password
-    if not password or len(str(password)) < 10:
-        raise TenantProvisionError("admin_password en az 10 karakter olmalı")
     full_name = (admin_full_name or (slug + " Admin")).strip()
+
+    ensure_platform_tenants_table()
+
+    existing_row = _fetch_tenant_row(slug, schema)
+    # Idempotency: zaten active → no-op (şifre doğrulaması gerekmez)
+    if existing_row and existing_row.get("status") == "active":
+        return _active_provision_noop(
+            slug=slug,
+            schema=schema,
+            plan_s=plan_s,
+            user=user,
+            selected_module_keys=selected_module_keys,
+            module_tier_preferences=module_tier_preferences,
+            ledger_only=bool(ledger_only),
+        )
+
+    prehashed = False
+    password_material: str | None = None
+    if admin_password_hash is not None and str(admin_password_hash).strip():
+        password_material = str(admin_password_hash).strip()
+        if len(password_material) <= 20:
+            raise TenantProvisionError("geçersiz admin_password_hash")
+        prehashed = True
+    else:
+        password_material = admin_password
+        if not password_material or len(str(password_material)) < 10:
+            raise TenantProvisionError("admin_password en az 10 karakter olmalı")
 
     src_path = Path(dump_path) if dump_path else _DEFAULT_DUMP
     if not src_path.is_file():
         raise TenantProvisionError(f"DDL şablonu yok: {src_path}")
 
-    ensure_platform_tenants_table()
-
-    existing_row = _fetch_tenant_row(slug, schema)
     resume_provisioning = False
     if allow_existing_provisioning_row and existing_row:
-        if existing_row.get("status") == "provisioning":
+        st = str(existing_row.get("status") or "")
+        if st == "provisioning":
             resume_provisioning = True
+        elif st == "pending_payment":
+            claimed = _claim_pending_payment_tenant(slug)
+            if claimed:
+                resume_provisioning = True
+            else:
+                # Yarış: başka worker claim etti veya active oldu
+                again = _fetch_tenant_row(slug, schema)
+                if again and again.get("status") == "active":
+                    return _active_provision_noop(
+                        slug=slug,
+                        schema=schema,
+                        plan_s=plan_s,
+                        user=user,
+                        selected_module_keys=selected_module_keys,
+                        module_tier_preferences=module_tier_preferences,
+                        ledger_only=bool(ledger_only),
+                    )
+                if again and again.get("status") == "provisioning":
+                    resume_provisioning = True
+                else:
+                    raise TenantProvisionError(
+                        f"pending_payment claim başarısız "
+                        f"(slug={slug} status={(again or {}).get('status')})"
+                    )
         else:
             raise TenantProvisionError(
                 f"kiracı zaten var (slug={slug} status={existing_row.get('status')})"
@@ -655,7 +808,13 @@ def provision_new_tenant(
     try:
         if not resume_provisioning or not _schema_exists(schema):
             _apply_tenant_ddl(sql_path)
-        admin_id = _insert_admin(schema, user, str(password), full_name)
+        admin_id = _insert_admin(
+            schema,
+            user,
+            str(password_material),
+            full_name,
+            password_already_hashed=prehashed,
+        )
         if resume_provisioning:
             execute(
                 """
@@ -690,6 +849,7 @@ def provision_new_tenant(
     )
     return {
         "ok": True,
+        "already_active": False,
         "slug": slug,
         "schema_name": schema,
         "plan": plan_s,
