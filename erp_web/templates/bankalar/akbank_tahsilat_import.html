@@ -95,6 +95,85 @@ th.ak-sort-num { text-align: right; }
     border-color: #b71c1c !important;
     color: #fff !important;
 }
+.ak-makbuz-icons {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+    vertical-align: middle;
+}
+.ak-makbuz-icons .ak-btn-pdf {
+    background: #e91e63;
+    color: #fff;
+    border: none;
+    padding: 3px 7px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 11px;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+}
+.ak-makbuz-icons .ak-btn-pdf:hover { background: #c2185b; color: #fff; }
+.ak-makbuz-icons .ak-btn-goz {
+    background: #7e57c2;
+    color: #fff;
+    border: none;
+    padding: 3px 7px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 11px;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+}
+.ak-makbuz-icons .ak-btn-goz:hover { background: #5e35b1; color: #fff; }
+.ak-pdf-modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 10050;
+    background: rgba(0, 0, 0, 0.55);
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+}
+.ak-pdf-modal.show { display: flex; }
+.ak-pdf-modal-icerik {
+    background: #0f2537;
+    border: 1px solid #37474f;
+    border-radius: 6px;
+    width: min(900px, 96vw);
+    height: min(85vh, 900px);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.ak-pdf-modal-baslik {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    border-bottom: 1px solid #263238;
+    color: #e0f7fa;
+    font-weight: 600;
+}
+.ak-pdf-modal-kapat {
+    background: transparent;
+    border: none;
+    color: #eceff1;
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 4px;
+}
+#akPdfOnizleIframe {
+    width: 100%;
+    flex: 1;
+    border: none;
+    background: #fff;
+}
 .ak-search-wrap { position: relative; min-width: 180px; }
 .ak-search-wrap input {
     width: 100%;
@@ -309,6 +388,15 @@ td.ak-td-sira {
 
     <div id="akMsg" class="ak-msg"></div>
     <div id="akMakbuzPanel" class="ak-makbuz-panel" style="display:none;" role="region" aria-label="Makbuz PDF linkleri"></div>
+    <div id="akPdfOnizleModal" class="ak-pdf-modal" style="display:none;" role="dialog" aria-modal="true" aria-label="Makbuz önizleme">
+        <div class="ak-pdf-modal-icerik">
+            <div class="ak-pdf-modal-baslik">
+                <span><i class="fa fa-file-pdf" aria-hidden="true"></i> Makbuz Önizleme</span>
+                <button type="button" class="ak-pdf-modal-kapat" id="akPdfOnizleKapat" aria-label="Kapat">&times;</button>
+            </div>
+            <iframe id="akPdfOnizleIframe" title="Makbuz PDF önizleme"></iframe>
+        </div>
+    </div>
     <div id="akOzet" class="ak-ozet"></div>
 
     <div id="akFilterBar" class="ak-filter-bar">
@@ -341,7 +429,7 @@ td.ak-td-sira {
                 <tr>
                     <th style="width:36px;">Onay</th>
                     <th>Durum</th>
-                    <th style="width:72px;">Makbuz</th>
+                    <th style="width:118px;">Makbuz</th>
                     <th class="ak-sort-th" data-sort="tarih" title="Tık 1: en yeni üstte (bugünden geçmişe, ▼). Tık 2: en eski üstte (kronolojik, ▲).">Tarih<span class="ak-sort-hint"></span></th>
                     <th class="ak-sort-th ak-sort-num" data-sort="tutar" title="Sırala">Tutar<span class="ak-sort-hint"></span></th>
                     <th>Fiş / Dekont</th>
@@ -927,16 +1015,24 @@ td.ak-td-sira {
             );
             let makbuzCell;
             if (canMakbuzYesil) {
+                const mnEsc = escapeHtml(String(r.makbuz_no || tidNum));
                 makbuzCell = (
-                    "<button type=\"button\" class=\"ak-btn ak-makbuz-yesil ak-row-makbuz\" data-i=\"" + i + "\" data-mode=\"open\" " +
-                    "style=\"padding:3px 8px;font-size:11px;white-space:nowrap;\" " +
-                    "title=\"Mevcut makbuz PDF (#" + escapeHtml(String(r.makbuz_no || tidNum)) + ")\">Makbuz</button>"
+                    "<span class=\"ak-makbuz-icons\">" +
+                    "<span class=\"ak-btn ak-makbuz-yesil\" style=\"padding:3px 8px;font-size:11px;cursor:default;\" " +
+                    "title=\"Cariye aktarıldı (#" + mnEsc + ")\">Makbuz</span>" +
+                    "<a class=\"ak-btn-pdf\" href=\"/faturalar/tahsilat-pdf/" + tidNum + "?indir=1\" download " +
+                    "title=\"PDF indir (#" + mnEsc + ")\" rel=\"noopener\">" +
+                    "<i class=\"fa fa-file-pdf\" aria-hidden=\"true\"></i><span> PDF</span></a>" +
+                    "<button type=\"button\" class=\"ak-btn-goz ak-row-makbuz-goz\" data-tid=\"" + tidNum + "\" " +
+                    "title=\"Önizle (#" + mnEsc + ")\">" +
+                    "<i class=\"fa fa-eye\" aria-hidden=\"true\"></i></button>" +
+                    "</span>"
                 );
             } else if (canMakbuzKirmizi) {
                 makbuzCell = (
                     "<button type=\"button\" class=\"ak-btn ak-makbuz-kirmizi ak-row-makbuz\" data-i=\"" + i + "\" data-mode=\"create\" " +
                     "style=\"padding:3px 8px;font-size:11px;white-space:nowrap;\" " +
-                    "title=\"Bu satır için banka ödeme türüyle makbuz oluştur ve PDF aç\">Makbuz</button>"
+                    "title=\"Bu satırı cariye aktar (makbuz oluştur; PDF otomatik açılmaz)\">Makbuz</button>"
                 );
             } else {
                 makbuzCell = "<span class=\"muted\" style=\"font-size:11px;\">—</span>";
@@ -981,12 +1077,16 @@ td.ak-td-sira {
                 btnMak.addEventListener("click", function (ev) {
                     ev.preventDefault();
                     ev.stopPropagation();
-                    const mode = btnMak.getAttribute("data-mode") || "create";
-                    if (mode === "open") {
-                        satirMakbuzPdfAc(displayRows[i]);
-                    } else {
-                        satirMakbuzOlustur(displayRows[i], btnMak);
-                    }
+                    satirMakbuzOlustur(displayRows[i], btnMak);
+                });
+            }
+            const btnGoz = tr.querySelector(".ak-row-makbuz-goz");
+            if (btnGoz) {
+                btnGoz.addEventListener("click", function (ev) {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    const tid = Number(btnGoz.getAttribute("data-tid"));
+                    akPdfOnizleAc(tid);
                 });
             }
 
@@ -1135,7 +1235,9 @@ td.ak-td-sira {
         document.getElementById("akOzet").textContent = t;
     }
 
-    function applyAnalyzeSuccess(data, infoMsg) {
+    function applyAnalyzeSuccess(data, infoMsg, opts) {
+        opts = opts || {};
+        const preserveFilters = !!opts.preserveFilters;
         const oz = data.ozet || {};
         applyOzetText(oz);
         allRows = (data.satirlar || []).map((r) => {
@@ -1149,16 +1251,23 @@ td.ak-td-sira {
                 _gondericiMapKaydedildi: !!hatirDb,
             });
         });
-        aciklamaFilter = "";
-        filtreMusteriIdSet.clear();
-        pendingMusteriIdSet.clear();
-        musteriFiltreUygulandi = false;
+        const fin = document.getElementById("akAciklamaFilter");
+        if (!preserveFilters) {
+            aciklamaFilter = "";
+            filtreMusteriIdSet.clear();
+            pendingMusteriIdSet.clear();
+            musteriFiltreUygulandi = false;
+            if (fin) fin.value = "";
+            sortState = { key: "tarih", dir: -1 };
+            hedefMusteriTemizle(true);
+        } else {
+            /* Yenileme: açıklama + müşteri filtresini koru; input ile state senkron. */
+            if (fin) {
+                aciklamaFilter = fin.value || "";
+            }
+        }
         const btEl0 = document.getElementById("akBankType");
         analyzeBankType = (btEl0 && btEl0.value) ? btEl0.value : "AKBANK";
-        hedefMusteriTemizle(true);
-        const fin = document.getElementById("akAciklamaFilter");
-        if (fin) fin.value = "";
-        sortState = { key: "tarih", dir: -1 };
         showMsg(infoMsg || (allRows.length + " satır listelendi. Cariye işlenmiş fişler listede kalır (Makbuz yeşil)."), true);
         render();
         loadKayitliDosyalar();
@@ -1242,7 +1351,7 @@ td.ak-td-sira {
                     document.getElementById("akOzet").textContent = "";
                     return;
                 }
-                applyAnalyzeSuccess(data, "Liste güncellendi (cariye işlenen fişler çıkarıldı).");
+                applyAnalyzeSuccess(data, "Liste güncellendi (cariye işlenmiş fişler listede kalır).", { preserveFilters: true });
             } catch (e) {
                 showMsg((e && e.name === "AbortError") ? "Yenileme zaman aşımı." : ("Ağ hatası: " + e), false);
                 document.getElementById("akOzet").textContent = "";
@@ -1593,11 +1702,69 @@ td.ak-td-sira {
         });
     })();
 
+    function uygulaSatirTahsilatta(row, kayit) {
+        if (!row || !kayit) return;
+        const tid = Number(kayit.tahsilat_id);
+        row.tahsilatta = true;
+        row.tahsilat_id = Number.isFinite(tid) && tid > 0 ? tid : row.tahsilat_id;
+        if (kayit.makbuz_no != null && String(kayit.makbuz_no).trim() !== "") {
+            row.makbuz_no = String(kayit.makbuz_no);
+        }
+        row._onay = false;
+        /* Aynı ref allRows içinde başka referansla duruyorsa onu da güncelle. */
+        const ref = String(row.banka_referans_no || "").trim();
+        if (ref && Array.isArray(allRows)) {
+            allRows.forEach(function (r) {
+                if (r !== row && String(r.banka_referans_no || "").trim() === ref) {
+                    r.tahsilatta = true;
+                    r.tahsilat_id = row.tahsilat_id;
+                    r.makbuz_no = row.makbuz_no;
+                    r._onay = false;
+                }
+            });
+        }
+    }
+
+    function akPdfOnizleAc(tahsilatId) {
+        const tid = Number(tahsilatId);
+        if (!Number.isFinite(tid) || tid <= 0) {
+            showMsg("Önizleme için geçerli tahsilat_id yok.", false);
+            return;
+        }
+        const iframe = document.getElementById("akPdfOnizleIframe");
+        const modal = document.getElementById("akPdfOnizleModal");
+        if (!iframe || !modal) return;
+        iframe.src = "/faturalar/tahsilat-pdf/" + tid;
+        modal.style.display = "flex";
+        modal.classList.add("show");
+    }
+
+    function akPdfOnizleKapat() {
+        const iframe = document.getElementById("akPdfOnizleIframe");
+        const modal = document.getElementById("akPdfOnizleModal");
+        if (iframe) iframe.src = "about:blank";
+        if (modal) {
+            modal.classList.remove("show");
+            modal.style.display = "none";
+        }
+    }
+
+    (function akPdfModalInit() {
+        const btn = document.getElementById("akPdfOnizleKapat");
+        if (btn) btn.addEventListener("click", akPdfOnizleKapat);
+        const modal = document.getElementById("akPdfOnizleModal");
+        if (modal) {
+            modal.addEventListener("click", function (ev) {
+                if (ev.target === modal) akPdfOnizleKapat();
+            });
+        }
+    })();
+
     function satirMakbuzPdfAc(row) {
         if (!row || !row.tahsilatta) return;
         const tid = Number(row.tahsilat_id);
         if (!Number.isFinite(tid) || tid <= 0) {
-            showMsg("Bu satır için tahsilat_id yok; PDF açılamadı.", false);
+            showMsg("Bu satır için tahsilat_id yok; önizleme açılamadı.", false);
             return;
         }
         showMakbuzPanel([{
@@ -1606,8 +1773,7 @@ td.ak-td-sira {
             banka_referans_no: row.banka_referans_no || "",
             tutar: row.tutar,
         }]);
-        showMsg("Mevcut makbuz PDF açılıyor (#" + (row.makbuz_no || tid) + "). Yeni tahsilat oluşturulmadı.", true);
-        window.open("/faturalar/tahsilat-pdf/" + tid + "?indir=1", "_blank", "noopener");
+        akPdfOnizleAc(tid);
     }
 
     async function satirMakbuzOlustur(row, btnEl) {
@@ -1662,14 +1828,13 @@ td.ak-td-sira {
             const k0 = data.kayitlar[0];
             showMakbuzPanel(data.kayitlar);
             showMsg(
-                "Makbuz oluşturuldu (#" + (k0.makbuz_no || "") + ", odeme_turu=banka). PDF yeni sekmede açılıyor.",
+                "Aktarıldı / makbuz #" + (k0.makbuz_no || k0.tahsilat_id || "") +
+                " (odeme_turu=banka). PDF otomatik açılmadı — yeşil satırdaki PDF / Göz ikonlarını kullanın.",
                 true
             );
-            const tid = Number(k0.tahsilat_id);
-            if (Number.isFinite(tid)) {
-                window.open("/faturalar/tahsilat-pdf/" + tid + "?indir=1", "_blank", "noopener");
-            }
-            await tabloyuYenile();
+            /* Listeyi yeniden çekme — filtre/sort/hedef korunur; satır yerel yeşile döner. PDF açılmaz. */
+            uygulaSatirTahsilatta(row, k0);
+            render();
             if (data.kayitlar.length) showMakbuzPanel(data.kayitlar);
         } catch (e) {
             showMsg("Ağ hatası: " + e, false);
