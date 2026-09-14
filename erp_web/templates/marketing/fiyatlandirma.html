@@ -289,6 +289,17 @@
     font-weight: 650;
   }
   .btn-select.is-secondary:hover { background: #f8fafc; }
+  .pricing-all-packages {
+    margin: 0 0 18px;
+    font-size: 0.9rem;
+  }
+  .pricing-all-packages a {
+    color: #1d4ed8;
+    font-weight: 600;
+    text-decoration: none;
+  }
+  .pricing-all-packages a:hover { text-decoration: underline; }
+
   .core-divider {
     border: 0;
     border-top: 1px solid var(--border);
@@ -419,6 +430,10 @@
   <p class="pricing-intro">Türkiye — müşteri hacmine göre esnek planlar. 14 gün deneme.</p>
 </div>
 
+<p id="pricing-all-packages" class="pricing-all-packages" hidden>
+  <a href="/fiyatlandirma">Tüm paketler</a>
+</p>
+
 <!-- Dinamik Kampanya Hero Banner -->
 <div id="pricing-campaign-banner" class="campaign-hero-banner" style="display:none;">
   <div style="display:flex; align-items:center;">
@@ -428,6 +443,7 @@
   <div id="pricing-campaign-days" style="font-size:0.85rem; font-weight:600; background:rgba(0,0,0,0.2); padding:4px 10px; border-radius:6px;"></div>
 </div>
 
+<section class="pricing-module-section" data-module="core" aria-label="ERP çekirdek planları">
 <h2 class="pricing-section-title">ERP çekirdek planları</h2>
 <p class="pricing-section-sub">Müşteri sayısına göre taban + müşteri başı ücret.</p>
 
@@ -435,7 +451,9 @@
 <div id="pricing-loading" class="pricing-loading">Planlar yükleniyor…</div>
 <div id="pricing-grid" class="pricing-grid" hidden></div>
 <div id="overage-note" class="overage-note" hidden></div>
+</section>
 
+<section class="pricing-module-section" data-module="personnel" aria-label="Personel Yönetimi Modülü">
 <hr class="core-divider" />
 
 <h2 class="pricing-section-title">Personel Yönetimi Modülü</h2>
@@ -458,9 +476,9 @@
 <div id="module-pricing-error" class="pricing-error" role="alert"></div>
 <div id="module-pricing-loading" class="pricing-loading">Personel planları yükleniyor…</div>
 <div id="module-pricing-grid" class="pricing-grid" hidden></div>
+</section>
 
-
-
+<section class="pricing-module-section" data-module="randevu" aria-label="Randevu Yönetimi Modülü">
 <hr class="core-divider" />
 
 <h2 class="pricing-section-title">Randevu Yönetimi Modülü</h2>
@@ -483,7 +501,9 @@
 <div id="rv-pricing-error" class="pricing-error" role="alert"></div>
 <div id="rv-pricing-loading" class="pricing-loading">Randevu planları yükleniyor…</div>
 <div id="rv-pricing-grid" class="pricing-grid" hidden></div>
+</section>
 
+<section class="pricing-module-section" data-module="ledger" aria-label="Payafin Cari Modülü">
 <hr class="core-divider" />
 
 <h2 id="payafin-cari" class="pricing-section-title">Payafin Cari Modülü</h2>
@@ -504,6 +524,7 @@
 <div id="ld-pricing-error" class="pricing-error" role="alert"></div>
 <div id="ld-pricing-loading" class="pricing-loading">Payafin Cari planları yükleniyor…</div>
 <div id="ld-pricing-grid" class="pricing-grid" hidden></div>
+</section>
 
 <div id="mp-contact-modal" class="mp-modal-backdrop" hidden aria-hidden="true">
   <div class="mp-modal" role="dialog" aria-modal="true" aria-labelledby="mp-contact-title">
@@ -1577,6 +1598,24 @@
     });
   }
 
+  function applyModuleFilterFromQuery() {
+    var allowed = { core: true, personnel: true, randevu: true, ledger: true };
+    var raw = new URLSearchParams(window.location.search).get("module");
+    var m = (raw || "").trim().toLowerCase();
+    var sections = document.querySelectorAll("section.pricing-module-section[data-module]");
+    var allLink = document.getElementById("pricing-all-packages");
+    if (!m || !allowed[m]) {
+      sections.forEach(function (el) { el.hidden = false; });
+      if (allLink) allLink.hidden = true;
+      return;
+    }
+    sections.forEach(function (el) {
+      el.hidden = el.getAttribute("data-module") !== m;
+    });
+    if (allLink) allLink.hidden = false;
+  }
+
+  applyModuleFilterFromQuery();
   loadPricing();
   loadModulePricing();
   loadRandevuPricing();
