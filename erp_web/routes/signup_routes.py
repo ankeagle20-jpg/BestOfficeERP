@@ -145,6 +145,17 @@ def _parse_ledger_only(data: dict) -> bool:
     return False
 
 
+def _parse_signup_intent(data: dict) -> str:
+    """A2.1: yalnız 'purchase' özel dal; yok/trial/diğer → mevcut trial+provision yolu."""
+    raw = data.get("intent")
+    if raw is None:
+        return "trial"
+    s = str(raw).strip().lower()
+    if s == "purchase":
+        return "purchase"
+    return "trial"
+
+
 def _provision_worker(
     app,
     slug: str,
@@ -313,6 +324,7 @@ def api_signup():
     selected_modules = _parse_selected_modules(data)
     tier_prefs = _parse_module_tier_preferences(data)
     ledger_only = _parse_ledger_only(data)
+    signup_intent = _parse_signup_intent(data)
     # S4.1: ledger_only sunucuda doğrulanır — boş/ledger-dışı → 400 (fail-closed, reserve öncesi)
     if ledger_only and set(selected_modules) != {"ledger"}:
         return (
@@ -340,12 +352,17 @@ def api_signup():
             {"Retry-After": str(retry_after)},
         )
 
+    purchase = signup_intent == "purchase"
+    reserve_status = "pending_payment" if purchase else "provisioning"
+    reserve_plan = "purchase" if purchase else "trial"
+
     try:
-        reserve_tenant_slug(
+        reserved = reserve_tenant_slug(
             slug,
             company_name=str(data.get("company_name") or "").strip(),
             country_code=str(data.get("country_code") or "").strip().upper(),
-            plan="trial",
+            plan=reserve_plan,
+            status=reserve_status,
         )
     except TenantSlugConflictError:
         retry = _slug_conflict_response(slug)
@@ -355,6 +372,23 @@ def api_signup():
     except (TenantSlugReserveError, TenantProvisionError) as e:
         logger.warning("reserve_tenant_slug failed slug=%s: %s", slug, e)
         return jsonify({"ok": False, "mesaj": "Kayıt tamamlanamadı, bilgileri kontrol edin."}), 400
+
+    # A2.1: Satın Al — slug kilidi + pending_payment; provizyon/fatura YOK (A2.2+)
+    if purchase:
+        tenant_row = reserved.get("tenant") or {}
+        tenant_id = tenant_row.get("id")
+        return (
+            jsonify(
+                {
+                    "ok": True,
+                    "slug": slug,
+                    "status": "pending_payment",
+                    "tenant_id": tenant_id,
+                    "plan": reserve_plan,
+                }
+            ),
+            200,
+        )
 
     app_obj = current_app._get_current_object()
     thread = threading.Thread(

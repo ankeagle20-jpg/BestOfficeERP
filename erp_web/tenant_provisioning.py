@@ -93,14 +93,18 @@ def _fetch_tenant_row(slug: str, schema: str) -> dict | None:
     )
 
 
+_RESERVE_STATUSES = frozenset({"provisioning", "pending_payment"})
+
+
 def reserve_tenant_slug(
     slug: str,
     *,
     company_name: str | None = None,
     country_code: str | None = None,
     plan: str = "trial",
+    status: str = "provisioning",
 ) -> dict:
-    """Asenkron signup: slug'ı hemen status='provisioning' ile rezerve et.
+    """Slug rezervasyonu: varsayılan status='provisioning'; Satın Al için 'pending_payment'.
 
     UNIQUE(slug)/UNIQUE(schema_name) yarışını DB'ye bırakır.
     """
@@ -109,6 +113,9 @@ def reserve_tenant_slug(
     plan_s = str(plan or "trial").strip() or "trial"
     if not re.fullmatch(r"[a-z0-9_]{1,32}", plan_s):
         raise TenantSlugReserveError("geçersiz plan")
+    status_s = str(status or "provisioning").strip().lower()
+    if status_s not in _RESERVE_STATUSES:
+        raise TenantSlugReserveError("geçersiz status")
 
     ensure_platform_tenants_table()
 
@@ -129,9 +136,9 @@ def reserve_tenant_slug(
             """
             INSERT INTO public.tenants
                 (slug, schema_name, plan, status, company_name, country_code)
-            VALUES (%s, %s, %s, 'provisioning', %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s)
             """,
-            (slug, schema, plan_s, company, country),
+            (slug, schema, plan_s, status_s, company, country),
         )
     except UniqueViolation as e:
         raise TenantSlugConflictError(f"slug çakışması: {slug}") from e
@@ -141,7 +148,13 @@ def reserve_tenant_slug(
         "FROM public.tenants WHERE slug=%s",
         (slug,),
     )
-    return {"ok": True, "slug": slug, "schema_name": schema, "status": "provisioning", "tenant": row}
+    return {
+        "ok": True,
+        "slug": slug,
+        "schema_name": schema,
+        "status": status_s,
+        "tenant": row,
+    }
 
 
 def mark_tenant_provision_failed(

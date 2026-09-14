@@ -2392,7 +2392,7 @@ def ensure_platform_tenants_table():
                 schema_name ~ '^tenant_[a-z0-9_]+$' OR schema_name = 'public'
             ),
             CONSTRAINT tenants_status_ok CHECK (
-                status IN ('provisioning', 'active', 'suspended', 'failed')
+                status IN ('provisioning', 'pending_payment', 'active', 'suspended', 'failed')
             )
         )
         """
@@ -2419,7 +2419,7 @@ def ensure_platform_tenants_signup_columns():
         execute(
             """
             ALTER TABLE public.tenants ADD CONSTRAINT tenants_status_ok CHECK (
-                status IN ('provisioning', 'active', 'suspended', 'failed')
+                status IN ('provisioning', 'pending_payment', 'active', 'suspended', 'failed')
             )
             """
         )
