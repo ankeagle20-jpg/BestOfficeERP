@@ -489,18 +489,23 @@
       });
       const data = await res.json().catch(() => ({}));
       if (res.status === 200 && data.ok && data.status === "pending_payment") {
-        globalError.style.display = "none";
-        showPanel("panel-form");
-        globalError.style.display = "block";
-        globalError.style.color = "#0f766e";
+        const invoiceId = data.invoice_id;
+        const payToken = data.pay_token;
+        if (invoiceId && payToken) {
+          const payUrl =
+            data.pay_url ||
+            ("/billing/paytr/checkout/" +
+              encodeURIComponent(String(invoiceId)) +
+              "?token=" +
+              encodeURIComponent(String(payToken)));
+          window.location.href = payUrl;
+          return;
+        }
+        globalError.style.color = "";
         globalError.textContent =
-          "Hesap rezervasyonu alındı (ödeme bekleniyor). Fatura #" +
-          (data.invoice_id || "?") +
-          " — " +
-          (data.total_gross != null ? data.total_gross : "") +
-          " " +
-          (data.currency || "TRY") +
-          ". Ödeme adımı yakında eklenecek.";
+          data.mesaj ||
+          "Ödeme bağlantısı oluşturulamadı. Lütfen tekrar deneyin veya destek ile iletişime geçin.";
+        globalError.style.display = "block";
         return;
       }
       if (res.status === 202 && data.ok) {
