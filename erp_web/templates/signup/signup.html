@@ -36,8 +36,13 @@
 <div id="panel-form" class="panel active">
   <div class="signup-brand">
     <div class="logo">PAYAFIN</div>
+    {% if request.args.get('intent') == 'purchase' %}
+    <h1>Hesabınızı oluşturun</h1>
+    <p>Ödeme aşaması yakında eklenecek — şimdilik hesabınızı oluşturun. (Satın Al; 14 günlük deneme değil.)</p>
+    {% else %}
     <h1>Payafin'e KAYDOLUN</h1>
     <p>14 gün deneme — işletmeniz için bulut ERP</p>
+    {% endif %}
   </div>
   <div id="global-error" class="global-error" style="display:none" role="alert"></div>
   <form id="signup-form" novalidate>
