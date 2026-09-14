@@ -159,6 +159,118 @@ def paytr_pay_page(invoice_id: int):
     )
 
 
+@bp.route("/billing/paytr/checkout/<int:invoice_id>", methods=["GET"])
+@platform_host_only
+def paytr_checkout_page(invoice_id: int):
+    """A2.3 public checkout: imzalı pay_token ile girişsiz ödeme (admin /pay ayrı kalır).
+
+    - token yok/bozuk/süresi dolmuş/yanlış fatura → 403 (numara tahmini sızdırma)
+    - fatura yok → 404
+    - paid/void → 400 (token geçerli olsa bile)
+    - geçerli + tek-kullanım consume → run_paytr_init + aynı iFrame şablonu
+    """
+    from paytr_checkout_token import CheckoutTokenError, consume_pay_token, parse_and_verify_mac
+
+    raw_token = (request.args.get("token") or "").strip()
+    if not raw_token:
+        return (
+            render_template(
+                "billing/paytr_pay_error.html",
+                mesaj="Ödeme bağlantısı geçersiz veya eksik.",
+                http_status=403,
+                invoice_id=invoice_id,
+            ),
+            403,
+        )
+
+    try:
+        _iid, _exp, nonce = parse_and_verify_mac(
+            raw_token, expected_invoice_id=int(invoice_id)
+        )
+    except CheckoutTokenError:
+        logger.info(
+            "paytr_checkout token reject invoice_id=%s", invoice_id
+        )
+        return (
+            render_template(
+                "billing/paytr_pay_error.html",
+                mesaj="Ödeme bağlantısı geçersiz veya süresi dolmuş.",
+                http_status=403,
+                invoice_id=invoice_id,
+            ),
+            403,
+        )
+
+    inv_row = fetch_one(
+        "SELECT id, status, source FROM public.platform_tenant_invoices WHERE id=%s",
+        (int(invoice_id),),
+    )
+    if not inv_row:
+        return (
+            render_template(
+                "billing/paytr_pay_error.html",
+                mesaj="Fatura bulunamadı.",
+                http_status=404,
+                invoice_id=invoice_id,
+            ),
+            404,
+        )
+
+    status = str(inv_row.get("status") or "").strip().lower()
+    if status in ("paid", "void"):
+        return (
+            render_template(
+                "billing/paytr_pay_error.html",
+                mesaj=f"Bu fatura için ödeme sayfası açılamaz (durum: {status}).",
+                http_status=400,
+                invoice_id=invoice_id,
+            ),
+            400,
+        )
+
+    try:
+        consume_pay_token(int(invoice_id), nonce)
+    except CheckoutTokenError as e:
+        code = getattr(e, "code", "") or ""
+        http_st = 404 if code == "not_found" else 403
+        return (
+            render_template(
+                "billing/paytr_pay_error.html",
+                mesaj="Ödeme bağlantısı geçersiz veya daha önce kullanılmış.",
+                http_status=http_st,
+                invoice_id=invoice_id,
+            ),
+            http_st,
+        )
+
+    ok, http_status, payload = run_paytr_init(invoice_id, data={})
+    if not ok:
+        # Token consume edildi; init hatası ayrı — kullanıcıya net mesaj
+        return (
+            render_template(
+                "billing/paytr_pay_error.html",
+                mesaj=payload.get("mesaj") or "Ödeme başlatılamadı",
+                http_status=http_status,
+                invoice_id=invoice_id,
+            ),
+            http_status if http_status in (400, 403, 404, 409, 502) else 400,
+        )
+
+    inv = payload.get("invoice") or {}
+    return render_template(
+        "billing/paytr_pay.html",
+        token=payload.get("token"),
+        merchant_oid=payload.get("merchant_oid"),
+        payment_amount_kurus=payload.get("payment_amount_kurus"),
+        test_mode=payload.get("test_mode"),
+        invoice_id=inv.get("id") or invoice_id,
+        invoice_no=inv.get("invoice_no") or "",
+        currency=inv.get("currency") or "TRY",
+        total_gross=inv.get("total_gross"),
+        tenant_slug=inv.get("tenant_slug") or "",
+    )
+
+
 @bp.route("/billing/paytr/ok", methods=["GET"])
 @platform_host_only
 def paytr_ok_page():

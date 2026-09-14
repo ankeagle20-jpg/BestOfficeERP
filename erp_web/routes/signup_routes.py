@@ -406,7 +406,21 @@ def _create_purchase_invoice(
         """,
         (json.dumps(meta), inv_id),
     )
-    return updated or row
+    inv_row = updated or row
+    # A2.3: imzalı tek-kullanımlık pay_token (yanıtta dönecek)
+    try:
+        from paytr_checkout_token import attach_pay_token_to_invoice_metadata
+
+        pay_token = attach_pay_token_to_invoice_metadata(inv_id)
+        inv_row = dict(inv_row)
+        inv_row["_pay_token"] = pay_token
+    except Exception as e:
+        logger.exception("pay_token mint failed invoice_id=%s", inv_id)
+        raise PurchasePricingError(
+            "Ödeme token'ı oluşturulamadı.",
+            errors={"pay_token": "mint_failed", "detail": str(e)},
+        ) from e
+    return inv_row
 
 
 def _provision_worker(
@@ -690,6 +704,11 @@ def api_signup():
                 400,
             )
         total_gross = inv.get("total_gross")
+        pay_token = inv.get("_pay_token")
+        invoice_id = inv.get("id")
+        pay_url = None
+        if pay_token and invoice_id:
+            pay_url = f"/billing/paytr/checkout/{int(invoice_id)}?token={pay_token}"
         return (
             jsonify(
                 {
@@ -698,9 +717,11 @@ def api_signup():
                     "status": "pending_payment",
                     "tenant_id": tenant_id,
                     "plan": reserve_plan,
-                    "invoice_id": inv.get("id"),
+                    "invoice_id": invoice_id,
                     "total_gross": float(total_gross) if total_gross is not None else None,
                     "currency": inv.get("currency") or purchase_bill.get("currency"),
+                    "pay_token": pay_token,
+                    "pay_url": pay_url,
                 }
             ),
             200,
