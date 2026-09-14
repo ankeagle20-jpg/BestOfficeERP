@@ -2,13 +2,19 @@
 """Payafin herkese açık kayıt API (apex-only, async provisioning)."""
 from __future__ import annotations
 
+import json
 import logging
+import re
+import secrets
 import threading
 import time
+from decimal import Decimal
 from functools import wraps
 
 from flask import Blueprint, current_app, jsonify, render_template, request
-from db import fetch_one
+from db import execute, execute_returning, fetch_one
+from module_pricing_engine import ModulePricingEngineError, calculate_module_bill
+from pricing_engine import PricingEngineError, calculate_tenant_bill
 from signup_provision_errors import map_provision_error
 from signup_rate_limit import check_signup_post_rate, check_slug_available_rate
 from signup_validation import (
@@ -154,6 +160,253 @@ def _parse_signup_intent(data: dict) -> str:
     if s == "purchase":
         return "purchase"
     return "trial"
+
+
+_PURCHASE_MODULES = frozenset({"core", "personnel", "randevu", "ledger"})
+
+
+class PurchasePricingError(Exception):
+    """Geçersiz module/tier veya fiyatlandırılamayan Satın Al isteği."""
+
+    def __init__(self, message: str, *, errors: dict | None = None):
+        super().__init__(message)
+        self.errors = errors or {}
+
+
+def _release_pending_payment_tenant(slug: str) -> None:
+    """Fatura oluşturulamazsa pending_payment rezervasyonunu geri al."""
+    slug_s = str(slug or "").strip().lower()
+    if not slug_s:
+        return
+    try:
+        execute(
+            """
+            DELETE FROM public.tenants
+            WHERE slug = %s AND status = 'pending_payment'
+            """,
+            (slug_s,),
+        )
+    except Exception:
+        logger.exception("release pending_payment tenant failed slug=%s", slug_s)
+
+
+def _normalize_tier_key(raw) -> str:
+    return str(raw or "").strip().lower()
+
+
+def _resolve_purchase_module_and_tier(
+    data: dict,
+    *,
+    selected_modules: list[str],
+    tier_prefs: dict[str, str],
+    ledger_only: bool,
+) -> tuple[str, str]:
+    """Satın Al için tek module + tier. Client tutarı yok sayılır."""
+    tier = _normalize_tier_key(data.get("tier"))
+    module = str(data.get("module") or "").strip().lower()
+
+    if ledger_only:
+        module = "ledger"
+        if not tier:
+            tier = _normalize_tier_key(tier_prefs.get("ledger"))
+    elif module in _PURCHASE_MODULES:
+        if not tier and module != "core":
+            tier = _normalize_tier_key(tier_prefs.get(module))
+        if not tier and module == "core":
+            # core: body tier zorunlu; prefs'te core olmayabilir
+            tier = _normalize_tier_key(tier_prefs.get("core"))
+    elif len(selected_modules) == 1:
+        module = selected_modules[0]
+        if not tier:
+            tier = _normalize_tier_key(tier_prefs.get(module))
+    elif not selected_modules and not module:
+        module = "core"
+    else:
+        raise PurchasePricingError(
+            "Satın Al için tek bir modül ve kademe gerekli.",
+            errors={"module": "invalid_module"},
+        )
+
+    if module not in _PURCHASE_MODULES:
+        raise PurchasePricingError(
+            "Geçersiz modül.",
+            errors={"module": "invalid_module"},
+        )
+    if not tier or not re.fullmatch(r"[a-z0-9_]{1,32}", tier):
+        raise PurchasePricingError(
+            "Geçersiz veya eksik kademe (tier).",
+            errors={"tier": "invalid_tier"},
+        )
+    if tier in ("enterprise", "contact", "contact_sales"):
+        raise PurchasePricingError(
+            "Bu kademe self-servis Satın Al için uygun değil.",
+            errors={"tier": "contact_sales"},
+        )
+    return module, tier
+
+
+def _bill_core_for_tier(country_code: str, tier_key: str) -> dict:
+    """Core ERP: istenen tier_key için sunucu tutarı (client amount yok sayılır)."""
+    cc = str(country_code or "TR").strip().upper() or "TR"
+    row = fetch_one(
+        """
+        SELECT tier_key, min_customers, max_customers, is_active
+        FROM public.pricing_tiers
+        WHERE country_code = %s
+          AND tier_key = %s
+          AND is_active = TRUE
+        LIMIT 1
+        """,
+        (cc, tier_key),
+    )
+    if not row:
+        # US master türetilmiş ülkelerde override yoksa US'tan kontrol
+        row = fetch_one(
+            """
+            SELECT tier_key, min_customers, max_customers, is_active
+            FROM public.pricing_tiers
+            WHERE country_code = 'US'
+              AND tier_key = %s
+              AND is_active = TRUE
+            LIMIT 1
+            """,
+            (tier_key,),
+        )
+    if not row:
+        raise PurchasePricingError(
+            "Geçersiz Core ERP kademesi.",
+            errors={"tier": "invalid_tier"},
+        )
+    n = int(row.get("min_customers") or 0)
+    try:
+        bill = calculate_tenant_bill(cc, n, 1)
+    except PricingEngineError as e:
+        raise PurchasePricingError(
+            "Fiyat hesaplanamadı.",
+            errors={"tier": "pricing_error", "detail": str(e)},
+        ) from e
+    if str(bill.get("tier_key") or "") != tier_key:
+        raise PurchasePricingError(
+            "Seçilen kademe fiyat motoru ile eşleşmedi.",
+            errors={"tier": "tier_mismatch"},
+        )
+    return bill
+
+
+def _bill_module_for_tier(
+    module_key: str, country_code: str, tier_key: str
+) -> dict:
+    """Modül: taban kademe tutarı (0 personel/şube/randevu — aşım yok)."""
+    cc = str(country_code or "TR").strip().upper() or "TR"
+    kwargs = {
+        "module_key": module_key,
+        "country_code": cc,
+        "personnel_count": 0,
+        "branch_count": 0,
+        "billing_period": "monthly",
+        "tier_key": tier_key,
+    }
+    if module_key == "randevu":
+        kwargs["appointment_count"] = 0
+    try:
+        bill = calculate_module_bill(**kwargs)
+    except ModulePricingEngineError as e:
+        raise PurchasePricingError(
+            "Geçersiz modül veya kademe.",
+            errors={"tier": "invalid_tier", "detail": str(e)},
+        ) from e
+    if bill.get("requires_contact_sales") or bill.get("kind") == "contact":
+        raise PurchasePricingError(
+            "Bu kademe self-servis Satın Al için uygun değil.",
+            errors={"tier": "contact_sales"},
+        )
+    if str(bill.get("tier_key") or "") != tier_key:
+        raise PurchasePricingError(
+            "Seçilen kademe fiyat motoru ile eşleşmedi.",
+            errors={"tier": "tier_mismatch"},
+        )
+    total = Decimal(str(bill.get("total_monthly") or "0"))
+    if total <= 0:
+        raise PurchasePricingError(
+            "Hesaplanan tutar geçersiz.",
+            errors={"tier": "invalid_amount"},
+        )
+    return bill
+
+
+def _compute_purchase_bill(
+    *,
+    module_key: str,
+    tier_key: str,
+    country_code: str,
+) -> dict:
+    """Client tutarını yok say; sunucu motorundan bill üret."""
+    if module_key == "core":
+        bill = _bill_core_for_tier(country_code, tier_key)
+        total = Decimal(str(bill.get("total_monthly") or "0"))
+        if total <= 0:
+            raise PurchasePricingError(
+                "Hesaplanan tutar geçersiz.",
+                errors={"tier": "invalid_amount"},
+            )
+        return bill
+    return _bill_module_for_tier(module_key, country_code, tier_key)
+
+def _create_purchase_invoice(
+    *,
+    tenant_id: int,
+    slug: str,
+    module_key: str,
+    tier_key: str,
+    bill: dict,
+) -> dict:
+    """platform_tenant_invoices: source=paytr, status=sent + merchant_oid damgası."""
+    currency = str(bill.get("currency") or "TRY").strip().upper() or "TRY"
+    total = Decimal(str(bill.get("total_monthly") or "0")).quantize(Decimal("0.01"))
+    invoice_no = f"PUR-{slug}-{secrets.token_hex(4)}"[:64]
+    meta = {
+        "intent": "purchase",
+        "module": module_key,
+        "tier": tier_key,
+        "signup_slug": slug,
+        "bill_tier_key": bill.get("tier_key"),
+        "bill_total_monthly": float(total),
+    }
+    row = execute_returning(
+        """
+        INSERT INTO public.platform_tenant_invoices (
+            tenant_id, tenant_slug, subscription_id, invoice_no, status, currency,
+            total_gross, issued_at, due_at, paid_at, source, external_ref, metadata
+        ) VALUES (
+            %s, %s, NULL, %s, 'sent', %s,
+            %s, NOW(), NOW() + INTERVAL '24 hours', NULL, 'paytr', NULL, %s::jsonb
+        )
+        RETURNING *
+        """,
+        (
+            int(tenant_id),
+            slug,
+            invoice_no,
+            currency,
+            total,
+            json.dumps(meta),
+        ),
+    )
+    if not row:
+        raise PurchasePricingError("Fatura oluşturulamadı.")
+    # PayTR init için merchant_oid (A2.3 checkout)
+    inv_id = int(row["id"])
+    meta["merchant_oid"] = f"INV{inv_id}{secrets.token_hex(4)}"
+    updated = execute_returning(
+        """
+        UPDATE public.platform_tenant_invoices
+        SET metadata = %s::jsonb, updated_at = NOW()
+        WHERE id = %s
+        RETURNING *
+        """,
+        (json.dumps(meta), inv_id),
+    )
+    return updated or row
 
 
 def _provision_worker(
@@ -355,12 +608,43 @@ def api_signup():
     purchase = signup_intent == "purchase"
     reserve_status = "pending_payment" if purchase else "provisioning"
     reserve_plan = "purchase" if purchase else "trial"
+    country_code = str(data.get("country_code") or "").strip().upper() or "TR"
+
+    # A2.2: Satın Al — fiyatı reserve ÖNCESİ hesapla (geçersiz tier → slug kilitleme)
+    purchase_module = None
+    purchase_tier = None
+    purchase_bill = None
+    if purchase:
+        # Client'tan gelen tutarı yok say (total_gross / amount / price)
+        try:
+            purchase_module, purchase_tier = _resolve_purchase_module_and_tier(
+                data,
+                selected_modules=selected_modules,
+                tier_prefs=tier_prefs,
+                ledger_only=ledger_only,
+            )
+            purchase_bill = _compute_purchase_bill(
+                module_key=purchase_module,
+                tier_key=purchase_tier,
+                country_code=country_code,
+            )
+        except PurchasePricingError as e:
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "mesaj": str(e) or "Geçersiz modül veya kademe.",
+                        "errors": e.errors or {"tier": "invalid_tier"},
+                    }
+                ),
+                400,
+            )
 
     try:
         reserved = reserve_tenant_slug(
             slug,
             company_name=str(data.get("company_name") or "").strip(),
-            country_code=str(data.get("country_code") or "").strip().upper(),
+            country_code=country_code,
             plan=reserve_plan,
             status=reserve_status,
         )
@@ -373,10 +657,39 @@ def api_signup():
         logger.warning("reserve_tenant_slug failed slug=%s: %s", slug, e)
         return jsonify({"ok": False, "mesaj": "Kayıt tamamlanamadı, bilgileri kontrol edin."}), 400
 
-    # A2.1: Satın Al — slug kilidi + pending_payment; provizyon/fatura YOK (A2.2+)
+    # A2.2: Satın Al — pending_payment + fatura; provizyon/pay_url YOK (A2.3+)
     if purchase:
         tenant_row = reserved.get("tenant") or {}
         tenant_id = tenant_row.get("id")
+        try:
+            if not tenant_id:
+                raise PurchasePricingError("Tenant rezervasyonu tamamlanamadı.")
+            inv = _create_purchase_invoice(
+                tenant_id=int(tenant_id),
+                slug=slug,
+                module_key=purchase_module,
+                tier_key=purchase_tier,
+                bill=purchase_bill,
+            )
+        except Exception as e:
+            logger.exception("purchase invoice failed slug=%s", slug)
+            _release_pending_payment_tenant(slug)
+            mesaj = (
+                str(e)
+                if isinstance(e, PurchasePricingError)
+                else "Fatura oluşturulamadı."
+            )
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "mesaj": mesaj,
+                        "errors": {"invoice": "create_failed"},
+                    }
+                ),
+                400,
+            )
+        total_gross = inv.get("total_gross")
         return (
             jsonify(
                 {
@@ -385,6 +698,9 @@ def api_signup():
                     "status": "pending_payment",
                     "tenant_id": tenant_id,
                     "plan": reserve_plan,
+                    "invoice_id": inv.get("id"),
+                    "total_gross": float(total_gross) if total_gross is not None else None,
+                    "currency": inv.get("currency") or purchase_bill.get("currency"),
                 }
             ),
             200,

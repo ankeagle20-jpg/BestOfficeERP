@@ -711,7 +711,13 @@
       "<li>Müşteri başı: " + ppcHtml + "</li>" +
       "<li>Dahil kullanıcı: <strong>" + escapeHtml(String(tier.included_users)) + "</strong></li>" +
       "<li>Ek kullanıcı: " + extraUHtml + "</li>" +
-      "</ul>";
+      "</ul>" +
+      "<a class=\"btn-select\" href=\"/signup?module=core&amp;tier=" +
+      encodeURIComponent(String(tier.tier_key || "")) +
+      "\">Bu Paketi Seç</a>" +
+      "<a class=\"btn-select is-secondary\" href=\"/signup?intent=purchase&amp;module=core&amp;tier=" +
+      encodeURIComponent(String(tier.tier_key || "")) +
+      "\">Satın Al</a>";
     return card;
   }
 
@@ -930,7 +936,10 @@
       estimateHtml +
       "<a class=\"btn-select" + (recommended ? " is-emphasized" : "") +
       "\" href=\"/signup?module=randevu&tier=" + encodeURIComponent(String(tier.tier_key || "")) +
-      "\">Bu Paketi Seç</a>";
+      "\">Bu Paketi Seç</a>" +
+      "<a class=\"btn-select is-secondary\" href=\"/signup?intent=purchase&amp;module=randevu&amp;tier=" +
+      encodeURIComponent(String(tier.tier_key || "")) +
+      "\">Satın Al</a>";
     return card;
   }
 
@@ -1030,6 +1039,12 @@
             tierKeyEnc +
             "\">ERP’ye Cari Ekle</a>" +
             "<p class=\"ld-cta-caption\">Tam ERP’ye eklenti (temel ERP dahildir)</p>" +
+          "</div>" +
+          "<div class=\"ld-cta-item\">" +
+            "<a class=\"btn-select is-secondary\" href=\"/signup?intent=purchase&amp;mode=ledger_only&amp;tier=" +
+            tierKeyEnc +
+            "\">Satın Al</a>" +
+            "<p class=\"ld-cta-caption\">Ödeme yakında — hesabı oluşturun</p>" +
           "</div>" +
         "</div>"
       );
@@ -1300,7 +1315,10 @@
       estimateHtml +
       "<a class=\"btn-select" + (recommended ? " is-emphasized" : "") +
       "\" href=\"/signup?module=personnel&tier=" + encodeURIComponent(String(tier.tier_key || "")) +
-      "\">Bu Paketi Seç</a>";
+      "\">Bu Paketi Seç</a>" +
+      "<a class=\"btn-select is-secondary\" href=\"/signup?intent=purchase&amp;module=personnel&amp;tier=" +
+      encodeURIComponent(String(tier.tier_key || "")) +
+      "\">Satın Al</a>";
     return card;
   }
 

@@ -467,12 +467,42 @@
       ledger_only: ledgerOnly
     };
     try {
+      const urlParams = new URLSearchParams(window.location.search || "");
+      const intent = String(urlParams.get("intent") || "").trim().toLowerCase();
+      if (intent === "purchase") {
+        body.intent = "purchase";
+      }
+      const urlModule = String(urlParams.get("module") || "").trim().toLowerCase();
+      if (urlModule) {
+        body.module = urlModule;
+      }
+      const urlTier = String(urlParams.get("tier") || "").trim().toLowerCase();
+      if (urlTier && /^[a-z0-9_]{1,32}$/.test(urlTier)) {
+        body.tier = urlTier;
+      }
+    } catch (e) { /* ignore */ }
+    try {
       const res = await fetch("/api/signup", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Accept": "application/json" },
         body: JSON.stringify(body)
       });
       const data = await res.json().catch(() => ({}));
+      if (res.status === 200 && data.ok && data.status === "pending_payment") {
+        globalError.style.display = "none";
+        showPanel("panel-form");
+        globalError.style.display = "block";
+        globalError.style.color = "#0f766e";
+        globalError.textContent =
+          "Hesap rezervasyonu alındı (ödeme bekleniyor). Fatura #" +
+          (data.invoice_id || "?") +
+          " — " +
+          (data.total_gross != null ? data.total_gross : "") +
+          " " +
+          (data.currency || "TRY") +
+          ". Ödeme adımı yakında eklenecek.";
+        return;
+      }
       if (res.status === 202 && data.ok) {
         showPanel("panel-provisioning");
         startPoll(data.slug || slug, data.login_url);
