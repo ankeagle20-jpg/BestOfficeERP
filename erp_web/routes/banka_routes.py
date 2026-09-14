@@ -1244,8 +1244,15 @@ def api_akbank_tahsilat_gonderici_kaydet():
 @bp.route("/api/akbank-tahsilat/commit", methods=["POST"])
 @giris_gerekli
 def api_akbank_tahsilat_commit():
-    """Aşama 2: Onaylanan satırları tahsilatlar tablosuna yazar (Faturalar ile aynı makbuz serisi)."""
-    from routes.faturalar_routes import _tahsilat_icin_makbuz_no_sec_cursor
+    """Aşama 2: Onaylanan satırları tahsilatlar tablosuna yazar (Faturalar ile aynı makbuz serisi).
+
+    Plan A: aciklama ham banka metni kalır (AYLIK_TAH/PAY marker yok); aylık dağılım
+    yalnızca panel/grid için apply_makbuz_dagitim_to_panel_db ile yazılır.
+    """
+    from routes.faturalar_routes import (
+        _auto_allocate_oldest_unpaid_months,
+        _tahsilat_icin_makbuz_no_sec_cursor,
+    )
 
     data = request.get_json(silent=True) or {}
     items = data.get("satirlar")
@@ -1258,6 +1265,29 @@ def api_akbank_tahsilat_commit():
     atlandi = 0
     hatalar: list[str] = []
     kayitlar: list[dict] = []
+    # Commit sonrası panel/cache (transaction dışında, manuel makbuz ile aynı).
+    panel_sync_jobs: list[tuple[int, str, list[dict]]] = []
+
+    def _ensure_aylik_cache(mid: int) -> None:
+        try:
+            from routes.giris_routes import (
+                _read_aylik_grid_cache_payload,
+                _upsert_aylik_grid_cache,
+            )
+            if not _read_aylik_grid_cache_payload(int(mid)):
+                _upsert_aylik_grid_cache(int(mid))
+        except Exception:
+            pass
+
+    def _aciklama_ve_aylik_dagitim(mid: int, tutar: float, ham: str) -> tuple[str, list[tuple[str, float]]]:
+        """Ham aciklama + oldest-unpaid pay_items (panel sync için). Marker yazılmaz."""
+        text = (ham or "").strip() or "Banka tahsilat"
+        # Ham metinde zaten marker varsa dağıtımı yeniden hesaplama (elle müdahale).
+        if "|AYLIK_TAH|" in text or "|AYLIK_PAY|" in text:
+            return text, []
+        _ensure_aylik_cache(mid)
+        _auto_isos, auto_pay_items = _auto_allocate_oldest_unpaid_months(mid, tutar)
+        return text, list(auto_pay_items or [])
 
     with db() as conn:
         cur = conn.cursor()
@@ -1289,7 +1319,7 @@ def api_akbank_tahsilat_commit():
                 atlandi += 1
                 hatalar.append(f"Ref {ref}: giden satır tahsilata yazılmaz (atlandı).")
                 continue
-            aciklama = (it.get("aciklama") or "").strip() or "Banka tahsilat"
+            aciklama_ham = (it.get("aciklama") or "").strip() or "Banka tahsilat"
             tah_str = (it.get("tahsilat_tarihi") or it.get("tarih") or "")[:10]
             if len(tah_str) < 10:
                 atlandi += 1
@@ -1319,6 +1349,17 @@ def api_akbank_tahsilat_commit():
                 atlandi += 1
                 hatalar.append(f"Ref {ref}: müşteri yok (id={mid}).")
                 continue
+            # Plan A: ham aciklama + FIFO oldest unpaid → sadece panel/grid (marker yok).
+            try:
+                aciklama, pay_items = _aciklama_ve_aylik_dagitim(mid, round(tutar, 2), aciklama_ham)
+            except Exception as ex:
+                aciklama, pay_items = aciklama_ham, []
+                hatalar.append(f"Ref {ref}: aylık panel dağıtımı atlandı ({ex}).")
+            dagitim_list = [
+                {"iso": str(iso), "tutar": round(float(pay or 0), 2)}
+                for iso, pay in (pay_items or [])
+                if str(iso or "").strip()
+            ]
             makbuz_no = _tahsilat_icin_makbuz_no_sec_cursor(cur, None)
             cur.execute(
                 """INSERT INTO tahsilatlar (
@@ -1345,7 +1386,10 @@ def api_akbank_tahsilat_commit():
                 "tutar": round(tutar, 2),
                 "odeme_turu": str(odeme_out or odeme_turu),
                 "aciklama": aciklama,
+                "aylik_dagitim": dagitim_list,
             })
+            if dagitim_list:
+                panel_sync_jobs.append((mid, tah_str, dagitim_list))
             # Varsa aynı dekont/referanslı hesap hareketini tahsilata bağla (Hareketler → Makbuz).
             try:
                 cur.execute(
@@ -1366,8 +1410,8 @@ def api_akbank_tahsilat_commit():
                 )
             except Exception:
                 pass
-            if it.get("manuel_musteri") and aciklama:
-                sk = akbank_sender_key(aciklama)
+            if it.get("manuel_musteri") and aciklama_ham:
+                sk = akbank_sender_key(aciklama_ham)
                 if sk:
                     cur.execute(
                         """
@@ -1378,8 +1422,27 @@ def api_akbank_tahsilat_commit():
                             ornek_aciklama = EXCLUDED.ornek_aciklama,
                             updated_at = NOW()
                         """,
-                        (sk, mid, aciklama[:2000]),
+                        (sk, mid, aciklama_ham[:2000]),
                     )
+            # Aynı istekte sonraki satırlar için kalan ayları güncelle (manuel ile tutarlı).
+            if dagitim_list:
+                try:
+                    from routes.giris_routes import apply_makbuz_dagitim_to_panel_db
+                    apply_makbuz_dagitim_to_panel_db(mid, dagitim_list, tahsilat_tarihi=tah_str)
+                except Exception:
+                    pass
+
+    # Transaction sonrası ek güvence (başarısız iç-çağrı olsa bile).
+    for mid_s, tah_s, dag_s in panel_sync_jobs:
+        try:
+            from routes.giris_routes import apply_makbuz_dagitim_to_panel_db
+            apply_makbuz_dagitim_to_panel_db(mid_s, dag_s, tahsilat_tarihi=tah_s)
+        except Exception:
+            try:
+                from routes.giris_routes import _defer_aylik_grid_cache_rebuild
+                _defer_aylik_grid_cache_rebuild(int(mid_s))
+            except Exception:
+                pass
 
     return jsonify({
         "ok": True,

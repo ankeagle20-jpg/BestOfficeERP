@@ -7557,6 +7557,16 @@ def _fatura_tutar_kdv_split(toplam_kdv_dahil: float, kira_nakit: bool, kdv_oran:
     return net, kdv, toplam
 
 
+def _is_banka_import_markersiz(row) -> bool:
+    """Plan B: banka_import + |AYLIK_TAH| yok → ekstrede kendi satırı (direct_pays), aylık map'e alınmaz."""
+    if not isinstance(row, dict):
+        return False
+    if str(row.get("kaynak") or "").strip().lower() != "banka_import":
+        return False
+    ac = str(row.get("aciklama") or row.get("tahsilat_aciklama") or "")
+    return not bool(re.search(r"\|AYLIK_TAH\|\d{4}-\d{2}-\d{2}\|", ac))
+
+
 def _ekstre_tahsil_rows_for_musteri(musteri_id: int) -> list:
     """Müşterinin tüm tahsilatları (ekstre için tek sorgu)."""
     try:
@@ -7569,7 +7579,8 @@ def _ekstre_tahsil_rows_for_musteri(musteri_id: int) -> list:
         """
         SELECT t.id, COALESCE(t.tutar, 0) AS tutar,
                COALESCE(t.aciklama, '') AS aciklama,
-               t.tahsilat_tarihi, f.fatura_tarihi
+               t.tahsilat_tarihi, f.fatura_tarihi,
+               COALESCE(t.kaynak, '') AS kaynak
         FROM tahsilatlar t
         LEFT JOIN faturalar f ON f.id = t.fatura_id
         WHERE (t.musteri_id = %s OR t.customer_id = %s)
@@ -9893,6 +9904,19 @@ def _cari_ekstre_hareketler(
         )
     except Exception:
         ekstre_tahsil_map = {}
+    # Plan B Adım 3: aylık sentetik Tahsilat satırı — banka_import (marker'sız) map'ten hariç
+    # (kendi direct_pays satırında zaten sayılır). Grid/panel hâlâ tam ekstre_tahsil_map kullanır.
+    try:
+        _rows_aylik = [r for r in (tahsil_rows_ek or []) if not _is_banka_import_markersiz(r)]
+        ekstre_tahsil_map_aylik = _aylik_tahsil_tutar_map(
+            int(musteri_id),
+            tahsil_rows=_rows_aylik,
+            remaining_by_iso=dict(remaining_fifo),
+            kyc_row=kyc,
+            tufe_map=tufe_map,
+        )
+    except Exception:
+        ekstre_tahsil_map_aylik = dict(ekstre_tahsil_map or {})
 
     # Reel dönem: DB kayıtları + isteğe bağlı reel_json (Uygula önizlemesi) birleşimi.
     manual_reel_pass = _reel_manual_merge_db_and_client(
@@ -10312,7 +10336,8 @@ def _cari_ekstre_hareketler(
                   t.fatura_id,
                   t.tahsilat_tarihi AS tarih,
                   {_eslesme_sql} AS eslesme_tarihi,
-                  t.tutar, t.odeme_turu, t.aciklama AS tahsilat_aciklama
+                  t.tutar, t.odeme_turu, t.aciklama AS tahsilat_aciklama,
+                  COALESCE(t.kaynak, '') AS kaynak
            FROM tahsilatlar t
            LEFT JOIN faturalar f ON f.id = t.fatura_id
            WHERE (t.musteri_id = %s OR t.customer_id = %s)
@@ -10522,9 +10547,9 @@ def _cari_ekstre_hareketler(
                 if panel_pt <= tol_f:
                     continue
                 db_tah_iso = 0.0
-                if ekstre_tahsil_map:
+                if ekstre_tahsil_map_aylik:
                     try:
-                        db_tah_iso = round(float(ekstre_tahsil_map.get(iso) or 0), 2)
+                        db_tah_iso = round(float(ekstre_tahsil_map_aylik.get(iso) or 0), 2)
                     except (TypeError, ValueError):
                         db_tah_iso = 0.0
                 if db_tah_iso <= tol_f and not (fifo_ids.get(iso) or []):
@@ -10559,7 +10584,7 @@ def _cari_ekstre_hareketler(
                     iso,
                     fifo_amt,
                     hedef_grid,
-                    tahsil_map=ekstre_tahsil_map,
+                    tahsil_map=ekstre_tahsil_map_aylik,
                     grid_odenen=None,
                     grid_kalan=None,
                     batch_maps=ekstre_batch_maps,
@@ -10599,7 +10624,7 @@ def _cari_ekstre_hareketler(
                     iso,
                     float(fifo_alloc_win.get(iso) or 0),
                     hedef_grid,
-                    tahsil_map=ekstre_tahsil_map,
+                    tahsil_map=ekstre_tahsil_map_aylik,
                     grid_odenen=og_iso if og_iso and og_iso > 0 else None,
                     grid_kalan=kl_iso,
                     batch_maps=ekstre_batch_maps,
@@ -10608,8 +10633,8 @@ def _cari_ekstre_hareketler(
                 continue
             try:
                 db_tah_row = (
-                    round(float(ekstre_tahsil_map.get(iso) or 0), 2)
-                    if ekstre_tahsil_map
+                    round(float(ekstre_tahsil_map_aylik.get(iso) or 0), 2)
+                    if ekstre_tahsil_map_aylik
                     else 0.0
                 )
             except (TypeError, ValueError):
