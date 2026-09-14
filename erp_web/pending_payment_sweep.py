@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
-"""A2.5 — süresi dolmuş pending_payment kiracılarını temizle.
+"""A2.5 / A3.1 — süresi dolmuş pending_payment kiracılarını temizle.
 
 - tenants.status = 'pending_payment' ve created_at < now() - TTL
 - İlgili paytr/sent faturaları → void
+- platform_signup_intents satırını sil (tenant CASCADE yedek; açık DELETE)
 - tenants satırını sil (slug serbest; CASCADE faturaları da siler)
 
 Tetikleme: APScheduler (boot + interval) — her slug-available isteğinde değil.
@@ -47,6 +48,7 @@ def sweep_expired_pending_payments(
     out: dict[str, Any] = {
         "scanned": 0,
         "voided_invoices": 0,
+        "deleted_intents": 0,
         "deleted_tenants": 0,
         "skipped": 0,
         "errors": [],
@@ -116,6 +118,18 @@ def sweep_expired_pending_payments(
                     if str(vr.get("status") if isinstance(vr, dict) else vr[1]) != "void":
                         raise RuntimeError(f"void beklenirken status={vr}")
 
+                # A3.1: intent'i tenant silmeden önce açıkça kaldır (CASCADE yedek)
+                cur.execute(
+                    """
+                    DELETE FROM public.platform_signup_intents
+                    WHERE tenant_id = %s
+                    RETURNING id
+                    """,
+                    (tid,),
+                )
+                intent_rows = cur.fetchall() or []
+                deleted_intents = len(intent_rows)
+
                 cur.execute(
                     """
                     DELETE FROM public.tenants
@@ -127,13 +141,15 @@ def sweep_expired_pending_payments(
                 deleted = 1 if cur.fetchone() else 0
 
             out["voided_invoices"] += int(voided)
+            out["deleted_intents"] += int(deleted_intents)
             if deleted:
                 out["deleted_tenants"] += 1
                 logger.info(
-                    "sweep expired pending_payment slug=%s tenant_id=%s voided=%s",
+                    "sweep expired pending_payment slug=%s tenant_id=%s voided=%s intents=%s",
                     slug,
                     tid,
                     voided,
+                    deleted_intents,
                 )
             else:
                 out["skipped"] += 1
@@ -154,9 +170,10 @@ def run_pending_payment_sweep_job() -> None:
         result = sweep_expired_pending_payments()
         if result.get("scanned"):
             logger.info(
-                "pending_payment_sweep scanned=%s deleted=%s voided=%s skipped=%s errors=%s",
+                "pending_payment_sweep scanned=%s deleted=%s intents=%s voided=%s skipped=%s errors=%s",
                 result.get("scanned"),
                 result.get("deleted_tenants"),
+                result.get("deleted_intents"),
                 result.get("voided_invoices"),
                 result.get("skipped"),
                 len(result.get("errors") or []),

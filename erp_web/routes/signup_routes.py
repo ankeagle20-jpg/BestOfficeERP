@@ -12,6 +12,8 @@ from decimal import Decimal
 from functools import wraps
 
 from flask import Blueprint, current_app, jsonify, render_template, request
+from werkzeug.security import generate_password_hash
+
 from db import execute, execute_returning, fetch_one
 from module_pricing_engine import ModulePricingEngineError, calculate_module_bill
 from pricing_engine import PricingEngineError, calculate_tenant_bill
@@ -174,7 +176,10 @@ class PurchasePricingError(Exception):
 
 
 def _release_pending_payment_tenant(slug: str) -> None:
-    """Fatura oluşturulamazsa pending_payment rezervasyonunu geri al."""
+    """Fatura/intent oluşturulamazsa pending_payment rezervasyonunu geri al.
+
+    platform_signup_intents.tenant_id ON DELETE CASCADE ile intent de silinir.
+    """
     slug_s = str(slug or "").strip().lower()
     if not slug_s:
         return
@@ -188,6 +193,59 @@ def _release_pending_payment_tenant(slug: str) -> None:
         )
     except Exception:
         logger.exception("release pending_payment tenant failed slug=%s", slug_s)
+
+
+def _insert_purchase_signup_intent(
+    *,
+    tenant_id: int,
+    invoice_id: int,
+    email: str,
+    admin_full_name: str,
+    module_key: str,
+    tier_key: str,
+    password_hash: str,
+    selected_module_keys: list[str],
+    module_tier_preferences: dict[str, str],
+    ledger_only: bool,
+) -> dict:
+    """A3.1: yalnızca hash + kimlik; plaintext şifre parametresi yok."""
+    from pending_payment_sweep import _ttl_hours
+
+    ttl = float(_ttl_hours())
+    row = execute_returning(
+        """
+        INSERT INTO public.platform_signup_intents (
+            tenant_id, email, admin_full_name, module_key, tier_key,
+            password_hash, selected_module_keys, module_tier_preferences,
+            ledger_only, invoice_id, expires_at
+        ) VALUES (
+            %s, %s, %s, %s, %s,
+            %s, %s::jsonb, %s::jsonb,
+            %s, %s, NOW() + (%s * INTERVAL '1 hour')
+        )
+        RETURNING id, tenant_id, invoice_id, email, module_key, tier_key,
+                  expires_at, created_at
+        """,
+        (
+            int(tenant_id),
+            str(email or "").strip().lower(),
+            str(admin_full_name or "").strip(),
+            str(module_key or "").strip().lower() or None,
+            str(tier_key or "").strip().lower() or None,
+            password_hash,
+            json.dumps(list(selected_module_keys or [])),
+            json.dumps(dict(module_tier_preferences or {})),
+            bool(ledger_only),
+            int(invoice_id),
+            ttl,
+        ),
+    )
+    if not row:
+        raise PurchasePricingError(
+            "Kayıt kimliği saklanamadı.",
+            errors={"signup_intent": "insert_failed"},
+        )
+    return row
 
 
 def _normalize_tier_key(raw) -> str:
@@ -671,7 +729,7 @@ def api_signup():
         logger.warning("reserve_tenant_slug failed slug=%s: %s", slug, e)
         return jsonify({"ok": False, "mesaj": "Kayıt tamamlanamadı, bilgileri kontrol edin."}), 400
 
-    # A2.2: Satın Al — pending_payment + fatura; provizyon/pay_url YOK (A2.3+)
+    # A2.2 + A3.1: Satın Al — pending_payment + fatura + intent(hash); provizyon YOK
     if purchase:
         tenant_row = reserved.get("tenant") or {}
         tenant_id = tenant_row.get("id")
@@ -685,20 +743,45 @@ def api_signup():
                 tier_key=purchase_tier,
                 bill=purchase_bill,
             )
+            invoice_id = inv.get("id")
+            if not invoice_id:
+                raise PurchasePricingError("Fatura oluşturulamadı.")
+            # C modeli: plaintext → hash; bu noktadan sonra purchase yolunda plaintext yok
+            password_hash = generate_password_hash(str(password))
+            password = None
+            _insert_purchase_signup_intent(
+                tenant_id=int(tenant_id),
+                invoice_id=int(invoice_id),
+                email=email,
+                admin_full_name=str(data.get("admin_full_name") or "").strip(),
+                module_key=purchase_module,
+                tier_key=purchase_tier,
+                password_hash=password_hash,
+                selected_module_keys=selected_modules,
+                module_tier_preferences=tier_prefs,
+                ledger_only=ledger_only,
+            )
+            password_hash = None  # yerel referansı bırakma
         except Exception as e:
-            logger.exception("purchase invoice failed slug=%s", slug)
+            logger.exception("purchase invoice/intent failed slug=%s", slug)
             _release_pending_payment_tenant(slug)
             mesaj = (
                 str(e)
                 if isinstance(e, PurchasePricingError)
                 else "Fatura oluşturulamadı."
             )
+            err_key = (
+                "signup_intent"
+                if isinstance(e, PurchasePricingError)
+                and (e.errors or {}).get("signup_intent")
+                else "invoice"
+            )
             return (
                 jsonify(
                     {
                         "ok": False,
                         "mesaj": mesaj,
-                        "errors": {"invoice": "create_failed"},
+                        "errors": {err_key: "create_failed"},
                     }
                 ),
                 400,

@@ -3732,6 +3732,51 @@ def ensure_platform_tenant_billing_tables():
     except Exception as e:
         print(f"platform billing paytr reference uidx: {e}")
 
+    # A3.0: Satın Al — ödeme öncesi kimlik (yalnız password_hash; plaintext yok)
+    execute(
+        """
+        CREATE TABLE IF NOT EXISTS public.platform_signup_intents (
+            id                          BIGSERIAL PRIMARY KEY,
+            tenant_id                   INTEGER NOT NULL,
+            email                       TEXT NOT NULL,
+            admin_full_name             TEXT NOT NULL DEFAULT '',
+            module_key                  TEXT,
+            tier_key                    TEXT,
+            password_hash               TEXT NOT NULL,
+            selected_module_keys        JSONB NOT NULL DEFAULT '[]'::jsonb,
+            module_tier_preferences     JSONB NOT NULL DEFAULT '{}'::jsonb,
+            ledger_only                 BOOLEAN NOT NULL DEFAULT FALSE,
+            invoice_id                  BIGINT,
+            created_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            expires_at                  TIMESTAMPTZ NOT NULL,
+            CONSTRAINT platform_signup_intents_email_chk
+                CHECK (length(trim(email)) > 0),
+            CONSTRAINT platform_signup_intents_password_hash_chk
+                CHECK (length(trim(password_hash)) > 20),
+            CONSTRAINT platform_signup_intents_expires_chk
+                CHECK (expires_at > created_at),
+            CONSTRAINT platform_signup_intents_tenant_id_fkey
+                FOREIGN KEY (tenant_id) REFERENCES public.tenants (id) ON DELETE CASCADE,
+            CONSTRAINT platform_signup_intents_invoice_id_fkey
+                FOREIGN KEY (invoice_id)
+                REFERENCES public.platform_tenant_invoices (id)
+                ON DELETE SET NULL,
+            CONSTRAINT platform_signup_intents_tenant_id_uniq
+                UNIQUE (tenant_id)
+        )
+        """
+    )
+    for stmt in (
+        "CREATE INDEX IF NOT EXISTS platform_signup_intents_expires_at_idx "
+        "ON public.platform_signup_intents (expires_at)",
+        "CREATE INDEX IF NOT EXISTS platform_signup_intents_invoice_id_idx "
+        "ON public.platform_signup_intents (invoice_id)",
+    ):
+        try:
+            execute(stmt)
+        except Exception as e:
+            print(f"platform_signup_intents index: {e}")
+
 
 def ensure_platform_support_tables():
     """Platform destek talepleri: tickets + events (yalnız public) — Sistem 2 / S1.

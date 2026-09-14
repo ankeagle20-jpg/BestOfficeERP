@@ -49,6 +49,7 @@ PLATFORM_STRIP_TABLES = (
     "platform_tenant_subscriptions",
     "platform_tenant_invoices",
     "platform_tenant_payments",
+    "platform_signup_intents",
     "platform_support_tickets",
     "platform_support_ticket_events",
 )
