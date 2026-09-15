@@ -42,6 +42,27 @@ def _tenant_schema_for_request():
         raise ValueError("geçersiz tenant_schema")
     return s
 
+
+# Process-ömürlü DDL kapısı (Payafin Cari _ensure_ledger_tables_once ile aynı desen):
+# şema başına key yalnızca bir kez çalışır; başarısız olursa sete yazılmaz → sonraki istek yeniden dener.
+_ENSURE_DDL_ONCE_KEYS: set[str] = set()
+_ENSURE_DDL_ONCE_LOCK = threading.Lock()
+
+
+def _run_ensure_ddl_once(key: str, runner) -> None:
+    """İstek yolunda çıplak ALTER/CREATE'i şema+key başına process ömründe tek sefere indirger."""
+    schema = _tenant_schema_for_request() or "__no_tenant__"
+    full = f"{schema}|{key}"
+    if full in _ENSURE_DDL_ONCE_KEYS:
+        return
+    with _ENSURE_DDL_ONCE_LOCK:
+        if full in _ENSURE_DDL_ONCE_KEYS:
+            return
+        runner()
+        _ENSURE_DDL_ONCE_KEYS.add(full)
+
+
+
 logger = logging.getLogger(__name__)
 _POOL = None
 _POOL_KEY = None
@@ -989,12 +1010,13 @@ def ensure_customers_hazir_ofis_oda():
 
 def ensure_musteri_kyc_hazir_ofis_oda_no():
     """KYC satırında Hazır Ofis oda no (ensure_musteri_kyc_columns tek seferlik olduğu için ayrı)."""
-    try:
+    def _do():
         execute("ALTER TABLE musteri_kyc ADD COLUMN IF NOT EXISTS hazir_ofis_oda_no INTEGER")
+
+    try:
+        _run_ensure_ddl_once("musteri_kyc.hazir_ofis_oda_no", _do)
     except Exception as e:
         print(f"musteri_kyc.hazir_ofis_oda_no: {e}")
-
-
 
 
 def ensure_musteri_kyc_uyruk_column():
@@ -1002,37 +1024,45 @@ def ensure_musteri_kyc_uyruk_column():
 
     Formdaki Uyrugu secimi; yetkili_tcno / vergi_no ile ayni KYC satirinda.
     Idempotent ALTER; ensure_musteri_kyc_columns tek-seferlik oldugu icin ayridir.
+    Process-ömürlü: şema başına yalnızca ilk istekte ALTER (Payafin Cari once deseni).
     """
-    try:
+    def _do():
         execute(
             "ALTER TABLE musteri_kyc ADD COLUMN IF NOT EXISTS uyruk TEXT DEFAULT 'TC'"
         )
+
+    try:
+        _run_ensure_ddl_once("musteri_kyc.uyruk", _do)
     except Exception as e:
         print(f"musteri_kyc.uyruk: {e}")
 
+
 def ensure_musteri_kyc_odeme_duzeni():
     """Ödeme düzeni (aylık / manuel vb.) — aylık grid dışı müşteriler için."""
-    try:
+    def _do():
         execute("ALTER TABLE musteri_kyc ADD COLUMN IF NOT EXISTS odeme_duzeni TEXT")
         execute("ALTER TABLE musteri_kyc ADD COLUMN IF NOT EXISTS odeme_duzeni_manuel TEXT")
+
+    try:
+        _run_ensure_ddl_once("musteri_kyc.odeme_duzeni", _do)
     except Exception as e:
         print(f"musteri_kyc.odeme_duzeni: {e}")
 
 
 def ensure_musteri_kyc_kira_banka():
     """Aylık kira ödeme tipi: Banka (Nakit ile karşılıklı; KDV mantığı yine kira_nakit)."""
-    try:
+    def _do():
         execute("ALTER TABLE musteri_kyc ADD COLUMN IF NOT EXISTS kira_banka BOOLEAN DEFAULT FALSE")
+        for col_sql in (
+            "ALTER TABLE musteri_kyc ADD COLUMN IF NOT EXISTS kira_nakit_tutar NUMERIC(14,2)",
+            "ALTER TABLE musteri_kyc ADD COLUMN IF NOT EXISTS kira_banka_tutar NUMERIC(14,2)",
+        ):
+            execute(col_sql)
+
+    try:
+        _run_ensure_ddl_once("musteri_kyc.kira_banka", _do)
     except Exception as e:
         print(f"musteri_kyc.kira_banka: {e}")
-    for col_sql in (
-        "ALTER TABLE musteri_kyc ADD COLUMN IF NOT EXISTS kira_nakit_tutar NUMERIC(14,2)",
-        "ALTER TABLE musteri_kyc ADD COLUMN IF NOT EXISTS kira_banka_tutar NUMERIC(14,2)",
-    ):
-        try:
-            execute(col_sql)
-        except Exception as e:
-            print(f"musteri_kyc tutar kolonu: {e}")
 
 
 _musteri_kyc_latest_idx_done = False
