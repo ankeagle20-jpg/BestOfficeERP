@@ -6272,6 +6272,34 @@ def _kira_bildirgesi_kdv_oran_float(kdv_raw, default=20.0):
         return float(default)
 
 
+def _kira_bildirgesi_dosya_adi(musteri_adi) -> str:
+    """İndirme adı: «Firma İsmi Kira Bildirgesi.pdf» (geçersiz dosya karakterleri temiz)."""
+    name = str(musteri_adi or "").strip() or "Musteri"
+    for ch in '\\/:*?"<>|\r\n\t':
+        name = name.replace(ch, " ")
+    name = re.sub(r"\s+", " ", name).strip(" .") or "Musteri"
+    if len(name) > 120:
+        name = name[:120].rstrip(" .") or "Musteri"
+    return f"{name} Kira Bildirgesi.pdf"
+
+
+def _kira_bildirgesi_content_disposition(musteri_adi, disposition="inline") -> str:
+    """Content-Disposition: ASCII fallback + UTF-8 filename* (Türkçe firma adı)."""
+    fname = _kira_bildirgesi_dosya_adi(musteri_adi)
+    # Eski istemciler için ASCII güvenli fallback (Türkçe harfler _)
+    ascii_fb = (
+        fname.encode("ascii", "replace")
+        .decode("ascii")
+        .replace("?", "_")
+        .replace('"', "")
+    )
+    ascii_fb = re.sub(r"\s+", " ", ascii_fb).strip() or "Kira_Bildirgesi.pdf"
+    return (
+        f'{disposition}; filename="{ascii_fb}"; '
+        f"filename*=UTF-8''{urllib.parse.quote(fname)}"
+    )
+
+
 def build_kira_bildirgesi_pdf(
     musteri_adi,
     sozlesme_tarihi,
@@ -6619,7 +6647,7 @@ def kira_bildirgesi_pdf():
             hibrit_banka_net=hibrit_b if use_hibrit_pdf else None,
         )
         return Response(pdf_bytes, mimetype="application/pdf", headers={
-            "Content-Disposition": "inline; filename=Kira_Bildirgesi.pdf"
+            "Content-Disposition": _kira_bildirgesi_content_disposition(musteri_adi, "inline")
         })
     except Exception as e:
         return jsonify({'ok': False, 'mesaj': str(e)}), 500

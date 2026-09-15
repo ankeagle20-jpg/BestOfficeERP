@@ -26007,7 +26007,7 @@ function kiraBildirgesiOlusturYil(yil, aylikKira, bildirgeMod, fromReel) {
     }
     bildirgeHizmetTuruSenaryoVeyaKarttanAktar();
 
-    setTimeout(function() { kiraBildirgesiOnizle(); }, 100);
+    setTimeout(function() { kiraBildirgesiOnizleVeIndir(); }, 100);
 }
 
 function kiraBildirgesiOlusturFromSenaryo() {
@@ -26049,7 +26049,7 @@ function kiraBildirgesiOlusturFromSenaryo() {
     }
     bildirgeHizmetTuruSenaryoVeyaKarttanAktar();
 
-    setTimeout(function() { kiraBildirgesiOnizle(); }, 100);
+    setTimeout(function() { kiraBildirgesiOnizleVeIndir(); }, 100);
 }
 
 /** Kira bildirgesi PDF'inde yıllık satırı için doğru hizmet türü: önce senaryo, yoksa müşteri kartı. */
@@ -26116,6 +26116,25 @@ function kiraBildirgesiPayload() {
     }
     return out;
 }
+/** İndirme adı: «Firma İsmi Kira Bildirgesi.pdf» (\/:*?"<>| ve kontrol karakterleri temiz). */
+function kiraBildirgesiDosyaAdi(musteriAdi) {
+    var adi = String(musteriAdi || '').trim() || 'Musteri';
+    adi = adi.replace(/[\\\/:*?"<>|\r\n\t]+/g, ' ').replace(/\s+/g, ' ').replace(/^[\s.]+|[\s.]+$/g, '');
+    if (!adi) adi = 'Musteri';
+    if (adi.length > 120) adi = adi.slice(0, 120).replace(/[\s.]+$/g, '') || 'Musteri';
+    return adi + ' Kira Bildirgesi.pdf';
+}
+function kiraBildirgesiBlobIndir(blob, musteriAdi) {
+    if (!blob) return;
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = kiraBildirgesiDosyaAdi(musteriAdi);
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function() { try { URL.revokeObjectURL(url); } catch (_e) {} }, 60000);
+}
 async function kiraBildirgesiPdfBlob() {
     const payload = kiraBildirgesiPayload();
     if (!payload.gecerlilik_tarihi) {
@@ -26145,6 +26164,21 @@ async function kiraBildirgesiOnizle() {
         window.open(url, '_blank', 'noopener');
     }
 }
+/** Senaryo «Kira bildirgesi oluştur»: önizleme + doğru isimle indirme (tek PDF isteği). */
+async function kiraBildirgesiOnizleVeIndir() {
+    const payload = kiraBildirgesiPayload();
+    const blob = await kiraBildirgesiPdfBlob();
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank', 'noopener');
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = kiraBildirgesiDosyaAdi(payload.musteri_adi);
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function() { try { URL.revokeObjectURL(url); } catch (_e) {} }, 60000);
+}
 async function kiraBildirgesiYazdir() {
     const blob = await kiraBildirgesiPdfBlob();
     if (blob) {
@@ -26154,15 +26188,10 @@ async function kiraBildirgesiYazdir() {
     }
 }
 async function kiraBildirgesiPdfIndir() {
+    const payload = kiraBildirgesiPayload();
     const blob = await kiraBildirgesiPdfBlob();
     if (!blob) return;
-    const payload = kiraBildirgesiPayload();
-    const adi = (payload.musteri_adi || 'KiraBildirgesi').replace(/\s+/g, '_');
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'Kira_Bildirgesi_' + adi + '.pdf';
-    a.click();
-    URL.revokeObjectURL(a.href);
+    kiraBildirgesiBlobIndir(blob, payload.musteri_adi);
 }
 async function kiraBildirgesiWhatsApp() {
     const blob = await kiraBildirgesiPdfBlob();
