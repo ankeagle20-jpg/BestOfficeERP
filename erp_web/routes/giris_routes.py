@@ -6664,6 +6664,74 @@ def _tahsilat_aciklama_temizle(text):
     return re.sub(r"\s{2,}", " ", s).strip()
 
 
+def _tutar_tr_goster(v) -> str:
+    """1800.0 → «1.800,00» (tr-TR)."""
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return "0,00"
+    if not math.isfinite(x):
+        return "0,00"
+    s = f"{x:,.2f}"
+    return s.replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def _tahsilat_aciklama_aylik_okunabilir(text) -> str:
+    """Görüntü: |AYLIK_PAY| → «Ağustos 2023: 1.800,00 ₺, Eylül 2023: 1.200,00 ₺».
+
+    Sözleşmeler makbuz listesi (tahsilAciklamaOkunabilirMetin) ile aynı parça formatı;
+    ekstre satırında virgülle birleştirilir. Marker yoksa ham metin aynen.
+    DB yazılmaz — yalnızca render.
+    """
+    s = str(text or "").strip()
+    if not s:
+        return ""
+    if "|AYLIK_PAY|" not in s and "|AYLIK_TAH|" not in s:
+        return s
+    pay_map: dict[tuple[int, int], float] = {}
+    for iso_raw, tut_raw in re.findall(
+        r"\|AYLIK_PAY\|([0-9]{4}-[0-9]{2}-[0-9]{2})=([0-9]+(?:\.[0-9]+)?)\|",
+        s,
+    ):
+        try:
+            dd = datetime.strptime(iso_raw[:10], "%Y-%m-%d").date()
+            pay_map[(int(dd.year), int(dd.month))] = round(float(tut_raw), 2)
+        except (TypeError, ValueError):
+            continue
+    tah_keys: list[tuple[int, int]] = []
+    seen: set[tuple[int, int]] = set()
+    for iso_raw in re.findall(
+        r"\|AYLIK_TAH\|([0-9]{4}-[0-9]{2}-[0-9]{2})\|",
+        s,
+    ):
+        try:
+            dd = datetime.strptime(iso_raw[:10], "%Y-%m-%d").date()
+            key = (int(dd.year), int(dd.month))
+        except ValueError:
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        tah_keys.append(key)
+    if not tah_keys:
+        tah_keys = sorted(pay_map.keys())
+    else:
+        tah_keys = sorted(tah_keys)
+    if not tah_keys:
+        return _tahsilat_aciklama_temizle(s) or s
+    parts = []
+    for y, m in tah_keys:
+        if m < 1 or m > 12:
+            continue
+        ay_ad = f"{_AY_ADLARI[m - 1]} {y}"
+        tut = pay_map.get((y, m))
+        if tut is not None and tut > 0:
+            parts.append(f"{ay_ad}: {_tutar_tr_goster(tut)} ₺")
+        else:
+            parts.append(ay_ad)
+    return ", ".join(parts) if parts else (_tahsilat_aciklama_temizle(s) or s)
+
+
 def _ekstre_tahsilat_aciklama_goster(
     tah_aciklama_raw,
     odeme_turu,
@@ -7557,14 +7625,17 @@ def _fatura_tutar_kdv_split(toplam_kdv_dahil: float, kira_nakit: bool, kdv_oran:
     return net, kdv, toplam
 
 
-def _is_banka_import_markersiz(row) -> bool:
-    """Plan B: banka_import + |AYLIK_TAH| yok → ekstrede kendi satırı (direct_pays), aylık map'e alınmaz."""
+def _ekstre_kaynak_kendi_satiri(row) -> bool:
+    """Ekstrede bölünmeden kendi satırı: manuel_makbuz / banka_import (marker olsa da)."""
     if not isinstance(row, dict):
         return False
-    if str(row.get("kaynak") or "").strip().lower() != "banka_import":
-        return False
-    ac = str(row.get("aciklama") or row.get("tahsilat_aciklama") or "")
-    return not bool(re.search(r"\|AYLIK_TAH\|\d{4}-\d{2}-\d{2}\|", ac))
+    kay = str(row.get("kaynak") or "").strip().lower()
+    return kay in ("manuel_makbuz", "banka_import")
+
+
+def _is_banka_import_markersiz(row) -> bool:
+    """Geriye uyum alias: aylık map harici = kendi-satır kaynakları (Plan B + manuel direct)."""
+    return _ekstre_kaynak_kendi_satiri(row)
 
 
 def _ekstre_tahsil_rows_for_musteri(musteri_id: int) -> list:
@@ -9904,10 +9975,9 @@ def _cari_ekstre_hareketler(
         )
     except Exception:
         ekstre_tahsil_map = {}
-    # Plan B Adım 3: aylık sentetik Tahsilat satırı — banka_import (marker'sız) map'ten hariç
-    # (kendi direct_pays satırında zaten sayılır). Grid/panel hâlâ tam ekstre_tahsil_map kullanır.
+    # Plan B/C: aylık sentetik Tahsilat — yalnızca grid_toplu map'te; manuel/banka kendi satırında.
     try:
-        _rows_aylik = [r for r in (tahsil_rows_ek or []) if not _is_banka_import_markersiz(r)]
+        _rows_aylik = [r for r in (tahsil_rows_ek or []) if not _ekstre_kaynak_kendi_satiri(r)]
         ekstre_tahsil_map_aylik = _aylik_tahsil_tutar_map(
             int(musteri_id),
             tahsil_rows=_rows_aylik,
@@ -10351,8 +10421,15 @@ def _cari_ekstre_hareketler(
         marker_pays = []
         general_pays = []
         for pr in pays_fifo:
+            kay0 = str(pr.get("kaynak") or "").strip().lower()
             ac0 = str(pr.get("tahsilat_aciklama") or "")
-            if re.search(r"\|AYLIK_TAH\|\d{4}-\d{2}-\d{2}\|", ac0):
+            has_tah = bool(re.search(r"\|AYLIK_TAH\|\d{4}-\d{2}-\d{2}\|", ac0))
+            # Sentetik aylık yol: yalnızca grid_toplu. Manuel/banka → her zaman general (direct).
+            if kay0 == "grid_toplu":
+                marker_pays.append(pr)
+            elif kay0 in ("manuel_makbuz", "banka_import"):
+                general_pays.append(pr)
+            elif has_tah:
                 marker_pays.append(pr)
             else:
                 general_pays.append(pr)
@@ -10466,7 +10543,7 @@ def _cari_ekstre_hareketler(
                 fifo_general.append(pr)
         for pr in fifo_general:
             _fifo_pay_alloc(pr, restrict_marker_months=False)
-        # Serbest makbuzlar direkt satır
+        # Serbest makbuzlar direkt satır (dönem dışı: açılış FIFO + Devreden'de; tekil satır ekleme)
         for pr in direct_pays:
             logging.getLogger(__name__).warning(
                 "direct_pay: id=%s tutar=%s aciklama=%s",
@@ -10474,10 +10551,17 @@ def _cari_ekstre_hareketler(
                 pr.get("tahsilat_aciklama"),
             )
             t_tarih = str(pr.get("tahsilat_tarihi") or pr.get("tarih") or "")[:10]
+            try:
+                t_dt = datetime.strptime(t_tarih[:10], "%Y-%m-%d").date() if t_tarih else None
+            except Exception:
+                t_dt = None
+            if t_dt is None or t_dt < bas or t_dt > bit:
+                continue
             t_tutar = round(float(pr.get("tutar") or 0), 2)
             if t_tutar <= tol_f:
                 continue
-            t_aciklama = (pr.get("tahsilat_aciklama") or pr.get("aciklama") or "")
+            t_aciklama_raw = (pr.get("tahsilat_aciklama") or pr.get("aciklama") or "")
+            t_aciklama = _tahsilat_aciklama_aylik_okunabilir(t_aciklama_raw)
             t_belge = (pr.get("belge_no") or pr.get("makbuz_no") or f"Makbuz-{pr.get('id')}")
             rows.append({
                 "tarih": t_tarih,
