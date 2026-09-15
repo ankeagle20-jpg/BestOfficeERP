@@ -17833,13 +17833,48 @@ function girisKiraNakitBankaDegisti(kaynak) {
     if (typeof syncBildirgeKdvFromCariKart === 'function') syncBildirgeKdvFromCariKart();
 }
 
+
+/** Kayitli banka net, formdaki Tutar-Nakit otomatik kalanina uyuyorsa true (data-auto-sync=1). */
+function girisKiraBankaNetOtomatikHesapMi(bankaNet) {
+    var bn = (typeof bankaNet === 'number') ? bankaNet : (typeof girisTrSayiParse === 'function' ? girisTrSayiParse(bankaNet) : parseFloat(bankaNet));
+    if (isNaN(bn) || bn <= 0) return false;
+    bn = Math.round(bn * 100) / 100;
+    var ak = document.getElementById('aylik_kira');
+    var tN = document.getElementById('kira_nakit_tutar');
+    var total = ak ? (typeof girisTrSayiParse === 'function' ? girisTrSayiParse(ak.value) : parseFloat(String(ak.value || '').replace(/\s/g, '').replace(',', '.'))) : NaN;
+    if (isNaN(total) || total <= 0) return true;
+    total = Math.round(total * 100) / 100;
+    var nak = tN ? (typeof girisTrSayiParse === 'function' ? girisTrSayiParse(tN.value) : parseFloat(String(tN.value || '').replace(/\s/g, '').replace(',', '.'))) : NaN;
+    if (isNaN(nak) || nak <= 0) nak = 0;
+    else nak = Math.round(nak * 100) / 100;
+    var expected = Math.max(0, Math.round((total - nak) * 100) / 100);
+    var tol = Math.max(0.02, Math.abs(total) * 0.01 + 1e-9);
+    return Math.abs(bn - expected) <= tol;
+}
+
 function girisKiraNakitBankaTutarInputDoldur(el, raw) {
     if (!el) return;
     if (raw == null || String(raw).trim() === '') {
         el.value = '';
+        if (el.id === 'kira_banka_tutar') {
+            el.removeAttribute('data-kira-banka-net');
+            el.removeAttribute('data-auto-sync');
+        }
         return;
     }
-    var n = parseFloat(String(raw).replace(/\s/g, '').replace(',', '.'));
+    var n = (typeof girisTrSayiParse === 'function')
+        ? girisTrSayiParse(String(raw))
+        : parseFloat(String(raw).replace(/\s/g, '').replace(',', '.'));
+    /* Banka: sozlesme yuklerken net->KDV dahil UI + data-auto-sync (otomatik kalan ise). */
+    if (el.id === 'kira_banka_tutar' && typeof girisKiraBankaTutarUiYazNet === 'function' && !isNaN(n) && n > 0) {
+        var isAuto = (typeof girisKiraBankaNetOtomatikHesapMi === 'function')
+            ? !!girisKiraBankaNetOtomatikHesapMi(n)
+            : true;
+        girisKiraBankaTutarUiYazNet(n, { autoSync: isAuto });
+        if (isAuto) el.setAttribute('data-auto-sync', '1');
+        else el.removeAttribute('data-auto-sync');
+        return;
+    }
     el.value = isNaN(n) ? String(raw).replace(',', '.').trim() : String(n);
 }
 
@@ -17905,6 +17940,7 @@ function girisKiraBankaTutarUiDoldurNetten(el, netRaw) {
     if (netRaw == null || String(netRaw).trim() === '') {
         el.value = '';
         el.removeAttribute('data-kira-banka-net');
+        el.removeAttribute('data-auto-sync');
         return;
     }
     var n = girisTrSayiParse(String(netRaw));
@@ -17913,7 +17949,12 @@ function girisKiraBankaTutarUiDoldurNetten(el, netRaw) {
         return;
     }
     if (el.id === 'kira_banka_tutar') {
-        girisKiraBankaTutarUiYazNet(n);
+        var isAuto = (typeof girisKiraBankaNetOtomatikHesapMi === 'function')
+            ? !!girisKiraBankaNetOtomatikHesapMi(n)
+            : true;
+        girisKiraBankaTutarUiYazNet(n, { autoSync: isAuto });
+        if (isAuto) el.setAttribute('data-auto-sync', '1');
+        else el.removeAttribute('data-auto-sync');
         return;
     }
     girisKiraNakitBankaTutarInputDoldur(el, netRaw);
