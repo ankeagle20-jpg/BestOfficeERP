@@ -45,6 +45,7 @@ from db import (
     db as get_db,
     get_conn,
     _tenant_schema_for_request,
+    _run_ensure_ddl_once,
     sql_expr_fatura_not_gib_taslak,
     sql_expr_fatura_gib_no_tasindi_degil,
 )
@@ -223,7 +224,6 @@ ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'pdf', 'docx'}
 # Process içinde tek seferlik DDL koruması: ensure_*_table fonksiyonları her HTTP
 # isteğinde tetiklenip ~150-300ms ek gecikme yaratıyordu (Supabase round-trip).
 # İlk çağrıda tabloyu garanti altına alıp sonraki çağrılarda no-op'a düşüyoruz.
-_AYLIK_GRID_CACHE_TABLE_READY = False
 _REEL_DONEM_TUTAR_TABLE_READY = False
 _TAHSILAT_PANEL_DETAY_TABLE_READY = False
 
@@ -267,10 +267,8 @@ def _giris_grup_uuid_id_haritasi():
 
 
 def _ensure_aylik_grid_cache_table():
-    global _AYLIK_GRID_CACHE_TABLE_READY
-    if _AYLIK_GRID_CACHE_TABLE_READY:
-        return
-    try:
+    """musteri_aylik_grid_cache DDL — şema başına process-ömürlü bir kez (_run_ensure_ddl_once)."""
+    def _do():
         execute(
             """
             CREATE TABLE IF NOT EXISTS musteri_aylik_grid_cache (
@@ -280,9 +278,11 @@ def _ensure_aylik_grid_cache_table():
             )
             """
         )
+
+    try:
+        _run_ensure_ddl_once("musteri_aylik_grid_cache", _do)
     except Exception:
         pass
-    _AYLIK_GRID_CACHE_TABLE_READY = True
 
 
 def _ensure_musteri_reel_donem_tutar_table():
