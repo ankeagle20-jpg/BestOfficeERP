@@ -19406,6 +19406,8 @@ function selectMusteri(id) {
         /* Aşama 1 b′: hafif musteri isteği bundle ile paralel — form+ekstre grid beklemeden. */
         var pMusteri = girisFetchJsonCached('/giris/api/musteri/' + midNav, { ttlMs: 60000, persistMs: 300000, swr: false, fetch: Object.assign({ credentials: 'same-origin' }, __selSigFetch) });
         sozlesmeAylikBorclananMusteriDegistir(midNav);
+        /* Lazy ekstre: önceki carinin satırlarını temizle; otomatik warm-up yok. */
+        try { if (typeof cariEkstreTablolariniTemizle === 'function') cariEkstreTablolariniTemizle(); } catch (_eEkLazy) {}
         window.__sozlesmelerAylikYilFiltre = { hepsi: true, yillar: [] };
         window.__sozlesmelerAylikYilSig = null;
         /* Token select başında girisSelectFetchBegin ile artırıldı (kemer+askı). */
@@ -19422,24 +19424,6 @@ function selectMusteri(id) {
             girisSonMusteriDetayHafifYukleme = false;
             if (res && res.ok && res.musteri) fillActiveTab(res.musteri);
             else if (musteri) fillActiveTab(musteri);
-            /* A3: erken ekstre warm-up — pMusteri sonrası idle'a ertele; stale ise atlama. */
-            (function () {
-                function __ekEarlyRun() {
-                    if (!__selStillCurrent()) return;
-                    if (typeof cariEkstreYukle === 'function' && String(cariEkstreMusteriIdSec()) === String(midNav)) {
-                        try { cariEkstreYukle({ sessiz: true, dbEsas: true, otomatikVarsayilan: true, signal: __selSignal }); } catch (_eEkEarly) {}
-                    }
-                }
-                try {
-                    if (typeof requestIdleCallback === 'function') {
-                        requestIdleCallback(function () { __ekEarlyRun(); }, { timeout: 2000 });
-                    } else {
-                        setTimeout(__ekEarlyRun, 0);
-                    }
-                } catch (_eEkSched) {
-                    setTimeout(__ekEarlyRun, 0);
-                }
-            })();
         }).catch(function (err) {
             if (typeof girisSelectFetchAbortIs === 'function' && girisSelectFetchAbortIs(err)) {
                 try { console.debug('[giris-select-fetch] pMusteri aborted', midNav); } catch (_eDbg) {}
@@ -24185,7 +24169,10 @@ function cariEkstreTablolariniTemizle() {
     if (foot) foot.style.display = 'none';
     if (bos) {
         bos.style.display = 'block';
-        bos.textContent = 'Müşteri seçin, tarih aralığı ve aylık kira girin, Ekstre Göster ile yükleyin.';
+        var _midBos = (typeof cariEkstreMusteriIdSec === 'function') ? cariEkstreMusteriIdSec() : null;
+        bos.textContent = _midBos
+            ? 'Ekstreyi görmek için «Ekstre Göster»e basın.'
+            : 'Müşteri seçin, tarih aralığı ve aylık kira girin, Ekstre Göster ile yükleyin.';
     }
     var tb = document.getElementById('cari_ekstre_toplam_borc');
     var ta = document.getElementById('cari_ekstre_toplam_alacak');
@@ -24228,13 +24215,8 @@ function cariEkstreMusteriDegisinceYenile() {
             window.__cariEkstreBitisKullaniciDokundu = false;
         }
     } catch (_eHorMid2) {}
-    var aktifTab = document.querySelector('.cari-ekstre-tab.active');
-    var tabAd = aktifTab ? (aktifTab.getAttribute('data-tab') || 'cari_ekstre') : 'cari_ekstre';
-    if (tabAd === 'cari_ekstre_b') {
-        cariEkstreBYukle({ sessiz: true });
-    } else {
-        cariEkstreYukle({ sessiz: true, otomatikVarsayilan: true });
-    }
+    /* Lazy: cari değişince otomatik ekstre yükleme yok — kullanıcı «Ekstre Göster» ile tetikler. */
+    if (typeof cariEkstreTablolariniTemizle === 'function') cariEkstreTablolariniTemizle();
 }
 function cariEkstreEscAttr(s) {
     if (s == null || s === '') return '';
