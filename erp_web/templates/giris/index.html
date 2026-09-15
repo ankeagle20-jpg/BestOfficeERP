@@ -32581,6 +32581,28 @@ function kiraBildirgesiPayload() {
     }
     return out;
 }
+/** İndirme adı: «Firma İsmi Kira Bildirgesi.pdf» (\/:*?"<>| ve kontrol karakterleri temiz). */
+function kiraBildirgesiDosyaAdi(musteriAdi) {
+    var adi = String(musteriAdi || '').trim() || 'Musteri';
+    // Dosya adı: « - Şube/lokasyon» sonekini at (kayıt/PDF metnine dokunulmaz)
+    var dash = adi.indexOf(' - ');
+    if (dash >= 0) adi = adi.slice(0, dash).trim() || 'Musteri';
+    adi = adi.replace(/[\\\/:*?"<>|\r\n\t]+/g, ' ').replace(/\s+/g, ' ').replace(/^[\s.]+|[\s.]+$/g, '');
+    if (!adi) adi = 'Musteri';
+    if (adi.length > 120) adi = adi.slice(0, 120).replace(/[\s.]+$/g, '') || 'Musteri';
+    return adi + ' Kira Bildirgesi.pdf';
+}
+function kiraBildirgesiBlobIndir(blob, musteriAdi) {
+    if (!blob) return;
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = kiraBildirgesiDosyaAdi(musteriAdi);
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function() { try { URL.revokeObjectURL(url); } catch (_e) {} }, 60000);
+}
 async function kiraBildirgesiPdfBlob() {
     const payload = kiraBildirgesiPayload();
     if (!payload.gecerlilik_tarihi) {
@@ -32603,12 +32625,68 @@ async function kiraBildirgesiPdfBlob() {
     }
     return await response.blob();
 }
-async function kiraBildirgesiOnizle() {
-    const blob = await kiraBildirgesiPdfBlob();
-    if (blob) {
-        const url = URL.createObjectURL(blob);
-        window.open(url, '_blank', 'noopener');
+
+/** Gizli form POST → yeni sekme: Content-Disposition (firma ismi) tarayıcıda kalır; otomatik indirme yok. */
+function kiraBildirgesiOnizleFormPost() {
+    const payload = kiraBildirgesiPayload();
+    if (!payload.gecerlilik_tarihi) {
+        alert('Lütfen yeni kira geçerlilik tarihini giriniz.');
+        return false;
     }
+    if (payload.kira_net <= 0) {
+        alert('Lütfen aylık kira tutarını giriniz.');
+        return false;
+    }
+    var winName = 'kira_bildirge_' + String(Date.now());
+    try { window.open('about:blank', winName); } catch (_eWin) {}
+    var form = document.createElement('form');
+    form.method = 'POST';
+    form.action = '/giris/kira-bildirgesi-pdf';
+    form.target = winName;
+    form.acceptCharset = 'UTF-8';
+    form.style.display = 'none';
+    function addField(name, val) {
+        if (val === undefined || val === null) return;
+        var inp = document.createElement('input');
+        inp.type = 'hidden';
+        inp.name = name;
+        inp.value = String(val);
+        form.appendChild(inp);
+    }
+    addField('musteri_adi', payload.musteri_adi || '');
+    addField('sozlesme_tarihi', payload.sozlesme_tarihi || '');
+    addField('gecerlilik_tarihi', payload.gecerlilik_tarihi || '');
+    addField('kira_net', payload.kira_net);
+    addField('kdv_oran', payload.kdv_oran);
+    addField('hizmet_turu', payload.hizmet_turu || '');
+    if (payload.kira_nakit) addField('kira_nakit', '1');
+    if (payload.kira_hibrit) {
+        addField('kira_hibrit', '1');
+        addField('hibrit_nakit_pay', payload.hibrit_nakit_pay);
+        addField('hibrit_banka_net', payload.hibrit_banka_net);
+    }
+    document.body.appendChild(form);
+    form.submit();
+    setTimeout(function() { try { form.remove(); } catch (_eRm) {} }, 2000);
+    return true;
+}
+async function kiraBildirgesiOnizle() {
+    kiraBildirgesiOnizleFormPost();
+}
+/** Senaryo «Kira bildirgesi oluştur»: önizleme + doğru isimle indirme (tek PDF isteği). */
+async function kiraBildirgesiOnizleVeIndir() {
+    const payload = kiraBildirgesiPayload();
+    const blob = await kiraBildirgesiPdfBlob();
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank', 'noopener');
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = kiraBildirgesiDosyaAdi(payload.musteri_adi);
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function() { try { URL.revokeObjectURL(url); } catch (_e) {} }, 60000);
 }
 async function kiraBildirgesiYazdir() {
     const blob = await kiraBildirgesiPdfBlob();
@@ -32619,15 +32697,10 @@ async function kiraBildirgesiYazdir() {
     }
 }
 async function kiraBildirgesiPdfIndir() {
+    const payload = kiraBildirgesiPayload();
     const blob = await kiraBildirgesiPdfBlob();
     if (!blob) return;
-    const payload = kiraBildirgesiPayload();
-    const adi = (payload.musteri_adi || 'KiraBildirgesi').replace(/\s+/g, '_');
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'Kira_Bildirgesi_' + adi + '.pdf';
-    a.click();
-    URL.revokeObjectURL(a.href);
+    kiraBildirgesiBlobIndir(blob, payload.musteri_adi);
 }
 async function kiraBildirgesiWhatsApp() {
     const blob = await kiraBildirgesiPdfBlob();

@@ -6273,8 +6273,13 @@ def _kira_bildirgesi_kdv_oran_float(kdv_raw, default=20.0):
 
 
 def _kira_bildirgesi_dosya_adi(musteri_adi) -> str:
-    """İndirme adı: «Firma İsmi Kira Bildirgesi.pdf» (geçersiz dosya karakterleri temiz)."""
+    """İndirme adı: «Firma İsmi Kira Bildirgesi.pdf» (geçersiz dosya karakterleri temiz).
+
+    Yalnız dosya adı: « - şube/lokasyon» sonekini atar; müşteri kaydı / PDF metni değişmez.
+    """
     name = str(musteri_adi or "").strip() or "Musteri"
+    if " - " in name:
+        name = name.split(" - ", 1)[0].strip() or "Musteri"
     for ch in '\\/:*?"<>|\r\n\t':
         name = name.replace(ch, " ")
     name = re.sub(r"\s+", " ", name).strip(" .") or "Musteri"
@@ -6601,7 +6606,10 @@ def kira_bildirgesi_antet():
 def kira_bildirgesi_pdf():
     """Kira bildirgesi PDF oluştur (önizleme / yazdır)."""
     try:
-        data = request.get_json()
+        # JSON (fetch) veya form POST (gizli form → yeni sekme; Content-Disposition korunur)
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict) or not data:
+            data = request.form.to_dict(flat=True) if request.form else {}
         musteri_adi = (data.get('musteri_adi') or '').strip() or 'Değerli Kiracımız'
         sozlesme_tarihi = data.get('sozlesme_tarihi') or ''
         gecerlilik_tarihi = data.get('gecerlilik_tarihi') or ''

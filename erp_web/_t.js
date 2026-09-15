@@ -26007,7 +26007,7 @@ function kiraBildirgesiOlusturYil(yil, aylikKira, bildirgeMod, fromReel) {
     }
     bildirgeHizmetTuruSenaryoVeyaKarttanAktar();
 
-    setTimeout(function() { kiraBildirgesiOnizleVeIndir(); }, 100);
+    setTimeout(function() { kiraBildirgesiOnizle(); }, 100);
 }
 
 function kiraBildirgesiOlusturFromSenaryo() {
@@ -26049,7 +26049,7 @@ function kiraBildirgesiOlusturFromSenaryo() {
     }
     bildirgeHizmetTuruSenaryoVeyaKarttanAktar();
 
-    setTimeout(function() { kiraBildirgesiOnizleVeIndir(); }, 100);
+    setTimeout(function() { kiraBildirgesiOnizle(); }, 100);
 }
 
 /** Kira bildirgesi PDF'inde yıllık satırı için doğru hizmet türü: önce senaryo, yoksa müşteri kartı. */
@@ -26119,6 +26119,9 @@ function kiraBildirgesiPayload() {
 /** İndirme adı: «Firma İsmi Kira Bildirgesi.pdf» (\/:*?"<>| ve kontrol karakterleri temiz). */
 function kiraBildirgesiDosyaAdi(musteriAdi) {
     var adi = String(musteriAdi || '').trim() || 'Musteri';
+    // Dosya adı: « - Şube/lokasyon» sonekini at (kayıt/PDF metnine dokunulmaz)
+    var dash = adi.indexOf(' - ');
+    if (dash >= 0) adi = adi.slice(0, dash).trim() || 'Musteri';
     adi = adi.replace(/[\\\/:*?"<>|\r\n\t]+/g, ' ').replace(/\s+/g, ' ').replace(/^[\s.]+|[\s.]+$/g, '');
     if (!adi) adi = 'Musteri';
     if (adi.length > 120) adi = adi.slice(0, 120).replace(/[\s.]+$/g, '') || 'Musteri';
@@ -26157,12 +26160,53 @@ async function kiraBildirgesiPdfBlob() {
     }
     return await response.blob();
 }
-async function kiraBildirgesiOnizle() {
-    const blob = await kiraBildirgesiPdfBlob();
-    if (blob) {
-        const url = URL.createObjectURL(blob);
-        window.open(url, '_blank', 'noopener');
+
+/** Gizli form POST → yeni sekme: Content-Disposition (firma ismi) tarayıcıda kalır; otomatik indirme yok. */
+function kiraBildirgesiOnizleFormPost() {
+    const payload = kiraBildirgesiPayload();
+    if (!payload.gecerlilik_tarihi) {
+        alert('Lütfen yeni kira geçerlilik tarihini giriniz.');
+        return false;
     }
+    if (payload.kira_net <= 0) {
+        alert('Lütfen aylık kira tutarını giriniz.');
+        return false;
+    }
+    var winName = 'kira_bildirge_' + String(Date.now());
+    try { window.open('about:blank', winName); } catch (_eWin) {}
+    var form = document.createElement('form');
+    form.method = 'POST';
+    form.action = '/giris/kira-bildirgesi-pdf';
+    form.target = winName;
+    form.acceptCharset = 'UTF-8';
+    form.style.display = 'none';
+    function addField(name, val) {
+        if (val === undefined || val === null) return;
+        var inp = document.createElement('input');
+        inp.type = 'hidden';
+        inp.name = name;
+        inp.value = String(val);
+        form.appendChild(inp);
+    }
+    addField('musteri_adi', payload.musteri_adi || '');
+    addField('sozlesme_tarihi', payload.sozlesme_tarihi || '');
+    addField('gecerlilik_tarihi', payload.gecerlilik_tarihi || '');
+    addField('kira_net', payload.kira_net);
+    addField('kdv_oran', payload.kdv_oran);
+    addField('hizmet_turu', payload.hizmet_turu || '');
+    if (payload.kira_nakit) addField('kira_nakit', '1');
+    if (payload.kira_hibrit) {
+        addField('kira_hibrit', '1');
+        addField('hibrit_nakit_pay', payload.hibrit_nakit_pay);
+        addField('hibrit_banka_net', payload.hibrit_banka_net);
+    }
+    document.body.appendChild(form);
+    form.submit();
+    setTimeout(function() { try { form.remove(); } catch (_eRm) {} }, 2000);
+    return true;
+}
+async function kiraBildirgesiOnizle() {
+    kiraBildirgesiOnizleFormPost();
 }
 /** Senaryo «Kira bildirgesi oluştur»: önizleme + doğru isimle indirme (tek PDF isteği). */
 async function kiraBildirgesiOnizleVeIndir() {
