@@ -9167,6 +9167,16 @@ def tahsilat_ekle():
             except Exception:
                 pass
 
+        # Manuel makbuz: Cari Ekstre süreç-içi cache bayat kalmasın (GİB imza / toplu tahsil ile aynı mekanizma).
+        try:
+            from routes.giris_routes import _cari_ekstre_cache_invalidate_musteri
+            _cari_ekstre_cache_invalidate_musteri(musteri_id)
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "Manuel makbuz sonrası Cari Ekstre cache temizlenemedi musteri_id=%s",
+                musteri_id,
+            )
+
         return jsonify({
             'ok': True,
             'mesaj': 'Tahsilat eklendi. Makbuz PDF müşteri dosyalarına kaydedildi.',
