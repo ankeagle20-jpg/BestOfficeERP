@@ -3890,7 +3890,8 @@ def _musteri_yetkililer_listesi(musteri_id) -> list:
         rows = fetch_all(
             """
             SELECT sira, birincil, ad_soyad, tc_no, tel, tel2,
-                   tel_aciklama, tel2_aciklama, email, email_sirket
+                   tel_aciklama, tel2_aciklama, email, email_sirket,
+                   tc_aciklama, email_aciklama, email_sirket_aciklama
             FROM musteri_yetkililer
             WHERE musteri_id = %s
             ORDER BY sira ASC NULLS LAST, id ASC
@@ -3917,6 +3918,11 @@ def _musteri_yetkililer_listesi(musteri_id) -> list:
                 "tel2_aciklama": _musteri_serialize_val(r.get("tel2_aciklama")),
                 "email": _musteri_serialize_val(r.get("email")),
                 "email_sirket": _musteri_serialize_val(r.get("email_sirket")),
+                "tc_aciklama": _musteri_serialize_val(r.get("tc_aciklama")),
+                "email_aciklama": _musteri_serialize_val(r.get("email_aciklama")),
+                "email_sirket_aciklama": _musteri_serialize_val(
+                    r.get("email_sirket_aciklama")
+                ),
             }
         )
     return out

@@ -221,6 +221,24 @@ def _parse_yetkililer_payload(data, *, uyruk_yabanci=False):
                 "email_sirket": (
                     item.get("email_sirket") or item.get("email_sirketi") or ""
                 ).strip(),
+                "tc_aciklama": (
+                    item.get("tc_aciklama")
+                    or item.get("yetkili_tc_aciklama")
+                    or item.get("yetkili_tc_kime")
+                    or ""
+                ).strip(),
+                "email_aciklama": (
+                    item.get("email_aciklama")
+                    or item.get("yetkili_email_aciklama")
+                    or item.get("email_kime")
+                    or ""
+                ).strip(),
+                "email_sirket_aciklama": (
+                    item.get("email_sirket_aciklama")
+                    or item.get("email_sirketi_aciklama")
+                    or item.get("email_sirket_kime")
+                    or ""
+                ).strip(),
                 "ikametgah": (
                     item.get("ikametgah") or item.get("yetkili_ikametgah") or item.get("ev_adres") or ""
                 ).strip(),
@@ -264,11 +282,15 @@ def _replace_musteri_yetkililer(musteri_id, yetkililer: list) -> None:
                 INSERT INTO musteri_yetkililer (
                     musteri_id, sira, birincil,
                     ad_soyad, tc_no, tel, tel2, tel_aciklama, tel2_aciklama,
-                    email, email_sirket, ikametgah, created_at, updated_at
+                    email, email_sirket,
+                    tc_aciklama, email_aciklama, email_sirket_aciklama,
+                    ikametgah, created_at, updated_at
                 ) VALUES (
                     %s, %s, %s,
                     %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, NOW(), NOW()
+                    %s, %s,
+                    %s, %s, %s,
+                    %s, NOW(), NOW()
                 )
                 """,
                 (
@@ -283,6 +305,9 @@ def _replace_musteri_yetkililer(musteri_id, yetkililer: list) -> None:
                     (y.get("tel2_aciklama") or "") or None,
                     (y.get("email") or "") or None,
                     (y.get("email_sirket") or "") or None,
+                    (y.get("tc_aciklama") or "") or None,
+                    (y.get("email_aciklama") or "") or None,
+                    (y.get("email_sirket_aciklama") or "") or None,
                     (y.get("ikametgah") or "") or None,
                 ),
             )

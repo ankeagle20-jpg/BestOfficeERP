@@ -1982,6 +1982,9 @@ CREATE TABLE public.musteri_yetkililer (
     tel2_aciklama text,
     email text,
     email_sirket text,
+    tc_aciklama text,
+    email_aciklama text,
+    email_sirket_aciklama text,
     ikametgah text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL

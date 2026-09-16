@@ -2939,7 +2939,10 @@
                                 <input type="text" id="yetkili_ad" class="yetkili-f-ad" required onchange="hesaplaYuzde()">
                                 
                                 <label class="required">Yetkili T.C. Kimlik No</label>
-                                <input type="text" id="yetkili_tc" class="yetkili-f-tc" placeholder="11=TC / 12=Yab" maxlength="11" inputmode="numeric" oninput="yetkiliTcInput(this)" onchange="hesaplaYuzde()" autocomplete="off">
+                                <div class="giris-tel-ve-kime" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;min-width:0;width:100%;">
+                                    <input type="text" id="yetkili_tc" class="yetkili-f-tc" placeholder="11=TC / 12=Yab" maxlength="11" inputmode="numeric" oninput="yetkiliTcInput(this)" onchange="hesaplaYuzde()" autocomplete="off" style="flex:0 1 160px;min-width:110px;max-width:200px;">
+                                    <input type="text" id="yetkili_tc_kime" class="yetkili-f-tc-aciklama" placeholder="Kime ait" maxlength="120" autocomplete="off" onchange="hesaplaYuzde()" style="flex:1 1 160px;min-width:120px;">
+                                </div>
                                 
                                 <label class="required">Yetkili Cep Telefon</label>
                                 <div class="giris-tel-ve-kime" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;min-width:0;width:100%;">
@@ -2954,11 +2957,15 @@
                                 </div>
                                 
                                 <label class="required">Yetkili E-posta</label>
-                                <input type="email" id="email" class="yetkili-f-email" required onchange="hesaplaYuzde()">
+                                <div class="giris-tel-ve-kime" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;min-width:0;width:100%;">
+                                    <input type="email" id="email" class="yetkili-f-email" required onchange="hesaplaYuzde()" style="flex:1 1 180px;min-width:140px;">
+                                    <input type="text" id="email_kime" class="yetkili-f-email-aciklama" placeholder="Kime ait" maxlength="120" autocomplete="off" onchange="hesaplaYuzde()" style="flex:1 1 160px;min-width:120px;">
+                                </div>
                                 
                                 <label>E-posta (şirket)</label>
                                 <div class="yetkili-aksiyon-hucre">
-                                    <input type="email" id="email_sirket" class="yetkili-f-email-sirket" onchange="hesaplaYuzde()">
+                                    <input type="email" id="email_sirket" class="yetkili-f-email-sirket" onchange="hesaplaYuzde()" style="flex:1 1 160px;min-width:120px;">
+                                    <input type="text" id="email_sirket_kime" class="yetkili-f-email-sirket-aciklama" placeholder="Kime ait" maxlength="120" autocomplete="off" onchange="hesaplaYuzde()" style="flex:1 1 140px;min-width:110px;">
                                     <button type="button" class="yetkili-btn-ekle" title="Yetkili ekle" aria-label="Yetkili ekle" onclick="girisYetkiliBlokEkle(this)">+</button>
                                 </div>
                             </div>
@@ -26977,7 +26984,10 @@ function girisYetkiliBlokOlustur(data, idx) {
         '<label class="required">Yetkili Ad Soyad</label>' +
         '<input type="text" class="yetkili-f-ad" onchange="hesaplaYuzde()">' +
         '<label class="required">Yetkili T.C. Kimlik No</label>' +
-        '<input type="text" class="yetkili-f-tc" placeholder="11=TC / 12=Yab" maxlength="11" inputmode="numeric" oninput="yetkiliTcInput(this)" onchange="hesaplaYuzde()" autocomplete="off">' +
+        '<div class="giris-tel-ve-kime" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;min-width:0;width:100%;">' +
+        '<input type="text" class="yetkili-f-tc" placeholder="11=TC / 12=Yab" maxlength="11" inputmode="numeric" oninput="yetkiliTcInput(this)" onchange="hesaplaYuzde()" autocomplete="off" style="flex:0 1 160px;min-width:110px;max-width:200px;">' +
+        '<input type="text" class="yetkili-f-tc-aciklama" placeholder="Kime ait" maxlength="120" autocomplete="off" onchange="hesaplaYuzde()" style="flex:1 1 160px;min-width:120px;">' +
+        '</div>' +
         '<label>Yetkili Cep Telefon</label>' +
         '<div class="giris-tel-ve-kime" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;min-width:0;width:100%;">' +
         '<input type="text" class="yetkili-f-tel" placeholder="5XX XXX XX XX" maxlength="10" inputmode="numeric" oninput="telefonInput(this)" onpaste="telefonPasteTr(event)" onchange="hesaplaYuzde()" style="flex:0 1 120px;min-width:90px;max-width:160px;">' +
@@ -26989,22 +26999,29 @@ function girisYetkiliBlokOlustur(data, idx) {
         '<input type="text" class="yetkili-f-tel2-aciklama" placeholder="Kime ait" maxlength="120" autocomplete="off" onchange="hesaplaYuzde()" style="flex:1 1 160px;min-width:120px;">' +
         '</div>' +
         '<label>Yetkili E-posta</label>' +
-        '<input type="email" class="yetkili-f-email" onchange="hesaplaYuzde()">' +
+        '<div class="giris-tel-ve-kime" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;min-width:0;width:100%;">' +
+        '<input type="email" class="yetkili-f-email" onchange="hesaplaYuzde()" style="flex:1 1 180px;min-width:140px;">' +
+        '<input type="text" class="yetkili-f-email-aciklama" placeholder="Kime ait" maxlength="120" autocomplete="off" onchange="hesaplaYuzde()" style="flex:1 1 160px;min-width:120px;">' +
+        '</div>' +
         '<label>E-posta (şirket)</label>' +
         '<div class="yetkili-aksiyon-hucre">' +
-        '<input type="email" class="yetkili-f-email-sirket" onchange="hesaplaYuzde()">' +
+        '<input type="email" class="yetkili-f-email-sirket" onchange="hesaplaYuzde()" style="flex:1 1 160px;min-width:120px;">' +
+        '<input type="text" class="yetkili-f-email-sirket-aciklama" placeholder="Kime ait" maxlength="120" autocomplete="off" onchange="hesaplaYuzde()" style="flex:1 1 140px;min-width:110px;">' +
         '<button type="button" class="yetkili-btn-ekle" title="Yetkili ekle" aria-label="Yetkili ekle" onclick="girisYetkiliBlokEkle(this)">+</button>' +
         '<button type="button" class="yetkili-btn-kaldir" title="Yetkili kaldır" aria-label="Yetkili kaldır" onclick="girisYetkiliBlokKaldir(this)">−</button>' +
         '</div>' +
         '</div>';
     girisYetkiliBlokFieldSet(wrap, 'yetkili-f-ad', d.ad_soyad != null ? d.ad_soyad : d.yetkili_adsoyad);
     girisYetkiliBlokFieldSet(wrap, 'yetkili-f-tc', d.tc_no != null ? d.tc_no : d.yetkili_tcno);
+    girisYetkiliBlokFieldSet(wrap, 'yetkili-f-tc-aciklama', d.tc_aciklama != null ? d.tc_aciklama : d.yetkili_tc_aciklama);
     girisYetkiliBlokFieldSet(wrap, 'yetkili-f-tel', d.tel != null ? d.tel : d.yetkili_tel);
     girisYetkiliBlokFieldSet(wrap, 'yetkili-f-tel-aciklama', d.tel_aciklama != null ? d.tel_aciklama : d.yetkili_tel_aciklama);
     girisYetkiliBlokFieldSet(wrap, 'yetkili-f-tel2', d.tel2 != null ? d.tel2 : d.yetkili_tel2);
     girisYetkiliBlokFieldSet(wrap, 'yetkili-f-tel2-aciklama', d.tel2_aciklama != null ? d.tel2_aciklama : d.yetkili_tel2_aciklama);
     girisYetkiliBlokFieldSet(wrap, 'yetkili-f-email', d.email != null ? d.email : d.yetkili_email);
+    girisYetkiliBlokFieldSet(wrap, 'yetkili-f-email-aciklama', d.email_aciklama != null ? d.email_aciklama : d.yetkili_email_aciklama);
     girisYetkiliBlokFieldSet(wrap, 'yetkili-f-email-sirket', d.email_sirket);
+    girisYetkiliBlokFieldSet(wrap, 'yetkili-f-email-sirket-aciklama', d.email_sirket_aciklama);
     girisYetkiliUyrukAttrsUygula(wrap);
     return wrap;
 }
@@ -27052,12 +27069,15 @@ function girisYetkililerTopla() {
             birincil: true,
             ad_soyad: String(ad0).trim(),
             tc_no: String(tc0).trim(),
+            tc_aciklama: String((document.getElementById('yetkili_tc_kime') || {}).value || '').trim(),
             tel: String((document.getElementById('phone') || {}).value || '').trim(),
             tel2: String((document.getElementById('phone2') || {}).value || '').trim(),
             tel_aciklama: String((document.getElementById('phone_kime') || {}).value || '').trim(),
             tel2_aciklama: String((document.getElementById('phone2_kime') || {}).value || '').trim(),
             email: String((document.getElementById('email') || {}).value || '').trim(),
-            email_sirket: String((document.getElementById('email_sirket') || {}).value || '').trim()
+            email_aciklama: String((document.getElementById('email_kime') || {}).value || '').trim(),
+            email_sirket: String((document.getElementById('email_sirket') || {}).value || '').trim(),
+            email_sirket_aciklama: String((document.getElementById('email_sirket_kime') || {}).value || '').trim()
         });
         return out;
     }
@@ -27067,12 +27087,15 @@ function girisYetkililerTopla() {
             birincil: i === 0,
             ad_soyad: girisYetkiliBlokFieldVal(blok, 'yetkili-f-ad'),
             tc_no: girisYetkiliBlokFieldVal(blok, 'yetkili-f-tc'),
+            tc_aciklama: girisYetkiliBlokFieldVal(blok, 'yetkili-f-tc-aciklama'),
             tel: girisYetkiliBlokFieldVal(blok, 'yetkili-f-tel'),
             tel2: girisYetkiliBlokFieldVal(blok, 'yetkili-f-tel2'),
             tel_aciklama: girisYetkiliBlokFieldVal(blok, 'yetkili-f-tel-aciklama'),
             tel2_aciklama: girisYetkiliBlokFieldVal(blok, 'yetkili-f-tel2-aciklama'),
             email: girisYetkiliBlokFieldVal(blok, 'yetkili-f-email'),
-            email_sirket: girisYetkiliBlokFieldVal(blok, 'yetkili-f-email-sirket')
+            email_aciklama: girisYetkiliBlokFieldVal(blok, 'yetkili-f-email-aciklama'),
+            email_sirket: girisYetkiliBlokFieldVal(blok, 'yetkili-f-email-sirket'),
+            email_sirket_aciklama: girisYetkiliBlokFieldVal(blok, 'yetkili-f-email-sirket-aciklama')
         });
     });
     return out;
@@ -27116,12 +27139,15 @@ function girisYetkililerUIYukle(m) {
             return {
                 ad_soyad: y.ad_soyad != null ? y.ad_soyad : y.yetkili_adsoyad,
                 tc_no: y.tc_no != null ? y.tc_no : y.yetkili_tcno,
+                tc_aciklama: y.tc_aciklama != null ? y.tc_aciklama : y.yetkili_tc_aciklama,
                 tel: y.tel != null ? y.tel : y.yetkili_tel,
                 tel2: y.tel2 != null ? y.tel2 : y.yetkili_tel2,
                 tel_aciklama: y.tel_aciklama != null ? y.tel_aciklama : y.yetkili_tel_aciklama,
                 tel2_aciklama: y.tel2_aciklama != null ? y.tel2_aciklama : y.yetkili_tel2_aciklama,
                 email: y.email != null ? y.email : y.yetkili_email,
-                email_sirket: y.email_sirket
+                email_aciklama: y.email_aciklama != null ? y.email_aciklama : y.yetkili_email_aciklama,
+                email_sirket: y.email_sirket,
+                email_sirket_aciklama: y.email_sirket_aciklama
             };
         }
         return fallbackFlat || {};
@@ -27131,12 +27157,15 @@ function girisYetkililerUIYukle(m) {
         var r0 = rowFrom(arr[0], null);
         girisYetkiliBlokFieldSet(first, 'yetkili-f-ad', r0.ad_soyad);
         girisYetkiliBlokFieldSet(first, 'yetkili-f-tc', r0.tc_no);
+        girisYetkiliBlokFieldSet(first, 'yetkili-f-tc-aciklama', r0.tc_aciklama);
         girisYetkiliBlokFieldSet(first, 'yetkili-f-tel', r0.tel);
         girisYetkiliBlokFieldSet(first, 'yetkili-f-tel-aciklama', r0.tel_aciklama);
         girisYetkiliBlokFieldSet(first, 'yetkili-f-tel2', r0.tel2);
         girisYetkiliBlokFieldSet(first, 'yetkili-f-tel2-aciklama', r0.tel2_aciklama);
         girisYetkiliBlokFieldSet(first, 'yetkili-f-email', r0.email);
+        girisYetkiliBlokFieldSet(first, 'yetkili-f-email-aciklama', r0.email_aciklama);
         girisYetkiliBlokFieldSet(first, 'yetkili-f-email-sirket', r0.email_sirket);
+        girisYetkiliBlokFieldSet(first, 'yetkili-f-email-sirket-aciklama', r0.email_sirket_aciklama);
         for (var i = 1; i < arr.length; i++) {
             girisYetkiliBlokEkle(null, rowFrom(arr[i], null));
         }
