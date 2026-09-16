@@ -18,6 +18,7 @@ from db import (
     ensure_musteri_kyc_hazir_ofis_oda_no,
     ensure_musteri_kyc_kira_banka,
     ensure_musteri_kyc_odeme_duzeni,
+    ensure_musteri_yetkililer_table,
     db as get_db,
     clear_all_customers,
     get_conn,
@@ -53,6 +54,7 @@ def _kyc_kaydet_schema_ensure_once() -> None:
         ensure_musteri_kyc_hazir_ofis_oda_no()
         ensure_musteri_kyc_kira_banka()
         ensure_musteri_kyc_odeme_duzeni()
+        ensure_musteri_yetkililer_table()
         _kyc_kaydet_schema_ready = True
 
 
@@ -131,6 +133,159 @@ def _vergi_no_normalize_veya_hata_kyc(tax_raw, yetkili_tc_raw, uyruk_yabanci=Fal
         return "Vergi no 11 hane yalnızca Yetkili T.C. Kimlik No ile aynı olduğunda kabul edilir.", None
     return "Vergi no 10 haneli VKN veya Yetkili T.C. ile aynı 11 haneli T.C. olmalıdır.", None
 
+
+def _yetkili_tc_normalize_veya_hata(tc_raw, *, uyruk_yabanci=False, idx=None):
+    """Yetkili T.C. — Ad+TC zorunlu kuralının TC kısmı (FE: 11 hane / yabancı 12)."""
+    label = ("Yetkili #%s" % idx) if idx is not None else "Yetkili"
+    digits = "".join(c for c in str(tc_raw or "") if c.isdigit())
+    if not digits:
+        return "%s: T.C. Kimlik No zorunludur." % label, None
+    if uyruk_yabanci:
+        if len(digits) not in (11, 12):
+            return (
+                "%s: TC Kimlik No 11 hane (veya yabancı için 12 hane) olmalıdır." % label
+            ), None
+        return None, digits
+    if len(digits) != 11:
+        return "%s: TC Kimlik No 11 hane olmalıdır." % label, None
+    return None, digits
+
+
+def _parse_yetkililer_payload(data, *, uyruk_yabanci=False):
+    """İstek gövdesinden yetkililer listesini doğrula.
+
+    Dönüş:
+      (None, None) — alan yok / gönderilmedi → eski tek-yetkili yolu
+      (err_str, None) — 400 mesajı
+      (None, list[dict]) — normalize edilmiş satırlar (sira 1..n, tek birincil)
+    """
+    if not isinstance(data, dict) or "yetkililer" not in data:
+        return None, None
+    raw = data.get("yetkililer")
+    if isinstance(raw, str):
+        s = raw.strip()
+        if not s:
+            return "yetkililer listesi boş olamaz.", None
+        try:
+            raw = json.loads(s)
+        except Exception:
+            return "yetkililer geçerli bir JSON listesi olmalıdır.", None
+    if not isinstance(raw, list):
+        return "yetkililer bir liste olmalıdır.", None
+    if len(raw) < 1:
+        return "En az bir yetkili kişi gereklidir.", None
+
+    parsed = []
+    for i, item in enumerate(raw, start=1):
+        if not isinstance(item, dict):
+            return "Yetkili #%s: geçersiz kayıt." % i, None
+        ad = (item.get("ad_soyad") or item.get("yetkili_adsoyad") or item.get("yetkili_ad") or "").strip()
+        if not ad:
+            return "Yetkili #%s: Ad Soyad zorunludur." % i, None
+        tc_err, tc_norm = _yetkili_tc_normalize_veya_hata(
+            item.get("tc_no") or item.get("yetkili_tcno") or item.get("yetkili_tc"),
+            uyruk_yabanci=uyruk_yabanci,
+            idx=i,
+        )
+        if tc_err:
+            return tc_err, None
+        try:
+            sira_raw = item.get("sira")
+            sira_val = int(sira_raw) if sira_raw is not None and str(sira_raw).strip() != "" else i
+        except (TypeError, ValueError):
+            sira_val = i
+        birincil_flag = item.get("birincil") in (True, 1, "1", "true", "True", "yes", "on")
+        parsed.append(
+            {
+                "sira": sira_val,
+                "birincil": birincil_flag,
+                "ad_soyad": ad,
+                "tc_no": tc_norm,
+                "tel": (item.get("tel") or item.get("yetkili_tel") or item.get("phone") or "").strip(),
+                "tel2": (item.get("tel2") or item.get("yetkili_tel2") or item.get("phone2") or "").strip(),
+                "tel_aciklama": (
+                    item.get("tel_aciklama")
+                    or item.get("yetkili_tel_aciklama")
+                    or item.get("phone_kime")
+                    or ""
+                ).strip(),
+                "tel2_aciklama": (
+                    item.get("tel2_aciklama")
+                    or item.get("yetkili_tel2_aciklama")
+                    or item.get("phone2_kime")
+                    or ""
+                ).strip(),
+                "email": (
+                    item.get("email") or item.get("yetkili_email") or ""
+                ).strip(),
+                "email_sirket": (
+                    item.get("email_sirket") or item.get("email_sirketi") or ""
+                ).strip(),
+                "ikametgah": (
+                    item.get("ikametgah") or item.get("yetkili_ikametgah") or item.get("ev_adres") or ""
+                ).strip(),
+            }
+        )
+
+    # Birincil: işaretli ilk; yoksa sira==1; yoksa listedeki ilk
+    primary_idx = 0
+    for j, y in enumerate(parsed):
+        if y.get("birincil"):
+            primary_idx = j
+            break
+    else:
+        for j, y in enumerate(parsed):
+            if int(y.get("sira") or 0) == 1:
+                primary_idx = j
+                break
+
+    # Primary öne al; sira=1..n ve tek birincil
+    primary = parsed.pop(primary_idx)
+    ordered = [primary] + parsed
+    normalized = []
+    for n, y in enumerate(ordered, start=1):
+        row = dict(y)
+        row["sira"] = n
+        row["birincil"] = n == 1
+        normalized.append(row)
+    return None, normalized
+
+
+def _replace_musteri_yetkililer(musteri_id, yetkililer: list) -> None:
+    """musteri_yetkililer: musteri_id için sil+insert (tek transaction)."""
+    mid = int(musteri_id)
+    ensure_musteri_yetkililer_table()
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM musteri_yetkililer WHERE musteri_id = %s", (mid,))
+        for y in yetkililer:
+            cur.execute(
+                """
+                INSERT INTO musteri_yetkililer (
+                    musteri_id, sira, birincil,
+                    ad_soyad, tc_no, tel, tel2, tel_aciklama, tel2_aciklama,
+                    email, email_sirket, ikametgah, created_at, updated_at
+                ) VALUES (
+                    %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, NOW(), NOW()
+                )
+                """,
+                (
+                    mid,
+                    int(y.get("sira") or 1),
+                    bool(y.get("birincil")),
+                    (y.get("ad_soyad") or "") or None,
+                    (y.get("tc_no") or "") or None,
+                    (y.get("tel") or "") or None,
+                    (y.get("tel2") or "") or None,
+                    (y.get("tel_aciklama") or "") or None,
+                    (y.get("tel2_aciklama") or "") or None,
+                    (y.get("email") or "") or None,
+                    (y.get("email_sirket") or "") or None,
+                    (y.get("ikametgah") or "") or None,
+                ),
+            )
 
 
 def _uyruk_db_value_kyc(uyruk_yabanci: bool) -> str:
@@ -2215,12 +2370,15 @@ def api_kyc_kaydet():
         uyruk_yabanci = _request_uyruk_yabanci_kyc(data if isinstance(data, dict) else {})
         ensure_musteri_kyc_uyruk_column()
         uyruk_val = _uyruk_db_value_kyc(uyruk_yabanci)
-        vergi_err, vergi_no_norm = _vergi_no_normalize_veya_hata_kyc(
-            vergi_no, yetkili_tcno, uyruk_yabanci=uyruk_yabanci
+
+        # A4: çoklu yetkililer (alan yoksa eski tek-yetkili yolu)
+        yet_err, yetkililer_norm = _parse_yetkililer_payload(
+            data if isinstance(data, dict) else {},
+            uyruk_yabanci=uyruk_yabanci,
         )
-        if vergi_err:
-            return jsonify({"ok": False, "mesaj": vergi_err}), 400
-        vergi_no = vergi_no_norm
+        if yet_err:
+            return jsonify({"ok": False, "mesaj": yet_err}), 400
+
         yetkili_dogum = data.get("yetkili_dogum")
         yetkili_ikametgah = (data.get("yetkili_ikametgah") or "").strip()
         yetkili_tel = (data.get("yetkili_tel") or "").strip()
@@ -2229,6 +2387,27 @@ def api_kyc_kaydet():
         yetkili_tel2_aciklama = (data.get("yetkili_tel2_aciklama") or "").strip()
         yetkili_email = (data.get("yetkili_email") or "").strip()
         email = (data.get("email") or "").strip()
+
+        if yetkililer_norm:
+            # Birinci yetkiliyi musteri_kyc / customers alanlarına mirror et
+            primary = yetkililer_norm[0]
+            yetkili_adsoyad = (primary.get("ad_soyad") or "").strip()
+            yetkili_tcno = (primary.get("tc_no") or "").strip()
+            yetkili_tel = (primary.get("tel") or "").strip()
+            yetkili_tel2 = (primary.get("tel2") or "").strip()
+            yetkili_tel_aciklama = (primary.get("tel_aciklama") or "").strip()
+            yetkili_tel2_aciklama = (primary.get("tel2_aciklama") or "").strip()
+            yetkili_email = (primary.get("email") or "").strip()
+            email = (primary.get("email_sirket") or "").strip()
+            if (primary.get("ikametgah") or "").strip():
+                yetkili_ikametgah = (primary.get("ikametgah") or "").strip()
+
+        vergi_err, vergi_no_norm = _vergi_no_normalize_veya_hata_kyc(
+            vergi_no, yetkili_tcno, uyruk_yabanci=uyruk_yabanci
+        )
+        if vergi_err:
+            return jsonify({"ok": False, "mesaj": vergi_err}), 400
+        vergi_no = vergi_no_norm
         # customers.email: arama / liste için şirket e-postası yoksa yetkili e-postası (KYC öncesi kayıt silinmesin)
         cust_row_email = email or yetkili_email or None
         hizmet_turu = (data.get("hizmet_turu") or "Sanal Ofis").strip()
@@ -2378,7 +2557,15 @@ def api_kyc_kaydet():
                 kira_nakit = False
 
         zorunlu = ["sirket_unvani", "vergi_no", "vergi_dairesi", "yeni_adres", "yetkili_adsoyad", "yetkili_tcno"]
-        dolu = sum(1 for k in zorunlu if (data.get(k) or "").strip())
+        _zorunlu_vals = {
+            "sirket_unvani": sirket_unvani,
+            "vergi_no": vergi_no,
+            "vergi_dairesi": vergi_dairesi,
+            "yeni_adres": yeni_adres,
+            "yetkili_adsoyad": yetkili_adsoyad,
+            "yetkili_tcno": yetkili_tcno,
+        }
+        dolu = sum(1 for k in zorunlu if (_zorunlu_vals.get(k) or "").strip())
         tamamlanma_yuzdesi = int(dolu / len(zorunlu) * 100) if zorunlu else 0
 
         mevcut = fetch_one("SELECT id FROM musteri_kyc WHERE musteri_id = %s ORDER BY id DESC LIMIT 1", (musteri_id,)) if musteri_id else None
@@ -2541,6 +2728,19 @@ def api_kyc_kaydet():
                 CariService.set_parent(int(musteri_id), parent_cari_id)
             except Exception:
                 pass
+
+        # A4: yetkililer gönderildiyse tabloyu replace-by-musteri_id ile yaz
+        if yetkililer_norm and musteri_id:
+            try:
+                _replace_musteri_yetkililer(int(musteri_id), yetkililer_norm)
+            except Exception as e:
+                return jsonify(
+                    {
+                        "ok": False,
+                        "mesaj": "Yetkililer kaydedilemedi: %s" % (str(e) or "hata"),
+                    }
+                ), 400
+
         return jsonify({"ok": True, "kyc_id": kyc_id})
     except Exception as e:
         return jsonify({"ok": False, "mesaj": str(e)}), 400
