@@ -587,6 +587,7 @@ def init_schema():
     ensure_musteri_kyc_hazir_ofis_oda_no()
     ensure_musteri_kyc_uyruk_column()
     ensure_musteri_yetkililer_table()
+    ensure_musteri_yetkili_alan_degerleri_table()
     ensure_hizmet_turleri_table()
     ensure_duzenli_fatura_secenekleri_table()
     ensure_office_rentals()
@@ -1143,6 +1144,78 @@ def ensure_musteri_yetkililer_table():
         _run_ensure_ddl_once("musteri_yetkililer", _do)
     except Exception as e:
         print(f"musteri_yetkililer: {e}")
+
+
+def ensure_musteri_yetkili_alan_degerleri_table():
+    """Yetkili kişi başına çoklu alan değerleri (musteri_yetkili_alan_degerleri).
+
+    musteri_yetkililer skaler sütunlarına dokunulmaz; bu tablo alan_tipi başına
+    birden fazla değer (tc/tel/tel2/email/email_sirket) tutar. Process-ömürlü
+    once kapısı ile şema başına yalnızca ilk istekte CREATE/ALTER çalışır.
+    """
+    def _do():
+        execute(
+            """
+            CREATE TABLE IF NOT EXISTS musteri_yetkili_alan_degerleri (
+                id              SERIAL PRIMARY KEY,
+                yetkili_id      INTEGER NOT NULL
+                    REFERENCES musteri_yetkililer(id) ON DELETE CASCADE,
+                alan_tipi       TEXT NOT NULL
+                    CHECK (alan_tipi IN ('tc', 'tel', 'tel2', 'email', 'email_sirket')),
+                deger           TEXT,
+                kime_ait        TEXT,
+                sira            SMALLINT NOT NULL DEFAULT 1,
+                created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+        # Soft migration: eski kopyalarda eksik kolonlar
+        for col, typ in (
+            ("yetkili_id", "INTEGER"),
+            ("alan_tipi", "TEXT"),
+            ("deger", "TEXT"),
+            ("kime_ait", "TEXT"),
+            ("sira", "SMALLINT NOT NULL DEFAULT 1"),
+            ("created_at", "TIMESTAMPTZ NOT NULL DEFAULT NOW()"),
+            ("updated_at", "TIMESTAMPTZ NOT NULL DEFAULT NOW()"),
+        ):
+            try:
+                execute(
+                    f"ALTER TABLE musteri_yetkili_alan_degerleri "
+                    f"ADD COLUMN IF NOT EXISTS {col} {typ}"
+                )
+            except Exception as e:
+                print(f"musteri_yetkili_alan_degerleri.{col}: {e}")
+        # Soft migration: CHECK constraint (IF NOT EXISTS yok → DO bloğu)
+        try:
+            execute(
+                """
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_constraint
+                        WHERE conname = 'musteri_yetkili_alan_degerleri_alan_tipi_check'
+                    ) THEN
+                        ALTER TABLE musteri_yetkili_alan_degerleri
+                            ADD CONSTRAINT musteri_yetkili_alan_degerleri_alan_tipi_check
+                            CHECK (alan_tipi IN ('tc', 'tel', 'tel2', 'email', 'email_sirket'));
+                    END IF;
+                END $$
+                """
+            )
+        except Exception as e:
+            print(f"musteri_yetkili_alan_degerleri.alan_tipi_check: {e}")
+        execute(
+            "CREATE INDEX IF NOT EXISTS "
+            "idx_musteri_yetkili_alan_degerleri_yetkili_tip_sira "
+            "ON musteri_yetkili_alan_degerleri (yetkili_id, alan_tipi, sira)"
+        )
+
+    try:
+        _run_ensure_ddl_once("musteri_yetkili_alan_degerleri", _do)
+    except Exception as e:
+        print(f"musteri_yetkili_alan_degerleri: {e}")
 
 
 _musteri_kyc_latest_idx_done = False

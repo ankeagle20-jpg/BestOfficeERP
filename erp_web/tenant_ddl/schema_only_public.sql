@@ -2012,6 +2012,43 @@ ALTER SEQUENCE public.musteri_yetkililer_id_seq OWNED BY public.musteri_yetkilil
 
 
 --
+-- Name: musteri_yetkili_alan_degerleri; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.musteri_yetkili_alan_degerleri (
+    id integer NOT NULL,
+    yetkili_id integer NOT NULL,
+    alan_tipi text NOT NULL,
+    deger text,
+    kime_ait text,
+    sira smallint DEFAULT 1 NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT musteri_yetkili_alan_degerleri_alan_tipi_check CHECK ((alan_tipi = ANY (ARRAY['tc'::text, 'tel'::text, 'tel2'::text, 'email'::text, 'email_sirket'::text])))
+);
+
+
+--
+-- Name: musteri_yetkili_alan_degerleri_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.musteri_yetkili_alan_degerleri_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: musteri_yetkili_alan_degerleri_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.musteri_yetkili_alan_degerleri_id_seq OWNED BY public.musteri_yetkili_alan_degerleri.id;
+
+
+--
 -- Name: musteri_reel_donem_tutar; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -3175,6 +3212,13 @@ ALTER TABLE ONLY public.musteri_yetkililer ALTER COLUMN id SET DEFAULT nextval('
 
 
 --
+-- Name: musteri_yetkili_alan_degerleri id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.musteri_yetkili_alan_degerleri ALTER COLUMN id SET DEFAULT nextval('public.musteri_yetkili_alan_degerleri_id_seq'::regclass);
+
+
+--
 -- Name: office_rentals id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -3777,6 +3821,14 @@ ALTER TABLE ONLY public.musteri_kyc
 
 ALTER TABLE ONLY public.musteri_yetkililer
     ADD CONSTRAINT musteri_yetkililer_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: musteri_yetkili_alan_degerleri musteri_yetkili_alan_degerleri_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.musteri_yetkili_alan_degerleri
+    ADD CONSTRAINT musteri_yetkili_alan_degerleri_pkey PRIMARY KEY (id);
 
 
 --
@@ -4384,6 +4436,13 @@ CREATE UNIQUE INDEX uq_musteri_yetkililer_birincil ON public.musteri_yetkililer 
 
 
 --
+-- Name: idx_musteri_yetkili_alan_degerleri_yetkili_tip_sira; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_musteri_yetkili_alan_degerleri_yetkili_tip_sira ON public.musteri_yetkili_alan_degerleri USING btree (yetkili_id, alan_tipi, sira);
+
+
+--
 -- Name: idx_musteri_reel_donem_tutar_musteri_id; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -4741,6 +4800,14 @@ ALTER TABLE ONLY public.musteri_aylik_grid_cache
 
 ALTER TABLE ONLY public.musteri_yetkililer
     ADD CONSTRAINT musteri_yetkililer_musteri_id_fkey FOREIGN KEY (musteri_id) REFERENCES public.customers(id) ON DELETE CASCADE;
+
+
+--
+-- Name: musteri_yetkili_alan_degerleri musteri_yetkili_alan_degerleri_yetkili_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.musteri_yetkili_alan_degerleri
+    ADD CONSTRAINT musteri_yetkili_alan_degerleri_yetkili_id_fkey FOREIGN KEY (yetkili_id) REFERENCES public.musteri_yetkililer(id) ON DELETE CASCADE;
 
 
 --
