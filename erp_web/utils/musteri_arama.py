@@ -6,8 +6,10 @@ customers tablosunda ortak metin araması.
 - Yetkili ad soyad: yetkili_kisi
 
 Geniş arama (`customers_arama_sql_giris_genis`): ayrıca vergi dairesi, adresler, telefonlar,
-e-postalar, T.C., KYC alanları (ünvan, ikametgah, yetkili iletişim vb.). Telefonda ayrıca
-sorgudaki rakamlar (en az 3 hane) format fark etmeksizin cep / cep 2 / KYC yetkili hatlar ile eşleşir.
+e-postalar, T.C., KYC alanları (ünvan, ikametgah, yetkili iletişim vb.) ve
+``musteri_yetkililer`` (çoklu yetkili: ad/TC/tel/e-posta). Telefonda ayrıca
+sorgudaki rakamlar (en az 3 hane) format fark etmeksizin cep / cep 2 / KYC /
+``musteri_yetkililer`` hatları ile eşleşir.
 """
 
 from __future__ import annotations
@@ -90,13 +92,16 @@ def _giris_genis_eposta_sql(table_alias: str) -> str:
     """
     E-posta araması: translate+LIKE bazen @/. veya _ ile sürpriz üretir; ILIKE + strpos ile yedekler.
     strpos tarafında boşluklar sıkıştırılır (ör. «zafer @ gmail.com» ile «zafer@gmail.com»).
-    7× %s — (iğne,iğne,iğne,iğne, ilike, ilike, ilike).
+    11× %s — (iğne×6 strpos/boşluk, ilike×5: cust + mk×2 + yetkililer×2).
     """
     a = f"{table_alias.strip()}." if table_alias and table_alias.strip() else ""
     id_ref = f"{a}id"
+    id_ref_y = _giris_genis_id_ref(table_alias)
     mail_cust = f"TRIM(COALESCE({a}email, ''))"
     mk_yetkili_mail = "TRIM(COALESCE(mk.yetkili_email, ''))"
     mk_sirket_mail = "TRIM(COALESCE(mk.email, ''))"
+    y_mail = "TRIM(COALESCE(y.email, ''))"
+    y_sirket_mail = "TRIM(COALESCE(y.email_sirket, ''))"
     needle_c = "regexp_replace(lower(TRIM(%s)), '[[:space:]]+', '', 'g')"
     return (
         "("
@@ -105,11 +110,19 @@ def _giris_genis_eposta_sql(table_alias: str) -> str:
         f"EXISTS (SELECT 1 FROM musteri_kyc mk WHERE mk.musteri_id = {id_ref} AND ("
         f"strpos({_sql_email_ws_squeeze_lower(mk_yetkili_mail)}, {needle_c}) > 0 OR "
         f"strpos({_sql_email_ws_squeeze_lower(mk_sirket_mail)}, {needle_c}) > 0"
+        f")) OR "
+        f"EXISTS (SELECT 1 FROM musteri_yetkililer y WHERE y.musteri_id = {id_ref_y} AND ("
+        f"strpos({_sql_email_ws_squeeze_lower(y_mail)}, {needle_c}) > 0 OR "
+        f"strpos({_sql_email_ws_squeeze_lower(y_sirket_mail)}, {needle_c}) > 0"
         f")))) OR "
         f"{mail_cust} ILIKE %s ESCAPE '\\' OR "
         f"EXISTS (SELECT 1 FROM musteri_kyc mk WHERE mk.musteri_id = {id_ref} AND ("
         f"TRIM(COALESCE(mk.yetkili_email, '')) ILIKE %s ESCAPE '\\' OR "
         f"TRIM(COALESCE(mk.email, '')) ILIKE %s ESCAPE '\\'"
+        f")) OR "
+        f"EXISTS (SELECT 1 FROM musteri_yetkililer y WHERE y.musteri_id = {id_ref_y} AND ("
+        f"TRIM(COALESCE(y.email, '')) ILIKE %s ESCAPE '\\' OR "
+        f"TRIM(COALESCE(y.email_sirket, '')) ILIKE %s ESCAPE '\\'"
         f"))"
         ")"
     )
@@ -156,6 +169,7 @@ def customers_arama_params_6(q: str):
 
 # Geniş müşteri araması: formdaki tüm ana iletişim / kimlik alanları + KYC satırları
 _kyc_arama_kolonlari_ensure_done = False
+_yetkililer_arama_ensure_done = False
 
 
 def _ensure_musteri_kyc_arama_kolonlari_lazy() -> None:
@@ -170,6 +184,65 @@ def _ensure_musteri_kyc_arama_kolonlari_lazy() -> None:
     except Exception:
         return
     _kyc_arama_kolonlari_ensure_done = True
+
+
+def _ensure_musteri_yetkililer_arama_lazy() -> None:
+    """A6: geniş arama musteri_yetkililer tablosuna dayanır — yoksa idempotent ensure."""
+    global _yetkililer_arama_ensure_done
+    if _yetkililer_arama_ensure_done:
+        return
+    try:
+        from db import ensure_musteri_yetkililer_table
+
+        ensure_musteri_yetkililer_table()
+    except Exception:
+        return
+    _yetkililer_arama_ensure_done = True
+
+
+# A6: musteri_yetkililer fold/LIKE alanları (placeholder sayısı ile senkron)
+_GIRIS_GENIS_YETKILILER_ALANLARI = (
+    "ad_soyad",
+    "tc_no",
+    "tel",
+    "tel2",
+    "email",
+    "email_sirket",
+)
+
+
+def _mk_yetkili_coalesce_text(col: str, alias: str = "y") -> str:
+    return f"TRIM(COALESCE({alias}.{col}::text, ''))"
+
+
+def _giris_genis_id_ref(table_alias: str) -> str:
+    """
+    EXISTS alt sorgularında dış müşteri PK.
+
+    Alias yokken çıplak ``id`` kullanılamaz: musteri_kyc / musteri_yetkililer
+    kendi ``id`` sütununa gölgeler (ikincil yetkili araması sessizce kaçardı).
+    """
+    a = (table_alias or "").strip()
+    if a:
+        return f"{a}.id"
+    return "customers.id"
+
+
+def _giris_genis_yetkililer_fold_sql(table_alias: str) -> str:
+    """
+    Çoklu yetkili satırları: ad / TC / tel / e-posta fold+LIKE.
+    {n} × %s — n = len(_GIRIS_GENIS_YETKILILER_ALANLARI).
+    """
+    id_ref = _giris_genis_id_ref(table_alias)
+    parts = [
+        f"{_fold_sql_text(_mk_yetkili_coalesce_text(col))} LIKE %s"
+        for col in _GIRIS_GENIS_YETKILILER_ALANLARI
+    ]
+    inner = " OR ".join(parts)
+    return (
+        f"EXISTS (SELECT 1 FROM musteri_yetkililer y WHERE y.musteri_id = {id_ref} "
+        f"AND ({inner}))"
+    )
 
 
 _GIRIS_GENIS_MK_ALANLARI = (
@@ -205,10 +278,12 @@ def _telefon_arama_digits(q: str) -> str:
 def _giris_genis_telefon_rakam_sql(table_alias: str) -> str:
     """
     Metin LIKE ile tutmayan formatlı numaralar için: kolon ve sorgu rakamlara indirgenir.
-    5 adet %s — hepsi aynı «rakam dizisi» parametresi (char_length >= min + 4 LIKE).
+    7 adet %s — hepsi aynı «rakam dizisi» parametresi
+    (char_length >= min + cust×2 + KYC×2 + musteri_yetkililer×2 LIKE).
     """
     a = f"{table_alias.strip()}." if table_alias and table_alias.strip() else ""
     id_ref = f"{a}id"
+    id_ref_y = _giris_genis_id_ref(table_alias)
 
     def _rx(expr: str) -> str:
         return f"regexp_replace(TRIM(COALESCE({expr}, '')), '[^0-9]', '', 'g')"
@@ -217,6 +292,8 @@ def _giris_genis_telefon_rakam_sql(table_alias: str) -> str:
     c2 = _rx(f"{a}phone2")
     m1 = _rx("mk.yetkili_tel")
     m2 = _rx("mk.yetkili_tel2")
+    y1 = _rx("y.tel")
+    y2 = _rx("y.tel2")
     return (
         f"(char_length(TRIM(%s)) >= {_GIRIS_GENIS_TELEFON_RAKAM_MIN} AND ("
         f"{c1} LIKE ('%%' || TRIM(%s) || '%%') OR "
@@ -224,6 +301,10 @@ def _giris_genis_telefon_rakam_sql(table_alias: str) -> str:
         f"EXISTS (SELECT 1 FROM musteri_kyc mk WHERE mk.musteri_id = {id_ref} AND ("
         f"{m1} LIKE ('%%' || TRIM(%s) || '%%') OR "
         f"{m2} LIKE ('%%' || TRIM(%s) || '%%')"
+        f")) OR "
+        f"EXISTS (SELECT 1 FROM musteri_yetkililer y WHERE y.musteri_id = {id_ref_y} AND ("
+        f"{y1} LIKE ('%%' || TRIM(%s) || '%%') OR "
+        f"{y2} LIKE ('%%' || TRIM(%s) || '%%')"
         f"))))"
     )
 
@@ -254,6 +335,7 @@ def customers_arama_sql_giris_genis(table_alias: str = "") -> str:
     """
     Müşteri kartı + Giriş üst arama + Cari kart listesi için tam metin araması.
     table_alias: örn. \"c\" → kolonlar c.name, EXISTS ... mk.musteri_id = c.id
+    A6: ayrıca musteri_yetkililer (çoklu yetkili ad/TC/tel/e-posta).
     """
     a = f"{table_alias.strip()}." if table_alias and table_alias.strip() else ""
     id_ref = f"{a}id"
@@ -265,6 +347,7 @@ def customers_arama_sql_giris_genis(table_alias: str = "") -> str:
     cust_cols = _giris_genis_cust_search_exprs(table_alias)
     parts = [_fold_sql_text(expr) + " LIKE %s" for _key, expr in cust_cols]
     parts.append(exists_mk)
+    parts.append(_giris_genis_yetkililer_fold_sql(table_alias))
     parts.append(_giris_genis_telefon_rakam_sql(table_alias))
     parts.append(_giris_genis_eposta_sql(table_alias))
     return "(" + " OR ".join(parts) + ")"
@@ -272,14 +355,23 @@ def customers_arama_sql_giris_genis(table_alias: str = "") -> str:
 
 def customers_arama_params_giris_genis(q: str):
     _ensure_musteri_kyc_arama_kolonlari_lazy()
+    _ensure_musteri_yetkililer_arama_lazy()
     p = _pct(q)
-    n = len(_GIRIS_GENIS_MK_ALANLARI) + len(_giris_genis_cust_search_exprs())
+    n = (
+        len(_GIRIS_GENIS_MK_ALANLARI)
+        + len(_giris_genis_cust_search_exprs())
+        + len(_GIRIS_GENIS_YETKILILER_ALANLARI)
+    )
     digits = _telefon_arama_digits(q)
     needle = normalize_musteri_arama_tr(q or "")
     p_ilike = _ilike_pct_escaped(q)
-    # Telefon rakam bloğu: 5× aynı parametre (uzunluk eşiği + 4 LIKE)
-    # E-posta bloğu: 4× iğne (strpos + boşluk kontrolü) + 3× kaçışlı ILIKE
-    return (p,) * n + (digits, digits, digits, digits, digits) + (needle, needle, needle, needle, p_ilike, p_ilike, p_ilike)
+    # Telefon rakam bloğu: 7× aynı parametre (uzunluk eşiği + cust×2 + KYC×2 + yetkililer×2)
+    # E-posta bloğu: 6× iğne (strpos + boşluk kontrolü) + 5× kaçışlı ILIKE
+    return (
+        (p,) * n
+        + (digits, digits, digits, digits, digits, digits, digits)
+        + (needle, needle, needle, needle, needle, needle, p_ilike, p_ilike, p_ilike, p_ilike, p_ilike)
+    )
 
 
 def customers_arama_tokens_split(q: str) -> list[str]:
