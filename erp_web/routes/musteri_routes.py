@@ -19,6 +19,7 @@ from db import (
     ensure_musteri_kyc_kira_banka,
     ensure_musteri_kyc_odeme_duzeni,
     ensure_musteri_yetkililer_table,
+    ensure_musteri_yetkili_alan_degerleri_table,
     db as get_db,
     clear_all_customers,
     get_conn,
@@ -151,13 +152,195 @@ def _yetkili_tc_normalize_veya_hata(tc_raw, *, uyruk_yabanci=False, idx=None):
     return None, digits
 
 
+# C4: nested alan_degerleri ↔ skaler mirror (sira=1)
+_YETKILI_ALAN_TIPLERI = ("tc", "tel", "tel2", "email", "email_sirket")
+_YETKILI_ALAN_SKALER = {
+    "tc": ("tc_no", "tc_aciklama"),
+    "tel": ("tel", "tel_aciklama"),
+    "tel2": ("tel2", "tel2_aciklama"),
+    "email": ("email", "email_aciklama"),
+    "email_sirket": ("email_sirket", "email_sirket_aciklama"),
+}
+
+
+def _yetkili_alan_listesi_normalize(raw_list, *, tip: str, idx: int):
+    """Tek alan_tipi listesini [{deger, kime_ait, sira}, ...] yap; boşsa 1 boş satır."""
+    if raw_list is None:
+        return None
+    if not isinstance(raw_list, list):
+        return "Yetkili #%s: alan_degerleri.%s bir liste olmalıdır." % (idx, tip), None
+    out = []
+    for j, el in enumerate(raw_list, start=1):
+        if isinstance(el, str):
+            el = {"deger": el}
+        if not isinstance(el, dict):
+            return (
+                "Yetkili #%s: alan_degerleri.%s[%s] geçersiz." % (idx, tip, j),
+                None,
+            )
+        deger = (el.get("deger") if el.get("deger") is not None else "")
+        deger = str(deger).strip()
+        kime = (el.get("kime_ait") if el.get("kime_ait") is not None else "")
+        kime = str(kime).strip()
+        try:
+            sira_raw = el.get("sira")
+            sira_val = (
+                int(sira_raw)
+                if sira_raw is not None and str(sira_raw).strip() != ""
+                else j
+            )
+        except (TypeError, ValueError):
+            sira_val = j
+        out.append({"deger": deger, "kime_ait": kime, "sira": sira_val})
+    if not out:
+        out = [{"deger": "", "kime_ait": "", "sira": 1}]
+    out.sort(key=lambda x: (int(x.get("sira") or 0),))
+    for n, e in enumerate(out, start=1):
+        e["sira"] = n
+    return None, out
+
+
+def _yetkili_alan_degerleri_parse(item: dict, *, idx: int, uyruk_yabanci=False):
+    """Kişi için alan_degerleri oluştur; sira=1 → skaler mirror alanları.
+
+    Dönüş: (err, alan_degerleri_dict, skaler_patch_dict)
+    """
+    tips = _YETKILI_ALAN_TIPLERI
+    raw_ad = item.get("alan_degerleri")
+    # Skaler ham değerler (geriye uyum / eksik tip doldurma)
+    skaler_ham = {
+        "tc_no": (
+            item.get("tc_no") or item.get("yetkili_tcno") or item.get("yetkili_tc") or ""
+        ),
+        "tel": (item.get("tel") or item.get("yetkili_tel") or item.get("phone") or ""),
+        "tel2": (
+            item.get("tel2") or item.get("yetkili_tel2") or item.get("phone2") or ""
+        ),
+        "tel_aciklama": (
+            item.get("tel_aciklama")
+            or item.get("yetkili_tel_aciklama")
+            or item.get("phone_kime")
+            or ""
+        ),
+        "tel2_aciklama": (
+            item.get("tel2_aciklama")
+            or item.get("yetkili_tel2_aciklama")
+            or item.get("phone2_kime")
+            or ""
+        ),
+        "email": (item.get("email") or item.get("yetkili_email") or ""),
+        "email_sirket": (item.get("email_sirket") or item.get("email_sirketi") or ""),
+        "tc_aciklama": (
+            item.get("tc_aciklama")
+            or item.get("yetkili_tc_aciklama")
+            or item.get("yetkili_tc_kime")
+            or ""
+        ),
+        "email_aciklama": (
+            item.get("email_aciklama")
+            or item.get("yetkili_email_aciklama")
+            or item.get("email_kime")
+            or ""
+        ),
+        "email_sirket_aciklama": (
+            item.get("email_sirket_aciklama")
+            or item.get("email_sirketi_aciklama")
+            or item.get("email_sirket_kime")
+            or ""
+        ),
+    }
+    for k in list(skaler_ham.keys()):
+        skaler_ham[k] = str(skaler_ham[k] or "").strip()
+
+    alan = {}
+    if raw_ad is None:
+        # Geriye uyum: skalerlerden tek elemanlı listeler
+        for tip in tips:
+            col, acik = _YETKILI_ALAN_SKALER[tip]
+            alan[tip] = [
+                {
+                    "deger": skaler_ham.get(col) or "",
+                    "kime_ait": skaler_ham.get(acik) or "",
+                    "sira": 1,
+                }
+            ]
+    else:
+        if not isinstance(raw_ad, dict):
+            return (
+                "Yetkili #%s: alan_degerleri bir nesne olmalıdır." % idx,
+                None,
+                None,
+            )
+        for tip in tips:
+            if tip in raw_ad:
+                err, lst = _yetkili_alan_listesi_normalize(
+                    raw_ad.get(tip), tip=tip, idx=idx
+                )
+                if err:
+                    return err, None, None
+                alan[tip] = lst
+            else:
+                col, acik = _YETKILI_ALAN_SKALER[tip]
+                alan[tip] = [
+                    {
+                        "deger": skaler_ham.get(col) or "",
+                        "kime_ait": skaler_ham.get(acik) or "",
+                        "sira": 1,
+                    }
+                ]
+
+    # TC: en az bir (tc[0] veya skaler) zorunlu; ek dolu TC'ler format kontrolü
+    tc_list = alan.get("tc") or []
+    tc0 = (tc_list[0].get("deger") if tc_list else "") or ""
+    if not str(tc0).strip():
+        tc0 = skaler_ham.get("tc_no") or ""
+    tc_err, tc_norm = _yetkili_tc_normalize_veya_hata(
+        tc0, uyruk_yabanci=uyruk_yabanci, idx=idx
+    )
+    if tc_err:
+        return tc_err, None, None
+    if not tc_list:
+        tc_list = [{"deger": tc_norm, "kime_ait": skaler_ham.get("tc_aciklama") or "", "sira": 1}]
+        alan["tc"] = tc_list
+    else:
+        tc_list[0]["deger"] = tc_norm
+        alan["tc"] = tc_list
+
+    for j, entry in enumerate(tc_list[1:], start=2):
+        d = (entry.get("deger") or "").strip()
+        if not d:
+            continue
+        e2, n2 = _yetkili_tc_normalize_veya_hata(
+            d, uyruk_yabanci=uyruk_yabanci, idx=idx
+        )
+        if e2:
+            return (
+                "Yetkili #%s: ek TC (#%s) geçersiz — %s"
+                % (idx, j, e2.split(": ", 1)[-1] if ": " in e2 else e2),
+                None,
+                None,
+            )
+        entry["deger"] = n2
+
+    # sira=1 → skaler mirror
+    skaler_patch = {}
+    for tip in tips:
+        col, acik = _YETKILI_ALAN_SKALER[tip]
+        first = (alan.get(tip) or [{"deger": "", "kime_ait": ""}])[0]
+        skaler_patch[col] = (first.get("deger") or "").strip()
+        skaler_patch[acik] = (first.get("kime_ait") or "").strip()
+
+    return None, alan, skaler_patch
+
+
 def _parse_yetkililer_payload(data, *, uyruk_yabanci=False):
     """İstek gövdesinden yetkililer listesini doğrula.
 
     Dönüş:
       (None, None) — alan yok / gönderilmedi → eski tek-yetkili yolu
       (err_str, None) — 400 mesajı
-      (None, list[dict]) — normalize edilmiş satırlar (sira 1..n, tek birincil)
+      (None, list[dict]) — normalize edilmiş satırlar (sira 1..n, tek birincil;
+        her satırda alan_degerleri nested + skaler mirror sira=1)
     """
     if not isinstance(data, dict) or "yetkililer" not in data:
         return None, None
@@ -182,13 +365,13 @@ def _parse_yetkililer_payload(data, *, uyruk_yabanci=False):
         ad = (item.get("ad_soyad") or item.get("yetkili_adsoyad") or item.get("yetkili_ad") or "").strip()
         if not ad:
             return "Yetkili #%s: Ad Soyad zorunludur." % i, None
-        tc_err, tc_norm = _yetkili_tc_normalize_veya_hata(
-            item.get("tc_no") or item.get("yetkili_tcno") or item.get("yetkili_tc"),
-            uyruk_yabanci=uyruk_yabanci,
-            idx=i,
+
+        ad_err, alan_degerleri, skaler_patch = _yetkili_alan_degerleri_parse(
+            item, idx=i, uyruk_yabanci=uyruk_yabanci
         )
-        if tc_err:
-            return tc_err, None
+        if ad_err:
+            return ad_err, None
+
         try:
             sira_raw = item.get("sira")
             sira_val = int(sira_raw) if sira_raw is not None and str(sira_raw).strip() != "" else i
@@ -200,48 +383,20 @@ def _parse_yetkililer_payload(data, *, uyruk_yabanci=False):
                 "sira": sira_val,
                 "birincil": birincil_flag,
                 "ad_soyad": ad,
-                "tc_no": tc_norm,
-                "tel": (item.get("tel") or item.get("yetkili_tel") or item.get("phone") or "").strip(),
-                "tel2": (item.get("tel2") or item.get("yetkili_tel2") or item.get("phone2") or "").strip(),
-                "tel_aciklama": (
-                    item.get("tel_aciklama")
-                    or item.get("yetkili_tel_aciklama")
-                    or item.get("phone_kime")
-                    or ""
-                ).strip(),
-                "tel2_aciklama": (
-                    item.get("tel2_aciklama")
-                    or item.get("yetkili_tel2_aciklama")
-                    or item.get("phone2_kime")
-                    or ""
-                ).strip(),
-                "email": (
-                    item.get("email") or item.get("yetkili_email") or ""
-                ).strip(),
-                "email_sirket": (
-                    item.get("email_sirket") or item.get("email_sirketi") or ""
-                ).strip(),
-                "tc_aciklama": (
-                    item.get("tc_aciklama")
-                    or item.get("yetkili_tc_aciklama")
-                    or item.get("yetkili_tc_kime")
-                    or ""
-                ).strip(),
-                "email_aciklama": (
-                    item.get("email_aciklama")
-                    or item.get("yetkili_email_aciklama")
-                    or item.get("email_kime")
-                    or ""
-                ).strip(),
-                "email_sirket_aciklama": (
-                    item.get("email_sirket_aciklama")
-                    or item.get("email_sirketi_aciklama")
-                    or item.get("email_sirket_kime")
-                    or ""
-                ).strip(),
+                "tc_no": skaler_patch.get("tc_no") or "",
+                "tel": skaler_patch.get("tel") or "",
+                "tel2": skaler_patch.get("tel2") or "",
+                "tel_aciklama": skaler_patch.get("tel_aciklama") or "",
+                "tel2_aciklama": skaler_patch.get("tel2_aciklama") or "",
+                "email": skaler_patch.get("email") or "",
+                "email_sirket": skaler_patch.get("email_sirket") or "",
+                "tc_aciklama": skaler_patch.get("tc_aciklama") or "",
+                "email_aciklama": skaler_patch.get("email_aciklama") or "",
+                "email_sirket_aciklama": skaler_patch.get("email_sirket_aciklama") or "",
                 "ikametgah": (
                     item.get("ikametgah") or item.get("yetkili_ikametgah") or item.get("ev_adres") or ""
                 ).strip(),
+                "alan_degerleri": alan_degerleri,
             }
         )
 
@@ -270,9 +425,14 @@ def _parse_yetkililer_payload(data, *, uyruk_yabanci=False):
 
 
 def _replace_musteri_yetkililer(musteri_id, yetkililer: list) -> None:
-    """musteri_yetkililer: musteri_id için sil+insert (tek transaction)."""
+    """musteri_yetkililer + alan_degerleri: musteri_id için sil+insert (tek transaction).
+
+    Çocuk satırlar CASCADE ile silinir; her yeni yetkili_id için alan_degerleri
+    yeniden INSERT edilir (replace-by-yetkili_id, aynı transaction).
+    """
     mid = int(musteri_id)
     ensure_musteri_yetkililer_table()
+    ensure_musteri_yetkili_alan_degerleri_table()
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute("DELETE FROM musteri_yetkililer WHERE musteri_id = %s", (mid,))
@@ -292,6 +452,7 @@ def _replace_musteri_yetkililer(musteri_id, yetkililer: list) -> None:
                     %s, %s, %s,
                     %s, NOW(), NOW()
                 )
+                RETURNING id
                 """,
                 (
                     mid,
@@ -311,6 +472,43 @@ def _replace_musteri_yetkililer(musteri_id, yetkililer: list) -> None:
                     (y.get("ikametgah") or "") or None,
                 ),
             )
+            row = cur.fetchone()
+            yid = int(row["id"] if isinstance(row, dict) else row[0])
+            alan = y.get("alan_degerleri")
+            if not isinstance(alan, dict):
+                # Güvenli yedek: skalerlerden tek satır
+                alan = {
+                    tip: [
+                        {
+                            "deger": (y.get(col) or "") or "",
+                            "kime_ait": (y.get(acik) or "") or "",
+                            "sira": 1,
+                        }
+                    ]
+                    for tip, (col, acik) in _YETKILI_ALAN_SKALER.items()
+                }
+            for tip in _YETKILI_ALAN_TIPLERI:
+                entries = alan.get(tip) or [
+                    {"deger": "", "kime_ait": "", "sira": 1}
+                ]
+                for e in entries:
+                    cur.execute(
+                        """
+                        INSERT INTO musteri_yetkili_alan_degerleri (
+                            yetkili_id, alan_tipi, deger, kime_ait, sira,
+                            created_at, updated_at
+                        ) VALUES (
+                            %s, %s, %s, %s, %s, NOW(), NOW()
+                        )
+                        """,
+                        (
+                            yid,
+                            tip,
+                            (e.get("deger") or "") or None,
+                            (e.get("kime_ait") or "") or None,
+                            int(e.get("sira") or 1),
+                        ),
+                    )
 
 
 def _uyruk_db_value_kyc(uyruk_yabanci: bool) -> str:
