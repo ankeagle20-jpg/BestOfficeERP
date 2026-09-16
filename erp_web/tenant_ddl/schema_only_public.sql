@@ -1966,6 +1966,49 @@ ALTER SEQUENCE public.musteri_kyc_id_seq OWNED BY public.musteri_kyc.id;
 
 
 --
+-- Name: musteri_yetkililer; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.musteri_yetkililer (
+    id integer NOT NULL,
+    musteri_id integer NOT NULL,
+    sira smallint DEFAULT 1 NOT NULL,
+    birincil boolean DEFAULT false NOT NULL,
+    ad_soyad text,
+    tc_no text,
+    tel text,
+    tel2 text,
+    tel_aciklama text,
+    tel2_aciklama text,
+    email text,
+    email_sirket text,
+    ikametgah text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: musteri_yetkililer_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.musteri_yetkililer_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: musteri_yetkililer_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.musteri_yetkililer_id_seq OWNED BY public.musteri_yetkililer.id;
+
+
+--
 -- Name: musteri_reel_donem_tutar; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -3122,6 +3165,13 @@ ALTER TABLE ONLY public.musteri_kyc ALTER COLUMN id SET DEFAULT nextval('public.
 
 
 --
+-- Name: musteri_yetkililer id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.musteri_yetkililer ALTER COLUMN id SET DEFAULT nextval('public.musteri_yetkililer_id_seq'::regclass);
+
+
+--
 -- Name: office_rentals id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -3719,6 +3769,14 @@ ALTER TABLE ONLY public.musteri_kyc
 
 
 --
+-- Name: musteri_yetkililer musteri_yetkililer_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.musteri_yetkililer
+    ADD CONSTRAINT musteri_yetkililer_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: musteri_reel_donem_tutar musteri_reel_donem_tutar_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4302,6 +4360,27 @@ CREATE INDEX idx_musteri_kyc_musteri_id_id_desc ON public.musteri_kyc USING btre
 
 
 --
+-- Name: idx_musteri_yetkililer_musteri_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_musteri_yetkililer_musteri_id ON public.musteri_yetkililer USING btree (musteri_id);
+
+
+--
+-- Name: idx_musteri_yetkililer_musteri_sira; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_musteri_yetkililer_musteri_sira ON public.musteri_yetkililer USING btree (musteri_id, sira);
+
+
+--
+-- Name: uq_musteri_yetkililer_birincil; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_musteri_yetkililer_birincil ON public.musteri_yetkililer USING btree (musteri_id) WHERE (birincil IS TRUE);
+
+
+--
 -- Name: idx_musteri_reel_donem_tutar_musteri_id; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -4651,6 +4730,14 @@ ALTER TABLE ONLY public.legal_cases
 
 ALTER TABLE ONLY public.musteri_aylik_grid_cache
     ADD CONSTRAINT musteri_aylik_grid_cache_musteri_id_fkey FOREIGN KEY (musteri_id) REFERENCES public.customers(id) ON DELETE CASCADE;
+
+
+--
+-- Name: musteri_yetkililer musteri_yetkililer_musteri_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.musteri_yetkililer
+    ADD CONSTRAINT musteri_yetkililer_musteri_id_fkey FOREIGN KEY (musteri_id) REFERENCES public.customers(id) ON DELETE CASCADE;
 
 
 --

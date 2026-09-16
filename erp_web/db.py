@@ -586,6 +586,7 @@ def init_schema():
     ensure_musteri_kyc_arama_kolonlari()
     ensure_musteri_kyc_hazir_ofis_oda_no()
     ensure_musteri_kyc_uyruk_column()
+    ensure_musteri_yetkililer_table()
     ensure_hizmet_turleri_table()
     ensure_duzenli_fatura_secenekleri_table()
     ensure_office_rentals()
@@ -1063,6 +1064,79 @@ def ensure_musteri_kyc_kira_banka():
         _run_ensure_ddl_once("musteri_kyc.kira_banka", _do)
     except Exception as e:
         print(f"musteri_kyc.kira_banka: {e}")
+
+
+def ensure_musteri_yetkililer_table():
+    """Çoklu yetkili kişileri (musteri_yetkililer) — kiracı search_path'inde.
+
+    Birinci yetkili geriye uyum için musteri_kyc.yetkili_* sütunlarında kalmaya
+    devam eder; ek yetkililer bu tabloda tutulur. Process-ömürlü once kapısı
+    ile şema başına yalnızca ilk istekte CREATE/ALTER çalışır.
+    """
+    def _do():
+        execute(
+            """
+            CREATE TABLE IF NOT EXISTS musteri_yetkililer (
+                id              SERIAL PRIMARY KEY,
+                musteri_id      INTEGER NOT NULL
+                    REFERENCES customers(id) ON DELETE CASCADE,
+                sira            SMALLINT NOT NULL DEFAULT 1,
+                birincil        BOOLEAN NOT NULL DEFAULT FALSE,
+                ad_soyad        TEXT,
+                tc_no           TEXT,
+                tel             TEXT,
+                tel2            TEXT,
+                tel_aciklama    TEXT,
+                tel2_aciklama   TEXT,
+                email           TEXT,
+                email_sirket    TEXT,
+                ikametgah       TEXT,
+                created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+        # Soft migration: eski kopyalarda eksik kolonlar
+        for col, typ in (
+            ("sira", "SMALLINT NOT NULL DEFAULT 1"),
+            ("birincil", "BOOLEAN NOT NULL DEFAULT FALSE"),
+            ("ad_soyad", "TEXT"),
+            ("tc_no", "TEXT"),
+            ("tel", "TEXT"),
+            ("tel2", "TEXT"),
+            ("tel_aciklama", "TEXT"),
+            ("tel2_aciklama", "TEXT"),
+            ("email", "TEXT"),
+            ("email_sirket", "TEXT"),
+            ("ikametgah", "TEXT"),
+            ("created_at", "TIMESTAMPTZ NOT NULL DEFAULT NOW()"),
+            ("updated_at", "TIMESTAMPTZ NOT NULL DEFAULT NOW()"),
+        ):
+            try:
+                execute(
+                    f"ALTER TABLE musteri_yetkililer ADD COLUMN IF NOT EXISTS {col} {typ}"
+                )
+            except Exception as e:
+                print(f"musteri_yetkililer.{col}: {e}")
+        execute(
+            "CREATE INDEX IF NOT EXISTS idx_musteri_yetkililer_musteri_id "
+            "ON musteri_yetkililer (musteri_id)"
+        )
+        execute(
+            "CREATE INDEX IF NOT EXISTS idx_musteri_yetkililer_musteri_sira "
+            "ON musteri_yetkililer (musteri_id, sira)"
+        )
+        # Müşteri başına en fazla bir birincil yetkili
+        execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_musteri_yetkililer_birincil "
+            "ON musteri_yetkililer (musteri_id) "
+            "WHERE birincil IS TRUE"
+        )
+
+    try:
+        _run_ensure_ddl_once("musteri_yetkililer", _do)
+    except Exception as e:
+        print(f"musteri_yetkililer: {e}")
 
 
 _musteri_kyc_latest_idx_done = False
