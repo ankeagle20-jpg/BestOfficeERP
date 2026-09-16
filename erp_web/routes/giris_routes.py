@@ -36,6 +36,7 @@ from db import (
     ensure_musteri_kyc_uyruk_column,
     ensure_musteri_kyc_hazir_ofis_oda_no,
     ensure_musteri_kyc_kira_banka,
+    ensure_musteri_yetkililer_table,
     ensure_customers_bizim_hesap,
     ensure_customers_grup2_secimleri,
     ensure_customers_calisma_sekli,
@@ -3872,6 +3873,55 @@ def _musteri_serialize_val(v):
     return str(v).strip() if v else ""
 
 
+def _musteri_yetkililer_listesi(musteri_id) -> list:
+    """musteri_yetkililer satırları — sira ASC; boşsa [].
+
+    Düz yetkili_ad / yetkili_tc vb. alanlarına dokunmaz; yalnızca yeni
+    «yetkililer» dizisi için kullanılır (A3 okuma).
+    """
+    try:
+        mid = int(musteri_id)
+    except (TypeError, ValueError):
+        return []
+    if mid <= 0:
+        return []
+    try:
+        ensure_musteri_yetkililer_table()
+        rows = fetch_all(
+            """
+            SELECT sira, birincil, ad_soyad, tc_no, tel, tel2,
+                   tel_aciklama, tel2_aciklama, email, email_sirket
+            FROM musteri_yetkililer
+            WHERE musteri_id = %s
+            ORDER BY sira ASC NULLS LAST, id ASC
+            """,
+            (mid,),
+        ) or []
+    except Exception:
+        return []
+    out = []
+    for r in rows:
+        try:
+            sira_val = int(r.get("sira") or 0)
+        except (TypeError, ValueError):
+            sira_val = 0
+        out.append(
+            {
+                "sira": sira_val,
+                "birincil": bool(r.get("birincil")),
+                "ad_soyad": _musteri_serialize_val(r.get("ad_soyad")),
+                "tc_no": _musteri_serialize_val(r.get("tc_no")),
+                "tel": _musteri_serialize_val(r.get("tel")),
+                "tel2": _musteri_serialize_val(r.get("tel2")),
+                "tel_aciklama": _musteri_serialize_val(r.get("tel_aciklama")),
+                "tel2_aciklama": _musteri_serialize_val(r.get("tel2_aciklama")),
+                "email": _musteri_serialize_val(r.get("email")),
+                "email_sirket": _musteri_serialize_val(r.get("email_sirket")),
+            }
+        )
+    return out
+
+
 def _parse_kapanis_tarihi(s):
     """Formdan gelen kapanış tarihi (YYYY-MM-DD veya GG.AA.YYYY)."""
     if not s:
@@ -5277,6 +5327,12 @@ def api_musteri_detay(mid):
     g2_list = list(dict.fromkeys(g2_list))
     out["grup2_secimleri"] = g2_list
     out["bizim_hesap"] = "bizim_hesap" in g2_list
+
+    # A3: çoklu yetkili listesi (mevcut düz yetkili_* alanları değişmez)
+    try:
+        out["yetkililer"] = _musteri_yetkililer_listesi(mid)
+    except Exception:
+        out["yetkililer"] = []
 
     payload = {"ok": True, "musteri": out}
     if not force:
