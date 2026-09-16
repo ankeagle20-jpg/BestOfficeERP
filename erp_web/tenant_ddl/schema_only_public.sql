@@ -2024,7 +2024,7 @@ CREATE TABLE public.musteri_yetkili_alan_degerleri (
     sira smallint DEFAULT 1 NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT musteri_yetkili_alan_degerleri_alan_tipi_check CHECK ((alan_tipi = ANY (ARRAY['tc'::text, 'tel'::text, 'tel2'::text, 'email'::text, 'email_sirket'::text])))
+    CONSTRAINT musteri_yetkili_alan_degerleri_alan_tipi_check CHECK ((alan_tipi = ANY (ARRAY['ad_soyad'::text, 'tc'::text, 'tel'::text, 'tel2'::text, 'email'::text, 'email_sirket'::text])))
 );
 
 

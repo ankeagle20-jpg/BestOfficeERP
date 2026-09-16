@@ -1150,18 +1150,24 @@ def ensure_musteri_yetkili_alan_degerleri_table():
     """Yetkili kişi başına çoklu alan değerleri (musteri_yetkili_alan_degerleri).
 
     musteri_yetkililer skaler sütunlarına dokunulmaz; bu tablo alan_tipi başına
-    birden fazla değer (tc/tel/tel2/email/email_sirket) tutar. Process-ömürlü
-    once kapısı ile şema başına yalnızca ilk istekte CREATE/ALTER çalışır.
+    birden fazla değer (ad_soyad/tc/tel/tel2/email/email_sirket) tutar.
+    Process-ömürlü once kapısı ile şema başına yalnızca ilk istekte
+    CREATE/ALTER çalışır. v2: CHECK'e ad_soyad eklendi (DROP+ADD soft mig).
     """
+    _ALAN_TIPI_CHECK = (
+        "alan_tipi IN ("
+        "'ad_soyad', 'tc', 'tel', 'tel2', 'email', 'email_sirket')"
+    )
+
     def _do():
         execute(
-            """
+            f"""
             CREATE TABLE IF NOT EXISTS musteri_yetkili_alan_degerleri (
                 id              SERIAL PRIMARY KEY,
                 yetkili_id      INTEGER NOT NULL
                     REFERENCES musteri_yetkililer(id) ON DELETE CASCADE,
                 alan_tipi       TEXT NOT NULL
-                    CHECK (alan_tipi IN ('tc', 'tel', 'tel2', 'email', 'email_sirket')),
+                    CHECK ({_ALAN_TIPI_CHECK}),
                 deger           TEXT,
                 kime_ait        TEXT,
                 sira            SMALLINT NOT NULL DEFAULT 1,
@@ -1187,20 +1193,22 @@ def ensure_musteri_yetkili_alan_degerleri_table():
                 )
             except Exception as e:
                 print(f"musteri_yetkili_alan_degerleri.{col}: {e}")
-        # Soft migration: CHECK constraint (IF NOT EXISTS yok → DO bloğu)
+        # Soft migration: CHECK — ad_soyad dahil (DROP+ADD; eski C1 CHECK'i genişlet)
         try:
             execute(
-                """
+                f"""
                 DO $$
                 BEGIN
-                    IF NOT EXISTS (
+                    IF EXISTS (
                         SELECT 1 FROM pg_constraint
                         WHERE conname = 'musteri_yetkili_alan_degerleri_alan_tipi_check'
                     ) THEN
                         ALTER TABLE musteri_yetkili_alan_degerleri
-                            ADD CONSTRAINT musteri_yetkili_alan_degerleri_alan_tipi_check
-                            CHECK (alan_tipi IN ('tc', 'tel', 'tel2', 'email', 'email_sirket'));
+                            DROP CONSTRAINT musteri_yetkili_alan_degerleri_alan_tipi_check;
                     END IF;
+                    ALTER TABLE musteri_yetkili_alan_degerleri
+                        ADD CONSTRAINT musteri_yetkili_alan_degerleri_alan_tipi_check
+                        CHECK ({_ALAN_TIPI_CHECK});
                 END $$
                 """
             )
@@ -1213,7 +1221,8 @@ def ensure_musteri_yetkili_alan_degerleri_table():
         )
 
     try:
-        _run_ensure_ddl_once("musteri_yetkili_alan_degerleri", _do)
+        # v2: once anahtarı yenilendi → mevcut process'ler de CHECK'i genişletsin
+        _run_ensure_ddl_once("musteri_yetkili_alan_degerleri.v2_ad_soyad", _do)
     except Exception as e:
         print(f"musteri_yetkili_alan_degerleri: {e}")
 

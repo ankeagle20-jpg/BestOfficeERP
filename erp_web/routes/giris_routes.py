@@ -3877,6 +3877,7 @@ def _musteri_serialize_val(v):
 def _musteri_yetkili_alan_degerleri_bos() -> dict:
     """C3 nested listeler — her alan tipi için boş dizi şablonu."""
     return {
+        "ad_soyad": [],
         "tc": [],
         "tel": [],
         "tel2": [],
@@ -3892,8 +3893,8 @@ def _musteri_yetkililer_listesi(musteri_id) -> list:
     «yetkililer» dizisi için kullanılır (A3 okuma).
 
     C3: her kişiye ``alan_degerleri`` nested listeleri eklenir
-    ({tc,tel,tel2,email,email_sirket} → [{deger, kime_ait, sira}, ...]).
-    Düz skaler alanlar (tc_no, tel, email, …) aynen kalır — eski
+    ({ad_soyad,tc,tel,tel2,email,email_sirket} → [{deger, kime_ait, sira}, ...]).
+    Düz skaler alanlar (ad_soyad, tc_no, tel, email, …) aynen kalır — eski
     frontend kırılmaz (nested anahtarlar skalerlerle çakışmaz).
     """
     try:

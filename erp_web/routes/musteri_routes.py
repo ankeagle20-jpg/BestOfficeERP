@@ -153,8 +153,11 @@ def _yetkili_tc_normalize_veya_hata(tc_raw, *, uyruk_yabanci=False, idx=None):
 
 
 # C4: nested alan_degerleri ↔ skaler mirror (sira=1)
-_YETKILI_ALAN_TIPLERI = ("tc", "tel", "tel2", "email", "email_sirket")
+# ad_soyad: deger → musteri_yetkililer.ad_soyad; kime yalnızca çocuk tabloda
+# (parent'ta ad_soyad_aciklama kolonu yok — skaler_patch anahtarı yazılmaz).
+_YETKILI_ALAN_TIPLERI = ("ad_soyad", "tc", "tel", "tel2", "email", "email_sirket")
 _YETKILI_ALAN_SKALER = {
+    "ad_soyad": ("ad_soyad", "ad_soyad_aciklama"),
     "tc": ("tc_no", "tc_aciklama"),
     "tel": ("tel", "tel_aciklama"),
     "tel2": ("tel2", "tel2_aciklama"),
@@ -209,6 +212,18 @@ def _yetkili_alan_degerleri_parse(item: dict, *, idx: int, uyruk_yabanci=False):
     raw_ad = item.get("alan_degerleri")
     # Skaler ham değerler (geriye uyum / eksik tip doldurma)
     skaler_ham = {
+        "ad_soyad": (
+            item.get("ad_soyad")
+            or item.get("yetkili_adsoyad")
+            or item.get("yetkili_ad")
+            or ""
+        ),
+        "ad_soyad_aciklama": (
+            item.get("ad_soyad_aciklama")
+            or item.get("yetkili_ad_aciklama")
+            or item.get("yetkili_ad_kime")
+            or ""
+        ),
         "tc_no": (
             item.get("tc_no") or item.get("yetkili_tcno") or item.get("yetkili_tc") or ""
         ),
@@ -362,15 +377,23 @@ def _parse_yetkililer_payload(data, *, uyruk_yabanci=False):
     for i, item in enumerate(raw, start=1):
         if not isinstance(item, dict):
             return "Yetkili #%s: geçersiz kayıt." % i, None
-        ad = (item.get("ad_soyad") or item.get("yetkili_adsoyad") or item.get("yetkili_ad") or "").strip()
-        if not ad:
-            return "Yetkili #%s: Ad Soyad zorunludur." % i, None
-
         ad_err, alan_degerleri, skaler_patch = _yetkili_alan_degerleri_parse(
             item, idx=i, uyruk_yabanci=uyruk_yabanci
         )
         if ad_err:
             return ad_err, None
+
+        # sira=1 ad_soyad (nested mirror) öncelikli; yoksa düz skaler
+        ad = (skaler_patch.get("ad_soyad") or "").strip()
+        if not ad:
+            ad = (
+                item.get("ad_soyad")
+                or item.get("yetkili_adsoyad")
+                or item.get("yetkili_ad")
+                or ""
+            ).strip()
+        if not ad:
+            return "Yetkili #%s: Ad Soyad zorunludur." % i, None
 
         try:
             sira_raw = item.get("sira")

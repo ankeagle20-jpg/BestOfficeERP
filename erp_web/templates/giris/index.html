@@ -1166,11 +1166,19 @@
     margin-bottom: 0;
     padding-bottom: 0;
 }
+.yetkili-blok-baslik-satir {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 8px 0;
+}
 .yetkili-blok-baslik {
     color: #90caf9;
     font-size: 12px;
     font-weight: 600;
-    margin: 0 0 8px 0;
+    margin: 0;
+    flex: 0 1 auto;
 }
 .yetkili-aksiyon-hucre {
     display: flex;
@@ -2954,10 +2962,20 @@
                     <h4>Yetkili Bilgileri</h4>
                     <div id="yetkililer-listesi">
                         <div class="yetkili-blok" data-yetkili-idx="0">
-                            <div class="yetkili-blok-baslik">1. Yetkili</div>
+                            <div class="yetkili-blok-baslik-satir">
+                                <div class="yetkili-blok-baslik">1. Yetkili</div>
+                                <button type="button" class="yetkili-btn-ekle" title="Yetkili ekle" aria-label="Yetkili ekle" onclick="girisYetkiliBlokEkle(this)">+</button>
+                                <button type="button" class="yetkili-btn-kaldir" title="Yetkili kaldır" aria-label="Yetkili kaldır" onclick="girisYetkiliBlokKaldir(this)" style="display:none">−</button>
+                            </div>
                             <div class="form-grid">
                                 <label class="required">Yetkili Ad Soyad</label>
-                                <input type="text" id="yetkili_ad" class="yetkili-f-ad" required onchange="hesaplaYuzde()">
+                                <div class="yetkili-alan-grup" data-alan-tipi="ad_soyad">
+                                    <div class="yetkili-alan-satir giris-tel-ve-kime" data-sira="1">
+                                        <input type="text" id="yetkili_ad" class="yetkili-f-ad" required onchange="hesaplaYuzde()" style="flex:1 1 180px;min-width:140px;">
+                                        <input type="text" id="yetkili_ad_kime" class="yetkili-f-ad-aciklama" placeholder="Kime ait" maxlength="120" autocomplete="off" onchange="hesaplaYuzde()" style="flex:1 1 160px;min-width:120px;">
+                                        <button type="button" class="yetkili-alan-btn-ekle" title="Ad Soyad ekle" aria-label="Ad Soyad ekle" onclick="girisYetkiliAlanSatirEkle(this)">+</button>
+                                    </div>
+                                </div>
                                 
                                 <label class="required">Yetkili T.C. Kimlik No</label>
                                 <div class="yetkili-alan-grup" data-alan-tipi="tc">
@@ -2995,16 +3013,13 @@
                                     </div>
                                 </div>
                                 
-                                <label>E-posta (şirket)</label>
-                                <div class="yetkili-aksiyon-hucre">
-                                    <div class="yetkili-alan-grup" data-alan-tipi="email_sirket" style="flex:1 1 auto;min-width:0;">
-                                        <div class="yetkili-alan-satir" data-sira="1">
-                                            <input type="email" id="email_sirket" class="yetkili-f-email-sirket" onchange="hesaplaYuzde()" style="flex:1 1 160px;min-width:120px;">
-                                            <input type="text" id="email_sirket_kime" class="yetkili-f-email-sirket-aciklama" placeholder="Kime ait" maxlength="120" autocomplete="off" onchange="hesaplaYuzde()" style="flex:1 1 140px;min-width:110px;">
-                                            <button type="button" class="yetkili-alan-btn-ekle" title="Şirket e-posta ekle" aria-label="Şirket e-posta ekle" onclick="girisYetkiliAlanSatirEkle(this)">+</button>
-                                        </div>
+                                <label>E-posta (Şirket)</label>
+                                <div class="yetkili-alan-grup" data-alan-tipi="email_sirket">
+                                    <div class="yetkili-alan-satir giris-tel-ve-kime" data-sira="1">
+                                        <input type="email" id="email_sirket" class="yetkili-f-email-sirket" onchange="hesaplaYuzde()" style="flex:1 1 160px;min-width:120px;">
+                                        <input type="text" id="email_sirket_kime" class="yetkili-f-email-sirket-aciklama" placeholder="Kime ait" maxlength="120" autocomplete="off" onchange="hesaplaYuzde()" style="flex:1 1 140px;min-width:110px;">
+                                        <button type="button" class="yetkili-alan-btn-ekle" title="Şirket e-posta ekle" aria-label="Şirket e-posta ekle" onclick="girisYetkiliAlanSatirEkle(this)">+</button>
                                     </div>
-                                    <button type="button" class="yetkili-btn-ekle" title="Yetkili ekle" aria-label="Yetkili ekle" onclick="girisYetkiliBlokEkle(this)">+</button>
                                 </div>
                             </div>
                         </div>
@@ -27015,8 +27030,9 @@ function girisYetkiliUyrukAttrsUygula(blok) {
 }
 
 /* ========== C5: kişi içi alan değeri satırları (+/−) ========== */
-var GIRIS_YETKILI_ALAN_TIPLERI = ['tc', 'tel', 'tel2', 'email', 'email_sirket'];
+var GIRIS_YETKILI_ALAN_TIPLERI = ['ad_soyad', 'tc', 'tel', 'tel2', 'email', 'email_sirket'];
 var GIRIS_YETKILI_ALAN_CLS = {
+    ad_soyad: { deger: 'yetkili-f-ad', kime: 'yetkili-f-ad-aciklama', type: 'text' },
     tc: { deger: 'yetkili-f-tc', kime: 'yetkili-f-tc-aciklama', type: 'text' },
     tel: { deger: 'yetkili-f-tel', kime: 'yetkili-f-tel-aciklama', type: 'text' },
     tel2: { deger: 'yetkili-f-tel2', kime: 'yetkili-f-tel2-aciklama', type: 'text' },
@@ -27051,7 +27067,7 @@ function girisYetkiliAlanSatirOlustur(tip, data, isPrimary) {
         ? 'flex:0 1 160px;min-width:110px;max-width:200px;'
         : (tip === 'tel' || tip === 'tel2')
             ? 'flex:0 1 120px;min-width:90px;max-width:160px;'
-            : (tip === 'email')
+            : (tip === 'email' || tip === 'ad_soyad')
                 ? 'flex:1 1 180px;min-width:140px;'
                 : 'flex:1 1 160px;min-width:120px;';
     var kimeStyle = (tip === 'email_sirket')
@@ -27156,6 +27172,7 @@ function girisYetkiliAlanDegerleriYukle(blok, alanDegerleri, fallbackScalars) {
         var list = (ad && Array.isArray(ad[tip])) ? ad[tip].slice() : null;
         if (!list || !list.length) {
             var skalerMap = {
+                ad_soyad: { deger: fb.ad_soyad, kime_ait: fb.ad_soyad_aciklama },
                 tc: { deger: fb.tc_no, kime_ait: fb.tc_aciklama },
                 tel: { deger: fb.tel, kime_ait: fb.tel_aciklama },
                 tel2: { deger: fb.tel2, kime_ait: fb.tel2_aciklama },
@@ -27210,10 +27227,19 @@ function girisYetkiliBlokOlustur(data, idx) {
     wrap.className = 'yetkili-blok';
     wrap.setAttribute('data-yetkili-idx', String(n - 1));
     wrap.innerHTML =
+        '<div class="yetkili-blok-baslik-satir">' +
         '<div class="yetkili-blok-baslik">' + n + '. Yetkili</div>' +
+        '<button type="button" class="yetkili-btn-ekle" title="Yetkili ekle" aria-label="Yetkili ekle" onclick="girisYetkiliBlokEkle(this)">+</button>' +
+        '<button type="button" class="yetkili-btn-kaldir" title="Yetkili kaldır" aria-label="Yetkili kaldır" onclick="girisYetkiliBlokKaldir(this)">−</button>' +
+        '</div>' +
         '<div class="form-grid">' +
         '<label class="required">Yetkili Ad Soyad</label>' +
-        '<input type="text" class="yetkili-f-ad" onchange="hesaplaYuzde()">' +
+        '<div class="yetkili-alan-grup" data-alan-tipi="ad_soyad">' +
+        '<div class="yetkili-alan-satir giris-tel-ve-kime" data-sira="1">' +
+        '<input type="text" class="yetkili-f-ad" onchange="hesaplaYuzde()" style="flex:1 1 180px;min-width:140px;">' +
+        '<input type="text" class="yetkili-f-ad-aciklama" placeholder="Kime ait" maxlength="120" autocomplete="off" onchange="hesaplaYuzde()" style="flex:1 1 160px;min-width:120px;">' +
+        '<button type="button" class="yetkili-alan-btn-ekle" title="Ad Soyad ekle" aria-label="Ad Soyad ekle" onclick="girisYetkiliAlanSatirEkle(this)">+</button>' +
+        '</div></div>' +
         '<label class="required">Yetkili T.C. Kimlik No</label>' +
         '<div class="yetkili-alan-grup" data-alan-tipi="tc">' +
         '<div class="yetkili-alan-satir giris-tel-ve-kime" data-sira="1">' +
@@ -27242,20 +27268,17 @@ function girisYetkiliBlokOlustur(data, idx) {
         '<input type="text" class="yetkili-f-email-aciklama" placeholder="Kime ait" maxlength="120" autocomplete="off" onchange="hesaplaYuzde()" style="flex:1 1 160px;min-width:120px;">' +
         '<button type="button" class="yetkili-alan-btn-ekle" title="E-posta ekle" aria-label="E-posta ekle" onclick="girisYetkiliAlanSatirEkle(this)">+</button>' +
         '</div></div>' +
-        '<label>E-posta (şirket)</label>' +
-        '<div class="yetkili-aksiyon-hucre">' +
-        '<div class="yetkili-alan-grup" data-alan-tipi="email_sirket" style="flex:1 1 auto;min-width:0;">' +
-        '<div class="yetkili-alan-satir" data-sira="1">' +
+        '<label>E-posta (Şirket)</label>' +
+        '<div class="yetkili-alan-grup" data-alan-tipi="email_sirket">' +
+        '<div class="yetkili-alan-satir giris-tel-ve-kime" data-sira="1">' +
         '<input type="email" class="yetkili-f-email-sirket" onchange="hesaplaYuzde()" style="flex:1 1 160px;min-width:120px;">' +
         '<input type="text" class="yetkili-f-email-sirket-aciklama" placeholder="Kime ait" maxlength="120" autocomplete="off" onchange="hesaplaYuzde()" style="flex:1 1 140px;min-width:110px;">' +
         '<button type="button" class="yetkili-alan-btn-ekle" title="Şirket e-posta ekle" aria-label="Şirket e-posta ekle" onclick="girisYetkiliAlanSatirEkle(this)">+</button>' +
         '</div></div>' +
-        '<button type="button" class="yetkili-btn-ekle" title="Yetkili ekle" aria-label="Yetkili ekle" onclick="girisYetkiliBlokEkle(this)">+</button>' +
-        '<button type="button" class="yetkili-btn-kaldir" title="Yetkili kaldır" aria-label="Yetkili kaldır" onclick="girisYetkiliBlokKaldir(this)">−</button>' +
-        '</div>' +
         '</div>';
-    girisYetkiliBlokFieldSet(wrap, 'yetkili-f-ad', d.ad_soyad != null ? d.ad_soyad : d.yetkili_adsoyad);
     var scalars = {
+        ad_soyad: d.ad_soyad != null ? d.ad_soyad : d.yetkili_adsoyad,
+        ad_soyad_aciklama: d.ad_soyad_aciklama || '',
         tc_no: d.tc_no != null ? d.tc_no : d.yetkili_tcno,
         tc_aciklama: d.tc_aciklama != null ? d.tc_aciklama : d.yetkili_tc_aciklama,
         tel: d.tel != null ? d.tel : d.yetkili_tel,
@@ -27326,6 +27349,7 @@ function girisYetkililerTopla() {
             email_sirket_aciklama: String((document.getElementById('email_sirket_kime') || {}).value || '').trim()
         };
         legacy.alan_degerleri = {
+            ad_soyad: [{ deger: legacy.ad_soyad, kime_ait: '', sira: 1 }],
             tc: [{ deger: legacy.tc_no, kime_ait: legacy.tc_aciklama, sira: 1 }],
             tel: [{ deger: legacy.tel, kime_ait: legacy.tel_aciklama, sira: 1 }],
             tel2: [{ deger: legacy.tel2, kime_ait: legacy.tel2_aciklama, sira: 1 }],
@@ -27337,6 +27361,7 @@ function girisYetkililerTopla() {
     }
     blocks.forEach(function (blok, i) {
         var alan = girisYetkiliAlanDegerleriTopla(blok);
+        var ad0 = (alan.ad_soyad && alan.ad_soyad[0]) ? alan.ad_soyad[0] : { deger: '', kime_ait: '' };
         var tc0 = (alan.tc && alan.tc[0]) ? alan.tc[0] : { deger: '', kime_ait: '' };
         var tel0 = (alan.tel && alan.tel[0]) ? alan.tel[0] : { deger: '', kime_ait: '' };
         var tel20 = (alan.tel2 && alan.tel2[0]) ? alan.tel2[0] : { deger: '', kime_ait: '' };
@@ -27345,7 +27370,7 @@ function girisYetkililerTopla() {
         out.push({
             sira: i + 1,
             birincil: i === 0,
-            ad_soyad: girisYetkiliBlokFieldVal(blok, 'yetkili-f-ad'),
+            ad_soyad: ad0.deger || girisYetkiliBlokFieldVal(blok, 'yetkili-f-ad'),
             tc_no: tc0.deger || '',
             tc_aciklama: tc0.kime_ait || '',
             tel: tel0.deger || '',
@@ -27399,6 +27424,7 @@ function girisYetkililerUIYukle(m) {
         if (y && typeof y === 'object') {
             return {
                 ad_soyad: y.ad_soyad != null ? y.ad_soyad : y.yetkili_adsoyad,
+                ad_soyad_aciklama: y.ad_soyad_aciklama || '',
                 tc_no: y.tc_no != null ? y.tc_no : y.yetkili_tcno,
                 tc_aciklama: y.tc_aciklama != null ? y.tc_aciklama : y.yetkili_tc_aciklama,
                 tel: y.tel != null ? y.tel : y.yetkili_tel,
@@ -27417,7 +27443,6 @@ function girisYetkililerUIYukle(m) {
 
     if (arr.length) {
         var r0 = rowFrom(arr[0], null);
-        girisYetkiliBlokFieldSet(first, 'yetkili-f-ad', r0.ad_soyad);
         girisYetkiliAlanDegerleriYukle(first, r0.alan_degerleri, r0);
         for (var i = 1; i < arr.length; i++) {
             girisYetkiliBlokEkle(null, rowFrom(arr[i], null));
