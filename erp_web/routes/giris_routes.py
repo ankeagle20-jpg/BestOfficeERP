@@ -37,6 +37,7 @@ from db import (
     ensure_musteri_kyc_hazir_ofis_oda_no,
     ensure_musteri_kyc_kira_banka,
     ensure_musteri_yetkililer_table,
+    ensure_musteri_yetkili_alan_degerleri_table,
     ensure_customers_bizim_hesap,
     ensure_customers_grup2_secimleri,
     ensure_customers_calisma_sekli,
@@ -3873,11 +3874,27 @@ def _musteri_serialize_val(v):
     return str(v).strip() if v else ""
 
 
+def _musteri_yetkili_alan_degerleri_bos() -> dict:
+    """C3 nested listeler — her alan tipi için boş dizi şablonu."""
+    return {
+        "tc": [],
+        "tel": [],
+        "tel2": [],
+        "email": [],
+        "email_sirket": [],
+    }
+
+
 def _musteri_yetkililer_listesi(musteri_id) -> list:
     """musteri_yetkililer satırları — sira ASC; boşsa [].
 
     Düz yetkili_ad / yetkili_tc vb. alanlarına dokunmaz; yalnızca yeni
     «yetkililer» dizisi için kullanılır (A3 okuma).
+
+    C3: her kişiye ``alan_degerleri`` nested listeleri eklenir
+    ({tc,tel,tel2,email,email_sirket} → [{deger, kime_ait, sira}, ...]).
+    Düz skaler alanlar (tc_no, tel, email, …) aynen kalır — eski
+    frontend kırılmaz (nested anahtarlar skalerlerle çakışmaz).
     """
     try:
         mid = int(musteri_id)
@@ -3887,9 +3904,10 @@ def _musteri_yetkililer_listesi(musteri_id) -> list:
         return []
     try:
         ensure_musteri_yetkililer_table()
+        ensure_musteri_yetkili_alan_degerleri_table()
         rows = fetch_all(
             """
-            SELECT sira, birincil, ad_soyad, tc_no, tel, tel2,
+            SELECT id, sira, birincil, ad_soyad, tc_no, tel, tel2,
                    tel_aciklama, tel2_aciklama, email, email_sirket,
                    tc_aciklama, email_aciklama, email_sirket_aciklama
             FROM musteri_yetkililer
@@ -3900,31 +3918,86 @@ def _musteri_yetkililer_listesi(musteri_id) -> list:
         ) or []
     except Exception:
         return []
+
+    yet_ids = []
+    for r in rows:
+        try:
+            yet_ids.append(int(r.get("id")))
+        except (TypeError, ValueError):
+            continue
+
+    nested_by_yet = {yid: _musteri_yetkili_alan_degerleri_bos() for yid in yet_ids}
+    if yet_ids:
+        try:
+            deg_rows = fetch_all(
+                """
+                SELECT yetkili_id, alan_tipi, deger, kime_ait, sira
+                FROM musteri_yetkili_alan_degerleri
+                WHERE yetkili_id = ANY(%s)
+                ORDER BY yetkili_id ASC, alan_tipi ASC,
+                         sira ASC NULLS LAST, id ASC
+                """,
+                (yet_ids,),
+            ) or []
+        except Exception:
+            deg_rows = []
+        for d in deg_rows:
+            try:
+                yid = int(d.get("yetkili_id"))
+            except (TypeError, ValueError):
+                continue
+            tip = str(d.get("alan_tipi") or "").strip()
+            bucket = nested_by_yet.get(yid)
+            if not bucket or tip not in bucket:
+                continue
+            try:
+                tip_sira = int(d.get("sira") or 0)
+            except (TypeError, ValueError):
+                tip_sira = 0
+            bucket[tip].append(
+                {
+                    "deger": _musteri_serialize_val(d.get("deger")),
+                    "kime_ait": _musteri_serialize_val(d.get("kime_ait")),
+                    "sira": tip_sira,
+                }
+            )
+
     out = []
     for r in rows:
         try:
             sira_val = int(r.get("sira") or 0)
         except (TypeError, ValueError):
             sira_val = 0
-        out.append(
-            {
-                "sira": sira_val,
-                "birincil": bool(r.get("birincil")),
-                "ad_soyad": _musteri_serialize_val(r.get("ad_soyad")),
-                "tc_no": _musteri_serialize_val(r.get("tc_no")),
-                "tel": _musteri_serialize_val(r.get("tel")),
-                "tel2": _musteri_serialize_val(r.get("tel2")),
-                "tel_aciklama": _musteri_serialize_val(r.get("tel_aciklama")),
-                "tel2_aciklama": _musteri_serialize_val(r.get("tel2_aciklama")),
-                "email": _musteri_serialize_val(r.get("email")),
-                "email_sirket": _musteri_serialize_val(r.get("email_sirket")),
-                "tc_aciklama": _musteri_serialize_val(r.get("tc_aciklama")),
-                "email_aciklama": _musteri_serialize_val(r.get("email_aciklama")),
-                "email_sirket_aciklama": _musteri_serialize_val(
-                    r.get("email_sirket_aciklama")
-                ),
-            }
-        )
+        try:
+            yid = int(r.get("id"))
+        except (TypeError, ValueError):
+            yid = None
+        item = {
+            "sira": sira_val,
+            "birincil": bool(r.get("birincil")),
+            "ad_soyad": _musteri_serialize_val(r.get("ad_soyad")),
+            "tc_no": _musteri_serialize_val(r.get("tc_no")),
+            "tel": _musteri_serialize_val(r.get("tel")),
+            "tel2": _musteri_serialize_val(r.get("tel2")),
+            "tel_aciklama": _musteri_serialize_val(r.get("tel_aciklama")),
+            "tel2_aciklama": _musteri_serialize_val(r.get("tel2_aciklama")),
+            "email": _musteri_serialize_val(r.get("email")),
+            "email_sirket": _musteri_serialize_val(r.get("email_sirket")),
+            "tc_aciklama": _musteri_serialize_val(r.get("tc_aciklama")),
+            "email_aciklama": _musteri_serialize_val(r.get("email_aciklama")),
+            "email_sirket_aciklama": _musteri_serialize_val(
+                r.get("email_sirket_aciklama")
+            ),
+            # Nested listeler ayrı anahtarda: plan formatı (tc/tel/…) tel/email
+            # skaler string anahtarlarıyla ÇAKIŞMASIN diye (eski FE kırılmaz).
+            "alan_degerleri": (
+                nested_by_yet.get(yid)
+                if yid is not None
+                else None
+            )
+            or _musteri_yetkili_alan_degerleri_bos(),
+        }
+        out.append(item)
     return out
 
 
