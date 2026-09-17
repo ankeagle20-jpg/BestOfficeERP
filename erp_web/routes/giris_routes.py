@@ -2582,6 +2582,58 @@ def _aylik_grid_cache_skip_refresh_enabled() -> bool:
         return False
 
 
+def _aylik_grid_debug_skip_wanted() -> bool:
+    """GEÇİCİ tanı: ?debug_skip=1 ile grid yanıtına skip teşhisi ekle."""
+    try:
+        return str(request.args.get("debug_skip") or "").lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        )
+    except Exception:
+        return False
+
+
+def _aylik_grid_debug_skip_attach(body: dict, **info) -> dict:
+    if not _aylik_grid_debug_skip_wanted() or not isinstance(body, dict):
+        return body
+    out = dict(body)
+    dbg = {
+        "flag_enabled": bool(_aylik_grid_cache_skip_refresh_enabled()),
+        "env_raw": os.getenv("GRID_CACHE_SKIP_REFRESH"),
+    }
+    dbg.update(info)
+    out["debug_skip"] = dbg
+    return out
+
+
+def _aylik_grid_skip_info_public(skip_info) -> dict:
+    """should_skip / shadow bilgisini JSON-safe özetle."""
+    if not isinstance(skip_info, dict):
+        return {}
+    keys = (
+        "would_skip",
+        "reason",
+        "skip_reason",
+        "stored_source",
+        "r_known",
+        "p_known",
+        "t_same",
+        "r_same",
+        "p_same",
+        "k_same",
+        "live",
+        "stored",
+        "hit_kind",
+    )
+    out = {}
+    for k in keys:
+        if k in skip_info and skip_info.get(k) is not None:
+            out[k] = skip_info.get(k)
+    return out
+
+
 def _aylik_grid_freshness_should_skip(musteri_id, payload) -> tuple[bool, dict]:
     """
     Gerçek atlama kararı (katı):
@@ -12552,6 +12604,78 @@ def _json_no_cache(payload, status=200):
     return response
 
 
+@bp.route("/api/debug/grid-skip-status")
+@giris_gerekli
+def api_debug_grid_skip_status():
+    """GEÇİCİ tanı: GRID_CACHE_SKIP_REFRESH + (opsiyonel) mid için should_skip.
+
+    Kod yolunu değiştirmez; yalnızca bayrak/env ve mevcut mem|DB payload üzerinde
+    _aylik_grid_freshness_should_skip sonucunu döner. Kaldırılacak.
+    """
+    mid = request.args.get("musteri_id", type=int)
+    out = {
+        "ok": True,
+        "skip_refresh_enabled": bool(_aylik_grid_cache_skip_refresh_enabled()),
+        "env_GRID_CACHE_SKIP_REFRESH": os.getenv("GRID_CACHE_SKIP_REFRESH"),
+        "shadow_log_enabled": bool(_aylik_grid_freshness_shadow_log_enabled()),
+        "env_BUNDLE_PARALLEL_MG": os.getenv("BUNDLE_PARALLEL_MG"),
+        "env_BUNDLE_PARALLEL_TR": os.getenv("BUNDLE_PARALLEL_TR"),
+        "tmp_diagnostic": True,
+    }
+    if not mid:
+        return _json_no_cache(out)
+
+    hit = None
+    payload = None
+    mem_age_s = None
+    try:
+        mem_hit = _aylik_grid_mem_get(mid)
+        if mem_hit and isinstance(mem_hit[1], dict):
+            try:
+                mem_age_s = round(time.time() - float(mem_hit[0]), 3)
+            except (TypeError, ValueError):
+                mem_age_s = None
+            if mem_age_s is not None and mem_age_s < 60.0:
+                hit = "mem"
+                payload = mem_hit[1]
+    except Exception:
+        pass
+    if payload is None:
+        try:
+            _ensure_aylik_grid_cache_table()
+            row = fetch_one(
+                "SELECT payload FROM musteri_aylik_grid_cache WHERE musteri_id = %s",
+                (mid,),
+            )
+            if row and row.get("payload"):
+                raw = row["payload"]
+                payload = json.loads(raw) if isinstance(raw, str) else raw
+                hit = "db"
+        except Exception:
+            payload = None
+            hit = None
+
+    out["musteri_id"] = mid
+    out["payload_hit"] = hit
+    out["mem_age_s"] = mem_age_s
+    out["has_freshness_fingerprint"] = bool(
+        isinstance(payload, dict)
+        and (payload.get("freshness_fingerprint") or payload.get("freshness_imza"))
+    )
+    if isinstance(payload, dict):
+        try:
+            _would, info = _aylik_grid_freshness_should_skip(mid, payload)
+            out["should_skip"] = bool(_would)
+            out["skip_info"] = _aylik_grid_skip_info_public(info)
+        except Exception as e:
+            out["should_skip"] = False
+            out["skip_info"] = {"reason": "eval_err", "error": str(e)[:200]}
+    else:
+        out["should_skip"] = False
+        out["skip_info"] = {"reason": "no_payload"}
+    return _json_no_cache(out)
+
+
 @bp.route('/api/aylik-grid-cache')
 @giris_gerekli
 def api_aylik_grid_cache():
@@ -12631,14 +12755,24 @@ def api_aylik_grid_cache():
                             _aylik_grid_mem_set(musteri_id, mem_hit[1])
                         except (TypeError, ValueError):
                             pass
-                        return _json_no_cache(
-                            {
-                                "ok": True,
-                                "cache": mem_hit[1],
-                                "cached": True,
-                                "mem": True,
-                            }
+                        _skip_body = {
+                            "ok": True,
+                            "cache": mem_hit[1],
+                            "cached": True,
+                            "mem": True,
+                        }
+                        _skip_body = _aylik_grid_debug_skip_attach(
+                            _skip_body,
+                            hit="mem",
+                            did_skip=True,
+                            refresh_ms=round(float(_refresh_ms), 1),
+                            has_freshness_fingerprint=bool(
+                                (mem_hit[1] or {}).get("freshness_fingerprint")
+                                or (mem_hit[1] or {}).get("freshness_imza")
+                            ),
+                            **_aylik_grid_skip_info_public(_skip_info or {}),
                         )
+                        return _json_no_cache(_skip_body)
                     mem_payload = _aylik_grid_cache_payload_tahsil_guncelle(musteri_id, mem_hit[1])
                     mem_payload = _aylik_grid_payload_reel_overlay_from_db(musteri_id, mem_payload)
                     # Isınma: flag veya shadow açıkken tam FP damgası (mem; DB yok).
@@ -12686,7 +12820,24 @@ def api_aylik_grid_cache():
                         _aylik_grid_mem_set(musteri_id, mem_payload)
                     except (TypeError, ValueError):
                         pass
-                    return _json_no_cache({"ok": True, "cache": mem_payload, "cached": True, "mem": True})
+                    _mem_body = {
+                        "ok": True,
+                        "cache": mem_payload,
+                        "cached": True,
+                        "mem": True,
+                    }
+                    _mem_body = _aylik_grid_debug_skip_attach(
+                        _mem_body,
+                        hit="mem",
+                        did_skip=False,
+                        refresh_ms=round(float(_refresh_ms), 1),
+                        has_freshness_fingerprint=bool(
+                            (mem_payload or {}).get("freshness_fingerprint")
+                            or (mem_payload or {}).get("freshness_imza")
+                        ),
+                        **_aylik_grid_skip_info_public(_skip_info or _fresh_shadow or {}),
+                    )
+                    return _json_no_cache(_mem_body)
         except (TypeError, ValueError):
             pass
         row = fetch_one("SELECT payload FROM musteri_aylik_grid_cache WHERE musteri_id = %s", (musteri_id,))
@@ -12760,13 +12911,45 @@ def api_aylik_grid_cache():
                         _aylik_grid_mem_set(musteri_id, cache_obj)
                     except (TypeError, ValueError):
                         pass
-                    return _json_no_cache({"ok": True, "cache": cache_obj, "cached": True})
+                    _db_body = {"ok": True, "cache": cache_obj, "cached": True}
+                    _db_reason = (
+                        (_fresh_shadow or {}).get("skip_reason")
+                        if isinstance(_fresh_shadow, dict)
+                        else None
+                    ) or "db_hit_no_skip"
+                    _db_body = _aylik_grid_debug_skip_attach(
+                        _db_body,
+                        hit="db",
+                        did_skip=False,
+                        reason=_db_reason,
+                        refresh_ms=round(float(_refresh_ms), 1),
+                        has_freshness_fingerprint=bool(
+                            (cache_obj or {}).get("freshness_fingerprint")
+                            or (cache_obj or {}).get("freshness_imza")
+                        ),
+                        **_aylik_grid_skip_info_public(_fresh_shadow or {}),
+                    )
+                    return _json_no_cache(_db_body)
             except Exception:
                 pass
     if not fetch_one("SELECT id FROM customers WHERE id = %s", (musteri_id,)):
         return _json_no_cache({"ok": False, "mesaj": "Müşteri bulunamadı."}, 404)
     payload = _upsert_aylik_grid_cache(musteri_id)
-    return _json_no_cache({"ok": True, "cache": payload or {}, "cached": False})
+    _rb_body = {"ok": True, "cache": payload or {}, "cached": False}
+    _rb_body = _aylik_grid_debug_skip_attach(
+        _rb_body,
+        hit="rebuild",
+        did_skip=False,
+        reason="rebuild",
+        has_freshness_fingerprint=bool(
+            isinstance(payload, dict)
+            and (
+                payload.get("freshness_fingerprint")
+                or payload.get("freshness_imza")
+            )
+        ),
+    )
+    return _json_no_cache(_rb_body)
 
 
 @bp.route("/api/reel-donem-tutarlar")
