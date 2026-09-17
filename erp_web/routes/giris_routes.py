@@ -2477,7 +2477,8 @@ def _aylik_grid_freshness_fingerprint(musteri_id) -> str:
 
 def _aylik_grid_freshness_stamp(musteri_id, payload, fp=None):
     """
-    Refresh sonrası tam freshness fingerprint'i payload'a yazar (Seçenek A: mem).
+    Refresh/rebuild sonrası tam freshness fingerprint'i payload dict'e yazar.
+    Kalıcı DB yazımı çağıran tarafta `_aylik_grid_freshness_persist_payload` ile yapılır.
     Hata olursa payload'a dokunmaz. fp verilirse yeniden SQL çalıştırmaz.
     """
     try:
@@ -2491,6 +2492,41 @@ def _aylik_grid_freshness_stamp(musteri_id, payload, fp=None):
     except Exception:
         pass
     return payload
+
+
+def _aylik_grid_freshness_persist_payload(musteri_id, payload) -> bool:
+    """Stamp'li (veya mevcut) payload'ı musteri_aylik_grid_cache satırına kalıcı yaz.
+
+    Skip karar mantığına dokunmaz; yalnızca INSERT … ON CONFLICT UPDATE payload.
+    Başarıda True. Hata yutulur (ana istek yolu kırılmasın).
+    """
+    try:
+        mid = int(musteri_id)
+    except (TypeError, ValueError):
+        return False
+    if mid <= 0 or not isinstance(payload, dict):
+        return False
+    try:
+        _ensure_aylik_grid_cache_table()
+        execute(
+            """
+            INSERT INTO musteri_aylik_grid_cache (musteri_id, payload, updated_at)
+            VALUES (%s, %s, NOW())
+            ON CONFLICT (musteri_id)
+            DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()
+            """,
+            (mid, json.dumps(payload, ensure_ascii=False)),
+        )
+        return True
+    except Exception as e:
+        try:
+            print(
+                "[grid-fp-persist] mid=%s err=%s" % (mid, str(e)[:200]),
+                flush=True,
+            )
+        except Exception:
+            pass
+        return False
 
 
 def _aylik_grid_freshness_stored_from_payload(payload) -> tuple[str, dict]:
@@ -3378,6 +3414,12 @@ def _upsert_aylik_grid_cache(musteri_id, tufe_map=None):
     payload = _build_aylik_grid_cache_payload(musteri_id, tufe_map=tufe_map)
     if not payload:
         return None
+    # Adım 1: rebuild sonrası FP damgası (flag/shadow açıksa) — persist paneli yazarken kalıcılaşır.
+    try:
+        if _aylik_grid_cache_skip_refresh_enabled() or _aylik_grid_freshness_shadow_log_enabled():
+            payload = _aylik_grid_freshness_stamp(musteri_id, payload)
+    except Exception:
+        pass
     return _persist_grid_cache_with_panel(musteri_id, payload)
 
 
@@ -12775,7 +12817,7 @@ def api_aylik_grid_cache():
                         return _json_no_cache(_skip_body)
                     mem_payload = _aylik_grid_cache_payload_tahsil_guncelle(musteri_id, mem_hit[1])
                     mem_payload = _aylik_grid_payload_reel_overlay_from_db(musteri_id, mem_payload)
-                    # Isınma: flag veya shadow açıkken tam FP damgası (mem; DB yok).
+                    # Isınma: flag veya shadow açıkken tam FP damgası; Adım 1: DB'ye de yaz.
                     try:
                         if _skip_flag or _aylik_grid_freshness_shadow_log_enabled():
                             _fp_reuse = None
@@ -12786,6 +12828,12 @@ def api_aylik_grid_cache():
                             mem_payload = _aylik_grid_freshness_stamp(
                                 musteri_id, mem_payload, fp=_fp_reuse
                             )
+                            try:
+                                _aylik_grid_freshness_persist_payload(
+                                    musteri_id, mem_payload
+                                )
+                            except Exception:
+                                pass
                     except Exception:
                         pass
                     _refresh_ms = (time.perf_counter() - _t_refresh0) * 1000.0
@@ -12873,7 +12921,8 @@ def api_aylik_grid_cache():
                     _t_refresh0 = time.perf_counter()
                     cache_obj = _aylik_grid_cache_payload_tahsil_guncelle(musteri_id, cache_obj)
                     cache_obj = _aylik_grid_payload_reel_overlay_from_db(musteri_id, cache_obj)
-                    # Isınma: flag veya shadow açıkken tam FP damgası (mem; DB yok).
+                    # Isınma: flag veya shadow açıkken tam FP damgası; Adım 1: DB'ye de yaz.
+                    # DB-hit HÂLÂ asla skip etmez (davranış aynı).
                     try:
                         if _skip_flag or _aylik_grid_freshness_shadow_log_enabled():
                             _fp_reuse = None
@@ -12882,6 +12931,12 @@ def api_aylik_grid_cache():
                             cache_obj = _aylik_grid_freshness_stamp(
                                 musteri_id, cache_obj, fp=_fp_reuse
                             )
+                            try:
+                                _aylik_grid_freshness_persist_payload(
+                                    musteri_id, cache_obj
+                                )
+                            except Exception:
+                                pass
                     except Exception:
                         pass
                     _refresh_ms = (time.perf_counter() - _t_refresh0) * 1000.0
