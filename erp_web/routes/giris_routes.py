@@ -55,6 +55,7 @@ from datetime import datetime, date, timedelta
 import calendar
 import time
 import threading
+import copy
 from docx import Document
 from docx.shared import Pt, Cm
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -2641,6 +2642,23 @@ def _aylik_grid_cache_skip_db_hit_enabled() -> bool:
         return False
 
 
+def _aylik_grid_cache_swr_db_hit_enabled() -> bool:
+    """GRID_CACHE_SWR_DB_HIT env — varsayılan KAPALI.
+
+    DB-hit stale-while-revalidate: would_skip iken cache'i hemen dön,
+    arka planda tahsil_guncelle + reel_overlay + FP/DB/mem güncelle.
+    """
+    try:
+        return str(os.getenv("GRID_CACHE_SWR_DB_HIT") or "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        )
+    except Exception:
+        return False
+
+
 def _aylik_grid_debug_skip_wanted() -> bool:
     """GEÇİCİ tanı: ?debug_skip=1 ile grid yanıtına skip teşhisi ekle."""
     try:
@@ -2661,8 +2679,10 @@ def _aylik_grid_debug_skip_attach(body: dict, **info) -> dict:
     dbg = {
         "flag_enabled": bool(_aylik_grid_cache_skip_refresh_enabled()),
         "db_hit_skip_enabled": bool(_aylik_grid_cache_skip_db_hit_enabled()),
+        "swr_db_hit_enabled": bool(_aylik_grid_cache_swr_db_hit_enabled()),
         "env_raw": os.getenv("GRID_CACHE_SKIP_REFRESH"),
         "env_GRID_CACHE_SKIP_DB_HIT": os.getenv("GRID_CACHE_SKIP_DB_HIT"),
+        "env_GRID_CACHE_SWR_DB_HIT": os.getenv("GRID_CACHE_SWR_DB_HIT"),
     }
     dbg.update(info)
     out["debug_skip"] = dbg
@@ -3451,6 +3471,8 @@ def _upsert_aylik_grid_cache(musteri_id, tufe_map=None):
 # Kısa süreli bellek önbelleği: aynı müşteri için grid-cache + tahsil-durum arka arkaya gelince
 # _build_aylik_grid_cache_payload tekrar çalışmasın (Supabase round-trip + ağır hesap).
 _aylik_grid_payload_mem: dict = {}
+_aylik_grid_swr_inflight: set = set()
+_aylik_grid_swr_lock = threading.Lock()
 
 
 def _tenant_cache_part():
@@ -3575,6 +3597,100 @@ def _defer_aylik_grid_cache_rebuild(musteri_id) -> None:
                     pass
 
     threading.Thread(target=_work, daemon=True).start()
+
+
+def _defer_aylik_grid_db_hit_swr_revalidate(musteri_id, payload) -> bool:
+    """DB-hit SWR: yanıtı bekletmeden tahsil_guncelle + reel_overlay + FP/DB/mem.
+
+    _defer_aylik_grid_cache_rebuild deseninde daemon thread + app_context.
+    Aynı mid için eşzamanlı ikinci SWR coalesce edilir (False döner).
+    """
+    try:
+        mid = int(musteri_id)
+    except (TypeError, ValueError):
+        return False
+    if mid <= 0 or not isinstance(payload, dict):
+        return False
+    with _aylik_grid_swr_lock:
+        if mid in _aylik_grid_swr_inflight:
+            return False
+        _aylik_grid_swr_inflight.add(mid)
+    captured_tenant = None
+    try:
+        if has_app_context():
+            captured_tenant = getattr(g, "tenant_schema", None)
+    except Exception:
+        captured_tenant = None
+    try:
+        base_payload = copy.deepcopy(payload)
+    except Exception:
+        try:
+            base_payload = json.loads(json.dumps(payload, default=str))
+        except Exception:
+            with _aylik_grid_swr_lock:
+                _aylik_grid_swr_inflight.discard(mid)
+            return False
+    try:
+        app = current_app._get_current_object()
+    except Exception:
+        with _aylik_grid_swr_lock:
+            _aylik_grid_swr_inflight.discard(mid)
+        return False
+
+    def _work():
+        t0 = time.perf_counter()
+        try:
+            with app.app_context():
+                if captured_tenant is not None:
+                    g.tenant_schema = captured_tenant
+                try:
+                    pl = base_payload
+                    pl = _aylik_grid_cache_payload_tahsil_guncelle(mid, pl)
+                    pl = _aylik_grid_payload_reel_overlay_from_db(mid, pl)
+                    pl = _aylik_grid_freshness_stamp(mid, pl)
+                    try:
+                        _aylik_grid_freshness_persist_payload(mid, pl)
+                    except Exception:
+                        pass
+                    try:
+                        _aylik_grid_mem_set(mid, pl)
+                    except (TypeError, ValueError):
+                        pass
+                    refresh_ms = (time.perf_counter() - t0) * 1000.0
+                    print(
+                        "[grid-swr] mid=%s swr_done=True refresh_ms=%.1f"
+                        % (mid, float(refresh_ms)),
+                        flush=True,
+                    )
+                except Exception as ex:
+                    try:
+                        current_app.logger.warning(
+                            "grid-swr revalidate mid=%s: %r", mid, ex
+                        )
+                    except Exception:
+                        pass
+                    try:
+                        print(
+                            "[grid-swr] mid=%s swr_done=False err=%s"
+                            % (mid, str(ex)[:160]),
+                            flush=True,
+                        )
+                    except Exception:
+                        pass
+        finally:
+            with _aylik_grid_swr_lock:
+                _aylik_grid_swr_inflight.discard(mid)
+
+    try:
+        print(
+            "[grid-swr] mid=%s swr_scheduled=True hit=db"
+            % (mid,),
+            flush=True,
+        )
+    except Exception:
+        pass
+    threading.Thread(target=_work, daemon=True).start()
+    return True
 
 
 def _parse_aylik_grid_cache_payload_raw(raw):
@@ -12894,9 +13010,11 @@ def api_aylik_grid_cache():
                         _fresh_shadow = None
                     _skip_flag = _aylik_grid_cache_skip_refresh_enabled()
                     _db_hit_skip_flag = _aylik_grid_cache_skip_db_hit_enabled()
+                    _swr_db_hit_flag = _aylik_grid_cache_swr_db_hit_enabled()
                     _want_shadow_obs = bool(
                         _skip_flag
                         or _db_hit_skip_flag
+                        or _swr_db_hit_flag
                         or _aylik_grid_debug_skip_wanted()
                         or _aylik_grid_freshness_shadow_log_enabled()
                     )
@@ -12994,6 +13112,63 @@ def api_aylik_grid_cache():
                             **_db_pub,
                         )
                         return _json_no_cache(_db_body)
+                    # SWR: bayrak açık + would_skip → hemen dön, arka planda yenile.
+                    if _swr_db_hit_flag and _db_would_skip:
+                        _swr_ok = False
+                        try:
+                            _swr_ok = bool(
+                                _defer_aylik_grid_db_hit_swr_revalidate(
+                                    musteri_id, cache_obj
+                                )
+                            )
+                        except Exception:
+                            _swr_ok = False
+                        if _swr_ok:
+                            _refresh_ms = (time.perf_counter() - _t_refresh0) * 1000.0
+                            try:
+                                _aylik_grid_freshness_shadow_end(
+                                    _fresh_shadow,
+                                    cache_obj,
+                                    _refresh_ms,
+                                )
+                            except Exception:
+                                pass
+                            try:
+                                _aylik_grid_mem_set(musteri_id, cache_obj)
+                            except (TypeError, ValueError):
+                                pass
+                            _db_body = {
+                                "ok": True,
+                                "cache": cache_obj,
+                                "cached": True,
+                                "revalidating": True,
+                            }
+                            _db_pub = _aylik_grid_skip_info_public(
+                                _db_skip_info or _fresh_shadow or {}
+                            )
+                            _obs_reason = _db_pub.pop("reason", None)
+                            if (
+                                _obs_reason is not None
+                                and _db_pub.get("skip_reason") is None
+                            ):
+                                _db_pub["skip_reason"] = _obs_reason
+                            _db_pub["would_skip"] = True
+                            _db_body = _aylik_grid_debug_skip_attach(
+                                _db_body,
+                                hit="db",
+                                did_skip=False,
+                                swr_scheduled=True,
+                                revalidating=True,
+                                reason="db_hit_swr",
+                                refresh_ms=round(float(_refresh_ms), 1),
+                                has_freshness_fingerprint=bool(
+                                    (cache_obj or {}).get("freshness_fingerprint")
+                                    or (cache_obj or {}).get("freshness_imza")
+                                ),
+                                **_db_pub,
+                            )
+                            return _json_no_cache(_db_body)
+                        # Coalesce/başarısız → senkron yola düş.
                     # Bayrak kapalı VEYA would_skip=False → tam yenileme (Adım 2 davranışı).
                     cache_obj = _aylik_grid_cache_payload_tahsil_guncelle(musteri_id, cache_obj)
                     cache_obj = _aylik_grid_payload_reel_overlay_from_db(musteri_id, cache_obj)
@@ -13002,6 +13177,7 @@ def api_aylik_grid_cache():
                         if (
                             _skip_flag
                             or _db_hit_skip_flag
+                            or _swr_db_hit_flag
                             or _aylik_grid_freshness_shadow_log_enabled()
                         ):
                             _fp_reuse = None
