@@ -833,6 +833,15 @@
             {% if sadece_manuel_makbuz is defined and sadece_manuel_makbuz %}checked{% endif %}>
           Tahsilat Makbuzu
         </label>
+        <label style="display:flex;
+          align-items:center;gap:6px;
+          cursor:pointer;font-size:13px;"
+          title="İşaretliyse çok aylı makbuzlar/gruplar da listelenir (mevcut davranış). İşaretsizse yalnızca tek ay kapsayan kayıtlar görünür.">
+          <input type="checkbox"
+            id="tahsilat_yillik"
+            {% if yillik is not defined or yillik %}checked{% endif %}>
+          Yıllık
+        </label>
     </div>
     
     <div class="stats">
@@ -1384,6 +1393,9 @@
         if (cbMakbuz && cbMakbuz.checked) {
           url += '&sadece_manuel_makbuz=1';
         }
+        // Yıllık: işaretli=1 (çok aylılar dahil), işaretsiz=0 (yalnız tek ay)
+        var cbYillik = document.getElementById('tahsilat_yillik');
+        url += '&yillik=' + (cbYillik && cbYillik.checked ? '1' : '0');
         url += _finansIframeEmbedSuffix();
         return url;
     }
@@ -1697,6 +1709,13 @@
         if (cbMakbuz) {
           var mmOn = (mmParam === '1' || mmParam === 'true' || mmParam === 'yes' || mmParam === 'on');
           cbMakbuz.checked = mmOn;
+        }
+        // yillik yok / 1 → işaretli (varsayılan); yillik=0 → işaretsiz
+        var yillikParam = urlParams.get('yillik');
+        var cbYillik = document.getElementById('tahsilat_yillik');
+        if (cbYillik) {
+          var yOff = (yillikParam === '0' || yillikParam === 'false' || yillikParam === 'no' || yillikParam === 'off');
+          cbYillik.checked = !yOff;
         }
         tahsilatHizmetSecimiYukle();
         tahsilatTutarHucresiFormatla();

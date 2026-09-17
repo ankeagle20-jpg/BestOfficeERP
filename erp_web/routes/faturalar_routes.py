@@ -850,6 +850,46 @@ def _tahsil_rapor_yil_ay_coerce(val):
     return None
 
 
+def _tahsilat_rapor_unique_ay_keys(row):
+    """Ham tahsilat satırından benzersiz (yıl, ay) listesi.
+
+    Önce |AYLIK_TAH|YYYY-MM-DD| işaretçileri; yoksa tahsilat_tarihi (grupla ile aynı).
+    """
+    ac = str((row or {}).get("aciklama") or "")
+    keys = []
+    seen = set()
+    for y, mo in re.findall(r"\|AYLIK_TAH\|(\d{4})-(\d{2})-\d{2}\|", ac):
+        k = f"{y}-{mo}"
+        if k in seen:
+            continue
+        seen.add(k)
+        try:
+            keys.append((y, int(mo, 10)))
+        except ValueError:
+            continue
+    if not keys:
+        ym = _tahsil_rapor_yil_ay_coerce((row or {}).get("tahsilat_tarihi"))
+        if ym:
+            keys.append((str(ym[0]), int(ym[1])))
+    return keys
+
+
+def _tahsilat_rapor_display_ay_sayisi(row):
+    """Display satırı (tekil veya grup) için benzersiz ödenen ay sayısı."""
+    if (row or {}).get("is_group"):
+        seen = set()
+        for m in ((row or {}).get("grup_uyeleri") or []):
+            for mk in _tahsilat_rapor_unique_ay_keys(m):
+                try:
+                    sk = f"{mk[0]}-{int(mk[1]):02d}"
+                except (TypeError, ValueError):
+                    continue
+                seen.add(sk)
+        return len(seen) if seen else 1
+    keys = _tahsilat_rapor_unique_ay_keys(row)
+    return len(keys) if keys else 1
+
+
 def _tahsilat_rapor_aciklama_ay_metni(aciklama, fatura_tarihi=None, tahsilat_tarihi=None):
     """Tahsilat açıklamasındaki |AYLIK_TAH|YYYY-MM-DD| işaretçilerinden ay listesi (Türkçe)."""
     text = str(aciklama or "")
@@ -5821,6 +5861,9 @@ def tahsilatlar():
     senaryo = str(request.args.get("senaryo", "1") or "1").strip()
     _mm_raw = str(request.args.get("sadece_manuel_makbuz") or "").strip().lower()
     sadece_manuel_makbuz = _mm_raw in ("1", "true", "yes", "on")
+    # Yıllık: varsayılan True (parametre yok / 1). yillik=0 → çok aylı satır/grupları gizle.
+    _y_raw = str(request.args.get("yillik") or "1").strip().lower()
+    yillik = _y_raw not in ("0", "false", "no", "off")
 
     raw_hizmet = (request.args.get("hizmet_turleri") or "").strip()
     secili_hizmet_turleri = []
@@ -6040,10 +6083,24 @@ def tahsilatlar():
             t["rapor_hizmet_turu"] = ht_map.get(mid, "")
 
     # Toplam / ham sayı: gruplamadan ÖNCE (çift sayım yok). Display liste Aşama 2a.
+    # yillik=0 ise gruplama sonrası çok aylıları düşürüp istatistikleri yeniden hesapla.
     tahsilatlar_ham = list(tahsilatlar_list)
-    toplam = sum(t.get("tutar") or 0 for t in tahsilatlar_ham)
-    tahsilat_ham_sayi = len(tahsilatlar_ham)
     tahsilatlar_list = _tahsilat_rapor_grupla(tahsilatlar_ham)
+    if not yillik:
+        kept_display = []
+        kept_ham = []
+        for _disp in tahsilatlar_list:
+            if _tahsilat_rapor_display_ay_sayisi(_disp) > 1:
+                continue
+            kept_display.append(_disp)
+            if (_disp or {}).get("is_group"):
+                kept_ham.extend(list((_disp or {}).get("grup_uyeleri") or []))
+            else:
+                kept_ham.append(_disp)
+        tahsilatlar_list = kept_display
+        tahsilatlar_ham = kept_ham
+    toplam = sum((t.get("tutar") or 0) for t in tahsilatlar_ham)
+    tahsilat_ham_sayi = len(tahsilatlar_ham)
     hizmet_rows = fetch_all(
         """
         SELECT DISTINCT hizmet_turu
@@ -6072,6 +6129,7 @@ def tahsilatlar():
         secili_hizmet_turleri=secili_hizmet_turleri,
         senaryo=senaryo,
         sadece_manuel_makbuz=sadece_manuel_makbuz,
+        yillik=yillik,
         tahsilatlar=tahsilatlar_list,
         toplam=toplam,
         tahsilat_ham_sayi=tahsilat_ham_sayi,
