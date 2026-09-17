@@ -818,15 +818,6 @@
         <label style="display:flex;
           align-items:center;gap:6px;
           cursor:pointer;font-size:13px;"
-          title="İşaretliyse Başlangıç/Bitiş, Girildiği Tarih (created_at) alanına göre uygulanır.">
-          <input type="checkbox"
-            id="tahsilat_senaryo"
-            {% if senaryo is defined and senaryo == '0' %}checked{% endif %}>
-          Girildiği Tarih'e göre filtrele
-        </label>
-        <label style="display:flex;
-          align-items:center;gap:6px;
-          cursor:pointer;font-size:13px;"
           title="Sadece kaynak etiketi yazılmaya başlandıktan sonraki Tahsilat Makbuzu kayıtlarını gösterir; daha eski kayıtlar bu filtrede görünmez.">
           <input type="checkbox"
             id="tahsilat_manuel_makbuz"
@@ -836,10 +827,10 @@
         <label style="display:flex;
           align-items:center;gap:6px;
           cursor:pointer;font-size:13px;"
-          title="İşaretliyse çok aylı makbuzlar/gruplar da listelenir (mevcut davranış). İşaretsizse yalnızca tek ay kapsayan kayıtlar görünür.">
+          title="İşaretliyse (varsayılan): seçilen dönemi kapsayan tüm ödemeler (çok aylı peşinler dahil). İşaretsizse yalnızca Girildiği Tarih (created_at) Başlangıç–Bitiş aralığında olan kayıtlar.">
           <input type="checkbox"
             id="tahsilat_yillik"
-            {% if yillik is not defined or yillik %}checked{% endif %}>
+            {% if senaryo is not defined or senaryo != '0' %}checked{% endif %}>
           Yıllık
         </label>
     </div>
@@ -1384,18 +1375,14 @@
         }
         if (bas) url += '&baslangic=' + encodeURIComponent(bas);
         if (bit) url += '&bitis=' + encodeURIComponent(bit);
-        // İşaretli = Girildiği Tarih (created_at) → senaryo=0
-        // İşaretsiz = dönem/marker (varsayılan) → senaryo=1
-        url += '&senaryo=' +
-          (document.getElementById(
-            'tahsilat_senaryo').checked ? '0' : '1');
+        // Yıllık işaretli (varsayılan) = dönem kapsama → senaryo=1
+        // Yıllık işaretsiz = Girildiği Tarih (created_at) → senaryo=0
+        var cbYillik = document.getElementById('tahsilat_yillik');
+        url += '&senaryo=' + (cbYillik && cbYillik.checked ? '1' : '0');
         var cbMakbuz = document.getElementById('tahsilat_manuel_makbuz');
         if (cbMakbuz && cbMakbuz.checked) {
           url += '&sadece_manuel_makbuz=1';
         }
-        // Yıllık: işaretli=1 (çok aylılar dahil), işaretsiz=0 (yalnız tek ay)
-        var cbYillik = document.getElementById('tahsilat_yillik');
-        url += '&yillik=' + (cbYillik && cbYillik.checked ? '1' : '0');
         url += _finansIframeEmbedSuffix();
         return url;
     }
@@ -1603,8 +1590,9 @@
         if (bit) bit.setHours(23, 59, 59, 999);
         var sayi = 0;
         var toplam = 0;
-        var cbGir = document.getElementById('tahsilat_senaryo');
-        var useGirildigi = !!(cbGir && cbGir.checked);
+        // Yıllık işaretsiz = Girildiği Tarih modu (senaryo=0)
+        var cbYillikAralik = document.getElementById('tahsilat_yillik');
+        var useGirildigi = !(cbYillikAralik && cbYillikAralik.checked);
         Array.prototype.forEach.call(tbody.querySelectorAll('tr'), function (tr) {
             if (tr.classList.contains('tahsilat-empty-row')) return;
             if (!tr.cells || tr.cells.length < 11) return;
@@ -1698,24 +1686,17 @@
         var urlParams = new URLSearchParams(
           window.location.search);
         var senaryoParam = urlParams.get('senaryo');
-        // senaryo=0 → Girildiği Tarih modu → checkbox işaretli
-        // parametre yok / 1 → varsayılan dönem modu → işaretsiz
-        var cbSen = document.getElementById('tahsilat_senaryo');
-        if (cbSen) {
-          cbSen.checked = (senaryoParam === '0');
+        // senaryo=0 → Girildiği Tarih → Yıllık işaretsiz
+        // parametre yok / 1 → dönem kapsama → Yıllık işaretli (varsayılan)
+        var cbYillik = document.getElementById('tahsilat_yillik');
+        if (cbYillik) {
+          cbYillik.checked = (senaryoParam !== '0');
         }
         var mmParam = urlParams.get('sadece_manuel_makbuz');
         var cbMakbuz = document.getElementById('tahsilat_manuel_makbuz');
         if (cbMakbuz) {
           var mmOn = (mmParam === '1' || mmParam === 'true' || mmParam === 'yes' || mmParam === 'on');
           cbMakbuz.checked = mmOn;
-        }
-        // yillik yok / 1 → işaretli (varsayılan); yillik=0 → işaretsiz
-        var yillikParam = urlParams.get('yillik');
-        var cbYillik = document.getElementById('tahsilat_yillik');
-        if (cbYillik) {
-          var yOff = (yillikParam === '0' || yillikParam === 'false' || yillikParam === 'no' || yillikParam === 'off');
-          cbYillik.checked = !yOff;
         }
         tahsilatHizmetSecimiYukle();
         tahsilatTutarHucresiFormatla();
