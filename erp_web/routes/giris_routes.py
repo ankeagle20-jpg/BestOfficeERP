@@ -343,8 +343,12 @@ def _ensure_tahsilat_panel_detay_table():
     _TAHSILAT_PANEL_DETAY_TABLE_READY = True
 
 
-def _load_musteri_panel_by_iso(musteri_id: int) -> dict:
-    """DB panel kaynağı: {YYYY-MM-01: {aylik, tahsil, kalan, tahsil_tarih?}}."""
+def _load_musteri_panel_by_iso(musteri_id: int, tahsil_rows=None, ekstre_batch=None) -> dict:
+    """DB panel kaynağı: {YYYY-MM-01: {aylik, tahsil, kalan, tahsil_tarih?}}.
+
+    tahsil_rows / ekstre_batch verilirse _ekstre_tahsil_rows_for_musteri tekrar
+    çağrılmaz (api_aylik_tahsil_durum sorgu birleştirme).
+    """
     try:
         mid = int(musteri_id)
     except (TypeError, ValueError):
@@ -369,9 +373,15 @@ def _load_musteri_panel_by_iso(musteri_id: int) -> dict:
     # Kural A: |AYLIK_TAH| marker varsa kayıtlı kalan=0'ı tutarlılık
     # düzeltmesiyle yeniden açma (FIFO/tarih map'i değil).
     try:
-        _mk_batch = _ekstre_tahsil_batch_maps_from_rows(
-            _ekstre_tahsil_rows_for_musteri(mid)
-        )
+        if isinstance(ekstre_batch, dict):
+            _mk_batch = ekstre_batch
+        else:
+            _rows = (
+                tahsil_rows
+                if tahsil_rows is not None
+                else _ekstre_tahsil_rows_for_musteri(mid)
+            )
+            _mk_batch = _ekstre_tahsil_batch_maps_from_rows(_rows)
         marker_by_iso = (_mk_batch or {}).get("marker") or {}
         pay_by_iso = (_mk_batch or {}).get("pay") or {}
     except Exception:
@@ -8140,14 +8150,15 @@ def _ekstre_payload_odenen_zenginlestir(
         a["tutar_kdv_dahil"] = round(max(brut, 0.01), 2)
 
 
-def _aylik_grid_cache_payload_tahsil_guncelle(musteri_id, payload, panel_by_iso=None):
+def _aylik_grid_cache_payload_tahsil_guncelle(musteri_id, payload, panel_by_iso=None, tahsil_rows=None):
     """Disk önbelleği dönerken tahsil/kısmi alanlarını DB ile yenile (sayfa yenilemesinde turuncu kalan)."""
     if not isinstance(payload, dict):
         return payload
     try:
         mid = int(musteri_id)
         panel_db = panel_by_iso if panel_by_iso is not None else _load_musteri_panel_by_iso(mid)
-        tahsil_rows = _ekstre_tahsil_rows_for_musteri(mid)
+        if tahsil_rows is None:
+            tahsil_rows = _ekstre_tahsil_rows_for_musteri(mid)
         tahsil_map = _aylik_tahsil_tutar_map(mid, tahsil_rows=tahsil_rows)
         batch = _ekstre_tahsil_batch_maps_from_rows(tahsil_rows)
         manual_reel = _musteri_reel_donem_manual_dict_from_db(mid)
@@ -8578,23 +8589,29 @@ def _ekstre_tahsil_ids_for_iso(
     return _ekstre_tahsil_ids_by_iso_from_rows(_ekstre_tahsil_rows_for_musteri(mid)).get(iso) or []
 
 
-def _aylik_tahsil_marker_aylar_set_normalized(musteri_id: int) -> set[str]:
+def _aylik_tahsil_marker_aylar_set_normalized(musteri_id: int, tahsil_rows=None) -> set[str]:
     """
     Bu müşteriye ait |AYLIK_TAH| marker'lı aylar (YYYY-M normalize).
     Not: Grid cache ufku dışında kalan (ama daha önce tahsil edilmiş) aylar için
     frontend yeşil durumunun kaybolmaması amacıyla ayrıca döndürülür.
+
+    tahsil_rows verilirse SQL tekrarlanmaz (sorgu birleştirme); satırlardan
+    birebir aynı regex taraması yapılır.
     """
     out: set[str] = set()
-    rows = fetch_all(
-        """
-        SELECT COALESCE(aciklama, '') AS aciklama
-        FROM tahsilatlar
-        WHERE (musteri_id = %s OR customer_id = %s)
-          AND COALESCE(tutar, 0) > 0
-          AND COALESCE(aciklama, '') LIKE '%%|AYLIK_TAH|%%'
-        """,
-        (musteri_id, musteri_id),
-    ) or []
+    if tahsil_rows is not None:
+        rows = tahsil_rows or []
+    else:
+        rows = fetch_all(
+            """
+            SELECT COALESCE(aciklama, '') AS aciklama
+            FROM tahsilatlar
+            WHERE (musteri_id = %s OR customer_id = %s)
+              AND COALESCE(tutar, 0) > 0
+              AND COALESCE(aciklama, '') LIKE '%%|AYLIK_TAH|%%'
+            """,
+            (musteri_id, musteri_id),
+        ) or []
     for r in rows:
         ac = str((r or {}).get("aciklama") or "")
         for iso in re.findall(r"\|AYLIK_TAH\|([0-9]{4}-[0-9]{2}-[0-9]{2})\|", ac):
@@ -8604,8 +8621,22 @@ def _aylik_tahsil_marker_aylar_set_normalized(musteri_id: int) -> set[str]:
     return out
 
 
-def _aylik_tahsil_ekstre_eslesme_aylar_set_normalized(musteri_id: int) -> set[str]:
-    """Ekstrede tahsilat satırı üreten aylar (YYYY-M normalize)."""
+def _aylik_tahsil_ekstre_eslesme_aylar_set_normalized(musteri_id: int, tahsil_rows=None) -> set[str]:
+    """Ekstrede tahsilat satırı üreten aylar (YYYY-M normalize).
+
+    tahsil_rows verilirse SQL tekrarlanmaz; _tahsil_row_ekstre_eslesme_ay_iso
+    ile (fatura → |AYLIK_TAH| → tahsilat_tarihi) aynı öncelik uygulanır.
+    """
+    out: set[str] = set()
+    if tahsil_rows is not None:
+        for r in tahsil_rows or []:
+            iso = _tahsil_row_ekstre_eslesme_ay_iso(r if isinstance(r, dict) else {})
+            if not iso:
+                continue
+            nk = _firma_ozet_normalize_tahsil_ay_key(iso)
+            if nk:
+                out.add(nk)
+        return out
     rows = fetch_all(
         """
         SELECT
@@ -8621,7 +8652,6 @@ def _aylik_tahsil_ekstre_eslesme_aylar_set_normalized(musteri_id: int) -> set[st
         """,
         (musteri_id, musteri_id),
     ) or []
-    out: set[str] = set()
     for r in rows:
         d = (r or {}).get("eslesme_tarihi")
         if not d:
@@ -14853,12 +14883,19 @@ def api_aylik_tahsil_durum(onceden_hesaplanmis_grid=None):
 
     onceden_hesaplanmis_grid: Bundle (Aşama 2b) grid cache'ini paylaşırsa
     read/build/tahsil_guncelle atlanır; HTTP/hover yolları parametresiz kalır.
+
+    Sorgu birleştirme: _ekstre_tahsil_rows_for_musteri bir kez; panel + marker +
+    ekstre ay setleri aynı satırlardan türetilir (sonuç birebir aynı).
     """
     musteri_id = request.args.get("musteri_id", type=int)
     if not musteri_id:
         return _json_no_cache({"ok": False, "mesaj": "musteri_id gerekli."}, 400)
     mid = int(musteri_id)
-    panel_by_iso = _load_musteri_panel_by_iso(mid)
+    tahsil_rows = _ekstre_tahsil_rows_for_musteri(mid)
+    ekstre_batch = _ekstre_tahsil_batch_maps_from_rows(tahsil_rows)
+    panel_by_iso = _load_musteri_panel_by_iso(
+        mid, tahsil_rows=tahsil_rows, ekstre_batch=ekstre_batch
+    )
     if onceden_hesaplanmis_grid is not None:
         # Aşama 2b: hazır grid payload — ikinci build/tahsil_guncelle yok
         payload = onceden_hesaplanmis_grid
@@ -14868,9 +14905,17 @@ def api_aylik_tahsil_durum(onceden_hesaplanmis_grid=None):
         if payload is None:
             payload = _build_aylik_grid_cache_payload(mid, tufe_map=_tufe_map_by_year_month_cached())
         else:
-            payload = _aylik_grid_cache_payload_tahsil_guncelle(mid, payload, panel_by_iso=panel_by_iso)
-    marker_ay_only = _aylik_tahsil_marker_aylar_set_normalized(mid)
-    ekstre_ay_only = _aylik_tahsil_ekstre_eslesme_aylar_set_normalized(mid)
+            payload = _aylik_grid_cache_payload_tahsil_guncelle(
+                mid, payload, panel_by_iso=panel_by_iso, tahsil_rows=tahsil_rows
+            )
+    # Marker: satırlardan |AYLIK_TAH| (eski SQL fonksiyonu ile aynı tarama).
+    # Ekstre: batch_maps.eslesme anahtarları (= _tahsil_row_ekstre_eslesme_ay_iso).
+    marker_ay_only = _aylik_tahsil_marker_aylar_set_normalized(mid, tahsil_rows=tahsil_rows)
+    ekstre_ay_only = set()
+    for iso_e in (ekstre_batch.get("eslesme") or {}):
+        nk = _firma_ozet_normalize_tahsil_ay_key(iso_e)
+        if nk:
+            ekstre_ay_only.add(nk)
     ay_set = _aylik_tahsil_edilen_aylar_from_payload(payload) if payload else set()
     aylar = _aylik_tahsil_durum_finalize_ay_set(
         mid,
