@@ -12909,7 +12909,8 @@ def api_aylik_grid_cache():
                 if cache_gecerli and _aylik_grid_cache_horizon_stale(musteri_id, cache_obj):
                     cache_gecerli = False
                 if cache_gecerli:
-                    # DB-hit: Seçenek A — asla gerçek atlama yok; shadow + stamp (ısınma).
+                    # DB-hit: Adım 2 gölge gözlem — would_skip hesapla/logla;
+                    # GERÇEK atlama YOK (tahsil_guncelle + reel_overlay her zaman).
                     _fresh_shadow = None
                     try:
                         _fresh_shadow = _aylik_grid_freshness_shadow_begin(
@@ -12918,6 +12919,36 @@ def api_aylik_grid_cache():
                     except Exception:
                         _fresh_shadow = None
                     _skip_flag = _aylik_grid_cache_skip_refresh_enabled()
+                    _want_shadow_obs = bool(
+                        _skip_flag
+                        or _aylik_grid_debug_skip_wanted()
+                        or _aylik_grid_freshness_shadow_log_enabled()
+                    )
+                    _db_would_skip = False
+                    _db_skip_info = None
+                    if _want_shadow_obs:
+                        try:
+                            if isinstance(_fresh_shadow, dict):
+                                _db_would_skip = bool(_fresh_shadow.get("would_skip"))
+                                _db_skip_info = _fresh_shadow
+                            else:
+                                _ws, _db_skip_info = _aylik_grid_freshness_should_skip(
+                                    musteri_id, cache_obj
+                                )
+                                _db_would_skip = bool(_ws)
+                                if isinstance(_db_skip_info, dict):
+                                    _db_skip_info["hit_kind"] = "db"
+                                    _db_skip_info["skip_reason"] = _db_skip_info.get(
+                                        "reason"
+                                    )
+                        except Exception:
+                            _db_would_skip = False
+                            _db_skip_info = {
+                                "would_skip": False,
+                                "reason": "shadow_eval_err",
+                                "skip_reason": "shadow_eval_err",
+                                "hit_kind": "db",
+                            }
                     _t_refresh0 = time.perf_counter()
                     cache_obj = _aylik_grid_cache_payload_tahsil_guncelle(musteri_id, cache_obj)
                     cache_obj = _aylik_grid_payload_reel_overlay_from_db(musteri_id, cache_obj)
@@ -12928,6 +12959,8 @@ def api_aylik_grid_cache():
                             _fp_reuse = None
                             if isinstance(_fresh_shadow, dict) and _fresh_shadow.get("live"):
                                 _fp_reuse = _fresh_shadow.get("live")
+                            elif isinstance(_db_skip_info, dict) and _db_skip_info.get("live"):
+                                _fp_reuse = _db_skip_info.get("live")
                             cache_obj = _aylik_grid_freshness_stamp(
                                 musteri_id, cache_obj, fp=_fp_reuse
                             )
@@ -12940,16 +12973,30 @@ def api_aylik_grid_cache():
                     except Exception:
                         pass
                     _refresh_ms = (time.perf_counter() - _t_refresh0) * 1000.0
-                    if _skip_flag:
+                    if _want_shadow_obs:
                         try:
                             _reason = (
-                                (_fresh_shadow or {}).get("skip_reason")
-                                if isinstance(_fresh_shadow, dict)
-                                else None
-                            ) or "db_hit_no_skip"
+                                (
+                                    (_db_skip_info or {}).get("skip_reason")
+                                    if isinstance(_db_skip_info, dict)
+                                    else None
+                                )
+                                or (
+                                    (_fresh_shadow or {}).get("skip_reason")
+                                    if isinstance(_fresh_shadow, dict)
+                                    else None
+                                )
+                                or "db_hit_no_skip"
+                            )
                             print(
-                                "[grid-skip] mid=%s skipped=False reason=%s refresh_ms=%.1f"
-                                % (musteri_id, _reason, float(_refresh_ms)),
+                                "[grid-skip] mid=%s skipped=False did_skip=False "
+                                "would_skip=%s reason=%s hit=db refresh_ms=%.1f"
+                                % (
+                                    musteri_id,
+                                    bool(_db_would_skip),
+                                    _reason,
+                                    float(_refresh_ms),
+                                ),
                                 flush=True,
                             )
                         except Exception:
@@ -12967,22 +13014,25 @@ def api_aylik_grid_cache():
                     except (TypeError, ValueError):
                         pass
                     _db_body = {"ok": True, "cache": cache_obj, "cached": True}
-                    _db_reason = (
-                        (_fresh_shadow or {}).get("skip_reason")
-                        if isinstance(_fresh_shadow, dict)
-                        else None
-                    ) or "db_hit_no_skip"
+                    _db_pub = _aylik_grid_skip_info_public(
+                        _db_skip_info or _fresh_shadow or {}
+                    )
+                    # reason = davranış (asla skip); would_skip / skip_reason = gölge gözlem
+                    _obs_reason = _db_pub.pop("reason", None)
+                    if _obs_reason is not None and _db_pub.get("skip_reason") is None:
+                        _db_pub["skip_reason"] = _obs_reason
+                    _db_pub["would_skip"] = bool(_db_would_skip)
                     _db_body = _aylik_grid_debug_skip_attach(
                         _db_body,
                         hit="db",
                         did_skip=False,
-                        reason=_db_reason,
+                        reason="db_hit_no_skip",
                         refresh_ms=round(float(_refresh_ms), 1),
                         has_freshness_fingerprint=bool(
                             (cache_obj or {}).get("freshness_fingerprint")
                             or (cache_obj or {}).get("freshness_imza")
                         ),
-                        **_aylik_grid_skip_info_public(_fresh_shadow or {}),
+                        **_db_pub,
                     )
                     return _json_no_cache(_db_body)
             except Exception:
