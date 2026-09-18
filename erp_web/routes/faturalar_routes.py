@@ -3749,6 +3749,726 @@ def api_ui_tercih_post():
     return jsonify({"ok": True})
 
 
+def _firma_ozet_parse_csv_list(raw: str | None) -> list[str]:
+    """Virgüllü veya JSON dizi query param → benzersiz trim'li liste."""
+    s = (raw or "").strip()
+    if not s:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    if s.startswith("["):
+        try:
+            j = json.loads(s)
+            if isinstance(j, list):
+                for x in j:
+                    t = str(x if x is not None else "").strip()
+                    if not t or t in seen:
+                        continue
+                    seen.add(t)
+                    out.append(t)
+                return out
+        except Exception:
+            pass
+    for part in s.split(","):
+        t = part.strip()
+        if not t or t in seen:
+            continue
+        seen.add(t)
+        out.append(t)
+    return out
+
+
+def _firma_ozet_hizmet_filtre_temel(hm: str) -> str:
+    """İstemci faturaRaporHizmetFiltreIcinTemel ile aynı: '… · Oda N' sonekini kırp."""
+    s = (hm or "").strip()
+    m = re.match(r"^(.*?)(\s*[·•]\s*Oda\s+\d+)\s*$", s)
+    if m:
+        return (m.group(1) or "").strip()
+    return s
+
+
+def _firma_ozet_hizmet_filtre_eslesir(hm: str, fh: str) -> bool:
+    if not fh:
+        return True
+    if fh == "__FR_HIZMET_BOS":
+        b = _firma_ozet_hizmet_filtre_temel(hm)
+        return b in ("-", "")
+    temel = _firma_ozet_hizmet_filtre_temel(hm)
+    return temel == fh or (hm or "") == fh
+
+
+def _firma_ozet_client_filtre_uygula(
+    satirlar: list,
+    *,
+    q: str,
+    grup2: list[str],
+    hizmet: list[str],
+    durum: str,
+    oda: str | None,
+) -> list:
+    """faturaRaporListeAraUygula (firma_ozet) ile birebir istemci süzgeçleri."""
+    q_raw = (q or "").strip()
+    q_low = turkish_lower(q_raw) if q_raw else ""
+    fd = (durum or "").strip().lower()
+    if fd not in ("aktif", "pasif"):
+        fd = ""
+    g2 = [str(x).strip() for x in (grup2 or []) if str(x).strip()]
+    hz = [str(x).strip() for x in (hizmet or []) if str(x).strip()]
+    oda_f = None
+    if oda is not None and str(oda).strip() != "":
+        ov = str(oda).strip().lower()
+        if ov in ("hepsi", "yok"):
+            oda_f = ov
+        else:
+            try:
+                n = int(str(oda).strip())
+                if 200 <= n <= 230:
+                    oda_f = str(n)
+            except (TypeError, ValueError):
+                oda_f = None
+
+    out = []
+    for it in satirlar or []:
+        if not isinstance(it, dict):
+            continue
+        ok = True
+        if q_raw:
+            ad = turkish_lower(it.get("firma_adi") or "")
+            fr_ara = turkish_lower(it.get("liste_ara_blob") or "")
+            g2m = turkish_lower(it.get("grup2") or "")
+            hizm = turkish_lower(it.get("hizmet_turu") or "")
+            durm = turkish_lower(it.get("durum_etiket") or "")
+            tarih = str(it.get("giris_tarihi") or "").lower()
+            ok = (
+                q_low in ad
+                or q_low in fr_ara
+                or q_low in g2m
+                or q_low in hizm
+                or q_low in durm
+                or q_low in tarih
+            )
+        if ok and fd:
+            ds = "pasif" if "pasif" in turkish_lower(it.get("durum_etiket") or "") else "aktif"
+            if fd == "aktif" and ds != "aktif":
+                ok = False
+            if fd == "pasif" and ds != "pasif":
+                ok = False
+        if ok and g2:
+            raw_g = str(it.get("grup2") or "").strip()
+            arr = [x.strip() for x in raw_g.split("|") if x.strip()]
+            if not arr:
+                g2s = it.get("grup2_secimleri")
+                if isinstance(g2s, list):
+                    arr = [str(x).strip() for x in g2s if str(x).strip()]
+            ok = any(f in arr for f in g2)
+        if ok and hz:
+            hm = str(it.get("hizmet_turu") or "")
+            ok = any(_firma_ozet_hizmet_filtre_eslesir(hm, f) for f in hz)
+        if ok and oda_f:
+            ho = it.get("hazir_ofis_oda_no")
+            tr_oda = "" if ho is None or str(ho).strip() == "" else str(ho).strip()
+            if oda_f == "hepsi":
+                if tr_oda == "":
+                    ok = False
+            elif oda_f == "yok":
+                if tr_oda != "":
+                    ok = False
+            elif tr_oda != oda_f:
+                ok = False
+        if ok:
+            out.append(it)
+    return out
+
+
+def _firma_ozet_satirlara_grid_ozet_uygula(satirlar: list, ref_first: date) -> None:
+    """Excel / tam liste: geciken_ay + toplam_borc + guncel grid özetiyle güncelle."""
+    if not satirlar:
+        return
+    page_grid_map = _firma_ozet_grid_ozet_map_for_rows(satirlar, ref_first)
+    if not isinstance(page_grid_map, dict) or not page_grid_map:
+        return
+    for _it in satirlar:
+        if not isinstance(_it, dict):
+            continue
+        try:
+            _mid = int(_it.get("musteri_id") or 0)
+        except (TypeError, ValueError):
+            continue
+        if _mid <= 0:
+            continue
+        _oz = page_grid_map.get(_mid)
+        if not isinstance(_oz, dict) or not _oz:
+            continue
+        try:
+            _gcur = float(_oz.get("borc_month") or 0)
+            if math.isfinite(_gcur) and abs(_gcur) > 1e-9:
+                _it["guncel_kira_bedeli"] = round(_gcur, 2)
+        except (TypeError, ValueError):
+            pass
+        try:
+            _it["toplam_borc"] = max(0.0, round(float(_oz.get("toplam_borc") or 0), 2))
+        except (TypeError, ValueError):
+            pass
+        try:
+            _it["geciken_ay"] = max(0, int(_oz.get("geciken_ay") or 0))
+        except (TypeError, ValueError):
+            pass
+
+
+def _firma_ozet_recalc_ozet(satirlar: list) -> tuple[float, float, int]:
+    toplam_aylik = 0.0
+    toplam_borc = 0.0
+    for it in satirlar or []:
+        try:
+            v = float(it.get("aylik_tutar") or 0)
+            if math.isfinite(v):
+                toplam_aylik += v
+        except (TypeError, ValueError):
+            pass
+        try:
+            b = float(it.get("toplam_borc") or 0)
+            if math.isfinite(b):
+                toplam_borc += b
+        except (TypeError, ValueError):
+            pass
+    return round(toplam_aylik, 2), round(toplam_borc, 2), len(satirlar or [])
+
+
+def _firma_ozet_dataset_from_request(*, excel_mode: bool = False) -> dict:
+    """Tekil müşteri (firma_ozet) rapor payload — api_fatura_rapor ile aynı mantık.
+
+    excel_mode=True: page_size=0 + istemci süzgeçleri; resp cache yok.
+    """
+    bugun = date.today()
+    first_this = bugun.replace(day=1)
+    last_prev = first_this - timedelta(days=1)
+    bas_default = last_prev.replace(day=1)
+    bas_s = (request.args.get("baslangic") or "").strip()
+    bit_s = (request.args.get("bitis") or "").strip()
+    try:
+        bas = datetime.strptime(bas_s[:10], "%Y-%m-%d").date() if len(bas_s) >= 10 else bas_default
+    except Exception:
+        bas = bas_default
+    try:
+        bit = datetime.strptime(bit_s[:10], "%Y-%m-%d").date() if len(bit_s) >= 10 else bugun
+    except Exception:
+        bit = bugun
+    if bas > bit:
+        bas, bit = bit, bas
+    try:
+        page_size = int(request.args.get("page_size", 0) or 0)
+    except (TypeError, ValueError):
+        page_size = 0
+    try:
+        page = int(request.args.get("page", 1) or 1)
+    except (TypeError, ValueError):
+        page = 1
+    if page < 1:
+        page = 1
+    if page_size < 0:
+        page_size = 0
+    if page_size > 5000:
+        page_size = 5000
+    if excel_mode:
+        page_size = 0
+        page = 1
+
+    pasifleri_dahil = _fatura_rapor_query_truthy(request.args.get("pasifleri_dahil"))
+    tum_musteriler = _fatura_rapor_query_truthy(request.args.get("tum_musteriler"))
+    sadece_aktif = _fatura_rapor_query_truthy(request.args.get("sadece_aktif"))
+    bizim_hesap = _fatura_rapor_query_truthy(request.args.get("bizim_hesap"))
+    cift_olanlar = _fatura_rapor_query_truthy(request.args.get("cift_olanlar"))
+    duzenli_fatura = _fatura_rapor_duzenli_fatura_norm(request.args.get("duzenli_fatura"))
+
+    client_q = (request.args.get("q") or "").strip()
+    client_grup2 = _firma_ozet_parse_csv_list(request.args.get("grup2"))
+    client_hizmet = _firma_ozet_parse_csv_list(
+        request.args.get("hizmet_turleri") or request.args.get("hizmet")
+    )
+    client_durum = (request.args.get("durum") or "").strip().lower()
+    client_oda_raw = (
+        request.args.get("hazir_ofis_oda") or request.args.get("hazir_oda") or ""
+    ).strip()
+
+    liste_hizli = _firma_ozet_liste_hizli_mod()
+    if liste_hizli:
+        if not excel_mode:
+            _ck = _firma_ozet_resp_cache_key()
+            _cached = None
+            if not pasifleri_dahil and not sadece_aktif:
+                _cached = _firma_ozet_resp_cache_get(_ck)
+            if _cached is not None:
+                return _cached
+        _firma_ozet_rapor_schema_ensure_once()
+    else:
+        ensure_customers_is_active()
+        ensure_customers_durum()
+        ensure_customers_rent_columns()
+        ensure_customers_hazir_ofis_oda()
+        ensure_musteri_kyc_columns()
+        ensure_musteri_kyc_hazir_ofis_oda_no()
+        ensure_musteri_kyc_latest_lookup_index()
+        ensure_customers_grup2_secimleri()
+        ensure_grup2_etiketleri_table()
+        ensure_customers_balance_trigger()
+    ref = bugun
+    ay_y, ay_m = ref.year, ref.month
+    ref_first = date(ay_y, ay_m, 1)
+    ay_etiket = f"{_AYLAR_TR_FATURA_RAPOR[ay_m - 1]} {ay_y}"
+    if not liste_hizli:
+        try:
+            from routes.giris_routes import _ensure_aylik_grid_cache_table
+
+            _ensure_aylik_grid_cache_table()
+        except Exception as _e_agc:
+            current_app.logger.warning("firma_ozet aylik_grid_cache ensure: %r", _e_agc)
+    _firma_guncel_grid_sql = (
+        _firma_ozet_sql_guncel_kdv_dahil_hizli_expr()
+        if liste_hizli
+        else _firma_ozet_sql_guncel_grid_kdv_dahil_expr(ay_y, ay_m)
+    )
+    musteri_where = _fatura_rapor_musteri_where_with_bizim(
+        _fatura_rapor_musteri_where_sql(pasifleri_dahil, tum_musteriler, sadece_aktif),
+        bizim_hesap,
+    )
+    mk_df_sql = ""
+    mk_df_params = []
+    arama = "" if excel_mode else (request.args.get("q") or "").strip()
+    arama_sql = ""
+    if arama:
+        # Tekil müşteri raporunda arama kutusu: sayfadan bağımsız server-side süz.
+        # Önce aramayla eşleşen müşteri id'lerini tek bir ayrı sorguda buluyoruz, sonra
+        # ana rapor sorgusuna `c.id = ANY(%s)` olarak enjekte ediyoruz. Bu yaklaşım:
+        #   • Çok sayıda placeholder yerine tek parametre kullandığı için parametre
+        #     sıralama hatalarına neden olmaz.
+        #   • Paging CTE'sine güvenle girer, SQL paging fallback olsa bile bozulmaz.
+        #   • Büyük tabloda da ID+GIN/B-tree indeksleri üzerinden hızlıdır.
+        try:
+            _t_arama = time.perf_counter()
+            arama_where_sql, arama_where_params = customers_arama_sql_params_giris_genis_tokens(
+                arama, "c"
+            )
+            arama_id_rows = fetch_all(
+                f"""
+                SELECT DISTINCT c.id
+                FROM customers c
+                WHERE {arama_where_sql}
+                """,
+                arama_where_params,
+            ) or []
+            arama_ids = [int(r["id"]) for r in arama_id_rows if r and r.get("id") is not None]
+            current_app.logger.info(
+                "firma_ozet_server_arama q=%r matched=%d ms=%.2f",
+                arama,
+                len(arama_ids),
+                (time.perf_counter() - _t_arama) * 1000.0,
+            )
+        except Exception as e_ar:
+            current_app.logger.warning("firma_ozet_server_arama err=%r", e_ar)
+            arama_ids = []
+        # Eşleşme yoksa bile boş liste döndürecek biçimde filtreyi mutlak yap (sayfada
+        # eski 50 satır görünmesin).
+        arama_sql = " AND c.id = ANY(%s::bigint[])"
+        mk_df_params.append(arama_ids if arama_ids else [0])
+    if duzenli_fatura:
+        mk_df_sql = (
+            "AND COALESCE(NULLIF(LOWER(TRIM(mk.duzenli_fatura)), ''), 'duzenle') = %s"
+        )
+        mk_df_params.append(duzenli_fatura)
+    giris_aylar_filtre = _fatura_rapor_giris_aylari_parse(request.args.get("giri_aylar"))
+    giri_ay_sql = ""
+    if giris_aylar_filtre:
+        # IN (%s,…) — psycopg2’de ANY(%s::int[]) bazı sürümlerde/uzak DB’de güvenilir bağlanmıyor.
+        _gph = ", ".join(["%s"] * len(giris_aylar_filtre))
+        giri_ay_sql = (
+            f" AND (EXTRACT(MONTH FROM ({_FIRMA_OZET_GIRIS_TARIHI_SQL})::date))::int IN ({_gph})"
+        )
+        mk_df_params.extend(giris_aylar_filtre)
+    hazir_oda_raw = (request.args.get("hazir_ofis_oda") or request.args.get("hazir_oda") or "").strip()
+    hazir_oda_filtre = None
+    if hazir_oda_raw and not excel_mode:
+        try:
+            _hz = int(hazir_oda_raw)
+            if 200 <= _hz <= 230:
+                hazir_oda_filtre = _hz
+        except (TypeError, ValueError):
+            pass
+    ho_sql = ""
+    if hazir_oda_filtre is not None:
+        ho_sql = " AND COALESCE(mk.hazir_ofis_oda_no, c.hazir_ofis_oda_no) = %s"
+        mk_df_params.append(hazir_oda_filtre)
+    cift_sql = ""
+    if cift_olanlar:
+        cift_sql = _firma_ozet_sql_cift_olanlar_giris_gunu_filter(
+            musteri_where=musteri_where,
+            mk_df_sql=mk_df_sql,
+            giri_ay_sql=giri_ay_sql,
+            ho_sql=ho_sql,
+            arama_sql=arama_sql,
+            hizli=liste_hizli,
+        )
+    rows_firma_sql = _firma_ozet_build_rows_firma_sql(
+        musteri_where=musteri_where,
+        mk_df_sql=mk_df_sql,
+        giri_ay_sql=giri_ay_sql,
+        ho_sql=ho_sql,
+        arama_sql=arama_sql,
+        firma_guncel_sql=_firma_guncel_grid_sql,
+        hizli=liste_hizli,
+        cift_sql=cift_sql,
+    )
+    rows_firma_params = tuple(mk_df_params)
+    rows_firma_sql_no_order = re.sub(r"\s+ORDER\s+BY\s+2\s*$", "", rows_firma_sql.rstrip(), flags=re.I)
+    firma_hizli_degrade = False
+    rows_firma = []
+    satirlar_firma = []
+    toplam_aylik = 0.0
+    toplam_borc = 0.0
+    total_count_firma = 0
+    satirlar_resp = []
+    has_more = False
+    sql_paging_ok = False
+    firma_sql_ms = None
+    firma_sunucu_ms = None
+    if page_size > 0:
+        totals_sql, page_sql = _firma_ozet_sql_paging_queries(rows_firma_sql_no_order, cift_olanlar)
+        _t_sql = time.perf_counter()
+        try:
+            tot_row = fetch_one(totals_sql, rows_firma_params)
+            lim = page_size
+            off = (page - 1) * page_size
+            page_rows = fetch_all(page_sql, rows_firma_params + (lim, off)) or []
+            firma_sql_ms = (time.perf_counter() - _t_sql) * 1000.0
+            if not tot_row:
+                raise RuntimeError("firma_ozet totals row missing")
+            total_count_firma = int(tot_row.get("cnt") or 0)
+            toplam_borc = round(float(tot_row.get("sum_borc") or 0), 2)
+            toplam_aylik = round(float(tot_row.get("sum_aylik") or 0), 2)
+            grid_hesapla = _firma_ozet_sayfa_grid_hesapla(liste_hizli, page_size)
+            if not grid_hesapla:
+                _t_pg = time.perf_counter()
+                satirlar_resp = [
+                    _firma_ozet_row_to_satir_item(r, pasifleri_dahil, None)
+                    for r in page_rows
+                ]
+                current_app.logger.info(
+                    "firma_ozet_liste_hizli page=%s rows=%s ms=%.2f",
+                    page,
+                    len(page_rows),
+                    (time.perf_counter() - _t_pg) * 1000.0,
+                )
+            else:
+                # Sayfa satirlari icin prewarm — tum winner listesini SQL ile cekmeye gerek yok.
+                winner_ids_prewarm = [
+                    int(r["id"])
+                    for r in page_rows
+                    if r is not None and r.get("id") is not None
+                ]
+                try:
+                    from routes.giris_routes import prewarm_aylik_grid_cache_for_musteriler
+
+                    _t_pw0 = time.perf_counter()
+                    n_pw = prewarm_aylik_grid_cache_for_musteriler(
+                        winner_ids_prewarm,
+                        ref_first,
+                        max_rebuild=min(50, max(1, len(page_rows))),
+                    )
+                    current_app.logger.info(
+                        "firma_ozet prewarm rebuilt=%s winner_ids=%s ms=%.2f",
+                        n_pw,
+                        len(winner_ids_prewarm),
+                        (time.perf_counter() - _t_pw0) * 1000.0,
+                    )
+                except Exception as e_pw:
+                    current_app.logger.warning("firma_ozet prewarm err=%r", e_pw)
+                page_grid_map = _firma_ozet_grid_ozet_map_for_rows(page_rows, ref_first)
+                satirlar_resp = [
+                    _firma_ozet_row_to_satir_item(r, pasifleri_dahil, page_grid_map)
+                    for r in page_rows
+                ]
+                try:
+                    _t_tb = time.perf_counter()
+                    ids_sql = _firma_ozet_sql_winner_ids_query(
+                        rows_firma_sql_no_order, cift_olanlar
+                    )
+                    id_rows = fetch_all(ids_sql, rows_firma_params) or []
+                    winner_ids = [
+                        int(r["id"])
+                        for r in id_rows
+                        if r is not None and r.get("id") is not None
+                    ]
+                    try:
+                        max_ids = int(
+                            str(os.getenv("FIRMA_OZET_TOPLAM_BORC_MAX_IDS") or "800").strip() or "800"
+                        )
+                    except ValueError:
+                        max_ids = 800
+                    if winner_ids and len(winner_ids) <= max(50, max_ids):
+                        toplam_borc = _firma_ozet_toplam_borc_grid_for_winner_ids(
+                            winner_ids, ref_first, chunk_size=100
+                        )
+                    elif winner_ids:
+                        toplam_borc = round(float(tot_row.get("sum_borc") or 0), 2)
+                        current_app.logger.info(
+                            "firma_ozet toplam_borc SQL yedek (winner_ids=%s > max=%s)",
+                            len(winner_ids),
+                            max_ids,
+                        )
+                    current_app.logger.info(
+                        "firma_ozet toplam_borc_grid ids=%s ms=%.2f borc=%.2f",
+                        len(winner_ids),
+                        (time.perf_counter() - _t_tb) * 1000.0,
+                        toplam_borc,
+                    )
+                except Exception as e_borc:
+                    current_app.logger.warning("firma_ozet grid toplam_borc ids err=%r", e_borc)
+            for _it in satirlar_resp:
+                _it.pop("_dedupe_vergi", None)
+            has_more = off + len(satirlar_resp) < total_count_firma
+            sql_paging_ok = True
+            firma_sunucu_ms = firma_sql_ms
+            current_app.logger.info(
+                "firma_ozet_sql_paging page=%s page_size=%s page_rows=%s total=%s ms=%.2f",
+                page,
+                page_size,
+                len(satirlar_resp),
+                total_count_firma,
+                firma_sql_ms,
+            )
+            exp_b = _firma_ozet_expect_borc_env()
+            if exp_b is not None:
+                if abs(toplam_borc - exp_b) > 0.005:
+                    current_app.logger.warning(
+                        "firma_ozet toplam_borc=%s FIRMA_OZET_EXPECT_BORC=%s fark=%.4f",
+                        toplam_borc,
+                        exp_b,
+                        toplam_borc - exp_b,
+                    )
+                else:
+                    current_app.logger.info(
+                        "firma_ozet toplam_borc teyit OK (FIRMA_OZET_EXPECT_BORC=%s)", exp_b
+                    )
+        except Exception as e_pg:
+            firma_sql_ms = (time.perf_counter() - _t_sql) * 1000.0
+            current_app.logger.warning(
+                "firma_ozet_sql_paging fallback err=%r ms=%.2f", e_pg, firma_sql_ms
+            )
+            sql_paging_ok = False
+    _last_firma_err = None
+    if not sql_paging_ok:
+        _t_fb = time.perf_counter()
+        for _att in range(0, 2):
+            try:
+                rows_firma = fetch_all(rows_firma_sql, rows_firma_params) or []
+                _last_firma_err = None
+                break
+            except Exception as e_rf:
+                _last_firma_err = e_rf
+                em = str(e_rf or "").lower()
+                # Supabase pooler bağlantı kesmesi (SSL closed) için bir kez hızlı tekrar dene.
+                if _att == 0 and ("ssl connection has been closed" in em or "connection to server" in em):
+                    time.sleep(0.35)
+                    continue
+                break
+        if _last_firma_err is not None:
+            # Ağ/DB dalgalanmasında raporu tamamen düşürme: minimal SQL ile listeyi göster.
+            firma_hizli_degrade = True
+            _deg_sql = _firma_ozet_build_rows_firma_sql(
+                musteri_where=musteri_where,
+                mk_df_sql=mk_df_sql,
+                giri_ay_sql=giri_ay_sql,
+                ho_sql=ho_sql,
+                arama_sql=arama_sql,
+                firma_guncel_sql=_firma_ozet_sql_guncel_kdv_dahil_hizli_expr(),
+                hizli=True,
+                cift_sql=cift_sql,
+            )
+            rows_firma = fetch_all(_deg_sql, rows_firma_params) or []
+        if not liste_hizli:
+            try:
+                from routes.giris_routes import prewarm_aylik_grid_cache_for_musteriler
+
+                _all_ids = [int(r["id"]) for r in rows_firma if r is not None and r.get("id") is not None]
+                _t_pw_fb = time.perf_counter()
+                n_pw_fb = prewarm_aylik_grid_cache_for_musteriler(_all_ids, ref_first)
+                current_app.logger.info(
+                    "firma_ozet prewarm (fallback) rebuilt=%s ids=%s ms=%.2f",
+                    n_pw_fb,
+                    len(_all_ids),
+                    (time.perf_counter() - _t_pw_fb) * 1000.0,
+                )
+            except Exception as e_pw_fb:
+                current_app.logger.warning("firma_ozet prewarm fallback err=%r", e_pw_fb)
+        grid_hesapla_fb = _firma_ozet_sayfa_grid_hesapla(liste_hizli, page_size)
+        # Hizli mod kapaliysa (liste_hizli=False): tum satirlar icin batch — eski davranis.
+        # Hizli mod + kucuk sayfa: once None ile donustur+sirala+dilimle, sonra dilim ID'leri icin batch.
+        if grid_hesapla_fb and not liste_hizli:
+            grid_map_all = _firma_ozet_grid_ozet_map_for_rows(rows_firma, ref_first)
+        else:
+            grid_map_all = {}
+        satirlar_firma = []
+        for row in rows_firma:
+            satirlar_firma.append(
+                _firma_ozet_row_to_satir_item(
+                    row,
+                    pasifleri_dahil,
+                    grid_map_all if grid_map_all else None,
+                )
+            )
+        satirlar_firma.sort(key=lambda x: turkish_lower((x.get("firma_adi") or "").strip()))
+        if not cift_olanlar:
+            satirlar_firma = _firma_ozet_dedupe_satirlar(satirlar_firma)
+        for _it in satirlar_firma:
+            _it.pop("_dedupe_vergi", None)
+        toplam_aylik = 0.0
+        toplam_borc = 0.0
+        for it in satirlar_firma:
+            try:
+                v = float(it.get("aylik_tutar") or 0)
+                if math.isfinite(v):
+                    toplam_aylik += v
+            except (TypeError, ValueError):
+                pass
+            try:
+                b = float(it.get("toplam_borc") or 0)
+                if math.isfinite(b):
+                    toplam_borc += b
+            except (TypeError, ValueError):
+                pass
+        toplam_aylik = round(toplam_aylik, 2)
+        toplam_borc = round(toplam_borc, 2)
+        total_count_firma = len(satirlar_firma)
+        satirlar_resp = satirlar_firma
+        has_more = False
+        if page_size > 0:
+            start_idx = (page - 1) * page_size
+            end_idx = start_idx + page_size
+            satirlar_resp = satirlar_firma[start_idx:end_idx]
+            has_more = end_idx < total_count_firma
+        # Hizli + kucuk sayfa: alfabetik sayfa dilimindeki ID'ler icin grid (sort sonrasi).
+        if grid_hesapla_fb and liste_hizli and satirlar_resp:
+            page_grid_map_fb = _firma_ozet_grid_ozet_map_for_rows(satirlar_resp, ref_first)
+            for _it in satirlar_resp:
+                try:
+                    _mid = int(_it.get("musteri_id") or 0)
+                except (TypeError, ValueError):
+                    continue
+                if _mid <= 0:
+                    continue
+                _oz = page_grid_map_fb.get(_mid) if isinstance(page_grid_map_fb, dict) else None
+                if not isinstance(_oz, dict) or not _oz:
+                    continue
+                try:
+                    _gcur = float(_oz.get("borc_month") or 0)
+                    if math.isfinite(_gcur) and abs(_gcur) > 1e-9:
+                        _it["guncel_kira_bedeli"] = round(_gcur, 2)
+                except (TypeError, ValueError):
+                    pass
+                try:
+                    _it["toplam_borc"] = max(0.0, round(float(_oz.get("toplam_borc") or 0), 2))
+                except (TypeError, ValueError):
+                    pass
+                try:
+                    _it["geciken_ay"] = max(0, int(_oz.get("geciken_ay") or 0))
+                except (TypeError, ValueError):
+                    pass
+        if page_size > 0:
+            current_app.logger.info(
+                "firma_ozet_python_liste_ms=%.2f (sql_paging devre dışı veya hata)",
+                (time.perf_counter() - _t_fb) * 1000.0,
+            )
+            exp_b = _firma_ozet_expect_borc_env()
+            if exp_b is not None:
+                if abs(toplam_borc - exp_b) > 0.005:
+                    current_app.logger.warning(
+                        "firma_ozet toplam_borc=%s FIRMA_OZET_EXPECT_BORC=%s fark=%.4f (python yolu)",
+                        toplam_borc,
+                        exp_b,
+                        toplam_borc - exp_b,
+                    )
+                else:
+                    current_app.logger.info(
+                        "firma_ozet toplam_borc teyit OK (FIRMA_OZET_EXPECT_BORC=%s, python yolu)", exp_b
+                    )
+        firma_sunucu_ms = (time.perf_counter() - _t_fb) * 1000.0
+    kapsam_etiket = (
+        "aktif"
+        if sadece_aktif
+        else (
+            "tum_kayitlar"
+            if tum_musteriler
+            else ("pasif" if pasifleri_dahil else "aktif")
+        )
+    )
+    _firma_ozet_satirlara_referans_ay_guncel_uygula(satirlar_resp, ref_first)
+    _firma_payload = {
+        "ok": True,
+        "gorunum": "firma_ozet",
+        "sunucu_islem_ms": (round(float(firma_sunucu_ms), 2) if firma_sunucu_ms is not None else None),
+        "baslangic": bas.isoformat(),
+        "bitis": bit.isoformat(),
+        "duzenli_fatura": duzenli_fatura or "",
+        "musteri_kapsam": kapsam_etiket,
+        "pasifleri_dahil": pasifleri_dahil,
+        "tum_musteriler": tum_musteriler,
+        "sadece_aktif": sadece_aktif,
+        "bizim_hesap": bizim_hesap,
+        "cift_olanlar": cift_olanlar,
+        "sadece_faturali": False,
+        "giri_aylar_filtre": giris_aylar_filtre or [],
+        "hazir_ofis_oda_filtre": hazir_oda_filtre,
+        "ay_referans": {"y": ay_y, "m": ay_m, "etiket": ay_etiket},
+        "satirlar": satirlar_resp,
+        "total_count": total_count_firma,
+        "page": page,
+        "page_size": page_size,
+        "has_more": has_more,
+        "ozet": {
+            "fatura_adedi": 0,
+            "satir_adedi": total_count_firma,
+            "kesilen_fatura_satir_sayisi": 0,
+            "musteri_kapsam_adedi": total_count_firma,
+            "donemde_faturasiz_musteri": 0,
+            "toplam_satir_kdv_dahil": toplam_aylik,
+            "toplam_borc_kdv_dahil": toplam_borc,
+        },
+        "degrade_mode": firma_hizli_degrade,
+        "mesaj": ("Bağlantı dalgalanması nedeniyle hızlı modda yüklendi (borç özetleri sadeleştirildi)." if firma_hizli_degrade else ""),
+    }
+    if liste_hizli and not excel_mode:
+        _firma_ozet_resp_cache_set(_firma_ozet_resp_cache_key(), _firma_payload)
+
+    if excel_mode:
+        # Tam liste grid özeti (page_size=0 + hizli modda satır borç/güncel eksik kalmasın)
+        _firma_ozet_satirlara_grid_ozet_uygula(satirlar_resp, ref_first)
+        _firma_ozet_satirlara_referans_ay_guncel_uygula(satirlar_resp, ref_first)
+        satirlar_resp = _firma_ozet_client_filtre_uygula(
+            satirlar_resp,
+            q=client_q,
+            grup2=client_grup2,
+            hizmet=client_hizmet,
+            durum=client_durum,
+            oda=client_oda_raw or None,
+        )
+        toplam_aylik, toplam_borc, total_count_firma = _firma_ozet_recalc_ozet(satirlar_resp)
+        _firma_payload["satirlar"] = satirlar_resp
+        _firma_payload["total_count"] = total_count_firma
+        _firma_payload["page"] = 1
+        _firma_payload["page_size"] = 0
+        _firma_payload["has_more"] = False
+        _firma_payload["hazir_ofis_oda_filtre"] = client_oda_raw or None
+        _firma_payload["ozet"] = {
+            "fatura_adedi": 0,
+            "satir_adedi": total_count_firma,
+            "kesilen_fatura_satir_sayisi": 0,
+            "musteri_kapsam_adedi": total_count_firma,
+            "donemde_faturasiz_musteri": 0,
+            "toplam_satir_kdv_dahil": toplam_aylik,
+            "toplam_borc_kdv_dahil": toplam_borc,
+        }
+    return _firma_payload
+
+
 @bp.route('/api/fatura-rapor')
 @faturalar_gerekli
 def api_fatura_rapor():
@@ -3801,453 +4521,7 @@ def api_fatura_rapor():
     duzenli_fatura = _fatura_rapor_duzenli_fatura_norm(request.args.get("duzenli_fatura"))
     gorunum_firma = _fatura_rapor_firma_ozet_mi(request.args.get("gorunum"))
     if gorunum_firma:
-        liste_hizli = _firma_ozet_liste_hizli_mod()
-        if liste_hizli:
-            _ck = _firma_ozet_resp_cache_key()
-            _cached = None
-            if not pasifleri_dahil and not sadece_aktif:
-                _cached = _firma_ozet_resp_cache_get(_ck)
-            if _cached is not None:
-                return jsonify(_cached)
-            _firma_ozet_rapor_schema_ensure_once()
-        else:
-            ensure_customers_is_active()
-            ensure_customers_durum()
-            ensure_customers_rent_columns()
-            ensure_customers_hazir_ofis_oda()
-            ensure_musteri_kyc_columns()
-            ensure_musteri_kyc_hazir_ofis_oda_no()
-            ensure_musteri_kyc_latest_lookup_index()
-            ensure_customers_grup2_secimleri()
-            ensure_grup2_etiketleri_table()
-            ensure_customers_balance_trigger()
-        ref = bugun
-        ay_y, ay_m = ref.year, ref.month
-        ref_first = date(ay_y, ay_m, 1)
-        ay_etiket = f"{_AYLAR_TR_FATURA_RAPOR[ay_m - 1]} {ay_y}"
-        if not liste_hizli:
-            try:
-                from routes.giris_routes import _ensure_aylik_grid_cache_table
-
-                _ensure_aylik_grid_cache_table()
-            except Exception as _e_agc:
-                current_app.logger.warning("firma_ozet aylik_grid_cache ensure: %r", _e_agc)
-        _firma_guncel_grid_sql = (
-            _firma_ozet_sql_guncel_kdv_dahil_hizli_expr()
-            if liste_hizli
-            else _firma_ozet_sql_guncel_grid_kdv_dahil_expr(ay_y, ay_m)
-        )
-        musteri_where = _fatura_rapor_musteri_where_with_bizim(
-            _fatura_rapor_musteri_where_sql(pasifleri_dahil, tum_musteriler, sadece_aktif),
-            bizim_hesap,
-        )
-        mk_df_sql = ""
-        mk_df_params = []
-        arama = (request.args.get("q") or "").strip()
-        arama_sql = ""
-        if arama:
-            # Tekil müşteri raporunda arama kutusu: sayfadan bağımsız server-side süz.
-            # Önce aramayla eşleşen müşteri id'lerini tek bir ayrı sorguda buluyoruz, sonra
-            # ana rapor sorgusuna `c.id = ANY(%s)` olarak enjekte ediyoruz. Bu yaklaşım:
-            #   • Çok sayıda placeholder yerine tek parametre kullandığı için parametre
-            #     sıralama hatalarına neden olmaz.
-            #   • Paging CTE'sine güvenle girer, SQL paging fallback olsa bile bozulmaz.
-            #   • Büyük tabloda da ID+GIN/B-tree indeksleri üzerinden hızlıdır.
-            try:
-                _t_arama = time.perf_counter()
-                arama_where_sql, arama_where_params = customers_arama_sql_params_giris_genis_tokens(
-                    arama, "c"
-                )
-                arama_id_rows = fetch_all(
-                    f"""
-                    SELECT DISTINCT c.id
-                    FROM customers c
-                    WHERE {arama_where_sql}
-                    """,
-                    arama_where_params,
-                ) or []
-                arama_ids = [int(r["id"]) for r in arama_id_rows if r and r.get("id") is not None]
-                current_app.logger.info(
-                    "firma_ozet_server_arama q=%r matched=%d ms=%.2f",
-                    arama,
-                    len(arama_ids),
-                    (time.perf_counter() - _t_arama) * 1000.0,
-                )
-            except Exception as e_ar:
-                current_app.logger.warning("firma_ozet_server_arama err=%r", e_ar)
-                arama_ids = []
-            # Eşleşme yoksa bile boş liste döndürecek biçimde filtreyi mutlak yap (sayfada
-            # eski 50 satır görünmesin).
-            arama_sql = " AND c.id = ANY(%s::bigint[])"
-            mk_df_params.append(arama_ids if arama_ids else [0])
-        if duzenli_fatura:
-            mk_df_sql = (
-                "AND COALESCE(NULLIF(LOWER(TRIM(mk.duzenli_fatura)), ''), 'duzenle') = %s"
-            )
-            mk_df_params.append(duzenli_fatura)
-        giris_aylar_filtre = _fatura_rapor_giris_aylari_parse(request.args.get("giri_aylar"))
-        giri_ay_sql = ""
-        if giris_aylar_filtre:
-            # IN (%s,…) — psycopg2’de ANY(%s::int[]) bazı sürümlerde/uzak DB’de güvenilir bağlanmıyor.
-            _gph = ", ".join(["%s"] * len(giris_aylar_filtre))
-            giri_ay_sql = (
-                f" AND (EXTRACT(MONTH FROM ({_FIRMA_OZET_GIRIS_TARIHI_SQL})::date))::int IN ({_gph})"
-            )
-            mk_df_params.extend(giris_aylar_filtre)
-        hazir_oda_raw = (request.args.get("hazir_ofis_oda") or request.args.get("hazir_oda") or "").strip()
-        hazir_oda_filtre = None
-        if hazir_oda_raw:
-            try:
-                _hz = int(hazir_oda_raw)
-                if 200 <= _hz <= 230:
-                    hazir_oda_filtre = _hz
-            except (TypeError, ValueError):
-                pass
-        ho_sql = ""
-        if hazir_oda_filtre is not None:
-            ho_sql = " AND COALESCE(mk.hazir_ofis_oda_no, c.hazir_ofis_oda_no) = %s"
-            mk_df_params.append(hazir_oda_filtre)
-        cift_sql = ""
-        if cift_olanlar:
-            cift_sql = _firma_ozet_sql_cift_olanlar_giris_gunu_filter(
-                musteri_where=musteri_where,
-                mk_df_sql=mk_df_sql,
-                giri_ay_sql=giri_ay_sql,
-                ho_sql=ho_sql,
-                arama_sql=arama_sql,
-                hizli=liste_hizli,
-            )
-        rows_firma_sql = _firma_ozet_build_rows_firma_sql(
-            musteri_where=musteri_where,
-            mk_df_sql=mk_df_sql,
-            giri_ay_sql=giri_ay_sql,
-            ho_sql=ho_sql,
-            arama_sql=arama_sql,
-            firma_guncel_sql=_firma_guncel_grid_sql,
-            hizli=liste_hizli,
-            cift_sql=cift_sql,
-        )
-        rows_firma_params = tuple(mk_df_params)
-        rows_firma_sql_no_order = re.sub(r"\s+ORDER\s+BY\s+2\s*$", "", rows_firma_sql.rstrip(), flags=re.I)
-        firma_hizli_degrade = False
-        rows_firma = []
-        satirlar_firma = []
-        toplam_aylik = 0.0
-        toplam_borc = 0.0
-        total_count_firma = 0
-        satirlar_resp = []
-        has_more = False
-        sql_paging_ok = False
-        firma_sql_ms = None
-        firma_sunucu_ms = None
-        if page_size > 0:
-            totals_sql, page_sql = _firma_ozet_sql_paging_queries(rows_firma_sql_no_order, cift_olanlar)
-            _t_sql = time.perf_counter()
-            try:
-                tot_row = fetch_one(totals_sql, rows_firma_params)
-                lim = page_size
-                off = (page - 1) * page_size
-                page_rows = fetch_all(page_sql, rows_firma_params + (lim, off)) or []
-                firma_sql_ms = (time.perf_counter() - _t_sql) * 1000.0
-                if not tot_row:
-                    raise RuntimeError("firma_ozet totals row missing")
-                total_count_firma = int(tot_row.get("cnt") or 0)
-                toplam_borc = round(float(tot_row.get("sum_borc") or 0), 2)
-                toplam_aylik = round(float(tot_row.get("sum_aylik") or 0), 2)
-                grid_hesapla = _firma_ozet_sayfa_grid_hesapla(liste_hizli, page_size)
-                if not grid_hesapla:
-                    _t_pg = time.perf_counter()
-                    satirlar_resp = [
-                        _firma_ozet_row_to_satir_item(r, pasifleri_dahil, None)
-                        for r in page_rows
-                    ]
-                    current_app.logger.info(
-                        "firma_ozet_liste_hizli page=%s rows=%s ms=%.2f",
-                        page,
-                        len(page_rows),
-                        (time.perf_counter() - _t_pg) * 1000.0,
-                    )
-                else:
-                    # Sayfa satirlari icin prewarm — tum winner listesini SQL ile cekmeye gerek yok.
-                    winner_ids_prewarm = [
-                        int(r["id"])
-                        for r in page_rows
-                        if r is not None and r.get("id") is not None
-                    ]
-                    try:
-                        from routes.giris_routes import prewarm_aylik_grid_cache_for_musteriler
-
-                        _t_pw0 = time.perf_counter()
-                        n_pw = prewarm_aylik_grid_cache_for_musteriler(
-                            winner_ids_prewarm,
-                            ref_first,
-                            max_rebuild=min(50, max(1, len(page_rows))),
-                        )
-                        current_app.logger.info(
-                            "firma_ozet prewarm rebuilt=%s winner_ids=%s ms=%.2f",
-                            n_pw,
-                            len(winner_ids_prewarm),
-                            (time.perf_counter() - _t_pw0) * 1000.0,
-                        )
-                    except Exception as e_pw:
-                        current_app.logger.warning("firma_ozet prewarm err=%r", e_pw)
-                    page_grid_map = _firma_ozet_grid_ozet_map_for_rows(page_rows, ref_first)
-                    satirlar_resp = [
-                        _firma_ozet_row_to_satir_item(r, pasifleri_dahil, page_grid_map)
-                        for r in page_rows
-                    ]
-                    try:
-                        _t_tb = time.perf_counter()
-                        ids_sql = _firma_ozet_sql_winner_ids_query(
-                            rows_firma_sql_no_order, cift_olanlar
-                        )
-                        id_rows = fetch_all(ids_sql, rows_firma_params) or []
-                        winner_ids = [
-                            int(r["id"])
-                            for r in id_rows
-                            if r is not None and r.get("id") is not None
-                        ]
-                        try:
-                            max_ids = int(
-                                str(os.getenv("FIRMA_OZET_TOPLAM_BORC_MAX_IDS") or "800").strip() or "800"
-                            )
-                        except ValueError:
-                            max_ids = 800
-                        if winner_ids and len(winner_ids) <= max(50, max_ids):
-                            toplam_borc = _firma_ozet_toplam_borc_grid_for_winner_ids(
-                                winner_ids, ref_first, chunk_size=100
-                            )
-                        elif winner_ids:
-                            toplam_borc = round(float(tot_row.get("sum_borc") or 0), 2)
-                            current_app.logger.info(
-                                "firma_ozet toplam_borc SQL yedek (winner_ids=%s > max=%s)",
-                                len(winner_ids),
-                                max_ids,
-                            )
-                        current_app.logger.info(
-                            "firma_ozet toplam_borc_grid ids=%s ms=%.2f borc=%.2f",
-                            len(winner_ids),
-                            (time.perf_counter() - _t_tb) * 1000.0,
-                            toplam_borc,
-                        )
-                    except Exception as e_borc:
-                        current_app.logger.warning("firma_ozet grid toplam_borc ids err=%r", e_borc)
-                for _it in satirlar_resp:
-                    _it.pop("_dedupe_vergi", None)
-                has_more = off + len(satirlar_resp) < total_count_firma
-                sql_paging_ok = True
-                firma_sunucu_ms = firma_sql_ms
-                current_app.logger.info(
-                    "firma_ozet_sql_paging page=%s page_size=%s page_rows=%s total=%s ms=%.2f",
-                    page,
-                    page_size,
-                    len(satirlar_resp),
-                    total_count_firma,
-                    firma_sql_ms,
-                )
-                exp_b = _firma_ozet_expect_borc_env()
-                if exp_b is not None:
-                    if abs(toplam_borc - exp_b) > 0.005:
-                        current_app.logger.warning(
-                            "firma_ozet toplam_borc=%s FIRMA_OZET_EXPECT_BORC=%s fark=%.4f",
-                            toplam_borc,
-                            exp_b,
-                            toplam_borc - exp_b,
-                        )
-                    else:
-                        current_app.logger.info(
-                            "firma_ozet toplam_borc teyit OK (FIRMA_OZET_EXPECT_BORC=%s)", exp_b
-                        )
-            except Exception as e_pg:
-                firma_sql_ms = (time.perf_counter() - _t_sql) * 1000.0
-                current_app.logger.warning(
-                    "firma_ozet_sql_paging fallback err=%r ms=%.2f", e_pg, firma_sql_ms
-                )
-                sql_paging_ok = False
-        _last_firma_err = None
-        if not sql_paging_ok:
-            _t_fb = time.perf_counter()
-            for _att in range(0, 2):
-                try:
-                    rows_firma = fetch_all(rows_firma_sql, rows_firma_params) or []
-                    _last_firma_err = None
-                    break
-                except Exception as e_rf:
-                    _last_firma_err = e_rf
-                    em = str(e_rf or "").lower()
-                    # Supabase pooler bağlantı kesmesi (SSL closed) için bir kez hızlı tekrar dene.
-                    if _att == 0 and ("ssl connection has been closed" in em or "connection to server" in em):
-                        time.sleep(0.35)
-                        continue
-                    break
-            if _last_firma_err is not None:
-                # Ağ/DB dalgalanmasında raporu tamamen düşürme: minimal SQL ile listeyi göster.
-                firma_hizli_degrade = True
-                _deg_sql = _firma_ozet_build_rows_firma_sql(
-                    musteri_where=musteri_where,
-                    mk_df_sql=mk_df_sql,
-                    giri_ay_sql=giri_ay_sql,
-                    ho_sql=ho_sql,
-                    arama_sql=arama_sql,
-                    firma_guncel_sql=_firma_ozet_sql_guncel_kdv_dahil_hizli_expr(),
-                    hizli=True,
-                    cift_sql=cift_sql,
-                )
-                rows_firma = fetch_all(_deg_sql, rows_firma_params) or []
-            if not liste_hizli:
-                try:
-                    from routes.giris_routes import prewarm_aylik_grid_cache_for_musteriler
-
-                    _all_ids = [int(r["id"]) for r in rows_firma if r is not None and r.get("id") is not None]
-                    _t_pw_fb = time.perf_counter()
-                    n_pw_fb = prewarm_aylik_grid_cache_for_musteriler(_all_ids, ref_first)
-                    current_app.logger.info(
-                        "firma_ozet prewarm (fallback) rebuilt=%s ids=%s ms=%.2f",
-                        n_pw_fb,
-                        len(_all_ids),
-                        (time.perf_counter() - _t_pw_fb) * 1000.0,
-                    )
-                except Exception as e_pw_fb:
-                    current_app.logger.warning("firma_ozet prewarm fallback err=%r", e_pw_fb)
-            grid_hesapla_fb = _firma_ozet_sayfa_grid_hesapla(liste_hizli, page_size)
-            # Hizli mod kapaliysa (liste_hizli=False): tum satirlar icin batch — eski davranis.
-            # Hizli mod + kucuk sayfa: once None ile donustur+sirala+dilimle, sonra dilim ID'leri icin batch.
-            if grid_hesapla_fb and not liste_hizli:
-                grid_map_all = _firma_ozet_grid_ozet_map_for_rows(rows_firma, ref_first)
-            else:
-                grid_map_all = {}
-            satirlar_firma = []
-            for row in rows_firma:
-                satirlar_firma.append(
-                    _firma_ozet_row_to_satir_item(
-                        row,
-                        pasifleri_dahil,
-                        grid_map_all if grid_map_all else None,
-                    )
-                )
-            satirlar_firma.sort(key=lambda x: turkish_lower((x.get("firma_adi") or "").strip()))
-            if not cift_olanlar:
-                satirlar_firma = _firma_ozet_dedupe_satirlar(satirlar_firma)
-            for _it in satirlar_firma:
-                _it.pop("_dedupe_vergi", None)
-            toplam_aylik = 0.0
-            toplam_borc = 0.0
-            for it in satirlar_firma:
-                try:
-                    v = float(it.get("aylik_tutar") or 0)
-                    if math.isfinite(v):
-                        toplam_aylik += v
-                except (TypeError, ValueError):
-                    pass
-                try:
-                    b = float(it.get("toplam_borc") or 0)
-                    if math.isfinite(b):
-                        toplam_borc += b
-                except (TypeError, ValueError):
-                    pass
-            toplam_aylik = round(toplam_aylik, 2)
-            toplam_borc = round(toplam_borc, 2)
-            total_count_firma = len(satirlar_firma)
-            satirlar_resp = satirlar_firma
-            has_more = False
-            if page_size > 0:
-                start_idx = (page - 1) * page_size
-                end_idx = start_idx + page_size
-                satirlar_resp = satirlar_firma[start_idx:end_idx]
-                has_more = end_idx < total_count_firma
-            # Hizli + kucuk sayfa: alfabetik sayfa dilimindeki ID'ler icin grid (sort sonrasi).
-            if grid_hesapla_fb and liste_hizli and satirlar_resp:
-                page_grid_map_fb = _firma_ozet_grid_ozet_map_for_rows(satirlar_resp, ref_first)
-                for _it in satirlar_resp:
-                    try:
-                        _mid = int(_it.get("musteri_id") or 0)
-                    except (TypeError, ValueError):
-                        continue
-                    if _mid <= 0:
-                        continue
-                    _oz = page_grid_map_fb.get(_mid) if isinstance(page_grid_map_fb, dict) else None
-                    if not isinstance(_oz, dict) or not _oz:
-                        continue
-                    try:
-                        _gcur = float(_oz.get("borc_month") or 0)
-                        if math.isfinite(_gcur) and abs(_gcur) > 1e-9:
-                            _it["guncel_kira_bedeli"] = round(_gcur, 2)
-                    except (TypeError, ValueError):
-                        pass
-                    try:
-                        _it["toplam_borc"] = max(0.0, round(float(_oz.get("toplam_borc") or 0), 2))
-                    except (TypeError, ValueError):
-                        pass
-                    try:
-                        _it["geciken_ay"] = max(0, int(_oz.get("geciken_ay") or 0))
-                    except (TypeError, ValueError):
-                        pass
-            if page_size > 0:
-                current_app.logger.info(
-                    "firma_ozet_python_liste_ms=%.2f (sql_paging devre dışı veya hata)",
-                    (time.perf_counter() - _t_fb) * 1000.0,
-                )
-                exp_b = _firma_ozet_expect_borc_env()
-                if exp_b is not None:
-                    if abs(toplam_borc - exp_b) > 0.005:
-                        current_app.logger.warning(
-                            "firma_ozet toplam_borc=%s FIRMA_OZET_EXPECT_BORC=%s fark=%.4f (python yolu)",
-                            toplam_borc,
-                            exp_b,
-                            toplam_borc - exp_b,
-                        )
-                    else:
-                        current_app.logger.info(
-                            "firma_ozet toplam_borc teyit OK (FIRMA_OZET_EXPECT_BORC=%s, python yolu)", exp_b
-                        )
-            firma_sunucu_ms = (time.perf_counter() - _t_fb) * 1000.0
-        kapsam_etiket = (
-            "aktif"
-            if sadece_aktif
-            else (
-                "tum_kayitlar"
-                if tum_musteriler
-                else ("pasif" if pasifleri_dahil else "aktif")
-            )
-        )
-        _firma_ozet_satirlara_referans_ay_guncel_uygula(satirlar_resp, ref_first)
-        _firma_payload = {
-            "ok": True,
-            "gorunum": "firma_ozet",
-            "sunucu_islem_ms": (round(float(firma_sunucu_ms), 2) if firma_sunucu_ms is not None else None),
-            "baslangic": bas.isoformat(),
-            "bitis": bit.isoformat(),
-            "duzenli_fatura": duzenli_fatura or "",
-            "musteri_kapsam": kapsam_etiket,
-            "pasifleri_dahil": pasifleri_dahil,
-            "tum_musteriler": tum_musteriler,
-            "sadece_aktif": sadece_aktif,
-            "bizim_hesap": bizim_hesap,
-            "cift_olanlar": cift_olanlar,
-            "sadece_faturali": False,
-            "giri_aylar_filtre": giris_aylar_filtre or [],
-            "hazir_ofis_oda_filtre": hazir_oda_filtre,
-            "ay_referans": {"y": ay_y, "m": ay_m, "etiket": ay_etiket},
-            "satirlar": satirlar_resp,
-            "total_count": total_count_firma,
-            "page": page,
-            "page_size": page_size,
-            "has_more": has_more,
-            "ozet": {
-                "fatura_adedi": 0,
-                "satir_adedi": total_count_firma,
-                "kesilen_fatura_satir_sayisi": 0,
-                "musteri_kapsam_adedi": total_count_firma,
-                "donemde_faturasiz_musteri": 0,
-                "toplam_satir_kdv_dahil": toplam_aylik,
-                "toplam_borc_kdv_dahil": toplam_borc,
-            },
-            "degrade_mode": firma_hizli_degrade,
-            "mesaj": ("Bağlantı dalgalanması nedeniyle hızlı modda yüklendi (borç özetleri sadeleştirildi)." if firma_hizli_degrade else ""),
-        }
-        if liste_hizli:
-            _firma_ozet_resp_cache_set(_firma_ozet_resp_cache_key(), _firma_payload)
-        return jsonify(_firma_payload)
+        return jsonify(_firma_ozet_dataset_from_request(excel_mode=False))
     ensure_faturalar_amount_columns()
     ensure_customers_is_active()
     ensure_customers_durum()
@@ -6260,6 +6534,163 @@ def tahsilat_raporu_excel():
     buf = _tahsilat_rapor_workbook_bytes(ds)
     filename = (
         f"Tahsilat_Raporu_{ds.get('baslangic_iso') or ''}_{ds.get('bitis_iso') or ''}_"
+        f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    )
+    return send_file(
+        buf,
+        as_attachment=True,
+        download_name=filename,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+def _firma_ozet_workbook_bytes(ds: dict):
+    """Müşteriler (firma_ozet) Excel — Tahsilat stili; ekran sütunlarıyla birebir."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment, PatternFill
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Musteriler"
+
+    arial = Font(name="Arial", size=11)
+    arial_bold = Font(name="Arial", size=11, bold=True)
+    baslik_font = Font(name="Arial", size=14, bold=True)
+    header_fill = PatternFill(start_color="0097A7", end_color="0097A7", fill_type="solid")
+    header_font = Font(name="Arial", size=11, bold=True, color="FFFFFF")
+
+    ay_ref = (ds.get("ay_referans") or {}) if isinstance(ds.get("ay_referans"), dict) else {}
+    ay_etiket = str(ay_ref.get("etiket") or "").strip()
+
+    ws.merge_cells("A1:N1")
+    ws["A1"] = "MÜŞTERİLER RAPORU"
+    ws["A1"].font = baslik_font
+    ws["A1"].alignment = Alignment(horizontal="center")
+
+    ws["A2"] = "Referans ay:"
+    ws["B2"] = ay_etiket or "—"
+    ws["A3"] = "Kapsam:"
+    ws["B3"] = str(ds.get("musteri_kapsam") or "")
+    for c in ("A2", "A3"):
+        ws[c].font = arial_bold
+    for c in ("B2", "B3"):
+        ws[c].font = arial
+
+    headers = [
+        "Giriş tarihi",
+        "Firma ismi",
+        "Vergi no",
+        "Kimlik no",
+        f"Aylık tutar{(' (' + ay_etiket + ')') if ay_etiket else ''}",
+        "İlk kira",
+        "Güncel",
+        "Toplam borç",
+        "Gün",
+        "Ay",
+        "Geciken ay",
+        "Grup2",
+        "Hizmet türü",
+        "Durum",
+    ]
+    header_row = 5
+    for i, h in enumerate(headers, start=1):
+        cell = ws.cell(row=header_row, column=i, value=h)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center")
+
+    def _num(v):
+        if v is None or v == "":
+            return None
+        try:
+            x = float(v)
+            if not math.isfinite(x):
+                return None
+            return round(x, 2)
+        except (TypeError, ValueError):
+            return None
+
+    rows = ds.get("satirlar") or []
+    row = header_row + 1
+    for s in rows:
+        if not isinstance(s, dict):
+            continue
+        ws.cell(row=row, column=1, value=str(s.get("giris_tarihi") or "")).font = arial
+        ws.cell(row=row, column=2, value=str(s.get("firma_adi") or "")).font = arial
+        ws.cell(row=row, column=3, value=str(s.get("vergi_no") or "")).font = arial
+        ws.cell(row=row, column=4, value=str(s.get("kimlik_no") or "")).font = arial
+        for col, key in ((5, "aylik_tutar"), (6, "ilk_kira_bedeli"), (7, "guncel_kira_bedeli"), (8, "toplam_borc")):
+            nv = _num(s.get(key))
+            cell = ws.cell(row=row, column=col, value=nv if nv is not None else None)
+            cell.font = arial
+            if nv is not None:
+                cell.number_format = "#,##0.00"
+        gun = s.get("sozlesme_gun")
+        try:
+            gun_v = int(gun) if gun not in (None, "") else None
+        except (TypeError, ValueError):
+            gun_v = None
+        ws.cell(row=row, column=9, value=gun_v if gun_v else None).font = arial
+        ws.cell(row=row, column=10, value=str(s.get("sozlesme_ay_adi") or "")).font = arial
+        try:
+            ga = int(s.get("geciken_ay") or 0)
+        except (TypeError, ValueError):
+            ga = 0
+        ws.cell(row=row, column=11, value=ga).font = arial
+        ws.cell(row=row, column=12, value=str(s.get("grup2") or "")).font = arial
+        ws.cell(row=row, column=13, value=str(s.get("hizmet_turu") or "")).font = arial
+        ws.cell(row=row, column=14, value=str(s.get("durum_etiket") or "")).font = arial
+        row += 1
+
+    last_data_row = row - 1
+    toplam_row = row + 1
+    ozet = ds.get("ozet") or {}
+    ws.cell(row=toplam_row, column=2, value=f"Adet: {int(ds.get('total_count') or len(rows) or 0)}").font = arial_bold
+    ws.cell(row=toplam_row, column=4, value="TOPLAM").font = arial_bold
+    if last_data_row >= header_row + 1:
+        for col in (5, 6, 7, 8):
+            letter = chr(ord("A") + col - 1)
+            tb = ws.cell(
+                row=toplam_row,
+                column=col,
+                value=f"=SUM({letter}{header_row + 1}:{letter}{last_data_row})",
+            )
+            tb.font = arial_bold
+            tb.number_format = "#,##0.00"
+    else:
+        for col, key in (
+            (5, "toplam_satir_kdv_dahil"),
+            (8, "toplam_borc_kdv_dahil"),
+        ):
+            try:
+                tv = float(ozet.get(key) or 0)
+            except (TypeError, ValueError):
+                tv = 0.0
+            tb = ws.cell(row=toplam_row, column=col, value=tv)
+            tb.font = arial_bold
+            tb.number_format = "#,##0.00"
+
+    widths = [12, 36, 14, 14, 14, 12, 12, 14, 6, 10, 10, 18, 18, 10]
+    for i, w in enumerate(widths, start=1):
+        ws.column_dimensions[chr(ord("A") + i - 1)].width = w
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf
+
+
+@bp.route("/firma-ozet-excel")
+@faturalar_gerekli
+def firma_ozet_excel():
+    """Müşteriler (firma_ozet) Excel — api ile aynı helper; page_size=0 + istemci süzgeçleri."""
+    ensure_customers_bizim_hesap()
+    ds = _firma_ozet_dataset_from_request(excel_mode=True)
+    buf = _firma_ozet_workbook_bytes(ds)
+    ay_ref = (ds.get("ay_referans") or {}) if isinstance(ds.get("ay_referans"), dict) else {}
+    ay_tag = str(ay_ref.get("etiket") or "").replace(" ", "_")
+    filename = (
+        f"Musteriler_Raporu_{ay_tag}_"
         f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
     )
     return send_file(

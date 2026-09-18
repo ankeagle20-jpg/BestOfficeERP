@@ -3793,6 +3793,7 @@
                         </select>
                     </label>
                     <button type="button" class="auto-btn run" id="fatura_rapor_btn" onclick="faturaRaporYukle()"><i class="fa fa-list"></i> Listeyi getir</button>
+                    <button type="button" class="auto-btn" id="fatura_rapor_excel_btn" onclick="faturaRaporExcelAktar()" title="Ekrandaki aktif filtrelerle Müşteriler raporunu Excel (.xlsx) olarak indirir." style="background:#1b5e20;color:#fff;"><i class="fa fa-file-excel-o" aria-hidden="true"></i> Excel'e Aktar</button>
                     <label>Düzenli Fatura
                         <select id="fatura_rapor_duzenli_fatura" autocomplete="off" title="Müşteri kartındaki Düzenli Fatura ile aynı seçenekler">
                             <option value="">Tümü</option>
@@ -12898,12 +12899,14 @@ function faturaRaporGorunumUI() {
     var arWrap = document.getElementById('fatura_rapor_liste_ara_wrap');
     var odaWrap = document.getElementById('fatura_rapor_oda_wrap');
     var hizWrap = document.getElementById('fatura_rapor_hizmet_wrap');
+    var excelBtn = document.getElementById('fatura_rapor_excel_btn');
     var firma = sel && sel.value === 'firma_ozet';
     if (tw) tw.style.display = firma ? 'none' : '';
     if (sw) sw.style.display = firma ? 'none' : '';
     if (arWrap) arWrap.style.display = firma ? '' : 'none';
     if (odaWrap) odaWrap.style.display = firma ? 'inline-flex' : 'none';
     if (hizWrap) hizWrap.style.display = firma ? 'inline-flex' : 'none';
+    if (excelBtn) excelBtn.style.display = firma ? '' : 'none';
     if (!firma) {
         faturaRaporListeAraTemizle();
         if (typeof faturaRaporOdaFiltreTemizle === 'function') faturaRaporOdaFiltreTemizle(true);
@@ -13591,6 +13594,51 @@ function faturaRaporSatirlarPasifFiltre(satirlar, data) {
     return (satirlar || []).filter(function (s) {
         return String(s.durum_etiket || '').toLowerCase().indexOf('pasif') >= 0;
     });
+}
+
+
+function faturaRaporExcelAktar() {
+    var gor = document.getElementById('fatura_rapor_gorunum');
+    if (!gor || gor.value !== 'firma_ozet') return;
+    var basEl = document.getElementById('fatura_rapor_baslangic');
+    var bitEl = document.getElementById('fatura_rapor_bitis');
+    if (basEl && bitEl && (!basEl.value || !bitEl.value) && typeof faturaRaporVarsayilanTarihlerDoldur === 'function') {
+        faturaRaporVarsayilanTarihlerDoldur();
+    }
+    var bas = basEl ? basEl.value : '';
+    var bit = bitEl ? bitEl.value : '';
+    var u = '/faturalar/firma-ozet-excel?baslangic=' + encodeURIComponent(bas) + '&bitis=' + encodeURIComponent(bit);
+    var elTm = document.getElementById('fatura_rapor_tum_musteri');
+    var elPd = document.getElementById('fatura_rapor_pasif_dahil');
+    var elSa = document.getElementById('fatura_rapor_sadece_aktif');
+    var elCo = document.getElementById('fatura_rapor_cift_olanlar');
+    var elDf = document.getElementById('fatura_rapor_duzenli_fatura');
+    var elBh = document.getElementById('fatura_rapor_bizim_hesap');
+    if (elSa && elSa.checked) u += '&sadece_aktif=1';
+    else if (elTm && elTm.checked) u += '&tum_musteriler=1';
+    else if (elPd && elPd.checked) u += '&pasifleri_dahil=1';
+    if (elCo && elCo.checked) u += '&cift_olanlar=1';
+    if (elBh && elBh.checked) u += '&bizim_hesap=1';
+    if (elDf && elDf.value) u += '&duzenli_fatura=' + encodeURIComponent(elDf.value);
+    u += '&gorunum=firma_ozet';
+    if (typeof faturaRaporGirisAyQuerySuffix === 'function') u += faturaRaporGirisAyQuerySuffix();
+    // İstemci süzgeçleri (ekranla birebir)
+    var elAra = document.getElementById('fatura_rapor_liste_ara');
+    var araQ = elAra ? String(elAra.value || '').trim() : '';
+    if (araQ) u += '&q=' + encodeURIComponent(araQ);
+    var g2 = (typeof faturaRaporFirmaFiltreGrup2DiziOku === 'function') ? faturaRaporFirmaFiltreGrup2DiziOku() : [];
+    if (g2 && g2.length) u += '&grup2=' + encodeURIComponent(g2.join(','));
+    var hz = (typeof faturaRaporFirmaFiltreHizmetDiziOku === 'function') ? faturaRaporFirmaFiltreHizmetDiziOku() : [];
+    if (hz && hz.length) u += '&hizmet_turleri=' + encodeURIComponent(hz.join(','));
+    var fd = (typeof faturaRaporFirmaFiltreDurumOku === 'function') ? faturaRaporFirmaFiltreDurumOku() : '';
+    if (!fd) {
+        if (elPd && elPd.checked) fd = 'pasif';
+        else if (elSa && elSa.checked) fd = 'aktif';
+    }
+    if (fd) u += '&durum=' + encodeURIComponent(fd);
+    var oda = (typeof faturaRaporOdaFiltreOku === 'function') ? faturaRaporOdaFiltreOku() : null;
+    if (oda) u += '&hazir_ofis_oda=' + encodeURIComponent(String(oda));
+    window.location.href = u;
 }
 
 function faturaRaporYukle() {
