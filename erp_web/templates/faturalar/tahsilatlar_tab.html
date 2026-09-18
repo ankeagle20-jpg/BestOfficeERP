@@ -818,19 +818,21 @@
         <label style="display:flex;
           align-items:center;gap:6px;
           cursor:pointer;font-size:13px;"
-          title="Sadece kaynak etiketi yazılmaya başlandıktan sonraki Tahsilat Makbuzu kayıtlarını gösterir; daha eski kayıtlar bu filtrede görünmez.">
+          title="İşaretliyken: sadece manuel makbuzlar + tarih aralığı Girildiği Tarih (created_at) baz alınır. İşaretsizken: tüm kayıtlar; tarih bazı Yıllık kutusuna göre (dönem kapsama veya Tahsilat Tarihi).">
           <input type="checkbox"
             id="tahsilat_manuel_makbuz"
-            {% if sadece_manuel_makbuz is defined and sadece_manuel_makbuz %}checked{% endif %}>
+            {% if sadece_manuel_makbuz is defined and sadece_manuel_makbuz %}checked{% endif %}
+            onchange="tahsilatYillikMakbuzSenkron()">
           Tahsilat Makbuzu
         </label>
-        <label style="display:flex;
+        <label id="tahsilat_yillik_label" style="display:flex;
           align-items:center;gap:6px;
           cursor:pointer;font-size:13px;"
-          title="İşaretliyse (varsayılan): seçilen dönemi kapsayan tüm ödemeler (çok aylı peşinler dahil). İşaretsizse yalnızca Girildiği Tarih (created_at) Başlangıç–Bitiş aralığında olan kayıtlar.">
+          title="{% if sadece_manuel_makbuz is defined and sadece_manuel_makbuz %}Makbuz açıkken TARİH = Girildiği TARİH{% else %}İşaretliyse (varsayılan): seçilen dönemi kapsayan tüm ödemeler (çok aylı peşinler dahil). İşaretsizse Tahsilat Tarihi (tahsilat_tarihi) aralıkta olan kayıtlar.{% endif %}">
           <input type="checkbox"
             id="tahsilat_yillik"
-            {% if senaryo is not defined or senaryo != '0' %}checked{% endif %}>
+            {% if senaryo is not defined or senaryo != '0' %}checked{% endif %}
+            {% if sadece_manuel_makbuz is defined and sadece_manuel_makbuz %}disabled{% endif %}>
           Yıllık
         </label>
     </div>
@@ -1375,8 +1377,9 @@
         }
         if (bas) url += '&baslangic=' + encodeURIComponent(bas);
         if (bit) url += '&bitis=' + encodeURIComponent(bit);
-        // Yıllık işaretli (varsayılan) = dönem kapsama → senaryo=1
-        // Yıllık işaretsiz = Girildiği Tarih (created_at) → senaryo=0
+        // Makbuz açık → sunucu date_mode=created_at (Yıllık ezilir).
+        // Makbuz kapalı + Yıllık açık → dönem kapsama (senaryo=1).
+        // Makbuz kapalı + Yıllık kapalı → tahsilat_tarihi (senaryo=0).
         var cbYillik = document.getElementById('tahsilat_yillik');
         url += '&senaryo=' + (cbYillik && cbYillik.checked ? '1' : '0');
         var cbMakbuz = document.getElementById('tahsilat_manuel_makbuz');
@@ -1590,9 +1593,9 @@
         if (bit) bit.setHours(23, 59, 59, 999);
         var sayi = 0;
         var toplam = 0;
-        // Yıllık işaretsiz = Girildiği Tarih modu (senaryo=0)
-        var cbYillikAralik = document.getElementById('tahsilat_yillik');
-        var useGirildigi = !(cbYillikAralik && cbYillikAralik.checked);
+        // Makbuz açık → client de Girildiği Tarih; kapalı → Tahsilat Tarihi sütunu.
+        var cbMakbuzAralik = document.getElementById('tahsilat_manuel_makbuz');
+        var useGirildigi = !!(cbMakbuzAralik && cbMakbuzAralik.checked);
         Array.prototype.forEach.call(tbody.querySelectorAll('tr'), function (tr) {
             if (tr.classList.contains('tahsilat-empty-row')) return;
             if (!tr.cells || tr.cells.length < 11) return;
@@ -1680,14 +1683,33 @@
         if (tabloToplamEl) tabloToplamEl.textContent = tahsilatFmtMoney(toplam) + ' TL';
     }
 
+    function tahsilatYillikMakbuzSenkron() {
+        var cbMakbuz = document.getElementById('tahsilat_manuel_makbuz');
+        var cbYillik = document.getElementById('tahsilat_yillik');
+        var lab = document.getElementById('tahsilat_yillik_label');
+        var makbuzOn = !!(cbMakbuz && cbMakbuz.checked);
+        if (cbYillik) {
+            cbYillik.disabled = makbuzOn;
+        }
+        if (lab) {
+            lab.title = makbuzOn
+                ? 'Makbuz açıkken TARİH = Girildiği TARİH'
+                : 'İşaretliyse (varsayılan): seçilen dönemi kapsayan tüm ödemeler (çok aylı peşinler dahil). İşaretsizse Tahsilat Tarihi (tahsilat_tarihi) aralıkta olan kayıtlar.';
+            lab.style.opacity = makbuzOn ? '0.55' : '';
+            lab.style.cursor = makbuzOn ? 'not-allowed' : 'pointer';
+        }
+        if (typeof tahsilatTarihAraligiRaporuUygula === 'function') {
+            tahsilatTarihAraligiRaporuUygula();
+        }
+    }
+
     let musteriAramaZamanlayici;
     document.addEventListener('DOMContentLoaded', function() {
         // Sayfa yüklenince
         var urlParams = new URLSearchParams(
           window.location.search);
         var senaryoParam = urlParams.get('senaryo');
-        // senaryo=0 → Girildiği Tarih → Yıllık işaretsiz
-        // parametre yok / 1 → dönem kapsama → Yıllık işaretli (varsayılan)
+        // senaryo=0 → Makbuz kapalıyken tahsilat_tarihi; parametre yok/1 → dönem kapsama
         var cbYillik = document.getElementById('tahsilat_yillik');
         if (cbYillik) {
           cbYillik.checked = (senaryoParam !== '0');
@@ -1698,6 +1720,7 @@
           var mmOn = (mmParam === '1' || mmParam === 'true' || mmParam === 'yes' || mmParam === 'on');
           cbMakbuz.checked = mmOn;
         }
+        tahsilatYillikMakbuzSenkron();
         tahsilatHizmetSecimiYukle();
         tahsilatTutarHucresiFormatla();
         tahsilatHizmetTurleriYukle().finally(function () { tahsilatHizmetBtnLabelGuncelle(); });

@@ -5791,9 +5791,11 @@ def api_musteri_odeme_duzeni():
 def tahsilatlar():
     """Tahsilatlar sekmesi — tarih aralığı veya (?yil=) tam yıl.
 
-    Tarih filtresi tahsil edildiği güne göre değil, raporun «hangi aya» yazıldığına göre:
-    - |AYLIK_TAH|YYYY-MM-DD| varsa en az bir işaretçi tarihi aralıkta olmalı;
-    - yoksa COALESCE(fatura_tarihi, tahsilat_tarihi) aralıkta olmalı.
+    Tarih ekseni (date_mode) — iki checkbox etkileşimi:
+    - Tahsilat Makbuzu AÇIK → created_at (Girildiği Tarih); Yıllık tarih kuralı ezilir.
+    - Makbuz KAPALI + Yıllık AÇIK (senaryo≠0) → dönem kapsama (|AYLIK_TAH| veya
+      COALESCE(fatura_tarihi, tahsilat_tarihi)) — mevcut senaryo=1.
+    - Makbuz KAPALI + Yıllık KAPALI (senaryo=0) → tahsilat_tarihi (Tarih sütunu).
     """
     today = date.today()
     bas_s = (request.args.get("baslangic") or "").strip()
@@ -5821,6 +5823,13 @@ def tahsilatlar():
     senaryo = str(request.args.get("senaryo", "1") or "1").strip()
     _mm_raw = str(request.args.get("sadece_manuel_makbuz") or "").strip().lower()
     sadece_manuel_makbuz = _mm_raw in ("1", "true", "yes", "on")
+    # Makbuz açık → created_at ezer; değilse Yıllık (senaryo≠0) dönem; değilse tahsilat_tarihi.
+    if sadece_manuel_makbuz:
+        date_mode = "created_at"
+    elif senaryo != "0":
+        date_mode = "donem_kapsama"
+    else:
+        date_mode = "tahsilat_tarihi"
 
     raw_hizmet = (request.args.get("hizmet_turleri") or "").strip()
     secili_hizmet_turleri = []
@@ -5851,13 +5860,20 @@ def tahsilatlar():
         ) mk ON TRUE
         LEFT JOIN faturalar f ON t.fatura_id = f.id
     """
-    if senaryo == "0":
+    if date_mode == "created_at":
         sql += """
         WHERE t.created_at::date >= %s::date
           AND t.created_at::date <= %s::date
         """
         params = [d0, d1]
+    elif date_mode == "tahsilat_tarihi":
+        sql += """
+        WHERE t.tahsilat_tarihi::date >= %s::date
+          AND t.tahsilat_tarihi::date <= %s::date
+        """
+        params = [d0, d1]
     else:
+        # donem_kapsama — mevcut senaryo=1 SQL
         sql += """
         WHERE (
             (
@@ -5891,6 +5907,7 @@ def tahsilatlar():
     # Ana Tahsilatlar raporu: seçili aralıkta gerçekten tahsil edilmiş/işaretlenmiş ayları göster.
     # - Marker'lı kayıtlar: marker tarihi aralıkta olmalı VE (cache varsa) aylık gridde görünür aylar içinde olmalı.
     # - Marker'sız kayıtlar: elle girilmiş kabul edilir, referans tarih (fatura/tahsilat) aralıkta olmalı.
+    # Yalnız date_mode=donem_kapsama iken (Makbuz kapalı + Yıllık açık).
     def _date_from_val(v):
         if v is None:
             return None
@@ -5914,7 +5931,7 @@ def tahsilatlar():
         if _mid > 0:
             mid_set.add(_mid)
     visible_ym_by_mid = {}
-    if mid_set:
+    if mid_set and date_mode == "donem_kapsama":
         try:
             cache_rows = fetch_all(
                 "SELECT musteri_id, payload FROM musteri_aylik_grid_cache WHERE musteri_id = ANY(%s::bigint[])",
@@ -5952,7 +5969,7 @@ def tahsilatlar():
             visible_ym_by_mid = {}
 
     filtered = []
-    if senaryo != "0":
+    if date_mode == "donem_kapsama":
         for _t in tahsilatlar_list:
             ac = str(_t.get("aciklama") or "")
             marker_isos = re.findall(r"\|AYLIK_TAH\|([0-9]{4}-[0-9]{2}-[0-9]{2})\|", ac)
@@ -6072,6 +6089,7 @@ def tahsilatlar():
         secili_hizmet_turleri=secili_hizmet_turleri,
         senaryo=senaryo,
         sadece_manuel_makbuz=sadece_manuel_makbuz,
+        date_mode=date_mode,
         tahsilatlar=tahsilatlar_list,
         toplam=toplam,
         tahsilat_ham_sayi=tahsilat_ham_sayi,
