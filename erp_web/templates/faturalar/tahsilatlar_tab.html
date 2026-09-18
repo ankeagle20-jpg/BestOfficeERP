@@ -835,6 +835,12 @@
             {% if sadece_manuel_makbuz is defined and sadece_manuel_makbuz %}disabled{% endif %}>
           Yıllık
         </label>
+        <button type="button" id="tahsilat_excel_aktar" class="btn-erp btn-erp-sm"
+          onclick="tahsilatExcelAktar()"
+          title="Ekrandaki aktif filtrelerle Tahsilat raporunu Excel (.xlsx) olarak indirir."
+          style="margin-left:4px;">
+          <i class="fa fa-file-excel-o" aria-hidden="true"></i> Excel'e Aktar
+        </button>
     </div>
     
     <div class="stats">
@@ -1333,6 +1339,23 @@
         if (n === 'kredi_karti') return 'Kredi Kartı';
         if (n === 'cek') return 'Çek';
         return 'Nakit';
+    }
+
+    function tahsilatExcelAktar() {
+        try {
+            if (typeof tahsilatHizmetSecimiPaneldenOku === 'function') {
+                tahsilatHizmetSecimiPaneldenOku();
+            }
+        } catch (_e) {}
+        var url = tahsilatFiltreUrlOlustur(
+            (typeof __tahsilatHizmetSecili !== 'undefined') ? __tahsilatHizmetSecili : []
+        );
+        // /faturalar/tahsilatlar?... → /faturalar/tahsilat-raporu-excel?...
+        url = String(url || '').replace(
+            /\/faturalar\/tahsilatlar(\?|$)/,
+            '/faturalar/tahsilat-raporu-excel$1'
+        );
+        window.location.href = url;
     }
 
     function filtrele() {

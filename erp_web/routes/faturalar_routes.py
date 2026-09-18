@@ -5786,16 +5786,13 @@ def api_musteri_odeme_duzeni():
     })
 
 
-@bp.route('/tahsilatlar')
-@faturalar_gerekli
-def tahsilatlar():
-    """Tahsilatlar sekmesi — tarih aralığı veya (?yil=) tam yıl.
+def _tahsilat_rapor_dataset_from_request():
+    """Tahsilat raporu: request.args filtreleri → ham + display satırlar + meta.
 
-    Tarih ekseni (date_mode) — iki checkbox etkileşimi:
-    - Tahsilat Makbuzu AÇIK → created_at (Girildiği Tarih); Yıllık tarih kuralı ezilir.
-    - Makbuz KAPALI + Yıllık AÇIK (senaryo≠0) → dönem kapsama (|AYLIK_TAH| veya
-      COALESCE(fatura_tarihi, tahsilat_tarihi)) — mevcut senaryo=1.
-    - Makbuz KAPALI + Yıllık KAPALI (senaryo=0) → tahsilat_tarihi (Tarih sütunu).
+    date_mode:
+    - Tahsilat Makbuzu AÇIK → created_at (Yıllık ezilir)
+    - Makbuz KAPALI + Yıllık AÇIK (senaryo≠0) → donem_kapsama
+    - Makbuz KAPALI + Yıllık KAPALI (senaryo=0) → tahsilat_tarihi
     """
     today = date.today()
     bas_s = (request.args.get("baslangic") or "").strip()
@@ -5823,7 +5820,6 @@ def tahsilatlar():
     senaryo = str(request.args.get("senaryo", "1") or "1").strip()
     _mm_raw = str(request.args.get("sadece_manuel_makbuz") or "").strip().lower()
     sadece_manuel_makbuz = _mm_raw in ("1", "true", "yes", "on")
-    # Makbuz açık → created_at ezer; değilse Yıllık (senaryo≠0) dönem; değilse tahsilat_tarihi.
     if sadece_manuel_makbuz:
         date_mode = "created_at"
     elif senaryo != "0":
@@ -5873,7 +5869,6 @@ def tahsilatlar():
         """
         params = [d0, d1]
     else:
-        # donem_kapsama — mevcut senaryo=1 SQL
         sql += """
         WHERE (
             (
@@ -5904,10 +5899,7 @@ def tahsilatlar():
     sql += " ORDER BY t.tahsilat_tarihi DESC NULLS LAST, t.id DESC"
     tahsilatlar_raw = fetch_all(sql, tuple(params))
     tahsilatlar_list = [_row_serializable(t) for t in (tahsilatlar_raw or [])]
-    # Ana Tahsilatlar raporu: seçili aralıkta gerçekten tahsil edilmiş/işaretlenmiş ayları göster.
-    # - Marker'lı kayıtlar: marker tarihi aralıkta olmalı VE (cache varsa) aylık gridde görünür aylar içinde olmalı.
-    # - Marker'sız kayıtlar: elle girilmiş kabul edilir, referans tarih (fatura/tahsilat) aralıkta olmalı.
-    # Yalnız date_mode=donem_kapsama iken (Makbuz kapalı + Yıllık açık).
+
     def _date_from_val(v):
         if v is None:
             return None
@@ -6006,8 +5998,6 @@ def tahsilatlar():
             fatura_tarihi=_t.get("fatura_tarihi"),
             tahsilat_tarihi=_t.get("tahsilat_tarihi"),
         )
-    # Güvenli doldurma: bazı ortamlarda join/alias farklarından dolayı hizmet türü boş gelebiliyor.
-    # Burada müşteri id -> hizmet türü haritasını ayrıca kurup eksik satırları tamamlıyoruz.
     musteri_idler = []
     seen_mid = set()
     for t in tahsilatlar_list:
@@ -6056,11 +6046,10 @@ def tahsilatlar():
                 continue
             t["rapor_hizmet_turu"] = ht_map.get(mid, "")
 
-    # Toplam / ham sayı: gruplamadan ÖNCE (çift sayım yok). Display liste Aşama 2a.
     tahsilatlar_ham = list(tahsilatlar_list)
     toplam = sum(t.get("tutar") or 0 for t in tahsilatlar_ham)
     tahsilat_ham_sayi = len(tahsilatlar_ham)
-    tahsilatlar_list = _tahsilat_rapor_grupla(tahsilatlar_ham)
+    tahsilatlar_display = _tahsilat_rapor_grupla(tahsilatlar_ham)
     hizmet_rows = fetch_all(
         """
         SELECT DISTINCT hizmet_turu
@@ -6080,19 +6069,204 @@ def tahsilatlar():
     hizmet_turu_options = [str((r or {}).get("hizmet_turu") or "").strip() for r in hizmet_rows]
     hizmet_turu_options = [x for x in hizmet_turu_options if x]
 
+    return {
+        "yil": yil,
+        "d0": d0,
+        "d1": d1,
+        "baslangic_iso": d0.isoformat(),
+        "bitis_iso": d1.isoformat(),
+        "senaryo": senaryo,
+        "sadece_manuel_makbuz": sadece_manuel_makbuz,
+        "date_mode": date_mode,
+        "secili_hizmet_turleri": secili_hizmet_turleri,
+        "hizmet_turu_options": hizmet_turu_options,
+        "tahsilatlar_ham": tahsilatlar_ham,
+        "tahsilatlar": tahsilatlar_display,
+        "toplam": toplam,
+        "tahsilat_ham_sayi": tahsilat_ham_sayi,
+    }
+
+
+def _tahsilat_rapor_odeme_label(odeme_turu):
+    od = str(odeme_turu or "nakit").strip().lower().replace(" ", "_")
+    if od in ("havale", "eft", "banka", "havale/eft"):
+        return "Banka"
+    if od in ("kredi_karti", "kredi_kartı", "kredi-kartı"):
+        return "Kredi Kartı"
+    if od in ("cek", "çek"):
+        return "Çek"
+    return "Nakit"
+
+
+def _tahsilat_rapor_excel_cell_date(val):
+    if val is None:
+        return ""
+    if hasattr(val, "strftime"):
+        try:
+            return val.strftime("%d.%m.%Y")
+        except Exception:
+            pass
+    s = str(val).strip()
+    if len(s) >= 10 and s[4] == "-" and s[7] == "-":
+        return f"{s[8:10]}.{s[5:7]}.{s[0:4]}"
+    return s
+
+
+def _tahsilat_rapor_workbook_bytes(ds):
+    """Cari Ekstre stilinde Tahsilat raporu .xlsx (ham satırlar = ekran adet/toplam)."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment, PatternFill
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Tahsilat Raporu"
+
+    arial = Font(name="Arial", size=11)
+    arial_bold = Font(name="Arial", size=11, bold=True)
+    baslik_font = Font(name="Arial", size=14, bold=True)
+    header_fill = PatternFill(start_color="0097A7", end_color="0097A7", fill_type="solid")
+    header_font = Font(name="Arial", size=11, bold=True, color="FFFFFF")
+
+    ws.merge_cells("A1:J1")
+    ws["A1"] = "TAHSİLAT RAPORU"
+    ws["A1"].font = baslik_font
+    ws["A1"].alignment = Alignment(horizontal="center")
+
+    ws["A2"] = "Dönem:"
+    ws["B2"] = f"{ds.get('baslangic_iso') or ''} - {ds.get('bitis_iso') or ''}"
+    ws["A3"] = "Filtre:"
+    _mm = "Makbuz" if ds.get("sadece_manuel_makbuz") else "Tümü"
+    _yl = "Yıllık açık" if str(ds.get("senaryo") or "1") != "0" else "Yıllık kapalı"
+    _dm = str(ds.get("date_mode") or "")
+    ws["B3"] = f"{_mm} | {_yl} | date_mode={_dm}"
+    for c in ("A2", "A3"):
+        ws[c].font = arial_bold
+    for c in ("B2", "B3"):
+        ws[c].font = arial
+
+    headers = [
+        "ERP #",
+        "Tarih",
+        "Girildiği Tarih",
+        "Cari",
+        "Ödenen Aylar",
+        "Tutar",
+        "Ödeme türü",
+        "Hizmet türü",
+        "Oda No",
+        "Fatura No",
+    ]
+    header_row = 5
+    for i, h in enumerate(headers, start=1):
+        cell = ws.cell(row=header_row, column=i, value=h)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center")
+
+    rows = ds.get("tahsilatlar_ham") or []
+    row = header_row + 1
+    for t in rows:
+        ws.cell(row=row, column=1, value=str(t.get("makbuz_no") or "")).font = arial
+        ws.cell(row=row, column=2, value=_tahsilat_rapor_excel_cell_date(t.get("tahsilat_tarihi"))).font = arial
+        ws.cell(row=row, column=3, value=_tahsilat_rapor_excel_cell_date(t.get("created_at"))).font = arial
+        ws.cell(row=row, column=4, value=str(t.get("musteri_adi") or "")).font = arial
+        ws.cell(row=row, column=5, value=str(t.get("rapor_aciklama_ay") or "")).font = arial
+        try:
+            tutar_v = float(t.get("tutar") or 0)
+        except (TypeError, ValueError):
+            tutar_v = 0.0
+        tc = ws.cell(row=row, column=6, value=tutar_v)
+        tc.font = arial
+        tc.number_format = "#,##0.00"
+        ws.cell(row=row, column=7, value=_tahsilat_rapor_odeme_label(t.get("odeme_turu"))).font = arial
+        ws.cell(
+            row=row,
+            column=8,
+            value=str(t.get("rapor_hizmet_turu") or t.get("hizmet_turu") or ""),
+        ).font = arial
+        ws.cell(row=row, column=9, value=str(t.get("hazir_ofis_oda_no") or "")).font = arial
+        ws.cell(row=row, column=10, value=str(t.get("fatura_no") or "")).font = arial
+        row += 1
+
+    last_data_row = row - 1
+    toplam_row = row + 1
+    ws.cell(row=toplam_row, column=5, value="TOPLAM").font = arial_bold
+    if last_data_row >= header_row + 1:
+        tb = ws.cell(
+            row=toplam_row,
+            column=6,
+            value=f"=SUM(F{header_row + 1}:F{last_data_row})",
+        )
+    else:
+        tb = ws.cell(row=toplam_row, column=6, value=float(ds.get("toplam") or 0))
+    tb.font = arial_bold
+    tb.number_format = "#,##0.00"
+    ws.cell(row=toplam_row, column=4, value=f"Adet: {int(ds.get('tahsilat_ham_sayi') or 0)}").font = arial_bold
+
+    widths = {
+        "A": 12,
+        "B": 12,
+        "C": 14,
+        "D": 36,
+        "E": 28,
+        "F": 12,
+        "G": 12,
+        "H": 18,
+        "I": 10,
+        "J": 16,
+    }
+    for col, w in widths.items():
+        ws.column_dimensions[col].width = w
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf
+
+
+@bp.route('/tahsilatlar')
+@faturalar_gerekli
+def tahsilatlar():
+    """Tahsilatlar sekmesi — tarih aralığı veya (?yil=) tam yıl.
+
+    Tarih ekseni (date_mode) — iki checkbox etkileşimi:
+    - Tahsilat Makbuzu AÇIK → created_at (Girildiği Tarih); Yıllık tarih kuralı ezilir.
+    - Makbuz KAPALI + Yıllık AÇIK (senaryo≠0) → dönem kapsama (|AYLIK_TAH| veya
+      COALESCE(fatura_tarihi, tahsilat_tarihi)) — mevcut senaryo=1.
+    - Makbuz KAPALI + Yıllık KAPALI (senaryo=0) → tahsilat_tarihi (Tarih sütunu).
+    """
+    ds = _tahsilat_rapor_dataset_from_request()
     return render_template(
         "faturalar/tahsilatlar_tab.html",
-        yil=yil,
-        baslangic_iso=d0.isoformat(),
-        bitis_iso=d1.isoformat(),
-        hizmet_turu_options=hizmet_turu_options,
-        secili_hizmet_turleri=secili_hizmet_turleri,
-        senaryo=senaryo,
-        sadece_manuel_makbuz=sadece_manuel_makbuz,
-        date_mode=date_mode,
-        tahsilatlar=tahsilatlar_list,
-        toplam=toplam,
-        tahsilat_ham_sayi=tahsilat_ham_sayi,
+        yil=ds["yil"],
+        baslangic_iso=ds["baslangic_iso"],
+        bitis_iso=ds["bitis_iso"],
+        hizmet_turu_options=ds["hizmet_turu_options"],
+        secili_hizmet_turleri=ds["secili_hizmet_turleri"],
+        senaryo=ds["senaryo"],
+        sadece_manuel_makbuz=ds["sadece_manuel_makbuz"],
+        date_mode=ds["date_mode"],
+        tahsilatlar=ds["tahsilatlar"],
+        toplam=ds["toplam"],
+        tahsilat_ham_sayi=ds["tahsilat_ham_sayi"],
+    )
+
+
+@bp.route("/tahsilat-raporu-excel")
+@faturalar_gerekli
+def tahsilat_raporu_excel():
+    """Tahsilat raporu Excel (.xlsx) — tahsilatlar() ile aynı filtreler / helper."""
+    ds = _tahsilat_rapor_dataset_from_request()
+    buf = _tahsilat_rapor_workbook_bytes(ds)
+    filename = (
+        f"Tahsilat_Raporu_{ds.get('baslangic_iso') or ''}_{ds.get('bitis_iso') or ''}_"
+        f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    )
+    return send_file(
+        buf,
+        as_attachment=True,
+        download_name=filename,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
 
