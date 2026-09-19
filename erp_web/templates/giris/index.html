@@ -2749,6 +2749,16 @@
     padding: 0;
     text-decoration: underline dotted;
 }
+button.auto-btn.whatsapp-hizmet-filter-btn {
+    text-decoration: none;
+    padding: inherit;
+    font: inherit;
+    color: #e0f7fa;
+}
+button.auto-btn.whatsapp-hizmet-filter-btn.wa-hizmet-aktif {
+    color: #4fc3f7;
+    box-shadow: inset 0 0 0 1px rgba(79, 195, 247, 0.55);
+}
 .fatura-rapor-firma-fatura-btn {
     display: inline-flex;
     align-items: center;
@@ -4032,6 +4042,13 @@
                 onclick="window.__whatsappSadeceHaricModu = false; whatsappGecikenListeYukle(true, false);">
                 <i class="fa fa-refresh"></i> Listeyi Yenile
             </button>
+            <button type="button" class="auto-btn whatsapp-hizmet-filter-btn"
+                id="whatsapp_hizmet_filter_btn"
+                onclick="whatsappHizmetFilterMenuAc(this)"
+                style="background:#455a64;"
+                title="Rapor Almadan önce hizmet türü süzgeci seçin">
+                <i class="fa fa-filter"></i> Hizmet Türü ▾
+            </button>
             <button type="button" class="auto-btn"
                 onclick="whatsappSeciliListedenCikar()"
                 style="background:#78716c;">
@@ -4064,9 +4081,7 @@
                         </th>
                         <th>Müşteri</th>
                         <th>Sözleşme</th>
-                        <th><button type="button" class="whatsapp-hizmet-filter-btn"
-                            id="whatsapp_hizmet_filter_btn"
-                            onclick="whatsappHizmetFilterMenuAc(this)">Hizmet Türü ▾</button></th>
+                        <th>Hizmet Türü</th>
                         <th><button type="button" class="whatsapp-hizmet-filter-btn"
                             id="whatsapp_grup2_filter_btn"
                             onclick="whatsappGrup2FilterMenuAc(this)">Grup 2 ▾</button></th>
@@ -8618,7 +8633,11 @@ function whatsappGecikenListeYukle(force, haricGoster) {
                 return;
             }
             __whatsappGecikenListe = d.liste || [];
+            window.__whatsappGecikenListeYuklendi = true;
             window.__whatsappGrup2EtiketMap = d.grup2_etiket_map || {};
+            whatsappHizmetSecenekleriMerge((__whatsappGecikenListe || []).map(function (it) {
+                return it.hizmet_turu;
+            }));
             if (ozet) {
                 ozet.textContent = __whatsappGecikenListe.length + ' müşteri gecikmiş durumda (' + d.tarih + ')';
             }
@@ -8846,27 +8865,56 @@ function whatsappHizmetFilterPopBindOutsideDeferred() {
     }, 0);
 }
 
-function whatsappHizmetSecenekleriTopla() {
-    var seen = {};
-    var out = [];
-    (__whatsappGecikenListe || []).forEach(function (it) {
-        var h = (it.hizmet_turu || '').trim();
-        if (!h || seen[h]) return;
-        seen[h] = true;
-        out.push(h);
+function whatsappHizmetSecenekleriMerge(arr) {
+    var map = window.__whatsappHizmetSecenekleriMap || {};
+    (arr || []).forEach(function (x) {
+        var ad = String(x || '').trim();
+        if (!ad) return;
+        var key = ad.toLowerCase();
+        if (!map[key]) map[key] = ad;
     });
+    window.__whatsappHizmetSecenekleriMap = map;
+}
+
+function whatsappHizmetTurleriYukle() {
+    if (window.__whatsappHizmetTurleriYukleniyor) {
+        return window.__whatsappHizmetTurleriYukleniyor;
+    }
+    window.__whatsappHizmetTurleriYukleniyor = fetch('/giris/api/hizmet-turleri', { credentials: 'same-origin' })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (j) {
+            var arr = (j && j.ok && Array.isArray(j.turler)) ? j.turler : [];
+            whatsappHizmetSecenekleriMerge(arr.map(function (it) {
+                return (it && it.ad) ? it.ad : '';
+            }));
+            return whatsappHizmetSecenekleriTopla();
+        })
+        .catch(function () { return whatsappHizmetSecenekleriTopla(); })
+        .finally(function () {
+            window.__whatsappHizmetTurleriYukleniyor = null;
+        });
+    return window.__whatsappHizmetTurleriYukleniyor;
+}
+
+function whatsappHizmetSecenekleriTopla() {
+    // Master liste (endpoint) + varsa mevcut rapordan ek türler + aktif filtre
+    whatsappHizmetSecenekleriMerge((__whatsappGecikenListe || []).map(function (it) {
+        return it.hizmet_turu;
+    }));
+    whatsappHizmetSecenekleriMerge(window.__whatsappHizmetFiltre || []);
+    var map = window.__whatsappHizmetSecenekleriMap || {};
+    var out = Object.keys(map).map(function (k) { return map[k]; });
     out.sort(function (a, b) {
         return a.localeCompare(b, 'tr', { sensitivity: 'base', numeric: true });
     });
     return out;
 }
 
-function whatsappHizmetFilterMenuAc(anchor) {
+function whatsappHizmetFilterMenuRender(anchor, list) {
     whatsappHizmetFilterPopClose();
     var pop = whatsappHizmetFilterPopEnsure();
     pop.hidden = false;
     whatsappHizmetFilterPopPosition(anchor, pop);
-    var list = whatsappHizmetSecenekleriTopla();
     var curDizi = window.__whatsappHizmetFiltre || [];
     var curSet = {};
     curDizi.forEach(function (x) { curSet[String(x || '').trim().toLowerCase()] = true; });
@@ -8901,9 +8949,15 @@ function whatsappHizmetFilterMenuAc(anchor) {
             });
         }
     });
-    list.forEach(function (h) {
+    (list || []).forEach(function (h) {
         hizmetSatir(h, h, !!curSet[String(h || '').trim().toLowerCase()]);
     });
+    if (!(list || []).length) {
+        var bos = document.createElement('div');
+        bos.style.cssText = 'padding:8px 10px;color:#90a4ae;font-size:12px;';
+        bos.textContent = 'Hizmet türü tanımı bulunamadı.';
+        inn.appendChild(bos);
+    }
     var act = document.createElement('div');
     act.className = 'whatsapp-hizmet-filter-pop-actions';
     var btnU = document.createElement('button');
@@ -8927,7 +8981,11 @@ function whatsappHizmetFilterMenuAc(anchor) {
         }
         whatsappHizmetFilterPopClose();
         whatsappHizmetFilterBtnStilGuncelle();
-        whatsappGecikenListeYukle(true, !!window.__whatsappSadeceHaricModu);
+        // Rapor henüz alınmadıysa sadece seçimi sakla; Rapor Al filtreyle çekecek.
+        // Rapor zaten yüklüyse süzgeci sunucuda yeniden uygula.
+        if (window.__whatsappGecikenListeYuklendi) {
+            whatsappGecikenListeYukle(true, !!window.__whatsappSadeceHaricModu);
+        }
     });
     act.appendChild(btnU);
     pop.appendChild(inn);
@@ -8936,14 +8994,38 @@ function whatsappHizmetFilterMenuAc(anchor) {
     whatsappHizmetFilterPopBindOutsideDeferred();
 }
 
+function whatsappHizmetFilterMenuAc(anchor) {
+    var mevcut = whatsappHizmetSecenekleriTopla();
+    if (mevcut.length) {
+        whatsappHizmetFilterMenuRender(anchor, mevcut);
+        // Arka planda master listeyi tazeleyip menüyü güncelle (açıksa)
+        whatsappHizmetTurleriYukle().then(function (list) {
+            var pop = document.getElementById('whatsapp_hizmet_filter_pop');
+            if (!pop || pop.hidden) return;
+            whatsappHizmetFilterMenuRender(anchor, list);
+        });
+        return;
+    }
+    whatsappHizmetFilterPopClose();
+    var pop = whatsappHizmetFilterPopEnsure();
+    pop.hidden = false;
+    whatsappHizmetFilterPopPosition(anchor, pop);
+    pop.innerHTML = '<div style="padding:10px 12px;color:#90a4ae;font-size:12px;">Hizmet türleri yükleniyor...</div>';
+    whatsappHizmetFilterPopBindOutsideDeferred();
+    whatsappHizmetTurleriYukle().then(function (list) {
+        whatsappHizmetFilterMenuRender(anchor, list);
+    });
+}
+
 function whatsappHizmetFilterBtnStilGuncelle() {
     var btn = document.getElementById('whatsapp_hizmet_filter_btn');
     if (!btn) return;
     var aktifMi = (window.__whatsappHizmetFiltre || []).length > 0;
+    btn.classList.toggle('wa-hizmet-aktif', aktifMi);
     btn.style.color = aktifMi ? '#4fc3f7' : '';
-    btn.textContent = aktifMi
-        ? 'Hizmet Türü ▾ (' + window.__whatsappHizmetFiltre.length + ')'
-        : 'Hizmet Türü ▾';
+    btn.innerHTML = aktifMi
+        ? '<i class="fa fa-filter"></i> Hizmet Türü ▾ (' + window.__whatsappHizmetFiltre.length + ')'
+        : '<i class="fa fa-filter"></i> Hizmet Türü ▾';
 }
 
 function whatsappGrup2SecenekleriTopla() {
