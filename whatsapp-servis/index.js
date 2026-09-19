@@ -24,10 +24,44 @@ const WA_IDLE_CHECK_MS = Math.max(
   1000,
   parseInt(String(process.env.WA_IDLE_CHECK_MS || '60000'), 10) || 60000
 );
+/** Flask ile paylaşılan secret. Env yoksa yerel varsayılan (üretimde mutlaka override). */
+const WA_INTERNAL_TOKEN = String(
+  process.env.WA_INTERNAL_TOKEN || 'bestoffice-wa-internal'
+).trim();
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+/** Tarayıcıdan doğrudan erişimi engelle — yalnızca Flask (header token) geçer. */
+function requireInternalToken(req, res, next) {
+  const got = String(req.headers['x-wa-internal-token'] || '').trim();
+  if (!WA_INTERNAL_TOKEN || got !== WA_INTERNAL_TOKEN) {
+    return res.status(401).json({
+      ok: false,
+      error: 'Yetkisiz: geçerli X-WA-Internal-Token gerekli.',
+    });
+  }
+  return next();
+}
+
+const PROTECTED_EXACT = new Set([
+  '/durum',
+  '/status',
+  '/qr-goster',
+  '/kuyruk-ekle',
+  '/kuyruk-toplu-ekle',
+  '/send',
+]);
+
+app.use((req, res, next) => {
+  const p = req.path || '';
+  if (p === '/health') return next();
+  if (p.startsWith('/t/') || PROTECTED_EXACT.has(p)) {
+    return requireInternalToken(req, res, next);
+  }
+  return next();
+});
 
 /** @type {Map<string, object>} */
 const sessions = new Map();
@@ -736,6 +770,7 @@ app.listen(PORT, () => {
   console.log(
     `[WA] Kapasite: max_chrome=${WA_MAX_CONCURRENT_CHROME} idle_ms=${WA_IDLE_MS} idle_check_ms=${WA_IDLE_CHECK_MS} headless=${String(process.env.WA_HEADLESS || 'false')}`
   );
+  console.log('[WA] Internal token koruması: AÇIK (X-WA-Internal-Token zorunlu; /health hariç)');
   setInterval(() => {
     idleDestroySweep().catch((err) => {
       console.warn('[WA] Idle sweep hatası:', err && err.message ? err.message : err);

@@ -1,4 +1,4 @@
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, Response
 from datetime import date, datetime
 import os
 from db import fetch_all, fetch_one, execute, _tenant_schema_for_request
@@ -7,6 +7,9 @@ from auth import giris_gerekli
 bp = Blueprint('whatsapp', __name__, url_prefix='/whatsapp')
 
 _WHATSAPP_GECIKEN_HARIC_TABLE_READY = False
+
+# Yerel varsayılan; üretimde WA_INTERNAL_TOKEN ile güçlü secret verin (Node ile aynı olmalı).
+_WA_INTERNAL_TOKEN_DEFAULT = 'bestoffice-wa-internal'
 
 
 def _wa_service_base_url():
@@ -26,6 +29,17 @@ def _wa_url(path_suffix):
     """Örn. path_suffix='durum' → http://…/t/{tenantId}/durum"""
     suffix = str(path_suffix or '').lstrip('/')
     return f"{_wa_service_base_url()}/t/{_wa_tenant_id()}/{suffix}"
+
+
+def _wa_internal_token():
+    """Node ile paylaşılan secret (env: WA_INTERNAL_TOKEN)."""
+    raw = (os.environ.get('WA_INTERNAL_TOKEN') or '').strip()
+    return raw or _WA_INTERNAL_TOKEN_DEFAULT
+
+
+def _wa_internal_headers():
+    """Sunucu→Node istekleri; tarayıcıya sızmaz."""
+    return {'X-WA-Internal-Token': _wa_internal_token()}
 
 
 def _ensure_whatsapp_geciken_haric_table():
@@ -349,6 +363,7 @@ def api_gonder():
         r = requests.post(
             _wa_url('kuyruk-toplu-ekle'),
             json={'liste': wa_liste},
+            headers=_wa_internal_headers(),
             timeout=10
         )
         result = r.json()
@@ -356,7 +371,6 @@ def api_gonder():
             'ok': True,
             'servis_yaniti': result,
             'wa_tenant_id': _wa_tenant_id(),
-            'wa_url': _wa_url('kuyruk-toplu-ekle'),
         })
     except Exception as e:
         return jsonify({'ok': False, 'mesaj': f'WhatsApp servisine bağlanılamadı: {e}'}), 500
@@ -368,10 +382,38 @@ def api_servis_durum():
     """WhatsApp servisinin bağlantı durumunu kontrol eder"""
     import requests
     try:
-        r = requests.get(_wa_url('durum'), timeout=5)
+        r = requests.get(
+            _wa_url('durum'),
+            headers=_wa_internal_headers(),
+            timeout=5,
+        )
         data = r.json() if r.content else {}
         if isinstance(data, dict):
             data.setdefault('wa_tenant_id', _wa_tenant_id())
         return jsonify(data)
     except Exception as e:
         return jsonify({'bagli': False, 'hata': str(e), 'wa_tenant_id': _wa_tenant_id()})
+
+
+@bp.route('/qr-ac')
+@giris_gerekli
+def api_qr_ac():
+    """Kiracıya özel WhatsApp QR/bağlı sayfası — Flask proxy (Node adresi tarayıcıya sızmaz)."""
+    import requests
+    try:
+        r = requests.get(
+            _wa_url('qr-goster'),
+            headers=_wa_internal_headers(),
+            timeout=30,
+        )
+        ctype = r.headers.get('Content-Type') or 'text/html; charset=utf-8'
+        return Response(r.content, status=r.status_code, content_type=ctype)
+    except Exception as e:
+        body = (
+            '<!DOCTYPE html><html lang="tr"><head><meta charset="utf-8">'
+            '<title>WhatsApp</title></head>'
+            '<body style="font-family:sans-serif;padding:40px;background:#111;color:#eee">'
+            '<h1 style="color:#ef5350">WhatsApp QR alınamadı</h1>'
+            f'<p>{e}</p><p>Tenant: <code>{_wa_tenant_id()}</code></p></body></html>'
+        )
+        return Response(body, status=502, content_type='text/html; charset=utf-8')
