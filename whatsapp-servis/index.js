@@ -9,12 +9,30 @@ const PORT = process.env.PORT || 3001;
 const AUTH_DATA_PATH = path.join(__dirname, '.wwebjs_auth');
 const TENANT_ID_RE = /^(default|tenant_[a-z0-9_]+)$/;
 
+/** Eşzamanlı Chrome/Puppeteer üst sınırı (Render önerisi: 2). */
+const WA_MAX_CONCURRENT_CHROME = Math.max(
+  1,
+  parseInt(String(process.env.WA_MAX_CONCURRENT_CHROME || '2'), 10) || 2
+);
+/** Idle destroy eşiği (ms). Varsayılan 20 dk. default tenant bu süpürmeye tabi değil. */
+const WA_IDLE_MS = Math.max(
+  1000,
+  parseInt(String(process.env.WA_IDLE_MS || String(20 * 60 * 1000)), 10) || 20 * 60 * 1000
+);
+/** Idle kontrol periyodu (ms). Varsayılan 60 sn. */
+const WA_IDLE_CHECK_MS = Math.max(
+  1000,
+  parseInt(String(process.env.WA_IDLE_CHECK_MS || '60000'), 10) || 60000
+);
+
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 /** @type {Map<string, object>} */
 const sessions = new Map();
+/** Şu an Chrome tutan oturum sayısı (starting/qr/ready). */
+let activeChromeCount = 0;
 
 function normalizeTelefon(raw) {
   let phone = String(raw || '').replace(/\D/g, '');
@@ -124,9 +142,42 @@ function getOrCreateSession(tenantId) {
     initPromise: null,
     lastUsedAt: Date.now(),
     status: 'idle',
+    chromeHeld: false,
+    // Üretim default oturumu idle destroy'a tabi olmasın
+    pinKeepAlive: tenantId === 'default',
   };
   sessions.set(tenantId, session);
   return session;
+}
+
+function concurrentLimitError() {
+  const err = new Error(
+    `WhatsApp eşzamanlı oturum limiti doldu (max ${WA_MAX_CONCURRENT_CHROME}). ` +
+      'Lütfen daha sonra tekrar deneyin veya kullanılmayan oturumların kapanmasını bekleyin.'
+  );
+  err.code = 'WA_CONCURRENT_LIMIT';
+  err.statusCode = 503;
+  return err;
+}
+
+function sendEnsureError(res, err, asHtml) {
+  const code = err && err.code;
+  const status = (err && err.statusCode) || (code === 'WA_CONCURRENT_LIMIT' ? 503 : 500);
+  const msg = (err && err.message) || String(err);
+  if (asHtml) {
+    return res.status(status).send(
+      `<!DOCTYPE html><html lang="tr"><head><meta charset="utf-8"><title>WhatsApp</title></head>` +
+        `<body style="font-family:sans-serif;padding:40px;background:#111;color:#eee">` +
+        `<h1 style="color:#ef5350">WhatsApp servisi meşgul</h1><p>${msg}</p></body></html>`
+    );
+  }
+  return res.status(status).json({
+    ok: false,
+    error: msg,
+    code: code || 'WA_ERROR',
+    active_chrome: activeChromeCount,
+    max_concurrent_chrome: WA_MAX_CONCURRENT_CHROME,
+  });
 }
 
 async function kuyrukIsle(session) {
@@ -212,6 +263,18 @@ async function ensureClient(tenantId) {
     return session;
   }
 
+  // Yeni Chrome slotu gerekli — limit doluysa 503
+  if (!session.chromeHeld) {
+    if (activeChromeCount >= WA_MAX_CONCURRENT_CHROME) {
+      console.warn(
+        `[WA:${tenantId}] Eşzamanlı limit (${WA_MAX_CONCURRENT_CHROME}), active=${activeChromeCount}`
+      );
+      throw concurrentLimitError();
+    }
+    activeChromeCount += 1;
+    session.chromeHeld = true;
+  }
+
   session.status = 'starting';
   session.initPromise = (async () => {
     const client = new Client({
@@ -223,7 +286,9 @@ async function ensureClient(tenantId) {
     });
     session.client = client;
     attachHandlers(session);
-    console.log(`[WA:${tenantId}] WhatsApp istemcisi başlatılıyor...`);
+    console.log(
+      `[WA:${tenantId}] WhatsApp istemcisi başlatılıyor... (chrome ${activeChromeCount}/${WA_MAX_CONCURRENT_CHROME})`
+    );
     await client.initialize();
     return session;
   })();
@@ -233,6 +298,10 @@ async function ensureClient(tenantId) {
   } catch (err) {
     session.status = 'error';
     session.client = null;
+    if (session.chromeHeld) {
+      session.chromeHeld = false;
+      activeChromeCount = Math.max(0, activeChromeCount - 1);
+    }
     console.error(
       `[WA:${tenantId}] initialize hatası:`,
       err && err.message ? err.message : err
@@ -254,8 +323,35 @@ async function destroySession(tenantId) {
   } catch (err) {
     console.warn(`[WA:${tenantId}] destroy uyarısı:`, err && err.message ? err.message : err);
   }
+  if (session.chromeHeld) {
+    session.chromeHeld = false;
+    activeChromeCount = Math.max(0, activeChromeCount - 1);
+  }
   sessions.delete(tenantId);
-  console.log(`[WA:${tenantId}] Oturum bellekten kaldırıldı (auth disk korunur).`);
+  console.log(
+    `[WA:${tenantId}] Oturum bellekten kaldırıldı (auth disk korunur). chrome=${activeChromeCount}/${WA_MAX_CONCURRENT_CHROME}`
+  );
+}
+
+async function idleDestroySweep() {
+  const now = Date.now();
+  const victims = [];
+  for (const [id, s] of sessions) {
+    if (s.pinKeepAlive || id === 'default') continue;
+    if (!s.client && !s.chromeHeld) continue;
+    if (s.queue.length > 0 || s.queueBusy) continue;
+    if (s.status === 'starting' || s.initPromise) continue;
+    if (now - (s.lastUsedAt || 0) <= WA_IDLE_MS) continue;
+    victims.push(id);
+  }
+  for (const id of victims) {
+    console.log(`[WA:${id}] Idle destroy (lastUsed > ${WA_IDLE_MS}ms, kuyruk boş)`);
+    try {
+      await destroySession(id);
+    } catch (err) {
+      console.warn(`[WA:${id}] Idle destroy hatası:`, err && err.message ? err.message : err);
+    }
+  }
 }
 
 function logDeprecatedAlias(routeName) {
@@ -358,7 +454,7 @@ app.get('/t/:tenantId/durum', async (req, res) => {
     const session = await ensureClient(tenantId);
     res.json({ ok: true, ...durumPayload(session) });
   } catch (err) {
-    res.status(500).json({ ok: false, error: err.message || String(err) });
+    return sendEnsureError(res, err, false);
   }
 });
 
@@ -369,7 +465,7 @@ app.get('/t/:tenantId/qr-goster', async (req, res) => {
     const session = await ensureClient(tenantId);
     await handleQrGoster(session, res);
   } catch (err) {
-    res.status(500).send('QR hatası: ' + (err.message || String(err)));
+    return sendEnsureError(res, err, true);
   }
 });
 
@@ -409,7 +505,7 @@ app.post('/t/:tenantId/kuyruk-ekle', async (req, res) => {
       mesaj: 'WhatsApp bağlı değil; QR tarandıktan sonra gönderilecek.',
     });
   } catch (err) {
-    res.status(500).json({ ok: false, error: err.message || String(err) });
+    return sendEnsureError(res, err, false);
   }
 });
 
@@ -432,7 +528,7 @@ app.post('/t/:tenantId/kuyruk-toplu-ekle', async (req, res) => {
     kuyrukIsle(session);
     res.json({ ok: true, eklenen, kuyruk_uzunlugu: session.queue.length, tenant_id: tenantId });
   } catch (err) {
-    res.status(500).json({ ok: false, error: err.message || String(err) });
+    return sendEnsureError(res, err, false);
   }
 });
 
@@ -462,6 +558,7 @@ app.post('/t/:tenantId/send', async (req, res) => {
       tenant_id: tenantId,
     });
   } catch (err) {
+    if (err && err.code === 'WA_CONCURRENT_LIMIT') return sendEnsureError(res, err, false);
     console.error(`[WA:${tenantId}] Gönderim hatası:`, err);
     res.status(500).json({ ok: false, error: err.message || String(err) });
   }
@@ -472,12 +569,24 @@ app.post('/t/:tenantId/send', async (req, res) => {
 app.get('/health', (_req, res) => {
   const active = [];
   for (const [id, s] of sessions) {
-    active.push({ tenant_id: id, ready: s.ready, status: s.status });
+    active.push({
+      tenant_id: id,
+      ready: s.ready,
+      status: s.status,
+      chrome_held: Boolean(s.chromeHeld),
+      pin_keep_alive: Boolean(s.pinKeepAlive),
+      last_used_at: s.lastUsedAt || null,
+      idle_ms: s.lastUsedAt ? Date.now() - s.lastUsedAt : null,
+    });
   }
   res.json({
     ok: true,
     ready: sessions.has('default') ? sessions.get('default').ready : false,
     active_sessions: active.length,
+    active_chrome: activeChromeCount,
+    max_concurrent_chrome: WA_MAX_CONCURRENT_CHROME,
+    idle_ms: WA_IDLE_MS,
+    idle_check_ms: WA_IDLE_CHECK_MS,
     sessions: active,
   });
 });
@@ -505,7 +614,7 @@ app.get('/durum', async (_req, res) => {
     const session = await ensureClient('default');
     res.json({ ok: true, ...durumPayload(session), deprecated_alias: true });
   } catch (err) {
-    res.status(500).json({ ok: false, error: err.message || String(err) });
+    return sendEnsureError(res, err, false);
   }
 });
 
@@ -515,7 +624,7 @@ app.get('/qr-goster', async (_req, res) => {
     const session = await ensureClient('default');
     await handleQrGoster(session, res);
   } catch (err) {
-    res.status(500).send('QR hatası: ' + (err.message || String(err)));
+    return sendEnsureError(res, err, true);
   }
 });
 
@@ -624,7 +733,15 @@ app.listen(PORT, () => {
   console.log(`[API] WhatsApp servisi http://localhost:${PORT}`);
   console.log(`[API] Tenant QR: http://localhost:${PORT}/t/{tenantId}/qr-goster`);
   console.log(`[API] Alias (DEPRECATED): http://localhost:${PORT}/qr-goster → default`);
-  // Geriye uyum: default oturumu hemen ayağa kaldır (eski davranış)
+  console.log(
+    `[WA] Kapasite: max_chrome=${WA_MAX_CONCURRENT_CHROME} idle_ms=${WA_IDLE_MS} idle_check_ms=${WA_IDLE_CHECK_MS} headless=${String(process.env.WA_HEADLESS || 'false')}`
+  );
+  setInterval(() => {
+    idleDestroySweep().catch((err) => {
+      console.warn('[WA] Idle sweep hatası:', err && err.message ? err.message : err);
+    });
+  }, WA_IDLE_CHECK_MS);
+  // Geriye uyum: default oturumu hemen ayağa kaldır (eski davranış); pinKeepAlive → idle destroy yok
   ensureClient('default').catch((err) => {
     console.error('[WA:default] initialize hatası:', err && err.message ? err.message : err);
   });
