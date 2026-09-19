@@ -45,19 +45,11 @@ function requireInternalToken(req, res, next) {
   return next();
 }
 
-const PROTECTED_EXACT = new Set([
-  '/durum',
-  '/status',
-  '/qr-goster',
-  '/kuyruk-ekle',
-  '/kuyruk-toplu-ekle',
-  '/send',
-]);
-
 app.use((req, res, next) => {
   const p = req.path || '';
   if (p === '/health') return next();
-  if (p.startsWith('/t/') || PROTECTED_EXACT.has(p)) {
+  // Eski alias'lar 410 döner (token gerekmez); koruma yalnızca /t/*
+  if (p.startsWith('/t/')) {
     return requireInternalToken(req, res, next);
   }
   return next();
@@ -388,11 +380,6 @@ async function idleDestroySweep() {
   }
 }
 
-function logDeprecatedAlias(routeName) {
-  console.warn(`[WA] DEPRECATED alias kullanıldı: ${routeName} → /t/default${routeName === '/status' || routeName === '/health' ? '' : routeName.replace(/^\/(health|status)/, '') || ''} (tenant=default)`);
-  console.warn(`[WA] DEPRECATED: ${routeName} — lütfen /t/default/... kullanın`);
-}
-
 async function handleQrGoster(session, res) {
   try {
     touch(session);
@@ -625,148 +612,30 @@ app.get('/health', (_req, res) => {
   });
 });
 
-app.get('/status', async (_req, res) => {
-  logDeprecatedAlias('/status');
-  try {
-    const session = await ensureClient('default');
-    res.json({
-      ok: true,
-      ready: session.ready,
-      has_qr: Boolean(session.qr),
-      tenant_id: 'default',
-    });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message || String(err) });
-  }
-});
+/** Eski tenant'sız alias'lar kaldırıldı (Aşama 6) — 410 Gone */
+function goneAlias(req, res) {
+  return res.status(410).json({
+    ok: false,
+    error:
+      'Bu endpoint kaldırıldı (410 Gone). Tenant-scoped yol kullanın: /t/{tenantId}/…',
+    path: req.path,
+    ornek: '/t/default/durum',
+  });
+}
 
-// --- DEPRECATED aliases → default tenant ---
-
-app.get('/durum', async (_req, res) => {
-  logDeprecatedAlias('/durum');
-  try {
-    const session = await ensureClient('default');
-    res.json({ ok: true, ...durumPayload(session), deprecated_alias: true });
-  } catch (err) {
-    return sendEnsureError(res, err, false);
-  }
-});
-
-app.get('/qr-goster', async (_req, res) => {
-  logDeprecatedAlias('/qr-goster');
-  try {
-    const session = await ensureClient('default');
-    await handleQrGoster(session, res);
-  } catch (err) {
-    return sendEnsureError(res, err, true);
-  }
-});
-
-app.post('/kuyruk-ekle', async (req, res) => {
-  logDeprecatedAlias('/kuyruk-ekle');
-  try {
-    const session = await ensureClient('default');
-    const telefon = String(req.body.telefon || req.body.phone || '').trim();
-    const mesaj = String(req.body.mesaj || req.body.message || '').trim();
-    if (!telefon || !mesaj) {
-      return res.status(400).json({ ok: false, error: 'telefon ve mesaj zorunlu.' });
-    }
-    const item = {
-      id: Date.now() + '-' + Math.random().toString(36).slice(2, 8),
-      telefon,
-      mesaj,
-      eklendi: new Date().toISOString(),
-    };
-    session.queue.push(item);
-    touch(session);
-    if (session.ready) {
-      kuyrukIsle(session);
-      return res.json({
-        ok: true,
-        kuyruga_eklendi: true,
-        kuyruk_id: item.id,
-        ...durumPayload(session),
-        deprecated_alias: true,
-        mesaj: 'Mesaj kuyruğa alındı, gönderiliyor.',
-      });
-    }
-    res.status(202).json({
-      ok: true,
-      kuyruga_eklendi: true,
-      kuyruk_id: item.id,
-      ...durumPayload(session),
-      deprecated_alias: true,
-      mesaj: 'WhatsApp bağlı değil; QR tarandıktan sonra gönderilecek.',
-    });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message || String(err) });
-  }
-});
-
-app.post('/kuyruk-toplu-ekle', async (req, res) => {
-  logDeprecatedAlias('/kuyruk-toplu-ekle');
-  try {
-    const session = await ensureClient('default');
-    const { liste } = req.body || {};
-    if (!Array.isArray(liste) || liste.length === 0) {
-      return res.status(400).json({ ok: false, mesaj: 'liste zorunlu (boş olamaz)' });
-    }
-    let eklenen = 0;
-    for (const item of liste) {
-      if (!item || !item.telefon || !item.mesaj) continue;
-      session.queue.push({ telefon: item.telefon, mesaj: item.mesaj });
-      eklenen++;
-    }
-    touch(session);
-    kuyrukIsle(session);
-    res.json({
-      ok: true,
-      eklenen,
-      kuyruk_uzunlugu: session.queue.length,
-      tenant_id: 'default',
-      deprecated_alias: true,
-    });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message || String(err) });
-  }
-});
-
-app.post('/send', async (req, res) => {
-  logDeprecatedAlias('/send');
-  try {
-    const session = await ensureClient('default');
-    if (!session.ready || !session.client) {
-      return res.status(503).json({
-        ok: false,
-        error: 'WhatsApp henüz hazır değil. QR kodu tarayın.',
-      });
-    }
-    const phone = normalizeTelefon(req.body.phone || req.body.telefon);
-    const message = String(req.body.message || req.body.mesaj || '').trim();
-    if (!phone || !message) {
-      return res.status(400).json({ ok: false, error: 'phone ve message zorunlu.' });
-    }
-    const chatId = phone.endsWith('@c.us') ? phone : `${phone}@c.us`;
-    touch(session);
-    const result = await session.client.sendMessage(chatId, message);
-    res.json({
-      ok: true,
-      id: result && result.id ? result.id._serialized || null : null,
-      tenant_id: 'default',
-      deprecated_alias: true,
-    });
-  } catch (err) {
-    console.error('[WA:default] Gönderim hatası:', err);
-    res.status(500).json({ ok: false, error: err.message || String(err) });
-  }
-});
+app.get('/status', goneAlias);
+app.get('/durum', goneAlias);
+app.get('/qr-goster', goneAlias);
+app.post('/kuyruk-ekle', goneAlias);
+app.post('/kuyruk-toplu-ekle', goneAlias);
+app.post('/send', goneAlias);
 
 migrateDefaultSessionDir();
 
 app.listen(PORT, () => {
   console.log(`[API] WhatsApp servisi http://localhost:${PORT}`);
-  console.log(`[API] Tenant QR: http://localhost:${PORT}/t/{tenantId}/qr-goster`);
-  console.log(`[API] Alias (DEPRECATED): http://localhost:${PORT}/qr-goster → default`);
+  console.log(`[API] Tenant API: http://localhost:${PORT}/t/{tenantId}/…`);
+  console.log(`[API] QR (Flask proxy): /whatsapp/qr-ac → /t/{tenantId}/qr-goster`);
   console.log(
     `[WA] Kapasite: max_chrome=${WA_MAX_CONCURRENT_CHROME} idle_ms=${WA_IDLE_MS} idle_check_ms=${WA_IDLE_CHECK_MS} headless=${String(process.env.WA_HEADLESS || 'false')}`
   );
