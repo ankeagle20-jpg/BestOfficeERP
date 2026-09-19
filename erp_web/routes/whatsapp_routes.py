@@ -145,27 +145,36 @@ def api_geciken_liste():
             except Exception:
                 continue
 
+    # En eski ödenmemiş ay_key — tek batch (eski: müşteri başına N+1 sorgu)
+    oldest_ay_by_mid = {}
+    if musteri_ids_all:
+        oldest_rows = fetch_all(
+            """
+            SELECT musteri_id, MIN(elem->>'ay_key') AS ay_key
+            FROM musteri_aylik_grid_cache gc,
+                 jsonb_array_elements(gc.payload::jsonb->'aylar') AS elem
+            WHERE gc.musteri_id = ANY(%s)
+              AND (elem->>'tahsil_edildi')::boolean = false
+              AND to_date(elem->>'ay_key', 'YYYY-MM')
+                  <= to_date(%s, 'YYYY-MM')
+              AND (elem->>'tutar_kdv_dahil')::float > 0
+            GROUP BY musteri_id
+            """,
+            (musteri_ids_all, bugun_key),
+        ) or []
+        for orow in oldest_rows:
+            mid_o = orow.get('musteri_id')
+            ay_o = orow.get('ay_key')
+            if mid_o is not None and ay_o:
+                oldest_ay_by_mid[mid_o] = ay_o
+
     sonuc = []
     for r in rows:
-        # Bu müşterinin en eski ödenmemiş ayını bul
-        odenme_rows = fetch_all("""
-            SELECT elem->>'ay_key' as ay_key
-            FROM musteri_aylik_grid_cache,
-            jsonb_array_elements(payload::jsonb->'aylar') AS elem
-            WHERE musteri_id = %s
-            AND (elem->>'tahsil_edildi')::boolean = false
-            AND to_date(elem->>'ay_key', 'YYYY-MM')
-                <= to_date(%s, 'YYYY-MM')
-            AND (elem->>'tutar_kdv_dahil')::float > 0
-            ORDER BY elem->>'ay_key' ASC
-            LIMIT 1
-        """, (r['id'], bugun_key)) or []
-
-        if not odenme_rows:
+        en_eski_ay_key = oldest_ay_by_mid.get(r['id'])
+        if not en_eski_ay_key:
             continue
 
         # En eski ödenmemiş ayın sözleşme gününden gecikme hesapla
-        en_eski_ay_key = odenme_rows[0]['ay_key']  # "2026-5" gibi
         yil, ay = map(int, en_eski_ay_key.split('-'))
 
         sozlesme_tarihi = r.get('sozlesme_tarihi')
