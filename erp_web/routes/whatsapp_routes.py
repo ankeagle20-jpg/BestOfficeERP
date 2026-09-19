@@ -1,11 +1,31 @@
 from flask import Blueprint, jsonify, request
 from datetime import date, datetime
-from db import fetch_all, fetch_one, execute
+import os
+from db import fetch_all, fetch_one, execute, _tenant_schema_for_request
 from auth import giris_gerekli
 
 bp = Blueprint('whatsapp', __name__, url_prefix='/whatsapp')
 
 _WHATSAPP_GECIKEN_HARIC_TABLE_READY = False
+
+
+def _wa_service_base_url():
+    """Node WhatsApp servisi taban URL (env: WHATSAPP_SERVICE_URL)."""
+    return (os.environ.get('WHATSAPP_SERVICE_URL') or 'http://127.0.0.1:3001').rstrip('/')
+
+
+def _wa_tenant_id():
+    """g.tenant_schema varsa onu, yoksa (tek şirket / platform) 'default'."""
+    schema = _tenant_schema_for_request()
+    if schema:
+        return schema
+    return 'default'
+
+
+def _wa_url(path_suffix):
+    """Örn. path_suffix='durum' → http://…/t/{tenantId}/durum"""
+    suffix = str(path_suffix or '').lstrip('/')
+    return f"{_wa_service_base_url()}/t/{_wa_tenant_id()}/{suffix}"
 
 
 def _ensure_whatsapp_geciken_haric_table():
@@ -327,12 +347,17 @@ def api_gonder():
 
     try:
         r = requests.post(
-            'http://127.0.0.1:3001/kuyruk-toplu-ekle',
+            _wa_url('kuyruk-toplu-ekle'),
             json={'liste': wa_liste},
             timeout=10
         )
         result = r.json()
-        return jsonify({'ok': True, 'servis_yaniti': result})
+        return jsonify({
+            'ok': True,
+            'servis_yaniti': result,
+            'wa_tenant_id': _wa_tenant_id(),
+            'wa_url': _wa_url('kuyruk-toplu-ekle'),
+        })
     except Exception as e:
         return jsonify({'ok': False, 'mesaj': f'WhatsApp servisine bağlanılamadı: {e}'}), 500
 
@@ -343,7 +368,10 @@ def api_servis_durum():
     """WhatsApp servisinin bağlantı durumunu kontrol eder"""
     import requests
     try:
-        r = requests.get('http://127.0.0.1:3001/durum', timeout=5)
-        return jsonify(r.json())
+        r = requests.get(_wa_url('durum'), timeout=5)
+        data = r.json() if r.content else {}
+        if isinstance(data, dict):
+            data.setdefault('wa_tenant_id', _wa_tenant_id())
+        return jsonify(data)
     except Exception as e:
-        return jsonify({'bagli': False, 'hata': str(e)})
+        return jsonify({'bagli': False, 'hata': str(e), 'wa_tenant_id': _wa_tenant_id()})
