@@ -8593,7 +8593,24 @@ function whatsappGecikenListeYukle(force, haricGoster) {
 
     whatsappServisDurumKontrol();
 
-    fetch('/whatsapp/api/geciken-liste' + (haricGoster ? '?haric_goster=1' : ''), {credentials:'same-origin'})
+    var qs = [];
+    if (haricGoster) qs.push('haric_goster=1');
+    var hzFiltre = window.__whatsappHizmetFiltre || [];
+    if (hzFiltre.length) {
+        var hzLower = [];
+        var hzSeen = {};
+        hzFiltre.forEach(function (x) {
+            var v = String(x || '').trim().toLowerCase();
+            if (!v || hzSeen[v]) return;
+            hzSeen[v] = true;
+            hzLower.push(v);
+        });
+        if (hzLower.length) {
+            qs.push('hizmet_turleri=' + encodeURIComponent(hzLower.join(',')));
+        }
+    }
+    var gecikenUrl = '/whatsapp/api/geciken-liste' + (qs.length ? ('?' + qs.join('&')) : '');
+    fetch(gecikenUrl, {credentials:'same-origin'})
         .then(r => r.json())
         .then(d => {
             if (!d.ok) {
@@ -8615,7 +8632,12 @@ function whatsappGecikenListeYukle(force, haricGoster) {
                 ? __whatsappGecikenListe.filter(it => it.haric)
                 : __whatsappGecikenListe.filter(it => !it.haric);
             if (hizmetFiltre0.length) {
-                gosterilecekListe = gosterilecekListe.filter(it => hizmetFiltre0.indexOf(it.hizmet_turu) !== -1);
+                gosterilecekListe = gosterilecekListe.filter(function (it) {
+                    var ht = String(it.hizmet_turu || '').trim().toLowerCase();
+                    return hizmetFiltre0.some(function (f) {
+                        return String(f || '').trim().toLowerCase() === ht;
+                    });
+                });
             }
             var grup2Filtre0 = window.__whatsappGrup2Filtre || [];
             if (grup2Filtre0.length) {
@@ -8847,7 +8869,7 @@ function whatsappHizmetFilterMenuAc(anchor) {
     var list = whatsappHizmetSecenekleriTopla();
     var curDizi = window.__whatsappHizmetFiltre || [];
     var curSet = {};
-    curDizi.forEach(function (x) { curSet[x] = true; });
+    curDizi.forEach(function (x) { curSet[String(x || '').trim().toLowerCase()] = true; });
     pop.innerHTML = '';
     var inn = document.createElement('div');
     inn.className = 'whatsapp-hizmet-filter-pop-inn';
@@ -8880,7 +8902,7 @@ function whatsappHizmetFilterMenuAc(anchor) {
         }
     });
     list.forEach(function (h) {
-        hizmetSatir(h, h, !!curSet[h]);
+        hizmetSatir(h, h, !!curSet[String(h || '').trim().toLowerCase()]);
     });
     var act = document.createElement('div');
     act.className = 'whatsapp-hizmet-filter-pop-actions';
@@ -8905,7 +8927,7 @@ function whatsappHizmetFilterMenuAc(anchor) {
         }
         whatsappHizmetFilterPopClose();
         whatsappHizmetFilterBtnStilGuncelle();
-        whatsappGecikenListesiYenidenCiz();
+        whatsappGecikenListeYukle(true, !!window.__whatsappSadeceHaricModu);
     });
     act.appendChild(btnU);
     pop.appendChild(inn);
@@ -9067,7 +9089,12 @@ function whatsappGecikenListesiYenidenCiz() {
         ? __whatsappGecikenListe.filter(it => it.haric)
         : __whatsappGecikenListe.filter(it => !it.haric);
     if (hizmetFiltre.length) {
-        gosterilecekListe = gosterilecekListe.filter(it => hizmetFiltre.indexOf(it.hizmet_turu) !== -1);
+        gosterilecekListe = gosterilecekListe.filter(function (it) {
+            var ht = String(it.hizmet_turu || '').trim().toLowerCase();
+            return hizmetFiltre.some(function (f) {
+                return String(f || '').trim().toLowerCase() === ht;
+            });
+        });
     }
     var grup2Filtre = window.__whatsappGrup2Filtre || [];
     if (grup2Filtre.length) {

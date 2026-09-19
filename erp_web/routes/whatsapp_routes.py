@@ -114,6 +114,18 @@ def api_geciken_liste():
     _ensure_whatsapp_geciken_haric_table()
     bugun_key = f"{bugun.year}-{bugun.month}"
 
+    # Tahsilat raporu ile aynı: virgüllü hizmet_turleri → lower whitelist; boş = filtre yok
+    raw_hizmet = (request.args.get("hizmet_turleri") or "").strip()
+    secili_hizmet_turleri = []
+    if raw_hizmet:
+        seen_ht = set()
+        for part in raw_hizmet.split(","):
+            v = part.strip().lower()
+            if not v or v in seen_ht:
+                continue
+            seen_ht.add(v)
+            secili_hizmet_turleri.append(v)
+
     # Grid cache'den ödenmemiş geçmiş ayları olan müşterileri çek
     haric_sql = ""
     if not haric_goster:
@@ -123,10 +135,23 @@ def api_geciken_liste():
         )
         """
 
+    hizmet_sql = ""
+    sql_params = []
+    if secili_hizmet_turleri:
+        placeholders = ", ".join(["%s"] * len(secili_hizmet_turleri))
+        hizmet_sql = (
+            " AND LOWER(TRIM(COALESCE(NULLIF(TRIM(mk.hizmet_turu), ''), "
+            "NULLIF(TRIM(c.hizmet_turu), ''), ''))) IN (" + placeholders + ")"
+        )
+        sql_params.extend(secili_hizmet_turleri)
+    sql_params.append(bugun_key)
+
     rows = fetch_all("""
         SELECT c.id, c.name, c.musteri_adi, c.phone, c.phone2,
                COALESCE(c.guncel_kira_bedeli, c.ilk_kira_bedeli, mk.aylik_kira, 0) as aylik_tutar,
-               mk.sozlesme_tarihi, mk.hizmet_turu, c.grup2_secimleri
+               mk.sozlesme_tarihi,
+               COALESCE(NULLIF(TRIM(mk.hizmet_turu), ''), NULLIF(TRIM(c.hizmet_turu), ''), '') AS hizmet_turu,
+               c.grup2_secimleri
         FROM customers c
         LEFT JOIN LATERAL (
             SELECT sozlesme_tarihi, aylik_kira, hizmet_turu
@@ -135,7 +160,7 @@ def api_geciken_liste():
             ORDER BY id DESC LIMIT 1
         ) mk ON TRUE
         WHERE c.durum = 'aktif'
-        """ + haric_sql + """
+        """ + haric_sql + hizmet_sql + """
         AND EXISTS (
             SELECT 1 FROM musteri_aylik_grid_cache gc,
             jsonb_array_elements(gc.payload::jsonb->'aylar') AS elem
@@ -145,7 +170,7 @@ def api_geciken_liste():
                 <= to_date(%s, 'YYYY-MM')
             AND (elem->>'tutar_kdv_dahil')::float > 0
         )
-    """, (bugun_key,)) or []
+    """, tuple(sql_params)) or []
 
     haric_ids = set()
     if haric_goster:
