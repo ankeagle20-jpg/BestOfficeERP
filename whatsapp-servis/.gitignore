@@ -1,0 +1,10 @@
+# Sensitive WhatsApp session data - NEVER commit
+.wwebjs_auth/
+.wwebjs_cache/
+
+# Dependencies
+node_modules/
+
+# Backups and temp
+*.bak*
+_tmp_*
