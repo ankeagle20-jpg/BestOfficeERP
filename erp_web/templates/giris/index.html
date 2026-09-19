@@ -2759,6 +2759,29 @@ button.auto-btn.whatsapp-hizmet-filter-btn.wa-hizmet-aktif {
     color: #4fc3f7;
     box-shadow: inset 0 0 0 1px rgba(79, 195, 247, 0.55);
 }
+.whatsapp-sort-btn {
+    background: none;
+    border: none;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+    padding: 0;
+    white-space: nowrap;
+}
+.whatsapp-sort-btn:hover {
+    color: #4fc3f7;
+}
+.whatsapp-sort-btn .wa-sort-ind {
+    display: inline-block;
+    min-width: 0.9em;
+    margin-left: 2px;
+    font-size: 0.85em;
+    opacity: 0.55;
+}
+.whatsapp-sort-btn.wa-sort-aktif .wa-sort-ind {
+    opacity: 1;
+    color: #4fc3f7;
+}
 .fatura-rapor-firma-fatura-btn {
     display: inline-flex;
     align-items: center;
@@ -4081,16 +4104,16 @@ button.auto-btn.whatsapp-hizmet-filter-btn.wa-hizmet-aktif {
                         </th>
                         <th>Müşteri</th>
                         <th>Sözleşme</th>
-                        <th>Hizmet Türü</th>
+                        <th><button type="button" class="whatsapp-sort-btn" data-wa-sort="hizmet_turu" data-wa-sort-type="text" onclick="whatsappListeSirala(this)">Hizmet Türü <span class="wa-sort-ind">⇅</span></button></th>
                         <th><button type="button" class="whatsapp-hizmet-filter-btn"
                             id="whatsapp_grup2_filter_btn"
                             onclick="whatsappGrup2FilterMenuAc(this)">Grup 2 ▾</button></th>
                         <th>Telefon</th>
-                        <th>Gecikme</th>
-                        <th>Ay</th>
-                        <th>İlk Kira</th>
-                        <th>Güncel</th>
-                        <th>Toplam</th>
+                        <th><button type="button" class="whatsapp-sort-btn" data-wa-sort="gecikme_gun" data-wa-sort-type="num" onclick="whatsappListeSirala(this)">Gecikme <span class="wa-sort-ind">⇅</span></button></th>
+                        <th><button type="button" class="whatsapp-sort-btn" data-wa-sort="ay" data-wa-sort-type="text" onclick="whatsappListeSirala(this)">Ay <span class="wa-sort-ind">⇅</span></button></th>
+                        <th><button type="button" class="whatsapp-sort-btn" data-wa-sort="ilk_kira" data-wa-sort-type="num" onclick="whatsappListeSirala(this)">İlk Kira <span class="wa-sort-ind">⇅</span></button></th>
+                        <th><button type="button" class="whatsapp-sort-btn" data-wa-sort="guncel" data-wa-sort-type="num" onclick="whatsappListeSirala(this)">Güncel <span class="wa-sort-ind">⇅</span></button></th>
+                        <th><button type="button" class="whatsapp-sort-btn" data-wa-sort="toplam" data-wa-sort-type="num" onclick="whatsappListeSirala(this)">Toplam <span class="wa-sort-ind">⇅</span></button></th>
                         <th style="min-width:300px;">Mesaj (düzenlenebilir)</th>
                     </tr>
                 </thead>
@@ -8634,6 +8657,7 @@ function whatsappGecikenListeYukle(force, haricGoster) {
             }
             __whatsappGecikenListe = d.liste || [];
             window.__whatsappGecikenListeYuklendi = true;
+            window.__whatsappSort = null;
             window.__whatsappGrup2EtiketMap = d.grup2_etiket_map || {};
             whatsappHizmetSecenekleriMerge((__whatsappGecikenListe || []).map(function (it) {
                 return it.hizmet_turu;
@@ -8702,6 +8726,7 @@ function whatsappGecikenListeYukle(force, haricGoster) {
                     '</tr>';
             }).join('') + whatsappGecikenToplamSatiriHtml(gosterilecekListe);
             try { whatsappTabloResizableKur(); } catch (eResz) {}
+            try { whatsappSortIndikatorGuncelle(); } catch (eSort) {}
         })
         .catch(e => {
             if (tbody) tbody.innerHTML = '<tr><td colspan="12" style="color:#ef5350;">Hata: ' + e.message + '</td></tr>';
@@ -9161,6 +9186,93 @@ function whatsappOzetGuncelle(gosterilecekListe, toplamListe, tarih) {
     } else {
         ozet.textContent = gosterilen + ' / ' + toplam + ' müşteri gösteriliyor (filtre uygulanıyor)' + tarihTxt;
     }
+}
+
+function whatsappMesajInputlariSenkronla() {
+    document.querySelectorAll('.whatsapp-mesaj-input').forEach(function (ta) {
+        var idx = parseInt(ta.getAttribute('data-idx'), 10);
+        if (isNaN(idx) || !__whatsappGecikenListe || !__whatsappGecikenListe[idx]) return;
+        __whatsappGecikenListe[idx].mesaj = ta.value;
+    });
+}
+
+function whatsappSeciliMusteriIdsTopla() {
+    var ids = {};
+    document.querySelectorAll('.whatsapp-check:checked').forEach(function (c) {
+        var idx = parseInt(c.getAttribute('data-idx'), 10);
+        if (isNaN(idx) || !__whatsappGecikenListe || !__whatsappGecikenListe[idx]) return;
+        var mid = __whatsappGecikenListe[idx].musteri_id;
+        if (mid != null) ids[String(mid)] = true;
+    });
+    return ids;
+}
+
+function whatsappSeciliMusteriIdsUygula(ids) {
+    if (!ids) return;
+    var tum = document.getElementById('whatsapp-tumunu-sec');
+    var n = 0;
+    var nChk = 0;
+    document.querySelectorAll('.whatsapp-check').forEach(function (c) {
+        nChk += 1;
+        var idx = parseInt(c.getAttribute('data-idx'), 10);
+        var item = (!isNaN(idx) && __whatsappGecikenListe) ? __whatsappGecikenListe[idx] : null;
+        var on = !!(item && item.musteri_id != null && ids[String(item.musteri_id)]);
+        c.checked = on;
+        if (on) n += 1;
+    });
+    if (tum) tum.checked = (nChk > 0 && n === nChk);
+}
+
+function whatsappSortIndikatorGuncelle() {
+    var st = window.__whatsappSort || null;
+    document.querySelectorAll('.whatsapp-sort-btn').forEach(function (btn) {
+        var ind = btn.querySelector('.wa-sort-ind');
+        var key = btn.getAttribute('data-wa-sort');
+        var aktif = !!(st && st.key === key);
+        btn.classList.toggle('wa-sort-aktif', aktif);
+        if (!ind) return;
+        if (!aktif) {
+            ind.textContent = '⇅';
+        } else {
+            ind.textContent = (st.dir === 'asc') ? '▲' : '▼';
+        }
+    });
+}
+
+function whatsappListeSirala(btn) {
+    if (!btn || !__whatsappGecikenListe || !__whatsappGecikenListe.length) return;
+    var key = btn.getAttribute('data-wa-sort');
+    var typ = btn.getAttribute('data-wa-sort-type') || 'text';
+    if (!key) return;
+    whatsappMesajInputlariSenkronla();
+    var secili = whatsappSeciliMusteriIdsTopla();
+    var prev = window.__whatsappSort || {};
+    var dir = 'asc';
+    if (prev.key === key) {
+        dir = (prev.dir === 'asc') ? 'desc' : 'asc';
+    }
+    window.__whatsappSort = { key: key, dir: dir, type: typ };
+    var mul = (dir === 'asc') ? 1 : -1;
+    __whatsappGecikenListe.sort(function (a, b) {
+        var va = a ? a[key] : null;
+        var vb = b ? b[key] : null;
+        if (typ === 'num') {
+            var na = Number(va);
+            var nb = Number(vb);
+            if (!isFinite(na)) na = 0;
+            if (!isFinite(nb)) nb = 0;
+            if (na < nb) return -1 * mul;
+            if (na > nb) return 1 * mul;
+            return 0;
+        }
+        var sa = String(va == null ? '' : va).trim();
+        var sb = String(vb == null ? '' : vb).trim();
+        var cmp = sa.localeCompare(sb, 'tr', { sensitivity: 'base', numeric: true });
+        return cmp * mul;
+    });
+    whatsappSortIndikatorGuncelle();
+    whatsappGecikenListesiYenidenCiz();
+    whatsappSeciliMusteriIdsUygula(secili);
 }
 
 function whatsappGecikenListesiYenidenCiz() {
