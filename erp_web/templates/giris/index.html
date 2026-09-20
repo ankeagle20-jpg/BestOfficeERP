@@ -4072,6 +4072,14 @@ button.auto-btn.whatsapp-hizmet-filter-btn.wa-hizmet-aktif {
                 title="Rapor Almadan önce hizmet türü süzgeci seçin">
                 <i class="fa fa-filter"></i> Hizmet Türü ▾
             </button>
+            <label id="whatsapp_liste_ara_wrap" title="İsim, telefon, hizmet türü, Grup 2, sözleşme tarihi, mesaj ve diğer satır alanlarında ara (istemci; sunucuya gitmez)"
+                style="display:inline-flex;align-items:center;gap:6px;margin:0;">
+                <input type="search" id="whatsapp_liste_ara"
+                    placeholder="Listede ara (isim, telefon, hizmet…)"
+                    autocomplete="off"
+                    aria-label="WhatsApp geciken listesinde metin ara"
+                    style="height:34px;min-width:220px;max-width:320px;padding:6px 10px;border:1px solid #2d4060;border-radius:4px;background:#0f2537;color:#e0f7fa;font-size:13px;">
+            </label>
             <button type="button" class="auto-btn"
                 onclick="whatsappSeciliListedenCikar()"
                 style="background:#78716c;">
@@ -8658,6 +8666,7 @@ function whatsappGecikenListeYukle(force, haricGoster) {
             __whatsappGecikenListe = d.liste || [];
             window.__whatsappGecikenListeYuklendi = true;
             window.__whatsappSort = null;
+            window.__whatsappKorunanSecim = {};
             window.__whatsappGrup2EtiketMap = d.grup2_etiket_map || {};
             whatsappHizmetSecenekleriMerge((__whatsappGecikenListe || []).map(function (it) {
                 return it.hizmet_turu;
@@ -8687,6 +8696,15 @@ function whatsappGecikenListeYukle(force, haricGoster) {
                 gosterilecekListe = gosterilecekListe.filter(function (it) {
                     var itGrup2 = it.grup2_secimleri || [];
                     return grup2Filtre0.some(function (g) { return itGrup2.indexOf(g) !== -1; });
+                });
+            }
+            var araRaw0 = (typeof whatsappListeAraMetniOku === 'function') ? whatsappListeAraMetniOku() : '';
+            if (araRaw0) {
+                var araQ0 = araRaw0.toLocaleLowerCase('tr-TR');
+                gosterilecekListe = gosterilecekListe.filter(function (it) {
+                    return (typeof whatsappSatirAraEslesir === 'function')
+                        ? whatsappSatirAraEslesir(it, araQ0)
+                        : true;
                 });
             }
             whatsappOzetGuncelle(gosterilecekListe, __whatsappGecikenListe, d.tarih);
@@ -9239,13 +9257,75 @@ function whatsappSortIndikatorGuncelle() {
     });
 }
 
+function whatsappSecimKorunanSenkronla() {
+    var korunan = window.__whatsappKorunanSecim || {};
+    document.querySelectorAll('.whatsapp-check').forEach(function (c) {
+        var idx = parseInt(c.getAttribute('data-idx'), 10);
+        if (isNaN(idx) || !__whatsappGecikenListe || !__whatsappGecikenListe[idx]) return;
+        var mid = __whatsappGecikenListe[idx].musteri_id;
+        if (mid == null) return;
+        var key = String(mid);
+        if (c.checked) korunan[key] = true;
+        else delete korunan[key];
+    });
+    window.__whatsappKorunanSecim = korunan;
+    return korunan;
+}
+
+function whatsappListeAraMetniOku() {
+    var inp = document.getElementById('whatsapp_liste_ara');
+    return inp ? String(inp.value || '').trim() : '';
+}
+
+function whatsappSatirAraHaystack(it) {
+    if (!it) return '';
+    var parts = [];
+    function push(v) {
+        if (v == null || v === '') return;
+        parts.push(String(v));
+    }
+    push(it.isim);
+    push(it.telefon);
+    push(String(it.telefon || '').replace(/\D/g, ''));
+    push(it.hizmet_turu);
+    push(it.sozlesme_tarihi);
+    push(it.gecikme_gun);
+    push(it.esik);
+    push(it.tutar);
+    push(it.mesaj);
+    push(it.ilk_kira);
+    push(it.guncel);
+    push(it.ay);
+    push(it.toplam);
+    push(it.musteri_id);
+    var g2 = it.grup2_secimleri || [];
+    var map = window.__whatsappGrup2EtiketMap || {};
+    for (var i = 0; i < g2.length; i++) {
+        push(g2[i]);
+        if (map[g2[i]]) push(map[g2[i]]);
+    }
+    return parts.join(' ').toLocaleLowerCase('tr-TR');
+}
+
+function whatsappSatirAraEslesir(it, q) {
+    if (!q) return true;
+    var hay = whatsappSatirAraHaystack(it);
+    if (hay.indexOf(q) !== -1) return true;
+    var qDigits = String(q).replace(/\D/g, '');
+    if (qDigits && qDigits.length >= 3) {
+        var telDigits = String((it && it.telefon) || '').replace(/\D/g, '');
+        if (telDigits && telDigits.indexOf(qDigits) !== -1) return true;
+    }
+    return false;
+}
+
 function whatsappListeSirala(btn) {
     if (!btn || !__whatsappGecikenListe || !__whatsappGecikenListe.length) return;
     var key = btn.getAttribute('data-wa-sort');
     var typ = btn.getAttribute('data-wa-sort-type') || 'text';
     if (!key) return;
     whatsappMesajInputlariSenkronla();
-    var secili = whatsappSeciliMusteriIdsTopla();
+    whatsappSecimKorunanSenkronla();
     var prev = window.__whatsappSort || {};
     var dir = 'asc';
     if (prev.key === key) {
@@ -9272,12 +9352,12 @@ function whatsappListeSirala(btn) {
     });
     whatsappSortIndikatorGuncelle();
     whatsappGecikenListesiYenidenCiz();
-    whatsappSeciliMusteriIdsUygula(secili);
 }
 
 function whatsappGecikenListesiYenidenCiz() {
     const tbody = document.getElementById('whatsapp-liste-tbody');
     if (!tbody || !__whatsappGecikenListe) return;
+    whatsappSecimKorunanSenkronla();
     const hizmetFiltre = window.__whatsappHizmetFiltre || [];
     let gosterilecekListe = window.__whatsappSadeceHaricModu
         ? __whatsappGecikenListe.filter(it => it.haric)
@@ -9295,6 +9375,13 @@ function whatsappGecikenListesiYenidenCiz() {
         gosterilecekListe = gosterilecekListe.filter(function (it) {
             var itGrup2 = it.grup2_secimleri || [];
             return grup2Filtre.some(function (g) { return itGrup2.indexOf(g) !== -1; });
+        });
+    }
+    var araRaw = whatsappListeAraMetniOku();
+    if (araRaw) {
+        var araQ = araRaw.toLocaleLowerCase('tr-TR');
+        gosterilecekListe = gosterilecekListe.filter(function (it) {
+            return whatsappSatirAraEslesir(it, araQ);
         });
     }
     whatsappOzetGuncelle(gosterilecekListe, __whatsappGecikenListe, null);
@@ -9338,7 +9425,27 @@ function whatsappGecikenListesiYenidenCiz() {
             '</tr>';
     }).join('') + whatsappGecikenToplamSatiriHtml(gosterilecekListe);
     try { whatsappTabloResizableKur(); } catch (eResz) {}
+    whatsappSeciliMusteriIdsUygula(window.__whatsappKorunanSecim || {});
 }
+
+
+(function initWhatsappListeAramaGiris() {
+    var inp = document.getElementById('whatsapp_liste_ara');
+    if (!inp) return;
+    var tDeb = null;
+    function uygula() {
+        if (typeof whatsappMesajInputlariSenkronla === 'function') whatsappMesajInputlariSenkronla();
+        if (typeof whatsappGecikenListesiYenidenCiz === 'function') whatsappGecikenListesiYenidenCiz();
+    }
+    inp.addEventListener('input', function () {
+        clearTimeout(tDeb);
+        tDeb = setTimeout(uygula, 220);
+    });
+    inp.addEventListener('search', function () {
+        clearTimeout(tDeb);
+        uygula();
+    });
+})();
 
 function whatsappTabloResizableKur() {
     var table = document.querySelector('.whatsapp-geciken-tablo');
