@@ -61,12 +61,16 @@ def _ensure_whatsapp_geciken_haric_table():
 
 
 SABLONLAR = {
-    0: "Değerli iş ortağımız, bugün vadesi dolan faturanızın hatırlatmasıdır. İş birliğiniz için teşekkür ederiz.",
-    3: "Sayın {isim}, ödemenizde 3 günlük bir gecikme görünüyor. Gözden kaçmış olabileceğini düşündük.",
-    7: "Ödemeniz 1 haftadır gecikmededir. Mutabakat veya teknik bir sorun varsa lütfen bizimle iletişime geçiniz.",
-    15: "Sayın Yetkili, gecikme süresi 15 günü bulmuştur. Hizmet sürekliliğinde aksama olmaması adına gün içinde ödeme beklemekteyiz.",
-    21: "Ödemeniz 21 gündür yapılmamıştır. Borç bakiyenizin kapatılmaması durumunda sistem erişim kısıtlamaları gündeme gelecektir.",
-    30: "Gecikme 1 ayı doldurmuştur. Dosyanızın hukuk birimine aktarılmaması için 24 saat içinde ödeme yapılması gerekmektedir.",
+    0: "Sayın {isim}, bugün vadesi dolan {tutar} TL tutarındaki ödemenizin hatırlatmasıdır. İş birliğiniz için teşekkür ederiz.",
+    3: "Sayın {isim}, ödemenizde {gun} günlük bir gecikme görünüyor. Bakiyeniz {tutar} TL'dir. Gözden kaçmış olabileceğini düşündük.",
+    7: "Sayın {isim}, ödemeniz {gun} gündür gecikmededir. {tutar} TL tutarındaki bakiyeniz için mutabakat veya teknik bir sorun varsa lütfen bizimle iletişime geçiniz.",
+    15: "Sayın {isim}, gecikme süreniz {gun} günü bulmuştur. {tutar} TL tutarındaki bakiyenizin, hizmet sürekliliğinizde aksama olmaması adına gün içinde ödenmesini beklemekteyiz.",
+    21: "Sayın {isim}, ödemeniz {gun} gündür yapılmamıştır. {tutar} TL tutarındaki borç bakiyenizin kapatılmaması durumunda sistem erişim kısıtlamaları gündeme gelecektir.",
+    30: "Sayın {isim}, gecikmeniz {gun} günü (1 ayı) doldurmuştur. {tutar} TL tutarındaki bakiyenizin en kısa sürede kapatılmasını rica ederiz, aksi halde takip sürecimiz başlayacaktır.",
+    60: "Sayın {isim}, ödemeniz {gun} gündür gecikmede olup, tutarınız {tutar} TL'ye ulaşmıştır. Önceki hatırlatmalarımıza rağmen ödeme yapılmadığı görülmektedir. Lütfen en kısa sürede ödemenizi tamamlayınız.",
+    90: "Sayın {isim}, {gun} gündür devam eden ödeme geciken bakiyeniz {tutar} TL'dir. Bu gecikme hizmet sürekliliğinizi etkileyebilecek bir aşamaya gelmiştir. 7 gün içinde ödeme yapılmadığı takdirde hizmetiniz askıya alınabilir.",
+    180: "Sayın {isim}, {gun} gündür ödenmeyen {tutar} TL tutarındaki borcunuz nedeniyle dosyanız hukuk birimine devredilme aşamasına gelmiştir. Mağduriyet yaşamamanız için lütfen ivedilikle ödemenizi yapınız.",
+    365: "Sayın {isim}, {gun} gündür (1 yılı aşkın süredir) ödenmeyen {tutar} TL tutarındaki borcunuz nedeniyle yasal süreç başlatılacaktır. Bu son bildirimden itibaren 48 saat içinde ödeme yapılmadığı takdirde, hukuki işlemlere resmi olarak başlanacaktır.",
 }
 
 
