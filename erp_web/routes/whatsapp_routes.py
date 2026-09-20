@@ -151,19 +151,63 @@ def api_geciken_liste():
         sql_params.extend(secili_hizmet_turleri)
     sql_params.append(bugun_key)
 
+    # Çoklu yetkili (musteri_yetkililer) — arama/rapor satırı için; tablo yoksa no-op
+    try:
+        from db import ensure_musteri_yetkililer_table
+        ensure_musteri_yetkililer_table()
+    except Exception:
+        pass
+
     rows = fetch_all("""
         SELECT c.id, c.name, c.musteri_adi, c.phone, c.phone2,
                COALESCE(c.guncel_kira_bedeli, c.ilk_kira_bedeli, mk.aylik_kira, 0) as aylik_tutar,
                mk.sozlesme_tarihi,
                COALESCE(NULLIF(TRIM(mk.hizmet_turu), ''), NULLIF(TRIM(c.hizmet_turu), ''), '') AS hizmet_turu,
-               c.grup2_secimleri
+               c.grup2_secimleri,
+               COALESCE(
+                   NULLIF(TRIM(y1.ad_soyad), ''),
+                   NULLIF(TRIM(mk.yetkili_adsoyad), ''),
+                   NULLIF(TRIM(c.yetkili_kisi), ''),
+                   ''
+               ) AS yetkili_adi,
+               COALESCE(
+                   NULLIF(TRIM(y1.tel), ''),
+                   NULLIF(TRIM(y1.tel2), ''),
+                   NULLIF(TRIM(mk.yetkili_tel), ''),
+                   NULLIF(TRIM(mk.yetkili_tel2), ''),
+                   ''
+               ) AS yetkili_telefon,
+               COALESCE(ya.yetkililer_metin, '') AS yetkililer_metin
         FROM customers c
         LEFT JOIN LATERAL (
-            SELECT sozlesme_tarihi, aylik_kira, hizmet_turu
+            SELECT sozlesme_tarihi, aylik_kira, hizmet_turu,
+                   yetkili_adsoyad, yetkili_tel, yetkili_tel2, yetkili_email
             FROM musteri_kyc
             WHERE musteri_id = c.id
             ORDER BY id DESC LIMIT 1
         ) mk ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT ad_soyad, tel, tel2
+            FROM musteri_yetkililer
+            WHERE musteri_id = c.id
+            ORDER BY birincil DESC NULLS LAST, sira ASC NULLS LAST, id ASC
+            LIMIT 1
+        ) y1 ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT string_agg(
+                NULLIF(TRIM(BOTH FROM CONCAT_WS(' ',
+                    NULLIF(TRIM(ad_soyad), ''),
+                    NULLIF(TRIM(tel), ''),
+                    NULLIF(TRIM(tel2), ''),
+                    NULLIF(TRIM(email), ''),
+                    NULLIF(TRIM(email_sirket), '')
+                )), ''),
+                ' | '
+                ORDER BY birincil DESC NULLS LAST, sira ASC NULLS LAST, id ASC
+            ) AS yetkililer_metin
+            FROM musteri_yetkililer
+            WHERE musteri_id = c.id
+        ) ya ON TRUE
         WHERE c.durum = 'aktif'
         """ + haric_sql + hizmet_sql + """
         AND EXISTS (
@@ -280,11 +324,21 @@ def api_geciken_liste():
             tutar=_tutar_tr_goster(tutar),
             gun=gecikme
         )
+        yetkili_adi = str(r.get('yetkili_adi') or '').strip()
+        yetkili_telefon = str(r.get('yetkili_telefon') or '').strip()
+        yetkililer_metin = str(r.get('yetkililer_metin') or '').strip()
+        # Arama blob: tüm yetkililer metni + birincil ad/tel (tekrarlar zararsız)
+        yetkililer_metin_arama = ' '.join(
+            p for p in (yetkililer_metin, yetkili_adi, yetkili_telefon) if p
+        ).strip()
         sonuc.append({
             'musteri_id': mid_r,
             'isim': isim,
             'telefon': telefon,
             'hizmet_turu': r.get('hizmet_turu') or '',
+            'yetkili_adi': yetkili_adi,
+            'yetkili_telefon': yetkili_telefon,
+            'yetkililer_metin': yetkililer_metin_arama,
             'haric': mid_r in haric_ids,
             'gecikme_gun': gecikme,
             'esik': esik,

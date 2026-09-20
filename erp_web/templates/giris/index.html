@@ -9287,6 +9287,10 @@ function whatsappSatirAraHaystack(it) {
     push(it.isim);
     push(it.telefon);
     push(String(it.telefon || '').replace(/\D/g, ''));
+    push(it.yetkili_adi);
+    push(it.yetkili_telefon);
+    push(String(it.yetkili_telefon || '').replace(/\D/g, ''));
+    push(it.yetkililer_metin);
     push(it.hizmet_turu);
     push(it.sozlesme_tarihi);
     push(it.gecikme_gun);
@@ -9315,6 +9319,10 @@ function whatsappSatirAraEslesir(it, q) {
     if (qDigits && qDigits.length >= 3) {
         var telDigits = String((it && it.telefon) || '').replace(/\D/g, '');
         if (telDigits && telDigits.indexOf(qDigits) !== -1) return true;
+        var yTelDigits = String((it && it.yetkili_telefon) || '').replace(/\D/g, '');
+        if (yTelDigits && yTelDigits.indexOf(qDigits) !== -1) return true;
+        var yMetinDigits = String((it && it.yetkililer_metin) || '').replace(/\D/g, '');
+        if (yMetinDigits && yMetinDigits.indexOf(qDigits) !== -1) return true;
     }
     return false;
 }
