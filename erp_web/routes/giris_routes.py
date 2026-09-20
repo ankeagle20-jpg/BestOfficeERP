@@ -9294,15 +9294,81 @@ def _firma_ozet_classify_borc_month(tut, brut_raw) -> tuple[float, bool]:
     return round(tut_f, 2), False
 
 
-def _firma_ozet_ozet_from_grid_cache_payload(payload, ref_y: int, ref_m: int) -> dict | None:
+def _firma_ozet_kyc_has_usable_kira(kyc_for_grid) -> bool:
+    """Yanlış pozitif koruması: canlı yola düşmek için anlamlı aylık kira olsun."""
+    if not kyc_for_grid or not isinstance(kyc_for_grid, dict):
+        return False
+    try:
+        kira = float(kyc_for_grid.get("aylik_kira") or 0)
+    except (TypeError, ValueError):
+        kira = 0.0
+    if not math.isfinite(kira):
+        return False
+    return kira > float(AYLIK_GRID_TAM_ODENDI_TOLERANS)
+
+
+def _firma_ozet_payload_is_placeholder_dominated(payload, ref_y: int, ref_m: int) -> bool:
+    """Politika A (sıkı): referans ayına kadar (dahil) penceredeki TÜM aylar placeholder ise True.
+
+    Placeholder tanımı: _firma_ozet_classify_borc_month ile aynı
+    (0 < tutar < PLACEHOLDER_BRUT_MAX ve brut≈0).
+    """
+    if not isinstance(payload, dict):
+        return False
+    try:
+        ry = int(ref_y)
+        rm = int(ref_m)
+    except (TypeError, ValueError):
+        return False
+    if rm < 1 or rm > 12:
+        return False
+    try:
+        ref_first = date(ry, rm, 1)
+    except (TypeError, ValueError):
+        return False
+    n_window = 0
+    n_ph = 0
+    for a in payload.get("aylar") or []:
+        if not isinstance(a, dict):
+            continue
+        try:
+            cur = date(int(a.get("yil")), int(a.get("ay")), 1)
+        except (TypeError, ValueError):
+            continue
+        if cur > ref_first:
+            continue
+        n_window += 1
+        try:
+            tut = float(a.get("tutar_kdv_dahil") or a.get("brut_tutar_kdv") or 0)
+        except (TypeError, ValueError):
+            tut = 0.0
+        if not math.isfinite(tut):
+            tut = 0.0
+        _shown, is_ph = _firma_ozet_classify_borc_month(tut, a.get("brut_tutar_kdv"))
+        if is_ph:
+            n_ph += 1
+    if n_window <= 0:
+        return False
+    return n_ph == n_window
+
+
+def _firma_ozet_ozet_from_grid_cache_payload(
+    payload, ref_y: int, ref_m: int, kyc_for_grid=None
+) -> dict | None:
     """
     musteri_aylik_grid_cache payload'ından rapor özet alanları (tam grid yeniden hesap yok).
     firma_ozet_toplam_borc_ve_geciken_ay ile uyumlu: referans aya kadar tahsil edilmemiş pozitif aylar.
+
+    Placeholder-dominated cache + kullanılabilir KYC/kira varsa None döner; çağıran
+    (musteri_firma_ozet_grid_ozet_batch) mevcut canlı yola düşer.
     """
     if not _firma_ozet_cache_payload_usable(payload, ref_y, ref_m):
         return None
     if ref_m < 1 or ref_m > 12:
         return None
+    if _firma_ozet_payload_is_placeholder_dominated(payload, ref_y, ref_m):
+        if _firma_ozet_kyc_has_usable_kira(kyc_for_grid):
+            return None
     ref_first = date(int(ref_y), int(ref_m), 1)
     tol = float(AYLIK_GRID_TAM_ODENDI_TOLERANS)
     borc_month = 0.0
@@ -9516,7 +9582,9 @@ def musteri_firma_ozet_grid_ozet_batch(musteri_ids: list, ref: date | None = Non
         gun = _sozlesme_gun_from_grid_row(row)
         cached_pl = cache_payloads.get(mid)
         fast = (
-            _firma_ozet_ozet_from_grid_cache_payload(cached_pl, ref_y, ref_m)
+            _firma_ozet_ozet_from_grid_cache_payload(
+                cached_pl, ref_y, ref_m, kyc_for_grid=kyc_for_grid
+            )
             if cached_pl
             else None
         )
