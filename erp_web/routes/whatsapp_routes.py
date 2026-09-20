@@ -113,6 +113,7 @@ def api_geciken_liste():
         _musteri_aylik_grid_customer_kyc_select_sql,
         _firma_ozet_kyc_dict_from_grid_sql_row,
         _tufe_map_by_year_month_cached,
+        _tutar_tr_goster,
     )
     haric_goster = str(request.args.get('haric_goster') or '').strip().lower() in ('1', 'true', 'yes', 'on')
     _ensure_whatsapp_geciken_haric_table()
@@ -270,14 +271,15 @@ def api_geciken_liste():
         if not telefon:
             continue
 
-        tutar = float(r.get('aylik_tutar') or 0)
-        sablon = SABLONLAR[esik].format(
-            isim=isim,
-            tutar=f"{tutar:,.2f}".replace(',', '.'),
-            gun=gecikme
-        )
         mid_r = r.get('id')
         ozet_r = ozet_batch.get(mid_r) or {}
+        # Mesaj {tutar}: Toplam sütunu ile aynı kaynak (birikmiş gecikmiş borç)
+        tutar = round(float(ozet_r.get('toplam_borc') or 0), 2)
+        sablon = SABLONLAR[esik].format(
+            isim=isim,
+            tutar=_tutar_tr_goster(tutar),
+            gun=gecikme
+        )
         sonuc.append({
             'musteri_id': mid_r,
             'isim': isim,
