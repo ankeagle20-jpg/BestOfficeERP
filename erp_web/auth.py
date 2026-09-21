@@ -188,50 +188,104 @@ def load_user(user_id):
     return None
 
 # ── Giriş yapma ──────────────────────────────────────────────────────────────
+def _resolve_login_identifier(raw: str) -> tuple[str, str]:
+    """Giriş alanı: e-posta | telefon (E.164) | klasik kullanıcı adı.
+
+    Döner: (mode, normalized) — mode ∈ {'email','phone','username'}.
+    """
+    s = str(raw or "").strip()
+    if not s:
+        return "username", ""
+    if "@" in s:
+        return "email", s.lower()
+    try:
+        from signup_validation import normalize_phone_e164
+
+        e164 = normalize_phone_e164(s)
+        if e164:
+            return "phone", e164
+    except ValueError:
+        pass
+    return "username", s
+
+
 def giris_yap(username, password):
     """
-    Kullanıcı adı ve şifre ile giriş yapar.
-    
+    E-posta, cep telefonu veya kullanıcı adı + şifre ile giriş.
+
     Args:
-        username (str): Kullanıcı adı
+        username (str): E-posta / telefon / kullanıcı adı
         password (str): Şifre
-    
+
     Returns:
         User: Giriş başarılıysa User nesnesi, değilse None
-    
+
     Raises:
         LoginLockedOut: Çok fazla başarısız deneme sonrası geçici kilit
     """
     tenant_schema = getattr(g, "tenant_schema", None)
-    username_key = str(username or "").strip().lower()
+    mode, ident = _resolve_login_identifier(username)
+    # Lockout anahtarı: e-posta/username lower; telefon E.164 (zaten normalize)
+    username_key = ident.lower() if mode != "phone" else ident
     try:
         check_login_lockout(tenant_schema, username_key)
 
-        row = fetch_one(
-            """
-            SELECT id, username, password_hash, full_name, role, is_active, security_stamp
-            FROM users WHERE username=%s
-            """,
-            (username,),
-        )
-        
+        if mode == "phone":
+            try:
+                from db import ensure_users_phone_in_schema, _tenant_schema_for_request
+
+                ts = _tenant_schema_for_request() or "public"
+                ensure_users_phone_in_schema(ts)
+            except Exception:
+                pass
+            row = fetch_one(
+                """
+                SELECT id, username, password_hash, full_name, role, is_active, security_stamp
+                FROM users
+                WHERE phone = %s
+                LIMIT 1
+                """,
+                (ident,),
+            )
+        elif mode == "email":
+            row = fetch_one(
+                """
+                SELECT id, username, password_hash, full_name, role, is_active, security_stamp
+                FROM users
+                WHERE LOWER(username) = %s
+                LIMIT 1
+                """,
+                (ident,),
+            )
+        else:
+            row = fetch_one(
+                """
+                SELECT id, username, password_hash, full_name, role, is_active, security_stamp
+                FROM users WHERE username=%s
+                """,
+                (ident,),
+            )
+
         # Kullanıcı bulunamadı
         if not row:
             record_login_failure(tenant_schema, username_key)
             return None
-        
+
         # Kullanıcı aktif değil
         if not row["is_active"]:
             record_login_failure(tenant_schema, username_key)
             return None
-        
+
         # Şifre yanlış
         if not check_password_hash(row["password_hash"], password):
             record_login_failure(tenant_schema, username_key)
             return None
-        
-        # Giriş başarılı
+
+        # Giriş başarılı — lockout kaydı gerçek username ile de temizlensin
         record_login_success(tenant_schema, username_key)
+        canon = str(row.get("username") or ident).strip().lower()
+        if canon and canon != username_key:
+            record_login_success(tenant_schema, canon)
         user = User(
             id=row["id"],
             username=row["username"],
@@ -248,7 +302,7 @@ def giris_yap(username, password):
         except Exception:
             pass
         return user
-        
+
     except LoginLockedOut:
         raise
     except Exception as e:

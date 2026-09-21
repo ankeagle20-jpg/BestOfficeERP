@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Payafin ana sayfa — e-posta → kiracı yönlendirme API (apex-only, auth yok)."""
+"""Payafin ana sayfa — e-posta/telefon → kiracı yönlendirme API (apex-only, auth yok)."""
 from __future__ import annotations
 
 import logging
@@ -8,16 +8,17 @@ from urllib.parse import urlencode
 
 from flask import Blueprint, jsonify, request
 
-from db import fetch_one
+from db import ensure_tenant_user_lookup_phone_column, fetch_one
 from login_lookup_rate_limit import check_login_lookup_rate
-from signup_validation import validate_email
+from signup_validation import normalize_phone_e164, validate_email
 from tenant_identity import _tenant_apex_domains, resolve_tenant_slug
 
 logger = logging.getLogger(__name__)
 
 bp = Blueprint("login_lookup", __name__)
 
-MSG_NOT_FOUND = "Bu e-posta ile kayıtlı bir hesap bulunamadı."
+MSG_NOT_FOUND = "Bu bilgilerle kayıtlı bir hesap bulunamadı."
+MSG_INVALID = "Geçerli bir e-posta veya cep telefonu girin."
 MSG_TENANT_HOST = "Bu endpoint yalnızca ana (public) host üzerinden kullanılabilir."
 
 # L0: istemci yalnız module key gönderir; kanonik next sunucuda üretilir (ham path yok).
@@ -73,6 +74,30 @@ def _login_url(slug: str, next_path: str | None = None) -> str:
     return f"{base}?{urlencode({'next': next_path})}"
 
 
+def _parse_lookup_identifier(data: dict) -> tuple[str | None, str | None]:
+    """Döner: (mode, value) — mode 'email'|'phone'; geçersizse (None, None)."""
+    raw = str(
+        data.get("identifier")
+        or data.get("email")
+        or data.get("phone")
+        or ""
+    ).strip()
+    if not raw:
+        return None, None
+    if "@" in raw:
+        email = raw.lower()
+        if validate_email(email):
+            return None, None
+        return "email", email
+    try:
+        e164 = normalize_phone_e164(raw)
+    except ValueError:
+        return None, None
+    if not e164:
+        return None, None
+    return "phone", e164
+
+
 @bp.route("/api/login-lookup", methods=["POST"])
 @marketing_public_only
 def api_login_lookup():
@@ -85,24 +110,38 @@ def api_login_lookup():
         )
 
     data = request.get_json(silent=True) or {}
-    email = str(data.get("email") or "").strip().lower()
-    if validate_email(email):
-        return jsonify({"ok": False, "mesaj": "Geçersiz e-posta."}), 400
+    mode, ident = _parse_lookup_identifier(data)
+    if not mode or not ident:
+        return jsonify({"ok": False, "mesaj": MSG_INVALID}), 400
 
     # Ham "next" / path alanlarını bilerek yok say — yalnız whitelist module
     next_path = _canonical_next_for_module(data.get("module"))
 
-    row = fetch_one(
-        """
-        SELECT l.tenant_slug
-        FROM public.tenant_user_lookup l
-        INNER JOIN public.tenants t
-            ON t.slug = l.tenant_slug AND t.status = 'active'
-        WHERE l.email = %s
-        LIMIT 1
-        """,
-        (email,),
-    )
+    if mode == "phone":
+        ensure_tenant_user_lookup_phone_column()
+        row = fetch_one(
+            """
+            SELECT l.tenant_slug
+            FROM public.tenant_user_lookup l
+            INNER JOIN public.tenants t
+                ON t.slug = l.tenant_slug AND t.status = 'active'
+            WHERE l.phone = %s
+            LIMIT 1
+            """,
+            (ident,),
+        )
+    else:
+        row = fetch_one(
+            """
+            SELECT l.tenant_slug
+            FROM public.tenant_user_lookup l
+            INNER JOIN public.tenants t
+                ON t.slug = l.tenant_slug AND t.status = 'active'
+            WHERE l.email = %s
+            LIMIT 1
+            """,
+            (ident,),
+        )
 
     if row:
         slug = row["tenant_slug"]

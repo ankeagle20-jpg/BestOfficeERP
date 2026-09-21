@@ -195,8 +195,9 @@
     <h2 id="login-heading" class="section-title">Giriş Yap</h2>
     <form id="login-lookup-form" novalidate>
       <div class="field">
-        <label for="login-email">E-posta adresiniz</label>
-        <input id="login-email" name="email" type="email" autocomplete="email" required placeholder="ornek@sirket.com">
+        <label for="login-email">E-posta veya cep telefonu</label>
+        <input id="login-email" name="identifier" type="text" autocomplete="username"
+               required placeholder="ornek@sirket.com veya 05xx xxx xx xx">
       </div>
       <div id="login-error" class="field-error" role="alert"></div>
       <button type="submit" class="btn-primary" id="btn-login-lookup">Devam et</button>
@@ -272,12 +273,13 @@
 <div id="hg-backdrop" class="hg-backdrop" hidden>
   <div class="hg-modal" role="dialog" aria-modal="true" aria-labelledby="hg-title">
     <h3 id="hg-title">Hesabıma git</h3>
-    <p class="hg-sub" id="hg-sub">E-posta adresinizi girin; sizi hesabınıza yönlendirelim.</p>
+    <p class="hg-sub" id="hg-sub">E-posta veya cep telefonunuzu girin; sizi hesabınıza yönlendirelim.</p>
     <form id="hg-form" novalidate>
       <input type="hidden" id="hg-module" name="module" value="">
       <div class="field">
-        <label for="hg-email">E-posta adresiniz</label>
-        <input id="hg-email" name="email" type="email" autocomplete="email" required placeholder="ornek@sirket.com">
+        <label for="hg-email">E-posta veya cep telefonu</label>
+        <input id="hg-email" name="identifier" type="text" autocomplete="username"
+               required placeholder="ornek@sirket.com veya 05xx xxx xx xx">
       </div>
       <div id="hg-error" class="field-error" role="alert"></div>
       <div class="hg-actions">
@@ -302,8 +304,14 @@
     errEl.style.display = "block";
   }
 
-  async function postLoginLookup(email, moduleKey) {
-    var body = { email: email };
+  async function postLoginLookup(identifier, moduleKey) {
+    var raw = String(identifier || "").trim();
+    var body = { identifier: raw };
+    if (raw.indexOf("@") >= 0) {
+      body.email = raw.toLowerCase();
+    } else {
+      body.phone = raw;
+    }
     if (moduleKey) body.module = moduleKey;
     var res = await fetch("/api/login-lookup", {
       method: "POST",
@@ -318,21 +326,21 @@
     ev.preventDefault();
     errEl.style.display = "none";
     errEl.textContent = "";
-    var email = emailInput.value.trim().toLowerCase();
-    if (!email) {
-      showError("Geçerli bir e-posta adresi girin.");
+    var identifier = emailInput.value.trim();
+    if (!identifier) {
+      showError("Geçerli bir e-posta veya cep telefonu girin.");
       return;
     }
     btn.disabled = true;
     try {
-      var result = await postLoginLookup(email, null);
+      var result = await postLoginLookup(identifier, null);
       var data = result.data;
       if (result.status === 429) {
         showError(data.mesaj || "Çok fazla deneme, lütfen bekleyin.");
         return;
       }
       if (result.status === 400) {
-        showError(data.mesaj || "Geçersiz e-posta.");
+        showError(data.mesaj || "Geçerli bir e-posta veya cep telefonu girin.");
         return;
       }
       if (result.status === 403) {
@@ -344,7 +352,7 @@
         return;
       }
       showError(
-        (data.mesaj || "Bu e-posta ile kayıtlı bir hesap bulunamadı.") +
+        (data.mesaj || "Bu bilgilerle kayıtlı bir hesap bulunamadı.") +
         ' <a href="/signup">Kayıt ol</a>'
       );
     } catch (e) {
@@ -367,7 +375,7 @@
   function openHgModal(moduleKey, label) {
     hgModule.value = moduleKey || "";
     hgSub.textContent = (label || "Bu modül") +
-      " için e-posta adresinizi girin; sizi hesabınıza yönlendirelim.";
+      " için e-posta veya cep telefonunuzu girin; sizi hesabınıza yönlendirelim.";
     hgErr.style.display = "none";
     hgErr.textContent = "";
     hgEmail.value = "";
@@ -402,22 +410,22 @@
   hgForm.addEventListener("submit", async function (ev) {
     ev.preventDefault();
     showHgError("");
-    var email = hgEmail.value.trim().toLowerCase();
+    var identifier = hgEmail.value.trim();
     var moduleKey = (hgModule.value || "").trim();
-    if (!email) {
-      showHgError("Geçerli bir e-posta adresi girin.");
+    if (!identifier) {
+      showHgError("Geçerli bir e-posta veya cep telefonu girin.");
       return;
     }
     hgSubmit.disabled = true;
     try {
-      var result = await postLoginLookup(email, moduleKey || null);
+      var result = await postLoginLookup(identifier, moduleKey || null);
       var data = result.data;
       if (result.status === 429) {
         showHgError(data.mesaj || "Çok fazla deneme, lütfen bekleyin.");
         return;
       }
       if (result.status === 400) {
-        showHgError(data.mesaj || "Geçersiz e-posta.");
+        showHgError(data.mesaj || "Geçerli bir e-posta veya cep telefonu girin.");
         return;
       }
       if (result.status === 403) {

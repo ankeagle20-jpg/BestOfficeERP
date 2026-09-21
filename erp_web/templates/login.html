@@ -101,9 +101,9 @@
       {% if request.args.get('next') %}
       <input type="hidden" name="next" value="{{ request.args.get('next') }}">
       {% endif %}
-      <label>Kullanıcı Adı</label>
+      <label>E-posta veya cep telefonu</label>
       <input type="text" name="username" autofocus autocomplete="username"
-             placeholder="kullanici_adi" required>
+             placeholder="ornek@firma.com veya 05xx xxx xx xx" required>
 
       <label>Şifre</label>
       <input type="password" name="password" autocomplete="current-password"

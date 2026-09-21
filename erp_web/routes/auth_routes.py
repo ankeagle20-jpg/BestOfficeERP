@@ -88,7 +88,7 @@ def login():
                 return redirect(safe_next)
             return redirect(url_for("index"))
         else:
-            flash("Kullanıcı adı veya şifre hatalı!", "danger")
+            flash("E-posta / telefon veya şifre hatalı!", "danger")
     
     return render_template("login.html")
 
