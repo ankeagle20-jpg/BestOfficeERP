@@ -64,9 +64,9 @@
       <div class="field-error" data-error-for="admin_username"></div>
     </div>
     <div class="field">
-      <label for="admin_phone">Cep telefonu <span style="font-weight:400;color:#64748b">(isteğe bağlı)</span></label>
+      <label for="admin_phone">Cep telefonu <span aria-hidden="true">*</span></label>
       <input id="admin_phone" name="admin_phone" type="tel" autocomplete="tel"
-             inputmode="tel" maxlength="20" placeholder="05xx xxx xx xx">
+             inputmode="tel" maxlength="20" placeholder="05xx xxx xx xx" required>
       <div class="field-error" data-error-for="admin_phone"></div>
     </div>
     <div class="field">
@@ -179,6 +179,7 @@
     },
     admin_username: { invalid_email: "Geçerli bir e-posta adresi girin." },
     admin_phone: {
+      phone_required: "Cep telefonu zorunludur.",
       invalid_phone: "Geçerli bir cep telefonu girin (örn. 05xx xxx xx xx).",
       phone_taken: "Bu telefon numarası zaten kayıtlı."
     },

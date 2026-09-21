@@ -118,15 +118,19 @@ def normalize_phone_e164(raw: str | None, *, default_region: str = "TR") -> str 
 
 
 def validate_admin_phone(raw: str | None) -> tuple[str | None, str | None]:
-    """İsteğe bağlı cep telefonu.
+    """Zorunlu cep telefonu.
 
-    Döner: (e164_or_none, error_code_or_none).
-    Boş → (None, None). Geçersiz → (None, 'invalid_phone').
+    Döner: (e164, None) | (None, error_code).
+    Boş → (None, 'phone_required'). Geçersiz → (None, 'invalid_phone').
     """
+    if not str(raw or "").strip():
+        return None, "phone_required"
     try:
         e164 = normalize_phone_e164(raw)
     except ValueError:
         return None, "invalid_phone"
+    if not e164:
+        return None, "phone_required"
     return e164, None
 
 
