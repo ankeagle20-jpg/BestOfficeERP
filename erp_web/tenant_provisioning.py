@@ -425,11 +425,13 @@ def _insert_admin(
     full_name: str,
     *,
     password_already_hashed: bool = False,
+    phone: str | None = None,
 ) -> int:
     """Admin kullanıcı ekle.
 
     password_already_hashed=True: password parametresi zaten werkzeug hash'i;
     generate_password_hash tekrar çağrılmaz (A3.2 Satın Al / platform_signup_intents).
+    phone: E.164 (örn. +905xxxxxxxxx) veya None.
     """
     if password_already_hashed:
         hashed = str(password or "").strip()
@@ -437,15 +439,22 @@ def _insert_admin(
             raise TenantProvisionError("geçersiz admin_password_hash")
     else:
         hashed = generate_password_hash(password)
+    phone_s = str(phone or "").strip() or None
+    try:
+        from db import ensure_users_phone_in_schema
+
+        ensure_users_phone_in_schema(schema)
+    except Exception:
+        logger.exception("users.phone ensure failed schema=%s", schema)
     with db() as conn:
         cur = conn.cursor()
         cur.execute(
             psql.SQL(
                 "INSERT INTO {}.users "
-                "(username, password_hash, full_name, role, is_active, security_stamp) "
-                "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id"
+                "(username, password_hash, full_name, role, is_active, security_stamp, phone) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id"
             ).format(psql.Identifier(schema)),
-            (username, hashed, full_name, "admin", True, generate_security_stamp()),
+            (username, hashed, full_name, "admin", True, generate_security_stamp(), phone_s),
         )
         row = cur.fetchone()
     if not row:
@@ -533,23 +542,38 @@ def _active_provision_noop(
     }
 
 
-def _register_tenant_user_lookup(slug: str, username: str) -> None:
-    """Signup/login yönlendirme indeksine e-posta kaydı (yalnız @ içeren admin)."""
-    from db import ensure_tenant_user_lookup_table
+def _register_tenant_user_lookup(
+    slug: str, username: str, phone: str | None = None
+) -> None:
+    """Signup/login yönlendirme indeksi: e-posta (+ isteğe bağlı E.164 phone)."""
+    from db import (
+        ensure_tenant_user_lookup_phone_column,
+        ensure_tenant_user_lookup_table,
+    )
 
     email = str(username or "").strip().lower()
     if "@" not in email or not _ADMIN_EMAIL_RE.fullmatch(email):
         return
+    phone_s = str(phone or "").strip() or None
     ensure_tenant_user_lookup_table()
+    ensure_tenant_user_lookup_phone_column()
     try:
         execute(
             """
-            INSERT INTO public.tenant_user_lookup (email, tenant_slug)
-            VALUES (%s, %s)
+            INSERT INTO public.tenant_user_lookup (email, phone, tenant_slug)
+            VALUES (%s, %s, %s)
             """,
-            (email, slug),
+            (email, phone_s, slug),
         )
-    except UniqueViolation:
+    except UniqueViolation as e:
+        # phone UNIQUE → fail-closed; email UNIQUE → soft warn (mevcut davranış)
+        cname = ""
+        try:
+            cname = str(getattr(getattr(e, "diag", None), "constraint_name", "") or "")
+        except Exception:
+            cname = ""
+        if cname == "tenant_user_lookup_phone_key":
+            raise TenantProvisionError("telefon zaten kayıtlı") from e
         logger.warning(
             "tenant_user_lookup email already registered email=%s slug=%s",
             email,
@@ -695,6 +719,7 @@ def provision_new_tenant(
     admin_password: str | None = None,
     admin_password_hash: str | None = None,
     admin_full_name: str | None = None,
+    admin_phone: str | None = None,
     dump_path: Path | None = None,
     allow_existing_provisioning_row: bool = False,
     selected_module_keys: list | tuple | None = None,
@@ -724,6 +749,7 @@ def provision_new_tenant(
     if not _valid_admin_username(user):
         raise TenantProvisionError("geçersiz admin kullanıcı adı")
     full_name = (admin_full_name or (slug + " Admin")).strip()
+    phone_e164 = str(admin_phone or "").strip() or None
 
     ensure_platform_tenants_table()
 
@@ -814,7 +840,11 @@ def provision_new_tenant(
             str(password_material),
             full_name,
             password_already_hashed=prehashed,
+            phone=phone_e164,
         )
+        # Lookup, status=active'den ÖNCE — aksi halde poll/aktif anında
+        # phone UNIQUE kontrolü yarışa düşer (duplicate signup 202 alabilir).
+        _register_tenant_user_lookup(slug, user, phone=phone_e164)
         if resume_provisioning:
             execute(
                 """
@@ -832,7 +862,6 @@ def provision_new_tenant(
                 """,
                 (slug, schema, plan_s),
             )
-        _register_tenant_user_lookup(slug, user)
     except Exception:
         # Kısmi şema bırakılabilir; tekrar çağrı mevcut şema yüzünden durur (fail-closed).
         raise

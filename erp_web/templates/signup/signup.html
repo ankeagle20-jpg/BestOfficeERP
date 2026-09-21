@@ -64,6 +64,12 @@
       <div class="field-error" data-error-for="admin_username"></div>
     </div>
     <div class="field">
+      <label for="admin_phone">Cep telefonu <span style="font-weight:400;color:#64748b">(isteğe bağlı)</span></label>
+      <input id="admin_phone" name="admin_phone" type="tel" autocomplete="tel"
+             inputmode="tel" maxlength="20" placeholder="05xx xxx xx xx">
+      <div class="field-error" data-error-for="admin_phone"></div>
+    </div>
+    <div class="field">
       <label for="admin_password">Şifre</label>
       <input id="admin_password" name="admin_password" type="password" autocomplete="new-password" required>
       <div class="field-error" data-error-for="admin_password"></div>
@@ -172,6 +178,10 @@
       taken: "Bu adres zaten kullanılıyor."
     },
     admin_username: { invalid_email: "Geçerli bir e-posta adresi girin." },
+    admin_phone: {
+      invalid_phone: "Geçerli bir cep telefonu girin (örn. 05xx xxx xx xx).",
+      phone_taken: "Bu telefon numarası zaten kayıtlı."
+    },
     admin_password: {
       password_too_short: "Şifre en az 10 karakter olmalı.",
       password_needs_upper: "Şifre en az bir büyük harf içermeli.",
@@ -457,6 +467,9 @@
       company_name: document.getElementById("company_name").value.trim(),
       slug: slug,
       admin_username: document.getElementById("admin_username").value.trim().toLowerCase(),
+      admin_phone: (document.getElementById("admin_phone") || {}).value
+        ? document.getElementById("admin_phone").value.trim()
+        : "",
       admin_password: document.getElementById("admin_password").value,
       password_confirm: document.getElementById("password_confirm").value,
       admin_full_name: document.getElementById("admin_full_name").value.trim(),
@@ -520,6 +533,9 @@
           globalError.style.display = "block";
         }
       } else if (res.status === 409) {
+        if (data.errors && data.errors.admin_phone) {
+          setFieldErrors(data.errors);
+        }
         globalError.textContent = data.mesaj || "Bu adres zaten kullanılıyor.";
         globalError.style.display = "block";
       } else if (res.status === 429) {

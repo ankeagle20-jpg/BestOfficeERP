@@ -23,6 +23,7 @@ from signup_validation import (
     honeypot_triggered,
     normalize_slug_input,
     validate_admin_full_name,
+    validate_admin_phone,
     validate_company_name,
     validate_country_code,
     validate_email,
@@ -48,6 +49,7 @@ logger = logging.getLogger(__name__)
 bp = Blueprint("signup", __name__)
 
 MSG_SLUG_TAKEN = "Bu adres zaten kullanılıyor."
+MSG_PHONE_TAKEN = "Bu telefon numarası zaten kayıtlı."
 MSG_SLUG_FAILED = "Bu adres kullanılamıyor; farklı bir subdomain deneyin."
 
 
@@ -207,28 +209,33 @@ def _insert_purchase_signup_intent(
     selected_module_keys: list[str],
     module_tier_preferences: dict[str, str],
     ledger_only: bool,
+    admin_phone: str | None = None,
 ) -> dict:
     """A3.1: yalnızca hash + kimlik; plaintext şifre parametresi yok."""
+    from db import ensure_platform_signup_intents_admin_phone_column
     from pending_payment_sweep import _ttl_hours
 
+    ensure_platform_signup_intents_admin_phone_column()
     ttl = float(_ttl_hours())
+    phone_s = str(admin_phone or "").strip() or None
     row = execute_returning(
         """
         INSERT INTO public.platform_signup_intents (
-            tenant_id, email, admin_full_name, module_key, tier_key,
+            tenant_id, email, admin_phone, admin_full_name, module_key, tier_key,
             password_hash, selected_module_keys, module_tier_preferences,
             ledger_only, invoice_id, expires_at
         ) VALUES (
-            %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, %s, %s,
             %s, %s::jsonb, %s::jsonb,
             %s, %s, NOW() + (%s * INTERVAL '1 hour')
         )
-        RETURNING id, tenant_id, invoice_id, email, module_key, tier_key,
+        RETURNING id, tenant_id, invoice_id, email, admin_phone, module_key, tier_key,
                   expires_at, created_at
         """,
         (
             int(tenant_id),
             str(email or "").strip().lower(),
+            phone_s,
             str(admin_full_name or "").strip(),
             str(module_key or "").strip().lower() or None,
             str(tier_key or "").strip().lower() or None,
@@ -492,6 +499,7 @@ def _provision_worker(
     selected_module_keys: list[str] | None = None,
     module_tier_preferences: dict[str, str] | None = None,
     ledger_only: bool = False,
+    admin_phone: str | None = None,
 ) -> None:
     t0 = time.monotonic()
     with app.app_context():
@@ -502,6 +510,7 @@ def _provision_worker(
                 admin_username=admin_username,
                 admin_password=admin_password,
                 admin_full_name=admin_full_name,
+                admin_phone=admin_phone,
                 allow_existing_provisioning_row=True,
                 selected_module_keys=selected_module_keys or [],
                 module_tier_preferences=module_tier_preferences or {},
@@ -634,6 +643,10 @@ def api_signup():
     email = str(data.get("admin_username") or data.get("email") or "").strip().lower()
     if validate_email(email):
         errors["admin_username"] = "invalid_email"
+    admin_phone_raw = data.get("admin_phone") or data.get("phone")
+    admin_phone_e164, phone_err = validate_admin_phone(admin_phone_raw)
+    if phone_err:
+        errors["admin_phone"] = phone_err
     if validate_admin_full_name(data.get("admin_full_name")):
         errors["admin_full_name"] = "invalid_full_name"
     password = data.get("admin_password")
@@ -645,6 +658,31 @@ def api_signup():
 
     if errors:
         return jsonify({"ok": False, "mesaj": "Doğrulama hatası.", "errors": errors}), 400
+
+    if admin_phone_e164:
+        from db import ensure_tenant_user_lookup_phone_column
+
+        ensure_tenant_user_lookup_phone_column()
+        phone_hit = fetch_one(
+            """
+            SELECT tenant_slug
+            FROM public.tenant_user_lookup
+            WHERE phone = %s
+            LIMIT 1
+            """,
+            (admin_phone_e164,),
+        )
+        if phone_hit:
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "mesaj": MSG_PHONE_TAKEN,
+                        "errors": {"admin_phone": "phone_taken"},
+                    }
+                ),
+                409,
+            )
 
     selected_modules = _parse_selected_modules(data)
     tier_prefs = _parse_module_tier_preferences(data)
@@ -760,6 +798,7 @@ def api_signup():
                 selected_module_keys=selected_modules,
                 module_tier_preferences=tier_prefs,
                 ledger_only=ledger_only,
+                admin_phone=admin_phone_e164,
             )
             password_hash = None  # yerel referansı bırakma
         except Exception as e:
@@ -819,6 +858,7 @@ def api_signup():
             "admin_username": email,
             "admin_password": str(password),
             "admin_full_name": str(data.get("admin_full_name") or "").strip(),
+            "admin_phone": admin_phone_e164,
             "plan": "trial",
             "selected_module_keys": selected_modules,
             "module_tier_preferences": tier_prefs,

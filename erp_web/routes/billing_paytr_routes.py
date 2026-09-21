@@ -171,7 +171,7 @@ def _fetch_signup_intent_for_invoice(invoice_id: int) -> dict | None:
     """platform_signup_intents — password_hash dahil; çağıran log'a yazmamalı."""
     return fetch_one(
         """
-        SELECT id, tenant_id, email, admin_full_name, module_key, tier_key,
+        SELECT id, tenant_id, email, admin_phone, admin_full_name, module_key, tier_key,
                password_hash, selected_module_keys, module_tier_preferences,
                ledger_only, invoice_id
         FROM public.platform_signup_intents
@@ -193,6 +193,7 @@ def _purchase_provision_worker(
     selected_module_keys: list | None,
     module_tier_preferences: dict | None,
     ledger_only: bool,
+    admin_phone: str | None = None,
 ) -> None:
     """A3.3 async: trial _provision_worker deseni; plaintext şifre yok."""
     t0 = time.monotonic()
@@ -206,6 +207,7 @@ def _purchase_provision_worker(
                 admin_username=admin_username,
                 admin_password_hash=admin_password_hash,
                 admin_full_name=admin_full_name,
+                admin_phone=admin_phone,
                 allow_existing_provisioning_row=True,
                 selected_module_keys=selected_module_keys or [],
                 module_tier_preferences=module_tier_preferences or {},
@@ -315,6 +317,7 @@ def _maybe_trigger_purchase_provision(inv: dict, meta: dict) -> None:
             "admin_username": email,
             "admin_password_hash": password_hash,
             "admin_full_name": str(row.get("admin_full_name") or "").strip() or slug,
+            "admin_phone": str(row.get("admin_phone") or "").strip() or None,
             "selected_module_keys": selected,
             "module_tier_preferences": tier_prefs,
             "ledger_only": ledger_only,

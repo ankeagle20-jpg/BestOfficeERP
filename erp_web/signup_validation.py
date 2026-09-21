@@ -93,5 +93,42 @@ def validate_admin_full_name(name: str | None) -> str | None:
     return None
 
 
+def normalize_phone_e164(raw: str | None, *, default_region: str = "TR") -> str | None:
+    """Cep telefonunu E.164'e çevir. Boş → None. Geçersiz → ValueError.
+
+    TR varsayılan: 05xx / 5xx / +905xx / 905xx → +905XXXXXXXXX
+    (yalnız mobil; ulusal 10 hane, 5 ile başlar).
+    """
+    from phone_util import canonical_tr_mobile_digits
+
+    s = str(raw or "").strip()
+    if not s:
+        return None
+    region = str(default_region or "TR").strip().upper() or "TR"
+    digits = re.sub(r"\D", "", s)
+    if region == "TR":
+        national = canonical_tr_mobile_digits(digits)
+        if not national or len(national) != 10 or not national.startswith("5"):
+            raise ValueError("invalid_phone")
+        return f"+90{national}"
+    # Diğer bölgeler: en az 8, en fazla 15 rakam (E.164 üst sınırı)
+    if len(digits) < 8 or len(digits) > 15:
+        raise ValueError("invalid_phone")
+    return f"+{digits.lstrip('0')}" if not digits.startswith("0") else f"+{digits}"
+
+
+def validate_admin_phone(raw: str | None) -> tuple[str | None, str | None]:
+    """İsteğe bağlı cep telefonu.
+
+    Döner: (e164_or_none, error_code_or_none).
+    Boş → (None, None). Geçersiz → (None, 'invalid_phone').
+    """
+    try:
+        e164 = normalize_phone_e164(raw)
+    except ValueError:
+        return None, "invalid_phone"
+    return e164, None
+
+
 def honeypot_triggered(website: str | None) -> bool:
     return bool(str(website or "").strip())
