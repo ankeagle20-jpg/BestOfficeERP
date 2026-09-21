@@ -46,6 +46,29 @@
   .bulk-field {
     display:flex; flex-direction:column; gap:4px;
   }
+  .access-box {
+    background:rgba(10, 25, 41, 0.7); border:1px solid #1e3a5f; border-radius:8px;
+    padding:14px; margin-bottom:16px;
+  }
+  .access-box .access-title {
+    color:#90caf9; font-weight:600; font-size:.9rem; margin-bottom:8px;
+  }
+  .access-box .access-meta { color:#b0bec5; font-size:.85rem; line-height:1.5; }
+  .access-box .access-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; align-items:center; }
+  .access-box .access-hint { color:#78909c; font-size:.75rem; margin-top:8px; }
+  .access-temp-modal {
+    display:none; position:fixed; inset:0; z-index:9999;
+    background:rgba(0,0,0,.55); align-items:center; justify-content:center;
+  }
+  .access-temp-modal.open { display:flex; }
+  .access-temp-card {
+    background:#0a1929; border:1px solid #1e3a5f; border-radius:10px;
+    padding:20px; max-width:420px; width:92%; color:#e3f2fd;
+  }
+  .access-temp-card code {
+    display:block; background:#132f4c; padding:10px 12px; border-radius:6px;
+    font-size:1rem; letter-spacing:.02em; margin:10px 0; word-break:break-all;
+  }
   .bulk-field label {
     color:#90caf9; font-size:.8rem; font-weight:500;
   }
@@ -275,6 +298,41 @@
     </div>
     <div class="mod-meta" id="mod-meta">Yükleniyor...</div>
 
+    <div class="access-box" id="access-box" style="display:none;">
+      <div class="access-title">Erişim Bilgileri</div>
+      <div class="access-meta" id="access-meta">Kiracı seçin...</div>
+      <div class="access-actions">
+        <button type="button" class="btn-erp btn-erp-sm" id="access-send-reset-btn"
+          style="background:#1565c0;">Şifre sıfırlama e-postası gönder</button>
+        <button type="button" class="btn-erp btn-erp-sm btn-outline-erp" id="access-gen-temp-btn">
+          Geçici şifre oluştur
+        </button>
+        <label style="display:inline-flex;align-items:center;gap:6px;font-size:.8rem;color:#90a4ae;cursor:pointer;">
+          <input type="checkbox" id="access-email-also">
+          Geçici şifreyi e-posta ile de gönder
+        </label>
+      </div>
+      <div class="access-hint">
+        Mevcut şifre görüntülenemez (hash). Sıfırlama bağlantısı müşteriye gider;
+        geçici şifre varsayılan olarak yalnızca size bir kez gösterilir.
+      </div>
+    </div>
+
+    <div class="access-temp-modal" id="access-temp-modal" role="dialog" aria-modal="true">
+      <div class="access-temp-card">
+        <div style="font-weight:600;margin-bottom:6px;">Geçici şifre (bir kez)</div>
+        <div style="font-size:.85rem;color:#90a4ae;" id="access-temp-user"></div>
+        <code id="access-temp-pwd"></code>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button type="button" class="btn-erp btn-erp-sm" id="access-temp-copy">Kopyala</button>
+          <button type="button" class="btn-erp btn-erp-sm btn-outline-erp" id="access-temp-close">Kapat</button>
+        </div>
+        <div class="access-hint" style="margin-top:10px;">
+          Bu pencereyi kapattıktan sonra şifre tekrar gösterilmez.
+        </div>
+      </div>
+    </div>
+
     <div style="overflow-x:auto;">
       <table class="mod-table" id="mod-table">
         <thead>
@@ -304,6 +362,17 @@
   var errEl = document.getElementById('mod-err');
   var okEl = document.getElementById('mod-ok');
   var bodyEl = document.getElementById('mod-body');
+  var accessBox = document.getElementById('access-box');
+  var accessMeta = document.getElementById('access-meta');
+  var accessSendResetBtn = document.getElementById('access-send-reset-btn');
+  var accessGenTempBtn = document.getElementById('access-gen-temp-btn');
+  var accessEmailAlso = document.getElementById('access-email-also');
+  var accessTempModal = document.getElementById('access-temp-modal');
+  var accessTempUser = document.getElementById('access-temp-user');
+  var accessTempPwd = document.getElementById('access-temp-pwd');
+  var accessTempCopy = document.getElementById('access-temp-copy');
+  var accessTempClose = document.getElementById('access-temp-close');
+  var _accessState = { tenantId: null, username: null };
 
   var overviewThead = document.getElementById('overview-thead');
   var overviewTbody = document.getElementById('overview-tbody');
@@ -817,25 +886,81 @@
       '</tr>';
   }
 
+  function renderAccess(data) {
+    if (!accessBox) return;
+    if (!data || !data.ok) {
+      accessBox.style.display = 'none';
+      _accessState = { tenantId: null, username: null };
+      return;
+    }
+    accessBox.style.display = 'block';
+    var adm = data.admin;
+    var t = data.tenant || {};
+    if (!adm) {
+      accessMeta.innerHTML = '<span style="color:#ef9a9a;">Bu kiracıda admin kullanıcı bulunamadı.</span>';
+      _accessState = { tenantId: t.id || tenantSel.value, username: null };
+      if (accessSendResetBtn) accessSendResetBtn.disabled = true;
+      if (accessGenTempBtn) accessGenTempBtn.disabled = true;
+      return;
+    }
+    if (accessSendResetBtn) accessSendResetBtn.disabled = false;
+    if (accessGenTempBtn) accessGenTempBtn.disabled = false;
+    _accessState = { tenantId: t.id || tenantSel.value, username: adm.username || '' };
+    var aktif = adm.is_active ? 'aktif' : 'pasif';
+    accessMeta.innerHTML =
+      '<div><strong>Kullanıcı / e-posta:</strong> ' + escHtml(adm.username) + '</div>' +
+      (adm.full_name
+        ? '<div><strong>Ad:</strong> ' + escHtml(adm.full_name) + '</div>'
+        : '') +
+      '<div><strong>Durum:</strong> ' + escHtml(aktif) +
+      ' · <strong>Rol:</strong> ' + escHtml(adm.role || 'admin') + '</div>' +
+      '<div style="color:#78909c;font-size:.8rem;margin-top:4px;">Şifre hash olarak saklanır; görüntülenemez.</div>';
+  }
+
+  function loadAccess() {
+    var tid = tenantSel.value;
+    if (!accessBox) return Promise.resolve();
+    if (!tid) {
+      accessBox.style.display = 'none';
+      _accessState = { tenantId: null, username: null };
+      return Promise.resolve();
+    }
+    accessMeta.textContent = 'Erişim bilgileri yükleniyor...';
+    accessBox.style.display = 'block';
+    return api('/admin/api/modules/tenants/' + encodeURIComponent(tid) + '/access')
+      .then(function (res) {
+        if (!res.json.ok) throw new Error(res.json.mesaj || 'Erişim bilgisi yüklenemedi');
+        renderAccess(res.json);
+      })
+      .catch(function (e) {
+        accessMeta.innerHTML = '<span style="color:#ef9a9a;">' +
+          escHtml(String(e.message || e)) + '</span>';
+      });
+  }
+
   function loadEntitlements() {
     var tid = tenantSel.value;
     showErr('');
     showOk('');
     if (!tid) {
       bodyEl.innerHTML = '<tr><td colspan="4" style="color:#78909c;">Kiracı seçin...</td></tr>';
+      if (accessBox) accessBox.style.display = 'none';
       return Promise.resolve();
     }
     bodyEl.innerHTML = '<tr><td colspan="4" style="color:#78909c;">Yükleniyor...</td></tr>';
-    return api('/admin/api/modules/entitlements?tenant_id=' + encodeURIComponent(tid))
-      .then(function (res) {
-        if (!res.json.ok) throw new Error(res.json.mesaj || 'Entitlement yüklenemedi');
-        var list = res.json.entitlements || [];
-        bodyEl.innerHTML = list.map(rowHtml).join('');
-        var t = res.json.tenant || {};
-        metaEl.textContent = 'Kiracı: ' + (t.slug || '') +
-          (t.company_name ? ' — ' + t.company_name : '') +
-          ' · ' + list.length + ' modül';
-      });
+    return Promise.all([
+      api('/admin/api/modules/entitlements?tenant_id=' + encodeURIComponent(tid))
+        .then(function (res) {
+          if (!res.json.ok) throw new Error(res.json.mesaj || 'Entitlement yüklenemedi');
+          var list = res.json.entitlements || [];
+          bodyEl.innerHTML = list.map(rowHtml).join('');
+          var t = res.json.tenant || {};
+          metaEl.textContent = 'Kiracı: ' + (t.slug || '') +
+            (t.company_name ? ' — ' + t.company_name : '') +
+            ' · ' + list.length + ' modül';
+        }),
+      loadAccess()
+    ]);
   }
 
   function saveRow(tr) {
@@ -896,6 +1021,84 @@
       .then(function () { showOk('Yenilendi'); })
       .catch(function (e) { showErr(String(e.message || e)); });
   });
+
+  if (accessSendResetBtn) {
+    accessSendResetBtn.addEventListener('click', function () {
+      var tid = tenantSel.value;
+      var uname = _accessState.username || '';
+      if (!tid || !uname) { showErr('Kiracı / admin seçili değil'); return; }
+      if (!confirm('Şifre sıfırlama bağlantısı şu adrese gönderilecek:\n\n' + uname + '\n\nDevam?')) return;
+      accessSendResetBtn.disabled = true;
+      api('/admin/api/modules/tenants/' + encodeURIComponent(tid) + '/access/send-reset-link', {
+        method: 'POST',
+        body: JSON.stringify({ confirm: true })
+      }).then(function (res) {
+        accessSendResetBtn.disabled = false;
+        if (!res.json.ok) throw new Error(res.json.mesaj || 'Gönderilemedi');
+        showOk(res.json.mesaj || 'Sıfırlama e-postası gönderildi');
+      }).catch(function (e) {
+        accessSendResetBtn.disabled = false;
+        showErr(String(e.message || e));
+      });
+    });
+  }
+
+  function closeTempModal() {
+    if (accessTempModal) accessTempModal.classList.remove('open');
+    if (accessTempPwd) accessTempPwd.textContent = '';
+  }
+  if (accessTempClose) accessTempClose.addEventListener('click', closeTempModal);
+  if (accessTempModal) {
+    accessTempModal.addEventListener('click', function (ev) {
+      if (ev.target === accessTempModal) closeTempModal();
+    });
+  }
+  if (accessTempCopy) {
+    accessTempCopy.addEventListener('click', function () {
+      var t = (accessTempPwd && accessTempPwd.textContent) || '';
+      if (!t) return;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(t).then(function () { showOk('Şifre kopyalandı'); });
+      } else {
+        showOk('Şifreyi elle kopyalayın');
+      }
+    });
+  }
+  if (accessGenTempBtn) {
+    accessGenTempBtn.addEventListener('click', function () {
+      var tid = tenantSel.value;
+      var uname = _accessState.username || '';
+      var emailAlso = !!(accessEmailAlso && accessEmailAlso.checked);
+      if (!tid || !uname) { showErr('Kiracı / admin seçili değil'); return; }
+      var msg = 'Geçici şifre oluşturulacak ve mevcut şifre geçersiz olacak.\n\nKullanıcı: ' + uname;
+      if (emailAlso) msg += '\n\nAyrıca e-posta ile de gönderilecek.';
+      msg += '\n\nDevam?';
+      if (!confirm(msg)) return;
+      accessGenTempBtn.disabled = true;
+      api('/admin/api/modules/tenants/' + encodeURIComponent(tid) + '/access/generate-temp-password', {
+        method: 'POST',
+        body: JSON.stringify({ confirm: true, email_also: emailAlso })
+      }).then(function (res) {
+        accessGenTempBtn.disabled = false;
+        if (!res.json.ok) throw new Error(res.json.mesaj || 'Oluşturulamadı');
+        if (accessTempUser) {
+          accessTempUser.textContent = 'Kullanıcı: ' + (res.json.username || uname);
+        }
+        if (accessTempPwd) accessTempPwd.textContent = res.json.temp_password || '';
+        if (accessTempModal) accessTempModal.classList.add('open');
+        var okMsg = res.json.mesaj || 'Geçici şifre oluşturuldu';
+        if (emailAlso) {
+          okMsg += res.json.mail_sent
+            ? ' (e-posta gönderildi)'
+            : (' (e-posta gönderilemedi' + (res.json.mail_error ? ': ' + res.json.mail_error : '') + ')');
+        }
+        showOk(okMsg);
+      }).catch(function (e) {
+        accessGenTempBtn.disabled = false;
+        showErr(String(e.message || e));
+      });
+    });
+  }
 
   // İlk yüklemede hem Genel Bakış matrisini hem Tek Kiracı listesini başlat
   Promise.all([loadOverview(), loadTenants()])

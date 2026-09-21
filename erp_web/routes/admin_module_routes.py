@@ -2,14 +2,21 @@
 """Admin: Payafin platform modül entitlement yönetimi (yalnız public host)."""
 from __future__ import annotations
 
+import hashlib
 import logging
+import secrets
 from functools import wraps
 
-from flask import Blueprint, g, jsonify, render_template, request
+from flask import Blueprint, current_app, g, jsonify, render_template, request
 from flask_login import current_user
+from psycopg2 import sql as psql
+from werkzeug.security import generate_password_hash
 
-from auth import admin_gerekli
-from db import execute, fetch_all, fetch_one
+from auth import admin_gerekli, generate_security_stamp
+from db import db, execute, fetch_all, fetch_one
+from mail_utils import send_mail, send_password_reset_email
+from signup_validation import validate_password_strength
+from tenant_identity import _tenant_apex_domains
 from tenant_module_access import (
     has_module_entitlement,
     invalidate_module_entitlement_cache,
@@ -44,6 +51,102 @@ MSG_LEDGER_REQUIRED = (
 MSG_PUBLIC_FORBIDDEN = "Platform (public) kiracısı dönüştürülemez."
 MSG_CONFIRM_REQUIRED = "Onay gerekli (confirm=true)."
 MSG_UNDERSTOOD_REQUIRED = "Anladım onay kutusu gerekli (understood=true)."
+
+
+def _token_hash(raw_token: str) -> str:
+    return hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+
+
+def _resolve_active_tenant(tenant_id: int) -> dict | None:
+    return fetch_one(
+        """
+        SELECT id, slug, company_name, schema_name, status
+        FROM public.tenants
+        WHERE id = %s AND status = 'active'
+        """,
+        (tenant_id,),
+    )
+
+
+def _schema_ident(schema_name: str) -> str | None:
+    """Güvenli şema adı (yalnız tenant_* veya public)."""
+    s = str(schema_name or "").strip()
+    if s == "public":
+        return s
+    from db import _TENANT_SCHEMA_RE
+
+    if _TENANT_SCHEMA_RE.fullmatch(s):
+        return s
+    return None
+
+
+def _ensure_tenant_password_reset_tokens(schema: str) -> None:
+    sch = psql.Identifier(schema)
+    with db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            psql.SQL(
+                """
+                CREATE TABLE IF NOT EXISTS {}.password_reset_tokens (
+                    id          BIGSERIAL PRIMARY KEY,
+                    user_id     INTEGER NOT NULL
+                        REFERENCES {}.users (id) ON DELETE CASCADE,
+                    token_hash  TEXT NOT NULL,
+                    expires_at  TIMESTAMPTZ NOT NULL,
+                    used_at     TIMESTAMPTZ,
+                    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    request_ip  TEXT,
+                    CONSTRAINT password_reset_tokens_token_hash_key UNIQUE (token_hash)
+                )
+                """
+            ).format(sch, sch)
+        )
+        cur.execute(
+            psql.SQL(
+                """
+                CREATE INDEX IF NOT EXISTS password_reset_tokens_user_id_idx
+                ON {}.password_reset_tokens (user_id)
+                """
+            ).format(sch)
+        )
+
+
+def _fetch_tenant_admins(schema: str) -> list[dict]:
+    with db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            psql.SQL(
+                """
+                SELECT id, username, full_name, role, is_active
+                FROM {}.users
+                WHERE LOWER(TRIM(COALESCE(role, ''))) = 'admin'
+                ORDER BY id
+                """
+            ).format(psql.Identifier(schema))
+        )
+        rows = cur.fetchall() or []
+        return [dict(r) for r in rows]
+
+
+def _tenant_reset_url(slug: str, raw_token: str) -> str:
+    apex = (_tenant_apex_domains() or ("payafin.com",))[0]
+    return f"https://{slug}.{apex}/reset-password?token={raw_token}"
+
+
+def _generate_temp_password() -> str:
+    """signup_validation kurallarına uyan rastgele şifre."""
+    for _ in range(40):
+        # token_urlsafe + garantili sınıflar
+        raw = secrets.token_urlsafe(10)
+        pwd = "Aa1" + raw
+        if len(pwd) < 10:
+            continue
+        if validate_password_strength(pwd) is None:
+            return pwd
+    # son çare
+    return "Aa1" + secrets.token_urlsafe(12)
+
+
 
 
 def _upsert_module_entitlement(
@@ -626,6 +729,288 @@ def api_restore_full_erp(tenant_id: int):
             "slug": slug,
             "shell": "full_erp",
             "core_erp": "active",
+        }
+    )
+
+
+# ── Erişim Bilgileri (tek kiracı admin username / şifre işlemleri) ─────────────
+
+
+@bp.route("/api/modules/tenants/<int:tenant_id>/access")
+@platform_modules_admin
+def api_modules_tenant_access(tenant_id: int):
+    """Kiracı admin kullanıcı(lar)ı — şifre gösterilmez."""
+    tenant = _resolve_active_tenant(int(tenant_id))
+    if not tenant:
+        return jsonify({"ok": False, "mesaj": "Kiracı bulunamadı."}), 404
+
+    schema = _schema_ident(tenant.get("schema_name") or "")
+    if not schema:
+        return jsonify({"ok": False, "mesaj": "Geçersiz kiracı şeması."}), 400
+
+    try:
+        admins = _fetch_tenant_admins(schema)
+    except Exception as e:
+        logger.exception("tenant access list failed schema=%s", schema)
+        return jsonify({"ok": False, "mesaj": f"Kullanıcılar okunamadı: {e}"}), 500
+
+    primary = admins[0] if admins else None
+    return jsonify(
+        {
+            "ok": True,
+            "tenant": {
+                "id": int(tenant["id"]),
+                "slug": tenant.get("slug") or "",
+                "company_name": tenant.get("company_name") or "",
+                "schema_name": schema,
+            },
+            "admin": (
+                {
+                    "id": int(primary["id"]),
+                    "username": primary.get("username") or "",
+                    "full_name": primary.get("full_name") or "",
+                    "role": primary.get("role") or "admin",
+                    "is_active": bool(primary.get("is_active", True)),
+                }
+                if primary
+                else None
+            ),
+            "admins": [
+                {
+                    "id": int(a["id"]),
+                    "username": a.get("username") or "",
+                    "full_name": a.get("full_name") or "",
+                    "role": a.get("role") or "admin",
+                    "is_active": bool(a.get("is_active", True)),
+                }
+                for a in admins
+            ],
+        }
+    )
+
+
+@bp.route(
+    "/api/modules/tenants/<int:tenant_id>/access/send-reset-link",
+    methods=["POST"],
+)
+@platform_modules_admin
+def api_modules_tenant_access_send_reset(tenant_id: int):
+    """Mevcut forgot-password deseni: token + e-posta (şifre gövdede yok)."""
+    body = request.get_json(silent=True) or {}
+    if not body.get("confirm"):
+        return jsonify({"ok": False, "mesaj": MSG_CONFIRM_REQUIRED}), 400
+
+    tenant = _resolve_active_tenant(int(tenant_id))
+    if not tenant:
+        return jsonify({"ok": False, "mesaj": "Kiracı bulunamadı."}), 404
+
+    slug = str(tenant.get("slug") or "")
+    if slug.lower() == "public":
+        return jsonify(
+            {"ok": False, "mesaj": "Public platform kullanıcısı için bu akış kullanılamaz."}
+        ), 400
+
+    schema = _schema_ident(tenant.get("schema_name") or "")
+    if not schema:
+        return jsonify({"ok": False, "mesaj": "Geçersiz kiracı şeması."}), 400
+
+    try:
+        admins = _fetch_tenant_admins(schema)
+    except Exception as e:
+        logger.exception("send-reset list failed schema=%s", schema)
+        return jsonify({"ok": False, "mesaj": f"Kullanıcılar okunamadı: {e}"}), 500
+
+    if not admins:
+        return jsonify({"ok": False, "mesaj": "Bu kiracıda admin kullanıcı yok."}), 404
+
+    admin = admins[0]
+    username = str(admin.get("username") or "").strip()
+    if "@" not in username:
+        return jsonify(
+            {
+                "ok": False,
+                "mesaj": (
+                    "Admin kullanıcı adı e-posta değil; "
+                    "sıfırlama bağlantısı gönderilemez."
+                ),
+            }
+        ), 400
+    if not admin.get("is_active", True):
+        return jsonify({"ok": False, "mesaj": "Admin kullanıcı pasif."}), 400
+
+    user_id = int(admin["id"])
+    try:
+        _ensure_tenant_password_reset_tokens(schema)
+        ttl = int(current_app.config.get("PASSWORD_RESET_TTL_SEC", 3600))
+        raw_token = secrets.token_urlsafe(32)
+        req_ip = (request.headers.get("X-Forwarded-For") or request.remote_addr or "")[
+            :64
+        ]
+        with db() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                psql.SQL(
+                    """
+                    UPDATE {}.password_reset_tokens
+                    SET used_at = NOW()
+                    WHERE user_id = %s AND used_at IS NULL
+                    """
+                ).format(psql.Identifier(schema)),
+                (user_id,),
+            )
+            cur.execute(
+                psql.SQL(
+                    """
+                    INSERT INTO {}.password_reset_tokens
+                        (user_id, token_hash, expires_at, request_ip)
+                    VALUES (%s, %s, NOW() + (%s * interval '1 second'), %s)
+                    """
+                ).format(psql.Identifier(schema)),
+                (user_id, _token_hash(raw_token), ttl, req_ip),
+            )
+        reset_url = _tenant_reset_url(slug, raw_token)
+        sent = bool(send_password_reset_email(username, reset_url))
+    except Exception as e:
+        logger.exception(
+            "send-reset failed tenant_id=%s schema=%s", tenant_id, schema
+        )
+        return jsonify({"ok": False, "mesaj": f"Sıfırlama gönderilemedi: {e}"}), 500
+
+    logger.info(
+        "admin access send-reset tenant_id=%s slug=%s user_id=%s by=%s sent=%s",
+        tenant_id,
+        slug,
+        user_id,
+        getattr(current_user, "username", None),
+        sent,
+    )
+    if not sent:
+        return jsonify(
+            {
+                "ok": False,
+                "mesaj": (
+                    "E-posta gönderilemedi (SMTP ayarlarını / mail vault kontrol edin)."
+                ),
+            }
+        ), 502
+
+    return jsonify(
+        {
+            "ok": True,
+            "mesaj": f"Şifre sıfırlama bağlantısı gönderildi: {username}",
+            "username": username,
+        }
+    )
+
+
+@bp.route(
+    "/api/modules/tenants/<int:tenant_id>/access/generate-temp-password",
+    methods=["POST"],
+)
+@platform_modules_admin
+def api_modules_tenant_access_generate_temp(tenant_id: int):
+    """Geçici şifre üret → hash + security_stamp; plaintext yalnız yanıtta bir kez."""
+    body = request.get_json(silent=True) or {}
+    if not body.get("confirm"):
+        return jsonify({"ok": False, "mesaj": MSG_CONFIRM_REQUIRED}), 400
+
+    email_also = bool(body.get("email_also"))
+    tenant = _resolve_active_tenant(int(tenant_id))
+    if not tenant:
+        return jsonify({"ok": False, "mesaj": "Kiracı bulunamadı."}), 404
+
+    slug = str(tenant.get("slug") or "")
+    if slug.lower() == "public":
+        return jsonify(
+            {"ok": False, "mesaj": "Public platform kullanıcısı için bu akış kullanılamaz."}
+        ), 400
+
+    schema = _schema_ident(tenant.get("schema_name") or "")
+    if not schema:
+        return jsonify({"ok": False, "mesaj": "Geçersiz kiracı şeması."}), 400
+
+    try:
+        admins = _fetch_tenant_admins(schema)
+    except Exception as e:
+        return jsonify({"ok": False, "mesaj": f"Kullanıcılar okunamadı: {e}"}), 500
+
+    if not admins:
+        return jsonify({"ok": False, "mesaj": "Bu kiracıda admin kullanıcı yok."}), 404
+
+    admin = admins[0]
+    user_id = int(admin["id"])
+    username = str(admin.get("username") or "").strip()
+    temp = _generate_temp_password()
+    hashed = generate_password_hash(temp)
+    stamp = generate_security_stamp()
+
+    try:
+        with db() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                psql.SQL(
+                    """
+                    UPDATE {}.users
+                    SET password_hash = %s, security_stamp = %s
+                    WHERE id = %s
+                    """
+                ).format(psql.Identifier(schema)),
+                (hashed, stamp, user_id),
+            )
+            if cur.rowcount != 1:
+                return jsonify({"ok": False, "mesaj": "Şifre güncellenemedi."}), 500
+    except Exception as e:
+        logger.exception("temp-password update failed tenant_id=%s", tenant_id)
+        return jsonify({"ok": False, "mesaj": f"Şifre güncellenemedi: {e}"}), 500
+
+    mail_sent = False
+    mail_error = None
+    if email_also:
+        if "@" not in username:
+            mail_error = "Kullanıcı adı e-posta değil; e-posta atlandı."
+        else:
+            apex = (_tenant_apex_domains() or ("payafin.com",))[0]
+            login_url = f"https://{slug}.{apex}/login"
+            body_txt = (
+                f"Merhaba,\n\n"
+                f"Payafin hesabınız ({slug}) için geçici bir şifre oluşturuldu.\n\n"
+                f"Kullanıcı adı: {username}\n"
+                f"Geçici şifre: {temp}\n"
+                f"Giriş: {login_url}\n\n"
+                f"Giriş yaptıktan sonra şifrenizi değiştirmenizi öneririz.\n"
+            )
+            try:
+                mail_sent = bool(
+                    send_mail(
+                        username,
+                        "Payafin — Geçici erişim şifresi",
+                        body_txt,
+                    )
+                )
+                if not mail_sent:
+                    mail_error = "E-posta gönderilemedi (SMTP)."
+            except Exception as e:
+                mail_error = str(e)
+
+    logger.info(
+        "admin access temp-password tenant_id=%s slug=%s user_id=%s by=%s email_also=%s mail_sent=%s",
+        tenant_id,
+        slug,
+        user_id,
+        getattr(current_user, "username", None),
+        email_also,
+        mail_sent,
+    )
+
+    return jsonify(
+        {
+            "ok": True,
+            "mesaj": "Geçici şifre oluşturuldu (yalnız bu yanıtta bir kez gösterilir).",
+            "username": username,
+            "temp_password": temp,
+            "email_also": email_also,
+            "mail_sent": mail_sent,
+            "mail_error": mail_error,
         }
     )
 
