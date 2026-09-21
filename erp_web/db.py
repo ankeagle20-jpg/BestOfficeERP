@@ -607,9 +607,11 @@ def init_schema():
     ensure_platform_tenants_table()
     ensure_pricing_tables()
     ensure_tenant_user_lookup_table()
+    ensure_tenant_user_lookup_phone_column()
     ensure_password_reset_tokens_table()
     ensure_users_security_stamp_column()
     ensure_users_email_verified_at_column()
+    ensure_users_phone_column()
     ensure_email_verification_tokens_table()
     ensure_tenant_module_entitlements_table()
     ensure_module_pricing_tiers_table()
@@ -2627,9 +2629,11 @@ def ensure_tenant_user_lookup_table():
         CREATE TABLE IF NOT EXISTS public.tenant_user_lookup (
             id          BIGSERIAL PRIMARY KEY,
             email       TEXT NOT NULL,
+            phone       TEXT,
             tenant_slug TEXT NOT NULL,
             created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             CONSTRAINT tenant_user_lookup_email_key UNIQUE (email),
+            CONSTRAINT tenant_user_lookup_phone_key UNIQUE (phone),
             CONSTRAINT tenant_user_lookup_slug_fkey
                 FOREIGN KEY (tenant_slug) REFERENCES public.tenants (slug)
                 ON DELETE CASCADE
@@ -2643,6 +2647,116 @@ def ensure_tenant_user_lookup_table():
         )
     except Exception as e:
         print(f"tenant_user_lookup_slug_idx: {e}")
+    ensure_tenant_user_lookup_phone_column()
+
+
+def ensure_tenant_user_lookup_phone_column():
+    """Platform telefon → kiracı indeksi (E.164 TEXT; email UNIQUE ile aynı mantık).
+
+    Aynı telefon iki farklı kiracıda kullanılamaz. NULL çoklu satıra izinli
+    (PostgreSQL UNIQUE NULL semantiği — mevcut satırlar etkilenmez).
+    """
+    ensure_platform_tenants_table()
+
+    def _do():
+        execute(
+            "ALTER TABLE public.tenant_user_lookup "
+            "ADD COLUMN IF NOT EXISTS phone TEXT"
+        )
+        execute(
+            """
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1
+                    FROM pg_constraint
+                    WHERE conname = 'tenant_user_lookup_phone_key'
+                      AND conrelid = 'public.tenant_user_lookup'::regclass
+                ) THEN
+                    ALTER TABLE public.tenant_user_lookup
+                    ADD CONSTRAINT tenant_user_lookup_phone_key UNIQUE (phone);
+                END IF;
+            END$$;
+            """
+        )
+
+    try:
+        _run_ensure_ddl_once("tenant_user_lookup.phone", _do)
+    except Exception as e:
+        print(f"tenant_user_lookup.phone: {e}")
+
+
+def ensure_users_phone_in_schema(schema: str) -> None:
+    """users.phone (E.164 TEXT, nullable) — verilen şemada (public veya tenant_*)."""
+    sch = str(schema or "").strip()
+    if sch != "public" and not _TENANT_SCHEMA_RE.fullmatch(sch):
+        raise ValueError("geçersiz users.phone şeması")
+    full_key = f"{sch}|users.phone"
+    if full_key in _ENSURE_DDL_ONCE_KEYS:
+        return
+    with _ENSURE_DDL_ONCE_LOCK:
+        if full_key in _ENSURE_DDL_ONCE_KEYS:
+            return
+        with db() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                psql.SQL(
+                    "ALTER TABLE {}.users ADD COLUMN IF NOT EXISTS phone TEXT"
+                ).format(psql.Identifier(sch))
+            )
+        _ENSURE_DDL_ONCE_KEYS.add(full_key)
+
+
+def ensure_users_phone_column():
+    """Platform login telefonu — public + tüm aktif tenant_* şemaları.
+
+    Process-ömürlü once: şema başına tek ALTER (_ENSURE_DDL_ONCE_KEYS).
+    Mevcut satırlar NULL kalır; veri/hash değişmez.
+    """
+    ensure_users_phone_in_schema("public")
+    try:
+        rows = fetch_all(
+            """
+            SELECT DISTINCT schema_name
+            FROM public.tenants
+            WHERE schema_name IS NOT NULL
+              AND btrim(schema_name) <> ''
+            ORDER BY 1
+            """
+        )
+        for row in rows or []:
+            sch = str((row or {}).get("schema_name") or "").strip()
+            if not sch or sch == "public":
+                continue
+            if not _TENANT_SCHEMA_RE.fullmatch(sch):
+                continue
+            try:
+                ensure_users_phone_in_schema(sch)
+            except Exception as e:
+                print(f"users.phone ensure ({sch}): {e}")
+    except Exception as e:
+        print(f"users.phone tenant list: {e}")
+    try:
+        ts = _tenant_schema_for_request()
+        if ts:
+            ensure_users_phone_in_schema(ts)
+    except Exception as e:
+        print(f"users.phone request tenant: {e}")
+
+
+def ensure_platform_signup_intents_admin_phone_column():
+    """Satın Al / signup intent — admin_phone (E.164 TEXT, nullable)."""
+
+    def _do():
+        execute(
+            "ALTER TABLE public.platform_signup_intents "
+            "ADD COLUMN IF NOT EXISTS admin_phone TEXT"
+        )
+
+    try:
+        _run_ensure_ddl_once("platform_signup_intents.admin_phone", _do)
+    except Exception as e:
+        print(f"platform_signup_intents.admin_phone: {e}")
 
 
 def ensure_password_reset_tokens_in_schema(schema: str) -> None:
@@ -3963,6 +4077,7 @@ def ensure_platform_tenant_billing_tables():
             id                          BIGSERIAL PRIMARY KEY,
             tenant_id                   INTEGER NOT NULL,
             email                       TEXT NOT NULL,
+            admin_phone                 TEXT,
             admin_full_name             TEXT NOT NULL DEFAULT '',
             module_key                  TEXT,
             tier_key                    TEXT,
@@ -3990,6 +4105,7 @@ def ensure_platform_tenant_billing_tables():
         )
         """
     )
+    ensure_platform_signup_intents_admin_phone_column()
     for stmt in (
         "CREATE INDEX IF NOT EXISTS platform_signup_intents_expires_at_idx "
         "ON public.platform_signup_intents (expires_at)",
