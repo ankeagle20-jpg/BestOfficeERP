@@ -2645,37 +2645,69 @@ def ensure_tenant_user_lookup_table():
         print(f"tenant_user_lookup_slug_idx: {e}")
 
 
+def ensure_password_reset_tokens_in_schema(schema: str) -> None:
+    """Şifre sıfırlama token tablosu — verilen şemada (public veya tenant_*)."""
+    sch = str(schema or "").strip()
+    if sch != "public" and not _TENANT_SCHEMA_RE.fullmatch(sch):
+        raise ValueError("geçersiz password_reset_tokens şeması")
+    full_key = f"{sch}|password_reset_tokens"
+    if full_key in _ENSURE_DDL_ONCE_KEYS:
+        return
+    with _ENSURE_DDL_ONCE_LOCK:
+        if full_key in _ENSURE_DDL_ONCE_KEYS:
+            return
+        ident = psql.Identifier(sch)
+        with db() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                psql.SQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS {}.password_reset_tokens (
+                        id          BIGSERIAL PRIMARY KEY,
+                        user_id     INTEGER NOT NULL
+                            REFERENCES {}.users (id) ON DELETE CASCADE,
+                        token_hash  TEXT NOT NULL,
+                        expires_at  TIMESTAMPTZ NOT NULL,
+                        used_at     TIMESTAMPTZ,
+                        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        request_ip  TEXT,
+                        CONSTRAINT password_reset_tokens_token_hash_key UNIQUE (token_hash)
+                    )
+                    """
+                ).format(ident, ident)
+            )
+            try:
+                cur.execute(
+                    psql.SQL(
+                        """
+                        CREATE INDEX IF NOT EXISTS password_reset_tokens_user_id_idx
+                        ON {}.password_reset_tokens (user_id)
+                        """
+                    ).format(ident)
+                )
+                cur.execute(
+                    psql.SQL(
+                        """
+                        CREATE INDEX IF NOT EXISTS password_reset_tokens_expires_at_idx
+                        ON {}.password_reset_tokens (expires_at)
+                        WHERE used_at IS NULL
+                        """
+                    ).format(ident)
+                )
+            except Exception as e:
+                print(f"password_reset_tokens indexes ({sch}): {e}")
+        _ENSURE_DDL_ONCE_KEYS.add(full_key)
+
+
 def ensure_password_reset_tokens_table():
-    """Şifre sıfırlama tokenları — public.users FK (Ofisbir / public şema)."""
-    execute(
-        """
-        CREATE TABLE IF NOT EXISTS public.password_reset_tokens (
-            id          BIGSERIAL PRIMARY KEY,
-            user_id     INTEGER NOT NULL
-                REFERENCES public.users (id) ON DELETE CASCADE,
-            token_hash  TEXT NOT NULL,
-            expires_at  TIMESTAMPTZ NOT NULL,
-            used_at     TIMESTAMPTZ,
-            created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            request_ip  TEXT,
-            CONSTRAINT password_reset_tokens_token_hash_key UNIQUE (token_hash)
-        )
-        """
-    )
+    """Bootstrap: public + (request varsa) aktif tenant şeması."""
+    ensure_password_reset_tokens_in_schema("public")
     try:
-        execute(
-            "CREATE INDEX IF NOT EXISTS password_reset_tokens_user_id_idx "
-            "ON public.password_reset_tokens (user_id)"
-        )
-        execute(
-            """
-            CREATE INDEX IF NOT EXISTS password_reset_tokens_expires_at_idx
-            ON public.password_reset_tokens (expires_at)
-            WHERE used_at IS NULL
-            """
-        )
+        ts = _tenant_schema_for_request()
+        if ts:
+            ensure_password_reset_tokens_in_schema(ts)
     except Exception as e:
-        print(f"password_reset_tokens indexes: {e}")
+        print(f"password_reset_tokens tenant ensure: {e}")
 
 
 def ensure_users_email_verified_at_column():

@@ -40,6 +40,8 @@ _LEDGER_ONLY_EXACT_PATHS = frozenset(
     {
         "/login",
         "/logout",
+        "/forgot-password",
+        "/reset-password",
         "/profile",
         "/healthz",
         "/favicon.ico",
