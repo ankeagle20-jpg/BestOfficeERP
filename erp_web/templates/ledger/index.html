@@ -342,6 +342,17 @@
   .pc-attach-view {
     font-size: 1.05rem; line-height: 1; padding: 0.35rem 0.5rem; min-width: 2.25rem;
   }
+  .pc-in-inv-badge {
+    display: inline-flex; align-items: center; gap: 0.25rem;
+    font-size: 0.75rem; font-weight: 600; color: var(--pc-muted);
+    padding: 0.2rem 0.45rem; border: 1px solid var(--pc-line, #cbd5e1);
+    border-radius: 0.35rem; white-space: nowrap;
+  }
+  .pc-in-inv-warn {
+    font-size: 0.85rem; color: #92400e; background: #fffbeb;
+    border: 1px solid #fcd34d; border-radius: 0.45rem;
+    padding: 0.55rem 0.7rem; margin: 0 0 0.75rem;
+  }
   .pc-wa {
     display: inline-flex;
     align-items: center;
@@ -945,6 +956,25 @@
         <button type="button" class="pc-btn pc-btn-ghost" id="pc-inv-close">Kapat</button>
       </div>
     </div>
+
+    <div class="pc-panel" id="pc-in-inv-panel">
+      <h2>Gelen Fatura (kayıt)</h2>
+      <p class="pc-in-inv-warn" role="status">Bu kayıt GİB’e gitmez. Karşı tarafın kestiği belgeyi yalnızca arşivlersiniz; imza/SMS yok.</p>
+      <input type="hidden" id="pc-in-inv-tx-id" value="">
+      <div class="pc-field"><label for="pc-in-inv-doc">Belge no</label><input id="pc-in-inv-doc" maxlength="128" autocomplete="off"></div>
+      <div class="pc-field"><label for="pc-in-inv-amount">Tutar</label><input id="pc-in-inv-amount" inputmode="decimal" autocomplete="off"></div>
+      <div class="pc-field"><label for="pc-in-inv-date">Belge tarihi</label><input type="date" id="pc-in-inv-date"></div>
+      <div class="pc-field"><label for="pc-in-inv-note">Not (isteğe bağlı)</label><input id="pc-in-inv-note" maxlength="300" autocomplete="off"></div>
+      <div class="pc-field">
+        <label for="pc-in-inv-file">Fotoğraf / görsel</label>
+        <input id="pc-in-inv-file" type="file" accept="image/jpeg,image/png,image/webp" capture="environment">
+      </div>
+      <div id="pc-in-inv-err" class="pc-err" hidden></div>
+      <div class="pc-actions">
+        <button type="button" class="pc-btn pc-btn-primary" id="pc-in-inv-save">Kaydet</button>
+        <button type="button" class="pc-btn pc-btn-ghost" id="pc-in-inv-close">Kapat</button>
+      </div>
+    </div>
   </div>
 
   <div id="pc-group-detail-view" hidden>
@@ -1099,6 +1129,7 @@
     registeredAssets: [],
     detailFilter: { kind: null, dir: null },
     detailTxs: [],
+    incomingByTx: {},
     selectMode: false,
     selectedPartyIds: {}
   };
@@ -1649,6 +1680,72 @@
       });
     }
     return out;
+  }
+
+  function loadIncomingForParty(partyId) {
+    if (!partyId) {
+      state.incomingByTx = {};
+      return Promise.resolve();
+    }
+    return api("/ledger/api/incoming-invoices?party_id=" + encodeURIComponent(partyId))
+      .then(function (j) {
+        var map = {};
+        (j.incoming_invoices || []).forEach(function (inv) {
+          if (inv && inv.source_transaction_id != null && !inv.is_deleted) {
+            map[String(inv.source_transaction_id)] = inv;
+          }
+        });
+        state.incomingByTx = map;
+      })
+      .catch(function () {
+        state.incomingByTx = {};
+      });
+  }
+
+  function openIncomingLightbox(invId) {
+    if (!invId) return;
+    api("/ledger/api/incoming-invoices/" + invId).then(function (j) {
+      var img = document.getElementById("pc-lightbox-img");
+      var box = document.getElementById("pc-lightbox");
+      if (!img || !box || !j.url) throw new Error("Görüntü URL alınamadı.");
+      img.src = j.url;
+      box.hidden = false;
+    }).catch(function (e) { alert(e.message || "Gelen belge açılamadı."); });
+  }
+
+  function findDetailTx(txId) {
+    var id = Number(txId);
+    var txs = state.detailTxs || [];
+    for (var i = 0; i < txs.length; i++) {
+      if (Number(txs[i].id) === id) return txs[i];
+    }
+    return null;
+  }
+
+  function openIncomingForm(txId) {
+    var t = findDetailTx(txId);
+    if (!t) {
+      alert("Hareket bulunamadı.");
+      return;
+    }
+    if (!confirm("Gelen fatura kaydı oluşturulsun mu?\n\nBu işlem GİB’e gitmez; yalnızca belge arşividir.")) return;
+    document.getElementById("pc-inv-panel").classList.remove("open");
+    document.getElementById("pc-tx-panel").classList.remove("open");
+    document.getElementById("pc-stmt-panel").classList.remove("open");
+    document.getElementById("pc-edit-panel").classList.remove("open");
+    document.getElementById("pc-in-inv-tx-id").value = String(t.id);
+    document.getElementById("pc-in-inv-doc").value = "";
+    document.getElementById("pc-in-inv-amount").value = String(t.amount != null ? t.amount : "");
+    var d = (t.occurred_at || "").toString().slice(0, 10);
+    document.getElementById("pc-in-inv-date").value = d || todayISO();
+    document.getElementById("pc-in-inv-note").value = "";
+    var fileEl = document.getElementById("pc-in-inv-file");
+    if (fileEl) fileEl.value = "";
+    var err = document.getElementById("pc-in-inv-err");
+    err.hidden = true;
+    err.textContent = "";
+    document.getElementById("pc-in-inv-panel").classList.add("open");
+    try { document.getElementById("pc-in-inv-doc").focus(); } catch (e) {}
   }
 
   function renderDetailTxList() {
@@ -2243,10 +2340,22 @@
       ? ('<button type="button" class="pc-btn pc-btn-ghost pc-inv-convert" data-id="' +
         t.id + '" title="Giden fatura (GİB taslağı)">Giden Fatura</button>')
       : "";
-    var inInvBtn = (!t.is_void && t.direction === "receive" && t.currency === "TRY")
-      ? ('<button type="button" class="pc-btn pc-btn-ghost pc-inv-incoming" data-id="' +
-        t.id + '" title="Gelen fatura kaydı (yakında)">Gelen Fatura</button>')
-      : "";
+    var incoming = (state.incomingByTx || {})[String(t.id)] || null;
+    var inInvBtn = "";
+    if (!t.is_void && t.direction === "receive" && t.currency === "TRY") {
+      if (incoming && incoming.id) {
+        inInvBtn =
+          '<span class="pc-in-inv-badge" title="Belge no: ' +
+          String(incoming.document_no || "").replace(/"/g, "&quot;") +
+          '">Gelen belge</span>' +
+          '<button type="button" class="pc-btn pc-btn-ghost pc-in-inv-view" data-inv-id="' +
+          incoming.id + '" title="Gelen belgeyi görüntüle">Görüntüle</button>';
+      } else {
+        inInvBtn =
+          '<button type="button" class="pc-btn pc-btn-ghost pc-inv-incoming" data-id="' +
+          t.id + '" title="Gelen fatura kaydı (GİB yok)">Gelen Fatura</button>';
+      }
+    }
     var dateS = fmtTxDate(t.occurred_at);
     var dateHtml = dateS ? ('<span class="pc-tx-date">' + dateS + "</span>") : "";
     return '<div class="pc-tx' + voided + '" data-tx-id="' + t.id + '"><div class="pc-tx-row"><div class="pc-tx-main">' +
@@ -2269,9 +2378,14 @@
         openInvoiceFromTx(invb.getAttribute("data-id"));
         return;
       }
+      var inView = ev.target.closest ? ev.target.closest(".pc-in-inv-view") : null;
+      if (inView && box.contains(inView)) {
+        openIncomingLightbox(inView.getAttribute("data-inv-id"));
+        return;
+      }
       var inb = ev.target.closest ? ev.target.closest(".pc-inv-incoming") : null;
       if (inb && box.contains(inb)) {
-        alert("Gelen Fatura kaydı yakında eklenecek (Aşama I2–I3). GİB'e gönderim yok; yalnızca belge kaydı olacak.");
+        openIncomingForm(inb.getAttribute("data-id"));
         return;
       }
       var b = ev.target.closest ? ev.target.closest(".pc-void") : null;
@@ -2370,6 +2484,75 @@
       }).catch(function (e) { err.textContent = e.message; err.hidden = false; });
   });
 
+  document.getElementById("pc-in-inv-close").addEventListener("click", function () {
+    document.getElementById("pc-in-inv-panel").classList.remove("open");
+  });
+  document.getElementById("pc-in-inv-save").addEventListener("click", function () {
+    var err = document.getElementById("pc-in-inv-err");
+    err.hidden = true;
+    err.textContent = "";
+    var txId = parseInt(document.getElementById("pc-in-inv-tx-id").value || "0", 10);
+    var partyId = state.partyId;
+    if (!txId || !partyId) {
+      err.textContent = "Hareket/cari bağlamı yok.";
+      err.hidden = false;
+      return;
+    }
+    var docNo = (document.getElementById("pc-in-inv-doc").value || "").trim();
+    var amount = (document.getElementById("pc-in-inv-amount").value || "").trim();
+    var invDate = (document.getElementById("pc-in-inv-date").value || "").trim();
+    var note = (document.getElementById("pc-in-inv-note").value || "").trim();
+    var fileEl = document.getElementById("pc-in-inv-file");
+    var file = fileEl && fileEl.files && fileEl.files[0];
+    if (!docNo) {
+      err.textContent = "Belge no gerekli.";
+      err.hidden = false;
+      return;
+    }
+    if (!amount) {
+      err.textContent = "Tutar gerekli.";
+      err.hidden = false;
+      return;
+    }
+    if (!invDate) {
+      err.textContent = "Belge tarihi gerekli.";
+      err.hidden = false;
+      return;
+    }
+    if (!file) {
+      err.textContent = "Fotoğraf / görsel gerekli.";
+      err.hidden = false;
+      return;
+    }
+    var fd = new FormData();
+    fd.append("party_id", String(partyId));
+    fd.append("source_transaction_id", String(txId));
+    fd.append("document_no", docNo);
+    fd.append("invoice_date", invDate);
+    fd.append("amount", amount);
+    fd.append("currency", "TRY");
+    if (note) fd.append("note", note);
+    fd.append("file", file, file.name || "gelen.jpg");
+    var saveBtn = document.getElementById("pc-in-inv-save");
+    saveBtn.disabled = true;
+    apiUpload("/ledger/api/incoming-invoices", fd)
+      .then(function (j) {
+        var inv = j.incoming_invoice;
+        if (inv && inv.source_transaction_id != null) {
+          state.incomingByTx[String(inv.source_transaction_id)] = inv;
+        }
+        document.getElementById("pc-in-inv-panel").classList.remove("open");
+        renderDetailTxList();
+      })
+      .catch(function (e) {
+        err.textContent = e.message || "Kayıt başarısız.";
+        err.hidden = false;
+      })
+      .then(function () {
+        saveBtn.disabled = false;
+      });
+  });
+
   function applyTxToDetailList(t) {
     if (!t) return;
     upsertDetailTx(t);
@@ -2381,6 +2564,8 @@
     if (!p) return;
     document.getElementById("pc-tx-panel").classList.remove("open");
     document.getElementById("pc-stmt-panel").classList.remove("open");
+    document.getElementById("pc-inv-panel").classList.remove("open");
+    document.getElementById("pc-in-inv-panel").classList.remove("open");
     document.getElementById("pc-edit-name").value = p.name || "";
     document.getElementById("pc-edit-type").value = p.type || "person";
     document.getElementById("pc-edit-phone").value = p.phone || "";
@@ -2424,11 +2609,15 @@
     document.getElementById("pc-tx-panel").classList.remove("open");
     document.getElementById("pc-stmt-panel").classList.remove("open");
     document.getElementById("pc-edit-panel").classList.remove("open");
+    document.getElementById("pc-inv-panel").classList.remove("open");
+    document.getElementById("pc-in-inv-panel").classList.remove("open");
     return api("/ledger/api/parties/" + id).then(function (j) {
       var p = j.party;
       applyPartyDetailUi(p);
       state.detailTxs = j.transactions || [];
-      renderDetailTxList();
+      return loadIncomingForParty(id).then(function () {
+        renderDetailTxList();
+      });
     });
   }
 
@@ -2769,7 +2958,9 @@
       if (rows.length) {
         return api("/ledger/api/parties/" + state.partyId).then(function (detail) {
           state.detailTxs = detail.transactions || [];
-          renderDetailTxList();
+          return loadIncomingForParty(state.partyId).then(function () {
+            renderDetailTxList();
+          });
         });
       }
     }).then(function () {
