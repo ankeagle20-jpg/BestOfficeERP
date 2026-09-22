@@ -34,7 +34,7 @@ except ImportError:
     pass
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-MODEL = "qwen/qwen3.6-27b"
+MODEL = "qwen/qwen3.8-27b"
 MAX_TOKENS = 4096
 
 SYSTEM_PROMPT = (
@@ -316,6 +316,315 @@ def fis_oku(
         return True, parsed, None, raw
 
     # Teorik: döngü bitti (2. deneme de HTTP hata ile continue etmedi)
+    return (
+        False,
+        None,
+        f"AI servisi hata döndü (HTTP {last_status}).",
+        last_raw_body,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Payafin Cari — kartvizit / vergi levhası / serbest metin OCR (Aşama O0)
+# fis_oku'dan bağımsız; masraf akışına dokunulmaz.
+# ---------------------------------------------------------------------------
+
+CARI_BELGE_SYSTEM_PROMPT = (
+    "Sen bir kartvizit, vergi levhası ve serbest ticari metin OCR asistanısın. "
+    "Sadece geçerli JSON döndür. Tahmin etme veya uydurma; okunamayan alanları null bırak. "
+    "Fiş/fatura ürün satırı veya tutar çıkarma. "
+    "Telefon ve e-postayı belgedeki ham metin olarak ver (aşırı normalizasyon yapma). "
+    "VKN genelde 10, TCKN 11 hanedir; uymazsa yine yaz ama guven alanını dusuk yap."
+)
+
+CARI_BELGE_USER_PROMPT = """Bu görselden (kartvizit, vergi levhası veya serbest ticari metin)
+şu alanları çıkar ve SADECE JSON döndür:
+{
+  "belge_tipi": "kartvizit | vergi_levhasi | serbest | bilinmiyor",
+  "unvan": "string|null",
+  "tip_tahmini": "person|company|null",
+  "vkn": "string|null",
+  "tckn": "string|null",
+  "vergi_dairesi": "string|null",
+  "adres": "string|null",
+  "telefon": "string|null",
+  "email": "string|null",
+  "ulke": "string|null",
+  "not_ham": "string|null",
+  "guven": "yuksek|orta|dusuk"
+}
+
+Kurallar:
+- unvan: vergi levhasında Unvan/Trade name; kartvizitte şirket veya kişi adı.
+- tip_tahmini: VKN/şirket ünvani varsa company; şahıs/kişiyse person; belirsizse null.
+- Hem VKN hem TCKN görünüyorsa ikisini de doldur; çelişirse guven=dusuk.
+- ulke yoksa ve belge TR ise "TR" yazabilirsin; emin değilsen null.
+- not_ham: forma uymayan kısa ek not (isteğe bağlı); yoksa null.
+"""
+
+CARI_BELGE_USER_PROMPT_RETRY = (
+    CARI_BELGE_USER_PROMPT
+    + "\n\nGörselde birden fazla belge/parça varsa SADECE en net/en büyük "
+    "olanı işle; diğerlerini yok say. Yalnızca geçerli JSON üret."
+)
+
+_CARI_BELGE_EXPECTED_KEYS = (
+    "belge_tipi",
+    "unvan",
+    "tip_tahmini",
+    "vkn",
+    "tckn",
+    "vergi_dairesi",
+    "adres",
+    "telefon",
+    "email",
+    "ulke",
+    "not_ham",
+    "guven",
+)
+
+
+def _log_cari_belge_issue(
+    image_path,
+    status_code,
+    raw_snippet,
+    *,
+    neden: str,
+    deneme: int = 1,
+) -> None:
+    """cari_belge_oku hata teşhisi — fis_oku log yardımcısından ayrı."""
+    snippet = (raw_snippet or "")[:2000]
+    _log.warning(
+        "Groq cari_belge_oku sorun: neden=%s status_code=%s image_path=%s deneme=%s raw_body=%s",
+        neden,
+        status_code,
+        image_path,
+        deneme,
+        snippet,
+    )
+
+
+def _normalize_cari_belge_result(parsed: dict) -> dict:
+    """Beklenen anahtarları garanti et; bilinmeyenleri koru."""
+    out: dict = {}
+    for k in _CARI_BELGE_EXPECTED_KEYS:
+        v = parsed.get(k)
+        if isinstance(v, str):
+            v = v.strip() or None
+        out[k] = v
+
+    tip = out.get("tip_tahmini")
+    if tip is not None:
+        tip_l = str(tip).strip().lower()
+        if tip_l in ("person", "kişi", "kisi", "şahıs", "sahis"):
+            out["tip_tahmini"] = "person"
+        elif tip_l in ("company", "firma", "şirket", "sirket"):
+            out["tip_tahmini"] = "company"
+        elif tip_l in ("person", "company"):
+            out["tip_tahmini"] = tip_l
+        else:
+            out["tip_tahmini"] = None
+
+    belge = out.get("belge_tipi")
+    if belge is not None:
+        b = str(belge).strip().lower().replace(" ", "_")
+        allowed = {"kartvizit", "vergi_levhasi", "serbest", "bilinmiyor"}
+        if b in ("vergi-levhasi", "vergi_levhası", "vergi levhasi"):
+            b = "vergi_levhasi"
+        out["belge_tipi"] = b if b in allowed else "bilinmiyor"
+
+    guven = out.get("guven")
+    if guven is not None:
+        g = str(guven).strip().lower()
+        if g not in ("yuksek", "orta", "dusuk"):
+            out["guven"] = "orta"
+        else:
+            out["guven"] = g
+    else:
+        out["guven"] = "orta"
+
+    return out
+
+
+def cari_belge_oku(
+    image_path,
+    *,
+    model: str | None = None,
+    timeout: int = 120,
+    belge_ipucu: str | None = None,
+) -> tuple[bool, dict | None, str | None, str | None]:
+    """Kartvizit / vergi levhası / serbest metin görselini Groq ile okur.
+
+    fis_oku'dan bağımsız (ayrı prompt + retry). Masraf akışına yazmaz.
+
+    Returns:
+        (ok, result, error, raw) — result normalize edilmiş cari belge alanları.
+    """
+    api_key = _api_key()
+    if not api_key:
+        return False, None, "Cari belge okuma yapılandırması eksik (GROQ_API_KEY).", None
+
+    path = Path(image_path).expanduser()
+    if not path.is_file():
+        return False, None, f"Görsel dosyası bulunamadı: {path}", None
+
+    try:
+        data_url = _load_image_data_url(path)
+    except Exception as e:
+        return False, None, f"Görsel okunamadı: {e}", None
+
+    try:
+        import requests
+    except ImportError:
+        return False, None, "requests kütüphanesi yüklü değil.", None
+
+    use_model = (model or MODEL).strip() or MODEL
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    tip_hint = (belge_ipucu or "").strip().lower()
+    hint_line = ""
+    if tip_hint in ("kartvizit", "vergi_levhasi", "serbest"):
+        hint_line = f"\n\nBelge tipi ipucu (kullanıcı): {tip_hint}."
+
+    user_text_1 = CARI_BELGE_USER_PROMPT + hint_line
+    user_text_2 = CARI_BELGE_USER_PROMPT_RETRY + hint_line
+
+    attempt_specs = (
+        {"deneme": 1, "temperature": 0.1, "user_text": user_text_1},
+        {"deneme": 2, "temperature": 0.0, "user_text": user_text_2},
+    )
+
+    last_raw_body: str | None = None
+    last_status: int | None = None
+
+    for attempt_i, spec in enumerate(attempt_specs):
+        deneme = int(spec["deneme"])
+        payload = {
+            "model": use_model,
+            "temperature": spec["temperature"],
+            "max_tokens": MAX_TOKENS,
+            "response_format": {"type": "json_object"},
+            "messages": [
+                {"role": "system", "content": CARI_BELGE_SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": spec["user_text"]},
+                        {"type": "image_url", "image_url": {"url": data_url}},
+                    ],
+                },
+            ],
+        }
+
+        try:
+            resp = requests.post(
+                GROQ_URL, headers=headers, json=payload, timeout=timeout
+            )
+        except requests.Timeout:
+            return False, None, "AI servisi zaman aşımına uğradı; tekrar deneyin.", None
+        except requests.RequestException as e:
+            return False, None, f"AI servisine ulaşılamadı: {e}", None
+
+        raw_body = (resp.text or "")[:8000]
+        last_raw_body = raw_body
+        last_status = resp.status_code
+
+        if resp.status_code != 200:
+            _log_cari_belge_issue(
+                str(path),
+                resp.status_code,
+                raw_body,
+                neden=f"http_{resp.status_code}",
+                deneme=deneme,
+            )
+            if resp.status_code == 429:
+                return (
+                    False,
+                    None,
+                    "AI servisi yoğun; biraz sonra tekrar deneyin.",
+                    raw_body,
+                )
+            if resp.status_code == 401:
+                return (
+                    False,
+                    None,
+                    "Cari belge okuma yapılandırması geçersiz (API anahtarı).",
+                    raw_body,
+                )
+            if resp.status_code == 404:
+                return (
+                    False,
+                    None,
+                    "Cari belge okuma modeli erişilemiyor; yapılandırmayı kontrol edin.",
+                    raw_body,
+                )
+            if attempt_i == 0 and _is_json_validate_failed(
+                resp.status_code, raw_body
+            ):
+                continue
+            return (
+                False,
+                None,
+                f"AI servisi hata döndü (HTTP {resp.status_code}).",
+                raw_body,
+            )
+
+        try:
+            body = resp.json()
+        except Exception:
+            _log_cari_belge_issue(
+                str(path),
+                resp.status_code,
+                raw_body,
+                neden="json_parse",
+                deneme=deneme,
+            )
+            return False, None, "AI yanıtı okunamadı.", raw_body
+
+        try:
+            content = body["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError):
+            _log_cari_belge_issue(
+                str(path),
+                resp.status_code,
+                raw_body,
+                neden="beklenen_icerik_yok",
+                deneme=deneme,
+            )
+            return False, None, "AI yanıtında beklenen içerik yok.", raw_body
+
+        raw = (
+            content
+            if isinstance(content, str)
+            else json.dumps(content, ensure_ascii=False)
+        )
+        try:
+            parsed = json.loads(content) if isinstance(content, str) else content
+        except (json.JSONDecodeError, TypeError):
+            _log_cari_belge_issue(
+                str(path),
+                resp.status_code,
+                raw,
+                neden="gecersiz_json",
+                deneme=deneme,
+            )
+            return False, None, "Cari belge okunamadı (geçersiz JSON).", raw
+
+        if not isinstance(parsed, dict):
+            _log_cari_belge_issue(
+                str(path),
+                resp.status_code,
+                raw,
+                neden="beklenmeyen_yanit",
+                deneme=deneme,
+            )
+            return False, None, "Cari belge okunamadı (beklenmeyen yanıt).", raw
+
+        return True, _normalize_cari_belge_result(parsed), None, raw
+
     return (
         False,
         None,
