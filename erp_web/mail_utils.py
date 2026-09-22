@@ -11,8 +11,10 @@ from credentials_vault import get_credential
 
 logger = logging.getLogger(__name__)
 
-# Render worker timeout (~30s) altinda kal; SMTP takilmasinda istek olmesin.
+# Render worker timeout (~30s) altinda kal; SMTP/HTTP takilmasinda istek olmesin.
 SMTP_TIMEOUT_SEC = 15
+BREVO_HTTP_TIMEOUT_SEC = 15
+BREVO_SMTP_EMAIL_URL = "https://api.brevo.com/v3/smtp/email"
 
 
 def _mail_credentials():
@@ -48,34 +50,113 @@ def _mail_smtp_endpoint():
     return host, port
 
 
-def send_mail(to_email, subject, body_text, body_html=None):
-    """Tek alıcıya e-posta gönder. mail.username / mail.password (vault veya .env) gerekli.
+def _brevo_api_key():
+    """Brevo HTTP API key: vault mail.brevo_api_key → env BREVO_API_KEY."""
+    try:
+        return (get_credential("mail.brevo_api_key") or "").strip()
+    except Exception as e:
+        logger.warning("brevo api key failed: %s", type(e).__name__)
+        return ""
 
-    Her türlü hata (vault, timeout, SMTP) → False; asla exception fırlatmaz.
+
+def _mail_sender_email():
+    """From adresi: MAIL_DEFAULT_SENDER → SMTP login → boş."""
+    default_sender = (current_app.config.get("MAIL_DEFAULT_SENDER") or "").strip()
+    if default_sender:
+        return default_sender
+    user, _ = _mail_credentials()
+    return (user or "").strip()
+
+
+def _send_mail_brevo_http(to_email, subject, body_text, body_html, api_key):
+    """Brevo Transactional HTTP API (443). Başarı True, aksi False — exception yutulur."""
+    try:
+        import requests
+
+        sender_email = _mail_sender_email()
+        if not sender_email or "@" not in sender_email:
+            logger.warning("brevo http skipped: missing sender")
+            return False
+        sender_name = (current_app.config.get("MAIL_SENDER_NAME") or "Payafin").strip() or "Payafin"
+        payload = {
+            "sender": {"name": sender_name, "email": sender_email},
+            "to": [{"email": to_email}],
+            "subject": subject or "",
+            "textContent": body_text or "",
+        }
+        if body_html:
+            payload["htmlContent"] = body_html
+        timeout = int(
+            current_app.config.get("MAIL_HTTP_TIMEOUT_SEC", BREVO_HTTP_TIMEOUT_SEC)
+            or BREVO_HTTP_TIMEOUT_SEC
+        )
+        resp = requests.post(
+            BREVO_SMTP_EMAIL_URL,
+            headers={
+                "api-key": api_key,
+                "accept": "application/json",
+                "content-type": "application/json",
+            },
+            json=payload,
+            timeout=timeout,
+        )
+        if 200 <= resp.status_code < 300:
+            return True
+        logger.warning(
+            "brevo http failed status=%s",
+            getattr(resp, "status_code", "?"),
+        )
+        return False
+    except Exception as e:
+        logger.warning("brevo http error: %s", type(e).__name__)
+        return False
+
+
+def _send_mail_smtp(to_email, subject, body_text, body_html=None):
+    """Eski SMTP yolu (geriye dönük uyumluluk)."""
+    user, password = _mail_credentials()
+    if not (user and password):
+        return False
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    default_sender = (current_app.config.get("MAIL_DEFAULT_SENDER") or "").strip()
+    msg["From"] = default_sender or user or "noreply@example.com"
+    msg["To"] = to_email
+    msg.attach(MIMEText(body_text, "plain", "utf-8"))
+    if body_html:
+        msg.attach(MIMEText(body_html, "html", "utf-8"))
+    host, port = _mail_smtp_endpoint()
+    timeout = int(
+        current_app.config.get("MAIL_SMTP_TIMEOUT_SEC", SMTP_TIMEOUT_SEC)
+        or SMTP_TIMEOUT_SEC
+    )
+    with smtplib.SMTP(host, port, timeout=timeout) as s:
+        if current_app.config.get("MAIL_USE_TLS"):
+            s.starttls()
+        s.login(user, password)
+        s.sendmail(msg["From"], to_email, msg.as_string())
+    return True
+
+
+def send_mail(to_email, subject, body_text, body_html=None):
+    """Tek alıcıya e-posta gönder.
+
+    1) Brevo HTTP API (mail.brevo_api_key) — 443
+    2) Yoksa / başarısızsa SMTP (mail.username / mail.password)
+
+    Her türlü hata (vault, timeout, SMTP/HTTP) → False; asla exception fırlatmaz.
     """
     try:
-        user, password = _mail_credentials()
-        if not to_email or not (user and password):
+        if not to_email:
             return False
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = subject
-        default_sender = (current_app.config.get("MAIL_DEFAULT_SENDER") or "").strip()
-        msg["From"] = default_sender or user or "noreply@example.com"
-        msg["To"] = to_email
-        msg.attach(MIMEText(body_text, "plain", "utf-8"))
-        if body_html:
-            msg.attach(MIMEText(body_html, "html", "utf-8"))
-        host, port = _mail_smtp_endpoint()
-        timeout = int(
-            current_app.config.get("MAIL_SMTP_TIMEOUT_SEC", SMTP_TIMEOUT_SEC)
-            or SMTP_TIMEOUT_SEC
-        )
-        with smtplib.SMTP(host, port, timeout=timeout) as s:
-            if current_app.config.get("MAIL_USE_TLS"):
-                s.starttls()
-            s.login(user, password)
-            s.sendmail(msg["From"], to_email, msg.as_string())
-        return True
+        api_key = _brevo_api_key()
+        if api_key:
+            if _send_mail_brevo_http(
+                to_email, subject, body_text, body_html, api_key
+            ):
+                return True
+            logger.warning("brevo http failed; falling back to smtp")
+        return _send_mail_smtp(to_email, subject, body_text, body_html)
     except Exception as e:
         try:
             if current_app.debug:

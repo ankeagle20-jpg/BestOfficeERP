@@ -19,6 +19,7 @@ ENV_ALIAS: dict[str, str] = {
     "mail.password": "MAIL_PASSWORD",
     "mail.server": "MAIL_SERVER",
     "mail.port": "MAIL_PORT",
+    "mail.brevo_api_key": "BREVO_API_KEY",
     "gib.user": "GIB_USER",
     "gib.pass": "GIB_PASS",
     "ai.gemini_api_key": "GEMINI_API_KEY",

@@ -3809,6 +3809,7 @@ def ensure_platform_credentials_table():
         ("mail.password", "mail", "SMTP şifresi / Brevo SMTP key", True),
         ("mail.server", "mail", "SMTP sunucu host (örn. smtp-relay.brevo.com)", False),
         ("mail.port", "mail", "SMTP port (örn. 587)", False),
+        ("mail.brevo_api_key", "mail", "Brevo Transactional HTTP API key (xkeysib-...)", True),
         ("gib.user", "gib", "GİB e-Arşiv kullanıcı kodu", True),
         ("gib.pass", "gib", "GİB e-Arşiv şifresi", True),
         ("ai.gemini_api_key", "ai", "Google Gemini API anahtarı", True),
