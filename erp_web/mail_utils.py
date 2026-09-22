@@ -29,6 +29,25 @@ def _mail_credentials():
         return "", ""
 
 
+def _mail_smtp_endpoint():
+    """SMTP host/port: vault (mail.server / mail.port) → Config/env → Brevo varsayılan."""
+    try:
+        host = (get_credential("mail.server") or "").strip()
+        port_raw = (get_credential("mail.port") or "").strip()
+    except Exception as e:
+        logger.warning("mail smtp endpoint creds failed: %s", type(e).__name__)
+        host, port_raw = "", ""
+    if not host:
+        host = (current_app.config.get("MAIL_SERVER") or "smtp-relay.brevo.com").strip()
+    if not port_raw:
+        port_raw = str(current_app.config.get("MAIL_PORT") or 587)
+    try:
+        port = int(port_raw)
+    except (TypeError, ValueError):
+        port = 587
+    return host, port
+
+
 def send_mail(to_email, subject, body_text, body_html=None):
     """Tek alıcıya e-posta gönder. mail.username / mail.password (vault veya .env) gerekli.
 
@@ -46,8 +65,7 @@ def send_mail(to_email, subject, body_text, body_html=None):
         msg.attach(MIMEText(body_text, "plain", "utf-8"))
         if body_html:
             msg.attach(MIMEText(body_html, "html", "utf-8"))
-        host = current_app.config.get("MAIL_SERVER", "smtp.gmail.com")
-        port = int(current_app.config.get("MAIL_PORT", 587) or 587)
+        host, port = _mail_smtp_endpoint()
         timeout = int(
             current_app.config.get("MAIL_SMTP_TIMEOUT_SEC", SMTP_TIMEOUT_SEC)
             or SMTP_TIMEOUT_SEC

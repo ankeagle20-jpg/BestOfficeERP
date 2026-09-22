@@ -17,6 +17,8 @@ logger = logging.getLogger(__name__)
 ENV_ALIAS: dict[str, str] = {
     "mail.username": "MAIL_USERNAME",
     "mail.password": "MAIL_PASSWORD",
+    "mail.server": "MAIL_SERVER",
+    "mail.port": "MAIL_PORT",
     "gib.user": "GIB_USER",
     "gib.pass": "GIB_PASS",
     "ai.gemini_api_key": "GEMINI_API_KEY",

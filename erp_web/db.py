@@ -3805,8 +3805,10 @@ def ensure_platform_credentials_table():
     )
     # Başlangıç kataloğu — boş değerler (is_configured=FALSE)
     catalog = (
-        ("mail.username", "mail", "SMTP kullanıcı adı / Gmail", True),
-        ("mail.password", "mail", "SMTP uygulama şifresi", True),
+        ("mail.username", "mail", "SMTP kullanıcı adı (Brevo login)", True),
+        ("mail.password", "mail", "SMTP şifresi / Brevo SMTP key", True),
+        ("mail.server", "mail", "SMTP sunucu host (örn. smtp-relay.brevo.com)", False),
+        ("mail.port", "mail", "SMTP port (örn. 587)", False),
         ("gib.user", "gib", "GİB e-Arşiv kullanıcı kodu", True),
         ("gib.pass", "gib", "GİB e-Arşiv şifresi", True),
         ("ai.gemini_api_key", "ai", "Google Gemini API anahtarı", True),
