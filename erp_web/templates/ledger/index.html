@@ -185,6 +185,71 @@
     border-radius: 8px; padding: 0.6rem 0.7rem; font-size: 1rem;
   }
   .pc-modal-actions { display: flex; gap: 0.45rem; margin-top: 0.75rem; flex-wrap: wrap; }
+
+  .pc-modal-card-wide {
+    width: min(36rem, 100%);
+    max-height: min(92vh, 40rem);
+    overflow-y: auto;
+  }
+  .pc-import-steps {
+    display: flex; gap: 0.35rem; flex-wrap: wrap;
+    margin: 0 0 0.85rem; font-size: 0.78rem;
+  }
+  .pc-import-step {
+    padding: 0.25rem 0.55rem; border-radius: 999px;
+    border: 1px solid var(--pc-line); color: var(--pc-muted); background: #f8fafc;
+  }
+  .pc-import-step.is-active {
+    background: var(--pc-accent); color: #fff; border-color: var(--pc-accent); font-weight: 650;
+  }
+  .pc-import-step.is-done { color: var(--pc-ink); border-color: #94a3b8; }
+  .pc-import-ozet {
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.4rem;
+    margin: 0.65rem 0;
+  }
+  @media (min-width: 480px) {
+    .pc-import-ozet { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  }
+  .pc-import-chip {
+    border: 1px solid var(--pc-line); border-radius: 10px; padding: 0.45rem 0.55rem;
+    background: #fff; text-align: center;
+  }
+  .pc-import-chip strong { display: block; font-size: 1.15rem; font-variant-numeric: tabular-nums; }
+  .pc-import-chip span { font-size: 0.72rem; color: var(--pc-muted); }
+  .pc-import-chip.yeni strong { color: var(--pc-recv); }
+  .pc-import-chip.dup strong { color: #b45309; }
+  .pc-import-chip.hata strong { color: #b91c1c; }
+  .pc-import-chip.kota strong { color: #0369a1; }
+  .pc-import-map {
+    display: grid; grid-template-columns: 1fr; gap: 0.4rem; margin: 0.5rem 0 0.75rem;
+  }
+  @media (min-width: 480px) {
+    .pc-import-map { grid-template-columns: 1fr 1fr; }
+  }
+  .pc-import-map .pc-field { margin-bottom: 0; }
+  .pc-import-table-wrap {
+    overflow: auto; max-height: 14rem; border: 1px solid var(--pc-line);
+    border-radius: 10px; margin: 0.5rem 0 0.75rem;
+  }
+  .pc-import-table {
+    width: 100%; border-collapse: collapse; font-size: 0.78rem; background: #fff;
+  }
+  .pc-import-table th, .pc-import-table td {
+    border-bottom: 1px solid var(--pc-line); padding: 0.35rem 0.45rem;
+    text-align: left; white-space: nowrap; color: var(--pc-ink);
+  }
+  .pc-import-table th { background: #f1f5f9; position: sticky; top: 0; z-index: 1; }
+  .pc-import-badge {
+    display: inline-block; padding: 0.1rem 0.4rem; border-radius: 6px;
+    font-size: 0.7rem; font-weight: 650;
+  }
+  .pc-import-badge.yeni { background: #ecfdf5; color: #047857; }
+  .pc-import-badge.atlanacak_duplicate { background: #fff7ed; color: #c2410c; }
+  .pc-import-badge.hata { background: #fef2f2; color: #b91c1c; }
+  .pc-import-badge.eklenen { background: #ecfdf5; color: #047857; }
+  .pc-import-badge.skipped_quota { background: #e0f2fe; color: #0369a1; }
+  .pc-btn-import { border: 1px solid #3d5166; }
+
   body.pc-select-mode-on .pc-wrap { padding-bottom: 5.25rem; }
   .pc-btn {
     border: none; border-radius: 10px; padding: 0.7rem 1rem; font-size: 0.95rem;
@@ -685,6 +750,7 @@
       <div class="pc-toolbar">
         <input type="search" id="pc-q" placeholder="Ara…" autocomplete="off">
         <button type="button" class="pc-btn pc-btn-ghost pc-btn-select-mode" id="pc-btn-select-mode">Seç</button>
+        <button type="button" class="pc-btn pc-btn-ghost pc-btn-import" id="pc-btn-import-excel">Excel'den Aktar</button>
         <button type="button" class="pc-btn pc-btn-primary" id="pc-btn-new">Yeni Cari</button>
       </div>
       <div class="pc-panel" id="pc-new-panel">
@@ -881,6 +947,64 @@
         <button type="button" class="pc-btn pc-btn-primary" id="pc-asset-save">Kaydet</button>
         <button type="button" class="pc-btn pc-btn-ghost" id="pc-asset-cancel">Vazgeç</button>
       </div>
+    </div>
+  </div>
+
+
+  <div id="pc-import-modal" class="pc-modal" hidden>
+    <div class="pc-modal-card pc-modal-card-wide" role="dialog" aria-modal="true" aria-labelledby="pc-import-title">
+      <h2 id="pc-import-title">Excel'den cari aktar</h2>
+      <div class="pc-import-steps" id="pc-import-steps" aria-hidden="true">
+        <span class="pc-import-step is-active" data-step="1">1. Dosya</span>
+        <span class="pc-import-step" data-step="2">2. Önizleme</span>
+        <span class="pc-import-step" data-step="3">3. Sonuç</span>
+      </div>
+
+      <div id="pc-import-pane-1">
+        <div class="pc-field">
+          <label for="pc-import-file">Excel dosyası (.xlsx)</label>
+          <input type="file" id="pc-import-file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+        </div>
+        <p class="pc-meta" style="margin:0.35rem 0 0.75rem;">
+          İlk satır başlık olmalı. Örnek sütunlar: Ad, Tip, Telefon, E-posta, Ülke, Not.
+          <button type="button" class="pc-btn pc-btn-ghost" id="pc-import-template" style="padding:0.25rem 0.55rem;font-size:0.78rem;margin-left:0.25rem;">Şablon indir</button>
+        </p>
+        <div class="pc-modal-actions">
+          <button type="button" class="pc-btn pc-btn-primary" id="pc-import-do-preview">Önizle</button>
+          <button type="button" class="pc-btn pc-btn-ghost" id="pc-import-cancel-1">Vazgeç</button>
+        </div>
+      </div>
+
+      <div id="pc-import-pane-2" hidden>
+        <p class="pc-meta" id="pc-import-map-hint" style="margin:0 0 0.35rem;">Algılanan sütun eşlemesi (düzenlenebilir; aktarımda sunucu otomatik eşler).</p>
+        <div class="pc-import-map" id="pc-import-map"></div>
+        <div class="pc-import-ozet" id="pc-import-ozet"></div>
+        <div class="pc-import-table-wrap">
+          <table class="pc-import-table" id="pc-import-table">
+            <thead>
+              <tr>
+                <th>Satır</th><th>Ad</th><th>Tip</th><th>Tel</th><th>E-posta</th><th>Durum</th>
+              </tr>
+            </thead>
+            <tbody id="pc-import-tbody"></tbody>
+          </table>
+        </div>
+        <div class="pc-modal-actions">
+          <button type="button" class="pc-btn pc-btn-primary" id="pc-import-do-commit">İçe Aktar</button>
+          <button type="button" class="pc-btn pc-btn-ghost" id="pc-import-back">Geri</button>
+          <button type="button" class="pc-btn pc-btn-ghost" id="pc-import-cancel-2">Vazgeç</button>
+        </div>
+      </div>
+
+      <div id="pc-import-pane-3" hidden>
+        <div class="pc-import-ozet" id="pc-import-result-ozet"></div>
+        <p class="pc-meta" id="pc-import-result-msg" style="margin:0.5rem 0;"></p>
+        <div class="pc-modal-actions">
+          <button type="button" class="pc-btn pc-btn-primary" id="pc-import-done">Tamam</button>
+        </div>
+      </div>
+
+      <div id="pc-import-err" class="pc-err" hidden></div>
     </div>
   </div>
 
@@ -2541,6 +2665,244 @@
       encodeURIComponent(fr) + "&to=" + encodeURIComponent(to) + "&indir=1";
     window.open(url, "_blank");
   });
+
+
+  /* ---- A3: Excel party import modal ---- */
+  var importState = { step: 1, file: null, preview: null, colOptions: [] };
+
+  var IMPORT_FIELD_LABELS = {
+    name: "Ad",
+    type: "Tip",
+    phone: "Telefon",
+    email: "E-posta",
+    country: "Ülke",
+    notes: "Not"
+  };
+
+  function importErr(msg) {
+    var el = document.getElementById("pc-import-err");
+    if (!msg) { el.hidden = true; el.textContent = ""; return; }
+    el.textContent = msg;
+    el.hidden = false;
+  }
+
+  function setImportStep(n) {
+    importState.step = n;
+    document.getElementById("pc-import-pane-1").hidden = n !== 1;
+    document.getElementById("pc-import-pane-2").hidden = n !== 2;
+    document.getElementById("pc-import-pane-3").hidden = n !== 3;
+    var steps = document.querySelectorAll("#pc-import-steps .pc-import-step");
+    Array.prototype.forEach.call(steps, function (el) {
+      var s = Number(el.getAttribute("data-step"));
+      el.classList.toggle("is-active", s === n);
+      el.classList.toggle("is-done", s < n);
+    });
+  }
+
+  function closeImportModal() {
+    document.getElementById("pc-import-modal").hidden = true;
+    importState = { step: 1, file: null, preview: null, colOptions: [] };
+    var fi = document.getElementById("pc-import-file");
+    if (fi) fi.value = "";
+    importErr(null);
+    setImportStep(1);
+    document.getElementById("pc-import-tbody").innerHTML = "";
+    document.getElementById("pc-import-map").innerHTML = "";
+    document.getElementById("pc-import-ozet").innerHTML = "";
+    document.getElementById("pc-import-result-ozet").innerHTML = "";
+    document.getElementById("pc-import-result-msg").textContent = "";
+  }
+
+  function openImportModal() {
+    closeImportModal();
+    document.getElementById("pc-import-modal").hidden = false;
+    setImportStep(1);
+  }
+
+  function durumLabel(d) {
+    if (d === "yeni") return "Yeni";
+    if (d === "atlanacak_duplicate") return "Atlanacak";
+    if (d === "hata") return "Hata";
+    if (d === "eklenen") return "Eklendi";
+    if (d === "skipped_quota") return "Kota";
+    return d || "";
+  }
+
+  function tipLabel(t) {
+    if (t === "company") return "Şirket";
+    if (t === "person") return "Kişi";
+    return t || "";
+  }
+
+  function renderImportOzet(targetId, ozet, mode) {
+    ozet = ozet || {};
+    var el = document.getElementById(targetId);
+    if (mode === "preview") {
+      el.innerHTML =
+        '<div class="pc-import-chip yeni"><strong>' + (ozet.yeni || 0) + '</strong><span>Yeni</span></div>' +
+        '<div class="pc-import-chip dup"><strong>' + (ozet.atlanacak_duplicate || 0) + '</strong><span>Atlanacak</span></div>' +
+        '<div class="pc-import-chip hata"><strong>' + (ozet.hata || 0) + '</strong><span>Hata</span></div>' +
+        '<div class="pc-import-chip kota"><strong>' + (ozet.aktif_cari || 0) + '</strong><span>' +
+          (ozet.kota_dolu ? "Kota dolu" : "Aktif cari") + '</span></div>';
+    } else {
+      el.innerHTML =
+        '<div class="pc-import-chip yeni"><strong>' + (ozet.eklenen || 0) + '</strong><span>Eklenen</span></div>' +
+        '<div class="pc-import-chip dup"><strong>' + (ozet.atlanan || 0) + '</strong><span>Atlanan</span></div>' +
+        '<div class="pc-import-chip hata"><strong>' + (ozet.hata || 0) + '</strong><span>Hata</span></div>' +
+        '<div class="pc-import-chip kota"><strong>' + (ozet.skipped_quota || 0) + '</strong><span>Kota atlandı</span></div>';
+    }
+  }
+
+  function renderImportMap(kolonlar) {
+    kolonlar = kolonlar || {};
+    var opts = importState.colOptions.slice();
+    var mapEl = document.getElementById("pc-import-map");
+    var html = "";
+    Object.keys(IMPORT_FIELD_LABELS).forEach(function (field) {
+      var cur = kolonlar[field] || "";
+      html += '<div class="pc-field"><label for="pc-import-map-' + field + '">' +
+        IMPORT_FIELD_LABELS[field] + '</label><select id="pc-import-map-' + field +
+        '" data-field="' + field + '">';
+      html += '<option value="">— Yoksay —</option>';
+      opts.forEach(function (col) {
+        html += '<option value="' + escapeHtml(col) + '"' +
+          (col === cur ? " selected" : "") + ">" + escapeHtml(col) + "</option>";
+      });
+      if (cur && opts.indexOf(cur) < 0) {
+        html += '<option value="' + escapeHtml(cur) + '" selected>' + escapeHtml(cur) + "</option>";
+      }
+      html += "</select></div>";
+    });
+    mapEl.innerHTML = html;
+  }
+
+  function escapeHtml(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function renderImportRows(satirlar) {
+    var tb = document.getElementById("pc-import-tbody");
+    var rows = (satirlar || []).slice(0, 20);
+    if (!rows.length) {
+      tb.innerHTML = '<tr><td colspan="6">Satır yok</td></tr>';
+      return;
+    }
+    var html = "";
+    rows.forEach(function (r) {
+      var d = r.durum || "";
+      html += "<tr>" +
+        "<td>" + (r.satir || "") + "</td>" +
+        "<td>" + escapeHtml(r.ad || "—") + "</td>" +
+        "<td>" + escapeHtml(tipLabel(r.tip)) + "</td>" +
+        "<td>" + escapeHtml(r.tel || "") + "</td>" +
+        "<td>" + escapeHtml(r.email || "") + "</td>" +
+        '<td><span class="pc-import-badge ' + escapeHtml(d) + '">' +
+          escapeHtml(durumLabel(d)) + "</span></td>" +
+        "</tr>";
+    });
+    if ((satirlar || []).length > 20) {
+      html += '<tr><td colspan="6">… ve ' + ((satirlar.length) - 20) + " satır daha</td></tr>";
+    }
+    tb.innerHTML = html;
+  }
+
+  function collectColOptions(kolonlar) {
+    var seen = {};
+    var out = [];
+    Object.keys(kolonlar || {}).forEach(function (k) {
+      var v = kolonlar[k];
+      if (v && !seen[v]) { seen[v] = true; out.push(v); }
+    });
+    out.sort();
+    return out;
+  }
+
+  function downloadImportTemplate() {
+    var csv = "Ad,Tip,Telefon,E-posta,Ülke,Not\nÖrnek Kişi,Şahıs,05320000000,ornek@email.com,TR,\n";
+    var blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "payafin_cari_sablon.csv";
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () {
+      URL.revokeObjectURL(a.href);
+      a.remove();
+    }, 500);
+  }
+
+  document.getElementById("pc-btn-import-excel").addEventListener("click", openImportModal);
+  document.getElementById("pc-import-cancel-1").addEventListener("click", closeImportModal);
+  document.getElementById("pc-import-cancel-2").addEventListener("click", closeImportModal);
+  document.getElementById("pc-import-done").addEventListener("click", function () {
+    closeImportModal();
+    loadList().then(loadSummary).catch(function () {});
+  });
+  document.getElementById("pc-import-back").addEventListener("click", function () {
+    importErr(null);
+    setImportStep(1);
+  });
+  document.getElementById("pc-import-template").addEventListener("click", downloadImportTemplate);
+
+  document.getElementById("pc-import-modal").addEventListener("click", function (ev) {
+    if (ev.target === document.getElementById("pc-import-modal")) closeImportModal();
+  });
+
+  document.getElementById("pc-import-do-preview").addEventListener("click", function () {
+    importErr(null);
+    var fi = document.getElementById("pc-import-file");
+    var file = fi && fi.files && fi.files[0];
+    if (!file) { importErr("Excel dosyası seçin (.xlsx)."); return; }
+    importState.file = file;
+    var btn = document.getElementById("pc-import-do-preview");
+    btn.disabled = true;
+    var fd = new FormData();
+    fd.append("file", file);
+    apiUpload("/ledger/api/parties/import/preview", fd).then(function (j) {
+      importState.preview = j;
+      importState.colOptions = collectColOptions(j.kolonlar || {});
+      renderImportMap(j.kolonlar || {});
+      renderImportOzet("pc-import-ozet", j.ozet || {}, "preview");
+      renderImportRows(j.satirlar || []);
+      setImportStep(2);
+    }).catch(function (e) {
+      importErr(e.message || "Önizleme başarısız");
+    }).then(function () { btn.disabled = false; });
+  });
+
+  document.getElementById("pc-import-do-commit").addEventListener("click", function () {
+    importErr(null);
+    if (!importState.file) { importErr("Dosya kayboldu; yeniden seçin."); setImportStep(1); return; }
+    var ozet = (importState.preview && importState.preview.ozet) || {};
+    var nYeni = Number(ozet.yeni || 0);
+    if (nYeni <= 0) {
+      importErr("Eklenecek yeni satır yok (hepsi atlanacak veya hatalı).");
+      return;
+    }
+    if (!window.confirm(nYeni + " yeni cari eklenecek. Devam edilsin mi?")) return;
+    var btn = document.getElementById("pc-import-do-commit");
+    btn.disabled = true;
+    var fd = new FormData();
+    fd.append("file", importState.file);
+    fd.append("action", "create");
+    apiUpload("/ledger/api/parties/import/commit", fd).then(function (j) {
+      renderImportOzet("pc-import-result-ozet", j.ozet || {}, "result");
+      var o = j.ozet || {};
+      document.getElementById("pc-import-result-msg").textContent =
+        (o.eklenen || 0) + " eklendi, " + (o.atlanan || 0) + " atlandı, " +
+        (o.hata || 0) + " hata, " + (o.skipped_quota || 0) + " kota nedeniyle atlandı.";
+      setImportStep(3);
+      deferLoadList();
+      deferLoadSummary();
+    }).catch(function (e) {
+      importErr(e.message || "İçe aktarma başarısız");
+    }).then(function () { btn.disabled = false; });
+  });
+
 
   loadRegisteredAssets().then(function () {
     return loadList();
