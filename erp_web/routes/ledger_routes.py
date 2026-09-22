@@ -388,6 +388,10 @@ def _party_dict(
         "email": row.get("email"),
         "country": row.get("country"),
         "notes": row.get("notes"),
+        "tax_id": row.get("tax_id"),
+        "tax_office": row.get("tax_office"),
+        "address": row.get("address"),
+        "tax_id_kind": row.get("tax_id_kind"),
         "is_active": bool(row.get("is_active")),
         "created_at": row["created_at"].isoformat() if row.get("created_at") else None,
         "updated_at": row["updated_at"].isoformat() if row.get("updated_at") else None,
@@ -399,6 +403,34 @@ def _party_dict(
         primary = next((b for b in bals if b["currency"] == "TRY"), bals[0] if bals else None)
         d["primary_balance"] = primary
     return d
+
+
+_PARTY_COLS = (
+    "id, name, type, phone, email, country, notes, "
+    "tax_id, tax_office, address, tax_id_kind, "
+    "is_active, created_at, updated_at"
+)
+
+
+def _parse_party_tax_fields(data: dict) -> tuple[str | None, str | None, str | None, str | None, str | None]:
+    """tax_id, tax_office, address, tax_id_kind, error_mesaj."""
+    from ledger_gib_adapter import normalize_tax_id
+
+    raw_tax = data.get("tax_id")
+    if raw_tax is None or str(raw_tax).strip() == "":
+        tax_id = tax_kind = None
+    else:
+        tax_id, tax_kind, err = normalize_tax_id(raw_tax)
+        if err:
+            return None, None, None, None, err
+    tax_office = (str(data.get("tax_office") or "").strip() or None)
+    address = (str(data.get("address") or "").strip() or None)
+    kind_in = (str(data.get("tax_id_kind") or "").strip().lower() or None)
+    if kind_in in ("vkn", "tckn"):
+        tax_kind = kind_in
+    elif tax_kind is None and kind_in:
+        return None, None, None, None, "tax_id_kind vkn veya tckn olmalı."
+    return tax_id, tax_office, address, tax_kind, None
 
 
 def _registered_asset_dict(row: dict) -> dict:
@@ -509,8 +541,8 @@ def api_parties_list():
     _ensure_ledger_tables_once()
     active_only = str(request.args.get("active") or "1").strip() not in ("0", "false", "False")
     q = (request.args.get("q") or "").strip()
-    sql = """
-        SELECT id, name, type, phone, email, country, notes, is_active, created_at, updated_at
+    sql = f"""
+        SELECT {_PARTY_COLS}
         FROM ledger_parties
         WHERE 1=1
     """
@@ -559,14 +591,31 @@ def api_parties_create():
     email = (str(data.get("email") or "").strip() or None)
     country = (str(data.get("country") or "").strip() or None)
     notes = (str(data.get("notes") or "").strip() or None)
+    tax_id, tax_office, address, tax_kind, tax_err = _parse_party_tax_fields(data)
+    if tax_err:
+        return _json_err(tax_err)
 
     row = execute_returning(
-        """
-        INSERT INTO ledger_parties (name, type, phone, email, country, notes)
-        VALUES (%s, %s, %s, %s, %s, %s)
-        RETURNING id, name, type, phone, email, country, notes, is_active, created_at, updated_at
+        f"""
+        INSERT INTO ledger_parties (
+            name, type, phone, email, country, notes,
+            tax_id, tax_office, address, tax_id_kind
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING {_PARTY_COLS}
         """,
-        (name, ptype, phone, email, country, notes),
+        (
+            name,
+            ptype,
+            phone,
+            email,
+            country,
+            notes,
+            tax_id,
+            tax_office,
+            address,
+            tax_kind,
+        ),
     )
     if not row:
         return _json_err("Kayıt oluşturulamadı.", 500)
@@ -579,8 +628,8 @@ def api_parties_create():
 def api_parties_detail(party_id: int):
     _ensure_ledger_tables_once()
     row = fetch_one(
-        """
-        SELECT id, name, type, phone, email, country, notes, is_active, created_at, updated_at
+        f"""
+        SELECT {_PARTY_COLS}
         FROM ledger_parties
         WHERE id = %s
         """,
@@ -625,8 +674,8 @@ def api_parties_detail(party_id: int):
 def api_parties_update(party_id: int):
     _ensure_ledger_tables_once()
     existing = fetch_one(
-        """
-        SELECT id, name, type, phone, email, country, notes, is_active, created_at, updated_at
+        f"""
+        SELECT {_PARTY_COLS}
         FROM ledger_parties
         WHERE id = %s
         """,
@@ -648,9 +697,23 @@ def api_parties_update(party_id: int):
     email = (str(data.get("email") or "").strip() or None)
     country = (str(data.get("country") or "").strip() or None)
     notes = (str(data.get("notes") or "").strip() or None)
+    # tax alanları gönderilmediyse mevcutları koru
+    merged = {
+        "tax_id": data["tax_id"] if "tax_id" in data else existing.get("tax_id"),
+        "tax_office": data["tax_office"]
+        if "tax_office" in data
+        else existing.get("tax_office"),
+        "address": data["address"] if "address" in data else existing.get("address"),
+        "tax_id_kind": data["tax_id_kind"]
+        if "tax_id_kind" in data
+        else existing.get("tax_id_kind"),
+    }
+    tax_id, tax_office, address, tax_kind, tax_err = _parse_party_tax_fields(merged)
+    if tax_err:
+        return _json_err(tax_err)
 
     row = execute_returning(
-        """
+        f"""
         UPDATE ledger_parties
         SET name = %s,
             type = %s,
@@ -658,11 +721,27 @@ def api_parties_update(party_id: int):
             email = %s,
             country = %s,
             notes = %s,
+            tax_id = %s,
+            tax_office = %s,
+            address = %s,
+            tax_id_kind = %s,
             updated_at = NOW()
         WHERE id = %s
-        RETURNING id, name, type, phone, email, country, notes, is_active, created_at, updated_at
+        RETURNING {_PARTY_COLS}
         """,
-        (name, ptype, phone, email, country, notes, int(party_id)),
+        (
+            name,
+            ptype,
+            phone,
+            email,
+            country,
+            notes,
+            tax_id,
+            tax_office,
+            address,
+            tax_kind,
+            int(party_id),
+        ),
     )
     if not row:
         return _json_err("Güncelleme başarısız.", 500)
@@ -1072,7 +1151,7 @@ def _build_statement(party_id: int, d_from: date, d_to: date) -> dict | None:
     """Tarih aralığı ekstresi — açılış + koşan bakiye; Borç=receive, Alacak=give."""
     party = fetch_one(
         """
-        SELECT id, name, type, phone, email, country, notes, is_active, created_at, updated_at
+        SELECT {_PARTY_COLS}
         FROM ledger_parties
         WHERE id = %s
         """,
@@ -2684,6 +2763,8 @@ def _ledger_ocr_build_response(
     if oneri.get("not_ham"):
         notes_parts.append(str(oneri["not_ham"]))
     notes_onerisi = " | ".join(notes_parts) if notes_parts else None
+    tax_id = oneri.get("vkn") or oneri.get("tckn")
+    tax_kind = "vkn" if oneri.get("vkn") else ("tckn" if oneri.get("tckn") else None)
     return {
         "ok": True,
         "yazma": False,
@@ -2698,6 +2779,10 @@ def _ledger_ocr_build_response(
             "email": oneri.get("email"),
             "country": oneri.get("ulke"),
             "notes": notes_onerisi,
+            "tax_id": tax_id,
+            "tax_office": oneri.get("vergi_dairesi"),
+            "address": oneri.get("adres"),
+            "tax_id_kind": tax_kind,
         },
     }
 
@@ -2849,3 +2934,18 @@ def api_parties_ocr_preview():
     payload["rate_remaining"] = remaining
     _ledger_ocr_cache_put(tid, digest, belge_ipucu, payload)
     return jsonify(payload)
+
+
+# G4–G9 invoice + GİB çağrı route'ları (ayrı modül; gib_earsiv gövdesine dokunulmaz)
+from routes.ledger_invoice_routes import register_ledger_invoice_routes
+
+register_ledger_invoice_routes(
+    bp,
+    helpers={
+        "_ensure_ledger_tables_once": _ensure_ledger_tables_once,
+        "_json_err": _json_err,
+        "_money": _money,
+        "_dec": _dec,
+        "_PARTY_COLS": _PARTY_COLS,
+    },
+)

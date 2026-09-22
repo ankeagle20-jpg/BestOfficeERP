@@ -4304,7 +4304,196 @@ def ensure_ledger_tables():
             execute(stmt)
         except Exception as e:
             print(f"ledger index: {e}")
+    # G1: vergi kimliği kolonları (geriye uyumlu; mevcut satırlar NULL)
+    for col, typ in (
+        ("tax_id", "TEXT"),
+        ("tax_office", "TEXT"),
+        ("address", "TEXT"),
+        ("tax_id_kind", "TEXT"),
+    ):
+        try:
+            execute(
+                f"ALTER TABLE ledger_parties ADD COLUMN IF NOT EXISTS {col} {typ}"
+            )
+        except Exception as e:
+            print(f"ledger_parties add {col}: {e}")
+    try:
+        execute(
+            """
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint
+                    WHERE conname = 'ledger_parties_tax_id_kind_chk'
+                ) THEN
+                    ALTER TABLE ledger_parties
+                    ADD CONSTRAINT ledger_parties_tax_id_kind_chk
+                    CHECK (
+                        tax_id_kind IS NULL
+                        OR tax_id_kind IN ('vkn', 'tckn')
+                    );
+                END IF;
+            END $$;
+            """
+        )
+    except Exception as e:
+        print(f"ledger_parties tax_id_kind_chk: {e}")
+    _ledger_parties_soft_backfill_tax_from_notes()
     ensure_ledger_group_tables()
+    ensure_ledger_invoice_tables()
+
+
+def _ledger_parties_soft_backfill_tax_from_notes() -> None:
+    """G2: notes içindeki VKN/TCKN/VD/Adres → kolon (yalnız tax_id boşsa)."""
+    try:
+        execute(
+            """
+            UPDATE ledger_parties
+            SET
+                tax_id = CASE
+                    WHEN tax_id IS NULL OR btrim(tax_id) = '' THEN
+                        COALESCE(
+                            NULLIF(
+                                substring(notes from 'VKN:\\s*([0-9]{10})'),
+                                ''
+                            ),
+                            NULLIF(
+                                substring(notes from 'TCKN:\\s*([0-9]{11})'),
+                                ''
+                            )
+                        )
+                    ELSE tax_id
+                END,
+                tax_id_kind = CASE
+                    WHEN tax_id_kind IS NOT NULL THEN tax_id_kind
+                    WHEN notes ~ 'VKN:\\s*[0-9]{10}' THEN 'vkn'
+                    WHEN notes ~ 'TCKN:\\s*[0-9]{11}' THEN 'tckn'
+                    ELSE tax_id_kind
+                END,
+                tax_office = CASE
+                    WHEN tax_office IS NULL OR btrim(tax_office) = '' THEN
+                        NULLIF(
+                            btrim(
+                                substring(
+                                    notes
+                                    from 'Vergi dairesi:\\s*([^|]+)'
+                                )
+                            ),
+                            ''
+                        )
+                    ELSE tax_office
+                END,
+                address = CASE
+                    WHEN address IS NULL OR btrim(address) = '' THEN
+                        NULLIF(
+                            btrim(
+                                substring(notes from 'Adres:\\s*(.+)$')
+                            ),
+                            ''
+                        )
+                    ELSE address
+                END,
+                updated_at = updated_at
+            WHERE notes IS NOT NULL
+              AND btrim(notes) <> ''
+              AND (
+                    tax_id IS NULL OR btrim(tax_id) = ''
+                    OR tax_office IS NULL OR btrim(tax_office) = ''
+                    OR address IS NULL OR btrim(address) = ''
+              )
+            """
+        )
+    except Exception as e:
+        print(f"ledger_parties tax backfill: {e}")
+
+
+def ensure_ledger_invoice_tables():
+    """Payafin Cari G4 — yerel fatura/borç belgesi (ana faturalar'dan izole)."""
+    execute(
+        """
+        CREATE TABLE IF NOT EXISTS ledger_invoices (
+            id                      BIGSERIAL PRIMARY KEY,
+            party_id                BIGINT NOT NULL,
+            source_transaction_id   BIGINT,
+            status                  TEXT NOT NULL DEFAULT 'draft',
+            invoice_date            DATE NOT NULL DEFAULT CURRENT_DATE,
+            currency                TEXT NOT NULL DEFAULT 'TRY',
+            subtotal                NUMERIC(18, 2) NOT NULL DEFAULT 0,
+            tax_total               NUMERIC(18, 2) NOT NULL DEFAULT 0,
+            grand_total             NUMERIC(18, 2) NOT NULL DEFAULT 0,
+            note                    TEXT,
+            gib_ettn                TEXT,
+            gib_belge_no            TEXT,
+            gib_last_error          TEXT,
+            gib_payload_snapshot    JSONB,
+            confirmed_at            TIMESTAMPTZ,
+            confirmed_by            INTEGER,
+            created_by              INTEGER,
+            created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT ledger_invoices_party_id_fkey
+                FOREIGN KEY (party_id)
+                REFERENCES ledger_parties (id)
+                ON DELETE RESTRICT,
+            CONSTRAINT ledger_invoices_source_tx_fkey
+                FOREIGN KEY (source_transaction_id)
+                REFERENCES ledger_transactions (id)
+                ON DELETE RESTRICT,
+            CONSTRAINT ledger_invoices_status_chk
+                CHECK (status IN (
+                    'draft', 'ready', 'gib_taslak', 'gib_imzalandi',
+                    'void', 'failed'
+                )),
+            CONSTRAINT ledger_invoices_currency_chk
+                CHECK (currency ~ '^[A-Z]{3}$'),
+            CONSTRAINT ledger_invoices_totals_chk
+                CHECK (
+                    subtotal >= 0 AND tax_total >= 0 AND grand_total >= 0
+                )
+        )
+        """
+    )
+    execute(
+        """
+        CREATE TABLE IF NOT EXISTS ledger_invoice_lines (
+            id              BIGSERIAL PRIMARY KEY,
+            invoice_id      BIGINT NOT NULL,
+            line_no         INTEGER NOT NULL DEFAULT 1,
+            description     TEXT NOT NULL,
+            quantity        NUMERIC(18, 4) NOT NULL DEFAULT 1,
+            unit_price      NUMERIC(18, 4) NOT NULL DEFAULT 0,
+            tax_rate        INTEGER NOT NULL DEFAULT 0,
+            line_total      NUMERIC(18, 2) NOT NULL DEFAULT 0,
+            CONSTRAINT ledger_invoice_lines_invoice_id_fkey
+                FOREIGN KEY (invoice_id)
+                REFERENCES ledger_invoices (id)
+                ON DELETE CASCADE,
+            CONSTRAINT ledger_invoice_lines_desc_chk
+                CHECK (length(trim(description)) > 0),
+            CONSTRAINT ledger_invoice_lines_qty_chk
+                CHECK (quantity > 0),
+            CONSTRAINT ledger_invoice_lines_tax_chk
+                CHECK (tax_rate >= 0 AND tax_rate <= 100),
+            CONSTRAINT ledger_invoice_lines_line_no_chk
+                CHECK (line_no >= 1)
+        )
+        """
+    )
+    for stmt in (
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_ledger_invoices_source_tx_active "
+        "ON ledger_invoices (source_transaction_id) "
+        "WHERE source_transaction_id IS NOT NULL AND status <> 'void'",
+        "CREATE INDEX IF NOT EXISTS idx_ledger_invoices_party "
+        "ON ledger_invoices (party_id, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_ledger_invoices_status "
+        "ON ledger_invoices (status)",
+        "CREATE INDEX IF NOT EXISTS idx_ledger_invoice_lines_invoice "
+        "ON ledger_invoice_lines (invoice_id, line_no)",
+    ):
+        try:
+            execute(stmt)
+        except Exception as e:
+            print(f"ledger invoice index: {e}")
 
 
 def ensure_ledger_group_tables():

@@ -792,7 +792,10 @@
         <div class="pc-field"><label>Telefon</label><input id="pc-new-phone" maxlength="64"></div>
         <div class="pc-field"><label>E-posta</label><input id="pc-new-email" type="email" maxlength="120"></div>
         <div class="pc-field"><label>Ülke</label><input id="pc-new-country" maxlength="8" placeholder="TR"></div>
-        <div class="pc-field"><label>Not</label><textarea id="pc-new-notes" maxlength="500" rows="2" placeholder="VKN, vergi dairesi, adres…"></textarea></div>
+        <div class="pc-field"><label>VKN / TCKN</label><input id="pc-new-tax-id" maxlength="11" inputmode="numeric" placeholder="10 veya 11 hane"></div>
+        <div class="pc-field"><label>Vergi dairesi</label><input id="pc-new-tax-office" maxlength="120"></div>
+        <div class="pc-field"><label>Adres</label><textarea id="pc-new-address" maxlength="500" rows="2"></textarea></div>
+        <div class="pc-field"><label>Not</label><textarea id="pc-new-notes" maxlength="500" rows="2" placeholder="Serbest not…"></textarea></div>
         <div id="pc-new-err" class="pc-err" hidden></div>
         <div class="pc-actions">
           <button type="button" class="pc-btn pc-btn-primary" id="pc-new-save">Kaydet</button>
@@ -878,6 +881,9 @@
       <div class="pc-field"><label>Telefon</label><input id="pc-edit-phone" maxlength="64"></div>
       <div class="pc-field"><label>E-posta</label><input id="pc-edit-email" type="email" maxlength="120"></div>
       <div class="pc-field"><label>Ülke</label><input id="pc-edit-country" maxlength="8" placeholder="TR"></div>
+      <div class="pc-field"><label>VKN / TCKN</label><input id="pc-edit-tax-id" maxlength="11" inputmode="numeric"></div>
+      <div class="pc-field"><label>Vergi dairesi</label><input id="pc-edit-tax-office" maxlength="120"></div>
+      <div class="pc-field"><label>Adres</label><textarea id="pc-edit-address" maxlength="500" rows="2"></textarea></div>
       <div class="pc-field"><label>Not</label><textarea id="pc-edit-notes" maxlength="500" rows="2"></textarea></div>
       <div id="pc-edit-err" class="pc-err" hidden></div>
       <div class="pc-actions">
@@ -916,6 +922,29 @@
     </div>
 
     <div id="pc-tx-list"></div>
+
+    <div class="pc-panel" id="pc-inv-panel">
+      <h2>Fatura taslağı (Payafin)</h2>
+      <p class="pc-meta" id="pc-inv-status"></p>
+      <div class="pc-field"><label>Açıklama</label><input id="pc-inv-desc" maxlength="200"></div>
+      <div class="pc-field"><label>KDV %</label>
+        <select id="pc-inv-tax">
+          <option value="20">20</option>
+          <option value="10">10</option>
+          <option value="1">1</option>
+          <option value="0">0</option>
+        </select>
+      </div>
+      <div class="pc-field"><label>Not</label><input id="pc-inv-note" maxlength="300"></div>
+      <pre id="pc-inv-preview" class="pc-meta" style="white-space:pre-wrap;max-height:12rem;overflow:auto"></pre>
+      <div id="pc-inv-err" class="pc-err" hidden></div>
+      <div class="pc-actions">
+        <button type="button" class="pc-btn pc-btn-ghost" id="pc-inv-preview-btn">Önizle</button>
+        <button type="button" class="pc-btn pc-btn-ghost" id="pc-inv-confirm-btn">Onayla</button>
+        <button type="button" class="pc-btn pc-btn-primary" id="pc-inv-gib-btn">GİB taslak gönder</button>
+        <button type="button" class="pc-btn pc-btn-ghost" id="pc-inv-close">Kapat</button>
+      </div>
+    </div>
   </div>
 
   <div id="pc-group-detail-view" hidden>
@@ -2210,11 +2239,15 @@
         '" target="payafin_whatsapp" rel="noopener noreferrer" title="WhatsApp ile gönder" aria-label="WhatsApp ile gönder">' +
         '<i class="fa-brands fa-whatsapp" aria-hidden="true"></i></a>')
       : "";
+    var invBtn = (!t.is_void && t.direction === "give" && t.currency === "TRY")
+      ? ('<button type="button" class="pc-btn pc-btn-ghost pc-inv-convert" data-id="' +
+        t.id + '" title="Faturaya dönüştür">Fatura</button>')
+      : "";
     var dateS = fmtTxDate(t.occurred_at);
     var dateHtml = dateS ? ('<span class="pc-tx-date">' + dateS + "</span>") : "";
     return '<div class="pc-tx' + voided + '" data-tx-id="' + t.id + '"><div class="pc-tx-row"><div class="pc-tx-main">' +
       dateHtml + '<strong class="' + dirCls + '">' + dir + " " + fmtMoney(t.amount, t.currency) + "</strong></div>" +
-      '<div class="pc-tx-actions">' + waBtn + attBtn + voidBtn + "</div>" +
+      '<div class="pc-tx-actions">' + waBtn + attBtn + invBtn + voidBtn + "</div>" +
       '</div><div class="pc-meta"></div></div>';
   }
 
@@ -2225,6 +2258,11 @@
       var att = ev.target.closest ? ev.target.closest(".pc-attach-view") : null;
       if (att && box.contains(att)) {
         openAttachmentLightbox(att.getAttribute("data-att-id"));
+        return;
+      }
+      var invb = ev.target.closest ? ev.target.closest(".pc-inv-convert") : null;
+      if (invb && box.contains(invb)) {
+        openInvoiceFromTx(invb.getAttribute("data-id"));
         return;
       }
       var b = ev.target.closest ? ev.target.closest(".pc-void") : null;
@@ -2240,6 +2278,88 @@
       }).catch(function (e) { alert(e.message); });
     });
   }
+
+  state.invoiceId = null;
+
+  function openInvoiceFromTx(txId) {
+    if (!confirm("Bu 'Verdim' hareketini yerel fatura taslağına dönüştür? (GİB'e henüz gönderilmez)")) return;
+    var err = document.getElementById("pc-inv-err");
+    err.hidden = true;
+    var tax = parseInt(document.getElementById("pc-inv-tax").value || "20", 10);
+    var desc = document.getElementById("pc-inv-desc").value || "";
+    api("/ledger/api/invoices/from-transaction", {
+      method: "POST",
+      body: { transaction_id: parseInt(txId, 10), tax_rate: tax, description: desc || undefined }
+    }).then(function (j) {
+      state.invoiceId = j.invoice && j.invoice.id;
+      document.getElementById("pc-inv-status").textContent =
+        "Durum: " + (j.invoice.status || "") + " · id=" + state.invoiceId +
+        " · toplam " + fmtMoney(j.invoice.grand_total, j.invoice.currency);
+      if (j.invoice.lines && j.invoice.lines[0]) {
+        document.getElementById("pc-inv-desc").value = j.invoice.lines[0].description || "";
+        document.getElementById("pc-inv-tax").value = String(j.invoice.lines[0].tax_rate || 20);
+      }
+      document.getElementById("pc-inv-note").value = j.invoice.note || "";
+      document.getElementById("pc-inv-preview").textContent = "";
+      document.getElementById("pc-inv-panel").classList.add("open");
+    }).catch(function (e) {
+      err.textContent = e.message;
+      err.hidden = false;
+      document.getElementById("pc-inv-panel").classList.add("open");
+    });
+  }
+
+  function saveInvoiceLinesThen(fn) {
+    if (!state.invoiceId) return Promise.reject(new Error("Fatura yok"));
+    var desc = document.getElementById("pc-inv-desc").value.trim() || "Hizmet bedeli";
+    var tax = parseInt(document.getElementById("pc-inv-tax").value || "20", 10);
+    return api("/ledger/api/invoices/" + state.invoiceId).then(function (j) {
+      var inv = j.invoice;
+      var up = (inv.lines && inv.lines[0] && inv.lines[0].unit_price) || inv.subtotal || 0;
+      return api("/ledger/api/invoices/" + state.invoiceId, {
+        method: "PUT",
+        body: {
+          note: document.getElementById("pc-inv-note").value,
+          lines: [{ description: desc, quantity: 1, unit_price: up, tax_rate: tax }]
+        }
+      });
+    }).then(fn);
+  }
+
+  document.getElementById("pc-inv-close").addEventListener("click", function () {
+    document.getElementById("pc-inv-panel").classList.remove("open");
+  });
+  document.getElementById("pc-inv-preview-btn").addEventListener("click", function () {
+    var err = document.getElementById("pc-inv-err");
+    err.hidden = true;
+    saveInvoiceLinesThen(function () {
+      return api("/ledger/api/invoices/" + state.invoiceId + "/gib-preview", { method: "POST", body: {} });
+    }).then(function (j) {
+      document.getElementById("pc-inv-preview").textContent =
+        JSON.stringify(j.fatura_data || j.jp || j, null, 2);
+    }).catch(function (e) { err.textContent = e.message; err.hidden = false; });
+  });
+  document.getElementById("pc-inv-confirm-btn").addEventListener("click", function () {
+    var err = document.getElementById("pc-inv-err");
+    err.hidden = true;
+    if (!confirm("Fatura bilgilerini onaylıyor musunuz? (GİB'e henüz yazılmaz)")) return;
+    saveInvoiceLinesThen(function () {
+      return api("/ledger/api/invoices/" + state.invoiceId + "/confirm", { method: "POST", body: {} });
+    }).then(function (j) {
+      document.getElementById("pc-inv-status").textContent =
+        "Durum: " + j.invoice.status + " · onaylandı · GİB için ayrı gönderim gerekir";
+    }).catch(function (e) { err.textContent = e.message; err.hidden = false; });
+  });
+  document.getElementById("pc-inv-gib-btn").addEventListener("click", function () {
+    var err = document.getElementById("pc-inv-err");
+    err.hidden = true;
+    if (!confirm("GİB e-Arşiv TASLAĞI oluşturulsun mu? Bu gerçek portal yazmasıdır.")) return;
+    api("/ledger/api/invoices/" + state.invoiceId + "/gib-taslak", { method: "POST", body: {} })
+      .then(function (j) {
+        document.getElementById("pc-inv-status").textContent =
+          "Durum: " + j.invoice.status + " · ETTN: " + (j.ettn || "");
+      }).catch(function (e) { err.textContent = e.message; err.hidden = false; });
+  });
 
   function applyTxToDetailList(t) {
     if (!t) return;
@@ -2257,6 +2377,9 @@
     document.getElementById("pc-edit-phone").value = p.phone || "";
     document.getElementById("pc-edit-email").value = p.email || "";
     document.getElementById("pc-edit-country").value = p.country || "";
+    document.getElementById("pc-edit-tax-id").value = p.tax_id || "";
+    document.getElementById("pc-edit-tax-office").value = p.tax_office || "";
+    document.getElementById("pc-edit-address").value = p.address || "";
     document.getElementById("pc-edit-notes").value = p.notes || "";
     document.getElementById("pc-edit-err").hidden = true;
     document.getElementById("pc-edit-panel").classList.add("open");
@@ -2359,6 +2482,9 @@
         phone: document.getElementById("pc-new-phone").value,
         email: document.getElementById("pc-new-email").value,
         country: (document.getElementById("pc-new-country") || {}).value || "",
+        tax_id: (document.getElementById("pc-new-tax-id") || {}).value || "",
+        tax_office: (document.getElementById("pc-new-tax-office") || {}).value || "",
+        address: (document.getElementById("pc-new-address") || {}).value || "",
         notes: (document.getElementById("pc-new-notes") || {}).value || ""
       }
     }).then(function () {
@@ -2384,8 +2510,14 @@
     document.getElementById("pc-new-type").value = "person";
     var c = document.getElementById("pc-new-country");
     var n = document.getElementById("pc-new-notes");
+    var tid = document.getElementById("pc-new-tax-id");
+    var toff = document.getElementById("pc-new-tax-office");
+    var addr = document.getElementById("pc-new-address");
     if (c) c.value = "";
     if (n) n.value = "";
+    if (tid) tid.value = "";
+    if (toff) toff.value = "";
+    if (addr) addr.value = "";
     var fi = document.getElementById("pc-new-ocr-file");
     if (fi) fi.value = "";
     clearNewOcrBanner();
@@ -2402,7 +2534,13 @@
     if (form.email) document.getElementById("pc-new-email").value = form.email;
     var cEl = document.getElementById("pc-new-country");
     var nEl = document.getElementById("pc-new-notes");
+    var tid = document.getElementById("pc-new-tax-id");
+    var toff = document.getElementById("pc-new-tax-office");
+    var addr = document.getElementById("pc-new-address");
     if (cEl && form.country) cEl.value = form.country;
+    if (tid && form.tax_id) tid.value = form.tax_id;
+    if (toff && form.tax_office) toff.value = form.tax_office;
+    if (addr && form.address) addr.value = form.address;
     if (nEl && form.notes) nEl.value = form.notes;
 
     var ban = document.getElementById("pc-new-ocr-banner");
@@ -2609,6 +2747,9 @@
         phone: document.getElementById("pc-edit-phone").value,
         email: document.getElementById("pc-edit-email").value,
         country: document.getElementById("pc-edit-country").value,
+        tax_id: document.getElementById("pc-edit-tax-id").value,
+        tax_office: document.getElementById("pc-edit-tax-office").value,
+        address: document.getElementById("pc-edit-address").value,
         notes: document.getElementById("pc-edit-notes").value
       }
     }).then(function (j) {
