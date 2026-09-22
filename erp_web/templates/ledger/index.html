@@ -2241,13 +2241,17 @@
       : "";
     var invBtn = (!t.is_void && t.direction === "give" && t.currency === "TRY")
       ? ('<button type="button" class="pc-btn pc-btn-ghost pc-inv-convert" data-id="' +
-        t.id + '" title="Faturaya dönüştür">Fatura</button>')
+        t.id + '" title="Giden fatura (GİB taslağı)">Giden Fatura</button>')
+      : "";
+    var inInvBtn = (!t.is_void && t.direction === "receive" && t.currency === "TRY")
+      ? ('<button type="button" class="pc-btn pc-btn-ghost pc-inv-incoming" data-id="' +
+        t.id + '" title="Gelen fatura kaydı (yakında)">Gelen Fatura</button>')
       : "";
     var dateS = fmtTxDate(t.occurred_at);
     var dateHtml = dateS ? ('<span class="pc-tx-date">' + dateS + "</span>") : "";
     return '<div class="pc-tx' + voided + '" data-tx-id="' + t.id + '"><div class="pc-tx-row"><div class="pc-tx-main">' +
       dateHtml + '<strong class="' + dirCls + '">' + dir + " " + fmtMoney(t.amount, t.currency) + "</strong></div>" +
-      '<div class="pc-tx-actions">' + waBtn + attBtn + invBtn + voidBtn + "</div>" +
+      '<div class="pc-tx-actions">' + waBtn + attBtn + invBtn + inInvBtn + voidBtn + "</div>" +
       '</div><div class="pc-meta"></div></div>';
   }
 
@@ -2263,6 +2267,11 @@
       var invb = ev.target.closest ? ev.target.closest(".pc-inv-convert") : null;
       if (invb && box.contains(invb)) {
         openInvoiceFromTx(invb.getAttribute("data-id"));
+        return;
+      }
+      var inb = ev.target.closest ? ev.target.closest(".pc-inv-incoming") : null;
+      if (inb && box.contains(inb)) {
+        alert("Gelen Fatura kaydı yakında eklenecek (Aşama I2–I3). GİB'e gönderim yok; yalnızca belge kaydı olacak.");
         return;
       }
       var b = ev.target.closest ? ev.target.closest(".pc-void") : null;
