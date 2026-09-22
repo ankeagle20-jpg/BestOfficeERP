@@ -2949,3 +2949,19 @@ register_ledger_invoice_routes(
         "_PARTY_COLS": _PARTY_COLS,
     },
 )
+
+# I2 — gelen fatura arşivi (GİB yok; faturalar tablosuna yazılmaz)
+from routes.ledger_incoming_invoice_routes import register_ledger_incoming_invoice_routes
+
+register_ledger_incoming_invoice_routes(
+    bp,
+    helpers={
+        "_ensure_ledger_tables_once": _ensure_ledger_tables_once,
+        "_json_err": _json_err,
+        "_money": _money,
+        "_dec": _dec,
+        "_tenant_slug_for_object_key": _tenant_slug_for_object_key,
+        "_detect_image_magic": _detect_image_magic,
+        "_sanitize_original_filename": _sanitize_original_filename,
+    },
+)

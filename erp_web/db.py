@@ -4494,6 +4494,83 @@ def ensure_ledger_invoice_tables():
             execute(stmt)
         except Exception as e:
             print(f"ledger invoice index: {e}")
+    ensure_ledger_incoming_invoice_tables()
+
+
+def ensure_ledger_incoming_invoice_tables():
+    """Payafin Cari I2 — gelen fatura arşivi (R2 meta; GİB yok; ana faturalar izole).
+
+    Karşı tarafın kestiği belgeyi yalnızca kayıt altına alır. Bakiye değiştirmez.
+    """
+    execute(
+        """
+        CREATE TABLE IF NOT EXISTS ledger_incoming_invoices (
+            id                      BIGSERIAL PRIMARY KEY,
+            party_id                BIGINT NOT NULL,
+            source_transaction_id   BIGINT,
+            document_no             TEXT NOT NULL,
+            invoice_date            DATE NOT NULL DEFAULT CURRENT_DATE,
+            amount                  NUMERIC(18, 2) NOT NULL,
+            currency                TEXT NOT NULL DEFAULT 'TRY',
+            note                    TEXT,
+            object_key              TEXT NOT NULL,
+            content_type            TEXT NOT NULL,
+            byte_size               INTEGER NOT NULL,
+            original_filename       TEXT,
+            is_deleted              BOOLEAN NOT NULL DEFAULT FALSE,
+            created_by              INTEGER,
+            created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT ledger_incoming_party_id_fkey
+                FOREIGN KEY (party_id)
+                REFERENCES ledger_parties (id)
+                ON DELETE RESTRICT,
+            CONSTRAINT ledger_incoming_source_tx_fkey
+                FOREIGN KEY (source_transaction_id)
+                REFERENCES ledger_transactions (id)
+                ON DELETE RESTRICT,
+            CONSTRAINT ledger_incoming_document_no_chk
+                CHECK (
+                    length(trim(document_no)) > 0
+                    AND length(document_no) <= 128
+                ),
+            CONSTRAINT ledger_incoming_amount_chk
+                CHECK (amount > 0),
+            CONSTRAINT ledger_incoming_currency_chk
+                CHECK (currency ~ '^[A-Z]{3}$'),
+            CONSTRAINT ledger_incoming_content_type_chk
+                CHECK (content_type IN ('image/jpeg', 'image/png', 'image/webp')),
+            CONSTRAINT ledger_incoming_byte_size_chk
+                CHECK (byte_size > 0 AND byte_size <= 5242880),
+            CONSTRAINT ledger_incoming_object_key_chk
+                CHECK (
+                    length(trim(object_key)) > 0
+                    AND length(object_key) <= 1024
+                    AND position('..' in object_key) = 0
+                ),
+            CONSTRAINT ledger_incoming_original_filename_chk
+                CHECK (
+                    original_filename IS NULL
+                    OR (
+                        length(trim(original_filename)) > 0
+                        AND length(original_filename) <= 255
+                    )
+                )
+        )
+        """
+    )
+    for stmt in (
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_ledger_incoming_source_tx_active "
+        "ON ledger_incoming_invoices (source_transaction_id) "
+        "WHERE source_transaction_id IS NOT NULL AND is_deleted = FALSE",
+        "CREATE INDEX IF NOT EXISTS idx_ledger_incoming_party "
+        "ON ledger_incoming_invoices (party_id, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_ledger_incoming_created_at "
+        "ON ledger_incoming_invoices (created_at DESC)",
+    ):
+        try:
+            execute(stmt)
+        except Exception as e:
+            print(f"ledger incoming invoice index: {e}")
 
 
 def ensure_ledger_group_tables():
