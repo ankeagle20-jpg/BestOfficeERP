@@ -2187,3 +2187,381 @@ def api_parties_import_preview():
             "satirlar": rows_out,
         }
     )
+
+
+# ---------------------------------------------------------------------------
+# Aşama A2 — Excel party import commit (yalnızca action=create; yazma var)
+# ---------------------------------------------------------------------------
+
+
+def _ledger_import_slots_remaining() -> int | None:
+    """Kaç yeni aktif cari eklenebilir.
+
+    None = sınırsız (max_personnel NULL veya kademe yok).
+    0 = kota dolu. Mevcut _ledger_party_quota_block_message ile aynı kaynaklar;
+    bu fonksiyon YALNIZCA A2 commit için eklenmiştir (mevcut fonksiyonlara dokunulmaz).
+    """
+    tid = resolve_request_tenant_id()
+    if tid is None:
+        return 0
+
+    ent = fetch_one(
+        """
+        SELECT metadata, status
+        FROM public.tenant_module_entitlements
+        WHERE tenant_id = %s AND module_key = 'ledger'
+        """,
+        (int(tid),),
+    )
+    if not ent:
+        return 0
+
+    meta = ent.get("metadata") or {}
+    if isinstance(meta, str):
+        try:
+            meta = json.loads(meta)
+        except Exception:
+            meta = {}
+    if not isinstance(meta, dict):
+        meta = {}
+    tier_key = str(meta.get("selected_tier") or "starter").strip().lower() or "starter"
+
+    tenant = fetch_one(
+        """
+        SELECT COALESCE(NULLIF(TRIM(country_code), ''), 'TR') AS country_code
+        FROM public.tenants
+        WHERE id = %s
+        """,
+        (int(tid),),
+    )
+    cc = str((tenant or {}).get("country_code") or "TR").strip().upper() or "TR"
+
+    tier = fetch_one(
+        """
+        SELECT max_personnel
+        FROM public.module_pricing_tiers
+        WHERE module_key = 'ledger'
+          AND country_code = %s
+          AND tier_key = %s
+          AND is_active = TRUE
+        """,
+        (cc, tier_key),
+    )
+    if not tier and cc != "US":
+        tier = fetch_one(
+            """
+            SELECT max_personnel
+            FROM public.module_pricing_tiers
+            WHERE module_key = 'ledger'
+              AND country_code = 'US'
+              AND tier_key = %s
+              AND is_active = TRUE
+            """,
+            (tier_key,),
+        )
+    if not tier:
+        return None
+
+    mx = tier.get("max_personnel")
+    if mx is None:
+        return None
+
+    active = _ledger_active_party_count()
+    return max(0, int(mx) - int(active))
+
+
+@bp.route("/api/parties/import/commit", methods=["POST"])
+@giris_gerekli
+@module_required("ledger")
+def api_parties_import_commit():
+    """Excel'den cari (party) içe aktarma — yalnızca action=create.
+
+    multipart: file (.xlsx), action=create (A4 güncelleme yok).
+    İsim-duplicate atlanır; kota dolunca kalan yeni satırlar skipped_quota.
+    Tek DB transaction içinde INSERT.
+    """
+    from io import BytesIO
+
+    from db import db as db_ctx
+    from ledger_excel_import import (
+        map_ledger_party_columns,
+        normalize_headers,
+        row_to_party_fields,
+    )
+
+    _ensure_ledger_tables_once()
+
+    action = (
+        str(request.form.get("action") or request.args.get("action") or "create")
+        .strip()
+        .lower()
+    )
+    if action != "create":
+        return _json_err(
+            "Bu aşamada yalnızca action=create desteklenir "
+            "(aynı adı güncelle sonraki aşamada)."
+        )
+
+    f = request.files.get("file")
+    if not f or not getattr(f, "filename", None):
+        return _json_err("Excel dosyası seçin (.xlsx).")
+    raw = f.read()
+    if not raw:
+        return _json_err("Dosya boş veya okunamadı.")
+    if len(raw) > _LEDGER_IMPORT_MAX_BYTES:
+        return _json_err("Dosya çok büyük (en fazla 5 MB).")
+
+    fn = str(f.filename or "").lower()
+    try:
+        import pandas as pd
+    except ImportError:
+        return _json_err("Excel desteği için pandas/openpyxl gerekli."), 500
+
+    try:
+        if fn.endswith(".xls") and not fn.endswith(".xlsx"):
+            try:
+                df = pd.read_excel(BytesIO(raw), header=0)
+            except Exception:
+                return _json_err(
+                    "Eski .xls formatı desteklenmiyor. Dosyayı .xlsx olarak kaydedip tekrar deneyin."
+                )
+        else:
+            df = pd.read_excel(BytesIO(raw), engine="openpyxl", header=0)
+    except ImportError:
+        return _json_err("Excel desteği için openpyxl yüklü değil."), 500
+    except Exception as e:
+        return _json_err(f"Excel okunamadı: {e}")
+
+    if df is None or df.empty or len(df) == 0:
+        return _json_err("Excel dosyasında veri satırı yok.")
+
+    if len(df) > _LEDGER_IMPORT_MAX_ROWS:
+        return _json_err(
+            f"En fazla {_LEDGER_IMPORT_MAX_ROWS} satır desteklenir "
+            f"(dosyada {len(df)} satır var)."
+        )
+
+    orig_cols = list(df.columns)
+    norm_cols = normalize_headers(orig_cols)
+    df = df.copy()
+    df.columns = norm_cols
+
+    colmap = map_ledger_party_columns(norm_cols)
+    if not colmap.get("name"):
+        return _json_err(
+            "Excel'de ad/ünvan/firma sütunu bulunamadı. "
+            "İlk satır başlık olmalı (örn. Ad, Firma, Cari)."
+        )
+
+    # Sınıflandırma (A1 preview ile aynı mantık) — sonra tek transaction'da yaz
+    existing_rows = fetch_all(
+        """
+        SELECT lower(trim(name)) AS n
+        FROM ledger_parties
+        WHERE is_active = TRUE
+          AND length(trim(name)) > 0
+        """
+    ) or []
+    existing_names = {
+        str(r.get("n") or "").strip().lower()
+        for r in existing_rows
+        if (r.get("n") or "").strip()
+    }
+
+    seen_in_file: set[str] = set()
+    classified: list[dict] = []
+
+    for idx, series in df.iterrows():
+        try:
+            excel_row = int(idx) + 2
+        except Exception:
+            excel_row = len(classified) + 2
+
+        fields = row_to_party_fields(series, colmap)
+        if not fields or not (fields.get("name") or "").strip():
+            classified.append(
+                {
+                    "satir": excel_row,
+                    "ad": None,
+                    "tip": None,
+                    "tel": None,
+                    "email": None,
+                    "ulke": None,
+                    "notlar": None,
+                    "durum": "hata",
+                    "mesaj": "Ad boş veya okunamadı",
+                    "party_id": None,
+                    "_do": "skip",
+                }
+            )
+            continue
+
+        name = str(fields["name"]).strip()
+        name_key = name.lower()
+        tip = fields.get("type") or "person"
+        if tip not in _PARTY_TYPES:
+            tip = "person"
+        tel = fields.get("phone")
+        email = fields.get("email")
+        ulke = fields.get("country")
+        notlar = fields.get("notes")
+
+        if name_key in existing_names or name_key in seen_in_file:
+            mesaj = (
+                "Dosyada aynı ad tekrar ediyor"
+                if name_key in seen_in_file
+                else "Aynı adlı aktif cari zaten var"
+            )
+            classified.append(
+                {
+                    "satir": excel_row,
+                    "ad": name,
+                    "tip": tip,
+                    "tel": tel,
+                    "email": email,
+                    "ulke": ulke,
+                    "notlar": notlar,
+                    "durum": "atlanacak_duplicate",
+                    "mesaj": mesaj,
+                    "party_id": None,
+                    "_do": "skip",
+                }
+            )
+        else:
+            seen_in_file.add(name_key)
+            classified.append(
+                {
+                    "satir": excel_row,
+                    "ad": name,
+                    "tip": tip,
+                    "tel": tel,
+                    "email": email,
+                    "ulke": ulke,
+                    "notlar": notlar,
+                    "durum": "yeni",
+                    "mesaj": None,
+                    "party_id": None,
+                    "_do": "insert",
+                    "_name_key": name_key,
+                }
+            )
+
+    slots = _ledger_import_slots_remaining()
+    counts = {"eklenen": 0, "atlanan": 0, "hata": 0, "skipped_quota": 0}
+    rows_out: list[dict] = []
+
+    try:
+        with db_ctx() as conn:
+            cur = conn.cursor()
+            # Transaction içinde mevcut adları yeniden oku (yarışa karşı)
+            cur.execute(
+                """
+                SELECT lower(trim(name)) AS n
+                FROM ledger_parties
+                WHERE is_active = TRUE
+                  AND length(trim(name)) > 0
+                """
+            )
+            txn_names = {
+                str(r.get("n") or "").strip().lower()
+                for r in (cur.fetchall() or [])
+                if (r.get("n") or "").strip()
+            }
+
+            for item in classified:
+                do = item.pop("_do", "skip")
+                name_key = item.pop("_name_key", None)
+
+                if item.get("durum") == "hata":
+                    counts["hata"] += 1
+                    rows_out.append(item)
+                    continue
+
+                if do != "insert":
+                    counts["atlanan"] += 1
+                    rows_out.append(item)
+                    continue
+
+                # Transaction içi duplicate (başka istek araya girdiyse)
+                if name_key and name_key in txn_names:
+                    item["durum"] = "atlanacak_duplicate"
+                    item["mesaj"] = "Aynı adlı aktif cari zaten var"
+                    counts["atlanan"] += 1
+                    rows_out.append(item)
+                    continue
+
+                if slots is not None and slots <= 0:
+                    item["durum"] = "skipped_quota"
+                    item["mesaj"] = "Aktif cari kart kotası doldu; satır eklenmedi"
+                    counts["skipped_quota"] += 1
+                    rows_out.append(item)
+                    continue
+
+                try:
+                    cur.execute("SAVEPOINT ledger_import_row")
+                    cur.execute(
+                        """
+                        INSERT INTO ledger_parties
+                            (name, type, phone, email, country, notes)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                        RETURNING id
+                        """,
+                        (
+                            item["ad"],
+                            item["tip"],
+                            item.get("tel"),
+                            item.get("email"),
+                            item.get("ulke"),
+                            item.get("notlar"),
+                        ),
+                    )
+                    row = cur.fetchone()
+                    cur.execute("RELEASE SAVEPOINT ledger_import_row")
+                    pid = int(row["id"]) if row and row.get("id") is not None else None
+                    item["durum"] = "eklenen"
+                    item["mesaj"] = None
+                    item["party_id"] = pid
+                    counts["eklenen"] += 1
+                    if name_key:
+                        txn_names.add(name_key)
+                    if slots is not None:
+                        slots -= 1
+                    rows_out.append(item)
+                except Exception as e:
+                    try:
+                        cur.execute("ROLLBACK TO SAVEPOINT ledger_import_row")
+                    except Exception:
+                        pass
+                    item["durum"] = "hata"
+                    item["mesaj"] = f"Kayıt başarısız: {e}"
+                    item["party_id"] = None
+                    counts["hata"] += 1
+                    rows_out.append(item)
+    except Exception as e:
+        return _json_err(f"İçe aktarma işlemi başarısız: {e}"), 500
+
+    active_n = _ledger_active_party_count()
+    return jsonify(
+        {
+            "ok": True,
+            "yazma": True,
+            "action": "create",
+            "kolonlar": {
+                "name": colmap.get("name"),
+                "type": colmap.get("type"),
+                "phone": colmap.get("phone"),
+                "email": colmap.get("email"),
+                "country": colmap.get("country"),
+                "notes": colmap.get("notes"),
+            },
+            "ozet": {
+                "toplam": len(rows_out),
+                "eklenen": counts["eklenen"],
+                "atlanan": counts["atlanan"],
+                "hata": counts["hata"],
+                "skipped_quota": counts["skipped_quota"],
+                "aktif_cari": active_n,
+            },
+            "satirlar": rows_out,
+        }
+    )
