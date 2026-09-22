@@ -2565,3 +2565,160 @@ def api_parties_import_commit():
             "satirlar": rows_out,
         }
     )
+
+
+# ---------------------------------------------------------------------------
+# Aşama O1 — Kartvizit / vergi levhası OCR önizleme (yazma yok)
+# ---------------------------------------------------------------------------
+_LEDGER_OCR_MAX_BYTES = 5 * 1024 * 1024
+
+
+@bp.route("/api/parties/ocr-preview", methods=["POST"])
+@giris_gerekli
+@module_required("ledger")
+def api_parties_ocr_preview():
+    """Belge görselinden cari alan önerisi — DB yazmaz.
+
+    multipart: file (JPEG/PNG/WEBP), isteğe bağlı belge_ipucu
+    (kartvizit|vergi_levhasi|serbest).
+    """
+    import tempfile
+    from pathlib import Path
+
+    from groq_helper import cari_belge_oku
+
+    _ensure_ledger_tables_once()
+
+    upload = request.files.get("file")
+    if upload is None or not getattr(upload, "filename", None):
+        return _json_err("Görsel dosyası seçin (alan: file).")
+
+    raw = upload.read(_LEDGER_OCR_MAX_BYTES + 1)
+    if not raw:
+        return _json_err("Dosya boş.")
+    if len(raw) > _LEDGER_OCR_MAX_BYTES:
+        return _json_err("Dosya çok büyük (en fazla 5 MB).")
+
+    detected = _detect_image_magic(raw)
+    if not detected:
+        return _json_err(
+            "Geçersiz dosya: yalnızca gerçek JPEG/PNG/WEBP kabul edilir."
+        )
+    content_type, ext = detected
+
+    # Uzantı / Content-Type ipucu (magic asıl doğrulayıcı)
+    fn = str(upload.filename or "").lower()
+    allowed_ext = (".jpg", ".jpeg", ".png", ".webp")
+    if fn and not any(fn.endswith(e) for e in allowed_ext):
+        # Magic geçtiyse yine kabul et; yalnızca bilgilendirici — sıkı MIME:
+        pass
+    ctype = (getattr(upload, "mimetype", None) or "").strip().lower()
+    if ctype and not ctype.startswith("image/") and ctype not in (
+        "application/octet-stream",
+        "",
+    ):
+        return _json_err(
+            "Geçersiz Content-Type: yalnızca image/jpeg, image/png, image/webp."
+        )
+    if ctype.startswith("image/") and ctype not in (
+        "image/jpeg",
+        "image/jpg",
+        "image/png",
+        "image/webp",
+        "image/pjpeg",
+    ):
+        return _json_err(
+            "Geçersiz Content-Type: yalnızca image/jpeg, image/png, image/webp."
+        )
+
+    belge_ipucu = (
+        str(request.form.get("belge_ipucu") or request.args.get("belge_ipucu") or "")
+        .strip()
+        .lower()
+        or None
+    )
+    if belge_ipucu and belge_ipucu not in (
+        "kartvizit",
+        "vergi_levhasi",
+        "serbest",
+    ):
+        return _json_err(
+            "belge_ipucu kartvizit, vergi_levhasi veya serbest olmalı."
+        )
+
+    tmp_path: str | None = None
+    try:
+        fd, tmp_path = tempfile.mkstemp(suffix=f".{ext}", prefix="ledger_ocr_")
+        os.close(fd)
+        Path(tmp_path).write_bytes(raw)
+
+        ok, result, err, raw_ai = cari_belge_oku(
+            tmp_path, belge_ipucu=belge_ipucu
+        )
+    except Exception as e:
+        return _json_err(f"Belge okunamadı: {e}"), 502
+    finally:
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+    if not ok or not isinstance(result, dict):
+        msg = err or "Belge okunamadı."
+        status = 502
+        low = msg.lower()
+        if "yoğun" in low or "rate" in low:
+            status = 429
+        elif "yapılandırma" in low or "api anahtarı" in low:
+            status = 503
+        elif "model" in low:
+            status = 503
+        return _json_err(msg, status)
+
+    oneri = {
+        "belge_tipi": result.get("belge_tipi"),
+        "unvan": result.get("unvan"),
+        "tip_tahmini": result.get("tip_tahmini"),
+        "vkn": result.get("vkn"),
+        "tckn": result.get("tckn"),
+        "vergi_dairesi": result.get("vergi_dairesi"),
+        "adres": result.get("adres"),
+        "telefon": result.get("telefon"),
+        "email": result.get("email"),
+        "ulke": result.get("ulke"),
+        "not_ham": result.get("not_ham"),
+        "guven": result.get("guven"),
+    }
+
+    # Form ön-doldurma ipucu (yazma yok — istemci kullanır)
+    notes_parts = []
+    if oneri.get("vkn"):
+        notes_parts.append(f"VKN: {oneri['vkn']}")
+    if oneri.get("tckn"):
+        notes_parts.append(f"TCKN: {oneri['tckn']}")
+    if oneri.get("vergi_dairesi"):
+        notes_parts.append(f"Vergi dairesi: {oneri['vergi_dairesi']}")
+    if oneri.get("adres"):
+        notes_parts.append(f"Adres: {oneri['adres']}")
+    if oneri.get("not_ham"):
+        notes_parts.append(str(oneri["not_ham"]))
+    notes_onerisi = " | ".join(notes_parts) if notes_parts else None
+
+    return jsonify(
+        {
+            "ok": True,
+            "yazma": False,
+            "content_type": content_type,
+            "belge_ipucu": belge_ipucu,
+            "oneri": oneri,
+            "form": {
+                "name": oneri.get("unvan"),
+                "type": oneri.get("tip_tahmini"),
+                "phone": oneri.get("telefon"),
+                "email": oneri.get("email"),
+                "country": oneri.get("ulke"),
+                "notes": notes_onerisi,
+            },
+        }
+    )
