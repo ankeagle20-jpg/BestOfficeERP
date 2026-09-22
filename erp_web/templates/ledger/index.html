@@ -250,6 +250,23 @@
   .pc-import-badge.skipped_quota { background: #e0f2fe; color: #0369a1; }
   .pc-btn-import { border: 1px solid #3d5166; }
 
+  .pc-ocr-banner {
+    display: none;
+    margin: 0 0 0.65rem;
+    padding: 0.55rem 0.7rem;
+    border-radius: 10px;
+    border: 1px solid #fde68a;
+    background: #fffbeb;
+    color: #92400e;
+    font-size: 0.82rem;
+    line-height: 1.35;
+  }
+  .pc-ocr-banner.is-on { display: block; }
+  .pc-ocr-banner.is-low { border-color: #fecaca; background: #fef2f2; color: #991b1b; }
+  .pc-ocr-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; margin: 0 0 0.65rem; }
+  .pc-ocr-actions .pc-btn { padding: 0.45rem 0.7rem; font-size: 0.85rem; }
+
+
   body.pc-select-mode-on .pc-wrap { padding-bottom: 5.25rem; }
   .pc-btn {
     border: none; border-radius: 10px; padding: 0.7rem 1rem; font-size: 0.95rem;
@@ -755,6 +772,11 @@
       </div>
       <div class="pc-panel" id="pc-new-panel">
         <h2>Yeni cari</h2>
+        <div class="pc-ocr-actions">
+          <button type="button" class="pc-btn pc-btn-ghost" id="pc-new-ocr-btn">Belgeden doldur</button>
+          <input type="file" id="pc-new-ocr-file" accept="image/jpeg,image/png,image/webp,image/*" capture="environment" hidden>
+        </div>
+        <div id="pc-new-ocr-banner" class="pc-ocr-banner" role="status"></div>
         <div class="pc-field"><label>Ad</label><input id="pc-new-name" maxlength="200"></div>
         <div class="pc-field">
           <label>Tür</label>
@@ -762,6 +784,8 @@
         </div>
         <div class="pc-field"><label>Telefon</label><input id="pc-new-phone" maxlength="64"></div>
         <div class="pc-field"><label>E-posta</label><input id="pc-new-email" type="email" maxlength="120"></div>
+        <div class="pc-field"><label>Ülke</label><input id="pc-new-country" maxlength="8" placeholder="TR"></div>
+        <div class="pc-field"><label>Not</label><textarea id="pc-new-notes" maxlength="500" rows="2" placeholder="VKN, vergi dairesi, adres…"></textarea></div>
         <div id="pc-new-err" class="pc-err" hidden></div>
         <div class="pc-actions">
           <button type="button" class="pc-btn pc-btn-primary" id="pc-new-save">Kaydet</button>
@@ -2311,9 +2335,11 @@
   document.getElementById("pc-btn-new").addEventListener("click", function () {
     document.getElementById("pc-new-panel").classList.add("open");
     document.getElementById("pc-new-err").hidden = true;
+    clearNewOcrBanner();
   });
   document.getElementById("pc-new-cancel").addEventListener("click", function () {
     document.getElementById("pc-new-panel").classList.remove("open");
+    resetNewPartyForm();
   });
   document.getElementById("pc-new-save").addEventListener("click", function () {
     var err = document.getElementById("pc-new-err");
@@ -2324,16 +2350,92 @@
         name: document.getElementById("pc-new-name").value,
         type: document.getElementById("pc-new-type").value,
         phone: document.getElementById("pc-new-phone").value,
-        email: document.getElementById("pc-new-email").value
+        email: document.getElementById("pc-new-email").value,
+        country: (document.getElementById("pc-new-country") || {}).value || "",
+        notes: (document.getElementById("pc-new-notes") || {}).value || ""
       }
     }).then(function () {
       document.getElementById("pc-new-panel").classList.remove("open");
-      document.getElementById("pc-new-name").value = "";
-      document.getElementById("pc-new-phone").value = "";
-      document.getElementById("pc-new-email").value = "";
+      resetNewPartyForm();
       return loadList();
     }).catch(function (e) { err.textContent = e.message; err.hidden = false; });
   });
+
+
+  /* ---- O2: Belgeden doldur (OCR → form; sessiz kayıt yok) ---- */
+  function clearNewOcrBanner() {
+    var b = document.getElementById("pc-new-ocr-banner");
+    if (!b) return;
+    b.classList.remove("is-on", "is-low");
+    b.textContent = "";
+  }
+
+  function resetNewPartyForm() {
+    document.getElementById("pc-new-name").value = "";
+    document.getElementById("pc-new-phone").value = "";
+    document.getElementById("pc-new-email").value = "";
+    document.getElementById("pc-new-type").value = "person";
+    var c = document.getElementById("pc-new-country");
+    var n = document.getElementById("pc-new-notes");
+    if (c) c.value = "";
+    if (n) n.value = "";
+    var fi = document.getElementById("pc-new-ocr-file");
+    if (fi) fi.value = "";
+    clearNewOcrBanner();
+  }
+
+  function applyOcrToNewForm(j) {
+    var form = (j && j.form) || {};
+    var oneri = (j && j.oneri) || {};
+    if (form.name) document.getElementById("pc-new-name").value = form.name;
+    if (form.type === "person" || form.type === "company") {
+      document.getElementById("pc-new-type").value = form.type;
+    }
+    if (form.phone) document.getElementById("pc-new-phone").value = form.phone;
+    if (form.email) document.getElementById("pc-new-email").value = form.email;
+    var cEl = document.getElementById("pc-new-country");
+    var nEl = document.getElementById("pc-new-notes");
+    if (cEl && form.country) cEl.value = form.country;
+    if (nEl && form.notes) nEl.value = form.notes;
+
+    var ban = document.getElementById("pc-new-ocr-banner");
+    var guven = oneri.guven || "orta";
+    var tip = oneri.belge_tipi || "belge";
+    ban.textContent = "AI önerisi (" + tip + ", güven: " + guven +
+      ") — alanları kontrol edin, sonra Kaydet’e basın. Otomatik kayıt yok.";
+    ban.classList.add("is-on");
+    ban.classList.toggle("is-low", guven === "dusuk");
+  }
+
+  document.getElementById("pc-new-ocr-btn").addEventListener("click", function () {
+    document.getElementById("pc-new-ocr-file").click();
+  });
+
+  document.getElementById("pc-new-ocr-file").addEventListener("change", function () {
+    var err = document.getElementById("pc-new-err");
+    err.hidden = true;
+    clearNewOcrBanner();
+    var fi = document.getElementById("pc-new-ocr-file");
+    var file = fi && fi.files && fi.files[0];
+    if (!file) return;
+    var btn = document.getElementById("pc-new-ocr-btn");
+    btn.disabled = true;
+    btn.textContent = "Analiz…";
+    var fd = new FormData();
+    fd.append("file", file);
+    apiUpload("/ledger/api/parties/ocr-preview", fd).then(function (j) {
+      applyOcrToNewForm(j);
+    }).catch(function (e) {
+      err.textContent = e.message || "Belge okunamadı";
+      err.hidden = false;
+    }).then(function () {
+      btn.disabled = false;
+      btn.textContent = "Belgeden doldur";
+      fi.value = "";
+    });
+  });
+
+
 
   document.getElementById("pc-btn-new-group").addEventListener("click", function () {
     document.getElementById("pc-new-group-panel").classList.add("open");
