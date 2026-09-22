@@ -262,7 +262,14 @@
     line-height: 1.35;
   }
   .pc-ocr-banner.is-on { display: block; }
-  .pc-ocr-banner.is-low { border-color: #fecaca; background: #fef2f2; color: #991b1b; }
+  .pc-ocr-banner.is-low {
+    border: 2px solid #dc2626;
+    background: #fef2f2;
+    color: #7f1d1d;
+    font-weight: 700;
+    font-size: 0.88rem;
+    box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.18);
+  }
   .pc-ocr-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; margin: 0 0 0.65rem; }
   .pc-ocr-actions .pc-btn { padding: 0.45rem 0.7rem; font-size: 0.85rem; }
 
@@ -2401,8 +2408,16 @@
     var ban = document.getElementById("pc-new-ocr-banner");
     var guven = oneri.guven || "orta";
     var tip = oneri.belge_tipi || "belge";
-    ban.textContent = "AI önerisi (" + tip + ", güven: " + guven +
+    var base = "AI önerisi (" + tip + ", güven: " + guven +
       ") — alanları kontrol edin, sonra Kaydet’e basın. Otomatik kayıt yok.";
+    if (guven === "dusuk") {
+      base = "⚠ DÜŞÜK GÜVEN — AI okuması belirsiz veya eksik olabilir. " +
+        "Tüm alanları mutlaka elle doğrulayın; yanlış kayıt riski yüksek. " + base;
+    }
+    if (j && j.from_cache) {
+      base += " (önceki aynı görselden; yeniden okutulmadı)";
+    }
+    ban.textContent = base;
     ban.classList.add("is-on");
     ban.classList.toggle("is-low", guven === "dusuk");
   }

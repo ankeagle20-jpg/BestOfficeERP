@@ -2568,9 +2568,138 @@ def api_parties_import_commit():
 
 
 # ---------------------------------------------------------------------------
-# Aşama O1 — Kartvizit / vergi levhası OCR önizleme (yazma yok)
+# Aşama O1 + O3 — Kartvizit / vergi levhası OCR önizleme (yazma yok)
+# O3: kiracı başına rate limit + görsel hash cache (Groq tasarrufu)
 # ---------------------------------------------------------------------------
 _LEDGER_OCR_MAX_BYTES = 5 * 1024 * 1024
+_LEDGER_OCR_RATE_LIMIT = 10  # istek / pencere
+_LEDGER_OCR_RATE_WINDOW_SEC = 60
+_LEDGER_OCR_CACHE_TTL_SEC = 15 * 60  # aynı görsel → Groq'a tekrar gitme
+_LEDGER_OCR_RATE_LOCK = threading.Lock()
+_LEDGER_OCR_CACHE_LOCK = threading.Lock()
+# tenant_id -> list[monotonic timestamps]
+_LEDGER_OCR_RATE: dict[int, list[float]] = {}
+# (tenant_id, sha256, belge_ipucu) -> {expires, payload}
+_LEDGER_OCR_HASH_CACHE: dict[tuple, dict] = {}
+
+
+def _ledger_ocr_reset_caches_for_tests() -> None:
+    """Canlı/unit testler için rate + hash cache sıfırla."""
+    with _LEDGER_OCR_RATE_LOCK:
+        _LEDGER_OCR_RATE.clear()
+    with _LEDGER_OCR_CACHE_LOCK:
+        _LEDGER_OCR_HASH_CACHE.clear()
+
+
+def _ledger_ocr_tenant_id() -> int | None:
+    tid = resolve_request_tenant_id()
+    if tid is None:
+        return None
+    try:
+        return int(tid)
+    except (TypeError, ValueError):
+        return None
+
+
+def _ledger_ocr_rate_allow(tenant_id: int) -> tuple[bool, int]:
+    """True, kalan kota. False ise limit aşıldı (kalan=0)."""
+    import time
+
+    now = time.monotonic()
+    window = float(_LEDGER_OCR_RATE_WINDOW_SEC)
+    limit = int(_LEDGER_OCR_RATE_LIMIT)
+    with _LEDGER_OCR_RATE_LOCK:
+        hits = _LEDGER_OCR_RATE.get(tenant_id) or []
+        hits = [t for t in hits if (now - t) < window]
+        if len(hits) >= limit:
+            _LEDGER_OCR_RATE[tenant_id] = hits
+            return False, 0
+        hits.append(now)
+        _LEDGER_OCR_RATE[tenant_id] = hits
+        return True, max(0, limit - len(hits))
+
+
+def _ledger_ocr_sha256(data: bytes) -> str:
+    import hashlib
+
+    return hashlib.sha256(data).hexdigest()
+
+
+def _ledger_ocr_cache_get(
+    tenant_id: int, digest: str, belge_ipucu: str | None
+) -> dict | None:
+    import time
+
+    key = (tenant_id, digest, belge_ipucu or "")
+    now = time.monotonic()
+    with _LEDGER_OCR_CACHE_LOCK:
+        row = _LEDGER_OCR_HASH_CACHE.get(key)
+        if not row:
+            return None
+        if float(row.get("expires") or 0) < now:
+            _LEDGER_OCR_HASH_CACHE.pop(key, None)
+            return None
+        payload = row.get("payload")
+        return dict(payload) if isinstance(payload, dict) else None
+
+
+def _ledger_ocr_cache_put(
+    tenant_id: int, digest: str, belge_ipucu: str | None, payload: dict
+) -> None:
+    import time
+
+    key = (tenant_id, digest, belge_ipucu or "")
+    with _LEDGER_OCR_CACHE_LOCK:
+        _LEDGER_OCR_HASH_CACHE[key] = {
+            "expires": time.monotonic() + float(_LEDGER_OCR_CACHE_TTL_SEC),
+            "payload": dict(payload),
+        }
+        # basit üst sınır (kiracı başına birikmesin)
+        if len(_LEDGER_OCR_HASH_CACHE) > 500:
+            # en eski ~100'ü at
+            items = sorted(
+                _LEDGER_OCR_HASH_CACHE.items(),
+                key=lambda kv: float((kv[1] or {}).get("expires") or 0),
+            )
+            for k, _ in items[:100]:
+                _LEDGER_OCR_HASH_CACHE.pop(k, None)
+
+
+def _ledger_ocr_build_response(
+    *,
+    content_type: str,
+    belge_ipucu: str | None,
+    oneri: dict,
+    from_cache: bool,
+) -> dict:
+    notes_parts = []
+    if oneri.get("vkn"):
+        notes_parts.append(f"VKN: {oneri['vkn']}")
+    if oneri.get("tckn"):
+        notes_parts.append(f"TCKN: {oneri['tckn']}")
+    if oneri.get("vergi_dairesi"):
+        notes_parts.append(f"Vergi dairesi: {oneri['vergi_dairesi']}")
+    if oneri.get("adres"):
+        notes_parts.append(f"Adres: {oneri['adres']}")
+    if oneri.get("not_ham"):
+        notes_parts.append(str(oneri["not_ham"]))
+    notes_onerisi = " | ".join(notes_parts) if notes_parts else None
+    return {
+        "ok": True,
+        "yazma": False,
+        "from_cache": bool(from_cache),
+        "content_type": content_type,
+        "belge_ipucu": belge_ipucu,
+        "oneri": oneri,
+        "form": {
+            "name": oneri.get("unvan"),
+            "type": oneri.get("tip_tahmini"),
+            "phone": oneri.get("telefon"),
+            "email": oneri.get("email"),
+            "country": oneri.get("ulke"),
+            "notes": notes_onerisi,
+        },
+    }
 
 
 @bp.route("/api/parties/ocr-preview", methods=["POST"])
@@ -2581,6 +2710,8 @@ def api_parties_ocr_preview():
 
     multipart: file (JPEG/PNG/WEBP), isteğe bağlı belge_ipucu
     (kartvizit|vergi_levhasi|serbest).
+
+    O3: kiracı başına dakikada 10 istek; aynı görsel hash'i kısa süre cache.
     """
     import tempfile
     from pathlib import Path
@@ -2588,6 +2719,18 @@ def api_parties_ocr_preview():
     from groq_helper import cari_belge_oku
 
     _ensure_ledger_tables_once()
+
+    tid = _ledger_ocr_tenant_id()
+    if tid is None:
+        return _json_err("Kiracı doğrulanamadı.", 403)
+
+    allowed, remaining = _ledger_ocr_rate_allow(tid)
+    if not allowed:
+        return _json_err(
+            "Belge okuma limiti aşıldı (dakikada en fazla "
+            f"{_LEDGER_OCR_RATE_LIMIT} istek). Lütfen biraz sonra tekrar deneyin.",
+            429,
+        )
 
     upload = request.files.get("file")
     if upload is None or not getattr(upload, "filename", None):
@@ -2606,11 +2749,9 @@ def api_parties_ocr_preview():
         )
     content_type, ext = detected
 
-    # Uzantı / Content-Type ipucu (magic asıl doğrulayıcı)
     fn = str(upload.filename or "").lower()
     allowed_ext = (".jpg", ".jpeg", ".png", ".webp")
     if fn and not any(fn.endswith(e) for e in allowed_ext):
-        # Magic geçtiyse yine kabul et; yalnızca bilgilendirici — sıkı MIME:
         pass
     ctype = (getattr(upload, "mimetype", None) or "").strip().lower()
     if ctype and not ctype.startswith("image/") and ctype not in (
@@ -2646,6 +2787,14 @@ def api_parties_ocr_preview():
             "belge_ipucu kartvizit, vergi_levhasi veya serbest olmalı."
         )
 
+    digest = _ledger_ocr_sha256(raw)
+    cached = _ledger_ocr_cache_get(tid, digest, belge_ipucu)
+    if cached is not None:
+        cached["from_cache"] = True
+        cached["yazma"] = False
+        cached["rate_remaining"] = remaining
+        return jsonify(cached)
+
     tmp_path: str | None = None
     try:
         fd, tmp_path = tempfile.mkstemp(suffix=f".{ext}", prefix="ledger_ocr_")
@@ -2656,7 +2805,7 @@ def api_parties_ocr_preview():
             tmp_path, belge_ipucu=belge_ipucu
         )
     except Exception as e:
-        return _json_err(f"Belge okunamadı: {e}"), 502
+        return _json_err(f"Belge okunamadı: {e}", 502)
     finally:
         if tmp_path:
             try:
@@ -2691,34 +2840,12 @@ def api_parties_ocr_preview():
         "guven": result.get("guven"),
     }
 
-    # Form ön-doldurma ipucu (yazma yok — istemci kullanır)
-    notes_parts = []
-    if oneri.get("vkn"):
-        notes_parts.append(f"VKN: {oneri['vkn']}")
-    if oneri.get("tckn"):
-        notes_parts.append(f"TCKN: {oneri['tckn']}")
-    if oneri.get("vergi_dairesi"):
-        notes_parts.append(f"Vergi dairesi: {oneri['vergi_dairesi']}")
-    if oneri.get("adres"):
-        notes_parts.append(f"Adres: {oneri['adres']}")
-    if oneri.get("not_ham"):
-        notes_parts.append(str(oneri["not_ham"]))
-    notes_onerisi = " | ".join(notes_parts) if notes_parts else None
-
-    return jsonify(
-        {
-            "ok": True,
-            "yazma": False,
-            "content_type": content_type,
-            "belge_ipucu": belge_ipucu,
-            "oneri": oneri,
-            "form": {
-                "name": oneri.get("unvan"),
-                "type": oneri.get("tip_tahmini"),
-                "phone": oneri.get("telefon"),
-                "email": oneri.get("email"),
-                "country": oneri.get("ulke"),
-                "notes": notes_onerisi,
-            },
-        }
+    payload = _ledger_ocr_build_response(
+        content_type=content_type,
+        belge_ipucu=belge_ipucu,
+        oneri=oneri,
+        from_cache=False,
     )
+    payload["rate_remaining"] = remaining
+    _ledger_ocr_cache_put(tid, digest, belge_ipucu, payload)
+    return jsonify(payload)
