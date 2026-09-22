@@ -2000,3 +2000,190 @@ def api_assets_delete(asset_id: int):
             "deleted": _registered_asset_dict(row),
         }
     )
+
+
+# ---------------------------------------------------------------------------
+# Aşama A1 — Excel party import önizleme (yazma yok)
+# ---------------------------------------------------------------------------
+_LEDGER_IMPORT_MAX_ROWS = 2000
+_LEDGER_IMPORT_MAX_BYTES = 5 * 1024 * 1024
+
+
+@bp.route("/api/parties/import/preview", methods=["POST"])
+@giris_gerekli
+@module_required("ledger")
+def api_parties_import_preview():
+    """Excel'den cari (party) içe aktarma önizlemesi — DB yazmaz.
+
+    multipart alan: file (.xlsx tercihen).
+    Satır durumları: yeni | atlanacak_duplicate | hata
+    """
+    from io import BytesIO
+
+    from ledger_excel_import import (
+        map_ledger_party_columns,
+        normalize_headers,
+        row_to_party_fields,
+    )
+
+    _ensure_ledger_tables_once()
+
+    f = request.files.get("file")
+    if not f or not getattr(f, "filename", None):
+        return _json_err("Excel dosyası seçin (.xlsx).")
+    raw = f.read()
+    if not raw:
+        return _json_err("Dosya boş veya okunamadı.")
+    if len(raw) > _LEDGER_IMPORT_MAX_BYTES:
+        return _json_err("Dosya çok büyük (en fazla 5 MB).")
+
+    fn = str(f.filename or "").lower()
+    try:
+        import pandas as pd
+    except ImportError:
+        return _json_err("Excel desteği için pandas/openpyxl gerekli."), 500
+
+    try:
+        if fn.endswith(".xls") and not fn.endswith(".xlsx"):
+            try:
+                df = pd.read_excel(BytesIO(raw), header=0)
+            except Exception:
+                return _json_err(
+                    "Eski .xls formatı desteklenmiyor. Dosyayı .xlsx olarak kaydedip tekrar deneyin."
+                )
+        else:
+            df = pd.read_excel(BytesIO(raw), engine="openpyxl", header=0)
+    except ImportError:
+        return _json_err("Excel desteği için openpyxl yüklü değil."), 500
+    except Exception as e:
+        return _json_err(f"Excel okunamadı: {e}")
+
+    if df is None or df.empty or len(df) == 0:
+        return _json_err("Excel dosyasında veri satırı yok.")
+
+    if len(df) > _LEDGER_IMPORT_MAX_ROWS:
+        return _json_err(
+            f"En fazla {_LEDGER_IMPORT_MAX_ROWS} satır desteklenir "
+            f"(dosyada {len(df)} satır var)."
+        )
+
+    # Başlıkları normalize et; DataFrame kolonlarını da aynı isimlere çek
+    orig_cols = list(df.columns)
+    norm_cols = normalize_headers(orig_cols)
+    df = df.copy()
+    df.columns = norm_cols
+
+    colmap = map_ledger_party_columns(norm_cols)
+    if not colmap.get("name"):
+        return _json_err(
+            "Excel'de ad/ünvan/firma sütunu bulunamadı. "
+            "İlk satır başlık olmalı (örn. Ad, Firma, Cari)."
+        )
+
+    # Mevcut aktif cariler (ada göre duplicate)
+    existing_rows = fetch_all(
+        """
+        SELECT lower(trim(name)) AS n
+        FROM ledger_parties
+        WHERE is_active = TRUE
+          AND length(trim(name)) > 0
+        """
+    ) or []
+    existing_names = {
+        str(r.get("n") or "").strip().lower()
+        for r in existing_rows
+        if (r.get("n") or "").strip()
+    }
+
+    seen_in_file: set[str] = set()
+    rows_out: list[dict] = []
+    counts = {"yeni": 0, "atlanacak_duplicate": 0, "hata": 0}
+
+    for idx, series in df.iterrows():
+        try:
+            excel_row = int(idx) + 2
+        except Exception:
+            excel_row = len(rows_out) + 2
+
+        fields = row_to_party_fields(series, colmap)
+        if not fields or not (fields.get("name") or "").strip():
+            counts["hata"] += 1
+            rows_out.append(
+                {
+                    "satir": excel_row,
+                    "ad": None,
+                    "tip": None,
+                    "tel": None,
+                    "email": None,
+                    "ulke": None,
+                    "notlar": None,
+                    "durum": "hata",
+                    "mesaj": "Ad boş veya okunamadı",
+                }
+            )
+            continue
+
+        name = str(fields["name"]).strip()
+        name_key = name.lower()
+        tip = fields.get("type") or "person"
+        tel = fields.get("phone")
+        email = fields.get("email")
+        ulke = fields.get("country")
+        notlar = fields.get("notes")
+
+        if name_key in existing_names or name_key in seen_in_file:
+            durum = "atlanacak_duplicate"
+            counts["atlanacak_duplicate"] += 1
+            mesaj = (
+                "Dosyada aynı ad tekrar ediyor"
+                if name_key in seen_in_file
+                else "Aynı adlı aktif cari zaten var"
+            )
+        else:
+            durum = "yeni"
+            counts["yeni"] += 1
+            mesaj = None
+            seen_in_file.add(name_key)
+
+        rows_out.append(
+            {
+                "satir": excel_row,
+                "ad": name,
+                "tip": tip,
+                "tel": tel,
+                "email": email,
+                "ulke": ulke,
+                "notlar": notlar,
+                "durum": durum,
+                "mesaj": mesaj,
+            }
+        )
+
+    # Kota bilgisi (yalnızca rapor; yazma yok)
+    active_n = _ledger_active_party_count()
+    quota_msg = _ledger_party_quota_block_message()
+    kota_dolu = bool(quota_msg)
+
+    return jsonify(
+        {
+            "ok": True,
+            "yazma": False,
+            "kolonlar": {
+                "name": colmap.get("name"),
+                "type": colmap.get("type"),
+                "phone": colmap.get("phone"),
+                "email": colmap.get("email"),
+                "country": colmap.get("country"),
+                "notes": colmap.get("notes"),
+            },
+            "ozet": {
+                "toplam": len(rows_out),
+                "yeni": counts["yeni"],
+                "atlanacak_duplicate": counts["atlanacak_duplicate"],
+                "hata": counts["hata"],
+                "aktif_cari": active_n,
+                "kota_dolu": kota_dolu,
+            },
+            "satirlar": rows_out,
+        }
+    )
