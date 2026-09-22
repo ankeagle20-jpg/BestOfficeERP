@@ -175,22 +175,6 @@
     color: #fff;
   }
   .hg-actions button:disabled { opacity: 0.55; cursor: not-allowed; }
-  .hg-alt {
-    margin: 0.85rem 0 0;
-    text-align: center;
-    font-size: 0.82rem;
-  }
-  .hg-alt button {
-    background: none;
-    border: none;
-    padding: 0;
-    color: var(--accent);
-    font: inherit;
-    font-weight: 600;
-    cursor: pointer;
-    text-decoration: underline;
-  }
-  .hg-alt button:disabled { opacity: 0.55; cursor: not-allowed; }
 
   @media (max-width: 640px) {
     .home-top-compact { max-width: 100%; }
@@ -308,9 +292,6 @@
         <button type="submit" class="hg-submit" id="hg-submit">Hesabıma git</button>
       </div>
     </form>
-    <p class="hg-alt">
-      <button type="button" id="hg-lookup-only">Şifreyi kiracı sayfasında gireceğim</button>
-    </p>
   </div>
 </div>
 {% endblock %}
@@ -401,7 +382,7 @@
     }
   });
 
-  /* L1 — paket kartı Hesabıma git (Aşama 2: tek adım login-complete) */
+  /* L1 — paket kartı Hesabıma git (tek adım login-complete) */
   var backdrop = document.getElementById("hg-backdrop");
   var hgForm = document.getElementById("hg-form");
   var hgEmail = document.getElementById("hg-email");
@@ -411,7 +392,6 @@
   var hgErr = document.getElementById("hg-error");
   var hgSubmit = document.getElementById("hg-submit");
   var hgCancel = document.getElementById("hg-cancel");
-  var hgLookupOnly = document.getElementById("hg-lookup-only");
 
   function openHgModal(moduleKey, label) {
     hgModule.value = moduleKey || "";
@@ -428,7 +408,6 @@
   function closeHgModal() {
     backdrop.hidden = true;
     hgSubmit.disabled = false;
-    if (hgLookupOnly) hgLookupOnly.disabled = false;
   }
 
   function showHgError(msg) {
@@ -438,7 +417,6 @@
 
   function setHgBusy(busy) {
     hgSubmit.disabled = !!busy;
-    if (hgLookupOnly) hgLookupOnly.disabled = !!busy;
   }
 
   document.querySelectorAll(".btn-hesabima-git").forEach(function (el) {
@@ -500,45 +478,6 @@
       setHgBusy(false);
     }
   });
-
-  /* Geriye dönüş: yalnız lookup → kiracı /login (şifre orada) */
-  if (hgLookupOnly) {
-    hgLookupOnly.addEventListener("click", async function () {
-      showHgError("");
-      var identifier = hgEmail.value.trim();
-      var moduleKey = (hgModule.value || "").trim();
-      if (!identifier) {
-        showHgError("Geçerli bir e-posta veya cep telefonu girin.");
-        return;
-      }
-      setHgBusy(true);
-      try {
-        var result = await postLoginLookup(identifier, moduleKey || null);
-        var data = result.data;
-        if (result.status === 429) {
-          showHgError(data.mesaj || "Çok fazla deneme, lütfen bekleyin.");
-          return;
-        }
-        if (result.status === 400) {
-          showHgError(data.mesaj || "Geçerli bir e-posta veya cep telefonu girin.");
-          return;
-        }
-        if (result.status === 403) {
-          showHgError(data.mesaj || "Bu işlem yalnızca ana sitede kullanılabilir.");
-          return;
-        }
-        if (data.found && data.login_url) {
-          window.location.href = data.login_url;
-          return;
-        }
-        window.location.href = data.signup_url || "/signup";
-      } catch (e) {
-        showHgError("Bağlantı hatası. Lütfen tekrar deneyin.");
-      } finally {
-        setHgBusy(false);
-      }
-    });
-  }
 })();
 </script>
 {% endblock %}
