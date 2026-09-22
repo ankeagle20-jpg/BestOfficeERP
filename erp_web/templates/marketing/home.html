@@ -175,6 +175,22 @@
     color: #fff;
   }
   .hg-actions button:disabled { opacity: 0.55; cursor: not-allowed; }
+  .hg-alt {
+    margin: 0.85rem 0 0;
+    text-align: center;
+    font-size: 0.82rem;
+  }
+  .hg-alt button {
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--accent);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: underline;
+  }
+  .hg-alt button:disabled { opacity: 0.55; cursor: not-allowed; }
 
   @media (max-width: 640px) {
     .home-top-compact { max-width: 100%; }
@@ -273,7 +289,7 @@
 <div id="hg-backdrop" class="hg-backdrop" hidden>
   <div class="hg-modal" role="dialog" aria-modal="true" aria-labelledby="hg-title">
     <h3 id="hg-title">Hesabıma git</h3>
-    <p class="hg-sub" id="hg-sub">E-posta veya cep telefonunuzu girin; sizi hesabınıza yönlendirelim.</p>
+    <p class="hg-sub" id="hg-sub">E-posta veya cep telefonunuz ve şifrenizle tek adımda giriş yapın.</p>
     <form id="hg-form" novalidate>
       <input type="hidden" id="hg-module" name="module" value="">
       <div class="field">
@@ -281,12 +297,20 @@
         <input id="hg-email" name="identifier" type="text" autocomplete="username"
                required placeholder="ornek@sirket.com veya 05xx xxx xx xx">
       </div>
+      <div class="field">
+        <label for="hg-password">Şifre</label>
+        <input id="hg-password" name="password" type="password" autocomplete="current-password"
+               required placeholder="Şifreniz">
+      </div>
       <div id="hg-error" class="field-error" role="alert"></div>
       <div class="hg-actions">
         <button type="button" id="hg-cancel">Vazgeç</button>
         <button type="submit" class="hg-submit" id="hg-submit">Hesabıma git</button>
       </div>
     </form>
+    <p class="hg-alt">
+      <button type="button" id="hg-lookup-only">Şifreyi kiracı sayfasında gireceğim</button>
+    </p>
   </div>
 </div>
 {% endblock %}
@@ -304,7 +328,7 @@
     errEl.style.display = "block";
   }
 
-  async function postLoginLookup(identifier, moduleKey) {
+  function buildLoginBody(identifier, moduleKey, password) {
     var raw = String(identifier || "").trim();
     var body = { identifier: raw };
     if (raw.indexOf("@") >= 0) {
@@ -313,10 +337,25 @@
       body.phone = raw;
     }
     if (moduleKey) body.module = moduleKey;
+    if (password !== undefined) body.password = String(password || "");
+    return body;
+  }
+
+  async function postLoginLookup(identifier, moduleKey) {
     var res = await fetch("/api/login-lookup", {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify(body)
+      body: JSON.stringify(buildLoginBody(identifier, moduleKey))
+    });
+    var data = await res.json().catch(function () { return {}; });
+    return { status: res.status, data: data };
+  }
+
+  async function postLoginComplete(identifier, password, moduleKey) {
+    var res = await fetch("/api/login-complete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(buildLoginBody(identifier, moduleKey, password))
     });
     var data = await res.json().catch(function () { return {}; });
     return { status: res.status, data: data };
@@ -362,23 +401,26 @@
     }
   });
 
-  /* L1 — paket kartı Hesabıma git */
+  /* L1 — paket kartı Hesabıma git (Aşama 2: tek adım login-complete) */
   var backdrop = document.getElementById("hg-backdrop");
   var hgForm = document.getElementById("hg-form");
   var hgEmail = document.getElementById("hg-email");
+  var hgPassword = document.getElementById("hg-password");
   var hgModule = document.getElementById("hg-module");
   var hgSub = document.getElementById("hg-sub");
   var hgErr = document.getElementById("hg-error");
   var hgSubmit = document.getElementById("hg-submit");
   var hgCancel = document.getElementById("hg-cancel");
+  var hgLookupOnly = document.getElementById("hg-lookup-only");
 
   function openHgModal(moduleKey, label) {
     hgModule.value = moduleKey || "";
     hgSub.textContent = (label || "Bu modül") +
-      " için e-posta veya cep telefonunuzu girin; sizi hesabınıza yönlendirelim.";
+      " için e-posta veya cep telefonunuz ve şifrenizle tek adımda giriş yapın.";
     hgErr.style.display = "none";
     hgErr.textContent = "";
     hgEmail.value = "";
+    hgPassword.value = "";
     backdrop.hidden = false;
     setTimeout(function () { hgEmail.focus(); }, 0);
   }
@@ -386,11 +428,17 @@
   function closeHgModal() {
     backdrop.hidden = true;
     hgSubmit.disabled = false;
+    if (hgLookupOnly) hgLookupOnly.disabled = false;
   }
 
   function showHgError(msg) {
     hgErr.textContent = msg || "";
     hgErr.style.display = msg ? "block" : "none";
+  }
+
+  function setHgBusy(busy) {
+    hgSubmit.disabled = !!busy;
+    if (hgLookupOnly) hgLookupOnly.disabled = !!busy;
   }
 
   document.querySelectorAll(".btn-hesabima-git").forEach(function (el) {
@@ -411,38 +459,86 @@
     ev.preventDefault();
     showHgError("");
     var identifier = hgEmail.value.trim();
+    var password = hgPassword.value;
     var moduleKey = (hgModule.value || "").trim();
     if (!identifier) {
       showHgError("Geçerli bir e-posta veya cep telefonu girin.");
       return;
     }
-    hgSubmit.disabled = true;
+    if (!password) {
+      showHgError("Şifre gerekli.");
+      return;
+    }
+    setHgBusy(true);
     try {
-      var result = await postLoginLookup(identifier, moduleKey || null);
+      var result = await postLoginComplete(identifier, password, moduleKey || null);
       var data = result.data;
       if (result.status === 429) {
         showHgError(data.mesaj || "Çok fazla deneme, lütfen bekleyin.");
         return;
       }
       if (result.status === 400) {
-        showHgError(data.mesaj || "Geçerli bir e-posta veya cep telefonu girin.");
+        showHgError(data.mesaj || "Geçerli bir e-posta, cep telefonu ve şifre girin.");
         return;
       }
       if (result.status === 403) {
         showHgError(data.mesaj || "Bu işlem yalnızca ana sitede kullanılabilir.");
         return;
       }
-      if (data.found && data.login_url) {
-        window.location.href = data.login_url;
+      if (result.status === 401 || (data && data.ok === false && !data.redirect_url)) {
+        showHgError(data.mesaj || "E-posta / telefon veya şifre hatalı.");
         return;
       }
-      window.location.href = data.signup_url || "/signup";
+      if (data.ok && data.redirect_url) {
+        window.location.href = data.redirect_url;
+        return;
+      }
+      showHgError(data.mesaj || "E-posta / telefon veya şifre hatalı.");
     } catch (e) {
       showHgError("Bağlantı hatası. Lütfen tekrar deneyin.");
     } finally {
-      hgSubmit.disabled = false;
+      setHgBusy(false);
     }
   });
+
+  /* Geriye dönüş: yalnız lookup → kiracı /login (şifre orada) */
+  if (hgLookupOnly) {
+    hgLookupOnly.addEventListener("click", async function () {
+      showHgError("");
+      var identifier = hgEmail.value.trim();
+      var moduleKey = (hgModule.value || "").trim();
+      if (!identifier) {
+        showHgError("Geçerli bir e-posta veya cep telefonu girin.");
+        return;
+      }
+      setHgBusy(true);
+      try {
+        var result = await postLoginLookup(identifier, moduleKey || null);
+        var data = result.data;
+        if (result.status === 429) {
+          showHgError(data.mesaj || "Çok fazla deneme, lütfen bekleyin.");
+          return;
+        }
+        if (result.status === 400) {
+          showHgError(data.mesaj || "Geçerli bir e-posta veya cep telefonu girin.");
+          return;
+        }
+        if (result.status === 403) {
+          showHgError(data.mesaj || "Bu işlem yalnızca ana sitede kullanılabilir.");
+          return;
+        }
+        if (data.found && data.login_url) {
+          window.location.href = data.login_url;
+          return;
+        }
+        window.location.href = data.signup_url || "/signup";
+      } catch (e) {
+        showHgError("Bağlantı hatası. Lütfen tekrar deneyin.");
+      } finally {
+        setHgBusy(false);
+      }
+    });
+  }
 })();
 </script>
 {% endblock %}
