@@ -175,6 +175,16 @@
     color: #fff;
   }
   .hg-actions button:disabled { opacity: 0.55; cursor: not-allowed; }
+  .hg-forgot {
+    margin: 0.75rem 0 0;
+    text-align: center;
+    font-size: 0.82rem;
+  }
+  .hg-forgot a {
+    color: var(--accent);
+    font-weight: 600;
+    text-decoration: underline;
+  }
 
   @media (max-width: 640px) {
     .home-top-compact { max-width: 100%; }
@@ -292,6 +302,9 @@
         <button type="submit" class="hg-submit" id="hg-submit">Hesabıma git</button>
       </div>
     </form>
+    <p class="hg-forgot">
+      <a href="/forgot-password" id="hg-forgot-link">Şifremi unuttum</a>
+    </p>
   </div>
 </div>
 {% endblock %}
@@ -392,6 +405,7 @@
   var hgErr = document.getElementById("hg-error");
   var hgSubmit = document.getElementById("hg-submit");
   var hgCancel = document.getElementById("hg-cancel");
+  var hgForgotLink = document.getElementById("hg-forgot-link");
 
   function openHgModal(moduleKey, label) {
     hgModule.value = moduleKey || "";
@@ -432,6 +446,18 @@
   document.addEventListener("keydown", function (ev) {
     if (ev.key === "Escape" && !backdrop.hidden) closeHgModal();
   });
+
+  if (hgForgotLink) {
+    hgForgotLink.addEventListener("click", function (ev) {
+      ev.preventDefault();
+      var identifier = (hgEmail.value || "").trim();
+      var url = "/forgot-password";
+      if (identifier) {
+        url += "?identifier=" + encodeURIComponent(identifier);
+      }
+      window.location.href = url;
+    });
+  }
 
   hgForm.addEventListener("submit", async function (ev) {
     ev.preventDefault();
