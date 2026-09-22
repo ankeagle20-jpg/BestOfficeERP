@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Basit e-posta gönderimi — randevu onay, iptal, hatırlatma; webhook tetikleme."""
 import json
+import logging
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -8,20 +9,35 @@ from flask import current_app
 
 from credentials_vault import get_credential
 
+logger = logging.getLogger(__name__)
+
+# Render worker timeout (~30s) altinda kal; SMTP takilmasinda istek olmesin.
+SMTP_TIMEOUT_SEC = 15
+
 
 def _mail_credentials():
-    """SMTP kullanıcı/şifre: vault → .env fallback (get_credential zinciri)."""
-    user = (get_credential("mail.username") or "").strip()
-    password = (get_credential("mail.password") or "").strip()
-    return user, password
+    """SMTP kullanıcı/şifre: vault → .env fallback (get_credential zinciri).
+
+    Vault/env hatasında (CredentialsVaultError vb.) boş döner — çağıran False alır.
+    """
+    try:
+        user = (get_credential("mail.username") or "").strip()
+        password = (get_credential("mail.password") or "").strip()
+        return user, password
+    except Exception as e:
+        logger.warning("mail credentials failed: %s", type(e).__name__)
+        return "", ""
 
 
 def send_mail(to_email, subject, body_text, body_html=None):
-    """Tek alıcıya e-posta gönder. mail.username / mail.password (vault veya .env) gerekli."""
-    user, password = _mail_credentials()
-    if not to_email or not (user and password):
-        return False
+    """Tek alıcıya e-posta gönder. mail.username / mail.password (vault veya .env) gerekli.
+
+    Her türlü hata (vault, timeout, SMTP) → False; asla exception fırlatmaz.
+    """
     try:
+        user, password = _mail_credentials()
+        if not to_email or not (user and password):
+            return False
         msg = MIMEMultipart("alternative")
         msg["Subject"] = subject
         default_sender = (current_app.config.get("MAIL_DEFAULT_SENDER") or "").strip()
@@ -30,15 +46,25 @@ def send_mail(to_email, subject, body_text, body_html=None):
         msg.attach(MIMEText(body_text, "plain", "utf-8"))
         if body_html:
             msg.attach(MIMEText(body_html, "html", "utf-8"))
-        with smtplib.SMTP(current_app.config.get("MAIL_SERVER", "smtp.gmail.com"), current_app.config.get("MAIL_PORT", 587)) as s:
+        host = current_app.config.get("MAIL_SERVER", "smtp.gmail.com")
+        port = int(current_app.config.get("MAIL_PORT", 587) or 587)
+        timeout = int(
+            current_app.config.get("MAIL_SMTP_TIMEOUT_SEC", SMTP_TIMEOUT_SEC)
+            or SMTP_TIMEOUT_SEC
+        )
+        with smtplib.SMTP(host, port, timeout=timeout) as s:
             if current_app.config.get("MAIL_USE_TLS"):
                 s.starttls()
             s.login(user, password)
             s.sendmail(msg["From"], to_email, msg.as_string())
         return True
     except Exception as e:
-        if current_app.debug:
-            print("send_mail error:", type(e).__name__)
+        try:
+            if current_app.debug:
+                print("send_mail error:", type(e).__name__)
+        except Exception:
+            pass
+        logger.warning("send_mail failed: %s", type(e).__name__)
         return False
 
 
