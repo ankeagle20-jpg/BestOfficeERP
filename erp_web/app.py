@@ -39,6 +39,7 @@ def _tenant_bind_and_session_lock():
 _LEDGER_ONLY_EXACT_PATHS = frozenset(
     {
         "/login",
+        "/login/handoff",
         "/logout",
         "/forgot-password",
         "/reset-password",

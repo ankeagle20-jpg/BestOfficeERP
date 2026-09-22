@@ -51,6 +51,20 @@ def check_login_lookup_rate(ip: str | None = None) -> tuple[bool, int]:
     )
 
 
+_LOGIN_COMPLETE_LIMIT = 20
+_LOGIN_COMPLETE_WINDOW_SEC = 60.0
+
+
+def check_login_complete_rate(ip: str | None = None) -> tuple[bool, int]:
+    """POST /api/login-complete: dakikada 20 istek / IP (şifre denemeleri)."""
+    addr = ip or client_ip()
+    return _check_limit(
+        f"login_complete:post:{addr}",
+        _LOGIN_COMPLETE_LIMIT,
+        _LOGIN_COMPLETE_WINDOW_SEC,
+    )
+
+
 def reset_login_lookup_rate_limits_for_tests() -> None:
     """Test harness: bellek içi sayaçları sıfırla."""
     with _LOCK:

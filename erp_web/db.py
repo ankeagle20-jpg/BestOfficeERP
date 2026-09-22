@@ -2824,6 +2824,39 @@ def ensure_password_reset_tokens_table():
         print(f"password_reset_tokens tenant ensure: {e}")
 
 
+def ensure_login_handoff_tokens_table():
+    """Apex → kiracı tek kullanımlık giriş handoff jti (public)."""
+
+    def _do():
+        execute(
+            """
+            CREATE TABLE IF NOT EXISTS public.login_handoff_tokens (
+                jti         TEXT PRIMARY KEY,
+                tenant_slug TEXT NOT NULL,
+                user_id     INTEGER NOT NULL,
+                expires_at  TIMESTAMPTZ NOT NULL,
+                used_at     TIMESTAMPTZ,
+                created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+        try:
+            execute(
+                """
+                CREATE INDEX IF NOT EXISTS login_handoff_tokens_expires_at_idx
+                ON public.login_handoff_tokens (expires_at)
+                WHERE used_at IS NULL
+                """
+            )
+        except Exception as e:
+            print(f"login_handoff_tokens index: {e}")
+
+    try:
+        _run_ensure_ddl_once("public.login_handoff_tokens", _do)
+    except Exception as e:
+        print(f"login_handoff_tokens: {e}")
+
+
 def ensure_users_email_verified_at_column():
     """E-posta doğrulama zaman damgası — users.email_verified_at (nullable, public)."""
     execute(

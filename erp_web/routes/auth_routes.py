@@ -1,7 +1,8 @@
 import os
-from flask import Blueprint, render_template, request, redirect, url_for, flash
-from flask_login import login_required, logout_user, current_user
-from auth import giris_yap, sifre_degistir, generate_security_stamp
+from flask import Blueprint, render_template, request, redirect, url_for, flash, abort
+from flask_login import login_required, logout_user, current_user, login_user
+from auth import User, giris_yap, sifre_degistir, generate_security_stamp
+from login_handoff import consume_login_handoff_token
 from login_lockout import LoginLockedOut
 from db import fetch_one, execute
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -91,6 +92,88 @@ def login():
             flash("E-posta / telefon veya şifre hatalı!", "danger")
     
     return render_template("login.html")
+
+
+@bp.route("/login/handoff", methods=["GET", "POST"])
+def login_handoff():
+    """Kiracı host: imzalı tek kullanımlık handoff bileti → login_user.
+
+    Marketing/apex host'ta 404. Token'da şifre yok.
+    """
+    from tenant_identity import (
+        is_payafin_marketing_host,
+        resolve_tenant_slug,
+        stamp_session_tenant_slug,
+    )
+
+    host = request.host or request.headers.get("Host")
+    if is_payafin_marketing_host(host):
+        abort(404)
+
+    slug = resolve_tenant_slug()
+    if not slug:
+        abort(404)
+
+    raw = (
+        request.args.get("token")
+        or request.form.get("token")
+        or ""
+    ).strip()
+    if not raw:
+        flash("Giriş bağlantısı geçersiz veya süresi dolmuş.", "danger")
+        return redirect(url_for("auth.login"))
+
+    consumed = consume_login_handoff_token(raw, expected_slug=slug)
+    if not consumed:
+        flash("Giriş bağlantısı geçersiz veya süresi dolmuş.", "danger")
+        return redirect(url_for("auth.login"))
+
+    user_id = int(consumed["user_id"])
+    token_stamp = str(consumed.get("security_stamp") or "")
+    row = fetch_one(
+        """
+        SELECT id, username, password_hash, full_name, role, is_active, security_stamp
+        FROM users
+        WHERE id = %s
+        LIMIT 1
+        """,
+        (user_id,),
+    )
+    if not row or not row.get("is_active"):
+        flash("Giriş bağlantısı geçersiz veya süresi dolmuş.", "danger")
+        return redirect(url_for("auth.login"))
+
+    db_stamp = str(row.get("security_stamp") or "")
+    if token_stamp != db_stamp:
+        flash("Giriş bağlantısı geçersiz veya süresi dolmuş.", "danger")
+        return redirect(url_for("auth.login"))
+
+    user = User(
+        id=row["id"],
+        username=row["username"],
+        full_name=row["full_name"],
+        role=row["role"],
+        aktif_mi=row["is_active"],
+        security_stamp=row.get("security_stamp"),
+    )
+    login_user(user, remember=True)
+    try:
+        stamp_session_tenant_slug()
+    except Exception:
+        pass
+
+    flash(f"Hoş geldiniz, {user.full_name}!", "success")
+    next_url = str(consumed.get("next") or "").strip()
+    safe_next = _login_safe_next_url(next_url)
+
+    if _login_redirect_is_ledger_only():
+        if safe_next and _login_next_allowed_for_ledger_only(safe_next):
+            return redirect(safe_next)
+        return redirect("/ledger/")
+
+    if safe_next:
+        return redirect(safe_next)
+    return redirect(url_for("index"))
 
 
 def _login_safe_next_url(next_url: str) -> str | None:

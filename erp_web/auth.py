@@ -209,6 +209,126 @@ def _resolve_login_identifier(raw: str) -> tuple[str, str]:
     return "username", s
 
 
+def _fetch_login_user_row(mode: str, ident: str, *, schema: str | None = None) -> dict | None:
+    """users satırı — schema=None → search_path; aksi halde {}.users nitelikli."""
+    if schema:
+        from psycopg2 import sql as psql
+        from db import db, ensure_users_phone_in_schema
+
+        sch = str(schema).strip()
+        if mode == "phone":
+            try:
+                ensure_users_phone_in_schema(sch)
+            except Exception:
+                pass
+            sql = """
+                SELECT id, username, password_hash, full_name, role, is_active, security_stamp
+                FROM {}.users
+                WHERE phone = %s
+                LIMIT 1
+                """
+        elif mode == "email":
+            sql = """
+                SELECT id, username, password_hash, full_name, role, is_active, security_stamp
+                FROM {}.users
+                WHERE LOWER(username) = %s
+                LIMIT 1
+                """
+        else:
+            sql = """
+                SELECT id, username, password_hash, full_name, role, is_active, security_stamp
+                FROM {}.users
+                WHERE username = %s
+                LIMIT 1
+                """
+        with db() as conn:
+            cur = conn.cursor()
+            cur.execute(psql.SQL(sql).format(psql.Identifier(sch)), (ident,))
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+    if mode == "phone":
+        try:
+            from db import ensure_users_phone_in_schema, _tenant_schema_for_request
+
+            ts = _tenant_schema_for_request() or "public"
+            ensure_users_phone_in_schema(ts)
+        except Exception:
+            pass
+        return fetch_one(
+            """
+            SELECT id, username, password_hash, full_name, role, is_active, security_stamp
+            FROM users
+            WHERE phone = %s
+            LIMIT 1
+            """,
+            (ident,),
+        )
+    if mode == "email":
+        return fetch_one(
+            """
+            SELECT id, username, password_hash, full_name, role, is_active, security_stamp
+            FROM users
+            WHERE LOWER(username) = %s
+            LIMIT 1
+            """,
+            (ident,),
+        )
+    return fetch_one(
+        """
+        SELECT id, username, password_hash, full_name, role, is_active, security_stamp
+        FROM users WHERE username=%s
+        """,
+        (ident,),
+    )
+
+
+def dogrula_giris_kimlik(
+    username,
+    password,
+    *,
+    schema: str | None = None,
+) -> dict | None:
+    """E-posta/telefon/kullanıcı adı + şifre doğrula; login_user ÇAĞIRMAZ.
+
+    Args:
+        username: E-posta / telefon / kullanıcı adı
+        password: Şifre
+        schema: Verilirse {}.users (apex → kiracı doğrulama); None → search_path
+
+    Returns:
+        Başarılıysa users satırı (dict); aksi halde None
+
+    Raises:
+        LoginLockedOut: Çok fazla başarısız deneme sonrası geçici kilit
+    """
+    tenant_schema = (
+        str(schema).strip()
+        if schema
+        else getattr(g, "tenant_schema", None)
+    )
+    mode, ident = _resolve_login_identifier(username)
+    username_key = ident.lower() if mode != "phone" else ident
+    check_login_lockout(tenant_schema, username_key)
+
+    row = _fetch_login_user_row(mode, ident, schema=schema)
+    if not row:
+        record_login_failure(tenant_schema, username_key)
+        return None
+    if not row.get("is_active"):
+        record_login_failure(tenant_schema, username_key)
+        return None
+    if not check_password_hash(row["password_hash"], password):
+        record_login_failure(tenant_schema, username_key)
+        return None
+
+    record_login_success(tenant_schema, username_key)
+    canon = str(row.get("username") or ident).strip().lower()
+    if canon and canon != username_key:
+        record_login_success(tenant_schema, canon)
+    return dict(row)
+
+
 def giris_yap(username, password):
     """
     E-posta, cep telefonu veya kullanıcı adı + şifre ile giriş.
@@ -223,69 +343,10 @@ def giris_yap(username, password):
     Raises:
         LoginLockedOut: Çok fazla başarısız deneme sonrası geçici kilit
     """
-    tenant_schema = getattr(g, "tenant_schema", None)
-    mode, ident = _resolve_login_identifier(username)
-    # Lockout anahtarı: e-posta/username lower; telefon E.164 (zaten normalize)
-    username_key = ident.lower() if mode != "phone" else ident
     try:
-        check_login_lockout(tenant_schema, username_key)
-
-        if mode == "phone":
-            try:
-                from db import ensure_users_phone_in_schema, _tenant_schema_for_request
-
-                ts = _tenant_schema_for_request() or "public"
-                ensure_users_phone_in_schema(ts)
-            except Exception:
-                pass
-            row = fetch_one(
-                """
-                SELECT id, username, password_hash, full_name, role, is_active, security_stamp
-                FROM users
-                WHERE phone = %s
-                LIMIT 1
-                """,
-                (ident,),
-            )
-        elif mode == "email":
-            row = fetch_one(
-                """
-                SELECT id, username, password_hash, full_name, role, is_active, security_stamp
-                FROM users
-                WHERE LOWER(username) = %s
-                LIMIT 1
-                """,
-                (ident,),
-            )
-        else:
-            row = fetch_one(
-                """
-                SELECT id, username, password_hash, full_name, role, is_active, security_stamp
-                FROM users WHERE username=%s
-                """,
-                (ident,),
-            )
-
-        # Kullanıcı bulunamadı
+        row = dogrula_giris_kimlik(username, password)
         if not row:
-            record_login_failure(tenant_schema, username_key)
             return None
-
-        # Kullanıcı aktif değil
-        if not row["is_active"]:
-            record_login_failure(tenant_schema, username_key)
-            return None
-
-        # Şifre yanlış
-        if not check_password_hash(row["password_hash"], password):
-            record_login_failure(tenant_schema, username_key)
-            return None
-
-        # Giriş başarılı — lockout kaydı gerçek username ile de temizlensin
-        record_login_success(tenant_schema, username_key)
-        canon = str(row.get("username") or ident).strip().lower()
-        if canon and canon != username_key:
-            record_login_success(tenant_schema, canon)
         user = User(
             id=row["id"],
             username=row["username"],

@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Payafin ana sayfa — e-posta/telefon → kiracı yönlendirme API (apex-only, auth yok)."""
+"""Payafin ana sayfa — e-posta/telefon → kiracı yönlendirme API (apex-only, auth yok).
+
+Aşama 0-1: POST /api/login-complete — identifier+şifre → handoff bileti (UI yok).
+"""
 from __future__ import annotations
 
 import logging
@@ -8,10 +11,20 @@ from urllib.parse import urlencode
 
 from flask import Blueprint, jsonify, request
 
+from auth import dogrula_giris_kimlik
 from db import ensure_tenant_user_lookup_phone_column, fetch_one
-from login_lookup_rate_limit import check_login_lookup_rate
+from login_handoff import mint_login_handoff_token
+from login_lockout import LoginLockedOut
+from login_lookup_rate_limit import (
+    check_login_complete_rate,
+    check_login_lookup_rate,
+)
 from signup_validation import normalize_phone_e164, validate_email
-from tenant_identity import _tenant_apex_domains, resolve_tenant_slug
+from tenant_identity import (
+    _tenant_apex_domains,
+    resolve_tenant_slug,
+    schema_name_for_slug,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +33,8 @@ bp = Blueprint("login_lookup", __name__)
 MSG_NOT_FOUND = "Bu bilgilerle kayıtlı bir hesap bulunamadı."
 MSG_INVALID = "Geçerli bir e-posta veya cep telefonu girin."
 MSG_TENANT_HOST = "Bu endpoint yalnızca ana (public) host üzerinden kullanılabilir."
+MSG_LOGIN_FAIL = "E-posta / telefon veya şifre hatalı."
+MSG_PASSWORD_REQUIRED = "Şifre gerekli."
 
 # L0: istemci yalnız module key gönderir; kanonik next sunucuda üretilir (ham path yok).
 # core / bilinmeyen / boş → next yok (eski /login davranışı).
@@ -74,6 +89,11 @@ def _login_url(slug: str, next_path: str | None = None) -> str:
     return f"{base}?{urlencode({'next': next_path})}"
 
 
+def _handoff_url(slug: str, token: str) -> str:
+    apex = (_tenant_apex_domains() or ("payafin.com",))[0]
+    return f"https://{slug}.{apex}/login/handoff?{urlencode({'token': token})}"
+
+
 def _parse_lookup_identifier(data: dict) -> tuple[str | None, str | None]:
     """Döner: (mode, value) — mode 'email'|'phone'; geçersizse (None, None)."""
     raw = str(
@@ -98,25 +118,7 @@ def _parse_lookup_identifier(data: dict) -> tuple[str | None, str | None]:
     return "phone", e164
 
 
-@bp.route("/api/login-lookup", methods=["POST"])
-@marketing_public_only
-def api_login_lookup():
-    allowed, retry_after = check_login_lookup_rate()
-    if not allowed:
-        return (
-            jsonify({"ok": False, "mesaj": "Çok fazla deneme, lütfen bekleyin."}),
-            429,
-            {"Retry-After": str(retry_after)},
-        )
-
-    data = request.get_json(silent=True) or {}
-    mode, ident = _parse_lookup_identifier(data)
-    if not mode or not ident:
-        return jsonify({"ok": False, "mesaj": MSG_INVALID}), 400
-
-    # Ham "next" / path alanlarını bilerek yok say — yalnız whitelist module
-    next_path = _canonical_next_for_module(data.get("module"))
-
+def _lookup_active_tenant_slug(mode: str, ident: str) -> str | None:
     if mode == "phone":
         ensure_tenant_user_lookup_phone_column()
         row = fetch_one(
@@ -142,9 +144,32 @@ def api_login_lookup():
             """,
             (ident,),
         )
+    if not row:
+        return None
+    return str(row.get("tenant_slug") or "").strip() or None
 
-    if row:
-        slug = row["tenant_slug"]
+
+@bp.route("/api/login-lookup", methods=["POST"])
+@marketing_public_only
+def api_login_lookup():
+    allowed, retry_after = check_login_lookup_rate()
+    if not allowed:
+        return (
+            jsonify({"ok": False, "mesaj": "Çok fazla deneme, lütfen bekleyin."}),
+            429,
+            {"Retry-After": str(retry_after)},
+        )
+
+    data = request.get_json(silent=True) or {}
+    mode, ident = _parse_lookup_identifier(data)
+    if not mode or not ident:
+        return jsonify({"ok": False, "mesaj": MSG_INVALID}), 400
+
+    # Ham "next" / path alanlarını bilerek yok say — yalnız whitelist module
+    next_path = _canonical_next_for_module(data.get("module"))
+
+    slug = _lookup_active_tenant_slug(mode, ident)
+    if slug:
         payload = {
             "ok": True,
             "found": True,
@@ -161,5 +186,75 @@ def api_login_lookup():
             "found": False,
             "mesaj": MSG_NOT_FOUND,
             "signup_url": "/signup",
+        }
+    )
+
+
+@bp.route("/api/login-complete", methods=["POST"])
+@marketing_public_only
+def api_login_complete():
+    """Apex: identifier+şifre → kiracı şemasında doğrula → handoff redirect_url.
+
+    login_user çağrılmaz; oturum yalnız kiracı /login/handoff'ta açılır.
+    """
+    allowed, retry_after = check_login_complete_rate()
+    if not allowed:
+        return (
+            jsonify({"ok": False, "mesaj": "Çok fazla deneme, lütfen bekleyin."}),
+            429,
+            {"Retry-After": str(retry_after)},
+        )
+
+    data = request.get_json(silent=True) or {}
+    mode, ident = _parse_lookup_identifier(data)
+    password = data.get("password")
+    if password is None:
+        password = ""
+    password = str(password)
+
+    if not mode or not ident:
+        return jsonify({"ok": False, "mesaj": MSG_INVALID}), 400
+    if not password:
+        return jsonify({"ok": False, "mesaj": MSG_PASSWORD_REQUIRED}), 400
+
+    next_path = _canonical_next_for_module(data.get("module"))
+
+    slug = _lookup_active_tenant_slug(mode, ident)
+    if not slug:
+        return jsonify({"ok": False, "mesaj": MSG_LOGIN_FAIL}), 401
+
+    schema = schema_name_for_slug(slug)
+    if not schema:
+        logger.error("login-complete bad schema slug=%s", slug)
+        return jsonify({"ok": False, "mesaj": MSG_LOGIN_FAIL}), 401
+
+    try:
+        row = dogrula_giris_kimlik(ident, password, schema=schema)
+    except LoginLockedOut as exc:
+        return (
+            jsonify({"ok": False, "mesaj": exc.message}),
+            429,
+            {"Retry-After": str(getattr(exc, "retry_after", None) or 3600)},
+        )
+
+    if not row:
+        return jsonify({"ok": False, "mesaj": MSG_LOGIN_FAIL}), 401
+
+    try:
+        token = mint_login_handoff_token(
+            user_id=int(row["id"]),
+            tenant_slug=slug,
+            security_stamp=row.get("security_stamp"),
+            next_path=next_path,
+        )
+    except Exception:
+        logger.exception("login-complete mint failed slug=%s", slug)
+        return jsonify({"ok": False, "mesaj": MSG_LOGIN_FAIL}), 500
+
+    return jsonify(
+        {
+            "ok": True,
+            "redirect_url": _handoff_url(slug, token),
+            "tenant_slug": slug,
         }
     )
