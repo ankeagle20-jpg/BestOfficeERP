@@ -77,7 +77,7 @@ Payafin Cari detay ekranında fatura oluşturmanın **iki ayrı** yolu vardır. 
 
 ### Üst — atomik kısayol (`quick-create`)
 
-1. **Giden:** JSON `direction=give` → tek DB transaction içinde `ledger_transactions(give)` + `ledger_invoices` (`source_transaction_id` = yeni tx) + satır. Sonra mevcut Giden paneli (Önizle / Onayla / GİB taslak / Durum / HTML).
+1. **Giden:** JSON `direction=give` → tek DB transaction içinde `ledger_transactions(give)` + `ledger_invoices` (`source_transaction_id` = yeni tx) + satır(lar). Gövde: ya eski tek alan (`amount` = KDV dahil + `tax_rate` + `description`) ya da çok satır `lines[]` (`description`, `quantity`, `unit_price` = KDV hariç, `tax_rate`); `lines` doluysa eski tutar alanları yok sayılır; tx tutarı = `grand_total`. Sonra mevcut Giden paneli (Önizle / Onayla / GİB taslak / Durum / HTML).
 2. **Gelen:** multipart `direction=receive` + görsel → tek DB transaction içinde `ledger_transactions(receive)` → R2 yükleme → `ledger_incoming_invoices` (`source_transaction_id` = yeni tx). Hata olursa DB rollback; R2’ye yazılmışsa best-effort silme.
 
 Form notu: *«Hareket ve fatura birlikte oluşur; bakiye güncellenir.»*
@@ -98,7 +98,7 @@ Aynı hareket için ikinci aktif giden veya gelen fatura **oluşturulamaz** (kı
 | Method | Path | Not |
 |---|---|---|
 | CRUD | `/ledger/api/parties` | `tax_id`, `tax_office`, `address`, `tax_id_kind` |
-| POST | `/ledger/api/invoices/quick-create` | Atomik: give+JSON → tx+`ledger_invoices`; receive+multipart → tx+R2+`ledger_incoming_invoices` |
+| POST | `/ledger/api/invoices/quick-create` | Atomik: give+JSON (`amount` veya `lines[]`) → tx+`ledger_invoices`; receive+multipart → tx+R2+`ledger_incoming_invoices` |
 | POST | `/ledger/api/invoices/from-transaction` | Mevcut give+TRY → draft (satır yolu) |
 | GET/PUT | `/ledger/api/invoices/<id>` | local CRUD |
 | POST | `/ledger/api/invoices/<id>/confirm` | → ready + confirmed_at |

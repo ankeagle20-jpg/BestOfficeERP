@@ -395,25 +395,9 @@ def register_ledger_invoice_routes(bp, *, helpers: dict) -> None:
         if party.get("is_active") is False:
             return _json_err("Pasif cari için fatura oluşturulamaz.")
 
-        try:
-            amount = _dec(data.get("amount"))
-        except (InvalidOperation, TypeError, ValueError):
-            return _json_err("Geçersiz tutar.")
-        if amount <= 0:
-            return _json_err("Tutar 0'dan büyük olmalı.")
-
         currency = str(data.get("currency") or "TRY").strip().upper()
         if currency != "TRY":
             return _json_err("v1 yalnızca TRY destekler.")
-
-        tax_rate = 20
-        try:
-            if data.get("tax_rate") is not None:
-                tax_rate = int(data.get("tax_rate"))
-        except (TypeError, ValueError):
-            return _json_err("tax_rate geçersiz.")
-        if tax_rate < 0 or tax_rate > 100:
-            return _json_err("tax_rate 0–100 olmalı.")
 
         occurred_at = _parse_occurred_at(data.get("occurred_at"))
         if occurred_at is None:
@@ -431,23 +415,80 @@ def register_ledger_invoice_routes(bp, *, helpers: dict) -> None:
                 return _json_err("invoice_date geçersiz (YYYY-MM-DD).")
 
         note = str(data.get("note") or "").strip() or None
-        desc = str(
-            data.get("description") or note or "Hizmet bedeli"
-        ).strip() or "Hizmet bedeli"
 
         from ledger_gib_adapter import compute_line_totals
 
-        rate = Decimal(tax_rate)
-        if rate > 0:
-            net = (amount / (Decimal("1") + rate / Decimal("100"))).quantize(
-                Decimal("0.01")
-            )
+        # --- Çok satır (lines[]) veya eski tek tutar (KDV dahil) ---
+        raw_lines = data.get("lines")
+        use_multi = isinstance(raw_lines, list) and len(raw_lines) > 0
+        line_payload: list[tuple] = []
+        subtotal = Decimal("0")
+        tax_total = Decimal("0")
+        grand_total = Decimal("0")
+
+        if use_multi:
+            if len(raw_lines) > 50:
+                return _json_err("En fazla 50 satır.")
+            for i, raw in enumerate(raw_lines, start=1):
+                raw = raw or {}
+                desc = str(raw.get("description") or "").strip()
+                if not desc:
+                    return _json_err(f"Satır {i}: açıklama gerekli.")
+                try:
+                    qty = _dec(raw.get("quantity") if raw.get("quantity") is not None else 1)
+                    up = _dec(raw.get("unit_price") if raw.get("unit_price") is not None else 0)
+                    tr = int(raw.get("tax_rate") if raw.get("tax_rate") is not None else 0)
+                except (InvalidOperation, TypeError, ValueError):
+                    return _json_err(f"Satır {i}: tutar geçersiz.")
+                if qty <= 0:
+                    return _json_err(f"Satır {i}: miktar > 0 olmalı.")
+                if up < 0:
+                    return _json_err(f"Satır {i}: birim fiyat negatif olamaz.")
+                if tr < 0 or tr > 100:
+                    return _json_err(f"Satır {i}: KDV 0–100.")
+                net_l, tax_l, gross_l = compute_line_totals(qty, up, tr)
+                line_payload.append((desc, qty, up, tr, gross_l))
+                subtotal += net_l
+                tax_total += tax_l
+                grand_total += gross_l
+            if grand_total <= 0:
+                return _json_err("Fatura toplamı 0'dan büyük olmalı.")
         else:
-            net = amount.quantize(Decimal("0.01"))
-        net_l, tax_l, gross_l = compute_line_totals(1, net, tax_rate)
+            try:
+                amount = _dec(data.get("amount"))
+            except (InvalidOperation, TypeError, ValueError):
+                return _json_err("Geçersiz tutar.")
+            if amount <= 0:
+                return _json_err("Tutar 0'dan büyük olmalı.")
+
+            tax_rate = 20
+            try:
+                if data.get("tax_rate") is not None:
+                    tax_rate = int(data.get("tax_rate"))
+            except (TypeError, ValueError):
+                return _json_err("tax_rate geçersiz.")
+            if tax_rate < 0 or tax_rate > 100:
+                return _json_err("tax_rate 0–100 olmalı.")
+
+            desc = str(
+                data.get("description") or note or "Hizmet bedeli"
+            ).strip() or "Hizmet bedeli"
+
+            rate = Decimal(tax_rate)
+            if rate > 0:
+                net = (amount / (Decimal("1") + rate / Decimal("100"))).quantize(
+                    Decimal("0.01")
+                )
+            else:
+                net = amount.quantize(Decimal("0.01"))
+            net_l, tax_l, gross_l = compute_line_totals(1, net, tax_rate)
+            line_payload.append((desc, Decimal("1"), net, tax_rate, gross_l))
+            subtotal = net_l
+            tax_total = tax_l
+            grand_total = gross_l
 
         uid = _quick_create_uid()
-        amount_s = str(amount.quantize(Decimal("0.01")))
+        amount_s = str(grand_total.quantize(Decimal("0.01")))
         _TX_RET = (
             "id, party_id, direction, amount, currency, occurred_at, note, "
             "created_by, is_void, metadata, created_at"
@@ -490,9 +531,9 @@ def register_ledger_invoice_routes(bp, *, helpers: dict) -> None:
                         party_id,
                         tx_id,
                         inv_date,
-                        net_l,
-                        tax_l,
-                        gross_l,
+                        subtotal,
+                        tax_total,
+                        grand_total,
                         note,
                         uid,
                     ),
@@ -503,16 +544,19 @@ def register_ledger_invoice_routes(bp, *, helpers: dict) -> None:
                 inv = dict(inv_row)
                 inv_id = int(inv["id"])
 
-                cur.execute(
-                    """
-                    INSERT INTO ledger_invoice_lines (
-                        invoice_id, line_no, description, quantity, unit_price,
-                        tax_rate, line_total
+                for line_no, (desc, qty, up, tr, gross_l) in enumerate(
+                    line_payload, start=1
+                ):
+                    cur.execute(
+                        """
+                        INSERT INTO ledger_invoice_lines (
+                            invoice_id, line_no, description, quantity, unit_price,
+                            tax_rate, line_total
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (inv_id, line_no, desc, qty, up, tr, gross_l),
                     )
-                    VALUES (%s, 1, %s, 1, %s, %s, %s)
-                    """,
-                    (inv_id, desc, net, tax_rate, gross_l),
-                )
 
                 cur.execute(
                     f"""

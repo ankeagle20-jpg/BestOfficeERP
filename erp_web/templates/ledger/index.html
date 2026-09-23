@@ -293,6 +293,35 @@
   .pc-order-ocr-preview th { color: var(--pc-muted); font-weight: 600; }
   .pc-order-ocr-preview td.num { text-align: right; font-variant-numeric: tabular-nums; }
   .pc-order-ocr-preview .pc-actions { margin: 0.35rem 0 0; }
+  .pc-qc-lines-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+  .pc-qc-lines-table th,
+  .pc-qc-lines-table td {
+    border-bottom: 1px solid #e2e8f0; padding: 0.3rem 0.25rem; text-align: left;
+    vertical-align: middle;
+  }
+  .pc-qc-lines-table th { color: var(--pc-muted); font-weight: 600; }
+  .pc-qc-lines-table td.num,
+  .pc-qc-lines-table th.num { text-align: right; }
+  .pc-qc-lines-table input[type="number"],
+  .pc-qc-lines-table input[type="text"],
+  .pc-qc-lines-table select {
+    width: 100%; max-width: 7.5rem; box-sizing: border-box;
+    padding: 0.25rem 0.3rem; font-size: 0.8rem;
+    border: 1px solid var(--pc-line, #cbd5e1); border-radius: 6px;
+  }
+  .pc-qc-lines-table input.pc-qc-desc { max-width: none; min-width: 6rem; }
+  .pc-qc-lines-table .pc-qc-line-gross {
+    font-variant-numeric: tabular-nums; white-space: nowrap;
+  }
+  .pc-qc-totals {
+    display: flex; flex-wrap: wrap; gap: 0.75rem 1.25rem;
+    margin: 0.5rem 0 0.75rem; padding: 0.55rem 0.65rem;
+    border: 1px solid var(--pc-line, #cbd5e1); border-radius: 10px;
+    background: #f8fafc;
+  }
+  .pc-qc-tot { display: flex; flex-direction: column; gap: 0.15rem; min-width: 5.5rem; }
+  .pc-qc-tot span { font-size: 0.72rem; color: var(--pc-muted); }
+  .pc-qc-tot strong { font-size: 0.95rem; font-variant-numeric: tabular-nums; color: var(--pc-ink); }
 
 
   body.pc-select-mode-on .pc-wrap { padding-bottom: 5.25rem; }
@@ -985,18 +1014,33 @@
           <button type="button" class="pc-btn pc-btn-ghost" id="pc-qc-giden-ocr-dismiss">Vazgeç</button>
         </div>
       </div>
-      <div class="pc-field"><label for="pc-qc-giden-amount">Tutar (KDV dahil)</label><input id="pc-qc-giden-amount" type="number" min="0.01" step="0.01" inputmode="decimal"></div>
       <div class="pc-field"><label for="pc-qc-giden-date">Tarih</label><input type="date" id="pc-qc-giden-date"></div>
-      <div class="pc-field"><label for="pc-qc-giden-desc">Açıklama</label><input id="pc-qc-giden-desc" maxlength="200" placeholder="Hizmet bedeli"></div>
-      <div class="pc-field"><label for="pc-qc-giden-tax">KDV %</label>
-        <select id="pc-qc-giden-tax">
-          <option value="20">20</option>
-          <option value="10">10</option>
-          <option value="1">1</option>
-          <option value="0">0</option>
-        </select>
-      </div>
       <div class="pc-field"><label for="pc-qc-giden-note">Not</label><input id="pc-qc-giden-note" maxlength="300"></div>
+      <div class="pc-qc-lines-wrap">
+        <div class="pc-import-table-wrap" style="max-height:16rem;overflow:auto;">
+          <table class="pc-qc-lines-table" id="pc-qc-giden-lines-table">
+            <thead>
+              <tr>
+                <th>Açıklama</th>
+                <th class="num">Miktar</th>
+                <th class="num">Birim (KDV hariç)</th>
+                <th class="num">KDV %</th>
+                <th class="num">Satır</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="pc-qc-giden-lines-tbody"></tbody>
+          </table>
+        </div>
+        <div class="pc-actions" style="margin:0.35rem 0 0.5rem;">
+          <button type="button" class="pc-btn pc-btn-ghost" id="pc-qc-giden-line-add">+ Satır ekle</button>
+        </div>
+      </div>
+      <div class="pc-qc-totals" id="pc-qc-giden-totals" aria-live="polite">
+        <div class="pc-qc-tot"><span>Tutar (KDV hariç)</span><strong id="pc-qc-giden-sum-net">0,00</strong></div>
+        <div class="pc-qc-tot"><span>KDV</span><strong id="pc-qc-giden-sum-tax">0,00</strong></div>
+        <div class="pc-qc-tot"><span>KDV Dahil</span><strong id="pc-qc-giden-sum-gross">0,00</strong></div>
+      </div>
       <div id="pc-qc-giden-err" class="pc-err" hidden></div>
       <div class="pc-actions">
         <button type="button" class="pc-btn pc-btn-primary" id="pc-qc-giden-save">Kaydet</button>
@@ -3312,31 +3356,181 @@
     box.classList.add("is-on");
   }
 
+  function qcRound2(n) {
+    var x = Number(n);
+    if (!isFinite(x)) return 0;
+    return Math.round((x + Number.EPSILON) * 100) / 100;
+  }
+
+  /** compute_line_totals ile aynı: unit_price = KDV hariç */
+  function qcLineTotals(qty, unitPrice, taxRate) {
+    var q = Number(qty);
+    var up = Number(unitPrice);
+    var rate = parseInt(taxRate, 10);
+    if (!isFinite(q)) q = 0;
+    if (!isFinite(up)) up = 0;
+    if (!isFinite(rate)) rate = 0;
+    var net = qcRound2(q * up);
+    var tax = qcRound2(net * rate / 100);
+    var gross = qcRound2(net + tax);
+    return { net: net, tax: tax, gross: gross };
+  }
+
+  function qcFmtTry(n) {
+    try {
+      return Number(n).toLocaleString("tr-TR", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      });
+    } catch (e) {
+      return String(qcRound2(n));
+    }
+  }
+
+  function qcGidenTaxSelectHtml(selected) {
+    var rates = [20, 10, 1, 0];
+    var sel = parseInt(selected, 10);
+    if (!isFinite(sel)) sel = 20;
+    var html = "";
+    var found = false;
+    for (var i = 0; i < rates.length; i++) {
+      var r = rates[i];
+      var isSel = r === sel;
+      if (isSel) found = true;
+      html += '<option value="' + r + '"' + (isSel ? " selected" : "") + ">" + r + "</option>";
+    }
+    if (!found && sel >= 0 && sel <= 100) {
+      html += '<option value="' + sel + '" selected>' + sel + "</option>";
+    }
+    return html;
+  }
+
+  function readQcGidenLinesFromDom() {
+    var rows = document.querySelectorAll("#pc-qc-giden-lines-tbody tr");
+    var out = [];
+    for (var i = 0; i < rows.length; i++) {
+      var tr = rows[i];
+      var desc = (tr.querySelector(".pc-qc-desc") || {}).value || "";
+      var qty = (tr.querySelector(".pc-qc-qty") || {}).value;
+      var up = (tr.querySelector(".pc-qc-up") || {}).value;
+      var tax = (tr.querySelector(".pc-qc-tax") || {}).value;
+      out.push({
+        description: String(desc).trim(),
+        quantity: qty,
+        unit_price: up,
+        tax_rate: tax
+      });
+    }
+    return out;
+  }
+
+  function recalcQcGiden() {
+    var rows = document.querySelectorAll("#pc-qc-giden-lines-tbody tr");
+    var sumNet = 0;
+    var sumTax = 0;
+    var sumGross = 0;
+    for (var i = 0; i < rows.length; i++) {
+      var tr = rows[i];
+      var qty = (tr.querySelector(".pc-qc-qty") || {}).value;
+      var up = (tr.querySelector(".pc-qc-up") || {}).value;
+      var tax = (tr.querySelector(".pc-qc-tax") || {}).value;
+      var t = qcLineTotals(qty, up, tax);
+      sumNet += t.net;
+      sumTax += t.tax;
+      sumGross += t.gross;
+      var gEl = tr.querySelector(".pc-qc-line-gross");
+      if (gEl) gEl.textContent = qcFmtTry(t.gross);
+    }
+    sumNet = qcRound2(sumNet);
+    sumTax = qcRound2(sumTax);
+    sumGross = qcRound2(sumGross);
+    var nEl = document.getElementById("pc-qc-giden-sum-net");
+    var tEl = document.getElementById("pc-qc-giden-sum-tax");
+    var gEl2 = document.getElementById("pc-qc-giden-sum-gross");
+    if (nEl) nEl.textContent = qcFmtTry(sumNet);
+    if (tEl) tEl.textContent = qcFmtTry(sumTax);
+    if (gEl2) gEl2.textContent = qcFmtTry(sumGross);
+    return { net: sumNet, tax: sumTax, gross: sumGross };
+  }
+
+  function addQcGidenLineRow(line) {
+    line = line || {};
+    var tb = document.getElementById("pc-qc-giden-lines-tbody");
+    if (!tb) return;
+    var tr = document.createElement("tr");
+    var desc = line.description != null ? String(line.description) : "";
+    var qty = line.quantity != null ? String(line.quantity) : "1";
+    var up = line.unit_price != null ? String(line.unit_price) : "";
+    var tax = line.tax_rate != null ? line.tax_rate : 20;
+    tr.innerHTML =
+      '<td><input type="text" class="pc-qc-desc" maxlength="200" placeholder="Hizmet / ürün"></td>' +
+      '<td class="num"><input type="number" class="pc-qc-qty" min="0.0001" step="any" inputmode="decimal"></td>' +
+      '<td class="num"><input type="number" class="pc-qc-up" min="0" step="0.01" inputmode="decimal"></td>' +
+      '<td class="num"><select class="pc-qc-tax">' + qcGidenTaxSelectHtml(tax) + "</select></td>" +
+      '<td class="num"><span class="pc-qc-line-gross">0,00</span></td>' +
+      '<td><button type="button" class="pc-btn pc-btn-ghost pc-qc-line-del" title="Satır sil">Sil</button></td>';
+    tb.appendChild(tr);
+    tr.querySelector(".pc-qc-desc").value = desc;
+    tr.querySelector(".pc-qc-qty").value = qty;
+    tr.querySelector(".pc-qc-up").value = up;
+    recalcQcGiden();
+  }
+
+  function setQcGidenLines(lines) {
+    var tb = document.getElementById("pc-qc-giden-lines-tbody");
+    if (!tb) return;
+    tb.innerHTML = "";
+    if (!lines || !lines.length) {
+      addQcGidenLineRow({ description: "", quantity: 1, unit_price: "", tax_rate: 20 });
+    } else {
+      for (var i = 0; i < lines.length; i++) {
+        addQcGidenLineRow(lines[i]);
+      }
+    }
+    recalcQcGiden();
+  }
+
   function applyQcGidenOcrToForm() {
     var j = state.qcGidenOcr;
     if (!j) return;
+    var oneri = j.oneri || {};
     var form = j.form || {};
-    if (form.amount_kdv_dahil != null && form.amount_kdv_dahil !== "") {
-      document.getElementById("pc-qc-giden-amount").value = String(form.amount_kdv_dahil);
+    var satirlar = oneri.satirlar || form.satirlar || [];
+    var mapped = [];
+    for (var i = 0; i < satirlar.length; i++) {
+      var s = satirlar[i] || {};
+      mapped.push({
+        description: s.aciklama || "",
+        quantity: s.miktar != null ? s.miktar : 1,
+        unit_price: s.birim_fiyat != null ? s.birim_fiyat : "",
+        tax_rate: s.kdv_orani != null ? s.kdv_orani : 20
+      });
     }
-    if (form.description) {
-      document.getElementById("pc-qc-giden-desc").value = String(form.description).slice(0, 200);
+    if (!mapped.length && form.amount_kdv_dahil != null) {
+      /* collapse yedek: tek satır, birim ≈ net */
+      var tr = parseInt(form.tax_rate, 10);
+      if (!isFinite(tr)) tr = 20;
+      var gross = Number(form.amount_kdv_dahil);
+      var net = tr > 0 ? qcRound2(gross / (1 + tr / 100)) : qcRound2(gross);
+      mapped.push({
+        description: form.description || "Hizmet bedeli",
+        quantity: 1,
+        unit_price: net,
+        tax_rate: tr
+      });
     }
-    if (form.invoice_date) {
-      document.getElementById("pc-qc-giden-date").value = String(form.invoice_date).slice(0, 10);
+    setQcGidenLines(mapped);
+    if (form.invoice_date || oneri.tarih) {
+      document.getElementById("pc-qc-giden-date").value =
+        String(form.invoice_date || oneri.tarih).slice(0, 10);
     }
-    var taxEl = document.getElementById("pc-qc-giden-tax");
-    var tr = parseInt(form.tax_rate, 10);
-    if (isFinite(tr)) {
-      var opt = taxEl.querySelector('option[value="' + tr + '"]');
-      if (opt) taxEl.value = String(tr);
-    }
-    if (form.note) {
-      document.getElementById("pc-qc-giden-note").value = String(form.note).slice(0, 300);
+    if (form.note || oneri.not_ham) {
+      document.getElementById("pc-qc-giden-note").value =
+        String(form.note || oneri.not_ham).slice(0, 300);
     }
     var ban = document.getElementById("pc-qc-giden-ocr-banner");
-    var guven = (j.oneri && j.oneri.guven) || "orta";
-    ban.textContent = "Form alanları AI önerisiyle dolduruldu (güven: " + guven +
+    var guven = oneri.guven || "orta";
+    ban.textContent = "Satırlar AI önerisiyle dolduruldu (güven: " + guven +
       "). Kontrol edip Kaydet’e basın — otomatik kayıt yok.";
     ban.classList.add("is-on");
     ban.classList.toggle("is-low", guven === "dusuk");
@@ -3473,17 +3667,18 @@
   function openQcGidenPanel() {
     if (!state.partyId) return;
     closeDetailSidePanels("pc-qc-giden-panel");
-    document.getElementById("pc-qc-giden-amount").value = "";
     document.getElementById("pc-qc-giden-date").value = todayISO();
-    document.getElementById("pc-qc-giden-desc").value = "";
-    document.getElementById("pc-qc-giden-tax").value = "20";
     document.getElementById("pc-qc-giden-note").value = "";
     var err = document.getElementById("pc-qc-giden-err");
     err.hidden = true;
     err.textContent = "";
     clearQcGidenOcrUi();
+    setQcGidenLines([{ description: "", quantity: 1, unit_price: "", tax_rate: 20 }]);
     document.getElementById("pc-qc-giden-panel").classList.add("open");
-    try { document.getElementById("pc-qc-giden-amount").focus(); } catch (e) {}
+    try {
+      var first = document.querySelector("#pc-qc-giden-lines-tbody .pc-qc-desc");
+      if (first) first.focus();
+    } catch (e) {}
   }
 
   function openQcGelenPanel() {
@@ -3568,6 +3763,30 @@
     clearQcGidenOcrUi();
   });
 
+  document.getElementById("pc-qc-giden-line-add").addEventListener("click", function () {
+    addQcGidenLineRow({ description: "", quantity: 1, unit_price: "", tax_rate: 20 });
+  });
+  document.getElementById("pc-qc-giden-lines-tbody").addEventListener("input", function () {
+    recalcQcGiden();
+  });
+  document.getElementById("pc-qc-giden-lines-tbody").addEventListener("change", function () {
+    recalcQcGiden();
+  });
+  document.getElementById("pc-qc-giden-lines-tbody").addEventListener("click", function (ev) {
+    var btn = ev.target && ev.target.closest ? ev.target.closest(".pc-qc-line-del") : null;
+    if (!btn) return;
+    var tr = btn.closest("tr");
+    var tb = document.getElementById("pc-qc-giden-lines-tbody");
+    if (tr && tb) {
+      if (tb.querySelectorAll("tr").length <= 1) {
+        setQcGidenLines([{ description: "", quantity: 1, unit_price: "", tax_rate: 20 }]);
+      } else {
+        tr.parentNode.removeChild(tr);
+        recalcQcGiden();
+      }
+    }
+  });
+
   document.getElementById("pc-qc-gelen-ocr-btn").addEventListener("click", function () {
     document.getElementById("pc-qc-gelen-ocr-file").click();
   });
@@ -3613,18 +3832,57 @@
       err.hidden = false;
       return;
     }
-    var amount = (document.getElementById("pc-qc-giden-amount").value || "").trim();
     var invDate = (document.getElementById("pc-qc-giden-date").value || "").trim();
-    var desc = (document.getElementById("pc-qc-giden-desc").value || "").trim();
     var note = (document.getElementById("pc-qc-giden-note").value || "").trim();
-    var tax = parseInt(document.getElementById("pc-qc-giden-tax").value || "20", 10);
-    if (!amount || Number(amount) <= 0) {
-      err.textContent = "Tutar gerekli.";
+    if (!invDate) {
+      err.textContent = "Tarih gerekli.";
       err.hidden = false;
       return;
     }
-    if (!invDate) {
-      err.textContent = "Tarih gerekli.";
+    var rawLines = readQcGidenLinesFromDom();
+    var lines = [];
+    for (var i = 0; i < rawLines.length; i++) {
+      var rl = rawLines[i];
+      var desc = (rl.description || "").trim();
+      var qty = Number(rl.quantity);
+      var up = Number(rl.unit_price);
+      var tax = parseInt(rl.tax_rate, 10);
+      if (!desc && !(isFinite(up) && up > 0)) continue;
+      if (!desc) {
+        err.textContent = "Satır " + (i + 1) + ": açıklama gerekli.";
+        err.hidden = false;
+        return;
+      }
+      if (!isFinite(qty) || qty <= 0) {
+        err.textContent = "Satır " + (i + 1) + ": miktar > 0 olmalı.";
+        err.hidden = false;
+        return;
+      }
+      if (!isFinite(up) || up < 0) {
+        err.textContent = "Satır " + (i + 1) + ": birim fiyat gerekli.";
+        err.hidden = false;
+        return;
+      }
+      if (!isFinite(tax) || tax < 0 || tax > 100) {
+        err.textContent = "Satır " + (i + 1) + ": KDV 0–100.";
+        err.hidden = false;
+        return;
+      }
+      lines.push({
+        description: desc.slice(0, 200),
+        quantity: qty,
+        unit_price: up,
+        tax_rate: tax
+      });
+    }
+    if (!lines.length) {
+      err.textContent = "En az bir satır gerekli.";
+      err.hidden = false;
+      return;
+    }
+    var sums = recalcQcGiden();
+    if (!(sums.gross > 0)) {
+      err.textContent = "KDV dahil toplam 0'dan büyük olmalı.";
       err.hidden = false;
       return;
     }
@@ -3635,9 +3893,7 @@
       body: {
         party_id: state.partyId,
         direction: "give",
-        amount: amount,
-        tax_rate: tax,
-        description: desc || undefined,
+        lines: lines,
         note: note || undefined,
         invoice_date: invDate,
         occurred_at: invDate + "T12:00:00",
