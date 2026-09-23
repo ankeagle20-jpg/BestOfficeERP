@@ -353,6 +353,11 @@
     border: 1px solid #fcd34d; border-radius: 0.45rem;
     padding: 0.55rem 0.7rem; margin: 0 0 0.75rem;
   }
+  .pc-qc-note {
+    font-size: 0.85rem; color: #1e3a5f; background: #eff6ff;
+    border: 1px solid #93c5fd; border-radius: 0.45rem;
+    padding: 0.55rem 0.7rem; margin: 0 0 0.75rem;
+  }
   .pc-wa {
     display: inline-flex;
     align-items: center;
@@ -880,6 +885,8 @@
       <button type="button" class="pc-btn pc-btn-give" id="pc-btn-give">Verdim</button>
       <button type="button" class="pc-btn pc-btn-recv" id="pc-btn-recv">Aldım</button>
       <button type="button" class="pc-btn pc-btn-ghost" id="pc-btn-stmt">Ekstre</button>
+      <button type="button" class="pc-btn pc-btn-give" id="pc-btn-qc-giden" title="Hareket + giden fatura birlikte">Giden Fatura</button>
+      <button type="button" class="pc-btn pc-btn-recv" id="pc-btn-qc-gelen" title="Hareket + gelen fatura birlikte">Gelen Fatura</button>
     </div>
 
     <div class="pc-panel" id="pc-edit-panel">
@@ -930,6 +937,47 @@
         <button type="button" class="pc-btn pc-btn-ghost" id="pc-stmt-cancel">Kapat</button>
       </div>
       <div id="pc-stmt-preview-box" class="pc-meta"></div>
+    </div>
+
+    <div class="pc-panel" id="pc-qc-giden-panel">
+      <h2>Giden Fatura (hızlı)</h2>
+      <p class="pc-qc-note" role="status">Hareket ve fatura birlikte oluşur; bakiye güncellenir.</p>
+      <div class="pc-field"><label for="pc-qc-giden-amount">Tutar (KDV dahil)</label><input id="pc-qc-giden-amount" type="number" min="0.01" step="0.01" inputmode="decimal"></div>
+      <div class="pc-field"><label for="pc-qc-giden-date">Tarih</label><input type="date" id="pc-qc-giden-date"></div>
+      <div class="pc-field"><label for="pc-qc-giden-desc">Açıklama</label><input id="pc-qc-giden-desc" maxlength="200" placeholder="Hizmet bedeli"></div>
+      <div class="pc-field"><label for="pc-qc-giden-tax">KDV %</label>
+        <select id="pc-qc-giden-tax">
+          <option value="20">20</option>
+          <option value="10">10</option>
+          <option value="1">1</option>
+          <option value="0">0</option>
+        </select>
+      </div>
+      <div class="pc-field"><label for="pc-qc-giden-note">Not</label><input id="pc-qc-giden-note" maxlength="300"></div>
+      <div id="pc-qc-giden-err" class="pc-err" hidden></div>
+      <div class="pc-actions">
+        <button type="button" class="pc-btn pc-btn-primary" id="pc-qc-giden-save">Kaydet</button>
+        <button type="button" class="pc-btn pc-btn-ghost" id="pc-qc-giden-cancel">Vazgeç</button>
+      </div>
+    </div>
+
+    <div class="pc-panel" id="pc-qc-gelen-panel">
+      <h2>Gelen Fatura (hızlı)</h2>
+      <p class="pc-qc-note" role="status">Hareket ve fatura birlikte oluşur; bakiye güncellenir.</p>
+      <p class="pc-in-inv-warn" role="status">Bu kayıt GİB’e gitmez. Karşı tarafın kestiği belgeyi arşivlersiniz.</p>
+      <div class="pc-field"><label for="pc-qc-gelen-doc">Belge no</label><input id="pc-qc-gelen-doc" maxlength="128" autocomplete="off"></div>
+      <div class="pc-field"><label for="pc-qc-gelen-amount">Tutar</label><input id="pc-qc-gelen-amount" type="number" min="0.01" step="0.01" inputmode="decimal"></div>
+      <div class="pc-field"><label for="pc-qc-gelen-date">Tarih</label><input type="date" id="pc-qc-gelen-date"></div>
+      <div class="pc-field"><label for="pc-qc-gelen-note">Not (isteğe bağlı)</label><input id="pc-qc-gelen-note" maxlength="300" autocomplete="off"></div>
+      <div class="pc-field">
+        <label for="pc-qc-gelen-file">Fotoğraf / görsel</label>
+        <input id="pc-qc-gelen-file" type="file" accept="image/jpeg,image/png,image/webp" capture="environment">
+      </div>
+      <div id="pc-qc-gelen-err" class="pc-err" hidden></div>
+      <div class="pc-actions">
+        <button type="button" class="pc-btn pc-btn-primary" id="pc-qc-gelen-save">Kaydet</button>
+        <button type="button" class="pc-btn pc-btn-ghost" id="pc-qc-gelen-cancel">Vazgeç</button>
+      </div>
     </div>
 
     <div id="pc-tx-list"></div>
@@ -1724,6 +1772,19 @@
     return null;
   }
 
+  function closeDetailSidePanels(exceptId) {
+    var ids = [
+      "pc-tx-panel", "pc-stmt-panel", "pc-edit-panel",
+      "pc-inv-panel", "pc-in-inv-panel",
+      "pc-qc-giden-panel", "pc-qc-gelen-panel"
+    ];
+    ids.forEach(function (id) {
+      if (exceptId && id === exceptId) return;
+      var el = document.getElementById(id);
+      if (el) el.classList.remove("open");
+    });
+  }
+
   function openIncomingForm(txId) {
     var t = findDetailTx(txId);
     if (!t) {
@@ -1731,10 +1792,7 @@
       return;
     }
     if (!confirm("Gelen fatura kaydı oluşturulsun mu?\n\nBu işlem GİB’e gitmez; yalnızca belge arşividir.")) return;
-    document.getElementById("pc-inv-panel").classList.remove("open");
-    document.getElementById("pc-tx-panel").classList.remove("open");
-    document.getElementById("pc-stmt-panel").classList.remove("open");
-    document.getElementById("pc-edit-panel").classList.remove("open");
+    closeDetailSidePanels("pc-in-inv-panel");
     document.getElementById("pc-in-inv-tx-id").value = String(t.id);
     document.getElementById("pc-in-inv-doc").value = "";
     document.getElementById("pc-in-inv-amount").value = String(t.amount != null ? t.amount : "");
@@ -2457,11 +2515,13 @@
       document.getElementById("pc-inv-note").value = j.invoice.note || "";
       document.getElementById("pc-inv-preview").textContent = "";
       syncGidenReadButtons(state.invoiceStatus);
+      closeDetailSidePanels("pc-inv-panel");
       document.getElementById("pc-inv-panel").classList.add("open");
     }).catch(function (e) {
       err.textContent = e.message;
       err.hidden = false;
       syncGidenReadButtons(null);
+      closeDetailSidePanels("pc-inv-panel");
       document.getElementById("pc-inv-panel").classList.add("open");
     });
   }
@@ -2650,10 +2710,7 @@
   function openEditPartyPanel() {
     var p = state.partyFull;
     if (!p) return;
-    document.getElementById("pc-tx-panel").classList.remove("open");
-    document.getElementById("pc-stmt-panel").classList.remove("open");
-    document.getElementById("pc-inv-panel").classList.remove("open");
-    document.getElementById("pc-in-inv-panel").classList.remove("open");
+    closeDetailSidePanels("pc-edit-panel");
     document.getElementById("pc-edit-name").value = p.name || "";
     document.getElementById("pc-edit-type").value = p.type || "person";
     document.getElementById("pc-edit-phone").value = p.phone || "";
@@ -2694,11 +2751,7 @@
     document.getElementById("pc-list-view").hidden = true;
     document.getElementById("pc-group-detail-view").hidden = true;
     document.getElementById("pc-detail-view").hidden = false;
-    document.getElementById("pc-tx-panel").classList.remove("open");
-    document.getElementById("pc-stmt-panel").classList.remove("open");
-    document.getElementById("pc-edit-panel").classList.remove("open");
-    document.getElementById("pc-inv-panel").classList.remove("open");
-    document.getElementById("pc-in-inv-panel").classList.remove("open");
+    closeDetailSidePanels();
     return api("/ledger/api/parties/" + id).then(function (j) {
       var p = j.party;
       applyPartyDetailUi(p);
@@ -3077,8 +3130,7 @@
   function openTx(dir) {
     state.direction = dir;
     document.getElementById("pc-tx-title").textContent = dir === "give" ? "Verdim" : "Aldım";
-    document.getElementById("pc-stmt-panel").classList.remove("open");
-    document.getElementById("pc-edit-panel").classList.remove("open");
+    closeDetailSidePanels("pc-tx-panel");
     document.getElementById("pc-tx-panel").classList.add("open");
     document.getElementById("pc-tx-err").hidden = true;
     document.getElementById("pc-tx-amount").value = "";
@@ -3090,6 +3142,189 @@
   document.getElementById("pc-btn-recv").addEventListener("click", function () { openTx("receive"); });
   document.getElementById("pc-tx-cancel").addEventListener("click", function () {
     document.getElementById("pc-tx-panel").classList.remove("open");
+  });
+
+  function openQcGidenPanel() {
+    if (!state.partyId) return;
+    closeDetailSidePanels("pc-qc-giden-panel");
+    document.getElementById("pc-qc-giden-amount").value = "";
+    document.getElementById("pc-qc-giden-date").value = todayISO();
+    document.getElementById("pc-qc-giden-desc").value = "";
+    document.getElementById("pc-qc-giden-tax").value = "20";
+    document.getElementById("pc-qc-giden-note").value = "";
+    var err = document.getElementById("pc-qc-giden-err");
+    err.hidden = true;
+    err.textContent = "";
+    document.getElementById("pc-qc-giden-panel").classList.add("open");
+    try { document.getElementById("pc-qc-giden-amount").focus(); } catch (e) {}
+  }
+
+  function openQcGelenPanel() {
+    if (!state.partyId) return;
+    closeDetailSidePanels("pc-qc-gelen-panel");
+    document.getElementById("pc-qc-gelen-doc").value = "";
+    document.getElementById("pc-qc-gelen-amount").value = "";
+    document.getElementById("pc-qc-gelen-date").value = todayISO();
+    document.getElementById("pc-qc-gelen-note").value = "";
+    var fileEl = document.getElementById("pc-qc-gelen-file");
+    if (fileEl) fileEl.value = "";
+    var err = document.getElementById("pc-qc-gelen-err");
+    err.hidden = true;
+    err.textContent = "";
+    document.getElementById("pc-qc-gelen-panel").classList.add("open");
+    try { document.getElementById("pc-qc-gelen-doc").focus(); } catch (e) {}
+  }
+
+  function applyInvoicePanelFromQuick(inv) {
+    state.invoiceId = inv && inv.id;
+    state.invoiceStatus = (inv && inv.status) || null;
+    document.getElementById("pc-inv-status").textContent =
+      "Durum: " + ((inv && inv.status) || "") + " · id=" + state.invoiceId +
+      " · toplam " + fmtMoney(inv.grand_total, inv.currency);
+    if (inv.lines && inv.lines[0]) {
+      document.getElementById("pc-inv-desc").value = inv.lines[0].description || "";
+      document.getElementById("pc-inv-tax").value = String(inv.lines[0].tax_rate || 20);
+    }
+    document.getElementById("pc-inv-note").value = inv.note || "";
+    document.getElementById("pc-inv-preview").textContent = "";
+    var invErr = document.getElementById("pc-inv-err");
+    invErr.hidden = true;
+    invErr.textContent = "";
+    syncGidenReadButtons(state.invoiceStatus);
+    closeDetailSidePanels("pc-inv-panel");
+    document.getElementById("pc-inv-panel").classList.add("open");
+  }
+
+  document.getElementById("pc-btn-qc-giden").addEventListener("click", openQcGidenPanel);
+  document.getElementById("pc-btn-qc-gelen").addEventListener("click", openQcGelenPanel);
+  document.getElementById("pc-qc-giden-cancel").addEventListener("click", function () {
+    document.getElementById("pc-qc-giden-panel").classList.remove("open");
+  });
+  document.getElementById("pc-qc-gelen-cancel").addEventListener("click", function () {
+    document.getElementById("pc-qc-gelen-panel").classList.remove("open");
+  });
+
+  document.getElementById("pc-qc-giden-save").addEventListener("click", function () {
+    var err = document.getElementById("pc-qc-giden-err");
+    err.hidden = true;
+    err.textContent = "";
+    if (!state.partyId) {
+      err.textContent = "Cari seçili değil.";
+      err.hidden = false;
+      return;
+    }
+    var amount = (document.getElementById("pc-qc-giden-amount").value || "").trim();
+    var invDate = (document.getElementById("pc-qc-giden-date").value || "").trim();
+    var desc = (document.getElementById("pc-qc-giden-desc").value || "").trim();
+    var note = (document.getElementById("pc-qc-giden-note").value || "").trim();
+    var tax = parseInt(document.getElementById("pc-qc-giden-tax").value || "20", 10);
+    if (!amount || Number(amount) <= 0) {
+      err.textContent = "Tutar gerekli.";
+      err.hidden = false;
+      return;
+    }
+    if (!invDate) {
+      err.textContent = "Tarih gerekli.";
+      err.hidden = false;
+      return;
+    }
+    var saveBtn = document.getElementById("pc-qc-giden-save");
+    saveBtn.disabled = true;
+    api("/ledger/api/invoices/quick-create", {
+      method: "POST",
+      body: {
+        party_id: state.partyId,
+        direction: "give",
+        amount: amount,
+        tax_rate: tax,
+        description: desc || undefined,
+        note: note || undefined,
+        invoice_date: invDate,
+        occurred_at: invDate + "T12:00:00",
+        currency: "TRY"
+      }
+    }).then(function (j) {
+      applyBalancesToUi(j.balances || []);
+      if (j.transaction) applyTxToDetailList(j.transaction);
+      document.getElementById("pc-qc-giden-panel").classList.remove("open");
+      if (j.invoice) applyInvoicePanelFromQuick(j.invoice);
+      deferLoadList();
+      deferLoadSummary();
+    }).catch(function (e) {
+      err.textContent = e.message || "Kayıt başarısız.";
+      err.hidden = false;
+    }).then(function () {
+      saveBtn.disabled = false;
+    });
+  });
+
+  document.getElementById("pc-qc-gelen-save").addEventListener("click", function () {
+    var err = document.getElementById("pc-qc-gelen-err");
+    err.hidden = true;
+    err.textContent = "";
+    if (!state.partyId) {
+      err.textContent = "Cari seçili değil.";
+      err.hidden = false;
+      return;
+    }
+    var docNo = (document.getElementById("pc-qc-gelen-doc").value || "").trim();
+    var amount = (document.getElementById("pc-qc-gelen-amount").value || "").trim();
+    var invDate = (document.getElementById("pc-qc-gelen-date").value || "").trim();
+    var note = (document.getElementById("pc-qc-gelen-note").value || "").trim();
+    var fileEl = document.getElementById("pc-qc-gelen-file");
+    var file = fileEl && fileEl.files && fileEl.files[0];
+    if (!docNo) {
+      err.textContent = "Belge no gerekli.";
+      err.hidden = false;
+      return;
+    }
+    if (!amount || Number(amount) <= 0) {
+      err.textContent = "Tutar gerekli.";
+      err.hidden = false;
+      return;
+    }
+    if (!invDate) {
+      err.textContent = "Tarih gerekli.";
+      err.hidden = false;
+      return;
+    }
+    if (!file) {
+      err.textContent = "Fotoğraf / görsel gerekli.";
+      err.hidden = false;
+      return;
+    }
+    var fd = new FormData();
+    fd.append("party_id", String(state.partyId));
+    fd.append("direction", "receive");
+    fd.append("amount", amount);
+    fd.append("document_no", docNo);
+    fd.append("invoice_date", invDate);
+    fd.append("occurred_at", invDate + "T12:00:00");
+    fd.append("currency", "TRY");
+    if (note) fd.append("note", note);
+    fd.append("file", file, file.name || "gelen.jpg");
+    var saveBtn = document.getElementById("pc-qc-gelen-save");
+    saveBtn.disabled = true;
+    apiUpload("/ledger/api/invoices/quick-create", fd)
+      .then(function (j) {
+        applyBalancesToUi(j.balances || []);
+        if (j.transaction) applyTxToDetailList(j.transaction);
+        var inv = j.incoming_invoice;
+        if (inv && inv.source_transaction_id != null) {
+          state.incomingByTx[String(inv.source_transaction_id)] = inv;
+        }
+        document.getElementById("pc-qc-gelen-panel").classList.remove("open");
+        renderDetailTxList();
+        deferLoadList();
+        deferLoadSummary();
+      })
+      .catch(function (e) {
+        err.textContent = e.message || "Kayıt başarısız.";
+        err.hidden = false;
+      })
+      .then(function () {
+        saveBtn.disabled = false;
+      });
   });
   document.getElementById("pc-lightbox-close").addEventListener("click", closeLightbox);
   document.getElementById("pc-lightbox").addEventListener("click", function (ev) {
@@ -3138,8 +3373,7 @@
   });
 
   document.getElementById("pc-btn-stmt").addEventListener("click", function () {
-    document.getElementById("pc-tx-panel").classList.remove("open");
-    document.getElementById("pc-edit-panel").classList.remove("open");
+    closeDetailSidePanels("pc-stmt-panel");
     document.getElementById("pc-stmt-panel").classList.add("open");
     document.getElementById("pc-stmt-from").value = monthStartISO();
     document.getElementById("pc-stmt-to").value = todayISO();
