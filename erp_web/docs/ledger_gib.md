@@ -62,16 +62,44 @@ Alternatif: `void`, `failed`.
 6. SMS imza — `LEDGER_GIB_SMS_ENABLED=1` olmadan kapalı (K6)  
 7. `GIB_TEST` / prod bilinci (K7)
 
-**Yasak:** sessiz GİB; OCR→otomatik fatura; receive/void’tan fatura; `faturalar` yazma; otomatik imza.
+**Yasak:** sessiz GİB; OCR→otomatik fatura; receive/void’tan **giden** fatura; `faturalar` yazma; otomatik imza.
 
 ---
 
-## API özeti (G1–G9)
+## Giden / Gelen Fatura — iki yol (Q1–Q4)
+
+Payafin Cari detay ekranında fatura oluşturmanın **iki ayrı** yolu vardır. İkisi de `faturalar` tablosuna ve ana ERP GİB UI’sına dokunmaz.
+
+| Yol | UI | API | Bakiye | Ne zaman |
+|---|---|---|---|---|
+| **Üst buton (atomik kısayol)** | «Giden Fatura» / «Gelen Fatura» (Verdim \| Aldım \| Ekstre yanında) | `POST /ledger/api/invoices/quick-create` | **Değişir** (give↑ / receive↓) | Kullanıcı tek adımda hem hareket hem belge ister |
+| **Satır buton (ikincil)** | Hareket satırındaki «Giden Fatura» / «Gelen Fatura» | Giden: `POST …/from-transaction` · Gelen: `POST …/incoming-invoices` | **Değişmez** (hareket zaten var) | Önce Verdim/Aldım kaydedilmiş; sonradan belge eklenir |
+
+### Üst — atomik kısayol (`quick-create`)
+
+1. **Giden:** JSON `direction=give` → tek DB transaction içinde `ledger_transactions(give)` + `ledger_invoices` (`source_transaction_id` = yeni tx) + satır. Sonra mevcut Giden paneli (Önizle / Onayla / GİB taslak / Durum / HTML).
+2. **Gelen:** multipart `direction=receive` + görsel → tek DB transaction içinde `ledger_transactions(receive)` → R2 yükleme → `ledger_incoming_invoices` (`source_transaction_id` = yeni tx). Hata olursa DB rollback; R2’ye yazılmışsa best-effort silme.
+
+Form notu: *«Hareket ve fatura birlikte oluşur; bakiye güncellenir.»*
+
+### Satır — mevcut harekete belge
+
+1. **Giden:** Yalnızca `give` + TRY, void değil; zaten aktif fatura varsa **409**.
+2. **Gelen:** Yalnızca `receive` + TRY; dosya zorunlu; aynı `source_transaction_id` için aktif gelen kayıt varsa **409**. UI’da belge varken satır «Gelen belge» + Görüntüle gösterir (ikinci «Gelen Fatura» butonu yok).
+
+### Çakışma / çift fatura
+
+Aynı hareket için ikinci aktif giden veya gelen fatura **oluşturulamaz** (kısmi unique + API 409). Üst yoldan oluşan kayıtlarda `source_transaction_id` dolu olduğu için satır yolu o harekette ikinci belgeyi reddeder.
+
+---
+
+## API özeti (G1–G9 + Q1–Q2)
 
 | Method | Path | Not |
 |---|---|---|
 | CRUD | `/ledger/api/parties` | `tax_id`, `tax_office`, `address`, `tax_id_kind` |
-| POST | `/ledger/api/invoices/from-transaction` | give+TRY → draft |
+| POST | `/ledger/api/invoices/quick-create` | Atomik: give+JSON → tx+`ledger_invoices`; receive+multipart → tx+R2+`ledger_incoming_invoices` |
+| POST | `/ledger/api/invoices/from-transaction` | Mevcut give+TRY → draft (satır yolu) |
 | GET/PUT | `/ledger/api/invoices/<id>` | local CRUD |
 | POST | `/ledger/api/invoices/<id>/confirm` | → ready + confirmed_at |
 | POST | `/ledger/api/invoices/<id>/gib-preview` | JP önizleme (yazmaz) |
@@ -79,3 +107,6 @@ Alternatif: `void`, `failed`.
 | GET | `/ledger/api/invoices/<id>/gib-status` | portal durum |
 | GET | `/ledger/api/invoices/<id>/gib-html` | HTML |
 | POST | `/ledger/api/invoices/<id>/gib-sms-*` | yalnız flag açıkken |
+| POST | `/ledger/api/incoming-invoices` | Mevcut receive’e gelen belge (satır yolu; GİB yok) |
+| GET | `/ledger/api/incoming-invoices?party_id=` | Liste |
+| GET | `/ledger/api/incoming-invoices/<id>` | Presign görüntü URL |
