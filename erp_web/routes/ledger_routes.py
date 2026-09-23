@@ -2936,6 +2936,211 @@ def api_parties_ocr_preview():
     return jsonify(payload)
 
 
+def _order_ocr_collapse_form(oneri: dict) -> dict:
+    """Çok kalemi hızlı form alanlarına indirger (v1 tek satır)."""
+    satirlar = oneri.get("satirlar") if isinstance(oneri.get("satirlar"), list) else []
+    amount = oneri.get("toplam_kdv_dahil_tahmini")
+    if amount is None and satirlar:
+        total = Decimal("0")
+        for s in satirlar:
+            try:
+                qty = Decimal(str(s.get("miktar") or 0))
+                up = Decimal(str(s.get("birim_fiyat") or 0))
+                kdv = Decimal(str(int(s.get("kdv_orani") or 0)))
+                net = qty * up
+                total += (net * (Decimal("1") + kdv / Decimal("100"))).quantize(
+                    Decimal("0.01"), rounding=ROUND_HALF_UP
+                )
+            except (InvalidOperation, TypeError, ValueError):
+                continue
+        amount = float(total) if total > 0 else None
+
+    desc = None
+    if len(satirlar) == 1:
+        desc = str(satirlar[0].get("aciklama") or "").strip() or None
+    elif len(satirlar) > 1:
+        first = str(satirlar[0].get("aciklama") or "").strip()
+        extra = len(satirlar) - 1
+        desc = (first + f" (+{extra} kalem)") if first else f"{len(satirlar)} kalem"
+        if desc and len(desc) > 200:
+            desc = desc[:197] + "..."
+
+    tax_rate = 20
+    if satirlar:
+        rates: dict[int, int] = {}
+        for s in satirlar:
+            try:
+                r = int(s.get("kdv_orani") or 20)
+            except (TypeError, ValueError):
+                r = 20
+            rates[r] = rates.get(r, 0) + 1
+        tax_rate = max(rates.items(), key=lambda kv: kv[1])[0]
+
+    note = oneri.get("not_ham")
+    if isinstance(note, str):
+        note = note.strip() or None
+
+    return {
+        "satirlar": satirlar,
+        "amount_kdv_dahil": float(amount) if amount is not None else None,
+        "description": desc,
+        "tax_rate": int(tax_rate),
+        "document_no": oneri.get("belge_no"),
+        "invoice_date": oneri.get("tarih"),
+        "note": note,
+    }
+
+
+@bp.route("/api/invoices/order-ocr-preview", methods=["POST"])
+@giris_gerekli
+@module_required("ledger")
+def api_invoices_order_ocr_preview():
+    """Sipariş/teklif görselinden fatura kalem önerisi — DB yazmaz.
+
+    multipart: file (JPEG/PNG/WEBP), isteğe bağlı belge_ipucu
+    (siparis|teklif|fatura|serbest).
+
+    Rate limit + hash cache: parti OCR ile aynı kota; cache anahtarı
+    'order|' öneki ile ayrı bucket (farklı model sonucu).
+    """
+    import tempfile
+    from pathlib import Path
+
+    from groq_helper import siparis_belge_oku
+
+    _ensure_ledger_tables_once()
+
+    tid = _ledger_ocr_tenant_id()
+    if tid is None:
+        return _json_err("Kiracı doğrulanamadı.", 403)
+
+    allowed, remaining = _ledger_ocr_rate_allow(tid)
+    if not allowed:
+        return _json_err(
+            "Belge okuma limiti aşıldı (dakikada en fazla "
+            f"{_LEDGER_OCR_RATE_LIMIT} istek). Lütfen biraz sonra tekrar deneyin.",
+            429,
+        )
+
+    upload = request.files.get("file")
+    if upload is None or not getattr(upload, "filename", None):
+        return _json_err("Görsel dosyası seçin (alan: file).")
+
+    raw = upload.read(_LEDGER_OCR_MAX_BYTES + 1)
+    if not raw:
+        return _json_err("Dosya boş.")
+    if len(raw) > _LEDGER_OCR_MAX_BYTES:
+        return _json_err("Dosya çok büyük (en fazla 5 MB).")
+
+    detected = _detect_image_magic(raw)
+    if not detected:
+        return _json_err(
+            "Geçersiz dosya: yalnızca gerçek JPEG/PNG/WEBP kabul edilir."
+        )
+    content_type, ext = detected
+
+    ctype = (getattr(upload, "mimetype", None) or "").strip().lower()
+    if ctype and not ctype.startswith("image/") and ctype not in (
+        "application/octet-stream",
+        "",
+    ):
+        return _json_err(
+            "Geçersiz Content-Type: yalnızca image/jpeg, image/png, image/webp."
+        )
+    if ctype.startswith("image/") and ctype not in (
+        "image/jpeg",
+        "image/jpg",
+        "image/png",
+        "image/webp",
+        "image/pjpeg",
+    ):
+        return _json_err(
+            "Geçersiz Content-Type: yalnızca image/jpeg, image/png, image/webp."
+        )
+
+    belge_ipucu = (
+        str(request.form.get("belge_ipucu") or request.args.get("belge_ipucu") or "")
+        .strip()
+        .lower()
+        or None
+    )
+    if belge_ipucu and belge_ipucu not in (
+        "siparis",
+        "teklif",
+        "fatura",
+        "serbest",
+    ):
+        return _json_err(
+            "belge_ipucu siparis, teklif, fatura veya serbest olmalı."
+        )
+
+    # Ayrı cache bucket — parti OCR ile karışmasın
+    cache_hint = "order|" + (belge_ipucu or "")
+    digest = _ledger_ocr_sha256(raw)
+    cached = _ledger_ocr_cache_get(tid, digest, cache_hint)
+    if cached is not None:
+        cached["from_cache"] = True
+        cached["yazma"] = False
+        cached["rate_remaining"] = remaining
+        return jsonify(cached)
+
+    tmp_path: str | None = None
+    try:
+        fd, tmp_path = tempfile.mkstemp(suffix=f".{ext}", prefix="ledger_order_ocr_")
+        os.close(fd)
+        Path(tmp_path).write_bytes(raw)
+
+        ok, result, err, raw_ai = siparis_belge_oku(
+            tmp_path, belge_ipucu=belge_ipucu
+        )
+    except Exception as e:
+        return _json_err(f"Belge okunamadı: {e}", 502)
+    finally:
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+    if not ok or not isinstance(result, dict):
+        msg = err or "Belge okunamadı."
+        status = 502
+        low = msg.lower()
+        if "yoğun" in low or "rate" in low:
+            status = 429
+        elif "yapılandırma" in low or "api anahtarı" in low:
+            status = 503
+        elif "model" in low:
+            status = 503
+        return _json_err(msg, status)
+
+    oneri = {
+        "belge_tipi": result.get("belge_tipi"),
+        "belge_no": result.get("belge_no"),
+        "tarih": result.get("tarih"),
+        "para_birimi": result.get("para_birimi"),
+        "satirlar": result.get("satirlar") or [],
+        "toplam_kdv_haric_tahmini": result.get("toplam_kdv_haric_tahmini"),
+        "toplam_kdv_dahil_tahmini": result.get("toplam_kdv_dahil_tahmini"),
+        "guven": result.get("guven"),
+        "not_ham": result.get("not_ham"),
+    }
+    form = _order_ocr_collapse_form(oneri)
+
+    payload = {
+        "ok": True,
+        "yazma": False,
+        "from_cache": False,
+        "content_type": content_type,
+        "belge_ipucu": belge_ipucu,
+        "oneri": oneri,
+        "form": form,
+        "rate_remaining": remaining,
+    }
+    _ledger_ocr_cache_put(tid, digest, cache_hint, payload)
+    return jsonify(payload)
+
+
 # G4–G9 invoice + GİB çağrı route'ları (ayrı modül; gib_earsiv gövdesine dokunulmaz)
 from routes.ledger_invoice_routes import register_ledger_invoice_routes
 
