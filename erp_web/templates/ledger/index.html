@@ -953,6 +953,8 @@
         <button type="button" class="pc-btn pc-btn-ghost" id="pc-inv-preview-btn">Önizle</button>
         <button type="button" class="pc-btn pc-btn-ghost" id="pc-inv-confirm-btn">Onayla</button>
         <button type="button" class="pc-btn pc-btn-primary" id="pc-inv-gib-btn">GİB taslak gönder</button>
+        <button type="button" class="pc-btn pc-btn-ghost" id="pc-inv-gib-status-btn" hidden>Durum Getir</button>
+        <button type="button" class="pc-btn pc-btn-ghost" id="pc-inv-gib-html-btn" hidden>HTML Görüntüle</button>
         <button type="button" class="pc-btn pc-btn-ghost" id="pc-inv-close">Kapat</button>
       </div>
     </div>
@@ -2403,6 +2405,35 @@
   }
 
   state.invoiceId = null;
+  state.invoiceStatus = null;
+
+  function syncGidenReadButtons(status) {
+    var st = String(status || state.invoiceStatus || "").trim();
+    state.invoiceStatus = st || null;
+    var show = !!(state.invoiceId && (st === "gib_taslak" || st === "gib_imzalandi"));
+    var statusBtn = document.getElementById("pc-inv-gib-status-btn");
+    var htmlBtn = document.getElementById("pc-inv-gib-html-btn");
+    if (statusBtn) statusBtn.hidden = !show;
+    if (htmlBtn) htmlBtn.hidden = !show;
+  }
+
+  function formatGibDurumSummary(durum, ettn) {
+    if (!durum || typeof durum !== "object") {
+      return "ETTN: " + (ettn || "—") + "\nPortal kaydı bulunamadı (durum=null).";
+    }
+    var keys = [
+      "onayDurumu", "durum", "belgeNo", "belgeNumarasi", "ettn", "uuid", "faturaUuid",
+      "aliciUnvanAdSoyad", "aliciUnvan", "unvan"
+    ];
+    var lines = ["ETTN: " + (ettn || "—")];
+    keys.forEach(function (k) {
+      if (durum[k] != null && String(durum[k]).trim() !== "") {
+        lines.push(k + ": " + String(durum[k]));
+      }
+    });
+    lines.push("", "Ham durum:", JSON.stringify(durum, null, 2));
+    return lines.join("\n");
+  }
 
   function openInvoiceFromTx(txId) {
     if (!confirm("Bu 'Verdim' hareketini yerel fatura taslağına dönüştür? (GİB'e henüz gönderilmez)")) return;
@@ -2415,6 +2446,7 @@
       body: { transaction_id: parseInt(txId, 10), tax_rate: tax, description: desc || undefined }
     }).then(function (j) {
       state.invoiceId = j.invoice && j.invoice.id;
+      state.invoiceStatus = (j.invoice && j.invoice.status) || null;
       document.getElementById("pc-inv-status").textContent =
         "Durum: " + (j.invoice.status || "") + " · id=" + state.invoiceId +
         " · toplam " + fmtMoney(j.invoice.grand_total, j.invoice.currency);
@@ -2424,10 +2456,12 @@
       }
       document.getElementById("pc-inv-note").value = j.invoice.note || "";
       document.getElementById("pc-inv-preview").textContent = "";
+      syncGidenReadButtons(state.invoiceStatus);
       document.getElementById("pc-inv-panel").classList.add("open");
     }).catch(function (e) {
       err.textContent = e.message;
       err.hidden = false;
+      syncGidenReadButtons(null);
       document.getElementById("pc-inv-panel").classList.add("open");
     });
   }
@@ -2469,8 +2503,10 @@
     saveInvoiceLinesThen(function () {
       return api("/ledger/api/invoices/" + state.invoiceId + "/confirm", { method: "POST", body: {} });
     }).then(function (j) {
+      state.invoiceStatus = (j.invoice && j.invoice.status) || "ready";
       document.getElementById("pc-inv-status").textContent =
         "Durum: " + j.invoice.status + " · onaylandı · GİB için ayrı gönderim gerekir";
+      syncGidenReadButtons(state.invoiceStatus);
     }).catch(function (e) { err.textContent = e.message; err.hidden = false; });
   });
   document.getElementById("pc-inv-gib-btn").addEventListener("click", function () {
@@ -2479,9 +2515,61 @@
     if (!confirm("GİB e-Arşiv TASLAĞI oluşturulsun mu? Bu gerçek portal yazmasıdır.")) return;
     api("/ledger/api/invoices/" + state.invoiceId + "/gib-taslak", { method: "POST", body: {} })
       .then(function (j) {
+        state.invoiceStatus = (j.invoice && j.invoice.status) || "gib_taslak";
         document.getElementById("pc-inv-status").textContent =
           "Durum: " + j.invoice.status + " · ETTN: " + (j.ettn || "");
+        syncGidenReadButtons(state.invoiceStatus);
       }).catch(function (e) { err.textContent = e.message; err.hidden = false; });
+  });
+  document.getElementById("pc-inv-gib-status-btn").addEventListener("click", function () {
+    var err = document.getElementById("pc-inv-err");
+    err.hidden = true;
+    if (!state.invoiceId) {
+      err.textContent = "Fatura yok.";
+      err.hidden = false;
+      return;
+    }
+    api("/ledger/api/invoices/" + state.invoiceId + "/gib-status")
+      .then(function (j) {
+        document.getElementById("pc-inv-preview").textContent =
+          formatGibDurumSummary(j.durum, j.ettn);
+      })
+      .catch(function (e) {
+        err.textContent = e.message || "Durum alınamadı.";
+        err.hidden = false;
+      });
+  });
+  document.getElementById("pc-inv-gib-html-btn").addEventListener("click", function () {
+    var err = document.getElementById("pc-inv-err");
+    err.hidden = true;
+    if (!state.invoiceId) {
+      err.textContent = "Fatura yok.";
+      err.hidden = false;
+      return;
+    }
+    api("/ledger/api/invoices/" + state.invoiceId + "/gib-html")
+      .then(function (j) {
+        var html = (j && j.html) ? String(j.html) : "";
+        if (!html.trim()) {
+          err.textContent = "HTML boş döndü.";
+          err.hidden = false;
+          return;
+        }
+        var w = window.open("", "payafin_gib_html", "noopener,noreferrer");
+        if (!w) {
+          err.textContent = "Pop-up engellendi; tarayıcıda izin verin.";
+          err.hidden = false;
+          return;
+        }
+        w.document.open();
+        w.document.write(html);
+        w.document.close();
+        try { w.document.title = "GİB HTML · " + (j.ettn || state.invoiceId); } catch (e2) {}
+      })
+      .catch(function (e) {
+        err.textContent = e.message || "HTML alınamadı.";
+        err.hidden = false;
+      });
   });
 
   document.getElementById("pc-in-inv-close").addEventListener("click", function () {
