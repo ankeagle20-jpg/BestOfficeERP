@@ -4495,6 +4495,7 @@ def ensure_ledger_invoice_tables():
         except Exception as e:
             print(f"ledger invoice index: {e}")
     ensure_ledger_incoming_invoice_tables()
+    ensure_ledger_product_tables()
 
 
 def ensure_ledger_incoming_invoice_tables():
@@ -4608,6 +4609,141 @@ def ensure_ledger_incoming_invoice_tables():
             execute(stmt)
         except Exception as e:
             print(f"ledger incoming invoice lines index: {e}")
+
+
+def ensure_ledger_product_tables():
+    """Payafin Cari S1 — stok kataloğu + hareketler (ana ERP urunler izole).
+
+    qty_on_hand önbellektir; doğruluk kaynağı ledger_stock_movements.
+    Çift stok yazımı: aktif (is_void=FALSE) outgoing_line_id / incoming_line_id
+    üzerinde kısmi UNIQUE indeksler.
+    """
+    execute(
+        """
+        CREATE TABLE IF NOT EXISTS ledger_products (
+            id                  BIGSERIAL PRIMARY KEY,
+            name                TEXT NOT NULL,
+            name_norm           TEXT NOT NULL,
+            unit                TEXT NOT NULL DEFAULT 'adet',
+            default_tax_rate    INTEGER NOT NULL DEFAULT 20,
+            qty_on_hand         NUMERIC(18, 4) NOT NULL DEFAULT 0,
+            is_active           BOOLEAN NOT NULL DEFAULT TRUE,
+            notes               TEXT,
+            created_by          INTEGER,
+            created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT ledger_products_name_chk
+                CHECK (length(trim(name)) > 0),
+            CONSTRAINT ledger_products_name_norm_chk
+                CHECK (length(trim(name_norm)) > 0),
+            CONSTRAINT ledger_products_unit_chk
+                CHECK (length(trim(unit)) > 0 AND length(unit) <= 32),
+            CONSTRAINT ledger_products_tax_chk
+                CHECK (default_tax_rate >= 0 AND default_tax_rate <= 100)
+        )
+        """
+    )
+    for stmt in (
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_ledger_products_name_norm_active "
+        "ON ledger_products (name_norm) "
+        "WHERE is_active = TRUE",
+        "CREATE INDEX IF NOT EXISTS idx_ledger_products_active_name "
+        "ON ledger_products (is_active, name)",
+    ):
+        try:
+            execute(stmt)
+        except Exception as e:
+            print(f"ledger products index: {e}")
+
+    execute(
+        """
+        CREATE TABLE IF NOT EXISTS ledger_stock_movements (
+            id                      BIGSERIAL PRIMARY KEY,
+            product_id              BIGINT NOT NULL,
+            direction               TEXT NOT NULL,
+            quantity                NUMERIC(18, 4) NOT NULL,
+            occurred_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            note                    TEXT,
+            source_kind             TEXT NOT NULL,
+            outgoing_invoice_id     BIGINT,
+            outgoing_line_id        BIGINT,
+            incoming_invoice_id     BIGINT,
+            incoming_line_id        BIGINT,
+            created_by              INTEGER,
+            created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            is_void                 BOOLEAN NOT NULL DEFAULT FALSE,
+            CONSTRAINT ledger_stock_mov_product_fkey
+                FOREIGN KEY (product_id)
+                REFERENCES ledger_products (id)
+                ON DELETE RESTRICT,
+            CONSTRAINT ledger_stock_mov_outgoing_inv_fkey
+                FOREIGN KEY (outgoing_invoice_id)
+                REFERENCES ledger_invoices (id)
+                ON DELETE RESTRICT,
+            CONSTRAINT ledger_stock_mov_outgoing_line_fkey
+                FOREIGN KEY (outgoing_line_id)
+                REFERENCES ledger_invoice_lines (id)
+                ON DELETE RESTRICT,
+            CONSTRAINT ledger_stock_mov_incoming_inv_fkey
+                FOREIGN KEY (incoming_invoice_id)
+                REFERENCES ledger_incoming_invoices (id)
+                ON DELETE RESTRICT,
+            CONSTRAINT ledger_stock_mov_incoming_line_fkey
+                FOREIGN KEY (incoming_line_id)
+                REFERENCES ledger_incoming_invoice_lines (id)
+                ON DELETE RESTRICT,
+            CONSTRAINT ledger_stock_mov_direction_chk
+                CHECK (direction IN ('in', 'out')),
+            CONSTRAINT ledger_stock_mov_quantity_chk
+                CHECK (quantity > 0),
+            CONSTRAINT ledger_stock_mov_source_kind_chk
+                CHECK (
+                    source_kind IN (
+                        'outgoing_line',
+                        'incoming_line',
+                        'manual_adjust'
+                    )
+                ),
+            CONSTRAINT ledger_stock_mov_source_shape_chk
+                CHECK (
+                    (
+                        source_kind = 'outgoing_line'
+                        AND outgoing_line_id IS NOT NULL
+                        AND incoming_line_id IS NULL
+                    )
+                    OR (
+                        source_kind = 'incoming_line'
+                        AND incoming_line_id IS NOT NULL
+                        AND outgoing_line_id IS NULL
+                    )
+                    OR (
+                        source_kind = 'manual_adjust'
+                        AND outgoing_line_id IS NULL
+                        AND incoming_line_id IS NULL
+                        AND outgoing_invoice_id IS NULL
+                        AND incoming_invoice_id IS NULL
+                    )
+                )
+        )
+        """
+    )
+    for stmt in (
+        # Çift stok yazımını engelle (aynı fatura satırı → tek aktif hareket)
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_ledger_stock_mov_out_line_active "
+        "ON ledger_stock_movements (outgoing_line_id) "
+        "WHERE is_void = FALSE AND outgoing_line_id IS NOT NULL",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_ledger_stock_mov_in_line_active "
+        "ON ledger_stock_movements (incoming_line_id) "
+        "WHERE is_void = FALSE AND incoming_line_id IS NOT NULL",
+        "CREATE INDEX IF NOT EXISTS idx_ledger_stock_mov_product_occurred "
+        "ON ledger_stock_movements (product_id, occurred_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_ledger_stock_mov_occurred "
+        "ON ledger_stock_movements (occurred_at DESC)",
+    ):
+        try:
+            execute(stmt)
+        except Exception as e:
+            print(f"ledger stock movements index: {e}")
 
 
 def ensure_ledger_group_tables():
