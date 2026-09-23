@@ -8,13 +8,14 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import date as date_cls
 from decimal import Decimal, InvalidOperation
 
 from flask import jsonify, request
 from flask_login import current_user
 
 from auth import giris_gerekli
-from db import execute, execute_returning, fetch_all, fetch_one
+from db import db as db_txn, execute, execute_returning, fetch_all, fetch_one
 from tenant_module_access import module_required
 
 
@@ -25,6 +26,9 @@ def register_ledger_invoice_routes(bp, *, helpers: dict) -> None:
     _money = helpers["_money"]
     _dec = helpers["_dec"]
     _PARTY_COLS = helpers["_PARTY_COLS"]
+    _tx_dict = helpers["_tx_dict"]
+    _balances_for_party = helpers["_balances_for_party"]
+    _parse_occurred_at = helpers["_parse_occurred_at"]
 
     _INV_COLS = (
         "id, party_id, source_transaction_id, status, invoice_date, currency, "
@@ -288,6 +292,191 @@ def register_ledger_invoice_routes(bp, *, helpers: dict) -> None:
                 {
                     "ok": True,
                     "invoice": _inv_dict(inv, lines),
+                    "yazma_gib": False,
+                }
+            ),
+            201,
+        )
+
+    @bp.route("/api/invoices/quick-create", methods=["POST"])
+    @giris_gerekli
+    @module_required("ledger")
+    def api_invoices_quick_create():
+        """Atomik: give hareketi + giden fatura (tek DB transaction).
+
+        Q1: yalnızca direction=give / JSON. Gelen (receive) Q2'de.
+        faturalar tablosuna / GİB'e yazılmaz.
+        """
+        _ensure()
+        data = request.get_json(silent=True) or {}
+
+        direction = str(data.get("direction") or "").strip().lower()
+        if direction != "give":
+            return _json_err(
+                "Q1: quick-create yalnızca direction=give destekler "
+                "(receive sonraki aşamada)."
+            )
+
+        try:
+            party_id = int(data.get("party_id"))
+        except (TypeError, ValueError):
+            return _json_err("party_id gerekli.")
+
+        party = _load_party(party_id)
+        if not party:
+            return _json_err("Cari bulunamadı.", 404)
+        if party.get("is_active") is False:
+            return _json_err("Pasif cari için fatura oluşturulamaz.")
+
+        try:
+            amount = _dec(data.get("amount"))
+        except (InvalidOperation, TypeError, ValueError):
+            return _json_err("Geçersiz tutar.")
+        if amount <= 0:
+            return _json_err("Tutar 0'dan büyük olmalı.")
+
+        currency = str(data.get("currency") or "TRY").strip().upper()
+        if currency != "TRY":
+            return _json_err("v1 yalnızca TRY destekler.")
+
+        tax_rate = 20
+        try:
+            if data.get("tax_rate") is not None:
+                tax_rate = int(data.get("tax_rate"))
+        except (TypeError, ValueError):
+            return _json_err("tax_rate geçersiz.")
+        if tax_rate < 0 or tax_rate > 100:
+            return _json_err("tax_rate 0–100 olmalı.")
+
+        occurred_at = _parse_occurred_at(data.get("occurred_at"))
+        if occurred_at is None:
+            return _json_err("occurred_at geçersiz.")
+
+        inv_date_raw = data.get("invoice_date")
+        if inv_date_raw is None or str(inv_date_raw).strip() == "":
+            inv_date = (
+                occurred_at.date() if hasattr(occurred_at, "date") else occurred_at
+            )
+        else:
+            try:
+                inv_date = date_cls.fromisoformat(str(inv_date_raw).strip()[:10])
+            except ValueError:
+                return _json_err("invoice_date geçersiz (YYYY-MM-DD).")
+
+        note = str(data.get("note") or "").strip() or None
+        desc = str(
+            data.get("description") or note or "Hizmet bedeli"
+        ).strip() or "Hizmet bedeli"
+
+        from ledger_gib_adapter import compute_line_totals
+
+        rate = Decimal(tax_rate)
+        if rate > 0:
+            net = (amount / (Decimal("1") + rate / Decimal("100"))).quantize(
+                Decimal("0.01")
+            )
+        else:
+            net = amount.quantize(Decimal("0.01"))
+        net_l, tax_l, gross_l = compute_line_totals(1, net, tax_rate)
+
+        uid = None
+        try:
+            if current_user and getattr(current_user, "is_authenticated", False):
+                uid = int(current_user.id)
+        except (TypeError, ValueError, AttributeError):
+            uid = None
+
+        amount_s = str(amount.quantize(Decimal("0.01")))
+        _TX_RET = (
+            "id, party_id, direction, amount, currency, occurred_at, note, "
+            "created_by, is_void, metadata, created_at"
+        )
+
+        try:
+            with db_txn() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    f"""
+                    INSERT INTO ledger_transactions (
+                        party_id, direction, amount, currency, occurred_at,
+                        note, created_by, metadata
+                    ) VALUES (
+                        %s, 'give', %s, 'TRY', %s, %s, %s, '{{}}'::jsonb
+                    )
+                    RETURNING {_TX_RET}
+                    """,
+                    (party_id, amount_s, occurred_at, note, uid),
+                )
+                tx_row = cur.fetchone()
+                if not tx_row:
+                    raise RuntimeError("Hareket INSERT boş döndü.")
+                tx = dict(tx_row)
+                tx_id = int(tx["id"])
+
+                cur.execute(
+                    f"""
+                    INSERT INTO ledger_invoices (
+                        party_id, source_transaction_id, status, invoice_date,
+                        currency, subtotal, tax_total, grand_total, note,
+                        created_by
+                    )
+                    VALUES (
+                        %s, %s, 'draft', %s, 'TRY', %s, %s, %s, %s, %s
+                    )
+                    RETURNING {_INV_COLS}
+                    """,
+                    (
+                        party_id,
+                        tx_id,
+                        inv_date,
+                        net_l,
+                        tax_l,
+                        gross_l,
+                        note,
+                        uid,
+                    ),
+                )
+                inv_row = cur.fetchone()
+                if not inv_row:
+                    raise RuntimeError("Fatura INSERT boş döndü.")
+                inv = dict(inv_row)
+                inv_id = int(inv["id"])
+
+                cur.execute(
+                    """
+                    INSERT INTO ledger_invoice_lines (
+                        invoice_id, line_no, description, quantity, unit_price,
+                        tax_rate, line_total
+                    )
+                    VALUES (%s, 1, %s, 1, %s, %s, %s)
+                    """,
+                    (inv_id, desc, net, tax_rate, gross_l),
+                )
+
+                cur.execute(
+                    f"""
+                    SELECT {_LINE_COLS}
+                    FROM ledger_invoice_lines
+                    WHERE invoice_id = %s
+                    ORDER BY line_no, id
+                    """,
+                    (inv_id,),
+                )
+                line_rows = cur.fetchall() or []
+                lines = [_line_dict(dict(r)) for r in line_rows]
+        except Exception as exc:
+            return _json_err(
+                f"Atomik oluşturma başarısız (rollback): {exc}",
+                500,
+            )
+
+        return (
+            jsonify(
+                {
+                    "ok": True,
+                    "transaction": _tx_dict(tx),
+                    "invoice": _inv_dict(inv, lines),
+                    "balances": _balances_for_party(party_id),
                     "yazma_gib": False,
                 }
             ),

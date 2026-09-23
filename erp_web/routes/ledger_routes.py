@@ -2947,6 +2947,9 @@ register_ledger_invoice_routes(
         "_money": _money,
         "_dec": _dec,
         "_PARTY_COLS": _PARTY_COLS,
+        "_tx_dict": _tx_dict,
+        "_balances_for_party": _balances_for_party,
+        "_parse_occurred_at": _parse_occurred_at,
     },
 )
 
