@@ -310,6 +310,26 @@
     border: 1px solid var(--pc-line, #cbd5e1); border-radius: 6px;
   }
   .pc-qc-lines-table input.pc-qc-desc { max-width: none; min-width: 6rem; }
+  .pc-qc-desc-wrap { position: relative; width: 100%; }
+  .pc-qc-desc-wrap .pc-qc-desc { width: 100%; }
+  .pc-qc-ac-list {
+    position: absolute; left: 0; right: 0; top: 100%; z-index: 40;
+    margin: 0.15rem 0 0; padding: 0.2rem 0; list-style: none;
+    max-height: 11rem; overflow: auto;
+    border: 1px solid var(--pc-line, #cbd5e1); border-radius: 8px;
+    background: #fff; box-shadow: 0 8px 20px rgba(15, 23, 42, 0.12);
+  }
+  .pc-qc-ac-list[hidden] { display: none !important; }
+  .pc-qc-ac-item {
+    display: block; width: 100%; text-align: left;
+    border: 0; background: transparent; cursor: pointer;
+    padding: 0.35rem 0.55rem; font-size: 0.78rem; color: var(--pc-ink);
+  }
+  .pc-qc-ac-item:hover,
+  .pc-qc-ac-item:focus { background: #f1f5f9; outline: none; }
+  .pc-qc-ac-item .pc-qc-ac-meta {
+    display: block; font-size: 0.68rem; color: var(--pc-muted); margin-top: 0.1rem;
+  }
   .pc-qc-lines-table .pc-qc-line-gross {
     font-variant-numeric: tabular-nums; white-space: nowrap;
   }
@@ -3715,6 +3735,140 @@
     return { net: sumNet, tax: sumTax, gross: sumGross };
   }
 
+  /** S5: satır açıklama → ürün önerisi (debounce + GET /ledger/api/products?q=). */
+  var QC_AC_DEBOUNCE_MS = 250;
+  var QC_AC_MIN_CHARS = 1;
+  var QC_AC_MAX_ITEMS = 8;
+  var _qcAcDocWired = false;
+
+  function qcHideProductAc(listEl) {
+    if (!listEl) return;
+    listEl.innerHTML = "";
+    listEl.hidden = true;
+  }
+
+  function qcHideAllProductAc(exceptList) {
+    var lists = document.querySelectorAll(".pc-qc-ac-list");
+    for (var i = 0; i < lists.length; i++) {
+      if (exceptList && lists[i] === exceptList) continue;
+      qcHideProductAc(lists[i]);
+    }
+  }
+
+  function qcRenderProductAc(listEl, products, onPick) {
+    qcHideProductAc(listEl);
+    if (!products || !products.length) return;
+    var lim = Math.min(products.length, QC_AC_MAX_ITEMS);
+    for (var i = 0; i < lim; i++) {
+      (function (p) {
+        var li = document.createElement("li");
+        li.setAttribute("role", "option");
+        var btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "pc-qc-ac-item";
+        btn.textContent = p.name || ("#" + p.id);
+        var meta = document.createElement("span");
+        meta.className = "pc-qc-ac-meta";
+        var unit = p.unit || "adet";
+        var qtyTxt = p.qty_on_hand != null ? String(p.qty_on_hand) : "—";
+        meta.textContent = qtyTxt + " " + unit;
+        btn.appendChild(meta);
+        btn.addEventListener("mousedown", function (ev) {
+          // blur ile listenin kapanmasını engelle
+          ev.preventDefault();
+        });
+        btn.addEventListener("click", function (ev) {
+          ev.preventDefault();
+          if (typeof onPick === "function") onPick(p);
+        });
+        li.appendChild(btn);
+        listEl.appendChild(li);
+      })(products[i]);
+    }
+    listEl.hidden = false;
+  }
+
+  function wireQcDescAutocomplete(inp) {
+    if (!inp || inp._qcAcWired) return;
+    inp._qcAcWired = true;
+    inp.setAttribute("autocomplete", "off");
+    inp.setAttribute("aria-autocomplete", "list");
+    var wrap = inp.closest(".pc-qc-desc-wrap");
+    var list = wrap ? wrap.querySelector(".pc-qc-ac-list") : null;
+    if (!list) return;
+    var timer = null;
+    var seq = 0;
+
+    function scheduleFetch() {
+      if (inp._qcAcPicking) return;
+      if (timer) clearTimeout(timer);
+      var q = String(inp.value || "").trim();
+      if (q.length < QC_AC_MIN_CHARS) {
+        qcHideProductAc(list);
+        return;
+      }
+      timer = setTimeout(function () {
+        var my = ++seq;
+        api("/ledger/api/products?q=" + encodeURIComponent(q))
+          .then(function (j) {
+            if (my !== seq) return;
+            var cur = String(inp.value || "").trim();
+            if (cur.length < QC_AC_MIN_CHARS) {
+              qcHideProductAc(list);
+              return;
+            }
+            var rows = (j && j.products) || [];
+            qcHideAllProductAc(list);
+            qcRenderProductAc(list, rows, function (p) {
+              if (timer) clearTimeout(timer);
+              seq += 1;
+              inp._qcAcPicking = true;
+              inp.value = p.name || "";
+              qcHideProductAc(list);
+              try {
+                inp.dispatchEvent(new Event("input", { bubbles: true }));
+              } catch (e1) {
+                var ev = document.createEvent("Event");
+                ev.initEvent("input", true, true);
+                inp.dispatchEvent(ev);
+              }
+              inp._qcAcPicking = false;
+              try { inp.focus(); } catch (e2) {}
+            });
+          })
+          .catch(function () {
+            if (my !== seq) return;
+            qcHideProductAc(list);
+          });
+      }, QC_AC_DEBOUNCE_MS);
+    }
+
+    inp.addEventListener("input", scheduleFetch);
+    inp.addEventListener("focus", function () {
+      var q = String(inp.value || "").trim();
+      if (q.length >= QC_AC_MIN_CHARS) scheduleFetch();
+    });
+    inp.addEventListener("keydown", function (ev) {
+      if (ev.key === "Escape") {
+        qcHideProductAc(list);
+      }
+    });
+    inp.addEventListener("blur", function () {
+      setTimeout(function () {
+        if (!list.contains(document.activeElement)) qcHideProductAc(list);
+      }, 180);
+    });
+
+    if (!_qcAcDocWired) {
+      _qcAcDocWired = true;
+      document.addEventListener("mousedown", function (ev) {
+        var t = ev.target;
+        if (t && t.closest && t.closest(".pc-qc-desc-wrap")) return;
+        qcHideAllProductAc(null);
+      });
+    }
+  }
+
   function addQcLineRow(cfg, line) {
     line = line || {};
     var tb = document.getElementById(cfg.tbodyId);
@@ -3725,14 +3879,19 @@
     var up = line.unit_price != null ? String(line.unit_price) : "";
     var tax = line.tax_rate != null ? line.tax_rate : 20;
     tr.innerHTML =
-      '<td><input type="text" class="pc-qc-desc" maxlength="200" placeholder="Hizmet / ürün"></td>' +
+      '<td><div class="pc-qc-desc-wrap">' +
+        '<input type="text" class="pc-qc-desc" maxlength="200" placeholder="Hizmet / ürün" autocomplete="off">' +
+        '<ul class="pc-qc-ac-list" hidden role="listbox"></ul>' +
+      "</div></td>" +
       '<td class="num"><input type="number" class="pc-qc-qty" min="0.0001" step="any" inputmode="decimal"></td>' +
       '<td class="num"><input type="number" class="pc-qc-up" min="0" step="0.01" inputmode="decimal"></td>' +
       '<td class="num"><select class="pc-qc-tax">' + qcTaxSelectHtml(tax) + "</select></td>" +
       '<td class="num"><span class="pc-qc-line-gross">0,00</span></td>' +
       '<td><button type="button" class="pc-btn pc-btn-ghost pc-qc-line-del" title="Satır sil">Sil</button></td>';
     tb.appendChild(tr);
-    tr.querySelector(".pc-qc-desc").value = desc;
+    var descInp = tr.querySelector(".pc-qc-desc");
+    descInp.value = desc;
+    wireQcDescAutocomplete(descInp);
     tr.querySelector(".pc-qc-qty").value = qty;
     tr.querySelector(".pc-qc-up").value = up;
     recalcQcLines(cfg);
