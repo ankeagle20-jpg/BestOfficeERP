@@ -34,7 +34,7 @@ from reportlab.pdfgen import canvas
 from reportlab.platypus import Table, TableStyle
 
 from auth import giris_gerekli
-from db import ensure_ledger_tables, execute, execute_returning, fetch_all, fetch_one
+from db import db as db_txn, ensure_ledger_tables, execute, execute_returning, fetch_all, fetch_one
 from r2_storage import R2StorageError, delete as r2_delete, put_bytes, presign_get
 from pwa_kit import (
     build_navigate_offline_sw,
@@ -836,6 +836,8 @@ def api_transactions_create():
 @module_required("ledger")
 def api_transactions_void(tx_id: int):
     _ensure_ledger_tables_once()
+    from routes.ledger_invoice_routes import _void_stock_movements
+
     row = fetch_one(
         """
         SELECT id, party_id, direction, amount, currency, occurred_at, note,
@@ -859,29 +861,65 @@ def api_transactions_void(tx_id: int):
 
     data = request.get_json(silent=True) or {}
     reason = str(data.get("reason") or "").strip()
-
-    updated = execute_returning(
-        """
-        UPDATE ledger_transactions
-        SET is_void = TRUE,
-            metadata = COALESCE(metadata, '{}'::jsonb) || %s::jsonb
-        WHERE id = %s AND is_void = FALSE
-        RETURNING id, party_id, direction, amount, currency, occurred_at, note,
-                  created_by, is_void, metadata, created_at
-        """,
-        (
-            json.dumps(
-                {
-                    "voided_at": datetime.now(timezone.utc).isoformat(),
-                    "void_reason": reason or None,
-                },
-                ensure_ascii=False,
-            ),
-            int(tx_id),
-        ),
+    meta_patch = json.dumps(
+        {
+            "voided_at": datetime.now(timezone.utc).isoformat(),
+            "void_reason": reason or None,
+        },
+        ensure_ascii=False,
     )
-    if not updated:
-        return _json_err("İptal başarısız.", 500)
+
+    try:
+        with db_txn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                UPDATE ledger_transactions
+                SET is_void = TRUE,
+                    metadata = COALESCE(metadata, '{}'::jsonb) || %s::jsonb
+                WHERE id = %s AND is_void = FALSE
+                RETURNING id, party_id, direction, amount, currency, occurred_at, note,
+                          created_by, is_void, metadata, created_at
+                """,
+                (meta_patch, int(tx_id)),
+            )
+            updated_row = cur.fetchone()
+            if not updated_row:
+                raise RuntimeError("Hareket void UPDATE boş döndü.")
+            updated = dict(updated_row)
+
+            cur.execute(
+                """
+                SELECT id FROM ledger_invoices
+                WHERE source_transaction_id = %s
+                ORDER BY id ASC
+                """,
+                (int(tx_id),),
+            )
+            for inv_r in cur.fetchall() or []:
+                inv_id = int(
+                    dict(inv_r)["id"] if not isinstance(inv_r, dict) else inv_r["id"]
+                )
+                _void_stock_movements(cur, outgoing_invoice_id=inv_id)
+
+            cur.execute(
+                """
+                SELECT id FROM ledger_incoming_invoices
+                WHERE source_transaction_id = %s AND is_deleted = FALSE
+                ORDER BY id ASC
+                """,
+                (int(tx_id),),
+            )
+            for inc_r in cur.fetchall() or []:
+                inc_id = int(
+                    dict(inc_r)["id"] if not isinstance(inc_r, dict) else inc_r["id"]
+                )
+                _void_stock_movements(cur, incoming_invoice_id=inc_id)
+    except Exception as exc:
+        return _json_err(
+            f"Atomik iptal başarısız (rollback): {exc}",
+            500,
+        )
 
     return jsonify(
         {

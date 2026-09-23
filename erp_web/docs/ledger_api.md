@@ -174,7 +174,8 @@ Oturum yoksa `/ledger/api/*` → **401** `{ "ok": false, "mesaj": "Oturum gerekl
 | `reason` | hayır | iptal nedeni (metadata’ya yazılır) |
 
 **200:** `{ "ok": true, "transaction": { ... }, "balances": [ ... ], "mesaj"?: "Zaten iptal." }`  
-Soft void: `is_void=true`; bakiye hesaplarından düşer.
+Soft void: `is_void=true`; bakiye hesaplarından düşer.  
+Bağlı quick-create faturalarının stok hareketleri de atomik olarak `is_void` yapılır ve `qty_on_hand` ters çevrilir (ayrıntı: [ledger_stock.md](ledger_stock.md) S6).
 
 ---
 

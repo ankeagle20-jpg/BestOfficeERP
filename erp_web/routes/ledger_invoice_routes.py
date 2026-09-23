@@ -181,6 +181,106 @@ def _apply_stock_for_lines(
             )
 
 
+def _void_stock_movements(
+    cur,
+    *,
+    outgoing_invoice_id: int | None = None,
+    incoming_invoice_id: int | None = None,
+) -> int:
+    """Aktif stok hareketlerini iptal et; qty_on_hand'i ters çevir (aynı cursor).
+
+    out iptal → qty += quantity (stok geri artar)
+    in  iptal → qty -= quantity (stok geri azalır)
+    is_void=FALSE filtresi + FOR UPDATE → idempotent / çift düzeltme yok.
+    """
+    if outgoing_invoice_id is None and incoming_invoice_id is None:
+        raise ValueError("outgoing_invoice_id veya incoming_invoice_id gerekli.")
+    if outgoing_invoice_id is not None and incoming_invoice_id is not None:
+        raise ValueError("Tek seferde yalnızca bir fatura türü void edilir.")
+
+    if outgoing_invoice_id is not None:
+        cur.execute(
+            """
+            SELECT id, product_id, direction, quantity
+            FROM ledger_stock_movements
+            WHERE is_void = FALSE AND outgoing_invoice_id = %s
+            ORDER BY id ASC
+            FOR UPDATE
+            """,
+            (int(outgoing_invoice_id),),
+        )
+    else:
+        cur.execute(
+            """
+            SELECT id, product_id, direction, quantity
+            FROM ledger_stock_movements
+            WHERE is_void = FALSE AND incoming_invoice_id = %s
+            ORDER BY id ASC
+            FOR UPDATE
+            """,
+            (int(incoming_invoice_id),),
+        )
+
+    rows = cur.fetchall() or []
+    voided = 0
+    for raw in rows:
+        mov = dict(raw) if not isinstance(raw, dict) else raw
+        mov_id = int(mov["id"])
+        product_id = int(mov["product_id"])
+        direction = str(mov.get("direction") or "")
+        try:
+            qty = Decimal(str(mov.get("quantity") if mov.get("quantity") is not None else 0))
+        except (InvalidOperation, TypeError, ValueError) as exc:
+            raise ValueError(f"Stok void miktarı geçersiz (mov#{mov_id})") from exc
+        if qty <= 0:
+            continue
+
+        cur.execute(
+            """
+            SELECT id FROM ledger_products
+            WHERE id = %s
+            FOR UPDATE
+            """,
+            (product_id,),
+        )
+        if not cur.fetchone():
+            raise RuntimeError(f"Ürün bulunamadı (id={product_id}) stok void için.")
+
+        if direction == "out":
+            cur.execute(
+                """
+                UPDATE ledger_products
+                SET qty_on_hand = qty_on_hand + %s,
+                    updated_at = NOW()
+                WHERE id = %s
+                """,
+                (qty, product_id),
+            )
+        elif direction == "in":
+            cur.execute(
+                """
+                UPDATE ledger_products
+                SET qty_on_hand = qty_on_hand - %s,
+                    updated_at = NOW()
+                WHERE id = %s
+                """,
+                (qty, product_id),
+            )
+        else:
+            raise ValueError(f"Stok yönü geçersiz (mov#{mov_id}): {direction}")
+
+        cur.execute(
+            """
+            UPDATE ledger_stock_movements
+            SET is_void = TRUE
+            WHERE id = %s AND is_void = FALSE
+            """,
+            (mov_id,),
+        )
+        voided += 1
+    return voided
+
+
 def register_ledger_invoice_routes(bp, *, helpers: dict) -> None:
     """ledger_routes.py'den inject edilen yardımcılarla route kaydı."""
     _ensure = helpers["_ensure_ledger_tables_once"]
@@ -1177,16 +1277,34 @@ def register_ledger_invoice_routes(bp, *, helpers: dict) -> None:
             return _json_err("Fatura bulunamadı.", 404)
         if inv.get("status") == "gib_imzalandi":
             return _json_err("İmzalanmış fatura iptal edilemez.")
-        row = execute_returning(
-            f"""
-            UPDATE ledger_invoices SET status = 'void', updated_at = NOW()
-            WHERE id = %s
-            RETURNING {_INV_COLS}
-            """,
-            (int(invoice_id),),
-        )
+        try:
+            with db_txn() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    f"""
+                    UPDATE ledger_invoices SET status = 'void', updated_at = NOW()
+                    WHERE id = %s
+                    RETURNING {_INV_COLS}
+                    """,
+                    (int(invoice_id),),
+                )
+                row = cur.fetchone()
+                if not row:
+                    raise RuntimeError("Fatura void UPDATE boş döndü.")
+                _void_stock_movements(
+                    cur, outgoing_invoice_id=int(invoice_id)
+                )
+                inv_out = dict(row)
+        except Exception as exc:
+            return _json_err(
+                f"Fatura iptali başarısız (rollback): {exc}",
+                500,
+            )
         return jsonify(
-            {"ok": True, "invoice": _inv_dict(row, _fetch_lines(invoice_id))}
+            {
+                "ok": True,
+                "invoice": _inv_dict(inv_out, _fetch_lines(invoice_id)),
+            }
         )
 
     @bp.route("/api/invoices/<int:invoice_id>/confirm", methods=["POST"])
