@@ -322,6 +322,18 @@
   .pc-qc-tot { display: flex; flex-direction: column; gap: 0.15rem; min-width: 5.5rem; }
   .pc-qc-tot span { font-size: 0.72rem; color: var(--pc-muted); }
   .pc-qc-tot strong { font-size: 0.95rem; font-variant-numeric: tabular-nums; color: var(--pc-ink); }
+  .pc-qc-lines-toolbar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.85rem;
+    margin: 0.35rem 0 0.5rem;
+  }
+  .pc-qc-bulk-tax-wrap {
+    display: inline-flex; align-items: center; gap: 0.35rem;
+    font-size: 0.82rem; color: var(--pc-muted);
+  }
+  .pc-qc-bulk-tax-wrap label { margin: 0; white-space: nowrap; }
+  .pc-qc-bulk-tax-wrap select.pc-qc-bulk-tax {
+    min-width: 4.25rem; max-width: 5.5rem;
+  }
 
 
   body.pc-select-mode-on .pc-wrap { padding-bottom: 5.25rem; }
@@ -1032,8 +1044,17 @@
             <tbody id="pc-qc-giden-lines-tbody"></tbody>
           </table>
         </div>
-        <div class="pc-actions" style="margin:0.35rem 0 0.5rem;">
+        <div class="pc-qc-lines-toolbar">
           <button type="button" class="pc-btn pc-btn-ghost" id="pc-qc-giden-line-add">+ Satır ekle</button>
+          <div class="pc-qc-bulk-tax-wrap">
+            <label for="pc-qc-giden-bulk-tax">Tüm satırlara uygula (KDV %)</label>
+            <select id="pc-qc-giden-bulk-tax" class="pc-qc-bulk-tax" aria-label="Tüm satırların KDV'sini toplu değiştir">
+              <option value="20">20</option>
+              <option value="10">10</option>
+              <option value="1">1</option>
+              <option value="0">0</option>
+            </select>
+          </div>
         </div>
       </div>
       <div class="pc-qc-totals" id="pc-qc-giden-totals" aria-live="polite">
@@ -1093,8 +1114,17 @@
             <tbody id="pc-qc-gelen-lines-tbody"></tbody>
           </table>
         </div>
-        <div class="pc-actions" style="margin:0.35rem 0 0.5rem;">
+        <div class="pc-qc-lines-toolbar">
           <button type="button" class="pc-btn pc-btn-ghost" id="pc-qc-gelen-line-add">+ Satır ekle</button>
+          <div class="pc-qc-bulk-tax-wrap">
+            <label for="pc-qc-gelen-bulk-tax">Tüm satırlara uygula (KDV %)</label>
+            <select id="pc-qc-gelen-bulk-tax" class="pc-qc-bulk-tax" aria-label="Tüm satırların KDV'sini toplu değiştir">
+              <option value="20">20</option>
+              <option value="10">10</option>
+              <option value="1">1</option>
+              <option value="0">0</option>
+            </select>
+          </div>
         </div>
       </div>
       <div class="pc-qc-totals" id="pc-qc-gelen-totals" aria-live="polite">
@@ -3434,13 +3464,15 @@
     tbodyId: "pc-qc-giden-lines-tbody",
     sumNetId: "pc-qc-giden-sum-net",
     sumTaxId: "pc-qc-giden-sum-tax",
-    sumGrossId: "pc-qc-giden-sum-gross"
+    sumGrossId: "pc-qc-giden-sum-gross",
+    bulkTaxId: "pc-qc-giden-bulk-tax"
   };
   var QC_GELEN_LINES = {
     tbodyId: "pc-qc-gelen-lines-tbody",
     sumNetId: "pc-qc-gelen-sum-net",
     sumTaxId: "pc-qc-gelen-sum-tax",
-    sumGrossId: "pc-qc-gelen-sum-gross"
+    sumGrossId: "pc-qc-gelen-sum-gross",
+    bulkTaxId: "pc-qc-gelen-bulk-tax"
   };
 
   function readQcLinesFromDom(tbodyId) {
@@ -3528,6 +3560,41 @@
     recalcQcLines(cfg);
   }
 
+  /** Tüm satırların .pc-qc-tax değerini güncelle + canlı toplamları yeniden hesapla. */
+  function applyQcBulkTax(cfg, rate) {
+    var r = parseInt(rate, 10);
+    if (!isFinite(r) || r < 0 || r > 100) return;
+    var selects = document.querySelectorAll("#" + cfg.tbodyId + " select.pc-qc-tax");
+    for (var i = 0; i < selects.length; i++) {
+      var sel = selects[i];
+      var has = false;
+      for (var j = 0; j < sel.options.length; j++) {
+        if (parseInt(sel.options[j].value, 10) === r) {
+          has = true;
+          break;
+        }
+      }
+      if (!has) {
+        var opt = document.createElement("option");
+        opt.value = String(r);
+        opt.textContent = String(r);
+        sel.appendChild(opt);
+      }
+      sel.value = String(r);
+    }
+    recalcQcLines(cfg);
+  }
+
+  function wireQcBulkTax(cfg) {
+    if (!cfg || !cfg.bulkTaxId) return;
+    var el = document.getElementById(cfg.bulkTaxId);
+    if (!el || el._qcBulkTaxWired) return;
+    el._qcBulkTaxWired = true;
+    el.addEventListener("change", function () {
+      applyQcBulkTax(cfg, el.value);
+    });
+  }
+
   function wireQcLinesEditor(cfg) {
     var tb = document.getElementById(cfg.tbodyId);
     if (!tb || tb._qcLinesWired) return;
@@ -3547,6 +3614,7 @@
         }
       }
     });
+    wireQcBulkTax(cfg);
   }
 
   function readQcGidenLinesFromDom() {
