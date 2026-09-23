@@ -2950,6 +2950,9 @@ register_ledger_invoice_routes(
         "_tx_dict": _tx_dict,
         "_balances_for_party": _balances_for_party,
         "_parse_occurred_at": _parse_occurred_at,
+        "_tenant_slug_for_object_key": _tenant_slug_for_object_key,
+        "_detect_image_magic": _detect_image_magic,
+        "_sanitize_original_filename": _sanitize_original_filename,
     },
 )
 

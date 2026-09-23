@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import uuid
 from datetime import date as date_cls
 from decimal import Decimal, InvalidOperation
 
@@ -16,7 +17,11 @@ from flask_login import current_user
 
 from auth import giris_gerekli
 from db import db as db_txn, execute, execute_returning, fetch_all, fetch_one
+from r2_storage import R2StorageError, delete as r2_delete, put_bytes
 from tenant_module_access import module_required
+
+# Gelen fatura görseli — I2 ile aynı limit (DB CHECK uyumlu)
+_QC_IN_MAX_BYTES = 5 * 1024 * 1024
 
 
 def register_ledger_invoice_routes(bp, *, helpers: dict) -> None:
@@ -29,6 +34,9 @@ def register_ledger_invoice_routes(bp, *, helpers: dict) -> None:
     _tx_dict = helpers["_tx_dict"]
     _balances_for_party = helpers["_balances_for_party"]
     _parse_occurred_at = helpers["_parse_occurred_at"]
+    _tenant_slug = helpers["_tenant_slug_for_object_key"]
+    _detect_image = helpers["_detect_image_magic"]
+    _sanitize_name = helpers["_sanitize_original_filename"]
 
     _INV_COLS = (
         "id, party_id, source_transaction_id, status, invoice_date, currency, "
@@ -298,25 +306,84 @@ def register_ledger_invoice_routes(bp, *, helpers: dict) -> None:
             201,
         )
 
+    _INCOMING_COLS = (
+        "id, party_id, source_transaction_id, document_no, invoice_date, amount, "
+        "currency, note, object_key, content_type, byte_size, original_filename, "
+        "is_deleted, created_by, created_at"
+    )
+
+    def _incoming_dict(row: dict) -> dict:
+        return {
+            "id": int(row["id"]),
+            "party_id": int(row["party_id"]),
+            "source_transaction_id": (
+                int(row["source_transaction_id"])
+                if row.get("source_transaction_id") is not None
+                else None
+            ),
+            "document_no": row.get("document_no"),
+            "invoice_date": (
+                row["invoice_date"].isoformat()
+                if hasattr(row.get("invoice_date"), "isoformat")
+                else str(row.get("invoice_date") or "")[:10]
+            ),
+            "amount": _money(row.get("amount")),
+            "currency": row.get("currency"),
+            "note": row.get("note"),
+            "content_type": row.get("content_type"),
+            "byte_size": int(row["byte_size"]) if row.get("byte_size") is not None else None,
+            "original_filename": row.get("original_filename"),
+            "is_deleted": bool(row.get("is_deleted")),
+            "created_by": row.get("created_by"),
+            "created_at": (
+                row["created_at"].isoformat() if row.get("created_at") else None
+            ),
+        }
+
     @bp.route("/api/invoices/quick-create", methods=["POST"])
     @giris_gerekli
     @module_required("ledger")
     def api_invoices_quick_create():
-        """Atomik: give hareketi + giden fatura (tek DB transaction).
+        """Atomik kısayol: hareket + fatura (tek DB transaction).
 
-        Q1: yalnızca direction=give / JSON. Gelen (receive) Q2'de.
+        - direction=give + JSON → ledger_transactions(give) + ledger_invoices
+        - direction=receive + multipart → ledger_transactions(receive)
+          + R2 görsel + ledger_incoming_invoices
+
         faturalar tablosuna / GİB'e yazılmaz.
         """
         _ensure()
-        data = request.get_json(silent=True) or {}
+        ctype = (request.content_type or "").lower()
+        is_multipart = "multipart/form-data" in ctype
 
-        direction = str(data.get("direction") or "").strip().lower()
-        if direction != "give":
-            return _json_err(
-                "Q1: quick-create yalnızca direction=give destekler "
-                "(receive sonraki aşamada)."
-            )
+        if is_multipart:
+            form = request.form
+            direction = str(form.get("direction") or "").strip().lower()
+        else:
+            data = request.get_json(silent=True) or {}
+            direction = str(data.get("direction") or "").strip().lower()
 
+        if direction == "give":
+            if is_multipart:
+                return _json_err("direction=give için JSON body kullanın.")
+            return _quick_create_give(data)
+        if direction == "receive":
+            if not is_multipart:
+                return _json_err(
+                    "direction=receive için multipart/form-data (file) gerekli."
+                )
+            return _quick_create_receive(form)
+        return _json_err("direction give veya receive olmalı.")
+
+    def _quick_create_uid() -> int | None:
+        try:
+            if current_user and getattr(current_user, "is_authenticated", False):
+                return int(current_user.id)
+        except (TypeError, ValueError, AttributeError):
+            pass
+        return None
+
+    def _quick_create_give(data: dict):
         try:
             party_id = int(data.get("party_id"))
         except (TypeError, ValueError):
@@ -379,13 +446,7 @@ def register_ledger_invoice_routes(bp, *, helpers: dict) -> None:
             net = amount.quantize(Decimal("0.01"))
         net_l, tax_l, gross_l = compute_line_totals(1, net, tax_rate)
 
-        uid = None
-        try:
-            if current_user and getattr(current_user, "is_authenticated", False):
-                uid = int(current_user.id)
-        except (TypeError, ValueError, AttributeError):
-            uid = None
-
+        uid = _quick_create_uid()
         amount_s = str(amount.quantize(Decimal("0.01")))
         _TX_RET = (
             "id, party_id, direction, amount, currency, occurred_at, note, "
@@ -476,6 +537,171 @@ def register_ledger_invoice_routes(bp, *, helpers: dict) -> None:
                     "ok": True,
                     "transaction": _tx_dict(tx),
                     "invoice": _inv_dict(inv, lines),
+                    "balances": _balances_for_party(party_id),
+                    "yazma_gib": False,
+                }
+            ),
+            201,
+        )
+
+    def _quick_create_receive(form):
+        slug = _tenant_slug()
+        if not slug:
+            return _json_err("Kiracı bağlamı yok.", 403)
+
+        try:
+            party_id = int(form.get("party_id") or 0)
+        except (TypeError, ValueError):
+            return _json_err("party_id gerekli.")
+        if party_id <= 0:
+            return _json_err("party_id gerekli.")
+
+        party = _load_party(party_id)
+        if not party:
+            return _json_err("Cari bulunamadı.", 404)
+        if party.get("is_active") is False:
+            return _json_err("Pasif cari için fatura oluşturulamaz.")
+
+        try:
+            amount = _dec(form.get("amount"))
+        except (InvalidOperation, TypeError, ValueError):
+            return _json_err("Geçersiz tutar.")
+        if amount <= 0:
+            return _json_err("Tutar 0'dan büyük olmalı.")
+        amount = amount.quantize(Decimal("0.01"))
+
+        currency = str(form.get("currency") or "TRY").strip().upper()
+        if currency != "TRY":
+            return _json_err("v1 yalnızca TRY destekler.")
+
+        document_no = (form.get("document_no") or "").strip()
+        if not document_no or len(document_no) > 128:
+            return _json_err("document_no gerekli (max 128).")
+
+        inv_date_raw = (form.get("invoice_date") or "").strip()
+        if inv_date_raw:
+            try:
+                inv_date = date_cls.fromisoformat(inv_date_raw[:10])
+            except ValueError:
+                return _json_err("invoice_date geçersiz (YYYY-MM-DD).")
+        else:
+            inv_date = None
+
+        occurred_at = _parse_occurred_at(form.get("occurred_at"))
+        if occurred_at is None:
+            return _json_err("occurred_at geçersiz.")
+        if inv_date is None:
+            inv_date = (
+                occurred_at.date() if hasattr(occurred_at, "date") else occurred_at
+            )
+
+        note = (form.get("note") or "").strip() or None
+        if note and len(note) > 2000:
+            return _json_err("note en fazla 2000 karakter.")
+
+        upload = request.files.get("file") or request.files.get("attachment")
+        if upload is None or not getattr(upload, "filename", None):
+            return _json_err("Dosya gerekli (multipart alan: file).")
+
+        raw = upload.read(_QC_IN_MAX_BYTES + 1)
+        if not raw:
+            return _json_err("Dosya boş.")
+        if len(raw) > _QC_IN_MAX_BYTES:
+            return _json_err("Dosya en fazla 5 MB olabilir.")
+
+        detected = _detect_image(raw)
+        if not detected:
+            return _json_err(
+                "Geçersiz dosya: yalnızca gerçek JPEG/PNG/WEBP kabul edilir."
+            )
+        content_type, ext = detected
+        original_filename = _sanitize_name(upload.filename)
+
+        uid = _quick_create_uid()
+        amount_s = str(amount)
+        object_key = (
+            f"{slug}/ledger/incoming/{party_id}/{uuid.uuid4().hex}.{ext}"
+        )
+        _TX_RET = (
+            "id, party_id, direction, amount, currency, occurred_at, note, "
+            "created_by, is_void, metadata, created_at"
+        )
+        r2_uploaded = False
+
+        try:
+            with db_txn() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    f"""
+                    INSERT INTO ledger_transactions (
+                        party_id, direction, amount, currency, occurred_at,
+                        note, created_by, metadata
+                    ) VALUES (
+                        %s, 'receive', %s, 'TRY', %s, %s, %s, '{{}}'::jsonb
+                    )
+                    RETURNING {_TX_RET}
+                    """,
+                    (party_id, amount_s, occurred_at, note, uid),
+                )
+                tx_row = cur.fetchone()
+                if not tx_row:
+                    raise RuntimeError("Hareket INSERT boş döndü.")
+                tx = dict(tx_row)
+                tx_id = int(tx["id"])
+
+                try:
+                    put_bytes(object_key, raw, content_type=content_type)
+                    r2_uploaded = True
+                except R2StorageError as r2exc:
+                    raise RuntimeError(f"Dosya depolanamadı: {r2exc}") from r2exc
+
+                cur.execute(
+                    f"""
+                    INSERT INTO ledger_incoming_invoices (
+                        party_id, source_transaction_id, document_no,
+                        invoice_date, amount, currency, note, object_key,
+                        content_type, byte_size, original_filename, created_by
+                    ) VALUES (
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    )
+                    RETURNING {_INCOMING_COLS}
+                    """,
+                    (
+                        party_id,
+                        tx_id,
+                        document_no,
+                        inv_date,
+                        amount,
+                        currency,
+                        note,
+                        object_key,
+                        content_type,
+                        len(raw),
+                        original_filename,
+                        uid,
+                    ),
+                )
+                in_row = cur.fetchone()
+                if not in_row:
+                    raise RuntimeError("Gelen fatura INSERT boş döndü.")
+                incoming = dict(in_row)
+        except Exception as exc:
+            if r2_uploaded:
+                try:
+                    r2_delete(object_key)
+                except R2StorageError:
+                    pass
+            return _json_err(
+                f"Atomik oluşturma başarısız (rollback): {exc}",
+                500,
+            )
+
+        return (
+            jsonify(
+                {
+                    "ok": True,
+                    "transaction": _tx_dict(tx),
+                    "incoming_invoice": _incoming_dict(incoming),
                     "balances": _balances_for_party(party_id),
                     "yazma_gib": False,
                 }
