@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import uuid
 from datetime import date as date_cls
 from decimal import Decimal, InvalidOperation
@@ -22,6 +23,162 @@ from tenant_module_access import module_required
 
 # Gelen fatura görseli — I2 ile aynı limit (DB CHECK uyumlu)
 _QC_IN_MAX_BYTES = 5 * 1024 * 1024
+_WS_RE = re.compile(r"\s+")
+
+
+def _stock_name_norm(name: str) -> str:
+    """Ürün eşleştirme: trim + çoklu boşluk tek + casefold (S2/S3 ortak)."""
+    s = _WS_RE.sub(" ", str(name or "").strip())
+    return s.casefold()
+
+
+def _apply_stock_for_lines(
+    cur,
+    *,
+    stock_direction: str,
+    source_kind: str,
+    invoice_id: int,
+    lines: list[dict],
+    occurred_at,
+    created_by: int | None,
+) -> None:
+    """Fatura satırlarından stok hareketi (aynı db_txn cursor).
+
+    stock_direction: 'in' | 'out'
+    source_kind: 'outgoing_line' | 'incoming_line'
+    lines: [{line_id, description, quantity, tax_rate?}, ...]
+    """
+    if stock_direction not in ("in", "out"):
+        raise ValueError(f"stock_direction geçersiz: {stock_direction}")
+    if source_kind not in ("outgoing_line", "incoming_line"):
+        raise ValueError(f"source_kind geçersiz: {source_kind}")
+
+    for spec in lines or []:
+        desc = str(spec.get("description") or "").strip()
+        if not desc:
+            continue
+        try:
+            qty = Decimal(str(spec.get("quantity") if spec.get("quantity") is not None else 0))
+        except (InvalidOperation, TypeError, ValueError) as exc:
+            raise ValueError(f"Stok miktarı geçersiz: {desc}") from exc
+        if qty <= 0:
+            continue
+        line_id = int(spec["line_id"])
+        name_norm = _stock_name_norm(desc)
+        if not name_norm:
+            continue
+
+        tax_rate = 20
+        try:
+            if spec.get("tax_rate") is not None:
+                tax_rate = int(spec.get("tax_rate"))
+        except (TypeError, ValueError):
+            tax_rate = 20
+        if tax_rate < 0 or tax_rate > 100:
+            tax_rate = 20
+
+        cur.execute(
+            """
+            SELECT id FROM ledger_products
+            WHERE name_norm = %s AND is_active = TRUE
+            ORDER BY id ASC
+            LIMIT 1
+            FOR UPDATE
+            """,
+            (name_norm,),
+        )
+        prow = cur.fetchone()
+        if prow:
+            product_id = int(dict(prow)["id"] if not isinstance(prow, dict) else prow["id"])
+        else:
+            cur.execute(
+                """
+                INSERT INTO ledger_products (
+                    name, name_norm, unit, default_tax_rate, qty_on_hand,
+                    is_active, created_by
+                ) VALUES (
+                    %s, %s, 'adet', %s, 0, TRUE, %s
+                )
+                RETURNING id
+                """,
+                (desc, name_norm, tax_rate, created_by),
+            )
+            ins = cur.fetchone()
+            if not ins:
+                raise RuntimeError(f"Ürün oluşturulamadı: {desc}")
+            product_id = int(dict(ins)["id"] if not isinstance(ins, dict) else ins["id"])
+
+        if source_kind == "outgoing_line":
+            cur.execute(
+                """
+                INSERT INTO ledger_stock_movements (
+                    product_id, direction, quantity, occurred_at, note,
+                    source_kind, outgoing_invoice_id, outgoing_line_id,
+                    created_by, is_void
+                ) VALUES (
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s,
+                    %s, FALSE
+                )
+                """,
+                (
+                    product_id,
+                    stock_direction,
+                    qty,
+                    occurred_at,
+                    desc[:200],
+                    source_kind,
+                    int(invoice_id),
+                    line_id,
+                    created_by,
+                ),
+            )
+        else:
+            cur.execute(
+                """
+                INSERT INTO ledger_stock_movements (
+                    product_id, direction, quantity, occurred_at, note,
+                    source_kind, incoming_invoice_id, incoming_line_id,
+                    created_by, is_void
+                ) VALUES (
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s,
+                    %s, FALSE
+                )
+                """,
+                (
+                    product_id,
+                    stock_direction,
+                    qty,
+                    occurred_at,
+                    desc[:200],
+                    source_kind,
+                    int(invoice_id),
+                    line_id,
+                    created_by,
+                ),
+            )
+
+        if stock_direction == "out":
+            cur.execute(
+                """
+                UPDATE ledger_products
+                SET qty_on_hand = qty_on_hand - %s,
+                    updated_at = NOW()
+                WHERE id = %s
+                """,
+                (qty, product_id),
+            )
+        else:
+            cur.execute(
+                """
+                UPDATE ledger_products
+                SET qty_on_hand = qty_on_hand + %s,
+                    updated_at = NOW()
+                WHERE id = %s
+                """,
+                (qty, product_id),
+            )
 
 
 def register_ledger_invoice_routes(bp, *, helpers: dict) -> None:
@@ -566,6 +723,7 @@ def register_ledger_invoice_routes(bp, *, helpers: dict) -> None:
                 inv = dict(inv_row)
                 inv_id = int(inv["id"])
 
+                stock_line_specs: list[dict] = []
                 for line_no, (desc, qty, up, tr, gross_l) in enumerate(
                     line_payload, start=1
                 ):
@@ -576,9 +734,33 @@ def register_ledger_invoice_routes(bp, *, helpers: dict) -> None:
                             tax_rate, line_total
                         )
                         VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        RETURNING id, description, quantity, tax_rate
                         """,
                         (inv_id, line_no, desc, qty, up, tr, gross_l),
                     )
+                    line_ins = cur.fetchone()
+                    if not line_ins:
+                        raise RuntimeError("Fatura satırı INSERT boş döndü.")
+                    lr = dict(line_ins)
+                    stock_line_specs.append(
+                        {
+                            "line_id": int(lr["id"]),
+                            "description": lr.get("description") or desc,
+                            "quantity": lr.get("quantity") if lr.get("quantity") is not None else qty,
+                            "tax_rate": lr.get("tax_rate") if lr.get("tax_rate") is not None else tr,
+                        }
+                    )
+
+                # S3: Giden satırlar → stok çıkışı (aynı atomik tx)
+                _apply_stock_for_lines(
+                    cur,
+                    stock_direction="out",
+                    source_kind="outgoing_line",
+                    invoice_id=inv_id,
+                    lines=stock_line_specs,
+                    occurred_at=occurred_at,
+                    created_by=uid,
+                )
 
                 cur.execute(
                     f"""
