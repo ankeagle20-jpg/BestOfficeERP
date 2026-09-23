@@ -1075,9 +1075,33 @@
         </div>
       </div>
       <div class="pc-field"><label for="pc-qc-gelen-doc">Belge no</label><input id="pc-qc-gelen-doc" maxlength="128" autocomplete="off"></div>
-      <div class="pc-field"><label for="pc-qc-gelen-amount">Tutar</label><input id="pc-qc-gelen-amount" type="number" min="0.01" step="0.01" inputmode="decimal"></div>
       <div class="pc-field"><label for="pc-qc-gelen-date">Tarih</label><input type="date" id="pc-qc-gelen-date"></div>
       <div class="pc-field"><label for="pc-qc-gelen-note">Not (isteğe bağlı)</label><input id="pc-qc-gelen-note" maxlength="300" autocomplete="off"></div>
+      <div class="pc-qc-lines-wrap">
+        <div class="pc-import-table-wrap" style="max-height:16rem;overflow:auto;">
+          <table class="pc-qc-lines-table" id="pc-qc-gelen-lines-table">
+            <thead>
+              <tr>
+                <th>Açıklama</th>
+                <th class="num">Miktar</th>
+                <th class="num">Birim (KDV hariç)</th>
+                <th class="num">KDV %</th>
+                <th class="num">Satır</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="pc-qc-gelen-lines-tbody"></tbody>
+          </table>
+        </div>
+        <div class="pc-actions" style="margin:0.35rem 0 0.5rem;">
+          <button type="button" class="pc-btn pc-btn-ghost" id="pc-qc-gelen-line-add">+ Satır ekle</button>
+        </div>
+      </div>
+      <div class="pc-qc-totals" id="pc-qc-gelen-totals" aria-live="polite">
+        <div class="pc-qc-tot"><span>Tutar (KDV hariç)</span><strong id="pc-qc-gelen-sum-net">0,00</strong></div>
+        <div class="pc-qc-tot"><span>KDV</span><strong id="pc-qc-gelen-sum-tax">0,00</strong></div>
+        <div class="pc-qc-tot"><span>KDV Dahil</span><strong id="pc-qc-gelen-sum-gross">0,00</strong></div>
+      </div>
       <div class="pc-field">
         <label for="pc-qc-gelen-file">Fotoğraf / görsel (arşiv)</label>
         <input id="pc-qc-gelen-file" type="file" accept="image/jpeg,image/png,image/webp" capture="environment">
@@ -3387,7 +3411,7 @@
     }
   }
 
-  function qcGidenTaxSelectHtml(selected) {
+  function qcTaxSelectHtml(selected) {
     var rates = [20, 10, 1, 0];
     var sel = parseInt(selected, 10);
     if (!isFinite(sel)) sel = 20;
@@ -3404,9 +3428,23 @@
     }
     return html;
   }
+  var qcGidenTaxSelectHtml = qcTaxSelectHtml;
 
-  function readQcGidenLinesFromDom() {
-    var rows = document.querySelectorAll("#pc-qc-giden-lines-tbody tr");
+  var QC_GIDEN_LINES = {
+    tbodyId: "pc-qc-giden-lines-tbody",
+    sumNetId: "pc-qc-giden-sum-net",
+    sumTaxId: "pc-qc-giden-sum-tax",
+    sumGrossId: "pc-qc-giden-sum-gross"
+  };
+  var QC_GELEN_LINES = {
+    tbodyId: "pc-qc-gelen-lines-tbody",
+    sumNetId: "pc-qc-gelen-sum-net",
+    sumTaxId: "pc-qc-gelen-sum-tax",
+    sumGrossId: "pc-qc-gelen-sum-gross"
+  };
+
+  function readQcLinesFromDom(tbodyId) {
+    var rows = document.querySelectorAll("#" + tbodyId + " tr");
     var out = [];
     for (var i = 0; i < rows.length; i++) {
       var tr = rows[i];
@@ -3424,8 +3462,8 @@
     return out;
   }
 
-  function recalcQcGiden() {
-    var rows = document.querySelectorAll("#pc-qc-giden-lines-tbody tr");
+  function recalcQcLines(cfg) {
+    var rows = document.querySelectorAll("#" + cfg.tbodyId + " tr");
     var sumNet = 0;
     var sumTax = 0;
     var sumGross = 0;
@@ -3444,18 +3482,18 @@
     sumNet = qcRound2(sumNet);
     sumTax = qcRound2(sumTax);
     sumGross = qcRound2(sumGross);
-    var nEl = document.getElementById("pc-qc-giden-sum-net");
-    var tEl = document.getElementById("pc-qc-giden-sum-tax");
-    var gEl2 = document.getElementById("pc-qc-giden-sum-gross");
+    var nEl = document.getElementById(cfg.sumNetId);
+    var tEl = document.getElementById(cfg.sumTaxId);
+    var gEl2 = document.getElementById(cfg.sumGrossId);
     if (nEl) nEl.textContent = qcFmtTry(sumNet);
     if (tEl) tEl.textContent = qcFmtTry(sumTax);
     if (gEl2) gEl2.textContent = qcFmtTry(sumGross);
     return { net: sumNet, tax: sumTax, gross: sumGross };
   }
 
-  function addQcGidenLineRow(line) {
+  function addQcLineRow(cfg, line) {
     line = line || {};
-    var tb = document.getElementById("pc-qc-giden-lines-tbody");
+    var tb = document.getElementById(cfg.tbodyId);
     if (!tb) return;
     var tr = document.createElement("tr");
     var desc = line.description != null ? String(line.description) : "";
@@ -3466,28 +3504,75 @@
       '<td><input type="text" class="pc-qc-desc" maxlength="200" placeholder="Hizmet / ürün"></td>' +
       '<td class="num"><input type="number" class="pc-qc-qty" min="0.0001" step="any" inputmode="decimal"></td>' +
       '<td class="num"><input type="number" class="pc-qc-up" min="0" step="0.01" inputmode="decimal"></td>' +
-      '<td class="num"><select class="pc-qc-tax">' + qcGidenTaxSelectHtml(tax) + "</select></td>" +
+      '<td class="num"><select class="pc-qc-tax">' + qcTaxSelectHtml(tax) + "</select></td>" +
       '<td class="num"><span class="pc-qc-line-gross">0,00</span></td>' +
       '<td><button type="button" class="pc-btn pc-btn-ghost pc-qc-line-del" title="Satır sil">Sil</button></td>';
     tb.appendChild(tr);
     tr.querySelector(".pc-qc-desc").value = desc;
     tr.querySelector(".pc-qc-qty").value = qty;
     tr.querySelector(".pc-qc-up").value = up;
-    recalcQcGiden();
+    recalcQcLines(cfg);
   }
 
-  function setQcGidenLines(lines) {
-    var tb = document.getElementById("pc-qc-giden-lines-tbody");
+  function setQcLines(cfg, lines) {
+    var tb = document.getElementById(cfg.tbodyId);
     if (!tb) return;
     tb.innerHTML = "";
     if (!lines || !lines.length) {
-      addQcGidenLineRow({ description: "", quantity: 1, unit_price: "", tax_rate: 20 });
+      addQcLineRow(cfg, { description: "", quantity: 1, unit_price: "", tax_rate: 20 });
     } else {
       for (var i = 0; i < lines.length; i++) {
-        addQcGidenLineRow(lines[i]);
+        addQcLineRow(cfg, lines[i]);
       }
     }
-    recalcQcGiden();
+    recalcQcLines(cfg);
+  }
+
+  function wireQcLinesEditor(cfg) {
+    var tb = document.getElementById(cfg.tbodyId);
+    if (!tb || tb._qcLinesWired) return;
+    tb._qcLinesWired = true;
+    tb.addEventListener("input", function () { recalcQcLines(cfg); });
+    tb.addEventListener("change", function () { recalcQcLines(cfg); });
+    tb.addEventListener("click", function (ev) {
+      var btn = ev.target && ev.target.closest ? ev.target.closest(".pc-qc-line-del") : null;
+      if (!btn) return;
+      var tr = btn.closest("tr");
+      if (tr && tb) {
+        if (tb.querySelectorAll("tr").length <= 1) {
+          setQcLines(cfg, [{ description: "", quantity: 1, unit_price: "", tax_rate: 20 }]);
+        } else {
+          tr.parentNode.removeChild(tr);
+          recalcQcLines(cfg);
+        }
+      }
+    });
+  }
+
+  function readQcGidenLinesFromDom() {
+    return readQcLinesFromDom(QC_GIDEN_LINES.tbodyId);
+  }
+  function recalcQcGiden() {
+    return recalcQcLines(QC_GIDEN_LINES);
+  }
+  function addQcGidenLineRow(line) {
+    addQcLineRow(QC_GIDEN_LINES, line);
+  }
+  function setQcGidenLines(lines) {
+    setQcLines(QC_GIDEN_LINES, lines);
+  }
+
+  function readQcGelenLinesFromDom() {
+    return readQcLinesFromDom(QC_GELEN_LINES.tbodyId);
+  }
+  function recalcQcGelen() {
+    return recalcQcLines(QC_GELEN_LINES);
+  }
+  function addQcGelenLineRow(line) {
+    addQcLineRow(QC_GELEN_LINES, line);
+  }
+  function setQcGelenLines(lines) {
+    setQcLines(QC_GELEN_LINES, lines);
   }
 
   function applyQcGidenOcrToForm() {
@@ -3579,7 +3664,7 @@
 
     var ban = document.getElementById("pc-qc-gelen-ocr-banner");
     var base = "AI önerisi (" + tip + ", güven: " + guven +
-      ") — satırları kontrol edin, Forma uygula ile belge no/tutar/tarih doldurun, sonra Kaydet. " +
+      ") — satırları kontrol edin, Forma uygula ile belge no/satırlar/tarih doldurun, sonra Kaydet. " +
       "GİB yok; otomatik kayıt yok.";
     if (guven === "dusuk") {
       base = "⚠ DÜŞÜK GÜVEN — AI okuması belirsiz veya eksik olabilir. " +
@@ -3643,22 +3728,47 @@
   function applyQcGelenOcrToForm() {
     var j = state.qcGelenOcr;
     if (!j) return;
+    var oneri = j.oneri || {};
     var form = j.form || {};
-    if (form.document_no) {
-      document.getElementById("pc-qc-gelen-doc").value = String(form.document_no).slice(0, 128);
+    var satirlar = oneri.satirlar || form.satirlar || [];
+    var mapped = [];
+    for (var i = 0; i < satirlar.length; i++) {
+      var s = satirlar[i] || {};
+      mapped.push({
+        description: s.aciklama || "",
+        quantity: s.miktar != null ? s.miktar : 1,
+        unit_price: s.birim_fiyat != null ? s.birim_fiyat : "",
+        tax_rate: s.kdv_orani != null ? s.kdv_orani : 20
+      });
     }
-    if (form.amount_kdv_dahil != null && form.amount_kdv_dahil !== "") {
-      document.getElementById("pc-qc-gelen-amount").value = String(form.amount_kdv_dahil);
+    if (!mapped.length && form.amount_kdv_dahil != null) {
+      var tr = parseInt(form.tax_rate, 10);
+      if (!isFinite(tr)) tr = 20;
+      var gross = Number(form.amount_kdv_dahil);
+      var net = tr > 0 ? qcRound2(gross / (1 + tr / 100)) : qcRound2(gross);
+      mapped.push({
+        description: form.description || "Hizmet bedeli",
+        quantity: 1,
+        unit_price: net,
+        tax_rate: tr
+      });
     }
-    if (form.invoice_date) {
-      document.getElementById("pc-qc-gelen-date").value = String(form.invoice_date).slice(0, 10);
+    setQcGelenLines(mapped);
+    if (form.document_no || oneri.belge_no) {
+      document.getElementById("pc-qc-gelen-doc").value =
+        String(form.document_no || oneri.belge_no).slice(0, 128);
     }
-    if (form.note) {
-      document.getElementById("pc-qc-gelen-note").value = String(form.note).slice(0, 300);
+    if (form.invoice_date || oneri.tarih) {
+      document.getElementById("pc-qc-gelen-date").value =
+        String(form.invoice_date || oneri.tarih).slice(0, 10);
+    }
+    if (form.note || oneri.not_ham) {
+      document.getElementById("pc-qc-gelen-note").value =
+        String(form.note || oneri.not_ham).slice(0, 300);
     }
     var ban = document.getElementById("pc-qc-gelen-ocr-banner");
-    var guven = (j.oneri && j.oneri.guven) || "orta";
-    ban.textContent = "Form alanları AI önerisiyle dolduruldu (güven: " + guven +
+    var guven = oneri.guven || "orta";
+    ban.textContent = "Satırlar AI önerisiyle dolduruldu (güven: " + guven +
       "). Arşiv görselini kontrol edip Kaydet’e basın — otomatik kayıt yok; GİB yok.";
     ban.classList.add("is-on");
     ban.classList.toggle("is-low", guven === "dusuk");
@@ -3685,7 +3795,6 @@
     if (!state.partyId) return;
     closeDetailSidePanels("pc-qc-gelen-panel");
     document.getElementById("pc-qc-gelen-doc").value = "";
-    document.getElementById("pc-qc-gelen-amount").value = "";
     document.getElementById("pc-qc-gelen-date").value = todayISO();
     document.getElementById("pc-qc-gelen-note").value = "";
     var fileEl = document.getElementById("pc-qc-gelen-file");
@@ -3694,6 +3803,7 @@
     err.hidden = true;
     err.textContent = "";
     clearQcGelenOcrUi();
+    setQcGelenLines([{ description: "", quantity: 1, unit_price: "", tax_rate: 20 }]);
     document.getElementById("pc-qc-gelen-panel").classList.add("open");
     try { document.getElementById("pc-qc-gelen-doc").focus(); } catch (e) {}
   }
@@ -3766,26 +3876,7 @@
   document.getElementById("pc-qc-giden-line-add").addEventListener("click", function () {
     addQcGidenLineRow({ description: "", quantity: 1, unit_price: "", tax_rate: 20 });
   });
-  document.getElementById("pc-qc-giden-lines-tbody").addEventListener("input", function () {
-    recalcQcGiden();
-  });
-  document.getElementById("pc-qc-giden-lines-tbody").addEventListener("change", function () {
-    recalcQcGiden();
-  });
-  document.getElementById("pc-qc-giden-lines-tbody").addEventListener("click", function (ev) {
-    var btn = ev.target && ev.target.closest ? ev.target.closest(".pc-qc-line-del") : null;
-    if (!btn) return;
-    var tr = btn.closest("tr");
-    var tb = document.getElementById("pc-qc-giden-lines-tbody");
-    if (tr && tb) {
-      if (tb.querySelectorAll("tr").length <= 1) {
-        setQcGidenLines([{ description: "", quantity: 1, unit_price: "", tax_rate: 20 }]);
-      } else {
-        tr.parentNode.removeChild(tr);
-        recalcQcGiden();
-      }
-    }
-  });
+  wireQcLinesEditor(QC_GIDEN_LINES);
 
   document.getElementById("pc-qc-gelen-ocr-btn").addEventListener("click", function () {
     document.getElementById("pc-qc-gelen-ocr-file").click();
@@ -3822,6 +3913,11 @@
   document.getElementById("pc-qc-gelen-ocr-dismiss").addEventListener("click", function () {
     clearQcGelenOcrUi();
   });
+
+  document.getElementById("pc-qc-gelen-line-add").addEventListener("click", function () {
+    addQcGelenLineRow({ description: "", quantity: 1, unit_price: "", tax_rate: 20 });
+  });
+  wireQcLinesEditor(QC_GELEN_LINES);
 
   document.getElementById("pc-qc-giden-save").addEventListener("click", function () {
     var err = document.getElementById("pc-qc-giden-err");
@@ -3925,18 +4021,12 @@
       return;
     }
     var docNo = (document.getElementById("pc-qc-gelen-doc").value || "").trim();
-    var amount = (document.getElementById("pc-qc-gelen-amount").value || "").trim();
     var invDate = (document.getElementById("pc-qc-gelen-date").value || "").trim();
     var note = (document.getElementById("pc-qc-gelen-note").value || "").trim();
     var fileEl = document.getElementById("pc-qc-gelen-file");
     var file = fileEl && fileEl.files && fileEl.files[0];
     if (!docNo) {
       err.textContent = "Belge no gerekli.";
-      err.hidden = false;
-      return;
-    }
-    if (!amount || Number(amount) <= 0) {
-      err.textContent = "Tutar gerekli.";
       err.hidden = false;
       return;
     }
@@ -3950,10 +4040,57 @@
       err.hidden = false;
       return;
     }
+    var rawLines = readQcGelenLinesFromDom();
+    var lines = [];
+    for (var i = 0; i < rawLines.length; i++) {
+      var rl = rawLines[i];
+      var desc = (rl.description || "").trim();
+      var qty = Number(rl.quantity);
+      var up = Number(rl.unit_price);
+      var tax = parseInt(rl.tax_rate, 10);
+      if (!desc && !(isFinite(up) && up > 0)) continue;
+      if (!desc) {
+        err.textContent = "Satır " + (i + 1) + ": açıklama gerekli.";
+        err.hidden = false;
+        return;
+      }
+      if (!isFinite(qty) || qty <= 0) {
+        err.textContent = "Satır " + (i + 1) + ": miktar > 0 olmalı.";
+        err.hidden = false;
+        return;
+      }
+      if (!isFinite(up) || up < 0) {
+        err.textContent = "Satır " + (i + 1) + ": birim fiyat gerekli.";
+        err.hidden = false;
+        return;
+      }
+      if (!isFinite(tax) || tax < 0 || tax > 100) {
+        err.textContent = "Satır " + (i + 1) + ": KDV 0–100.";
+        err.hidden = false;
+        return;
+      }
+      lines.push({
+        description: desc.slice(0, 200),
+        quantity: qty,
+        unit_price: up,
+        tax_rate: tax
+      });
+    }
+    if (!lines.length) {
+      err.textContent = "En az bir satır gerekli.";
+      err.hidden = false;
+      return;
+    }
+    var sums = recalcQcGelen();
+    if (!(sums.gross > 0)) {
+      err.textContent = "KDV dahil toplam 0'dan büyük olmalı.";
+      err.hidden = false;
+      return;
+    }
     var fd = new FormData();
     fd.append("party_id", String(state.partyId));
     fd.append("direction", "receive");
-    fd.append("amount", amount);
+    fd.append("lines", JSON.stringify(lines));
     fd.append("document_no", docNo);
     fd.append("invoice_date", invDate);
     fd.append("occurred_at", invDate + "T12:00:00");

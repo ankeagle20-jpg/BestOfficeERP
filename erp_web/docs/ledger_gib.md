@@ -78,7 +78,7 @@ Payafin Cari detay ekranında fatura oluşturmanın **iki ayrı** yolu vardır. 
 ### Üst — atomik kısayol (`quick-create`)
 
 1. **Giden:** JSON `direction=give` → tek DB transaction içinde `ledger_transactions(give)` + `ledger_invoices` (`source_transaction_id` = yeni tx) + satır(lar). Gövde: ya eski tek alan (`amount` = KDV dahil + `tax_rate` + `description`) ya da çok satır `lines[]` (`description`, `quantity`, `unit_price` = KDV hariç, `tax_rate`); `lines` doluysa eski tutar alanları yok sayılır; tx tutarı = `grand_total`. Sonra mevcut Giden paneli (Önizle / Onayla / GİB taslak / Durum / HTML).
-2. **Gelen:** multipart `direction=receive` + görsel → tek DB transaction içinde `ledger_transactions(receive)` → R2 yükleme → `ledger_incoming_invoices` (`source_transaction_id` = yeni tx). Hata olursa DB rollback; R2’ye yazılmışsa best-effort silme.
+2. **Gelen:** multipart `direction=receive` + görsel → tek DB transaction içinde `ledger_transactions(receive)` → R2 yükleme → `ledger_incoming_invoices` (`source_transaction_id` = yeni tx; `amount` = KDV dahil grand). İsteğe bağlı `lines` = JSON string `[{description, quantity, unit_price, tax_rate}, …]` → `ledger_incoming_invoice_lines`; doluysa `amount` yok sayılır (otorite = satırlar). Eski tek `amount` yolu satır yazmaz (geriye uyum). Hata olursa DB rollback; R2’ye yazılmışsa best-effort silme. GİB yok.
 
 Form notu: *«Hareket ve fatura birlikte oluşur; bakiye güncellenir.»*
 
@@ -98,7 +98,7 @@ Aynı hareket için ikinci aktif giden veya gelen fatura **oluşturulamaz** (kı
 | Method | Path | Not |
 |---|---|---|
 | CRUD | `/ledger/api/parties` | `tax_id`, `tax_office`, `address`, `tax_id_kind` |
-| POST | `/ledger/api/invoices/quick-create` | Atomik: give+JSON (`amount` veya `lines[]`) → tx+`ledger_invoices`; receive+multipart → tx+R2+`ledger_incoming_invoices` |
+| POST | `/ledger/api/invoices/quick-create` | Atomik: give+JSON (`amount` veya `lines[]`) → tx+`ledger_invoices`; receive+multipart (`amount` veya `lines` JSON + file) → tx+R2+`ledger_incoming_invoices` (+ isteğe bağlı `ledger_incoming_invoice_lines`) |
 | POST | `/ledger/api/invoices/from-transaction` | Mevcut give+TRY → draft (satır yolu) |
 | GET/PUT | `/ledger/api/invoices/<id>` | local CRUD |
 | POST | `/ledger/api/invoices/<id>/confirm` | → ready + confirmed_at |

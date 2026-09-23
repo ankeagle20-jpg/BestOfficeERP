@@ -4572,6 +4572,43 @@ def ensure_ledger_incoming_invoice_tables():
         except Exception as e:
             print(f"ledger incoming invoice index: {e}")
 
+    execute(
+        """
+        CREATE TABLE IF NOT EXISTS ledger_incoming_invoice_lines (
+            id                      BIGSERIAL PRIMARY KEY,
+            incoming_invoice_id     BIGINT NOT NULL,
+            line_no                 INTEGER NOT NULL DEFAULT 1,
+            description             TEXT NOT NULL,
+            quantity                NUMERIC(18, 4) NOT NULL DEFAULT 1,
+            unit_price              NUMERIC(18, 4) NOT NULL DEFAULT 0,
+            tax_rate                INTEGER NOT NULL DEFAULT 0,
+            line_total              NUMERIC(18, 2) NOT NULL DEFAULT 0,
+            CONSTRAINT ledger_incoming_invoice_lines_inv_fkey
+                FOREIGN KEY (incoming_invoice_id)
+                REFERENCES ledger_incoming_invoices (id)
+                ON DELETE CASCADE,
+            CONSTRAINT ledger_incoming_invoice_lines_desc_chk
+                CHECK (length(trim(description)) > 0),
+            CONSTRAINT ledger_incoming_invoice_lines_qty_chk
+                CHECK (quantity > 0),
+            CONSTRAINT ledger_incoming_invoice_lines_tax_chk
+                CHECK (tax_rate >= 0 AND tax_rate <= 100),
+            CONSTRAINT ledger_incoming_invoice_lines_line_no_chk
+                CHECK (line_no >= 1)
+        )
+        """
+    )
+    for stmt in (
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_ledger_incoming_inv_lines_no "
+        "ON ledger_incoming_invoice_lines (incoming_invoice_id, line_no)",
+        "CREATE INDEX IF NOT EXISTS idx_ledger_incoming_invoice_lines_inv "
+        "ON ledger_incoming_invoice_lines (incoming_invoice_id, line_no)",
+    ):
+        try:
+            execute(stmt)
+        except Exception as e:
+            print(f"ledger incoming invoice lines index: {e}")
+
 
 def ensure_ledger_group_tables():
     """Payafin Cari L1.5 — gruplar + üyelik (kiracı search_path)."""

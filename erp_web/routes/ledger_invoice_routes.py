@@ -312,8 +312,27 @@ def register_ledger_invoice_routes(bp, *, helpers: dict) -> None:
         "is_deleted, created_by, created_at"
     )
 
-    def _incoming_dict(row: dict) -> dict:
+    _INCOMING_LINE_COLS = (
+        "id, incoming_invoice_id, line_no, description, quantity, unit_price, "
+        "tax_rate, line_total"
+    )
+
+    def _incoming_line_dict(row: dict) -> dict:
         return {
+            "id": int(row["id"]),
+            "incoming_invoice_id": int(row["incoming_invoice_id"]),
+            "line_no": int(row["line_no"]),
+            "description": row.get("description"),
+            "quantity": float(row["quantity"]) if row.get("quantity") is not None else 0,
+            "unit_price": float(row["unit_price"])
+            if row.get("unit_price") is not None
+            else 0,
+            "tax_rate": int(row.get("tax_rate") or 0),
+            "line_total": _money(row.get("line_total")),
+        }
+
+    def _incoming_dict(row: dict, lines: list | None = None) -> dict:
+        out = {
             "id": int(row["id"]),
             "party_id": int(row["party_id"]),
             "source_transaction_id": (
@@ -339,6 +358,9 @@ def register_ledger_invoice_routes(bp, *, helpers: dict) -> None:
                 row["created_at"].isoformat() if row.get("created_at") else None
             ),
         }
+        if lines is not None:
+            out["lines"] = lines
+        return out
 
     @bp.route("/api/invoices/quick-create", methods=["POST"])
     @giris_gerekli
@@ -606,13 +628,65 @@ def register_ledger_invoice_routes(bp, *, helpers: dict) -> None:
         if party.get("is_active") is False:
             return _json_err("Pasif cari için fatura oluşturulamaz.")
 
-        try:
-            amount = _dec(form.get("amount"))
-        except (InvalidOperation, TypeError, ValueError):
-            return _json_err("Geçersiz tutar.")
-        if amount <= 0:
-            return _json_err("Tutar 0'dan büyük olmalı.")
-        amount = amount.quantize(Decimal("0.01"))
+        from ledger_gib_adapter import compute_line_totals
+
+        # --- Çok satır (lines JSON) veya eski tek tutar ---
+        raw_lines_field = form.get("lines")
+        raw_lines = None
+        if raw_lines_field not in (None, ""):
+            if isinstance(raw_lines_field, str):
+                try:
+                    raw_lines = json.loads(raw_lines_field)
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    return _json_err("lines JSON geçersiz.")
+            elif isinstance(raw_lines_field, list):
+                raw_lines = raw_lines_field
+            else:
+                return _json_err("lines JSON geçersiz.")
+        use_multi = isinstance(raw_lines, list) and len(raw_lines) > 0
+        line_payload: list[tuple] = []
+
+        if use_multi:
+            if len(raw_lines) > 50:
+                return _json_err("En fazla 50 satır.")
+            grand_total = Decimal("0")
+            for i, raw in enumerate(raw_lines, start=1):
+                raw = raw or {}
+                desc = str(raw.get("description") or "").strip()
+                if not desc:
+                    return _json_err(f"Satır {i}: açıklama gerekli.")
+                try:
+                    qty = _dec(
+                        raw.get("quantity") if raw.get("quantity") is not None else 1
+                    )
+                    up = _dec(
+                        raw.get("unit_price") if raw.get("unit_price") is not None else 0
+                    )
+                    tr = int(
+                        raw.get("tax_rate") if raw.get("tax_rate") is not None else 0
+                    )
+                except (InvalidOperation, TypeError, ValueError):
+                    return _json_err(f"Satır {i}: tutar geçersiz.")
+                if qty <= 0:
+                    return _json_err(f"Satır {i}: miktar > 0 olmalı.")
+                if up < 0:
+                    return _json_err(f"Satır {i}: birim fiyat negatif olamaz.")
+                if tr < 0 or tr > 100:
+                    return _json_err(f"Satır {i}: KDV 0–100.")
+                _net_l, _tax_l, gross_l = compute_line_totals(qty, up, tr)
+                line_payload.append((desc, qty, up, tr, gross_l))
+                grand_total += gross_l
+            if grand_total <= 0:
+                return _json_err("Fatura toplamı 0'dan büyük olmalı.")
+            amount = grand_total.quantize(Decimal("0.01"))
+        else:
+            try:
+                amount = _dec(form.get("amount"))
+            except (InvalidOperation, TypeError, ValueError):
+                return _json_err("Geçersiz tutar.")
+            if amount <= 0:
+                return _json_err("Tutar 0'dan büyük olmalı.")
+            amount = amount.quantize(Decimal("0.01"))
 
         currency = str(form.get("currency") or "TRY").strip().upper()
         if currency != "TRY":
@@ -671,6 +745,7 @@ def register_ledger_invoice_routes(bp, *, helpers: dict) -> None:
             "created_by, is_void, metadata, created_at"
         )
         r2_uploaded = False
+        lines_out: list = []
 
         try:
             with db_txn() as conn:
@@ -729,6 +804,44 @@ def register_ledger_invoice_routes(bp, *, helpers: dict) -> None:
                 if not in_row:
                     raise RuntimeError("Gelen fatura INSERT boş döndü.")
                 incoming = dict(in_row)
+                incoming_id = int(incoming["id"])
+
+                # Eski amount yolu: satır yazılmaz (geriye uyum).
+                if use_multi:
+                    for line_no, (desc, qty, up, tr, gross_l) in enumerate(
+                        line_payload, start=1
+                    ):
+                        cur.execute(
+                            """
+                            INSERT INTO ledger_incoming_invoice_lines (
+                                incoming_invoice_id, line_no, description,
+                                quantity, unit_price, tax_rate, line_total
+                            )
+                            VALUES (%s, %s, %s, %s, %s, %s, %s)
+                            """,
+                            (
+                                incoming_id,
+                                line_no,
+                                desc,
+                                qty,
+                                up,
+                                tr,
+                                gross_l,
+                            ),
+                        )
+                    cur.execute(
+                        f"""
+                        SELECT {_INCOMING_LINE_COLS}
+                        FROM ledger_incoming_invoice_lines
+                        WHERE incoming_invoice_id = %s
+                        ORDER BY line_no, id
+                        """,
+                        (incoming_id,),
+                    )
+                    line_rows = cur.fetchall() or []
+                    lines_out = [
+                        _incoming_line_dict(dict(r)) for r in line_rows
+                    ]
         except Exception as exc:
             if r2_uploaded:
                 try:
@@ -745,7 +858,9 @@ def register_ledger_invoice_routes(bp, *, helpers: dict) -> None:
                 {
                     "ok": True,
                     "transaction": _tx_dict(tx),
-                    "incoming_invoice": _incoming_dict(incoming),
+                    "incoming_invoice": _incoming_dict(
+                        incoming, lines_out if use_multi else None
+                    ),
                     "balances": _balances_for_party(party_id),
                     "yazma_gib": False,
                 }
