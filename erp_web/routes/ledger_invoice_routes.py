@@ -988,8 +988,9 @@ def register_ledger_invoice_routes(bp, *, helpers: dict) -> None:
                 incoming = dict(in_row)
                 incoming_id = int(incoming["id"])
 
-                # Eski amount yolu: satır yazılmaz (geriye uyum).
+                # Eski amount yolu: satır yazılmaz (geriye uyum) — stok da yok.
                 if use_multi:
+                    stock_line_specs: list[dict] = []
                     for line_no, (desc, qty, up, tr, gross_l) in enumerate(
                         line_payload, start=1
                     ):
@@ -1000,6 +1001,7 @@ def register_ledger_invoice_routes(bp, *, helpers: dict) -> None:
                                 quantity, unit_price, tax_rate, line_total
                             )
                             VALUES (%s, %s, %s, %s, %s, %s, %s)
+                            RETURNING id, description, quantity, tax_rate
                             """,
                             (
                                 incoming_id,
@@ -1011,6 +1013,36 @@ def register_ledger_invoice_routes(bp, *, helpers: dict) -> None:
                                 gross_l,
                             ),
                         )
+                        line_ins = cur.fetchone()
+                        if not line_ins:
+                            raise RuntimeError(
+                                "Gelen fatura satırı INSERT boş döndü."
+                            )
+                        lr = dict(line_ins)
+                        stock_line_specs.append(
+                            {
+                                "line_id": int(lr["id"]),
+                                "description": lr.get("description") or desc,
+                                "quantity": lr.get("quantity")
+                                if lr.get("quantity") is not None
+                                else qty,
+                                "tax_rate": lr.get("tax_rate")
+                                if lr.get("tax_rate") is not None
+                                else tr,
+                            }
+                        )
+
+                    # S4: Gelen çok-satır → stok girişi (aynı atomik tx)
+                    _apply_stock_for_lines(
+                        cur,
+                        stock_direction="in",
+                        source_kind="incoming_line",
+                        invoice_id=incoming_id,
+                        lines=stock_line_specs,
+                        occurred_at=occurred_at,
+                        created_by=uid,
+                    )
+
                     cur.execute(
                         f"""
                         SELECT {_INCOMING_LINE_COLS}
