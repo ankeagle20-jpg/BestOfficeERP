@@ -1252,29 +1252,65 @@ class BestOfficeGIBManager:
         return None
 
     def _find_fatura_by_uuid(self, uuid, days_back=370, force_new_session=True):
+        """ETTN/UUID ile portal satırı bul (TASLAKLARI_GETIR dilimli tarama).
+
+        Dar→geniş strateji (stop-on-first-hit): önce ±3 gün, sonra ±14 / ±62 /
+        istenen days_back (üst sınır 370 merdiveni). days_back olduğu gibi
+        uygulanır (eski max(7, …) tabanı yok — days_back=3 gerçekten 3 gün).
+        Dilimler arası kısa bekleme portal_kesilen ile aynı (0.22s).
+        """
         from datetime import datetime, timedelta
         if force_new_session:
             self._fresh_login()
         uid = str(uuid or "").strip().lower()
         if not uid:
             return None, None
+        try:
+            days_back_i = int(days_back or 370)
+        except (TypeError, ValueError):
+            days_back_i = 370
+        if days_back_i < 1:
+            days_back_i = 1
+
         bugun = datetime.now().date()
-        bas_d = bugun - timedelta(days=max(7, int(days_back or 370)))
         bit_d = bugun + timedelta(days=1)
         ht_raw = (os.getenv("GIB_PORTAL_LISTE_HANGI_TIP") or "5000/30000").strip()
         hangi_tips = [t.strip() for t in ht_raw.split("|") if t.strip()] or ["5000/30000"]
-        cur = bas_d
-        while cur <= bit_d:
-            chunk_end = min(cur + timedelta(days=14), bit_d)
-            bas_s = cur.strftime("%d/%m/%Y")
-            bit_s = chunk_end.strftime("%d/%m/%Y")
-            for ht in hangi_tips:
-                for d in self._portal_taslaklari_data_raw(bas_s, bit_s, ht):
-                    et = self._portal_extract_ettn(d).strip().lower()
-                    if et == uid:
-                        return d, d
-            cur = chunk_end + timedelta(days=1)
-        bas = bas_d.strftime("%d/%m/%Y")
+
+        # Dar → geniş (stop-on-first-hit); days_back üst sınırdır.
+        ladder = (3, 14, 62, 370)
+        windows = []
+        for w in ladder:
+            if w <= days_back_i:
+                windows.append(w)
+        if not windows or windows[-1] != days_back_i:
+            windows.append(days_back_i)
+
+        def _scan_window(bas_d):
+            cur = bas_d
+            first_chunk = True
+            while cur <= bit_d:
+                if not first_chunk:
+                    time.sleep(0.22)
+                first_chunk = False
+                chunk_end = min(cur + timedelta(days=14), bit_d)
+                bas_s = cur.strftime("%d/%m/%Y")
+                bit_s = chunk_end.strftime("%d/%m/%Y")
+                for ht in hangi_tips:
+                    for d in self._portal_taslaklari_data_raw(bas_s, bit_s, ht):
+                        et = self._portal_extract_ettn(d).strip().lower()
+                        if et == uid:
+                            return d, d
+                cur = chunk_end + timedelta(days=1)
+            return None
+
+        for w in windows:
+            hit = _scan_window(bugun - timedelta(days=w))
+            if hit is not None:
+                return hit
+
+        # Yedek: kütüphane faturalari_getir (hangiTip/eşleştirme aynı; dokunulmadı)
+        bas = (bugun - timedelta(days=days_back_i)).strftime("%d/%m/%Y")
         bit = bit_d.strftime("%d/%m/%Y")
         rows = self.client.faturalari_getir(baslangic_tarihi=bas, bitis_tarihi=bit) or []
         for r in rows:
