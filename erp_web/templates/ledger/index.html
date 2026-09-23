@@ -1008,13 +1008,36 @@
       <h2>Gelen Fatura (hızlı)</h2>
       <p class="pc-qc-note" role="status">Hareket ve fatura birlikte oluşur; bakiye güncellenir.</p>
       <p class="pc-in-inv-warn" role="status">Bu kayıt GİB’e gitmez. Karşı tarafın kestiği belgeyi arşivlersiniz.</p>
+      <div class="pc-ocr-actions">
+        <button type="button" class="pc-btn pc-btn-ghost" id="pc-qc-gelen-ocr-btn">Belgeden doldur</button>
+        <input type="file" id="pc-qc-gelen-ocr-file" accept="image/jpeg,image/png,image/webp,image/*" capture="environment" hidden>
+      </div>
+      <div id="pc-qc-gelen-ocr-banner" class="pc-ocr-banner" role="status"></div>
+      <div id="pc-qc-gelen-ocr-preview" class="pc-order-ocr-preview" hidden>
+        <div class="pc-meta" id="pc-qc-gelen-ocr-preview-meta"></div>
+        <div class="pc-import-table-wrap" style="max-height:10rem;overflow:auto;">
+          <table>
+            <thead>
+              <tr>
+                <th>Açıklama</th><th class="num">Miktar</th><th class="num">Birim</th><th class="num">KDV</th><th class="num">Satır</th>
+              </tr>
+            </thead>
+            <tbody id="pc-qc-gelen-ocr-tbody"></tbody>
+          </table>
+        </div>
+        <div class="pc-actions">
+          <button type="button" class="pc-btn pc-btn-primary" id="pc-qc-gelen-ocr-apply">Forma uygula</button>
+          <button type="button" class="pc-btn pc-btn-ghost" id="pc-qc-gelen-ocr-dismiss">Vazgeç</button>
+        </div>
+      </div>
       <div class="pc-field"><label for="pc-qc-gelen-doc">Belge no</label><input id="pc-qc-gelen-doc" maxlength="128" autocomplete="off"></div>
       <div class="pc-field"><label for="pc-qc-gelen-amount">Tutar</label><input id="pc-qc-gelen-amount" type="number" min="0.01" step="0.01" inputmode="decimal"></div>
       <div class="pc-field"><label for="pc-qc-gelen-date">Tarih</label><input type="date" id="pc-qc-gelen-date"></div>
       <div class="pc-field"><label for="pc-qc-gelen-note">Not (isteğe bağlı)</label><input id="pc-qc-gelen-note" maxlength="300" autocomplete="off"></div>
       <div class="pc-field">
-        <label for="pc-qc-gelen-file">Fotoğraf / görsel</label>
+        <label for="pc-qc-gelen-file">Fotoğraf / görsel (arşiv)</label>
         <input id="pc-qc-gelen-file" type="file" accept="image/jpeg,image/png,image/webp" capture="environment">
+        <p class="pc-meta" id="pc-qc-gelen-file-hint" style="margin:0.25rem 0 0;">Belgeden doldur ile seçilen görsel arşive de kopyalanır; isterseniz değiştirebilirsiniz.</p>
       </div>
       <div id="pc-qc-gelen-err" class="pc-err" hidden></div>
       <div class="pc-actions">
@@ -1225,7 +1248,8 @@
     incomingByTx: {},
     selectMode: false,
     selectedPartyIds: {},
-    qcGidenOcr: null
+    qcGidenOcr: null,
+    qcGelenOcr: null
   };
 
   var ASSET_LABELS = {
@@ -3318,6 +3342,134 @@
     ban.classList.toggle("is-low", guven === "dusuk");
   }
 
+  /* ---- S4: Gelen hızlı — Belgeden doldur (OCR → tutar/belge no/tarih; GİB yok; sessiz kayıt yok) ---- */
+  function assignFileToInput(inputEl, file) {
+    if (!inputEl || !file) return false;
+    try {
+      var dt = new DataTransfer();
+      dt.items.add(file);
+      inputEl.files = dt.files;
+      return !!(inputEl.files && inputEl.files[0]);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function clearQcGelenOcrUi() {
+    state.qcGelenOcr = null;
+    var ban = document.getElementById("pc-qc-gelen-ocr-banner");
+    if (ban) {
+      ban.classList.remove("is-on", "is-low");
+      ban.textContent = "";
+    }
+    var box = document.getElementById("pc-qc-gelen-ocr-preview");
+    if (box) {
+      box.classList.remove("is-on");
+      box.hidden = true;
+    }
+    var tb = document.getElementById("pc-qc-gelen-ocr-tbody");
+    if (tb) tb.innerHTML = "";
+    var meta = document.getElementById("pc-qc-gelen-ocr-preview-meta");
+    if (meta) meta.textContent = "";
+    var fi = document.getElementById("pc-qc-gelen-ocr-file");
+    if (fi) fi.value = "";
+  }
+
+  function showQcGelenOcrPreview(j) {
+    state.qcGelenOcr = j || null;
+    var oneri = (j && j.oneri) || {};
+    var form = (j && j.form) || {};
+    var satirlar = oneri.satirlar || form.satirlar || [];
+    var guven = oneri.guven || "orta";
+    var tip = oneri.belge_tipi || "belge";
+
+    var ban = document.getElementById("pc-qc-gelen-ocr-banner");
+    var base = "AI önerisi (" + tip + ", güven: " + guven +
+      ") — satırları kontrol edin, Forma uygula ile belge no/tutar/tarih doldurun, sonra Kaydet. " +
+      "GİB yok; otomatik kayıt yok.";
+    if (guven === "dusuk") {
+      base = "⚠ DÜŞÜK GÜVEN — AI okuması belirsiz veya eksik olabilir. " +
+        "Tüm alanları mutlaka elle doğrulayın; yanlış kayıt riski yüksek. " + base;
+    }
+    if (j && j.from_cache) {
+      base += " (önceki aynı görselden; yeniden okutulmadı)";
+    }
+    ban.textContent = base;
+    ban.classList.add("is-on");
+    ban.classList.toggle("is-low", guven === "dusuk");
+
+    var meta = document.getElementById("pc-qc-gelen-ocr-preview-meta");
+    var bits = [];
+    if (oneri.belge_no) bits.push("Belge: " + oneri.belge_no);
+    if (oneri.tarih) bits.push("Tarih: " + oneri.tarih);
+    if (oneri.para_birimi) bits.push(oneri.para_birimi);
+    if (oneri.toplam_kdv_dahil_tahmini != null) {
+      bits.push("Toplam (KDV dahil): " + oneri.toplam_kdv_dahil_tahmini);
+    }
+    meta.textContent = bits.join(" · ");
+
+    var tb = document.getElementById("pc-qc-gelen-ocr-tbody");
+    tb.innerHTML = "";
+    if (!satirlar.length) {
+      var empty = document.createElement("tr");
+      var td0 = document.createElement("td");
+      td0.colSpan = 5;
+      td0.textContent = "Satır okunamadı — formu elle doldurun.";
+      empty.appendChild(td0);
+      tb.appendChild(empty);
+    } else {
+      for (var i = 0; i < satirlar.length; i++) {
+        var s = satirlar[i] || {};
+        var tr = document.createElement("tr");
+        var cells = [
+          s.aciklama || "—",
+          s.miktar != null ? String(s.miktar) : "—",
+          s.birim_fiyat != null ? String(s.birim_fiyat) : "—",
+          s.kdv_orani != null ? String(s.kdv_orani) : "—",
+          (function () {
+            var g = qcGidenLineGross(s);
+            return g != null ? String(g) : "—";
+          })()
+        ];
+        for (var c = 0; c < cells.length; c++) {
+          var td = document.createElement("td");
+          if (c > 0) td.className = "num";
+          td.textContent = cells[c];
+          tr.appendChild(td);
+        }
+        tb.appendChild(tr);
+      }
+    }
+
+    var box = document.getElementById("pc-qc-gelen-ocr-preview");
+    box.hidden = false;
+    box.classList.add("is-on");
+  }
+
+  function applyQcGelenOcrToForm() {
+    var j = state.qcGelenOcr;
+    if (!j) return;
+    var form = j.form || {};
+    if (form.document_no) {
+      document.getElementById("pc-qc-gelen-doc").value = String(form.document_no).slice(0, 128);
+    }
+    if (form.amount_kdv_dahil != null && form.amount_kdv_dahil !== "") {
+      document.getElementById("pc-qc-gelen-amount").value = String(form.amount_kdv_dahil);
+    }
+    if (form.invoice_date) {
+      document.getElementById("pc-qc-gelen-date").value = String(form.invoice_date).slice(0, 10);
+    }
+    if (form.note) {
+      document.getElementById("pc-qc-gelen-note").value = String(form.note).slice(0, 300);
+    }
+    var ban = document.getElementById("pc-qc-gelen-ocr-banner");
+    var guven = (j.oneri && j.oneri.guven) || "orta";
+    ban.textContent = "Form alanları AI önerisiyle dolduruldu (güven: " + guven +
+      "). Arşiv görselini kontrol edip Kaydet’e basın — otomatik kayıt yok; GİB yok.";
+    ban.classList.add("is-on");
+    ban.classList.toggle("is-low", guven === "dusuk");
+  }
+
   function openQcGidenPanel() {
     if (!state.partyId) return;
     closeDetailSidePanels("pc-qc-giden-panel");
@@ -3346,6 +3498,7 @@
     var err = document.getElementById("pc-qc-gelen-err");
     err.hidden = true;
     err.textContent = "";
+    clearQcGelenOcrUi();
     document.getElementById("pc-qc-gelen-panel").classList.add("open");
     try { document.getElementById("pc-qc-gelen-doc").focus(); } catch (e) {}
   }
@@ -3377,6 +3530,7 @@
     document.getElementById("pc-qc-giden-panel").classList.remove("open");
   });
   document.getElementById("pc-qc-gelen-cancel").addEventListener("click", function () {
+    clearQcGelenOcrUi();
     document.getElementById("pc-qc-gelen-panel").classList.remove("open");
   });
 
@@ -3412,6 +3566,42 @@
   });
   document.getElementById("pc-qc-giden-ocr-dismiss").addEventListener("click", function () {
     clearQcGidenOcrUi();
+  });
+
+  document.getElementById("pc-qc-gelen-ocr-btn").addEventListener("click", function () {
+    document.getElementById("pc-qc-gelen-ocr-file").click();
+  });
+  document.getElementById("pc-qc-gelen-ocr-file").addEventListener("change", function () {
+    var err = document.getElementById("pc-qc-gelen-err");
+    err.hidden = true;
+    err.textContent = "";
+    var fi = document.getElementById("pc-qc-gelen-ocr-file");
+    var file = fi && fi.files && fi.files[0];
+    if (!file) return;
+    var btn = document.getElementById("pc-qc-gelen-ocr-btn");
+    btn.disabled = true;
+    btn.textContent = "Analiz…";
+    /* OCR görseli arşiv alanına da kopyala — Kaydet hâlâ aynı file input’u kullanır */
+    assignFileToInput(document.getElementById("pc-qc-gelen-file"), file);
+    var fd = new FormData();
+    fd.append("file", file);
+    apiUpload("/ledger/api/invoices/order-ocr-preview", fd).then(function (j) {
+      showQcGelenOcrPreview(j);
+    }).catch(function (e) {
+      clearQcGelenOcrUi();
+      err.textContent = e.message || "Belge okunamadı";
+      err.hidden = false;
+    }).then(function () {
+      btn.disabled = false;
+      btn.textContent = "Belgeden doldur";
+      fi.value = "";
+    });
+  });
+  document.getElementById("pc-qc-gelen-ocr-apply").addEventListener("click", function () {
+    applyQcGelenOcrToForm();
+  });
+  document.getElementById("pc-qc-gelen-ocr-dismiss").addEventListener("click", function () {
+    clearQcGelenOcrUi();
   });
 
   document.getElementById("pc-qc-giden-save").addEventListener("click", function () {
@@ -3524,6 +3714,7 @@
         if (inv && inv.source_transaction_id != null) {
           state.incomingByTx[String(inv.source_transaction_id)] = inv;
         }
+        clearQcGelenOcrUi();
         document.getElementById("pc-qc-gelen-panel").classList.remove("open");
         renderDetailTxList();
         deferLoadList();
