@@ -3176,3 +3176,15 @@ register_ledger_incoming_invoice_routes(
         "_sanitize_original_filename": _sanitize_original_filename,
     },
 )
+
+# S2 — stok kataloğu API (ana ERP urunler izole; fatura yazımı yok)
+from routes.ledger_product_routes import register_ledger_product_routes
+
+register_ledger_product_routes(
+    bp,
+    helpers={
+        "_ensure_ledger_tables_once": _ensure_ledger_tables_once,
+        "_json_err": _json_err,
+        "_money": _money,
+    },
+)

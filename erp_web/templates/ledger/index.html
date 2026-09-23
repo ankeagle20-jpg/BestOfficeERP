@@ -346,6 +346,9 @@
   .pc-btn-recv { background: #ecfdf5; color: var(--pc-recv); border: 1px solid #6ee7b7; }
   .pc-btn-ghost { background: transparent; color: var(--pc-on-dark-muted); border: 1px solid #3d5166; }
   .pc-btn-danger { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+  .pc-stock-qty-neg { color: #b91c1c; font-weight: 600; }
+  .pc-stock-mov-meta { font-size: 0.78rem; color: var(--pc-muted); margin-top: 0.15rem; }
+  .pc-stock-row-meta { font-size: 0.78rem; color: var(--pc-muted); }
   .pc-list { display: flex; flex-direction: column; gap: 0.55rem; }
   .pc-item {
     background: var(--pc-card); border: 1px solid var(--pc-line); border-radius: 12px;
@@ -845,6 +848,7 @@
     <button type="button" class="pc-tab active" data-tab="parties">Cariler</button>
     <button type="button" class="pc-tab" data-tab="groups">Gruplar</button>
     <button type="button" class="pc-tab" data-tab="reminders">Hatırlatma</button>
+    <button type="button" class="pc-tab" data-tab="stock" id="pc-tab-stock">Stok</button>
   </div>
 
   <div id="pc-list-view">
@@ -924,6 +928,43 @@
         </div>
       </div>
       <div id="pc-rem-list" class="pc-list"></div>
+    </div>
+
+    <div id="pc-stock-home" hidden>
+      <div class="pc-toolbar">
+        <input type="search" id="pc-stock-q" placeholder="Ürün ara…" autocomplete="off">
+        <button type="button" class="pc-btn pc-btn-primary" id="pc-btn-new-product">Yeni ürün</button>
+      </div>
+      <div class="pc-panel" id="pc-new-product-panel">
+        <h2>Yeni ürün</h2>
+        <p class="pc-meta">Manuel katalog kaydı. Fatura satırlarına henüz otomatik bağlanmaz.</p>
+        <div class="pc-field"><label for="pc-np-name">Ad</label><input id="pc-np-name" maxlength="200" autocomplete="off"></div>
+        <div class="pc-field"><label for="pc-np-unit">Birim</label><input id="pc-np-unit" maxlength="32" value="adet" autocomplete="off"></div>
+        <div class="pc-field">
+          <label for="pc-np-tax">Varsayılan KDV %</label>
+          <select id="pc-np-tax">
+            <option value="20" selected>20</option>
+            <option value="10">10</option>
+            <option value="1">1</option>
+            <option value="0">0</option>
+          </select>
+        </div>
+        <div class="pc-field"><label for="pc-np-notes">Not (isteğe bağlı)</label><input id="pc-np-notes" maxlength="300" autocomplete="off"></div>
+        <div id="pc-np-err" class="pc-err" hidden></div>
+        <div class="pc-actions">
+          <button type="button" class="pc-btn pc-btn-primary" id="pc-np-save">Kaydet</button>
+          <button type="button" class="pc-btn pc-btn-ghost" id="pc-np-cancel">Vazgeç</button>
+        </div>
+      </div>
+      <div id="pc-stock-list" class="pc-list"></div>
+      <div class="pc-panel" id="pc-stock-mov-panel" hidden>
+        <h2 id="pc-stock-mov-title">Hareketler</h2>
+        <p class="pc-meta" id="pc-stock-mov-meta"></p>
+        <div id="pc-stock-mov-list" class="pc-list"></div>
+        <div class="pc-actions">
+          <button type="button" class="pc-btn pc-btn-ghost" id="pc-stock-mov-close">Kapat</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -2143,8 +2184,11 @@
     document.getElementById("pc-parties-home").hidden = tab !== "parties";
     document.getElementById("pc-groups-home").hidden = tab !== "groups";
     document.getElementById("pc-reminders-home").hidden = tab !== "reminders";
+    var stockHome = document.getElementById("pc-stock-home");
+    if (stockHome) stockHome.hidden = tab !== "stock";
     if (tab === "groups") loadGroups();
     else if (tab === "reminders") loadReminders();
+    else if (tab === "stock") loadStockList();
     else loadList();
   }
 
@@ -2293,6 +2337,98 @@
             .then(loadReminders).catch(function (e) { alert(e.message); });
         });
       });
+    });
+  }
+
+  function fmtQty(n) {
+    var v = Number(n);
+    if (!isFinite(v)) v = 0;
+    try {
+      return v.toLocaleString("tr-TR", { maximumFractionDigits: 4 });
+    } catch (e) {
+      return String(v);
+    }
+  }
+
+  function closeStockMovPanel() {
+    var p = document.getElementById("pc-stock-mov-panel");
+    if (p) p.hidden = true;
+    var list = document.getElementById("pc-stock-mov-list");
+    if (list) list.innerHTML = "";
+  }
+
+  function openStockMovements(productId, productName) {
+    var panel = document.getElementById("pc-stock-mov-panel");
+    var title = document.getElementById("pc-stock-mov-title");
+    var meta = document.getElementById("pc-stock-mov-meta");
+    var list = document.getElementById("pc-stock-mov-list");
+    if (title) title.textContent = "Hareketler — " + (productName || ("#" + productId));
+    if (meta) meta.textContent = "Yükleniyor…";
+    if (list) list.innerHTML = "";
+    if (panel) panel.hidden = false;
+    api("/ledger/api/products/" + productId + "/movements").then(function (j) {
+      var prod = j.product || {};
+      var rows = j.movements || [];
+      if (meta) {
+        meta.textContent =
+          "Miktar: " + fmtQty(prod.qty_on_hand) + " " + (prod.unit || "adet") +
+          (prod.is_active ? "" : " · pasif");
+      }
+      if (!rows.length) {
+        list.innerHTML = '<div class="pc-empty">Henüz stok hareketi yok.</div>';
+        return;
+      }
+      list.innerHTML = rows.map(function () {
+        return '<div class="pc-item" style="cursor:default"><div class="pc-item-top"><span class="pc-name"></span><span class="pc-amt"></span></div><div class="pc-stock-mov-meta"></div></div>';
+      }).join("");
+      Array.prototype.forEach.call(list.querySelectorAll(".pc-item"), function (row, i) {
+        var m = rows[i];
+        var dirLabel = m.direction === "in" ? "Giriş" : (m.direction === "out" ? "Çıkış" : m.direction);
+        row.querySelector(".pc-name").textContent = dirLabel + " · " + fmtQty(m.quantity);
+        row.querySelector(".pc-amt").textContent = (m.occurred_at || "").slice(0, 16).replace("T", " ");
+        var bits = [m.source_kind || ""];
+        if (m.outgoing_invoice_id) bits.push("giden#" + m.outgoing_invoice_id);
+        if (m.incoming_invoice_id) bits.push("gelen#" + m.incoming_invoice_id);
+        if (m.note) bits.push(m.note);
+        if (m.is_void) bits.push("iptal");
+        row.querySelector(".pc-stock-mov-meta").textContent = bits.filter(Boolean).join(" · ");
+      });
+    }).catch(function (e) {
+      if (meta) meta.textContent = e.message || "Hareketler yüklenemedi";
+    });
+  }
+
+  function loadStockList() {
+    var qEl = document.getElementById("pc-stock-q");
+    var q = (qEl && qEl.value || "").trim();
+    var url = "/ledger/api/products";
+    if (q) url += "?q=" + encodeURIComponent(q);
+    return api(url).then(function (j) {
+      var el = document.getElementById("pc-stock-list");
+      var rows = j.products || [];
+      if (!rows.length) {
+        el.innerHTML = '<div class="pc-empty">Ürün yok. «Yeni ürün» ile ekleyin.</div>';
+        return;
+      }
+      el.innerHTML = rows.map(function () {
+        return '<div class="pc-item"><div class="pc-item-top"><span class="pc-name"></span><span class="pc-amt"></span></div><div class="pc-stock-row-meta"></div></div>';
+      }).join("");
+      Array.prototype.forEach.call(el.querySelectorAll(".pc-item"), function (row, i) {
+        var p = rows[i];
+        row.querySelector(".pc-name").textContent = p.name || ("#" + p.id);
+        var qtyEl = row.querySelector(".pc-amt");
+        qtyEl.textContent = fmtQty(p.qty_on_hand) + " " + (p.unit || "adet");
+        if (Number(p.qty_on_hand) < 0) qtyEl.classList.add("pc-stock-qty-neg");
+        row.querySelector(".pc-stock-row-meta").textContent =
+          (p.is_active ? "Aktif" : "Pasif") +
+          " · KDV %" + (p.default_tax_rate != null ? p.default_tax_rate : "—");
+        row.addEventListener("click", function () {
+          openStockMovements(p.id, p.name);
+        });
+      });
+    }).catch(function (e) {
+      var el = document.getElementById("pc-stock-list");
+      if (el) el.innerHTML = '<div class="pc-empty">' + (e.message || "Liste yüklenemedi") + "</div>";
     });
   }
 
@@ -3145,6 +3281,62 @@
       return loadReminders();
     }).catch(function (e) { err.textContent = e.message; err.hidden = false; });
   });
+
+  document.getElementById("pc-btn-new-product").addEventListener("click", function () {
+    document.getElementById("pc-new-product-panel").classList.add("open");
+    document.getElementById("pc-np-err").hidden = true;
+    document.getElementById("pc-np-err").textContent = "";
+    try { document.getElementById("pc-np-name").focus(); } catch (e) {}
+  });
+  document.getElementById("pc-np-cancel").addEventListener("click", function () {
+    document.getElementById("pc-new-product-panel").classList.remove("open");
+  });
+  document.getElementById("pc-np-save").addEventListener("click", function () {
+    var err = document.getElementById("pc-np-err");
+    err.hidden = true;
+    err.textContent = "";
+    var name = (document.getElementById("pc-np-name").value || "").trim();
+    var unit = (document.getElementById("pc-np-unit").value || "").trim() || "adet";
+    var tax = parseInt(document.getElementById("pc-np-tax").value || "20", 10);
+    var notes = (document.getElementById("pc-np-notes").value || "").trim();
+    if (!name) {
+      err.textContent = "Ürün adı gerekli.";
+      err.hidden = false;
+      return;
+    }
+    api("/ledger/api/products", {
+      method: "POST",
+      body: {
+        name: name,
+        unit: unit,
+        default_tax_rate: tax,
+        notes: notes || undefined
+      }
+    }).then(function () {
+      document.getElementById("pc-new-product-panel").classList.remove("open");
+      document.getElementById("pc-np-name").value = "";
+      document.getElementById("pc-np-notes").value = "";
+      document.getElementById("pc-np-unit").value = "adet";
+      document.getElementById("pc-np-tax").value = "20";
+      closeStockMovPanel();
+      return loadStockList();
+    }).catch(function (e) {
+      err.textContent = e.message || "Kayıt başarısız.";
+      err.hidden = false;
+    });
+  });
+  document.getElementById("pc-stock-mov-close").addEventListener("click", closeStockMovPanel);
+  (function () {
+    var sq = document.getElementById("pc-stock-q");
+    if (!sq) return;
+    var t = null;
+    sq.addEventListener("input", function () {
+      if (t) clearTimeout(t);
+      t = setTimeout(function () {
+        if (state.tab === "stock") loadStockList();
+      }, 250);
+    });
+  })();
 
   document.getElementById("pc-btn-select-mode").addEventListener("click", toggleSelectMode);
   document.getElementById("pc-btn-create-group-sel").addEventListener("click", openGrupSelModal);
