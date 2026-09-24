@@ -159,6 +159,8 @@ def _db_connect_kwargs_common():
         keepalives_idle=int(os.environ.get("DB_KEEPALIVES_IDLE", "30")),
         keepalives_interval=10,
         keepalives_count=3,
+        # Half-open/zombi TCP: ACK gelmezse libpq bağlantıyı keser (ms).
+        tcp_user_timeout=int(os.environ.get("DB_TCP_USER_TIMEOUT_MS", "15000")),
         sslmode=os.environ.get("DB_SSLMODE", "require"),
     )
 
@@ -181,11 +183,55 @@ def _pool_key_from(dsn: str, extra: dict) -> tuple:
         extra.get("keepalives_idle"),
         extra.get("keepalives_interval"),
         extra.get("keepalives_count"),
+        extra.get("tcp_user_timeout"),
         Config.DB_HOST,
         Config.DB_PORT,
         Config.DB_NAME,
         Config.DB_USER,
     )
+
+
+def _conn_is_healthy(conn) -> bool:
+    """Havuz checkout: hafif SELECT 1. Zombi/yarı-açık TCP'yi yakalar."""
+    try:
+        if getattr(conn, "closed", 1):
+            return False
+        cur = conn.cursor()
+        cur.execute("SELECT 1")
+        cur.fetchone()
+        conn.rollback()
+        return True
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return False
+
+
+def _discard_pooled_conn(conn):
+    """Sağlık kontrolü başarısız: her zaman close=True (reuse yok)."""
+    cid = id(conn)
+    if cid in _POOLED_CONN_IDS and _POOL is not None:
+        try:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            try:
+                _POOL.putconn(conn, close=True)
+            except Exception:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+        finally:
+            _POOLED_CONN_IDS.discard(cid)
+    else:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 def _pool_getconn(dsn: str, extra: dict):
@@ -200,6 +246,7 @@ def _pool_getconn(dsn: str, extra: dict):
                 keepalives_idle=extra.get("keepalives_idle"),
                 keepalives_interval=extra.get("keepalives_interval"),
                 keepalives_count=extra.get("keepalives_count"),
+                tcp_user_timeout=extra.get("tcp_user_timeout"),
                 cursor_factory=extra.get("cursor_factory"),
             )
             if dsn:
@@ -220,7 +267,28 @@ def _pool_getconn(dsn: str, extra: dict):
             _POOL_KEY = k
         conn = _POOL.getconn()
     _POOLED_CONN_IDS.add(id(conn))
-    return conn
+
+    if _conn_is_healthy(conn):
+        return conn
+
+    logger.warning(
+        "PostgreSQL havuz bağlantısı sağlık kontrolünden geçemedi; bir kez yenileniyor."
+    )
+    _discard_pooled_conn(conn)
+
+    with _POOL_LOCK:
+        conn2 = _POOL.getconn()
+    _POOLED_CONN_IDS.add(id(conn2))
+    if _conn_is_healthy(conn2):
+        return conn2
+
+    logger.error(
+        "PostgreSQL havuz yenileme sonrası da sağlık kontrolü başarısız."
+    )
+    _discard_pooled_conn(conn2)
+    raise psycopg2.OperationalError(
+        "PostgreSQL bağlantı sağlık kontrolü başarısız (havuz)."
+    )
 
 
 def _release_conn(conn):
@@ -315,12 +383,17 @@ def db():
 
     g.tenant_schema yoksa: search_path'e dokunulmaz, ek SQL yok (bugünkü production).
     g.tenant_schema varsa: transaction başında SET LOCAL search_path (havuz sızıntısı yok).
+    Her transaction başında SET LOCAL statement_timeout (web yolu üst sınırı);
+    ensure_*/DDL içindeki daha kısa SET LOCAL override'lar aynı transaction'da üstüne yazar.
     """
     conn = get_conn()
     try:
+        cur = conn.cursor()
+        # Transaction-local: havuzda oturum sızıntısı yok. Override: SET LOCAL ... (ensure_*).
+        stmt_to = (os.environ.get("DB_STATEMENT_TIMEOUT") or "30000ms").strip() or "30000ms"
+        cur.execute(psql.SQL("SET LOCAL statement_timeout TO {}").format(psql.Literal(stmt_to)))
         schema = _tenant_schema_for_request()
         if schema is not None:
-            cur = conn.cursor()
             cur.execute(
                 psql.SQL("SET LOCAL search_path TO {}, pg_catalog").format(
                     psql.Identifier(schema)
