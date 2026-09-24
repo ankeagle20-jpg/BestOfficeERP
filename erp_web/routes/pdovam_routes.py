@@ -25,7 +25,6 @@ try:
     from zoneinfo import ZoneInfo
 except ImportError:
     ZoneInfo = None  # Python < 3.9
-import qrcode
 import io
 import os
 import socket
@@ -1905,6 +1904,8 @@ def _server_base_url():
 @bp.route("/qr/tek")
 def qr_tek():
     """Tek QR: /pdovam/ sayfasına gider; herkes aynı QR'ı okutup listeden kendi isimlerini seçerek giriş/çıkış yapar."""
+    import qrcode  # lazy: boot RSS — yalnızca personel devam QR
+
     host = _server_base_url().rstrip("/")
     # Ortak cihazlar için liste modu: ?ortak=1 ile aç
     url = f"{host}/pdovam/?ortak=1"
@@ -1922,6 +1923,8 @@ def qr_tek():
 @bp.route("/qr/<int:personel_id>")
 def qr_uret(personel_id):
     """Personele özel QR kod PNG döndürür."""
+    import qrcode  # lazy: boot RSS — yalnızca personel devam QR
+
     host = _server_base_url().rstrip("/")
     url  = f"{host}/pdovam/isle/{personel_id}"
 
@@ -1946,6 +1949,8 @@ def _bulut_base():
 @bp.route("/qr/bulut/tek")
 def qr_bulut_tek():
     """Bulut sekmesi: Tek QR görseli — içerik Render adresine gider, görsel mevcut sunucudan hızlı yüklenir."""
+    import qrcode  # lazy: boot RSS — yalnızca personel devam QR
+
     host = _bulut_base()
     url = f"{host}/pdovam/?ortak=1"
     qr = qrcode.QRCode(version=2, box_size=10, border=4,
@@ -1962,6 +1967,8 @@ def qr_bulut_tek():
 @bp.route("/qr/bulut/<int:personel_id>")
 def qr_bulut_personel(personel_id):
     """Bulut sekmesi: Kişiye özel QR görseli — içerik Render adresine gider."""
+    import qrcode  # lazy: boot RSS — yalnızca personel devam QR
+
     host = _bulut_base()
     url = f"{host}/pdovam/isle/{personel_id}"
     qr = qrcode.QRCode(version=2, box_size=10, border=4,
