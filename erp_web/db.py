@@ -6,6 +6,8 @@ import os
 import re
 import time
 import threading
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import psycopg2
@@ -68,6 +70,8 @@ _POOL = None
 _POOL_KEY = None
 _POOL_LOCK = threading.Lock()
 _POOLED_CONN_IDS = set()
+# Sağlık kontrolü: libpq hang'ini ana worker'dan ayır (max_workers küçük tutulur).
+_HEALTHCHECK_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="db-hc")
 
 
 def _dsn_with_sslmode(dsn: str, sslmode: str = "require") -> str:
@@ -191,26 +195,99 @@ def _pool_key_from(dsn: str, extra: dict) -> tuple:
     )
 
 
-def _conn_is_healthy(conn) -> bool:
-    """Havuz checkout: hafif SELECT 1. Zombi/yarı-açık TCP'yi yakalar."""
+def _healthcheck_timeout_sec() -> float:
+    """Sağlık kontrolü üst sınırı (sn). Varsayılan 4; gunicorn --timeout 120'den çok kısa."""
+    raw = (os.environ.get("DB_HEALTHCHECK_TIMEOUT_SEC") or "4").strip()
     try:
-        if getattr(conn, "closed", 1):
-            return False
-        cur = conn.cursor()
-        cur.execute("SELECT 1")
-        cur.fetchone()
-        conn.rollback()
-        return True
-    except Exception:
+        val = float(raw)
+    except ValueError:
+        val = 4.0
+    if val < 0.5:
+        return 0.5
+    if val > 30.0:
+        return 30.0
+    return val
+
+
+def _abandon_pooled_conn(conn) -> None:
+    """Zombi/timeout: ana thread'de rollback/putconn YOK.
+
+    Tracking'ten düş; best-effort close + putconn(close=True) yalnızca daemon thread'de
+    (asılı kalırsa worker'ı kilitlemez; havuz slot'u zamanla/process yenilemede düzelir).
+    """
+    cid = id(conn)
+    _POOLED_CONN_IDS.discard(cid)
+
+    def _bg_close():
         try:
-            conn.rollback()
+            conn.close()
         except Exception:
             pass
+        pool = _POOL
+        if pool is None:
+            return
+        try:
+            pool.putconn(conn, close=True)
+        except Exception:
+            pass
+
+    try:
+        threading.Thread(
+            target=_bg_close,
+            name="db-abandon-close",
+            daemon=True,
+        ).start()
+    except Exception:
+        pass
+
+
+def _conn_is_healthy(conn) -> bool:
+    """Havuz checkout: autocommit SELECT 1, hard timeout; başarılı yolda rollback YOK.
+
+    Timeout/hata: ana thread'den senkron rollback/putconn yok → _abandon_pooled_conn.
+    """
+    if getattr(conn, "closed", 1):
+        _abandon_pooled_conn(conn)
+        return False
+
+    def _probe():
+        # Geçici autocommit: SELECT 1 transaction açmaz → rollback gerekmez.
+        conn.autocommit = True
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT 1")
+            cur.fetchone()
+        finally:
+            # db() transactional bekler; rollback çağırma.
+            conn.autocommit = False
+        return True
+
+    timeout = _healthcheck_timeout_sec()
+    try:
+        fut = _HEALTHCHECK_EXECUTOR.submit(_probe)
+        return bool(fut.result(timeout=timeout))
+    except FuturesTimeoutError:
+        logger.warning(
+            "PostgreSQL sağlık kontrolü zaman aşımı (%.1fs); bağlantı terk ediliyor.",
+            timeout,
+        )
+        _abandon_pooled_conn(conn)
+        return False
+    except Exception as e:
+        logger.warning(
+            "PostgreSQL sağlık kontrolü başarısız (%s); bağlantı terk ediliyor.",
+            e,
+        )
+        _abandon_pooled_conn(conn)
         return False
 
 
 def _discard_pooled_conn(conn):
-    """Sağlık kontrolü başarısız: her zaman close=True (reuse yok)."""
+    """Sağlık kontrolü dışı discard: her zaman close=True (reuse yok).
+
+    Not: zombi sağlık fail yolunda KULLANMA — _abandon_pooled_conn kullan
+    (senkron rollback/putconn hang riski).
+    """
     cid = id(conn)
     if cid in _POOLED_CONN_IDS and _POOL is not None:
         try:
@@ -271,10 +348,10 @@ def _pool_getconn(dsn: str, extra: dict):
     if _conn_is_healthy(conn):
         return conn
 
+    # Fail/timeout: _conn_is_healthy zaten _abandon_pooled_conn yaptı (senkron discard YOK).
     logger.warning(
         "PostgreSQL havuz bağlantısı sağlık kontrolünden geçemedi; bir kez yenileniyor."
     )
-    _discard_pooled_conn(conn)
 
     with _POOL_LOCK:
         conn2 = _POOL.getconn()
@@ -285,7 +362,6 @@ def _pool_getconn(dsn: str, extra: dict):
     logger.error(
         "PostgreSQL havuz yenileme sonrası da sağlık kontrolü başarısız."
     )
-    _discard_pooled_conn(conn2)
     raise psycopg2.OperationalError(
         "PostgreSQL bağlantı sağlık kontrolü başarısız (havuz)."
     )
