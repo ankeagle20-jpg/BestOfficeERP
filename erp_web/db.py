@@ -224,18 +224,31 @@ def _pool_getconn(dsn: str, extra: dict):
 
 
 def _release_conn(conn):
+    """Bağlantıyı havuza geri ver; ölü/bozuk ise kapatıp havuzdan çıkar.
+
+    rollback başarısız veya conn.closed != 0 ise putconn(..., close=True):
+    bağlantı yeniden kullanılmaz, sonraki getconn yeni bağlantı açar.
+    """
     cid = id(conn)
     if cid in _POOLED_CONN_IDS and _POOL is not None:
         try:
-            try:
-                conn.rollback()
-            except Exception:
-                pass
-            _POOL.putconn(conn)
+            discard = bool(getattr(conn, "closed", 1))
+            if not discard:
+                try:
+                    conn.rollback()
+                except Exception:
+                    discard = True
+            if discard:
+                _POOL.putconn(conn, close=True)
+            else:
+                _POOL.putconn(conn)
         finally:
             _POOLED_CONN_IDS.discard(cid)
     else:
-        conn.close()
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 def get_conn():
