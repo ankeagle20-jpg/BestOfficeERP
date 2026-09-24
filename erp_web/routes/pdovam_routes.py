@@ -30,12 +30,6 @@ import io
 import os
 import socket
 
-# Supabase entegrasyonu için (ENV: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
-try:
-    from supabase import create_client
-except ImportError:  # supabase-python yüklü değilse, entegrasyon sessizce devre dışı kalır
-    create_client = None
-
 bp = Blueprint("pdovam", __name__)
 
 
@@ -81,8 +75,10 @@ CREATE INDEX IF NOT EXISTS idx_hareket_personel ON personel_hareketleri(personel
 
 
 def _supabase_client():
-    """Supabase client (mevcut değilse None)."""
-    if not create_client:
+    """Supabase client (mevcut değilse None). Lazy import — boot RSS için top-level yok."""
+    try:
+        from supabase import create_client
+    except ImportError:  # supabase-python yüklü değilse, entegrasyon sessizce devre dışı kalır
         return None
     url = os.getenv("SUPABASE_URL")
     key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")

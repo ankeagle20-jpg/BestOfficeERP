@@ -7,14 +7,12 @@
 """
 import os
 
-try:
-    from supabase import create_client
-except ImportError:
-    create_client = None
-
 
 def _supabase_client():
-    if not create_client:
+    """Supabase client (mevcut değilse None). Lazy import — boot RSS için top-level yok."""
+    try:
+        from supabase import create_client
+    except ImportError:
         return None
     url = os.getenv("SUPABASE_URL")
     key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
