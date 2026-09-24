@@ -1183,7 +1183,7 @@ def _balance_sign_label(bal: Decimal, *, currency: str | None = None) -> str:
 def _build_statement(party_id: int, d_from: date, d_to: date) -> dict | None:
     """Tarih aralığı ekstresi — açılış + koşan bakiye; Borç=receive, Alacak=give."""
     party = fetch_one(
-        """
+        f"""
         SELECT {_PARTY_COLS}
         FROM ledger_parties
         WHERE id = %s
