@@ -56,9 +56,6 @@ import calendar
 import time
 import threading
 import copy
-from docx import Document
-from docx.shared import Pt, Cm
-from docx.enum.text import WD_ALIGN_PARAGRAPH
 import os
 import io
 import base64
@@ -6180,6 +6177,9 @@ def sozlesme_olustur(mid):
         sozlesme_no = f"{prefix}{tarih_kod}-{sayac}"
         
         # Word belgesi oluştur
+        from docx import Document  # lazy: boot RSS — yalnızca sözleşme .docx
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+
         doc = Document()
         
         # Başlık

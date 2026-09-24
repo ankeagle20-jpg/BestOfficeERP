@@ -32,7 +32,6 @@ import calendar
 import json
 from io import BytesIO
 from datetime import date, datetime, timedelta
-from docx import Document
 import os
 import sys
 import re
@@ -3081,6 +3080,8 @@ def api_kyc_sozlesme():
 
     def tl_fmt(v):
         return f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+    from docx import Document  # lazy: boot RSS — yalnızca sözleşme .docx üretiminde
 
     doc = Document()
 
