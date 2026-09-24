@@ -64,12 +64,6 @@ import math
 import logging
 import urllib.parse
 from werkzeug.utils import secure_filename
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.units import mm
-from reportlab.lib.utils import ImageReader
-from reportlab.pdfgen import canvas
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
 from utils.text_utils import turkish_lower
 from utils.musteri_arama import (
     customers_arama_params_giris_genis,
@@ -176,6 +170,9 @@ def _register_arial():
     """Türkçe karakter için Arial veya alternatif font kaydet."""
     if getattr(_register_arial, "_done", False):
         return
+    from reportlab.pdfbase import pdfmetrics  # lazy: boot RSS
+    from reportlab.pdfbase.ttfonts import TTFont
+
     candidates = []
     win = os.environ.get("WINDIR") or os.environ.get("SystemRoot") or "C:\\Windows"
     for f in ("arial.ttf", "Arial.ttf", "ARIAL.TTF"):
@@ -6690,6 +6687,12 @@ def build_kira_bildirgesi_pdf(
     hizmet_turu: yalnızca sanal_ofis -> yıllık kira ibaresi; diğerlerinde aylık net + KDV dahil.
     Hibrit: nakit payı KDV dışı, banka net payı üzerinden KDV — toplam KDV dahil = nakit + banka_net * (1+kdv%).
     """
+    from reportlab.lib.pagesizes import A4  # lazy: boot RSS — yalnızca kira bildirgesi PDF
+    from reportlab.lib.units import mm
+    from reportlab.lib.utils import ImageReader
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfgen import canvas
+
     _register_arial()
     buf = io.BytesIO()
     w, h = A4
@@ -15887,6 +15890,9 @@ def api_tediye_detay():
 @giris_gerekli
 def api_cari_kart_pdf(mid):
     """Cari hareketleri BestOffice antetli PDF ekstre olarak indir."""
+    from reportlab.lib.pagesizes import A4  # lazy: boot RSS — yalnızca cari ekstre PDF
+    from reportlab.pdfgen import canvas
+
     cust = fetch_one("SELECT id, name, tax_number FROM customers WHERE id = %s", (mid,))
     if not cust:
         return jsonify({"ok": False, "mesaj": "Müşteri bulunamadı."}), 404
