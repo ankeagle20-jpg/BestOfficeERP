@@ -72,6 +72,8 @@ _POOL_LOCK = threading.Lock()
 _POOLED_CONN_IDS = set()
 # Sağlık kontrolü: libpq hang'ini ana worker'dan ayır (max_workers küçük tutulur).
 _HEALTHCHECK_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="db-hc")
+# Checkout+bootstrap çiti — sağlık executor'ından AYRI (iç içe deadlock olmasın).
+_BOOTSTRAP_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="db-boot")
 
 
 def _dsn_with_sslmode(dsn: str, sslmode: str = "require") -> str:
@@ -453,28 +455,92 @@ def get_conn():
     raise last_err  # pragma: no cover
 
 
+def _bootstrap_timeout_sec() -> float:
+    """Checkout+bootstrap (get_conn+SET'ler) üst sınırı. Varsayılan 8sn."""
+    raw = (os.environ.get("DB_BOOTSTRAP_TIMEOUT_SEC") or "8").strip()
+    try:
+        val = float(raw)
+    except ValueError:
+        val = 8.0
+    if val < 1.0:
+        return 1.0
+    if val > 60.0:
+        return 60.0
+    return val
+
+
+def _prepare_db_connection():
+    """get_conn + statement_timeout + search_path — tek thread+timeout çiti, 1 retry.
+
+    tenant_schema Flask context'te ana thread'de çözülür; libpq işi worker'da.
+    Timeout/hata: _abandon_pooled_conn (ana thread'de senkron rollback/putconn yok).
+    """
+    schema = _tenant_schema_for_request()
+    stmt_to = (os.environ.get("DB_STATEMENT_TIMEOUT") or "30000ms").strip() or "30000ms"
+    timeout = _bootstrap_timeout_sec()
+    last_err = None
+
+    for attempt in range(2):
+        holder = {"conn": None}
+
+        def _bootstrap():
+            conn = get_conn()
+            holder["conn"] = conn
+            cur = conn.cursor()
+            cur.execute(
+                psql.SQL("SET LOCAL statement_timeout TO {}").format(
+                    psql.Literal(stmt_to)
+                )
+            )
+            if schema is not None:
+                cur.execute(
+                    psql.SQL("SET LOCAL search_path TO {}, pg_catalog").format(
+                        psql.Identifier(schema)
+                    )
+                )
+            return conn
+
+        try:
+            fut = _BOOTSTRAP_EXECUTOR.submit(_bootstrap)
+            return fut.result(timeout=timeout)
+        except FuturesTimeoutError:
+            logger.warning(
+                "PostgreSQL db bootstrap zaman aşımı (%.1fs, deneme %s/2); bağlantı terk ediliyor.",
+                timeout,
+                attempt + 1,
+            )
+            c = holder.get("conn")
+            if c is not None:
+                _abandon_pooled_conn(c)
+            last_err = psycopg2.OperationalError(
+                "PostgreSQL db bootstrap zaman aşımı (havuz/checkout)."
+            )
+        except Exception as e:
+            logger.warning(
+                "PostgreSQL db bootstrap başarısız (%s, deneme %s/2); bağlantı terk ediliyor.",
+                e,
+                attempt + 1,
+            )
+            c = holder.get("conn")
+            if c is not None:
+                _abandon_pooled_conn(c)
+            last_err = e
+
+    if isinstance(last_err, BaseException):
+        raise last_err
+    raise psycopg2.OperationalError("PostgreSQL db bootstrap başarısız.")
+
+
 @contextmanager
 def db():
     """Context manager: otomatik commit/rollback.
 
-    g.tenant_schema yoksa: search_path'e dokunulmaz, ek SQL yok (bugünkü production).
-    g.tenant_schema varsa: transaction başında SET LOCAL search_path (havuz sızıntısı yok).
-    Her transaction başında SET LOCAL statement_timeout (web yolu üst sınırı);
-    ensure_*/DDL içindeki daha kısa SET LOCAL override'lar aynı transaction'da üstüne yazar.
+    Checkout+bootstrap (get_conn, statement_timeout, search_path) tek timeout çitinde;
+    ensure_*/DDL içindeki daha kısa SET LOCAL override'lar yield sonrası aynı
+    transaction'da üstüne yazar.
     """
-    conn = get_conn()
+    conn = _prepare_db_connection()
     try:
-        cur = conn.cursor()
-        # Transaction-local: havuzda oturum sızıntısı yok. Override: SET LOCAL ... (ensure_*).
-        stmt_to = (os.environ.get("DB_STATEMENT_TIMEOUT") or "30000ms").strip() or "30000ms"
-        cur.execute(psql.SQL("SET LOCAL statement_timeout TO {}").format(psql.Literal(stmt_to)))
-        schema = _tenant_schema_for_request()
-        if schema is not None:
-            cur.execute(
-                psql.SQL("SET LOCAL search_path TO {}, pg_catalog").format(
-                    psql.Identifier(schema)
-                )
-            )
         yield conn
         conn.commit()
     except BaseException:
