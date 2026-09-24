@@ -29,8 +29,6 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
-import pandas as pd
-
 _log_ak = logging.getLogger(__name__)
 
 
@@ -341,6 +339,8 @@ def _vkn_in_aciklama(c: dict[str, Any], digit_hay: str) -> int:
 
 
 def parse_tutar_tr(val: object) -> float:
+    import pandas as pd  # lazy: boot RSS
+
     if val is None or (isinstance(val, float) and pd.isna(val)):
         return 0.0
     s = str(val).strip().replace(" ", "").replace("TL", "").replace("₺", "")
@@ -360,6 +360,8 @@ def parse_tutar_tr(val: object) -> float:
 
 
 def parse_tarih(val: object) -> date | None:
+    import pandas as pd  # lazy: boot RSS
+
     if val is None or (isinstance(val, float) and pd.isna(val)):
         return None
     if hasattr(val, "date") and callable(getattr(val, "date", None)):
@@ -382,6 +384,8 @@ def parse_tarih(val: object) -> date | None:
 
 
 def read_akbank_excel(source: Path | bytes) -> pd.DataFrame:
+    import pandas as pd  # lazy: boot RSS
+
     last_err: Exception | None = None
     for skip in range(0, 18):
         try:
@@ -589,6 +593,8 @@ def dataframe_hareket_satirlari(
     Varsayılan yon=gelen: yalnızca A (Alacak) — mevcut davranış.
     yon=giden: B (Borç); yon=hepsi: A+B.
     """
+    import pandas as pd  # lazy: boot RSS
+
     yon_f = _normalize_yon_filtre(yon)
     col_tarih = col(df, "tarih")
     col_saat = col(df, "saat")

@@ -4,12 +4,6 @@ Bankalar: hesap dökümü, ekstre yükleme, tahsilat eşleştirme, masraf takibi
 from flask import Blueprint, render_template, request, jsonify, redirect, url_for
 from auth import giris_gerekli, admin_gerekli
 from db import fetch_all, fetch_one, execute, execute_returning, db, ensure_banka_hesaplar_columns
-from services.banka_ak_import import (
-    akbank_sender_key,
-    dataframe_hareket_satirlari,
-    onizleme_satirlari,
-    read_akbank_excel,
-)
 try:
     # Yeni sürüm: giriş/müşteri kartı ile aynı geniş arama.
     from utils.musteri_arama import customers_arama_sql_giris_genis, customers_arama_params_giris_genis
@@ -809,6 +803,8 @@ def _tahsilat_by_ref_for_ham(ham: list) -> dict[str, dict]:
 
 
 def _manual_map_for_ham(ham: list) -> dict[str, int]:
+    from services.banka_ak_import import akbank_sender_key  # lazy: boot RSS
+
     keys_u = list(dict.fromkeys(akbank_sender_key(r.get("aciklama") or "") for r in ham))
     keys_u = [k for k in keys_u if k]
     manual_by_key: dict[str, int] = {}
@@ -849,6 +845,8 @@ def _ham_birlestir_dedupe(ham_parcalar: list[list]) -> list:
 
 def _json_akbank_analyze_ham(ham: list, ozet: dict, kayit_dosya: dict | None) -> dict:
     """Önizleme: tahsilatta olan satırlar listede kalır; satırda tahsilatta + id/makbuz_no."""
+    from services.banka_ak_import import onizleme_satirlari  # lazy: boot RSS
+
     _ensure_tahsilat_banka_referans_no()
     _ensure_akbank_dekont_musteri_map()
     by_ref = _tahsilat_by_ref_for_ham(ham)
@@ -931,6 +929,10 @@ def _iso_or_str(v):
 def api_akbank_tahsilat_analyze():
     """Yeni Excel yükle: dosyayı ERP'ye kaydet + önizleme (cariye işlenmiş fişler listede kalır, tahsilatta bayrağı ile)."""
     from services.bank_processor import standard_transactions_to_tahsilat_ham, upload_bank_excel
+    from services.banka_ak_import import (  # lazy: boot RSS
+        dataframe_hareket_satirlari,
+        read_akbank_excel,
+    )
 
     f = request.files.get("file")
     if not f or not getattr(f, "filename", ""):
@@ -1129,6 +1131,10 @@ def api_akbank_tahsilat_dosyalar_sil():
 def api_akbank_tahsilat_analyze_kayitli():
     """Bir veya birden fazla kayıtlı dosyayı aç; içerik birleştirilir (aynı fiş no tekil)."""
     from services.bank_processor import standard_transactions_to_tahsilat_ham, upload_bank_excel
+    from services.banka_ak_import import (  # lazy: boot RSS
+        dataframe_hareket_satirlari,
+        read_akbank_excel,
+    )
 
     data = request.get_json(silent=True) or {}
     bank_type = _normalize_tahsilat_bank_type(data.get("bank_type") or request.args.get("bank_type"))
@@ -1210,6 +1216,8 @@ def api_akbank_tahsilat_musteriler():
 @giris_gerekli
 def api_akbank_tahsilat_gonderici_kaydet():
     """Manuel müşteri seçimini tahsilat kaydı olmadan kalıcılaştırır (sonraki Excel analizinde önerilir)."""
+    from services.banka_ak_import import akbank_sender_key  # lazy: boot RSS
+
     data = request.get_json(silent=True) or {}
     aciklama = (data.get("aciklama") or "").strip()
     try:
@@ -1249,6 +1257,7 @@ def api_akbank_tahsilat_commit():
     Plan A: aciklama ham banka metni kalır (AYLIK_TAH/PAY marker yok); aylık dağılım
     yalnızca panel/grid için apply_makbuz_dagitim_to_panel_db ile yazılır.
     """
+    from services.banka_ak_import import akbank_sender_key  # lazy: boot RSS
     from routes.faturalar_routes import (
         _auto_allocate_oldest_unpaid_months,
         _tahsilat_icin_makbuz_no_sec_cursor,

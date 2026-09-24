@@ -20,13 +20,14 @@ from db import (
     ensure_musteri_kyc_odeme_duzeni,
     ensure_musteri_yetkililer_table,
     ensure_musteri_yetkili_alan_degerleri_table,
+    ensure_customers_rent_columns,
+    ensure_customers_excel_columns,
     db as get_db,
     clear_all_customers,
     get_conn,
 )
 from utils.musteri_arama import customers_arama_sql_giris_genis, customers_arama_params_giris_genis
 from utils.musteri_gorunur import musteri_liste_gorunur_and, request_pasifleri_dahil
-import pandas as pd
 import calendar
 import json
 from io import BytesIO
@@ -1856,6 +1857,8 @@ def import_excel():
     """Excel'den müşteri içeri aktar"""
     if request.method == "POST":
         try:
+            import pandas as pd  # lazy: boot RSS — yalnızca Excel aktarımında
+
             f = request.files.get("file")
             if not f or not f.filename:
                 flash("Lütfen bir Excel dosyası seçin.", "warning")
@@ -2155,6 +2158,8 @@ def tumunu_sil():
 @giris_gerekli
 def export_excel():
     """Müşteri listesini Excel olarak dışa aktar"""
+    import pandas as pd  # lazy: boot RSS — yalnızca Excel dışa aktarımında
+
     tum_yillar_odenmis = request.args.get("tum_yillar_odenmis") == "1"
     if tum_yillar_odenmis:
         rows = fetch_all("""
