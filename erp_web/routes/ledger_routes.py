@@ -24,14 +24,6 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from flask import Blueprint, Response, g, jsonify, redirect, render_template, request
 from flask_login import current_user
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.units import mm
-from reportlab.lib.utils import ImageReader
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.pdfgen import canvas
-from reportlab.platypus import Table, TableStyle
 
 from auth import giris_gerekli
 from db import db as db_txn, ensure_ledger_tables, execute, execute_returning, fetch_all, fetch_one
@@ -165,6 +157,9 @@ def _ledger_register_arial():
     """Faturalar PDF ile aynı Arial kayıt deseni (Türkçe glyph)."""
     if getattr(_ledger_register_arial, "_done", False):
         return
+    from reportlab.pdfbase import pdfmetrics  # lazy: boot RSS
+    from reportlab.pdfbase.ttfonts import TTFont
+
     try:
         from routes.faturalar_routes import _register_arial
 
@@ -1384,6 +1379,14 @@ def _resolve_ledger_logo_path() -> str | None:
 
 def _build_statement_pdf(stmt: dict) -> bytes:
     """A4 ekstre PDF — reportlab canvas + Table (faturalar/kira PDF deseni)."""
+    from reportlab.lib import colors  # lazy: boot RSS — yalnızca ekstre PDF
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.lib.utils import ImageReader
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfgen import canvas
+    from reportlab.platypus import Table, TableStyle
+
     _ledger_register_arial()
     font = "Arial" if "Arial" in pdfmetrics.getRegisteredFontNames() else "Helvetica"
     font_b = (
