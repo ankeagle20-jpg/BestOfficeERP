@@ -2,16 +2,6 @@
 Personel İzin Talep Formu - PDF Üretici
 reportlab ile profesyonel izin formu oluşturur
 """
-from reportlab.lib.pagesizes import A4
-from reportlab.lib import colors
-from reportlab.lib.units import cm
-from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer, Table,
-                                  TableStyle, HRFlowable)
-from reportlab.platypus import Image as RLImage
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
 from pathlib import Path
 import os
 
@@ -23,6 +13,9 @@ def _register_fonts():
     global _FONT_REGISTERED
     if _FONT_REGISTERED:
         return
+    from reportlab.pdfbase import pdfmetrics  # lazy: boot RSS
+    from reportlab.pdfbase.ttfonts import TTFont
+
     font_paths = [
         ("Arial", r"C:\Windows\Fonts\arial.ttf"),
         ("Arial-Bold", r"C:\Windows\Fonts\arialbd.ttf"),
@@ -61,6 +54,21 @@ def izin_formu_olustur(data: dict, cikti_yolu: str = None) -> str:
         ise_baslama, aciklama, firma_adi
     }
     """
+    from reportlab.lib.pagesizes import A4  # lazy: boot RSS — yalnızca izin formu PDF
+    from reportlab.lib import colors
+    from reportlab.lib.units import cm
+    from reportlab.platypus import (
+        SimpleDocTemplate,
+        Paragraph,
+        Spacer,
+        Table,
+        TableStyle,
+        HRFlowable,
+    )
+    from reportlab.platypus import Image as RLImage
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER, TA_RIGHT
+
     _register_fonts()
     if not cikti_yolu:
         ad = data.get("personel_ad", "izin").replace(" ", "_")

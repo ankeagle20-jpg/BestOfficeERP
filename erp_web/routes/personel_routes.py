@@ -27,8 +27,6 @@ _PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-from izin_form_pdf import izin_formu_olustur
-
 
 MESAI_SABAH_DK = 9 * 60
 VARSAYILAN_CIKIS_DK = 18 * 60 + 30
@@ -1493,6 +1491,8 @@ def api_izin_pdf(izin_id):
     data = _izin_pdf_data_from_row(dict(row), izin_bakiye)
     buf = io.BytesIO()
     try:
+        from izin_form_pdf import izin_formu_olustur  # lazy: boot RSS — yalnızca izin PDF
+
         izin_formu_olustur(data, buf)
     except Exception as e:
         return jsonify({"ok": False, "mesaj": str(e)}), 500
