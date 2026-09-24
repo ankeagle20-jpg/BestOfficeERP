@@ -14,7 +14,7 @@ const WA_MAX_CONCURRENT_CHROME = Math.max(
   1,
   parseInt(String(process.env.WA_MAX_CONCURRENT_CHROME || '2'), 10) || 2
 );
-/** Idle destroy eşiği (ms). Varsayılan 20 dk. default tenant bu süpürmeye tabi değil. */
+/** Idle destroy eşiği (ms). Varsayılan 20 dk. Tüm kiracılar (default dahil) tabi. */
 const WA_IDLE_MS = Math.max(
   1000,
   parseInt(String(process.env.WA_IDLE_MS || String(20 * 60 * 1000)), 10) || 20 * 60 * 1000
@@ -169,8 +169,8 @@ function getOrCreateSession(tenantId) {
     lastUsedAt: Date.now(),
     status: 'idle',
     chromeHeld: false,
-    // Üretim default oturumu idle destroy'a tabi olmasın
-    pinKeepAlive: tenantId === 'default',
+    // Idle destroy'a tabi (default dahil). LocalAuth diski korunur; ihtiyaçta yeniden açılır.
+    pinKeepAlive: false,
   };
   sessions.set(tenantId, session);
   return session;
@@ -363,7 +363,7 @@ async function idleDestroySweep() {
   const now = Date.now();
   const victims = [];
   for (const [id, s] of sessions) {
-    if (s.pinKeepAlive || id === 'default') continue;
+    if (s.pinKeepAlive) continue;
     if (!s.client && !s.chromeHeld) continue;
     if (s.queue.length > 0 || s.queueBusy) continue;
     if (s.status === 'starting' || s.initPromise) continue;
@@ -645,7 +645,9 @@ app.listen(PORT, () => {
       console.warn('[WA] Idle sweep hatası:', err && err.message ? err.message : err);
     });
   }, WA_IDLE_CHECK_MS);
-  // Geriye uyum: default oturumu hemen ayağa kaldır (eski davranış); pinKeepAlive → idle destroy yok
+  // Eager start (opsiyonel geriye uyum): default'u hemen ayağa kaldırır.
+  // pinKeepAlive yok → WA_IDLE_MS sonra idle destroy edilir; sonraki istekte
+  // LocalAuth disk oturumu ile QR'sız yeniden bağlanır.
   ensureClient('default').catch((err) => {
     console.error('[WA:default] initialize hatası:', err && err.message ? err.message : err);
   });
