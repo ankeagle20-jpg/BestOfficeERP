@@ -816,7 +816,11 @@ def apply_makbuz_dagitim_to_panel_db(
     tahsilat_tarihi: str | None = None,
     payload: dict | None = None,
 ) -> dict:
-    """Makbuz popup dağıtım tutarlarını panel DB'ye kalıcı yazar (ekstre ile uyumlu)."""
+    """Makbuz dağıtım tutarlarını panel DB'ye kalıcı yazar (ekstre ile uyumlu).
+
+    Her ay için yeni pay, paneldeki mevcut tahsil'e EKLENİR (üzerine yazılmaz);
+    tahsil = min(mevcut_tahsil + pay, aylik_brut), kalan = brut - tahsil.
+    """
     try:
         mid = int(musteri_id)
     except (TypeError, ValueError):
@@ -853,14 +857,26 @@ def apply_makbuz_dagitim_to_panel_db(
             pay = 0.0
         if pay <= tol:
             continue
-        brut = round(float((by_iso.get(iso_key) or {}).get("aylik") or 0), 2)
+        prev = by_iso.get(iso_key) or {}
+        try:
+            prev_tah = round(float(prev.get("tahsil") or 0), 2)
+        except (TypeError, ValueError):
+            prev_tah = 0.0
+        if prev_tah < 0:
+            prev_tah = 0.0
+        brut = round(float(prev.get("aylik") or 0), 2)
         if brut <= tol and isinstance(payload, dict):
             brut = _month_brut_from_grid_payload(payload, yy_d, mm_d)
         if brut <= tol:
-            brut = pay
-        tah = round(min(pay, brut), 2) if brut > tol else pay
+            # Panel/grid brüt yoksa en az mevcut tahsil + bu pay kadar tut.
+            brut = round(max(prev_tah + pay, pay), 2)
+        # Bu ödemenin payını mevcut panel tahsiline EKLE (üzerine yazma).
+        tah = (
+            round(min(prev_tah + pay, brut), 2)
+            if brut > tol
+            else round(prev_tah + pay, 2)
+        )
         kalan = round(max(brut - tah, 0), 2) if brut > tol else 0.0
-        prev = by_iso.get(iso_key) or {}
         by_iso[iso_key] = {
             "aylik": brut,
             "tahsil": tah,

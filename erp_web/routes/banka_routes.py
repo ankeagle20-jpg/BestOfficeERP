@@ -1254,11 +1254,13 @@ def api_akbank_tahsilat_gonderici_kaydet():
 def api_akbank_tahsilat_commit():
     """Aşama 2: Onaylanan satırları tahsilatlar tablosuna yazar (Faturalar ile aynı makbuz serisi).
 
-    Plan A: aciklama ham banka metni kalır (AYLIK_TAH/PAY marker yok); aylık dağılım
-    yalnızca panel/grid için apply_makbuz_dagitim_to_panel_db ile yazılır.
+    FIFO oldest-unpaid dağıtım → aciklama'ya |AYLIK_TAH| + |AYLIK_PAY| (tahsilat-ekle ile
+    aynı yardımcılar); panel/grid ayrıca apply_makbuz_dagitim_to_panel_db ile güncellenir.
     """
     from services.banka_ak_import import akbank_sender_key  # lazy: boot RSS
     from routes.faturalar_routes import (
+        _aciklama_with_aylik_markers,
+        _aciklama_with_aylik_pay_tokens,
         _auto_allocate_oldest_unpaid_months,
         _tahsilat_icin_makbuz_no_sec_cursor,
     )
@@ -1289,14 +1291,18 @@ def api_akbank_tahsilat_commit():
             pass
 
     def _aciklama_ve_aylik_dagitim(mid: int, tutar: float, ham: str) -> tuple[str, list[tuple[str, float]]]:
-        """Ham aciklama + oldest-unpaid pay_items (panel sync için). Marker yazılmaz."""
+        """Ham aciklama + FIFO → |AYLIK_TAH| + |AYLIK_PAY| (gerçek pay tutarları)."""
         text = (ham or "").strip() or "Banka tahsilat"
         # Ham metinde zaten marker varsa dağıtımı yeniden hesaplama (elle müdahale).
         if "|AYLIK_TAH|" in text or "|AYLIK_PAY|" in text:
             return text, []
         _ensure_aylik_cache(mid)
-        _auto_isos, auto_pay_items = _auto_allocate_oldest_unpaid_months(mid, tutar)
-        return text, list(auto_pay_items or [])
+        auto_isos, auto_pay_items = _auto_allocate_oldest_unpaid_months(mid, tutar)
+        pay_items = list(auto_pay_items or [])
+        if pay_items:
+            text = _aciklama_with_aylik_markers(text, auto_isos or [iso for iso, _ in pay_items])
+            text = _aciklama_with_aylik_pay_tokens(text, pay_items)
+        return text, pay_items
 
     with db() as conn:
         cur = conn.cursor()
@@ -1358,7 +1364,7 @@ def api_akbank_tahsilat_commit():
                 atlandi += 1
                 hatalar.append(f"Ref {ref}: müşteri yok (id={mid}).")
                 continue
-            # Plan A: ham aciklama + FIFO oldest unpaid → sadece panel/grid (marker yok).
+            # FIFO oldest unpaid → aciklama'ya TAH+PAY; panel ayrıca apply ile.
             try:
                 aciklama, pay_items = _aciklama_ve_aylik_dagitim(mid, round(tutar, 2), aciklama_ham)
             except Exception as ex:
@@ -1397,8 +1403,6 @@ def api_akbank_tahsilat_commit():
                 "aciklama": aciklama,
                 "aylik_dagitim": dagitim_list,
             })
-            if dagitim_list:
-                panel_sync_jobs.append((mid, tah_str, dagitim_list))
             # Varsa aynı dekont/referanslı hesap hareketini tahsilata bağla (Hareketler → Makbuz).
             try:
                 cur.execute(
@@ -1434,14 +1438,16 @@ def api_akbank_tahsilat_commit():
                         (sk, mid, aciklama_ham[:2000]),
                     )
             # Aynı istekte sonraki satırlar için kalan ayları güncelle (manuel ile tutarlı).
+            # Başarılı apply sonrası aynı dagitim'i tekrar EKLEME (panel birikim çift saymasın);
+            # yalnız başarısız iç-çağrı panel_sync_jobs'a alınır.
             if dagitim_list:
                 try:
                     from routes.giris_routes import apply_makbuz_dagitim_to_panel_db
                     apply_makbuz_dagitim_to_panel_db(mid, dagitim_list, tahsilat_tarihi=tah_str)
                 except Exception:
-                    pass
+                    panel_sync_jobs.append((mid, tah_str, dagitim_list))
 
-    # Transaction sonrası ek güvence (başarısız iç-çağrı olsa bile).
+    # Transaction sonrası ek güvence (yalnız döngü içi apply başarısız olanlar).
     for mid_s, tah_s, dag_s in panel_sync_jobs:
         try:
             from routes.giris_routes import apply_makbuz_dagitim_to_panel_db
