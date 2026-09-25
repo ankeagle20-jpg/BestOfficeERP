@@ -19479,6 +19479,7 @@ function selectMusteri(id) {
 /** Tahsilat makbuzu: müşteri id / ad / telefon (Giriş sekmesindeki seçimle aynı). */
 function girisTahsilatFormunuMusteriyleDoldur(m) {
     if (!m || m.id == null || m.id === '') return;
+    try { sozlesmeAylikSecimiTemizle(); } catch (_eSelClrMid) {}
     tahsilatTutarDokunduSifirla('giris_tahsilat');
     var mid = document.getElementById('giris_tahsilat_musteri_id');
     if (!mid) return;
@@ -23198,6 +23199,8 @@ function girisTahsilatMakbuzKaydet() {
                 tahsilatAylikDagitimCacheGuncelle(data);
                 if (typeof girisTahsilatYilAyPaneldenTumGridBoyan === 'function') girisTahsilatYilAyPaneldenTumGridBoyan();
             } catch (_eMkOn) {}
+            // DOM seçim kalıntısı sonraki makbuzda ay_ref_iso_list sızdırmasın.
+            try { sozlesmeAylikSecimiTemizle(); } catch (_eSelClrOk) {}
             if (data.makbuz_no != null) tahsilatMakbuzNoSet('giris_tahsilat', data.makbuz_no);
             tahsilatMakbuzNoYukle('giris_tahsilat');
             sozlesmeAylikZorlaBorcTemizle();

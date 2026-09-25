@@ -703,9 +703,16 @@ def _acik_aylik_tutar_ay_set(musteri_id: int) -> set[str]:
     return out
 
 
-def _auto_allocate_oldest_unpaid_months(musteri_id, tahsil_tutar, borc_listesi=None, start_iso: str | None = None):
+def _auto_allocate_oldest_unpaid_months(
+    musteri_id,
+    tahsil_tutar,
+    borc_listesi=None,
+    start_iso: str | None = None,
+    iso_allowlist=None,
+):
     """
     Elle tahsilatta ay işaretlenmemişse, cache'teki en eski borçlu aylardan dağıtım yap.
+    iso_allowlist verilirse yalnız bu aylara (gerçek kalan ile) dağıtır — eşit bölme yok.
     Çıktı: (iso_list, [(iso, pay), ...])
     """
     try:
@@ -718,6 +725,19 @@ def _auto_allocate_oldest_unpaid_months(musteri_id, tahsil_tutar, borc_listesi=N
     start_iso_s = str(start_iso or "").strip()
     if not re.match(r"^\d{4}-\d{2}-\d{2}$", start_iso_s):
         start_iso_s = ""
+    allow = None
+    if iso_allowlist:
+        allow = set()
+        for raw in iso_allowlist:
+            iso_a = str(raw or "").strip()[:10]
+            if re.match(r"^\d{4}-\d{2}-\d{2}$", iso_a):
+                try:
+                    dd = datetime.strptime(iso_a, "%Y-%m-%d").date()
+                    allow.add(date(dd.year, dd.month, 1).isoformat())
+                except ValueError:
+                    continue
+        if not allow:
+            allow = None
     # 1) İstemciden gelen canlı grid borç listesi (tercihli kaynak)
     borclu = []
     if isinstance(borc_listesi, list):
@@ -727,6 +747,13 @@ def _auto_allocate_oldest_unpaid_months(musteri_id, tahsil_tutar, borc_listesi=N
                 continue
             iso = str(it.get("iso") or "").strip()
             if not re.match(r"^\d{4}-\d{2}-\d{2}$", iso):
+                continue
+            try:
+                dd = datetime.strptime(iso[:10], "%Y-%m-%d").date()
+                iso = date(dd.year, dd.month, 1).isoformat()
+            except ValueError:
+                continue
+            if allow is not None and iso not in allow:
                 continue
             if start_iso_s and iso < start_iso_s:
                 continue
@@ -787,6 +814,8 @@ def _auto_allocate_oldest_unpaid_months(musteri_id, tahsil_tutar, borc_listesi=N
             if mm < 1 or mm > 12:
                 continue
             iso = date(yy, mm, 1).isoformat()
+            if allow is not None and iso not in allow:
+                continue
             if start_iso_s and iso < start_iso_s:
                 continue
             # Kritik: oldest dağıtımda asla "aylık tutarın tamamı"na düşme.
@@ -9587,9 +9616,10 @@ def tahsilat_ekle():
         ay_ref_isos = _ay_ref_iso_list_from_tahsilat_payload(data)
         raw_aciklama = (data.get('aciklama') or '').strip()
         auto_pay_items = []
-        # Elle tahsilatta kullanıcı ay seçtiyse o seçim korunur.
-        # Ay seçilmemişse en eski açık aylardan otomatik dağıtım yapılır.
-        if not data.get("fatura_id") and not ay_ref_isos:
+        # Elle tahsilatta kullanıcı ay seçtiyse o seçim korunur (hangi aylar).
+        # Dağıtım tutarları her zaman gerçek kalandan (FIFO); eşit bölme yok.
+        skip_ay_dagitim = bool(data.get("yillik_tek_tahsilat") or data.get("tahsilat_dagitimsiz"))
+        if not data.get("fatura_id") and not skip_ay_dagitim:
             try:
                 from .giris_routes import (
                     _read_aylik_grid_cache_payload,
@@ -9599,51 +9629,76 @@ def tahsilat_ekle():
                     _refresh_aylik_cache_before_alloc(int(musteri_id))
             except Exception:
                 pass
-        skip_ay_dagitim = bool(data.get("yillik_tek_tahsilat") or data.get("tahsilat_dagitimsiz"))
-        if not ay_ref_isos and not skip_ay_dagitim:
-            auto_isos, auto_pay_items = _auto_allocate_oldest_unpaid_months(
-                musteri_id,
-                tutar,
-                data.get("aylik_borc_listesi"),
-                data.get("ay_ref_start_iso"),
-            )
-            if auto_isos:
-                ay_ref_isos = auto_isos
+        if not skip_ay_dagitim:
+            if not ay_ref_isos:
+                auto_isos, auto_pay_items = _auto_allocate_oldest_unpaid_months(
+                    musteri_id,
+                    tutar,
+                    data.get("aylik_borc_listesi"),
+                    data.get("ay_ref_start_iso"),
+                )
+                if auto_isos:
+                    ay_ref_isos = auto_isos
+            else:
+                # Seçili aylar var: eşit bölme YOK — gerçek kalan ile aynı aylara dağıt.
+                client_borc = data.get("aylik_borc_listesi")
+                allow_set = set(ay_ref_isos)
+                if isinstance(client_borc, list) and client_borc:
+                    filtered = []
+                    for it in client_borc:
+                        if not isinstance(it, dict):
+                            continue
+                        iso_c = str(it.get("iso") or "").strip()[:10]
+                        if iso_c in allow_set:
+                            filtered.append(it)
+                    client_borc = filtered or None
+                else:
+                    client_borc = None
+                _sel_isos, auto_pay_items = _auto_allocate_oldest_unpaid_months(
+                    musteri_id,
+                    tutar,
+                    client_borc,
+                    None,
+                    iso_allowlist=ay_ref_isos,
+                )
+                if auto_pay_items:
+                    ay_ref_isos = [iso for iso, _ in auto_pay_items]
             # Soft-confirm: tutar açık aylara dağıtılandan fazlaysa (eşleşmeyen kısım)
             # onay flag'i olmadan INSERT etme. Fazla ay/avans yazılmaz; sadece uyarı.
-            dagitilacak = round(
-                sum(float(p or 0) for _iso, p in (auto_pay_items or [])),
-                2,
-            )
-            eslesmeyen = round(float(tutar or 0) - dagitilacak, 2)
-            if eslesmeyen > 0.01:
-                _onay_raw = data.get("asiri_tutar_onay")
-                _onay = _onay_raw in (True, 1, "1", "true", "True", "yes", "on")
-                if not _onay:
-                    def _fmt_tl(n):
-                        return (
-                            f"{float(n):,.2f}"
-                            .replace(",", "X")
-                            .replace(".", ",")
-                            .replace("X", ".")
-                        )
-                    return jsonify({
-                        "ok": False,
-                        "kod": "asiri_tutar_onay_gerekli",
-                        "mesaj": (
-                            "Girilen %s TL'nin %s TL'si açık aylara dağıtılacak; "
-                            "%s TL hiçbir aya eşleşmeyecek. Devam edilsin mi?"
-                            % (
-                                _fmt_tl(tutar),
-                                _fmt_tl(dagitilacak),
-                                _fmt_tl(eslesmeyen),
+            if auto_pay_items is not None:
+                dagitilacak = round(
+                    sum(float(p or 0) for _iso, p in (auto_pay_items or [])),
+                    2,
+                )
+                eslesmeyen = round(float(tutar or 0) - dagitilacak, 2)
+                if eslesmeyen > 0.01:
+                    _onay_raw = data.get("asiri_tutar_onay")
+                    _onay = _onay_raw in (True, 1, "1", "true", "True", "yes", "on")
+                    if not _onay:
+                        def _fmt_tl(n):
+                            return (
+                                f"{float(n):,.2f}"
+                                .replace(",", "X")
+                                .replace(".", ",")
+                                .replace("X", ".")
                             )
-                        ),
-                        "tutar": round(float(tutar or 0), 2),
-                        "dagitilacak": dagitilacak,
-                        "eslesmeyen": eslesmeyen,
-                        "acik_ay_sayisi": len(auto_pay_items or []),
-                    }), 400
+                        return jsonify({
+                            "ok": False,
+                            "kod": "asiri_tutar_onay_gerekli",
+                            "mesaj": (
+                                "Girilen %s TL'nin %s TL'si açık aylara dağıtılacak; "
+                                "%s TL hiçbir aya eşleşmeyecek. Devam edilsin mi?"
+                                % (
+                                    _fmt_tl(tutar),
+                                    _fmt_tl(dagitilacak),
+                                    _fmt_tl(eslesmeyen),
+                                )
+                            ),
+                            "tutar": round(float(tutar or 0), 2),
+                            "dagitilacak": dagitilacak,
+                            "eslesmeyen": eslesmeyen,
+                            "acik_ay_sayisi": len(auto_pay_items or []),
+                        }), 400
         aciklama_text = _aciklama_with_aylik_markers(
             raw_aciklama,
             ay_ref_isos,
@@ -9745,30 +9800,12 @@ def tahsilat_ekle():
                 for iso, pay in auto_pay_items
                 if re.match(r"^\d{4}-\d{2}-\d{2}$", str(iso or ""))
             ]
-        elif ay_ref_isos:
-            uniq_isos = []
-            seen_isos = set()
-            for iso in ay_ref_isos:
-                iso_s = str(iso or "").strip()
-                if not re.match(r"^\d{4}-\d{2}-\d{2}$", iso_s):
-                    continue
-                if iso_s in seen_isos:
-                    continue
-                seen_isos.add(iso_s)
-                uniq_isos.append(iso_s)
-            if len(uniq_isos) == 1:
-                dagitim_items = [(uniq_isos[0], round(float(tutar or 0), 2))]
-            elif len(uniq_isos) > 1:
-                cents_total = int(round(float(tutar or 0) * 100))
-                n = len(uniq_isos)
-                base = cents_total // n if n else 0
-                rem = cents_total % n if n else 0
-                dagitim_items = []
-                for i, iso_s in enumerate(uniq_isos):
-                    pay_cents = base + (1 if i < rem else 0)
-                    if pay_cents <= 0:
-                        continue
-                    dagitim_items.append((iso_s, pay_cents / 100.0))
+        elif ay_ref_isos and len(ay_ref_isos) == 1:
+            # Tek ay ref + kalan bulunamadı: tutarın tamamını o aya yaz (eski tek-ay davranışı).
+            iso_s = str(ay_ref_isos[0] or "").strip()
+            if re.match(r"^\d{4}-\d{2}-\d{2}$", iso_s):
+                dagitim_items = [(iso_s, round(float(tutar or 0), 2))]
+        # Çoklu ay + pay_items yok: eşit bölme YAPILMAZ (gerçek kalan yolu yukarıda).
 
         try:
             from .giris_routes import (
