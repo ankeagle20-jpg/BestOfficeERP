@@ -1,5 +1,9 @@
 # Render Blueprint — Bulut linki: https://bestofficeerp.onrender.com
 # Bu PC açık kalmasa da çalışır; link her yerden açılır.
+#
+# Bölge notu: Render mevcut servisin region'ını değiştirmeyi desteklemez.
+# Oregon (bestofficeerp) + Frankfurt (bestofficeerp-fra) geçişte yan yana
+# tutulabilir; DNS/custom domain taşınana kadar eski servis canlı kalır.
 services:
   - type: web
     name: bestofficeerp
@@ -15,6 +19,34 @@ services:
     envVars:
       - key: SECRET_KEY
         generateValue: true
+      - key: TENANT_APEX_DOMAINS
+        value: "payafin.com,bestofficeerp.com,bestofficeerp.local"
+      - key: DB_HOST
+        sync: false
+      - key: DB_PORT
+        value: "5432"
+      - key: DB_NAME
+        value: postgres
+      - key: DB_USER
+        value: postgres
+      - key: DB_PASSWORD
+        sync: false
+
+  # Frankfurt göç hedefi — domain taşınmadan önce bestofficeerp-fra.onrender.com
+  # üzerinden smoke + süre ölçümü. SECRET_KEY: dashboard'dan ESKİ değeri elle yapıştır
+  # (generateValue YOK — oturum/cookie kırılmasın).
+  - type: web
+    name: bestofficeerp-fra
+    runtime: python
+    plan: free
+    region: frankfurt
+    rootDir: erp_web
+    healthCheckPath: /healthz
+    buildCommand: pip install -r requirements-render.txt
+    startCommand: gunicorn -w 1 --threads 2 --worker-class gthread -b 0.0.0.0:$PORT --timeout 120 --graceful-timeout 30 app:app
+    envVars:
+      - key: SECRET_KEY
+        sync: false
       - key: TENANT_APEX_DOMAINS
         value: "payafin.com,bestofficeerp.com,bestofficeerp.local"
       - key: DB_HOST
