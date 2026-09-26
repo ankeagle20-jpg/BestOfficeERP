@@ -21,10 +21,12 @@ from db import (
     execute,
     ensure_grup2_etiketleri_table,
     ensure_grup2_bizim_hesap_into_array,
+    init_request_db,
 )
 
 app = Flask(__name__)
 app.config.from_object(Config)
+init_request_db(app)
 
 
 @app.before_request

@@ -407,6 +407,12 @@ _PARTY_COLS = (
     "tax_id, tax_office, address, tax_id_kind, "
     "is_active, created_at, updated_at"
 )
+# api_parties_list birleşik SQL için p. önekli kolon listesi
+_PARTY_COLS_P = (
+    "p.id, p.name, p.type, p.phone, p.email, p.country, p.notes, "
+    "p.tax_id, p.tax_office, p.address, p.tax_id_kind, "
+    "p.is_active, p.created_at, p.updated_at"
+)
 
 
 def _parse_party_tax_fields(data: dict) -> tuple[str | None, str | None, str | None, str | None, str | None]:
@@ -538,32 +544,77 @@ def api_parties_list():
     _ensure_ledger_tables_once()
     active_only = str(request.args.get("active") or "1").strip() not in ("0", "false", "False")
     q = (request.args.get("q") or "").strip()
+    # Tek SQL: parties + bakiyeler (json_agg) + last_occurred — 3 ayrı fetch yerine 1.
     sql = f"""
-        SELECT {_PARTY_COLS}
-        FROM ledger_parties
+        SELECT
+            {_PARTY_COLS_P},
+            last_tx.last_occurred_at,
+            bals.balances_json
+        FROM ledger_parties p
+        LEFT JOIN LATERAL (
+            SELECT MAX(t.occurred_at) AS last_occurred_at
+            FROM ledger_transactions t
+            WHERE t.party_id = p.id
+              AND t.is_void = FALSE
+        ) last_tx ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT COALESCE(
+                json_agg(
+                    json_build_object(
+                        'currency', x.currency,
+                        'given', x.given,
+                        'received', x.received,
+                        'balance', x.balance
+                    )
+                    ORDER BY x.currency
+                ),
+                '[]'::json
+            ) AS balances_json
+            FROM (
+                SELECT
+                    t.currency,
+                    COALESCE(SUM(CASE WHEN t.direction = 'give' THEN t.amount ELSE 0 END), 0) AS given,
+                    COALESCE(SUM(CASE WHEN t.direction = 'receive' THEN t.amount ELSE 0 END), 0) AS received,
+                    COALESCE(SUM(
+                        CASE
+                            WHEN t.direction = 'give' THEN t.amount
+                            WHEN t.direction = 'receive' THEN -t.amount
+                            ELSE 0
+                        END
+                    ), 0) AS balance
+                FROM ledger_transactions t
+                WHERE t.party_id = p.id
+                  AND t.is_void = FALSE
+                GROUP BY t.currency
+            ) x
+        ) bals ON TRUE
         WHERE 1=1
     """
     params: list = []
     if active_only:
-        sql += " AND is_active = TRUE"
+        sql += " AND p.is_active = TRUE"
     if q:
-        sql += " AND (name ILIKE %s OR COALESCE(phone,'') ILIKE %s OR COALESCE(email,'') ILIKE %s)"
+        sql += (
+            " AND (p.name ILIKE %s OR COALESCE(p.phone,'') ILIKE %s "
+            "OR COALESCE(p.email,'') ILIKE %s)"
+        )
         like = f"%{q}%"
         params.extend([like, like, like])
-    sql += " ORDER BY lower(name), id"
+    sql += " ORDER BY lower(p.name), p.id"
     rows = fetch_all(sql, tuple(params)) or []
-    ids = [int(r["id"]) for r in rows]
-    bals_by = _balances_by_party_ids(ids)
-    last_by = _last_occurred_by_party_ids(ids)
     parties = []
     for r in rows:
-        pid = int(r["id"])
-        d = _party_dict(
-            r,
-            with_balances=True,
-            balances=bals_by.get(pid, []),
-        )
-        last_dt = last_by.get(pid)
+        raw_bals = r.get("balances_json")
+        if isinstance(raw_bals, str):
+            try:
+                raw_bals = json.loads(raw_bals)
+            except Exception:
+                raw_bals = []
+        if not isinstance(raw_bals, list):
+            raw_bals = []
+        formatted = [_format_balance_row(b) for b in raw_bals if isinstance(b, dict)]
+        d = _party_dict(r, with_balances=True, balances=formatted)
+        last_dt = r.get("last_occurred_at")
         d["last_occurred_at"] = last_dt.isoformat() if last_dt else None
         parties.append(d)
     return jsonify({"ok": True, "parties": parties, "count": len(parties)})

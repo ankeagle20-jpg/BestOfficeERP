@@ -469,14 +469,129 @@ def _bootstrap_timeout_sec() -> float:
     return val
 
 
-def _prepare_db_connection():
+def _request_scoped_db_enabled() -> bool:
+    """Flask request içinde tek bağlantı yeniden kullanılsın mı? Varsayılan açık."""
+    return (os.environ.get("DB_REQUEST_SCOPED", "1") or "").strip().lower() not in (
+        "0",
+        "false",
+        "no",
+        "off",
+    )
+
+
+_G_REQ_CONN = "_db_req_conn"
+_G_REQ_SCHEMA = "_db_req_schema"
+_G_REQ_DEPTH = "_db_req_depth"
+
+
+def _statement_timeout_literal() -> str:
+    return (os.environ.get("DB_STATEMENT_TIMEOUT") or "30000ms").strip() or "30000ms"
+
+
+def _apply_session_bootstrap(conn, schema: str | None) -> None:
+    """İlk checkout: yalnızca statement_timeout (session).
+
+    search_path burada set edilmez — Supabase transaction-mode pooler commit
+    sonrası session SET'i düşürebilir. Tenant path her db() başında
+    _apply_txn_locals (SET LOCAL) ile uygulanır.
+    """
+    del schema  # API uyumu; search_path txn-local'de
+    cur = conn.cursor()
+    cur.execute(
+        psql.SQL("SET statement_timeout TO {}").format(
+            psql.Literal(_statement_timeout_literal())
+        )
+    )
+
+
+def _apply_txn_locals(conn, schema: str | None) -> None:
+    """Her db() transaction başı — SET LOCAL search_path (+ timeout).
+
+    Multi-tenant + transaction-mode pooler için zorunlu.
+    """
+    cur = conn.cursor()
+    cur.execute(
+        psql.SQL("SET LOCAL statement_timeout TO {}").format(
+            psql.Literal(_statement_timeout_literal())
+        )
+    )
+    if schema is not None:
+        cur.execute(
+            psql.SQL("SET LOCAL search_path TO {}, pg_catalog").format(
+                psql.Identifier(schema)
+            )
+        )
+    else:
+        cur.execute("SET LOCAL search_path TO public, pg_catalog")
+
+
+def _reset_session_state(conn) -> None:
+    """Havuza iade öncesi tenant search_path / timeout temizliği."""
+    try:
+        if getattr(conn, "closed", 1):
+            return
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        cur = conn.cursor()
+        cur.execute("RESET statement_timeout")
+        cur.execute("RESET search_path")
+        try:
+            conn.commit()
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+    except Exception as e:
+        logger.warning("PostgreSQL session reset başarısız (%s); bağlantı kapatılacak.", e)
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _prepare_db_connection(*, force_new: bool = False):
     """get_conn + statement_timeout + search_path — tek thread+timeout çiti, 1 retry.
+
+    Request-scoped açıksa (varsayılan): Flask g üzerinde tek bağlantı; healthcheck
+    ve session bootstrap yalnızca ilk açılışta. Tenant search_path g.tenant_schema
+    ile kilitlenir; şema değişirse yeni bootstrap.
 
     tenant_schema Flask context'te ana thread'de çözülür; libpq işi worker'da.
     Timeout/hata: _abandon_pooled_conn (ana thread'de senkron rollback/putconn yok).
     """
     schema = _tenant_schema_for_request()
-    stmt_to = (os.environ.get("DB_STATEMENT_TIMEOUT") or "30000ms").strip() or "30000ms"
+
+    try:
+        from flask import g, has_app_context
+    except Exception:
+        has_app_context = lambda: False  # noqa: E731
+        g = None
+
+    if (
+        (not force_new)
+        and _request_scoped_db_enabled()
+        and has_app_context()
+        and g is not None
+    ):
+        existing = getattr(g, _G_REQ_CONN, None)
+        bound = getattr(g, _G_REQ_SCHEMA, object())
+        if existing is not None and not getattr(existing, "closed", 1) and bound == schema:
+            return existing
+        if existing is not None:
+            # Şema değişti veya conn kapalı — eskisini güvenli iade et.
+            try:
+                _reset_session_state(existing)
+            except Exception:
+                pass
+            try:
+                _release_conn(existing)
+            except Exception:
+                pass
+            setattr(g, _G_REQ_CONN, None)
+
     timeout = _bootstrap_timeout_sec()
     last_err = None
 
@@ -486,23 +601,25 @@ def _prepare_db_connection():
         def _bootstrap():
             conn = get_conn()
             holder["conn"] = conn
-            cur = conn.cursor()
-            cur.execute(
-                psql.SQL("SET LOCAL statement_timeout TO {}").format(
-                    psql.Literal(stmt_to)
-                )
-            )
-            if schema is not None:
-                cur.execute(
-                    psql.SQL("SET LOCAL search_path TO {}, pg_catalog").format(
-                        psql.Identifier(schema)
-                    )
-                )
+            # Request-scoped: timeout session; search_path her db() içinde LOCAL.
+            # Request dışı: SET LOCAL burada (tek checkout = tek txn).
+            if _request_scoped_db_enabled() and has_app_context():
+                _apply_session_bootstrap(conn, schema)
+            else:
+                _apply_txn_locals(conn, schema)
             return conn
 
         try:
             fut = _BOOTSTRAP_EXECUTOR.submit(_bootstrap)
-            return fut.result(timeout=timeout)
+            conn = fut.result(timeout=timeout)
+            if (
+                _request_scoped_db_enabled()
+                and has_app_context()
+                and g is not None
+            ):
+                setattr(g, _G_REQ_CONN, conn)
+                setattr(g, _G_REQ_SCHEMA, schema)
+            return conn
         except FuturesTimeoutError:
             logger.warning(
                 "PostgreSQL db bootstrap zaman aşımı (%.1fs, deneme %s/2); bağlantı terk ediliyor.",
@@ -531,23 +648,100 @@ def _prepare_db_connection():
     raise psycopg2.OperationalError("PostgreSQL db bootstrap başarısız.")
 
 
+def close_request_db_connection(exc=None) -> None:
+    """teardown_appcontext: request bağlantısını RESET edip havuza iade et."""
+    try:
+        from flask import g, has_app_context
+    except Exception:
+        return
+    if not has_app_context():
+        return
+    conn = getattr(g, _G_REQ_CONN, None)
+    if conn is None:
+        return
+    setattr(g, _G_REQ_CONN, None)
+    setattr(g, _G_REQ_SCHEMA, None)
+    setattr(g, _G_REQ_DEPTH, 0)
+    try:
+        if exc is not None:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        _reset_session_state(conn)
+        _release_conn(conn)
+    except Exception as e:
+        logger.warning("Request DB bağlantı teardown hatası: %s", e)
+        try:
+            _abandon_pooled_conn(conn)
+        except Exception:
+            pass
+
+
+def init_request_db(app) -> None:
+    """Flask app'e request-scoped DB teardown bağla."""
+    app.teardown_appcontext(close_request_db_connection)
+
+
 @contextmanager
 def db():
     """Context manager: otomatik commit/rollback.
 
-    Checkout+bootstrap (get_conn, statement_timeout, search_path) tek timeout çitinde;
-    ensure_*/DDL içindeki daha kısa SET LOCAL override'lar yield sonrası aynı
-    transaction'da üstüne yazar.
+    Request-scoped (varsayılan): aynı Flask request'te tek checkout; healthcheck
+    yalnızca ilk açılışta. Her db() transaction başında SET LOCAL search_path
+    (multi-tenant + transaction-mode pooler güvenliği).
+
+    İç içe db(): yalnızca en dış katman commit/rollback yapar.
+
+    Request dışı (CLI/thread): her db() checkout+SET LOCAL+release.
     """
+    try:
+        from flask import g, has_app_context
+    except Exception:
+        has_app_context = lambda: False  # noqa: E731
+        g = None
+
+    scoped = bool(
+        _request_scoped_db_enabled() and has_app_context() and g is not None
+    )
+    schema = _tenant_schema_for_request()
     conn = _prepare_db_connection()
+
+    if scoped:
+        depth = int(getattr(g, _G_REQ_DEPTH, 0) or 0) + 1
+        setattr(g, _G_REQ_DEPTH, depth)
+    else:
+        depth = 1
+
+    # depth==1: yeni txn — SET LOCAL zorunlu. Nested: outer zaten set etti.
+    if depth == 1 and scoped:
+        _apply_txn_locals(conn, schema)
+    elif scoped:
+        bound = getattr(g, _G_REQ_SCHEMA, None)
+        if bound != schema:
+            raise RuntimeError(
+                f"tenant_schema değişti nested db içinde: {bound!r} -> {schema!r}"
+            )
+    # non-scoped: SET LOCAL zaten _prepare/_bootstrap içinde
+
     try:
         yield conn
-        conn.commit()
+        if depth == 1:
+            conn.commit()
     except BaseException:
-        conn.rollback()
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         raise
     finally:
-        _release_conn(conn)
+        if scoped:
+            try:
+                setattr(g, _G_REQ_DEPTH, max(0, int(getattr(g, _G_REQ_DEPTH, 1) or 1) - 1))
+            except Exception:
+                pass
+        else:
+            _release_conn(conn)
 
 
 def fetch_all(sql: str, params=()) -> list:
