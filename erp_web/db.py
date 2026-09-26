@@ -4465,12 +4465,77 @@ def ensure_platform_support_tables():
             print(f"platform support index: {e}")
 
 
+# Bump when ledger DDL changes (new table/column/index that must run on existing tenants).
+LEDGER_SCHEMA_VERSION = 1
+
+
+def _ledger_schema_is_current() -> bool:
+    """Tek ucuz sorgu: ledger_parties + schema_version damgası güncel mi?
+
+    True → ensure_ledger_tables DDL zincirini tamamen atla.
+    False/hata → fail-open: tam ensure çalışır (ilk kurulum / migration).
+    """
+    try:
+        row = fetch_one(
+            """
+            SELECT
+              to_regclass('ledger_parties') IS NOT NULL AS has_parties,
+              CASE
+                WHEN to_regclass('ledger_schema_meta') IS NULL THEN NULL
+                ELSE (
+                  SELECT value
+                  FROM ledger_schema_meta
+                  WHERE key = 'schema_version'
+                  LIMIT 1
+                )
+              END AS ver
+            """
+        )
+        if not row or not row.get("has_parties"):
+            return False
+        ver_raw = row.get("ver")
+        if ver_raw is None or str(ver_raw).strip() == "":
+            return False
+        return int(str(ver_raw).strip()) >= int(LEDGER_SCHEMA_VERSION)
+    except Exception:
+        return False
+
+
+def _ledger_stamp_schema_version() -> None:
+    """Şema damgası: erken-çıkış için ledger_schema_meta.schema_version."""
+    execute(
+        """
+        CREATE TABLE IF NOT EXISTS ledger_schema_meta (
+            key         TEXT PRIMARY KEY,
+            value       TEXT NOT NULL,
+            updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT ledger_schema_meta_key_chk
+                CHECK (length(trim(key)) > 0)
+        )
+        """
+    )
+    execute(
+        """
+        INSERT INTO ledger_schema_meta (key, value, updated_at)
+        VALUES ('schema_version', %s, NOW())
+        ON CONFLICT (key) DO UPDATE
+        SET value = EXCLUDED.value, updated_at = NOW()
+        """,
+        (str(int(LEDGER_SCHEMA_VERSION)),),
+    )
+
+
 def ensure_ledger_tables():
     """Payafin Cari (ledger) — taraflar + hareketler (kiracı search_path).
 
     KRİTİK: bakiye kolonu/cache YOK. Bakiye her zaman
     ledger_transactions üzerinden canlı SUM ile hesaplanır (is_void=FALSE).
+
+    Performans: şema zaten güncelse (ledger_schema_meta) DDL zinciri atlanır.
+    Yeni kolon/tablo için LEDGER_SCHEMA_VERSION artır → bir kez tam ensure.
     """
+    if _ledger_schema_is_current():
+        return
     execute(
         """
         CREATE TABLE IF NOT EXISTS ledger_parties (
@@ -4569,6 +4634,7 @@ def ensure_ledger_tables():
     _ledger_parties_soft_backfill_tax_from_notes()
     ensure_ledger_group_tables()
     ensure_ledger_invoice_tables()
+    _ledger_stamp_schema_version()
 
 
 def _ledger_parties_soft_backfill_tax_from_notes() -> None:

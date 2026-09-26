@@ -4898,12 +4898,18 @@
   });
 
 
-  loadRegisteredAssets().then(function () {
-    return loadList();
-  }).then(loadSummary).catch(function (e) {
-    document.getElementById("pc-list").innerHTML =
-      '<div class="pc-empty">' + (e.message || "Yüklenemedi") + "</div>";
-  });
+  /* Paralel boot: assets / parties / summary waterfall'ını kır (Promise.all). */
+  Promise.all([loadRegisteredAssets(), loadList(), loadSummary()])
+    .then(function () {
+      try {
+        populateAssetFilterDropdown(state.summaryByCurrency || []);
+        applySummaryBoxes();
+      } catch (_eBootUi) {}
+    })
+    .catch(function (e) {
+      document.getElementById("pc-list").innerHTML =
+        '<div class="pc-empty">' + (e.message || "Yüklenemedi") + "</div>";
+    });
 
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("/ledger/sw.js", { scope: "/ledger/" }).catch(function () {

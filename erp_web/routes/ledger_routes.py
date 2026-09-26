@@ -48,10 +48,12 @@ _LEDGER_ENSURE_LOCK = threading.Lock()
 
 
 def _ensure_ledger_tables_once() -> None:
-    """İstek yolunda DDL'i şema başına process ömründe tek sefere indirger.
+    """İstek yolunda ledger DDL'i şema başına process ömründe tek sefere indirger.
 
-    İlk istek: ensure_ledger_tables() (CREATE IF NOT EXISTS zinciri).
-    Sonraki: no-op. Başarısız olursa set'e yazılmaz → sonraki istek yeniden dener.
+    ensure_ledger_tables() içinde ayrıca schema_version early-exit vardır
+    (tablolar güncelse CREATE/ALTER zinciri atlanır). Buradaki set, aynı
+    process'te o ucuz kontrolü bile tekrarlamamak içindir.
+    Başarısız olursa set'e yazılmaz → sonraki istek yeniden dener.
     """
     schema = getattr(g, "tenant_schema", None) or "__no_tenant__"
     if schema in _LEDGER_ENSURED_SCHEMAS:
