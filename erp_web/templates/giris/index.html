@@ -30622,14 +30622,8 @@ function girisTahsilatMakbuzKaydet() {
           .finally(function () { window.__girisTahsilKaydetInFlight = false; });
         return;
     }
-    window.__girisTahsilKaydetInFlight = true;
-    fetch(API_TAHSILAT_EKLE, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-    })
-    .then(r => r.json())
-    .then(data => {
+
+    function girisTahsilatMakbuzKaydetUygula(data) {
         if (data.ok && data.tahsilat_id) {
             try {
                 tahsilatAylikKismiOverrideYaz(payload);
@@ -30718,7 +30712,28 @@ function girisTahsilatMakbuzKaydet() {
         } else {
             alert(data.mesaj || 'Kayıt yapılamadı.');
         }
+    }
+    function girisTahsilatMakbuzKaydetCevap(data) {
+        if (data && data.kod === 'asiri_tutar_onay_gerekli') {
+            var onayMsg = (data.mesaj || 'Girilen tutar açık ayları aşıyor. Devam edilsin mi?');
+            if (!window.confirm(onayMsg)) return;
+            var payloadOnay = Object.assign({}, payload, { asiri_tutar_onay: true });
+            return fetch(API_TAHSILAT_EKLE, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payloadOnay)
+            }).then(function (r2) { return r2.json(); }).then(girisTahsilatMakbuzKaydetUygula);
+        }
+        return girisTahsilatMakbuzKaydetUygula(data);
+    }
+    window.__girisTahsilKaydetInFlight = true;
+    fetch(API_TAHSILAT_EKLE, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
     })
+    .then(r => r.json())
+    .then(girisTahsilatMakbuzKaydetCevap)
     .catch(err => alert('İstek gönderilemedi: ' + (err.message || err)))
     .finally(() => { window.__girisTahsilKaydetInFlight = false; });
 }
@@ -31071,15 +31086,9 @@ function sozlesmeTahsilatFormPayload() {
         ? tahsilatMakbuzSecilenAylikSatirlari()
         : [];
     var ayRefIsoListRaw = tahsilatAyRefIsoListFromSecilenSatirlar(seciliSatirlar);
-    var seciliToplam = tahsilatSecilenSatirlarToplami(seciliSatirlar);
-    var ayRefIsoList = [];
-    if (ayRefIsoListRaw.length === 1) {
-        var tekAyTol = 0.01;
-        var tekAyTutar = parseFloat(tutar || 0) || 0;
-        if (tekAyTutar > 0 && tekAyTutar <= (seciliToplam + tekAyTol)) ayRefIsoList = ayRefIsoListRaw.slice();
-    } else if (ayRefIsoListRaw.length > 1) {
-        if (Math.abs(seciliToplam - (tutar || 0)) <= 0.01) ayRefIsoList = ayRefIsoListRaw.slice();
-    }
+    // Tutar grid toplamına uymasa da seçili aylar gönderilir. Sunucu bu listeyi
+    // iso_allowlist olarak kullanır; fazla tutar soft-confirm ile onaylanır.
+    var ayRefIsoList = ayRefIsoListRaw.slice();
     var ayRefIso = ayRefIsoList.length ? ayRefIsoList[0] : null;
     var ayRefStartIso = ayRefIsoListRaw.length ? ayRefIsoListRaw[0] : null;
     var ayRefTutar = null;
@@ -31143,14 +31152,8 @@ function sozlesmeTahsilatKaydet() {
           .finally(function () { window.__sozlesmeTahsilKaydetInFlight = false; });
         return;
     }
-    window.__sozlesmeTahsilKaydetInFlight = true;
-    fetch(API_TAHSILAT_EKLE, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-    })
-    .then(r => r.json())
-    .then(data => {
+
+    function sozlesmeTahsilatKaydetUygula(data) {
         if (data.ok && data.tahsilat_id) {
             tahsilatAylikKismiOverrideYaz(payload);
             tahsilatAylikSeciliAyKismiDomUygula(payload);
@@ -31205,7 +31208,28 @@ function sozlesmeTahsilatKaydet() {
         } else {
             alert(data.mesaj || 'Kayıt yapılamadı.');
         }
+    }
+    function sozlesmeTahsilatKaydetCevap(data) {
+        if (data && data.kod === 'asiri_tutar_onay_gerekli') {
+            var onayMsg = (data.mesaj || 'Girilen tutar açık ayları aşıyor. Devam edilsin mi?');
+            if (!window.confirm(onayMsg)) return;
+            var payloadOnay = Object.assign({}, payload, { asiri_tutar_onay: true });
+            return fetch(API_TAHSILAT_EKLE, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payloadOnay)
+            }).then(function (r2) { return r2.json(); }).then(sozlesmeTahsilatKaydetUygula);
+        }
+        return sozlesmeTahsilatKaydetUygula(data);
+    }
+    window.__sozlesmeTahsilKaydetInFlight = true;
+    fetch(API_TAHSILAT_EKLE, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
     })
+    .then(r => r.json())
+    .then(sozlesmeTahsilatKaydetCevap)
     .catch(err => alert('İstek gönderilemedi: ' + (err.message || err)))
     .finally(() => { window.__sozlesmeTahsilKaydetInFlight = false; });
 }
