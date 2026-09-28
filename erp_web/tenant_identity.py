@@ -73,6 +73,63 @@ def _host_matches_suffix(host: str, suffix: str) -> bool:
     return host == suffix or host.endswith("." + suffix)
 
 
+def _tenant_slug_aliases() -> dict[str, str]:
+    """TENANT_SLUG_ALIASES=adem-fra:adem — boşsa tamamen no-op.
+
+    Yalnızca bu env set edilmiş süreçte (ör. bestofficeerp-fra) çalışır.
+    Sol taraf test host etiketi (tire olabilir); sağ taraf gerçek slug.
+    """
+    raw = (os.environ.get("TENANT_SLUG_ALIASES") or "").strip().lower()
+    if not raw:
+        return {}
+    out: dict[str, str] = {}
+    alias_src_re = re.compile(r"^[a-z0-9_-]+$")
+    for part in raw.split(","):
+        piece = part.strip()
+        if ":" not in piece:
+            continue
+        src, dst = piece.split(":", 1)
+        src, dst = src.strip(), dst.strip()
+        if not src or not dst:
+            continue
+        if not alias_src_re.fullmatch(src):
+            continue
+        if not _SLUG_RE.fullmatch(dst) or dst in RESERVED_TENANT_SLUGS:
+            continue
+        if schema_name_for_slug(dst) is None:
+            continue
+        out[src] = dst
+    return out
+
+
+def _apex_host_label(host: str | None) -> str | None:
+    """{label}.{TENANT_APEX} etiketini slug regex uygulamadan döndürür.
+
+    Alias çevirisi için. Public / onrender / apex kök → None.
+    """
+    raw = _normalize_host(host)
+    if not raw or raw in ("localhost", "127.0.0.1", "::1"):
+        return None
+    if _IPV4_RE.fullmatch(raw):
+        return None
+    if raw in _public_hosts():
+        return None
+    for sfx in _no_tenant_suffixes():
+        if _host_matches_suffix(raw, sfx):
+            return None
+    for apex in _tenant_apex_domains():
+        if raw == apex:
+            return None
+        suffix = "." + apex
+        if not raw.endswith(suffix):
+            continue
+        rest = raw[: -len(suffix)]
+        if not rest or "." in rest:
+            return None
+        return rest
+    return None
+
+
 def _subdomain_from_host(host: str | None) -> str | None:
     """Yalnız {slug}.{TENANT_APEX}. PaaS / bilinmeyen host → None (public, fail-closed)."""
     raw = _normalize_host(host)
@@ -111,7 +168,17 @@ def resolve_tenant_slug(*, debug: bool | None = None) -> str | None:
             debug = bool(current_app.debug)
         except Exception:
             debug = False
-    slug = _subdomain_from_host(request.host or request.headers.get("Host"))
+    host = request.host or request.headers.get("Host")
+    # Alias (yalnız TENANT_SLUG_ALIASES doluysa) normal slug çözümünden önce.
+    # Env yok/boş → _tenant_slug_aliases() {} ve bu dal hiç çalışmaz.
+    aliases = _tenant_slug_aliases()
+    slug = None
+    if aliases:
+        label = _apex_host_label(host)
+        if label and label in aliases:
+            slug = aliases[label]
+    if slug is None:
+        slug = _subdomain_from_host(host)
     if debug:
         hdr = (request.headers.get(TENANT_HEADER) or "").strip().lower()
         if hdr:
