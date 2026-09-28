@@ -3319,15 +3319,31 @@ def ensure_email_verification_tokens_table():
 
 
 def ensure_users_security_stamp_column():
-    """Oturum geçersiz kılma — users.security_stamp (R2.5-S1, public şema)."""
+    """Oturum geçersiz kılma — users.security_stamp (R2.5-S1, public şema).
+
+    Boş damgalar Python'da üretilir. gen_random_bytes kullanılmaz: pgcrypto
+    extensions şemasındadır ve boot search_path onu görmez.
+    """
     execute("ALTER TABLE public.users ADD COLUMN IF NOT EXISTS security_stamp TEXT")
-    execute(
+    from auth import generate_security_stamp
+
+    empty = fetch_all(
         """
-        UPDATE public.users
-        SET security_stamp = encode(gen_random_bytes(24), 'base64')
+        SELECT id
+        FROM public.users
         WHERE security_stamp IS NULL OR btrim(security_stamp) = ''
         """
     )
+    for row in empty:
+        execute(
+            """
+            UPDATE public.users
+            SET security_stamp = %s
+            WHERE id = %s
+              AND (security_stamp IS NULL OR btrim(security_stamp) = '')
+            """,
+            (generate_security_stamp(), row["id"]),
+        )
     try:
         execute("ALTER TABLE public.users ALTER COLUMN security_stamp SET NOT NULL")
     except Exception as e:

@@ -20,6 +20,8 @@ TARGET_SCHEMAS: tuple[str, ...] = (
 
 
 def _ensure_security_stamp_in_schema(schema: str) -> None:
+    from auth import generate_security_stamp
+
     with db() as conn:
         cur = conn.cursor()
         cur.execute(
@@ -30,12 +32,22 @@ def _ensure_security_stamp_in_schema(schema: str) -> None:
         cur.execute(
             psql.SQL(
                 """
-                UPDATE {}.users
-                SET security_stamp = encode(gen_random_bytes(24), 'base64')
+                SELECT id FROM {}.users
                 WHERE security_stamp IS NULL OR btrim(security_stamp) = ''
                 """
             ).format(psql.Identifier(schema))
         )
+        empty_ids = [row["id"] for row in cur.fetchall()]
+        update_sql = psql.SQL(
+            """
+            UPDATE {}.users
+            SET security_stamp = %s
+            WHERE id = %s
+              AND (security_stamp IS NULL OR btrim(security_stamp) = '')
+            """
+        ).format(psql.Identifier(schema))
+        for user_id in empty_ids:
+            cur.execute(update_sql, (generate_security_stamp(), user_id))
         cur.execute(
             psql.SQL(
                 "ALTER TABLE {}.users ALTER COLUMN security_stamp SET NOT NULL"
