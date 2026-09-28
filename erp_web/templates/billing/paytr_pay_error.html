@@ -7,7 +7,7 @@
   <style>
     body {
       margin: 0; min-height: 100vh; font-family: "Segoe UI", system-ui, sans-serif;
-      background: #0b1220; color: #e2e8f0; display: flex; align-items: center; justify-content: center;
+      background: #0b1220; color: #e2e8f0; display: flex; flex-direction: column; align-items: center;
     }
     .box {
       max-width: 420px; background: #f8fafc; color: #0f172a; border-radius: 14px;
@@ -23,5 +23,6 @@
     <h1>Ödeme başlatılamadı</h1>
     <p>{{ mesaj }}</p>
   </div>
+  {% include "partials/legal_footer.html" %}
 </body>
 </html>

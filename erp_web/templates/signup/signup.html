@@ -52,7 +52,7 @@
       <div class="field-error" data-error-for="company_name"></div>
     </div>
     <div class="field">
-      <label for="slug">İşletme adresi (subdomain)</label>
+      <label for="slug">İşletme WEB Adresi</label>
       <input id="slug" name="slug" type="text" autocomplete="off" required maxlength="32" placeholder="ornek">
       <div class="slug-preview"><span id="slug-preview-text"><strong>ornek</strong>.{{ apex_domain }}</span></div>
       <div id="slug-status" class="slug-status"></div>
@@ -135,6 +135,7 @@
       </div>
     </div>
 
+    {% include "partials/purchase_consents.html" %}
     <div class="hp-field" aria-hidden="true">
       <label for="website">Website</label>
       <input id="website" name="website" type="text" tabindex="-1" autocomplete="off">
@@ -448,6 +449,18 @@
   form.addEventListener("submit", async function (ev) {
     ev.preventDefault();
     clearErrors();
+    const consentIds = ["accept_sozlesme", "accept_iptal", "accept_teslimat", "accept_gizlilik"];
+    const missingConsent = consentIds.some(function (id) {
+      const box = document.getElementById(id);
+      return !box || !box.checked;
+    });
+    if (missingConsent) {
+      const consentErr = document.querySelector('[data-error-for="consent"]');
+      if (consentErr) {
+        consentErr.textContent = "Devam etmek için sözleşme, iptal-iade, teslimat ve gizlilik onaylarını işaretleyin.";
+      }
+      return;
+    }
     btnSubmit.disabled = true;
     const slug = normalizeSlug(slugInput.value);
     const ledgerOnly = isLedgerOnlyMode();

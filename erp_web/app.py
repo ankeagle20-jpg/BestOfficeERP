@@ -178,6 +178,7 @@ from routes.admin_credentials_routes import bp as admin_credentials_bp
 from routes.billing_paytr_routes import bp as billing_paytr_bp
 from routes.ledger_routes import bp as ledger_bp
 from routes.public_pricing_routes import bp as public_pricing_bp
+from routes.legal_routes import bp as legal_bp
 from routes.signup_routes import bp as signup_bp
 from routes.login_lookup_routes import bp as login_lookup_bp
 from routes.forgot_password_routes import bp as forgot_password_bp
@@ -222,6 +223,7 @@ app.register_blueprint(admin_credentials_bp, url_prefix="/admin")
 app.register_blueprint(billing_paytr_bp)
 app.register_blueprint(ledger_bp, url_prefix="/ledger")
 app.register_blueprint(public_pricing_bp)
+app.register_blueprint(legal_bp)
 app.register_blueprint(signup_bp)
 app.register_blueprint(login_lookup_bp)
 app.register_blueprint(forgot_password_bp)

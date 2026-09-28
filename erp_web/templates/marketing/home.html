@@ -104,6 +104,21 @@
     color: #fff;
   }
   .packages-section .section-title { text-align: center; margin-bottom: 6px; }
+  .home-sozlesme {
+    margin-top: 28px;
+    border: 1px solid #cbd5e1;
+    border-radius: 10px;
+    background: #fff;
+    padding: 12px 16px 4px;
+  }
+  .home-sozlesme summary {
+    cursor: pointer;
+    font-weight: 700;
+    color: #0f172a;
+    margin-bottom: 8px;
+  }
+  .home-sozlesme .legal-doc h2 { font-size: 1rem; margin: 1rem 0 0.3rem; }
+  .home-sozlesme .legal-doc p { font-size: 0.9rem; color: #334155; }
 
   /* L1 — Hesabıma git modal */
   .hg-backdrop {
@@ -279,6 +294,11 @@
     </article>
   </div>
 </section>
+
+<details class="home-sozlesme" id="mesafeli-sozlesme">
+  <summary>Mesafeli Hizmet, Abonelik ve Yazılım Kullanım Sözleşmesi</summary>
+  {% include "legal/_sozlesme_body.html" %}
+</details>
 
 <div id="hg-backdrop" class="hg-backdrop" hidden>
   <div class="hg-modal" role="dialog" aria-modal="true" aria-labelledby="hg-title">

@@ -8,7 +8,7 @@
     body {
       margin: 0; min-height: 100vh; font-family: "Segoe UI", system-ui, sans-serif;
       background: linear-gradient(160deg, #0b1220, #1e293b); color: #e2e8f0;
-      display: flex; align-items: center; justify-content: center;
+      display: flex; flex-direction: column; align-items: center;
     }
     .box {
       max-width: 480px; background: #f8fafc; color: #0f172a; border-radius: 14px;
@@ -41,5 +41,6 @@
     <p class="meta">merchant_oid: {{ merchant_oid }}</p>
     {% endif %}
   </div>
+  {% include "partials/legal_footer.html" %}
 </body>
 </html>

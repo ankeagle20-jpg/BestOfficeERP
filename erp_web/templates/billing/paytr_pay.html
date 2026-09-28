@@ -91,6 +91,7 @@
         <div><strong>Tutar:</strong> {{ '%.2f'|format(total_gross or 0) }} {{ currency }}</div>
         <div class="oid">merchant_oid: {{ merchant_oid }}</div>
       </div>
+      {% include "partials/purchase_consents.html" %}
       <iframe
         src="https://www.paytr.com/odeme/guvenli/{{ token }}"
         id="paytriframe"
@@ -107,5 +108,6 @@
       iFrameResize({ log: false, checkOrigin: false }, "#paytriframe");
     }
   </script>
+  {% include "partials/legal_footer.html" %}
 </body>
 </html>
