@@ -6,7 +6,7 @@ import secrets
 from flask_login import LoginManager, UserMixin, login_user, current_user
 from werkzeug.security import check_password_hash, generate_password_hash
 from functools import wraps
-from flask import abort, flash, g, jsonify, redirect, request, url_for
+from flask import abort, flash, g, has_request_context, jsonify, redirect, request, url_for
 from db import fetch_one, fetch_all, execute, execute_returning
 from login_lockout import (
     LoginLockedOut,
@@ -311,15 +311,33 @@ def dogrula_giris_kimlik(
     username_key = ident.lower() if mode != "phone" else ident
     check_login_lockout(tenant_schema, username_key)
 
+    def _log_login_fail(reason: str) -> None:
+        try:
+            if has_request_context():
+                print(
+                    "[login-fail]"
+                    f" host={request.host}"
+                    f" slug={getattr(g, 'tenant_slug', None)}"
+                    f" schema={getattr(g, 'tenant_schema', None)}"
+                    f" reason={reason}"
+                    f" ident={ident}",
+                    flush=True,
+                )
+        except Exception:
+            pass
+
     row = _fetch_login_user_row(mode, ident, schema=schema)
     if not row:
         record_login_failure(tenant_schema, username_key)
+        _log_login_fail("user_not_found")
         return None
     if not row.get("is_active"):
         record_login_failure(tenant_schema, username_key)
+        _log_login_fail("inactive")
         return None
     if not check_password_hash(row["password_hash"], password):
         record_login_failure(tenant_schema, username_key)
+        _log_login_fail("bad_password")
         return None
 
     record_login_success(tenant_schema, username_key)

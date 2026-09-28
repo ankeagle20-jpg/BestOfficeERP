@@ -193,10 +193,25 @@ def resolve_tenant_slug(*, debug: bool | None = None) -> str | None:
     return slug
 
 
+_ALIAS_BOOT_LOGGED = False
+
+
+def _log_tenant_alias_once() -> None:
+    """Bir kez: alias env kaç kayıt (değer/secret yok). Oregon'da 0 beklenir."""
+    global _ALIAS_BOOT_LOGGED
+    if _ALIAS_BOOT_LOGGED:
+        return
+    _ALIAS_BOOT_LOGGED = True
+    aliases = _tenant_slug_aliases()
+    keys = ",".join(sorted(aliases)) or "-"
+    print(f"[tenant-alias] entries={len(aliases)} keys={keys}", flush=True)
+
+
 def bind_request_tenant():
     """before_request: g.tenant_schema (yalnız kiracı) + session↔Host kilidi."""
     if not has_request_context():
         return None
+    _log_tenant_alias_once()
     slug = resolve_tenant_slug()
     schema = schema_name_for_slug(slug)
     if schema is not None:
