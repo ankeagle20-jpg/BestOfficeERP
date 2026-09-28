@@ -587,6 +587,8 @@ function sozlesmeTahsilSetFromJson(j) {
 
 /** Grid önbelleğindeki tahsil_aylar → yeşil set (ayrı tahsil-durum isteği gecikse bile). */
 function sozlesmeTahsilSetFromGridCache(cacheObj) {
+    /* Rapor silme yeniden çiziminde eski tahsil_aylar, az önce silinen ayı sete geri yazmasın. */
+    if (window.__tahsilRaporSilSetKoru) return false;
     if (!cacheObj || !Array.isArray(cacheObj.tahsil_aylar) || !cacheObj.tahsil_aylar.length) return false;
     sozlesmeTahsilEdilenAyAnahtarlari = new Set();
     cacheObj.tahsil_aylar.forEach(function (x) {
@@ -22018,38 +22020,200 @@ function tahsilRaporSatirMusteriId(tahsilatId) {
     }
     return 0;
 }
-function tahsilRaporSilSonrasiAcikMusteriYenile(midSil) {
-    var mid = parseInt(midSil, 10);
-    if (isNaN(mid) || mid <= 0) return;
-    var hedefRaw = '';
-    if (typeof cariEkstreMusteriIdSec === 'function') hedefRaw = String(cariEkstreMusteriIdSec() || '').trim();
-    if (!hedefRaw && typeof selectedId !== 'undefined' && selectedId != null && selectedId !== '') {
-        hedefRaw = String(selectedId);
+function tahsilRaporSatirBul(tahsilatId, listId) {
+    var maps = window.__tahsilRaporItemMap || {};
+    var tid = String(parseInt(tahsilatId, 10) || '');
+    if (listId && maps[listId] && maps[listId][tid]) return maps[listId][tid];
+    var lists = Object.keys(maps);
+    for (var i = 0; i < lists.length; i++) {
+        if (maps[lists[i]] && maps[lists[i]][tid]) return maps[lists[i]][tid];
     }
-    var hedef = parseInt(hedefRaw, 10);
-    if (isNaN(hedef) || hedef !== mid) return;
-    if (typeof girisTahsilatEkstrePanelGridSenkron === 'function') {
-        try { girisTahsilatEkstrePanelGridSenkron(); } catch (_eSilSen) {}
-        return;
-    }
-    try {
-        if (typeof girisJsonCacheInvalidatePrefix === 'function') {
-            girisJsonCacheInvalidatePrefix('/giris/api/tahsilat-panel-detay?musteri_id=' + encodeURIComponent(mid));
-            girisJsonCacheInvalidatePrefix('/giris/api/aylik-grid-cache?musteri_id=' + encodeURIComponent(mid));
-            girisJsonCacheInvalidatePrefix('/giris/api/aylik-tahsil-durum?musteri_id=' + encodeURIComponent(mid));
-        }
-    } catch (_eSilInv) {}
-    if (typeof sozlesmelerAylikHizliYukle === 'function') {
-        try { sozlesmelerAylikHizliYukle(true); } catch (_eSilGrid) {}
-    } else if (typeof girisTahsilatYilAyPanelDbYukle === 'function') {
-        try { girisTahsilatYilAyPanelDbYukle(mid, null, { ttlMs: 0, persistMs: 0, zorlaUygula: true }); } catch (_eSilPan) {}
-    }
+    return null;
 }
-function tahsilRaporSatirSil(tahsilatId) {
+/** Açık aylık gridin müşterisi. Sözleşme formundaki gizli alan griddeki selectedId'den önce okunmaz. */
+function tahsilRaporAcikGridMusteriId() {
+    var sid = NaN;
+    if (typeof selectedId !== 'undefined' && selectedId != null && selectedId !== '') {
+        sid = parseInt(selectedId, 10);
+    }
+    if (!isNaN(sid) && sid > 0) return sid;
+    var raw = '';
+    if (typeof cariEkstreMusteriIdSec === 'function') raw = String(cariEkstreMusteriIdSec() || '').trim();
+    var n = parseInt(raw, 10);
+    if (!isNaN(n) && n > 0) return n;
+    try {
+        var p = new URLSearchParams(window.location.search);
+        var u = parseInt(p.get('mid') || '', 10);
+        if (!isNaN(u) && u > 0) return u;
+    } catch (_eUrlMid) {}
+    return 0;
+}
+function tahsilRaporAciklamaAyIsolari(aciklama) {
+    var s = String(aciklama || '');
+    var out = [];
+    var re = /\|AYLIK_(?:TAH|PAY)\|(\d{4}-\d{2}-\d{2})/g;
+    var m;
+    while ((m = re.exec(s))) {
+        if (out.indexOf(m[1]) < 0) out.push(m[1]);
+    }
+    return out;
+}
+function tahsilRaporIsoAyKey(iso) {
+    var m = String(iso || '').match(/^(\d{4})-(\d{2})/);
+    if (!m) return '';
+    var yil = parseInt(m[1], 10);
+    var ay = parseInt(m[2], 10);
+    var ak = (typeof sozlesmeAylikAyKeyFromYilAy === 'function') ? sozlesmeAylikAyKeyFromYilAy(yil, ay) : (yil + '-' + ay);
+    return (typeof sozlesmeAylikAyKeyNormalize === 'function') ? sozlesmeAylikAyKeyNormalize(ak) : ak;
+}
+function tahsilRaporSilYesilBellekDusur(row) {
+    var isos = tahsilRaporAciklamaAyIsolari(row && row.aciklama);
+    if (!isos.length) return;
+    var keys = {};
+    isos.forEach(function (iso) {
+        var kn = tahsilRaporIsoAyKey(iso);
+        if (kn) keys[kn] = iso;
+    });
+    Object.keys(keys).forEach(function (kn) {
+        try {
+            if (sozlesmeTahsilEdilenAyAnahtarlari && sozlesmeTahsilEdilenAyAnahtarlari.delete) {
+                sozlesmeTahsilEdilenAyAnahtarlari.delete(kn);
+            }
+        } catch (_eSet) {}
+        var det = window.__tahsilatSatirYilAyDetay || {};
+        Object.keys(det).forEach(function (dk) {
+            var map = det[dk] || {};
+            Object.keys(map).forEach(function (ak) {
+                var n = (typeof sozlesmeAylikAyKeyNormalize === 'function') ? sozlesmeAylikAyKeyNormalize(ak) : ak;
+                if (n !== kn || !map[ak]) return;
+                var d = map[ak];
+                var brut = parseFloat(d.aylik_tutar) || 0;
+                d.tahsil = 0;
+                d.kalan = brut > 0 ? Math.round(brut * 100) / 100 : 0;
+                d.tahsil_aktif = d.kalan > 0;
+                d.__locked = false;
+                try {
+                    if (typeof girisTahsilatYilAyPanelSatirYenile === 'function') {
+                        girisTahsilatYilAyPanelSatirYenile(parseInt(dk, 10), ak);
+                    }
+                } catch (_ePanSat) {}
+            });
+        });
+        var co = window.__sozlesmelerAylikSonCacheObj;
+        if (co && Array.isArray(co.tahsil_aylar)) {
+            co.tahsil_aylar = co.tahsil_aylar.filter(function (x) {
+                var sx = String(x);
+                var n = (typeof sozlesmeAylikAyKeyNormalize === 'function') ? sozlesmeAylikAyKeyNormalize(sx) : sx;
+                if (n === kn) return false;
+                var mm = sx.match(/^(\d{4})-(\d{2})/);
+                if (!mm) return true;
+                var n2 = (typeof sozlesmeAylikAyKeyNormalize === 'function')
+                    ? sozlesmeAylikAyKeyNormalize(parseInt(mm[1], 10) + '-' + parseInt(mm[2], 10))
+                    : (parseInt(mm[1], 10) + '-' + parseInt(mm[2], 10));
+                return n2 !== kn;
+            });
+        }
+        if (co && Array.isArray(co.aylar)) {
+            co.aylar.forEach(function (a) {
+                if (!a) return;
+                var akn = (typeof sozlesmeAylikAyKeyNormalize === 'function')
+                    ? sozlesmeAylikAyKeyNormalize(String(a.ay_key || ((a.yil || '') + '-' + (a.ay || ''))))
+                    : '';
+                if (akn !== kn) return;
+                a.tahsil_edildi = false;
+                a.kismi_tahsilat = false;
+                a.odenen_tutar_kdv = 0;
+                var brutA = parseFloat(a.brut_tutar_kdv != null ? a.brut_tutar_kdv : a.tutar_kdv_dahil);
+                if (isFinite(brutA) && brutA > 0) a.kalan_tutar_kdv = Math.round(brutA * 100) / 100;
+            });
+        }
+        if (co && co.panel_by_iso && typeof co.panel_by_iso === 'object') {
+            var iso = keys[kn];
+            var ym = String(iso).slice(0, 7);
+            Object.keys(co.panel_by_iso).forEach(function (pk) {
+                if (String(pk).slice(0, 7) !== ym) return;
+                var pr = co.panel_by_iso[pk];
+                if (!pr || typeof pr !== 'object') return;
+                var aylik = parseFloat(pr.aylik) || 0;
+                pr.tahsil = 0;
+                pr.kalan = aylik > 0 ? Math.round(aylik * 100) / 100 : 0;
+            });
+        }
+        try {
+            var bolum = document.getElementById('sozlesmeler-aylik-bolum');
+            if (bolum) {
+                bolum.querySelectorAll('.sozlesmeler-ay-kart[data-ay-key]').forEach(function (card) {
+                    var ck = (typeof sozlesmeAylikAyKeyNormalize === 'function')
+                        ? sozlesmeAylikAyKeyNormalize(String(card.getAttribute('data-ay-key') || ''))
+                        : '';
+                    if (ck !== kn) return;
+                    card.classList.remove('sozlesmeler-ay-kart-odendi', 'sozlesmeler-ay-kart-kismi');
+                    card.classList.add('sozlesmeler-ay-kart-odenmedi');
+                    card.setAttribute('data-tahsil-kapandi', '0');
+                    card.setAttribute('data-kismi', '0');
+                    card.setAttribute('data-odenen-kdv', '0');
+                    card.setAttribute('data-acik-aylik-borc', '1');
+                    card.setAttribute('data-secilebilir', '1');
+                    var brutK = parseFloat(card.getAttribute('data-brut-kdv') || card.getAttribute('data-sozlesme-brut-kdv') || '0');
+                    if (isFinite(brutK) && brutK > 0) {
+                        var brutS = (Math.round(brutK * 100) / 100).toFixed(2);
+                        card.setAttribute('data-tutar-kdv', brutS);
+                        var deg = card.querySelector('.aylik-deger');
+                        if (deg) deg.textContent = brutS;
+                    }
+                });
+            }
+        } catch (_eDom) {}
+    });
+    try { if (typeof girisTahsilatYilAyKayitYaz === 'function') girisTahsilatYilAyKayitYaz(); } catch (_eYaz) {}
+}
+function tahsilRaporSilSonrasiAcikMusteriYenile(midSil, row, listId) {
+    var mid = parseInt(midSil, 10);
+    if (isNaN(mid) || mid <= 0) {
+        mid = 0;
+        if (row) {
+            mid = parseInt(row.cari_id != null ? row.cari_id : row.musteri_id, 10);
+            if (isNaN(mid) || mid <= 0) mid = 0;
+        }
+    }
+    var acik = tahsilRaporAcikGridMusteriId();
+    if (!acik) return;
+    if (mid > 0 && acik !== mid) return;
+    if (!(mid > 0) && String(listId || '') !== 'sozlesme_tahsil_rapor_list') return;
+    try { tahsilRaporSilYesilBellekDusur(row); } catch (_eBel) {}
+    window.__tahsilRaporSilSetKoru = true;
+    window.__girisEkstreSilPanelZorla = true;
+    function koruBirak() {
+        try { window.__tahsilRaporSilSetKoru = false; } catch (_eKoru) {}
+    }
+    var p = null;
+    if (typeof girisTahsilatEkstrePanelGridSenkron === 'function') {
+        try { p = girisTahsilatEkstrePanelGridSenkron(); } catch (_eSilSen) { p = null; }
+    } else {
+        try {
+            if (typeof girisJsonCacheInvalidatePrefix === 'function') {
+                girisJsonCacheInvalidatePrefix('/giris/api/tahsilat-panel-detay?musteri_id=' + encodeURIComponent(acik));
+                girisJsonCacheInvalidatePrefix('/giris/api/aylik-grid-cache?musteri_id=' + encodeURIComponent(acik));
+                girisJsonCacheInvalidatePrefix('/giris/api/aylik-tahsil-durum?musteri_id=' + encodeURIComponent(acik));
+            }
+        } catch (_eSilInv) {}
+        if (typeof sozlesmelerAylikHizliYukle === 'function') {
+            try { p = sozlesmelerAylikHizliYukle(true); } catch (_eSilGrid) { p = null; }
+        } else if (typeof girisTahsilatYilAyPanelDbYukle === 'function') {
+            try { girisTahsilatYilAyPanelDbYukle(acik, null, { ttlMs: 0, persistMs: 0, zorlaUygula: true }); } catch (_eSilPan) {}
+        }
+    }
+    if (p && typeof p.then === 'function') p.then(koruBirak, koruBirak);
+    else koruBirak();
+}
+function tahsilRaporSatirSil(tahsilatId, listId) {
     var tid = parseInt(tahsilatId, 10);
     if (isNaN(tid) || tid <= 0) return;
     if (!window.confirm('Bu tahsilat kaydını silmek istiyor musunuz?')) return;
-    var midSil = tahsilRaporSatirMusteriId(tid);
+    var rowSil = tahsilRaporSatirBul(tid, listId);
+    var midSil = 0;
+    if (rowSil) midSil = parseInt(rowSil.cari_id != null ? rowSil.cari_id : rowSil.musteri_id, 10);
+    if (isNaN(midSil) || midSil <= 0) midSil = tahsilRaporSatirMusteriId(tid);
     fetch(API_TAHSILAT_SIL, {
         method: 'POST',
         credentials: 'same-origin',
@@ -22059,7 +22223,7 @@ function tahsilRaporSatirSil(tahsilatId) {
       .then(function (j) {
           if (!j || !j.ok) throw new Error((j && j.mesaj) || 'Silme başarısız.');
           tahsilRaporlariYenile();
-          tahsilRaporSilSonrasiAcikMusteriYenile(midSil);
+          tahsilRaporSilSonrasiAcikMusteriYenile(midSil, rowSil, listId);
       })
       .catch(function (e) { alert('Silme hatası: ' + (e && e.message ? e.message : e)); });
 }
@@ -22419,8 +22583,7 @@ function tahsilRaporSatirDuzenleByList(listId, tahsilatId) {
     tahsilRaporSatirMakbuzFormAc(listId, tahsilatId);
 }
 function tahsilRaporSatirSilByList(listId, tahsilatId) {
-    var _x = listId;
-    tahsilRaporSatirSil(tahsilatId);
+    tahsilRaporSatirSil(tahsilatId, listId);
 }
 function tahsilRaporRender(listId, j) {
     var list = document.getElementById(listId);
