@@ -22006,10 +22006,50 @@ function tahsilRaporSatirMakbuzFormAc(listId, tahsilatId) {
 function tahsilRaporSatirDuzenle(tahsilatId, mevcutTutar, mevcutTarih, mevcutOdeme, mevcutAciklama) {
     tahsilRaporSatirMakbuzFormAc(window.__tahsilMakbuzDuzenleListId || 'giris_tahsil_rapor_list', tahsilatId);
 }
+function tahsilRaporSatirMusteriId(tahsilatId) {
+    var maps = window.__tahsilRaporItemMap || {};
+    var lists = Object.keys(maps);
+    var tid = String(tahsilatId);
+    for (var i = 0; i < lists.length; i++) {
+        var row = maps[lists[i]] ? maps[lists[i]][tid] : null;
+        if (!row) continue;
+        var mid = parseInt(row.cari_id != null ? row.cari_id : row.musteri_id, 10);
+        if (!isNaN(mid) && mid > 0) return mid;
+    }
+    return 0;
+}
+function tahsilRaporSilSonrasiAcikMusteriYenile(midSil) {
+    var mid = parseInt(midSil, 10);
+    if (isNaN(mid) || mid <= 0) return;
+    var hedefRaw = '';
+    if (typeof cariEkstreMusteriIdSec === 'function') hedefRaw = String(cariEkstreMusteriIdSec() || '').trim();
+    if (!hedefRaw && typeof selectedId !== 'undefined' && selectedId != null && selectedId !== '') {
+        hedefRaw = String(selectedId);
+    }
+    var hedef = parseInt(hedefRaw, 10);
+    if (isNaN(hedef) || hedef !== mid) return;
+    if (typeof girisTahsilatEkstrePanelGridSenkron === 'function') {
+        try { girisTahsilatEkstrePanelGridSenkron(); } catch (_eSilSen) {}
+        return;
+    }
+    try {
+        if (typeof girisJsonCacheInvalidatePrefix === 'function') {
+            girisJsonCacheInvalidatePrefix('/giris/api/tahsilat-panel-detay?musteri_id=' + encodeURIComponent(mid));
+            girisJsonCacheInvalidatePrefix('/giris/api/aylik-grid-cache?musteri_id=' + encodeURIComponent(mid));
+            girisJsonCacheInvalidatePrefix('/giris/api/aylik-tahsil-durum?musteri_id=' + encodeURIComponent(mid));
+        }
+    } catch (_eSilInv) {}
+    if (typeof sozlesmelerAylikHizliYukle === 'function') {
+        try { sozlesmelerAylikHizliYukle(true); } catch (_eSilGrid) {}
+    } else if (typeof girisTahsilatYilAyPanelDbYukle === 'function') {
+        try { girisTahsilatYilAyPanelDbYukle(mid, null, { ttlMs: 0, persistMs: 0, zorlaUygula: true }); } catch (_eSilPan) {}
+    }
+}
 function tahsilRaporSatirSil(tahsilatId) {
     var tid = parseInt(tahsilatId, 10);
     if (isNaN(tid) || tid <= 0) return;
     if (!window.confirm('Bu tahsilat kaydını silmek istiyor musunuz?')) return;
+    var midSil = tahsilRaporSatirMusteriId(tid);
     fetch(API_TAHSILAT_SIL, {
         method: 'POST',
         credentials: 'same-origin',
@@ -22019,6 +22059,7 @@ function tahsilRaporSatirSil(tahsilatId) {
       .then(function (j) {
           if (!j || !j.ok) throw new Error((j && j.mesaj) || 'Silme başarısız.');
           tahsilRaporlariYenile();
+          tahsilRaporSilSonrasiAcikMusteriYenile(midSil);
       })
       .catch(function (e) { alert('Silme hatası: ' + (e && e.message ? e.message : e)); });
 }
