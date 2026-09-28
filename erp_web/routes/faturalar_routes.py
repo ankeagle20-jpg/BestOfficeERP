@@ -448,17 +448,34 @@ def get_next_makbuz_no():
     return str(seq)
 
 
-def _next_makbuz_no_with_cursor(cur):
-    """Açık transaction + cursor ile MAX(makbuz); get_next_makbuz_no ile aynı mantık."""
+def tahsilat_makbuz_seq_floor(cur) -> int:
+    """Aynı transaction'da makbuz kilidi + sayısal MAX.
+
+    Dönüş, veritabanındaki en büyük >=1000 makbuzdur (yoksa 999).
+    Çağıran her yeni kayıtta 1 artırır. pg_advisory_xact_lock commit'e kadar
+    diğer tahsilat numarası üreticilerini bekletir; MAX okuması kilitten sonradır.
+    """
+    cur.execute(
+        "SELECT pg_advisory_xact_lock(hashtext('tahsilat_makbuz_no_alloc')::bigint)"
+    )
     cur.execute(_MAKBUZ_MAX_SEQ_SQL)
     row = cur.fetchone() or {}
     try:
-        seq = int(row.get("max_seq") or 999) + 1
-    except Exception:
-        seq = 1000
-    if seq < 1000:
-        seq = 1000
-    return str(seq)
+        seq = int(row.get("max_seq") or 999)
+    except (TypeError, ValueError):
+        seq = 999
+    if seq < 999:
+        seq = 999
+    return seq
+
+
+def _next_makbuz_no_with_cursor(cur):
+    """Açık transaction + cursor ile MAX(makbuz); get_next_makbuz_no ile aynı mantık.
+
+    Çağıran zaten tahsilat_makbuz_no_alloc kilidini aldıysa ikinci kilit aynı
+    transaction'da anında döner.
+    """
+    return str(tahsilat_makbuz_seq_floor(cur) + 1)
 
 
 def _makbuz_no_used_cursor(cur, mn):

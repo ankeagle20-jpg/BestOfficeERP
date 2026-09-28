@@ -12032,23 +12032,10 @@ def _next_fatura_no_aylik(prefix=None):
 
 
 def _next_makbuz_no_aylik():
-    """Bir sonraki makbuz numarası: 1000, 1001, 1002 ..."""
-    row = fetch_one(
-        "SELECT makbuz_no FROM tahsilatlar WHERE makbuz_no IS NOT NULL AND makbuz_no <> '' ORDER BY id DESC LIMIT 1",
-    )
-    if not row or not row.get("makbuz_no"):
-        return "1000"
-    s = str(row.get("makbuz_no") or "").strip()
-    m = re.search(r"(\d+)$", s)
-    if not m:
-        return "1000"
-    try:
-        seq = int(m.group(1)) + 1
-    except Exception:
-        seq = 1000
-    if seq < 1000:
-        seq = 1000
-    return str(seq)
+    """Bir sonraki makbuz numarası: sayısal MAX+1 (son satırın id'si değil)."""
+    from routes.faturalar_routes import get_next_makbuz_no
+
+    return get_next_makbuz_no()
 
 
 @bp.route('/api/aylik-tutarlardan-borclandir', methods=['POST'])
@@ -12439,20 +12426,9 @@ def api_aylik_tutarlardan_tahsil_et():
                     if iso in by_iso:
                         dup_makbuz_by_ab[p["ay_bir"]] = by_iso[iso]
 
-            cur.execute(
-                "SELECT makbuz_no FROM tahsilatlar WHERE makbuz_no IS NOT NULL AND makbuz_no <> '' ORDER BY id DESC LIMIT 1"
-            )
-            row_m = cur.fetchone()
-            makbuz_seq = 999
-            if row_m and row_m.get("makbuz_no"):
-                m = re.search(r"(\d+)$", str(row_m.get("makbuz_no") or "").strip())
-                if m:
-                    try:
-                        makbuz_seq = int(m.group(1))
-                    except Exception:
-                        makbuz_seq = 999
-            if makbuz_seq < 999:
-                makbuz_seq = 999
+            from routes.faturalar_routes import tahsilat_makbuz_seq_floor
+
+            makbuz_seq = tahsilat_makbuz_seq_floor(cur)
 
             harf = _odeme_turu_harf(odeme)
             yerel_tahsil_iso = set()
@@ -14630,20 +14606,6 @@ def api_tufe_borclandir_nakit_tahsil_toplu():
         except (ValueError, IndexError):
             fatura_tail = 0
 
-    row_m = fetch_one(
-        "SELECT makbuz_no FROM tahsilatlar WHERE makbuz_no IS NOT NULL AND makbuz_no <> '' ORDER BY id DESC LIMIT 1"
-    )
-    makbuz_seq = 999
-    if row_m and row_m.get("makbuz_no"):
-        m = re.search(r"(\d+)$", str(row_m.get("makbuz_no") or "").strip())
-        if m:
-            try:
-                makbuz_seq = int(m.group(1))
-            except Exception:
-                makbuz_seq = 999
-    if makbuz_seq < 999:
-        makbuz_seq = 999
-
     insert_rows = []
     tahsil_plan = []
     touched_mids = set()
@@ -14886,6 +14848,9 @@ def api_tufe_borclandir_nakit_tahsil_toplu():
             INSERT INTO tahsilatlar (musteri_id, customer_id, fatura_id, tutar, odeme_turu, aciklama, tahsilat_tarihi, makbuz_no, kaynak)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
+        from routes.faturalar_routes import tahsilat_makbuz_seq_floor
+
+        makbuz_seq = tahsilat_makbuz_seq_floor(cur)
         tahsil_rows = []
         for t in tahsil_plan:
             mid = t["musteri_id"]
