@@ -1202,6 +1202,13 @@ def build_makbuz_pdf(tahsilat, musteri_adi, fatura_no=None, banka_hesaplar=None)
         return datetime.now().strftime("%d.%m.%Y")
 
     def _resolve_receipt_logo():
+        try:
+            from firma_profil import firma_logo_abs
+            kayitli = firma_logo_abs()
+            if kayitli:
+                return kayitli
+        except Exception:
+            pass
         here = os.path.dirname(os.path.abspath(__file__))
         cands = []
         for nm in (
@@ -1233,9 +1240,23 @@ def build_makbuz_pdf(tahsilat, musteri_adi, fatura_no=None, banka_hesaplar=None)
             pass
 
     c.setFont(font_name, 8)
-    firma_satir_1 = "Ofisbir Ofis ve Danışmanlık A.Ş."
-    firma_satir_2 = "Kavaklıdere Mah. Esat Cad. No:12/1 06660 Çankaya/ANKARA"
-    firma_satir_3 = f"Tel: {FIRMA_TELEFON} | {FIRMA_WEB} | {FIRMA_EMAIL} | VKN: {FIRMA_VERGI_NO}"
+    _fp = None
+    try:
+        from firma_profil import pdf_firma_varsa
+        _fp = pdf_firma_varsa()
+    except Exception:
+        _fp = None
+    if _fp:
+        firma_satir_1 = _fp["unvan"]
+        firma_satir_2 = _fp["adres"] or "—"
+        firma_satir_3 = (
+            f"Tel: {_fp['telefon'] or '—'} | {_fp['email'] or '—'} | "
+            f"VD: {_fp['vergi_dairesi'] or '—'} | VKN: {_fp['vergi_no'] or '—'}"
+        )
+    else:
+        firma_satir_1 = "Ofisbir Ofis ve Danışmanlık A.Ş."
+        firma_satir_2 = "Kavaklıdere Mah. Esat Cad. No:12/1 06660 Çankaya/ANKARA"
+        firma_satir_3 = f"Tel: {FIRMA_TELEFON} | {FIRMA_WEB} | {FIRMA_EMAIL} | VKN: {FIRMA_VERGI_NO}"
     c.drawString(x_left, logo_y - 4 * mm, firma_satir_1)
     c.drawString(x_left, logo_y - 8 * mm, firma_satir_2)
     c.drawString(x_left, logo_y - 12 * mm, firma_satir_3)
@@ -1590,12 +1611,18 @@ def build_fatura_pdf(fatura, musteri, satirlar, preview=False):
             c.drawString(x_pt + label_w_pt, y_pt, (value or "")[:95])
 
     company = (fatura.get("current_user_company") or fatura.get("company") or {}) if isinstance(fatura, dict) else {}
-    sender_unvan = (company.get("unvan") or FIRMA_UNVAN or "").strip()
-    sender_adres = _sanitize_addr_text((company.get("adres") or FIRMA_ADRES or "").strip())
-    sender_tel = (company.get("telefon") or FIRMA_TELEFON or "").strip() or "—"
+    _fp = {}
+    try:
+        from firma_profil import pdf_firma_varsa
+        _fp = pdf_firma_varsa() or {}
+    except Exception:
+        _fp = {}
+    sender_unvan = (company.get("unvan") or _fp.get("unvan") or FIRMA_UNVAN or "").strip()
+    sender_adres = _sanitize_addr_text((company.get("adres") or _fp.get("adres") or FIRMA_ADRES or "").strip())
+    sender_tel = (company.get("telefon") or _fp.get("telefon") or FIRMA_TELEFON or "").strip() or "—"
     sender_web = (company.get("web") or FIRMA_WEB or "").strip() or "—"
-    sender_vd = _normalize_vergi_dairesi(company.get("vergi_dairesi") or FIRMA_VERGI_DAIRESI or "")
-    sender_vkn = (company.get("vkn") or FIRMA_VERGI_NO or "").strip() or "—"
+    sender_vd = _normalize_vergi_dairesi(company.get("vergi_dairesi") or _fp.get("vergi_dairesi") or FIRMA_VERGI_DAIRESI or "")
+    sender_vkn = (company.get("vkn") or _fp.get("vergi_no") or FIRMA_VERGI_NO or "").strip() or "—"
 
     client = (fatura.get("active_invoice_client") or fatura.get("client") or {}) if isinstance(fatura, dict) else {}
     # mevcut musteri dict'i ile birleştir (varsa client öncelikli)

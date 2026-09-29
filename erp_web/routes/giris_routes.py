@@ -6775,6 +6775,13 @@ def build_kira_bildirgesi_pdf(
     try:
         here = os.path.dirname(os.path.abspath(__file__))
         logo_cands = []
+        try:
+            from firma_profil import firma_logo_abs
+            kayitli_logo = firma_logo_abs()
+            if kayitli_logo:
+                logo_cands.append(kayitli_logo)
+        except Exception:
+            pass
         for nm in (
             "Ofisbir Logo.jpg", "Ofisbir Logo.jpeg", "Ofisbir Logo.png",
             "ofisbir_logo.png", "ofisbir_logo.jpg", "ofisbir_logo.jpeg",
@@ -6810,7 +6817,13 @@ def build_kira_bildirgesi_pdf(
     y = 44
     c.setFont(font_name, 9)
     c.setFillColorRGB(0, 0, 0)
-    unvan_sol = "Ofisbir Ofis ve Dan. Hiz. A.Ş."
+    _fp = None
+    try:
+        from firma_profil import pdf_firma_varsa
+        _fp = pdf_firma_varsa()
+    except Exception:
+        _fp = None
+    unvan_sol = (_fp or {}).get("unvan") or "Ofisbir Ofis ve Dan. Hiz. A.Ş."
     unvan_w = c.stringWidth(unvan_sol, font_name, 9)
     c.drawString(logo_center_x - (unvan_w / 2.0), h - y * mm, unvan_sol)
     y += 20
@@ -6864,7 +6877,7 @@ def build_kira_bildirgesi_pdf(
     c.drawRightString(right_margin, h - y * mm, "BESTOFFICE")
     y += 6
     c.setFont(font_name, 9)
-    unvan_text = "Ofisbir Ofis ve Danışmanlık Hizmetleri A.Ş."
+    unvan_text = (_fp or {}).get("unvan") or "Ofisbir Ofis ve Danışmanlık Hizmetleri A.Ş."
     w_best = c.stringWidth("BESTOFFICE", font_name, 11)
     w_unvan = c.stringWidth(unvan_text, font_name, 9)
     unvan_x = right_margin - w_best / 2 - w_unvan / 2
@@ -15920,7 +15933,15 @@ def api_cari_kart_pdf(mid):
         c.setFont("Arial", 16)
     except Exception:
         c.setFont("Helvetica", 16)
-    c.drawString(40, y, "BestOffice - Cari Ekstre")
+    _ekstre_baslik = "BestOffice - Cari Ekstre"
+    try:
+        from firma_profil import pdf_firma_varsa
+        _fp_ekstre = pdf_firma_varsa()
+        if _fp_ekstre and _fp_ekstre.get("unvan"):
+            _ekstre_baslik = _fp_ekstre["unvan"] + " - Cari Ekstre"
+    except Exception:
+        pass
+    c.drawString(40, y, _ekstre_baslik)
     y -= 24
     c.setFont("Helvetica", 10)
     c.drawString(40, y, "Müşteri: " + (cust.get("name") or ""))

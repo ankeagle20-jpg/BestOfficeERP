@@ -193,6 +193,7 @@ from routes.ofis_routes    import bp as ofis_bp
 from routes.personel_routes import bp as personel_bp
 from routes.banka_routes    import bp as banka_bp
 from routes.giris_routes    import bp as giris_bp
+from routes.ayarlar_routes  import bp as ayarlar_bp
 from routes.urun_routes     import bp as urun_bp
 from routes.dashboard_routes import bp as dashboard_bp
 from routes.mobile_routes import bp as mobile_bp
@@ -239,6 +240,7 @@ app.register_blueprint(personel_bp, url_prefix="/personel")
 app.register_blueprint(banka_bp, url_prefix="/bankalar")
 app.register_blueprint(urun_bp, url_prefix="/urunler")
 app.register_blueprint(giris_bp, url_prefix="/giris")
+app.register_blueprint(ayarlar_bp)
 app.register_blueprint(cari_kart_bp, url_prefix="/cari-kart")
 app.register_blueprint(randevu_bp)
 app.register_blueprint(pdovam_bp, url_prefix="/pdovam")

@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sistem Ayarları</title>
+<style>
+  :root { --bg:#0b1220; --panel:#121a2b; --line:#1e3a5f; --text:#e8eef7; --muted:#93a4bd; --accent:#3b82f6; --ok:#14532d; --err:#7f1d1d; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: Segoe UI, Arial, sans-serif; background:var(--bg); color:var(--text); }
+  header { display:flex; align-items:center; justify-content:space-between; padding:14px 20px; border-bottom:1px solid var(--line); }
+  header a { color:#90caf9; text-decoration:none; }
+  .layout { display:flex; min-height:calc(100vh - 54px); }
+  nav { width:220px; border-right:1px solid var(--line); padding:12px; }
+  nav button { display:block; width:100%; text-align:left; margin:0 0 6px; padding:10px 12px; border:1px solid transparent; border-radius:8px; background:transparent; color:var(--text); cursor:pointer; }
+  nav button.aktif { background:#172554; border-color:var(--line); }
+  main { flex:1; padding:20px 24px; max-width:880px; }
+  label { display:block; margin:10px 0 4px; color:var(--muted); font-size:13px; }
+  input, select { width:100%; max-width:480px; padding:8px 10px; border-radius:8px; border:1px solid var(--line); background:#0f172a; color:var(--text); }
+  textarea { width:100%; max-width:480px; min-height:72px; padding:8px 10px; border-radius:8px; border:1px solid var(--line); background:#0f172a; color:var(--text); }
+  .btn { margin-top:14px; padding:8px 14px; border:0; border-radius:8px; background:var(--accent); color:#fff; cursor:pointer; }
+  .btn.ikincil { background:#334155; }
+  .msg { margin-top:12px; padding:8px 10px; border-radius:8px; display:none; }
+  .msg.ok { display:block; background:var(--ok); }
+  .msg.err { display:block; background:var(--err); }
+  table { width:100%; border-collapse:collapse; margin-top:12px; }
+  th, td { text-align:left; padding:8px; border-bottom:1px solid var(--line); font-size:14px; }
+  .satir { display:flex; gap:8px; align-items:center; }
+  .kanal { margin:8px 0; }
+  .pasif { opacity:.55; }
+  .not { color:var(--muted); font-size:13px; margin-top:8px; }
+  @media (max-width: 800px) { .layout { flex-direction:column; } nav { width:auto; display:flex; gap:6px; overflow:auto; border-right:0; border-bottom:1px solid var(--line); } nav button { width:auto; white-space:nowrap; } }
+</style>
+</head>
+<body>
+<header>
+  <strong>Sistem Ayarları</strong>
+  <a href="/giris/">Giriş ekranına dön</a>
+</header>
+<div class="layout">
+  <nav>
+    <button type="button" class="aktif" data-sekme="profil">Firma profili</button>
+    <button type="button" data-sekme="kullanicilar">Kullanıcılar</button>
+    <button type="button" data-sekme="bildirimler">Bildirimler</button>
+    <button type="button" data-sekme="abonelik">Abonelik ve ödeme</button>
+    <button type="button" data-sekme="guvenlik">Güvenlik</button>
+  </nav>
+  <main>
+    <section id="sekme-profil">
+      <h2>Firma profili</h2>
+      <p class="not">Ekstre, makbuz ve sözleşmedeki firma satırları bu kayıttan okunur. Kayıt yoksa mevcut sabit metin kullanılır.</p>
+      <label>Ünvan</label><input id="unvan" maxlength="300">
+      <label>Vergi numarası</label><input id="vergi_no" maxlength="32">
+      <label>Vergi dairesi</label><input id="vergi_dairesi" maxlength="120">
+      <label>Telefon</label><input id="telefon" maxlength="40">
+      <label>E-posta</label><input id="email" maxlength="200">
+      <label>Adres</label><textarea id="adres" maxlength="500"></textarea>
+      <div><button class="btn" type="button" id="profil-kaydet">Kaydet</button></div>
+      <div class="msg" id="profil-msg"></div>
+      <h3>Logo</h3>
+      <img id="logo-onizleme" alt="" style="max-width:180px;max-height:72px;display:none;">
+      <label>Logo dosyası (png, jpg, webp, en fazla 2 MB)</label>
+      <input id="logo-dosya" type="file" accept=".png,.jpg,.jpeg,.webp">
+      <div><button class="btn ikincil" type="button" id="logo-kaydet">Logoyu yükle</button></div>
+      <div class="msg" id="logo-msg"></div>
+    </section>
+    <section id="sekme-kullanicilar" hidden>
+      <h2>Kullanıcılar</h2>
+      <table><thead><tr><th>Ad</th><th>E-posta</th><th>Rol</th><th>Durum</th><th></th></tr></thead><tbody id="kullanici-liste"></tbody></table>
+      <h3>Yeni kullanıcı</h3>
+      <label>Ad</label><input id="yeni-ad">
+      <label>E-posta</label><input id="yeni-email">
+      <label>Rol</label><select id="yeni-rol"></select>
+      <label>Geçici şifre</label><input id="yeni-sifre" type="password" autocomplete="new-password">
+      <div><button class="btn" type="button" id="kullanici-ekle">Kullanıcı ekle</button></div>
+      <div class="msg" id="kullanici-msg"></div>
+    </section>
+    <section id="sekme-bildirimler" hidden>
+      <h2>Bildirimler</h2>
+      <p class="not">Bu sürüm tercihleri kaydeder. Otomatik hatırlatma gönderimi ayrı iş olarak duruyor.</p>
+      <label class="kanal"><input type="checkbox" id="gun_7"> 7 gün kala</label>
+      <label class="kanal"><input type="checkbox" id="gun_3"> 3 gün kala</label>
+      <label class="kanal"><input type="checkbox" id="gun_1"> 1 gün kala</label>
+      <label class="kanal"><input type="checkbox" id="vade_gunu"> Vade günü</label>
+      <label class="kanal"><input type="checkbox" id="gecikme_sonrasi"> Gecikme sonrası</label>
+      <h3>Kanal</h3>
+      <div id="kanallar"></div>
+      <div><button class="btn" type="button" id="bildirim-kaydet">Kaydet</button></div>
+      <div class="msg" id="bildirim-msg"></div>
+    </section>
+    <section id="sekme-abonelik" hidden>
+      <h2>Abonelik ve ödeme</h2>
+      <div id="plan-kutu" class="not"></div>
+      <table><thead><tr><th>Tarih</th><th>Fatura</th><th>Tutar</th><th>Durum</th><th></th></tr></thead><tbody id="fatura-liste"></tbody></table>
+      <div class="msg" id="abonelik-msg"></div>
+    </section>
+    <section id="sekme-guvenlik" hidden>
+      <h2>Güvenlik</h2>
+      <label>Mevcut şifre</label><input id="sifre-mevcut" type="password" autocomplete="current-password">
+      <label>Yeni şifre</label><input id="sifre-yeni" type="password" autocomplete="new-password">
+      <label>Yeni şifre tekrar</label><input id="sifre-tekrar" type="password" autocomplete="new-password">
+      <div><button class="btn" type="button" id="sifre-kaydet">Şifreyi değiştir</button></div>
+      <div class="msg" id="sifre-msg"></div>
+    </section>
+  </main>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+function msg(id, ok, text) {
+  const el = $(id);
+  el.className = "msg " + (ok ? "ok" : "err");
+  el.textContent = text || "";
+}
+async function api(url, opt) {
+  const r = await fetch(url, Object.assign({ credentials: "same-origin", headers: { "Content-Type": "application/json" } }, opt || {}));
+  const data = await r.json().catch(() => ({ ok: false, mesaj: "Sunucu yanıtı okunamadı." }));
+  if (!r.ok && data.ok !== false) data.ok = false;
+  if (!r.ok && !data.mesaj) data.mesaj = "İşlem başarısız.";
+  return data;
+}
+document.querySelectorAll("nav button").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll("nav button").forEach((b) => b.classList.remove("aktif"));
+    btn.classList.add("aktif");
+    document.querySelectorAll("main section").forEach((s) => { s.hidden = true; });
+    $("sekme-" + btn.dataset.sekme).hidden = false;
+  });
+});
+async function profilYukle() {
+  const data = await api("/ayarlar/api/profil");
+  const p = data.profil || {};
+  ["unvan","vergi_no","vergi_dairesi","telefon","email","adres"].forEach((k) => { $(k).value = p[k] || ""; });
+  if (data.logo_var) {
+    $("logo-onizleme").src = "/ayarlar/api/profil/logo?t=" + Date.now();
+    $("logo-onizleme").style.display = "block";
+  }
+}
+$("profil-kaydet").onclick = async () => {
+  const data = await api("/ayarlar/api/profil", { method: "POST", body: JSON.stringify({
+    unvan: $("unvan").value, vergi_no: $("vergi_no").value, vergi_dairesi: $("vergi_dairesi").value,
+    telefon: $("telefon").value, email: $("email").value, adres: $("adres").value
+  })});
+  msg("profil-msg", data.ok, data.mesaj);
+};
+$("logo-kaydet").onclick = async () => {
+  const file = $("logo-dosya").files[0];
+  if (!file) { msg("logo-msg", false, "Dosya seçin."); return; }
+  const fd = new FormData();
+  fd.append("logo", file);
+  const r = await fetch("/ayarlar/api/profil/logo", { method: "POST", credentials: "same-origin", body: fd });
+  const data = await r.json().catch(() => ({ ok: false, mesaj: "Yükleme başarısız." }));
+  msg("logo-msg", data.ok, data.mesaj);
+  if (data.ok) profilYukle();
+};
+let roller = [];
+async function kullaniciYukle() {
+  const data = await api("/ayarlar/api/kullanicilar");
+  roller = data.roller || {};
+  const sel = $("yeni-rol");
+  sel.innerHTML = "";
+  Object.keys(roller).forEach((kod) => {
+    const o = document.createElement("option");
+    o.value = kod; o.textContent = roller[kod];
+    sel.appendChild(o);
+  });
+  const tb = $("kullanici-liste");
+  tb.innerHTML = "";
+  (data.kullanicilar || []).forEach((u) => {
+    const tr = document.createElement("tr");
+    const rolSel = document.createElement("select");
+    Object.keys(roller).forEach((kod) => {
+      const o = document.createElement("option");
+      o.value = kod; o.textContent = roller[kod];
+      if (kod === u.role) o.selected = true;
+      rolSel.appendChild(o);
+    });
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn ikincil";
+    btn.textContent = u.is_active ? "Pasifleştir" : "Aktifleştir";
+    btn.onclick = async () => {
+      const sonuc = await api("/ayarlar/api/kullanicilar/" + u.id, { method: "POST", body: JSON.stringify({ is_active: !u.is_active, rol: rolSel.value }) });
+      msg("kullanici-msg", sonuc.ok, sonuc.mesaj);
+      if (sonuc.ok) kullaniciYukle();
+    };
+    rolSel.onchange = async () => {
+      const sonuc = await api("/ayarlar/api/kullanicilar/" + u.id, { method: "POST", body: JSON.stringify({ rol: rolSel.value }) });
+      msg("kullanici-msg", sonuc.ok, sonuc.mesaj);
+    };
+    tr.innerHTML = "<td></td><td></td><td></td><td></td><td></td>";
+    tr.children[0].textContent = u.full_name || "";
+    tr.children[1].textContent = u.username || "";
+    tr.children[2].appendChild(rolSel);
+    tr.children[3].textContent = u.is_active ? "Aktif" : "Pasif";
+    tr.children[4].appendChild(btn);
+    tb.appendChild(tr);
+  });
+}
+$("kullanici-ekle").onclick = async () => {
+  const data = await api("/ayarlar/api/kullanicilar", { method: "POST", body: JSON.stringify({
+    ad: $("yeni-ad").value, email: $("yeni-email").value, rol: $("yeni-rol").value, sifre: $("yeni-sifre").value
+  })});
+  msg("kullanici-msg", data.ok, data.mesaj);
+  if (data.ok) { $("yeni-ad").value = ""; $("yeni-email").value = ""; $("yeni-sifre").value = ""; kullaniciYukle(); }
+};
+async function bildirimYukle() {
+  const data = await api("/ayarlar/api/bildirimler");
+  const a = data.ayar || {};
+  ["gun_7","gun_3","gun_1","vade_gunu","gecikme_sonrasi"].forEach((k) => { $(k).checked = !!a[k]; });
+  const kutu = $("kanallar");
+  kutu.innerHTML = "";
+  const em = document.createElement("label");
+  em.className = "kanal";
+  em.innerHTML = '<input type="checkbox" id="kanal_email"> E-posta';
+  kutu.appendChild(em);
+  $("kanal_email").checked = !!a.kanal_email;
+  const kan = data.kanallar || {};
+  ["sms","whatsapp"].forEach((k) => {
+    const row = kan[k] || {};
+    const lab = document.createElement("label");
+    lab.className = "kanal pasif";
+    lab.textContent = (row.etiket || k) + " — yakında";
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.disabled = true;
+    lab.prepend(cb);
+    kutu.appendChild(lab);
+  });
+}
+$("bildirim-kaydet").onclick = async () => {
+  const data = await api("/ayarlar/api/bildirimler", { method: "POST", body: JSON.stringify({
+    gun_7: $("gun_7").checked, gun_3: $("gun_3").checked, gun_1: $("gun_1").checked,
+    vade_gunu: $("vade_gunu").checked, gecikme_sonrasi: $("gecikme_sonrasi").checked,
+    kanal_email: $("kanal_email").checked
+  })});
+  msg("bildirim-msg", data.ok, data.mesaj);
+};
+function tarihYazi(v) {
+  if (!v) return "—";
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return String(v).slice(0, 10);
+  return d.toLocaleDateString("tr-TR");
+}
+async function abonelikYukle() {
+  const data = await api("/ayarlar/api/abonelik");
+  const p = data.plan || {};
+  $("plan-kutu").textContent = "Plan: " + (p.plan_code || "—") + " · Tutar: " + (p.amount_gross || "—") + " " + (p.currency || "") + " · Sonraki ödeme: " + tarihYazi(p.next_invoice_at);
+  const tb = $("fatura-liste");
+  tb.innerHTML = "";
+  (data.faturalar || []).forEach((f) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = "<td></td><td></td><td></td><td></td><td></td>";
+    tr.children[0].textContent = tarihYazi(f.issued_at);
+    tr.children[1].textContent = f.invoice_no || ("#" + f.id);
+    tr.children[2].textContent = (f.total_gross || "—") + " " + (f.currency || "");
+    tr.children[3].textContent = f.status || "";
+    if (f.odenebilir) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "btn";
+      b.textContent = "Öde";
+      b.onclick = async () => {
+        const sonuc = await api("/ayarlar/api/abonelik/ode/" + f.id, { method: "POST", body: "{}" });
+        if (sonuc.ok && sonuc.pay_url) window.location.href = sonuc.pay_url;
+        else msg("abonelik-msg", false, sonuc.mesaj || "Ödeme başlatılamadı.");
+      };
+      tr.children[4].appendChild(b);
+    }
+    tb.appendChild(tr);
+  });
+}
+$("sifre-kaydet").onclick = async () => {
+  const data = await api("/ayarlar/api/guvenlik/sifre", { method: "POST", body: JSON.stringify({
+    mevcut: $("sifre-mevcut").value, yeni: $("sifre-yeni").value, tekrar: $("sifre-tekrar").value
+  })});
+  msg("sifre-msg", data.ok, data.mesaj);
+};
+profilYukle();
+kullaniciYukle();
+bildirimYukle();
+abonelikYukle();
+</script>
+</body>
+</html>

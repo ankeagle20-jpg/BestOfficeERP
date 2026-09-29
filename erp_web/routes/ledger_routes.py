@@ -1408,6 +1408,13 @@ def _build_statement(party_id: int, d_from: date, d_to: date) -> dict | None:
 
 def _resolve_ledger_logo_path() -> str | None:
     """Ofisbir / Payafin logo adayları — kira bildirgesi ile aynı desen."""
+    try:
+        from firma_profil import firma_logo_abs
+        kayitli = firma_logo_abs()
+        if kayitli:
+            return kayitli
+    except Exception:
+        pass
     here = os.path.dirname(os.path.abspath(__file__))
     names = (
         "Ofisbir Logo.jpg",
@@ -1468,7 +1475,15 @@ def _build_statement_pdf(stmt: dict) -> bytes:
             pass
 
     c.setFont(font_b, 14)
-    c.drawString(15 * mm, y - 18 * mm, "Payafin Cari — Ekstre")
+    _ekstre_baslik = "Payafin Cari — Ekstre"
+    try:
+        from firma_profil import pdf_firma_varsa
+        _fp = pdf_firma_varsa()
+        if _fp and _fp.get("unvan"):
+            _ekstre_baslik = _fp["unvan"]
+    except Exception:
+        pass
+    c.drawString(15 * mm, y - 18 * mm, _ekstre_baslik)
     y -= 26 * mm
 
     party = stmt.get("party") or {}

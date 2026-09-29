@@ -2819,6 +2819,9 @@ button.auto-btn.whatsapp-hizmet-filter-btn.wa-hizmet-aktif {
         </div>
     </div>
     <div class="giris-buttons">
+        {% if current_user.is_authenticated and current_user.role == 'admin' %}
+        <a href="/ayarlar" class="giris-btn-ayar" title="Sistem Ayarlar?" aria-label="Sistem Ayarlar?" style="display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;margin-right:6px;border-radius:3px;background:#0f2744;color:#90caf9;text-decoration:none;font-size:16px;vertical-align:middle;"><i class="fa fa-cog" aria-hidden="true"></i></a>
+        {% endif %}
         <button type="button" class="giris-btn-cogalt" onclick="girisMusteriCogalt()" title="Aynı bilgilerle yeni müşteri numarası oluştur (plan değişimi)"><i class="fa fa-copy" aria-hidden="true"></i> Müşteri çoğalt</button>
         <button type="button" class="giris-btn-whatsapp" onclick="girisMusteriWhatsAppAc()" title="Formdaki telefon ile WhatsApp’ta sohbet aç"><i class="fa-brands fa-whatsapp" aria-hidden="true"></i> WhatsApp</button>
         <button onclick="yeniMusteri()" style="background: #4caf50;">➕ Yeni Müşteri</button>

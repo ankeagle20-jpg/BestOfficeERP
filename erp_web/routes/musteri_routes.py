@@ -3097,13 +3097,29 @@ def api_kyc_sozlesme():
     doc.add_paragraph(f"Sözleşme No: {soz_no}  |  Tarih: {soz_tarih.strftime('%d.%m.%Y')}")
 
     doc.add_heading("MADDE 1 – TARAFLAR", level=1)
-    doc.add_paragraph(
-        "Hizmet Veren:\n"
-        "Ofisbir Ofis ve Danışmanlık Hizmetleri A.Ş.\n"
-        "Adres: Kavaklıdere Mah. Esat Caddesi No:12 İç Kapı No:1 Çankaya/Ankara\n"
-        "Vergi No: 6340871926\n"
-        '(İşbu sözleşmede "OFİSBİR" olarak anılacaktır.)\n'
-    )
+    _fp = None
+    try:
+        from firma_profil import pdf_firma_varsa
+        _fp = pdf_firma_varsa()
+    except Exception:
+        _fp = None
+    if _fp:
+        doc.add_paragraph(
+            "Hizmet Veren:\n"
+            f"{_fp['unvan']}\n"
+            f"Adres: {_fp['adres'] or '—'}\n"
+            f"Vergi Dairesi: {_fp['vergi_dairesi'] or '—'}\n"
+            f"Vergi No: {_fp['vergi_no'] or '—'}\n"
+            f"Tel: {_fp['telefon'] or '—'}  E-posta: {_fp['email'] or '—'}\n"
+        )
+    else:
+        doc.add_paragraph(
+            "Hizmet Veren:\n"
+            "Ofisbir Ofis ve Danışmanlık Hizmetleri A.Ş.\n"
+            "Adres: Kavaklıdere Mah. Esat Caddesi No:12 İç Kapı No:1 Çankaya/Ankara\n"
+            "Vergi No: 6340871926\n"
+            '(İşbu sözleşmede "OFİSBİR" olarak anılacaktır.)\n'
+        )
     doc.add_paragraph(
         "HİZMET ALAN (ŞİRKET BİLGİLERİ)\n"
         f"Unvan: {unvan}\n"
