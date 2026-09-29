@@ -2603,6 +2603,12 @@ def api_kyc_kaydet():
         data = request.json or request.form
         _kyc_kaydet_schema_ensure_once()
         musteri_id = data.get("musteri_id")
+        try:
+            from routes.giris_routes import musteri_detay_cache_invalidate
+
+            musteri_detay_cache_invalidate(musteri_id)
+        except Exception:
+            pass
         sirket_unvani = (data.get("sirket_unvani") or data.get("unvan") or "").strip()
         musteri_adi = (data.get("musteri_adi") or "").strip() or None
         vergi_no = (data.get("vergi_no") or "").strip()

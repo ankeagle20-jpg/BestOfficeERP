@@ -19044,6 +19044,15 @@ function selectMusteri(id) {
     window.__musteriReelDonemDbKayitli = false;
     girisHistoryMaybeClearFaturaRaporListFlag();
     selectedId = id;
+    window.__girisKartFormKirli = false;
+    (function () {
+        var form = document.getElementById('musteri-form');
+        if (!form || form.getAttribute('data-giris-kirli-bound') === '1') return;
+        form.setAttribute('data-giris-kirli-bound', '1');
+        function girisKartKirliIsaretle() { window.__girisKartFormKirli = true; }
+        form.addEventListener('input', girisKartKirliIsaretle);
+        form.addEventListener('change', girisKartKirliIsaretle);
+    })();
     try {
         if (typeof sozlesmelerAylikSessizPollOnTabOrMusteri === 'function') {
             sozlesmelerAylikSessizPollOnTabOrMusteri('selectMusteri');
@@ -19109,6 +19118,7 @@ function selectMusteri(id) {
         return;
     }
     function fillActiveTab(data) {
+        if (window.__girisKartFormKirli) return;
         var m = data || { id: id, name: '', phone: '' };
         if (activeTab === 0 || activeTab === 6 || activeTab === 7 || activeTab === 9) {
             var set = function(fid, val) { var el = document.getElementById(fid); if (el) el.value = (val != null && val !== undefined) ? String(val).trim() : ''; };

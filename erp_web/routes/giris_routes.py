@@ -5453,6 +5453,35 @@ def api_musteri_komsu():
     )
 
 
+def _musteri_detay_cache_buckets():
+    """Süreç içi müşteri detay önbelleği ve kayıt kuşağı."""
+    cache = getattr(api_musteri_detay, "_cache", None)
+    if not isinstance(cache, dict):
+        cache = {}
+        setattr(api_musteri_detay, "_cache", cache)
+    gens = getattr(api_musteri_detay, "_cache_gen", None)
+    if not isinstance(gens, dict):
+        gens = {}
+        setattr(api_musteri_detay, "_cache_gen", gens)
+    return cache, gens
+
+
+def musteri_detay_cache_invalidate(musteri_id) -> None:
+    """Kayıt sonrası eski kart gövdesi dönmesin. Uçuştaki okuma da yazamaz."""
+    try:
+        mid = int(musteri_id)
+    except (TypeError, ValueError):
+        return
+    if mid <= 0:
+        return
+    cache, gens = _musteri_detay_cache_buckets()
+    gens[mid] = int(gens.get(mid) or 0) + 1
+    prefix = f"{mid}:"
+    for key in list(cache.keys()):
+        if str(key).startswith(prefix):
+            cache.pop(key, None)
+
+
 @bp.route('/api/musteri/<int:mid>')
 @giris_gerekli
 def api_musteri_detay(mid):
@@ -5461,16 +5490,19 @@ def api_musteri_detay(mid):
     _hesapla_tahsilat_ozet = _od_arg not in ("0", "false", "hayir", "no")
     force = str(request.args.get("force") or "").lower() in ("1", "true", "yes", "on")
     cache_key = f"{int(mid)}:{1 if _hesapla_tahsilat_ozet else 0}"
+    cache, gens = _musteri_detay_cache_buckets()
+    gen_at_start = int(gens.get(int(mid)) or 0)
     if not force:
         try:
             now = time.time()
             ttl = 35.0
-            cache = getattr(api_musteri_detay, "_cache", None)
-            if cache is None:
-                cache = {}
-                setattr(api_musteri_detay, "_cache", cache)
             hit = cache.get(cache_key)
-            if hit and (now - float(hit.get("ts") or 0)) <= ttl and hit.get("payload"):
+            if (
+                hit
+                and int(hit.get("gen") or -1) == gen_at_start
+                and (now - float(hit.get("ts") or 0)) <= ttl
+                and hit.get("payload")
+            ):
                 return jsonify(hit["payload"])
         except Exception:
             pass
@@ -5660,13 +5692,11 @@ def api_musteri_detay(mid):
         out["yetkililer"] = []
 
     payload = {"ok": True, "musteri": out}
-    if not force:
-        try:
-            cache = getattr(api_musteri_detay, "_cache", None)
-            if isinstance(cache, dict):
-                cache[cache_key] = {"ts": time.time(), "payload": payload}
-        except Exception:
-            pass
+    try:
+        if int(gens.get(int(mid)) or 0) == gen_at_start:
+            cache[cache_key] = {"ts": time.time(), "payload": payload, "gen": gen_at_start}
+    except Exception:
+        pass
     return jsonify(payload)
 
 
@@ -5963,6 +5993,7 @@ def kaydet():
         calisma_sekli = _normalize_calisma_sekli(data)
 
         if musteri_id:
+            musteri_detay_cache_invalidate(musteri_id)
             # Güncelleme
             execute("""
                 UPDATE customers SET 
@@ -6094,6 +6125,8 @@ def kaydet():
                 return jsonify({"ok": False, "mesaj": mesaj}), 409
             mid = result["id"] if result else None
             mno = result.get("musteri_no") if result else None
+            if mid:
+                musteri_detay_cache_invalidate(mid)
             kaydet_mesaj = f"✅ Müşteri kaydedildi (ID: {mid}"
             if mno is not None:
                 kaydet_mesaj += f", müşteri no: {mno}"
