@@ -635,7 +635,14 @@ def run_paytr_init(
             )
             with urllib.request.urlopen(req, timeout=25) as resp:
                 raw = resp.read().decode("utf-8", errors="replace")
-            paytr_json = json.loads(raw) if raw else {}
+            if not (raw or "").strip():
+                logger.warning("paytr-init empty body invoice_id=%s", invoice_id)
+                return (
+                    False,
+                    502,
+                    {"ok": False, "mesaj": "PayTR boş yanıt döndü"},
+                )
+            paytr_json = json.loads(raw)
         except urllib.error.HTTPError as e:
             try:
                 raw = e.read().decode("utf-8", errors="replace")

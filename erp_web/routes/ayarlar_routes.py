@@ -2,6 +2,7 @@
 """Kiracı sistem ayarları. Yalnızca oturumdaki tenant şeması ve admin rolü."""
 from __future__ import annotations
 
+import json
 import os
 import re
 from datetime import datetime
@@ -377,6 +378,43 @@ def api_abonelik_ode(invoice_id: int):
         return jsonify({"ok": False, "mesaj": "Fatura bulunamadı."}), 404
     if str(row.get("status") or "") != "sent" or str(row.get("source") or "") != "paytr":
         return jsonify({"ok": False, "mesaj": "Bu fatura için ödeme başlatılamaz."}), 400
+    full = fetch_one(
+        """
+        SELECT metadata
+        FROM public.platform_tenant_invoices
+        WHERE id = %s AND tenant_id = %s
+        """,
+        (invoice_id, int(tenant["id"])),
+    )
+    paid = fetch_one(
+        """
+        SELECT id
+        FROM public.platform_tenant_payments
+        WHERE invoice_id = %s AND tenant_id = %s
+        LIMIT 1
+        """,
+        (invoice_id, int(tenant["id"])),
+    )
+    if paid:
+        return jsonify({"ok": False, "mesaj": "Bu fatura için ödeme kaydı var."}), 409
+    from routes.admin_billing_routes import _meta, _paytr_merchant_oid
+
+    meta = _meta((full or {}).get("metadata"))
+    # Aynı merchant_oid ile ikinci get-token PayTR'de boş 200 döner.
+    if meta.get("paytr_init_at"):
+        meta["merchant_oid"] = _paytr_merchant_oid(invoice_id)
+        meta.pop("paytr_init_at", None)
+        meta.pop("payment_amount_kurus", None)
+        updated = execute(
+            """
+            UPDATE public.platform_tenant_invoices
+            SET metadata = %s::jsonb, updated_at = NOW()
+            WHERE id = %s AND tenant_id = %s AND status = 'sent'
+            """,
+            (json.dumps(meta), invoice_id, int(tenant["id"])),
+        )
+        if not updated:
+            return jsonify({"ok": False, "mesaj": "Fatura ödeme için güncellenemedi."}), 409
     from paytr_checkout_token import attach_pay_token_to_invoice_metadata
 
     try:
