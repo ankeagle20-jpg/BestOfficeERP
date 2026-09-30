@@ -11,6 +11,7 @@ from facebook_oauth import (
     FacebookEmailRequired,
     authorization_url,
     facebook_configured,
+    facebook_failure_message,
     fetch_facebook_profile,
     mint_email_prompt,
     mint_oauth_state,
@@ -107,8 +108,9 @@ def facebook_callback():
         ticket = mint_email_prompt(name=exc.name, state=state)
         return render_template("auth/facebook_email.html", ticket=ticket, name=exc.name)
     except RuntimeError as exc:
-        logger.info("facebook profile failed reason=%s", exc)
-        return _page("Facebook hesabı doğrulanamadı. Lütfen tekrar deneyin.", 400)
+        detail = str(exc)
+        logger.warning("facebook profile failed reason=%s", detail[:300])
+        return _page(facebook_failure_message(detail), 400)
     return finish_social_login(profile["email"], profile["name"], state, email_trusted=True)
 
 

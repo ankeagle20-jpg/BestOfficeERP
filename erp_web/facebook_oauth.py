@@ -32,10 +32,15 @@ class FacebookEmailRequired(Exception):
         self.name = name
 
 
+def _env_value(name: str) -> str:
+    raw = (os.environ.get(name) or "").strip().lstrip("\ufeff")
+    if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in {'"', "'"}:
+        raw = raw[1:-1].strip()
+    return raw
+
+
 def facebook_configured() -> bool:
-    app_id = (os.environ.get("FACEBOOK_APP_ID") or "").strip()
-    secret = (os.environ.get("FACEBOOK_APP_SECRET") or "").strip()
-    return bool(app_id and secret)
+    return bool(_env_value("FACEBOOK_APP_ID") and _env_value("FACEBOOK_APP_SECRET"))
 
 
 def facebook_redirect_uri() -> str:
@@ -96,8 +101,57 @@ def read_email_prompt(raw: str) -> dict | None:
     return {"name": str(data.get("name") or "").strip()[:120], "state": state}
 
 
+def _graph_failure(resp: httpx.Response) -> str:
+    """Facebook hata kodu. Secret, kod ve token yazılmaz."""
+    code = sub = None
+    typ = msg = ""
+    try:
+        err = (resp.json() or {}).get("error") or {}
+    except Exception:
+        err = {}
+    if isinstance(err, dict):
+        code = err.get("code")
+        sub = err.get("error_subcode")
+        typ = str(err.get("type") or "")[:40]
+        msg = str(err.get("message") or "")[:180]
+    secret = _env_value("FACEBOOK_APP_SECRET")
+    if secret and secret in msg:
+        msg = msg.replace(secret, "[secret]")
+    return f"status={resp.status_code} type={typ} code={code} sub={sub} msg={msg}"
+
+
+def facebook_failure_message(detail: str) -> str:
+    low = str(detail or "").lower()
+    if "client secret" in low:
+        return (
+            "Facebook uygulama parolası kabul edilmedi. "
+            "Render'daki FACEBOOK_APP_SECRET, Developers panelindeki App Secret olmalı; "
+            "Client Token yapıştırılmamalı."
+        )
+    if "redirect_uri" in low or "verification code" in low or "sub=36008" in low:
+        return (
+            "Facebook yönlendirme adresi uyuşmuyor. "
+            "Valid OAuth Redirect URIs alanına tam olarak "
+            "https://payafin.com/auth/facebook/callback yazın; sonda eğik çizgi olmasın."
+        )
+    if any(
+        part in low
+        for part in (
+            "app not active",
+            "not available",
+            "not authorized",
+            "application does not have permission",
+        )
+    ):
+        return (
+            "Bu Facebook uygulaması Development modunda olabilir. "
+            "Yalnızca uygulamaya ekli yönetici, geliştirici veya test kullanıcısı girebilir."
+        )
+    return "Facebook hesabı doğrulanamadı. Lütfen tekrar deneyin."
+
+
 def authorization_url(state: str) -> str:
-    app_id = (os.environ.get("FACEBOOK_APP_ID") or "").strip()
+    app_id = _env_value("FACEBOOK_APP_ID")
     query = urlencode(
         {
             "client_id": app_id,
@@ -112,8 +166,8 @@ def authorization_url(state: str) -> str:
 
 def fetch_facebook_profile(code: str) -> dict:
     """Kodu ada ve varsa e-postaya çevirir. Token ve secret loglanmaz."""
-    app_id = (os.environ.get("FACEBOOK_APP_ID") or "").strip()
-    secret = (os.environ.get("FACEBOOK_APP_SECRET") or "").strip()
+    app_id = _env_value("FACEBOOK_APP_ID")
+    secret = _env_value("FACEBOOK_APP_SECRET")
     if not app_id or not secret:
         raise RuntimeError("facebook_not_configured")
     with httpx.Client(timeout=15.0) as client:
@@ -127,18 +181,27 @@ def fetch_facebook_profile(code: str) -> dict:
             },
         )
         if token_resp.status_code != 200:
-            logger.info("facebook token exchange failed status=%s", token_resp.status_code)
-            raise RuntimeError("facebook_token_failed")
-        access = str((token_resp.json() or {}).get("access_token") or "").strip()
+            detail = _graph_failure(token_resp)
+            logger.warning("facebook token exchange failed %s", detail)
+            raise RuntimeError(f"facebook_token_failed {detail}")
+        try:
+            token_body = token_resp.json() or {}
+        except Exception:
+            logger.warning("facebook token exchange failed status=200 body=not_json")
+            raise RuntimeError("facebook_token_failed status=200 body=not_json")
+        access = str(token_body.get("access_token") or "").strip()
         if not access:
-            raise RuntimeError("facebook_token_failed")
+            detail = _graph_failure(token_resp)
+            logger.warning("facebook token exchange empty %s", detail)
+            raise RuntimeError(f"facebook_token_failed {detail}")
         info = client.get(
             _ME_URL,
             params={"fields": "id,name,email", "access_token": access},
         )
         if info.status_code != 200:
-            logger.info("facebook profile failed status=%s", info.status_code)
-            raise RuntimeError("facebook_profile_failed")
+            detail = _graph_failure(info)
+            logger.warning("facebook profile failed %s", detail)
+            raise RuntimeError(f"facebook_profile_failed {detail}")
         body = info.json() or {}
     name = str(body.get("name") or "").strip()[:120]
     email = str(body.get("email") or "").strip().lower()
