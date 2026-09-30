@@ -167,6 +167,7 @@ def _parse_signup_intent(data: dict) -> str:
 
 
 _PURCHASE_MODULES = frozenset({"core", "personnel", "randevu", "ledger"})
+_PURCHASE_ENTRY_TIER = "starter"
 
 
 class PurchasePricingError(Exception):
@@ -266,7 +267,11 @@ def _resolve_purchase_module_and_tier(
     tier_prefs: dict[str, str],
     ledger_only: bool,
 ) -> tuple[str, str]:
-    """Satın Al için tek module + tier. Client tutarı yok sayılır."""
+    """Satın Al için tek module + tier. Client tutarı yok sayılır.
+
+    Kademe boşsa modülün giriş kademesi (starter) seçilir. Gönderilen
+    geçersiz kademe starter'a düşmez.
+    """
     tier = _normalize_tier_key(data.get("tier"))
     module = str(data.get("module") or "").strip().lower()
 
@@ -275,11 +280,8 @@ def _resolve_purchase_module_and_tier(
         if not tier:
             tier = _normalize_tier_key(tier_prefs.get("ledger"))
     elif module in _PURCHASE_MODULES:
-        if not tier and module != "core":
+        if not tier:
             tier = _normalize_tier_key(tier_prefs.get(module))
-        if not tier and module == "core":
-            # core: body tier zorunlu; prefs'te core olmayabilir
-            tier = _normalize_tier_key(tier_prefs.get("core"))
     elif len(selected_modules) == 1:
         module = selected_modules[0]
         if not tier:
@@ -297,7 +299,9 @@ def _resolve_purchase_module_and_tier(
             "Geçersiz modül.",
             errors={"module": "invalid_module"},
         )
-    if not tier or not re.fullmatch(r"[a-z0-9_]{1,32}", tier):
+    if not tier:
+        tier = _PURCHASE_ENTRY_TIER
+    if not re.fullmatch(r"[a-z0-9_]{1,32}", tier):
         raise PurchasePricingError(
             "Geçersiz veya eksik kademe (tier).",
             errors={"tier": "invalid_tier"},
