@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import secrets
 import threading
 from functools import wraps
@@ -51,7 +52,8 @@ logger = logging.getLogger(__name__)
 
 bp = Blueprint("google_auth", __name__)
 
-_INTENTS = frozenset({"login", "signup", "purchase"})
+_INTENTS = frozenset({"login", "signup", "purchase", "trial"})
+_SOCIAL_MODULES = ("personnel", "randevu", "ledger")
 
 
 def _apex_only(f):
@@ -179,15 +181,46 @@ def _login_public_user(email: str):
     return True
 
 
+def _modules_from_state(state: dict) -> list[str]:
+    raw = str((state or {}).get("modules") or "")
+    selected: list[str] = []
+    for part in raw.split(","):
+        key = part.strip().lower()
+        if key in _SOCIAL_MODULES and key not in selected:
+            selected.append(key)
+    return selected
+
+
+def _trial_selection(state: dict) -> tuple[bool, list[str], dict]:
+    module = str((state or {}).get("module") or "").strip().lower()
+    mode = str((state or {}).get("mode") or "").strip().lower()
+    ledger_only = mode == "ledger_only"
+    if ledger_only:
+        selected = ["ledger"]
+    else:
+        selected = _modules_from_state(state)
+        if not selected and module in _SOCIAL_MODULES:
+            selected = [module]
+    tier = str((state or {}).get("tier") or "").strip().lower()
+    prefs: dict[str, str] = {}
+    if re.fullmatch(r"[a-z0-9_]{1,32}", tier or "") and tier not in (
+        "enterprise",
+        "contact",
+        "contact_sales",
+    ):
+        if ledger_only:
+            prefs["ledger"] = tier
+        elif len(selected) == 1:
+            prefs[selected[0]] = tier
+    return ledger_only, selected, prefs
+
+
 def _start_trial(email: str, name: str, state: dict):
     slug = _pick_slug(str(state.get("slug") or ""), email)
     if not slug:
         return _page("Uygun bir işletme adresi üretilemedi. Kayıt formundan devam edin.", 400)
     company = _company_name(str(state.get("company_name") or ""), name, email)
-    module = str(state.get("module") or "").strip().lower()
-    mode = str(state.get("mode") or "").strip().lower()
-    ledger_only = mode == "ledger_only" or module == "ledger"
-    selected = ["ledger"] if ledger_only else ([module] if module in ("personnel", "randevu", "ledger") else [])
+    ledger_only, selected, prefs = _trial_selection(state)
     password = secrets.token_urlsafe(18) + "Aa1"
     try:
         reserve_tenant_slug(
@@ -211,7 +244,7 @@ def _start_trial(email: str, name: str, state: dict):
             "admin_full_name": name or company,
             "plan": "trial",
             "selected_module_keys": selected,
-            "module_tier_preferences": {},
+            "module_tier_preferences": prefs,
             "ledger_only": ledger_only,
         },
         name=f"google-provision-{slug}",
@@ -224,8 +257,8 @@ def _start_trial(email: str, name: str, state: dict):
 def _start_purchase(email: str, name: str, state: dict):
     module = str(state.get("module") or "").strip().lower()
     mode = str(state.get("mode") or "").strip().lower()
-    ledger_only = mode == "ledger_only" or module == "ledger"
-    selected = ["ledger"] if ledger_only else ([module] if module in ("personnel", "randevu", "ledger") else [])
+    ledger_only = mode == "ledger_only"
+    selected = ["ledger"] if ledger_only else ([module] if module in _SOCIAL_MODULES else [])
     data = {
         "module": "ledger" if ledger_only else (module or "core"),
         "tier": str(state.get("tier") or "").strip().lower(),
@@ -314,6 +347,7 @@ def google_start():
             "module": str(request.args.get("module") or "").strip().lower()[:32],
             "tier": str(request.args.get("tier") or "").strip().lower()[:32],
             "mode": str(request.args.get("mode") or "").strip().lower()[:32],
+            "modules": ",".join(_modules_from_state({"modules": request.args.get("modules")})),
             "slug": normalize_slug_input(request.args.get("slug"))[:32],
             "company_name": str(request.args.get("company_name") or "").strip()[:200],
         }

@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 bp = Blueprint("facebook_auth", __name__)
 
-_INTENTS = frozenset({"login", "signup", "purchase"})
+_INTENTS = frozenset({"login", "signup", "purchase", "trial"})
 
 
 def _page(message: str, status: int = 200):
@@ -60,6 +60,16 @@ def _state_from_request() -> dict:
         "module": str(request.args.get("module") or request.form.get("module") or "").strip().lower()[:32],
         "tier": str(request.args.get("tier") or request.form.get("tier") or "").strip().lower()[:32],
         "mode": str(request.args.get("mode") or request.form.get("mode") or "").strip().lower()[:32],
+        "modules": ",".join(
+            part
+            for part in (
+                p.strip().lower()
+                for p in str(
+                    request.args.get("modules") or request.form.get("modules") or ""
+                ).split(",")
+            )
+            if part in ("personnel", "randevu", "ledger")
+        ),
         "slug": normalize_slug_input(request.args.get("slug") or request.form.get("slug"))[:32],
         "company_name": str(
             request.args.get("company_name") or request.form.get("company_name") or ""

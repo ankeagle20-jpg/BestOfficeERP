@@ -29,6 +29,7 @@
     width:100%; padding:8px 10px; border:1px solid #e2e8f0; border-radius:6px;
     font-size:0.95rem; background:#fff; color:#0f172a;
   }
+  .social-or { text-align:center; color:#64748b; font-size:0.85rem; margin:14px 0 4px; }
 </style>
 {% endblock %}
 
@@ -140,10 +141,11 @@
       <label for="website">Website</label>
       <input id="website" name="website" type="text" tabindex="-1" autocomplete="off">
     </div>
-    {% with google_href='/auth/google?intent=signup', google_btn_id='google-continue' %}
+    <p class="social-or">veya</p>
+    {% with google_href='/auth/google?intent=trial', google_btn_id='google-continue' %}
     {% include "partials/google_continue_button.html" %}
     {% endwith %}
-    {% with facebook_href='/auth/facebook?intent=signup', facebook_btn_id='facebook-continue' %}
+    {% with facebook_href='/auth/facebook?intent=trial', facebook_btn_id='facebook-continue' %}
     {% include "partials/facebook_continue_button.html" %}
     {% endwith %}
     <button type="submit" class="btn-primary" id="btn-submit">Kaydı tamamla</button>
@@ -601,13 +603,29 @@
       if (!a) return;
       a.addEventListener("click", function () {
         var page = new URLSearchParams(window.location.search || "");
-        var intent = String(page.get("intent") || "").trim().toLowerCase() === "purchase" ? "purchase" : "signup";
+        var purchase = String(page.get("intent") || "").trim().toLowerCase() === "purchase";
         var q = new URLSearchParams();
-        q.set("intent", intent);
-        ["module", "tier", "mode"].forEach(function (key) {
-          var v = String(page.get(key) || "").trim();
-          if (v) q.set(key, v);
-        });
+        q.set("intent", purchase ? "purchase" : "trial");
+        if (purchase) {
+          ["module", "tier", "mode"].forEach(function (key) {
+            var v = String(page.get(key) || "").trim();
+            if (v) q.set(key, v);
+          });
+        } else if (isLedgerOnlyMode()) {
+          q.set("mode", "ledger_only");
+          if (ledgerTierSelect && ledgerTierSelect.value) q.set("tier", ledgerTierSelect.value);
+        } else {
+          var mods = [];
+          if (modPersonnel && modPersonnel.checked) mods.push("personnel");
+          if (modRandevu && modRandevu.checked) mods.push("randevu");
+          if (modLedger && modLedger.checked) mods.push("ledger");
+          if (mods.length === 1) {
+            q.set("module", mods[0]);
+            if (moduleTierPreferences[mods[0]]) q.set("tier", moduleTierPreferences[mods[0]]);
+          } else if (mods.length > 1) {
+            q.set("modules", mods.join(","));
+          }
+        }
         var company = document.getElementById("company_name");
         var slugEl = document.getElementById("slug");
         if (company && company.value.trim()) q.set("company_name", company.value.trim());

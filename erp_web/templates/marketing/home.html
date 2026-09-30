@@ -83,6 +83,9 @@
     gap: 8px;
     margin-top: 4px;
   }
+  .social-auth-pair { display: flex; flex-direction: column; gap: 6px; }
+  .social-auth-pair .gsi-material-button,
+  .social-auth-pair .fb-continue { margin-top: 0; height: 36px; font-size: 13px; }
   .package-card .btn-package {
     width: 100%;
     padding: 10px 14px;
@@ -267,7 +270,13 @@
       <div class="package-actions">
         <a href="/fiyatlandirma?module=core" class="btn-package">Detaylar</a>
         <a href="/signup" class="btn-package btn-package-primary">14 Gün Ücretsiz Dene</a>
+        {% with social_intent='trial' %}
+        {% include "partials/social_auth_pair.html" %}
+        {% endwith %}
         <a href="/signup?intent=purchase&amp;module=core&amp;tier=starter" class="btn-package">Satın Al</a>
+        {% with social_intent='purchase', social_module='core', social_tier='starter' %}
+        {% include "partials/social_auth_pair.html" %}
+        {% endwith %}
         <button type="button" class="btn-package btn-hesabima-git" data-module="core" data-label="Core ERP">Hesabıma git</button>
       </div>
     </article>
@@ -278,7 +287,13 @@
       <div class="package-actions">
         <a href="/fiyatlandirma?module=personnel" class="btn-package">Detaylar</a>
         <a href="/signup?module=personnel" class="btn-package btn-package-primary">14 Gün Ücretsiz Dene</a>
+        {% with social_intent='trial', social_module='personnel' %}
+        {% include "partials/social_auth_pair.html" %}
+        {% endwith %}
         <a href="/signup?intent=purchase&amp;module=personnel&amp;tier=starter" class="btn-package">Satın Al</a>
+        {% with social_intent='purchase', social_module='personnel', social_tier='starter' %}
+        {% include "partials/social_auth_pair.html" %}
+        {% endwith %}
         <button type="button" class="btn-package btn-hesabima-git" data-module="personnel" data-label="Personel Yönetimi">Hesabıma git</button>
       </div>
     </article>
@@ -289,7 +304,13 @@
       <div class="package-actions">
         <a href="/fiyatlandirma?module=randevu" class="btn-package">Detaylar</a>
         <a href="/signup?module=randevu" class="btn-package btn-package-primary">14 Gün Ücretsiz Dene</a>
+        {% with social_intent='trial', social_module='randevu' %}
+        {% include "partials/social_auth_pair.html" %}
+        {% endwith %}
         <a href="/signup?intent=purchase&amp;module=randevu&amp;tier=starter" class="btn-package">Satın Al</a>
+        {% with social_intent='purchase', social_module='randevu', social_tier='starter' %}
+        {% include "partials/social_auth_pair.html" %}
+        {% endwith %}
         <button type="button" class="btn-package btn-hesabima-git" data-module="randevu" data-label="Randevu Yönetimi">Hesabıma git</button>
       </div>
     </article>
@@ -300,7 +321,13 @@
       <div class="package-actions">
         <a href="/fiyatlandirma?module=ledger" class="btn-package">Detaylar</a>
         <a href="/signup?mode=ledger_only" class="btn-package btn-package-primary">14 Gün Ücretsiz Dene</a>
+        {% with social_intent='trial', social_mode='ledger_only' %}
+        {% include "partials/social_auth_pair.html" %}
+        {% endwith %}
         <a href="/signup?intent=purchase&amp;mode=ledger_only&amp;tier=starter" class="btn-package">Satın Al</a>
+        {% with social_intent='purchase', social_mode='ledger_only', social_tier='starter' %}
+        {% include "partials/social_auth_pair.html" %}
+        {% endwith %}
         <button type="button" class="btn-package btn-hesabima-git" data-module="ledger" data-label="Payafin Cari">Hesabıma git</button>
       </div>
     </article>

@@ -415,6 +415,26 @@
   @media (max-width: 560px) {
     .mp-form-grid { grid-template-columns: 1fr; }
   }
+  .social-auth-pair { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+  .gsi-material-button {
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+    width: 100%; box-sizing: border-box;
+    background: #fff; border: 1px solid #747775; border-radius: 4px;
+    color: #1f1f1f; font-family: Roboto, Arial, sans-serif; font-size: 13px;
+    font-weight: 500; height: 36px; text-decoration: none; cursor: pointer;
+  }
+  .gsi-material-button:hover { background: #f8f9fa; }
+  .gsi-material-button-icon { width: 18px; height: 18px; flex: 0 0 18px; }
+  .gsi-material-button-icon svg { width: 18px; height: 18px; display: block; }
+  .fb-continue {
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+    width: 100%; box-sizing: border-box;
+    background: #1877F2; border: 0; border-radius: 4px;
+    color: #fff; font-family: Helvetica, Arial, sans-serif; font-size: 13px;
+    font-weight: 700; height: 36px; text-decoration: none; cursor: pointer;
+  }
+  .fb-continue:hover { background: #166fe5; }
+  .fb-continue svg { width: 18px; height: 18px; flex: 0 0 18px; display: block; }
 </style>
 {% endblock %}
 
@@ -580,6 +600,9 @@
 <div class="pricing-cta">
   <a href="/signup" class="btn-primary">Kayıt Ol</a>
 </div>
+<template id="tpl-social-pair">
+  {% include "partials/social_auth_pair.html" %}
+</template>
 {% endblock %}
 
 {% block scripts %}
@@ -671,6 +694,24 @@
     return d.innerHTML;
   }
 
+  function socialPairHtml(intent, extra) {
+    const tpl = document.getElementById("tpl-social-pair");
+    if (!tpl) return "";
+    const wrap = document.createElement("div");
+    wrap.appendChild(tpl.content.cloneNode(true));
+    wrap.querySelectorAll("a[href]").forEach(function (a) {
+      const params = new URLSearchParams();
+      params.set("intent", intent);
+      Object.keys(extra || {}).forEach(function (key) {
+        const val = extra[key];
+        if (val) params.set(key, String(val));
+      });
+      const provider = a.getAttribute("href").indexOf("/auth/facebook") === 0 ? "facebook" : "google";
+      a.href = "/auth/" + provider + "?" + params.toString();
+    });
+    return wrap.innerHTML;
+  }
+
   function renderTier(tier, currency) {
     const card = document.createElement("article");
     card.className = "tier-card";
@@ -715,9 +756,11 @@
       "<a class=\"btn-select\" href=\"/signup?module=core&amp;tier=" +
       encodeURIComponent(String(tier.tier_key || "")) +
       "\">Bu Paketi Seç</a>" +
+      socialPairHtml("trial", { module: "core", tier: String(tier.tier_key || "") }) +
       "<a class=\"btn-select is-secondary\" href=\"/signup?intent=purchase&amp;module=core&amp;tier=" +
       encodeURIComponent(String(tier.tier_key || "")) +
-      "\">Satın Al</a>";
+      "\">Satın Al</a>" +
+      socialPairHtml("purchase", { module: "core", tier: String(tier.tier_key || "") });
     return card;
   }
 
@@ -937,9 +980,11 @@
       "<a class=\"btn-select" + (recommended ? " is-emphasized" : "") +
       "\" href=\"/signup?module=randevu&tier=" + encodeURIComponent(String(tier.tier_key || "")) +
       "\">Bu Paketi Seç</a>" +
+      socialPairHtml("trial", { module: "randevu", tier: String(tier.tier_key || "") }) +
       "<a class=\"btn-select is-secondary\" href=\"/signup?intent=purchase&amp;module=randevu&amp;tier=" +
       encodeURIComponent(String(tier.tier_key || "")) +
-      "\">Satın Al</a>";
+      "\">Satın Al</a>" +
+      socialPairHtml("purchase", { module: "randevu", tier: String(tier.tier_key || "") });
     return card;
   }
 
@@ -1032,18 +1077,21 @@
             "<a class=\"btn-select" + (recommended ? " is-emphasized" : "") +
             "\" href=\"/signup?mode=ledger_only&amp;tier=" + tierKeyEnc +
             "\">Sadece Cari Al</a>" +
+            socialPairHtml("trial", { mode: "ledger_only", tier: String(tier.tier_key || "") }) +
             "<p class=\"ld-cta-caption\">Bağımsız ürün — ERP gerekmez</p>" +
           "</div>" +
           "<div class=\"ld-cta-item\">" +
             "<a class=\"btn-select is-secondary\" href=\"/signup?module=ledger&amp;tier=" +
             tierKeyEnc +
             "\">ERP’ye Cari Ekle</a>" +
+            socialPairHtml("trial", { module: "ledger", tier: String(tier.tier_key || "") }) +
             "<p class=\"ld-cta-caption\">Tam ERP’ye eklenti (temel ERP dahildir)</p>" +
           "</div>" +
           "<div class=\"ld-cta-item\">" +
             "<a class=\"btn-select is-secondary\" href=\"/signup?intent=purchase&amp;mode=ledger_only&amp;tier=" +
             tierKeyEnc +
             "\">Satın Al</a>" +
+            socialPairHtml("purchase", { mode: "ledger_only", tier: String(tier.tier_key || "") }) +
             "<p class=\"ld-cta-caption\">Ödeme yakında — hesabı oluşturun</p>" +
           "</div>" +
         "</div>"
@@ -1316,9 +1364,11 @@
       "<a class=\"btn-select" + (recommended ? " is-emphasized" : "") +
       "\" href=\"/signup?module=personnel&tier=" + encodeURIComponent(String(tier.tier_key || "")) +
       "\">Bu Paketi Seç</a>" +
+      socialPairHtml("trial", { module: "personnel", tier: String(tier.tier_key || "") }) +
       "<a class=\"btn-select is-secondary\" href=\"/signup?intent=purchase&amp;module=personnel&amp;tier=" +
       encodeURIComponent(String(tier.tier_key || "")) +
-      "\">Satın Al</a>";
+      "\">Satın Al</a>" +
+      socialPairHtml("purchase", { module: "personnel", tier: String(tier.tier_key || "") });
     return card;
   }
 
