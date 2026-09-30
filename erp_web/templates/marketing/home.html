@@ -7,6 +7,11 @@
   .marketing-card { max-width: 1080px; }
 
   /* Üst giriş/kayıt bloğu — paket kartlarından bağımsız, dar ve ortalı */
+  .hero-satin-al {
+    display: inline-block;
+    margin-top: 12px;
+    text-decoration: none;
+  }
   .home-top-compact {
     max-width: 460px;
     margin: 0 auto;
@@ -214,6 +219,7 @@
     <div class="logo">PAYAFIN</div>
     <h1>Payafin ile işletmenizi yönetin</h1>
     <p>14 gün deneme — bulut ERP</p>
+    <a href="/signup?intent=purchase&amp;module=core&amp;tier=starter" class="btn-primary hero-satin-al">Satın Al</a>
   </div>
 
   <section aria-labelledby="login-heading">
@@ -255,7 +261,7 @@
       <div class="package-actions">
         <a href="/fiyatlandirma?module=core" class="btn-package">Detaylar</a>
         <a href="/signup" class="btn-package btn-package-primary">14 Gün Ücretsiz Dene</a>
-        <a href="/signup?intent=purchase" class="btn-package">Satın Al</a>
+        <a href="/signup?intent=purchase&amp;module=core&amp;tier=starter" class="btn-package">Satın Al</a>
         <button type="button" class="btn-package btn-hesabima-git" data-module="core" data-label="Core ERP">Hesabıma git</button>
       </div>
     </article>
@@ -266,7 +272,7 @@
       <div class="package-actions">
         <a href="/fiyatlandirma?module=personnel" class="btn-package">Detaylar</a>
         <a href="/signup?module=personnel" class="btn-package btn-package-primary">14 Gün Ücretsiz Dene</a>
-        <a href="/signup?intent=purchase&amp;module=personnel" class="btn-package">Satın Al</a>
+        <a href="/signup?intent=purchase&amp;module=personnel&amp;tier=starter" class="btn-package">Satın Al</a>
         <button type="button" class="btn-package btn-hesabima-git" data-module="personnel" data-label="Personel Yönetimi">Hesabıma git</button>
       </div>
     </article>
@@ -277,7 +283,7 @@
       <div class="package-actions">
         <a href="/fiyatlandirma?module=randevu" class="btn-package">Detaylar</a>
         <a href="/signup?module=randevu" class="btn-package btn-package-primary">14 Gün Ücretsiz Dene</a>
-        <a href="/signup?intent=purchase&amp;module=randevu" class="btn-package">Satın Al</a>
+        <a href="/signup?intent=purchase&amp;module=randevu&amp;tier=starter" class="btn-package">Satın Al</a>
         <button type="button" class="btn-package btn-hesabima-git" data-module="randevu" data-label="Randevu Yönetimi">Hesabıma git</button>
       </div>
     </article>
@@ -288,7 +294,7 @@
       <div class="package-actions">
         <a href="/fiyatlandirma?module=ledger" class="btn-package">Detaylar</a>
         <a href="/signup?mode=ledger_only" class="btn-package btn-package-primary">14 Gün Ücretsiz Dene</a>
-        <a href="/signup?intent=purchase&amp;mode=ledger_only" class="btn-package">Satın Al</a>
+        <a href="/signup?intent=purchase&amp;mode=ledger_only&amp;tier=starter" class="btn-package">Satın Al</a>
         <button type="button" class="btn-package btn-hesabima-git" data-module="ledger" data-label="Payafin Cari">Hesabıma git</button>
       </div>
     </article>
