@@ -5691,6 +5691,12 @@ def api_musteri_detay(mid):
     except Exception:
         out["yetkililer"] = []
 
+    try:
+        ek_bas, ek_bit = _cari_ekstre_varsayilan_bas_bit(int(mid))
+        out["ekstre_varsayilan_bas"] = ek_bas.isoformat()
+        out["ekstre_varsayilan_bit"] = ek_bit.isoformat()
+    except Exception:
+        logging.getLogger(__name__).exception("ekstre varsayilan tarih mid=%s", mid)
     payload = {"ok": True, "musteri": out}
     try:
         if int(gens.get(int(mid)) or 0) == gen_at_start:
@@ -11727,6 +11733,148 @@ def _api_cari_kart_impl(mid):
         ), 500
 
 
+def _ekstre_tarih_gunu(yil: int, ay: int, gun: int) -> date:
+    son = calendar.monthrange(int(yil), int(ay))[1]
+    g = int(gun) if gun else 1
+    if g < 1:
+        g = 1
+    if g > son:
+        g = son
+    return date(int(yil), int(ay), g)
+
+
+def _ekstre_acilis_tarihi(musteri_id: int, kyc: dict | None = None) -> date | None:
+    """Sözleşme başlangıcı; yoksa müşteri kaydının oluşturulma günü."""
+    kaynak = kyc if isinstance(kyc, dict) else _musteri_kyc_grup_for_aylik_grid(int(musteri_id))
+    for key in ("sozlesme_tarihi", "rent_start_date"):
+        d = _aylik_grid_coerce_date((kaynak or {}).get(key))
+        if isinstance(d, date):
+            return d
+    row = fetch_one(
+        "SELECT created_at::date AS created FROM customers WHERE id = %s",
+        (int(musteri_id),),
+    )
+    d = _aylik_grid_coerce_date((row or {}).get("created"))
+    return d if isinstance(d, date) else None
+
+
+def _ekstre_son_tam_odenen_ay(musteri_id: int) -> date | None:
+    """|AYLIK_TAH| / |AYLIK_PAY| içinden tam ödenmiş en ileri ay (ayın 1'i).
+
+    Grid brütü varsa ödeme brütü karşılamalı. Brüt yoksa pozitif PAY/TAH marker yeter.
+    """
+    mid = int(musteri_id)
+    rows = fetch_all(
+        """
+        SELECT t.id,
+               COALESCE(t.aciklama, '') AS aciklama,
+               COALESCE(t.tutar, 0) AS tutar,
+               t.tahsilat_tarihi,
+               f.fatura_tarihi
+        FROM tahsilatlar t
+        LEFT JOIN faturalar f ON f.id = t.fatura_id
+        WHERE (t.musteri_id = %s OR t.customer_id = %s)
+          AND COALESCE(t.tutar, 0) > 0
+          AND (
+                COALESCE(t.aciklama, '') LIKE '%%|AYLIK_TAH|%%'
+             OR COALESCE(t.aciklama, '') LIKE '%%|AYLIK_PAY|%%'
+          )
+        """,
+        (mid, mid),
+    ) or []
+    rows = [r for r in rows if "|BTUFRT|" not in str(r.get("aciklama") or "")]
+    if not rows:
+        return None
+    marker_isos: set[str] = set()
+    pay_amt: dict[str, float] = {}
+    for r in rows:
+        ac = str(r.get("aciklama") or "")
+        for iso_raw in re.findall(r"\|AYLIK_TAH\|([0-9]{4}-[0-9]{2}-[0-9]{2})\|", ac):
+            try:
+                dd = datetime.strptime(iso_raw[:10], "%Y-%m-%d").date()
+                marker_isos.add(date(dd.year, dd.month, 1).isoformat())
+            except ValueError:
+                continue
+        for iso_raw, amt_s in re.findall(
+            r"\|AYLIK_PAY\|([0-9]{4}-[0-9]{2}-[0-9]{2})=([0-9]+(?:\.[0-9]+)?)|",
+            ac,
+        ):
+            try:
+                dd = datetime.strptime(iso_raw[:10], "%Y-%m-%d").date()
+                iso = date(dd.year, dd.month, 1).isoformat()
+                pay_amt[iso] = pay_amt.get(iso, 0.0) + float(amt_s)
+                marker_isos.add(iso)
+            except ValueError:
+                continue
+    if not marker_isos:
+        return None
+    cache = fetch_one(
+        "SELECT payload FROM musteri_aylik_grid_cache WHERE musteri_id = %s",
+        (mid,),
+    )
+    brut = _brut_by_iso_from_aylik_grid_payload((cache or {}).get("payload"))
+    tol = float(AYLIK_GRID_TAM_ODENDI_TOLERANS)
+    paid: list[date] = []
+    tahsil_map: dict = {}
+    if brut:
+        try:
+            tahsil_map = _aylik_tahsil_tutar_map(
+                mid, tahsil_rows=rows, remaining_by_iso=dict(brut)
+            ) or {}
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "ekstre son odenen ay tahsil_map mid=%s", mid
+            )
+            tahsil_map = {}
+    for iso in marker_isos:
+        try:
+            ay = datetime.strptime(iso[:10], "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        brut_t = float(brut.get(iso) or 0) if brut else 0.0
+        odenen = float(tahsil_map.get(iso) or 0) if tahsil_map else float(pay_amt.get(iso) or 0)
+        if brut_t > 0:
+            if odenen + 1e-9 >= (brut_t - tol):
+                paid.append(ay)
+        elif float(pay_amt.get(iso) or 0) > tol or iso in marker_isos:
+            if not brut:
+                paid.append(ay)
+            elif float(pay_amt.get(iso) or 0) > tol:
+                paid.append(ay)
+    if not paid:
+        return None
+    return max(paid)
+
+
+def _cari_ekstre_varsayilan_bas_bit(musteri_id: int) -> tuple[date, date]:
+    """Sayfa açılışındaki ekstre aralığı.
+
+    Başlangıç: bu yıl açıldıysa sözleşme/açılış günü, değilse 1 Ocak.
+    Bitiş: bugün; bugünden sonraki tam ödenmiş ay varsa o ayın sözleşme günü.
+    """
+    bugun = date.today()
+    kyc = _musteri_kyc_grup_for_aylik_grid(int(musteri_id))
+    acilis = _ekstre_acilis_tarihi(int(musteri_id), kyc)
+    if acilis and acilis.year == bugun.year:
+        bas = acilis
+    else:
+        bas = date(bugun.year, 1, 1)
+    bit = bugun
+    try:
+        son_ay = _ekstre_son_tam_odenen_ay(int(musteri_id))
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "ekstre varsayilan bitis mid=%s", musteri_id
+        )
+        son_ay = None
+    if son_ay and (son_ay.year, son_ay.month) > (bugun.year, bugun.month):
+        gun = acilis.day if acilis else bugun.day
+        bit = _ekstre_tarih_gunu(son_ay.year, son_ay.month, gun)
+    if bas > bit:
+        bas = bit
+    return bas, bit
+
+
 def _cari_ekstre_varsayilan_son_tam_ay():
     """Parametresiz isteklerde: içinde bulunulan takvim ayının 1. ve son günü (cari ay kira borcu dahil)."""
     bugun = date.today()
@@ -11767,47 +11915,15 @@ def _cari_ekstre_build_payload_from_request():
     cust = fetch_one("SELECT id, name FROM customers WHERE id = %s", (musteri_id,))
     if not cust:
         return None, (jsonify({"ok": False, "mesaj": "Müşteri bulunamadı."}), 404)
-    def_b, def_bit_cari_ay = _cari_ekstre_varsayilan_son_tam_ay()
+    def_b, def_bit = _cari_ekstre_varsayilan_bas_bit(int(musteri_id))
     kyc = _musteri_kyc_grup_for_aylik_grid(int(musteri_id))
-    soz_bit = _aylik_grid_coerce_date((kyc or {}).get("sozlesme_bitis"))
-    if soz_bit:
-        soz_bit = _aylik_grid_effective_bitis(kyc, soz_bit) or soz_bit
     cust_durum = (kyc or {}).get("durum") or ""
-    if str(cust_durum).strip().lower() == "aktif" and soz_bit:
-        if soz_bit >= date.today():
-            def_bit = min(soz_bit, def_bit_cari_ay)
-        else:
-            # Sözleşme bitişi zaten geçmişte kalmış (örn. yenileme
-            # sonrası KYC güncellenmemiş) - bunu dikkate almadan
-            # cari ay sonunu kullan, aksi halde bas>bit swap'i
-            # aralığı yanlış yönde genişletir.
-            def_bit = def_bit_cari_ay
-    else:
-        def_bit = soz_bit or def_bit_cari_ay
     baslangic = request.args.get("baslangic")
     bitis = request.args.get("bitis")
     kullanici_araligi_verildi = bool(baslangic or bitis)
-    # Peşin ufuk: yalnız açık bitis YOKSA varsayılan bitişi peşin ödenen aya kadar uzat.
-    # (Kullanıcı bitis verdiyse dokunma — C kuralı.)
+    # Boş bitiş: yukarıdaki varsayılan (bugün veya son ödenen ayın sözleşme günü).
+    # Kullanıcının gönderdiği tarih olduğu gibi kalır.
     if not (bitis and str(bitis).strip()):
-        try:
-            max_by_mid = _load_max_aylik_tah_iso_by_musteri(
-                exclude_btufrt=True, only_fully_paid=True
-            )
-            horizon_ay = _pesin_borclandirma_horizon_for_musteri(
-                int(musteri_id), max_by_mid=max_by_mid
-            )
-            _, son_gun = calendar.monthrange(horizon_ay.year, horizon_ay.month)
-            horizon_bit = date(horizon_ay.year, horizon_ay.month, son_gun)
-            if horizon_bit > def_bit:
-                def_bit = horizon_bit
-        except Exception:
-            logging.getLogger(__name__).exception(
-                "cari ekstre peşin ufuk bitiş musteri_id=%s", musteri_id
-            )
-        # Pasif cap: peşin ufku uzatabilir ama efektif bitişi ASLA aşamaz.
-        # (Kullanıcı açık bitis verdiyse bu blok zaten çalışmaz.)
-        # Grid bitiş dışlayıcı (donem < cap); ekstre inclusive (<= bit) → cap-1 gün.
         if str(cust_durum).strip().lower() == "pasif":
             cap = _aylik_grid_effective_bitis(kyc, def_bit)
             if isinstance(cap, date):
@@ -15141,29 +15257,12 @@ def api_cari_ekstre_b():
     cust = fetch_one("SELECT id, name FROM customers WHERE id = %s", (musteri_id,))
     if not cust:
         return jsonify({"ok": False, "mesaj": "Müşteri bulunamadı."}), 404
-    def_b, def_bit = _cari_ekstre_varsayilan_son_tam_ay()
+    def_b, def_bit = _cari_ekstre_varsayilan_bas_bit(int(musteri_id))
     baslangic = request.args.get("baslangic")
     bitis = request.args.get("bitis")
-    # Peşin ufuk: yalnız açık bitis YOKSA varsayılan bitişi peşin ödenen aya kadar uzat.
+    # Boş bitiş: bugün veya son ödenen ayın sözleşme günü. Gönderilen tarih korunur.
+    # Pasif cap: efektif bitişi aşamaz. Grid bitiş dışlayıcı → ekstre için cap-1 gün.
     if not (bitis and str(bitis).strip()):
-        try:
-            max_by_mid = _load_max_aylik_tah_iso_by_musteri(
-                exclude_btufrt=True, only_fully_paid=True
-            )
-            horizon_ay = _pesin_borclandirma_horizon_for_musteri(
-                int(musteri_id), max_by_mid=max_by_mid
-            )
-            _, son_gun = calendar.monthrange(horizon_ay.year, horizon_ay.month)
-            horizon_bit = date(horizon_ay.year, horizon_ay.month, son_gun)
-            if horizon_bit > def_bit:
-                def_bit = horizon_bit
-        except Exception:
-            logging.getLogger(__name__).exception(
-                "cari ekstre B peşin ufuk bitiş musteri_id=%s", musteri_id
-            )
-        # Pasif cap: peşin ufku uzatabilir ama efektif bitişi ASLA aşamaz.
-        # (Kullanıcı açık bitis verdiyse bu blok zaten çalışmaz.)
-        # Grid bitiş dışlayıcı (donem < cap); ekstre inclusive (<= bit) → cap-1 gün.
         try:
             kyc_b = _musteri_kyc_grup_for_aylik_grid(int(musteri_id))
             if str((kyc_b or {}).get("durum") or "").strip().lower() == "pasif":

@@ -24169,20 +24169,28 @@ function girisCariEkstreAyIlkSon(yil, ay1based) {
 }
 /**
  * Cari ekstre varsayılan tarih aralığı.
- * Aktif: cari takvim yılı (1 Ocak → içinde olunan ayın sonu).
- * Pasif: kapanış (veya sözleşme bitiş) tarihinin bir önceki takvim ayı.
+ * Sunucu ekstre_varsayilan_* gönderdiyse onu kullan.
+ * Yedek: bu yıl açıldıysa sözleşme günü, değilse 1 Ocak; bitiş bugün.
+ * Pasif ve sunucu alanı yoksa: kapanış ayının bir önceki ayı.
  */
 function girisCariEkstreVarsayilanTarihAraligi(m) {
     m = m || {};
+    var sunucuBas = String(m.ekstre_varsayilan_bas || '').substring(0, 10);
+    var sunucuBit = String(m.ekstre_varsayilan_bit || '').substring(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(sunucuBas) && /^\d{4}-\d{2}-\d{2}$/.test(sunucuBit)) {
+        return { bas: sunucuBas, bit: sunucuBit };
+    }
     var now = new Date();
     var cy = now.getFullYear();
     var cm = now.getMonth() + 1;
     var pasif = String(m.durum || '').toLowerCase().trim() === 'pasif';
-    var bitCur = girisCariEkstreAyIlkSon(cy, cm);
+    var bugun = cy + '-' + girisCariEkstrePad2(cm) + '-' + girisCariEkstrePad2(now.getDate());
+    var acilis = String(m.rent_start_date || m.sozlesme_baslangic || '').substring(0, 10);
+    var basYil = cy + '-01-01';
+    if (/^\d{4}-\d{2}-\d{2}$/.test(acilis) && acilis.substring(0, 4) === String(cy)) basYil = acilis;
     if (!pasif) {
-        var basCur = girisCariEkstreAyIlkSon(cy, 1);
-        if (basCur.bas > bitCur.bit) basCur = bitCur;
-        return { bas: basCur.bas, bit: bitCur.bit };
+        if (basYil > bugun) basYil = bugun;
+        return { bas: basYil, bit: bugun };
     }
     var yil;
     var ay;
@@ -24730,17 +24738,6 @@ function cariEkstreYukle(opts) {
     var baslangicInput = document.getElementById('cari_ekstre_baslangic');
     var bitis = document.getElementById('cari_ekstre_bitis').value;
     var baslangic = baslangicInput ? baslangicInput.value : '';
-
-    // Sözleşme başlangıcından önceki tarihe izin verme
-    var sozlesmeBasInput = document.getElementById('sozlesme_baslangic');
-    if (sozlesmeBasInput && sozlesmeBasInput.value && baslangic) {
-        var soz = new Date(sozlesmeBasInput.value);
-        var bas = new Date(baslangic);
-        if (bas < soz) {
-            baslangic = sozlesmeBasInput.value;
-            baslangicInput.value = baslangic;
-        }
-    }
     var bitisEl = document.getElementById('cari_ekstre_bitis');
     if (bitisEl && baslangic && bitis) {
         var bA = new Date(baslangic);
@@ -24753,21 +24750,6 @@ function cariEkstreYukle(opts) {
             bitisEl.value = bitis;
         }
     }
-    var durumEkEl = document.getElementById('musteri_durum');
-    var pasifEkstre = durumEkEl && String(durumEkEl.value || '').toLowerCase().trim() === 'pasif';
-    // otomatikVarsayilan: aktif müşteride bitişi cari ay sonuna zorlama — backend peşin ufku kullanılsın
-    if (!otomatikVarsayilan && !kullaniciAraligiKoru && bitisEl && !pasifEkstre) {
-        var nowEk = new Date();
-        var cyEk = nowEk.getFullYear();
-        var cmEk = nowEk.getMonth() + 1;
-        var sonGunEk = new Date(cyEk, cmEk, 0).getDate();
-        var curBitIso = cyEk + '-' + girisCariEkstrePad2(cmEk) + '-' + girisCariEkstrePad2(sonGunEk);
-        if (!bitis || String(bitis).substring(0, 10) < curBitIso) {
-            bitis = curBitIso;
-            bitisEl.value = bitis;
-        }
-    }
-
     var aylikKiraEl = document.getElementById('cari_ekstre_aylik_kira');
     var aylikKira = (aylikKiraEl && aylikKiraEl.value !== '') ? parseFloat((aylikKiraEl.value || '0').replace(',', '.')) : parseFloat((document.getElementById('aylik_kira').value || '0').replace(',', '.'));
     if (isNaN(aylikKira)) aylikKira = 0;
