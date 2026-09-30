@@ -143,6 +143,9 @@
     {% with google_href='/auth/google?intent=signup', google_btn_id='google-continue' %}
     {% include "partials/google_continue_button.html" %}
     {% endwith %}
+    {% with facebook_href='/auth/facebook?intent=signup', facebook_btn_id='facebook-continue' %}
+    {% include "partials/facebook_continue_button.html" %}
+    {% endwith %}
     <button type="submit" class="btn-primary" id="btn-submit">Kaydı tamamla</button>
   </form>
 </div>
@@ -592,24 +595,28 @@
   });
 
   applyUrlModuleTier();
-  (function bindGoogleContinue() {
-    var a = document.getElementById("google-continue");
-    if (!a) return;
-    a.addEventListener("click", function () {
-      var page = new URLSearchParams(window.location.search || "");
-      var intent = String(page.get("intent") || "").trim().toLowerCase() === "purchase" ? "purchase" : "signup";
-      var q = new URLSearchParams();
-      q.set("intent", intent);
-      ["module", "tier", "mode"].forEach(function (key) {
-        var v = String(page.get(key) || "").trim();
-        if (v) q.set(key, v);
+  (function bindSocialContinue() {
+    function bind(id, path) {
+      var a = document.getElementById(id);
+      if (!a) return;
+      a.addEventListener("click", function () {
+        var page = new URLSearchParams(window.location.search || "");
+        var intent = String(page.get("intent") || "").trim().toLowerCase() === "purchase" ? "purchase" : "signup";
+        var q = new URLSearchParams();
+        q.set("intent", intent);
+        ["module", "tier", "mode"].forEach(function (key) {
+          var v = String(page.get(key) || "").trim();
+          if (v) q.set(key, v);
+        });
+        var company = document.getElementById("company_name");
+        var slugEl = document.getElementById("slug");
+        if (company && company.value.trim()) q.set("company_name", company.value.trim());
+        if (slugEl && slugEl.value.trim()) q.set("slug", slugEl.value.trim());
+        a.href = path + "?" + q.toString();
       });
-      var company = document.getElementById("company_name");
-      var slugEl = document.getElementById("slug");
-      if (company && company.value.trim()) q.set("company_name", company.value.trim());
-      if (slugEl && slugEl.value.trim()) q.set("slug", slugEl.value.trim());
-      a.href = "/auth/google?" + q.toString();
-    });
+    }
+    bind("google-continue", "/auth/google");
+    bind("facebook-continue", "/auth/facebook");
   })();
   applySignupModeUI();
   loadPricing();

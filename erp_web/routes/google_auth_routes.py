@@ -342,32 +342,69 @@ def google_callback():
         logger.info("google profile failed reason=%s", exc)
         return _page("Google hesabı doğrulanamadı. Lütfen tekrar deneyin.", 400)
 
-    email = profile["email"]
-    name = profile["name"]
-    module = str(state.get("module") or "")
+    return finish_social_login(profile["email"], profile["name"], state)
+
+
+def finish_social_login(email: str, name: str, state: dict, *, email_trusted: bool = True):
+    """Kayıtlı e-posta → giriş; Satın Al → fatura/checkout; aksi halde trial.
+
+    email_trusted=False: kullanıcı elle yazdığı adres. Kayıtlı hesaba oturum açılmaz.
+    """
+    email = str(email or "").strip().lower()
+    name = str(name or "").strip()[:120]
+    module = str((state or {}).get("module") or "")
+    known = False
+    try:
+        known = bool(_lookup_active_tenant_slug("email", email))
+    except Exception:
+        logger.exception("social lookup failed")
+    if not known:
+        try:
+            pending_row = fetch_one(
+                """
+                SELECT i.id
+                FROM public.platform_signup_intents i
+                INNER JOIN public.tenants t ON t.id = i.tenant_id
+                WHERE LOWER(i.email) = %s AND t.status = 'pending_payment'
+                LIMIT 1
+                """,
+                (email,),
+            )
+            known = bool(pending_row)
+        except Exception:
+            logger.exception("social pending lookup failed")
+            known = False
+    if not known:
+        row = fetch_one(
+            "SELECT id FROM public.users WHERE LOWER(username) = %s AND is_active = TRUE LIMIT 1",
+            (email,),
+        )
+        known = bool(row)
+    if known and not email_trusted:
+        return _page(
+            "Bu e-posta zaten kayıtlı. Facebook e-posta iznini açın veya şifrenizle giriş yapın.",
+            400,
+        )
     try:
         handoff = _handoff_for_email(email, module)
     except Exception:
-        logger.exception("google handoff failed")
+        logger.exception("social handoff failed")
         return _page("Giriş tamamlanamadı. Lütfen tekrar deneyin.", 500)
     if handoff:
         return redirect(handoff)
-
-    pending = None
     try:
         pending = _pending_purchase_checkout(email)
     except Exception:
-        logger.exception("google pending checkout failed")
+        logger.exception("social pending checkout failed")
+        pending = None
     if pending:
         return redirect(pending)
-
     if _login_public_user(email):
         return redirect("/")
-
-    intent = _clean_intent(state.get("intent"))
+    intent = _clean_intent((state or {}).get("intent"))
     if intent == "purchase":
-        return _start_purchase(email, name, state)
-    return _start_trial(email, name, state)
+        return _start_purchase(email, name, state or {})
+    return _start_trial(email, name, state or {})
 
 
 @bp.route("/auth/google/waiting", methods=["GET"])

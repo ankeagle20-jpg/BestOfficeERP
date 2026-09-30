@@ -235,6 +235,9 @@
       {% with google_href='/auth/google?intent=login', google_btn_id='google-continue-login' %}
       {% include "partials/google_continue_button.html" %}
       {% endwith %}
+      {% with facebook_href='/auth/facebook?intent=login', facebook_btn_id='facebook-continue-login' %}
+      {% include "partials/facebook_continue_button.html" %}
+      {% endwith %}
     </form>
   </section>
 

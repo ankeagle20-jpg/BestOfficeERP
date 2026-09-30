@@ -1,0 +1,17 @@
+<style>
+  .fb-continue {
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+    width: 100%; box-sizing: border-box; margin-top: 8px;
+    background: #1877F2; border: 0; border-radius: 4px;
+    color: #fff; font-family: Helvetica, Arial, sans-serif; font-size: 14px;
+    font-weight: 700; height: 40px; text-decoration: none; cursor: pointer;
+  }
+  .fb-continue:hover { background: #166fe5; }
+  .fb-continue svg { width: 20px; height: 20px; flex: 0 0 20px; display: block; }
+</style>
+<a class="fb-continue" href="{{ facebook_href }}" id="{{ facebook_btn_id or 'facebook-continue' }}">
+  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <path fill="#fff" d="M15.1 8.5h-2.1V7.1c0-.5.3-.6.6-.6h1.5V4.1L12.9 4c-2.3 0-2.8 1.7-2.8 2.8v1.7H8.2V11h1.9v9h2.9v-9h2l.1-2.5z"/>
+  </svg>
+  <span>Facebook ile devam et</span>
+</a>
