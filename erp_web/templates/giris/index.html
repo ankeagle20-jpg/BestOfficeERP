@@ -3013,7 +3013,7 @@ button.auto-btn.whatsapp-hizmet-filter-btn.wa-hizmet-aktif {
                                     </div>
                                 </div>
                                 
-                                <label class="required">Yetkili T.C. Kimlik No</label>
+                                <label class="required yetkili-tc-etiket">Yetkili T.C. Kimlik No</label>
                                 <div class="yetkili-alan-grup" data-alan-tipi="tc">
                                     <div class="yetkili-alan-satir giris-tel-ve-kime" data-sira="1">
                                         <input type="text" id="yetkili_tc" class="yetkili-f-tc" placeholder="11=TC / 12=Yab" maxlength="11" inputmode="numeric" oninput="yetkiliTcInput(this)" onchange="hesaplaYuzde()" autocomplete="off" style="flex:0 1 160px;min-width:110px;max-width:200px;">
@@ -25423,6 +25423,8 @@ function girisUyrukSnapshotTcAttrs() {
 function girisUyrukUygula() {
     girisUyrukSnapshotTcAttrs();
     var yab = girisUyrukYabanciMi();
+    var tcEtiket = yab ? 'TC Kimlik No / Pasaport No' : 'Yetkili T.C. Kimlik No';
+    document.querySelectorAll('.yetkili-tc-etiket').forEach(function (lab) { lab.textContent = tcEtiket; });
     var tax = document.getElementById('tax_number');
     var tc = document.getElementById('yetkili_tc');
     var phone = document.getElementById('phone');
@@ -25437,8 +25439,8 @@ function girisUyrukUygula() {
             tax.oninput = function () { girisUyrukMaxLenSoft(tax, 50); hesaplaYuzde(); };
         }
         if (tc) {
-            tc.setAttribute('maxlength', '30');
-            tc.setAttribute('placeholder', 'Pasaport / yabancı kimlik (harf+rakam, en fazla 30)');
+            tc.setAttribute('maxlength', '20');
+            tc.setAttribute('placeholder', 'Pasaport no');
             tc.removeAttribute('inputmode');
             tc.removeAttribute('oninput');
             tc.oninput = function () { yetkiliTcInput(tc); try { hesaplaYuzde(); } catch (e) {} };
@@ -25497,10 +25499,12 @@ function girisUyrukDegisti() {
 }
 
 function yetkiliTcInput(input) {
-    /** TC: yalnız rakam (11). Yabancı: harf+rakam pasaport/kimlik, en fazla 30. */
+    /** TC: yalnız rakam (11). Yabancı: pasaport, 5-20 harf/rakam. */
     if (!input) return;
     if (typeof girisUyrukYabanciMi === 'function' && girisUyrukYabanciMi()) {
-        girisUyrukMaxLenSoft(input, 30);
+        var v = String(input.value || '').replace(/[^A-Za-z0-9]/g, '');
+        if (v.length > 20) v = v.slice(0, 20);
+        if (input.value !== v) input.value = v;
         return;
     }
     sadeceRakam(input, 11);
@@ -26856,15 +26860,21 @@ async function kaydet(event) {
     var vergiRaw = (document.getElementById('tax_number').value || '').trim();
     var tcRaw = (document.getElementById('yetkili_tc').value || '').trim();
     var vergiNo = uyrukYabanci ? vergiRaw.slice(0, 50) : vergiRaw.replace(/\D/g, '');
-    var tcNo = uyrukYabanci ? tcRaw.slice(0, 30) : tcRaw.replace(/\D/g, '');
+    var tcNo = uyrukYabanci ? tcRaw : tcRaw.replace(/\D/g, '');
     if (uyrukYabanci) {
         if (!vergiNo) {
             alert('Vergi No zorunlu alandır.');
             document.getElementById('tax_number').focus();
             return;
         }
-        if (vergiNo.length > 50 || (tcNo && tcNo.length > 30)) {
-            alert('Vergi en fazla 50, kimlik/pasaport en fazla 30 karakter olabilir.');
+        if (vergiNo.length > 50) {
+            alert('Vergi numarası en fazla 50 karakter olabilir.');
+            document.getElementById('tax_number').focus();
+            return;
+        }
+        if (tcNo && !/^[A-Za-z0-9]{5,20}$/.test(tcNo)) {
+            alert('Pasaport No 5-20 karakter, yalnızca harf ve rakam olmalıdır.');
+            document.getElementById('yetkili_tc').focus();
             return;
         }
         var telY = (document.getElementById('phone').value || '').trim();
@@ -26894,8 +26904,8 @@ async function kaydet(event) {
     }
 
     if (!uyrukYabanci) {
-        if (tcNo && !/^\d{11}$/.test(tcNo) && !/^\d{12}$/.test(tcNo)) {
-            alert('TC Kimlik No 11 hane (veya yabancı için 12 hane) olmalıdır.');
+        if (tcNo && !/^\d{11}$/.test(tcNo)) {
+            alert('TC Kimlik No 11 hane olmalıdır.');
             document.getElementById('yetkili_tc').focus();
             return;
         }
@@ -26923,7 +26933,7 @@ async function kaydet(event) {
         name: aramaGuvenli ? aramaGuvenli.name : document.getElementById('name').value,
         musteri_adi: aramaGuvenli ? aramaGuvenli.musteri_adi : (document.getElementById('musteri_adi') ? document.getElementById('musteri_adi').value : ''),
         tax_number: vergiNo,
-        yetkili_tc: uyrukYabanci ? tcRaw.slice(0, 30) : document.getElementById('yetkili_tc').value,
+        yetkili_tc: uyrukYabanci ? tcRaw.slice(0, 20) : document.getElementById('yetkili_tc').value,
         uyruk_yabanci: !!uyrukYabanci,
         uyruk: uyrukYabanci ? 'yabanci' : 'tc',
         phone: uyrukYabanci ? ((document.getElementById('phone').value || '').trim().slice(0, 50)) : document.getElementById('phone').value,
@@ -26973,7 +26983,7 @@ async function kaydet(event) {
         yeni_adres: document.getElementById('address').value,
         sube_merkez: document.getElementById('sube_merkez').value,
         yetkili_adsoyad: document.getElementById('yetkili_ad').value,
-        yetkili_tcno: uyrukYabanci ? tcRaw.slice(0, 30) : document.getElementById('yetkili_tc').value,
+        yetkili_tcno: uyrukYabanci ? tcRaw.slice(0, 20) : document.getElementById('yetkili_tc').value,
         yetkili_ikametgah: document.getElementById('ev_adres').value,
         yetkili_tel: uyrukYabanci ? ((document.getElementById('phone').value || '').trim().slice(0, 50)) : document.getElementById('phone').value,
         yetkili_tel2: (document.getElementById('phone2') || {}).value || '',
@@ -27384,12 +27394,14 @@ function girisYetkiliUyrukAttrsUygula(blok) {
     var tcs = blok.querySelectorAll('.yetkili-f-tc');
     var tels = blok.querySelectorAll('.yetkili-f-tel');
     var tel2s = blok.querySelectorAll('.yetkili-f-tel2');
-    var i, tc, tel, tel2;
+    var i, tc, tel, tel2, lab, labs = blok.querySelectorAll('.yetkili-tc-etiket');
+    var tcEtiket = yab ? 'TC Kimlik No / Pasaport No' : 'Yetkili T.C. Kimlik No';
+    for (i = 0; i < labs.length; i++) labs[i].textContent = tcEtiket;
     for (i = 0; i < tcs.length; i++) {
         tc = tcs[i];
         if (yab) {
-            tc.setAttribute('maxlength', '30');
-            tc.setAttribute('placeholder', 'Pasaport / yabancı kimlik (harf+rakam, en fazla 30)');
+            tc.setAttribute('maxlength', '20');
+            tc.setAttribute('placeholder', 'Pasaport no');
             tc.removeAttribute('inputmode');
             tc.oninput = (function (el) { return function () { yetkiliTcInput(el); try { hesaplaYuzde(); } catch (e) {} }; })(tc);
         } else {
@@ -27644,7 +27656,7 @@ function girisYetkiliBlokOlustur(data, idx) {
         '<input type="text" class="yetkili-f-ad-aciklama" placeholder="Kime ait" maxlength="120" autocomplete="off" onchange="hesaplaYuzde()" style="flex:1 1 160px;min-width:120px;">' +
         '<button type="button" class="yetkili-alan-btn-ekle" title="Ad Soyad ekle" aria-label="Ad Soyad ekle" onclick="girisYetkiliAlanSatirEkle(this)">+</button>' +
         '</div></div>' +
-        '<label class="required">Yetkili T.C. Kimlik No</label>' +
+        '<label class="required yetkili-tc-etiket">Yetkili T.C. Kimlik No</label>' +
         '<div class="yetkili-alan-grup" data-alan-tipi="tc">' +
         '<div class="yetkili-alan-satir giris-tel-ve-kime" data-sira="1">' +
         '<input type="text" class="yetkili-f-tc" placeholder="11=TC / 12=Yab" maxlength="11" inputmode="numeric" oninput="yetkiliTcInput(this)" onchange="hesaplaYuzde()" autocomplete="off" style="flex:0 1 160px;min-width:110px;max-width:200px;">' +
@@ -27800,17 +27812,19 @@ function girisYetkililerDogrula() {
         if (!(y.ad_soyad || '').trim()) {
             return { ok: false, mesaj: n + '. Yetkili: Ad Soyad zorunludur.', idx: i, field: 'yetkili-f-ad' };
         }
-        var tcDigits = String(y.tc_no || '').replace(/\D/g, '');
-        if (!tcDigits) {
-            return { ok: false, mesaj: n + '. Yetkili: T.C. Kimlik No zorunludur.', idx: i, field: 'yetkili-f-tc' };
-        }
+        var tcRawY = String(y.tc_no || '').trim();
+        var tcDigits = tcRawY.replace(/\D/g, '');
         if (uyrukYabanci) {
-            var tcRaw = String(y.tc_no || '').trim();
-            if (tcRaw.length > 30) {
-                return { ok: false, mesaj: n + '. Yetkili: kimlik/pasaport en fazla 30 karakter olabilir.', idx: i, field: 'yetkili-f-tc' };
+            if (!tcRawY) {
+                return { ok: false, mesaj: n + '. Yetkili: TC Kimlik No / Pasaport No zorunludur.', idx: i, field: 'yetkili-f-tc' };
             }
-        } else if (!/^\d{11}$/.test(tcDigits) && !/^\d{12}$/.test(tcDigits)) {
-            return { ok: false, mesaj: n + '. Yetkili: TC Kimlik No 11 hane (veya yabancı için 12 hane) olmalıdır.', idx: i, field: 'yetkili-f-tc' };
+            if (!/^[A-Za-z0-9]{5,20}$/.test(tcRawY)) {
+                return { ok: false, mesaj: n + '. Yetkili: Pasaport No 5-20 karakter, yalnızca harf ve rakam olmalıdır.', idx: i, field: 'yetkili-f-tc' };
+            }
+        } else if (!tcDigits) {
+            return { ok: false, mesaj: n + '. Yetkili: T.C. Kimlik No zorunludur.', idx: i, field: 'yetkili-f-tc' };
+        } else if (!/^\d{11}$/.test(tcDigits)) {
+            return { ok: false, mesaj: n + '. Yetkili: TC Kimlik No 11 hane olmalıdır.', idx: i, field: 'yetkili-f-tc' };
         }
     }
     return { ok: true, list: list };

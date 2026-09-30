@@ -136,17 +136,20 @@ def _vergi_no_normalize_veya_hata_kyc(tax_raw, yetkili_tc_raw, uyruk_yabanci=Fal
 
 
 def _yetkili_tc_normalize_veya_hata(tc_raw, *, uyruk_yabanci=False, idx=None):
-    """Yetkili T.C. — Ad+TC zorunlu kuralının TC kısmı (FE: 11 hane / yabancı 12)."""
+    """Yetkili kimlik: TC ise 11 rakam; yabancı ise pasaport (5-20 harf/rakam)."""
     label = ("Yetkili #%s" % idx) if idx is not None else "Yetkili"
+    if uyruk_yabanci:
+        raw = str(tc_raw or "").strip()
+        if not raw:
+            return "%s: TC Kimlik No / Pasaport No zorunludur." % label, None
+        if not re.fullmatch(r"[A-Za-z0-9]{5,20}", raw):
+            return (
+                "%s: Pasaport No 5-20 karakter, yalnızca harf ve rakam olmalıdır." % label
+            ), None
+        return None, raw
     digits = "".join(c for c in str(tc_raw or "") if c.isdigit())
     if not digits:
         return "%s: T.C. Kimlik No zorunludur." % label, None
-    if uyruk_yabanci:
-        if len(digits) not in (11, 12):
-            return (
-                "%s: TC Kimlik No 11 hane (veya yabancı için 12 hane) olmalıdır." % label
-            ), None
-        return None, digits
     if len(digits) != 11:
         return "%s: TC Kimlik No 11 hane olmalıdır." % label, None
     return None, digits
