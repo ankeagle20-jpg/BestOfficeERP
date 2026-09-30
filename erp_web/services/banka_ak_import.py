@@ -9,7 +9,8 @@ Ortam:
   AKBANK_ONIZLEME_MAX_WORKERS=8   → en fazla 8 işçi (ör. Render’da sınırla)
   AKBANK_ONIZLEME_MIN_ROWS=32     → bundan az satırda havuz açılmaz (overhead)
 
-Windows: AKBANK_ONIZLEME_PROCESSES ayarlı değilse önizleme tek süreç (ProcessPool Flask altında sık kilitlenir).
+Windows ve gunicorn/Render: AKBANK_ONIZLEME_PROCESSES sayı verilmediyse önizleme tek süreç.
+ProcessPool bu süreçlerde kilitlenir veya bellek yüzünden işçiyi düşürür; istemci JSON yerine HTML alır.
 
 Önbellek: norm_text_fold, norm_loose, akbank_sender_key, _digits_only_str, _digit_haystack
   için LRU (tekrarlayan ünvan/açıklama/rakam dizilerinde O(1) yakın maliyet).
@@ -733,13 +734,22 @@ def _onizleme_mp_worker_chunk(
     ]
 
 
+def _onizleme_web_process() -> bool:
+    """Flask/gunicorn isteği. Render Linux'ta cpu_count>1 olsa da havuz açılmaz."""
+    if sys.platform == "win32":
+        return True
+    if os.environ.get("RENDER") or os.environ.get("WEB_CONCURRENCY"):
+        return True
+    return "gunicorn" in sys.modules
+
+
 def _onizleme_worker_count(n_rows: int) -> int:
-    """İşçi sayısı: varsayılan tüm CPU; AKBANK_ONIZLEME_PROCESSES=1 → 1 (paralel kapalı)."""
+    """İşçi sayısı: varsayılan tüm CPU; web sürecinde ve PROCESSES=1 iken tek süreç."""
     raw = os.environ.get("AKBANK_ONIZLEME_PROCESSES", "").strip().lower()
     if raw == "1" or raw == "off" or raw == "false":
         return 1
-    # Windows + Flask/Werkzeug: ProcessPool önizlemede sık sonsuz beklemeye düşer; açıkça çoklu istenmediyse tek süreç.
-    if sys.platform == "win32":
+    # Windows + gunicorn: ProcessPool kilitlenir veya işçiyi düşürür; sayı verilmediyse tek süreç.
+    if _onizleme_web_process():
         if not raw or raw in ("0", "auto"):
             return 1
         if raw.isdigit():
@@ -834,25 +844,39 @@ def onizleme_satirlari(
             for r in ham_satirlar
         ]
     else:
-        chunk_sz = max(1, (n + workers - 1) // workers)
-        chunks: list[list[dict[str, Any]]] = [
-            ham_satirlar[i : i + chunk_sz] for i in range(0, n, chunk_sz)
-        ]
-        import multiprocessing
+        try:
+            chunk_sz = max(1, (n + workers - 1) // workers)
+            chunks: list[list[dict[str, Any]]] = [
+                ham_satirlar[i : i + chunk_sz] for i in range(0, n, chunk_sz)
+            ]
+            import multiprocessing
 
-        ctx = multiprocessing.get_context("spawn")
-        with ctx.Pool(
-            processes=min(workers, len(chunks)),
-            initializer=_onizleme_mp_init,
-            initargs=(musteriler, manual_by_key),
-        ) as pool:
-            parts: list[list[dict[str, Any]]] = pool.starmap(
-                _onizleme_mp_worker_chunk,
-                [(ch, mevcut_refler) for ch in chunks],
-            )
-        out = []
-        for p in parts:
-            out.extend(p)
+            ctx = multiprocessing.get_context("spawn")
+            with ctx.Pool(
+                processes=min(workers, len(chunks)),
+                initializer=_onizleme_mp_init,
+                initargs=(musteriler, manual_by_key),
+            ) as pool:
+                parts: list[list[dict[str, Any]]] = pool.starmap(
+                    _onizleme_mp_worker_chunk,
+                    [(ch, mevcut_refler) for ch in chunks],
+                )
+            out = []
+            for p in parts:
+                out.extend(p)
+        except Exception as e:
+            _log_ak.warning("AKBANK onizleme havuzu kapandi, tek surec: %s", type(e).__name__)
+            must_by_id = {}
+            for c in musteriler:
+                try:
+                    must_by_id[int(c.get("id"))] = c
+                except (TypeError, ValueError):
+                    continue
+            indeks = build_akbank_musteri_indeks(musteriler)
+            out = [
+                _onizleme_satir_tek(r, must_by_id, indeks, musteriler, mevcut_refler, manual_by_key)
+                for r in ham_satirlar
+            ]
 
     try:
         from services.embedding_akbank_prototype import (
