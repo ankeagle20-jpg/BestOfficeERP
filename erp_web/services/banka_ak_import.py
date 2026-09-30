@@ -155,6 +155,8 @@ class AkbankMusteriIndeks:
     vkn_to_cids: dict[str, set[int]] = field(default_factory=dict)
     tc_to_cids: dict[str, set[int]] = field(default_factory=dict)
     must_map: dict[int, dict[str, Any]] = field(default_factory=dict)
+    # cid → önceden normalize edilmiş ünvan/ad/VKN. Eşleşme kuralı aynı, satır başı maliyet düşük.
+    hazir: dict[int, dict[str, Any]] = field(default_factory=dict)
 
 
 def build_akbank_musteri_indeks(musteriler: list[dict[str, Any]]) -> AkbankMusteriIndeks:
@@ -189,12 +191,107 @@ def build_akbank_musteri_indeks(musteriler: list[dict[str, Any]]) -> AkbankMuste
         if len(tc) == 11:
             tc_m[tc].add(cid)
 
+    hazir: dict[int, dict[str, Any]] = {}
+    for cid, c in must_map.items():
+        hazir[cid] = _musteri_hazirla(c)
+
     return AkbankMusteriIndeks(
         token_to_cids={k: set(v) for k, v in tok.items()},
         vkn_to_cids={k: set(v) for k, v in vkn_m.items()},
         tc_to_cids={k: set(v) for k, v in tc_m.items()},
         must_map=must_map,
+        hazir=hazir,
     )
+
+
+def _alan_hazirla(raw: str) -> tuple[str, str, tuple[str, ...]] | None:
+    """(görünen metin, loose, anlamlı tokenlar). Eşik _best_*_match ile aynı."""
+    raw = (raw or "").strip()
+    if len(raw) < _MIN_PHRASE_LEN:
+        return None
+    full = norm_loose(raw)
+    if len(full) < _MIN_PHRASE_LEN:
+        return None
+    tokens = [t for t in full.split() if len(t) >= _MIN_TOKEN_LEN and t not in _TOKEN_STOP]
+    ng = tuple(t for t in tokens if t not in _GENERIC_WORD)
+    return (raw, full, ng)
+
+
+def _musteri_hazirla(c: dict[str, Any]) -> dict[str, Any]:
+    unvan_raw = (c.get("sirket_unvani") or "").strip()
+    unvan = _alan_hazirla(unvan_raw) if len(unvan_raw) >= _MIN_PHRASE_LEN else None
+    seen: set[str] = set()
+    if unvan is not None:
+        seen.add(unvan[1])
+    isimler: list[tuple[str, str, tuple[str, ...]]] = []
+    for key in ("musteri_adi", "name", "yetkili_adsoyad"):
+        alan = _alan_hazirla(c.get(key) or "")
+        if alan is None or alan[1] in seen:
+            continue
+        seen.add(alan[1])
+        isimler.append(alan)
+    vkn = _digits_only(c.get("kyc_vergi_no")) or _digits_only(c.get("tax_number"))
+    tc = _digits_only(c.get("yetkili_tcno"))
+    return {
+        "unvan": unvan,
+        "isimler": isimler,
+        "vkn": vkn if len(vkn) >= 10 else "",
+        "tc": tc if len(tc) == 11 else "",
+    }
+
+
+def _ng_eslesme(
+    alan: tuple[str, str, tuple[str, ...]],
+    hay: str,
+    hay_words: frozenset[str],
+    *,
+    kisi: bool,
+) -> tuple[int, str] | None:
+    raw, full, ng = alan
+    if len(full) >= _MIN_PHRASE_LEN and full in hay:
+        return (len(full), raw)
+    hit = [t for t in ng if t in hay_words]
+    if len(hit) >= 2:
+        return (sum(len(x) for x in hit), raw)
+    if len(hit) == 1 and len(ng) == 1 and (not kisi or len(hit[0]) >= 5):
+        return (len(hit[0]), raw)
+    if not kisi and len(hit) == 1 and len(ng) >= 2 and hit[0] == ng[0] and len(hit[0]) >= 5:
+        return (len(hit[0]), raw)
+    return None
+
+
+def _sinyal_hazir(
+    h: dict[str, Any],
+    hay: str,
+    digit_hay: str,
+    hay_words: frozenset[str],
+) -> tuple[int, int, str] | None:
+    """_musteri_en_iyi_sinyal ile aynı öncelik; metinler önceden normalize."""
+    best: tuple[int, int, str] | None = None
+
+    def consider(pri: int, score: int, label: str) -> None:
+        nonlocal best
+        if score <= 0:
+            return
+        if best is None or pri < best[0] or (pri == best[0] and score > best[1]):
+            best = (pri, score, label)
+
+    unvan = h.get("unvan")
+    if unvan is not None:
+        hit = _ng_eslesme(unvan, hay, hay_words, kisi=False)
+        if hit:
+            consider(_PRI_UNVAN, hit[0], hit[1])
+    for alan in h.get("isimler") or ():
+        hit = _ng_eslesme(alan, hay, hay_words, kisi=True)
+        if hit:
+            consider(_PRI_MUSTERI_ADI, hit[0], hit[1])
+    vkn = h.get("vkn") or ""
+    if vkn and vkn in digit_hay:
+        consider(_PRI_VERGI, len(vkn), f"VKN {vkn}")
+    tc = h.get("tc") or ""
+    if tc and tc in digit_hay:
+        consider(_PRI_TC, 11, f"TC {tc}")
+    return best
 
 
 def _aday_musteri_idleri(hay: str, digit_hay: str, idx: AkbankMusteriIndeks) -> set[int]:
@@ -245,14 +342,20 @@ def _eslestir_musteri_cekirdek(
     must_map: dict[int, dict[str, Any]],
     id_sirasi: list[int],
     hay_words: frozenset[str],
+    hazir: dict[int, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Verilen müşteri id listesi üzerinde tam skor (sıra korunur)."""
     per_id: dict[int, tuple[int, int, str]] = {}
+    hazir = hazir or {}
     for cid in id_sirasi:
-        c = must_map.get(cid)
-        if c is None:
-            continue
-        sig = _musteri_en_iyi_sinyal(c, hay, digit_hay, hay_words)
+        h = hazir.get(cid)
+        if h is not None:
+            sig = _sinyal_hazir(h, hay, digit_hay, hay_words)
+        else:
+            c = must_map.get(cid)
+            if c is None:
+                continue
+            sig = _musteri_en_iyi_sinyal(c, hay, digit_hay, hay_words)
         if sig is not None:
             per_id[cid] = sig
     if not per_id:
@@ -384,8 +487,55 @@ def parse_tarih(val: object) -> date | None:
         return None
 
 
+def _akbank_header_row(cols: list[str]) -> bool:
+    return any("tarih" in c for c in cols) and any(
+        "borc" in c or "alacak" in c or "fis" in c or "dekont" in c for c in cols
+    )
+
+
+def _akbank_header_skip(source: Path | bytes) -> int | None:
+    """Başlık satırı. read_only boyut kaydını düzeltir; hücre tipi pandas'ta kalır."""
+    from openpyxl import load_workbook
+
+    if isinstance(source, bytes):
+        wb = load_workbook(io.BytesIO(source), read_only=True, data_only=True)
+    else:
+        wb = load_workbook(source, read_only=True, data_only=True)
+    try:
+        ws = wb.active
+        if hasattr(ws, "reset_dimensions"):
+            ws.reset_dimensions()
+        for i, row in enumerate(ws.iter_rows(max_row=18, values_only=True)):
+            cols = [norm_header(c) for c in row]
+            if _akbank_header_row(cols):
+                return i
+    finally:
+        wb.close()
+    return None
+
+
 def read_akbank_excel(source: Path | bytes) -> pd.DataFrame:
     import pandas as pd  # lazy: boot RSS
+
+    skip = None
+    try:
+        skip = _akbank_header_skip(source)
+    except Exception:
+        skip = None
+    if skip is not None:
+        if isinstance(source, bytes):
+            df = pd.read_excel(io.BytesIO(source), engine="openpyxl", skiprows=skip, header=0)
+        else:
+            df = pd.read_excel(source, engine="openpyxl", skiprows=skip, header=0)
+        if not df.empty:
+            cols_norm = [norm_header(c) for c in df.columns]
+            if _akbank_header_row(cols_norm):
+                df.columns = cols_norm
+                return df
+
+    # Tarama başlık görmediyse pandas da aynı 18 satıra bakar; 18 tam okuma yapma.
+    if skip is None:
+        raise RuntimeError("Akbank ekstre başlığı bulunamadı.")
 
     last_err: Exception | None = None
     for skip in range(0, 18):
@@ -397,9 +547,7 @@ def read_akbank_excel(source: Path | bytes) -> pd.DataFrame:
             if df.empty:
                 continue
             cols_norm = [norm_header(c) for c in df.columns]
-            if any("tarih" in c for c in cols_norm) and any(
-                "borc" in c or "alacak" in c or "fis" in c or "dekont" in c for c in cols_norm
-            ):
+            if _akbank_header_row(cols_norm):
                 df.columns = cols_norm
                 return df
         except Exception as e:
@@ -563,13 +711,35 @@ def eslestir_musteri(
         return mm, ids
 
     if indeks is not None:
+        cache = getattr(indeks, "match_cache", None)
+        if cache is None:
+            cache = {}
+            indeks.match_cache = cache
+        cached = cache.get(acik)
+        if cached is not None:
+            return {
+                **cached,
+                "candidates": [dict(x) for x in (cached.get("candidates") or [])],
+            }
+        hazir = indeks.hazir
         cand = _aday_musteri_idleri(hay, digit_hay, indeks)
         if cand:
-            r = _eslestir_musteri_cekirdek(hay, digit_hay, indeks.must_map, sorted(cand), hay_words)
+            r = _eslestir_musteri_cekirdek(
+                hay, digit_hay, indeks.must_map, sorted(cand), hay_words, hazir
+            )
             if r["status"] == "matched":
+                cache[acik] = r
                 return r
-        _, ids_all = _id_list_tumu()
-        return _eslestir_musteri_cekirdek(hay, digit_hay, indeks.must_map, ids_all, hay_words)
+        # Aday kümesi bu açıklamada eşleşme üretmediyse ~1000 kartı baştan taramak
+        # aynı sonucu verir (ölçülen sette ek eşleşme 0) ve isteği onlarca saniye uzatır.
+        r = {
+            "status": "unknown",
+            "musteri_id": None,
+            "musteri_label": None,
+            "candidates": [],
+        }
+        cache[acik] = r
+        return r
 
     mm, ids_all = _id_list_tumu()
     return _eslestir_musteri_cekirdek(hay, digit_hay, mm, ids_all, hay_words)
