@@ -140,6 +140,9 @@
       <label for="website">Website</label>
       <input id="website" name="website" type="text" tabindex="-1" autocomplete="off">
     </div>
+    {% with google_href='/auth/google?intent=signup', google_btn_id='google-continue' %}
+    {% include "partials/google_continue_button.html" %}
+    {% endwith %}
     <button type="submit" class="btn-primary" id="btn-submit">Kaydı tamamla</button>
   </form>
 </div>
@@ -589,6 +592,25 @@
   });
 
   applyUrlModuleTier();
+  (function bindGoogleContinue() {
+    var a = document.getElementById("google-continue");
+    if (!a) return;
+    a.addEventListener("click", function () {
+      var page = new URLSearchParams(window.location.search || "");
+      var intent = String(page.get("intent") || "").trim().toLowerCase() === "purchase" ? "purchase" : "signup";
+      var q = new URLSearchParams();
+      q.set("intent", intent);
+      ["module", "tier", "mode"].forEach(function (key) {
+        var v = String(page.get(key) || "").trim();
+        if (v) q.set(key, v);
+      });
+      var company = document.getElementById("company_name");
+      var slugEl = document.getElementById("slug");
+      if (company && company.value.trim()) q.set("company_name", company.value.trim());
+      if (slugEl && slugEl.value.trim()) q.set("slug", slugEl.value.trim());
+      a.href = "/auth/google?" + q.toString();
+    });
+  })();
   applySignupModeUI();
   loadPricing();
   updateSlugPreview("");

@@ -232,6 +232,9 @@
       </div>
       <div id="login-error" class="field-error" role="alert"></div>
       <button type="submit" class="btn-primary" id="btn-login-lookup">Devam et</button>
+      {% with google_href='/auth/google?intent=login', google_btn_id='google-continue-login' %}
+      {% include "partials/google_continue_button.html" %}
+      {% endwith %}
     </form>
   </section>
 

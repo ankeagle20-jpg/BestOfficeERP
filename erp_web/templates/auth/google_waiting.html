@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hesabınız hazırlanıyor — Payafin</title>
+  <style>
+    body { font-family: Segoe UI, sans-serif; background: #f8fafc; color: #0f172a; margin: 0; }
+    main { max-width: 420px; margin: 12vh auto; padding: 24px; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; }
+    p { color: #475569; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1 style="font-size:1.15rem;margin:0 0 12px;">Hesabınız hazırlanıyor</h1>
+    <p id="google-wait-msg">Kurulum bir dakika sürebilir. Bu sayfayı kapatmayın.</p>
+  </main>
+  <script>
+    (function () {
+      var slug = {{ slug|tojson }};
+      var ticket = {{ ticket|tojson }};
+      var msg = document.getElementById("google-wait-msg");
+      function poll() {
+        fetch("/api/signup/status?slug=" + encodeURIComponent(slug), { credentials: "same-origin" })
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            if (data && data.status === "active") {
+              window.location.href = "/auth/google/enter?ticket=" + encodeURIComponent(ticket);
+              return;
+            }
+            if (data && data.status === "failed") {
+              msg.textContent = data.error_message || "Hesap oluşturulamadı. Kayıt formundan tekrar deneyin.";
+              return;
+            }
+            setTimeout(poll, 2000);
+          })
+          .catch(function () { setTimeout(poll, 3000); });
+      }
+      poll();
+    })();
+  </script>
+</body>
+</html>

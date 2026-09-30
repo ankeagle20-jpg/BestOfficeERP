@@ -112,6 +112,9 @@
       <a class="forgot-link" href="{{ url_for('forgot_password.forgot_password') }}">Şifremi unuttum</a>
 
       <button type="submit">🔐 Giriş Yap</button>
+      {% with google_href='https://payafin.com/auth/google?intent=login', google_btn_id='google-continue-login' %}
+      {% include "partials/google_continue_button.html" %}
+      {% endwith %}
     </form>
 
     <div class="footer-text">

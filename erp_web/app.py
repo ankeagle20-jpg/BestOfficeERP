@@ -180,6 +180,7 @@ from routes.ledger_routes import bp as ledger_bp
 from routes.public_pricing_routes import bp as public_pricing_bp
 from routes.legal_routes import bp as legal_bp
 from routes.signup_routes import bp as signup_bp
+from routes.google_auth_routes import bp as google_auth_bp
 from routes.login_lookup_routes import bp as login_lookup_bp
 from routes.forgot_password_routes import bp as forgot_password_bp
 from routes.email_verification_routes import bp as email_verification_bp
@@ -226,6 +227,7 @@ app.register_blueprint(ledger_bp, url_prefix="/ledger")
 app.register_blueprint(public_pricing_bp)
 app.register_blueprint(legal_bp)
 app.register_blueprint(signup_bp)
+app.register_blueprint(google_auth_bp)
 app.register_blueprint(login_lookup_bp)
 app.register_blueprint(forgot_password_bp)
 app.register_blueprint(email_verification_bp)
