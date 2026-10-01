@@ -1476,6 +1476,8 @@ td.ak-td-sira {
     });
 
     document.getElementById("btnAnalyzeSaved").addEventListener("click", async () => {
+        const btn = document.getElementById("btnAnalyzeSaved");
+        if (btn && btn.disabled) return;
         const ids = Array.prototype.map.call(document.querySelectorAll(".ak-saved-cb:checked"), function (c) {
             return parseInt(c.value, 10);
         }).filter(function (id) { return Number.isFinite(id); });
@@ -1483,6 +1485,7 @@ td.ak-td-sira {
             showMsg("Aşağıdan en az bir kayıtlı dosya işaretleyin.", false);
             return;
         }
+        if (btn) btn.disabled = true;
         showMsg("", true);
         document.getElementById("akOzet").textContent = "Kayıtlı dosyalar yükleniyor…";
         lastAnalyzeMode = "saved";
@@ -1532,6 +1535,7 @@ td.ak-td-sira {
             document.getElementById("akOzet").textContent = "";
         } finally {
             clearTimeout(tid);
+            if (btn) btn.disabled = false;
         }
     });
 
