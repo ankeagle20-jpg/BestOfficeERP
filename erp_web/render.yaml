@@ -17,6 +17,8 @@ services:
     buildCommand: pip install -r requirements-render.txt
     startCommand: gunicorn -w 1 --threads 2 --worker-class gthread -b 0.0.0.0:$PORT --timeout 120 --graceful-timeout 30 app:app
     envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"
       - key: SECRET_KEY
         generateValue: true
       - key: TENANT_APEX_DOMAINS
@@ -45,6 +47,8 @@ services:
     buildCommand: pip install -r requirements-render.txt
     startCommand: gunicorn -w 1 --threads 2 --worker-class gthread -b 0.0.0.0:$PORT --timeout 120 --graceful-timeout 30 app:app
     envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"
       - key: SECRET_KEY
         sync: false
       - key: TENANT_APEX_DOMAINS

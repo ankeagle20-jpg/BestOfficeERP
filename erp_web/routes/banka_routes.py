@@ -1131,6 +1131,8 @@ def api_akbank_tahsilat_dosyalar_sil():
 @giris_gerekli
 def api_akbank_tahsilat_analyze_kayitli():
     """Bir veya birden fazla kayıtlı dosyayı aç; içerik birleştirilir (aynı fiş no tekil)."""
+    # logging.warning Render akışına düşmüyor; gunicorn stdout'u print ile görüyor.
+    print("akbank analyze girdi", flush=True)
     import time
     from services.banka_ak_import import (  # lazy: boot RSS; pandas yok
         kayit_hareket_satirlari,
@@ -1203,13 +1205,10 @@ def api_akbank_tahsilat_analyze_kayitli():
             "dosya": len(clean_ids),
             "satir": len(ham_birlesik),
         }
-    logging.getLogger(__name__).warning(
-        "akbank analyze dosya=%s satir=%s oku_ms=%s eslesme_ms=%s toplam_ms=%s",
-        len(clean_ids),
-        len(ham_birlesik),
-        oku_ms,
-        es_ms,
-        toplam_ms,
+    print(
+        "akbank analyze dosya=%s satir=%s oku_ms=%s eslesme_ms=%s toplam_ms=%s"
+        % (len(clean_ids), len(ham_birlesik), oku_ms, es_ms, toplam_ms),
+        flush=True,
     )
     return jsonify(out)
 
