@@ -16,6 +16,7 @@ except ImportError:
 
     def customers_arama_params_giris_genis(q: str):
         return customers_arama_params_4(q)
+import logging
 from datetime import datetime, date
 
 bp = Blueprint("banka", __name__)
@@ -928,10 +929,9 @@ def _iso_or_str(v):
 @giris_gerekli
 def api_akbank_tahsilat_analyze():
     """Yeni Excel yükle: dosyayı ERP'ye kaydet + önizleme (cariye işlenmiş fişler listede kalır, tahsilatta bayrağı ile)."""
-    from services.bank_processor import standard_transactions_to_tahsilat_ham, upload_bank_excel
     from services.banka_ak_import import (  # lazy: boot RSS
-        dataframe_hareket_satirlari,
-        read_akbank_excel,
+        kayit_hareket_satirlari,
+        read_akbank_kayitlar,
     )
 
     f = request.files.get("file")
@@ -951,11 +951,12 @@ def api_akbank_tahsilat_analyze():
         return jsonify({"ok": False, "mesaj": "Dosya çok büyük (en fazla 20 MB)."}), 400
     try:
         if bank_type == "TURKIYE_FINANS":
+            from services.bank_processor import standard_transactions_to_tahsilat_ham, upload_bank_excel
             txs = upload_bank_excel(raw, bank_type)
             ham, ozet = standard_transactions_to_tahsilat_ham(txs, yon=yon)
         else:
-            df = read_akbank_excel(raw)
-            ham, ozet = dataframe_hareket_satirlari(df, yon=yon)
+            kayitlar = read_akbank_kayitlar(raw)
+            ham, ozet = kayit_hareket_satirlari(kayitlar, yon=yon)
     except ValueError as e:
         return jsonify({"ok": False, "mesaj": str(e)}), 400
     except Exception as e:
@@ -1130,11 +1131,13 @@ def api_akbank_tahsilat_dosyalar_sil():
 @giris_gerekli
 def api_akbank_tahsilat_analyze_kayitli():
     """Bir veya birden fazla kayıtlı dosyayı aç; içerik birleştirilir (aynı fiş no tekil)."""
-    from services.bank_processor import standard_transactions_to_tahsilat_ham, upload_bank_excel
-    from services.banka_ak_import import (  # lazy: boot RSS
-        dataframe_hareket_satirlari,
-        read_akbank_excel,
+    import time
+    from services.banka_ak_import import (  # lazy: boot RSS; pandas yok
+        kayit_hareket_satirlari,
+        read_akbank_kayitlar,
     )
+
+    t0 = time.perf_counter()
 
     data = request.get_json(silent=True) or {}
     bank_type = _normalize_tahsilat_bank_type(data.get("bank_type") or request.args.get("bank_type"))
@@ -1164,17 +1167,19 @@ def api_akbank_tahsilat_analyze_kayitli():
     hams: list = []
     ozet_top = {"excel_satir": 0, "a_degil": 0, "ref_bos": 0, "tutar_sifir": 0, "tarih_yok": 0, "islenen": 0, "yon": yon}
     meta_list: list[dict] = []
+    t_oku = time.perf_counter()
     for fid in clean_ids:
         row = found[fid]
         raw = _bytea_to_bytes(row.get("excel_binary"))
         eff = _effective_tahsilat_bank_type(bank_type, row.get("orijinal_filename"))
         try:
             if eff == "TURKIYE_FINANS":
+                from services.bank_processor import standard_transactions_to_tahsilat_ham, upload_bank_excel
                 txs = upload_bank_excel(raw, eff)
                 ham, ozet = standard_transactions_to_tahsilat_ham(txs, yon=yon)
             else:
-                df = read_akbank_excel(raw)
-                ham, ozet = dataframe_hareket_satirlari(df, yon=yon)
+                kayitlar = read_akbank_kayitlar(raw)
+                ham, ozet = kayit_hareket_satirlari(kayitlar, yon=yon)
         except Exception as e:
             return jsonify({"ok": False, "mesaj": f"Dosya okunamadı ({row.get('ad_gosterim')}): {e}"}), 400
         hams.append(ham)
@@ -1184,8 +1189,28 @@ def api_akbank_tahsilat_analyze_kayitli():
             ozet_top[k] = ozet_top.get(k, 0) + int(ozet.get(k, 0) or 0)
         meta_list.append({"id": row["id"], "ad_gosterim": row["ad_gosterim"]})
 
+    oku_ms = int((time.perf_counter() - t_oku) * 1000)
     ham_birlesik = _ham_birlestir_dedupe(hams)
+    t_es = time.perf_counter()
     out = _json_akbank_analyze_ham(ham_birlesik, ozet_top, {"kayitli_dosyalar": meta_list})
+    es_ms = int((time.perf_counter() - t_es) * 1000)
+    toplam_ms = int((time.perf_counter() - t0) * 1000)
+    if isinstance(out.get("ozet"), dict):
+        out["ozet"]["sure_ms"] = {
+            "oku": oku_ms,
+            "eslesme": es_ms,
+            "toplam": toplam_ms,
+            "dosya": len(clean_ids),
+            "satir": len(ham_birlesik),
+        }
+    logging.getLogger(__name__).warning(
+        "akbank analyze dosya=%s satir=%s oku_ms=%s eslesme_ms=%s toplam_ms=%s",
+        len(clean_ids),
+        len(ham_birlesik),
+        oku_ms,
+        es_ms,
+        toplam_ms,
+    )
     return jsonify(out)
 
 
