@@ -62,6 +62,7 @@
   .pr-row-msg { font-size:.72rem; margin-left:6px; }
   .pr-row-msg.ok { color:#a5d6a7; }
   .pr-row-msg.err { color:#ef9a9a; }
+  .pr-badge { margin-left:6px; font-size:.68rem; color:#ffb74d; }
 </style>
 
 <div class="mod-nav">
@@ -128,6 +129,84 @@
           <tr><td colspan="10" style="color:#78909c;">Yükleniyor...</td></tr>
         </tbody>
       </table>
+    </div>
+  </div>
+
+  <div id="pr-module-sections">
+    <div class="pr-section">
+      <h3>Personel Modülü — Kademeler</h3>
+      <div class="pr-meta">Taban, personel başı, max personel ve ek şube. Ülke üstteki listeden gelir.</div>
+      <div style="overflow-x:auto;">
+        <table class="pr-table">
+          <thead>
+            <tr>
+              <th>tier_key</th>
+              <th>Ad</th>
+              <th>Taban (aylık)</th>
+              <th>Personel başı</th>
+              <th>Max personel</th>
+              <th>Ek şube ücreti</th>
+              <th>Yıllık indirim (ay)</th>
+              <th>Aktif</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="pr-mod-personnel-body" data-module="personnel" data-kind="personnel">
+            <tr><td colspan="9" style="color:#78909c;">Yükleniyor...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="pr-section">
+      <h3>Randevu Modülü — Kademeler</h3>
+      <div class="pr-meta">Taban, dahil randevu, dahil personel, ek personel ücreti ve personel max.</div>
+      <div style="overflow-x:auto;">
+        <table class="pr-table">
+          <thead>
+            <tr>
+              <th>tier_key</th>
+              <th>Ad</th>
+              <th>Taban (aylık)</th>
+              <th>Dahil randevu</th>
+              <th>Dahil personel</th>
+              <th>Ek personel ücreti</th>
+              <th>Personel max</th>
+              <th>Yıllık indirim (ay)</th>
+              <th>Aktif</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="pr-mod-randevu-body" data-module="randevu" data-kind="randevu">
+            <tr><td colspan="10" style="color:#78909c;">Yükleniyor...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="pr-section">
+      <h3>Payafin Cari Modülü — Kademeler</h3>
+      <div class="pr-meta">Taban, cari kart başı, max cari kart ve ek şube. Ülke üstteki listeden gelir.</div>
+      <div style="overflow-x:auto;">
+        <table class="pr-table">
+          <thead>
+            <tr>
+              <th>tier_key</th>
+              <th>Ad</th>
+              <th>Taban (aylık)</th>
+              <th>Cari kart başı</th>
+              <th>Max cari kart</th>
+              <th>Ek şube ücreti</th>
+              <th>Yıllık indirim (ay)</th>
+              <th>Aktif</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="pr-mod-ledger-body" data-module="ledger" data-kind="ledger">
+            <tr><td colspan="9" style="color:#78909c;">Yükleniyor...</td></tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   </div>
 
@@ -430,10 +509,118 @@
       });
   }
 
+  function parseNullableInt(raw) {
+    var s = String(raw == null ? '' : raw).trim();
+    if (s === '') return null;
+    return parseInt(s, 10);
+  }
+
+  function moduleRowHtml(t, kind) {
+    var maxVal = t.max_personnel == null ? '' : t.max_personnel;
+    var contact = t.is_contact_sales ? '1' : '0';
+    var maxDisabled = t.is_contact_sales ? ' disabled' : '';
+    var badge = t.is_contact_sales ? '<span class="pr-badge">contact</span>' : '';
+    var head = '<tr data-tier-id="' + t.id + '" data-module="' + escHtml(t.module_key) + '" data-kind="' + kind + '" data-tier-key="' + escHtml(t.tier_key) + '" data-contact="' + contact + '" data-extra-branch="' + t.price_per_extra_branch + '">' +
+      '<td><code>' + escHtml(t.tier_key) + '</code>' + badge + '</td>' +
+      '<td><input type="text" class="prm-name" value="' + escHtml(t.display_name) + '"></td>' +
+      '<td><input type="number" class="prm-base" min="0" step="0.01" value="' + t.base_monthly + '"></td>';
+    var tail = '<td><input type="number" class="prm-annual" min="0" max="11" value="' + t.annual_discount_months + '"></td>' +
+      '<td><input type="checkbox" class="prm-active" ' + (t.is_active ? 'checked' : '') + '></td>' +
+      '<td><button type="button" class="btn-erp btn-erp-sm prm-save">Kaydet</button><span class="pr-row-msg"></span></td>' +
+      '</tr>';
+    if (kind === 'randevu') {
+      var incAppt = t.included_monthly_appointments == null ? '' : t.included_monthly_appointments;
+      var incPers = t.included_personnel == null ? '' : t.included_personnel;
+      return head +
+        '<td><input type="number" class="prm-inc-appt" min="0" value="' + incAppt + '" placeholder="—"></td>' +
+        '<td><input type="number" class="prm-inc-pers" min="0" value="' + incPers + '" placeholder="—"></td>' +
+        '<td><input type="number" class="prm-per" min="0" step="0.0001" value="' + t.price_per_personnel + '"></td>' +
+        '<td><input type="number" class="prm-max" min="1" value="' + maxVal + '" placeholder="∞"' + maxDisabled + '></td>' +
+        tail;
+    }
+    return head +
+      '<td><input type="number" class="prm-per" min="0" step="0.0001" value="' + t.price_per_personnel + '"></td>' +
+      '<td><input type="number" class="prm-max" min="1" value="' + maxVal + '" placeholder="∞"' + maxDisabled + '></td>' +
+      '<td><input type="number" class="prm-extra-branch" min="0" step="0.01" value="' + t.price_per_extra_branch + '"></td>' +
+      tail;
+  }
+
+  function loadOneModule(spec) {
+    var cc = currentCountry();
+    var bodyEl = document.getElementById(spec.bodyId);
+    var q = '?module=' + encodeURIComponent(spec.key) + '&country=' + encodeURIComponent(cc);
+    return api('/admin/api/module-pricing/tiers' + q).then(function (res) {
+      if (!res.json.ok) throw new Error(res.json.mesaj || 'Modül kademeleri yüklenemedi');
+      var tiers = res.json.tiers || [];
+      var cols = spec.kind === 'randevu' ? 10 : 9;
+      if (!tiers.length) {
+        bodyEl.innerHTML = '<tr><td colspan="' + cols + '" style="color:#78909c;">Bu ülke için satır yok.</td></tr>';
+        return;
+      }
+      bodyEl.innerHTML = tiers.map(function (t) { return moduleRowHtml(t, spec.kind); }).join('');
+    });
+  }
+
+  function loadModuleSections() {
+    var specs = [
+      { key: 'personnel', bodyId: 'pr-mod-personnel-body', kind: 'personnel' },
+      { key: 'randevu', bodyId: 'pr-mod-randevu-body', kind: 'randevu' },
+      { key: 'ledger', bodyId: 'pr-mod-ledger-body', kind: 'ledger' }
+    ];
+    return Promise.all(specs.map(loadOneModule));
+  }
+
+  function readModuleRow(tr) {
+    var kind = tr.getAttribute('data-kind');
+    var isContact = tr.getAttribute('data-contact') === '1';
+    var maxRaw = tr.querySelector('.prm-max').value.trim();
+    var body = {
+      module_key: tr.getAttribute('data-module'),
+      tier_key: tr.getAttribute('data-tier-key'),
+      display_name: tr.querySelector('.prm-name').value.trim(),
+      base_monthly: parseFloat(tr.querySelector('.prm-base').value),
+      price_per_personnel: parseFloat(tr.querySelector('.prm-per').value),
+      max_personnel: isContact ? null : (maxRaw === '' ? null : parseInt(maxRaw, 10)),
+      annual_discount_months: parseInt(tr.querySelector('.prm-annual').value, 10),
+      is_active: tr.querySelector('.prm-active').checked
+    };
+    if (kind === 'randevu') {
+      var extraBranch = parseFloat(tr.getAttribute('data-extra-branch') || '0');
+      body.price_per_extra_branch = isNaN(extraBranch) ? 0 : extraBranch;
+      body.included_monthly_appointments = parseNullableInt(tr.querySelector('.prm-inc-appt').value);
+      body.included_personnel = parseNullableInt(tr.querySelector('.prm-inc-pers').value);
+    } else {
+      body.price_per_extra_branch = parseFloat(tr.querySelector('.prm-extra-branch').value);
+    }
+    return body;
+  }
+
+  function saveModuleTier(tr) {
+    var id = tr.getAttribute('data-tier-id');
+    var msgEl = tr.querySelector('.pr-row-msg');
+    msgEl.textContent = '...';
+    msgEl.className = 'pr-row-msg';
+    api('/admin/api/module-pricing/tiers/' + id, { method: 'PUT', body: JSON.stringify(readModuleRow(tr)) })
+      .then(function (res) {
+        if (!res.json.ok) {
+          msgEl.textContent = res.json.mesaj || ('Hata ' + res.status);
+          msgEl.className = 'pr-row-msg err';
+          return;
+        }
+        msgEl.textContent = 'OK';
+        msgEl.className = 'pr-row-msg ok';
+        showOk('Modül kademesi kaydedildi: ' + (res.json.tier && res.json.tier.module_key) + ' / ' + (res.json.tier && res.json.tier.tier_key));
+      })
+      .catch(function (e) {
+        msgEl.textContent = e.message || 'Hata';
+        msgEl.className = 'pr-row-msg err';
+      });
+  }
+
   function reloadAll() {
     showErr('');
     showOk('');
-    loadTiers().then(loadOverage).then(runPreview).catch(function (e) { showErr(e.message); });
+    loadTiers().then(loadModuleSections).then(loadOverage).then(runPreview).catch(function (e) { showErr(e.message); });
   }
 
   document.getElementById('pr-yenile').addEventListener('click', reloadAll);
@@ -441,6 +628,11 @@
   tiersBody.addEventListener('click', function (ev) {
     if (ev.target.classList.contains('pr-save-tier')) {
       saveTier(ev.target.closest('tr'));
+    }
+  });
+  document.getElementById('pr-module-sections').addEventListener('click', function (ev) {
+    if (ev.target.classList.contains('prm-save')) {
+      saveModuleTier(ev.target.closest('tr'));
     }
   });
   overageBody.addEventListener('click', function (ev) {

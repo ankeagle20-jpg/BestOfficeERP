@@ -192,7 +192,7 @@ def api_module_pricing_tier_update(tier_id: int):
     body = request.get_json(silent=True) or {}
     row = fetch_one(
         """
-        SELECT id, module_key, country_code, currency, tier_key,
+        SELECT id, module_key, country_code, currency, tier_key, display_name,
                is_contact_sales, included_branches, setup_fee, sort_order
         FROM public.module_pricing_tiers
         WHERE id = %s
@@ -205,7 +205,22 @@ def api_module_pricing_tier_update(tier_id: int):
         return jsonify({"ok": False, "mesaj": "bu modül yönetilemez"}), 400
 
     mk = str(row["module_key"])
+    tier_key = str(row["tier_key"])
+    country_code = str(row["country_code"])
+    body_mk = str(body.get("module_key") or "").strip()
+    body_tk = str(body.get("tier_key") or "").strip()
+    if body_mk and body_mk != mk:
+        return jsonify({"ok": False, "mesaj": "module_key bu satırla uyuşmuyor"}), 400
+    if body_tk and body_tk != tier_key:
+        return jsonify({"ok": False, "mesaj": "tier_key bu satırla uyuşmuyor"}), 400
     try:
+        display_name = str(row.get("display_name") or "").strip()
+        if "display_name" in body:
+            display_name = str(body.get("display_name") or "").strip()
+            if not display_name:
+                raise ValueError("display_name boş olamaz")
+            if len(display_name) > 120:
+                raise ValueError("display_name çok uzun")
         base_monthly = _parse_decimal("base_monthly", body.get("base_monthly"))
         price_per_personnel = _parse_decimal(
             "price_per_personnel", body.get("price_per_personnel"), places=4
@@ -250,7 +265,8 @@ def api_module_pricing_tier_update(tier_id: int):
         execute(
             """
             UPDATE public.module_pricing_tiers
-            SET base_monthly = %s,
+            SET display_name = %s,
+                base_monthly = %s,
                 price_per_personnel = %s,
                 max_personnel = %s,
                 price_per_extra_branch = %s,
@@ -259,9 +275,10 @@ def api_module_pricing_tier_update(tier_id: int):
                 included_personnel = %s,
                 is_active = %s,
                 updated_at = NOW()
-            WHERE id = %s
+            WHERE id = %s AND module_key = %s AND tier_key = %s AND country_code = %s
             """,
             (
+                display_name,
                 str(base_monthly),
                 str(price_per_personnel),
                 max_personnel,
@@ -271,23 +288,28 @@ def api_module_pricing_tier_update(tier_id: int):
                 included_personnel,
                 is_active,
                 tier_id,
+                mk,
+                tier_key,
+                country_code,
             ),
         )
     else:
-        # Personel: mevcut kolon seti aynen (included_* dokunulmaz)
+        # Personel / Cari: mevcut kolon seti (included_* dokunulmaz)
         execute(
             """
             UPDATE public.module_pricing_tiers
-            SET base_monthly = %s,
+            SET display_name = %s,
+                base_monthly = %s,
                 price_per_personnel = %s,
                 max_personnel = %s,
                 price_per_extra_branch = %s,
                 annual_discount_months = %s,
                 is_active = %s,
                 updated_at = NOW()
-            WHERE id = %s
+            WHERE id = %s AND module_key = %s AND tier_key = %s AND country_code = %s
             """,
             (
+                display_name,
                 str(base_monthly),
                 str(price_per_personnel),
                 max_personnel,
@@ -295,6 +317,9 @@ def api_module_pricing_tier_update(tier_id: int):
                 annual_discount_months,
                 is_active,
                 tier_id,
+                mk,
+                tier_key,
+                country_code,
             ),
         )
     updated = fetch_one(
