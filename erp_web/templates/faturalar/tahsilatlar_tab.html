@@ -925,7 +925,7 @@
                         {% endif %}
                     </td>
                     <td class="td-aciklama-ay" title="{{ (t.rapor_aciklama_ay or '')|e }}">{{ t.rapor_aciklama_ay or '—' }}</td>
-                    <td>{{ t.fatura_no or '-' }}</td>
+                    <td>{{ t.fatura_no|fatura_no_gorunen }}</td>
                     <td class="td-tutar">{{ (t.tutar|default(0))|round(2) }} TL</td>
                     <td>
                         {% set _od = (t.odeme_turu or 'nakit')|lower %}
@@ -959,7 +959,7 @@
                         {% endif %}
                     </td>
                     <td class="td-aciklama-ay" title="{{ (u.rapor_aciklama_ay or '')|e }}">{{ u.rapor_aciklama_ay or '—' }}</td>
-                    <td>{{ u.fatura_no or '-' }}</td>
+                    <td>{{ u.fatura_no|fatura_no_gorunen }}</td>
                     <td class="td-tutar">{{ (u.tutar|default(0))|round(2) }} TL</td>
                     <td>
                         {% set _od = (u.odeme_turu or 'nakit')|lower %}
@@ -998,7 +998,7 @@
                         {% endif %}
                     </td>
                     <td class="td-aciklama-ay" title="{{ (t.rapor_aciklama_ay or '')|e }}">{{ t.rapor_aciklama_ay or '—' }}</td>
-                    <td>{{ t.fatura_no or '-' }}</td>
+                    <td>{{ t.fatura_no|fatura_no_gorunen }}</td>
                     <td class="td-tutar">{{ (t.tutar|default(0))|round(2) }} TL</td>
                     <td>
                         {% set _od = (t.odeme_turu or 'nakit')|lower %}

@@ -245,7 +245,7 @@
             <div>
                 <div class="form-row">
                     <label>{% if irsaliye_modu %}İrsaliye No{% else %}Fatura No{% endif %}</label>
-                    <input type="text" id="fatura-no" placeholder="Boş bırakırsanız otomatik atanır" value="{{ edit_fatura.fatura_no if edit_fatura else '' }}">
+                    <input type="text" id="fatura-no" readonly placeholder="Taslak" value="{{ edit_fatura.fatura_no|fatura_no_gorunen if edit_fatura else 'Taslak' }}" title="Resmi numara GİB imzasından gelir. Elle GIB numarası yazılmaz.">
                 </div>
                 <div class="form-row">
                     <label>{% if irsaliye_modu %}İrsaliye Tarihi{% else %}Fatura Tarihi{% endif %}</label>
@@ -937,7 +937,7 @@
         const prefillRows = sozlesmePrefill && sozlesmePrefill.rows;
         const faturaDonemTutarlari = sozlesmePrefill && sozlesmePrefill.donemTutarlari;
         if (EDIT_FATURA) {
-            if (EDIT_FATURA.fatura_no) document.getElementById('fatura-no').value = EDIT_FATURA.fatura_no;
+            if (EDIT_FATURA.fatura_no) document.getElementById('fatura-no').value = faturaNoGorunen(EDIT_FATURA.fatura_no);
             if (EDIT_FATURA.fatura_tarihi) document.getElementById('fatura-tarihi').value = EDIT_FATURA.fatura_tarihi;
             if (EDIT_FATURA.fatura_saati) document.getElementById('fatura-saati').value = EDIT_FATURA.fatura_saati;
             if (EDIT_FATURA.fatura_tipi) document.getElementById('fatura-tipi').value = EDIT_FATURA.fatura_tipi;
@@ -1054,7 +1054,7 @@
 
             const payload = {
                 fatura_id: EDIT_FATURA && EDIT_FATURA.id ? EDIT_FATURA.id : null,
-                fatura_no: document.getElementById('fatura-no').value.trim() || null,
+                fatura_no: null,
                 fatura_tarihi: document.getElementById('fatura-tarihi').value,
                 fatura_saati: document.getElementById('fatura-saati').value,
                 fatura_tipi: document.getElementById('fatura-tipi').value,
@@ -1206,7 +1206,7 @@
             const genelToplam = araToplam - toplamIskonto + kdvToplam;
             const payload = {
                 fatura_id: EDIT_FATURA && EDIT_FATURA.id ? EDIT_FATURA.id : null,
-                fatura_no: document.getElementById('fatura-no').value.trim() || null,
+                fatura_no: null,
                 fatura_tarihi: document.getElementById('fatura-tarihi').value,
                 fatura_saati: document.getElementById('fatura-saati').value,
                 fatura_tipi: document.getElementById('fatura-tipi').value,
@@ -1470,7 +1470,7 @@
                     .then(function (r) { return r.json(); })
                     .then(function (j) {
                         if (!j || !j.ok || !j.fatura) return;
-                        belgeEl.value = String(j.fatura.fatura_no || '').trim();
+                        belgeEl.value = faturaNoGorunen(j.fatura.fatura_no);
                     })
                     .catch(function () {});
             }
@@ -1499,8 +1499,8 @@
                         if (!j || !j.ok || !j.fatura) throw new Error((j && j.mesaj) || 'Son fatura alınamadı');
                         idInput.value = String(j.fatura.id || '').trim();
                         var belgeEl = document.getElementById('yeni-gib-belge-no');
-                        if (belgeEl) belgeEl.value = String(j.fatura.fatura_no || '').trim();
-                        setStatus('Son fatura: ERP # ' + (j.fatura.id || '-') + ' — Belge no ' + (j.fatura.fatura_no || '—'));
+                        if (belgeEl) belgeEl.value = faturaNoGorunen(j.fatura.fatura_no);
+                        setStatus('Son fatura: ERP # ' + (j.fatura.id || '-') + ' — Belge no ' + faturaNoGorunen(j.fatura.fatura_no));
                         yeniGibBelgeOzetYukle();
                     })
                     .catch(function (err) {

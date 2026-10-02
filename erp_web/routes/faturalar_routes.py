@@ -1445,7 +1445,8 @@ def build_makbuz_pdf(tahsilat, musteri_adi, fatura_no=None, banka_hesaplar=None)
             c.drawString(x_left, note_y, f"Açıklama: {aciklama[:90]}")
             note_y -= 4 * mm
         if fatura_no:
-            c.drawString(x_left, note_y, f"İlgili Fatura: {fatura_no}")
+            from fatura_belge_no import fatura_no_gorunen
+            c.drawString(x_left, note_y, f"İlgili Fatura: {fatura_no_gorunen(fatura_no)}")
 
     c.endForm()
 
@@ -1800,7 +1801,8 @@ def build_fatura_pdf(fatura, musteri, satirlar, preview=False):
     fat_tarih_dm = dt_ft.strftime("%d-%m-%Y")
     fat_saat = (fatura.get("fatura_saati") or fatura.get("irsaliye_saati") or now.strftime("%H:%M:%S"))
     fat_tip_disp = (str(fatura.get("fatura_tipi") or "SATIŞ")).strip().upper() or "SATIŞ"
-    fat_no_goster = (str(fatura.get("fatura_no") or "").strip() or irs_no)[:32]
+    from fatura_belge_no import fatura_no_gorunen
+    fat_no_goster = (fatura_no_gorunen(fatura.get("fatura_no")) or irs_no)[:32]
 
     if irsaliye_modu:
         meta_lines = [
@@ -6850,33 +6852,15 @@ def _portal_max_gib_serial_for_year_safe(yil: int):
 
 
 def _next_fatura_no(prefix=None):
+    """Resmi GIB numarası üretmez. Yeni kayıt kilitli TASLAK-YYYY-#### alır.
+
+    Kesin numara yalnız GİB yanıtında _fatura_gib_bilgilerini_yaz ile yazılır.
+    prefix parametresi geriye dönük çağrılar için durur; GIB/INV sayacı çalıştırılmaz.
     """
-    Yıla göre artan fatura numarası.
-    - GIB: GIByyyy######### (GİB İnteraktif belge no ile aynı biçim, 9 haneli sıra).
-    - INV (veya başka önek): önceki 6 haneli kuyruk davranışı.
-    Taslak/imza sonrası kesin numara yine portal yanıtıyla _fatura_gib_bilgilerini_yaz üzerinden yazılır.
-    """
-    yil = datetime.now().year
-    if prefix is None:
-        prefix = _fatura_no_default_prefix()
-    prefix = (prefix or "GIB").strip().upper()
-    if prefix == "GIB":
-        mx_db = _db_max_gib_serial_for_year(yil)
-        mx_pt = _portal_max_gib_serial_for_year_safe(yil)
-        mx = mx_db
-        if mx_pt is not None:
-            mx = max(mx_db, mx_pt)
-        return f"GIB{yil}{mx + 1:09d}"
-    like = f"{prefix}{yil}%"
-    row = fetch_one("SELECT fatura_no FROM faturalar WHERE fatura_no LIKE %s ORDER BY id DESC LIMIT 1", (like,))
-    if not row or not row.get("fatura_no"):
-        return f"{prefix}{yil}000001"
-    no = str(row["fatura_no"])
-    try:
-        tail = int(no[-6:])
-        return f"{prefix}{yil}{tail + 1:06d}"
-    except Exception:
-        return f"{prefix}{yil}000001"
+    del prefix
+    from fatura_belge_no import yeni_taslak_no
+
+    return yeni_taslak_no()
 
 
 def _next_gelen_fatura_no():
@@ -7048,7 +7032,7 @@ def _auto_month_amount_resolved(musteri_id, run_month_date):
     return round(net * 1.2, 2) if net > 0 else 0.0
 
 
-def _auto_invoice_create_for_customer(musteri_id, run_month_date):
+def _auto_invoice_create_for_customer(musteri_id, run_month_date, belge="dahili"):
     try:
         run_month_date = date(int(run_month_date.year), int(run_month_date.month), 1)
     except Exception:
@@ -7093,7 +7077,11 @@ def _auto_invoice_create_for_customer(musteri_id, run_month_date):
         except Exception:
             pass
         return {"status": "skip", "error": "Aylık tutar bulunamadı veya 0."}
-    fatura_no = _next_fatura_no()
+    if str(belge or "").strip().lower() == "taslak":
+        fatura_no = _next_fatura_no()
+    else:
+        from fatura_belge_no import next_dahili_no
+        fatura_no = next_dahili_no()
     ay_ad = _AY_ADLARI_TR[run_month_date.month - 1]
     notlar = f"{ay_ad} {run_month_date.year} otomatik kira faturası {marker}"
     row = execute_returning(
@@ -7185,7 +7173,12 @@ def run_auto_invoice_cycle(force=False, run_date=None):
             while month <= horizon:
                 item_period_key = month.strftime("%Y-%m")
                 try:
-                    created = _auto_invoice_create_for_customer(mid, month)
+                    allow_gib_for_month = bool(send_gib) and (month == bugun_ay)
+                    if month > bugun_ay:
+                        allow_gib_for_month = False
+                    created = _auto_invoice_create_for_customer(
+                        mid, month, belge="taslak" if allow_gib_for_month else "dahili"
+                    )
                     if created.get("status") in ("skip", "exists"):
                         execute(
                             """INSERT INTO auto_invoice_items (run_id, musteri_id, fatura_id, period_key, status, error_message)
@@ -7219,10 +7212,6 @@ def run_auto_invoice_cycle(force=False, run_date=None):
                     gib_uuid = None
                     item_status = "created"
                     err = None
-                    # Altın kural: GİB yalnız bugünün ayı; peşin/gelecek aylar fail-closed.
-                    allow_gib_for_month = bool(send_gib) and (month == bugun_ay)
-                    if month > bugun_ay:
-                        allow_gib_for_month = False
                     if allow_gib_for_month and gib and gib.is_available():
                         try:
                             from gib_earsiv import build_fatura_data_from_db
@@ -9045,9 +9034,11 @@ def fatura_ekle():
         if (not erp_taslak_kayit) and (not gelen_ettn_req) and gelen_gib_durum_req != "imzali":
             erp_taslak_kayit = True
 
-        fatura_no = (data.get("fatura_no") or "").strip() or (
-            str((mevcut_fatura or {}).get("fatura_no") or "").strip() or _next_fatura_no()
-        )
+        if mevcut_fatura:
+            fatura_no = str(mevcut_fatura.get("fatura_no") or "").strip() or _next_fatura_no()
+        else:
+            # Elle GIB numarası kabul edilmez. Kesin numara imza yanıtında yazılır.
+            fatura_no = _next_fatura_no()
         musteri_id = _opt_customer_id(data.get("musteri_id"))
         musteri_adi = (data.get("musteri_adi") or "").strip()
         # Kayıtlı müşteri: fatura satırında şirket ünvanı (name); yoksa cari müşteri adı.

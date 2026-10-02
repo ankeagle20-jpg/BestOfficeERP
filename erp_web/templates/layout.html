@@ -340,6 +340,11 @@
     {% include "partials/legal_footer.html" %}
     
     <script>
+    window.faturaNoGorunen = function (no) {
+      var s = String(no == null ? '' : no).trim();
+      if (!s || s.toUpperCase().indexOf('TASLAK') === 0) return 'Taslak';
+      return s;
+    };
     window.setActiveTab = function(tabId) {
       document.querySelectorAll('.nav-tab-link').forEach(function(a) { a.classList.remove('active'); });
       var el = document.getElementById('nav-tab-' + tabId);

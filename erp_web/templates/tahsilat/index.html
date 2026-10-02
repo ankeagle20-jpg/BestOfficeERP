@@ -250,7 +250,7 @@ async function selectMusteri(id, name) {
   faturalar.forEach(f => {
     const opt = document.createElement('option');
     opt.value = f.id;
-    opt.textContent = (f.fatura_no || '') + ' - ' + formatTutar(f.toplam) + ' ₺';
+    opt.textContent = faturaNoGorunen(f.fatura_no) + ' - ' + formatTutar(f.toplam) + ' ₺';
     sel.appendChild(opt);
   });
   loadTahsilatList(id);

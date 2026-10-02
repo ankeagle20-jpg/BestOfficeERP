@@ -153,6 +153,12 @@ def _format_tr_number(value, decimals=2):
 def trnum_filter(value, decimals=2):
     return _format_tr_number(value, decimals=decimals)
 
+
+@app.template_filter("fatura_no_gorunen")
+def fatura_no_gorunen_filter(value):
+    from fatura_belge_no import fatura_no_gorunen
+    return fatura_no_gorunen(value)
+
 # Gzip sıkıştırma — mobil ve yavaş bağlantıda cevap boyutunu küçültür
 try:
     from flask_compress import Compress

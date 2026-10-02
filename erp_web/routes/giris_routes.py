@@ -12172,25 +12172,11 @@ def api_cari_ekstre_excel():
 
 
 def _next_fatura_no_aylik(prefix=None):
-    """Yıla göre artan fatura no; finans ile aynı seri (GIB/INV .env)."""
-    try:
-        from routes.faturalar_routes import _next_fatura_no
+    """Aylık borç numarası. GİB/INV serisine girmez; kilitli DAHILI sayacı."""
+    del prefix
+    from fatura_belge_no import next_dahili_no
 
-        return _next_fatura_no(prefix)
-    except Exception:
-        pass
-    yil = datetime.now().year
-    prefix = (prefix or "INV").strip().upper() or "INV"
-    like = f"{prefix}{yil}%"
-    row = fetch_one("SELECT fatura_no FROM faturalar WHERE fatura_no LIKE %s ORDER BY id DESC LIMIT 1", (like,))
-    if not row or not row.get("fatura_no"):
-        return f"{prefix}{yil}000001"
-    no = str(row["fatura_no"])
-    try:
-        tail = int(no[-6:])
-        return f"{prefix}{yil}{tail + 1:06d}"
-    except Exception:
-        return f"{prefix}{yil}000001"
+    return next_dahili_no()
 
 
 def _next_makbuz_no_aylik():
@@ -12351,8 +12337,9 @@ def api_aylik_tutarlardan_borclandir():
         else:
             notlar = f"{ay_adi} {yil} kira bedeli (KDV dahil, Aylık Tutarlar){marker}"
 
-        # Marker bulunmadıysa yeni oluştur.
-        fatura_no = _next_fatura_no_aylik()
+        # Marker bulunmadıysa yeni oluştur. Dahili borç; GIB serisine girmez.
+        from fatura_belge_no import next_dahili_no
+        fatura_no = next_dahili_no()
         execute(
             """
             INSERT INTO faturalar (

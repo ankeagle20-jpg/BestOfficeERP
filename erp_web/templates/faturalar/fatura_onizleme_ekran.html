@@ -78,7 +78,7 @@
                 <div><span class="k">Düzenleme No</span><span>TR1.2</span></div>
                 <div><span class="k">Senaryo</span><span>EARSIVFATURA</span></div>
                 <div><span class="k">Fatura Tipi</span><span>{{ (fatura.fatura_tipi or 'SATIS')|upper }}</span></div>
-                <div><span class="k">Fatura No</span><span>{{ fatura.fatura_no or '—' }}</span></div>
+                <div><span class="k">Fatura No</span><span>{{ fatura.fatura_no|fatura_no_gorunen }}</span></div>
                 <div><span class="k">Fatura Tarihi</span><span>{{ fatura.fatura_tarihi_str }}</span></div>
             </div>
         </div>

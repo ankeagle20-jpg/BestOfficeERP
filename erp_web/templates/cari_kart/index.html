@@ -1328,7 +1328,7 @@ function dFin(){
     var k=r.vade_tarihi&&r.vade_tarihi<today;
     return'<tr'+(k?' class="kr"':'')+'>'+
       '<td class="tdate">'+(r.tarih||'')+'</td>'+
-      '<td class="tno">'+(r.belge_no||'')+'</td>'+
+      '<td class="tno">'+faturaNoGorunen(r.belge_no)+'</td>'+
       '<td>'+pi(r.tur,r.tur==='Fatura'?'pr':'pg')+(k?pi('Gecikmiş','po'):'')+'</td>'+
       '<td style="color:var(--t2);font-size:11px">'+(r.tur==='Fatura'?'Fatura':'Tahsilat')+(k?' — Gecikmiş':'')+'</td>'+
       '<td class="tborc tr">'+(r.borc?'₺'+fm(r.borc):'—')+'</td>'+
@@ -1346,7 +1346,7 @@ function rFat(r){
   document.getElementById('tb-fat').innerHTML=r.length?r.map(function(x){
     return'<tr>'+
       '<td class="tdate">'+(x.tarih||'')+'</td>'+
-      '<td class="tno">'+(x.belge_no||'')+'</td>'+
+      '<td class="tno">'+faturaNoGorunen(x.belge_no)+'</td>'+
       '<td>'+pi(x.tur,x.tur==='Fatura'?'pr':'pg')+'</td>'+
       '<td class="tborc tr">₺'+(x.borc?fm(x.borc):fm(x.alacak))+'</td>'+
       '<td>'+pi(x.tur==='Fatura'?'Kesildi':'Alındı',x.tur==='Fatura'?'pc':'pg')+'</td>'+

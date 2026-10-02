@@ -1741,7 +1741,7 @@ function gibFaturaOzetLookup() {
       .then(function (r) { return r.json(); })
       .then(function (j) {
         if (!j || !j.ok || !j.fatura) return;
-        belgeEl.value = String(j.fatura.fatura_no || '').trim();
+        belgeEl.value = faturaNoGorunen(j.fatura.fatura_no);
       })
       .catch(function () {});
   }, 250);
@@ -1922,9 +1922,9 @@ function gibSonFaturaGetir() {
         if (!j || !j.ok || !j.fatura) throw new Error((j && j.mesaj) || 'Son fatura alınamadı');
         document.getElementById('gib_fatura_id').value = j.fatura.id || '';
         var belgeEl = document.getElementById('gib_belge_no_erp');
-        if (belgeEl) belgeEl.value = String(j.fatura.fatura_no || '').trim();
+        if (belgeEl) belgeEl.value = faturaNoGorunen(j.fatura.fatura_no);
         document.getElementById('gib_manual_status').textContent =
-          'Son fatura: ERP # ' + (j.fatura.id || '-') + ' — Belge no ' + (j.fatura.fatura_no || '—') +
+          'Son fatura: ERP # ' + (j.fatura.id || '-') + ' — Belge no ' + faturaNoGorunen(j.fatura.fatura_no) +
           (j.fatura.ettn ? (' — ETTN ' + String(j.fatura.ettn).slice(0, 13) + '…') : '');
       })
       .catch(function(err){
@@ -4127,7 +4127,7 @@ function faturaRaporYukle() {
                 return '<tr class="' + (isPh ? 'fatura-rapor-placeholder-row' : '') + '" data-fatura-id="' + fid.replace(/"/g, '') + '">' +
                     chCell + gozCell +
                     '<td>' + (s.fatura_tarihi || '') + '</td>' +
-                    '<td>' + (s.fatura_no || '') + '</td>' +
+                    '<td>' + faturaNoGorunen(s.fatura_no) + '</td>' +
                     '<td>' + musEsc + '</td>' +
                     '<td>' + (s.satir_no != null ? s.satir_no : '') + '</td>' +
                     '<td class="num">' + fmt(s.miktar) + '</td>' +
@@ -5641,7 +5641,7 @@ function finansGibRaporRenderFromCache() {
         '</div>'
     );
     items.forEach((it) => {
-        const fno = finansGibRaporHtmlEsc(it.fatura_no || '—');
+        const fno = finansGibRaporHtmlEsc(faturaNoGorunen(it.fatura_no));
         const firma = finansGibRaporHtmlEsc(it.musteri_adi || '—');
         const gd = (it.gib_durum || 'Taslak').toString();
         const durumEsc = finansGibRaporHtmlEsc(gd);
