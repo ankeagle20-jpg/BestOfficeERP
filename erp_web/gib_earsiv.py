@@ -911,7 +911,7 @@ class BestOfficeGIBManager:
             iso = ""
         tut = self._portal_odenecek_tutar(d)
         kes = self._portal_row_gib_kesinlik(d)
-        gib_etiket = {"imzalı": "İmzalı", "taslak": "Taslak", "iptal": "İptal"}.get(kes, "Taslak")
+        gib_etiket = {"imzalı": "İmzalı", "taslak": "GİB'de taslak", "iptal": "İptal"}.get(kes, "Taslak")
         return {
             "id": None,
             "fatura_tarihi": iso,

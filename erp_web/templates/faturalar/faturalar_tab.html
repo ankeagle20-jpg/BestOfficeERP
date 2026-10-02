@@ -938,7 +938,7 @@
                     </td>
                     <td data-col-key="gib_durum">
                         {% set _gibdr = f.gib_durum_rapor or 'Taslak' %}
-                        <span class="badge {% if _gibdr == 'İptal' %}badge-gib-iptal{% elif _gibdr in ('Taslak', 'İmzasız') %}badge-gib-taslak{% else %}badge-gib-imzali{% endif %}">
+                        <span class="badge {% if _gibdr == 'İptal' %}badge-gib-iptal{% elif _gibdr in ('Taslak', 'İmzasız', "GİB'de taslak") %}badge-gib-taslak{% else %}badge-gib-imzali{% endif %}">
                             {{ _gibdr }}
                         </span>
                     </td>
@@ -1403,7 +1403,8 @@
                 var tarih = (f.fatura_tarihi || '').slice(0, 10);
                 var tutarTR = Number(f.toplam || 0).toLocaleString('tr-TR', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' TL';
                 var editLink = f.duzenle_url ? ('<a href="' + f.duzenle_url + '" target="_blank" title="Düzenle" style="color:#e0f7fa;text-decoration:none;border-bottom:1px dotted rgba(224,247,250,.35);">' + faturaNoGorunen(f.fatura_no) + '</a>') : faturaNoGorunen(f.fatura_no);
-                var durumBadge = '<span class="badge badge-gib-taslak">ERP Taslak</span>';
+                var gd = (f.gib_durum_rapor || 'Taslak');
+                var durumBadge = '<span class="badge badge-gib-taslak">' + gd + '</span>';
                 var islemBtn = f.id ? faturaIslemHtml(f) : '—';
                 html += '<tr>';
                 html += '<td data-col-key="tarih">' + tarih + '</td>';

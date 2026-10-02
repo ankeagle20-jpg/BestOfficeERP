@@ -5561,7 +5561,7 @@ function finansGibSortValue(it, field) {
     if (field === 'gib_durum') {
         const g = (it.gib_durum || '').toString();
         if (g === 'İptal') return 1;
-        if (g === 'Taslak' || g === 'İmzasız') return 2;
+        if (g === 'Taslak' || g === 'İmzasız' || g === "GİB'de taslak") return 2;
         if (g === 'İmzalı') return 4;
         const d = g.toLowerCase();
         if (d.indexOf('iptal') !== -1) return 1;
@@ -5618,7 +5618,7 @@ function finansGibRaporRenderFromCache() {
         return a;
     }, 0);
     const toplamTaslak = j.toplam_taslak != null ? Number(j.toplam_taslak) : itemsRaw.reduce(function (a, x) {
-        if (x && (x.gib_durum === 'Taslak' || x.gib_durum === 'İmzasız')) return a + (parseFloat(x.tutar) || 0);
+        if (x && (x.gib_durum === 'Taslak' || x.gib_durum === 'İmzasız' || x.gib_durum === "GİB'de taslak")) return a + (parseFloat(x.tutar) || 0);
         return a;
     }, 0);
     const toplamIptal = itemsRaw.reduce(function (a, x) {
@@ -5650,7 +5650,7 @@ function finansGibRaporRenderFromCache() {
         const tarihRaw = (it.fatura_tarihi || '').toString();
         const tarih = tarihRaw.length >= 10 ? finansGibRaporHtmlEsc(tarihRaw.slice(0, 10)) : (tarihRaw ? finansGibRaporHtmlEsc(tarihRaw) : '—');
         let rowCls = 'finans-gib-rapor-row';
-        if (gd === 'Taslak' || gd === 'İmzasız') rowCls += ' finans-gib-rapor-row--taslak';
+        if (gd === 'Taslak' || gd === 'İmzasız' || gd === "GİB'de taslak") rowCls += ' finans-gib-rapor-row--taslak';
         else if (gd === 'İptal') rowCls += ' finans-gib-rapor-row--iptal';
         parts.push(
             '<div class="' + rowCls + '" role="row">' +

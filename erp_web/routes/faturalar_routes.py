@@ -5873,7 +5873,7 @@ def faturalar():
         for f in (faturalar_raw or []):
             row = _row_serializable(f)
             row["kaynak"] = "erp_taslak"
-            row["gib_durum_rapor"] = "Taslak"
+            row["gib_durum_rapor"] = _fatura_resmi_gib_durumu(row)
             row["toplam"] = _fatura_satir_tutar(row)
             row["kdv_tutar"] = _fatura_kdv_liste_gosterim(row)
             row["duzenle_url"] = _fatura_editor_url(row)
@@ -7701,6 +7701,17 @@ def _fatura_gib_taslak_sayilir(row):
     return bool(re.search(r"G.?B\s+durum\s*:\s*taslak", norm, flags=re.IGNORECASE))
 
 
+def _fatura_gibde_taslak_rozet(row):
+    """GİB belge no + ETTN var, imza yok. ETTN'siz eski yerel GIB no «Taslak» kalır."""
+    if not row or _fatura_gib_imzalanmis_sayilir(row):
+        return False
+    no = str(row.get("fatura_no") or "").strip().upper()
+    ettn = str(row.get("ettn") or "").strip()
+    if not ettn or not re.match(r"^GIB\d{13}$", no):
+        return False
+    return True
+
+
 def _fatura_gib_resmi_no(row):
     if not row:
         return ""
@@ -7759,14 +7770,16 @@ def _fatura_resmi_gib_durumu(row):
 
             h = (_gib_portal_html_cache_oku(fid) or "") or ""
             wm = gib_fatura_html_watermark_etiket(h)
-            if wm in ("İptal", "İmzasız", "İmzalı"):
-                return wm
+            if wm == "İptal":
+                return "İptal"
+            if wm == "İmzalı":
+                return "İmzalı"
         except Exception:
             pass
-    if _fatura_gib_taslak_sayilir(row):
-        return "Taslak"
     if _fatura_gib_imzalanmis_sayilir(row):
         return "İmzalı"
+    if _fatura_gibde_taslak_rozet(row):
+        return "GİB'de taslak"
     return "Taslak"
 
 
@@ -8001,7 +8014,7 @@ def _gib_satir_from_status_dict(d):
     except Exception:
         tarih = str(d.get("faturaTarihi") or d.get("tarih") or "")[:10]
     onay = str(d.get("onayDurumu") or d.get("durum") or "").strip().lower()
-    gib_durum = "Taslak"
+    gib_durum = "GİB'de taslak"
     if "iptal" in onay:
         gib_durum = "İptal"
     elif "onay" in onay or "imza" in onay:
@@ -10950,8 +10963,9 @@ def _fatura_gib_bilgilerini_yaz(fatura_id, ettn=None, gib_fatura_no=None, gib_as
 
     gib_asama: 'taslak' → «GİB durum: taslak»; 'imzali' → «GİB İMZALANDI»; 'iptal' → «GİB durum: iptal».
 
-    Dönüş: {"ok": bool, "fatura_no_cakisti": bool}. Yeni gib_fatura_no başka bir id'de
-    kayıtlıysa fatura_no ezilmez (yalnızca ettn + notlar güncellenir).
+    Dönüş: {"ok": bool, "fatura_no_cakisti": bool}. Gerçek GİB numarası ETTN'siz eski
+    satırdaysa o satır KIRA|… diye ayrılır ve numara bu kayda yazılır. İki ETTN'li
+    kayıt çakışırsa fatura_no ezilmez. Satırda GİB numarası varken imza onu değiştirmez.
     """
     try:
         fid = int(fatura_id)
@@ -10965,28 +10979,46 @@ def _fatura_gib_bilgilerini_yaz(fatura_id, ettn=None, gib_fatura_no=None, gib_as
         row, ettn=ettn, gib_fatura_no=gib_fatura_no, gib_asama=gib_asama
     )
 
-    fatura_no_yaz = gib_no_val or row.get("fatura_no")
+    mevcut_no = str(row.get("fatura_no") or "").strip()
+    gelen_no = str(gib_fatura_no or "").strip()
+    resmi_gelen = bool(re.match(r"^GIB\d{13}$", gelen_no.upper()))
+    # İmzada numara değişmez. Satırda gerçek GİB no varsa onu koru.
+    if (
+        gib_asama == "imzali"
+        and re.match(r"^GIB\d{13}$", mevcut_no.upper())
+        and resmi_gelen
+        and gelen_no.upper() != mevcut_no.upper()
+    ):
+        gelen_no = mevcut_no
+        gib_no_val = mevcut_no
+    fatura_no_yaz = gelen_no or mevcut_no
     fatura_no_cakisti = False
-    if gib_no_val:
+    if resmi_gelen:
         diger = fetch_one(
             """
-            SELECT id FROM faturalar
+            SELECT id, ettn, fatura_no FROM faturalar
             WHERE BTRIM(COALESCE(fatura_no::text, '')) = BTRIM(%s)
               AND id <> %s
             ORDER BY id DESC
             LIMIT 1
             """,
-            (str(gib_no_val).strip(), fid),
+            (gelen_no, fid),
         )
         if diger and diger.get("id") is not None:
-            fatura_no_cakisti = True
-            fatura_no_yaz = row.get("fatura_no")
-            logging.getLogger(__name__).warning(
-                "fatura_no_cakisti: hedef_id=%s istenen_no=%s mevcut_id=%s; fatura_no ezilmedi",
-                fid,
-                str(gib_no_val).strip(),
-                diger.get("id"),
-            )
+            diger_ettn = str(diger.get("ettn") or "").strip()
+            if not diger_ettn:
+                # Eski yerel kayıt seriyi tutmuş. Resmi no, GİB'in verdiği satıra geçer.
+                _kira_fatura_no_serbest_birak(diger.get("id"), gelen_no, yeni_id=fid)
+                fatura_no_yaz = gelen_no
+            else:
+                fatura_no_cakisti = True
+                fatura_no_yaz = mevcut_no or gelen_no
+                logging.getLogger(__name__).warning(
+                    "fatura_no_cakisti: hedef_id=%s istenen_no=%s mevcut_id=%s; fatura_no ezilmedi",
+                    fid,
+                    gelen_no,
+                    diger.get("id"),
+                )
 
     execute(
         "UPDATE faturalar SET notlar = %s, ettn = %s, fatura_no = %s WHERE id = %s",
