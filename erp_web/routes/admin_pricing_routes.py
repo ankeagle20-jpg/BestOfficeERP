@@ -10,9 +10,21 @@ from flask import Blueprint, g, jsonify, render_template, request
 from flask_login import current_user
 
 from auth import admin_gerekli
-from db import execute, fetch_all, fetch_one
+from db import ensure_pricing_display_columns_once, execute, fetch_all, fetch_one
+from pricing_display_fx import (
+    display_dolar,
+    get_usd_try_rate,
+    parse_dolar,
+    parse_indirim,
+    recalculate_auto_dolar,
+    resolve_dolar_on_save,
+    set_usd_try_rate,
+    usd_try_status,
+)
 from pricing_engine import PricingEngineError, calculate_tenant_bill
 from pricing_public_cache import invalidate_public_pricing_cache
+from module_pricing_public_cache import invalidate_public_module_pricing_cache
+from services.exchange_rate_service import fetch_and_store_exchange_rates
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +88,13 @@ def _parse_int_nonneg(name: str, raw, *, allow_null: bool = False):
     return v
 
 
-def _tier_row_to_json(row: dict) -> dict:
+def _opt_num(row: dict, key: str):
+    if row.get(key) is None:
+        return None
+    return float(row[key])
+
+
+def _tier_row_to_json(row: dict, rate: Decimal | None = None) -> dict:
     return {
         "id": row["id"],
         "country_code": row["country_code"],
@@ -89,6 +107,10 @@ def _tier_row_to_json(row: dict) -> dict:
         "price_per_customer": float(row["price_per_customer"]),
         "included_users": row["included_users"],
         "price_per_extra_user": float(row["price_per_extra_user"]),
+        "dolar_fiyat": _opt_num(row, "dolar_fiyat"),
+        "dolar_fiyat_manuel": bool(row.get("dolar_fiyat_manuel")),
+        "dolar_goster": display_dolar(row, rate),
+        "indirim_yuzde": _opt_num(row, "indirim_yuzde"),
         "sort_order": row["sort_order"],
         "is_active": bool(row["is_active"]),
     }
@@ -174,16 +196,22 @@ def api_pricing_regions():
 @bp.route("/api/pricing/tiers")
 @platform_pricing_admin
 def api_pricing_tiers():
+    ensure_pricing_display_columns_once()
     try:
         cc = _country_param()
     except ValueError as e:
         return jsonify({"ok": False, "mesaj": str(e)}), 400
+    try:
+        rate, _src = get_usd_try_rate()
+    except ValueError:
+        rate = None
     rows = fetch_all(
         """
         SELECT id, country_code, currency, tier_key, display_name,
                min_customers, max_customers,
                base_monthly, price_per_customer,
                included_users, price_per_extra_user,
+               dolar_fiyat, dolar_fiyat_manuel, indirim_yuzde,
                sort_order, is_active
         FROM public.pricing_tiers
         WHERE country_code = %s
@@ -195,7 +223,7 @@ def api_pricing_tiers():
         {
             "ok": True,
             "country_code": cc,
-            "tiers": [_tier_row_to_json(r) for r in rows],
+            "tiers": [_tier_row_to_json(r, rate) for r in rows],
             "n": len(rows),
         }
     )
@@ -204,10 +232,12 @@ def api_pricing_tiers():
 @bp.route("/api/pricing/tiers/<int:tier_id>", methods=["PUT"])
 @platform_pricing_admin
 def api_pricing_tier_update(tier_id: int):
+    ensure_pricing_display_columns_once()
     body = request.get_json(silent=True) or {}
     row = fetch_one(
         """
-        SELECT id, country_code, currency, tier_key
+        SELECT id, country_code, currency, tier_key,
+               base_monthly, dolar_fiyat, dolar_fiyat_manuel, indirim_yuzde
         FROM public.pricing_tiers
         WHERE id = %s
         """,
@@ -230,6 +260,21 @@ def api_pricing_tier_update(tier_id: int):
             "price_per_extra_user", body.get("price_per_extra_user")
         )
         is_active = bool(body.get("is_active", True))
+        if "indirim_yuzde" in body:
+            indirim_yuzde = parse_indirim(body.get("indirim_yuzde"))
+        else:
+            indirim_yuzde = (
+                None if row.get("indirim_yuzde") is None else Decimal(str(row["indirim_yuzde"]))
+            )
+        dolar_fiyat, dolar_manuel = resolve_dolar_on_save(
+            old_base=Decimal(str(row["base_monthly"])),
+            new_base=base_monthly,
+            old_dolar=None if row.get("dolar_fiyat") is None else Decimal(str(row["dolar_fiyat"])),
+            old_manuel=bool(row.get("dolar_fiyat_manuel")),
+            currency=str(row["currency"]),
+            submitted_dolar=parse_dolar(body.get("dolar_fiyat")) if body.get("dolar_edited") else None,
+            dolar_edited=bool(body.get("dolar_edited")),
+        )
         _validate_tier_fields(
             min_customers=min_customers,
             max_customers=max_customers,
@@ -256,6 +301,9 @@ def api_pricing_tier_update(tier_id: int):
             price_per_customer = %s,
             included_users = %s,
             price_per_extra_user = %s,
+            dolar_fiyat = %s,
+            dolar_fiyat_manuel = %s,
+            indirim_yuzde = %s,
             is_active = %s,
             updated_at = NOW()
         WHERE id = %s
@@ -268,6 +316,9 @@ def api_pricing_tier_update(tier_id: int):
             str(price_per_customer),
             included_users,
             str(price_per_extra_user),
+            None if dolar_fiyat is None else str(dolar_fiyat),
+            bool(dolar_manuel),
+            None if indirim_yuzde is None else str(indirim_yuzde),
             is_active,
             tier_id,
         ),
@@ -278,6 +329,7 @@ def api_pricing_tier_update(tier_id: int):
                min_customers, max_customers,
                base_monthly, price_per_customer,
                included_users, price_per_extra_user,
+               dolar_fiyat, dolar_fiyat_manuel, indirim_yuzde,
                sort_order, is_active
         FROM public.pricing_tiers
         WHERE id = %s
@@ -285,7 +337,11 @@ def api_pricing_tier_update(tier_id: int):
         (tier_id,),
     )
     invalidate_public_pricing_cache(row["country_code"])
-    return jsonify({"ok": True, "tier": _tier_row_to_json(updated)})
+    try:
+        saved_rate, _src = get_usd_try_rate()
+    except ValueError:
+        saved_rate = None
+    return jsonify({"ok": True, "tier": _tier_row_to_json(updated, saved_rate)})
 
 
 @bp.route("/api/pricing/overage", methods=["GET", "PUT"])
@@ -410,3 +466,58 @@ def api_pricing_preview():
     except Exception:
         logger.exception("api_pricing_preview")
         return jsonify({"ok": False, "mesaj": "Önizleme hesaplanamadı."}), 500
+
+
+def _after_rate_change(rate: Decimal) -> int:
+    ensure_pricing_display_columns_once()
+    updated = recalculate_auto_dolar(rate)
+    invalidate_public_pricing_cache()
+    invalidate_public_module_pricing_cache()
+    return updated
+
+
+@bp.route("/api/pricing/usd-try", methods=["GET"])
+@platform_pricing_admin
+def api_pricing_usd_try():
+    ensure_pricing_display_columns_once()
+    try:
+        return jsonify({"ok": True, **usd_try_status()})
+    except ValueError as e:
+        return jsonify({"ok": False, "mesaj": str(e)}), 400
+
+
+@bp.route("/api/pricing/usd-try", methods=["PUT"])
+@platform_pricing_admin
+def api_pricing_usd_try_save():
+    """Elle girilen USD/TRY. Otomatik dolar fiyatlarını yeniden hesaplar."""
+    body = request.get_json(silent=True) or {}
+    try:
+        try:
+            rate = Decimal(str(body.get("rate")))
+        except (InvalidOperation, TypeError, ValueError):
+            raise ValueError("kur geçersiz")
+        if rate <= 0:
+            raise ValueError("kur pozitif olmalı")
+        saved = set_usd_try_rate(rate, "manual")
+        updated = _after_rate_change(saved)
+    except ValueError as e:
+        return jsonify({"ok": False, "mesaj": str(e)}), 400
+    status = usd_try_status()
+    return jsonify({"ok": True, "updated_rows": updated, **status})
+
+
+@bp.route("/api/pricing/usd-try/refresh", methods=["POST"])
+@platform_pricing_admin
+def api_pricing_usd_try_refresh():
+    """open.er-api.com üzerinden USD/TRY çeker; manuel dolar satırlarına dokunmaz."""
+    ensure_pricing_display_columns_once()
+    res = fetch_and_store_exchange_rates()
+    if not res.get("ok"):
+        return jsonify({"ok": False, "mesaj": f"Kur alınamadı: {res.get('error')}"}), 502
+    try:
+        rate, _src = get_usd_try_rate()
+        updated = _after_rate_change(rate)
+    except ValueError as e:
+        return jsonify({"ok": False, "mesaj": str(e)}), 400
+    status = usd_try_status()
+    return jsonify({"ok": True, "updated_rows": updated, **status})

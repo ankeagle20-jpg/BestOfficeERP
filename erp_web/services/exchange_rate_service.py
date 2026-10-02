@@ -54,6 +54,12 @@ def _fx_cache_set(base: str, target: str, rate: Decimal) -> None:
     with _FX_CACHE_LOCK:
         _FX_CACHE[(base, target)] = (time.monotonic(), rate)
 
+
+def clear_exchange_rate_cache() -> None:
+    """Kur kaydı değişince bu worker eski kuru fatura hesabında tutmasın."""
+    with _FX_CACHE_LOCK:
+        _FX_CACHE.clear()
+
 def fetch_and_store_exchange_rates() -> dict[str, Any]:
     """open.er-api.com API'sinden güncel USD kurlarını çeker ve public.exchange_rates tablosuna kaydeder.
 
@@ -99,6 +105,7 @@ def fetch_and_store_exchange_rates() -> dict[str, Any]:
             )
             updated_count += 1
 
+        clear_exchange_rate_cache()
         logger.info(f"Döviz kurları başarıyla güncellendi: {updated_count} kur kaydedildi.")
         return {"ok": True, "rates_count": updated_count, "source": "open.er-api.com"}
 

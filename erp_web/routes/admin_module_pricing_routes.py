@@ -10,9 +10,16 @@ from flask import Blueprint, g, jsonify, render_template, request
 from flask_login import current_user
 
 from auth import admin_gerekli
-from db import execute, fetch_all, fetch_one
+from db import ensure_pricing_display_columns_once, execute, fetch_all, fetch_one
 from module_pricing_engine import ModulePricingEngineError, calculate_module_bill
 from module_pricing_public_cache import invalidate_public_module_pricing_cache
+from pricing_display_fx import (
+    display_dolar,
+    get_usd_try_rate,
+    parse_dolar,
+    parse_indirim,
+    resolve_dolar_on_save,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +43,7 @@ _TIER_SELECT_COLS = """
         included_branches, price_per_extra_branch,
         included_monthly_appointments, included_personnel,
         is_contact_sales, annual_discount_months, setup_fee,
+        dolar_fiyat, dolar_fiyat_manuel, indirim_yuzde,
         sort_order, is_active
 """
 
@@ -85,7 +93,7 @@ def _parse_int_nonneg(name: str, raw, *, allow_null: bool = False):
     return v
 
 
-def _tier_row_to_json(row: dict) -> dict:
+def _tier_row_to_json(row: dict, rate: Decimal | None = None) -> dict:
     return {
         "id": int(row["id"]),
         "module_key": row["module_key"],
@@ -113,6 +121,10 @@ def _tier_row_to_json(row: dict) -> dict:
         "is_contact_sales": bool(row["is_contact_sales"]),
         "annual_discount_months": int(row["annual_discount_months"]),
         "setup_fee": float(row["setup_fee"]),
+        "dolar_fiyat": None if row.get("dolar_fiyat") is None else float(row["dolar_fiyat"]),
+        "dolar_fiyat_manuel": bool(row.get("dolar_fiyat_manuel")),
+        "dolar_goster": display_dolar(row, rate),
+        "indirim_yuzde": None if row.get("indirim_yuzde") is None else float(row["indirim_yuzde"]),
         "sort_order": int(row["sort_order"]),
         "is_active": bool(row["is_active"]),
     }
@@ -157,6 +169,7 @@ def module_pricing_page():
 @bp.route("/api/module-pricing/tiers")
 @platform_module_pricing_admin
 def api_module_pricing_tiers():
+    ensure_pricing_display_columns_once()
     mk = (request.args.get("module") or request.args.get("module_key") or "").strip()
     cc = (request.args.get("country") or request.args.get("country_code") or "TR").strip().upper()
     if not mk:
@@ -175,12 +188,16 @@ def api_module_pricing_tiers():
         """,
         (mk, cc),
     ) or []
+    try:
+        rate, _src = get_usd_try_rate()
+    except ValueError:
+        rate = None
     return jsonify(
         {
             "ok": True,
             "module_key": mk,
             "country_code": cc,
-            "tiers": [_tier_row_to_json(r) for r in rows],
+            "tiers": [_tier_row_to_json(r, rate) for r in rows],
             "n": len(rows),
         }
     )
@@ -189,10 +206,12 @@ def api_module_pricing_tiers():
 @bp.route("/api/module-pricing/tiers/<int:tier_id>", methods=["PUT"])
 @platform_module_pricing_admin
 def api_module_pricing_tier_update(tier_id: int):
+    ensure_pricing_display_columns_once()
     body = request.get_json(silent=True) or {}
     row = fetch_one(
         """
         SELECT id, module_key, country_code, currency, tier_key, display_name,
+               base_monthly, dolar_fiyat, dolar_fiyat_manuel, indirim_yuzde,
                is_contact_sales, included_branches, setup_fee, sort_order
         FROM public.module_pricing_tiers
         WHERE id = %s
@@ -235,6 +254,21 @@ def api_module_pricing_tier_update(tier_id: int):
             "annual_discount_months", body.get("annual_discount_months")
         )
         is_active = bool(body.get("is_active", True))
+        if "indirim_yuzde" in body:
+            indirim_yuzde = parse_indirim(body.get("indirim_yuzde"))
+        else:
+            indirim_yuzde = (
+                None if row.get("indirim_yuzde") is None else Decimal(str(row["indirim_yuzde"]))
+            )
+        dolar_fiyat, dolar_manuel = resolve_dolar_on_save(
+            old_base=Decimal(str(row["base_monthly"])),
+            new_base=base_monthly,
+            old_dolar=None if row.get("dolar_fiyat") is None else Decimal(str(row["dolar_fiyat"])),
+            old_manuel=bool(row.get("dolar_fiyat_manuel")),
+            currency=str(row["currency"]),
+            submitted_dolar=parse_dolar(body.get("dolar_fiyat")) if body.get("dolar_edited") else None,
+            dolar_edited=bool(body.get("dolar_edited")),
+        )
         is_contact_sales = bool(row["is_contact_sales"])
         _validate_update_fields(
             base_monthly=base_monthly,
@@ -273,6 +307,9 @@ def api_module_pricing_tier_update(tier_id: int):
                 annual_discount_months = %s,
                 included_monthly_appointments = %s,
                 included_personnel = %s,
+                dolar_fiyat = %s,
+                dolar_fiyat_manuel = %s,
+                indirim_yuzde = %s,
                 is_active = %s,
                 updated_at = NOW()
             WHERE id = %s AND module_key = %s AND tier_key = %s AND country_code = %s
@@ -286,6 +323,9 @@ def api_module_pricing_tier_update(tier_id: int):
                 annual_discount_months,
                 included_monthly_appointments,
                 included_personnel,
+                None if dolar_fiyat is None else str(dolar_fiyat),
+                bool(dolar_manuel),
+                None if indirim_yuzde is None else str(indirim_yuzde),
                 is_active,
                 tier_id,
                 mk,
@@ -304,6 +344,9 @@ def api_module_pricing_tier_update(tier_id: int):
                 max_personnel = %s,
                 price_per_extra_branch = %s,
                 annual_discount_months = %s,
+                dolar_fiyat = %s,
+                dolar_fiyat_manuel = %s,
+                indirim_yuzde = %s,
                 is_active = %s,
                 updated_at = NOW()
             WHERE id = %s AND module_key = %s AND tier_key = %s AND country_code = %s
@@ -315,6 +358,9 @@ def api_module_pricing_tier_update(tier_id: int):
                 max_personnel,
                 str(price_per_extra_branch),
                 annual_discount_months,
+                None if dolar_fiyat is None else str(dolar_fiyat),
+                bool(dolar_manuel),
+                None if indirim_yuzde is None else str(indirim_yuzde),
                 is_active,
                 tier_id,
                 mk,
@@ -333,7 +379,11 @@ def api_module_pricing_tier_update(tier_id: int):
     invalidate_public_module_pricing_cache(
         str(row["module_key"]), str(row["country_code"])
     )
-    return jsonify({"ok": True, "tier": _tier_row_to_json(updated)})
+    try:
+        saved_rate, _src = get_usd_try_rate()
+    except ValueError:
+        saved_rate = None
+    return jsonify({"ok": True, "tier": _tier_row_to_json(updated, saved_rate)})
 
 
 @bp.route("/api/module-pricing/preview", methods=["POST"])

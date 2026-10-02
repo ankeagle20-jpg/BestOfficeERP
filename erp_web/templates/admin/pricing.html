@@ -63,6 +63,7 @@
   .pr-row-msg.ok { color:#a5d6a7; }
   .pr-row-msg.err { color:#ef9a9a; }
   .pr-badge { margin-left:6px; font-size:.68rem; color:#ffb74d; }
+  .pr-table input.pr-dolar-fixed { border-color:#f57c00; }
 </style>
 
 <div class="mod-nav">
@@ -101,8 +102,15 @@
       Ülke
       <select id="pr-country"></select>
     </label>
+    <label>
+      Güncel Kur (USD/TRY)
+      <input type="number" id="pr-usdtry" min="0" step="0.0001" style="width:120px;">
+    </label>
+    <button type="button" class="btn-erp btn-erp-sm" id="pr-kur-guncelle">Kuru Güncelle</button>
+    <button type="button" class="btn-erp btn-erp-sm" id="pr-kur-kaydet">Kuru Kaydet</button>
     <button type="button" class="btn-erp btn-erp-sm" id="pr-yenile">Yenile</button>
   </div>
+  <div class="pr-meta">Dolar fiyatı taban / kur ile hesaplanır. Elle girilirse sabit kalır; taban değişince yeniden otomatik olur. % İndirim yalnızca nottur, faturaya yansımaz.</div>
   <div class="pr-meta" id="pr-meta">Yükleniyor...</div>
   <div class="pr-err" id="pr-err"></div>
   <div class="pr-ok" id="pr-ok"></div>
@@ -118,15 +126,17 @@
             <th>Min müşteri</th>
             <th>Max müşteri</th>
             <th>Taban (aylık)</th>
+            <th>Dolar Fiyat</th>
             <th>Müşteri başı</th>
             <th>Dahil kullanıcı</th>
             <th>Ek kullanıcı ücreti</th>
+            <th>% İndirim</th>
             <th>Aktif</th>
             <th></th>
           </tr>
         </thead>
         <tbody id="pr-tiers-body">
-          <tr><td colspan="10" style="color:#78909c;">Yükleniyor...</td></tr>
+          <tr><td colspan="12" style="color:#78909c;">Yükleniyor...</td></tr>
         </tbody>
       </table>
     </div>
@@ -143,16 +153,18 @@
               <th>tier_key</th>
               <th>Ad</th>
               <th>Taban (aylık)</th>
+              <th>Dolar Fiyat</th>
               <th>Personel başı</th>
               <th>Max personel</th>
               <th>Ek şube ücreti</th>
               <th>Yıllık indirim (ay)</th>
+              <th>% İndirim</th>
               <th>Aktif</th>
               <th></th>
             </tr>
           </thead>
           <tbody id="pr-mod-personnel-body" data-module="personnel" data-kind="personnel">
-            <tr><td colspan="9" style="color:#78909c;">Yükleniyor...</td></tr>
+            <tr><td colspan="11" style="color:#78909c;">Yükleniyor...</td></tr>
           </tbody>
         </table>
       </div>
@@ -168,17 +180,19 @@
               <th>tier_key</th>
               <th>Ad</th>
               <th>Taban (aylık)</th>
+              <th>Dolar Fiyat</th>
               <th>Dahil randevu</th>
               <th>Dahil personel</th>
               <th>Ek personel ücreti</th>
               <th>Personel max</th>
               <th>Yıllık indirim (ay)</th>
+              <th>% İndirim</th>
               <th>Aktif</th>
               <th></th>
             </tr>
           </thead>
           <tbody id="pr-mod-randevu-body" data-module="randevu" data-kind="randevu">
-            <tr><td colspan="10" style="color:#78909c;">Yükleniyor...</td></tr>
+            <tr><td colspan="12" style="color:#78909c;">Yükleniyor...</td></tr>
           </tbody>
         </table>
       </div>
@@ -194,16 +208,18 @@
               <th>tier_key</th>
               <th>Ad</th>
               <th>Taban (aylık)</th>
+              <th>Dolar Fiyat</th>
               <th>Cari kart başı</th>
               <th>Max cari kart</th>
               <th>Ek şube ücreti</th>
               <th>Yıllık indirim (ay)</th>
+              <th>% İndirim</th>
               <th>Aktif</th>
               <th></th>
             </tr>
           </thead>
           <tbody id="pr-mod-ledger-body" data-module="ledger" data-kind="ledger">
-            <tr><td colspan="9" style="color:#78909c;">Yükleniyor...</td></tr>
+            <tr><td colspan="11" style="color:#78909c;">Yükleniyor...</td></tr>
           </tbody>
         </table>
       </div>
@@ -361,15 +377,21 @@
 
   function tierRowHtml(t) {
     var maxVal = t.max_customers == null ? '' : t.max_customers;
-    return '<tr data-tier-id="' + t.id + '">' +
+    var dolar = t.dolar_goster == null ? '' : t.dolar_goster;
+    var indirim = t.indirim_yuzde == null ? '' : t.indirim_yuzde;
+    var fixed = t.dolar_fiyat_manuel ? ' pr-dolar-fixed' : '';
+    var title = t.dolar_fiyat_manuel ? 'Sabit dolar fiyatı' : 'Taban / kur';
+    return '<tr data-tier-id="' + t.id + '" data-orig-base="' + t.base_monthly + '" data-orig-dolar="' + dolar + '">' +
       '<td><code>' + escHtml(t.tier_key) + '</code></td>' +
       '<td><input type="text" class="pr-f-display_name" value="' + escHtml(t.display_name) + '"></td>' +
       '<td><input type="number" class="pr-f-min_customers" min="0" value="' + t.min_customers + '"></td>' +
       '<td><input type="number" class="pr-f-max_customers" min="0" value="' + maxVal + '" placeholder="+"></td>' +
       '<td><input type="number" class="pr-f-base_monthly" min="0" step="0.01" value="' + t.base_monthly + '"></td>' +
+      '<td><input type="number" class="pr-f-dolar' + fixed + '" min="0" step="0.01" value="' + dolar + '" title="' + title + '"></td>' +
       '<td><input type="number" class="pr-f-price_per_customer" min="0" step="0.0001" value="' + t.price_per_customer + '"></td>' +
       '<td><input type="number" class="pr-f-included_users" min="0" value="' + t.included_users + '"></td>' +
       '<td><input type="number" class="pr-f-price_per_extra_user" min="0" step="0.01" value="' + t.price_per_extra_user + '"></td>' +
+      '<td><input type="number" class="pr-f-indirim" min="0" max="100" step="0.01" value="' + indirim + '" placeholder="—"></td>' +
       '<td><input type="checkbox" class="pr-f-is_active" ' + (t.is_active ? 'checked' : '') + '></td>' +
       '<td><button type="button" class="btn-erp btn-erp-sm pr-save-tier">Kaydet</button><span class="pr-row-msg"></span></td>' +
       '</tr>';
@@ -382,7 +404,7 @@
       if (!res.json.ok) throw new Error(res.json.mesaj || 'Kademeler yüklenemedi');
       var tiers = res.json.tiers || [];
       if (!tiers.length) {
-        tiersBody.innerHTML = '<tr><td colspan="10" style="color:#78909c;">Bu ülke için özel kademe tanımlı değil (US Master kademeleri kullanılır).</td></tr>';
+        tiersBody.innerHTML = '<tr><td colspan="12" style="color:#78909c;">Bu ülke için özel kademe tanımlı değil (US Master kademeleri kullanılır).</td></tr>';
       } else {
         tiersBody.innerHTML = tiers.map(tierRowHtml).join('');
       }
@@ -418,8 +440,37 @@
       price_per_customer: parseFloat(tr.querySelector('.pr-f-price_per_customer').value),
       included_users: parseInt(tr.querySelector('.pr-f-included_users').value, 10),
       price_per_extra_user: parseFloat(tr.querySelector('.pr-f-price_per_extra_user').value),
-      is_active: tr.querySelector('.pr-f-is_active').checked
+      is_active: tr.querySelector('.pr-f-is_active').checked,
+      dolar_fiyat: parseFloat(tr.querySelector('.pr-f-dolar').value),
+      dolar_edited: !nearly(tr.querySelector('.pr-f-dolar').value, tr.getAttribute('data-orig-dolar')),
+      indirim_yuzde: blankToNull(tr.querySelector('.pr-f-indirim').value)
     };
+  }
+
+  function nearly(a, b) {
+    var x = parseFloat(a);
+    var y = parseFloat(b);
+    if (isNaN(x) && (b === null || b === '' || isNaN(y))) return true;
+    if (isNaN(x) || isNaN(y)) return false;
+    return Math.abs(x - y) < 0.001;
+  }
+
+  function blankToNull(raw) {
+    var s = String(raw == null ? '' : raw).trim();
+    if (s === '') return null;
+    return parseFloat(s);
+  }
+
+  function rememberPriceOrig(tr, tier) {
+    if (!tr || !tier) return;
+    tr.setAttribute('data-orig-base', tier.base_monthly);
+    tr.setAttribute('data-orig-dolar', tier.dolar_goster == null ? '' : tier.dolar_goster);
+    var dolarEl = tr.querySelector('.pr-f-dolar, .prm-dolar');
+    if (dolarEl && tier.dolar_goster != null) {
+      dolarEl.value = tier.dolar_goster;
+      dolarEl.classList.toggle('pr-dolar-fixed', !!tier.dolar_fiyat_manuel);
+      dolarEl.title = tier.dolar_fiyat_manuel ? 'Sabit dolar fiyatı' : 'Taban / kur';
+    }
   }
 
   function saveTier(tr) {
@@ -436,6 +487,7 @@
         }
         msgEl.textContent = 'OK';
         msgEl.className = 'pr-row-msg ok';
+        rememberPriceOrig(tr, res.json.tier);
         showOk('Kademe kaydedildi: ' + (res.json.tier && res.json.tier.tier_key));
         runPreview();
       })
@@ -520,11 +572,17 @@
     var contact = t.is_contact_sales ? '1' : '0';
     var maxDisabled = t.is_contact_sales ? ' disabled' : '';
     var badge = t.is_contact_sales ? '<span class="pr-badge">contact</span>' : '';
-    var head = '<tr data-tier-id="' + t.id + '" data-module="' + escHtml(t.module_key) + '" data-kind="' + kind + '" data-tier-key="' + escHtml(t.tier_key) + '" data-contact="' + contact + '" data-extra-branch="' + t.price_per_extra_branch + '">' +
+    var dolar = t.dolar_goster == null ? '' : t.dolar_goster;
+    var indirim = t.indirim_yuzde == null ? '' : t.indirim_yuzde;
+    var fixed = t.dolar_fiyat_manuel ? ' pr-dolar-fixed' : '';
+    var title = t.dolar_fiyat_manuel ? 'Sabit dolar fiyatı' : 'Taban / kur';
+    var head = '<tr data-tier-id="' + t.id + '" data-module="' + escHtml(t.module_key) + '" data-kind="' + kind + '" data-tier-key="' + escHtml(t.tier_key) + '" data-contact="' + contact + '" data-extra-branch="' + t.price_per_extra_branch + '" data-orig-base="' + t.base_monthly + '" data-orig-dolar="' + dolar + '">' +
       '<td><code>' + escHtml(t.tier_key) + '</code>' + badge + '</td>' +
       '<td><input type="text" class="prm-name" value="' + escHtml(t.display_name) + '"></td>' +
-      '<td><input type="number" class="prm-base" min="0" step="0.01" value="' + t.base_monthly + '"></td>';
+      '<td><input type="number" class="prm-base" min="0" step="0.01" value="' + t.base_monthly + '"></td>' +
+      '<td><input type="number" class="prm-dolar' + fixed + '" min="0" step="0.01" value="' + dolar + '" title="' + title + '"></td>';
     var tail = '<td><input type="number" class="prm-annual" min="0" max="11" value="' + t.annual_discount_months + '"></td>' +
+      '<td><input type="number" class="prm-indirim" min="0" max="100" step="0.01" value="' + indirim + '" placeholder="—"></td>' +
       '<td><input type="checkbox" class="prm-active" ' + (t.is_active ? 'checked' : '') + '></td>' +
       '<td><button type="button" class="btn-erp btn-erp-sm prm-save">Kaydet</button><span class="pr-row-msg"></span></td>' +
       '</tr>';
@@ -552,7 +610,7 @@
     return api('/admin/api/module-pricing/tiers' + q).then(function (res) {
       if (!res.json.ok) throw new Error(res.json.mesaj || 'Modül kademeleri yüklenemedi');
       var tiers = res.json.tiers || [];
-      var cols = spec.kind === 'randevu' ? 10 : 9;
+      var cols = spec.kind === 'randevu' ? 12 : 11;
       if (!tiers.length) {
         bodyEl.innerHTML = '<tr><td colspan="' + cols + '" style="color:#78909c;">Bu ülke için satır yok.</td></tr>';
         return;
@@ -582,7 +640,10 @@
       price_per_personnel: parseFloat(tr.querySelector('.prm-per').value),
       max_personnel: isContact ? null : (maxRaw === '' ? null : parseInt(maxRaw, 10)),
       annual_discount_months: parseInt(tr.querySelector('.prm-annual').value, 10),
-      is_active: tr.querySelector('.prm-active').checked
+      is_active: tr.querySelector('.prm-active').checked,
+      dolar_fiyat: parseFloat(tr.querySelector('.prm-dolar').value),
+      dolar_edited: !nearly(tr.querySelector('.prm-dolar').value, tr.getAttribute('data-orig-dolar')),
+      indirim_yuzde: blankToNull(tr.querySelector('.prm-indirim').value)
     };
     if (kind === 'randevu') {
       var extraBranch = parseFloat(tr.getAttribute('data-extra-branch') || '0');
@@ -609,6 +670,7 @@
         }
         msgEl.textContent = 'OK';
         msgEl.className = 'pr-row-msg ok';
+        rememberPriceOrig(tr, res.json.tier);
         showOk('Modül kademesi kaydedildi: ' + (res.json.tier && res.json.tier.module_key) + ' / ' + (res.json.tier && res.json.tier.tier_key));
       })
       .catch(function (e) {
@@ -617,11 +679,54 @@
       });
   }
 
+  function loadUsdTry() {
+    return api('/admin/api/pricing/usd-try').then(function (res) {
+      if (!res.json.ok) throw new Error(res.json.mesaj || 'Kur yüklenemedi');
+      var input = document.getElementById('pr-usdtry');
+      if (input) input.value = res.json.rate;
+    });
+  }
+
   function reloadAll() {
     showErr('');
     showOk('');
-    loadTiers().then(loadModuleSections).then(loadOverage).then(runPreview).catch(function (e) { showErr(e.message); });
+    loadUsdTry().then(loadTiers).then(loadModuleSections).then(loadOverage).then(runPreview).catch(function (e) { showErr(e.message); });
   }
+
+  document.getElementById('pr-kur-guncelle').addEventListener('click', function () {
+    var btn = this;
+    btn.disabled = true;
+    api('/admin/api/pricing/usd-try/refresh', { method: 'POST' }).then(function (res) {
+      btn.disabled = false;
+      if (!res.json.ok) {
+        showErr(res.json.mesaj || 'Kur güncellenemedi');
+        return;
+      }
+      showOk('Kur güncellendi: ' + res.json.rate);
+      reloadAll();
+    }).catch(function (e) {
+      btn.disabled = false;
+      showErr(e.message || 'Kur güncellenemedi');
+    });
+  });
+
+  document.getElementById('pr-kur-kaydet').addEventListener('click', function () {
+    var btn = this;
+    var rate = parseFloat(document.getElementById('pr-usdtry').value);
+    btn.disabled = true;
+    api('/admin/api/pricing/usd-try', { method: 'PUT', body: JSON.stringify({ rate: rate }) }).then(function (res) {
+      btn.disabled = false;
+      if (!res.json.ok) {
+        showErr(res.json.mesaj || 'Kur kaydedilemedi');
+        return;
+      }
+      showOk('Kur kaydedildi: ' + res.json.rate);
+      reloadAll();
+    }).catch(function (e) {
+      btn.disabled = false;
+      showErr(e.message || 'Kur kaydedilemedi');
+    });
+  });
 
   document.getElementById('pr-yenile').addEventListener('click', reloadAll);
   countrySel.addEventListener('change', reloadAll);

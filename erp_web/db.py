@@ -3538,6 +3538,7 @@ def ensure_pricing_tables():
     )
     _seed_pricing_tr()
     _seed_pricing_us()
+    ensure_pricing_display_columns()
 
 
 def _seed_pricing_tr() -> None:
@@ -3885,6 +3886,7 @@ def ensure_module_pricing_tiers_table():
     _seed_module_pricing_personnel()
     _seed_module_pricing_randevu()
     _seed_module_pricing_ledger()
+    ensure_pricing_display_columns()
 
 
 def _seed_module_pricing_personnel() -> None:
@@ -4274,6 +4276,33 @@ def ensure_platform_credentials_table():
             """,
             (key, desc, cat, is_secret),
         )
+
+
+def ensure_pricing_display_columns() -> None:
+    """Admin not kolonları: dolar fiyatı ve indirim yüzdesi. Fatura hesabı bunları okumaz."""
+    for table in ("public.pricing_tiers", "public.module_pricing_tiers"):
+        execute(
+            f"""
+            ALTER TABLE {table}
+            ADD COLUMN IF NOT EXISTS dolar_fiyat NUMERIC(12,2)
+            """
+        )
+        execute(
+            f"""
+            ALTER TABLE {table}
+            ADD COLUMN IF NOT EXISTS dolar_fiyat_manuel BOOLEAN NOT NULL DEFAULT FALSE
+            """
+        )
+        execute(
+            f"""
+            ALTER TABLE {table}
+            ADD COLUMN IF NOT EXISTS indirim_yuzde NUMERIC(5,2)
+            """
+        )
+
+
+def ensure_pricing_display_columns_once() -> None:
+    _run_ensure_ddl_once("pricing_display_columns", ensure_pricing_display_columns)
 
 
 def ensure_exchange_rates_table():
