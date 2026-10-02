@@ -1290,7 +1290,7 @@ def pdovam_anasayfa():
     bugun = liste_gun.strftime("%d.%m.%Y")
     gun_adi = ["Pazartesi","Salı","Çarşamba","Perşembe","Cuma","Cumartesi","Pazar"][liste_gun.weekday()]
     is_admin = current_user.is_authenticated and getattr(current_user, "role", None) == "admin"
-    bulut_base = (os.getenv("PUBLIC_APP_URL") or "https://bestofficeerp.onrender.com").strip().rstrip("/")
+    bulut_base = _bulut_base()
     # Görselleri her zaman mevcut sunucudan yükle (yerelde hızlı, Render'da aynı origin)
     qr_img_base = request.url_root.rstrip("/") or _server_base_url().rstrip("/")
 
@@ -1942,8 +1942,11 @@ def qr_uret(personel_id):
 
 
 def _bulut_base():
-    """Bulut (Render) adresi — QR içeriği bu adrese gider."""
-    return (os.getenv("PUBLIC_APP_URL") or "https://bestofficeerp.onrender.com").strip().rstrip("/")
+    """QR içeriğinin gideceği adres. PUBLIC_APP_URL yoksa isteğin kendi adresi."""
+    public_url = (os.getenv("PUBLIC_APP_URL") or "").strip().rstrip("/")
+    if public_url:
+        return public_url
+    return _server_base_url().rstrip("/")
 
 
 @bp.route("/qr/bulut/tek")
