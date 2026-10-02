@@ -442,18 +442,10 @@ def _vkn_in_aciklama(c: dict[str, Any], digit_hay: str) -> int:
     return 1 if len(v) >= 10 and v in digit_hay else 0
 
 
-def _blank_cell(val: object) -> bool:
-    if val is None:
-        return True
-    if isinstance(val, float) and val != val:
-        return True
-    if isinstance(val, str) and not val.strip():
-        return True
-    return False
-
-
 def parse_tutar_tr(val: object) -> float:
-    if _blank_cell(val):
+    import pandas as pd  # lazy: boot RSS
+
+    if val is None or (isinstance(val, float) and pd.isna(val)):
         return 0.0
     s = str(val).strip().replace(" ", "").replace("TL", "").replace("₺", "")
     if not s or s == "-":
@@ -472,7 +464,9 @@ def parse_tutar_tr(val: object) -> float:
 
 
 def parse_tarih(val: object) -> date | None:
-    if _blank_cell(val):
+    import pandas as pd  # lazy: boot RSS
+
+    if val is None or (isinstance(val, float) and pd.isna(val)):
         return None
     if hasattr(val, "date") and callable(getattr(val, "date", None)):
         try:
@@ -487,7 +481,10 @@ def parse_tarih(val: object) -> date | None:
             return datetime.strptime(s[:10], fmt).date()
         except ValueError:
             continue
-    return None
+    try:
+        return pd.to_datetime(s, dayfirst=True).date()
+    except Exception:
+        return None
 
 
 def _akbank_header_row(cols: list[str]) -> bool:
@@ -559,199 +556,6 @@ def read_akbank_excel(source: Path | bytes) -> pd.DataFrame:
     if last_err:
         raise RuntimeError(f"Excel okunamadı: {last_err}") from last_err
     raise RuntimeError("Akbank ekstre başlığı bulunamadı.")
-
-
-def _numeric_cell(val: object) -> float | None:
-    if isinstance(val, bool) or _blank_cell(val):
-        return None
-    if isinstance(val, (int, float)):
-        return float(val)
-    if isinstance(val, str):
-        s = val.strip().replace(" ", "")
-        if not s:
-            return None
-        try:
-            return float(s)
-        except ValueError:
-            return None
-    return None
-
-
-def _pandas_number_text(n: float) -> str:
-    """read_excel sayı sütununu metne çevirince tam sayılar '739982.0' olur."""
-    if n == int(n) and abs(n) < 1e15:
-        return f"{int(n)}.0"
-    return str(n)
-
-
-def _coerce_fis_like_pandas(records: list[dict[str, Any]], fis_key: str | None) -> None:
-    if not fis_key:
-        return
-    values = [r.get(fis_key) for r in records if not _blank_cell(r.get(fis_key))]
-    if not values or any(_numeric_cell(v) is None for v in values):
-        return
-    for r in records:
-        n = _numeric_cell(r.get(fis_key))
-        if n is None:
-            continue
-        r[fis_key] = _pandas_number_text(n)
-
-
-def _col_key(keys: list[str], *names: str) -> str | None:
-    folded = [(k, str(k).strip().lower()) for k in keys]
-    for n in names:
-        for k, low in folded:
-            if low == n:
-                return k
-    for n in names:
-        for k, low in folded:
-            if n in low:
-                return k
-    return None
-
-
-def read_akbank_kayitlar(source: Path | bytes) -> list[dict[str, Any]]:
-    """Tek openpyxl geçişi. Fiş no, pandas read_excel ile aynı metne çevrilir."""
-    from openpyxl import load_workbook
-
-    if isinstance(source, bytes):
-        wb = load_workbook(io.BytesIO(source), read_only=True, data_only=True)
-    else:
-        wb = load_workbook(source, read_only=True, data_only=True)
-    try:
-        ws = wb.active
-        if hasattr(ws, "reset_dimensions"):
-            ws.reset_dimensions()
-        header: list[str] | None = None
-        scanned = 0
-        row_iter = ws.iter_rows(values_only=True)
-        for row in row_iter:
-            cols = [norm_header(c) for c in row]
-            scanned += 1
-            if _akbank_header_row(cols):
-                header = cols
-                break
-            if scanned >= 18:
-                break
-        if not header:
-            raise RuntimeError("Akbank ekstre başlığı bulunamadı.")
-        records: list[dict[str, Any]] = []
-        for row in row_iter:
-            if row is None:
-                continue
-            item: dict[str, Any] = {}
-            cells = list(row)
-            for i, name in enumerate(header):
-                if not name or name in item:
-                    continue
-                item[name] = cells[i] if i < len(cells) else None
-            records.append(item)
-        fis_key = _col_key(header, "fiş/dekont no", "fis/dekont no", "fiş dekont no", "fis dekont no", "dekont no")
-        _coerce_fis_like_pandas(records, fis_key)
-        return records
-    finally:
-        wb.close()
-
-
-def kayit_hareket_satirlari(
-    records: list[dict[str, Any]],
-    yon: str = "gelen",
-) -> tuple[list[dict[str, Any]], dict[str, int]]:
-    """dataframe_hareket_satirlari ile aynı satırlar; DataFrame kurmaz."""
-    yon_f = _normalize_yon_filtre(yon)
-    keys = list(records[0].keys()) if records else []
-    col_tarih = _col_key(keys, "tarih")
-    col_saat = _col_key(keys, "saat")
-    col_aciklama = _col_key(keys, "aciklama")
-    col_ba = _col_key(keys, "borç/alacak", "borc/alacak", "borc / alacak")
-    col_fis = _col_key(keys, "fiş/dekont no", "fis/dekont no", "fiş dekont no", "fis dekont no", "dekont no")
-    col_tutar = _col_key(keys, "tutar")
-    if col_tutar is None:
-        for k in keys:
-            low = str(k).lower()
-            if "bakiye" in low:
-                continue
-            if "tutar" in low or low.startswith("unnamed"):
-                if any(parse_tutar_tr(r.get(k)) > 0 for r in records[:40]):
-                    col_tutar = k
-                    break
-    eksik = [n for n, c in [
-        ("tarih", col_tarih),
-        ("tutar", col_tutar),
-        ("borc/alacak", col_ba),
-        ("aciklama", col_aciklama),
-        ("fis/dekont no", col_fis),
-    ] if c is None]
-    if eksik:
-        raise ValueError(f"Eksik sütunlar: {eksik}. Mevcut: {keys}")
-
-    ozet: dict[str, Any] = {
-        "excel_satir": 0,
-        "a_degil": 0,
-        "ref_bos": 0,
-        "tutar_sifir": 0,
-        "tarih_yok": 0,
-        "islenen": 0,
-        "yon": yon_f,
-    }
-    satirlar: list[dict[str, Any]] = []
-    for sira, row in enumerate(records, start=1):
-        ozet["excel_satir"] += 1
-        ba = str(row.get(col_ba) or "").strip().upper()
-        is_gelen = ba == "A"
-        is_giden = ba == "B"
-        if yon_f == "gelen":
-            if not is_gelen:
-                ozet["a_degil"] += 1
-                continue
-            tip = "gelen"
-        elif yon_f == "giden":
-            if not is_giden:
-                ozet["a_degil"] += 1
-                continue
-            tip = "giden"
-        else:
-            if not (is_gelen or is_giden):
-                ozet["a_degil"] += 1
-                continue
-            tip = "gelen" if is_gelen else "giden"
-        ref_raw = row.get(col_fis)
-        if _blank_cell(ref_raw):
-            ozet["ref_bos"] += 1
-            continue
-        ref = str(ref_raw).strip()
-        if not ref:
-            ozet["ref_bos"] += 1
-            continue
-        tutar = parse_tutar_tr(row.get(col_tutar))
-        if tutar <= 0:
-            ozet["tutar_sifir"] += 1
-            continue
-        d = parse_tarih(row.get(col_tarih))
-        if not d:
-            ozet["tarih_yok"] += 1
-            continue
-        acik = str(row.get(col_aciklama) or "").strip()
-        saat_str = ""
-        if col_saat:
-            sa = row.get(col_saat)
-            if not _blank_cell(sa):
-                saat_str = str(sa).strip()
-        if saat_str:
-            acik = f"[Saat {saat_str}] {acik}".strip()
-        ozet["islenen"] += 1
-        satirlar.append({
-            "sira": sira,
-            "excel_index": sira - 1,
-            "tarih": d.isoformat(),
-            "saat": saat_str,
-            "tutar": round(tutar, 2),
-            "aciklama": acik,
-            "banka_referans_no": ref,
-            "tip": tip,
-            "yon": tip,
-        })
-    return satirlar, ozet
 
 
 def pick_tutar_column(df: pd.DataFrame) -> str | None:

@@ -930,8 +930,8 @@ def _iso_or_str(v):
 def api_akbank_tahsilat_analyze():
     """Yeni Excel yükle: dosyayı ERP'ye kaydet + önizleme (cariye işlenmiş fişler listede kalır, tahsilatta bayrağı ile)."""
     from services.banka_ak_import import (  # lazy: boot RSS
-        kayit_hareket_satirlari,
-        read_akbank_kayitlar,
+        dataframe_hareket_satirlari,
+        read_akbank_excel,
     )
 
     f = request.files.get("file")
@@ -955,8 +955,8 @@ def api_akbank_tahsilat_analyze():
             txs = upload_bank_excel(raw, bank_type)
             ham, ozet = standard_transactions_to_tahsilat_ham(txs, yon=yon)
         else:
-            kayitlar = read_akbank_kayitlar(raw)
-            ham, ozet = kayit_hareket_satirlari(kayitlar, yon=yon)
+            df = read_akbank_excel(raw)
+            ham, ozet = dataframe_hareket_satirlari(df, yon=yon)
     except ValueError as e:
         return jsonify({"ok": False, "mesaj": str(e)}), 400
     except Exception as e:
@@ -1134,9 +1134,9 @@ def api_akbank_tahsilat_analyze_kayitli():
     # logging.warning Render akışına düşmüyor; gunicorn stdout'u print ile görüyor.
     print("akbank analyze girdi", flush=True)
     import time
-    from services.banka_ak_import import (  # lazy: boot RSS; pandas yok
-        kayit_hareket_satirlari,
-        read_akbank_kayitlar,
+    from services.banka_ak_import import (  # lazy: boot RSS
+        dataframe_hareket_satirlari,
+        read_akbank_excel,
     )
 
     t0 = time.perf_counter()
@@ -1180,8 +1180,8 @@ def api_akbank_tahsilat_analyze_kayitli():
                 txs = upload_bank_excel(raw, eff)
                 ham, ozet = standard_transactions_to_tahsilat_ham(txs, yon=yon)
             else:
-                kayitlar = read_akbank_kayitlar(raw)
-                ham, ozet = kayit_hareket_satirlari(kayitlar, yon=yon)
+                df = read_akbank_excel(raw)
+                ham, ozet = dataframe_hareket_satirlari(df, yon=yon)
         except Exception as e:
             return jsonify({"ok": False, "mesaj": f"Dosya okunamadı ({row.get('ad_gosterim')}): {e}"}), 400
         hams.append(ham)
