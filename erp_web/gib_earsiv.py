@@ -23,6 +23,68 @@ _log = logging.getLogger(__name__)
 load_dotenv()
 
 _gib_file_log_lock = threading.Lock()
+_gib_oturum_lock = threading.Lock()
+_gib_oturum_client = None
+
+
+def gib_oturum_kaydet(client) -> None:
+    """Son başarılı e-Arşiv istemcisini tut. Token DB'ye yazılmaz."""
+    global _gib_oturum_client
+    if client is None:
+        return
+    with _gib_oturum_lock:
+        _gib_oturum_client = client
+
+
+def gib_oturum_kapat() -> dict:
+    """Açık e-Arşiv token'ı varsa GİB logout çağırır ve bellekteki oturumu siler.
+
+    Token yoksa GİB tarafındaki eski oturum kapanmaz; o oturumun anahtarı
+    elimizde değildir.
+    """
+    global _gib_oturum_client
+    with _gib_oturum_lock:
+        client = _gib_oturum_client
+        _gib_oturum_client = None
+    if client is None or not getattr(client, "token", None):
+        return {
+            "ok": True,
+            "portal_logout": False,
+            "mesaj": (
+                "ERP belleğinde açık GİB oturumu yoktu. "
+                "GİB hâlâ «başka oturum açık» diyorsa e-Arşiv portalına tarayıcıdan girip çıkış yapın; "
+                "o oturumun token'ı bizde kayıtlı değil."
+            ),
+        }
+    portal_ok = False
+    hata = ""
+    try:
+        if hasattr(client, "cikis_yap"):
+            portal_ok = bool(client.cikis_yap())
+        elif hasattr(client, "logout"):
+            portal_ok = bool(client.logout())
+    except Exception as ex:
+        hata = str(ex)[:300]
+        portal_ok = False
+    try:
+        client.token = None
+    except Exception:
+        pass
+    if portal_ok:
+        return {
+            "ok": True,
+            "portal_logout": True,
+            "mesaj": "GİB oturumu kapatıldı. Tekrar giriş deneyebilirsiniz.",
+        }
+    return {
+        "ok": False,
+        "portal_logout": False,
+        "mesaj": (
+            "GİB çıkış çağrısı tamamlanamadı. "
+            + (hata + " " if hata else "")
+            + "e-Arşiv portalına tarayıcıdan girip orada çıkış yapın."
+        ),
+    }
 
 
 def _gib_trace_file_line(text: str) -> None:
@@ -257,6 +319,7 @@ class BestOfficeGIBManager:
             self.client_type = "earsivportal"
             self._client_born_fresh = True
             self._portal_compat_shim()
+            gib_oturum_kaydet(self.client)
         except Exception as e:
             self.init_error = str(e)
             self.client = None

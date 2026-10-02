@@ -912,6 +912,8 @@
       <button type="button" class="auto-btn" id="gib_kaydet_btn" style="background:#3949ab;color:#fff;" onclick="gibFaturaKaydetEkraniAc()"><i class="fa fa-save"></i> Faturayı Kaydet</button>
       <button type="button" class="auto-btn" id="gib_son_btn" style="background:#455a64;color:#fff;" onclick="gibSonFaturaGetir()">Son Faturayı Getir</button>
       <button type="button" class="auto-btn run" id="gib_taslak_btn" onclick="gibTaslakGonder()">GİB Taslak Gönder</button>
+      <button type="button" class="auto-btn" id="gib_cikis_btn" style="background:#6d4c41;color:#fff;" onclick="gibCikisYap()" title="Bellekteki GİB oturumunu kapatır. «Başka oturum açık» hatasında işe yaramaz; earsivportal.efatura.gov.tr adresinden tarayıcıyla çıkış yapın.">GİB Çıkış</button>
+      <span style="font-size:12px;color:#ffcc80;max-width:280px;line-height:1.35;">«Başka oturum açık» hatasında bu buton işe yaramaz. earsivportal.efatura.gov.tr adresinden tarayıcıyla çıkış yapın.</span>
       <label>UUID/ETTN <input type="text" id="gib_uuid" placeholder="taslak sonrası gelir" style="width:220px;"></label>
       <button type="button" class="auto-btn" id="gib_sms_send_btn" style="background:#00897b;color:#fff;" onclick="gibSmsGonder()">SMS Gönder</button>
       <label>SMS Kod <input type="text" id="gib_sms_kod" placeholder="B2Z7V5" style="width:110px;"></label>
@@ -1748,6 +1750,21 @@ function gibFaturaOzetLookup() {
 }
 
 var gibTaslakDogrulandi = false;
+function gibCikisYap() {
+    var btn = document.getElementById('gib_cikis_btn');
+    var st = document.getElementById('gib_manual_status');
+    autoSetBusy(btn, true, 'Çıkılıyor...');
+    if (st) st.textContent = 'GİB oturumu kapatılıyor...';
+    fetch('/faturalar/api/gib-cikis', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}' })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+            if (st) st.textContent = (j && j.mesaj) ? j.mesaj : 'GİB çıkış isteği bitti.';
+        })
+        .catch(function (err) {
+            if (st) st.textContent = 'GİB çıkış isteği başarısız: ' + (err && err.message ? err.message : err);
+        })
+        .finally(function () { autoSetBusy(btn, false); });
+}
 function gibSetFlowEnabled(enabled) {
     var on = !!enabled;
     var smsSend = document.getElementById('gib_sms_send_btn');

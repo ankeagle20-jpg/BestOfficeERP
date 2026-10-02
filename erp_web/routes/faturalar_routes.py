@@ -11081,6 +11081,24 @@ except Exception:
     pass
 
 
+@bp.route('/api/gib-cikis', methods=['POST'])
+@faturalar_gerekli
+def api_gib_cikis():
+    """e-Arşiv oturumunu kapat. Token bellekteyse GİB logout; yoksa yalnız yerel temizlik."""
+    try:
+        from gib_earsiv import gib_oturum_kapat
+
+        out = gib_oturum_kapat()
+        return jsonify(out)
+    except Exception as e:
+        logging.getLogger(__name__).exception("api_gib_cikis")
+        return jsonify({
+            "ok": False,
+            "portal_logout": False,
+            "mesaj": "GİB çıkış isteği başarısız: " + str(e)[:300],
+        }), 500
+
+
 @bp.route('/api/gib-taslak', methods=['GET', 'POST'])
 @faturalar_gerekli
 def api_gib_taslak():
