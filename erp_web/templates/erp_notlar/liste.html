@@ -28,6 +28,9 @@
   .ea-tablo tr.ea-not-soluk { opacity:.55; }
   .ea-tablo tr.ea-not-vurgu { background:#1b3a4b; }
   .ea-tablo a { color:#80deea; }
+  .ea-kolon-tasi { border:0; background:transparent; color:#90a4ae; cursor:pointer; padding:0 2px; font-size:12px; }
+  .ea-tablo th:first-child [data-kolon-tasi="-1"],
+  .ea-tablo th:last-child [data-kolon-tasi="1"] { visibility:hidden; }
   .ea-bos { opacity:.75; }
 </style>
 {% endblock %}
@@ -43,6 +46,7 @@
     <a href="/erp-notlar/?gorunum=takvim" class="{% if gorunum == 'takvim' %}aktif{% endif %}">Takvim</a>
   </div>
 
+  <script>window.ERP_ASISTAN_KOLONLAR = {{ kolonlar|tojson }};</script>
   <div id="erp-asistan-liste" {% if gorunum == 'takvim' %}style="display:none;"{% endif %}>
     <form method="get" action="/erp-notlar/" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; align-items:center;">
       <label>Durum
@@ -63,27 +67,30 @@
       <table class="ea-tablo">
         <thead>
           <tr>
-            <th>Müşteri</th>
-            <th>Kategori</th>
-            <th>Görüşme Tarihi</th>
-            <th>Hatırlatma Tarihi</th>
-            <th>Görüşen Kişi</th>
-            <th>Görüşülen Kişi</th>
-            <th>Açıklama</th>
-            <th>Durum</th>
+            {% for k in kolonlar %}
+            <th data-kolon="{{ k }}">
+              <button type="button" class="ea-kolon-tasi" data-kolon-tasi="-1" title="Sola taşı">‹</button>{{ kolon_etiket[k] }}<button type="button" class="ea-kolon-tasi" data-kolon-tasi="1" title="Sağa taşı">›</button>
+            </th>
+            {% endfor %}
           </tr>
         </thead>
         <tbody>
           {% for n in notlar %}
           <tr id="not-{{ n.id }}" class="ea-satir{% if n.durum == 'tamamlandi' %} ea-not-soluk{% endif %}{% if vurgu == (n.id|string) %} ea-not-vurgu{% endif %}" data-not-id="{{ n.id }}">
-            <td>{% if n.detay_url and n.iliski_etiket %}<a href="{{ n.detay_url }}">{{ n.iliski_etiket }}</a>{% else %}{{ n.iliski_etiket or '-' }}{% endif %}</td>
-            <td>{{ n.kategori }}</td>
-            <td>{{ n.created_etiket }}</td>
-            <td>{{ n.hatirlatma_etiket }}</td>
-            <td>{{ n.olusturan_ad or '-' }}</td>
-            <td>{{ n.gorusulen_kisi or '-' }}</td>
-            <td>{{ n.not_metni }}</td>
-            <td>{{ n.durum }}</td>
+            {% for k in kolonlar %}
+            <td>
+              {% if k == 'musteri' %}
+                {% if n.detay_url and n.iliski_etiket %}<a href="{{ n.detay_url }}">{{ n.iliski_etiket }}</a>{% else %}{{ n.iliski_etiket or '-' }}{% endif %}
+              {% elif k == 'kategori' %}{{ n.kategori }}
+              {% elif k == 'gorusme' %}{{ n.created_etiket }}
+              {% elif k == 'hatirlatma' %}{{ n.hatirlatma_etiket }}
+              {% elif k == 'gorusen' %}{{ n.olusturan_ad or '-' }}
+              {% elif k == 'gorusulen' %}{{ n.gorusulen_kisi or '-' }}
+              {% elif k == 'aciklama' %}{{ n.not_metni }}
+              {% elif k == 'durum' %}{{ n.durum }}
+              {% endif %}
+            </td>
+            {% endfor %}
           </tr>
           {% endfor %}
         </tbody>

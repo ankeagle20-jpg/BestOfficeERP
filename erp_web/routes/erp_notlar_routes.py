@@ -5,6 +5,7 @@ APScheduler dakikada bir gonder_whatsapp_notlari çağırır.
 """
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -29,6 +30,26 @@ KATEGORILER = (
 )
 ILISKI_TIPLERI = ("musteri", "sozlesme", "fatura", "oda")
 DURUMLAR = ("bekliyor", "ertelendi", "tamamlandi")
+KOLON_VARSAYILAN = (
+    "musteri",
+    "kategori",
+    "gorusme",
+    "hatirlatma",
+    "gorusen",
+    "gorusulen",
+    "aciklama",
+    "durum",
+)
+KOLON_ETIKET = {
+    "musteri": "Müşteri",
+    "kategori": "Kategori",
+    "gorusme": "Görüşme Tarihi",
+    "hatirlatma": "Hatırlatma Tarihi",
+    "gorusen": "Görüşen Kişi",
+    "gorusulen": "Görüşülen Kişi",
+    "aciklama": "Açıklama",
+    "durum": "Durum",
+}
 _HAZIR_SEMALAR: set[str] = set()
 
 
@@ -77,6 +98,7 @@ def ensure_erp_notlar_tablolari() -> None:
     )
     try:
         execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS departman TEXT")
+        execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS erp_asistan_kolon_sirasi TEXT")
     except Exception as e:
         print(f"[WARN] erp_notlar users.departman ({schema}): {type(e).__name__}")
     try:
@@ -84,6 +106,28 @@ def ensure_erp_notlar_tablolari() -> None:
     except Exception as e:
         print(f"[WARN] erp_notlar gorusulen_kisi ({schema}): {type(e).__name__}")
     _HAZIR_SEMALAR.add(schema)
+
+
+def _kolon_gecerli(raw) -> list | None:
+    if not isinstance(raw, list) or len(raw) != len(KOLON_VARSAYILAN):
+        return None
+    temiz = [str(x) for x in raw]
+    if sorted(temiz) != sorted(KOLON_VARSAYILAN):
+        return None
+    return temiz
+
+
+def _kolon_sirasi_getir() -> list:
+    ensure_erp_notlar_tablolari()
+    try:
+        row = fetch_one(
+            "SELECT erp_asistan_kolon_sirasi FROM users WHERE id = %s",
+            (_uid(),),
+        )
+        ham = json.loads((row or {}).get("erp_asistan_kolon_sirasi") or "")
+    except Exception:
+        ham = None
+    return _kolon_gecerli(ham) or list(KOLON_VARSAYILAN)
 
 
 def _uid() -> int:
@@ -321,6 +365,8 @@ def liste():
     return render_template(
         "erp_notlar/liste.html",
         notlar=[_serialize(r) for r in rows],
+        kolonlar=_kolon_sirasi_getir(),
+        kolon_etiket=KOLON_ETIKET,
         durum=durum,
         q=q,
         vurgu=str(vurgu or ""),
@@ -385,6 +431,23 @@ def api_meta():
             "departmanlar": sorted(departmanlar),
         }
     )
+
+
+@bp.route("/api/kolonlar", methods=["GET", "POST"])
+@giris_gerekli
+def api_kolonlar():
+    if request.method == "POST":
+        data = request.get_json(silent=True) or {}
+        sira = _kolon_gecerli(data.get("siralama"))
+        if not sira:
+            return jsonify({"ok": False, "mesaj": "Kolon sırası geçersiz"}), 400
+        ensure_erp_notlar_tablolari()
+        execute(
+            "UPDATE users SET erp_asistan_kolon_sirasi = %s WHERE id = %s",
+            (json.dumps(sira, ensure_ascii=False), _uid()),
+        )
+        return jsonify({"ok": True, "siralama": sira})
+    return jsonify({"ok": True, "siralama": _kolon_sirasi_getir()})
 
 
 @bp.route("/api/musteri/<int:mid>")

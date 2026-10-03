@@ -6,6 +6,18 @@
   var sonMusteri = null;
   var panelSekme = "acik";
   var panelNotlar = [];
+  var KOLON_VARSAYILAN = ["musteri", "kategori", "gorusme", "hatirlatma", "gorusen", "gorusulen", "aciklama", "durum"];
+  var KOLON_ETIKET = {
+    musteri: "Müşteri",
+    kategori: "Kategori",
+    gorusme: "Görüşme Tarihi",
+    hatirlatma: "Hatırlatma Tarihi",
+    gorusen: "Görüşen Kişi",
+    gorusulen: "Görüşülen Kişi",
+    aciklama: "Açıklama",
+    durum: "Durum"
+  };
+  var kolonSirasi = KOLON_VARSAYILAN.slice();
 
   function loadShown() {
     try {
@@ -65,6 +77,8 @@
       ".ea-tablo tr.ea-not-soluk{opacity:.55;}" +
       ".ea-tablo tr.ea-not-vurgu{background:#1b3a4b;}" +
       ".ea-tablo a{color:#80deea;}" +
+      ".ea-kolon-tasi{border:0;background:transparent;color:#90a4ae;cursor:pointer;padding:0 2px;font-size:12px;}" +
+      ".ea-tablo th:first-child [data-kolon-tasi='-1'],.ea-tablo th:last-child [data-kolon-tasi='1']{visibility:hidden;}" +
       ".ea-not-meta{font-size:11px;opacity:.7;margin-bottom:4px;}" +
       ".erp-asistan-sabit{opacity:.85;margin:0 0 6px;font-size:13px;}";
     document.head.appendChild(st);
@@ -286,32 +300,88 @@
     return !!(kutu && kutu.classList.contains("acik"));
   }
 
-  function satirHtml(n) {
-    var soluk = n.durum === "tamamlandi" ? " ea-not-soluk" : "";
-    var musteri = "-";
-    if (n.iliski_etiket) {
-      musteri = n.detay_url
+  function kolonNormalize(raw) {
+    if (!Array.isArray(raw) || raw.length !== KOLON_VARSAYILAN.length) return KOLON_VARSAYILAN.slice();
+    var kopya = raw.map(function (x) { return String(x); });
+    var a = kopya.slice().sort().join("|");
+    var b = KOLON_VARSAYILAN.slice().sort().join("|");
+    return a === b ? kopya : KOLON_VARSAYILAN.slice();
+  }
+
+  if (window.ERP_ASISTAN_KOLONLAR) kolonSirasi = kolonNormalize(window.ERP_ASISTAN_KOLONLAR);
+
+  function hucreHtml(n, key) {
+    if (key === "musteri") {
+      if (!n.iliski_etiket) return "-";
+      return n.detay_url
         ? '<a href="' + esc(n.detay_url) + '">' + esc(n.iliski_etiket) + "</a>"
         : esc(n.iliski_etiket);
     }
-    return '<tr class="ea-satir' + soluk + '" data-not-id="' + esc(n.id) + '">' +
-      "<td>" + musteri + "</td>" +
-      "<td>" + esc(n.kategori) + "</td>" +
-      "<td>" + esc(n.created_etiket) + "</td>" +
-      "<td>" + esc(n.hatirlatma_etiket) + "</td>" +
-      "<td>" + esc(String(n.olusturan_ad || "").trim() || "-") + "</td>" +
-      "<td>" + esc(String(n.gorusulen_kisi || "").trim() || "-") + "</td>" +
-      "<td>" + esc(n.not_metni) + "</td>" +
-      "<td>" + esc(n.durum) + "</td></tr>";
+    if (key === "kategori") return esc(n.kategori);
+    if (key === "gorusme") return esc(n.created_etiket);
+    if (key === "hatirlatma") return esc(n.hatirlatma_etiket);
+    if (key === "gorusen") return esc(String(n.olusturan_ad || "").trim() || "-");
+    if (key === "gorusulen") return esc(String(n.gorusulen_kisi || "").trim() || "-");
+    if (key === "aciklama") return esc(n.not_metni);
+    if (key === "durum") return esc(n.durum);
+    return "";
+  }
+
+  function satirHtml(n) {
+    var soluk = n.durum === "tamamlandi" ? " ea-not-soluk" : "";
+    var html = '<tr class="ea-satir' + soluk + '" data-not-id="' + esc(n.id) + '">';
+    kolonSirasi.forEach(function (key) { html += "<td>" + hucreHtml(n, key) + "</td>"; });
+    return html + "</tr>";
   }
 
   function tabloHtml(notlar) {
-    var html = '<div class="ea-tablo-kaydir"><table class="ea-tablo"><thead><tr>' +
-      "<th>Müşteri</th><th>Kategori</th><th>Görüşme Tarihi</th><th>Hatırlatma Tarihi</th>" +
-      "<th>Görüşen Kişi</th><th>Görüşülen Kişi</th><th>Açıklama</th><th>Durum</th>" +
-      "</tr></thead><tbody>";
+    var html = '<div class="ea-tablo-kaydir"><table class="ea-tablo"><thead><tr>';
+    kolonSirasi.forEach(function (key) {
+      html += '<th data-kolon="' + esc(key) + '">' +
+        '<button type="button" class="ea-kolon-tasi" data-kolon-tasi="-1" title="Sola taşı">‹</button>' +
+        esc(KOLON_ETIKET[key] || key) +
+        '<button type="button" class="ea-kolon-tasi" data-kolon-tasi="1" title="Sağa taşı">›</button></th>';
+    });
+    html += "</tr></thead><tbody>";
     (notlar || []).forEach(function (n) { html += satirHtml(n); });
     return html + "</tbody></table></div>";
+  }
+
+  function kolonHucreDegistir(table, i, j) {
+    if (i === j) return;
+    var lo = Math.min(i, j);
+    var hi = Math.max(i, j);
+    for (var r = 0; r < table.rows.length; r++) {
+      var cells = table.rows[r].cells;
+      var left = cells[lo];
+      var right = cells[hi];
+      var marker = right.nextSibling;
+      table.rows[r].insertBefore(right, left);
+      table.rows[r].insertBefore(left, marker);
+    }
+  }
+
+  function kolonTasi(key, yon) {
+    var i = kolonSirasi.indexOf(key);
+    var j = i + yon;
+    if (i < 0 || j < 0 || j >= kolonSirasi.length) return;
+    var yeni = kolonSirasi.slice();
+    var tmp = yeni[i];
+    yeni[i] = yeni[j];
+    yeni[j] = tmp;
+    postJson("/erp-notlar/api/kolonlar", { siralama: yeni }).then(function (res) {
+      if (!res || !res.ok || !res.siralama) {
+        alert((res && res.mesaj) || "Sıra kaydedilemedi");
+        return;
+      }
+      kolonSirasi = kolonNormalize(res.siralama);
+      if (panelAcikMi()) {
+        gecmisCiz(panelNotlar);
+        return;
+      }
+      var tablolar = document.querySelectorAll("table.ea-tablo");
+      for (var t = 0; t < tablolar.length; t++) kolonHucreDegistir(tablolar[t], i, j);
+    });
   }
 
   function yerelInput(iso) {
@@ -613,6 +683,7 @@
       wa +
       '<div class="erp-asistan-aksiyon">' +
       '<button type="submit">Kaydet</button>' +
+      '<button type="button" id="erp-asistan-detay-tamam">Tamamlandı</button>' +
       '<button type="button" id="erp-asistan-detay-kapat">Kapat</button>' +
       "</div></form>";
     document.body.appendChild(perde);
@@ -620,7 +691,24 @@
     form.hatirlatma_zamani.value = yerelInput(n.hatirlatma_zamani);
     form.gorusulen_kisi.value = n.gorusulen_kisi || "";
     form.not_metni.value = n.not_metni || "";
+    function detayYenile() {
+      detayKapat();
+      if (document.getElementById("erp-asistan-liste") || document.getElementById("erp-asistan-takvim")) {
+        window.location.reload();
+        return;
+      }
+      if (panelAcikMi()) gecmisYukle();
+    }
     document.getElementById("erp-asistan-detay-kapat").onclick = function () { detayKapat(); };
+    document.getElementById("erp-asistan-detay-tamam").onclick = function () {
+      postJson("/erp-notlar/api/" + n.id + "/tamamla", {}).then(function (j) {
+        if (!j || !j.ok) {
+          alert((j && j.mesaj) || "Tamamlanamadı");
+          return;
+        }
+        detayYenile();
+      });
+    };
     form.onsubmit = function (ev) {
       ev.preventDefault();
       var metin = String(form.not_metni.value || "").trim();
@@ -638,12 +726,7 @@
           alert((j && j.mesaj) || "Kaydedilemedi");
           return;
         }
-        detayKapat();
-        if (document.getElementById("erp-asistan-liste") || document.getElementById("erp-asistan-takvim")) {
-          window.location.reload();
-          return;
-        }
-        if (panelAcikMi()) gecmisYukle();
+        detayYenile();
       });
     };
   }
@@ -666,7 +749,24 @@
     bildirimIzniBagla();
     var kutu = document.getElementById("erp_asistan_gecmis");
     if (kutu) kutu.classList.remove("acik");
+    if (!window.ERP_ASISTAN_KOLONLAR) {
+      fetch("/erp-notlar/api/kolonlar", { credentials: "same-origin" })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (j) {
+          if (!j || !j.ok) return;
+          kolonSirasi = kolonNormalize(j.siralama);
+          if (panelAcikMi()) gecmisCiz(panelNotlar);
+        })
+        .catch(function () {});
+    }
     document.addEventListener("click", function (ev) {
+      var ok = ev.target.closest && ev.target.closest("[data-kolon-tasi]");
+      if (ok) {
+        var th = ok.closest("th");
+        var key = th && th.getAttribute("data-kolon");
+        if (key) kolonTasi(key, Number(ok.getAttribute("data-kolon-tasi")));
+        return;
+      }
       var kart = ev.target.closest && ev.target.closest("tr.ea-satir");
       if (!kart || ev.target.closest("a,button,input,textarea,select,label")) return;
       var id = kart.getAttribute("data-not-id");
