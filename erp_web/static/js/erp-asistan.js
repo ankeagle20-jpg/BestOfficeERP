@@ -136,12 +136,47 @@
     });
   }
 
+  function masaustuBildir(n) {
+    try {
+      if (!document.hidden) return;
+      if (!window.Notification || Notification.permission !== "granted") return;
+      var baslik = n.kategori || "ERP Asistan";
+      var notif = new Notification(baslik, { body: n.not_metni || "" });
+      notif.onclick = function () {
+        try { window.focus(); } catch (e) {}
+        try { notif.close(); } catch (e2) {}
+      };
+    } catch (e) {}
+  }
+
+  function bildirimIzniBagla() {
+    var btn = document.getElementById("erp-asistan-bildirim-izin");
+    if (!btn) return;
+    if (!window.Notification || Notification.permission !== "default") {
+      btn.style.display = "none";
+      return;
+    }
+    btn.onclick = function () {
+      try {
+        var p = Notification.requestPermission();
+        if (p && typeof p.then === "function") {
+          p.then(function () {
+            if (Notification.permission !== "default") btn.style.display = "none";
+          }).catch(function () {});
+        } else if (Notification.permission !== "default") {
+          btn.style.display = "none";
+        }
+      } catch (e) {}
+    };
+  }
+
   function kartGoster(n) {
     if (acik) return;
     stilEkle();
     acik = true;
     isaretle(n);
     sesCal();
+    masaustuBildir(n);
     var perde = document.createElement("div");
     perde.id = "erp-asistan-popup";
     perde.className = "erp-asistan-perde";
@@ -470,6 +505,7 @@
 
   function basla() {
     stilEkle();
+    bildirimIzniBagla();
     var kutu = document.getElementById("erp_asistan_gecmis");
     if (kutu) kutu.classList.remove("acik");
     tara();

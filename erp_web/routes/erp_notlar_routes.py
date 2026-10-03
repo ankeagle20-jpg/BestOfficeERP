@@ -263,12 +263,13 @@ _LISTE_COLS = """
 """
 
 
-def _notlari_getir(extra_sql: str, extra_params: tuple, limit: int = 100) -> list:
+def _notlari_getir(extra_sql: str, extra_params: tuple, limit: int = 100, sira: str = "hatirlatma") -> list:
     ensure_erp_notlar_tablolari()
     params = _gorunur_params() + tuple(extra_params)
+    order = "n.created_at DESC, n.id DESC" if sira == "yeni" else "n.hatirlatma_zamani ASC, n.id ASC"
     sql = (
         f"SELECT {_LISTE_COLS} {_LISTE_FROM} WHERE {_gorunur_sql()} {extra_sql} "
-        f"ORDER BY n.hatirlatma_zamani ASC LIMIT {int(limit)}"
+        f"ORDER BY {order} LIMIT {int(limit)}"
     )
     try:
         return fetch_all(sql, params)
@@ -277,7 +278,7 @@ def _notlari_getir(extra_sql: str, extra_params: tuple, limit: int = 100) -> lis
         extra_sade = extra_sql.replace("c.name", "n.not_metni")
         sql2 = (
             f"SELECT n.* FROM erp_notlar n WHERE {_gorunur_sql()} {extra_sade} "
-            f"ORDER BY n.hatirlatma_zamani ASC LIMIT {int(limit)}"
+            f"ORDER BY {order} LIMIT {int(limit)}"
         )
         return fetch_all(sql2, params)
 
@@ -305,7 +306,7 @@ def liste():
         )
         like = "%" + q.replace("%", "") + "%"
         params.extend([like, like, like])
-    rows = _notlari_getir(" ".join(extra), tuple(params), limit=200)
+    rows = _notlari_getir(" ".join(extra), tuple(params), limit=200, sira="yeni")
     return render_template(
         "erp_notlar/liste.html",
         notlar=[_serialize(r) for r in rows],
@@ -425,7 +426,8 @@ def api_liste():
         like = "%" + q.replace("%", "") + "%"
         params.extend([like, like, like])
     limit = 500 if (bas or bitis) else 100
-    rows = _notlari_getir(" ".join(extra), tuple(params), limit=limit)
+    sira = "hatirlatma" if (bas or bitis) else "yeni"
+    rows = _notlari_getir(" ".join(extra), tuple(params), limit=limit, sira=sira)
     return jsonify({"ok": True, "notlar": [_serialize(r) for r in rows]})
 
 

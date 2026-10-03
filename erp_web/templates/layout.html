@@ -127,6 +127,20 @@
             align-items: center;
             justify-content: center;
         }
+
+        .erp-asistan-bildirim-izin {
+            background: transparent;
+            color: #90a4ae;
+            border: 1px solid #1e3a50;
+            border-radius: 12px;
+            font-size: 11px;
+            padding: 3px 8px;
+            cursor: pointer;
+        }
+
+        .erp-asistan-bildirim-izin:hover {
+            color: #4fc3f7;
+        }
         
         /* Navigation */
         .nav {
@@ -271,6 +285,7 @@
                     <i class="fa fa-bell"></i>
                     <span id="erp-asistan-zil-adet" class="erp-asistan-zil-adet"></span>
                 </a>
+                <button type="button" id="erp-asistan-bildirim-izin" class="erp-asistan-bildirim-izin" title="Sekme arkadayken masaüstü bildirimi">Bildirimlere izin ver</button>
                 {% endif %}
                 <span class="user-name">
                     <i class="fa fa-user"></i> {{ current_user.username }}
