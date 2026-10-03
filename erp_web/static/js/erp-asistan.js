@@ -52,10 +52,58 @@
   }
 
   function detayUrl(n) {
-    if (n.iliski_tip === "musteri" && n.iliski_id) {
-      return "/giris/?mid=" + encodeURIComponent(n.iliski_id);
+    if (n && n.detay_url) return n.detay_url;
+    if (n && n.iliski_tip === "musteri" && n.iliski_id) {
+      return "/giris/?mid=" + encodeURIComponent(n.iliski_id) + "&tab=sozlesmeler";
     }
-    return "/erp-notlar/?vurgu=" + encodeURIComponent(n.id);
+    if (n && n.id) return "/erp-notlar/?vurgu=" + encodeURIComponent(n.id);
+    return "/erp-notlar/?durum=bekliyor";
+  }
+
+  var sesCtx = null;
+
+  function sesHazirla() {
+    if (sesCtx) return;
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    try { sesCtx = new AC(); } catch (e) { sesCtx = null; }
+  }
+
+  document.addEventListener("pointerdown", function () {
+    sesHazirla();
+    if (sesCtx && sesCtx.state === "suspended") {
+      sesCtx.resume().catch(function () {});
+    }
+  });
+
+  function sesCal() {
+    try {
+      sesHazirla();
+      if (!sesCtx || sesCtx.state !== "running") return;
+      var o = sesCtx.createOscillator();
+      var g = sesCtx.createGain();
+      o.type = "sine";
+      o.frequency.value = 880;
+      g.gain.setValueAtTime(0.0001, sesCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.05, sesCtx.currentTime + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, sesCtx.currentTime + 0.16);
+      o.connect(g);
+      g.connect(sesCtx.destination);
+      o.start();
+      o.stop(sesCtx.currentTime + 0.18);
+    } catch (e) {}
+  }
+
+  function rozetGuncelle(adet) {
+    var el = document.getElementById("erp-asistan-zil-adet");
+    if (!el) return;
+    var n = parseInt(adet, 10) || 0;
+    if (n > 0) {
+      el.textContent = n > 99 ? "99+" : String(n);
+      el.style.display = "inline-flex";
+    } else {
+      el.style.display = "none";
+    }
   }
 
   function isaretle(n) {
@@ -90,6 +138,7 @@
     stilEkle();
     acik = true;
     isaretle(n);
+    sesCal();
     var perde = document.createElement("div");
     perde.id = "erp-asistan-popup";
     perde.className = "erp-asistan-perde";
@@ -137,7 +186,6 @@
   }
 
   function tara() {
-    if (acik) return;
     fetch("/erp-notlar/api/bekleyenler", { credentials: "same-origin" })
       .then(function (r) {
         if (!r.ok) return null;
@@ -145,6 +193,8 @@
       })
       .then(function (j) {
         if (!j || !j.ok || !j.notlar) return;
+        rozetGuncelle(j.notlar.length);
+        if (acik) return;
         var shown = loadShown();
         for (var i = 0; i < j.notlar.length; i++) {
           var n = j.notlar[i];

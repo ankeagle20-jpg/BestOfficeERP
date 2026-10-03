@@ -157,6 +157,35 @@ def _parse_dt(raw) -> datetime | None:
     return dt
 
 
+def _dt_gun(value) -> str:
+    if not isinstance(value, datetime):
+        return ""
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=IST)
+    return value.astimezone(IST).strftime("%Y-%m-%d")
+
+
+def _musteri_hedef_id(row: dict):
+    tip = str(row.get("iliski_tip") or "")
+    if tip == "musteri" and row.get("iliski_id"):
+        return int(row["iliski_id"])
+    for key in ("sozlesme_musteri_id", "fatura_musteri_id", "oda_musteri_id"):
+        if row.get(key):
+            return int(row[key])
+    return None
+
+
+def _detay_url(row: dict) -> str:
+    """Müşteri veya sözleşmenin müşterisi → Giriş / Sözleşmeler kartı."""
+    mid = _musteri_hedef_id(row)
+    if mid:
+        return f"/giris/?mid={mid}&tab=sozlesmeler"
+    nid = row.get("id")
+    if nid:
+        return f"/erp-notlar/?vurgu={nid}"
+    return "/erp-notlar/?durum=bekliyor"
+
+
 def _iliski_etiket(row: dict) -> str:
     tip = str(row.get("iliski_tip") or "")
     if tip == "musteri":
@@ -195,6 +224,8 @@ def _serialize(row: dict) -> dict:
         "not_metni": row.get("not_metni") or "",
         "hatirlatma_zamani": _dt_iso(row.get("hatirlatma_zamani")),
         "hatirlatma_etiket": _dt_etiket(row.get("hatirlatma_zamani")),
+        "hatirlatma_gun": _dt_gun(row.get("hatirlatma_zamani")),
+        "detay_url": _detay_url(row),
         "durum": row.get("durum") or "",
         "gorunurluk": row.get("gorunurluk") or "",
         "departman": row.get("departman") or "",
@@ -224,8 +255,11 @@ _LISTE_COLS = """
     c.name AS musteri_adi,
     c.phone AS musteri_telefon,
     s.sozlesme_no,
+    s.musteri_id AS sozlesme_musteri_id,
     f.fatura_no,
-    o.code AS office_number
+    f.musteri_id AS fatura_musteri_id,
+    o.code AS office_number,
+    o.customer_id AS oda_musteri_id
 """
 
 
@@ -252,6 +286,9 @@ def _notlari_getir(extra_sql: str, extra_params: tuple, limit: int = 100) -> lis
 @giris_gerekli
 def liste():
     ensure_erp_notlar_tablolari()
+    gorunum = str(request.args.get("gorunum") or "liste").strip().lower()
+    if gorunum not in ("liste", "takvim"):
+        gorunum = "liste"
     durum = str(request.args.get("durum") or "bekliyor").strip().lower()
     if durum not in DURUMLAR and durum != "hepsi":
         durum = "bekliyor"
@@ -275,6 +312,7 @@ def liste():
         durum=durum,
         q=q,
         vurgu=str(vurgu or ""),
+        gorunum=gorunum,
     )
 
 
@@ -364,8 +402,16 @@ def api_liste():
     iliski_tip = str(request.args.get("iliski_tip") or "").strip().lower()
     iliski_id = request.args.get("iliski_id")
     q = str(request.args.get("q") or "").strip()
+    bas = _parse_dt(str(request.args.get("bas") or "")[:10])
+    bitis = _parse_dt(str(request.args.get("bitis") or "")[:10])
     extra = []
     params: list = []
+    if bas:
+        extra.append("AND n.hatirlatma_zamani >= %s")
+        params.append(bas)
+    if bitis:
+        extra.append("AND n.hatirlatma_zamani < %s")
+        params.append(bitis + timedelta(days=1))
     if durum in DURUMLAR:
         extra.append("AND n.durum = %s")
         params.append(durum)
@@ -378,7 +424,8 @@ def api_liste():
         )
         like = "%" + q.replace("%", "") + "%"
         params.extend([like, like, like])
-    rows = _notlari_getir(" ".join(extra), tuple(params), limit=100)
+    limit = 500 if (bas or bitis) else 100
+    rows = _notlari_getir(" ".join(extra), tuple(params), limit=limit)
     return jsonify({"ok": True, "notlar": [_serialize(r) for r in rows]})
 
 

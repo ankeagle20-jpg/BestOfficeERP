@@ -98,6 +98,35 @@
         .user-actions a:hover {
             color: #4fc3f7;
         }
+
+        .erp-asistan-zil {
+            position: relative;
+            color: #90a4ae;
+            text-decoration: none;
+            font-size: 16px;
+            line-height: 1;
+        }
+
+        .erp-asistan-zil:hover {
+            color: #4fc3f7;
+        }
+
+        .erp-asistan-zil-adet {
+            display: none;
+            position: absolute;
+            top: -7px;
+            right: -10px;
+            min-width: 16px;
+            height: 16px;
+            padding: 0 4px;
+            border-radius: 8px;
+            background: #c62828;
+            color: #fff;
+            font-size: 10px;
+            font-weight: 700;
+            align-items: center;
+            justify-content: center;
+        }
         
         /* Navigation */
         .nav {
@@ -237,6 +266,12 @@
                 </div>
             </div>
             <div class="user-info">
+                {% if current_user.is_authenticated %}
+                <a href="/erp-notlar/?durum=bekliyor" id="erp-asistan-zil" class="erp-asistan-zil" title="Zamanı gelen notlar">
+                    <i class="fa fa-bell"></i>
+                    <span id="erp-asistan-zil-adet" class="erp-asistan-zil-adet"></span>
+                </a>
+                {% endif %}
                 <span class="user-name">
                     <i class="fa fa-user"></i> {{ current_user.username }}
                 </span>
