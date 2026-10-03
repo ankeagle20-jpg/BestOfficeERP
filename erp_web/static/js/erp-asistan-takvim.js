@@ -131,13 +131,10 @@
   function gunListe(g) {
     var liste = grup()[g] || [];
     if (!liste.length) return '<p class="ea-bos">Bu günde not yok.</p>';
+    if (window.erpAsistanTabloHtml) return window.erpAsistanTabloHtml(liste);
     var html = '<div class="ea-liste">';
-    liste.forEach(function (n) {
-      html += window.erpAsistanKartHtml
-        ? window.erpAsistanKartHtml(n)
-        : "<div>" + esc(n.not_metni) + "</div>";
-    });
-    return html + '</div>';
+    liste.forEach(function (n) { html += "<div>" + esc(n.not_metni) + "</div>"; });
+    return html + "</div>";
   }
 
   function ciz() {

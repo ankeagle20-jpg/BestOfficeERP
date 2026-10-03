@@ -55,13 +55,17 @@
       "#erp_asistan_gecmis{display:none;margin:8px 0 12px;}" +
       "#erp_asistan_gecmis.acik{display:block;}" +
       ".erp-asistan-rozet{display:inline-block;background:#8d2a2a;color:#fff;border-radius:8px;padding:1px 6px;margin-left:6px;font-size:11px;}" +
-      ".ea-not{border:1px solid #1e3a50;border-radius:8px;padding:8px 10px;margin:8px 0;cursor:pointer;font-size:13px;line-height:1.45;}" +
-      ".ea-not:hover{border-color:#4fc3f7;}" +
-      ".ea-not-soluk{opacity:.55;}" +
-      ".ea-not-vurgu{background:#1b3a4b;}" +
+      ".ea-tablo-kaydir{overflow-x:auto;margin-top:8px;}" +
+      ".ea-tablo{width:100%;min-width:920px;border-collapse:collapse;font-size:13px;}" +
+      ".ea-tablo th,.ea-tablo td{padding:6px 8px;border-bottom:1px solid #1e3a50;text-align:left;vertical-align:top;}" +
+      ".ea-tablo th{font-size:12px;white-space:nowrap;}" +
+      ".ea-tablo td:nth-child(3),.ea-tablo td:nth-child(4){white-space:nowrap;}" +
+      ".ea-tablo tbody tr{cursor:pointer;}" +
+      ".ea-tablo tbody tr:hover{background:#13293b;}" +
+      ".ea-tablo tr.ea-not-soluk{opacity:.55;}" +
+      ".ea-tablo tr.ea-not-vurgu{background:#1b3a4b;}" +
+      ".ea-tablo a{color:#80deea;}" +
       ".ea-not-meta{font-size:11px;opacity:.7;margin-bottom:4px;}" +
-      ".ea-not span{font-weight:600;}" +
-      ".ea-not a{color:#80deea;}" +
       ".erp-asistan-sabit{opacity:.85;margin:0 0 6px;font-size:13px;}";
     document.head.appendChild(st);
   }
@@ -282,22 +286,32 @@
     return !!(kutu && kutu.classList.contains("acik"));
   }
 
-  function kartHtml(n) {
-    var kisi = String(n.gorusulen_kisi || "").trim();
-    var goren = String(n.olusturan_ad || "").trim();
+  function satirHtml(n) {
     var soluk = n.durum === "tamamlandi" ? " ea-not-soluk" : "";
-    var iliski = "";
-    if (n.detay_url && n.iliski_etiket) {
-      iliski = ' · <a href="' + esc(n.detay_url) + '">' + esc(n.iliski_etiket) + "</a>";
+    var musteri = "-";
+    if (n.iliski_etiket) {
+      musteri = n.detay_url
+        ? '<a href="' + esc(n.detay_url) + '">' + esc(n.iliski_etiket) + "</a>"
+        : esc(n.iliski_etiket);
     }
-    return '<article class="ea-not' + soluk + '" data-not-id="' + esc(n.id) + '">' +
-      '<div class="ea-not-meta">' + esc(n.kategori) + " · " + esc(n.durum) + iliski + "</div>" +
-      "<div><span>Görüşme Tarihi:</span> " + esc(n.created_etiket) + "</div>" +
-      "<div><span>Hatırlatma Tarihi:</span> " + esc(n.hatirlatma_etiket) + "</div>" +
-      "<div><span>Görüşen Kişi:</span> " + esc(goren || "-") + "</div>" +
-      "<div><span>Görüşülen Kişi:</span> " + esc(kisi || "-") + "</div>" +
-      "<div><span>Açıklama:</span> " + esc(n.not_metni) + "</div>" +
-      "</article>";
+    return '<tr class="ea-satir' + soluk + '" data-not-id="' + esc(n.id) + '">' +
+      "<td>" + musteri + "</td>" +
+      "<td>" + esc(n.kategori) + "</td>" +
+      "<td>" + esc(n.created_etiket) + "</td>" +
+      "<td>" + esc(n.hatirlatma_etiket) + "</td>" +
+      "<td>" + esc(String(n.olusturan_ad || "").trim() || "-") + "</td>" +
+      "<td>" + esc(String(n.gorusulen_kisi || "").trim() || "-") + "</td>" +
+      "<td>" + esc(n.not_metni) + "</td>" +
+      "<td>" + esc(n.durum) + "</td></tr>";
+  }
+
+  function tabloHtml(notlar) {
+    var html = '<div class="ea-tablo-kaydir"><table class="ea-tablo"><thead><tr>' +
+      "<th>Müşteri</th><th>Kategori</th><th>Görüşme Tarihi</th><th>Hatırlatma Tarihi</th>" +
+      "<th>Görüşen Kişi</th><th>Görüşülen Kişi</th><th>Açıklama</th><th>Durum</th>" +
+      "</tr></thead><tbody>";
+    (notlar || []).forEach(function (n) { html += satirHtml(n); });
+    return html + "</tbody></table></div>";
   }
 
   function yerelInput(iso) {
@@ -331,8 +345,7 @@
       return;
     }
     var baslik = panelSekme === "gecmis" ? "Geçmiş notlar" : "Açık notlar";
-    var html = "<strong>" + baslik + "</strong>";
-    gorunen.forEach(function (n) { html += kartHtml(n); });
+    var html = "<strong>" + baslik + "</strong>" + tabloHtml(gorunen);
     html += '<a href="/erp-notlar/" style="color:#80deea;">Tüm notlar</a>';
     liste.innerHTML = html;
   }
@@ -646,7 +659,7 @@
   }
 
   window.erpAsistanAc = panelToggle;
-  window.erpAsistanKartHtml = kartHtml;
+  window.erpAsistanTabloHtml = tabloHtml;
 
   function basla() {
     stilEkle();
@@ -654,7 +667,7 @@
     var kutu = document.getElementById("erp_asistan_gecmis");
     if (kutu) kutu.classList.remove("acik");
     document.addEventListener("click", function (ev) {
-      var kart = ev.target.closest && ev.target.closest(".ea-not");
+      var kart = ev.target.closest && ev.target.closest("tr.ea-satir");
       if (!kart || ev.target.closest("a,button,input,textarea,select,label")) return;
       var id = kart.getAttribute("data-not-id");
       if (id) detayAc(id);

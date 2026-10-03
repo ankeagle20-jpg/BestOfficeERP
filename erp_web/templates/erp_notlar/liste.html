@@ -18,19 +18,21 @@
   .ea-gun b { float:right; font-size:12px; }
   .ea-gun em, .ea-liste i { display:flex; gap:3px; margin-top:6px; font-style:normal; }
   .ea-gun em i, .ea-liste i { width:8px; height:8px; border-radius:50%; display:inline-block; }
-  .ea-liste { margin:8px 0 0; }
-  .ea-not { border:1px solid #1e3a50; border-radius:8px; padding:8px 10px; margin:8px 0; cursor:pointer; font-size:13px; line-height:1.45; }
-  .ea-not:hover { border-color:#4fc3f7; }
-  .ea-not-soluk { opacity:.55; }
-  .ea-not-vurgu { background:#1b3a4b; }
-  .ea-not-meta { font-size:11px; opacity:.7; margin-bottom:4px; }
-  .ea-not span { font-weight:600; }
-  .ea-not a { color:#80deea; }
+  .ea-tablo-kaydir { overflow-x:auto; }
+  .ea-tablo { width:100%; min-width:920px; border-collapse:collapse; font-size:13px; }
+  .ea-tablo th, .ea-tablo td { padding:6px 8px; border-bottom:1px solid #1e3a50; text-align:left; vertical-align:top; }
+  .ea-tablo th { font-size:12px; white-space:nowrap; }
+  .ea-tablo td:nth-child(3), .ea-tablo td:nth-child(4) { white-space:nowrap; }
+  .ea-tablo tbody tr { cursor:pointer; }
+  .ea-tablo tbody tr:hover { background:#13293b; }
+  .ea-tablo tr.ea-not-soluk { opacity:.55; }
+  .ea-tablo tr.ea-not-vurgu { background:#1b3a4b; }
+  .ea-tablo a { color:#80deea; }
   .ea-bos { opacity:.75; }
 </style>
 {% endblock %}
 {% block content %}
-<div style="padding:16px 20px 40px; max-width:1100px;">
+<div style="padding:16px 20px 40px; max-width:1400px;">
   <h1 style="font-size:22px; margin-bottom:6px;">ERP Asistan</h1>
   <p style="opacity:.8; font-size:13px; margin-bottom:14px;">
     Bekleyen notlar net, tamamlananlar soluk görünür.
@@ -56,18 +58,40 @@
       </label>
       <button type="submit">Listele</button>
     </form>
-    {% for n in notlar %}
-    <article id="not-{{ n.id }}" class="ea-not{% if n.durum == 'tamamlandi' %} ea-not-soluk{% endif %}{% if vurgu == (n.id|string) %} ea-not-vurgu{% endif %}" data-not-id="{{ n.id }}">
-      <div class="ea-not-meta">{{ n.kategori }} · {{ n.durum }}{% if n.detay_url and n.iliski_etiket %} · <a href="{{ n.detay_url }}">{{ n.iliski_etiket }}</a>{% elif n.iliski_etiket %} · {{ n.iliski_etiket }}{% endif %}</div>
-      <div><span>Görüşme Tarihi:</span> {{ n.created_etiket }}</div>
-      <div><span>Hatırlatma Tarihi:</span> {{ n.hatirlatma_etiket }}</div>
-      <div><span>Görüşen Kişi:</span> {{ n.olusturan_ad or '-' }}</div>
-      <div><span>Görüşülen Kişi:</span> {{ n.gorusulen_kisi or '-' }}</div>
-      <div><span>Açıklama:</span> {{ n.not_metni }}</div>
-    </article>
+    {% if notlar %}
+    <div class="ea-tablo-kaydir">
+      <table class="ea-tablo">
+        <thead>
+          <tr>
+            <th>Müşteri</th>
+            <th>Kategori</th>
+            <th>Görüşme Tarihi</th>
+            <th>Hatırlatma Tarihi</th>
+            <th>Görüşen Kişi</th>
+            <th>Görüşülen Kişi</th>
+            <th>Açıklama</th>
+            <th>Durum</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for n in notlar %}
+          <tr id="not-{{ n.id }}" class="ea-satir{% if n.durum == 'tamamlandi' %} ea-not-soluk{% endif %}{% if vurgu == (n.id|string) %} ea-not-vurgu{% endif %}" data-not-id="{{ n.id }}">
+            <td>{% if n.detay_url and n.iliski_etiket %}<a href="{{ n.detay_url }}">{{ n.iliski_etiket }}</a>{% else %}{{ n.iliski_etiket or '-' }}{% endif %}</td>
+            <td>{{ n.kategori }}</td>
+            <td>{{ n.created_etiket }}</td>
+            <td>{{ n.hatirlatma_etiket }}</td>
+            <td>{{ n.olusturan_ad or '-' }}</td>
+            <td>{{ n.gorusulen_kisi or '-' }}</td>
+            <td>{{ n.not_metni }}</td>
+            <td>{{ n.durum }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
     {% else %}
     <p style="opacity:.75;">Kayıt yok.</p>
-    {% endfor %}
+    {% endif %}
   </div>
 
   <div id="erp-asistan-takvim" {% if gorunum != 'takvim' %}style="display:none;"{% endif %}>
