@@ -54,7 +54,15 @@
       "#erp-asistan-sekme-acik.aktif,#erp-asistan-sekme-gecmis.aktif{background:#1565c0;}" +
       "#erp_asistan_gecmis{display:none;margin:8px 0 12px;}" +
       "#erp_asistan_gecmis.acik{display:block;}" +
-      ".erp-asistan-rozet{display:inline-block;background:#8d2a2a;color:#fff;border-radius:8px;padding:1px 6px;margin-left:6px;font-size:11px;}";
+      ".erp-asistan-rozet{display:inline-block;background:#8d2a2a;color:#fff;border-radius:8px;padding:1px 6px;margin-left:6px;font-size:11px;}" +
+      ".ea-not{border:1px solid #1e3a50;border-radius:8px;padding:8px 10px;margin:8px 0;cursor:pointer;font-size:13px;line-height:1.45;}" +
+      ".ea-not:hover{border-color:#4fc3f7;}" +
+      ".ea-not-soluk{opacity:.55;}" +
+      ".ea-not-vurgu{background:#1b3a4b;}" +
+      ".ea-not-meta{font-size:11px;opacity:.7;margin-bottom:4px;}" +
+      ".ea-not span{font-weight:600;}" +
+      ".ea-not a{color:#80deea;}" +
+      ".erp-asistan-sabit{opacity:.85;margin:0 0 6px;font-size:13px;}";
     document.head.appendChild(st);
   }
 
@@ -274,8 +282,27 @@
     return !!(kutu && kutu.classList.contains("acik"));
   }
 
-  function tarihSatiri(n) {
-    return "Not tarihi: " + esc(n.created_etiket || "") + " · Hatırlatma: " + esc(n.hatirlatma_etiket || "");
+  function kartHtml(n) {
+    var kisi = String(n.gorusulen_kisi || "").trim();
+    var goren = String(n.olusturan_ad || "").trim();
+    var soluk = n.durum === "tamamlandi" ? " ea-not-soluk" : "";
+    var iliski = "";
+    if (n.detay_url && n.iliski_etiket) {
+      iliski = ' · <a href="' + esc(n.detay_url) + '">' + esc(n.iliski_etiket) + "</a>";
+    }
+    return '<article class="ea-not' + soluk + '" data-not-id="' + esc(n.id) + '">' +
+      '<div class="ea-not-meta">' + esc(n.kategori) + " · " + esc(n.durum) + iliski + "</div>" +
+      "<div><span>Görüşme Tarihi:</span> " + esc(n.created_etiket) + "</div>" +
+      "<div><span>Hatırlatma Tarihi:</span> " + esc(n.hatirlatma_etiket) + "</div>" +
+      "<div><span>Görüşen Kişi:</span> " + esc(goren || "-") + "</div>" +
+      "<div><span>Görüşülen Kişi:</span> " + esc(kisi || "-") + "</div>" +
+      "<div><span>Açıklama:</span> " + esc(n.not_metni) + "</div>" +
+      "</article>";
+  }
+
+  function yerelInput(iso) {
+    var s = String(iso || "");
+    return s.length >= 16 ? s.slice(0, 16) : "";
   }
 
   function sekmeNotlari(notlar) {
@@ -304,15 +331,9 @@
       return;
     }
     var baslik = panelSekme === "gecmis" ? "Geçmiş notlar" : "Açık notlar";
-    var html = "<strong>" + baslik + "</strong><ul style=\"margin:6px 0 0 16px;\">";
-    gorunen.forEach(function (n) {
-      var rozet = n.whatsapp_rozet === "gönderilemedi"
-        ? ' <span class="erp-asistan-rozet" title="' + esc(n.whatsapp_hata) + '">gönderilemedi</span>'
-        : (n.whatsapp_rozet ? " · WA " + esc(n.whatsapp_rozet) : "");
-      html += "<li>" + tarihSatiri(n) + " · " + esc(n.kategori) + " · " +
-        esc(n.durum) + " — " + esc(n.not_metni) + rozet + "</li>";
-    });
-    html += '</ul> <a href="/erp-notlar/" style="color:#80deea;">Tüm notlar</a>';
+    var html = "<strong>" + baslik + "</strong>";
+    gorunen.forEach(function (n) { html += kartHtml(n); });
+    html += '<a href="/erp-notlar/" style="color:#80deea;">Tüm notlar</a>';
     liste.innerHTML = html;
   }
 
@@ -359,8 +380,9 @@
       "<h3>ERP Asistan</h3>" +
       '<div class="erp-asistan-alan"><span id="erp-asistan-musteri">Müşteri yükleniyor…</span></div>' +
       '<label class="erp-asistan-alan">Kategori<select name="kategori" id="erp-asistan-kategori"></select></label>' +
-      '<label class="erp-asistan-alan">Not<textarea name="not_metni" required rows="3"></textarea></label>' +
-      '<label class="erp-asistan-alan">Tarih ve saat<input type="datetime-local" name="hatirlatma_zamani" required></label>' +
+      '<label class="erp-asistan-alan">Açıklama<textarea name="not_metni" required rows="3"></textarea></label>' +
+      '<label class="erp-asistan-alan">Görüşülen Kişi<input name="gorusulen_kisi" maxlength="200"></label>' +
+      '<label class="erp-asistan-alan">Hatırlatma Tarihi<input type="datetime-local" name="hatirlatma_zamani" required></label>' +
       '<label class="erp-asistan-alan">Görünürlük<select name="gorunurluk" id="erp-asistan-gorunurluk">' +
       '<option value="kisisel">Kişisel</option><option value="ekip">Ekip</option></select></label>' +
       '<div id="erp-asistan-ekip" style="display:none;">' +
@@ -434,6 +456,7 @@
       var payload = {
         kategori: fd.get("kategori"),
         not_metni: fd.get("not_metni"),
+        gorusulen_kisi: fd.get("gorusulen_kisi") || "",
         hatirlatma_zamani: fd.get("hatirlatma_zamani"),
         gorunurluk: fd.get("gorunurluk"),
         departman: fd.get("gorunurluk") === "ekip" ? fd.get("departman") : "",
@@ -502,19 +525,21 @@
     var form = document.createElement("form");
     form.id = "erp-asistan-baska";
     form.innerHTML =
-      '<label class="erp-asistan-alan">Yeni not<textarea name="not_metni" required rows="2"></textarea></label>' +
-      '<label class="erp-asistan-alan">Tarih ve saat<input type="datetime-local" name="hatirlatma_zamani" required></label>' +
+      '<label class="erp-asistan-alan">Açıklama<textarea name="not_metni" required rows="2"></textarea></label>' +
+      '<label class="erp-asistan-alan">Görüşülen Kişi<input name="gorusulen_kisi" maxlength="200"></label>' +
+      '<label class="erp-asistan-alan">Hatırlatma Tarihi<input type="datetime-local" name="hatirlatma_zamani" required></label>' +
       '<div class="erp-asistan-aksiyon">' +
       '<button type="submit">Kaydet</button>' +
       '<button type="button" data-act="baska-vazgec">Vazgeç</button></div>' +
       '<p id="erp-asistan-baska-durum" style="display:none;"></p>';
-    var saat = form.querySelector("input");
+    var saat = form.querySelector('input[name="hatirlatma_zamani"]');
     saat.value = yerelSaat(new Date(Date.now() + 60 * 60 * 1000));
     aksiyon.parentNode.insertBefore(form, aksiyon);
     form.onsubmit = function (ev) {
       ev.preventDefault();
       var metin = String(form.not_metni.value || "").trim();
       var zaman = form.hatirlatma_zamani.value;
+      var gorusulen = String(form.gorusulen_kisi.value || "").trim();
       if (!metin || !zaman) return;
       if (new Date(zaman).getTime() <= Date.now()) {
         alert("İleri bir tarih ve saat seçin.");
@@ -523,6 +548,7 @@
       postJson("/erp-notlar/api/olustur", {
         kategori: n.kategori || "Genel Not",
         not_metni: metin,
+        gorusulen_kisi: gorusulen,
         hatirlatma_zamani: zaman,
         gorunurluk: "kisisel",
         iliski_tip: n.iliski_tip || "",
@@ -541,13 +567,98 @@
     };
   }
 
+  function detayKapat() {
+    var eski = document.getElementById("erp-asistan-detay");
+    if (eski) eski.remove();
+  }
+
+  function detayCiz(n) {
+    detayKapat();
+    stilEkle();
+    var gor = n.gorunurluk === "ekip" ? "Ekip" : "Kişisel";
+    if (n.departman) gor += " · " + n.departman;
+    var wa = "";
+    if (n.whatsapp_gonderilsin) {
+      wa = '<p class="ea-not-meta">WhatsApp: ' + esc(n.whatsapp_rozet || "gönderilecek") +
+        (n.whatsapp_telefon ? " · " + esc(n.whatsapp_telefon) : "") +
+        (n.whatsapp_mesaj ? " · " + esc(n.whatsapp_mesaj) : "") +
+        (n.whatsapp_hata ? " · " + esc(n.whatsapp_hata) : "") + "</p>";
+    }
+    var perde = document.createElement("div");
+    perde.id = "erp-asistan-detay";
+    perde.className = "erp-asistan-perde";
+    perde.innerHTML =
+      '<form class="erp-asistan-kart" id="erp-asistan-detay-form">' +
+      "<h3>Not detayı</h3>" +
+      '<p class="ea-not-meta">' + esc(n.kategori) + " · " + esc(n.durum) + " · " + esc(gor) + "</p>" +
+      (n.iliski_etiket ? '<p class="erp-asistan-sabit">' + esc(n.iliski_etiket) + "</p>" : "") +
+      '<p class="erp-asistan-sabit">Görüşme Tarihi: ' + esc(n.created_etiket || "-") + "</p>" +
+      '<p class="erp-asistan-sabit">Görüşen Kişi: ' + esc(n.olusturan_ad || "-") + "</p>" +
+      '<label class="erp-asistan-alan">Hatırlatma Tarihi<input type="datetime-local" name="hatirlatma_zamani" required></label>' +
+      '<label class="erp-asistan-alan">Görüşülen Kişi<input name="gorusulen_kisi" maxlength="200"></label>' +
+      '<label class="erp-asistan-alan">Açıklama<textarea name="not_metni" required rows="4"></textarea></label>' +
+      wa +
+      '<div class="erp-asistan-aksiyon">' +
+      '<button type="submit">Kaydet</button>' +
+      '<button type="button" id="erp-asistan-detay-kapat">Kapat</button>' +
+      "</div></form>";
+    document.body.appendChild(perde);
+    var form = document.getElementById("erp-asistan-detay-form");
+    form.hatirlatma_zamani.value = yerelInput(n.hatirlatma_zamani);
+    form.gorusulen_kisi.value = n.gorusulen_kisi || "";
+    form.not_metni.value = n.not_metni || "";
+    document.getElementById("erp-asistan-detay-kapat").onclick = function () { detayKapat(); };
+    form.onsubmit = function (ev) {
+      ev.preventDefault();
+      var metin = String(form.not_metni.value || "").trim();
+      var zaman = form.hatirlatma_zamani.value;
+      if (!metin || !zaman) {
+        alert("Açıklama ve hatırlatma tarihi gerekli.");
+        return;
+      }
+      postJson("/erp-notlar/api/" + n.id + "/guncelle", {
+        not_metni: metin,
+        gorusulen_kisi: form.gorusulen_kisi.value || "",
+        hatirlatma_zamani: zaman
+      }).then(function (j) {
+        if (!j || !j.ok) {
+          alert((j && j.mesaj) || "Kaydedilemedi");
+          return;
+        }
+        detayKapat();
+        if (document.getElementById("erp-asistan-liste") || document.getElementById("erp-asistan-takvim")) {
+          window.location.reload();
+          return;
+        }
+        if (panelAcikMi()) gecmisYukle();
+      });
+    };
+  }
+
+  function detayAc(id) {
+    fetch("/erp-notlar/api/" + encodeURIComponent(id), { credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) {
+        if (!j || !j.ok || !j.not) return;
+        detayCiz(j.not);
+      })
+      .catch(function () {});
+  }
+
   window.erpAsistanAc = panelToggle;
+  window.erpAsistanKartHtml = kartHtml;
 
   function basla() {
     stilEkle();
     bildirimIzniBagla();
     var kutu = document.getElementById("erp_asistan_gecmis");
     if (kutu) kutu.classList.remove("acik");
+    document.addEventListener("click", function (ev) {
+      var kart = ev.target.closest && ev.target.closest(".ea-not");
+      if (!kart || ev.target.closest("a,button,input,textarea,select,label")) return;
+      var id = kart.getAttribute("data-not-id");
+      if (id) detayAc(id);
+    });
     tara();
     setInterval(tara, POLL_MS);
     setInterval(function () {

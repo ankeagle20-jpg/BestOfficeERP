@@ -79,6 +79,10 @@ def ensure_erp_notlar_tablolari() -> None:
         execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS departman TEXT")
     except Exception as e:
         print(f"[WARN] erp_notlar users.departman ({schema}): {type(e).__name__}")
+    try:
+        execute("ALTER TABLE erp_notlar ADD COLUMN IF NOT EXISTS gorusulen_kisi TEXT")
+    except Exception as e:
+        print(f"[WARN] erp_notlar gorusulen_kisi ({schema}): {type(e).__name__}")
     _HAZIR_SEMALAR.add(schema)
 
 
@@ -227,6 +231,8 @@ def _serialize(row: dict) -> dict:
         "hatirlatma_gun": _dt_gun(row.get("hatirlatma_zamani")),
         "created_at": _dt_iso(row.get("created_at")),
         "created_etiket": _dt_etiket(row.get("created_at")),
+        "gorusulen_kisi": str(row.get("gorusulen_kisi") or "").strip(),
+        "olusturan_ad": str(row.get("olusturan_ad") or "").strip(),
         "detay_url": _detay_url(row),
         "durum": row.get("durum") or "",
         "gorunurluk": row.get("gorunurluk") or "",
@@ -250,6 +256,8 @@ _LISTE_FROM = """
       ON n.iliski_tip = 'fatura' AND f.id = n.iliski_id
     LEFT JOIN offices o
       ON n.iliski_tip = 'oda' AND o.id = n.iliski_id
+    LEFT JOIN users u
+      ON u.id = n.olusturan_kullanici_id
 """
 
 _LISTE_COLS = """
@@ -261,7 +269,8 @@ _LISTE_COLS = """
     f.fatura_no,
     f.musteri_id AS fatura_musteri_id,
     o.code AS office_number,
-    o.customer_id AS oda_musteri_id
+    o.customer_id AS oda_musteri_id,
+    COALESCE(NULLIF(BTRIM(u.full_name), ''), NULLIF(BTRIM(u.username), ''), '') AS olusturan_ad
 """
 
 
@@ -491,6 +500,7 @@ def api_olustur():
         return jsonify(
             {"ok": False, "mesaj": "Ekip notu için kullanıcı veya departman seçin"}
         ), 400
+    gorusulen = str(data.get("gorusulen_kisi") or "").strip()[:200]
     wa = bool(data.get("whatsapp_gonderilsin"))
     telefon = re.sub(r"[^\d+]", "", str(data.get("whatsapp_telefon") or ""))[:32]
     wa_mesaj = str(data.get("whatsapp_mesaj") or "").strip()
@@ -501,11 +511,13 @@ def api_olustur():
         INSERT INTO erp_notlar (
             olusturan_kullanici_id, kategori, iliski_tip, iliski_id, not_metni,
             hatirlatma_zamani, durum, gorunurluk, departman,
-            whatsapp_gonderilsin, whatsapp_telefon, whatsapp_mesaj
+            whatsapp_gonderilsin, whatsapp_telefon, whatsapp_mesaj,
+            gorusulen_kisi
         ) VALUES (
             %s, %s, %s, %s, %s,
             %s, 'bekliyor', %s, %s,
-            %s, %s, %s
+            %s, %s, %s,
+            %s
         )
         RETURNING id
         """,
@@ -521,6 +533,7 @@ def api_olustur():
             wa,
             telefon or None,
             wa_mesaj or None,
+            gorusulen or None,
         ),
     )
     nid = (row or {}).get("id")
@@ -545,6 +558,41 @@ def _guncelle_gorunur(nid: int, set_sql: str, set_params: tuple) -> bool:
     )
     params = tuple(set_params) + (nid,) + _gorunur_params()
     return execute(sql, params) > 0
+
+
+def _not_tek(nid: int):
+    rows = _notlari_getir("AND n.id = %s", (nid,), limit=1)
+    return rows[0] if rows else None
+
+
+@bp.route("/api/<int:nid>", methods=["GET"])
+@giris_gerekli
+def api_detay(nid: int):
+    row = _not_tek(nid)
+    if not row:
+        return jsonify({"ok": False, "mesaj": "Not bulunamadı"}), 404
+    return jsonify({"ok": True, "not": _serialize(row)})
+
+
+@bp.route("/api/<int:nid>/guncelle", methods=["POST"])
+@giris_gerekli
+def api_guncelle(nid: int):
+    data = request.get_json(silent=True) or {}
+    metin = str(data.get("not_metni") or "").strip()
+    if not metin:
+        return jsonify({"ok": False, "mesaj": "Açıklama gerekli"}), 400
+    hat = _parse_dt(data.get("hatirlatma_zamani"))
+    if not hat:
+        return jsonify({"ok": False, "mesaj": "Hatırlatma tarihi gerekli"}), 400
+    kisi = str(data.get("gorusulen_kisi") or "").strip()[:200]
+    if not _guncelle_gorunur(
+        nid,
+        "not_metni = %s, hatirlatma_zamani = %s, gorusulen_kisi = %s",
+        (metin, hat, kisi or None),
+    ):
+        return jsonify({"ok": False, "mesaj": "Not bulunamadı"}), 404
+    row = _not_tek(nid)
+    return jsonify({"ok": True, "not": _serialize(row) if row else {}})
 
 
 @bp.route("/api/<int:nid>/tamamla", methods=["POST"])

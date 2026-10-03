@@ -131,18 +131,13 @@
   function gunListe(g) {
     var liste = grup()[g] || [];
     if (!liste.length) return '<p class="ea-bos">Bu günde not yok.</p>';
-    var html = '<ul class="ea-liste">';
+    var html = '<div class="ea-liste">';
     liste.forEach(function (n) {
-      var soluk = n.durum === "tamamlandi" ? " ea-soluk" : "";
-      html += '<li class="' + soluk.trim() + '">' +
-        '<i style="background:' + renk(n.kategori) + '"></i>' +
-        '<span>Not tarihi: ' + esc(n.created_etiket) + ' · Hatırlatma: ' + esc(n.hatirlatma_etiket) + ' · ' + esc(n.kategori) + '</span>' +
-        '<strong>' + esc(n.not_metni) + '</strong>' +
-        (n.iliski_etiket ? '<em>' + esc(n.iliski_etiket) + '</em>' : '') +
-        (n.detay_url ? ' <a href="' + esc(n.detay_url) + '">Detay</a>' : '') +
-        '</li>';
+      html += window.erpAsistanKartHtml
+        ? window.erpAsistanKartHtml(n)
+        : "<div>" + esc(n.not_metni) + "</div>";
     });
-    return html + '</ul>';
+    return html + '</div>';
   }
 
   function ciz() {
