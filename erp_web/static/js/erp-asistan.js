@@ -77,8 +77,10 @@
       ".ea-tablo tr.ea-not-soluk{opacity:.55;}" +
       ".ea-tablo tr.ea-not-vurgu{background:#1b3a4b;}" +
       ".ea-tablo a{color:#80deea;}" +
-      ".ea-kolon-tasi{border:0;background:transparent;color:#90a4ae;cursor:pointer;padding:0 2px;font-size:12px;}" +
-      ".ea-tablo th:first-child [data-kolon-tasi='-1'],.ea-tablo th:last-child [data-kolon-tasi='1']{visibility:hidden;}" +
+      ".ea-tablo th[data-kolon]{cursor:grab;user-select:none;}" +
+      ".ea-tablo th.ea-surukleniyor{opacity:.45;cursor:grabbing;}" +
+      ".ea-tablo th.ea-birak-sol{box-shadow:inset 3px 0 0 #4fc3f7;}" +
+      ".ea-tablo th.ea-birak-sag{box-shadow:inset -3px 0 0 #4fc3f7;}" +
       ".ea-not-meta{font-size:11px;opacity:.7;margin-bottom:4px;}" +
       ".erp-asistan-sabit{opacity:.85;margin:0 0 6px;font-size:13px;}";
     document.head.appendChild(st);
@@ -337,38 +339,75 @@
   function tabloHtml(notlar) {
     var html = '<div class="ea-tablo-kaydir"><table class="ea-tablo"><thead><tr>';
     kolonSirasi.forEach(function (key) {
-      html += '<th data-kolon="' + esc(key) + '">' +
-        '<button type="button" class="ea-kolon-tasi" data-kolon-tasi="-1" title="Sola taşı">‹</button>' +
-        esc(KOLON_ETIKET[key] || key) +
-        '<button type="button" class="ea-kolon-tasi" data-kolon-tasi="1" title="Sağa taşı">›</button></th>';
+      html += '<th data-kolon="' + esc(key) + '" draggable="true" title="Kolonu sürükleyerek taşı">' +
+        esc(KOLON_ETIKET[key] || key) + "</th>";
     });
     html += "</tr></thead><tbody>";
     (notlar || []).forEach(function (n) { html += satirHtml(n); });
     return html + "</tbody></table></div>";
   }
 
-  function kolonHucreDegistir(table, i, j) {
-    if (i === j) return;
-    var lo = Math.min(i, j);
-    var hi = Math.max(i, j);
-    for (var r = 0; r < table.rows.length; r++) {
-      var cells = table.rows[r].cells;
-      var left = cells[lo];
-      var right = cells[hi];
-      var marker = right.nextSibling;
-      table.rows[r].insertBefore(right, left);
-      table.rows[r].insertBefore(left, marker);
+  var suruklenenKolon = "";
+
+  function kolonYeniSira(sira, tasinan, hedef, once) {
+    var yeni = sira.slice();
+    var from = yeni.indexOf(tasinan);
+    var to = yeni.indexOf(hedef);
+    if (from < 0 || to < 0 || tasinan === hedef) return yeni;
+    yeni.splice(from, 1);
+    if (from < to) to--;
+    yeni.splice(once ? to : to + 1, 0, tasinan);
+    return yeni;
+  }
+
+  function kolonBaslik(el) {
+    var node = el && el.nodeType === 1 ? el : (el && el.parentElement);
+    var th = node && node.closest && node.closest("th[data-kolon]");
+    if (!th || !th.closest("table.ea-tablo")) return null;
+    return th;
+  }
+
+  function kolonOpaklik(key, deger) {
+    var tablolar = document.querySelectorAll("table.ea-tablo");
+    for (var t = 0; t < tablolar.length; t++) {
+      var head = tablolar[t].tHead && tablolar[t].tHead.rows[0];
+      if (!head) continue;
+      var idx = -1;
+      for (var i = 0; i < head.cells.length; i++) {
+        if (head.cells[i].getAttribute("data-kolon") === key) idx = i;
+      }
+      if (idx < 0) continue;
+      for (var r = 0; r < tablolar[t].rows.length; r++) {
+        var cell = tablolar[t].rows[r].cells[idx];
+        if (cell) cell.style.opacity = deger;
+      }
     }
   }
 
-  function kolonTasi(key, yon) {
-    var i = kolonSirasi.indexOf(key);
-    var j = i + yon;
-    if (i < 0 || j < 0 || j >= kolonSirasi.length) return;
-    var yeni = kolonSirasi.slice();
-    var tmp = yeni[i];
-    yeni[i] = yeni[j];
-    yeni[j] = tmp;
+  function kolonVurguTemizle() {
+    var isaret = document.querySelectorAll(".ea-surukleniyor,.ea-birak-sol,.ea-birak-sag");
+    for (var i = 0; i < isaret.length; i++) {
+      isaret[i].classList.remove("ea-surukleniyor", "ea-birak-sol", "ea-birak-sag");
+    }
+    kolonOpaklik(suruklenenKolon, "");
+  }
+
+  function tabloKolonSirala(table, yeni) {
+    var head = table.tHead && table.tHead.rows[0];
+    if (!head) return;
+    var simdiki = [];
+    for (var i = 0; i < head.cells.length; i++) simdiki.push(head.cells[i].getAttribute("data-kolon"));
+    for (var r = 0; r < table.rows.length; r++) {
+      var byKey = {};
+      for (var c = 0; c < simdiki.length; c++) byKey[simdiki[c]] = table.rows[r].cells[c];
+      yeni.forEach(function (key) {
+        if (byKey[key]) table.rows[r].appendChild(byKey[key]);
+      });
+    }
+  }
+
+  function kolonKaydet(yeni) {
+    if (yeni.join("|") === kolonSirasi.join("|")) return;
     postJson("/erp-notlar/api/kolonlar", { siralama: yeni }).then(function (res) {
       if (!res || !res.ok || !res.siralama) {
         alert((res && res.mesaj) || "Sıra kaydedilemedi");
@@ -380,7 +419,7 @@
         return;
       }
       var tablolar = document.querySelectorAll("table.ea-tablo");
-      for (var t = 0; t < tablolar.length; t++) kolonHucreDegistir(tablolar[t], i, j);
+      for (var t = 0; t < tablolar.length; t++) tabloKolonSirala(tablolar[t], kolonSirasi);
     });
   }
 
@@ -759,14 +798,45 @@
         })
         .catch(function () {});
     }
+    document.addEventListener("dragstart", function (ev) {
+      var th = kolonBaslik(ev.target);
+      if (!th) return;
+      suruklenenKolon = th.getAttribute("data-kolon") || "";
+      th.classList.add("ea-surukleniyor");
+      kolonOpaklik(suruklenenKolon, "0.45");
+      try {
+        ev.dataTransfer.effectAllowed = "move";
+        ev.dataTransfer.setData("text/plain", suruklenenKolon);
+      } catch (e) {}
+    });
+    document.addEventListener("dragover", function (ev) {
+      var th = kolonBaslik(ev.target);
+      if (!th || !suruklenenKolon) return;
+      ev.preventDefault();
+      var hedefler = document.querySelectorAll(".ea-birak-sol,.ea-birak-sag");
+      for (var i = 0; i < hedefler.length; i++) hedefler[i].classList.remove("ea-birak-sol", "ea-birak-sag");
+      if (th.getAttribute("data-kolon") === suruklenenKolon) return;
+      var rect = th.getBoundingClientRect();
+      var once = (ev.clientX - rect.left) < rect.width / 2;
+      th.classList.add(once ? "ea-birak-sol" : "ea-birak-sag");
+    });
+    document.addEventListener("drop", function (ev) {
+      var th = kolonBaslik(ev.target);
+      if (!th || !suruklenenKolon) return;
+      ev.preventDefault();
+      var hedef = th.getAttribute("data-kolon") || "";
+      var rect = th.getBoundingClientRect();
+      var once = (ev.clientX - rect.left) < rect.width / 2;
+      var yeni = kolonYeniSira(kolonSirasi, suruklenenKolon, hedef, once);
+      kolonVurguTemizle();
+      suruklenenKolon = "";
+      kolonKaydet(yeni);
+    });
+    document.addEventListener("dragend", function () {
+      kolonVurguTemizle();
+      suruklenenKolon = "";
+    });
     document.addEventListener("click", function (ev) {
-      var ok = ev.target.closest && ev.target.closest("[data-kolon-tasi]");
-      if (ok) {
-        var th = ok.closest("th");
-        var key = th && th.getAttribute("data-kolon");
-        if (key) kolonTasi(key, Number(ok.getAttribute("data-kolon-tasi")));
-        return;
-      }
       var kart = ev.target.closest && ev.target.closest("tr.ea-satir");
       if (!kart || ev.target.closest("a,button,input,textarea,select,label")) return;
       var id = kart.getAttribute("data-not-id");

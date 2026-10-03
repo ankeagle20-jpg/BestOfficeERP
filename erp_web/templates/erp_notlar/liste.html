@@ -28,9 +28,10 @@
   .ea-tablo tr.ea-not-soluk { opacity:.55; }
   .ea-tablo tr.ea-not-vurgu { background:#1b3a4b; }
   .ea-tablo a { color:#80deea; }
-  .ea-kolon-tasi { border:0; background:transparent; color:#90a4ae; cursor:pointer; padding:0 2px; font-size:12px; }
-  .ea-tablo th:first-child [data-kolon-tasi="-1"],
-  .ea-tablo th:last-child [data-kolon-tasi="1"] { visibility:hidden; }
+  .ea-tablo th[data-kolon] { cursor:grab; user-select:none; }
+  .ea-tablo th.ea-surukleniyor { opacity:.45; cursor:grabbing; }
+  .ea-tablo th.ea-birak-sol { box-shadow:inset 3px 0 0 #4fc3f7; }
+  .ea-tablo th.ea-birak-sag { box-shadow:inset -3px 0 0 #4fc3f7; }
   .ea-bos { opacity:.75; }
 </style>
 {% endblock %}
@@ -68,9 +69,7 @@
         <thead>
           <tr>
             {% for k in kolonlar %}
-            <th data-kolon="{{ k }}">
-              <button type="button" class="ea-kolon-tasi" data-kolon-tasi="-1" title="Sola taşı">‹</button>{{ kolon_etiket[k] }}<button type="button" class="ea-kolon-tasi" data-kolon-tasi="1" title="Sağa taşı">›</button>
-            </th>
+            <th data-kolon="{{ k }}" draggable="true" title="Kolonu sürükleyerek taşı">{{ kolon_etiket[k] }}</th>
             {% endfor %}
           </tr>
         </thead>
