@@ -32,6 +32,9 @@
   .ea-tablo th.ea-surukleniyor { opacity:.45; cursor:grabbing; }
   .ea-tablo th.ea-birak-sol { box-shadow:inset 3px 0 0 #4fc3f7; }
   .ea-tablo th.ea-birak-sag { box-shadow:inset -3px 0 0 #4fc3f7; }
+  .ea-durum-ac { background:transparent; border:0; color:#4fc3f7; cursor:pointer; padding:0; font:inherit; text-decoration:underline; }
+  .ea-durum-menu { position:fixed; z-index:13000; background:#0f2537; border:1px solid #1e3a50; border-radius:6px; padding:4px; min-width:128px; }
+  .ea-durum-sec { display:block; width:100%; text-align:left; background:transparent; color:#e0f7fa; border:0; cursor:pointer; padding:6px 8px; }
   .ea-bos { opacity:.75; }
 </style>
 {% endblock %}
@@ -77,7 +80,7 @@
           {% for n in notlar %}
           <tr id="not-{{ n.id }}" class="ea-satir{% if n.durum == 'tamamlandi' %} ea-not-soluk{% endif %}{% if vurgu == (n.id|string) %} ea-not-vurgu{% endif %}" data-not-id="{{ n.id }}">
             {% for k in kolonlar %}
-            <td>
+            <td{% if k == 'durum' %} class="ea-durum"{% endif %}>
               {% if k == 'musteri' %}
                 {% if n.detay_url and n.iliski_etiket %}<a href="{{ n.detay_url }}">{{ n.iliski_etiket }}</a>{% else %}{{ n.iliski_etiket or '-' }}{% endif %}
               {% elif k == 'kategori' %}{{ n.kategori }}
@@ -86,7 +89,10 @@
               {% elif k == 'gorusen' %}{{ n.olusturan_ad or '-' }}
               {% elif k == 'gorusulen' %}{{ n.gorusulen_kisi or '-' }}
               {% elif k == 'aciklama' %}{{ n.not_metni }}
-              {% elif k == 'durum' %}{{ n.durum }}
+              {% elif k == 'durum' %}
+                {% if n.durum == 'bekliyor' or n.durum == 'ertelendi' %}
+                <button type="button" class="ea-durum-ac" data-not-id="{{ n.id }}">{{ n.durum }}</button>
+                {% else %}{{ n.durum }}{% endif %}
               {% endif %}
             </td>
             {% endfor %}
