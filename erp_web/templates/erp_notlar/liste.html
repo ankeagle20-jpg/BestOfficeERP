@@ -54,7 +54,7 @@
     <table style="width:100%; border-collapse:collapse; font-size:13px;">
       <thead>
         <tr style="text-align:left; border-bottom:1px solid #1e3a50;">
-          <th style="padding:6px;">Zaman</th>
+          <th style="padding:6px;">Tarih</th>
           <th style="padding:6px;">Kategori</th>
           <th style="padding:6px;">İlişki</th>
           <th style="padding:6px;">Not</th>
@@ -65,7 +65,7 @@
       <tbody>
         {% for n in notlar %}
         <tr id="not-{{ n.id }}" style="border-bottom:1px solid #163044;{% if vurgu == (n.id|string) %} background:#1b3a4b;{% endif %}">
-          <td style="padding:6px; white-space:nowrap;">{{ n.hatirlatma_etiket }}</td>
+          <td style="padding:6px; white-space:nowrap;">Not tarihi: {{ n.created_etiket }} · Hatırlatma: {{ n.hatirlatma_etiket }}</td>
           <td style="padding:6px;">{{ n.kategori }}</td>
           <td style="padding:6px;">{% if n.detay_url %}<a href="{{ n.detay_url }}" style="color:#80deea;">{{ n.iliski_etiket or 'Detay' }}</a>{% else %}{{ n.iliski_etiket }}{% endif %}</td>
           <td style="padding:6px;">{{ n.not_metni }}</td>

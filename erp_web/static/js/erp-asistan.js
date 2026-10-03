@@ -4,6 +4,8 @@
   var STORAGE_KEY = "bestoffice_erp_asistan_v1";
   var acik = false;
   var sonMusteri = null;
+  var panelSekme = "acik";
+  var panelNotlar = [];
 
   function loadShown() {
     try {
@@ -47,7 +49,9 @@
       ".erp-asistan-alan{display:flex;flex-direction:column;gap:4px;margin-bottom:8px;font-size:13px;}" +
       ".erp-asistan-alan input,.erp-asistan-alan select,.erp-asistan-alan textarea{background:#0a1929;color:#e0f7fa;border:1px solid #1e3a50;border-radius:6px;padding:6px;}" +
       ".erp-asistan-gecmis-kutu{margin-top:8px;font-size:13px;}" +
-      "#erp-asistan-yeni{margin:0 0 8px;cursor:pointer;border-radius:6px;border:1px solid #1e3a50;background:#1565c0;color:#fff;padding:6px 10px;}" +
+      "#erp-asistan-yeni,#erp-asistan-sekme-acik,#erp-asistan-sekme-gecmis{margin:0 6px 8px 0;cursor:pointer;border-radius:6px;border:1px solid #1e3a50;background:#1565c0;color:#fff;padding:6px 10px;}" +
+      "#erp-asistan-sekme-acik,#erp-asistan-sekme-gecmis{background:#0a1929;}" +
+      "#erp-asistan-sekme-acik.aktif,#erp-asistan-sekme-gecmis.aktif{background:#1565c0;}" +
       "#erp_asistan_gecmis{display:none;margin:8px 0 12px;}" +
       "#erp_asistan_gecmis.acik{display:block;}" +
       ".erp-asistan-rozet{display:inline-block;background:#8d2a2a;color:#fff;border-radius:8px;padding:1px 6px;margin-left:6px;font-size:11px;}";
@@ -270,19 +274,42 @@
     return !!(kutu && kutu.classList.contains("acik"));
   }
 
+  function tarihSatiri(n) {
+    return "Not tarihi: " + esc(n.created_etiket || "") + " · Hatırlatma: " + esc(n.hatirlatma_etiket || "");
+  }
+
+  function sekmeNotlari(notlar) {
+    return (notlar || []).filter(function (n) {
+      if (panelSekme === "gecmis") return n.durum === "tamamlandi";
+      return n.durum === "bekliyor" || n.durum === "ertelendi";
+    });
+  }
+
+  function sekmeIsaretle() {
+    var acikBtn = document.getElementById("erp-asistan-sekme-acik");
+    var gecmisBtn = document.getElementById("erp-asistan-sekme-gecmis");
+    if (acikBtn) acikBtn.classList.toggle("aktif", panelSekme !== "gecmis");
+    if (gecmisBtn) gecmisBtn.classList.toggle("aktif", panelSekme === "gecmis");
+  }
+
   function gecmisCiz(notlar) {
     var liste = document.getElementById("erp_asistan_gecmis_liste");
     if (!liste) return;
-    if (!notlar || !notlar.length) {
-      liste.innerHTML = "<div>Bu müşteri için not yok.</div>";
+    sekmeIsaretle();
+    var gorunen = sekmeNotlari(notlar);
+    if (!gorunen.length) {
+      liste.innerHTML = panelSekme === "gecmis"
+        ? "<div>Tamamlanan not yok.</div>"
+        : "<div>Açık not yok.</div>";
       return;
     }
-    var html = "<strong>ERP Asistan notları</strong><ul style=\"margin:6px 0 0 16px;\">";
-    notlar.forEach(function (n) {
+    var baslik = panelSekme === "gecmis" ? "Geçmiş notlar" : "Açık notlar";
+    var html = "<strong>" + baslik + "</strong><ul style=\"margin:6px 0 0 16px;\">";
+    gorunen.forEach(function (n) {
       var rozet = n.whatsapp_rozet === "gönderilemedi"
         ? ' <span class="erp-asistan-rozet" title="' + esc(n.whatsapp_hata) + '">gönderilemedi</span>'
         : (n.whatsapp_rozet ? " · WA " + esc(n.whatsapp_rozet) : "");
-      html += "<li>" + esc(n.hatirlatma_etiket) + " · " + esc(n.kategori) + " · " +
+      html += "<li>" + tarihSatiri(n) + " · " + esc(n.kategori) + " · " +
         esc(n.durum) + " — " + esc(n.not_metni) + rozet + "</li>";
     });
     html += '</ul> <a href="/erp-notlar/" style="color:#80deea;">Tüm notlar</a>';
@@ -301,7 +328,10 @@
     fetch("/erp-notlar/api/liste?iliski_tip=musteri&iliski_id=" + id, { credentials: "same-origin" })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (j) {
-        if (j && j.ok) gecmisCiz(j.notlar);
+        if (j && j.ok) {
+          panelNotlar = j.notlar || [];
+          gecmisCiz(panelNotlar);
+        }
       })
       .catch(function () {});
   }
@@ -431,8 +461,18 @@
     kutu.innerHTML =
       '<div class="erp-asistan-gecmis-kutu">' +
       '<button type="button" id="erp-asistan-yeni">Yeni Ekle</button>' +
+      '<button type="button" id="erp-asistan-sekme-acik" class="aktif">Açık</button>' +
+      '<button type="button" id="erp-asistan-sekme-gecmis">Geçmiş</button>' +
       '<div id="erp_asistan_gecmis_liste"></div></div>';
     document.getElementById("erp-asistan-yeni").onclick = function () { formAc(); };
+    document.getElementById("erp-asistan-sekme-acik").onclick = function () {
+      panelSekme = "acik";
+      gecmisCiz(panelNotlar);
+    };
+    document.getElementById("erp-asistan-sekme-gecmis").onclick = function () {
+      panelSekme = "gecmis";
+      gecmisCiz(panelNotlar);
+    };
   }
 
   function panelToggle() {
@@ -514,6 +554,8 @@
       var id = musteriId();
       if (id !== sonMusteri) {
         sonMusteri = id;
+        panelSekme = "acik";
+        panelNotlar = [];
         gecmisYukle();
       }
     }, 4000);

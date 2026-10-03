@@ -225,6 +225,8 @@ def _serialize(row: dict) -> dict:
         "hatirlatma_zamani": _dt_iso(row.get("hatirlatma_zamani")),
         "hatirlatma_etiket": _dt_etiket(row.get("hatirlatma_zamani")),
         "hatirlatma_gun": _dt_gun(row.get("hatirlatma_zamani")),
+        "created_at": _dt_iso(row.get("created_at")),
+        "created_etiket": _dt_etiket(row.get("created_at")),
         "detay_url": _detay_url(row),
         "durum": row.get("durum") or "",
         "gorunurluk": row.get("gorunurluk") or "",

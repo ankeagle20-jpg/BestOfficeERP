@@ -136,7 +136,7 @@
       var soluk = n.durum === "tamamlandi" ? " ea-soluk" : "";
       html += '<li class="' + soluk.trim() + '">' +
         '<i style="background:' + renk(n.kategori) + '"></i>' +
-        '<span>' + esc(n.hatirlatma_etiket) + ' · ' + esc(n.kategori) + '</span>' +
+        '<span>Not tarihi: ' + esc(n.created_etiket) + ' · Hatırlatma: ' + esc(n.hatirlatma_etiket) + ' · ' + esc(n.kategori) + '</span>' +
         '<strong>' + esc(n.not_metni) + '</strong>' +
         (n.iliski_etiket ? '<em>' + esc(n.iliski_etiket) + '</em>' : '') +
         (n.detay_url ? ' <a href="' + esc(n.detay_url) + '">Detay</a>' : '') +
