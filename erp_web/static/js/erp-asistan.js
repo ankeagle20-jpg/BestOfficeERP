@@ -47,6 +47,9 @@
       ".erp-asistan-alan{display:flex;flex-direction:column;gap:4px;margin-bottom:8px;font-size:13px;}" +
       ".erp-asistan-alan input,.erp-asistan-alan select,.erp-asistan-alan textarea{background:#0a1929;color:#e0f7fa;border:1px solid #1e3a50;border-radius:6px;padding:6px;}" +
       ".erp-asistan-gecmis-kutu{margin-top:8px;font-size:13px;}" +
+      "#erp-asistan-yeni{margin:0 0 8px;cursor:pointer;border-radius:6px;border:1px solid #1e3a50;background:#1565c0;color:#fff;padding:6px 10px;}" +
+      "#erp_asistan_gecmis{display:none;margin:8px 0 12px;}" +
+      "#erp_asistan_gecmis.acik{display:block;}" +
       ".erp-asistan-rozet{display:inline-block;background:#8d2a2a;color:#fff;border-radius:8px;padding:1px 6px;margin-left:6px;font-size:11px;}";
     document.head.appendChild(st);
   }
@@ -153,6 +156,7 @@
       "<p>" + esc(n.not_metni) + "</p>" +
       '<div class="erp-asistan-aksiyon">' +
       '<button type="button" data-act="tamam">Tamamlandı</button>' +
+      '<button type="button" data-act="baska">Başka Ekle</button>' +
       '<button type="button" data-act="5">Ertele 5 dk</button>' +
       '<button type="button" data-act="15">Ertele 15 dk</button>' +
       '<button type="button" data-act="60">Ertele 1 sa</button>' +
@@ -164,12 +168,22 @@
       var btn = ev.target.closest("button");
       if (!btn) return;
       var act = btn.getAttribute("data-act");
+      if (!act) return;
       if (act === "kapat") {
         kapatKart();
         return;
       }
       if (act === "detay") {
         window.location.href = detayUrl(n);
+        return;
+      }
+      if (act === "baska") {
+        baskaFormGoster(n);
+        return;
+      }
+      if (act === "baska-vazgec") {
+        var eskiForm = document.getElementById("erp-asistan-baska");
+        if (eskiForm) eskiForm.remove();
         return;
       }
       if (act === "tamam") {
@@ -216,14 +230,19 @@
     return null;
   }
 
-  function gecmisCiz(notlar) {
+  function panelAcikMi() {
     var kutu = document.getElementById("erp_asistan_gecmis");
-    if (!kutu) return;
+    return !!(kutu && kutu.classList.contains("acik"));
+  }
+
+  function gecmisCiz(notlar) {
+    var liste = document.getElementById("erp_asistan_gecmis_liste");
+    if (!liste) return;
     if (!notlar || !notlar.length) {
-      kutu.innerHTML = '<div class="erp-asistan-gecmis-kutu">Bu müşteri için not yok.</div>';
+      liste.innerHTML = "<div>Bu müşteri için not yok.</div>";
       return;
     }
-    var html = '<div class="erp-asistan-gecmis-kutu"><strong>ERP Asistan notları</strong><ul style="margin:6px 0 0 16px;">';
+    var html = "<strong>ERP Asistan notları</strong><ul style=\"margin:6px 0 0 16px;\">";
     notlar.forEach(function (n) {
       var rozet = n.whatsapp_rozet === "gönderilemedi"
         ? ' <span class="erp-asistan-rozet" title="' + esc(n.whatsapp_hata) + '">gönderilemedi</span>'
@@ -231,16 +250,17 @@
       html += "<li>" + esc(n.hatirlatma_etiket) + " · " + esc(n.kategori) + " · " +
         esc(n.durum) + " — " + esc(n.not_metni) + rozet + "</li>";
     });
-    html += '</ul> <a href="/erp-notlar/" style="color:#80deea;">Tüm notlar</a></div>';
-    kutu.innerHTML = html;
+    html += '</ul> <a href="/erp-notlar/" style="color:#80deea;">Tüm notlar</a>';
+    liste.innerHTML = html;
   }
 
   function gecmisYukle() {
-    var kutu = document.getElementById("erp_asistan_gecmis");
-    if (!kutu) return;
+    if (!panelAcikMi()) return;
+    var liste = document.getElementById("erp_asistan_gecmis_liste");
+    if (!liste) return;
     var id = musteriId();
     if (!id) {
-      kutu.innerHTML = '<div class="erp-asistan-gecmis-kutu">Müşteri seçilince notlar burada listelenir.</div>';
+      liste.innerHTML = "<div>Müşteri seçilince notlar burada listelenir.</div>";
       return;
     }
     fetch("/erp-notlar/api/liste?iliski_tip=musteri&iliski_id=" + id, { credentials: "same-origin" })
@@ -370,12 +390,90 @@
     };
   }
 
-  window.erpAsistanAc = formAc;
+  function panelIskelet() {
+    var kutu = document.getElementById("erp_asistan_gecmis");
+    if (!kutu || document.getElementById("erp-asistan-yeni")) return;
+    kutu.innerHTML =
+      '<div class="erp-asistan-gecmis-kutu">' +
+      '<button type="button" id="erp-asistan-yeni">Yeni Ekle</button>' +
+      '<div id="erp_asistan_gecmis_liste"></div></div>';
+    document.getElementById("erp-asistan-yeni").onclick = function () { formAc(); };
+  }
+
+  function panelToggle() {
+    var kutu = document.getElementById("erp_asistan_gecmis");
+    if (!kutu) return;
+    if (panelAcikMi()) {
+      kutu.classList.remove("acik");
+      return;
+    }
+    if (!musteriId()) {
+      alert("ERP Asistan için önce müşteri seçin.");
+      return;
+    }
+    panelIskelet();
+    kutu.classList.add("acik");
+    gecmisYukle();
+  }
+
+  function baskaFormGoster(n) {
+    var eski = document.getElementById("erp-asistan-baska");
+    if (eski) {
+      eski.remove();
+      return;
+    }
+    var aksiyon = document.querySelector("#erp-asistan-popup .erp-asistan-aksiyon");
+    if (!aksiyon) return;
+    var form = document.createElement("form");
+    form.id = "erp-asistan-baska";
+    form.innerHTML =
+      '<label class="erp-asistan-alan">Yeni not<textarea name="not_metni" required rows="2"></textarea></label>' +
+      '<label class="erp-asistan-alan">Tarih ve saat<input type="datetime-local" name="hatirlatma_zamani" required></label>' +
+      '<div class="erp-asistan-aksiyon">' +
+      '<button type="submit">Kaydet</button>' +
+      '<button type="button" data-act="baska-vazgec">Vazgeç</button></div>' +
+      '<p id="erp-asistan-baska-durum" style="display:none;"></p>';
+    var saat = form.querySelector("input");
+    saat.value = yerelSaat(new Date(Date.now() + 60 * 60 * 1000));
+    aksiyon.parentNode.insertBefore(form, aksiyon);
+    form.onsubmit = function (ev) {
+      ev.preventDefault();
+      var metin = String(form.not_metni.value || "").trim();
+      var zaman = form.hatirlatma_zamani.value;
+      if (!metin || !zaman) return;
+      if (new Date(zaman).getTime() <= Date.now()) {
+        alert("İleri bir tarih ve saat seçin.");
+        return;
+      }
+      postJson("/erp-notlar/api/olustur", {
+        kategori: n.kategori || "Genel Not",
+        not_metni: metin,
+        hatirlatma_zamani: zaman,
+        gorunurluk: "kisisel",
+        iliski_tip: n.iliski_tip || "",
+        iliski_id: n.iliski_id || null
+      }).then(function (j) {
+        if (!j || !j.ok) {
+          alert((j && j.mesaj) || "Kaydedilemedi");
+          return;
+        }
+        form.remove();
+        var bilgi = document.createElement("p");
+        bilgi.textContent = "Yeni hatırlatma kaydedildi. Bu not duruyor.";
+        aksiyon.parentNode.insertBefore(bilgi, aksiyon);
+        if (panelAcikMi()) gecmisYukle();
+      });
+    };
+  }
+
+  window.erpAsistanAc = panelToggle;
 
   function basla() {
+    stilEkle();
+    var kutu = document.getElementById("erp_asistan_gecmis");
+    if (kutu) kutu.classList.remove("acik");
     tara();
     setInterval(tara, POLL_MS);
-    gecmisYukle();
     setInterval(function () {
       var id = musteriId();
       if (id !== sonMusteri) {
