@@ -209,6 +209,7 @@ from routes.cari_kart_routes import bp as cari_kart_bp
 from routes.randevu_routes import bp as randevu_bp
 from routes.pdovam_routes import bp as pdovam_bp
 from routes.whatsapp_routes import bp as whatsapp_bp
+from routes.erp_notlar_routes import bp as erp_notlar_bp
 from routes.masraf_routes import bp as fis_masraflari_bp
 try:
     from routes.ilan_robotu_routes import bp as ilan_robotu_bp
@@ -255,6 +256,7 @@ app.register_blueprint(cari_kart_bp, url_prefix="/cari-kart")
 app.register_blueprint(randevu_bp)
 app.register_blueprint(pdovam_bp, url_prefix="/pdovam")
 app.register_blueprint(whatsapp_bp)
+app.register_blueprint(erp_notlar_bp)
 app.register_blueprint(fis_masraflari_bp, url_prefix="/fis-masraflari")
 if ilan_robotu_bp is not None:
     app.register_blueprint(ilan_robotu_bp, url_prefix="/ilan-robotu")
@@ -571,6 +573,23 @@ def _start_background_jobs():
         max_instances=1,
         coalesce=True,
     )
+
+    def _erp_not_whatsapp_tick():
+        try:
+            from routes.erp_notlar_routes import run_erp_not_whatsapp_job
+            run_erp_not_whatsapp_job()
+        except Exception as e:
+            print("[WARN] erp_not_whatsapp:", type(e).__name__)
+
+    scheduler.add_job(
+        _erp_not_whatsapp_tick,
+        "interval",
+        minutes=1,
+        id="erp_not_whatsapp",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
     scheduler.start()
     atexit.register(lambda: scheduler.shutdown(wait=False))
     # Boot: bir kez hemen çalıştır (scheduler ilk tick'i 30 dk bekler)
@@ -581,7 +600,7 @@ def _start_background_jobs():
     print(
         "[OK] Background scheduler aktif: auto_invoice_cycle/15dk, "
         "izin_otomatik_gece/00:05, mesai_otomatik_cikis/1dk, "
-        "pending_payment_sweep/30dk+boot "
+        "pending_payment_sweep/30dk+boot, erp_not_whatsapp/1dk "
         "(MESAI_OTOMATIK_CIKIS_ENABLED varsayılan KAPALI)"
     )
 

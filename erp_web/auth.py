@@ -490,6 +490,7 @@ def giris_gerekli(f):
                 "/randevu/api/",
                 "/fis-masraflari/api/",
                 "/ledger/api/",
+                "/erp-notlar/api/",
             )
             wants_json401 = path in _json401_exact or any(path.startswith(p) for p in _json401_prefixes)
             if wants_json401:

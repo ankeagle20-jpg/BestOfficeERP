@@ -1,0 +1,57 @@
+{% extends "layout.html" %}
+{% block page_title %}ERP Asistan{% endblock %}
+{% block content %}
+<div style="padding:16px 20px 40px; max-width:1100px;">
+  <h1 style="font-size:22px; margin-bottom:6px;">ERP Asistan</h1>
+  <p style="opacity:.8; font-size:13px; margin-bottom:14px;">
+    Bekleyen, ertelenen ve tamamlanan notlar. Takvim görünümü sonraki fazda.
+    WhatsApp rozeti «gönderilemedi» ise servis o an ayakta değildi; kayıt durur, sonraki dakikada yeniden denenir.
+  </p>
+  <form method="get" action="/erp-notlar/" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; align-items:center;">
+    <label>Durum
+      <select name="durum">
+        <option value="bekliyor" {% if durum == 'bekliyor' %}selected{% endif %}>Bekleyenler</option>
+        <option value="ertelendi" {% if durum == 'ertelendi' %}selected{% endif %}>Ertelenenler</option>
+        <option value="tamamlandi" {% if durum == 'tamamlandi' %}selected{% endif %}>Tamamlananlar</option>
+        <option value="hepsi" {% if durum == 'hepsi' %}selected{% endif %}>Hepsi</option>
+      </select>
+    </label>
+    <label>Ara
+      <input type="text" name="q" value="{{ q }}" placeholder="Müşteri adı veya not" style="min-width:220px;">
+    </label>
+    <button type="submit" class="tahsilat-btn-kaydet">Listele</button>
+  </form>
+  <table style="width:100%; border-collapse:collapse; font-size:13px;">
+    <thead>
+      <tr style="text-align:left; border-bottom:1px solid #1e3a50;">
+        <th style="padding:6px;">Zaman</th>
+        <th style="padding:6px;">Kategori</th>
+        <th style="padding:6px;">İlişki</th>
+        <th style="padding:6px;">Not</th>
+        <th style="padding:6px;">Durum</th>
+        <th style="padding:6px;">WhatsApp</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for n in notlar %}
+      <tr id="not-{{ n.id }}" style="border-bottom:1px solid #163044;{% if vurgu == (n.id|string) %} background:#1b3a4b;{% endif %}">
+        <td style="padding:6px; white-space:nowrap;">{{ n.hatirlatma_etiket }}</td>
+        <td style="padding:6px;">{{ n.kategori }}</td>
+        <td style="padding:6px;">{{ n.iliski_etiket }}</td>
+        <td style="padding:6px;">{{ n.not_metni }}</td>
+        <td style="padding:6px;">{{ n.durum }}</td>
+        <td style="padding:6px;">
+          {% if n.whatsapp_rozet == 'gönderilemedi' %}
+          <span title="{{ n.whatsapp_hata }}" style="background:#8d2a2a; color:#fff; border-radius:8px; padding:2px 8px;">gönderilemedi</span>
+          {% elif n.whatsapp_rozet %}
+          <span>{{ n.whatsapp_rozet }}</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" style="padding:12px; opacity:.75;">Kayıt yok.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

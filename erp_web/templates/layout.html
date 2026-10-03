@@ -354,6 +354,7 @@
     <script src="{{ url_for('static', filename='js/erp-tarih-hizli.js') }}"></script>
     {% if not _layout_hide_chrome and current_user.is_authenticated %}
     <script src="{{ url_for('static', filename='js/randevu-hatirlatma.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/erp-asistan.js') }}"></script>
     {% endif %}
     {% block extra_js %}{% endblock %}
 </body>
