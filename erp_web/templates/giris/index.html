@@ -2894,6 +2894,7 @@ button.auto-btn.whatsapp-hizmet-filter-btn.wa-hizmet-aktif {
             <button class="tab" data-index="9" onclick="switchTab(9)">Grup</button>
             <button class="tab" data-index="10" onclick="switchTab(10)">Müşteriler 2</button>
             <button class="tab" data-index="13" onclick="switchTab(13)">Senaryo 01</button>
+            <button class="tab" data-index="14" onclick="switchTab(14)">ERP Asistan</button>
         </div>
         
         <div class="tab-content-wrapper" id="tab-content-wrapper">
@@ -3974,6 +3975,9 @@ button.auto-btn.whatsapp-hizmet-filter-btn.wa-hizmet-aktif {
         <div class="tab-content" id="tab-13">
                 <iframe id="giris-senaryo01-iframe" title="Senaryo 01" data-s01-src="{{ url_for('giris.senaryo_01_page', embed=1) }}"></iframe>
             </div>
+        <div class="tab-content" id="tab-14">
+            <div id="erp-asistan-ozet"></div>
+        </div>
             <div class="tab-content" id="tab-11">
             <div class="tahsilat-makbuz-wrap">
                 <div class="tahsilat-makbuz-baslik">
@@ -5094,7 +5098,8 @@ var GIRIS_TAB_KEY_BY_INDEX = {
     10: 'musteriler_2',
     11: 'tediye',
     12: 'whatsapp',
-    13: 'senaryo_01'
+    13: 'senaryo_01',
+    14: 'erp_asistan'
 };
 var GIRIS_TAB_INDEX_BY_KEY = {
     musteri_ekle: 0,
@@ -5110,7 +5115,8 @@ var GIRIS_TAB_INDEX_BY_KEY = {
     musteriler_2: 10,
     tediye: 11,
     whatsapp: 12,
-    senaryo_01: 13
+    senaryo_01: 13,
+    erp_asistan: 14
 };
 
 function girisTabKeyFromIndex(index) {
@@ -5125,7 +5131,7 @@ function girisTabIndexFromParam(raw) {
     if (!s) return null;
     if (/^\d+$/.test(s)) {
         var n = parseInt(s, 10);
-        if (!isNaN(n) && n >= 0 && n <= 13) return n;
+        if (!isNaN(n) && n >= 0 && n <= 14) return n;
         return null;
     }
     var key = s.toLowerCase();
@@ -5142,7 +5148,8 @@ var GIRIS_MID_BAGIMSIZ_TAB_KEYLERI = {
     musteriler_2: true,
     potansiyel: true,
     whatsapp: true,
-    senaryo_01: true
+    senaryo_01: true,
+    erp_asistan: true
 };
 
 function girisStandaloneTabQueryGuncelle(index) {
@@ -10182,7 +10189,7 @@ function sozlesmelerAylikSessizPollTick() {
 function switchTab(index) {
     currentTabIndex = index;
     try {
-        if (index >= 0 && index <= 13) localStorage.setItem('bestoffice_giris_tab_index', String(index));
+        if (index >= 0 && index <= 14) localStorage.setItem('bestoffice_giris_tab_index', String(index));
     } catch (e) {}
     // Üst sekme butonlarının aktifliğini index yerine data-index ile kontrol et
     document.querySelectorAll('.tab').forEach(function(t) {
@@ -10276,6 +10283,9 @@ function switchTab(index) {
                 if (typeof girisGrupOzetDurumGoster === 'function') {
                     girisGrupOzetDurumGoster('idle', 'Tüm gruplar listesinden seçim yapıp "Uygula" tıklayın.');
                 }
+            }
+            if (effectiveIndex === 14 && typeof window.erpAsistanOzetYukle === 'function') {
+                window.erpAsistanOzetYukle();
             }
             if (effectiveIndex === 1) {
                 var midSenaryo = selectedId;

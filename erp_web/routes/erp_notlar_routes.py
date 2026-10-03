@@ -50,6 +50,29 @@ KOLON_ETIKET = {
     "aciklama": "Açıklama",
     "durum": "Durum",
 }
+KOLON_OZET_VARSAYILAN = (
+    "musteri",
+    "gorusme",
+    "hatirlatma",
+    "aciklama",
+    "durum",
+    "gorusen",
+    "gorusulen",
+)
+KOLON_OZET_ETIKET = {
+    "musteri": "Müşteri",
+    "gorusme": "Son Görüşme Tarihi",
+    "hatirlatma": "Son Hatırlatma Tarihi",
+    "aciklama": "Son Açıklama",
+    "durum": "Durum",
+    "gorusen": "Görüşen Kişi",
+    "gorusulen": "Görüşülen Kişi",
+}
+_KOLON_KUMESI = {"not": KOLON_VARSAYILAN, "ozet": KOLON_OZET_VARSAYILAN}
+_KOLON_ALAN = {
+    "not": "erp_asistan_kolon_sirasi",
+    "ozet": "erp_asistan_ozet_kolon_sirasi",
+}
 _HAZIR_SEMALAR: set[str] = set()
 
 
@@ -99,6 +122,7 @@ def ensure_erp_notlar_tablolari() -> None:
     try:
         execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS departman TEXT")
         execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS erp_asistan_kolon_sirasi TEXT")
+        execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS erp_asistan_ozet_kolon_sirasi TEXT")
     except Exception as e:
         print(f"[WARN] erp_notlar users.departman ({schema}): {type(e).__name__}")
     try:
@@ -108,26 +132,34 @@ def ensure_erp_notlar_tablolari() -> None:
     _HAZIR_SEMALAR.add(schema)
 
 
-def _kolon_gecerli(raw) -> list | None:
-    if not isinstance(raw, list) or len(raw) != len(KOLON_VARSAYILAN):
+def _kolon_ekran(raw) -> str:
+    ekran = str(raw or "not").strip().lower()
+    return ekran if ekran in _KOLON_KUMESI else "not"
+
+
+def _kolon_gecerli(raw, ekran: str = "not") -> list | None:
+    kume = _KOLON_KUMESI[_kolon_ekran(ekran)]
+    if not isinstance(raw, list) or len(raw) != len(kume):
         return None
     temiz = [str(x) for x in raw]
-    if sorted(temiz) != sorted(KOLON_VARSAYILAN):
+    if sorted(temiz) != sorted(kume):
         return None
     return temiz
 
 
-def _kolon_sirasi_getir() -> list:
+def _kolon_sirasi_getir(ekran: str = "not") -> list:
     ensure_erp_notlar_tablolari()
+    ekran = _kolon_ekran(ekran)
+    alan = _KOLON_ALAN[ekran]
     try:
         row = fetch_one(
-            "SELECT erp_asistan_kolon_sirasi FROM users WHERE id = %s",
+            f"SELECT {alan} FROM users WHERE id = %s",
             (_uid(),),
         )
-        ham = json.loads((row or {}).get("erp_asistan_kolon_sirasi") or "")
+        ham = json.loads((row or {}).get(alan) or "")
     except Exception:
         ham = None
-    return _kolon_gecerli(ham) or list(KOLON_VARSAYILAN)
+    return _kolon_gecerli(ham, ekran) or list(_KOLON_KUMESI[ekran])
 
 
 def _uid() -> int:
@@ -436,18 +468,19 @@ def api_meta():
 @bp.route("/api/kolonlar", methods=["GET", "POST"])
 @giris_gerekli
 def api_kolonlar():
+    data = request.get_json(silent=True) or {}
+    ekran = _kolon_ekran(request.args.get("ekran") or data.get("ekran"))
     if request.method == "POST":
-        data = request.get_json(silent=True) or {}
-        sira = _kolon_gecerli(data.get("siralama"))
+        sira = _kolon_gecerli(data.get("siralama"), ekran)
         if not sira:
             return jsonify({"ok": False, "mesaj": "Kolon sırası geçersiz"}), 400
         ensure_erp_notlar_tablolari()
         execute(
-            "UPDATE users SET erp_asistan_kolon_sirasi = %s WHERE id = %s",
+            f"UPDATE users SET {_KOLON_ALAN[ekran]} = %s WHERE id = %s",
             (json.dumps(sira, ensure_ascii=False), _uid()),
         )
-        return jsonify({"ok": True, "siralama": sira})
-    return jsonify({"ok": True, "siralama": _kolon_sirasi_getir()})
+        return jsonify({"ok": True, "ekran": ekran, "siralama": sira})
+    return jsonify({"ok": True, "ekran": ekran, "siralama": _kolon_sirasi_getir(ekran)})
 
 
 @bp.route("/api/musteri/<int:mid>")
@@ -468,6 +501,77 @@ def api_musteri(mid: int):
             "telefon": row.get("phone") or "",
         }
     )
+
+
+_HEDEF_SQL = """
+CASE
+  WHEN n.iliski_tip = 'musteri' THEN n.iliski_id
+  WHEN n.iliski_tip = 'sozlesme' THEN s.musteri_id
+  WHEN n.iliski_tip = 'fatura' THEN f.musteri_id
+  WHEN n.iliski_tip = 'oda' THEN o.customer_id
+END
+"""
+
+
+def _ozet_serialize(row: dict) -> dict:
+    kopya = dict(row)
+    hid = row.get("hedef_id")
+    kopya["iliski_tip"] = "musteri"
+    kopya["iliski_id"] = hid
+    kopya["musteri_adi"] = row.get("ozet_musteri_adi") or row.get("musteri_adi")
+    out = _serialize(kopya)
+    out["musteri_id"] = hid
+    return out
+
+
+def _musteri_notlari(mid: int) -> list:
+    extra = f"""
+      AND ({_HEDEF_SQL}) = %s
+    """
+    return _notlari_getir(extra, (mid,), limit=200, sira="yeni")
+
+
+@bp.route("/api/ozet")
+@giris_gerekli
+def api_ozet():
+    ensure_erp_notlar_tablolari()
+    kapsam = str(request.args.get("kapsam") or "acik").strip().lower()
+    if kapsam not in ("acik", "hepsi"):
+        kapsam = "acik"
+    q = str(request.args.get("q") or "").strip()
+    like = "%" + q.replace("%", "") + "%"
+    sql = f"""
+        SELECT * FROM (
+            SELECT DISTINCT ON ({_HEDEF_SQL})
+                {_LISTE_COLS},
+                {_HEDEF_SQL} AS hedef_id,
+                cm.name AS ozet_musteri_adi
+            {_LISTE_FROM}
+            LEFT JOIN customers cm ON cm.id = ({_HEDEF_SQL})
+            WHERE {_gorunur_sql()}
+              AND ({_HEDEF_SQL}) IS NOT NULL
+            ORDER BY {_HEDEF_SQL}, n.created_at DESC, n.id DESC
+        ) ozet
+        WHERE (%s = 'hepsi' OR ozet.durum IN ('bekliyor', 'ertelendi'))
+          AND (%s = '' OR COALESCE(ozet.ozet_musteri_adi, '') ILIKE %s)
+        ORDER BY CASE WHEN ozet.durum IN ('bekliyor', 'ertelendi') THEN 0 ELSE 1 END,
+                 COALESCE(ozet.ozet_musteri_adi, ''), ozet.id DESC
+        LIMIT 500
+    """
+    params = _gorunur_params() + (kapsam, q, like)
+    try:
+        rows = fetch_all(sql, params)
+    except Exception as e:
+        print(f"[WARN] erp_notlar ozet: {type(e).__name__}")
+        return jsonify({"ok": False, "mesaj": "Özet alınamadı"}), 500
+    return jsonify({"ok": True, "notlar": [_ozet_serialize(r) for r in rows]})
+
+
+@bp.route("/api/musteri/<int:mid>/notlar")
+@giris_gerekli
+def api_musteri_notlar(mid: int):
+    rows = _musteri_notlari(mid)
+    return jsonify({"ok": True, "notlar": [_serialize(r) for r in rows]})
 
 
 @bp.route("/api/liste")

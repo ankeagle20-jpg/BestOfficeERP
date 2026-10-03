@@ -18,6 +18,24 @@
     durum: "Durum"
   };
   var kolonSirasi = KOLON_VARSAYILAN.slice();
+  var KOLON_OZET_VARSAYILAN = ["musteri", "gorusme", "hatirlatma", "aciklama", "durum", "gorusen", "gorusulen"];
+  var KOLON_OZET_ETIKET = {
+    musteri: "Müşteri",
+    gorusme: "Son Görüşme Tarihi",
+    hatirlatma: "Son Hatırlatma Tarihi",
+    aciklama: "Son Açıklama",
+    durum: "Durum",
+    gorusen: "Görüşen Kişi",
+    gorusulen: "Görüşülen Kişi"
+  };
+  var ozetKolonSirasi = KOLON_OZET_VARSAYILAN.slice();
+  var ozetKapsam = "acik";
+  var ozetSatirlar = [];
+  var ozetKuruldu = false;
+  var ozetArama = null;
+  var ozetGecmisId = null;
+  var ozetGecmisNotlar = [];
+  var ozetGecmisSekme = "acik";
 
   function loadShown() {
     try {
@@ -65,6 +83,12 @@
       "#erp-asistan-sekme-acik,#erp-asistan-sekme-gecmis{background:#0a1929;}" +
       "#erp-asistan-sekme-acik.aktif,#erp-asistan-sekme-gecmis.aktif{background:#1565c0;}" +
       "#erp_asistan_gecmis{display:none;margin:8px 0 12px;}" +
+      "#erp-asistan-ozet{padding:8px 4px 28px;}" +
+      ".ea-ozet-arac{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 10px;}" +
+      ".ea-ozet-arac input{background:#0a1929;color:#e0f7fa;border:1px solid #1e3a50;border-radius:6px;padding:6px 8px;min-width:220px;}" +
+      ".ea-ozet-arac button{cursor:pointer;border-radius:6px;border:1px solid #1e3a50;background:#0a1929;color:#e0f7fa;padding:6px 10px;}" +
+      ".ea-ozet-arac button.aktif{background:#1565c0;border-color:#1565c0;}" +
+      "#erp-asistan-ozet-gecmis .erp-asistan-kart{max-width:980px;max-height:86vh;overflow:auto;}" +
       "#erp_asistan_gecmis.acik{display:block;}" +
       ".erp-asistan-rozet{display:inline-block;background:#8d2a2a;color:#fff;border-radius:8px;padding:1px 6px;margin-left:6px;font-size:11px;}" +
       ".ea-tablo-kaydir{overflow-x:auto;margin-top:8px;}" +
@@ -306,12 +330,13 @@
     return !!(kutu && kutu.classList.contains("acik"));
   }
 
-  function kolonNormalize(raw) {
-    if (!Array.isArray(raw) || raw.length !== KOLON_VARSAYILAN.length) return KOLON_VARSAYILAN.slice();
+  function kolonNormalize(raw, ekran) {
+    var kume = ekran === "ozet" ? KOLON_OZET_VARSAYILAN : KOLON_VARSAYILAN;
+    if (!Array.isArray(raw) || raw.length !== kume.length) return kume.slice();
     var kopya = raw.map(function (x) { return String(x); });
     var a = kopya.slice().sort().join("|");
-    var b = KOLON_VARSAYILAN.slice().sort().join("|");
-    return a === b ? kopya : KOLON_VARSAYILAN.slice();
+    var b = kume.slice().sort().join("|");
+    return a === b ? kopya : kume.slice();
   }
 
   if (window.ERP_ASISTAN_KOLONLAR) kolonSirasi = kolonNormalize(window.ERP_ASISTAN_KOLONLAR);
@@ -338,27 +363,34 @@
     return "";
   }
 
-  function satirHtml(n) {
+  function satirHtml(n, ekran) {
     var soluk = n.durum === "tamamlandi" ? " ea-not-soluk" : "";
-    var html = '<tr class="ea-satir' + soluk + '" data-not-id="' + esc(n.id) + '">';
-    kolonSirasi.forEach(function (key) {
+    var sira = ekran === "ozet" ? ozetKolonSirasi : kolonSirasi;
+    var ozet = ekran === "ozet"
+      ? ' data-ozet="1" data-musteri-id="' + esc(n.musteri_id || n.iliski_id) + '"'
+      : "";
+    var html = '<tr class="ea-satir' + soluk + '" data-not-id="' + esc(n.id) + '"' + ozet + ">";
+    sira.forEach(function (key) {
       html += '<td' + (key === "durum" ? ' class="ea-durum"' : "") + ">" + hucreHtml(n, key) + "</td>";
     });
     return html + "</tr>";
   }
 
-  function tabloHtml(notlar) {
-    var html = '<div class="ea-tablo-kaydir"><table class="ea-tablo"><thead><tr>';
-    kolonSirasi.forEach(function (key) {
+  function tabloHtml(notlar, ekran) {
+    var sira = ekran === "ozet" ? ozetKolonSirasi : kolonSirasi;
+    var etiket = ekran === "ozet" ? KOLON_OZET_ETIKET : KOLON_ETIKET;
+    var html = '<div class="ea-tablo-kaydir"><table class="ea-tablo" data-ekran="' + (ekran === "ozet" ? "ozet" : "not") + '"><thead><tr>';
+    sira.forEach(function (key) {
       html += '<th data-kolon="' + esc(key) + '" draggable="true" title="Kolonu sürükleyerek taşı">' +
-        esc(KOLON_ETIKET[key] || key) + "</th>";
+        esc(etiket[key] || key) + "</th>";
     });
     html += "</tr></thead><tbody>";
-    (notlar || []).forEach(function (n) { html += satirHtml(n); });
+    (notlar || []).forEach(function (n) { html += satirHtml(n, ekran); });
     return html + "</tbody></table></div>";
   }
 
   var suruklenenKolon = "";
+  var suruklenenEkran = "not";
 
   function kolonYeniSira(sira, tasinan, hedef, once) {
     var yeni = sira.slice();
@@ -417,20 +449,33 @@
     }
   }
 
-  function kolonKaydet(yeni) {
-    if (yeni.join("|") === kolonSirasi.join("|")) return;
-    postJson("/erp-notlar/api/kolonlar", { siralama: yeni }).then(function (res) {
+  function kolonKaydet(yeni, ekran) {
+    var ozet = ekran === "ozet";
+    var simdiki = ozet ? ozetKolonSirasi : kolonSirasi;
+    if (yeni.join("|") === simdiki.join("|")) return;
+    postJson("/erp-notlar/api/kolonlar", { siralama: yeni, ekran: ozet ? "ozet" : "not" }).then(function (res) {
       if (!res || !res.ok || !res.siralama) {
         alert((res && res.mesaj) || "Sıra kaydedilemedi");
         return;
       }
-      kolonSirasi = kolonNormalize(res.siralama);
+      var sira = kolonNormalize(res.siralama, ozet ? "ozet" : "not");
+      if (ozet) {
+        ozetKolonSirasi = sira;
+        if (document.getElementById("erp-asistan-ozet-tablo")) ozetCiz();
+        return;
+      }
+      kolonSirasi = sira;
       if (panelAcikMi()) {
         gecmisCiz(panelNotlar);
         return;
       }
-      var tablolar = document.querySelectorAll("table.ea-tablo");
-      for (var t = 0; t < tablolar.length; t++) tabloKolonSirala(tablolar[t], kolonSirasi);
+      if (document.getElementById("erp-asistan-ozet-gecmis-liste")) ozetGecmisCiz();
+      var tablolar = document.querySelectorAll('table.ea-tablo[data-ekran="not"], table.ea-tablo:not([data-ekran])');
+      for (var t = 0; t < tablolar.length; t++) {
+        if (tablolar[t].getAttribute("data-ekran") === "ozet") continue;
+        if (tablolar[t].closest("#erp-asistan-ozet-gecmis")) continue;
+        tabloKolonSirala(tablolar[t], kolonSirasi);
+      }
     });
   }
 
@@ -822,12 +867,13 @@
         if (String(panelNotlar[i].id) === String(id)) panelNotlar[i].durum = "tamamlandi";
       }
       if (panelAcikMi()) gecmisCiz(panelNotlar);
+      ozetDurumIsle(id);
       var hepsi = /(?:^|[?&])durum=hepsi(?:&|$)/.test(location.search);
       var satirlar = document.querySelectorAll("tr.ea-satir");
       for (var s = 0; s < satirlar.length; s++) {
         var tr = satirlar[s];
         if (tr.getAttribute("data-not-id") !== String(id)) continue;
-        if (tr.closest("#erp_asistan_gecmis")) continue;
+        if (tr.closest("#erp_asistan_gecmis") || tr.closest("#erp-asistan-ozet") || tr.closest("#erp-asistan-ozet-gecmis")) continue;
         if (tr.closest("#erp-asistan-liste") && !hepsi) {
           tr.remove();
           continue;
@@ -839,8 +885,156 @@
     });
   }
 
+  function ozetGorunen() {
+    var liste = (ozetSatirlar || []).filter(function (n) {
+      if (ozetKapsam === "hepsi") return true;
+      return n.durum === "bekliyor" || n.durum === "ertelendi";
+    });
+    liste.sort(function (a, b) {
+      var aa = (a.durum === "bekliyor" || a.durum === "ertelendi") ? 0 : 1;
+      var bb = (b.durum === "bekliyor" || b.durum === "ertelendi") ? 0 : 1;
+      if (aa !== bb) return aa - bb;
+      return String(a.iliski_etiket || "").localeCompare(String(b.iliski_etiket || ""), "tr");
+    });
+    return liste;
+  }
+
+  function ozetCiz() {
+    var kutu = document.getElementById("erp-asistan-ozet-tablo");
+    if (!kutu) return;
+    var liste = ozetGorunen();
+    var acikBtn = document.getElementById("erp-asistan-ozet-acik");
+    var hepsiBtn = document.getElementById("erp-asistan-ozet-hepsi");
+    if (acikBtn) acikBtn.classList.toggle("aktif", ozetKapsam !== "hepsi");
+    if (hepsiBtn) hepsiBtn.classList.toggle("aktif", ozetKapsam === "hepsi");
+    if (!liste.length) {
+      kutu.innerHTML = "<p>Bu filtrede müşteri yok.</p>";
+      return;
+    }
+    kutu.innerHTML = tabloHtml(liste, "ozet");
+  }
+
+  function ozetGetir() {
+    var kutu = document.getElementById("erp-asistan-ozet-tablo");
+    if (!kutu) return;
+    var q = "";
+    var ara = document.getElementById("erp-asistan-ozet-ara");
+    if (ara) q = String(ara.value || "").trim();
+    fetch("/erp-notlar/api/ozet?kapsam=hepsi&q=" + encodeURIComponent(q), { credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) {
+        if (!j || !j.ok) return;
+        ozetSatirlar = j.notlar || [];
+        ozetCiz();
+      })
+      .catch(function () {});
+  }
+
+  function ozetIskelet() {
+    var kok = document.getElementById("erp-asistan-ozet");
+    if (!kok || ozetKuruldu) return;
+    ozetKuruldu = true;
+    kok.innerHTML =
+      '<div class="ea-ozet-arac">' +
+      '<input id="erp-asistan-ozet-ara" type="search" placeholder="Müşteri ara">' +
+      '<button type="button" id="erp-asistan-ozet-acik" class="aktif">İş bitmemiş</button>' +
+      '<button type="button" id="erp-asistan-ozet-hepsi">Hepsi</button>' +
+      "</div>" +
+      '<div id="erp-asistan-ozet-tablo"></div>';
+    document.getElementById("erp-asistan-ozet-acik").onclick = function () {
+      ozetKapsam = "acik";
+      ozetCiz();
+    };
+    document.getElementById("erp-asistan-ozet-hepsi").onclick = function () {
+      ozetKapsam = "hepsi";
+      ozetCiz();
+    };
+    document.getElementById("erp-asistan-ozet-ara").oninput = function () {
+      if (ozetArama) clearTimeout(ozetArama);
+      ozetArama = setTimeout(ozetGetir, 300);
+    };
+  }
+
+  function ozetGecmisCiz() {
+    var liste = document.getElementById("erp-asistan-ozet-gecmis-liste");
+    if (!liste) return;
+    var acikBtn = document.getElementById("erp-asistan-ozet-gecmis-acik");
+    var gecmisBtn = document.getElementById("erp-asistan-ozet-gecmis-gecmis");
+    if (acikBtn) acikBtn.classList.toggle("aktif", ozetGecmisSekme !== "gecmis");
+    if (gecmisBtn) gecmisBtn.classList.toggle("aktif", ozetGecmisSekme === "gecmis");
+    var gorunen = (ozetGecmisNotlar || []).filter(function (n) {
+      if (ozetGecmisSekme === "gecmis") return n.durum === "tamamlandi";
+      return n.durum === "bekliyor" || n.durum === "ertelendi";
+    });
+    if (!gorunen.length) {
+      liste.innerHTML = ozetGecmisSekme === "gecmis" ? "<p>Tamamlanan not yok.</p>" : "<p>Açık not yok.</p>";
+      return;
+    }
+    liste.innerHTML = tabloHtml(gorunen, "not");
+  }
+
+  function ozetGecmisAc(mid) {
+    if (!mid) return;
+    ozetGecmisId = String(mid);
+    ozetGecmisSekme = "acik";
+    stilEkle();
+    var eski = document.getElementById("erp-asistan-ozet-gecmis");
+    if (eski) eski.remove();
+    var perde = document.createElement("div");
+    perde.id = "erp-asistan-ozet-gecmis";
+    perde.className = "erp-asistan-perde";
+    perde.innerHTML =
+      '<div class="erp-asistan-kart">' +
+      "<h3>Müşteri notları</h3>" +
+      '<div class="ea-ozet-arac">' +
+      '<button type="button" id="erp-asistan-ozet-gecmis-acik" class="aktif">Açık</button>' +
+      '<button type="button" id="erp-asistan-ozet-gecmis-gecmis">Geçmiş</button>' +
+      '<button type="button" id="erp-asistan-ozet-gecmis-kapat">Kapat</button>' +
+      "</div>" +
+      '<div id="erp-asistan-ozet-gecmis-liste"><p>Yükleniyor…</p></div></div>';
+    document.body.appendChild(perde);
+    document.getElementById("erp-asistan-ozet-gecmis-kapat").onclick = function () { perde.remove(); };
+    document.getElementById("erp-asistan-ozet-gecmis-acik").onclick = function () {
+      ozetGecmisSekme = "acik";
+      ozetGecmisCiz();
+    };
+    document.getElementById("erp-asistan-ozet-gecmis-gecmis").onclick = function () {
+      ozetGecmisSekme = "gecmis";
+      ozetGecmisCiz();
+    };
+    fetch("/erp-notlar/api/musteri/" + encodeURIComponent(mid) + "/notlar", { credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) {
+        if (!j || !j.ok) return;
+        ozetGecmisNotlar = j.notlar || [];
+        ozetGecmisCiz();
+      })
+      .catch(function () {});
+  }
+
+  function ozetDurumIsle(id) {
+    var degisti = false;
+    for (var i = 0; i < ozetSatirlar.length; i++) {
+      if (String(ozetSatirlar[i].id) === String(id)) {
+        ozetSatirlar[i].durum = "tamamlandi";
+        degisti = true;
+      }
+    }
+    if (degisti && document.getElementById("erp-asistan-ozet-tablo")) ozetCiz();
+    for (var g = 0; g < ozetGecmisNotlar.length; g++) {
+      if (String(ozetGecmisNotlar[g].id) === String(id)) ozetGecmisNotlar[g].durum = "tamamlandi";
+    }
+    if (document.getElementById("erp-asistan-ozet-gecmis-liste")) ozetGecmisCiz();
+  }
+
+  function erpAsistanOzetYukle() {
+    ozetIskelet();
+    ozetGetir();
+  }
+
   window.erpAsistanAc = panelToggle;
   window.erpAsistanTabloHtml = tabloHtml;
+  window.erpAsistanOzetYukle = erpAsistanOzetYukle;
 
   function basla() {
     stilEkle();
@@ -852,16 +1046,26 @@
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (j) {
           if (!j || !j.ok) return;
-          kolonSirasi = kolonNormalize(j.siralama);
+          kolonSirasi = kolonNormalize(j.siralama, "not");
           if (panelAcikMi()) gecmisCiz(panelNotlar);
         })
         .catch(function () {});
     }
+    fetch("/erp-notlar/api/kolonlar?ekran=ozet", { credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) {
+        if (!j || !j.ok) return;
+        ozetKolonSirasi = kolonNormalize(j.siralama, "ozet");
+        if (document.getElementById("erp-asistan-ozet-tablo")) ozetCiz();
+      })
+      .catch(function () {});
     document.addEventListener("dragstart", function (ev) {
       durumMenuKapat();
       var th = kolonBaslik(ev.target);
       if (!th) return;
       suruklenenKolon = th.getAttribute("data-kolon") || "";
+      var tablo = th.closest("table.ea-tablo");
+      suruklenenEkran = tablo && tablo.getAttribute("data-ekran") === "ozet" ? "ozet" : "not";
       th.classList.add("ea-surukleniyor");
       kolonOpaklik(suruklenenKolon, "0.45");
       try {
@@ -887,10 +1091,11 @@
       var hedef = th.getAttribute("data-kolon") || "";
       var rect = th.getBoundingClientRect();
       var once = (ev.clientX - rect.left) < rect.width / 2;
-      var yeni = kolonYeniSira(kolonSirasi, suruklenenKolon, hedef, once);
+      var kaynak = suruklenenEkran === "ozet" ? ozetKolonSirasi : kolonSirasi;
+      var yeni = kolonYeniSira(kaynak, suruklenenKolon, hedef, once);
       kolonVurguTemizle();
       suruklenenKolon = "";
-      kolonKaydet(yeni);
+      kolonKaydet(yeni, suruklenenEkran);
     });
     document.addEventListener("dragend", function () {
       kolonVurguTemizle();
@@ -913,6 +1118,10 @@
       if (ev.target.closest && ev.target.closest(".ea-durum")) return;
       var kart = ev.target.closest && ev.target.closest("tr.ea-satir");
       if (!kart || ev.target.closest("a,button,input,textarea,select,label")) return;
+      if (kart.getAttribute("data-ozet") === "1") {
+        ozetGecmisAc(kart.getAttribute("data-musteri-id"));
+        return;
+      }
       var id = kart.getAttribute("data-not-id");
       if (id) detayAc(id);
     });
