@@ -14,9 +14,9 @@ import psycopg2
 import psycopg2.extras
 import psycopg2.pool
 from psycopg2 import sql as psql
-from psycopg2.extras import RealDictCursor
 from contextlib import contextmanager
 from config import Config
+from prod_write_guard import cursor_factory_for_runtime
 
 # Kiracı şema adı: yalnızca tenant_ + [a-z0-9_] (SQL enjeksiyonuna kapalı).
 _TENANT_SCHEMA_RE = re.compile(r"^tenant_[a-z0-9_]+$")
@@ -160,7 +160,7 @@ def _db_connect_kwargs_common():
     default_connect_timeout = "10"
     return dict(
         connect_timeout=int(os.environ.get("DB_CONNECT_TIMEOUT", default_connect_timeout)),
-        cursor_factory=psycopg2.extras.RealDictCursor,
+        cursor_factory=cursor_factory_for_runtime(),
         keepalives=1,
         keepalives_idle=int(os.environ.get("DB_KEEPALIVES_IDLE", "30")),
         keepalives_interval=10,
@@ -190,6 +190,7 @@ def _pool_key_from(dsn: str, extra: dict) -> tuple:
         extra.get("keepalives_interval"),
         extra.get("keepalives_count"),
         extra.get("tcp_user_timeout"),
+        extra.get("cursor_factory"),
         Config.DB_HOST,
         Config.DB_PORT,
         Config.DB_NAME,

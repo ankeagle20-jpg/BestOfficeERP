@@ -56,6 +56,9 @@ from config import Config
 
 
 def _connect():
+    from prod_write_guard import ensure_write_allowed
+
+    ensure_write_allowed()
     dsn = (os.environ.get("DATABASE_URL") or os.environ.get("SUPABASE_DB_URL") or "").strip()
     if dsn:
         return psycopg2.connect(dsn, connect_timeout=10)

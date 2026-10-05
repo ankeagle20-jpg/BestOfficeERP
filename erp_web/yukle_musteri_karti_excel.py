@@ -108,6 +108,9 @@ def _db_password() -> str:
 
 
 def _connect():
+    from prod_write_guard import ensure_write_allowed
+
+    ensure_write_allowed()
     host = os.environ.get("DB_HOST", "").strip()
     user = os.environ.get("DB_USER", "postgres").strip()
     pw = _db_password()
