@@ -9,6 +9,7 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
+from urllib.parse import urlsplit
 
 from db import db, execute, fetch_one
 from db import _tenant_schema_for_request
@@ -17,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 OID_PREFIX = "OLNK"
 NEUTRAL = "Bu ödeme bağlantısı kullanılamıyor."
+_DEFAULT_PUBLIC_BASE = "https://payafin.com"
 SILINEMEZ = "Kart ödemesi, silinemez"
 _HAZIR = False
 _HITS: dict[str, list[float]] = {}
@@ -47,6 +49,24 @@ def ofisbir_istegi() -> bool:
 
 def ozellik_acik() -> bool:
     return bayrak_acik() and ofisbir_istegi()
+
+
+def public_odeme_base() -> str:
+    """Ödeme linki ve PayTR dönüş adresinin kökü.
+
+    İstek host'u kullanılmaz. Varsayılan https://payafin.com.
+    ODEME_LINKI_PUBLIC_BASE ile kök değiştirilebilir.
+    """
+    raw = (os.environ.get("ODEME_LINKI_PUBLIC_BASE") or _DEFAULT_PUBLIC_BASE).strip()
+    if "://" not in raw:
+        raw = "https://" + raw
+    try:
+        parts = urlsplit(raw)
+    except Exception:
+        return _DEFAULT_PUBLIC_BASE
+    if parts.scheme not in ("https", "http") or not parts.netloc:
+        return _DEFAULT_PUBLIC_BASE
+    return f"{parts.scheme}://{parts.netloc}"
 
 
 def ensure_tablolar() -> None:

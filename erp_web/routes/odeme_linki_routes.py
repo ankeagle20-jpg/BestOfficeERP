@@ -24,6 +24,7 @@ from odeme_linki import (
     link_olustur,
     mask_ad,
     ozellik_acik,
+    public_odeme_base,
     token_hash,
     tutar_tl,
 )
@@ -43,11 +44,6 @@ def _yok():
 def _personel():
     if not ozellik_acik():
         _yok()
-
-
-def _public_base() -> str:
-    proto = (request.headers.get("X-Forwarded-Proto") or request.scheme or "https").split(",")[0].strip()
-    return f"{proto}://{request.host}"
 
 
 def _musteri(mid: int) -> dict | None:
@@ -96,7 +92,7 @@ def paytr_form(link: dict, ip: str) -> dict[str, str]:
     ).decode("ascii")
     cust = _musteri(int(link["musteri_id"]))
     ad = mask_ad((cust or {}).get("name") or "")
-    base = _public_base()
+    base = public_odeme_base()
     return build_get_token_request(
         merchant_oid=str(link["merchant_oid"]),
         payment_amount_kurus=str(int(link["tutar_kurus"])),
@@ -238,7 +234,7 @@ def api_link():
         )
     except ValueError:
         return jsonify({"ok": False, "mesaj": "Süre 1 ile 30 gün arasında olmalı"}), 400
-    url = _public_base() + "/odeme/" + token
+    url = public_odeme_base() + "/odeme/" + token
     return jsonify(
         {
             "ok": True,
