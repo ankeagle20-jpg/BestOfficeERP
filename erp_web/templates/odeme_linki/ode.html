@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ödeme</title>
+  <style>
+    body { font-family: Arial, sans-serif; background: #f4f7fb; color: #102033; margin: 0; }
+    main { max-width: 640px; margin: 32px auto; background: #fff; border: 1px solid #d5dee8; border-radius: 10px; padding: 20px; }
+    p { margin: 0 0 8px; }
+    button { background: #1565c0; color: #fff; border: 0; border-radius: 6px; padding: 8px 14px; cursor: pointer; }
+    iframe { width: 100%; min-height: 680px; border: 0; margin-top: 12px; }
+  </style>
+</head>
+<body>
+  <main>
+    <p>{{ ad }}</p>
+    <p><strong>{{ tutar }} TL</strong></p>
+    {% if aciklama %}<p>{{ aciklama }}</p>{% endif %}
+    {% if iframe_token %}
+    <iframe title="Ödeme" src="https://www.paytr.com/odeme/guvenli/{{ iframe_token }}"></iframe>
+    {% else %}
+    <form method="post">
+      <button type="submit">Ödemeye geç</button>
+    </form>
+    {% endif %}
+  </main>
+</body>
+</html>

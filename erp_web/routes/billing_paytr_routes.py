@@ -574,6 +574,16 @@ def paytr_callback():
         logger.warning("paytr_callback WOULD_REJECT_OID_FORMAT")
         return _plain_ok()
 
+    if merchant_oid.startswith("OLNK"):
+        try:
+            from odeme_linki import callback_olnk
+
+            callback_olnk(merchant_oid, status, total_amount)
+        except Exception:
+            logger.exception("odeme_linki callback")
+            return Response("ERR", status=500, mimetype="text/plain")
+        return _plain_ok()
+
     inv = fetch_one(
         """
         SELECT id, tenant_id, tenant_slug, status, currency, total_gross, metadata

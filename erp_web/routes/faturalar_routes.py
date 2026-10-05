@@ -10169,9 +10169,11 @@ def tahsilat_sil():
         if tahsilat_id <= 0:
             return jsonify({'ok': False, 'mesaj': 'Geçersiz tahsilat kaydı.'}), 400
         pre = fetch_one(
-            "SELECT COALESCE(customer_id, musteri_id) AS mid FROM tahsilatlar WHERE id = %s",
+            "SELECT COALESCE(customer_id, musteri_id) AS mid, COALESCE(kaynak, '') AS kaynak FROM tahsilatlar WHERE id = %s",
             (tahsilat_id,),
         ) or {}
+        if str(pre.get("kaynak") or "") == "odeme_linki":
+            return jsonify({"ok": False, "mesaj": "Kart ödemesi, silinemez"}), 400
         try:
             mid = int(pre.get("mid") or 0)
         except (TypeError, ValueError):

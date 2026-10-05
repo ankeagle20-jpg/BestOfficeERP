@@ -3874,7 +3874,12 @@ def allowed_file(filename):
 def index():
     """Giriş / Müşteri Kaydı ana sayfası"""
     embed = str(request.args.get('embed') or '').lower() in ('1', 'true', 'yes', 'on')
-    return render_template('giris/index.html', embed=embed)
+    try:
+        from odeme_linki import ozellik_acik
+        link_acik = ozellik_acik()
+    except Exception:
+        link_acik = False
+    return render_template('giris/index.html', embed=embed, odeme_linki_acik=link_acik)
 
 
 @bp.route('/senaryo-01')
@@ -8108,7 +8113,7 @@ def _ekstre_kaynak_kendi_satiri(row) -> bool:
     if not isinstance(row, dict):
         return False
     kay = str(row.get("kaynak") or "").strip().lower()
-    return kay in ("manuel_makbuz", "banka_import")
+    return kay in ("manuel_makbuz", "banka_import", "odeme_linki")
 
 
 def _is_banka_import_markersiz(row) -> bool:
@@ -15492,12 +15497,14 @@ def api_ekstre_tahsilat_sil():
         return jsonify({"ok": False, "mesaj": "musteri_id ve id gerekli."}), 400
     row_pre = fetch_one(
         """
-        SELECT COALESCE(aciklama, '') AS aciklama
+        SELECT COALESCE(aciklama, '') AS aciklama, COALESCE(kaynak, '') AS kaynak
         FROM tahsilatlar
         WHERE id = %s AND (musteri_id = %s OR customer_id = %s)
         """,
         (tid, musteri_id, musteri_id),
     )
+    if row_pre and str(row_pre.get("kaynak") or "") == "odeme_linki":
+        return jsonify({"ok": False, "mesaj": "Kart ödemesi, silinemez"}), 400
     affected_iso = (
         _iso_from_aylik_tah_marker(row_pre.get("aciklama")) if row_pre else None
     )
@@ -15613,7 +15620,7 @@ def api_ekstre_kayit_donustur():
         src = fetch_one(
             """
             SELECT id, COALESCE(aciklama, '') AS aciklama, tahsilat_tarihi, fatura_id,
-                   cek_detay, havale_banka, tahsil_eden
+                   cek_detay, havale_banka, tahsil_eden, COALESCE(kaynak, '') AS kaynak
             FROM tahsilatlar
             WHERE id = %s AND (musteri_id = %s OR customer_id = %s)
             """,
@@ -15621,6 +15628,8 @@ def api_ekstre_kayit_donustur():
         )
         if not src:
             return jsonify({"ok": False, "mesaj": "Tahsilat bulunamadı."}), 404
+        if str(src.get("kaynak") or "") == "odeme_linki":
+            return jsonify({"ok": False, "mesaj": "Kart ödemesi, silinemez"}), 400
         if "|AYLIK_TAH|" in str(src.get("aciklama") or ""):
             return jsonify({
                 "ok": False,

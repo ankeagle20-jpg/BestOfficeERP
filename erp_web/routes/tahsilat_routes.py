@@ -195,9 +195,11 @@ def api_tahsilat_delete():
     try:
         tid = int(request.form.get("tahsilat_id") or request.json.get("tahsilat_id"))
         pre = fetch_one(
-            "SELECT COALESCE(customer_id, musteri_id) AS mid FROM tahsilatlar WHERE id = %s",
+            "SELECT COALESCE(customer_id, musteri_id) AS mid, COALESCE(kaynak, '') AS kaynak FROM tahsilatlar WHERE id = %s",
             (tid,),
         ) or {}
+        if str(pre.get("kaynak") or "") == "odeme_linki":
+            return jsonify({"ok": False, "mesaj": "Kart ödemesi, silinemez"}), 400
         try:
             mid = int(pre.get("mid") or 0)
         except (TypeError, ValueError):
