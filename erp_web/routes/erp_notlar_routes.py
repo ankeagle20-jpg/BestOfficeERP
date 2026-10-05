@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import requests
@@ -531,6 +531,62 @@ def _musteri_notlari(mid: int) -> list:
     return _notlari_getir(extra, (mid,), limit=200, sira="yeni")
 
 
+_OZET_TARIH_KOLON = {
+    "gorusme": "ozet.created_at",
+    "hatirlatma": "ozet.hatirlatma_zamani",
+}
+
+
+def _gun_basi(gun: date) -> datetime:
+    return datetime(gun.year, gun.month, gun.day, tzinfo=IST)
+
+
+def _gun_cozumle(raw) -> date | None:
+    s = str(raw or "").strip()[:10]
+    if not s:
+        return None
+    try:
+        return date.fromisoformat(s)
+    except ValueError:
+        return None
+
+
+def _ozet_tarih_penceresi(tarih: str, bas_raw, bitis_raw):
+    """İstanbul günü. Dönüş: (başlangıç, bitiş hariç, hata).
+
+    Bitiş ertesi gün 00:00 olduğu için seçilen günün 23:59:59'u aralığa girer.
+    """
+    sec = str(tarih or "hepsi").strip().lower()
+    bugun = datetime.now(IST).date()
+    if sec in ("", "hepsi"):
+        return None, None, None
+    if sec == "bugun":
+        return _gun_basi(bugun), _gun_basi(bugun + timedelta(days=1)), None
+    if sec == "dun":
+        dun = bugun - timedelta(days=1)
+        return _gun_basi(dun), _gun_basi(bugun), None
+    if sec == "bu_hafta":
+        pazartesi = bugun - timedelta(days=bugun.weekday())
+        return _gun_basi(pazartesi), _gun_basi(bugun + timedelta(days=1)), None
+    if sec == "bu_ay":
+        return _gun_basi(bugun.replace(day=1)), _gun_basi(bugun + timedelta(days=1)), None
+    if sec == "son_7":
+        return _gun_basi(bugun - timedelta(days=6)), _gun_basi(bugun + timedelta(days=1)), None
+    if sec == "son_30":
+        return _gun_basi(bugun - timedelta(days=29)), _gun_basi(bugun + timedelta(days=1)), None
+    if sec == "ozel":
+        bas = _gun_cozumle(bas_raw)
+        bitis = _gun_cozumle(bitis_raw)
+        if bas and bitis and bas > bitis:
+            return None, None, "Başlangıç tarihi bitişten sonra olamaz"
+        return (
+            _gun_basi(bas) if bas else None,
+            _gun_basi(bitis + timedelta(days=1)) if bitis else None,
+            None,
+        )
+    return None, None, None
+
+
 @bp.route("/api/ozet")
 @giris_gerekli
 def api_ozet():
@@ -540,6 +596,26 @@ def api_ozet():
         kapsam = "acik"
     q = str(request.args.get("q") or "").strip()
     like = "%" + q.replace("%", "") + "%"
+    turu = str(request.args.get("tarih_turu") or "gorusme").strip().lower()
+    if turu not in _OZET_TARIH_KOLON:
+        turu = "gorusme"
+    kolon = _OZET_TARIH_KOLON[turu]
+    bas, bitis_haric, tarih_hata = _ozet_tarih_penceresi(
+        request.args.get("tarih"),
+        request.args.get("bas"),
+        request.args.get("bitis"),
+    )
+    if tarih_hata:
+        return jsonify({"ok": False, "mesaj": tarih_hata}), 400
+    tarih_sql = ""
+    tarih_params: tuple = ()
+    if str(request.args.get("tarih") or "hepsi").strip().lower() not in ("", "hepsi"):
+        tarih_sql = f"""
+          AND {kolon} IS NOT NULL
+          AND (%s::timestamptz IS NULL OR {kolon} >= %s::timestamptz)
+          AND (%s::timestamptz IS NULL OR {kolon} < %s::timestamptz)
+        """
+        tarih_params = (bas, bas, bitis_haric, bitis_haric)
     sql = f"""
         SELECT * FROM (
             SELECT DISTINCT ON ({_HEDEF_SQL})
@@ -554,11 +630,12 @@ def api_ozet():
         ) ozet
         WHERE (%s = 'hepsi' OR ozet.durum IN ('bekliyor', 'ertelendi'))
           AND (%s = '' OR COALESCE(ozet.ozet_musteri_adi, '') ILIKE %s)
+          {tarih_sql}
         ORDER BY CASE WHEN ozet.durum IN ('bekliyor', 'ertelendi') THEN 0 ELSE 1 END,
                  COALESCE(ozet.ozet_musteri_adi, ''), ozet.id DESC
         LIMIT 500
     """
-    params = _gorunur_params() + (kapsam, q, like)
+    params = _gorunur_params() + (kapsam, q, like) + tarih_params
     try:
         rows = fetch_all(sql, params)
     except Exception as e:

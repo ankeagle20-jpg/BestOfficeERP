@@ -85,7 +85,14 @@
       "#erp_asistan_gecmis{display:none;margin:8px 0 12px;}" +
       "#erp-asistan-ozet{padding:8px 4px 28px;}" +
       ".ea-ozet-arac{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 10px;}" +
-      ".ea-ozet-arac input{background:#0a1929;color:#e0f7fa;border:1px solid #1e3a50;border-radius:6px;padding:6px 8px;min-width:220px;}" +
+      ".ea-ozet-arac input,.ea-ozet-arac select{background:#0a1929;color:#e0f7fa;border:1px solid #1e3a50;border-radius:6px;padding:6px 8px;}" +
+      ".ea-ozet-arac input[type=search]{min-width:220px;}" +
+      ".ea-ozet-arac label{display:inline-flex;align-items:center;gap:6px;font-size:13px;}" +
+      "#erp-asistan-ozet-ozel{display:inline-flex;gap:6px;align-items:center;}" +
+      "#erp-asistan-ozet-ozel[hidden]{display:none;}" +
+      ".ea-ozet-uyari{color:#ffab91;font-size:12px;margin:0 0 8px;}" +
+      ".ea-ozet-bilgi{font-size:12px;margin:0 0 8px;}" +
+      ".ea-ozet-bilgi a{color:#80deea;}" +
       ".ea-ozet-arac button{cursor:pointer;border-radius:6px;border:1px solid #1e3a50;background:#0a1929;color:#e0f7fa;padding:6px 10px;}" +
       ".ea-ozet-arac button.aktif{background:#1565c0;border-color:#1565c0;}" +
       "#erp-asistan-ozet-gecmis .erp-asistan-kart{max-width:980px;max-height:86vh;overflow:auto;}" +
@@ -295,6 +302,7 @@
   }
 
   function tara() {
+    if (document.getElementById("erp-asistan-ozet-tablo")) ozetGetir();
     fetch("/erp-notlar/api/bekleyenler", { credentials: "same-origin" })
       .then(function (r) {
         if (!r.ok) return null;
@@ -907,6 +915,7 @@
     var hepsiBtn = document.getElementById("erp-asistan-ozet-hepsi");
     if (acikBtn) acikBtn.classList.toggle("aktif", ozetKapsam !== "hepsi");
     if (hepsiBtn) hepsiBtn.classList.toggle("aktif", ozetKapsam === "hepsi");
+    ozetBilgi(liste.length);
     if (!liste.length) {
       kutu.innerHTML = "<p>Bu filtrede müşteri yok.</p>";
       return;
@@ -914,13 +923,85 @@
     kutu.innerHTML = tabloHtml(liste, "ozet");
   }
 
+  function ozetTarihOku() {
+    var tur = document.getElementById("erp-asistan-ozet-tur");
+    var tarih = document.getElementById("erp-asistan-ozet-tarih");
+    var bas = document.getElementById("erp-asistan-ozet-bas");
+    var bit = document.getElementById("erp-asistan-ozet-bit");
+    return {
+      turu: tur ? tur.value : "gorusme",
+      sec: tarih ? tarih.value : "hepsi",
+      bas: bas ? bas.value : "",
+      bit: bit ? bit.value : ""
+    };
+  }
+
+  function ozetOzelGoster() {
+    var tarih = document.getElementById("erp-asistan-ozet-tarih");
+    var ozel = document.getElementById("erp-asistan-ozet-ozel");
+    if (ozel) ozel.hidden = !tarih || tarih.value !== "ozel";
+  }
+
+  function ozetTarihGecerli() {
+    var p = ozetTarihOku();
+    var uyari = document.getElementById("erp-asistan-ozet-uyari");
+    var bozuk = p.sec === "ozel" && p.bas && p.bit && p.bas > p.bit;
+    if (uyari) {
+      uyari.style.display = bozuk ? "" : "none";
+      uyari.textContent = bozuk ? "Başlangıç tarihi bitişten sonra olamaz." : "";
+    }
+    if (bozuk) {
+      var bilgi = document.getElementById("erp-asistan-ozet-bilgi");
+      if (bilgi) bilgi.innerHTML = "";
+      return false;
+    }
+    return true;
+  }
+
+  function ozetTarihSifirla() {
+    var tur = document.getElementById("erp-asistan-ozet-tur");
+    var tarih = document.getElementById("erp-asistan-ozet-tarih");
+    var bas = document.getElementById("erp-asistan-ozet-bas");
+    var bit = document.getElementById("erp-asistan-ozet-bit");
+    if (tur) tur.value = "gorusme";
+    if (tarih) tarih.value = "hepsi";
+    if (bas) bas.value = "";
+    if (bit) bit.value = "";
+    ozetOzelGoster();
+    ozetGetir();
+  }
+
+  function ozetBilgi(adet) {
+    var bilgi = document.getElementById("erp-asistan-ozet-bilgi");
+    if (!bilgi) return;
+    var p = ozetTarihOku();
+    if (p.sec === "hepsi") {
+      bilgi.innerHTML = "";
+      return;
+    }
+    bilgi.innerHTML = esc(adet) + ' müşteri listeleniyor · <a href="#" id="erp-asistan-ozet-temizle">Filtreyi temizle</a>';
+    var link = document.getElementById("erp-asistan-ozet-temizle");
+    if (link) link.onclick = function (ev) {
+      ev.preventDefault();
+      ozetTarihSifirla();
+    };
+  }
+
   function ozetGetir() {
     var kutu = document.getElementById("erp-asistan-ozet-tablo");
     if (!kutu) return;
+    if (!ozetTarihGecerli()) return;
     var q = "";
     var ara = document.getElementById("erp-asistan-ozet-ara");
     if (ara) q = String(ara.value || "").trim();
-    fetch("/erp-notlar/api/ozet?kapsam=hepsi&q=" + encodeURIComponent(q), { credentials: "same-origin" })
+    var p = ozetTarihOku();
+    var url = "/erp-notlar/api/ozet?kapsam=hepsi&q=" + encodeURIComponent(q) +
+      "&tarih_turu=" + encodeURIComponent(p.turu) +
+      "&tarih=" + encodeURIComponent(p.sec);
+    if (p.sec === "ozel") {
+      url += "&bas=" + encodeURIComponent(p.bas) + "&bitis=" + encodeURIComponent(p.bit);
+    }
+    fetch(url, { credentials: "same-origin" })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (j) {
         if (!j || !j.ok) return;
@@ -939,7 +1020,25 @@
       '<input id="erp-asistan-ozet-ara" type="search" placeholder="Müşteri ara">' +
       '<button type="button" id="erp-asistan-ozet-acik" class="aktif">İş bitmemiş</button>' +
       '<button type="button" id="erp-asistan-ozet-hepsi">Hepsi</button>' +
-      "</div>" +
+      '<label>Tarih türü <select id="erp-asistan-ozet-tur">' +
+      '<option value="gorusme">Görüşme Tarihi</option>' +
+      '<option value="hatirlatma">Hatırlatma Tarihi</option></select></label>' +
+      '<label>Tarih <select id="erp-asistan-ozet-tarih">' +
+      '<option value="hepsi">Hepsi</option>' +
+      '<option value="bugun">Bugün</option>' +
+      '<option value="dun">Dün</option>' +
+      '<option value="bu_hafta">Bu hafta</option>' +
+      '<option value="bu_ay">Bu ay</option>' +
+      '<option value="son_7">Son 7 gün</option>' +
+      '<option value="son_30">Son 30 gün</option>' +
+      '<option value="ozel">Özel aralık</option></select></label>' +
+      '<span id="erp-asistan-ozet-ozel" hidden>' +
+      '<input id="erp-asistan-ozet-bas" type="date" aria-label="Başlangıç">' +
+      "<span>–</span>" +
+      '<input id="erp-asistan-ozet-bit" type="date" aria-label="Bitiş">' +
+      "</span></div>" +
+      '<p id="erp-asistan-ozet-uyari" class="ea-ozet-uyari" style="display:none"></p>' +
+      '<p id="erp-asistan-ozet-bilgi" class="ea-ozet-bilgi"></p>' +
       '<div id="erp-asistan-ozet-tablo"></div>';
     document.getElementById("erp-asistan-ozet-acik").onclick = function () {
       ozetKapsam = "acik";
@@ -953,6 +1052,13 @@
       if (ozetArama) clearTimeout(ozetArama);
       ozetArama = setTimeout(ozetGetir, 300);
     };
+    document.getElementById("erp-asistan-ozet-tur").onchange = ozetGetir;
+    document.getElementById("erp-asistan-ozet-tarih").onchange = function () {
+      ozetOzelGoster();
+      ozetGetir();
+    };
+    document.getElementById("erp-asistan-ozet-bas").onchange = ozetGetir;
+    document.getElementById("erp-asistan-ozet-bit").onchange = ozetGetir;
   }
 
   function ozetGecmisCiz() {
