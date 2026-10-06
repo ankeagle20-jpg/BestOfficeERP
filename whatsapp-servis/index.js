@@ -4,6 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const QRCode = require('qrcode');
 const { Client, LocalAuth } = require('whatsapp-web.js');
+const { idleKapanirMi, tekUcus } = require('./oturum-kural');
 
 const WA_LOG_PATH = path.join(__dirname, 'wa-servis.log');
 
@@ -98,6 +99,8 @@ app.use(requireInternalToken);
 
 /** @type {Map<string, object>} */
 const sessions = new Map();
+/** Aynı kiracı için tek Chrome başlatma. */
+const ensureUcus = new Map();
 /** Şu an Chrome tutan oturum sayısı (starting/qr/ready). */
 let activeChromeCount = 0;
 
@@ -331,11 +334,17 @@ function attachHandlers(session) {
   client.on('disconnected', (reason) => {
     session.ready = false;
     session.status = 'idle';
-    waLog('disconnected', reason);
+    const neden = String(reason || '');
+    waLog('disconnected', neden || tid);
+    if (neden.toUpperCase() === 'LOGOUT') waLog('cikis', tid);
   });
 }
 
 async function ensureClient(tenantId) {
+  return tekUcus(ensureUcus, String(tenantId), () => ensureClientGovde(tenantId));
+}
+
+async function ensureClientGovde(tenantId) {
   const session = getOrCreateSession(tenantId);
   touch(session);
   if (session.client && (session.ready || session.status === 'starting' || session.status === 'qr')) {
@@ -378,6 +387,7 @@ async function ensureClient(tenantId) {
     });
     session.client = client;
     attachHandlers(session);
+    waLog('uyandirma', tenantId);
     waLog(
       'initialize_basladi',
       `${tenantId} chrome ${activeChromeCount}/${WA_MAX_CONCURRENT_CHROME} webcache=remote`
@@ -437,20 +447,25 @@ async function idleDestroySweep() {
   const now = Date.now();
   const victims = [];
   for (const [id, s] of sessions) {
-    if (s.pinKeepAlive) continue;
-    if (!s.client && !s.chromeHeld) continue;
-    if (s.queue.length > 0 || s.queueBusy) continue;
-    if (s.status === 'starting' || s.initPromise) continue;
-    if (now - (s.lastUsedAt || 0) <= WA_IDLE_MS) continue;
+    if (!idleKapanirMi(Object.assign({ tenantId: id }, s), now, WA_IDLE_MS)) continue;
     victims.push(id);
   }
   for (const id of victims) {
-    console.log(`[WA:${id}] Idle destroy (lastUsed > ${WA_IDLE_MS}ms, kuyruk boş)`);
+    waLog('idle_destroy', id);
     try {
       await destroySession(id);
     } catch (err) {
-      console.warn(`[WA:${id}] Idle destroy hatası:`, err && err.message ? err.message : err);
+      waLog('idle_destroy_hata', err && err.message ? err.message : err);
     }
+  }
+}
+
+function diskOturumVar(tenantId) {
+  const dir = path.join(AUTH_DATA_PATH, 'session-' + tenantId);
+  try {
+    return fs.existsSync(dir) && fs.readdirSync(dir).length > 0;
+  } catch (_err) {
+    return false;
   }
 }
 
@@ -546,6 +561,38 @@ app.get('/t/:tenantId/durum-bak', (req, res) => {
   const tenantId = tenantParam(req, res);
   if (!tenantId) return;
   res.json(durumBak(sessions, tenantId));
+});
+
+app.post('/t/:tenantId/uyandir', async (req, res) => {
+  const tenantId = tenantParam(req, res);
+  if (!tenantId) return;
+  const istenen = parseInt(String((req.body || {}).bekle_ms || ''), 10);
+  const bekleMs = Math.min(20000, Math.max(1000, Number.isFinite(istenen) ? istenen : 20000));
+  const mevcut = sessions.get(tenantId);
+  if ((!mevcut || !mevcut.ready) && !diskOturumVar(tenantId)) {
+    waLog('uyandirma_yok', tenantId);
+    return res.json({ ok: true, bagli: false, hazir: false, neden: 'qr', qr_bekliyor: true });
+  }
+  try {
+    const session = await ensureClient(tenantId);
+    const son = Date.now() + bekleMs;
+    while (!session.ready && session.status !== 'qr' && session.status !== 'error' && Date.now() < son) {
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    if (session.ready) {
+      waLog('uyandirma_hazir', tenantId);
+      return res.json({ ok: true, bagli: true, hazir: true, neden: '' });
+    }
+    if (session.status === 'qr' || session.qr) {
+      waLog('uyandirma_qr', tenantId);
+      return res.json({ ok: true, bagli: false, hazir: false, neden: 'qr', qr_bekliyor: true });
+    }
+    waLog('uyandirma_olmadi', tenantId);
+    return res.json({ ok: true, bagli: false, hazir: false, neden: 'oturum' });
+  } catch (err) {
+    waLog('uyandirma_hata', err && err.message ? err.message : err);
+    return res.json({ ok: false, bagli: false, hazir: false, neden: 'oturum' });
+  }
 });
 
 app.get('/t/:tenantId/durum', async (req, res) => {

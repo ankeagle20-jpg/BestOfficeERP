@@ -50,6 +50,7 @@ def gonder(**kwargs):
         bagli_fn=kwargs.get("bagli", lambda: True),
         numara_fn=kwargs.get("numara", lambda _t: ("kayitli", "")),
         kuyruk_fn=kwargs.get("kuyruk", lambda *_a: "ok"),
+        uyandir_fn=kwargs.get("uyandir"),
     )
 
 
@@ -104,7 +105,8 @@ def test_kiraci_ve_bagli():
 
     govde, kod = gonder(bagli=bagli, kuyruk=kuyruk)
     check("kiraci_geri", kod == 200 and govde.get("geri_dus") is True and calls["bagli"] == 0 and calls["kuyruk"] == 0)
-    check("kiraci_kayit", calls["ekle"] == ["geri_dus"])
+    check("kiraci_kayit", calls["ekle"] == ["geri_kiraci"])
+    check("kiraci_metin", "WhatsApp Web sayfası açılıyor" in govde.get("mesaj", ""))
 
     base_patches()
     calls = {"kuyruk": 0, "bagli": 0}
@@ -119,7 +121,8 @@ def test_kiraci_ve_bagli():
         return "ok"
 
     govde, kod = gonder(bagli=bagli2, kuyruk=kuyruk2)
-    check("bagli_degil", kod == 200 and govde.get("geri_dus") is True and calls["bagli"] == 1 and calls["kuyruk"] == 0)
+    check("bagli_degil", kod == 200 and govde.get("geri_dus") is True and govde.get("neden") == "bagli_degil" and calls["bagli"] == 1 and calls["kuyruk"] == 0)
+    check("bagli_metin", govde.get("mesaj") == sw._GERI_METIN["bagli_degil"])
 
 
 def test_tekrar_ve_kilit():
@@ -190,6 +193,64 @@ def test_sayfa_ayrimi():
     check("js_yine", "Yine de gönder" in js and "window.confirm" not in js)
     check("js_tel", "Telefon numarası geçersiz" in js)
     check("yeniden_yok", "whatsapp_yeniden_dene" not in (ROOT / "sozlesme_whatsapp.py").read_text(encoding="utf-8"))
+    check("js_baglaniyor", "WhatsApp bağlanıyor…" in js)
+    check("js_neden", "WhatsApp servisi bağlı değil, WhatsApp Web sayfası açılıyor" in js)
+    check("js_qr", "WhatsApp oturumu yenilenmeli (QR)" in js)
+    check("js_eski_yok", "WhatsApp Web açıldı" not in js)
+
+
+def test_uyandirma_ve_yeniden():
+    base_patches()
+    calls = {"kuyruk": 0, "uyandir": 0, "ekle": []}
+    sw._ekle = lambda *a, **_k: calls["ekle"].append(a[3]) or {"id": 1}
+
+    def uyandir():
+        calls["uyandir"] += 1
+        return {"hazir": True, "neden": ""}
+
+    def kuyruk(*_a):
+        calls["kuyruk"] += 1
+        return "ok"
+
+    govde, kod = gonder(bagli=lambda: False, uyandir=uyandir, kuyruk=kuyruk)
+    time.sleep(0.3)
+    check("uyandir_kuyruk", kod == 200 and govde.get("durum") == "gonderiliyor" and calls["uyandir"] == 1 and calls["kuyruk"] == 1)
+
+    base_patches()
+    calls = {"kuyruk": 0, "ekle": []}
+    sw._ekle = lambda *a, **_k: calls["ekle"].append(a[3]) or {"id": 1}
+    govde, kod = gonder(bagli=lambda: False, uyandir=lambda: {"hazir": False, "neden": "oturum"}, kuyruk=lambda *_a: calls.__setitem__("kuyruk", 1) or "ok")
+    check("uyandir_olmadi", kod == 200 and govde.get("geri_dus") is True and govde.get("neden") == "oturum" and calls["kuyruk"] == 0)
+    check("uyandir_metin", govde.get("mesaj") == sw._GERI_METIN["oturum"])
+    check("uyandir_kayit", calls["ekle"] == ["geri_oturum"])
+
+    base_patches()
+    sw._ekle = lambda *a, **_k: {"id": 1}
+    govde, kod = gonder(bagli=lambda: {"hazir": False, "neden": "qr"})
+    check("qr_metin", kod == 200 and govde.get("qr") is True and govde.get("geri_dus") is False and govde.get("mesaj") == sw._GERI_METIN["qr"])
+
+    say = {"n": 0}
+
+    def cagri():
+        say["n"] += 1
+        if say["n"] == 1:
+            raise RuntimeError("zaman")
+        return "oldu"
+
+    sonuc = sw.dene_bir_kez(cagri, (RuntimeError,))
+    check("yeniden_bir", sonuc == "oldu" and say["n"] == 2)
+    say["n"] = 0
+
+    def hep():
+        say["n"] += 1
+        raise RuntimeError("zaman")
+
+    try:
+        sw.dene_bir_kez(hep, (RuntimeError,))
+        yeniden_dustu = False
+    except RuntimeError:
+        yeniden_dustu = True
+    check("yeniden_iki", yeniden_dustu and say["n"] == 2)
 
 
 def test_giris_kapali():
@@ -216,6 +277,7 @@ if __name__ == "__main__":
     test_kiraci_ve_bagli()
     test_tekrar_ve_kilit()
     test_hizli_ve_yok()
+    test_uyandirma_ve_yeniden()
     test_sayfa_ayrimi()
     test_giris_kapali()
     if fails:

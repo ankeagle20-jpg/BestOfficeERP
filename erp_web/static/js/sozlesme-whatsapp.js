@@ -113,6 +113,7 @@
       return;
     }
     if (uyari && !onay) uyari.textContent = "";
+    if (sonuc) sonuc.textContent = "WhatsApp bağlanıyor…";
     gonderiyor = true;
     if (btn) btn.disabled = true;
     if (yine) yine.disabled = true;
@@ -131,10 +132,14 @@
       return r.json().then(function (j) { return { kod: r.status, j: j || {} }; }).catch(function () { return { kod: r.status, j: {} }; });
     }).then(function (paket) {
       var j = paket.j || {};
-      if (j.geri_dus) {
+      if (j.qr) {
+        if (uyari) uyari.textContent = j.mesaj || "WhatsApp oturumu yenilenmeli (QR)";
+        if (sonuc) sonuc.textContent = "";
+        if (yine) yine.style.display = "none";
+      } else if (j.geri_dus) {
         webAc(ham, metin);
-        if (uyari) uyari.textContent = "";
-        if (sonuc) sonuc.textContent = "WhatsApp Web açıldı";
+        if (uyari) uyari.textContent = j.mesaj || "WhatsApp servisi bağlı değil, WhatsApp Web sayfası açılıyor";
+        if (sonuc) sonuc.textContent = "";
         if (yine) yine.style.display = "none";
       } else if (j.tekrar) {
         if (uyari) uyari.textContent = j.mesaj || "Bu mesaj bu numaraya az önce gönderildi.";

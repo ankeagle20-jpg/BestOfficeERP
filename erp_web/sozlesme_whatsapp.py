@@ -32,6 +32,13 @@ _MUSTERI = "Önce müşteri seçin."
 _YOK = "Müşteri bulunamadı"
 _ORIGIN = "İstek reddedildi"
 _KAYITSIZ = "Bu numara WhatsApp'ta kayıtlı değil"
+_GERI_METIN = {
+    "kiraci": "WhatsApp servisi bağlı değil, WhatsApp Web sayfası açılıyor",
+    "bagli_degil": "WhatsApp servisi bağlı değil, WhatsApp Web sayfası açılıyor",
+    "ulasilamadi": "Servise ulaşılamadı, WhatsApp Web sayfası açılıyor",
+    "oturum": "Oturum açılamadı, WhatsApp Web sayfası açılıyor",
+    "qr": "WhatsApp oturumu yenilenmeli (QR)",
+}
 _DK_USER = "Bu dakika içinde sizin gönderim sınırınız doldu. Bir dakika sonra tekrar deneyin."
 _GUN_USER = "Bugünkü gönderim sınırınız doldu."
 _DK_KIRACI = "Bu dakika içinde kiracı gönderim sınırı doldu. Bir dakika sonra tekrar deneyin."
@@ -196,23 +203,100 @@ def _durum_yaz(rid: int, durum: str) -> None:
     )
 
 
-def _bagli_varsayilan() -> bool:
-    import requests
-    from routes.whatsapp_routes import _wa_internal_headers, _wa_url
+def dene_bir_kez(cagri, ag_hatalari):
+    """Zaman aşımı ve bağlantı hatasında çağrıyı bir kez yineler."""
+    son = None
+    for _deneme in (1, 2):
+        try:
+            return cagri()
+        except ag_hatalari as exc:
+            son = exc
+    raise son
 
-    try:
-        r = requests.get(_wa_url("durum-bak"), headers=_wa_internal_headers(), timeout=(3, 5))
-    except Exception:
-        return False
-    if r.status_code != 200:
-        return False
+
+def _durum_coz(data) -> dict:
+    if not isinstance(data, dict):
+        return {"hazir": False, "neden": "ulasilamadi"}
+    if bool(data.get("bagli")) and bool(data.get("hazir")):
+        return {"hazir": True, "neden": ""}
+    if data.get("neden") == "qr" or data.get("qr_bekliyor"):
+        return {"hazir": False, "neden": "qr"}
+    neden = str(data.get("neden") or "bagli_degil")
+    if neden not in _GERI_METIN:
+        neden = "bagli_degil"
+    return {"hazir": False, "neden": neden}
+
+
+def _yanit_durum(r) -> dict:
+    if getattr(r, "status_code", 0) != 200:
+        return {"hazir": False, "neden": "ulasilamadi"}
     try:
         data = r.json() if r.content else {}
     except Exception:
-        return False
-    if not isinstance(data, dict):
-        return False
-    return bool(data.get("bagli")) and bool(data.get("hazir"))
+        return {"hazir": False, "neden": "ulasilamadi"}
+    return _durum_coz(data)
+
+
+def _ag_sinifi():
+    import requests
+
+    return (requests.exceptions.Timeout, requests.exceptions.ConnectionError)
+
+
+def _durum_varsayilan() -> dict:
+    import requests
+    from routes.whatsapp_routes import _wa_internal_headers, _wa_url
+
+    def cagri():
+        return requests.get(_wa_url("durum-bak"), headers=_wa_internal_headers(), timeout=(3, 5))
+
+    try:
+        return _yanit_durum(dene_bir_kez(cagri, _ag_sinifi()))
+    except Exception:
+        return {"hazir": False, "neden": "ulasilamadi"}
+
+
+def _uyandir_varsayilan() -> dict:
+    import requests
+    from routes.whatsapp_routes import _wa_internal_headers, _wa_url
+
+    def cagri():
+        return requests.post(
+            _wa_url("uyandir"),
+            json={"bekle_ms": 20000},
+            headers=_wa_internal_headers(),
+            timeout=(3, 22),
+        )
+
+    try:
+        return _yanit_durum(dene_bir_kez(cagri, _ag_sinifi()))
+    except Exception:
+        return {"hazir": False, "neden": "ulasilamadi"}
+
+
+def _numara_dene(telefon: str):
+    from routes.erp_notlar_routes import _wa_numara_kayitli
+
+    son = ("hata", "ulasilamadi")
+    for _deneme in (1, 2):
+        kayit, neden = _wa_numara_kayitli(telefon)
+        if kayit != "hata" or neden not in ("baglanti", "yanit_yok"):
+            return kayit, neden
+        son = (kayit, neden)
+    return son
+
+
+def _bagli_paket(raw) -> dict:
+    if isinstance(raw, bool):
+        return {"hazir": raw, "neden": "" if raw else "bagli_degil"}
+    if isinstance(raw, dict):
+        if raw.get("hazir"):
+            return {"hazir": True, "neden": ""}
+        neden = str(raw.get("neden") or "bagli_degil")
+        if neden not in _GERI_METIN:
+            neden = "bagli_degil"
+        return {"hazir": False, "neden": neden}
+    return {"hazir": False, "neden": "bagli_degil"}
 
 
 def _kuyruk_varsayilan(telefon: str, mesaj: str, anahtar: str) -> str:
@@ -251,6 +335,7 @@ def sozlesme_wa_isle(
     bagli_fn=None,
     numara_fn=None,
     kuyruk_fn=None,
+    uyandir_fn=None,
 ) -> tuple[dict, int]:
     if not origin_uygun(origin, host):
         return {"ok": False, "mesaj": _ORIGIN}, 403
@@ -297,16 +382,28 @@ def sozlesme_wa_isle(
     def _tekil(on_ek: str) -> str:
         return (on_ek + ":" + metin_h[:8] + ":" + tel_h[:8] + ":" + str(int(uid)) + ":" + str(int(an.timestamp() * 1000)))[:120]
 
-    def _geri():
-        _kaydet("geri_dus", _tekil("szwa:geri"))
-        return {"ok": True, "geri_dus": True}, 200
+    def _geri(neden):
+        kod = "geri_" + str(neden or "bagli_degil")
+        _kaydet(kod, _tekil("szwa:geri"))
+        logger.info("sozlesme_wa_geri neden=%s adet=1", neden)
+        mesaj = _GERI_METIN.get(neden) or _GERI_METIN["bagli_degil"]
+        if neden == "qr":
+            return {"ok": False, "qr": True, "geri_dus": False, "neden": neden, "mesaj": mesaj}, 200
+        return {"ok": True, "geri_dus": True, "neden": neden, "mesaj": mesaj}, 200
 
     if not node_yolu_acik():
-        return _geri()
+        return _geri("kiraci")
 
-    bagli = bagli_fn or _bagli_varsayilan
-    if not bagli():
-        return _geri()
+    if bagli_fn is not None:
+        paket = _bagli_paket(bagli_fn())
+        if not paket["hazir"] and uyandir_fn is not None:
+            paket = _bagli_paket(uyandir_fn())
+    else:
+        paket = _durum_varsayilan()
+        if not paket["hazir"] and paket["neden"] != "ulasilamadi":
+            paket = _uyandir_varsayilan()
+    if not paket["hazir"]:
+        return _geri(paket["neden"] or "bagli_degil")
 
     if not onay:
         son = _son_gonderim(int(uid), metin_h, tel_h, an - timedelta(seconds=TEKRAR_SANIYE))
@@ -316,17 +413,15 @@ def sozlesme_wa_isle(
             return {"ok": False, "tekrar": True, "mesaj": _YINE}, 409
 
     if numara_fn is None:
-        from routes.erp_notlar_routes import _wa_numara_kayitli
-
-        numara = _wa_numara_kayitli
+        kayit, _neden = _numara_dene(norm)
     else:
-        numara = numara_fn
-    kayit, _neden = numara(norm)
+        kayit, _neden = numara_fn(norm)
     if kayit == "yok":
         _kaydet("basarisiz", _tekil("szwa:yok"))
         return {"ok": False, "kayitli": False, "mesaj": _KAYITSIZ}, 400
     if kayit != "kayitli":
-        return _geri()
+        neden_k = "ulasilamadi" if _neden in ("baglanti", "yanit_yok", "ulasilamadi") else "oturum"
+        return _geri(neden_k)
 
     row = _kaydet("gonderiliyor", anahtar)
     if not row:
