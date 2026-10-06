@@ -7,11 +7,12 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import requests
-from flask import Blueprint, jsonify, render_template, request
+from flask import Blueprint, current_app, g, jsonify, render_template, request
 from flask_login import current_user
 
 from auth import giris_gerekli
@@ -129,6 +130,37 @@ def ensure_erp_notlar_tablolari() -> None:
         execute("ALTER TABLE erp_notlar ADD COLUMN IF NOT EXISTS gorusulen_kisi TEXT")
     except Exception as e:
         print(f"[WARN] erp_notlar gorusulen_kisi ({schema}): {type(e).__name__}")
+    for stmt in (
+        "ALTER TABLE erp_notlar ADD COLUMN IF NOT EXISTS whatsapp_gonderim_durumu TEXT",
+        "ALTER TABLE erp_notlar ADD COLUMN IF NOT EXISTS whatsapp_gonderim_deneme INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE erp_notlar ADD COLUMN IF NOT EXISTS whatsapp_son_deneme_at TIMESTAMPTZ",
+        "ALTER TABLE erp_notlar ADD COLUMN IF NOT EXISTS whatsapp_gonderildi_at TIMESTAMPTZ",
+    ):
+        try:
+            execute(stmt)
+        except Exception as e:
+            print(f"[WARN] erp_notlar wa kolon ({schema}): {type(e).__name__}")
+    try:
+        execute(
+            """
+            UPDATE erp_notlar
+            SET whatsapp_gonderim_durumu = 'gonderildi',
+                whatsapp_gonderildi_at = COALESCE(whatsapp_gonderildi_at, updated_at)
+            WHERE whatsapp_gonderildi_mi IS TRUE
+              AND COALESCE(whatsapp_gonderim_durumu, '') = ''
+            """
+        )
+        execute(
+            """
+            UPDATE erp_notlar
+            SET whatsapp_gonderim_durumu = 'gonderilmeyecek'
+            WHERE whatsapp_gonderilsin IS TRUE
+              AND whatsapp_gonderildi_mi IS NOT TRUE
+              AND COALESCE(whatsapp_gonderim_durumu, '') = ''
+            """
+        )
+    except Exception as e:
+        print(f"[WARN] erp_notlar wa gecis ({schema}): {type(e).__name__}")
     _HAZIR_SEMALAR.add(schema)
 
 
@@ -283,15 +315,42 @@ def _iliski_etiket(row: dict) -> str:
     return ""
 
 
-def _wa_rozet(row: dict) -> str:
+_WA_ETIKET = {
+    "gonderildi": "Gönderildi",
+    "gonderiliyor": "Gönderiliyor",
+    "bekliyor": "Gönderiliyor",
+    "basarisiz": "Gönderilemedi",
+    "basarisiz_kalici": "Gönderilemedi",
+    "gonderilmeyecek": "Gönderilmeyecek",
+    "belirsiz": "Gönderim doğrulanamadı, WhatsApp'ı kontrol edin",
+}
+
+
+def _wa_durum_etiket(row: dict) -> str:
     if not row.get("whatsapp_gonderilsin"):
         return ""
+    durum = str(row.get("whatsapp_gonderim_durumu") or "").strip()
+    if durum in _WA_ETIKET:
+        return _WA_ETIKET[durum]
     if row.get("whatsapp_gonderildi_mi"):
-        return "gönderildi"
+        return "Gönderildi"
+    return "Gönderilmeyecek"
+
+
+def _wa_uyari(row: dict) -> str:
+    durum = str(row.get("whatsapp_gonderim_durumu") or "").strip()
+    if durum == "belirsiz":
+        return "Gönderim doğrulanamadı, WhatsApp'ı kontrol edin"
     hata = str(row.get("whatsapp_hata") or "").strip()
-    if hata:
-        return "gönderilemedi"
-    return "gönderilecek"
+    if durum in ("basarisiz", "basarisiz_kalici") and hata == "baglanti":
+        return "WhatsApp servisi şu an kapalı"
+    if durum in ("basarisiz", "basarisiz_kalici"):
+        return "Gönderilemedi"
+    return ""
+
+
+def _wa_rozet(row: dict) -> str:
+    return _wa_durum_etiket(row)
 
 
 def _serialize(row: dict) -> dict:
@@ -317,7 +376,10 @@ def _serialize(row: dict) -> dict:
         "whatsapp_telefon": row.get("whatsapp_telefon") or "",
         "whatsapp_gonderildi_mi": bool(row.get("whatsapp_gonderildi_mi")),
         "whatsapp_hata": row.get("whatsapp_hata") or "",
+        "whatsapp_gonderim_durumu": row.get("whatsapp_gonderim_durumu") or "",
         "whatsapp_rozet": _wa_rozet(row),
+        "whatsapp_durum_etiket": _wa_durum_etiket(row),
+        "whatsapp_uyari": _wa_uyari(row),
         "olusturan_kullanici_id": row.get("olusturan_kullanici_id"),
     }
 
@@ -756,12 +818,12 @@ def api_olustur():
             olusturan_kullanici_id, kategori, iliski_tip, iliski_id, not_metni,
             hatirlatma_zamani, durum, gorunurluk, departman,
             whatsapp_gonderilsin, whatsapp_telefon, whatsapp_mesaj,
-            gorusulen_kisi
+            whatsapp_gonderim_durumu, gorusulen_kisi
         ) VALUES (
             %s, %s, %s, %s, %s,
             %s, 'bekliyor', %s, %s,
             %s, %s, %s,
-            %s
+            %s, %s
         )
         RETURNING id
         """,
@@ -777,6 +839,7 @@ def api_olustur():
             wa,
             telefon or None,
             wa_mesaj or None,
+            "bekliyor" if wa else "gonderilmeyecek",
             gorusulen or None,
         ),
     )
@@ -791,6 +854,8 @@ def api_olustur():
                 """,
                 (nid, uid),
             )
+    if wa and nid:
+        _wa_arkaplan_baslat(int(nid))
     return jsonify({"ok": True, "id": nid})
 
 
@@ -872,106 +937,264 @@ def api_ertele(nid: int):
     return jsonify({"ok": True, "hatirlatma_zamani": _dt_iso(yeni)})
 
 
-def gonder_whatsapp_notlari(only_ids=None) -> dict:
-    """Zamanı gelmiş, henüz gönderilmemiş WhatsApp notlarını Node kuyruğuna yazar.
+_WA_KAPALI = (
+    "gonderildi",
+    "gonderiliyor",
+    "gonderilmeyecek",
+    "basarisiz_kalici",
+    "belirsiz",
+)
 
-    Tamamlanan notlara mesaj gitmez. Servis kapalıysa whatsapp_hata dolar,
-    whatsapp_gonderildi_mi false kalır; sonraki dakika tekrar dener.
-    only_ids verilirse yalnız o kayıtlar işlenir (test).
+
+def _wa_otuz_doldu(created_at) -> bool:
+    if not created_at:
+        return False
+    an = created_at
+    if getattr(an, "tzinfo", None) is None:
+        an = an.replace(tzinfo=IST)
+    return datetime.now(IST) - an >= timedelta(minutes=30)
+
+
+def _wa_sonraki_basarisiz(deneme, created_at) -> tuple[str, int]:
+    yeni = int(deneme or 0) + 1
+    if yeni >= 5 or _wa_otuz_doldu(created_at):
+        return "basarisiz_kalici", yeni
+    return "basarisiz", yeni
+
+
+def _wa_sahiplen(nid: int):
+    return execute_returning(
+        """
+        UPDATE erp_notlar
+        SET whatsapp_gonderim_durumu = 'gonderiliyor',
+            whatsapp_son_deneme_at = NOW(),
+            updated_at = NOW()
+        WHERE id = %s
+          AND COALESCE(whatsapp_gonderim_durumu, '') <> ALL (%s)
+        RETURNING id, whatsapp_telefon, whatsapp_mesaj, not_metni,
+                  whatsapp_gonderim_deneme, created_at
+        """,
+        (nid, list(_WA_KAPALI)),
+    )
+
+
+def _wa_gonderildi_yaz(nid: int) -> None:
+    execute(
+        """
+        UPDATE erp_notlar
+        SET whatsapp_gonderim_durumu = 'gonderildi',
+            whatsapp_gonderildi_mi = TRUE,
+            whatsapp_gonderildi_at = NOW(),
+            whatsapp_hata = NULL,
+            updated_at = NOW()
+        WHERE id = %s AND whatsapp_gonderim_durumu = 'gonderiliyor'
+        """,
+        (nid,),
+    )
+
+
+def _wa_belirsiz_yaz(nid: int) -> None:
+    execute(
+        """
+        UPDATE erp_notlar
+        SET whatsapp_gonderim_durumu = 'belirsiz',
+            whatsapp_hata = 'yanit_yok',
+            updated_at = NOW()
+        WHERE id = %s AND whatsapp_gonderim_durumu = 'gonderiliyor'
+        """,
+        (nid,),
+    )
+
+
+def _wa_basarisiz_yaz(nid: int, deneme, created_at, hata_turu: str) -> str:
+    durum, yeni = _wa_sonraki_basarisiz(deneme, created_at)
+    execute(
+        """
+        UPDATE erp_notlar
+        SET whatsapp_gonderim_durumu = %s,
+            whatsapp_gonderim_deneme = %s,
+            whatsapp_hata = %s,
+            updated_at = NOW()
+        WHERE id = %s AND whatsapp_gonderim_durumu = 'gonderiliyor'
+        """,
+        (durum, yeni, hata_turu[:40], nid),
+    )
+    return durum
+
+
+def _wa_node_gonder(nid: int, telefon: str, mesaj: str, schema: str | None):
+    """Dönüş: ('ok'|'belirsiz'|'hata', hata_turu)."""
+    from routes.whatsapp_routes import _wa_internal_headers, _wa_url
+
+    anahtar = f"{schema or 'public'}:{int(nid)}"
+    try:
+        r = requests.post(
+            _wa_url("kuyruk-toplu-ekle"),
+            json={"liste": [{"telefon": telefon, "mesaj": mesaj, "anahtar": anahtar}]},
+            headers=_wa_internal_headers(),
+            timeout=(3, 12),
+        )
+    except requests.exceptions.ConnectTimeout:
+        return "hata", "baglanti"
+    except requests.exceptions.ConnectionError:
+        return "hata", "baglanti"
+    except requests.exceptions.Timeout:
+        return "belirsiz", "yanit_yok"
+    except Exception as e:
+        print(f"[WARN] erp_not_whatsapp not_id={nid} hata={type(e).__name__}")
+        return "belirsiz", "yanit_yok"
+    body = {}
+    try:
+        body = r.json() if r.content else {}
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    if r.status_code >= 400 or body.get("ok") is False:
+        print(f"[WARN] erp_not_whatsapp not_id={nid} http={r.status_code}")
+        return "hata", "http"
+    return "ok", ""
+
+
+def _wa_gonder_bir(nid: int, schema: str | None = None) -> str:
+    row = _wa_sahiplen(nid)
+    if not row:
+        return "atlandi"
+    tel = str(row.get("whatsapp_telefon") or "").strip()
+    mesaj = str(row.get("whatsapp_mesaj") or "").strip() or str(row.get("not_metni") or "").strip()
+    if not tel:
+        _wa_basarisiz_yaz(nid, 4, row.get("created_at"), "telefon_yok")
+        return "basarisiz_kalici"
+    if not mesaj:
+        _wa_basarisiz_yaz(nid, 4, row.get("created_at"), "mesaj_yok")
+        return "basarisiz_kalici"
+    sonuc, tur = _wa_node_gonder(nid, tel, mesaj, schema)
+    if sonuc == "ok":
+        _wa_gonderildi_yaz(nid)
+        return "gonderildi"
+    if sonuc == "belirsiz":
+        _wa_belirsiz_yaz(nid)
+        return "belirsiz"
+    return _wa_basarisiz_yaz(nid, row.get("whatsapp_gonderim_deneme"), row.get("created_at"), tur or "http")
+
+
+def _wa_arkaplan(app, schema, nid: int) -> None:
+    with app.app_context():
+        try:
+            if schema:
+                g.tenant_schema = schema
+            else:
+                g.pop("tenant_schema", None)
+            _wa_gonder_bir(nid, schema)
+        except Exception as e:
+            print(f"[WARN] erp_not_whatsapp arkaplan not_id={nid} hata={type(e).__name__}")
+        finally:
+            try:
+                g.pop("tenant_schema", None)
+            except Exception:
+                pass
+
+
+def _wa_arkaplan_baslat(nid: int) -> None:
+    schema = _tenant_schema_for_request()
+    app = current_app._get_current_object()
+    threading.Thread(
+        target=_wa_arkaplan,
+        args=(app, schema, nid),
+        daemon=True,
+        name=f"wa-not-{nid}",
+    ).start()
+
+
+def _wa_takili_toparla(only_ids=None) -> None:
+    id_sql = ""
+    params: list = []
+    if only_ids:
+        id_sql = " AND id = ANY(%s)"
+        params.append(list(only_ids))
+    execute(
+        f"""
+        UPDATE erp_notlar
+        SET whatsapp_gonderim_deneme = COALESCE(whatsapp_gonderim_deneme, 0) + 1,
+            whatsapp_gonderim_durumu = CASE
+                WHEN COALESCE(whatsapp_gonderim_deneme, 0) + 1 >= 5
+                  OR created_at < NOW() - INTERVAL '30 minutes'
+                THEN 'basarisiz_kalici'
+                ELSE 'basarisiz'
+            END,
+            whatsapp_hata = 'surec_kesildi',
+            updated_at = NOW()
+        WHERE whatsapp_gonderim_durumu = 'gonderiliyor'
+          AND whatsapp_son_deneme_at IS NOT NULL
+          AND whatsapp_son_deneme_at < NOW() - INTERVAL '3 minutes'
+          {id_sql}
+        """,
+        tuple(params),
+    )
+
+
+def gonder_whatsapp_notlari(only_ids=None) -> dict:
+    """Yalnız tekrar deneme. Hatırlatma saatine bakmaz.
+
+    basarisiz, deneme < 5, son 30 dakikada açılmış ve son denemeden
+    en az 2 dakika geçmiş notlar. 5. deneme veya 30 dakika sonra kalıcı.
     """
     ensure_erp_notlar_tablolari()
+    _wa_takili_toparla(only_ids)
     params: list = []
     id_sql = ""
     if only_ids:
         id_sql = " AND id = ANY(%s)"
         params.append(list(only_ids))
+    execute(
+        f"""
+        UPDATE erp_notlar
+        SET whatsapp_gonderim_durumu = 'basarisiz_kalici',
+            updated_at = NOW()
+        WHERE whatsapp_gonderim_durumu = 'basarisiz'
+          AND (
+            COALESCE(whatsapp_gonderim_deneme, 0) >= 5
+            OR created_at < NOW() - INTERVAL '30 minutes'
+          )
+          {id_sql}
+        """,
+        tuple(params),
+    )
     rows = fetch_all(
         f"""
-        SELECT id, whatsapp_telefon, whatsapp_mesaj, not_metni, whatsapp_hata
+        SELECT id
         FROM erp_notlar
-        WHERE whatsapp_gonderilsin = TRUE
-          AND whatsapp_gonderildi_mi = FALSE
-          AND hatirlatma_zamani <= NOW()
-          AND durum <> 'tamamlandi'
-          AND COALESCE(whatsapp_hata, '') NOT IN ('telefon yok', 'mesaj yok')
+        WHERE whatsapp_gonderim_durumu = 'basarisiz'
+          AND COALESCE(whatsapp_gonderim_deneme, 0) < 5
+          AND created_at >= NOW() - INTERVAL '30 minutes'
+          AND (
+            whatsapp_son_deneme_at IS NULL
+            OR whatsapp_son_deneme_at <= NOW() - INTERVAL '2 minutes'
+          )
           {id_sql}
-        ORDER BY hatirlatma_zamani
+        ORDER BY created_at
         LIMIT 30
         """,
         tuple(params),
     )
-    from routes.whatsapp_routes import _wa_internal_headers, _wa_url
-
+    schema = _tenant_schema_for_request()
     gonderilen = 0
     hata = 0
+    belirsiz = 0
     for row in rows or []:
-        nid = row.get("id")
-        tel = str(row.get("whatsapp_telefon") or "").strip()
-        mesaj = str(row.get("whatsapp_mesaj") or "").strip() or str(row.get("not_metni") or "").strip()
-        if not tel:
-            execute(
-                "UPDATE erp_notlar SET whatsapp_hata = 'telefon yok', updated_at = NOW() WHERE id = %s",
-                (nid,),
-            )
-            hata += 1
-            continue
-        if not mesaj:
-            execute(
-                "UPDATE erp_notlar SET whatsapp_hata = 'mesaj yok', updated_at = NOW() WHERE id = %s",
-                (nid,),
-            )
-            hata += 1
-            continue
-        try:
-            r = requests.post(
-                _wa_url("kuyruk-toplu-ekle"),
-                json={"liste": [{"telefon": tel, "mesaj": mesaj}]},
-                headers=_wa_internal_headers(),
-                timeout=10,
-            )
-            body = {}
-            try:
-                body = r.json() if r.content else {}
-            except Exception:
-                body = {}
-            basarisiz = r.status_code >= 400 or (
-                isinstance(body, dict) and body.get("ok") is False
-            )
-            if basarisiz:
-                execute(
-                    """
-                    UPDATE erp_notlar
-                    SET whatsapp_hata = %s, updated_at = NOW()
-                    WHERE id = %s AND whatsapp_gonderildi_mi = FALSE
-                    """,
-                    (f"gönderilemedi: HTTP {r.status_code}", nid),
-                )
-                print(f"[WARN] erp_not_whatsapp not_id={nid} http={r.status_code}")
-                hata += 1
-                continue
-            execute(
-                """
-                UPDATE erp_notlar
-                SET whatsapp_gonderildi_mi = TRUE,
-                    whatsapp_hata = NULL,
-                    updated_at = NOW()
-                WHERE id = %s
-                """,
-                (nid,),
-            )
+        sonuc = _wa_gonder_bir(int(row["id"]), schema)
+        if sonuc == "gonderildi":
             gonderilen += 1
-        except Exception as e:
-            execute(
-                """
-                UPDATE erp_notlar
-                SET whatsapp_hata = %s, updated_at = NOW()
-                WHERE id = %s AND whatsapp_gonderildi_mi = FALSE
-                """,
-                (f"gönderilemedi: {type(e).__name__}", nid),
-            )
-            print(f"[WARN] erp_not_whatsapp not_id={nid} hata={type(e).__name__}")
+        elif sonuc == "belirsiz":
+            belirsiz += 1
+        elif sonuc != "atlandi":
             hata += 1
-    return {"gonderilen": gonderilen, "hata": hata, "adet": len(rows or [])}
+    return {
+        "gonderilen": gonderilen,
+        "hata": hata,
+        "belirsiz": belirsiz,
+        "adet": len(rows or []),
+    }
 
 
 def run_erp_not_whatsapp_job() -> None:

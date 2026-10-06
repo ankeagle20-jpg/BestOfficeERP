@@ -247,8 +247,8 @@
     var perde = document.createElement("div");
     perde.id = "erp-asistan-popup";
     perde.className = "erp-asistan-perde";
-    var rozet = n.whatsapp_rozet === "gönderilemedi"
-      ? '<span class="erp-asistan-rozet" title="' + esc(n.whatsapp_hata) + '">gönderilemedi</span>'
+    var rozet = n.whatsapp_durum_etiket === "Gönderilemedi"
+      ? '<span class="erp-asistan-rozet" title="' + esc(n.whatsapp_uyari || "") + '">Gönderilemedi</span>'
       : "";
     perde.innerHTML =
       '<div class="erp-asistan-kart" role="dialog" aria-label="ERP Asistan hatırlatma">' +
@@ -363,10 +363,14 @@
     if (key === "gorusulen") return esc(String(n.gorusulen_kisi || "").trim() || "-");
     if (key === "aciklama") return esc(n.not_metni);
     if (key === "durum") {
-      if (n.durum === "bekliyor" || n.durum === "ertelendi") {
-        return '<button type="button" class="ea-durum-ac" data-not-id="' + esc(n.id) + '">' + esc(n.durum) + "</button>";
+      var temel = (n.durum === "bekliyor" || n.durum === "ertelendi")
+        ? '<button type="button" class="ea-durum-ac" data-not-id="' + esc(n.id) + '">' + esc(n.durum) + "</button>"
+        : esc(n.durum);
+      if (n.whatsapp_gonderilsin && n.whatsapp_durum_etiket) {
+        temel += '<div class="ea-not-meta">' + esc(n.whatsapp_durum_etiket) + "</div>";
+        if (n.whatsapp_uyari) temel += '<div class="ea-not-meta">' + esc(n.whatsapp_uyari) + "</div>";
       }
-      return esc(n.durum);
+      return temel;
     }
     return "";
   }
@@ -765,10 +769,10 @@
     if (n.departman) gor += " · " + n.departman;
     var wa = "";
     if (n.whatsapp_gonderilsin) {
-      wa = '<p class="ea-not-meta">WhatsApp: ' + esc(n.whatsapp_rozet || "gönderilecek") +
+      wa = '<p class="ea-not-meta">WhatsApp: ' + esc(n.whatsapp_rozet || n.whatsapp_durum_etiket || "") +
         (n.whatsapp_telefon ? " · " + esc(n.whatsapp_telefon) : "") +
-        (n.whatsapp_mesaj ? " · " + esc(n.whatsapp_mesaj) : "") +
-        (n.whatsapp_hata ? " · " + esc(n.whatsapp_hata) : "") + "</p>";
+        (n.whatsapp_mesaj ? " · " + esc(n.whatsapp_mesaj) : "") + "</p>";
+      if (n.whatsapp_uyari) wa += '<p class="ea-not-meta">' + esc(n.whatsapp_uyari) + "</p>";
     }
     var perde = document.createElement("div");
     perde.id = "erp-asistan-detay";
