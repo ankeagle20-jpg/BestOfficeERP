@@ -183,6 +183,7 @@ from routes.admin_support_routes import bp as admin_support_bp
 from routes.admin_credentials_routes import bp as admin_credentials_bp
 from routes.billing_paytr_routes import bp as billing_paytr_bp
 from routes.odeme_linki_routes import bp as odeme_linki_bp
+from routes.sozlesme_whatsapp_routes import bp as sozlesme_whatsapp_bp
 from routes.ledger_routes import bp as ledger_bp
 from routes.public_pricing_routes import bp as public_pricing_bp
 from routes.legal_routes import bp as legal_bp
@@ -233,6 +234,7 @@ app.register_blueprint(admin_support_bp, url_prefix="/admin")
 app.register_blueprint(admin_credentials_bp, url_prefix="/admin")
 app.register_blueprint(billing_paytr_bp)
 app.register_blueprint(odeme_linki_bp)
+app.register_blueprint(sozlesme_whatsapp_bp)
 app.register_blueprint(ledger_bp, url_prefix="/ledger")
 app.register_blueprint(public_pricing_bp)
 app.register_blueprint(legal_bp)

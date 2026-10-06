@@ -28179,11 +28179,6 @@ function girisMusteriCogalt() {
 function girisMusteriWhatsAppAc() {
     var phoneEl = document.getElementById('phone');
     var tel = (phoneEl && phoneEl.value) ? phoneEl.value : '';
-    var num = girisTelefonuWhatsAppRakam(tel);
-    if (!num) {
-        alert('Müşteri telefonu bulunamadı. Listeden müşteri seçin veya formdaki Telefon alanına numara girin (örn. 5XX XXX XX XX).');
-        return;
-    }
     var ad = ((document.getElementById('name') || {}).value || '').trim();
     if (!ad) {
         var sad = document.getElementById('giris-secili-musteri-ad');
@@ -28195,7 +28190,13 @@ function girisMusteriWhatsAppAc() {
     var mesaj = ad
         ? ('Merhaba ' + ad + ',\n\nBestOffice üzerinden iletişime geçiyorum.')
         : 'Merhaba,\n\nBestOffice üzerinden iletişime geçiyorum.';
-    bestOfficeWhatsAppWebAc(num, mesaj);
+    var mid = 0;
+    try { mid = parseInt(typeof selectedId !== 'undefined' ? selectedId : 0, 10) || 0; } catch (eMid) { mid = 0; }
+    if (typeof sozlesmeWhatsAppAc === 'function') {
+        sozlesmeWhatsAppAc({ buton: 'ust', musteriId: mid, telefon: tel, ad: ad, mesaj: mesaj });
+        return;
+    }
+    bestOfficeWhatsAppWebAc(girisTelefonuWhatsAppRakam(tel), mesaj);
 }
 
 // Yeni müşteri formu aç
@@ -31589,10 +31590,15 @@ function sozlesmeTahsilatWhatsApp() {
     var payload = sozlesmeTahsilatFormPayload();
     if (!payload.musteri_id && !payload.musteri_adi) { alert('Lütfen müşteri seçiniz.'); return; }
     if (payload.tutar <= 0) { alert('Geçerli bir tutar giriniz.'); return; }
-    var num = girisTelefonuWhatsAppRakam(document.getElementById('sozlesme_tahsilat_musteri_phone').value || '');
+    var tel = document.getElementById('sozlesme_tahsilat_musteri_phone').value || '';
     var adi = (document.getElementById('sozlesme_tahsilat_musteri_secilen').textContent || payload.musteri_adi || 'Müşteri').trim();
-    var metin = 'Sayın ' + adi + ',\n\nTahsilat makbuzunuz ekte yer almaktadır. İncelemenizi rica ederiz.\n\nİyi günler dileriz.\nBESTOFFICE';
-    bestOfficeWhatsAppWebAc(num, metin);
+    var metin = 'Sayın ' + adi + ',\n\nTahsilat makbuzunuz hazırdır. İncelemenizi rica ederiz.\n\nİyi günler dileriz.\nBESTOFFICE';
+    var mid = parseInt(payload.musteri_id, 10) || 0;
+    if (typeof sozlesmeWhatsAppAc === 'function') {
+        sozlesmeWhatsAppAc({ buton: 'makbuz', musteriId: mid, telefon: tel, ad: adi, mesaj: metin });
+        return;
+    }
+    bestOfficeWhatsAppWebAc(girisTelefonuWhatsAppRakam(tel), metin);
 }
 
 function sozlesmeTahsilatMusteriListesiGetir(q) {
@@ -34010,4 +34016,5 @@ async function kiraBildirgesiWhatsApp() {
 }
 
 </script>
+<script src="{{ url_for('static', filename='js/sozlesme-whatsapp.js', v=sozlesme_wa_js_surum) }}"></script>
 {% endblock %}

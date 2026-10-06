@@ -186,6 +186,17 @@ function touch(session) {
   if (session) session.lastUsedAt = Date.now();
 }
 
+function durumBak(sessionsMap, tenantId) {
+  const session = sessionsMap && sessionsMap.get ? sessionsMap.get(tenantId) : null;
+  if (!session) return { ok: true, bagli: false, hazir: false, durum: 'yok' };
+  return {
+    ok: true,
+    bagli: Boolean(session.ready),
+    hazir: Boolean(session.ready),
+    durum: session.status || '',
+  };
+}
+
 function durumPayload(session) {
   return {
     tenant_id: session.tenantId,
@@ -531,6 +542,12 @@ function tenantParam(req, res) {
 
 // --- Tenant-scoped routes ---
 
+app.get('/t/:tenantId/durum-bak', (req, res) => {
+  const tenantId = tenantParam(req, res);
+  if (!tenantId) return;
+  res.json(durumBak(sessions, tenantId));
+});
+
 app.get('/t/:tenantId/durum', async (req, res) => {
   const tenantId = tenantParam(req, res);
   if (!tenantId) return;
@@ -790,7 +807,7 @@ yerelQrApp.listen(YEREL_QR_PORT, '127.0.0.1', () => {
 });
 }
 
-module.exports = { kuyrukKalemleri, numaraKayitliMi };
+module.exports = { kuyrukKalemleri, numaraKayitliMi, durumBak };
 
 if (require.main === module) {
   servisiBaslat();
