@@ -32,7 +32,9 @@
       "#odeme-linki-kart button{cursor:pointer;border-radius:6px;border:1px solid #1e3a50;background:#1565c0;color:#fff;padding:6px 10px;margin-right:6px;}" +
       "#odeme-linki-liste{font-size:13px;margin-top:12px;}" +
       "#odeme-linki-liste table{width:100%;border-collapse:collapse;}" +
-      "#odeme-linki-liste td{border-bottom:1px solid #1e3a50;padding:4px;}";
+      "#odeme-linki-liste td{border-bottom:1px solid #1e3a50;padding:4px;}" +
+      "#odeme-linki-url{word-break:break-all;margin:8px 0;}" +
+      ".odeme-linki-sonuc-btn{margin:8px 0;}";
     document.head.appendChild(st);
   }
 
@@ -60,7 +62,8 @@
     linkler.forEach(function (n) {
       var tarih = String(n.created_at || "").replace("T", " ").slice(0, 16);
       var iptal = n.durum === "bekliyor"
-        ? ' <button type="button" data-iptal="' + esc(n.id) + '">İptal et</button>'
+        ? ' <button type="button" data-wa="' + esc(n.id) + '">WhatsApp ile gönder</button>' +
+          ' <button type="button" data-iptal="' + esc(n.id) + '">İptal et</button>'
         : "";
       var wa = n.whatsapp_etiket ? " · " + esc(n.whatsapp_etiket) : "";
       html += "<tr><td>" + esc(tarih) + "</td><td>" + esc(n.tutar) + " TL</td><td>" +
@@ -84,33 +87,57 @@
     return s.slice(i + 7).split(/[?#]/)[0];
   }
 
-  function waBagla(mid, linkId, url) {
-    var acBtn = document.getElementById("odeme-linki-wa-ac");
+  var adresler = {};
+  try {
+    adresler = JSON.parse(sessionStorage.getItem("olnkWaAdres") || "{}") || {};
+  } catch (e) {
+    adresler = {};
+  }
+
+  function adresKaydet(id, url) {
+    adresler[String(id)] = url;
+    try { sessionStorage.setItem("olnkWaAdres", JSON.stringify(adresler)); } catch (e) {}
+  }
+
+  function waPost(linkId, govde) {
+    return fetch("/giris/api/odeme-linki/" + encodeURIComponent(linkId) + "/whatsapp", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(govde)
+    }).then(function (r) {
+      return r.json().then(function (j) { return j || {}; }).catch(function () { return {}; });
+    });
+  }
+
+  function waPanelAc(mid, linkId) {
+    var kutu = document.getElementById("odeme-linki-wa-kutu");
+    var uyari = document.getElementById("odeme-linki-wa-uyari");
     var gonder = document.getElementById("odeme-linki-wa-gonder");
-    if (!acBtn || !gonder) return;
-    var token = tokenFromUrl(url);
-    function waPost(govde) {
-      return fetch("/giris/api/odeme-linki/" + encodeURIComponent(linkId) + "/whatsapp", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(govde)
-      }).then(function (r) {
-        return r.json().then(function (j) { return j || {}; }).catch(function () { return {}; });
-      });
+    var sonuc = document.getElementById("odeme-linki-wa-sonuc");
+    if (kutu) kutu.hidden = false;
+    if (sonuc) sonuc.textContent = "";
+    if (gonder) gonder.setAttribute("data-link", String(linkId));
+    var url = adresler[String(linkId)] || "";
+    if (!url) {
+      if (uyari) uyari.textContent = "Bu linkin adresi bu oturumda yok. Az önce oluşturduğunuz linkten gönderebilirsiniz.";
+      if (gonder) gonder.disabled = true;
+      return;
     }
-    acBtn.onclick = function () {
-      var kutu = document.getElementById("odeme-linki-wa-kutu");
-      if (kutu) kutu.hidden = false;
-      waPost({ onizle: true, token: token }).then(function (j) {
-        var tel = document.getElementById("odeme-linki-wa-tel");
-        var mesaj = document.getElementById("odeme-linki-wa-mesaj");
-        var uyari = document.getElementById("odeme-linki-wa-uyari");
-        if (tel && !tel.value) tel.value = j.telefon || "";
-        if (mesaj && !mesaj.value) mesaj.value = j.mesaj || "";
-        if (uyari) uyari.textContent = j.uyari || (j.gonderilebilir ? "" : "Bu link gönderilemez");
-      }).catch(function () {});
-    };
+    if (gonder) gonder.disabled = false;
+    waPost(linkId, { onizle: true, token: tokenFromUrl(url) }).then(function (j) {
+      var tel = document.getElementById("odeme-linki-wa-tel");
+      var mesaj = document.getElementById("odeme-linki-wa-mesaj");
+      if (tel) tel.value = j.telefon || "";
+      if (mesaj) mesaj.value = j.mesaj || "";
+      if (uyari) uyari.textContent = j.uyari || (j.gonderilebilir === false ? "Bu link gönderilemez" : "");
+    }).catch(function () {});
+  }
+
+  function waGonderBagla(mid) {
+    var gonder = document.getElementById("odeme-linki-wa-gonder");
+    if (!gonder || gonder.getAttribute("data-bagli") === "1") return;
+    gonder.setAttribute("data-bagli", "1");
     gonder.onclick = function () {
       if (gonder.disabled) return;
       gonder.disabled = true;
@@ -118,30 +145,35 @@
       var mesaj = document.getElementById("odeme-linki-wa-mesaj");
       var sonuc = document.getElementById("odeme-linki-wa-sonuc");
       var uyari = document.getElementById("odeme-linki-wa-uyari");
+      var linkId = gonder.getAttribute("data-link");
+      var token = tokenFromUrl(adresler[String(linkId)] || "");
       function bitir(j) {
         if (uyari && j && j.kayitli === false) uyari.textContent = j.mesaj || "";
         if (sonuc) sonuc.textContent = (j && (j.whatsapp_etiket || j.mesaj)) || "";
         if (j && j.ok) listeGetir(mid);
         else gonder.disabled = false;
       }
-      waPost({
-        token: token,
-        telefon: tel ? tel.value : "",
-        mesaj: mesaj ? mesaj.value : "",
-        onay: false
-      }).then(function (j) {
+      if (!token) {
+        if (uyari) uyari.textContent = "Bu linkin adresi bu oturumda yok. Az önce oluşturduğunuz linkten gönderebilirsiniz.";
+        gonder.disabled = true;
+        return;
+      }
+      function govde(onay) {
+        return {
+          token: token,
+          telefon: tel ? tel.value : "",
+          mesaj: mesaj ? mesaj.value : "",
+          onay: !!onay
+        };
+      }
+      waPost(linkId, govde(false)).then(function (j) {
         if (j && j.tekrar_onay) {
           var evet = window.confirm(j.mesaj || "Bu linke daha önce gönderildi, tekrar göndermek istiyor musun?");
           if (!evet) {
             gonder.disabled = false;
             return null;
           }
-          return waPost({
-            token: token,
-            telefon: tel ? tel.value : "",
-            mesaj: mesaj ? mesaj.value : "",
-            onay: true
-          });
+          return waPost(linkId, govde(true));
         }
         return j;
       }).then(function (j) {
@@ -173,7 +205,13 @@
       '<label>Geçerlilik (gün)<input name="gun" type="number" min="1" max="30" value="7" required></label>' +
       '<div><button type="submit">Link oluştur</button>' +
       '<button type="button" id="odeme-linki-kapat">Kapat</button></div>' +
-      '<p id="odeme-linki-url"></p>' +
+      '<div id="odeme-linki-url"></div>' +
+      '<div id="odeme-linki-wa-kutu" hidden>' +
+      '<label>Telefon<input id="odeme-linki-wa-tel"></label>' +
+      '<p id="odeme-linki-wa-uyari"></p>' +
+      '<label>Mesaj<textarea id="odeme-linki-wa-mesaj" rows="6"></textarea></label>' +
+      '<button type="button" id="odeme-linki-wa-gonder">Onayla ve gönder</button>' +
+      '<p id="odeme-linki-wa-sonuc"></p></div>' +
       '<div id="odeme-linki-liste"></div></form>';
     document.body.appendChild(perde);
     var form = document.getElementById("odeme-linki-kart");
@@ -214,21 +252,25 @@
             kutu.textContent = "Link oluşturulamadı.";
             return;
           }
-          kutu.innerHTML = esc(j.url) + ' <button type="button" id="odeme-linki-kopyala">Kopyala</button>' +
-            ' <button type="button" id="odeme-linki-wa-ac">WhatsApp ile gönder</button>' +
-            '<div id="odeme-linki-wa-kutu" hidden>' +
-            '<label>Telefon<input id="odeme-linki-wa-tel"></label>' +
-            '<p id="odeme-linki-wa-uyari"></p>' +
-            '<label>Mesaj<textarea id="odeme-linki-wa-mesaj" rows="6"></textarea></label>' +
-            '<button type="button" id="odeme-linki-wa-gonder">Onayla ve gönder</button>' +
-            '<p id="odeme-linki-wa-sonuc"></p></div>';
+          adresKaydet(j.id, j.url);
+          kutu.innerHTML =
+            '<div class="odeme-linki-sonuc-url">' + esc(j.url) + "</div>" +
+            '<div class="odeme-linki-sonuc-btn">' +
+            '<button type="button" id="odeme-linki-kopyala">Kopyala</button>' +
+            '<button type="button" id="odeme-linki-wa-ac">WhatsApp ile gönder</button></div>';
           document.getElementById("odeme-linki-kopyala").onclick = function () { kopyala(j.url); };
-          waBagla(mid, j.id, j.url);
+          document.getElementById("odeme-linki-wa-ac").onclick = function () { waPanelAc(mid, j.id); };
           listeGetir(mid);
         })
         .catch(function () {});
     };
+    waGonderBagla(mid);
     perde.addEventListener("click", function (ev) {
+      var wa = ev.target.closest && ev.target.closest("[data-wa]");
+      if (wa) {
+        waPanelAc(mid, wa.getAttribute("data-wa"));
+        return;
+      }
       var btn = ev.target.closest && ev.target.closest("[data-iptal]");
       if (!btn) return;
       fetch("/giris/api/odeme-linki/" + encodeURIComponent(btn.getAttribute("data-iptal")) + "/iptal", {

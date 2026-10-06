@@ -4309,7 +4309,7 @@ button.auto-btn.whatsapp-hizmet-filter-btn.wa-hizmet-aktif {
                 </div>
                 <div class="sozlesmeler-tahsilat-wrap">
                     <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
-                        <span style="display:inline-flex;align-items:center;gap:8px;"><h4 class="sozlesmeler-sag-baslik" style="margin:0;">Tahsilat Makbuzu</h4>{% if odeme_linki_acik %}<button type="button" id="odeme-linki-ac">Ödeme Linki</button><script src="{{ url_for('static', filename='js/odeme-linki.js') }}"></script>{% endif %}</span>
+                        <span style="display:inline-flex;align-items:center;gap:8px;"><h4 class="sozlesmeler-sag-baslik" style="margin:0;">Tahsilat Makbuzu</h4>{% if odeme_linki_acik %}<button type="button" id="odeme-linki-ac">Ödeme Linki</button><script src="{{ url_for('static', filename='js/odeme-linki.js', v=odeme_linki_js_surum) }}"></script>{% endif %}</span>
                         <div class="cari-ekstre-tab-bar" style="margin:0;">
                             <button type="button" class="cari-ekstre-tab active" id="sozlesme_tahsil_tab_makbuz_btn" onclick="sozlesmeTahsilAltTabAc('makbuz')">Tahsilat Makbuzu</button>
                             <button type="button" class="cari-ekstre-tab" id="sozlesme_tahsil_tab_rapor_btn" onclick="sozlesmeTahsilAltTabAc('rapor')">Tahsilat Raporu</button>

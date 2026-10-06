@@ -3879,7 +3879,18 @@ def index():
         link_acik = ozellik_acik()
     except Exception:
         link_acik = False
-    return render_template('giris/index.html', embed=embed, odeme_linki_acik=link_acik)
+    js_surum = ""
+    try:
+        js_yol = os.path.join(os.path.dirname(__file__), "..", "static", "js", "odeme-linki.js")
+        js_surum = str(int(os.path.getmtime(js_yol)))
+    except Exception:
+        js_surum = ""
+    return render_template(
+        'giris/index.html',
+        embed=embed,
+        odeme_linki_acik=link_acik,
+        odeme_linki_js_surum=js_surum,
+    )
 
 
 @bp.route('/senaryo-01')
