@@ -451,14 +451,30 @@ def api_gonder():
             headers=_wa_internal_headers(),
             timeout=10
         )
-        result = r.json()
-        return jsonify({
-            'ok': True,
-            'servis_yaniti': result,
-            'wa_tenant_id': _wa_tenant_id(),
-        })
     except Exception as e:
         return jsonify({'ok': False, 'mesaj': f'WhatsApp servisine bağlanılamadı: {e}'}), 500
+
+    try:
+        result = r.json() if r.content else {}
+    except Exception:
+        result = {}
+    if not isinstance(result, dict):
+        result = {}
+    if r.status_code >= 400 or result.get('ok') is False:
+        if r.status_code >= 400:
+            return jsonify({
+                'ok': False,
+                'mesaj': f'WhatsApp servisi hata döndü (HTTP {r.status_code}).',
+            }), int(r.status_code)
+        return jsonify({
+            'ok': False,
+            'mesaj': 'WhatsApp servisi gönderimi kabul etmedi.',
+        }), 502
+    return jsonify({
+        'ok': True,
+        'servis_yaniti': result,
+        'wa_tenant_id': _wa_tenant_id(),
+    })
 
 
 @bp.route('/api/servis-durum')
