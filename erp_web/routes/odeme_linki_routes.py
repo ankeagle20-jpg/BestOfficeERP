@@ -4,12 +4,13 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 
-from flask import Blueprint, abort, jsonify, render_template, request
+from flask import Blueprint, abort, current_app, jsonify, render_template, request
 from flask_login import current_user
 
 from auth import giris_gerekli
@@ -20,13 +21,23 @@ from odeme_linki import (
     ensure_tablolar,
     hiz_siniri,
     istemci_ip,
+    kanonik_odeme_url,
     kurus_from_tutar,
     link_olustur,
+    link_wa_gonderilebilir,
     mask_ad,
+    normalize_wa_telefon,
+    ofis_imzasi,
     ozellik_acik,
     public_odeme_base,
     token_hash,
     tutar_tl,
+    wa_mesaj_dogrula,
+    wa_tekrar_onay_gerekli,
+    wa_varsayilan_mesaj,
+    whatsapp_etiket,
+    whatsapp_gonder_isle,
+    whatsapp_sahiplen,
 )
 from paytr_client import PAYTR_GET_TOKEN_URL, PaytrClientError, build_get_token_request
 from routes.admin_billing_routes import _paytr_test_mode_from_vault
@@ -186,7 +197,8 @@ def api_link():
         ensure_tablolar()
         rows = fetch_all(
             """
-            SELECT id, tutar_kurus, aciklama, durum, expires_at, created_at, paid_at
+            SELECT id, tutar_kurus, aciklama, durum, expires_at, created_at, paid_at,
+                   whatsapp_durum
             FROM public.odeme_linkleri
             WHERE musteri_id = %s
             ORDER BY created_at DESC, id DESC
@@ -205,6 +217,7 @@ def api_link():
                     "durum": item.get("durum") or "",
                     "expires_at": item.get("expires_at").isoformat() if item.get("expires_at") else "",
                     "created_at": item.get("created_at").isoformat() if item.get("created_at") else "",
+                    "whatsapp_etiket": whatsapp_etiket(item.get("whatsapp_durum")),
                 }
             )
         return jsonify({"ok": True, "linkler": out})
@@ -270,6 +283,136 @@ def api_iptal(link_id: int):
         (int(link_id),),
     )
     return jsonify({"ok": True})
+
+
+_WA_YOK = "Bu numara WhatsApp'ta kayıtlı değil"
+_WA_KAPALI = "WhatsApp servisi şu an kapalı"
+_WA_TEKRAR = "Bu linke daha önce gönderildi, tekrar göndermek istiyor musun?"
+_WA_SUREN = "Gönderim sürüyor"
+_WA_ENGEL = "Bu link gönderilemez"
+
+
+def _wa_link(link_id: int) -> dict | None:
+    ensure_tablolar()
+    row = fetch_one(
+        """
+        SELECT id, token_hash, musteri_id, tutar_kurus, aciklama, durum, expires_at,
+               whatsapp_durum
+        FROM public.odeme_linkleri
+        WHERE id = %s
+        """,
+        (int(link_id),),
+    )
+    if not row:
+        return None
+    return _sure_doldu_isaretle(dict(row))
+
+
+def _musteri_iletisim(mid: int) -> dict | None:
+    return fetch_one(
+        "SELECT id, name, phone FROM customers WHERE id = %s",
+        (int(mid),),
+    )
+
+
+@bp.route("/giris/api/odeme-linki/<int:link_id>/whatsapp", methods=["POST"])
+@giris_gerekli
+def api_whatsapp(link_id: int):
+    _personel()
+    data = request.get_json(silent=True) or {}
+    link = _wa_link(link_id)
+    if not link:
+        return jsonify({"ok": False, "mesaj": "Link bulunamadı"}), 404
+    url = kanonik_odeme_url(str(data.get("token") or ""), str(link.get("token_hash") or ""))
+    if not url:
+        return jsonify({"ok": False, "mesaj": "Link doğrulanamadı"}), 400
+    cust = _musteri_iletisim(int(link["musteri_id"])) or {}
+    if "telefon" in data and not data.get("onizle"):
+        telefon = normalize_wa_telefon(data.get("telefon"))
+        ham_tel = str(data.get("telefon") or "")
+    else:
+        ham_tel = str(cust.get("phone") or "")
+        telefon = normalize_wa_telefon(ham_tel)
+    varsayilan = wa_varsayilan_mesaj(
+        cust.get("name"),
+        link.get("aciklama"),
+        tutar_tl(int(link["tutar_kurus"])),
+        url,
+        link.get("expires_at"),
+        ofis_imzasi(),
+    )
+    gonderilebilir = link_wa_gonderilebilir(link.get("durum"), link.get("expires_at"))
+    if data.get("onizle"):
+        uyari = ""
+        if not str(cust.get("phone") or "").strip():
+            uyari = "Müşteri kartında telefon yok"
+        elif not telefon:
+            uyari = "Telefon numarası geçersiz"
+        return jsonify(
+            {
+                "ok": True,
+                "onizle": True,
+                "telefon": telefon or ham_tel,
+                "telefon_gecerli": bool(telefon),
+                "uyari": uyari,
+                "mesaj": varsayilan,
+                "gonderilebilir": gonderilebilir,
+                "daha_once": wa_tekrar_onay_gerekli(link.get("whatsapp_durum")),
+                "whatsapp_etiket": whatsapp_etiket(link.get("whatsapp_durum")),
+            }
+        )
+    if not gonderilebilir:
+        return jsonify({"ok": False, "mesaj": _WA_ENGEL}), 400
+    if not telefon:
+        return jsonify({"ok": False, "mesaj": "Telefon numarası geçersiz"}), 400
+    mesaj = str(data.get("mesaj") or "").strip() or varsayilan
+    mesaj_hata = wa_mesaj_dogrula(mesaj, url)
+    if mesaj_hata:
+        return jsonify({"ok": False, "mesaj": mesaj_hata}), 400
+    if wa_tekrar_onay_gerekli(link.get("whatsapp_durum")) and not data.get("onay"):
+        return jsonify({"ok": False, "tekrar_onay": True, "mesaj": _WA_TEKRAR}), 409
+    from routes.erp_notlar_routes import _wa_numara_kayitli
+
+    kayit, _neden = _wa_numara_kayitli(telefon)
+    if kayit == "yok":
+        return jsonify({"ok": False, "kayitli": False, "mesaj": _WA_YOK}), 400
+    if kayit != "kayitli":
+        return jsonify({"ok": False, "mesaj": _WA_KAPALI}), 503
+    owned = whatsapp_sahiplen(int(link_id), telefon, mesaj, bool(data.get("onay")))
+    if not owned:
+        taze = _wa_link(link_id) or {}
+        if str(taze.get("whatsapp_durum") or "") == "gonderiliyor":
+            return jsonify(
+                {
+                    "ok": True,
+                    "durum": "gonderiliyor",
+                    "whatsapp_etiket": "Gönderiliyor",
+                    "mesaj": _WA_SUREN,
+                }
+            )
+        if wa_tekrar_onay_gerekli(taze.get("whatsapp_durum")) and not data.get("onay"):
+            return jsonify({"ok": False, "tekrar_onay": True, "mesaj": _WA_TEKRAR}), 409
+        return jsonify({"ok": False, "mesaj": _WA_ENGEL}), 400
+    app = current_app._get_current_object()
+    lid = int(owned["id"])
+    sayac = int(owned["whatsapp_sayac"] or 0)
+
+    def _calis():
+        with app.app_context():
+            try:
+                whatsapp_gonder_isle(lid, sayac)
+            except Exception as e:
+                logger.info("odeme linki wa arkaplan link_id=%s hata=%s", lid, type(e).__name__)
+
+    threading.Thread(target=_calis, daemon=True, name=f"wa-olnk-{lid}").start()
+    return jsonify(
+        {
+            "ok": True,
+            "durum": "gonderiliyor",
+            "whatsapp_etiket": "Gönderiliyor",
+            "kayitli": True,
+        }
+    )
 
 
 @bp.route("/odeme/sonuc/ok")

@@ -2,16 +2,19 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import logging
 import os
+import re
 import secrets
 import threading
 import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo
 
-from db import db, execute, fetch_one
+from db import db, execute, execute_returning, fetch_all, fetch_one
 from db import _tenant_schema_for_request
 
 logger = logging.getLogger(__name__)
@@ -23,6 +26,11 @@ SILINEMEZ = "Kart ödemesi, silinemez"
 _HAZIR = False
 _HITS: dict[str, list[float]] = {}
 _HITS_LOCK = threading.Lock()
+IST = ZoneInfo("Europe/Istanbul")
+_WA_MESAJ_LIMIT = 1000
+_URL_RE = re.compile(r"https?://[^\s<>\"']+", re.I)
+_TOKEN_RE = re.compile(r"[A-Za-z0-9_-]{20,128}")
+_VARSAYILAN_IMZA = "Ofisbir Ofis ve Danışmanlık Hizmetleri A.Ş."
 
 
 def bayrak_acik() -> bool:
@@ -142,7 +150,130 @@ def ensure_tablolar() -> None:
         ON public.odeme_link_olaylari (link_id, created_at)
         """
     )
+    for stmt in (
+        "ALTER TABLE public.odeme_linkleri ADD COLUMN IF NOT EXISTS whatsapp_durum TEXT",
+        "ALTER TABLE public.odeme_linkleri ADD COLUMN IF NOT EXISTS whatsapp_sayac INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE public.odeme_linkleri ADD COLUMN IF NOT EXISTS whatsapp_deneme INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE public.odeme_linkleri ADD COLUMN IF NOT EXISTS whatsapp_son_deneme_at TIMESTAMPTZ",
+        "ALTER TABLE public.odeme_linkleri ADD COLUMN IF NOT EXISTS whatsapp_telefon TEXT",
+        "ALTER TABLE public.odeme_linkleri ADD COLUMN IF NOT EXISTS whatsapp_mesaj TEXT",
+    ):
+        try:
+            execute(stmt)
+        except Exception:
+            logger.info("odeme linki wa kolon")
     _HAZIR = True
+
+
+def normalize_wa_telefon(raw) -> str:
+    """+90, 00 ve baştaki 0 biçimini ülke kodlu rakama çevirir. Geçersizse boş."""
+    s = re.sub(r"\D", "", str(raw or ""))
+    if s.startswith("00"):
+        s = s[2:]
+    if s.startswith("0") and len(s) == 11:
+        s = "90" + s[1:]
+    elif len(s) == 10 and s.startswith("5"):
+        s = "90" + s
+    if not re.fullmatch(r"[1-9]\d{10,14}", s or ""):
+        return ""
+    return s
+
+
+def whatsapp_etiket(durum: str) -> str:
+    kod = str(durum or "").strip()
+    return {
+        "gonderildi": "Gönderildi",
+        "gonderiliyor": "Gönderiliyor",
+        "basarisiz": "Gönderilemedi",
+        "basarisiz_kalici": "Gönderilemedi",
+        "belirsiz": "Gönderim doğrulanamadı, WhatsApp'ı kontrol edin",
+    }.get(kod, "")
+
+
+def _tarih_ist(value) -> str:
+    if not isinstance(value, datetime):
+        return ""
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(IST).strftime("%d.%m.%Y %H:%M")
+
+
+def ofis_imzasi() -> str:
+    try:
+        from firma_profil import firma_profil_oku
+
+        unvan = str((firma_profil_oku() or {}).get("unvan") or "").strip()
+        if unvan:
+            return unvan[:160]
+    except Exception:
+        logger.info("odeme linki imza")
+    return _VARSAYILAN_IMZA
+
+
+def kanonik_odeme_url(token: str, token_hash_kayit: str) -> str:
+    """İstemci adresini kullanmaz. Token özeti kayıtla eşleşirse payafin kökünden kurar."""
+    ham = str(token or "").strip()
+    if not _TOKEN_RE.fullmatch(ham):
+        return ""
+    kayit = str(token_hash_kayit or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", kayit):
+        return ""
+    if not hmac.compare_digest(token_hash(ham), kayit):
+        return ""
+    return public_odeme_base() + "/odeme/" + ham
+
+
+def wa_varsayilan_mesaj(ad, aciklama, tutar, url, expires_at, imza) -> str:
+    isim = str(ad or "").strip() or "Müşteri"
+    acik = str(aciklama or "").strip() or "Ödeme"
+    imza_metin = str(imza or "").strip() or _VARSAYILAN_IMZA
+    return (
+        f"Sayın {isim},\n"
+        f"{acik}\n"
+        f"Tutar: {tutar} TL\n"
+        f"Ödeme linki: {url}\n"
+        f"Son geçerlilik: {_tarih_ist(expires_at)}\n"
+        f"{imza_metin}"
+    )
+
+
+def wa_mesaj_dogrula(mesaj: str, kanonik_url: str) -> str:
+    """Boşsa uygun. Aksi halde kısa hata metni. Başka URL kabul edilmez."""
+    metin = str(mesaj or "").strip()
+    url = str(kanonik_url or "").strip()
+    if not url or url not in metin:
+        return "Mesajda ödeme linki olmalı"
+    if len(metin) > _WA_MESAJ_LIMIT:
+        return "Mesaj çok uzun"
+    for bulunan in _URL_RE.findall(metin):
+        if bulunan.rstrip(".,)") != url:
+            return "Mesajda yalnız ödeme linki olabilir"
+    return ""
+
+
+def link_wa_gonderilebilir(durum: str, expires_at, now: datetime | None = None) -> bool:
+    if str(durum or "") != "bekliyor":
+        return False
+    if not isinstance(expires_at, datetime):
+        return False
+    an = now or datetime.now(timezone.utc)
+    exp = expires_at
+    if exp.tzinfo is None:
+        exp = exp.replace(tzinfo=timezone.utc)
+    if an.tzinfo is None:
+        an = an.replace(tzinfo=timezone.utc)
+    return exp >= an
+
+
+def wa_tekrar_onay_gerekli(durum: str) -> bool:
+    return str(durum or "") in ("gonderildi", "belirsiz")
+
+
+def wa_sonraki_basarisiz(deneme, gecerli: bool) -> tuple[str, int]:
+    yeni = int(deneme or 0) + 1
+    if yeni >= 5 or not gecerli:
+        return "basarisiz_kalici", yeni
+    return "basarisiz", yeni
 
 
 def token_hash(token: str) -> str:
@@ -436,3 +567,165 @@ def tahsilat_kaynak(tahsilat_id: int) -> str:
         (int(tahsilat_id),),
     )
     return str((row or {}).get("kaynak") or "")
+
+
+def _wa_olay(link_id: int, olay: str, kod: str = "") -> None:
+    """Olay kaydı. Telefon, mesaj ve token yazılmaz."""
+    execute(
+        """
+        INSERT INTO public.odeme_link_olaylari (link_id, olay, merchant_oid, gelen_tutar_kurus)
+        VALUES (%s, %s, NULL, %s)
+        """,
+        (int(link_id), str(olay)[:40], str(kod or "")[:32] or None),
+    )
+
+
+def whatsapp_sahiplen(link_id: int, telefon: str, mesaj: str, onay: bool):
+    """Atomik sahiplenme. Dönüş satırı ya da None. Sayacı yalnız yeni gönderimde artırır."""
+    return execute_returning(
+        """
+        UPDATE public.odeme_linkleri
+        SET whatsapp_durum = 'gonderiliyor',
+            whatsapp_son_deneme_at = NOW(),
+            whatsapp_telefon = %s,
+            whatsapp_mesaj = %s,
+            whatsapp_sayac = CASE
+                WHEN COALESCE(whatsapp_durum, '') IN ('gonderildi', 'belirsiz')
+                THEN COALESCE(whatsapp_sayac, 0) + 1
+                ELSE COALESCE(whatsapp_sayac, 0)
+            END,
+            updated_at = NOW()
+        WHERE id = %s
+          AND durum = 'bekliyor'
+          AND expires_at > NOW()
+          AND (
+            COALESCE(whatsapp_durum, '') IN ('', 'basarisiz')
+            OR (
+              %s
+              AND COALESCE(whatsapp_durum, '') IN ('gonderildi', 'belirsiz')
+            )
+            OR (
+              COALESCE(whatsapp_durum, '') = 'gonderiliyor'
+              AND whatsapp_son_deneme_at IS NOT NULL
+              AND whatsapp_son_deneme_at < NOW() - INTERVAL '3 minutes'
+            )
+          )
+        RETURNING id, whatsapp_sayac, whatsapp_deneme, whatsapp_telefon, whatsapp_mesaj,
+                  expires_at, durum
+        """,
+        (telefon, mesaj, int(link_id), bool(onay)),
+    )
+
+
+def whatsapp_sonuc_yaz(link_id: int, sayac: int, durum: str, deneme: int | None, kod: str) -> None:
+    olay = "whatsapp_gonderildi" if durum == "gonderildi" else "whatsapp_basarisiz"
+    n = execute(
+        """
+        UPDATE public.odeme_linkleri
+        SET whatsapp_durum = %s,
+            whatsapp_deneme = COALESCE(%s, whatsapp_deneme),
+            updated_at = NOW()
+        WHERE id = %s
+          AND whatsapp_durum = 'gonderiliyor'
+          AND whatsapp_sayac = %s
+        """,
+        (durum, deneme, int(link_id), int(sayac)),
+    )
+    if n:
+        _wa_olay(link_id, olay, "" if durum == "gonderildi" else kod)
+
+
+def whatsapp_gonder_isle(link_id: int, sayac: int) -> str:
+    row = fetch_one(
+        """
+        SELECT whatsapp_telefon, whatsapp_mesaj, whatsapp_deneme, whatsapp_sayac,
+               expires_at, durum
+        FROM public.odeme_linkleri
+        WHERE id = %s
+        """,
+        (int(link_id),),
+    )
+    if not row or int(row.get("whatsapp_sayac") or 0) != int(sayac):
+        return "atlandi"
+    tel = str(row.get("whatsapp_telefon") or "").strip()
+    mesaj = str(row.get("whatsapp_mesaj") or "").strip()
+    if not tel or not mesaj:
+        durum, yeni = wa_sonraki_basarisiz(row.get("whatsapp_deneme"), False)
+        whatsapp_sonuc_yaz(link_id, sayac, durum, yeni, "telefon_yok")
+        return durum
+    from routes.erp_notlar_routes import _wa_node_gonder
+
+    sonuc, tur = _wa_node_gonder(
+        int(link_id), tel, mesaj, "public", f"olnk:{int(link_id)}:{int(sayac)}"
+    )
+    gecerli = link_wa_gonderilebilir(str(row.get("durum") or ""), row.get("expires_at"))
+    if sonuc == "ok":
+        whatsapp_sonuc_yaz(link_id, sayac, "gonderildi", None, "")
+        return "gonderildi"
+    if sonuc == "belirsiz":
+        whatsapp_sonuc_yaz(link_id, sayac, "belirsiz", None, "yanit_yok")
+        return "belirsiz"
+    durum, yeni = wa_sonraki_basarisiz(row.get("whatsapp_deneme"), gecerli)
+    whatsapp_sonuc_yaz(link_id, sayac, durum, yeni, tur or "http")
+    return durum
+
+
+def whatsapp_yeniden_dene() -> None:
+    """Takılı gönderimi toparlar, yalnız başarısız denemeyi yineler."""
+    if not bayrak_acik() or not ofisbir_istegi():
+        return
+    ensure_tablolar()
+    with db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE public.odeme_linkleri
+            SET whatsapp_deneme = COALESCE(whatsapp_deneme, 0) + 1,
+                whatsapp_durum = CASE
+                    WHEN COALESCE(whatsapp_deneme, 0) + 1 >= 5
+                      OR expires_at <= NOW()
+                      OR durum <> 'bekliyor'
+                    THEN 'basarisiz_kalici'
+                    ELSE 'basarisiz'
+                END,
+                updated_at = NOW()
+            WHERE whatsapp_durum = 'gonderiliyor'
+              AND whatsapp_son_deneme_at IS NOT NULL
+              AND whatsapp_son_deneme_at < NOW() - INTERVAL '3 minutes'
+            RETURNING id
+            """
+        )
+        takili = [int(r["id"]) for r in (cur.fetchall() or []) if r.get("id")]
+    for lid in takili:
+        _wa_olay(lid, "whatsapp_basarisiz", "surec_kesildi")
+    rows = fetch_all(
+        """
+        SELECT id, whatsapp_telefon, whatsapp_mesaj
+        FROM public.odeme_linkleri
+        WHERE whatsapp_durum = 'basarisiz'
+          AND COALESCE(whatsapp_deneme, 0) < 5
+          AND durum = 'bekliyor'
+          AND expires_at > NOW()
+          AND (
+            whatsapp_son_deneme_at IS NULL
+            OR whatsapp_son_deneme_at <= NOW() - INTERVAL '2 minutes'
+          )
+        ORDER BY id
+        LIMIT 10
+        """
+    )
+    for row in rows or []:
+        if not str(row.get("whatsapp_telefon") or "").strip():
+            continue
+        owned = whatsapp_sahiplen(
+            int(row["id"]),
+            str(row.get("whatsapp_telefon") or ""),
+            str(row.get("whatsapp_mesaj") or ""),
+            False,
+        )
+        if not owned:
+            continue
+        try:
+            whatsapp_gonder_isle(int(owned["id"]), int(owned["whatsapp_sayac"]))
+        except Exception as e:
+            logger.info("odeme linki wa yeniden link_id=%s hata=%s", int(row["id"]), type(e).__name__)

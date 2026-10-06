@@ -5,6 +5,50 @@ const fs = require('fs');
 const QRCode = require('qrcode');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 
+const WA_LOG_PATH = path.join(__dirname, 'wa-servis.log');
+
+function waLog(event, detail) {
+  const safe = String(detail == null ? '' : detail)
+    .replace(/\d{8,}/g, '[num]')
+    .replace(/[\r\n]/g, ' ')
+    .slice(0, 160);
+  const line = `${new Date().toISOString()} ${event}${safe ? ' ' + safe : ''}`;
+  try {
+    fs.appendFileSync(WA_LOG_PATH, line + '\n');
+  } catch (_e) {}
+  console.log(`[WA] ${event}${safe ? ' ' + safe : ''}`);
+}
+
+function loadLocalEnv() {
+  const envPath = path.join(__dirname, '.env');
+  let text;
+  try {
+    text = fs.readFileSync(envPath, 'utf8');
+  } catch (err) {
+    if (err && err.code === 'ENOENT') return;
+    console.error('[WA] .env okunamadı. Servis başlamadı.');
+    process.exit(1);
+  }
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eq = trimmed.indexOf('=');
+    if (eq <= 0) continue;
+    const key = trimmed.slice(0, eq).trim();
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue;
+    let val = trimmed.slice(eq + 1).trim();
+    if (
+      (val.startsWith('"') && val.endsWith('"')) ||
+      (val.startsWith("'") && val.endsWith("'"))
+    ) {
+      val = val.slice(1, -1);
+    }
+    if (process.env[key] === undefined) process.env[key] = val;
+  }
+}
+
+loadLocalEnv();
+
 const PORT = process.env.PORT || 3001;
 const AUTH_DATA_PATH = path.join(__dirname, '.wwebjs_auth');
 const TENANT_ID_RE = /^(default|tenant_[a-z0-9_]+)$/;
@@ -24,10 +68,14 @@ const WA_IDLE_CHECK_MS = Math.max(
   1000,
   parseInt(String(process.env.WA_IDLE_CHECK_MS || '60000'), 10) || 60000
 );
-/** Flask ile paylaşılan secret. Env yoksa yerel varsayılan (üretimde mutlaka override). */
-const WA_INTERNAL_TOKEN = String(
-  process.env.WA_INTERNAL_TOKEN || 'bestoffice-wa-internal'
-).trim();
+/** Flask ile paylaşılan secret. Sabit varsayılan yok; kısa/boş değerle süreç açılmaz. */
+const WA_INTERNAL_TOKEN = String(process.env.WA_INTERNAL_TOKEN || '').trim();
+if (WA_INTERNAL_TOKEN.length < 32) {
+  console.error(
+    '[WA] WA_INTERNAL_TOKEN yok, boş veya 32 karakterden kısa. Servis başlamadı.'
+  );
+  process.exit(1);
+}
 
 const app = express();
 app.use(cors());
@@ -45,15 +93,8 @@ function requireInternalToken(req, res, next) {
   return next();
 }
 
-app.use((req, res, next) => {
-  const p = req.path || '';
-  if (p === '/health') return next();
-  // Eski alias'lar 410 döner (token gerekmez); koruma yalnızca /t/*
-  if (p.startsWith('/t/')) {
-    return requireInternalToken(req, res, next);
-  }
-  return next();
-});
+// Tünel ve LAN dahil her yol token ister. /health ve 410 alias'ları da açıkta kalmasın.
+app.use(requireInternalToken);
 
 /** @type {Map<string, object>} */
 const sessions = new Map();
@@ -108,6 +149,8 @@ function buildPuppeteerOpts() {
       '--no-first-run',
       '--no-default-browser-check',
       '--disable-extensions',
+      '--disable-features=IsolateOrigins,site-per-process',
+      '--disable-site-isolation-trials',
     ],
   };
   if (chromeExecutable) opts.executablePath = chromeExecutable;
@@ -171,6 +214,7 @@ function getOrCreateSession(tenantId) {
     chromeHeld: false,
     // Idle destroy'a tabi (default dahil). LocalAuth diski korunur; ihtiyaçta yeniden açılır.
     pinKeepAlive: false,
+    gonderimAnahtarlari: new Set(),
   };
   sessions.set(tenantId, session);
   return session;
@@ -223,7 +267,7 @@ async function kuyrukIsle(session) {
       try {
         const result = await session.client.sendMessage(chatId, message);
         item._sonuc = { ok: true, id: result && result.id ? result.id._serialized || null : null };
-        console.log(`[WA:${session.tenantId}] Kuyruk gönderildi: ${phone}`);
+        console.log(`[WA:${session.tenantId}] Kuyruk gönderildi`);
       } catch (err) {
         item._sonuc = { ok: false, error: err.message || String(err) };
         console.error(`[WA:${session.tenantId}] Kuyruk gönderim hatası:`, err);
@@ -247,12 +291,11 @@ function attachHandlers(session) {
     session.ready = false;
     session.status = 'qr';
     touch(session);
-    console.log(`\n[WA:${tid}] Yeni QR kodu hazır.`);
-    console.log(`[WA:${tid}] Tarayıcıdan açın: http://localhost:${PORT}/t/${tid}/qr-goster\n`);
+    waLog('qr', tid);
   });
 
   client.on('authenticated', () => {
-    console.log(`[WA:${tid}] Oturum doğrulandı.`);
+    waLog('authenticated', tid);
   });
 
   client.on('ready', () => {
@@ -260,20 +303,24 @@ function attachHandlers(session) {
     session.qr = null;
     session.status = 'ready';
     touch(session);
-    console.log(`[WA:${tid}] WhatsApp bağlantısı hazır.`);
+    waLog('ready', tid);
     kuyrukIsle(session);
   });
 
   client.on('auth_failure', (msg) => {
     session.ready = false;
     session.status = 'error';
-    console.error(`[WA:${tid}] Kimlik doğrulama hatası:`, msg);
+    waLog('auth_failure', msg && msg.message ? msg.message : msg);
+  });
+
+  client.on('loading_screen', (percent) => {
+    waLog('loading_screen', String(percent));
   });
 
   client.on('disconnected', (reason) => {
     session.ready = false;
     session.status = 'idle';
-    console.warn(`[WA:${tid}] Bağlantı kesildi:`, reason);
+    waLog('disconnected', reason);
   });
 }
 
@@ -308,14 +355,30 @@ async function ensureClient(tenantId) {
         clientId: tenantId,
         dataPath: AUTH_DATA_PATH,
       }),
+      userAgent:
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+      webVersionCache: {
+        type: 'remote',
+        remotePath:
+          'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/{version}.html',
+        strict: false,
+      },
       puppeteer: buildPuppeteerOpts(),
     });
     session.client = client;
     attachHandlers(session);
-    console.log(
-      `[WA:${tenantId}] WhatsApp istemcisi başlatılıyor... (chrome ${activeChromeCount}/${WA_MAX_CONCURRENT_CHROME})`
+    waLog(
+      'initialize_basladi',
+      `${tenantId} chrome ${activeChromeCount}/${WA_MAX_CONCURRENT_CHROME} webcache=remote`
     );
     await client.initialize();
+    let socketState = '';
+    try {
+      socketState = await client.getState();
+    } catch (_e) {
+      socketState = 'okunamadi';
+    }
+    waLog('initialize_bitti', `${tenantId} durum=${socketState || 'bos'}`);
     return session;
   })();
 
@@ -328,8 +391,8 @@ async function ensureClient(tenantId) {
       session.chromeHeld = false;
       activeChromeCount = Math.max(0, activeChromeCount - 1);
     }
-    console.error(
-      `[WA:${tenantId}] initialize hatası:`,
+    waLog(
+      'initialize_hata',
       err && err.message ? err.message : err
     );
     throw err;
@@ -530,6 +593,52 @@ app.post('/t/:tenantId/kuyruk-ekle', async (req, res) => {
   }
 });
 
+async function numaraKayitliMi(session, telefon) {
+  const phone = normalizeTelefon(telefon);
+  if (!phone || phone.length < 11 || phone.length > 15) {
+    return { ok: false, kayitli: false, neden: 'gecersiz' };
+  }
+  if (!session || !session.ready || !session.client || typeof session.client.isRegisteredUser !== 'function') {
+    return { ok: false, kayitli: false, neden: 'hazir_degil' };
+  }
+  try {
+    const kayitli = await session.client.isRegisteredUser(`${phone}@c.us`);
+    return { ok: true, kayitli: Boolean(kayitli), neden: '' };
+  } catch (_err) {
+    return { ok: false, kayitli: false, neden: 'hata' };
+  }
+}
+
+function kuyrukKalemleri(session, liste) {
+  if (!session.gonderimAnahtarlari) session.gonderimAnahtarlari = new Set();
+  let eklenen = 0;
+  let tekrar = 0;
+  for (const item of liste || []) {
+    if (!item || !item.telefon || !item.mesaj) continue;
+    const anahtar = String(item.anahtar || '').trim().slice(0, 120);
+    if (anahtar && session.gonderimAnahtarlari.has(anahtar)) {
+      tekrar += 1;
+      continue;
+    }
+    if (anahtar) session.gonderimAnahtarlari.add(anahtar);
+    session.queue.push({ telefon: item.telefon, mesaj: item.mesaj, anahtar });
+    eklenen += 1;
+  }
+  return { eklenen, tekrar };
+}
+
+app.post('/t/:tenantId/numara-kontrol', async (req, res) => {
+  const tenantId = tenantParam(req, res);
+  if (!tenantId) return;
+  try {
+    const session = await ensureClient(tenantId);
+    const sonuc = await numaraKayitliMi(session, (req.body || {}).telefon);
+    res.json(sonuc);
+  } catch (err) {
+    return sendEnsureError(res, err, false);
+  }
+});
+
 app.post('/t/:tenantId/kuyruk-toplu-ekle', async (req, res) => {
   const tenantId = tenantParam(req, res);
   if (!tenantId) return;
@@ -539,15 +648,16 @@ app.post('/t/:tenantId/kuyruk-toplu-ekle', async (req, res) => {
     if (!Array.isArray(liste) || liste.length === 0) {
       return res.status(400).json({ ok: false, mesaj: 'liste zorunlu (boş olamaz)' });
     }
-    let eklenen = 0;
-    for (const item of liste) {
-      if (!item || !item.telefon || !item.mesaj) continue;
-      session.queue.push({ telefon: item.telefon, mesaj: item.mesaj });
-      eklenen++;
-    }
+    const sonuc = kuyrukKalemleri(session, liste);
     touch(session);
     kuyrukIsle(session);
-    res.json({ ok: true, eklenen, kuyruk_uzunlugu: session.queue.length, tenant_id: tenantId });
+    res.json({
+      ok: true,
+      eklenen: sonuc.eklenen,
+      tekrar: sonuc.tekrar,
+      kuyruk_uzunlugu: session.queue.length,
+      tenant_id: tenantId,
+    });
   } catch (err) {
     return sendEnsureError(res, err, false);
   }
@@ -632,14 +742,33 @@ app.post('/send', goneAlias);
 
 migrateDefaultSessionDir();
 
-app.listen(PORT, () => {
-  console.log(`[API] WhatsApp servisi http://localhost:${PORT}`);
+function loopbackIstegi(req) {
+  const ip = String((req.socket && req.socket.remoteAddress) || '');
+  return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+}
+
+/** Tünelin baktığı 3001 dışında. QR yalnız bu süreçten, 127.0.0.1:3002. */
+const YEREL_QR_PORT = 3002;
+const yerelQrApp = express();
+yerelQrApp.get('/', async (req, res) => {
+  if (!loopbackIstegi(req)) return res.status(404).end();
+  try {
+    const session = await ensureClient('default');
+    return handleQrGoster(session, res);
+  } catch (err) {
+    return sendEnsureError(res, err, true);
+  }
+});
+
+function servisiBaslat() {
+app.listen(PORT, '127.0.0.1', () => {
+  console.log(`[API] WhatsApp servisi http://127.0.0.1:${PORT}`);
   console.log(`[API] Tenant API: http://localhost:${PORT}/t/{tenantId}/…`);
   console.log(`[API] QR (Flask proxy): /whatsapp/qr-ac → /t/{tenantId}/qr-goster`);
   console.log(
     `[WA] Kapasite: max_chrome=${WA_MAX_CONCURRENT_CHROME} idle_ms=${WA_IDLE_MS} idle_check_ms=${WA_IDLE_CHECK_MS} headless=${String(process.env.WA_HEADLESS || 'false')}`
   );
-  console.log('[WA] Internal token koruması: AÇIK (X-WA-Internal-Token zorunlu; /health hariç)');
+  console.log('[WA] Internal token koruması: AÇIK (X-WA-Internal-Token her yolda zorunlu)');
   setInterval(() => {
     idleDestroySweep().catch((err) => {
       console.warn('[WA] Idle sweep hatası:', err && err.message ? err.message : err);
@@ -649,6 +778,20 @@ app.listen(PORT, () => {
   // pinKeepAlive yok → WA_IDLE_MS sonra idle destroy edilir; sonraki istekte
   // LocalAuth disk oturumu ile QR'sız yeniden bağlanır.
   ensureClient('default').catch((err) => {
-    console.error('[WA:default] initialize hatası:', err && err.message ? err.message : err);
+    const msg = err && err.message ? err.message : err;
+    waLog('acilis_hata', msg);
+    console.error('[WA:default] initialize hatası:', msg);
+    process.exit(1);
   });
 });
+
+yerelQrApp.listen(YEREL_QR_PORT, '127.0.0.1', () => {
+  waLog('yerel_qr', `127.0.0.1:${YEREL_QR_PORT}`);
+});
+}
+
+module.exports = { kuyrukKalemleri, numaraKayitliMi };
+
+if (require.main === module) {
+  servisiBaslat();
+}

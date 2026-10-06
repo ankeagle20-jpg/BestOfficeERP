@@ -1022,11 +1022,11 @@ def _wa_basarisiz_yaz(nid: int, deneme, created_at, hata_turu: str) -> str:
     return durum
 
 
-def _wa_node_gonder(nid: int, telefon: str, mesaj: str, schema: str | None):
+def _wa_node_gonder(nid: int, telefon: str, mesaj: str, schema: str | None, anahtar: str | None = None):
     """Dönüş: ('ok'|'belirsiz'|'hata', hata_turu)."""
     from routes.whatsapp_routes import _wa_internal_headers, _wa_url
 
-    anahtar = f"{schema or 'public'}:{int(nid)}"
+    anahtar = (str(anahtar or "").strip() or f"{schema or 'public'}:{int(nid)}")[:120]
     try:
         r = requests.post(
             _wa_url("kuyruk-toplu-ekle"),
@@ -1054,6 +1054,43 @@ def _wa_node_gonder(nid: int, telefon: str, mesaj: str, schema: str | None):
         print(f"[WARN] erp_not_whatsapp not_id={nid} http={r.status_code}")
         return "hata", "http"
     return "ok", ""
+
+
+def _wa_numara_kayitli(telefon: str):
+    """Dönüş: ('kayitli'|'yok'|'hata', neden). Telefon ve mesaj loglanmaz."""
+    from routes.whatsapp_routes import _wa_internal_headers, _wa_url
+
+    try:
+        r = requests.post(
+            _wa_url("numara-kontrol"),
+            json={"telefon": telefon},
+            headers=_wa_internal_headers(),
+            timeout=(3, 8),
+        )
+    except requests.exceptions.ConnectTimeout:
+        return "hata", "baglanti"
+    except requests.exceptions.ConnectionError:
+        return "hata", "baglanti"
+    except requests.exceptions.Timeout:
+        return "hata", "yanit_yok"
+    except Exception as e:
+        print(f"[WARN] wa numara hata={type(e).__name__}")
+        return "hata", "yanit_yok"
+    body = {}
+    try:
+        body = r.json() if r.content else {}
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    if r.status_code >= 400 or body.get("ok") is False:
+        neden = str(body.get("neden") or "http")[:32]
+        if neden not in ("gecersiz", "hazir_degil", "hata", "http", "baglanti", "yanit_yok"):
+            neden = "http"
+        return "hata", neden
+    if body.get("kayitli") is True:
+        return "kayitli", ""
+    return "yok", ""
 
 
 def _wa_gonder_bir(nid: int, schema: str | None = None) -> str:
@@ -1239,6 +1276,13 @@ def run_erp_not_whatsapp_job() -> None:
                     if not var:
                         continue
                 gonder_whatsapp_notlari()
+                if not sch:
+                    try:
+                        from odeme_linki import whatsapp_yeniden_dene
+
+                        whatsapp_yeniden_dene()
+                    except Exception as oe:
+                        print(f"[WARN] odeme_link_whatsapp {type(oe).__name__}")
             except Exception as e:
                 print(f"[WARN] erp_not_whatsapp {sch or 'public'}: {type(e).__name__}")
             finally:

@@ -24,7 +24,9 @@
     st.textContent =
       "#odeme-linki-ac{margin-left:8px;cursor:pointer;border:1px solid #1e3a50;background:#1565c0;color:#fff;border-radius:6px;padding:4px 10px;}" +
       "#odeme-linki-perde{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:14000;display:flex;align-items:center;justify-content:center;padding:16px;}" +
-      "#odeme-linki-kart{background:#0f2537;color:#e0f7fa;border:1px solid #1e3a50;border-radius:10px;max-width:520px;width:100%;padding:16px;max-height:86vh;overflow:auto;}" +
+      "#odeme-linki-kart{background:#0f2537;color:#e0f7fa;border:1px solid #1e3a50;border-radius:10px;max-width:560px;width:100%;padding:16px;max-height:86vh;overflow:auto;}" +
+      "#odeme-linki-wa-uyari{color:#ffcc80;margin:4px 0;}" +
+      "#odeme-linki-wa-kutu{margin-top:8px;}" +
       "#odeme-linki-kart label{display:flex;flex-direction:column;gap:4px;margin:0 0 8px;font-size:13px;}" +
       "#odeme-linki-kart input,#odeme-linki-kart textarea{background:#0a1929;color:#e0f7fa;border:1px solid #1e3a50;border-radius:6px;padding:6px;}" +
       "#odeme-linki-kart button{cursor:pointer;border-radius:6px;border:1px solid #1e3a50;background:#1565c0;color:#fff;padding:6px 10px;margin-right:6px;}" +
@@ -60,8 +62,9 @@
       var iptal = n.durum === "bekliyor"
         ? ' <button type="button" data-iptal="' + esc(n.id) + '">İptal et</button>'
         : "";
+      var wa = n.whatsapp_etiket ? " · " + esc(n.whatsapp_etiket) : "";
       html += "<tr><td>" + esc(tarih) + "</td><td>" + esc(n.tutar) + " TL</td><td>" +
-        esc(n.durum) + iptal + "</td></tr>";
+        esc(n.durum) + wa + iptal + "</td></tr>";
     });
     html += "</tbody></table>";
     kutu.innerHTML = html;
@@ -72,6 +75,82 @@
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (j) { if (j && j.ok) listeCiz(j.linkler || []); })
       .catch(function () {});
+  }
+
+  function tokenFromUrl(url) {
+    var s = String(url || "");
+    var i = s.indexOf("/odeme/");
+    if (i < 0) return "";
+    return s.slice(i + 7).split(/[?#]/)[0];
+  }
+
+  function waBagla(mid, linkId, url) {
+    var acBtn = document.getElementById("odeme-linki-wa-ac");
+    var gonder = document.getElementById("odeme-linki-wa-gonder");
+    if (!acBtn || !gonder) return;
+    var token = tokenFromUrl(url);
+    function waPost(govde) {
+      return fetch("/giris/api/odeme-linki/" + encodeURIComponent(linkId) + "/whatsapp", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(govde)
+      }).then(function (r) {
+        return r.json().then(function (j) { return j || {}; }).catch(function () { return {}; });
+      });
+    }
+    acBtn.onclick = function () {
+      var kutu = document.getElementById("odeme-linki-wa-kutu");
+      if (kutu) kutu.hidden = false;
+      waPost({ onizle: true, token: token }).then(function (j) {
+        var tel = document.getElementById("odeme-linki-wa-tel");
+        var mesaj = document.getElementById("odeme-linki-wa-mesaj");
+        var uyari = document.getElementById("odeme-linki-wa-uyari");
+        if (tel && !tel.value) tel.value = j.telefon || "";
+        if (mesaj && !mesaj.value) mesaj.value = j.mesaj || "";
+        if (uyari) uyari.textContent = j.uyari || (j.gonderilebilir ? "" : "Bu link gönderilemez");
+      }).catch(function () {});
+    };
+    gonder.onclick = function () {
+      if (gonder.disabled) return;
+      gonder.disabled = true;
+      var tel = document.getElementById("odeme-linki-wa-tel");
+      var mesaj = document.getElementById("odeme-linki-wa-mesaj");
+      var sonuc = document.getElementById("odeme-linki-wa-sonuc");
+      var uyari = document.getElementById("odeme-linki-wa-uyari");
+      function bitir(j) {
+        if (uyari && j && j.kayitli === false) uyari.textContent = j.mesaj || "";
+        if (sonuc) sonuc.textContent = (j && (j.whatsapp_etiket || j.mesaj)) || "";
+        if (j && j.ok) listeGetir(mid);
+        else gonder.disabled = false;
+      }
+      waPost({
+        token: token,
+        telefon: tel ? tel.value : "",
+        mesaj: mesaj ? mesaj.value : "",
+        onay: false
+      }).then(function (j) {
+        if (j && j.tekrar_onay) {
+          var evet = window.confirm(j.mesaj || "Bu linke daha önce gönderildi, tekrar göndermek istiyor musun?");
+          if (!evet) {
+            gonder.disabled = false;
+            return null;
+          }
+          return waPost({
+            token: token,
+            telefon: tel ? tel.value : "",
+            mesaj: mesaj ? mesaj.value : "",
+            onay: true
+          });
+        }
+        return j;
+      }).then(function (j) {
+        if (!j) return;
+        bitir(j);
+      }).catch(function () {
+        gonder.disabled = false;
+      });
+    };
   }
 
   function ac() {
@@ -135,8 +214,16 @@
             kutu.textContent = "Link oluşturulamadı.";
             return;
           }
-          kutu.innerHTML = esc(j.url) + ' <button type="button" id="odeme-linki-kopyala">Kopyala</button>';
+          kutu.innerHTML = esc(j.url) + ' <button type="button" id="odeme-linki-kopyala">Kopyala</button>' +
+            ' <button type="button" id="odeme-linki-wa-ac">WhatsApp ile gönder</button>' +
+            '<div id="odeme-linki-wa-kutu" hidden>' +
+            '<label>Telefon<input id="odeme-linki-wa-tel"></label>' +
+            '<p id="odeme-linki-wa-uyari"></p>' +
+            '<label>Mesaj<textarea id="odeme-linki-wa-mesaj" rows="6"></textarea></label>' +
+            '<button type="button" id="odeme-linki-wa-gonder">Onayla ve gönder</button>' +
+            '<p id="odeme-linki-wa-sonuc"></p></div>';
           document.getElementById("odeme-linki-kopyala").onclick = function () { kopyala(j.url); };
+          waBagla(mid, j.id, j.url);
           listeGetir(mid);
         })
         .catch(function () {});
