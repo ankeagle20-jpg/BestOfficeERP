@@ -32,6 +32,12 @@ _MUSTERI = "Önce müşteri seçin."
 _YOK = "Müşteri bulunamadı"
 _ORIGIN = "İstek reddedildi"
 _KAYITSIZ = "Bu numara WhatsApp'ta kayıtlı değil"
+_ONCEDEN = "Bu mesaj daha önce kuyruğa alındı"
+_GONDERILDI_ONCEDEN = "Bu mesaj daha önce gönderildi"
+_BASARISIZ = "Gönderilemedi: kuyruk kabul etmedi"
+_BELIRSIZ = "Sonuç belirsiz, telefondan kontrol edin"
+_KAYIT_YOK = "Kayıt yok"
+_DENEME_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 _GERI_METIN = {
     "kiraci": "WhatsApp servisi bağlı değil, WhatsApp Web sayfası açılıyor",
     "bagli_degil": "WhatsApp servisi bağlı değil, WhatsApp Web sayfası açılıyor",
@@ -94,6 +100,32 @@ def ozet_hash(metin: str) -> str:
 
 def telefon_ozet(norm: str) -> str:
     return hashlib.sha256(str(norm or "").encode("utf-8")).hexdigest()
+
+
+def deneme_gecerli(ham: str) -> str:
+    s = str(ham or "").strip().lower()
+    if not _DENEME_RE.match(s):
+        return ""
+    return s
+
+
+def deneme_anahtar(deneme: str) -> str:
+    return "szwa:d:" + deneme
+
+
+def durum_mesaji(durum: str, cakisma: bool) -> str:
+    kod = str(durum or "")
+    if kod == "gonderiliyor":
+        return _SUREN
+    if kod == "kuyrukta":
+        return _ONCEDEN if cakisma else "Kuyruğa alındı"
+    if kod == "gonderildi":
+        return _GONDERILDI_ONCEDEN if cakisma else "Gönderildi"
+    if kod == "belirsiz":
+        return _BELIRSIZ
+    if kod == "basarisiz":
+        return _BASARISIZ
+    return _ONCEDEN
 
 
 def origin_uygun(origin: str, host: str) -> bool:
@@ -163,13 +195,24 @@ def _sayilar(uid: int, dk_basi: datetime, gun_basi: datetime):
     )
 
 
+def _bul(uid: int, anahtar: str):
+    return fetch_one(
+        """
+        SELECT id, durum
+        FROM sozlesme_whatsapp_gonderim
+        WHERE user_id = %s AND anahtar = %s
+        """,
+        (int(uid), anahtar),
+    )
+
+
 def _son_gonderim(uid: int, metin_h: str, tel_h: str, sinir: datetime):
     return fetch_one(
         """
         SELECT id, durum, created_at
         FROM sozlesme_whatsapp_gonderim
         WHERE user_id = %s AND metin_hash = %s AND telefon_hash = %s
-          AND durum IN ('gonderiliyor', 'gonderildi', 'belirsiz')
+          AND durum IN ('gonderiliyor', 'kuyrukta', 'gonderildi', 'belirsiz')
           AND created_at >= %s
         ORDER BY id DESC
         LIMIT 1
@@ -320,9 +363,46 @@ def _kuyruk_varsayilan(telefon: str, mesaj: str, anahtar: str) -> str:
         body = r.json() if r.content else {}
     except Exception:
         return "belirsiz"
+    return _kuyruk_sonuc(body)
+
+
+def _kuyruk_sonuc(body) -> str:
     if not isinstance(body, dict) or body.get("ok") is False:
         return "hata"
-    return "ok"
+    oge = body.get("oge") or []
+    if not oge or not isinstance(oge[0], dict):
+        return "kuyrukta"
+    durum = str(oge[0].get("durum") or "")
+    if durum == "gonderildi":
+        return "gonderildi"
+    if durum == "basarisiz":
+        return "hata"
+    if durum == "belirsiz":
+        return "belirsiz"
+    return "kuyrukta"
+
+
+def _durum_govde(row: dict, cakisma: bool) -> dict:
+    durum = str((row or {}).get("durum") or "")
+    govde = {
+        "ok": durum != "basarisiz",
+        "durum": durum,
+        "mesaj": durum_mesaji(durum, cakisma),
+    }
+    if cakisma:
+        govde["cakisma"] = True
+    return govde
+
+
+def sozlesme_wa_durum(uid: int, deneme: str) -> tuple[dict, int]:
+    kim = deneme_gecerli(deneme)
+    if not kim:
+        return {"ok": False, "mesaj": _ORIGIN}, 400
+    ensure_tablo()
+    row = _bul(int(uid), deneme_anahtar(kim))
+    if not row:
+        return {"ok": False, "durum": "yok", "mesaj": _KAYIT_YOK}, 404
+    return _durum_govde(row, False), 200
 
 
 def sozlesme_wa_isle(
@@ -358,6 +438,9 @@ def sozlesme_wa_isle(
     norm = normalize_wa_telefon((data or {}).get("telefon"))
     if not norm:
         return {"ok": False, "mesaj": _TEL}, 400
+    kim = deneme_gecerli((data or {}).get("deneme"))
+    if not kim:
+        return {"ok": False, "mesaj": _ORIGIN}, 400
 
     ensure_tablo()
     an = simdi or datetime.now(timezone.utc)
@@ -372,9 +455,10 @@ def sozlesme_wa_isle(
     tel_h = telefon_ozet(norm)
     metin_h = ozet_hash(metin)
     onay = bool((data or {}).get("onay"))
-    anahtar = "szwa:" + metin_h[:12] + ":" + tel_h[:12] + ":" + str(int(uid))
-    if onay:
-        anahtar = (anahtar + ":" + str(int(an.timestamp() * 1000)))[:120]
+    anahtar = deneme_anahtar(kim)
+    var_olan = _bul(int(uid), anahtar)
+    if var_olan:
+        return _durum_govde(var_olan, True), 200
 
     def _kaydet(durum: str, anahtar_deger: str):
         return _ekle(int(uid), mid, buton, durum, maske, tel_h, len(metin), metin_h, anahtar_deger[:120])
@@ -408,9 +492,7 @@ def sozlesme_wa_isle(
     if not onay:
         son = _son_gonderim(int(uid), metin_h, tel_h, an - timedelta(seconds=TEKRAR_SANIYE))
         if son:
-            if str(son.get("durum") or "") == "gonderiliyor":
-                return {"ok": True, "durum": "gonderiliyor", "mesaj": _SUREN}, 200
-            return {"ok": False, "tekrar": True, "mesaj": _YINE}, 409
+            return {"ok": False, "tekrar": True, "durum": str(son.get("durum") or ""), "mesaj": _YINE}, 409
 
     if numara_fn is None:
         kayit, _neden = _numara_dene(norm)
@@ -425,7 +507,10 @@ def sozlesme_wa_isle(
 
     row = _kaydet("gonderiliyor", anahtar)
     if not row:
-        return {"ok": True, "durum": "gonderiliyor", "mesaj": _SUREN}, 200
+        bulunan = _bul(int(uid), anahtar)
+        if bulunan:
+            return _durum_govde(bulunan, True), 200
+        return {"ok": False, "cakisma": True, "mesaj": _ONCEDEN}, 200
     rid = int(row["id"])
     kuyruk = kuyruk_fn or _kuyruk_varsayilan
 
@@ -435,12 +520,14 @@ def sozlesme_wa_isle(
         except Exception:
             logger.info("sozlesme wa arkaplan hata")
             sonuc = "belirsiz"
-        if sonuc == "ok":
+        if sonuc == "gonderildi":
             _durum_yaz(rid, "gonderildi")
+        elif sonuc in ("ok", "kuyrukta"):
+            _durum_yaz(rid, "kuyrukta")
         elif sonuc == "belirsiz":
             _durum_yaz(rid, "belirsiz")
         else:
             _durum_yaz(rid, "basarisiz")
 
     threading.Thread(target=_calis, daemon=True, name=f"szwa-{rid}").start()
-    return {"ok": True, "durum": "gonderiliyor"}, 200
+    return {"ok": True, "durum": "gonderiliyor", "mesaj": _SUREN, "deneme": kim}, 200

@@ -86,6 +86,103 @@
 
   var gonderiyor = false;
   var acik = null;
+  var pollTimer = null;
+  var POLL_MS = 1500;
+  var POLL_SON = 30000;
+
+  function denemeUret() {
+    if (window.crypto && typeof crypto.randomUUID === "function") return crypto.randomUUID();
+    return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c) {
+      var r = (Math.random() * 16) | 0;
+      var v = c === "x" ? r : (r & 0x3) | 0x8;
+      return v.toString(16);
+    });
+  }
+
+  function pollDur() {
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = null;
+  }
+
+  function dugmeAc() {
+    gonderiyor = false;
+    var btn = document.getElementById("sozlesme-wa-gonder");
+    var yine = document.getElementById("sozlesme-wa-yine");
+    if (btn) btn.disabled = false;
+    if (yine) yine.disabled = false;
+  }
+
+  function yineGoster(goster) {
+    var yine = document.getElementById("sozlesme-wa-yine");
+    if (yine) yine.style.display = goster ? "inline-block" : "none";
+  }
+
+  function belirsizGoster() {
+    var uyari = document.getElementById("sozlesme-wa-uyari");
+    var sonuc = document.getElementById("sozlesme-wa-sonuc");
+    if (uyari) uyari.textContent = "Sonuç belirsiz, telefondan kontrol edin";
+    if (sonuc) sonuc.textContent = "";
+    yineGoster(true);
+    dugmeAc();
+  }
+
+  function sonucYaz(j) {
+    var uyari = document.getElementById("sozlesme-wa-uyari");
+    var sonuc = document.getElementById("sozlesme-wa-sonuc");
+    var durum = j && j.durum;
+    if (durum === "kuyrukta") {
+      if (uyari) uyari.textContent = j.cakisma ? (j.mesaj || "") : "";
+      if (sonuc) sonuc.textContent = "Kuyruğa alındı ✓ (birkaç saniyede iletilir)";
+      yineGoster(false);
+      return;
+    }
+    if (durum === "gonderildi") {
+      if (uyari) uyari.textContent = j.cakisma ? (j.mesaj || "") : "";
+      if (sonuc) sonuc.textContent = "Gönderildi ✓";
+      yineGoster(false);
+      return;
+    }
+    if (durum === "basarisiz") {
+      var neden = (j && j.mesaj) || "";
+      if (uyari) uyari.textContent = neden.indexOf("Gönderilemedi") === 0 ? neden : "Gönderilemedi: " + (neden || "bilinmiyor");
+      if (sonuc) sonuc.textContent = "";
+      yineGoster(true);
+      return;
+    }
+    if (durum === "belirsiz") {
+      belirsizGoster();
+      return;
+    }
+    if (sonuc) sonuc.textContent = (j && j.mesaj) || "Gönderim sürüyor";
+  }
+
+  function pollBaslat(deneme) {
+    pollDur();
+    var bas = Date.now();
+    pollTimer = setInterval(function () {
+      if (!acik || acik.deneme !== deneme) {
+        pollDur();
+        return;
+      }
+      if (Date.now() - bas >= POLL_SON) {
+        pollDur();
+        belirsizGoster();
+        return;
+      }
+      fetch("/giris/api/sozlesme-whatsapp/durum?deneme=" + encodeURIComponent(deneme), { credentials: "same-origin" })
+        .then(function (r) {
+          return r.json().then(function (j) { return j || {}; }).catch(function () { return {}; });
+        })
+        .then(function (j) {
+          if (!acik || acik.deneme !== deneme) return;
+          if (!j.durum || j.durum === "gonderiliyor" || j.durum === "yok") return;
+          pollDur();
+          dugmeAc();
+          sonucYaz(j);
+        })
+        .catch(function () {});
+    }, POLL_MS);
+  }
 
   function webAc(tel, mesaj) {
     var num = tel;
@@ -114,9 +211,11 @@
     }
     if (uyari && !onay) uyari.textContent = "";
     if (sonuc) sonuc.textContent = "WhatsApp bağlanıyor…";
+    var deneme = acik.deneme;
     gonderiyor = true;
     if (btn) btn.disabled = true;
     if (yine) yine.disabled = true;
+    var suruyor = false;
     fetch("/giris/api/sozlesme-whatsapp/gonder", {
       method: "POST",
       credentials: "same-origin",
@@ -126,50 +225,61 @@
         telefon: ham,
         mesaj: metin,
         buton: acik.buton,
-        onay: !!onay
+        onay: !!onay,
+        deneme: deneme
       })
     }).then(function (r) {
       return r.json().then(function (j) { return { kod: r.status, j: j || {} }; }).catch(function () { return { kod: r.status, j: {} }; });
     }).then(function (paket) {
+      if (!acik || acik.deneme !== deneme) return;
       var j = paket.j || {};
       if (j.qr) {
         if (uyari) uyari.textContent = j.mesaj || "WhatsApp oturumu yenilenmeli (QR)";
         if (sonuc) sonuc.textContent = "";
-        if (yine) yine.style.display = "none";
+        yineGoster(false);
       } else if (j.geri_dus) {
         webAc(ham, metin);
         if (uyari) uyari.textContent = j.mesaj || "WhatsApp servisi bağlı değil, WhatsApp Web sayfası açılıyor";
         if (sonuc) sonuc.textContent = "";
-        if (yine) yine.style.display = "none";
+        yineGoster(false);
       } else if (j.tekrar) {
         if (uyari) uyari.textContent = j.mesaj || "Bu mesaj bu numaraya az önce gönderildi.";
-        if (yine) yine.style.display = "inline-block";
+        yineGoster(true);
         if (sonuc) sonuc.textContent = "";
+      } else if (j.ok && j.durum === "gonderiliyor") {
+        suruyor = true;
+        sonucYaz(j);
+        pollBaslat(deneme);
+      } else if (j.durum === "kuyrukta" || j.durum === "gonderildi" || j.durum === "belirsiz" || j.durum === "basarisiz") {
+        sonucYaz(j);
       } else if (j.ok) {
         if (uyari) uyari.textContent = "";
         if (sonuc) sonuc.textContent = j.mesaj || "Gönderiliyor";
-        if (yine) yine.style.display = "none";
+        yineGoster(false);
       } else {
         if (uyari) uyari.textContent = j.mesaj || "Gönderilemedi";
         if (sonuc) sonuc.textContent = "";
       }
     }).catch(function () {
+      if (!acik || acik.deneme !== deneme) return;
       if (uyari) uyari.textContent = "Gönderilemedi";
     }).then(function () {
-      gonderiyor = false;
-      if (btn) btn.disabled = false;
-      if (yine) yine.disabled = false;
+      if (suruyor) return;
+      dugmeAc();
     });
   }
 
   function sozlesmeWhatsAppAc(opts) {
     opts = opts || {};
     stil();
+    pollDur();
+    gonderiyor = false;
     var eski = document.getElementById("sozlesme-wa-perde");
     if (eski) eski.remove();
     acik = {
       buton: opts.buton === "makbuz" ? "makbuz" : "ust",
-      musteriId: parseInt(opts.musteriId, 10) || 0
+      musteriId: parseInt(opts.musteriId, 10) || 0,
+      deneme: denemeUret()
     };
     var perde = document.createElement("div");
     perde.id = "sozlesme-wa-perde";
@@ -186,9 +296,18 @@
       '<button type="button" id="sozlesme-wa-yine">Yine de gönder</button>' +
       '<button type="button" id="sozlesme-wa-kapat">Kapat</button></div></form>';
     document.body.appendChild(perde);
-    document.getElementById("sozlesme-wa-kapat").onclick = function () { perde.remove(); acik = null; };
+    document.getElementById("sozlesme-wa-kapat").onclick = function () {
+      pollDur();
+      gonderiyor = false;
+      perde.remove();
+      acik = null;
+    };
     document.getElementById("sozlesme-wa-gonder").onclick = function () { gonder(false); };
-    document.getElementById("sozlesme-wa-yine").onclick = function () { gonder(true); };
+    document.getElementById("sozlesme-wa-yine").onclick = function () {
+      pollDur();
+      if (acik) acik.deneme = denemeUret();
+      gonder(true);
+    };
     var mesaj = document.getElementById("sozlesme-wa-mesaj");
     if (mesaj) mesaj.value = opts.mesaj || "";
     var sec = document.getElementById("sozlesme-wa-sec");

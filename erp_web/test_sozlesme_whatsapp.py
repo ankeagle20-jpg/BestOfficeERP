@@ -22,11 +22,16 @@ def _noop(*_a, **_k):
     return None
 
 
+DENEME = "11111111-1111-4111-8111-111111111111"
+DENEME_2 = "22222222-2222-4222-8222-222222222222"
+
+
 def base_patches():
     sw.ensure_tablo = _noop
     sw._musteri = lambda mid: {"id": int(mid)}
     sw._sayilar = lambda *_a, **_k: (0, 0, 0, 0)
     sw._son_gonderim = lambda *_a, **_k: None
+    sw._bul = lambda *_a, **_k: None
     sw._durum_yaz = lambda *_a, **_k: None
     sw.node_yolu_acik = lambda: True
 
@@ -38,6 +43,7 @@ def gonder(**kwargs):
         "mesaj": "deneme metin",
         "buton": "ust",
         "onay": False,
+        "deneme": DENEME,
     }
     data.update(kwargs.pop("data", {}))
     an = datetime(2026, 10, 6, 9, 0, tzinfo=timezone.utc)
@@ -134,14 +140,10 @@ def test_tekrar_ve_kilit():
     check("tekrar_409", kod == 409 and govde.get("tekrar") is True and ekle["n"] == 0)
     sw._son_gonderim = lambda *_a, **_k: {"id": 9, "durum": "gonderiliyor"}
     govde, kod = gonder()
-    check("suruyor", kod == 200 and govde.get("mesaj") == sw._SUREN and ekle["n"] == 0)
+    check("on_dk_uyari", kod == 409 and govde.get("tekrar") is True and govde.get("mesaj") == sw._YINE and ekle["n"] == 0)
     sw._son_gonderim = lambda *_a, **_k: {"id": 9, "durum": "gonderildi"}
-    govde, kod = gonder(data={"onay": True})
+    govde, kod = gonder(data={"onay": True, "deneme": DENEME_2})
     check("yine_de", kod == 200 and govde.get("durum") == "gonderiliyor" and ekle["n"] == 1)
-    sw._ekle = lambda *_a, **_k: None
-    sw._son_gonderim = lambda *_a, **_k: None
-    govde, kod = gonder()
-    check("cift_kilit", kod == 200 and govde.get("mesaj") == sw._SUREN)
 
 
 def test_hizli_ve_yok():
@@ -159,7 +161,7 @@ def test_hizli_ve_yok():
     sure = time.perf_counter() - t0
     check("arkaplan", kod == 200 and govde.get("durum") == "gonderiliyor" and sure < 0.25)
     time.sleep(0.6)
-    check("sonuc_yaz", durum == ["gonderildi"])
+    check("sonuc_yaz", durum == ["kuyrukta"])
 
     base_patches()
     yaz = []
@@ -197,6 +199,11 @@ def test_sayfa_ayrimi():
     check("js_neden", "WhatsApp servisi bağlı değil, WhatsApp Web sayfası açılıyor" in js)
     check("js_qr", "WhatsApp oturumu yenilenmeli (QR)" in js)
     check("js_eski_yok", "WhatsApp Web açıldı" not in js)
+    check("js_deneme", "denemeUret" in js and "deneme: deneme" in js)
+    check("js_poll", "/giris/api/sozlesme-whatsapp/durum?deneme=" in js and "POLL_SON = 30000" in js)
+    check("js_sonuc", "Kuyruğa alındı ✓ (birkaç saniyede iletilir)" in js and "Gönderildi ✓" in js and "Sonuç belirsiz, telefondan kontrol edin" in js and "Gönderilemedi" in js)
+    check("js_iki_pencere", "gonderiyor = false" in js and "acik.deneme = denemeUret()" in js)
+    check("eski_anahtar_yok", "metin_h[:12]" not in (ROOT / "sozlesme_whatsapp.py").read_text(encoding="utf-8"))
 
 
 def test_uyandirma_ve_yeniden():
@@ -269,6 +276,115 @@ def test_giris_kapali():
         headers={"Origin": "http://localhost"},
     )
     check("yetkisiz_401", r.status_code == 401)
+    r = client.get("/giris/api/sozlesme-whatsapp/durum?deneme=" + DENEME)
+    check("durum_yetkisiz_401", r.status_code == 401)
+
+
+def test_deneme_ve_poll():
+    base_patches()
+    govde, kod = gonder(data={"deneme": "eski-kalici"})
+    check("deneme_400", kod == 400 and govde.get("mesaj") == sw._ORIGIN)
+
+    base_patches()
+    kuyruklar = []
+    kayit = {}
+
+    def ekle(*a, **_k):
+        anahtar = a[8]
+        if anahtar in kayit:
+            return None
+        kayit[anahtar] = {"id": len(kayit) + 1, "durum": "gonderiliyor"}
+        return dict(kayit[anahtar])
+
+    def bul(_uid, anahtar):
+        return kayit.get(anahtar)
+
+    sw._ekle = ekle
+    sw._bul = bul
+    sw._durum_yaz = lambda rid, durum: [row.__setitem__("durum", durum) for row in kayit.values() if row["id"] == rid]
+
+    def kuyruk(*a):
+        kuyruklar.append(a[2])
+        return "ok"
+
+    govde, kod = gonder(kuyruk=kuyruk)
+    time.sleep(0.2)
+    govde2, kod2 = gonder(kuyruk=kuyruk)
+    check("cift_tik_tek", kod == 200 and len(kuyruklar) == 1 and kod2 == 200 and govde2.get("cakisma") is True)
+    check("cift_tik_durum", govde2.get("durum") in ("gonderiliyor", "kuyrukta", "gonderildi"))
+    check("cift_suren_veya_onceden", govde2.get("mesaj") in (sw._SUREN, sw._ONCEDEN, sw._GONDERILDI_ONCEDEN))
+
+    base_patches()
+    kuyruklar = []
+    sw._ekle = lambda *a, **_k: {"id": len(kuyruklar) + 1}
+    govde, kod = gonder(kuyruk=lambda *a: kuyruklar.append(a[2]) or "ok", data={"deneme": DENEME})
+    govde, kod = gonder(kuyruk=lambda *a: kuyruklar.append(a[2]) or "ok", data={"deneme": DENEME_2})
+    time.sleep(0.3)
+    check("ertesi_gun", len(kuyruklar) == 2 and kuyruklar[0] != kuyruklar[1])
+
+    base_patches()
+    sw._son_gonderim = lambda *_a, **_k: {"id": 2, "durum": "gonderildi"}
+    sw._ekle = lambda *_a, **_k: {"id": 6}
+    kuyruklar = []
+    govde, kod = gonder(kuyruk=lambda *a: kuyruklar.append(1) or "ok")
+    check("on_dk_uyari_yok_kuyruk", kod == 409 and govde.get("tekrar") is True and kuyruklar == [])
+    govde, kod = gonder(kuyruk=lambda *a: kuyruklar.append(a[2]) or "ok", data={"onay": True, "deneme": DENEME_2})
+    time.sleep(0.3)
+    check("yine_yeni_deneme", kod == 200 and govde.get("durum") == "gonderiliyor" and kuyruklar == ["szwa:d:" + DENEME_2])
+
+    for durum, mesaj in (
+        ("gonderildi", sw._GONDERILDI_ONCEDEN),
+        ("kuyrukta", sw._ONCEDEN),
+        ("gonderiliyor", sw._SUREN),
+        ("basarisiz", sw._BASARISIZ),
+        ("belirsiz", sw._BELIRSIZ),
+    ):
+        base_patches()
+        sw._bul = lambda *_a, d=durum: {"id": 4, "durum": d}
+        govde, kod = gonder()
+        check("cakisma_" + durum, kod == 200 and govde.get("durum") == durum and govde.get("mesaj") == mesaj and govde.get("cakisma") is True)
+
+    base_patches()
+    sw._bul = lambda *_a, **_k: None
+    sw._ekle = lambda *_a, **_k: None
+
+    def bul_ikinci(_uid, _anahtar, k={"n": 0}):
+        k["n"] += 1
+        if k["n"] < 2:
+            return None
+        return {"id": 8, "durum": "gonderildi"}
+
+    sw._bul = bul_ikinci
+    govde, kod = gonder()
+    check("cakisma_yaris", kod == 200 and govde.get("durum") == "gonderildi" and govde.get("mesaj") == sw._GONDERILDI_ONCEDEN)
+
+    base_patches()
+    sw._bul = lambda *_a, **_k: {"id": 5, "durum": "gonderildi"}
+    govde, kod = sw.sozlesme_wa_durum(3, DENEME)
+    check("poll_gonderildi", kod == 200 and govde.get("durum") == "gonderildi" and govde.get("mesaj") == "Gönderildi")
+    sw._bul = lambda *_a, **_k: {"id": 5, "durum": "basarisiz"}
+    govde, kod = sw.sozlesme_wa_durum(3, DENEME)
+    check("poll_basarisiz", kod == 200 and govde.get("ok") is False and "Gönderilemedi" in govde.get("mesaj", ""))
+    sw._bul = lambda *_a, **_k: {"id": 5, "durum": "belirsiz"}
+    govde, kod = sw.sozlesme_wa_durum(3, DENEME)
+    check("poll_belirsiz", kod == 200 and govde.get("mesaj") == sw._BELIRSIZ)
+    sw._bul = lambda *_a, **_k: None
+    govde, kod = sw.sozlesme_wa_durum(3, DENEME)
+    check("poll_yok", kod == 404 and govde.get("durum") == "yok")
+    check("kuyruk_basarisiz", sw._kuyruk_sonuc({"ok": True, "oge": [{"durum": "basarisiz"}]}) == "hata")
+    check("kuyruk_belirsiz", sw._kuyruk_sonuc({"ok": True, "oge": [{"durum": "belirsiz"}]}) == "belirsiz")
+    check("kuyruk_bekliyor", sw._kuyruk_sonuc({"ok": True, "oge": [{"durum": "bekliyor"}]}) == "kuyrukta")
+    check("kuyruk_gercek", sw._kuyruk_sonuc({"ok": True, "oge": [{"durum": "gonderildi"}]}) == "gonderildi")
+    sw._bul = lambda *_a, **_k: {"id": 5, "durum": "kuyrukta"}
+    govde, kod = sw.sozlesme_wa_durum(3, DENEME)
+    check("poll_kuyrukta", kod == 200 and govde.get("durum") == "kuyrukta" and govde.get("mesaj") == "Kuyruğa alındı")
+
+    base_patches()
+    anahtarlar = []
+    sw._ekle = lambda *a, **_k: anahtarlar.append(a[8]) or {"id": 1}
+    gonder(data={"buton": "ust", "deneme": DENEME})
+    gonder(data={"buton": "makbuz", "deneme": DENEME_2})
+    check("iki_buton", anahtarlar == ["szwa:d:" + DENEME, "szwa:d:" + DENEME_2])
 
 
 if __name__ == "__main__":
@@ -278,6 +394,7 @@ if __name__ == "__main__":
     test_tekrar_ve_kilit()
     test_hizli_ve_yok()
     test_uyandirma_ve_yeniden()
+    test_deneme_ve_poll()
     test_sayfa_ayrimi()
     test_giris_kapali()
     if fails:

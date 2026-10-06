@@ -5,7 +5,7 @@ from flask import Blueprint, jsonify, request
 from flask_login import current_user
 
 from auth import giris_gerekli
-from sozlesme_whatsapp import sozlesme_wa_isle
+from sozlesme_whatsapp import sozlesme_wa_durum, sozlesme_wa_isle
 
 bp = Blueprint("sozlesme_whatsapp", __name__)
 
@@ -41,4 +41,11 @@ def api_gonder():
         request.headers.get("Origin") or "",
         request.host or "",
     )
+    return jsonify(govde), kod
+
+
+@bp.route("/giris/api/sozlesme-whatsapp/durum")
+@giris_gerekli
+def api_durum():
+    govde, kod = sozlesme_wa_durum(_uid(), request.args.get("deneme") or "")
     return jsonify(govde), kod

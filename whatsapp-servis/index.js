@@ -5,6 +5,7 @@ const fs = require('fs');
 const QRCode = require('qrcode');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const { idleKapanirMi, tekUcus } = require('./oturum-kural');
+const { kalemEkle } = require('./kuyruk-kural');
 
 const WA_LOG_PATH = path.join(__dirname, 'wa-servis.log');
 
@@ -228,7 +229,7 @@ function getOrCreateSession(tenantId) {
     chromeHeld: false,
     // Idle destroy'a tabi (default dahil). LocalAuth diski korunur; ihtiyaçta yeniden açılır.
     pinKeepAlive: false,
-    gonderimAnahtarlari: new Set(),
+    gonderimDurum: new Map(),
   };
   sessions.set(tenantId, session);
   return session;
@@ -271,19 +272,23 @@ async function kuyrukIsle(session) {
   try {
     while (session.queue.length > 0 && session.ready && session.client) {
       const item = session.queue.shift();
+      item.durum = 'gonderiliyor';
       const phone = normalizeTelefon(item.telefon);
       const message = String(item.mesaj || '').trim();
       if (!phone || !message) {
         item._sonuc = { ok: false, error: 'telefon veya mesaj geçersiz' };
+        item.durum = 'basarisiz';
         continue;
       }
       const chatId = phone.endsWith('@c.us') ? phone : `${phone}@c.us`;
       try {
         const result = await session.client.sendMessage(chatId, message);
         item._sonuc = { ok: true, id: result && result.id ? result.id._serialized || null : null };
+        item.durum = 'gonderildi';
         console.log(`[WA:${session.tenantId}] Kuyruk gönderildi`);
       } catch (err) {
         item._sonuc = { ok: false, error: err.message || String(err) };
+        item.durum = 'basarisiz';
         console.error(`[WA:${session.tenantId}] Kuyruk gönderim hatası:`, err);
       }
       const minBekleme = 20000;
@@ -674,21 +679,8 @@ async function numaraKayitliMi(session, telefon) {
 }
 
 function kuyrukKalemleri(session, liste) {
-  if (!session.gonderimAnahtarlari) session.gonderimAnahtarlari = new Set();
-  let eklenen = 0;
-  let tekrar = 0;
-  for (const item of liste || []) {
-    if (!item || !item.telefon || !item.mesaj) continue;
-    const anahtar = String(item.anahtar || '').trim().slice(0, 120);
-    if (anahtar && session.gonderimAnahtarlari.has(anahtar)) {
-      tekrar += 1;
-      continue;
-    }
-    if (anahtar) session.gonderimAnahtarlari.add(anahtar);
-    session.queue.push({ telefon: item.telefon, mesaj: item.mesaj, anahtar });
-    eklenen += 1;
-  }
-  return { eklenen, tekrar };
+  if (!session.gonderimDurum) session.gonderimDurum = new Map();
+  return kalemEkle(session.gonderimDurum, session.queue, liste);
 }
 
 app.post('/t/:tenantId/numara-kontrol', async (req, res) => {
@@ -719,6 +711,7 @@ app.post('/t/:tenantId/kuyruk-toplu-ekle', async (req, res) => {
       ok: true,
       eklenen: sonuc.eklenen,
       tekrar: sonuc.tekrar,
+      oge: sonuc.oge,
       kuyruk_uzunlugu: session.queue.length,
       tenant_id: tenantId,
     });
