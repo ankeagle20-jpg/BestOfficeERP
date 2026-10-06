@@ -32,6 +32,7 @@ from odeme_linki import (
     public_odeme_base,
     token_hash,
     tutar_tl,
+    wa_kisi_secenekleri,
     wa_mesaj_dogrula,
     wa_tekrar_onay_gerekli,
     wa_varsayilan_mesaj,
@@ -164,6 +165,73 @@ def _iframe_token(link: dict) -> str | None:
     return token
 
 
+def _wa_kisiler(mid: int) -> list[dict]:
+    """Karttaki yetkili adları ve telefonları. Yazma yok; tablo yoksa boş döner."""
+    yet = []
+    try:
+        yet = fetch_all(
+            """
+            SELECT id, sira, birincil, ad_soyad, tel, tel2
+            FROM musteri_yetkililer
+            WHERE musteri_id = %s
+            ORDER BY birincil DESC, sira ASC NULLS LAST, id ASC
+            """,
+            (int(mid),),
+        ) or []
+    except Exception:
+        logger.info("odeme linki yetkili")
+        yet = []
+    if yet and not any(str(r.get("tel") or "").strip() or str(r.get("tel2") or "").strip() for r in yet):
+        try:
+            ekstra = fetch_all(
+                """
+                SELECT y.birincil, y.sira, y.ad_soyad, d.deger AS tel
+                FROM musteri_yetkili_alan_degerleri d
+                JOIN musteri_yetkililer y ON y.id = d.yetkili_id
+                WHERE y.musteri_id = %s AND d.alan_tipi IN ('tel', 'tel2')
+                ORDER BY y.birincil DESC, y.sira ASC NULLS LAST, d.sira ASC NULLS LAST
+                """,
+                (int(mid),),
+            ) or []
+            if ekstra:
+                yet = ekstra
+        except Exception:
+            logger.info("odeme linki yetkili tel")
+    kyc = None
+    try:
+        kyc = fetch_one(
+            """
+            SELECT yetkili_adsoyad, yetkili_tel, yetkili_tel2
+            FROM musteri_kyc
+            WHERE musteri_id = %s
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (int(mid),),
+        )
+    except Exception:
+        logger.info("odeme linki kyc")
+        kyc = None
+    kart = {}
+    try:
+        kart = fetch_one(
+            "SELECT phone, yetkili_kisi FROM customers WHERE id = %s",
+            (int(mid),),
+        ) or {}
+    except Exception:
+        try:
+            kart = fetch_one("SELECT phone FROM customers WHERE id = %s", (int(mid),)) or {}
+        except Exception:
+            logger.info("odeme linki kart tel")
+            kart = {}
+    return wa_kisi_secenekleri(
+        yet,
+        kyc,
+        kart.get("phone"),
+        kart.get("yetkili_kisi"),
+    )
+
+
 @bp.route("/giris/api/odeme-linki/kalan")
 @giris_gerekli
 def api_kalan():
@@ -182,7 +250,14 @@ def api_kalan():
         kalan = 0.0
     if kalan < 0:
         kalan = 0.0
-    return jsonify({"ok": True, "tutar": kalan, "ad": cust.get("name") or ""})
+    return jsonify(
+        {
+            "ok": True,
+            "tutar": kalan,
+            "ad": cust.get("name") or "",
+            "kisiler": _wa_kisiler(mid),
+        }
+    )
 
 
 @bp.route("/giris/api/odeme-linki", methods=["GET", "POST"])
@@ -287,7 +362,7 @@ def api_iptal(link_id: int):
 
 _WA_YOK = "Bu numara WhatsApp'ta kayıtlı değil"
 _WA_KAPALI = "WhatsApp servisi şu an kapalı"
-_WA_TEKRAR = "Bu linke daha önce gönderildi, tekrar göndermek istiyor musun?"
+_WA_TEKRAR = "Bu link daha önce gönderildi, tekrar gönderilsin mi?"
 _WA_SUREN = "Gönderim sürüyor"
 _WA_ENGEL = "Bu link gönderilemez"
 

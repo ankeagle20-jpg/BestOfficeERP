@@ -179,6 +179,62 @@ def normalize_wa_telefon(raw) -> str:
     return s
 
 
+def wa_kisi_secenekleri(yetkililer=None, kyc=None, kart_telefon="", kart_yetkili="") -> list[dict]:
+    """Yetkili adı ve telefonu. Birincil önce, aynı numara bir kez. Ad yoksa ad boş."""
+    adaylar: list[tuple] = []
+
+    def ekle(oncelik, sira, ad, tel):
+        numara = str(tel or "").strip()
+        if not numara:
+            return
+        adaylar.append((oncelik, sira, len(adaylar), str(ad or "").strip(), numara))
+
+    for row in yetkililer or []:
+        if not isinstance(row, dict):
+            continue
+        ad = row.get("ad_soyad") or row.get("ad") or ""
+        try:
+            sira = int(row.get("sira") or 0)
+        except (TypeError, ValueError):
+            sira = 0
+        oncelik = 0 if row.get("birincil") else 1
+        ekle(oncelik, sira, ad, row.get("tel"))
+        ekle(oncelik, sira, ad, row.get("tel2"))
+    if not adaylar and isinstance(kyc, dict):
+        ad = kyc.get("yetkili_adsoyad") or ""
+        ekle(0, 0, ad, kyc.get("yetkili_tel"))
+        ekle(0, 0, ad, kyc.get("yetkili_tel2"))
+    if not adaylar:
+        ad = ""
+        if isinstance(kyc, dict):
+            ad = str(kyc.get("yetkili_adsoyad") or "").strip()
+        if not ad:
+            for row in yetkililer or []:
+                if isinstance(row, dict) and row.get("birincil") and str(row.get("ad_soyad") or "").strip():
+                    ad = str(row.get("ad_soyad") or "").strip()
+                    break
+        if not ad:
+            for row in yetkililer or []:
+                if isinstance(row, dict) and str(row.get("ad_soyad") or "").strip():
+                    ad = str(row.get("ad_soyad") or "").strip()
+                    break
+        if not ad:
+            ad = str(kart_yetkili or "").strip()
+        ekle(0, 0, ad, kart_telefon)
+    else:
+        ekle(2, 0, str(kart_yetkili or "").strip(), kart_telefon)
+    adaylar.sort(key=lambda x: (x[0], x[1], x[2]))
+    gorulen = set()
+    out = []
+    for _oncelik, _sira, _i, ad, tel in adaylar:
+        anahtar = normalize_wa_telefon(tel) or re.sub(r"\D", "", tel)
+        if not anahtar or anahtar in gorulen:
+            continue
+        gorulen.add(anahtar)
+        out.append({"ad": ad, "telefon": tel})
+    return out
+
+
 def whatsapp_etiket(durum: str) -> str:
     kod = str(durum or "").strip()
     return {
