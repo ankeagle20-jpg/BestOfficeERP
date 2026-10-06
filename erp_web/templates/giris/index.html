@@ -8641,6 +8641,21 @@ function whatsappServisDurumKontrol() {
         });
 }
 
+function whatsappGuvenilmezUyariHtml(liste) {
+    var n = 0;
+    (liste || []).forEach(function (it) {
+        if (it && (it.guvenilmez || it.kilitli)) n += 1;
+    });
+    if (!n) return '';
+    return '<tr><td colspan="12" style="color:#ffb74d;background:#2a2114;padding:8px;">'
+        + 'Bu hesapların aylık tutarı ekstre borcuyla uyuşmuyor veya tahsilat borç satırına sığmıyor. Gecikme tutarı bu gönderimde kullanılmasın.'
+        + '</td></tr>';
+}
+function whatsappSecimKutusuHtml(idx, it) {
+    var gv = (it && (it.guvenilmez || it.kilitli)) ? ' data-guvenilmez="1"' : '';
+    return '<td><input type="checkbox" class="whatsapp-check" data-idx="' + idx + '"' + gv + '></td>';
+}
+
 function whatsappGecikenListeYukle(force, haricGoster) {
     if (!force && __whatsappGecikenListe && __whatsappGecikenListe.length > 0) {
         return;
@@ -8720,7 +8735,7 @@ function whatsappGecikenListeYukle(force, haricGoster) {
                 });
             }
             whatsappOzetGuncelle(gosterilecekListe, __whatsappGecikenListe, d.tarih);
-            tbody.innerHTML = gosterilecekListe.map((it) => {
+            tbody.innerHTML = whatsappGuvenilmezUyariHtml(gosterilecekListe) + gosterilecekListe.map((it) => {
                 const idx = __whatsappGecikenListe.indexOf(it);
                 const tutarTxt = it.tutar ? it.tutar.toLocaleString('tr-TR', {minimumFractionDigits:2}) + ' TL' : '-';
                 const ilkKiraTxt = it.ilk_kira ? it.ilk_kira.toLocaleString('tr-TR', {minimumFractionDigits:2}) + ' TL' : '-';
@@ -8733,7 +8748,7 @@ function whatsappGecikenListeYukle(force, haricGoster) {
                       'style="color:#ffa726;font-size:11px;margin-left:6px;">[Listeye Geri Al]</a>'
                     : '';
                 return '<tr' + rowStyle + '>' +
-                    '<td><input type="checkbox" class="whatsapp-check" data-idx="' + idx + '"></td>' +
+                    whatsappSecimKutusuHtml(idx, it) +
                     '<td><a href="#" onclick="whatsappMusteriKartaGit(event, ' +
                     JSON.stringify(it.musteri_id) + '); return false;" ' +
                     'style="color:#5eb3f5; text-decoration:underline; cursor:pointer;">' +
@@ -8765,7 +8780,13 @@ function whatsappGecikenListeYukle(force, haricGoster) {
 
 function whatsappTumunuSecToggle() {
     const all = document.getElementById('whatsapp-tumunu-sec').checked;
-    document.querySelectorAll('.whatsapp-check').forEach(c => c.checked = all);
+    document.querySelectorAll('.whatsapp-check').forEach(c => {
+        if (c.getAttribute('data-guvenilmez') === '1') {
+            if (!all) c.checked = false;
+            return;
+        }
+        c.checked = all;
+    });
 }
 
 function whatsappSeciliGonder() {
@@ -8777,9 +8798,12 @@ function whatsappSeciliGonder() {
         const textarea = document.querySelector(
             '.whatsapp-mesaj-input[data-idx="' + idx + '"]');
         const guncelMesaj = textarea ? textarea.value : item.mesaj;
+        if ((item.guvenilmez || item.kilitli) && c.getAttribute('data-guvenilmez') !== '1') return;
         secilenler.push({
             telefon: item.telefon,
             mesaj: guncelMesaj,
+            musteri_id: item.musteri_id,
+            guvenilmez_onay: !!(item.guvenilmez || item.kilitli)
         });
     });
     if (!secilenler.length) {
@@ -9409,7 +9433,7 @@ function whatsappGecikenListesiYenidenCiz() {
         tbody.innerHTML = '<tr><td colspan="12" style="color:#90a4ae;">Bu filtreye uyan müşteri yok.</td></tr>';
         return;
     }
-    tbody.innerHTML = gosterilecekListe.map((it) => {
+    tbody.innerHTML = whatsappGuvenilmezUyariHtml(gosterilecekListe) + gosterilecekListe.map((it) => {
         const idx = __whatsappGecikenListe.indexOf(it);
         const tutarTxt = it.tutar ? it.tutar.toLocaleString('tr-TR', {minimumFractionDigits:2}) + ' TL' : '-';
         const ilkKiraTxt = it.ilk_kira ? it.ilk_kira.toLocaleString('tr-TR', {minimumFractionDigits:2}) + ' TL' : '-';
@@ -9422,7 +9446,7 @@ function whatsappGecikenListesiYenidenCiz() {
               'style="color:#ffa726;font-size:11px;margin-left:6px;">[Listeye Geri Al]</a>'
             : '';
         return '<tr' + rowStyle + '>' +
-            '<td><input type="checkbox" class="whatsapp-check" data-idx="' + idx + '"></td>' +
+            whatsappSecimKutusuHtml(idx, it) +
             '<td><a href="#" onclick="whatsappMusteriKartaGit(event, ' +
             JSON.stringify(it.musteri_id) + '); return false;" ' +
             'style="color:#5eb3f5; text-decoration:underline; cursor:pointer;">' +

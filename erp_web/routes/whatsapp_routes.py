@@ -357,6 +357,28 @@ def api_geciken_liste():
         })
 
     sonuc.sort(key=lambda x: -x['gecikme_gun'])
+    from ay_sinif import UYARI_METNI, kilitli_musteriler, siniflari_yukle
+    try:
+        sinif_map = siniflari_yukle([s.get("musteri_id") for s in sonuc])
+        kilitli = kilitli_musteriler([s.get("musteri_id") for s in sonuc])
+    except Exception:
+        sinif_map = {}
+        kilitli = set()
+        for s in sonuc:
+            s["sinif"] = "C"
+            s["guvenilmez"] = True
+            s["kilitli"] = False
+    else:
+        for s in sonuc:
+            try:
+                mid_s = int(s.get("musteri_id") or 0)
+            except (TypeError, ValueError):
+                mid_s = 0
+            sinif = sinif_map.get(mid_s) or "C"
+            s["sinif"] = sinif
+            s["guvenilmez"] = sinif in ("B", "C")
+            s["kilitli"] = mid_s in kilitli
+    guvenilmez_var = any(s.get("guvenilmez") or s.get("kilitli") for s in sonuc)
     grup2_etiket_map = {}
     try:
         etiket_rows = fetch_all(
@@ -369,7 +391,8 @@ def api_geciken_liste():
         'ok': True,
         'liste': sonuc,
         'tarih': bugun.isoformat(),
-        'grup2_etiket_map': grup2_etiket_map
+        'grup2_etiket_map': grup2_etiket_map,
+        'uyari': UYARI_METNI if guvenilmez_var else '',
     })
 
 
@@ -435,14 +458,39 @@ def api_gonder():
         return jsonify({'ok': False, 'mesaj': 'Liste boş'}), 400
 
     wa_liste = []
+    engellenen = 0
+    from ay_sinif import UYARI_METNI, gonderime_izin, kilitli_musteriler, siniflari_yukle
+    mids = []
     for item in liste:
+        try:
+            mids.append(int(item.get("musteri_id") or 0))
+        except (TypeError, ValueError):
+            mids.append(0)
+    try:
+        sinif_map = siniflari_yukle([m for m in mids if m > 0])
+        kilit_set = kilitli_musteriler([m for m in mids if m > 0])
+        sinif_hazir = True
+    except Exception:
+        sinif_map = {}
+        kilit_set = set()
+        sinif_hazir = False
+    if not sinif_hazir:
+        return jsonify({"ok": False, "mesaj": UYARI_METNI}), 400
+    for item, mid in zip(liste, mids):
         tel = str(item.get('telefon') or '').strip()
         mesaj = str(item.get('mesaj') or '').strip()
-        if tel and mesaj:
-            wa_liste.append({'telefon': tel, 'mesaj': mesaj})
+        if not tel or not mesaj or mid <= 0:
+            engellenen += 1
+            continue
+        onay = item.get("guvenilmez_onay") in (True, 1, "1", "true", "True", "yes", "on")
+        izin, _neden = gonderime_izin(sinif_map.get(mid) or "C", onay, mid in kilit_set)
+        if not izin:
+            engellenen += 1
+            continue
+        wa_liste.append({'telefon': tel, 'mesaj': mesaj})
 
     if not wa_liste:
-        return jsonify({'ok': False, 'mesaj': 'Geçerli kayıt yok'}), 400
+        return jsonify({'ok': False, 'mesaj': UYARI_METNI, 'engellenen': engellenen}), 400
 
     try:
         r = requests.post(
@@ -474,6 +522,7 @@ def api_gonder():
         'ok': True,
         'servis_yaniti': result,
         'wa_tenant_id': _wa_tenant_id(),
+        'engellenen': engellenen,
     })
 
 
