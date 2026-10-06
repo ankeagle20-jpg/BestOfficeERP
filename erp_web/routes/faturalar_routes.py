@@ -64,6 +64,8 @@ import logging
 import math
 import time
 
+from ay_fifo import acik_ay_dagit, borc_haritasi
+
 
 def _fatura_pdf_debug():
     return os.environ.get("FATURA_PDF_DEBUG", "").lower() in ("1", "true", "yes")
@@ -720,18 +722,80 @@ def _acik_aylik_tutar_ay_set(musteri_id: int) -> set[str]:
     return out
 
 
+def _ekstre_borc_satirlari(musteri_id: int) -> dict[str, float]:
+    """Ekstre borç satırı: ayın 1'i fatura tutarı. Grid önbelleği okunmaz."""
+    rows = fetch_all(
+        f"""
+        SELECT LEFT(fatura_tarihi::text, 10) AS tarih,
+               ROUND(COALESCE(toplam, tutar, 0)::numeric, 2) AS tutar
+        FROM faturalar
+        WHERE musteri_id = %s
+          AND SUBSTRING(fatura_tarihi::text, 9, 2) = '01'
+          AND COALESCE(toplam, tutar, 0) > 0
+          AND {sql_expr_fatura_gib_no_tasindi_degil("notlar")}
+        """,
+        (int(musteri_id),),
+    ) or []
+    return borc_haritasi([(r.get("tarih"), r.get("tutar")) for r in rows])
+
+
+def _onceki_tahsilat_satirlari(musteri_id: int, odeme_tarihi: str, haric_tahsilat_id=None) -> list[dict]:
+    """Ödeme gününe kadar (o gün dahil) kayıtlı tahsilatlar. İleri tarih yok."""
+    rows = fetch_all(
+        """
+        SELECT id,
+               LEFT(tahsilat_tarihi::text, 10) AS tarih,
+               ROUND(COALESCE(tutar, 0)::numeric, 2) AS tutar
+        FROM tahsilatlar
+        WHERE (musteri_id = %s OR customer_id = %s)
+          AND COALESCE(tutar, 0) > 0
+          AND LEFT(COALESCE(tahsilat_tarihi::text, ''), 10) <= %s
+        ORDER BY LEFT(tahsilat_tarihi::text, 10), id
+        """,
+        (int(musteri_id), int(musteri_id), str(odeme_tarihi)[:10]),
+    ) or []
+    haric = None
+    try:
+        if haric_tahsilat_id is not None:
+            haric = int(haric_tahsilat_id)
+    except (TypeError, ValueError):
+        haric = None
+    out = []
+    odeme = str(odeme_tarihi)[:10]
+    for r in rows:
+        try:
+            rid = int(r.get("id"))
+        except (TypeError, ValueError):
+            rid = None
+        tarih = str(r.get("tarih") or "")[:10]
+        if haric is not None and rid == haric:
+            continue
+        # Aynı gündeki daha sonraki kayıt, bu satırın öncesi değildir.
+        if haric is not None and tarih == odeme and rid is not None and rid > haric:
+            continue
+        out.append({"id": rid if rid is not None else 0, "tarih": tarih, "tutar": r.get("tutar")})
+    return out
+
+
 def _auto_allocate_oldest_unpaid_months(
     musteri_id,
     tahsil_tutar,
     borc_listesi=None,
     start_iso: str | None = None,
     iso_allowlist=None,
+    odeme_tarihi=None,
+    borc_satirlari=None,
+    onceki_tahsilatlar=None,
+    ek_onceki=None,
+    haric_tahsilat_id=None,
 ):
-    """
-    Elle tahsilatta ay işaretlenmemişse, cache'teki en eski borçlu aylardan dağıtım yap.
-    iso_allowlist verilirse yalnız bu aylara (gerçek kalan ile) dağıtır — eşit bölme yok.
+    """Ekstre borç satırından, en eski vadesi gelmiş açık aya dağıtır.
+
+    borc_listesi ve start_iso yok sayılır (yıl filtresi dağıtımı daraltmasın).
+    iso_allowlist varsa yalnız seçilen aylar doldurulur.
     Çıktı: (iso_list, [(iso, pay), ...])
     """
+    del borc_listesi, start_iso
     try:
         mid = int(musteri_id or 0)
         total = round(float(tahsil_tutar or 0), 2)
@@ -739,136 +803,29 @@ def _auto_allocate_oldest_unpaid_months(
         return [], []
     if mid <= 0 or total <= 0:
         return [], []
-    start_iso_s = str(start_iso or "").strip()
-    if not re.match(r"^\d{4}-\d{2}-\d{2}$", start_iso_s):
-        start_iso_s = ""
-    allow = None
-    if iso_allowlist:
-        allow = set()
-        for raw in iso_allowlist:
-            iso_a = str(raw or "").strip()[:10]
-            if re.match(r"^\d{4}-\d{2}-\d{2}$", iso_a):
-                try:
-                    dd = datetime.strptime(iso_a, "%Y-%m-%d").date()
-                    allow.add(date(dd.year, dd.month, 1).isoformat())
-                except ValueError:
-                    continue
-        if not allow:
-            allow = None
-    # 1) İstemciden gelen canlı grid borç listesi (tercihli kaynak)
-    borclu = []
-    if isinstance(borc_listesi, list):
-        raw_rows = []
-        for it in borc_listesi:
-            if not isinstance(it, dict):
-                continue
-            iso = str(it.get("iso") or "").strip()
-            if not re.match(r"^\d{4}-\d{2}-\d{2}$", iso):
-                continue
-            try:
-                dd = datetime.strptime(iso[:10], "%Y-%m-%d").date()
-                iso = date(dd.year, dd.month, 1).isoformat()
-            except ValueError:
-                continue
-            if allow is not None and iso not in allow:
-                continue
-            if start_iso_s and iso < start_iso_s:
-                continue
-            try:
-                kalan_v = round(float(it.get("kalan") or 0), 2)
-            except (TypeError, ValueError):
-                kalan_v = 0.0
-            if kalan_v <= 0.01:
-                continue
-            try:
-                odenen_v = round(float(it.get("odenen") or 0), 2)
-            except (TypeError, ValueError):
-                odenen_v = 0.0
-            raw_rows.append({
-                "iso": iso,
-                "kalan": kalan_v,
-                "acik_borc": bool(it.get("acik_borc")),
-                "odenen": odenen_v,
-            })
-        # İstemciden gelen canlı grid borç listesi birincil kaynak:
-        # kalan > 0 aylar kronolojik sırayla dağıtılır.
-        if raw_rows:
-            raw_rows.sort(key=lambda r: r["iso"])
-            borclu = [(r["iso"], r["kalan"]) for r in raw_rows]
-    if borclu:
-        rem = total
-        pay_items = []
-        for iso, kalan_v in borclu:
-            if rem <= 0.004:
-                break
-            pay = min(kalan_v, rem)
-            pay = round(pay, 2)
-            if pay <= 0:
-                continue
-            pay_items.append((iso, pay))
-            rem = round(rem - pay, 2)
-        return [iso for iso, _ in pay_items], pay_items
-
-    # 2) Sunucu cache fallback
-    try:
-        row = fetch_one("SELECT payload FROM musteri_aylik_grid_cache WHERE musteri_id = %s", (mid,))
-        payload_raw = (row or {}).get("payload")
-        if not payload_raw:
+    odeme = str(odeme_tarihi or "").strip()[:10]
+    if len(odeme) != 10:
+        odeme = date.today().isoformat()
+    if borc_satirlari is None:
+        try:
+            borc = _ekstre_borc_satirlari(mid)
+        except Exception:
+            logging.getLogger(__name__).info("ekstre borc satiri okunamadi")
             return [], []
-        payload = json.loads(payload_raw) if isinstance(payload_raw, str) else payload_raw
-        aylar = payload if isinstance(payload, list) else ((payload or {}).get("aylar") or [])
-        if not isinstance(aylar, list):
+    else:
+        borc = borc_satirlari
+    if onceki_tahsilatlar is None:
+        try:
+            onceki = _onceki_tahsilat_satirlari(mid, odeme, haric_tahsilat_id)
+        except Exception:
+            logging.getLogger(__name__).info("onceki tahsilat okunamadi")
             return [], []
-        borclu = []
-        for a in aylar:
-            if not isinstance(a, dict):
-                continue
-            try:
-                yy = int(a.get("yil"))
-                mm = int(a.get("ay"))
-            except (TypeError, ValueError):
-                continue
-            if mm < 1 or mm > 12:
-                continue
-            iso = date(yy, mm, 1).isoformat()
-            if allow is not None and iso not in allow:
-                continue
-            if start_iso_s and iso < start_iso_s:
-                continue
-            # Kritik: oldest dağıtımda asla "aylık tutarın tamamı"na düşme.
-            # Sadece gerçek kalan borcu kullan (kalan_tutar_kdv yoksa brut-odenen hesapla).
-            kalan = a.get("kalan_tutar_kdv")
-            if kalan is None:
-                try:
-                    brut_v = float(a.get("brut_tutar_kdv") or a.get("tutar_kdv_dahil") or 0)
-                except (TypeError, ValueError):
-                    brut_v = 0.0
-                try:
-                    odenen_v = float(a.get("odenen_tutar_kdv") or 0)
-                except (TypeError, ValueError):
-                    odenen_v = 0.0
-                kalan = round(max(brut_v - odenen_v, 0), 2)
-            try:
-                kalan_v = round(float(kalan or 0), 2)
-            except (TypeError, ValueError):
-                kalan_v = 0.0
-            if kalan_v <= 0.01:
-                continue
-            borclu.append((iso, kalan_v))
-        borclu.sort(key=lambda x: x[0])
-        rem = total
-        pay_items = []
-        for iso, kalan_v in borclu:
-            if rem <= 0.004:
-                break
-            pay = round(min(kalan_v, rem), 2)
-            if pay <= 0:
-                continue
-            pay_items.append((iso, pay))
-            rem = round(rem - pay, 2)
-        return [iso for iso, _ in pay_items], pay_items
-    except Exception:
-        return [], []
+    else:
+        onceki = list(onceki_tahsilatlar)
+    if ek_onceki:
+        onceki.extend(list(ek_onceki))
+    pay_items = acik_ay_dagit(borc, total, odeme, onceki=onceki, allowlist=iso_allowlist)
+    return [iso for iso, _ in pay_items], pay_items
 
 
 def _tahsil_rapor_yil_ay_coerce(val):
@@ -9667,46 +9624,21 @@ def tahsilat_ekle():
         # Elle tahsilatta kullanıcı ay seçtiyse o seçim korunur (hangi aylar).
         # Dağıtım tutarları her zaman gerçek kalandan (FIFO); eşit bölme yok.
         skip_ay_dagitim = bool(data.get("yillik_tek_tahsilat") or data.get("tahsilat_dagitimsiz"))
-        if not data.get("fatura_id") and not skip_ay_dagitim:
-            try:
-                from .giris_routes import (
-                    _read_aylik_grid_cache_payload,
-                    _upsert_aylik_grid_cache as _refresh_aylik_cache_before_alloc,
-                )
-                if not _read_aylik_grid_cache_payload(int(musteri_id)):
-                    _refresh_aylik_cache_before_alloc(int(musteri_id))
-            except Exception:
-                pass
         if not skip_ay_dagitim:
             if not ay_ref_isos:
                 auto_isos, auto_pay_items = _auto_allocate_oldest_unpaid_months(
                     musteri_id,
                     tutar,
-                    data.get("aylik_borc_listesi"),
-                    data.get("ay_ref_start_iso"),
+                    odeme_tarihi=tahsilat_tarihi,
                 )
                 if auto_isos:
                     ay_ref_isos = auto_isos
             else:
-                # Seçili aylar var: eşit bölme YOK — gerçek kalan ile aynı aylara dağıt.
-                client_borc = data.get("aylik_borc_listesi")
-                allow_set = set(ay_ref_isos)
-                if isinstance(client_borc, list) and client_borc:
-                    filtered = []
-                    for it in client_borc:
-                        if not isinstance(it, dict):
-                            continue
-                        iso_c = str(it.get("iso") or "").strip()[:10]
-                        if iso_c in allow_set:
-                            filtered.append(it)
-                    client_borc = filtered or None
-                else:
-                    client_borc = None
+                # Seçili aylar: yalnız onlar. Tutar ekstre açık borcundan; eşit bölme yok.
                 _sel_isos, auto_pay_items = _auto_allocate_oldest_unpaid_months(
                     musteri_id,
                     tutar,
-                    client_borc,
-                    None,
+                    odeme_tarihi=tahsilat_tarihi,
                     iso_allowlist=ay_ref_isos,
                 )
                 if auto_pay_items:

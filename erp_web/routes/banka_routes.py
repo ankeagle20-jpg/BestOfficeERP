@@ -1302,26 +1302,21 @@ def api_akbank_tahsilat_commit():
     kayitlar: list[dict] = []
     # Commit sonrası panel/cache (transaction dışında, manuel makbuz ile aynı).
     panel_sync_jobs: list[tuple[int, str, list[dict]]] = []
+    # Aynı istekte henüz commit edilmemiş satırlar. Sıra, tarih + geliş.
+    batch_onceki: dict[int, list[dict]] = {}
+    batch_sira = 0
 
-    def _ensure_aylik_cache(mid: int) -> None:
-        try:
-            from routes.giris_routes import (
-                _read_aylik_grid_cache_payload,
-                _upsert_aylik_grid_cache,
-            )
-            if not _read_aylik_grid_cache_payload(int(mid)):
-                _upsert_aylik_grid_cache(int(mid))
-        except Exception:
-            pass
-
-    def _aciklama_ve_aylik_dagitim(mid: int, tutar: float, ham: str) -> tuple[str, list[tuple[str, float]]]:
-        """Ham aciklama + FIFO → |AYLIK_TAH| + |AYLIK_PAY| (gerçek pay tutarları)."""
+    def _aciklama_ve_aylik_dagitim(mid: int, tutar: float, ham: str, tah_str: str) -> tuple[str, list[tuple[str, float]]]:
+        """Ham aciklama + ekstre FIFO → |AYLIK_TAH| + |AYLIK_PAY|."""
         text = (ham or "").strip() or "Banka tahsilat"
-        # Ham metinde zaten marker varsa dağıtımı yeniden hesaplama (elle müdahale).
         if "|AYLIK_TAH|" in text or "|AYLIK_PAY|" in text:
             return text, []
-        _ensure_aylik_cache(mid)
-        auto_isos, auto_pay_items = _auto_allocate_oldest_unpaid_months(mid, tutar)
+        auto_isos, auto_pay_items = _auto_allocate_oldest_unpaid_months(
+            mid,
+            tutar,
+            odeme_tarihi=tah_str,
+            ek_onceki=batch_onceki.get(mid),
+        )
         pay_items = list(auto_pay_items or [])
         if pay_items:
             text = _aciklama_with_aylik_markers(text, auto_isos or [iso for iso, _ in pay_items])
@@ -1390,7 +1385,7 @@ def api_akbank_tahsilat_commit():
                 continue
             # FIFO oldest unpaid → aciklama'ya TAH+PAY; panel ayrıca apply ile.
             try:
-                aciklama, pay_items = _aciklama_ve_aylik_dagitim(mid, round(tutar, 2), aciklama_ham)
+                aciklama, pay_items = _aciklama_ve_aylik_dagitim(mid, round(tutar, 2), aciklama_ham, tah_str)
             except Exception as ex:
                 aciklama, pay_items = aciklama_ham, []
                 hatalar.append(f"Ref {ref}: aylık panel dağıtımı atlandı ({ex}).")
@@ -1416,6 +1411,12 @@ def api_akbank_tahsilat_commit():
                 atlandi += 1
                 hatalar.append(f"Ref {ref}: tahsilat kaydı dönmedi.")
                 continue
+            batch_sira += 1
+            batch_onceki.setdefault(mid, []).append({
+                "tarih": tah_str,
+                "tutar": round(tutar, 2),
+                "id": 10**12 + batch_sira,
+            })
             eklendi += 1
             kayitlar.append({
                 "tahsilat_id": int(tid),
