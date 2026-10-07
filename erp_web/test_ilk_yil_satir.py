@@ -67,6 +67,10 @@ def main():
     routes = (ROOT / "routes" / "giris_routes.py").read_text(encoding="utf-8")
     check("backend ilk yil reddi duruyor", "İlk sözleşme yılı için reel tutar girilemez." in routes)
     check("backend grid ortmesi duruyor", "int(k) != y_start" in routes)
+    check("flat map ilk yil atlanir", "sozlesmelerReelDbIlkDonemYilMi(basStr, dy)" in html)
+    check("panel senkron ilk yil atlanir", "sozlesmelerReelDbIlkDonemYilMi(basStr, donemYil)" in html)
+    check("grid boya ilk yil atlanir", "sozlesmelerReelDbIlkDonemYilMi(basStr, yNum)" in html)
+    check("tam kapali kalan sarti", "eskiKalan <= tolRs && eskiTahsil + tolRs >= eskiBrut" in html)
     blok = "\n".join(_fn(html, n) for n in NAMES)
     harness = r"""
 const calls = [];

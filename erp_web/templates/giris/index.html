@@ -6556,6 +6556,32 @@ function _sozlesmelerReelDetayToStoredKdvDahil(detay, fallbackKdvDahil) {
 }
 
 /** DB reel → ay-key (Y-M) haritası; dönem yılı = yıldönümü başlangıç yılı (sozlesmeReelDonemAyKeys ile aynı). */
+function sozlesmelerReelDbBaslangicYili(basStr) {
+    if (!basStr) return NaN;
+    var bas = (typeof parseTarihStr === 'function') ? (parseTarihStr(String(basStr).trim()) || new Date(basStr)) : new Date(basStr);
+    if (!bas || isNaN(bas.getTime())) return NaN;
+    return bas.getFullYear();
+}
+function sozlesmelerReelDbIlkDonemYilMi(basStr, yil) {
+    var y0 = sozlesmelerReelDbBaslangicYili(basStr);
+    var yy = parseInt(yil, 10);
+    return !isNaN(y0) && !isNaN(yy) && yy === y0;
+}
+function sozlesmelerReelDbAyIlkDonemMi(basStr, ayKey) {
+    if (!basStr || ayKey == null || ayKey === '') return false;
+    var y0 = sozlesmelerReelDbBaslangicYili(basStr);
+    if (isNaN(y0) || typeof sozlesmeReelDonemAyKeys !== 'function') return false;
+    var keys = sozlesmeReelDonemAyKeys(basStr, y0) || [];
+    var ak = String(ayKey);
+    var nk = (typeof sozlesmeAylikAyKeyNormalize === 'function') ? sozlesmeAylikAyKeyNormalize(ak) : ak;
+    for (var iIlk = 0; iIlk < keys.length; iIlk++) {
+        var kIlk = String(keys[iIlk]);
+        if (kIlk === ak) return true;
+        var knIlk = (typeof sozlesmeAylikAyKeyNormalize === 'function') ? sozlesmeAylikAyKeyNormalize(kIlk) : kIlk;
+        if (nk && (knIlk === nk || kIlk === nk)) return true;
+    }
+    return false;
+}
 function sozlesmelerReelDbAyKeyFlatMap(basStr) {
     var map = window.__musteriReelDonemTutarlari || {};
     if (!basStr || !map || !Object.keys(map).length) return {};
@@ -6567,6 +6593,7 @@ function sozlesmelerReelDbAyKeyFlatMap(basStr) {
     Object.keys(map).forEach(function (yk) {
         var dy = parseInt(yk, 10);
         if (isNaN(dy)) return;
+        if (sozlesmelerReelDbIlkDonemYilMi(basStr, dy)) return;
         var tut = parseFloat(map[yk]);
         if (!isFinite(tut) || tut <= 0) return;
         tut = Math.round(tut * 100) / 100;
@@ -6654,6 +6681,7 @@ function sozlesmelerReelTahsilPanelSenkron() {
         Object.keys(map).forEach(function (yk) {
             var donemYil = parseInt(yk, 10);
             if (isNaN(donemYil)) return;
+            if (sozlesmelerReelDbIlkDonemYilMi(basStr, donemYil)) return;
             var tut = parseFloat(map[yk]);
             if (!isFinite(tut) || tut <= 0) return;
             tut = Math.round(tut * 100) / 100;
@@ -6671,9 +6699,16 @@ function sozlesmelerReelTahsilPanelSenkron() {
                 if (!d) continue;
                 var eskiBrut = parseFloat(d.aylik_tutar) || 0;
                 var eskiTahsil = Math.round((parseFloat(d.tahsil) || 0) * 100) / 100;
+                var eskiKalan = parseFloat(d.kalan);
                 var tolRs = 0.05;
+                if (!isFinite(eskiKalan) || eskiKalan < 0) {
+                    eskiKalan = Math.max(Math.round((eskiBrut - eskiTahsil) * 100) / 100, 0);
+                } else {
+                    eskiKalan = Math.round(eskiKalan * 100) / 100;
+                }
                 var tahReel;
-                if (eskiBrut > tolRs && eskiTahsil >= eskiBrut - tolRs) {
+                var tamKapali = eskiBrut > tolRs && eskiKalan <= tolRs && eskiTahsil + tolRs >= eskiBrut;
+                if (tamKapali) {
                     tahReel = tut;
                 } else {
                     tahReel = eskiTahsil;
@@ -6919,6 +6954,7 @@ function sozlesmelerReelKayitliTumYillariGridaUygula() {
     Object.keys(map).forEach(function (k) {
         var yNum = parseInt(k, 10);
         if (isNaN(yNum)) return;
+        if (sozlesmelerReelDbIlkDonemYilMi(basStr, yNum)) return;
         var t = parseFloat(map[k]);
         if (isNaN(t) || t < 0) return;
         _sozlesmelerReelYilSecimiGridAnlikUygula(yNum, t);
@@ -19940,14 +19976,43 @@ function girisTahsilatYilAyPanelAylikCanon(donemYil, ayKey) {
 function girisTahsilatYilAyPanelSatirNormalize(d, donemYil, ayKey) {
     if (!d) return d;
     var tol = Number(SOZLESME_TAM_ODENDI_TOLERANS) || 0.05;
+    var ilkDonemSatir = false;
+    try {
+        var basElNk = document.getElementById('sozlesme_baslangic');
+        var basStrNk = (basElNk && basElNk.value) ? String(basElNk.value).trim() : '';
+        if (!basStrNk && window.__sozlesmelerAylikSonCacheObj && window.__sozlesmelerAylikSonCacheObj.baslangic) {
+            basStrNk = String(window.__sozlesmelerAylikSonCacheObj.baslangic).trim();
+        }
+        if (basStrNk && typeof sozlesmelerReelDbAyIlkDonemMi === 'function' && sozlesmelerReelDbAyIlkDonemMi(basStrNk, ayKey)) {
+            ilkDonemSatir = true;
+        }
+    } catch (_eIlkNk) { ilkDonemSatir = false; }
+    if (ilkDonemSatir) {
+        var tahIlk = d.tahsil;
+        var kalanIlk = d.kalan;
+        var canonIlk = 0;
+        try { canonIlk = parseFloat(girisTahsilatYilAyPanelAylikCanon(donemYil, ayKey)); } catch (_eCanonIlk) { canonIlk = 0; }
+        if (isFinite(canonIlk) && canonIlk > tol) d.aylik_tutar = Math.round(canonIlk * 100) / 100;
+        d.tahsil = tahIlk;
+        d.kalan = kalanIlk;
+        if (d.__reel_db_aylik != null) d.__reel_db_aylik = null;
+        return d;
+    }
     if (d.__reel_db_aylik != null) {
         var rb = parseFloat(d.__reel_db_aylik);
         if (isFinite(rb) && rb > tol) {
             var yeniBrutRb = Math.round(rb * 100) / 100;
             var eskiBrutRb = parseFloat(d.aylik_tutar) || 0;
             var eskiTahsilRb = Math.round((parseFloat(d.tahsil) || 0) * 100) / 100;
+            var eskiKalanRb = parseFloat(d.kalan);
+            if (!isFinite(eskiKalanRb) || eskiKalanRb < 0) {
+                eskiKalanRb = Math.max(Math.round((eskiBrutRb - eskiTahsilRb) * 100) / 100, 0);
+            } else {
+                eskiKalanRb = Math.round(eskiKalanRb * 100) / 100;
+            }
             var tahRb;
-            if (eskiBrutRb > tol && eskiTahsilRb >= eskiBrutRb - tol) {
+            var tamKapaliRb = eskiBrutRb > tol && eskiKalanRb <= tol && eskiTahsilRb + tol >= eskiBrutRb;
+            if (tamKapaliRb) {
                 tahRb = yeniBrutRb;
             } else {
                 tahRb = eskiTahsilRb;
