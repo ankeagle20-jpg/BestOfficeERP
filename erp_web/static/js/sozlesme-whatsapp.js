@@ -29,6 +29,7 @@
       "#sozlesme-wa-ad{font-size:13px;}" +
       "#sozlesme-wa-tel{flex:1;min-width:140px;}" +
       "#sozlesme-wa-uyari{color:#ffcc80;margin:4px 0;}" +
+      "#sozlesme-wa-indir a{color:#80deea;}" +
       "#sozlesme-wa-yine{display:none;background:#6a4a12;}";
     document.head.appendChild(st);
   }
@@ -184,6 +185,26 @@
     }, POLL_MS);
   }
 
+  function pdfIndirGoster(j) {
+    var uyari = document.getElementById("sozlesme-wa-uyari");
+    var sonuc = document.getElementById("sozlesme-wa-sonuc");
+    var mesaj = document.getElementById("sozlesme-wa-mesaj");
+    var kutu = document.getElementById("sozlesme-wa-indir");
+    var a = document.getElementById("sozlesme-wa-indir-a");
+    if (mesaj && j && j.mesaj) mesaj.value = j.mesaj;
+    var uy = (j && j.uyari) || "PDF'yi indirip WhatsApp'a ekleyin";
+    if (j && j.qr) uy = (j.mesaj_qr || j.neden_yazi || "WhatsApp oturumu yenilenmeli (QR)") + " " + uy;
+    if (uyari) uyari.textContent = uy;
+    if (sonuc) sonuc.textContent = "";
+    var yol = j && j.indir ? String(j.indir) : "";
+    if (a && yol.indexOf("/faturalar/tahsilat-pdf/") === 0) {
+      a.href = yol;
+      a.textContent = "Makbuzu indir";
+      if (kutu) kutu.hidden = false;
+    }
+    yineGoster(false);
+  }
+
   function webAc(tel, mesaj) {
     var num = tel;
     if (typeof girisTelefonuWhatsAppRakam === "function") num = girisTelefonuWhatsAppRakam(tel) || tel;
@@ -216,24 +237,40 @@
     if (btn) btn.disabled = true;
     if (yine) yine.disabled = true;
     var suruyor = false;
-    fetch("/giris/api/sozlesme-whatsapp/gonder", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    var adres = "/giris/api/sozlesme-whatsapp/gonder";
+    var govde = {
+      musteri_id: acik.musteriId,
+      telefon: ham,
+      mesaj: metin,
+      buton: acik.buton,
+      onay: !!onay,
+      deneme: deneme
+    };
+    if (acik.tahsilatId) {
+      adres = "/giris/api/tahsilat-whatsapp/gonder";
+      govde = {
+        tahsilat_id: acik.tahsilatId,
         musteri_id: acik.musteriId,
         telefon: ham,
         mesaj: metin,
-        buton: acik.buton,
         onay: !!onay,
         deneme: deneme
-      })
+      };
+    }
+    fetch(adres, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(govde)
     }).then(function (r) {
       return r.json().then(function (j) { return { kod: r.status, j: j || {} }; }).catch(function () { return { kod: r.status, j: {} }; });
     }).then(function (paket) {
       if (!acik || acik.deneme !== deneme) return;
       var j = paket.j || {};
-      if (j.qr) {
+      if (acik.tahsilatId && (j.pdf_indir || j.geri_dus || j.qr)) {
+        if (j.qr) j.neden_yazi = j.mesaj && j.pdf_indir ? "WhatsApp oturumu yenilenmeli (QR)" : (j.mesaj || "WhatsApp oturumu yenilenmeli (QR)");
+        pdfIndirGoster(j);
+      } else if (j.qr) {
         if (uyari) uyari.textContent = j.mesaj || "WhatsApp oturumu yenilenmeli (QR)";
         if (sonuc) sonuc.textContent = "";
         yineGoster(false);
@@ -279,6 +316,7 @@
     acik = {
       buton: opts.buton === "makbuz" ? "makbuz" : "ust",
       musteriId: parseInt(opts.musteriId, 10) || 0,
+      tahsilatId: parseInt(opts.tahsilatId, 10) || 0,
       deneme: denemeUret()
     };
     var perde = document.createElement("div");
@@ -291,6 +329,7 @@
       '<input id="sozlesme-wa-tel" inputmode="tel" placeholder="Telefon"></div>' +
       '<label>Mesaj<textarea id="sozlesme-wa-mesaj" rows="6"></textarea></label>' +
       '<p id="sozlesme-wa-uyari"></p>' +
+      '<p id="sozlesme-wa-indir" hidden><a id="sozlesme-wa-indir-a" href="#"></a></p>' +
       '<p id="sozlesme-wa-sonuc"></p>' +
       '<div><button type="button" id="sozlesme-wa-gonder">Gönder</button>' +
       '<button type="button" id="sozlesme-wa-yine">Yine de gönder</button>' +
@@ -309,7 +348,10 @@
       gonder(true);
     };
     var mesaj = document.getElementById("sozlesme-wa-mesaj");
-    if (mesaj) mesaj.value = opts.mesaj || "";
+    if (mesaj) {
+      mesaj.value = opts.mesaj || "";
+      mesaj.addEventListener("input", function () { if (acik) acik.mesajDokunuldu = true; });
+    }
     var sec = document.getElementById("sozlesme-wa-sec");
     var telInp = document.getElementById("sozlesme-wa-tel");
     if (sec) sec.onchange = function () {
@@ -332,8 +374,129 @@
         })
         .catch(function () {});
     }
+    if (acik.tahsilatId) {
+      var tid = acik.tahsilatId;
+      fetch("/giris/api/tahsilat-whatsapp/hazir?tahsilat_id=" + encodeURIComponent(tid), { credentials: "same-origin" })
+        .then(function (r) { return r.json().then(function (j) { return j || {}; }).catch(function () { return {}; }); })
+        .then(function (j) {
+          if (!acik || acik.tahsilatId !== tid) return;
+          var kutu = document.getElementById("sozlesme-wa-mesaj");
+          if (kutu && !acik.mesajDokunuldu && j.mesaj) kutu.value = j.mesaj;
+          if (j.pdf_indir || j.qr) pdfIndirGoster(j);
+        })
+        .catch(function () {});
+    }
     perde.addEventListener("submit", function (ev) { ev.preventDefault(); });
   }
 
+  function onEkId(onEk) {
+    return onEk === "sozlesme" ? "sozlesme_tahsilat" : "giris_tahsilat";
+  }
+
+  var formlar = { giris: null, sozlesme: null };
+
+  function durumAl(onEk) {
+    var api = window.tahsilatWaDurum;
+    if (!api) return null;
+    if (!formlar[onEk]) formlar[onEk] = api.bos();
+    return formlar[onEk];
+  }
+
+  function dugme(onEk) {
+    return document.getElementById(onEk + "-tahsilat-wa");
+  }
+
+  function ciz(onEk) {
+    var b = dugme(onEk);
+    var s = formlar[onEk];
+    if (!b) return;
+    var acikMi = !!(s && s.aktif && s.tahsilatId);
+    b.disabled = !acikMi;
+    b.title = acikMi ? "" : "Önce makbuzu kaydedin";
+  }
+
+  function alanOku(onEk, ad) {
+    var el = document.getElementById(onEkId(onEk) + "_" + ad);
+    return el ? String(el.value || "") : "";
+  }
+
+  function tahsilatWaKayit(onEk, data, musteriId) {
+    var api = window.tahsilatWaDurum;
+    if (!api) return;
+    var id = parseInt(data && data.tahsilat_id, 10) || 0;
+    if (!id) {
+      formlar[onEk] = api.pasif(durumAl(onEk));
+      ciz(onEk);
+      return;
+    }
+    formlar[onEk] = api.kayit(durumAl(onEk), {
+      tahsilat_id: id,
+      makbuz_no: data.makbuz_no,
+      musteri_id: musteriId,
+      tutar: alanOku(onEk, "tutar"),
+      tarih: alanOku(onEk, "tarih"),
+      aciklama: alanOku(onEk, "aciklama")
+    });
+    ciz(onEk);
+  }
+
+  function tahsilatWaPasif(onEk) {
+    var api = window.tahsilatWaDurum;
+    if (!api) return;
+    formlar[onEk] = api.pasif(durumAl(onEk));
+    ciz(onEk);
+  }
+
+  function tahsilatWaMusteri(onEk, id) {
+    var api = window.tahsilatWaDurum;
+    if (!api) return;
+    formlar[onEk] = api.musteri(durumAl(onEk), id);
+    ciz(onEk);
+  }
+
+  function tahsilatWaAc(onEk) {
+    var s = formlar[onEk];
+    if (!s || !s.aktif || !(parseInt(s.tahsilatId, 10) > 0)) return;
+    var ph = document.getElementById(onEkId(onEk) + "_musteri_phone");
+    sozlesmeWhatsAppAc({
+      buton: "makbuz",
+      musteriId: s.musteriId,
+      tahsilatId: s.tahsilatId,
+      telefon: ph ? ph.value || "" : "",
+      mesaj: ""
+    });
+  }
+
+  function bagla() {
+    if (typeof document === "undefined") return;
+    if (!document.getElementById("tahsilat-wa-stil")) {
+      var st = document.createElement("style");
+      st.id = "tahsilat-wa-stil";
+      st.textContent = ".tahsilat-btn-whatsapp:disabled{opacity:.45;cursor:not-allowed;}";
+      if (document.head) document.head.appendChild(st);
+    }
+    ["giris", "sozlesme"].forEach(function (onEk) {
+      ciz(onEk);
+      ["tutar", "tarih", "aciklama"].forEach(function (ad) {
+        var el = document.getElementById(onEkId(onEk) + "_" + ad);
+        if (!el || el.getAttribute("data-wa-bag")) return;
+        el.setAttribute("data-wa-bag", "1");
+        var degisti = function () {
+          var api = window.tahsilatWaDurum;
+          if (!api) return;
+          formlar[onEk] = api.alan(durumAl(onEk), ad, el.value);
+          ciz(onEk);
+        };
+        el.addEventListener("input", degisti);
+        el.addEventListener("change", degisti);
+      });
+    });
+  }
+
   window.sozlesmeWhatsAppAc = sozlesmeWhatsAppAc;
+  window.tahsilatWaKayit = tahsilatWaKayit;
+  window.tahsilatWaPasif = tahsilatWaPasif;
+  window.tahsilatWaMusteri = tahsilatWaMusteri;
+  window.tahsilatWaAc = tahsilatWaAc;
+  bagla();
 })();

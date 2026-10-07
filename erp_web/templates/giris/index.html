@@ -3552,7 +3552,7 @@ button.auto-btn.whatsapp-hizmet-filter-btn.wa-hizmet-aktif {
                         <button type="button" class="tahsilat-btn-onizle" onclick="girisTahsilatOnizle(); return false;"><i class="fa fa-eye"></i> Önizle</button>
                         <button type="button" class="tahsilat-btn-yazdir" onclick="girisTahsilatYazdir(); return false;"><i class="fa fa-print"></i> Yazdır</button>
                         <button type="button" class="tahsilat-btn-pdf" onclick="girisTahsilatPdfIndir(); return false;"><i class="fa fa-file-pdf-o"></i> PDF İndir</button>
-                        <button type="button" class="tahsilat-btn-whatsapp" onclick="girisTahsilatWhatsApp(); return false;"><i class="fa fa-whatsapp"></i> WhatsApp</button>
+                        <button type="button" class="tahsilat-btn-whatsapp" id="giris-tahsilat-wa" disabled title="Önce makbuzu kaydedin" onclick="girisTahsilatWhatsApp(); return false;"><i class="fa fa-whatsapp"></i> WhatsApp</button>
                     </div>
                 </form>
             </div>
@@ -4395,7 +4395,7 @@ button.auto-btn.whatsapp-hizmet-filter-btn.wa-hizmet-aktif {
                                 <button type="button" class="tahsilat-btn-onizle" onclick="sozlesmeTahsilatOnizle(); return false;"><i class="fa fa-eye"></i> Önizle</button>
                                 <button type="button" class="tahsilat-btn-yazdir" onclick="sozlesmeTahsilatYazdir(); return false;"><i class="fa fa-print"></i> Yazdır</button>
                                 <button type="button" class="tahsilat-btn-pdf" onclick="sozlesmeTahsilatPdfIndir(); return false;"><i class="fa fa-file-pdf-o"></i> PDF İndir</button>
-                                <button type="button" class="tahsilat-btn-whatsapp" onclick="sozlesmeTahsilatWhatsApp(); return false;"><i class="fa fa-whatsapp"></i> WhatsApp</button>
+                                <button type="button" class="tahsilat-btn-whatsapp" id="sozlesme-tahsilat-wa" disabled title="Önce makbuzu kaydedin" onclick="sozlesmeTahsilatWhatsApp(); return false;"><i class="fa fa-whatsapp"></i> WhatsApp</button>
                             </div>
                         </form>
                     </div>
@@ -25155,6 +25155,7 @@ function selectMusteri(id) {
 /** Tahsilat makbuzu: müşteri id / ad / telefon (Giriş sekmesindeki seçimle aynı). */
 function girisTahsilatFormunuMusteriyleDoldur(m) {
     if (!m || m.id == null || m.id === '') return;
+    if (window.tahsilatWaMusteri) tahsilatWaMusteri('giris', m.id);
     try { sozlesmeAylikSecimiTemizle(); } catch (_eSelClrMid) {}
     tahsilatTutarDokunduSifirla('giris_tahsilat');
     var mid = document.getElementById('giris_tahsilat_musteri_id');
@@ -25389,6 +25390,7 @@ function fillSozlesmeTahsilatMusteri(id, musteri) {
 /** Sözleşmeler sağ panel tahsilat: seçili müşteriyi forma yazar (Giriş Tahsilat ile aynı mantık). */
 function sozlesmeTahsilatFormunuSeciliMusteridenDoldur() {
     if (!selectedId) return;
+    if (window.tahsilatWaMusteri) tahsilatWaMusteri('sozlesme', selectedId);
     var nameEl = document.getElementById('name');
     var ad = (nameEl && nameEl.value) ? nameEl.value.trim() : '';
     if (!ad) {
@@ -30902,6 +30904,7 @@ function girisTahsilatMakbuzKaydet() {
             try { sozlesmeAylikSecimiTemizle(); } catch (_eSelClrOk) {}
             if (data.makbuz_no != null) tahsilatMakbuzNoSet('giris_tahsilat', data.makbuz_no);
             tahsilatMakbuzNoYukle('giris_tahsilat');
+            if (window.tahsilatWaKayit) tahsilatWaKayit('giris', data, payload.musteri_id);
             sozlesmeAylikZorlaBorcTemizle();
             sozlesmeAylikYilFiltresiniSaglamlastir();
             var midInv = document.getElementById('giris_tahsilat_musteri_id').value;
@@ -31211,6 +31214,7 @@ function girisTahsilatYazdir() {
 }
 
 function girisTahsilatIptal() {
+    if (window.tahsilatWaPasif) tahsilatWaPasif('giris');
     tahsilatTutarDokunduSifirla('giris_tahsilat');
     tahsilMakbuzDuzenleModuTemizle('giris_tahsilat');
     document.getElementById('giris_tahsilat_musteri_id').value = '';
@@ -31249,13 +31253,7 @@ function girisTahsilatPdfIndir() {
 }
 
 function girisTahsilatWhatsApp() {
-    var payload = girisTahsilatFormPayload();
-    if (!payload.musteri_id && !payload.musteri_adi) { alert('Lütfen müşteri seçiniz.'); return; }
-    if (payload.tutar <= 0) { alert('Geçerli bir tutar giriniz.'); return; }
-    var num = girisTelefonuWhatsAppRakam(document.getElementById('giris_tahsilat_musteri_phone').value || '');
-    var adi = (document.getElementById('giris_tahsilat_musteri_secilen').textContent || payload.musteri_adi || 'Müşteri').trim();
-    var metin = 'Sayın ' + adi + ',\n\nTahsilat makbuzunuz ekte yer almaktadır. İncelemenizi rica ederiz.\n\nİyi günler dileriz.\nBESTOFFICE';
-    bestOfficeWhatsAppWebAc(num, metin);
+    if (window.tahsilatWaAc) tahsilatWaAc('giris');
 }
 
 function girisTahsilatKaydet(e) {
@@ -31427,6 +31425,7 @@ function sozlesmeTahsilatKaydet() {
             tahsilatAylikDagitimCacheGuncelle(data);
             if (data.makbuz_no != null) tahsilatMakbuzNoSet('sozlesme_tahsilat', data.makbuz_no);
             tahsilatMakbuzNoYukle('sozlesme_tahsilat');
+            if (window.tahsilatWaKayit) tahsilatWaKayit('sozlesme', data, payload.musteri_id);
             sozlesmeAylikZorlaBorcTemizle();
             sozlesmeAylikYilFiltresiTumYillar();
             function makbuzSonrasiGrid(panelKayitOk) {
@@ -31572,6 +31571,7 @@ function sozlesmeTahsilatYazdir() {
 }
 
 function sozlesmeTahsilatIptal() {
+    if (window.tahsilatWaPasif) tahsilatWaPasif('sozlesme');
     tahsilatTutarDokunduSifirla('sozlesme_tahsilat');
     tahsilMakbuzDuzenleModuTemizle('sozlesme_tahsilat');
     document.getElementById('sozlesme_tahsilat_musteri_id').value = '';
@@ -31611,18 +31611,7 @@ function sozlesmeTahsilatPdfIndir() {
 }
 
 function sozlesmeTahsilatWhatsApp() {
-    var payload = sozlesmeTahsilatFormPayload();
-    if (!payload.musteri_id && !payload.musteri_adi) { alert('Lütfen müşteri seçiniz.'); return; }
-    if (payload.tutar <= 0) { alert('Geçerli bir tutar giriniz.'); return; }
-    var tel = document.getElementById('sozlesme_tahsilat_musteri_phone').value || '';
-    var adi = (document.getElementById('sozlesme_tahsilat_musteri_secilen').textContent || payload.musteri_adi || 'Müşteri').trim();
-    var metin = 'Sayın ' + adi + ',\n\nTahsilat makbuzunuz hazırdır. İncelemenizi rica ederiz.\n\nİyi günler dileriz.\nBESTOFFICE';
-    var mid = parseInt(payload.musteri_id, 10) || 0;
-    if (typeof sozlesmeWhatsAppAc === 'function') {
-        sozlesmeWhatsAppAc({ buton: 'makbuz', musteriId: mid, telefon: tel, ad: adi, mesaj: metin });
-        return;
-    }
-    bestOfficeWhatsAppWebAc(girisTelefonuWhatsAppRakam(tel), metin);
+    if (window.tahsilatWaAc) tahsilatWaAc('sozlesme');
 }
 
 function sozlesmeTahsilatMusteriListesiGetir(q) {
@@ -34040,5 +34029,6 @@ async function kiraBildirgesiWhatsApp() {
 }
 
 </script>
+<script src="{{ url_for('static', filename='js/tahsilat-wa-durum.js', v=tahsilat_wa_js_surum) }}"></script>
 <script src="{{ url_for('static', filename='js/sozlesme-whatsapp.js', v=sozlesme_wa_js_surum) }}"></script>
 {% endblock %}

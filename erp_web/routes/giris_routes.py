@@ -3881,19 +3881,23 @@ def index():
         link_acik = False
     js_surum = ""
     wa_surum = ""
+    tahsilat_wa_surum = ""
     try:
         kok = os.path.join(os.path.dirname(__file__), "..", "static", "js")
         js_surum = str(int(os.path.getmtime(os.path.join(kok, "odeme-linki.js"))))
         wa_surum = str(int(os.path.getmtime(os.path.join(kok, "sozlesme-whatsapp.js"))))
+        tahsilat_wa_surum = str(int(os.path.getmtime(os.path.join(kok, "tahsilat-wa-durum.js"))))
     except Exception:
         js_surum = js_surum or ""
         wa_surum = wa_surum or ""
+        tahsilat_wa_surum = tahsilat_wa_surum or ""
     return render_template(
         'giris/index.html',
         embed=embed,
         odeme_linki_acik=link_acik,
         odeme_linki_js_surum=js_surum,
         sozlesme_wa_js_surum=wa_surum,
+        tahsilat_wa_js_surum=tahsilat_wa_surum,
     )
 
 

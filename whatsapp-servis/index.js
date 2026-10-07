@@ -3,9 +3,9 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const QRCode = require('qrcode');
-const { Client, LocalAuth } = require('whatsapp-web.js');
+const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const { idleKapanirMi, tekUcus } = require('./oturum-kural');
-const { kalemEkle } = require('./kuyruk-kural');
+const { kalemEkle, gonderGovde } = require('./kuyruk-kural');
 
 const WA_LOG_PATH = path.join(__dirname, 'wa-servis.log');
 
@@ -275,22 +275,30 @@ async function kuyrukIsle(session) {
       item.durum = 'gonderiliyor';
       const phone = normalizeTelefon(item.telefon);
       const message = String(item.mesaj || '').trim();
-      if (!phone || !message) {
-        item._sonuc = { ok: false, error: 'telefon veya mesaj geçersiz' };
-        item.durum = 'basarisiz';
-        continue;
-      }
-      const chatId = phone.endsWith('@c.us') ? phone : `${phone}@c.us`;
+      let beklenir = false;
       try {
-        const result = await session.client.sendMessage(chatId, message);
-        item._sonuc = { ok: true, id: result && result.id ? result.id._serialized || null : null };
-        item.durum = 'gonderildi';
-        console.log(`[WA:${session.tenantId}] Kuyruk gönderildi`);
+        if (!phone || !message) {
+          item._sonuc = { ok: false, error: 'telefon veya mesaj geçersiz' };
+          item.durum = 'basarisiz';
+        } else {
+          beklenir = true;
+          const chatId = phone.endsWith('@c.us') ? phone : `${phone}@c.us`;
+          const result = await gonderGovde(item, (icerik, opts) => {
+            if (opts) return session.client.sendMessage(chatId, icerik, opts);
+            return session.client.sendMessage(chatId, icerik);
+          }, (mime, veri, ad) => new MessageMedia(mime, veri, ad));
+          item._sonuc = { ok: true, id: result && result.id ? result.id._serialized || null : null };
+          item.durum = 'gonderildi';
+          console.log(`[WA:${session.tenantId}] Kuyruk gönderildi`);
+        }
       } catch (err) {
         item._sonuc = { ok: false, error: err.message || String(err) };
         item.durum = 'basarisiz';
         console.error(`[WA:${session.tenantId}] Kuyruk gönderim hatası:`, err);
+      } finally {
+        item.ek = null;
       }
+      if (!beklenir) continue;
       const minBekleme = 20000;
       const maxBekleme = 60000;
       const rastgeleBekleme = minBekleme + Math.floor(Math.random() * (maxBekleme - minBekleme));
