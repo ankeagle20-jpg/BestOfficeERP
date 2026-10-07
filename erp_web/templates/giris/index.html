@@ -21623,10 +21623,64 @@ function girisAylikSatirAnaDegerOku() {
     if (isNaN(bk)) bk = 0;
     return { aylik: ak, nakit: nt, banka: bk };
 }
+function girisAylikSatirIlkYilMi(y) {
+    var yStart = (typeof girisAylikSatirBaslangicYili === 'function') ? girisAylikSatirBaslangicYili() : NaN;
+    var yy = parseInt(y, 10);
+    return !isNaN(yStart) && !isNaN(yy) && yy === yStart;
+}
+function girisAylikSatirIlkYilKartHesap() {
+    var main = (typeof girisAylikSatirAnaDegerOku === 'function') ? girisAylikSatirAnaDegerOku() : { aylik: 0, nakit: 0, banka: 0 };
+    var kdvEl = document.getElementById('kdv_oran');
+    var kdvOran = (kdvEl && kdvEl.value !== '') ? parseFloat(String(kdvEl.value).replace(',', '.')) : 20;
+    if (isNaN(kdvOran) || kdvOran < 0) kdvOran = 20;
+    var kdvMult = 1 + kdvOran / 100;
+    var aylik = (!isNaN(main.aylik) && main.aylik > 0) ? Math.round(main.aylik * 100) / 100 : 0;
+    var nakit = 0;
+    var banka = 0;
+    var kdvDahil = 0;
+    var toplam = 0;
+    var karma = (typeof girisKiraKarmaPaylariOkuma === 'function') ? girisKiraKarmaPaylariOkuma() : null;
+    if (karma && karma.split && karma.total > 0) {
+        nakit = Math.round(karma.total * karma.rN * 100) / 100;
+        var banPay = Math.round((karma.total - nakit) * 100) / 100;
+        banka = banPay > 0 ? Math.round(banPay * kdvMult * 100) / 100 : 0;
+        kdvDahil = banka;
+        toplam = Math.round((nakit + kdvDahil) * 100) / 100;
+        aylik = Math.round(karma.total * 100) / 100;
+    } else if (typeof kiraNakitMi === 'function' && kiraNakitMi()) {
+        nakit = aylik;
+        toplam = aylik;
+    } else {
+        banka = aylik > 0 ? Math.round(aylik * kdvMult * 100) / 100 : 0;
+        kdvDahil = banka;
+        toplam = banka;
+    }
+    var reel = toplam > 0 ? toplam : aylik;
+    return {
+        aylik: aylik,
+        nakit: nakit,
+        banka: banka,
+        kdv_dahil: kdvDahil,
+        toplam: toplam,
+        reel: reel
+    };
+}
 function girisAylikSatirYilHesapla(y) {
     window.__aylikSatirYilDetay = window.__aylikSatirYilDetay || {};
     var k = String(y);
     var row = window.__aylikSatirYilDetay[k] || {};
+    if (typeof girisAylikSatirIlkYilMi === 'function' && girisAylikSatirIlkYilMi(y)) {
+        var kart = girisAylikSatirIlkYilKartHesap();
+        window.__aylikSatirYilDetay[k] = Object.assign({}, row, kart, {
+            __reel_aktif: false,
+            __manual_saved: false,
+            __manual_aylik: false,
+            __ilk_yil_kart: true,
+            __locked: true
+        });
+        delete window.__aylikSatirYilDetay[k].__aylik_brut_kdv;
+        return window.__aylikSatirYilDetay[k];
+    }
     var nakit = parseFloat(row.nakit); if (isNaN(nakit) || nakit < 0) nakit = 0;
     var reel = parseFloat(row.reel); if (isNaN(reel) || reel < 0) reel = 0;
     var reelAktif = !!row.__reel_aktif;
@@ -21768,6 +21822,10 @@ function girisAylikSatirYilReelAktifDegisti(y, aktif) {
     if ((window.__aylikSatirYilAcik || {})[k]) girisAylikSatirYilAyPanelGuncelle(y);
 }
 function girisAylikSatirYilReelGoster(y) {
+    if (typeof girisAylikSatirIlkYilMi === 'function' && girisAylikSatirIlkYilMi(y)) {
+        var kartG = girisAylikSatirIlkYilKartHesap();
+        return kartG.reel > 0 ? kartG.reel : 0;
+    }
     var k = String(y);
     var row = (window.__aylikSatirYilDetay || {})[k] || {};
     var r = parseFloat(row.reel);
@@ -22207,6 +22265,7 @@ function girisAylikSatirYilKayitDbdenUygula() {
     Object.keys(map).forEach(function (k) {
         var yy = parseInt(k, 10);
         if (isNaN(yy)) return;
+        if (typeof girisAylikSatirIlkYilMi === 'function' && girisAylikSatirIlkYilMi(yy)) return;
         var t = parseFloat(map[k]);
         if (isNaN(t) || t <= 0) return;
         var cur = window.__aylikSatirYilDetay[String(yy)] || {};
@@ -22239,6 +22298,7 @@ function girisAylikSatirYilKayitYukle() {
                     Object.keys(obj).forEach(function (k) {
                         var v = obj[k];
                         if (!v || typeof v !== 'object') return;
+                        if (typeof girisAylikSatirIlkYilMi === 'function' && girisAylikSatirIlkYilMi(k)) return;
                         var cur = window.__aylikSatirYilDetay[k] || {};
                         cur.aylik = parseFloat(v.aylik) || 0;
                         cur.nakit = parseFloat(v.nakit) || 0;
@@ -22274,6 +22334,9 @@ function girisAylikSatirYilKaydetTutarAl(y) {
     return Math.round(t * 100) / 100;
 }
 function girisAylikSatirYilDbKaydetTek(y) {
+    if (typeof girisAylikSatirIlkYilMi === 'function' && girisAylikSatirIlkYilMi(y)) {
+        return Promise.resolve({ ok: true, atlandi: true });
+    }
     var mid = (typeof selectedId !== 'undefined' && selectedId != null) ? String(selectedId) : '';
     if (!mid) return Promise.reject(new Error('Önce müşteri seçin.'));
     var t = girisAylikSatirYilKaydetTutarAl(y);
@@ -22299,6 +22362,9 @@ function girisAylikSatirYilDbKaydetTek(y) {
     });
 }
 function girisAylikSatirYilDbSilTek(y) {
+    if (typeof girisAylikSatirIlkYilMi === 'function' && girisAylikSatirIlkYilMi(y)) {
+        return Promise.resolve({ ok: true, atlandi: true });
+    }
     var mid = (typeof selectedId !== 'undefined' && selectedId != null) ? String(selectedId) : '';
     if (!mid) return Promise.reject(new Error('Önce müşteri seçin.'));
     var fetchFn = (typeof girisFetchAgKopmasinaKarsi === 'function') ? girisFetchAgKopmasinaKarsi : function (u, o) { return fetch(u, o); };
@@ -22415,17 +22481,22 @@ function girisAylikSatirYilDomOku(y) {
 }
 function girisAylikSatirYilSatirKilitUygula(p, locked) {
     if (!p) return;
+    var yilKilit = String(p.id || '').replace('aylik_yil_row_', '');
+    var ilkKilit = (typeof girisAylikSatirIlkYilMi === 'function') && girisAylikSatirIlkYilMi(yilKilit);
     var pairs = [['aylik-yil-aylik'], ['aylik-yil-nakit'], ['aylik-yil-reel']];
     for (var i = 0; i < pairs.length; i++) {
         var el = p.querySelector('.' + pairs[i][0]);
         if (!el) continue;
-        el.readOnly = !!locked;
-        el.style.background = locked ? '#10293d' : '#0f2537';
+        var kilitli = !!locked || ilkKilit;
+        el.readOnly = kilitli;
+        el.style.background = kilitli ? '#10293d' : '#0f2537';
+        if (ilkKilit && pairs[i][0] === 'aylik-yil-reel') el.title = 'İlk yıl sözleşme tutarından';
     }
     var chk = p.querySelector('.aylik-yil-reel-aktif');
-    if (chk) chk.disabled = !!locked;
+    if (chk) chk.disabled = !!locked || ilkKilit;
 }
 async function girisAylikSatirYilReelSilDirekt(y) {
+    if (typeof girisAylikSatirIlkYilMi === 'function' && girisAylikSatirIlkYilMi(y)) return;
     if (!confirm(y + ' reel tutarı silinsin mi?')) return;
     var mid = String(selectedId || '');
     var r = await fetch('/giris/api/reel-donem-tutar', {
@@ -22524,6 +22595,7 @@ function girisAylikSatirYilReelTemizleVeKaydet(y) {
     girisAylikSatirYilKaydet(y);
 }
 function girisAylikSatirYilDuzenle(y) {
+    if (typeof girisAylikSatirIlkYilMi === 'function' && girisAylikSatirIlkYilMi(y)) return;
     window.__aylikSatirYilDetay = window.__aylikSatirYilDetay || {};
     var k = String(y);
     var cur = girisAylikSatirYilDomOku(y);
@@ -22612,6 +22684,7 @@ function girisAylikSatirYilEkstreSenkron() {
     cariEkstreYukle({ sessiz: true });
 }
 function girisAylikSatirYilSil(y) {
+    if (typeof girisAylikSatirIlkYilMi === 'function' && girisAylikSatirIlkYilMi(y)) return;
     var k = String(y);
     var yy = parseInt(y, 10);
     var mid = (typeof selectedId !== 'undefined' && selectedId != null) ? String(selectedId) : '';
@@ -22644,6 +22717,7 @@ function girisAylikSatirYilSil(y) {
     });
 }
 function girisAylikSatirYilKaydet(y) {
+    if (typeof girisAylikSatirIlkYilMi === 'function' && girisAylikSatirIlkYilMi(y)) return;
     window.__aylikSatirYilDetay = window.__aylikSatirYilDetay || {};
     var k = String(y);
     var midKay = (typeof selectedId !== 'undefined' && selectedId != null) ? String(selectedId) : '';
@@ -22763,7 +22837,9 @@ function girisAylikSatirYilAyVarsayilan(donemYil) {
         nakit: h.nakit || 0,
         banka: h.banka || 0,
         reel: reel || 0,
-        __reel_aktif: reel > 0 ? true : !!rowY.__reel_aktif
+        __reel_aktif: (typeof girisAylikSatirIlkYilMi === 'function' && girisAylikSatirIlkYilMi(donemYil))
+            ? false
+            : (reel > 0 ? true : !!rowY.__reel_aktif)
     };
 }
 function girisAylikSatirYilAyHesapla(donemYil, d) {
@@ -23191,13 +23267,28 @@ function girisAylikSatirYilPanelDoldur() {
             }
         }
         var row0 = window.__aylikSatirYilDetay[ov] || {};
-        /* Aşama 3: Reel sütunu yalnızca gerçek DB map (__musteriReelDonemDbMap). */
+        var ilkYilSatir = (typeof girisAylikSatirIlkYilMi === 'function') && girisAylikSatirIlkYilMi(yy);
+        /* Aşama 3: Reel sütunu yalnızca gerçek DB map (__musteriReelDonemDbMap). İlk yıl karttan. */
         var dbMap = (window.__musteriReelDonemDbMap && typeof window.__musteriReelDonemDbMap === 'object')
             ? window.__musteriReelDonemDbMap : {};
         var dbReel = parseFloat(dbMap[ov] != null ? dbMap[ov] : dbMap[yy]);
-        var hasDbReel = !isNaN(dbReel) && dbReel > 0;
+        var hasDbReel = !ilkYilSatir && !isNaN(dbReel) && dbReel > 0;
         var reelG = 0;
-        if (hasDbReel) {
+        if (ilkYilSatir) {
+            var kart0 = girisAylikSatirIlkYilKartHesap();
+            row0.aylik = kart0.aylik;
+            row0.nakit = kart0.nakit;
+            row0.banka = kart0.banka;
+            row0.kdv_dahil = kart0.kdv_dahil;
+            row0.toplam = kart0.toplam;
+            row0.reel = kart0.reel;
+            row0.__reel_aktif = false;
+            row0.__manual_saved = false;
+            row0.__manual_aylik = false;
+            row0.__ilk_yil_kart = true;
+            delete row0.__aylik_brut_kdv;
+            reelG = kart0.reel > 0 ? kart0.reel : 0;
+        } else if (hasDbReel) {
             reelG = dbReel;
             row0.__reel_aktif = true;
             row0.reel = dbReel;
@@ -23209,9 +23300,13 @@ function girisAylikSatirYilPanelDoldur() {
         window.__aylikSatirYilDetay[ov] = row0;
         var reelAktif = !!hasDbReel;
         var h = girisAylikSatirYilHesapla(yy);
-        var kayitli = !!(window.__aylikSatirYilDetay[ov] && window.__aylikSatirYilDetay[ov].__manual_saved);
-        var kayitliReel = kayitli && reelG > 0;
-        var locked = kayitli && row0.__locked !== false;
+        if (ilkYilSatir) {
+            reelG = h.reel > 0 ? h.reel : reelG;
+            reelAktif = false;
+        }
+        var kayitli = ilkYilSatir ? false : !!(window.__aylikSatirYilDetay[ov] && window.__aylikSatirYilDetay[ov].__manual_saved);
+        var kayitliReel = !ilkYilSatir && kayitli && reelG > 0;
+        var locked = ilkYilSatir || (kayitli && row0.__locked !== false);
         var roInp = locked ? ' readonly' : '';
         var stInp = locked ? ' background:#10293d;' : ' background:#0f2537;';
         var acikY = !!(window.__aylikSatirYilAcik || {})[ov];
@@ -23224,7 +23319,7 @@ function girisAylikSatirYilPanelDoldur() {
             '<input type="number" step="0.01" min="0" class="aylik-yil-nakit" value="' + (h.nakit || '') + '"' + roInp + ' oninput="girisAylikSatirYilSatirDegisti(' + ov + ',\'nakit\',this.value)" style="padding:4px 6px;border-radius:4px;border:1px solid #2d4060;' + stInp + 'color:#e0f7fa;">' +
             '<input type="number" step="0.01" min="0" class="aylik-yil-banka" value="' + (h.banka || '') + '" readonly style="padding:4px 6px;border-radius:4px;border:1px solid #2d4060;background:#10293d;color:#e0f7fa;">' +
             '<div style="display:flex;align-items:center;gap:4px;min-width:0;">' +
-            '<input type="number" step="0.01" min="0" class="aylik-yil-reel" value="' + (reelG > 0 ? reelG : '') + '" title="KDV dahil reel tutar (işaretli satırda Toplam = reel)"' + roInp + ' oninput="girisAylikSatirYilSatirDegisti(' + ov + ',\'reel\',this.value)" style="flex:1;min-width:0;padding:4px 6px;border-radius:4px;border:1px solid #2d4060;' + stInp + 'color:#e0f7fa;">' +
+            '<input type="number" step="0.01" min="0" class="aylik-yil-reel" value="' + (reelG > 0 ? reelG : '') + '" title="' + (ilkYilSatir ? 'İlk yıl sözleşme tutarından' : 'KDV dahil reel tutar (işaretli satırda Toplam = reel)') + '"' + roInp + ' oninput="girisAylikSatirYilSatirDegisti(' + ov + ',\'reel\',this.value)" style="flex:1;min-width:0;padding:4px 6px;border-radius:4px;border:1px solid #2d4060;' + stInp + 'color:#e0f7fa;">' +
             '<input type="checkbox" class="aylik-yil-reel-aktif" title="Toplam, KDV dahil, banka ve aylık (net) reel tutara göre"' + (reelAktif ? ' checked' : '') + (locked ? ' disabled' : '') + ' onchange="girisAylikSatirYilReelAktifDegisti(' + ov + ', this.checked)" style="flex-shrink:0;cursor:pointer;">' +
             '</div>' +
             '<div style="display:flex;gap:4px;flex-wrap:nowrap;">' +
