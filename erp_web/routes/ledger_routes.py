@@ -155,42 +155,6 @@ def _ledger_party_quota_block_message() -> str | None:
     return None
 
 
-def _ledger_register_arial():
-    """Faturalar PDF ile aynı Arial kayıt deseni (Türkçe glyph)."""
-    if getattr(_ledger_register_arial, "_done", False):
-        return
-    from reportlab.pdfbase import pdfmetrics  # lazy: boot RSS
-    from reportlab.pdfbase.ttfonts import TTFont
-
-    try:
-        from routes.faturalar_routes import _register_arial
-
-        _register_arial()
-        _ledger_register_arial._done = True
-        return
-    except Exception:
-        pass
-    win = os.environ.get("WINDIR") or os.environ.get("SystemRoot") or "C:\\Windows"
-    fonts_dir = os.path.join(win, "Fonts")
-    for f in ("arial.ttf", "Arial.ttf", "ARIAL.TTF"):
-        p = os.path.join(fonts_dir, f)
-        if os.path.isfile(p):
-            try:
-                pdfmetrics.registerFont(TTFont("Arial", p))
-                break
-            except Exception:
-                pass
-    for f in ("arialbd.ttf", "Arial Bold.ttf"):
-        p = os.path.join(fonts_dir, f)
-        if os.path.isfile(p):
-            try:
-                pdfmetrics.registerFont(TTFont("Arial-Bold", p))
-                break
-            except Exception:
-                pass
-    _ledger_register_arial._done = True
-
-
 bp = Blueprint("ledger", __name__)
 
 _CURRENCY_RE = re.compile(r"^[A-Z]{3}$")
@@ -1443,21 +1407,17 @@ def _build_statement_pdf(stmt: dict) -> bytes:
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import mm
     from reportlab.lib.utils import ImageReader
-    from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfgen import canvas
     from reportlab.platypus import Table, TableStyle
+    from pdf_fonts import FONT, FONT_BOLD, ensure_registered
 
-    _ledger_register_arial()
-    font = "Arial" if "Arial" in pdfmetrics.getRegisteredFontNames() else "Helvetica"
-    font_b = (
-        "Arial-Bold"
-        if "Arial-Bold" in pdfmetrics.getRegisteredFontNames()
-        else ("Helvetica-Bold" if font == "Helvetica" else font)
-    )
+    ensure_registered()
+    font = FONT
+    font_b = FONT_BOLD
 
     buf = io.BytesIO()
     w, h = A4
-    c = canvas.Canvas(buf, pagesize=A4)
+    c = canvas.Canvas(buf, pagesize=A4, initialFontName=font, initialFontSize=10)
     c.setPageCompression(0)
     c.setTitle("Payafin Cari Ekstre")
 
@@ -1567,7 +1527,7 @@ def _build_statement_pdf(stmt: dict) -> bytes:
     y = y - th - 8 * mm
 
     # Makine-okunur satır izi
-    c.setFont("Helvetica", 7)
+    c.setFont(font, 7)
     tx_only = [ln for ln in stmt_lines if ln.get("row_type") == "tx"]
     for i, ln in enumerate(tx_only):
         marker = (
@@ -1580,8 +1540,8 @@ def _build_statement_pdf(stmt: dict) -> bytes:
         if y < 28 * mm:
             c.showPage()
             y = h - 20 * mm
-            c.setFont("Helvetica", 7)
-    c.setFont("Helvetica", 7)
+            c.setFont(font, 7)
+    c.setFont(font, 7)
     c.drawString(15 * mm, y, f"LEDGER_STMT_ROWS={int(stmt.get('row_count') or 0)}")
     y -= 4 * mm
     c.drawString(15 * mm, y, f"LEDGER_STMT_LINES={int(stmt.get('line_count') or 0)}")

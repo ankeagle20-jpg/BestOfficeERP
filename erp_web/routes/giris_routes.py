@@ -166,31 +166,6 @@ def _tahsil_row_ekstre_eslesme_ay_iso(r: dict) -> str | None:
     return None
 
 
-def _register_arial():
-    """Türkçe karakter için Arial veya alternatif font kaydet."""
-    if getattr(_register_arial, "_done", False):
-        return
-    from reportlab.pdfbase import pdfmetrics  # lazy: boot RSS
-    from reportlab.pdfbase.ttfonts import TTFont
-
-    candidates = []
-    win = os.environ.get("WINDIR") or os.environ.get("SystemRoot") or "C:\\Windows"
-    for f in ("arial.ttf", "Arial.ttf", "ARIAL.TTF"):
-        candidates.append(os.path.join(win, "Fonts", f))
-    candidates.extend([
-        "/usr/share/fonts/truetype/msttcorefonts/Arial.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    ])
-    for path in candidates:
-        if path and os.path.isfile(path):
-            try:
-                pdfmetrics.registerFont(TTFont("Arial", path))
-                _register_arial._done = True
-                return
-            except Exception:
-                pass
-    _register_arial._done = True
-
 bp = Blueprint('giris', __name__)
 
 @bp.route('/api/tahsilat-personeller')
@@ -6762,22 +6737,22 @@ def build_kira_bildirgesi_pdf(
     hibrit_nakit_pay=None,
     hibrit_banka_net=None,
 ):
-    """Kira bildirgesi mektubu A4 PDF (bestoffice / Ofisbir). Arial ile Türkçe karakter desteği.
+    """Kira bildirgesi mektubu A4 PDF (bestoffice / Ofisbir). Liberation Sans.
     hizmet_turu: yalnızca sanal_ofis -> yıllık kira ibaresi; diğerlerinde aylık net + KDV dahil.
     Hibrit: nakit payı KDV dışı, banka net payı üzerinden KDV — toplam KDV dahil = nakit + banka_net * (1+kdv%).
     """
     from reportlab.lib.pagesizes import A4  # lazy: boot RSS — yalnızca kira bildirgesi PDF
     from reportlab.lib.units import mm
     from reportlab.lib.utils import ImageReader
-    from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfgen import canvas
+    from pdf_fonts import FONT, ensure_registered
 
-    _register_arial()
+    ensure_registered()
+    font_name = FONT
     buf = io.BytesIO()
     w, h = A4
-    c = canvas.Canvas(buf, pagesize=A4)
+    c = canvas.Canvas(buf, pagesize=A4, initialFontName=font_name, initialFontSize=9)
     c.setTitle("Kira Bildirgesi")
-    font_name = "Arial" if "Arial" in pdfmetrics.getRegisteredFontNames() else "Helvetica"
 
     kira_net = float(kira_net or 0)
     kdv_oran = _kira_bildirgesi_kdv_oran_float(kdv_oran, 20.0)
@@ -16118,15 +16093,14 @@ def api_cari_kart_pdf(mid):
     if not cust:
         return jsonify({"ok": False, "mesaj": "Müşteri bulunamadı."}), 404
     hareketler = _cari_hareketler(mid)
-    _register_arial()
+    from pdf_fonts import FONT, ensure_registered
+
+    ensure_registered()
     buf = io.BytesIO()
-    c = canvas.Canvas(buf, pagesize=A4)
+    c = canvas.Canvas(buf, pagesize=A4, initialFontName=FONT, initialFontSize=10)
     w, h = A4
     y = h - 40
-    try:
-        c.setFont("Arial", 16)
-    except Exception:
-        c.setFont("Helvetica", 16)
+    c.setFont(FONT, 16)
     _ekstre_baslik = "BestOffice - Cari Ekstre"
     try:
         from firma_profil import pdf_firma_varsa
@@ -16137,7 +16111,7 @@ def api_cari_kart_pdf(mid):
         pass
     c.drawString(40, y, _ekstre_baslik)
     y -= 24
-    c.setFont("Helvetica", 10)
+    c.setFont(FONT, 10)
     c.drawString(40, y, "Müşteri: " + (cust.get("name") or ""))
     c.drawString(40, y - 14, "Vergi No: " + (cust.get("tax_number") or ""))
     y -= 40
@@ -16154,6 +16128,7 @@ def api_cari_kart_pdf(mid):
         if y < 80:
             c.showPage()
             y = h - 40
+            c.setFont(FONT, 10)
         c.drawString(40, y, (row.get("tarih") or "")[:10])
         c.drawString(120, y, (row.get("belge_no") or "")[:18])
         c.drawString(220, y, row.get("tur") or "")

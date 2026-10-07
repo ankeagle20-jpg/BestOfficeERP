@@ -4,29 +4,17 @@ reportlab ile profesyonel izin formu oluşturur
 """
 from pathlib import Path
 import os
-
-# Windows Arial font yolları
-_FONT_REGISTERED = False
+import sys
 
 
-def _register_fonts():
-    global _FONT_REGISTERED
-    if _FONT_REGISTERED:
-        return
-    from reportlab.pdfbase import pdfmetrics  # lazy: boot RSS
-    from reportlab.pdfbase.ttfonts import TTFont
+def _bind_fonts():
+    erp = os.path.join(os.path.dirname(os.path.abspath(__file__)), "erp_web")
+    if erp not in sys.path:
+        sys.path.insert(0, erp)
+    from pdf_fonts import FONT, FONT_BOLD, ensure_registered
 
-    font_paths = [
-        ("Arial", r"C:\Windows\Fonts\arial.ttf"),
-        ("Arial-Bold", r"C:\Windows\Fonts\arialbd.ttf"),
-    ]
-    for fname, fpath in font_paths:
-        if os.path.exists(fpath):
-            try:
-                pdfmetrics.registerFont(TTFont(fname, fpath))
-            except Exception:
-                pass
-    _FONT_REGISTERED = True
+    ensure_registered()
+    return FONT, FONT_BOLD
 
 
 def _resolve_izin_logo():
@@ -69,7 +57,7 @@ def izin_formu_olustur(data: dict, cikti_yolu: str = None) -> str:
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.enums import TA_CENTER, TA_RIGHT
 
-    _register_fonts()
+    FONT, FONT_BOLD = _bind_fonts()
     if not cikti_yolu:
         ad = data.get("personel_ad", "izin").replace(" ", "_")
         cikti_yolu = str(Path(__file__).parent / f"izin_formu_{ad}.pdf")
@@ -78,30 +66,32 @@ def izin_formu_olustur(data: dict, cikti_yolu: str = None) -> str:
         cikti_yolu,
         pagesize=A4,
         leftMargin=1.5*cm, rightMargin=1.5*cm,
-        topMargin=0.5*cm, bottomMargin=1.5*cm
+        topMargin=0.5*cm, bottomMargin=1.5*cm,
+        initialFontName=FONT,
+        initialFontSize=9,
     )
 
     styles = getSampleStyleSheet()
 
     # Özel stiller
     baslik_style = ParagraphStyle("baslik", parent=styles["Title"],
-                                   fontName="Arial",
+                                   fontName=FONT,
                                    fontSize=15, textColor=colors.HexColor("#0f2537"),
                                    spaceAfter=2)
     alt_baslik_style = ParagraphStyle("alt_baslik", parent=styles["Normal"],
-                                       fontName="Arial",
+                                       fontName=FONT,
                                        fontSize=9, textColor=colors.HexColor("#555555"),
                                        spaceAfter=8)
     bolum_style = ParagraphStyle("bolum", parent=styles["Heading2"],
-                                  fontName="Arial",
+                                  fontName=FONT,
                                   fontSize=10, textColor=colors.HexColor("#0f2537"),
                                   spaceBefore=8, spaceAfter=4,
                                   borderPad=4)
     alan_style = ParagraphStyle("alan", parent=styles["Normal"],
-                                 fontName="Arial",
+                                 fontName=FONT,
                                  fontSize=9, spaceAfter=2)
     kucuk_style = ParagraphStyle("kucuk", parent=styles["Normal"],
-                                  fontName="Arial",
+                                  fontName=FONT,
                                   fontSize=7, textColor=colors.HexColor("#777777"))
     header_sag_style = ParagraphStyle(
         "header_sag",
@@ -109,7 +99,7 @@ def izin_formu_olustur(data: dict, cikti_yolu: str = None) -> str:
         alignment=TA_RIGHT,
     )
     imza_style = ParagraphStyle("imza", parent=styles["Normal"],
-                                 fontName="Arial",
+                                 fontName=FONT,
                                  fontSize=8, alignment=TA_CENTER)
 
     story = []
@@ -129,7 +119,7 @@ def izin_formu_olustur(data: dict, cikti_yolu: str = None) -> str:
             f"<b>{firma}</b>",
             ParagraphStyle(
                 "firma",
-                fontName="Arial-Bold",
+                fontName=FONT_BOLD,
                 fontSize=13,
                 textColor=colors.HexColor("#4fc3f7"),
             ),
@@ -141,6 +131,7 @@ def izin_formu_olustur(data: dict, cikti_yolu: str = None) -> str:
     ]]
     header_table = Table(header_data, colWidths=[10*cm, 7*cm])
     header_table.setStyle(TableStyle([
+        ("FONT", (0, 0), (-1, -1), FONT, 8),
         ("ALIGN", (0, 0), (0, 0), "LEFT"),
         ("VALIGN", (0, 0), (0, 0), "MIDDLE"),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
@@ -175,6 +166,7 @@ def izin_formu_olustur(data: dict, cikti_yolu: str = None) -> str:
     ]
     personel_table = Table(personel_data, colWidths=[5*cm, 12*cm])
     personel_table.setStyle(TableStyle([
+        ("FONT", (0,0), (-1,-1), FONT, 9),
         ("FONTSIZE", (0,0), (-1,-1), 9),
         ("BOTTOMPADDING", (0,0), (-1,-1), 3),
         ("TOPPADDING", (0,0), (-1,-1), 2),
@@ -223,6 +215,7 @@ def izin_formu_olustur(data: dict, cikti_yolu: str = None) -> str:
     ]
     tarih_table = Table(tarih_data, colWidths=[5*cm, 12*cm])
     tarih_table.setStyle(TableStyle([
+        ("FONT", (0,0), (-1,-1), FONT, 9),
         ("FONTSIZE", (0,0), (-1,-1), 9),
         ("BOTTOMPADDING", (0,0), (-1,-1), 3),
         ("TOPPADDING", (0,0), (-1,-1), 2),
@@ -247,6 +240,7 @@ def izin_formu_olustur(data: dict, cikti_yolu: str = None) -> str:
     ]
     iletisim_table = Table(iletisim_data, colWidths=[5*cm, 12*cm])
     iletisim_table.setStyle(TableStyle([
+        ("FONT", (0,0), (-1,-1), FONT, 9),
         ("FONTSIZE", (0,0), (-1,-1), 9),
         ("BOTTOMPADDING", (0,0), (-1,-1), 3),
         ("TOPPADDING", (0,0), (-1,-1), 2),
@@ -259,7 +253,7 @@ def izin_formu_olustur(data: dict, cikti_yolu: str = None) -> str:
     # ── Beyan ──
     story.append(Paragraph(
         '"Yukarıda belirttiğim tarihlerde izin kullanmak istediğimi beyan ederim."',
-        ParagraphStyle("beyan", parent=styles["Normal"], fontName="Arial", fontSize=8,
+        ParagraphStyle("beyan", parent=styles["Normal"], fontName=FONT, fontSize=8,
                        textColor=colors.HexColor("#555555"), alignment=TA_CENTER)
     ))
     story.append(Spacer(1, 0.35*cm))
@@ -284,6 +278,7 @@ def izin_formu_olustur(data: dict, cikti_yolu: str = None) -> str:
         rowHeights=[0.7*cm, 2.8*cm, 0.4*cm],
     )
     imza_table.setStyle(TableStyle([
+        ("FONT", (0,0), (-1,-1), FONT, 8),
         ("BOX", (0,0), (0,-1), 0.5, colors.HexColor("#333333")),
         ("BOX", (1,0), (1,-1), 0.5, colors.HexColor("#333333")),
         ("BOX", (2,0), (2,-1), 0.5, colors.HexColor("#333333")),
@@ -307,19 +302,39 @@ def izin_formu_olustur(data: dict, cikti_yolu: str = None) -> str:
     bakiye = data.get("izin_bakiye")
     if bakiye:
         story.append(Spacer(1, 0.1*cm))
+        if bakiye.get("kalan_str"):
+            _kalan_str = bakiye["kalan_str"]
+            try:
+                _kalan = float(bakiye.get("kalan", 0) or 0)
+            except (TypeError, ValueError):
+                _kalan = 0.0
+            if _kalan <= 0:
+                import re
+                _m = re.search(r"(\d+)", _kalan_str or "")
+                _kalan = float(_m.group(1)) if _m else 0.0
+        else:
+            _kalan = bakiye.get("kalan", 0)
+            try:
+                _kalan = float(_kalan)
+            except (TypeError, ValueError):
+                _kalan = 0.0
+            _gun = int(_kalan)
+            _saat = round((_kalan - _gun) * 8)
+            _kalan_str = f"{_gun} gün {_saat} saat" if _saat > 0 else f"{_gun} gün"
         bakiye_data = [[
             Paragraph(f"<b>Toplam Hak:</b> {bakiye.get('toplam_hak', 14)} gün",
                       kucuk_style),
             Paragraph(f"<b>Kullanılan:</b> {bakiye.get('yillik_kullanilan', 0)} gün",
                       kucuk_style),
-            Paragraph(f"<b>Kalan:</b> {bakiye.get('kalan', 14)} gün",
-                      ParagraphStyle("kalan", parent=kucuk_style, fontName="Arial",
+            Paragraph(f"<b>Kalan:</b> {_kalan_str}",
+                      ParagraphStyle("kalan", parent=kucuk_style, fontName=FONT,
                                      textColor=colors.HexColor("#0f6b2a")
-                                     if bakiye.get('kalan', 0) > 0
+                                     if _kalan > 0
                                      else colors.red)),
         ]]
         bak_table = Table(bakiye_data, colWidths=[5.6*cm, 5.6*cm, 5.8*cm])
         bak_table.setStyle(TableStyle([
+            ("FONT", (0,0), (-1,-1), FONT, 7),
             ("ALIGN", (0,0), (-1,-1), "CENTER"),
             ("BACKGROUND", (0,0), (-1,-1), colors.HexColor("#f0f8ff")),
             ("BOX", (0,0), (-1,-1), 0.5, colors.HexColor("#aaaaaa")),

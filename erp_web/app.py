@@ -815,6 +815,12 @@ try:
     log_startup_accelerators()
 except Exception:
     pass
+try:
+    from pdf_fonts import log_font_status
+
+    log_font_status()
+except Exception:
+    pass
 # Debug reloader'da parent process'te çift scheduler açmamak için sadece child'da başlat.
 if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or os.environ.get("GUNICORN_CMD_ARGS"):
     _start_background_jobs()

@@ -71,43 +71,6 @@ def _fatura_pdf_debug():
     return os.environ.get("FATURA_PDF_DEBUG", "").lower() in ("1", "true", "yes")
 
 
-def _register_arial():
-    """Türkçe karakter için Arial fontlarını kaydet (fatura/makbuz PDF)."""
-    if getattr(_register_arial, "_done", False):
-        return
-    from reportlab.pdfbase import pdfmetrics  # lazy: boot RSS
-    from reportlab.pdfbase.ttfonts import TTFont
-
-    win = os.environ.get("WINDIR") or os.environ.get("SystemRoot") or "C:\\Windows"
-    fonts_dir = os.path.join(win, "Fonts")
-    for f in ("arial.ttf", "Arial.ttf", "ARIAL.TTF"):
-        p = os.path.join(fonts_dir, f)
-        if os.path.isfile(p):
-            try:
-                pdfmetrics.registerFont(TTFont("Arial", p))
-                break
-            except Exception:
-                pass
-    for f in ("arialbd.ttf", "Arial Bold.ttf"):
-        p = os.path.join(fonts_dir, f)
-        if os.path.isfile(p):
-            try:
-                pdfmetrics.registerFont(TTFont("Arial-Bold", p))
-                break
-            except Exception:
-                pass
-    if "Arial" not in pdfmetrics.getRegisteredFontNames():
-        for path in ["/usr/share/fonts/truetype/msttcorefonts/Arial.ttf",
-                     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"]:
-            if os.path.isfile(path):
-                try:
-                    pdfmetrics.registerFont(TTFont("Arial", path))
-                    break
-                except Exception:
-                    pass
-    _register_arial._done = True
-
-
 def _resolve_ettn_for_pdf(raw_ettn, fatura_id=None):
     """
     ETTN: Sadece geçerli UUID string'i olduğu gibi (büyük harf) kullanılır.
@@ -1194,15 +1157,15 @@ def build_makbuz_pdf(tahsilat, musteri_adi, fatura_no=None, banka_hesaplar=None)
     """Tahsilat makbuzu (klasik form görünümü) PDF bytes döndürür."""
     from reportlab.lib.pagesizes import A4, landscape  # lazy: boot RSS — yalnızca makbuz PDF
     from reportlab.lib.units import mm
-    from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfgen import canvas
+    from pdf_fonts import FONT, FONT_BOLD, ensure_registered
 
-    _register_arial()
-    font_name = "Arial" if "Arial" in pdfmetrics.getRegisteredFontNames() else "Helvetica"
-    font_bold = "Arial-Bold" if "Arial-Bold" in pdfmetrics.getRegisteredFontNames() else "Helvetica-Bold"
+    ensure_registered()
+    font_name = FONT
+    font_bold = FONT_BOLD
     buf = io.BytesIO()
     w_pt, h_pt = landscape(A4)  # tek makbuz şablon ölçüsü
-    c = canvas.Canvas(buf, pagesize=A4)  # çıktı: 1 A4 sayfada 2 makbuz
+    c = canvas.Canvas(buf, pagesize=A4, initialFontName=font_name, initialFontSize=8)  # çıktı: 1 A4 sayfada 2 makbuz
     c.setTitle("Tahsilat Makbuzu")
     h = h_pt
     c.beginForm("makbuz_form", 0, 0, w_pt, h_pt)
@@ -1526,17 +1489,17 @@ def build_fatura_pdf(fatura, musteri, satirlar, preview=False):
     from reportlab.lib import colors  # lazy: boot RSS — yalnızca fatura PDF
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import mm
-    from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfgen import canvas
     from reportlab.platypus import Table, TableStyle
+    from pdf_fonts import FONT, FONT_BOLD, ensure_registered
 
-    _register_arial()
-    font_name = "Arial" if "Arial" in pdfmetrics.getRegisteredFontNames() else "Helvetica"
-    font_bold = "Arial-Bold" if "Arial-Bold" in pdfmetrics.getRegisteredFontNames() else "Helvetica-Bold"
+    ensure_registered()
+    font_name = FONT
+    font_bold = FONT_BOLD
     buf = io.BytesIO()
     w_pt, h_pt = A4
     irsaliye_modu = _pdf_irsaliye_modu(fatura)
-    c = canvas.Canvas(buf, pagesize=A4)
+    c = canvas.Canvas(buf, pagesize=A4, initialFontName=font_name, initialFontSize=8)
     c.setTitle("İrsaliye Önizleme" if irsaliye_modu else "Fatura Önizleme")
 
     # Kenarlar
