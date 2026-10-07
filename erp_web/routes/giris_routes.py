@@ -8127,12 +8127,94 @@ def _fatura_tutar_kdv_split(toplam_kdv_dahil: float, kira_nakit: bool, kdv_oran:
     return net, kdv, toplam
 
 
+_EKSTRE_KENDI_KAYNAK = ("manuel_makbuz", "banka_import", "odeme_linki")
+
+
+def _ekstre_ilk_ay_isareti(aciklama):
+    """Metindeki ilk |AYLIK_TAH| veya |AYLIK_PAY| günü. Yoksa None."""
+    text = str(aciklama or "")
+    bulunan = []
+    for rx in (
+        r"\|AYLIK_TAH\|([0-9]{4}-[0-9]{2}-[0-9]{2})\|",
+        r"\|AYLIK_PAY\|([0-9]{4}-[0-9]{2}-[0-9]{2})=",
+    ):
+        m = re.search(rx, text)
+        if m:
+            bulunan.append((m.start(), m.group(1)))
+    if not bulunan:
+        return None
+    bulunan.sort()
+    return bulunan[0][1]
+
+
+def _ekstre_eslesme_tarihi(
+    kaynak, tahsilat_tarihi, fatura_tarihi=None, aciklama="", alt_sinir=None
+):
+    """Eşleşme günü.
+
+    Kendi satır kaynaklarında tahsilat tarihi yalnız ilk ay işareti sözleşme
+    ayından (alt sınır) önceyse kullanılır. İşaret pencereden sonraysa eski
+    kural durur: fatura tarihi, yoksa ilk |AYLIK_TAH|, o da yoksa tahsilat tarihi.
+    """
+    def _gun(raw):
+        if raw is None or raw == "":
+            return None
+        if hasattr(raw, "year") and not isinstance(raw, str):
+            try:
+                return date(int(raw.year), int(raw.month), int(raw.day)).isoformat()
+            except (TypeError, ValueError):
+                return None
+        s = str(raw).strip()[:10]
+        if len(s) != 10:
+            return None
+        try:
+            datetime.strptime(s, "%Y-%m-%d")
+        except ValueError:
+            return None
+        return s
+
+    kay = str(kaynak or "").strip().lower()
+    ilk = _ekstre_ilk_ay_isareti(aciklama)
+    taban = _gun(alt_sinir)
+    if kay in _EKSTRE_KENDI_KAYNAK and ilk and taban and ilk < taban:
+        return _gun(tahsilat_tarihi)
+    fat = _gun(fatura_tarihi)
+    if fat:
+        return fat
+    if ilk and "|AYLIK_TAH|" in str(aciklama or ""):
+        m = re.search(r"\|AYLIK_TAH\|([0-9]{4}-[0-9]{2}-[0-9]{2})\|", str(aciklama or ""))
+        if m:
+            return m.group(1)
+    return _gun(tahsilat_tarihi)
+
+
+def _ekstre_eslesme_sql(floor_iso: str) -> str:
+    """Kendi satır + ilk işaret alt sınırdan önce → tahsilat tarihi. Yoksa eski COALESCE."""
+    taban = str(floor_iso or "")[:10]
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", taban):
+        taban = "1900-01-01"
+    kendi = ", ".join("'" + k + "'" for k in _EKSTRE_KENDI_KAYNAK)
+    return (
+        "CASE WHEN lower(COALESCE(t.kaynak, '')) IN ("
+        + kendi
+        + ") AND (regexp_match(COALESCE(t.aciklama, ''), "
+        + r"'\|(?:AYLIK_TAH|AYLIK_PAY)\|([0-9]{4}-[0-9]{2}-[0-9]{2})'))[1]::date < '"
+        + taban
+        + """'::date THEN t.tahsilat_tarihi::date
+                    ELSE COALESCE(
+                    f.fatura_tarihi::date,
+                    NULLIF(substring(COALESCE(t.aciklama, '') from '\\|AYLIK_TAH\\|([0-9]{4}-[0-9]{2}-[0-9]{2})\\|'), '')::date,
+                    t.tahsilat_tarihi::date
+                  ) END"""
+    )
+
+
 def _ekstre_kaynak_kendi_satiri(row) -> bool:
-    """Ekstrede bölünmeden kendi satırı: manuel_makbuz / banka_import (marker olsa da)."""
+    """Ekstrede bölünmeden kendi satırı: manuel_makbuz / banka_import / odeme_linki (marker olsa da)."""
     if not isinstance(row, dict):
         return False
     kay = str(row.get("kaynak") or "").strip().lower()
-    return kay in ("manuel_makbuz", "banka_import", "odeme_linki")
+    return kay in _EKSTRE_KENDI_KAYNAK
 
 
 def _is_banka_import_markersiz(row) -> bool:
@@ -10973,11 +11055,13 @@ def _cari_ekstre_hareketler(
 
     # 3) Tahsilat (alacak): varsayılan FIFO — ödeme en eski açık aydan başlayarak kapatır;
     #    AYLIK_PAY ile çok aya bölünmüş görünüm yerine tek kısmi ay + dolu aylar.
-    _eslesme_sql = """COALESCE(
-                    f.fatura_tarihi::date,
-                    NULLIF(substring(COALESCE(t.aciklama, '') from '\\|AYLIK_TAH\\|([0-9]{4}-[0-9]{2}-[0-9]{2})\\|'), '')::date,
-                    t.tahsilat_tarihi::date
-                  )"""
+    # Kendi satır: tahsilat tarihi yalnız ilk ay işareti sözleşme ayından önceyse.
+    # İşaret pencere bitişinden sonraysa eski COALESCE (satır elenmeye devam eder).
+    floor_pay = (
+        soz_first_month.isoformat() if soz_first_month
+        else (soz_floor_iso if soz_floor_iso else "1900-01-01")
+    )
+    _eslesme_sql = _ekstre_eslesme_sql(floor_pay)
     use_fifo_tahsil = bool(full_borc_for_fifo)
     if use_fifo_tahsil and tahsilat_borca_hizala:
         month_order_all = sorted(full_borc_for_fifo.keys())
@@ -10985,10 +11069,6 @@ def _cari_ekstre_hareketler(
         fifo_alloc_win = {iso: 0.0 for iso in month_order_all}
         fifo_harf = {iso: "B" for iso in month_order_all}
         fifo_ids = defaultdict(list)
-        floor_pay = (
-            soz_first_month.isoformat() if soz_first_month
-            else (soz_floor_iso if soz_floor_iso else "1900-01-01")
-        )
         bit_iso_cmp = bit.isoformat()
         pays_fifo = fetch_all(
             f"""SELECT t.id,
@@ -11014,10 +11094,10 @@ def _cari_ekstre_hareketler(
             kay0 = str(pr.get("kaynak") or "").strip().lower()
             ac0 = str(pr.get("tahsilat_aciklama") or "")
             has_tah = bool(re.search(r"\|AYLIK_TAH\|\d{4}-\d{2}-\d{2}\|", ac0))
-            # Sentetik aylık yol: yalnızca grid_toplu. Manuel/banka → her zaman general (direct).
+            # Sentetik aylık yol: yalnızca grid_toplu. Kendi satır → ay satırına yazılmaz.
             if kay0 == "grid_toplu":
                 marker_pays.append(pr)
-            elif kay0 in ("manuel_makbuz", "banka_import"):
+            elif kay0 in _EKSTRE_KENDI_KAYNAK:
                 general_pays.append(pr)
             elif has_tah:
                 marker_pays.append(pr)

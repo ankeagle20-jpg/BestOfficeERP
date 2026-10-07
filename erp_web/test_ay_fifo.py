@@ -364,6 +364,87 @@ def test_tah_isaret_kaynagi_ve_cift_sayim():
     assert karisik == [("2026-08-01", 100.0)], karisik
 
 
+def _aylar(y, m, y2, m2, tutar):
+    out = []
+    while (y, m) <= (y2, m2):
+        out.append((f"{y:04d}-{m:02d}-01", tutar))
+        m += 1
+        if m == 13:
+            y, m = y + 1, 1
+    return out
+
+
+def test_fatura_yedek_sozlesme_oncesi_yok():
+    fatura = {f"2023-{m:02d}-01": 300.0 for m in range(1, 8)}
+    fatura["2023-08-01"] = 300.0
+    borc, yedek = gorunen_borc_biles(
+        None, None, fatura, sozlesme_basi="2023-08-01",
+    )
+    assert "2023-01-01" not in borc
+    assert borc["2023-08-01"] == 300.0
+    assert yedek == ["2023-08-01"], yedek
+    eski, yedek_eski = gorunen_borc_biles(None, None, fatura)
+    assert eski["2023-01-01"] == 300.0
+    assert "2023-01-01" in yedek_eski
+
+
+def test_867_bes_bin_sozlesme_sonrasi():
+    """İlk ay Ağustos 2023. 5.000, kapalı ilk yıldan sonra Ağustos 2024'ten kapanır."""
+    borc = [(f"2023-{m:02d}-01", 300.0) for m in range(1, 8)]
+    borc += _aylar(2023, 8, 2024, 7, 720.0)
+    borc += _aylar(2024, 8, 2024, 12, 1094.18)
+    onceki = []
+    for i, (iso, _t) in enumerate(_aylar(2023, 8, 2024, 7, 720.0), start=1):
+        onceki.append({
+            "id": i,
+            "tarih": iso,
+            "tutar": 720.0,
+            "aciklama": f"|AYLIK_TAH|{iso}|",
+        })
+    pays = acik_ay_dagit(
+        borc, 5000, "2026-10-07", onceki=onceki, sozlesme_basi="2023-08-01",
+    )
+    assert pays == [
+        ("2024-08-01", 1094.18),
+        ("2024-09-01", 1094.18),
+        ("2024-10-01", 1094.18),
+        ("2024-11-01", 1094.18),
+        ("2024-12-01", 623.28),
+    ], pays
+    assert not any(iso < "2023-08-01" for iso, _t in pays)
+    assert round(sum(t for _iso, t in pays), 2) == 5000.0
+
+
+def test_baslangic_tarihi_yoksa_eski_fifo():
+    borc = [(f"2023-{m:02d}-01", 300.0) for m in range(1, 4)]
+    pays = acik_ay_dagit(borc, 500, "2026-10-07")
+    assert pays[0] == ("2023-01-01", 300.0), pays
+    assert pays[1] == ("2023-02-01", 200.0)
+
+
+def test_isaret_ve_allowlist_sozlesme_sinirini_gecer():
+    borc = [("2023-01-01", 300.0), ("2024-08-01", 1094.18)]
+    pays = acik_ay_dagit(
+        borc,
+        100,
+        "2026-10-07",
+        onceki=[{
+            "id": 1,
+            "tarih": "2026-10-01",
+            "tutar": 300.0,
+            "aciklama": "|AYLIK_PAY|2023-01-01=300.00|",
+        }],
+        sozlesme_basi="2023-08-01",
+    )
+    assert pays == [("2024-08-01", 100.0)], pays
+    secilen = acik_ay_dagit(
+        borc, 100, "2026-10-07",
+        allowlist=["2023-01-01"],
+        sozlesme_basi="2023-08-01",
+    )
+    assert secilen == [("2023-01-01", 100.0)], secilen
+
+
 if __name__ == "__main__":
     test_ornek_360_ve_1800()
     test_yil_filtresi_ve_baslangic_yok_sayilir()
@@ -385,4 +466,8 @@ if __name__ == "__main__":
     test_banka_yolu_gorunen_borc()
     test_tutarli_hesap_ayni_dagilim()
     test_tah_isaret_kaynagi_ve_cift_sayim()
+    test_fatura_yedek_sozlesme_oncesi_yok()
+    test_867_bes_bin_sozlesme_sonrasi()
+    test_baslangic_tarihi_yoksa_eski_fifo()
+    test_isaret_ve_allowlist_sozlesme_sinirini_gecer()
     print("CASE ay_fifo ok", date.today().isoformat())

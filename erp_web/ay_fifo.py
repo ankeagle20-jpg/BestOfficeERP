@@ -143,14 +143,19 @@ def reel_ay_haritasi(donemler, artis) -> dict[str, float]:
     return out
 
 
-def gorunen_borc_biles(grid=None, reel=None, fatura=None) -> tuple[dict[str, float], list[str]]:
+def gorunen_borc_biles(
+    grid=None, reel=None, fatura=None, sozlesme_basi=None
+) -> tuple[dict[str, float], list[str]]:
     """Ekrandaki ay borcu. Hücre varsa o; yoksa reel; o da yoksa fatura yedeği.
 
+    sozlesme_basi verilirse fatura yedeği yalnız o ay ve sonrası. Tarih yoksa
+    fatura yedeği eskisi gibi her aya uygulanır.
     Dönüş: (borç haritası, fatura yedeğine düşen aylar).
     """
     gg = _pozitif_harita(grid)
     rr = _pozitif_harita(reel)
     ff = _pozitif_harita(fatura)
+    taban = ay_basi(sozlesme_basi) if sozlesme_basi else None
     borc: dict[str, float] = {}
     yedek: list[str] = []
     for iso in sorted(set(gg) | set(rr) | set(ff)):
@@ -158,13 +163,21 @@ def gorunen_borc_biles(grid=None, reel=None, fatura=None) -> tuple[dict[str, flo
             borc[iso] = gg[iso]
         elif iso in rr:
             borc[iso] = rr[iso]
+        elif taban and iso < taban:
+            continue
         else:
             borc[iso] = ff[iso]
             yedek.append(iso)
     return borc, yedek
 
 
-def _uygula(need: dict[str, float], tutar: float, odeme_tarihi: str, allowlist) -> list[tuple[str, float]]:
+def _uygula(
+    need: dict[str, float],
+    tutar: float,
+    odeme_tarihi: str,
+    allowlist,
+    taban=None,
+) -> list[tuple[str, float]]:
     try:
         rem = round(float(tutar or 0), 2)
     except (TypeError, ValueError):
@@ -175,6 +188,8 @@ def _uygula(need: dict[str, float], tutar: float, odeme_tarihi: str, allowlist) 
     if allowlist is not None:
         phases = [[iso for iso in months if iso in allowlist]]
     else:
+        if taban:
+            months = [iso for iso in months if iso >= taban]
         phases = [
             [iso for iso in months if iso <= odeme_tarihi],
             [iso for iso in months if iso > odeme_tarihi],
@@ -306,6 +321,7 @@ def acik_ay_dagit(
     odeme_tarihi: str,
     onceki=None,
     allowlist=None,
+    sozlesme_basi=None,
 ) -> list[tuple[str, float]]:
     """Açık tutar = ay borcu − daha önce o aya işaretlenmiş tahsilat.
 
@@ -313,11 +329,14 @@ def acik_ay_dagit(
     İşaretsiz önceki tutar tarih sırasında açık aylara uygulanır.
     Vadesi gelmiş aylar bitmeden sonraki aya yazılmaz.
     allowlist verilirse yalnız o aylar, açık tutar sırasında doldurulur.
+    sozlesme_basi yalnız yeni işaretsiz tutarı sınırlar; önceki işaretler ve
+    allowlist aynı kalır. Tarih yoksa sınır yoktur.
     """
     iso_odeme = ay_basi(odeme_tarihi) and str(odeme_tarihi)[:10]
     if not iso_odeme or len(str(odeme_tarihi).strip()) < 10:
         return []
     odeme = str(odeme_tarihi).strip()[:10]
+    taban = ay_basi(sozlesme_basi) if sozlesme_basi else None
     need = borc_haritasi(borc)
     allow = None
     if allowlist is not None:
@@ -336,7 +355,9 @@ def acik_ay_dagit(
             _kapat_ay(need, [(isaret[1][0], eski["tutar"])])
         else:
             _uygula(need, eski["tutar"], odeme, set(isaret[1]))
-    return _uygula(need, tutar, odeme, allow)
+    if allow is not None:
+        return _uygula(need, tutar, odeme, allow)
+    return _uygula(need, tutar, odeme, None, taban=taban)
 
 
 def dagit_seri(borc, tahsilatlar) -> list[list[tuple[str, float]]]:

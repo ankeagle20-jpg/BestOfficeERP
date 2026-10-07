@@ -64,7 +64,7 @@ import logging
 import math
 import time
 
-from ay_fifo import acik_ay_dagit, borc_haritasi, gorunen_borc_biles, grid_brut_haritasi, reel_ay_haritasi
+from ay_fifo import acik_ay_dagit, ay_basi, borc_haritasi, gorunen_borc_biles, grid_brut_haritasi, reel_ay_haritasi
 
 
 def _fatura_pdf_debug():
@@ -783,11 +783,28 @@ def _onceki_tahsilat_satirlari(musteri_id: int, odeme_tarihi: str, haric_tahsila
     return out
 
 
+def _sozlesme_ay_basi(musteri_id: int):
+    """Sözleşme ayının 1'i. Tarih yoksa None; dağıtım eski kuralda kalır."""
+    try:
+        kyc = fetch_one(
+            """
+            SELECT sozlesme_tarihi::text AS bas
+            FROM musteri_kyc WHERE musteri_id = %s
+            ORDER BY id DESC LIMIT 1
+            """,
+            (int(musteri_id),),
+        ) or {}
+    except Exception:
+        return None
+    return ay_basi((kyc or {}).get("bas"))
+
+
 def _gorunen_borc_satirlari(musteri_id: int) -> dict[str, float]:
     """Ekrandaki aylık borç. Hücre varsa o; yoksa reel; o da yoksa fatura yedeği."""
     grid: dict[str, float] = {}
     reel: dict[str, float] = {}
     fatura: dict[str, float] = {}
+    taban = None
     try:
         row = fetch_one(
             "SELECT payload FROM musteri_aylik_grid_cache WHERE musteri_id = %s",
@@ -806,6 +823,7 @@ def _gorunen_borc_satirlari(musteri_id: int) -> dict[str, float]:
             """
             SELECT sozlesme_tarihi::text AS bas, kira_artis_tarihi::text AS artis
             FROM musteri_kyc WHERE musteri_id = %s
+            ORDER BY id DESC LIMIT 1
             """,
             (int(musteri_id),),
         ) or {}
@@ -813,13 +831,14 @@ def _gorunen_borc_satirlari(musteri_id: int) -> dict[str, float]:
             [(r.get("donem_yil"), r.get("tutar_kdv_dahil")) for r in donem],
             (kyc or {}).get("artis") or (kyc or {}).get("bas"),
         )
+        taban = ay_basi((kyc or {}).get("bas"))
     except Exception:
         logging.getLogger(__name__).info("ay_borc_reel okunamadi")
     try:
         fatura = _ekstre_borc_satirlari(musteri_id)
     except Exception:
         logging.getLogger(__name__).info("ekstre borc satiri okunamadi")
-    borc, yedek = gorunen_borc_biles(grid, reel, fatura)
+    borc, yedek = gorunen_borc_biles(grid, reel, fatura, sozlesme_basi=taban)
     if yedek:
         logging.getLogger(__name__).info("ay_borc_yedek adet=%s", len(yedek))
     return borc
@@ -854,8 +873,10 @@ def _auto_allocate_oldest_unpaid_months(
     odeme = str(odeme_tarihi or "").strip()[:10]
     if len(odeme) != 10:
         odeme = date.today().isoformat()
+    sozlesme_basi = None
     if borc_satirlari is None:
         borc = _gorunen_borc_satirlari(mid)
+        sozlesme_basi = _sozlesme_ay_basi(mid)
     else:
         borc = borc_satirlari
     if onceki_tahsilatlar is None:
@@ -868,7 +889,9 @@ def _auto_allocate_oldest_unpaid_months(
         onceki = list(onceki_tahsilatlar)
     if ek_onceki:
         onceki.extend(list(ek_onceki))
-    pay_items = acik_ay_dagit(borc, total, odeme, onceki=onceki, allowlist=iso_allowlist)
+    pay_items = acik_ay_dagit(
+        borc, total, odeme, onceki=onceki, allowlist=iso_allowlist, sozlesme_basi=sozlesme_basi,
+    )
     return [iso for iso, _ in pay_items], pay_items
 
 
