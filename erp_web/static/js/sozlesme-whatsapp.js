@@ -29,6 +29,7 @@
       "#sozlesme-wa-ad{font-size:13px;}" +
       "#sozlesme-wa-tel{flex:1;min-width:140px;}" +
       "#sozlesme-wa-uyari{color:#ffcc80;margin:4px 0;}" +
+      "#sozlesme-wa-indir{font-size:12px;margin:2px 0;}" +
       "#sozlesme-wa-indir a{color:#80deea;}" +
       "#sozlesme-wa-yine{display:none;background:#6a4a12;}";
     document.head.appendChild(st);
@@ -184,24 +185,16 @@
     }, POLL_MS);
   }
 
-  function pdfIndirGoster(j) {
-    var uyari = document.getElementById("sozlesme-wa-uyari");
-    var sonuc = document.getElementById("sozlesme-wa-sonuc");
-    var mesaj = document.getElementById("sozlesme-wa-mesaj");
+  function yedekLink(j) {
     var kutu = document.getElementById("sozlesme-wa-indir");
     var a = document.getElementById("sozlesme-wa-indir-a");
-    if (mesaj && j && j.mesaj) mesaj.value = j.mesaj;
-    var uy = (j && j.uyari) || "PDF'yi indirip WhatsApp'a ekleyin";
-    if (j && j.qr) uy = (j.mesaj_qr || j.neden_yazi || "WhatsApp oturumu yenilenmeli (QR)") + " " + uy;
-    if (uyari) uyari.textContent = uy;
-    if (sonuc) sonuc.textContent = "";
     var yol = j && j.indir ? String(j.indir) : "";
-    if (a && yol.indexOf("/faturalar/tahsilat-pdf/") === 0) {
+    if (!(a && kutu)) return;
+    if (yol.indexOf("/faturalar/tahsilat-pdf/") === 0) {
       a.href = yol;
       a.textContent = "Makbuzu indir";
-      if (kutu) kutu.hidden = false;
+      kutu.hidden = false;
     }
-    yineGoster(false);
   }
 
   function webAc(tel, mesaj) {
@@ -266,10 +259,8 @@
     }).then(function (paket) {
       if (!acik || acik.deneme !== deneme) return;
       var j = paket.j || {};
-      if (acik.tahsilatId && (j.pdf_indir || j.geri_dus || j.qr)) {
-        if (j.qr) j.neden_yazi = j.mesaj && j.pdf_indir ? "WhatsApp oturumu yenilenmeli (QR)" : (j.mesaj || "WhatsApp oturumu yenilenmeli (QR)");
-        pdfIndirGoster(j);
-      } else if (j.qr) {
+      yedekLink(j);
+      if (j.qr) {
         if (uyari) uyari.textContent = j.mesaj || "WhatsApp oturumu yenilenmeli (QR)";
         if (sonuc) sonuc.textContent = "";
         yineGoster(false);
@@ -381,7 +372,7 @@
           if (!acik || acik.tahsilatId !== tid) return;
           var kutu = document.getElementById("sozlesme-wa-mesaj");
           if (kutu && !acik.mesajDokunuldu && j.mesaj) kutu.value = j.mesaj;
-          if (j.pdf_indir || j.qr) pdfIndirGoster(j);
+          yedekLink(j);
         })
         .catch(function () {});
     }

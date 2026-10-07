@@ -88,6 +88,8 @@ def test_kimlik_ve_pdf():
 
     govde, kod = gonder(data={"musteri_id": 8}, getir=getir, kuyruk=lambda *_a: calls.__setitem__("kuyruk", 1) or "ok")
     check("musteri_403", kod == 403 and calls["kuyruk"] == 0)
+    govde, kod = gonder(data={"musteri_id": ""}, getir=getir, kuyruk=lambda *_a: calls.__setitem__("kuyruk", 1) or "ok")
+    check("musteri_bos_403", kod == 403 and calls["kuyruk"] == 0)
 
     govde, kod = gonder(data={"makbuz_no": "999"}, getir=getir)
     check("makbuz_403", kod == 403 and govde.get("geri_dus") is False)
@@ -160,8 +162,8 @@ def test_kapali_ve_tekrar():
         return "ok"
 
     govde, kod = gonder(node=lambda: False, pdf=pdf, kuyruk=kuyruk)
-    check("kapali", kod == 200 and govde.get("pdf_indir") is True and govde.get("geri_dus") is False and govde.get("qr") is False)
-    check("kapali_metin", "ekte" not in (govde.get("mesaj") or "") and govde.get("uyari") == sw._PDF_UYARI)
+    check("kapali", kod == 200 and govde.get("geri_dus") is True and govde.get("qr") is False and not govde.get("pdf_indir"))
+    check("kapali_metin", govde.get("mesaj") == sw._GERI_METIN["kiraci"] and "ekte" not in (govde.get("mesaj") or "") and "indirip" not in (govde.get("mesaj") or ""))
     check("kapali_indir", govde.get("indir") == "/faturalar/tahsilat-pdf/55?indir=1")
     check("kapali_web", "web.whatsapp" not in json.dumps(govde) and calls["k"] == 0 and calls["p"] == 0)
 
@@ -171,7 +173,7 @@ def test_kapali_ve_tekrar():
         pdf=pdf,
         kuyruk=kuyruk,
     )
-    check("oturum", govde.get("pdf_indir") is True and govde.get("geri_dus") is False and "ekte" not in (govde.get("mesaj") or ""))
+    check("oturum", govde.get("geri_dus") is True and govde.get("qr") is False and not govde.get("pdf_indir") and govde.get("mesaj") == sw._GERI_METIN["oturum"])
 
     govde, kod = gonder(
         bagli=lambda: {"hazir": False, "neden": "qr"},
@@ -179,7 +181,7 @@ def test_kapali_ve_tekrar():
         pdf=pdf,
         kuyruk=kuyruk,
     )
-    check("qr", govde.get("qr") is True and govde.get("pdf_indir") is True and govde.get("geri_dus") is False and "ekte" not in (govde.get("mesaj") or ""))
+    check("qr", govde.get("qr") is True and govde.get("geri_dus") is False and not govde.get("pdf_indir") and govde.get("mesaj") == sw._GERI_METIN["qr"])
     check("pdf_yok", calls["p"] == 0 and calls["k"] == 0)
 
     base()
@@ -228,7 +230,7 @@ def test_hazir_ve_kaynak():
     govde, kod = sw.tahsilat_wa_hazir(55, getir_fn=lambda _i: dict(ROW), node_fn=lambda: True)
     check("hazir_ek", kod == 200 and govde.get("pdf_ek") is True and "ekte" in (govde.get("mesaj") or "") and "260" in govde.get("mesaj") and "06.10.2026" in govde.get("mesaj") and "Gizli" not in govde.get("mesaj") and not govde.get("pdf_indir"))
     govde, kod = sw.tahsilat_wa_hazir(55, getir_fn=lambda _i: dict(ROW), node_fn=lambda: False)
-    check("hazir_yok", kod == 200 and govde.get("pdf_ek") is False and "ekte" not in (govde.get("mesaj") or "") and govde.get("uyari") == sw._PDF_UYARI and govde.get("geri_dus") is False)
+    check("hazir_yok", kod == 200 and govde.get("pdf_ek") is False and "ekte" not in (govde.get("mesaj") or "") and not govde.get("pdf_indir") and govde.get("geri_dus") is False and govde.get("indir") == "/faturalar/tahsilat-pdf/55?indir=1" and "indirip" not in json.dumps(govde))
     govde, kod = sw.tahsilat_wa_hazir(0, getir_fn=lambda _i: dict(ROW), node_fn=lambda: True)
     check("hazir_0", kod == 400)
     govde, kod = sw.tahsilat_wa_hazir(99, getir_fn=lambda _i: None, node_fn=lambda: True)
@@ -272,11 +274,9 @@ def test_sayfa_ve_mig():
     check("pasif_html", 'id="giris-tahsilat-wa" disabled' in html and 'id="sozlesme-tahsilat-wa" disabled' in html and html.count('title="Önce makbuzu kaydedin"') >= 2)
     check("web_fonk", "bestOfficeWhatsAppWebAc" not in govde("girisTahsilatWhatsApp") and "bestOfficeWhatsAppWebAc" not in govde("sozlesmeTahsilatWhatsApp"))
     check("script", html.find("tahsilat-wa-durum.js") < html.find("sozlesme-whatsapp.js") and "tahsilat_wa_js_surum" in html)
-    i = js.find("function pdfIndirGoster")
-    j = js.find("\n  function ", i + 10)
-    check("pdf_web_yok", i > 0 and "webAc" not in js[i:j] and "PDF'yi indirip WhatsApp'a ekleyin" in js[i:j])
-    dal = js.find("acik.tahsilatId && (j.pdf_indir || j.geri_dus || j.qr)")
-    check("web_sonra", dal > 0 and js.find("webAc(ham, metin)", dal) > dal)
+    check("pdf_web_yok", "PDF'yi indirip WhatsApp'a ekleyin" not in js and "function pdfIndirGoster" not in js and "tahsilat_id: acik.tahsilatId" in js)
+    dal = js.find("function gonder")
+    check("web_sonra", dal > 0 and "acik.tahsilatId && (j.pdf_indir" not in js and js.find("webAc(ham, metin)", dal) > dal and js.find("/giris/api/tahsilat-whatsapp/gonder", dal) > dal)
     check("alan_dinle", '"tutar", "tarih", "aciklama"' in js)
     check("kalici_yok", "localStorage" not in js and "localStorage" not in durum and "sessionStorage" not in durum)
     check("kuyruk_yazi", "Kuyruğa alındı ✓ (birkaç saniyede iletilir)" in js and "Gönderildi ✓" in js)
@@ -353,6 +353,41 @@ def test_neden_esleme():
     check("neden_baglanti_yok", r2.returncode == 2 and "BAGLANTI YOK" in r2.stdout)
 
 
+def test_pdf_turleri():
+    import contextlib
+    import io
+
+    sessiz = io.StringIO()
+    with contextlib.redirect_stdout(sessiz), contextlib.redirect_stderr(sessiz):
+        import firma_profil
+        from routes.faturalar_routes import build_makbuz_pdf
+
+        firma_profil.pdf_firma_varsa = lambda: None
+        firma_profil.firma_logo_abs = lambda: None
+        turler = (
+            ("manuel_makbuz", "manuel_makbuz", ""),
+            ("grid_toplu", "grid_toplu", ""),
+            ("banka_import", "banka_import", ""),
+            ("odeme_linki", "odeme_linki", ""),
+            ("cok_ay", "manuel_makbuz", "2026-01 2026-02"),
+        )
+        sonuclar = []
+        for ad, kaynak, aciklama in turler:
+            row = {
+                "id": 1,
+                "makbuz_no": "1",
+                "tutar": 1,
+                "tahsilat_tarihi": "2026-01-01",
+                "odeme_turu": "nakit",
+                "aciklama": aciklama,
+                "kaynak": kaynak,
+            }
+            pdf = build_makbuz_pdf(row, "Deneme")
+            sonuclar.append((ad, isinstance(pdf, (bytes, bytearray)) and pdf[:4] == b"%PDF" and 100 < len(pdf) < 2_000_000))
+    for ad, ok in sonuclar:
+        check("pdf_" + ad, ok)
+
+
 def test_yetkisiz():
     from flask import Flask
     from auth import login_manager
@@ -377,6 +412,7 @@ if __name__ == "__main__":
     test_hazir_ve_kaynak()
     test_sayfa_ve_mig()
     test_neden_esleme()
+    test_pdf_turleri()
     test_yetkisiz()
     if fails:
         print("FAIL", len(fails))

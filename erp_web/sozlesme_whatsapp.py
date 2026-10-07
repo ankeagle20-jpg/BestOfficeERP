@@ -78,7 +78,6 @@ _DK_USER = "Bu dakika içinde sizin gönderim sınırınız doldu. Bir dakika so
 _GUN_USER = "Bugünkü gönderim sınırınız doldu."
 _DK_KIRACI = "Bu dakika içinde kiracı gönderim sınırı doldu. Bir dakika sonra tekrar deneyin."
 _GUN_KIRACI = "Bugünkü kiracı gönderim sınırı doldu."
-_PDF_UYARI = "PDF'yi indirip WhatsApp'a ekleyin"
 _MAKBUZ_YINE = "Bu makbuz daha önce gönderildi."
 _TAHSILAT_YOK = "Tahsilat bulunamadı"
 _PDF_OLMADI = "Makbuz PDF gönderilemedi"
@@ -754,38 +753,8 @@ def _pdf_bayt(row, pdf_fn=None) -> bytes:
     return raw
 
 
-def _pdf_yanit(row, *, qr: bool = False, neden: str = "") -> tuple[dict, int]:
-    tid = int(row["id"])
-    govde = {
-        "ok": True,
-        "pdf_indir": True,
-        "geri_dus": False,
-        "qr": bool(qr),
-        "mesaj": tahsilat_metin(row.get("makbuz_no"), row.get("tutar"), row.get("tahsilat_tarihi"), False),
-        "uyari": _PDF_UYARI,
-        "indir": f"/faturalar/tahsilat-pdf/{tid}?indir=1",
-    }
-    if neden:
-        govde["neden"] = neden
-    return govde, 200
-
-
-def _pdf_not(uid, row, maske, tel_h, metin, anahtar) -> None:
-    try:
-        _ekle_tahsilat(
-            int(uid),
-            int(row.get("musteri_id") or 0),
-            "pdf_indir",
-            maske,
-            tel_h,
-            len(metin),
-            ozet_hash(metin),
-            str(anahtar)[:120],
-            int(row["id"]),
-            row.get("makbuz_no"),
-        )
-    except Exception:
-        logger.info("tahsilat_wa pdf_indir kayit yok")
+def _makbuz_indir(tid: int) -> str:
+    return f"/faturalar/tahsilat-pdf/{int(tid)}?indir=1"
 
 
 def tahsilat_wa_hazir(tid, *, getir_fn=None, node_fn=None) -> tuple[dict, int]:
@@ -799,17 +768,13 @@ def tahsilat_wa_hazir(tid, *, getir_fn=None, node_fn=None) -> tuple[dict, int]:
     if not row:
         return {"ok": False, "mesaj": _TAHSILAT_YOK}, 404
     ek = bool((node_fn or node_yolu_acik)())
-    if not ek:
-        govde, kod = _pdf_yanit(row)
-        govde["pdf_ek"] = False
-        govde["makbuz_no"] = str(row.get("makbuz_no") or "")
-        return govde, kod
     return {
         "ok": True,
-        "pdf_ek": True,
+        "pdf_ek": ek,
         "geri_dus": False,
         "makbuz_no": str(row.get("makbuz_no") or ""),
-        "mesaj": tahsilat_metin(row.get("makbuz_no"), row.get("tutar"), row.get("tahsilat_tarihi"), True),
+        "mesaj": tahsilat_metin(row.get("makbuz_no"), row.get("tutar"), row.get("tahsilat_tarihi"), ek),
+        "indir": _makbuz_indir(tid),
     }, 200
 
 
@@ -848,14 +813,12 @@ def tahsilat_wa_isle(
         kayit_mid = 0
     if kayit_mid <= 0:
         return {"ok": False, "mesaj": _TAHSILAT_YOK, "geri_dus": False}, 404
-    ham_mid = (data or {}).get("musteri_id")
-    if ham_mid not in (None, "", 0, "0"):
-        try:
-            istenen = int(ham_mid)
-        except (TypeError, ValueError):
-            return {"ok": False, "mesaj": _ORIGIN, "geri_dus": False}, 403
-        if istenen != kayit_mid:
-            return {"ok": False, "mesaj": _ORIGIN, "geri_dus": False}, 403
+    try:
+        istenen = int((data or {}).get("musteri_id") or 0)
+    except (TypeError, ValueError):
+        return {"ok": False, "mesaj": _ORIGIN, "geri_dus": False}, 403
+    if istenen != kayit_mid:
+        return {"ok": False, "mesaj": _ORIGIN, "geri_dus": False}, 403
     istem_no = str((data or {}).get("makbuz_no") or "").strip()
     if istem_no and istem_no != str(row.get("makbuz_no") or "").strip():
         return {"ok": False, "mesaj": _ORIGIN, "geri_dus": False}, 403
@@ -901,14 +864,37 @@ def tahsilat_wa_isle(
         ozet = ozet_hash(str(tid) + ":" + str(int(an.timestamp() * 1000)))
         return (on_ek + ":" + ozet[:16])[:120]
 
-    def _indir(neden: str, qr: bool = False):
-        yazi = tahsilat_metin(row.get("makbuz_no"), row.get("tutar"), row.get("tahsilat_tarihi"), False)
-        _pdf_not(int(uid), row, maske, tel_h, yazi, _tekil("szwa:pdf"))
-        return _pdf_yanit(row, qr=qr, neden=neden)
+    def _geri_makbuz(neden: str):
+        neden_k = neden if neden in _GERI_METIN else "bagli_degil"
+        try:
+            _ekle_tahsilat(
+                int(uid),
+                kayit_mid,
+                ("geri_" + neden_k)[:40],
+                maske,
+                tel_h,
+                len(metin),
+                metin_h,
+                _tekil("szwa:geri"),
+                tid,
+                row.get("makbuz_no"),
+            )
+        except Exception:
+            logger.info("tahsilat_wa geri kayit yok")
+        mesaj = _GERI_METIN.get(neden_k) or _GERI_METIN["bagli_degil"]
+        qr = neden_k == "qr"
+        return {
+            "ok": not qr,
+            "geri_dus": not qr,
+            "qr": qr,
+            "neden": neden_k,
+            "mesaj": mesaj,
+            "indir": _makbuz_indir(tid),
+        }, 200
 
     acik = node_yolu_acik if node_fn is None else node_fn
     if not acik():
-        return _indir("kiraci")
+        return _geri_makbuz("kiraci")
 
     if bagli_fn is not None:
         paket = _bagli_paket(bagli_fn())
@@ -919,7 +905,7 @@ def tahsilat_wa_isle(
         if not paket["hazir"] and paket["neden"] != "ulasilamadi":
             paket = _uyandir_varsayilan()
     if not paket["hazir"]:
-        return _indir(paket["neden"] or "bagli_degil", qr=(paket["neden"] == "qr"))
+        return _geri_makbuz(paket["neden"] or "bagli_degil")
 
     if numara_fn is None:
         kayit, neden_n = _numara_dene(norm)
@@ -936,7 +922,7 @@ def tahsilat_wa_isle(
         return {"ok": False, "kayitli": False, "geri_dus": False, "mesaj": _KAYITSIZ}, 400
     if kayit != "kayitli":
         neden_k = "ulasilamadi" if neden_n in ("baglanti", "yanit_yok", "ulasilamadi") else "oturum"
-        return _indir(neden_k)
+        return _geri_makbuz(neden_k)
 
     raw = _pdf_bayt(row, pdf_fn)
     ad = _dosya_adi(row.get("makbuz_no"))
