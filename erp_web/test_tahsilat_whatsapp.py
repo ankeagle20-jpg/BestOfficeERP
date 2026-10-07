@@ -116,7 +116,7 @@ def test_gonderim_ve_ek():
     yaz = []
     args = []
     hold = {}
-    sw._durum_yaz = lambda _rid, durum: yaz.append(durum)
+    sw._durum_yaz = lambda _rid, durum, neden="": yaz.append(durum)
     sw._ekle_tahsilat = lambda *a, **_k: args.append(a) or {"id": 4}
 
     def kuyruk(_tel, _mesaj, _anahtar, ek=None):
@@ -141,7 +141,7 @@ def test_gonderim_ve_ek():
 
     base()
     yaz = []
-    sw._durum_yaz = lambda _rid, durum: yaz.append(durum)
+    sw._durum_yaz = lambda _rid, durum, neden="": yaz.append(durum)
     gonder(kuyruk=lambda *_a: "gonderildi")
     time.sleep(0.5)
     check("durum_gonderildi", yaz == ["gonderildi"])
@@ -291,6 +291,68 @@ def test_sayfa_ve_mig():
     check("mig_baglanti_yok", r2.returncode == 2 and "BAGLANTI YOK" in r2.stdout)
 
 
+def test_neden_esleme():
+    import logging
+
+    yaz = []
+    sw._durum_yaz = lambda rid, durum, neden="": yaz.append((durum, neden))
+    sw._arkaplan_yaz(4, {"durum": "hata", "neden": "ek_cok_buyuk"})
+    sw._arkaplan_yaz(4, {"durum": "hata", "neden": "ek_gecersiz"})
+    sw._arkaplan_yaz(4, {"durum": "hata", "neden": "ulasilamadi"})
+    sw._arkaplan_yaz(4, {"durum": "hata", "neden": "oturum_yok"})
+    sw._arkaplan_yaz(4, "ok")
+    check("neden_yaz", yaz == [
+        ("basarisiz", "ek_cok_buyuk"),
+        ("basarisiz", "ek_gecersiz"),
+        ("basarisiz", "ulasilamadi"),
+        ("basarisiz", "oturum_yok"),
+        ("kuyrukta", ""),
+    ])
+    buyuk = sw._kuyruk_oku(413, {"ok": False, "code": "ek_cok_buyuk"})
+    check("http_413", buyuk["durum"] == "hata" and buyuk["neden"] == "ek_cok_buyuk")
+    cozulmus = sw._kuyruk_oku(200, {"ok": True, "oge": [{"durum": "basarisiz", "kod": "ek_cok_buyuk"}]})
+    check("cozulmus_kod", cozulmus["neden"] == "ek_cok_buyuk")
+    ek = sw._kuyruk_oku(200, {"ok": True, "oge": [{"durum": "basarisiz", "kod": "ek_gecersiz"}]})
+    check("ek_kod", ek["neden"] == "ek_gecersiz")
+    duz = sw._kuyruk_oku(200, {"ok": True, "oge": [{"durum": "bekliyor"}]})
+    check("duz_kuyruk", duz["durum"] == "kuyrukta" and duz["neden"] == "" and sw._kuyruk_sonuc({"ok": True, "oge": [{"durum": "bekliyor"}]}) == "kuyrukta")
+    check("metin_buyuk", sw.durum_mesaji("basarisiz", False, "ek_cok_buyuk") == sw._EK_BUYUK)
+    check("metin_ek", sw.durum_mesaji("basarisiz", False, "ek_gecersiz") == sw._EK_YOK)
+    check("metin_servis", sw.durum_mesaji("basarisiz", False, "ulasilamadi") == sw._SERVIS)
+    check("metin_oturum", sw.durum_mesaji("basarisiz", False, "oturum_yok") == sw._OTURUM_YOK)
+    check("metin_genel", sw.durum_mesaji("basarisiz", False, "") == sw._BASARISIZ)
+    g1 = sw._durum_govde({"durum": "basarisiz", "neden": "ek_cok_buyuk"}, False)
+    g2 = sw._durum_govde({"durum": "basarisiz", "neden": "ek_gecersiz"}, False)
+    g3 = sw._durum_govde({"durum": "basarisiz", "neden": "oturum_yok"}, False)
+    g4 = sw._durum_govde({"durum": "basarisiz", "neden": ""}, False)
+    check("yine_kapali", g1.get("yine") is False and g1.get("mesaj") == sw._EK_BUYUK and g2.get("yine") is False)
+    check("yine_oturum", g3.get("yine") is True and g3.get("mesaj") == sw._OTURUM_YOK and g4.get("yine") is True)
+    check("yine_409", sw._YINE == "Bu mesaj bu numaraya az önce gönderildi.")
+    kayit = []
+
+    class H(logging.Handler):
+        def emit(self, record):
+            kayit.append(record.getMessage())
+
+    h = H()
+    sw.logger.addHandler(h)
+    sw.logger.setLevel(logging.INFO)
+    sw._kuyruk_log(413, "ek_cok_buyuk")
+    sw.logger.removeHandler(h)
+    check("log_kod", kayit and "http=413" in kayit[-1] and "kod=ek_cok_buyuk" in kayit[-1] and "905" not in kayit[-1])
+    js = (ROOT / "static" / "js" / "sozlesme-whatsapp.js").read_text(encoding="utf-8")
+    check("js_yine_bayrak", "j.yine === false" in js and "Bu mesaj bu numaraya az önce gönderildi." in js)
+    check("ensure_neden", "ADD COLUMN IF NOT EXISTS neden TEXT" in ENSURE_SRC and "neden TEXT" in ENSURE_SRC)
+    sql = (ROOT / "scripts" / "migrate_sozlesme_whatsapp_neden.sql").read_text(encoding="utf-8")
+    check("neden_sql", "public.sozlesme_whatsapp_gonderim" in sql and "ADD COLUMN IF NOT EXISTS neden TEXT" in sql and "DROP COLUMN IF EXISTS neden" in sql)
+    py = (ROOT / "sozlesme_whatsapp.py").read_text(encoding="utf-8")
+    check("neden_otomatik_yok", "migrate_sozlesme_whatsapp_neden" not in py)
+    r = subprocess.run([sys.executable, str(ROOT / "scripts" / "migrate_sozlesme_whatsapp_neden.py")], capture_output=True, text=True)
+    check("neden_dry", r.returncode == 0 and "Calistirilmadi" in r.stdout)
+    r2 = subprocess.run([sys.executable, str(ROOT / "scripts" / "migrate_sozlesme_whatsapp_neden.py"), "--uygula"], capture_output=True, text=True)
+    check("neden_baglanti_yok", r2.returncode == 2 and "BAGLANTI YOK" in r2.stdout)
+
+
 def test_yetkisiz():
     from flask import Flask
     from auth import login_manager
@@ -314,6 +376,7 @@ if __name__ == "__main__":
     test_cift_tik()
     test_hazir_ve_kaynak()
     test_sayfa_ve_mig()
+    test_neden_esleme()
     test_yetkisiz()
     if fails:
         print("FAIL", len(fails))

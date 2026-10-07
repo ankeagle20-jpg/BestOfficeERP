@@ -72,7 +72,19 @@ const buyuk = kalemEkle(new Map(), [], [{
 }]);
 assert.strictEqual(buyuk.eklenen, 0);
 assert.strictEqual(buyuk.oge[0].durum, "basarisiz");
+assert.strictEqual(buyuk.oge[0].kod, "ek_cok_buyuk");
+assert.strictEqual(kotuMime.oge[0].kod, "ek_gecersiz");
 assert.strictEqual(ekAyikla({ mime: "application/pdf", veri: kucuk, ad: "260.pdf" }).ad, "260.pdf");
+
+const ortaHam = Buffer.alloc(160 * 1024, 0x25);
+const orta = ortaHam.toString("base64");
+const ortaEk = ekAyikla({ mime: "application/pdf", veri: orta, ad: "260.pdf" });
+assert.strictEqual(ortaEk.hata, undefined);
+assert.strictEqual(ortaEk.ad, "260.pdf");
+const yaziKalem = kalemEkle(new Map(), [], [{ telefon: "905550000000", mesaj: "duz", anahtar: "szwa:d:yazi" }]);
+assert.strictEqual(yaziKalem.eklenen, 1);
+assert.strictEqual(yaziKalem.oge[0].durum, "bekliyor");
+assert.strictEqual(yaziKalem.oge[0].kod, undefined);
 
 async function gonderTest() {
   const item = { mesaj: "m", ek: { mime: "application/pdf", veri: kucuk, ad: "260.pdf" } };

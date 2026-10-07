@@ -36,7 +36,35 @@ _KAYITSIZ = "Bu numara WhatsApp'ta kayıtlı değil"
 _ONCEDEN = "Bu mesaj daha önce kuyruğa alındı"
 _GONDERILDI_ONCEDEN = "Bu mesaj daha önce gönderildi"
 _BASARISIZ = "Gönderilemedi: kuyruk kabul etmedi"
+_EK_BUYUK = "Makbuz eki çok büyük"
+_EK_YOK = "Ek kabul edilmedi"
+_SERVIS = "Servise ulaşılamadı"
+_KUYRUK_DOLU = "Kuyruk dolu"
+_OTURUM_YOK = "Oturum açık değil"
 _BELIRSIZ = "Sonuç belirsiz, telefondan kontrol edin"
+_NEDEN_METIN = {
+    "ek_cok_buyuk": _EK_BUYUK,
+    "ek_gecersiz": _EK_YOK,
+    "ulasilamadi": _SERVIS,
+    "yanit_yok": _SERVIS,
+    "numara_gecersiz": _TEL,
+    "kuyruk_dolu": _KUYRUK_DOLU,
+    "oturum_yok": _OTURUM_YOK,
+}
+_YINE_KAPALI = frozenset(("ek_cok_buyuk", "ek_gecersiz"))
+_KOD_ES = {
+    "ek_cok_buyuk": "ek_cok_buyuk",
+    "ek_gecersiz": "ek_gecersiz",
+    "numara_gecersiz": "numara_gecersiz",
+    "gecersiz": "numara_gecersiz",
+    "kuyruk_dolu": "kuyruk_dolu",
+    "WA_CONCURRENT_LIMIT": "kuyruk_dolu",
+    "oturum_yok": "oturum_yok",
+    "hazir_degil": "oturum_yok",
+    "ulasilamadi": "ulasilamadi",
+    "yanit_yok": "yanit_yok",
+}
+_KOD_RE = re.compile(r"^[a-z0-9_]{1,32}$")
 _KAYIT_YOK = "Kayıt yok"
 _DENEME_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 _GERI_METIN = {
@@ -77,7 +105,8 @@ def ensure_tablo() -> None:
             anahtar TEXT NOT NULL UNIQUE,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             tahsilat_id INTEGER,
-            makbuz_no TEXT
+            makbuz_no TEXT,
+            neden TEXT
         )
         """
     )
@@ -91,6 +120,12 @@ def ensure_tablo() -> None:
         """
         ALTER TABLE sozlesme_whatsapp_gonderim
         ADD COLUMN IF NOT EXISTS makbuz_no TEXT
+        """
+    )
+    execute(
+        """
+        ALTER TABLE sozlesme_whatsapp_gonderim
+        ADD COLUMN IF NOT EXISTS neden TEXT
         """
     )
     execute(
@@ -140,7 +175,17 @@ def deneme_anahtar(deneme: str) -> str:
     return "szwa:d:" + deneme
 
 
-def durum_mesaji(durum: str, cakisma: bool) -> str:
+def _neden_kodu(ham) -> str:
+    s = str(ham or "").strip()
+    if s in _KOD_ES:
+        return _KOD_ES[s]
+    k = s.lower()
+    if _KOD_RE.match(k):
+        return k
+    return ""
+
+
+def durum_mesaji(durum: str, cakisma: bool, neden: str = "") -> str:
     kod = str(durum or "")
     if kod == "gonderiliyor":
         return _SUREN
@@ -151,7 +196,7 @@ def durum_mesaji(durum: str, cakisma: bool) -> str:
     if kod == "belirsiz":
         return _BELIRSIZ
     if kod == "basarisiz":
-        return _BASARISIZ
+        return _NEDEN_METIN.get(_neden_kodu(neden)) or _BASARISIZ
     return _ONCEDEN
 
 
@@ -225,7 +270,7 @@ def _sayilar(uid: int, dk_basi: datetime, gun_basi: datetime):
 def _bul(uid: int, anahtar: str):
     return fetch_one(
         """
-        SELECT id, durum
+        SELECT id, durum, COALESCE(neden, '') AS neden
         FROM sozlesme_whatsapp_gonderim
         WHERE user_id = %s AND anahtar = %s
         """,
@@ -262,14 +307,14 @@ def _ekle(uid, mid, buton, durum, maske, tel_h, uzunluk, metin_h, anahtar):
     )
 
 
-def _durum_yaz(rid: int, durum: str) -> None:
+def _durum_yaz(rid: int, durum: str, neden: str = "") -> None:
     execute(
         """
         UPDATE sozlesme_whatsapp_gonderim
-        SET durum = %s
+        SET durum = %s, neden = NULLIF(%s, '')
         WHERE id = %s AND durum = 'gonderiliyor'
         """,
-        (durum, int(rid)),
+        (durum, _neden_kodu(neden), int(rid)),
     )
 
 
@@ -376,7 +421,11 @@ def _kuyruk_liste(telefon: str, mesaj: str, anahtar: str, ek=None) -> list:
     return [oge]
 
 
-def _kuyruk_varsayilan(telefon: str, mesaj: str, anahtar: str, ek=None) -> str:
+def _kuyruk_log(http_kod: int, neden: str) -> None:
+    logger.info("sozlesme_wa_kuyruk http=%s kod=%s", int(http_kod), (_neden_kodu(neden) or "-")[:32])
+
+
+def _kuyruk_varsayilan(telefon: str, mesaj: str, anahtar: str, ek=None) -> dict:
     import requests
     from routes.whatsapp_routes import _wa_internal_headers, _wa_url
 
@@ -388,54 +437,82 @@ def _kuyruk_varsayilan(telefon: str, mesaj: str, anahtar: str, ek=None) -> str:
             timeout=(3, 12),
         )
     except requests.exceptions.Timeout:
-        return "belirsiz"
+        _kuyruk_log(0, "yanit_yok")
+        return {"durum": "belirsiz", "neden": "yanit_yok"}
     except Exception:
-        return "hata"
-    if r.status_code >= 400:
-        return "hata"
+        _kuyruk_log(0, "ulasilamadi")
+        return {"durum": "hata", "neden": "ulasilamadi"}
     try:
         body = r.json() if r.content else {}
     except Exception:
-        return "belirsiz"
-    return _kuyruk_sonuc(body)
+        body = {}
+    paket = _kuyruk_oku(int(r.status_code), body)
+    if int(r.status_code) >= 400 or paket.get("durum") in ("hata", "belirsiz"):
+        _kuyruk_log(int(r.status_code), str(paket.get("neden") or ""))
+    return paket
+
+
+def _kuyruk_oku(status: int, body) -> dict:
+    if int(status) == 413:
+        return {"durum": "hata", "neden": "ek_cok_buyuk"}
+    if int(status) >= 400 or not isinstance(body, dict) or body.get("ok") is False:
+        neden = ""
+        if isinstance(body, dict):
+            neden = _neden_kodu(body.get("code") or body.get("kod"))
+        if not neden and int(status) == 503:
+            neden = "oturum_yok"
+        elif not neden and int(status) >= 500:
+            neden = "ulasilamadi"
+        elif not neden and int(status) >= 400:
+            neden = "http"
+        return {"durum": "hata", "neden": neden}
+    oge = body.get("oge") or []
+    if not oge or not isinstance(oge[0], dict):
+        return {"durum": "kuyrukta", "neden": ""}
+    durum = str(oge[0].get("durum") or "")
+    if durum == "gonderildi":
+        return {"durum": "gonderildi", "neden": ""}
+    if durum == "basarisiz":
+        return {"durum": "hata", "neden": _neden_kodu(oge[0].get("kod") or oge[0].get("code"))}
+    if durum == "belirsiz":
+        return {"durum": "belirsiz", "neden": ""}
+    return {"durum": "kuyrukta", "neden": ""}
 
 
 def _kuyruk_sonuc(body) -> str:
-    if not isinstance(body, dict) or body.get("ok") is False:
-        return "hata"
-    oge = body.get("oge") or []
-    if not oge or not isinstance(oge[0], dict):
-        return "kuyrukta"
-    durum = str(oge[0].get("durum") or "")
-    if durum == "gonderildi":
-        return "gonderildi"
-    if durum == "basarisiz":
-        return "hata"
-    if durum == "belirsiz":
-        return "belirsiz"
-    return "kuyrukta"
+    return str(_kuyruk_oku(200, body).get("durum") or "hata")
 
 
-def _arkaplan_yaz(rid: int, sonuc: str) -> None:
-    if sonuc == "gonderildi":
-        _durum_yaz(rid, "gonderildi")
-    elif sonuc in ("ok", "kuyrukta"):
-        _durum_yaz(rid, "kuyrukta")
-    elif sonuc == "belirsiz":
-        _durum_yaz(rid, "belirsiz")
+def _arkaplan_ayir(sonuc) -> tuple[str, str]:
+    if isinstance(sonuc, dict):
+        return str(sonuc.get("durum") or "hata"), _neden_kodu(sonuc.get("neden"))
+    return str(sonuc or "hata"), ""
+
+
+def _arkaplan_yaz(rid: int, sonuc) -> None:
+    kod, neden = _arkaplan_ayir(sonuc)
+    if kod == "gonderildi":
+        _durum_yaz(rid, "gonderildi", neden)
+    elif kod in ("ok", "kuyrukta"):
+        _durum_yaz(rid, "kuyrukta", neden)
+    elif kod == "belirsiz":
+        _durum_yaz(rid, "belirsiz", neden)
     else:
-        _durum_yaz(rid, "basarisiz")
+        _durum_yaz(rid, "basarisiz", neden)
 
 
 def _durum_govde(row: dict, cakisma: bool) -> dict:
     durum = str((row or {}).get("durum") or "")
+    neden = _neden_kodu((row or {}).get("neden"))
     govde = {
         "ok": durum != "basarisiz",
         "durum": durum,
-        "mesaj": durum_mesaji(durum, cakisma),
+        "mesaj": durum_mesaji(durum, cakisma, neden),
     }
     if cakisma:
         govde["cakisma"] = True
+    if durum == "basarisiz":
+        govde["yine"] = neden not in _YINE_KAPALI
     return govde
 
 

@@ -13,13 +13,14 @@ function cozulmusBoyut(veri) {
 }
 
 function ekAyikla(ek) {
-  if (!ek || typeof ek !== "object") return null;
-  if (ek.mime !== "application/pdf") return null;
+  if (!ek || typeof ek !== "object") return { hata: "ek_gecersiz" };
+  if (ek.mime !== "application/pdf") return { hata: "ek_gecersiz" };
   const veri = String(ek.veri || "").replace(/\s/g, "");
   const boyut = cozulmusBoyut(veri);
-  if (boyut < 5 || boyut > PDF_LIMIT) return null;
+  if (boyut > PDF_LIMIT) return { hata: "ek_cok_buyuk" };
+  if (boyut < 5) return { hata: "ek_gecersiz" };
   const ad = String(ek.ad || "");
-  if (!/^[0-9]{1,18}\.pdf$/.test(ad)) return null;
+  if (!/^[0-9]{1,18}\.pdf$/.test(ad)) return { hata: "ek_gecersiz" };
   return { mime: "application/pdf", veri, ad };
 }
 
@@ -40,11 +41,12 @@ function kalemEkle(harita, kuyruk, liste) {
     }
     let ek = null;
     if (item.ek) {
-      ek = ekAyikla(item.ek);
-      if (!ek) {
-        oge.push({ tekrar: false, durum: "basarisiz" });
+      const ayik = ekAyikla(item.ek);
+      if (!ayik || ayik.hata) {
+        oge.push({ tekrar: false, durum: "basarisiz", kod: (ayik && ayik.hata) || "ek_gecersiz" });
         continue;
       }
+      ek = ayik;
     }
     const kayit = {
       telefon: item.telefon,

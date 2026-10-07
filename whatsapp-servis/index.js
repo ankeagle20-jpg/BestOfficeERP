@@ -6,6 +6,7 @@ const QRCode = require('qrcode');
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const { idleKapanirMi, tekUcus } = require('./oturum-kural');
 const { kalemEkle, gonderGovde } = require('./kuyruk-kural');
+const { govdeAyir, jsonSinirHatasi } = require('./govde-kural');
 
 const WA_LOG_PATH = path.join(__dirname, 'wa-servis.log');
 
@@ -81,22 +82,24 @@ if (WA_INTERNAL_TOKEN.length < 32) {
 
 const app = express();
 app.use(cors());
-app.use(express.json());
 
-/** Tarayıcıdan doğrudan erişimi engelle — yalnızca Flask (header token) geçer. */
+/** Tarayıcıdan doğrudan erişimi engelle — yalnızca Flask (header token) geçer. Gövdeden önce. */
 function requireInternalToken(req, res, next) {
   const got = String(req.headers['x-wa-internal-token'] || '').trim();
   if (!WA_INTERNAL_TOKEN || got !== WA_INTERNAL_TOKEN) {
-    return res.status(401).json({
+    res.status(401).json({
       ok: false,
       error: 'Yetkisiz: geçerli X-WA-Internal-Token gerekli.',
     });
+    req.resume();
+    return;
   }
   return next();
 }
 
-// Tünel ve LAN dahil her yol token ister. /health ve 410 alias'ları da açıkta kalmasın.
+// Tünel ve LAN dahil her yol token ister. Gövde ayrıştırması token sonrası.
 app.use(requireInternalToken);
+app.use(govdeAyir);
 
 /** @type {Map<string, object>} */
 const sessions = new Map();
@@ -804,6 +807,8 @@ app.get('/qr-goster', goneAlias);
 app.post('/kuyruk-ekle', goneAlias);
 app.post('/kuyruk-toplu-ekle', goneAlias);
 app.post('/send', goneAlias);
+
+app.use(jsonSinirHatasi(waLog));
 
 migrateDefaultSessionDir();
 

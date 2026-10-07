@@ -150,7 +150,7 @@ def test_hizli_ve_yok():
     base_patches()
     durum = []
     sw._ekle = lambda *_a, **_k: {"id": 4}
-    sw._durum_yaz = lambda rid, d: durum.append(d)
+    sw._durum_yaz = lambda rid, d, neden="": durum.append(d)
 
     def kuyruk(*_a):
         time.sleep(0.4)
@@ -301,7 +301,7 @@ def test_deneme_ve_poll():
 
     sw._ekle = ekle
     sw._bul = bul
-    sw._durum_yaz = lambda rid, durum: [row.__setitem__("durum", durum) for row in kayit.values() if row["id"] == rid]
+    sw._durum_yaz = lambda rid, durum, neden="": [row.__setitem__("durum", durum) for row in kayit.values() if row["id"] == rid]
 
     def kuyruk(*a):
         kuyruklar.append(a[2])

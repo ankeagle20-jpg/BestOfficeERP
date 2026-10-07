@@ -144,10 +144,9 @@
       return;
     }
     if (durum === "basarisiz") {
-      var neden = (j && j.mesaj) || "";
-      if (uyari) uyari.textContent = neden.indexOf("Gönderilemedi") === 0 ? neden : "Gönderilemedi: " + (neden || "bilinmiyor");
+      if (uyari) uyari.textContent = (j && j.mesaj) || "Gönderilemedi: kuyruk kabul etmedi";
       if (sonuc) sonuc.textContent = "";
-      yineGoster(true);
+      yineGoster(!(j && j.yine === false));
       return;
     }
     if (durum === "belirsiz") {
