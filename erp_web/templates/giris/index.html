@@ -30812,20 +30812,9 @@ function girisTahsilatFormPayload() {
         ? tahsilatMakbuzSecilenAylikSatirlari()
         : [];
     var ayRefIsoListRaw = tahsilatAyRefIsoListFromSecilenSatirlar(seciliSatirlar);
-    var seciliToplam = tahsilatSecilenSatirlarToplami(seciliSatirlar);
-    // Tek ay seçiliyse ve girilen tutar o ayı aşmıyorsa (kısmi/tam), marker yaz:
-    // ay turuncu/yeşil + kalan tutar doğru görünsün.
-    // Tek ay seçiliyken girilen tutar ayı aşıyorsa (örn. 5000), kilitleme yapma:
-    // oldest açık aylara dağıtılsın.
-    // Çoklu seçimde eski güvenli davranış korunur (toplam ile tam eşleşince marker).
-    var ayRefIsoList = [];
-    if (ayRefIsoListRaw.length === 1) {
-        var tekAyTol = 0.01;
-        var tekAyTutar = parseFloat(tutar || 0) || 0;
-        if (tekAyTutar > 0 && tekAyTutar <= (seciliToplam + tekAyTol)) ayRefIsoList = ayRefIsoListRaw.slice();
-    } else if (ayRefIsoListRaw.length > 1) {
-        if (Math.abs(seciliToplam - (tutar || 0)) <= 0.01) ayRefIsoList = ayRefIsoListRaw.slice();
-    }
+    // Seçim varsa liste olduğu gibi gider; tutar seçilen ayların açık tutarına göre dolar.
+    // Seçim yoksa (otomatik tek ay dahil) liste boş kalır.
+    var ayRefIsoList = ayRefIsoListRaw.slice();
     var ayRefIso = ayRefIsoList.length ? ayRefIsoList[0] : null;
     var ayRefStartIso = ayRefIsoListRaw.length ? ayRefIsoListRaw[0] : null;
     var ayRefTutar = null;

@@ -1,7 +1,7 @@
 """Ekstre FIFO ay dağıtımı. Canlı veritabanına yazmaz."""
 from datetime import date
 
-from ay_fifo import TOL, acik_ay_dagit, dagit_seri
+from ay_fifo import TOL, acik_ay_dagit, dagit_seri, gorunen_borc_biles, reel_ay_haritasi
 from routes.faturalar_routes import _auto_allocate_oldest_unpaid_months
 
 
@@ -138,11 +138,230 @@ def test_cagri_metinleri():
     assert "ek_onceki=batch_onceki.get(mid)" in banka
     assert "_ensure_aylik_cache" not in banka
     fatura = Path("routes/faturalar_routes.py").read_text(encoding="utf-8")
-    assert "musteri_aylik_grid_cache" not in fatura.split("def _auto_allocate_oldest_unpaid_months")[1].split("def _tahsil_rapor_yil_ay_coerce")[0]
-    betik = Path("scripts/migrate_banka_import_aylik_markers.py").read_text(encoding="utf-8")
-    assert "Aşama 3 onayı olmadan çalıştırılmaz" in betik
-    assert "haric_tahsilat_id=tid" in betik
-    assert "_alloc_oldest" not in betik
+    dilim = fatura.split("def _auto_allocate_oldest_unpaid_months")[1].split("def _tahsil_rapor_yil_ay_coerce")[0]
+    assert "musteri_aylik_grid_cache" not in dilim
+    assert "_gorunen_borc_satirlari" in dilim
+    assert "ay_borc_yedek adet" in fatura
+    betik = Path("asama3_ay.py").read_text(encoding="utf-8")
+    yukleme = betik.split("def hesap_yukle")[1].split("def _yedek_yolu")[0]
+    assert "gorunen_borc_biles" in yukleme
+    html = Path("templates/giris/index.html").read_text(encoding="utf-8")
+
+    def pencere(bas, uzun=2200):
+        i = html.find(bas)
+        assert i >= 0, bas
+        return html[i:i + uzun]
+
+    giris = pencere("function girisTahsilatFormPayload")
+    soz = pencere("function sozlesmeTahsilatFormPayload")
+    assert "ayRefIsoList = ayRefIsoListRaw.slice()" in giris
+    assert "ayRefIsoList = ayRefIsoListRaw.slice()" in soz
+    assert "tekAyTutar" not in giris
+    secilen = pencere("function sozlesmeAylikTahsilEt", 3200)
+    assert "aylik-tutarlardan-tahsil-et" in secilen
+    assert "ayRefIsoList" not in secilen
+    betik_m = Path("scripts/migrate_banka_import_aylik_markers.py").read_text(encoding="utf-8")
+    assert "Aşama 3 onayı olmadan çalıştırılmaz" in betik_m
+    assert "haric_tahsilat_id=tid" in betik_m
+    assert "_alloc_oldest" not in betik_m
+
+
+def _borc_867():
+    rows = []
+    for m in range(1, 8):
+        rows.append((f"2024-{m:02d}-01", 720.0))
+    y, m = 2024, 8
+    while (y, m) <= (2025, 6):
+        rows.append((f"{y:04d}-{m:02d}-01", 1094.18))
+        m += 1
+        if m == 13:
+            y, m = y + 1, 1
+    return rows
+
+
+def _onceki_867(agustos_bir=True):
+    onceki = []
+    for m in range(1, 8):
+        iso = f"2024-{m:02d}-01"
+        onceki.append({
+            "id": m,
+            "tarih": iso,
+            "tutar": 720.0,
+            "aciklama": f"|AYLIK_TAH|{iso}|",
+        })
+    if agustos_bir:
+        onceki.append({
+            "id": 8,
+            "tarih": "2024-08-01",
+            "tutar": 1.0,
+            "aciklama": "|AYLIK_PAY|2024-08-01=1.00|",
+        })
+    return onceki
+
+
+def test_867_bin_agustos():
+    pays = acik_ay_dagit(_borc_867(), 1000, "2026-10-07", onceki=_onceki_867(True))
+    assert pays == [("2024-08-01", 1000.0)], pays
+    assert not any(iso.startswith("2025") for iso, _t in pays)
+
+
+def test_867_tam_acik_ve_uc_bin():
+    tam = acik_ay_dagit(_borc_867(), 1000, "2026-10-07", onceki=_onceki_867(False))
+    assert tam == [("2024-08-01", 1000.0)], tam
+    uc = acik_ay_dagit(_borc_867(), 3000, "2026-10-07", onceki=_onceki_867(False))
+    assert uc == [
+        ("2024-08-01", 1094.18),
+        ("2024-09-01", 1094.18),
+        ("2024-10-01", 811.64),
+    ], uc
+    kalanli = acik_ay_dagit(_borc_867(), 3000, "2026-10-07", onceki=_onceki_867(True))
+    assert kalanli[0] == ("2024-08-01", 1093.18), kalanli
+    assert kalanli[1] == ("2024-09-01", 1094.18)
+    assert kalanli[2] == ("2024-10-01", 812.64)
+
+
+def test_vadesi_gelmis_kapaninca_avans():
+    borc = [("2024-08-01", 1094.18), ("2024-09-01", 1094.18)]
+    onceki = [{"id": 1, "tarih": "2024-08-01", "tutar": 1094.18, "aciklama": "|AYLIK_TAH|2024-08-01|"}]
+    pays = acik_ay_dagit(borc, 40, "2024-08-20", onceki=onceki)
+    assert pays == [("2024-09-01", 40.0)], pays
+
+
+def test_yil_listesi_867_etkisiz():
+    _iso, pays = _auto_allocate_oldest_unpaid_months(
+        1,
+        1000,
+        [{"iso": "2025-01-01", "kalan": 1094.18}],
+        "2025-01-01",
+        odeme_tarihi="2026-10-07",
+        borc_satirlari=_borc_867(),
+        onceki_tahsilatlar=_onceki_867(True),
+    )
+    assert pays == [("2024-08-01", 1000.0)], pays
+
+
+def test_secilen_ay_acik_tutardan():
+    pays = acik_ay_dagit(
+        _borc_867(),
+        2000,
+        "2026-10-07",
+        onceki=_onceki_867(True),
+        allowlist=["2024-09-01", "2024-11-01"],
+    )
+    assert pays == [("2024-09-01", 1094.18), ("2024-11-01", 905.82)], pays
+
+
+def test_isaret_sonraki_aya_tasmaz():
+    borc = [("2024-01-01", 400.0), ("2024-02-01", 400.0)]
+    onceki = [{
+        "id": 1,
+        "tarih": "2024-01-01",
+        "tutar": 720.0,
+        "aciklama": "|AYLIK_TAH|2024-01-01|",
+    }]
+    pays = acik_ay_dagit(borc, 100, "2024-03-01", onceki=onceki)
+    assert pays == [("2024-02-01", 100.0)], pays
+    kismi = acik_ay_dagit(
+        [("2024-01-01", 720.0), ("2024-02-01", 720.0)],
+        100,
+        "2024-03-01",
+        onceki=[{
+            "id": 1,
+            "tarih": "2024-01-01",
+            "tutar": 720.0,
+            "aciklama": "|AYLIK_PAY|2024-01-01=400.00|",
+        }],
+    )
+    assert kismi == [("2024-01-01", 100.0)], kismi
+
+
+def test_fatura_yedek_ve_reel():
+    borc, yedek = gorunen_borc_biles(
+        {"2024-01-01": 720.0},
+        {"2024-01-01": 300.0, "2024-08-01": 1094.18},
+        {"2024-01-01": 400.0, "2024-02-01": 400.0},
+    )
+    assert borc["2024-01-01"] == 720.0
+    assert borc["2024-08-01"] == 1094.18
+    assert borc["2024-02-01"] == 400.0
+    assert yedek == ["2024-02-01"], yedek
+    reel = reel_ay_haritasi([(2024, 1094.18)], "2024-08-01")
+    assert reel["2024-08-01"] == 1094.18
+    assert reel["2025-07-01"] == 1094.18
+    assert "2024-07-01" not in reel
+
+
+def test_banka_yolu_gorunen_borc():
+    _iso, pays = _auto_allocate_oldest_unpaid_months(
+        1,
+        1000,
+        odeme_tarihi="2026-10-07",
+        borc_satirlari=_borc_867(),
+        onceki_tahsilatlar=_onceki_867(False),
+        ek_onceki=[{
+            "id": 50,
+            "tarih": "2024-08-01",
+            "tutar": 1.0,
+            "aciklama": "|AYLIK_PAY|2024-08-01=1.00|",
+        }],
+    )
+    assert pays == [("2024-08-01", 1000.0)], pays
+
+
+def test_tutarli_hesap_ayni_dagilim():
+    borc = _borc_ornek()
+    harita = {iso: tutar for iso, tutar in borc}
+    gorunen, yedek = gorunen_borc_biles(harita, harita, harita)
+    assert yedek == []
+    assert acik_ay_dagit(gorunen, 360, "2024-03-05") == acik_ay_dagit(borc, 360, "2024-03-05")
+    seri = dagit_seri(gorunen, [
+        {"id": 7, "tarih": "2024-03-05", "tutar": 360, "aciklama": "|AYLIK_PAY|2024-01-01=360.00|"},
+    ])
+    assert seri[0] == [("2022-09-01", 300.0), ("2022-10-01", 60.0)], seri
+
+
+def test_tah_isaret_kaynagi_ve_cift_sayim():
+    """Tutar AYLIK_TAH'tan gelir. PAY varsa PAY tutarı kullanılır, ikisi toplanmaz."""
+    from ay_fifo import _isaret
+    tah = {"tutar": 10000, "aciklama": "|AYLIK_TAH|2026-08-01|"}
+    assert _isaret(tah) == ("tah", ["2026-08-01"])
+    borc = [
+        ("2026-06-01", 10000.0),
+        ("2026-07-01", 10000.0),
+        ("2026-08-01", 10000.0),
+        ("2026-09-01", 10000.0),
+    ]
+    rows = [
+        {"id": 5819, "tarih": "2026-08-01", "tutar": 10000, "aciklama": "|AYLIK_TAH|2026-08-01|"},
+        {"id": 5701, "tarih": "2026-08-28", "tutar": 10000, "aciklama": "|AYLIK_PAY|2026-06-01=10000.00|"},
+        {"id": 5700, "tarih": "2026-09-28", "tutar": 10000, "aciklama": "|AYLIK_PAY|2026-07-01=10000.00|"},
+    ]
+    parca = dagit_seri(borc, rows)
+    assert parca[0] == [("2026-08-01", 10000.0)], parca[0]
+    assert parca[1] == [("2026-06-01", 10000.0)], parca[1]
+    assert parca[2] == [("2026-07-01", 10000.0)], parca[2]
+    agustos = sum(t for p in parca for iso, t in p if iso == "2026-08-01")
+    assert agustos == 10000.0
+    pays = acik_ay_dagit(
+        borc,
+        10000,
+        "2026-09-28",
+        onceki=[rows[0]],
+    )
+    assert pays == [("2026-06-01", 10000.0)], pays
+    karisik = acik_ay_dagit(
+        [("2026-08-01", 10000.0)],
+        100,
+        "2026-09-28",
+        onceki=[{
+            "id": 1,
+            "tarih": "2026-08-01",
+            "tutar": 10000,
+            "aciklama": "|AYLIK_TAH|2026-08-01| |AYLIK_PAY|2026-08-01=1.00|",
+        }],
+    )
+    assert _isaret({"aciklama": "|AYLIK_TAH|2026-08-01| |AYLIK_PAY|2026-08-01=1.00|"})[0] == "pay"
+    assert karisik == [("2026-08-01", 100.0)], karisik
 
 
 if __name__ == "__main__":
@@ -156,4 +375,14 @@ if __name__ == "__main__":
     test_banka_ayni_istek_sirasi()
     test_seri_ileri_tarih_oncekiyi_degistirmez()
     test_cagri_metinleri()
+    test_867_bin_agustos()
+    test_867_tam_acik_ve_uc_bin()
+    test_vadesi_gelmis_kapaninca_avans()
+    test_yil_listesi_867_etkisiz()
+    test_secilen_ay_acik_tutardan()
+    test_isaret_sonraki_aya_tasmaz()
+    test_fatura_yedek_ve_reel()
+    test_banka_yolu_gorunen_borc()
+    test_tutarli_hesap_ayni_dagilim()
+    test_tah_isaret_kaynagi_ve_cift_sayim()
     print("CASE ay_fifo ok", date.today().isoformat())

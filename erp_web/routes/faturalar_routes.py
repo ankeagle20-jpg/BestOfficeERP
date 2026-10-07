@@ -64,7 +64,7 @@ import logging
 import math
 import time
 
-from ay_fifo import acik_ay_dagit, borc_haritasi
+from ay_fifo import acik_ay_dagit, borc_haritasi, gorunen_borc_biles, grid_brut_haritasi, reel_ay_haritasi
 
 
 def _fatura_pdf_debug():
@@ -723,7 +723,7 @@ def _acik_aylik_tutar_ay_set(musteri_id: int) -> set[str]:
 
 
 def _ekstre_borc_satirlari(musteri_id: int) -> dict[str, float]:
-    """Ekstre borç satırı: ayın 1'i fatura tutarı. Grid önbelleği okunmaz."""
+    """Fatura yedeği: ayın 1'i fatura tutarı. Ekrandaki ay tutarı yoksa kullanılır."""
     rows = fetch_all(
         f"""
         SELECT LEFT(fatura_tarihi::text, 10) AS tarih,
@@ -745,7 +745,8 @@ def _onceki_tahsilat_satirlari(musteri_id: int, odeme_tarihi: str, haric_tahsila
         """
         SELECT id,
                LEFT(tahsilat_tarihi::text, 10) AS tarih,
-               ROUND(COALESCE(tutar, 0)::numeric, 2) AS tutar
+               ROUND(COALESCE(tutar, 0)::numeric, 2) AS tutar,
+               COALESCE(aciklama, '') AS aciklama
         FROM tahsilatlar
         WHERE (musteri_id = %s OR customer_id = %s)
           AND COALESCE(tutar, 0) > 0
@@ -773,8 +774,55 @@ def _onceki_tahsilat_satirlari(musteri_id: int, odeme_tarihi: str, haric_tahsila
         # Aynı gündeki daha sonraki kayıt, bu satırın öncesi değildir.
         if haric is not None and tarih == odeme and rid is not None and rid > haric:
             continue
-        out.append({"id": rid if rid is not None else 0, "tarih": tarih, "tutar": r.get("tutar")})
+        out.append({
+            "id": rid if rid is not None else 0,
+            "tarih": tarih,
+            "tutar": r.get("tutar"),
+            "aciklama": r.get("aciklama") or "",
+        })
     return out
+
+
+def _gorunen_borc_satirlari(musteri_id: int) -> dict[str, float]:
+    """Ekrandaki aylık borç. Hücre varsa o; yoksa reel; o da yoksa fatura yedeği."""
+    grid: dict[str, float] = {}
+    reel: dict[str, float] = {}
+    fatura: dict[str, float] = {}
+    try:
+        row = fetch_one(
+            "SELECT payload FROM musteri_aylik_grid_cache WHERE musteri_id = %s",
+            (int(musteri_id),),
+        )
+        payload = row.get("payload") if row else None
+        grid = grid_brut_haritasi(payload)
+    except Exception:
+        logging.getLogger(__name__).info("ay_borc_grid okunamadi")
+    try:
+        donem = fetch_all(
+            "SELECT donem_yil, tutar_kdv_dahil FROM musteri_reel_donem_tutar WHERE musteri_id = %s",
+            (int(musteri_id),),
+        ) or []
+        kyc = fetch_one(
+            """
+            SELECT sozlesme_tarihi::text AS bas, kira_artis_tarihi::text AS artis
+            FROM musteri_kyc WHERE musteri_id = %s
+            """,
+            (int(musteri_id),),
+        ) or {}
+        reel = reel_ay_haritasi(
+            [(r.get("donem_yil"), r.get("tutar_kdv_dahil")) for r in donem],
+            (kyc or {}).get("artis") or (kyc or {}).get("bas"),
+        )
+    except Exception:
+        logging.getLogger(__name__).info("ay_borc_reel okunamadi")
+    try:
+        fatura = _ekstre_borc_satirlari(musteri_id)
+    except Exception:
+        logging.getLogger(__name__).info("ekstre borc satiri okunamadi")
+    borc, yedek = gorunen_borc_biles(grid, reel, fatura)
+    if yedek:
+        logging.getLogger(__name__).info("ay_borc_yedek adet=%s", len(yedek))
+    return borc
 
 
 def _auto_allocate_oldest_unpaid_months(
@@ -789,10 +837,10 @@ def _auto_allocate_oldest_unpaid_months(
     ek_onceki=None,
     haric_tahsilat_id=None,
 ):
-    """Ekstre borç satırından, en eski vadesi gelmiş açık aya dağıtır.
+    """Ekrandaki aylık borçtan, en eski vadesi gelmiş açık aya dağıtır.
 
     borc_listesi ve start_iso yok sayılır (yıl filtresi dağıtımı daraltmasın).
-    iso_allowlist varsa yalnız seçilen aylar doldurulur.
+    iso_allowlist varsa yalnız seçilen aylar, açık tutarına göre doldurulur.
     Çıktı: (iso_list, [(iso, pay), ...])
     """
     del borc_listesi, start_iso
@@ -807,11 +855,7 @@ def _auto_allocate_oldest_unpaid_months(
     if len(odeme) != 10:
         odeme = date.today().isoformat()
     if borc_satirlari is None:
-        try:
-            borc = _ekstre_borc_satirlari(mid)
-        except Exception:
-            logging.getLogger(__name__).info("ekstre borc satiri okunamadi")
-            return [], []
+        borc = _gorunen_borc_satirlari(mid)
     else:
         borc = borc_satirlari
     if onceki_tahsilatlar is None:
