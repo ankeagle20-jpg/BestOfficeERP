@@ -92,7 +92,7 @@
   var acik = null;
   var pollTimer = null;
   var POLL_MS = 1500;
-  var POLL_SON = 30000;
+  var POLL_SON = 90000;
 
   function denemeUret() {
     if (window.crypto && typeof crypto.randomUUID === "function") return crypto.randomUUID();
@@ -134,9 +134,9 @@
     var uyari = document.getElementById("sozlesme-wa-uyari");
     var sonuc = document.getElementById("sozlesme-wa-sonuc");
     var durum = j && j.durum;
-    if (durum === "kuyrukta") {
+    if (durum === "kuyrukta" || durum === "gonderiliyor") {
       if (uyari) uyari.textContent = j.cakisma ? (j.mesaj || "") : "";
-      if (sonuc) sonuc.textContent = "Kuyruğa alındı ✓ (birkaç saniyede iletilir)";
+      if (sonuc) sonuc.textContent = "Kuyruğa alındı…";
       yineGoster(false);
       return;
     }
@@ -169,7 +169,12 @@
       }
       if (Date.now() - bas >= POLL_SON) {
         pollDur();
-        belirsizGoster();
+        var uyari = document.getElementById("sozlesme-wa-uyari");
+        var sonuc = document.getElementById("sozlesme-wa-sonuc");
+        if (uyari) uyari.textContent = "Sonuç henüz yok; birkaç dakika sonra durum yenilenir";
+        if (sonuc) sonuc.textContent = "";
+        yineGoster(true);
+        dugmeAc();
         return;
       }
       fetch("/giris/api/sozlesme-whatsapp/durum?deneme=" + encodeURIComponent(deneme), { credentials: "same-origin" })
@@ -178,7 +183,10 @@
         })
         .then(function (j) {
           if (!acik || acik.deneme !== deneme) return;
-          if (!j.durum || j.durum === "gonderiliyor" || j.durum === "yok") return;
+          if (!j.durum || j.durum === "gonderiliyor" || j.durum === "kuyrukta" || j.durum === "yok") {
+            if (j.durum === "kuyrukta" || j.durum === "gonderiliyor") sonucYaz(j);
+            return;
+          }
           pollDur();
           dugmeAc();
           sonucYaz(j);
@@ -293,11 +301,11 @@
         if (uyari) uyari.textContent = j.mesaj || "Bu mesaj bu numaraya az önce gönderildi.";
         yineGoster(true);
         if (sonuc) sonuc.textContent = "";
-      } else if (j.ok && j.durum === "gonderiliyor") {
+      } else if (j.ok && (j.durum === "gonderiliyor" || j.durum === "kuyrukta")) {
         suruyor = true;
         sonucYaz(j);
         pollBaslat(deneme);
-      } else if (j.durum === "kuyrukta" || j.durum === "gonderildi" || j.durum === "belirsiz" || j.durum === "basarisiz") {
+      } else if (j.durum === "gonderildi" || j.durum === "belirsiz" || j.durum === "basarisiz") {
         sonucYaz(j);
       } else if (j.ok) {
         if (uyari) uyari.textContent = "";

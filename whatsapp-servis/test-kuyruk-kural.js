@@ -33,7 +33,7 @@ assert.strictEqual(d.eklenen, 1);
 assert.strictEqual(kuyruk.length, 2);
 assert.strictEqual(JSON.stringify(c.oge[0]).includes("90555"), false);
 
-const { ekAyikla, gonderGovde, PDF_LIMIT } = require("./kuyruk-kural");
+const { ekAyikla, gonderGovde, gonderSecenek, PDF_LIMIT, sonucSinifla, sureli, yariyiGeriAl, gonderimBitir, sonucSakla, sonucGetir, logSatiri, SONUC_TTL_MS } = require("./kuyruk-kural");
 const fs = require("fs");
 const path = require("path");
 const kuralSrc = fs.readFileSync(path.join(__dirname, "kuyruk-kural.js"), "utf8");
@@ -90,13 +90,14 @@ async function gonderTest() {
   const item = { mesaj: "m", ek: { mime: "application/pdf", veri: kucuk, ad: "260.pdf" } };
   let giden = null;
   await gonderGovde(item, async (icerik, opts) => {
-    giden = { ad: icerik.ad, mime: icerik.mime, caption: opts && opts.caption };
+    giden = { ad: icerik.ad, mime: icerik.mime, caption: opts && opts.caption, belge: opts && opts.sendMediaAsDocument };
     return { id: { _serialized: "1" } };
   }, (mime, veri, ad) => ({ mime, veri, ad }));
   assert.strictEqual(item.ek, null);
   assert.strictEqual(giden.ad, "260.pdf");
   assert.strictEqual(giden.mime, "application/pdf");
   assert.strictEqual(giden.caption, "m");
+  assert.strictEqual(giden.belge, true);
 
   const yazi = { mesaj: "sadece" };
   let alinan = null;
@@ -123,12 +124,75 @@ const indexSrc = fs.readFileSync(path.join(__dirname, "index.js"), "utf8");
 assert.strictEqual(indexSrc.includes("new MessageMedia"), true);
 assert.strictEqual(indexSrc.includes("item.ek = null"), true);
 assert.strictEqual(indexSrc.includes("gonderGovde"), true);
+assert.strictEqual(kuralSrc.includes("sendMediaAsDocument: true"), true);
+assert.strictEqual(indexSrc.includes("kuyruk-sonuc"), true);
+assert.strictEqual(indexSrc.includes("yariyiGeriAl"), true);
+assert.strictEqual(gonderSecenek({ mesaj: "m" }), undefined);
+assert.strictEqual(gonderSecenek({ mesaj: "m", ek: { ad: "1.pdf" } }).sendMediaAsDocument, true);
 
-gonderTest().then(() => {
-  console.log("CASE kuyruk kural ok");
-}).catch((err) => {
-  console.error("FAIL kuyruk");
-  console.error(err && err.message ? err.message : "hata");
-  process.exit(1);
-});
+assert.strictEqual(sonucSinifla({ id: { _serialized: "MID" } }, null, false, true).durum, "gonderildi");
+assert.strictEqual(sonucSinifla({}, null, false, true).kod, "bos_donus");
+assert.strictEqual(sonucSinifla(null, new Error("Evaluation failed"), false, true).kod, "medya_hata");
+assert.strictEqual(sonucSinifla(null, new Error("Evaluation failed"), false, false).kod, "gonderim_hata");
+assert.strictEqual(sonucSinifla(null, new Error("Protocol error: Target closed"), false, true).kod, "oturum");
+assert.strictEqual(sonucSinifla({ id: { _serialized: "MID" } }, null, true, true).kod, "zaman_asimi");
+
+const satir = logSatiri("szwa:d:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "pdf", 130890, "basarisiz", "medya_hata", 80);
+assert.strictEqual(satir.includes("merhaba"), false);
+assert.strictEqual(satir.includes("90555"), false);
+assert.ok(satir.includes("tur=pdf"));
+assert.ok(satir.includes("bayt=130890"));
+assert.ok(satir.includes("kod=medya_hata"));
+assert.ok(satir.includes("sonuc=basarisiz"));
+assert.strictEqual(logSatiri("905551112233", "metin", 0, "gonderildi", "", 10).includes("905551112233"), false);
+
+const sonucHarita = new Map();
+sonucSakla(sonucHarita, "szwa:d:abc", { durum: "gonderildi", kod: "", tur: "pdf", bayt: 10, sure: 4 }, 1000);
+assert.strictEqual(sonucGetir(sonucHarita, "szwa:d:abc", 1000, SONUC_TTL_MS).durum, "gonderildi");
+assert.strictEqual(JSON.stringify(sonucGetir(sonucHarita, "szwa:d:abc", 1000, SONUC_TTL_MS)).includes("telefon"), false);
+assert.strictEqual(sonucGetir(sonucHarita, "szwa:d:abc", 1000 + SONUC_TTL_MS + 1, SONUC_TTL_MS).durum, "yok");
+assert.strictEqual(sonucGetir(new Map(), "yok", 1, 10).durum, "yok");
+
+const gidenKalem = { durum: "gonderildi", kusak: 1 };
+assert.strictEqual(yariyiGeriAl([], gidenKalem).neden, "bitti");
+const yarim = { durum: "gonderiliyor", kusak: 1, askida: true, anahtar: "a" };
+const sira = [];
+assert.strictEqual(yariyiGeriAl(sira, yarim).eklendi, true);
+assert.strictEqual(yariyiGeriAl(sira, yarim).neden, "zaten");
+assert.strictEqual(sira.length, 1);
+assert.strictEqual(yarim.kusak, 2);
+const gecBasari = gonderimBitir(yarim, sira, { durum: "gonderildi", kod: "" }, 1);
+assert.strictEqual(gecBasari.uygulandi, true);
+assert.strictEqual(yarim.durum, "gonderildi");
+assert.strictEqual(sira.length, 0);
+
+const takili = { durum: "gonderiliyor", kusak: 1, askida: true };
+const sira2 = [];
+yariyiGeriAl(sira2, takili);
+const zaman = gonderimBitir(takili, sira2, { durum: "basarisiz", kod: "zaman_asimi" }, 1);
+assert.strictEqual(zaman.uygulandi, true);
+assert.strictEqual(takili.durum, "basarisiz");
+assert.strictEqual(takili.kod, "zaman_asimi");
+assert.strictEqual(sira2.length, 0);
+
+const kirilan = { durum: "gonderiliyor", kusak: 1, askida: true };
+const sira3 = [];
+yariyiGeriAl(sira3, kirilan);
+const yeniden = gonderimBitir(kirilan, sira3, { durum: "basarisiz", kod: "medya_hata" }, 1);
+assert.strictEqual(yeniden.uygulandi, false);
+assert.strictEqual(kirilan.durum, "bekliyor");
+assert.strictEqual(kirilan.askida, false);
+assert.strictEqual(sira3.length, 1);
+
+gonderTest()
+  .then(() => sureli(() => new Promise(() => {}), 40))
+  .then((paket) => {
+    assert.strictEqual(paket.zamanAsimi, true);
+    console.log("CASE kuyruk kural ok");
+  })
+  .catch((err) => {
+    console.error("FAIL kuyruk");
+    console.error(err && err.message ? err.message : "hata");
+    process.exit(1);
+  });
 

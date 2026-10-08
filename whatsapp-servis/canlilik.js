@@ -3,6 +3,7 @@
 const HEARTBEAT_MS = 60 * 1000;
 const HEARTBEAT_TIMEOUT_MS = 10 * 1000;
 const TOPARLAMA_MS = 5 * 60 * 1000;
+const HEARTBEAT_SERI = 3;
 const { tekUcus } = require("./oturum-kural");
 
 function heartbeatSonuc(state, hata, zamanAsimi) {
@@ -173,10 +174,37 @@ async function toparlaOturum(oturum, deps) {
   });
 }
 
+function gonderimSuruyor(oturum) {
+  if (!oturum) return false;
+  if (oturum.gonderiliyor) return true;
+  return Boolean(oturum.aktifKalem && oturum.aktifKalem.askida);
+}
+
+function toparlaEsik(oturum, adim, seri) {
+  const once = Math.max(0, Number(seri) || 0);
+  if (!adim || !adim.toparla) return { toparla: false, seri: 0 };
+  const yeni = once + 1;
+  const neden = String((adim.sonuc && adim.sonuc.bozuk_neden) || "");
+  if (gonderimSuruyor(oturum) && yeni < HEARTBEAT_SERI && neden !== "zaman_asimi") {
+    return { toparla: false, seri: yeni };
+  }
+  return { toparla: true, seri: yeni };
+}
+
+function heartbeatBastir(oturum) {
+  if (!oturum) return oturum;
+  oturum.bozuk = false;
+  oturum.bozukNeden = "";
+  oturum.canli = oturum.ready === true && oturum.status === "ready";
+  if (oturum.canli) oturum.toparlamaDurumu = "hazir";
+  return oturum;
+}
+
 module.exports = {
   HEARTBEAT_MS,
   HEARTBEAT_TIMEOUT_MS,
   TOPARLAMA_MS,
+  HEARTBEAT_SERI,
   heartbeatSonuc,
   heartbeatUygula,
   planAdim,
@@ -185,4 +213,7 @@ module.exports = {
   olcGetState,
   heartbeatAdim,
   toparlaOturum,
+  gonderimSuruyor,
+  toparlaEsik,
+  heartbeatBastir,
 };

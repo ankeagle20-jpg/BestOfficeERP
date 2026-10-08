@@ -12,8 +12,23 @@ const {
   heartbeatAdim,
   planAdim,
   toparlaOturum,
+  toparlaEsik,
+  heartbeatBastir,
 } = require('./canlilik');
-const { kalemEkle, gonderGovde } = require('./kuyruk-kural');
+const {
+  kalemEkle,
+  gonderGovde,
+  cozulmusBoyut,
+  sonucSinifla,
+  sureli,
+  MEDYA_TIMEOUT_MS,
+  SONUC_TTL_MS,
+  sonucSakla,
+  sonucGetir,
+  logSatiri,
+  yariyiGeriAl,
+  gonderimBitir,
+} = require('./kuyruk-kural');
 const { govdeAyir, jsonSinirHatasi } = require('./govde-kural');
 
 const WA_LOG_PATH = path.join(__dirname, 'wa-servis.log');
@@ -242,6 +257,9 @@ function getOrCreateSession(tenantId) {
     // Idle destroy'a tabi (default dahil). LocalAuth diski korunur; ihtiyaçta yeniden açılır.
     pinKeepAlive: false,
     gonderimDurum: new Map(),
+    heartbeatSeri: 0,
+    aktifKalem: null,
+    gonderiliyor: false,
     canli: false,
     bozuk: false,
     bozukNeden: '',
@@ -289,32 +307,57 @@ async function kuyrukIsle(session) {
   touch(session);
   try {
     while (session.queue.length > 0 && session.ready && session.client) {
+      if (session.queue[0] && session.queue[0].askida) break;
       const item = session.queue.shift();
+      if (!item || item.durum === 'gonderildi' || item._kapali) continue;
+      const kusak = (item.kusak || 0) + 1;
+      item.kusak = kusak;
       item.durum = 'gonderiliyor';
+      item.askida = true;
+      session.aktifKalem = item;
+      session.gonderiliyor = true;
       const phone = normalizeTelefon(item.telefon);
       const message = String(item.mesaj || '').trim();
+      const tur = item.ek ? 'pdf' : 'metin';
+      const baytHam = item.ek ? cozulmusBoyut(item.ek.veri) : 0;
+      const bayt = baytHam > 0 ? baytHam : 0;
+      const bas = Date.now();
+      let sinif = { durum: 'basarisiz', kod: 'gonderim_hata' };
       let beklenir = false;
       try {
         if (!phone || !message) {
-          item._sonuc = { ok: false, error: 'telefon veya mesaj geçersiz' };
-          item.durum = 'basarisiz';
+          sinif = { durum: 'basarisiz', kod: 'gonderim_hata' };
         } else {
           beklenir = true;
           const chatId = phone.endsWith('@c.us') ? phone : `${phone}@c.us`;
-          const result = await gonderGovde(item, (icerik, opts) => {
-            if (opts) return session.client.sendMessage(chatId, icerik, opts);
-            return session.client.sendMessage(chatId, icerik);
-          }, (mime, veri, ad) => new MessageMedia(mime, veri, ad));
-          item._sonuc = { ok: true, id: result && result.id ? result.id._serialized || null : null };
-          item.durum = 'gonderildi';
-          console.log(`[WA:${session.tenantId}] Kuyruk gönderildi`);
+          const paket = await sureli(
+            gonderGovde(item, (icerik, opts) => {
+              if (opts) return session.client.sendMessage(chatId, icerik, opts);
+              return session.client.sendMessage(chatId, icerik);
+            }, (mime, veri, ad) => new MessageMedia(mime, veri, ad)),
+            MEDYA_TIMEOUT_MS
+          );
+          sinif = sonucSinifla(paket.donus, paket.hata, Boolean(paket.zamanAsimi), tur === 'pdf');
         }
       } catch (err) {
-        item._sonuc = { ok: false, error: err.message || String(err) };
-        item.durum = 'basarisiz';
-        console.error(`[WA:${session.tenantId}] Kuyruk gönderim hatası:`, err);
+        sinif = sonucSinifla(null, err, false, tur === 'pdf');
       } finally {
         item.ek = null;
+        session.gonderiliyor = false;
+      }
+      const bit = gonderimBitir(item, session.queue, sinif, kusak);
+      if (session.aktifKalem === item && !item.askida) session.aktifKalem = null;
+      if (bit.uygulandi) {
+        if (!session.gonderimDurum) session.gonderimDurum = new Map();
+        const sure = Date.now() - bas;
+        sonucSakla(session.gonderimDurum, item.anahtar, {
+          durum: item.durum,
+          kod: item.kod || '',
+          tur,
+          bayt,
+          sure,
+        }, Date.now());
+        waLog('kuyruk_sonuc', logSatiri(item.anahtar, tur, bayt, item.durum, item.kod, sure));
       }
       if (!beklenir) continue;
       const minBekleme = 20000;
@@ -324,7 +367,29 @@ async function kuyrukIsle(session) {
     }
   } finally {
     session.queueBusy = false;
+    session.gonderiliyor = false;
   }
+}
+
+function heartbeatKarar(session, adim) {
+  if (!adim || !adim.kontrol || !adim.toparla) {
+    session.heartbeatSeri = 0;
+    return false;
+  }
+  const esik = toparlaEsik(session, adim, session.heartbeatSeri || 0);
+  session.heartbeatSeri = esik.seri;
+  if (!esik.toparla) {
+    heartbeatBastir(session);
+    waLog('heartbeat_bekle', session.tenantId + ' ' + ((adim.sonuc && adim.sonuc.bozuk_neden) || 'hata'));
+    return false;
+  }
+  session.heartbeatSeri = 0;
+  if (session.aktifKalem) {
+    const geri = yariyiGeriAl(session.queue, session.aktifKalem);
+    waLog('kuyruk_geri', session.tenantId + ' ' + geri.neden);
+  }
+  waLog('heartbeat_hata', session.tenantId + ' ' + ((adim.sonuc && adim.sonuc.bozuk_neden) || 'hata'));
+  return true;
 }
 
 function attachHandlers(session) {
@@ -419,8 +484,7 @@ async function heartbeatBir(session) {
     Date.now(),
     HEARTBEAT_TIMEOUT_MS
   );
-  if (!adim.kontrol || !adim.toparla) return;
-  waLog('heartbeat_hata', session.tenantId + ' ' + (adim.sonuc.bozuk_neden || 'hata'));
+  if (!heartbeatKarar(session, adim)) return;
   ensureClient(session.tenantId).catch(() => {
     waLog('toparlama_hata', session.tenantId);
   });
@@ -724,8 +788,7 @@ async function durumCanli(tenantId) {
     Date.now(),
     HEARTBEAT_TIMEOUT_MS
   );
-  if (!adim.kontrol || !adim.toparla) return session;
-  waLog('heartbeat_hata', session.tenantId + ' ' + (adim.sonuc.bozuk_neden || 'hata'));
+  if (!heartbeatKarar(session, adim)) return session;
   return ensureClient(tenantId);
 }
 
@@ -847,6 +910,20 @@ app.post('/t/:tenantId/kuyruk-toplu-ekle', async (req, res) => {
   } catch (err) {
     return sendEnsureError(res, err, false);
   }
+});
+
+const KUYRUK_ANAHTAR = /^szwa:d:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+app.get('/t/:tenantId/kuyruk-sonuc', (req, res) => {
+  const tenantId = tenantParam(req, res);
+  if (!tenantId) return;
+  const anahtar = String((req.query && req.query.anahtar) || '').trim();
+  if (!KUYRUK_ANAHTAR.test(anahtar)) {
+    return res.status(400).json({ ok: false, durum: 'yok', kod: '' });
+  }
+  const session = sessions.get(tenantId);
+  const govde = sonucGetir(session && session.gonderimDurum, anahtar, Date.now(), SONUC_TTL_MS);
+  res.json({ ok: true, durum: govde.durum, kod: govde.kod || '' });
 });
 
 app.post('/t/:tenantId/send', async (req, res) => {

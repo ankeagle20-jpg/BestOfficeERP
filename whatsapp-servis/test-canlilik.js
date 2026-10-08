@@ -10,6 +10,8 @@ const {
   durumBakGovde,
   toparlaOturum,
   TOPARLAMA_MS,
+  toparlaEsik,
+  HEARTBEAT_SERI,
 } = require("./canlilik");
 
 function bos() {
@@ -163,12 +165,30 @@ function kaynakDenemesi() {
   assert.ok(src.slice(durum, qr).includes("durumCanli"));
   const fn = src.indexOf("async function durumCanli");
   assert.ok(fn > 0 && src.slice(fn, fn + 800).includes("heartbeatAdim"));
+  assert.ok(src.includes("heartbeatKarar"));
+  assert.ok(src.includes("yariyiGeriAl"));
+  assert.ok(src.includes("kuyruk-sonuc"));
+}
+
+function esikDenemesi() {
+  const adim = { toparla: true, sonuc: { bozuk_neden: "hata" } };
+  const oturum = { gonderiliyor: true, ready: true, status: "ready" };
+  const bir = toparlaEsik(oturum, adim, 0);
+  assert.strictEqual(bir.toparla, false);
+  assert.strictEqual(bir.seri, 1);
+  assert.strictEqual(toparlaEsik(oturum, adim, 1).toparla, false);
+  assert.strictEqual(toparlaEsik(oturum, adim, HEARTBEAT_SERI - 1).toparla, true);
+  const zaman = toparlaEsik(oturum, { toparla: true, sonuc: { bozuk_neden: "zaman_asimi" } }, 0);
+  assert.strictEqual(zaman.toparla, true);
+  assert.strictEqual(toparlaEsik({ gonderiliyor: false }, adim, 0).toparla, true);
+  assert.strictEqual(toparlaEsik(oturum, { toparla: false }, 2).seri, 0);
 }
 
 heartbeatDenemesi()
   .then(() => sicramaDenemesi())
   .then(() => toparlamaDenemesi())
   .then(() => kaynakDenemesi())
+  .then(() => esikDenemesi())
   .then(() => {
     console.log("CASE canlilik ok");
   })

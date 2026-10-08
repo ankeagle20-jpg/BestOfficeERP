@@ -58,6 +58,7 @@ def gonder(**kwargs):
         kuyruk_fn=kwargs.get("kuyruk", lambda *_a: "ok"),
         uyandir_fn=kwargs.get("uyandir"),
         durum_fn=kwargs.get("durum"),
+        sonuc_fn=kwargs.get("sonuc"),
     )
 
 
@@ -201,8 +202,8 @@ def test_sayfa_ayrimi():
     check("js_qr", "WhatsApp oturumu yenilenmeli (QR)" in js)
     check("js_eski_yok", "WhatsApp Web açıldı" not in js)
     check("js_deneme", "denemeUret" in js and "deneme: deneme" in js)
-    check("js_poll", "/giris/api/sozlesme-whatsapp/durum?deneme=" in js and "POLL_SON = 30000" in js)
-    check("js_sonuc", "Kuyruğa alındı ✓ (birkaç saniyede iletilir)" in js and "Gönderildi ✓" in js and "Sonuç belirsiz, telefondan kontrol edin" in js and "Gönderilemedi" in js)
+    check("js_poll", "/giris/api/sozlesme-whatsapp/durum?deneme=" in js and "POLL_SON = 90000" in js)
+    check("js_sonuc", "Kuyruğa alındı…" in js and "Gönderildi ✓" in js and "Sonuç belirsiz, telefondan kontrol edin" in js and "Gönderilemedi" in js and "Sonuç henüz yok; birkaç dakika sonra durum yenilenir" in js)
     check("js_iki_pencere", "gonderiyor = false" in js and "acik.deneme = denemeUret()" in js)
     check("eski_anahtar_yok", "metin_h[:12]" not in (ROOT / "sozlesme_whatsapp.py").read_text(encoding="utf-8"))
 
@@ -404,6 +405,42 @@ def test_deneme_ve_poll():
     check("iki_buton", anahtarlar == ["szwa:d:" + DENEME, "szwa:d:" + DENEME_2])
 
 
+def test_sonuc_cek():
+    import inspect
+
+    base_patches()
+    yaz = []
+    sw._durum_yaz = lambda rid, durum, neden="": yaz.append((int(rid), durum, neden))
+    sw._bul = lambda *_a, **_k: {"id": 22, "durum": "kuyrukta", "neden": ""}
+    govde, kod = sw.sozlesme_wa_durum(3, DENEME, sonuc_fn=lambda _a: {"durum": "gonderildi", "kod": ""})
+    check("cek_gonderildi", kod == 200 and govde.get("durum") == "gonderildi" and govde.get("mesaj") == "Gönderildi" and yaz == [(22, "gonderildi", "")])
+    yaz.clear()
+    govde, kod = sw.sozlesme_wa_durum(3, DENEME, sonuc_fn=lambda _a: {"durum": "basarisiz", "kod": "medya_hata"})
+    check("cek_pdf", kod == 200 and govde.get("durum") == "basarisiz" and govde.get("mesaj") == sw._PDF_GONDERILEMEDI and yaz == [(22, "basarisiz", "medya_hata")])
+    yaz.clear()
+    govde, kod = sw.sozlesme_wa_durum(3, DENEME, sonuc_fn=lambda _a: {"durum": "basarisiz", "kod": "zaman_asimi"})
+    check("cek_zaman", govde.get("mesaj") == sw._ZAMAN_GONDERILEMEDI)
+    yaz.clear()
+    govde, kod = sw.sozlesme_wa_durum(3, DENEME, sonuc_fn=lambda _a: {"durum": "basarisiz", "kod": "oturum"})
+    check("cek_oturum", govde.get("mesaj") == sw._OTURUM_GONDERILEMEDI)
+    yaz.clear()
+    govde, kod = sw.sozlesme_wa_durum(3, DENEME, sonuc_fn=lambda _a: {"durum": "yok"})
+    check("cek_yok", govde.get("durum") == "belirsiz" and govde.get("mesaj") == sw._BELIRSIZ and "Gönderildi" not in (govde.get("mesaj") or "") and yaz == [(22, "belirsiz", "")])
+    yaz.clear()
+    govde, kod = sw.sozlesme_wa_durum(3, DENEME, sonuc_fn=lambda _a: {"durum": "bekliyor"})
+    check("cek_bekliyor", govde.get("durum") == "kuyrukta" and yaz == [])
+    yaz.clear()
+    govde, kod = sw.sozlesme_wa_durum(3, DENEME, sonuc_fn=lambda _a: {"durum": "erisilemedi"})
+    check("cek_erisim", govde.get("durum") == "kuyrukta" and yaz == [])
+    check("pdfsiz_yok", "_kuyruk_varsayilan" not in inspect.getsource(sw._satiri_tazele))
+    base_patches()
+    yaz.clear()
+    sw._durum_yaz = lambda rid, durum, neden="": yaz.append((durum, neden))
+    sw._bul = lambda *_a, **_k: {"id": 9, "durum": "kuyrukta", "neden": ""}
+    govde, kod = gonder(sonuc=lambda _a: {"durum": "basarisiz", "kod": "oturum"})
+    check("tekrar_ac_oturum", kod == 200 and govde.get("durum") == "basarisiz" and govde.get("mesaj") == sw._OTURUM_GONDERILEMEDI and yaz == [("basarisiz", "oturum")])
+
+
 if __name__ == "__main__":
     test_sinirlar()
     test_red()
@@ -413,6 +450,7 @@ if __name__ == "__main__":
     test_numara_yenile()
     test_uyandirma_ve_yeniden()
     test_deneme_ve_poll()
+    test_sonuc_cek()
     test_sayfa_ayrimi()
     test_giris_kapali()
     if fails:

@@ -43,6 +43,10 @@ _SERVIS = "Servise ulaşılamadı"
 _KUYRUK_DOLU = "Kuyruk dolu"
 _OTURUM_YOK = "Oturum açık değil"
 _BELIRSIZ = "Sonuç belirsiz, telefondan kontrol edin"
+_PDF_GONDERILEMEDI = "Gönderilemedi: PDF gönderilemedi"
+_OTURUM_GONDERILEMEDI = "Gönderilemedi: WhatsApp oturumu"
+_ZAMAN_GONDERILEMEDI = "Gönderilemedi: zaman aşımı"
+_BOS_GONDERILEMEDI = "Gönderilemedi"
 _NEDEN_METIN = {
     "ek_cok_buyuk": _EK_BUYUK,
     "ek_gecersiz": _EK_YOK,
@@ -51,6 +55,11 @@ _NEDEN_METIN = {
     "numara_gecersiz": _TEL,
     "kuyruk_dolu": _KUYRUK_DOLU,
     "oturum_yok": _OTURUM_YOK,
+    "medya_hata": _PDF_GONDERILEMEDI,
+    "bos_donus": _BOS_GONDERILEMEDI,
+    "zaman_asimi": _ZAMAN_GONDERILEMEDI,
+    "oturum": _OTURUM_GONDERILEMEDI,
+    "gonderim_hata": _BOS_GONDERILEMEDI,
 }
 _YINE_KAPALI = frozenset(("ek_cok_buyuk", "ek_gecersiz"))
 _KOD_ES = {
@@ -575,7 +584,66 @@ def _durum_govde(row: dict, cakisma: bool) -> dict:
     return govde
 
 
-def sozlesme_wa_durum(uid: int, deneme: str) -> tuple[dict, int]:
+_TAZELE = frozenset(("kuyrukta", "gonderiliyor"))
+
+
+def _sonuc_varsayilan(anahtar: str) -> dict:
+    import requests
+    from routes.whatsapp_routes import _wa_internal_headers, _wa_url
+
+    try:
+        r = requests.get(
+            _wa_url("kuyruk-sonuc"),
+            params={"anahtar": str(anahtar or "")[:120]},
+            headers=_wa_internal_headers(),
+            timeout=(3, 5),
+        )
+    except requests.exceptions.Timeout:
+        return {"durum": "erisilemedi"}
+    except Exception:
+        return {"durum": "erisilemedi"}
+    try:
+        body = r.json() if r.content else {}
+    except Exception:
+        body = {}
+    if int(r.status_code) >= 400 or not isinstance(body, dict):
+        return {"durum": "erisilemedi"}
+    return {"durum": str(body.get("durum") or "erisilemedi"), "kod": body.get("kod") or ""}
+
+
+def _satiri_tazele(row: dict, anahtar: str, sonuc_fn) -> dict:
+    if not row or sonuc_fn is None:
+        return row
+    if str(row.get("durum") or "") not in _TAZELE:
+        return row
+    try:
+        paket = sonuc_fn(anahtar)
+    except Exception:
+        return row
+    if not isinstance(paket, dict):
+        return row
+    kod = str(paket.get("durum") or "")
+    guncel = dict(row)
+    if kod == "gonderildi":
+        _durum_yaz(int(row["id"]), "gonderildi", "")
+        guncel["durum"] = "gonderildi"
+        guncel["neden"] = ""
+        return guncel
+    if kod == "basarisiz":
+        neden = _neden_kodu(paket.get("kod"))
+        _durum_yaz(int(row["id"]), "basarisiz", neden)
+        guncel["durum"] = "basarisiz"
+        guncel["neden"] = neden
+        return guncel
+    if kod == "yok":
+        _durum_yaz(int(row["id"]), "belirsiz", "")
+        guncel["durum"] = "belirsiz"
+        guncel["neden"] = ""
+        return guncel
+    return row
+
+
+def sozlesme_wa_durum(uid: int, deneme: str, sonuc_fn=None) -> tuple[dict, int]:
     kim = deneme_gecerli(deneme)
     if not kim:
         return {"ok": False, "mesaj": _ORIGIN}, 400
@@ -583,6 +651,8 @@ def sozlesme_wa_durum(uid: int, deneme: str) -> tuple[dict, int]:
     row = _bul(int(uid), deneme_anahtar(kim))
     if not row:
         return {"ok": False, "durum": "yok", "mesaj": _KAYIT_YOK}, 404
+    if sonuc_fn is not None:
+        row = _satiri_tazele(row, deneme_anahtar(kim), sonuc_fn)
     return _durum_govde(row, False), 200
 
 
@@ -598,6 +668,7 @@ def sozlesme_wa_isle(
     kuyruk_fn=None,
     uyandir_fn=None,
     durum_fn=None,
+    sonuc_fn=None,
 ) -> tuple[dict, int]:
     if not origin_uygun(origin, host):
         return {"ok": False, "mesaj": _ORIGIN}, 403
@@ -640,6 +711,8 @@ def sozlesme_wa_isle(
     anahtar = deneme_anahtar(kim)
     var_olan = _bul(int(uid), anahtar)
     if var_olan:
+        if sonuc_fn is not None and str(var_olan.get("durum") or "") in _TAZELE:
+            var_olan = _satiri_tazele(var_olan, anahtar, sonuc_fn)
         return _durum_govde(var_olan, True), 200
 
     def _kaydet(durum: str, anahtar_deger: str):
@@ -859,6 +932,7 @@ def tahsilat_wa_isle(
     getir_fn=None,
     pdf_fn=None,
     node_fn=None,
+    sonuc_fn=None,
 ) -> tuple[dict, int]:
     if not origin_uygun(origin, host):
         return {"ok": False, "mesaj": _ORIGIN, "geri_dus": False}, 403
@@ -913,6 +987,8 @@ def tahsilat_wa_isle(
     anahtar = deneme_anahtar(kim)
     var_olan = _bul(int(uid), anahtar)
     if var_olan:
+        if sonuc_fn is not None and str(var_olan.get("durum") or "") in _TAZELE:
+            var_olan = _satiri_tazele(var_olan, anahtar, sonuc_fn)
         govde = _durum_govde(var_olan, True)
         govde["geri_dus"] = False
         return govde, 200

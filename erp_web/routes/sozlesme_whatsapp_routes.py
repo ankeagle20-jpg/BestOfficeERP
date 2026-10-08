@@ -5,7 +5,13 @@ from flask import Blueprint, jsonify, request
 from flask_login import current_user
 
 from auth import giris_gerekli
-from sozlesme_whatsapp import sozlesme_wa_durum, sozlesme_wa_isle, tahsilat_wa_hazir, tahsilat_wa_isle
+from sozlesme_whatsapp import (
+    _sonuc_varsayilan,
+    sozlesme_wa_durum,
+    sozlesme_wa_isle,
+    tahsilat_wa_hazir,
+    tahsilat_wa_isle,
+)
 
 bp = Blueprint("sozlesme_whatsapp", __name__)
 
@@ -40,6 +46,7 @@ def api_gonder():
         data,
         request.headers.get("Origin") or "",
         request.host or "",
+        sonuc_fn=_sonuc_varsayilan,
     )
     return jsonify(govde), kod
 
@@ -47,7 +54,7 @@ def api_gonder():
 @bp.route("/giris/api/sozlesme-whatsapp/durum")
 @giris_gerekli
 def api_durum():
-    govde, kod = sozlesme_wa_durum(_uid(), request.args.get("deneme") or "")
+    govde, kod = sozlesme_wa_durum(_uid(), request.args.get("deneme") or "", sonuc_fn=_sonuc_varsayilan)
     return jsonify(govde), kod
 
 
@@ -71,5 +78,6 @@ def api_tahsilat_gonder():
         data,
         request.headers.get("Origin") or "",
         request.host or "",
+        sonuc_fn=_sonuc_varsayilan,
     )
     return jsonify(govde), kod

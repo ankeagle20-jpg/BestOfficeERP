@@ -70,6 +70,7 @@ def gonder(**kwargs):
         getir_fn=kwargs.get("getir", lambda _i: dict(ROW)),
         pdf_fn=kwargs.get("pdf", lambda _r: b"%PDF-1.4\n"),
         node_fn=kwargs.get("node", lambda: True),
+        sonuc_fn=kwargs.get("sonuc"),
     )
 
 
@@ -282,7 +283,7 @@ def test_sayfa_ve_mig():
     check("oturum_elle", oturum_dal > 0 and js.find("webElleGoster(ham, metin)", oturum_dal) > oturum_dal and js.find("webAc(ham, metin)", oturum_dal) > js.find("webElleGoster(ham, metin)", oturum_dal) and "WhatsApp Web'de aç" in js)
     check("alan_dinle", '"tutar", "tarih", "aciklama"' in js)
     check("kalici_yok", "localStorage" not in js and "localStorage" not in durum and "sessionStorage" not in durum)
-    check("kuyruk_yazi", "Kuyruğa alındı ✓ (birkaç saniyede iletilir)" in js and "Gönderildi ✓" in js)
+    check("kuyruk_yazi", "Kuyruğa alındı…" in js and "Gönderildi ✓" in js and "Sonuç henüz yok; birkaç dakika sonra durum yenilenir" in js)
 
     sql = (ROOT / "scripts" / "migrate_sozlesme_whatsapp_tahsilat.sql").read_text(encoding="utf-8")
     check("mig_sql", sql.count("ADD COLUMN IF NOT EXISTS") >= 2 and "tahsilat_id INTEGER" in sql and "makbuz_no TEXT" in sql and "DROP COLUMN IF EXISTS" in sql)
@@ -461,6 +462,14 @@ def test_yetkisiz():
     check("hazir_401", r.status_code == 401)
 
 
+def test_sonuc_metin():
+    check("metin_pdf", sw.durum_mesaji("basarisiz", False, "medya_hata") == sw._PDF_GONDERILEMEDI)
+    check("metin_zaman", sw.durum_mesaji("basarisiz", False, "zaman_asimi") == sw._ZAMAN_GONDERILEMEDI)
+    check("metin_oturum", sw.durum_mesaji("basarisiz", False, "oturum") == sw._OTURUM_GONDERILEMEDI)
+    check("metin_bos", sw.durum_mesaji("basarisiz", False, "bos_donus") == sw._BOS_GONDERILEMEDI)
+    check("gonderildi_yalniz", sw.durum_mesaji("gonderildi", False, "") == "Gönderildi")
+
+
 if __name__ == "__main__":
     test_kimlik_ve_pdf()
     test_gonderim_ve_ek()
@@ -471,6 +480,7 @@ if __name__ == "__main__":
     test_neden_esleme()
     test_pdf_turleri()
     test_numara_yenile()
+    test_sonuc_metin()
     test_yetkisiz()
     if fails:
         print("FAIL", len(fails))
