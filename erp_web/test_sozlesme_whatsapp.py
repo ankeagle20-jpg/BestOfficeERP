@@ -57,6 +57,7 @@ def gonder(**kwargs):
         numara_fn=kwargs.get("numara", lambda _t: ("kayitli", "")),
         kuyruk_fn=kwargs.get("kuyruk", lambda *_a: "ok"),
         uyandir_fn=kwargs.get("uyandir"),
+        durum_fn=kwargs.get("durum"),
     )
 
 
@@ -127,7 +128,7 @@ def test_kiraci_ve_bagli():
         return "ok"
 
     govde, kod = gonder(bagli=bagli2, kuyruk=kuyruk2)
-    check("bagli_degil", kod == 200 and govde.get("geri_dus") is True and govde.get("neden") == "bagli_degil" and calls["bagli"] == 1 and calls["kuyruk"] == 0)
+    check("bagli_degil", kod == 200 and govde.get("geri_dus") is True and govde.get("web_elle") is not True and govde.get("neden") == "bagli_degil" and calls["bagli"] == 1 and calls["kuyruk"] == 0)
     check("bagli_metin", govde.get("mesaj") == sw._GERI_METIN["bagli_degil"])
 
 
@@ -206,6 +207,22 @@ def test_sayfa_ayrimi():
     check("eski_anahtar_yok", "metin_h[:12]" not in (ROOT / "sozlesme_whatsapp.py").read_text(encoding="utf-8"))
 
 
+def test_numara_yenile():
+    base_patches()
+    sw._ekle = lambda *a, **_k: {"id": 1}
+    calls = {"n": 0, "d": 0}
+
+    def numara(_t):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return ("hata", "http")
+        return ("kayitli", "")
+
+    govde, kod = gonder(numara=numara, durum=lambda: calls.__setitem__("d", calls["d"] + 1), data={"onay": True})
+    time.sleep(0.3)
+    check("numara_toparla", kod == 200 and govde.get("durum") == "gonderiliyor" and calls["d"] == 1 and calls["n"] == 2)
+
+
 def test_uyandirma_ve_yeniden():
     base_patches()
     calls = {"kuyruk": 0, "uyandir": 0, "ekle": []}
@@ -227,7 +244,7 @@ def test_uyandirma_ve_yeniden():
     calls = {"kuyruk": 0, "ekle": []}
     sw._ekle = lambda *a, **_k: calls["ekle"].append(a[3]) or {"id": 1}
     govde, kod = gonder(bagli=lambda: False, uyandir=lambda: {"hazir": False, "neden": "oturum"}, kuyruk=lambda *_a: calls.__setitem__("kuyruk", 1) or "ok")
-    check("uyandir_olmadi", kod == 200 and govde.get("geri_dus") is True and govde.get("neden") == "oturum" and calls["kuyruk"] == 0)
+    check("uyandir_olmadi", kod == 200 and govde.get("geri_dus") is True and govde.get("web_elle") is True and govde.get("neden") == "oturum" and calls["kuyruk"] == 0)
     check("uyandir_metin", govde.get("mesaj") == sw._GERI_METIN["oturum"])
     check("uyandir_kayit", calls["ekle"] == ["geri_oturum"])
 
@@ -393,6 +410,7 @@ if __name__ == "__main__":
     test_kiraci_ve_bagli()
     test_tekrar_ve_kilit()
     test_hizli_ve_yok()
+    test_numara_yenile()
     test_uyandirma_ve_yeniden()
     test_deneme_ve_poll()
     test_sayfa_ayrimi()

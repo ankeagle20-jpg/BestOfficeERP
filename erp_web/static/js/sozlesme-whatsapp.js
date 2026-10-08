@@ -31,6 +31,8 @@
       "#sozlesme-wa-uyari{color:#ffcc80;margin:4px 0;}" +
       "#sozlesme-wa-indir{font-size:12px;margin:2px 0;}" +
       "#sozlesme-wa-indir a{color:#80deea;}" +
+      "#sozlesme-wa-web{font-size:12px;margin:2px 0;}" +
+      "#sozlesme-wa-web a{color:#80deea;}" +
       "#sozlesme-wa-yine{display:none;background:#6a4a12;}";
     document.head.appendChild(st);
   }
@@ -203,6 +205,19 @@
     if (typeof bestOfficeWhatsAppWebAc === "function") bestOfficeWhatsAppWebAc(num, mesaj);
   }
 
+  function webElleGoster(tel, mesaj) {
+    var kutu = document.getElementById("sozlesme-wa-web");
+    var a = document.getElementById("sozlesme-wa-web-a");
+    if (!(kutu && a)) return;
+    a.href = "#";
+    a.textContent = "WhatsApp Web'de aç";
+    a.onclick = function (ev) {
+      ev.preventDefault();
+      webAc(tel, mesaj);
+    };
+    kutu.hidden = false;
+  }
+
   function gonder(onay) {
     if (gonderiyor || !acik) return;
     var uyari = document.getElementById("sozlesme-wa-uyari");
@@ -264,6 +279,11 @@
         if (uyari) uyari.textContent = j.mesaj || "WhatsApp oturumu yenilenmeli (QR)";
         if (sonuc) sonuc.textContent = "";
         yineGoster(false);
+      } else if (j.geri_dus && j.neden === "oturum") {
+        webElleGoster(ham, metin);
+        if (uyari) uyari.textContent = j.mesaj || "Oturum yenileniyor, 1 dk sonra tekrar deneyin.";
+        if (sonuc) sonuc.textContent = "";
+        yineGoster(false);
       } else if (j.geri_dus) {
         webAc(ham, metin);
         if (uyari) uyari.textContent = j.mesaj || "WhatsApp servisi bağlı değil, WhatsApp Web sayfası açılıyor";
@@ -320,6 +340,7 @@
       '<label>Mesaj<textarea id="sozlesme-wa-mesaj" rows="6"></textarea></label>' +
       '<p id="sozlesme-wa-uyari"></p>' +
       '<p id="sozlesme-wa-indir" hidden><a id="sozlesme-wa-indir-a" href="#"></a></p>' +
+      '<p id="sozlesme-wa-web" hidden><a id="sozlesme-wa-web-a" href="#">WhatsApp Web\'de aç</a></p>' +
       '<p id="sozlesme-wa-sonuc"></p>' +
       '<div><button type="button" id="sozlesme-wa-gonder">Gönder</button>' +
       '<button type="button" id="sozlesme-wa-yine">Yine de gönder</button>' +

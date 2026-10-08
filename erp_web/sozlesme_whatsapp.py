@@ -6,6 +6,7 @@ import hashlib
 import logging
 import re
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
@@ -71,7 +72,7 @@ _GERI_METIN = {
     "kiraci": "WhatsApp servisi bağlı değil, WhatsApp Web sayfası açılıyor",
     "bagli_degil": "WhatsApp servisi bağlı değil, WhatsApp Web sayfası açılıyor",
     "ulasilamadi": "Servise ulaşılamadı, WhatsApp Web sayfası açılıyor",
-    "oturum": "Oturum açılamadı, WhatsApp Web sayfası açılıyor",
+    "oturum": "Oturum yenileniyor, 1 dk sonra tekrar deneyin.",
     "qr": "WhatsApp oturumu yenilenmeli (QR)",
 }
 _DK_USER = "Bu dakika içinde sizin gönderim sınırınız doldu. Bir dakika sonra tekrar deneyin."
@@ -370,6 +371,65 @@ def _durum_varsayilan() -> dict:
         return {"hazir": False, "neden": "ulasilamadi"}
 
 
+_NUMARA_YENILE = frozenset({"hazir_degil", "hata", "http"})
+
+
+def _oturum_log(kaynak: str, bilgi: dict | None) -> None:
+    b = bilgi or {}
+    logger.info(
+        "sozlesme_wa_geri_oturum kaynak=%s tur=%s sure_ms=%s durum_ms=%s tekrar=%s tekrar_ms=%s",
+        kaynak,
+        b.get("tur") or "-",
+        int(b.get("sure_ms") or 0),
+        int(b.get("durum_ms") or 0),
+        b.get("tekrar") or "-",
+        int(b.get("tekrar_ms") or 0),
+    )
+
+
+def _durum_uyan_varsayilan() -> None:
+    import requests
+    from routes.whatsapp_routes import _wa_internal_headers, _wa_url
+
+    def cagri():
+        return requests.get(_wa_url("durum"), headers=_wa_internal_headers(), timeout=(3, 22))
+
+    try:
+        dene_bir_kez(cagri, _ag_sinifi())
+    except Exception:
+        logger.info("sozlesme_wa_durum tur=ulasilamadi")
+
+
+def _numara_bir_ve_yenile(norm: str, numara_fn, durum_fn, yenile: bool):
+    fn = numara_fn or _numara_dene
+    t0 = time.perf_counter()
+    kayit, neden = fn(norm)
+    sure1 = int((time.perf_counter() - t0) * 1000)
+    bilgi = {"tur": neden or "-", "sure_ms": sure1, "durum_ms": 0, "tekrar": "-", "tekrar_ms": 0}
+    if not yenile or kayit in ("kayitli", "yok") or neden not in _NUMARA_YENILE:
+        return kayit, neden, bilgi
+    logger.info("sozlesme_wa_numara tur=%s sure_ms=%s", neden or "-", sure1)
+    t1 = time.perf_counter()
+    try:
+        (durum_fn or _durum_uyan_varsayilan)()
+    except Exception:
+        logger.info("sozlesme_wa_durum tur=hata")
+    bilgi["durum_ms"] = int((time.perf_counter() - t1) * 1000)
+    t2 = time.perf_counter()
+    kayit2, neden2 = fn(norm)
+    bilgi["tekrar"] = kayit2
+    bilgi["tekrar_ms"] = int((time.perf_counter() - t2) * 1000)
+    bilgi["tur"] = neden2 or bilgi["tur"]
+    logger.info(
+        "sozlesme_wa_numara_tekrar tur=%s sure_ms=%s durum_ms=%s sonuc=%s",
+        neden2 or "-",
+        bilgi["tekrar_ms"],
+        bilgi["durum_ms"],
+        kayit2,
+    )
+    return kayit2, neden2, bilgi
+
+
 def _uyandir_varsayilan() -> dict:
     import requests
     from routes.whatsapp_routes import _wa_internal_headers, _wa_url
@@ -537,6 +597,7 @@ def sozlesme_wa_isle(
     numara_fn=None,
     kuyruk_fn=None,
     uyandir_fn=None,
+    durum_fn=None,
 ) -> tuple[dict, int]:
     if not origin_uygun(origin, host):
         return {"ok": False, "mesaj": _ORIGIN}, 403
@@ -587,26 +648,34 @@ def sozlesme_wa_isle(
     def _tekil(on_ek: str) -> str:
         return (on_ek + ":" + metin_h[:8] + ":" + tel_h[:8] + ":" + str(int(uid)) + ":" + str(int(an.timestamp() * 1000)))[:120]
 
-    def _geri(neden):
+    def _geri(neden, bilgi=None):
         kod = "geri_" + str(neden or "bagli_degil")
         _kaydet(kod, _tekil("szwa:geri"))
         logger.info("sozlesme_wa_geri neden=%s adet=1", neden)
+        if neden == "oturum":
+            _oturum_log("metin", bilgi)
         mesaj = _GERI_METIN.get(neden) or _GERI_METIN["bagli_degil"]
         if neden == "qr":
             return {"ok": False, "qr": True, "geri_dus": False, "neden": neden, "mesaj": mesaj}, 200
-        return {"ok": True, "geri_dus": True, "neden": neden, "mesaj": mesaj}, 200
+        govde = {"ok": True, "geri_dus": True, "neden": neden, "mesaj": mesaj}
+        if neden == "oturum":
+            govde["web_elle"] = True
+        return govde, 200
 
     if not node_yolu_acik():
         return _geri("kiraci")
 
+    uyandi = False
     if bagli_fn is not None:
         paket = _bagli_paket(bagli_fn())
         if not paket["hazir"] and uyandir_fn is not None:
             paket = _bagli_paket(uyandir_fn())
+            uyandi = True
     else:
         paket = _durum_varsayilan()
         if not paket["hazir"] and paket["neden"] != "ulasilamadi":
             paket = _uyandir_varsayilan()
+            uyandi = True
     if not paket["hazir"]:
         return _geri(paket["neden"] or "bagli_degil")
 
@@ -615,16 +684,13 @@ def sozlesme_wa_isle(
         if son:
             return {"ok": False, "tekrar": True, "durum": str(son.get("durum") or ""), "mesaj": _YINE}, 409
 
-    if numara_fn is None:
-        kayit, _neden = _numara_dene(norm)
-    else:
-        kayit, _neden = numara_fn(norm)
+    kayit, _neden, bilgi = _numara_bir_ve_yenile(norm, numara_fn, durum_fn, not uyandi)
     if kayit == "yok":
         _kaydet("basarisiz", _tekil("szwa:yok"))
         return {"ok": False, "kayitli": False, "mesaj": _KAYITSIZ}, 400
     if kayit != "kayitli":
         neden_k = "ulasilamadi" if _neden in ("baglanti", "yanit_yok", "ulasilamadi") else "oturum"
-        return _geri(neden_k)
+        return _geri(neden_k, bilgi if neden_k == "oturum" else None)
 
     row = _kaydet("gonderiliyor", anahtar)
     if not row:
@@ -789,6 +855,7 @@ def tahsilat_wa_isle(
     numara_fn=None,
     kuyruk_fn=None,
     uyandir_fn=None,
+    durum_fn=None,
     getir_fn=None,
     pdf_fn=None,
     node_fn=None,
@@ -864,8 +931,10 @@ def tahsilat_wa_isle(
         ozet = ozet_hash(str(tid) + ":" + str(int(an.timestamp() * 1000)))
         return (on_ek + ":" + ozet[:16])[:120]
 
-    def _geri_makbuz(neden: str):
+    def _geri_makbuz(neden: str, bilgi=None):
         neden_k = neden if neden in _GERI_METIN else "bagli_degil"
+        if neden_k == "oturum":
+            _oturum_log("makbuz", bilgi)
         try:
             _ekle_tahsilat(
                 int(uid),
@@ -883,34 +952,37 @@ def tahsilat_wa_isle(
             logger.info("tahsilat_wa geri kayit yok")
         mesaj = _GERI_METIN.get(neden_k) or _GERI_METIN["bagli_degil"]
         qr = neden_k == "qr"
-        return {
+        govde = {
             "ok": not qr,
             "geri_dus": not qr,
             "qr": qr,
             "neden": neden_k,
             "mesaj": mesaj,
             "indir": _makbuz_indir(tid),
-        }, 200
+        }
+        if neden_k == "oturum":
+            govde["web_elle"] = True
+        return govde, 200
 
     acik = node_yolu_acik if node_fn is None else node_fn
     if not acik():
         return _geri_makbuz("kiraci")
 
+    uyandi = False
     if bagli_fn is not None:
         paket = _bagli_paket(bagli_fn())
         if not paket["hazir"] and uyandir_fn is not None:
             paket = _bagli_paket(uyandir_fn())
+            uyandi = True
     else:
         paket = _durum_varsayilan()
         if not paket["hazir"] and paket["neden"] != "ulasilamadi":
             paket = _uyandir_varsayilan()
+            uyandi = True
     if not paket["hazir"]:
         return _geri_makbuz(paket["neden"] or "bagli_degil")
 
-    if numara_fn is None:
-        kayit, neden_n = _numara_dene(norm)
-    else:
-        kayit, neden_n = numara_fn(norm)
+    kayit, neden_n, bilgi = _numara_bir_ve_yenile(norm, numara_fn, durum_fn, not uyandi)
     if kayit == "yok":
         try:
             _ekle_tahsilat(
@@ -922,7 +994,7 @@ def tahsilat_wa_isle(
         return {"ok": False, "kayitli": False, "geri_dus": False, "mesaj": _KAYITSIZ}, 400
     if kayit != "kayitli":
         neden_k = "ulasilamadi" if neden_n in ("baglanti", "yanit_yok", "ulasilamadi") else "oturum"
-        return _geri_makbuz(neden_k)
+        return _geri_makbuz(neden_k, bilgi if neden_k == "oturum" else None)
 
     raw = _pdf_bayt(row, pdf_fn)
     ad = _dosya_adi(row.get("makbuz_no"))

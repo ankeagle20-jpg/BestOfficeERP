@@ -66,6 +66,7 @@ def gonder(**kwargs):
         numara_fn=kwargs.get("numara", lambda _t: ("kayitli", "")),
         kuyruk_fn=kwargs.get("kuyruk", lambda *_a: "ok"),
         uyandir_fn=kwargs.get("uyandir"),
+        durum_fn=kwargs.get("durum"),
         getir_fn=kwargs.get("getir", lambda _i: dict(ROW)),
         pdf_fn=kwargs.get("pdf", lambda _r: b"%PDF-1.4\n"),
         node_fn=kwargs.get("node", lambda: True),
@@ -162,7 +163,7 @@ def test_kapali_ve_tekrar():
         return "ok"
 
     govde, kod = gonder(node=lambda: False, pdf=pdf, kuyruk=kuyruk)
-    check("kapali", kod == 200 and govde.get("geri_dus") is True and govde.get("qr") is False and not govde.get("pdf_indir"))
+    check("kapali", kod == 200 and govde.get("geri_dus") is True and govde.get("web_elle") is not True and govde.get("qr") is False and not govde.get("pdf_indir"))
     check("kapali_metin", govde.get("mesaj") == sw._GERI_METIN["kiraci"] and "ekte" not in (govde.get("mesaj") or "") and "indirip" not in (govde.get("mesaj") or ""))
     check("kapali_indir", govde.get("indir") == "/faturalar/tahsilat-pdf/55?indir=1")
     check("kapali_web", "web.whatsapp" not in json.dumps(govde) and calls["k"] == 0 and calls["p"] == 0)
@@ -173,7 +174,7 @@ def test_kapali_ve_tekrar():
         pdf=pdf,
         kuyruk=kuyruk,
     )
-    check("oturum", govde.get("geri_dus") is True and govde.get("qr") is False and not govde.get("pdf_indir") and govde.get("mesaj") == sw._GERI_METIN["oturum"])
+    check("oturum", govde.get("geri_dus") is True and govde.get("web_elle") is True and govde.get("qr") is False and not govde.get("pdf_indir") and govde.get("mesaj") == sw._GERI_METIN["oturum"] and "açılıyor" not in govde.get("mesaj"))
 
     govde, kod = gonder(
         bagli=lambda: {"hazir": False, "neden": "qr"},
@@ -277,6 +278,8 @@ def test_sayfa_ve_mig():
     check("pdf_web_yok", "PDF'yi indirip WhatsApp'a ekleyin" not in js and "function pdfIndirGoster" not in js and "tahsilat_id: acik.tahsilatId" in js)
     dal = js.find("function gonder")
     check("web_sonra", dal > 0 and "acik.tahsilatId && (j.pdf_indir" not in js and js.find("webAc(ham, metin)", dal) > dal and js.find("/giris/api/tahsilat-whatsapp/gonder", dal) > dal)
+    oturum_dal = js.find('j.geri_dus && j.neden === "oturum"')
+    check("oturum_elle", oturum_dal > 0 and js.find("webElleGoster(ham, metin)", oturum_dal) > oturum_dal and js.find("webAc(ham, metin)", oturum_dal) > js.find("webElleGoster(ham, metin)", oturum_dal) and "WhatsApp Web'de aç" in js)
     check("alan_dinle", '"tutar", "tarih", "aciklama"' in js)
     check("kalici_yok", "localStorage" not in js and "localStorage" not in durum and "sessionStorage" not in durum)
     check("kuyruk_yazi", "Kuyruğa alındı ✓ (birkaç saniyede iletilir)" in js and "Gönderildi ✓" in js)
@@ -388,6 +391,60 @@ def test_pdf_turleri():
         check("pdf_" + ad, ok)
 
 
+def test_numara_yenile():
+    import logging
+
+    base()
+    calls = {"n": 0, "d": 0}
+
+    def numara(_t):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return ("hata", "hata")
+        return ("kayitli", "")
+
+    def durum():
+        calls["d"] += 1
+
+    govde, kod = gonder(numara=numara, durum=durum)
+    time.sleep(0.4)
+    check("numara_toparla", kod == 200 and govde.get("durum") == "gonderiliyor" and calls["d"] == 1 and calls["n"] == 2 and govde.get("geri_dus") is False)
+
+    base()
+    calls = {"n": 0, "d": 0}
+    kayitlar = []
+
+    class Tut(logging.Handler):
+        def emit(self, record):
+            kayitlar.append(record.getMessage())
+
+    tut = Tut()
+    eski = sw.logger.level
+    sw.logger.setLevel(logging.INFO)
+    sw.logger.addHandler(tut)
+    try:
+        govde, kod = gonder(numara=lambda _t: calls.__setitem__("n", calls["n"] + 1) or ("hata", "hazir_degil"), durum=lambda: calls.__setitem__("d", calls["d"] + 1))
+    finally:
+        sw.logger.removeHandler(tut)
+        sw.logger.setLevel(eski)
+    check("numara_geri", kod == 200 and govde.get("geri_dus") is True and govde.get("qr") is False and calls["d"] == 1 and calls["n"] == 2)
+    check(
+        "numara_log",
+        any(m.startswith("sozlesme_wa_numara tur=hazir_degil sure_ms=") for m in kayitlar)
+        and any(m.startswith("sozlesme_wa_geri_oturum kaynak=makbuz ") and "tekrar=hata" in m and "durum_ms=" in m and "tekrar_ms=" in m for m in kayitlar),
+    )
+
+    base()
+    calls = {"d": 0, "u": 0}
+    govde, kod = gonder(
+        bagli=lambda: {"hazir": False, "neden": "bagli_degil"},
+        uyandir=lambda: calls.__setitem__("u", calls["u"] + 1) or {"hazir": True, "neden": ""},
+        numara=lambda _t: ("hata", "http"),
+        durum=lambda: calls.__setitem__("d", calls["d"] + 1),
+    )
+    check("uyanmis_durum_yok", calls["u"] == 1 and calls["d"] == 0 and govde.get("geri_dus") is True)
+
+
 def test_yetkisiz():
     from flask import Flask
     from auth import login_manager
@@ -413,6 +470,7 @@ if __name__ == "__main__":
     test_sayfa_ve_mig()
     test_neden_esleme()
     test_pdf_turleri()
+    test_numara_yenile()
     test_yetkisiz()
     if fails:
         print("FAIL", len(fails))

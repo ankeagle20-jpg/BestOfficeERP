@@ -5,6 +5,14 @@ const fs = require('fs');
 const QRCode = require('qrcode');
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const { idleKapanirMi, tekUcus } = require('./oturum-kural');
+const {
+  HEARTBEAT_MS,
+  HEARTBEAT_TIMEOUT_MS,
+  durumBakGovde,
+  heartbeatAdim,
+  planAdim,
+  toparlaOturum,
+} = require('./canlilik');
 const { kalemEkle, gonderGovde } = require('./kuyruk-kural');
 const { govdeAyir, jsonSinirHatasi } = require('./govde-kural');
 
@@ -105,6 +113,8 @@ app.use(govdeAyir);
 const sessions = new Map();
 /** Aynı kiracı için tek Chrome başlatma. */
 const ensureUcus = new Map();
+const toparlamaUcus = new Map();
+let sonPlanMs = 0;
 /** Şu an Chrome tutan oturum sayısı (starting/qr/ready). */
 let activeChromeCount = 0;
 
@@ -195,21 +205,20 @@ function touch(session) {
 
 function durumBak(sessionsMap, tenantId) {
   const session = sessionsMap && sessionsMap.get ? sessionsMap.get(tenantId) : null;
-  if (!session) return { ok: true, bagli: false, hazir: false, durum: 'yok' };
-  return {
-    ok: true,
-    bagli: Boolean(session.ready),
-    hazir: Boolean(session.ready),
-    durum: session.status || '',
-  };
+  return durumBakGovde(session);
 }
 
 function durumPayload(session) {
+  const temel = durumBakGovde(session);
   return {
     tenant_id: session.tenantId,
-    bagli: session.ready,
-    qr_bekliyor: Boolean(session.qr) && !session.ready,
-    hazir: session.ready,
+    bagli: temel.bagli,
+    qr_bekliyor: Boolean(session.qr) && !temel.hazir,
+    hazir: temel.hazir,
+    canli: temel.canli,
+    son_kontrol_ms: temel.son_kontrol_ms,
+    bozuk_neden: temel.bozuk_neden,
+    toparlama_durumu: temel.toparlama_durumu,
     kuyruk_uzunlugu: session.queue.length,
     kuyruk_isleniyor: session.queueBusy,
     status: session.status,
@@ -233,6 +242,12 @@ function getOrCreateSession(tenantId) {
     // Idle destroy'a tabi (default dahil). LocalAuth diski korunur; ihtiyaçta yeniden açılır.
     pinKeepAlive: false,
     gonderimDurum: new Map(),
+    canli: false,
+    bozuk: false,
+    bozukNeden: '',
+    toparlamaDurumu: '',
+    sonKontrolMs: 0,
+    sonToparlamaMs: 0,
   };
   sessions.set(tenantId, session);
   return session;
@@ -319,6 +334,10 @@ function attachHandlers(session) {
   client.on('qr', (qr) => {
     session.qr = qr;
     session.ready = false;
+    session.canli = false;
+    session.bozuk = true;
+    session.bozukNeden = 'qr';
+    session.toparlamaDurumu = 'qr';
     session.status = 'qr';
     touch(session);
     waLog('qr', tid);
@@ -331,6 +350,11 @@ function attachHandlers(session) {
   client.on('ready', () => {
     session.ready = true;
     session.qr = null;
+    session.canli = true;
+    session.bozuk = false;
+    session.bozukNeden = '';
+    session.toparlamaDurumu = 'hazir';
+    session.sonKontrolMs = Date.now();
     session.status = 'ready';
     touch(session);
     waLog('ready', tid);
@@ -349,11 +373,74 @@ function attachHandlers(session) {
 
   client.on('disconnected', (reason) => {
     session.ready = false;
-    session.status = 'idle';
+    session.canli = false;
+    session.bozuk = true;
     const neden = String(reason || '');
+    session.bozukNeden = neden.toUpperCase() === 'LOGOUT' ? 'cikis' : 'kopuk';
+    session.status = 'idle';
     waLog('disconnected', neden || tid);
     if (neden.toUpperCase() === 'LOGOUT') waLog('cikis', tid);
   });
+}
+
+function canliBag() {
+  return {
+    ucus: toparlamaUcus,
+    simdi: () => Date.now(),
+    log: (olay, detay) => waLog(olay, detay),
+    destroy: async (client) => {
+      await client.destroy();
+    },
+    initialize: (session) => kurtarInit(session),
+  };
+}
+
+async function kurtarInit(session) {
+  try {
+    await istemciKur(session);
+  } catch (_err) {
+    waLog('toparlama_hata', session.tenantId);
+    return 'hata';
+  }
+  const son = Date.now() + 15000;
+  while (!session.ready && session.status !== 'qr' && session.status !== 'error' && Date.now() < son) {
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  if (session.status === 'qr' || session.qr) return 'qr';
+  if (session.ready) return 'ready';
+  return 'hata';
+}
+
+async function heartbeatBir(session) {
+  if (!session || !session.client || typeof session.client.getState !== 'function') return;
+  const adim = await heartbeatAdim(
+    session,
+    () => session.client.getState(),
+    Date.now(),
+    HEARTBEAT_TIMEOUT_MS
+  );
+  if (!adim.kontrol || !adim.toparla) return;
+  waLog('heartbeat_hata', session.tenantId + ' ' + (adim.sonuc.bozuk_neden || 'hata'));
+  ensureClient(session.tenantId).catch(() => {
+    waLog('toparlama_hata', session.tenantId);
+  });
+}
+
+function heartbeatHepsi() {
+  for (const session of sessions.values()) {
+    heartbeatBir(session).catch(() => {
+      waLog('heartbeat_hata', 'hata');
+    });
+  }
+}
+
+function zamanPlan() {
+  const simdi = Date.now();
+  const adim = planAdim(sonPlanMs, simdi, HEARTBEAT_MS);
+  sonPlanMs = simdi;
+  if (!adim.sicrama) return;
+  waLog('saat_sicrama', String(adim.gecen));
+  heartbeatHepsi();
 }
 
 async function ensureClient(tenantId) {
@@ -363,10 +450,25 @@ async function ensureClient(tenantId) {
 async function ensureClientGovde(tenantId) {
   const session = getOrCreateSession(tenantId);
   touch(session);
+  if (session.status === 'qr') return session;
+  if (session.bozuk) {
+    await toparlaOturum(session, canliBag());
+    return session;
+  }
   if (session.client && (session.ready || session.status === 'starting' || session.status === 'qr')) {
     if (session.initPromise) await session.initPromise;
     return session;
   }
+  if (session.initPromise) {
+    await session.initPromise;
+    return session;
+  }
+  await istemciKur(session);
+  return session;
+}
+
+async function istemciKur(session) {
+  const tenantId = session.tenantId;
   if (session.initPromise) {
     await session.initPromise;
     return session;
@@ -611,11 +713,27 @@ app.post('/t/:tenantId/uyandir', async (req, res) => {
   }
 });
 
+async function durumCanli(tenantId) {
+  let session = await ensureClient(tenantId);
+  if (!session || !session.client || session.status === 'qr' || session.status === 'starting' || session.status === 'baglaniyor') {
+    return session;
+  }
+  const adim = await heartbeatAdim(
+    session,
+    () => session.client.getState(),
+    Date.now(),
+    HEARTBEAT_TIMEOUT_MS
+  );
+  if (!adim.kontrol || !adim.toparla) return session;
+  waLog('heartbeat_hata', session.tenantId + ' ' + (adim.sonuc.bozuk_neden || 'hata'));
+  return ensureClient(tenantId);
+}
+
 app.get('/t/:tenantId/durum', async (req, res) => {
   const tenantId = tenantParam(req, res);
   if (!tenantId) return;
   try {
-    const session = await ensureClient(tenantId);
+    const session = await durumCanli(tenantId);
     res.json({ ok: true, ...durumPayload(session) });
   } catch (err) {
     return sendEnsureError(res, err, false);
@@ -844,6 +962,9 @@ app.listen(PORT, '127.0.0.1', () => {
       console.warn('[WA] Idle sweep hatası:', err && err.message ? err.message : err);
     });
   }, WA_IDLE_CHECK_MS);
+  sonPlanMs = Date.now();
+  setInterval(() => heartbeatHepsi(), HEARTBEAT_MS);
+  setInterval(() => zamanPlan(), 20000);
   // Eager start (opsiyonel geriye uyum): default'u hemen ayağa kaldırır.
   // pinKeepAlive yok → WA_IDLE_MS sonra idle destroy edilir; sonraki istekte
   // LocalAuth disk oturumu ile QR'sız yeniden bağlanır.
