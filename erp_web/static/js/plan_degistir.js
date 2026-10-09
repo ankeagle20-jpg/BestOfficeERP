@@ -62,6 +62,16 @@ function planArayuzKaldir() {
     window.__planKilit = [];
 }
 
+/* Sayfada `let selectedId` tanımlı; top-level let window'a eklenmez, bu yüzden window.selectedId her zaman undefined.
+   Önce global (lexical) değişkene, yoksa window'a bakılır. */
+function planMusteriId() {
+    try {
+        if (typeof selectedId !== "undefined" && selectedId != null && selectedId !== "") return selectedId;
+    } catch (e) { /* TDZ */ }
+    var w = window.selectedId;
+    return (w != null && w !== "") ? w : null;
+}
+
 function planKapisiniYenile(mid) {
     planArayuzKaldir();
     if (mid == null || mid === "") return;
@@ -73,7 +83,8 @@ function planKapisiniYenile(mid) {
         })
         .then(function (j) {
             if (!j || !j.ok) return;
-            if (String(window.selectedId || "") !== istenen && String(window.selectedId || "") !== "") return;
+            var simdi = String(planMusteriId() || "");
+            if (simdi !== "" && simdi !== istenen) return;
             planArayuzKur(istenen, j);
         })
         .catch(function () {});
@@ -168,22 +179,30 @@ function planModalHazirla() {
     kutu.style.borderRadius = "8px";
     kutu.style.maxHeight = "86vh";
     kutu.style.overflow = "auto";
+    /* Etiket / alan / düğme stilleri satır içi: sayfa CSS'inden bağımsız, etiketler alanın üstünde ayrı satırda. */
+    var E = "display:block;margin:8px 0 2px;font-size:12px;color:#b0bec5;";
+    var G = "display:block;box-sizing:border-box;width:100%;max-width:280px;margin:0 0 4px;padding:6px 10px;"
+        + "background:#2d4060;border:1px solid #3d5070;border-radius:3px;color:#e0f7fa;font-size:13px;font-family:inherit;";
+    var D = "padding:7px 16px;border-radius:4px;border:none;cursor:pointer;font-size:13px;font-family:inherit;";
+    kutu.style.fontFamily = "inherit";
+    kutu.style.fontSize = "13px";
     kutu.innerHTML = ""
-        + "<div style=\"font-weight:600;margin-bottom:8px;\">Plan değiştir</div>"
-        + "<label>Geçerlilik ayı</label><input id=\"plan_gecerlilik\" type=\"month\" style=\"display:block;margin-bottom:8px;\">"
-        + "<label>Yeni aylık net</label><input id=\"plan_yeni_net\" type=\"number\" step=\"0.01\" style=\"display:block;margin-bottom:8px;\">"
-        + "<label>KDV oranı</label><input id=\"plan_kdv\" type=\"number\" step=\"0.01\" style=\"display:block;margin-bottom:8px;\">"
-        + "<label>Ödeme tipi</label><select id=\"plan_odeme\" style=\"display:block;margin-bottom:8px;\"><option value=\"banka\">Banka</option><option value=\"nakit\">Nakit</option><option value=\"karma\">Karma</option></select>"
-        + "<div id=\"plan_paylar\" style=\"display:none;margin-bottom:8px;\">Nakit <input id=\"plan_nakit\" type=\"number\" step=\"0.01\"> Banka net <input id=\"plan_banka\" type=\"number\" step=\"0.01\"></div>"
-        + "<div>Hesaplanan brüt: <span id=\"plan_brut\">—</span></div>"
+        + "<div style=\"font-weight:600;font-size:15px;margin-bottom:6px;\">Plan değiştir</div>"
+        + "<label for=\"plan_gecerlilik\" style=\"" + E + "\">Geçerlilik ayı</label><input id=\"plan_gecerlilik\" type=\"month\" style=\"" + G + "\">"
+        + "<label for=\"plan_yeni_net\" style=\"" + E + "\">Yeni aylık net</label><input id=\"plan_yeni_net\" type=\"number\" step=\"0.01\" style=\"" + G + "\">"
+        + "<label for=\"plan_kdv\" style=\"" + E + "\">KDV oranı</label><input id=\"plan_kdv\" type=\"number\" step=\"0.01\" style=\"" + G + "\">"
+        + "<label for=\"plan_odeme\" style=\"" + E + "\">Ödeme tipi</label><select id=\"plan_odeme\" style=\"" + G + "\"><option value=\"banka\">Banka</option><option value=\"nakit\">Nakit</option><option value=\"karma\">Karma</option></select>"
+        + "<div id=\"plan_paylar\" style=\"display:none;margin:8px 0;\"><label for=\"plan_nakit\" style=\"" + E + "\">Nakit</label><input id=\"plan_nakit\" type=\"number\" step=\"0.01\" style=\"" + G + "\"><label for=\"plan_banka\" style=\"" + E + "\">Banka net</label><input id=\"plan_banka\" type=\"number\" step=\"0.01\" style=\"" + G + "\"></div>"
+        + "<div style=\"margin-top:10px;\">Hesaplanan brüt: <span id=\"plan_brut\">—</span></div>"
+        + "<div id=\"plan_hata\" role=\"alert\" style=\"display:none;margin:8px 0;padding:8px;border:1px solid #e53935;border-radius:4px;color:#ff8a80;\"></div>"
         + "<div id=\"plan_uyarilar\" style=\"margin:8px 0;color:#ffcc80;\"></div>"
         + "<div id=\"plan_kilit_kutu\" style=\"display:none;margin:8px 0;padding:8px;border:1px solid #e53935;color:#ff8a80;\"></div>"
         + "<label id=\"plan_kilit_etiket\" style=\"display:none;\"><input id=\"plan_kilit_onay\" type=\"checkbox\"> Bu aylar değişmeyecek, anladım</label>"
         + "<div id=\"plan_onizleme\" style=\"margin-top:8px;overflow:auto;\"></div>"
-        + "<div style=\"margin-top:10px;display:flex;gap:8px;\">"
-        + "<button type=\"button\" id=\"plan_onizle_btn\">Önizle</button>"
-        + "<button type=\"button\" id=\"plan_kaydet\" disabled>Kaydet</button>"
-        + "<button type=\"button\" id=\"plan_kapat\">Kapat</button>"
+        + "<div style=\"margin-top:12px;display:flex;gap:8px;\">"
+        + "<button type=\"button\" id=\"plan_onizle_btn\" style=\"" + D + "background:#00838f;color:#fff;\">Önizle</button>"
+        + "<button type=\"button\" id=\"plan_kaydet\" style=\"" + D + "background:#2e7d32;color:#fff;\" disabled>Kaydet</button>"
+        + "<button type=\"button\" id=\"plan_kapat\" style=\"" + D + "background:#455a64;color:#fff;\">Kapat</button>"
         + "</div>";
     kok.appendChild(kutu);
     document.body.appendChild(kok);
@@ -222,6 +241,7 @@ function planDegistirModalAc() {
     if (document.getElementById("plan_nakit") && nakitT) document.getElementById("plan_nakit").value = nakitT.value || "";
     if (document.getElementById("plan_banka") && bankaT) document.getElementById("plan_banka").value = bankaT.value || "";
     window.__planOnizlemeHazir = false;
+    planHataGoster("");
     planKaydetDurumu();
     modal.style.display = "block";
 }
@@ -253,22 +273,50 @@ function planKaydetDurumu() {
     var onay = document.getElementById("plan_kilit_onay");
     var engel = !window.__planOnizlemeHazir || (kilit.length > 0 && !(onay && onay.checked));
     btn.disabled = !!engel;
+    btn.style.opacity = engel ? "0.5" : "1";
+    btn.style.cursor = engel ? "not-allowed" : "pointer";
 }
 
-function planOnizlemeIste() {
-    var mid = window.selectedId;
-    if (!mid) return;
-    fetch("/giris/api/musteri/" + encodeURIComponent(mid) + "/plan/onizleme", {
+function planHataGoster(mesaj) {
+    var kutu = document.getElementById("plan_hata");
+    if (!kutu) return;
+    kutu.textContent = mesaj || "";
+    kutu.style.display = mesaj ? "" : "none";
+}
+
+/* Yanıt JSON değilse de (oturum yönlendirmesi, 500 HTML sayfası) durum koduyla döner; sessiz kalmaz. */
+function planIstekGonder(url, govde) {
+    return fetch(url, {
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(planGovde())
-    }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+        body: JSON.stringify(govde)
+    }).then(function (r) {
+        return r.text().then(function (t) {
+            var j = null;
+            try { j = JSON.parse(t); } catch (e) { j = null; }
+            return { ok: r.ok, kod: r.status, j: j };
+        });
+    });
+}
+
+function planOnizlemeIste() {
+    var mid = planMusteriId();
+    planHataGoster("");
+    if (!mid) {
+        planHataGoster("Önizleme alınamadı: müşteri seçili değil");
+        return;
+    }
+    var dugme = document.getElementById("plan_onizle_btn");
+    if (dugme) dugme.disabled = true;
+    window.__planOnizlemeHazir = false;
+    planKaydetDurumu();
+    planIstekGonder("/giris/api/musteri/" + encodeURIComponent(mid) + "/plan/onizleme", planGovde())
         .then(function (pack) {
             var j = pack.j || {};
             if (!pack.ok || !j.ok) {
                 window.__planOnizlemeHazir = false;
-                alert(j.mesaj || "Önizleme yapılamadı");
+                planHataGoster(j.mesaj || ("Önizleme alınamadı: " + pack.kod));
                 planKaydetDurumu();
                 return;
             }
@@ -317,32 +365,38 @@ function planOnizlemeIste() {
             window.__planSonGovde = j;
             planKaydetDurumu();
         })
-        .catch(function () { alert("Önizleme yapılamadı"); });
+        .catch(function () {
+            window.__planOnizlemeHazir = false;
+            planHataGoster("Önizleme alınamadı: bağlantı hatası");
+            planKaydetDurumu();
+        })
+        .then(function () {
+            if (dugme) dugme.disabled = false;
+        });
 }
 
 function planKaydet() {
-    var mid = window.selectedId;
-    if (!mid) return;
+    var mid = planMusteriId();
+    planHataGoster("");
+    if (!mid) {
+        planHataGoster("Kaydedilemedi: müşteri seçili değil");
+        return;
+    }
     var govde = planGovde();
     if (window.__planSonGovde && window.__planSonGovde.yeni_brut != null) govde.yeni_brut = window.__planSonGovde.yeni_brut;
     var onay = document.getElementById("plan_kilit_onay");
     if (onay && onay.checked) govde.onay_kilitli_aylar = true;
     var btn = document.getElementById("plan_kaydet");
     if (btn && btn.disabled) return;
-    fetch("/giris/api/musteri/" + encodeURIComponent(mid) + "/plan", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(govde)
-    }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+    planIstekGonder("/giris/api/musteri/" + encodeURIComponent(mid) + "/plan", govde)
         .then(function (pack) {
             if (!pack.ok || !pack.j || !pack.j.ok) {
-                alert((pack.j && pack.j.mesaj) || "Kaydedilemedi");
+                planHataGoster((pack.j && pack.j.mesaj) || ("Kaydedilemedi: " + pack.kod));
                 return;
             }
             planKayitSonrasi(mid);
         })
-        .catch(function () { alert("Kaydedilemedi"); });
+        .catch(function () { planHataGoster("Kaydedilemedi: bağlantı hatası"); });
 }
 
 function planIptalGonder(mid, planId) {
