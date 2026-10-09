@@ -96,6 +96,11 @@ function planGecmisCiz(mid, veri) {
     var sel = document.getElementById("musteri_durum");
     var kutu = document.createElement("div");
     kutu.id = "plan_gecmis_bolum";
+    /* .form-grid etiket|alan iki sütunludur. Kutu tek hücre kaplarsa sonraki etiketler alan sütununa kayar.
+       Tam genişlikli ayrı satır: sütun sayısı fark etmez, diğer satırların yapısı değişmez. */
+    kutu.style.gridColumn = "1 / -1";
+    kutu.style.minWidth = "0";
+    kutu.style.boxSizing = "border-box";
     kutu.style.margin = "8px 0 12px";
     kutu.style.padding = "8px";
     kutu.style.border = "1px solid #2d4060";

@@ -398,6 +398,13 @@ def test_js():
     parca = html[i:html.find("</select>", i)]
     check("kapali secenek yok", 'value="plan"' not in parca and "Plan değiştir" not in parca)
     check("onchange karar", "musteriDurumSecildi(this.value)" in parca and "/durum" not in (ROOT / "static" / "js" / "plan_degistir.js").read_text(encoding="utf-8"))
+    js_metin = (ROOT / "static" / "js" / "plan_degistir.js").read_text(encoding="utf-8")
+    kutu_blok = js_metin[js_metin.find('kutu.id = "plan_gecmis_bolum"'):][:600]
+    check(
+        "gecmis kutusu form-grid'de tam genislikli ayri satir",
+        'kutu.style.gridColumn = "1 / -1"' in kutu_blok and "insertBefore(kutu, sel.nextSibling)" in js_metin,
+    )
+    check("script surumu artirildi", "js/plan_degistir.js', v=2" in html)
     taze = html.find("dnormFresh")
     taze_blok = html[taze:taze + 900] if taze >= 0 else ""
     check(
