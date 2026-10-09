@@ -3200,7 +3200,7 @@ button.auto-btn.whatsapp-hizmet-filter-btn.wa-hizmet-aktif {
                         </div>
                         
                         <label>Durum</label>
-                        <select id="musteri_durum" name="musteri_durum" onchange="syncDurumUI(this.value === 'pasif' ? 'pasif' : 'aktif', {});" style="padding:8px 10px;border-radius:4px;border:1px solid #2d4060;background:#0f2537;color:#e0f7fa;font-size:13px;">
+                        <select id="musteri_durum" name="musteri_durum" onfocus="planDurumOdak()" onchange="musteriDurumSecildi(this.value)" style="padding:8px 10px;border-radius:4px;border:1px solid #2d4060;background:#0f2537;color:#e0f7fa;font-size:13px;">
                             <option value="aktif" selected>Aktif</option>
                             <option value="pasif">Pasif</option>
                         </select>
@@ -18723,6 +18723,42 @@ function girisTahsilatParaYaz(el, n) {
     }
     el.value = x.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
+function girisPlanGridHucreBrut(yil, ay) {
+    var sco = window.__sozlesmelerAylikSonCacheObj;
+    if (!sco || !sco.plan_var || !sco.aylar) return null;
+    var y = parseInt(yil, 10);
+    var m = parseInt(ay, 10);
+    if (isNaN(y) || isNaN(m)) return null;
+    for (var i = 0; i < sco.aylar.length; i++) {
+        var a = sco.aylar[i];
+        if (!a) continue;
+        if (parseInt(a.yil, 10) === y && parseInt(a.ay, 10) === m) {
+            var tv = parseFloat(a.tutar_kdv_dahil);
+            if (isFinite(tv) && tv > 0.05) return Math.round(tv * 100) / 100;
+            return null;
+        }
+    }
+    return null;
+}
+function girisPlanYilToplam(yy) {
+    var sco = window.__sozlesmelerAylikSonCacheObj;
+    if (!sco || !sco.plan_var) return null;
+    if (typeof girisTahsilatYilAyKeysFiltered !== 'function') return null;
+    var keys = girisTahsilatYilAyKeysFiltered(yy) || [];
+    if (!keys.length) return null;
+    var sum = 0;
+    var n = 0;
+    for (var i = 0; i < keys.length; i++) {
+        var ya = (typeof girisTahsilatAyKeyToYilAy === 'function') ? girisTahsilatAyKeyToYilAy(keys[i]) : null;
+        if (!ya) continue;
+        var b = girisPlanGridHucreBrut(ya.yil, ya.ay);
+        if (b == null) continue;
+        sum += b;
+        n++;
+    }
+    if (!n) return null;
+    return Math.round(sum * 100) / 100;
+}
 function girisTahsilatYilAylikTek(yy) {
     try { if (typeof girisAylikSatirYilKayitYukle === 'function') girisAylikSatirYilKayitYukle(); } catch (_eTb0) {}
     var h = girisAylikSatirYilHesapla(yy);
@@ -18733,6 +18769,8 @@ function girisTahsilatYilAylikTek(yy) {
 function girisTahsilatYilBorcTek(yy) {
     var aylikTop = girisTahsilatYilAylikTek(yy);
     if (aylikTop <= 0) return 0;
+    var planToplam = girisPlanYilToplam(yy);
+    if (planToplam != null) return planToplam;
     return Math.round(aylikTop * 12 * 100) / 100;
 }
 function girisTahsilatYilYilListesi() {
@@ -19933,6 +19971,13 @@ function girisTahsilatYilAyKiraTutar(donemYil, ayKey) {
             }
         }
     } catch (_eDblKt) {}
+    try {
+        var yaPlan = (typeof girisTahsilatAyKeyToYilAy === 'function') ? girisTahsilatAyKeyToYilAy(ayKey) : null;
+        if (yaPlan) {
+            var planBrutKt = girisPlanGridHucreBrut(yaPlan.yil, yaPlan.ay);
+            if (planBrutKt != null) return planBrutKt;
+        }
+    } catch (_ePlanKt) {}
     return outKt;
 }
 /** Sözleşme / yıl satırı aylık KDV dahil (1500); grid cache TÜFE brütü (≈1836) değil. */
@@ -20242,6 +20287,16 @@ function girisTahsilatYilAyPanelHtml(donemYil, ayKeys) {
             d.aylik_tutar = girisTahsilatYilAyPanelAylikOkuma(donemYil, ak);
             d.kalan = girisTahsilatYilAyKalanHesapla(d);
         }
+        try {
+            var yaPh = (typeof girisTahsilatAyKeyToYilAy === 'function') ? girisTahsilatAyKeyToYilAy(ak) : null;
+            if (yaPh) {
+                var planPh = girisPlanGridHucreBrut(yaPh.yil, yaPh.ay);
+                if (planPh != null) {
+                    d.aylik_tutar = planPh;
+                    d.kalan = girisTahsilatYilAyKalanHesapla(d);
+                }
+            }
+        } catch (_ePlanPh) {}
         if (d.tahsil > 0 && !d.tahsil_aktif) d.tahsil_aktif = true;
         mapAy[ak] = d;
         var rid = girisTahsilatYilAyId(donemYil, ak);
@@ -25039,6 +25094,7 @@ function selectMusteri(id) {
             } else {
                 syncDurumUI('aktif', { skipAylikGrid: activeTab === 0 || activeTab === 6 || activeTab === 7 || activeTab === 9 });
             }
+            if (typeof planKapisiniYenile === 'function') planKapisiniYenile(m.id);
             (function () {
                 var arr = Array.isArray(m.grup2_secimleri) ? m.grup2_secimleri.slice() : [];
                 if (!arr.length && m.bizim_hesap) arr = ['bizim_hesap'];
@@ -27353,6 +27409,7 @@ async function kaydet(event) {
                                     } else {
                                         syncDurumUI('aktif', {});
                                     }
+                                    if (typeof planKapisiniYenile === 'function') planKapisiniYenile(m.id);
                                 }
                                 if (typeof sozlesmelerOdemeDuzeniManuelUygula === 'function') {
                                     sozlesmelerOdemeDuzeniManuelUygula();
@@ -28086,6 +28143,7 @@ function temizleForm() {
     if (mnoEl) mnoEl.value = '';
     try { window.__rezerveEdilenMusteriId = null; } catch (eRez) {}
     syncDurumUI('aktif');
+    if (typeof planKapisiniYenile === 'function') planKapisiniYenile(null);
     var csEl = document.getElementById('calisma_sekli');
     if (csEl) csEl.value = 'sirali';
     if (typeof calismaSekliDegisti === 'function') calismaSekliDegisti();
@@ -33909,6 +33967,23 @@ function kiraBildirgesiOlusturYil(yil, aylikKira, bildirgeMod, fromReel) {
     var nakit = mod === 'nakit';
     var hibrit = mod === 'hibrit';
     var yilKey = parseInt(yil, 10);
+    window.__kiraBildirgeAyTablosu = null;
+    try {
+        var scoB = window.__sozlesmelerAylikSonCacheObj;
+        if (scoB && scoB.plan_var && scoB.aylar && !isNaN(yilKey)) {
+            var tabloB = [];
+            for (var ib = 0; ib < scoB.aylar.length; ib++) {
+                var ab = scoB.aylar[ib];
+                if (!ab || parseInt(ab.yil, 10) !== yilKey) continue;
+                var bb = parseFloat(ab.tutar_kdv_dahil);
+                if (!isFinite(bb) || bb <= 0) continue;
+                var ayNo = parseInt(ab.ay, 10);
+                if (isNaN(ayNo)) continue;
+                tabloB.push({ ay: String(yilKey) + '-' + (ayNo < 10 ? '0' : '') + String(ayNo), brut: Math.round(bb * 100) / 100 });
+            }
+            if (tabloB.length) window.__kiraBildirgeAyTablosu = JSON.stringify(tabloB);
+        }
+    } catch (_eBt) {}
     var hMap = fromReel ? window.senaryoHibritProjByYilReel : window.senaryoHibritProjByYil;
     var hSlice = hibrit && hMap && !isNaN(yilKey) ? hMap[yilKey] : null;
     if (hibrit && (!hSlice || !(hSlice.n > 0) || !(hSlice.b > 0))) {
@@ -33940,6 +34015,7 @@ function kiraBildirgesiOlusturYil(yil, aylikKira, bildirgeMod, fromReel) {
 }
 
 function kiraBildirgesiOlusturFromSenaryo() {
+    window.__kiraBildirgeAyTablosu = null;
     var musteriEl = document.getElementById('senaryo_musteri_ismi');
     var tarihEl = document.getElementById('senaryo_baslangic_tarih');
     // İstek: her zaman projeksiyon tablosundaki SON yılın aylık net tutarı kullanılsın
@@ -34043,6 +34119,7 @@ function kiraBildirgesiPayload() {
         out.hibrit_banka_net = hb.b;
         out.kira_nakit = false;
     }
+    if (window.__kiraBildirgeAyTablosu) out.ay_tablosu = window.__kiraBildirgeAyTablosu;
     return out;
 }
 /** İndirme adı: «Firma İsmi Kira Bildirgesi.pdf» (\/:*?"<>| ve kontrol karakterleri temiz). */
@@ -34129,6 +34206,7 @@ function kiraBildirgesiOnizleFormPost() {
         addField('hibrit_nakit_pay', payload.hibrit_nakit_pay);
         addField('hibrit_banka_net', payload.hibrit_banka_net);
     }
+    if (payload.ay_tablosu) addField('ay_tablosu', payload.ay_tablosu);
     document.body.appendChild(form);
     form.submit();
     setTimeout(function() { try { form.remove(); } catch (_eRm) {} }, 2000);
@@ -34178,6 +34256,7 @@ async function kiraBildirgesiWhatsApp() {
 }
 
 </script>
+<script src="{{ url_for('static', filename='js/plan_degistir.js', v=1) }}"></script>
 <script src="{{ url_for('static', filename='js/tahsilat-wa-durum.js', v=tahsilat_wa_js_surum) }}"></script>
 <script src="{{ url_for('static', filename='js/sozlesme-whatsapp.js', v=sozlesme_wa_js_surum) }}"></script>
 {% endblock %}

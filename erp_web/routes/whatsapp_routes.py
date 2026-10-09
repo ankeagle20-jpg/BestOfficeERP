@@ -230,6 +230,8 @@ def api_geciken_liste():
     ozet_batch = musteri_firma_ozet_grid_ozet_batch(musteri_ids_all, bugun) if musteri_ids_all else {}
 
     ilk_kira_by_mid = {}
+    kyc_by_mid = {}
+    tufe_map_local = {}
     if musteri_ids_all:
         tufe_map_local = _tufe_map_by_year_month_cached()
         base_sql_local = _musteri_aylik_grid_customer_kyc_select_sql()
@@ -244,6 +246,7 @@ def api_geciken_liste():
             kyc_for_grid_k = _firma_ozet_kyc_dict_from_grid_sql_row(kr)
             if not kyc_for_grid_k:
                 continue
+            kyc_by_mid[mid_k] = kyc_for_grid_k
             try:
                 core_k = _aylik_grid_contract_core(kyc_for_grid_k, tufe_map_local)
                 if core_k and isinstance(core_k.get('yillik_map'), dict):
@@ -355,6 +358,24 @@ def api_geciken_liste():
             'ay': int(ozet_r.get('geciken_ay') or 0),
             'toplam': round(float(ozet_r.get('toplam_borc') or 0), 2),
         })
+
+    if sonuc:
+        try:
+            from routes.giris_routes import (
+                _plan_paket_yukle,
+                _planli_reel_haritasi,
+                geciken_satir_guncelleri,
+            )
+
+            mids_g = [s.get("musteri_id") for s in sonuc]
+            _plan_paket_yukle(mids_g)
+            reel_g = _planli_reel_haritasi(mids_g)
+            yeni_g = geciken_satir_guncelleri(sonuc, bugun, kyc_by_mid, tufe_map_local, reel_g)
+            for s, guncel in zip(sonuc, yeni_g):
+                s["guncel"] = guncel
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception("geciken plan guncel")
 
     sonuc.sort(key=lambda x: -x['gecikme_gun'])
     from ay_sinif import UYARI_METNI, kilitli_musteriler, siniflari_yukle

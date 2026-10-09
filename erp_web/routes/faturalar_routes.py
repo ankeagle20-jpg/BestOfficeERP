@@ -6966,6 +6966,56 @@ def _auto_month_amount_from_cache(musteri_id, run_month_date):
     return round(net * 1.2, 2) if net > 0 else 0.0
 
 
+def _auto_plan_ay_brut(musteri_id, run_month_date):
+    """Cache boşken plan varsa o ayın brütü. Plan yoksa None; eski son fatura / ilk kira sürer."""
+    try:
+        from routes.giris_routes import (
+            _PLAN_BOS,
+            _plan_ay_brut_varsa,
+            _plan_paket_yukle,
+            _planli_reel_haritasi,
+            _tufe_map_by_year_month_cached,
+        )
+    except Exception:
+        return None
+    try:
+        mid = int(musteri_id)
+        y = int(run_month_date.year)
+        m = int(run_month_date.month)
+    except (TypeError, ValueError, AttributeError):
+        return None
+    if mid <= 0:
+        return None
+    try:
+        paket = _plan_paket_yukle([mid]).get(mid) or _PLAN_BOS
+    except Exception:
+        logging.getLogger(__name__).exception("plan okuma")
+        return None
+    if not (paket.get("planlar") or []):
+        return None
+    kyc = fetch_one(
+        """
+        SELECT sozlesme_tarihi, kira_artis_tarihi, aylik_kira, kdv_oran,
+               kira_nakit, kira_nakit_tutar, kira_banka_tutar
+        FROM musteri_kyc WHERE musteri_id = %s ORDER BY id DESC LIMIT 1
+        """,
+        (mid,),
+    ) or {}
+    try:
+        tufe = _tufe_map_by_year_month_cached()
+    except Exception:
+        tufe = {}
+    try:
+        reel = (_planli_reel_haritasi([mid]) or {}).get(mid) or {}
+    except Exception:
+        reel = {}
+    try:
+        return _plan_ay_brut_varsa(mid, kyc, tufe, y, m, reel)
+    except Exception:
+        logging.getLogger(__name__).exception("plan hucre")
+        return None
+
+
 def _auto_month_amount_resolved(musteri_id, run_month_date):
     """Aylık tutar: cache → (gerekirse) son fatura → ilk_kira_bedeli.
 
@@ -6986,6 +7036,15 @@ def _auto_month_amount_resolved(musteri_id, run_month_date):
         v = 0.0
     if v > 0:
         return round(v, 2)
+
+    plan_t = _auto_plan_ay_brut(musteri_id, run_month_date)
+    if plan_t is not None:
+        try:
+            pt = float(plan_t)
+        except (TypeError, ValueError):
+            pt = 0.0
+        if pt > 0:
+            return round(pt, 2)
 
     # KYC/cache boş ise müşterinin son pozitif toplamlı faturasını baz al.
     last_inv = fetch_one(
@@ -7149,6 +7208,14 @@ def run_auto_invoice_cycle(force=False, run_date=None):
         ORDER BY c.id
         """
     ) or []
+    try:
+        from .giris_routes import _plan_paket_yukle, _planli_reel_haritasi
+
+        _idler = [r.get("id") for r in musteri_rows]
+        _plan_paket_yukle(_idler)
+        _planli_reel_haritasi(_idler)
+    except Exception:
+        logging.getLogger(__name__).exception("plan okuma")
     for mr in musteri_rows:
         mid = int(mr.get("id"))
         try:

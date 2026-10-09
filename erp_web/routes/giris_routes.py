@@ -53,6 +53,7 @@ from db import (
 )
 from datetime import datetime, date, timedelta
 import calendar
+import contextvars
 import time
 import threading
 import copy
@@ -167,6 +168,16 @@ def _tahsil_row_ekstre_eslesme_ay_iso(r: dict) -> str | None:
 
 
 bp = Blueprint('giris', __name__)
+
+
+def _plan_yazma_rotalari():
+    from sozlesme_plan_api import plan_rotalarini_bagla
+
+    plan_rotalarini_bagla(bp)
+
+
+_plan_yazma_rotalari()
+
 
 @bp.route('/api/tahsilat-personeller')
 @giris_gerekli
@@ -783,6 +794,11 @@ def resync_panel_and_grid_after_tahsil_change(musteri_id: int) -> bool:
             "resync_panel_and_grid_after_tahsil_change musteri_id=%s", mid
         )
         return False
+
+
+def resync_panel_and_grid_after_plan_change(musteri_id: int) -> bool:
+    """Yazım sonrası yalnız bu kartın panel ve grid önbelleği. Henüz hiçbir akış çağırmaz."""
+    return resync_panel_and_grid_after_tahsil_change(musteri_id)
 
 
 def apply_makbuz_dagitim_to_panel_db(
@@ -1726,7 +1742,564 @@ def _aylik_grid_single_month_kdv_from_core(core, ref_y, ref_m) -> float:
     return round(tutar, 2) if math.isfinite(tutar) else 0.0
 
 
-def _aylik_grid_compute(musteri_id, kyc, tufe_map, tahsil_tutar_map=None):
+_PLAN_KUTU = contextvars.ContextVar("sozlesme_plan_kutu", default=None)
+_PLAN_BOS = {"planlar": [], "faturali": [], "belge": {}}
+
+
+def _plan_kutu():
+    """İstek (ve aynı isteğin iş parçacığı) içinde tablo varlığı + plan haritası."""
+    box = None
+    try:
+        if has_app_context():
+            box = getattr(g, "_sozlesme_plan_kutu", None)
+    except Exception:
+        box = None
+    if box is None:
+        box = _PLAN_KUTU.get()
+    if box is None:
+        box = {"tablo": None, "harita": {}}
+    try:
+        if has_app_context():
+            g._sozlesme_plan_kutu = box
+    except Exception:
+        pass
+    _PLAN_KUTU.set(box)
+    return box
+
+
+def _plan_kutu_sifirla():
+    _PLAN_KUTU.set(None)
+    try:
+        if has_app_context():
+            g.pop("_sozlesme_plan_kutu", None)
+    except Exception:
+        pass
+
+
+def _plan_satir_dict(row) -> dict | None:
+    if not isinstance(row, dict):
+        return None
+    try:
+        net = float(row.get("yeni_net") or 0)
+        brut = float(row.get("yeni_brut") or 0)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(net) or not math.isfinite(brut) or net <= 0 or brut <= 0:
+        return None
+    return {
+        "gecerlilik_ay": row.get("gecerlilik_ay"),
+        "yeni_net": net,
+        "kdv_oran": row.get("kdv_oran"),
+        "yeni_brut": brut,
+        "nakit_tutar": row.get("nakit_tutar"),
+        "banka_tutar": row.get("banka_tutar"),
+    }
+
+
+_FATURA_TASLAK_NOT = re.compile(
+    r"(?:ERP|G.?B)\s+durum\s*:\s*taslak",
+    re.IGNORECASE,
+)
+_FATURA_IPTAL_NOT = re.compile(
+    r"G.?B\s+durum\s*:\s*iptal",
+    re.IGNORECASE,
+)
+
+
+def _fatura_not_norm(notlar: str) -> str:
+    return str(notlar or "").replace("İ", "I").replace("ı", "i").replace("�", "I")
+
+
+def _fatura_kaydi_gecerli(row) -> bool:
+    """Kesilmiş giden fatura. İptal, taslak, taşınmış GİB no ve gelen fatura değil."""
+    if not isinstance(row, dict):
+        return False
+    durum = str(row.get("durum") or "").strip().lower()
+    if durum in ("iptal", "taslak"):
+        return False
+    yon = str(row.get("yon") or "giden").strip().lower()
+    if yon == "gelen":
+        return False
+    notlar = str(row.get("notlar") or "")
+    if "|GIB_NO_TASINDI|" in notlar:
+        return False
+    norm = _fatura_not_norm(notlar)
+    if _FATURA_TASLAK_NOT.search(norm) or _FATURA_IPTAL_NOT.search(norm):
+        return False
+    return True
+
+
+def _fatura_ay_kumesi(row) -> set[str]:
+    """İşaretçinin ayı. İşaretçi yoksa fatura_tarihi ayı."""
+    return {ay for ay, _kaynak in _fatura_ay_kaynakli(row)}
+
+
+def _fatura_ay_kaynakli(row) -> list[tuple[str, str]]:
+    """(ay, kaynak). İşaretçi varsa yalnız işaret; yoksa fatura_tarihi."""
+    notlar = str((row or {}).get("notlar") or "")
+    isaret = set()
+    for iso in re.findall(r"\|AYLIK_TUTAR\|([0-9]{4}-[0-9]{2}-[0-9]{2})\|", notlar):
+        isaret.add(iso[:7])
+    for ym in re.findall(r"\|AUTO_INV\|([0-9]{4}-[0-9]{2})\|", notlar):
+        isaret.add(ym)
+    if isaret:
+        return [(ay, "isaret") for ay in sorted(isaret)]
+    ft = (row or {}).get("fatura_tarihi")
+    if isinstance(ft, datetime):
+        ft = ft.date()
+    if isinstance(ft, date):
+        return [(f"{ft.year:04d}-{ft.month:02d}", "fatura_tarihi")]
+    s = str(ft or "").strip()[:10]
+    if len(s) >= 7 and s[4] == "-":
+        try:
+            y, m = int(s[0:4]), int(s[5:7])
+        except ValueError:
+            return []
+        if 1 <= m <= 12:
+            return [(f"{y:04d}-{m:02d}", "fatura_tarihi")]
+    return []
+
+
+def _plan_fatura_kilit_listesi(rows) -> dict:
+    """mid -> kilitlenen aylar. Aynı ayda işaret, fatura_tarihi kaynağını ezer."""
+    birikim: dict[int, dict] = {}
+    for row in rows or []:
+        if not _fatura_kaydi_gecerli(row):
+            continue
+        try:
+            mid = int(row.get("musteri_id") or 0)
+            tutar = float(row.get("toplam") or 0)
+        except (TypeError, ValueError):
+            continue
+        if mid <= 0:
+            continue
+        if not math.isfinite(tutar):
+            tutar = 0.0
+        for ay, kaynak in _fatura_ay_kaynakli(row):
+            slot = birikim.setdefault(mid, {}).setdefault(ay, {"tutar": 0.0, "kaynak": kaynak})
+            slot["tutar"] = round(float(slot["tutar"]) + tutar, 2)
+            if kaynak == "isaret":
+                slot["kaynak"] = "isaret"
+    out = {}
+    for mid, aylar in birikim.items():
+        out[mid] = [
+            {"ay": ay, "fatura_tutari": round(float(v["tutar"]), 2), "kaynak": v["kaynak"]}
+            for ay, v in sorted(aylar.items())
+        ]
+    return out
+
+
+def _plan_fatura_aylari(rows) -> tuple[dict, dict]:
+    """Geçerli faturalar: ay listesi ve ay başına belge toplamı."""
+    faturali: dict[int, list] = {}
+    belge: dict[int, dict] = {}
+    for row in rows or []:
+        if not _fatura_kaydi_gecerli(row):
+            continue
+        try:
+            mid = int(row.get("musteri_id") or 0)
+            tutar = float(row.get("toplam") or 0)
+        except (TypeError, ValueError):
+            continue
+        if mid <= 0:
+            continue
+        if not math.isfinite(tutar):
+            tutar = 0.0
+        for ay in _fatura_ay_kumesi(row):
+            faturali.setdefault(mid, [])
+            if ay not in faturali[mid]:
+                faturali[mid].append(ay)
+            belge.setdefault(mid, {})
+            belge[mid][ay] = round(float(belge[mid].get(ay) or 0) + tutar, 2)
+    return faturali, belge
+
+
+def _plan_fatura_oku(planli) -> tuple[dict, dict]:
+    """Planlı kartların faturaları, tek sorgu. İptal ve taslak SQL'de elenir; not süzgeci Python'da."""
+    sql_yon = """
+        SELECT musteri_id, COALESCE(notlar, '') AS notlar,
+               COALESCE(toplam, tutar, 0) AS toplam,
+               fatura_tarihi, COALESCE(durum, '') AS durum,
+               COALESCE(yon, 'giden') AS yon
+        FROM faturalar
+        WHERE musteri_id = ANY(%s)
+          AND COALESCE(durum, '') NOT IN ('iptal', 'taslak')
+          AND COALESCE(yon, 'giden') <> 'gelen'
+    """
+    sql_yonsuz = """
+        SELECT musteri_id, COALESCE(notlar, '') AS notlar,
+               COALESCE(toplam, tutar, 0) AS toplam,
+               fatura_tarihi, COALESCE(durum, '') AS durum
+        FROM faturalar
+        WHERE musteri_id = ANY(%s)
+          AND COALESCE(durum, '') NOT IN ('iptal', 'taslak')
+    """
+    try:
+        rows = fetch_all(sql_yon, (planli,)) or []
+    except Exception:
+        logging.getLogger(__name__).exception("plan fatura yon")
+        rows = fetch_all(sql_yonsuz, (planli,)) or []
+    return _plan_fatura_aylari(rows)
+
+
+def _plan_paket_yukle(musteri_ids) -> dict:
+    """Açık planlar, tek sorgu. Tablo yoksa hiçbir şey yapmaz. Hata olursa boş paket."""
+    mids = []
+    seen = set()
+    for x in musteri_ids or []:
+        try:
+            i = int(x)
+        except (TypeError, ValueError):
+            continue
+        if i <= 0 or i in seen:
+            continue
+        seen.add(i)
+        mids.append(i)
+    box = _plan_kutu()
+    if box.get("tablo") is False:
+        return {i: dict(_PLAN_BOS) for i in mids}
+    if box.get("tablo") is None:
+        try:
+            row = fetch_one("SELECT to_regclass(%s) AS t", ("sozlesme_plan_degisiklik",))
+            box["tablo"] = bool(row and row.get("t"))
+        except Exception:
+            logging.getLogger(__name__).exception("plan tablo kontrol")
+            box["tablo"] = False
+            return {i: dict(_PLAN_BOS) for i in mids}
+        if not box["tablo"]:
+            return {i: dict(_PLAN_BOS) for i in mids}
+    eksik = [i for i in mids if i not in box["harita"]]
+    if eksik:
+        try:
+            rows = fetch_all(
+                """
+                SELECT musteri_id, gecerlilik_ay, yeni_net, kdv_oran, yeni_brut, nakit_tutar, banka_tutar
+                FROM sozlesme_plan_degisiklik
+                WHERE iptal_at IS NULL AND musteri_id = ANY(%s)
+                """,
+                (eksik,),
+            ) or []
+        except Exception:
+            logging.getLogger(__name__).exception("plan okuma")
+            for i in eksik:
+                box["harita"][i] = dict(_PLAN_BOS)
+            return {i: box["harita"].get(i) or dict(_PLAN_BOS) for i in mids}
+        grup: dict[int, list] = {i: [] for i in eksik}
+        for row in rows:
+            try:
+                mid = int(row.get("musteri_id") or 0)
+            except (TypeError, ValueError):
+                continue
+            plan = _plan_satir_dict(row)
+            if mid in grup and plan is not None:
+                grup[mid].append(plan)
+        planli = [i for i, pl in grup.items() if pl]
+        faturali, belge = {}, {}
+        if planli:
+            try:
+                faturali, belge = _plan_fatura_oku(planli)
+            except Exception:
+                logging.getLogger(__name__).exception("plan fatura okuma")
+                for i in eksik:
+                    box["harita"][i] = dict(_PLAN_BOS)
+                return {i: box["harita"].get(i) or dict(_PLAN_BOS) for i in mids}
+        for i in eksik:
+            box["harita"][i] = {
+                "planlar": grup.get(i) or [],
+                "faturali": list(faturali.get(i) or []),
+                "belge": dict(belge.get(i) or {}),
+            }
+    return {i: box["harita"].get(i) or dict(_PLAN_BOS) for i in mids}
+
+
+def _planli_reel_haritasi(musteri_ids) -> dict:
+    """Planı olan kartların reel yılları, tek sorgu. Plansız istekte sorgu yok."""
+    box = _plan_kutu()
+    planli = []
+    for x in musteri_ids or []:
+        try:
+            i = int(x)
+        except (TypeError, ValueError):
+            continue
+        if i <= 0:
+            continue
+        if (box.get("harita") or {}).get(i, {}).get("planlar"):
+            planli.append(i)
+    yuklu = box.setdefault("reel", {})
+    if not planli:
+        return {}
+    eksik = [i for i in planli if i not in yuklu]
+    if eksik:
+        try:
+            rows = fetch_all(
+                """
+                SELECT musteri_id, donem_yil, tutar_kdv_dahil
+                FROM musteri_reel_donem_tutar
+                WHERE musteri_id = ANY(%s)
+                """,
+                (eksik,),
+            ) or []
+        except Exception:
+            logging.getLogger(__name__).exception("plan reel okuma")
+            return {i: dict(yuklu.get(i) or {}) for i in planli if i in yuklu}
+        for i in eksik:
+            yuklu.setdefault(i, {})
+        for row in rows:
+            try:
+                mid = int(row.get("musteri_id") or 0)
+                yil = int(row.get("donem_yil") or 0)
+                tut = round(float(row.get("tutar_kdv_dahil") or 0), 2)
+            except (TypeError, ValueError):
+                continue
+            if mid > 0 and yil > 0 and math.isfinite(tut) and tut >= 0:
+                yuklu.setdefault(mid, {})[yil] = tut
+    return {i: dict(yuklu.get(i) or {}) for i in planli}
+
+
+def _plan_zincir(kyc: dict, tufe_map, ay_sayisi: int, reel, faturali_aylar, fatura_belge) -> dict | None:
+    bas = _aylik_grid_coerce_date((kyc or {}).get("sozlesme_tarihi"))
+    if not bas:
+        bas = _aylik_grid_coerce_date((kyc or {}).get("rent_start_date"))
+    if not bas or ay_sayisi < 1:
+        return None
+    artis = _aylik_grid_coerce_date((kyc or {}).get("kira_artis_tarihi")) or bas
+    try:
+        net = float((kyc or {}).get("aylik_kira") or 0)
+    except (TypeError, ValueError):
+        net = 0.0
+    if not math.isfinite(net) or net <= 0:
+        return None
+    return {
+        "sozlesme_tarihi": bas,
+        "artis_tarihi": artis,
+        "ay_sayisi": int(ay_sayisi),
+        "aylik_net": net,
+        "kdv_oran": (kyc or {}).get("kdv_oran"),
+        "kira_nakit": bool((kyc or {}).get("kira_nakit")),
+        "nakit_tutar": (kyc or {}).get("kira_nakit_tutar"),
+        "banka_tutar": (kyc or {}).get("kira_banka_tutar"),
+        "tufe": tufe_map if isinstance(tufe_map, dict) else {},
+        "reel": reel if isinstance(reel, dict) else {},
+        "faturali_aylar": list(faturali_aylar or []),
+        "fatura_belge": dict(fatura_belge or {}),
+    }
+
+
+def _plan_katmani_payloada(
+    payload,
+    kyc,
+    tufe_map,
+    *,
+    planlar,
+    reel=None,
+    faturali_aylar=None,
+    fatura_belge=None,
+):
+    """Reel örtmesinden sonra. Plansız veya hatalı okumada payload aynı kalır."""
+    if not payload or not isinstance(payload.get("aylar"), list) or not planlar:
+        return
+    try:
+        from sozlesme_plan import plan_uygulanacak_aylar
+
+        zincir = _plan_zincir(kyc, tufe_map, len(payload["aylar"]), reel, faturali_aylar, fatura_belge)
+        if not zincir:
+            return
+        harita, uyarilar = plan_uygulanacak_aylar(zincir, planlar)
+    except Exception:
+        logging.getLogger(__name__).exception("plan katmani")
+        return
+    if not harita:
+        return
+    tol = float(AYLIK_GRID_TAM_ODENDI_TOLERANS)
+    for a in payload["aylar"]:
+        if not isinstance(a, dict):
+            continue
+        try:
+            anahtar = f"{int(a.get('yil')):04d}-{int(a.get('ay')):02d}"
+        except (TypeError, ValueError):
+            continue
+        row = harita.get(anahtar)
+        if not row:
+            continue
+        try:
+            new_t = round(float(row.get("brut") or 0), 2)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(new_t) or new_t <= 0:
+            continue
+        try:
+            odenen = float(a.get("odenen_tutar_kdv") or 0)
+        except (TypeError, ValueError):
+            odenen = 0.0
+        if not math.isfinite(odenen):
+            odenen = 0.0
+        odenen = round(min(max(odenen, 0.0), new_t), 2)
+        kalan = max(round(new_t - odenen, 2), 0.0)
+        a["brut_tutar_kdv"] = new_t
+        a["tutar_kdv_dahil"] = new_t
+        a["odenen_tutar_kdv"] = odenen
+        a["kalan_tutar_kdv"] = kalan
+        a["tahsil_edildi"] = new_t > tol and kalan <= tol
+        a["kismi_tahsilat"] = odenen > tol and kalan > tol
+    payload["plan_var"] = True
+    if uyarilar:
+        payload["plan_uyarilar"] = uyarilar
+
+
+def _plan_ay_brut_varsa(musteri_id, kyc, tufe_map, ref_y, ref_m, reel):
+    """Bu ay plan altındaysa brüt; değilse None. Okuma hatası None (eski hücre)."""
+    try:
+        paket = _plan_paket_yukle([musteri_id]).get(int(musteri_id)) or _PLAN_BOS
+        planlar = paket.get("planlar") or []
+        if not planlar:
+            return None
+        from sozlesme_plan import plan_uygulanacak_aylar
+
+        bas = _aylik_grid_coerce_date((kyc or {}).get("sozlesme_tarihi")) or _aylik_grid_coerce_date(
+            (kyc or {}).get("rent_start_date")
+        )
+        if not bas:
+            return None
+        ay_sayisi = ((int(ref_y) - bas.year) * 12 + (int(ref_m) - bas.month)) + 1
+        if ay_sayisi < 1:
+            ay_sayisi = 1
+        zincir = _plan_zincir(
+            kyc, tufe_map, ay_sayisi, reel, paket.get("faturali"), paket.get("belge")
+        )
+        if not zincir:
+            return None
+        harita, _uy = plan_uygulanacak_aylar(zincir, planlar)
+        row = harita.get(f"{int(ref_y):04d}-{int(ref_m):02d}")
+        if not row:
+            return None
+        v = round(float(row.get("brut") or 0), 2)
+        if math.isfinite(v) and v > 0:
+            return v
+    except Exception:
+        logging.getLogger(__name__).exception("plan hucre")
+    return None
+
+
+def _ekstre_plan_brut_haritasi(musteri_id, kyc, tufe_map, reel_yillar, bitis) -> dict:
+    """Planlı ayların brütü, bir kez. Plansızda boş sözlük. Ay döngüsü sorgu yapmaz."""
+    try:
+        paket = _plan_paket_yukle([musteri_id]).get(int(musteri_id)) or _PLAN_BOS
+    except Exception:
+        logging.getLogger(__name__).exception("plan okuma")
+        return {}
+    planlar = paket.get("planlar") or []
+    if not planlar:
+        return {}
+    bas = _aylik_grid_coerce_date((kyc or {}).get("sozlesme_tarihi"))
+    if not bas:
+        bas = _aylik_grid_coerce_date((kyc or {}).get("rent_start_date"))
+    if not bas or not hasattr(bitis, "year"):
+        return {}
+    ay_sayisi = (int(bitis.year) - bas.year) * 12 + (int(bitis.month) - bas.month) + 1
+    if ay_sayisi < 1:
+        return {}
+    if ay_sayisi > 480:
+        ay_sayisi = 480
+    try:
+        from sozlesme_plan import plan_uygulanacak_aylar
+
+        zincir = _plan_zincir(
+            kyc,
+            tufe_map,
+            ay_sayisi,
+            reel_yillar,
+            paket.get("faturali"),
+            paket.get("belge"),
+        )
+        if not zincir:
+            return {}
+        harita, _uy = plan_uygulanacak_aylar(zincir, planlar)
+    except Exception:
+        logging.getLogger(__name__).exception("plan katmani")
+        return {}
+    out = {}
+    for ay, row in (harita or {}).items():
+        try:
+            brut = round(float(row.get("brut") or 0), 2)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(brut) and brut > 0:
+            out[ay] = brut
+    return out
+
+
+def geciken_satir_guncelleri(satirlar, bugun, kyc_by_mid, tufe_map, reel_by_mid):
+    """Liste satırının guncel alanı. Plan yoksa eski değer. Plan varsa geçerli ayın brütü.
+
+    customers alanına yazmaz. Plan okuması kutu doluysa ek sorgu yapmaz.
+    """
+    from sozlesme_plan import plan_uygulanacak_aylar
+
+    mids = []
+    for satir in satirlar or []:
+        try:
+            i = int(satir.get("musteri_id") or 0)
+        except (TypeError, ValueError, AttributeError):
+            continue
+        if i > 0:
+            mids.append(i)
+    paketler = _plan_paket_yukle(mids)
+    try:
+        ay_key = f"{int(bugun.year):04d}-{int(bugun.month):02d}"
+    except (TypeError, ValueError, AttributeError):
+        return [s.get("guncel") if isinstance(s, dict) else None for s in (satirlar or [])]
+    out = []
+    for satir in satirlar or []:
+        eski = satir.get("guncel") if isinstance(satir, dict) else None
+        try:
+            mid = int(satir.get("musteri_id") or 0)
+        except (TypeError, ValueError, AttributeError):
+            out.append(eski)
+            continue
+        paket = paketler.get(mid) or _PLAN_BOS
+        if not paket.get("planlar"):
+            out.append(eski)
+            continue
+        kyc = (kyc_by_mid or {}).get(mid)
+        if not kyc:
+            out.append(eski)
+            continue
+        bas = _aylik_grid_coerce_date(kyc.get("sozlesme_tarihi")) or _aylik_grid_coerce_date(
+            kyc.get("rent_start_date")
+        )
+        if not bas:
+            out.append(eski)
+            continue
+        ay_sayisi = (int(bugun.year) - bas.year) * 12 + (int(bugun.month) - bas.month) + 1
+        if ay_sayisi < 1:
+            out.append(eski)
+            continue
+        zincir = _plan_zincir(
+            kyc,
+            tufe_map,
+            ay_sayisi,
+            (reel_by_mid or {}).get(mid) or {},
+            paket.get("faturali"),
+            paket.get("belge"),
+        )
+        if not zincir:
+            out.append(eski)
+            continue
+        try:
+            harita, _uy = plan_uygulanacak_aylar(zincir, paket.get("planlar"))
+            row = (harita or {}).get(ay_key)
+            v = round(float((row or {}).get("brut") or 0), 2)
+        except (TypeError, ValueError):
+            out.append(eski)
+            continue
+        if math.isfinite(v) and v > 0:
+            out.append(v)
+        else:
+            out.append(eski)
+    return out
+
+
+def _aylik_grid_compute(musteri_id, kyc, tufe_map, tahsil_tutar_map=None, *, planlar=None, plan_katmani=True, reel=None, faturali_aylar=None, fatura_belge=None):
     """
     KYC satırı + önceden yüklenmiş TÜFE haritası ile aylık grid payload üretir.
     Tam ödendi: brut > tol ve o aya dağıtılan tahsilatların KDV dahil kiraya göre kalanı ≤ tol.
@@ -1776,7 +2349,7 @@ def _aylik_grid_compute(musteri_id, kyc, tufe_map, tahsil_tutar_map=None):
             "kalan_tutar_kdv": round(kalan, 2),
             "brut_tutar_kdv": round(tutar, 2),
         })
-    return {
+    payload = {
         "musteri_id": musteri_id,
         "baslangic": bas.isoformat(),
         "bitis": bit.isoformat(),
@@ -1793,6 +2366,28 @@ def _aylik_grid_compute(musteri_id, kyc, tufe_map, tahsil_tutar_map=None):
         "compute_rev": AYLIK_GRID_COMPUTE_REV,
         "updated_at": datetime.now().isoformat(timespec="seconds"),
     }
+    if plan_katmani:
+        if planlar is None:
+            try:
+                paket = _plan_paket_yukle([musteri_id]).get(int(musteri_id)) or _PLAN_BOS
+            except Exception:
+                logging.getLogger(__name__).exception("plan okuma")
+                paket = _PLAN_BOS
+            planlar = paket.get("planlar") or []
+            if faturali_aylar is None:
+                faturali_aylar = paket.get("faturali") or []
+            if fatura_belge is None:
+                fatura_belge = paket.get("belge") or {}
+        _plan_katmani_payloada(
+            payload,
+            kyc,
+            tufe_map,
+            planlar=planlar,
+            reel=reel,
+            faturali_aylar=faturali_aylar,
+            fatura_belge=fatura_belge,
+        )
+    return payload
 
 
 _musteri_kyc_grid_mem: dict[int, dict] = {}
@@ -2157,7 +2752,7 @@ def _aylik_grid_payload_reel_overlay_from_db(musteri_id: int, payload: dict | No
     return payload
 
 
-def _build_aylik_grid_cache_payload(musteri_id, tufe_map=None, kyc_row=None, manual_reel_by_year=None):
+def _build_aylik_grid_cache_payload(musteri_id, tufe_map=None, kyc_row=None, manual_reel_by_year=None, *, planlar=None, faturali_aylar=None, fatura_belge=None):
     if kyc_row is not None:
         kyc = dict(kyc_row)
     else:
@@ -2165,14 +2760,43 @@ def _build_aylik_grid_cache_payload(musteri_id, tufe_map=None, kyc_row=None, man
     if not kyc:
         return None
     tm = tufe_map if tufe_map is not None else _tufe_map_by_year_month_cached()
+    if planlar is None:
+        try:
+            paket = _plan_paket_yukle([musteri_id]).get(int(musteri_id)) or _PLAN_BOS
+        except Exception:
+            logging.getLogger(__name__).exception("plan okuma")
+            paket = _PLAN_BOS
+        planlar = paket.get("planlar") or []
+        if faturali_aylar is None:
+            faturali_aylar = paket.get("faturali") or []
+        if fatura_belge is None:
+            fatura_belge = paket.get("belge") or {}
     tahsil_map = _aylik_tahsil_tutar_map(musteri_id)
-    payload = _aylik_grid_compute(musteri_id, kyc, tm, tahsil_map)
+    payload = _aylik_grid_compute(
+        musteri_id,
+        kyc,
+        tm,
+        tahsil_map,
+        planlar=planlar,
+        faturali_aylar=faturali_aylar,
+        fatura_belge=fatura_belge,
+    )
     if isinstance(payload, dict):
         if manual_reel_by_year is None:
             manual_reel_by_year = _musteri_reel_donem_manual_dict_from_db(int(musteri_id))
         if isinstance(manual_reel_by_year, dict) and manual_reel_by_year:
             _aylik_grid_apply_reel_donem_overlay_to_payload(
                 int(musteri_id), kyc, tm, payload, manual_reel_by_year=manual_reel_by_year
+            )
+        if planlar:
+            _plan_katmani_payloada(
+                payload,
+                kyc,
+                tm,
+                planlar=planlar,
+                reel=manual_reel_by_year,
+                faturali_aylar=faturali_aylar,
+                fatura_belge=fatura_belge,
             )
         acik_aylik_tutar_aylari = _aylik_grid_acik_tutar_ay_keys_normalized(musteri_id)
         tol = float(AYLIK_GRID_TAM_ODENDI_TOLERANS)
@@ -6727,6 +7351,52 @@ def _kira_bildirgesi_content_disposition(musteri_adi, disposition="inline") -> s
     )
 
 
+def _kira_bildirge_ay_tablosu_ciz(c, ay_tablosu, font_name, w, h):
+    """Yıl içinde tutar kırılıyorsa ikinci sayfaya ay ay yazar. Tek tutarsa mektup aynı kalır."""
+    if isinstance(ay_tablosu, str):
+        try:
+            ay_tablosu = json.loads(ay_tablosu)
+        except Exception:
+            return False
+    if not isinstance(ay_tablosu, list):
+        return False
+    satirlar = []
+    degerler = []
+    for row in ay_tablosu:
+        if not isinstance(row, dict):
+            continue
+        ay = str(row.get("ay") or "")[:7]
+        if len(ay) != 7 or ay[4] != "-":
+            continue
+        ham = row.get("brut")
+        if ham is None:
+            ham = row.get("net")
+        try:
+            val = round(float(ham), 2)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(val):
+            continue
+        satirlar.append((ay, val))
+        degerler.append(val)
+    if len(satirlar) < 2 or len(set(degerler)) < 2:
+        return False
+    from reportlab.lib.units import mm
+
+    c.showPage()
+    c.setFont(font_name, 11)
+    y = 20
+    c.drawString(15 * mm, h - y * mm, "Yil ici kira (plan ayindan itibaren)")
+    y += 8
+    c.setFont(font_name, 9)
+    for ay, val in satirlar:
+        if y > 270:
+            break
+        c.drawString(15 * mm, h - y * mm, ay + "    " + f"{val:,.2f}")
+        y += 5
+    return True
+
+
 def build_kira_bildirgesi_pdf(
     musteri_adi,
     sozlesme_tarihi,
@@ -6736,6 +7406,7 @@ def build_kira_bildirgesi_pdf(
     hizmet_turu="",
     hibrit_nakit_pay=None,
     hibrit_banka_net=None,
+    ay_tablosu=None,
 ):
     """Kira bildirgesi mektubu A4 PDF (bestoffice / Ofisbir). Liberation Sans.
     hizmet_turu: yalnızca sanal_ofis -> yıllık kira ibaresi; diğerlerinde aylık net + KDV dahil.
@@ -6887,6 +7558,7 @@ def build_kira_bildirgesi_pdf(
     w_unvan = c.stringWidth(unvan_text, font_name, 9)
     unvan_x = right_margin - w_best / 2 - w_unvan / 2
     c.drawString(unvan_x, h - y * mm, unvan_text)
+    _kira_bildirge_ay_tablosu_ciz(c, ay_tablosu, font_name, w, h)
 
     c.save()
     buf.seek(0)
@@ -7094,6 +7766,7 @@ def kira_bildirgesi_pdf():
             hizmet_turu=hizmet_turu,
             hibrit_nakit_pay=hibrit_n if use_hibrit_pdf else None,
             hibrit_banka_net=hibrit_b if use_hibrit_pdf else None,
+            ay_tablosu=data.get("ay_tablosu"),
         )
         return Response(pdf_bytes, mimetype="application/pdf", headers={
             "Content-Disposition": _kira_bildirgesi_content_disposition(musteri_adi, "inline")
@@ -7845,6 +8518,9 @@ def firma_ozet_aylik_grid_hucre_kdv_dahil(
             )
         except Exception:
             reel_map = {}
+        plan_brut = _plan_ay_brut_varsa(musteri_id, kyc, tufe_map, ref_y, ref_m, reel_manual)
+        if plan_brut is not None:
+            return plan_brut
         if key in reel_map:
             try:
                 v = float(reel_map[key])
@@ -7852,6 +8528,10 @@ def firma_ozet_aylik_grid_hucre_kdv_dahil(
                     return round(v, 2)
             except (TypeError, ValueError):
                 pass
+    elif not skip_disk_cache:
+        plan_brut = _plan_ay_brut_varsa(musteri_id, kyc, tufe_map, ref_y, ref_m, manual_reel_by_year)
+        if plan_brut is not None:
+            return plan_brut
     if skip_disk_cache:
         return round(base_one, 2) if math.isfinite(base_one) else 0.0
     for a in payload["aylar"]:
@@ -8659,15 +9339,27 @@ def _ekstre_hucre_alacak(
     grid_kismi_by_iso: dict | None = None,
     ayda_tahsilat_var: bool = False,
     reel_ay_map: dict | None = None,
+    plan_ay_brut=None,
+    tahsil_tutar=None,
 ) -> float | None:
     """
     Ekstre tahsilat = aylık grid hücresinde görünen brüt (kira ile aynı rakam).
     Ayda tahsilat yoksa 0; grid'de ay yoksa None → çağıran yedek yola düşer.
+    plan_ay_brut verilmezse eski reel/grid hedefi. Verilirse hedef plan brütüdür;
+    kısmi tahsilatta alacak nakit kadardır, reel hedefi borcu küçük bırakmaz.
     """
     tol = float(AYLIK_GRID_TAM_ODENDI_TOLERANS)
     iso = str(iso or "").strip()[:10]
-    hedef = None
-    if reel_ay_map and isinstance(reel_ay_map, dict):
+    plan_hedef = None
+    if plan_ay_brut is not None:
+        try:
+            pv = round(float(plan_ay_brut), 2)
+        except (TypeError, ValueError):
+            pv = 0.0
+        if math.isfinite(pv) and pv > tol:
+            plan_hedef = pv
+    hedef = plan_hedef
+    if hedef is None and reel_ay_map and isinstance(reel_ay_map, dict):
         try:
             dp = datetime.strptime(iso[:10], "%Y-%m-%d").date()
             rk = f"{dp.year}-{dp.month}"
@@ -8697,6 +9389,25 @@ def _ekstre_hucre_alacak(
             has_pay = False
     if not has_pay:
         return 0.0
+    if plan_hedef is not None:
+        nakit = None
+        if tahsil_tutar is not None:
+            try:
+                nakit = round(float(tahsil_tutar), 2)
+            except (TypeError, ValueError):
+                nakit = None
+        if nakit is None:
+            try:
+                nakit = round(max(0.0, float((grid_odenen_by_iso or {}).get(iso) or 0)), 2)
+            except (TypeError, ValueError):
+                nakit = 0.0
+        if nakit is None or not math.isfinite(nakit):
+            nakit = 0.0
+        if bool((grid_tahsil_edildi_by_iso or {}).get(iso)) or nakit + tol >= hedef:
+            return hedef
+        if nakit > tol:
+            return round(min(nakit, hedef), 2)
+        return hedef
     return hedef
 
 
@@ -8949,6 +9660,7 @@ def _aylik_tahsil_edilen_aylar_set_normalized_batch(musteri_ids: list[int]) -> d
         mids.append(i)
     if not mids:
         return {}
+    _plan_paket_yukle(mids)
     out: dict[int, set[str]] = {m: set() for m in mids}
     cached = _read_aylik_grid_cache_payload_batch(mids)
     tm = _tufe_map_by_year_month_cached()
@@ -9253,6 +9965,7 @@ def musteri_aylik_grid_hucre_kdv_dahil_takvim_ayi_batch(musteri_ids: list, ref: 
 
     _ensure_musteri_reel_donem_tutar_table()
     tufe_map = _tufe_map_by_year_month()
+    _plan_paket_yukle(mids)
 
     base_sql = _musteri_aylik_grid_customer_kyc_select_sql()
     rows = fetch_all(base_sql + " WHERE c.id = ANY(%s)", (mids,)) or []
@@ -9378,6 +10091,7 @@ def prewarm_aylik_grid_cache_for_musteriler(
         except (TypeError, ValueError):
             pass
     need = need[: max(1, cap)]
+    _plan_paket_yukle(need)
     workers = 1
     try:
         workers = max(1, min(4, int(str(os.getenv("FIRMA_OZET_CACHE_REBUILD_WORKERS", "3")).strip() or "3")))
@@ -9663,6 +10377,7 @@ def musteri_firma_ozet_grid_ozet_batch(musteri_ids: list, ref: date | None = Non
         return cached_out
 
     try:
+        _plan_paket_yukle(need_mids)
         prewarm_aylik_grid_cache_for_musteriler(need_mids, date(ref_y, ref_m, 1))
     except Exception:
         pass
@@ -9967,8 +10682,17 @@ def _ekstre_borc_tutar_for_month(
     artis_month,
     tufe_map,
     aylik,
+    *,
+    plan_ay_brut=None,
 ):
-    """Kayıtlı reel dönem tutarı varsa önce onu; yoksa grid / sözleşme çekirdeği / TÜFE zinciri."""
+    """Plan ayı varsa ay_bazli brütü. Plansızda eski sıra: reel, grid, çekirdek."""
+    if plan_ay_brut is not None:
+        try:
+            p0 = round(float(plan_ay_brut), 2)
+            if math.isfinite(p0) and p0 > 0:
+                return p0
+        except (TypeError, ValueError):
+            pass
     rk = f"{int(y)}-{int(m)}"
     if reel_ay_map and isinstance(reel_ay_map, dict) and rk in reel_ay_map:
         try:
@@ -10005,6 +10729,43 @@ def _ekstre_borc_tutar_for_month(
         grid_tutar_by_iso,
         contract_ay_tutar=cv_m,
     )
+
+
+def _ekstre_ay_borcu(
+    y,
+    m,
+    prev_borc,
+    grid_tutar_by_iso,
+    core_ekstre,
+    tahsilat_ay_tutar_map,
+    reel_ay_map,
+    artis_month,
+    tufe_map,
+    aylik,
+    plan_brut_by_ay=None,
+):
+    """Ekstrede görünen ay borcu. Plan ayında reel hücresi bu brütü ezmez."""
+    key = f"{int(y):04d}-{int(m):02d}"
+    plan_b = None
+    if isinstance(plan_brut_by_ay, dict):
+        plan_b = plan_brut_by_ay.get(key)
+    borc = _ekstre_borc_tutar_for_month(
+        y,
+        m,
+        prev_borc,
+        grid_tutar_by_iso,
+        core_ekstre,
+        tahsilat_ay_tutar_map,
+        reel_ay_map,
+        artis_month,
+        tufe_map,
+        aylik,
+        plan_ay_brut=plan_b,
+    )
+    if plan_b is None:
+        iso = date(int(y), int(m), 1).isoformat()
+        borc = _ekstre_hucre_borc(iso, borc, grid_tutar_by_iso, reel_ay_map)
+    return borc
 
 
 def _ekstre_devreden_toplamlari(
@@ -10745,7 +11506,9 @@ def _cari_ekstre_hareketler(
                     )
             _ekstre_grid_iso_aylar_doldur((live_pl or {}).get("aylar"), merge=False)
         else:
-            live_pl = _aylik_grid_compute(int(musteri_id), kyc, tufe_map, ekstre_tahsil_map)
+            live_pl = _aylik_grid_compute(
+                int(musteri_id), kyc, tufe_map, ekstre_tahsil_map, plan_katmani=False
+            )
             if isinstance(live_pl, dict):
                 _ekstre_payload_odenen_zenginlestir(
                     live_pl, ekstre_tahsil_map, ekstre_batch_maps
@@ -10935,7 +11698,11 @@ def _cari_ekstre_hareketler(
     kira_block = []
     full_borc_for_fifo = {}
     borc_by_tarih = {}
+    plan_brut_by_ay = {}
     if not is_cari_mod:
+        plan_brut_by_ay = _ekstre_plan_brut_haritasi(
+            musteri_id, kyc, tufe_map, manual_reel_pass, bit
+        )
         fifo_bas = dev_bas
         if soz_first_month and soz_first_month > fifo_bas:
             fifo_bas = soz_first_month
@@ -10944,7 +11711,8 @@ def _cari_ekstre_hareketler(
         prev_borc_tutar = None
         while (y, m) <= (bit_y, bit_m):
             ilk_gun = date(y, m, 1)
-            borc_tutar = _ekstre_borc_tutar_for_month(
+            plan_ay = f"{y:04d}-{m:02d}" in plan_brut_by_ay
+            borc_tutar = _ekstre_ay_borcu(
                 y,
                 m,
                 prev_borc_tutar,
@@ -10955,15 +11723,15 @@ def _cari_ekstre_hareketler(
                 artis_month,
                 tufe_map,
                 aylik,
+                plan_brut_by_ay,
             )
             prev_borc_tutar = borc_tutar
             tarih_iso = ilk_gun.isoformat()
-            borc_tutar = _ekstre_hucre_borc(tarih_iso, borc_tutar, grid_tutar_by_iso, reel_ay_map)
             rk_fifo = f"{y}-{m}"
             reel_kilit = bool(
                 reel_ay_map and isinstance(reel_ay_map, dict) and rk_fifo in reel_ay_map
             )
-            if panel_tahsil_by_iso and tarih_iso in panel_tahsil_by_iso and not reel_kilit:
+            if panel_tahsil_by_iso and tarih_iso in panel_tahsil_by_iso and not reel_kilit and not plan_ay:
                 try:
                     pbr = round(float(panel_tahsil_by_iso[tarih_iso].get("aylik") or 0), 2)
                 except (TypeError, ValueError, KeyError):
@@ -11329,6 +12097,15 @@ def _cari_ekstre_hareketler(
                 else:
                     alacak_iso = fifo_amt
             else:
+                plan_b = None
+                nakit_plan = None
+                if isinstance(plan_brut_by_ay, dict):
+                    plan_b = plan_brut_by_ay.get(str(iso)[:7])
+                if plan_b is not None:
+                    try:
+                        nakit_plan = round(float((grid_odenen_by_iso or {}).get(iso) or 0), 2)
+                    except (TypeError, ValueError):
+                        nakit_plan = 0.0
                 alacak_iso = _ekstre_hucre_alacak(
                     iso,
                     grid_tutar_by_iso,
@@ -11337,7 +12114,9 @@ def _cari_ekstre_hareketler(
                     grid_tahsil_edildi_by_iso=grid_tahsil_edildi_by_iso,
                     grid_kismi_by_iso=grid_kismi_by_iso,
                     ayda_tahsilat_var=fifo_pay,
-                    reel_ay_map=reel_ay_map,
+                    reel_ay_map=None if plan_b is not None else reel_ay_map,
+                    plan_ay_brut=plan_b,
+                    tahsil_tutar=nakit_plan,
                 )
             if alacak_iso is None:
                 try:
@@ -11538,6 +12317,9 @@ def _cari_ekstre_hareketler(
             if tahsilat_borca_hizala:
                 hedef_borc = round(float(borc_by_tarih.get(tarih) or 0), 2)
                 if hedef_borc > 0:
+                    plan_b = None
+                    if isinstance(plan_brut_by_ay, dict):
+                        plan_b = plan_brut_by_ay.get(str(tarih)[:7])
                     alacak_grid = _ekstre_hucre_alacak(
                         tarih,
                         grid_tutar_by_iso,
@@ -11546,7 +12328,9 @@ def _cari_ekstre_hareketler(
                         grid_tahsil_edildi_by_iso=grid_tahsil_edildi_by_iso,
                         grid_kismi_by_iso=grid_kismi_by_iso,
                         ayda_tahsilat_var=alacak_toplam > 0.01,
-                        reel_ay_map=reel_ay_map,
+                        reel_ay_map=None if plan_b is not None else reel_ay_map,
+                        plan_ay_brut=plan_b,
+                        tahsil_tutar=alacak_toplam if plan_b is not None else None,
                     )
                     if alacak_grid is not None:
                         alacak_toplam = alacak_grid
@@ -14600,6 +15384,9 @@ def api_aylik_kira_guncelle_ve_borclandir_all():
     max_by_mid = _load_max_aylik_tah_iso_by_musteri(
         exclude_btufrt=True, only_fully_paid=True
     )
+    _plan_idler = [r.get("id") for r in rows]
+    _plan_paket_yukle(_plan_idler)
+    _plan_reel = _planli_reel_haritasi(_plan_idler)
 
     for r in rows:
         mid = int(r.get("id") or 0)
@@ -14608,7 +15395,16 @@ def api_aylik_kira_guncelle_ve_borclandir_all():
         kyc = kyc_by_mid.get(mid)
         if not kyc:
             continue
-        payload = _aylik_grid_compute(mid, kyc, tufe_map)
+        _paket = (_plan_kutu().get("harita") or {}).get(mid) or _PLAN_BOS
+        payload = _aylik_grid_compute(
+            mid,
+            kyc,
+            tufe_map,
+            planlar=_paket.get("planlar") or [],
+            reel=_plan_reel.get(mid),
+            faturali_aylar=_paket.get("faturali"),
+            fatura_belge=_paket.get("belge"),
+        )
         if not payload:
             continue
         aylar = payload.get("aylar") or []
@@ -14844,6 +15640,9 @@ def api_tufe_borclandir_nakit_tahsil_toplu():
     borc_atlandi = 0
     tahsil_atlandi = 0
     harf = _odeme_turu_harf(odeme)
+    _plan_idler_t = [r.get("id") for r in rows]
+    _plan_paket_yukle(_plan_idler_t)
+    _plan_reel_t = _planli_reel_haritasi(_plan_idler_t)
 
     for r in rows:
         mid = int(r.get("id") or 0)
@@ -14875,7 +15674,16 @@ def api_tufe_borclandir_nakit_tahsil_toplu():
             continue
 
         kira_nakit_borc = bool(kyc.get("kira_nakit"))
-        payload = _aylik_grid_compute(mid, kyc, tufe_map)
+        _paket = (_plan_kutu().get("harita") or {}).get(mid) or _PLAN_BOS
+        payload = _aylik_grid_compute(
+            mid,
+            kyc,
+            tufe_map,
+            planlar=_paket.get("planlar") or [],
+            reel=_plan_reel_t.get(mid),
+            faturali_aylar=_paket.get("faturali"),
+            fatura_belge=_paket.get("belge"),
+        )
         if not payload:
             musteri_atlanan += 1
             continue

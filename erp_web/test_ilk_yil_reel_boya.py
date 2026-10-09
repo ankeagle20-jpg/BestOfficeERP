@@ -68,6 +68,8 @@ NAMES = [
     "girisTahsilatYilAyKiraTutar",
     "girisTahsilatYilAyPanelAylikCanon",
     "girisTahsilatYilAyPanelSatirNormalize",
+    "girisPlanGridHucreBrut",
+    "girisPlanYilToplam",
     "girisTahsilatYilAylikTek",
     "girisTahsilatYilBorcTek",
     "_sozlesmelerReelDonemAyKeysTam",
