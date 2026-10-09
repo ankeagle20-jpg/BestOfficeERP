@@ -88,6 +88,7 @@ def _flask_kur():
     app.logger.disabled = True
     tx = Tx()
     _kur(tx)
+    app.test_tx = tx
     # 60 aylık zincir: 2027-09 geçerlilik ayı da zincir içinde kalsın
     eski = api._onizleme_zinciri
 
@@ -157,6 +158,160 @@ def _onizle(page):
     page.wait_for_timeout(100)
 
 
+def _kutu_durum(sayfa):
+    return sayfa.evaluate(
+        """() => {
+            const r = id => { const e = document.getElementById(id); if (!e) return null; const b = e.getBoundingClientRect(); return {t: b.top, b: b.bottom, l: b.left, r: b.right, h: b.height}; };
+            const g = id => { const e = document.getElementById(id); return !!e && getComputedStyle(e).display !== 'none'; };
+            return {
+                kaydet_pasif: document.getElementById('plan_kaydet').disabled,
+                ipucu: document.getElementById('plan_kaydet_ipucu').textContent,
+                hazir: window.__planOnizlemeHazir,
+                kilit_kutu: g('plan_kilit_kutu'), odemeli_kutu: g('plan_odemeli_kutu'),
+                modal: r('plan_degistir_modal').h ? (function () { const m = document.querySelector('#plan_degistir_modal > div').getBoundingClientRect(); return {t: m.top, b: m.bottom}; })() : null,
+                kaydet: r('plan_kaydet'), kilit_etiket: r('plan_kilit_etiket'), kilit_cb: r('plan_kilit_onay'), kilit_box: r('plan_kilit_kutu'),
+                odemeli_etiket: r('plan_odemeli_etiket'), odemeli_cb: r('plan_odemeli_onay'), odemeli_box: r('plan_odemeli_kutu'),
+            };
+        }"""
+    )
+
+
+def _icinde(ic, dis):
+    return ic and dis and ic["t"] >= dis["t"] - 1 and ic["b"] <= dis["b"] + 1
+
+
+def _yeni_senaryolar(sayfa, app, gorunen, bu_ay):
+    """867 benzeri tüm-faturalı kart, geçmiş aya plan + ödemeli ay onayı, geçmiş plan iptali."""
+    tx = app.test_tx
+    api._resync = lambda mid: True
+    api._bugun = lambda: date.today()
+    eski_kilit, eski_tahsil, eski_fa = api._kilitler, api._tahsil_haritasi, Durum.faturali
+
+    def modal_ac():
+        _modal_ac(sayfa, 7)
+
+    def kaydet_istegi(n0):
+        return [json.loads(g[2]) for g in gorunen[n0:] if g[0] == "POST" and g[1] == "/giris/api/musteri/7/plan"]
+
+    # ---------- A) 867 benzeri: 2023-01..2027-08 tümü faturalı, geçerlilik = bu ay ----------
+    aylar = [f"{2023 + i // 12}-{i % 12 + 1:02d}" for i in range(56)]
+    api._kilitler = lambda mid: [{"ay": a, "fatura_tutari": 1200.0, "kaynak": "fatura_tarihi"} for a in aylar]
+    Durum.faturali = list(aylar)
+    api._tahsil_haritasi = lambda mid: {}
+    sayfa.keyboard.press("Escape")
+    sayfa.click("#plan_kapat")
+    modal_ac()
+    _doldur(sayfa, ay=bu_ay)
+    _onizle(sayfa)
+    d = _kutu_durum(sayfa)
+    check("867: onizleme hazir, kilit kutusu gorunur", d["hazir"] is True and d["kilit_kutu"] is True, d)
+    check("867: onay isaretlenmeden kaydet pasif + ipucu", d["kaydet_pasif"] and d["ipucu"] == "Kilitli ay onayını işaretleyin", d)
+    check(
+        "867: onay kutusu kirmizi kutu icinde ve ekranda gorunur",
+        _icinde(d["kilit_cb"], d["kilit_box"]) and _icinde(d["kilit_cb"], d["modal"]) and d["kilit_cb"]["h"] >= 16,
+        d,
+    )
+    check("867: kaydet dugmesi ekranda gorunur (sabit alt cubuk)", _icinde(d["kaydet"], d["modal"]), d)
+    check("867: kilit kutusu kompakt", d["kilit_box"]["h"] < 160, d["kilit_box"])
+    check(
+        "867: gorunur degisiklik yok uyarisi bilgi amacli degil/engel degil",
+        "Bilgi:" not in sayfa.evaluate("document.getElementById('plan_uyarilar').textContent"),
+    )
+    sayfa.click("#plan_kilit_onay")
+    d = _kutu_durum(sayfa)
+    check("867: onay isaretlenince kaydet aktif, ipucu bos", d["kaydet_pasif"] is False and d["ipucu"] == "", d)
+    sayfa.click("#plan_kilit_onay")
+    check("867: onay kalkinca kaydet tekrar pasif", _kutu_durum(sayfa)["kaydet_pasif"] is True)
+    sayfa.click("#plan_kilit_onay")
+    # form değişince eski önizleme geçersiz: kaydet kapanır, ipucu Önizle der
+    sayfa.fill("#plan_yeni_net", "2100")
+    d = _kutu_durum(sayfa)
+    check("867: form degisince kaydet kapanir", d["kaydet_pasif"] and d["ipucu"] == "Önce Önizle'ye basın" and d["kilit_kutu"] is False, d)
+    _onizle(sayfa)
+    sayfa.click("#plan_kilit_onay")
+    n0 = len(gorunen)
+    sayfa.click("#plan_kaydet")
+    sayfa.wait_for_function("() => { const m = document.getElementById('plan_degistir_modal'); return !m || m.style.display === 'none'; }", timeout=5000)
+    ist = kaydet_istegi(n0)
+    check(
+        "867: kayit istegi onay_kilitli_aylar ile gitti ve kaydedildi",
+        len(ist) == 1 and ist[0].get("onay_kilitli_aylar") is True and "onay_odemeli_aylar" not in ist[0]
+        and any(str(s["gecerlilik_ay"])[:7] == bu_ay for s in tx.bellek.satirlar),
+        ist,
+    )
+
+    # "görünür değişiklik yok" + kilit yok: bilgi, Kaydet engellenmez
+    api._kilitler = lambda mid: []
+    Durum.faturali = [f"{2027 + (8 + i) // 12}-{(8 + i) % 12 + 1:02d}" for i in range(40)]
+    modal_ac()
+    _doldur(sayfa, ay="2027-09", net="2000")
+    _onizle(sayfa)
+    d = _kutu_durum(sayfa)
+    uy = sayfa.evaluate("document.getElementById('plan_uyarilar').textContent")
+    check("gorunur degisiklik yok: bilgi var, kaydet engellenmedi", "Bilgi:" in uy and d["kaydet_pasif"] is False, (uy, d))
+    Durum.faturali = []
+
+    # ---------- B) geçmiş aya plan + ödemeli aylar ----------
+    sayfa.click("#plan_kapat")
+    api._bugun = lambda: date(2026, 10, 9)
+    api._tahsil_haritasi = lambda mid: {"2026-03": 500.0, "2026-04": 99999.0, "2026-01": 700.0}
+    modal_ac()
+    _doldur(sayfa, ay="2026-03")
+    _onizle(sayfa)
+    d = _kutu_durum(sayfa)
+    satir_sayisi = sayfa.locator("#plan_odemeli_tablo table tr").count()
+    odm_metin = sayfa.evaluate("document.getElementById('plan_odemeli_kutu').textContent")
+    check("odemeli: kutu gorunur, 2 ay + baslik satiri", d["odemeli_kutu"] is True and satir_sayisi == 3, (d, satir_sayisi))
+    check("odemeli: fazla odeme kirmizi uyari", "Fazla ödeme" in odm_metin and "DİKKAT" in odm_metin, odm_metin)
+    check("odemeli: onay kutusu gorunur ve etiket dogru", _icinde(d["odemeli_cb"], d["odemeli_box"]) and "Ödemesi olan geçmiş aylar etkilenecek, anladım" in odm_metin, d)
+    check("odemeli: onaysiz kaydet pasif + ipucu", d["kaydet_pasif"] and d["ipucu"] == "Ödemeli ay onayını işaretleyin", d)
+    sayfa.click("#plan_odemeli_onay")
+    check("odemeli: onayla kaydet aktif", _kutu_durum(sayfa)["kaydet_pasif"] is False)
+    n0 = len(gorunen)
+    sayfa.click("#plan_kaydet")
+    sayfa.wait_for_function("() => { const m = document.getElementById('plan_degistir_modal'); return !m || m.style.display === 'none'; }", timeout=5000)
+    ist = kaydet_istegi(n0)
+    check(
+        "odemeli: istek onay_odemeli_aylar ile gitti, gecmis plan kaydedildi",
+        len(ist) == 1 and ist[0].get("onay_odemeli_aylar") is True
+        and any(str(s["gecerlilik_ay"])[:7] == "2026-03" for s in tx.bellek.satirlar),
+        ist,
+    )
+
+    # ---------- C) geçmiş plan iptali (arayüzde İptal düğmesi var, geçmiş notu yok) ----------
+    tx.bellek.satirlar.append(
+        {
+            "id": 21, "musteri_id": 7, "gecerlilik_ay": date(2024, 1, 1), "yeni_net": 2000, "kdv_oran": 20,
+            "yeni_brut": 2400, "nakit_tutar": None, "banka_tutar": 2000, "olusturan": "test",
+            "created_at": None, "iptal_at": None, "iptal_eden": None,
+        }
+    )
+    eski_fetch = dbmod.fetch_all
+    dbmod.fetch_all = lambda *a, **k: [dict(s) for s in tx.bellek.satirlar if int(s["musteri_id"]) == 7]
+    try:
+        sayfa.evaluate("planKapisiniYenile(7)")
+        sayfa.wait_for_selector("#plan_gecmis_bolum button", state="attached", timeout=5000)
+        bolum = sayfa.evaluate("document.getElementById('plan_gecmis_bolum').textContent")
+        iptal_say = sayfa.locator("#plan_gecmis_bolum button").count()
+        check("gecmis plan icin Iptal dugmesi var", iptal_say >= 1 and "Geçmiş aya ait plan iptal edilemez" not in bolum, (iptal_say, bolum))
+        n0 = len(gorunen)
+        sayfa.evaluate(
+            "(() => { const b = [...document.querySelectorAll('#plan_gecmis_bolum > div')].find(x => x.textContent.indexOf('2024-01') >= 0); b.querySelector('button').click(); })()"
+        )
+        sayfa.wait_for_timeout(600)
+        iptaller = [g for g in gorunen[n0:] if g[1].endswith("/plan/21/iptal")]
+        satir21 = [s for s in tx.bellek.satirlar if s["id"] == 21][0]
+        check("gecmis plan iptal istegi gitti ve iptal edildi", len(iptaller) == 1 and satir21["iptal_at"] is not None, iptaller)
+    finally:
+        dbmod.fetch_all = eski_fetch
+        api._kilitler, api._tahsil_haritasi = eski_kilit, eski_tahsil
+        Durum.faturali = eski_fa
+        api._bugun = lambda: date(2024, 10, 9)
+    # sonraki (hata) senaryoları için modal temiz açılabilsin
+    modal_ac()
+    _doldur(sayfa)
+
+
 def main():
     app = _flask_kur()
     gorunen = []
@@ -188,10 +343,15 @@ def main():
             ok = ok and all(yer[k]["it"] < yer[k + 1]["lt"] for k in range(3))
             check("modal etiket ustte, alan altta, satirlar ayri", ok, yer)
 
-            # --- ay seçici: min = bu ay (tarayıcı yerel tarihi), eski değer bu aydan önceyse bu aya çekilir ---
+            # --- ay seçici: min = sözleşme başlangıç ayı (geçmiş serbest), varsayılan bu ay ---
             bu_ay = sayfa.evaluate("(() => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); })()")
-            check("ay secici min bu ay", sayfa.evaluate("document.getElementById('plan_gecerlilik').min") == bu_ay)
+            check("ay secici min sozlesme baslangic ayi", sayfa.evaluate("document.getElementById('plan_gecerlilik').min") == "2023-08")
             check("ay secici varsayilan bu ay", sayfa.evaluate("document.getElementById('plan_gecerlilik').value") == bu_ay)
+            check(
+                "kaydet baslangicta pasif ve ipucu var",
+                sayfa.evaluate("document.getElementById('plan_kaydet').disabled")
+                and sayfa.evaluate("document.getElementById('plan_kaydet_ipucu').textContent") == "Önce Önizle'ye basın",
+            )
 
             # --- ana akış: gerçek route ---
             _doldur(sayfa)
@@ -254,12 +414,12 @@ def main():
             _onizle(sayfa)
             hata_kontrol("400 gecersiz tutar modalda", "pozitif")
 
-            _doldur(sayfa, ay="2020-01")
+            _doldur(sayfa, ay="2023-07")
             _onizle(sayfa)
-            hata_kontrol("400 gecmis ay modalda (sunucu mesaji)", "Geçmiş aya plan girilemez")
+            hata_kontrol("400 sozlesme oncesi modalda (sunucu mesaji)", "sözleşme başlangıcından önce")
             check(
-                "gecmis ay mesaji tam",
-                sayfa.evaluate("document.getElementById('plan_hata').textContent") == api.MSG_GECMIS_AY,
+                "sozlesme oncesi mesaji tam",
+                sayfa.evaluate("document.getElementById('plan_hata').textContent") == "Geçerlilik ayı sözleşme başlangıcından önce olamaz.",
             )
 
             _doldur(sayfa)
@@ -296,6 +456,8 @@ def main():
                 sayfa.evaluate("document.getElementById('plan_hata').style.display") == "none"
                 and sayfa.evaluate("!document.getElementById('plan_kaydet').disabled"),
             )
+
+            _yeni_senaryolar(sayfa, app, gorunen, bu_ay)
 
             # müşteri seçili değil
             sayfa.evaluate("selectedId = null")

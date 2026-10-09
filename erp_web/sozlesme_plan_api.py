@@ -58,8 +58,7 @@ def _bugun() -> date:
     return date.today()
 
 
-MSG_GECMIS_AY = "Geçmiş aya plan girilemez; geçerlilik ayı bu ay veya sonrası olmalı"
-MSG_IPTAL_GECMIS = "Geçmiş aya ait plan iptal edilemez; yalnızca bu ay veya sonrası planlar iptal edilebilir"
+MSG_ODEMELI_ONAY = "Ödemesi olan geçmiş aylar onaylanmadan kaydedilemez."
 
 
 def _bu_ay_basi() -> date:
@@ -68,8 +67,54 @@ def _bu_ay_basi() -> date:
 
 
 def _gecmis_ay_mi(ay: date) -> bool:
-    """Geçerlilik ayı bulunulan aydan önceyse True. Bulunulan ay serbesttir."""
+    """Geçerlilik ayı bulunulan aydan önceyse True. Yalnız bilgi/ödeme etkisi için; plan girişini ENGELLEMEZ
+    (sözleşme başlangıcından sonraki her ay serbest)."""
     return ay < _bu_ay_basi()
+
+
+def _tahsil_haritasi(mid) -> dict:
+    """Ay -> ödenen toplam (YYYY-MM anahtarlı). Yalnız okur."""
+    from routes.giris_routes import _aylik_tahsil_tutar_map
+
+    out: dict = {}
+    for iso, tutar in (_aylik_tahsil_tutar_map(int(mid)) or {}).items():
+        anahtar = str(iso)[:7]
+        try:
+            out[anahtar] = round(out.get(anahtar, 0.0) + float(tutar or 0), 2)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def odemeli_etki(zincir: dict, mevcut, yeni: dict, ay: date, tahsil: dict, bu_ay: date) -> list:
+    """Geçmiş aya plan: brütü değişen aylardan ödeme kaydı olanlar. Yazmaz.
+
+    Her kayıt: ay, eski_brut, yeni_brut, odenen, yeni_kalan, fazla_odeme (ödenen > yeni brüt ise fark).
+    """
+    ay_sayisi = (bu_ay.year - ay.year) * 12 + (bu_ay.month - ay.month) + 25
+    adet = max(24, min(240, ay_sayisi))
+    out = []
+    for a in onizleme_olustur(zincir, mevcut, yeni, ay, adet):
+        if not _brut_degisti(a):
+            continue
+        try:
+            odenen = round(float((tahsil or {}).get(str(a.get("ay"))[:7]) or 0), 2)
+        except (TypeError, ValueError):
+            continue
+        if odenen <= 0.004:
+            continue
+        yeni_brut = round(float(a.get("yeni_brut") or 0), 2)
+        out.append(
+            {
+                "ay": a.get("ay"),
+                "eski_brut": a.get("eski_brut"),
+                "yeni_brut": a.get("yeni_brut"),
+                "odenen": odenen,
+                "yeni_kalan": round(max(yeni_brut - odenen, 0.0), 2),
+                "fazla_odeme": round(max(odenen - yeni_brut, 0.0), 2),
+            }
+        )
+    return out
 
 
 def _brut_degisti(a: dict) -> bool:
@@ -378,6 +423,11 @@ def plan_liste_yanit(mid):
     if not musteri:
         return _yok()
     try:
+        _bas = _sozlesme_basi(_kyc)
+        soz_ay = f"{_bas.year:04d}-{_bas.month:02d}" if _bas else None
+    except Exception:
+        soz_ay = None
+    try:
         from db import fetch_all
 
         satirlar = plan_liste(lambda sql, params=None: fetch_all(sql, params or ()), musteri_id=int(mid), iptaller=True)
@@ -386,7 +436,15 @@ def plan_liste_yanit(mid):
         satirlar = []
     aktif = [_json_plan(s) for s in satirlar if not s.get("iptal_at")]
     iptaller = [_json_plan(s) for s in satirlar if s.get("iptal_at")]
-    return jsonify({"ok": True, "aktif": aktif, "iptaller": iptaller, "gecmis": [_json_plan(s) for s in satirlar]})
+    return jsonify(
+        {
+            "ok": True,
+            "aktif": aktif,
+            "iptaller": iptaller,
+            "gecmis": [_json_plan(s) for s in satirlar],
+            "sozlesme_baslangic": soz_ay,
+        }
+    )
 
 
 def plan_onizleme_yanit(mid):
@@ -405,8 +463,6 @@ def plan_onizleme_yanit(mid):
         ay = _ay_basi(data.get("gecerlilik_ay") or _bugun())
     except ValueError as exc:
         return jsonify({"ok": False, "mesaj": str(exc)}), 400
-    if _gecmis_ay_mi(ay):
-        return jsonify({"ok": False, "mesaj": MSG_GECMIS_AY}), 400
     bas = _sozlesme_basi(kyc)
     if bas and ay < date(bas.year, bas.month, 1):
         return jsonify({"ok": False, "mesaj": "Geçerlilik ayı sözleşme başlangıcından önce olamaz."}), 400
@@ -433,6 +489,14 @@ def plan_onizleme_yanit(mid):
     gorunmez = gorunur_degisiklik_uyarisi(degisim, bool((zincir or {}).get("faturali_aylar")))
     if gorunmez:
         uyarilar.append(gorunmez)
+    gecmis_plan = _gecmis_ay_mi(ay)
+    odemeli = []
+    if gecmis_plan:
+        try:
+            odemeli = odemeli_etki(zincir, mevcut, yeni, ay, _tahsil_haritasi(mid), _bu_ay_basi())
+        except Exception:
+            _LOG.exception("plan odemeli etki")
+            return jsonify({"ok": False, "mesaj": "Ödeme etkisi hesaplanamadı."}), 500
     return jsonify(
         {
             "ok": True,
@@ -450,6 +514,9 @@ def plan_onizleme_yanit(mid):
             "kilitlenen_aylar": kontrol.get("kilitlenen_aylar") or [],
             "faturali": bool(kontrol.get("faturali")),
             "onerilen_ay": kontrol.get("onerilen_ay"),
+            "gecmis_plan": bool(gecmis_plan),
+            "odemeli_aylar": odemeli,
+            "fazla_odeme": any(float(o.get("fazla_odeme") or 0) > 0.004 for o in odemeli),
         }
     )
 
@@ -470,8 +537,6 @@ def plan_ekle_yanit(mid):
         ay = _ay_basi(data.get("gecerlilik_ay"))
     except ValueError as exc:
         return jsonify({"ok": False, "mesaj": str(exc)}), 400
-    if _gecmis_ay_mi(ay):
-        return jsonify({"ok": False, "mesaj": MSG_GECMIS_AY}), 400
     bas = _sozlesme_basi(kyc)
     if bas and ay < date(bas.year, bas.month, 1):
         return jsonify({"ok": False, "mesaj": "Geçerlilik ayı sözleşme başlangıcından önce olamaz."}), 400
@@ -488,6 +553,24 @@ def plan_ekle_yanit(mid):
             ),
             400,
         )
+    if _gecmis_ay_mi(ay):
+        # Geçmiş aya plan serbest; ancak ödemesi olan aylar etkileniyorsa ayrı onay şart (sunucuda da).
+        try:
+            zincir, mevcut, _kutu = _onizleme_zinciri(mid, kyc)
+            yeni_plan = {
+                "gecerlilik_ay": ay,
+                "yeni_net": tutar["yeni_net"],
+                "kdv_oran": tutar["kdv_oran"],
+                "yeni_brut": tutar["yeni_brut"],
+                "nakit_tutar": tutar["nakit_tutar"],
+                "banka_tutar": tutar["banka_tutar"],
+            }
+            odemeli = odemeli_etki(zincir, mevcut, yeni_plan, ay, _tahsil_haritasi(mid), _bu_ay_basi()) if zincir else []
+        except Exception:
+            _LOG.exception("plan odemeli etki")
+            return jsonify({"ok": False, "mesaj": "Ödeme etkisi hesaplanamadı."}), 500
+        if odemeli and data.get("onay_odemeli_aylar") is not True:
+            return jsonify({"ok": False, "mesaj": MSG_ODEMELI_ONAY, "odemeli_aylar": odemeli}), 400
 
     def islem(calistir, oku_bir, _oku_cok):
         _ensure_sema(calistir)
@@ -540,9 +623,6 @@ def plan_iptal_yanit(mid, plan_id):
             raise PlanYok("acik plan yok")
         if int(mevcut.get("musteri_id") or 0) != int(mid):
             raise PermissionError("mid")
-        ay = _ay_basi(mevcut.get("gecerlilik_ay"))
-        if _gecmis_ay_mi(ay):
-            raise ValueError(MSG_IPTAL_GECMIS)
         row = plan_iptal(calistir, oku_bir, plan_id=int(plan_id), iptal_eden=_kim())
         if not _resync(int(mid)):
             raise RuntimeError("yenileme")
