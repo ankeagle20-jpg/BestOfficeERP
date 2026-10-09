@@ -18,8 +18,8 @@ ROOT = Path(__file__).resolve().parent
 FAILS = []
 
 
-def check(name, ok):
-    print(("ok " if ok else "FAIL ") + name)
+def check(name, ok, ek=""):
+    print(("ok " if ok else "FAIL ") + name + ((" :: " + str(ek)) if (ek and not ok) else ""))
     if not ok:
         FAILS.append(name)
 
@@ -64,11 +64,13 @@ def _govde(**ek):
     return g
 
 
-def _kur(tx, kilit=None, durum="aktif"):
+def _kur(tx, kilit=None, durum="aktif", bugun=None):
     api.plan_tx = tx
     api._sema = lambda: "tenant_abc"
     api._kim = lambda: "test-kullanici"
-    api._bugun = lambda: date(2026, 10, 9)
+    # Geçmiş aya plan girilemediği için varsayılan "bugün", test planlarından (2024-11 vb.) önce.
+    _b = bugun or date(2024, 10, 9)
+    api._bugun = lambda: _b
     api._kilitler = lambda mid: list(kilit or [])
     api._musteri_ve_kyc = lambda mid: (
         {"id": int(mid), "durum": durum},
@@ -176,6 +178,7 @@ def test_yazma():
 
         _kur(tx)
         api._resync = lambda mid: resync.append(int(mid)) or True
+        api._bugun = lambda: date(2023, 1, 1)  # sözleşme başlangıcı bugünden sonra: yalnız sözleşme kuralı çalışır
         with app.test_request_context(json=_govde(gecerlilik_ay="2023-07-02"), method="POST"):
             govde, kod = _yanit(api.plan_ekle_yanit(7))
         check("sozlesmeden once", kod == 400 and "sözleşme" in govde.get("mesaj", "") and tx.commit == 0)
@@ -183,6 +186,20 @@ def test_yazma():
         with app.test_request_context(json=_govde(yeni_brut=9999), method="POST"):
             govde, kod = _yanit(api.plan_ekle_yanit(7))
         check("brut tutarsiz", kod == 400 and govde.get("mesaj") == "Brüt tutar tutarsız." and tx.commit == 0)
+
+        # Geçmiş aya plan girilemez; bulunulan ay serbest
+        api._bugun = lambda: date(2026, 10, 9)
+        check(
+            "gecmis ay mesaji",
+            api.MSG_GECMIS_AY == "Geçmiş aya plan girilemez; geçerlilik ayı bu ay veya sonrası olmalı",
+        )
+        for ay_gecmis in ("2026-09-01", "2026-09-30", "2025-01-15"):
+            with app.test_request_context(json=_govde(gecerlilik_ay=ay_gecmis), method="POST"):
+                govde, kod = _yanit(api.plan_ekle_yanit(7))
+            check(
+                "gecmis ay reddi " + ay_gecmis,
+                kod == 400 and govde.get("mesaj") == api.MSG_GECMIS_AY and tx.commit == 0 and resync == [] and not tx.bellek.satirlar,
+            )
 
         _kur(tx, kilit=[{"ay": "2024-11", "fatura_tutari": 999, "kaynak": "fatura_tarihi"}])
         api._resync = lambda mid: resync.append(int(mid)) or True
@@ -244,6 +261,7 @@ def test_yazma():
         check("resync hata geri alinir", kod == 500 and tx.rollback >= 2 and all(s["gecerlilik_ay"] != date(2025, 4, 1) for s in tx.bellek.satirlar))
 
         api._resync = lambda mid: resync.append(int(mid)) or True
+        api._bugun = lambda: date(2026, 10, 9)
         tx.bellek.satirlar.append(
             {
                 "id": 9,
@@ -265,7 +283,8 @@ def test_yazma():
         check(
             "gecmis iptal yok",
             kod == 400
-            and govde.get("mesaj") == "Geçmiş plan iptal edilemez, yeni plan değişikliği girin"
+            and govde.get("mesaj") == api.MSG_IPTAL_GECMIS
+            and "Geçmiş aya ait plan iptal edilemez" in govde.get("mesaj", "")
             and resync == []
             and tx.bellek.satirlar[-1]["iptal_at"] is None,
         )
@@ -288,6 +307,47 @@ def test_yazma():
         with app.test_request_context(json={}, method="POST"):
             govde, kod = _yanit(api.plan_iptal_yanit(7, 11))
         check("gelecek iptal resync", kod == 200 and resync == [7] and govde["plan"]["iptal_at"])
+
+        # Bulunulan aydaki plan iptal edilebilir (aynı transaction'da resync); resync hatasında geri alınır
+        def plan_satiri(pid, ay):
+            return {
+                "id": pid,
+                "musteri_id": 7,
+                "gecerlilik_ay": ay,
+                "yeni_net": 2000,
+                "kdv_oran": 20,
+                "yeni_brut": 2400,
+                "nakit_tutar": None,
+                "banka_tutar": 2000,
+                "olusturan": "test-kullanici",
+                "created_at": None,
+                "iptal_at": None,
+                "iptal_eden": None,
+            }
+
+        resync.clear()
+        tx.bellek.satirlar.append(plan_satiri(13, date(2026, 10, 1)))
+        with app.test_request_context(json={}, method="POST"):
+            govde, kod = _yanit(api.plan_iptal_yanit(7, 13))
+        check("bulunulan ay iptal resync", kod == 200 and resync == [7] and govde["plan"]["iptal_at"])
+
+        resync.clear()
+        api._resync = lambda mid: False
+        tx.bellek.satirlar.append(plan_satiri(14, date(2026, 10, 1)))
+        rb0 = tx.rollback
+        with app.test_request_context(json={}, method="POST"):
+            govde, kod = _yanit(api.plan_iptal_yanit(7, 14))
+        check(
+            "bulunulan ay iptal resync hata geri alinir",
+            kod == 500 and tx.rollback == rb0 + 1 and tx.bellek.satirlar[-1]["iptal_at"] is None,
+        )
+        api._resync = lambda mid: resync.append(int(mid)) or True
+
+        tx.bellek.satirlar.append(plan_satiri(15, date(2026, 9, 1)))
+        with app.test_request_context(json={}, method="POST"):
+            govde, kod = _yanit(api.plan_iptal_yanit(7, 15))
+        check("onceki ay iptal reddi", kod == 400 and govde.get("mesaj") == api.MSG_IPTAL_GECMIS and tx.bellek.satirlar[-1]["iptal_at"] is None)
+        tx.bellek.satirlar.pop()
 
         with app.test_request_context(json={}, method="POST"):
             tx.bellek.satirlar.append(
@@ -339,6 +399,68 @@ def test_onizleme_ve_liste():
             and cagri["tx"] == 0
             and govde.get("kilitlenen_aylar") == [],
         )
+
+        # geçmiş ay önizlemede de aynı mesajla reddedilir; bulunulan ay serbest (bugün: 2024-10-09)
+        with app.test_request_context(json=_govde(gecerlilik_ay="2024-09-01"), method="POST"):
+            g_gecmis, kod_gecmis = _yanit(api.plan_onizleme_yanit(7))
+        check("onizleme gecmis ay reddi", kod_gecmis == 400 and g_gecmis.get("mesaj") == api.MSG_GECMIS_AY and cagri["tx"] == 0)
+        with app.test_request_context(json=_govde(gecerlilik_ay="2024-10-01"), method="POST"):
+            g_bu, kod_bu = _yanit(api.plan_onizleme_yanit(7))
+        check("onizleme bulunulan ay serbest", kod_bu == 200 and g_bu["aylar"][0]["ay"] == "2024-10")
+
+        # görünür değişiklik uyarısı
+        zincir_eski = api._onizleme_zinciri
+
+        def zincir_faturali(faturali):
+            def f(mid, kyc):
+                z, mevcut, kutu = zincir_eski(mid, kyc)
+                z["faturali_aylar"] = list(faturali)
+                return z, mevcut, kutu
+            return f
+
+        def aylar_listesi(bas_y, bas_m, adet):
+            out = []
+            y, m = bas_y, bas_m
+            for _ in range(adet):
+                out.append(f"{y:04d}-{m:02d}")
+                m += 1
+                if m > 12:
+                    y, m = y + 1, 1
+            return out
+
+        try:
+            # 40 ay faturalı: 24 aylık pencerede hiç değişiklik yok
+            api._onizleme_zinciri = zincir_faturali(aylar_listesi(2024, 11, 40))
+            with app.test_request_context(json=_govde(), method="POST"):
+                g_u, kod_u = _yanit(api.plan_onizleme_yanit(7))
+            ayni = all(a["eski_brut"] == a["yeni_brut"] for a in g_u.get("aylar", []))
+            uy = [u.get("mesaj", "") for u in g_u.get("uyarilar", []) if u.get("kod") == "gorunur_degisiklik_yok"]
+            ilk = g_u.get("ilk_degisen_ay")
+            check(
+                "gorunur degisiklik yok uyarisi",
+                kod_u == 200
+                and ayni
+                and g_u.get("gorunur_degisiklik") is False
+                and ilk == "2028-03"
+                and len(uy) == 1
+                and uy[0]
+                == "Bu plan seçilen geçerlilik ayından itibaren faturalı aylar nedeniyle şu an görünür bir değişiklik yaratmıyor; ilk değişen ay: 2028-03",
+                (kod_u, ayni, g_u.get("gorunur_degisiklik"), ilk, uy),
+            )
+            # 3 ay faturalı: pencerede değişiklik var, uyarı yok
+            api._onizleme_zinciri = zincir_faturali(aylar_listesi(2024, 11, 3))
+            with app.test_request_context(json=_govde(), method="POST"):
+                g_v, kod_v = _yanit(api.plan_onizleme_yanit(7))
+            check(
+                "gorunur degisiklik varsa uyari yok",
+                kod_v == 200
+                and g_v.get("gorunur_degisiklik") is True
+                and g_v.get("ilk_degisen_ay") == "2025-02"
+                and not [u for u in g_v.get("uyarilar", []) if u.get("kod") == "gorunur_degisiklik_yok"],
+                (kod_v, g_v.get("gorunur_degisiklik"), g_v.get("ilk_degisen_ay")),
+            )
+        finally:
+            api._onizleme_zinciri = zincir_eski
         import db as dbmod
 
         def fetch_all(sql, params=None):
@@ -404,7 +526,8 @@ def test_js():
         "gecmis kutusu form-grid'de tam genislikli ayri satir",
         'kutu.style.gridColumn = "1 / -1"' in kutu_blok and "insertBefore(kutu, sel.nextSibling)" in js_metin,
     )
-    check("script surumu artirildi", "js/plan_degistir.js', v=3" in html)
+    check("script surumu artirildi", "js/plan_degistir.js', v=4" in html)
+    check("ay secici min = bu ay", "gec.min = ayIso" in js_metin and "gec.value < ayIso" in js_metin)
     taze = html.find("dnormFresh")
     taze_blok = html[taze:taze + 900] if taze >= 0 else ""
     check(
@@ -444,6 +567,9 @@ if (!(pasif.modal === false && pasif.kaydetDurum === true && pasif.durum === 'pa
 if (!(kapali.goster === false && kapali.modal === false && m.planSecenekEklensin(false) === false)) process.exit(4);
 if (m.planIptalEdilebilir('2026-11-01', '2026-10-09') !== true) process.exit(5);
 if (m.planIptalEdilebilir('2026-09-01', '2026-10-09') !== false) process.exit(6);
+if (m.planIptalEdilebilir('2026-10-01', '2026-10-09') !== true) process.exit(15);
+if (m.planIptalEdilebilir('2026-10-31', '2026-10-01') !== true) process.exit(16);
+if (m.planIptalEdilebilir('2025-12-01', '2026-01-01') !== false) process.exit(17);
 process.exit(0);
 """
     r = subprocess.run(["node", "-e", kod], cwd=str(ROOT), capture_output=True, text=True)

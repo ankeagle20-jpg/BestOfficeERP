@@ -58,6 +58,56 @@ def _bugun() -> date:
     return date.today()
 
 
+MSG_GECMIS_AY = "Geçmiş aya plan girilemez; geçerlilik ayı bu ay veya sonrası olmalı"
+MSG_IPTAL_GECMIS = "Geçmiş aya ait plan iptal edilemez; yalnızca bu ay veya sonrası planlar iptal edilebilir"
+
+
+def _bu_ay_basi() -> date:
+    b = _bugun()
+    return date(b.year, b.month, 1)
+
+
+def _gecmis_ay_mi(ay: date) -> bool:
+    """Geçerlilik ayı bulunulan aydan önceyse True. Bulunulan ay serbesttir."""
+    return ay < _bu_ay_basi()
+
+
+def _brut_degisti(a: dict) -> bool:
+    e, n = a.get("eski_brut"), a.get("yeni_brut")
+    if e is None or n is None:
+        return e != n
+    try:
+        return abs(float(e) - float(n)) > 0.004
+    except (TypeError, ValueError):
+        return e != n
+
+
+def gorunur_degisiklik_bilgisi(zincir: dict, mevcut, yeni: dict, ay: date, aylar: list) -> dict:
+    """24 aylık önizlemede eskiden farklı en az bir ay var mı; ilk değişen ay (yoksa 10 yıla kadar aranır)."""
+    for a in aylar:
+        if _brut_degisti(a):
+            return {"gorunur": True, "ilk_degisen_ay": a.get("ay")}
+    uzun = onizleme_olustur(zincir, mevcut, yeni, ay, 120)
+    ilk = next((a.get("ay") for a in uzun if _brut_degisti(a)), None)
+    return {"gorunur": False, "ilk_degisen_ay": ilk}
+
+
+def gorunur_degisiklik_uyarisi(bilgi: dict, faturali: bool) -> dict | None:
+    if bilgi.get("gorunur"):
+        return None
+    ilk = bilgi.get("ilk_degisen_ay")
+    if ilk and faturali:
+        mesaj = (
+            "Bu plan seçilen geçerlilik ayından itibaren faturalı aylar nedeniyle şu an görünür bir "
+            f"değişiklik yaratmıyor; ilk değişen ay: {ilk}"
+        )
+    elif ilk:
+        mesaj = f"Bu plan seçilen geçerlilik ayından itibaren şu an görünür bir değişiklik yaratmıyor; ilk değişen ay: {ilk}"
+    else:
+        mesaj = "Bu plan seçilen geçerlilik ayından itibaren görünür bir değişiklik yaratmıyor."
+    return {"kod": "gorunur_degisiklik_yok", "mesaj": mesaj}
+
+
 def _sema():
     from db import _tenant_schema_for_request
 
@@ -355,6 +405,8 @@ def plan_onizleme_yanit(mid):
         ay = _ay_basi(data.get("gecerlilik_ay") or _bugun())
     except ValueError as exc:
         return jsonify({"ok": False, "mesaj": str(exc)}), 400
+    if _gecmis_ay_mi(ay):
+        return jsonify({"ok": False, "mesaj": MSG_GECMIS_AY}), 400
     bas = _sozlesme_basi(kyc)
     if bas and ay < date(bas.year, bas.month, 1):
         return jsonify({"ok": False, "mesaj": "Geçerlilik ayı sözleşme başlangıcından önce olamaz."}), 400
@@ -376,6 +428,11 @@ def plan_onizleme_yanit(mid):
         "banka_tutar": tutar["banka_tutar"],
     }
     aylar = onizleme_olustur(zincir, mevcut, yeni, ay, 24)
+    degisim = gorunur_degisiklik_bilgisi(zincir, mevcut, yeni, ay, aylar)
+    uyarilar = list(kontrol.get("uyarilar") or [])
+    gorunmez = gorunur_degisiklik_uyarisi(degisim, bool((zincir or {}).get("faturali_aylar")))
+    if gorunmez:
+        uyarilar.append(gorunmez)
     return jsonify(
         {
             "ok": True,
@@ -387,7 +444,9 @@ def plan_onizleme_yanit(mid):
             "banka_tutar": tutar["banka_tutar"],
             "odeme": tutar["odeme"],
             "aylar": aylar,
-            "uyarilar": kontrol.get("uyarilar") or [],
+            "uyarilar": uyarilar,
+            "gorunur_degisiklik": bool(degisim.get("gorunur")),
+            "ilk_degisen_ay": degisim.get("ilk_degisen_ay"),
             "kilitlenen_aylar": kontrol.get("kilitlenen_aylar") or [],
             "faturali": bool(kontrol.get("faturali")),
             "onerilen_ay": kontrol.get("onerilen_ay"),
@@ -411,6 +470,8 @@ def plan_ekle_yanit(mid):
         ay = _ay_basi(data.get("gecerlilik_ay"))
     except ValueError as exc:
         return jsonify({"ok": False, "mesaj": str(exc)}), 400
+    if _gecmis_ay_mi(ay):
+        return jsonify({"ok": False, "mesaj": MSG_GECMIS_AY}), 400
     bas = _sozlesme_basi(kyc)
     if bas and ay < date(bas.year, bas.month, 1):
         return jsonify({"ok": False, "mesaj": "Geçerlilik ayı sözleşme başlangıcından önce olamaz."}), 400
@@ -480,9 +541,8 @@ def plan_iptal_yanit(mid, plan_id):
         if int(mevcut.get("musteri_id") or 0) != int(mid):
             raise PermissionError("mid")
         ay = _ay_basi(mevcut.get("gecerlilik_ay"))
-        bugun = _bugun()
-        if ay <= date(bugun.year, bugun.month, 1):
-            raise ValueError("Geçmiş plan iptal edilemez, yeni plan değişikliği girin")
+        if _gecmis_ay_mi(ay):
+            raise ValueError(MSG_IPTAL_GECMIS)
         row = plan_iptal(calistir, oku_bir, plan_id=int(plan_id), iptal_eden=_kim())
         if not _resync(int(mid)):
             raise RuntimeError("yenileme")

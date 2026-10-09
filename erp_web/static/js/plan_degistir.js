@@ -24,7 +24,8 @@ function planIptalEdilebilir(ayIso, bugunIso) {
     var ay = String(ayIso || "").slice(0, 7);
     var bugun = String(bugunIso || "").slice(0, 7);
     if (ay.length < 7 || bugun.length < 7) return false;
-    return ay > bugun;
+    /* Bulunulan ay ve sonrası iptal edilebilir; geçmiş aylar edilemez. */
+    return ay >= bugun;
 }
 
 function planSecenekEklensin(kapiAcik) {
@@ -152,7 +153,7 @@ function planGecmisCiz(mid, veri) {
             satir.appendChild(btn);
         } else if (!p.iptal_at) {
             var not = document.createElement("span");
-            not.textContent = "Geçmiş plan iptal edilemez, yeni plan değişikliği girin";
+            not.textContent = "Geçmiş aya ait plan iptal edilemez, yeni plan değişikliği girin";
             not.style.color = "#90a4ae";
             satir.appendChild(not);
         }
@@ -222,7 +223,10 @@ function planDegistirModalAc() {
     var ay = new Date();
     var ayIso = ay.getFullYear() + "-" + String(ay.getMonth() + 1).padStart(2, "0");
     var gec = document.getElementById("plan_gecerlilik");
-    if (gec && !gec.value) gec.value = ayIso;
+    if (gec) {
+        gec.min = ayIso; /* geçmiş aya plan girilemez */
+        if (!gec.value || gec.value < ayIso) gec.value = ayIso;
+    }
     var kdvKart = document.getElementById("kdv_oran");
     var kdv = document.getElementById("plan_kdv");
     if (kdv && kdvKart && kdvKart.value !== "") kdv.value = kdvKart.value;

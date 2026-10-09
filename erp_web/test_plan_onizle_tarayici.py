@@ -63,6 +63,7 @@ def _sayfa():
 class Durum:
     giris = True
     ag_hatasi = False
+    faturali = []
 
 
 def _auth_yamala():
@@ -93,6 +94,7 @@ def _flask_kur():
     def zincir(mid, kyc):
         z, mevcut, kutu = eski(mid, kyc)
         z["ay_sayisi"] = 60
+        z["faturali_aylar"] = list(Durum.faturali)
         return z, mevcut, kutu
 
     api._onizleme_zinciri = zincir
@@ -186,6 +188,11 @@ def main():
             ok = ok and all(yer[k]["it"] < yer[k + 1]["lt"] for k in range(3))
             check("modal etiket ustte, alan altta, satirlar ayri", ok, yer)
 
+            # --- ay seçici: min = bu ay (tarayıcı yerel tarihi), eski değer bu aydan önceyse bu aya çekilir ---
+            bu_ay = sayfa.evaluate("(() => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); })()")
+            check("ay secici min bu ay", sayfa.evaluate("document.getElementById('plan_gecerlilik').min") == bu_ay)
+            check("ay secici varsayilan bu ay", sayfa.evaluate("document.getElementById('plan_gecerlilik').value") == bu_ay)
+
             # --- ana akış: gerçek route ---
             _doldur(sayfa)
             _onizle(sayfa)
@@ -204,6 +211,21 @@ def main():
             check("brut 2400 ve tablo dolu", brut == "2400" and satir >= 2, (brut, satir))
             check("kaydet onizlemeden sonra aktif", kaydet_acik)
             check("hata kutusu gizli", hata == "none", hata)
+
+            # --- görünür değişiklik yok uyarısı arayüzde (40 ay faturalı: pencerede fark yok) ---
+            check("normal akista gorunur degisiklik uyarisi yok", "görünür bir değişiklik yaratmıyor" not in sayfa.evaluate("document.getElementById('plan_uyarilar').textContent"))
+            Durum.faturali = [f"{2027 + (8 + i) // 12}-{(8 + i) % 12 + 1:02d}" for i in range(40)]  # 2027-09 ... 2030-12
+            _onizle(sayfa)
+            uyari = sayfa.evaluate("document.getElementById('plan_uyarilar').textContent")
+            check(
+                "gorunur degisiklik yok uyarisi arayuzde",
+                "faturalı aylar nedeniyle şu an görünür bir değişiklik yaratmıyor; ilk değişen ay: 2031-01" in uyari
+                and sayfa.evaluate("!document.getElementById('plan_kaydet').disabled"),
+                uyari,
+            )
+            Durum.faturali = []
+            _onizle(sayfa)
+            check("uyari yeni onizlemede temizlenir", sayfa.evaluate("document.getElementById('plan_uyarilar').textContent") == "")
 
             # --- karma ödeme gövdesi ---
             sayfa.select_option("#plan_odeme", "karma")
@@ -234,7 +256,11 @@ def main():
 
             _doldur(sayfa, ay="2020-01")
             _onizle(sayfa)
-            hata_kontrol("400 sozlesme oncesi ay modalda", "sözleşme")
+            hata_kontrol("400 gecmis ay modalda (sunucu mesaji)", "Geçmiş aya plan girilemez")
+            check(
+                "gecmis ay mesaji tam",
+                sayfa.evaluate("document.getElementById('plan_hata').textContent") == api.MSG_GECMIS_AY,
+            )
 
             _doldur(sayfa)
             Durum.giris = False
