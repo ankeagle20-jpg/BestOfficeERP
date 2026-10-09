@@ -2830,9 +2830,10 @@ def _build_aylik_grid_cache_payload(musteri_id, tufe_map=None, kyc_row=None, man
                 tt_t = round(float((batch_grid.get("tarih_ay") or {}).get(iso_m1) or 0), 2)
                 odenen = _grid_payload_ay_odenen_kdv(brut, odenen, mk_t, tm_t, te_t, tt_t, tol)
             reel_kap_b = 0.0
+            donem_yil_b = _reel_donem_yili_for_ay(yy, mm, payload.get("artis_ay"))
             if isinstance(manual_reel_by_year, dict):
                 try:
-                    reel_kap_b = round(float(manual_reel_by_year.get(yy) or 0), 2)
+                    reel_kap_b = round(float(manual_reel_by_year.get(donem_yil_b) or 0), 2)
                 except (TypeError, ValueError):
                     reel_kap_b = 0.0
             kap_b = reel_kap_b if reel_kap_b > tol else round(brut, 2)
@@ -2842,7 +2843,7 @@ def _build_aylik_grid_cache_payload(musteri_id, tufe_map=None, kyc_row=None, man
             except (TypeError, ValueError):
                 pay_tb = None
             if _grid_payload_marker_panel_tam_kapandi(
-                mk_t, brut, yy, manual_reel_by_year, tol, pay_t=pay_tb
+                mk_t, brut, donem_yil_b, manual_reel_by_year, tol, pay_t=pay_tb
             ):
                 a["odenen_tutar_kdv"] = round(mk_t, 2)
                 a["kalan_tutar_kdv"] = 0.0
@@ -8990,6 +8991,28 @@ def _grid_payload_ay_odenen_kdv(brut, odenen_mevcut, mk_t, tm_t, te_t, tt_t, tol
     return round(min(best, brut), 2)
 
 
+def _reel_donem_yili_for_ay(yil, ay, artis_ay=None) -> int:
+    """Ayın ait olduğu reel dönem yılı (musteri_reel_donem_tutar.donem_yil).
+
+    Reel dönem artış ayında başlar (_reel_donem_ay_keys_for_period ile aynı kural):
+    ay < artış ayı ise önceki yılın dönemidir. Örn. artış Ağustos: 2025-07 → 2024 dönemi.
+    artis_ay geçersizse takvim yılı döner (eski davranış). Tek kaynak: manual_reel_by_year
+    anahtarı bu fonksiyonla okunur.
+    """
+    try:
+        y = int(yil)
+    except (TypeError, ValueError):
+        return 0
+    try:
+        a = int(ay)
+        am = int(artis_ay)
+    except (TypeError, ValueError):
+        return y
+    if not (1 <= am <= 12) or not (1 <= a <= 12):
+        return y
+    return y - 1 if a < am else y
+
+
 def _grid_payload_marker_panel_tam_kapandi(
     mk_t: float,
     brut: float,
@@ -9061,10 +9084,14 @@ def _ekstre_payload_odenen_zenginlestir(
             yy_en = int(a.get("yil"))
         except (TypeError, ValueError):
             yy_en = 0
+        # Reel anahtarı takvim yılı değil dönem yılı (artış ayına göre).
+        donem_yil_en = (
+            _reel_donem_yili_for_ay(yy_en, a.get("ay"), payload.get("artis_ay")) if yy_en else 0
+        )
         reel_kap = 0.0
         if isinstance(manual_reel_by_year, dict) and yy_en:
             try:
-                reel_kap = round(float(manual_reel_by_year.get(yy_en) or 0), 2)
+                reel_kap = round(float(manual_reel_by_year.get(donem_yil_en) or 0), 2)
             except (TypeError, ValueError):
                 reel_kap = 0.0
         kap = reel_kap if reel_kap > tol else round(brut, 2)
@@ -9076,7 +9103,7 @@ def _ekstre_payload_odenen_zenginlestir(
         except (TypeError, ValueError):
             pay_tz = None
         if _grid_payload_marker_panel_tam_kapandi(
-            mk_t, brut, yy_en, manual_reel_by_year, tol, pay_t=pay_tz
+            mk_t, brut, donem_yil_en, manual_reel_by_year, tol, pay_t=pay_tz
         ):
             a["odenen_tutar_kdv"] = round(mk_t, 2)
             a["kalan_tutar_kdv"] = 0.0
