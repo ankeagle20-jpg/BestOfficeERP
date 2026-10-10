@@ -123,6 +123,18 @@ function planGecmisCiz(mid, veri) {
     baslik.style.fontWeight = "600";
     baslik.style.marginBottom = "6px";
     kutu.appendChild(baslik);
+    /* "Açık plan yok." (404) sonrası liste sunucudan yenilenir; bilgi yalnız aynı müşterinin listesinde bir kez gösterilir. */
+    var bilgiPaket = window.__planBilgi;
+    if (bilgiPaket && bilgiPaket.mesaj && String(bilgiPaket.mid) === String(mid)) {
+        var bilgi = document.createElement("div");
+        bilgi.id = "plan_gecmis_bilgi";
+        bilgi.textContent = bilgiPaket.mesaj;
+        bilgi.style.color = "#90caf9";
+        bilgi.style.fontSize = "12px";
+        bilgi.style.marginBottom = "6px";
+        kutu.appendChild(bilgi);
+        window.__planBilgi = null;
+    }
     var bugun = new Date();
     var bugunIso = bugun.getFullYear() + "-" + String(bugun.getMonth() + 1).padStart(2, "0") + "-01";
     var satirlar = (veri.gecmis && veri.gecmis.length) ? veri.gecmis : (veri.aktif || []);
@@ -150,7 +162,7 @@ function planGecmisCiz(mid, veri) {
             var btn = document.createElement("button");
             btn.type = "button";
             btn.textContent = "İptal";
-            btn.onclick = function () { planIptalGonder(mid, p.id); };
+            btn.onclick = function () { planIptalGonder(mid, p.id, btn); };
             satir.appendChild(btn);
         }
         kutu.appendChild(satir);
@@ -643,21 +655,39 @@ function planKaydet() {
         });
 }
 
-function planIptalGonder(mid, planId) {
-    fetch("/giris/api/musteri/" + encodeURIComponent(mid) + "/plan/" + encodeURIComponent(planId) + "/iptal", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "Content-Type": "application/json" },
-        body: "{}"
-    }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+/* 404 "Açık plan yok.": plan zaten kapanmış (başka sekme, aynı aya yeni plan ile otomatik iptal); ekrandaki liste eski. */
+function planAcikPlanYok(pack) {
+    return !!(pack && pack.kod === 404 && pack.j && String(pack.j.mesaj || "").toLowerCase().indexOf("açık plan yok") >= 0);
+}
+
+function planIptalGonder(mid, planId, btn) {
+    /* İstek boyunca İptal kilitli: çift tıklama tek istek gönderir. */
+    if (window.__planIptalDevam) return;
+    window.__planIptalDevam = true;
+    var kutuDugmeleri = document.querySelectorAll("#plan_gecmis_bolum button");
+    Array.prototype.forEach.call(kutuDugmeleri, function (b) { b.disabled = true; });
+    if (btn) btn.disabled = true;
+    function kilitAc() {
+        window.__planIptalDevam = false;
+        Array.prototype.forEach.call(kutuDugmeleri, function (b) { b.disabled = false; });
+        if (btn) btn.disabled = false;
+    }
+    planIstekGonder("/giris/api/musteri/" + encodeURIComponent(mid) + "/plan/" + encodeURIComponent(planId) + "/iptal", {})
         .then(function (pack) {
-            if (!pack.ok || !pack.j || !pack.j.ok) {
-                alert((pack.j && pack.j.mesaj) || "İptal edilemedi");
+            if (pack.ok && pack.j && pack.j.ok) {
+                planKayitSonrasi(mid);
                 return;
             }
-            planKayitSonrasi(mid);
+            if (planAcikPlanYok(pack)) {
+                /* alert yok: liste sunucudan yenilenir, bilgi listenin içinde görünür. */
+                window.__planBilgi = { mid: String(mid), mesaj: "Plan zaten iptal edilmiş, liste güncellendi." };
+                planKapisiniYenile(mid);
+                return;
+            }
+            alert((pack.j && pack.j.mesaj) || "İptal edilemedi");
         })
-        .catch(function () { alert("İptal edilemedi"); });
+        .catch(function () { alert("İptal edilemedi"); })
+        .then(kilitAc);
 }
 
 function planKayitSonrasi(mid) {
@@ -682,6 +712,7 @@ if (typeof module !== "undefined" && module.exports) {
         planDurumKarari: planDurumKarari,
         planIptalEdilebilir: planIptalEdilebilir,
         planSecenekEklensin: planSecenekEklensin,
-        planHataMetni: planHataMetni
+        planHataMetni: planHataMetni,
+        planAcikPlanYok: planAcikPlanYok
     };
 }

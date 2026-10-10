@@ -852,7 +852,7 @@ def test_js():
         "gecmis kutusu form-grid'de tam genislikli ayri satir",
         'kutu.style.gridColumn = "1 / -1"' in kutu_blok and "insertBefore(kutu, sel.nextSibling)" in js_metin,
     )
-    check("script surumu artirildi", "js/plan_degistir.js', v=7" in html)
+    check("script surumu artirildi", "js/plan_degistir.js', v=8" in html)
     check(
         "kaydet kilidi, hata kutusu ve ipucu js'te",
         "__planKaydediliyor" in js_metin
