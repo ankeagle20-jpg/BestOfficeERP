@@ -1860,86 +1860,207 @@ def _fatura_ay_kaynakli(row) -> list[tuple[str, str]]:
     return []
 
 
-def _plan_fatura_kilit_listesi(rows) -> dict:
-    """mid -> kilitlenen aylar. Aynı ayda işaret, fatura_tarihi kaynağını ezer."""
-    birikim: dict[int, dict] = {}
-    for row in rows or []:
-        if not _fatura_kaydi_gecerli(row):
-            continue
-        try:
-            mid = int(row.get("musteri_id") or 0)
-            tutar = float(row.get("toplam") or 0)
-        except (TypeError, ValueError):
-            continue
-        if mid <= 0:
-            continue
-        if not math.isfinite(tutar):
-            tutar = 0.0
-        for ay, kaynak in _fatura_ay_kaynakli(row):
-            slot = birikim.setdefault(mid, {}).setdefault(ay, {"tutar": 0.0, "kaynak": kaynak})
-            slot["tutar"] = round(float(slot["tutar"]) + tutar, 2)
-            if kaynak == "isaret":
-                slot["kaynak"] = "isaret"
+def _plan_fatura_siniflari(rows, tahsil_ay=None, fid_tahsil=None, tahsil_bilinmiyor=None) -> dict:
+    """mid -> {ay: {sinif K1/K2/K0/K3, neden, fatura_tutari, kaynak}}. Saf, yazmaz."""
+    from plan_fatura_kilit import ay_siniflari
+
+    return ay_siniflari(rows, tahsil_ay, fid_tahsil, tahsil_bilinmiyor)
+
+
+def _plan_fatura_kilit_listesi(rows, tahsil_ay=None, fid_tahsil=None, tahsil_bilinmiyor=None) -> dict:
+    """mid -> kilitli (K1/K2/K0) aylar. K3 (serbest) aylar kilit değildir."""
+    from plan_fatura_kilit import kilit_listesi
+
     out = {}
-    for mid, aylar in birikim.items():
-        out[mid] = [
-            {"ay": ay, "fatura_tutari": round(float(v["tutar"]), 2), "kaynak": v["kaynak"]}
-            for ay, v in sorted(aylar.items())
-        ]
+    for mid, aylar in _plan_fatura_siniflari(rows, tahsil_ay, fid_tahsil, tahsil_bilinmiyor).items():
+        lst = kilit_listesi(aylar)
+        if lst:
+            out[mid] = lst
     return out
 
 
-def _plan_fatura_aylari(rows) -> tuple[dict, dict]:
-    """Geçerli faturalar: ay listesi ve ay başına belge toplamı."""
+def _plan_fatura_aylari(rows, tahsil_ay=None, fid_tahsil=None, tahsil_bilinmiyor=None) -> tuple[dict, dict]:
+    """Kilitli (K1/K2/K0) ay listesi ve ay başına belge toplamı. K3 aylar plana göre hesaplanır."""
     faturali: dict[int, list] = {}
     belge: dict[int, dict] = {}
-    for row in rows or []:
-        if not _fatura_kaydi_gecerli(row):
-            continue
-        try:
-            mid = int(row.get("musteri_id") or 0)
-            tutar = float(row.get("toplam") or 0)
-        except (TypeError, ValueError):
-            continue
-        if mid <= 0:
-            continue
-        if not math.isfinite(tutar):
-            tutar = 0.0
-        for ay in _fatura_ay_kumesi(row):
-            faturali.setdefault(mid, [])
-            if ay not in faturali[mid]:
-                faturali[mid].append(ay)
-            belge.setdefault(mid, {})
-            belge[mid][ay] = round(float(belge[mid].get(ay) or 0) + tutar, 2)
+    for mid, lst in _plan_fatura_kilit_listesi(rows, tahsil_ay, fid_tahsil, tahsil_bilinmiyor).items():
+        faturali[mid] = [k["ay"] for k in lst]
+        belge[mid] = {k["ay"]: k["fatura_tutari"] for k in lst}
     return faturali, belge
 
 
-def _plan_fatura_oku(planli) -> tuple[dict, dict]:
-    """Planlı kartların faturaları, tek sorgu. İptal ve taslak SQL'de elenir; not süzgeci Python'da."""
-    sql_yon = """
-        SELECT musteri_id, COALESCE(notlar, '') AS notlar,
+def _plan_fatura_ham_oku(mids) -> list:
+    """Kartların fatura satırları, tek sorgu. ettn/yon sütunu yoksa sütunsuz ikinci deneme (notlara göre karar)."""
+    log = logging.getLogger(__name__)
+    ortak = """
+               id, musteri_id, COALESCE(notlar, '') AS notlar,
                COALESCE(toplam, tutar, 0) AS toplam,
-               fatura_tarihi, COALESCE(durum, '') AS durum,
-               COALESCE(yon, 'giden') AS yon
+               fatura_tarihi, COALESCE(durum, '') AS durum"""
+    kosul = """
         FROM faturalar
         WHERE musteri_id = ANY(%s)
-          AND COALESCE(durum, '') NOT IN ('iptal', 'taslak')
-          AND COALESCE(yon, 'giden') <> 'gelen'
+          AND COALESCE(durum, '') NOT IN ('iptal', 'taslak')"""
+    yon_kosul = " AND COALESCE(yon, 'giden') <> 'gelen'"
+    denemeler = (
+        ("SELECT" + ortak + ", COALESCE(yon, 'giden') AS yon, COALESCE(ettn, '') AS ettn" + kosul + yon_kosul, "ettn+yon"),
+        ("SELECT" + ortak + ", COALESCE(yon, 'giden') AS yon" + kosul + yon_kosul, "yon (ettn sütunu yok, notlara göre)"),
+        ("SELECT" + ortak + kosul, "sütunsuz (ettn/yon yok, notlara göre)"),
+    )
+    son = None
+    for sql, ad in denemeler:
+        try:
+            rows = fetch_all(sql, (list(mids),)) or []
+            if ad != "ettn+yon":
+                log.warning("plan fatura okuma geri düşüş: %s", ad)
+            return rows
+        except Exception as exc:
+            son = exc
+            log.warning("plan fatura okuma deneme başarısız (%s)", ad)
+    raise son if son else RuntimeError("plan fatura okuma")
+
+
+def _plan_tahsilat_oku(mids, rows) -> tuple[dict, dict, set]:
+    """Toplu tahsilat bilgisi: ({mid: {YYYY-MM: tutar}}, {fatura_id: tutar}, bilinmeyen_mid_kümesi).
+
+    Ay haritası mevcut _aylik_tahsil_tutar_map ile; kalan brüt tek toplu grid cache sorgusundan.
+    Sorgular toplu; müşteri başına ek sorgu yalnız grid cache'i olmayan kartta (haritanın kendi geri düşüşü).
     """
-    sql_yonsuz = """
-        SELECT musteri_id, COALESCE(notlar, '') AS notlar,
-               COALESCE(toplam, tutar, 0) AS toplam,
-               fatura_tarihi, COALESCE(durum, '') AS durum
-        FROM faturalar
-        WHERE musteri_id = ANY(%s)
-          AND COALESCE(durum, '') NOT IN ('iptal', 'taslak')
-    """
+    log = logging.getLogger(__name__)
+    mids = [int(m) for m in mids or []]
+    bilinmiyor = set(mids)
+    fid_tahsil: dict[int, float] = {}
+    tahsil_ay: dict[int, dict] = {}
     try:
-        rows = fetch_all(sql_yon, (planli,)) or []
+        fids = sorted({int(r.get("id")) for r in rows or [] if r.get("id") is not None})
+        if fids:
+            for r in fetch_all(
+                """
+                SELECT fatura_id, SUM(COALESCE(tutar, 0)) AS s
+                FROM tahsilatlar
+                WHERE fatura_id = ANY(%s) AND COALESCE(tutar, 0) > 0
+                GROUP BY fatura_id
+                """,
+                (fids,),
+            ) or []:
+                fid_tahsil[int(r["fatura_id"])] = float(r.get("s") or 0)
+            try:
+                for r in fetch_all(
+                    """
+                    SELECT fatura_id, SUM(COALESCE(tutar, 0)) AS s
+                    FROM fatura_tahsilat
+                    WHERE fatura_id = ANY(%s) AND COALESCE(tutar, 0) > 0
+                    GROUP BY fatura_id
+                    """,
+                    (fids,),
+                ) or []:
+                    fid_tahsil[int(r["fatura_id"])] = fid_tahsil.get(int(r["fatura_id"]), 0.0) + float(r.get("s") or 0)
+            except Exception:
+                log.info("plan tahsilat: fatura_tahsilat tablosu okunamadı (yoksa sorun değil)")
+        trows = fetch_all(
+            """
+            SELECT t.musteri_id AS m1, t.customer_id AS m2, t.id,
+                   COALESCE(t.aciklama, '') AS aciklama, COALESCE(t.tutar, 0) AS tutar,
+                   t.tahsilat_tarihi, f.fatura_tarihi
+            FROM tahsilatlar t
+            LEFT JOIN faturalar f ON f.id = t.fatura_id
+            WHERE (t.musteri_id = ANY(%s) OR t.customer_id = ANY(%s))
+              AND COALESCE(t.tutar, 0) > 0
+            ORDER BY t.tahsilat_tarihi ASC NULLS LAST, t.id ASC
+            """,
+            (mids, mids),
+        ) or []
+        cache_rows = fetch_all(
+            "SELECT musteri_id, payload FROM musteri_aylik_grid_cache WHERE musteri_id = ANY(%s)",
+            (mids,),
+        ) or []
     except Exception:
-        logging.getLogger(__name__).exception("plan fatura yon")
-        rows = fetch_all(sql_yonsuz, (planli,)) or []
-    return _plan_fatura_aylari(rows)
+        log.exception("plan tahsilat toplu okuma")
+        return {}, {}, bilinmiyor
+    grup: dict[int, list] = {m: [] for m in mids}
+    kume = set(mids)
+    for r in trows:
+        gorulen = set()
+        for anahtar in ("m1", "m2"):
+            try:
+                m = int(r.get(anahtar) or 0)
+            except (TypeError, ValueError):
+                continue
+            if m in kume and m not in gorulen:
+                gorulen.add(m)
+                grup[m].append(r)
+    brut_by_mid: dict[int, dict] = {}
+    for cr in cache_rows:
+        try:
+            cm = int(cr.get("musteri_id") or 0)
+        except (TypeError, ValueError):
+            continue
+        if cm > 0:
+            brut_by_mid[cm] = _brut_by_iso_from_aylik_grid_payload(cr.get("payload"))
+    for m in mids:
+        satirlar = grup.get(m) or []
+        if not satirlar:
+            tahsil_ay[m] = {}
+            bilinmiyor.discard(m)
+            continue
+        try:
+            brut = brut_by_mid.get(m) or {}
+            harita = (
+                _aylik_tahsil_tutar_map(m, tahsil_rows=satirlar, remaining_by_iso=dict(brut))
+                if brut
+                else _aylik_tahsil_tutar_map(m, tahsil_rows=satirlar)
+            ) or {}
+        except Exception:
+            log.exception("plan tahsilat ay haritası mid=%s", m)
+            continue
+        ay_map: dict[str, float] = {}
+        for iso, tutar in harita.items():
+            try:
+                ay_map[str(iso)[:7]] = round(ay_map.get(str(iso)[:7], 0.0) + float(tutar or 0), 2)
+            except (TypeError, ValueError):
+                continue
+        tahsil_ay[m] = ay_map
+        bilinmiyor.discard(m)
+    return tahsil_ay, fid_tahsil, bilinmiyor
+
+
+def _plan_fatura_rows_ve_tahsil(mids) -> tuple[list, dict, dict, set]:
+    """Fatura satırları + (gerekirse) tahsilat bilgisi.
+
+    Tahsilat sorguları yalnız K3 adayı (GİB'siz, işaretli, tek kayıtlı) ayı olan kartlar için çalışır;
+    K1/K0 kararı tahsilata bağlı değildir, bu yüzden çoğu kartta ek sorgu yoktur.
+    """
+    from plan_fatura_kilit import K3
+
+    rows = _plan_fatura_ham_oku(mids)
+    ilk = _plan_fatura_siniflari(rows)
+    aday = {mid for mid, aylar in ilk.items() if any(v.get("sinif") == K3 for v in aylar.values())}
+    if not aday:
+        return rows, {}, {}, set()
+    aday_rows = []
+    for r in rows:
+        try:
+            if int(r.get("musteri_id") or 0) in aday:
+                aday_rows.append(r)
+        except (TypeError, ValueError):
+            continue
+    tahsil_ay, fid_tahsil, bilinmiyor = _plan_tahsilat_oku(sorted(aday), aday_rows)
+    return rows, tahsil_ay, fid_tahsil, bilinmiyor
+
+
+def _plan_fatura_siniflari_oku(mids) -> dict:
+    """Kartlar için tam sınıf haritası (K1/K2/K0/K3), toplu sorgularla. Yazmaz."""
+    mids = [int(m) for m in mids or []]
+    if not mids:
+        return {}
+    rows, tahsil_ay, fid_tahsil, bilinmiyor = _plan_fatura_rows_ve_tahsil(mids)
+    return _plan_fatura_siniflari(rows, tahsil_ay, fid_tahsil, bilinmiyor)
+
+
+def _plan_fatura_oku(planli) -> tuple[dict, dict]:
+    """Planlı kartların kilitli (K1/K2/K0) ayları ve belge toplamları. İptal/taslak SQL'de elenir."""
+    mids = [int(m) for m in planli or []]
+    rows, tahsil_ay, fid_tahsil, bilinmiyor = _plan_fatura_rows_ve_tahsil(mids)
+    return _plan_fatura_aylari(rows, tahsil_ay, fid_tahsil, bilinmiyor)
 
 
 def _plan_paket_yukle(musteri_ids) -> dict:

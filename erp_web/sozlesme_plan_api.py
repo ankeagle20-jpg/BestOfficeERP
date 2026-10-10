@@ -143,8 +143,8 @@ def gorunur_degisiklik_uyarisi(bilgi: dict, faturali: bool) -> dict | None:
     ilk = bilgi.get("ilk_degisen_ay")
     if ilk and faturali:
         mesaj = (
-            "Bu plan seçilen geçerlilik ayından itibaren faturalı aylar nedeniyle şu an görünür bir "
-            f"değişiklik yaratmıyor; ilk değişen ay: {ilk}"
+            "Bu plan seçilen geçerlilik ayından itibaren kilitli aylar (GİB'e gönderilmiş, ödemeli veya "
+            f"belirsiz) nedeniyle şu an görünür bir değişiklik yaratmıyor; ilk değişen ay: {ilk}"
         )
     elif ilk:
         mesaj = f"Bu plan seçilen geçerlilik ayından itibaren şu an görünür bir değişiklik yaratmıyor; ilk değişen ay: {ilk}"
@@ -230,27 +230,126 @@ def _musteri_ve_kyc(mid):
     return row, kyc or {}
 
 
-def _kilitler(mid) -> list:
-    from db import fetch_all
-    from routes.giris_routes import _plan_fatura_kilit_listesi
+class KilitOkunamadi(RuntimeError):
+    """Kilit sınıfları okunamadı; kilitsiz devam etmek güvenli değil."""
+
+
+def _siniflar(mid) -> dict:
+    """Tek müşteri: {ay: {sinif K1/K2/K0/K3, neden, fatura_tutari, kaynak}}. Yazmaz."""
+    from routes.giris_routes import _plan_fatura_siniflari_oku
 
     try:
-        rows = fetch_all(
-            """
-            SELECT musteri_id, COALESCE(notlar, '') AS notlar,
-                   COALESCE(toplam, tutar, 0) AS toplam,
-                   fatura_tarihi, COALESCE(durum, '') AS durum,
-                   COALESCE(yon, 'giden') AS yon
-            FROM faturalar
-            WHERE musteri_id = %s
-              AND COALESCE(durum, '') NOT IN ('iptal', 'taslak')
-            """,
-            (int(mid),),
-        ) or []
-    except Exception:
-        _LOG.exception("plan fatura okuma")
+        return dict((_plan_fatura_siniflari_oku([int(mid)]) or {}).get(int(mid)) or {})
+    except Exception as exc:
+        _LOG.exception("plan kilit siniflari")
+        raise KilitOkunamadi("kilit") from exc
+
+
+def _kilitler(mid) -> list:
+    """Kilitli (K1 GİB, K2 ödemeli, K0 belirsiz) aylar. K3 (serbest) aylar kilit değildir."""
+    from plan_fatura_kilit import kilit_listesi
+
+    return kilit_listesi(_siniflar(mid))
+
+
+def _kilit_k3_aylari(mid) -> list:
+    """Yalnız bilgi: serbest (K3) aylar. Okunamazsa boş (kayıt akışını etkilemez)."""
+    from plan_fatura_kilit import serbest_liste
+
+    try:
+        return serbest_liste(_siniflar(mid))
+    except KilitOkunamadi:
         return []
-    return list((_plan_fatura_kilit_listesi(rows).get(int(mid)) or []))
+
+
+def _ay_anahtari(ay: date) -> str:
+    return f"{ay.year:04d}-{ay.month:02d}"
+
+
+def _kilit_etkin(kilit, ay: date) -> list:
+    """Geçerlilik ayından itibaren (dahil) kilitli aylar; plan öncesi aylara dokunmadığı için onay gerektirmez."""
+    esik = _ay_anahtari(ay)
+    return [k for k in (kilit or []) if str(k.get("ay") or "")[:7] >= esik]
+
+
+def _tr_para(x) -> str:
+    try:
+        v = round(float(x), 2)
+    except (TypeError, ValueError):
+        return str(x)
+    metin = f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return metin[:-3] if metin.endswith(",00") else metin
+
+
+def _brut_haritalari(zincir: dict, mevcut, yeni: dict, aylar) -> tuple[dict, dict]:
+    """Verilen ayların eski ve yeni zincir brütü. Yazmaz; hesaplanamazsa boş."""
+    anahtarlar = sorted({str(a)[:7] for a in aylar if a})
+    if not anahtarlar:
+        return {}, {}
+    try:
+        z = dict(zincir or {})
+        soz = z.get("sozlesme_tarihi")
+        if isinstance(soz, datetime):
+            soz = soz.date()
+        son = anahtarlar[-1]
+        gerek = (int(son[:4]) - soz.year) * 12 + (int(son[5:7]) - soz.month) + 1
+        z["ay_sayisi"] = max(1, min(240, max(int(z.get("ay_sayisi") or 0), gerek)))
+        eski = {s["ay"]: s.get("brut") for s in ay_bazli_tutarlar(z, mevcut or [])}
+        yeni_h = {s["ay"]: s.get("brut") for s in ay_bazli_tutarlar(z, list(mevcut or []) + [yeni])}
+        return eski, yeni_h
+    except Exception:
+        _LOG.exception("plan kilit brut haritasi")
+        return {}, {}
+
+
+def _kilit_listeleri(zincir: dict, mevcut, yeni: dict, ay: date, kilit_etkin, k3) -> dict:
+    """Önizleme için sınıf listeleri: ay, neden, mevcut fatura kaydı toplamı, plan sonrası zincir brütü."""
+    esik = _ay_anahtari(ay)
+    k3_etkin = [k for k in (k3 or []) if str(k.get("ay") or "")[:7] >= esik]
+    eski, yeni_h = _brut_haritalari(
+        zincir, mevcut, yeni, [k.get("ay") for k in list(kilit_etkin or []) + k3_etkin]
+    )
+
+    def kayit(k):
+        a = str(k.get("ay"))[:7]
+        return {
+            "ay": a,
+            "neden": k.get("neden") or "",
+            "fatura_tutari": k.get("fatura_tutari"),
+            "eski_zincir_brut": eski.get(a),
+            "zincir_brut": yeni_h.get(a),
+        }
+
+    liste = {"K1": [], "K2": [], "K0": [], "K3_guncellenecek_aylar": []}
+    for k in kilit_etkin or []:
+        liste[k.get("sinif") if k.get("sinif") in ("K1", "K2", "K0") else "K1"].append(kayit(k))
+    for k in k3_etkin:
+        r = kayit(k)
+        e, n = r["eski_zincir_brut"], r["zincir_brut"]
+        if e is None or n is None or abs(float(e) - float(n)) > 0.004:
+            liste["K3_guncellenecek_aylar"].append(r)
+    return liste
+
+
+def k3_bilgi_metni(k3_liste) -> str:
+    """K3 aylar güncellenecekse sabit bilgi satırı; örnek tutarlar kayıtlardan alınır."""
+    if not k3_liste:
+        return ""
+    ornek = []
+    for r in k3_liste:
+        t = r.get("fatura_tutari")
+        if t is None:
+            continue
+        s = _tr_para(t)
+        if s not in ornek:
+            ornek.append(s)
+        if len(ornek) >= 2:
+            break
+    ek = f" (örn. {', '.join(ornek)})" if ornek else ""
+    return (
+        f"ERP içi borç kayıtlarındaki tutarlar{ek} bu aşamada güncellenmez; "
+        "aylık grid, borçlandırma/tahsilat paneli ve ekstre yeni plana göre görünür."
+    )
 
 
 def _sozlesme_basi(kyc):
@@ -466,7 +565,10 @@ def plan_onizleme_yanit(mid):
     bas = _sozlesme_basi(kyc)
     if bas and ay < date(bas.year, bas.month, 1):
         return jsonify({"ok": False, "mesaj": "Geçerlilik ayı sözleşme başlangıcından önce olamaz."}), 400
-    kilit = _kilitler(mid)
+    try:
+        kilit = _kilit_etkin(_kilitler(mid), ay)
+    except KilitOkunamadi:
+        return jsonify({"ok": False, "mesaj": "Kilit durumu okunamadı."}), 500
     kontrol = plan_ekle_on_kontrol(ay, kilit)
     try:
         zincir, mevcut, _kutu = _onizleme_zinciri(mid, kyc)
@@ -486,7 +588,10 @@ def plan_onizleme_yanit(mid):
     aylar = onizleme_olustur(zincir, mevcut, yeni, ay, 24)
     degisim = gorunur_degisiklik_bilgisi(zincir, mevcut, yeni, ay, aylar)
     uyarilar = list(kontrol.get("uyarilar") or [])
-    gorunmez = gorunur_degisiklik_uyarisi(degisim, bool((zincir or {}).get("faturali_aylar")))
+    # Sebep kilitli (K1/K2/K0) aylardır; K3 aylar plana göre hesaplandığı için sebep sayılmaz.
+    _esik = _ay_anahtari(ay)
+    kilitli_etkin = bool(kilit) or any(str(a)[:7] >= _esik for a in ((zincir or {}).get("faturali_aylar") or []))
+    gorunmez = gorunur_degisiklik_uyarisi(degisim, kilitli_etkin)
     if gorunmez:
         uyarilar.append(gorunmez)
     gecmis_plan = _gecmis_ay_mi(ay)
@@ -497,6 +602,13 @@ def plan_onizleme_yanit(mid):
         except Exception:
             _LOG.exception("plan odemeli etki")
             return jsonify({"ok": False, "mesaj": "Ödeme etkisi hesaplanamadı."}), 500
+    k3 = _kilit_k3_aylari(mid)
+    listeler = _kilit_listeleri(zincir, mevcut, yeni, ay, kilit, k3)
+    sinif_by_ay = {str(k.get("ay"))[:7]: k for k in kilit}
+    kilitlenen = []
+    for k in kontrol.get("kilitlenen_aylar") or []:
+        ek = sinif_by_ay.get(str(k.get("ay"))[:7]) or {}
+        kilitlenen.append(dict(k, sinif=ek.get("sinif") or "K1", neden=ek.get("neden") or ""))
     return jsonify(
         {
             "ok": True,
@@ -511,7 +623,9 @@ def plan_onizleme_yanit(mid):
             "uyarilar": uyarilar,
             "gorunur_degisiklik": bool(degisim.get("gorunur")),
             "ilk_degisen_ay": degisim.get("ilk_degisen_ay"),
-            "kilitlenen_aylar": kontrol.get("kilitlenen_aylar") or [],
+            "kilitlenen_aylar": kilitlenen,
+            "kilit_listeleri": listeler,
+            "k3_bilgi": k3_bilgi_metni(listeler.get("K3_guncellenecek_aylar")),
             "faturali": bool(kontrol.get("faturali")),
             "onerilen_ay": kontrol.get("onerilen_ay"),
             "gecmis_plan": bool(gecmis_plan),
@@ -540,7 +654,10 @@ def plan_ekle_yanit(mid):
     bas = _sozlesme_basi(kyc)
     if bas and ay < date(bas.year, bas.month, 1):
         return jsonify({"ok": False, "mesaj": "Geçerlilik ayı sözleşme başlangıcından önce olamaz."}), 400
-    kilit = _kilitler(mid)
+    try:
+        kilit = _kilit_etkin(_kilitler(mid), ay)
+    except KilitOkunamadi:
+        return jsonify({"ok": False, "mesaj": "Kilit durumu okunamadı."}), 500
     kontrol = plan_ekle_on_kontrol(ay, kilit)
     if kontrol.get("kilitlenen_aylar") and data.get("onay_kilitli_aylar") is not True:
         return (

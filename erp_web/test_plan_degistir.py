@@ -72,6 +72,7 @@ def _kur(tx, kilit=None, durum="aktif", bugun=None):
     _b = bugun or date(2024, 10, 9)
     api._bugun = lambda: _b
     api._kilitler = lambda mid: list(kilit or [])
+    api._kilit_k3_aylari = lambda mid: []
     api._tahsil_haritasi = lambda mid: {}
     api._musteri_ve_kyc = lambda mid: (
         {"id": int(mid), "durum": durum},
@@ -457,7 +458,7 @@ def test_onizleme_ve_liste():
                 and ilk == "2028-03"
                 and len(uy) == 1
                 and uy[0]
-                == "Bu plan seçilen geçerlilik ayından itibaren faturalı aylar nedeniyle şu an görünür bir değişiklik yaratmıyor; ilk değişen ay: 2028-03",
+                == "Bu plan seçilen geçerlilik ayından itibaren kilitli aylar (GİB'e gönderilmiş, ödemeli veya belirsiz) nedeniyle şu an görünür bir değişiklik yaratmıyor; ilk değişen ay: 2028-03",
                 (kod_u, ayni, g_u.get("gorunur_degisiklik"), ilk, uy),
             )
             # 3 ay faturalı: pencerede değişiklik var, uyarı yok
@@ -655,7 +656,7 @@ def test_js():
         "gecmis kutusu form-grid'de tam genislikli ayri satir",
         'kutu.style.gridColumn = "1 / -1"' in kutu_blok and "insertBefore(kutu, sel.nextSibling)" in js_metin,
     )
-    check("script surumu artirildi", "js/plan_degistir.js', v=5" in html)
+    check("script surumu artirildi", "js/plan_degistir.js', v=6" in html)
     check(
         "ay secici min = sozlesme baslangic ayi",
         "gec.min = sozBas" in js_metin and "gec.value < ayIso" not in js_metin and "sozlesme_baslangic" in js_metin,

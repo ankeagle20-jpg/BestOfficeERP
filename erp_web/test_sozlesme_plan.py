@@ -988,7 +988,7 @@ def test_fatura_kaydi_ve_on_kontrol():
     from routes.giris_routes import _plan_fatura_aylari
 
     rows = [
-        {"musteri_id": 1, "durum": "odenmedi", "yon": "giden", "toplam": 1500, "notlar": "|AYLIK_TUTAR|2024-10-01|", "fatura_tarihi": date(2024, 10, 1)},
+        {"musteri_id": 1, "durum": "odenmedi", "yon": "giden", "toplam": 1500, "notlar": "|AYLIK_TUTAR|2024-10-01|", "fatura_tarihi": date(2024, 10, 1), "ettn": "e-1"},
         {"musteri_id": 1, "durum": "iptal", "yon": "giden", "toplam": 10, "notlar": "|AYLIK_TUTAR|2024-09-01|", "fatura_tarihi": date(2024, 9, 1)},
         {"musteri_id": 1, "durum": "odenmedi", "yon": "giden", "toplam": 10, "notlar": "ERP durum: taslak", "fatura_tarihi": date(2024, 8, 1)},
         {"musteri_id": 1, "durum": "odenmedi", "yon": "gelen", "toplam": 10, "notlar": "", "fatura_tarihi": date(2024, 7, 1)},
@@ -1309,7 +1309,7 @@ def test_asama5_okuyucular():
 
     from routes.giris_routes import _plan_fatura_kilit_listesi
     rows = [
-        {"musteri_id": 1, "durum": "odenmedi", "yon": "giden", "toplam": 1500, "notlar": "|AYLIK_TUTAR|2024-10-01|", "fatura_tarihi": date(2024, 10, 1)},
+        {"musteri_id": 1, "durum": "odenmedi", "yon": "giden", "toplam": 1500, "notlar": "|AYLIK_TUTAR|2024-10-01|", "fatura_tarihi": date(2024, 10, 1), "ettn": "e-1"},
         {"musteri_id": 1, "durum": "odenmedi", "yon": "giden", "toplam": 999, "notlar": "GİB İMZALANDI", "fatura_tarihi": date(2024, 11, 15)},
     ]
     kilit = _plan_fatura_kilit_listesi(rows).get(1) or []

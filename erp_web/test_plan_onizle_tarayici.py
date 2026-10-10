@@ -186,6 +186,7 @@ def _yeni_senaryolar(sayfa, app, gorunen, bu_ay):
     api._resync = lambda mid: True
     api._bugun = lambda: date.today()
     eski_kilit, eski_tahsil, eski_fa = api._kilitler, api._tahsil_haritasi, Durum.faturali
+    api._kilit_k3_aylari = lambda mid: []
 
     def modal_ac():
         _modal_ac(sayfa, 7)
@@ -379,7 +380,7 @@ def main():
             uyari = sayfa.evaluate("document.getElementById('plan_uyarilar').textContent")
             check(
                 "gorunur degisiklik yok uyarisi arayuzde",
-                "faturalı aylar nedeniyle şu an görünür bir değişiklik yaratmıyor; ilk değişen ay: 2031-01" in uyari
+                "kilitli aylar (GİB'e gönderilmiş, ödemeli veya belirsiz) nedeniyle şu an görünür bir değişiklik yaratmıyor; ilk değişen ay: 2031-01" in uyari
                 and sayfa.evaluate("!document.getElementById('plan_kaydet').disabled"),
                 uyari,
             )

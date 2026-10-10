@@ -199,6 +199,10 @@ function planModalHazirla() {
         + "<div id=\"plan_kilit_metin\"></div>"
         + "<label id=\"plan_kilit_etiket\" style=\"" + C + "\"><input id=\"plan_kilit_onay\" type=\"checkbox\" style=\"width:18px;height:18px;margin:0;\"> Bu aylar değişmeyecek, anladım</label>"
         + "</div>"
+        + "<div id=\"plan_k3_kutu\" style=\"" + K + "display:none;border-color:#2d6a8f;\">"
+        + "<div id=\"plan_k3_metin\"></div>"
+        + "<div id=\"plan_k3_tablo\" style=\"overflow:auto;max-height:160px;margin-top:6px;\"></div>"
+        + "</div>"
         + "<div id=\"plan_odemeli_kutu\" style=\"" + K + "display:none;\">"
         + "<div id=\"plan_odemeli_metin\"></div>"
         + "<div id=\"plan_odemeli_tablo\" style=\"overflow:auto;max-height:180px;margin-top:6px;\"></div>"
@@ -236,7 +240,7 @@ function planOnizlemeSifirla() {
     window.__planOnizlemeHazir = false;
     window.__planKilit = [];
     window.__planOdemeli = [];
-    ["plan_kilit_kutu", "plan_odemeli_kutu"].forEach(function (id) {
+    ["plan_kilit_kutu", "plan_odemeli_kutu", "plan_k3_kutu"].forEach(function (id) {
         var el = document.getElementById(id);
         if (el) el.style.display = "none";
     });
@@ -338,17 +342,24 @@ function planKilitCiz(kilit) {
         return;
     }
     kutu.style.display = "";
+    var SINIF_AD = { K1: "GİB'e gönderilmiş", K2: "ödemeli, kilitli", K0: "belirsiz, kilitli" };
+    var sayac = { K1: 0, K2: 0, K0: 0 };
     var satirlar = kilit.map(function (x) {
-        return x.ay + " (" + x.kaynak + " " + x.fatura_tutari + ")";
+        var s = SINIF_AD[x.sinif] ? x.sinif : "K1";
+        sayac[s] += 1;
+        return x.ay + " (" + SINIF_AD[s] + (x.neden ? ": " + x.neden : "") + ", kayıt " + x.fatura_tutari + ")";
     });
+    var dagilim = ["K1", "K2", "K0"].filter(function (k) { return sayac[k] > 0; }).map(function (k) {
+        return SINIF_AD[k] + " " + sayac[k];
+    }).join(", ");
     if (kilit.length <= 6) {
-        metin.textContent = "Kilitli aylar değişmez: " + satirlar.join(", ");
+        metin.textContent = "Kilitli aylar değişmez: " + satirlar.join("; ");
         return;
     }
     /* Çok sayıda kilitli ay: tek satır özet, ayrıntı katlanır; onay kutusu hep görünür kalır. */
     var ozet = document.createElement("div");
     ozet.style.fontWeight = "600";
-    ozet.textContent = "Kilitli (faturalı) " + kilit.length + " ay değişmez: " + planAyAraligiMetni(kilit);
+    ozet.textContent = "Kilitli " + kilit.length + " ay değişmez (" + dagilim + "): " + planAyAraligiMetni(kilit);
     metin.appendChild(ozet);
     var det = document.createElement("details");
     var sum = document.createElement("summary");
@@ -360,9 +371,57 @@ function planKilitCiz(kilit) {
     ic.style.maxHeight = "120px";
     ic.style.overflow = "auto";
     ic.style.fontSize = "12px";
-    ic.textContent = satirlar.join(", ");
+    ic.textContent = satirlar.join("; ");
     det.appendChild(ic);
     metin.appendChild(det);
+}
+
+/* K3 (serbest) aylar: yalnız bilgi, onay gerektirmez. Fatura kayıt tutarları güncellenmez; plan zincire uygulanır. */
+function planK3Ciz(liste, bilgi) {
+    var kutu = document.getElementById("plan_k3_kutu");
+    var metin = document.getElementById("plan_k3_metin");
+    var tablo = document.getElementById("plan_k3_tablo");
+    if (!kutu || !metin || !tablo) return;
+    metin.textContent = "";
+    tablo.textContent = "";
+    if (!liste || !liste.length) {
+        kutu.style.display = "none";
+        return;
+    }
+    kutu.style.display = "";
+    var baslik = document.createElement("div");
+    baslik.style.fontWeight = "600";
+    baslik.textContent = "Plana göre yeni tutara geçecek " + liste.length + " ay (GİB'siz, tahsilatsız): " + planAyAraligiMetni(liste);
+    metin.appendChild(baslik);
+    if (bilgi) {
+        var b = document.createElement("div");
+        b.style.marginTop = "4px";
+        b.style.color = "#90caf9";
+        b.textContent = bilgi;
+        metin.appendChild(b);
+    }
+    var t = document.createElement("table");
+    t.style.fontSize = "12px";
+    var h = document.createElement("tr");
+    ["Ay", "Mevcut fatura kaydı", "Önceki zincir brütü", "Plan sonrası zincir brütü"].forEach(function (s) {
+        var th = document.createElement("th");
+        th.textContent = s;
+        th.style.padding = "2px 8px";
+        th.style.textAlign = "left";
+        h.appendChild(th);
+    });
+    t.appendChild(h);
+    liste.forEach(function (o) {
+        var tr = document.createElement("tr");
+        [o.ay, o.fatura_tutari, o.eski_zincir_brut, o.zincir_brut].forEach(function (v) {
+            var td = document.createElement("td");
+            td.style.padding = "2px 8px";
+            td.textContent = v == null ? "" : String(v);
+            tr.appendChild(td);
+        });
+        t.appendChild(tr);
+    });
+    tablo.appendChild(t);
 }
 
 function planOdemeliCiz(odemeli, fazla) {
@@ -467,6 +526,7 @@ function planOnizlemeIste() {
                 if (el) el.checked = false;
             });
             planKilitCiz(window.__planKilit);
+            planK3Ciz((j.kilit_listeleri || {}).K3_guncellenecek_aylar || [], j.k3_bilgi || "");
             planOdemeliCiz(window.__planOdemeli, !!j.fazla_odeme);
             var uy = document.getElementById("plan_uyarilar");
             if (uy) {
