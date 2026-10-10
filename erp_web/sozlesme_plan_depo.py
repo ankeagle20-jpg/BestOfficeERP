@@ -180,6 +180,54 @@ def plan_ekle(
     return dict(row)
 
 
+def plan_degistir(
+    calistir,
+    oku,
+    *,
+    musteri_id: int,
+    gecerlilik_ay,
+    yeni_net,
+    kdv_oran,
+    yeni_brut,
+    nakit_tutar=None,
+    banka_tutar=None,
+    olusturan: str,
+    simdi: datetime | None = None,
+) -> tuple[dict, dict | None]:
+    """Aynı ayda açık plan varsa iptal eder (satır silinmez; iptal_at/iptal_eden dolar), ardından yenisini yazar.
+
+    Dönen: (yeni_satir, iptal_edilen_satir veya None). Transaction'ı çağıran yönetir:
+    herhangi bir adım hata verirse çağıran rollback yapar ve eski plan açık kalır.
+    plan_ekle ve PlanCakisma davranışı değişmez; eşzamanlı yazımda unique index PlanCakisma/unique hatası verir.
+    """
+    ensure_sozlesme_plan_degisiklik(calistir)
+    ay = _ay_basi(gecerlilik_ay)
+    mid = int(musteri_id)
+    zaman = simdi or datetime.now(timezone.utc)
+    onceki = None
+    var = oku(SQL_AKTIF, (mid, ay))
+    if var:
+        try:
+            onceki = plan_iptal(calistir, oku, plan_id=int(var["id"]), iptal_eden=olusturan, simdi=zaman)
+        except PlanYok as exc:
+            # Başka bir istek aynı satırı bu arada iptal etti/değiştirdi: yarışı çakışma say.
+            raise PlanCakisma("bu gecerlilik ayinda acik plan baska istekle degisti") from exc
+    yeni = plan_ekle(
+        calistir,
+        oku,
+        musteri_id=mid,
+        gecerlilik_ay=ay,
+        yeni_net=yeni_net,
+        kdv_oran=kdv_oran,
+        yeni_brut=yeni_brut,
+        nakit_tutar=nakit_tutar,
+        banka_tutar=banka_tutar,
+        olusturan=olusturan,
+        simdi=zaman,
+    )
+    return yeni, onceki
+
+
 def plan_iptal(calistir, oku, *, plan_id: int, iptal_eden: str, simdi: datetime | None = None) -> dict:
     """Açık satırı iptal eder. Satır silinmez; iptal_at ve iptal_eden dolar."""
     ensure_sozlesme_plan_degisiklik(calistir)

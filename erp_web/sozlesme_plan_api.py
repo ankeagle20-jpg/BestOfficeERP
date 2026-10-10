@@ -17,6 +17,7 @@ from sozlesme_plan_depo import (
     PlanYok,
     ensure_sozlesme_plan_degisiklik,
     ensure_sozlesme_plan_degisiklik_semada,
+    plan_degistir,
     plan_ekle,
     plan_iptal,
     plan_liste,
@@ -187,6 +188,40 @@ def _para(val) -> float:
     return round(float(val), 2)
 
 
+def _ayni_ay_mi(plan, ay: date) -> bool:
+    try:
+        return _ay_basi((plan or {}).get("gecerlilik_ay")) == ay
+    except (ValueError, TypeError):
+        return False
+
+
+def aktif_plan_ayni_ay(mevcut, ay: date) -> dict | None:
+    """Seçilen geçerlilik ayında zaten açık olan plan (yoksa None). Yazmaz."""
+    for p in mevcut or []:
+        if _ayni_ay_mi(p, ay):
+            return p
+    return None
+
+
+def yeni_taban_planlar(mevcut, yeni: dict) -> list:
+    """Kayıt sonrası durumun tabanı: yeni planın ayındaki açık plan iptal edilmiş sayılır.
+
+    plan_degistir aynı ayı iptal edip yenisini yazdığı için "yeni" hesap bu tabana yeni planı ekler;
+    önizleme ile kayıttan sonraki durum böylece sapmaz.
+    """
+    try:
+        ay = _ay_basi(yeni.get("gecerlilik_ay"))
+    except (ValueError, TypeError, AttributeError):
+        return list(mevcut or [])
+    return [p for p in (mevcut or []) if not _ayni_ay_mi(p, ay)]
+
+
+def iptal_uyari_metni(onceki: dict | None) -> str:
+    if not onceki:
+        return ""
+    return f"Bu ay için mevcut aktif plan (net {_tr_para(onceki.get('yeni_net'))}) iptal edilip yenisi yazılacak."
+
+
 def _json_plan(row: dict) -> dict:
     out = {}
     for k, v in (row or {}).items():
@@ -295,7 +330,7 @@ def _brut_haritalari(zincir: dict, mevcut, yeni: dict, aylar) -> tuple[dict, dic
         gerek = (int(son[:4]) - soz.year) * 12 + (int(son[5:7]) - soz.month) + 1
         z["ay_sayisi"] = max(1, min(240, max(int(z.get("ay_sayisi") or 0), gerek)))
         eski = {s["ay"]: s.get("brut") for s in ay_bazli_tutarlar(z, mevcut or [])}
-        yeni_h = {s["ay"]: s.get("brut") for s in ay_bazli_tutarlar(z, list(mevcut or []) + [yeni])}
+        yeni_h = {s["ay"]: s.get("brut") for s in ay_bazli_tutarlar(z, yeni_taban_planlar(mevcut, yeni) + [yeni])}
         return eski, yeni_h
     except Exception:
         _LOG.exception("plan kilit brut haritasi")
@@ -417,7 +452,8 @@ def onizleme_olustur(zincir: dict, mevcut, yeni_plan: dict, bas: date, adet: int
         if int(z.get("ay_sayisi") or 0) < gerek:
             z["ay_sayisi"] = gerek
     eskiler = {s["ay"]: s for s in ay_bazli_tutarlar(z, mevcut or [])}
-    yeniler = {s["ay"]: s for s in ay_bazli_tutarlar(z, list(mevcut or []) + [yeni_plan])}
+    # Aynı ayda açık plan varsa kayıtta iptal edilecek: yeni zincir o plan olmadan hesaplanır.
+    yeniler = {s["ay"]: s for s in ay_bazli_tutarlar(z, yeni_taban_planlar(mevcut, yeni_plan) + [yeni_plan])}
     out = []
     y, m = bas.year, bas.month
     for _ in range(int(adet)):
@@ -588,6 +624,10 @@ def plan_onizleme_yanit(mid):
     aylar = onizleme_olustur(zincir, mevcut, yeni, ay, 24)
     degisim = gorunur_degisiklik_bilgisi(zincir, mevcut, yeni, ay, aylar)
     uyarilar = list(kontrol.get("uyarilar") or [])
+    onceki = aktif_plan_ayni_ay(mevcut, ay)
+    iptal_uyari = iptal_uyari_metni(onceki)
+    if onceki:
+        uyarilar.append({"kod": "aktif_plan_iptal", "mesaj": iptal_uyari})
     # Sebep kilitli (K1/K2/K0) aylardır; K3 aylar plana göre hesaplandığı için sebep sayılmaz.
     _esik = _ay_anahtari(ay)
     kilitli_etkin = bool(kilit) or any(str(a)[:7] >= _esik for a in ((zincir or {}).get("faturali_aylar") or []))
@@ -621,6 +661,16 @@ def plan_onizleme_yanit(mid):
             "odeme": tutar["odeme"],
             "aylar": aylar,
             "uyarilar": uyarilar,
+            "degisen_aktif_plan": (
+                {
+                    "gecerlilik_ay": ay.isoformat(),
+                    "yeni_net": _para(onceki.get("yeni_net")),
+                    "yeni_brut": _para(onceki.get("yeni_brut")),
+                }
+                if onceki
+                else None
+            ),
+            "iptal_uyari": iptal_uyari,
             "gorunur_degisiklik": bool(degisim.get("gorunur")),
             "ilk_degisen_ay": degisim.get("ilk_degisen_ay"),
             "kilitlenen_aylar": kilitlenen,
@@ -691,7 +741,8 @@ def plan_ekle_yanit(mid):
 
     def islem(calistir, oku_bir, _oku_cok):
         _ensure_sema(calistir)
-        row = plan_ekle(
+        # Aynı ayda açık plan varsa iptal + yeni yazım + resync tek transaction'da; hata olursa tamamı geri alınır.
+        row, onceki = plan_degistir(
             calistir,
             oku_bir,
             musteri_id=int(mid),
@@ -705,10 +756,10 @@ def plan_ekle_yanit(mid):
         )
         if not _resync(int(mid)):
             raise RuntimeError("yenileme")
-        return row
+        return row, onceki
 
     try:
-        row = plan_tx(islem)
+        row, onceki = plan_tx(islem)
     except PlanCakisma:
         return jsonify({"ok": False, "mesaj": "Bu geçerlilik ayında açık bir plan zaten var."}), 409
     except Exception as exc:
@@ -718,7 +769,7 @@ def plan_ekle_yanit(mid):
         if not (isinstance(exc, RuntimeError) and str(exc) == "yenileme"):
             _LOG.exception("plan kayit")
         return jsonify({"ok": False, "mesaj": "Plan kaydedilemedi."}), 500
-    return jsonify({"ok": True, "plan": _json_plan(row)})
+    return jsonify({"ok": True, "plan": _json_plan(row), "onceki_iptal": _json_plan(onceki) if onceki else None})
 
 
 def plan_iptal_yanit(mid, plan_id):

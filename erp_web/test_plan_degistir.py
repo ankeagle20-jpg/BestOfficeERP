@@ -227,12 +227,16 @@ def test_yazma():
 
         with app.test_request_context(json=_govde(onay_kilitli_aylar=True), method="POST"):
             govde, kod = _yanit(api.plan_ekle_yanit(7))
+        # Aynı ay için ikinci POST artık 409 değil: eski plan iptal edilir, yenisi yazılır (plan_degistir).
+        # Ayrıntılı senaryolar test_ayni_ay_degistir içinde.
         check(
-            "cift istek",
-            kod == 409
-            and "açık bir plan zaten var" in govde.get("mesaj", "")
-            and len(tx.bellek.satirlar) == 1
-            and tx.rollback == 1,
+            "cift istek ayni ay eskiyi iptal eder",
+            kod == 200
+            and govde.get("ok") is True
+            and len(tx.bellek.satirlar) == 2
+            and tx.bellek.satirlar[0]["iptal_at"] is not None
+            and tx.bellek.satirlar[1]["iptal_at"] is None
+            and tx.rollback == 0,
         )
 
         def patlat(sql, params=None):
@@ -644,6 +648,198 @@ def test_gecmis_ay_ve_odeme():
         os.environ.pop("PLAN_DEGISTIR_MUSTERI_IDS", None)
 
 
+def _tx_mevcutlu():
+    """Önizleme zinciri bellekteki açık planları 'mevcut' olarak döndürür (gerçek _plan_paket_yukle gibi)."""
+    tx, resync = _yeni_tx()
+    eski = api._onizleme_zinciri
+
+    def zincir(mid, kyc):
+        z, _m, k = eski(mid, kyc)
+        acik = [dict(s) for s in tx.bellek.satirlar if s["iptal_at"] is None and int(s["musteri_id"]) == int(mid)]
+        return z, acik, k
+
+    api._onizleme_zinciri = zincir
+    return tx, resync
+
+
+def test_ayni_ay_degistir():
+    from sozlesme_plan import ay_bazli_tutarlar
+    from sozlesme_plan_depo import PlanCakisma, plan_degistir, plan_ekle
+
+    app = _app()
+    try:
+        # 1) Aynı ay değiştirme: eski satır silinmez, iptal_at/iptal_eden dolar, yeni açık; tek transaction + resync
+        tx, resync = _tx_mevcutlu()
+        with app.test_request_context(json=_govde(gecerlilik_ay="2026-12-01"), method="POST"):
+            g1, k1 = _yanit(api.plan_ekle_yanit(7))
+        check("ilk plan eklenir, onceki_iptal yok", k1 == 200 and g1.get("onceki_iptal") is None and tx.commit == 1)
+        eski_id = g1["plan"]["id"]
+        resync.clear()
+        with app.test_request_context(json=_govde(gecerlilik_ay="2026-12-18", yeni_net=2500, yeni_brut=3000), method="POST"):
+            g2, k2 = _yanit(api.plan_ekle_yanit(7))
+        satirlar = tx.bellek.satirlar
+        acik = [s for s in satirlar if s["iptal_at"] is None]
+        iptal = [s for s in satirlar if s["iptal_at"] is not None]
+        check(
+            "ayni ay: eski iptal, yeni acik, tek commit + resync",
+            k2 == 200
+            and len(satirlar) == 2
+            and len(acik) == 1
+            and len(iptal) == 1
+            and iptal[0]["id"] == eski_id
+            and iptal[0]["iptal_eden"] == "test-kullanici"
+            and float(acik[0]["yeni_net"]) == 2500
+            and acik[0]["id"] == g2["plan"]["id"]
+            and g2.get("onceki_iptal", {}).get("id") == eski_id
+            and tx.commit == 2
+            and tx.rollback == 0
+            and resync == [7],
+            (k2, satirlar),
+        )
+        check(
+            "ayni ay: iptal ve yeni ayni zaman damgasi (tek islem)",
+            iptal[0]["iptal_at"] == acik[0]["created_at"],
+        )
+        # unique index mantığı: aynı ayda tek açık satır
+        check("ayni ay: tek acik satir", sum(1 for s in satirlar if s["gecerlilik_ay"] == date(2026, 12, 1) and s["iptal_at"] is None) == 1)
+
+        # 2) Farklı ay ekleme: mevcut plan iptal edilmez
+        resync.clear()
+        with app.test_request_context(json=_govde(gecerlilik_ay="2027-03-01"), method="POST"):
+            g3, k3 = _yanit(api.plan_ekle_yanit(7))
+        acik = [s for s in tx.bellek.satirlar if s["iptal_at"] is None]
+        check(
+            "farkli ay: oncekine dokunmaz",
+            k3 == 200
+            and g3.get("onceki_iptal") is None
+            and sorted(str(s["gecerlilik_ay"]) for s in acik) == ["2026-12-01", "2027-03-01"]
+            and len([s for s in tx.bellek.satirlar if s["iptal_at"] is not None]) == 1
+            and resync == [7],
+        )
+
+        # 3) Resync hatası: tam rollback, eski plan açık kalır, yeni satır yok
+        once = deepcopy(tx.bellek.satirlar)
+        rb0 = tx.rollback
+        api._resync = lambda mid: False
+        with app.test_request_context(json=_govde(gecerlilik_ay="2027-03-01", yeni_net=3000, yeni_brut=3600), method="POST"):
+            g4, k4 = _yanit(api.plan_ekle_yanit(7))
+        check(
+            "resync hatasi: rollback, eski plan acik",
+            k4 == 500
+            and tx.rollback == rb0 + 1
+            and tx.bellek.satirlar == once
+            and any(s["gecerlilik_ay"] == date(2027, 3, 1) and s["iptal_at"] is None and float(s["yeni_net"]) == 2000 for s in tx.bellek.satirlar),
+            (k4, g4),
+        )
+        api._resync = lambda mid: resync.append(int(mid)) or True
+
+        # 4) INSERT eşzamanlı unique ihlali: iptal geri alınır, 409 kalır
+        def tx_insert_patlat(fn):
+            snap = deepcopy(tx.bellek.satirlar)
+
+            def calistir(sql, params=None):
+                if str(sql).lstrip().startswith("INSERT"):
+                    raise RuntimeError("duplicate key value violates unique constraint uq_sozlesme_plan_degisiklik_acik")
+                return tx.bellek.calistir(sql, params)
+
+            try:
+                return fn(calistir, tx.bellek.oku, tx.bellek.oku)
+            except Exception:
+                tx.bellek.satirlar[:] = snap
+                tx.rollback += 1
+                raise
+
+        eski_tx = api.plan_tx
+        api.plan_tx = tx_insert_patlat
+        try:
+            with app.test_request_context(json=_govde(gecerlilik_ay="2027-03-01", yeni_net=3000, yeni_brut=3600), method="POST"):
+                g5, k5 = _yanit(api.plan_ekle_yanit(7))
+        finally:
+            api.plan_tx = eski_tx
+        check(
+            "eszamanli unique: 409, eski plan acik kaldi",
+            k5 == 409
+            and "açık bir plan zaten var" in g5.get("mesaj", "")
+            and tx.bellek.satirlar == once,
+            (k5, g5),
+        )
+
+        # 5) Depo: plan_ekle/PlanCakisma aynen; plan_degistir yarışta (iptal 0 satır) PlanCakisma verir
+        tx2, _r2 = _yeni_tx()
+        b = tx2.bellek
+        plan_ekle(b.calistir, b.oku, musteri_id=7, gecerlilik_ay=date(2026, 12, 1), yeni_net=2000, kdv_oran=20, yeni_brut=2400, olusturan="a")
+        try:
+            plan_ekle(b.calistir, b.oku, musteri_id=7, gecerlilik_ay=date(2026, 12, 1), yeni_net=2000, kdv_oran=20, yeni_brut=2400, olusturan="a")
+            cakisma = False
+        except PlanCakisma:
+            cakisma = True
+        check("plan_ekle PlanCakisma aynen", cakisma and len(b.satirlar) == 1)
+
+        def yaris_calistir(sql, params=None):
+            if str(sql).lstrip().startswith("UPDATE"):
+                return None  # başka istek satırı zaten iptal etti
+            return b.calistir(sql, params)
+
+        try:
+            plan_degistir(yaris_calistir, b.oku, musteri_id=7, gecerlilik_ay=date(2026, 12, 1), yeni_net=2100, kdv_oran=20, yeni_brut=2520, olusturan="b")
+            yaris = False
+        except PlanCakisma:
+            yaris = True
+        check("plan_degistir iptal yarisi PlanCakisma", yaris and len(b.satirlar) == 1 and b.satirlar[0]["iptal_at"] is None)
+
+        # 6) Önizleme: uyarı metni, eski plan iptal varsayımıyla fark; kayıt sonrası durumla birebir
+        tx, resync = _tx_mevcutlu()
+        with app.test_request_context(json=_govde(gecerlilik_ay="2026-12-01"), method="POST"):
+            on0, kon0 = _yanit(api.plan_onizleme_yanit(7))
+        check(
+            "onizleme: aktif plan yokken uyari yok",
+            kon0 == 200 and on0.get("degisen_aktif_plan") is None and on0.get("iptal_uyari") == ""
+            and not [u for u in on0.get("uyarilar", []) if u.get("kod") == "aktif_plan_iptal"],
+        )
+        with app.test_request_context(json=_govde(gecerlilik_ay="2026-12-01"), method="POST"):
+            _yanit(api.plan_ekle_yanit(7))
+        # K3 ay: plana göre güncellenecek (borç kaydı değil, zincir brütü)
+        api._kilit_k3_aylari = lambda mid: [{"ay": "2027-02", "fatura_tutari": 1200, "kaynak": "fatura_tarihi"}]
+        yeni_govde = _govde(gecerlilik_ay="2026-12-01", yeni_net=2500, yeni_brut=3000)
+        with app.test_request_context(json=yeni_govde, method="POST"):
+            on, kon = _yanit(api.plan_onizleme_yanit(7))
+        metin = "Bu ay için mevcut aktif plan (net 2.000) iptal edilip yenisi yazılacak."
+        check(
+            "onizleme: iptal uyari metni ve alan",
+            kon == 200
+            and on.get("iptal_uyari") == metin
+            and any(u.get("kod") == "aktif_plan_iptal" and u.get("mesaj") == metin for u in on.get("uyarilar", []))
+            and on.get("degisen_aktif_plan") == {"gecerlilik_ay": "2026-12-01", "yeni_net": 2000.0, "yeni_brut": 2400.0},
+            (on.get("iptal_uyari"), on.get("degisen_aktif_plan")),
+        )
+        a0 = on["aylar"][0]
+        check("onizleme: eski brut -> yeni brut farki", a0["ay"] == "2026-12" and a0["eski_brut"] == 2400 and a0["yeni_brut"] == 3000, a0)
+        # Kaydet: aynı gövde; sonra gerçek zincirle hesaplanan brütler önizleme "yeni_brut" ile aynı olmalı
+        with app.test_request_context(json=yeni_govde, method="POST"):
+            gk, kk = _yanit(api.plan_ekle_yanit(7))
+        z, mevcut_sonra, _k = api._onizleme_zinciri(7, {})
+        z = dict(z)
+        z["ay_sayisi"] = 120
+        sonra = {s["ay"]: s.get("brut") for s in ay_bazli_tutarlar(z, mevcut_sonra)}
+        sapma = [(a["ay"], a["yeni_brut"], sonra.get(a["ay"])) for a in on["aylar"] if sonra.get(a["ay"]) != a["yeni_brut"]]
+        check("onizleme yeni brut == kayit sonrasi zincir (sapma yok)", kk == 200 and not sapma, sapma[:3])
+        k3 = (on.get("kilit_listeleri") or {}).get("K3_guncellenecek_aylar") or []
+        check(
+            "onizleme K3: zincir brutu kayit sonrasiyla ayni, eskiden farkli",
+            len(k3) == 1 and k3[0]["ay"] == "2027-02" and k3[0]["zincir_brut"] == sonra.get("2027-02") and k3[0]["eski_zincir_brut"] != k3[0]["zincir_brut"],
+            k3,
+        )
+        # Yardımcı: aynı ayı taban dışı bırakır
+        taban = api.yeni_taban_planlar(
+            [{"gecerlilik_ay": date(2026, 12, 1), "yeni_net": 1}, {"gecerlilik_ay": date(2027, 1, 1), "yeni_net": 2}],
+            {"gecerlilik_ay": date(2026, 12, 1)},
+        )
+        check("yeni_taban_planlar ayni ayi cikarir", [p["yeni_net"] for p in taban] == [2])
+    finally:
+        os.environ.pop("PLAN_DEGISTIR_ENABLED", None)
+        os.environ.pop("PLAN_DEGISTIR_MUSTERI_IDS", None)
+
+
 def test_js():
     html = (ROOT / "templates" / "giris" / "index.html").read_text(encoding="utf-8")
     i = html.find('id="musteri_durum"')
@@ -656,7 +852,15 @@ def test_js():
         "gecmis kutusu form-grid'de tam genislikli ayri satir",
         'kutu.style.gridColumn = "1 / -1"' in kutu_blok and "insertBefore(kutu, sel.nextSibling)" in js_metin,
     )
-    check("script surumu artirildi", "js/plan_degistir.js', v=6" in html)
+    check("script surumu artirildi", "js/plan_degistir.js', v=7" in html)
+    check(
+        "kaydet kilidi, hata kutusu ve ipucu js'te",
+        "__planKaydediliyor" in js_metin
+        and "scrollIntoView" in js_metin
+        and '"Hata: "' in js_metin
+        and "planHataMetni(pack, \"Kaydedilemedi\")" in js_metin
+        and "iptal_uyari" in js_metin,
+    )
     check(
         "ay secici min = sozlesme baslangic ayi",
         "gec.min = sozBas" in js_metin and "gec.value < ayIso" not in js_metin and "sozlesme_baslangic" in js_metin,
@@ -720,6 +924,7 @@ def main():
     test_yazma()
     test_onizleme_ve_liste()
     test_gecmis_ay_ve_odeme()
+    test_ayni_ay_degistir()
     test_js()
     if FAILS:
         print("FAIL", len(FAILS))

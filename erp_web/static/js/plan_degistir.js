@@ -319,11 +319,24 @@ function planKaydetDurumu() {
     else if (kilit.length > 0 && !(onay && onay.checked)) ipucu = "Kilitli ay onayını işaretleyin";
     else if (odemeli.length > 0 && !(oOnay && oOnay.checked)) ipucu = "Ödemeli ay onayını işaretleyin";
     var engel = ipucu !== "";
-    btn.disabled = engel;
-    btn.style.opacity = engel ? "0.5" : "1";
-    btn.style.cursor = engel ? "not-allowed" : "pointer";
+    var kayit = !!window.__planKaydediliyor;
+    var hataIpucu = "";
+    if (!engel) {
+        /* Engel yoksa kısa durum: istek sürüyor / son hata / aynı aydaki aktif planın iptal uyarısı. */
+        var son = window.__planSonGovde;
+        if (kayit) ipucu = "Kaydediliyor…";
+        else if (window.__planHataIpucu) { ipucu = window.__planHataIpucu; hataIpucu = ipucu; }
+        else if (son && son.iptal_uyari) ipucu = son.iptal_uyari;
+    }
+    var kilitli = engel || kayit;
+    btn.disabled = kilitli;
+    btn.style.opacity = kilitli ? "0.5" : "1";
+    btn.style.cursor = kilitli ? "not-allowed" : "pointer";
     var ip = document.getElementById("plan_kaydet_ipucu");
-    if (ip) ip.textContent = ipucu;
+    if (ip) {
+        ip.textContent = ipucu;
+        ip.style.color = hataIpucu ? "#ff8a80" : "#ffcc80";
+    }
 }
 
 function planAyAraligiMetni(liste) {
@@ -480,6 +493,24 @@ function planHataGoster(mesaj) {
     if (!kutu) return;
     kutu.textContent = mesaj || "";
     kutu.style.display = mesaj ? "" : "none";
+    /* Alt çubukta kısa ipucu: hata kutusu kaydırılmış modalın üstünde kalabilir. */
+    var kisa = String(mesaj || "");
+    if (kisa.length > 80) kisa = kisa.slice(0, 77) + "…";
+    window.__planHataIpucu = mesaj ? ("Hata: " + kisa) : "";
+    if (mesaj && typeof kutu.scrollIntoView === "function") {
+        try { kutu.scrollIntoView({ block: "nearest" }); } catch (e) { /* eski tarayıcı */ }
+    }
+    planKaydetDurumu();
+}
+
+/* Sunucu cevabından kullanıcı mesajı: JSON mesaj varsa o; JSON değilse (HTML 500, oturum yönlendirmesi) durum koduyla. */
+function planHataMetni(pack, onek) {
+    if (pack && pack.j && pack.j.mesaj) return String(pack.j.mesaj);
+    var kod = pack ? pack.kod : "";
+    if (pack && !pack.j) {
+        return Number(kod) >= 500 ? (onek + ": sunucu hatası (" + kod + ")") : (onek + ": sunucudan geçersiz yanıt (" + kod + ")");
+    }
+    return onek + ": " + kod;
 }
 
 /* Yanıt JSON değilse de (oturum yönlendirmesi, 500 HTML sayfası) durum koduyla döner; sessiz kalmaz. */
@@ -590,15 +621,26 @@ function planKaydet() {
     if (oOnay && oOnay.checked) govde.onay_odemeli_aylar = true;
     var btn = document.getElementById("plan_kaydet");
     if (btn && btn.disabled) return;
+    if (window.__planKaydediliyor) return;
+    /* İstek boyunca Kaydet (ve Önizle) kilitli: çift tıklama ikinci istek göndermez. */
+    window.__planKaydediliyor = true;
+    var onizleBtn = document.getElementById("plan_onizle_btn");
+    if (onizleBtn) onizleBtn.disabled = true;
+    planKaydetDurumu();
     planIstekGonder("/giris/api/musteri/" + encodeURIComponent(mid) + "/plan", govde)
         .then(function (pack) {
             if (!pack.ok || !pack.j || !pack.j.ok) {
-                planHataGoster((pack.j && pack.j.mesaj) || ("Kaydedilemedi: " + pack.kod));
+                planHataGoster(planHataMetni(pack, "Kaydedilemedi"));
                 return;
             }
             planKayitSonrasi(mid);
         })
-        .catch(function () { planHataGoster("Kaydedilemedi: bağlantı hatası"); });
+        .catch(function () { planHataGoster("Kaydedilemedi: bağlantı hatası"); })
+        .then(function () {
+            window.__planKaydediliyor = false;
+            if (onizleBtn) onizleBtn.disabled = false;
+            planKaydetDurumu();
+        });
 }
 
 function planIptalGonder(mid, planId) {
@@ -639,6 +681,7 @@ if (typeof module !== "undefined" && module.exports) {
     module.exports = {
         planDurumKarari: planDurumKarari,
         planIptalEdilebilir: planIptalEdilebilir,
-        planSecenekEklensin: planSecenekEklensin
+        planSecenekEklensin: planSecenekEklensin,
+        planHataMetni: planHataMetni
     };
 }

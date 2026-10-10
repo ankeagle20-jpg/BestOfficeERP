@@ -313,6 +313,137 @@ def _yeni_senaryolar(sayfa, app, gorunen, bu_ay):
     _doldur(sayfa)
 
 
+def _kaydet_senaryolari(sayfa, app, gorunen):
+    """Aynı ay uyarısı + Kaydet kilidi + 409/500/JSON olmayan 500 hata gösterimi + başarıda akış."""
+    tx = app.test_tx
+    api._resync = lambda mid: True
+    api._bugun = lambda: date(2026, 10, 9)
+    eski_zincir, eski_tx, eski_tutar = api._onizleme_zinciri, api.plan_tx, api.plan_tutar_hesapla
+    AY = "2027-06"
+    tx.bellek.satirlar.append(
+        {
+            "id": 31, "musteri_id": 7, "gecerlilik_ay": date(2027, 6, 1), "yeni_net": 1800, "kdv_oran": 20,
+            "yeni_brut": 2160, "nakit_tutar": None, "banka_tutar": 1800, "olusturan": "test",
+            "created_at": None, "iptal_at": None, "iptal_eden": None,
+        }
+    )
+
+    def zincir(mid, kyc):
+        z, _m, k = eski_zincir(mid, kyc)
+        acik = [dict(s) for s in tx.bellek.satirlar if s["iptal_at"] is None and int(s["musteri_id"]) == int(mid)]
+        return z, acik, k
+
+    api._onizleme_zinciri = zincir
+    sayfa.set_viewport_size({"width": 1280, "height": 520})  # dar: önizleme tablosu modalı kaydırır
+
+    def hata_durumu():
+        return sayfa.evaluate(
+            """() => {
+                const k = document.getElementById('plan_hata'), m = document.querySelector('#plan_degistir_modal > div');
+                const kb = k.getBoundingClientRect(), mb = m.getBoundingClientRect();
+                const btn = document.getElementById('plan_kaydet');
+                return {gorunur: getComputedStyle(k).display !== 'none', metin: k.textContent,
+                        ipucu: document.getElementById('plan_kaydet_ipucu').textContent,
+                        ekranda: kb.top >= mb.top - 1 && kb.bottom <= mb.bottom + 1, kaydet_pasif: btn.disabled,
+                        modal_acik: document.getElementById('plan_degistir_modal').style.display !== 'none',
+                        onizle_pasif: document.getElementById('plan_onizle_btn').disabled};
+            }"""
+        )
+
+    def kaydet_tikla_kaydirilmis():
+        sayfa.evaluate("(() => { const m = document.querySelector('#plan_degistir_modal > div'); m.scrollTop = m.scrollHeight; })()")
+        sayfa.click("#plan_kaydet")
+        sayfa.wait_for_function("() => !window.__planKaydediliyor", timeout=5000)
+        sayfa.wait_for_timeout(100)
+
+    try:
+        sayfa.click("#plan_kapat")
+        _modal_ac(sayfa, 7)
+        _doldur(sayfa, ay=AY, net="2000")
+        _onizle(sayfa)
+        d = _kutu_durum(sayfa)
+        uy = sayfa.evaluate("document.getElementById('plan_uyarilar').textContent")
+        metin = "Bu ay için mevcut aktif plan (net 1.800) iptal edilip yenisi yazılacak."
+        check("ayni ay: onizlemede iptal uyarisi", metin in uy, uy)
+        check("ayni ay: kaydet yaninda ayni uyari, ek onay kutusu yok", d["ipucu"] == metin and d["kaydet_pasif"] is False and d["kilit_kutu"] is False and d["odemeli_kutu"] is False, d)
+        farki = sayfa.evaluate("document.querySelector('#plan_onizleme table tr:nth-child(2)').textContent")
+        check("ayni ay: tabloda eski brut 2160 -> yeni brut 2400", "2160" in farki and "2400" in farki, farki)
+
+        # ---- 409 ----
+        from sozlesme_plan_depo import PlanCakisma
+
+        def cakisma(fn):
+            raise PlanCakisma("test")
+
+        api.plan_tx = cakisma
+        kaydet_tikla_kaydirilmis()
+        h = hata_durumu()
+        check(
+            "409: mesaj hata kutusunda, ekranda, alt cubukta Hata: ipucu, modal acik, kaydet geri acildi",
+            h["gorunur"] and "açık bir plan zaten var" in h["metin"] and h["ekranda"] and h["ipucu"].startswith("Hata: ")
+            and h["modal_acik"] and h["kaydet_pasif"] is False and h["onizle_pasif"] is False,
+            h,
+        )
+
+        # ---- 500 (JSON mesajlı) ----
+        def patla(fn):
+            raise RuntimeError("boom")
+
+        api.plan_tx = patla
+        app.config["PROPAGATE_EXCEPTIONS"] = False
+        kaydet_tikla_kaydirilmis()
+        h = hata_durumu()
+        check(
+            "500: JSON mesaji gosterilir",
+            h["gorunur"] and h["metin"] == "Plan kaydedilemedi." and h["ekranda"] and h["ipucu"] == "Hata: Plan kaydedilemedi."
+            and h["kaydet_pasif"] is False,
+            h,
+        )
+
+        # ---- 500 JSON olmayan (HTML hata sayfası) ----
+        api.plan_tx = eski_tx
+        api.plan_tutar_hesapla = lambda d: (_ for _ in ()).throw(RuntimeError("html-500"))
+        kaydet_tikla_kaydirilmis()
+        h = hata_durumu()
+        check(
+            "500 HTML: kod ile mesaj, ipucu",
+            h["gorunur"] and "500" in h["metin"] and h["ekranda"] and h["ipucu"].startswith("Hata: ") and h["kaydet_pasif"] is False,
+            h,
+        )
+        api.plan_tutar_hesapla = eski_tutar
+
+        # ---- Kaydet istek boyunca kilitli, çift tıklama tek istek ----
+        n0 = len(gorunen)
+        kilit = sayfa.evaluate(
+            """() => {
+                const b = document.getElementById('plan_kaydet'), o = document.getElementById('plan_onizle_btn');
+                b.click(); const k1 = b.disabled; b.click();
+                return {kaydet_pasif: k1, onizle_pasif: o.disabled, ipucu: document.getElementById('plan_kaydet_ipucu').textContent};
+            }"""
+        )
+        sayfa.wait_for_function("() => { const m = document.getElementById('plan_degistir_modal'); return !m || m.style.display === 'none'; }", timeout=5000)
+        post = [g for g in gorunen[n0:] if g[0] == "POST" and g[1] == "/giris/api/musteri/7/plan"]
+        check("kaydet istek boyunca kilitli, cift tiklama tek istek", kilit["kaydet_pasif"] is True and kilit["onizle_pasif"] is True and kilit["ipucu"] == "Kaydediliyor…" and len(post) == 1, (kilit, len(post)))
+
+        # ---- Başarı: eski iptal, yeni açık, planKayitSonrasi akışı (modal kapandı) ----
+        eski = [s for s in tx.bellek.satirlar if s["id"] == 31][0]
+        yeni = [s for s in tx.bellek.satirlar if s["gecerlilik_ay"] == date(2027, 6, 1) and s["iptal_at"] is None]
+        check(
+            "basari: eski plan iptal, yeni acik, modal kapandi",
+            eski["iptal_at"] is not None and eski["iptal_eden"] == "test-kullanici" and len(yeni) == 1 and float(yeni[0]["yeni_net"]) == 2000
+            and sayfa.evaluate("document.getElementById('plan_degistir_modal').style.display") == "none",
+        )
+        check("basaride kaydediliyor bayragi temiz, kaydet yeniden acilabilir", sayfa.evaluate("window.__planKaydediliyor") is False)
+    finally:
+        api._onizleme_zinciri, api.plan_tx, api.plan_tutar_hesapla = eski_zincir, eski_tx, eski_tutar
+        sayfa.set_viewport_size({"width": 1280, "height": 900})
+        api._bugun = lambda: date(2024, 10, 9)
+        sayfa.evaluate("selectedId = 7")
+        # sonraki senaryolar için modal açık ve temiz
+        _modal_ac(sayfa, 7)
+        _doldur(sayfa)
+
+
 def main():
     app = _flask_kur()
     gorunen = []
@@ -459,6 +590,7 @@ def main():
             )
 
             _yeni_senaryolar(sayfa, app, gorunen, bu_ay)
+            _kaydet_senaryolari(sayfa, app, gorunen)
 
             # müşteri seçili değil
             sayfa.evaluate("selectedId = null")
