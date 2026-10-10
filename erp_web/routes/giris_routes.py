@@ -1744,25 +1744,40 @@ def _aylik_grid_single_month_kdv_from_core(core, ref_y, ref_m) -> float:
 
 _PLAN_KUTU = contextvars.ContextVar("sozlesme_plan_kutu", default=None)
 _PLAN_BOS = {"planlar": [], "faturali": [], "belge": {}}
+_PLAN_KUTU_OMUR_SN = 2.0
 
 
 def _plan_kutu():
-    """İstek (ve aynı isteğin iş parçacığı) içinde tablo varlığı + plan haritası."""
+    """İstek (ve aynı isteğin iş parçacığı) içinde tablo varlığı + plan haritası.
+
+    Kutu İSTEK ÖMÜRLÜDÜR: uygulama bağlamı varsa yalnız ``g`` kullanılır (ContextVar
+    bir önceki isteğin kutusunu gthread iş parçacığında bir sonraki isteğe taşırdı →
+    plan kaydedildikten sonra bayat «plansız» harita okunurdu). Bağlam yoksa
+    (arka plan / betik) ContextVar kutusu en çok ``_PLAN_KUTU_OMUR_SN`` saniye yaşar.
+    """
     box = None
+    app_ctx = False
     try:
-        if has_app_context():
+        app_ctx = bool(has_app_context())
+    except Exception:
+        app_ctx = False
+    if app_ctx:
+        try:
             box = getattr(g, "_sozlesme_plan_kutu", None)
-    except Exception:
-        box = None
-    if box is None:
+        except Exception:
+            box = None
+    else:
         box = _PLAN_KUTU.get()
+        if box is not None and (time.monotonic() - float(box.get("_ts") or 0)) > _PLAN_KUTU_OMUR_SN:
+            box = None
     if box is None:
-        box = {"tablo": None, "harita": {}}
-    try:
-        if has_app_context():
+        box = {"tablo": None, "harita": {}, "_ts": time.monotonic()}
+    if app_ctx:
+        try:
             g._sozlesme_plan_kutu = box
-    except Exception:
-        pass
+        except Exception:
+            pass
+    # Bağlamsız alt iş parçacıkları (copy_context) aynı kutuyu görebilsin.
     _PLAN_KUTU.set(box)
     return box
 
@@ -2659,6 +2674,48 @@ def _reel_manual_merge_db_and_client(musteri_id: int, client: dict | None) -> di
 
 
 def _aylik_grid_apply_reel_donem_overlay_to_payload(
+    musteri_id: int,
+    kyc: dict,
+    tufe_map: dict,
+    payload: dict,
+    manual_reel_by_year=None,
+    *,
+    plan_katmani: bool = True,
+) -> None:
+    """Reel örtmesi + (planlı kartta) plan katmanı — tek çıkış noktası.
+
+    Reel örtmesi planlı ayların brütünü reel/TÜFE değeriyle EZERDİ; önbellek okunurken
+    (DB/bellek isabeti, ekstre) çağrılan her yol planı kaybediyordu. Plan katmanı reelden
+    SONRA uygulanır (kayıt/yeniden inşa sırasıyla aynı). Plansız kartta no-op.
+    plan_katmani=False: çağıran plan katmanını kendisi uygular (yeniden inşa yolu).
+    """
+    _aylik_grid_apply_reel_donem_overlay_ham(
+        musteri_id, kyc, tufe_map, payload, manual_reel_by_year=manual_reel_by_year
+    )
+    if not plan_katmani or not payload or not isinstance(payload.get("aylar"), list) or not kyc:
+        return
+    try:
+        paket = _plan_paket_yukle([int(musteri_id)]).get(int(musteri_id)) or _PLAN_BOS
+        planlar = paket.get("planlar") or []
+        if not planlar:
+            return
+        manual = manual_reel_by_year
+        if manual is None:
+            manual = _musteri_reel_donem_manual_dict_from_db(int(musteri_id))
+        _plan_katmani_payloada(
+            payload,
+            kyc,
+            tufe_map,
+            planlar=planlar,
+            reel=manual,
+            faturali_aylar=paket.get("faturali"),
+            fatura_belge=paket.get("belge"),
+        )
+    except Exception:
+        logging.getLogger(__name__).exception("plan katmani (reel sonrası)")
+
+
+def _aylik_grid_apply_reel_donem_overlay_ham(
     musteri_id: int, kyc: dict, tufe_map: dict, payload: dict, manual_reel_by_year=None
 ) -> None:
     """musteri_reel_donem_tutar (DB) → 12 ay sabit KDV dahil (flat).
@@ -2907,7 +2964,8 @@ def _build_aylik_grid_cache_payload(musteri_id, tufe_map=None, kyc_row=None, man
             manual_reel_by_year = _musteri_reel_donem_manual_dict_from_db(int(musteri_id))
         if isinstance(manual_reel_by_year, dict) and manual_reel_by_year:
             _aylik_grid_apply_reel_donem_overlay_to_payload(
-                int(musteri_id), kyc, tm, payload, manual_reel_by_year=manual_reel_by_year
+                int(musteri_id), kyc, tm, payload, manual_reel_by_year=manual_reel_by_year,
+                plan_katmani=False,
             )
         if planlar:
             _plan_katmani_payloada(
@@ -11655,7 +11713,7 @@ def _cari_ekstre_hareketler(
             _ekstre_grid_iso_aylar_doldur((live_pl or {}).get("aylar"), merge=False)
         else:
             live_pl = _aylik_grid_compute(
-                int(musteri_id), kyc, tufe_map, ekstre_tahsil_map, plan_katmani=False
+                int(musteri_id), kyc, tufe_map, ekstre_tahsil_map
             )
             if isinstance(live_pl, dict):
                 _ekstre_payload_odenen_zenginlestir(
@@ -16091,6 +16149,46 @@ def api_tufe_borclandir_nakit_tahsil_toplu():
     })
 
 
+def _panel_by_iso_plan_duzelt(musteri_id, by_iso):
+    """Planlı kartta istemcinin (bayat olabilir) aylık/brüt değerini sunucudaki plan katmanlı
+    brütle değiştirir; kalan = brüt - tahsil. Plansız kart / plan öncesi aylar / okuma hatası:
+    girdi AYNEN döner."""
+    try:
+        mid = int(musteri_id)
+        if not isinstance(by_iso, dict) or not by_iso:
+            return by_iso
+        planlar = (_plan_paket_yukle([mid]).get(mid) or _PLAN_BOS).get("planlar") or []
+        if not planlar:
+            return by_iso
+        ilk = min(str(p.get("gecerlilik_ay"))[:7] for p in planlar)
+        payload = _read_aylik_grid_cache_payload(mid)
+        if not isinstance(payload, dict) or not payload.get("plan_var"):
+            return by_iso
+        brut_by = {}
+        for a in payload.get("aylar") or []:
+            try:
+                ym = f"{int(a.get('yil')):04d}-{int(a.get('ay')):02d}"
+                v = round(float(a.get("tutar_kdv_dahil") or 0), 2)
+            except (TypeError, ValueError):
+                continue
+            if ym >= ilk and math.isfinite(v) and v > 0.05:
+                brut_by[ym] = v
+        out = dict(by_iso)
+        for iso, prow in by_iso.items():
+            v = brut_by.get(str(iso)[:7])
+            if v is None or not isinstance(prow, dict):
+                continue
+            try:
+                tah = round(float(prow.get("tahsil") or 0), 2)
+            except (TypeError, ValueError):
+                tah = 0.0
+            out[iso] = {**prow, "aylik": v, "kalan": round(max(v - tah, 0), 2)}
+        return out
+    except Exception:
+        logging.getLogger(__name__).exception("panel plan düzeltme")
+        return by_iso
+
+
 @bp.route('/api/tahsilat-panel-detay', methods=['GET', 'POST'])
 @giris_gerekli
 def api_tahsilat_panel_detay():
@@ -16137,6 +16235,7 @@ def api_tahsilat_panel_detay():
                 by_iso_kayit = duzeltilen_by_iso
         except Exception:
             pass
+        by_iso_kayit = _panel_by_iso_plan_duzelt(mid, by_iso_kayit)
         _save_musteri_panel_by_iso(mid, by_iso_kayit)
         payload = _read_aylik_grid_cache_payload(mid)
         if payload is None:

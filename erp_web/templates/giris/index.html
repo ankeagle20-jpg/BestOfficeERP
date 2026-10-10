@@ -18759,7 +18759,26 @@ function girisPlanYilToplam(yy) {
     if (!n) return null;
     return Math.round(sum * 100) / 100;
 }
+function girisPlanYilGecerliAylik(yy) {
+    /* PlanlÄ± kartta yÄ±l satÄ±rÄ±nÄ±n Â«AylÄ±kÂ» deÄŸeri: sunucu Ã¶nbelleÄŸindeki (plan katmanlÄ±) o yÄ±lÄ±n
+       SON planlÄ± ayÄ±nÄ±n brÃ¼tÃ¼. Plan yoksa / Ã¶nbellek henÃ¼z yoksa null â†’ eski kart+TÃœFE hesabÄ±. */
+    var sco = window.__sozlesmelerAylikSonCacheObj;
+    if (!sco || !sco.plan_var || !sco.aylar) return null;
+    if (typeof girisTahsilatYilAyKeysFiltered !== 'function' || typeof girisTahsilatAyKeyToYilAy !== 'function') return null;
+    var keys = girisTahsilatYilAyKeysFiltered(yy) || [];
+    var enAy = -1, enBrut = null;
+    for (var i = 0; i < keys.length; i++) {
+        var ya = girisTahsilatAyKeyToYilAy(keys[i]);
+        if (!ya) continue;
+        var b = girisPlanGridHucreBrut(ya.yil, ya.ay);
+        if (b == null) continue;
+        var an = parseInt(ya.ay, 10);
+        if (an > enAy) { enAy = an; enBrut = b; }
+    }
+    return enBrut;
+}
 function girisTahsilatYilAylikTek(yy) {
+    try { var planAylik = girisPlanYilGecerliAylik(yy); if (planAylik != null && planAylik > 0) return planAylik; } catch (_ePlA) {}
     try { if (typeof girisAylikSatirYilKayitYukle === 'function') girisAylikSatirYilKayitYukle(); } catch (_eTb0) {}
     var h = girisAylikSatirYilHesapla(yy);
     var aylikTop = (h.toplam > 0) ? h.toplam : ((h.kdv_dahil > 0) ? h.kdv_dahil : 0);
