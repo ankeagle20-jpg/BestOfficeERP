@@ -5647,6 +5647,14 @@ function sozlesmelerAylikGridVeriSonBoyama(midNav, selToken, settled) {
     var tRes = val(1);
     var gRes = val(2);
     var rRes = val(3);
+    try {
+        /* plan_var: form/reel yazicilari calismadan ONCE plan katmanli cache hazir olsun
+           (girisPlanGridHucreBrut); cache formla uyumsuz sayilip atilsa bile plan bilgisi kalir. */
+        var gcPlanOn = (gRes && gRes.ok && gRes.cache) ? gRes.cache : null;
+        if (gcPlanOn && gcPlanOn.plan_var && Array.isArray(gcPlanOn.aylar) && gcPlanOn.aylar.length) {
+            window.__sozlesmelerAylikSonCacheObj = gcPlanOn;
+        }
+    } catch (_ePlOn) {}
     if (mRes && mRes.ok && mRes.musteri) {
         girisSonMusteriDetayHafifYukleme = false;
         if (typeof girisMusteriKiraFormuUygula === 'function') girisMusteriKiraFormuUygula(mRes.musteri);
@@ -5746,6 +5754,11 @@ function sozlesmeAylikGridParalelYukle(mid) {
             if (mid) delete window.__musteriReelDonemDetayTaslakByMid[String(mid)];
         } catch (eDr) {}
         var cj = triple[1];
+        try {
+            if (cj && cj.ok && cj.cache && cj.cache.plan_var && Array.isArray(cj.cache.aylar) && cj.cache.aylar.length) {
+                window.__sozlesmelerAylikSonCacheObj = cj.cache; /* plan_var: uyumsuz sayilsa da plan bilgisi kalsin */
+            }
+        } catch (_ePlPar) {}
         if (cj && cj.ok && cj.cache && Array.isArray(cj.cache.aylar) && cj.cache.aylar.length) {
             if (window.__musteriReelDonemTutarlari && Object.keys(window.__musteriReelDonemTutarlari).length
                 && typeof sozlesmelerAylikCacheReelDbEsasla === 'function') {
@@ -6936,10 +6949,17 @@ function _sozlesmelerReelYilSecimiGridAnlikUygula(yilNum, kdvDahilTutar) {
             var card = _sozlesmeAyKartBul(grid, keys[i]);
             if (!card) continue;
             if (card.getAttribute('data-panel-esas') === '1') continue;
-            card.setAttribute('data-tutar-kdv', String(t));
-            card.setAttribute('data-secilebilir', t > 0 ? '1' : '0');
+            var tPaint = t;
+            try {
+                /* plan_var: reel yil tutari plan aylarini ezmesin (plan brutu kullan) */
+                var planBrutPg = (typeof girisPlanGridHucreBrut === 'function')
+                    ? girisPlanGridHucreBrut(card.getAttribute('data-yil'), card.getAttribute('data-ay')) : null;
+                if (planBrutPg != null) tPaint = planBrutPg;
+            } catch (_ePlPg) {}
+            card.setAttribute('data-tutar-kdv', String(tPaint));
+            card.setAttribute('data-secilebilir', tPaint > 0 ? '1' : '0');
             var deg = card.querySelector('.aylik-deger');
-            if (deg) deg.textContent = t.toFixed(2);
+            if (deg) deg.textContent = tPaint.toFixed(2);
         }
     }
     paintGrid(document.getElementById('sozlesmeler-reel-aylik-grid'));
@@ -7125,6 +7145,12 @@ function sozlesmelerAyKartTutarUygula(card, override) {
     var acikAylikBorc = card.getAttribute('data-acik-aylik-borc') === '1';
     var tut = parseFloat(override);
     if (isNaN(tut) || tut < 0) return;
+    try {
+        /* plan_var: reel override plan aylarini ezmesin (plan brutu kullan) */
+        var planBrutAk = (!isNaN(yAk) && !isNaN(aAk) && typeof girisPlanGridHucreBrut === 'function')
+            ? girisPlanGridHucreBrut(yAk, aAk) : null;
+        if (planBrutAk != null) tut = planBrutAk;
+    } catch (_ePlAk) {}
     tut = Math.round(tut * 100) / 100;
     var odenen = parseFloat(card.getAttribute('data-odenen-kdv') || '0');
     if (isNaN(odenen) || odenen < 0) odenen = 0;
