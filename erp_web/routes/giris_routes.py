@@ -13255,6 +13255,33 @@ def _next_makbuz_no_aylik():
     return get_next_makbuz_no()
 
 
+def _borc_plan_brut_haritasi(musteri_id):
+    """Planli kart: {'YYYY-MM': plan katmanli brut} (yalniz plan gecerlilik ayindan itibaren).
+    Plansiz kart, plan oncesi aylar, okuma hatasi veya cache yok: bos dict (istemci tutari aynen kalir)."""
+    try:
+        mid = int(musteri_id)
+        planlar = (_plan_paket_yukle([mid]).get(mid) or _PLAN_BOS).get("planlar") or []
+        if not planlar:
+            return {}
+        ilk = min(str(p.get("gecerlilik_ay"))[:7] for p in planlar)
+        payload = _read_aylik_grid_cache_payload(mid)
+        if not isinstance(payload, dict) or not payload.get("plan_var"):
+            return {}
+        out = {}
+        for a in payload.get("aylar") or []:
+            try:
+                ym = f"{int(a.get('yil')):04d}-{int(a.get('ay')):02d}"
+                v = round(float(a.get("tutar_kdv_dahil") or 0), 2)
+            except (TypeError, ValueError):
+                continue
+            if ym >= ilk and math.isfinite(v) and v > 0.05:
+                out[ym] = v
+        return out
+    except Exception:
+        logging.getLogger(__name__).exception("borclandir plan brut")
+        return {}
+
+
 @bp.route('/api/aylik-tutarlardan-borclandir', methods=['POST'])
 @giris_gerekli
 def api_aylik_tutarlardan_borclandir():
@@ -13296,6 +13323,18 @@ def api_aylik_tutarlardan_borclandir():
     atlanan = []
     tahsil_silinen = []
     tahsil_silinen_aylar = set()
+    # Planli kartta istemciden gelen (bayat olabilir) tutar yerine sunucudaki plan bruti kullanilir.
+    plan_brut_by = _borc_plan_brut_haritasi(musteri_id)
+    if plan_brut_by:
+        # satirlar hem fatura yazimina hem sync_musteri_panel_borclu_from_satirlar'a gider: ikisi de plan brutunu gorur.
+        _yeni_satirlar = []
+        for raw in satirlar:
+            try:
+                plan_v = plan_brut_by.get(f"{int(raw.get('yil')):04d}-{int(raw.get('ay')):02d}")
+            except (TypeError, ValueError, AttributeError):
+                plan_v = None
+            _yeni_satirlar.append(dict(raw, tutar_kdv_dahil=plan_v) if plan_v is not None else raw)
+        satirlar = _yeni_satirlar
 
     for raw in satirlar:
         if not isinstance(raw, dict):

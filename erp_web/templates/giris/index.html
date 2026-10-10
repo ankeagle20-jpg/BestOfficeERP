@@ -6641,6 +6641,7 @@ function sozlesmelerAylikCacheReelDbEsasla(cacheObj) {
     var basEl = document.getElementById('sozlesme_baslangic');
     var basStr = (basEl && basEl.value ? String(basEl.value).trim() : '') || String(cacheObj.baslangic || '').trim();
     if (!basStr) return cacheObj;
+    if (cacheObj.plan_var) return cacheObj; /* plan_var: sunucu reel+plan birlesik; istemci reel haritasi plani ezmez */
     var tol = Number(SOZLESME_TAM_ODENDI_TOLERANS) || 0.05;
     cacheObj.aylar.forEach(function (a) {
         if (!a) return;
@@ -6776,6 +6777,7 @@ function sozlesmelerAylikCacheBrutFlatDisiUygula() {
     var tol = Number(SOZLESME_TAM_ODENDI_TOLERANS) || 0.05;
     function inFlat(ak) {
         if (!ak) return false;
+        if (sco.plan_var) return false; /* planli kart: cache brut (reel+plan birlesik) tum aylarda esas */
         var t0 = parseFloat(flat[ak]);
         if (isFinite(t0) && t0 > 0) return true;
         try {
@@ -22192,6 +22194,10 @@ function _sozlesmelerAylikTekGridKartTutarlariniYenile(grid, basStr, hucreMap, r
             var projYil = sozlesmelerAylikKartDonemYili(basStr, yil, ay);
             tut = parseFloat(hucreMap[projYil]);
         }
+        try {
+            var planBrutTek = (typeof girisPlanGridHucreBrut === 'function') ? girisPlanGridHucreBrut(yil, ay) : null;
+            if (planBrutTek != null) tut = planBrutTek; /* plan_var: reel/TUFE haritasi degil plan katmanli deger */
+        } catch (_ePlTek) {}
         if (isNaN(tut) || tut <= 0) continue;
         tut = Math.round(tut * 100) / 100;
         var odendi = card.classList.contains('sozlesmeler-ay-kart-odendi');
@@ -23046,6 +23052,26 @@ function girisAylikSatirYilAyDetayAl(donemYil, ayKey) {
 function girisAylikSatirYilAyId(donemYil, ayKey) {
     return 'aylik_yil_ay_' + String(donemYil) + '_' + String(ayKey).replace(/-/g, '_');
 }
+/** Planli kart: ayin plan katmanli brutu varsa yil varsayilanini o aya gore uyarlar; yoksa vars AYNEN. */
+function girisAylikSatirYilAyPlanVars(donemYil, ak, vars) {
+    try {
+        if (typeof girisPlanGridHucreBrut !== 'function' || typeof girisTahsilatAyKeyToYilAy !== 'function') return vars;
+        var ya = girisTahsilatAyKeyToYilAy(ak);
+        if (!ya) return vars;
+        var pb = girisPlanGridHucreBrut(ya.yil, ya.ay);
+        if (pb == null || !(pb > 0)) return vars;
+        var oran = (vars.toplam > 0) ? (pb / vars.toplam) : 0;
+        var nk = Math.round(Math.min(pb, (vars.nakit || 0) * oran) * 100) / 100;
+        return Object.assign({}, vars, {
+            toplam: pb,
+            reel: pb,
+            nakit: nk,
+            kdv_dahil: Math.round(Math.max(0, pb - nk) * 100) / 100,
+            banka: Math.round(Math.max(0, pb - nk) * 100) / 100,
+            __reel_aktif: true
+        });
+    } catch (_ePlV) { return vars; }
+}
 function girisAylikSatirYilAyYildanSenkron(donemYil, ayKeys) {
     var vars = girisAylikSatirYilAyVarsayilan(donemYil);
     var map = girisAylikSatirYilAyDetayMap(donemYil);
@@ -23053,10 +23079,11 @@ function girisAylikSatirYilAyYildanSenkron(donemYil, ayKeys) {
         var ak = ayKeys[i];
         var onceki = map[ak];
         if (onceki && onceki.__saved) continue;
-        map[ak] = Object.assign({}, vars, {
+        var vk = girisAylikSatirYilAyPlanVars(donemYil, ak, vars);
+        map[ak] = Object.assign({}, vk, {
             __saved: false,
             __locked: (onceki && onceki.__locked === false) ? false : true,
-            __reel_aktif: vars.__reel_aktif
+            __reel_aktif: vk.__reel_aktif
         });
     }
 }
@@ -23090,10 +23117,11 @@ function girisAylikSatirYilAyPanelHtml(donemYil, ayKeys) {
     for (var i = 0; i < ayKeys.length; i++) {
         var ak = ayKeys[i];
         var d = mapAy[ak];
+        var vk = girisAylikSatirYilAyPlanVars(donemYil, ak, vars);
         if (!d || !d.__saved) {
-            d = Object.assign({}, vars, (d && d.__locked === false) ? { __locked: false } : {}, { __saved: false, __locked: (d && d.__locked === false) ? false : true });
+            d = Object.assign({}, vk, (d && d.__locked === false) ? { __locked: false } : {}, { __saved: false, __locked: (d && d.__locked === false) ? false : true });
         }
-        if ((d.reel > 0 || vars.reel > 0) && !d.__saved) d.__reel_aktif = true;
+        if ((d.reel > 0 || vk.reel > 0) && !d.__saved) d.__reel_aktif = true;
         d = girisAylikSatirYilAyHesapla(donemYil, d);
         mapAy[ak] = d;
         var reelAktif = !!d.__reel_aktif;
