@@ -443,40 +443,66 @@ def ay_bazli_tutarlar(zincir: dict, planlar: list | None = None) -> list[dict]:
             parca = _plan_parca(yurur, yurur["yeni_net"], kart, True)
             out.append(_satir(ay, bas, parca, "plan"))
             continue
-        prev_brut = _plan_parca(yurur, yurur["yeni_net"], kart, True)["brut"]
-        kilit = False
+        # Aktif plan varken plan blogundan SONRAKI reel donem yillari zinciri kesmez: her donem
+        # degisiminde TUFE plan netine uygulanir. Kilit ay bazindadir (yukaridaki faturali ay dali:
+        # K1/K2/K0 kilitli aylar kendi satirinda kalir); kilitsiz (K3) aylar her zaman plan zincirinden gelir.
+        # Plan ONCESI reel yillar ve plansiz kart bu dala girmez (yurur None -> yukarida doner).
         net = float(yurur["yeni_net"])
-        kaynak = "plan_tufe"
         for w in range(p_blok + 1, blok + 1):
             donem_yil = bas.year + w
             oran = tufe_oran_bloga_giris(tufe, donem_yil, artis.month, bas.year)
-            yil_reel = reel_yillar.get(donem_yil)
-            reel_brut = _reel_brut_deger(yil_reel) if yil_reel is not None else None
-            if reel_brut is not None and reel_brut > 0 and _reel_acik_kilit(donem_yil, bas.year, reel_brut, prev_brut):
-                prev_brut = reel_brut
-                kilit = True
-                kaynak = "reel"
-                continue
-            if kilit:
-                if oran > 0:
-                    nxt = round(prev_brut * (1.0 + oran / 100.0), 2)
-                    if math.isfinite(nxt) and nxt > 0:
-                        prev_brut = nxt
-                kaynak = "reel_tufe"
-                continue
             if oran > 0:
                 net = round(net * (1.0 + oran / 100.0), 2)
-            prev_brut = _plan_parca(yurur, net, kart, False)["brut"]
-            kaynak = "plan_tufe"
-        if kaynak == "reel":
-            parca = _reel_parca(reel_yillar[bas.year + blok], kdv_oran, kira_nakit and r_kart is None, r_kart)
-            parca["brut"] = round(prev_brut, 2)
-        elif kaynak == "reel_tufe":
-            parca = _reel_parca(prev_brut, kdv_oran, kira_nakit and r_kart is None, r_kart)
-        else:
-            parca = _plan_parca(yurur, net, kart, False)
+        parca = _plan_parca(yurur, net, kart, False)
+        kaynak = "plan_tufe"
         out.append(_satir(ay, bas, parca, kaynak))
     return AyListesi(out, uyarilar)
+
+
+def yok_sayilan_reel_yillari(zincir: dict, planlar: list | None) -> list[dict]:
+    """Aktif plan blogundan sonraki reel donem yillarindan plan zincirinin yok saydiklari.
+
+    Donen: [{"yil", "reel_brut", "plan_brut", "ay"}]; yalniz reel brut ile plan zinciri farkliysa.
+    Plansizda veya reel yoksa bos. Yazmaz.
+    """
+    if not planlar or not isinstance(zincir, dict):
+        return []
+    reel_ham = zincir.get("reel") if isinstance(zincir.get("reel"), dict) else {}
+    bas_gun = _tarih(zincir.get("sozlesme_tarihi"))
+    if bas_gun is None or not reel_ham:
+        return []
+    bas = _ay_basi(bas_gun)
+    reeller = {}
+    for k, v in reel_ham.items():
+        try:
+            yil = int(k)
+        except (TypeError, ValueError):
+            continue
+        brut = _reel_brut_deger(v)
+        if yil > bas.year and brut > 0:
+            reeller[yil] = brut
+    if not reeller:
+        return []
+    z = dict(zincir)
+    gerek = (max(reeller) - bas.year + 1) * 12
+    try:
+        z["ay_sayisi"] = max(1, min(240, max(int(z.get("ay_sayisi") or 0), gerek)))
+        satirlar = ay_bazli_tutarlar(z, planlar)
+    except (ValueError, TypeError):
+        return []
+    by_ay = {s["ay"]: s for s in satirlar}
+    out = []
+    for yil in sorted(reeller):
+        w = yil - bas.year
+        for i in range(12):
+            satir = by_ay.get(_anahtar(_ay_ekle(bas, 12 * w + i)))
+            if satir is None or satir.get("kaynak") != "plan_tufe":
+                continue
+            plan_brut = float(satir["brut"])
+            if abs(plan_brut - reeller[yil]) > 0.02:
+                out.append({"yil": yil, "reel_brut": round(reeller[yil], 2), "plan_brut": round(plan_brut, 2), "ay": satir["ay"]})
+            break
+    return out
 
 
 def _plan_ay_alti(ay_anahtar: str, planlar) -> bool:

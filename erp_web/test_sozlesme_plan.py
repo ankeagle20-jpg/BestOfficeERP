@@ -79,12 +79,110 @@ def test_plan_ayni_pencerede_reeli_ezer():
 
 
 def test_sonraki_yil_reel_kazanir():
+    """ESKI KURAL (planli kartta sonraki reel yil kazanir) KALKTI: planli kartta reel yil plan zincirini kesmez.
+    Reel yilin kazanmaya devam ettigi yer PLANSIZ karttir (test_plansiz_kartta_reel_kazanmaya_devam_eder)."""
     plan = [{"gecerlilik_ay": "2024-11-01", "yeni_net": 2000, "kdv_oran": 20, "yeni_brut": 2400}]
     satirlar = ay_bazli_tutarlar(_zincir(reel={2024: 1500, 2025: 1800}), plan)
     check("plan penceresi reel degil", _ay(satirlar, "2024-12")["kaynak"] == "plan")
     bas = _ay(satirlar, "2025-08")
     son = _ay(satirlar, "2026-07")
-    check("sonraki yil tum pencere reel", bas["brut"] == 1800 and bas["kaynak"] == "reel" and son["brut"] == 1800 and son["kaynak"] == "reel")
+    check(
+        "sonraki yil reel plani kesmez (tum pencere plan_tufe)",
+        bas["brut"] == 2520 and bas["kaynak"] == "plan_tufe" and son["brut"] == 2520 and son["kaynak"] == "plan_tufe",
+    )
+
+
+def test_planli_kartta_reel_yil_kesmez():
+    """Aktif plan varken plan blogundan SONRAKI reel yillar zinciri kesmez; plan ONCESI reel etkilenmez."""
+    plan = [{"gecerlilik_ay": "2025-02-01", "yeni_net": 1000, "kdv_oran": 20, "yeni_brut": 1200}]
+    tufe = {2024: {8: 10}, 2025: {8: 10}, 2026: {8: 10}, 2027: {8: 10}}
+    reel = {2023: 300, 2024: 1500, 2025: 1800, 2026: 2500, 2027: 9999}
+    satirlar = ay_bazli_tutarlar(_zincir(ay_sayisi=60, tufe=tufe, reel=reel), plan)
+    check("plan oncesi reel yili aynen (2024)", _ay(satirlar, "2024-08")["brut"] == 1500 and _ay(satirlar, "2025-01")["kaynak"] == "reel")
+    check("plan blogu (2025-02..2025-07) plan", _ay(satirlar, "2025-02")["brut"] == 1200 and _ay(satirlar, "2025-07")["kaynak"] == "plan")
+    # plan blogu 2024-08 penceresinde (blok 1); sonraki bloklar plan netine TUFE
+    beklenen = {"2025-08": 1320, "2026-08": 1452, "2027-08": 1597.2}
+    # 2025-08 yeni blok (blok 2): net 1000*1.10 = 1100, brut 1320; 2026-08: 1210/1452; 2027-08: 1331/1597.2
+    ok = True
+    for ay, brut in beklenen.items():
+        s = _ay(satirlar, ay)
+        ok = ok and abs(s["brut"] - brut) < 0.011 and s["kaynak"] == "plan_tufe"
+    check("sonraki reel yillari (1800/2500/9999) plan zincirini kesmez", ok)
+    check("blok icinde ayni deger", _ay(satirlar, "2025-08")["brut"] == _ay(satirlar, "2026-07")["brut"])
+    # kilit ay bazinda: sonraki blokta kilitli ay kendi satirinda kalir, K3 komsulari plan zincirinde
+    kilitli = ay_bazli_tutarlar(_zincir(ay_sayisi=60, tufe=tufe, reel=reel, faturali_aylar=["2026-09"]), plan)
+    k = _ay(kilitli, "2026-09")
+    check("kilitli ay fatura kaynagi (plan zincirine donmez)", k["kaynak"] == "fatura")
+    check(
+        "kilitsiz komsu aylar plan zincirinde",
+        _ay(kilitli, "2026-08")["kaynak"] == "plan_tufe" and _ay(kilitli, "2026-10")["kaynak"] == "plan_tufe"
+        and abs(_ay(kilitli, "2026-10")["brut"] - 1452) < 0.011,
+    )
+
+
+def test_plansiz_kartta_reel_kazanmaya_devam_eder():
+    """Aktif plan yoksa kesme dongusune girilmez: reel yili kazanir, kart zinciri reel bitince doner (degismedi)."""
+    reel = {2023: 9999, 2024: 1500, 2025: 1800}
+    tufe = {2024: {8: 10}, 2025: {8: 5}, 2026: {8: 5}}
+    z = _zincir(ay_sayisi=48, tufe=tufe, reel=reel)
+    plansiz = ay_bazli_tutarlar(z)
+    check("plansiz reel 2024 kazanir", _ay(plansiz, "2024-08")["brut"] == 1500 and _ay(plansiz, "2025-07")["kaynak"] == "reel")
+    check("plansiz reel 2025 kazanir", _ay(plansiz, "2025-08")["brut"] == 1800 and _ay(plansiz, "2026-07")["kaynak"] == "reel")
+    check("plansiz kaynaklarda plan yok", all(s["kaynak"] in ("kart", "reel", "reel_tufe") for s in plansiz))
+    bos = ay_bazli_tutarlar(z, [])
+    nonem = ay_bazli_tutarlar(z, None)
+    check("plansiz: bos liste / None ayni sonuc", list(plansiz) == list(bos) == list(nonem))
+    # iptal edilmis plan = plansiz
+    iptalli = ay_bazli_tutarlar(z, [{"gecerlilik_ay": "2024-11-01", "yeni_net": 2000, "kdv_oran": 20, "yeni_brut": 2400, "iptal_at": "2025-01-01"}])
+    check("iptal plan plansizla ayni", list(iptalli) == list(plansiz))
+
+
+def test_867_fixture_zincir():
+    """Canli 867 senaryosu: plan 2026-02 net 500 brut 600; reel {2023:300,2024:1094.18,2025:1454.71,2026:1918.76}."""
+    plan = [{"gecerlilik_ay": "2026-02-01", "yeni_net": 500, "kdv_oran": 20, "yeni_brut": 600}]
+    tufe = {2024: {8: 40.0}, 2025: {8: 33.0}, 2026: {8: 31.9}, 2027: {8: 31.9}}
+    reel = {2023: 300, 2024: 1094.18, 2025: 1454.71, 2026: 1918.76}
+    z = _zincir(
+        ay_sayisi=60, aylik_net=250, tufe=tufe, reel=reel,
+        faturali_aylar=["2026-03", "2026-04"], fatura_belge={"2026-03": 1454.71, "2026-04": 1454.71},
+    )
+    satirlar = ay_bazli_tutarlar(z, plan)
+    pre = all(abs(_ay(satirlar, f"{y}-{m:02d}")["brut"] - 1454.71) < 0.011 for y, m in [(2025, 8), (2025, 9), (2025, 12), (2026, 1)])
+    check("867: Agu 2025 - Oca 2026 = 1454,71 (plan oncesi reel)", pre)
+    check("867: Subat 2026 = 600 plan", _ay(satirlar, "2026-02")["brut"] == 600 and _ay(satirlar, "2026-02")["kaynak"] == "plan")
+    check("867: Mart/Nisan 2026 = 1454,71 kilitli", all(abs(_ay(satirlar, a)["brut"] - 1454.71) < 0.011 and _ay(satirlar, a)["kaynak"] == "fatura" for a in ("2026-03", "2026-04")))
+    check("867: Mayis-Temmuz 2026 = 600", all(_ay(satirlar, a)["brut"] == 600 for a in ("2026-05", "2026-06", "2026-07")))
+    donem = [f"2026-{m:02d}" for m in range(8, 13)] + [f"2027-{m:02d}" for m in range(1, 8)]
+    check(
+        "867: Agu 2026 - Tem 2027 = 791,40 (net 659,50)",
+        all(abs(_ay(satirlar, a)["brut"] - 791.40) < 0.011 and _ay(satirlar, a)["net"] == 659.5 and _ay(satirlar, a)["kaynak"] == "plan_tufe" for a in donem),
+    )
+    check("867: 1918,76 hicbir aya yazilmaz (plan sonrasi)", all(abs(s["brut"] - 1918.76) > 0.011 for s in satirlar if s["ay"] >= "2026-02"))
+    sonra = [f"2027-{m:02d}" for m in range(8, 13)] + [f"2028-{m:02d}" for m in range(1, 8)]
+    check("867: Agu 2027 - = 1043,86 (plan_tufe)", all(abs(_ay(satirlar, a)["brut"] - 1043.86) < 0.011 and _ay(satirlar, a)["kaynak"] == "plan_tufe" for a in sonra))
+    # reel haritasi vermeden de plan sonrasi ayni (reel plan sonrasi etkisiz)
+    reelsiz = ay_bazli_tutarlar(_zincir(ay_sayisi=60, aylik_net=250, tufe=tufe, reel={2023: 300, 2024: 1094.18, 2025: 1454.71}, faturali_aylar=["2026-03", "2026-04"]), plan)
+    check("867: 2026 reel kaydi olsa da olmasa da plan sonrasi ayni", all(abs(_ay(reelsiz, a)["brut"] - _ay(satirlar, a)["brut"]) < 0.011 for a in donem + sonra))
+
+
+def test_yok_sayilan_reel_yillari():
+    from sozlesme_plan import yok_sayilan_reel_yillari
+
+    plan = [{"gecerlilik_ay": "2026-02-01", "yeni_net": 500, "kdv_oran": 20, "yeni_brut": 600}]
+    tufe = {2026: {8: 31.9}}
+    reel = {2023: 300, 2024: 1094.18, 2025: 1454.71, 2026: 1918.76}
+    z = _zincir(ay_sayisi=24, aylik_net=250, tufe=tufe, reel=reel)
+    liste = yok_sayilan_reel_yillari(z, plan)
+    check(
+        "yok sayilan: yalniz 2026 (plan sonrasi), 1918,76 -> 791,40",
+        len(liste) == 1 and liste[0]["yil"] == 2026 and abs(liste[0]["reel_brut"] - 1918.76) < 0.011 and abs(liste[0]["plan_brut"] - 791.40) < 0.011,
+    )
+    check("yok sayilan: plansiz bos", yok_sayilan_reel_yillari(z, []) == [] and yok_sayilan_reel_yillari(z, None) == [])
+    check("yok sayilan: reel yok bos", yok_sayilan_reel_yillari(_zincir(tufe=tufe), plan) == [])
+    # reel plan zincirine esitse (fark yok) uyari yok
+    esit = dict(reel)
+    esit[2026] = 791.40
+    check("yok sayilan: fark yoksa bos", yok_sayilan_reel_yillari(_zincir(ay_sayisi=24, aylik_net=250, tufe=tufe, reel=esit), plan) == [])
 
 
 def test_coklu_plan():
@@ -138,7 +236,10 @@ def test_ilk_yil_icinde_plan():
     check("ilk yil plan oncesi kart", _ay(satirlar, "2023-10")["brut"] == 1200)
     check("ilk yil plan", _ay(satirlar, "2023-11")["brut"] == 960 and _ay(satirlar, "2024-07")["brut"] == 960)
     check("ilk yil reel hala yok", _ay(satirlar, "2023-12")["kaynak"] == "plan")
-    check("sonraki yil reel plani ezer", _ay(satirlar, "2024-08")["brut"] == 1500 and _ay(satirlar, "2024-08")["kaynak"] == "reel")
+    check(
+        "sonraki yil reel plani kesmez (plan netine tufe)",
+        _ay(satirlar, "2024-08")["brut"] == 1056 and _ay(satirlar, "2024-08")["kaynak"] == "plan_tufe",
+    )
 
 
 def test_fatura_ayi_sabit():
@@ -405,19 +506,20 @@ def test_depo():
 
 
 def test_reel_sonrasi_tufe():
-    """Kilitli reel yılından sonraki yıl, plan netinden değil o brütten TÜFE ile gider."""
+    """Planli kartta reel yil zinciri kesmez: her donem degisiminde TUFE plan netine uygulanir (reel_tufe yok)."""
     plan = [{"gecerlilik_ay": "2024-11-01", "yeni_net": 2000, "kdv_oran": 20, "yeni_brut": 2400}]
     tufe = {2024: {8: 10}, 2025: {8: 5}, 2026: {8: 5}}
     satirlar = ay_bazli_tutarlar(
         _zincir(ay_sayisi=48, tufe=tufe, reel={2024: 1500, 2025: 1800}),
         plan,
     )
-    check("kilit yili reel", _ay(satirlar, "2025-08")["brut"] == 1800 and _ay(satirlar, "2026-07")["kaynak"] == "reel")
+    check("reel yili plani kesmez", _ay(satirlar, "2025-08")["brut"] == 2520 and _ay(satirlar, "2026-07")["kaynak"] == "plan_tufe")
     son = _ay(satirlar, "2026-08")
     check(
-        "reel sonrasi tufe",
-        son["brut"] == 1890 and son["kaynak"] == "reel_tufe" and son["brut"] != 2646,
+        "donem degisiminde plan netine tufe (reel brutune degil)",
+        son["brut"] == 2646 and son["net"] == 2205 and son["kaynak"] == "plan_tufe" and son["brut"] != 1890,
     )
+    check("reel_tufe kaynagi uretilmez", all(s["kaynak"] != "reel_tufe" for s in satirlar))
 
 
 def test_fatura_belge_uyarisi():
@@ -559,7 +661,7 @@ def test_planli_grid_katmani():
         kilitli, kyc, tufe, planlar=plan, reel={2024: 1500, 2025: 1800}
     )
     hk = {(a["yil"], a["ay"]): a["tutar_kdv_dahil"] for a in kilitli["aylar"]}
-    check("ileri reel kilidi", hk[(2025, 8)] == 1800 and hk[(2026, 8)] == 1890)
+    check("ileri reel yili plan zincirini kesmez", hk[(2025, 8)] == 2520 and hk[(2026, 8)] == 2646)
     coklu = gr._aylik_grid_compute(2, kyc, tufe, plan_katmani=False)
     gr._plan_katmani_payloada(
         coklu,
@@ -597,7 +699,7 @@ def test_planli_grid_katmani():
         reel={2023: 9999, 2024: 1500},
     )
     hi = {(a["yil"], a["ay"]): a["tutar_kdv_dahil"] for a in ilk["aylar"]}
-    check("ilk yil ici plan", hi[(2023, 10)] == 1200 and hi[(2023, 11)] == 960 and hi[(2024, 8)] == 1500)
+    check("ilk yil ici plan", hi[(2023, 10)] == 1200 and hi[(2023, 11)] == 960 and hi[(2024, 8)] == 1056)
     fat = _reel_boya(
         gr._aylik_grid_compute(2, kyc, tufe, plan_katmani=False),
         date(2023, 8, 1),
@@ -1346,6 +1448,10 @@ def main():
     test_reel_ilk_yil_yok_sonraki_pencere()
     test_plan_ayni_pencerede_reeli_ezer()
     test_sonraki_yil_reel_kazanir()
+    test_planli_kartta_reel_yil_kesmez()
+    test_plansiz_kartta_reel_kazanmaya_devam_eder()
+    test_867_fixture_zincir()
+    test_yok_sayilan_reel_yillari()
     test_coklu_plan()
     test_hibrit_ve_varsayilan_pay()
     test_nakit_kart()

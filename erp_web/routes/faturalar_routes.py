@@ -3355,7 +3355,7 @@ def _firma_ozet_referans_ay_grid_tutar_map(musteri_ids, ref: date | None = None)
                     continue
                 # Dar B geçiş: 27..29 veya güncel REV (30). Daha eski (örn. 23) reddedilir.
                 # Placeholder sınıflandırması aşağıda değişmez.
-                if rev not in (27, 28, 29, int(AYLIK_GRID_COMPUTE_REV)):
+                if rev not in (27, 28, 29, 30, int(AYLIK_GRID_COMPUTE_REV)):
                     continue
             elif payload_tipi != "array":
                 continue

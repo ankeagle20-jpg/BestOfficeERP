@@ -6,6 +6,10 @@ Beklenen grid: 2026-8/9 = 1918,76 ; 2026-10..2027-7 = 360 ; 2027-8/9 = 474,84.
 Iki yol: musteri-kart-bundle (ilk yukleme) ve fallback (aylik-grid-cache + reel-donem-tutarlar + aylik-tahsil-durum).
 Her kart yazimi (data-tutar-kdv / data-brut-kdv / .aylik-deger) yazici fonksiyonuyla kaydedilir.
 Canli DB'ye ve .env'e gitmez.
+
+YENI senaryo (Secenek B, plan zinciri reel yilla kesilmez): plan 2026-02 net 500 / brut 600, reel {2023:300, 2024:1094.18,
+2025:1454.71, 2026:1918.76}, Mart/Nisan 2026 kilitli (1454,71). Sunucu cache'i GERCEK sunucu kodundan uretilir
+(_build_aylik_grid_cache_payload); sayfa Agu 2026 - Tem 2027 icin 791,40 gostermeli, 1918,76 hicbir yere yazilmamali.
 """
 import copy
 import json
@@ -80,11 +84,40 @@ def _musteri(mid):
             "guncel_kira_bedeli": 600, "ilk_kira_bedeli": 600, "aylik_kira": 600, "kdv_oran": 20}
 
 
-def fixture_867():
+def _aylar_yeni_sunucudan():
+    """Gercek sunucu zinciri (plan 2026-02, kilitli Mart/Nisan) -> grid ayları; tahsilat bayraklari 867 gibi."""
+    import test_plan_reel_kesmez as t
+    eski = t._yama(t.PLAN, t.REEL)
+    try:
+        p = t._kayit_sonrasi_payload()
+    finally:
+        t._geri(eski)
+    out = []
+    for a in p["aylar"]:
+        if (a["yil"], a["ay"]) > (2027, 9):
+            continue
+        a = dict(a)
+        a["ay_key"] = "%d-%d" % (a["yil"], a["ay"])
+        tt = a["tutar_kdv_dahil"]
+        a.update(odenen_tutar_kdv=0.0, kalan_tutar_kdv=tt, tahsil_edildi=False, kismi_tahsilat=False, acik_aylik_borc_faturasi=False)
+        if (a["yil"], a["ay"]) <= (2025, 6):
+            a.update(tahsil_edildi=True, odenen_tutar_kdv=tt, kalan_tutar_kdv=0.0)
+        elif (a["yil"], a["ay"]) == (2025, 7):
+            a.update(kismi_tahsilat=True, odenen_tutar_kdv=round(tt - 130.16, 2), kalan_tutar_kdv=130.16)
+        if (a["yil"], a["ay"]) >= (2025, 7):
+            a["acik_aylik_borc_faturasi"] = True
+        out.append(a)
+    return out
+
+
+def fixture_867(senaryo="eski"):
     cache = {"musteri_id": MID, "plan_var": True, "artis_ay": 8, "baslangic": "2023-08-01", "bitis": "2027-10-01",
              "kapanis_tarihi": None, "kapanis_sonrasi_borc_ay": None, "kira_suresi_ay": 48,
              "kira_banka_tutar": 600.0, "kira_nakit": False, "kira_nakit_tutar": 0.0, "split_kira_odeme": False,
              "taban_aylik_net": 600.0, "compute_rev": 30, "aylar": _aylar_867()}
+    if senaryo == "yeni":
+        cache["compute_rev"] = 31
+        cache["aylar"] = _aylar_yeni_sunucudan()
     reel_map = {"2023": 300.0, "2024": 1094.18, "2025": 1454.71, "2026": 1918.76}
     detay = {k: {"tip": "dahil", "giris_tutar": v, "hibrit": None} for k, v in reel_map.items()}
     tahsil = ["%d-%d" % (a["yil"], a["ay"]) for a in cache["aylar"] if a["tahsil_edildi"]]
@@ -118,12 +151,12 @@ def beklenen_867(fx):
             if (a["yil"], a["ay"]) >= (2026, 8)}
 
 
-def kosu(yol, html_yol, etiket, kart_degistir=True, dump=None, ls_stale=False):
+def kosu(yol, html_yol, etiket, kart_degistir=True, dump=None, ls_stale=False, senaryo="eski"):
     """yol: 'bundle' | 'fallback'. (basarisiz_kontroller, kotu_yazim_sayisi, kotu_yazici_dagilimi) doner."""
     global FAILS
     FAILS = []
     ETIKET[0] = etiket + ": "
-    fx = {MID: fixture_867(), DIGER: fixture_diger()}
+    fx = {MID: fixture_867(senaryo), DIGER: fixture_diger()}
     beklenen = beklenen_867(fx[MID])
     app = _app()
     app.logger.disabled = True
@@ -248,6 +281,13 @@ def kosu(yol, html_yol, etiket, kart_degistir=True, dump=None, ls_stale=False):
         s.wait_for_function("document.querySelectorAll('#sozlesmeler-aylik-grid .sozlesmeler-ay-kart').length > 20", timeout=20000)
         s.wait_for_timeout(1500)
         kontrol(s, "ilk yukleme")
+        if senaryo == "yeni":
+            k0 = _kartlar(s)["sozlesmeler-aylik-grid"]
+            check("YENI: Subat 2026 = 600", k0.get("2026-2", {}).get("metin") == "600.00", k0.get("2026-2"))
+            check("YENI: Mart/Nisan 2026 = 1454,71 (kilitli)", k0.get("2026-3", {}).get("metin") == "1454.71" and k0.get("2026-4", {}).get("metin") == "1454.71")
+            check("YENI: Agustos 2026 = 791,40", k0.get("2026-8", {}).get("metin") == "791.40", k0.get("2026-8"))
+            check("YENI: Agu 2026 - Tem 2027 hepsi 791,40", all(k0.get(a, {}).get("metin") == "791.40" for a in ["2026-8", "2026-9", "2026-10", "2026-11", "2026-12"] + ["2027-%d" % i for i in range(1, 8)]))
+            check("YENI: Agustos 2027 = 1043,86", k0.get("2027-8", {}).get("metin") == "1043.86", k0.get("2027-8"))
         for tur in (1, 2, 3):
             s.evaluate("""() => { try { sozlesmelerReelDbGridVePanelSonBoya(); } catch (e) {} try { sozlesmelerAylikNormGridKartTutarlariniYenile(); } catch (e) {}
                 try { sozlesmelerReelKayitliTumYillariGridaUygula(); } catch (e) {} try { sozlesmelerReelDbSonBoyaSira(window.__sozlesmelerAylikSonCacheObj); } catch (e) {}
@@ -257,6 +297,9 @@ def kosu(yol, html_yol, etiket, kart_degistir=True, dump=None, ls_stale=False):
         s.evaluate("() => { try { sozlesmelerReelDbGridVePanelSonBoya(); } catch (e) {} }")
         s.wait_for_timeout(1500)
         kontrol(s, "gecikmeli tur")
+        if senaryo == "yeni":
+            k1 = _kartlar(s)["sozlesmeler-aylik-grid"]
+            check("YENI gecikmeli: Agustos 2026 = 791,40", k1.get("2026-8", {}).get("metin") == "791.40", k1.get("2026-8"))
         if kart_degistir:
             s.evaluate("selectMusteri(%d)" % DIGER)
             s.wait_for_timeout(2000)
@@ -278,7 +321,7 @@ def kosu(yol, html_yol, etiket, kart_degistir=True, dump=None, ls_stale=False):
             if y["tur"] != "metin" or y["deger"] != "1918.76":
                 continue
             yy, mm = [int(x) for x in y["ay"].split("-")]
-            if (2026, 10) <= (yy, mm) <= (2027, 7):
+            if ((2026, 8) if senaryo == "yeni" else (2026, 10)) <= (yy, mm) <= (2027, 7):
                 kotu[y["kim"]] = kotu.get(y["kim"], 0) + 1
         print("%s: sayfa hatalari %s; toplam yazim %d" % (etiket, hatalar[:2], len(yaz)))
         tarayici.close()
@@ -315,6 +358,16 @@ def main():
         if f is None:
             return 0
         print("YENI %s%s: basarisiz=%d plan_disi_yazim=%d" % (yol, "+ls_stale" if ls else "", len(f), k))
+        for kim, n in sorted(dag.items(), key=lambda x: -x[1])[:8]:
+            print("   %6d  %s" % (n, kim[:230]))
+        if f or k:
+            sonuc = 1
+    # YENI senaryo (plan 2026-02, Agu 2026 = 791,40): yalniz guncel index.html
+    for yol, ls in (("bundle", False), ("fallback", False), ("bundle", True)):
+        f, k, dag = kosu(yol, None, "YENI-B %s%s" % (yol, "+ls_stale" if ls else ""), ls_stale=ls, senaryo="yeni")
+        if f is None:
+            return 0
+        print("YENI-B %s%s: basarisiz=%d plan_disi_yazim=%d" % (yol, "+ls_stale" if ls else "", len(f), k))
         for kim, n in sorted(dag.items(), key=lambda x: -x[1])[:8]:
             print("   %6d  %s" % (n, kim[:230]))
         if f or k:

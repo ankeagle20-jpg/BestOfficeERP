@@ -85,7 +85,24 @@ import secrets
 from decimal import Decimal
 
 # Aylık grid «tam ödendi» / tahsil dağıtım mantığı değişince artırın; musteri_aylik_grid_cache yeniden üretilir.
-AYLIK_GRID_COMPUTE_REV = 30
+AYLIK_GRID_COMPUTE_REV = 31
+# 31: plan zinciri artik plan blogundan sonraki reel yillarla kesilmiyor (yalniz plan_var kartlarini etkiler).
+# Plansiz kartlarin rev 30 cache'i hesap acisindan 31 ile ayni: gereksiz yere gecersiz sayilmaz.
+AYLIK_GRID_ONCEKI_REV = 30
+
+
+def _aylik_grid_rev_uyumlu(payload) -> bool:
+    """compute_rev guncel mi? Rev 30 yalniz plan_var OLMAYAN (plansiz) payload icin gecerli sayilir."""
+    if not isinstance(payload, dict):
+        return False
+    try:
+        rev = int(payload.get("compute_rev") or 0)
+    except (TypeError, ValueError):
+        return False
+    if rev == AYLIK_GRID_COMPUTE_REV:
+        return True
+    return rev == AYLIK_GRID_ONCEKI_REV and not payload.get("plan_var")
+
 AYLIK_GRID_TAM_ODENDI_TOLERANS = 0.05  # kurus farklarini (dagitim/yuvarlama) tam odendi say
 PLACEHOLDER_BRUT_MAX = 0.5  # grid min tutar (0.01); gerçek brüt yazılmamış panel
 
@@ -1322,7 +1339,7 @@ def _aylik_grid_cache_matches_kyc(musteri_id, cache_obj):
     if _int_or_none(cache_obj.get("kira_suresi_ay")) != _int_or_none(kyc.get("kira_suresi_ay")):
         return False
     try:
-        if int(cache_obj.get("compute_rev") or 0) != AYLIK_GRID_COMPUTE_REV:
+        if not _aylik_grid_rev_uyumlu(cache_obj):
             return False
     except (TypeError, ValueError):
         return False
@@ -2148,7 +2165,7 @@ def _plan_paket_yukle(musteri_ids) -> dict:
     return {i: box["harita"].get(i) or dict(_PLAN_BOS) for i in mids}
 
 
-def _planli_reel_haritasi(musteri_ids) -> dict:
+def _planli_reel_haritasi(musteri_ids, *, tum=False) -> dict:
     """Planı olan kartların reel yılları, tek sorgu. Plansız istekte sorgu yok."""
     box = _plan_kutu()
     planli = []
@@ -2159,7 +2176,8 @@ def _planli_reel_haritasi(musteri_ids) -> dict:
             continue
         if i <= 0:
             continue
-        if (box.get("harita") or {}).get(i, {}).get("planlar"):
+        # tum=True: plan ONIZLEME (ilk planda da kayit sonrasi zincirle ayni reel harita).
+        if tum or (box.get("harita") or {}).get(i, {}).get("planlar"):
             planli.append(i)
     yuklu = box.setdefault("reel", {})
     if not planli:
@@ -3163,6 +3181,8 @@ def _aylik_grid_freshness_k_from_payload(payload) -> str:
         rev = int(payload.get("compute_rev") or 0)
     except (TypeError, ValueError):
         rev = 0
+    if _aylik_grid_rev_uyumlu(payload):
+        rev = AYLIK_GRID_COMPUTE_REV  # rev 30 plansiz payload == 31 (hesap ayni): parmak izi sabit kalir
     kap = str(payload.get("kapanis_tarihi") or "")[:10]
     try:
         ek = int(payload.get("kapanis_sonrasi_borc_ay") or 0)
@@ -5625,7 +5645,7 @@ def _senaryo01_grid_tutar_map(
             except (TypeError, ValueError):
                 rev_uyumsuz.add(pmid)
                 continue
-            if rev not in (27, 28, 29, int(AYLIK_GRID_COMPUTE_REV)):
+            if rev not in (27, 28, 29, AYLIK_GRID_ONCEKI_REV, int(AYLIK_GRID_COMPUTE_REV)):
                 rev_uyumsuz.add(pmid)
         elif tip != "array":
             rev_uyumsuz.add(pmid)
@@ -5696,7 +5716,7 @@ def _senaryo01_grid_tutar_map(
                 rev = int(row.get("compute_rev") or 0)
             except (TypeError, ValueError):
                 continue
-            if rev not in (27, 28, 29, int(AYLIK_GRID_COMPUTE_REV)):
+            if rev not in (27, 28, 29, AYLIK_GRID_ONCEKI_REV, int(AYLIK_GRID_COMPUTE_REV)):
                 continue
         elif payload_tipi != "array":
             continue
@@ -10238,7 +10258,7 @@ def _firma_ozet_cache_payload_usable(payload, ref_y: int, ref_m: int) -> bool:
     if ref_m < 1 or ref_m > 12:
         return False
     try:
-        if int(payload.get("compute_rev") or 0) != AYLIK_GRID_COMPUTE_REV:
+        if not _aylik_grid_rev_uyumlu(payload):
             return False
     except (TypeError, ValueError):
         return False
@@ -14143,7 +14163,7 @@ def api_aylik_grid_cache():
                 cache_gecerli = True
                 # Mem hit: REV uyuşmuyorsa bayat payload'u 60 sn servis etme → DB/rebuild yoluna düş.
                 try:
-                    if int(mem_hit[1].get("compute_rev") or 0) != AYLIK_GRID_COMPUTE_REV:
+                    if not _aylik_grid_rev_uyumlu(mem_hit[1]):
                         cache_gecerli = False
                 except (TypeError, ValueError):
                     cache_gecerli = False
@@ -14311,7 +14331,7 @@ def api_aylik_grid_cache():
                 cache_gecerli = bool(kyc_uyumlu)
                 if cache_gecerli:
                     try:
-                        if int(cache_obj.get("compute_rev") or 0) != AYLIK_GRID_COMPUTE_REV:
+                        if not _aylik_grid_rev_uyumlu(cache_obj):
                             cache_gecerli = False
                     except (TypeError, ValueError):
                         cache_gecerli = False

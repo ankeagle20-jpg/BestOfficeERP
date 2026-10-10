@@ -11,7 +11,7 @@ from flask import jsonify, request
 from flask_login import current_user
 
 from auth import giris_gerekli
-from sozlesme_plan import _kart_parca, ay_bazli_tutarlar, plan_ekle_on_kontrol
+from sozlesme_plan import _kart_parca, ay_bazli_tutarlar, plan_ekle_on_kontrol, yok_sayilan_reel_yillari
 from sozlesme_plan_depo import (
     PlanCakisma,
     PlanYok,
@@ -214,6 +214,25 @@ def yeni_taban_planlar(mevcut, yeni: dict) -> list:
     except (ValueError, TypeError, AttributeError):
         return list(mevcut or [])
     return [p for p in (mevcut or []) if not _ayni_ay_mi(p, ay)]
+
+
+def _tr_duz(x) -> str:
+    """1918,76 biciminde (binlik ayraci yok, her zaman iki ondalik)."""
+    try:
+        return f"{round(float(x), 2):.2f}".replace(".", ",")
+    except (TypeError, ValueError):
+        return str(x)
+
+
+def reel_yok_sayilacak_uyarisi(yok_sayilan: list | None) -> dict | None:
+    """Plan blogundan sonraki reel kayitlari plan zincirince yok sayilacaksa onizleme uyari satiri."""
+    if not yok_sayilan:
+        return None
+    parcalar = [f"{r['yil']}: {_tr_duz(r['reel_brut'])} \u2192 {_tr_duz(r['plan_brut'])}" for r in yok_sayilan]
+    return {
+        "kod": "reel_yok_sayilacak",
+        "mesaj": "Şu dönem reel kayıtları plan tarafından yok sayılacak: " + ", ".join(parcalar) + ".",
+    }
 
 
 def iptal_uyari_metni(onceki: dict | None) -> str:
@@ -486,7 +505,7 @@ def _onizleme_zinciri(mid, kyc):
     )
 
     paket = _plan_paket_yukle([mid]).get(int(mid)) or {"planlar": [], "faturali": [], "belge": {}}
-    reel = (_planli_reel_haritasi([mid]) or {}).get(int(mid)) or {}
+    reel = (_planli_reel_haritasi([mid], tum=True) or {}).get(int(mid)) or {}
     try:
         tufe = _tufe_map_by_year_month_cached()
     except Exception:
@@ -634,6 +653,14 @@ def plan_onizleme_yanit(mid):
     gorunmez = gorunur_degisiklik_uyarisi(degisim, kilitli_etkin)
     if gorunmez:
         uyarilar.append(gorunmez)
+    try:
+        yok_sayilan = yok_sayilan_reel_yillari(zincir, yeni_taban_planlar(mevcut, yeni) + [yeni])
+    except Exception:
+        _LOG.exception("plan onizleme reel yok sayilan")
+        yok_sayilan = []
+    reel_uyari = reel_yok_sayilacak_uyarisi(yok_sayilan)
+    if reel_uyari:
+        uyarilar.append(reel_uyari)
     gecmis_plan = _gecmis_ay_mi(ay)
     odemeli = []
     if gecmis_plan:
@@ -661,6 +688,7 @@ def plan_onizleme_yanit(mid):
             "odeme": tutar["odeme"],
             "aylar": aylar,
             "uyarilar": uyarilar,
+            "yok_sayilan_reel": yok_sayilan,
             "degisen_aktif_plan": (
                 {
                     "gecerlilik_ay": ay.isoformat(),
