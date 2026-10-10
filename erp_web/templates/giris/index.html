@@ -6627,6 +6627,15 @@ function sozlesmelerReelDbAyKeyFlatMap(basStr) {
 
 function sozlesmelerReelDbTutarAyKey(basStr, ayKey) {
     if (!basStr || ayKey == null || ayKey === '') return null;
+    try {
+        /* plan_var: efektif tutar plan brutu (reel yil tutari plan aylarini ezmesin).
+           ay_key sifirli ('2026-09') ve sifirsiz ('2026-9') biciminde ayni sonuc: parseInt. */
+        if (typeof girisPlanGridHucreBrut === 'function') {
+            var ppAk = String(ayKey).split('-');
+            var planBrutAk = girisPlanGridHucreBrut(parseInt(ppAk[0], 10), parseInt(ppAk[1], 10));
+            if (planBrutAk != null) return planBrutAk;
+        }
+    } catch (_ePlRak) {}
     var flat = sozlesmelerReelDbAyKeyFlatMap(basStr);
     var k = String(ayKey);
     var t = flat[k];
@@ -6699,6 +6708,7 @@ function sozlesmelerReelTahsilPanelSenkron() {
             var tut = parseFloat(map[yk]);
             if (!isFinite(tut) || tut <= 0) return;
             tut = Math.round(tut * 100) / 100;
+            var tutDonemYil = tut;
             var keys = (typeof sozlesmeReelDonemAyKeys === 'function') ? sozlesmeReelDonemAyKeys(basStr, donemYil) : [];
             for (var i = 0; i < keys.length; i++) {
                 var ak = keys[i];
@@ -6711,6 +6721,13 @@ function sozlesmelerReelTahsilPanelSenkron() {
                 var d = mapDet[ak];
                 if (!d && typeof girisTahsilatYilAyDetayAl === 'function') d = girisTahsilatYilAyDetayAl(calYil, ak);
                 if (!d) continue;
+                tut = tutDonemYil;
+                try {
+                    /* plan_var: donem-yili reel tutari plan aylarinin panel satirini ezmesin (plan brutu) */
+                    var planBrutSen = (typeof girisPlanGridHucreBrut === 'function')
+                        ? girisPlanGridHucreBrut(calYil, parseInt(akParts[1], 10)) : null;
+                    if (planBrutSen != null) tut = planBrutSen;
+                } catch (_ePlSen) {}
                 var eskiBrut = parseFloat(d.aylik_tutar) || 0;
                 var eskiTahsil = Math.round((parseFloat(d.tahsil) || 0) * 100) / 100;
                 var eskiKalan = parseFloat(d.kalan);
