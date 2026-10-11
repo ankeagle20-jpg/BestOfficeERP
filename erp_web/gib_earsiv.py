@@ -1996,10 +1996,11 @@ class BestOfficeGIBManager:
             raise
 
 
-def build_fatura_data_from_db(fatura_id, fetch_one_func):
+def build_fatura_data_from_db(fatura_id, fetch_one_func, plan_baglam=None):
     """
     Veritabanından fatura + müşteri + KYC çekip GİB fatura_data sözlüğüne dönüştürür.
     fetch_one_func: (sql, params) -> dict kullanacak fonksiyon (örn. db.fetch_one).
+    plan_baglam: test/enjeksiyon; None ise canlı plan okunur (yazmaz).
     """
     fatura = fetch_one_func(
         """
@@ -2031,7 +2032,7 @@ def build_fatura_data_from_db(fatura_id, fetch_one_func):
             (musteri_id,),
         )
         kyc = fetch_one_func(
-            "SELECT vergi_dairesi, vergi_no, hizmet_turu, aylik_kira, yeni_adres, yetkili_email, email, yetkili_tel FROM musteri_kyc WHERE musteri_id = %s ORDER BY id DESC LIMIT 1",
+            "SELECT vergi_dairesi, vergi_no, hizmet_turu, aylik_kira, yeni_adres, yetkili_email, email, yetkili_tel, kira_nakit, kira_nakit_tutar, kira_banka_tutar, kdv_oran, sozlesme_tarihi, kira_artis_tarihi FROM musteri_kyc WHERE musteri_id = %s ORDER BY id DESC LIMIT 1",
             (musteri_id,),
         )
 
@@ -2149,6 +2150,28 @@ def build_fatura_data_from_db(fatura_id, fetch_one_func):
         if birim_fiyat <= 0:
             birim_fiyat = toplam
         kdv_orani_genel = 20
+        plan_over = None
+        try:
+            from gib_plan_tutar import plan_gib_override, yukle_plan_gib_satir
+
+            if isinstance(plan_baglam, dict):
+                if not plan_baglam.get("atla"):
+                    plan_over = plan_gib_override(
+                        fatura,
+                        kyc or {},
+                        ay_sinif=plan_baglam.get("ay_sinif"),
+                        plan_satir=plan_baglam.get("plan_satir"),
+                        planlar=plan_baglam.get("planlar"),
+                    )
+            else:
+                plan_over = yukle_plan_gib_satir(fatura, kyc)
+        except Exception:
+            _log.exception("gib plan tutar")
+            plan_over = None
+        if plan_over:
+            birim_fiyat = float(plan_over["birim_fiyat"])
+            kdv_orani_genel = int(plan_over["kdv_orani"])
+            toplam = float(plan_over["toplam"])
         items = [{
             "name": hizmet_adi,
             "quantity": 1,

@@ -856,7 +856,13 @@ def test_js():
         "durum secicisi satir kabinda (dugme ayni grid hucresinde)",
         'id="musteri_durum_satir"' in html and html.find('id="musteri_durum_satir"') < html.find('id="musteri_durum"') < html.find("</select>", html.find('id="musteri_durum"')),
     )
-    check("script surumu artirildi", "js/plan_degistir.js', v=9" in html)
+    check("script surumu artirildi", "js/plan_degistir.js', v=10" in html)
+    check(
+        "plan kapsam notu sabit",
+        "plan_kapsam_not" in js_metin
+        and "Plan; grid, ekstre, ödeme linki ve resmi fatura tutarını günceller." in js_metin
+        and "Cari kart özeti ve fatura satırları (borç kayıtları) eski tutarda kalır." in js_metin,
+    )
     check(
         "kaydet kilidi, hata kutusu ve ipucu js'te",
         "__planKaydediliyor" in js_metin

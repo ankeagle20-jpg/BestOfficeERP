@@ -237,6 +237,7 @@ function planModalHazirla() {
         + "</div>"
         + "<div id=\"plan_gecmis_bolum\" style=\"margin:0 0 10px;padding:8px;border:1px solid #2d4060;border-radius:6px;\"></div>"
         + "<div id=\"plan_pasif_not\" role=\"status\" style=\"display:none;margin:0 0 10px;padding:8px;border:1px solid #ff9800;border-radius:4px;color:#ffcc80;\">Bu müşteri pasif: yeni plan kaydedilemez, yalnız plan geçmişi görüntülenir.</div>"
+        + "<div id=\"plan_kapsam_not\" style=\"margin:0 0 10px;padding:8px;border:1px solid #546e7a;border-radius:4px;color:#b0bec5;font-size:12px;line-height:1.4;\">Plan; grid, ekstre, ödeme linki ve resmi fatura tutarını günceller. Cari kart özeti ve fatura satırları (borç kayıtları) eski tutarda kalır.</div>"
         + "<div style=\"font-weight:600;margin:6px 0 2px;\">Yeni plan</div>"
         + "<label for=\"plan_gecerlilik\" style=\"" + E + "\">Geçerlilik ayı</label><input id=\"plan_gecerlilik\" type=\"month\" style=\"" + G + "\">"
         + "<label for=\"plan_yeni_net\" style=\"" + E + "\">Yeni aylık net</label><input id=\"plan_yeni_net\" type=\"number\" step=\"0.01\" style=\"" + G + "\">"
