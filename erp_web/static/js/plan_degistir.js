@@ -39,7 +39,7 @@ function planDurumOdak() {
 function musteriDurumSecildi(secilen) {
     var sel = document.getElementById("musteri_durum");
     var onceki = (sel && sel.getAttribute("data-onceki")) || "aktif";
-    var kapi = !!document.getElementById("plan_gecmis_bolum");
+    var kapi = !!window.__planMid;
     var karar = planDurumKarari(secilen, onceki, kapi);
     if (karar.modal) {
         if (sel) sel.value = karar.durum;
@@ -47,16 +47,23 @@ function musteriDurumSecildi(secilen) {
         planDegistirModalAc();
         return;
     }
+    if (sel && (karar.durum === "aktif" || karar.durum === "pasif")) sel.setAttribute("data-onceki", karar.durum);
     if (typeof syncDurumUI === "function") syncDurumUI(karar.durum, {});
 }
 
 function planArayuzKaldir() {
     var op = document.querySelector("#musteri_durum option[value='plan']");
     if (op) op.remove();
-    var gec = document.getElementById("plan_gecmis_bolum");
-    if (gec) gec.remove();
+    var btn = document.getElementById("plan_degistir_btn");
+    if (btn) btn.remove();
+    /* Popup (geçmiş + form) tek elemandır; kalkınca içindeki her şey birlikte gider. */
     var modal = document.getElementById("plan_degistir_modal");
     if (modal) modal.remove();
+    window.__planMid = null;
+    window.__planBilgi = null;
+    window.__planSonGovde = null;
+    window.__planHataIpucu = "";
+    window.__planTaban = "";
     window.__planOnizlemeHazir = false;
     window.__planKilit = [];
     window.__planOdemeli = [];
@@ -73,26 +80,39 @@ function planMusteriId() {
     return (w != null && w !== "") ? w : null;
 }
 
+/* Kart yükleme yolları (ilk yükleme, kayıt sonrası tazeleme, plan kaydı/iptali) bunu üst üste çağırır.
+   İdempotent: son çağrı kazanır (eskimiş yanıt çizilmez), aynı müşteride arayüz yerinde kalır ve yalnız içerik yenilenir,
+   başka müşteride eski müşterinin popup'ı/butonu/geçmişi hemen kalkar. */
 function planKapisiniYenile(mid) {
-    planArayuzKaldir();
-    if (mid == null || mid === "") return;
+    var sira = (window.__planYenileSira = (window.__planYenileSira || 0) + 1);
+    if (mid == null || mid === "") {
+        planArayuzKaldir();
+        return;
+    }
     var istenen = String(mid);
+    if (window.__planMid !== istenen) planArayuzKaldir();
     fetch("/giris/api/musteri/" + encodeURIComponent(istenen) + "/plan", { credentials: "same-origin" })
         .then(function (r) {
-            if (!r.ok) return null;
-            return r.json();
+            if (!r.ok) return { kod: r.status, j: null };
+            return r.json().then(function (j) { return { kod: r.status, j: j }; });
         })
-        .then(function (j) {
-            if (!j || !j.ok) return;
+        .then(function (pack) {
+            if (sira !== window.__planYenileSira) return;
             var simdi = String(planMusteriId() || "");
             if (simdi !== "" && simdi !== istenen) return;
-            planArayuzKur(istenen, j);
+            if (pack.kod === 401 || pack.kod === 403 || pack.kod === 404) {
+                planArayuzKaldir();
+                return;
+            }
+            if (!pack.j || !pack.j.ok) return;
+            planArayuzKur(istenen, pack.j);
         })
         .catch(function () {});
 }
 
 function planArayuzKur(mid, veri) {
     if (!planSecenekEklensin(true)) return;
+    window.__planMid = String(mid);
     window.__planSozBas = (veri && veri.sozlesme_baslangic) ? String(veri.sozlesme_baslangic).slice(0, 7) : "";
     var sel = document.getElementById("musteri_durum");
     if (sel && !sel.querySelector("option[value='plan']")) {
@@ -101,23 +121,32 @@ function planArayuzKur(mid, veri) {
         op.textContent = "Plan değiştir";
         sel.appendChild(op);
     }
-    planGecmisCiz(mid, veri || {});
+    planDugmesiHazirla();
     planModalHazirla();
+    planGecmisCiz(mid, veri || {});
 }
 
-function planGecmisCiz(mid, veri) {
+/* Durum seçicinin sağındaki küçük buton. Kapı açıkken hep görünür; aynı eleman ikinci kez oluşturulmaz. */
+function planDugmesiHazirla() {
     var sel = document.getElementById("musteri_durum");
-    var kutu = document.createElement("div");
-    kutu.id = "plan_gecmis_bolum";
-    /* .form-grid etiket|alan iki sütunludur. Kutu tek hücre kaplarsa sonraki etiketler alan sütununa kayar.
-       Tam genişlikli ayrı satır: sütun sayısı fark etmez, diğer satırların yapısı değişmez. */
-    kutu.style.gridColumn = "1 / -1";
-    kutu.style.minWidth = "0";
-    kutu.style.boxSizing = "border-box";
-    kutu.style.margin = "8px 0 12px";
-    kutu.style.padding = "8px";
-    kutu.style.border = "1px solid #2d4060";
-    kutu.style.borderRadius = "6px";
+    if (!sel || !sel.parentNode) return;
+    if (document.getElementById("plan_degistir_btn")) return;
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.id = "plan_degistir_btn";
+    btn.textContent = "Plan değiştir";
+    btn.title = "Plan geçmişi ve yeni plan";
+    btn.style.cssText = "flex:0 0 auto;padding:5px 10px;font-size:12px;border-radius:4px;border:1px solid #3d5070;"
+        + "background:#1b3a57;color:#e0f7fa;cursor:pointer;white-space:nowrap;font-family:inherit;";
+    btn.onclick = function () { planDegistirModalAc(); };
+    sel.parentNode.insertBefore(btn, sel.nextSibling);
+}
+
+/* Geçmiş listesi popup içindeki sabit kapta çizilir; her çizimde kap boşaltılır (ikinci kopya oluşamaz). */
+function planGecmisCiz(mid, veri) {
+    var kutu = document.getElementById("plan_gecmis_bolum");
+    if (!kutu) return;
+    kutu.textContent = "";
     var baslik = document.createElement("div");
     baslik.textContent = "Plan geçmişi";
     baslik.style.fontWeight = "600";
@@ -150,6 +179,7 @@ function planGecmisCiz(mid, veri) {
         satir.style.display = "flex";
         satir.style.gap = "8px";
         satir.style.alignItems = "center";
+        satir.style.flexWrap = "wrap";
         satir.style.fontSize = "12px";
         satir.style.marginBottom = "4px";
         var metin = document.createElement("span");
@@ -167,7 +197,6 @@ function planGecmisCiz(mid, veri) {
         }
         kutu.appendChild(satir);
     });
-    if (sel && sel.parentNode) sel.parentNode.insertBefore(kutu, sel.nextSibling);
 }
 
 function planModalHazirla() {
@@ -178,16 +207,20 @@ function planModalHazirla() {
     kok.style.position = "fixed";
     kok.style.inset = "0";
     kok.style.background = "rgba(0,0,0,.45)";
-    kok.style.zIndex = "80";
+    kok.style.zIndex = "12000";
     var kutu = document.createElement("div");
     kutu.style.background = "#0f2537";
     kutu.style.color = "#e0f7fa";
     kutu.style.maxWidth = "720px";
-    kutu.style.margin = "40px auto";
+    kutu.style.boxSizing = "border-box";
+    kutu.style.width = "calc(100% - 16px)";
+    kutu.style.margin = "4vh auto";
     kutu.style.padding = "16px";
     kutu.style.borderRadius = "8px";
-    kutu.style.maxHeight = "86vh";
-    kutu.style.overflow = "auto";
+    kutu.style.maxHeight = "92vh";
+    kutu.style.overflowY = "auto";
+    kutu.style.overflowX = "hidden";
+    kutu.style.overscrollBehavior = "contain";
     /* Etiket / alan / düğme stilleri satır içi: sayfa CSS'inden bağımsız, etiketler alanın üstünde ayrı satırda. */
     var E = "display:block;margin:8px 0 2px;font-size:12px;color:#b0bec5;";
     var G = "display:block;box-sizing:border-box;width:100%;max-width:280px;margin:0 0 4px;padding:6px 10px;"
@@ -198,7 +231,13 @@ function planModalHazirla() {
     kutu.style.fontFamily = "inherit";
     kutu.style.fontSize = "13px";
     kutu.innerHTML = ""
-        + "<div style=\"font-weight:600;font-size:15px;margin-bottom:6px;\">Plan değiştir</div>"
+        + "<div id=\"plan_baslik\" style=\"position:sticky;top:-16px;z-index:2;display:flex;align-items:center;justify-content:space-between;gap:8px;margin:-16px -16px 10px;padding:10px 16px;background:#0f2537;border-bottom:1px solid #2d4060;\">"
+        + "<div style=\"font-weight:600;font-size:15px;\">Plan değiştir</div>"
+        + "<button type=\"button\" id=\"plan_x\" aria-label=\"Kapat\" title=\"Kapat\" style=\"background:none;border:none;color:#b0bec5;font-size:24px;line-height:1;cursor:pointer;padding:0 4px;font-family:inherit;\">&times;</button>"
+        + "</div>"
+        + "<div id=\"plan_gecmis_bolum\" style=\"margin:0 0 10px;padding:8px;border:1px solid #2d4060;border-radius:6px;\"></div>"
+        + "<div id=\"plan_pasif_not\" role=\"status\" style=\"display:none;margin:0 0 10px;padding:8px;border:1px solid #ff9800;border-radius:4px;color:#ffcc80;\">Bu müşteri pasif: yeni plan kaydedilemez, yalnız plan geçmişi görüntülenir.</div>"
+        + "<div style=\"font-weight:600;margin:6px 0 2px;\">Yeni plan</div>"
         + "<label for=\"plan_gecerlilik\" style=\"" + E + "\">Geçerlilik ayı</label><input id=\"plan_gecerlilik\" type=\"month\" style=\"" + G + "\">"
         + "<label for=\"plan_yeni_net\" style=\"" + E + "\">Yeni aylık net</label><input id=\"plan_yeni_net\" type=\"number\" step=\"0.01\" style=\"" + G + "\">"
         + "<label for=\"plan_kdv\" style=\"" + E + "\">KDV oranı</label><input id=\"plan_kdv\" type=\"number\" step=\"0.01\" style=\"" + G + "\">"
@@ -231,6 +270,23 @@ function planModalHazirla() {
     kok.appendChild(kutu);
     document.body.appendChild(kok);
     document.getElementById("plan_kapat").onclick = planModalKapat;
+    document.getElementById("plan_x").onclick = planModalKapat;
+    /* Dışına tıklama: basış ve bırakış ikisi de arka plandaysa (kutu içinde başlayan metin seçimi kapatmaz). */
+    kok.addEventListener("mousedown", function (e) { kok.__basisDisarida = (e.target === kok); });
+    kok.addEventListener("click", function (e) {
+        if (e.target === kok && kok.__basisDisarida) planKapatIstek();
+    });
+    if (!window.__planEscKurulu) {
+        window.__planEscKurulu = true;
+        document.addEventListener("keydown", function (e) {
+            if (e.key !== "Escape" && e.keyCode !== 27) return;
+            var m = document.getElementById("plan_degistir_modal");
+            if (!m || m.style.display === "none") return;
+            e.preventDefault();
+            e.stopPropagation();
+            planKapatIstek();
+        }, true);
+    }
     document.getElementById("plan_onizle_btn").onclick = planOnizlemeIste;
     document.getElementById("plan_kaydet").onclick = planKaydet;
     document.getElementById("plan_kilit_onay").onchange = planKaydetDurumu;
@@ -264,6 +320,13 @@ function planOnizlemeSifirla() {
 }
 
 function planDegistirModalAc() {
+    /* Başka müşteriye geçilmişse eski müşterinin arayüzü kalkar, popup açılmaz. */
+    var simdiMid = planMusteriId();
+    if (window.__planMid && simdiMid != null && String(simdiMid) !== window.__planMid) {
+        planArayuzKaldir();
+        return;
+    }
+    if (!window.__planMid) return;
     planModalHazirla();
     var modal = document.getElementById("plan_degistir_modal");
     if (!modal) return;
@@ -296,12 +359,56 @@ function planDegistirModalAc() {
     if (document.getElementById("plan_banka") && bankaT) document.getElementById("plan_banka").value = bankaT.value || "";
     planHataGoster("");
     planOnizlemeSifirla();
+    var durSel = document.getElementById("musteri_durum");
+    var pasifNot = document.getElementById("plan_pasif_not");
+    if (pasifNot) pasifNot.style.display = (durSel && durSel.value === "pasif") ? "block" : "none";
     modal.style.display = "block";
+    var kutuEl = modal.firstChild;
+    if (kutuEl && kutuEl.scrollTop) kutuEl.scrollTop = 0;
+    window.__planTaban = planFormOzeti();
 }
 
+/* Formdaki kullanıcı girdileri; açılıştaki hâlinden farklıysa form "kirli". */
+function planFormOzeti() {
+    return ["plan_gecerlilik", "plan_yeni_net", "plan_kdv", "plan_odeme", "plan_nakit", "plan_banka"].map(function (id) {
+        var el = document.getElementById(id);
+        return el ? String(el.value) : "";
+    }).join("|");
+}
+
+function planFormKirliMi() {
+    return planFormOzeti() !== (window.__planTaban || "");
+}
+
+/* Form girdilerini ve önizlemeyi temizler; sonraki açılışta varsayılanlar yeniden doldurulur. */
+function planFormSifirla() {
+    ["plan_gecerlilik", "plan_yeni_net", "plan_nakit", "plan_banka"].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (el) el.value = "";
+    });
+    var ob = document.getElementById("plan_brut");
+    if (ob) ob.textContent = "—";
+    ["plan_uyarilar", "plan_onizleme"].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (el) el.textContent = "";
+    });
+    window.__planSonGovde = null;
+    planHataGoster("");
+    planOnizlemeSifirla();
+    window.__planTaban = "";
+}
+
+/* Kapat düğmesi ve X: doğrudan kapatır. */
 function planModalKapat() {
     var modal = document.getElementById("plan_degistir_modal");
     if (modal) modal.style.display = "none";
+    planFormSifirla();
+}
+
+/* ESC ve dışına tıklama: form değiştirilmişse kapatmadan önce basit onay. */
+function planKapatIstek() {
+    if (planFormKirliMi() && !window.confirm("Kaydedilmemiş plan bilgileri var. Kapatılsın mı?")) return;
+    planModalKapat();
 }
 
 function planGovde() {
@@ -675,7 +782,7 @@ function planIptalGonder(mid, planId, btn) {
     planIstekGonder("/giris/api/musteri/" + encodeURIComponent(mid) + "/plan/" + encodeURIComponent(planId) + "/iptal", {})
         .then(function (pack) {
             if (pack.ok && pack.j && pack.j.ok) {
-                planKayitSonrasi(mid);
+                planSayfaYenile(mid);
                 return;
             }
             if (planAcikPlanYok(pack)) {
@@ -690,8 +797,14 @@ function planIptalGonder(mid, planId, btn) {
         .then(kilitAc);
 }
 
+/* Plan kaydı sonrası popup kapanır ve sayfa yenilenir. */
 function planKayitSonrasi(mid) {
     planModalKapat();
+    planSayfaYenile(mid);
+}
+
+/* Geçmiş listesi sunucu cevabından yenilenir; grid/borç/ekstre güncellenir. Popup'a dokunmaz (İptal popup içinde kalır). */
+function planSayfaYenile(mid) {
     planKapisiniYenile(mid);
     if (typeof sozlesmelerAylikHizliYukle === "function") {
         try { sozlesmelerAylikHizliYukle(); } catch (_e) {}

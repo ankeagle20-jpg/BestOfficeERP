@@ -199,7 +199,6 @@ def _yeni_senaryolar(sayfa, app, gorunen, bu_ay):
     api._kilitler = lambda mid: [{"ay": a, "fatura_tutari": 1200.0, "kaynak": "fatura_tarihi"} for a in aylar]
     Durum.faturali = list(aylar)
     api._tahsil_haritasi = lambda mid: {}
-    sayfa.keyboard.press("Escape")
     sayfa.click("#plan_kapat")
     modal_ac()
     _doldur(sayfa, ay=bu_ay)

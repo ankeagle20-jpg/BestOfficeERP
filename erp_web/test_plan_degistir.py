@@ -847,12 +847,16 @@ def test_js():
     check("kapali secenek yok", 'value="plan"' not in parca and "Plan değiştir" not in parca)
     check("onchange karar", "musteriDurumSecildi(this.value)" in parca and "/durum" not in (ROOT / "static" / "js" / "plan_degistir.js").read_text(encoding="utf-8"))
     js_metin = (ROOT / "static" / "js" / "plan_degistir.js").read_text(encoding="utf-8")
-    kutu_blok = js_metin[js_metin.find('kutu.id = "plan_gecmis_bolum"'):][:600]
     check(
-        "gecmis kutusu form-grid'de tam genislikli ayri satir",
-        'kutu.style.gridColumn = "1 / -1"' in kutu_blok and "insertBefore(kutu, sel.nextSibling)" in js_metin,
+        "gecmis kutusu popup icinde sabit kap, form-grid'e eklenmez",
+        'id=\\"plan_gecmis_bolum\\"' in js_metin and 'kutu.id = "plan_gecmis_bolum"' not in js_metin
+        and "insertBefore(kutu, sel.nextSibling)" not in js_metin and "gridColumn" not in js_metin,
     )
-    check("script surumu artirildi", "js/plan_degistir.js', v=8" in html)
+    check(
+        "durum secicisi satir kabinda (dugme ayni grid hucresinde)",
+        'id="musteri_durum_satir"' in html and html.find('id="musteri_durum_satir"') < html.find('id="musteri_durum"') < html.find("</select>", html.find('id="musteri_durum"')),
+    )
+    check("script surumu artirildi", "js/plan_degistir.js', v=9" in html)
     check(
         "kaydet kilidi, hata kutusu ve ipucu js'te",
         "__planKaydediliyor" in js_metin
