@@ -2687,7 +2687,7 @@ def api_kyc_kaydet():
         odeme_duzeni_manuel_txt = (
             (data.get("odeme_duzeni_manuel") or "").strip()[:200] if _odemd == "manuel" else ""
         )
-        alanlar = musteri_durum_yaz_alanlari(data, kati=False)
+        alanlar = musteri_durum_yaz_alanlari(data, kati=False, oda_bosalt=False)
         durum_m = alanlar["durum"]
         aylik_kira = float(str(data.get("aylik_kira") or 0).replace(",", ".") or 0)
         yillik_kira = float(str(data.get("yillik_kira") or 0).replace(",", ".") or 0)
@@ -2868,7 +2868,7 @@ def api_kyc_kaydet():
                    uyruk=%s,
                    yetkili_tel=%s, yetkili_tel2=%s, yetkili_tel_aciklama=%s, yetkili_tel2_aciklama=%s, yetkili_email=%s, email=%s,
                    hizmet_turu=%s, duzenli_fatura=%s, aylik_kira=%s, yillik_kira=%s, sozlesme_no=%s, sozlesme_tarihi=%s, sozlesme_bitis=%s,
-                   kira_artis_tarihi=%s, kira_suresi_ay=%s, kira_nakit=%s, kira_banka=%s, kira_nakit_tutar=%s, kira_banka_tutar=%s, hazir_ofis_oda_no=%s,
+                   kira_artis_tarihi=%s, kira_suresi_ay=%s, kira_nakit=%s, kira_banka=%s, kira_nakit_tutar=%s, kira_banka_tutar=%s, hazir_ofis_oda_no=CASE WHEN %s THEN hazir_ofis_oda_no ELSE %s END,
                    evrak_imza_sirkuleri=%s, evrak_vergi_levhasi=%s, evrak_ticaret_sicil=%s, evrak_faaliyet_belgesi=%s,
                    evrak_kimlik_fotokopi=%s, evrak_ikametgah=%s, evrak_kase=%s, notlar=%s, tamamlanma_yuzdesi=%s,
                    odeme_duzeni=%s, odeme_duzeni_manuel=%s, updated_at=NOW()
@@ -2879,7 +2879,7 @@ def api_kyc_kaydet():
                  uyruk_val,
                  yetkili_tel, yetkili_tel2, yetkili_tel_aciklama, yetkili_tel2_aciklama, yetkili_email, email,
                  hizmet_turu, duzenli_fatura, aylik_kira, yillik_kira, sozlesme_no, sozlesme_tarihi, sozlesme_bitis,
-                 kira_artis_tarihi, kira_suresi_ay, kira_nakit, kira_banka, kira_nakit_tutar, kira_banka_tutar, hazir_oda_val,
+                 kira_artis_tarihi, kira_suresi_ay, kira_nakit, kira_banka, kira_nakit_tutar, kira_banka_tutar, durum_pasif, hazir_oda_val,
                  evrak_imza_sirkuleri, evrak_vergi_levhasi, evrak_ticaret_sicil, evrak_faaliyet_belgesi,
                  evrak_kimlik_fotokopi, evrak_ikametgah, evrak_kase, notlar, tamamlanma_yuzdesi,
                  _odemd, odeme_duzeni_manuel_txt or None, mevcut["id"])
@@ -2888,9 +2888,9 @@ def api_kyc_kaydet():
             if musteri_id:
                 execute(
                     """UPDATE customers SET name=%s, musteri_adi=%s, email=%s, phone=%s, address=%s, tax_number=%s,
-                       durum=%s, kapanis_tarihi=%s, kapanis_sonrasi_borc_ay=%s, is_active=%s, hizmet_turu=%s, hazir_ofis_oda_no=%s WHERE id=%s""",
+                       durum=%s, kapanis_tarihi=%s, kapanis_sonrasi_borc_ay=%s, is_active=%s, hizmet_turu=%s, hazir_ofis_oda_no=CASE WHEN %s THEN hazir_ofis_oda_no ELSE %s END WHERE id=%s""",
                     (sirket_unvani or None, musteri_adi, cust_row_email, yetkili_tel or None, yeni_adres or None, vergi_no or None,
-                     durum_m, kapanis_tarihi, alanlar["kapanis_sonrasi_borc_ay"], alanlar["is_active"], hizmet_turu, hazir_oda_val, musteri_id)
+                     durum_m, kapanis_tarihi, alanlar["kapanis_sonrasi_borc_ay"], alanlar["is_active"], hizmet_turu, durum_pasif, hazir_oda_val, musteri_id)
                 )
         else:
             if musteri_id:
@@ -2905,9 +2905,9 @@ def api_kyc_kaydet():
                     ), 409
                 execute(
                     """UPDATE customers SET name=%s, musteri_adi=%s, email=%s, phone=%s, address=%s, tax_number=%s,
-                       durum=%s, kapanis_tarihi=%s, kapanis_sonrasi_borc_ay=%s, is_active=%s, hizmet_turu=%s, hazir_ofis_oda_no=%s WHERE id=%s""",
+                       durum=%s, kapanis_tarihi=%s, kapanis_sonrasi_borc_ay=%s, is_active=%s, hizmet_turu=%s, hazir_ofis_oda_no=CASE WHEN %s THEN hazir_ofis_oda_no ELSE %s END WHERE id=%s""",
                     (sirket_unvani or None, musteri_adi, cust_row_email, yetkili_tel or None, yeni_adres or None, vergi_no or None,
-                     durum_m, kapanis_tarihi, alanlar["kapanis_sonrasi_borc_ay"], alanlar["is_active"], hizmet_turu, hazir_oda_val, musteri_id)
+                     durum_m, kapanis_tarihi, alanlar["kapanis_sonrasi_borc_ay"], alanlar["is_active"], hizmet_turu, durum_pasif, hazir_oda_val, musteri_id)
                 )
             else:
                 # Yeni müşteri oluştur (oda çakışması: kayıt öncesi, başka aktif kartta aynı oda var mı)

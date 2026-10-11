@@ -27,7 +27,7 @@ def test_yaz_alanlari():
     a = musteri_durum_yaz_alanlari({"durum": "aktif", "kapanis_tarihi": "2024-01-01", "kapanis_sonrasi_borc_ay": 2})
     check("pasif is_active false", p["is_active"] is False)
     check("pasif kapanis bugun", p["kapanis_tarihi"] == date.today())
-    check("pasif oda sil", p["oda_sil"] is True)
+    check("pasif oda sil varsayilan", p["oda_sil"] is True)
     check("aktif is_active true", a["is_active"] is True)
     check("aktif kapanis None", a["kapanis_tarihi"] is None)
     check("aktif borc ay None", a["kapanis_sonrasi_borc_ay"] is None)
@@ -41,18 +41,36 @@ def test_yaz_alanlari():
     check("kaydet plan->aktif", musteri_durum_yaz_alanlari({"durum": "plan"}, kati=False)["durum"] == "aktif")
     j = musteri_durum_yaz_json(p)
     check("json durum pasif", j["durum"] == "pasif" and j["is_active"] is False)
+    kart_p = musteri_durum_yaz_alanlari({"durum": "pasif"}, oda_bosalt=False)
+    check("kart pasif oda dokunma", kart_p["oda_sil"] is False)
+    check("kart pasif is_active", kart_p["is_active"] is False)
+    check("kart pasif durum", kart_p["durum"] == "pasif")
+    kart_a = musteri_durum_yaz_alanlari({"durum": "aktif"}, oda_bosalt=False)
+    check("kart aktif oda yazmaz", kart_a["oda_sil"] is False)
+    check("kart aktif is_active", kart_a["is_active"] is True)
+    durum_p = musteri_durum_yaz_alanlari({"durum": "pasif"}, kati=True, oda_bosalt=True)
+    check("durum ucu pasif oda sil", durum_p["oda_sil"] is True)
+    check("durum ucu pasif is_active", durum_p["is_active"] is False)
+    oda_mevcut = 215
+    check("kart pasif oda kaydi kalir", (None if kart_p["oda_sil"] else oda_mevcut) == 215)
+    check("durum ucu oda kaydi silinir", (None if durum_p["oda_sil"] else oda_mevcut) is None)
+    check("kart aktif oda kaydi kalir", (None if kart_a["oda_sil"] else oda_mevcut) == 215)
 
 
 def test_iki_uc_ayni():
     src = (ROOT / "routes" / "giris_routes.py").read_text(encoding="utf-8")
-    check("kaydet helper", "alanlar = musteri_durum_yaz_alanlari(data, kati=False)" in src)
-    check("durum ucu helper", "alanlar = musteri_durum_yaz_alanlari(data, kati=True)" in src)
+    check("kaydet helper", "alanlar = musteri_durum_yaz_alanlari(data, kati=False, oda_bosalt=False)" in src)
+    check("durum ucu helper", "alanlar = musteri_durum_yaz_alanlari(data, kati=True, oda_bosalt=True)" in src)
     check("kaydet is_active", "is_active = %s" in src and "kart_aktif" in src)
     kaydet = src[src.find("def kaydet"): src.find("def resim_yukle")]
     check("kaydet cevap durum", "musteri_durum_yaz_json(alanlar)" in kaydet)
+    check("kaydet oda kolonuna dokunmaz", "hazir_ofis_oda_no" not in kaydet)
+    durum_fn = src[src.find("def api_musteri_durum_guncelle"): src.find("def api_tahmini")]
+    check("durum ucu oda CASE", "hazir_ofis_oda_no = CASE WHEN %s THEN NULL ELSE hazir_ofis_oda_no END" in durum_fn)
     kyc = (ROOT / "routes" / "musteri_routes.py").read_text(encoding="utf-8")
-    check("kyc helper", "musteri_durum_yaz_alanlari(data, kati=False)" in kyc)
+    check("kyc helper", "musteri_durum_yaz_alanlari(data, kati=False, oda_bosalt=False)" in kyc)
     check("kyc is_active", "is_active=%s" in kyc)
+    check("kyc pasif oda korunur", "hazir_ofis_oda_no=CASE WHEN %s THEN hazir_ofis_oda_no ELSE %s END" in kyc)
     check("kyc ayri istek", "/musteriler/api/kyc/kaydet" not in kaydet)
 
 
@@ -160,7 +178,7 @@ def main():
         for ad in FAILS:
             print(" -", ad)
         raise SystemExit(1)
-    print("musteri_durum_kaydet ok", "checks", 12 + 6 + 7 + 1 + 4)
+    print("musteri_durum_kaydet ok", "checks", 23 + 10 + 9 + 1 + 4)
 
 
 if __name__ == "__main__":

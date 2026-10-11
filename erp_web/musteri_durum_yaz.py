@@ -45,11 +45,13 @@ def normalize_kapanis_sonrasi_borc_ay(data, durum: str | None = None):
     return val if 0 <= val <= 12 else None
 
 
-def musteri_durum_yaz_alanlari(data, *, kati: bool = False):
-    """durum + kapanış + is_active + oda sil. /kaydet ve /durum birebir aynı.
+def musteri_durum_yaz_alanlari(data, *, kati: bool = False, oda_bosalt: bool = True):
+    """durum + kapanış + is_active; oda_bosalt=True ise pasifte oda_sil.
 
     kati=True: durum aktif|pasif değilse None (400).
     kati=False: geçersiz durum aktif sayılır (kart kaydet varsayılanı).
+    oda_bosalt=True: /durum (pill/toplu) — pasifte oda NULL.
+    oda_bosalt=False: /giris/kaydet — oda kolonuna dokunma (oda_sil False).
     Pasifte boş kapanış → bugün. Aktifte kapanış alanları None, is_active True.
     """
     payload = dict(data or {})
@@ -68,7 +70,7 @@ def musteri_durum_yaz_alanlari(data, *, kati: bool = False):
         "kapanis_tarihi": kap,
         "kapanis_sonrasi_borc_ay": kap_borc,
         "is_active": dr == "aktif",
-        "oda_sil": dr == "pasif",
+        "oda_sil": bool(oda_bosalt) and dr == "pasif",
     }
 
 

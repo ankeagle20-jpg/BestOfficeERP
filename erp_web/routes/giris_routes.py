@@ -6591,7 +6591,7 @@ def api_hazir_ofis_durum():
 def api_musteri_durum_guncelle(mid):
     """customers.durum + kapanis_tarihi + kapanış sonrası ek borç ayı + is_active."""
     data = request.get_json(silent=True) or {}
-    alanlar = musteri_durum_yaz_alanlari(data, kati=True)
+    alanlar = musteri_durum_yaz_alanlari(data, kati=True, oda_bosalt=True)
     if not alanlar:
         return jsonify({"ok": False, "mesaj": "durum aktif veya pasif olmalıdır."}), 400
     ensure_customers_durum()
@@ -6822,12 +6822,11 @@ def kaydet():
             return jsonify({"ok": False, "mesaj": vergi_err}), 400
 
         musteri_id = data.get('id')
-        alanlar = musteri_durum_yaz_alanlari(data, kati=False)
+        alanlar = musteri_durum_yaz_alanlari(data, kati=False, oda_bosalt=False)
         dr = alanlar["durum"]
         kap = alanlar["kapanis_tarihi"]
         kap_borc_ay = alanlar["kapanis_sonrasi_borc_ay"]
         kart_aktif = alanlar["is_active"]
-        oda_sil = alanlar["oda_sil"]
         bh_raw = data.get("bizim_hesap")
         if isinstance(bh_raw, str):
             bizim_hesap_legacy = bh_raw.strip().lower() in ("1", "true", "yes", "evet", "on")
@@ -6857,7 +6856,6 @@ def kaydet():
                     kapanis_tarihi = %s,
                     kapanis_sonrasi_borc_ay = %s,
                     is_active = %s,
-                    hazir_ofis_oda_no = CASE WHEN %s THEN NULL ELSE hazir_ofis_oda_no END,
                     bizim_hesap = %s,
                     grup2_secimleri = %s,
                     calisma_sekli = %s
@@ -6875,7 +6873,6 @@ def kaydet():
                 kap,
                 kap_borc_ay,
                 kart_aktif,
-                oda_sil,
                 bizim_hesap,
                 g2_list,
                 calisma_sekli,
