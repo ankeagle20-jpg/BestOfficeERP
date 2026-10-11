@@ -43,12 +43,12 @@ function musteriDurumSecildi(secilen) {
     var karar = planDurumKarari(secilen, onceki, kapi);
     if (karar.modal) {
         if (sel) sel.value = karar.durum;
-        if (typeof syncDurumUI === "function") syncDurumUI(karar.durum, {});
+        if (typeof syncDurumUI === "function") syncDurumUI(karar.durum, (karar.durum === "pasif" && onceki !== "pasif") ? { yeniPasif: true } : {});
         planDegistirModalAc();
         return;
     }
     if (sel && (karar.durum === "aktif" || karar.durum === "pasif")) sel.setAttribute("data-onceki", karar.durum);
-    if (typeof syncDurumUI === "function") syncDurumUI(karar.durum, {});
+    if (typeof syncDurumUI === "function") syncDurumUI(karar.durum, (karar.durum === "pasif" && onceki !== "pasif") ? { yeniPasif: true } : {});
 }
 
 function planArayuzKaldir() {

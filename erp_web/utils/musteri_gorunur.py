@@ -56,3 +56,30 @@ def musteri_liste_gorunur_sql(alias: str | None = "c", *, pasifleri_dahil: bool 
 def musteri_liste_gorunur_and(alias: str | None = "c", *, pasifleri_dahil: bool = False) -> str:
     """WHERE zincirine eklenecek ' AND …' parçası (liste/arama)."""
     return " AND " + musteri_liste_gorunur_sql(alias, pasifleri_dahil=pasifleri_dahil)
+
+
+def request_musteri_durum_filtre(args=None):
+    """Query durum=aktif|pasif|hepsi|tumu. Yoksa None (eski pasifleri_dahil kalsın)."""
+    if args is None:
+        from flask import request
+
+        args = request.args
+    raw = (args.get("durum") or "").strip().lower()
+    if not raw:
+        return None
+    if raw in ("hepsi", "all", "tum", "tumu"):
+        return "hepsi"
+    if raw in ("aktif", "pasif"):
+        return raw
+    return None
+
+
+def musteri_liste_durum_sql(alias: str | None = "c", *, durum: str = "aktif") -> str:
+    """Arşiv gizli + durum=aktif|pasif|hepsi. Diğer ekranların pasifleri_dahil yoluna dokunmaz."""
+    parts = [musteri_gorunur_sql(alias)]
+    if durum == "pasif":
+        col = f"{alias}.durum" if alias else "durum"
+        parts.append(f"LOWER(TRIM(COALESCE({col}, ''))) = 'pasif'")
+    elif durum != "hepsi":
+        parts.append(musteri_pasif_degil_sql(alias))
+    return " AND ".join(parts)

@@ -7,6 +7,8 @@ from db import (
     execute_returning,
     ensure_faturalar_amount_columns,
     ensure_customers_durum,
+    ensure_customers_is_active,
+    ensure_customers_kapanis_sonrasi_borc_ay,
     ensure_customers_arsivli,
     ensure_customers_quick_edit_columns,
     ensure_musteri_kyc_uyruk_column,
@@ -36,6 +38,7 @@ import os
 import sys
 import re
 import threading
+from musteri_durum_yaz import musteri_durum_yaz_alanlari
 from services.cari_service import CariService
 
 _HAZIR_OFIS_ODA_MIN, _HAZIR_OFIS_ODA_MAX = 200, 230
@@ -52,6 +55,8 @@ def _kyc_kaydet_schema_ensure_once() -> None:
         if _kyc_kaydet_schema_ready:
             return
         ensure_customers_hazir_ofis_oda()
+        ensure_customers_is_active()
+        ensure_customers_kapanis_sonrasi_borc_ay()
         ensure_musteri_kyc_hazir_ofis_oda_no()
         ensure_musteri_kyc_kira_banka()
         ensure_musteri_kyc_odeme_duzeni()
@@ -2682,9 +2687,8 @@ def api_kyc_kaydet():
         odeme_duzeni_manuel_txt = (
             (data.get("odeme_duzeni_manuel") or "").strip()[:200] if _odemd == "manuel" else ""
         )
-        durum_m = (data.get("durum") or "aktif").strip().lower()
-        if durum_m not in ("aktif", "pasif"):
-            durum_m = "aktif"
+        alanlar = musteri_durum_yaz_alanlari(data, kati=False)
+        durum_m = alanlar["durum"]
         aylik_kira = float(str(data.get("aylik_kira") or 0).replace(",", ".") or 0)
         yillik_kira = float(str(data.get("yillik_kira") or 0).replace(",", ".") or 0)
         sozlesme_no = (data.get("sozlesme_no") or "").strip()
@@ -2710,7 +2714,7 @@ def api_kyc_kaydet():
         sozlesme_tarihi = parse_date(sozlesme_tarihi)
         sozlesme_bitis = parse_date(sozlesme_bitis)
         kira_artis_tarihi = parse_date(kira_artis_tarihi)
-        kapanis_tarihi = parse_date(data.get("kapanis_tarihi")) if durum_m == "pasif" else None
+        kapanis_tarihi = alanlar["kapanis_tarihi"]
 
         # Sözleşme başlangıcı bugünden >3 ay ilerideyse soft-onay gerekir
         # (FE: confirm → sozlesme_ileri_tarih_onay=true). Kesin üst sınır yok.
@@ -2884,9 +2888,9 @@ def api_kyc_kaydet():
             if musteri_id:
                 execute(
                     """UPDATE customers SET name=%s, musteri_adi=%s, email=%s, phone=%s, address=%s, tax_number=%s,
-                       durum=%s, kapanis_tarihi=%s, hizmet_turu=%s, hazir_ofis_oda_no=%s WHERE id=%s""",
+                       durum=%s, kapanis_tarihi=%s, kapanis_sonrasi_borc_ay=%s, is_active=%s, hizmet_turu=%s, hazir_ofis_oda_no=%s WHERE id=%s""",
                     (sirket_unvani or None, musteri_adi, cust_row_email, yetkili_tel or None, yeni_adres or None, vergi_no or None,
-                     durum_m, kapanis_tarihi, hizmet_turu, hazir_oda_val, musteri_id)
+                     durum_m, kapanis_tarihi, alanlar["kapanis_sonrasi_borc_ay"], alanlar["is_active"], hizmet_turu, hazir_oda_val, musteri_id)
                 )
         else:
             if musteri_id:
@@ -2901,9 +2905,9 @@ def api_kyc_kaydet():
                     ), 409
                 execute(
                     """UPDATE customers SET name=%s, musteri_adi=%s, email=%s, phone=%s, address=%s, tax_number=%s,
-                       durum=%s, kapanis_tarihi=%s, hizmet_turu=%s, hazir_ofis_oda_no=%s WHERE id=%s""",
+                       durum=%s, kapanis_tarihi=%s, kapanis_sonrasi_borc_ay=%s, is_active=%s, hizmet_turu=%s, hazir_ofis_oda_no=%s WHERE id=%s""",
                     (sirket_unvani or None, musteri_adi, cust_row_email, yetkili_tel or None, yeni_adres or None, vergi_no or None,
-                     durum_m, kapanis_tarihi, hizmet_turu, hazir_oda_val, musteri_id)
+                     durum_m, kapanis_tarihi, alanlar["kapanis_sonrasi_borc_ay"], alanlar["is_active"], hizmet_turu, hazir_oda_val, musteri_id)
                 )
             else:
                 # Yeni müşteri oluştur (oda çakışması: kayıt öncesi, başka aktif kartta aynı oda var mı)
@@ -2929,9 +2933,9 @@ def api_kyc_kaydet():
                             }
                         ), 409
                 cust = execute_returning(
-                    """INSERT INTO customers (name, musteri_adi, email, phone, address, notes, tax_number, durum, kapanis_tarihi, hizmet_turu, hazir_ofis_oda_no)
-                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
-                    (sirket_unvani or "Yeni Müşteri", musteri_adi, cust_row_email, yetkili_tel or None, yeni_adres or None, notlar or None, vergi_no or None, durum_m, kapanis_tarihi, hizmet_turu, hazir_oda_val)
+                    """INSERT INTO customers (name, musteri_adi, email, phone, address, notes, tax_number, durum, kapanis_tarihi, is_active, hizmet_turu, hazir_ofis_oda_no)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                    (sirket_unvani or "Yeni Müşteri", musteri_adi, cust_row_email, yetkili_tel or None, yeni_adres or None, notlar or None, vergi_no or None, durum_m, kapanis_tarihi, alanlar["is_active"], hizmet_turu, hazir_oda_val)
                 )
                 musteri_id = cust["id"] if cust else None
             row = execute_returning(

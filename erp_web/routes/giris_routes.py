@@ -51,6 +51,13 @@ from db import (
     sql_expr_fatura_not_gib_taslak,
     sql_expr_fatura_gib_no_tasindi_degil,
 )
+from musteri_durum_yaz import (
+    musteri_durum_yaz_alanlari,
+    musteri_durum_yaz_json,
+    normalize_kapanis_sonrasi_borc_ay as _normalize_kapanis_sonrasi_borc_ay,
+    normalize_musteri_durum_kapanis as _normalize_musteri_durum_kapanis,
+    parse_kapanis_tarihi as _parse_kapanis_tarihi,
+)
 from datetime import datetime, date, timedelta
 import calendar
 import contextvars
@@ -74,7 +81,9 @@ from utils.musteri_arama import (
 )
 from utils.musteri_gorunur import (
     musteri_gorunur_sql,
+    musteri_liste_durum_sql,
     musteri_liste_gorunur_sql,
+    request_musteri_durum_filtre,
     request_pasifleri_dahil,
 )
 import json
@@ -4379,6 +4388,9 @@ def _giris_kaydet_schema_ensure_once() -> None:
         ensure_customers_bizim_hesap()
         ensure_customers_grup2_secimleri()
         ensure_customers_kapanis_sonrasi_borc_ay()
+        ensure_customers_durum()
+        ensure_customers_is_active()
+        ensure_customers_hazir_ofis_oda()
         ensure_customers_calisma_sekli()
         ensure_grup2_etiketleri_table()
         _giris_kaydet_schema_ready = True
@@ -4932,8 +4944,12 @@ def api_musteriler():
 
     ensure_customers_arsivli()
     arama = (request.args.get('q') or '').strip()
-    pasifleri_dahil = request_pasifleri_dahil()
-    gor = musteri_liste_gorunur_sql("", pasifleri_dahil=pasifleri_dahil)
+    durum_f = request_musteri_durum_filtre()
+    if durum_f:
+        gor = musteri_liste_durum_sql("", durum=durum_f)
+    else:
+        pasifleri_dahil = request_pasifleri_dahil()
+        gor = musteri_liste_gorunur_sql("", pasifleri_dahil=pasifleri_dahil)
     base = (
         "SELECT id, name, musteri_adi, musteri_no, tax_number, phone, email, office_code, yetkili_kisi, "
         "NULLIF(TRIM(COALESCE(durum, '')), '') AS durum, "
@@ -5110,49 +5126,9 @@ def _musteri_yetkililer_listesi(musteri_id) -> list:
     return out
 
 
-def _parse_kapanis_tarihi(s):
-    """Formdan gelen kapanış tarihi (YYYY-MM-DD veya GG.AA.YYYY)."""
-    if not s:
-        return None
-    s = str(s).strip()[:10]
-    for fmt in ("%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y"):
-        try:
-            return datetime.strptime(s, fmt).date()
-        except ValueError:
-            continue
-    return None
-
-
-def _normalize_musteri_durum_kapanis(data):
-    """durum: aktif|pasif; pasif değilse kapanis_tarihi None."""
-    dr = (data.get("durum") or "aktif").strip().lower()
-    if dr not in ("aktif", "pasif"):
-        dr = "aktif"
-    kap = _parse_kapanis_tarihi(data.get("kapanis_tarihi")) if dr == "pasif" else None
-    return dr, kap
-
-
 def _normalize_calisma_sekli(data) -> str:
     v = str((data or {}).get("calisma_sekli") or "sirali").strip().lower()
     return v if v in ("sirali", "cari") else "sirali"
-
-
-def _normalize_kapanis_sonrasi_borc_ay(data, durum: str | None = None):
-    """Pasif: kapanış sonrası ek ay (0=sadece kapanış, 1..=kapanış+N), boş/None=Hepsi."""
-    dr = (durum or data.get("durum") or "aktif").strip().lower()
-    if dr != "pasif":
-        return None
-    raw = data.get("kapanis_sonrasi_borc_ay")
-    if raw is None:
-        return None
-    s = str(raw).strip()
-    if not s:
-        return None
-    try:
-        val = int(s)
-    except (TypeError, ValueError):
-        return None
-    return val if 0 <= val <= 12 else None
 
 
 def _aylik_grid_effective_bitis(kyc: dict, bit: date | None) -> date | None:
@@ -6270,6 +6246,7 @@ def api_musteri_komsu():
         return jsonify({"ok": False, "mesaj": "musteri_id ve yon=onceki|sonraki gerekli."}), 400
 
     aktif_only = str(request.args.get("aktif_only", "1")).lower() not in ("0", "false", "no", "hayir")
+    durum_f = request_musteri_durum_filtre()
 
     def _komsu_row(where_sql):
         return fetch_one(
@@ -6286,10 +6263,14 @@ def api_musteri_komsu():
             (mid,),
         )
 
-    where_aktif = "LOWER(COALESCE(durum, 'aktif')) <> 'pasif'"
-    row = _komsu_row(where_aktif) if aktif_only else _komsu_row("TRUE")
-    if not row and aktif_only:
-        row = _komsu_row("TRUE")
+    if durum_f:
+        where_liste = musteri_liste_durum_sql("", durum=durum_f)
+        row = _komsu_row(where_liste)
+    else:
+        where_aktif = "LOWER(COALESCE(durum, 'aktif')) <> 'pasif'"
+        row = _komsu_row(where_aktif) if aktif_only else _komsu_row("TRUE")
+        if not row and aktif_only:
+            row = _komsu_row("TRUE")
     if not row:
         return jsonify({"ok": False, "mesaj": "Müşteri bulunamadı."}), 404
 
@@ -6610,8 +6591,8 @@ def api_hazir_ofis_durum():
 def api_musteri_durum_guncelle(mid):
     """customers.durum + kapanis_tarihi + kapanış sonrası ek borç ayı + is_active."""
     data = request.get_json(silent=True) or {}
-    dr_in = (data.get("durum") or "").strip().lower()
-    if dr_in not in ("aktif", "pasif"):
+    alanlar = musteri_durum_yaz_alanlari(data, kati=True)
+    if not alanlar:
         return jsonify({"ok": False, "mesaj": "durum aktif veya pasif olmalıdır."}), 400
     ensure_customers_durum()
     ensure_customers_is_active()
@@ -6620,14 +6601,6 @@ def api_musteri_durum_guncelle(mid):
     row = fetch_one("SELECT id FROM customers WHERE id = %s", (mid,))
     if not row:
         return jsonify({"ok": False, "mesaj": "Müşteri bulunamadı."}), 404
-    payload = dict(data)
-    if dr_in == "pasif" and not (payload.get("kapanis_tarihi") or "").strip():
-        payload["kapanis_tarihi"] = date.today().isoformat()
-    dr2, kap = _normalize_musteri_durum_kapanis(payload)
-    kap_borc_ay = _normalize_kapanis_sonrasi_borc_ay(payload, dr2)
-    # Rapor / liste: COALESCE(is_active, TRUE) ve durum NOT IN (pasif, …) birlikte kullanılıyor.
-    kart_aktif = dr2 == "aktif"
-    pasif_mi = dr2 == "pasif"
     n = execute(
         """
         UPDATE customers
@@ -6635,7 +6608,14 @@ def api_musteri_durum_guncelle(mid):
             hazir_ofis_oda_no = CASE WHEN %s THEN NULL ELSE hazir_ofis_oda_no END
         WHERE id = %s
         """,
-        (dr2, kap, kap_borc_ay, kart_aktif, pasif_mi, int(mid)),
+        (
+            alanlar["durum"],
+            alanlar["kapanis_tarihi"],
+            alanlar["kapanis_sonrasi_borc_ay"],
+            alanlar["is_active"],
+            alanlar["oda_sil"],
+            int(mid),
+        ),
     )
     if n is None or int(n) < 1:
         logging.warning("api_musteri_durum_guncelle: UPDATE rowcount=%s mid=%s user=%s", n, mid, getattr(current_user, "id", None))
@@ -6645,15 +6625,10 @@ def api_musteri_durum_guncelle(mid):
                 "mesaj": "Kayıt güncellenemedi (satır yok veya veritabanı kısıtı). Yöneticiye bildirin.",
             }
         ), 409
-    kap_out = kap.isoformat() if kap else None
     _upsert_aylik_grid_cache(int(mid))
-    return jsonify({
-        "ok": True,
-        "durum": dr2,
-        "kapanis_tarihi": kap_out,
-        "kapanis_sonrasi_borc_ay": kap_borc_ay,
-        "is_active": kart_aktif,
-    })
+    out = musteri_durum_yaz_json(alanlar)
+    out["ok"] = True
+    return jsonify(out)
 
 
 @bp.route("/api/tahmini-musteri-no", methods=["GET"])
@@ -6847,8 +6822,12 @@ def kaydet():
             return jsonify({"ok": False, "mesaj": vergi_err}), 400
 
         musteri_id = data.get('id')
-        dr, kap = _normalize_musteri_durum_kapanis(data)
-        kap_borc_ay = _normalize_kapanis_sonrasi_borc_ay(data, dr)
+        alanlar = musteri_durum_yaz_alanlari(data, kati=False)
+        dr = alanlar["durum"]
+        kap = alanlar["kapanis_tarihi"]
+        kap_borc_ay = alanlar["kapanis_sonrasi_borc_ay"]
+        kart_aktif = alanlar["is_active"]
+        oda_sil = alanlar["oda_sil"]
         bh_raw = data.get("bizim_hesap")
         if isinstance(bh_raw, str):
             bizim_hesap_legacy = bh_raw.strip().lower() in ("1", "true", "yes", "evet", "on")
@@ -6877,6 +6856,8 @@ def kaydet():
                     durum = %s,
                     kapanis_tarihi = %s,
                     kapanis_sonrasi_borc_ay = %s,
+                    is_active = %s,
+                    hazir_ofis_oda_no = CASE WHEN %s THEN NULL ELSE hazir_ofis_oda_no END,
                     bizim_hesap = %s,
                     grup2_secimleri = %s,
                     calisma_sekli = %s
@@ -6893,13 +6874,17 @@ def kaydet():
                 dr,
                 kap,
                 kap_borc_ay,
+                kart_aktif,
+                oda_sil,
                 bizim_hesap,
                 g2_list,
                 calisma_sekli,
                 musteri_id
             ))
             _persist_musteri_kyc_uyruk(musteri_id, uyruk_yabanci)
-            return jsonify({'ok': True, 'mesaj': '✅ Müşteri güncellendi'})
+            out = {'ok': True, 'mesaj': '✅ Müşteri güncellendi'}
+            out.update(musteri_durum_yaz_json(alanlar))
+            return jsonify(out)
         else:
             # Yeni kayıt: musteri_no = id (aynı transaction); opsiyonel rezerve_edilen_id
             insert_params = (
@@ -6914,6 +6899,7 @@ def kaydet():
                 dr,
                 kap,
                 kap_borc_ay,
+                kart_aktif,
                 bizim_hesap,
                 g2_list,
                 calisma_sekli,
@@ -6950,9 +6936,9 @@ def kaydet():
                             INSERT INTO customers (
                                 id, name, musteri_adi, tax_number, phone, email, address,
                                 ev_adres, notes, durum, kapanis_tarihi, kapanis_sonrasi_borc_ay,
-                                bizim_hesap, grup2_secimleri, calisma_sekli, created_at
+                                is_active, bizim_hesap, grup2_secimleri, calisma_sekli, created_at
                             )
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
                             RETURNING id
                             """,
                             (rezerve_id,) + insert_params,
@@ -6963,9 +6949,9 @@ def kaydet():
                             INSERT INTO customers (
                                 name, musteri_adi, tax_number, phone, email, address,
                                 ev_adres, notes, durum, kapanis_tarihi, kapanis_sonrasi_borc_ay,
-                                bizim_hesap, grup2_secimleri, calisma_sekli, created_at
+                                is_active, bizim_hesap, grup2_secimleri, calisma_sekli, created_at
                             )
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
                             RETURNING id
                             """,
                             insert_params,
@@ -7001,7 +6987,9 @@ def kaydet():
                 kaydet_mesaj += f", müşteri no: {mno}"
             kaydet_mesaj += ")"
             _persist_musteri_kyc_uyruk(mid, uyruk_yabanci)
-            return jsonify({"ok": True, "mesaj": kaydet_mesaj, "id": mid, "musteri_no": mno})
+            out = {"ok": True, "mesaj": kaydet_mesaj, "id": mid, "musteri_no": mno}
+            out.update(musteri_durum_yaz_json(alanlar))
+            return jsonify(out)
 
     except Exception as e:
         return jsonify({'ok': False, 'mesaj': f'❌ Hata: {str(e)}'}), 400

@@ -2835,6 +2835,14 @@ button.auto-btn.whatsapp-hizmet-filter-btn.wa-hizmet-aktif {
         <span id="giris-secili-musteri-liste-not" class="giris-secili-liste-not" hidden></span>
     </div>
     <div class="giris-secili-toolbar-actions">
+        <label id="sozlesmeler-durum-filtre-wrap" class="giris-sozlesmeler-durum-filtre" style="display:none;align-items:center;gap:6px;color:#b0bec5;font-size:12px;white-space:nowrap;">
+            Durum
+            <select id="sozlesmeler-durum-filtre" aria-label="Sözleşmeler durum filtresi" onchange="if(typeof musteriAra==='function')musteriAra();">
+                <option value="aktif" selected>Aktif</option>
+                <option value="pasif">Pasif</option>
+                <option value="hepsi">Hepsi</option>
+            </select>
+        </label>
         <button type="button" class="giris-nav-prev" onclick="girisMusteriKomsuyaGit('onceki')">Önceki</button>
         <button type="button" class="giris-nav-next" onclick="girisMusteriKomsuyaGit('sonraki')">Sonraki</button>
         <button type="button" class="giris-cache-isit-btn" id="sozlesme-cache-isit-btn" onclick="sozlesmeAylikCacheIsit()"><i class="fa fa-bolt"></i> Cache'i ısıt (tümü)</button>
@@ -10295,6 +10303,8 @@ function sozlesmelerAylikSessizPollTick() {
 
 function switchTab(index) {
     currentTabIndex = index;
+    var _dfw = document.getElementById('sozlesmeler-durum-filtre-wrap');
+    if (_dfw) _dfw.style.display = (index === 6) ? 'inline-flex' : 'none';
     try {
         if (index >= 0 && index <= 14) localStorage.setItem('bestoffice_giris_tab_index', String(index));
     } catch (e) {}
@@ -23981,7 +23991,11 @@ function girisPasifleriDahilAktif() {
 function girisMusteriApiUrl(q) {
     var params = [];
     if (q != null && String(q).length) params.push('q=' + encodeURIComponent(String(q)));
-    if (girisPasifleriDahilAktif()) params.push('pasifleri_dahil=1');
+    if (typeof sozlesmelerDurumFiltreAktifMi === 'function' && sozlesmelerDurumFiltreAktifMi()) {
+        params.push('durum=' + encodeURIComponent(sozlesmelerDurumFiltreDegeri()));
+    } else if (girisPasifleriDahilAktif()) {
+        params.push('pasifleri_dahil=1');
+    }
     return '/giris/api/musteriler' + (params.length ? ('?' + params.join('&')) : '');
 }
 function girisPasifleriDahilBind() {
@@ -24159,6 +24173,9 @@ function girisMusteriKomsuyaGit(yon) {
     var navBtns = document.querySelectorAll('.giris-nav-prev, .giris-nav-next');
     navBtns.forEach(function (b) { b.disabled = true; });
     var url = '/giris/api/musteri-komsu?musteri_id=' + encodeURIComponent(selectedId) + '&yon=' + encodeURIComponent(yon);
+    if (typeof sozlesmelerDurumFiltreAktifMi === 'function' && sozlesmelerDurumFiltreAktifMi()) {
+        url += '&durum=' + encodeURIComponent(sozlesmelerDurumFiltreDegeri());
+    }
     fetch(url)
         .then(function (r) { return r.json(); })
         .then(function (j) {
@@ -24740,7 +24757,8 @@ function syncDurumUI(d, opts) {
             inp.value = '';
         }
     }
-    if (aySel) {
+    if (typeof kapanisAySecimYaz === 'function') kapanisAySecimYaz(aySel, opts, showKap);
+    else if (aySel) {
         if (showKap) {
             var kapAy = kapanisSonrasiBorcAyDegeri(opts.kapanisAy);
             aySel.value = (kapAy !== null && kapAy !== undefined) ? String(kapAy) : '';
@@ -25393,7 +25411,8 @@ function selectMusteri(id) {
         var __selSigFetch = __selSignal ? { signal: __selSignal } : {};
         var pBundle = girisFetchJsonCached(bundleUrl, { ttlMs: 0, persistMs: 0, swr: false, fetch: Object.assign({ credentials: 'same-origin' }, __selSigFetch) });
         /* Aşama 1 b′: hafif musteri isteği bundle ile paralel — form+ekstre grid beklemeden. */
-        var pMusteri = girisFetchJsonCached('/giris/api/musteri/' + midNav, { ttlMs: 60000, persistMs: 300000, swr: false, fetch: Object.assign({ credentials: 'same-origin' }, __selSigFetch) });
+        var __musteriTaze = (typeof girisMusteriDetayTazeMi === 'function') && girisMusteriDetayTazeMi(midNav);
+        var pMusteri = girisFetchJsonCached('/giris/api/musteri/' + midNav, { ttlMs: __musteriTaze ? 0 : 60000, persistMs: __musteriTaze ? 0 : 300000, swr: false, fetch: Object.assign({ credentials: 'same-origin' }, __selSigFetch) });
         sozlesmeAylikBorclananMusteriDegistir(midNav);
         /* Lazy ekstre: önceki carinin satırlarını temizle; otomatik warm-up yok. */
         try { if (typeof cariEkstreTablolariniTemizle === 'function') cariEkstreTablolariniTemizle(); } catch (_eEkLazy) {}
@@ -26766,6 +26785,10 @@ function girisMusteriPrefetch(mid, opts) {
         if (typeof girisFetchJsonCached === 'function') {
             var pfOpts = { ttlMs: 60000, persistMs: 300000 };
             if (opts && opts.signal) pfOpts.fetch = { signal: opts.signal };
+            if (typeof girisMusteriDetayTazeMi === 'function' && girisMusteriDetayTazeMi(k)) {
+                pfOpts.ttlMs = 0;
+                pfOpts.persistMs = 0;
+            }
             girisFetchJsonCached('/giris/api/musteri/' + k, pfOpts).catch(function (err) {
                 if (typeof girisSelectFetchAbortIs === 'function' && girisSelectFetchAbortIs(err)) {
                     try { window.__girisMusteriPrefetched.delete(k); } catch (_eDel) {}
@@ -27391,6 +27414,11 @@ async function kaydet(event) {
         }
 
         if (result.ok) {
+            try {
+                var midKay = result.id || data.id || (document.getElementById('musteri-id') || {}).value;
+                if (typeof girisMusteriKartOnbellekSil === 'function') girisMusteriKartOnbellekSil(midKay);
+                if (typeof girisMusteriKartOnbellekYazDurum === 'function') girisMusteriKartOnbellekYazDurum(midKay, result);
+            } catch (_eKartOnb) {}
             if (result.id) {
                 selectedId = result.id;
                 girisSonSeciliMusteriKaydet(result.id);
@@ -34353,7 +34381,8 @@ async function kiraBildirgesiWhatsApp() {
 }
 
 </script>
-<script src="{{ url_for('static', filename='js/plan_degistir.js', v=10) }}"></script>
+<script src="{{ url_for('static', filename='js/plan_degistir.js', v=11) }}"></script>
+<script src="{{ url_for('static', filename='js/musteri_durum.js', v=1) }}"></script>
 <script src="{{ url_for('static', filename='js/tahsilat-wa-durum.js', v=tahsilat_wa_js_surum) }}"></script>
 <script src="{{ url_for('static', filename='js/sozlesme-whatsapp.js', v=sozlesme_wa_js_surum) }}"></script>
 {% endblock %}
