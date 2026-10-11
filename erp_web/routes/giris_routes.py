@@ -13341,6 +13341,7 @@ def api_aylik_tutarlardan_borclandir():
 
     olusturulan = []
     atlanan = []
+    atlanan_aylar = []  # AUTO_INV zaten var: bu uc o ayi atlar (mukerrer korumasi)
     tahsil_silinen = []
     tahsil_silinen_aylar = set()
     # Planli kartta istemciden gelen (bayat olabilir) tutar yerine sunucudaki plan bruti kullanilir.
@@ -13384,6 +13385,16 @@ def api_aylik_tutarlardan_borclandir():
         marker = f"|AYLIK_TUTAR|{ay_anahtar}|"
         tah_marker_pat = f"%|AYLIK_TAH|{ay_anahtar}|%"
         pay_marker_pat = f"%|AYLIK_PAY|{ay_anahtar}=%"
+        # Mükerrer koruması: o ay için AUTO_INV (veya AYLIK_TUTAR) borç faturası varsa yeni satır açma.
+        # AYLIK_TUTAR olan ay aşağıdaki mevcut «zaten var» dalında eskisi gibi işlenir (burada dokunulmaz);
+        # yalnız AUTO_INV'li ay atlanır, tahsilat silme / fatura yazma / panel senkronu yapılmaz.
+        if _ay_has_aylik_borc_faturasi(musteri_id, yil, ay) and not fetch_one(
+            "SELECT id FROM faturalar WHERE musteri_id = %s AND COALESCE(notlar, '') LIKE %s LIMIT 1",
+            (musteri_id, f"%{marker}%"),
+        ):
+            atlanan.append({"neden": "auto_inv_zaten_var", "yil": yil, "ay": ay, "satir": raw})
+            atlanan_aylar.append(f"{yil:04d}-{ay:02d}")
+            continue
         # Borçlandırılan (veya zaten borçlu kabul edilen) ayda aylık tahsilat kaydı kalmasın:
         # ekstrede aynı ayda hem borç hem tahsil görünmesini önler.
         silinen_rows = fetch_all(
@@ -13492,7 +13503,20 @@ def api_aylik_tutarlardan_borclandir():
         fid = row.get("id") if row else None
         olusturulan.append({"id": fid, "fatura_no": fatura_no, "yil": yil, "ay": ay, "toplam": toplam, "guncellendi": False})
 
-    sync_musteri_panel_borclu_from_satirlar(musteri_id, satirlar)
+    if atlanan_aylar:
+        # Atlanan (AUTO_INV'li) aylar panel DB'ye yazılmaz: mevcut kayda dokunulmaz.
+        _atl = set(atlanan_aylar)
+        satirlar_sync = []
+        for _r in satirlar:
+            try:
+                _k = f"{int(_r.get('yil')):04d}-{int(_r.get('ay')):02d}"
+            except (TypeError, ValueError, AttributeError):
+                _k = None
+            if _k not in _atl:
+                satirlar_sync.append(_r)
+    else:
+        satirlar_sync = satirlar
+    sync_musteri_panel_borclu_from_satirlar(musteri_id, satirlar_sync)
     _invalidate_aylik_grid_payload_mem(int(musteri_id))
     try:
         execute(
@@ -13531,10 +13555,13 @@ def api_aylik_tutarlardan_borclandir():
             "yeniden borçlandırmak için önce «Borçtan çıkar» ile o ayların aylık faturasını silin "
             "(tahsilat kayıtları ayrı kalır)."
         )
+    if atlanan_aylar:
+        mesaj += " Şu aylar zaten borçlandırılmış, atlandı: " + ", ".join(atlanan_aylar) + "."
     return jsonify({
         "ok": True,
         "olusturulan": olusturulan,
         "atlanan": atlanan,
+        "atlanan_aylar": atlanan_aylar,
         "tahsil_silinen": tahsil_silinen,
         "tahsil_silinen_aylar": [
             {"yil": int(y), "ay": int(a)} for (y, a) in sorted(tahsil_silinen_aylar)

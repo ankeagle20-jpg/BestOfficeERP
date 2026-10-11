@@ -5,7 +5,7 @@ Kapsam: dropdown'dan popup, durum kaydina 'plan' gitmez, gecmis tek kopya (kart 
 buton her zaman gorunur, Onizle/Kaydet/ayni aya degistirme/Iptal/hata popup icinde, kirli formda ESC/dis tiklama onayi,
 kapi kapali musteride buton+popup yok, musteri degisince eski popup/plan kalmaz, pasif musteri notu,
 Grup/Grup 2 duzeni (rect karsilastirma) ve ekran goruntuleri (C:\\Users\\MSI\\plan_ui_ekran).
-ESKI_REF ortam degiskeni (varsayilan HEAD): eski index+js ile ayni senaryo -> cift gecmis KUSURU yeniden uretilir.
+ESKI_REF ortam degiskeni (varsayilan d80e1c1 = popup oncesi): eski index+js ile ayni senaryo -> cift gecmis KUSURU yeniden uretilir.
 Canli DB'ye ve .env'e gitmez."""
 import json
 import os
@@ -476,7 +476,7 @@ def kosu(html_yol=None, js_yol=None, etiket="YENI", tam=True, ekran=False):
 
 def main():
     sonuc = 0
-    ref = os.environ.get("ESKI_REF", "HEAD")
+    ref = os.environ.get("ESKI_REF", "d80e1c1")
     tmp = tempfile.gettempdir()
     eski_html = _git_dosya(ref, "erp_web/templates/giris/index.html", os.path.join(tmp, "_pp_index_eski.html"))
     eski_js = _git_dosya(ref, "erp_web/static/js/plan_degistir.js", os.path.join(tmp, "_pp_plan_eski.js"))

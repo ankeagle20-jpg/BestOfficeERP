@@ -17449,6 +17449,9 @@ function sozlesmeAylikBorclandir() {
             alert((res.j && res.j.mesaj) ? res.j.mesaj : 'Borçlandırma kaydedilemedi.');
             return;
         }
+        if (res.j.atlanan_aylar && res.j.atlanan_aylar.length) {
+            alert('Şu aylar zaten borçlandırılmış, atlandı: ' + res.j.atlanan_aylar.join(', '));
+        }
         (res.j.tahsil_silinen || []).forEach(function (row) {
             var k = (typeof sozlesmeAylikAyKeyFromYilAy === 'function') ? sozlesmeAylikAyKeyFromYilAy(row.yil, row.ay) : null;
             if (!k) return;
@@ -21194,6 +21197,8 @@ function girisTahsilatYilAySecilenleriBorclandir(donemYil, ev) {
                 sozlesmeAylikZorlaBorcluAyAnahtarlari.add(kn3);
             }
         }
+        var atlAyMetin = (res.j.atlanan_aylar && res.j.atlanan_aylar.length)
+            ? ('\nŞu aylar zaten borçlandırılmış, atlandı: ' + res.j.atlanan_aylar.join(', ')) : '';
         var yeniFatura = 0;
         var guncellenen = 0;
         o.forEach(function (row) {
@@ -21203,7 +21208,7 @@ function girisTahsilatYilAySecilenleriBorclandir(donemYil, ev) {
         var silinenN = (res.j.tahsil_silinen && res.j.tahsil_silinen.length) ? res.j.tahsil_silinen.length : 0;
         var borcDegismedi = (guncellenen > 0 && yeniFatura <= 0 && silinenN <= 0);
         if (borcDegismedi) {
-            alert(guncellenen + ' ay zaten borçlu; tahsilat veya ek değişiklik yok.\nGrid aynı kaldı.');
+            alert(guncellenen + ' ay zaten borçlu; tahsilat veya ek değişiklik yok.\nGrid aynı kaldı.' + atlAyMetin);
             if (typeof girisTahsilatYilAyPanelSecimleriTemizle === 'function') {
                 girisTahsilatYilAyPanelSecimleriTemizle(donemYil, ayKeys);
             }
@@ -21218,7 +21223,7 @@ function girisTahsilatYilAySecilenleriBorclandir(donemYil, ev) {
             if (guncellenen > 0) msgBr += ', ' + guncellenen + ' ay güncellendi';
             if (silinenN > 0) msgBr += ' (' + silinenN + ' tahsilat silindi)';
         }
-        alert(msgBr + (a.length ? '\nAtlanan: ' + a.length : ''));
+        alert(msgBr + (a.length ? '\nAtlanan: ' + a.length : '') + (msgBr.indexOf('zaten borçlandırılmış') < 0 ? atlAyMetin : ''));
         function panelBorcSatirlariniKoru() {
             var mapBr = girisTahsilatYilAyDetayMap(donemYil);
             ayKeys.forEach(function (ak) {
