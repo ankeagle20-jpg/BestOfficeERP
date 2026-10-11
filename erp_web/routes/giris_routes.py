@@ -4218,6 +4218,46 @@ def _ay_has_aylik_borc_faturasi(musteri_id, yil, ay) -> bool:
     return bool(row)
 
 
+def _ay_has_gecerli_aylik_borc_faturasi(musteri_id, yil, ay) -> bool:
+    """
+    Yalnız Grid «Borçlandır» ucu için: _ay_has_aylik_borc_faturasi ile aynı işaretler
+    (|AYLIK_TUTAR|YYYY-MM-01| / |AUTO_INV|YYYY-MM|), ama yalnız GEÇERLİ kayıtlar sayılır
+    (plan_fatura_kilit.kayit_gecerli: iptal/taslak durum, yon=gelen, |GIB_NO_TASINDI|,
+    «GİB durum: iptal», GİB izsiz «ERP durum: taslak» sayılmaz).
+    Ortak yardımcı (toplu borçlandırma, otomatik fatura job'u) değişmez.
+    Okuma hatasında (ör. sütun yok) güvenli taraf: eski yardımcıya düşer (atlar).
+    """
+    try:
+        mid = int(musteri_id)
+        y = int(yil)
+        m = int(ay)
+    except (TypeError, ValueError):
+        return False
+    if mid <= 0 or m < 1 or m > 12 or y < 1990 or y > 2100:
+        return False
+    from plan_fatura_kilit import kayit_gecerli
+
+    ay_bir = date(y, m, 1)
+    try:
+        rows = fetch_all(
+            """
+            SELECT id, COALESCE(notlar, '') AS notlar, COALESCE(durum, '') AS durum,
+                   COALESCE(yon, 'giden') AS yon, COALESCE(ettn, '') AS ettn
+            FROM faturalar
+            WHERE musteri_id = %s
+              AND (
+                    COALESCE(notlar, '') LIKE %s
+                 OR COALESCE(notlar, '') LIKE %s
+              )
+            """,
+            (mid, f"%|AYLIK_TUTAR|{ay_bir.isoformat()}|%", f"%|AUTO_INV|{ay_bir.strftime('%Y-%m')}|%"),
+        ) or []
+    except Exception:
+        logging.getLogger(__name__).exception("borclandir gecerli mukerrer okuma")
+        return _ay_has_aylik_borc_faturasi(musteri_id, yil, ay)
+    return any(kayit_gecerli(r) for r in rows)
+
+
 def _load_manual_fatura_ay_by_musteri():
     """AYLIK_TUTAR işaretçisi olmayan faturalar: müşteri + ay başı (manuel / dış kayıt)."""
     rows = fetch_all(
@@ -13388,7 +13428,7 @@ def api_aylik_tutarlardan_borclandir():
         # Mükerrer koruması: o ay için AUTO_INV (veya AYLIK_TUTAR) borç faturası varsa yeni satır açma.
         # AYLIK_TUTAR olan ay aşağıdaki mevcut «zaten var» dalında eskisi gibi işlenir (burada dokunulmaz);
         # yalnız AUTO_INV'li ay atlanır, tahsilat silme / fatura yazma / panel senkronu yapılmaz.
-        if _ay_has_aylik_borc_faturasi(musteri_id, yil, ay) and not fetch_one(
+        if _ay_has_gecerli_aylik_borc_faturasi(musteri_id, yil, ay) and not fetch_one(
             "SELECT id FROM faturalar WHERE musteri_id = %s AND COALESCE(notlar, '') LIKE %s LIMIT 1",
             (musteri_id, f"%{marker}%"),
         ):

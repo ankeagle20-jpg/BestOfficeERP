@@ -50,12 +50,20 @@ ISTEMCI = [
 ]
 
 
-def _icerir(notlar_listesi, kalip):
+def _norm(m):
+    if isinstance(m, str):
+        return {"id": 1, "notlar": m, "durum": "odenmedi", "yon": "giden", "ettn": ""}
+    n, du, yo = m
+    return {"id": 1, "notlar": n, "durum": du, "yon": yo, "ettn": ""}
+
+
+def _icerir(mevcut, kalip):
     ic = kalip.strip("%")
-    return any(ic in n for n in notlar_listesi)
+    return any(ic in _norm(m)["notlar"] for m in mevcut)
 
 
 KOS_YAZMA = []
+ESKI_YARDIMCI_CAGRILDI = []
 
 
 def kos(plan_var, satirlar=None, mevcut=None):
@@ -84,7 +92,8 @@ def kos(plan_var, satirlar=None, mevcut=None):
         if "tahsil_marker_var" in sql:  # mevcut AYLIK_TUTAR «zaten var» sorgusu
             return ({"id": 5, "fatura_no": "X", "ettn": None, "durum": "odenmedi", "tahsil_marker_var": False}
                     if _icerir(mevcut, params[4]) else None)
-        if params is not None and len(params) == 3:  # _ay_has_aylik_borc_faturasi
+        if params is not None and len(params) == 3:  # eski ortak _ay_has_aylik_borc_faturasi (artik bu uctan cagrilmaz)
+            ESKI_YARDIMCI_CAGRILDI.append(params)
             return {"id": 1} if (_icerir(mevcut, params[1]) or _icerir(mevcut, params[2])) else None
         if params is not None and sql.strip().startswith("SELECT id FROM faturalar WHERE musteri_id"):
             return {"id": 2} if _icerir(mevcut, params[1]) else None  # yeni AYLIK ayirici sorgu
@@ -93,6 +102,9 @@ def kos(plan_var, satirlar=None, mevcut=None):
     def fetch_all(sql, params=None):
         if "DELETE FROM tahsilatlar" in sql:
             silme.append(params)
+            return []
+        if "FROM faturalar" in sql and params is not None and len(params) == 3:  # dar gecerli-kayit yardimcisi
+            return [_norm(m) for m in mevcut if _icerir([m], params[1]) or _icerir([m], params[2])]
         return []
 
     fatura_belge_no.next_dahili_no = no
@@ -177,6 +189,40 @@ def sunucu():
           len(ap) == 1 and ap[0].get("zaten_vardi") is True and j.get("atlanan_aylar") == [] and ins == [], (j, ins))
 
 
+def gecersiz_kayitlar():
+    """Gecersiz AUTO_INV kayitlari (iptal/taslak/gelen/GIB_NO_TASINDI/GIB durum: iptal) ayi atlatmaz; gecerli atlatir."""
+    mart = "Mart 2026 otomatik kira faturasi|AUTO_INV|2026-03|"
+    senaryolar = [
+        ("iptal durumlu AUTO_INV", [(mart, "iptal", "giden")], False),
+        ("taslak durumlu AUTO_INV", [(mart, "taslak", "giden")], False),
+        ("gelen yonlu AUTO_INV", [(mart, "odenmedi", "gelen")], False),
+        ("|GIB_NO_TASINDI| isaretli AUTO_INV", [(mart + "|GIB_NO_TASINDI|", "odenmedi", "giden")], False),
+        ("'GİB durum: iptal' notlu AUTO_INV", [(mart + " GİB durum: iptal", "odenmedi", "giden")], False),
+        ("gecerli AUTO_INV (odenmedi)", [(mart, "odenmedi", "giden")], True),
+        ("gecerli AUTO_INV (odendi)", [(mart, "odendi", "giden")], True),
+        ("iptal + gecerli AUTO_INV birlikte", [(mart, "iptal", "giden"), (mart, "odenmedi", "giden")], True),
+    ]
+    for plan_var, et in ((False, "plansiz"), (True, "planli")):
+        for ad, mevcut, atlanmali in senaryolar:
+            ESKI_YARDIMCI_CAGRILDI.clear()
+            j, ins, sil, sen = kos(plan_var, satirlar=[ISTEMCI[0]], mevcut=mevcut)
+            yazildi = ay_say(ins, "2026-03-01") == 1
+            if atlanmali:
+                ok = j.get("atlanan_aylar") == ["2026-03"] and not yazildi and silme_say(sil, "2026-03-01") == 0
+            else:
+                ok = j.get("atlanan_aylar") == [] and yazildi and silme_say(sil, "2026-03-01") == 1 \
+                    and "zaten borçlandırılmış" not in j.get("mesaj", "")
+            check("%s: %s -> %s" % (et, ad, "atlanir" if atlanmali else "atlanmaz, yazilir"), ok, (j.get("atlanan_aylar"), ins, sil))
+    check("bu uc eski ortak yardimciyi cagirmiyor (davranisi degismedi)", not ESKI_YARDIMCI_CAGRILDI, ESKI_YARDIMCI_CAGRILDI)
+    # ortak yardimci aynen: iptal AUTO_INV'li ayda hala True (toplu borclandirma/otomatik job davranisi)
+    eski = gr.fetch_one
+    gr.fetch_one = lambda sql, params=None: {"id": 1}
+    try:
+        check("ortak _ay_has_aylik_borc_faturasi degismedi (kayit varsa True)", gr._ay_has_aylik_borc_faturasi(MID, 2026, 3) is True)
+    finally:
+        gr.fetch_one = eski
+
+
 def arayuz():
     html = (ROOT / "templates" / "giris" / "index.html").read_text(encoding="utf-8", errors="replace")
     n = len(re.findall(r"res\.j\.atlanan_aylar", html))
@@ -212,6 +258,7 @@ def arayuz():
 
 if __name__ == "__main__":
     sunucu()
+    gecersiz_kayitlar()
     arayuz()
     print("FAIL" if FAILS else "TUMU GECTI", FAILS)
     sys.exit(1 if FAILS else 0)
