@@ -61,6 +61,112 @@ def en_erken_plan_ayi(planlar) -> str | None:
     return en
 
 
+def satirlar_json_bos(raw) -> bool:
+    if raw is None:
+        return True
+    s = str(raw).strip()
+    if not s or s in ("[]", "null", "None"):
+        return True
+    try:
+        import json
+
+        v = json.loads(s) if s[:1] in "[{" else raw
+        return not v
+    except Exception:
+        return False
+
+
+def cek_gonderilen_plan_tutar(fatura, ov, execute_func, log=None) -> dict:
+    """Kapı geçmiş override ile WHERE id=? AND toplam=? günceller. notlar'a yazmaz."""
+    lg = log or _LOG
+    out = {"yazildi": False, "neden": "", "eski_toplam": None, "yeni_toplam": None, "ay": None}
+    if not isinstance(ov, dict):
+        out["neden"] = "kapi_disi"
+        return out
+    if not satirlar_json_bos((fatura or {}).get("satirlar_json")):
+        out["neden"] = "satirlar_dolu"
+        return out
+    try:
+        fid = int((fatura or {}).get("id") or 0)
+        eski = round(float((fatura or {}).get("toplam") or 0), 2)
+        yeni = round(float(ov.get("toplam") or 0), 2)
+        net = round(float(ov.get("birim_fiyat") or 0), 2)
+        kdv = ov.get("kdv")
+        kdv = round(float(kdv), 2) if kdv is not None else round(yeni - net, 2)
+    except (TypeError, ValueError):
+        out["neden"] = "satir_okunamadi"
+        return out
+    out["eski_toplam"] = eski
+    out["yeni_toplam"] = yeni
+    out["ay"] = ov.get("ay")
+    if fid <= 0 or yeni <= 0 or net <= 0:
+        out["neden"] = "satir_okunamadi"
+        return out
+    if abs(net + kdv - yeni) > 0.02:
+        out["neden"] = "kdv_uyumsuz"
+        return out
+    if abs(eski - yeni) < 0.02:
+        out["neden"] = "idempotent"
+        lg.info(
+            "gib plan tutar zaten uyumlu fatura_id=%s ay=%s eski_toplam=%s yeni_toplam=%s",
+            fid,
+            ov.get("ay"),
+            eski,
+            yeni,
+        )
+        return out
+    n = execute_func(
+        "UPDATE faturalar SET tutar = %s, kdv_tutar = %s, toplam = %s WHERE id = %s AND toplam = %s",
+        (net, kdv, yeni, fid, eski),
+    )
+    try:
+        n = int(n or 0)
+    except (TypeError, ValueError):
+        n = 0
+    if n > 0:
+        out["yazildi"] = True
+        out["neden"] = "yazildi"
+        lg.info(
+            "gib plan tutar cekildi fatura_id=%s ay=%s eski_toplam=%s yeni_toplam=%s",
+            fid,
+            ov.get("ay"),
+            eski,
+            yeni,
+        )
+    else:
+        out["neden"] = "where_tutmadi"
+        lg.info(
+            "gib plan tutar where tutmadi fatura_id=%s ay=%s eski_toplam=%s yeni_toplam=%s",
+            fid,
+            ov.get("ay"),
+            eski,
+            yeni,
+        )
+    return out
+
+
+def uygula_gib_basari_tutar(
+    fatura,
+    kyc,
+    *,
+    ay_sinif,
+    plan_satir,
+    planlar,
+    execute_func,
+    log=None,
+) -> dict:
+    """GİB başarı sonrası: kapı içiyse tutar/kdv/toplam çek. Yazma yalnız WHERE id+toplam."""
+    lg = log or _LOG
+    if not satirlar_json_bos((fatura or {}).get("satirlar_json")):
+        return {"yazildi": False, "neden": "satirlar_dolu", "eski_toplam": None, "yeni_toplam": None, "ay": None}
+    ov = plan_gib_override(
+        fatura, kyc, ay_sinif=ay_sinif, plan_satir=plan_satir, planlar=planlar, log=lg
+    )
+    if not ov:
+        return {"yazildi": False, "neden": "kapi_disi", "eski_toplam": None, "yeni_toplam": None, "ay": None}
+    return cek_gonderilen_plan_tutar(fatura, ov, execute_func, log=lg)
+
+
 def plan_gib_override(fatura, kyc, *, ay_sinif, plan_satir, planlar, log=None) -> dict | None:
     """K3 + aktif plan + AYLIK ise {birim_fiyat, kdv_orani, toplam, kdv, ay}. Aksi None."""
     lg = log or _LOG

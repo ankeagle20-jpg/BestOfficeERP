@@ -11831,6 +11831,35 @@ def api_gib_fatura_onizleme():
         return jsonify({"ok": False, "mesaj": "GİB önizleme hatası: " + err}), 500
 
 
+def _gib_olustur_sonrasi_plan_tutar_cek(fatura_id):
+    """GİB olustur başarısından sonra, kapı içi K3 AYLIK satırın tutarını plana çeker.
+
+    Yazma yoksa sessiz. notlar alanına dokunmaz; iz uygulama logunda.
+    """
+    try:
+        from gib_plan_tutar import cek_gonderilen_plan_tutar, yukle_plan_gib_satir
+
+        row = fetch_one(
+            """
+            SELECT id, musteri_id, notlar, satirlar_json,
+                   COALESCE(tutar, 0) AS tutar, COALESCE(kdv_tutar, 0) AS kdv_tutar,
+                   COALESCE(toplam, tutar, 0) AS toplam
+            FROM faturalar WHERE id = %s
+            """,
+            (int(fatura_id),),
+        )
+        if not row:
+            return
+        ov = yukle_plan_gib_satir(row)
+        if not ov:
+            return
+        cek_gonderilen_plan_tutar(row, ov, execute)
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "gib plan tutar cek fatura_id=%s", fatura_id
+        )
+
+
 @bp.route('/api/gib-fatura-olustur', methods=['POST'])
 @faturalar_gerekli
 def api_gib_fatura_olustur():
@@ -11854,9 +11883,11 @@ def api_gib_fatura_olustur():
             gib_ettn = _extract_gib_ettn_from_obj(st) or uuid
             gib_fatura_no = _extract_gib_fatura_no_from_obj(st)
             _fatura_gib_bilgilerini_yaz(fid, gib_ettn, gib_fatura_no, gib_asama="imzali")
+            _gib_olustur_sonrasi_plan_tutar_cek(fid)
             _gib_portal_html_indir_ve_kaydet(fid, gib_ettn or uuid, gib)
         else:
             _fatura_gib_bilgilerini_yaz(fid, uuid, None, gib_asama="imzali")
+            _gib_olustur_sonrasi_plan_tutar_cek(fid)
             _gib_portal_html_indir_ve_kaydet(fid, uuid, gib)
         return jsonify({"ok": True, "mesaj": "Fatura gerçek ETTN ile oluşturuldu/kesinleşti.", "fatura_id": fid, "onizleme_url": f"/faturalar/onizleme/{fid}"})
     except Exception as e:
