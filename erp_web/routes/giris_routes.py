@@ -4479,7 +4479,8 @@ def _ay_has_gecerli_aylik_borc_faturasi(musteri_id, yil, ay) -> bool:
     (|AYLIK_TUTAR|YYYY-MM-01| / |AUTO_INV|YYYY-MM|), ama yalnız GEÇERLİ kayıtlar sayılır
     (plan_fatura_kilit.kayit_gecerli: iptal/taslak durum, yon=gelen, |GIB_NO_TASINDI|,
     «GİB durum: iptal», GİB izsiz «ERP durum: taslak» sayılmaz).
-    Ortak yardımcı (toplu borçlandırma, otomatik fatura job'u) değişmez.
+    Grid borçlandırma ve otomatik fatura job'u bu yardımcıyı kullanır.
+    _ay_has_aylik_borc_faturasi (iptal satırı da sayar) ayrıca durur.
     Okuma hatasında (ör. sütun yok) güvenli taraf: eski yardımcıya düşer (atlar).
     """
     try:

@@ -7084,6 +7084,18 @@ def _auto_invoice_create_for_customer(musteri_id, run_month_date, belge="dahili"
     except Exception:
         run_month_date = date.today().replace(day=1)
     marker = f"|AUTO_INV|{run_month_date.strftime('%Y-%m')}|"
+    try:
+        from .giris_routes import _dondurma_ay_kumesi
+
+        ay_key = f"{run_month_date.year:04d}-{run_month_date.month:02d}"
+        if ay_key in (_dondurma_ay_kumesi(int(musteri_id)) or ()):
+            return {"status": "skip", "error": "Bu ay dondurulmuş, otomatik fatura oluşturulmaz."}
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "auto_invoice dondurma kontrolü musteri_id=%s ay=%s",
+            musteri_id,
+            run_month_date.strftime("%Y-%m"),
+        )
     mevcut = fetch_one(
         """SELECT id, fatura_no FROM faturalar
            WHERE musteri_id = %s
@@ -7095,8 +7107,8 @@ def _auto_invoice_create_for_customer(musteri_id, run_month_date, belge="dahili"
         return {"status": "exists", "fatura_id": mevcut.get("id"), "fatura_no": mevcut.get("fatura_no")}
     # Çapraz: aynı ayda AYLIK_TUTAR (veya başka AUTO_INV) varsa mükerrer açma.
     try:
-        from .giris_routes import _ay_has_aylik_borc_faturasi
-        if _ay_has_aylik_borc_faturasi(musteri_id, run_month_date.year, run_month_date.month):
+        from .giris_routes import _ay_has_gecerli_aylik_borc_faturasi
+        if _ay_has_gecerli_aylik_borc_faturasi(musteri_id, run_month_date.year, run_month_date.month):
             return {
                 "status": "exists",
                 "error": "Ay için AYLIK_TUTAR/AUTO_INV faturası zaten var.",

@@ -554,6 +554,178 @@ def test_borclandir_dondurma():
     gr.fetch_one = eski_one
 
 
+def test_auto_inv_dondurma():
+    from routes import faturalar_routes as fr
+    from routes import giris_routes as gr
+
+    yazildi = []
+    cagri = {"tutar": 0}
+    eski = {
+        "ret": fr.execute_returning,
+        "one": fr.fetch_one,
+        "don": gr._dondurma_ay_kumesi,
+        "tutar": fr._auto_month_amount_resolved,
+        "gone": gr.fetch_one,
+        "gall": gr.fetch_all,
+    }
+    fr.execute_returning = lambda *a, **k: yazildi.append(1) or {"id": 1}
+    def fatura_oku(sql, params=None):
+        if "FROM customers" in str(sql):
+            return {"id": 867, "name": "Test"}
+        return None
+
+    fr.fetch_one = fatura_oku
+    gr.fetch_one = lambda *a, **k: None
+    gr.fetch_all = lambda *a, **k: []
+    gr._dondurma_ay_kumesi = lambda mid: {"2026-11"} if int(mid) == 867 else set()
+
+    def tutar(*a, **k):
+        cagri["tutar"] += 1
+        return 0.0
+
+    fr._auto_month_amount_resolved = tutar
+    try:
+        out = fr._auto_invoice_create_for_customer(867, date(2026, 11, 1))
+        check(
+            "auto inv dondurma satiri yok",
+            out.get("status") == "skip" and "dondurulmuş" in str(out.get("error") or "") and not yazildi and cagri["tutar"] == 0,
+            out,
+        )
+        gr._dondurma_ay_kumesi = lambda mid: set()
+        var = fr._auto_invoice_create_for_customer(867, date(2026, 11, 1))
+        check("auto inv dondurma yoksa tutara bakar", cagri["tutar"] == 1 and not yazildi, (cagri["tutar"], var.get("status")))
+    finally:
+        fr.execute_returning = eski["ret"]
+        fr.fetch_one = eski["one"]
+        gr._dondurma_ay_kumesi = eski["don"]
+        fr._auto_month_amount_resolved = eski["tutar"]
+        gr.fetch_one = eski["gone"]
+        gr.fetch_all = eski["gall"]
+
+
+def test_kapi_ve_flask_tur():
+    import auth
+    import db as dbmod
+    from routes import giris_routes as gr
+    from test_plan_degistir import _app
+
+    class K:
+        is_authenticated = True
+        is_active = True
+        is_anonymous = False
+        id = 1
+
+        def get_id(self):
+            return "1"
+
+    eski_user = auth.current_user
+    auth.current_user = K()
+    bellek = Bellek()
+    eski_tx = da.plan_tx
+    eski_kim = da._kim
+    eski_sema = da._sema
+    eski_sinif = da._siniflar
+    eski_mus = da._musteri_ve_kyc
+    eski_zincir = plan_api._onizleme_zinciri
+    eski_all = dbmod.fetch_all
+    eski_one = gr.fetch_one
+    eski_gall = gr.fetch_all
+    da.plan_tx = lambda fn: fn(bellek.calistir, bellek.oku, bellek.oku)
+    da._kim = lambda: "test-kullanici"
+    da._sema = lambda: None
+    da._siniflar = lambda mid: {}
+    da._musteri_ve_kyc = lambda mid: (
+        {"id": int(mid), "durum": "aktif"},
+        {"sozlesme_tarihi": date(2023, 8, 1), "aylik_kira": 1000, "kdv_oran": 20},
+    )
+    plan_api._onizleme_zinciri = lambda mid, kyc: (_zincir(), [], None)
+    app = _app()
+    client = app.test_client()
+    try:
+        os.environ["PLAN_DEGISTIR_ENABLED"] = ""
+        os.environ["PLAN_DEGISTIR_MUSTERI_IDS"] = "867"
+        kapali = [
+            client.post("/giris/api/musteri/867/plan/dondurma", json={"baslangic_ay": "2024-08", "ay_sayisi": 1}),
+            client.get("/giris/api/musteri/867/plan/dondurma"),
+            client.post("/giris/api/musteri/867/plan/dondurma/1/iptal", json={}),
+        ]
+        check("kapi kapali uc ret", all(r.status_code == 404 for r in kapali) and not bellek.satirlar, [r.status_code for r in kapali])
+        os.environ["PLAN_DEGISTIR_ENABLED"] = "1"
+        os.environ["PLAN_DEGISTIR_MUSTERI_IDS"] = "7"
+        dis = [
+            client.post("/giris/api/musteri/867/plan/dondurma", json={"baslangic_ay": "2024-08", "ay_sayisi": 1}),
+            client.get("/giris/api/musteri/867/plan/dondurma"),
+            client.post("/giris/api/musteri/867/plan/dondurma/1/iptal", json={}),
+        ]
+        check("kapi baska musteri uc ret", all(r.status_code == 404 for r in dis) and not bellek.satirlar, [r.status_code for r in dis])
+        os.environ["PLAN_DEGISTIR_MUSTERI_IDS"] = "867"
+
+        def fetch_all(sql, params=None):
+            metin = str(sql)
+            if "FROM sozlesme_plan_dondurma" in metin and "ANY" in metin:
+                mids = [int(x) for x in (params[0] or [])] if params else []
+                return [
+                    {"musteri_id": s["musteri_id"], "dondurulan_aylar": s["dondurulan_aylar"]}
+                    for s in bellek.satirlar
+                    if not s.get("iptal_at") and int(s["musteri_id"]) in mids
+                ]
+            if "sozlesme_plan_dondurma" in metin:
+                return bellek.oku(sql, params) or []
+            return eski_all(sql, params)
+
+        def fetch_one(sql, params=None):
+            if "to_regclass" in str(sql) and params and "sozlesme_plan_dondurma" in str(params):
+                return {"t": "sozlesme_plan_dondurma"}
+            return eski_one(sql, params)
+
+        dbmod.fetch_all = fetch_all
+        gr.fetch_one = fetch_one
+        gr.fetch_all = fetch_all
+        tufe = {2024: {8: 10.0}, 2025: {8: 5.0}}
+        kyc = _kyc()
+        gr._plan_kutu_sifirla()
+        once = _hucre(gr._aylik_grid_compute(867, kyc, tufe, planlar=[]), 2024, 8)
+        once_tutar = float((once or {}).get("tutar_kdv_dahil") or 0)
+        check("flask tur once tutar", once_tutar > 0, once_tutar)
+        kayit = client.post(
+            "/giris/api/musteri/867/plan/dondurma",
+            json={"baslangic_ay": "2024-08", "ay_sayisi": 1, "musteri_id": 867},
+        )
+        check("flask tur kayit", kayit.status_code == 200 and len(bellek.satirlar) == 1, kayit.status_code)
+        gr._plan_kutu_sifirla()
+        sifir = _hucre(gr._aylik_grid_compute(867, kyc, tufe, planlar=[]), 2024, 8)
+        check("flask tur grid 0", sifir and float(sifir.get("tutar_kdv_dahil") or 0) == 0, sifir)
+        did = bellek.satirlar[0]["id"]
+        iptal = client.post("/giris/api/musteri/867/plan/dondurma/%s/iptal" % did, json={"musteri_id": 867})
+        check("flask tur iptal", iptal.status_code == 200 and bellek.satirlar[0].get("iptal_at"), iptal.status_code)
+        gr._plan_kutu_sifirla()
+        geri = _hucre(gr._aylik_grid_compute(867, kyc, tufe, planlar=[]), 2024, 8)
+        check("flask tur eski tutar", geri and float(geri.get("tutar_kdv_dahil") or 0) == once_tutar, (geri or {}).get("tutar_kdv_dahil"))
+        sql_once = len(bellek.sql)
+        liste = client.get("/giris/api/musteri/867/plan/dondurma")
+        govde = liste.get_json() or {}
+        check("flask tur liste iptal", liste.status_code == 200 and govde.get("aktif") == [] and len(govde.get("gecmis") or []) == 1)
+        check(
+            "flask tur liste create yok",
+            any(str(s).lstrip().startswith("CREATE") for s in bellek.sql[:sql_once])
+            and not any(str(s).lstrip().startswith("CREATE") for s in bellek.sql[sql_once:]),
+        )
+    finally:
+        auth.current_user = eski_user
+        da.plan_tx = eski_tx
+        da._kim = eski_kim
+        da._sema = eski_sema
+        da._siniflar = eski_sinif
+        da._musteri_ve_kyc = eski_mus
+        plan_api._onizleme_zinciri = eski_zincir
+        dbmod.fetch_all = eski_all
+        gr.fetch_one = eski_one
+        gr.fetch_all = eski_gall
+        gr._plan_kutu_sifirla()
+        os.environ.pop("PLAN_DEGISTIR_ENABLED", None)
+        os.environ.pop("PLAN_DEGISTIR_MUSTERI_IDS", None)
+
+
 def main():
     test_plansiz_diger_aylar_ayni()
     test_tufe_sonraki_ay()
@@ -566,6 +738,8 @@ def main():
     test_on_kontrol_ab()
     test_tuketiciler()
     test_borclandir_dondurma()
+    test_auto_inv_dondurma()
+    test_kapi_ve_flask_tur()
     if FAILS:
         print("FAIL", len(FAILS))
         for ad in FAILS:
