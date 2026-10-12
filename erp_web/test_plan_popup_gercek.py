@@ -448,7 +448,7 @@ def kosu(html_yol=None, js_yol=None, etiket="YENI", tam=True, ekran=False):
 
         # ---------------- 12) Grup / Grup 2 duzeni kaymaz ----------------
         acik_rects = rects(s)
-        farklar = {k: (acik_rects.get(k), kapali_rects.get(k)) for k in set(acik_rects) | set(kapali_rects) if k != "plan_degistir_btn" and acik_rects.get(k) != kapali_rects.get(k)}
+        farklar = {k: (acik_rects.get(k), kapali_rects.get(k)) for k in set(acik_rects) | set(kapali_rects) if k not in ("plan_degistir_btn", "plan_dondur_btn") and acik_rects.get(k) != kapali_rects.get(k)}
         check("form-grid elemanlari konumu: plan kapisi acik == kapali (Grup/Grup 2 dahil)", not farklar, dict(list(farklar.items())[:6]))
         check("Grup / Grup 2 elemanlari bulundu", any("grup" in k for k in acik_rects), sorted(k for k in acik_rects if "grup" in k)[:6])
         if ekran:

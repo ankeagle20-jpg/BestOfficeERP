@@ -844,7 +844,7 @@ def test_js():
     html = (ROOT / "templates" / "giris" / "index.html").read_text(encoding="utf-8")
     i = html.find('id="musteri_durum"')
     parca = html[i:html.find("</select>", i)]
-    check("kapali secenek yok", 'value="plan"' not in parca and "Plan değiştir" not in parca)
+    check("kapali secenek yok", 'value="plan"' not in parca and "Plan değiştir" not in parca and 'value="dondur"' not in parca)
     check("onchange karar", "musteriDurumSecildi(this.value)" in parca and "/durum" not in (ROOT / "static" / "js" / "plan_degistir.js").read_text(encoding="utf-8"))
     js_metin = (ROOT / "static" / "js" / "plan_degistir.js").read_text(encoding="utf-8")
     check(
@@ -917,6 +917,10 @@ const kapali = m.planDurumKarari('plan', 'aktif', false);
 if (!(plan.modal && plan.kaydetDurum === false && plan.durum === 'aktif')) process.exit(2);
 if (!(pasif.modal === false && pasif.kaydetDurum === true && pasif.durum === 'pasif')) process.exit(3);
 if (!(kapali.goster === false && kapali.modal === false && m.planSecenekEklensin(false) === false)) process.exit(4);
+const don = m.planDurumKarari('dondur', 'aktif', true);
+const donKapali = m.planDurumKarari('dondur', 'aktif', false);
+if (!(don.modal && don.dondur === true && don.kaydetDurum === false && don.durum === 'aktif')) process.exit(7);
+if (!(donKapali.goster === false && donKapali.modal === false)) process.exit(8);
 if (m.planIptalEdilebilir('2026-11-01', '2026-10-09') !== true) process.exit(5);
 if (m.planIptalEdilebilir('2026-09-01', '2026-10-09') !== true) process.exit(6);
 if (m.planIptalEdilebilir('2026-10-01', '2026-10-09') !== true) process.exit(15);
