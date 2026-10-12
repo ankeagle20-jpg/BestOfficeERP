@@ -108,13 +108,39 @@ def _odenen_haritasi(mid, zincir, planlar, aday_aylar):
     return out
 
 
-def _onizleme_hesap(mid, kyc, bas, n):
+def _eski_dondurma_aylari(mid, data) -> set:
+    """Düzenlenen açık kaydın ayları. Okuma; ensure yok. Kayıt yoksa boş küme."""
+    ham = (data or {}).get("duzenlenen_dondurma_id")
+    if ham in (None, ""):
+        return set()
+    try:
+        pid = int(ham)
+    except (TypeError, ValueError):
+        return set()
+    try:
+        from db import fetch_one
+
+        row = fetch_one(SQL_BY_ID, (pid,))
+    except Exception:
+        _LOG.exception("eski dondurma okunamadi")
+        return set()
+    if not row or row.get("iptal_at") or row.get("silindi_at"):
+        return set()
+    if int(row.get("musteri_id") or 0) != int(mid):
+        return set()
+    from sozlesme_plan_dondurma_depo import _json_list
+
+    return {str(a)[:7] for a in _json_list(row.get("dondurulan_aylar")) if a}
+
+
+def _onizleme_hesap(mid, kyc, bas, n, haric_aylar=None):
     siniflar = _siniflar(mid)
     zincir, planlar = _zincir_ve_plan(mid, kyc)
     if not zincir:
         raise ValueError("Sözleşme zinciri hesaplanamadı.")
     aday = ay_listesi(bas, n)
-    odenen = _odenen_haritasi(mid, zincir, planlar, aday)
+    haric = {str(a)[:7] for a in aday} | {str(a)[:7] for a in (haric_aylar or set())}
+    odenen = _odenen_haritasi(mid, zincir, planlar, haric)
     from routes.giris_routes import AYLIK_GRID_TAM_ODENDI_TOLERANS
 
     return dondurma_onizleme(
@@ -150,7 +176,7 @@ def dondurma_onizleme_yanit(mid):
     if soz and bas < soz:
         return jsonify({"ok": False, "mesaj": "Başlangıç ayı sözleşme başlangıcından önce olamaz."}), 400
     try:
-        onizleme = _onizleme_hesap(mid, kyc, bas, n)
+        onizleme = _onizleme_hesap(mid, kyc, bas, n, _eski_dondurma_aylari(mid, data))
     except ValueError as exc:
         return jsonify({"ok": False, "mesaj": str(exc)}), 400
     except Exception:
@@ -207,7 +233,7 @@ def dondurma_ekle_yanit(mid):
     if soz and bas < soz:
         return jsonify({"ok": False, "mesaj": "Başlangıç ayı sözleşme başlangıcından önce olamaz."}), 400
     try:
-        onizleme = _onizleme_hesap(mid, kyc, bas, n)
+        onizleme = _onizleme_hesap(mid, kyc, bas, n, _eski_dondurma_aylari(mid, data))
     except ValueError as exc:
         return jsonify({"ok": False, "mesaj": str(exc)}), 400
     except Exception:
@@ -217,8 +243,25 @@ def dondurma_ekle_yanit(mid):
         return jsonify({"ok": False, "mesaj": "Dondurulacak ay yok.", "atlanan_aylar": onizleme["atlanan_aylar"]}), 400
 
     def islem(calistir, oku_bir, oku_cok):
+        from audit_log import anlik_al, audit_yaz
+
         _ensure_sema(calistir)
-        return dondurma_ekle(
+        anlik = None
+        kaynak = data.get("duzenlenen_dondurma_id")
+        if kaynak not in (None, ""):
+            mevcut = oku_bir(SQL_BY_ID, (int(kaynak),))
+            if isinstance(mevcut, list):
+                mevcut = mevcut[0] if mevcut else None
+            if not mevcut or mevcut.get("iptal_at") or mevcut.get("silindi_at"):
+                raise DondurmaYok("acik dondurma yok")
+            if int(mevcut.get("musteri_id") or 0) != int(mid):
+                raise PermissionError("mid")
+            anlik = anlik_al(
+                mevcut,
+                ("id", "musteri_id", "baslangic_ay", "ay_sayisi", "dondurulan_aylar"),
+            )
+            dondurma_iptal(calistir, oku_bir, dondurma_id=int(kaynak), iptal_eden=_kim())
+        row = dondurma_ekle(
             calistir,
             oku_cok,
             musteri_id=int(mid),
@@ -228,9 +271,24 @@ def dondurma_ekle_yanit(mid):
             atlanan_aylar=onizleme["atlanan_aylar"],
             olusturan=_kim(),
         )
+        if anlik:
+            audit_yaz(
+                calistir,
+                olay="dondurma_duzenle",
+                varlik="sozlesme_plan_dondurma",
+                kayit_id=anlik.get("id"),
+                musteri_id=mid,
+                kullanici=_kim(),
+                anlik=anlik,
+            )
+        return row
 
     try:
         row = plan_tx(islem)
+    except PermissionError:
+        return _yok()
+    except DondurmaYok:
+        return jsonify({"ok": False, "mesaj": "Açık dondurma yok."}), 404
     except DondurmaCakisma:
         return jsonify({"ok": False, "mesaj": "Bu aralıkta açık bir dondurma zaten var."}), 409
     except ValueError as exc:
@@ -263,7 +321,23 @@ def dondurma_iptal_yanit(mid, dondurma_id):
             raise DondurmaYok("acik dondurma yok")
         if int(mevcut.get("musteri_id") or 0) != int(mid):
             raise PermissionError("mid")
-        return dondurma_iptal(calistir, oku_bir, dondurma_id=int(dondurma_id), iptal_eden=_kim())
+        from audit_log import anlik_al, audit_yaz
+
+        anlik = anlik_al(
+            mevcut,
+            ("id", "musteri_id", "baslangic_ay", "ay_sayisi", "dondurulan_aylar"),
+        )
+        row = dondurma_iptal(calistir, oku_bir, dondurma_id=int(dondurma_id), iptal_eden=_kim())
+        audit_yaz(
+            calistir,
+            olay="dondurma_kaldir",
+            varlik="sozlesme_plan_dondurma",
+            kayit_id=anlik.get("id"),
+            musteri_id=mid,
+            kullanici=_kim(),
+            anlik=anlik,
+        )
+        return row
 
     try:
         row = plan_tx(islem)
@@ -279,6 +353,56 @@ def dondurma_iptal_yanit(mid, dondurma_id):
     return jsonify({"ok": True, "dondurma": _json_plan(row)})
 
 
+def dondurma_sil_yanit(mid, dondurma_id):
+    if not _kapi_acik(mid):
+        return _kapali()
+    data = request.get_json(silent=True) or {}
+    if _mid_uyusmaz(mid, data):
+        return _yok()
+    musteri, _kyc = _musteri_ve_kyc(mid)
+    if not musteri:
+        return _yok()
+
+    def islem(calistir, oku_bir, _oku_cok):
+        from audit_log import anlik_al, audit_yaz
+        from sozlesme_plan_dondurma_depo import dondurma_sil
+
+        _ensure_sema(calistir)
+        mevcut = oku_bir(SQL_BY_ID, (int(dondurma_id),))
+        if isinstance(mevcut, list):
+            mevcut = mevcut[0] if mevcut else None
+        if not mevcut or mevcut.get("silindi_at"):
+            raise DondurmaYok("dondurma yok")
+        if int(mevcut.get("musteri_id") or 0) != int(mid):
+            raise PermissionError("mid")
+        anlik = anlik_al(
+            mevcut,
+            ("id", "musteri_id", "baslangic_ay", "ay_sayisi", "dondurulan_aylar"),
+        )
+        row, _acikti = dondurma_sil(calistir, oku_bir, dondurma_id=int(dondurma_id), silen=_kim())
+        audit_yaz(
+            calistir,
+            olay="dondurma_sil",
+            varlik="sozlesme_plan_dondurma",
+            kayit_id=anlik.get("id"),
+            musteri_id=mid,
+            kullanici=_kim(),
+            anlik=anlik,
+        )
+        return row
+
+    try:
+        row = plan_tx(islem)
+    except PermissionError:
+        return _yok()
+    except DondurmaYok:
+        return jsonify({"ok": False, "mesaj": "Dondurma yok."}), 404
+    except Exception:
+        _LOG.exception("dondurma sil")
+        return jsonify({"ok": False, "mesaj": "Dondurma gizlenemedi."}), 500
+    return jsonify({"ok": True, "dondurma": _json_plan(row)})
+
+
 def dondurma_rotalarini_bagla(bp):
     @bp.route("/api/musteri/<int:mid>/plan/dondurma/onizleme", methods=["POST"])
     @giris_gerekli
@@ -289,6 +413,11 @@ def dondurma_rotalarini_bagla(bp):
     @giris_gerekli
     def api_musteri_plan_dondurma_iptal(mid, dondurma_id):
         return dondurma_iptal_yanit(mid, dondurma_id)
+
+    @bp.route("/api/musteri/<int:mid>/plan/dondurma/<int:dondurma_id>/sil", methods=["POST"])
+    @giris_gerekli
+    def api_musteri_plan_dondurma_sil(mid, dondurma_id):
+        return dondurma_sil_yanit(mid, dondurma_id)
 
     @bp.route("/api/musteri/<int:mid>/plan/dondurma", methods=["GET", "POST"])
     @giris_gerekli

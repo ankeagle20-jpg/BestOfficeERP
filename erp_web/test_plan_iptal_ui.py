@@ -61,7 +61,7 @@ def senaryolar(sayfa, app, gorunen, diyalog):
                 s["iptal_at"], s["iptal_eden"] = datetime(2026, 10, 9, 12, 0, 0), "baska-sekme"
         n0 = len(gorunen)
         d0 = len(diyalog)
-        sayfa.evaluate("document.querySelector('#plan_gecmis_bolum button').click()")
+        sayfa.evaluate("document.querySelector('#plan_gecmis_bolum [data-plan-islem=\"kaldir\"]').click(); document.getElementById('plan_onay_evet').click();")
         sayfa.wait_for_function("() => { var b = document.getElementById('plan_gecmis_bolum'); return b && b.textContent.indexOf('zaten') >= 0; }", timeout=5000)
         iptal = [g for g in gorunen[n0:] if g[0] == "POST" and g[1].endswith("/plan/41/iptal")]
         liste_get = [g for g in gorunen[n0:] if g[0] == "GET" and g[1] == "/giris/api/musteri/7/plan"]
@@ -79,8 +79,10 @@ def senaryolar(sayfa, app, gorunen, diyalog):
         n0 = len(gorunen)
         durum = sayfa.evaluate(
             """() => {
-                const b = document.querySelector('#plan_gecmis_bolum button');
-                b.click(); const k1 = b.disabled; b.click(); b.click();
+                const b = document.querySelector('#plan_gecmis_bolum [data-plan-islem="kaldir"]');
+                b.click();
+                const evet = document.getElementById('plan_onay_evet');
+                evet.click(); const k1 = document.querySelector('#plan_gecmis_bolum button').disabled; evet.click();
                 return {kilitli: k1, devam: window.__planIptalDevam === true};
             }"""
         )

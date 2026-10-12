@@ -33,11 +33,14 @@ class Tx:
     def __call__(self, fn):
         snap = deepcopy(self.bellek.satirlar)
         nsql = len(self.bellek.sql)
+        audit = list(getattr(self.bellek, "audit", []) or [])
         try:
             out = fn(self.bellek.calistir, self.bellek.oku, self.bellek.oku)
         except Exception:
             self.bellek.satirlar[:] = snap
             del self.bellek.sql[nsql:]
+            if hasattr(self.bellek, "audit"):
+                self.bellek.audit[:] = audit
             self.rollback += 1
             raise
         self.commit += 1
@@ -856,7 +859,7 @@ def test_js():
         "durum secicisi satir kabinda (dugme ayni grid hucresinde)",
         'id="musteri_durum_satir"' in html and html.find('id="musteri_durum_satir"') < html.find('id="musteri_durum"') < html.find("</select>", html.find('id="musteri_durum"')),
     )
-    check("script surumu artirildi", "js/plan_degistir.js', v=14" in html)
+    check("script surumu artirildi", "js/plan_degistir.js', v=15" in html)
     check(
         "plan kapsam notu sabit",
         "plan_kapsam_not" in js_metin

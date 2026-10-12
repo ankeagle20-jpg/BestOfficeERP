@@ -768,7 +768,24 @@ def plan_ekle_yanit(mid):
             return jsonify({"ok": False, "mesaj": MSG_ODEMELI_ONAY, "odemeli_aylar": odemeli}), 400
 
     def islem(calistir, oku_bir, _oku_cok):
+        from audit_log import anlik_al, audit_yaz
+        from sozlesme_plan_depo import SQL_BY_ID
+
         _ensure_sema(calistir)
+        # Düzenle: eski satır (ayı değişse de) iptal + yeni yazım aynı transaction'da.
+        anlik = None
+        kaynak = data.get("duzenlenen_plan_id")
+        if kaynak not in (None, ""):
+            mevcut = oku_bir(SQL_BY_ID, (int(kaynak),))
+            if not mevcut or mevcut.get("iptal_at") or mevcut.get("silindi_at"):
+                raise PlanYok("acik plan yok")
+            if int(mevcut.get("musteri_id") or 0) != int(mid):
+                raise PermissionError("mid")
+            anlik = anlik_al(
+                mevcut,
+                ("id", "musteri_id", "gecerlilik_ay", "yeni_net", "kdv_oran", "yeni_brut", "nakit_tutar", "banka_tutar"),
+            )
+            plan_iptal(calistir, oku_bir, plan_id=int(kaynak), iptal_eden=_kim())
         # Aynı ayda açık plan varsa iptal + yeni yazım + resync tek transaction'da; hata olursa tamamı geri alınır.
         row, onceki = plan_degistir(
             calistir,
@@ -782,12 +799,26 @@ def plan_ekle_yanit(mid):
             banka_tutar=tutar["banka_tutar"],
             olusturan=_kim(),
         )
+        if anlik:
+            audit_yaz(
+                calistir,
+                olay="plan_duzenle",
+                varlik="sozlesme_plan_degisiklik",
+                kayit_id=anlik.get("id"),
+                musteri_id=mid,
+                kullanici=_kim(),
+                anlik=anlik,
+            )
         if not _resync(int(mid)):
             raise RuntimeError("yenileme")
         return row, onceki
 
     try:
         row, onceki = plan_tx(islem)
+    except PlanYok:
+        return jsonify({"ok": False, "mesaj": "Açık plan yok."}), 404
+    except PermissionError:
+        return _yok()
     except PlanCakisma:
         return jsonify({"ok": False, "mesaj": "Bu geçerlilik ayında açık bir plan zaten var."}), 409
     except Exception as exc:
@@ -819,7 +850,22 @@ def plan_iptal_yanit(mid, plan_id):
             raise PlanYok("acik plan yok")
         if int(mevcut.get("musteri_id") or 0) != int(mid):
             raise PermissionError("mid")
+        from audit_log import anlik_al, audit_yaz
+
+        anlik = anlik_al(
+            mevcut,
+            ("id", "musteri_id", "gecerlilik_ay", "yeni_net", "kdv_oran", "yeni_brut", "nakit_tutar", "banka_tutar"),
+        )
         row = plan_iptal(calistir, oku_bir, plan_id=int(plan_id), iptal_eden=_kim())
+        audit_yaz(
+            calistir,
+            olay="plan_kaldir",
+            varlik="sozlesme_plan_degisiklik",
+            kayit_id=anlik.get("id"),
+            musteri_id=mid,
+            kullanici=_kim(),
+            anlik=anlik,
+        )
         if not _resync(int(mid)):
             raise RuntimeError("yenileme")
         return row
@@ -835,6 +881,56 @@ def plan_iptal_yanit(mid, plan_id):
     except Exception:
         _LOG.exception("plan iptal")
         return jsonify({"ok": False, "mesaj": "Plan iptal edilemedi."}), 500
+    return jsonify({"ok": True, "plan": _json_plan(row)})
+
+
+def plan_sil_yanit(mid, plan_id):
+    if not _kapi_acik(mid):
+        return _kapali()
+    data = request.get_json(silent=True) or {}
+    if _mid_uyusmaz(mid, data):
+        return _yok()
+    musteri, _kyc = _musteri_ve_kyc(mid)
+    if not musteri:
+        return _yok()
+
+    def islem(calistir, oku_bir, _oku_cok):
+        from audit_log import anlik_al, audit_yaz
+        from sozlesme_plan_depo import SQL_BY_ID, plan_sil
+
+        _ensure_sema(calistir)
+        mevcut = oku_bir(SQL_BY_ID, (int(plan_id),))
+        if not mevcut or mevcut.get("silindi_at"):
+            raise PlanYok("plan yok")
+        if int(mevcut.get("musteri_id") or 0) != int(mid):
+            raise PermissionError("mid")
+        anlik = anlik_al(
+            mevcut,
+            ("id", "musteri_id", "gecerlilik_ay", "yeni_net", "kdv_oran", "yeni_brut", "nakit_tutar", "banka_tutar"),
+        )
+        row, aktifti = plan_sil(calistir, oku_bir, plan_id=int(plan_id), silen=_kim())
+        audit_yaz(
+            calistir,
+            olay="plan_sil",
+            varlik="sozlesme_plan_degisiklik",
+            kayit_id=anlik.get("id"),
+            musteri_id=mid,
+            kullanici=_kim(),
+            anlik=anlik,
+        )
+        if aktifti and not _resync(int(mid)):
+            raise RuntimeError("yenileme")
+        return row
+
+    try:
+        row = plan_tx(islem)
+    except PermissionError:
+        return _yok()
+    except PlanYok:
+        return jsonify({"ok": False, "mesaj": "Plan yok."}), 404
+    except Exception:
+        _LOG.exception("plan sil")
+        return jsonify({"ok": False, "mesaj": "Plan gizlenemedi."}), 500
     return jsonify({"ok": True, "plan": _json_plan(row)})
 
 
@@ -859,6 +955,11 @@ def plan_rotalarini_bagla(bp):
     @giris_gerekli
     def api_musteri_plan_iptal(mid, plan_id):
         return plan_iptal_yanit(mid, plan_id)
+
+    @bp.route("/api/musteri/<int:mid>/plan/<int:plan_id>/sil", methods=["POST"])
+    @giris_gerekli
+    def api_musteri_plan_sil(mid, plan_id):
+        return plan_sil_yanit(mid, plan_id)
 
     @bp.route("/api/musteri/<int:mid>/plan", methods=["GET", "POST"])
     @giris_gerekli

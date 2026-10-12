@@ -76,6 +76,28 @@ RETURNING id, musteri_id, gecerlilik_ay, yeni_net, kdv_oran, yeni_brut,
           nakit_tutar, banka_tutar, olusturan, created_at, iptal_at, iptal_eden
 """.strip()
 
+_SQL_KOLON = """
+SELECT column_name FROM information_schema.columns
+WHERE table_schema = current_schema() AND table_name = %s AND column_name = %s
+""".strip()
+
+SQL_BY_ID_SIL = """
+SELECT id, musteri_id, gecerlilik_ay, yeni_net, kdv_oran, yeni_brut,
+       nakit_tutar, banka_tutar, olusturan, created_at, iptal_at, iptal_eden,
+       silindi_at, silen
+FROM sozlesme_plan_degisiklik
+WHERE id = %s
+""".strip()
+
+SQL_SIL = """
+UPDATE sozlesme_plan_degisiklik
+SET silindi_at = %s, silen = %s
+WHERE id = %s AND silindi_at IS NULL
+RETURNING id, musteri_id, gecerlilik_ay, yeni_net, kdv_oran, yeni_brut,
+          nakit_tutar, banka_tutar, olusturan, created_at, iptal_at, iptal_eden,
+          silindi_at, silen
+""".strip()
+
 
 class PlanCakisma(Exception):
     """Aynı müşteri ve geçerlilik ayında iptalsiz kayıt var."""
@@ -107,6 +129,32 @@ def ensure_sozlesme_plan_degisiklik(calistir) -> None:
     """Mevcut search_path içinde IF NOT EXISTS. İkinci çağrı aynı SQL'i yineler."""
     calistir(SQL_TABLO)
     calistir(SQL_INDEX)
+
+
+def ensure_plan_silindi_kolonlari(calistir) -> None:
+    """silindi_at / silen yalnız silme yazmasında. Okuma ve açılış çağırmaz."""
+    calistir("ALTER TABLE sozlesme_plan_degisiklik ADD COLUMN IF NOT EXISTS silindi_at TIMESTAMPTZ")
+    calistir("ALTER TABLE sozlesme_plan_degisiklik ADD COLUMN IF NOT EXISTS silen TEXT")
+
+
+def kolon_var_mi(oku, tablo: str, kolon: str) -> bool:
+    """Kolon var mı: yalnız okuma. ALTER yok. Hata veya boş sonuç = kolon yok."""
+    try:
+        rows = oku(_SQL_KOLON, (tablo, kolon))
+    except Exception:
+        return False
+    if not rows:
+        return False
+    if isinstance(rows, dict):
+        return True
+    try:
+        return len(rows) > 0
+    except TypeError:
+        return False
+
+
+def _silinmeyen(sql: str) -> str:
+    return sql.replace("ORDER BY", "AND silindi_at IS NULL\nORDER BY", 1)
 
 
 def ensure_sozlesme_plan_degisiklik_semada(calistir, sema: str) -> None:
@@ -249,9 +297,38 @@ def plan_iptal(calistir, oku, *, plan_id: int, iptal_eden: str, simdi: datetime 
     return dict(row)
 
 
+def plan_sil(calistir, oku, *, plan_id: int, silen: str, simdi: datetime | None = None) -> tuple[dict, bool]:
+    """Kalıcı silmez. Aktif satırı önce iptal eder, sonra geçmişten gizler.
+
+    Dönen: (satır, aktifti). Aktifti ise çağıran resync yapar. Tek transaction çağıranın işidir.
+    """
+    ensure_sozlesme_plan_degisiklik(calistir)
+    ensure_plan_silindi_kolonlari(calistir)
+    pid = int(plan_id)
+    mevcut = oku(SQL_BY_ID_SIL, (pid,))
+    if isinstance(mevcut, list):
+        mevcut = mevcut[0] if mevcut else None
+    if not mevcut or mevcut.get("silindi_at"):
+        raise PlanYok("plan yok")
+    kim = str(silen or "").strip()
+    if not kim:
+        raise ValueError("silen gerekli")
+    zaman = simdi or datetime.now(timezone.utc)
+    if zaman.tzinfo is None:
+        zaman = zaman.replace(tzinfo=timezone.utc)
+    aktifti = not mevcut.get("iptal_at")
+    if aktifti:
+        plan_iptal(calistir, oku, plan_id=pid, iptal_eden=kim, simdi=zaman)
+    row = calistir(SQL_SIL, (zaman, kim[:80], pid))
+    if not row:
+        raise PlanYok("plan yok")
+    return dict(row), aktifti
+
+
 def plan_liste(oku, *, musteri_id: int, iptaller: bool = False) -> list[dict]:
-    """Varsayılan yalnız iptalsiz satırlar."""
-    rows = oku(SQL_LISTE, (int(musteri_id), bool(iptaller)))
+    """Varsayılan yalnız iptalsiz satırlar. silindi_at kolonu yoksa filtre uygulanmaz."""
+    sql = _silinmeyen(SQL_LISTE) if kolon_var_mi(oku, "sozlesme_plan_degisiklik", "silindi_at") else SQL_LISTE
+    rows = oku(sql, (int(musteri_id), bool(iptaller)))
     if rows is None:
         return []
     if isinstance(rows, dict):

@@ -323,7 +323,7 @@ def kosu(html_yol=None, js_yol=None, etiket="YENI", tam=True, ekran=False):
 
         # ---------------- 6) Iptal popup icinde ----------------
         n0 = len(gorunen)
-        s.evaluate("document.querySelector('#plan_gecmis_bolum button').click()")
+        s.evaluate("document.querySelector('#plan_gecmis_bolum [data-plan-islem=\"kaldir\"]').click(); document.getElementById('plan_onay_evet').click();")
         try:
             s.wait_for_function("document.querySelectorAll('#plan_gecmis_bolum button').length === 0", timeout=6000)
         except Exception:

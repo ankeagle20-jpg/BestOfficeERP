@@ -171,6 +171,40 @@ function planDugmesiHazirla() {
 }
 
 /* Geçmiş listesi popup içindeki sabit kapta çizilir; her çizimde kap boşaltılır (ikinci kopya oluşamaz). */
+var SATIR_DUGME = "padding:3px 8px;border-radius:4px;border:1px solid #3d5070;background:#1b3a4b;color:#e0f7fa;font-size:11px;cursor:pointer;font-family:inherit;white-space:nowrap;";
+
+function satirDugme(yazi, islem, pasif) {
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = yazi;
+    btn.setAttribute("data-plan-islem", islem);
+    btn.style.cssText = SATIR_DUGME;
+    if (pasif) btn.disabled = true;
+    return btn;
+}
+
+function planOnayIste(kutuId, metin, tamam) {
+    var kutu = document.getElementById(kutuId);
+    var yazi = document.getElementById(kutuId + "_metin");
+    var evet = document.getElementById(kutuId + "_evet");
+    var hayir = document.getElementById(kutuId + "_hayir");
+    if (!kutu || !evet || !hayir) {
+        tamam();
+        return;
+    }
+    if (yazi) yazi.textContent = metin;
+    kutu.style.display = "block";
+    try { kutu.scrollIntoView({ block: "nearest" }); } catch (_e) {}
+    hayir.onclick = function () { kutu.style.display = "none"; };
+    evet.disabled = false;
+    evet.onclick = function () {
+        if (evet.disabled) return;
+        evet.disabled = true;
+        kutu.style.display = "none";
+        tamam();
+    };
+}
+
 function planGecmisCiz(mid, veri) {
     var kutu = document.getElementById("plan_gecmis_bolum");
     if (!kutu) return;
@@ -192,8 +226,6 @@ function planGecmisCiz(mid, veri) {
         kutu.appendChild(bilgi);
         window.__planBilgi = null;
     }
-    var bugun = new Date();
-    var bugunIso = bugun.getFullYear() + "-" + String(bugun.getMonth() + 1).padStart(2, "0") + "-01";
     var satirlar = (veri.gecmis && veri.gecmis.length) ? veri.gecmis : (veri.aktif || []);
     if (!satirlar.length) {
         var bos = document.createElement("div");
@@ -211,17 +243,39 @@ function planGecmisCiz(mid, veri) {
         satir.style.fontSize = "12px";
         satir.style.marginBottom = "4px";
         var metin = document.createElement("span");
+        metin.style.minWidth = "0";
+        metin.style.flex = "1 1 140px";
         var ay = String(p.gecerlilik_ay || "").slice(0, 10);
         var kim = p.iptal_at ? (p.iptal_eden || "") : (p.olusturan || "");
         var zaman = p.iptal_at || p.created_at || "";
         metin.textContent = ay + "  net " + (p.yeni_net != null ? p.yeni_net : "") + "  brüt " + (p.yeni_brut != null ? p.yeni_brut : "") + (p.iptal_at ? "  iptal" : "  aktif") + (kim ? "  " + kim : "") + (zaman ? "  " + String(zaman).slice(0, 19) : "");
         satir.appendChild(metin);
-        if (!p.iptal_at && planIptalEdilebilir(ay, bugunIso)) {
-            var btn = document.createElement("button");
-            btn.type = "button";
-            btn.textContent = "İptal";
-            btn.onclick = function () { planIptalGonder(mid, p.id, btn); };
-            satir.appendChild(btn);
+        if (!p.iptal_at && !p.silindi_at) {
+            var pasif = planPasifMi();
+            var dugmeler = document.createElement("span");
+            dugmeler.style.cssText = "display:flex;flex-wrap:wrap;gap:4px;";
+            var duzenle = satirDugme("Düzenle", "duzenle", pasif);
+            duzenle.onclick = function () { planSatirDuzenle(p); };
+            var kaldir = satirDugme("Planı kaldır", "kaldir", false);
+            kaldir.onclick = function () {
+                planOnayIste(
+                    "plan_onay",
+                    "Plan kaldırılır, grid/ekstre/ödeme tutarları eski haline döner; fatura satırları eski tutarda kalır.",
+                    function () { planIptalGonder(mid, p.id, kaldir); }
+                );
+            };
+            var sil = satirDugme("Sil", "sil", false);
+            sil.onclick = function () {
+                planOnayIste(
+                    "plan_onay",
+                    "Plan kalıcı silinmez; geçmişten gizlenir, kayıt durur. Aktif plan önce kaldırılır: grid, ekstre ve ödeme tutarları eski haline döner; fatura satırları eski tutarda kalır.",
+                    function () { planSilGonder(mid, p.id, sil); }
+                );
+            };
+            dugmeler.appendChild(duzenle);
+            dugmeler.appendChild(kaldir);
+            dugmeler.appendChild(sil);
+            satir.appendChild(dugmeler);
         }
         kutu.appendChild(satir);
     });
@@ -275,6 +329,12 @@ function planModalHazirla() {
         + "<div id=\"plan_paylar\" style=\"display:none;margin:8px 0;\"><label for=\"plan_nakit\" style=\"" + E + "\">Nakit</label><input id=\"plan_nakit\" type=\"number\" step=\"0.01\" style=\"" + G + "\"><label for=\"plan_banka\" style=\"" + E + "\">Banka net</label><input id=\"plan_banka\" type=\"number\" step=\"0.01\" style=\"" + G + "\"></div>"
         + "<div style=\"margin-top:10px;\">Hesaplanan brüt: <span id=\"plan_brut\">—</span></div>"
         + "<div id=\"plan_hata\" role=\"alert\" style=\"display:none;margin:8px 0;padding:8px;border:1px solid #e53935;border-radius:4px;color:#ff8a80;\"></div>"
+        + "<div id=\"plan_onay\" style=\"display:none;margin:8px 0;padding:8px;border:1px solid #ffb74d;border-radius:4px;background:#2a2416;\">"
+        + "<div id=\"plan_onay_metin\" style=\"font-size:12px;line-height:1.4;margin-bottom:6px;\"></div>"
+        + "<div style=\"display:flex;gap:6px;flex-wrap:wrap;\">"
+        + "<button type=\"button\" id=\"plan_onay_evet\" style=\"" + D + "background:#e65100;color:#fff;\">Onayla</button>"
+        + "<button type=\"button\" id=\"plan_onay_hayir\" style=\"" + D + "background:#455a64;color:#fff;\">Vazgeç</button>"
+        + "</div></div>"
         + "<div id=\"plan_uyarilar\" style=\"margin:8px 0;color:#ffcc80;\"></div>"
         + "<div id=\"plan_kilit_kutu\" style=\"" + K + "display:none;\">"
         + "<div id=\"plan_kilit_metin\"></div>"
@@ -299,6 +359,12 @@ function planModalHazirla() {
         + "<label for=\"dondurma_bas\" style=\"" + E + "\">Başlangıç ayı</label><input id=\"dondurma_bas\" type=\"month\" style=\"" + G + "\">"
         + "<label for=\"dondurma_sure\" style=\"" + E + "\">Süre (ay)</label><input id=\"dondurma_sure\" type=\"number\" min=\"1\" max=\"24\" step=\"1\" value=\"1\" style=\"" + G + "\">"
         + "<div id=\"dondurma_hata\" role=\"alert\" style=\"display:none;margin:8px 0;padding:8px;border:1px solid #e53935;border-radius:4px;color:#ff8a80;\"></div>"
+        + "<div id=\"dondurma_onay\" style=\"display:none;margin:8px 0;padding:8px;border:1px solid #ffb74d;border-radius:4px;background:#2a2416;\">"
+        + "<div id=\"dondurma_onay_metin\" style=\"font-size:12px;line-height:1.4;margin-bottom:6px;\"></div>"
+        + "<div style=\"display:flex;gap:6px;flex-wrap:wrap;\">"
+        + "<button type=\"button\" id=\"dondurma_onay_evet\" style=\"" + D + "background:#e65100;color:#fff;\">Onayla</button>"
+        + "<button type=\"button\" id=\"dondurma_onay_hayir\" style=\"" + D + "background:#455a64;color:#fff;\">Vazgeç</button>"
+        + "</div></div>"
         + "<div id=\"dondurma_uyari\" role=\"status\" style=\"display:none;margin:8px 0;padding:8px;border:1px solid #ff9800;border-radius:4px;color:#ffcc80;\"></div>"
         + "<div id=\"dondurma_onizleme\" style=\"margin-top:8px;overflow:auto;\"></div>"
         + "<div style=\"display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;\">"
@@ -399,6 +465,8 @@ function planDegistirModalAc(bolum) {
         return;
     }
     if (!window.__planMid) return;
+    window.__planDuzenlenenId = null;
+    window.__dondurmaDuzenlenenId = null;
     planModalHazirla();
     var modal = document.getElementById("plan_degistir_modal");
     if (!modal) return;
@@ -472,6 +540,9 @@ function planFormSifirla() {
     planHataGoster("");
     planOnizlemeSifirla();
     window.__planTaban = "";
+    window.__planDuzenlenenId = null;
+    var onay = document.getElementById("plan_onay");
+    if (onay) onay.style.display = "none";
 }
 
 /* Kapat düğmesi ve X: doğrudan kapatır. */
@@ -495,6 +566,7 @@ function planGovde() {
         kdv_oran: parseFloat((document.getElementById("plan_kdv") || {}).value),
         odeme: odeme
     };
+    if (window.__planDuzenlenenId) govde.duzenlenen_plan_id = window.__planDuzenlenenId;
     if (odeme === "karma") {
         govde.nakit_tutar = parseFloat((document.getElementById("plan_nakit") || {}).value);
         govde.banka_tutar = parseFloat((document.getElementById("plan_banka") || {}).value);
@@ -838,6 +910,62 @@ function planKaydet() {
         });
 }
 
+function planSatirDuzenle(p) {
+    if (planPasifMi()) {
+        planHataGoster("Bu müşteri pasif: plan düzenlenemez.");
+        return;
+    }
+    window.__planDuzenlenenId = p.id;
+    var gec = document.getElementById("plan_gecerlilik");
+    if (gec) gec.value = String(p.gecerlilik_ay || "").slice(0, 7);
+    var net = document.getElementById("plan_yeni_net");
+    if (net) net.value = p.yeni_net != null ? p.yeni_net : "";
+    var kdv = document.getElementById("plan_kdv");
+    if (kdv) kdv.value = p.kdv_oran != null ? p.kdv_oran : "";
+    var nakit = p.nakit_tutar;
+    var banka = p.banka_tutar;
+    var odeme = "banka";
+    if (nakit != null && nakit !== "" && banka != null && banka !== "") odeme = "karma";
+    else if (nakit != null && nakit !== "") odeme = "nakit";
+    var sel = document.getElementById("plan_odeme");
+    if (sel) sel.value = odeme;
+    var pay = document.getElementById("plan_paylar");
+    if (pay) pay.style.display = odeme === "karma" ? "" : "none";
+    var nakitEl = document.getElementById("plan_nakit");
+    var bankaEl = document.getElementById("plan_banka");
+    if (nakitEl && nakit != null) nakitEl.value = nakit;
+    if (bankaEl && banka != null) bankaEl.value = banka;
+    planOnizlemeSifirla();
+    planHataGoster("");
+    if (net) {
+        try { net.focus(); } catch (_e) {}
+    }
+}
+
+function planSilGonder(mid, planId, btn) {
+    if (window.__planIptalDevam) return;
+    window.__planIptalDevam = true;
+    var kutuDugmeleri = document.querySelectorAll("#plan_gecmis_bolum button");
+    Array.prototype.forEach.call(kutuDugmeleri, function (b) { b.disabled = true; });
+    if (btn) btn.disabled = true;
+    function kilitAc() {
+        window.__planIptalDevam = false;
+        Array.prototype.forEach.call(kutuDugmeleri, function (b) { b.disabled = false; });
+        if (btn) btn.disabled = false;
+        dondurmaPasifUygula();
+    }
+    planIstekGonder("/giris/api/musteri/" + encodeURIComponent(mid) + "/plan/" + encodeURIComponent(planId) + "/sil", {})
+        .then(function (pack) {
+            if (pack.ok && pack.j && pack.j.ok) {
+                dondurmaSayfaYenile(mid, null, false);
+                return;
+            }
+            planHataGoster((pack.j && pack.j.mesaj) || "Plan gizlenemedi");
+        })
+        .catch(function () { planHataGoster("Plan gizlenemedi"); })
+        .then(kilitAc);
+}
+
 /* 404 "Açık plan yok.": plan zaten kapanmış (başka sekme, aynı aya yeni plan ile otomatik iptal); ekrandaki liste eski. */
 function planAcikPlanYok(pack) {
     return !!(pack && pack.kod === 404 && pack.j && String(pack.j.mesaj || "").toLowerCase().indexOf("açık plan yok") >= 0);
@@ -854,6 +982,7 @@ function planIptalGonder(mid, planId, btn) {
         window.__planIptalDevam = false;
         Array.prototype.forEach.call(kutuDugmeleri, function (b) { b.disabled = false; });
         if (btn) btn.disabled = false;
+        dondurmaPasifUygula();
     }
     planIstekGonder("/giris/api/musteri/" + encodeURIComponent(mid) + "/plan/" + encodeURIComponent(planId) + "/iptal", {})
         .then(function (pack) {
@@ -867,9 +996,9 @@ function planIptalGonder(mid, planId, btn) {
                 planKapisiniYenile(mid);
                 return;
             }
-            alert((pack.j && pack.j.mesaj) || "İptal edilemedi");
+            planHataGoster((pack.j && pack.j.mesaj) || "İptal edilemedi");
         })
-        .catch(function () { alert("İptal edilemedi"); })
+        .catch(function () { planHataGoster("İptal edilemedi"); })
         .then(kilitAc);
 }
 
@@ -887,8 +1016,6 @@ function planPasifMi() {
 
 function dondurmaPasifUygula() {
     var pasif = planPasifMi();
-    var btn = document.getElementById("plan_dondur_btn");
-    if (btn) btn.disabled = pasif;
     ["dondurma_bas", "dondurma_sure", "dondurma_onizle_btn"].forEach(function (id) {
         var el = document.getElementById(id);
         if (el) el.disabled = pasif;
@@ -897,6 +1024,11 @@ function dondurmaPasifUygula() {
     if (kaydet) kaydet.disabled = !!(pasif || window.__dondurmaIstek);
     var not = document.getElementById("dondurma_pasif_not");
     if (not) not.style.display = pasif ? "block" : "none";
+    var planNot = document.getElementById("plan_pasif_not");
+    if (planNot && document.getElementById("plan_form_bolum")) {
+        planNot.style.display = pasif ? "block" : "none";
+    }
+    document.querySelectorAll("[data-plan-islem='duzenle']").forEach(function (b) { b.disabled = pasif; });
 }
 
 function dondurmaHataGoster(mesaj) {
@@ -910,7 +1042,7 @@ function dondurmaHataGoster(mesaj) {
 }
 
 function dondurmaGovdeAnahtar(govde) {
-    return String((govde && govde.baslangic_ay) || "") + "|" + String(govde && govde.ay_sayisi);
+    return String((govde && govde.baslangic_ay) || "") + "|" + String(govde && govde.ay_sayisi) + "|" + String(window.__dondurmaDuzenlenenId || "");
 }
 
 function dondurmaNedenYaz(sinif, neden) {
@@ -923,7 +1055,53 @@ function dondurmaNedenYaz(sinif, neden) {
 function dondurmaGovde() {
     var bas = (document.getElementById("dondurma_bas") || {}).value || "";
     var n = parseInt((document.getElementById("dondurma_sure") || {}).value, 10);
-    return { baslangic_ay: bas, ay_sayisi: n, musteri_id: planMusteriId() };
+    var govde = { baslangic_ay: bas, ay_sayisi: n, musteri_id: planMusteriId() };
+    if (window.__dondurmaDuzenlenenId) govde.duzenlenen_dondurma_id = window.__dondurmaDuzenlenenId;
+    return govde;
+}
+
+function dondurmaSatirDuzenle(p) {
+    if (planPasifMi()) {
+        dondurmaHataGoster("Bu müşteri pasif: dondurma düzenlenemez.");
+        return;
+    }
+    window.__dondurmaDuzenlenenId = p.id;
+    var bas = document.getElementById("dondurma_bas");
+    if (bas) bas.value = String(p.baslangic_ay || "").slice(0, 7);
+    var sure = document.getElementById("dondurma_sure");
+    if (sure) sure.value = p.ay_sayisi != null ? p.ay_sayisi : "";
+    window.__dondurmaOnizlemeHazir = false;
+    window.__dondurmaSonAnahtar = "";
+    var kaydet = document.getElementById("dondurma_kaydet");
+    if (kaydet) kaydet.disabled = true;
+    var oniz = document.getElementById("dondurma_onizleme");
+    if (oniz) oniz.textContent = "";
+    dondurmaHataGoster("");
+    if (bas) {
+        try { bas.focus(); } catch (_e) {}
+    }
+}
+
+function dondurmaSilGonder(mid, dondurmaId) {
+    if (window.__dondurmaIstek) return;
+    window.__dondurmaIstek = true;
+    var dugmeler = document.querySelectorAll("#dondurma_gecmis_bolum button");
+    Array.prototype.forEach.call(dugmeler, function (b) { b.disabled = true; });
+    dondurmaPasifUygula();
+    planIstekGonder("/giris/api/musteri/" + encodeURIComponent(mid) + "/plan/dondurma/" + encodeURIComponent(dondurmaId) + "/sil", { musteri_id: mid })
+        .then(function (pack) {
+            if (!pack.ok || !pack.j || !pack.j.ok) {
+                dondurmaHataGoster((pack.j && pack.j.mesaj) || "Dondurma gizlenemedi");
+                return;
+            }
+            window.__dondurmaDuzenlenenId = null;
+            dondurmaSayfaYenile(mid, null, false);
+        })
+        .catch(function () { dondurmaHataGoster("Dondurma gizlenemedi"); })
+        .then(function () {
+            window.__dondurmaIstek = false;
+            dondurmaPasifUygula();
+        });
 }
 
 function dondurmaGecmisCiz(mid, veri) {
@@ -954,17 +1132,33 @@ function dondurmaGecmisCiz(mid, veri) {
         satir.style.marginBottom = "4px";
         if (p.iptal_at) satir.style.opacity = "0.45";
         var metin = document.createElement("span");
+        metin.style.minWidth = "0";
+        metin.style.flex = "1 1 140px";
         var ay = String(p.baslangic_ay || "").slice(0, 7);
         var kim = p.iptal_at ? (p.iptal_eden || "") : (p.olusturan || "");
         var zaman = p.iptal_at || p.created_at || "";
         metin.textContent = ay + "  " + (p.ay_sayisi != null ? p.ay_sayisi : "") + " ay" + (p.iptal_at ? "  iptal" : "  açık") + (kim ? "  " + kim : "") + (zaman ? "  " + String(zaman).slice(0, 19) : "");
         satir.appendChild(metin);
-        if (!p.iptal_at && p.id != null) {
-            var btn = document.createElement("button");
-            btn.type = "button";
-            btn.textContent = "Dondurmayı kaldır";
-            btn.onclick = function () { dondurmaKaldir(mid, p.id, btn); };
-            satir.appendChild(btn);
+        if (!p.iptal_at && !p.silindi_at && p.id != null) {
+            var pasif = planPasifMi();
+            var dugmeler = document.createElement("span");
+            dugmeler.style.cssText = "display:flex;flex-wrap:wrap;gap:4px;";
+            var duzenle = satirDugme("Düzenle", "duzenle", pasif);
+            duzenle.onclick = function () { dondurmaSatirDuzenle(p); };
+            var kaldir = satirDugme("Dondurmayı kaldır", "kaldir", false);
+            kaldir.onclick = function () { dondurmaKaldir(mid, p.id, kaldir); };
+            var sil = satirDugme("Sil", "sil", false);
+            sil.onclick = function () {
+                planOnayIste(
+                    "dondurma_onay",
+                    "Dondurma kalıcı silinmez; geçmişten gizlenir, kayıt durur. Açık dondurma önce kaldırılır: grid, ekstre ve ödeme tutarları eski haline döner.",
+                    function () { dondurmaSilGonder(mid, p.id); }
+                );
+            };
+            dugmeler.appendChild(duzenle);
+            dugmeler.appendChild(kaldir);
+            dugmeler.appendChild(sil);
+            satir.appendChild(dugmeler);
         }
         kutu.appendChild(satir);
     });
@@ -1241,6 +1435,7 @@ function dondurmaKaydet() {
             }
             window.__dondurmaOnizlemeHazir = false;
             window.__dondurmaSonAnahtar = "";
+            window.__dondurmaDuzenlenenId = null;
             var oniz = document.getElementById("dondurma_onizleme");
             if (oniz) oniz.textContent = "";
             var once = (window.__sozlesmelerAylikSonCacheObj && window.__sozlesmelerAylikSonCacheObj.dondurulan_aylar) || [];

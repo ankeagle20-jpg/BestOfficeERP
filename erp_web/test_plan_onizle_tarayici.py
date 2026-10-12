@@ -296,7 +296,7 @@ def _yeni_senaryolar(sayfa, app, gorunen, bu_ay):
         check("gecmis plan icin Iptal dugmesi var", iptal_say >= 1 and "Geçmiş aya ait plan iptal edilemez" not in bolum, (iptal_say, bolum))
         n0 = len(gorunen)
         sayfa.evaluate(
-            "(() => { const b = [...document.querySelectorAll('#plan_gecmis_bolum > div')].find(x => x.textContent.indexOf('2024-01') >= 0); b.querySelector('button').click(); })()"
+            "(() => { const b = [...document.querySelectorAll('#plan_gecmis_bolum > div')].find(x => x.textContent.indexOf('2024-01') >= 0); b.querySelector('[data-plan-islem=\"kaldir\"]').click(); document.getElementById('plan_onay_evet').click(); })()"
         )
         sayfa.wait_for_timeout(600)
         iptaller = [g for g in gorunen[n0:] if g[1].endswith("/plan/21/iptal")]

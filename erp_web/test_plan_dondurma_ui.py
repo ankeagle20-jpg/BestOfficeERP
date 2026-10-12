@@ -80,6 +80,18 @@ def main():
     fx = fixture_867("eski")
     fx["musteri"]["musteri"] = _musteri(MID)
     kayitlar = []
+    planlar = [
+        {
+            "id": 11, "musteri_id": MID, "gecerlilik_ay": "2026-12-01", "yeni_net": 1500, "kdv_oran": 20,
+            "yeni_brut": 1800, "nakit_tutar": None, "banka_tutar": 1500, "olusturan": "test",
+            "created_at": None, "iptal_at": None, "iptal_eden": None,
+        },
+        {
+            "id": 10, "musteri_id": MID, "gecerlilik_ay": "2026-06-01", "yeni_net": 900, "kdv_oran": 20,
+            "yeni_brut": 1080, "nakit_tutar": None, "banka_tutar": 900, "olusturan": "test",
+            "created_at": None, "iptal_at": "2026-09-01T00:00:00", "iptal_eden": "test",
+        },
+    ]
     seq = {"n": 1}
     app = Flask(__name__)
     app.secret_key = "dondurma-ui"
@@ -113,7 +125,8 @@ def main():
         yol = u.split("?")[0]
         if "/plan/dondurma" in yol:
             if request.method == "GET":
-                js(route, {"ok": True, "aktif": [k for k in kayitlar if not k.get("iptal_at")], "gecmis": list(kayitlar)})
+                gorunen = [k for k in kayitlar if not k.get("silindi_at")]
+                js(route, {"ok": True, "aktif": [k for k in gorunen if not k.get("iptal_at")], "gecmis": list(gorunen)})
                 return
             govde = json.loads(request.post_data or "{}")
             if yol.endswith("/onizleme"):
@@ -142,6 +155,21 @@ def main():
                     return
                 js(route, {"ok": True, "dondurma": bulunan})
                 return
+            if yol.endswith("/sil"):
+                bulunan = None
+                for k in kayitlar:
+                    if str(k["id"]) in yol and not k.get("silindi_at"):
+                        if not k.get("iptal_at"):
+                            k["iptal_at"] = "2026-10-12T10:00:00"
+                            k["iptal_eden"] = "test"
+                        k["silindi_at"] = "2026-10-12T10:05:00"
+                        k["silen"] = "test"
+                        bulunan = k
+                if not bulunan:
+                    js(route, {"ok": False, "mesaj": "Dondurma yok."}, 404)
+                    return
+                js(route, {"ok": True, "dondurma": bulunan})
+                return
             oniz = _onizleme()
             if str(govde.get("baslangic_ay") or "")[:7] != AY or int(govde.get("ay_sayisi") or 0) != 4:
                 js(route, {"ok": False, "mesaj": "Aralık uyuşmuyor."}, 400)
@@ -162,12 +190,32 @@ def main():
             kayitlar.append(satir)
             js(route, {"ok": True, "dondurma": satir, "dondurulan_aylar": oniz["dondurulan_aylar"]})
             return
+        if re.match(r"^/giris/api/musteri/(\d+)/plan/\d+/sil$", yol):
+            bulunan = None
+            for k in planlar:
+                if str(k["id"]) in yol and not k.get("silindi_at"):
+                    if not k.get("iptal_at"):
+                        k["iptal_at"] = "2026-10-12T10:00:00"
+                        k["iptal_eden"] = "test"
+                    k["silindi_at"] = "2026-10-12T10:05:00"
+                    k["silen"] = "test"
+                    bulunan = k
+            if not bulunan:
+                js(route, {"ok": False, "mesaj": "Plan yok."}, 404)
+                return
+            js(route, {"ok": True, "plan": bulunan})
+            return
         if re.match(r"^/giris/api/musteri/(\d+)/plan$", yol):
             mid = int(re.match(r"^/giris/api/musteri/(\d+)/plan$", yol).group(1))
             if mid != MID:
                 js(route, {"ok": False}, 404)
                 return
-            js(route, {"ok": True, "gecmis": [], "aktif": [], "sozlesme_baslangic": "2023-08"})
+            js(route, {
+                "ok": True,
+                "sozlesme_baslangic": "2023-08",
+                "aktif": [k for k in planlar if not k.get("iptal_at") and not k.get("silindi_at")],
+                "gecmis": [k for k in planlar if not k.get("silindi_at")],
+            })
             return
         if yol.startswith("/giris/api/musteri-kart-bundle"):
             g = _grid(fx, acik_var())
@@ -210,7 +258,7 @@ def main():
         s.route("**/*", isle)
         s.goto(BASE + "/giris/", wait_until="load")
         s.wait_for_function("typeof selectMusteri === 'function'", timeout=20000)
-        check("statik selectte dondur yok", "value=\"dondur\"" not in html and "js/plan_degistir.js', v=14" in html)
+        check("statik selectte dondur yok", "value=\"dondur\"" not in html and "js/plan_degistir.js', v=15" in html)
         s.evaluate("selectMusteri(%d)" % MID)
         s.wait_for_selector("#plan_dondur_btn", timeout=15000)
         for _ in range(3):
@@ -257,6 +305,34 @@ def main():
         s.wait_for_function("getComputedStyle(document.getElementById('plan_form_bolum')).display !== 'none'", timeout=4000)
         check("plan basligi", s.evaluate("document.getElementById('plan_baslik_metin').textContent") == "Plan değiştir")
         check("plan modunda dondurma gizli", s.evaluate("getComputedStyle(document.getElementById('dondurma_bolum')).display") == "none")
+        s.wait_for_function("document.querySelectorAll('#plan_gecmis_bolum [data-plan-islem]').length === 3", timeout=5000)
+        plan_sira = s.evaluate(
+            """() => [...document.querySelectorAll('#plan_gecmis_bolum [data-plan-islem]')].map(b => b.textContent.trim())"""
+        )
+        iptal_dugme = s.evaluate(
+            """() => {
+                const satir = [...document.querySelectorAll('#plan_gecmis_bolum > div')].find(e => e.textContent.indexOf('iptal') >= 0);
+                return satir ? satir.querySelectorAll('button').length : -1;
+            }"""
+        )
+        check("plan satir butonlari", plan_sira == ["Düzenle", "Planı kaldır", "Sil"], plan_sira)
+        check("iptal planda buton yok", iptal_dugme == 0, iptal_dugme)
+        check("plan gecmisi tek kap", s.evaluate("document.querySelectorAll('#plan_gecmis_bolum').length") == 1)
+        s.screenshot(path=str(EKRAN / "plan_satir_butonlar.png"))
+        s.evaluate("document.querySelector('#plan_gecmis_bolum [data-plan-islem=\"duzenle\"]').click()")
+        dolu = s.evaluate(
+            """() => ({
+                ay: document.getElementById('plan_gecerlilik').value,
+                net: document.getElementById('plan_yeni_net').value,
+                kdv: document.getElementById('plan_kdv').value,
+                odeme: document.getElementById('plan_odeme').value
+            })"""
+        )
+        check("duzenle formu dolar", dolu == {"ay": "2026-12", "net": "1500", "kdv": "20", "odeme": "banka"}, dolu)
+        s.evaluate("document.querySelector('#plan_gecmis_bolum [data-plan-islem=\"sil\"]').click(); document.getElementById('plan_onay_evet').click()")
+        s.wait_for_function("document.querySelectorAll('#plan_gecmis_bolum [data-plan-islem]').length === 0", timeout=5000)
+        check("plan sil gecmisten duser", not any(k.get("id") == 11 and not k.get("silindi_at") for k in planlar))
+        check("plan sil kaydi durur", planlar[0].get("silindi_at") and planlar[0].get("iptal_at") and planlar[0].get("silen") == "test")
         check("plan modunda onizle tek", gorunur_say("Önizle") == 1, gorunur_say("Önizle"))
         check("plan modunda kaydet tek", gorunur_say("Kaydet") == 1, gorunur_say("Kaydet"))
         check("gecmis kapsayici plan modunda da tek", s.evaluate("document.querySelectorAll('#dondurma_gecmis_bolum').length") == 1)
@@ -340,7 +416,22 @@ def main():
         check("grid dondurulan ay 0", kart_metin() == "0.00", kart_metin())
         s.screenshot(path=str(EKRAN / "dondurma_grid_sifir.png"))
         check("acik dondurma tek", len([k for k in kayitlar if not k.get("iptal_at")]) == 1)
-        s.evaluate("document.querySelector('#dondurma_gecmis_bolum button').click()")
+        s.screenshot(path=str(EKRAN / "dondurma_satir_butonlar.png"))
+        sira = s.evaluate(
+            """() => [...document.querySelectorAll('#dondurma_gecmis_bolum [data-plan-islem]')].map(b => b.textContent.trim())"""
+        )
+        check("dondurma satir butonlari", sira == ["Düzenle", "Dondurmayı kaldır", "Sil"], sira)
+        s.evaluate("document.getElementById('musteri_durum').value = 'pasif'; dondurmaPasifUygula();")
+        pasif_dugme = s.evaluate(
+            """() => ({
+                duzenle: document.querySelector('#dondurma_gecmis_bolum [data-plan-islem="duzenle"]').disabled,
+                kaldir: document.querySelector('#dondurma_gecmis_bolum [data-plan-islem="kaldir"]').disabled,
+                sil: document.querySelector('#dondurma_gecmis_bolum [data-plan-islem="sil"]').disabled
+            })"""
+        )
+        check("pasif duzenle kapali kaldir sil acik", pasif_dugme == {"duzenle": True, "kaldir": False, "sil": False}, pasif_dugme)
+        s.evaluate("document.getElementById('musteri_durum').value = 'aktif'; dondurmaPasifUygula();")
+        s.evaluate("document.querySelector('#dondurma_gecmis_bolum [data-plan-islem=\"kaldir\"]').click()")
         for _ in range(20):
             if kart_metin() == once_metin and not acik_var():
                 break
@@ -359,10 +450,19 @@ def main():
         check("iptal gecmiste soluk", "iptal" in gecmis and soluk == "0.45", (gecmis, soluk))
         check("gecmis kapsayici hala tek", s.evaluate("document.querySelectorAll('#dondurma_gecmis_bolum').length") == 1)
         s.evaluate("document.getElementById('musteri_durum').value = 'pasif'; dondurmaPasifUygula();")
-        check("pasif yeni dondurma kapali", s.evaluate("document.getElementById('plan_dondur_btn').disabled") is True)
+        check("pasif yeni dondurma kapali", s.evaluate("document.getElementById('dondurma_bas').disabled && document.getElementById('dondurma_onizle_btn').disabled") is True)
+        check("pasif dondur gecmisi acik", s.evaluate("document.getElementById('plan_dondur_btn').disabled") is False)
         check("pasif gecmis durur", s.evaluate("!!document.getElementById('dondurma_gecmis_bolum')"))
         s.evaluate("document.getElementById('musteri_durum').value = 'aktif'; dondurmaPasifUygula();")
         check("aktif dondurma geri", s.evaluate("document.getElementById('plan_dondur_btn').disabled") is False)
+        s.evaluate("document.getElementById('dondurma_kaydet').click()")
+        s.wait_for_function("document.querySelectorAll('#dondurma_onizleme tr').length >= 2", timeout=6000)
+        s.evaluate("document.getElementById('dondurma_kaydet').click()")
+        s.wait_for_function("document.querySelector('#dondurma_gecmis_bolum [data-plan-islem=\"sil\"]')", timeout=6000)
+        s.evaluate("document.querySelector('#dondurma_gecmis_bolum [data-plan-islem=\"sil\"]').click(); document.getElementById('dondurma_onay_evet').click()")
+        s.wait_for_function("!document.querySelector('#dondurma_gecmis_bolum [data-plan-islem]')", timeout=6000)
+        silinen = [k for k in kayitlar if k.get("silindi_at")]
+        check("dondurma sil gecmisten duser kayit durur", len(silinen) == 1 and silinen[0].get("iptal_at") and not acik_var(), silinen)
         check("sayfa hatasi yok", not hatalar, hatalar[:2])
         tarayici.close()
     if acik_var():

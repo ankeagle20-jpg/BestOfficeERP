@@ -347,12 +347,21 @@ class Bellek:
         self.sql = []
         self.satirlar = []
         self.seq = 1
+        self.audit = []
+        self.audit_boz = False
 
     def calistir(self, sql, params=None):
         self.sql.append(sql)
         bas = sql.lstrip()
         if bas.startswith("CREATE TABLE") or bas.startswith("CREATE UNIQUE INDEX") or bas.startswith("SET LOCAL"):
             return None
+        if bas.startswith("ALTER") or bas.startswith("SAVEPOINT") or bas.startswith("RELEASE") or bas.startswith("ROLLBACK"):
+            return None
+        if bas.startswith("INSERT") and "audit_log" in sql:
+            if self.audit_boz:
+                raise RuntimeError("audit kirildi")
+            self.audit.append(params)
+            return {"id": len(self.audit)}
         if bas.startswith("INSERT"):
             mid, ay, net, kdv, brut, nakit, banka, kim, zaman = params
             for s in self.satirlar:
@@ -375,6 +384,14 @@ class Bellek:
             self.seq += 1
             self.satirlar.append(row)
             return dict(row)
+        if bas.startswith("UPDATE") and "silindi_at" in sql:
+            zaman, kim, pid = params
+            for s in self.satirlar:
+                if s["id"] == pid and not s.get("silindi_at"):
+                    s["silindi_at"] = zaman
+                    s["silen"] = kim
+                    return dict(s)
+            return None
         if bas.startswith("UPDATE"):
             zaman, kim, pid = params
             for s in self.satirlar:
@@ -388,6 +405,10 @@ class Bellek:
     def oku(self, sql, params=None):
         self.sql.append(sql)
         bas = sql.lstrip()
+        if "information_schema.columns" in sql:
+            kolon = params[1] if params and len(params) > 1 else ""
+            var = any(s.lstrip().startswith("ALTER") and kolon in s for s in self.sql)
+            return [{"column_name": kolon}] if var else []
         if "iptal_at IS NULL" in sql and "gecerlilik_ay = %s" in sql:
             mid, ay = params
             for s in self.satirlar:
@@ -405,6 +426,8 @@ class Bellek:
             rows = []
             for s in self.satirlar:
                 if s["musteri_id"] != mid:
+                    continue
+                if "silindi_at IS NULL" in sql and s.get("silindi_at"):
                     continue
                 if not iptaller and s["iptal_at"] is not None:
                     continue

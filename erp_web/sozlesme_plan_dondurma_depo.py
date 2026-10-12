@@ -81,6 +81,24 @@ WHERE id = %s AND iptal_at IS NULL
 RETURNING {_KOLONLAR}
 """.strip()
 
+_SQL_KOLON = """
+SELECT column_name FROM information_schema.columns
+WHERE table_schema = current_schema() AND table_name = %s AND column_name = %s
+""".strip()
+
+SQL_BY_ID_SIL = f"""
+SELECT {_KOLONLAR}, silindi_at, silen
+FROM sozlesme_plan_dondurma
+WHERE id = %s
+""".strip()
+
+SQL_SIL = f"""
+UPDATE sozlesme_plan_dondurma
+SET silindi_at = %s, silen = %s
+WHERE id = %s AND silindi_at IS NULL
+RETURNING {_KOLONLAR}, silindi_at, silen
+""".strip()
+
 
 class DondurmaCakisma(Exception):
     """Açık dondurma aralığı kesişiyor."""
@@ -93,6 +111,31 @@ class DondurmaYok(Exception):
 def ensure_sozlesme_plan_dondurma(calistir) -> None:
     calistir(SQL_TABLO)
     calistir(SQL_INDEX)
+
+
+def ensure_dondurma_silindi_kolonlari(calistir) -> None:
+    """silindi_at / silen yalnız silme yazmasında."""
+    calistir("ALTER TABLE sozlesme_plan_dondurma ADD COLUMN IF NOT EXISTS silindi_at TIMESTAMPTZ")
+    calistir("ALTER TABLE sozlesme_plan_dondurma ADD COLUMN IF NOT EXISTS silen TEXT")
+
+
+def kolon_var_mi(oku, tablo: str, kolon: str) -> bool:
+    try:
+        rows = oku(_SQL_KOLON, (tablo, kolon))
+    except Exception:
+        return False
+    if not rows:
+        return False
+    if isinstance(rows, dict):
+        return True
+    try:
+        return len(rows) > 0
+    except TypeError:
+        return False
+
+
+def _silinmeyen(sql: str) -> str:
+    return sql.replace("ORDER BY", "AND silindi_at IS NULL\nORDER BY", 1)
 
 
 def ensure_sozlesme_plan_dondurma_semada(calistir, sema: str) -> None:
@@ -146,13 +189,15 @@ def _satirlar(rows) -> list[dict]:
 
 
 def dondurma_liste(oku, *, musteri_id: int, iptaller: bool = False) -> list[dict]:
-    """Ensure çağırmaz. Tablo yoksa çağıran yakalar."""
-    return _satirlar(oku(SQL_LISTE, (int(musteri_id), bool(iptaller))))
+    """Ensure çağırmaz. Tablo yoksa çağıran yakalar. Kolon yoksa silindi filtresi yok."""
+    sql = _silinmeyen(SQL_LISTE) if kolon_var_mi(oku, "sozlesme_plan_dondurma", "silindi_at") else SQL_LISTE
+    return _satirlar(oku(sql, (int(musteri_id), bool(iptaller))))
 
 
 def dondurma_acik(oku, *, musteri_id: int) -> list[dict]:
     """Ensure çağırmaz."""
-    return _satirlar(oku(SQL_ACIK, (int(musteri_id),)))
+    sql = _silinmeyen(SQL_ACIK) if kolon_var_mi(oku, "sozlesme_plan_dondurma", "silindi_at") else SQL_ACIK
+    return _satirlar(oku(sql, (int(musteri_id),)))
 
 
 def dondurma_ekle(
@@ -220,6 +265,29 @@ def dondurma_iptal(calistir, oku, *, dondurma_id: int, iptal_eden: str, simdi: d
     if not row:
         raise DondurmaYok("acik dondurma yok")
     return _satir(row)
+
+
+def dondurma_sil(calistir, oku, *, dondurma_id: int, silen: str, simdi: datetime | None = None) -> tuple[dict, bool]:
+    """Kalıcı silmez. Açık satırı önce iptal eder, sonra geçmişten gizler."""
+    ensure_sozlesme_plan_dondurma(calistir)
+    ensure_dondurma_silindi_kolonlari(calistir)
+    pid = int(dondurma_id)
+    mevcut = _satir(oku(SQL_BY_ID_SIL, (pid,)))
+    if not mevcut or mevcut.get("silindi_at"):
+        raise DondurmaYok("dondurma yok")
+    kim = str(silen or "").strip()
+    if not kim:
+        raise ValueError("silen gerekli")
+    zaman = simdi or datetime.now(timezone.utc)
+    if zaman.tzinfo is None:
+        zaman = zaman.replace(tzinfo=timezone.utc)
+    acikti = not mevcut.get("iptal_at")
+    if acikti:
+        dondurma_iptal(calistir, oku, dondurma_id=pid, iptal_eden=kim, simdi=zaman)
+    row = calistir(SQL_SIL, (zaman, kim[:80], pid))
+    if not row:
+        raise DondurmaYok("dondurma yok")
+    return _satir(row), acikti
 
 
 def dondurma_imza_db(musteri_id) -> str:
