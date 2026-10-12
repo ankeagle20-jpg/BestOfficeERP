@@ -726,6 +726,34 @@ def test_kapi_ve_flask_tur():
         os.environ.pop("PLAN_DEGISTIR_MUSTERI_IDS", None)
 
 
+def test_tahsil_seti_dondurulan_ayi_atlar():
+    """Dondurulan ay marker, ekstre veya payload odendi olsa da tahsil setine girmez."""
+    import routes.giris_routes as gr
+
+    eski = gr._dondurma_ay_kumesi
+    gr._dondurma_ay_kumesi = lambda mid: {"2026-02", "2026-03", "2026-04"}
+    try:
+        payload = {
+            "dondurulan_aylar": ["2026-02", "2026-03", "2026-04"],
+            "aylar": [
+                {"ay_key": "2026-2", "tahsil_edildi": True, "kismi_tahsilat": False, "kalan_tutar_kdv": 0, "odenen_tutar_kdv": 1454.71},
+                {"ay_key": "2026-5", "tahsil_edildi": True, "kismi_tahsilat": False, "kalan_tutar_kdv": 0, "odenen_tutar_kdv": 1454.71},
+            ],
+        }
+        out = gr._aylik_tahsil_durum_finalize_ay_set(
+            867,
+            {"2026-2", "2026-5"},
+            payload=payload,
+            marker_ay_only={"2026-2", "2026-3"},
+            ekstre_ay_only={"2026-4"},
+            panel_by_iso={},
+        )
+    finally:
+        gr._dondurma_ay_kumesi = eski
+    check("dondurulan tahsil setinde yok", "2026-2" not in out and "2026-3" not in out and "2026-4" not in out, out)
+    check("dondurulmamis ay kalir", "2026-5" in out, out)
+
+
 def main():
     test_plansiz_diger_aylar_ayni()
     test_tufe_sonraki_ay()
@@ -739,6 +767,7 @@ def main():
     test_tuketiciler()
     test_borclandir_dondurma()
     test_auto_inv_dondurma()
+    test_tahsil_seti_dondurulan_ayi_atlar()
     test_kapi_ve_flask_tur()
     if FAILS:
         print("FAIL", len(FAILS))

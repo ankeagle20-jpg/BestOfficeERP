@@ -4961,6 +4961,21 @@ def _aylik_tahsil_durum_finalize_ay_set(
                 ay_set.discard(nk_p)
     except Exception:
         pass
+    donmus = set()
+    if isinstance(payload, dict):
+        for ham in payload.get("dondurulan_aylar") or []:
+            nk_d = _firma_ozet_normalize_tahsil_ay_key(str(ham))
+            if nk_d:
+                donmus.add(nk_d)
+    try:
+        for ham in _dondurma_ay_kumesi(mid) or ():
+            nk_d = _firma_ozet_normalize_tahsil_ay_key(str(ham))
+            if nk_d:
+                donmus.add(nk_d)
+    except Exception:
+        pass
+    if donmus:
+        ay_set.difference_update(donmus)
     return sorted(
         ay_set,
         key=lambda s: (int(str(s).split("-")[0]), int(str(s).split("-")[1])),
