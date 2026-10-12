@@ -260,9 +260,10 @@ function planModalHazirla() {
     kutu.style.fontSize = "13px";
     kutu.innerHTML = ""
         + "<div id=\"plan_baslik\" style=\"position:sticky;top:-16px;z-index:2;display:flex;align-items:center;justify-content:space-between;gap:8px;margin:-16px -16px 10px;padding:10px 16px;background:#0f2537;border-bottom:1px solid #2d4060;\">"
-        + "<div style=\"font-weight:600;font-size:15px;\">Plan değiştir</div>"
+        + "<div id=\"plan_baslik_metin\" style=\"font-weight:600;font-size:15px;\">Plan değiştir</div>"
         + "<button type=\"button\" id=\"plan_x\" aria-label=\"Kapat\" title=\"Kapat\" style=\"background:none;border:none;color:#b0bec5;font-size:24px;line-height:1;cursor:pointer;padding:0 4px;font-family:inherit;\">&times;</button>"
         + "</div>"
+        + "<div id=\"plan_form_bolum\">"
         + "<div id=\"plan_gecmis_bolum\" style=\"margin:0 0 10px;padding:8px;border:1px solid #2d4060;border-radius:6px;\"></div>"
         + "<div id=\"plan_pasif_not\" role=\"status\" style=\"display:none;margin:0 0 10px;padding:8px;border:1px solid #ff9800;border-radius:4px;color:#ffcc80;\">Bu müşteri pasif: yeni plan kaydedilemez, yalnız plan geçmişi görüntülenir.</div>"
         + "<div id=\"plan_kapsam_not\" style=\"margin:0 0 10px;padding:8px;border:1px solid #546e7a;border-radius:4px;color:#b0bec5;font-size:12px;line-height:1.4;\">Plan; grid, ekstre, ödeme linki ve resmi fatura tutarını günceller. Cari kart özeti ve fatura satırları (borç kayıtları) eski tutarda kalır.</div>"
@@ -289,7 +290,8 @@ function planModalHazirla() {
         + "<label id=\"plan_odemeli_etiket\" style=\"" + C + "\"><input id=\"plan_odemeli_onay\" type=\"checkbox\" style=\"width:18px;height:18px;margin:0;\"> Ödemesi olan geçmiş aylar etkilenecek, anladım</label>"
         + "</div>"
         + "<div id=\"plan_onizleme\" style=\"margin-top:8px;overflow:auto;\"></div>"
-        + "<div id=\"dondurma_bolum\" style=\"margin-top:16px;padding-top:12px;border-top:1px solid #2d4060;\">"
+        + "</div>"
+        + "<div id=\"dondurma_bolum\" style=\"display:none;\">"
         + "<div style=\"font-weight:600;margin-bottom:6px;\">Plan dondur</div>"
         + "<div id=\"dondurma_not\" style=\"margin:0 0 10px;padding:8px;border:1px solid #546e7a;border-radius:4px;color:#b0bec5;font-size:12px;line-height:1.4;\">Dondurma; grid, borçlandırma/tahsilat panelleri, ekstre ve ödeme tutarlarını 0 yapar. Cari kart özeti ve fatura satırları (borç kayıtları) eski tutarda kalır.</div>"
         + "<div id=\"dondurma_pasif_not\" role=\"status\" style=\"display:none;margin:0 0 10px;padding:8px;border:1px solid #ff9800;border-radius:4px;color:#ffcc80;\">Bu müşteri pasif: yeni dondurma kaydedilemez, geçmiş görüntülenir.</div>"
@@ -321,9 +323,7 @@ function planModalHazirla() {
         if (!el) return;
         el.addEventListener("input", function () {
             window.__dondurmaOnizlemeHazir = false;
-            var k = document.getElementById("dondurma_kaydet");
-            if (k && !k.disabled) k.disabled = true;
-            dondurmaPasifUygula();
+            window.__dondurmaSonAnahtar = "";
         });
     });
     /* Dışına tıklama: basış ve bırakış ikisi de arka plandaysa (kutu içinde başlayan metin seçimi kapatmaz). */
@@ -374,6 +374,23 @@ function planOnizlemeSifirla() {
     planKaydetDurumu();
 }
 
+/* Plan ve dondurma ayni popup, ayri icerik. Gecmis kaplari tek kalir. */
+function planModuUygula(bolum) {
+    var dondur = bolum === "dondur";
+    window.__planBolum = dondur ? "dondur" : "plan";
+    var baslik = document.getElementById("plan_baslik_metin");
+    if (baslik) baslik.textContent = dondur ? "Plan dondur" : "Plan değiştir";
+    var form = document.getElementById("plan_form_bolum");
+    if (form) form.style.display = dondur ? "none" : "";
+    var don = document.getElementById("dondurma_bolum");
+    if (don) don.style.display = dondur ? "" : "none";
+    ["plan_onizle_btn", "plan_kaydet", "plan_kaydet_ipucu"].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (el) el.style.display = dondur ? "none" : "";
+    });
+    if (!dondur) planKaydetDurumu();
+}
+
 function planDegistirModalAc(bolum) {
     /* Başka müşteriye geçilmişse eski müşterinin arayüzü kalkar, popup açılmaz. */
     var simdiMid = planMusteriId();
@@ -420,15 +437,10 @@ function planDegistirModalAc(bolum) {
     dondurmaPasifUygula();
     var dBas = document.getElementById("dondurma_bas");
     if (dBas && !dBas.value) dBas.value = ayIso;
+    planModuUygula(bolum === "dondur" ? "dondur" : "plan");
     modal.style.display = "block";
     var kutuEl = modal.firstChild;
-    if (kutuEl && kutuEl.scrollTop) kutuEl.scrollTop = 0;
-    if (bolum === "dondur") {
-        var hedef = document.getElementById("dondurma_bolum");
-        if (hedef && hedef.scrollIntoView) {
-            try { hedef.scrollIntoView({ block: "nearest" }); } catch (_eDon) {}
-        }
-    }
+    if (kutuEl) kutuEl.scrollTop = 0;
     window.__planTaban = planFormOzeti();
 }
 
@@ -882,7 +894,7 @@ function dondurmaPasifUygula() {
         if (el) el.disabled = pasif;
     });
     var kaydet = document.getElementById("dondurma_kaydet");
-    if (kaydet && (pasif || !window.__dondurmaOnizlemeHazir)) kaydet.disabled = true;
+    if (kaydet) kaydet.disabled = !!(pasif || window.__dondurmaIstek);
     var not = document.getElementById("dondurma_pasif_not");
     if (not) not.style.display = pasif ? "block" : "none";
 }
@@ -892,6 +904,13 @@ function dondurmaHataGoster(mesaj) {
     if (!kutu) return;
     kutu.textContent = mesaj || "";
     kutu.style.display = mesaj ? "block" : "none";
+    if (mesaj && typeof kutu.scrollIntoView === "function") {
+        try { kutu.scrollIntoView({ block: "nearest" }); } catch (_eDonHata) {}
+    }
+}
+
+function dondurmaGovdeAnahtar(govde) {
+    return String((govde && govde.baslangic_ay) || "") + "|" + String(govde && govde.ay_sayisi);
 }
 
 function dondurmaNedenYaz(sinif, neden) {
@@ -1016,9 +1035,13 @@ function dondurmaOnizlemeCiz(j) {
 }
 
 function dondurmaOnizlemeIste() {
+    if (window.__dondurmaIstek) return;
     var mid = planMusteriId();
     dondurmaHataGoster("");
-    if (planPasifMi()) return;
+    if (planPasifMi()) {
+        dondurmaHataGoster("Bu müşteri pasif: yeni dondurma kaydedilemez.");
+        return;
+    }
     if (!mid) {
         dondurmaHataGoster("Önizleme alınamadı: müşteri seçili değil");
         return;
@@ -1029,6 +1052,8 @@ function dondurmaOnizlemeIste() {
         return;
     }
     window.__dondurmaOnizlemeHazir = false;
+    window.__dondurmaSonAnahtar = "";
+    window.__dondurmaIstek = true;
     dondurmaPasifUygula();
     planIstekGonder("/giris/api/musteri/" + encodeURIComponent(mid) + "/plan/dondurma/onizleme", govde)
         .then(function (pack) {
@@ -1039,12 +1064,14 @@ function dondurmaOnizlemeIste() {
             dondurmaOnizlemeCiz(pack.j);
             window.__dondurmaOnizlemeHazir = !!(pack.j.dondurulan_aylar && pack.j.dondurulan_aylar.length);
             window.__dondurmaSonGovde = govde;
+            if (window.__dondurmaOnizlemeHazir) window.__dondurmaSonAnahtar = dondurmaGovdeAnahtar(govde);
             if (!window.__dondurmaOnizlemeHazir) dondurmaHataGoster("Dondurulacak ay yok.");
-            dondurmaPasifUygula();
-            var kaydet = document.getElementById("dondurma_kaydet");
-            if (kaydet && window.__dondurmaOnizlemeHazir && !planPasifMi()) kaydet.disabled = false;
         })
-        .catch(function () { dondurmaHataGoster("Önizleme alınamadı: bağlantı hatası"); });
+        .catch(function () { dondurmaHataGoster("Önizleme alınamadı: bağlantı hatası"); })
+        .then(function () {
+            window.__dondurmaIstek = false;
+            dondurmaPasifUygula();
+        });
 }
 
 function dondurmaSayfaYenile(mid) {
@@ -1054,31 +1081,47 @@ function dondurmaSayfaYenile(mid) {
 }
 
 function dondurmaKaydet() {
+    if (window.__dondurmaIstek) return;
     var mid = planMusteriId();
     dondurmaHataGoster("");
-    if (planPasifMi() || !window.__dondurmaOnizlemeHazir) return;
+    if (planPasifMi()) {
+        dondurmaHataGoster("Bu müşteri pasif: yeni dondurma kaydedilemez.");
+        return;
+    }
     if (!mid) {
         dondurmaHataGoster("Kaydedilemedi: müşteri seçili değil");
         return;
     }
     var govde = dondurmaGovde();
-    var btn = document.getElementById("dondurma_kaydet");
-    if (btn) btn.disabled = true;
+    if (!govde.baslangic_ay || !(govde.ay_sayisi >= 1 && govde.ay_sayisi <= 24)) {
+        dondurmaHataGoster("Başlangıç ayı ve süre (1-24) gerekli.");
+        return;
+    }
+    /* Ilk tik onizlemeyi gosterir; kayit ikinci tikta. */
+    if (!window.__dondurmaOnizlemeHazir || dondurmaGovdeAnahtar(govde) !== window.__dondurmaSonAnahtar) {
+        dondurmaOnizlemeIste();
+        return;
+    }
+    window.__dondurmaIstek = true;
+    dondurmaPasifUygula();
     planIstekGonder("/giris/api/musteri/" + encodeURIComponent(mid) + "/plan/dondurma", govde)
         .then(function (pack) {
             if (!pack.ok || !pack.j || !pack.j.ok) {
                 dondurmaHataGoster(planHataMetni(pack, "Kaydedilemedi"));
-                if (btn && window.__dondurmaOnizlemeHazir) btn.disabled = false;
                 return;
             }
             window.__dondurmaOnizlemeHazir = false;
+            window.__dondurmaSonAnahtar = "";
             var oniz = document.getElementById("dondurma_onizleme");
             if (oniz) oniz.textContent = "";
             dondurmaSayfaYenile(mid);
         })
         .catch(function () {
             dondurmaHataGoster("Kaydedilemedi: bağlantı hatası");
-            if (btn) btn.disabled = false;
+        })
+        .then(function () {
+            window.__dondurmaIstek = false;
+            dondurmaPasifUygula();
         });
 }
 

@@ -49,8 +49,9 @@ def check(name, ok, ek=""):
         FAILS.append(name)
 
 
-def _onizleme():
-    return dondurma_onizleme(ZINCIR, [], date(2026, 11, 1), 4, SINIF)
+def _onizleme(bas="2026-11", n=4):
+    y, m = int(str(bas)[:4]), int(str(bas)[5:7])
+    return dondurma_onizleme(ZINCIR, [], date(y, m, 1), int(n), SINIF)
 
 
 def _grid(fx, acik):
@@ -116,7 +117,18 @@ def main():
                 return
             govde = json.loads(request.post_data or "{}")
             if yol.endswith("/onizleme"):
-                js(route, {"ok": True, "not": "Dondurma; grid, borçlandırma/tahsilat panelleri, ekstre ve ödeme tutarlarını 0 yapar. Cari kart özeti ve fatura satırları (borç kayıtları) eski tutarda kalır.", **_onizleme()})
+                bas = str(govde.get("baslangic_ay") or "")[:7]
+                if bas == "2099-01":
+                    js(route, {"ok": False, "mesaj": "Bu aralik cakisiyor."}, 409)
+                    return
+                try:
+                    n = int(govde.get("ay_sayisi") or 0)
+                except (TypeError, ValueError):
+                    n = 0
+                if len(bas) < 7 or n < 1:
+                    js(route, {"ok": False, "mesaj": "Aralık uyuşmuyor."}, 400)
+                    return
+                js(route, {"ok": True, "not": "Dondurma; grid, borçlandırma/tahsilat panelleri, ekstre ve ödeme tutarlarını 0 yapar. Cari kart özeti ve fatura satırları (borç kayıtları) eski tutarda kalır.", **_onizleme(bas, n)})
                 return
             if yol.endswith("/iptal"):
                 bulunan = None
@@ -198,7 +210,7 @@ def main():
         s.route("**/*", isle)
         s.goto(BASE + "/giris/", wait_until="load")
         s.wait_for_function("typeof selectMusteri === 'function'", timeout=20000)
-        check("statik selectte dondur yok", "value=\"dondur\"" not in html and "js/plan_degistir.js', v=11" in html)
+        check("statik selectte dondur yok", "value=\"dondur\"" not in html and "js/plan_degistir.js', v=12" in html)
         s.evaluate("selectMusteri(%d)" % MID)
         s.wait_for_selector("#plan_dondur_btn", timeout=15000)
         for _ in range(3):
@@ -209,16 +221,92 @@ def main():
         once = (_kartlar(s).get("sozlesmeler-aylik-grid") or {}).get(AY) or {}
         once_metin = once.get("metin")
         check("grid baslangic tutari", once_metin not in (None, "", "0.00", "—"), once_metin)
+        def gorunur_say(metin):
+            return s.evaluate(
+                """(metin) => [...document.querySelectorAll('#plan_degistir_modal button')].filter(b => (b.textContent || '').trim() === metin && b.offsetParent !== null).length""",
+                metin,
+            )
+
+        def hata_gorunur():
+            return s.evaluate(
+                """() => {
+                    const h = document.getElementById('dondurma_hata');
+                    const kutu = document.querySelector('#plan_degistir_modal > div');
+                    if (!h || !kutu || getComputedStyle(h).display === 'none' || !h.textContent) return false;
+                    const hr = h.getBoundingClientRect();
+                    const kr = kutu.getBoundingClientRect();
+                    return hr.height > 0 && hr.top < kr.bottom && hr.bottom > kr.top;
+                }"""
+            )
+
         s.select_option("#musteri_durum", "dondur")
         s.wait_for_selector("#dondurma_bolum", state="visible", timeout=4000)
         durum = s.evaluate("document.getElementById('musteri_durum').value")
         check("dropdown dondur durumu degistirmez", durum == "aktif", durum)
+        check("dondur basligi", s.evaluate("document.getElementById('plan_baslik_metin').textContent") == "Plan dondur")
+        check("dondur modunda plan formu gizli", s.evaluate("getComputedStyle(document.getElementById('plan_form_bolum')).display") == "none")
+        check("dondur modunda onizle tek", gorunur_say("Önizle") == 1, gorunur_say("Önizle"))
+        check("dondur modunda kaydet tek", gorunur_say("Kaydet") == 1, gorunur_say("Kaydet"))
+        check(
+            "dondur modunda plan ipucu yok",
+            s.evaluate("getComputedStyle(document.getElementById('plan_kaydet_ipucu')).display") == "none",
+        )
         s.screenshot(path=str(EKRAN / "dondurma_dropdown_aktif.png"))
+        s.evaluate("document.getElementById('plan_kapat').click()")
+        s.click("#plan_degistir_btn")
+        s.wait_for_function("getComputedStyle(document.getElementById('plan_form_bolum')).display !== 'none'", timeout=4000)
+        check("plan basligi", s.evaluate("document.getElementById('plan_baslik_metin').textContent") == "Plan değiştir")
+        check("plan modunda dondurma gizli", s.evaluate("getComputedStyle(document.getElementById('dondurma_bolum')).display") == "none")
+        check("plan modunda onizle tek", gorunur_say("Önizle") == 1, gorunur_say("Önizle"))
+        check("plan modunda kaydet tek", gorunur_say("Kaydet") == 1, gorunur_say("Kaydet"))
+        check("gecmis kapsayici plan modunda da tek", s.evaluate("document.querySelectorAll('#dondurma_gecmis_bolum').length") == 1)
+        s.screenshot(path=str(EKRAN / "plan_mod_ayri.png"))
+        s.evaluate("document.getElementById('plan_kapat').click()")
+        s.click("#plan_dondur_btn")
+        s.wait_for_function("getComputedStyle(document.getElementById('dondurma_bolum')).display !== 'none'", timeout=4000)
+        s.screenshot(path=str(EKRAN / "dondurma_mod_ayri.png"))
+        s.evaluate(
+            """() => {
+                document.getElementById('dondurma_bas').value = '';
+                document.getElementById('dondurma_sure').value = '';
+                document.getElementById('dondurma_bas').dispatchEvent(new Event('input'));
+                document.getElementById('dondurma_kaydet').click();
+            }"""
+        )
+        s.wait_for_function("document.getElementById('dondurma_hata').textContent.indexOf('Başlangıç ayı') >= 0", timeout=4000)
+        check("bos alan uyarisi gorunur", hata_gorunur() and "Başlangıç ayı" in s.evaluate("document.getElementById('dondurma_hata').textContent"))
+        check("bos alan kayit yok", not kayitlar)
+        s.evaluate(
+            """() => {
+                document.getElementById('dondurma_bas').value = '2026-12';
+                document.getElementById('dondurma_sure').value = '1';
+                document.getElementById('dondurma_bas').dispatchEvent(new Event('input'));
+                document.getElementById('dondurma_kaydet').click();
+            }"""
+        )
+        s.wait_for_function("document.getElementById('dondurma_hata').textContent.indexOf('Dondurulacak ay yok') >= 0", timeout=6000)
+        check("tum aylar atlaninca uyari", hata_gorunur())
+        check("tum aylar atlaninca kayit yok", not kayitlar)
+        s.evaluate("document.getElementById('dondurma_kaydet').click()")
+        s.wait_for_timeout(500)
+        check("atlanan ayda ikinci kaydet de yazmaz", not kayitlar)
+        s.evaluate(
+            """() => {
+                document.getElementById('dondurma_bas').value = '2099-01';
+                document.getElementById('dondurma_sure').value = '1';
+                document.getElementById('dondurma_bas').dispatchEvent(new Event('input'));
+                document.getElementById('dondurma_kaydet').click();
+            }"""
+        )
+        s.wait_for_function("document.getElementById('dondurma_hata').textContent.indexOf('cakisiyor') >= 0", timeout=6000)
+        check("api hata popup icinde", hata_gorunur() and "cakisiyor" in s.evaluate("document.getElementById('dondurma_hata').textContent"))
+        s.screenshot(path=str(EKRAN / "dondurma_kaydet_hata.png"))
         s.evaluate(
             """() => {
                 document.getElementById('dondurma_bas').value = '2026-11';
                 document.getElementById('dondurma_sure').value = '4';
-                document.getElementById('dondurma_onizle_btn').click();
+                document.getElementById('dondurma_bas').dispatchEvent(new Event('input'));
+                document.getElementById('dondurma_kaydet').click();
             }"""
         )
         s.wait_for_function("document.querySelectorAll('#dondurma_onizleme tr').length >= 4", timeout=6000)
@@ -233,6 +321,7 @@ def main():
             "borçlandırma/tahsilat panelleri" in not_metin and "eski tutarda kalır" in not_metin,
         )
         s.screenshot(path=str(EKRAN / "dondurma_popup_onizleme.png"))
+        check("onizlemesiz ilk kaydet yalniz onizler", not kayitlar)
         s.evaluate("document.getElementById('dondurma_kaydet').click()")
         s.wait_for_function(
             """() => {
