@@ -2309,6 +2309,109 @@ def _plan_katmani_payloada(
         payload["plan_uyarilar"] = uyarilar
 
 
+def _dondurma_ay_kumesi(musteri_id) -> set:
+    """Açık dondurulan aylar (YYYY-MM). CREATE yok. Tablo yoksa boş. plan_var açmaz."""
+    try:
+        mid = int(musteri_id)
+    except (TypeError, ValueError):
+        return set()
+    if mid <= 0:
+        return set()
+    _dondurma_ay_kumesi_toplu([mid])
+    return set((_plan_kutu().get("dondurma") or {}).get(mid) or ())
+
+
+def _dondurma_ay_kumesi_toplu(mids) -> None:
+    """Bir sorguda doldurur. İkinci çağrı kutu doluysa sorgu yapmaz."""
+    istenen = []
+    for ham in mids or []:
+        try:
+            i = int(ham)
+        except (TypeError, ValueError):
+            continue
+        if i > 0 and i not in istenen:
+            istenen.append(i)
+    if not istenen:
+        return
+    box = _plan_kutu()
+    harita = box.setdefault("dondurma", {})
+    eksik = [i for i in istenen if i not in harita]
+    if not eksik:
+        return
+    if box.get("dondurma_tablo") is False:
+        for i in eksik:
+            harita[i] = set()
+        return
+    try:
+        if box.get("dondurma_tablo") is None:
+            row = fetch_one("SELECT to_regclass(%s) AS t", ("sozlesme_plan_dondurma",))
+            box["dondurma_tablo"] = bool(row and row.get("t"))
+            if not box["dondurma_tablo"]:
+                for i in eksik:
+                    harita[i] = set()
+                return
+        rows = fetch_all(
+            """
+            SELECT musteri_id, dondurulan_aylar
+            FROM sozlesme_plan_dondurma
+            WHERE iptal_at IS NULL AND musteri_id = ANY(%s)
+            """,
+            (eksik,),
+        ) or []
+    except Exception:
+        logging.getLogger(__name__).exception("dondurma okuma")
+        for i in eksik:
+            harita[i] = set()
+        return
+    for i in eksik:
+        harita[i] = set()
+    for row in rows:
+        try:
+            mid = int((row or {}).get("musteri_id") or 0)
+        except (TypeError, ValueError):
+            continue
+        if mid not in harita:
+            continue
+        ham = (row or {}).get("dondurulan_aylar")
+        if isinstance(ham, str):
+            try:
+                ham = json.loads(ham)
+            except (TypeError, ValueError):
+                ham = []
+        for ay in ham or []:
+            s = str(ay or "")[:7]
+            if len(s) == 7 and s[4] == "-":
+                harita[mid].add(s)
+
+
+def _dondurma_katmani_payloada(payload, musteri_id):
+    """Dondurulan ayı 0 yapar. Dondurma yoksa payload'a alan eklemez."""
+    if not payload or not isinstance(payload.get("aylar"), list):
+        return
+    kumesi = _dondurma_ay_kumesi(musteri_id)
+    if not kumesi:
+        return
+    degisti = False
+    for a in payload["aylar"]:
+        if not isinstance(a, dict):
+            continue
+        try:
+            anahtar = f"{int(a.get('yil')):04d}-{int(a.get('ay')):02d}"
+        except (TypeError, ValueError):
+            continue
+        if anahtar not in kumesi:
+            continue
+        a["brut_tutar_kdv"] = 0.0
+        a["tutar_kdv_dahil"] = 0.0
+        a["kalan_tutar_kdv"] = 0.0
+        a["tahsil_edildi"] = False
+        a["kismi_tahsilat"] = False
+        degisti = True
+    if degisti:
+        payload["dondurma_var"] = True
+        payload["dondurulan_aylar"] = sorted(kumesi)
+
+
 def _plan_ay_brut_varsa(musteri_id, kyc, tufe_map, ref_y, ref_m, reel):
     """Bu ay plan altındaysa brüt; değilse None. Okuma hatası None (eski hücre)."""
     try:
@@ -2407,6 +2510,7 @@ def geciken_satir_guncelleri(satirlar, bugun, kyc_by_mid, tufe_map, reel_by_mid)
         if i > 0:
             mids.append(i)
     paketler = _plan_paket_yukle(mids)
+    _dondurma_ay_kumesi_toplu(mids)
     try:
         ay_key = f"{int(bugun.year):04d}-{int(bugun.month):02d}"
     except (TypeError, ValueError, AttributeError):
@@ -2418,6 +2522,9 @@ def geciken_satir_guncelleri(satirlar, bugun, kyc_by_mid, tufe_map, reel_by_mid)
             mid = int(satir.get("musteri_id") or 0)
         except (TypeError, ValueError, AttributeError):
             out.append(eski)
+            continue
+        if ay_key in (_plan_kutu().get("dondurma") or {}).get(mid, ()):
+            out.append(0)
             continue
         paket = paketler.get(mid) or _PLAN_BOS
         if not paket.get("planlar"):
@@ -2550,6 +2657,10 @@ def _aylik_grid_compute(musteri_id, kyc, tufe_map, tahsil_tutar_map=None, *, pla
             faturali_aylar=faturali_aylar,
             fatura_belge=fatura_belge,
         )
+        try:
+            _dondurma_katmani_payloada(payload, musteri_id)
+        except Exception:
+            logging.getLogger(__name__).exception("dondurma katmani musteri_id=%s", musteri_id)
     return payload
 
 
@@ -2724,20 +2835,20 @@ def _aylik_grid_apply_reel_donem_overlay_to_payload(
     try:
         paket = _plan_paket_yukle([int(musteri_id)]).get(int(musteri_id)) or _PLAN_BOS
         planlar = paket.get("planlar") or []
-        if not planlar:
-            return
-        manual = manual_reel_by_year
-        if manual is None:
-            manual = _musteri_reel_donem_manual_dict_from_db(int(musteri_id))
-        _plan_katmani_payloada(
-            payload,
-            kyc,
-            tufe_map,
-            planlar=planlar,
-            reel=manual,
-            faturali_aylar=paket.get("faturali"),
-            fatura_belge=paket.get("belge"),
-        )
+        if planlar:
+            manual = manual_reel_by_year
+            if manual is None:
+                manual = _musteri_reel_donem_manual_dict_from_db(int(musteri_id))
+            _plan_katmani_payloada(
+                payload,
+                kyc,
+                tufe_map,
+                planlar=planlar,
+                reel=manual,
+                faturali_aylar=paket.get("faturali"),
+                fatura_belge=paket.get("belge"),
+            )
+        _dondurma_katmani_payloada(payload, musteri_id)
     except Exception:
         logging.getLogger(__name__).exception("plan katmani (reel sonrası)")
 
@@ -3004,6 +3115,10 @@ def _build_aylik_grid_cache_payload(musteri_id, tufe_map=None, kyc_row=None, man
                 faturali_aylar=faturali_aylar,
                 fatura_belge=fatura_belge,
             )
+        try:
+            _dondurma_katmani_payloada(payload, musteri_id)
+        except Exception:
+            logging.getLogger(__name__).exception("dondurma katmani musteri_id=%s", musteri_id)
         acik_aylik_tutar_aylari = _aylik_grid_acik_tutar_ay_keys_normalized(musteri_id)
         tol = float(AYLIK_GRID_TAM_ODENDI_TOLERANS)
         tahsil_pl_grid = tahsil_map or {}
@@ -3095,6 +3210,10 @@ def _build_aylik_grid_cache_payload(musteri_id, tufe_map=None, kyc_row=None, man
                         a["kismi_tahsilat"] = False
                         a["kalan_tutar_kdv"] = round(max(kalan, 0), 2)
         payload["tahsilat_imza"] = _aylik_tahsil_cache_imza(musteri_id)
+        try:
+            _dondurma_katmani_payloada(payload, musteri_id)
+        except Exception:
+            logging.getLogger(__name__).exception("dondurma katmani musteri_id=%s", musteri_id)
     return payload
 
 
@@ -3743,7 +3862,22 @@ def _aylik_grid_freshness_shadow_end(shadow: dict | None, after_payload, refresh
     )
 
 
-def _aylik_remaining_brut_by_iso_from_kyc(kyc, tufe_map=None) -> dict[str, float]:
+def _dondurma_remaining_dus(remaining_by_iso, musteri_id):
+    """Sıfır aya FIFO dağıtımı yapılmasın. Dondurma yoksa harita aynı kalır."""
+    if not remaining_by_iso:
+        return remaining_by_iso
+    try:
+        kumesi = _dondurma_ay_kumesi(musteri_id)
+    except Exception:
+        return remaining_by_iso
+    if not kumesi:
+        return remaining_by_iso
+    for ay in kumesi:
+        remaining_by_iso.pop(ay + "-01", None)
+    return remaining_by_iso
+
+
+def _aylik_remaining_brut_by_iso_from_kyc(kyc, tufe_map=None, musteri_id=None) -> dict[str, float]:
     """FIFO dağıtımı için ay başına sözleşme brüt borç (cache okumadan)."""
     remaining_by_iso: dict[str, float] = {}
     if not kyc:
@@ -3768,6 +3902,8 @@ def _aylik_remaining_brut_by_iso_from_kyc(kyc, tufe_map=None) -> dict[str, float
             remaining_by_iso[date(y, m, 1).isoformat()] = tut
     except Exception:
         pass
+    if musteri_id:
+        _dondurma_remaining_dus(remaining_by_iso, musteri_id)
     return remaining_by_iso
 
 
@@ -3818,12 +3954,13 @@ def _aylik_tahsil_tutar_map(musteri_id, tahsil_rows=None, remaining_by_iso=None,
                         if tv <= 0 or mm < 1 or mm > 12:
                             continue
                         remaining_by_iso[date(yy, mm, 1).isoformat()] = tv
+                    _dondurma_remaining_dus(remaining_by_iso, musteri_id)
         except Exception:
             remaining_by_iso = {}
 
         if not remaining_by_iso:
             if kyc_row is not None:
-                remaining_by_iso = _aylik_remaining_brut_by_iso_from_kyc(kyc_row, tufe_map)
+                remaining_by_iso = _aylik_remaining_brut_by_iso_from_kyc(kyc_row, tufe_map, musteri_id)
             else:
                 try:
                     # Flag açıkken loader zaten effective KYC döner; kapalıyken ham satır.
@@ -3847,9 +3984,11 @@ def _aylik_tahsil_tutar_map(musteri_id, tahsil_rows=None, remaining_by_iso=None,
                             """,
                             (musteri_id,),
                         ) or {}
-                    remaining_by_iso = _aylik_remaining_brut_by_iso_from_kyc(kyc, tufe_map)
+                    remaining_by_iso = _aylik_remaining_brut_by_iso_from_kyc(kyc, tufe_map, musteri_id)
                 except Exception:
                     pass
+
+    _dondurma_remaining_dus(remaining_by_iso, musteri_id)
 
     def _alloc_oldest(rem_tutar):
         try:
@@ -3911,6 +4050,18 @@ def _aylik_tahsil_tutar_map(musteri_id, tahsil_rows=None, remaining_by_iso=None,
             unmarked_rows.append(r)
 
     out = defaultdict(float)
+    try:
+        dondurulan_iso = {a + "-01" for a in _dondurma_ay_kumesi(musteri_id)}
+    except Exception:
+        dondurulan_iso = set()
+
+    def _yaz_ay(iso, pv):
+        if iso in dondurulan_iso:
+            for iso2, pv2 in _alloc_oldest(pv):
+                out[iso2] += pv2
+            return
+        out[iso] += pv
+        _remaining_drop(iso, pv)
     # --- Geçiş 1: marker'lı ---
     for r in marked_rows:
         ac = str(r.get("aciklama") or "")
@@ -3937,8 +4088,7 @@ def _aylik_tahsil_tutar_map(musteri_id, tahsil_rows=None, remaining_by_iso=None,
                     continue
                 if pv <= 0:
                     continue
-                out[iso] += pv
-                _remaining_drop(iso, pv)
+                _yaz_ay(iso, pv)
                 used_any = True
             if used_any:
                 continue
@@ -3959,8 +4109,7 @@ def _aylik_tahsil_tutar_map(musteri_id, tahsil_rows=None, remaining_by_iso=None,
                 except ValueError:
                     continue
                 share = share_cents / 100.0
-                out[iso] += share
-                _remaining_drop(iso, share)
+                _yaz_ay(iso, share)
             continue
         # pay_tokens vardı ama geçerli değil + TAH yok: eski tek-geçiş fallthrough
         al = _alloc_oldest(tut)
@@ -3971,13 +4120,13 @@ def _aylik_tahsil_tutar_map(musteri_id, tahsil_rows=None, remaining_by_iso=None,
         d = r.get("fatura_tarihi") or r.get("tahsilat_tarihi")
         if hasattr(d, "year"):
             iso = date(int(d.year), int(d.month), 1).isoformat()
-            out[iso] += tut
+            _yaz_ay(iso, tut)
         elif d:
             try:
                 ds = str(d)[:10]
                 dd = datetime.strptime(ds, "%Y-%m-%d").date()
                 iso = date(dd.year, dd.month, 1).isoformat()
-                out[iso] += tut
+                _yaz_ay(iso, tut)
             except Exception:
                 pass
 
@@ -3996,13 +4145,13 @@ def _aylik_tahsil_tutar_map(musteri_id, tahsil_rows=None, remaining_by_iso=None,
         d = r.get("fatura_tarihi") or r.get("tahsilat_tarihi")
         if hasattr(d, "year"):
             iso = date(int(d.year), int(d.month), 1).isoformat()
-            out[iso] += tut
+            _yaz_ay(iso, tut)
         elif d:
             try:
                 ds = str(d)[:10]
                 dd = datetime.strptime(ds, "%Y-%m-%d").date()
                 iso = date(dd.year, dd.month, 1).isoformat()
-                out[iso] += tut
+                _yaz_ay(iso, tut)
             except Exception:
                 pass
     return dict(out)
@@ -11654,7 +11803,7 @@ def _cari_ekstre_hareketler(
     }
     ekstre_batch_maps = _ekstre_tahsil_batch_maps_from_rows(tahsil_rows_ek)
     ekstre_tahsil_ids_by_iso = _ekstre_tahsil_ids_by_iso_from_rows(tahsil_rows_ek)
-    remaining_fifo = _aylik_remaining_brut_by_iso_from_kyc(kyc, tufe_map)
+    remaining_fifo = _aylik_remaining_brut_by_iso_from_kyc(kyc, tufe_map, musteri_id)
     try:
         ekstre_tahsil_map = _aylik_tahsil_tutar_map(
             int(musteri_id),
@@ -11991,6 +12140,10 @@ def _cari_ekstre_hareketler(
         y, m = fifo_bas.year, fifo_bas.month
         bit_y, bit_m = bit.year, bit.month
         prev_borc_tutar = None
+        try:
+            dondurulan_aylar = _dondurma_ay_kumesi(musteri_id)
+        except Exception:
+            dondurulan_aylar = set()
         while (y, m) <= (bit_y, bit_m):
             ilk_gun = date(y, m, 1)
             plan_ay = f"{y:04d}-{m:02d}" in plan_brut_by_ay
@@ -12008,6 +12161,8 @@ def _cari_ekstre_hareketler(
                 plan_brut_by_ay,
             )
             prev_borc_tutar = borc_tutar
+            if f"{y:04d}-{m:02d}" in dondurulan_aylar:
+                borc_tutar = 0.0
             tarih_iso = ilk_gun.isoformat()
             rk_fifo = f"{y}-{m}"
             reel_kilit = bool(
@@ -13425,6 +13580,10 @@ def api_aylik_tutarlardan_borclandir():
         if ay < 1 or ay > 12 or yil < 1990 or yil > 2100:
             atlanan.append({"neden": "tarih_aralik", "satir": raw})
             continue
+        if f"{yil:04d}-{ay:02d}" in _dondurma_ay_kumesi(musteri_id):
+            atlanan.append({"neden": "dondurma", "yil": yil, "ay": ay})
+            atlanan_aylar.append(f"{yil:04d}-{ay:02d}")
+            continue
         try:
             tutar = float(raw.get("tutar_kdv_dahil"))
         except (TypeError, ValueError):
@@ -13483,6 +13642,8 @@ def api_aylik_tutarlardan_borclandir():
                 fatura_no,
                 ettn,
                 COALESCE(durum, '') AS durum,
+                COALESCE(yon, 'giden') AS yon,
+                COALESCE(notlar, '') AS notlar,
                 EXISTS(
                     SELECT 1
                     FROM tahsilatlar t
@@ -13497,6 +13658,10 @@ def api_aylik_tutarlardan_borclandir():
             """,
             (musteri_id, musteri_id, tah_marker_pat, musteri_id, f"%{marker}%"),
         )
+        if var:
+            from plan_fatura_kilit import kayit_gecerli
+            if not kayit_gecerli(var):
+                var = None
         if var:
             # Fatura zaten var: yeni fatura açma; tahsil temizlendi → panel/grid borçlu senkronu.
             olusturulan.append(
@@ -13612,7 +13777,18 @@ def api_aylik_tutarlardan_borclandir():
             "(tahsilat kayıtları ayrı kalır)."
         )
     if atlanan_aylar:
-        mesaj += " Şu aylar zaten borçlandırılmış, atlandı: " + ", ".join(atlanan_aylar) + "."
+        dondurma_anahtar = []
+        for a in atlanan:
+            if isinstance(a, dict) and a.get("neden") == "dondurma":
+                try:
+                    dondurma_anahtar.append(f"{int(a.get('yil')):04d}-{int(a.get('ay')):02d}")
+                except (TypeError, ValueError):
+                    pass
+        diger = [k for k in atlanan_aylar if k not in dondurma_anahtar]
+        if dondurma_anahtar:
+            mesaj += " Dondurulan aylar atlandı: " + ", ".join(dondurma_anahtar) + "."
+        if diger:
+            mesaj += " Şu aylar zaten borçlandırılmış, atlandı: " + ", ".join(diger) + "."
     return jsonify({
         "ok": True,
         "olusturulan": olusturulan,

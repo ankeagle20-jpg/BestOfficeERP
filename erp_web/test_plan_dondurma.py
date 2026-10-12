@@ -224,7 +224,7 @@ def test_depo():
     check("iptal eden", iptal["iptal_eden"] == "test-iptal" and iptal["iptal_at"] == an)
     check("liste gizler", dondurma_liste(bellek.oku, musteri_id=7) == [])
     check("parmak none", dondurma_parmak([]) == "none")
-    check("parmak dolu", dondurma_parmak([bir]).startswith("s0;"))
+    check("parmak dolu", dondurma_parmak([bir]).startswith("s1;"))
 
 
 def _yanit(yanit):
@@ -279,6 +279,181 @@ def test_parmak_izi():
     check("eski none sayilir", _aylik_grid_dondurma_ayni("", "none"))
     check("dondurma farki", not _aylik_grid_dondurma_ayni("none", dolu["D"]))
     check("compute_rev 31", AYLIK_GRID_COMPUTE_REV == 31)
+    check("eski onbellek D yok dondurma yok", _aylik_grid_dondurma_ayni("", "none"))
+    check("eski onbellek dondurma varsa yenile", not _aylik_grid_dondurma_ayni("", "s1;1:2024-08:1:2024-08"))
+
+
+def _kyc():
+    return {
+        "sozlesme_tarihi": date(2023, 8, 1),
+        "sozlesme_bitis": date(2026, 8, 1),
+        "kira_artis_tarihi": date(2023, 8, 1),
+        "aylik_kira": 1000,
+        "kdv_oran": 20,
+        "kira_nakit": False,
+        "durum": "aktif",
+    }
+
+
+def _hucre(payload, yil, ay):
+    for a in payload.get("aylar") or []:
+        if int(a.get("yil")) == yil and int(a.get("ay")) == ay:
+            return a
+    return None
+
+
+def test_on_kontrol_ab():
+    """Parmak izi ve plan+dondurma birlikte. plan_degistir dondurma satirina dokunmaz."""
+    from sozlesme_plan_dondurma import DONDURMA_FP_SURUM
+
+    bellek = Bellek()
+    an = datetime(2026, 10, 12, 9, 0, tzinfo=timezone.utc)
+    check("parmak bos none", dondurma_parmak([]) == "none")
+    bir = dondurma_ekle(
+        bellek.calistir, bellek.oku, musteri_id=867, baslangic_ay="2024-08-01", ay_sayisi=1,
+        dondurulan_aylar=["2024-08"], atlanan_aylar=[], olusturan="test", simdi=an,
+    )
+    dolu = dondurma_parmak(dondurma_liste(bellek.oku, musteri_id=867))
+    check("olustur D degisir", dolu.startswith(DONDURMA_FP_SURUM + ";") and dolu != "none")
+    check("planli plansiz ayni D", dolu == dondurma_parmak([bir]))
+    bellek.calistir("SELECT 1 FROM sozlesme_plan_degisiklik WHERE musteri_id = %s", (867,))
+    sonra = dondurma_parmak(dondurma_liste(bellek.oku, musteri_id=867))
+    check("plan degistir D korunur", sonra == dolu and len(dondurma_liste(bellek.oku, musteri_id=867)) == 1)
+    dondurma_iptal(bellek.calistir, bellek.oku, dondurma_id=bir["id"], iptal_eden="test", simdi=an)
+    check("iptal D none", dondurma_parmak(dondurma_liste(bellek.oku, musteri_id=867)) == "none")
+
+    from routes import giris_routes as gr
+
+    tufe = {2024: {8: 10.0}, 2025: {8: 5.0}}
+    plan = [{"gecerlilik_ay": date(2024, 11, 1), "yeni_net": 2000, "kdv_oran": 20, "yeni_brut": 2400}]
+    eski_kume = gr._dondurma_ay_kumesi
+    gr._dondurma_ay_kumesi = lambda mid: set()
+    try:
+        zincir = gr._aylik_grid_compute(867, _kyc(), tufe, planlar=plan)
+        gr._dondurma_ay_kumesi = lambda mid: {"2024-08", "2025-01"} if int(mid) == 867 else set()
+        dolu_p = gr._aylik_grid_compute(867, _kyc(), tufe, planlar=plan)
+        dis = _hucre(dolu_p, 2024, 8)
+        ic = _hucre(dolu_p, 2025, 1)
+        sonraki = _hucre(dolu_p, 2025, 2)
+        ham_son = _hucre(zincir, 2025, 2)
+        ham_dis = _hucre(zincir, 2024, 8)
+        check("plan disi dondurma 0", dis and float(dis.get("tutar_kdv_dahil") or 0) == 0 and float(ham_dis.get("tutar_kdv_dahil") or 0) > 0)
+        check("plan ici dondurma 0", ic and float(ic.get("tutar_kdv_dahil") or 0) == 0 and float(_hucre(zincir, 2025, 1).get("tutar_kdv_dahil") or 0) > 0)
+        check("sonraki ay plan zinciri", sonraki and ham_son and float(sonraki.get("tutar_kdv_dahil")) == float(ham_son.get("tutar_kdv_dahil")) and float(sonraki.get("tutar_kdv_dahil")) > 0)
+        check("dondurma plan_var acmaz", dolu_p.get("plan_var") is True)
+    finally:
+        gr._dondurma_ay_kumesi = eski_kume
+
+
+def test_tuketiciler():
+    from routes import giris_routes as gr
+
+    tufe = {2024: {8: 10.0}, 2025: {8: 5.0}}
+    kyc = _kyc()
+    eski = gr._dondurma_ay_kumesi
+    gr._dondurma_ay_kumesi = lambda mid: set()
+    try:
+        a = gr._aylik_grid_compute(867, kyc, tufe, planlar=[], plan_katmani=False)
+        b = gr._aylik_grid_compute(867, kyc, tufe, planlar=[])
+        ka = [(x.get("yil"), x.get("ay"), x.get("tutar_kdv_dahil")) for x in a["aylar"]]
+        kb = [(x.get("yil"), x.get("ay"), x.get("tutar_kdv_dahil")) for x in b["aylar"]]
+        check("dondurmasiz grid birebir", ka == kb and "dondurma_var" not in b)
+        tam = gr._aylik_remaining_brut_by_iso_from_kyc(kyc, tufe)
+        gr._dondurma_ay_kumesi = lambda mid: {"2024-08"} if int(mid) == 867 else set()
+        kirp = gr._aylik_remaining_brut_by_iso_from_kyc(kyc, tufe, 867)
+        check("fifo sifir aya dagitmaz", "2024-08-01" in tam and "2024-08-01" not in kirp)
+        check("fifo diger aylar ayni", {k: v for k, v in tam.items() if k != "2024-08-01"} == kirp)
+        grid = gr._aylik_grid_compute(867, kyc, tufe, planlar=[])
+        h = _hucre(grid, 2024, 8)
+        h2 = _hucre(grid, 2024, 9)
+        ham = _hucre(a, 2024, 9)
+        check("grid dondurulan ay 0", h and float(h.get("tutar_kdv_dahil") or 0) == 0 and float(h.get("kalan_tutar_kdv") or 0) == 0)
+        check("grid sonraki ay zincir", h2 and ham and float(h2.get("tutar_kdv_dahil")) == float(ham.get("tutar_kdv_dahil")))
+        gr._plan_kutu_sifirla()
+        gr._plan_kutu().setdefault("dondurma", {})[11] = {"2024-12"}
+        gr._plan_kutu()["dondurma_tablo"] = True
+        eski_paket = gr._plan_paket_yukle
+        gr._plan_paket_yukle = lambda mids: {int(i): {"planlar": [], "faturali": [], "belge": {}} for i in mids}
+        try:
+            g = gr.geciken_satir_guncelleri(
+                [{"musteri_id": 11, "guncel": 1320.0}], date(2024, 12, 15), {11: kyc}, tufe, {}
+            )
+            check("wa geciken dondurma 0", g == [0], g)
+        finally:
+            gr._plan_paket_yukle = eski_paket
+            gr._plan_kutu_sifirla()
+        eski_ek = {
+            "fetch_one": gr.fetch_one,
+            "fetch_all": gr.fetch_all,
+            "kyc": gr._musteri_kyc_grup_for_aylik_grid,
+            "tufe": gr._tufe_map_by_year_month_cached,
+            "tah": gr._ekstre_tahsil_rows_for_musteri,
+            "meta": gr._aylik_tutar_fatura_meta_by_iso,
+            "reel": gr._reel_ay_key_tutar_map_musteri,
+            "grid": gr._read_aylik_grid_cache_payload,
+        }
+        gr.fetch_one = lambda sql, params=None: {}
+        gr.fetch_all = lambda sql, params=None: []
+        gr._musteri_kyc_grup_for_aylik_grid = lambda mid: kyc
+        gr._tufe_map_by_year_month_cached = lambda: tufe
+        gr._ekstre_tahsil_rows_for_musteri = lambda mid: []
+        gr._aylik_tutar_fatura_meta_by_iso = lambda mid: {}
+        gr._reel_ay_key_tutar_map_musteri = lambda *a, **k: {}
+        gr._read_aylik_grid_cache_payload = lambda mid: {"aylar": []}
+        try:
+            hareket = gr._cari_ekstre_hareketler(867, date(2024, 8, 1), date(2024, 9, 30), 1000, use_reel_cells=False)
+            kira = {h.get("tarih"): h.get("borc") for h in hareket if h.get("tur") == "Kira"}
+            check("ekstre dondurulan ay 0", kira.get("2024-08-01") == 0, kira.get("2024-08-01"))
+            check("ekstre sonraki ay durur", kira.get("2024-09-01") not in (None, 0), kira.get("2024-09-01"))
+        finally:
+            for ad, fn in eski_ek.items():
+                setattr(gr, {"fetch_one": "fetch_one", "fetch_all": "fetch_all", "kyc": "_musteri_kyc_grup_for_aylik_grid", "tufe": "_tufe_map_by_year_month_cached", "tah": "_ekstre_tahsil_rows_for_musteri", "meta": "_aylik_tutar_fatura_meta_by_iso", "reel": "_reel_ay_key_tutar_map_musteri", "grid": "_read_aylik_grid_cache_payload"}[ad], fn)
+    finally:
+        gr._dondurma_ay_kumesi = eski
+
+    from gib_plan_tutar import yukle_plan_gib_satir
+
+    gr._dondurma_ay_kumesi = lambda mid: {"2024-08"}
+    try:
+        ov = yukle_plan_gib_satir({"musteri_id": 867, "notlar": "x|AYLIK_TUTAR|2024-08-01|"})
+        check("gib dondurma 0 belge", ov and ov.get("dondurma") is True and ov.get("toplam") == 0 and ov.get("birim_fiyat") == 0)
+        check("gib mevcut satir yazilmaz", ov.get("dondurma") is True)
+    finally:
+        gr._dondurma_ay_kumesi = eski
+
+
+def test_borclandir_dondurma():
+    import copy
+    from routes import giris_routes as gr
+    import test_borclandir_mukerrer as tb
+
+    eski = gr._dondurma_ay_kumesi
+    gr._dondurma_ay_kumesi = lambda mid: {"2026-05", "2026-06"}
+    try:
+        satirlar = copy.deepcopy(tb.ISTEMCI) + [{"yil": 2026, "ay": 6, "tutar_kdv_dahil": 900.0}]
+        j, ins, sil, _sen = tb.kos(True, satirlar=satirlar)
+        check("borc dondurma atlanan", "2026-05" in (j.get("atlanan_aylar") or []) and "2026-06" in (j.get("atlanan_aylar") or []), j.get("atlanan_aylar"))
+        check("borc dondurma yazilmadi", tb.ay_say(ins, "2026-05-01") == 0 and tb.ay_say(ins, "2026-06-01") == 0)
+        check("borc dondurma uyari", "Dondurulan aylar atlandı" in (j.get("mesaj") or ""), j.get("mesaj"))
+        check("borc kismi gib ay silinmedi", tb.silme_say(sil, "2026-05-01") == 0 and tb.silme_say(sil, "2026-06-01") == 0)
+    finally:
+        gr._dondurma_ay_kumesi = eski
+
+    eski_one = gr.fetch_one
+    def fetch_iptal(sql, params=None):
+        if "tahsil_marker_var" in str(sql):
+            return {"id": 9, "fatura_no": "X", "ettn": "", "durum": "iptal", "yon": "giden", "notlar": "iptal|AYLIK_TUTAR|2026-07-01|", "tahsil_marker_var": False}
+        if "FROM customers" in str(sql):
+            return {"id": 4242, "name": "Test"}
+        if "FROM musteri_kyc" in str(sql):
+            return None
+        if "WHERE fatura_no" in str(sql):
+            return {"id": 77}
+        return None
+    # iptal kaydi «var» sayilmaz: gecerli helper ve zaten-var dali
+    from plan_fatura_kilit import kayit_gecerli
+    check("iptal gecerli sayilmaz", kayit_gecerli({"durum": "iptal", "yon": "giden", "notlar": "", "ettn": ""}) is False)
+    gr.fetch_one = eski_one
 
 
 def main():
@@ -290,6 +465,9 @@ def main():
     test_depo()
     test_api()
     test_parmak_izi()
+    test_on_kontrol_ab()
+    test_tuketiciler()
+    test_borclandir_dondurma()
     if FAILS:
         print("FAIL", len(FAILS))
         for ad in FAILS:

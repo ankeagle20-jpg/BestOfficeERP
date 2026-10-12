@@ -11,7 +11,7 @@ from datetime import date, datetime
 from plan_fatura_kilit import KILITLI
 from sozlesme_plan import _ay_basi, _ay_ekle, ay_bazli_tutarlar
 
-DONDURMA_FP_SURUM = "s0"
+DONDURMA_FP_SURUM = "s1"
 
 
 def _ay_anahtar(val) -> str:

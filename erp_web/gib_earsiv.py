@@ -2179,6 +2179,23 @@ def build_fatura_data_from_db(fatura_id, fetch_one_func, plan_baglam=None):
             "tax_rate": int(kdv_orani_genel),
         }]
 
+    try:
+        from gib_plan_tutar import aylik_tutar_ayi
+        from routes.giris_routes import _dondurma_ay_kumesi
+
+        _ay_d = aylik_tutar_ayi((fatura or {}).get("notlar"))
+        _mid_d = int((fatura or {}).get("musteri_id") or 0)
+        if _ay_d and _mid_d > 0 and _ay_d in _dondurma_ay_kumesi(_mid_d):
+            birim_fiyat = 0.0
+            toplam = 0.0
+            kdv_orani_genel = 0
+            for it in items or []:
+                if isinstance(it, dict):
+                    it["unit_price"] = 0.0
+                    it["tax_rate"] = 0
+    except Exception:
+        _log.exception("gib dondurma tutar")
+
     notlar_raw = str(fatura.get("notlar") or "")
     irsaliye_modu = "IRSALIYE_MODU" in notlar_raw.upper()
     note_clean = notlar_raw.replace("IRSALIYE_MODU", "").replace("||", "|").strip(" |")

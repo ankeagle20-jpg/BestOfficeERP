@@ -1189,7 +1189,7 @@ def test_asama5_okuyucular():
     kirik = [1500, 1500, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400]
     check("planli yil ay ay", tahsilat_yil_borc(1320, kirik, True) == round(sum(kirik), 2))
     html = (ROOT / "templates" / "giris" / "index.html").read_text(encoding="utf-8")
-    borc_js = html[html.find("function girisTahsilatYilBorcTek"):html.find("function girisTahsilatYilBorcTek") + 280]
+    borc_js = html[html.find("function girisTahsilatYilBorcTek"):html.find("function girisTahsilatYilBorcTek") + 420]
     check(
         "yil js plan varsa toplar",
         "girisPlanYilToplam" in borc_js and "planToplam != null" in borc_js and "* 12" in borc_js and "plan_var" in html,
@@ -1255,7 +1255,7 @@ def test_asama5_okuyucular():
         gr._plan_kutu_sifirla()
     check("geciken plansiz ayni", g1[0] == 1320 and g2[0] == 1320)
     check("geciken planli ay brut", g1[1] == 2400 and g2[1] == 2400)
-    check("geciken toplu sonra sifir", ilk == (1, 2) and sayac == {"one": 1, "all": 2, "fatura": 0, "kyc": 0})
+    check("geciken toplu sonra sifir", ilk == (2, 3) and sayac == {"one": 2, "all": 3, "fatura": 0, "kyc": 0})
     print("perf geciken_ms", round(sure, 2), "sorgu_ilk", ilk, "sorgu_ikinci", (sayac["one"], sayac["all"]))
 
     from routes import faturalar_routes as fr

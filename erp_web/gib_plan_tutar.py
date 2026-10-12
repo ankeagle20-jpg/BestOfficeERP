@@ -218,6 +218,7 @@ def yukle_plan_gib_satir(fatura, kyc_kismi=None):
         return None
     try:
         from routes.giris_routes import (
+            _dondurma_ay_kumesi,
             _ekstre_plan_brut_haritasi,
             _musteri_kyc_grup_for_aylik_grid,
             _plan_fatura_siniflari_oku,
@@ -230,13 +231,20 @@ def yukle_plan_gib_satir(fatura, kyc_kismi=None):
         _LOG.exception("gib plan tutar import")
         return None
     try:
+        ay = aylik_tutar_ayi((fatura or {}).get("notlar"))
+        if ay and ay in _dondurma_ay_kumesi(mid):
+            return {
+                "birim_fiyat": 0.0,
+                "kdv_orani": 0,
+                "toplam": 0.0,
+                "kdv": 0.0,
+                "ay": ay,
+                "dondurma": True,
+            }
         kyc = _musteri_kyc_grup_for_aylik_grid(mid) or dict(kyc_kismi or {})
         paket = _plan_paket_yukle([mid]).get(mid) or {}
         planlar = paket.get("planlar") or []
-        if not planlar:
-            return None
-        ay = aylik_tutar_ayi((fatura or {}).get("notlar"))
-        if not ay:
+        if not ay or not planlar:
             return None
         sin = (_plan_fatura_siniflari_oku([mid]) or {}).get(mid) or {}
         ay_sinif = (sin.get(ay) or {}).get("sinif")

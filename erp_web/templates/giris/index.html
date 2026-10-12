@@ -18785,10 +18785,13 @@ function girisTahsilatParaYaz(el, n) {
 }
 function girisPlanGridHucreBrut(yil, ay) {
     var sco = window.__sozlesmelerAylikSonCacheObj;
-    if (!sco || !sco.plan_var || !sco.aylar) return null;
+    if (!sco) return null;
     var y = parseInt(yil, 10);
     var m = parseInt(ay, 10);
     if (isNaN(y) || isNaN(m)) return null;
+    var anahtar = ('000' + y).slice(-4) + '-' + ('0' + m).slice(-2);
+    if (sco.dondurulan_aylar && sco.dondurulan_aylar.indexOf(anahtar) >= 0) return 0;
+    if (!sco.plan_var || !sco.aylar) return null;
     for (var i = 0; i < sco.aylar.length; i++) {
         var a = sco.aylar[i];
         if (!a) continue;
@@ -18812,7 +18815,7 @@ function girisPlanYilToplam(yy) {
         var ya = (typeof girisTahsilatAyKeyToYilAy === 'function') ? girisTahsilatAyKeyToYilAy(keys[i]) : null;
         if (!ya) continue;
         var b = girisPlanGridHucreBrut(ya.yil, ya.ay);
-        if (b == null) continue;
+        if (b == null || b <= 0.05) continue;
         sum += b;
         n++;
     }
@@ -18831,7 +18834,7 @@ function girisPlanYilGecerliAylik(yy) {
         var ya = girisTahsilatAyKeyToYilAy(keys[i]);
         if (!ya) continue;
         var b = girisPlanGridHucreBrut(ya.yil, ya.ay);
-        if (b == null) continue;
+        if (b == null || b <= 0.05) continue;
         var an = parseInt(ya.ay, 10);
         if (an > enAy) { enAy = an; enBrut = b; }
     }
@@ -18845,11 +18848,32 @@ function girisTahsilatYilAylikTek(yy) {
     if (aylikTop <= 0) return 0;
     return Math.round(aylikTop * 100) / 100;
 }
+function girisDondurmaYilToplam(yy) {
+    var sco = window.__sozlesmelerAylikSonCacheObj;
+    if (!sco || !sco.dondurma_var || !sco.dondurulan_aylar) return null;
+    if (typeof girisTahsilatYilAyKeysFiltered !== 'function') return null;
+    var keys = girisTahsilatYilAyKeysFiltered(yy) || [];
+    if (!keys.length) return null;
+    var aylikTop = girisTahsilatYilAylikTek(yy);
+    var sum = 0;
+    for (var i = 0; i < keys.length; i++) {
+        var ya = (typeof girisTahsilatAyKeyToYilAy === 'function') ? girisTahsilatAyKeyToYilAy(keys[i]) : null;
+        if (!ya) continue;
+        var anahtar = ('000' + ya.yil).slice(-4) + '-' + ('0' + ya.ay).slice(-2);
+        if (sco.dondurulan_aylar.indexOf(anahtar) >= 0) continue;
+        var b = (sco.plan_var && typeof girisPlanGridHucreBrut === 'function') ? girisPlanGridHucreBrut(ya.yil, ya.ay) : null;
+        if (b != null && b > 0.05) sum += b;
+        else sum += aylikTop;
+    }
+    return Math.round(sum * 100) / 100;
+}
 function girisTahsilatYilBorcTek(yy) {
     var aylikTop = girisTahsilatYilAylikTek(yy);
     if (aylikTop <= 0) return 0;
     var planToplam = girisPlanYilToplam(yy);
     if (planToplam != null) return planToplam;
+    var dondurmaToplam = girisDondurmaYilToplam(yy);
+    if (dondurmaToplam != null) return dondurmaToplam;
     return Math.round(aylikTop * 12 * 100) / 100;
 }
 function girisTahsilatYilYilListesi() {
@@ -19588,7 +19612,7 @@ function girisTahsilatYilAyPaneldenRenderOzellik(yil, ay) {
         kismi: st.tip === 'turuncu',
         odendi: st.tip === 'yesil',
         odenmedi: st.tip === 'kirmizi',
-        tutarStr: goster > tol ? goster.toFixed(2) : '—',
+        tutarStr: goster > tol ? goster.toFixed(2) : ((typeof girisPlanGridHucreBrut === 'function' && girisPlanGridHucreBrut(yil, ay) === 0) ? '0.00' : '—'),
         tutarKdvAttr: st.tip === 'yesil' ? '' : (goster > tol ? String(goster) : ''),
         odenenAttr: String(Math.round(st.odenen * 100) / 100),
         brutAttr: String(Math.round(st.brut * 100) / 100),
@@ -20074,6 +20098,10 @@ function girisTahsilatYilAyPanelAylikCanon(donemYil, ayKey) {
     var kt = Math.round((parseFloat(
         girisTahsilatYilAyKiraTutar(donemYil, ayKey)
     ) || 0) * 100) / 100;
+    try {
+        var yaDn = (typeof girisTahsilatAyKeyToYilAy === 'function') ? girisTahsilatAyKeyToYilAy(ayKey) : null;
+        if (yaDn && typeof girisPlanGridHucreBrut === 'function' && girisPlanGridHucreBrut(yaDn.yil, yaDn.ay) === 0) return 0;
+    } catch (_eDnCn) {}
     if (basStrCanon && ayKey && typeof sozlesmelerReelDbTutarAyKey === 'function') {
         var reelDbCn = sozlesmelerReelDbTutarAyKey(basStrCanon, ayKey);
         if (reelDbCn != null && reelDbCn > tol) {
@@ -22258,7 +22286,9 @@ function _sozlesmelerAylikTekGridKartTutarlariniYenile(grid, basStr, hucreMap, r
             var planBrutTek = (typeof girisPlanGridHucreBrut === 'function') ? girisPlanGridHucreBrut(yil, ay) : null;
             if (planBrutTek != null) tut = planBrutTek; /* plan_var: reel/TUFE haritasi degil plan katmanli deger */
         } catch (_ePlTek) {}
-        if (isNaN(tut) || tut <= 0) continue;
+        if (planBrutTek === 0) tut = 0;
+        if (isNaN(tut) || tut < 0) continue;
+        if (tut <= 0 && planBrutTek !== 0) continue;
         tut = Math.round(tut * 100) / 100;
         var odendi = card.classList.contains('sozlesmeler-ay-kart-odendi');
         var kismi = card.classList.contains('sozlesmeler-ay-kart-kismi');
@@ -22305,7 +22335,7 @@ function _sozlesmelerAylikTekGridKartTutarlariniYenile(grid, basStr, hucreMap, r
             if (deg) deg.textContent = kalan > tol ? kalan.toFixed(2) : '—';
         } else if (!odendi || tahsilTamKart) {
             card.setAttribute('data-tutar-kdv', tut > tol ? String(tut) : '');
-            if (deg) deg.textContent = tut > tol ? tut.toFixed(2) : '—';
+            if (deg) deg.textContent = tut > tol ? tut.toFixed(2) : (planBrutTek === 0 ? '0.00' : '—');
         }
     }
 }

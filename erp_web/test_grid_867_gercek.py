@@ -151,7 +151,7 @@ def beklenen_867(fx):
             if (a["yil"], a["ay"]) >= (2026, 8)}
 
 
-def kosu(yol, html_yol, etiket, kart_degistir=True, dump=None, ls_stale=False, senaryo="eski"):
+def kosu(yol, html_yol, etiket, kart_degistir=True, dump=None, ls_stale=False, senaryo="eski", ek_kontrol=None):
     """yol: 'bundle' | 'fallback'. (basarisiz_kontroller, kotu_yazim_sayisi, kotu_yazici_dagilimi) doner."""
     global FAILS
     FAILS = []
@@ -242,6 +242,8 @@ def kosu(yol, html_yol, etiket, kart_degistir=True, dump=None, ls_stale=False, s
     def kontrol(s, ad):
         for gid, (yanlis, n) in dogru(s).items():
             check("%s %s: 2026-8+ plan/cache rakamlarinda (%d kart)" % (ad, gid.split("-")[1], n), n > 20 and not yanlis, dict(list(yanlis.items())[:6]))
+        if ek_kontrol:
+            ek_kontrol(s, ad)
 
     with sync_playwright() as pw:
         try:

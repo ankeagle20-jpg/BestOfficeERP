@@ -11851,7 +11851,7 @@ def _gib_olustur_sonrasi_plan_tutar_cek(fatura_id):
         if not row:
             return
         ov = yukle_plan_gib_satir(row)
-        if not ov:
+        if not ov or ov.get("dondurma"):
             return
         cek_gonderilen_plan_tutar(row, ov, execute)
     except Exception:
