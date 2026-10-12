@@ -858,7 +858,7 @@ function planIptalGonder(mid, planId, btn) {
     planIstekGonder("/giris/api/musteri/" + encodeURIComponent(mid) + "/plan/" + encodeURIComponent(planId) + "/iptal", {})
         .then(function (pack) {
             if (pack.ok && pack.j && pack.j.ok) {
-                planSayfaYenile(mid);
+                dondurmaSayfaYenile(mid, null, false);
                 return;
             }
             if (planAcikPlanYok(pack)) {
@@ -876,7 +876,7 @@ function planIptalGonder(mid, planId, btn) {
 /* Plan kaydı sonrası popup kapanır ve sayfa yenilenir. */
 function planKayitSonrasi(mid) {
     planModalKapat();
-    planSayfaYenile(mid);
+    dondurmaSayfaYenile(mid, null, false);
 }
 
 /* Geçmiş listesi sunucu cevabından yenilenir; grid/borç/ekstre güncellenir. Popup'a dokunmaz (İptal popup içinde kalır). */
@@ -1074,10 +1074,139 @@ function dondurmaOnizlemeIste() {
         });
 }
 
-function dondurmaSayfaYenile(mid) {
-    try { window.__sozlesmelerAylikSonCacheObj = null; } catch (_e) {}
-    planSayfaYenile(mid);
-    dondurmaGecmisYukle(mid);
+function dondurmaAyNorm(ay) {
+    var parca = String(ay || "").split("-");
+    var y = parseInt(parca[0], 10);
+    var m = parseInt(parca[1], 10);
+    if (isNaN(y) || isNaN(m)) return "";
+    return ("000" + y).slice(-4) + "-" + ("0" + m).slice(-2);
+}
+
+function dondurmaListeNorm(liste) {
+    var norm = [];
+    (liste || []).forEach(function (a) {
+        var n = dondurmaAyNorm(a);
+        if (n && norm.indexOf(n) < 0) norm.push(n);
+    });
+    return norm;
+}
+
+/* Aylık grid, müşteri kartı, tahsilat ve borçlandırma paneli: bellek + sessionStorage. */
+function dondurmaOnbellekTemizle(mid) {
+    var id = String(mid || "");
+    var prefixes = [
+        "/giris/api/aylik-grid-cache",
+        "/giris/api/musteri/" + id,
+        "/giris/api/tahsilat-panel-detay",
+        "/giris/api/aylik-tahsil-durum"
+    ];
+    prefixes.forEach(function (p) {
+        if (typeof girisJsonCacheInvalidatePrefix === "function") {
+            try { girisJsonCacheInvalidatePrefix(p); } catch (_eOn1) {}
+        }
+        if (typeof girisJsonPersistInvalidatePrefix === "function") {
+            try { girisJsonPersistInvalidatePrefix(p); } catch (_eOn2) {}
+        }
+    });
+    try {
+        var sil = [];
+        for (var i = 0; i < sessionStorage.length; i++) {
+            var k = sessionStorage.key(i);
+            if (!k) continue;
+            if (k.indexOf("aylik-grid-cache") >= 0 || k.indexOf("tahsilat-panel") >= 0 || k.indexOf("borclandir") >= 0 || (id && k.indexOf("/musteri/" + id) >= 0))
+                sil.push(k);
+        }
+        for (var j = 0; j < sil.length; j++) sessionStorage.removeItem(sil[j]);
+    } catch (_eOn3) {}
+    try {
+        window.__tahsilatSatirYilAyDetay = {};
+        window.__aylikSatirYilAyDetay = {};
+        window.__aylikSatirYilDetay = {};
+        window.__tahsilatKismiOverrideByMid = {};
+    } catch (_eOn4) {}
+}
+
+function dondurmaListeyiBellegeYaz(liste) {
+    var norm = dondurmaListeNorm(liste);
+    window.__dondurmaBilinenAylar = norm;
+    window.__dondurmaBilinenZorunlu = true;
+    window.__dondurmaListeOnay = {
+        mid: String((typeof selectedId !== "undefined" && selectedId != null) ? selectedId : ""),
+        aylar: norm.slice()
+    };
+    var sco = window.__sozlesmelerAylikSonCacheObj;
+    if (!sco || typeof sco !== "object") sco = window.__sozlesmelerAylikSonCacheObj = { aylar: [] };
+    sco.dondurulan_aylar = norm.slice();
+    sco.dondurma_var = norm.length > 0;
+    if (Array.isArray(sco.aylar) && norm.length) {
+        sco.aylar.forEach(function (a) {
+            if (!a) return;
+            var ak = dondurmaAyNorm(a.ay_key || ((a.yil || "") + "-" + (a.ay || "")));
+            if (norm.indexOf(ak) < 0) return;
+            a.brut_tutar_kdv = 0;
+            a.tutar_kdv_dahil = 0;
+            a.kalan_tutar_kdv = 0;
+            a.odenen_tutar_kdv = 0;
+            a.tahsil_edildi = false;
+            a.kismi_tahsilat = false;
+        });
+    }
+    try { if (typeof girisTahsilSetindenDondurulanlariCikar === "function") girisTahsilSetindenDondurulanlariCikar(); } catch (_eOn5) {}
+    return norm;
+}
+
+function dondurmaGuncelListe(mid) {
+    return fetch("/giris/api/musteri/" + encodeURIComponent(mid) + "/plan/dondurma", { credentials: "same-origin" })
+        .then(function (r) {
+            return r.json().then(function (j) { return { ok: r.ok, j: j }; }).catch(function () { return { ok: false, j: null }; });
+        })
+        .then(function (pack) {
+            var liste = [];
+            var aktif = (pack.j && pack.j.aktif) || [];
+            aktif.forEach(function (p) {
+                var aylar = p && p.dondurulan_aylar;
+                if (typeof aylar === "string") {
+                    try { aylar = JSON.parse(aylar); } catch (_eJ) { aylar = []; }
+                }
+                (aylar || []).forEach(function (a) { liste.push(a); });
+            });
+            return liste;
+        });
+}
+
+/* liste verilirse ilk çizimden önce yazılır. hemenCiz: kayıtta 0,00 hemen basılır; kaldırmada taze grid beklenir. */
+function dondurmaSayfaYenile(mid, liste, hemenCiz) {
+    window.__dondurmaYenileNesil = (window.__dondurmaYenileNesil || 0) + 1;
+    var nesil = window.__dondurmaYenileNesil;
+    var bekle = liste == null && !hemenCiz;
+    if (bekle) window.__dondurmaYenileBekliyor = true;
+    function ciz(aylar) {
+        if ((window.__dondurmaYenileNesil || 0) !== nesil) return;
+        dondurmaOnbellekTemizle(mid);
+        dondurmaListeyiBellegeYaz(aylar);
+        window.__dondurmaYenileNesil = nesil + 1;
+        nesil = window.__dondurmaYenileNesil;
+        window.__dondurmaListeHazirNesil = nesil;
+        planKapisiniYenile(mid);
+        dondurmaGecmisYukle(mid);
+        if (hemenCiz && typeof sozlesmelerAylikGuncelle === "function") {
+            try { sozlesmelerAylikGuncelle(); } catch (_eG) {}
+        }
+        if (typeof sozlesmelerAylikHizliYukle === "function") {
+            try { sozlesmelerAylikHizliYukle(true); } catch (_eH) {}
+        }
+        if (typeof girisTahsilatOzetGuncelle === "function") {
+            try { girisTahsilatOzetGuncelle(); } catch (_eO) {}
+        }
+        if (typeof cariEkstreYukle === "function") {
+            try { cariEkstreYukle(); } catch (_eE) {}
+        }
+    }
+    if (liste) {
+        ciz(liste);
+        return;
+    }
+    dondurmaGuncelListe(mid).then(ciz).catch(function () { ciz(window.__dondurmaBilinenAylar || []); });
 }
 
 function dondurmaKaydet() {
@@ -1114,7 +1243,9 @@ function dondurmaKaydet() {
             window.__dondurmaSonAnahtar = "";
             var oniz = document.getElementById("dondurma_onizleme");
             if (oniz) oniz.textContent = "";
-            dondurmaSayfaYenile(mid);
+            var once = (window.__sozlesmelerAylikSonCacheObj && window.__sozlesmelerAylikSonCacheObj.dondurulan_aylar) || [];
+            var gelen = (pack.j && pack.j.dondurulan_aylar) || [];
+            dondurmaSayfaYenile(mid, dondurmaListeNorm([].concat(once, gelen)), true);
         })
         .catch(function () {
             dondurmaHataGoster("Kaydedilemedi: bağlantı hatası");
@@ -1134,7 +1265,7 @@ function dondurmaKaldir(mid, dondurmaId, btn) {
                 if (btn) btn.disabled = false;
                 return;
             }
-            dondurmaSayfaYenile(mid);
+            dondurmaSayfaYenile(mid, null, false);
         })
         .catch(function () {
             dondurmaHataGoster("Kaldırılamadı: bağlantı hatası");
@@ -1157,6 +1288,24 @@ function planSayfaYenile(mid) {
         try { cariEkstreYukle(); } catch (_e4) {}
     }
 }
+
+/* Kaldırma listesi gelene kadar kart metnine 0,00 yazılmasın. Kayıt yolu bayrağı açmaz. */
+(function () {
+    if (typeof window === "undefined" || window.__dondurmaMetinKilit) return;
+    window.__dondurmaMetinKilit = true;
+    try {
+        var desc = Object.getOwnPropertyDescriptor(Node.prototype, "textContent");
+        if (!desc || typeof desc.set !== "function" || desc.configurable === false) return;
+        var orig = desc.set;
+        desc.set = function (v) {
+            try {
+                if (window.__dondurmaYenileBekliyor && this.classList && this.classList.contains("aylik-deger")) return;
+            } catch (_eK) {}
+            return orig.call(this, v);
+        };
+        Object.defineProperty(Node.prototype, "textContent", desc);
+    } catch (_eKur) {}
+})();
 
 if (typeof module !== "undefined" && module.exports) {
     module.exports = {

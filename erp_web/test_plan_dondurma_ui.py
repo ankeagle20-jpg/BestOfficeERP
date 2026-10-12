@@ -210,7 +210,7 @@ def main():
         s.route("**/*", isle)
         s.goto(BASE + "/giris/", wait_until="load")
         s.wait_for_function("typeof selectMusteri === 'function'", timeout=20000)
-        check("statik selectte dondur yok", "value=\"dondur\"" not in html and "js/plan_degistir.js', v=13" in html)
+        check("statik selectte dondur yok", "value=\"dondur\"" not in html and "js/plan_degistir.js', v=14" in html)
         s.evaluate("selectMusteri(%d)" % MID)
         s.wait_for_selector("#plan_dondur_btn", timeout=15000)
         for _ in range(3):

@@ -230,8 +230,295 @@ def zaman_cizelgesi():
         t.fixture_867 = eski_fx
 
 
+GOZLEM = r"""
+() => {
+  window.__kare = [];
+  window.__kareSon = {};
+  const grid = document.getElementById('sozlesmeler-aylik-grid');
+  if (!grid) return false;
+  const yaz = (muts) => {
+    const ilgili = {};
+    (muts || []).forEach((m) => {
+      const ekle = (el) => {
+        if (!el || !el.getAttribute) return;
+        if (el.classList && el.classList.contains('sozlesmeler-ay-kart')) {
+          ilgili[el.getAttribute('data-ay-key')] = true;
+        }
+        if (el.querySelectorAll) {
+          el.querySelectorAll('.sozlesmeler-ay-kart').forEach((c) => {
+            ilgili[c.getAttribute('data-ay-key')] = true;
+          });
+        }
+      };
+      let n = m.target;
+      if (n && n.nodeType === 3) n = n.parentElement;
+      if (n && n.closest) ekle(n.closest('.sozlesmeler-ay-kart'));
+      if (m.type === 'childList') {
+        m.addedNodes.forEach(ekle);
+      }
+    });
+    ['2026-2','2026-3','2026-4','2025-6'].forEach((ay) => {
+      if (!ilgili[ay]) return;
+      const c = grid.querySelector('.sozlesmeler-ay-kart[data-ay-key="' + ay + '"]');
+      if (!c) return;
+      const deg = c.querySelector('.aylik-deger');
+      const rec = {ay: ay, sinif: c.className, metin: deg ? deg.textContent : ''};
+      const once = window.__kareSon[ay];
+      if (once && once.sinif === rec.sinif && once.metin === rec.metin) return;
+      window.__kareSon[ay] = rec;
+      window.__kare.push(rec);
+    });
+  };
+  if (window.__kareGoz) window.__kareGoz.disconnect();
+  window.__kareGoz = new MutationObserver(yaz);
+  window.__kareGoz.observe(grid, {childList: true, subtree: true, characterData: true});
+  return true;
+}
+"""
+
+
+def _yesil_veya_reel(rec):
+    sinif = (rec or {}).get("sinif") or ""
+    metin = (rec or {}).get("metin") or ""
+    return "1454.71" in metin or (
+        "sozlesmeler-ay-kart-odendi" in sinif and "sozlesmeler-ay-kart-odenmedi" not in sinif
+    )
+
+
+def flas_senaryolari():
+    """Kaydet/kaldir ve eski onbellek: yesil flas sifir. Canli DB yok."""
+    import json
+    from playwright.sync_api import sync_playwright
+    from werkzeug.routing.exceptions import BuildError
+
+    eski_fx = t.fixture_867
+    durum = {"grid_don": False, "liste": [], "grid_tazele": False}
+
+    def fixture(senaryo="eski"):
+        fx = eski_fx("eski")
+        cache = fx["grid"]["cache"]
+        for a in cache["aylar"]:
+            if (a["yil"], a["ay"]) in ((2026, 2), (2026, 3), (2026, 4)):
+                a["tutar_kdv_dahil"] = 1454.71
+                a["brut_tutar_kdv"] = 1454.71
+                a["odenen_tutar_kdv"] = 1454.71
+                a["kalan_tutar_kdv"] = 0.0
+                a["tahsil_edildi"] = True
+        aylar = list(fx["tahsil_durum"].get("aylar") or [])
+        for k in ("2026-2", "2026-3", "2026-4"):
+            if k not in aylar:
+                aylar.append(k)
+        fx["tahsil_durum"]["aylar"] = aylar
+        if "dondurulan_aylar" in cache:
+            del cache["dondurulan_aylar"]
+        cache.pop("dondurma_var", None)
+        return fx
+
+    t.fixture_867 = fixture
+    fx = fixture()
+    app = t._app()
+    app.logger.disabled = True
+    t._auth_yamala()
+    _uf = app.jinja_env.globals["url_for"]
+
+    def uf(endpoint, **values):
+        try:
+            return _uf(endpoint, **values)
+        except BuildError:
+            return "/yok/" + str(endpoint)
+
+    app.jinja_env.globals["url_for"] = uf
+    app.jinja_env.globals["has_module"] = lambda k: True
+    app.jinja_env.globals["is_ledger_only"] = lambda *a, **k: False
+    client = app.test_client()
+
+    def js(route, govde, status=200):
+        route.fulfill(status=status, content_type="application/json", body=json.dumps(govde))
+
+    def grid_govde():
+        govde = json.loads(json.dumps(fx["grid"]))
+        if durum["grid_don"]:
+            govde["cache"]["dondurma_var"] = True
+            govde["cache"]["dondurulan_aylar"] = ["2026-02", "2026-03", "2026-04"]
+            for a in govde["cache"]["aylar"]:
+                if (a["yil"], a["ay"]) in ((2026, 2), (2026, 3), (2026, 4)):
+                    a["tutar_kdv_dahil"] = 0.0
+                    a["brut_tutar_kdv"] = 0.0
+                    a["odenen_tutar_kdv"] = 0.0
+                    a["kalan_tutar_kdv"] = 0.0
+                    a["tahsil_edildi"] = False
+        return govde
+
+    def isle(route, request):
+        u = request.url[len(t.BASE):]
+        if u.startswith("/giris/api/musteri-kart-bundle"):
+            js(route, {"ok": True, "musteri_id": 867, "musteri": fx["musteri"], "tahsil_durum": fx["tahsil_durum"], "grid": grid_govde(), "reel": fx["reel"]})
+            return
+        if u.startswith("/giris/api/aylik-grid-cache"):
+            js(route, grid_govde())
+            return
+        if u.startswith("/giris/api/aylik-tahsil-durum"):
+            js(route, fx["tahsil_durum"])
+            return
+        if u.startswith("/giris/api/reel-donem-tutarlar"):
+            js(route, fx["reel"])
+            return
+        if u.startswith("/giris/api/tahsilat-panel-detay"):
+            js(route, {"ok": True, "by_iso": {}})
+            return
+        if "/plan/dondurma" in u and request.method == "GET":
+            aktif = []
+            if durum["liste"]:
+                aktif = [{"id": 1, "iptal_at": None, "dondurulan_aylar": list(durum["liste"]), "baslangic_ay": "2026-02", "ay_sayisi": 3}]
+            js(route, {"ok": True, "aktif": aktif, "gecmis": aktif})
+            return
+        if u.startswith("/giris/api/musteri/") and "/" not in u[len("/giris/api/musteri/"):].split("?")[0]:
+            js(route, fx["musteri"])
+            return
+        if u.startswith("/giris/api/"):
+            js(route, {"ok": True, "liste": [], "musteriler": [], "map": {}, "aylar": []})
+            return
+        r = client.get(u)
+        route.fulfill(status=r.status_code, content_type=r.content_type or "text/html", body=r.get_data())
+
+    def kareler(s, ay):
+        return [x for x in (s.evaluate("window.__kare") or []) if x.get("ay") == ay]
+
+    try:
+        with sync_playwright() as pw:
+            try:
+                tar = pw.chromium.launch(channel="msedge", headless=True)
+            except Exception as exc:
+                print("SKIP tarayici", str(exc)[:80])
+                return
+            s = tar.new_page(viewport={"width": 1400, "height": 900})
+            s.route("**/*", isle)
+
+            # Senaryo 5 ve 3: eski onbellek (alan yok).
+            durum["liste"] = ["2026-02", "2026-03", "2026-04"]
+            durum["grid_don"] = False
+            s.goto(t.BASE + "/giris/", wait_until="load")
+            s.wait_for_function("typeof selectMusteri === 'function'", timeout=20000)
+            s.evaluate(GOZLEM)
+            s.evaluate("selectMusteri(867)")
+            s.wait_for_function(
+                """() => {
+                    const c = document.querySelector('#sozlesmeler-aylik-grid .sozlesmeler-ay-kart[data-ay-key="2026-2"] .aylik-deger');
+                    return c && c.textContent === '0.00';
+                }""",
+                timeout=20000,
+            )
+            s.wait_for_timeout(400)
+            for ay in ("2026-2", "2026-3", "2026-4"):
+                kayit = kareler(s, ay)
+                t.check("s3 " + ay + " kare var", len(kayit) > 0, kayit[:3])
+                kotu = [x for x in kayit if _yesil_veya_reel(x)]
+                t.check("s3 " + ay + " yesil/reel yok", not kotu, kotu[:4])
+                _kirmizi_sifir(kayit[0] if kayit else None, "s3 ilk " + ay)
+            _yesil_kaldi(next((x for x in (s.evaluate("window.__kare") or []) if x.get("ay") == "2025-6"), None), "s4 2025-6")
+
+            # Senaryo 1: kaydet, stale grid hâlâ 1454 ama liste bellekte.
+            s.evaluate("window.__kare = []; window.__kareSon = {};")
+            s.evaluate(
+                """() => {
+                    sessionStorage.setItem('__giris_json_persist__/giris/api/aylik-grid-cache?musteri_id=867', '{"ts":1,"data":{"ok":true}}');
+                    sessionStorage.setItem('__giris_json_persist__/giris/api/musteri/867', '{"ts":1}');
+                    sessionStorage.setItem('__giris_json_persist__/giris/api/tahsilat-panel-detay?musteri_id=867', '{"ts":1}');
+                    dondurmaSayfaYenile(867, ['2026-02','2026-03','2026-04'], true);
+                }"""
+            )
+            s.wait_for_timeout(800)
+            for ay in ("2026-2", "2026-3", "2026-4"):
+                kayit = kareler(s, ay)
+                t.check("s1 " + ay + " kare var", len(kayit) > 0, kayit[:3])
+                kotu = [x for x in kayit if _yesil_veya_reel(x)]
+                t.check("s1 " + ay + " flas yok", not kotu, kotu[:4])
+                _kirmizi_sifir(kayit[0] if kayit else None, "s1 ilk " + ay)
+                if kayit:
+                    _kirmizi_sifir(kayit[-1], "s1 son " + ay)
+            kalan_ss = s.evaluate(
+                """() => {
+                    var n = 0;
+                    for (var i = 0; i < sessionStorage.length; i++) {
+                        var k = sessionStorage.key(i) || '';
+                        var v = sessionStorage.getItem(k) || '';
+                        if (v.indexOf('"ts":1,') >= 0 || v.indexOf('"ts":1}') >= 0) n++;
+                    }
+                    return n;
+                }"""
+            )
+            t.check("s1 sessionStorage temiz", kalan_ss == 0, kalan_ss)
+
+            # Senaryo 2: kaldir. Liste bos, grid eski tutari doner. 0.00 flasi yok.
+            durum["liste"] = []
+            durum["grid_don"] = False
+            s.evaluate(
+                """() => {
+                    window.__kare = [];
+                    window.__kareSon = {};
+                    dondurmaSayfaYenile(867, null, false);
+                }"""
+            )
+            s.wait_for_function(
+                """() => {
+                    const c = document.querySelector('#sozlesmeler-aylik-grid .sozlesmeler-ay-kart[data-ay-key="2026-2"] .aylik-deger');
+                    return c && c.textContent && c.textContent !== '0.00';
+                }""",
+                timeout=20000,
+            )
+            s.wait_for_timeout(500)
+            for ay in ("2026-2", "2026-3", "2026-4"):
+                kayit = kareler(s, ay)
+                sifir = [x for x in kayit if (x.get("metin") or "") in ("0.00", "0", "0.0")]
+                t.check("s2 " + ay + " 0 flas yok", kayit and not sifir, kayit[:6])
+                t.check(
+                    "s2 " + ay + " ilk tutar",
+                    kayit and "1454.71" in (kayit[0].get("metin") or ""),
+                    kayit[:2],
+                )
+
+            # Senaryo 5: dondurmasiz kart. Alan eklenmez, odenmis ay yesil kalir.
+            durum["liste"] = []
+            s.evaluate(
+                """() => {
+                    window.__kare = [];
+                    window.__kareSon = {};
+                    var g = document.getElementById('sozlesmeler-aylik-grid');
+                    if (g) g.innerHTML = '';
+                    selectMusteri(867);
+                }"""
+            )
+            s.wait_for_function(
+                """() => {
+                    const c = document.querySelector('#sozlesmeler-aylik-grid .sozlesmeler-ay-kart[data-ay-key="2025-6"]');
+                    const d = c && c.querySelector('.aylik-deger');
+                    return c && d && d.textContent && d.textContent !== '0.00' && c.className.indexOf('sozlesmeler-ay-kart-odendi') >= 0;
+                }""",
+                timeout=20000,
+            )
+            alan = s.evaluate(
+                """() => {
+                    const c = window.__sozlesmelerAylikSonCacheObj || {};
+                    return Object.prototype.hasOwnProperty.call(c, 'dondurulan_aylar');
+                }"""
+            )
+            t.check("s5 dondurulan_aylar eklenmedi", alan is False, alan)
+            yesil = s.evaluate(
+                """() => {
+                    const c = document.querySelector('#sozlesmeler-aylik-grid .sozlesmeler-ay-kart[data-ay-key="2025-6"]');
+                    const d = c && c.querySelector('.aylik-deger');
+                    return {sinif: c ? c.className : '', metin: d ? d.textContent : ''};
+                }"""
+            )
+            _yesil_kaldi(yesil, "s5 2025-6")
+            tar.close()
+    finally:
+        t.fixture_867 = eski_fx
+
+
 def main():
     zaman_cizelgesi()
+    flas_senaryolari()
     if t.FAILS:
         print("FAIL", len(t.FAILS))
         for ad in t.FAILS:
