@@ -27,6 +27,42 @@ MID = 867
 AY = "2026-11"
 FAILS = []
 
+GOZLEM = r"""
+() => {
+  window.__kare = [];
+  window.__kareSon = {};
+  const grid = document.getElementById('sozlesmeler-aylik-grid');
+  if (!grid) return false;
+  const yaz = (muts) => {
+    const ilgili = {};
+    (muts || []).forEach((m) => {
+      const ekle = (el) => {
+        if (!el || !el.getAttribute) return;
+        if (el.classList && el.classList.contains('sozlesmeler-ay-kart')) ilgili[el.getAttribute('data-ay-key')] = true;
+        if (el.querySelectorAll) el.querySelectorAll('.sozlesmeler-ay-kart').forEach((c) => { ilgili[c.getAttribute('data-ay-key')] = true; });
+      };
+      let n = m.target;
+      if (n && n.nodeType === 3) n = n.parentElement;
+      if (n && n.closest) ekle(n.closest('.sozlesmeler-ay-kart'));
+      if (m.type === 'childList') m.addedNodes.forEach(ekle);
+    });
+    if (!ilgili['2026-11']) return;
+    const c = grid.querySelector('.sozlesmeler-ay-kart[data-ay-key="2026-11"]');
+    if (!c) return;
+    const deg = c.querySelector('.aylik-deger');
+    const rec = {sinif: c.className, metin: deg ? deg.textContent : ''};
+    const once = window.__kareSon['2026-11'];
+    if (once && once.sinif === rec.sinif && once.metin === rec.metin) return;
+    window.__kareSon['2026-11'] = rec;
+    window.__kare.push(rec);
+  };
+  if (window.__kareGoz) window.__kareGoz.disconnect();
+  window.__kareGoz = new MutationObserver(yaz);
+  window.__kareGoz.observe(grid, {childList: true, subtree: true, characterData: true});
+  return true;
+}
+"""
+
 ZINCIR = {
     "sozlesme_tarihi": date(2023, 8, 1),
     "artis_tarihi": date(2023, 8, 1),
@@ -174,6 +210,12 @@ def main():
             if str(govde.get("baslangic_ay") or "")[:7] != AY or int(govde.get("ay_sayisi") or 0) != 4:
                 js(route, {"ok": False, "mesaj": "Aralık uyuşmuyor."}, 400)
                 return
+            eski = govde.get("duzenlenen_dondurma_id")
+            if eski not in (None, ""):
+                for k in kayitlar:
+                    if str(k["id"]) == str(eski) and not k.get("iptal_at"):
+                        k["iptal_at"] = "2026-10-12T10:00:00"
+                        k["iptal_eden"] = "test"
             satir = {
                 "id": seq["n"],
                 "musteri_id": MID,
@@ -258,7 +300,7 @@ def main():
         s.route("**/*", isle)
         s.goto(BASE + "/giris/", wait_until="load")
         s.wait_for_function("typeof selectMusteri === 'function'", timeout=20000)
-        check("statik selectte dondur yok", "value=\"dondur\"" not in html and "js/plan_degistir.js', v=15" in html)
+        check("statik selectte dondur yok", "value=\"dondur\"" not in html and "js/plan_degistir.js', v=16" in html)
         s.evaluate("selectMusteri(%d)" % MID)
         s.wait_for_selector("#plan_dondur_btn", timeout=15000)
         for _ in range(3):
@@ -269,6 +311,32 @@ def main():
         once = (_kartlar(s).get("sozlesmeler-aylik-grid") or {}).get(AY) or {}
         once_metin = once.get("metin")
         check("grid baslangic tutari", once_metin not in (None, "", "0.00", "—"), once_metin)
+
+        def gozlem_sifirla():
+            s.evaluate(GOZLEM)
+            s.evaluate("window.__kare = []; window.__kareSon = {};")
+
+        def flas_yok(ad, ilk_metin=None, sifir_yasak=False, eski_yasak=None):
+            kayit = s.evaluate("window.__kare") or []
+            if not kayit:
+                simdi = ((_kartlar(s).get("sozlesmeler-aylik-grid") or {}).get(AY) or {}).get("metin")
+                check(ad + " sabit tutar", simdi == ilk_metin, simdi)
+                return
+            yesil = [
+                x for x in kayit
+                if "sozlesmeler-ay-kart-odendi" in (x.get("sinif") or "")
+                and "sozlesmeler-ay-kart-odenmedi" not in (x.get("sinif") or "")
+            ]
+            check(ad + " yesil flas yok", not yesil, yesil[:3])
+            if sifir_yasak:
+                sifir = [x for x in kayit if (x.get("metin") or "") in ("0.00", "0", "0.0")]
+                check(ad + " sifir flas yok", not sifir, kayit[:4])
+            if eski_yasak:
+                eski = [x for x in kayit if (x.get("metin") or "") == eski_yasak]
+                check(ad + " eski tutar karesi yok", not eski, kayit[:4])
+            if ilk_metin is not None and kayit:
+                check(ad + " ilk kare hedef tutar", kayit[0].get("metin") == ilk_metin, kayit[:3])
+
         def gorunur_say(metin):
             return s.evaluate(
                 """(metin) => [...document.querySelectorAll('#plan_degistir_modal button')].filter(b => (b.textContent || '').trim() === metin && b.offsetParent !== null).length""",
@@ -329,10 +397,16 @@ def main():
             })"""
         )
         check("duzenle formu dolar", dolu == {"ay": "2026-12", "net": "1500", "kdv": "20", "odeme": "banka"}, dolu)
+        gozlem_sifirla()
+        s.evaluate("document.querySelector('#plan_gecmis_bolum [data-plan-islem=\"kaldir\"]').click(); document.getElementById('plan_onay_evet').click()")
+        s.wait_for_timeout(700)
+        flas_yok("plan kaldir", ilk_metin=once_metin, sifir_yasak=True)
+        gozlem_sifirla()
         s.evaluate("document.querySelector('#plan_gecmis_bolum [data-plan-islem=\"sil\"]').click(); document.getElementById('plan_onay_evet').click()")
         s.wait_for_function("document.querySelectorAll('#plan_gecmis_bolum [data-plan-islem]').length === 0", timeout=5000)
         check("plan sil gecmisten duser", not any(k.get("id") == 11 and not k.get("silindi_at") for k in planlar))
         check("plan sil kaydi durur", planlar[0].get("silindi_at") and planlar[0].get("iptal_at") and planlar[0].get("silen") == "test")
+        flas_yok("plan sil", ilk_metin=once_metin, sifir_yasak=True)
         check("plan modunda onizle tek", gorunur_say("Önizle") == 1, gorunur_say("Önizle"))
         check("plan modunda kaydet tek", gorunur_say("Kaydet") == 1, gorunur_say("Kaydet"))
         check("gecmis kapsayici plan modunda da tek", s.evaluate("document.querySelectorAll('#dondurma_gecmis_bolum').length") == 1)
@@ -398,6 +472,7 @@ def main():
         )
         s.screenshot(path=str(EKRAN / "dondurma_popup_onizleme.png"))
         check("onizlemesiz ilk kaydet yalniz onizler", not kayitlar)
+        gozlem_sifirla()
         s.evaluate("document.getElementById('dondurma_kaydet').click()")
         s.wait_for_function(
             """() => {
@@ -414,6 +489,7 @@ def main():
                 break
             s.wait_for_timeout(400)
         check("grid dondurulan ay 0", kart_metin() == "0.00", kart_metin())
+        flas_yok("dondurma kaydet", ilk_metin="0.00", eski_yasak=once_metin)
         s.screenshot(path=str(EKRAN / "dondurma_grid_sifir.png"))
         check("acik dondurma tek", len([k for k in kayitlar if not k.get("iptal_at")]) == 1)
         s.screenshot(path=str(EKRAN / "dondurma_satir_butonlar.png"))
@@ -421,6 +497,16 @@ def main():
             """() => [...document.querySelectorAll('#dondurma_gecmis_bolum [data-plan-islem]')].map(b => b.textContent.trim())"""
         )
         check("dondurma satir butonlari", sira == ["Düzenle", "Dondurmayı kaldır", "Sil"], sira)
+        s.evaluate("document.querySelector('#dondurma_gecmis_bolum [data-plan-islem=\"duzenle\"]').click()")
+        s.evaluate("document.getElementById('dondurma_onizle_btn').click()")
+        s.wait_for_function("document.querySelectorAll('#dondurma_onizleme tr').length >= 2", timeout=6000)
+        gozlem_sifirla()
+        s.evaluate("document.getElementById('dondurma_kaydet').click()")
+        for _ in range(20):
+            if kart_metin() == "0.00":
+                break
+            s.wait_for_timeout(400)
+        flas_yok("dondurma duzenle", ilk_metin="0.00", eski_yasak=once_metin)
         s.evaluate("document.getElementById('musteri_durum').value = 'pasif'; dondurmaPasifUygula();")
         pasif_dugme = s.evaluate(
             """() => ({
@@ -431,6 +517,7 @@ def main():
         )
         check("pasif duzenle kapali kaldir sil acik", pasif_dugme == {"duzenle": True, "kaldir": False, "sil": False}, pasif_dugme)
         s.evaluate("document.getElementById('musteri_durum').value = 'aktif'; dondurmaPasifUygula();")
+        gozlem_sifirla()
         s.evaluate("document.querySelector('#dondurma_gecmis_bolum [data-plan-islem=\"kaldir\"]').click()")
         for _ in range(20):
             if kart_metin() == once_metin and not acik_var():
@@ -438,6 +525,7 @@ def main():
             s.wait_for_timeout(400)
         check("dondurma kaldirildi", not acik_var(), kayitlar)
         check("grid eski tutar", kart_metin() == once_metin, (kart_metin(), once_metin))
+        flas_yok("dondurma kaldir", ilk_metin=once_metin, sifir_yasak=True)
         s.screenshot(path=str(EKRAN / "dondurma_grid_geri.png"))
         gecmis = s.evaluate("document.getElementById('dondurma_gecmis_bolum').innerText")
         soluk = s.evaluate(
@@ -459,10 +547,12 @@ def main():
         s.wait_for_function("document.querySelectorAll('#dondurma_onizleme tr').length >= 2", timeout=6000)
         s.evaluate("document.getElementById('dondurma_kaydet').click()")
         s.wait_for_function("document.querySelector('#dondurma_gecmis_bolum [data-plan-islem=\"sil\"]')", timeout=6000)
+        gozlem_sifirla()
         s.evaluate("document.querySelector('#dondurma_gecmis_bolum [data-plan-islem=\"sil\"]').click(); document.getElementById('dondurma_onay_evet').click()")
         s.wait_for_function("!document.querySelector('#dondurma_gecmis_bolum [data-plan-islem]')", timeout=6000)
         silinen = [k for k in kayitlar if k.get("silindi_at")]
         check("dondurma sil gecmisten duser kayit durur", len(silinen) == 1 and silinen[0].get("iptal_at") and not acik_var(), silinen)
+        flas_yok("dondurma sil", ilk_metin=once_metin, sifir_yasak=True)
         check("sayfa hatasi yok", not hatalar, hatalar[:2])
         tarayici.close()
     if acik_var():

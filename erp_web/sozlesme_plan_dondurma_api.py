@@ -280,6 +280,10 @@ def dondurma_ekle_yanit(mid):
                 musteri_id=mid,
                 kullanici=_kim(),
                 anlik=anlik,
+                yeni=anlik_al(
+                    row,
+                    ("id", "musteri_id", "baslangic_ay", "ay_sayisi", "dondurulan_aylar"),
+                ),
             )
         return row
 
@@ -328,6 +332,8 @@ def dondurma_iptal_yanit(mid, dondurma_id):
             ("id", "musteri_id", "baslangic_ay", "ay_sayisi", "dondurulan_aylar"),
         )
         row = dondurma_iptal(calistir, oku_bir, dondurma_id=int(dondurma_id), iptal_eden=_kim())
+        yeni = dict(anlik)
+        yeni["durum"] = "iptal"
         audit_yaz(
             calistir,
             olay="dondurma_kaldir",
@@ -336,6 +342,7 @@ def dondurma_iptal_yanit(mid, dondurma_id):
             musteri_id=mid,
             kullanici=_kim(),
             anlik=anlik,
+            yeni=yeni,
         )
         return row
 
@@ -380,6 +387,8 @@ def dondurma_sil_yanit(mid, dondurma_id):
             ("id", "musteri_id", "baslangic_ay", "ay_sayisi", "dondurulan_aylar"),
         )
         row, _acikti = dondurma_sil(calistir, oku_bir, dondurma_id=int(dondurma_id), silen=_kim())
+        yeni = dict(anlik)
+        yeni["durum"] = "silindi"
         audit_yaz(
             calistir,
             olay="dondurma_sil",
@@ -388,6 +397,7 @@ def dondurma_sil_yanit(mid, dondurma_id):
             musteri_id=mid,
             kullanici=_kim(),
             anlik=anlik,
+            yeni=yeni,
         )
         return row
 

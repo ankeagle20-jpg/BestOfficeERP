@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
-"""Ortak audit_log yazımı. Tablo yalnız bu yazma yolunda oluşturulur.
+"""audit_log yazımı. Mevcut cari-360 tablosunun kolonlarına yazar.
 
-Başarısız yazım işlemi durdurmaz; loglanır. Telefon, TC ve e-posta yazılmaz.
+Yeni kolon ve yeni tablo yok. ALTER yok. Tablo yoksa yazma yolunda,
+db.py ensure_cari_360_tables ile aynı kolonlarla oluşturulur.
+Başarısız yazım işlemi durdurmaz; loglanır. Telefon, TC, e-posta ve
+serbest açıklama yazılmaz.
 """
 from __future__ import annotations
 
@@ -22,23 +25,30 @@ _YASAK = {
     "e_posta",
     "eposta",
     "mail",
+    "aciklama",
+    "not",
+    "neden",
+    "mesaj",
+    "icerik",
+    "konu",
 }
 
+# db.py ensure_cari_360_tables ile birebir. Var olan tabloya kolon eklemez.
 SQL_TABLO = """
 CREATE TABLE IF NOT EXISTS audit_log (
-    id BIGSERIAL PRIMARY KEY,
-    olay TEXT NOT NULL,
-    varlik TEXT NOT NULL,
+    id SERIAL PRIMARY KEY,
+    tablo_adi TEXT,
     kayit_id INTEGER,
-    musteri_id INTEGER,
-    kullanici TEXT,
-    anlik TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    islem TEXT,
+    eski_deger TEXT,
+    yeni_deger TEXT,
+    user_id INTEGER,
+    created_at TIMESTAMPTZ DEFAULT NOW()
 )
 """.strip()
 
 SQL_INSERT = """
-INSERT INTO audit_log (olay, varlik, kayit_id, musteri_id, kullanici, anlik)
+INSERT INTO audit_log (tablo_adi, kayit_id, islem, eski_deger, yeni_deger, user_id)
 VALUES (%s, %s, %s, %s, %s, %s)
 """.strip()
 
@@ -54,7 +64,7 @@ def _deger(v):
 
 
 def anlik_al(row: dict | None, alanlar) -> dict:
-    """İzinli alanların anlık görüntüsü. Yasak anahtarlar (telefon/TC/e-posta) düşer."""
+    """İzinli alanların anlık görüntüsü. Yasak anahtarlar düşer."""
     kaynak = row or {}
     out = {}
     for ad in alanlar:
@@ -74,6 +84,34 @@ def anlik_al(row: dict | None, alanlar) -> dict:
     return out
 
 
+def _json_metin(govde) -> str:
+    temiz = {}
+    for anahtar, deger in (govde or {}).items():
+        ad = str(anahtar)
+        if ad.lower() in _YASAK:
+            continue
+        temiz[ad] = _deger(deger)
+    return json.dumps(temiz, ensure_ascii=False, default=str)
+
+
+def _oturum_id(kullanici) -> int | None:
+    """user_id INTEGER. Metin kullanıcı adı kolona yazılmaz."""
+    try:
+        from flask_login import current_user
+
+        raw = getattr(current_user, "id", None)
+        if raw not in (None, ""):
+            return int(raw)
+    except (TypeError, ValueError):
+        return None
+    except Exception:
+        pass
+    metin = str(kullanici or "").strip()
+    if metin.isdigit():
+        return int(metin)
+    return None
+
+
 def audit_yaz(
     calistir,
     *,
@@ -83,8 +121,9 @@ def audit_yaz(
     musteri_id,
     kullanici: str,
     anlik: dict,
+    yeni: dict | None = None,
 ) -> bool:
-    """audit_log tablosunu yazma anında açar ve satır ekler.
+    """Mevcut audit_log kolonlarına bir satır ekler.
 
     Hata olursa False döner, çağıran işleme devam eder. PostgreSQL'de SAVEPOINT
     sayesinde bozuk audit cümlesi asıl işlemin transaction'ını düşürmez.
@@ -92,16 +131,19 @@ def audit_yaz(
     try:
         calistir("SAVEPOINT audit_yaz")
         calistir(SQL_TABLO)
-        govde = {k: v for k, v in (anlik or {}).items() if str(k).lower() not in _YASAK}
+        eski = dict(anlik or {})
+        if musteri_id not in (None, "") and "musteri_id" not in eski:
+            eski["musteri_id"] = int(musteri_id)
+        sonraki = dict(yeni or {})
         calistir(
             SQL_INSERT,
             (
-                str(olay or "")[:80],
                 str(varlik or "")[:80],
                 int(kayit_id) if kayit_id not in (None, "") else None,
-                int(musteri_id) if musteri_id not in (None, "") else None,
-                str(kullanici or "")[:80],
-                json.dumps(govde, ensure_ascii=False, default=str),
+                str(olay or "")[:80],
+                _json_metin(eski),
+                _json_metin(sonraki),
+                _oturum_id(kullanici),
             ),
         )
         calistir("RELEASE SAVEPOINT audit_yaz")

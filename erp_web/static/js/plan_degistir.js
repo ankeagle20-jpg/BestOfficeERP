@@ -889,6 +889,7 @@ function planKaydet() {
     var btn = document.getElementById("plan_kaydet");
     if (btn && btn.disabled) return;
     if (window.__planKaydediliyor) return;
+    dondurmaBoyaBeklet();
     /* İstek boyunca Kaydet (ve Önizle) kilitli: çift tıklama ikinci istek göndermez. */
     window.__planKaydediliyor = true;
     var onizleBtn = document.getElementById("plan_onizle_btn");
@@ -945,6 +946,7 @@ function planSatirDuzenle(p) {
 function planSilGonder(mid, planId, btn) {
     if (window.__planIptalDevam) return;
     window.__planIptalDevam = true;
+    dondurmaBoyaBeklet();
     var kutuDugmeleri = document.querySelectorAll("#plan_gecmis_bolum button");
     Array.prototype.forEach.call(kutuDugmeleri, function (b) { b.disabled = true; });
     if (btn) btn.disabled = true;
@@ -957,7 +959,7 @@ function planSilGonder(mid, planId, btn) {
     planIstekGonder("/giris/api/musteri/" + encodeURIComponent(mid) + "/plan/" + encodeURIComponent(planId) + "/sil", {})
         .then(function (pack) {
             if (pack.ok && pack.j && pack.j.ok) {
-                dondurmaSayfaYenile(mid, null, false);
+                planMutasyonSonrasiYenile(mid, window.__dondurmaBilinenAylar || []);
                 return;
             }
             planHataGoster((pack.j && pack.j.mesaj) || "Plan gizlenemedi");
@@ -975,6 +977,7 @@ function planIptalGonder(mid, planId, btn) {
     /* İstek boyunca İptal kilitli: çift tıklama tek istek gönderir. */
     if (window.__planIptalDevam) return;
     window.__planIptalDevam = true;
+    dondurmaBoyaBeklet();
     var kutuDugmeleri = document.querySelectorAll("#plan_gecmis_bolum button");
     Array.prototype.forEach.call(kutuDugmeleri, function (b) { b.disabled = true; });
     if (btn) btn.disabled = true;
@@ -987,7 +990,7 @@ function planIptalGonder(mid, planId, btn) {
     planIstekGonder("/giris/api/musteri/" + encodeURIComponent(mid) + "/plan/" + encodeURIComponent(planId) + "/iptal", {})
         .then(function (pack) {
             if (pack.ok && pack.j && pack.j.ok) {
-                dondurmaSayfaYenile(mid, null, false);
+                planMutasyonSonrasiYenile(mid, window.__dondurmaBilinenAylar || []);
                 return;
             }
             if (planAcikPlanYok(pack)) {
@@ -1005,7 +1008,7 @@ function planIptalGonder(mid, planId, btn) {
 /* Plan kaydı sonrası popup kapanır ve sayfa yenilenir. */
 function planKayitSonrasi(mid) {
     planModalKapat();
-    dondurmaSayfaYenile(mid, null, false);
+    planMutasyonSonrasiYenile(mid, window.__dondurmaBilinenAylar || []);
 }
 
 /* Geçmiş listesi sunucu cevabından yenilenir; grid/borç/ekstre güncellenir. Popup'a dokunmaz (İptal popup içinde kalır). */
@@ -1066,6 +1069,7 @@ function dondurmaSatirDuzenle(p) {
         return;
     }
     window.__dondurmaDuzenlenenId = p.id;
+    window.__dondurmaDuzenlenenAylar = dondurmaKayitAylari(p);
     var bas = document.getElementById("dondurma_bas");
     if (bas) bas.value = String(p.baslangic_ay || "").slice(0, 7);
     var sure = document.getElementById("dondurma_sure");
@@ -1085,6 +1089,7 @@ function dondurmaSatirDuzenle(p) {
 function dondurmaSilGonder(mid, dondurmaId) {
     if (window.__dondurmaIstek) return;
     window.__dondurmaIstek = true;
+    dondurmaBoyaBeklet();
     var dugmeler = document.querySelectorAll("#dondurma_gecmis_bolum button");
     Array.prototype.forEach.call(dugmeler, function (b) { b.disabled = true; });
     dondurmaPasifUygula();
@@ -1095,7 +1100,8 @@ function dondurmaSilGonder(mid, dondurmaId) {
                 return;
             }
             window.__dondurmaDuzenlenenId = null;
-            dondurmaSayfaYenile(mid, null, false);
+            window.__dondurmaDuzenlenenAylar = null;
+            planMutasyonSonrasiYenile(mid, dondurmaHedefCikar(dondurmaKayitAylari(pack.j && pack.j.dondurma)));
         })
         .catch(function () { dondurmaHataGoster("Dondurma gizlenemedi"); })
         .then(function () {
@@ -1350,7 +1356,7 @@ function dondurmaListeyiBellegeYaz(liste) {
 }
 
 function dondurmaGuncelListe(mid) {
-    return fetch("/giris/api/musteri/" + encodeURIComponent(mid) + "/plan/dondurma", { credentials: "same-origin" })
+    return fetch("/giris/api/musteri/" + encodeURIComponent(mid) + "/plan/dondurma", { credentials: "same-origin", cache: "no-store" })
         .then(function (r) {
             return r.json().then(function (j) { return { ok: r.ok, j: j }; }).catch(function () { return { ok: false, j: null }; });
         })
@@ -1358,22 +1364,40 @@ function dondurmaGuncelListe(mid) {
             var liste = [];
             var aktif = (pack.j && pack.j.aktif) || [];
             aktif.forEach(function (p) {
-                var aylar = p && p.dondurulan_aylar;
-                if (typeof aylar === "string") {
-                    try { aylar = JSON.parse(aylar); } catch (_eJ) { aylar = []; }
-                }
-                (aylar || []).forEach(function (a) { liste.push(a); });
+                dondurmaKayitAylari(p).forEach(function (a) { liste.push(a); });
             });
             return liste;
         });
 }
 
-/* liste verilirse ilk çizimden önce yazılır. hemenCiz: kayıtta 0,00 hemen basılır; kaldırmada taze grid beklenir. */
-function dondurmaSayfaYenile(mid, liste, hemenCiz) {
+function dondurmaKayitAylari(kayit) {
+    var aylar = kayit && kayit.dondurulan_aylar;
+    if (typeof aylar === "string") {
+        try { aylar = JSON.parse(aylar); } catch (_eJ) { aylar = []; }
+    }
+    return dondurmaListeNorm(aylar || []);
+}
+
+function dondurmaHedefCikar(cikarilan) {
+    var cikar = dondurmaListeNorm(cikarilan || []);
+    return dondurmaListeNorm(window.__dondurmaBilinenAylar || []).filter(function (a) {
+        return cikar.indexOf(a) < 0;
+    });
+}
+
+function dondurmaBoyaBeklet() {
+    window.__dondurmaYenileBekliyor = true;
+    window.__dondurmaListeHazirNesil = 0;
+}
+
+/* Mutasyon sonrası tek yenileme: önce önbellek silinir, hedef dondurulan_aylar belleğe yazılır, sonra bir kez çizilir.
+   hedefAylar null ise liste sunucudan okunur (Commit C kaldır yolu). Dizi (boş dahil) hedef durumdur. */
+function planMutasyonSonrasiYenile(mid, hedefAylar) {
+    dondurmaBoyaBeklet();
     window.__dondurmaYenileNesil = (window.__dondurmaYenileNesil || 0) + 1;
     var nesil = window.__dondurmaYenileNesil;
-    var bekle = liste == null && !hemenCiz;
-    if (bekle) window.__dondurmaYenileBekliyor = true;
+    var bilinen = hedefAylar != null;
+    window.__dondurmaYenileBekliyor = true;
     function ciz(aylar) {
         if ((window.__dondurmaYenileNesil || 0) !== nesil) return;
         dondurmaOnbellekTemizle(mid);
@@ -1383,9 +1407,6 @@ function dondurmaSayfaYenile(mid, liste, hemenCiz) {
         window.__dondurmaListeHazirNesil = nesil;
         planKapisiniYenile(mid);
         dondurmaGecmisYukle(mid);
-        if (hemenCiz && typeof sozlesmelerAylikGuncelle === "function") {
-            try { sozlesmelerAylikGuncelle(); } catch (_eG) {}
-        }
         if (typeof sozlesmelerAylikHizliYukle === "function") {
             try { sozlesmelerAylikHizliYukle(true); } catch (_eH) {}
         }
@@ -1396,11 +1417,15 @@ function dondurmaSayfaYenile(mid, liste, hemenCiz) {
             try { cariEkstreYukle(); } catch (_eE) {}
         }
     }
-    if (liste) {
-        ciz(liste);
+    if (bilinen) {
+        ciz(hedefAylar);
         return;
     }
     dondurmaGuncelListe(mid).then(ciz).catch(function () { ciz(window.__dondurmaBilinenAylar || []); });
+}
+
+function dondurmaSayfaYenile(mid, liste) {
+    planMutasyonSonrasiYenile(mid, liste);
 }
 
 function dondurmaKaydet() {
@@ -1425,6 +1450,7 @@ function dondurmaKaydet() {
         dondurmaOnizlemeIste();
         return;
     }
+    dondurmaBoyaBeklet();
     window.__dondurmaIstek = true;
     dondurmaPasifUygula();
     planIstekGonder("/giris/api/musteri/" + encodeURIComponent(mid) + "/plan/dondurma", govde)
@@ -1435,12 +1461,14 @@ function dondurmaKaydet() {
             }
             window.__dondurmaOnizlemeHazir = false;
             window.__dondurmaSonAnahtar = "";
+            var eskiAylar = window.__dondurmaDuzenlenenAylar || [];
             window.__dondurmaDuzenlenenId = null;
+            window.__dondurmaDuzenlenenAylar = null;
             var oniz = document.getElementById("dondurma_onizleme");
             if (oniz) oniz.textContent = "";
-            var once = (window.__sozlesmelerAylikSonCacheObj && window.__sozlesmelerAylikSonCacheObj.dondurulan_aylar) || [];
+            var once = dondurmaHedefCikar(eskiAylar);
             var gelen = (pack.j && pack.j.dondurulan_aylar) || [];
-            dondurmaSayfaYenile(mid, dondurmaListeNorm([].concat(once, gelen)), true);
+            planMutasyonSonrasiYenile(mid, dondurmaListeNorm(once.concat(gelen)));
         })
         .catch(function () {
             dondurmaHataGoster("Kaydedilemedi: bağlantı hatası");
@@ -1453,6 +1481,7 @@ function dondurmaKaydet() {
 
 function dondurmaKaldir(mid, dondurmaId, btn) {
     if (btn) btn.disabled = true;
+    dondurmaBoyaBeklet();
     planIstekGonder("/giris/api/musteri/" + encodeURIComponent(mid) + "/plan/dondurma/" + encodeURIComponent(dondurmaId) + "/iptal", { musteri_id: mid })
         .then(function (pack) {
             if (!pack.ok || !pack.j || !pack.j.ok) {
@@ -1460,7 +1489,7 @@ function dondurmaKaldir(mid, dondurmaId, btn) {
                 if (btn) btn.disabled = false;
                 return;
             }
-            dondurmaSayfaYenile(mid, null, false);
+            planMutasyonSonrasiYenile(mid, dondurmaHedefCikar(dondurmaKayitAylari(pack.j && pack.j.dondurma)));
         })
         .catch(function () {
             dondurmaHataGoster("Kaldırılamadı: bağlantı hatası");
@@ -1469,19 +1498,7 @@ function dondurmaKaldir(mid, dondurmaId, btn) {
 }
 
 function planSayfaYenile(mid) {
-    planKapisiniYenile(mid);
-    if (typeof sozlesmelerAylikHizliYukle === "function") {
-        try { sozlesmelerAylikHizliYukle(); } catch (_e) {}
-    }
-    if (typeof sozlesmelerAylikGuncelle === "function") {
-        try { sozlesmelerAylikGuncelle(); } catch (_e2) {}
-    }
-    if (typeof girisTahsilatOzetGuncelle === "function") {
-        try { girisTahsilatOzetGuncelle(); } catch (_e3) {}
-    }
-    if (typeof cariEkstreYukle === "function") {
-        try { cariEkstreYukle(); } catch (_e4) {}
-    }
+    planMutasyonSonrasiYenile(mid, window.__dondurmaBilinenAylar || []);
 }
 
 /* Kaldırma listesi gelene kadar kart metnine 0,00 yazılmasın. Kayıt yolu bayrağı açmaz. */

@@ -808,6 +808,10 @@ def plan_ekle_yanit(mid):
                 musteri_id=mid,
                 kullanici=_kim(),
                 anlik=anlik,
+                yeni=anlik_al(
+                    row,
+                    ("id", "musteri_id", "gecerlilik_ay", "yeni_net", "kdv_oran", "yeni_brut", "nakit_tutar", "banka_tutar"),
+                ),
             )
         if not _resync(int(mid)):
             raise RuntimeError("yenileme")
@@ -857,6 +861,8 @@ def plan_iptal_yanit(mid, plan_id):
             ("id", "musteri_id", "gecerlilik_ay", "yeni_net", "kdv_oran", "yeni_brut", "nakit_tutar", "banka_tutar"),
         )
         row = plan_iptal(calistir, oku_bir, plan_id=int(plan_id), iptal_eden=_kim())
+        yeni = dict(anlik)
+        yeni["durum"] = "iptal"
         audit_yaz(
             calistir,
             olay="plan_kaldir",
@@ -865,6 +871,7 @@ def plan_iptal_yanit(mid, plan_id):
             musteri_id=mid,
             kullanici=_kim(),
             anlik=anlik,
+            yeni=yeni,
         )
         if not _resync(int(mid)):
             raise RuntimeError("yenileme")
@@ -909,6 +916,8 @@ def plan_sil_yanit(mid, plan_id):
             ("id", "musteri_id", "gecerlilik_ay", "yeni_net", "kdv_oran", "yeni_brut", "nakit_tutar", "banka_tutar"),
         )
         row, aktifti = plan_sil(calistir, oku_bir, plan_id=int(plan_id), silen=_kim())
+        yeni = dict(anlik)
+        yeni["durum"] = "silindi"
         audit_yaz(
             calistir,
             olay="plan_sil",
@@ -917,6 +926,7 @@ def plan_sil_yanit(mid, plan_id):
             musteri_id=mid,
             kullanici=_kim(),
             anlik=anlik,
+            yeni=yeni,
         )
         if aktifti and not _resync(int(mid)):
             raise RuntimeError("yenileme")

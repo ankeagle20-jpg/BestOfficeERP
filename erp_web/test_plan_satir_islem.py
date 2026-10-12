@@ -58,18 +58,24 @@ def test_plan_sil_soft_ve_audit():
         liste, kod = _yanit(api.plan_liste_yanit(867))
     kimlikler = [p.get("id") for p in (liste.get("gecmis") or [])]
     check("gecmis gizler", kod == 200 and pid not in kimlikler and liste.get("aktif") == [], kimlikler)
-    anlik = json.loads(tx.bellek.audit[-1][5])
+    anlik = json.loads(tx.bellek.audit[-1][3])
+    yeni = json.loads(tx.bellek.audit[-1][4])
     check(
         "audit alanlari",
-        tx.bellek.audit[-1][0] == "plan_sil"
+        tx.bellek.audit[-1][0] == "sozlesme_plan_degisiklik"
+        and tx.bellek.audit[-1][2] == "plan_sil"
+        and tx.bellek.audit[-1][1] == pid
         and anlik.get("id") == pid
         and anlik.get("musteri_id") == 867
         and "yeni_net" in anlik
         and "yeni_brut" in anlik
         and anlik.get("odeme") == "banka"
+        and yeni.get("durum") == "silindi"
         and "telefon" not in anlik
-        and "email" not in anlik,
-        anlik,
+        and "email" not in anlik
+        and "telefon" not in yeni
+        and "email" not in yeni,
+        (anlik, yeni),
     )
     os.environ["PLAN_DEGISTIR_MUSTERI_IDS"] = "7"
     with app.test_request_context(json={}, method="POST"):
@@ -172,10 +178,15 @@ def test_dondurma_duzenle_ve_sil():
         liste, kod = _yanit(da.dondurma_liste_yanit(867))
     kimlikler = [p.get("id") for p in (liste.get("gecmis") or [])]
     check("dondurma gecmis gizler", kod == 200 and acik["id"] not in kimlikler, kimlikler)
-    anlik = json.loads(bellek.audit[-1][5])
+    anlik = json.loads(bellek.audit[-1][3])
     check(
         "dondurma audit",
-        bellek.audit[-1][0] == "dondurma_sil" and anlik.get("musteri_id") == 867 and "baslangic_ay" in anlik and "telefon" not in anlik,
+        bellek.audit[-1][0] == "sozlesme_plan_dondurma"
+        and bellek.audit[-1][2] == "dondurma_sil"
+        and anlik.get("musteri_id") == 867
+        and "baslangic_ay" in anlik
+        and "telefon" not in anlik
+        and "aciklama" not in anlik,
         anlik,
     )
     da._musteri_ve_kyc = lambda mid: (
