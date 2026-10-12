@@ -7,7 +7,7 @@ import logging
 from flask import jsonify, request
 
 from auth import giris_gerekli
-from sozlesme_plan_dondurma import dondurma_onizleme
+from sozlesme_plan_dondurma import ay_listesi, dondurma_onizleme
 from sozlesme_plan_dondurma_depo import (
     DondurmaCakisma,
     DondurmaYok,
@@ -77,6 +77,51 @@ def _zincir_ve_plan(mid, kyc):
     return zincir, planlar
 
 
+def _odenen_haritasi(mid, zincir, planlar, aday_aylar):
+    """Baseline tahsilat: aday aylar dondurulmamış sayılır, diğer açık dondurmalar düşülür.
+
+    Grid yeşili ile aynı FIFO (_aylik_tahsil_tutar_map) ve aynı brüt (zincir).
+    """
+    from sozlesme_plan import ay_bazli_tutarlar
+    from routes.giris_routes import _aylik_tahsil_tutar_map
+
+    remaining = {}
+    for satir in ay_bazli_tutarlar(dict(zincir or {}), planlar):
+        try:
+            brut = round(float(satir.get("brut") or 0), 2)
+        except (TypeError, ValueError):
+            continue
+        ay = str(satir.get("ay") or "")
+        if brut > 0 and len(ay) == 7:
+            remaining[ay + "-01"] = brut
+    ham = _aylik_tahsil_tutar_map(
+        int(mid),
+        remaining_by_iso=remaining,
+        haric_dondurma_aylar=set(aday_aylar or ()),
+    )
+    out = {}
+    for iso, tut in (ham or {}).items():
+        try:
+            out[str(iso)[:7]] = round(float(tut or 0), 2)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _onizleme_hesap(mid, kyc, bas, n):
+    siniflar = _siniflar(mid)
+    zincir, planlar = _zincir_ve_plan(mid, kyc)
+    if not zincir:
+        raise ValueError("Sözleşme zinciri hesaplanamadı.")
+    aday = ay_listesi(bas, n)
+    odenen = _odenen_haritasi(mid, zincir, planlar, aday)
+    from routes.giris_routes import AYLIK_GRID_TAM_ODENDI_TOLERANS
+
+    return dondurma_onizleme(
+        zincir, planlar, bas, n, siniflar, odenen, AYLIK_GRID_TAM_ODENDI_TOLERANS
+    )
+
+
 def _govde(onizleme: dict) -> dict:
     return {
         "ok": True,
@@ -105,11 +150,7 @@ def dondurma_onizleme_yanit(mid):
     if soz and bas < soz:
         return jsonify({"ok": False, "mesaj": "Başlangıç ayı sözleşme başlangıcından önce olamaz."}), 400
     try:
-        siniflar = _siniflar(mid)
-        zincir, planlar = _zincir_ve_plan(mid, kyc)
-        if not zincir:
-            return jsonify({"ok": False, "mesaj": "Sözleşme zinciri hesaplanamadı."}), 400
-        onizleme = dondurma_onizleme(zincir, planlar, bas, n, siniflar)
+        onizleme = _onizleme_hesap(mid, kyc, bas, n)
     except ValueError as exc:
         return jsonify({"ok": False, "mesaj": str(exc)}), 400
     except Exception:
@@ -166,11 +207,7 @@ def dondurma_ekle_yanit(mid):
     if soz and bas < soz:
         return jsonify({"ok": False, "mesaj": "Başlangıç ayı sözleşme başlangıcından önce olamaz."}), 400
     try:
-        siniflar = _siniflar(mid)
-        zincir, planlar = _zincir_ve_plan(mid, kyc)
-        if not zincir:
-            return jsonify({"ok": False, "mesaj": "Sözleşme zinciri hesaplanamadı."}), 400
-        onizleme = dondurma_onizleme(zincir, planlar, bas, n, siniflar)
+        onizleme = _onizleme_hesap(mid, kyc, bas, n)
     except ValueError as exc:
         return jsonify({"ok": False, "mesaj": str(exc)}), 400
     except Exception:

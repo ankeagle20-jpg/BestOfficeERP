@@ -6,12 +6,17 @@ Veritabanı ve cache çağırmaz. plan_var üretmez.
 """
 from __future__ import annotations
 
+import math
 from datetime import date, datetime
 
 from plan_fatura_kilit import KILITLI
 from sozlesme_plan import _ay_basi, _ay_ekle, ay_bazli_tutarlar
 
 DONDURMA_FP_SURUM = "s1"
+# Grid AYLIK_GRID_TAM_ODENDI_TOLERANS ile aynı. K1/K2/K0 bu eşikten ayrıdır.
+AY_ODENDI_TOL = 0.05
+NEDEN_ODENMIS = "ödenmiş (tahsilat veya fazla ödeme kredisi)"
+NEDEN_KISMI = "kısmi ödenmiş"
 
 
 def _ay_anahtar(val) -> str:
@@ -54,10 +59,76 @@ def _sinif_kaydi(siniflar, ay: str) -> dict | None:
     return kayit if isinstance(kayit, dict) else None
 
 
-def dondurma_onizleme(zincir: dict, planlar, baslangic, ay_sayisi: int, siniflar=None) -> dict:
-    """Her ay: dondurulacak ya da atlanacak (K1/K2/K0 nedeni).
+def ay_odendi_mi(brut, odenen, tol=None) -> str:
+    """Grid yeşil kararı. 'tam' | 'kismi' | ''.
 
-    Zincir normal hesaplanır. Atlanan ayın tutarı değişmez.
+    Tam: brüt > tol ve kalan <= tol. Brüt yaklaşık 0 iken tam sayılmaz.
+    Kısmi: ödenen > 0 ve kalan > tol. plan_fatura_kilit K2 değildir.
+    """
+    if tol is None:
+        tol = AY_ODENDI_TOL
+    try:
+        brut_f = float(brut or 0)
+    except (TypeError, ValueError):
+        brut_f = 0.0
+    try:
+        odenen_f = float(odenen or 0)
+    except (TypeError, ValueError):
+        odenen_f = 0.0
+    if not math.isfinite(brut_f):
+        brut_f = 0.0
+    if not math.isfinite(odenen_f) or odenen_f < 0:
+        odenen_f = 0.0
+    try:
+        tol_f = float(tol)
+    except (TypeError, ValueError):
+        tol_f = AY_ODENDI_TOL
+    kalan = max(round(brut_f - odenen_f, 2), 0.0)
+    if odenen_f > 0 and kalan > tol_f:
+        return "kismi"
+    if brut_f > tol_f and kalan <= tol_f:
+        return "tam"
+    return ""
+
+
+def dondurma_ayi_odenmis(brut, odenen, tol=None) -> str | None:
+    """Dondurma uygunluğu. K1/K2/K0 sınıflarına girmez; None ise ödeme engeli yok."""
+    durum = ay_odendi_mi(brut, odenen, tol)
+    if durum == "tam":
+        return NEDEN_ODENMIS
+    if durum == "kismi":
+        return NEDEN_KISMI
+    return None
+
+
+def _odenen_deger(harita, ay: str) -> float:
+    if not isinstance(harita, dict):
+        return 0.0
+    anahtarlar = [ay, ay + "-01"]
+    parca = str(ay or "").split("-")
+    if len(parca) >= 2:
+        try:
+            anahtarlar.append("%d-%d" % (int(parca[0]), int(parca[1])))
+        except (TypeError, ValueError):
+            pass
+    for anahtar in anahtarlar:
+        if anahtar not in harita:
+            continue
+        try:
+            deger = float(harita.get(anahtar) or 0)
+        except (TypeError, ValueError):
+            return 0.0
+        return deger if math.isfinite(deger) and deger > 0 else 0.0
+    return 0.0
+
+
+def dondurma_onizleme(zincir: dict, planlar, baslangic, ay_sayisi: int, siniflar=None, odenen_by_ay=None, tol=None) -> dict:
+    """Her ay: dondurulacak ya da atlanacak.
+
+    K1/K2/K0 nedenleri aynen kalır. Onların dışında ay_odendi_mi (grid yeşili)
+    ödenmiş veya kısmi ayı atlar. odenen_by_ay adayın kendi dondurması yokmuş
+    gibi hesaplanmış baseline tahsilattır; bu fonksiyon veritabanı çağırmaz.
+    Atlanan ayın tutarı değişmez.
     """
     aylar = ay_listesi(baslangic, ay_sayisi)
     z = dict(zincir or {})
@@ -93,15 +164,27 @@ def dondurma_onizleme(zincir: dict, planlar, baslangic, ay_sayisi: int, siniflar
             }
             atlanan.append({"ay": ay, "sinif": sinif, "neden": neden})
         else:
-            satir = {
-                "ay": ay,
-                "durum": "dondurulacak",
-                "sinif": sinif or None,
-                "neden": "",
-                "brut": brut,
-                "brut_sonra": 0.0,
-            }
-            dondurulan.append(ay)
+            neden_odeme = dondurma_ayi_odenmis(brut, _odenen_deger(odenen_by_ay, ay), tol)
+            if neden_odeme:
+                satir = {
+                    "ay": ay,
+                    "durum": "atlanacak",
+                    "sinif": None,
+                    "neden": neden_odeme,
+                    "brut": brut,
+                    "brut_sonra": brut,
+                }
+                atlanan.append({"ay": ay, "sinif": None, "neden": neden_odeme})
+            else:
+                satir = {
+                    "ay": ay,
+                    "durum": "dondurulacak",
+                    "sinif": sinif or None,
+                    "neden": "",
+                    "brut": brut,
+                    "brut_sonra": 0.0,
+                }
+                dondurulan.append(ay)
         cikti.append(satir)
     return {"aylar": cikti, "dondurulan_aylar": dondurulan, "atlanan_aylar": atlanan}
 

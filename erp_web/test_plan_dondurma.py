@@ -7,7 +7,10 @@ from flask import Flask
 
 from sozlesme_plan import ay_bazli_tutarlar
 from sozlesme_plan_dondurma import (
+    NEDEN_KISMI,
+    NEDEN_ODENMIS,
     acik_dondurulan_aylar,
+    ay_odendi_mi,
     dondurma_onizleme,
     dondurma_parmak,
     dondurma_uygula,
@@ -237,6 +240,8 @@ def _yanit(yanit):
 def test_api():
     os.environ["PLAN_DEGISTIR_ENABLED"] = "1"
     os.environ["PLAN_DEGISTIR_MUSTERI_IDS"] = "867"
+    eski_odenen = da._odenen_haritasi
+    da._odenen_haritasi = lambda *a, **k: {}
     bellek = Bellek()
     da.plan_tx = lambda fn: fn(bellek.calistir, bellek.oku, bellek.oku)
     da._kim = lambda: "test-kullanici"
@@ -268,6 +273,165 @@ def test_api():
     check("kapi 867 disi", kod == 404)
     os.environ.pop("PLAN_DEGISTIR_ENABLED", None)
     os.environ.pop("PLAN_DEGISTIR_MUSTERI_IDS", None)
+    da._odenen_haritasi = eski_odenen
+
+
+def _k3():
+    neden = "ERP içi borç kaydı, GİB'siz, tahsilatsız"
+    return {ay: {"sinif": "K3", "neden": neden} for ay in ("2026-02", "2026-03", "2026-04", "2026-05")}
+
+
+def _zincir_900():
+    return _zincir(aylik_net=750, tufe={}, ay_sayisi=36)
+
+
+def test_867_odenen_ay_dondurulamaz():
+    """Fazla ödeme kredisi Şubat–Nisan 900 brütünü kapatırsa atlanır; kredi yoksa dondurulur."""
+    z = _zincir_900()
+    kredi = {"2026-02": 900.0, "2026-03": 900.0, "2026-04": 900.0}
+    oniz = dondurma_onizleme(z, None, "2026-02", 3, _k3(), kredi)
+    by = {s["ay"]: s for s in oniz["aylar"]}
+    for ay in ("2026-02", "2026-03", "2026-04"):
+        check(
+            ay + " odenmis atlanir",
+            by[ay]["durum"] == "atlanacak" and by[ay]["neden"] == NEDEN_ODENMIS and by[ay]["sinif"] is None,
+            by[ay],
+        )
+    check("kredi varken dondurulan yok", oniz["dondurulan_aylar"] == [])
+    bos = dondurma_onizleme(z, None, "2026-02", 3, _k3(), {})
+    check("kredi yokken dondurulacak", bos["dondurulan_aylar"] == ["2026-02", "2026-03", "2026-04"], bos["dondurulan_aylar"])
+    yari = dondurma_onizleme(z, None, "2026-02", 3, _k3(), {"2026-02": 450.0})
+    by_y = {s["ay"]: s for s in yari["aylar"]}
+    check("yarim ay kismi", by_y["2026-02"]["durum"] == "atlanacak" and by_y["2026-02"]["neden"] == NEDEN_KISMI, by_y["2026-02"])
+    check("yarimdan kalan dondurulur", yari["dondurulan_aylar"] == ["2026-03", "2026-04"], yari["dondurulan_aylar"])
+    k2 = dondurma_onizleme(
+        z, None, "2026-02", 1,
+        {"2026-02": {"sinif": "K2", "neden": "tahsilat var (ay haritası)"}},
+        {"2026-02": 900.0},
+    )
+    check("k2 nedeni degismez", k2["atlanan_aylar"][0]["sinif"] == "K2" and "tahsilat" in k2["atlanan_aylar"][0]["neden"])
+
+
+def test_yesil_ve_odenmis_ayni_kume():
+    """Aynı brüt ve tahsilattan grid yeşili ile dondurma ödenmiş kümesi aynıdır."""
+    from routes import giris_routes as gr
+
+    z = _zincir_900()
+    tahsil = {
+        "2026-02-01": 900.0,
+        "2026-03-01": 900.0,
+        "2026-04-01": 900.0,
+        "2026-05-01": 450.0,
+    }
+    odenen = {"2026-02": 900.0, "2026-03": 900.0, "2026-04": 900.0, "2026-05": 450.0}
+    oniz = dondurma_onizleme(z, None, "2026-02", 4, {}, odenen)
+    odenmis = {s["ay"] for s in oniz["atlanan_aylar"] if s.get("neden") == NEDEN_ODENMIS}
+    kismi = {s["ay"] for s in oniz["atlanan_aylar"] if s.get("neden") == NEDEN_KISMI}
+    kyc = _kyc()
+    kyc["aylik_kira"] = 750
+    eski = gr._dondurma_ay_kumesi
+    gr._dondurma_ay_kumesi = lambda mid: set()
+    try:
+        payload = gr._aylik_grid_compute(867, kyc, {}, tahsil, planlar=[], plan_katmani=False)
+    finally:
+        gr._dondurma_ay_kumesi = eski
+    pencere = {"2026-02", "2026-03", "2026-04", "2026-05"}
+    yesil = set()
+    kismi_grid = set()
+    for a in payload["aylar"]:
+        anahtar = "%04d-%02d" % (int(a["yil"]), int(a["ay"]))
+        if anahtar not in pencere:
+            continue
+        if ay_odendi_mi(a.get("brut_tutar_kdv"), a.get("odenen_tutar_kdv")) == "tam":
+            check(anahtar + " payload yesil", bool(a.get("tahsil_edildi")) and not a.get("kismi_tahsilat"))
+        if a.get("tahsil_edildi"):
+            yesil.add(anahtar)
+        if a.get("kismi_tahsilat"):
+            kismi_grid.add(anahtar)
+    check("yesil kume odenmis", yesil == odenmis == {"2026-02", "2026-03", "2026-04"}, (yesil, odenmis))
+    check("kismi kume ayni", kismi_grid == kismi == {"2026-05"}, (kismi_grid, kismi))
+    check("mayis dondurulmaz", "2026-05" not in oniz["dondurulan_aylar"])
+    tukenen = dondurma_onizleme(z, None, "2026-05", 1, {}, {})
+    check("kredi bitince dondurulur", tukenen["dondurulan_aylar"] == ["2026-05"])
+    check("kredi bitince yesil degil", ay_odendi_mi(900, 0) == "")
+
+
+def test_baseline_aday_haric():
+    """Adayın kendi dondurması baseline'dan çıkar; başka açık dondurma kalır."""
+    from routes import giris_routes as gr
+
+    remaining = {
+        "2025-12-01": 900.0,
+        "2026-02-01": 900.0,
+        "2026-03-01": 900.0,
+        "2026-04-01": 900.0,
+        "2026-05-01": 900.0,
+    }
+    rows = [{
+        "id": 1,
+        "aciklama": "Aralik 2024 fazla odeme",
+        "tutar": 2700,
+        "tahsilat_tarihi": date(2024, 12, 1),
+        "fatura_tarihi": None,
+    }]
+    eski = gr._dondurma_ay_kumesi
+    gr._dondurma_ay_kumesi = lambda mid: {"2025-12", "2026-02", "2026-03", "2026-04"}
+    try:
+        haricli = gr._aylik_tahsil_tutar_map(
+            867,
+            tahsil_rows=rows,
+            remaining_by_iso=dict(remaining),
+            haric_dondurma_aylar={"2026-02", "2026-03", "2026-04"},
+        )
+        dusmus = gr._aylik_tahsil_tutar_map(
+            867,
+            tahsil_rows=rows,
+            remaining_by_iso=dict(remaining),
+        )
+    finally:
+        gr._dondurma_ay_kumesi = eski
+    check(
+        "baseline aday aylara yazar",
+        [round(haricli.get(k) or 0, 2) for k in ("2026-02-01", "2026-03-01", "2026-04-01")] == [900.0, 900.0, 900.0],
+        haricli,
+    )
+    check("baseline baska dondurmayi atlar", round(haricli.get("2025-12-01") or 0, 2) == 0, haricli)
+    check("kayitli dondurma krediyi kaydirir", round(dusmus.get("2026-05-01") or 0, 2) == 900.0 and not dusmus.get("2026-02-01"), dusmus)
+
+
+def test_onizleme_olusturma_ayni_odenen():
+    os.environ["PLAN_DEGISTIR_ENABLED"] = "1"
+    os.environ["PLAN_DEGISTIR_MUSTERI_IDS"] = "867"
+    kredi = {"2026-02": 900.0, "2026-03": 900.0, "2026-04": 450.0}
+    eski_od = da._odenen_haritasi
+    eski_sin = da._siniflar
+    eski_zn = plan_api._onizleme_zinciri
+    eski_mu = da._musteri_ve_kyc
+    da._odenen_haritasi = lambda *a, **k: dict(kredi)
+    da._siniflar = lambda mid: _k3()
+    plan_api._onizleme_zinciri = lambda mid, kyc: (_zincir_900(), [], None)
+    da._musteri_ve_kyc = lambda mid: (
+        {"id": int(mid), "durum": "aktif"},
+        {"sozlesme_tarihi": date(2023, 8, 1), "aylik_kira": 750, "kdv_oran": 20},
+    )
+    app = Flask(__name__)
+    try:
+        with app.test_request_context("/x", method="POST", json={"baslangic_ay": "2026-02", "ay_sayisi": 3}):
+            oniz, kod_o = _yanit(da.dondurma_onizleme_yanit(867))
+            kayit, kod_k = _yanit(da.dondurma_ekle_yanit(867))
+    finally:
+        da._odenen_haritasi = eski_od
+        da._siniflar = eski_sin
+        plan_api._onizleme_zinciri = eski_zn
+        da._musteri_ve_kyc = eski_mu
+        os.environ.pop("PLAN_DEGISTIR_ENABLED", None)
+        os.environ.pop("PLAN_DEGISTIR_MUSTERI_IDS", None)
+    check("onizleme 200", kod_o == 200 and oniz.get("dondurulan_aylar") == [], (kod_o, oniz.get("dondurulan_aylar")))
+    check(
+        "onizleme olusturma ayni atlanan",
+        kod_k == 400 and kayit.get("atlanan_aylar") == oniz.get("atlanan_aylar") and kayit.get("mesaj") == "Dondurulacak ay yok.",
+        (kod_k, kayit.get("atlanan_aylar"), oniz.get("atlanan_aylar")),
+    )
 
 
 def test_parmak_izi():
@@ -630,6 +794,8 @@ def test_kapi_ve_flask_tur():
     eski_all = dbmod.fetch_all
     eski_one = gr.fetch_one
     eski_gall = gr.fetch_all
+    eski_odenen = da._odenen_haritasi
+    da._odenen_haritasi = lambda *a, **k: {}
     da.plan_tx = lambda fn: fn(bellek.calistir, bellek.oku, bellek.oku)
     da._kim = lambda: "test-kullanici"
     da._sema = lambda: None
@@ -721,6 +887,7 @@ def test_kapi_ve_flask_tur():
         dbmod.fetch_all = eski_all
         gr.fetch_one = eski_one
         gr.fetch_all = eski_gall
+        da._odenen_haritasi = eski_odenen
         gr._plan_kutu_sifirla()
         os.environ.pop("PLAN_DEGISTIR_ENABLED", None)
         os.environ.pop("PLAN_DEGISTIR_MUSTERI_IDS", None)
@@ -768,6 +935,10 @@ def main():
     test_borclandir_dondurma()
     test_auto_inv_dondurma()
     test_tahsil_seti_dondurulan_ayi_atlar()
+    test_867_odenen_ay_dondurulamaz()
+    test_yesil_ve_odenmis_ayni_kume()
+    test_baseline_aday_haric()
+    test_onizleme_olusturma_ayni_odenen()
     test_kapi_ve_flask_tur()
     if FAILS:
         print("FAIL", len(FAILS))

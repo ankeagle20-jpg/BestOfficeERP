@@ -2661,6 +2661,8 @@ def _aylik_grid_compute(musteri_id, kyc, tufe_map, tahsil_tutar_map=None, *, pla
     artis_month = core["artis_month"]
     aylar = []
     tahsil_tutar_map = tahsil_tutar_map or {}
+    from sozlesme_plan_dondurma import ay_odendi_mi
+
     for i in range(ay_sayisi):
         ay_toplam = (bas.month - 1) + i
         y = bas.year + (ay_toplam // 12)
@@ -2673,9 +2675,10 @@ def _aylik_grid_compute(musteri_id, kyc, tufe_map, tahsil_tutar_map=None, *, pla
         odenen = float(tahsil_tutar_map.get(ay_iso) or 0)
         kalan = max(round(tutar - odenen, 2), 0.0)
         tol = float(AYLIK_GRID_TAM_ODENDI_TOLERANS)
-        kismi = odenen > 0 and kalan > tol
-        # Güvenlik freni: brut≈0 iken kalan=0 «tam ödendi» sayılmaz.
-        tam_odendi = tutar > tol and kalan <= tol
+        durum_odeme = ay_odendi_mi(tutar, odenen, tol)
+        kismi = durum_odeme == "kismi"
+        # Güvenlik freni: brut≈0 iken kalan=0 «tam ödendi» sayılmaz (ay_odendi_mi).
+        tam_odendi = durum_odeme == "tam"
         # Hücre metni: her ay sözleşme taban KDV dahil tutarı (yıl içi tutarlı); kalan ayrı alanda.
         gosterim_tutar = tutar
         aylar.append({
@@ -3932,8 +3935,12 @@ def _aylik_grid_freshness_shadow_end(shadow: dict | None, after_payload, refresh
     )
 
 
-def _dondurma_remaining_dus(remaining_by_iso, musteri_id):
-    """Sıfır aya FIFO dağıtımı yapılmasın. Dondurma yoksa harita aynı kalır."""
+def _dondurma_remaining_dus(remaining_by_iso, musteri_id, haric_aylar=None):
+    """Sıfır aya FIFO dağıtımı yapılmasın. Dondurma yoksa harita aynı kalır.
+
+    haric_aylar: aday dondurmanın kendi ayları. Baseline hesabında düşülmez;
+    diğer açık dondurmalar düşülür. Grid çağrıları haric vermez.
+    """
     if not remaining_by_iso:
         return remaining_by_iso
     try:
@@ -3942,7 +3949,17 @@ def _dondurma_remaining_dus(remaining_by_iso, musteri_id):
         return remaining_by_iso
     if not kumesi:
         return remaining_by_iso
+    haric = set()
+    for ham in haric_aylar or ():
+        s = str(ham or "").strip()
+        if len(s) >= 7 and s[4] == "-":
+            try:
+                haric.add("%04d-%02d" % (int(s[0:4]), int(s[5:7])))
+            except (TypeError, ValueError):
+                continue
     for ay in kumesi:
+        if ay in haric:
+            continue
         remaining_by_iso.pop(ay + "-01", None)
     return remaining_by_iso
 
@@ -3977,7 +3994,7 @@ def _aylik_remaining_brut_by_iso_from_kyc(kyc, tufe_map=None, musteri_id=None) -
     return remaining_by_iso
 
 
-def _aylik_tahsil_tutar_map(musteri_id, tahsil_rows=None, remaining_by_iso=None, kyc_row=None, tufe_map=None):
+def _aylik_tahsil_tutar_map(musteri_id, tahsil_rows=None, remaining_by_iso=None, kyc_row=None, tufe_map=None, haric_dondurma_aylar=None):
     """Tahsilat tutarlarını aya dağıtır: |AYLIK_TAH|YYYY-MM-DD| varsa oraya; yoksa fatura ayı, o da yoksa tahsilat tarihi.
 
     - |BTUFRT|: yalnızca BTUFRT_GRID_ODENME_DAHIL_DEGIL (2026-01-01) ve sonrası ayları hedefliyorsa grid
@@ -4024,7 +4041,7 @@ def _aylik_tahsil_tutar_map(musteri_id, tahsil_rows=None, remaining_by_iso=None,
                         if tv <= 0 or mm < 1 or mm > 12:
                             continue
                         remaining_by_iso[date(yy, mm, 1).isoformat()] = tv
-                    _dondurma_remaining_dus(remaining_by_iso, musteri_id)
+                    _dondurma_remaining_dus(remaining_by_iso, musteri_id, haric_dondurma_aylar)
         except Exception:
             remaining_by_iso = {}
 
@@ -4058,7 +4075,7 @@ def _aylik_tahsil_tutar_map(musteri_id, tahsil_rows=None, remaining_by_iso=None,
                 except Exception:
                     pass
 
-    _dondurma_remaining_dus(remaining_by_iso, musteri_id)
+    _dondurma_remaining_dus(remaining_by_iso, musteri_id, haric_dondurma_aylar)
 
     def _alloc_oldest(rem_tutar):
         try:
@@ -4124,6 +4141,13 @@ def _aylik_tahsil_tutar_map(musteri_id, tahsil_rows=None, remaining_by_iso=None,
         dondurulan_iso = {a + "-01" for a in _dondurma_ay_kumesi(musteri_id)}
     except Exception:
         dondurulan_iso = set()
+    for ham in haric_dondurma_aylar or ():
+        s = str(ham or "").strip()
+        if len(s) >= 7 and s[4] == "-":
+            try:
+                dondurulan_iso.discard("%04d-%02d-01" % (int(s[0:4]), int(s[5:7])))
+            except (TypeError, ValueError):
+                continue
 
     def _yaz_ay(iso, pv):
         if iso in dondurulan_iso:
