@@ -2022,6 +2022,16 @@ def build_fatura_data_from_db(fatura_id, fetch_one_func, plan_baglam=None):
     )
     if not fatura:
         raise ValueError("Fatura bulunamadı.")
+    try:
+        from gib_plan_tutar import gib_dondurma_mesaji
+
+        _engel = gib_dondurma_mesaji(fatura)
+        if _engel:
+            raise ValueError(_engel)
+    except ValueError:
+        raise
+    except Exception:
+        _log.exception("gib dondurma tutar")
 
     musteri_id = fatura.get("musteri_id")
     cust = None
@@ -2180,19 +2190,13 @@ def build_fatura_data_from_db(fatura_id, fetch_one_func, plan_baglam=None):
         }]
 
     try:
-        from gib_plan_tutar import aylik_tutar_ayi
-        from routes.giris_routes import _dondurma_ay_kumesi
+        from gib_plan_tutar import gib_dondurma_mesaji
 
-        _ay_d = aylik_tutar_ayi((fatura or {}).get("notlar"))
-        _mid_d = int((fatura or {}).get("musteri_id") or 0)
-        if _ay_d and _mid_d > 0 and _ay_d in _dondurma_ay_kumesi(_mid_d):
-            birim_fiyat = 0.0
-            toplam = 0.0
-            kdv_orani_genel = 0
-            for it in items or []:
-                if isinstance(it, dict):
-                    it["unit_price"] = 0.0
-                    it["tax_rate"] = 0
+        _engel = gib_dondurma_mesaji(fatura)
+        if _engel:
+            raise ValueError(_engel)
+    except ValueError:
+        raise
     except Exception:
         _log.exception("gib dondurma tutar")
 

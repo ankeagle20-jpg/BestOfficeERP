@@ -279,8 +279,63 @@ def api_geciken_liste():
             if mid_o is not None and ay_o:
                 oldest_ay_by_mid[mid_o] = ay_o
 
+    dondurma_ozet = None
+    dondurma_mids = set()
+    try:
+        from routes.giris_routes import (
+            _dondurma_ay_kumesi_toplu,
+            _plan_kutu,
+            geciken_kayitlari_suz,
+        )
+
+        _dondurma_ay_kumesi_toplu(mids)
+        kutu = (_plan_kutu().get("dondurma") or {})
+        dmap = {}
+        for i in mids:
+            kum = kutu.get(int(i)) or set()
+            if kum:
+                dmap[int(i)] = set(kum)
+        if dmap:
+            dondurma_mids = set(dmap)
+            ay_rows = fetch_all(
+                """
+                SELECT gc.musteri_id,
+                       elem->>'ay_key' AS ay_key,
+                       (elem->>'tutar_kdv_dahil')::float AS tutar
+                FROM musteri_aylik_grid_cache gc,
+                     jsonb_array_elements(gc.payload::jsonb->'aylar') AS elem
+                WHERE gc.musteri_id = ANY(%s)
+                  AND (elem->>'tahsil_edildi')::boolean = false
+                  AND to_date(elem->>'ay_key', 'YYYY-MM')
+                      <= to_date(%s, 'YYYY-MM')
+                  AND (elem->>'tutar_kdv_dahil')::float > 0
+                """,
+                (list(dmap.keys()), bugun_key),
+            ) or []
+            grup = {}
+            for ay in ay_rows:
+                grup.setdefault(int(ay["musteri_id"]), []).append(ay)
+            dondurma_ozet = {
+                x["musteri_id"]: x
+                for x in geciken_kayitlari_suz(
+                    [{"musteri_id": i, "aylar": grup.get(i, [])} for i in dmap],
+                    dmap,
+                    bugun,
+                )
+            }
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("geciken dondurma suz")
+        dondurma_ozet = None
+        dondurma_mids = set()
+
     sonuc = []
     for r in rows:
+        if dondurma_ozet is not None and int(r["id"]) in dondurma_mids:
+            oz_don = dondurma_ozet.get(int(r["id"]))
+            if not oz_don:
+                continue
+            oldest_ay_by_mid[r["id"]] = oz_don["en_eski"]
         en_eski_ay_key = oldest_ay_by_mid.get(r['id'])
         if not en_eski_ay_key:
             continue
@@ -322,6 +377,13 @@ def api_geciken_liste():
         ozet_r = ozet_batch.get(mid_r) or {}
         # Mesaj {tutar}: Toplam sütunu ile aynı kaynak (birikmiş gecikmiş borç)
         tutar = round(float(ozet_r.get('toplam_borc') or 0), 2)
+        if dondurma_ozet is not None and int(mid_r) in dondurma_mids:
+            oz_don = dondurma_ozet.get(int(mid_r)) or {}
+            tutar = round(float(oz_don.get("toplam") or 0), 2)
+            ozet_r = dict(ozet_r)
+            ozet_r["toplam_borc"] = tutar
+            ozet_r["borc_month"] = oz_don.get("guncel") or 0
+            ozet_r["geciken_ay"] = oz_don.get("ay") or 0
         sablon = SABLONLAR[esik].format(
             isim=isim,
             tutar=_tutar_tr_goster(tutar),

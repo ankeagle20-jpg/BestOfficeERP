@@ -379,6 +379,24 @@ def test_tuketiciler():
                 [{"musteri_id": 11, "guncel": 1320.0}], date(2024, 12, 15), {11: kyc}, tufe, {}
             )
             check("wa geciken dondurma 0", g == [0], g)
+            suz = gr.geciken_kayitlari_suz(
+                [
+                    {"musteri_id": 11, "aylar": [{"ay_key": "2024-12", "tutar": 1320}]},
+                    {"musteri_id": 12, "aylar": [
+                        {"ay_key": "2024-11", "tutar": 400},
+                        {"ay_key": "2024-12", "tutar": 500},
+                    ]},
+                ],
+                {11: {"2024-12"}, 12: {"2024-12"}},
+                date(2024, 12, 15),
+            )
+            by = {x["musteri_id"]: x for x in suz}
+            check("wa liste dondurulan ay yok", 11 not in by, suz)
+            check(
+                "wa kalan dondurulan tutari eklemez",
+                by.get(12) and by[12]["en_eski"] == "2024-11" and by[12]["toplam"] == 400 and by[12]["ay"] == 1,
+                by.get(12),
+            )
         finally:
             gr._plan_paket_yukle = eski_paket
             gr._plan_kutu_sifirla()
@@ -391,6 +409,8 @@ def test_tuketiciler():
             "meta": gr._aylik_tutar_fatura_meta_by_iso,
             "reel": gr._reel_ay_key_tutar_map_musteri,
             "grid": gr._read_aylik_grid_cache_payload,
+            "basbit": gr._cari_ekstre_varsayilan_bas_bit,
+            "reel_db": gr._musteri_reel_donem_manual_dict_from_db,
         }
         gr.fetch_one = lambda sql, params=None: {}
         gr.fetch_all = lambda sql, params=None: []
@@ -405,19 +425,97 @@ def test_tuketiciler():
             kira = {h.get("tarih"): h.get("borc") for h in hareket if h.get("tur") == "Kira"}
             check("ekstre dondurulan ay 0", kira.get("2024-08-01") == 0, kira.get("2024-08-01"))
             check("ekstre sonraki ay durur", kira.get("2024-09-01") not in (None, 0), kira.get("2024-09-01"))
+            gr._cari_ekstre_varsayilan_bas_bit = lambda mid: (date(2024, 8, 1), date(2024, 9, 30))
+            gr._musteri_reel_donem_manual_dict_from_db = lambda mid: {}
+            import odeme_linki
+            def _ay_borc():
+                hareket_ay = gr._cari_ekstre_hareketler(
+                    867, date(2024, 8, 1), date(2024, 9, 30), 0,
+                    use_reel_cells=True, tahsilat_borca_hizala=True, kira_nakit_ekstre=False,
+                    reel_client_override={}, panel_tahsil_by_iso=None,
+                )
+                return {h.get("tarih"): h.get("borc") for h in hareket_ay if h.get("tur") == "Kira"}
+
+            kalan_don = float(odeme_linki.ekstre_kalan(867))
+            borc_don = _ay_borc()
+            gr._dondurma_ay_kumesi = lambda mid: set()
+            borc_yok = _ay_borc()
+            kalan_yok = float(odeme_linki.ekstre_kalan(867))
+            gr._dondurma_ay_kumesi = lambda mid: {"2024-08"} if int(mid) == 867 else set()
+            agustos = round(float(borc_yok.get("2024-08-01") or 0), 2)
+            check(
+                "odeme linki kalan dondurulan ay eklemez",
+                borc_don.get("2024-08-01") == 0
+                and agustos > 0
+                and abs((kalan_yok - kalan_don) - agustos) < 0.05,
+                (kalan_don, kalan_yok, agustos, borc_don.get("2024-08-01")),
+            )
         finally:
             for ad, fn in eski_ek.items():
-                setattr(gr, {"fetch_one": "fetch_one", "fetch_all": "fetch_all", "kyc": "_musteri_kyc_grup_for_aylik_grid", "tufe": "_tufe_map_by_year_month_cached", "tah": "_ekstre_tahsil_rows_for_musteri", "meta": "_aylik_tutar_fatura_meta_by_iso", "reel": "_reel_ay_key_tutar_map_musteri", "grid": "_read_aylik_grid_cache_payload"}[ad], fn)
+                setattr(gr, {"fetch_one": "fetch_one", "fetch_all": "fetch_all", "kyc": "_musteri_kyc_grup_for_aylik_grid", "tufe": "_tufe_map_by_year_month_cached", "tah": "_ekstre_tahsil_rows_for_musteri", "meta": "_aylik_tutar_fatura_meta_by_iso", "reel": "_reel_ay_key_tutar_map_musteri", "grid": "_read_aylik_grid_cache_payload", "basbit": "_cari_ekstre_varsayilan_bas_bit", "reel_db": "_musteri_reel_donem_manual_dict_from_db"}[ad], fn)
     finally:
         gr._dondurma_ay_kumesi = eski
 
-    from gib_plan_tutar import yukle_plan_gib_satir
+    from gib_earsiv import build_fatura_data_from_db
+    from gib_plan_tutar import GIB_DONDURMA_MESAJ, gib_dondurma_mesaji, yukle_plan_gib_satir
 
     gr._dondurma_ay_kumesi = lambda mid: {"2024-08"}
+    portal = {"cagri": 0}
+
+    class _Portal:
+        def __init__(self):
+            portal["cagri"] += 1
+
     try:
-        ov = yukle_plan_gib_satir({"musteri_id": 867, "notlar": "x|AYLIK_TUTAR|2024-08-01|"})
-        check("gib dondurma 0 belge", ov and ov.get("dondurma") is True and ov.get("toplam") == 0 and ov.get("birim_fiyat") == 0)
+        fatura = {"musteri_id": 867, "notlar": "x|AYLIK_TUTAR|2024-08-01|"}
+        ov = yukle_plan_gib_satir(fatura)
+        check("gib yukleyici dondurma bayragi", ov and ov.get("dondurma") is True and ov.get("toplam") == 0)
         check("gib mevcut satir yazilmaz", ov.get("dondurma") is True)
+        mesaj = gib_dondurma_mesaji(fatura)
+        check("gib dondurma mesaji", mesaj == GIB_DONDURMA_MESAJ, mesaj)
+
+        def _oku(sql, params=None):
+            if "FROM faturalar" in str(sql):
+                return dict(fatura, id=1, toplam=1000, tutar=1000)
+            raise AssertionError("GİB belgesi kurulmamalı")
+
+        try:
+            build_fatura_data_from_db(1, _oku)
+            check("gib belge kesilmez", False, "istisna yok")
+        except ValueError as exc:
+            check("gib belge kesilmez", str(exc) == GIB_DONDURMA_MESAJ, str(exc))
+        import gib_earsiv as ge
+        from routes import faturalar_routes as fr
+
+        eski_yon = ge.BestOfficeGIBManager
+        ge.BestOfficeGIBManager = _Portal
+        eski_fo = None
+        try:
+            import db as dbmod
+            eski_fo = dbmod.fetch_one
+            dbmod.fetch_one = lambda sql, params=None: dict(fatura, id=1)
+            fn = fr.api_gib_fatura_olustur
+            while hasattr(fn, "__wrapped__"):
+                fn = fn.__wrapped__
+            from flask import Flask
+            _uygulama = Flask(__name__)
+            with _uygulama.test_request_context(
+                "/api/gib-fatura-olustur",
+                method="POST",
+                json={"fatura_id": 1, "uuid": "deneme-uuid"},
+            ):
+                yanit = fn()
+            govde, kod = (yanit[0].get_json(), yanit[1]) if isinstance(yanit, tuple) else (yanit.get_json(), yanit.status_code)
+            check(
+                "gib portal cagrilmadi",
+                kod == 400 and govde.get("mesaj") == GIB_DONDURMA_MESAJ and portal["cagri"] == 0,
+                (kod, govde, portal["cagri"]),
+            )
+        finally:
+            ge.BestOfficeGIBManager = eski_yon
+            if eski_fo is not None:
+                import db as dbmod
+                dbmod.fetch_one = eski_fo
     finally:
         gr._dondurma_ay_kumesi = eski
 

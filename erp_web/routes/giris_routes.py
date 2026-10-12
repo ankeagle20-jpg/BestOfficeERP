@@ -2569,6 +2569,72 @@ def geciken_satir_guncelleri(satirlar, bugun, kyc_by_mid, tufe_map, reel_by_mid)
     return out
 
 
+def _geciken_ay_anahtar(ay_key) -> str:
+    parca = str(ay_key or "").strip().split("-")
+    if len(parca) < 2:
+        return ""
+    try:
+        yil, ay = int(parca[0]), int(parca[1])
+    except (TypeError, ValueError):
+        return ""
+    if ay < 1 or ay > 12:
+        return ""
+    return f"{yil:04d}-{ay:02d}"
+
+
+def geciken_kayitlari_suz(kayitlar, dondurulan_by_mid, bugun):
+    """Dondurulan ayları geciken listeden ve toplamdan çıkarır.
+
+    Dondurma kümesi boşsa çağıran eski listeyi olduğu gibi bırakır.
+    Kalan ödenmemiş ay yoksa müşteri listeye girmez.
+    """
+    try:
+        bugun_key = f"{int(bugun.year):04d}-{int(bugun.month):02d}"
+    except (TypeError, ValueError, AttributeError):
+        bugun_key = "9999-12"
+    out = []
+    for kayit in kayitlar or []:
+        if not isinstance(kayit, dict):
+            continue
+        try:
+            mid = int(kayit.get("musteri_id") or 0)
+        except (TypeError, ValueError):
+            continue
+        don = set((dondurulan_by_mid or {}).get(mid) or ())
+        kalan = []
+        for ay in kayit.get("aylar") or []:
+            if not isinstance(ay, dict):
+                continue
+            anahtar = _geciken_ay_anahtar(ay.get("ay_key"))
+            if not anahtar or anahtar > bugun_key:
+                continue
+            if ay.get("tahsil_edildi"):
+                continue
+            try:
+                tutar = round(float(ay.get("tutar") if ay.get("tutar") is not None else ay.get("tutar_kdv_dahil") or 0), 2)
+            except (TypeError, ValueError):
+                tutar = 0.0
+            if tutar <= 0 or anahtar in don:
+                continue
+            kalan.append({"ay_key": anahtar, "tutar": tutar})
+        if not kalan:
+            continue
+        kalan.sort(key=lambda a: a["ay_key"])
+        toplam = round(sum(a["tutar"] for a in kalan), 2)
+        guncel = 0.0
+        for a in kalan:
+            if a["ay_key"] == bugun_key:
+                guncel = a["tutar"]
+        out.append({
+            "musteri_id": mid,
+            "en_eski": kalan[0]["ay_key"],
+            "toplam": toplam,
+            "guncel": guncel,
+            "ay": len(kalan),
+        })
+    return out
+
+
 def _aylik_grid_compute(musteri_id, kyc, tufe_map, tahsil_tutar_map=None, *, planlar=None, plan_katmani=True, reel=None, faturali_aylar=None, fatura_belge=None):
     """
     KYC satırı + önceden yüklenmiş TÜFE haritası ile aylık grid payload üretir.

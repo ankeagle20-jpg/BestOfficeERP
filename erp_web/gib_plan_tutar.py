@@ -36,6 +36,30 @@ def kart_disi_neden(kyc) -> str | None:
     return None
 
 
+GIB_DONDURMA_MESAJ = "Bu ay dondurulmuş, GİB belgesi oluşturulmaz."
+
+
+def gib_dondurma_mesaji(fatura) -> str | None:
+    """Dondurulan ay için GİB belgesi kesilmez. Hata olursa engel dönmez."""
+    if not isinstance(fatura, dict):
+        return None
+    try:
+        ay = aylik_tutar_ayi(fatura.get("notlar"))
+        mid = int(fatura.get("musteri_id") or 0)
+    except (TypeError, ValueError):
+        return None
+    if not ay or mid <= 0:
+        return None
+    try:
+        from routes.giris_routes import _dondurma_ay_kumesi
+
+        if ay in (_dondurma_ay_kumesi(mid) or ()):
+            return GIB_DONDURMA_MESAJ
+    except Exception:
+        return None
+    return None
+
+
 def aylik_tutar_ayi(notlar) -> str | None:
     """Tek |AYLIK_TUTAR| ayı. AUTO_INV veya işaret yok/çoksa None."""
     s = str(notlar or "")

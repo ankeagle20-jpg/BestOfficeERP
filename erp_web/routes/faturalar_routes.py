@@ -11874,6 +11874,17 @@ def api_gib_fatura_olustur():
         if not uuid:
             return jsonify({"ok": False, "mesaj": "uuid gerekli."}), 400
         fid = int(fatura_id)
+        from db import fetch_one as _gib_fatura_oku
+        from gib_plan_tutar import gib_dondurma_mesaji
+
+        _engel = gib_dondurma_mesaji(
+            _gib_fatura_oku(
+                "SELECT id, musteri_id, notlar FROM faturalar WHERE id = %s",
+                (fid,),
+            )
+        )
+        if _engel:
+            return jsonify({"ok": False, "mesaj": _engel}), 400
         gib = BestOfficeGIBManager()
         if gib.is_available() and getattr(gib, "client_type", "") == "earsivportal":
             st = gib.fatura_durum_getir(uuid, days_back=370) or {}
