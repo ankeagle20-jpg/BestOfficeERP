@@ -3218,10 +3218,30 @@ def _aylik_grid_freshness_parse_parts(fp: str) -> dict:
             out["T"] = s[2:r_i]
             out["R"] = s[r_i + 3 : p_i]
             out["P"] = s[p_i + 3 : k_i]
-            out["K"] = s[k_i + 3 :]
+            d_i = s.find("|D=", k_i)
+            if d_i > k_i:
+                out["K"] = s[k_i + 3 : d_i]
+                out["D"] = s[d_i + 3 :]
+            else:
+                out["K"] = s[k_i + 3 :]
+                out["D"] = ""
     except Exception:
         pass
     return out
+
+
+def _aylik_grid_dondurma_ayni(stored_d, live_d) -> bool:
+    """Eski parmak izinde D yoksa ve canlı dondurma yoksa (none) aynı say.
+
+    compute_rev artmaz. Açık dondurma canlıda varken eski önbellek yenilenir.
+    """
+    live = str(live_d or "")
+    stored = str(stored_d or "")
+    if not live or "ERR" in live:
+        return False
+    if stored == "":
+        return live == "none"
+    return stored == live
 
 
 def _aylik_grid_freshness_fingerprint(musteri_id) -> str:
@@ -3232,7 +3252,7 @@ def _aylik_grid_freshness_fingerprint(musteri_id) -> str:
     try:
         mid = int(musteri_id)
     except (TypeError, ValueError):
-        return "T=|R=|P=|K="
+        return "T=|R=|P=|K=|D="
 
     try:
         t_part = str(_aylik_tahsil_cache_imza(mid) or "")
@@ -3301,7 +3321,14 @@ def _aylik_grid_freshness_fingerprint(musteri_id) -> str:
     except Exception:
         k_part = "ERR"
 
-    return f"T={t_part}|R={r_part}|P={p_part}|K={k_part}"
+    try:
+        from sozlesme_plan_dondurma_depo import dondurma_imza_db
+
+        d_part = dondurma_imza_db(mid)
+    except Exception:
+        d_part = "none"
+
+    return f"T={t_part}|R={r_part}|P={p_part}|K={k_part}|D={d_part}"
 
 
 def _aylik_grid_freshness_stamp(musteri_id, payload, fp=None):
@@ -3625,12 +3652,14 @@ def _aylik_grid_freshness_should_skip(musteri_id, payload) -> tuple[bool, dict]:
     r_same = live_p.get("R") == stor_p.get("R")
     p_same = live_p.get("P") == stor_p.get("P")
     k_same = live_p.get("K") == stor_p.get("K")
+    d_same = _aylik_grid_dondurma_ayni(stor_p.get("D"), live_p.get("D"))
     info["t_same"] = bool(t_same)
     info["r_same"] = bool(r_same)
     info["p_same"] = bool(p_same)
     info["k_same"] = bool(k_same)
+    info["d_same"] = bool(d_same)
 
-    if not (t_same and r_same and p_same and k_same):
+    if not (t_same and r_same and p_same and k_same and d_same):
         reasons = []
         if not t_same:
             reasons.append("t_diff")
@@ -3640,6 +3669,8 @@ def _aylik_grid_freshness_should_skip(musteri_id, payload) -> tuple[bool, dict]:
             reasons.append("p_diff")
         if not k_same:
             reasons.append("k_diff")
+        if not d_same:
+            reasons.append("d_diff")
         info["reason"] = "+".join(reasons) if reasons else "diff"
         info["would_skip"] = False
         return False, info

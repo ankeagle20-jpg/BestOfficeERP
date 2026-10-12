@@ -846,6 +846,10 @@ def plan_oku_liste(mid):
 
 
 def plan_rotalarini_bagla(bp):
+    from sozlesme_plan_dondurma_api import dondurma_rotalarini_bagla
+
+    dondurma_rotalarini_bagla(bp)
+
     @bp.route("/api/musteri/<int:mid>/plan/onizleme", methods=["POST"])
     @giris_gerekli
     def api_musteri_plan_onizleme(mid):
