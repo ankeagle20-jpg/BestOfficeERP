@@ -3862,7 +3862,7 @@ button.auto-btn.whatsapp-hizmet-filter-btn.wa-hizmet-aktif {
                     </span>
                     <button type="button" class="auto-btn" id="kira_backfill_btn" style="background:#6a1b9a;color:#fff;" onclick="kiraGuncelleVeBorclandirAll()" title="Aktif müşteriler: güncel kira + eksik aylık borç">Borçlandır</button>
                     <button type="button" class="auto-btn" id="tufe_borc_tahsil_btn" style="background:#00695c;color:#fff;" onclick="tufeBorclandirNakitTahsilToplu()" title="Sözleşme başlangıcından Nisan 2026 dahil TÜFE borç + nakit tahsilat">Borç+Tahsil</button>
-                    <button type="button" class="auto-btn" id="fatura_rapor_secili_otomatik_fatura_btn" style="background:#455a64;color:#eceff1;" onclick="faturaRaporSecilenlereFaturaOlustur(event)" title="İşaretli müşteriler için liste ayına otomatik kira faturası (tek tık)">Seçiliye otomatik fatura</button>
+                    <button type="button" class="auto-btn" id="fatura_rapor_secili_otomatik_fatura_btn" hidden style="background:#455a64;color:#eceff1;" onclick="faturaRaporSecilenlereFaturaOlustur(event)" title="İşaretli müşteriler için liste ayına otomatik kira faturası (tek tık)">Seçiliye otomatik fatura</button>
                     <button type="button" class="auto-btn" id="fatura_rapor_secili_pasif_btn" style="background:#b71c1c;color:#fff;" onclick="faturaRaporSecilenleriPasifYap(event)" title="İşaretli aktif müşterileri toplu pasif yapar (kapanış tarihi bugün)">Seçilenleri pasif yap</button>
                     <span id="fatura_rapor_oda_wrap" class="fatura-rapor-bos-oda-wrap">
                         <button type="button" class="auto-btn" id="fatura_rapor_bos_odalar_btn" onclick="faturaRaporBosHazirOfisOdaPanelToggle(event)" aria-expanded="false" aria-haspopup="dialog" style="background:#1565c0;color:#fff;" title="200–230 hazır ofis odaları: yeşil boş, kırmızı dolu">Oda No</button>
@@ -13535,6 +13535,18 @@ function girisTopluBulkBtnBusy(btn, busy, busyHtml) {
     btn.innerHTML = busy ? (busyHtml || '…') : btn.dataset.origHtml;
 }
 
+
+function otoFaturaSeciliButonKapisi() {
+    var btn = document.getElementById('fatura_rapor_secili_otomatik_fatura_btn');
+    if (!btn) return;
+    fetch('/faturalar/api/auto-fatura/status', {credentials: 'same-origin'})
+      .then(function(r) { return r.json(); })
+      .then(function(j) {
+        if (j && j.ok && j.settings && j.settings.enabled) btn.hidden = false;
+      })
+      .catch(function() {});
+}
+otoFaturaSeciliButonKapisi();
 function tufeBorclandirNakitTahsilToplu() {
     var pl0 = faturaRaporTopluMusteriPayload();
     if (pl0.scope === 'firma_none') {

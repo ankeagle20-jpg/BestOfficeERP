@@ -7168,7 +7168,8 @@ def run_auto_invoice_cycle(force=False, run_date=None):
     ensure_auto_invoice_tables()
     now = run_date or date.today()
     settings = _auto_inv_settings()
-    if (not force) and (not settings["enabled"]):
+    # force gün ve «bu dönem zaten başarılı» kontrollerini aşar; enabled kapalıyken hiç yazılmaz.
+    if not settings["enabled"]:
         return {"ok": True, "skipped": True, "mesaj": "Otomatik fatura kapalı."}
     if (not force) and int(now.day) != int(settings["run_day"]):
         return {"ok": True, "skipped": True, "mesaj": "Bugün planlanan gün değil."}
@@ -12545,6 +12546,8 @@ def api_auto_fatura_adaylar():
 @bp.route('/api/auto-fatura/secili-olustur', methods=['POST'])
 @faturalar_gerekli
 def api_auto_fatura_secili_olustur():
+    if not _auto_inv_settings().get("enabled"):
+        return jsonify({"ok": False, "mesaj": "Otomatik fatura kapalı."}), 403
     data = request.get_json(silent=True) or {}
     yil, ay_no = _parse_auto_year_month(data.get("yil"), data.get("ay"))
     run_month_date = date(yil, ay_no, 1)

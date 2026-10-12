@@ -855,7 +855,7 @@
                 <input type="checkbox" id="aday_send_gib" style="transform:scale(1.05);">
                 Oluşturma sonrası GİB taslak gönder
             </label>
-            <button type="button" id="aday_olustur_btn" style="background:#4caf50;color:#fff;" onclick="adaySecilenlereFaturaOlustur()">Seçilenlere otomatik fatura oluştur</button>
+            <button type="button" id="aday_olustur_btn" hidden style="background:#4caf50;color:#fff;" onclick="adaySecilenlereFaturaOlustur()">Seçilenlere otomatik fatura oluştur</button>
             <button type="button" style="background:#455a64;color:#fff;" onclick="faturaKesilecekPanelKapat()">Kapat</button>
         </div>
         <div id="aday_listesi" class="aday-list">
@@ -1706,6 +1706,13 @@
             var menuWrap = document.querySelector('.gib-durum-th-wrap');
             if (menuWrap && !menuWrap.contains(e.target)) gibDurumMenuKapat();
         });
+        fetch('/faturalar/api/auto-fatura/status', {credentials: 'same-origin'})
+          .then(function(r) { return r.json(); })
+          .then(function(j) {
+            var btn = document.getElementById('aday_olustur_btn');
+            if (btn && j && j.ok && j.settings && j.settings.enabled) btn.hidden = false;
+          })
+          .catch(function() {});
     });
     function cariSecipFaturaKes() {
         var cariId = document.getElementById('cari_musteri_id').value;

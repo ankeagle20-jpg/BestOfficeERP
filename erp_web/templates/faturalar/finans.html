@@ -895,13 +895,13 @@
     <i class="fa fa-robot"></i> Otomatik Fatura ve GİB
   </div>
   <div class="auto-row">
-    <label><input type="checkbox" id="auto_enabled"> Otomatik aktif</label>
+    <label><input type="checkbox" id="auto_enabled" onchange="autoRunButonunuAyarla()"> Otomatik aktif</label>
     <label>Gün <input type="number" id="auto_day" min="1" max="28" value="1"></label>
     <label>Saat <input type="number" id="auto_hour" min="0" max="23" value="9"></label>
     <label><input type="checkbox" id="auto_send_gib"> GİB taslak/gönderim dene</label>
     <label>SMS Kod (ops.) <input type="text" id="auto_sms" placeholder="B2Z7V5" style="width:110px;"></label>
     <button type="button" class="auto-btn save" id="auto_save_btn" onclick="autoSaveSettings()">Kaydet</button>
-    <button type="button" class="auto-btn run" id="auto_run_btn" onclick="autoRunNow()">Şimdi Çalıştır</button>
+    <button type="button" class="auto-btn run" id="auto_run_btn" onclick="autoRunNow()" disabled>Şimdi Çalıştır</button>
   </div>
   <div class="auto-status" id="auto_status">Durum yükleniyor...</div>
   <div class="gib-manuel-wrap">
@@ -985,7 +985,7 @@
             </span>
             <button type="button" class="auto-btn" id="kira_backfill_btn" style="background:#6a1b9a;color:#fff;" onclick="kiraGuncelleVeBorclandirAll()" title="Tekil listede işaretli firmalar; diğer görünümlerde tüm aktif müşteriler">Borçlandır</button>
             <button type="button" class="auto-btn" id="tufe_borc_tahsil_btn" style="background:#00695c;color:#fff;" onclick="tufeBorclandirNakitTahsilToplu()" title="Tekil listede işaretli firmalar; diğer görünümlerde tüm aktif müşteriler">Borç+Tahsil</button>
-            <button type="button" class="auto-btn" id="fatura_rapor_secili_otomatik_fatura_btn" style="background:#455a64;color:#eceff1;" onclick="faturaRaporSecilenlereFaturaOlustur(event)" title="İşaretli müşteriler için liste ayına otomatik kira faturası (tek tık)">Seçiliye otomatik fatura</button>
+            <button type="button" class="auto-btn" id="fatura_rapor_secili_otomatik_fatura_btn" hidden style="background:#455a64;color:#eceff1;" onclick="faturaRaporSecilenlereFaturaOlustur(event)" title="İşaretli müşteriler için liste ayına otomatik kira faturası (tek tık)">Seçiliye otomatik fatura</button>
             <button type="button" class="auto-btn" id="fatura_rapor_secili_pasif_btn" style="background:#b71c1c;color:#fff;" onclick="faturaRaporSecilenleriPasifYap(event)" title="İşaretli aktif müşterileri toplu pasif yapar (kapanış tarihi bugün)">Seçilenleri pasif yap</button>
             <span class="fatura-rapor-bos-oda-wrap">
                 <button type="button" class="auto-btn" id="fatura_rapor_bos_odalar_btn" onclick="faturaRaporBosHazirOfisOdaPanelToggle(event)" aria-expanded="false" aria-haspopup="dialog" style="background:#1565c0;color:#fff;" title="200–230 hazır ofis: yeşil boş, kırmızı dolu">Oda No</button>
@@ -1584,6 +1584,12 @@ function autoSetBusy(btn, busy, textBusy) {
     btn.innerHTML = busy ? textBusy : btn.dataset.orig;
 }
 
+function autoRunButonunuAyarla() {
+    var kutu = document.getElementById('auto_enabled');
+    var runBtn = document.getElementById('auto_run_btn');
+    if (runBtn && kutu) runBtn.disabled = !kutu.checked;
+}
+
 function autoLoadStatus() {
     fetch('/faturalar/api/auto-fatura/status')
       .then(r => r.json())
@@ -1595,6 +1601,10 @@ function autoLoadStatus() {
         document.getElementById('auto_hour').value = s.run_hour != null ? s.run_hour : 9;
         document.getElementById('auto_send_gib').checked = !!s.send_gib;
         document.getElementById('auto_sms').value = s.auto_sms_code || '';
+        var runBtn = document.getElementById('auto_run_btn');
+        if (runBtn) runBtn.disabled = !s.enabled;
+        var seciliBtn = document.getElementById('fatura_rapor_secili_otomatik_fatura_btn');
+        if (seciliBtn) seciliBtn.hidden = !s.enabled;
         document.getElementById('auto_status').textContent = autoStatusText(j.last_run);
       })
       .catch(err => {
@@ -1639,6 +1649,10 @@ function autoRunNow() {
     }).then(r => r.json())
       .then(j => {
         if (!j || !j.ok) throw new Error((j && j.mesaj) || 'Çalıştırılamadı');
+        if (j.skipped) {
+          document.getElementById('auto_status').textContent = j.mesaj || 'Otomatik fatura kapalı.';
+          return;
+        }
         document.getElementById('auto_status').textContent =
           'Çalıştı: başarılı ' + (j.success_count || 0) + ', hatalı ' + (j.fail_count || 0) + '.';
         autoLoadStatus();
