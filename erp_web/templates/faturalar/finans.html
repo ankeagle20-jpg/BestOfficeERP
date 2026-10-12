@@ -984,7 +984,9 @@
                 </div>
             </span>
             <button type="button" class="auto-btn" id="kira_backfill_btn" style="background:#6a1b9a;color:#fff;" onclick="kiraGuncelleVeBorclandirAll()" title="Tekil listede işaretli firmalar; diğer görünümlerde tüm aktif müşteriler">Borçlandır</button>
+            {% if tufe_borc_tahsil_acik %}
             <button type="button" class="auto-btn" id="tufe_borc_tahsil_btn" style="background:#00695c;color:#fff;" onclick="tufeBorclandirNakitTahsilToplu()" title="Tekil listede işaretli firmalar; diğer görünümlerde tüm aktif müşteriler">Borç+Tahsil</button>
+            {% endif %}
             <button type="button" class="auto-btn" id="fatura_rapor_secili_otomatik_fatura_btn" hidden style="background:#455a64;color:#eceff1;" onclick="faturaRaporSecilenlereFaturaOlustur(event)" title="İşaretli müşteriler için liste ayına otomatik kira faturası (tek tık)">Seçiliye otomatik fatura</button>
             <button type="button" class="auto-btn" id="fatura_rapor_secili_pasif_btn" style="background:#b71c1c;color:#fff;" onclick="faturaRaporSecilenleriPasifYap(event)" title="İşaretli aktif müşterileri toplu pasif yapar (kapanış tarihi bugün)">Seçilenleri pasif yap</button>
             <span class="fatura-rapor-bos-oda-wrap">

@@ -126,6 +126,10 @@ def _env_flag_true(name: str, default: bool = False) -> bool:
 # AŞAMA 1: varsayılan KAPALI. Açılmadan üretim yolları sentetik KYC helper'ını ÇAĞIRMAZ.
 SENTETIK_KYC_ENABLED = _env_flag_true("SENTETIK_KYC_ENABLED", default=False)
 
+def tufe_borc_tahsil_acik() -> bool:
+    """Borç+Tahsil (sentetik TÜFE çifti). Varsayılan kapalı. Mevcut |BTUFRT| satırlarına dokunmaz."""
+    return _env_flag_true("TUFE_BORC_TAHSIL_ENABLED", default=False)
+
 # Grid/panel tahsilat aciklama: «Ay YYYY Tahsilat H|AYLIK_TAH|…» (elle makbuz serbest metni haric)
 GRID_TAH_ACIKLAMA_REGEX = r"^.+ \d{4} Tahsilat [A-Z]\|AYLIK_TAH\|"
 GRID_TAH_PATTERN = re.compile(r"^\w[\w\s]+ \d{4} Tahsilat [A-Z]\|AYLIK_TAH\|")
@@ -4996,6 +5000,7 @@ def index():
         odeme_linki_js_surum=js_surum,
         sozlesme_wa_js_surum=wa_surum,
         tahsilat_wa_js_surum=tahsilat_wa_surum,
+        tufe_borc_tahsil_acik=tufe_borc_tahsil_acik(),
     )
 
 
@@ -16114,7 +16119,10 @@ def api_tufe_borclandir_nakit_tahsil_toplu():
     borç+tahsil marker'ı olan müşteriler atlanır.
 
     POST JSON (isteğe bağlı): musteri_ids: [1,2,3] → yalnız bu müşteriler.
+    Bayrak kapalıyken (varsayılan) hiç yazılmaz.
     """
+    if not tufe_borc_tahsil_acik():
+        return jsonify({"ok": False, "mesaj": "Borç+Tahsil kapalı."}), 403
     ensure_faturalar_amount_columns()
     try:
         data = request.get_json(force=True, silent=True) or {}

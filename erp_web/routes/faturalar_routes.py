@@ -4947,11 +4947,17 @@ def index():
     import time
 
     bugun = date.today()
+    try:
+        from routes.giris_routes import tufe_borc_tahsil_acik
+        tufe_acik = tufe_borc_tahsil_acik()
+    except Exception:
+        tufe_acik = False
     return render_template(
         "faturalar/finans.html",
         now_ts=int(time.time()),
         tahsilat_iframe_bas=bugun.replace(day=1).isoformat(),
         tahsilat_iframe_bit=bugun.isoformat(),
+        tufe_borc_tahsil_acik=tufe_acik,
     )
 
 
