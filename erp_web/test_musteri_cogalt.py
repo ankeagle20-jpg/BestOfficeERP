@@ -549,6 +549,90 @@ def ui(app, fetch_one, vergi_indeks=None):
         s.evaluate("selectMusteri(%d)" % MID)
         s.wait_for_function("document.getElementById('musteri-id').value === '%d'" % MID, timeout=8000)
         kaynak_ad = s.evaluate("document.getElementById('name').value")
+        check("ui kaynak unvan dolu", bool(kaynak_ad))
+        s.evaluate("window.girisYetkililerDogrula = function () { return { ok: true }; };")
+
+        def kaydet_govde():
+            once = len(yazilan)
+            s.click("#musteri-kaydet-btn")
+            for _ in range(40):
+                if len(yazilan) > once:
+                    return yazilan[-1]
+                s.wait_for_timeout(200)
+            return None
+
+        s.evaluate(
+            """() => {
+                const name = document.getElementById('name');
+                name.focus();
+                name.value = 'ARAMA NIYETI';
+                name.dispatchEvent(new Event('input', { bubbles: true }));
+                window.__girisKaydetTiklandi = true;
+                window.__girisDuzenleModu = false;
+                window.__girisDuzenleKaydi = false;
+            }"""
+        )
+        g1 = kaydet_govde()
+        check(
+            "ui arama kaydet adi degistirmez",
+            g1 is not None and g1.get("name") == kaynak_ad and g1.get("name") != "ARAMA NIYETI",
+            None if g1 is None else g1.get("name"),
+        )
+        s.evaluate("selectMusteri(%d)" % MID)
+        s.wait_for_function(
+            "document.getElementById('name').value === %s" % json.dumps(kaynak_ad),
+            timeout=8000,
+        )
+        s.evaluate("girisMusteriDuzenle()")
+        s.wait_for_function("window.__girisDuzenleModu === true", timeout=4000)
+        s.wait_for_function(
+            "document.getElementById('name').value === %s" % json.dumps(kaynak_ad),
+            timeout=8000,
+        )
+        s.evaluate(
+            """(ad) => {
+                document.getElementById('name').value = ad;
+                window.__girisDuzenleModu = true;
+                window.__girisDuzenleKaydi = true;
+            }""",
+            "Kalici Unvan",
+        )
+        g2 = kaydet_govde()
+        check("ui duzenle kaydet unvani kalici", g2 is not None and g2.get("name") == "Kalici Unvan", None if g2 is None else g2.get("name"))
+        s.evaluate("girisMusteriDuzenle()")
+        s.wait_for_function("window.__girisDuzenleModu === true", timeout=4000)
+        s.evaluate(
+            """(ad) => {
+                document.getElementById('name').value = ad;
+                window.__girisDuzenleModu = true;
+                window.__girisDuzenleKaydi = true;
+            }""",
+            kaynak_ad,
+        )
+        g2b = kaydet_govde()
+        check("ui duzenle kaynak ada doner", g2b is not None and g2b.get("name") == kaynak_ad, None if g2b is None else g2b.get("name"))
+        s.evaluate(
+            """() => {
+                const name = document.getElementById('name');
+                name.value = 'ARAMA ILE SEC';
+                name.dispatchEvent(new Event('input', { bubbles: true }));
+                sirketUnvaniSec(%d);
+            }"""
+            % MID
+        )
+        s.wait_for_function(
+            "document.getElementById('name').value === %s" % json.dumps(kaynak_ad),
+            timeout=8000,
+        )
+        s.evaluate(
+            """() => {
+                window.__girisKaydetTiklandi = true;
+                window.__girisDuzenleModu = false;
+                window.__girisDuzenleKaydi = false;
+            }"""
+        )
+        g4 = kaydet_govde()
+        check("ui aramayla secip kaydet adi ayni", g4 is not None and g4.get("name") == kaynak_ad, None if g4 is None else g4.get("name"))
         kaynak_form = s.evaluate(
             """() => ({
                 tax: document.getElementById('tax_number').value,
@@ -701,13 +785,13 @@ def ui(app, fetch_one, vergi_indeks=None):
         s.wait_for_timeout(800)
         normal = yazilan[-1] if len(yazilan) > onceki else {}
         check(
-            "normal kart govde yeni unvan",
-            normal.get("name") == "Normal Kart Unvan" and str(normal.get("id")) == str(MID),
+            "normal kart govde arama unvani ezmez",
+            normal.get("name") == "Kaynak Unvan" and str(normal.get("id")) == str(MID),
             normal.get("name"),
         )
         s.evaluate("selectMusteri(%d)" % MID)
-        s.wait_for_function("document.getElementById('name').value === 'Normal Kart Unvan'", timeout=8000)
-        check("normal kart yeniden ac", s.evaluate("document.getElementById('name').value") == "Normal Kart Unvan")
+        s.wait_for_function("document.getElementById('name').value === 'Kaynak Unvan'", timeout=8000)
+        check("normal kart yeniden ac ayni", s.evaluate("document.getElementById('name').value") == "Kaynak Unvan")
         tarayici.close()
 
 

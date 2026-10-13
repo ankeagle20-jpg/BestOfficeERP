@@ -25427,6 +25427,7 @@ function selectMusteri(id) {
         window.__girisCogaltKayit = false;
         if (typeof girisCogaltUyariGizle === 'function') girisCogaltUyariGizle();
     }
+    if (String(window.__girisDuzenleKaydiMid || '') !== String(id)) window.__girisDuzenleKaydi = false;
     girisHistoryMaybeClearFaturaRaporListFlag();
     window.__musteriReelDonemDbMap = {};
     window.__musteriReelDonemDbKayitli = false;
@@ -26451,11 +26452,12 @@ function girisKaydetAramaAlanlariGuvenli() {
         name: nmEl ? String(nmEl.value || '') : ''
     };
     if (!curMid) return out;
-    if (window.__girisKaydetTiklandi) return out;
-    if (window.__girisCogaltKayit && String(curMid) === String(window.__girisCogaltYeniId || '')) return out;
-    if (curMid !== snap.mid) return out;
-    if (window.__girisAramaMusteriAdiAranan) out.musteri_adi = snap.musteri_adi;
-    if (window.__girisAramaNameAranan) out.name = snap.name;
+    var cogalt = !!(window.__girisCogaltKayit && String(curMid) === String(window.__girisCogaltYeniId || ''));
+    var duzenle = !!(window.__girisDuzenleModu || window.__girisDuzenleKaydi);
+    if (cogalt || duzenle) return out;
+    if (String(curMid) !== String(snap.mid || '')) return out;
+    out.musteri_adi = snap.musteri_adi != null ? String(snap.musteri_adi) : '';
+    out.name = snap.name != null ? String(snap.name) : '';
     return out;
 }
 
@@ -27613,6 +27615,7 @@ function calismaSekliDegisti() {
 async function kaydet(event) {
     event.preventDefault();
     if (window.__girisDuzenleModu) {
+        window.__girisDuzenleKaydi = true;
         girisMusteriDuzenleModuKapat();
     }
     musteriKaydetDurumGoster('idle');
@@ -27842,6 +27845,8 @@ async function kaydet(event) {
         }
 
         if (result.ok) {
+            window.__girisDuzenleKaydi = false;
+            window.__girisDuzenleKaydiMid = '';
             try {
                 var midKay = result.id || data.id || (document.getElementById('musteri-id') || {}).value;
                 if (typeof girisMusteriKartOnbellekSil === 'function') girisMusteriKartOnbellekSil(midKay);
@@ -28851,6 +28856,8 @@ function girisMusteriDuzenle() {
   if (musteriAdiEl) musteriAdiEl.removeAttribute('readonly');
   // Düzenle modu - autocomplete kapat
   window.__girisDuzenleModu = true;
+  window.__girisDuzenleKaydi = true;
+  window.__girisDuzenleKaydiMid = mid;
   // musteri_adi ve name inputlarını
   // düz input'a çevir (autocomplete yok)
   var maEl = document.getElementById('musteri_adi');
@@ -28911,6 +28918,8 @@ function girisMusteriDuzenleVazgec() {
   }
 
   window.__girisDuzenleModu = false;
+  window.__girisDuzenleKaydi = false;
+  window.__girisDuzenleKaydiMid = '';
 
   // Vazgeç butonunu gizle
   var vazgecBtn = document.getElementById(
