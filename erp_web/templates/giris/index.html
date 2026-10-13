@@ -3325,7 +3325,8 @@ button.auto-btn.whatsapp-hizmet-filter-btn.wa-hizmet-aktif {
                     <button type="button" class="btn-sil" onclick="sil()">🗑 Sil</button>
                     <button type="button" class="btn-temizle" onclick="temizleForm()">✖ Temizle</button>
                 </div>
-                <div id="musteri-kaydet-durum" role="status" aria-live="polite" style="display:none;margin-top:10px;padding:10px 12px;border-radius:4px;font-size:13px;font-weight:600;"></div>
+                <div id="musteri-cogalt-uyari" role="status" style="display:none;margin-top:10px;padding:10px 12px;border-radius:4px;font-size:13px;font-weight:600;background:#fff3cd;color:#7a5b00;border:1px solid #e6c200;">Bu kart çoğaltıldı. Ünvan, vergi dairesi ve vergi numarasını yeni şirkete göre değiştirip Kaydet'e basın.</div>
+<div id="musteri-kaydet-durum" role="status" aria-live="polite" style="display:none;margin-top:10px;padding:10px 12px;border-radius:4px;font-size:13px;font-weight:600;"></div>
             </form>
         </div>
         
@@ -25335,6 +25336,7 @@ function girisMusteriGecisAnlikGuncelle(id, activeTab) {
 function selectMusteri(id) {
     if (window.__girisCogaltKayit && String(window.__girisCogaltYeniId || '') !== String(id)) {
         window.__girisCogaltKayit = false;
+        if (typeof girisCogaltUyariGizle === 'function') girisCogaltUyariGizle();
     }
     girisHistoryMaybeClearFaturaRaporListFlag();
     window.__musteriReelDonemDbMap = {};
@@ -27836,6 +27838,7 @@ async function kaydet(event) {
                 }
             } catch (eTahSync) {}
             musteriKaydetDurumGoster('success');
+            if (typeof girisCogaltUyariGizle === 'function') girisCogaltUyariGizle();
             try {
                 var midFresh = parseInt(String(selectedId || result.id || document.getElementById('musteri-id').value || '0'), 10);
                 if (!isNaN(midFresh) && midFresh > 0) {
@@ -28829,6 +28832,15 @@ function girisMusteriDuzenleVazgec() {
   }
 }
 
+function girisCogaltUyariGoster() {
+    var el = document.getElementById('musteri-cogalt-uyari');
+    if (el) el.style.display = 'block';
+}
+function girisCogaltUyariGizle() {
+    var el = document.getElementById('musteri-cogalt-uyari');
+    if (el) el.style.display = 'none';
+}
+
 function girisMusteriCogalt() {
     var midEl = document.getElementById('musteri-id');
     var mid = midEl && midEl.value ? String(midEl.value).trim() : '';
@@ -28842,7 +28854,7 @@ function girisMusteriCogalt() {
         'Seçili müşteri yeni bir müşteri numarası ile kopyalanacak.\n\n' +
         '• Fatura, tahsilat ve aylık grid geçmişi kopyalanmaz.\n' +
         '• Eski planı kapatmak için kaynak kartı pasif yapmanız yeterlidir.\n' +
-        '• Hizmet türü / oda / sözleşme tarihlerini yeni karta göre düzenleyip Kaydet ile onaylayın.\n\n' +
+        '• Ünvan, vergi dairesi ve vergi numarasını yeni şirkete göre düzenleyip Kaydet ile onaylayın.\n\n' +
         (mnoStr ? ('Kaynak müşteri no: ' + mnoStr + '\n\n') : '') +
         'Devam edilsin mi?'
     )) {
@@ -28875,10 +28887,11 @@ function girisMusteriCogalt() {
             if (typeof selectedId !== 'undefined') selectedId = parseInt(nid, 10);
             var idElY = document.getElementById('musteri-id');
             if (idElY) idElY.value = String(nid);
-            ['tax_number', 'phone', 'email', 'yetkili_tc', 'phone2', 'email_sirket', 'mersis', 'ticaret_sicil', 'ev_adres'].forEach(function (fid) {
+            ['mersis', 'ticaret_sicil', 'hazir_ofis_oda_no'].forEach(function (fid) {
                 var elB = document.getElementById(fid);
                 if (elB) elB.value = '';
             });
+            if (typeof girisCogaltUyariGoster === 'function') girisCogaltUyariGoster();
             if (typeof girisMusteriKartOnbellekSil === 'function') girisMusteriKartOnbellekSil(nid);
             if (typeof selectMusteri === 'function') selectMusteri(parseInt(nid, 10));
         }

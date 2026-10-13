@@ -188,6 +188,8 @@ def main():
                     yetkili_tcno TEXT,
                     yetkili_tel TEXT,
                     yetkili_email TEXT,
+                    yetkili_tel2 TEXT,
+                    yetkili_ikametgah TEXT,
                     email TEXT,
                     sozlesme_no TEXT,
                     hazir_ofis_oda_no INTEGER,
@@ -204,11 +206,6 @@ def main():
                     psql.Identifier(sema), psql.Identifier(tablo)
                 )
             )
-        cur.execute(
-            psql.SQL(
-                "CREATE UNIQUE INDEX {} ON {}.customers (tax_number) WHERE tax_number IS NOT NULL AND tax_number <> ''"
-            ).format(psql.Identifier("uq_%s_tax" % ("pub" if sema == "public" else "kir")), psql.Identifier(sema))
-        )
     conn.commit()
 
     def ekle(sema, ad):
@@ -232,11 +229,13 @@ def main():
                 INSERT INTO musteri_kyc (
                     musteri_id, musteri_adi, sirket_unvani, hizmet_turu, aylik_kira, kdv_oran, kira_suresi_ay,
                     sozlesme_tarihi, sube_merkez, yeni_adres, faaliyet_konusu, uyruk,
-                    vergi_no, yetkili_tcno, yetkili_tel, yetkili_email, email, sozlesme_no, hazir_ofis_oda_no, notlar, mersis_no
+                    vergi_no, vergi_dairesi, yetkili_adsoyad, yetkili_tcno, yetkili_tel, yetkili_tel2,
+                    yetkili_email, yetkili_ikametgah, email, sozlesme_no, hazir_ofis_oda_no, notlar, mersis_no, ticaret_sicil_no
                 ) VALUES (
                     %s, %s, %s, 'Hazir Ofis', 3600, 20, 12,
                     DATE '2024-01-01', 'Merkez', 'Is adresi', 'Danismanlik', 'TC',
-                    %s, %s, %s, %s, %s, 'SOZ-1', 210, 'kyc not', '0000000000000001'
+                    %s, 'Test Daire', 'Yetkili Ad', %s, %s, '5550000009',
+                    %s, 'Ev adresi', %s, 'SOZ-1', 210, 'kyc not', '0000000000000001', 'TS-1'
                 )
                 """,
                 (MID, ad, ad, "1000000001", "10000000146", "5550000001", "kaynak@ornek.test", "sirket@ornek.test"),
@@ -281,6 +280,29 @@ def main():
             toplam += int(row["n"])
         return toplam
 
+    def vergi_indeks(kur=True):
+        """Yalnızca çakışma denemesi. Uygulama şemasında bu indeks yok."""
+        aktif["sema"] = "public"
+        with local_db() as c:
+            k = c.cursor()
+            if kur:
+                k.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_pub_tax ON customers (tax_number) "
+                    "WHERE tax_number IS NOT NULL AND tax_number <> ''"
+                )
+            else:
+                k.execute("DROP INDEX IF EXISTS uq_pub_tax")
+        conn.commit()
+
+    def dolu_esit(a, b, kolonlar):
+        return all(
+            (a or {}).get(k) == (b or {}).get(k) and (a or {}).get(k) not in (None, "")
+            for k in kolonlar
+        )
+
+    def hepsi_bos(satir_row, kolonlar):
+        return all((satir_row or {}).get(k) in (None, "") for k in kolonlar)
+
     once = satir("public", MID)
     govde, kod = cagir("public", "/giris/api/musteri-cogalt", {"kaynak_id": MID}, gr.api_musteri_cogalt)
     yeni = int(govde.get("id") or 0)
@@ -288,25 +310,36 @@ def main():
     sonra = satir("public", MID)
     check("kaynak satir ayni", once == sonra, _fark_adlari(once, sonra))
     kopya = satir("public", yeni)
+    kyc_kaynak = local_fetch_one("SELECT * FROM musteri_kyc WHERE musteri_id = %s", (MID,))
     kyc = local_fetch_one("SELECT * FROM musteri_kyc WHERE musteri_id = %s", (yeni,))
     check(
-        "kimlik bos hizmet kopya",
-        kopya
-        and kopya.get("tax_number") in (None, "")
-        and kopya.get("phone") in (None, "")
-        and kopya.get("email") in (None, "")
-        and kopya.get("ev_adres") in (None, "")
-        and kopya.get("hazir_ofis_oda_no") in (None, "")
+        "kisi alanlari kopyali",
+        dolu_esit(kopya, once, ("name", "musteri_adi", "tax_number", "phone", "email", "ev_adres", "address"))
+        and dolu_esit(
+            kyc,
+            kyc_kaynak,
+            (
+                "vergi_no",
+                "vergi_dairesi",
+                "yetkili_adsoyad",
+                "yetkili_tcno",
+                "yetkili_tel",
+                "yetkili_tel2",
+                "yetkili_email",
+                "yetkili_ikametgah",
+                "email",
+                "sirket_unvani",
+            ),
+        )
         and kopya.get("calisma_sekli") == "cari"
-        and kopya.get("address") == "Is adresi"
-        and kyc
         and kyc.get("hizmet_turu") == "Hazir Ofis"
         and str(kyc.get("aylik_kira")) in ("3600", "3600.00")
-        and kyc.get("vergi_no") in (None, "")
-        and kyc.get("yetkili_tcno") in (None, "")
-        and kyc.get("sozlesme_no") in (None, "")
-        and kyc.get("hazir_ofis_oda_no") in (None, "")
-        and kyc.get("mersis_no") in (None, ""),
+        and int(kopya.get("musteri_no") or 0) == yeni,
+    )
+    check(
+        "sirket alanlari bos",
+        hepsi_bos(kopya, ("notes", "hazir_ofis_oda_no", "office_code"))
+        and hepsi_bos(kyc, ("sozlesme_no", "hazir_ofis_oda_no", "notlar", "mersis_no", "ticaret_sicil_no")),
     )
     check("cocuk tablolar kopyalanmadi", cocuk("public", yeni) == 0 and cocuk("public", MID) == 4, (cocuk("public", yeni), cocuk("public", MID)))
 
@@ -331,11 +364,13 @@ def main():
     check("yeni unvan kalici", (yeni_son or {}).get("name") == "Yeni Unvan" and (yeni_son or {}).get("address") == "Yeni adres")
     check("kaynak kaydetten sonra ayni", kaynak_son == once, _fark_adlari(once, kaynak_son) if kaynak_son and once else "yok")
 
+    vergi_indeks(True)
     cakisma = dict(kaydet_govde)
-    cakisma["tax_number"] = "1000000001"
+    cakisma["tax_number"] = once.get("tax_number")
     g3, k3 = cagir("public", "/giris/kaydet", cakisma, gr.kaydet)
     check("vergi cakismasi 409", k3 == 409 and g3.get("ok") is False and "vergi" in (g3.get("mesaj") or "").lower(), k3)
     check("cakisma kaynagi bozmadi", satir("public", MID) == once)
+    vergi_indeks(False)
 
     public_ids = [r["id"] for r in local_fetch_all("SELECT id FROM customers ORDER BY id")]
     g4, k4 = cagir("tenant_cogalt_b", "/giris/api/musteri-cogalt", {"kaynak_id": MID}, gr.api_musteri_cogalt)
@@ -343,7 +378,14 @@ def main():
     check("kiraci cogalt 200", k4 == 200 and kiraci_yeni and kiraci_yeni != MID, k4)
     aktif["sema"] = "tenant_cogalt_b"
     kiraci_satir = satir("tenant_cogalt_b", kiraci_yeni)
-    check("kiraci kimlik bos", kiraci_satir and kiraci_satir.get("tax_number") in (None, "") and kiraci_satir.get("name") == "Kiraci Unvan")
+    kiraci_kaynak = satir("tenant_cogalt_b", MID)
+    check(
+        "kiraci kisi kopyali",
+        kiraci_satir
+        and kiraci_satir.get("name") == "Kiraci Unvan"
+        and dolu_esit(kiraci_satir, kiraci_kaynak, ("tax_number", "phone", "email"))
+        and hepsi_bos(kiraci_satir, ("hazir_ofis_oda_no", "office_code", "notes")),
+    )
     aktif["sema"] = "public"
     public_ids_2 = [r["id"] for r in local_fetch_all("SELECT id FROM customers ORDER BY id")]
     check("kiraci public e sizmaz", public_ids_2 == public_ids, public_ids_2)
@@ -355,7 +397,19 @@ def main():
     )
     aktif["sema"] = "public"
 
-    ui(app, local_fetch_one)
+    ui(app, local_fetch_one, vergi_indeks)
+    vergi_indeks(True)
+    once_blok = satir("public", MID)
+    n_blok = local_fetch_one("SELECT COUNT(*) AS n FROM customers")
+    g5, k5 = cagir("public", "/giris/api/musteri-cogalt", {"kaynak_id": MID}, gr.api_musteri_cogalt)
+    n_blok_2 = local_fetch_one("SELECT COUNT(*) AS n FROM customers")
+    mesaj5 = (g5.get("mesaj") or "").lower()
+    check(
+        "tekil indeks cogalt 409",
+        k5 == 409 and "vergi" in mesaj5 and "kopyalanamad" in mesaj5 and int((n_blok or {}).get("n") or 0) == int((n_blok_2 or {}).get("n") or -1),
+        k5,
+    )
+    check("tekil indeks kaynak ayni", satir("public", MID) == once_blok, _fark_adlari(once_blok, satir("public", MID) or {}))
     conn.close()
     if FAILS:
         print("FAIL", len(FAILS))
@@ -365,7 +419,7 @@ def main():
     print("musteri_cogalt ok")
 
 
-def ui(app, fetch_one):
+def ui(app, fetch_one, vergi_indeks=None):
     try:
         from playwright.sync_api import sync_playwright
     except Exception:
@@ -495,14 +549,65 @@ def ui(app, fetch_one):
         s.evaluate("selectMusteri(%d)" % MID)
         s.wait_for_function("document.getElementById('musteri-id').value === '%d'" % MID, timeout=8000)
         kaynak_ad = s.evaluate("document.getElementById('name').value")
+        kaynak_form = s.evaluate(
+            """() => ({
+                tax: document.getElementById('tax_number').value,
+                phone: document.getElementById('phone').value,
+                email: document.getElementById('email').value,
+                ev: document.getElementById('ev_adres').value,
+                yetkili: (document.getElementById('yetkili_ad') || {}).value || '',
+                daire: (document.getElementById('vergi_dairesi') || {}).value || ''
+            })"""
+        )
         s.evaluate("document.querySelector('.giris-btn-cogalt').click()")
         s.wait_for_function(
             "() => { const v = document.getElementById('musteri-id').value; return v && v !== '%d'; }" % MID,
             timeout=8000,
         )
         yeni_ui = s.evaluate("document.getElementById('musteri-id').value")
+        form_kopya = s.evaluate(
+            """() => ({
+                tax: document.getElementById('tax_number').value,
+                phone: document.getElementById('phone').value,
+                email: document.getElementById('email').value,
+                ev: document.getElementById('ev_adres').value,
+                yetkili: (document.getElementById('yetkili_ad') || {}).value || '',
+                daire: (document.getElementById('vergi_dairesi') || {}).value || '',
+                mersis: (document.getElementById('mersis') || {}).value || '',
+                ticaret: (document.getElementById('ticaret_sicil') || {}).value || '',
+                oda: (document.getElementById('hazir_ofis_oda_no') || {}).value || ''
+            })"""
+        )
+        uyari = s.evaluate(
+            """() => {
+                const el = document.getElementById('musteri-cogalt-uyari');
+                if (!el) return {var: false, yazi: false};
+                const st = getComputedStyle(el);
+                const yazi = el.textContent || '';
+                return {
+                    var: st.display !== 'none' && st.visibility !== 'hidden',
+                    yazi: yazi.indexOf('çoğaltıldı') >= 0 && yazi.indexOf('vergi') >= 0
+                };
+            }"""
+        )
         check("ui yeni id", yeni_ui and yeni_ui != str(MID), yeni_ui)
-        check("ui vergi bos", s.evaluate("document.getElementById('tax_number').value") == "")
+        check(
+            "ui kisi kopyali",
+            form_kopya.get("tax") == kaynak_form.get("tax")
+            and form_kopya.get("tax")
+            and form_kopya.get("phone") == kaynak_form.get("phone")
+            and form_kopya.get("email") == kaynak_form.get("email")
+            and form_kopya.get("ev") == kaynak_form.get("ev")
+            and form_kopya.get("yetkili") == kaynak_form.get("yetkili")
+            and form_kopya.get("daire") == kaynak_form.get("daire")
+            and form_kopya.get("yetkili")
+            and form_kopya.get("daire"),
+        )
+        check(
+            "ui sirket bos",
+            form_kopya.get("mersis") == "" and form_kopya.get("ticaret") == "" and form_kopya.get("oda") == "",
+        )
+        check("ui uyari gorunur", uyari.get("var") and uyari.get("yazi"))
         s.evaluate(
             """(ad) => {
                 document.getElementById('name').value = ad;
@@ -528,12 +633,20 @@ def ui(app, fetch_one):
             "Yeni Unvan UI",
         )
         s.evaluate("document.getElementById('musteri-kaydet-btn').click()")
-        s.wait_for_function("() => window.__cogaltKayitBitti || true", timeout=1000)
-        s.wait_for_timeout(800)
+        s.wait_for_function(
+            """() => {
+                const el = document.getElementById('musteri-cogalt-uyari');
+                return el && getComputedStyle(el).display === 'none';
+            }""",
+            timeout=8000,
+        )
+        check("ui uyari kaydet sonrasi yok", True)
         check("ui kaydet govdesi yeni id", yazilan and str(yazilan[-1].get("id")) == str(yeni_ui), (yazilan[-1].get("id") if yazilan else None, yeni_ui))
         check("ui kaydet unvani yeni", yazilan and yazilan[-1].get("name") == "Yeni Unvan UI", yazilan[-1].get("name") if yazilan else None)
         check("ui kaynak unvani govdede degil", yazilan and yazilan[-1].get("name") != kaynak_ad)
-        s.evaluate("document.getElementById('tax_number').value = '1000000001'")
+        if vergi_indeks:
+            vergi_indeks(True)
+        s.evaluate("document.getElementById('tax_number').value = %s" % json.dumps(kaynak_form.get("tax") or ""))
         s.evaluate("document.getElementById('musteri-kaydet-btn').click()")
         s.wait_for_function(
             """() => {

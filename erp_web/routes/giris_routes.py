@@ -4671,20 +4671,20 @@ def _giris_kaydet_schema_ensure_once() -> None:
         _giris_kaydet_schema_ready = True
 
 
-# Kimlik ve belge kopyalanmaz. Sözleşme/hizmet alanları kopyalanır.
+# Aynı kişinin başka şirketi: kişi ve ünvan/vergi kopyalanır. Şirkete özgü belge ve oda kopyalanmaz.
 _COGALT_MUSTERI_KOPYA = (
     "name",
     "musteri_adi",
+    "tax_number",
+    "phone",
+    "email",
     "address",
+    "ev_adres",
     "calisma_sekli",
     "bizim_hesap",
     "grup2_secimleri",
 )
 _COGALT_MUSTERI_BOS = (
-    "tax_number",
-    "phone",
-    "email",
-    "ev_adres",
     "notes",
     "hazir_ofis_oda_no",
     "office_code",
@@ -4693,6 +4693,15 @@ _COGALT_KYC_KOPYA = (
     "musteri_adi",
     "sirket_unvani",
     "unvan",
+    "vergi_no",
+    "vergi_dairesi",
+    "yetkili_adsoyad",
+    "yetkili_tcno",
+    "yetkili_tel",
+    "yetkili_tel2",
+    "yetkili_email",
+    "yetkili_ikametgah",
+    "email",
     "hizmet_turu",
     "aylik_kira",
     "yillik_kira",
@@ -7008,8 +7017,9 @@ def api_tahmini_musteri_no():
 def api_musteri_cogalt():
     """
     Kayıtlı müşteriyi yeni id + yeni müşteri_no ile kopyalar.
-    Kimlik (vergi no, telefon, e-posta), tahsilat, fatura, plan ve dondurma kopyalanmaz.
-    Sözleşme ve hizmet alanları kopyalanır. Kaynak satır değişmez.
+    Kişi alanları, ünvan ve vergi bilgisi kopyalanır. Oda, ofis kodu, MERSİS,
+    ticaret sicil, sözleşme no, not ve evrak bayrakları kopyalanmaz.
+    Tahsilat, fatura, plan ve dondurma kopyalanmaz. Kaynak satır değişmez.
     """
     _giris_cogalt_schema_ensure_once()
     data = request.get_json(silent=True) or {}
@@ -7061,14 +7071,13 @@ def api_musteri_cogalt():
                     tuple(kvals),
                 )
     except psycopg2.errors.UniqueViolation as e:
-        logging.warning("api_musteri_cogalt unique violation kaynak=%s: %s", kaynak_id, e)
+        logging.warning("api_musteri_cogalt unique violation kaynak=%s", kaynak_id)
         return jsonify(
             {
                 "ok": False,
                 "mesaj": (
-                    "Çoğaltılamadı: vergi numarası, müşteri numarası veya başka benzersiz alan çakışıyor. "
-                    "Veritabanında vergi no tekil ise önce kaynak müşterinin vergi numarasını güncelleyin "
-                    "veya yöneticiye başvurun."
+                    "Çoğaltılamadı: vergi numarası veya başka benzersiz alan veritabanında tekil. "
+                    "Yeni kart oluşturulmadı; bu alan kopyalanamadı."
                 ),
             }
         ), 409
