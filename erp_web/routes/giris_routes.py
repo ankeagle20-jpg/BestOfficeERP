@@ -7045,6 +7045,17 @@ def _giris_rezerve_tuket(n):
     session.modified = True
 
 
+def _rezerve_gecersiz_json():
+    return {
+        "ok": False,
+        "kod": "rezerve_gecersiz",
+        "mesaj": (
+            "Müşteri numarası geçersiz. Formdaki bilgiler duruyor; "
+            "numara yenilenince tekrar Kaydet'e basın."
+        ),
+    }
+
+
 @bp.route("/api/tahmini-musteri-no", methods=["GET"])
 @giris_gerekli
 def api_tahmini_musteri_no():
@@ -7331,15 +7342,7 @@ def kaydet():
                 except (TypeError, ValueError):
                     rezerve_id = None
             if rezerve_id is not None and not _giris_rezerve_gecerli(rezerve_id):
-                return jsonify(
-                    {
-                        "ok": False,
-                        "mesaj": (
-                            "Rezerve müşteri numarası bu oturumda verilmedi. "
-                            "«Yeni Müşteri» butonuna tekrar basın."
-                        ),
-                    }
-                ), 409
+                return jsonify(_rezerve_gecersiz_json()), 409
             try:
                 with get_db() as conn:
                     cur = conn.cursor()
@@ -7349,15 +7352,7 @@ def kaydet():
                             (rezerve_id,),
                         )
                         if cur.fetchone():
-                            return jsonify(
-                                {
-                                    "ok": False,
-                                    "mesaj": (
-                                        "Rezerve müşteri numarası artık geçerli değil. "
-                                        "«Yeni Müşteri» butonuna tekrar basın."
-                                    ),
-                                }
-                            ), 409
+                            return jsonify(_rezerve_gecersiz_json()), 409
                         cur.execute(
                             """
                             INSERT INTO customers (
@@ -7396,17 +7391,22 @@ def kaydet():
                     _giris_rezerve_tuket(rezerve_id)
             except psycopg2.errors.UniqueViolation as e:
                 logging.warning("kaydet yeni musteri unique violation: %s", e)
-                mesaj = (
-                    "Kayıt oluşturulamadı: vergi numarası veya müşteri numarası "
-                    "benzersizlik kuralıyla çakışıyor. Vergi numarasını kontrol edin; "
-                    "sorun sürerse yöneticiye başvurun."
-                )
-                if rezerve_id is not None:
-                    mesaj = (
-                        "Rezerve müşteri numarası artık geçerli değil veya başka bir alan çakışıyor. "
-                        "«Yeni Müşteri» butonuna tekrar basın."
-                    )
-                return jsonify({"ok": False, "mesaj": mesaj}), 409
+                constraint = ""
+                diag = getattr(e, "diag", None)
+                if diag is not None:
+                    constraint = str(getattr(diag, "constraint_name", "") or "")
+                if rezerve_id is not None and ("pkey" in constraint or "musteri_no" in constraint):
+                    return jsonify(_rezerve_gecersiz_json()), 409
+                return jsonify(
+                    {
+                        "ok": False,
+                        "mesaj": (
+                            "Kayıt oluşturulamadı: vergi numarası veya müşteri numarası "
+                            "benzersizlik kuralıyla çakışıyor. Vergi numarasını kontrol edin; "
+                            "sorun sürerse yöneticiye başvurun."
+                        ),
+                    }
+                ), 409
             mid = result["id"] if result else None
             mno = result.get("musteri_no") if result else None
             if mid:

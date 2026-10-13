@@ -393,7 +393,7 @@ def main():
     sahte["rezerve_edilen_id"] = 424242
     sahte["name"] = "Hayalet Unvan"
     g_sahte, k_sahte = cagir("public", "/giris/kaydet", sahte, gr.kaydet)
-    check("rezerve oturum disi 409", k_sahte == 409 and g_sahte.get("ok") is False, k_sahte)
+    check("rezerve oturum disi 409", k_sahte == 409 and g_sahte.get("ok") is False and g_sahte.get("kod") == "rezerve_gecersiz", k_sahte)
     check(
         "hayalet yazilmadi",
         local_fetch_one("SELECT COUNT(*) AS n FROM customers")["n"] == n_rez
@@ -408,7 +408,7 @@ def main():
     check("rezerve kaydet tek satir", k_iyi == 200 and int(g_iyi.get("id") or 0) == rez_id, k_iyi)
     check("rezerve sayac bir", local_fetch_one("SELECT COUNT(*) AS n FROM customers")["n"] == n_rez + 1)
     g_tekrar, k_tekrar = cagir("public", "/giris/kaydet", iyi, gr.kaydet)
-    check("rezerve tekrar 409", k_tekrar == 409 and g_tekrar.get("ok") is False, k_tekrar)
+    check("rezerve tekrar 409", k_tekrar == 409 and g_tekrar.get("ok") is False and g_tekrar.get("kod") == "rezerve_gecersiz", k_tekrar)
     check("rezerve tekrar satir yok", local_fetch_one("SELECT COUNT(*) AS n FROM customers")["n"] == n_rez + 1)
 
     import routes.musteri_routes as mr
@@ -607,6 +607,14 @@ def ui(app, fetch_one, vergi_indeks=None):
             return
         if yol.startswith("/musteriler/api/kyc/kaydet"):
             kyc_yazilan.append(json.loads(request.post_data or "{}"))
+            if sayac.get("kyc_hata"):
+                sayac["kyc_hata"] -= 1
+                route.fulfill(
+                    status=500,
+                    content_type="application/json",
+                    body=json.dumps({"ok": False, "mesaj": "Sozlesme yazilamadi"}),
+                )
+                return
             route.fulfill(status=200, content_type="application/json", body=json.dumps({"ok": True}))
             return
         if yol.startswith("/giris/api/"):
@@ -636,7 +644,10 @@ def ui(app, fetch_one, vergi_indeks=None):
         if "function switchTab" in html:
             s.evaluate("switchTab(6)")
         s.evaluate("selectMusteri(%d)" % MID)
-        s.wait_for_function("document.getElementById('musteri-id').value === '%d'" % MID, timeout=8000)
+        s.wait_for_function(
+            "document.getElementById('musteri-id').value === '%d' && document.getElementById('name').value.length > 0" % MID,
+            timeout=8000,
+        )
         kaynak_ad = s.evaluate("document.getElementById('name').value")
         check("ui kaynak unvan dolu", bool(kaynak_ad))
         s.evaluate("window.girisYetkililerDogrula = function () { return { ok: true }; };")
@@ -918,6 +929,132 @@ def ui(app, fetch_one, vergi_indeks=None):
         s.evaluate("selectMusteri(%d)" % MID)
         s.wait_for_function("document.getElementById('name').value === 'Kaynak Unvan'", timeout=8000)
         check("normal kart yeniden ac ayni", s.evaluate("document.getElementById('name').value") == "Kaynak Unvan")
+        if vergi_indeks:
+            vergi_indeks(False)
+
+        def formu_doldur(ad, vergi):
+            s.evaluate(
+                """(alan) => {
+                    document.getElementById('name').value = alan.ad;
+                    document.getElementById('musteri_adi').value = alan.ad;
+                    document.getElementById('tax_number').value = alan.vergi;
+                    document.getElementById('vergi_dairesi').value = 'Test';
+                    document.getElementById('yetkili_ad').value = 'Yetkili';
+                    document.getElementById('yetkili_tc').value = '10000000146';
+                    document.getElementById('phone').value = '5550000001';
+                    document.getElementById('email').value = 'kaynak@ornek.test';
+                    document.getElementById('address').value = 'Is adresi';
+                    document.getElementById('ev_adres').value = 'Ev adresi';
+                    const sube = document.getElementById('sube_merkez');
+                    if (sube) sube.value = 'Merkez';
+                    const h = document.getElementById('hizmet_turu');
+                    if (h && !h.value && h.options.length > 1) h.selectedIndex = 1;
+                    const kira = document.getElementById('aylik_kira');
+                    if (kira && !kira.value) kira.value = '3600';
+                    window.girisYetkililerDogrula = function () { return { ok: true }; };
+                }""",
+                {"ad": ad, "vergi": vergi},
+            )
+
+        s.evaluate("selectMusteri(%d)" % MID)
+        s.wait_for_function(
+            "document.getElementById('musteri-id').value === '%d' && document.getElementById('name').value === 'Kaynak Unvan'" % MID,
+            timeout=8000,
+        )
+        s.evaluate("girisMusteriCogalt()")
+        s.wait_for_function(
+            """() => !document.getElementById('musteri-id').value && document.getElementById('musteri_no').value && document.getElementById('musteri-cogalt-uyari').style.display !== 'none'""",
+            timeout=8000,
+        )
+        formu_doldur("Numara Yenile Unvan", "2000000005")
+        eski_no = s.evaluate("document.getElementById('musteri_no').value")
+        ui_oturum.pop(gr._GIRIS_REZERVE_SESSION, None)
+        n_yenile = fetch_one("SELECT COUNT(*) AS n FROM customers")["n"]
+        s.click("#musteri-kaydet-btn")
+        s.wait_for_function(
+            """() => {
+                const el = document.getElementById('musteri-kaydet-durum');
+                return el && el.style.display !== 'none' && (el.textContent || '').indexOf('yenilendi') >= 0;
+            }""",
+            timeout=8000,
+        )
+        yeni_no = s.evaluate("document.getElementById('musteri_no').value")
+        check("ui rezerve form duruyor", s.evaluate("document.getElementById('name').value") == "Numara Yenile Unvan")
+        check("ui rezerve id bos", s.evaluate("document.getElementById('musteri-id').value") == "")
+        check("ui rezerve no yenilendi", bool(yeni_no) and yeni_no != eski_no)
+        check("ui rezerve 409 satir yok", fetch_one("SELECT COUNT(*) AS n FROM customers")["n"] == n_yenile)
+        kutu_yen = s.evaluate(
+            """() => {
+                const el = document.getElementById('musteri-kaydet-durum');
+                const st = getComputedStyle(el);
+                return {display: st.display, renk: st.borderTopColor || '', yazi: el.textContent || ''};
+            }"""
+        )
+        check(
+            "ui rezerve kirmizi mesaj",
+            kutu_yen.get("display") == "block"
+            and "229" in (kutu_yen.get("renk") or "")
+            and "Kaydet" in (kutu_yen.get("yazi") or ""),
+        )
+        once_yen = len(yazilan)
+        s.click("#musteri-kaydet-btn")
+        s.wait_for_function(
+            "() => { const v = document.getElementById('musteri-id').value; return v && v === document.getElementById('musteri_no').value; }",
+            timeout=8000,
+        )
+        govde_yen = yazilan[-1] if len(yazilan) > once_yen else {}
+        check("ui rezerve ikinci id bos", not govde_yen.get("id"))
+        check("ui rezerve ikinci tek satir", fetch_one("SELECT COUNT(*) AS n FROM customers")["n"] == n_yenile + 1)
+        check("ui rezerve unvan kalici", govde_yen.get("name") == "Numara Yenile Unvan", govde_yen.get("name"))
+
+        s.evaluate("selectMusteri(%d)" % MID)
+        s.wait_for_function(
+            "document.getElementById('musteri-id').value === '%d' && document.getElementById('name').value === 'Kaynak Unvan'" % MID,
+            timeout=8000,
+        )
+        s.evaluate("girisMusteriCogalt()")
+        s.wait_for_function(
+            """() => !document.getElementById('musteri-id').value && document.getElementById('musteri_no').value && document.getElementById('musteri-cogalt-uyari').style.display !== 'none'""",
+            timeout=8000,
+        )
+        formu_doldur("Sozlesme Tekrar Unvan", "2000000006")
+        sayac["kyc_hata"] = 1
+        n_kyc = fetch_one("SELECT COUNT(*) AS n FROM customers")["n"]
+        once_kyc = len(yazilan)
+        s.click("#musteri-kaydet-btn")
+        s.wait_for_function(
+            """() => {
+                const el = document.getElementById('musteri-kaydet-durum');
+                const yazi = (el && el.textContent) || '';
+                return el && el.style.display !== 'none' && yazi.indexOf('Kart açık') >= 0;
+            }""",
+            timeout=8000,
+        )
+        kyc_id = s.evaluate("document.getElementById('musteri-id').value")
+        govde_kyc = yazilan[-1] if len(yazilan) > once_kyc else {}
+        kutu_kyc = s.evaluate(
+            """() => {
+                const el = document.getElementById('musteri-kaydet-durum');
+                const st = getComputedStyle(el);
+                return {display: st.display, renk: st.borderTopColor || ''};
+            }"""
+        )
+        check("ui kyc hata kirmizi", kutu_kyc.get("display") == "block" and "229" in (kutu_kyc.get("renk") or ""))
+        check("ui kyc kart acik", bool(kyc_id) and s.evaluate("document.getElementById('name').value") == "Sozlesme Tekrar Unvan")
+        check("ui kyc ilk istek insert", not govde_kyc.get("id"))
+        check("ui kyc ilk satir", fetch_one("SELECT COUNT(*) AS n FROM customers")["n"] == n_kyc + 1)
+        once_kyc2 = len(yazilan)
+        s.click("#musteri-kaydet-btn")
+        s.wait_for_function(
+            """() => {
+                const el = document.getElementById('musteri-kaydet-durum');
+                return el && (el.textContent || '').indexOf('tamamland') >= 0;
+            }""",
+            timeout=8000,
+        )
+        govde_kyc2 = yazilan[-1] if len(yazilan) > once_kyc2 else {}
+        check("ui kyc ikinci guncelleme", str(govde_kyc2.get("id") or "") == str(kyc_id))
+        check("ui kyc ikinci satir yok", fetch_one("SELECT COUNT(*) AS n FROM customers")["n"] == n_kyc + 1)
         tarayici.close()
 
 

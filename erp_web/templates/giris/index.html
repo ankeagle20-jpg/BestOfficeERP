@@ -27940,8 +27940,12 @@ async function kaydet(event) {
                     girisTahsilatFormunuSeciliMusteridenDoldur();
                 }
             } catch (eTahSync) {}
-            musteriKaydetDurumGoster('success');
-            if (typeof girisCogaltUyariGizle === 'function') girisCogaltUyariGizle();
+            if (kycBasarisizMesaj) {
+                musteriKaydetDurumGoster('error', 'Müşteri kartı açıldı. Sözleşme kaydedilemedi. Kart açık; tekrar Kaydet\'e basın.');
+            } else {
+                musteriKaydetDurumGoster('success');
+                if (typeof girisCogaltUyariGizle === 'function') girisCogaltUyariGizle();
+            }
             try {
                 var midFresh = parseInt(String(selectedId || result.id || document.getElementById('musteri-id').value || '0'), 10);
                 if (!isNaN(midFresh) && midFresh > 0) {
@@ -27988,6 +27992,29 @@ async function kaydet(event) {
             if (typeof girisAramaAlanlariKartSnapshotKaydet === 'function') girisAramaAlanlariKartSnapshotKaydet();
         } else {
             var errMsg = result.mesaj || 'Kayıt başarısız.';
+            if (result.kod === 'rezerve_gecersiz' && !data.id) {
+                var yenilendi = false;
+                try {
+                    var nr = await girisFetchAgKopmasinaKarsi('/giris/api/tahmini-musteri-no', {
+                        method: 'GET',
+                        credentials: 'same-origin'
+                    }, 2);
+                    var nt = await nr.text();
+                    var nj = {};
+                    try { nj = nt ? JSON.parse(nt) : {}; } catch (eNj) { nj = {}; }
+                    if (nr.ok && nj.ok && nj.id != null && nj.id !== '') {
+                        window.__rezerveEdilenMusteriId = nj.id;
+                        var mnoYen = document.getElementById('musteri_no');
+                        if (mnoYen) mnoYen.value = String(nj.musteri_no != null && nj.musteri_no !== '' ? nj.musteri_no : nj.id);
+                        var idYen = document.getElementById('musteri-id');
+                        if (idYen) idYen.value = '';
+                        yenilendi = true;
+                    }
+                } catch (eYen) {}
+                errMsg = yenilendi
+                    ? 'Müşteri numarası yenilendi. Bilgileriniz duruyor. Tekrar Kaydet\'e basın.'
+                    : 'Müşteri numarası yenilenemedi. Bilgileriniz duruyor. Tekrar Kaydet\'e basın.';
+            }
             alert(errMsg);
             musteriKaydetDurumGoster('error', errMsg);
         }
