@@ -16,7 +16,7 @@ if os.environ.get("ALLOW_PROD_WRITE") == "1":
     raise SystemExit(1)
 
 import psycopg2
-from flask import Flask, g
+from flask import Flask, g, session
 from flask_login import LoginManager, login_user
 from jinja2 import ChoiceLoader, DictLoader
 from psycopg2 import sql as psql
@@ -260,13 +260,20 @@ def main():
             return govde, kod
         return (rv.get_json(silent=True) or {}), rv.status_code
 
-    def cagir(sema, yol, govde, fn):
+    oturum = {}
+
+    def cagir(sema, yol, govde, fn, method="POST"):
         aktif["sema"] = sema or "public"
-        with app.test_request_context(yol, method="POST", json=govde):
+        with app.test_request_context(yol, method=method, json=govde if method != "GET" else None):
             login_user(User(3, "deneme", "Deneme", "admin"))
             if sema and sema != "public":
                 g.tenant_schema = sema
-            return yanit(fn)
+            for anahtar, deger in list(oturum.items()):
+                session[anahtar] = deger
+            out = yanit(fn)
+            oturum.clear()
+            oturum.update(dict(session))
+            return out
 
     def satir(sema, mid):
         aktif["sema"] = sema
@@ -306,7 +313,11 @@ def main():
     once = satir("public", MID)
     govde, kod = cagir("public", "/giris/api/musteri-cogalt", {"kaynak_id": MID}, gr.api_musteri_cogalt)
     yeni = int(govde.get("id") or 0)
-    check("cogalt 200 ayri id", kod == 200 and yeni and yeni != MID, kod)
+    check(
+        "cogalt 200 ayri id",
+        kod == 200 and yeni and yeni != MID and govde.get("eski_endpoint") is True,
+        kod,
+    )
     sonra = satir("public", MID)
     check("kaynak satir ayni", once == sonra, _fark_adlari(once, sonra))
     kopya = satir("public", yeni)
@@ -371,6 +382,66 @@ def main():
     check("vergi cakismasi 409", k3 == 409 and g3.get("ok") is False and "vergi" in (g3.get("mesaj") or "").lower(), k3)
     check("cakisma kaynagi bozmadi", satir("public", MID) == once)
     vergi_indeks(False)
+
+    n_rez = int((local_fetch_one("SELECT COUNT(*) AS n FROM customers") or {}).get("n") or 0)
+    g_rez, k_rez = cagir("public", "/giris/api/tahmini-musteri-no", None, gr.api_tahmini_musteri_no, method="GET")
+    rez_id = int(g_rez.get("id") or 0)
+    n_rez_2 = int((local_fetch_one("SELECT COUNT(*) AS n FROM customers") or {}).get("n") or 0)
+    check("rezerve satir yazmaz", k_rez == 200 and g_rez.get("ok") is True and rez_id > 0 and n_rez_2 == n_rez, k_rez)
+    sahte = dict(kaydet_govde)
+    sahte.pop("id", None)
+    sahte["rezerve_edilen_id"] = 424242
+    sahte["name"] = "Hayalet Unvan"
+    g_sahte, k_sahte = cagir("public", "/giris/kaydet", sahte, gr.kaydet)
+    check("rezerve oturum disi 409", k_sahte == 409 and g_sahte.get("ok") is False, k_sahte)
+    check(
+        "hayalet yazilmadi",
+        local_fetch_one("SELECT COUNT(*) AS n FROM customers")["n"] == n_rez
+        and local_fetch_one("SELECT id FROM customers WHERE name = %s", ("Hayalet Unvan",)) is None,
+    )
+    iyi = dict(kaydet_govde)
+    iyi.pop("id", None)
+    iyi["rezerve_edilen_id"] = rez_id
+    iyi["name"] = "Rezerve Unvan"
+    iyi["tax_number"] = "2000000004"
+    g_iyi, k_iyi = cagir("public", "/giris/kaydet", iyi, gr.kaydet)
+    check("rezerve kaydet tek satir", k_iyi == 200 and int(g_iyi.get("id") or 0) == rez_id, k_iyi)
+    check("rezerve sayac bir", local_fetch_one("SELECT COUNT(*) AS n FROM customers")["n"] == n_rez + 1)
+    g_tekrar, k_tekrar = cagir("public", "/giris/kaydet", iyi, gr.kaydet)
+    check("rezerve tekrar 409", k_tekrar == 409 and g_tekrar.get("ok") is False, k_tekrar)
+    check("rezerve tekrar satir yok", local_fetch_one("SELECT COUNT(*) AS n FROM customers")["n"] == n_rez + 1)
+
+    import routes.musteri_routes as mr
+
+    mr._kyc_kaydet_schema_ensure_once = lambda: None
+    mr.ensure_musteri_kyc_uyruk_column = lambda: None
+    mr.fetch_one = local_fetch_one
+    kyc_yazildi = {"n": 0}
+
+    def _kyc_yazma(*_a, **_k):
+        kyc_yazildi["n"] += 1
+        raise RuntimeError("kyc yazdi")
+
+    mr.execute = _kyc_yazma
+    mr.execute_returning = _kyc_yazma
+    kyc_govde = {
+        "musteri_id": yeni,
+        "sirket_unvani": "Yeni Unvan",
+        "vergi_no": kaydet_govde["tax_number"],
+        "vergi_dairesi": "Test",
+        "yeni_adres": "Adres",
+        "yetkili_adsoyad": "Yetkili",
+        "yetkili_tcno": kaydet_govde["yetkili_tc"],
+        "hizmet_turu": "Hazir Ofis",
+        "hazir_ofis_oda_no": 210,
+        "aylik_kira": "3600",
+        "sozlesme_tarihi": "2024-01-01",
+        "durum": "aktif",
+    }
+    n_oda = local_fetch_one("SELECT COUNT(*) AS n FROM customers")["n"]
+    g_oda, k_oda = cagir("public", "/musteriler/api/kyc/kaydet", kyc_govde, mr.api_kyc_kaydet)
+    check("dolu oda 409", k_oda == 409 and g_oda.get("ok") is False and kyc_yazildi["n"] == 0, k_oda)
+    check("dolu oda satir ayni", local_fetch_one("SELECT COUNT(*) AS n FROM customers")["n"] == n_oda)
 
     public_ids = [r["id"] for r in local_fetch_all("SELECT id FROM customers ORDER BY id")]
     g4, k4 = cagir("tenant_cogalt_b", "/giris/api/musteri-cogalt", {"kaynak_id": MID}, gr.api_musteri_cogalt)
@@ -458,6 +529,19 @@ def ui(app, fetch_one, vergi_indeks=None):
     app.jinja_env.loader = ChoiceLoader([DictLoader({"giris/index.html": html}), app.jinja_env.loader])
     client = app.test_client()
     yazilan = []
+    kyc_yazilan = []
+    ui_oturum = {}
+    sayac = {"tahmini": 0, "cogalt": 0}
+
+    def gorunum(yol, method, govde, fn):
+        with app.test_request_context(yol, method=method, json=govde if method == "POST" else None):
+            login_user(User(3, "deneme", "Deneme", "admin"))
+            for anahtar, deger in list(ui_oturum.items()):
+                session[anahtar] = deger
+            paket = fn()
+            ui_oturum.clear()
+            ui_oturum.update(dict(session))
+            return paket
 
     def musteri_json(mid):
         row = fetch_one("SELECT * FROM customers WHERE id = %s", (mid,))
@@ -493,11 +577,17 @@ def ui(app, fetch_one, vergi_indeks=None):
     def isle(route, request):
         u = request.url.split("plan.test")[-1]
         yol = u.split("?")[0]
+        if yol == "/giris/api/tahmini-musteri-no" and request.method == "GET":
+            sayac["tahmini"] += 1
+            paket = gorunum(yol, "GET", None, gr.api_tahmini_musteri_no)
+            resp = paket[0] if isinstance(paket, tuple) else paket
+            kod = paket[1] if isinstance(paket, tuple) else 200
+            route.fulfill(status=kod, content_type="application/json", body=resp.get_data(as_text=True))
+            return
         if yol == "/giris/api/musteri-cogalt" and request.method == "POST":
+            sayac["cogalt"] += 1
             govde = json.loads(request.post_data or "{}")
-            with app.test_request_context(yol, method="POST", json=govde):
-                login_user(User(3, "deneme", "Deneme", "admin"))
-                paket = gr.api_musteri_cogalt()
+            paket = gorunum(yol, "POST", govde, gr.api_musteri_cogalt)
             resp = paket[0] if isinstance(paket, tuple) else paket
             kod = paket[1] if isinstance(paket, tuple) else 200
             route.fulfill(status=kod, content_type="application/json", body=resp.get_data(as_text=True))
@@ -505,9 +595,7 @@ def ui(app, fetch_one, vergi_indeks=None):
         if yol == "/giris/kaydet" and request.method == "POST":
             govde = json.loads(request.post_data or "{}")
             yazilan.append(govde)
-            with app.test_request_context(yol, method="POST", json=govde):
-                login_user(User(3, "deneme", "Deneme", "admin"))
-                paket = gr.kaydet()
+            paket = gorunum(yol, "POST", govde, gr.kaydet)
             resp = paket[0] if isinstance(paket, tuple) else paket
             kod = paket[1] if isinstance(paket, tuple) else 200
             route.fulfill(status=kod, content_type="application/json", body=resp.get_data(as_text=True))
@@ -518,6 +606,7 @@ def ui(app, fetch_one, vergi_indeks=None):
             route.fulfill(status=kod, content_type="application/json", body=json.dumps(m))
             return
         if yol.startswith("/musteriler/api/kyc/kaydet"):
+            kyc_yazilan.append(json.loads(request.post_data or "{}"))
             route.fulfill(status=200, content_type="application/json", body=json.dumps({"ok": True}))
             return
         if yol.startswith("/giris/api/"):
@@ -643,12 +732,30 @@ def ui(app, fetch_one, vergi_indeks=None):
                 daire: (document.getElementById('vergi_dairesi') || {}).value || ''
             })"""
         )
-        s.evaluate("document.querySelector('.giris-btn-cogalt').click()")
+        n_form = fetch_one("SELECT COUNT(*) AS n FROM customers")["n"]
+        s.evaluate(
+            """() => {
+                girisMusteriCogalt();
+                girisMusteriCogalt();
+            }"""
+        )
         s.wait_for_function(
-            "() => { const v = document.getElementById('musteri-id').value; return v && v !== '%d'; }" % MID,
+            """() => {
+                const id = document.getElementById('musteri-id').value;
+                const no = document.getElementById('musteri_no').value;
+                const uy = document.getElementById('musteri-cogalt-uyari');
+                return !id && !!no && no !== '%d' && uy && getComputedStyle(uy).display !== 'none';
+            }"""
+            % MID,
             timeout=8000,
         )
-        yeni_ui = s.evaluate("document.getElementById('musteri-id').value")
+        n_form_2 = fetch_one("SELECT COUNT(*) AS n FROM customers")["n"]
+        taslak = s.evaluate(
+            """() => ({
+                id: document.getElementById('musteri-id').value,
+                no: document.getElementById('musteri_no').value
+            })"""
+        )
         form_kopya = s.evaluate(
             """() => ({
                 tax: document.getElementById('tax_number').value,
@@ -659,7 +766,8 @@ def ui(app, fetch_one, vergi_indeks=None):
                 daire: (document.getElementById('vergi_dairesi') || {}).value || '',
                 mersis: (document.getElementById('mersis') || {}).value || '',
                 ticaret: (document.getElementById('ticaret_sicil') || {}).value || '',
-                oda: (document.getElementById('hazir_ofis_oda_no') || {}).value || ''
+                oda: (document.getElementById('hazir_ofis_oda_no') || {}).value || '',
+                notes: (document.getElementById('notes') || {}).value || ''
             })"""
         )
         uyari = s.evaluate(
@@ -674,7 +782,11 @@ def ui(app, fetch_one, vergi_indeks=None):
                 };
             }"""
         )
-        check("ui yeni id", yeni_ui and yeni_ui != str(MID), yeni_ui)
+        check("ui cogalt satir yazmaz", n_form_2 == n_form)
+        check("ui cogalt ucu yok", sayac["cogalt"] == 0, sayac["cogalt"])
+        check("ui cift tik bir rezerv", sayac["tahmini"] == 1, sayac["tahmini"])
+        check("ui taslak id bos", taslak.get("id") == "")
+        check("ui taslak no ayri", bool(taslak.get("no")) and str(taslak.get("no")) != str(MID))
         check(
             "ui kisi kopyali",
             form_kopya.get("tax") == kaynak_form.get("tax")
@@ -689,9 +801,14 @@ def ui(app, fetch_one, vergi_indeks=None):
         )
         check(
             "ui sirket bos",
-            form_kopya.get("mersis") == "" and form_kopya.get("ticaret") == "" and form_kopya.get("oda") == "",
+            form_kopya.get("mersis") == "" and form_kopya.get("ticaret") == "" and form_kopya.get("oda") == "" and form_kopya.get("notes") == "",
         )
         check("ui uyari gorunur", uyari.get("var") and uyari.get("yazi"))
+        ekran = Path(os.environ.get("TEMP", ".")) / "boe_cogalt_taslak"
+        ekran.mkdir(exist_ok=True)
+        s.locator("#musteri-cogalt-uyari").screenshot(path=str(ekran / "uyari.png"))
+        s.locator("#musteri_no").screenshot(path=str(ekran / "musteri_no.png"))
+        print("EKRAN", ekran)
         s.evaluate(
             """(ad) => {
                 document.getElementById('name').value = ad;
@@ -725,9 +842,18 @@ def ui(app, fetch_one, vergi_indeks=None):
             timeout=8000,
         )
         check("ui uyari kaydet sonrasi yok", True)
-        check("ui kaydet govdesi yeni id", yazilan and str(yazilan[-1].get("id")) == str(yeni_ui), (yazilan[-1].get("id") if yazilan else None, yeni_ui))
-        check("ui kaydet unvani yeni", yazilan and yazilan[-1].get("name") == "Yeni Unvan UI", yazilan[-1].get("name") if yazilan else None)
-        check("ui kaynak unvani govdede degil", yazilan and yazilan[-1].get("name") != kaynak_ad)
+        son = yazilan[-1] if yazilan else {}
+        check("ui kaydet id bos", not son.get("id"))
+        check("ui kaydet rezerve", str(son.get("rezerve_edilen_id") or "") == str(taslak.get("no") or ""))
+        yeni_ui = s.evaluate("document.getElementById('musteri-id').value")
+        check("ui kaydet sonrasi id", bool(yeni_ui) and str(yeni_ui) == str(taslak.get("no")))
+        check("ui kaydet unvani yeni", son.get("name") == "Yeni Unvan UI", son.get("name") if son else None)
+        check("ui kaynak unvani govdede degil", son.get("name") != kaynak_ad)
+        son_kyc = kyc_yazilan[-1] if kyc_yazilan else {}
+        check(
+            "ui kyc ayri oda bos",
+            str(son_kyc.get("musteri_id") or "") == str(yeni_ui) and not son_kyc.get("hazir_ofis_oda_no"),
+        )
         if vergi_indeks:
             vergi_indeks(True)
         s.evaluate("document.getElementById('tax_number').value = %s" % json.dumps(kaynak_form.get("tax") or ""))

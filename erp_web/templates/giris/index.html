@@ -2822,7 +2822,7 @@ button.auto-btn.whatsapp-hizmet-filter-btn.wa-hizmet-aktif {
         {% if current_user.is_authenticated and current_user.role == 'admin' %}
         <a href="/ayarlar" class="giris-btn-ayar" title="Sistem Ayarlar?" aria-label="Sistem Ayarlar?" style="display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;margin-right:6px;border-radius:3px;background:#0f2744;color:#90caf9;text-decoration:none;font-size:16px;vertical-align:middle;"><i class="fa fa-cog" aria-hidden="true"></i></a>
         {% endif %}
-        <button type="button" class="giris-btn-cogalt" onclick="girisMusteriCogalt()" title="Aynı bilgilerle yeni müşteri numarası oluştur (plan değişimi)"><i class="fa fa-copy" aria-hidden="true"></i> Müşteri çoğalt</button>
+        <button type="button" class="giris-btn-cogalt" onclick="girisMusteriCogalt()" title="Aynı bilgilerle form doldurulur; kayıt Kaydet ile yazılır"><i class="fa fa-copy" aria-hidden="true"></i> Müşteri çoğalt</button>
         <button type="button" class="giris-btn-whatsapp" onclick="girisMusteriWhatsAppAc()" title="Formdaki telefon ile WhatsApp’ta sohbet aç"><i class="fa-brands fa-whatsapp" aria-hidden="true"></i> WhatsApp</button>
         <button onclick="yeniMusteri()" style="background: #4caf50;">➕ Yeni Müşteri</button>
         <button onclick="location.reload()">↺ Yenile</button>
@@ -27614,6 +27614,9 @@ function calismaSekliDegisti() {
 
 async function kaydet(event) {
     event.preventDefault();
+    if (window.__girisKaydetSuruyor) return;
+    window.__girisKaydetSuruyor = true;
+    try {
     if (window.__girisDuzenleModu) {
         window.__girisDuzenleKaydi = true;
         girisMusteriDuzenleModuKapat();
@@ -27858,6 +27861,7 @@ async function kaydet(event) {
                 document.getElementById('musteri-id').value = result.id;
                 kycData.musteri_id = result.id;
                 try { window.__rezerveEdilenMusteriId = null; } catch (eRezOk) {}
+                if (window.__girisCogaltKayit) window.__girisCogaltYeniId = String(result.id);
                 if (result.musteri_no != null && result.musteri_no !== '' && document.getElementById('musteri_no')) {
                     document.getElementById('musteri_no').value = String(result.musteri_no);
                 }
@@ -27922,6 +27926,9 @@ async function kaydet(event) {
                 var midDos = parseInt(String(selectedId || result.id || document.getElementById('musteri-id').value || '0'), 10);
                 if (!isNaN(midDos) && midDos > 0) await musteriBekleyenDosyalariYukle(midDos);
             } catch (eDosY) { console.warn(eDosY); }
+            if (!kycBasarisizMesaj && window.__girisCogaltKayit && typeof girisCogaltUyariGizle === 'function') {
+                girisCogaltUyariGizle();
+            }
             alert(result.mesaj + kycBasarisizMesaj);
             musteriAra();
             girisHizmetTuruAltFormlaraUygula(kycData.hizmet_turu);
@@ -27990,6 +27997,9 @@ async function kaydet(event) {
         musteriKaydetDurumGoster('error', bag);
     } finally {
         musteriKaydetButonSifirla();
+    }
+    } finally {
+        window.__girisKaydetSuruyor = false;
     }
 }
 
@@ -28942,6 +28952,7 @@ function girisCogaltUyariGizle() {
 }
 
 function girisMusteriCogalt() {
+    if (window.__girisCogaltIstek) return;
     var midEl = document.getElementById('musteri-id');
     var mid = midEl && midEl.value ? String(midEl.value).trim() : '';
     if (!mid) {
@@ -28954,17 +28965,19 @@ function girisMusteriCogalt() {
         'Seçili müşteri yeni bir müşteri numarası ile kopyalanacak.\n\n' +
         '• Fatura, tahsilat ve aylık grid geçmişi kopyalanmaz.\n' +
         '• Eski planı kapatmak için kaynak kartı pasif yapmanız yeterlidir.\n' +
-        '• Ünvan, vergi dairesi ve vergi numarasını yeni şirkete göre düzenleyip Kaydet ile onaylayın.\n\n' +
+        '• Ünvan, vergi dairesi ve vergi numarasını yeni şirkete göre düzenleyip Kaydet ile onaylayın.\n' +
+        '• Kayıt, Kaydet’e basılana kadar veritabanına yazılmaz.\n\n' +
         (mnoStr ? ('Kaynak müşteri no: ' + mnoStr + '\n\n') : '') +
         'Devam edilsin mi?'
     )) {
         return;
     }
-    girisFetchAgKopmasinaKarsi('/giris/api/musteri-cogalt', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({ kaynak_id: parseInt(mid, 10) })
+    window.__girisCogaltIstek = true;
+    var btn = document.querySelector('.giris-btn-cogalt');
+    if (btn) btn.disabled = true;
+    girisFetchAgKopmasinaKarsi('/giris/api/tahmini-musteri-no', {
+        method: 'GET',
+        credentials: 'same-origin'
     }, 2).then(function (r) {
         return r.text().then(function (text) {
             var j = null;
@@ -28973,34 +28986,44 @@ function girisMusteriCogalt() {
         });
     }).then(function (res) {
         var j = res.j || {};
-        if (!j.ok) {
-            alert(j.mesaj || (res.text && res.text.slice ? res.text.slice(0, 200) : 'Çoğaltılamadı.'));
+        if (!res.ok || !j.ok || j.id == null || j.id === '') {
+            alert(j.mesaj || 'Müşteri numarası ayrılamadı. Kayıt açılmadı.');
             return;
         }
-        alert(j.mesaj || 'Yeni müşteri oluşturuldu.');
-        var nid = j.id;
-        if (nid != null && nid !== '') {
-            window.__girisCogaltKayit = true;
-            window.__girisCogaltYeniId = String(nid);
-            window.__girisAramaMusteriAdiAranan = false;
-            window.__girisAramaNameAranan = false;
-            if (typeof selectedId !== 'undefined') selectedId = parseInt(nid, 10);
-            var idElY = document.getElementById('musteri-id');
-            if (idElY) idElY.value = String(nid);
-            ['mersis', 'ticaret_sicil', 'hazir_ofis_oda_no'].forEach(function (fid) {
-                var elB = document.getElementById(fid);
-                if (elB) elB.value = '';
-            });
-            if (typeof girisCogaltUyariGoster === 'function') girisCogaltUyariGoster();
-            if (typeof girisMusteriKartOnbellekSil === 'function') girisMusteriKartOnbellekSil(nid);
-            if (typeof selectMusteri === 'function') selectMusteri(parseInt(nid, 10));
+        window.__girisCogaltKayit = true;
+        window.__girisCogaltYeniId = '';
+        window.__rezerveEdilenMusteriId = j.id;
+        window.__girisAramaKartSnapshot = { mid: '', musteri_adi: '', name: '' };
+        window.__girisAramaMusteriAdiAranan = false;
+        window.__girisAramaNameAranan = false;
+        window.__girisDuzenleModu = false;
+        window.__girisDuzenleKaydi = false;
+        window.__girisDuzenleKaydiMid = '';
+        if (typeof selectedId !== 'undefined') selectedId = null;
+        if (typeof girisSonSeciliMusteriSil === 'function') girisSonSeciliMusteriSil();
+        var idElY = document.getElementById('musteri-id');
+        if (idElY) idElY.value = '';
+        var pch = document.getElementById('parent_cari_id');
+        if (pch) pch.value = '';
+        var mnoY = document.getElementById('musteri_no');
+        if (mnoY) mnoY.value = String(j.musteri_no != null && j.musteri_no !== '' ? j.musteri_no : j.id);
+        ['mersis', 'ticaret_sicil', 'hazir_ofis_oda_no', 'notes'].forEach(function (fid) {
+            var elB = document.getElementById(fid);
+            if (elB) elB.value = '';
+        });
+        if (typeof girisCogaltUyariGoster === 'function') girisCogaltUyariGoster();
+        if (typeof planKapisiniYenile === 'function') {
+            try { planKapisiniYenile(null); } catch (ePlan) {}
         }
-        if (typeof musteriAra === 'function') musteriAra();
-        setTimeout(function () {
-            if (typeof cariEkstreMusteriDegisinceYenile === 'function') cariEkstreMusteriDegisinceYenile();
-        }, 800);
+        document.querySelectorAll('.musteri-item').forEach(function (item) {
+            item.classList.remove('selected');
+        });
+        alert('Form kopyalandı. Yeni kart, Kaydet’e basılınca açılır. Ünvan ve vergi bilgisini yeni şirkete göre düzenleyin.');
     }).catch(function (err) {
         alert(typeof girisSunucuBaglantiUyariMetni === 'function' ? girisSunucuBaglantiUyariMetni(err) : String(err));
+    }).finally(function () {
+        window.__girisCogaltIstek = false;
+        if (btn) btn.disabled = false;
     });
 }
 

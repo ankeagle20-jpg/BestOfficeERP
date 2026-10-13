@@ -2,7 +2,7 @@
 Giriş / Müşteri Kaydı Routes
 Desktop'taki gibi tam fonksiyonel + Sözleşme oluşturma
 """
-from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, send_file, Response, current_app, make_response, g, has_app_context
+from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, send_file, Response, current_app, make_response, g, has_app_context, session
 from flask_login import current_user
 from auth import giris_gerekli
 from collections import defaultdict
@@ -7001,14 +7001,59 @@ def api_musteri_durum_guncelle(mid):
     return jsonify(out)
 
 
+_GIRIS_REZERVE_SESSION = "giris_rezerve_idler"
+_GIRIS_REZERVE_AZAMI = 8
+
+
+def _giris_rezerve_liste():
+    raw = session.get(_GIRIS_REZERVE_SESSION) or []
+    out = []
+    if isinstance(raw, (list, tuple)):
+        for x in raw:
+            try:
+                n = int(x)
+            except (TypeError, ValueError):
+                continue
+            if n > 0 and n not in out:
+                out.append(n)
+    return out
+
+
+def _giris_rezerve_yaz(n):
+    ids = _giris_rezerve_liste()
+    n = int(n)
+    if n not in ids:
+        ids.append(n)
+    session[_GIRIS_REZERVE_SESSION] = ids[-_GIRIS_REZERVE_AZAMI:]
+    session.modified = True
+
+
+def _giris_rezerve_gecerli(n):
+    try:
+        n = int(n)
+    except (TypeError, ValueError):
+        return False
+    return n in _giris_rezerve_liste()
+
+
+def _giris_rezerve_tuket(n):
+    try:
+        n = int(n)
+    except (TypeError, ValueError):
+        return
+    session[_GIRIS_REZERVE_SESSION] = [x for x in _giris_rezerve_liste() if x != n]
+    session.modified = True
+
+
 @bp.route("/api/tahmini-musteri-no", methods=["GET"])
 @giris_gerekli
 def api_tahmini_musteri_no():
-    """Yeni müşteri formu açılırken id/musteri_no rezerve et (customers_id_seq nextval)."""
+    """Yeni müşteri formu açılırken id/musteri_no rezerve et (customers_id_seq nextval). Satır yazmaz."""
     row = fetch_one("SELECT nextval('customers_id_seq') AS n")
     if not row or row.get("n") is None:
         return jsonify({"ok": False, "mesaj": "Müşteri numarası rezerve edilemedi."}), 500
     n = int(row["n"])
+    _giris_rezerve_yaz(n)
     return jsonify({"ok": True, "id": n, "musteri_no": n})
 
 
@@ -7016,7 +7061,8 @@ def api_tahmini_musteri_no():
 @giris_gerekli
 def api_musteri_cogalt():
     """
-    Kayıtlı müşteriyi yeni id + yeni müşteri_no ile kopyalar.
+    ESKİ UÇ. Arayüz artık çağırmaz. Çoğaltma numara ayırıp formu doldurur;
+    customers satırı Kaydet ile yazılır. Bu uç duruyor: çağrılırsa satırı hemen açar.
     Kişi alanları, ünvan ve vergi bilgisi kopyalanır. Oda, ofis kodu, MERSİS,
     ticaret sicil, sözleşme no, not ve evrak bayrakları kopyalanmaz.
     Tahsilat, fatura, plan ve dondurma kopyalanmaz. Kaynak satır değişmez.
@@ -7098,7 +7144,17 @@ def api_musteri_cogalt():
     if new_mno is not None:
         mesaj += f", müşteri no: {new_mno}"
     mesaj += "). Hizmet türü ve sözleşme tarihlerini kontrol edip Kaydet ile onaylayın."
-    return jsonify({"ok": True, "id": new_id, "musteri_no": new_mno, "mesaj": mesaj})
+    resp = jsonify(
+        {
+            "ok": True,
+            "id": new_id,
+            "musteri_no": new_mno,
+            "mesaj": mesaj,
+            "eski_endpoint": True,
+        }
+    )
+    resp.headers["Deprecation"] = "true"
+    return resp
 
 
 def _digits_only(s):
@@ -7274,6 +7330,16 @@ def kaydet():
                         rezerve_id = None
                 except (TypeError, ValueError):
                     rezerve_id = None
+            if rezerve_id is not None and not _giris_rezerve_gecerli(rezerve_id):
+                return jsonify(
+                    {
+                        "ok": False,
+                        "mesaj": (
+                            "Rezerve müşteri numarası bu oturumda verilmedi. "
+                            "«Yeni Müşteri» butonuna tekrar basın."
+                        ),
+                    }
+                ), 409
             try:
                 with get_db() as conn:
                     cur = conn.cursor()
@@ -7326,6 +7392,8 @@ def kaydet():
                         (new_id, new_id),
                     )
                     result = {"id": new_id, "musteri_no": new_id}
+                if rezerve_id is not None:
+                    _giris_rezerve_tuket(rezerve_id)
             except psycopg2.errors.UniqueViolation as e:
                 logging.warning("kaydet yeni musteri unique violation: %s", e)
                 mesaj = (
