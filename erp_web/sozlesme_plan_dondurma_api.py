@@ -271,6 +271,8 @@ def dondurma_ekle_yanit(mid):
             atlanan_aylar=onizleme["atlanan_aylar"],
             olusturan=_kim(),
         )
+        alanlar = ("id", "musteri_id", "baslangic_ay", "ay_sayisi", "dondurulan_aylar")
+        yeni_snap = anlik_al(row, alanlar)
         if anlik:
             audit_yaz(
                 calistir,
@@ -280,10 +282,19 @@ def dondurma_ekle_yanit(mid):
                 musteri_id=mid,
                 kullanici=_kim(),
                 anlik=anlik,
-                yeni=anlik_al(
-                    row,
-                    ("id", "musteri_id", "baslangic_ay", "ay_sayisi", "dondurulan_aylar"),
-                ),
+                yeni=yeni_snap,
+            )
+        else:
+            audit_yaz(
+                calistir,
+                olay="dondurma_olustur",
+                varlik="sozlesme_plan_dondurma",
+                kayit_id=yeni_snap.get("id"),
+                musteri_id=mid,
+                kullanici=_kim(),
+                anlik={},
+                yeni=yeni_snap,
+                eski_yaz=False,
             )
         return row
 

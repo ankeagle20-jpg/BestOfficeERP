@@ -201,23 +201,36 @@ def main():
             blob = (satir["eski_deger"] or "") + (satir["yeni_deger"] or "")
             return not any(k in blob for k in YASAK)
 
-        def bak(sema, islem, tablo):
+        def bak(sema, islem, tablo, eski_yok=False):
             bulunan = [s for s in _satirlar(conn, sema) if s["islem"] == islem and s["tablo_adi"] == tablo]
             check(sema + " " + islem + " var", len(bulunan) == 1, bulunan)
             if not bulunan:
                 return
-            satir = bulunan[0]
-            eski = json.loads(satir["eski_deger"])
+            _satir_bak(sema, islem, bulunan[0], eski_yok)
+
+        def _satir_bak(sema, islem, satir, eski_yok):
             yeni = json.loads(satir["yeni_deger"])
+            if eski_yok:
+                eski = None
+                eski_ok = satir["eski_deger"] is None
+            else:
+                eski = json.loads(satir["eski_deger"])
+                eski_ok = isinstance(eski, dict) and "musteri_id" in eski and eski.get("kullanici") == "deneme"
             check(
                 sema + " " + islem + " kolon",
-                satir["user_id"] == 15 and satir["kayit_id"] and "musteri_id" in eski and kisisel_yok(satir),
+                satir["user_id"] == 15
+                and satir["kayit_id"]
+                and eski_ok
+                and kisisel_yok(satir)
+                and yeni.get("kullanici") == "deneme"
+                and "@" not in str(yeni.get("kullanici") or ""),
                 satir,
             )
-            check(sema + " " + islem + " yeni json", isinstance(yeni, dict) and yeni, yeni)
+            check(sema + " " + islem + " yeni json", isinstance(yeni, dict) and yeni.get("id"), yeni)
 
         sema_ayarla(None)
         pid = plan_olustur("2024-11-18")
+        bak("public", "plan_olustur", "sozlesme_plan_degisiklik", eski_yok=True)
         _g, kod = girisli("/x", {}, lambda: api.plan_iptal_yanit(867, pid))
         check("plan kaldir 200", kod == 200, kod)
         bak("public", "plan_kaldir", "sozlesme_plan_degisiklik")
@@ -237,6 +250,7 @@ def main():
         bak("public", "plan_sil", "sozlesme_plan_degisiklik")
 
         did = dondurma_olustur("2024-08")
+        bak("public", "dondurma_olustur", "sozlesme_plan_dondurma", eski_yok=True)
         _g, kod = girisli("/x", {"musteri_id": 867}, lambda: da.dondurma_iptal_yanit(867, did))
         check("dondurma kaldir 200", kod == 200, kod)
         bak("public", "dondurma_kaldir", "sozlesme_plan_dondurma")
@@ -255,6 +269,16 @@ def main():
         check("dondurma sil 200", kod == 200, kod)
         bak("public", "dondurma_sil", "sozlesme_plan_dondurma")
 
+        pid = plan_olustur("2025-06-01")
+        _g, kod = girisli("/x", _govde(gecerlilik_ay="2025-06-01", yeni_net=2200, yeni_brut=2640), lambda: api.plan_ekle_yanit(867))
+        check("plan degistir 200", kod == 200, kod)
+        degisen = [s for s in _satirlar(conn, "public") if s["islem"] == "plan_degistir"]
+        check("plan degistir tek", len(degisen) == 1, degisen)
+        if degisen:
+            _satir_bak("public", "plan_degistir", degisen[0], False)
+            eski = json.loads(degisen[0]["eski_deger"])
+            check("plan degistir eski iptal", eski.get("durum") == "iptal" and "telefon" not in eski and "email" not in eski, eski)
+
         once_public = len(_satirlar(conn, "public"))
         once_tenant = len(_satirlar(conn, "tenant_audit_e"))
         once_yanlis = len(_satirlar(conn, "yanlis"))
@@ -266,7 +290,7 @@ def main():
         _g, kod = girisli("/x", {"musteri_id": 867}, lambda: da.dondurma_sil_yanit(867, did))
         check("tenant dondurma sil 200", kod == 200, kod)
         tenant = _satirlar(conn, "tenant_audit_e")
-        check("tenant yalniz kendi audit", len(tenant) == once_tenant + 2, tenant)
+        check("tenant yalniz kendi audit", len(tenant) == once_tenant + 4, len(tenant) - once_tenant)
         check("yanlis sema bos", len(_satirlar(conn, "yanlis")) == once_yanlis)
         check("public tenant yazisini almaz", len(_satirlar(conn, "public")) == once_public)
 

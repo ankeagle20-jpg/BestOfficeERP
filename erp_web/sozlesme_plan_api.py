@@ -799,6 +799,8 @@ def plan_ekle_yanit(mid):
             banka_tutar=tutar["banka_tutar"],
             olusturan=_kim(),
         )
+        alanlar = ("id", "musteri_id", "gecerlilik_ay", "yeni_net", "kdv_oran", "yeni_brut", "nakit_tutar", "banka_tutar")
+        yeni_snap = anlik_al(row, alanlar)
         if anlik:
             audit_yaz(
                 calistir,
@@ -808,10 +810,32 @@ def plan_ekle_yanit(mid):
                 musteri_id=mid,
                 kullanici=_kim(),
                 anlik=anlik,
-                yeni=anlik_al(
-                    row,
-                    ("id", "musteri_id", "gecerlilik_ay", "yeni_net", "kdv_oran", "yeni_brut", "nakit_tutar", "banka_tutar"),
-                ),
+                yeni=yeni_snap,
+            )
+        elif onceki:
+            eski = anlik_al(onceki, alanlar)
+            eski["durum"] = "iptal"
+            audit_yaz(
+                calistir,
+                olay="plan_degistir",
+                varlik="sozlesme_plan_degisiklik",
+                kayit_id=yeni_snap.get("id"),
+                musteri_id=mid,
+                kullanici=_kim(),
+                anlik=eski,
+                yeni=yeni_snap,
+            )
+        else:
+            audit_yaz(
+                calistir,
+                olay="plan_olustur",
+                varlik="sozlesme_plan_degisiklik",
+                kayit_id=yeni_snap.get("id"),
+                musteri_id=mid,
+                kullanici=_kim(),
+                anlik={},
+                yeni=yeni_snap,
+                eski_yaz=False,
             )
         if not _resync(int(mid)):
             raise RuntimeError("yenileme")

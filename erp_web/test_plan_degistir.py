@@ -225,7 +225,10 @@ def test_yazma():
             and tx.commit == 1
             and any(s.startswith("SET LOCAL search_path TO tenant_abc,") for s in tx.bellek.sql)
             and any("CREATE TABLE IF NOT EXISTS sozlesme_plan_degisiklik" in s for s in tx.bellek.sql)
-            and "audit_log" not in "\n".join(tx.bellek.sql).lower(),
+            and len(tx.bellek.audit) == 1
+            and tx.bellek.audit[0][2] == "plan_olustur"
+            and tx.bellek.audit[0][3] is None
+            and "kullanici" in (tx.bellek.audit[0][4] or ""),
         )
 
         with app.test_request_context(json=_govde(onay_kilitli_aylar=True), method="POST"):
@@ -239,7 +242,11 @@ def test_yazma():
             and len(tx.bellek.satirlar) == 2
             and tx.bellek.satirlar[0]["iptal_at"] is not None
             and tx.bellek.satirlar[1]["iptal_at"] is None
-            and tx.rollback == 0,
+            and tx.rollback == 0
+            and tx.bellek.audit[-1][2] == "plan_degistir"
+            and tx.bellek.audit[-1][3] is not None
+            and '"durum": "iptal"' in tx.bellek.audit[-1][3]
+            and tx.bellek.audit[-1][2] != "plan_duzenle",
         )
 
         def patlat(sql, params=None):

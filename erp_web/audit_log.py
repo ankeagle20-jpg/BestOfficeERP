@@ -84,13 +84,24 @@ def anlik_al(row: dict | None, alanlar) -> dict:
     return out
 
 
-def _json_metin(govde) -> str:
+def _kullanici_adi(kullanici) -> str:
+    """Oturumdaki ad. Telefon, TC, e-posta ve serbest açıklama yazılmaz."""
+    ad = str(kullanici or "").strip()[:80]
+    if not ad or "@" in ad or ad.isdigit():
+        return ""
+    return ad
+
+
+def _json_metin(govde, kullanici=None) -> str:
     temiz = {}
     for anahtar, deger in (govde or {}).items():
         ad = str(anahtar)
-        if ad.lower() in _YASAK:
+        if ad.lower() in _YASAK or ad.lower() == "kullanici":
             continue
         temiz[ad] = _deger(deger)
+    ad = _kullanici_adi(kullanici)
+    if ad:
+        temiz["kullanici"] = ad
     return json.dumps(temiz, ensure_ascii=False, default=str)
 
 
@@ -122,6 +133,7 @@ def audit_yaz(
     kullanici: str,
     anlik: dict,
     yeni: dict | None = None,
+    eski_yaz: bool = True,
 ) -> bool:
     """Mevcut audit_log kolonlarına bir satır ekler.
 
@@ -132,17 +144,19 @@ def audit_yaz(
         calistir("SAVEPOINT audit_yaz")
         calistir(SQL_TABLO)
         eski = dict(anlik or {})
-        if musteri_id not in (None, "") and "musteri_id" not in eski:
+        if eski_yaz and musteri_id not in (None, "") and "musteri_id" not in eski:
             eski["musteri_id"] = int(musteri_id)
         sonraki = dict(yeni or {})
+        if musteri_id not in (None, "") and sonraki and "musteri_id" not in sonraki:
+            sonraki["musteri_id"] = int(musteri_id)
         calistir(
             SQL_INSERT,
             (
                 str(varlik or "")[:80],
                 int(kayit_id) if kayit_id not in (None, "") else None,
                 str(olay or "")[:80],
-                _json_metin(eski),
-                _json_metin(sonraki),
+                _json_metin(eski, kullanici) if eski_yaz else None,
+                _json_metin(sonraki, kullanici),
                 _oturum_id(kullanici),
             ),
         )
