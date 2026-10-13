@@ -866,7 +866,7 @@ def test_js():
         "durum secicisi satir kabinda (dugme ayni grid hucresinde)",
         'id="musteri_durum_satir"' in html and html.find('id="musteri_durum_satir"') < html.find('id="musteri_durum"') < html.find("</select>", html.find('id="musteri_durum"')),
     )
-    check("script surumu artirildi", "js/plan_degistir.js', v=17" in html and "js/plan_degistir.js', v=16" not in html)
+    check("script surumu artirildi", "js/plan_degistir.js', v=18" in html and "js/plan_degistir.js', v=17" not in html)
     check(
         "plan kapsam notu sabit",
         "plan_kapsam_not" in js_metin

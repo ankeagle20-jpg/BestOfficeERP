@@ -47,6 +47,7 @@ GOZLEM = r"""
       if (m.type === 'childList') m.addedNodes.forEach(ekle);
     });
     if (!ilgili['2026-11']) return;
+    if (!window.__kareAcik) return;
     const c = grid.querySelector('.sozlesmeler-ay-kart[data-ay-key="2026-11"]');
     if (!c) return;
     const deg = c.querySelector('.aylik-deger');
@@ -315,7 +316,7 @@ def main():
         s.route("**/*", isle)
         s.goto(BASE + "/giris/", wait_until="load")
         s.wait_for_function("typeof selectMusteri === 'function'", timeout=20000)
-        check("statik selectte dondur yok", "value=\"dondur\"" not in html and "js/plan_degistir.js', v=17" in html and "js/plan_degistir.js', v=16" not in html)
+        check("statik selectte dondur yok", "value=\"dondur\"" not in html and "js/plan_degistir.js', v=18" in html and "js/plan_degistir.js', v=17" not in html)
         s.evaluate("selectMusteri(%d)" % MID)
         s.wait_for_selector("#plan_dondur_btn", timeout=15000)
         for _ in range(3):
@@ -326,12 +327,154 @@ def main():
         once = (_kartlar(s).get("sozlesmeler-aylik-grid") or {}).get(AY) or {}
         once_metin = once.get("metin")
         check("grid baslangic tutari", once_metin not in (None, "", "0.00", "—"), once_metin)
+        jitter = s.evaluate(
+            """() => {
+                if (window.__boyaJitterKuruldu) return 'var';
+                window.__boyaJitterKuruldu = true;
+                var adlar = [
+                    'girisTahsilatYilAyPanelGridaKartUygula',
+                    'sozlesmelerAylikKismiKartlariniCachedenZorla',
+                    'sozlesmelerAylikTahsilSetiniGorseleZorla',
+                    'sozlesmelerReelDbGridVePanelSonBoya',
+                    'sozlesmelerAylikCacheRender',
+                    'girisPlanGridHucreBrut'
+                ];
+                var kurulan = [];
+                window.__boyaOrig = {};
+                adlar.forEach(function (ad) {
+                    var orig = window[ad];
+                    if (typeof orig !== 'function') return;
+                    kurulan.push(ad);
+                    window.__boyaOrig[ad] = orig;
+                    window[ad] = function () { return orig.apply(this, arguments); };
+                });
+                function aySnap(sco) {
+                    if (!sco || !Array.isArray(sco.aylar)) return null;
+                    return sco.aylar.map(function (a) {
+                        if (!a) return null;
+                        return {
+                            brut: a.brut_tutar_kdv, tutar: a.tutar_kdv_dahil, kalan: a.kalan_tutar_kdv,
+                            odenen: a.odenen_tutar_kdv, tahsil: a.tahsil_edildi, kismi: a.kismi_tahsilat
+                        };
+                    });
+                }
+                function ayYaz(sco, snap) {
+                    if (!sco || !snap || !Array.isArray(sco.aylar)) return;
+                    for (var n = 0; n < snap.length && n < sco.aylar.length; n++) {
+                        var a = sco.aylar[n], t = snap[n];
+                        if (!a || !t) continue;
+                        a.brut_tutar_kdv = t.brut;
+                        a.tutar_kdv_dahil = t.tutar;
+                        a.kalan_tutar_kdv = t.kalan;
+                        a.odenen_tutar_kdv = t.odenen;
+                        a.tahsil_edildi = t.tahsil;
+                        a.kismi_tahsilat = t.kismi;
+                    }
+                }
+                window.__dondurmaJitterSilah = function () {
+                    var sco0 = window.__sozlesmelerAylikSonCacheObj;
+                    var yakalanan = (sco0 && Array.isArray(sco0.dondurulan_aylar)) ? sco0.dondurulan_aylar.slice() : [];
+                    var nesil = window.__dondurmaYenileNesil || 0;
+                    var kareNesil = window.__kareNesil || 0;
+                    var deg0 = document.querySelector('#sozlesmeler-aylik-grid .sozlesmeler-ay-kart[data-ay-key="2026-11"] .aylik-deger');
+                    var metin = deg0 ? String(deg0.textContent || '') : '';
+                    var snap = aySnap(sco0);
+                    var bas = Date.now();
+                    function listeIcerir(ay) {
+                        for (var n = 0; n < yakalanan.length; n++) if (String(yakalanan[n] || '').slice(0, 7) === ay) return true;
+                        return false;
+                    }
+                    function hazirMi() {
+                        return (window.__dondurmaYenileNesil || 0) !== nesil
+                            && !window.__dondurmaYenileBekliyor
+                            && !window.__dondurmaMutasyonBekliyor;
+                    }
+                    function bekle() {
+                        if ((window.__kareNesil || 0) !== kareNesil) return;
+                        if (!hazirMi()) {
+                            if (Date.now() - bas < 2500) setTimeout(bekle, Math.floor(Math.random() * 51));
+                            return;
+                        }
+                        var adimlar = [
+                            'girisTahsilatYilAyPanelGridaKartUygula',
+                            'sozlesmelerAylikKismiKartlariniCachedenZorla',
+                            'sozlesmelerAylikTahsilSetiniGorseleZorla',
+                            'sozlesmelerReelDbGridVePanelSonBoya',
+                            'girisPlanGridHucreBrut',
+                            'sozlesmelerAylikCacheRender'
+                        ];
+                        var i = 0;
+                        function bir() {
+                            if ((window.__kareNesil || 0) !== kareNesil || !window.__kareAcik) return;
+                            if (i >= adimlar.length) return;
+                            var ad = adimlar[i++];
+                            var orig = window.__boyaOrig[ad];
+                            var sco2 = window.__sozlesmelerAylikSonCacheObj;
+                            var geriListe = sco2 ? sco2.dondurulan_aylar : null;
+                            var geriSnap = aySnap(sco2);
+                            var eskiRh = window.girisTahsilatYilAyPaneldenRenderOzellik;
+                            if (sco2) sco2.dondurulan_aylar = yakalanan.slice();
+                            ayYaz(sco2, snap);
+                            if (typeof eskiRh === 'function' && !listeIcerir('2026-11') && parseFloat(metin) > 0.01) {
+                                window.girisTahsilatYilAyPaneldenRenderOzellik = function (y, m) {
+                                    var rh = eskiRh.apply(this, arguments);
+                                    if (!rh || parseInt(y, 10) !== 2026 || parseInt(m, 10) !== 11) return rh;
+                                    var kopya = {};
+                                    for (var k in rh) kopya[k] = rh[k];
+                                    kopya.tutarStr = metin;
+                                    kopya.odendi = false;
+                                    kopya.kismi = false;
+                                    kopya.odenmedi = true;
+                                    kopya.tutarKdvAttr = String(parseFloat(metin));
+                                    kopya.brutAttr = kopya.tutarKdvAttr;
+                                    return kopya;
+                                };
+                            }
+                            try {
+                                if (typeof orig === 'function') {
+                                    if (ad === 'girisTahsilatYilAyPanelGridaKartUygula') {
+                                        var card = document.querySelector('#sozlesmeler-aylik-grid .sozlesmeler-ay-kart[data-ay-key="2026-11"]');
+                                        if (card) orig(card, 2026, 11);
+                                    } else if (ad === 'girisPlanGridHucreBrut') orig(2026, 11);
+                                    else if (ad === 'sozlesmelerAylikCacheRender') orig(sco2, false);
+                                    else orig();
+                                }
+                            } catch (_eJit) {}
+                            finally {
+                                if (sco2) sco2.dondurulan_aylar = geriListe;
+                                ayYaz(sco2, geriSnap);
+                                window.girisTahsilatYilAyPaneldenRenderOzellik = eskiRh;
+                            }
+                            setTimeout(bir, Math.floor(Math.random() * 51));
+                        }
+                        setTimeout(bir, Math.floor(Math.random() * 51));
+                    }
+                    setTimeout(bekle, Math.floor(Math.random() * 51));
+                };
+                return kurulan.join(',');
+            }"""
+        )
+        check("boya jitter kuruldu", "girisTahsilatYilAyPanelGridaKartUygula" in (jitter or ""), jitter)
 
         def gozlem_sifirla():
             s.evaluate(GOZLEM)
-            s.evaluate("window.__kare = []; window.__kareSon = {};")
+            s.evaluate("window.__kare = []; window.__kareSon = {}; window.__kareAcik = false; window.__kareNesil = (window.__kareNesil || 0) + 1;")
+
+        def eylem(kod):
+            s.evaluate(
+                """(kod) => {
+                    window.__kare = [];
+                    window.__kareSon = {};
+                    window.__kareNesil = (window.__kareNesil || 0) + 1;
+                    window.__kareAcik = true;
+                    if (typeof window.__dondurmaJitterSilah === 'function') window.__dondurmaJitterSilah();
+                    (0, eval)(kod);
+                }""",
+                kod,
+            )
 
         def flas_yok(ad, ilk_metin=None, sifir_yasak=False, eski_yasak=None):
+            s.wait_for_timeout(500)
             kayit = s.evaluate("window.__kare") or []
             if not kayit:
                 simdi = ((_kartlar(s).get("sozlesmeler-aylik-grid") or {}).get(AY) or {}).get("metin")
@@ -429,7 +572,7 @@ def main():
         )
         onay = s.evaluate("document.getElementById('plan_onay_metin').textContent")
         check("iptal sil onay metni", "geçmişten gizlenecek" in onay and "veride kalır" in onay, onay)
-        s.evaluate("document.getElementById('plan_onay_evet').click()")
+        eylem("document.getElementById('plan_onay_evet').click()")
         s.wait_for_function(
             """() => ![...document.querySelectorAll('#plan_gecmis_bolum > div')].some(e => e.textContent.indexOf('iptal') >= 0)
                 && document.querySelectorAll('#plan_gecmis_bolum [data-plan-islem="duzenle"]').length === 1""",
@@ -452,11 +595,11 @@ def main():
         )
         check("duzenle formu dolar", dolu == {"ay": "2026-12", "net": "1500", "kdv": "20", "odeme": "banka"}, dolu)
         gozlem_sifirla()
-        s.evaluate("document.querySelector('#plan_gecmis_bolum [data-plan-islem=\"kaldir\"]').click(); document.getElementById('plan_onay_evet').click()")
+        eylem("document.querySelector('#plan_gecmis_bolum [data-plan-islem=\"kaldir\"]').click(); document.getElementById('plan_onay_evet').click()")
         s.wait_for_timeout(700)
         flas_yok("plan kaldir", ilk_metin=once_metin, sifir_yasak=True)
         gozlem_sifirla()
-        s.evaluate("document.querySelector('#plan_gecmis_bolum [data-plan-islem=\"sil\"]').click(); document.getElementById('plan_onay_evet').click()")
+        eylem("document.querySelector('#plan_gecmis_bolum [data-plan-islem=\"sil\"]').click(); document.getElementById('plan_onay_evet').click()")
         s.wait_for_function("document.querySelectorAll('#plan_gecmis_bolum [data-plan-islem]').length === 0", timeout=5000)
         check("plan sil gecmisten duser", not any(k.get("id") == 11 and not k.get("silindi_at") for k in planlar))
         check("plan sil kaydi durur", planlar[0].get("silindi_at") and planlar[0].get("iptal_at") and planlar[0].get("silen") == "test")
@@ -528,7 +671,7 @@ def main():
         check("onizlemesiz ilk kaydet yalniz onizler", not kayitlar)
         s.wait_for_timeout(400)
         gozlem_sifirla()
-        s.evaluate("document.getElementById('dondurma_kaydet').click()")
+        eylem("document.getElementById('dondurma_kaydet').click()")
         s.wait_for_function(
             """() => {
                 const k = document.querySelector('#sozlesmeler-aylik-grid [data-ay="2026-11"], #sozlesmeler-aylik-grid');
@@ -556,7 +699,7 @@ def main():
         s.evaluate("document.getElementById('dondurma_onizle_btn').click()")
         s.wait_for_function("document.querySelectorAll('#dondurma_onizleme tr').length >= 2", timeout=6000)
         gozlem_sifirla()
-        s.evaluate("document.getElementById('dondurma_kaydet').click()")
+        eylem("document.getElementById('dondurma_kaydet').click()")
         for _ in range(20):
             if kart_metin() == "0.00":
                 break
@@ -573,7 +716,7 @@ def main():
         check("pasif duzenle kapali kaldir sil acik", pasif_dugme == {"duzenle": True, "kaldir": False, "sil": False}, pasif_dugme)
         s.evaluate("document.getElementById('musteri_durum').value = 'aktif'; dondurmaPasifUygula();")
         gozlem_sifirla()
-        s.evaluate("document.querySelector('#dondurma_gecmis_bolum [data-plan-islem=\"kaldir\"]').click()")
+        eylem("document.querySelector('#dondurma_gecmis_bolum [data-plan-islem=\"kaldir\"]').click()")
         for _ in range(20):
             if kart_metin() == once_metin and not acik_var():
                 break
@@ -632,7 +775,7 @@ def main():
             if _i == 0:
                 don_onay = s.evaluate("document.getElementById('dondurma_onay_metin').textContent")
                 check("dondurma iptal sil onay", "geçmişten gizlenecek" in don_onay and "veride kalır" in don_onay, don_onay)
-            s.evaluate("document.getElementById('dondurma_onay_evet').click()")
+            eylem("document.getElementById('dondurma_onay_evet').click()")
             s.wait_for_function(
                 """(kalan) => [...document.querySelectorAll('#dondurma_gecmis_bolum > div')].filter(e => e.textContent.indexOf('iptal') >= 0).length === kalan""",
                 arg=iptal_adet - _i - 1,
@@ -651,7 +794,7 @@ def main():
         s.evaluate("document.getElementById('dondurma_kaydet').click()")
         s.wait_for_function("document.querySelector('#dondurma_gecmis_bolum [data-plan-islem=\"sil\"]')", timeout=6000)
         gozlem_sifirla()
-        s.evaluate("document.querySelector('#dondurma_gecmis_bolum [data-plan-islem=\"sil\"]').click(); document.getElementById('dondurma_onay_evet').click()")
+        eylem("document.querySelector('#dondurma_gecmis_bolum [data-plan-islem=\"sil\"]').click(); document.getElementById('dondurma_onay_evet').click()")
         s.wait_for_function("!document.querySelector('#dondurma_gecmis_bolum [data-plan-islem]')", timeout=6000)
         silinen = [k for k in kayitlar if k.get("silindi_at")]
         check("dondurma sil gecmisten duser kayit durur", len(silinen) == 3 and all(k.get("iptal_at") for k in silinen) and not acik_var(), silinen)
