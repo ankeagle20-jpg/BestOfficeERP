@@ -2637,6 +2637,63 @@ def _fatura_rapor_giris_aylari_parse(raw) -> list | None:
     return out or None
 
 
+def _fatura_rapor_giris_yillari_parse(raw) -> list | None:
+    """giri_yillar=2024,2025 → artan yıllar.
+
+    Parametre yok / boş → None (filtre yok, bugünkü liste).
+    'yok' veya geçersiz → [] (hiç satır; giriş tarihi boş olanlar da gelmez).
+    """
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    if s.lower() in ("yok", "hic", "none", "-"):
+        return []
+    seen: set[int] = set()
+    out: list[int] = []
+    for part in s.replace(";", ",").split(","):
+        p = part.strip()
+        if not p:
+            continue
+        try:
+            y = int(p)
+        except ValueError:
+            continue
+        if y < 1900 or y > 2200 or y in seen:
+            continue
+        seen.add(y)
+        out.append(y)
+    out.sort()
+    return out
+
+
+def _fatura_rapor_giris_yili_sql(yillar: list | None) -> tuple[str, list]:
+    """Ay filtresiyle aynı giriş tarihi ifadesinin yılı. None → parça yok."""
+    if yillar is None:
+        return "", []
+    if not yillar:
+        return " AND FALSE", []
+    ph = ", ".join(["%s"] * len(yillar))
+    sql = (
+        f" AND (EXTRACT(YEAR FROM ({_FIRMA_OZET_GIRIS_TARIHI_SQL})::date))::int IN ({ph})"
+    )
+    return sql, list(yillar)
+
+
+def _firma_ozet_giris_yili_deger(iso) -> int | None:
+    s = str(iso or "").strip()
+    if len(s) < 4 or not s[:4].isdigit():
+        return None
+    try:
+        y = int(s[:4])
+    except ValueError:
+        return None
+    if y < 1900 or y > 2200:
+        return None
+    return y
+
+
 def _fatura_rapor_aktif_musteri_where_clause() -> str:
     durum_sql = _fatura_rapor_aktif_musteri_sql_durum_kosulu().strip()
     base = "COALESCE(c.is_active, TRUE) = TRUE"
@@ -3044,6 +3101,7 @@ def _firma_ozet_resp_cache_key() -> str:
         "duzenli_fatura",
         "q",
         "giri_aylar",
+        "giri_yillar",
         "hazir_ofis_oda",
         "hazir_oda",
     )
@@ -3141,6 +3199,7 @@ def _firma_ozet_build_rows_firma_sql(
     firma_guncel_sql: str,
     hizli: bool,
     cift_sql: str = "",
+    giri_yil_sql: str = "",
 ) -> str:
     if hizli:
         grup2_sql = "''::text AS grup2_etiketler"
@@ -3220,7 +3279,7 @@ def _firma_ozet_build_rows_firma_sql(
             FROM customers c
             {mk_join}
             WHERE {musteri_where}
-              {mk_df_sql}{giri_ay_sql}{ho_sql}{arama_sql}{cift_sql}
+              {mk_df_sql}{giri_ay_sql}{ho_sql}{giri_yil_sql}{arama_sql}{cift_sql}
             ORDER BY 2
             """
 
@@ -3874,6 +3933,7 @@ def _firma_ozet_client_filtre_uygula(
     hizmet: list[str],
     durum: str,
     oda: str | None,
+    yillar: list | None = None,
 ) -> list:
     """faturaRaporListeAraUygula (firma_ozet) ile birebir istemci süzgeçleri."""
     q_raw = (q or "").strip()
@@ -3943,6 +4003,10 @@ def _firma_ozet_client_filtre_uygula(
                 if tr_oda != "":
                     ok = False
             elif tr_oda != oda_f:
+                ok = False
+        if ok and yillar is not None:
+            gy = _firma_ozet_giris_yili_deger(it.get("giris_tarihi"))
+            if gy is None or gy not in yillar:
                 ok = False
         if ok:
             out.append(it)
@@ -4176,6 +4240,29 @@ def _firma_ozet_dataset_from_request(*, excel_mode: bool = False) -> dict:
             arama_sql=arama_sql,
             hizli=liste_hizli,
         )
+    giris_yillar_filtre = _fatura_rapor_giris_yillari_parse(request.args.get("giri_yillar"))
+    giri_yil_sql, giri_yil_params = _fatura_rapor_giris_yili_sql(giris_yillar_filtre)
+    giris_yillari: list[int] = []
+    if not excel_mode:
+        try:
+            yil_sql = f"""
+                SELECT DISTINCT (EXTRACT(YEAR FROM ({_FIRMA_OZET_GIRIS_TARIHI_SQL})::date))::int AS y
+                FROM customers c
+                {_firma_ozet_mk_join_sql(liste_hizli)}
+                WHERE {musteri_where}
+                  {mk_df_sql}{giri_ay_sql}{ho_sql}{arama_sql}{cift_sql}
+                  AND ({_FIRMA_OZET_GIRIS_TARIHI_SQL}) IS NOT NULL
+                ORDER BY 1
+            """
+            for _yr in fetch_all(yil_sql, tuple(mk_df_params)) or []:
+                _yv = _firma_ozet_giris_yili_deger((_yr or {}).get("y") if isinstance(_yr, dict) else None)
+                if _yv and _yv not in giris_yillari:
+                    giris_yillari.append(_yv)
+            giris_yillari.sort()
+        except Exception as e_yil:
+            current_app.logger.warning("firma_ozet giris yillari err=%r", e_yil)
+            giris_yillari = []
+    mk_df_params.extend(giri_yil_params)
     rows_firma_sql = _firma_ozet_build_rows_firma_sql(
         musteri_where=musteri_where,
         mk_df_sql=mk_df_sql,
@@ -4185,6 +4272,7 @@ def _firma_ozet_dataset_from_request(*, excel_mode: bool = False) -> dict:
         firma_guncel_sql=_firma_guncel_grid_sql,
         hizli=liste_hizli,
         cift_sql=cift_sql,
+        giri_yil_sql=giri_yil_sql,
     )
     rows_firma_params = tuple(mk_df_params)
     rows_firma_sql_no_order = re.sub(r"\s+ORDER\s+BY\s+2\s*$", "", rows_firma_sql.rstrip(), flags=re.I)
@@ -4351,6 +4439,7 @@ def _firma_ozet_dataset_from_request(*, excel_mode: bool = False) -> dict:
                 firma_guncel_sql=_firma_ozet_sql_guncel_kdv_dahil_hizli_expr(),
                 hizli=True,
                 cift_sql=cift_sql,
+                giri_yil_sql=giri_yil_sql,
             )
             rows_firma = fetch_all(_deg_sql, rows_firma_params) or []
         if not liste_hizli:
@@ -4485,6 +4574,8 @@ def _firma_ozet_dataset_from_request(*, excel_mode: bool = False) -> dict:
         "cift_olanlar": cift_olanlar,
         "sadece_faturali": False,
         "giri_aylar_filtre": giris_aylar_filtre or [],
+        "giri_yillar_filtre": giris_yillar_filtre,
+        "giris_yillari": giris_yillari,
         "hazir_ofis_oda_filtre": hazir_oda_filtre,
         "ay_referans": {"y": ay_y, "m": ay_m, "etiket": ay_etiket},
         "satirlar": satirlar_resp,
@@ -4518,6 +4609,7 @@ def _firma_ozet_dataset_from_request(*, excel_mode: bool = False) -> dict:
             hizmet=client_hizmet,
             durum=client_durum,
             oda=client_oda_raw or None,
+            yillar=giris_yillar_filtre,
         )
         toplam_aylik, toplam_borc, total_count_firma = _firma_ozet_recalc_ozet(satirlar_resp)
         _firma_payload["satirlar"] = satirlar_resp
