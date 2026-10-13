@@ -25333,6 +25333,9 @@ function girisMusteriGecisAnlikGuncelle(id, activeTab) {
 
 // Müşteri seç — hangi sekme açıksa o sekmeye göre forma doldurur (liste veya API'den)
 function selectMusteri(id) {
+    if (window.__girisCogaltKayit && String(window.__girisCogaltYeniId || '') !== String(id)) {
+        window.__girisCogaltKayit = false;
+    }
     girisHistoryMaybeClearFaturaRaporListFlag();
     window.__musteriReelDonemDbMap = {};
     window.__musteriReelDonemDbKayitli = false;
@@ -26355,6 +26358,7 @@ function girisKaydetAramaAlanlariGuvenli() {
         name: nmEl ? String(nmEl.value || '') : ''
     };
     if (!curMid) return out;
+    if (window.__girisCogaltKayit && String(curMid) === String(window.__girisCogaltYeniId || '')) return out;
     if (curMid !== snap.mid) return out;
     if (window.__girisAramaMusteriAdiAranan) out.musteri_adi = snap.musteri_adi;
     if (window.__girisAramaNameAranan) out.name = snap.name;
@@ -28862,8 +28866,20 @@ function girisMusteriCogalt() {
         }
         alert(j.mesaj || 'Yeni müşteri oluşturuldu.');
         var nid = j.id;
-        if (nid != null && nid !== '' && typeof selectMusteri === 'function') {
-            selectMusteri(parseInt(nid, 10));
+        if (nid != null && nid !== '') {
+            window.__girisCogaltKayit = true;
+            window.__girisCogaltYeniId = String(nid);
+            window.__girisAramaMusteriAdiAranan = false;
+            window.__girisAramaNameAranan = false;
+            if (typeof selectedId !== 'undefined') selectedId = parseInt(nid, 10);
+            var idElY = document.getElementById('musteri-id');
+            if (idElY) idElY.value = String(nid);
+            ['tax_number', 'phone', 'email', 'yetkili_tc', 'phone2', 'email_sirket', 'mersis', 'ticaret_sicil', 'ev_adres'].forEach(function (fid) {
+                var elB = document.getElementById(fid);
+                if (elB) elB.value = '';
+            });
+            if (typeof girisMusteriKartOnbellekSil === 'function') girisMusteriKartOnbellekSil(nid);
+            if (typeof selectMusteri === 'function') selectMusteri(parseInt(nid, 10));
         }
         if (typeof musteriAra === 'function') musteriAra();
         setTimeout(function () {

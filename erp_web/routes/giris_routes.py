@@ -4671,6 +4671,76 @@ def _giris_kaydet_schema_ensure_once() -> None:
         _giris_kaydet_schema_ready = True
 
 
+# Kimlik ve belge kopyalanmaz. Sözleşme/hizmet alanları kopyalanır.
+_COGALT_MUSTERI_KOPYA = (
+    "name",
+    "musteri_adi",
+    "address",
+    "calisma_sekli",
+    "bizim_hesap",
+    "grup2_secimleri",
+)
+_COGALT_MUSTERI_BOS = (
+    "tax_number",
+    "phone",
+    "email",
+    "ev_adres",
+    "notes",
+    "hazir_ofis_oda_no",
+    "office_code",
+)
+_COGALT_KYC_KOPYA = (
+    "musteri_adi",
+    "sirket_unvani",
+    "unvan",
+    "hizmet_turu",
+    "aylik_kira",
+    "yillik_kira",
+    "kdv_oran",
+    "kira_suresi_ay",
+    "kira_artis_tarihi",
+    "sozlesme_tarihi",
+    "sozlesme_bitis",
+    "kira_nakit",
+    "kira_banka",
+    "kira_nakit_tutar",
+    "kira_banka_tutar",
+    "duzenli_fatura",
+    "odeme_duzeni",
+    "odeme_duzeni_manuel",
+    "sube_merkez",
+    "yeni_adres",
+    "faaliyet_konusu",
+    "nace_kodu",
+    "uyruk",
+)
+
+
+def _musteri_cogalt_satirlar(src: dict, kyc: dict | None):
+    """Yeni müşteri satırı. Kaynak sözlüğü değiştirilmez."""
+    new_row = {}
+    for kolon in _COGALT_MUSTERI_KOPYA:
+        if kolon in src:
+            new_row[kolon] = src.get(kolon)
+    for kolon in _COGALT_MUSTERI_BOS:
+        if kolon in src:
+            new_row[kolon] = None
+    if not str(new_row.get("name") or "").strip():
+        new_row["name"] = src.get("name") or "Müşteri"
+    new_row["durum"] = "aktif"
+    new_row["kapanis_tarihi"] = None
+    if "kapanis_sonrasi_borc_ay" in src:
+        new_row["kapanis_sonrasi_borc_ay"] = None
+    new_row["is_active"] = True
+    k2 = None
+    if kyc:
+        k2 = {}
+        for kolon in _COGALT_KYC_KOPYA:
+            if kolon in kyc:
+                k2[kolon] = kyc.get(kolon)
+    return new_row, k2
+
+
 _giris_cogalt_schema_ready = False
 _giris_cogalt_schema_lock = threading.Lock()
 
@@ -6937,8 +7007,9 @@ def api_tahmini_musteri_no():
 @giris_gerekli
 def api_musteri_cogalt():
     """
-    Kayıtlı müşteriyi yeni id + yeni müşteri_no ile kopyalar (plan değişimi: eski kart pasif, yeni kart).
-    Fatura/tahsilat kopyalanmaz. Son KYC satırı yeni müşteriye kopyalanır; sözleşme no ve hazır ofis odası temizlenir.
+    Kayıtlı müşteriyi yeni id + yeni müşteri_no ile kopyalar.
+    Kimlik (vergi no, telefon, e-posta), tahsilat, fatura, plan ve dondurma kopyalanmaz.
+    Sözleşme ve hizmet alanları kopyalanır. Kaynak satır değişmez.
     """
     _giris_cogalt_schema_ensure_once()
     data = request.get_json(silent=True) or {}
@@ -6957,16 +7028,7 @@ def api_musteri_cogalt():
         (kaynak_id,),
     )
 
-    skip_cols = {"id", "musteri_no", "created_at"}
-    new_row = {k: v for k, v in src.items() if k not in skip_cols}
-    new_row.pop("updated_at", None)
-    new_row["durum"] = "aktif"
-    new_row["kapanis_tarihi"] = None
-    new_row["is_active"] = True
-    new_row["hazir_ofis_oda_no"] = None
-    tag = f"Çoğaltma kaynağı: müşteri ID {kaynak_id}."
-    prev_notes = (new_row.get("notes") or "").strip()
-    new_row["notes"] = f"{prev_notes} {tag}".strip() if prev_notes else tag
+    new_row, kyc_kopya = _musteri_cogalt_satirlar(src, kyc)
 
     cols = list(new_row.keys())
     vals = [new_row[c] for c in cols]
@@ -6988,11 +7050,9 @@ def api_musteri_cogalt():
                 (new_id, new_id),
             )
             new_mno = new_id
-            if kyc:
-                k2 = {k: v for k, v in kyc.items() if k not in ("id", "created_at", "updated_at")}
+            if kyc_kopya is not None:
+                k2 = dict(kyc_kopya)
                 k2["musteri_id"] = new_id
-                k2["sozlesme_no"] = None
-                k2["hazir_ofis_oda_no"] = None
                 kcols = list(k2.keys())
                 kvals = [k2[c] for c in kcols]
                 kph = ", ".join(["%s"] * len(kvals))
@@ -7016,6 +7076,10 @@ def api_musteri_cogalt():
         logging.exception("api_musteri_cogalt")
         return jsonify({"ok": False, "mesaj": str(e) or "Çoğaltma başarısız."}), 400
 
+    try:
+        musteri_detay_cache_invalidate(new_id)
+    except Exception:
+        pass
     try:
         _upsert_aylik_grid_cache(new_id)
     except Exception:
@@ -7279,6 +7343,13 @@ def kaydet():
             out.update(musteri_durum_yaz_json(alanlar))
             return jsonify(out)
 
+    except psycopg2.errors.UniqueViolation:
+        return jsonify(
+            {
+                "ok": False,
+                "mesaj": "Kayıt kaydedilemedi: vergi numarası, e-posta veya oda başka bir müşteride kullanılıyor.",
+            }
+        ), 409
     except Exception as e:
         return jsonify({'ok': False, 'mesaj': f'❌ Hata: {str(e)}'}), 400
 
