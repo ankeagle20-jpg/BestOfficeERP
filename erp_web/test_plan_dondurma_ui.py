@@ -129,6 +129,8 @@ def main():
         },
     ]
     seq = {"n": 1}
+    grid_iz = []
+    ui_audit = []
     app = Flask(__name__)
     app.secret_key = "dondurma-ui"
     login_manager.init_app(app)
@@ -195,11 +197,13 @@ def main():
                 bulunan = None
                 for k in kayitlar:
                     if str(k["id"]) in yol and not k.get("silindi_at"):
+                        onceki = "iptal" if k.get("iptal_at") else "acik"
                         if not k.get("iptal_at"):
                             k["iptal_at"] = "2026-10-12T10:00:00"
                             k["iptal_eden"] = "test"
                         k["silindi_at"] = "2026-10-12T10:05:00"
                         k["silen"] = "test"
+                        ui_audit.append({"islem": "dondurma_sil", "kayit_id": k["id"], "onceki": onceki, "kullanici": "test"})
                         bulunan = k
                 if not bulunan:
                     js(route, {"ok": False, "mesaj": "Dondurma yok."}, 404)
@@ -236,11 +240,13 @@ def main():
             bulunan = None
             for k in planlar:
                 if str(k["id"]) in yol and not k.get("silindi_at"):
+                    onceki = "iptal" if k.get("iptal_at") else "acik"
                     if not k.get("iptal_at"):
                         k["iptal_at"] = "2026-10-12T10:00:00"
                         k["iptal_eden"] = "test"
                     k["silindi_at"] = "2026-10-12T10:05:00"
                     k["silen"] = "test"
+                    ui_audit.append({"islem": "plan_sil", "kayit_id": k["id"], "onceki": onceki, "kullanici": "test"})
                     bulunan = k
             if not bulunan:
                 js(route, {"ok": False, "mesaj": "Plan yok."}, 404)
@@ -259,12 +265,21 @@ def main():
                 "gecmis": [k for k in planlar if not k.get("silindi_at")],
             })
             return
-        if yol.startswith("/giris/api/musteri-kart-bundle"):
+        def grid_govde():
             g = _grid(fx, acik_var())
-            js(route, {"ok": True, "musteri_id": MID, "musteri": fx["musteri"], "tahsil_durum": fx["tahsil_durum"], "grid": g, "reel": fx["reel"]})
+            fp = "T=a|R=b|P=c|K=k|D=" + ("acik" if acik_var() else "none")
+            grid_iz.append(json.dumps({"grid": g, "freshness_fingerprint": fp}, sort_keys=True, default=str))
+            return g, fp
+
+        if yol.startswith("/giris/api/musteri-kart-bundle"):
+            g, fp = grid_govde()
+            js(route, {"ok": True, "musteri_id": MID, "musteri": fx["musteri"], "tahsil_durum": fx["tahsil_durum"], "grid": g, "reel": fx["reel"], "freshness_fingerprint": fp})
             return
         if yol.startswith("/giris/api/aylik-grid-cache"):
-            js(route, _grid(fx, acik_var()))
+            g, fp = grid_govde()
+            g = dict(g)
+            g["freshness_fingerprint"] = fp
+            js(route, g)
             return
         if yol.startswith("/giris/api/aylik-tahsil-durum"):
             js(route, fx["tahsil_durum"])
@@ -300,7 +315,7 @@ def main():
         s.route("**/*", isle)
         s.goto(BASE + "/giris/", wait_until="load")
         s.wait_for_function("typeof selectMusteri === 'function'", timeout=20000)
-        check("statik selectte dondur yok", "value=\"dondur\"" not in html and "js/plan_degistir.js', v=16" in html)
+        check("statik selectte dondur yok", "value=\"dondur\"" not in html and "js/plan_degistir.js', v=17" in html and "js/plan_degistir.js', v=16" not in html)
         s.evaluate("selectMusteri(%d)" % MID)
         s.wait_for_selector("#plan_dondur_btn", timeout=15000)
         for _ in range(3):
@@ -373,20 +388,59 @@ def main():
         s.wait_for_function("getComputedStyle(document.getElementById('plan_form_bolum')).display !== 'none'", timeout=4000)
         check("plan basligi", s.evaluate("document.getElementById('plan_baslik_metin').textContent") == "Plan değiştir")
         check("plan modunda dondurma gizli", s.evaluate("getComputedStyle(document.getElementById('dondurma_bolum')).display") == "none")
-        s.wait_for_function("document.querySelectorAll('#plan_gecmis_bolum [data-plan-islem]').length === 3", timeout=5000)
+        s.wait_for_function("document.querySelectorAll('#plan_gecmis_bolum [data-plan-islem=\"duzenle\"]').length === 1", timeout=5000)
         plan_sira = s.evaluate(
-            """() => [...document.querySelectorAll('#plan_gecmis_bolum [data-plan-islem]')].map(b => b.textContent.trim())"""
+            """() => {
+                const satir = [...document.querySelectorAll('#plan_gecmis_bolum > div')].find(e => e.textContent.indexOf('aktif') >= 0);
+                return satir ? [...satir.querySelectorAll('[data-plan-islem]')].map(b => b.textContent.trim()) : [];
+            }"""
         )
-        iptal_dugme = s.evaluate(
+        iptal_sira = s.evaluate(
             """() => {
                 const satir = [...document.querySelectorAll('#plan_gecmis_bolum > div')].find(e => e.textContent.indexOf('iptal') >= 0);
-                return satir ? satir.querySelectorAll('button').length : -1;
+                return satir ? [...satir.querySelectorAll('button')].map(b => b.textContent.trim()) : [];
             }"""
         )
         check("plan satir butonlari", plan_sira == ["Düzenle", "Planı kaldır", "Sil"], plan_sira)
-        check("iptal planda buton yok", iptal_dugme == 0, iptal_dugme)
+        check("iptal planda yalniz sil", iptal_sira == ["Sil"], iptal_sira)
         check("plan gecmisi tek kap", s.evaluate("document.querySelectorAll('#plan_gecmis_bolum').length") == 1)
         s.screenshot(path=str(EKRAN / "plan_satir_butonlar.png"))
+        s.screenshot(path=str(EKRAN / "plan_iptal_sil.png"))
+        s.evaluate("document.getElementById('musteri_durum').value = 'pasif'; dondurmaPasifUygula();")
+        pasif_sil = s.evaluate(
+            """() => {
+                const satir = [...document.querySelectorAll('#plan_gecmis_bolum > div')].find(e => e.textContent.indexOf('iptal') >= 0);
+                const sil = satir && satir.querySelector('[data-plan-islem="sil"]');
+                const duzenle = document.querySelector('#plan_gecmis_bolum [data-plan-islem="duzenle"]');
+                return {sil: !!(sil && !sil.disabled), duzenle: !!(duzenle && duzenle.disabled)};
+            }"""
+        )
+        check("pasif iptal sil acik", pasif_sil == {"sil": True, "duzenle": True}, pasif_sil)
+        s.evaluate("document.getElementById('musteri_durum').value = 'aktif'; dondurmaPasifUygula();")
+        plan_grid_once = len(grid_iz)
+        plan_fp_once = grid_iz[-1] if grid_iz else ""
+        plan_sira_once = s.evaluate("window.__planYenileSira || 0")
+        gozlem_sifirla()
+        s.evaluate(
+            """() => {
+                const satir = [...document.querySelectorAll('#plan_gecmis_bolum > div')].find(e => e.textContent.indexOf('iptal') >= 0);
+                satir.querySelector('[data-plan-islem="sil"]').click();
+            }"""
+        )
+        onay = s.evaluate("document.getElementById('plan_onay_metin').textContent")
+        check("iptal sil onay metni", "geçmişten gizlenecek" in onay and "veride kalır" in onay, onay)
+        s.evaluate("document.getElementById('plan_onay_evet').click()")
+        s.wait_for_function(
+            """() => ![...document.querySelectorAll('#plan_gecmis_bolum > div')].some(e => e.textContent.indexOf('iptal') >= 0)
+                && document.querySelectorAll('#plan_gecmis_bolum [data-plan-islem="duzenle"]').length === 1""",
+            timeout=5000,
+        )
+        check("plan iptal sil gecmisten duser", any(k.get("id") == 10 and k.get("silindi_at") and k.get("iptal_at") for k in planlar))
+        check("plan iptal sil audit", any(a.get("islem") == "plan_sil" and a.get("kayit_id") == 10 and a.get("onceki") == "iptal" for a in ui_audit))
+        check("plan iptal sil grid ayni", grid_iz and grid_iz[-1] == plan_fp_once and all(x == plan_fp_once for x in grid_iz[plan_grid_once:]), (plan_grid_once, len(grid_iz)))
+        check("plan gecmisi tek kap kalir", s.evaluate("document.querySelectorAll('#plan_gecmis_bolum').length") == 1)
+        check("plan sira artar kap cogalmaz", s.evaluate("window.__planYenileSira || 0") > plan_sira_once)
+        flas_yok("plan iptal sil", ilk_metin=once_metin, sifir_yasak=True)
         s.evaluate("document.querySelector('#plan_gecmis_bolum [data-plan-islem=\"duzenle\"]').click()")
         dolu = s.evaluate(
             """() => ({
@@ -472,6 +526,7 @@ def main():
         )
         s.screenshot(path=str(EKRAN / "dondurma_popup_onizleme.png"))
         check("onizlemesiz ilk kaydet yalniz onizler", not kayitlar)
+        s.wait_for_timeout(400)
         gozlem_sifirla()
         s.evaluate("document.getElementById('dondurma_kaydet').click()")
         s.wait_for_function(
@@ -537,10 +592,58 @@ def main():
         )
         check("iptal gecmiste soluk", "iptal" in gecmis and soluk == "0.45", (gecmis, soluk))
         check("gecmis kapsayici hala tek", s.evaluate("document.querySelectorAll('#dondurma_gecmis_bolum').length") == 1)
+        iptal_dugme = s.evaluate(
+            """() => {
+                const satir = [...document.querySelectorAll('#dondurma_gecmis_bolum > div')].find(e => e.textContent.indexOf('iptal') >= 0);
+                return satir ? [...satir.querySelectorAll('button')].map(b => b.textContent.trim() + (b.disabled ? ':kapali' : '')) : [];
+            }"""
+        )
+        check("iptal dondurmada yalniz sil", iptal_dugme == ["Sil"], iptal_dugme)
+        s.screenshot(path=str(EKRAN / "dondurma_iptal_sil.png"))
         s.evaluate("document.getElementById('musteri_durum').value = 'pasif'; dondurmaPasifUygula();")
         check("pasif yeni dondurma kapali", s.evaluate("document.getElementById('dondurma_bas').disabled && document.getElementById('dondurma_onizle_btn').disabled") is True)
         check("pasif dondur gecmisi acik", s.evaluate("document.getElementById('plan_dondur_btn').disabled") is False)
         check("pasif gecmis durur", s.evaluate("!!document.getElementById('dondurma_gecmis_bolum')"))
+        check(
+            "pasif iptal dondurma sil acik",
+            s.evaluate(
+                """() => {
+                    const satir = [...document.querySelectorAll('#dondurma_gecmis_bolum > div')].find(e => e.textContent.indexOf('iptal') >= 0);
+                    const sil = satir && satir.querySelector('[data-plan-islem="sil"]');
+                    return !!(sil && !sil.disabled);
+                }"""
+            ) is True,
+        )
+        don_n = len(grid_iz)
+        don_fp = grid_iz[-1] if grid_iz else ""
+        don_sira = s.evaluate("window.__dondurmaYenileSira || 0")
+        gozlem_sifirla()
+        iptal_adet = s.evaluate(
+            """() => [...document.querySelectorAll('#dondurma_gecmis_bolum > div')].filter(e => e.textContent.indexOf('iptal') >= 0).length"""
+        )
+        check("iptal dondurma satiri var", iptal_adet >= 1, iptal_adet)
+        for _i in range(iptal_adet):
+            s.evaluate(
+                """() => {
+                    const satir = [...document.querySelectorAll('#dondurma_gecmis_bolum > div')].find(e => e.textContent.indexOf('iptal') >= 0);
+                    satir.querySelector('[data-plan-islem="sil"]').click();
+                }"""
+            )
+            if _i == 0:
+                don_onay = s.evaluate("document.getElementById('dondurma_onay_metin').textContent")
+                check("dondurma iptal sil onay", "geçmişten gizlenecek" in don_onay and "veride kalır" in don_onay, don_onay)
+            s.evaluate("document.getElementById('dondurma_onay_evet').click()")
+            s.wait_for_function(
+                """(kalan) => [...document.querySelectorAll('#dondurma_gecmis_bolum > div')].filter(e => e.textContent.indexOf('iptal') >= 0).length === kalan""",
+                arg=iptal_adet - _i - 1,
+                timeout=5000,
+            )
+        check("dondurma iptal sil kaydi durur", any(k.get("silindi_at") and k.get("iptal_at") for k in kayitlar))
+        check("dondurma iptal sil audit", any(a.get("islem") == "dondurma_sil" and a.get("onceki") == "iptal" for a in ui_audit))
+        check("dondurma iptal sil grid ayni", grid_iz and grid_iz[-1] == don_fp and all(x == don_fp for x in grid_iz[don_n:]), (don_n, len(grid_iz)))
+        check("dondurma gecmisi tek kap kalir", s.evaluate("document.querySelectorAll('#dondurma_gecmis_bolum').length") == 1)
+        check("dondurma sira artar", s.evaluate("window.__dondurmaYenileSira || 0") > don_sira)
+        flas_yok("dondurma iptal sil", ilk_metin=once_metin, sifir_yasak=True)
         s.evaluate("document.getElementById('musteri_durum').value = 'aktif'; dondurmaPasifUygula();")
         check("aktif dondurma geri", s.evaluate("document.getElementById('plan_dondur_btn').disabled") is False)
         s.evaluate("document.getElementById('dondurma_kaydet').click()")
@@ -551,8 +654,12 @@ def main():
         s.evaluate("document.querySelector('#dondurma_gecmis_bolum [data-plan-islem=\"sil\"]').click(); document.getElementById('dondurma_onay_evet').click()")
         s.wait_for_function("!document.querySelector('#dondurma_gecmis_bolum [data-plan-islem]')", timeout=6000)
         silinen = [k for k in kayitlar if k.get("silindi_at")]
-        check("dondurma sil gecmisten duser kayit durur", len(silinen) == 1 and silinen[0].get("iptal_at") and not acik_var(), silinen)
+        check("dondurma sil gecmisten duser kayit durur", len(silinen) == 3 and all(k.get("iptal_at") for k in silinen) and not acik_var(), silinen)
         flas_yok("dondurma sil", ilk_metin=once_metin, sifir_yasak=True)
+        s.evaluate("selectMusteri(999); planKapisiniYenile(999);")
+        s.wait_for_function("!document.getElementById('plan_degistir_btn') && !document.getElementById('plan_dondur_btn')", timeout=8000)
+        kapi = s.evaluate("fetch('/giris/api/musteri/999/plan', {credentials:'same-origin'}).then(r => r.status)")
+        check("kapi disi 404 buton yok", kapi == 404, kapi)
         check("sayfa hatasi yok", not hatalar, hatalar[:2])
         tarayici.close()
     if acik_var():

@@ -325,7 +325,10 @@ def kosu(html_yol=None, js_yol=None, etiket="YENI", tam=True, ekran=False):
         n0 = len(gorunen)
         s.evaluate("document.querySelector('#plan_gecmis_bolum [data-plan-islem=\"kaldir\"]').click(); document.getElementById('plan_onay_evet').click();")
         try:
-            s.wait_for_function("document.querySelectorAll('#plan_gecmis_bolum button').length === 0", timeout=6000)
+            s.wait_for_function(
+                """() => document.querySelectorAll('#plan_gecmis_bolum [data-plan-islem="kaldir"], #plan_gecmis_bolum [data-plan-islem="duzenle"]').length === 0 && document.querySelectorAll('#plan_gecmis_bolum [data-plan-islem="sil"]').length >= 1""",
+                timeout=6000,
+            )
         except Exception:
             raise
         iptal = [x for x in gorunen[n0:] if x[0] == "POST" and "/iptal" in x[1]]

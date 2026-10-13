@@ -200,10 +200,127 @@ def test_dondurma_duzenle_ve_sil():
     with app.test_request_context("/x", method="POST", json={}):
         _g, kod = _yanit(da.dondurma_sil_yanit(867, iptal_satir["id"]))
     check("pasif sil acik", kod == 200 and iptal_satir.get("silindi_at") is not None, kod)
+    anlik_iptal = json.loads(bellek.audit[-1][3])
+    yeni_iptal = json.loads(bellek.audit[-1][4])
+    check(
+        "iptal satir sil audit durum",
+        bellek.audit[-1][2] == "dondurma_sil"
+        and anlik_iptal.get("durum") == "iptal"
+        and yeni_iptal.get("durum") == "silindi"
+        and "telefon" not in anlik_iptal
+        and "email" not in anlik_iptal,
+        anlik_iptal,
+    )
     os.environ["PLAN_DEGISTIR_MUSTERI_IDS"] = "7"
     with app.test_request_context("/x", method="POST", json={}):
         _g, kod = _yanit(da.dondurma_liste_yanit(867))
     check("kapi disi liste 404", kod == 404)
+
+
+def test_iptal_sil_grid_parmak_ayni():
+    """İptal satırını gizlemek grid payload'ını ve |D= parmak izini değiştirmez."""
+    from routes import giris_routes as gr
+    from sozlesme_plan_dondurma import dondurma_parmak
+    from sozlesme_plan_dondurma_depo import dondurma_liste
+
+    tx = Tx()
+    bellek = Bellek()
+    app = Flask(__name__)
+    _kur(tx)
+    resync = []
+    api._resync = lambda mid: resync.append(int(mid)) or True
+    os.environ["PLAN_DEGISTIR_ENABLED"] = "1"
+    os.environ["PLAN_DEGISTIR_MUSTERI_IDS"] = "867"
+    da.plan_tx = lambda fn: fn(bellek.calistir, bellek.oku, bellek.oku)
+    da._kim = lambda: "test-kullanici"
+    da._sema = lambda: None
+    da._siniflar = lambda mid: {}
+    da._odenen_haritasi = lambda *a, **k: {}
+    da._musteri_ve_kyc = api._musteri_ve_kyc
+    with app.test_request_context(json=_govde(gecerlilik_ay="2025-01-01"), method="POST"):
+        govde, kod = _yanit(api.plan_ekle_yanit(867))
+    check("etki plan 1", kod == 200, kod)
+    pid_iptal = govde["plan"]["id"]
+    with app.test_request_context(json={}, method="POST"):
+        _g, kod = _yanit(api.plan_iptal_yanit(867, pid_iptal))
+    check("etki plan iptal", kod == 200, kod)
+    with app.test_request_context(json=_govde(gecerlilik_ay="2025-06-01", yeni_net=1800, yeni_brut=2160), method="POST"):
+        govde, kod = _yanit(api.plan_ekle_yanit(867))
+    check("etki plan acik", kod == 200, kod)
+    with app.test_request_context("/x", method="POST", json={"baslangic_ay": "2024-08", "ay_sayisi": 1, "musteri_id": 867}):
+        govde, kod = _yanit(da.dondurma_ekle_yanit(867))
+    check("etki dondurma 1", kod == 200, kod)
+    did_iptal = govde["dondurma"]["id"]
+    with app.test_request_context("/x", method="POST", json={"musteri_id": 867}):
+        _g, kod = _yanit(da.dondurma_iptal_yanit(867, did_iptal))
+    check("etki dondurma iptal", kod == 200, kod)
+    with app.test_request_context("/x", method="POST", json={"baslangic_ay": "2024-10", "ay_sayisi": 1, "musteri_id": 867}):
+        govde, kod = _yanit(da.dondurma_ekle_yanit(867))
+    check("etki dondurma acik", kod == 200, kod)
+    kyc = {
+        "sozlesme_tarihi": date(2023, 8, 1),
+        "sozlesme_bitis": date(2026, 8, 1),
+        "kira_artis_tarihi": date(2023, 8, 1),
+        "aylik_kira": 1000,
+        "kdv_oran": 20,
+        "kira_nakit": False,
+        "durum": "aktif",
+    }
+    tufe = {2024: {8: 10.0}, 2025: {8: 5.0}}
+    eski_kume = gr._dondurma_ay_kumesi
+
+    def olc():
+        planlar = [
+            {
+                "gecerlilik_ay": s["gecerlilik_ay"],
+                "yeni_net": s["yeni_net"],
+                "kdv_oran": s["kdv_oran"],
+                "yeni_brut": s["yeni_brut"],
+                "nakit_tutar": s.get("nakit_tutar"),
+                "banka_tutar": s.get("banka_tutar"),
+            }
+            for s in tx.bellek.satirlar
+            if s.get("iptal_at") is None
+        ]
+        acik = dondurma_liste(bellek.oku, musteri_id=867)
+        aylar = set()
+        for kayit in acik:
+            ham = kayit.get("dondurulan_aylar")
+            if isinstance(ham, str):
+                ham = json.loads(ham)
+            for ay in ham or []:
+                aylar.add(str(ay)[:7])
+
+        def kumesi(mid, kume=aylar):
+            return set(kume) if int(mid) == 867 else set()
+
+        gr._dondurma_ay_kumesi = kumesi
+        payload = gr._aylik_grid_compute(867, kyc, tufe, planlar=planlar)
+        govde = dict(payload or {})
+        govde.pop("updated_at", None)
+        fp = "D=" + dondurma_parmak(acik)
+        return json.dumps(govde, sort_keys=True, default=str), fp
+
+    try:
+        once_payload, once_fp = olc()
+        resync_once = len(resync)
+        with app.test_request_context(json={}, method="POST"):
+            _g, kod = _yanit(api.plan_sil_yanit(867, pid_iptal))
+        check("iptal plan sil 200", kod == 200, kod)
+        with app.test_request_context("/x", method="POST", json={"musteri_id": 867}):
+            _g, kod = _yanit(da.dondurma_sil_yanit(867, did_iptal))
+        check("iptal dondurma sil 200", kod == 200, kod)
+        sonra_payload, sonra_fp = olc()
+        check("grid payload ayni", once_payload == sonra_payload and once_payload not in ("", "null"))
+        check("parmak izi ayni", once_fp == sonra_fp and once_fp.startswith("D=") and once_fp != "D=none", (once_fp, sonra_fp))
+        check("iptal sil resync yok", len(resync) == resync_once, (resync_once, len(resync)))
+        plan_sql = "\n".join(tx.bellek.sql).lower()
+        don_sql = "\n".join(bellek.sql).lower()
+        check("delete from yok", "delete from" not in plan_sql and "delete from" not in don_sql)
+        anlik = json.loads(tx.bellek.audit[-1][3])
+        check("plan iptal sil audit", tx.bellek.audit[-1][2] == "plan_sil" and anlik.get("durum") == "iptal", anlik)
+    finally:
+        gr._dondurma_ay_kumesi = eski_kume
 
 
 def test_anlik_yasak():
@@ -220,6 +337,7 @@ def main():
     test_audit_hatasi_islemi_durdurmaz()
     test_kilit_ayni()
     test_dondurma_duzenle_ve_sil()
+    test_iptal_sil_grid_parmak_ayni()
     if FAILS:
         print("PLAN_SATIR_FAIL", FAILS)
         raise SystemExit(1)

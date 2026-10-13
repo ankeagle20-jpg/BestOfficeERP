@@ -915,6 +915,8 @@ def plan_sil_yanit(mid, plan_id):
             mevcut,
             ("id", "musteri_id", "gecerlilik_ay", "yeni_net", "kdv_oran", "yeni_brut", "nakit_tutar", "banka_tutar"),
         )
+        if mevcut.get("iptal_at"):
+            anlik["durum"] = "iptal"
         row, aktifti = plan_sil(calistir, oku_bir, plan_id=int(plan_id), silen=_kim())
         yeni = dict(anlik)
         yeni["durum"] = "silindi"

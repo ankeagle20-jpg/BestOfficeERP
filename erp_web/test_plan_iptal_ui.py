@@ -69,13 +69,18 @@ def senaryolar(sayfa, app, gorunen, diyalog):
         check("404 'Acik plan yok': alert yok", len(diyalog) == d0, diyalog[d0:])
         check("404 'Acik plan yok': tek iptal istegi, ardindan liste sunucudan yenilendi", len(iptal) == 1 and len(liste_get) >= 1, (len(iptal), len(liste_get)))
         check("404: mesaj 'plan zaten iptal edilmis, liste guncellendi' gosterilir", "plan zaten iptal edilmiş, liste güncellendi" in metin.lower(), metin)
-        check("404: yenilenen listede aktif plan / Iptal dugmesi yok", sayfa.locator("#plan_gecmis_bolum button").count() == 0 and "iptal" in metin and "aktif" not in metin.replace("Plan geçmişi", ""), metin)
+        yalniz_sil = (
+            sayfa.locator("#plan_gecmis_bolum [data-plan-islem='kaldir']").count() == 0
+            and sayfa.locator("#plan_gecmis_bolum [data-plan-islem='duzenle']").count() == 0
+            and sayfa.locator("#plan_gecmis_bolum [data-plan-islem='sil']").count() == 1
+        )
+        check("404: yenilenen listede aktif plan / Iptal dugmesi yok", yalniz_sil and "iptal" in metin and "aktif" not in metin.replace("Plan geçmişi", ""), metin)
         check("404: iptal kilidi acildi", sayfa.evaluate("!window.__planIptalDevam") is True)
 
         # ---------- 2) Çift tıklama tek istek, istek boyunca düğme kilitli ----------
         tx.bellek.satirlar.append(_satir(42, date(2026, 12, 1), 1000, 1200))
         sayfa.evaluate("selectedId = 7")
-        _liste_bekle(sayfa)
+        _liste_bekle(sayfa, "!!document.querySelector('#plan_gecmis_bolum [data-plan-islem=\"kaldir\"]')")
         n0 = len(gorunen)
         durum = sayfa.evaluate(
             """() => {
@@ -105,7 +110,7 @@ def senaryolar(sayfa, app, gorunen, diyalog):
 
         api._onizleme_zinciri = zincir
         try:
-            _liste_bekle(sayfa)
+            _liste_bekle(sayfa, "document.getElementById('plan_gecmis_bolum').textContent.indexOf('net 1800') >= 0")
             ilk = _bolum(sayfa)
             check("yeni plan oncesi: 2027-06 net 1800 aktif gorunur", "2027-06" in ilk and "net 1800" in ilk, ilk)
             sayfa.select_option("#musteri_durum", "plan")

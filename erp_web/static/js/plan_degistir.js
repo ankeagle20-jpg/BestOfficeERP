@@ -250,7 +250,20 @@ function planGecmisCiz(mid, veri) {
         var zaman = p.iptal_at || p.created_at || "";
         metin.textContent = ay + "  net " + (p.yeni_net != null ? p.yeni_net : "") + "  brüt " + (p.yeni_brut != null ? p.yeni_brut : "") + (p.iptal_at ? "  iptal" : "  aktif") + (kim ? "  " + kim : "") + (zaman ? "  " + String(zaman).slice(0, 19) : "");
         satir.appendChild(metin);
-        if (!p.iptal_at && !p.silindi_at) {
+        if (p.iptal_at && !p.silindi_at && p.id != null) {
+            var iptalDugme = document.createElement("span");
+            iptalDugme.style.cssText = "display:flex;flex-wrap:wrap;gap:4px;";
+            var iptalSil = satirDugme("Sil", "sil", false);
+            iptalSil.onclick = function () {
+                planOnayIste(
+                    "plan_onay",
+                    "Bu iptal edilmiş kayıt geçmişten gizlenecek (veride kalır). Devam?",
+                    function () { planSilGonder(mid, p.id, iptalSil); }
+                );
+            };
+            iptalDugme.appendChild(iptalSil);
+            satir.appendChild(iptalDugme);
+        } else if (!p.iptal_at && !p.silindi_at) {
             var pasif = planPasifMi();
             var dugmeler = document.createElement("span");
             dugmeler.style.cssText = "display:flex;flex-wrap:wrap;gap:4px;";
@@ -1086,13 +1099,14 @@ function dondurmaSatirDuzenle(p) {
     }
 }
 
-function dondurmaSilGonder(mid, dondurmaId) {
+function dondurmaSilGonder(mid, dondurmaId, iptalSatir) {
     if (window.__dondurmaIstek) return;
     window.__dondurmaIstek = true;
     dondurmaBoyaBeklet();
     var dugmeler = document.querySelectorAll("#dondurma_gecmis_bolum button");
     Array.prototype.forEach.call(dugmeler, function (b) { b.disabled = true; });
     dondurmaPasifUygula();
+    var hedef = iptalSatir ? (window.__dondurmaBilinenAylar || []) : null;
     planIstekGonder("/giris/api/musteri/" + encodeURIComponent(mid) + "/plan/dondurma/" + encodeURIComponent(dondurmaId) + "/sil", { musteri_id: mid })
         .then(function (pack) {
             if (!pack.ok || !pack.j || !pack.j.ok) {
@@ -1101,7 +1115,8 @@ function dondurmaSilGonder(mid, dondurmaId) {
             }
             window.__dondurmaDuzenlenenId = null;
             window.__dondurmaDuzenlenenAylar = null;
-            planMutasyonSonrasiYenile(mid, dondurmaHedefCikar(dondurmaKayitAylari(pack.j && pack.j.dondurma)));
+            if (!iptalSatir) hedef = dondurmaHedefCikar(dondurmaKayitAylari(pack.j && pack.j.dondurma));
+            planMutasyonSonrasiYenile(mid, hedef);
         })
         .catch(function () { dondurmaHataGoster("Dondurma gizlenemedi"); })
         .then(function () {
@@ -1145,7 +1160,20 @@ function dondurmaGecmisCiz(mid, veri) {
         var zaman = p.iptal_at || p.created_at || "";
         metin.textContent = ay + "  " + (p.ay_sayisi != null ? p.ay_sayisi : "") + " ay" + (p.iptal_at ? "  iptal" : "  açık") + (kim ? "  " + kim : "") + (zaman ? "  " + String(zaman).slice(0, 19) : "");
         satir.appendChild(metin);
-        if (!p.iptal_at && !p.silindi_at && p.id != null) {
+        if (p.iptal_at && !p.silindi_at && p.id != null) {
+            var iptalDugme = document.createElement("span");
+            iptalDugme.style.cssText = "display:flex;flex-wrap:wrap;gap:4px;";
+            var iptalSil = satirDugme("Sil", "sil", false);
+            iptalSil.onclick = function () {
+                planOnayIste(
+                    "dondurma_onay",
+                    "Bu iptal edilmiş kayıt geçmişten gizlenecek (veride kalır). Devam?",
+                    function () { dondurmaSilGonder(mid, p.id, true); }
+                );
+            };
+            iptalDugme.appendChild(iptalSil);
+            satir.appendChild(iptalDugme);
+        } else if (!p.iptal_at && !p.silindi_at && p.id != null) {
             var pasif = planPasifMi();
             var dugmeler = document.createElement("span");
             dugmeler.style.cssText = "display:flex;flex-wrap:wrap;gap:4px;";
@@ -1158,7 +1186,7 @@ function dondurmaGecmisCiz(mid, veri) {
                 planOnayIste(
                     "dondurma_onay",
                     "Dondurma kalıcı silinmez; geçmişten gizlenir, kayıt durur. Açık dondurma önce kaldırılır: grid, ekstre ve ödeme tutarları eski haline döner.",
-                    function () { dondurmaSilGonder(mid, p.id); }
+                    function () { dondurmaSilGonder(mid, p.id, false); }
                 );
             };
             dugmeler.appendChild(duzenle);

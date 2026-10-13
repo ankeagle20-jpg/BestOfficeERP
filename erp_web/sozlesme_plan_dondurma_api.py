@@ -386,6 +386,8 @@ def dondurma_sil_yanit(mid, dondurma_id):
             mevcut,
             ("id", "musteri_id", "baslangic_ay", "ay_sayisi", "dondurulan_aylar"),
         )
+        if mevcut.get("iptal_at"):
+            anlik["durum"] = "iptal"
         row, _acikti = dondurma_sil(calistir, oku_bir, dondurma_id=int(dondurma_id), silen=_kim())
         yeni = dict(anlik)
         yeni["durum"] = "silindi"
