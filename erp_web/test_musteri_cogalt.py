@@ -558,6 +558,43 @@ def ui(app, fetch_one):
         s.wait_for_function("document.getElementById('name').value === 'Yeni Unvan UI'", timeout=8000)
         check("ui yeniden ac unvan kalici", s.evaluate("document.getElementById('name').value") == "Yeni Unvan UI")
         check("ui kaynak id formu terk etti", s.evaluate("document.getElementById('musteri-id').value") == str(yeni_ui))
+        s.evaluate("selectMusteri(%d)" % MID)
+        s.wait_for_function(
+            "document.getElementById('musteri-id').value === '%d' && document.getElementById('name').value === 'Kaynak Unvan'" % MID,
+            timeout=8000,
+        )
+        s.evaluate(
+            """() => {
+                document.getElementById('tax_number').value = '1000000001';
+                document.getElementById('vergi_dairesi').value = 'Test';
+                document.getElementById('yetkili_ad').value = 'Yetkili';
+                document.getElementById('yetkili_tc').value = '10000000146';
+                document.getElementById('phone').value = '5550000001';
+                document.getElementById('email').value = 'kaynak@ornek.test';
+                document.getElementById('address').value = 'Is adresi';
+                document.getElementById('ev_adres').value = 'Ev adresi';
+                const sube = document.getElementById('sube_merkez');
+                if (sube) sube.value = 'Merkez';
+                const h = document.getElementById('hizmet_turu');
+                if (h && !h.value && h.options.length > 1) h.selectedIndex = 1;
+                const kira = document.getElementById('aylik_kira');
+                if (kira && !kira.value) kira.value = '3600';
+                window.girisYetkililerDogrula = function () { return { ok: true }; };
+            }"""
+        )
+        onceki = len(yazilan)
+        s.fill("#name", "Normal Kart Unvan")
+        s.click("#musteri-kaydet-btn")
+        s.wait_for_timeout(800)
+        normal = yazilan[-1] if len(yazilan) > onceki else {}
+        check(
+            "normal kart govde yeni unvan",
+            normal.get("name") == "Normal Kart Unvan" and str(normal.get("id")) == str(MID),
+            normal.get("name"),
+        )
+        s.evaluate("selectMusteri(%d)" % MID)
+        s.wait_for_function("document.getElementById('name').value === 'Normal Kart Unvan'", timeout=8000)
+        check("normal kart yeniden ac", s.evaluate("document.getElementById('name').value") == "Normal Kart Unvan")
         tarayici.close()
 
 
