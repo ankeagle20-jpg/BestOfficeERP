@@ -993,6 +993,104 @@ def _wa_gecikme_gun(payload, bugun: date) -> int:
     return max(0, (bugun - en).days)
 
 
+def _wa_iki_satir(metin: str) -> str:
+    satirlar = [s.strip() for s in str(metin or "").splitlines() if s.strip()]
+    return " ".join(satirlar[:2])[:180]
+
+
+def _wa_aktif_link_oku(mid: int):
+    """Aktif ödeme linki satırı. Adres üretilmez, tablo açılmaz."""
+    from odeme_linki import link_wa_gonderilebilir, ofisbir_istegi
+
+    if not ofisbir_istegi():
+        return None
+    try:
+        row = fetch_one(
+            """
+            SELECT tutar_kurus, aciklama, durum, expires_at, whatsapp_mesaj
+            FROM public.odeme_linkleri
+            WHERE musteri_id = %s AND durum = 'bekliyor' AND expires_at > NOW()
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1
+            """,
+            (int(mid),),
+        )
+    except Exception:
+        return None
+    if not row or not link_wa_gonderilebilir(row.get("durum"), row.get("expires_at")):
+        return None
+    return row
+
+
+def _wa_kayitli_odeme_url(mesaj: str) -> str:
+    from odeme_linki import _URL_RE, public_odeme_base
+
+    kok = public_odeme_base().rstrip("/") + "/odeme/"
+    bulunan = []
+    for ham in _URL_RE.findall(str(mesaj or "")):
+        url = ham.rstrip(".,)")
+        if url.startswith(kok):
+            bulunan.append(url)
+    if len(bulunan) != 1:
+        return ""
+    return bulunan[0]
+
+
+def _wa_link_kalem(ad: str, row) -> dict:
+    bos = {"metin": "", "engel": True, "ipucu": "Aktif ödeme linki yok", "rozet": "", "onizleme": ""}
+    if not row:
+        return bos
+    url = _wa_kayitli_odeme_url(row.get("whatsapp_mesaj"))
+    if not url:
+        return bos
+    try:
+        from odeme_linki import ofis_imzasi, tutar_tl, wa_varsayilan_mesaj
+
+        tutar = tutar_tl(int(row.get("tutar_kurus")))
+    except (TypeError, ValueError):
+        return bos
+    metin = wa_varsayilan_mesaj(ad, row.get("aciklama"), tutar, url, row.get("expires_at"), ofis_imzasi())
+    return {"metin": metin, "engel": False, "ipucu": "", "rozet": "", "onizleme": _wa_iki_satir(metin)}
+
+
+def _wa_son_tahsilat_oku(mid: int):
+    try:
+        return fetch_one(
+            """
+            SELECT NULLIF(BTRIM(makbuz_no), '') AS makbuz_no, tutar, tahsilat_tarihi
+            FROM tahsilatlar
+            WHERE COALESCE(customer_id, musteri_id) = %s
+              AND tutar IS NOT NULL
+              AND tahsilat_tarihi IS NOT NULL
+              AND NULLIF(BTRIM(makbuz_no), '') IS NOT NULL
+            ORDER BY tahsilat_tarihi DESC, id DESC
+            LIMIT 1
+            """,
+            (int(mid),),
+        )
+    except Exception:
+        return None
+
+
+def _wa_tahsilat_kalem(row) -> dict:
+    bos = {"metin": "", "engel": True, "ipucu": "", "rozet": "", "onizleme": ""}
+    if not row:
+        return bos
+    no = str(row.get("makbuz_no") or "").strip()
+    if not no or row.get("tutar") is None or not row.get("tahsilat_tarihi"):
+        return bos
+    from sozlesme_whatsapp import tahsilat_metin
+
+    metin = tahsilat_metin(no, row.get("tutar"), row.get("tahsilat_tarihi"), False)
+    return {
+        "metin": metin,
+        "engel": False,
+        "ipucu": "",
+        "rozet": "Son tahsilat bilgisiyle",
+        "onizleme": _wa_iki_satir(metin),
+    }
+
+
 def asistan_wa_onizleme(mid: int, bugun: date | None = None) -> tuple[dict, int]:
     row = _wa_musteri(mid)
     if not row:
@@ -1018,16 +1116,50 @@ def asistan_wa_onizleme(mid: int, bugun: date | None = None) -> tuple[dict, int]
     liste = []
     for anahtar in sorted(SABLONLAR):
         ham = SABLONLAR[anahtar]
+        dolu = "" if grid["grid_yok"] else ham.format(isim=ad, tutar=tutar, gun=gun)
         liste.append({
             "anahtar": str(anahtar),
             "etiket": _SABLON_AD.get(anahtar, str(anahtar)),
-            "metin": ham.format(isim=ad, tutar=tutar, gun=gun),
+            "grup": "gecikme",
+            "baslik": "Gecikme hatırlatma",
+            "metin": dolu,
+            "onizleme": _wa_iki_satir(dolu),
             "borc": True,
             "engel": bool(grid["grid_yok"]),
+            "ipucu": "Borç hesaplanmadı" if grid["grid_yok"] else "",
+            "rozet": "",
             "onerilen": str(anahtar) == onerilen,
         })
     if onerilen:
         liste.sort(key=lambda s: 0 if s["onerilen"] else 1)
+    link = _wa_link_kalem(ad, _wa_aktif_link_oku(mid))
+    liste.append({
+        "anahtar": "link",
+        "etiket": "Ödeme linki",
+        "grup": "link",
+        "baslik": "Ödeme linki",
+        "metin": link["metin"],
+        "onizleme": link["onizleme"],
+        "borc": False,
+        "engel": link["engel"],
+        "ipucu": link["ipucu"],
+        "rozet": "",
+        "onerilen": False,
+    })
+    makbuz = _wa_tahsilat_kalem(_wa_son_tahsilat_oku(mid))
+    liste.append({
+        "anahtar": "tahsilat",
+        "etiket": "Tahsilat makbuzu",
+        "grup": "tahsilat",
+        "baslik": "Tahsilat bilgilendirme",
+        "metin": makbuz["metin"],
+        "onizleme": makbuz["onizleme"],
+        "borc": False,
+        "engel": makbuz["engel"],
+        "ipucu": makbuz["ipucu"],
+        "rozet": makbuz["rozet"],
+        "onerilen": False,
+    })
     return {
         "ok": True,
         "unvan": ad,
@@ -1058,7 +1190,13 @@ def asistan_wa_gonder(uid: int, mid: int, data: dict, origin: str, host: str, go
     if len(metin) > MESAJ_LIMIT:
         return {"ok": False, "durum": "hata", "mesaj": "Mesaj çok uzun"}, 400
     sablon = str((data or {}).get("sablon") or "ozel").strip().lower()
-    if sablon != "ozel":
+    if sablon == "link":
+        if _wa_link_kalem("", _wa_aktif_link_oku(mid))["engel"]:
+            return {"ok": False, "durum": "hata", "mesaj": "Aktif ödeme linki yok"}, 409
+    elif sablon == "tahsilat":
+        if _wa_tahsilat_kalem(_wa_son_tahsilat_oku(mid))["engel"]:
+            return {"ok": False, "durum": "hata", "mesaj": "Tahsilat bilgisi yok"}, 409
+    elif sablon != "ozel":
         grid = _wa_grid_ozet(mid)
         if grid["grid_yok"]:
             return {"ok": False, "durum": "hata", "mesaj": "Borç hesaplanmadı, bu şablon gönderilemez"}, 409

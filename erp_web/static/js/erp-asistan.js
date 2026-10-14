@@ -120,10 +120,21 @@
       ".ea-gecmis-daha{margin-top:8px;cursor:pointer;border-radius:6px;border:1px solid #1e3a50;background:#0a1929;color:#e0f7fa;padding:6px 10px;}" +
       ".ea-wa{border:0;background:transparent;padding:0;cursor:pointer;line-height:0;}" +
       ".ea-wa[disabled]{cursor:not-allowed;opacity:.35;}" +
-      ".ea-wa-kart{max-width:560px;}" +
+      ".ea-wa-kart{max-width:920px;width:min(920px,100%);}" +
       ".ea-wa-metin{width:100%;min-height:120px;box-sizing:border-box;white-space:pre-wrap;}" +
       ".ea-wa-uyari{color:#ffab91;font-size:12px;}" +
       ".ea-wa-sonuc{font-size:13px;margin-top:8px;}" +
+      ".ea-wa-govde{display:flex;gap:12px;align-items:flex-start;}" +
+      ".ea-wa-sol{flex:1;min-width:0;}" +
+      ".ea-wa-sag{width:280px;max-height:420px;overflow:auto;border-left:1px solid #1e3a50;padding-left:8px;box-sizing:border-box;}" +
+      ".ea-wa-ara{width:100%;box-sizing:border-box;margin:0 0 6px;}" +
+      ".ea-wa-grup{font-size:11px;color:#80cbc4;margin:8px 0 4px;}" +
+      ".ea-wa-oge{display:block;width:100%;text-align:left;background:transparent;color:#e0f7fa;border:0;border-radius:4px;padding:4px;cursor:pointer;}" +
+      ".ea-wa-oge[disabled]{opacity:.45;cursor:not-allowed;}" +
+      ".ea-wa-oge.secili{background:#1e3a50;}" +
+      ".ea-wa-on{display:block;font-size:11px;color:#b0bec5;white-space:pre-wrap;}" +
+      ".ea-wa-rozet{display:inline-block;font-size:10px;color:#ffcc80;margin-left:4px;}" +
+      "@media (max-width:720px){.ea-wa-kart{max-width:100%;}.ea-wa-govde{flex-direction:column;}.ea-wa-sag{width:100%;max-height:220px;border-left:0;padding-left:0;border-top:1px solid #1e3a50;}}" +
       "@media (max-width:640px){.erp-asistan-perde{padding:8px;}.ea-gecmis-kart{max-width:100%;padding:10px;}}" +
       "#erp_asistan_gecmis.acik{display:block;}" +
       ".erp-asistan-rozet{display:inline-block;background:#8d2a2a;color:#fff;border-radius:8px;padding:1px 6px;margin-left:6px;font-size:11px;}" +
@@ -1460,15 +1471,22 @@
       '<div class="erp-asistan-kart ea-wa-kart" role="dialog" aria-modal="true">' +
       '<div class="ea-gecmis-baslik"><h3>' + esc(unvan || "Müşteri") + "</h3>" +
       '<button type="button" class="ea-gecmis-x" aria-label="Kapat">×</button></div>' +
+      '<div class="ea-wa-govde"><div class="ea-wa-sol">' +
       '<p class="ea-wa-maske"></p>' +
       '<label class="erp-asistan-alan">Hazır mesaj <select id="erp-asistan-wa-sec"></select></label>' +
       '<textarea id="erp-asistan-wa-metin" class="ea-wa-metin" maxlength="1000"></textarea>' +
       '<p class="ea-wa-uyari" hidden></p>' +
+      '<p id="erp-asistan-wa-gecis" hidden>Düzenlemeniz silinecek ' +
+      '<button type="button" id="erp-asistan-wa-gecis-evet">Geç</button> ' +
+      '<button type="button" id="erp-asistan-wa-gecis-hayir">Vazgeç</button></p>' +
       '<p class="ea-wa-sonuc"></p>' +
       '<div class="erp-asistan-aksiyon">' +
       '<button type="button" id="erp-asistan-wa-gonder" disabled>Gönder</button>' +
       '<button type="button" id="erp-asistan-wa-onay" hidden>Onayla</button>' +
-      "</div></div>";
+      "</div></div>" +
+      '<aside class="ea-wa-sag"><p class="ea-wa-grup">Tüm mesajlar</p>' +
+      '<input id="erp-asistan-wa-ara" class="ea-wa-ara" type="search" placeholder="Ara">' +
+      '<div id="erp-asistan-wa-liste"></div></aside></div></div>';
     document.body.appendChild(perde);
     perde.querySelector(".ea-gecmis-x").onclick = waPopKapat;
     perde.addEventListener("click", function (ev) { if (ev.target === perde) waPopKapat(); });
@@ -1478,24 +1496,88 @@
     var sonuc = perde.querySelector(".ea-wa-sonuc");
     var gonder = perde.querySelector("#erp-asistan-wa-gonder");
     var onay = perde.querySelector("#erp-asistan-wa-onay");
+    var liste = perde.querySelector("#erp-asistan-wa-liste");
+    var ara = perde.querySelector("#erp-asistan-wa-ara");
+    var gecis = perde.querySelector("#erp-asistan-wa-gecis");
     var sablonlar = [];
+    var temiz = "";
+    var bekleyen = null;
     var deneme = waDeneme();
     function secili() {
       for (var i = 0; i < sablonlar.length; i++) if (sablonlar[i].anahtar === sec.value) return sablonlar[i];
       return null;
     }
+    function kirli() {
+      return String(kutu.value || "") !== String(temiz || "");
+    }
+    function panelCiz() {
+      var q = String(ara.value || "").toLocaleLowerCase("tr");
+      var html = "";
+      var grup = "";
+      sablonlar.forEach(function (s) {
+        if (s.anahtar === "ozel") return;
+        var ad = (s.etiket || "") + " " + (s.onizleme || "") + " " + (s.metin || "");
+        if (q && ad.toLocaleLowerCase("tr").indexOf(q) < 0) return;
+        if (s.grup !== grup) {
+          grup = s.grup;
+          html += '<p class="ea-wa-grup">' + esc(s.baslik || "") + "</p>";
+        }
+        var seciliSinif = sec.value === s.anahtar ? " secili" : "";
+        html += '<button type="button" class="ea-wa-oge' + seciliSinif + '" data-wa-anahtar="' + esc(s.anahtar) + '"' +
+          (s.engel ? " disabled" : "") + ' title="' + esc(s.engel ? (s.ipucu || "") : (s.metin || "")) + '">' +
+          esc(s.etiket || "") + (s.onerilen ? " (önerilen)" : "") +
+          (s.rozet ? '<span class="ea-wa-rozet">' + esc(s.rozet) + "</span>" : "") +
+          '<span class="ea-wa-on">' + esc(s.onizleme || "") + "</span></button>";
+      });
+      liste.innerHTML = html;
+    }
     function uyar() {
       var s = secili();
       var engel = !!(s && s.engel);
       uyari.hidden = !engel;
-      uyari.textContent = engel ? "Borç hesaplanmadı, bu şablon gönderilemez" : "";
+      uyari.textContent = engel ? (s.ipucu || "Borç hesaplanmadı") : "";
       gonder.disabled = engel || !String(kutu.value || "").trim();
+      panelCiz();
     }
-    sec.onchange = function () {
-      var s = secili();
-      kutu.value = s ? (s.metin || "") : "";
+    function uygula(s) {
+      if (!s || s.engel) return;
+      sec.value = s.anahtar;
+      aktif = s.anahtar;
+      kutu.value = s.metin || "";
+      temiz = kutu.value;
+      bekleyen = null;
+      gecis.hidden = true;
       uyar();
+    }
+    var aktif = "";
+    function iste(s) {
+      if (!s || s.engel) return;
+      if (s.anahtar === aktif && !kirli()) return;
+      if (kirli()) {
+        bekleyen = s;
+        gecis.hidden = false;
+        if (sec.value !== aktif) sec.value = aktif;
+        return;
+      }
+      uygula(s);
+    }
+    sec.onchange = function () { iste(secili()); };
+    liste.onclick = function (ev) {
+      var btn = ev.target.closest && ev.target.closest(".ea-wa-oge");
+      if (!btn || btn.disabled) return;
+      var anahtar = btn.getAttribute("data-wa-anahtar");
+      var s = null;
+      for (var i = 0; i < sablonlar.length; i++) if (sablonlar[i].anahtar === anahtar) s = sablonlar[i];
+      iste(s);
     };
+    perde.querySelector("#erp-asistan-wa-gecis-evet").onclick = function () {
+      if (bekleyen) uygula(bekleyen);
+    };
+    perde.querySelector("#erp-asistan-wa-gecis-hayir").onclick = function () {
+      bekleyen = null;
+      gecis.hidden = true;
+    };
+    ara.oninput = panelCiz;
     kutu.oninput = uyar;
     gonder.onclick = function () {
       if (waKilit || gonder.disabled) return;
@@ -1511,7 +1593,8 @@
       if (!metin) return;
       waKilit = true;
       gonder.disabled = true;
-      onay.disabled = true;
+      var dugme = onay;
+      setTimeout(function () { dugme.disabled = true; }, 0);
       fetch("/erp-notlar/api/musteri/" + encodeURIComponent(mid) + "/whatsapp", {
         method: "POST",
         credentials: "same-origin",
@@ -1546,15 +1629,24 @@
         perde.querySelector("h3").textContent = j.unvan || unvan || "Müşteri";
         perde.querySelector(".ea-wa-maske").textContent = j.maske ? ("Numara " + j.maske) : "";
         sablonlar = (j.sablonlar || []).slice();
-        sablonlar.push({ anahtar: "ozel", etiket: "Özel mesaj", metin: "", borc: false, engel: false });
+        sablonlar.push({ anahtar: "ozel", etiket: "Özel mesaj", metin: "", borc: false, engel: false, grup: "ozel" });
+        sablonlar.forEach(function (s) {
+          if (!s.grup) s.grup = "gecikme";
+          if (!s.baslik) s.baslik = "Gecikme hatırlatma";
+          if (s.onizleme == null) s.onizleme = s.metin || "";
+        });
         var html = "";
         sablonlar.forEach(function (s) {
-          html += '<option value="' + esc(s.anahtar) + '">' + esc(s.etiket) + (s.onerilen ? " (önerilen)" : "") + "</option>";
+          html += '<option value="' + esc(s.anahtar) + '"' + (s.engel ? " disabled" : "") + ">" +
+            esc(s.etiket) + (s.onerilen ? " (önerilen)" : "") + "</option>";
         });
         sec.innerHTML = html;
         if (j.onerilen) sec.value = j.onerilen;
         var ilk = secili();
+        if (ilk && ilk.engel) ilk = null;
         kutu.value = ilk ? (ilk.metin || "") : "";
+        temiz = kutu.value;
+        aktif = sec.value;
         uyar();
       })
       .catch(function () {
