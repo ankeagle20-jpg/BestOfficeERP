@@ -91,6 +91,8 @@
         <option value="TR" selected>Türkiye</option>
       </select>
       <input type="hidden" name="country_code" value="TR">
+      <label for="partner_kod">Ortak/bayi kodu (isteğe bağlı)</label>
+      <input id="partner_kod" name="partner_kod" type="text" autocomplete="off" maxlength="16">
       <div id="pricing-box" class="pricing-box" style="display:none"></div>
       <div class="field-error" data-error-for="country_code"></div>
     </div>
@@ -501,6 +503,8 @@
       module_tier_preferences: tierPrefs,
       ledger_only: ledgerOnly
     };
+    const partnerKod = (document.getElementById("partner_kod").value || "").trim();
+    if (partnerKod) body.partner_kod = partnerKod;
     try {
       const urlParams = new URLSearchParams(window.location.search || "");
       const intent = String(urlParams.get("intent") || "").trim().toLowerCase();

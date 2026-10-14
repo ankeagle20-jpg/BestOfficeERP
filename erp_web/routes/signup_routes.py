@@ -707,6 +707,25 @@ def api_signup():
     if ledger_only:
         selected_modules = ["ledger"]
 
+    partner_kod = str(data.get("partner_kod") or "").strip()
+    partner_kod_row = None
+    if partner_kod:
+        from partner_program import PartnerKodError, kodu_cozumle
+
+        try:
+            partner_kod_row = kodu_cozumle(partner_kod)
+        except PartnerKodError as e:
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "mesaj": str(e),
+                        "errors": {"partner_kod": "gecersiz"},
+                    }
+                ),
+                400,
+            )
+
     conflict = _slug_conflict_response(slug)
     if conflict:
         return conflict
@@ -791,7 +810,7 @@ def api_signup():
             # C modeli: plaintext → hash; bu noktadan sonra purchase yolunda plaintext yok
             password_hash = generate_password_hash(str(password))
             password = None
-            _insert_purchase_signup_intent(
+            intent_row = _insert_purchase_signup_intent(
                 tenant_id=int(tenant_id),
                 invoice_id=int(invoice_id),
                 email=email,
@@ -804,6 +823,15 @@ def api_signup():
                 ledger_only=ledger_only,
                 admin_phone=admin_phone_e164,
             )
+            if partner_kod_row:
+                from partner_program import bag_olustur
+
+                bag_olustur(
+                    partner_id=int(partner_kod_row["partner_id"]),
+                    code_id=int(partner_kod_row["id"]),
+                    invoice_id=int(invoice_id),
+                    signup_intent_id=int(intent_row["id"]),
+                )
             password_hash = None  # yerel referansı bırakma
         except Exception as e:
             logger.exception("purchase invoice/intent failed slug=%s", slug)
@@ -852,6 +880,21 @@ def api_signup():
             ),
             200,
         )
+
+    if partner_kod_row:
+        from partner_program import bag_olustur
+
+        try:
+            tenant_row = reserved.get("tenant") or {}
+            bag_olustur(
+                partner_id=int(partner_kod_row["partner_id"]),
+                code_id=int(partner_kod_row["id"]),
+                tenant_id=int(tenant_row["id"]),
+            )
+        except Exception:
+            logger.exception("trial partner bind failed slug=%s", slug)
+            mark_tenant_provision_failed(slug, reason="partner_bind")
+            return jsonify({"ok": False, "mesaj": "Kayıt tamamlanamadı, bilgileri kontrol edin."}), 400
 
     app_obj = current_app._get_current_object()
     thread = threading.Thread(

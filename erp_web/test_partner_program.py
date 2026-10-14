@@ -206,10 +206,83 @@ def test_pencere_matrah_oran_surum_hold():
     check("hesap kaynakta gomulu oran yok", "100000" not in inspect.getsource(komisyon_satirlari))
 
 
+def test_kod():
+    import db
+    import routes.signup_routes as sr
+    import partner_program as pp
+
+    src = inspect.getsource(sr.api_signup)
+    i_kod = src.find("kodu_cozumle")
+    i_res = src.find("reserve_tenant_slug")
+    check("kod slugdan once", 0 < i_kod < i_res)
+    check("gecersiz slug oncesi", src.find('"gecersiz"') < i_res)
+    check("motor partner yok", "partner" not in inspect.getsource(sr._compute_purchase_bill))
+    check("metadata kod yok", "partner_kod" not in inspect.getsource(sr._create_purchase_invoice))
+    html = (ROOT / "templates" / "signup" / "signup.html").read_text(encoding="utf-8")
+    check("alan var", "Ortak/bayi kodu" in html and "if (partnerKod) body.partner_kod" in html)
+    pp.ensure_partner_tables_once = lambda: None
+    state = {"rows": []}
+    orig_f, orig_e = db.fetch_one, db.execute_returning
+
+    def fetch_one(sql, params=()):
+        duz = sql.replace(" ", "")
+        if "WHEREtenant_id=%s" in duz:
+            for r in state["rows"]:
+                if r.get("tenant_id") == params[0]:
+                    return {"id": r["id"], "partner_id": r["partner_id"]}
+        if "WHEREinvoice_id=%s" in duz:
+            for r in state["rows"]:
+                if r.get("invoice_id") == params[0]:
+                    return {"id": r["id"], "partner_id": r["partner_id"]}
+        return None
+
+    def execute_returning(sql, params=()):
+        row = {
+            "id": len(state["rows"]) + 1,
+            "tenant_id": params[0],
+            "invoice_id": params[1],
+            "partner_id": params[3],
+        }
+        state["rows"].append(row)
+        return row
+
+    db.fetch_one = fetch_one
+    db.execute_returning = execute_returning
+    try:
+        ilk = pp.bag_olustur(partner_id=1, code_id=2, tenant_id=9)
+        ikinci = pp.bag_olustur(partner_id=8, code_id=3, tenant_id=9)
+        check("ilk kod kazanir", ilk["ilk"] is False and ikinci["ilk"] is True and len(state["rows"]) == 1)
+    finally:
+        db.fetch_one, db.execute_returning = orig_f, orig_e
+    try:
+        pp.bag_degistir(tenant_id=1, kod="ABC", gerekce="y")
+        check("gerekce zorunlu", False)
+    except PartnerKuralError:
+        check("gerekce zorunlu", True)
+    from partner_program import kod_durum
+
+    simdi = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    check(
+        "suresi dolmus",
+        bool(
+            kod_durum(
+                {
+                    "aktif": True,
+                    "partner_durum": "aktif",
+                    "gecerlilik_bas": datetime(2020, 1, 1, tzinfo=timezone.utc),
+                    "gecerlilik_bit": datetime(2021, 1, 1, tzinfo=timezone.utc),
+                },
+                simdi,
+            )
+        ),
+    )
+
+
 def main():
     test_altyapi()
     test_derinlik()
     test_pencere_matrah_oran_surum_hold()
+    test_kod()
     if FAIL:
         raise SystemExit("FAIL " + ",".join(FAIL))
     print("partner_program ok")

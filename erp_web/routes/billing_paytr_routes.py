@@ -213,6 +213,16 @@ def _purchase_provision_worker(
                 module_tier_preferences=module_tier_preferences or {},
                 ledger_only=bool(ledger_only),
             )
+            try:
+                from partner_program import redemption_tenant_doldur
+
+                tenant_row = result.get("tenant") or {}
+                if tenant_row.get("id"):
+                    redemption_tenant_doldur(int(invoice_id), int(tenant_row["id"]))
+            except Exception:
+                logger.exception(
+                    "partner tenant bind failed invoice_id=%s", invoice_id
+                )
             logger.info(
                 "PURCHASE_PROVISION_SUCCESS slug=%s invoice_id=%s "
                 "already_active=%s admin_id=%s duration_sec=%.1f",
