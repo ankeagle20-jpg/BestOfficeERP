@@ -1478,6 +1478,14 @@
   }
 
   var waKilit = false;
+  var waPoll = null;
+
+  function waPollDur() {
+    if (waPoll) {
+      clearInterval(waPoll);
+      waPoll = null;
+    }
+  }
 
   function waDeneme() {
     if (window.crypto && typeof crypto.randomUUID === "function") return crypto.randomUUID();
@@ -1495,6 +1503,7 @@
 
   function waPopKapat() {
     waDurumDur();
+    waPollDur();
     var p = document.getElementById("erp-asistan-wa-pop");
     if (p) p.remove();
     waKilit = false;
@@ -1529,6 +1538,8 @@
       '<button type="button" id="erp-asistan-wa-yine" hidden>Yine de dene</button>' +
       '<button type="button" id="erp-asistan-wa-link">Ödeme linki</button>' +
       '<button type="button" id="erp-asistan-wa-onay" hidden>Onayla</button>' +
+      '<button type="button" id="erp-asistan-wa-tekrar" hidden>Evet, yine de gönder</button>' +
+      '<button type="button" id="erp-asistan-wa-belirsiz" hidden>Evet, gönder</button>' +
       "</div>" +
       '<p id="erp-asistan-wa-uyandir" class="ea-wa-uyandir" hidden>Oturum uyandırılmaya çalışılır, ~20 sn sürebilir.</p>' +
       '<p id="erp-asistan-wa-qr-kutu" hidden><button type="button" id="erp-asistan-wa-qr-okut">QR Okut</button> ' +
@@ -1564,6 +1575,9 @@
     var temiz = "";
     var bekleyen = null;
     var deneme = waDeneme();
+    var dugmeTut = false;
+    var tekrarBtn = perde.querySelector("#erp-asistan-wa-tekrar");
+    var belirsizBtn = perde.querySelector("#erp-asistan-wa-belirsiz");
     function secili() {
       for (var i = 0; i < sablonlar.length; i++) if (sablonlar[i].anahtar === sec.value) return sablonlar[i];
       return null;
@@ -1684,7 +1698,7 @@
       var engel = !!(s && s.engel);
       uyari.hidden = !engel;
       uyari.textContent = engel ? (s.ipucu || "Borç hesaplanmadı") : "";
-      gonder.disabled = durumEngel || engel || !String(kutu.value || "").trim();
+      gonder.disabled = dugmeTut || durumEngel || engel || !String(kutu.value || "").trim();
       panelCiz();
     }
     function uygula(s) {
@@ -1856,6 +1870,126 @@
       linkOnay.hidden = true;
       linkGonder(b.mod, !!b.onay, !!b.ust);
     };
+    function numaraSatir(n) {
+      var durum = n && n.durum;
+      var yazi = durum === "gonderildi" ? "Gönderildi"
+        : (durum === "gonderiliyor" || durum === "kuyrukta" || durum === "bekliyor") ? "Gönderim sürüyor"
+        : (durum === "hata" || durum === "basarisiz") ? ("Gönderilemedi" + (n.mesaj ? ": " + n.mesaj : ""))
+        : (n.mesaj || "Gönderilemedi");
+      return (n.sira || 1) + ". numara: " + yazi;
+    }
+    function listeOzet(liste) {
+      var gitti = 0;
+      var hata = 0;
+      var surer = 0;
+      liste.forEach(function (n) {
+        if (n.durum === "gonderildi") gitti += 1;
+        else if (n.durum === "hata" || n.durum === "basarisiz") hata += 1;
+        else if (n.durum === "gonderiliyor" || n.durum === "kuyrukta" || n.durum === "bekliyor") surer += 1;
+      });
+      if (surer) return "Gönderim sürüyor";
+      if (liste.length > 1 && gitti && hata) return gitti + "/" + liste.length + " gitti";
+      if (gitti === liste.length) return "Gönderildi";
+      if (hata) return "Gönderilemedi";
+      return "Gönderim sürüyor";
+    }
+    function sonucCiz(liste) {
+      if (!liste || !liste.length) return;
+      var bas = listeOzet(liste);
+      var detay = liste.map(numaraSatir).join(" · ");
+      sonuc.textContent = liste.length > 1 ? (bas + " — " + detay) : detay;
+    }
+    function pollBaslat(liste) {
+      waPollDur();
+      var baslangic = Date.now();
+      function acik(n) {
+        return n && n.deneme && (n.durum === "gonderiliyor" || n.durum === "kuyrukta" || n.durum === "bekliyor");
+      }
+      if (!liste.some(acik)) return;
+      waPoll = setInterval(function () {
+        if (!document.getElementById("erp-asistan-wa-pop")) {
+          waPollDur();
+          return;
+        }
+        if (Date.now() - baslangic >= 90000) {
+          waPollDur();
+          belirsizYaz();
+          return;
+        }
+        liste.forEach(function (n) {
+          if (!acik(n)) return;
+          fetch("/giris/api/sozlesme-whatsapp/durum?deneme=" + encodeURIComponent(n.deneme), { credentials: "same-origin" })
+            .then(function (r) { return r.json().then(function (j) { return j || {}; }).catch(function () { return null; }); })
+            .then(function (j) {
+              if (!j || !j.durum || j.durum === "gonderiliyor" || j.durum === "kuyrukta" || j.durum === "bekliyor" || j.durum === "yok") return;
+              n.durum = j.durum === "basarisiz" ? "hata" : j.durum;
+              n.mesaj = j.mesaj || "";
+              sonucCiz(liste);
+              if (!liste.some(acik)) waPollDur();
+            })
+            .catch(function () {});
+        });
+      }, 1500);
+    }
+    function belirsizYaz() {
+      waPollDur();
+      dugmeTut = true;
+      waKilit = true;
+      gonder.disabled = true;
+      onay.hidden = true;
+      if (tekrarBtn) tekrarBtn.hidden = true;
+      if (belirsizBtn) belirsizBtn.hidden = false;
+      sonuc.textContent = "Sonuç belirsiz, Tüm mesajlar/telefondan kontrol edin";
+    }
+    function gonderIstek(tekrarOnay) {
+      var metin = String(kutu.value || "").trim();
+      if (!metin) return;
+      waKilit = true;
+      dugmeTut = true;
+      gonder.disabled = true;
+      onay.hidden = true;
+      if (tekrarBtn) tekrarBtn.hidden = true;
+      if (belirsizBtn) belirsizBtn.hidden = true;
+      fetch("/erp-notlar/api/musteri/" + encodeURIComponent(mid) + "/whatsapp", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mesaj: metin,
+          onay: true,
+          deneme: deneme,
+          sablon: sec.value || "ozel",
+          tekrar_onay: !!tekrarOnay
+        })
+      }).then(function (r) {
+        return r.json().then(function (j) { return { j: j || {} }; }).catch(function () { return { bozuk: true }; });
+      }).then(function (p) {
+        if (!p || p.bozuk || !p.j) {
+          belirsizYaz();
+          return;
+        }
+        var j = p.j;
+        if (j.tekrar) {
+          sonuc.textContent = j.mesaj || "Aynı mesaj 10 dk içinde gönderildi, yine de gönder?";
+          if (tekrarBtn) tekrarBtn.hidden = false;
+          return;
+        }
+        var liste = (j.numaralar && j.numaralar.length) ? j.numaralar : [{
+          sira: 1, durum: j.durum, mesaj: j.mesaj, deneme: deneme, ok: !!j.ok
+        }];
+        if (!j.ok && liste.length < 2) {
+          sonuc.textContent = j.mesaj || "Gönderilemedi";
+          dugmeTut = false;
+          waKilit = false;
+          uyar();
+          return;
+        }
+        sonucCiz(liste);
+        pollBaslat(liste);
+      }).catch(function () {
+        belirsizYaz();
+      });
+    }
     function gonderOnayIste() {
       if (waKilit) return;
       var s = secili();
@@ -1878,33 +2012,27 @@
       if (waKilit) return;
       var s = secili();
       if (s && s.engel) return;
-      var metin = String(kutu.value || "").trim();
-      if (!metin) return;
-      waKilit = true;
-      gonder.disabled = true;
+      if (!String(kutu.value || "").trim()) return;
       var dugme = onay;
       setTimeout(function () { dugme.disabled = true; }, 0);
-      fetch("/erp-notlar/api/musteri/" + encodeURIComponent(mid) + "/whatsapp", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mesaj: metin, onay: true, deneme: deneme, sablon: sec.value || "ozel" })
-      }).then(function (r) { return r.json().then(function (j) { return { kod: r.status, j: j || {} }; }).catch(function () { return { kod: r.status, j: {} }; }); })
-        .then(function (p) {
-          var j = p.j || {};
-          sonuc.textContent = j.mesaj || (j.ok ? "Gönderildi" : "Gönderilemedi");
-          if (!j.ok) {
-            waKilit = false;
-            onay.disabled = false;
-            uyar();
-          }
-        })
-        .catch(function () {
-          sonuc.textContent = "Gönderilemedi";
-          waKilit = false;
-          onay.disabled = false;
-          uyar();
-        });
+      gonderIstek(false);
+    };
+    if (tekrarBtn) tekrarBtn.onclick = function () {
+      tekrarBtn.hidden = true;
+      gonderIstek(true);
+    };
+    if (belirsizBtn) belirsizBtn.onclick = function () {
+      if (belirsizBtn.getAttribute("data-sor") !== "1") {
+        belirsizBtn.setAttribute("data-sor", "1");
+        sonuc.textContent = "Önceki gönderim ulaşmış olabilir, yine de gönder?";
+        return;
+      }
+      belirsizBtn.hidden = true;
+      belirsizBtn.removeAttribute("data-sor");
+      deneme = waDeneme();
+      dugmeTut = false;
+      waKilit = false;
+      gonderIstek(false);
     };
     durumCek();
     fetch("/erp-notlar/api/musteri/" + encodeURIComponent(mid) + "/whatsapp", { credentials: "same-origin" })

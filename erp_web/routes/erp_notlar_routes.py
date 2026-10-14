@@ -9,6 +9,7 @@ import json
 import re
 import threading
 import time
+import uuid
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -928,16 +929,51 @@ _SABLON_AD = {
 
 
 def _wa_musteri(mid: int):
-    return fetch_one(
+    row = fetch_one(
         """
         SELECT id,
                COALESCE(NULLIF(BTRIM(name), ''), '') AS name,
-               COALESCE(NULLIF(BTRIM(phone), ''), NULLIF(BTRIM(phone2), '')) AS telefon
+               NULLIF(BTRIM(phone), '') AS phone,
+               NULLIF(BTRIM(phone2), '') AS phone2
         FROM customers
         WHERE id = %s
         """,
         (int(mid),),
     )
+    if not row:
+        return None
+    from odeme_linki import normalize_wa_telefon
+
+    tels = []
+    for ham in (row.get("phone"), row.get("phone2")):
+        tel = normalize_wa_telefon(ham)
+        if tel and tel not in tels:
+            tels.append(tel)
+    row["telefonlar"] = tels
+    row["telefon"] = tels[0] if tels else ""
+    return row
+
+
+def _wa_on_dk_var(mid: int, metin: str) -> bool:
+    """Aynı müşteri ve aynı metin, son 10 dk. Tablo yoksa uyarı yok; tablo açılmaz."""
+    from sozlesme_whatsapp import ozet_hash
+
+    try:
+        row = fetch_one(
+            """
+            SELECT 1 AS ok
+            FROM sozlesme_whatsapp_gonderim
+            WHERE musteri_id = %s
+              AND metin_hash = %s
+              AND durum IN ('gonderiliyor', 'kuyrukta', 'gonderildi', 'belirsiz')
+              AND created_at >= NOW() - INTERVAL '10 minutes'
+            LIMIT 1
+            """,
+            (int(mid), ozet_hash(metin)),
+        )
+    except Exception:
+        return False
+    return bool(row)
 
 
 def _wa_grid_ozet(mid: int, bugun: date | None = None):
@@ -1277,6 +1313,7 @@ def asistan_wa_onizleme(mid: int, bugun: date | None = None) -> tuple[dict, int]
         "geciken_tutar": grid.get("geciken_tutar"),
         "geciken_ay": grid.get("geciken_ay"),
         "onerilen": onerilen,
+        "numara_adet": len(row.get("telefonlar") or []) or (1 if row.get("telefon") else 0),
         "sablonlar": liste,
     }, 200
 
@@ -1313,30 +1350,57 @@ def asistan_wa_gonder(uid: int, mid: int, data: dict, origin: str, host: str, go
     deneme = deneme_gecerli((data or {}).get("deneme"))
     if not deneme:
         return {"ok": False, "durum": "hata", "mesaj": "İstek reddedildi"}, 400
+    if not bool((data or {}).get("tekrar_onay")) and _wa_on_dk_var(mid, metin):
+        return {
+            "ok": False,
+            "durum": "hata",
+            "tekrar": True,
+            "mesaj": "Aynı mesaj 10 dk içinde gönderildi, yine de gönder?",
+        }, 409
     simdi = time.monotonic()
     once = _WA_DENEME.get(deneme)
     if once is not None and simdi - once < 15:
         return {"ok": False, "durum": "hata", "mesaj": "Gönderim zaten başladı"}, 409
     _WA_DENEME[deneme] = simdi
     fn = gonder_fn or sozlesme_wa_isle
-    try:
-        govde, kod = fn(
-            int(uid),
-            {
-                "buton": "ust",
-                "musteri_id": int(mid),
-                "mesaj": metin,
-                "telefon": row.get("telefon"),
-                "onay": True,
-                "deneme": deneme,
-            },
-            origin,
-            host,
-        )
-    except Exception:
-        _WA_DENEME.pop(deneme, None)
-        return {"ok": False, "durum": "hata", "mesaj": "Gönderilemedi"}, 502
-    return _wa_sonuc_sade(govde or {}, int(kod), metin)
+    tels = list(row.get("telefonlar") or [])
+    if not tels and row.get("telefon"):
+        tels = [str(row.get("telefon"))]
+    satirlar = []
+    for sira, tel in enumerate(tels, start=1):
+        kim = deneme if sira == 1 else str(uuid.uuid5(uuid.UUID(deneme), str(sira)))
+        try:
+            govde, kod = fn(
+                int(uid),
+                {
+                    "buton": "ust",
+                    "musteri_id": int(mid),
+                    "mesaj": metin,
+                    "telefon": tel,
+                    "onay": True,
+                    "deneme": kim,
+                },
+                origin,
+                host,
+            )
+        except Exception:
+            satirlar.append({
+                "sira": sira,
+                "ok": False,
+                "durum": "hata",
+                "mesaj": "Gönderilemedi",
+                "deneme": kim,
+            })
+            continue
+        sade, _sk = _wa_sonuc_sade(govde or {}, int(kod), metin)
+        satirlar.append({
+            "sira": sira,
+            "ok": bool(sade.get("ok")),
+            "durum": sade.get("durum") or "hata",
+            "mesaj": sade.get("mesaj") or "",
+            "deneme": kim,
+        })
+    return _wa_coklu_paket(satirlar)
 
 
 def _wa_durum_paket(kod: str) -> dict:
@@ -1409,7 +1473,7 @@ def _wa_sonuc_sade(govde: dict, kod: int, metin: str) -> tuple[dict, int]:
         return {"ok": False, "durum": "hata", "mesaj": ham or "Gönderim sınırı doldu"}, 429
     if kod == 409:
         return {"ok": False, "durum": "hata", "mesaj": ham or "Az önce gönderildi"}, 409
-    if durum == "kuyrukta":
+    if durum in ("kuyrukta", "bekliyor"):
         return {"ok": True, "durum": "kuyrukta", "mesaj": "Kuyruğa alındı"}, 200
     if durum == "gonderildi":
         return {"ok": True, "durum": "gonderildi", "mesaj": "Gönderildi"}, 200
@@ -1418,6 +1482,49 @@ def _wa_sonuc_sade(govde: dict, kod: int, metin: str) -> tuple[dict, int]:
     if kod >= 400 or not govde.get("ok", True):
         return {"ok": False, "durum": "hata", "mesaj": ham or "Gönderilemedi"}, kod if kod >= 400 else 400
     return {"ok": False, "durum": "hata", "mesaj": "Gönderilemedi"}, 400
+
+
+def _wa_coklu_paket(satirlar: list) -> tuple[dict, int]:
+    """Numara yazılmaz. Tek satırda eski durum alanı durur."""
+    temiz = []
+    for s in satirlar:
+        temiz.append({
+            "sira": int(s.get("sira") or 0),
+            "ok": bool(s.get("ok")),
+            "durum": str(s.get("durum") or "hata"),
+            "mesaj": str(s.get("mesaj") or ""),
+            "deneme": str(s.get("deneme") or ""),
+        })
+    if not temiz:
+        return {"ok": False, "durum": "hata", "mesaj": "Telefon yok", "numaralar": []}, 400
+    if len(temiz) == 1:
+        bir = temiz[0]
+        return {
+            "ok": bir["ok"],
+            "durum": bir["durum"],
+            "mesaj": bir["mesaj"],
+            "numaralar": temiz,
+        }, 200 if bir["ok"] else 400
+    gitti = sum(1 for s in temiz if s["durum"] == "gonderildi")
+    surer = sum(1 for s in temiz if s["durum"] in ("gonderiliyor", "kuyrukta"))
+    hata = sum(1 for s in temiz if not s["ok"])
+    if surer:
+        mesaj = "Gönderim sürüyor"
+        durum = "gonderiliyor"
+        ok = True
+    elif gitti and hata:
+        mesaj = f"{gitti}/{len(temiz)} gitti"
+        durum = "kismi"
+        ok = True
+    elif gitti == len(temiz):
+        mesaj = "Gönderildi"
+        durum = "gonderildi"
+        ok = True
+    else:
+        mesaj = temiz[0]["mesaj"] or "Gönderilemedi"
+        durum = "hata"
+        ok = False
+    return {"ok": ok, "durum": durum, "mesaj": mesaj, "numaralar": temiz}, 200 if ok else 400
 
 
 def _wa_ayni_tutar_link_oku(mid: int, kurus: int):

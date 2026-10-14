@@ -187,7 +187,7 @@ def test_kaynak_yazmaz():
     check("fetch_all helperda yok", "fetch_all" not in src)
     check("ozet tek ekleme", api.count("_ozet_grid_borc_ekle(") == 1)
     layout = (ROOT / "templates" / "layout.html").read_text(encoding="utf-8")
-    check("js v=12", "js/erp-asistan.js') }}?v=12" in layout)
+    check("js v=13", "js/erp-asistan.js') }}?v=13" in layout)
     check("kullanici id", "ERP_ASISTAN_UID" in layout)
     js = (ROOT / "static" / "js" / "erp-asistan.js").read_text(encoding="utf-8")
     check("ipucu borc", "Ekstredeki ek fatura/tediye/devir dahil değildir." in js)
@@ -521,7 +521,8 @@ def test_asistan_wa():
             return {"ok": True, "geri_dus": True, "mesaj": "WhatsApp servisi bağlı değil, WhatsApp Web sayfası açılıyor"}, 200
         return {"ok": True, "durum": "kuyrukta"}, 200
 
-    eski = (en._wa_musteri, en._wa_grid_ozet, en._wa_aktif_link_oku, en._wa_son_tahsilat_oku, en._WA_DENEME)
+    eski = (en._wa_musteri, en._wa_grid_ozet, en._wa_aktif_link_oku, en._wa_son_tahsilat_oku, en._WA_DENEME, en._wa_on_dk_var)
+    en._wa_on_dk_var = lambda *_a, **_k: False
     en._wa_musteri = musteri
     en._wa_grid_ozet = grid
     en._wa_aktif_link_oku = lambda mid: None
@@ -572,7 +573,90 @@ def test_asistan_wa():
         check("onizleme ddl yok", "CREATE" not in kaynak and "ALTER" not in kaynak)
         check("batch yok", "musteri_firma_ozet_grid_ozet_batch" not in kaynak)
     finally:
-        en._wa_musteri, en._wa_grid_ozet, en._wa_aktif_link_oku, en._wa_son_tahsilat_oku, en._WA_DENEME = eski
+        en._wa_musteri, en._wa_grid_ozet, en._wa_aktif_link_oku, en._wa_son_tahsilat_oku, en._WA_DENEME, en._wa_on_dk_var = eski
+        en._WA_DENEME.clear()
+
+
+def test_wa_gonder_akisi():
+    import inspect
+    import json as _json
+    import routes.erp_notlar_routes as en
+
+    govde, kod = en._wa_sonuc_sade({"ok": True, "durum": "bekliyor"}, 200, "x")
+    check("bekliyor kuyruk", kod == 200 and govde.get("ok") is True and govde.get("durum") == "kuyrukta")
+    govde, kod = en._wa_sonuc_sade({"ok": True, "durum": "gonderiliyor"}, 200, "x")
+    check("gonderiliyor surer", kod == 200 and govde.get("durum") == "gonderiliyor" and govde.get("mesaj") == "Gönderim sürüyor")
+    govde, kod = en._wa_sonuc_sade({"ok": True, "durum": "gonderildi"}, 200, "x")
+    check("gonderildi", kod == 200 and govde.get("durum") == "gonderildi")
+    govde, kod = en._wa_sonuc_sade({"ok": False, "durum": "hata", "mesaj": "red"}, 400, "x")
+    check("hata neden", kod == 400 and govde.get("ok") is False and govde.get("mesaj") == "red")
+    govde, kod = en._wa_sonuc_sade({"ok": True, "durum": "baska"}, 200, "x")
+    check("baska gonderilemedi", kod == 400 and govde.get("mesaj") == "Gönderilemedi")
+
+    cagri = []
+
+    bir = "905550000001"
+    iki = "905550000002"
+
+    def musteri(_mid):
+        return {"id": 7, "name": "••••", "telefon": bir, "telefonlar": [bir, iki]}
+
+    def gonder(_uid, data, _origin, _host):
+        cagri.append(data.get("telefon"))
+        if data.get("telefon") == iki:
+            return {"ok": False, "durum": "hata", "mesaj": "red"}, 400
+        return {"ok": True, "durum": "gonderiliyor"}, 200
+
+    eski = (en._wa_musteri, en._wa_on_dk_var, en._WA_DENEME)
+    en._wa_musteri = musteri
+    en._wa_on_dk_var = lambda *_a, **_k: False
+    en._WA_DENEME.clear()
+    try:
+        deneme = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1"
+        govde, kod = en.asistan_wa_gonder(5, 7, {
+            "onay": True, "mesaj": "sahte-kismi", "sablon": "ozel", "deneme": deneme,
+        }, "http://yerel", "yerel", gonder_fn=gonder)
+        ham = _json.dumps(govde, ensure_ascii=False)
+        check("kismi cagri", cagri == [bir, iki] and kod == 200 and govde.get("durum") == "gonderiliyor")
+        numaralar = govde.get("numaralar") or []
+        check(
+            "kismi satir",
+            len(numaralar) == 2
+            and numaralar[0].get("sira") == 1
+            and numaralar[0].get("durum") == "gonderiliyor"
+            and numaralar[1].get("sira") == 2
+            and numaralar[1].get("ok") is False
+            and numaralar[1].get("mesaj") == "red"
+            and bir not in ham
+            and iki not in ham,
+        )
+        check("kismi deneme ayni kok", numaralar[0].get("deneme") == deneme and numaralar[1].get("deneme") != deneme)
+        en._wa_on_dk_var = lambda *_a, **_k: True
+        en._WA_DENEME.clear()
+        once = len(cagri)
+        deneme2 = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2"
+        govde, kod = en.asistan_wa_gonder(5, 7, {
+            "onay": True, "mesaj": "sahte-yakin", "sablon": "ozel", "deneme": deneme2,
+        }, "http://yerel", "yerel", gonder_fn=gonder)
+        check("on dk uyari", kod == 409 and govde.get("tekrar") is True and "10 dk" in govde.get("mesaj", "") and len(cagri) == once)
+        govde, kod = en.asistan_wa_gonder(5, 7, {
+            "onay": True, "tekrar_onay": True, "mesaj": "sahte-yakin", "sablon": "ozel", "deneme": deneme2,
+        }, "http://yerel", "yerel", gonder_fn=gonder)
+        check("on dk onay gecer", len(cagri) == once + 2 and kod == 200)
+        not_is = inspect.getsource(en.gonder_whatsapp_notlari)
+        gonder_is = inspect.getsource(en.asistan_wa_gonder)
+        check("not isi dokunmaz", "sozlesme_whatsapp_gonderim" not in not_is and "whatsapp_gonderim_durumu" not in gonder_is)
+        js = (ROOT / "static" / "js" / "erp-asistan.js").read_text(encoding="utf-8")
+        check(
+            "belirsiz metin",
+            "Sonuç belirsiz, Tüm mesajlar/telefondan kontrol edin" in js
+            and "Önceki gönderim ulaşmış olabilir, yine de gönder?" in js
+            and "/giris/api/sozlesme-whatsapp/durum?deneme=" in js
+            and "1500" in js
+            and "90000" in js,
+        )
+    finally:
+        en._wa_musteri, en._wa_on_dk_var, en._WA_DENEME = eski
         en._WA_DENEME.clear()
 
 
@@ -663,7 +747,7 @@ def test_wa_kapi():
         en._WA_DENEME.pop(deneme, None)
 
     js = (ROOT / "static/js/erp-asistan.js").read_text(encoding="utf-8")
-    govde_js = js.split("JSON.stringify({ mesaj:", 1)[1].split("})", 1)[0]
+    govde_js = js.split("function gonderIstek", 1)[1].split("function gonderOnayIste", 1)[0]
     check("istemci telefon gondermez", "telefon" not in govde_js)
 
     sayac = {"n": 0}
@@ -1025,7 +1109,7 @@ def arayuz():
             "<!doctype html><html><head><meta charset='utf-8'></head><body>"
             "<script>window.ERP_ASISTAN_UID = 41;</script>"
             "<div id='erp-asistan-ozet'></div>"
-            "<script src='/static/js/erp-asistan.js?v=12'></script>"
+            "<script src='/static/js/erp-asistan.js?v=13'></script>"
             "</body></html>"
         )
 
@@ -1035,7 +1119,7 @@ def arayuz():
             "<!doctype html><html><head><meta charset='utf-8'></head><body>"
             "<script>window.ERP_ASISTAN_UID = 99;</script>"
             "<div id='erp-asistan-ozet'></div>"
-            "<script src='/static/js/erp-asistan.js?v=12'></script>"
+            "<script src='/static/js/erp-asistan.js?v=13'></script>"
             "</body></html>"
         )
 
@@ -1095,17 +1179,37 @@ def arayuz():
                 "metin": "sablon metin", "mesaj": "",
             }))
             return
+        if yol == "/giris/api/sozlesme-whatsapp/durum":
+            wa_post["sorgu"] = wa_post.get("sorgu", 0) + 1
+            route.fulfill(status=200, content_type="application/json", body=json.dumps({
+                "ok": True, "durum": "gonderildi", "mesaj": "Gönderildi",
+            }))
+            return
         if yol.endswith("/whatsapp") and "/erp-notlar/api/musteri/" in yol:
             if request.method == "POST":
                 wa_post["n"] += 1
                 wa_post["yol"].append(yol)
+                if wa_post.get("bozuk"):
+                    route.fulfill(status=200, content_type="text/plain", body="<<")
+                    return
                 if wa_post["hata"]:
                     route.fulfill(status=409, content_type="application/json", body=json.dumps({
                         "ok": False, "durum": "hata", "mesaj": "Oturum hazır değil",
                     }))
                     return
+                if wa_post.get("tekrar"):
+                    wa_post["tekrar"] = False
+                    route.fulfill(status=409, content_type="application/json", body=json.dumps({
+                        "ok": False, "tekrar": True, "durum": "hata",
+                        "mesaj": "Aynı mesaj 10 dk içinde gönderildi, yine de gönder?",
+                    }))
+                    return
                 route.fulfill(status=200, content_type="application/json", body=json.dumps({
-                    "ok": True, "durum": "kuyrukta", "mesaj": "Kuyruğa alındı",
+                    "ok": True, "durum": "gonderiliyor", "mesaj": "Gönderim sürüyor",
+                    "numaralar": [{
+                        "sira": 1, "ok": True, "durum": "gonderiliyor",
+                        "mesaj": "Gönderim sürüyor", "deneme": "cccccccc-cccc-4ccc-8ccc-ccccccccccc1",
+                    }],
                 }))
                 return
             route.fulfill(status=200, content_type="application/json", body=json.dumps({
@@ -1450,8 +1554,36 @@ def arayuz():
           b.click();
           b.click();
         }""")
-        s.wait_for_function("() => document.querySelector('.ea-wa-sonuc').textContent.indexOf('Kuyruğa') >= 0")
+        s.wait_for_function("() => document.querySelector('.ea-wa-sonuc').textContent.indexOf('Gönderim sürüyor') >= 0")
         check("cift onay tek", wa_post["n"] == 1, str(wa_post["n"]))
+        s.wait_for_function("() => document.querySelector('.ea-wa-sonuc').textContent.indexOf('Gönderildi') >= 0", timeout=8000)
+        check("sorgu sonrasi tek post", wa_post["n"] == 1 and wa_post.get("sorgu", 0) >= 1)
+        s.click("#erp-asistan-wa-pop .ea-gecmis-x")
+        wa_post["bozuk"] = True
+        s.click("tr[data-musteri-id='867'] .ea-wa")
+        s.wait_for_selector("#erp-asistan-wa-metin")
+        s.select_option("#erp-asistan-wa-sec", "ozel")
+        s.fill("#erp-asistan-wa-metin", "sahte metin")
+        s.click("#erp-asistan-wa-gonder")
+        s.click("#erp-asistan-wa-onay")
+        s.wait_for_function("() => document.querySelector('.ea-wa-sonuc').textContent.indexOf('Sonuç belirsiz') >= 0")
+        bozuk_n = wa_post["n"]
+        s.wait_for_timeout(400)
+        check("bozuk ikinci yok", wa_post["n"] == bozuk_n and s.locator("#erp-asistan-wa-gonder").is_disabled())
+        wa_post["bozuk"] = False
+        s.click("#erp-asistan-wa-pop .ea-gecmis-x")
+        wa_post["tekrar"] = True
+        s.click("tr[data-musteri-id='867'] .ea-wa")
+        s.wait_for_selector("#erp-asistan-wa-metin")
+        s.select_option("#erp-asistan-wa-sec", "ozel")
+        s.fill("#erp-asistan-wa-metin", "sahte metin")
+        s.click("#erp-asistan-wa-gonder")
+        s.click("#erp-asistan-wa-onay")
+        s.wait_for_function("() => document.querySelector('.ea-wa-sonuc').textContent.indexOf('10 dk') >= 0")
+        on_n = wa_post["n"]
+        s.click("#erp-asistan-wa-tekrar")
+        s.wait_for_function("() => document.querySelector('.ea-wa-sonuc').textContent.indexOf('Gönderim sürüyor') >= 0")
+        check("on dk sonra bir gonderim", wa_post["n"] == on_n + 1)
         gonder_kutu = s.locator("#erp-asistan-wa-gonder").bounding_box()
         link_kutu = s.locator("#erp-asistan-wa-link").bounding_box()
         check("link dugme sagda", bool(gonder_kutu and link_kutu and link_kutu["x"] >= gonder_kutu["x"] + gonder_kutu["width"] - 2))
@@ -1632,6 +1764,7 @@ if __name__ == "__main__":
     test_gorunurluk_liste_popup()
     test_hatirlatma_pencereleri()
     test_asistan_wa()
+    test_wa_gonder_akisi()
     test_wa_kapi()
     test_wa_panel()
     test_wa_odeme_linki()
