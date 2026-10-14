@@ -136,6 +136,7 @@ def test_grid_sayilari():
         yasak.append("cagrildi")
         raise AssertionError("yazma veya yeniden hesap")
 
+    eski_fetch = en.fetch_one
     en.fetch_one = fake_one
     gr._read_aylik_grid_cache_payload_batch = fake_oku
     gr.musteri_firma_ozet_grid_ozet_batch = boom
@@ -171,6 +172,7 @@ def test_grid_sayilari():
     _ozet_grid_borc_ekle(bir)
     _ozet_grid_borc_ekle(cok)
     check("n+1 yok", len(okumalar) == 2 and len(okumalar[0][0]) == 1 and len(okumalar[1][0]) == 20)
+    en.fetch_one = eski_fetch
 
 
 def test_kaynak_yazmaz():
@@ -572,6 +574,119 @@ def test_asistan_wa():
         en._WA_DENEME.clear()
 
 
+def test_wa_kapi():
+    """Oturumsuz uç kapalı; müşteri sorgusu kiracı search_path'inde; istemci telefonu yok."""
+    from flask import Flask, g
+    from flask_login import login_user
+    from auth import User, login_manager
+    import db as dbmod
+    import routes.erp_notlar_routes as en
+
+    app = Flask(__name__)
+    app.secret_key = "wa-kapi"
+    login_manager.init_app(app)
+    app.register_blueprint(en.bp)
+    client = app.test_client()
+    r = client.post(
+        "/erp-notlar/api/musteri/7/whatsapp",
+        json={"onay": True, "mesaj": "x", "telefon": "000", "sablon": "ozel"},
+    )
+    check("oturumsuz gonder 401", r.status_code == 401)
+    r = client.get("/erp-notlar/api/musteri/7/whatsapp")
+    check("oturumsuz onizleme 401", r.status_code == 401)
+    kaynak = open(en.__file__, encoding="utf-8").read()
+    check("gonder giris gerekli", "@giris_gerekli\ndef api_musteri_whatsapp_gonder" in kaynak)
+    check("fetch tenant yolu", en.fetch_one is dbmod.fetch_one)
+
+    yakalanan = {}
+
+    def yakala(sql, params=()):
+        yakalanan["sql"] = sql
+        yakalanan["params"] = params
+        return None
+
+    eski_fetch = en.fetch_one
+    en.fetch_one = yakala
+    try:
+        satir = en._wa_musteri(4242)
+    finally:
+        en.fetch_one = eski_fetch
+    sql = str(yakalanan.get("sql") or "")
+    check("musteri customers", satir is None and "FROM customers" in sql and "WHERE id = %s" in sql)
+    check("sorgu sema oneksiz", "tenant_" not in sql.lower() and "public." not in sql.lower())
+    check("musteri id parametre", yakalanan.get("params") == (4242,))
+    with app.test_request_context("/"):
+        g.tenant_schema = "tenant_abc"
+        check("istek semasi", dbmod._tenant_schema_for_request() == "tenant_abc")
+        g.tenant_schema = "public"
+        try:
+            dbmod._tenant_schema_for_request()
+            check("gecersiz sema kapali", False)
+        except ValueError:
+            check("gecersiz sema kapali", True)
+    db_src = open(dbmod.__file__, encoding="utf-8").read()
+    hazir = db_src.split("def _prepare_db_connection")[1].split("\ndef ")[0]
+    check("search_path tenant", "_tenant_schema_for_request" in hazir and "SET LOCAL search_path TO" in db_src)
+
+    gelen = {"n": 0, "telefon": ""}
+
+    def musteri(mid):
+        if int(mid) == 7:
+            return {"id": 7, "name": "••••", "telefon": "05550001122"}
+        return None
+
+    def gonder(uid, data, origin, host):
+        gelen["n"] += 1
+        gelen["telefon"] = str(data.get("telefon") or "")
+        return {"ok": True, "durum": "kuyrukta"}, 200
+
+    eski = (en._wa_musteri, en._wa_grid_ozet)
+    en._wa_musteri = musteri
+    en._wa_grid_ozet = lambda mid, bugun=None: {"grid_yok": False, "toplam_borc": 1, "geciken_ay": 1, "gun": 0}
+    deneme = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa9"
+    en._WA_DENEME.pop(deneme, None)
+    try:
+        govde, kod = en.asistan_wa_gonder(5, 7, {
+            "onay": True, "mesaj": "sahte", "sablon": "ozel", "deneme": deneme, "telefon": "0001112222",
+        }, "http://yerel", "yerel", gonder_fn=gonder)
+        check("kapi gonder", kod == 200 and govde.get("durum") == "kuyrukta" and gelen["n"] == 1)
+        check("istemci telefonu yok", gelen["telefon"] != "0001112222" and gelen["telefon"].endswith("22"))
+        govde, kod = en.asistan_wa_gonder(5, 4242, {
+            "onay": True, "mesaj": "sahte", "sablon": "ozel",
+            "deneme": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab",
+        }, "http://yerel", "yerel", gonder_fn=gonder)
+        check("kayitsiz musteri 404", kod == 404 and gelen["n"] == 1)
+    finally:
+        en._wa_musteri, en._wa_grid_ozet = eski
+        en._WA_DENEME.pop(deneme, None)
+
+    js = (ROOT / "static/js/erp-asistan.js").read_text(encoding="utf-8")
+    govde_js = js.split("JSON.stringify({ mesaj:", 1)[1].split("})", 1)[0]
+    check("istemci telefon gondermez", "telefon" not in govde_js)
+
+    sayac = {"n": 0}
+    eski_fn = en.asistan_wa_gonder
+
+    def sahte(uid, mid, data, origin, host, gonder_fn=None):
+        sayac["n"] += 1
+        return {"ok": True, "durum": "kuyrukta", "mesaj": "Kuyruğa alındı"}, 200
+
+    en.asistan_wa_gonder = sahte
+    try:
+        with app.test_request_context(
+            "/erp-notlar/api/musteri/7/whatsapp",
+            method="POST",
+            json={"onay": True, "mesaj": "sahte", "sablon": "ozel", "deneme": deneme},
+            headers={"Origin": "http://localhost"},
+        ):
+            login_user(User(5, "t", "T", "personel"))
+            yanit = en.api_musteri_whatsapp_gonder(7)
+        kod = yanit[1] if isinstance(yanit, tuple) else yanit.status_code
+        check("oturum acik gecer", kod == 200 and sayac["n"] == 1)
+    finally:
+        en.asistan_wa_gonder = eski_fn
+
+
 def arayuz():
     try:
         from playwright.sync_api import sync_playwright
@@ -965,6 +1080,7 @@ if __name__ == "__main__":
     test_gorunurluk_liste_popup()
     test_hatirlatma_pencereleri()
     test_asistan_wa()
+    test_wa_kapi()
     arayuz()
     if FAILS:
         print("FAIL", len(FAILS))
