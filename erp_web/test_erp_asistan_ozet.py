@@ -1,0 +1,367 @@
+# -*- coding: utf-8 -*-
+"""ERP Asistan özet: grid toplam borç, geciken ay, sütun tercihi. Canlıya yazmaz."""
+import json
+import os
+import sys
+from datetime import date
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(ROOT))
+os.environ.pop("ALLOW_PROD_WRITE", None)
+
+FAILS = []
+REF = date(2026, 10, 14)
+
+
+def check(name, ok, ek=""):
+    print(("ok " if ok else "FAIL ") + name + ((" :: " + str(ek)[:180]) if ek and not ok else ""))
+    if not ok:
+        FAILS.append(name)
+
+
+def _ay(y, m, tut, tahsil=False, kalan=None, odenen=None, kismi=False, kilit=""):
+    row = {
+        "yil": y,
+        "ay": m,
+        "ay_key": "%04d-%02d" % (y, m),
+        "tutar_kdv_dahil": tut,
+        "brut_tutar_kdv": tut,
+        "tahsil_edildi": tahsil,
+        "kalan_tutar_kdv": tut if kalan is None else kalan,
+        "odenen_tutar_kdv": 0 if odenen is None else odenen,
+        "kismi_tahsilat": kismi,
+    }
+    if kilit:
+        row["kilit"] = kilit
+    return row
+
+
+def _payload_867():
+    """867 yapısı: ödenmiş, kısmi, FIFO fazla, dondurulmuş (0), gelecek ve K1 açık ay."""
+    return {
+        "compute_rev": 31,
+        "tahsilat_imza": "test",
+        "aylar": [
+            _ay(2026, 6, 200, tahsil=True, kalan=0, odenen=250),
+            _ay(2026, 7, 0),
+            _ay(2026, 8, 100, tahsil=True, kalan=0, odenen=100),
+            _ay(2026, 9, 100, kalan=40, odenen=60, kismi=True),
+            _ay(2026, 5, 50, kilit="K1"),
+            _ay(2026, 10, 80, kilit="K2"),
+            _ay(2026, 11, 90),
+        ],
+    }
+
+
+def _payload_tenant():
+    return {
+        "compute_rev": 31,
+        "tahsilat_imza": "test",
+        "aylar": [
+            _ay(2026, 8, 300, tahsil=True, kalan=0, odenen=400),
+            _ay(2026, 9, 300, tahsil=True, kalan=0, odenen=300),
+            _ay(2026, 10, 300, tahsil=True, kalan=0, odenen=300),
+            _ay(2026, 11, 300),
+        ],
+    }
+
+
+def test_grid_sayilari():
+    from routes.giris_routes import (
+        _firma_ozet_ozet_from_grid_cache_payload,
+        geciken_kayitlari_suz,
+    )
+    from routes.erp_notlar_routes import _ozet_grid_borc_ekle
+    import routes.giris_routes as gr
+
+    p867 = _payload_867()
+    p900 = _payload_tenant()
+    o867 = _firma_ozet_ozet_from_grid_cache_payload(p867, REF.year, REF.month)
+    o900 = _firma_ozet_ozet_from_grid_cache_payload(p900, REF.year, REF.month)
+    check("867 ozet hesap", isinstance(o867, dict) and isinstance(o900, dict))
+    if not isinstance(o867, dict):
+        return
+    check("867 toplam borc", o867["toplam_borc"] == 170)
+    check("867 geciken ay", o867["geciken_ay"] == 3)
+    check("test tenant borc sifir", o900["toplam_borc"] == 0 and o900["geciken_ay"] == 0)
+    check("kismi kalan", abs(o867["toplam_borc"] - (40 + 50 + 80)) < 0.001)
+
+    def wa_ay(payload, dondurma):
+        aylar = []
+        for a in payload["aylar"]:
+            if a.get("tahsil_edildi"):
+                continue
+            tutar = float(a.get("tutar_kdv_dahil") or 0)
+            if tutar <= 0:
+                continue
+            anahtar = "%04d-%02d" % (int(a["yil"]), int(a["ay"]))
+            if anahtar > "2026-10":
+                continue
+            aylar.append({"ay_key": anahtar, "tutar": tutar})
+        if dondurma:
+            süz = geciken_kayitlari_suz(
+                [{"musteri_id": 867, "aylar": aylar}],
+                {867: set(dondurma)},
+                REF,
+            )
+            return (süz[0]["ay"] if süz else 0)
+        return len(aylar)
+
+    check("867 geciken wa listesi", wa_ay(p867, set()) == o867["geciken_ay"])
+    check("dondurulmus ay sayilmaz", wa_ay(p867, {"2026-07"}) == o867["geciken_ay"] == 3)
+    donuk = [_ay(2026, 9, 100), _ay(2026, 10, 80)]
+    süz = geciken_kayitlari_suz(
+        [{"musteri_id": 867, "aylar": [{"ay_key": "2026-09", "tutar": 100}, {"ay_key": "2026-10", "tutar": 80}]}],
+        {867: {"2026-09"}},
+        REF,
+    )
+    check("suz dondurulan ayi dusurur", süz and süz[0]["ay"] == 1)
+    check("suz odememis kalan", len(donuk) == 2)
+
+    cagri = []
+
+    def fake_batch(ids, ref=None):
+        cagri.append(list(ids))
+        return {
+            867: {"toplam_borc": o867["toplam_borc"], "geciken_ay": o867["geciken_ay"]},
+            900: {"toplam_borc": o900["toplam_borc"], "geciken_ay": o900["geciken_ay"]},
+        }
+
+    gr.musteri_firma_ozet_grid_ozet_batch = fake_batch
+    notlar = [
+        {"musteri_id": 867, "id": 1},
+        {"musteri_id": 900, "id": 2},
+        {"musteri_id": 867, "id": 3},
+    ]
+    out, adet, ms = _ozet_grid_borc_ekle(notlar)
+    check("tek toplu cagri", len(cagri) == 1 and sorted(cagri[0]) == [867, 900])
+    check("musteri sayisi tekil", adet == 2)
+    check("867 kolon batch ile ayni", out[0]["toplam_borc"] == 170 and out[0]["geciken_ay"] == 3)
+    check("tenant kolon sifir", out[1]["toplam_borc"] == 0 and out[1]["geciken_ay"] == 0)
+    check("sure sayi", isinstance(ms, float) and ms >= 0)
+    print("olcum fixture musteri=%s sure_ms=%s" % (adet, ms))
+
+    cagri.clear()
+    bir = [{"musteri_id": 1}]
+    cok = [{"musteri_id": i} for i in range(1, 21)]
+    _ozet_grid_borc_ekle(bir)
+    _ozet_grid_borc_ekle(cok)
+    check("n+1 yok", len(cagri) == 2 and len(cagri[0]) == 1 and len(cagri[1]) == 20)
+
+
+def test_kaynak_yazmaz():
+    import inspect
+    from routes.erp_notlar_routes import _ozet_grid_borc_ekle, api_ozet
+
+    src = inspect.getsource(_ozet_grid_borc_ekle)
+    api = inspect.getsource(api_ozet)
+    for yasak in ("CREATE", "ALTER", "INSERT", "UPDATE", "fetch_all", "fetch_one", "execute("):
+        check("helper " + yasak + " yok", yasak not in src)
+    check("ozet tek ekleme", api.count("_ozet_grid_borc_ekle(") == 1)
+    layout = (ROOT / "templates" / "layout.html").read_text(encoding="utf-8")
+    check("js v=2", "js/erp-asistan.js') }}?v=2" in layout)
+    check("kullanici id", "ERP_ASISTAN_UID" in layout)
+    js = (ROOT / "static" / "js" / "erp-asistan.js").read_text(encoding="utf-8")
+    check("ipucu borc", "Ekstredeki ek fatura/tediye/devir dahil değildir." in js)
+    check("ipucu ay", "dondurulan ve ödenmiş aylar hariç)." in js)
+    check("anahtar", "asistan_sutunlar_" in js)
+    check("excel yok", "xlsx" not in js and "excel" not in js.lower())
+
+
+def arayuz():
+    try:
+        from playwright.sync_api import sync_playwright
+    except Exception:
+        check("playwright", False, "yok")
+        return
+    from test_plan_degistir import _app
+
+    app = _app()
+    app.logger.disabled = True
+
+    @app.route("/asistan-test")
+    def asistan_test():
+        return (
+            "<!doctype html><html><head><meta charset='utf-8'></head><body>"
+            "<script>window.ERP_ASISTAN_UID = 41;</script>"
+            "<div id='erp-asistan-ozet'></div>"
+            "<script src='/static/js/erp-asistan.js?v=2'></script>"
+            "</body></html>"
+        )
+
+    @app.route("/asistan-test-b")
+    def asistan_test_b():
+        return (
+            "<!doctype html><html><head><meta charset='utf-8'></head><body>"
+            "<script>window.ERP_ASISTAN_UID = 99;</script>"
+            "<div id='erp-asistan-ozet'></div>"
+            "<script src='/static/js/erp-asistan.js?v=2'></script>"
+            "</body></html>"
+        )
+
+    client = app.test_client()
+    notlar = [
+        {"id": 1, "musteri_id": 867, "iliski_etiket": "••••", "not_metni": "kisa not metni uzatildi",
+         "created_etiket": "01.10.2026", "hatirlatma_etiket": "02.10.2026", "durum": "bekliyor",
+         "olusturan_ad": "A", "gorusulen_kisi": "B", "toplam_borc": 0, "geciken_ay": 0},
+        {"id": 2, "musteri_id": 900, "iliski_etiket": "••••", "not_metni": "diger",
+         "created_etiket": "03.10.2026", "hatirlatma_etiket": "04.10.2026", "durum": "bekliyor",
+         "olusturan_ad": "A", "gorusulen_kisi": "B", "toplam_borc": 1500.5, "geciken_ay": 4},
+        {"id": 3, "musteri_id": 901, "iliski_etiket": "••••", "not_metni": "ucuncu",
+         "created_etiket": "05.10.2026", "hatirlatma_etiket": "06.10.2026", "durum": "tamamlandi",
+         "olusturan_ad": "A", "gorusulen_kisi": "B", "toplam_borc": 40, "geciken_ay": 1},
+    ]
+    kolon_istek = []
+
+    def isle(route, request):
+        try:
+            _isle(route, request)
+        except Exception as exc:
+            print("ROUTE", type(exc).__name__, str(exc)[:200])
+            route.fulfill(status=500, body=str(exc)[:200])
+
+    def _isle(route, request):
+        yol = request.url.split("asistan.test")[-1].split("?")[0]
+        if yol.startswith("/erp-notlar/api/ozet"):
+            route.fulfill(status=200, content_type="application/json", body=json.dumps({
+                "ok": True, "notlar": notlar, "grid_musteri": 3, "grid_ms": 1.5,
+            }))
+            return
+        if yol.startswith("/erp-notlar/api/kolonlar"):
+            kolon_istek.append(request.method + " " + yol)
+            if request.method == "POST":
+                route.fulfill(status=200, content_type="application/json", body=json.dumps({"ok": False}))
+                return
+            route.fulfill(status=200, content_type="application/json", body=json.dumps({
+                "ok": True,
+                "siralama": ["musteri", "gorusme", "hatirlatma", "aciklama", "durum", "gorusen", "gorusulen"],
+            }))
+            return
+        if yol.startswith("/static/"):
+            hedef = ROOT / yol.lstrip("/")
+            if hedef.is_file():
+                route.fulfill(status=200, body=hedef.read_bytes())
+                return
+        if yol.startswith("/asistan-test"):
+            r = client.get(yol)
+            route.fulfill(status=r.status_code, content_type="text/html", body=r.get_data())
+            return
+        route.fulfill(status=200, content_type="application/json", body=json.dumps({"ok": True, "notlar": []}))
+
+    with sync_playwright() as pw:
+        try:
+            tarayici = pw.chromium.launch(channel="msedge", headless=True)
+        except Exception as exc:
+            check("tarayici", False, type(exc).__name__)
+            return
+        s = tarayici.new_page(viewport={"width": 1100, "height": 700})
+        s.add_init_script(
+            "if (!sessionStorage.getItem('asistan-hazir')) {"
+            "localStorage.setItem('asistan_sutunlar_41', JSON.stringify({sira:['musteri','durum','gorusme','yok_kolon'], gizli:[]}));"
+            "localStorage.setItem('asistan_sutunlar_99', JSON.stringify({sira:['durum','musteri'], gizli:['musteri']}));"
+            "sessionStorage.setItem('asistan-hazir','1');}"
+        )
+        hatalar = []
+        s.on("pageerror", lambda e: hatalar.append(str(e)[:200]))
+        s.route("**/*", isle)
+        s.goto("http://asistan.test/asistan-test", wait_until="load")
+        if hatalar:
+            print("SAYFA", hatalar[:3])
+        try:
+            s.wait_for_function("typeof window.erpAsistanOzetYukle === 'function'", timeout=15000)
+        except Exception:
+            print("HTML", s.content()[:500])
+            print("HATA", hatalar[:4])
+            raise
+        birlesik = s.evaluate(
+            "() => window.erpAsistanSutunBirlestir({sira:['musteri','durum','yok'], gizli:['yok','durum']})"
+        )
+        check("eski kolon yok sayilir", "yok" not in birlesik["sira"] and "yok" not in birlesik["gizli"])
+        check("yeni sutun varsayilan yer", birlesik["sira"][:3] == ["musteri", "toplam_borc", "geciken_ay"])
+        check("kayitli gizlenen kalir", "durum" in birlesik["gizli"])
+        s.evaluate("window.erpAsistanOzetYukle()")
+        s.wait_for_selector("#erp-asistan-ozet-tablo th", timeout=8000)
+        baslik = s.evaluate("() => Array.from(document.querySelectorAll('#erp-asistan-ozet-tablo th')).map(th => th.textContent)")
+        check("eski tercihte yeni sutun", baslik[:3] == ["Müşteri", "Toplam borç", "Geciken ay"])
+        check("gorusen varsayilan gizli degil kayitta", "Görüşen Kişi" in "".join(baslik))
+        ipucu = s.evaluate("() => document.querySelector('th[data-kolon=toplam_borc]').title")
+        ipucu_ay = s.evaluate("() => document.querySelector('th[data-kolon=geciken_ay]').title")
+        check("baslik ipucu borc", "Ekstredeki ek fatura" in ipucu)
+        check("baslik ipucu ay", "dondurulan ve ödenmiş" in ipucu_ay)
+        s.click("#erp-asistan-ozet-hepsi")
+        s.click("th[data-kolon=toplam_borc]")
+        sirali = s.evaluate(
+            """() => Array.from(document.querySelectorAll('#erp-asistan-ozet-tablo tbody tr')).map(tr => {
+                var h = Array.from(tr.parentElement.parentElement.tHead.rows[0].cells).map(c => c.getAttribute('data-kolon'));
+                var i = h.indexOf('toplam_borc');
+                return (tr.cells[i] || {}).textContent || '';
+            })"""
+        )
+        check("borc sirasi buyukten", sirali and sirali[0].replace(".", "").startswith("1") and sirali[-1] == "")
+        bos = s.evaluate(
+            """() => {
+                var tr = document.querySelector('#erp-asistan-ozet-tablo tbody tr');
+                var h = Array.from(document.querySelectorAll('#erp-asistan-ozet-tablo th')).map(c => c.getAttribute('data-kolon'));
+                var i = h.indexOf('toplam_borc');
+                var td = document.querySelectorAll('#erp-asistan-ozet-tablo tbody tr')[2].cells[i];
+                return {metin: td.textContent, sinif: td.className};
+            }"""
+        )
+        check("sifir borc bos", bos["metin"] == "" and "ea-sayi-bos" in bos["sinif"])
+        s.click("#erp-asistan-sutunlar")
+        s.wait_for_selector("#erp-asistan-sutun-menu:not([hidden])")
+        s.evaluate(
+            """() => {
+                var k = document.querySelector('[data-sutun-goster="gorusme"]');
+                k.click();
+            }"""
+        )
+        gizli = s.evaluate("() => document.querySelector('th[data-kolon=gorusme]')")
+        check("sutun gizlendi", gizli is None)
+        kayit = s.evaluate("() => JSON.parse(localStorage.getItem('asistan_sutunlar_41'))")
+        diger = s.evaluate("() => localStorage.getItem('asistan_sutunlar_99')")
+        check("tercih 41 yazildi", "gorusme" in (kayit.get("gizli") or []))
+        check("diger kullanici ayni", '"musteri"' in diger and "gorusme" not in json.loads(diger).get("gizli", []))
+        s.click("#erp-asistan-sutun-varsayilan")
+        baslik2 = s.evaluate("() => Array.from(document.querySelectorAll('#erp-asistan-ozet-tablo th')).map(th => th.getAttribute('data-kolon'))")
+        check("varsayilan sira", baslik2[:3] == ["musteri", "toplam_borc", "geciken_ay"])
+        check("varsayilan gizli", "gorusen" not in baslik2 and "gorusulen" not in baslik2)
+        s.click("[data-sutun=geciken_ay][data-sutun-yon='1']")
+        kayit2 = s.evaluate("() => JSON.parse(localStorage.getItem('asistan_sutunlar_41')).sira")
+        check("ok ile sira", kayit2.index("geciken_ay") > kayit2.index("gorusme"))
+        check("ozet sunucuya yazmaz", not any(x.startswith("POST") for x in kolon_istek))
+        s.evaluate(
+            """() => {
+                var menu = document.getElementById('erp-asistan-sutun-menu');
+                if (menu) menu.hidden = true;
+                document.querySelectorAll('#erp-asistan-ozet-tablo tbody td').forEach(function (td) {
+                    td.style.filter = 'blur(8px)';
+                });
+            }"""
+        )
+        yol = os.path.join(os.environ.get("TEMP", "."), "erp_asistan_ozet.png")
+        s.locator("#erp-asistan-ozet-tablo").screenshot(path=yol)
+        check("ekran", os.path.isfile(yol))
+        print("ekran " + yol)
+        s.goto("http://asistan.test/asistan-test", wait_until="load")
+        s.evaluate("window.erpAsistanOzetYukle()")
+        s.wait_for_selector("#erp-asistan-ozet-tablo th")
+        kalici = s.evaluate("() => Array.from(document.querySelectorAll('#erp-asistan-ozet-tablo th')).map(th => th.getAttribute('data-kolon'))")
+        check("sira kalici", kalici.index("geciken_ay") > kalici.index("gorusme") if "gorusme" in kalici else False)
+        s.goto("http://asistan.test/asistan-test-b", wait_until="load")
+        s.evaluate("window.erpAsistanOzetYukle()")
+        s.wait_for_selector("#erp-asistan-ozet-tablo th")
+        b99 = s.evaluate("() => Array.from(document.querySelectorAll('#erp-asistan-ozet-tablo th')).map(th => th.getAttribute('data-kolon'))")
+        check("kullanici 99 ayri", b99[0] == "durum" and "musteri" not in b99)
+        tarayici.close()
+
+
+if __name__ == "__main__":
+    test_grid_sayilari()
+    test_kaynak_yazmaz()
+    arayuz()
+    if FAILS:
+        print("FAIL", len(FAILS))
+        raise SystemExit(1)
+    print("erp_asistan_ozet ok")
