@@ -185,7 +185,7 @@ def test_kaynak_yazmaz():
     check("fetch_all helperda yok", "fetch_all" not in src)
     check("ozet tek ekleme", api.count("_ozet_grid_borc_ekle(") == 1)
     layout = (ROOT / "templates" / "layout.html").read_text(encoding="utf-8")
-    check("js v=5", "js/erp-asistan.js') }}?v=5" in layout)
+    check("js v=6", "js/erp-asistan.js') }}?v=6" in layout)
     check("kullanici id", "ERP_ASISTAN_UID" in layout)
     js = (ROOT / "static" / "js" / "erp-asistan.js").read_text(encoding="utf-8")
     check("ipucu borc", "Ekstredeki ek fatura/tediye/devir dahil değildir." in js)
@@ -494,6 +494,84 @@ def test_hatirlatma_pencereleri():
         (auth.current_user, en.ensure_erp_notlar_tablolari, en.fetch_all, en._uid, en._benim_departman, en._ozet_grid_borc_ekle) = eski
 
 
+def test_asistan_wa():
+    import auth
+    from datetime import date
+    import routes.erp_notlar_routes as en
+
+    cagri = []
+
+    def musteri(mid):
+        if int(mid) == 7:
+            return {"id": 7, "name": "••••", "telefon": "05550001122"}
+        if int(mid) == 8:
+            return {"id": 8, "name": "••••", "telefon": ""}
+        return None
+
+    def grid(mid, bugun=None):
+        if int(mid) == 7:
+            return {"grid_yok": False, "toplam_borc": 10, "geciken_ay": 1, "gun": 0}
+        return {"grid_yok": True, "toplam_borc": None, "geciken_ay": None, "gun": None}
+
+    def gonder(uid, data, origin, host):
+        cagri.append(data.get("deneme"))
+        if data.get("mesaj") == "tunel":
+            return {"ok": True, "geri_dus": True, "mesaj": "WhatsApp servisi bağlı değil, WhatsApp Web sayfası açılıyor"}, 200
+        return {"ok": True, "durum": "kuyrukta"}, 200
+
+    eski = (en._wa_musteri, en._wa_grid_ozet, en._WA_DENEME)
+    en._wa_musteri = musteri
+    en._wa_grid_ozet = grid
+    en._WA_DENEME.clear()
+    try:
+        govde, kod = en.asistan_wa_onizleme(9)
+        check("baska tenant yok", kod == 404)
+        govde, kod = en.asistan_wa_onizleme(8)
+        check("numarasiz 400", kod == 400 and govde.get("mesaj") == "Telefon yok")
+        govde, kod = en.asistan_wa_onizleme(7)
+        check("onizleme", kod == 200 and govde.get("maske") == "**22" and govde.get("geciken_ay") == 1)
+        check("borc ayni", govde.get("toplam_borc") == 10)
+        check("telefon yok", "telefon" not in govde and "0555" not in str(govde.get("maske")))
+        ilk = govde["sablonlar"][0]
+        check("onerilen ustte", ilk.get("onerilen") is True and "{isim}" not in ilk.get("metin", ""))
+        en._wa_grid_ozet = lambda mid, bugun=None: {"grid_yok": True, "toplam_borc": None, "geciken_ay": None, "gun": None}
+        govde, kod = en.asistan_wa_gonder(5, 7, {
+            "onay": True, "mesaj": "x", "sablon": "0", "deneme": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1",
+        }, "http://yerel", "yerel", gonder_fn=gonder)
+        check("grid yok engel", kod == 409 and not cagri)
+        govde, kod = en.asistan_wa_gonder(5, 7, {
+            "onay": True, "mesaj": "", "sablon": "ozel", "deneme": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2",
+        }, "http://yerel", "yerel", gonder_fn=gonder)
+        check("bos engel", kod == 400)
+        govde, kod = en.asistan_wa_gonder(5, 7, {
+            "onay": True, "mesaj": "a" * 1001, "sablon": "ozel", "deneme": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3",
+        }, "http://yerel", "yerel", gonder_fn=gonder)
+        check("uzun engel", kod == 400 and govde.get("mesaj") == "Mesaj çok uzun")
+        deneme = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa4"
+        govde, kod = en.asistan_wa_gonder(5, 7, {
+            "onay": True, "mesaj": "sahte", "sablon": "ozel", "deneme": deneme,
+        }, "http://yerel", "yerel", gonder_fn=gonder)
+        check("ozel gonder", kod == 200 and govde.get("durum") == "kuyrukta" and cagri == [deneme])
+        govde, kod = en.asistan_wa_gonder(5, 7, {
+            "onay": True, "mesaj": "sahte", "sablon": "ozel", "deneme": deneme,
+        }, "http://yerel", "yerel", gonder_fn=gonder)
+        check("cift tik", kod == 409 and cagri == [deneme])
+        govde, kod = en.asistan_wa_gonder(5, 8, {
+            "onay": True, "mesaj": "sahte", "sablon": "ozel", "deneme": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa5",
+        }, "http://yerel", "yerel", gonder_fn=gonder)
+        check("numarasiz gonder 400", kod == 400)
+        govde, kod = en.asistan_wa_gonder(5, 7, {
+            "onay": True, "mesaj": "tunel", "sablon": "ozel", "deneme": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa6",
+        }, "http://yerel", "yerel", gonder_fn=gonder)
+        check("tunel hata", govde.get("durum") == "hata" and "bağlı değil" in govde.get("mesaj", ""))
+        kaynak = open(en.__file__, encoding="utf-8").read().split("def asistan_wa_onizleme")[1].split("def asistan_wa_gonder")[0]
+        check("onizleme ddl yok", "CREATE" not in kaynak and "ALTER" not in kaynak)
+        check("batch yok", "musteri_firma_ozet_grid_ozet_batch" not in kaynak)
+    finally:
+        en._wa_musteri, en._wa_grid_ozet, en._WA_DENEME = eski[0], eski[1], eski[2]
+        en._WA_DENEME.clear()
+
+
 def arayuz():
     try:
         from playwright.sync_api import sync_playwright
@@ -511,7 +589,7 @@ def arayuz():
             "<!doctype html><html><head><meta charset='utf-8'></head><body>"
             "<script>window.ERP_ASISTAN_UID = 41;</script>"
             "<div id='erp-asistan-ozet'></div>"
-            "<script src='/static/js/erp-asistan.js?v=5'></script>"
+            "<script src='/static/js/erp-asistan.js?v=6'></script>"
             "</body></html>"
         )
 
@@ -521,16 +599,16 @@ def arayuz():
             "<!doctype html><html><head><meta charset='utf-8'></head><body>"
             "<script>window.ERP_ASISTAN_UID = 99;</script>"
             "<div id='erp-asistan-ozet'></div>"
-            "<script src='/static/js/erp-asistan.js?v=5'></script>"
+            "<script src='/static/js/erp-asistan.js?v=6'></script>"
             "</body></html>"
         )
 
     client = app.test_client()
     notlar = [
-        {"id": 1, "musteri_id": 867, "iliski_etiket": "••••", "not_metni": "kisa not metni uzatildi",
+        {"id": 1, "musteri_id": 867, "iliski_etiket": "••••", "wa_var": True, "not_metni": "kisa not metni uzatildi",
          "created_etiket": "01.10.2026", "hatirlatma_etiket": "02.10.2026", "durum": "bekliyor",
          "olusturan_ad": "A", "gorusulen_kisi": "B", "toplam_borc": 0, "geciken_ay": 0},
-        {"id": 2, "musteri_id": 900, "iliski_etiket": "••••", "not_metni": "diger",
+        {"id": 2, "musteri_id": 900, "iliski_etiket": "••••", "wa_var": False, "not_metni": "diger",
          "created_etiket": "03.10.2026", "hatirlatma_etiket": "04.10.2026", "durum": "bekliyor",
          "olusturan_ad": "A", "gorusulen_kisi": "B", "toplam_borc": 1500.5, "geciken_ay": 4},
         {"id": 3, "musteri_id": 901, "iliski_etiket": "••••", "not_metni": "ucuncu",
@@ -555,6 +633,21 @@ def arayuz():
     def _isle(route, request):
         tam = request.url.split("asistan.test")[-1]
         yol = tam.split("?")[0]
+        if yol.endswith("/whatsapp") and "/erp-notlar/api/musteri/" in yol:
+            if request.method == "POST":
+                route.fulfill(status=200, content_type="application/json", body=json.dumps({
+                    "ok": True, "durum": "kuyrukta", "mesaj": "Kuyruğa alındı",
+                }))
+                return
+            route.fulfill(status=200, content_type="application/json", body=json.dumps({
+                "ok": True, "unvan": "••••", "maske": "**11", "grid_yok": False,
+                "toplam_borc": 10, "geciken_ay": 1, "onerilen": "0",
+                "sablonlar": [{
+                    "anahtar": "0", "etiket": "Vade günü", "metin": "Sayin •••• tutar 10,00",
+                    "borc": True, "engel": False, "onerilen": True,
+                }],
+            }))
+            return
         if "/erp-notlar/api/musteri/" in yol and yol.endswith("/notlar"):
             gecmis_istek.append(tam)
             mid = yol.split("/musteri/")[1].split("/")[0]
@@ -842,6 +935,26 @@ def arayuz():
             })"""
         )
         check("eski secim hepsi", gecersiz["tur"] == "hatirlatma" and gecersiz["sec"] == "hepsi" and gecersiz["bas"] == "")
+        s.goto("http://asistan.test/asistan-test", wait_until="load")
+        s.evaluate("window.erpAsistanOzetYukle()")
+        s.wait_for_selector("tr[data-musteri-id='867'] .ea-wa")
+        pasif = s.locator("tr[data-musteri-id='900'] .ea-wa")
+        check("numarasiz pasif", pasif.get_attribute("disabled") is not None and pasif.get_attribute("title") == "Telefon yok")
+        s.click("tr[data-musteri-id='867'] .ea-wa")
+        s.wait_for_selector("#erp-asistan-wa-pop textarea")
+        check("wa maske", s.locator(".ea-wa-maske").inner_text() == "Numara **11")
+        s.select_option("#erp-asistan-wa-sec", "ozel")
+        check("ozel bos", s.locator("#erp-asistan-wa-gonder").is_disabled())
+        s.fill("#erp-asistan-wa-metin", "sahte metin")
+        s.click("#erp-asistan-wa-gonder")
+        s.click("#erp-asistan-wa-onay")
+        s.wait_for_function("() => document.querySelector('.ea-wa-sonuc').textContent.indexOf('Kuyruğa') >= 0")
+        s.locator("#erp-asistan-wa-metin").evaluate("el => { el.style.filter = 'blur(8px)'; }")
+        s.locator("#erp-asistan-wa-pop h3").evaluate("el => { el.style.filter = 'blur(8px)'; }")
+        wa_png = os.path.join(os.environ.get("TEMP", "."), "erp_asistan_wa.png")
+        s.locator("#erp-asistan-wa-pop .ea-wa-kart").screenshot(path=wa_png)
+        check("wa ekran", os.path.isfile(wa_png))
+        print("ekran " + wa_png)
         tarayici.close()
 
 
@@ -851,6 +964,7 @@ if __name__ == "__main__":
     test_gecmis_sayfa()
     test_gorunurluk_liste_popup()
     test_hatirlatma_pencereleri()
+    test_asistan_wa()
     arayuz()
     if FAILS:
         print("FAIL", len(FAILS))

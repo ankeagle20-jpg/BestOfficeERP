@@ -18,7 +18,7 @@
     durum: "Durum"
   };
   var kolonSirasi = KOLON_VARSAYILAN.slice();
-  var KOLON_OZET_VARSAYILAN = ["musteri", "toplam_borc", "geciken_ay", "gorusme", "hatirlatma", "aciklama", "durum", "gorusen", "gorusulen"];
+  var KOLON_OZET_VARSAYILAN = ["musteri", "toplam_borc", "geciken_ay", "gorusme", "hatirlatma", "aciklama", "durum", "whatsapp", "gorusen", "gorusulen"];
   var KOLON_OZET_ETIKET = {
     musteri: "Müşteri",
     toplam_borc: "Toplam borç",
@@ -27,6 +27,7 @@
     hatirlatma: "Son Hatırlatma Tarihi",
     aciklama: "Son Açıklama",
     durum: "Durum",
+    whatsapp: "WhatsApp",
     gorusen: "Görüşen Kişi",
     gorusulen: "Görüşülen Kişi"
   };
@@ -117,6 +118,12 @@
       ".ea-gecmis-ust,.ea-gecmis-kisi{display:flex;flex-wrap:wrap;gap:8px 14px;font-size:12px;}" +
       ".ea-gecmis-metin{white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;margin-top:4px;font-size:13px;}" +
       ".ea-gecmis-daha{margin-top:8px;cursor:pointer;border-radius:6px;border:1px solid #1e3a50;background:#0a1929;color:#e0f7fa;padding:6px 10px;}" +
+      ".ea-wa{border:0;background:transparent;padding:0;cursor:pointer;line-height:0;}" +
+      ".ea-wa[disabled]{cursor:not-allowed;opacity:.35;}" +
+      ".ea-wa-kart{max-width:560px;}" +
+      ".ea-wa-metin{width:100%;min-height:120px;box-sizing:border-box;white-space:pre-wrap;}" +
+      ".ea-wa-uyari{color:#ffab91;font-size:12px;}" +
+      ".ea-wa-sonuc{font-size:13px;margin-top:8px;}" +
       "@media (max-width:640px){.erp-asistan-perde{padding:8px;}.ea-gecmis-kart{max-width:100%;padding:10px;}}" +
       "#erp_asistan_gecmis.acik{display:block;}" +
       ".erp-asistan-rozet{display:inline-block;background:#8d2a2a;color:#fff;border-radius:8px;padding:1px 6px;margin-left:6px;font-size:11px;}" +
@@ -554,6 +561,11 @@
     if (key === "gorusen") return esc(String(n.olusturan_ad || "").trim() || "-");
     if (key === "gorusulen") return esc(String(n.gorusulen_kisi || "").trim() || "-");
     if (key === "aciklama") return esc(n.not_metni);
+    if (key === "whatsapp") {
+      var ikon = '<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path fill="#25D366" d="M12 2a10 10 0 0 0-8.7 15l-1.2 4.3 4.4-1.2A10 10 0 1 0 12 2z"/></svg>';
+      if (!n.wa_var) return '<button type="button" class="ea-wa" disabled title="Telefon yok">' + ikon + "</button>";
+      return '<button type="button" class="ea-wa" data-wa="1" title="WhatsApp">' + ikon + "</button>";
+    }
     if (key === "durum") {
       var temel = (n.durum === "bekliyor" || n.durum === "ertelendi")
         ? '<button type="button" class="ea-durum-ac" data-not-id="' + esc(n.id) + '">' + esc(n.durum) + "</button>"
@@ -1424,6 +1436,134 @@
     liste.innerHTML = tabloHtml(gorunen, "not");
   }
 
+  var waKilit = false;
+
+  function waDeneme() {
+    if (window.crypto && typeof crypto.randomUUID === "function") return crypto.randomUUID();
+    return "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  }
+
+  function waPopKapat() {
+    var p = document.getElementById("erp-asistan-wa-pop");
+    if (p) p.remove();
+    waKilit = false;
+  }
+
+  function waPopAc(mid, unvan) {
+    if (!mid) return;
+    waPopKapat();
+    stilEkle();
+    var perde = document.createElement("div");
+    perde.id = "erp-asistan-wa-pop";
+    perde.className = "erp-asistan-perde";
+    perde.innerHTML =
+      '<div class="erp-asistan-kart ea-wa-kart" role="dialog" aria-modal="true">' +
+      '<div class="ea-gecmis-baslik"><h3>' + esc(unvan || "Müşteri") + "</h3>" +
+      '<button type="button" class="ea-gecmis-x" aria-label="Kapat">×</button></div>' +
+      '<p class="ea-wa-maske"></p>' +
+      '<label class="erp-asistan-alan">Hazır mesaj <select id="erp-asistan-wa-sec"></select></label>' +
+      '<textarea id="erp-asistan-wa-metin" class="ea-wa-metin" maxlength="1000"></textarea>' +
+      '<p class="ea-wa-uyari" hidden></p>' +
+      '<p class="ea-wa-sonuc"></p>' +
+      '<div class="erp-asistan-aksiyon">' +
+      '<button type="button" id="erp-asistan-wa-gonder" disabled>Gönder</button>' +
+      '<button type="button" id="erp-asistan-wa-onay" hidden>Onayla</button>' +
+      "</div></div>";
+    document.body.appendChild(perde);
+    perde.querySelector(".ea-gecmis-x").onclick = waPopKapat;
+    perde.addEventListener("click", function (ev) { if (ev.target === perde) waPopKapat(); });
+    var sec = perde.querySelector("#erp-asistan-wa-sec");
+    var kutu = perde.querySelector("#erp-asistan-wa-metin");
+    var uyari = perde.querySelector(".ea-wa-uyari");
+    var sonuc = perde.querySelector(".ea-wa-sonuc");
+    var gonder = perde.querySelector("#erp-asistan-wa-gonder");
+    var onay = perde.querySelector("#erp-asistan-wa-onay");
+    var sablonlar = [];
+    var deneme = waDeneme();
+    function secili() {
+      for (var i = 0; i < sablonlar.length; i++) if (sablonlar[i].anahtar === sec.value) return sablonlar[i];
+      return null;
+    }
+    function uyar() {
+      var s = secili();
+      var engel = !!(s && s.engel);
+      uyari.hidden = !engel;
+      uyari.textContent = engel ? "Borç hesaplanmadı, bu şablon gönderilemez" : "";
+      gonder.disabled = engel || !String(kutu.value || "").trim();
+    }
+    sec.onchange = function () {
+      var s = secili();
+      kutu.value = s ? (s.metin || "") : "";
+      uyar();
+    };
+    kutu.oninput = uyar;
+    gonder.onclick = function () {
+      if (waKilit || gonder.disabled) return;
+      var ad = (perde.querySelector("h3").textContent || "Müşteri");
+      sonuc.textContent = ad + " müşteriye gönderilecek, onaylıyor musunuz?";
+      onay.hidden = false;
+    };
+    onay.onclick = function () {
+      if (waKilit) return;
+      var s = secili();
+      if (s && s.engel) return;
+      var metin = String(kutu.value || "").trim();
+      if (!metin) return;
+      waKilit = true;
+      gonder.disabled = true;
+      onay.disabled = true;
+      fetch("/erp-notlar/api/musteri/" + encodeURIComponent(mid) + "/whatsapp", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mesaj: metin, onay: true, deneme: deneme, sablon: sec.value || "ozel" })
+      }).then(function (r) { return r.json().then(function (j) { return { kod: r.status, j: j || {} }; }).catch(function () { return { kod: r.status, j: {} }; }); })
+        .then(function (p) {
+          var j = p.j || {};
+          sonuc.textContent = j.mesaj || (j.ok ? "Gönderildi" : "Gönderilemedi");
+          if (!j.ok) {
+            waKilit = false;
+            onay.disabled = false;
+            uyar();
+          }
+        })
+        .catch(function () {
+          sonuc.textContent = "Gönderilemedi";
+          waKilit = false;
+          onay.disabled = false;
+          uyar();
+        });
+    };
+    fetch("/erp-notlar/api/musteri/" + encodeURIComponent(mid) + "/whatsapp", { credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) {
+        if (!j || !j.ok) {
+          uyari.hidden = false;
+          uyari.textContent = (j && j.mesaj) || "Açılamadı";
+          gonder.disabled = true;
+          return;
+        }
+        perde.querySelector("h3").textContent = j.unvan || unvan || "Müşteri";
+        perde.querySelector(".ea-wa-maske").textContent = j.maske ? ("Numara " + j.maske) : "";
+        sablonlar = (j.sablonlar || []).slice();
+        sablonlar.push({ anahtar: "ozel", etiket: "Özel mesaj", metin: "", borc: false, engel: false });
+        var html = "";
+        sablonlar.forEach(function (s) {
+          html += '<option value="' + esc(s.anahtar) + '">' + esc(s.etiket) + (s.onerilen ? " (önerilen)" : "") + "</option>";
+        });
+        sec.innerHTML = html;
+        if (j.onerilen) sec.value = j.onerilen;
+        var ilk = secili();
+        kutu.value = ilk ? (ilk.metin || "") : "";
+        uyar();
+      })
+      .catch(function () {
+        uyari.hidden = false;
+        uyari.textContent = "Açılamadı";
+        gonder.disabled = true;
+      });
+  }
+
   var gecmisPopEsc = null;
 
   function gecmisPopKapat() {
@@ -1680,6 +1820,16 @@
       }
       if (!(ev.target.closest && ev.target.closest(".ea-durum-menu"))) durumMenuKapat();
       if (ev.target.closest && ev.target.closest(".ea-durum")) return;
+      var waBtn = ev.target.closest && ev.target.closest(".ea-wa");
+      if (waBtn) {
+        if (waBtn.disabled) return;
+        var waSatir = waBtn.closest("tr.ea-satir");
+        if (waSatir && waSatir.getAttribute("data-ozet") === "1") {
+          var waUnvan = waSatir.querySelector("td[data-kolon=musteri]");
+          waPopAc(waSatir.getAttribute("data-musteri-id"), waUnvan ? waUnvan.textContent : "");
+        }
+        return;
+      }
       var aciklamaHucre = ev.target.closest && ev.target.closest("td.ea-gecmis-ac");
       if (aciklamaHucre) {
         var gecmisSatir = aciklamaHucre.closest("tr.ea-satir");

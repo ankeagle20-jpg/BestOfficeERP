@@ -402,7 +402,7 @@ _LISTE_FROM = """
 _LISTE_COLS = """
     n.*,
     c.name AS musteri_adi,
-    c.phone AS musteri_telefon,
+    COALESCE(NULLIF(BTRIM(c.phone), ''), NULLIF(BTRIM(c.phone2), '')) AS musteri_telefon,
     s.sozlesme_no,
     s.musteri_id AS sozlesme_musteri_id,
     f.fatura_no,
@@ -583,6 +583,15 @@ END
 """
 
 
+def _wa_var_maske(raw) -> tuple[bool, str]:
+    from odeme_linki import normalize_wa_telefon
+
+    tel = normalize_wa_telefon(raw)
+    if not tel:
+        return False, ""
+    return True, "**" + tel[-2:]
+
+
 def _ozet_serialize(row: dict) -> dict:
     kopya = dict(row)
     hid = row.get("hedef_id")
@@ -591,6 +600,16 @@ def _ozet_serialize(row: dict) -> dict:
     kopya["musteri_adi"] = row.get("ozet_musteri_adi") or row.get("musteri_adi")
     out = _serialize(kopya)
     out["musteri_id"] = hid
+    var, maske = _wa_var_maske(row.get("musteri_telefon"))
+    out["wa_var"] = var
+    out["wa_maske"] = maske
+    for anahtar in (
+        "whatsapp_telefon",
+        "whatsapp_mesaj",
+        "whatsapp_hata",
+        "musteri_telefon",
+    ):
+        out.pop(anahtar, None)
     return out
 
 
@@ -890,6 +909,228 @@ def api_musteri_notlar(mid: int):
         return jsonify(musteri_gecmis_paket(mid, request.args.get("limit"), request.args.get("ofset")))
     rows = _musteri_notlari(mid)
     return jsonify({"ok": True, "notlar": [_serialize(r) for r in rows]})
+
+
+_WA_DENEME: dict[str, float] = {}
+_SABLON_AD = {
+    0: "Vade günü",
+    3: "3 gün",
+    7: "7 gün",
+    15: "15 gün",
+    21: "21 gün",
+    30: "30 gün",
+    60: "60 gün",
+    90: "90 gün",
+    180: "180 gün",
+    365: "365 gün",
+}
+
+
+def _wa_musteri(mid: int):
+    return fetch_one(
+        """
+        SELECT id,
+               COALESCE(NULLIF(BTRIM(name), ''), '') AS name,
+               COALESCE(NULLIF(BTRIM(phone), ''), NULLIF(BTRIM(phone2), '')) AS telefon
+        FROM customers
+        WHERE id = %s
+        """,
+        (int(mid),),
+    )
+
+
+def _wa_grid_ozet(mid: int, bugun: date | None = None):
+    """Sütunlarla aynı salt okuma. Tablo yoksa veya satır yoksa grid_yok."""
+    bugun = bugun or datetime.now(IST).date()
+    paket = _ozet_grid_payload_oku([int(mid)])
+    if not isinstance(paket, dict):
+        return {"grid_yok": True, "toplam_borc": None, "geciken_ay": None, "gun": None}
+    ham = paket.get(int(mid))
+    if not ham:
+        return {"grid_yok": True, "toplam_borc": None, "geciken_ay": None, "gun": None}
+    from routes.giris_routes import _firma_ozet_ozet_from_grid_cache_payload
+
+    ozet = _firma_ozet_ozet_from_grid_cache_payload(ham, bugun.year, bugun.month)
+    if not isinstance(ozet, dict):
+        return {"grid_yok": True, "toplam_borc": None, "geciken_ay": None, "gun": None}
+    return {
+        "grid_yok": False,
+        "toplam_borc": ozet.get("toplam_borc"),
+        "geciken_ay": ozet.get("geciken_ay"),
+        "gun": _wa_gecikme_gun(ham, bugun),
+    }
+
+
+def _wa_gecikme_gun(payload, bugun: date) -> int:
+    """En eski ödenmemiş grid ayının 1'inden bugüne gün. Dondurulan ay tutarı 0 olduğu için düşer."""
+    if not isinstance(payload, dict):
+        return 0
+    ref = date(bugun.year, bugun.month, 1)
+    en = None
+    for a in payload.get("aylar") or []:
+        if not isinstance(a, dict):
+            continue
+        try:
+            yy = int(a.get("yil"))
+            mm = int(a.get("ay"))
+            cur = date(yy, mm, 1)
+        except (TypeError, ValueError):
+            continue
+        if cur > ref:
+            continue
+        if bool(a.get("tahsil_edildi")) and not bool(a.get("kismi_tahsilat")):
+            continue
+        try:
+            tut = float(a.get("tutar_kdv_dahil") or a.get("brut_tutar_kdv") or 0)
+        except (TypeError, ValueError):
+            tut = 0.0
+        if tut <= 0.005:
+            continue
+        if en is None or cur < en:
+            en = cur
+    if en is None:
+        return 0
+    return max(0, (bugun - en).days)
+
+
+def asistan_wa_onizleme(mid: int, bugun: date | None = None) -> tuple[dict, int]:
+    row = _wa_musteri(mid)
+    if not row:
+        return {"ok": False, "mesaj": "Müşteri bulunamadı"}, 404
+    var, maske = _wa_var_maske(row.get("telefon"))
+    if not var:
+        return {"ok": False, "mesaj": "Telefon yok", "wa_var": False}, 400
+    grid = _wa_grid_ozet(mid, bugun)
+    from routes.giris_routes import _tutar_tr_goster
+    from routes.whatsapp_routes import SABLONLAR, _en_yakin_esik
+
+    ad = str(row.get("name") or "").strip() or "Müşteri"
+    tutar = "—"
+    gun = 0
+    if not grid["grid_yok"]:
+        tutar = _tutar_tr_goster(grid.get("toplam_borc"))
+        gun = int(grid.get("gun") or 0)
+    onerilen = ""
+    if not grid["grid_yok"]:
+        esik = _en_yakin_esik(gun)
+        if esik is not None:
+            onerilen = str(esik)
+    liste = []
+    for anahtar in sorted(SABLONLAR):
+        ham = SABLONLAR[anahtar]
+        liste.append({
+            "anahtar": str(anahtar),
+            "etiket": _SABLON_AD.get(anahtar, str(anahtar)),
+            "metin": ham.format(isim=ad, tutar=tutar, gun=gun),
+            "borc": True,
+            "engel": bool(grid["grid_yok"]),
+            "onerilen": str(anahtar) == onerilen,
+        })
+    if onerilen:
+        liste.sort(key=lambda s: 0 if s["onerilen"] else 1)
+    return {
+        "ok": True,
+        "unvan": ad,
+        "maske": maske,
+        "grid_yok": bool(grid["grid_yok"]),
+        "toplam_borc": grid.get("toplam_borc"),
+        "geciken_ay": grid.get("geciken_ay"),
+        "onerilen": onerilen,
+        "sablonlar": liste,
+    }, 200
+
+
+def asistan_wa_gonder(uid: int, mid: int, data: dict, origin: str, host: str, gonder_fn=None) -> tuple[dict, int]:
+    """Mevcut sözleşme gönderim yolunu tek müşteri için çağırır. Metin loglanmaz."""
+    row = _wa_musteri(mid)
+    if not row:
+        return {"ok": False, "durum": "hata", "mesaj": "Müşteri bulunamadı"}, 404
+    var, _maske = _wa_var_maske(row.get("telefon"))
+    if not var:
+        return {"ok": False, "durum": "hata", "mesaj": "Telefon yok"}, 400
+    if not bool((data or {}).get("onay")):
+        return {"ok": False, "durum": "hata", "mesaj": "Onay gerekli"}, 400
+    metin = str((data or {}).get("mesaj") or "").strip()
+    if not metin:
+        return {"ok": False, "durum": "hata", "mesaj": "Mesaj boş"}, 400
+    from sozlesme_whatsapp import MESAJ_LIMIT, deneme_gecerli, sozlesme_wa_isle
+
+    if len(metin) > MESAJ_LIMIT:
+        return {"ok": False, "durum": "hata", "mesaj": "Mesaj çok uzun"}, 400
+    sablon = str((data or {}).get("sablon") or "ozel").strip().lower()
+    if sablon != "ozel":
+        grid = _wa_grid_ozet(mid)
+        if grid["grid_yok"]:
+            return {"ok": False, "durum": "hata", "mesaj": "Borç hesaplanmadı, bu şablon gönderilemez"}, 409
+    deneme = deneme_gecerli((data or {}).get("deneme"))
+    if not deneme:
+        return {"ok": False, "durum": "hata", "mesaj": "İstek reddedildi"}, 400
+    simdi = time.monotonic()
+    once = _WA_DENEME.get(deneme)
+    if once is not None and simdi - once < 15:
+        return {"ok": False, "durum": "hata", "mesaj": "Gönderim zaten başladı"}, 409
+    _WA_DENEME[deneme] = simdi
+    fn = gonder_fn or sozlesme_wa_isle
+    try:
+        govde, kod = fn(
+            int(uid),
+            {
+                "buton": "ust",
+                "musteri_id": int(mid),
+                "mesaj": metin,
+                "telefon": row.get("telefon"),
+                "onay": True,
+                "deneme": deneme,
+            },
+            origin,
+            host,
+        )
+    except Exception:
+        _WA_DENEME.pop(deneme, None)
+        return {"ok": False, "durum": "hata", "mesaj": "Gönderilemedi"}, 502
+    return _wa_sonuc_sade(govde or {}, int(kod), metin)
+
+
+def _wa_sonuc_sade(govde: dict, kod: int, metin: str) -> tuple[dict, int]:
+    ham = str(govde.get("mesaj") or "")
+    if ham == metin:
+        ham = ""
+    if govde.get("geri_dus") or govde.get("qr"):
+        return {"ok": False, "durum": "hata", "mesaj": ham or "WhatsApp servisi bağlı değil"}, 200
+    durum = str(govde.get("durum") or "")
+    if kod == 429:
+        return {"ok": False, "durum": "hata", "mesaj": ham or "Gönderim sınırı doldu"}, 429
+    if kod == 409:
+        return {"ok": False, "durum": "hata", "mesaj": ham or "Az önce gönderildi"}, 409
+    if durum == "kuyrukta":
+        return {"ok": True, "durum": "kuyrukta", "mesaj": "Kuyruğa alındı"}, 200
+    if durum == "gonderildi":
+        return {"ok": True, "durum": "gonderildi", "mesaj": "Gönderildi"}, 200
+    if durum == "gonderiliyor":
+        return {"ok": True, "durum": "gonderiliyor", "mesaj": "Gönderim sürüyor"}, 200
+    if kod >= 400 or not govde.get("ok", True):
+        return {"ok": False, "durum": "hata", "mesaj": ham or "Gönderilemedi"}, kod if kod >= 400 else 400
+    return {"ok": False, "durum": "hata", "mesaj": "Gönderilemedi"}, 400
+
+
+@bp.route("/api/musteri/<int:mid>/whatsapp")
+@giris_gerekli
+def api_musteri_whatsapp_onizleme(mid: int):
+    govde, kod = asistan_wa_onizleme(mid)
+    return jsonify(govde), kod
+
+
+@bp.route("/api/musteri/<int:mid>/whatsapp", methods=["POST"])
+@giris_gerekli
+def api_musteri_whatsapp_gonder(mid: int):
+    govde, kod = asistan_wa_gonder(
+        int(getattr(current_user, "id", 0) or 0),
+        mid,
+        request.get_json(silent=True) or {},
+        request.headers.get("Origin") or "",
+        request.host or "",
+    )
+    return jsonify(govde), kod
 
 
 @bp.route("/api/liste")
