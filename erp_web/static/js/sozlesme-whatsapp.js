@@ -33,6 +33,7 @@
       "#sozlesme-wa-indir a{color:#80deea;}" +
       "#sozlesme-wa-web{font-size:12px;margin:2px 0;}" +
       "#sozlesme-wa-web a{color:#80deea;}" +
+      "#sozlesme-wa-web-ipucu{display:block;color:#b0bec5;margin-top:4px;}" +
       "#sozlesme-wa-yine{display:none;background:#6a4a12;}";
     document.head.appendChild(st);
   }
@@ -218,7 +219,7 @@
     var a = document.getElementById("sozlesme-wa-web-a");
     if (!(kutu && a)) return;
     a.href = "#";
-    a.textContent = "WhatsApp Web'de aç";
+    a.textContent = "Kendi WhatsApp Web'imde aç (ofis hattı olmayabilir)";
     a.onclick = function (ev) {
       ev.preventDefault();
       webAc(tel, mesaj);
@@ -348,7 +349,8 @@
       '<label>Mesaj<textarea id="sozlesme-wa-mesaj" rows="6"></textarea></label>' +
       '<p id="sozlesme-wa-uyari"></p>' +
       '<p id="sozlesme-wa-indir" hidden><a id="sozlesme-wa-indir-a" href="#"></a></p>' +
-      '<p id="sozlesme-wa-web" hidden><a id="sozlesme-wa-web-a" href="#">WhatsApp Web\'de aç</a></p>' +
+      '<p id="sozlesme-wa-web" hidden><a id="sozlesme-wa-web-a" href="#">Kendi WhatsApp Web\'imde aç (ofis hattı olmayabilir)</a>' +
+      '<span id="sozlesme-wa-web-ipucu">ERP üzerinden ofis hattıyla göndermek için Giriş → WhatsApp ekranından QR\'ı ofis telefonuyla okutun.</span></p>' +
       '<p id="sozlesme-wa-sonuc"></p>' +
       '<div><button type="button" id="sozlesme-wa-gonder">Gönder</button>' +
       '<button type="button" id="sozlesme-wa-yine">Yine de gönder</button>' +

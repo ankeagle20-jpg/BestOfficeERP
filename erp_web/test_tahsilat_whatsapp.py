@@ -280,7 +280,7 @@ def test_sayfa_ve_mig():
     dal = js.find("function gonder")
     check("web_sonra", dal > 0 and "acik.tahsilatId && (j.pdf_indir" not in js and js.find("webAc(ham, metin)", dal) > dal and js.find("/giris/api/tahsilat-whatsapp/gonder", dal) > dal)
     oturum_dal = js.find('j.geri_dus && j.neden === "oturum"')
-    check("oturum_elle", oturum_dal > 0 and js.find("webElleGoster(ham, metin)", oturum_dal) > oturum_dal and js.find("webAc(ham, metin)", oturum_dal) > js.find("webElleGoster(ham, metin)", oturum_dal) and "WhatsApp Web'de aç" in js)
+    check("oturum_elle", oturum_dal > 0 and js.find("webElleGoster(ham, metin)", oturum_dal) > oturum_dal and js.find("webAc(ham, metin)", oturum_dal) > js.find("webElleGoster(ham, metin)", oturum_dal) and "Kendi WhatsApp Web'imde aç (ofis hattı olmayabilir)" in js and "ofis telefonuyla okutun" in js and "WhatsApp Web'de aç" not in js)
     check("alan_dinle", '"tutar", "tarih", "aciklama"' in js)
     check("kalici_yok", "localStorage" not in js and "localStorage" not in durum and "sessionStorage" not in durum)
     check("kuyruk_yazi", "Kuyruğa alındı…" in js and "Gönderildi ✓" in js and "Sonuç henüz yok; birkaç dakika sonra durum yenilenir" in js)
