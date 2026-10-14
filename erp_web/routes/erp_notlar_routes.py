@@ -1343,6 +1343,7 @@ def _wa_durum_paket(kod: str) -> dict:
     etiket = {
         "bagli": "WhatsApp bağlı",
         "baglaniyor": "Bağlanıyor…",
+        "qr": "QR bekliyor",
         "bagli_degil": "Bağlı değil",
         "bilinmiyor": "Durum alınamadı",
     }
@@ -1350,7 +1351,7 @@ def _wa_durum_paket(kod: str) -> dict:
         "ok": True,
         "durum": kod,
         "etiket": etiket.get(kod, "Durum alınamadı"),
-        "engel": kod == "bagli_degil",
+        "engel": kod in ("bagli_degil", "qr"),
     }
 
 
@@ -1390,6 +1391,8 @@ def asistan_wa_durum(getir_fn=None) -> tuple[dict, int]:
         return _wa_durum_paket("bagli"), 200
     oturum = str(data.get("durum") or "").strip().lower()
     topar = str(data.get("toparlama_durumu") or "").strip().lower()
+    if oturum == "qr" or topar == "qr":
+        return _wa_durum_paket("qr"), 200
     if oturum in ("baglaniyor", "starting") or topar == "baglaniyor":
         return _wa_durum_paket("baglaniyor"), 200
     return _wa_durum_paket("bagli_degil"), 200

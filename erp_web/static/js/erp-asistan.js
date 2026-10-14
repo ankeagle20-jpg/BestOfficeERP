@@ -126,6 +126,8 @@
       ".ea-wa-web{margin:0 0 4px;font-size:13px;}" +
       ".ea-wa-web a{color:#80deea;}" +
       ".ea-wa-web-ipucu{margin:0 0 8px;font-size:12px;color:#b0bec5;}" +
+      ".ea-wa-uyandir{margin:6px 0 0;font-size:12px;color:#ffcc80;}" +
+      "#erp-asistan-wa-yenile,#erp-asistan-wa-yine{background:#0a1929;color:#e0f7fa;}" +
       "#erp-asistan-wa-gonder:disabled{opacity:.45;cursor:not-allowed;}" +
       ".ea-wa-uyari{color:#ffab91;font-size:12px;}" +
       ".ea-wa-sonuc{font-size:13px;margin-top:8px;}" +
@@ -1519,9 +1521,12 @@
       '<p class="ea-wa-sonuc"></p>' +
       '<div class="erp-asistan-aksiyon">' +
       '<button type="button" id="erp-asistan-wa-gonder" disabled>Gönder</button>' +
+      '<button type="button" id="erp-asistan-wa-yenile" hidden>Durumu yenile</button>' +
+      '<button type="button" id="erp-asistan-wa-yine" hidden>Yine de dene</button>' +
       '<button type="button" id="erp-asistan-wa-link">Ödeme linki</button>' +
       '<button type="button" id="erp-asistan-wa-onay" hidden>Onayla</button>' +
       "</div>" +
+      '<p id="erp-asistan-wa-uyandir" class="ea-wa-uyandir" hidden>Oturum uyandırılmaya çalışılır, ~20 sn sürebilir.</p>' +
       '<div id="erp-asistan-wa-link-kutu" hidden>' +
       '<p>Tutar</p>' +
       '<label><input type="radio" name="ea-wa-tutar" value="toplam"> Toplam borç <span id="erp-asistan-wa-toplam"></span></label>' +
@@ -1587,18 +1592,33 @@
     var durumKutu = perde.querySelector("#erp-asistan-wa-durum");
     var webKutu = perde.querySelector("#erp-asistan-wa-web");
     var webIpucu = perde.querySelector("#erp-asistan-wa-web-ipucu");
+    var yenile = perde.querySelector("#erp-asistan-wa-yenile");
+    var yine = perde.querySelector("#erp-asistan-wa-yine");
+    var uyandirNot = perde.querySelector("#erp-asistan-wa-uyandir");
     function durumYaz(j) {
       var d = (j && j.durum) || "bilinmiyor";
-      durumEngel = d === "bagli_degil";
+      durumEngel = d === "bagli_degil" || d === "qr";
       if (d === "bagli_degil") {
         durumKutu.textContent = "Bağlı değil. WhatsApp bağlı değil, birkaç dakika sonra tekrar dene";
+      } else if (d === "qr") {
+        durumKutu.textContent = "QR bekliyor. Giriş → WhatsApp ekranından QR'ı ofis telefonuyla okutun.";
       } else {
         durumKutu.textContent = (j && j.etiket) || "Durum alınamadı";
       }
       var gizle = d === "bagli";
       if (webKutu) webKutu.hidden = gizle;
       if (webIpucu) webIpucu.hidden = gizle;
+      var yardim = d === "bagli_degil" || d === "qr";
+      if (yenile) yenile.hidden = !yardim;
+      if (yine) yine.hidden = !yardim;
+      if (uyandirNot) uyandirNot.hidden = !yardim;
       uyar();
+    }
+    function durumPlanla(d) {
+      waDurumDur();
+      if ((d === "baglaniyor" || d === "qr") && (Date.now() - durumBas) < 120000) {
+        waDurumZaman = setTimeout(durumCek, 10000);
+      }
     }
     function durumCek() {
       fetch("/erp-notlar/api/whatsapp-durum", { credentials: "same-origin" })
@@ -1610,9 +1630,7 @@
             return;
           }
           durumYaz(j);
-          if (j.durum === "baglaniyor" && (Date.now() - durumBas) < 120000) {
-            waDurumZaman = setTimeout(durumCek, 10000);
-          }
+          durumPlanla(j.durum);
         })
         .catch(function () {
           if (!document.getElementById("erp-asistan-wa-pop")) return;
@@ -1796,12 +1814,24 @@
       linkOnay.hidden = true;
       linkGonder(b.mod, !!b.onay, !!b.ust);
     };
-    gonder.onclick = function () {
-      if (waKilit || gonder.disabled) return;
+    function gonderOnayIste() {
+      if (waKilit) return;
+      var s = secili();
+      if (s && s.engel) return;
+      if (!String(kutu.value || "").trim()) return;
       var ad = (perde.querySelector("h3").textContent || "Müşteri");
       sonuc.textContent = ad + " müşteriye gönderilecek, onaylıyor musunuz?";
       onay.hidden = false;
+    }
+    gonder.onclick = function () {
+      if (waKilit || gonder.disabled) return;
+      gonderOnayIste();
     };
+    if (yenile) yenile.onclick = function () {
+      waDurumDur();
+      durumCek();
+    };
+    if (yine) yine.onclick = function () { gonderOnayIste(); };
     onay.onclick = function () {
       if (waKilit) return;
       var s = secili();

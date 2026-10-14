@@ -187,7 +187,7 @@ def test_kaynak_yazmaz():
     check("fetch_all helperda yok", "fetch_all" not in src)
     check("ozet tek ekleme", api.count("_ozet_grid_borc_ekle(") == 1)
     layout = (ROOT / "templates" / "layout.html").read_text(encoding="utf-8")
-    check("js v=10", "js/erp-asistan.js') }}?v=10" in layout)
+    check("js v=11", "js/erp-asistan.js') }}?v=11" in layout)
     check("kullanici id", "ERP_ASISTAN_UID" in layout)
     js = (ROOT / "static" / "js" / "erp-asistan.js").read_text(encoding="utf-8")
     check("ipucu borc", "Ekstredeki ek fatura/tediye/devir dahil değildir." in js)
@@ -944,7 +944,8 @@ def test_wa_durum():
     check("kisisel web metni", "Kendi WhatsApp Web\\'imde aç (ofis hattı olmayabilir)" in js)
     check("ofis qr ipucu", "Giriş → WhatsApp ekranından QR\\'ı ofis telefonuyla okutun." in js)
     check("kisisel web adresi", "https://web.whatsapp.com/" in js and "WA_INTERNAL_TOKEN" not in js)
-    check("yenile siniri", "setTimeout(durumCek, 10000)" in js and "120000" in js)
+    check("yenile siniri", "setTimeout(durumCek, 10000)" in js and "120000" in js and 'd === "baglaniyor" || d === "qr"' in js)
+    check("qr yardim dugmeleri", "Durumu yenile" in js and "Yine de dene" in js and "20 sn sürebilir" in js)
 
     class Sahte:
         def __init__(self, govde, kod=200):
@@ -959,6 +960,12 @@ def test_wa_durum():
     check("durum bagli", k == 200 and g["durum"] == "bagli" and g["etiket"] == "WhatsApp bağlı" and g["engel"] is False and "token" not in g and "url" not in g)
     g, _k = en.asistan_wa_durum(lambda: Sahte({"bagli": False, "hazir": False, "durum": "starting"}))
     check("durum baglaniyor", g["durum"] == "baglaniyor" and g["etiket"] == "Bağlanıyor…" and g["engel"] is False)
+    g, _k = en.asistan_wa_durum(lambda: Sahte({"bagli": False, "hazir": False, "durum": "baglaniyor"}))
+    check("durum baglaniyor kelime", g["durum"] == "baglaniyor" and g["engel"] is False)
+    g, _k = en.asistan_wa_durum(lambda: Sahte({"bagli": False, "hazir": False, "durum": "qr", "toparlama_durumu": "qr"}))
+    check("durum qr", g["durum"] == "qr" and g["etiket"] == "QR bekliyor" and g["engel"] is True and "token" not in g and "url" not in g)
+    g, _k = en.asistan_wa_durum(lambda: Sahte({"bagli": False, "hazir": False, "durum": "ready"}))
+    check("durum ready hazir degil", g["durum"] == "bagli_degil" and g["engel"] is True)
     g, _k = en.asistan_wa_durum(lambda: Sahte({"bagli": False, "hazir": False, "durum": "yok"}))
     check("durum bagli degil", g["durum"] == "bagli_degil" and g["etiket"] == "Bağlı değil" and g["engel"] is True)
 
@@ -1015,7 +1022,7 @@ def arayuz():
             "<!doctype html><html><head><meta charset='utf-8'></head><body>"
             "<script>window.ERP_ASISTAN_UID = 41;</script>"
             "<div id='erp-asistan-ozet'></div>"
-            "<script src='/static/js/erp-asistan.js?v=10'></script>"
+            "<script src='/static/js/erp-asistan.js?v=11'></script>"
             "</body></html>"
         )
 
@@ -1025,7 +1032,7 @@ def arayuz():
             "<!doctype html><html><head><meta charset='utf-8'></head><body>"
             "<script>window.ERP_ASISTAN_UID = 99;</script>"
             "<div id='erp-asistan-ozet'></div>"
-            "<script src='/static/js/erp-asistan.js?v=10'></script>"
+            "<script src='/static/js/erp-asistan.js?v=11'></script>"
             "</body></html>"
         )
 
@@ -1048,7 +1055,7 @@ def arayuz():
     kolon_istek = []
     gecmis_istek = []
     ozet_istek = []
-    wa_post = {"n": 0}
+    wa_post = {"n": 0, "hata": False, "yol": []}
     link_post = {"n": 0}
     durum_mod = {"kod": "bagli"}
     durum_baslik = []
@@ -1073,6 +1080,7 @@ def arayuz():
                 "bagli": {"ok": True, "durum": "bagli", "etiket": "WhatsApp bağlı", "engel": False},
                 "baglaniyor": {"ok": True, "durum": "baglaniyor", "etiket": "Bağlanıyor…", "engel": False},
                 "bagli_degil": {"ok": True, "durum": "bagli_degil", "etiket": "Bağlı değil", "engel": True},
+                "qr": {"ok": True, "durum": "qr", "etiket": "QR bekliyor", "engel": True},
             }
             route.fulfill(status=200, content_type="application/json", body=json.dumps(tablo[kod]))
             return
@@ -1087,6 +1095,12 @@ def arayuz():
         if yol.endswith("/whatsapp") and "/erp-notlar/api/musteri/" in yol:
             if request.method == "POST":
                 wa_post["n"] += 1
+                wa_post["yol"].append(yol)
+                if wa_post["hata"]:
+                    route.fulfill(status=409, content_type="application/json", body=json.dumps({
+                        "ok": False, "durum": "hata", "mesaj": "Oturum hazır değil",
+                    }))
+                    return
                 route.fulfill(status=200, content_type="application/json", body=json.dumps({
                     "ok": True, "durum": "kuyrukta", "mesaj": "Kuyruğa alındı",
                 }))
@@ -1461,6 +1475,12 @@ def arayuz():
         s.wait_for_function("() => document.querySelector('#erp-asistan-wa-durum').textContent.indexOf('birkaç dakika sonra tekrar dene') >= 0")
         check("bagli degil gonder pasif", s.locator("#erp-asistan-wa-gonder").is_disabled())
         check(
+            "bagli degil yardim",
+            s.locator("#erp-asistan-wa-yenile").is_visible()
+            and s.locator("#erp-asistan-wa-yine").is_visible()
+            and "20 sn sürebilir" in s.locator("#erp-asistan-wa-uyandir").inner_text(),
+        )
+        check(
             "bagli degil kisisel web",
             s.locator("#erp-asistan-wa-web").is_visible()
             and "ofis hattı olmayabilir" in s.locator("#erp-asistan-wa-web").inner_text()
@@ -1485,6 +1505,7 @@ def arayuz():
         )
         check("okunamadi engel yok", s.locator("#erp-asistan-wa-gonder").is_enabled())
         check("okunamadi web gorunur", s.locator("#erp-asistan-wa-web").is_visible() and s.locator("#erp-asistan-wa-web-ipucu").is_visible())
+        check("okunamadi yardim gizli", s.locator("#erp-asistan-wa-yenile").is_hidden() and s.locator("#erp-asistan-wa-yine").is_hidden())
         wa_yenile("baglaniyor")
         s.wait_for_function(
             "() => document.querySelector('#erp-asistan-wa-durum').textContent === 'Bağlanıyor…'"
@@ -1492,6 +1513,57 @@ def arayuz():
             " && !document.querySelector('#erp-asistan-wa-gonder').disabled"
         )
         check("baglaniyor gonder acik", s.locator("#erp-asistan-wa-gonder").is_enabled())
+        check("baglaniyor yardim gizli", s.locator("#erp-asistan-wa-yenile").is_hidden() and s.locator("#erp-asistan-wa-yine").is_hidden())
+        wa_yenile("qr")
+        s.wait_for_function(
+            "() => document.querySelector('#erp-asistan-wa-durum').textContent.indexOf('QR bekliyor') >= 0"
+            " && document.querySelector('#erp-asistan-wa-durum').textContent.indexOf('ofis telefonuyla okutun') >= 0"
+            " && document.querySelector('#erp-asistan-wa-gonder').disabled"
+        )
+        check("qr gonder pasif", s.locator("#erp-asistan-wa-gonder").is_disabled())
+        check(
+            "qr yardim",
+            s.locator("#erp-asistan-wa-yenile").is_visible()
+            and s.locator("#erp-asistan-wa-yine").is_visible()
+            and "20 sn sürebilir" in s.locator("#erp-asistan-wa-uyandir").inner_text()
+            and "3001" not in s.locator("#erp-asistan-wa-durum").inner_text(),
+        )
+        once_bakis = len(durum_baslik)
+        once_wa = wa_post["n"]
+        s.click("#erp-asistan-wa-yenile")
+        s.wait_for_timeout(1000)
+        check("qr yenile bakis", len(durum_baslik) > once_bakis and wa_post["n"] == once_wa)
+        s.wait_for_timeout(11000)
+        check("qr otomatik yenile", len(durum_baslik) > once_bakis + 1 and wa_post["n"] == once_wa)
+        wa_post["hata"] = True
+        s.locator("#erp-asistan-wa-gonder").click(force=True)
+        check("qr gonder tik yok", wa_post["n"] == once_wa)
+        s.click("#erp-asistan-wa-yine")
+        s.wait_for_selector("#erp-asistan-wa-onay", state="visible")
+        s.evaluate("""() => {
+          var b = document.querySelector('#erp-asistan-wa-onay');
+          b.click();
+          b.click();
+        }""")
+        s.wait_for_function("() => document.querySelector('.ea-wa-sonuc').textContent.indexOf('Oturum hazır değil') >= 0")
+        check(
+            "yine de dene mevcut yol",
+            wa_post["n"] == once_wa + 1
+            and wa_post["yol"]
+            and wa_post["yol"][-1].endswith("/whatsapp")
+            and "kuyruk" not in wa_post["yol"][-1]
+            and "Kuyruğa" not in s.locator(".ea-wa-sonuc").inner_text(),
+        )
+        wa_post["hata"] = False
+        s.locator("#erp-asistan-wa-metin").evaluate("el => { el.style.filter = 'blur(8px)'; }")
+        s.locator("#erp-asistan-wa-liste").evaluate("el => { el.style.filter = 'blur(8px)'; }")
+        s.locator(".ea-wa-maske").evaluate("el => { el.style.filter = 'blur(8px)'; }")
+        s.locator("#erp-asistan-wa-pop h3").evaluate("el => { el.style.filter = 'blur(8px)'; }")
+        s.locator("#erp-asistan-wa-web").evaluate("el => { el.style.filter = 'blur(8px)'; }")
+        s.locator("#erp-asistan-wa-web-ipucu").evaluate("el => { el.style.filter = 'blur(8px)'; }")
+        qr_png = os.path.join(os.environ.get("TEMP", "."), "erp_asistan_wa_qr.png")
+        s.locator("#erp-asistan-wa-pop .ea-wa-kart").screenshot(path=qr_png)
+        print("ekran " + qr_png)
         s.click("#erp-asistan-wa-pop .ea-gecmis-x")
         durum_mod["kod"] = "bagli_degil"
         uyari = {"m": ""}
