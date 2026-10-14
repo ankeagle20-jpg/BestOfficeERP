@@ -912,6 +912,7 @@ def api_musteri_notlar(mid: int):
 
 
 _WA_DENEME: dict[str, float] = {}
+_LINK_KILIT: dict[int, float] = {}
 _SABLON_AD = {
     0: "Vade günü",
     3: "3 gün",
@@ -957,8 +958,51 @@ def _wa_grid_ozet(mid: int, bugun: date | None = None):
         "grid_yok": False,
         "toplam_borc": ozet.get("toplam_borc"),
         "geciken_ay": ozet.get("geciken_ay"),
+        "geciken_tutar": _wa_geciken_tutar(ham, bugun),
         "gun": _wa_gecikme_gun(ham, bugun),
     }
+
+
+def _wa_geciken_tutar(payload, bugun: date) -> float:
+    """Referans ayından önceki ödenmemiş grid tutarı. İçinde bulunulan ay toplam borçtadır."""
+    from routes.giris_routes import AYLIK_GRID_TAM_ODENDI_TOLERANS
+
+    if not isinstance(payload, dict):
+        return 0.0
+    ref = date(bugun.year, bugun.month, 1)
+    tol = float(AYLIK_GRID_TAM_ODENDI_TOLERANS)
+    toplam = 0.0
+    for a in payload.get("aylar") or []:
+        if not isinstance(a, dict):
+            continue
+        try:
+            cur = date(int(a.get("yil")), int(a.get("ay")), 1)
+        except (TypeError, ValueError):
+            continue
+        if cur >= ref:
+            continue
+        try:
+            tut = float(a.get("tutar_kdv_dahil") or a.get("brut_tutar_kdv") or 0)
+        except (TypeError, ValueError):
+            tut = 0.0
+        if tut != tut:
+            continue
+        tahsil = bool(a.get("tahsil_edildi"))
+        try:
+            kalan = float(a.get("kalan_tutar_kdv") or 0)
+        except (TypeError, ValueError):
+            kalan = 0.0
+        try:
+            odenen = float(a.get("odenen_tutar_kdv") or 0) if a.get("odenen_tutar_kdv") is not None else 0.0
+        except (TypeError, ValueError):
+            odenen = 0.0
+        kismi = bool(a.get("kismi_tahsilat")) or (odenen > tol and kalan > tol)
+        if tahsil and not kismi:
+            continue
+        add = min(tut, max(kalan, 0.0)) if kismi else tut
+        if add > tol:
+            toplam += add
+    return round(toplam, 2)
 
 
 def _wa_gecikme_gun(payload, bugun: date) -> int:
@@ -1230,6 +1274,7 @@ def asistan_wa_onizleme(mid: int, bugun: date | None = None) -> tuple[dict, int]
         "maske": maske,
         "grid_yok": bool(grid["grid_yok"]),
         "toplam_borc": grid.get("toplam_borc"),
+        "geciken_tutar": grid.get("geciken_tutar"),
         "geciken_ay": grid.get("geciken_ay"),
         "onerilen": onerilen,
         "sablonlar": liste,
@@ -1316,6 +1361,152 @@ def _wa_sonuc_sade(govde: dict, kod: int, metin: str) -> tuple[dict, int]:
     return {"ok": False, "durum": "hata", "mesaj": "Gönderilemedi"}, 400
 
 
+def _wa_ayni_tutar_link_oku(mid: int, kurus: int):
+    """Aynı tutarda açık link. Adres üretilmez, tablo açılmaz."""
+    from odeme_linki import ofisbir_istegi
+
+    if not ofisbir_istegi():
+        return None
+    try:
+        return fetch_one(
+            """
+            SELECT id, tutar_kurus, expires_at, whatsapp_mesaj
+            FROM public.odeme_linkleri
+            WHERE musteri_id = %s
+              AND tutar_kurus = %s
+              AND durum = 'bekliyor'
+              AND expires_at > NOW()
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1
+            """,
+            (int(mid), int(kurus)),
+        )
+    except Exception:
+        return {"_okunamadi": True}
+
+
+def _asistan_link_audit(uid: int, mid: int, link_id: int, kurus: int) -> None:
+    from audit_log import audit_yaz
+    from db import execute as calistir
+
+    audit_yaz(
+        calistir,
+        olay="odeme_linki_olustur",
+        varlik="odeme_linkleri",
+        kayit_id=int(link_id),
+        musteri_id=int(mid),
+        kullanici=str(int(uid)),
+        anlik={"musteri_id": int(mid)},
+        yeni={"id": int(link_id), "tutar_kurus": int(kurus), "musteri_id": int(mid)},
+        eski_yaz=False,
+    )
+
+
+def asistan_odeme_linki(uid: int, mid: int, data: dict, olustur_fn=None) -> tuple[dict, int]:
+    """Mevcut link üretimini çağırır. Mesaj göndermez, tahsilat yazmaz."""
+    from odeme_linki import (
+        kurus_from_tutar,
+        link_olustur,
+        ofis_imzasi,
+        ozellik_acik,
+        public_odeme_base,
+        tutar_tl,
+        wa_varsayilan_mesaj,
+        _tarih_ist,
+    )
+
+    if not ozellik_acik():
+        return {"ok": False, "mesaj": "Müşteri bulunamadı"}, 404
+    row = _wa_musteri(mid)
+    if not row:
+        return {"ok": False, "mesaj": "Müşteri bulunamadı"}, 404
+    secim = str((data or {}).get("secim") or "").strip().lower()
+    if secim not in ("toplam", "geciken", "ozel"):
+        return {"ok": False, "mesaj": "Tutar seçilmedi"}, 400
+    grid = _wa_grid_ozet(mid)
+    if secim in ("toplam", "geciken") and grid.get("grid_yok"):
+        return {"ok": False, "mesaj": "Borç hesaplanmadı"}, 409
+    try:
+        if secim == "toplam":
+            kurus = kurus_from_tutar(grid.get("toplam_borc"))
+        elif secim == "geciken":
+            kurus = kurus_from_tutar(grid.get("geciken_tutar"))
+        else:
+            kurus = kurus_from_tutar((data or {}).get("tutar"))
+    except (TypeError, ValueError):
+        return {"ok": False, "mesaj": "Tutar pozitif olmalı"}, 400
+    if not grid.get("grid_yok"):
+        try:
+            tavan = kurus_from_tutar(grid.get("toplam_borc"))
+        except (TypeError, ValueError):
+            tavan = 0
+        if kurus > tavan and not bool((data or {}).get("ust_onay")):
+            return {"ok": False, "mesaj": "Tutar toplam borcun üstünde", "ust_onay": True}, 409
+    tutar = tutar_tl(kurus)
+    mevcut = _wa_ayni_tutar_link_oku(mid, kurus)
+    if isinstance(mevcut, dict) and mevcut.get("_okunamadi"):
+        return {"ok": False, "mesaj": "Ödeme linki oluşturulamadı"}, 409
+    if mevcut:
+        url = _wa_kayitli_odeme_url(mevcut.get("whatsapp_mesaj"))
+        if not url:
+            return {"ok": False, "mesaj": "Geçerli link var, adresi yeniden kurulamıyor"}, 409
+        tarih = _tarih_ist(mevcut.get("expires_at"))
+        metin = wa_varsayilan_mesaj(
+            str(row.get("name") or ""),
+            "Ödeme",
+            tutar,
+            url,
+            mevcut.get("expires_at"),
+            ofis_imzasi(),
+        )
+        return {
+            "ok": True,
+            "yeniden": True,
+            "id": int(mevcut["id"]),
+            "tutar": tutar,
+            "gecerlilik": tarih,
+            "metin": metin,
+            "mesaj": "Mevcut geçerli link kullanıldı (tutar " + tutar + " ₺, son geçerlilik " + tarih + ")",
+        }, 200
+    if not bool((data or {}).get("onay")):
+        return {
+            "ok": False,
+            "onay_gerekli": True,
+            "tutar": tutar,
+            "mesaj": tutar + " ₺ tutarında ödeme linki oluşturulacak. Onaylıyor musun?",
+        }, 409
+    simdi = time.monotonic()
+    once = _LINK_KILIT.get(int(mid))
+    if once is not None and simdi - once < 15:
+        return {"ok": False, "mesaj": "Link oluşturma zaten başladı"}, 409
+    _LINK_KILIT[int(mid)] = simdi
+    fn = olustur_fn or link_olustur
+    try:
+        token, kayit = fn(int(mid), int(kurus), "Ödeme", 7, int(uid) or None, None)
+    except Exception:
+        _LINK_KILIT.pop(int(mid), None)
+        return {"ok": False, "mesaj": "Ödeme linki oluşturulamadı"}, 502
+    url = public_odeme_base().rstrip("/") + "/odeme/" + str(token or "")
+    metin = wa_varsayilan_mesaj(
+        str(row.get("name") or ""),
+        str(kayit.get("aciklama") or "Ödeme"),
+        tutar,
+        url,
+        kayit.get("expires_at"),
+        ofis_imzasi(),
+    )
+    _asistan_link_audit(uid, mid, int(kayit["id"]), kurus)
+    return {
+        "ok": True,
+        "yeniden": False,
+        "id": int(kayit["id"]),
+        "tutar": tutar,
+        "gecerlilik": _tarih_ist(kayit.get("expires_at")),
+        "metin": metin,
+        "mesaj": "",
+    }, 200
+
+
 @bp.route("/api/musteri/<int:mid>/whatsapp")
 @giris_gerekli
 def api_musteri_whatsapp_onizleme(mid: int):
@@ -1332,6 +1523,17 @@ def api_musteri_whatsapp_gonder(mid: int):
         request.get_json(silent=True) or {},
         request.headers.get("Origin") or "",
         request.host or "",
+    )
+    return jsonify(govde), kod
+
+
+@bp.route("/api/musteri/<int:mid>/odeme-linki", methods=["POST"])
+@giris_gerekli
+def api_musteri_odeme_linki(mid: int):
+    govde, kod = asistan_odeme_linki(
+        int(getattr(current_user, "id", 0) or 0),
+        mid,
+        request.get_json(silent=True) or {},
     )
     return jsonify(govde), kod
 

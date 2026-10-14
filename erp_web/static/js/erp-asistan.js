@@ -124,6 +124,10 @@
       ".ea-wa-metin{width:100%;min-height:120px;box-sizing:border-box;white-space:pre-wrap;}" +
       ".ea-wa-uyari{color:#ffab91;font-size:12px;}" +
       ".ea-wa-sonuc{font-size:13px;margin-top:8px;}" +
+      "#erp-asistan-wa-link-kutu{margin-top:8px;padding:8px;border:1px solid #1e3a50;border-radius:8px;}" +
+      "#erp-asistan-wa-link-kutu label{display:flex;gap:6px;align-items:center;margin:4px 0;font-size:13px;flex-wrap:wrap;}" +
+      "#erp-asistan-wa-link-uyari,#erp-asistan-wa-link-onay{color:#ffcc80;font-size:13px;}" +
+      "#erp-asistan-wa-ozel{max-width:120px;background:#0a1929;color:#e0f7fa;border:1px solid #1e3a50;border-radius:6px;padding:4px;}" +
       ".ea-wa-govde{display:flex;gap:12px;align-items:flex-start;}" +
       ".ea-wa-sol{flex:1;min-width:0;}" +
       ".ea-wa-sag{width:280px;max-height:420px;overflow:auto;border-left:1px solid #1e3a50;padding-left:8px;box-sizing:border-box;}" +
@@ -1482,8 +1486,19 @@
       '<p class="ea-wa-sonuc"></p>' +
       '<div class="erp-asistan-aksiyon">' +
       '<button type="button" id="erp-asistan-wa-gonder" disabled>Gönder</button>' +
+      '<button type="button" id="erp-asistan-wa-link">Ödeme linki</button>' +
       '<button type="button" id="erp-asistan-wa-onay" hidden>Onayla</button>' +
-      "</div></div>" +
+      "</div>" +
+      '<div id="erp-asistan-wa-link-kutu" hidden>' +
+      '<p>Tutar</p>' +
+      '<label><input type="radio" name="ea-wa-tutar" value="toplam"> Toplam borç <span id="erp-asistan-wa-toplam"></span></label>' +
+      '<label><input type="radio" name="ea-wa-tutar" value="geciken"> Geciken tutar <span id="erp-asistan-wa-geciken"></span></label>' +
+      '<label><input type="radio" name="ea-wa-tutar" value="ozel"> Özel tutar <input id="erp-asistan-wa-ozel" inputmode="decimal"></label>' +
+      '<p id="erp-asistan-wa-link-uyari" hidden></p>' +
+      '<p id="erp-asistan-wa-link-onay" hidden></p>' +
+      '<button type="button" id="erp-asistan-wa-link-ekle">Mesaja ekle</button> ' +
+      '<button type="button" id="erp-asistan-wa-link-degistir">Ödeme linki şablonuyla değiştir</button>' +
+      '<p id="erp-asistan-wa-link-sonuc"></p></div></div>' +
       '<aside class="ea-wa-sag"><p class="ea-wa-grup">Tüm mesajlar</p>' +
       '<input id="erp-asistan-wa-ara" class="ea-wa-ara" type="search" placeholder="Ara">' +
       '<div id="erp-asistan-wa-liste"></div></aside></div></div>';
@@ -1582,6 +1597,135 @@
     };
     ara.oninput = panelCiz;
     kutu.oninput = uyar;
+    var linkKutu = perde.querySelector("#erp-asistan-wa-link-kutu");
+    var linkUyari = perde.querySelector("#erp-asistan-wa-link-uyari");
+    var linkOnay = perde.querySelector("#erp-asistan-wa-link-onay");
+    var linkSonuc = perde.querySelector("#erp-asistan-wa-link-sonuc");
+    var linkBtn = perde.querySelector("#erp-asistan-wa-link");
+    var gridYok = true;
+    var toplamBorc = null;
+    var gecikenTutar = null;
+    var linkKilit = false;
+    var linkBekleyen = null;
+    function paraYazi(n) {
+      if (n == null || n === "") return "—";
+      return String(n).replace(".", ",");
+    }
+    function linkSecim() {
+      var seciliTutar = perde.querySelector("input[name=ea-wa-tutar]:checked");
+      return seciliTutar ? seciliTutar.value : "";
+    }
+    function linkPanel() {
+      linkKutu.hidden = false;
+      perde.querySelector("#erp-asistan-wa-toplam").textContent = gridYok ? "—" : paraYazi(toplamBorc);
+      var gecikenVar = !gridYok && Number(gecikenTutar) > 0;
+      perde.querySelector("#erp-asistan-wa-geciken").textContent = gecikenVar ? paraYazi(gecikenTutar) : "—";
+      perde.querySelectorAll("input[name=ea-wa-tutar]").forEach(function (el) {
+        var kilitli = gridYok && el.value !== "ozel";
+        if (!gecikenVar && el.value === "geciken") kilitli = true;
+        el.disabled = kilitli;
+        if (kilitli) el.checked = false;
+      });
+      if (gridYok) {
+        var ozel = perde.querySelector("input[name=ea-wa-tutar][value=ozel]");
+        if (ozel) ozel.checked = true;
+      }
+      linkUyari.hidden = !gridYok;
+      linkUyari.textContent = gridYok ? "Borç hesaplanmadı" : "";
+    }
+    function linkMetniKoy(metin, mod) {
+      var ek = String(kutu.value || "").replace(/\s+$/, "");
+      var sonraki = mod === "degistir" ? metin : (ek ? (ek + "\n" + metin) : metin);
+      if (String(sonraki || "").length > 1000) {
+        linkSonuc.textContent = "Mesaj çok uzun";
+        return;
+      }
+      kutu.value = sonraki;
+      if (mod === "degistir") {
+        sablonlar.forEach(function (s) {
+          if (s.anahtar === "link") {
+            s.metin = metin;
+            s.engel = false;
+            s.onizleme = "";
+            s.hover = "";
+          }
+        });
+        sec.value = "link";
+        aktif = "link";
+      }
+      temiz = kutu.value;
+      uyar();
+    }
+    function linkGonder(mod, onay, ust) {
+      if (linkKilit) return;
+      var secim = linkSecim();
+      if (!secim) {
+        linkUyari.hidden = false;
+        linkUyari.textContent = "Tutar seçilmedi";
+        return;
+      }
+      var ozelDeger = String(perde.querySelector("#erp-asistan-wa-ozel").value || "").trim();
+      if (secim === "ozel" && !(Number(ozelDeger.replace(",", ".")) > 0)) {
+        linkUyari.hidden = false;
+        linkUyari.textContent = "Tutar pozitif olmalı";
+        return;
+      }
+      linkKilit = true;
+      linkBtn.disabled = true;
+      fetch("/erp-notlar/api/musteri/" + encodeURIComponent(mid) + "/odeme-linki", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ secim: secim, tutar: ozelDeger, onay: !!onay, ust_onay: !!ust })
+      }).then(function (r) { return r.json().then(function (j) { return { kod: r.status, j: j || {} }; }).catch(function () { return { kod: r.status, j: {} }; }); })
+        .then(function (p) {
+          linkKilit = false;
+          linkBtn.disabled = false;
+          var j = p.j || {};
+          if (j.onay_gerekli || j.ust_onay) {
+            linkOnay.hidden = false;
+            linkOnay.textContent = j.mesaj || "";
+            linkBekleyen = { mod: mod, onay: j.onay_gerekli ? true : !!onay, ust: !!j.ust_onay };
+            return;
+          }
+          linkOnay.hidden = true;
+          linkBekleyen = null;
+          if (!j.ok || !j.metin) {
+            linkSonuc.textContent = j.mesaj || "Ödeme linki oluşturulamadı";
+            return;
+          }
+          linkMetniKoy(j.metin, mod);
+          linkSonuc.textContent = j.mesaj || "";
+        })
+        .catch(function () {
+          linkKilit = false;
+          linkBtn.disabled = false;
+          linkSonuc.textContent = "Ödeme linki oluşturulamadı";
+        });
+    }
+    linkBtn.onclick = linkPanel;
+    perde.querySelector("#erp-asistan-wa-link-ekle").onclick = function () {
+      if (linkBekleyen && linkBekleyen.mod === "ekle") {
+        var b = linkBekleyen;
+        linkBekleyen = null;
+        linkOnay.hidden = true;
+        linkGonder(b.mod, b.onay, b.ust);
+        return;
+      }
+      linkGonder("ekle", false, false);
+    };
+    perde.querySelector("#erp-asistan-wa-link-degistir").onclick = function () {
+      if (kirli() && !(linkBekleyen && linkBekleyen.mod === "degistir")) {
+        linkOnay.hidden = false;
+        linkOnay.textContent = "Düzenlemeniz silinecek";
+        linkBekleyen = { mod: "degistir", onay: false, ust: false, kirli: true };
+        return;
+      }
+      var b = linkBekleyen && linkBekleyen.mod === "degistir" ? linkBekleyen : { mod: "degistir", onay: false, ust: false };
+      linkBekleyen = null;
+      linkOnay.hidden = true;
+      linkGonder(b.mod, !!b.onay, !!b.ust);
+    };
     gonder.onclick = function () {
       if (waKilit || gonder.disabled) return;
       var ad = (perde.querySelector("h3").textContent || "Müşteri");
@@ -1629,6 +1773,9 @@
           gonder.disabled = true;
           return;
         }
+        gridYok = !!j.grid_yok;
+        toplamBorc = j.toplam_borc;
+        gecikenTutar = j.geciken_tutar;
         perde.querySelector("h3").textContent = j.unvan || unvan || "Müşteri";
         perde.querySelector(".ea-wa-maske").textContent = j.maske ? ("Numara " + j.maske) : "";
         sablonlar = (j.sablonlar || []).slice();
