@@ -670,13 +670,33 @@ def _gun_cozumle(raw) -> date | None:
         return None
 
 
-def _ozet_tarih_penceresi(tarih: str, bas_raw, bitis_raw):
+_GORUSME_TARIH = frozenset({"hepsi", "bugun", "dun", "bu_hafta", "bu_ay", "son_7", "son_30", "ozel"})
+_HATIRLATMA_TARIH = frozenset({"hepsi", "bugun", "yarin", "sonraki_hafta", "sonraki_ay", "sonraki_30", "ozel"})
+
+
+def _ozet_tarih_sec(tarih: str, turu: str) -> str:
+    """Türe ait olmayan kayıtlı seçim sessizce Hepsi olur."""
+    sec = str(tarih or "hepsi").strip().lower() or "hepsi"
+    izin = _HATIRLATMA_TARIH if turu == "hatirlatma" else _GORUSME_TARIH
+    if sec not in izin:
+        return "hepsi"
+    return sec
+
+
+def _ay_basi(gun: date, kayma: int) -> date:
+    ay = gun.month - 1 + kayma
+    return date(gun.year + ay // 12, ay % 12 + 1, 1)
+
+
+def _ozet_tarih_penceresi(tarih: str, bas_raw, bitis_raw, bugun: date | None = None):
     """İstanbul günü. Dönüş: (başlangıç, bitiş hariç, hata).
 
     Bitiş ertesi gün 00:00 olduğu için seçilen günün 23:59:59'u aralığa girer.
+    Görüşme pencereleri (bu hafta/ay bugünde biter) aynı kalır.
     """
     sec = str(tarih or "hepsi").strip().lower()
-    bugun = datetime.now(IST).date()
+    if bugun is None:
+        bugun = datetime.now(IST).date()
     if sec in ("", "hepsi"):
         return None, None, None
     if sec == "bugun":
@@ -684,6 +704,9 @@ def _ozet_tarih_penceresi(tarih: str, bas_raw, bitis_raw):
     if sec == "dun":
         dun = bugun - timedelta(days=1)
         return _gun_basi(dun), _gun_basi(bugun), None
+    if sec == "yarin":
+        yarin = bugun + timedelta(days=1)
+        return _gun_basi(yarin), _gun_basi(yarin + timedelta(days=1)), None
     if sec == "bu_hafta":
         pazartesi = bugun - timedelta(days=bugun.weekday())
         return _gun_basi(pazartesi), _gun_basi(bugun + timedelta(days=1)), None
@@ -693,6 +716,14 @@ def _ozet_tarih_penceresi(tarih: str, bas_raw, bitis_raw):
         return _gun_basi(bugun - timedelta(days=6)), _gun_basi(bugun + timedelta(days=1)), None
     if sec == "son_30":
         return _gun_basi(bugun - timedelta(days=29)), _gun_basi(bugun + timedelta(days=1)), None
+    if sec == "sonraki_hafta":
+        pazartesi = bugun - timedelta(days=bugun.weekday()) + timedelta(days=7)
+        return _gun_basi(pazartesi), _gun_basi(pazartesi + timedelta(days=7)), None
+    if sec == "sonraki_ay":
+        bas_gun = _ay_basi(bugun, 1)
+        return _gun_basi(bas_gun), _gun_basi(_ay_basi(bas_gun, 1)), None
+    if sec == "sonraki_30":
+        return _gun_basi(bugun), _gun_basi(bugun + timedelta(days=30)), None
     if sec == "ozel":
         bas = _gun_cozumle(bas_raw)
         bitis = _gun_cozumle(bitis_raw)
@@ -801,8 +832,9 @@ def api_ozet():
     if turu not in _OZET_TARIH_KOLON:
         turu = "gorusme"
     kolon = _OZET_TARIH_KOLON[turu]
+    sec = _ozet_tarih_sec(request.args.get("tarih"), turu)
     bas, bitis_haric, tarih_hata = _ozet_tarih_penceresi(
-        request.args.get("tarih"),
+        sec,
         request.args.get("bas"),
         request.args.get("bitis"),
     )
@@ -810,7 +842,7 @@ def api_ozet():
         return jsonify({"ok": False, "mesaj": tarih_hata}), 400
     tarih_sql = ""
     tarih_params: tuple = ()
-    if str(request.args.get("tarih") or "hepsi").strip().lower() not in ("", "hepsi"):
+    if sec != "hepsi":
         tarih_sql = f"""
           AND {kolon} IS NOT NULL
           AND (%s::timestamptz IS NULL OR {kolon} >= %s::timestamptz)

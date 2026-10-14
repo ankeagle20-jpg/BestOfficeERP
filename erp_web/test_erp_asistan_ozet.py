@@ -185,7 +185,7 @@ def test_kaynak_yazmaz():
     check("fetch_all helperda yok", "fetch_all" not in src)
     check("ozet tek ekleme", api.count("_ozet_grid_borc_ekle(") == 1)
     layout = (ROOT / "templates" / "layout.html").read_text(encoding="utf-8")
-    check("js v=4", "js/erp-asistan.js') }}?v=4" in layout)
+    check("js v=5", "js/erp-asistan.js') }}?v=5" in layout)
     check("kullanici id", "ERP_ASISTAN_UID" in layout)
     js = (ROOT / "static" / "js" / "erp-asistan.js").read_text(encoding="utf-8")
     check("ipucu borc", "Ekstredeki ek fatura/tediye/devir dahil değildir." in js)
@@ -259,6 +259,241 @@ def test_gecmis_sayfa():
         en.ensure_erp_notlar_tablolari, en.fetch_all, en._uid, en._benim_departman = eski
 
 
+def _gorunur_mu(row, uid, dep):
+    if int(row["olusturan_kullanici_id"]) == int(uid):
+        return True
+    if row["gorunurluk"] != "ekip":
+        return False
+    if int(uid) in row["alicilar"]:
+        return True
+    return bool(row["departman"]) and row["departman"] == dep
+
+
+def test_gorunurluk_liste_popup():
+    """Kişisel not yalnız yazana, ekip notu alıcı veya aynı departmana. Liste ve popup aynı süzgeç."""
+    import auth
+    from datetime import datetime
+    import routes.erp_notlar_routes as en
+    from test_plan_degistir import _app
+
+    class K:
+        is_authenticated = True
+        is_active = True
+        is_anonymous = False
+        id = 5
+
+        def get_id(self):
+            return "5"
+
+    def satir(i, uid, gor, dep, alicilar, saat, hedef):
+        return {
+            "id": i,
+            "olusturan_kullanici_id": uid,
+            "gorunurluk": gor,
+            "departman": dep,
+            "alicilar": alicilar,
+            "not_metni": "n-%s" % i,
+            "durum": "bekliyor",
+            "created_at": datetime(2026, 10, 10, saat, 0),
+            "hatirlatma_zamani": datetime(2026, 10, 11, 9, 0),
+            "olusturan_ad": "Y",
+            "gorusulen_kisi": "K",
+            "hedef_id": hedef,
+            "ozet_musteri_adi": "••••",
+            "musteri_adi": "••••",
+            "iliski_tip": "musteri",
+            "iliski_id": hedef,
+        }
+
+    havuz = [
+        satir(10, 9, "kisisel", "", [], 18, 7),
+        satir(11, 9, "ekip", "satis", [], 17, 7),
+        satir(12, 9, "ekip", "", [5], 16, 7),
+        satir(13, 9, "ekip", "muhasebe", [8], 15, 7),
+        satir(14, 5, "kisisel", "", [], 14, 7),
+        satir(15, 9, "kisisel", "", [], 19, 8),
+    ]
+    sqls = []
+
+    def fake_all(sql, params=None):
+        sqls.append(sql)
+        params = tuple(params or ())
+        uid, dep = int(params[0]), str(params[2])
+        sec = [r for r in havuz if _gorunur_mu(r, uid, dep)]
+        if "DISTINCT ON" in sql:
+            grup = {}
+            for r in sorted(sec, key=lambda r: (r["created_at"], r["id"]), reverse=True):
+                grup.setdefault(r["hedef_id"], r)
+            return list(grup.values())
+        mid = int(params[-1])
+        sec = [r for r in sec if r["hedef_id"] == mid]
+        sec.sort(key=lambda r: (r["created_at"], r["id"]), reverse=True)
+        lim = int(sql.split("LIMIT", 1)[1].split("OFFSET")[0].strip())
+        off = int(sql.rsplit("OFFSET", 1)[-1].strip())
+        return sec[off:off + lim]
+
+    eski = (
+        auth.current_user,
+        en.ensure_erp_notlar_tablolari,
+        en.fetch_all,
+        en._uid,
+        en._benim_departman,
+        en._ozet_grid_borc_ekle,
+    )
+    auth.current_user = K()
+    en.ensure_erp_notlar_tablolari = lambda: None
+    en.fetch_all = fake_all
+    en._uid = lambda: 5
+    en._benim_departman = lambda: "satis"
+    en._ozet_grid_borc_ekle = lambda notlar: (notlar, 0, 0.0)
+    app = _app()
+    try:
+        paket = en.musteri_gecmis_paket(7, 50, 0)
+        ids = [n["id"] for n in paket["notlar"]]
+        check("kisisel baskasi gizli", 10 not in ids and 15 not in ids)
+        check("ekip departman gorunur", 11 in ids)
+        check("ekip alici gorunur", 12 in ids)
+        check("ekip yabanci gizli", 13 not in ids)
+        check("kendi notu gorunur", 14 in ids)
+        with app.test_request_context("/erp-notlar/api/ozet?kapsam=hepsi"):
+            yanit = en.api_ozet()
+        govde = yanit.get_json()
+        liste = [n for n in (govde or {}).get("notlar") or [] if n.get("musteri_id") == 7]
+        kural = en._gorunur_sql()
+        check("ayni süzgec", any(kural in s and "OFFSET" in s for s in sqls) and any(kural in s and "DISTINCT ON" in s for s in sqls))
+        check("son aciklama ayni", len(liste) == 1 and liste[0]["id"] == paket["notlar"][0]["id"] == 11)
+    finally:
+        (
+            auth.current_user,
+            en.ensure_erp_notlar_tablolari,
+            en.fetch_all,
+            en._uid,
+            en._benim_departman,
+            en._ozet_grid_borc_ekle,
+        ) = eski
+
+
+def _icinde(an, bas, bit):
+    return bas <= an < bit
+
+
+def test_hatirlatma_pencereleri():
+    from datetime import datetime
+    import auth
+    import routes.erp_notlar_routes as en
+
+    def an(y, m, d, sa=0, dk=0, sn=0):
+        return datetime(y, m, d, sa, dk, sn, tzinfo=en.IST)
+
+    def pencere(sec, gun, turu="hatirlatma", bas=None, bit=None):
+        etkin = en._ozet_tarih_sec(sec, turu)
+        return etkin, en._ozet_tarih_penceresi(etkin, bas, bit, bugun=gun)
+
+    car = date(2026, 10, 14)
+    check("carsamba", car.weekday() == 2)
+    sec, (bas, bit, err) = pencere("bugun", car, "gorusme")
+    check("gorusme bugun", sec == "bugun" and err is None and bas == an(2026, 10, 14) and bit == an(2026, 10, 15))
+    check("gun sonu dahil", _icinde(an(2026, 10, 14, 23, 59, 59), bas, bit))
+    check("ertesi gun basi haric", not _icinde(an(2026, 10, 15), bas, bit))
+    _, (bas, bit, _) = pencere("dun", car, "gorusme")
+    check("gorusme dun", bas == an(2026, 10, 13) and bit == an(2026, 10, 14))
+    _, (bas, bit, _) = pencere("bu_hafta", car, "gorusme")
+    check("gorusme bu hafta", bas == an(2026, 10, 12) and bit == an(2026, 10, 15))
+    check("gorusme pazar disi", not _icinde(an(2026, 10, 18, 12), bas, bit))
+    _, (bas, bit, _) = pencere("bu_hafta", date(2026, 10, 12), "gorusme")
+    check("gorusme pazartesi", date(2026, 10, 12).weekday() == 0 and bas == an(2026, 10, 12) and bit == an(2026, 10, 13))
+    _, (bas, bit, _) = pencere("bu_hafta", date(2026, 10, 18), "gorusme")
+    check("gorusme pazar", date(2026, 10, 18).weekday() == 6 and bas == an(2026, 10, 12) and bit == an(2026, 10, 19))
+    _, (bas, bit, _) = pencere("bu_ay", car, "gorusme")
+    check("gorusme bu ay", bas == an(2026, 10, 1) and bit == an(2026, 10, 15))
+    _, (bas, bit, _) = pencere("son_7", car, "gorusme")
+    check("gorusme son 7", bas == an(2026, 10, 8) and bit == an(2026, 10, 15))
+    _, (bas, bit, _) = pencere("son_30", car, "gorusme")
+    check("gorusme son 30", bas == an(2026, 9, 15) and bit == an(2026, 10, 15))
+    _, (bas, bit, err) = pencere("ozel", car, "gorusme", "2026-12-31", "2027-01-02")
+    check("ozel sinir dahil", err is None and _icinde(an(2026, 12, 31), bas, bit) and _icinde(an(2027, 1, 2, 23, 59, 59), bas, bit))
+    check("ozel disi", not _icinde(an(2027, 1, 3), bas, bit) and not _icinde(an(2026, 12, 30, 23, 59, 59), bas, bit))
+    sec, (bas, bit, err) = pencere("ozel", car, "hatirlatma", "2026-05-02", "2026-05-01")
+    check("ozel ters", err == "Başlangıç tarihi bitişten sonra olamaz")
+
+    sec, (bas, bit, err) = pencere("yarin", car)
+    check("yarin", sec == "yarin" and bas == an(2026, 10, 15) and bit == an(2026, 10, 16) and err is None)
+    check("yarin sonu", _icinde(an(2026, 10, 15, 23, 59, 59), bas, bit) and not _icinde(an(2026, 10, 16), bas, bit))
+    _, (bas, bit, _) = pencere("sonraki_hafta", car)
+    check("sonraki hafta carsamba", bas == an(2026, 10, 19) and bit == an(2026, 10, 26))
+    check("bu pazar haric", not _icinde(an(2026, 10, 18, 23, 59, 59), bas, bit))
+    check("sonraki pazar dahil", _icinde(an(2026, 10, 25, 23, 59, 59), bas, bit) and not _icinde(an(2026, 10, 26), bas, bit))
+    _, (bas, bit, _) = pencere("sonraki_hafta", date(2026, 10, 12))
+    check("sonraki hafta pazartesi", bas == an(2026, 10, 19) and not _icinde(an(2026, 10, 12, 12), bas, bit))
+    _, (bas, bit, _) = pencere("sonraki_hafta", date(2026, 10, 18))
+    check("sonraki hafta pazar", bas == an(2026, 10, 19) and bit == an(2026, 10, 26))
+    yil = date(2026, 12, 27)
+    check("aralik pazari", yil.weekday() == 6)
+    _, (bas, bit, _) = pencere("sonraki_hafta", yil)
+    check("hafta yil sonu", bas == an(2026, 12, 28) and bit == an(2027, 1, 4))
+    check("ocak pazar dahil", _icinde(an(2027, 1, 3, 23, 59, 59), bas, bit))
+    _, (bas, bit, _) = pencere("sonraki_ay", car)
+    check("sonraki ay", bas == an(2026, 11, 1) and bit == an(2026, 12, 1))
+    check("ay siniri", not _icinde(an(2026, 10, 31, 23, 59, 59), bas, bit) and _icinde(an(2026, 11, 30, 23, 59, 59), bas, bit))
+    _, (bas, bit, _) = pencere("sonraki_ay", date(2026, 12, 31))
+    check("ay yil sonu", bas == an(2027, 1, 1) and bit == an(2027, 2, 1))
+    _, (bas, bit, _) = pencere("sonraki_ay", date(2026, 1, 31))
+    check("subat", bas == an(2026, 2, 1) and bit == an(2026, 3, 1) and _icinde(an(2026, 2, 28, 23, 59, 59), bas, bit))
+    _, (bas, bit, _) = pencere("sonraki_30", car)
+    check("otuz gun", bas == an(2026, 10, 14) and bit == an(2026, 11, 13))
+    check("otuz dahil", _icinde(an(2026, 10, 14), bas, bit) and _icinde(an(2026, 11, 12, 23, 59, 59), bas, bit))
+    check("otuz haric", not _icinde(an(2026, 10, 13, 23, 59, 59), bas, bit) and not _icinde(an(2026, 11, 13), bas, bit))
+    _, (bas, bit, _) = pencere("sonraki_30", date(2026, 12, 15))
+    check("otuz yil sonu", bas == an(2026, 12, 15) and bit == an(2027, 1, 14))
+    sec, (bas, bit, _) = pencere("dun", car, "hatirlatma")
+    check("hatirlatmada dun hepsi", sec == "hepsi" and bas is None and bit is None)
+    sec, _ = pencere("yarin", car, "gorusme")
+    check("gorusmede yarin hepsi", sec == "hepsi")
+
+    class K:
+        is_authenticated = True
+        is_active = True
+        is_anonymous = False
+        id = 5
+
+        def get_id(self):
+            return "5"
+
+    sqls = []
+
+    def fake_all(sql, params=None):
+        sqls.append((sql, tuple(params or ())))
+        return []
+
+    from test_plan_degistir import _app
+    eski = (auth.current_user, en.ensure_erp_notlar_tablolari, en.fetch_all, en._uid, en._benim_departman, en._ozet_grid_borc_ekle)
+    auth.current_user = K()
+    en.ensure_erp_notlar_tablolari = lambda: None
+    en.fetch_all = fake_all
+    en._uid = lambda: 5
+    en._benim_departman = lambda: "satis"
+    en._ozet_grid_borc_ekle = lambda notlar: (notlar, 0, 0.0)
+    app = _app()
+    try:
+        with app.test_request_context("/erp-notlar/api/ozet?kapsam=acik&q=x&tarih_turu=hatirlatma&tarih=yarin"):
+            en.api_ozet()
+        sql, params = sqls[0]
+        check("tek sorgu", len(sqls) == 1)
+        check("hatirlatma alani", "ozet.hatirlatma_zamani IS NOT NULL" in sql and "ILIKE" in sql and "bekliyor" in sql)
+        beklenen = en._ozet_tarih_penceresi("yarin", None, None)
+        check("yarin parametre", params[-4:] == (beklenen[0], beklenen[0], beklenen[1], beklenen[1]))
+        sqls.clear()
+        with app.test_request_context("/erp-notlar/api/ozet?kapsam=hepsi&tarih_turu=hatirlatma&tarih=dun"):
+            en.api_ozet()
+        check("hatirlatmasiz hepsi", "ozet.hatirlatma_zamani IS NOT NULL" not in sqls[0][0] and len(sqls) == 1)
+        sqls.clear()
+        with app.test_request_context("/erp-notlar/api/ozet?tarih_turu=gorusme&tarih=bugun"):
+            en.api_ozet()
+        check("gorusme kolonu", "ozet.created_at IS NOT NULL" in sqls[0][0] and "ozet.hatirlatma_zamani IS NOT NULL" not in sqls[0][0])
+    finally:
+        (auth.current_user, en.ensure_erp_notlar_tablolari, en.fetch_all, en._uid, en._benim_departman, en._ozet_grid_borc_ekle) = eski
+
+
 def arayuz():
     try:
         from playwright.sync_api import sync_playwright
@@ -276,7 +511,7 @@ def arayuz():
             "<!doctype html><html><head><meta charset='utf-8'></head><body>"
             "<script>window.ERP_ASISTAN_UID = 41;</script>"
             "<div id='erp-asistan-ozet'></div>"
-            "<script src='/static/js/erp-asistan.js?v=4'></script>"
+            "<script src='/static/js/erp-asistan.js?v=5'></script>"
             "</body></html>"
         )
 
@@ -286,7 +521,7 @@ def arayuz():
             "<!doctype html><html><head><meta charset='utf-8'></head><body>"
             "<script>window.ERP_ASISTAN_UID = 99;</script>"
             "<div id='erp-asistan-ozet'></div>"
-            "<script src='/static/js/erp-asistan.js?v=4'></script>"
+            "<script src='/static/js/erp-asistan.js?v=5'></script>"
             "</body></html>"
         )
 
@@ -308,6 +543,7 @@ def arayuz():
     ]
     kolon_istek = []
     gecmis_istek = []
+    ozet_istek = []
 
     def isle(route, request):
         try:
@@ -350,6 +586,7 @@ def arayuz():
             route.fulfill(status=200, content_type="application/json", body=json.dumps(govde))
             return
         if yol.startswith("/erp-notlar/api/ozet"):
+            ozet_istek.append(tam)
             route.fulfill(status=200, content_type="application/json", body=json.dumps({
                 "ok": True, "notlar": notlar, "grid_musteri": 3, "grid_ms": 1.5,
             }))
@@ -408,6 +645,7 @@ def arayuz():
         check("kayitli gizlenen kalir", "durum" in birlesik["gizli"])
         s.evaluate("window.erpAsistanOzetYukle()")
         s.wait_for_selector("#erp-asistan-ozet-tablo th", timeout=8000)
+        check("is bitmemis and", s.locator("#erp-asistan-ozet-tablo tbody tr").count() == 3)
         baslik = s.evaluate("() => Array.from(document.querySelectorAll('#erp-asistan-ozet-tablo th')).map(th => th.textContent)")
         check("eski tercihte yeni sutun", baslik[:3] == ["Müşteri", "Toplam borç", "Geciken ay"])
         check("gorusen varsayilan gizli degil kayitta", "Görüşen Kişi" in "".join(baslik))
@@ -539,6 +777,71 @@ def arayuz():
         s.wait_for_selector("#erp-asistan-ozet-tablo th")
         b99 = s.evaluate("() => Array.from(document.querySelectorAll('#erp-asistan-ozet-tablo th')).map(th => th.getAttribute('data-kolon'))")
         check("kullanici 99 ayri", b99[0] == "durum" and "musteri" not in b99)
+        s.goto("http://asistan.test/asistan-test", wait_until="load")
+        s.evaluate("window.erpAsistanOzetYukle()")
+        s.wait_for_selector("#erp-asistan-ozet-tarih")
+        gorusme = s.evaluate(
+            """() => Array.from(document.querySelectorAll('#erp-asistan-ozet-tarih option')).map(o => o.value)"""
+        )
+        check("gorusme secenek ayni", gorusme == ["hepsi", "bugun", "dun", "bu_hafta", "bu_ay", "son_7", "son_30", "ozel"])
+        s.select_option("#erp-asistan-ozet-tur", "hatirlatma")
+        s.wait_for_function("() => document.querySelector('#erp-asistan-ozet-tarih').value === 'hepsi'")
+        hat = s.evaluate(
+            """() => Array.from(document.querySelectorAll('#erp-asistan-ozet-tarih option')).map(o => ({v:o.value, t:o.title}))"""
+        )
+        check("hatirlatma secenek", [o["v"] for o in hat] == [
+            "hepsi", "bugun", "yarin", "sonraki_hafta", "sonraki_ay", "sonraki_30", "ozel"])
+        basliklar = {o["v"]: o["t"] for o in hat}
+        check("hatirlatma ipucu", basliklar.get("yarin") == "Yarının tamamı"
+              and "Pazartesi" in basliklar.get("sonraki_hafta", "")
+              and "30 gün" in basliklar.get("sonraki_30", "")
+              and "dahil" in basliklar.get("ozel", ""))
+        s.select_option("#erp-asistan-ozet-tarih", "ozel")
+        s.fill("#erp-asistan-ozet-bas", "2026-03-01")
+        s.fill("#erp-asistan-ozet-bit", "2026-03-02")
+        s.select_option("#erp-asistan-ozet-tur", "gorusme")
+        s.wait_for_function("() => document.querySelector('#erp-asistan-ozet-tarih').value === 'hepsi'")
+        temiz = s.evaluate(
+            """() => ({
+                bas: document.querySelector('#erp-asistan-ozet-bas').value,
+                bit: document.querySelector('#erp-asistan-ozet-bit').value,
+                gizli: document.querySelector('#erp-asistan-ozet-ozel').hidden
+            })"""
+        )
+        check("tur degisince sifir", temiz["bas"] == "" and temiz["bit"] == "" and temiz["gizli"] is True)
+        s.select_option("#erp-asistan-ozet-tur", "hatirlatma")
+        s.select_option("#erp-asistan-ozet-tarih", "yarin")
+        for _ in range(20):
+            if any("tarih_turu=hatirlatma" in u and "tarih=yarin" in u for u in ozet_istek):
+                break
+            s.wait_for_timeout(100)
+        check("yarin istegi", any("tarih_turu=hatirlatma" in u and "tarih=yarin" in u for u in ozet_istek))
+        s.evaluate(
+            """() => {
+                document.querySelectorAll('#erp-asistan-ozet-tablo td').forEach(function (td) {
+                    td.style.filter = 'blur(8px)';
+                });
+            }"""
+        )
+        tarih_png = os.path.join(os.environ.get("TEMP", "."), "erp_asistan_hatirlatma_tarih.png")
+        s.locator(".ea-ozet-arac").screenshot(path=tarih_png)
+        check("tarih ekran", os.path.isfile(tarih_png))
+        print("ekran " + tarih_png)
+        s.evaluate(
+            """() => sessionStorage.setItem('asistan_ozet_tarih_41',
+               JSON.stringify({turu:'hatirlatma', sec:'dun', bas:'2026-01-01', bit:'2026-02-01'}))"""
+        )
+        s.goto("http://asistan.test/asistan-test", wait_until="load")
+        s.evaluate("window.erpAsistanOzetYukle()")
+        s.wait_for_selector("#erp-asistan-ozet-tarih")
+        gecersiz = s.evaluate(
+            """() => ({
+                tur: document.querySelector('#erp-asistan-ozet-tur').value,
+                sec: document.querySelector('#erp-asistan-ozet-tarih').value,
+                bas: document.querySelector('#erp-asistan-ozet-bas').value
+            })"""
+        )
+        check("eski secim hepsi", gecersiz["tur"] == "hatirlatma" and gecersiz["sec"] == "hepsi" and gecersiz["bas"] == "")
         tarayici.close()
 
 
@@ -546,6 +849,8 @@ if __name__ == "__main__":
     test_grid_sayilari()
     test_kaynak_yazmaz()
     test_gecmis_sayfa()
+    test_gorunurluk_liste_popup()
+    test_hatirlatma_pencereleri()
     arayuz()
     if FAILS:
         print("FAIL", len(FAILS))
