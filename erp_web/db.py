@@ -5460,6 +5460,224 @@ def ensure_ledger_registered_asset_tables():
             print(f"ledger registered asset index: {e}")
 
 
+def ensure_partner_program_tables() -> None:
+    """Ortak programı tabloları. Yalnız public. Kiracı şemasına kopyalanmaz.
+
+    Çağrı platform isteğinde bir kez yapılır. _run_ensure_ddl_once kullanılmaz.
+    payments / invoices / subscriptions şemasına dokunmaz.
+    """
+    execute(
+        """
+        CREATE TABLE IF NOT EXISTS public.partner_accounts (
+            id                  SERIAL PRIMARY KEY,
+            tur                 TEXT NOT NULL,
+            ad                  TEXT NOT NULL,
+            durum               TEXT NOT NULL DEFAULT 'aktif',
+            parent_partner_id   INTEGER,
+            kademe              TEXT NOT NULL DEFAULT 'starter',
+            created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT partner_accounts_tur_chk
+                CHECK (tur IN ('distributor', 'bayi')),
+            CONSTRAINT partner_accounts_durum_chk
+                CHECK (durum IN ('aktif', 'pasif')),
+            CONSTRAINT partner_accounts_kademe_chk
+                CHECK (kademe IN ('starter', 'silver', 'gold', 'platinum')),
+            CONSTRAINT partner_accounts_ad_chk
+                CHECK (length(trim(ad)) > 0),
+            CONSTRAINT partner_accounts_parent_self_chk
+                CHECK (parent_partner_id IS NULL OR parent_partner_id <> id),
+            CONSTRAINT partner_accounts_parent_fkey
+                FOREIGN KEY (parent_partner_id)
+                REFERENCES public.partner_accounts (id)
+        )
+        """
+    )
+    execute(
+        """
+        CREATE TABLE IF NOT EXISTS public.partner_program_settings (
+            id          SERIAL PRIMARY KEY,
+            valid_from  TIMESTAMPTZ NOT NULL,
+            valid_to    TIMESTAMPTZ,
+            payload     JSONB NOT NULL,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT partner_program_settings_dates_chk
+                CHECK (valid_to IS NULL OR valid_to > valid_from)
+        )
+        """
+    )
+    execute(
+        """
+        CREATE TABLE IF NOT EXISTS public.partner_codes (
+            id              SERIAL PRIMARY KEY,
+            kod             TEXT NOT NULL,
+            partner_id      INTEGER NOT NULL,
+            tur             TEXT NOT NULL DEFAULT 'satis',
+            gecerlilik_bas  TIMESTAMPTZ NOT NULL,
+            gecerlilik_bit  TIMESTAMPTZ,
+            aktif           BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT partner_codes_kod_uniq UNIQUE (kod),
+            CONSTRAINT partner_codes_tur_chk CHECK (tur = 'satis'),
+            CONSTRAINT partner_codes_dates_chk
+                CHECK (gecerlilik_bit IS NULL OR gecerlilik_bit > gecerlilik_bas),
+            CONSTRAINT partner_codes_partner_fkey
+                FOREIGN KEY (partner_id) REFERENCES public.partner_accounts (id)
+        )
+        """
+    )
+    execute(
+        """
+        CREATE TABLE IF NOT EXISTS public.partner_code_redemptions (
+            id                  SERIAL PRIMARY KEY,
+            tenant_id           INTEGER,
+            invoice_id          BIGINT,
+            signup_intent_id    BIGINT,
+            partner_id          INTEGER NOT NULL,
+            code_id             INTEGER NOT NULL,
+            bagli_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT partner_code_redemptions_tenant_uniq UNIQUE (tenant_id),
+            CONSTRAINT partner_code_redemptions_invoice_uniq UNIQUE (invoice_id),
+            CONSTRAINT partner_code_redemptions_intent_uniq UNIQUE (signup_intent_id),
+            CONSTRAINT partner_code_redemptions_partner_fkey
+                FOREIGN KEY (partner_id) REFERENCES public.partner_accounts (id),
+            CONSTRAINT partner_code_redemptions_code_fkey
+                FOREIGN KEY (code_id) REFERENCES public.partner_codes (id),
+            CONSTRAINT partner_code_redemptions_tenant_fkey
+                FOREIGN KEY (tenant_id) REFERENCES public.tenants (id) ON DELETE CASCADE,
+            CONSTRAINT partner_code_redemptions_invoice_fkey
+                FOREIGN KEY (invoice_id)
+                REFERENCES public.platform_tenant_invoices (id) ON DELETE CASCADE,
+            CONSTRAINT partner_code_redemptions_intent_fkey
+                FOREIGN KEY (signup_intent_id)
+                REFERENCES public.platform_signup_intents (id) ON DELETE CASCADE
+        )
+        """
+    )
+    execute(
+        """
+        CREATE TABLE IF NOT EXISTS public.partner_commission_entries (
+            id                  BIGSERIAL PRIMARY KEY,
+            payment_id          BIGINT NOT NULL,
+            invoice_id          BIGINT,
+            tenant_id           INTEGER,
+            partner_id          INTEGER NOT NULL,
+            rol                 TEXT NOT NULL,
+            tur                 TEXT NOT NULL,
+            matrah_brut         NUMERIC(14, 2) NOT NULL,
+            kdv_orani_pct       NUMERIC(6, 2) NOT NULL,
+            matrah_net          NUMERIC(14, 2) NOT NULL,
+            oran_pct            NUMERIC(8, 4) NOT NULL,
+            tutar               NUMERIC(14, 2) NOT NULL,
+            durum               TEXT NOT NULL DEFAULT 'bekliyor',
+            hold_until          TIMESTAMPTZ,
+            ayar_surum_id       INTEGER NOT NULL,
+            oran_snapshot       JSONB NOT NULL,
+            tavan_uygulandi     BOOLEAN NOT NULL DEFAULT FALSE,
+            iptal_gerekce       TEXT,
+            odendi_at           TIMESTAMPTZ,
+            odeme_referans      TEXT,
+            created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT partner_commission_entries_rol_chk
+                CHECK (rol IN ('bayi', 'distributor')),
+            CONSTRAINT partner_commission_entries_tur_chk
+                CHECK (tur IN ('satis', 'yenileme')),
+            CONSTRAINT partner_commission_entries_durum_chk
+                CHECK (durum IN ('bekliyor', 'onaylandi', 'odendi', 'iptal')),
+            CONSTRAINT partner_commission_entries_tutar_chk
+                CHECK (tutar >= 0 AND matrah_brut >= 0 AND matrah_net >= 0),
+            CONSTRAINT partner_commission_entries_uniq
+                UNIQUE (payment_id, partner_id, rol),
+            CONSTRAINT partner_commission_entries_partner_fkey
+                FOREIGN KEY (partner_id) REFERENCES public.partner_accounts (id),
+            CONSTRAINT partner_commission_entries_payment_fkey
+                FOREIGN KEY (payment_id)
+                REFERENCES public.platform_tenant_payments (id),
+            CONSTRAINT partner_commission_entries_invoice_fkey
+                FOREIGN KEY (invoice_id)
+                REFERENCES public.platform_tenant_invoices (id),
+            CONSTRAINT partner_commission_entries_ayar_fkey
+                FOREIGN KEY (ayar_surum_id)
+                REFERENCES public.partner_program_settings (id)
+        )
+        """
+    )
+    for stmt in (
+        "CREATE INDEX IF NOT EXISTS partner_codes_partner_idx "
+        "ON public.partner_codes (partner_id)",
+        "CREATE INDEX IF NOT EXISTS partner_commission_entries_durum_idx "
+        "ON public.partner_commission_entries (durum, hold_until)",
+        "CREATE INDEX IF NOT EXISTS partner_program_settings_valid_idx "
+        "ON public.partner_program_settings (valid_from)",
+    ):
+        try:
+            execute(stmt)
+        except Exception as e:
+            print(f"partner program index: {e}")
+    try:
+        execute(
+            """
+            CREATE OR REPLACE FUNCTION public.partner_accounts_depth_chk()
+            RETURNS trigger
+            LANGUAGE plpgsql
+            AS $$
+            DECLARE
+                parent_tur TEXT;
+            BEGIN
+                IF NEW.tur = 'distributor' AND NEW.parent_partner_id IS NOT NULL THEN
+                    RAISE EXCEPTION 'distributor parent olamaz';
+                END IF;
+                IF NEW.parent_partner_id IS NOT NULL THEN
+                    SELECT tur INTO parent_tur
+                    FROM public.partner_accounts
+                    WHERE id = NEW.parent_partner_id;
+                    IF parent_tur IS DISTINCT FROM 'distributor' THEN
+                        RAISE EXCEPTION 'bayi ustu yalniz distributor';
+                    END IF;
+                END IF;
+                RETURN NEW;
+            END;
+            $$
+            """
+        )
+        execute("DROP TRIGGER IF EXISTS partner_accounts_depth_trg ON public.partner_accounts")
+        execute(
+            """
+            CREATE TRIGGER partner_accounts_depth_trg
+            BEFORE INSERT OR UPDATE ON public.partner_accounts
+            FOR EACH ROW
+            EXECUTE PROCEDURE public.partner_accounts_depth_chk()
+            """
+        )
+    except Exception as e:
+        print(f"partner depth trigger: {e}")
+    execute(
+        """
+        INSERT INTO public.partner_program_settings (valid_from, valid_to, payload)
+        SELECT TIMESTAMPTZ '2020-01-01T00:00:00Z', NULL, %s::jsonb
+        WHERE NOT EXISTS (SELECT 1 FROM public.partner_program_settings)
+        """,
+        (
+            """
+            {
+              "satis_pencere_ay": 12,
+              "bekleme_gun": 30,
+              "tavan_komisyon_pct": 50,
+              "dist_satis_pct": 10,
+              "dist_yenileme_pct": 5,
+              "matrah_kdv_orani_pct": 20,
+              "matrah_kdv_onaylandi": false,
+              "kademeler": [
+                {"kod": "starter", "ad": "Başlangıç", "esik_ciro_try": 0, "satis_pct": 25, "yenileme_pct": 8},
+                {"kod": "silver", "ad": "Gümüş", "esik_ciro_try": 100000, "satis_pct": 30, "yenileme_pct": 10},
+                {"kod": "gold", "ad": "Altın", "esik_ciro_try": 300000, "satis_pct": 35, "yenileme_pct": 12},
+                {"kod": "platinum", "ad": "Platin", "esik_ciro_try": 750000, "satis_pct": 40, "yenileme_pct": 15}
+              ]
+            }
+            """,
+        ),
+    )
+
+
 def clear_all_customers():
     """
     Tüm müşteri verilerini ve müşteriye bağlı kayıtları siler (geri alınamaz).

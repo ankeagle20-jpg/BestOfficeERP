@@ -1,0 +1,192 @@
+{% extends "layout.html" %}
+{% block title %}Ortaklar{% endblock %}
+{% block page_title %}Ortaklar{% endblock %}
+{% block content %}
+<style>
+  .op { font-size:.9rem; color:#d7e3f4; }
+  .op input,.op select,.op textarea { background:#0f2537; color:#e3f2fd; border:1px solid #254b77; border-radius:4px; padding:6px 8px; }
+  .op table { width:100%; border-collapse:collapse; margin:10px 0 18px; }
+  .op th,.op td { border-bottom:1px solid #1e3a5f; padding:6px; text-align:left; }
+  .uyari { background:#3e2723; color:#ffcc80; padding:10px 12px; border-radius:6px; margin-bottom:12px; }
+  .op .row { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:8px; align-items:end; }
+</style>
+<div class="op">
+  {% if kdv_uyari %}<div class="uyari" id="kdv-uyari">{{ kdv_uyari }}</div>{% else %}<div class="uyari" id="kdv-uyari" hidden></div>{% endif %}
+  <h3>Ortaklar</h3>
+  <div class="row">
+    <input id="ad" placeholder="Ad" maxlength="120">
+    <select id="tur"><option value="bayi">Bayi</option><option value="distributor">Distribütör</option></select>
+    <input id="parent" placeholder="Üst id (boş=doğrudan)" style="width:140px">
+    <select id="kademe"><option>starter</option><option>silver</option><option>gold</option><option>platinum</option></select>
+    <button type="button" class="btn-erp" id="ekle">Ekle</button>
+  </div>
+  <table id="liste"><thead><tr><th>Id</th><th>Ad</th><th>Tür</th><th>Üst</th><th>Kademe</th><th>Önerilen</th><th>Durum</th></tr></thead><tbody></tbody></table>
+
+  <h3>Kod</h3>
+  <div class="row">
+    <input id="kod-partner" placeholder="Ortak id" style="width:100px">
+    <button type="button" class="btn-erp" id="kod-uret">Kod üret</button>
+    <span id="kod-sonuc"></span>
+  </div>
+
+  <h3>Ayar sürümü</h3>
+  <div class="row">
+    <input id="valid-from" type="datetime-local">
+    <label><input type="checkbox" id="kdv-onay"> KDV oranı onaylandı</label>
+    <button type="button" class="btn-erp" id="ayar-kaydet">Yeni sürüm ekle</button>
+  </div>
+  <textarea id="payload" rows="8" style="width:100%;max-width:720px"></textarea>
+
+  <h3>Elle bağla / değiştir</h3>
+  <div class="row">
+    <input id="bag-tenant" placeholder="Kiracı id" style="width:100px">
+    <input id="bag-kod" placeholder="Kod" style="width:140px">
+    <input id="bag-gerekce" placeholder="Gerekçe" style="width:220px">
+    <button type="button" class="btn-erp" id="bag-kaydet">Bağla</button>
+  </div>
+
+  <h3>Komisyon</h3>
+  <div class="row">
+    <input id="f-partner" placeholder="Ortak id" style="width:90px">
+    <select id="f-durum"><option value="">Durum</option><option>bekliyor</option><option>onaylandi</option><option>odendi</option><option>iptal</option></select>
+    <button type="button" class="btn-erp" id="filtre">Filtrele</button>
+    <a class="btn-erp" id="csv" href="/admin/api/ortak-komisyon.csv">CSV</a>
+    <button type="button" class="btn-erp" id="tara" hidden>Eksik komisyonları tara</button>
+  </div>
+  <table id="kom"><thead><tr><th>Id</th><th>Ortak</th><th>Rol</th><th>Tür</th><th>Net</th><th>Tutar</th><th>Durum</th><th></th></tr></thead><tbody></tbody></table>
+  <p id="mesaj"></p>
+</div>
+<script>
+(function () {
+  const mesaj = document.getElementById("mesaj");
+  function soyle(t) { mesaj.textContent = t || ""; }
+  async function api(url, opt) {
+    const res = await fetch(url, Object.assign({ headers: { "Content-Type": "application/json", "Accept": "application/json" } }, opt || {}));
+    const data = await res.json().catch(function () { return {}; });
+    if (!res.ok) throw new Error(data.mesaj || "İşlem olmadı");
+    return data;
+  }
+  async function liste() {
+    const data = await api("/admin/api/ortaklar");
+    const uy = document.getElementById("kdv-uyari");
+    if (data.kdv_uyari) { uy.hidden = false; uy.textContent = data.kdv_uyari; }
+    const tb = document.querySelector("#liste tbody");
+    tb.innerHTML = "";
+    (data.items || []).forEach(function (r) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = "<td>" + r.id + "</td><td>" + r.ad + "</td><td>" + r.tur + "</td><td>" + (r.parent_partner_id || "") + "</td><td>" + r.kademe + "</td><td>" + (r.onerilen_kademe || "") + "</td><td>" + r.durum + "</td>";
+      tb.appendChild(tr);
+    });
+  }
+  async function komisyon() {
+    const q = new URLSearchParams();
+    const p = document.getElementById("f-partner").value.trim();
+    const d = document.getElementById("f-durum").value;
+    if (p) q.set("partner_id", p);
+    if (d) q.set("durum", d);
+    const data = await api("/admin/api/ortak-komisyon?" + q.toString());
+    const tb = document.querySelector("#kom tbody");
+    tb.innerHTML = "";
+    (data.items || []).forEach(function (r) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = "<td>" + r.id + "</td><td>" + r.partner_id + "</td><td>" + r.rol + "</td><td>" + r.tur + "</td><td>" + r.matrah_net + "</td><td>" + r.tutar + "</td><td>" + r.durum + "</td><td></td>";
+      const td = tr.lastChild;
+      if (r.durum === "bekliyor") {
+        const b = document.createElement("button");
+        b.type = "button"; b.textContent = "Onayla";
+        b.onclick = async function () {
+          try { await api("/admin/api/ortak-komisyon/" + r.id + "/onayla", { method: "POST", body: "{}" }); }
+          catch (e) {
+            if (!confirm(e.message + " Zorla onaylansın mı?")) return;
+            await api("/admin/api/ortak-komisyon/" + r.id + "/onayla", { method: "POST", body: JSON.stringify({ zorla: true }) });
+          }
+          komisyon();
+        };
+        td.appendChild(b);
+      }
+      if (r.durum === "onaylandi") {
+        const b = document.createElement("button");
+        b.type = "button"; b.textContent = "Ödendi";
+        b.onclick = async function () {
+          const ref = prompt("Kısa referans");
+          if (!ref) return;
+          await api("/admin/api/ortak-komisyon/" + r.id + "/odendi", { method: "POST", body: JSON.stringify({ referans: ref }) });
+          komisyon();
+        };
+        td.appendChild(b);
+      }
+      if (r.durum === "bekliyor" || r.durum === "onaylandi") {
+        const b = document.createElement("button");
+        b.type = "button"; b.textContent = "İptal";
+        b.onclick = async function () {
+          const g = prompt("Gerekçe");
+          if (!g) return;
+          await api("/admin/api/ortak-komisyon/" + r.id + "/iptal", { method: "POST", body: JSON.stringify({ gerekce: g }) });
+          komisyon();
+        };
+        td.appendChild(b);
+      }
+      tb.appendChild(tr);
+    });
+  }
+  document.getElementById("ekle").onclick = async function () {
+    try {
+      await api("/admin/api/ortaklar", { method: "POST", body: JSON.stringify({
+        ad: document.getElementById("ad").value,
+        tur: document.getElementById("tur").value,
+        parent_partner_id: document.getElementById("parent").value.trim() || null,
+        kademe: document.getElementById("kademe").value
+      }) });
+      soyle("Ortak eklendi.");
+      liste();
+    } catch (e) { soyle(e.message); }
+  };
+  document.getElementById("kod-uret").onclick = async function () {
+    try {
+      const id = document.getElementById("kod-partner").value.trim();
+      const data = await api("/admin/api/ortaklar/" + id + "/kod", { method: "POST", body: "{}" });
+      document.getElementById("kod-sonuc").textContent = "Üretildi";
+      soyle("Kod üretildi, kimlik " + data.id);
+    } catch (e) { soyle(e.message); }
+  };
+  document.getElementById("ayar-kaydet").onclick = async function () {
+    try {
+      const payload = JSON.parse(document.getElementById("payload").value || "{}");
+      payload.matrah_kdv_onaylandi = document.getElementById("kdv-onay").checked;
+      const vf = document.getElementById("valid-from").value;
+      await api("/admin/api/ortak-ayar", { method: "POST", body: JSON.stringify({ valid_from: vf, payload: payload }) });
+      soyle("Yeni ayar sürümü eklendi.");
+      liste();
+    } catch (e) { soyle(e.message); }
+  };
+  document.getElementById("bag-kaydet").onclick = async function () {
+    try {
+      await api("/admin/api/ortak-bag", { method: "POST", body: JSON.stringify({
+        tenant_id: document.getElementById("bag-tenant").value.trim(),
+        kod: document.getElementById("bag-kod").value.trim(),
+        gerekce: document.getElementById("bag-gerekce").value.trim()
+      }) });
+      soyle("Bağ güncellendi.");
+    } catch (e) { soyle(e.message); }
+  };
+  document.getElementById("filtre").onclick = function () { komisyon().catch(function (e) { soyle(e.message); }); };
+  const tara = document.getElementById("tara");
+  if (tara) tara.onclick = async function () {
+    try {
+      const data = await api("/admin/api/ortak-komisyon/tara", { method: "POST", body: "{}" });
+      soyle("Tarandı: " + data.taranan + ", yazılan: " + data.yazilan);
+      komisyon();
+    } catch (e) { soyle(e.message); }
+  };
+  api("/admin/api/ortak-ayar").then(function (data) {
+    const son = (data.items || []).slice(-1)[0];
+    if (son) {
+      document.getElementById("payload").value = JSON.stringify(son.payload, null, 2);
+      document.getElementById("kdv-onay").checked = !!(son.payload && son.payload.matrah_kdv_onaylandi);
+    }
+  }).catch(function () {});
+  liste().catch(function (e) { soyle(e.message); });
+  komisyon().catch(function () {});
+})();
+</script>
+{% endblock %}

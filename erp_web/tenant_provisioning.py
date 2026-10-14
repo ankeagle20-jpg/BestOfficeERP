@@ -53,6 +53,11 @@ PLATFORM_STRIP_TABLES = (
     "platform_signup_intents",
     "platform_support_tickets",
     "platform_support_ticket_events",
+    "partner_accounts",
+    "partner_program_settings",
+    "partner_codes",
+    "partner_code_redemptions",
+    "partner_commission_entries",
 )
 _SLUG_RE = re.compile(r"^[a-z0-9_]+$")
 _ADMIN_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
