@@ -523,9 +523,15 @@
     return String(x);
   }
 
+  function gridHesaplanmadi(n) {
+    return !!(n && n.grid_yok);
+  }
+
   function hucreHtml(n, key) {
-    if (key === "toplam_borc") return esc(paraMetin(n.toplam_borc));
-    if (key === "geciken_ay") return esc(ayMetin(n.geciken_ay));
+    if (key === "toplam_borc" || key === "geciken_ay") {
+      if (gridHesaplanmadi(n)) return "—";
+      return esc(key === "toplam_borc" ? paraMetin(n.toplam_borc) : ayMetin(n.geciken_ay));
+    }
     if (key === "musteri") {
       if (!n.iliski_etiket) return "-";
       return n.detay_url
@@ -552,6 +558,7 @@
   }
 
   function hucreBaslik(n, key) {
+    if ((key === "toplam_borc" || key === "geciken_ay") && gridHesaplanmadi(n)) return "hesaplanmadı";
     if (key === "musteri") return String(n.iliski_etiket || "");
     if (key === "aciklama") return String(n.not_metni || "");
     if (key === "gorusen") return String(n.olusturan_ad || "");
@@ -1098,6 +1105,9 @@
     });
     liste.sort(function (a, b) {
       if (ozetSiraKey === "toplam_borc" || ozetSiraKey === "geciken_ay") {
+        var ayok = gridHesaplanmadi(a);
+        var byok = gridHesaplanmadi(b);
+        if (ayok !== byok) return ayok ? 1 : -1;
         var av = Number(a[ozetSiraKey]) || 0;
         var bv = Number(b[ozetSiraKey]) || 0;
         if (av !== bv) return (av - bv) * ozetSiraYon;

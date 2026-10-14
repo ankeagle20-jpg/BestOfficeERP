@@ -650,11 +650,32 @@ def _ozet_tarih_penceresi(tarih: str, bas_raw, bitis_raw):
     return None, None, None
 
 
-def _ozet_grid_borc_ekle(notlar: list) -> tuple[list, int, float]:
-    """Müşteriler raporu ile aynı toplu grid özeti.
+def _ozet_grid_payload_oku(mids: list) -> dict | None:
+    """Grid önbelleğini tek sorguda okur.
 
-    musteri_firma_ozet_grid_ozet_batch bir kez çağrılır. Bu fonksiyon
-    sorgu yazmaz, şema değiştirmez ve müşteri döngüsünde veritabanına gitmez.
+    Dönüş None: tablo yok veya okunamadı. Tablo açılmaz.
+    Dönüş sözlük: musteri_id -> payload; kaydı olmayan id anahtarda yoktur.
+    """
+    try:
+        row = fetch_one("SELECT to_regclass(%s) AS t", ("musteri_aylik_grid_cache",))
+    except Exception as e:
+        print(f"[WARN] erp_notlar grid tablo: {type(e).__name__}")
+        return None
+    if not (row and row.get("t")):
+        return None
+    try:
+        from routes.giris_routes import _read_aylik_grid_cache_payload_batch
+
+        return _read_aylik_grid_cache_payload_batch(mids, mem_ttl=0.0) or {}
+    except Exception as e:
+        print(f"[WARN] erp_notlar grid oku: {type(e).__name__}")
+        return None
+
+
+def _ozet_grid_borc_ekle(notlar: list) -> tuple[list, int, float]:
+    """Kayıtlı grid payload'ından Müşteriler raporu ile aynı özet.
+
+    Tablo veya satır yoksa sayı uydurmaz. Müşteri döngüsünde sorgu yok.
     Dondurulan ay gridde 0 olduğu için toplama ve geciken sayıya girmez.
     """
     mids: list[int] = []
@@ -668,41 +689,46 @@ def _ozet_grid_borc_ekle(notlar: list) -> tuple[list, int, float]:
             seen.add(mid)
             mids.append(mid)
     t0 = time.perf_counter()
-    ozet: dict = {}
-    if mids:
-        try:
-            from routes.giris_routes import musteri_firma_ozet_grid_ozet_batch
+    payloadlar = _ozet_grid_payload_oku(mids) if mids else {}
+    hesap = None
+    if payloadlar:
+        from routes.giris_routes import _firma_ozet_ozet_from_grid_cache_payload
 
-            bugun = date.today()
-            onbellek = getattr(musteri_firma_ozet_grid_ozet_batch, "_cache", None)
-            if isinstance(onbellek, dict):
-                for mid in mids:
-                    onbellek.pop((int(mid), bugun.year, bugun.month), None)
-            ozet = musteri_firma_ozet_grid_ozet_batch(mids, bugun) or {}
-        except Exception as e:
-            print(f"[WARN] erp_notlar ozet grid: {type(e).__name__}")
-            ozet = {}
-    gecen_ms = round((time.perf_counter() - t0) * 1000.0, 2)
+        hesap = _firma_ozet_ozet_from_grid_cache_payload
+    bugun = date.today()
     for n in notlar or []:
         try:
             mid = int((n or {}).get("musteri_id") or 0)
         except (TypeError, ValueError):
             mid = 0
-        hucre = ozet.get(mid) or {}
+        ham = (payloadlar or {}).get(mid) if payloadlar is not None else None
+        ozet = None
+        if ham and hesap:
+            try:
+                ozet = hesap(ham, bugun.year, bugun.month)
+            except Exception:
+                ozet = None
+        if not isinstance(ozet, dict):
+            n["grid_yok"] = True
+            n["toplam_borc"] = None
+            n["geciken_ay"] = None
+            continue
         try:
-            borc = round(float(hucre.get("toplam_borc") or 0), 2)
+            borc = round(float(ozet.get("toplam_borc") or 0), 2)
         except (TypeError, ValueError):
             borc = 0.0
         try:
-            ay = int(hucre.get("geciken_ay") or 0)
+            ay = int(ozet.get("geciken_ay") or 0)
         except (TypeError, ValueError):
             ay = 0
         if borc < 0 or borc != borc:
             borc = 0.0
         if ay < 0:
             ay = 0
+        n["grid_yok"] = False
         n["toplam_borc"] = borc
         n["geciken_ay"] = ay
+    gecen_ms = round((time.perf_counter() - t0) * 1000.0, 2)
     return notlar, len(mids), gecen_ms
 
 

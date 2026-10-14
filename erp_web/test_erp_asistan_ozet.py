@@ -73,6 +73,7 @@ def test_grid_sayilari():
         geciken_kayitlari_suz,
     )
     from routes.erp_notlar_routes import _ozet_grid_borc_ekle
+    import routes.erp_notlar_routes as en
     import routes.giris_routes as gr
 
     p867 = _payload_867()
@@ -119,48 +120,72 @@ def test_grid_sayilari():
     check("suz dondurulan ayi dusurur", süz and süz[0]["ay"] == 1)
     check("suz odememis kalan", len(donuk) == 2)
 
-    cagri = []
+    okumalar = []
+    regclass = {"var": True}
+    yasak = []
 
-    def fake_batch(ids, ref=None):
-        cagri.append(list(ids))
-        return {
-            867: {"toplam_borc": o867["toplam_borc"], "geciken_ay": o867["geciken_ay"]},
-            900: {"toplam_borc": o900["toplam_borc"], "geciken_ay": o900["geciken_ay"]},
-        }
+    def fake_one(sql, params=None):
+        check("regclass tek parametre", params == ("musteri_aylik_grid_cache",))
+        return {"t": "musteri_aylik_grid_cache" if regclass["var"] else None}
 
-    gr.musteri_firma_ozet_grid_ozet_batch = fake_batch
+    def fake_oku(ids, mem_ttl=12.0):
+        okumalar.append((list(ids), mem_ttl))
+        return {867: p867, 900: p900}
+
+    def boom(*_a, **_k):
+        yasak.append("cagrildi")
+        raise AssertionError("yazma veya yeniden hesap")
+
+    en.fetch_one = fake_one
+    gr._read_aylik_grid_cache_payload_batch = fake_oku
+    gr.musteri_firma_ozet_grid_ozet_batch = boom
+    gr.prewarm_aylik_grid_cache_for_musteriler = boom
+    gr._ensure_aylik_grid_cache_table = boom
     notlar = [
         {"musteri_id": 867, "id": 1},
         {"musteri_id": 900, "id": 2},
-        {"musteri_id": 867, "id": 3},
+        {"musteri_id": 901, "id": 3},
+        {"musteri_id": 867, "id": 4},
     ]
     out, adet, ms = _ozet_grid_borc_ekle(notlar)
-    check("tek toplu cagri", len(cagri) == 1 and sorted(cagri[0]) == [867, 900])
-    check("musteri sayisi tekil", adet == 2)
-    check("867 kolon batch ile ayni", out[0]["toplam_borc"] == 170 and out[0]["geciken_ay"] == 3)
-    check("tenant kolon sifir", out[1]["toplam_borc"] == 0 and out[1]["geciken_ay"] == 0)
+    check("tek toplu cagri", len(okumalar) == 1 and sorted(okumalar[0][0]) == [867, 900, 901])
+    check("onbellek bellegi atlanir", okumalar[0][1] == 0.0)
+    check("musteri sayisi tekil", adet == 3)
+    check("867 kolon grid ile ayni", out[0]["grid_yok"] is False and out[0]["toplam_borc"] == 170 and out[0]["geciken_ay"] == 3)
+    check("tenant kolon sifir", out[1]["grid_yok"] is False and out[1]["toplam_borc"] == 0 and out[1]["geciken_ay"] == 0)
+    check("kayitsiz tire", out[2]["grid_yok"] is True and out[2]["toplam_borc"] is None and out[2]["geciken_ay"] is None)
+    check("yazma yok", yasak == [])
     check("sure sayi", isinstance(ms, float) and ms >= 0)
     print("olcum fixture musteri=%s sure_ms=%s" % (adet, ms))
 
-    cagri.clear()
+    okumalar.clear()
+    regclass["var"] = False
+    yok, _, _ = _ozet_grid_borc_ekle([{"musteri_id": 867}, {"musteri_id": 900}])
+    check("tablo yok okuma yok", okumalar == [] and yasak == [])
+    check("tablo yok tire", all(x["grid_yok"] is True and x["toplam_borc"] is None for x in yok))
+
+    okumalar.clear()
+    regclass["var"] = True
     bir = [{"musteri_id": 1}]
     cok = [{"musteri_id": i} for i in range(1, 21)]
     _ozet_grid_borc_ekle(bir)
     _ozet_grid_borc_ekle(cok)
-    check("n+1 yok", len(cagri) == 2 and len(cagri[0]) == 1 and len(cagri[1]) == 20)
+    check("n+1 yok", len(okumalar) == 2 and len(okumalar[0][0]) == 1 and len(okumalar[1][0]) == 20)
 
 
 def test_kaynak_yazmaz():
     import inspect
-    from routes.erp_notlar_routes import _ozet_grid_borc_ekle, api_ozet
+    from routes.erp_notlar_routes import _ozet_grid_borc_ekle, _ozet_grid_payload_oku, api_ozet
 
-    src = inspect.getsource(_ozet_grid_borc_ekle)
+    src = inspect.getsource(_ozet_grid_borc_ekle) + inspect.getsource(_ozet_grid_payload_oku)
     api = inspect.getsource(api_ozet)
-    for yasak in ("CREATE", "ALTER", "INSERT", "UPDATE", "fetch_all", "fetch_one", "execute("):
+    for yasak in ("CREATE", "ALTER", "INSERT", "UPDATE", "execute(", "musteri_firma_ozet_grid_ozet_batch", "prewarm_", "_ensure_"):
         check("helper " + yasak + " yok", yasak not in src)
+    check("tek to_regclass", src.count("to_regclass") == 1)
+    check("fetch_all helperda yok", "fetch_all" not in src)
     check("ozet tek ekleme", api.count("_ozet_grid_borc_ekle(") == 1)
     layout = (ROOT / "templates" / "layout.html").read_text(encoding="utf-8")
-    check("js v=2", "js/erp-asistan.js') }}?v=2" in layout)
+    check("js v=3", "js/erp-asistan.js') }}?v=3" in layout)
     check("kullanici id", "ERP_ASISTAN_UID" in layout)
     js = (ROOT / "static" / "js" / "erp-asistan.js").read_text(encoding="utf-8")
     check("ipucu borc", "Ekstredeki ek fatura/tediye/devir dahil değildir." in js)
@@ -186,7 +211,7 @@ def arayuz():
             "<!doctype html><html><head><meta charset='utf-8'></head><body>"
             "<script>window.ERP_ASISTAN_UID = 41;</script>"
             "<div id='erp-asistan-ozet'></div>"
-            "<script src='/static/js/erp-asistan.js?v=2'></script>"
+            "<script src='/static/js/erp-asistan.js?v=3'></script>"
             "</body></html>"
         )
 
@@ -196,7 +221,7 @@ def arayuz():
             "<!doctype html><html><head><meta charset='utf-8'></head><body>"
             "<script>window.ERP_ASISTAN_UID = 99;</script>"
             "<div id='erp-asistan-ozet'></div>"
-            "<script src='/static/js/erp-asistan.js?v=2'></script>"
+            "<script src='/static/js/erp-asistan.js?v=3'></script>"
             "</body></html>"
         )
 
@@ -211,6 +236,10 @@ def arayuz():
         {"id": 3, "musteri_id": 901, "iliski_etiket": "••••", "not_metni": "ucuncu",
          "created_etiket": "05.10.2026", "hatirlatma_etiket": "06.10.2026", "durum": "tamamlandi",
          "olusturan_ad": "A", "gorusulen_kisi": "B", "toplam_borc": 40, "geciken_ay": 1},
+        {"id": 4, "musteri_id": 902, "iliski_etiket": "••••", "not_metni": "hesap yok",
+         "created_etiket": "07.10.2026", "hatirlatma_etiket": "08.10.2026", "durum": "bekliyor",
+         "olusturan_ad": "A", "gorusulen_kisi": "B", "grid_yok": True,
+         "toplam_borc": None, "geciken_ay": None},
     ]
     kolon_istek = []
 
@@ -298,17 +327,19 @@ def arayuz():
                 return (tr.cells[i] || {}).textContent || '';
             })"""
         )
-        check("borc sirasi buyukten", sirali and sirali[0].replace(".", "").startswith("1") and sirali[-1] == "")
-        bos = s.evaluate(
+        check("borc sirasi buyukten", sirali and sirali[0].replace(".", "").startswith("1") and sirali[-1] == "—")
+        hucre = s.evaluate(
             """() => {
-                var tr = document.querySelector('#erp-asistan-ozet-tablo tbody tr');
                 var h = Array.from(document.querySelectorAll('#erp-asistan-ozet-tablo th')).map(c => c.getAttribute('data-kolon'));
                 var i = h.indexOf('toplam_borc');
-                var td = document.querySelectorAll('#erp-asistan-ozet-tablo tbody tr')[2].cells[i];
-                return {metin: td.textContent, sinif: td.className};
+                var cells = Array.from(document.querySelectorAll('#erp-asistan-ozet-tablo tbody tr')).map(tr => tr.cells[i]);
+                var bos = cells.find(td => td.textContent === '' && td.className.indexOf('ea-sayi-bos') >= 0);
+                var tire = cells.find(td => td.textContent === '—');
+                return {bos: !!bos, tire: tire ? tire.title : ''};
             }"""
         )
-        check("sifir borc bos", bos["metin"] == "" and "ea-sayi-bos" in bos["sinif"])
+        check("sifir borc bos", hucre["bos"] is True)
+        check("hesaplanmadi ipucu", hucre["tire"] == "hesaplanmadı")
         s.click("#erp-asistan-sutunlar")
         s.wait_for_selector("#erp-asistan-sutun-menu:not([hidden])")
         s.evaluate(
