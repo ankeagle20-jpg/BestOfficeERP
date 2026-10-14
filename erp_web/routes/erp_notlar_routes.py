@@ -413,13 +413,20 @@ _LISTE_COLS = """
 """
 
 
-def _notlari_getir(extra_sql: str, extra_params: tuple, limit: int = 100, sira: str = "hatirlatma") -> list:
+def _notlari_getir(
+    extra_sql: str,
+    extra_params: tuple,
+    limit: int = 100,
+    sira: str = "hatirlatma",
+    offset: int = 0,
+) -> list:
     ensure_erp_notlar_tablolari()
     params = _gorunur_params() + tuple(extra_params)
     order = "n.created_at DESC, n.id DESC" if sira == "yeni" else "n.hatirlatma_zamani ASC, n.id ASC"
+    off = max(0, int(offset or 0))
     sql = (
         f"SELECT {_LISTE_COLS} {_LISTE_FROM} WHERE {_gorunur_sql()} {extra_sql} "
-        f"ORDER BY {order} LIMIT {int(limit)}"
+        f"ORDER BY {order} LIMIT {int(limit)} OFFSET {off}"
     )
     try:
         return fetch_all(sql, params)
@@ -428,7 +435,7 @@ def _notlari_getir(extra_sql: str, extra_params: tuple, limit: int = 100, sira: 
         extra_sade = extra_sql.replace("c.name", "n.not_metni")
         sql2 = (
             f"SELECT n.* FROM erp_notlar n WHERE {_gorunur_sql()} {extra_sade} "
-            f"ORDER BY {order} LIMIT {int(limit)}"
+            f"ORDER BY {order} LIMIT {int(limit)} OFFSET {off}"
         )
         return fetch_all(sql2, params)
 
@@ -592,6 +599,55 @@ def _musteri_notlari(mid: int) -> list:
       AND ({_HEDEF_SQL}) = %s
     """
     return _notlari_getir(extra, (mid,), limit=200, sira="yeni")
+
+
+_GECMIS_SAYFA = 50
+
+
+def _gecmis_olcu(limit, ofset) -> tuple[int, int]:
+    try:
+        lim = int(limit)
+    except (TypeError, ValueError):
+        lim = _GECMIS_SAYFA
+    try:
+        off = int(ofset)
+    except (TypeError, ValueError):
+        off = 0
+    if lim < 1:
+        lim = 1
+    if lim > _GECMIS_SAYFA:
+        lim = _GECMIS_SAYFA
+    if off < 0:
+        off = 0
+    return lim, off
+
+
+def _serialize_gecmis(row: dict) -> dict:
+    return {
+        "id": row.get("id"),
+        "created_etiket": _dt_etiket(row.get("created_at")),
+        "hatirlatma_etiket": _dt_etiket(row.get("hatirlatma_zamani")),
+        "durum": row.get("durum") or "",
+        "olusturan_ad": str(row.get("olusturan_ad") or "").strip(),
+        "gorusulen_kisi": str(row.get("gorusulen_kisi") or "").strip(),
+        "not_metni": row.get("not_metni") or "",
+    }
+
+
+def musteri_gecmis_paket(mid: int, limit=50, ofset=0) -> dict:
+    """Bir müşterinin görüşme notları, en yeni üstte. Tek sorgu; sayfa boyu en fazla 50."""
+    lim, off = _gecmis_olcu(limit, ofset)
+    extra = f"""
+      AND ({_HEDEF_SQL}) = %s
+    """
+    rows = _notlari_getir(extra, (int(mid),), limit=lim + 1, sira="yeni", offset=off)
+    devam = len(rows) > lim
+    return {
+        "ok": True,
+        "notlar": [_serialize_gecmis(r) for r in rows[:lim]],
+        "devam": devam,
+        "ofset": off,
+    }
 
 
 _OZET_TARIH_KOLON = {
@@ -798,6 +854,8 @@ def api_ozet():
 @bp.route("/api/musteri/<int:mid>/notlar")
 @giris_gerekli
 def api_musteri_notlar(mid: int):
+    if str(request.args.get("sayfa") or "").strip() == "1":
+        return jsonify(musteri_gecmis_paket(mid, request.args.get("limit"), request.args.get("ofset")))
     rows = _musteri_notlari(mid)
     return jsonify({"ok": True, "notlar": [_serialize(r) for r in rows]})
 

@@ -108,6 +108,16 @@
       ".ea-ozet-arac button{cursor:pointer;border-radius:6px;border:1px solid #1e3a50;background:#0a1929;color:#e0f7fa;padding:6px 10px;}" +
       ".ea-ozet-arac button.aktif{background:#1565c0;border-color:#1565c0;}" +
       "#erp-asistan-ozet-gecmis .erp-asistan-kart{max-width:980px;max-height:86vh;overflow:auto;}" +
+      ".ea-tablo td.ea-gecmis-ac{cursor:pointer;text-decoration:underline;text-underline-offset:2px;}" +
+      ".ea-gecmis-kart{max-width:760px;width:100%;max-height:86vh;overflow:auto;box-sizing:border-box;}" +
+      ".ea-gecmis-baslik{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;}" +
+      ".ea-gecmis-baslik h3{margin:0;word-break:break-word;}" +
+      ".ea-gecmis-x{cursor:pointer;border:0;background:transparent;color:#e0f7fa;font-size:22px;line-height:1;padding:0 4px;}" +
+      ".ea-gecmis-kayit{border-top:1px solid #1e3a50;padding:8px 0;}" +
+      ".ea-gecmis-ust,.ea-gecmis-kisi{display:flex;flex-wrap:wrap;gap:8px 14px;font-size:12px;}" +
+      ".ea-gecmis-metin{white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;margin-top:4px;font-size:13px;}" +
+      ".ea-gecmis-daha{margin-top:8px;cursor:pointer;border-radius:6px;border:1px solid #1e3a50;background:#0a1929;color:#e0f7fa;padding:6px 10px;}" +
+      "@media (max-width:640px){.erp-asistan-perde{padding:8px;}.ea-gecmis-kart{max-width:100%;padding:10px;}}" +
       "#erp_asistan_gecmis.acik{display:block;}" +
       ".erp-asistan-rozet{display:inline-block;background:#8d2a2a;color:#fff;border-radius:8px;padding:1px 6px;margin-left:6px;font-size:11px;}" +
       ".ea-tablo-kaydir{overflow:auto;max-height:68vh;margin-top:8px;}" +
@@ -578,7 +588,8 @@
       if (key === "durum") cls.push("ea-durum");
       if (key === "musteri" || key === "aciklama" || key === "gorusen" || key === "gorusulen") cls.push("ea-kirp");
       if ((key === "toplam_borc" || key === "geciken_ay") && !hucreHtml(n, key)) cls.push("ea-sayi-bos");
-      var ham = hucreBaslik(n, key);
+      if (ekran === "ozet" && key === "aciklama") cls.push("ea-gecmis-ac");
+      var ham = (ekran === "ozet" && key === "aciklama") ? "Tüm geçmişi gör" : hucreBaslik(n, key);
       var title = ham ? ' title="' + esc(ham) + '"' : "";
       html += "<td data-kolon=\"" + esc(key) + "\"" + (cls.length ? ' class="' + cls.join(" ") + '"' : "") + title + ">" + hucreHtml(n, key) + "</td>";
     });
@@ -1313,6 +1324,86 @@
     liste.innerHTML = tabloHtml(gorunen, "not");
   }
 
+  var gecmisPopEsc = null;
+
+  function gecmisPopKapat() {
+    var p = document.getElementById("erp-asistan-gecmis-pop");
+    if (p) p.remove();
+    if (gecmisPopEsc) {
+      document.removeEventListener("keydown", gecmisPopEsc);
+      gecmisPopEsc = null;
+    }
+  }
+
+  function gecmisKayitHtml(n) {
+    return '<article class="ea-gecmis-kayit">' +
+      '<div class="ea-gecmis-ust">' +
+      "<span>Görüşme: " + esc(n.created_etiket || "—") + "</span>" +
+      "<span>Hatırlatma: " + esc(n.hatirlatma_etiket || "—") + "</span>" +
+      "<span>Durum: " + esc(n.durum || "—") + "</span>" +
+      "</div>" +
+      '<div class="ea-gecmis-kisi">Görüşen: ' + esc(n.olusturan_ad || "—") +
+      " · Görüşülen: " + esc(n.gorusulen_kisi || "—") + "</div>" +
+      '<div class="ea-gecmis-metin">' + esc(n.not_metni || "") + "</div>" +
+      "</article>";
+  }
+
+  function gecmisSayfaYukle(kart, mid, ofset) {
+    var url = "/erp-notlar/api/musteri/" + encodeURIComponent(mid) +
+      "/notlar?sayfa=1&limit=50&ofset=" + encodeURIComponent(ofset);
+    return fetch(url, { credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) {
+        var liste = kart.querySelector(".ea-gecmis-liste");
+        var eskiBtn = kart.querySelector(".ea-gecmis-daha");
+        if (eskiBtn) eskiBtn.remove();
+        if (!liste) return;
+        if (ofset === 0) liste.innerHTML = "";
+        if (!j || !j.ok) {
+          if (ofset === 0) liste.innerHTML = "<p>Notlar alınamadı.</p>";
+          return;
+        }
+        var parca = (j.notlar || []).map(gecmisKayitHtml).join("");
+        if (ofset === 0 && !parca) liste.innerHTML = "<p>Görüşme notu yok.</p>";
+        else liste.insertAdjacentHTML("beforeend", parca);
+        if (j.devam) {
+          var btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "ea-gecmis-daha";
+          btn.textContent = "Daha eski";
+          btn.onclick = function () { gecmisSayfaYukle(kart, mid, ofset + 50); };
+          kart.appendChild(btn);
+        }
+      });
+  }
+
+  function gecmisPopAc(mid, unvan) {
+    if (!mid) return;
+    gecmisPopKapat();
+    stilEkle();
+    var perde = document.createElement("div");
+    perde.id = "erp-asistan-gecmis-pop";
+    perde.className = "erp-asistan-perde";
+    perde.innerHTML =
+      '<div class="erp-asistan-kart ea-gecmis-kart" role="dialog" aria-modal="true">' +
+      '<div class="ea-gecmis-baslik"><h3>' + esc(unvan || "Müşteri") + "</h3>" +
+      '<button type="button" class="ea-gecmis-x" aria-label="Kapat">×</button></div>' +
+      '<div class="ea-gecmis-liste"><p>Yükleniyor…</p></div></div>';
+    document.body.appendChild(perde);
+    perde.querySelector(".ea-gecmis-x").onclick = function (ev) {
+      ev.stopPropagation();
+      gecmisPopKapat();
+    };
+    perde.addEventListener("click", function (ev) {
+      if (ev.target === perde) gecmisPopKapat();
+    });
+    gecmisPopEsc = function (ev) {
+      if (ev.key === "Escape") gecmisPopKapat();
+    };
+    document.addEventListener("keydown", gecmisPopEsc);
+    gecmisSayfaYukle(perde.querySelector(".ea-gecmis-kart"), mid, 0);
+  }
+
   function ozetGecmisAc(mid) {
     if (!mid) return;
     ozetGecmisId = String(mid);
@@ -1489,6 +1580,15 @@
       }
       if (!(ev.target.closest && ev.target.closest(".ea-durum-menu"))) durumMenuKapat();
       if (ev.target.closest && ev.target.closest(".ea-durum")) return;
+      var aciklamaHucre = ev.target.closest && ev.target.closest("td.ea-gecmis-ac");
+      if (aciklamaHucre) {
+        var gecmisSatir = aciklamaHucre.closest("tr.ea-satir");
+        if (gecmisSatir && gecmisSatir.getAttribute("data-ozet") === "1") {
+          var unvanHucre = gecmisSatir.querySelector("td[data-kolon=musteri]");
+          gecmisPopAc(gecmisSatir.getAttribute("data-musteri-id"), unvanHucre ? unvanHucre.textContent : "");
+          return;
+        }
+      }
       var kart = ev.target.closest && ev.target.closest("tr.ea-satir");
       if (!kart || ev.target.closest("a,button,input,textarea,select,label")) return;
       if (kart.getAttribute("data-ozet") === "1") {

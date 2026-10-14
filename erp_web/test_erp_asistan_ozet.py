@@ -185,13 +185,78 @@ def test_kaynak_yazmaz():
     check("fetch_all helperda yok", "fetch_all" not in src)
     check("ozet tek ekleme", api.count("_ozet_grid_borc_ekle(") == 1)
     layout = (ROOT / "templates" / "layout.html").read_text(encoding="utf-8")
-    check("js v=3", "js/erp-asistan.js') }}?v=3" in layout)
+    check("js v=4", "js/erp-asistan.js') }}?v=4" in layout)
     check("kullanici id", "ERP_ASISTAN_UID" in layout)
     js = (ROOT / "static" / "js" / "erp-asistan.js").read_text(encoding="utf-8")
     check("ipucu borc", "Ekstredeki ek fatura/tediye/devir dahil değildir." in js)
     check("ipucu ay", "dondurulan ve ödenmiş aylar hariç)." in js)
     check("anahtar", "asistan_sutunlar_" in js)
     check("excel yok", "xlsx" not in js and "excel" not in js.lower())
+
+
+def test_gecmis_sayfa():
+    import inspect
+    from datetime import datetime
+    import routes.erp_notlar_routes as en
+
+    kaynak = inspect.getsource(en.musteri_gecmis_paket) + inspect.getsource(en._serialize_gecmis)
+    check("gecmis ddl yok", "CREATE" not in kaynak and "ALTER" not in kaynak and "INSERT" not in kaynak and "UPDATE" not in kaynak)
+    check("gecmis wa alani yok", "whatsapp" not in kaynak)
+    eski = (en.ensure_erp_notlar_tablolari, en.fetch_all, en._uid, en._benim_departman)
+    cagri = []
+
+    def fake_all(sql, params=None):
+        cagri.append((sql, tuple(params or ())))
+        off = int(sql.rsplit("OFFSET", 1)[-1].strip())
+        mid = int(params[-1])
+        if mid != 7:
+            return [{
+                "id": 99, "not_metni": "baska", "durum": "bekliyor",
+                "created_at": datetime(2026, 1, 2, 10, 0),
+                "hatirlatma_zamani": datetime(2026, 1, 3, 9, 0),
+                "olusturan_ad": "X", "gorusulen_kisi": "Y",
+                "whatsapp_telefon": "555", "whatsapp_mesaj": "gizli mesaj",
+            }]
+        if off == 0:
+            return [{
+                "id": i,
+                "not_metni": "<script>alert(1)</script>\nsatir" if i == 3 else "not-%s" % i,
+                "durum": "bekliyor",
+                "created_at": datetime(2026, 10, i, 14, 30),
+                "hatirlatma_zamani": datetime(2026, 10, i, 9, 0),
+                "olusturan_ad": "Goren", "gorusulen_kisi": "Karsi",
+                "whatsapp_telefon": "5551112233", "whatsapp_mesaj": "bu mesaj popupta yok",
+            } for i in (3, 2, 1)]
+        return [{
+            "id": 8, "not_metni": "eski", "durum": "tamamlandi",
+            "created_at": datetime(2025, 1, 1, 8, 0), "hatirlatma_zamani": None,
+            "olusturan_ad": "Goren", "gorusulen_kisi": "",
+            "whatsapp_telefon": "555",
+        }]
+
+    en.ensure_erp_notlar_tablolari = lambda: None
+    en.fetch_all = fake_all
+    en._uid = lambda: 5
+    en._benim_departman = lambda: "satis"
+    try:
+        paket = en.musteri_gecmis_paket(7, 2, 0)
+        sql, params = cagri[0]
+        check("tek sorgu", len(cagri) == 1)
+        check("yeni ustte sql", "created_at DESC" in sql and "OFFSET 0" in sql and "LIMIT 3" in sql)
+        check("hedef ve gorunurluk", params[:3] == (5, 5, "satis") and params[-1] == 7 and "= %s" in sql)
+        check("sayfa kesilir", paket["devam"] is True and [n["id"] for n in paket["notlar"]] == [3, 2])
+        check("metin oldugu gibi", "<script>" in paket["notlar"][0]["not_metni"] and "\n" in paket["notlar"][0]["not_metni"])
+        check("wa donmez", not any("whatsapp" in k or "telefon" in k for n in paket["notlar"] for k in n))
+        check("saat etiketi", paket["notlar"][0]["created_etiket"].endswith("14:30"))
+        ikinci = en.musteri_gecmis_paket(7, 2, 2)
+        check("ofset", "OFFSET 2" in cagri[1][0] and ikinci["notlar"][0]["id"] == 8 and ikinci["devam"] is False)
+        baska = en.musteri_gecmis_paket(8, 2, 0)
+        check("musteri ayrimi", cagri[2][1][-1] == 8 and baska["notlar"][0]["id"] == 99)
+        check("karismaz", all(n["id"] != 99 for n in paket["notlar"]))
+        dar = en.musteri_gecmis_paket(7, 500, -4)
+        check("olcu siniri", "LIMIT 51" in cagri[-1][0] and "OFFSET 0" in cagri[-1][0] and dar["ofset"] == 0)
+    finally:
+        en.ensure_erp_notlar_tablolari, en.fetch_all, en._uid, en._benim_departman = eski
 
 
 def arayuz():
@@ -211,7 +276,7 @@ def arayuz():
             "<!doctype html><html><head><meta charset='utf-8'></head><body>"
             "<script>window.ERP_ASISTAN_UID = 41;</script>"
             "<div id='erp-asistan-ozet'></div>"
-            "<script src='/static/js/erp-asistan.js?v=3'></script>"
+            "<script src='/static/js/erp-asistan.js?v=4'></script>"
             "</body></html>"
         )
 
@@ -221,7 +286,7 @@ def arayuz():
             "<!doctype html><html><head><meta charset='utf-8'></head><body>"
             "<script>window.ERP_ASISTAN_UID = 99;</script>"
             "<div id='erp-asistan-ozet'></div>"
-            "<script src='/static/js/erp-asistan.js?v=3'></script>"
+            "<script src='/static/js/erp-asistan.js?v=4'></script>"
             "</body></html>"
         )
 
@@ -242,6 +307,7 @@ def arayuz():
          "toplam_borc": None, "geciken_ay": None},
     ]
     kolon_istek = []
+    gecmis_istek = []
 
     def isle(route, request):
         try:
@@ -251,7 +317,38 @@ def arayuz():
             route.fulfill(status=500, body=str(exc)[:200])
 
     def _isle(route, request):
-        yol = request.url.split("asistan.test")[-1].split("?")[0]
+        tam = request.url.split("asistan.test")[-1]
+        yol = tam.split("?")[0]
+        if "/erp-notlar/api/musteri/" in yol and yol.endswith("/notlar"):
+            gecmis_istek.append(tam)
+            mid = yol.split("/musteri/")[1].split("/")[0]
+            ofset = "0"
+            if "ofset=" in tam:
+                ofset = tam.split("ofset=", 1)[1].split("&")[0]
+            if mid != "867":
+                govde = {"ok": True, "devam": False, "ofset": int(ofset or 0), "notlar": [{
+                    "id": 9, "created_etiket": "09.09.2026 09:09", "hatirlatma_etiket": "",
+                    "durum": "bekliyor", "olusturan_ad": "Z", "gorusulen_kisi": "Z",
+                    "not_metni": "baska-musteri-notu",
+                }]}
+            elif ofset in ("", "0"):
+                govde = {"ok": True, "devam": True, "ofset": 0, "notlar": [
+                    {"id": 3, "created_etiket": "03.10.2026 18:00", "hatirlatma_etiket": "04.10.2026 09:00",
+                     "durum": "bekliyor", "olusturan_ad": "G1", "gorusulen_kisi": "K1",
+                     "not_metni": "<b>kalin</b>\nsatir2", "whatsapp_telefon": "5550001111",
+                     "whatsapp_mesaj": "gizli-wa-icerik"},
+                    {"id": 1, "created_etiket": "01.10.2026 10:00", "hatirlatma_etiket": "02.10.2026 09:00",
+                     "durum": "ertelendi", "olusturan_ad": "G1", "gorusulen_kisi": "K1",
+                     "not_metni": "orta not"},
+                ]}
+            else:
+                govde = {"ok": True, "devam": False, "ofset": int(ofset or 0), "notlar": [{
+                    "id": 0, "created_etiket": "01.01.2025 08:00", "hatirlatma_etiket": "",
+                    "durum": "tamamlandi", "olusturan_ad": "G1", "gorusulen_kisi": "K1",
+                    "not_metni": "eski-kayit",
+                }]}
+            route.fulfill(status=200, content_type="application/json", body=json.dumps(govde))
+            return
         if yol.startswith("/erp-notlar/api/ozet"):
             route.fulfill(status=200, content_type="application/json", body=json.dumps({
                 "ok": True, "notlar": notlar, "grid_musteri": 3, "grid_ms": 1.5,
@@ -340,6 +437,63 @@ def arayuz():
         )
         check("sifir borc bos", hucre["bos"] is True)
         check("hesaplanmadi ipucu", hucre["tire"] == "hesaplanmadı")
+        aciklama = s.locator("tr[data-musteri-id='867'] td[data-kolon=aciklama]")
+        check("aciklama ipucu", aciklama.get_attribute("title") == "Tüm geçmişi gör")
+        check("aciklama imlec", s.evaluate(
+            "() => getComputedStyle(document.querySelector(\"tr[data-musteri-id='867'] td[data-kolon=aciklama]\")).cursor"
+        ) == "pointer")
+        s.set_viewport_size({"width": 390, "height": 700})
+        aciklama.click()
+        s.wait_for_selector("#erp-asistan-gecmis-pop .ea-gecmis-kayit")
+        pop = s.evaluate(
+            """() => {
+                var p = document.getElementById('erp-asistan-gecmis-pop');
+                var kart = p.querySelector('.ea-gecmis-kart');
+                var metin = p.innerText;
+                return {
+                    b: p.querySelectorAll('b,img,script').length,
+                    etiket: metin.indexOf('<b>kalin</b>') >= 0,
+                    satir: metin.indexOf('satir2') >= 0,
+                    sira: metin.indexOf('03.10.2026 18:00') < metin.indexOf('01.10.2026 10:00'),
+                    baska: metin.indexOf('baska-musteri-notu') >= 0,
+                    tel: metin.indexOf('5550001111') >= 0,
+                    wa: metin.indexOf('gizli-wa-icerik') >= 0,
+                    pre: getComputedStyle(p.querySelector('.ea-gecmis-metin')).whiteSpace,
+                    sigar: kart.scrollWidth <= kart.clientWidth + 2,
+                    eskiPop: !!document.getElementById('erp-asistan-ozet-gecmis'),
+                    duzen: p.querySelectorAll('textarea,input,select').length
+                };
+            }"""
+        )
+        check("popup acildi", pop["etiket"] and pop["satir"] and pop["sira"])
+        check("html kacis", pop["b"] == 0 and pop["etiket"])
+        check("baska musteri yok", pop["baska"] is False and pop["tel"] is False and pop["wa"] is False)
+        check("satir sonu", pop["pre"] == "pre-wrap")
+        check("dar ekran", pop["sigar"] is True)
+        check("salt okuma", pop["duzen"] == 0 and pop["eskiPop"] is False)
+        check("tek istek", len(gecmis_istek) == 1 and "/musteri/867/" in gecmis_istek[0] and "ofset=0" in gecmis_istek[0])
+        s.set_viewport_size({"width": 1100, "height": 700})
+        s.locator("#erp-asistan-gecmis-pop .ea-gecmis-metin").evaluate_all(
+            "els => els.forEach(el => { el.style.filter = 'blur(8px)'; })"
+        )
+        s.locator("#erp-asistan-gecmis-pop h3").evaluate("el => { el.style.filter = 'blur(8px)'; }")
+        gecmis_png = os.path.join(os.environ.get("TEMP", "."), "erp_asistan_gecmis.png")
+        s.locator("#erp-asistan-gecmis-pop .ea-gecmis-kart").screenshot(path=gecmis_png)
+        check("gecmis ekran", os.path.isfile(gecmis_png))
+        print("ekran " + gecmis_png)
+        s.click("#erp-asistan-gecmis-pop .ea-gecmis-daha")
+        s.wait_for_function("() => (document.getElementById('erp-asistan-gecmis-pop') || {}).innerText.indexOf('eski-kayit') >= 0")
+        check("daha eski", len(gecmis_istek) == 2 and "ofset=50" in gecmis_istek[1] and "/musteri/867/" in gecmis_istek[1])
+        s.click("#erp-asistan-gecmis-pop .ea-gecmis-x")
+        check("x kapatir", s.locator("#erp-asistan-gecmis-pop").count() == 0)
+        aciklama.click()
+        s.wait_for_selector("#erp-asistan-gecmis-pop")
+        s.keyboard.press("Escape")
+        check("esc kapatir", s.locator("#erp-asistan-gecmis-pop").count() == 0)
+        aciklama.click()
+        s.wait_for_selector("#erp-asistan-gecmis-pop")
+        s.locator("#erp-asistan-gecmis-pop").click(position={"x": 2, "y": 2})
+        check("disari kapatir", s.locator("#erp-asistan-gecmis-pop").count() == 0)
         s.click("#erp-asistan-sutunlar")
         s.wait_for_selector("#erp-asistan-sutun-menu:not([hidden])")
         s.evaluate(
@@ -391,6 +545,7 @@ def arayuz():
 if __name__ == "__main__":
     test_grid_sayilari()
     test_kaynak_yazmaz()
+    test_gecmis_sayfa()
     arayuz()
     if FAILS:
         print("FAIL", len(FAILS))
