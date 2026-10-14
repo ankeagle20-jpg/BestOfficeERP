@@ -127,6 +127,10 @@
       ".ea-wa-web a{color:#80deea;}" +
       ".ea-wa-web-ipucu{margin:0 0 8px;font-size:12px;color:#b0bec5;}" +
       ".ea-wa-uyandir{margin:6px 0 0;font-size:12px;color:#ffcc80;}" +
+      "#erp-asistan-wa-qr-kutu{margin:8px 0;}" +
+      "#erp-asistan-wa-qr-kutu button{margin-right:6px;}" +
+      "#erp-asistan-wa-qr-yedek{color:#80deea;}" +
+      "#erp-asistan-wa-qr-not{margin-left:6px;color:#ffcc80;}" +
       "#erp-asistan-wa-yenile,#erp-asistan-wa-yine{background:#0a1929;color:#e0f7fa;}" +
       "#erp-asistan-wa-gonder:disabled{opacity:.45;cursor:not-allowed;}" +
       ".ea-wa-uyari{color:#ffab91;font-size:12px;}" +
@@ -1527,6 +1531,10 @@
       '<button type="button" id="erp-asistan-wa-onay" hidden>Onayla</button>' +
       "</div>" +
       '<p id="erp-asistan-wa-uyandir" class="ea-wa-uyandir" hidden>Oturum uyandırılmaya çalışılır, ~20 sn sürebilir.</p>' +
+      '<p id="erp-asistan-wa-qr-kutu" hidden><button type="button" id="erp-asistan-wa-qr-okut">QR Okut</button> ' +
+      '<button type="button" id="erp-asistan-wa-qr-kapat">QR Kapat</button> ' +
+      '<a id="erp-asistan-wa-qr-yedek" href="/whatsapp/qr-ac" hidden>Açılamadı. QR sayfasını bu sekmede aç</a>' +
+      '<span id="erp-asistan-wa-qr-not" hidden>bu sekmeyi kapatabilirsiniz</span></p>' +
       '<div id="erp-asistan-wa-link-kutu" hidden>' +
       '<p>Tutar</p>' +
       '<label><input type="radio" name="ea-wa-tutar" value="toplam"> Toplam borç <span id="erp-asistan-wa-toplam"></span></label>' +
@@ -1595,6 +1603,39 @@
     var yenile = perde.querySelector("#erp-asistan-wa-yenile");
     var yine = perde.querySelector("#erp-asistan-wa-yine");
     var uyandirNot = perde.querySelector("#erp-asistan-wa-uyandir");
+    var qrKutu = perde.querySelector("#erp-asistan-wa-qr-kutu");
+    var qrYedek = perde.querySelector("#erp-asistan-wa-qr-yedek");
+    var qrNot = perde.querySelector("#erp-asistan-wa-qr-not");
+    function qrSayfaAc() {
+      var w = null;
+      try { w = window.open("/whatsapp/qr-ac", "BestOfficeERP_QR"); } catch (e) { w = null; }
+      if (!w) {
+        window.__erpQrPencere = null;
+        if (qrYedek) qrYedek.hidden = false;
+        return false;
+      }
+      window.__erpQrPencere = w;
+      if (qrYedek) qrYedek.hidden = true;
+      return true;
+    }
+    function qrSayfaKapat() {
+      var w = window.__erpQrPencere;
+      var kapandi = false;
+      try {
+        if (w && !w.closed) {
+          w.close();
+          kapandi = !!w.closed;
+        }
+      } catch (e) { kapandi = false; }
+      if (qrNot) qrNot.hidden = kapandi;
+      return kapandi;
+    }
+    if (qrKutu) {
+      var qrOkut = qrKutu.querySelector("#erp-asistan-wa-qr-okut");
+      var qrKapat = qrKutu.querySelector("#erp-asistan-wa-qr-kapat");
+      if (qrOkut) qrOkut.onclick = function () { qrSayfaAc(); };
+      if (qrKapat) qrKapat.onclick = function () { qrSayfaKapat(); };
+    }
     function durumYaz(j) {
       var d = (j && j.durum) || "bilinmiyor";
       durumEngel = d === "bagli_degil" || d === "qr";
@@ -1612,6 +1653,7 @@
       if (yenile) yenile.hidden = !yardim;
       if (yine) yine.hidden = !yardim;
       if (uyandirNot) uyandirNot.hidden = !yardim;
+      if (qrKutu) qrKutu.hidden = !yardim;
       uyar();
     }
     function durumPlanla(d) {

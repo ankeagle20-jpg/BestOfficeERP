@@ -199,7 +199,12 @@ def test_sayfa_ayrimi():
     check("yeniden_yok", "whatsapp_yeniden_dene" not in (ROOT / "sozlesme_whatsapp.py").read_text(encoding="utf-8"))
     check("js_baglaniyor", "WhatsApp bağlanıyor…" in js)
     check("js_neden", "WhatsApp servisi bağlı değil, WhatsApp Web sayfası açılıyor" in js)
-    check("js_qr", "WhatsApp oturumu yenilenmeli (QR)" in js)
+    check("js_qr", "WhatsApp oturumu yenilenmeli (QR)" in js and "qrDugmeGoster(true)" in js)
+    check("qr dugmeler", 'id="sozlesme-wa-qr-kutu" hidden' in js and "QR Okut" in js and "QR Kapat" in js and 'href="/whatsapp/qr-ac"' in js and "bu sekmeyi kapatabilirsiniz" in js and "WA_INTERNAL_TOKEN" not in js and "3001" not in js)
+    kapat_i = js.find("function qrSayfaKapat")
+    kapat_j = js.find("function qrDugmeGoster", kapat_i)
+    check("qr kapat istek yok", kapat_i > 0 and kapat_j > kapat_i and "fetch" not in js[kapat_i:kapat_j] and "uyandir" not in js[kapat_i:kapat_j])
+    check("yesil qr karar", "/erp-notlar/api/whatsapp-durum" in ust and "d === 'qr'" in ust and "d === 'bagli_degil'" in ust and "erpQrSayfaAc" in ust and "sozlesmeWhatsAppAc" in ust and "buton: 'ust'" in ust and "3001" not in ust and "WA_INTERNAL_TOKEN" not in ust)
     check("js_eski_yok", "WhatsApp Web açıldı" not in js)
     check("js_deneme", "denemeUret" in js and "deneme: deneme" in js)
     check("js_poll", "/giris/api/sozlesme-whatsapp/durum?deneme=" in js and "POLL_SON = 90000" in js)
@@ -441,6 +446,67 @@ def test_sonuc_cek():
     check("tekrar_ac_oturum", kod == 200 and govde.get("durum") == "basarisiz" and govde.get("mesaj") == sw._OTURUM_GONDERILEMEDI and yaz == [("basarisiz", "oturum")])
 
 
+def test_qr_pencere():
+    try:
+        from playwright.sync_api import sync_playwright
+    except Exception:
+        check("qr playwright", False)
+        return
+    istek = []
+    js_yol = str(ROOT / "static" / "js" / "sozlesme-whatsapp.js")
+
+    def hepsi(route):
+        url = route.request.url
+        if url.endswith("/sozlesme-whatsapp.js"):
+            route.fulfill(path=js_yol, content_type="text/javascript")
+            return
+        if "/giris/api/" in url:
+            istek.append(url.split("?")[0])
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body='{"qr":true,"mesaj":"WhatsApp oturumu yenilenmeli (QR)"}',
+            )
+            return
+        route.fulfill(
+            status=200,
+            content_type="text/html",
+            body="<!doctype html><meta charset='utf-8'><script src='/sozlesme-whatsapp.js'></script>",
+        )
+
+    with sync_playwright() as pw:
+        tarayici = pw.chromium.launch(channel="msedge", headless=True)
+        s = tarayici.new_page()
+        s.route("**/*", hepsi)
+        s.goto("http://qr.test/sayfa")
+        s.wait_for_function("() => typeof sozlesmeWhatsAppAc === 'function'")
+        s.evaluate("() => sozlesmeWhatsAppAc({buton:'ust', musteriId:1, telefon:'905550000000', ad:'', mesaj:'deneme'})")
+        check("qr baslangic gizli", s.locator("#sozlesme-wa-qr-kutu").is_hidden())
+        s.click("#sozlesme-wa-gonder")
+        s.wait_for_selector("#sozlesme-wa-qr-okut", state="visible")
+        check("qr uyari dugme", s.locator("#sozlesme-wa-qr-kapat").is_visible() and s.locator("#sozlesme-wa-qr-yedek").is_hidden())
+        s.evaluate("() => { window.open = function () { return null; }; }")
+        s.click("#sozlesme-wa-qr-okut")
+        check("qr yedek", s.locator("#sozlesme-wa-qr-yedek").is_visible() and s.locator("#sozlesme-wa-qr-yedek").get_attribute("href") == "/whatsapp/qr-ac")
+        s.evaluate("""() => {
+          window.__kapandi = false;
+          window.open = function (u) {
+            window.__acilan = u;
+            return { closed: false, close: function () { this.closed = true; window.__kapandi = true; } };
+          };
+        }""")
+        s.click("#sozlesme-wa-qr-okut")
+        n = len(istek)
+        s.click("#sozlesme-wa-qr-kapat")
+        check(
+            "qr kapat",
+            s.evaluate("() => window.__kapandi === true && window.__acilan === '/whatsapp/qr-ac'")
+            and s.locator("#sozlesme-wa-qr-not").is_hidden()
+            and len(istek) == n,
+        )
+        tarayici.close()
+
+
 if __name__ == "__main__":
     test_sinirlar()
     test_red()
@@ -452,6 +518,7 @@ if __name__ == "__main__":
     test_deneme_ve_poll()
     test_sonuc_cek()
     test_sayfa_ayrimi()
+    test_qr_pencere()
     test_giris_kapali()
     if fails:
         print("FAIL " + ",".join(fails))

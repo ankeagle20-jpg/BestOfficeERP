@@ -34,6 +34,9 @@
       "#sozlesme-wa-web{font-size:12px;margin:2px 0;}" +
       "#sozlesme-wa-web a{color:#80deea;}" +
       "#sozlesme-wa-web-ipucu{display:block;color:#b0bec5;margin-top:4px;}" +
+      "#sozlesme-wa-qr-kutu{margin:8px 0;}" +
+      "#sozlesme-wa-qr-yedek{margin-left:6px;color:#80deea;}" +
+      "#sozlesme-wa-qr-not{margin-left:6px;color:#ffcc80;}" +
       "#sozlesme-wa-yine{display:none;background:#6a4a12;}";
     document.head.appendChild(st);
   }
@@ -287,6 +290,7 @@
       if (j.qr) {
         if (uyari) uyari.textContent = j.mesaj || "WhatsApp oturumu yenilenmeli (QR)";
         if (sonuc) sonuc.textContent = "";
+        qrDugmeGoster(true);
         yineGoster(false);
       } else if (j.geri_dus && j.neden === "oturum") {
         webElleGoster(ham, metin);
@@ -348,6 +352,10 @@
       '<input id="sozlesme-wa-tel" inputmode="tel" placeholder="Telefon"></div>' +
       '<label>Mesaj<textarea id="sozlesme-wa-mesaj" rows="6"></textarea></label>' +
       '<p id="sozlesme-wa-uyari"></p>' +
+      '<p id="sozlesme-wa-qr-kutu" hidden><button type="button" id="sozlesme-wa-qr-okut">QR Okut</button>' +
+      '<button type="button" id="sozlesme-wa-qr-kapat">QR Kapat</button>' +
+      '<a id="sozlesme-wa-qr-yedek" href="/whatsapp/qr-ac" hidden>Açılamadı. QR sayfasını bu sekmede aç</a>' +
+      '<span id="sozlesme-wa-qr-not" hidden>bu sekmeyi kapatabilirsiniz</span></p>' +
       '<p id="sozlesme-wa-indir" hidden><a id="sozlesme-wa-indir-a" href="#"></a></p>' +
       '<p id="sozlesme-wa-web" hidden><a id="sozlesme-wa-web-a" href="#">Kendi WhatsApp Web\'imde aç (ofis hattı olmayabilir)</a>' +
       '<span id="sozlesme-wa-web-ipucu">ERP üzerinden ofis hattıyla göndermek için Giriş → WhatsApp ekranından QR\'ı ofis telefonuyla okutun.</span></p>' +
@@ -362,6 +370,8 @@
       perde.remove();
       acik = null;
     };
+    document.getElementById("sozlesme-wa-qr-okut").onclick = function () { qrSayfaAc(); };
+    document.getElementById("sozlesme-wa-qr-kapat").onclick = function () { qrSayfaKapat(); };
     document.getElementById("sozlesme-wa-gonder").onclick = function () { gonder(false); };
     document.getElementById("sozlesme-wa-yine").onclick = function () {
       pollDur();
@@ -514,6 +524,48 @@
     });
   }
 
+  var qrPencere = null;
+  function qrSayfaAc() {
+    var w = null;
+    try { w = window.open("/whatsapp/qr-ac", "BestOfficeERP_QR"); } catch (e) { w = null; }
+    var yedek = document.getElementById("sozlesme-wa-qr-yedek");
+    if (!w) {
+      qrPencere = null;
+      window.__erpQrPencere = null;
+      if (yedek) yedek.hidden = false;
+      return false;
+    }
+    qrPencere = w;
+    window.__erpQrPencere = w;
+    if (yedek) yedek.hidden = true;
+    return true;
+  }
+  function qrSayfaKapat() {
+    var w = window.__erpQrPencere || qrPencere;
+    var kapandi = false;
+    try {
+      if (w && !w.closed) {
+        w.close();
+        kapandi = !!w.closed;
+      }
+    } catch (e) { kapandi = false; }
+    var not = document.getElementById("sozlesme-wa-qr-not");
+    if (not) not.hidden = kapandi;
+    return kapandi;
+  }
+  function qrDugmeGoster(goster) {
+    var kutu = document.getElementById("sozlesme-wa-qr-kutu");
+    if (kutu) kutu.hidden = !goster;
+  }
+  function qrYedekGoster() {
+    qrDugmeGoster(true);
+    var yedek = document.getElementById("sozlesme-wa-qr-yedek");
+    if (yedek) yedek.hidden = false;
+  }
+  window.erpQrSayfaAc = qrSayfaAc;
+  window.erpQrSayfaKapat = qrSayfaKapat;
+  window.erpQrDugmeGoster = qrDugmeGoster;
+  window.erpQrYedekGoster = qrYedekGoster;
   window.sozlesmeWhatsAppAc = sozlesmeWhatsAppAc;
   window.tahsilatWaKayit = tahsilatWaKayit;
   window.tahsilatWaPasif = tahsilatWaPasif;

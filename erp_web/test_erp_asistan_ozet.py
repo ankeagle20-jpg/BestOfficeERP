@@ -187,7 +187,7 @@ def test_kaynak_yazmaz():
     check("fetch_all helperda yok", "fetch_all" not in src)
     check("ozet tek ekleme", api.count("_ozet_grid_borc_ekle(") == 1)
     layout = (ROOT / "templates" / "layout.html").read_text(encoding="utf-8")
-    check("js v=11", "js/erp-asistan.js') }}?v=11" in layout)
+    check("js v=12", "js/erp-asistan.js') }}?v=12" in layout)
     check("kullanici id", "ERP_ASISTAN_UID" in layout)
     js = (ROOT / "static" / "js" / "erp-asistan.js").read_text(encoding="utf-8")
     check("ipucu borc", "Ekstredeki ek fatura/tediye/devir dahil değildir." in js)
@@ -945,7 +945,10 @@ def test_wa_durum():
     check("ofis qr ipucu", "Giriş → WhatsApp ekranından QR\\'ı ofis telefonuyla okutun." in js)
     check("kisisel web adresi", "https://web.whatsapp.com/" in js and "WA_INTERNAL_TOKEN" not in js)
     check("yenile siniri", "setTimeout(durumCek, 10000)" in js and "120000" in js and 'd === "baglaniyor" || d === "qr"' in js)
-    check("qr yardim dugmeleri", "Durumu yenile" in js and "Yine de dene" in js and "20 sn sürebilir" in js)
+    check("qr yardim dugmeleri", "Durumu yenile" in js and "Yine de dene" in js and "20 sn sürebilir" in js and "QR Okut" in js and "QR Kapat" in js and 'href="/whatsapp/qr-ac"' in js)
+    kapat = js.find("function qrSayfaKapat()")
+    kapat_son = js.find("if (qrKutu)", kapat)
+    check("asistan qr kapat istek yok", kapat > 0 and kapat_son > kapat and "fetch" not in js[kapat:kapat_son] and "uyandir" not in js[kapat:kapat_son])
 
     class Sahte:
         def __init__(self, govde, kod=200):
@@ -1022,7 +1025,7 @@ def arayuz():
             "<!doctype html><html><head><meta charset='utf-8'></head><body>"
             "<script>window.ERP_ASISTAN_UID = 41;</script>"
             "<div id='erp-asistan-ozet'></div>"
-            "<script src='/static/js/erp-asistan.js?v=11'></script>"
+            "<script src='/static/js/erp-asistan.js?v=12'></script>"
             "</body></html>"
         )
 
@@ -1032,7 +1035,7 @@ def arayuz():
             "<!doctype html><html><head><meta charset='utf-8'></head><body>"
             "<script>window.ERP_ASISTAN_UID = 99;</script>"
             "<div id='erp-asistan-ozet'></div>"
-            "<script src='/static/js/erp-asistan.js?v=11'></script>"
+            "<script src='/static/js/erp-asistan.js?v=12'></script>"
             "</body></html>"
         )
 
@@ -1478,7 +1481,9 @@ def arayuz():
             "bagli degil yardim",
             s.locator("#erp-asistan-wa-yenile").is_visible()
             and s.locator("#erp-asistan-wa-yine").is_visible()
-            and "20 sn sürebilir" in s.locator("#erp-asistan-wa-uyandir").inner_text(),
+            and "20 sn sürebilir" in s.locator("#erp-asistan-wa-uyandir").inner_text()
+            and s.locator("#erp-asistan-wa-qr-okut").is_visible()
+            and s.locator("#erp-asistan-wa-qr-kapat").is_visible(),
         )
         check(
             "bagli degil kisisel web",
@@ -1505,7 +1510,7 @@ def arayuz():
         )
         check("okunamadi engel yok", s.locator("#erp-asistan-wa-gonder").is_enabled())
         check("okunamadi web gorunur", s.locator("#erp-asistan-wa-web").is_visible() and s.locator("#erp-asistan-wa-web-ipucu").is_visible())
-        check("okunamadi yardim gizli", s.locator("#erp-asistan-wa-yenile").is_hidden() and s.locator("#erp-asistan-wa-yine").is_hidden())
+        check("okunamadi yardim gizli", s.locator("#erp-asistan-wa-yenile").is_hidden() and s.locator("#erp-asistan-wa-yine").is_hidden() and s.locator("#erp-asistan-wa-qr-kutu").is_hidden())
         wa_yenile("baglaniyor")
         s.wait_for_function(
             "() => document.querySelector('#erp-asistan-wa-durum').textContent === 'Bağlanıyor…'"
@@ -1513,7 +1518,7 @@ def arayuz():
             " && !document.querySelector('#erp-asistan-wa-gonder').disabled"
         )
         check("baglaniyor gonder acik", s.locator("#erp-asistan-wa-gonder").is_enabled())
-        check("baglaniyor yardim gizli", s.locator("#erp-asistan-wa-yenile").is_hidden() and s.locator("#erp-asistan-wa-yine").is_hidden())
+        check("baglaniyor yardim gizli", s.locator("#erp-asistan-wa-yenile").is_hidden() and s.locator("#erp-asistan-wa-yine").is_hidden() and s.locator("#erp-asistan-wa-qr-kutu").is_hidden())
         wa_yenile("qr")
         s.wait_for_function(
             "() => document.querySelector('#erp-asistan-wa-durum').textContent.indexOf('QR bekliyor') >= 0"
@@ -1526,8 +1531,44 @@ def arayuz():
             s.locator("#erp-asistan-wa-yenile").is_visible()
             and s.locator("#erp-asistan-wa-yine").is_visible()
             and "20 sn sürebilir" in s.locator("#erp-asistan-wa-uyandir").inner_text()
-            and "3001" not in s.locator("#erp-asistan-wa-durum").inner_text(),
+            and "3001" not in s.locator("#erp-asistan-wa-durum").inner_text()
+            and s.locator("#erp-asistan-wa-qr-okut").is_visible()
+            and s.locator("#erp-asistan-wa-qr-kapat").is_visible()
+            and s.locator("#erp-asistan-wa-qr-yedek").is_hidden(),
         )
+        s.evaluate("""() => { window.open = function () { return null; }; }""")
+        s.click("#erp-asistan-wa-qr-okut")
+        check(
+            "qr popup engeli",
+            s.locator("#erp-asistan-wa-qr-yedek").is_visible()
+            and s.locator("#erp-asistan-wa-qr-yedek").get_attribute("href") == "/whatsapp/qr-ac",
+        )
+        s.evaluate("""() => {
+          window.__erpQrKapandi = false;
+          window.open = function () {
+            return { closed: false, close: function () { this.closed = true; window.__erpQrKapandi = true; } };
+          };
+        }""")
+        s.click("#erp-asistan-wa-qr-okut")
+        once_istek = len(durum_baslik)
+        once_wa = wa_post["n"]
+        s.click("#erp-asistan-wa-qr-kapat")
+        check(
+            "qr kapat istek yok",
+            s.evaluate("() => window.__erpQrKapandi === true")
+            and s.locator("#erp-asistan-wa-qr-not").is_hidden()
+            and len(durum_baslik) == once_istek
+            and wa_post["n"] == once_wa,
+        )
+        s.locator("#erp-asistan-wa-metin").evaluate("el => { el.style.filter = 'blur(8px)'; }")
+        s.locator("#erp-asistan-wa-liste").evaluate("el => { el.style.filter = 'blur(8px)'; }")
+        s.locator(".ea-wa-maske").evaluate("el => { el.style.filter = 'blur(8px)'; }")
+        s.locator("#erp-asistan-wa-pop h3").evaluate("el => { el.style.filter = 'blur(8px)'; }")
+        s.locator("#erp-asistan-wa-web").evaluate("el => { el.style.filter = 'blur(8px)'; }")
+        s.locator("#erp-asistan-wa-web-ipucu").evaluate("el => { el.style.filter = 'blur(8px)'; }")
+        qr_png = os.path.join(os.environ.get("TEMP", "."), "erp_asistan_wa_qr.png")
+        s.locator("#erp-asistan-wa-pop .ea-wa-kart").screenshot(path=qr_png)
+        print("ekran " + qr_png)
         once_bakis = len(durum_baslik)
         once_wa = wa_post["n"]
         s.click("#erp-asistan-wa-yenile")
@@ -1555,15 +1596,6 @@ def arayuz():
             and "Kuyruğa" not in s.locator(".ea-wa-sonuc").inner_text(),
         )
         wa_post["hata"] = False
-        s.locator("#erp-asistan-wa-metin").evaluate("el => { el.style.filter = 'blur(8px)'; }")
-        s.locator("#erp-asistan-wa-liste").evaluate("el => { el.style.filter = 'blur(8px)'; }")
-        s.locator(".ea-wa-maske").evaluate("el => { el.style.filter = 'blur(8px)'; }")
-        s.locator("#erp-asistan-wa-pop h3").evaluate("el => { el.style.filter = 'blur(8px)'; }")
-        s.locator("#erp-asistan-wa-web").evaluate("el => { el.style.filter = 'blur(8px)'; }")
-        s.locator("#erp-asistan-wa-web-ipucu").evaluate("el => { el.style.filter = 'blur(8px)'; }")
-        qr_png = os.path.join(os.environ.get("TEMP", "."), "erp_asistan_wa_qr.png")
-        s.locator("#erp-asistan-wa-pop .ea-wa-kart").screenshot(path=qr_png)
-        print("ekran " + qr_png)
         s.click("#erp-asistan-wa-pop .ea-gecmis-x")
         durum_mod["kod"] = "bagli_degil"
         uyari = {"m": ""}
@@ -1581,6 +1613,7 @@ def arayuz():
         s.wait_for_function(
             "() => document.querySelector('#erp-asistan-wa-durum').textContent === 'WhatsApp bağlı'"
             " && document.querySelector('#erp-asistan-wa-web').hidden"
+            " && document.querySelector('#erp-asistan-wa-qr-kutu').hidden"
         )
         s.locator("#erp-asistan-wa-metin").evaluate("el => { el.style.filter = 'blur(8px)'; }")
         s.locator("#erp-asistan-wa-liste").evaluate("el => { el.style.filter = 'blur(8px)'; }")

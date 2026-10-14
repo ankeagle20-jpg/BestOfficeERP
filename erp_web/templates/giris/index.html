@@ -29300,11 +29300,27 @@ function girisMusteriWhatsAppAc() {
         : 'Merhaba,\n\nBestOffice üzerinden iletişime geçiyorum.';
     var mid = 0;
     try { mid = parseInt(typeof selectedId !== 'undefined' ? selectedId : 0, 10) || 0; } catch (eMid) { mid = 0; }
-    if (typeof sozlesmeWhatsAppAc === 'function') {
-        sozlesmeWhatsAppAc({ buton: 'ust', musteriId: mid, telefon: tel, ad: ad, mesaj: mesaj });
-        return;
+    function mesajPenceresi() {
+        if (typeof sozlesmeWhatsAppAc === 'function') {
+            sozlesmeWhatsAppAc({ buton: 'ust', musteriId: mid, telefon: tel, ad: ad, mesaj: mesaj });
+            return;
+        }
+        bestOfficeWhatsAppWebAc(girisTelefonuWhatsAppRakam(tel), mesaj);
     }
-    bestOfficeWhatsAppWebAc(girisTelefonuWhatsAppRakam(tel), mesaj);
+    fetch('/erp-notlar/api/whatsapp-durum', { credentials: 'same-origin' })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (j) {
+            var d = j && j.durum;
+            if (d === 'qr' || d === 'bagli_degil') {
+                var acti = typeof window.erpQrSayfaAc === 'function' && window.erpQrSayfaAc();
+                if (acti) return;
+                mesajPenceresi();
+                if (typeof window.erpQrYedekGoster === 'function') window.erpQrYedekGoster();
+                return;
+            }
+            mesajPenceresi();
+        })
+        .catch(function () { mesajPenceresi(); });
 }
 
 // Yeni müşteri formu aç
