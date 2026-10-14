@@ -1385,6 +1385,36 @@ def _wa_ayni_tutar_link_oku(mid: int, kurus: int):
         return {"_okunamadi": True}
 
 
+def _wa_diger_gecerli_tutarlar(mid: int, kurus: int) -> list:
+    """Başka tutardaki açık linkler. Adres okunmaz, tablo açılmaz."""
+    from odeme_linki import ofisbir_istegi
+
+    if not ofisbir_istegi():
+        return []
+    try:
+        rows = fetch_all(
+            """
+            SELECT DISTINCT tutar_kurus
+            FROM public.odeme_linkleri
+            WHERE musteri_id = %s
+              AND tutar_kurus <> %s
+              AND durum = 'bekliyor'
+              AND expires_at > NOW()
+            ORDER BY tutar_kurus
+            """,
+            (int(mid), int(kurus)),
+        )
+    except Exception:
+        return []
+    out = []
+    for row in rows or []:
+        try:
+            out.append(int(row.get("tutar_kurus")))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
 def _asistan_link_audit(uid: int, mid: int, link_id: int, kurus: int) -> None:
     from audit_log import audit_yaz
     from db import execute as calistir
@@ -1449,7 +1479,16 @@ def asistan_odeme_linki(uid: int, mid: int, data: dict, olustur_fn=None) -> tupl
     if mevcut:
         url = _wa_kayitli_odeme_url(mevcut.get("whatsapp_mesaj"))
         if not url:
-            return {"ok": False, "mesaj": "Geçerli link var, adresi yeniden kurulamıyor"}, 409
+            tarih = _tarih_ist(mevcut.get("expires_at")) or "—"
+            return {
+                "ok": False,
+                "mesaj": (
+                    "Bu tutarda geçerli bir link zaten var (son geçerlilik "
+                    + tarih
+                    + ") ama adresi saklı değil; mükerrer ödeme riski nedeniyle yenisi üretilmedi. "
+                    "Farklı tutar seçebilir veya linki Sözleşmeler ekranından yönetebilirsin."
+                ),
+            }, 409
         tarih = _tarih_ist(mevcut.get("expires_at"))
         metin = wa_varsayilan_mesaj(
             str(row.get("name") or ""),
@@ -1469,11 +1508,18 @@ def asistan_odeme_linki(uid: int, mid: int, data: dict, olustur_fn=None) -> tupl
             "mesaj": "Mevcut geçerli link kullanıldı (tutar " + tutar + " ₺, son geçerlilik " + tarih + ")",
         }, 200
     if not bool((data or {}).get("onay")):
+        mesaj = tutar + " ₺ tutarında ödeme linki oluşturulacak. Onaylıyor musun?"
+        diger = _wa_diger_gecerli_tutarlar(mid, kurus)
+        if len(diger) == 1:
+            mesaj += " Bu müşteride " + tutar_tl(diger[0]) + " ₺ tutarında başka geçerli bir link de var."
+        elif len(diger) > 1:
+            parca = " ve ".join(tutar_tl(k) + " ₺" for k in diger)
+            mesaj += " Bu müşteride " + parca + " tutarlarında başka geçerli linkler de var."
         return {
             "ok": False,
             "onay_gerekli": True,
             "tutar": tutar,
-            "mesaj": tutar + " ₺ tutarında ödeme linki oluşturulacak. Onaylıyor musun?",
+            "mesaj": mesaj,
         }, 409
     simdi = time.monotonic()
     once = _LINK_KILIT.get(int(mid))

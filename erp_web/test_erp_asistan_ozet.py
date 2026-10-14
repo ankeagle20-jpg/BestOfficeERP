@@ -813,7 +813,7 @@ def test_wa_odeme_linki():
     eski_ozellik = ol.ozellik_acik
     eski_tahsil = ol._tahsilat_yaz
     eski_audit = audit_log.audit_yaz
-    eski = (en._wa_musteri, en._wa_grid_ozet, en._wa_ayni_tutar_link_oku)
+    eski = (en._wa_musteri, en._wa_grid_ozet, en._wa_ayni_tutar_link_oku, en._wa_diger_gecerli_tutarlar)
     tahsil = {"n": 0}
     cagri = {"n": 0, "patla": False}
     aud = []
@@ -841,6 +841,7 @@ def test_wa_odeme_linki():
         "grid_yok": False, "toplam_borc": 10, "geciken_tutar": 4, "geciken_ay": 1, "gun": 0,
     }
     en._wa_ayni_tutar_link_oku = lambda mid, kurus: None
+    en._wa_diger_gecerli_tutarlar = lambda mid, kurus: []
     en._LINK_KILIT.clear()
     try:
         govde, kod = en.asistan_odeme_linki(5, 7, {"secim": "toplam"}, olustur_fn=olustur)
@@ -861,8 +862,30 @@ def test_wa_odeme_linki():
             "id": 4, "tutar_kurus": kurus, "expires_at": bitis, "whatsapp_mesaj": "adres yok",
         }
         govde, kod = en.asistan_odeme_linki(5, 7, {"secim": "toplam", "onay": True}, olustur_fn=olustur)
-        check("link adres yok", kod == 409 and cagri["n"] == once and "http" not in govde.get("mesaj", ""))
+        adres_mesaj = govde.get("mesaj") or ""
+        check(
+            "link adres yok",
+            kod == 409 and cagri["n"] == once and tahsil["n"] == 0
+            and "son geçerlilik" in adres_mesaj and "01.12.2026" in adres_mesaj
+            and "yenisi üretilmedi" in adres_mesaj and "http" not in adres_mesaj,
+            "adres",
+        )
         en._wa_ayni_tutar_link_oku = lambda mid, kurus: None
+        en._wa_diger_gecerli_tutarlar = lambda mid, kurus: [1500]
+        govde, kod = en.asistan_odeme_linki(5, 7, {"secim": "toplam"}, olustur_fn=olustur)
+        diger_mesaj = govde.get("mesaj") or ""
+        check(
+            "link baska tutar",
+            kod == 409 and govde.get("onay_gerekli") is True and cagri["n"] == once
+            and "15.00 ₺ tutarında başka geçerli bir link de var" in diger_mesaj
+            and "http" not in diger_mesaj,
+            "diger",
+        )
+        govde, kod = en.asistan_odeme_linki(5, 7, {"secim": "toplam", "onay": True}, olustur_fn=olustur)
+        check("link baska tutar uretim", kod == 200 and cagri["n"] == once + 1 and tahsil["n"] == 0)
+        en._LINK_KILIT.clear()
+        en._wa_diger_gecerli_tutarlar = lambda mid, kurus: []
+        once = cagri["n"]
         en._wa_grid_ozet = lambda mid, bugun=None: {
             "grid_yok": True, "toplam_borc": None, "geciken_tutar": None, "geciken_ay": None, "gun": None,
         }
@@ -893,13 +916,13 @@ def test_wa_odeme_linki():
         if aud:
             ham = str(aud[-1].get("yeni")) + str(aud[-1].get("anlik"))
         check("link audit", bool(aud) and aud[-1].get("musteri_id") == 7 and "http" not in ham and "token" not in ham and "telefon" not in ham)
-        kaynak = inspect.getsource(en.asistan_odeme_linki) + inspect.getsource(en._wa_ayni_tutar_link_oku)
-        check("link tahsilat yok", "_tahsilat_yaz" not in kaynak and "paytr" not in kaynak.lower() and "CREATE" not in kaynak and "ALTER" not in kaynak and "sozlesme_wa_isle" not in kaynak)
+        kaynak = inspect.getsource(en.asistan_odeme_linki) + inspect.getsource(en._wa_ayni_tutar_link_oku) + inspect.getsource(en._wa_diger_gecerli_tutarlar)
+        check("link tahsilat yok", "_tahsilat_yaz" not in kaynak and "paytr" not in kaynak.lower() and "CREATE" not in kaynak and "ALTER" not in kaynak and "UPDATE" not in kaynak and "api_iptal" not in kaynak and "sozlesme_wa_isle" not in kaynak)
     finally:
         ol.ozellik_acik = eski_ozellik
         ol._tahsilat_yaz = eski_tahsil
         audit_log.audit_yaz = eski_audit
-        en._wa_musteri, en._wa_grid_ozet, en._wa_ayni_tutar_link_oku = eski
+        en._wa_musteri, en._wa_grid_ozet, en._wa_ayni_tutar_link_oku, en._wa_diger_gecerli_tutarlar = eski
         en._LINK_KILIT.clear()
 
 
