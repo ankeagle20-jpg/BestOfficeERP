@@ -187,7 +187,7 @@ def test_kaynak_yazmaz():
     check("fetch_all helperda yok", "fetch_all" not in src)
     check("ozet tek ekleme", api.count("_ozet_grid_borc_ekle(") == 1)
     layout = (ROOT / "templates" / "layout.html").read_text(encoding="utf-8")
-    check("js v=9", "js/erp-asistan.js') }}?v=9" in layout)
+    check("js v=10", "js/erp-asistan.js') }}?v=10" in layout)
     check("kullanici id", "ERP_ASISTAN_UID" in layout)
     js = (ROOT / "static" / "js" / "erp-asistan.js").read_text(encoding="utf-8")
     check("ipucu borc", "Ekstredeki ek fatura/tediye/devir dahil değildir." in js)
@@ -941,6 +941,9 @@ def test_wa_durum():
     js = (ROOT / "static" / "js" / "erp-asistan.js").read_text(encoding="utf-8")
     check("durum istemci servise gitmez", "durum-bak" not in js and "WA_INTERNAL_TOKEN" not in js and "/erp-notlar/api/whatsapp-durum" in js)
     check("ekstre uyari metni", "Not kaydedildi; WhatsApp bağlı olmadığı için mesaj henüz gitmedi." in js)
+    check("kisisel web metni", "Kendi WhatsApp Web\\'imde aç (ofis hattı olmayabilir)" in js)
+    check("ofis qr ipucu", "Giriş → WhatsApp ekranından QR\\'ı ofis telefonuyla okutun." in js)
+    check("kisisel web adresi", "https://web.whatsapp.com/" in js and "WA_INTERNAL_TOKEN" not in js)
     check("yenile siniri", "setTimeout(durumCek, 10000)" in js and "120000" in js)
 
     class Sahte:
@@ -1012,7 +1015,7 @@ def arayuz():
             "<!doctype html><html><head><meta charset='utf-8'></head><body>"
             "<script>window.ERP_ASISTAN_UID = 41;</script>"
             "<div id='erp-asistan-ozet'></div>"
-            "<script src='/static/js/erp-asistan.js?v=9'></script>"
+            "<script src='/static/js/erp-asistan.js?v=10'></script>"
             "</body></html>"
         )
 
@@ -1022,7 +1025,7 @@ def arayuz():
             "<!doctype html><html><head><meta charset='utf-8'></head><body>"
             "<script>window.ERP_ASISTAN_UID = 99;</script>"
             "<div id='erp-asistan-ozet'></div>"
-            "<script src='/static/js/erp-asistan.js?v=9'></script>"
+            "<script src='/static/js/erp-asistan.js?v=10'></script>"
             "</body></html>"
         )
 
@@ -1401,6 +1404,7 @@ def arayuz():
         s.wait_for_selector("#erp-asistan-wa-pop textarea")
         s.wait_for_function("() => document.querySelector('#erp-asistan-wa-durum').textContent === 'WhatsApp bağlı'")
         check("rozet bagli", s.locator("#erp-asistan-wa-durum").inner_text() == "WhatsApp bağlı")
+        check("bagli web gizli", s.locator("#erp-asistan-wa-web").is_hidden() and s.locator("#erp-asistan-wa-web-ipucu").is_hidden())
         check("wa maske", s.locator(".ea-wa-maske").inner_text() == "Numara **11")
         check("panel baslik", "Gecikme hatırlatma" in s.locator("#erp-asistan-wa-liste").inner_text() and "Ödeme linki" in s.locator("#erp-asistan-wa-liste").inner_text() and "Tahsilat bilgilendirme" in s.locator("#erp-asistan-wa-liste").inner_text())
         check("oneri secili", s.locator("#erp-asistan-wa-sec").input_value() == "0" and s.locator("#erp-asistan-wa-metin").input_value() == "sahte vade")
@@ -1456,6 +1460,13 @@ def arayuz():
         wa_yenile("bagli_degil")
         s.wait_for_function("() => document.querySelector('#erp-asistan-wa-durum').textContent.indexOf('birkaç dakika sonra tekrar dene') >= 0")
         check("bagli degil gonder pasif", s.locator("#erp-asistan-wa-gonder").is_disabled())
+        check(
+            "bagli degil kisisel web",
+            s.locator("#erp-asistan-wa-web").is_visible()
+            and "ofis hattı olmayabilir" in s.locator("#erp-asistan-wa-web").inner_text()
+            and "ofis telefonuyla okutun" in s.locator("#erp-asistan-wa-web-ipucu").inner_text()
+            and s.locator("#erp-asistan-wa-web-a").get_attribute("href") == "https://web.whatsapp.com/",
+        )
         s.locator("#erp-asistan-wa-metin").evaluate("el => { el.style.filter = 'blur(8px)'; }")
         s.locator("#erp-asistan-wa-liste").evaluate("el => { el.style.filter = 'blur(8px)'; }")
         s.locator(".ea-wa-maske").evaluate("el => { el.style.filter = 'blur(8px)'; }")
@@ -1473,6 +1484,7 @@ def arayuz():
             " && !document.querySelector('#erp-asistan-wa-gonder').disabled"
         )
         check("okunamadi engel yok", s.locator("#erp-asistan-wa-gonder").is_enabled())
+        check("okunamadi web gorunur", s.locator("#erp-asistan-wa-web").is_visible() and s.locator("#erp-asistan-wa-web-ipucu").is_visible())
         wa_yenile("baglaniyor")
         s.wait_for_function(
             "() => document.querySelector('#erp-asistan-wa-durum').textContent === 'Bağlanıyor…'"
@@ -1493,6 +1505,18 @@ def arayuz():
         pencere.accept()
         check("ekstre uyari", uyari["m"] == "Not kaydedildi; WhatsApp bağlı olmadığı için mesaj henüz gitmedi.")
         check("durum token gitmedi", durum_baslik and all(b is None for b in durum_baslik))
+        wa_yenile("bagli")
+        s.wait_for_function(
+            "() => document.querySelector('#erp-asistan-wa-durum').textContent === 'WhatsApp bağlı'"
+            " && document.querySelector('#erp-asistan-wa-web').hidden"
+        )
+        s.locator("#erp-asistan-wa-metin").evaluate("el => { el.style.filter = 'blur(8px)'; }")
+        s.locator("#erp-asistan-wa-liste").evaluate("el => { el.style.filter = 'blur(8px)'; }")
+        s.locator(".ea-wa-maske").evaluate("el => { el.style.filter = 'blur(8px)'; }")
+        s.locator("#erp-asistan-wa-pop h3").evaluate("el => { el.style.filter = 'blur(8px)'; }")
+        bagli_png = os.path.join(os.environ.get("TEMP", "."), "erp_asistan_wa_bagli.png")
+        s.locator("#erp-asistan-wa-pop .ea-wa-kart").screenshot(path=bagli_png)
+        print("ekran " + bagli_png)
         tarayici.close()
 
 

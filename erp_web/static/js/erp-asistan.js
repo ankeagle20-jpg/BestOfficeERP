@@ -123,6 +123,9 @@
       ".ea-wa-kart{max-width:920px;width:min(920px,100%);}" +
       ".ea-wa-metin{width:100%;min-height:120px;box-sizing:border-box;white-space:pre-wrap;}" +
       ".ea-wa-durum{font-size:13px;margin:0 0 8px;color:#80deea;}" +
+      ".ea-wa-web{margin:0 0 4px;font-size:13px;}" +
+      ".ea-wa-web a{color:#80deea;}" +
+      ".ea-wa-web-ipucu{margin:0 0 8px;font-size:12px;color:#b0bec5;}" +
       "#erp-asistan-wa-gonder:disabled{opacity:.45;cursor:not-allowed;}" +
       ".ea-wa-uyari{color:#ffab91;font-size:12px;}" +
       ".ea-wa-sonuc{font-size:13px;margin-top:8px;}" +
@@ -1505,6 +1508,8 @@
       '<div class="ea-wa-govde"><div class="ea-wa-sol">' +
       '<p class="ea-wa-maske"></p>' +
       '<p id="erp-asistan-wa-durum" class="ea-wa-durum">Durum alınıyor…</p>' +
+      '<p id="erp-asistan-wa-web" class="ea-wa-web"><a id="erp-asistan-wa-web-a" href="https://web.whatsapp.com/" target="_blank" rel="noopener noreferrer">Kendi WhatsApp Web\'imde aç (ofis hattı olmayabilir)</a></p>' +
+      '<p id="erp-asistan-wa-web-ipucu" class="ea-wa-web-ipucu">ERP üzerinden ofis hattıyla göndermek için Giriş → WhatsApp ekranından QR\'ı ofis telefonuyla okutun.</p>' +
       '<label class="erp-asistan-alan">Hazır mesaj <select id="erp-asistan-wa-sec"></select></label>' +
       '<textarea id="erp-asistan-wa-metin" class="ea-wa-metin" maxlength="1000"></textarea>' +
       '<p class="ea-wa-uyari" hidden></p>' +
@@ -1580,6 +1585,8 @@
     var durumEngel = false;
     var durumBas = Date.now();
     var durumKutu = perde.querySelector("#erp-asistan-wa-durum");
+    var webKutu = perde.querySelector("#erp-asistan-wa-web");
+    var webIpucu = perde.querySelector("#erp-asistan-wa-web-ipucu");
     function durumYaz(j) {
       var d = (j && j.durum) || "bilinmiyor";
       durumEngel = d === "bagli_degil";
@@ -1588,6 +1595,9 @@
       } else {
         durumKutu.textContent = (j && j.etiket) || "Durum alınamadı";
       }
+      var gizle = d === "bagli";
+      if (webKutu) webKutu.hidden = gizle;
+      if (webIpucu) webIpucu.hidden = gizle;
       uyar();
     }
     function durumCek() {
