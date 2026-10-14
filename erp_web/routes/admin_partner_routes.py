@@ -19,6 +19,7 @@ from partner_program import (
     ayar_ekle,
     bag_degistir,
     ensure_partner_tables_once,
+    eksik_komisyonlari_tara,
     kod_pasif,
     kod_uret,
     komisyon_durum,
@@ -324,6 +325,13 @@ def api_komisyon_csv():
         mimetype="text/csv",
         headers={"Content-Disposition": "attachment; filename=ortak-komisyon.csv"},
     )
+
+
+@bp.route("/api/ortak-komisyon/tara", methods=["POST"])
+@platform_partner_admin
+def api_komisyon_tara():
+    ozet = eksik_komisyonlari_tara()
+    return jsonify({"ok": True, "taranan": ozet["taranan"], "yazilan": ozet["yazilan"]})
 
 
 @bp.route("/api/ortak-komisyon/<int:entry_id>/onayla", methods=["POST"])

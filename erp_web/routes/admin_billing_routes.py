@@ -796,6 +796,10 @@ def api_payments_create():
                 json.dumps(meta),
             ),
         )
+        if row and row.get("id"):
+            from partner_program import komisyon_kancasi
+
+            komisyon_kancasi(int(row["id"]))
         return jsonify({"ok": True, "item": _serialize_row(row)}), 201
     except ValueError as e:
         return jsonify({"ok": False, "mesaj": str(e)}), 400

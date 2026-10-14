@@ -674,6 +674,22 @@ def paytr_callback():
             total_amount,
         )
         outcome = _record_paytr_paid(inv, merchant_oid, status)
+        try:
+            from partner_program import komisyon_kancasi
+
+            pay = fetch_one(
+                """
+                SELECT id FROM public.platform_tenant_payments
+                WHERE reference = %s
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (merchant_oid,),
+            )
+            if pay and pay.get("id"):
+                komisyon_kancasi(int(pay["id"]))
+        except Exception:
+            logger.exception("komisyon kanca invoice_id=%s", inv_id)
         if outcome == "already":
             logger.info(
                 "paytr_callback ALREADY_PROCESSED (unique race) invoice_id=%s oid_prefix=%s",

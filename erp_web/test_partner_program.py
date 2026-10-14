@@ -278,11 +278,42 @@ def test_kod():
     )
 
 
+def test_kanca():
+    import partner_program as pp
+
+    def patla(_pid):
+        raise RuntimeError("yazim")
+
+    eski = pp.komisyon_isle
+    pp.komisyon_isle = patla
+    try:
+        pp.komisyon_kancasi(5)
+        check("kanca yutar", True)
+    except Exception as e:
+        check("kanca yutar", False, str(e))
+    finally:
+        pp.komisyon_isle = eski
+    paytr = (ROOT / "routes" / "billing_paytr_routes.py").read_text(encoding="utf-8")
+    kayit = paytr.split("def _record_paytr_paid", 1)[1].split("\ndef ", 1)[0]
+    cb = paytr.split("def paytr_callback", 1)[1]
+    check("kayit icinde kanca yok", "komisyon" not in kayit)
+    check("kanca kayittan sonra", cb.find("_record_paytr_paid") < cb.find("komisyon_kancasi"))
+    elle = (ROOT / "routes" / "admin_billing_routes.py").read_text(encoding="utf-8")
+    fn = elle.split("def api_payments_create", 1)[1].split("\ndef ", 1)[0]
+    check(
+        "elle tahsilat kanca",
+        "komisyon_kancasi" in fn
+        and fn.find("INSERT INTO public.platform_tenant_payments") < fn.find("komisyon_kancasi"),
+    )
+    check("tara ucu", "eksik_komisyonlari_tara" in (ROOT / "routes" / "admin_partner_routes.py").read_text(encoding="utf-8"))
+
+
 def main():
     test_altyapi()
     test_derinlik()
     test_pencere_matrah_oran_surum_hold()
     test_kod()
+    test_kanca()
     if FAIL:
         raise SystemExit("FAIL " + ",".join(FAIL))
     print("partner_program ok")
