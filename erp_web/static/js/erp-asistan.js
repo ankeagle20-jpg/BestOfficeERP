@@ -122,6 +122,8 @@
       ".ea-wa[disabled]{cursor:not-allowed;opacity:.35;}" +
       ".ea-wa-kart{max-width:920px;width:min(920px,100%);}" +
       ".ea-wa-metin{width:100%;min-height:120px;box-sizing:border-box;white-space:pre-wrap;}" +
+      ".ea-wa-durum{font-size:13px;margin:0 0 8px;color:#80deea;}" +
+      "#erp-asistan-wa-gonder:disabled{opacity:.45;cursor:not-allowed;}" +
       ".ea-wa-uyari{color:#ffab91;font-size:12px;}" +
       ".ea-wa-sonuc{font-size:13px;margin-top:8px;}" +
       "#erp-asistan-wa-link-kutu{margin-top:8px;padding:8px;border:1px solid #1e3a50;border-radius:8px;}" +
@@ -901,8 +903,23 @@
           alert((j && j.mesaj) || "Kaydedilemedi");
           return;
         }
-        perde.remove();
-        gecmisYukle();
+        function kapat() {
+          perde.remove();
+          gecmisYukle();
+        }
+        if (!payload.whatsapp_gonderilsin) {
+          kapat();
+          return;
+        }
+        fetch("/erp-notlar/api/whatsapp-durum", { credentials: "same-origin" })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (st) {
+            kapat();
+            if (st && st.ok && (st.durum === "bagli_degil" || st.durum === "baglaniyor")) {
+              alert("Not kaydedildi; WhatsApp bağlı olmadığı için mesaj henüz gitmedi.");
+            }
+          })
+          .catch(function () { kapat(); });
       });
     };
   }
@@ -1458,7 +1475,17 @@
     return "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
   }
 
+  var waDurumZaman = null;
+
+  function waDurumDur() {
+    if (waDurumZaman) {
+      clearTimeout(waDurumZaman);
+      waDurumZaman = null;
+    }
+  }
+
   function waPopKapat() {
+    waDurumDur();
     var p = document.getElementById("erp-asistan-wa-pop");
     if (p) p.remove();
     waKilit = false;
@@ -1477,6 +1504,7 @@
       '<button type="button" class="ea-gecmis-x" aria-label="Kapat">×</button></div>' +
       '<div class="ea-wa-govde"><div class="ea-wa-sol">' +
       '<p class="ea-wa-maske"></p>' +
+      '<p id="erp-asistan-wa-durum" class="ea-wa-durum">Durum alınıyor…</p>' +
       '<label class="erp-asistan-alan">Hazır mesaj <select id="erp-asistan-wa-sec"></select></label>' +
       '<textarea id="erp-asistan-wa-metin" class="ea-wa-metin" maxlength="1000"></textarea>' +
       '<p class="ea-wa-uyari" hidden></p>' +
@@ -1549,12 +1577,44 @@
       });
       liste.innerHTML = html;
     }
+    var durumEngel = false;
+    var durumBas = Date.now();
+    var durumKutu = perde.querySelector("#erp-asistan-wa-durum");
+    function durumYaz(j) {
+      var d = (j && j.durum) || "bilinmiyor";
+      durumEngel = d === "bagli_degil";
+      if (d === "bagli_degil") {
+        durumKutu.textContent = "Bağlı değil. WhatsApp bağlı değil, birkaç dakika sonra tekrar dene";
+      } else {
+        durumKutu.textContent = (j && j.etiket) || "Durum alınamadı";
+      }
+      uyar();
+    }
+    function durumCek() {
+      fetch("/erp-notlar/api/whatsapp-durum", { credentials: "same-origin" })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (j) {
+          if (!document.getElementById("erp-asistan-wa-pop")) return;
+          if (!j || j.ok === false || !j.durum) {
+            durumYaz({ durum: "bilinmiyor", etiket: "Durum alınamadı" });
+            return;
+          }
+          durumYaz(j);
+          if (j.durum === "baglaniyor" && (Date.now() - durumBas) < 120000) {
+            waDurumZaman = setTimeout(durumCek, 10000);
+          }
+        })
+        .catch(function () {
+          if (!document.getElementById("erp-asistan-wa-pop")) return;
+          durumYaz({ durum: "bilinmiyor", etiket: "Durum alınamadı" });
+        });
+    }
     function uyar() {
       var s = secili();
       var engel = !!(s && s.engel);
       uyari.hidden = !engel;
       uyari.textContent = engel ? (s.ipucu || "Borç hesaplanmadı") : "";
-      gonder.disabled = engel || !String(kutu.value || "").trim();
+      gonder.disabled = durumEngel || engel || !String(kutu.value || "").trim();
       panelCiz();
     }
     function uygula(s) {
@@ -1764,6 +1824,7 @@
           uyar();
         });
     };
+    durumCek();
     fetch("/erp-notlar/api/musteri/" + encodeURIComponent(mid) + "/whatsapp", { credentials: "same-origin" })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (j) {
@@ -1948,6 +2009,7 @@
   window.erpAsistanAc = panelToggle;
   window.erpAsistanTabloHtml = tabloHtml;
   window.erpAsistanOzetYukle = erpAsistanOzetYukle;
+  window.erpAsistanNotFormAc = formAc;
   window.erpAsistanSutunBirlestir = tercihBirlestir;
 
   function basla() {

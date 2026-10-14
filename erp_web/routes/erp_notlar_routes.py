@@ -1339,6 +1339,62 @@ def asistan_wa_gonder(uid: int, mid: int, data: dict, origin: str, host: str, go
     return _wa_sonuc_sade(govde or {}, int(kod), metin)
 
 
+def _wa_durum_paket(kod: str) -> dict:
+    etiket = {
+        "bagli": "WhatsApp bağlı",
+        "baglaniyor": "Bağlanıyor…",
+        "bagli_degil": "Bağlı değil",
+        "bilinmiyor": "Durum alınamadı",
+    }
+    return {
+        "ok": True,
+        "durum": kod,
+        "etiket": etiket.get(kod, "Durum alınamadı"),
+        "engel": kod == "bagli_degil",
+    }
+
+
+def _wa_durum_bak_getir():
+    """Yalnız bakış. Mesaj gitmez, oturum uyandırılmaz."""
+    from routes.whatsapp_routes import _wa_internal_headers, _wa_url
+
+    return requests.get(
+        _wa_url("durum-bak"),
+        headers=_wa_internal_headers(),
+        timeout=(3, 5),
+    )
+
+
+def asistan_wa_durum(getir_fn=None) -> tuple[dict, int]:
+    """Kiracı oturumundan salt okunur durum. Tablo açılmaz. Adres ve anahtar dönmez."""
+    try:
+        from routes.whatsapp_routes import _wa_tenant_id
+
+        _wa_tenant_id()
+    except ValueError:
+        return {"ok": False, "mesaj": "İstek reddedildi"}, 404
+    fn = getir_fn or _wa_durum_bak_getir
+    try:
+        r = fn()
+    except Exception:
+        return _wa_durum_paket("bilinmiyor"), 200
+    if getattr(r, "status_code", 0) != 200:
+        return _wa_durum_paket("bilinmiyor"), 200
+    try:
+        data = r.json() if getattr(r, "content", None) else {}
+    except Exception:
+        return _wa_durum_paket("bilinmiyor"), 200
+    if not isinstance(data, dict):
+        return _wa_durum_paket("bilinmiyor"), 200
+    if bool(data.get("hazir")) and bool(data.get("bagli")):
+        return _wa_durum_paket("bagli"), 200
+    oturum = str(data.get("durum") or "").strip().lower()
+    topar = str(data.get("toparlama_durumu") or "").strip().lower()
+    if oturum in ("baglaniyor", "starting") or topar == "baglaniyor":
+        return _wa_durum_paket("baglaniyor"), 200
+    return _wa_durum_paket("bagli_degil"), 200
+
+
 def _wa_sonuc_sade(govde: dict, kod: int, metin: str) -> tuple[dict, int]:
     ham = str(govde.get("mesaj") or "")
     if ham == metin:
@@ -1551,6 +1607,13 @@ def asistan_odeme_linki(uid: int, mid: int, data: dict, olustur_fn=None) -> tupl
         "metin": metin,
         "mesaj": "",
     }, 200
+
+
+@bp.route("/api/whatsapp-durum")
+@giris_gerekli
+def api_whatsapp_durum():
+    govde, kod = asistan_wa_durum()
+    return jsonify(govde), kod
 
 
 @bp.route("/api/musteri/<int:mid>/whatsapp")

@@ -187,7 +187,7 @@ def test_kaynak_yazmaz():
     check("fetch_all helperda yok", "fetch_all" not in src)
     check("ozet tek ekleme", api.count("_ozet_grid_borc_ekle(") == 1)
     layout = (ROOT / "templates" / "layout.html").read_text(encoding="utf-8")
-    check("js v=8", "js/erp-asistan.js') }}?v=8" in layout)
+    check("js v=9", "js/erp-asistan.js') }}?v=9" in layout)
     check("kullanici id", "ERP_ASISTAN_UID" in layout)
     js = (ROOT / "static" / "js" / "erp-asistan.js").read_text(encoding="utf-8")
     check("ipucu borc", "Ekstredeki ek fatura/tediye/devir dahil değildir." in js)
@@ -926,6 +926,75 @@ def test_wa_odeme_linki():
         en._LINK_KILIT.clear()
 
 
+def test_wa_durum():
+    import inspect
+
+    from routes import erp_notlar_routes as en
+    import routes.whatsapp_routes as wr
+
+    src = inspect.getsource(en.asistan_wa_durum) + inspect.getsource(en._wa_durum_bak_getir)
+    for yasak in ("CREATE", "ALTER", "INSERT", "UPDATE", "uyandir", "kuyruk"):
+        check("durum " + yasak + " yok", yasak not in src)
+    check("durum token kaynakta yok", "WA_INTERNAL_TOKEN" not in src and "X-WA-Internal-Token" not in src)
+    kapi = inspect.getsource(en.api_whatsapp_durum)
+    check("durum oturum kapisi", "@giris_gerekli" in kapi)
+    js = (ROOT / "static" / "js" / "erp-asistan.js").read_text(encoding="utf-8")
+    check("durum istemci servise gitmez", "durum-bak" not in js and "WA_INTERNAL_TOKEN" not in js and "/erp-notlar/api/whatsapp-durum" in js)
+    check("ekstre uyari metni", "Not kaydedildi; WhatsApp bağlı olmadığı için mesaj henüz gitmedi." in js)
+    check("yenile siniri", "setTimeout(durumCek, 10000)" in js and "120000" in js)
+
+    class Sahte:
+        def __init__(self, govde, kod=200):
+            self.status_code = kod
+            self.content = b"1"
+            self._govde = govde
+
+        def json(self):
+            return self._govde
+
+    g, k = en.asistan_wa_durum(lambda: Sahte({"bagli": True, "hazir": True, "durum": "ready"}))
+    check("durum bagli", k == 200 and g["durum"] == "bagli" and g["etiket"] == "WhatsApp bağlı" and g["engel"] is False and "token" not in g and "url" not in g)
+    g, _k = en.asistan_wa_durum(lambda: Sahte({"bagli": False, "hazir": False, "durum": "starting"}))
+    check("durum baglaniyor", g["durum"] == "baglaniyor" and g["etiket"] == "Bağlanıyor…" and g["engel"] is False)
+    g, _k = en.asistan_wa_durum(lambda: Sahte({"bagli": False, "hazir": False, "durum": "yok"}))
+    check("durum bagli degil", g["durum"] == "bagli_degil" and g["etiket"] == "Bağlı değil" and g["engel"] is True)
+
+    def kopuk():
+        raise TimeoutError("zaman")
+
+    g, _k = en.asistan_wa_durum(kopuk)
+    check("durum okunamadi", g["durum"] == "bilinmiyor" and g["etiket"] == "Durum alınamadı" and g["engel"] is False)
+    g, _k = en.asistan_wa_durum(lambda: Sahte({}, 503))
+    check("durum http okunamadi", g["durum"] == "bilinmiyor" and g["engel"] is False)
+
+    eski = wr._wa_tenant_id
+    girdi = {"n": 0}
+
+    def kotu():
+        raise ValueError("geçersiz tenant_schema")
+
+    def say():
+        girdi["n"] += 1
+        return Sahte({"bagli": True, "hazir": True})
+
+    wr._wa_tenant_id = kotu
+    try:
+        g, k = en.asistan_wa_durum(say)
+    finally:
+        wr._wa_tenant_id = eski
+    check("durum tenant red", k == 404 and g.get("ok") is False and girdi["n"] == 0)
+
+    from flask import Flask
+    from auth import login_manager
+
+    kapi = Flask(__name__)
+    kapi.secret_key = "wa-durum"
+    login_manager.init_app(kapi)
+    kapi.register_blueprint(en.bp)
+    yanit = kapi.test_client().get("/erp-notlar/api/whatsapp-durum")
+    check("durum oturumsuz", yanit.status_code == 401, str(yanit.status_code))
+
+
 def arayuz():
     try:
         from playwright.sync_api import sync_playwright
@@ -943,7 +1012,7 @@ def arayuz():
             "<!doctype html><html><head><meta charset='utf-8'></head><body>"
             "<script>window.ERP_ASISTAN_UID = 41;</script>"
             "<div id='erp-asistan-ozet'></div>"
-            "<script src='/static/js/erp-asistan.js?v=8'></script>"
+            "<script src='/static/js/erp-asistan.js?v=9'></script>"
             "</body></html>"
         )
 
@@ -953,7 +1022,7 @@ def arayuz():
             "<!doctype html><html><head><meta charset='utf-8'></head><body>"
             "<script>window.ERP_ASISTAN_UID = 99;</script>"
             "<div id='erp-asistan-ozet'></div>"
-            "<script src='/static/js/erp-asistan.js?v=8'></script>"
+            "<script src='/static/js/erp-asistan.js?v=9'></script>"
             "</body></html>"
         )
 
@@ -978,6 +1047,8 @@ def arayuz():
     ozet_istek = []
     wa_post = {"n": 0}
     link_post = {"n": 0}
+    durum_mod = {"kod": "bagli"}
+    durum_baslik = []
 
     def isle(route, request):
         try:
@@ -989,6 +1060,19 @@ def arayuz():
     def _isle(route, request):
         tam = request.url.split("asistan.test")[-1]
         yol = tam.split("?")[0]
+        if yol == "/erp-notlar/api/whatsapp-durum":
+            durum_baslik.append(request.headers.get("x-wa-internal-token"))
+            kod = durum_mod["kod"]
+            if kod == "kopuk":
+                route.fulfill(status=504, content_type="text/plain", body="yok")
+                return
+            tablo = {
+                "bagli": {"ok": True, "durum": "bagli", "etiket": "WhatsApp bağlı", "engel": False},
+                "baglaniyor": {"ok": True, "durum": "baglaniyor", "etiket": "Bağlanıyor…", "engel": False},
+                "bagli_degil": {"ok": True, "durum": "bagli_degil", "etiket": "Bağlı değil", "engel": True},
+            }
+            route.fulfill(status=200, content_type="application/json", body=json.dumps(tablo[kod]))
+            return
         if yol.endswith("/odeme-linki") and "/erp-notlar/api/musteri/" in yol:
             if request.method == "POST":
                 link_post["n"] += 1
@@ -1315,6 +1399,8 @@ def arayuz():
         check("numarasiz pasif", pasif.get_attribute("disabled") is not None and pasif.get_attribute("title") == "Telefon yok")
         s.click("tr[data-musteri-id='867'] .ea-wa")
         s.wait_for_selector("#erp-asistan-wa-pop textarea")
+        s.wait_for_function("() => document.querySelector('#erp-asistan-wa-durum').textContent === 'WhatsApp bağlı'")
+        check("rozet bagli", s.locator("#erp-asistan-wa-durum").inner_text() == "WhatsApp bağlı")
         check("wa maske", s.locator(".ea-wa-maske").inner_text() == "Numara **11")
         check("panel baslik", "Gecikme hatırlatma" in s.locator("#erp-asistan-wa-liste").inner_text() and "Ödeme linki" in s.locator("#erp-asistan-wa-liste").inner_text() and "Tahsilat bilgilendirme" in s.locator("#erp-asistan-wa-liste").inner_text())
         check("oneri secili", s.locator("#erp-asistan-wa-sec").input_value() == "0" and s.locator("#erp-asistan-wa-metin").input_value() == "sahte vade")
@@ -1359,8 +1445,20 @@ def arayuz():
         }""")
         s.wait_for_function("() => document.querySelector('#erp-asistan-wa-metin').value.indexOf('sablon metin') >= 0")
         check("link editor", "sablon metin" in s.locator("#erp-asistan-wa-metin").input_value() and "http" not in s.locator("#erp-asistan-wa-link-sonuc").inner_text() and wa_post["n"] == once_wa and link_post["n"] == 1, str(link_post["n"]))
+        def wa_yenile(kod):
+            durum_mod["kod"] = kod
+            if s.locator("#erp-asistan-wa-pop").count():
+                s.click("#erp-asistan-wa-pop .ea-gecmis-x")
+                s.wait_for_selector("#erp-asistan-wa-pop", state="detached")
+            s.click("tr[data-musteri-id='867'] .ea-wa")
+            s.wait_for_selector("#erp-asistan-wa-durum")
+
+        wa_yenile("bagli_degil")
+        s.wait_for_function("() => document.querySelector('#erp-asistan-wa-durum').textContent.indexOf('birkaç dakika sonra tekrar dene') >= 0")
+        check("bagli degil gonder pasif", s.locator("#erp-asistan-wa-gonder").is_disabled())
         s.locator("#erp-asistan-wa-metin").evaluate("el => { el.style.filter = 'blur(8px)'; }")
         s.locator("#erp-asistan-wa-liste").evaluate("el => { el.style.filter = 'blur(8px)'; }")
+        s.locator(".ea-wa-maske").evaluate("el => { el.style.filter = 'blur(8px)'; }")
         s.locator("#erp-asistan-wa-pop h3").evaluate("el => { el.style.filter = 'blur(8px)'; }")
         wa_png = os.path.join(os.environ.get("TEMP", "."), "erp_asistan_wa.png")
         s.locator("#erp-asistan-wa-pop .ea-wa-kart").screenshot(path=wa_png)
@@ -1368,6 +1466,33 @@ def arayuz():
             piksel = ekran.read()
         check("wa ekran", os.path.isfile(wa_png) and b"LINKADRES" not in piksel and b"/odeme/" not in piksel)
         print("ekran " + wa_png)
+        wa_yenile("kopuk")
+        s.wait_for_function(
+            "() => document.querySelector('#erp-asistan-wa-durum').textContent === 'Durum alınamadı'"
+            " && document.querySelector('#erp-asistan-wa-metin').value === 'sahte vade'"
+            " && !document.querySelector('#erp-asistan-wa-gonder').disabled"
+        )
+        check("okunamadi engel yok", s.locator("#erp-asistan-wa-gonder").is_enabled())
+        wa_yenile("baglaniyor")
+        s.wait_for_function(
+            "() => document.querySelector('#erp-asistan-wa-durum').textContent === 'Bağlanıyor…'"
+            " && document.querySelector('#erp-asistan-wa-metin').value === 'sahte vade'"
+            " && !document.querySelector('#erp-asistan-wa-gonder').disabled"
+        )
+        check("baglaniyor gonder acik", s.locator("#erp-asistan-wa-gonder").is_enabled())
+        s.click("#erp-asistan-wa-pop .ea-gecmis-x")
+        durum_mod["kod"] = "bagli_degil"
+        uyari = {"m": ""}
+        s.evaluate("() => { window.cariEkstreMusteriIdSec = function () { return 867; }; window.erpAsistanNotFormAc(); }")
+        s.fill("#erp-asistan-form-ic textarea[name=not_metni]", "sahte not")
+        s.check("#erp-asistan-wa")
+        with s.expect_event("dialog", timeout=8000) as bilgi:
+            s.click("#erp-asistan-form-ic button[type=submit]")
+        pencere = bilgi.value
+        uyari["m"] = pencere.message
+        pencere.accept()
+        check("ekstre uyari", uyari["m"] == "Not kaydedildi; WhatsApp bağlı olmadığı için mesaj henüz gitmedi.")
+        check("durum token gitmedi", durum_baslik and all(b is None for b in durum_baslik))
         tarayici.close()
 
 
@@ -1381,6 +1506,7 @@ if __name__ == "__main__":
     test_wa_kapi()
     test_wa_panel()
     test_wa_odeme_linki()
+    test_wa_durum()
     arayuz()
     if FAILS:
         print("FAIL", len(FAILS))
