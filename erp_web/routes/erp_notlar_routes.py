@@ -999,8 +999,8 @@ def _wa_iki_satir(metin: str) -> str:
 
 
 def _wa_aktif_link_oku(mid: int):
-    """Aktif ödeme linki satırı. Adres üretilmez, tablo açılmaz."""
-    from odeme_linki import link_wa_gonderilebilir, ofisbir_istegi
+    """Son ödeme linki satırı. Adres üretilmez, tablo açılmaz."""
+    from odeme_linki import ofisbir_istegi
 
     if not ofisbir_istegi():
         return None
@@ -1009,17 +1009,15 @@ def _wa_aktif_link_oku(mid: int):
             """
             SELECT tutar_kurus, aciklama, durum, expires_at, whatsapp_mesaj
             FROM public.odeme_linkleri
-            WHERE musteri_id = %s AND durum = 'bekliyor' AND expires_at > NOW()
+            WHERE musteri_id = %s
             ORDER BY created_at DESC, id DESC
             LIMIT 1
             """,
             (int(mid),),
         )
     except Exception:
-        return None
-    if not row or not link_wa_gonderilebilir(row.get("durum"), row.get("expires_at")):
-        return None
-    return row
+        return {"_okunamadi": True}
+    return row or None
 
 
 def _wa_kayitli_odeme_url(mesaj: str) -> str:
@@ -1036,21 +1034,86 @@ def _wa_kayitli_odeme_url(mesaj: str) -> str:
     return bulunan[0]
 
 
-def _wa_link_kalem(ad: str, row) -> dict:
-    bos = {"metin": "", "engel": True, "ipucu": "Aktif ödeme linki yok", "rozet": "", "onizleme": ""}
+def _wa_tutar_uyumlu(toplam, kurus) -> bool:
+    from decimal import ROUND_HALF_UP, Decimal
+
+    try:
+        beklenen = int((Decimal(str(toplam)) * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+        return int(kurus) == beklenen
+    except Exception:
+        return False
+
+
+def _wa_link_suresi_dolmus(exp) -> bool:
+    from datetime import timezone
+
+    if not isinstance(exp, datetime):
+        return False
+    bitis = exp if exp.tzinfo else exp.replace(tzinfo=timezone.utc)
+    return bitis < datetime.now(timezone.utc)
+
+
+def _wa_link_onizleme_guvenli(kurus, exp) -> str:
+    from odeme_linki import _tarih_ist, tutar_tl
+
+    try:
+        tutar = tutar_tl(int(kurus))
+    except (TypeError, ValueError):
+        return ""
+    metin = "Tutar " + tutar + " TL"
+    tarih = _tarih_ist(exp)
+    if tarih:
+        metin += " · Geçerlilik " + tarih
+    if "http" in metin.lower() or "/odeme/" in metin:
+        return ""
+    return metin
+
+
+def _wa_link_kalem(ad: str, row, grid=None) -> dict:
+    def paket(ipucu, oniz="", metin="", engel=True):
+        return {
+            "metin": metin,
+            "engel": engel,
+            "ipucu": ipucu,
+            "rozet": "",
+            "onizleme": oniz,
+            "hover": oniz,
+        }
+
     if not row:
-        return bos
+        return paket("Aktif ödeme linki yok")
+    if row.get("_okunamadi"):
+        return paket("")
+    durum_ham = row.get("durum")
+    exp = row.get("expires_at")
+    if durum_ham is None or str(durum_ham).strip() == "" or not isinstance(exp, datetime):
+        return paket("")
+    durum = str(durum_ham).strip()
+    if durum not in ("bekliyor", "odendi", "suresi_doldu", "iptal", "basarisiz"):
+        return paket("")
+    from odeme_linki import link_wa_gonderilebilir, ofis_imzasi, tutar_tl, wa_varsayilan_mesaj
+
+    oniz = _wa_link_onizleme_guvenli(row.get("tutar_kurus"), exp)
+    if not link_wa_gonderilebilir(durum, exp):
+        if durum in ("odendi", "iptal", "basarisiz"):
+            ipucu = "Aktif ödeme linki yok"
+        elif durum == "suresi_doldu" or _wa_link_suresi_dolmus(exp):
+            ipucu = "Link süresi dolmuş"
+        else:
+            ipucu = ""
+        return paket(ipucu, oniz)
+    ozet = grid or {}
+    if ozet.get("grid_yok") or not _wa_tutar_uyumlu(ozet.get("toplam_borc"), row.get("tutar_kurus")):
+        return paket("tutar güncel değil", oniz)
     url = _wa_kayitli_odeme_url(row.get("whatsapp_mesaj"))
     if not url:
-        return bos
+        return paket("Aktif ödeme linki yok", oniz)
     try:
-        from odeme_linki import ofis_imzasi, tutar_tl, wa_varsayilan_mesaj
-
         tutar = tutar_tl(int(row.get("tutar_kurus")))
     except (TypeError, ValueError):
-        return bos
-    metin = wa_varsayilan_mesaj(ad, row.get("aciklama"), tutar, url, row.get("expires_at"), ofis_imzasi())
-    return {"metin": metin, "engel": False, "ipucu": "", "rozet": "", "onizleme": _wa_iki_satir(metin)}
+        return paket("")
+    metin = wa_varsayilan_mesaj(ad, row.get("aciklama"), tutar, url, exp, ofis_imzasi())
+    return paket("", oniz, metin, False)
 
 
 def _wa_son_tahsilat_oku(mid: int):
@@ -1132,7 +1195,7 @@ def asistan_wa_onizleme(mid: int, bugun: date | None = None) -> tuple[dict, int]
         })
     if onerilen:
         liste.sort(key=lambda s: 0 if s["onerilen"] else 1)
-    link = _wa_link_kalem(ad, _wa_aktif_link_oku(mid))
+    link = _wa_link_kalem(ad, _wa_aktif_link_oku(mid), grid)
     liste.append({
         "anahtar": "link",
         "etiket": "Ödeme linki",
@@ -1140,6 +1203,7 @@ def asistan_wa_onizleme(mid: int, bugun: date | None = None) -> tuple[dict, int]
         "baslik": "Ödeme linki",
         "metin": link["metin"],
         "onizleme": link["onizleme"],
+        "hover": link["hover"],
         "borc": False,
         "engel": link["engel"],
         "ipucu": link["ipucu"],
@@ -1191,8 +1255,9 @@ def asistan_wa_gonder(uid: int, mid: int, data: dict, origin: str, host: str, go
         return {"ok": False, "durum": "hata", "mesaj": "Mesaj çok uzun"}, 400
     sablon = str((data or {}).get("sablon") or "ozel").strip().lower()
     if sablon == "link":
-        if _wa_link_kalem("", _wa_aktif_link_oku(mid))["engel"]:
-            return {"ok": False, "durum": "hata", "mesaj": "Aktif ödeme linki yok"}, 409
+        kalem = _wa_link_kalem(str(row.get("name") or ""), _wa_aktif_link_oku(mid), _wa_grid_ozet(mid))
+        if kalem["engel"]:
+            return {"ok": False, "durum": "hata", "mesaj": kalem["ipucu"] or "Aktif ödeme linki yok"}, 409
     elif sablon == "tahsilat":
         if _wa_tahsilat_kalem(_wa_son_tahsilat_oku(mid))["engel"]:
             return {"ok": False, "durum": "hata", "mesaj": "Tahsilat bilgisi yok"}, 409

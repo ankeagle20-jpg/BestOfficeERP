@@ -727,20 +727,62 @@ def test_wa_panel():
         check("makbuz pasif", makbuz["engel"] is True and makbuz["metin"] == "")
         check("link yazilmadi", yazildi["n"] == 0)
         kok = ol.public_odeme_base().rstrip("/") + "/odeme/sahte-adres"
-        en._wa_aktif_link_oku = lambda mid: {
-            "tutar_kurus": 1500, "aciklama": "aidat", "durum": "bekliyor",
-            "expires_at": datetime(2026, 12, 1, tzinfo=timezone.utc),
-            "whatsapp_mesaj": "adres " + kok,
-        }
+        acik_bitis = datetime(2026, 12, 1, tzinfo=timezone.utc)
+
+        def satir(kurus, durum, bitis):
+            return {
+                "tutar_kurus": kurus, "aciklama": "aidat", "durum": durum,
+                "expires_at": bitis, "whatsapp_mesaj": "adres " + kok,
+            }
+
+        def adres_yok(kalem):
+            for alan in ("onizleme", "hover", "ipucu"):
+                metin = str(kalem.get(alan) or "")
+                if "http" in metin.lower() or "/odeme/" in metin:
+                    return False
+            return True
+
+        en._wa_aktif_link_oku = lambda mid: satir(1000, "bekliyor", acik_bitis)
         govde, _kod = en.asistan_wa_onizleme(7)
         link = [s for s in govde["sablonlar"] if s["anahtar"] == "link"][0]
-        beklenen = ol.wa_varsayilan_mesaj("••••", "aidat", "15.00", kok, datetime(2026, 12, 1, tzinfo=timezone.utc), ol.ofis_imzasi())
+        beklenen = ol.wa_varsayilan_mesaj("••••", "aidat", "10.00", kok, acik_bitis, ol.ofis_imzasi())
         check("link dolar", link["engel"] is False and link["metin"] == beklenen and yazildi["n"] == 0)
+        check("link onizleme tutar", "10.00" in link["onizleme"] and "Geçerlilik" in link["onizleme"] and adres_yok(link), "onizleme")
+        en._wa_aktif_link_oku = lambda mid: satir(1500, "bekliyor", acik_bitis)
+        govde, _kod = en.asistan_wa_onizleme(7)
+        link = [s for s in govde["sablonlar"] if s["anahtar"] == "link"][0]
+        check("link tutar uymaz", link["engel"] is True and link["metin"] == "" and link["ipucu"] == "tutar güncel değil" and adres_yok(link), "tutar")
+        en._wa_aktif_link_oku = lambda mid: satir(1000, "bekliyor", datetime(2020, 1, 1, tzinfo=timezone.utc))
+        govde, _kod = en.asistan_wa_onizleme(7)
+        link = [s for s in govde["sablonlar"] if s["anahtar"] == "link"][0]
+        check("link sure", link["engel"] is True and link["metin"] == "" and link["ipucu"] == "Link süresi dolmuş" and adres_yok(link), "sure")
+        en._wa_aktif_link_oku = lambda mid: satir(1000, "odendi", acik_bitis)
+        govde, _kod = en.asistan_wa_onizleme(7)
+        link = [s for s in govde["sablonlar"] if s["anahtar"] == "link"][0]
+        check("link kapali", link["engel"] is True and link["metin"] == "" and link["ipucu"] == "Aktif ödeme linki yok" and adres_yok(link), "kapali")
+        en._wa_aktif_link_oku = lambda mid: {"tutar_kurus": 1000, "aciklama": "aidat", "durum": None, "expires_at": None, "whatsapp_mesaj": "adres " + kok}
+        govde, _kod = en.asistan_wa_onizleme(7)
+        link = [s for s in govde["sablonlar"] if s["anahtar"] == "link"][0]
+        check("link okunamadi", link["engel"] is True and link["metin"] == "" and link["ipucu"] == "" and adres_yok(link), "okunamadi")
+        en._wa_aktif_link_oku = lambda mid: satir(1500, "bekliyor", acik_bitis)
+        govde, kod = en.asistan_wa_gonder(5, 7, {
+            "onay": True, "mesaj": "x", "sablon": "link", "deneme": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa12",
+        }, "http://yerel", "yerel", gonder_fn=gonder)
+        check("link tutar gonderilmez", kod == 409 and govde.get("mesaj") == "tutar güncel değil" and not cagri and "http" not in str(govde.get("mesaj") or ""), "tutar")
+        en._wa_aktif_link_oku = lambda mid: satir(1000, "bekliyor", datetime(2020, 1, 1, tzinfo=timezone.utc))
+        govde, kod = en.asistan_wa_gonder(5, 7, {
+            "onay": True, "mesaj": "x", "sablon": "link", "deneme": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa13",
+        }, "http://yerel", "yerel", gonder_fn=gonder)
+        check("link sure gonderilmez", kod == 409 and govde.get("mesaj") == "Link süresi dolmuş" and not cagri, "sure")
+        en._wa_aktif_link_oku = lambda mid: satir(1000, "bekliyor", acik_bitis)
         en._wa_son_tahsilat_oku = lambda mid: {"makbuz_no": "M1", "tutar": 10, "tahsilat_tarihi": datetime(2026, 10, 1)}
         govde, _kod = en.asistan_wa_onizleme(7)
         makbuz = [s for s in govde["sablonlar"] if s["anahtar"] == "tahsilat"][0]
         check("makbuz dolar", makbuz["engel"] is False and makbuz["rozet"] == "Son tahsilat bilgisiyle" and makbuz["metin"] == tahsilat_metin("M1", 10, datetime(2026, 10, 1), False))
         en._wa_grid_ozet = lambda mid, bugun=None: {"grid_yok": True, "toplam_borc": None, "geciken_ay": None, "gun": None}
+        govde, _kod = en.asistan_wa_onizleme(7)
+        link = [s for s in govde["sablonlar"] if s["anahtar"] == "link"][0]
+        check("link grid yok", link["engel"] is True and link["metin"] == "" and link["ipucu"] == "tutar güncel değil" and adres_yok(link), "grid")
         en._wa_aktif_link_oku = lambda mid: None
         en._wa_son_tahsilat_oku = lambda mid: None
         govde, _kod = en.asistan_wa_onizleme(7)
@@ -754,7 +796,7 @@ def test_wa_panel():
         }, "http://yerel", "yerel", gonder_fn=gonder)
         check("makbuz gonderilmez", kod == 409 and not cagri)
         kaynak = open(en.__file__, encoding="utf-8").read().split("def _wa_aktif_link_oku")[1].split("def asistan_wa_onizleme")[0]
-        check("panel ddl yok", "CREATE" not in kaynak and "ALTER" not in kaynak and "INSERT" not in kaynak and "link_olustur" not in kaynak)
+        check("panel ddl yok", "CREATE" not in kaynak and "ALTER" not in kaynak and "INSERT" not in kaynak and "link_olustur" not in kaynak and "ensure_tablolar" not in kaynak)
     finally:
         ol.link_olustur = eski_olustur
         ol.ensure_tablolar = eski_ensure
@@ -839,7 +881,9 @@ def arayuz():
                     {"anahtar": "3", "etiket": "3 gün", "grup": "gecikme", "baslik": "Gecikme hatırlatma",
                      "metin": "sahte uc", "onizleme": "sahte uc", "borc": True, "engel": False, "onerilen": False, "ipucu": "", "rozet": ""},
                     {"anahtar": "link", "etiket": "Ödeme linki", "grup": "link", "baslik": "Ödeme linki",
-                     "metin": "", "onizleme": "", "borc": False, "engel": True, "onerilen": False, "ipucu": "Aktif ödeme linki yok", "rozet": ""},
+                     "metin": "LINKADRES", "onizleme": "Tutar 10.00 TL · Geçerlilik 01.12.2026 03:00",
+                     "hover": "Tutar 10.00 TL · Geçerlilik 01.12.2026 03:00",
+                     "borc": False, "engel": False, "onerilen": False, "ipucu": "", "rozet": ""},
                     {"anahtar": "tahsilat", "etiket": "Tahsilat makbuzu", "grup": "tahsilat", "baslik": "Tahsilat bilgilendirme",
                      "metin": "", "onizleme": "", "borc": False, "engel": True, "onerilen": False, "ipucu": "", "rozet": ""},
                 ],
@@ -1150,7 +1194,10 @@ def arayuz():
         check("duzenleme onayi", s.locator("#erp-asistan-wa-gecis").is_visible() and s.locator("#erp-asistan-wa-metin").input_value() == "sahte uc degisti")
         s.click("#erp-asistan-wa-gecis-evet")
         check("gecis oldu", s.locator("#erp-asistan-wa-metin").input_value() == "sahte vade")
-        check("link pasif dugme", s.locator("[data-wa-anahtar='link']").is_disabled())
+        baslik = s.locator("[data-wa-anahtar='link']").get_attribute("title") or ""
+        gorunen = s.locator("[data-wa-anahtar='link']").inner_text()
+        editor = s.locator("#erp-asistan-wa-metin").input_value()
+        check("link onizleme adres yok", "LINKADRES" not in baslik and "LINKADRES" not in gorunen and "LINKADRES" not in editor and "10.00" in gorunen)
         s.set_viewport_size({"width": 390, "height": 700})
         yon = s.locator(".ea-wa-govde").evaluate("el => getComputedStyle(el).flexDirection")
         check("dar ekran panel", yon == "column")
@@ -1171,7 +1218,9 @@ def arayuz():
         s.locator("#erp-asistan-wa-pop h3").evaluate("el => { el.style.filter = 'blur(8px)'; }")
         wa_png = os.path.join(os.environ.get("TEMP", "."), "erp_asistan_wa.png")
         s.locator("#erp-asistan-wa-pop .ea-wa-kart").screenshot(path=wa_png)
-        check("wa ekran", os.path.isfile(wa_png))
+        with open(wa_png, "rb") as ekran:
+            piksel = ekran.read()
+        check("wa ekran", os.path.isfile(wa_png) and b"LINKADRES" not in piksel and b"/odeme/" not in piksel)
         print("ekran " + wa_png)
         tarayici.close()
 

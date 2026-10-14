@@ -1516,15 +1516,18 @@
       var grup = "";
       sablonlar.forEach(function (s) {
         if (s.anahtar === "ozel") return;
-        var ad = (s.etiket || "") + " " + (s.onizleme || "") + " " + (s.metin || "");
+        var ad = (s.etiket || "") + " " + (s.onizleme || "") + " " + (s.ipucu || "") + (s.anahtar === "link" ? "" : (" " + (s.metin || "")));
         if (q && ad.toLocaleLowerCase("tr").indexOf(q) < 0) return;
         if (s.grup !== grup) {
           grup = s.grup;
           html += '<p class="ea-wa-grup">' + esc(s.baslik || "") + "</p>";
         }
         var seciliSinif = sec.value === s.anahtar ? " secili" : "";
+        var baslik = s.anahtar === "link"
+          ? [s.hover || s.onizleme || "", s.ipucu || ""].filter(Boolean).join(" ")
+          : (s.engel ? (s.ipucu || "") : (s.metin || ""));
         html += '<button type="button" class="ea-wa-oge' + seciliSinif + '" data-wa-anahtar="' + esc(s.anahtar) + '"' +
-          (s.engel ? " disabled" : "") + ' title="' + esc(s.engel ? (s.ipucu || "") : (s.metin || "")) + '">' +
+          (s.engel ? " disabled" : "") + ' title="' + esc(baslik) + '">' +
           esc(s.etiket || "") + (s.onerilen ? " (önerilen)" : "") +
           (s.rozet ? '<span class="ea-wa-rozet">' + esc(s.rozet) + "</span>" : "") +
           '<span class="ea-wa-on">' + esc(s.onizleme || "") + "</span></button>";
@@ -1633,7 +1636,7 @@
         sablonlar.forEach(function (s) {
           if (!s.grup) s.grup = "gecikme";
           if (!s.baslik) s.baslik = "Gecikme hatırlatma";
-          if (s.onizleme == null) s.onizleme = s.metin || "";
+          if (s.onizleme == null) s.onizleme = s.anahtar === "link" ? "" : (s.metin || "");
         });
         var html = "";
         sablonlar.forEach(function (s) {
