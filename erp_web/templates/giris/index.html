@@ -18174,12 +18174,28 @@ function panelTekrarSatirYenile(donemYil, anahtarlar) {
         if (typeof girisTahsilatYilAyPaneldenTumGridBoyan === 'function') girisTahsilatYilAyPaneldenTumGridBoyan();
     } catch (eBoy) {}
 }
+function panelTekrarKodTemiz(kod) {
+    var s = String(kod || '');
+    if (!/^[a-z0-9_]{1,40}$/.test(s)) return 'panel_okuma';
+    return s;
+}
+function panelTekrarOkunamadiMesaji(kod) {
+    return 'Panel satırları okunamadı (kod: ' + panelTekrarKodTemiz(kod) + '); hiçbir şey kaydedilmedi.';
+}
+function panelTekrarOnizlemeHata(res) {
+    if (!res || !res.j) return true;
+    if (res.j.onay_gerekli) return false;
+    if (res.ok === false) return true;
+    if (res.j.ok === false) return true;
+    return false;
+}
 function panelTekrarGonder(url, opts, deneme) {
     var temiz = {};
     var onayli = !!(opts && opts.__panelOnay);
     var onizlendi = !!(opts && opts.__panelOnizle);
+    var soru = (opts && opts.__panelSoru) ? String(opts.__panelSoru) : '';
     Object.keys(opts || {}).forEach(function (k) {
-        if (k !== '__panelOnay' && k !== '__panelOnizle') temiz[k] = opts[k];
+        if (k !== '__panelOnay' && k !== '__panelOnizle' && k !== '__panelSoru') temiz[k] = opts[k];
     });
     var hedef = url;
     if (!onayli && !onizlendi) {
@@ -18194,31 +18210,43 @@ function panelTekrarGonder(url, opts, deneme) {
         return r.text().then(function (text) {
             var j = null;
             try { j = text ? JSON.parse(text) : null; } catch (e) {
-                throw new Error(text ? String(text).slice(0, 300) : ('HTTP ' + r.status));
+                throw new Error('panel_okuma');
             }
             return { ok: r.ok, j: j };
         });
     }).then(function (res) {
-        if (res.j && res.j.onay_gerekli && !onayli) {
-            if (!confirm(res.j.mesaj)) {
+        if (!onayli && !onizlendi) {
+            if (panelTekrarOnizlemeHata(res)) {
+                var kod = panelTekrarKodTemiz(res && res.j && res.j.kod);
+                return { ok: false, j: { ok: false, kod: kod, mesaj: panelTekrarOkunamadiMesaji(kod) } };
+            }
+            var parcalar = [];
+            if (soru) parcalar.push(soru);
+            if (res.j && res.j.onay_gerekli && res.j.mesaj) parcalar.push(String(res.j.mesaj));
+            if (res.j && Number(res.j.bozuk_tarih_n) > 0) {
+                parcalar.push('Biçimi bozuk tarihli ' + Number(res.j.bozuk_tarih_n) + ' satır silinmedi.');
+            }
+            if (parcalar.length && !confirm(parcalar.join('\n'))) {
                 return { ok: true, j: { ok: false, iptal: true, mesaj: 'Onaylanmadı; hiçbir satır silinmedi.' }, iptal: true };
             }
             var govde = {};
-            try { govde = JSON.parse(opts.body || '{}'); } catch (e2) { govde = {}; }
-            govde.onay = true;
+            try { govde = JSON.parse((opts && opts.body) || '{}'); } catch (e2) { govde = {}; }
+            if (res.j && res.j.onay_gerekli) govde.onay = true;
             var opts2 = {};
-            Object.keys(opts).forEach(function (k) { opts2[k] = opts[k]; });
+            Object.keys(opts || {}).forEach(function (k) {
+                if (k !== '__panelSoru') opts2[k] = opts[k];
+            });
             opts2.body = JSON.stringify(govde);
-            opts2.__panelOnay = true;
+            opts2.__panelOnizle = true;
+            if (res.j && res.j.onay_gerekli) opts2.__panelOnay = true;
             return panelTekrarGonder(url, opts2, deneme);
         }
-        if (!onayli && !onizlendi) {
-            var opts3 = {};
-            Object.keys(opts || {}).forEach(function (k) { opts3[k] = opts[k]; });
-            opts3.__panelOnizle = true;
-            return panelTekrarGonder(url, opts3, deneme);
-        }
         return res;
+    }).catch(function (err) {
+        if (!onayli && !onizlendi) {
+            return { ok: false, j: { ok: false, kod: 'panel_okuma', mesaj: panelTekrarOkunamadiMesaji('panel_okuma') } };
+        }
+        throw err;
     });
 }
 function sozlesmeAylikBorclandir() {
@@ -18266,8 +18294,7 @@ function sozlesmeAylikBorclandir() {
     var toplamOnay = toplamHucre > 0 ? toplamHucre : satirlar.reduce(function (s, r) { return s + r.tutar_kdv_dahil; }, 0);
     var toplamStr = toplamOnay.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     var detayBlok = detaySatirlar.length ? detaySatirlar.map(function (d) { return d.metin; }).join('\n') + '\n' : '';
-    if (!confirm(adetOnay + ' ay borçlu (tahsilatsız) kaydedilsin mi?\n' + detayBlok + 'Toplam aylık: ' + toplamStr + ' ₺\nTahsilat paneli güncellenir; grid kırmızı görünür; ekstrede bu ayların tahsilat satırı olmaz.')) return;
-
+    var panelSoruBorc = adetOnay + ' ay borçlu (tahsilatsız) kaydedilsin mi?\n' + detayBlok + 'Toplam aylık: ' + toplamStr + ' ₺\nTahsilat paneli güncellenir; grid kırmızı görünür; ekstrede bu ayların tahsilat satırı olmaz.';
     var panelBorcAni = panelTekrarAniBaslat();
 
     var cikarSatirlar = [];
@@ -18331,6 +18358,7 @@ function sozlesmeAylikBorclandir() {
         };
     });
     panelTekrarGonder('/giris/api/aylik-tutarlardan-borclandir', {
+        __panelSoru: panelSoruBorc,
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
@@ -18539,7 +18567,7 @@ function sozlesmeAylikTahsilEt() {
         )) return;
     }
     var toplamStr = satirlar.reduce(function(s, r) { return s + r.tutar_kdv_dahil; }, 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    if (!confirm(satirlar.length + ' ay için toplam ' + toplamStr + ' ₺ (KDV dahil) tahsilat olarak cari akışa yazılsın mı? Daha önce tahsil edilmiş aylar atlanır.')) return;
+    var panelSoruTahsil = satirlar.length + ' ay için toplam ' + toplamStr + ' ₺ (KDV dahil) tahsilat olarak cari akışa yazılsın mı? Daha önce tahsil edilmiş aylar atlanır.';
     window.__aylikTahsilInFlight = true;
     var tahsilBtn = document.querySelector('button.btn-aylik-tahsil');
     var eskiYazi = tahsilBtn ? tahsilBtn.innerHTML : '';
@@ -18554,6 +18582,7 @@ function sozlesmeAylikTahsilEt() {
         try { tahsilAbort.abort(); } catch (eAb) {}
     }, 180000);
     panelTekrarGonder('/giris/api/aylik-tutarlardan-tahsil-et', {
+        __panelSoru: panelSoruTahsil,
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
@@ -22115,15 +22144,13 @@ function girisTahsilatYilAySecilenleriBorclandir(donemYil, ev) {
     }
     var toplamOnay = satirlar.reduce(function (s, r) { return s + (r._toplam_goster != null ? r._toplam_goster : r.tutar_kdv_dahil); }, 0);
     var toplamStr = toplamOnay.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    if (!confirm(satirlar.length + ' ay borçlandırılsın mı?\nToplam tahsil (silinecek): ' + toplamStr + ' ₺\nFatura cari/ekstrede görünür; tahsilat kayıtları kaldırılır; grid kırmızı olur.')) {
-        panelTekrarAniGeri(panelBorcAni);
-        return;
-    }
+    var panelSoruSec = satirlar.length + ' ay borçlandırılsın mı?\nToplam tahsil (silinecek): ' + toplamStr + ' ₺\nFatura cari/ekstrede görünür; tahsilat kayıtları kaldırılır; grid kırmızı olur.';
     girisTahsilatYilAyKayitYaz();
     try { window.__girisEkstreSonIstek = {}; } catch (_eEkBr) {}
     window.__tahsilatYilAyBorcInFlight = true;
     var knEl = document.getElementById('kira_nakit');
     panelTekrarGonder('/giris/api/aylik-tutarlardan-borclandir', {
+        __panelSoru: panelSoruSec,
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',

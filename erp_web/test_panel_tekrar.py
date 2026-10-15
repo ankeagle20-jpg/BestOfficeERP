@@ -704,10 +704,15 @@ def test_iptal_ekrani():
     govde_bas = html.find("function girisTahsilatYilAySecilenleriBorclandir")
     govde_son = html.find("function girisTahsilatYilAySecilenleriTahsilet")
     govde = html[govde_bas:govde_son]
-    onay_yer = govde.find("if (!confirm(")
-    geri_yer = govde.find("panelTekrarAniGeri(panelBorcAni)")
     gonder_yer = govde.find("panelTekrarGonder(")
-    check("tutar iptali isteksiz", 0 <= geri_yer < gonder_yer and geri_yer > onay_yer)
+    geri_yer = govde.find("panelTekrarAniGeri(panelBorcAni)")
+    check(
+        "tutar iptali isteksiz",
+        gonder_yer > 0
+        and "__panelSoru" in govde
+        and "if (!confirm(" not in govde
+        and geri_yer > gonder_yer,
+    )
     betik = parca + r"""
 var map = { a: { tahsil: 5, aylik_tutar: 5 } };
 var ani = panelTekrarAniBaslat();
@@ -743,6 +748,43 @@ panelTekrarGonder('/giris/api/aylik-tutarlardan-borclandir', { method: 'POST', b
 """
     r = subprocess.run([node, "-e", betik], capture_output=True, text=True)
     check("iptal harita ve ikinci istek yok", r.returncode == 0, (r.stderr or r.stdout or "")[:180])
+    betik_hata = parca + r"""
+var n = 0;
+var girisFetchAgKopmasinaKarsi = function () {
+  n += 1;
+  return Promise.resolve({
+    ok: false,
+    text: function () { return Promise.resolve(JSON.stringify({ ok: false, kod: 'tahsilat_tarihi_tip', mesaj: 'ham' })); }
+  });
+};
+var confirm = function () { process.exit(8); return false; };
+panelTekrarGonder('/giris/api/aylik-tutarlardan-borclandir', { method: 'POST', body: '{}' }).then(function (res) {
+  if (n !== 1) process.exit(5);
+  if (!res || !res.j || res.j.ok !== false) process.exit(6);
+  if (res.j.kod !== 'tahsilat_tarihi_tip') process.exit(7);
+  if (String(res.j.mesaj).indexOf('kod: tahsilat_tarihi_tip') < 0) process.exit(9);
+  if (String(res.j.mesaj).indexOf('kaydedilmedi') < 0) process.exit(10);
+  process.exit(0);
+}).catch(function () { process.exit(11); });
+"""
+    r2 = subprocess.run([node, "-e", betik_hata], capture_output=True, text=True)
+    check("onizleme 500 yazma yok", r2.returncode == 0, (r2.stderr or r2.stdout or "")[:180])
+    betik_ag = parca + r"""
+var n = 0;
+var girisFetchAgKopmasinaKarsi = function () {
+  n += 1;
+  return Promise.reject(new Error('ag'));
+};
+var confirm = function () { process.exit(8); return false; };
+panelTekrarGonder('/giris/api/aylik-tutarlardan-borclandir', { method: 'POST', body: '{}' }).then(function (res) {
+  if (n !== 1) process.exit(5);
+  if (!res || !res.j || res.j.kod !== 'panel_okuma') process.exit(6);
+  if (String(res.j.mesaj).indexOf('kaydedilmedi') < 0) process.exit(7);
+  process.exit(0);
+}).catch(function () { process.exit(11); });
+"""
+    r3 = subprocess.run([node, "-e", betik_ag], capture_output=True, text=True)
+    check("onizleme ag hatasi yazma yok", r3.returncode == 0, (r3.stderr or r3.stdout or "")[:180])
 
 
 def test_kapsam_kapali_silmez():

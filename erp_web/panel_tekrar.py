@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -137,6 +138,51 @@ UPDATE panel_tekrar_yedek
 SET geri_yazildi = TRUE
 WHERE id = %s AND geri_yazildi = FALSE
 """.strip()
+
+# tahsilat_tarihi canlı şemalarda TEXT. Aralık date'e dökülmez.
+# YYYY-MM-DD uymayan metin bu dala girmez; sorgu hata vermez.
+SQL_TAHSIL_TARIH_ARALIK = """
+(
+    LEFT(btrim(COALESCE(tahsilat_tarihi::text, '')), 10) ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+    AND LEFT(btrim(COALESCE(tahsilat_tarihi::text, '')), 10) >= %s::text
+    AND LEFT(btrim(COALESCE(tahsilat_tarihi::text, '')), 10) < %s::text
+)
+""".strip()
+
+_ISO_GUN = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
+
+
+def tahsil_tarih_sinifi(val) -> str:
+    """bos | iso | bozuk. Boş ve NULL bozuk değildir; ay işareti yolu durur."""
+    if val is None:
+        return "bos"
+    if isinstance(val, datetime):
+        val = val.date()
+    if isinstance(val, date):
+        return "iso"
+    s = str(val).strip()
+    if not s:
+        return "bos"
+    head = s[:10]
+    if not _ISO_GUN.match(head):
+        return "bozuk"
+    try:
+        date.fromisoformat(head)
+    except ValueError:
+        return "bozuk"
+    return "iso"
+
+
+def tahsil_satirlari_ayir(rows):
+    """Bozuk tarih silme listesine girmez. Dönüş: temiz satırlar, adet."""
+    temiz = []
+    bozuk_n = 0
+    for row in rows or []:
+        if not isinstance(row, dict) or tahsil_tarih_sinifi(row.get("tahsilat_tarihi")) == "bozuk":
+            bozuk_n += 1
+            continue
+        temiz.append(row)
+    return temiz, bozuk_n
 
 
 def onay_metni(panel_n: int, diger_m: int) -> str:

@@ -13834,9 +13834,26 @@ def _panel_tekrar_haric(musteri_id, aylar):
     return haric
 
 
+def _panel_okuma_kod(exc) -> str:
+    """Yanıtta ham SQL ve satır yok. Tarih tipi ayrı koddur."""
+    low = str(exc or "").lower()
+    if "text >= date" in low or ("operator does not exist" in low and "tahsilat_tarihi" in low):
+        return "tahsilat_tarihi_tip"
+    return "panel_okuma"
+
+
+def _panel_okuma_hata_yaniti(exc, etiket):
+    logging.getLogger(__name__).exception(etiket)
+    return jsonify({
+        "ok": False,
+        "kod": _panel_okuma_kod(exc),
+        "mesaj": "Panel satırları okunamadı; hiçbir şey silinmedi.",
+    }), 500
+
+
 def _panel_tekrar_oku(musteri_id, aylar):
     if not aylar:
-        return [], []
+        return [], [], 0
     gunler = [date(int(y), int(a), 1) for y, a in aylar]
     bas = min(gunler)
     son = max(gunler)
@@ -13855,10 +13872,12 @@ def _panel_tekrar_oku(musteri_id, aylar):
           AND (
                 COALESCE(aciklama, '') LIKE '%%|AYLIK_TAH|%%'
              OR COALESCE(aciklama, '') LIKE '%%|AYLIK_PAY|%%'
-             OR (tahsilat_tarihi >= %s AND tahsilat_tarihi < %s)
+             OR """
+        + panel_tekrar.SQL_TAHSIL_TARIH_ARALIK
+        + """
           )
         """,
-        (musteri_id, musteri_id, bas, son_haric),
+        (musteri_id, musteri_id, bas.isoformat(), son_haric.isoformat()),
     ) or []
     borc = fetch_all(
         """
@@ -13872,7 +13891,8 @@ def _panel_tekrar_oku(musteri_id, aylar):
         """,
         (musteri_id,),
     ) or []
-    return tahsil, borc
+    temiz, bozuk_n = panel_tekrar.tahsil_satirlari_ayir(tahsil)
+    return temiz, borc, bozuk_n
 
 
 def _panel_cur_io(cur):
@@ -13956,6 +13976,7 @@ def _panel_tekrar_onay_yaniti(plan):
         "borc_silinen": [],
         "olusturulan": [],
         "atlanan": [],
+        "bozuk_tarih_n": int(plan.get("bozuk_tarih_n") or 0),
     })
 
 
@@ -13996,11 +14017,11 @@ def api_aylik_tutarlardan_panel_onizle():
         else:
             _aylar = _panel_tekrar_aylari(satirlar)
             haric = _panel_tekrar_haric(musteri_id, _aylar)
-        _tah, _borc = _panel_tekrar_oku(musteri_id, _aylar)
+        _tah, _borc, _bozuk_n = _panel_tekrar_oku(musteri_id, _aylar)
         plan = panel_tekrar.karar_ver(_aylar, _tah, _borc, haric=haric, taraf=taraf)
-    except Exception:
-        logging.getLogger(__name__).exception("panel onizle okuma")
-        return jsonify({"ok": False, "mesaj": "Panel satırları okunamadı; hiçbir şey silinmedi."}), 500
+        plan["bozuk_tarih_n"] = _bozuk_n
+    except Exception as exc:
+        return _panel_okuma_hata_yaniti(exc, "panel onizle okuma")
     if plan.get("onay_gerekli"):
         return _panel_tekrar_onay_yaniti(plan)
     return jsonify({
@@ -14013,6 +14034,7 @@ def api_aylik_tutarlardan_panel_onizle():
         "borc_silinen": [],
         "olusturulan": [],
         "atlanan": [],
+        "bozuk_tarih_n": int(plan.get("bozuk_tarih_n") or 0),
     })
 
 
@@ -14075,13 +14097,13 @@ def api_aylik_tutarlardan_borclandir():
     panel_plan = {"panel_n": 0, "diger_m": 0, "atla_tam": {}, "bagli": [], "uyarilar": [], "sil_tahsil": [], "sil_borc": []}
     try:
         _aylar = _panel_tekrar_aylari(satirlar)
-        _tah, _borc = _panel_tekrar_oku(musteri_id, _aylar)
+        _tah, _borc, _bozuk_n = _panel_tekrar_oku(musteri_id, _aylar)
         panel_plan = panel_tekrar.karar_ver(
             _aylar, _tah, _borc, haric=_panel_tekrar_haric(musteri_id, _aylar), taraf="borc"
         )
-    except Exception:
-        logging.getLogger(__name__).exception("panel tekrar okuma")
-        return jsonify({"ok": False, "mesaj": "Panel satırları okunamadı; hiçbir şey silinmedi."}), 500
+        panel_plan["bozuk_tarih_n"] = _bozuk_n
+    except Exception as exc:
+        return _panel_okuma_hata_yaniti(exc, "panel tekrar okuma")
     if panel_plan.get("onay_gerekli") and not _panel_tekrar_onayli(data):
         return _panel_tekrar_onay_yaniti(panel_plan)
     if panel_plan.get("panel_n") and not _panel_kapsam_acik():
@@ -14371,6 +14393,9 @@ def api_aylik_tutarlardan_borclandir():
         mesaj += f" {len(borc_silinen)} panel borç satırı silinip yeniden yazılacak şekilde kaldırıldı."
     if panel_plan.get("diger_m") and (tahsil_silinen or borc_silinen):
         mesaj += f" Başka kaynaktan {int(panel_plan.get('diger_m'))} satır duruyor."
+    _bozuk_n = int(panel_plan.get("bozuk_tarih_n") or 0)
+    if _bozuk_n:
+        mesaj += " Biçimi bozuk tarihli %s satır silinmedi." % _bozuk_n
     return jsonify({
         "ok": True,
         "olusturulan": olusturulan,
@@ -14384,6 +14409,7 @@ def api_aylik_tutarlardan_borclandir():
         "panel_n": panel_plan.get("panel_n") or 0,
         "diger_m": panel_plan.get("diger_m") or 0,
         "uyarilar": panel_plan.get("uyarilar") or [],
+        "bozuk_tarih_n": int(panel_plan.get("bozuk_tarih_n") or 0),
         "mesaj": mesaj,
     })
 
@@ -14498,11 +14524,11 @@ def api_aylik_tutarlardan_tahsil_et():
     panel_plan = {"panel_n": 0, "diger_m": 0, "atla_tam": {}, "bagli": [], "uyarilar": [], "sil_tahsil": [], "sil_borc": []}
     try:
         _aylar = [(p["yil"], p["ay"]) for p in parsed]
-        _tah, _borc = _panel_tekrar_oku(musteri_id, _aylar)
+        _tah, _borc, _bozuk_n = _panel_tekrar_oku(musteri_id, _aylar)
         panel_plan = panel_tekrar.karar_ver(_aylar, _tah, _borc, haric=set(), taraf="tahsil")
-    except Exception:
-        logging.getLogger(__name__).exception("panel tekrar okuma")
-        return jsonify({"ok": False, "mesaj": "Panel satırları okunamadı; hiçbir şey silinmedi."}), 500
+        panel_plan["bozuk_tarih_n"] = _bozuk_n
+    except Exception as exc:
+        return _panel_okuma_hata_yaniti(exc, "panel tekrar okuma")
     if panel_plan.get("onay_gerekli") and not _panel_tekrar_onayli(data):
         return _panel_tekrar_onay_yaniti(panel_plan)
     if panel_plan.get("panel_n") and not _panel_kapsam_acik():
@@ -14717,6 +14743,9 @@ def api_aylik_tutarlardan_tahsil_et():
         mesaj += " Başka kaynaklı satır olduğu için atlandı: " + ", ".join(_baska) + "."
     if panel_plan.get("diger_m") and tahsil_panel_silinen:
         mesaj += f" Başka kaynaktan {int(panel_plan.get('diger_m'))} satır duruyor."
+    _bozuk_n = int(panel_plan.get("bozuk_tarih_n") or 0)
+    if _bozuk_n:
+        mesaj += " Biçimi bozuk tarihli %s satır silinmedi." % _bozuk_n
     return jsonify({
         "ok": True,
         "olusturulan": olusturulan,
@@ -14726,6 +14755,7 @@ def api_aylik_tutarlardan_tahsil_et():
         "panel_n": panel_plan.get("panel_n") or 0,
         "diger_m": panel_plan.get("diger_m") or 0,
         "uyarilar": panel_plan.get("uyarilar") or [],
+        "bozuk_tarih_n": int(panel_plan.get("bozuk_tarih_n") or 0),
         "mesaj": mesaj,
         "ls_temizle": True,
         "cache_updated": True,
