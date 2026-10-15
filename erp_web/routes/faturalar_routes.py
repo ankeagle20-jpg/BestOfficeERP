@@ -2577,6 +2577,17 @@ def _firma_ozet_sql_alias_c_mk(sql_frag: str, c_alias: str, mk_alias: str) -> st
     return s
 
 
+def _firma_ozet_param_sirala(*parcalar: tuple[str, list]) -> tuple[str, list]:
+    """SQL parçalarını yazıldıkları sırayla birleştirir; parametreler yer tutucularla aynı sıradadır."""
+    sql: list[str] = []
+    params: list = []
+    for frag, prm in parcalar:
+        sql.append(frag or "")
+        if prm:
+            params.extend(prm)
+    return "".join(sql), params
+
+
 def _firma_ozet_sql_cift_olanlar_giris_gunu_filter(
     *,
     musteri_where: str,
@@ -2585,8 +2596,18 @@ def _firma_ozet_sql_cift_olanlar_giris_gunu_filter(
     ho_sql: str,
     arama_sql: str,
     hizli: bool,
-) -> str:
-    """Aynı giriş gününde tam 2 veya 3 müşteri kartı olan kayıtlar."""
+    suzgec_sql: str = "",
+    mk_df_params: list | None = None,
+    giri_ay_params: list | None = None,
+    ho_params: list | None = None,
+    arama_params: list | None = None,
+    suzgec_params: list | None = None,
+) -> tuple[str, list]:
+    """Aynı giriş gününde tam 2 veya 3 müşteri kartı.
+
+    İç sorgu dıştaki süzgeçleri tekrarlar. Dönüş parametreleri yalnız bu iç kopyanın
+    yer tutucularıdır; dış kopya çağıran tarafta bir kez daha eklenir.
+    """
     giris_c = _firma_ozet_giris_tarihi_sql("c", "mk")
     giris_c2 = _firma_ozet_giris_tarihi_sql("c2", "mk")
     mk_join_c2 = _firma_ozet_mk_join_sql(hizli, c_alias="c2", mk_alias="mk")
@@ -2595,7 +2616,8 @@ def _firma_ozet_sql_cift_olanlar_giris_gunu_filter(
     giri2 = _firma_ozet_sql_alias_c_mk(giri_ay_sql, "c2", "mk")
     ho2 = _firma_ozet_sql_alias_c_mk(ho_sql, "c2", "mk")
     ar2 = _firma_ozet_sql_alias_c_mk(arama_sql, "c2", "mk")
-    return f"""
+    suz2 = _firma_ozet_sql_alias_c_mk(suzgec_sql, "c2", "mk")
+    sql = f"""
               AND ({giris_c}) IS NOT NULL
               AND ({giris_c})::date IN (
                   SELECT dup.giris_gunu
@@ -2604,12 +2626,20 @@ def _firma_ozet_sql_cift_olanlar_giris_gunu_filter(
                       FROM customers c2
                       {mk_join_c2}
                       WHERE {mw2}
-                        {mkdf2}{giri2}{ho2}{ar2}
+                        {mkdf2}{giri2}{ho2}{ar2}{suz2}
                         AND ({giris_c2}) IS NOT NULL
                       GROUP BY 1
                       HAVING COUNT(*)::int BETWEEN 2 AND 3
                   ) dup
               )"""
+    _, params = _firma_ozet_param_sirala(
+        (mk_df_sql, list(mk_df_params or [])),
+        (giri_ay_sql, list(giri_ay_params or [])),
+        (ho_sql, list(ho_params or [])),
+        (arama_sql, list(arama_params or [])),
+        (suzgec_sql, list(suzgec_params or [])),
+    )
+    return sql, params
 
 
 def _fatura_rapor_giris_aylari_parse(raw) -> list | None:
@@ -3291,6 +3321,89 @@ def _firma_ozet_build_rows_firma_sql(
               {mk_df_sql}{giri_ay_sql}{ho_sql}{giri_yil_sql}{arama_sql}{cift_sql}{suzgec_sql}
             ORDER BY 2
             """
+
+
+def _firma_ozet_liste_sorgusu_kur(
+    *,
+    musteri_where: str,
+    mk_df_sql: str = "",
+    mk_df_params: list | None = None,
+    giri_ay_sql: str = "",
+    giri_ay_params: list | None = None,
+    ho_sql: str = "",
+    ho_params: list | None = None,
+    giri_yil_sql: str = "",
+    giri_yil_params: list | None = None,
+    arama_sql: str = "",
+    arama_params: list | None = None,
+    suzgec_sql: str = "",
+    suzgec_params: list | None = None,
+    cift_olanlar: bool = False,
+    hizli: bool = True,
+    firma_guncel_sql: str = "0",
+) -> dict:
+    """Liste ve yıl sorgusu. Parametre listesi, SQL'deki %s sırasının aynısıdır.
+
+    Çift olanlar iç sorgusu süzgeçleri ikinci kez yazar; onların parametreleri de ikinci kez gelir.
+    Kapsam (_fatura_rapor_musteri_where_sql) yer tutucusuzdur, bu listeye girmez.
+    """
+    mk_p = list(mk_df_params or [])
+    ay_p = list(giri_ay_params or [])
+    ho_p = list(ho_params or [])
+    yil_p = list(giri_yil_params or [])
+    ar_p = list(arama_params or [])
+    sz_p = list(suzgec_params or [])
+    cift_sql = ""
+    cift_params: list = []
+    if cift_olanlar:
+        cift_sql, cift_params = _firma_ozet_sql_cift_olanlar_giris_gunu_filter(
+            musteri_where=musteri_where,
+            mk_df_sql=mk_df_sql,
+            giri_ay_sql=giri_ay_sql,
+            ho_sql=ho_sql,
+            arama_sql=arama_sql,
+            hizli=hizli,
+            suzgec_sql=suzgec_sql,
+            mk_df_params=mk_p,
+            giri_ay_params=ay_p,
+            ho_params=ho_p,
+            arama_params=ar_p,
+            suzgec_params=sz_p,
+        )
+    _, yil_params = _firma_ozet_param_sirala(
+        (mk_df_sql, mk_p),
+        (giri_ay_sql, ay_p),
+        (ho_sql, ho_p),
+        (arama_sql, ar_p),
+        (cift_sql, cift_params),
+    )
+    rows_sql = _firma_ozet_build_rows_firma_sql(
+        musteri_where=musteri_where,
+        mk_df_sql=mk_df_sql,
+        giri_ay_sql=giri_ay_sql,
+        ho_sql=ho_sql,
+        arama_sql=arama_sql,
+        firma_guncel_sql=firma_guncel_sql,
+        hizli=hizli,
+        cift_sql=cift_sql,
+        giri_yil_sql=giri_yil_sql,
+        suzgec_sql=suzgec_sql,
+    )
+    _, rows_params = _firma_ozet_param_sirala(
+        (mk_df_sql, mk_p),
+        (giri_ay_sql, ay_p),
+        (ho_sql, ho_p),
+        (giri_yil_sql, yil_p),
+        (arama_sql, ar_p),
+        (cift_sql, cift_params),
+        (suzgec_sql, sz_p),
+    )
+    return {
+        "cift_sql": cift_sql,
+        "rows_sql": rows_sql,
+        "rows_params": rows_params,
+        "yil_params": yil_params,
+    }
 
 
 def _firma_ozet_grid_ozet_map_cache_only(rows: list, ref: date | None = None) -> dict[int, dict]:
@@ -4249,7 +4362,8 @@ def _firma_ozet_dataset_from_request(*, excel_mode: bool = False) -> dict:
         bizim_hesap,
     )
     mk_df_sql = ""
-    mk_df_params = []
+    mk_df_params: list = []
+    arama_params: list = []
     arama = "" if excel_mode else (request.args.get("q") or "").strip()
     arama_sql = ""
     if arama:
@@ -4286,7 +4400,7 @@ def _firma_ozet_dataset_from_request(*, excel_mode: bool = False) -> dict:
         # Eşleşme yoksa bile boş liste döndürecek biçimde filtreyi mutlak yap (sayfada
         # eski 50 satır görünmesin).
         arama_sql = " AND c.id = ANY(%s::bigint[])"
-        mk_df_params.append(arama_ids if arama_ids else [0])
+        arama_params.append(arama_ids if arama_ids else [0])
     if duzenli_fatura:
         mk_df_sql = (
             "AND COALESCE(NULLIF(LOWER(TRIM(mk.duzenli_fatura)), ''), 'duzenle') = %s"
@@ -4294,28 +4408,44 @@ def _firma_ozet_dataset_from_request(*, excel_mode: bool = False) -> dict:
         mk_df_params.append(duzenli_fatura)
     giris_aylar_filtre = _fatura_rapor_giris_aylari_parse(request.args.get("giri_aylar"))
     giri_ay_sql = ""
+    giri_ay_params: list = []
     if giris_aylar_filtre:
         # IN (%s,…) — psycopg2’de ANY(%s::int[]) bazı sürümlerde/uzak DB’de güvenilir bağlanmıyor.
         _gph = ", ".join(["%s"] * len(giris_aylar_filtre))
         giri_ay_sql = (
             f" AND (EXTRACT(MONTH FROM ({_FIRMA_OZET_GIRIS_TARIHI_SQL})::date))::int IN ({_gph})"
         )
-        mk_df_params.extend(giris_aylar_filtre)
+        giri_ay_params.extend(giris_aylar_filtre)
     ho_sql, ho_params = _firma_ozet_oda_sql(client_oda_raw, excel_mode=excel_mode)
     hazir_oda_filtre = ho_params[0] if ho_params else None
-    mk_df_params.extend(ho_params)
-    cift_sql = ""
-    if cift_olanlar:
-        cift_sql = _firma_ozet_sql_cift_olanlar_giris_gunu_filter(
-            musteri_where=musteri_where,
-            mk_df_sql=mk_df_sql,
-            giri_ay_sql=giri_ay_sql,
-            ho_sql=ho_sql,
-            arama_sql=arama_sql,
-            hizli=liste_hizli,
-        )
     giris_yillar_filtre = _fatura_rapor_giris_yillari_parse(request.args.get("giri_yillar"))
     giri_yil_sql, giri_yil_params = _fatura_rapor_giris_yili_sql(giris_yillar_filtre)
+    suzgec_sql, suzgec_params = _firma_ozet_sunucu_suzgec_sql(
+        grup2=client_grup2,
+        hizmet=client_hizmet,
+        durum=client_durum,
+    )
+    kur = _firma_ozet_liste_sorgusu_kur(
+        musteri_where=musteri_where,
+        mk_df_sql=mk_df_sql,
+        mk_df_params=mk_df_params,
+        giri_ay_sql=giri_ay_sql,
+        giri_ay_params=giri_ay_params,
+        ho_sql=ho_sql,
+        ho_params=ho_params,
+        giri_yil_sql=giri_yil_sql,
+        giri_yil_params=giri_yil_params,
+        arama_sql=arama_sql,
+        arama_params=arama_params,
+        suzgec_sql=suzgec_sql,
+        suzgec_params=suzgec_params,
+        cift_olanlar=cift_olanlar,
+        hizli=liste_hizli,
+        firma_guncel_sql=_firma_guncel_grid_sql,
+    )
+    cift_sql = kur["cift_sql"]
+    rows_firma_sql = kur["rows_sql"]
+    rows_firma_params = tuple(kur["rows_params"])
     giris_yillari: list[int] = []
     if not excel_mode:
         try:
@@ -4328,7 +4458,7 @@ def _firma_ozet_dataset_from_request(*, excel_mode: bool = False) -> dict:
                   AND ({_FIRMA_OZET_GIRIS_TARIHI_SQL}) IS NOT NULL
                 ORDER BY 1
             """
-            for _yr in fetch_all(yil_sql, tuple(mk_df_params)) or []:
+            for _yr in fetch_all(yil_sql, tuple(kur["yil_params"])) or []:
                 _yv = _firma_ozet_giris_yili_deger((_yr or {}).get("y") if isinstance(_yr, dict) else None)
                 if _yv and _yv not in giris_yillari:
                     giris_yillari.append(_yv)
@@ -4336,26 +4466,6 @@ def _firma_ozet_dataset_from_request(*, excel_mode: bool = False) -> dict:
         except Exception as e_yil:
             current_app.logger.warning("firma_ozet giris yillari err=%r", e_yil)
             giris_yillari = []
-    mk_df_params.extend(giri_yil_params)
-    suzgec_sql, suzgec_params = _firma_ozet_sunucu_suzgec_sql(
-        grup2=client_grup2,
-        hizmet=client_hizmet,
-        durum=client_durum,
-    )
-    mk_df_params.extend(suzgec_params)
-    rows_firma_sql = _firma_ozet_build_rows_firma_sql(
-        musteri_where=musteri_where,
-        mk_df_sql=mk_df_sql,
-        giri_ay_sql=giri_ay_sql,
-        ho_sql=ho_sql,
-        arama_sql=arama_sql,
-        firma_guncel_sql=_firma_guncel_grid_sql,
-        hizli=liste_hizli,
-        cift_sql=cift_sql,
-        giri_yil_sql=giri_yil_sql,
-        suzgec_sql=suzgec_sql,
-    )
-    rows_firma_params = tuple(mk_df_params)
     rows_firma_sql_no_order = re.sub(r"\s+ORDER\s+BY\s+2\s*$", "", rows_firma_sql.rstrip(), flags=re.I)
     firma_hizli_degrade = False
     rows_firma = []
