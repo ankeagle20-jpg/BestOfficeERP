@@ -3868,14 +3868,13 @@ function faturaRaporYukle() {
                     if (trh0) {
                         trh0.className = 'fatura-rapor-firma-hdr';
                         var ordF = (typeof faturaRaporFirmaReadColOrder === 'function') ? faturaRaporFirmaReadColOrder() : [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13];
-                        var ayEsc = ayEt ? ayEt.replace(/</g, '&lt;') : '';
                         var thParts = ordF.map(function (lid) {
                             if (lid === 0) {
                                 return '<th class="fatura-rapor-firma-ch" data-fr-col-id="0"><input type="checkbox" id="fatura_rapor_firma_hepsini_sec" title="Tümünü seç"></th>';
                             }
                             if (lid === 1) return '<th class="fatura-rapor-firma-th-drg" data-fr-col-id="1">Giriş tarihi</th>';
                             if (lid === 2) return '<th class="fatura-rapor-firma-th-drg" data-fr-col-id="2">Firma ismi</th>';
-                            if (lid === 3) return '<th class="num fatura-rapor-firma-th-drg" data-fr-col-id="3">Aylık tutar' + (ayEsc ? ' (' + ayEsc + ')' : '') + '</th>';
+                            if (lid === 3) return '<th class="num fatura-rapor-firma-th-drg" data-fr-col-id="3" title="Nakit sözleşmelerde KDV eklenmez.">Sözleşme aylık (KDV dahil)</th>';
                             if (lid === 4) {
                                 return '<th class="num fatura-rapor-firma-th-drg" data-fr-col-id="4" title="Müşteri kartındaki ilk kira (KDV hariç)">İlk kira (₺)</th>';
                             }
@@ -4998,8 +4997,6 @@ function faturaRaporSecilenleriSil() {
     };
 
     function firmaThHtmlForLogical(lid, ayEtiket) {
-        var ay = String(ayEtiket || '').replace(/</g, '&lt;');
-        var th3 = ay ? ('Aylık tutar (' + ay + ')') : 'Aylık tutar';
         if (lid === 0) {
             return '<th class="fatura-rapor-firma-ch" data-fr-col-id="0" title="Toplu işlem; başlığı sürükleyerek sütun sırası">' +
                 '<input type="checkbox" id="fatura_rapor_firma_hepsini_sec" title="Tümünü seç"></th>';
@@ -5011,7 +5008,7 @@ function faturaRaporSecilenleriSil() {
             return '<th class="fatura-rapor-firma-th-drg" data-fr-col-id="2" title="Sıralama · kenardan genişlik · sütunu sürükleyerek taşı">Firma ismi</th>';
         }
         if (lid === 3) {
-            return '<th class="num fatura-rapor-firma-th-drg" data-fr-col-id="3" title="Sıralama · kenardan genişlik · sütunu sürükleyerek taşı">' + th3 + '</th>';
+            return '<th class="num fatura-rapor-firma-th-drg" data-fr-col-id="3" title="Nakit sözleşmelerde KDV eklenmez. Sıralama · kenardan genişlik · sütunu sürükleyerek taşı">Sözleşme aylık (KDV dahil)</th>';
         }
         if (lid === 4) {
             return '<th class="num fatura-rapor-firma-th-drg" data-fr-col-id="4" title="Müşteri kartı ilk kira (KDV hariç) · sıralama · sürükle">İlk kira (₺)</th>';

@@ -6748,7 +6748,7 @@ def _firma_ozet_workbook_bytes(ds: dict):
         "Firma ismi",
         "Vergi no",
         "Kimlik no",
-        f"Aylık tutar{(' (' + ay_etiket + ')') if ay_etiket else ''}",
+        "Sözleşme aylık (KDV dahil)",
         "İlk kira",
         "Güncel",
         "Toplam borç",
