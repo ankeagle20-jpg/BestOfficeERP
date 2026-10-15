@@ -3105,7 +3105,15 @@ def _firma_ozet_resp_cache_key() -> str:
         "hazir_ofis_oda",
         "hazir_oda",
     )
-    return "|".join(f"{k}={request.args.get(k, '')}" for k in keys)
+    base = "|".join(f"{k}={request.args.get(k, '')}" for k in keys)
+    ekstra = []
+    for k in ("grup2", "hizmet", "hizmet_turleri", "durum"):
+        v = request.args.get(k, "")
+        if str(v or "").strip():
+            ekstra.append(f"{k}={v}")
+    if not ekstra:
+        return base
+    return base + "|" + "|".join(ekstra)
 
 
 def _firma_ozet_resp_cache_get(key: str):
@@ -3200,6 +3208,7 @@ def _firma_ozet_build_rows_firma_sql(
     hizli: bool,
     cift_sql: str = "",
     giri_yil_sql: str = "",
+    suzgec_sql: str = "",
 ) -> str:
     if hizli:
         grup2_sql = "''::text AS grup2_etiketler"
@@ -3279,7 +3288,7 @@ def _firma_ozet_build_rows_firma_sql(
             FROM customers c
             {mk_join}
             WHERE {musteri_where}
-              {mk_df_sql}{giri_ay_sql}{ho_sql}{giri_yil_sql}{arama_sql}{cift_sql}
+              {mk_df_sql}{giri_ay_sql}{ho_sql}{giri_yil_sql}{arama_sql}{cift_sql}{suzgec_sql}
             ORDER BY 2
             """
 
@@ -4067,6 +4076,81 @@ def _firma_ozet_recalc_ozet(satirlar: list) -> tuple[float, float, int]:
     return round(toplam_aylik, 2), round(toplam_borc, 2), len(satirlar or [])
 
 
+def _firma_ozet_oda_sql(raw: str, *, excel_mode: bool) -> tuple[str, list]:
+    """Liste modu oda süzgeci. Boş veya Excel: parça yok (eski davranış)."""
+    if excel_mode or not (raw or "").strip():
+        return "", []
+    low = str(raw).strip().lower()
+    if low == "hepsi":
+        return (
+            " AND NULLIF(BTRIM(COALESCE(mk.hazir_ofis_oda_no, c.hazir_ofis_oda_no)::text), '') IS NOT NULL",
+            [],
+        )
+    if low == "yok":
+        return (
+            " AND NULLIF(BTRIM(COALESCE(mk.hazir_ofis_oda_no, c.hazir_ofis_oda_no)::text), '') IS NULL",
+            [],
+        )
+    try:
+        n = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return "", []
+    if 200 <= n <= 230:
+        return " AND COALESCE(mk.hazir_ofis_oda_no, c.hazir_ofis_oda_no) = %s", [n]
+    return "", []
+
+
+def _firma_ozet_sunucu_suzgec_sql(*, grup2: list, hizmet: list, durum: str) -> tuple[str, list]:
+    """Grup2 / hizmet / durum. Parametre yoksa boş döner; sayfa diliminden önce WHERE'e eklenir."""
+    parts: list[str] = []
+    params: list = []
+    g2 = [str(x).strip() for x in (grup2 or []) if str(x).strip()]
+    if g2:
+        parts.append(
+            """ AND EXISTS (
+                SELECT 1
+                FROM (
+                    SELECT DISTINCT gs
+                    FROM unnest(
+                        COALESCE(c.grup2_secimleri, ARRAY[]::text[]) ||
+                        CASE WHEN COALESCE(c.bizim_hesap, FALSE) THEN ARRAY['bizim_hesap']::text[] ELSE ARRAY[]::text[] END
+                    ) gs
+                ) gg
+                LEFT JOIN grup2_etiketleri g2f ON g2f.slug = gg.gs
+                WHERE COALESCE(g2f.etiket, gg.gs) = ANY(%s)
+                   OR gg.gs = ANY(%s)
+            )"""
+        )
+        params.extend([g2, g2])
+    hz = [str(x).strip() for x in (hizmet or []) if str(x).strip()]
+    if hz:
+        bos = "__FR_HIZMET_BOS" in hz
+        adlar = [x for x in hz if x != "__FR_HIZMET_BOS"]
+        temel = (
+            "regexp_replace("
+            "BTRIM(COALESCE(NULLIF(BTRIM(mk.hizmet_turu), ''), NULLIF(BTRIM(c.hizmet_turu), ''), '')), "
+            r"'\s*[·•]\s*Oda\s+[0-9]+\s*$', '')"
+        )
+        ors = []
+        if adlar:
+            ors.append(f"{temel} = ANY(%s)")
+            params.append(adlar)
+            ors.append(
+                "BTRIM(COALESCE(NULLIF(BTRIM(mk.hizmet_turu), ''), NULLIF(BTRIM(c.hizmet_turu), ''), '')) = ANY(%s)"
+            )
+            params.append(adlar)
+        if bos:
+            ors.append(f"{temel} IN ('', '—', '-')")
+        if ors:
+            parts.append(" AND (" + " OR ".join(ors) + ")")
+    d = (durum or "").strip().lower()
+    if d == "aktif":
+        parts.append(f" AND ({_fatura_rapor_aktif_musteri_where_clause()})")
+    elif d == "pasif":
+        parts.append(f" AND ({_fatura_rapor_pasif_musteri_where_clause()})")
+    return "".join(parts), params
+
+
 def _firma_ozet_dataset_from_request(*, excel_mode: bool = False) -> dict:
     """Tekil müşteri (firma_ozet) rapor payload — api_fatura_rapor ile aynı mantık.
 
@@ -4217,19 +4301,9 @@ def _firma_ozet_dataset_from_request(*, excel_mode: bool = False) -> dict:
             f" AND (EXTRACT(MONTH FROM ({_FIRMA_OZET_GIRIS_TARIHI_SQL})::date))::int IN ({_gph})"
         )
         mk_df_params.extend(giris_aylar_filtre)
-    hazir_oda_raw = (request.args.get("hazir_ofis_oda") or request.args.get("hazir_oda") or "").strip()
-    hazir_oda_filtre = None
-    if hazir_oda_raw and not excel_mode:
-        try:
-            _hz = int(hazir_oda_raw)
-            if 200 <= _hz <= 230:
-                hazir_oda_filtre = _hz
-        except (TypeError, ValueError):
-            pass
-    ho_sql = ""
-    if hazir_oda_filtre is not None:
-        ho_sql = " AND COALESCE(mk.hazir_ofis_oda_no, c.hazir_ofis_oda_no) = %s"
-        mk_df_params.append(hazir_oda_filtre)
+    ho_sql, ho_params = _firma_ozet_oda_sql(client_oda_raw, excel_mode=excel_mode)
+    hazir_oda_filtre = ho_params[0] if ho_params else None
+    mk_df_params.extend(ho_params)
     cift_sql = ""
     if cift_olanlar:
         cift_sql = _firma_ozet_sql_cift_olanlar_giris_gunu_filter(
@@ -4263,6 +4337,12 @@ def _firma_ozet_dataset_from_request(*, excel_mode: bool = False) -> dict:
             current_app.logger.warning("firma_ozet giris yillari err=%r", e_yil)
             giris_yillari = []
     mk_df_params.extend(giri_yil_params)
+    suzgec_sql, suzgec_params = _firma_ozet_sunucu_suzgec_sql(
+        grup2=client_grup2,
+        hizmet=client_hizmet,
+        durum=client_durum,
+    )
+    mk_df_params.extend(suzgec_params)
     rows_firma_sql = _firma_ozet_build_rows_firma_sql(
         musteri_where=musteri_where,
         mk_df_sql=mk_df_sql,
@@ -4273,6 +4353,7 @@ def _firma_ozet_dataset_from_request(*, excel_mode: bool = False) -> dict:
         hizli=liste_hizli,
         cift_sql=cift_sql,
         giri_yil_sql=giri_yil_sql,
+        suzgec_sql=suzgec_sql,
     )
     rows_firma_params = tuple(mk_df_params)
     rows_firma_sql_no_order = re.sub(r"\s+ORDER\s+BY\s+2\s*$", "", rows_firma_sql.rstrip(), flags=re.I)

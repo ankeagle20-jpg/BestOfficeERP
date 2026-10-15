@@ -12700,13 +12700,8 @@ function faturaRaporFirmaFilterMenuGrup2Ac(anchor) {
             if (typeof faturaRaporFiltreStateKaydet === 'function') faturaRaporFiltreStateKaydet();
             // Grup2 seçilince sadece ilk sayfadaki eşleşmelerle sınırlı kalmasın:
             // arka planda tüm sayfaları yükleyip sonra süzgeci uygula.
-            var ps = window.__faturaRaporFirmaPagingState || null;
-            var allLoader = (picked.length > 0 && ps && ps.hasMore && typeof window.__faturaRaporFirmaPagingFetch === 'function')
-                ? window.__faturaRaporFirmaPagingFetch('all')
-                : Promise.resolve();
-            allLoader.finally(function () {
-                if (typeof faturaRaporListeAraUygula === 'function') faturaRaporListeAraUygula();
-            });
+            if (typeof faturaRaporYukle === 'function') faturaRaporYukle();
+            else if (typeof faturaRaporListeAraUygula === 'function') faturaRaporListeAraUygula();
         });
         act.appendChild(btnU);
         pop.appendChild(inn);
@@ -12808,13 +12803,8 @@ function faturaRaporFirmaFilterMenuHizmetAc(anchor) {
                 );
             }
             if (typeof faturaRaporHizmetBtnStilGuncelle === 'function') faturaRaporHizmetBtnStilGuncelle();
-            var ps = window.__faturaRaporFirmaPagingState || null;
-            var allLoader = (picked.length > 0 && ps && ps.hasMore && typeof window.__faturaRaporFirmaPagingFetch === 'function')
-                ? window.__faturaRaporFirmaPagingFetch('all')
-                : Promise.resolve();
-            allLoader.finally(function () {
-                if (typeof faturaRaporListeAraUygula === 'function') faturaRaporListeAraUygula();
-            });
+            if (typeof faturaRaporYukle === 'function') faturaRaporYukle();
+            else if (typeof faturaRaporListeAraUygula === 'function') faturaRaporListeAraUygula();
         });
         act.appendChild(btnU);
         pop.appendChild(inn);
@@ -14651,7 +14641,9 @@ function faturaRaporOdaFiltrePillTikla(raw) {
     }
     if (typeof faturaRaporBosOdaPillSecimGuncelle === 'function') faturaRaporBosOdaPillSecimGuncelle();
     if (typeof faturaRaporOdaNoBtnStilGuncelle === 'function') faturaRaporOdaNoBtnStilGuncelle();
-    if (typeof faturaRaporListeAraUygula === 'function') faturaRaporListeAraUygula();
+    var gorOda = document.getElementById('fatura_rapor_gorunum');
+    if (gorOda && gorOda.value === 'firma_ozet' && typeof faturaRaporYukle === 'function') faturaRaporYukle();
+    else if (typeof faturaRaporListeAraUygula === 'function') faturaRaporListeAraUygula();
     try {
         if (typeof faturaRaporFiltreStateKaydet === 'function') faturaRaporFiltreStateKaydet();
     } catch (eFs) {}
@@ -14873,6 +14865,23 @@ function faturaRaporFiltreTemizle() {
     if (typeof faturaRaporYukle === 'function') faturaRaporYukle();
 }
 
+
+function faturaRaporFirmaSunucuSuzgecSuffix() {
+    var p = '';
+    var elAra = document.getElementById('fatura_rapor_liste_ara');
+    var araQ = elAra ? String(elAra.value || '').trim() : '';
+    if (araQ) p += '&q=' + encodeURIComponent(araQ);
+    var g2 = (typeof faturaRaporFirmaFiltreGrup2DiziOku === 'function') ? faturaRaporFirmaFiltreGrup2DiziOku() : [];
+    if (g2 && g2.length) p += '&grup2=' + encodeURIComponent(g2.join(','));
+    var hz = (typeof faturaRaporFirmaFiltreHizmetDiziOku === 'function') ? faturaRaporFirmaFiltreHizmetDiziOku() : [];
+    if (hz && hz.length) p += '&hizmet_turleri=' + encodeURIComponent(hz.join(','));
+    var fd = (typeof faturaRaporFirmaFiltreDurumOku === 'function') ? faturaRaporFirmaFiltreDurumOku() : '';
+    if (fd === 'aktif' || fd === 'pasif') p += '&durum=' + encodeURIComponent(fd);
+    var oda = (typeof faturaRaporOdaFiltreOku === 'function') ? faturaRaporOdaFiltreOku() : null;
+    if (oda) p += '&hazir_ofis_oda=' + encodeURIComponent(String(oda));
+    return p;
+}
+
 function faturaRaporYukle() {
     var basEl = document.getElementById('fatura_rapor_baslangic');
     var bitEl = document.getElementById('fatura_rapor_bitis');
@@ -14927,6 +14936,7 @@ function faturaRaporYukle() {
         // istemci tarafında çalışır ve gerekirse aşağıda "Tümünü yükle" mantığı devreye girer.
         var frPs = ((frG2Sec && frG2Sec.length) || (frHizSec && frHizSec.length)) ? 5000 : 50;
         u += '&page_size=' + encodeURIComponent(String(frPs)) + '&page=1';
+        if (typeof faturaRaporFirmaSunucuSuzgecSuffix === 'function') u += faturaRaporFirmaSunucuSuzgecSuffix();
     }
     /* Uzun rapor + DB/SSL dalgalanması: 3 dk zaman aşımı, 4 deneme (girisFetchAgKopmasinaKarsi). */
     var frFetchOpts = { credentials: 'same-origin', timeoutMs: 180000 };
