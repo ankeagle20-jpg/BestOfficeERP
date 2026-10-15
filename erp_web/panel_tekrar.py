@@ -68,14 +68,40 @@ CREATE TABLE IF NOT EXISTS panel_tekrar_yedek (
     ay_iso DATE,
     satir_json TEXT NOT NULL,
     geri_yazildi BOOLEAN NOT NULL DEFAULT FALSE,
+    islem_tamam BOOLEAN NOT NULL DEFAULT FALSE,
+    taraf TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 )
 """.strip()
 
+SQL_SUTUN_TAMAM = "ALTER TABLE panel_tekrar_yedek ADD COLUMN IF NOT EXISTS islem_tamam BOOLEAN NOT NULL DEFAULT FALSE"
+SQL_SUTUN_TARAF = "ALTER TABLE panel_tekrar_yedek ADD COLUMN IF NOT EXISTS taraf TEXT"
+
 SQL_YEDEK_EKLE = """
-INSERT INTO panel_tekrar_yedek (tablo_adi, kayit_id, musteri_id, ay_iso, satir_json)
-VALUES (%s, %s, %s, %s, %s)
+INSERT INTO panel_tekrar_yedek (tablo_adi, kayit_id, musteri_id, ay_iso, satir_json, taraf)
+VALUES (%s, %s, %s, %s, %s, %s)
 RETURNING id
+""".strip()
+
+SQL_KILIT = "SELECT pg_advisory_xact_lock(hashtext(%s)::bigint)"
+
+# Aynı ay için onaylı ikinci istek bu pencerede yedek/silme/yazımı tekrarlamaz.
+KISA_KORUMA_SANIYE = 20
+
+SQL_KISA_KORUMA = """
+/* panel_kisa_koruma */
+SELECT ay_iso
+FROM panel_tekrar_yedek
+WHERE musteri_id = %s
+  AND taraf = %s
+  AND islem_tamam = TRUE
+  AND geri_yazildi = FALSE
+  AND created_at > NOW() - INTERVAL '20 seconds'
+""".strip()
+
+SQL_ISLEM_TAMAM = """
+/* panel_islem_tamam */
+UPDATE panel_tekrar_yedek SET islem_tamam = TRUE WHERE id = %s AND geri_yazildi = FALSE
 """.strip()
 
 SQL_TAHSIL_SIL = """
@@ -352,9 +378,80 @@ def _calistir(calistir, sql, params=None):
         calistir(sql, params)
 
 
-def panel_satirlari_sil(calistir, oku, *, tahsil_rows, borc_rows, musteri_id, kullanici) -> dict:
-    """Yedek + audit, sonra sil. Kaynak şartı SQL'de de durur. Kopyasız silme yok."""
+def kilit_al(calistir, musteri_id, taraf: str) -> None:
+    """Aynı müşteri ve taraf için eşzamanlı tekrar basışı sıraya koyar. İşlem bitince kilit kalkar."""
+    _calistir(
+        calistir,
+        SQL_KILIT,
+        ("panel_tekrar:%s:%s" % (int(musteri_id), str(taraf or "")),),
+    )
+
+
+def kisa_koruma_aylari(calistir, liste_al, musteri_id, taraf: str) -> set:
+    """Son birkaç saniyede tamamlanmış aylar. İkinci onaylı istek bunları yeniden silmez."""
+    _calistir(calistir, SQL_KISA_KORUMA, (int(musteri_id), str(taraf or "")))
+    rows = liste_al() or []
+    out = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        raw = row.get("ay_iso")
+        if raw is None:
+            continue
+        metin = raw.isoformat() if hasattr(raw, "isoformat") else str(raw)
+        if len(metin) >= 7 and metin[4] == "-":
+            out.add(metin[:7])
+    return out
+
+
+def korumayi_uygula(plan: dict, korunan, istenen_aylar=None) -> dict:
+    """Korunan ay silme listesinden çıkar ve yeniden yazımı atlar. Sessiz geri yazma yok."""
+    kume = {str(a)[:7] for a in (korunan or []) if a}
+    if not kume:
+        return plan
+    atla = plan.setdefault("atla_tam", {})
+    for ay in list(istenen_aylar or []) + list(kume):
+        ay = str(ay)[:7]
+        if ay in kume and ay not in atla:
+            atla[ay] = {"neden": "ayni_islem", "ay": ay}
+
+    def _aylar(row, tahsil):
+        if tahsil:
+            return [a[:7] for a in tahsil_aylari(row)]
+        borc_ay = _borc_ayi(row) or ""
+        return [borc_ay[:7]] if borc_ay else []
+
+    sil_t = []
+    for row in plan.get("sil_tahsil") or []:
+        aylar = _aylar(row, True)
+        if any(a in kume for a in aylar):
+            continue
+        sil_t.append(row)
+    sil_b = []
+    for row in plan.get("sil_borc") or []:
+        aylar = _aylar(row, False)
+        if any(a in kume for a in aylar):
+            continue
+        sil_b.append(row)
+    plan["sil_tahsil"] = sil_t
+    plan["sil_borc"] = sil_b
+    return plan
+
+
+def islem_tamamla(calistir, yedek_ids) -> None:
+    for yid in yedek_ids or []:
+        try:
+            _calistir(calistir, SQL_ISLEM_TAMAM, (int(yid),))
+        except (TypeError, ValueError):
+            continue
+
+
+def panel_satirlari_sil(calistir, oku, *, tahsil_rows, borc_rows, musteri_id, kullanici, taraf="borc") -> dict:
+    """Yedek + audit, sonra sil. Kaynak şartı SQL'de de durur. Kayıt zaten yoksa ikinci kez yedeklemez."""
     _calistir(calistir, SQL_TABLO)
+    _calistir(calistir, SQL_SUTUN_TAMAM)
+    _calistir(calistir, SQL_SUTUN_TARAF)
+    taraf_adi = str(taraf or "borc")
     tahsil_silinen = []
     borc_silinen = []
     yedek_ids = []
@@ -375,7 +472,7 @@ def panel_satirlari_sil(calistir, oku, *, tahsil_rows, borc_rows, musteri_id, ku
         yedek = _oku_satir(
             oku,
             SQL_YEDEK_EKLE,
-            (tablo, rid, int(musteri_id), ay_iso, _json_satir(govde)),
+            (tablo, rid, int(musteri_id), ay_iso, _json_satir(govde), taraf_adi),
         )
         if not yedek or not yedek.get("id"):
             raise RuntimeError("yedek yazilamadi")
@@ -408,6 +505,9 @@ def panel_satirlari_sil(calistir, oku, *, tahsil_rows, borc_rows, musteri_id, ku
     for row in tahsil_rows or []:
         if not panel_kaynak_mi(row.get("kaynak")):
             raise RuntimeError("panel disi tahsilat yedeklenmez")
+        rid = _satir_id(row)
+        if not _oku_satir(oku, "SELECT id FROM tahsilatlar WHERE id = %s", (rid,)):
+            continue
         aylar = tahsil_aylari(row)
         _yedekle(TABLO_TAHSIL, row, TAHSIL_KOLON, aylar[0] if aylar else "")
         silinen = _oku_satir(oku, SQL_TAHSIL_SIL, (_satir_id(row), int(musteri_id), int(musteri_id)))
@@ -423,6 +523,9 @@ def panel_satirlari_sil(calistir, oku, *, tahsil_rows, borc_rows, musteri_id, ku
     for row in borc_rows or []:
         if borc_bag_nedeni(row, tahsil_rows):
             raise RuntimeError("bagli borc silinmez")
+        rid = _satir_id(row)
+        if not _oku_satir(oku, "SELECT id FROM faturalar WHERE id = %s", (rid,)):
+            continue
         ay = _borc_ayi(row) or ""
         _yedekle(TABLO_BORC, row, BORC_KOLON, ay)
         silinen = _oku_satir(oku, SQL_BORC_SIL, (_satir_id(row), int(musteri_id)))

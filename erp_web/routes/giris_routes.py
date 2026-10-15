@@ -13990,153 +13990,198 @@ def api_aylik_tutarlardan_borclandir():
         return jsonify({"ok": False, "mesaj": "Panel satırları okunamadı; hiçbir şey silinmedi."}), 500
     if panel_plan.get("onay_gerekli") and not _panel_tekrar_onayli(data):
         return _panel_tekrar_onay_yaniti(panel_plan)
+    # Silme ile yeni fatura aynı db() içinde kalsın. Ayrı commit, belge servisi yüzünden değil:
+    # silme kendi bağlantı bloğunda bitiyor, fatura yazımı sonraki execute çağrılarındaydı.
+    # İstek kapsamında iç çağrılar (belge sayacı dahil) bu blok kapanınca birlikte kaydolur.
+    _tx = None
+    _sil = {"tahsil_silinen": [], "borc_silinen": [], "yedek_ids": []}
     if panel_plan.get("panel_n"):
+        _tx = get_db()
         try:
-            _sil = _panel_tekrar_uygula(musteri_id, panel_plan)
-        except Exception:
+            _conn = _tx.__enter__()
+            _cur = _conn.cursor()
+            _cal, _oku = _panel_cur_io(_cur)
+            panel_tekrar.kilit_al(_cal, musteri_id, "borc")
+            _koru = panel_tekrar.kisa_koruma_aylari(_cal, _cur.fetchall, musteri_id, "borc")
+            panel_tekrar.korumayi_uygula(
+                panel_plan,
+                _koru,
+                ["%04d-%02d" % (int(a[0]), int(a[1])) for a in _aylar],
+            )
+            if panel_plan.get("sil_tahsil") or panel_plan.get("sil_borc"):
+                _sil = panel_tekrar.panel_satirlari_sil(
+                    _cal,
+                    _oku,
+                    tahsil_rows=panel_plan.get("sil_tahsil") or [],
+                    borc_rows=panel_plan.get("sil_borc") or [],
+                    musteri_id=musteri_id,
+                    kullanici=_panel_tekrar_kullanici(),
+                    taraf="borc",
+                )
+                panel_tekrar.islem_tamamla(_cal, _sil.get("yedek_ids"))
+        except Exception as _sil_hata:
+            try:
+                _tx.__exit__(type(_sil_hata), _sil_hata, _sil_hata.__traceback__)
+            except Exception:
+                logging.getLogger(__name__).exception("panel tx kapatma")
+            _tx = None
             logging.getLogger(__name__).exception("panel tekrar silme")
             return jsonify({"ok": False, "mesaj": "Panel satırı silinemedi; hiçbir değişiklik kaydedilmedi."}), 500
-        for tr in _sil.get("tahsil_silinen") or []:
-            tahsil_silinen.append(tr)
+
+    try:
+        for raw in satirlar:
+            if not isinstance(raw, dict):
+                continue
             try:
-                tahsil_silinen_aylar.add((int(tr.get("yil")), int(tr.get("ay"))))
+                yil = int(raw.get("yil"))
+                ay = int(raw.get("ay"))
             except (TypeError, ValueError):
-                pass
-        borc_silinen.extend(_sil.get("borc_silinen") or [])
+                atlanan.append({"neden": "geçersiz_yil_ay", "satir": raw})
+                continue
+            if ay < 1 or ay > 12 or yil < 1990 or yil > 2100:
+                atlanan.append({"neden": "tarih_aralik", "satir": raw})
+                continue
+            if f"{yil:04d}-{ay:02d}" in _dondurma_ay_kumesi(musteri_id):
+                atlanan.append({"neden": "dondurma", "yil": yil, "ay": ay})
+                atlanan_aylar.append(f"{yil:04d}-{ay:02d}")
+                continue
+            try:
+                tutar = float(raw.get("tutar_kdv_dahil"))
+            except (TypeError, ValueError):
+                atlanan.append({"neden": "geçersiz_tutar", "satir": raw})
+                continue
+            if tutar <= 0:
+                atlanan.append({"neden": "tutar_sifir", "satir": raw})
+                continue
 
-    for raw in satirlar:
-        if not isinstance(raw, dict):
-            continue
-        try:
-            yil = int(raw.get("yil"))
-            ay = int(raw.get("ay"))
-        except (TypeError, ValueError):
-            atlanan.append({"neden": "geçersiz_yil_ay", "satir": raw})
-            continue
-        if ay < 1 or ay > 12 or yil < 1990 or yil > 2100:
-            atlanan.append({"neden": "tarih_aralik", "satir": raw})
-            continue
-        if f"{yil:04d}-{ay:02d}" in _dondurma_ay_kumesi(musteri_id):
-            atlanan.append({"neden": "dondurma", "yil": yil, "ay": ay})
-            atlanan_aylar.append(f"{yil:04d}-{ay:02d}")
-            continue
-        try:
-            tutar = float(raw.get("tutar_kdv_dahil"))
-        except (TypeError, ValueError):
-            atlanan.append({"neden": "geçersiz_tutar", "satir": raw})
-            continue
-        if tutar <= 0:
-            atlanan.append({"neden": "tutar_sifir", "satir": raw})
-            continue
+            toplam = round(tutar, 2)
 
-        toplam = round(tutar, 2)
-
-        ay_bir = date(yil, ay, 1)
-        ay_anahtar = ay_bir.isoformat()
-        marker = f"|AYLIK_TUTAR|{ay_anahtar}|"
-        tah_marker_pat = f"%|AYLIK_TAH|{ay_anahtar}|%"
-        # Mükerrer koruması: o ay için AUTO_INV (veya AYLIK_TUTAR) borç faturası varsa yeni satır açma.
-        # AYLIK_TUTAR olan ay aşağıdaki mevcut «zaten var» dalında eskisi gibi işlenir (burada dokunulmaz);
-        # yalnız AUTO_INV'li ay atlanır, tahsilat silme / fatura yazma / panel senkronu yapılmaz.
-        if _ay_has_gecerli_aylik_borc_faturasi(musteri_id, yil, ay) and not fetch_one(
-            "SELECT id FROM faturalar WHERE musteri_id = %s AND COALESCE(notlar, '') LIKE %s LIMIT 1",
-            (musteri_id, f"%{marker}%"),
-        ):
-            atlanan.append({"neden": "auto_inv_zaten_var", "yil": yil, "ay": ay, "satir": raw})
-            atlanan_aylar.append(f"{yil:04d}-{ay:02d}")
-            continue
-        _atla = (panel_plan.get("atla_tam") or {}).get(f"{yil:04d}-{ay:02d}")
-        if _atla:
-            atlanan.append(dict(_atla))
-            continue
-        var = fetch_one(
-            """
-            SELECT
-                id,
-                fatura_no,
-                ettn,
-                COALESCE(durum, '') AS durum,
-                COALESCE(yon, 'giden') AS yon,
-                COALESCE(notlar, '') AS notlar,
-                EXISTS(
-                    SELECT 1
-                    FROM tahsilatlar t
-                    WHERE (t.musteri_id = %s OR t.customer_id = %s)
-                      AND COALESCE(t.aciklama, '') LIKE %s
-                ) AS tahsil_marker_var
-            FROM faturalar
-            WHERE musteri_id = %s
-              AND COALESCE(notlar, '') LIKE %s
-            ORDER BY id DESC
-            LIMIT 1
-            """,
-            (musteri_id, musteri_id, tah_marker_pat, musteri_id, f"%{marker}%"),
-        )
-        if var:
-            from plan_fatura_kilit import kayit_gecerli
-            if not kayit_gecerli(var):
-                var = None
-        if var:
-            # Fatura zaten var: yeni fatura açma; tahsil temizlendi → panel/grid borçlu senkronu.
-            olusturulan.append(
-                {
-                    "id": var.get("id"),
-                    "fatura_no": var.get("fatura_no"),
-                    "yil": yil,
-                    "ay": ay,
-                    "toplam": toplam,
-                    "guncellendi": True,
-                    "zaten_vardi": True,
-                }
+            ay_bir = date(yil, ay, 1)
+            ay_anahtar = ay_bir.isoformat()
+            marker = f"|AYLIK_TUTAR|{ay_anahtar}|"
+            tah_marker_pat = f"%|AYLIK_TAH|{ay_anahtar}|%"
+            # Mükerrer koruması: o ay için AUTO_INV (veya AYLIK_TUTAR) borç faturası varsa yeni satır açma.
+            # AYLIK_TUTAR olan ay aşağıdaki mevcut «zaten var» dalında eskisi gibi işlenir (burada dokunulmaz);
+            # yalnız AUTO_INV'li ay atlanır, tahsilat silme / fatura yazma / panel senkronu yapılmaz.
+            if _ay_has_gecerli_aylik_borc_faturasi(musteri_id, yil, ay) and not fetch_one(
+                "SELECT id FROM faturalar WHERE musteri_id = %s AND COALESCE(notlar, '') LIKE %s LIMIT 1",
+                (musteri_id, f"%{marker}%"),
+            ):
+                atlanan.append({"neden": "auto_inv_zaten_var", "yil": yil, "ay": ay, "satir": raw})
+                atlanan_aylar.append(f"{yil:04d}-{ay:02d}")
+                continue
+            _atla = (panel_plan.get("atla_tam") or {}).get(f"{yil:04d}-{ay:02d}")
+            if _atla:
+                atlanan.append(dict(_atla))
+                continue
+            var = fetch_one(
+                """
+                SELECT
+                    id,
+                    fatura_no,
+                    ettn,
+                    COALESCE(durum, '') AS durum,
+                    COALESCE(yon, 'giden') AS yon,
+                    COALESCE(notlar, '') AS notlar,
+                    EXISTS(
+                        SELECT 1
+                        FROM tahsilatlar t
+                        WHERE (t.musteri_id = %s OR t.customer_id = %s)
+                          AND COALESCE(t.aciklama, '') LIKE %s
+                    ) AS tahsil_marker_var
+                FROM faturalar
+                WHERE musteri_id = %s
+                  AND COALESCE(notlar, '') LIKE %s
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (musteri_id, musteri_id, tah_marker_pat, musteri_id, f"%{marker}%"),
             )
-            continue
+            if var:
+                from plan_fatura_kilit import kayit_gecerli
+                if not kayit_gecerli(var):
+                    var = None
+            if var:
+                # Fatura zaten var: yeni fatura açma; tahsil temizlendi → panel/grid borçlu senkronu.
+                olusturulan.append(
+                    {
+                        "id": var.get("id"),
+                        "fatura_no": var.get("fatura_no"),
+                        "yil": yil,
+                        "ay": ay,
+                        "toplam": toplam,
+                        "guncellendi": True,
+                        "zaten_vardi": True,
+                    }
+                )
+                continue
 
-        # Ay sonu vade (yaklaşık)
-        if ay == 12:
-            vade = date(yil, 12, 31)
-        else:
-            vade = date(yil, ay + 1, 1) - timedelta(days=1)
+            # Ay sonu vade (yaklaşık)
+            if ay == 12:
+                vade = date(yil, 12, 31)
+            else:
+                vade = date(yil, ay + 1, 1) - timedelta(days=1)
 
-        if kira_nakit_borc:
-            net = toplam
-            kdv_tutar = 0.0
-        else:
-            net = round(toplam / (1 + KDV_ORAN / 100.0), 2)
-            kdv_tutar = round(toplam - net, 2)
-            net = round(toplam - kdv_tutar, 2)
+            if kira_nakit_borc:
+                net = toplam
+                kdv_tutar = 0.0
+            else:
+                net = round(toplam / (1 + KDV_ORAN / 100.0), 2)
+                kdv_tutar = round(toplam - net, 2)
+                net = round(toplam - kdv_tutar, 2)
 
-        ay_adi = _AY_ADLARI[ay - 1]
-        if kira_nakit_borc:
-            notlar = f"{ay_adi} {yil} kira bedeli (nakit / KDV yok, Aylık Tutarlar){marker}"
-        else:
-            notlar = f"{ay_adi} {yil} kira bedeli (KDV dahil, Aylık Tutarlar){marker}"
+            ay_adi = _AY_ADLARI[ay - 1]
+            if kira_nakit_borc:
+                notlar = f"{ay_adi} {yil} kira bedeli (nakit / KDV yok, Aylık Tutarlar){marker}"
+            else:
+                notlar = f"{ay_adi} {yil} kira bedeli (KDV dahil, Aylık Tutarlar){marker}"
 
-        # Marker bulunmadıysa yeni oluştur. Dahili borç; GIB serisine girmez.
-        from fatura_belge_no import next_dahili_no
-        fatura_no = next_dahili_no()
-        execute(
-            """
-            INSERT INTO faturalar (
-                fatura_no, musteri_id, musteri_adi, tutar, kdv_tutar,
-                toplam, durum, fatura_tarihi, vade_tarihi, notlar
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """,
-            (
-                fatura_no,
-                musteri_id,
-                musteri_adi,
-                net,
-                kdv_tutar,
-                toplam,
-                "odenmedi",
-                ay_bir,
-                vade,
-                notlar,
-            ),
-        )
-        row = fetch_one("SELECT id FROM faturalar WHERE fatura_no = %s ORDER BY id DESC LIMIT 1", (fatura_no,))
-        fid = row.get("id") if row else None
-        olusturulan.append({"id": fid, "fatura_no": fatura_no, "yil": yil, "ay": ay, "toplam": toplam, "guncellendi": False})
+            # Marker bulunmadıysa yeni oluştur. Dahili borç; GIB serisine girmez.
+            from fatura_belge_no import next_dahili_no
+            fatura_no = next_dahili_no()
+            execute(
+                """
+                INSERT INTO faturalar (
+                    fatura_no, musteri_id, musteri_adi, tutar, kdv_tutar,
+                    toplam, durum, fatura_tarihi, vade_tarihi, notlar
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    fatura_no,
+                    musteri_id,
+                    musteri_adi,
+                    net,
+                    kdv_tutar,
+                    toplam,
+                    "odenmedi",
+                    ay_bir,
+                    vade,
+                    notlar,
+                ),
+            )
+            row = fetch_one("SELECT id FROM faturalar WHERE fatura_no = %s ORDER BY id DESC LIMIT 1", (fatura_no,))
+            fid = row.get("id") if row else None
+            olusturulan.append({"id": fid, "fatura_no": fatura_no, "yil": yil, "ay": ay, "toplam": toplam, "guncellendi": False})
+    except Exception as _yaz_hata:
+        if _tx is not None:
+            try:
+                _tx.__exit__(type(_yaz_hata), _yaz_hata, _yaz_hata.__traceback__)
+            except Exception:
+                logging.getLogger(__name__).exception("panel tx kapatma")
+            _tx = None
+            logging.getLogger(__name__).exception("panel borc yazimi")
+            return jsonify({"ok": False, "mesaj": "Borç yazılamadı; silinen satır geri alındı."}), 500
+        raise
+    if _tx is not None:
+        _tx.__exit__(None, None, None)
+        _tx = None
+    for tr in _sil.get("tahsil_silinen") or []:
+        tahsil_silinen.append(tr)
+        try:
+            tahsil_silinen_aylar.add((int(tr.get("yil")), int(tr.get("ay"))))
+        except (TypeError, ValueError):
+            pass
+    borc_silinen.extend(_sil.get("borc_silinen") or [])
 
     _sync_disi = set(atlanan_aylar)
     for _ak in (panel_plan.get("atla_tam") or {}):
@@ -14371,15 +14416,25 @@ def api_aylik_tutarlardan_tahsil_et():
             cur = conn.cursor()
             if panel_plan.get("panel_n"):
                 _cal, _oku = _panel_cur_io(cur)
-                _sil = panel_tekrar.panel_satirlari_sil(
-                    _cal,
-                    _oku,
-                    tahsil_rows=panel_plan.get("sil_tahsil") or [],
-                    borc_rows=[],
-                    musteri_id=musteri_id,
-                    kullanici=_panel_tekrar_kullanici(),
+                panel_tekrar.kilit_al(_cal, musteri_id, "tahsil")
+                _koru = panel_tekrar.kisa_koruma_aylari(_cal, cur.fetchall, musteri_id, "tahsil")
+                panel_tekrar.korumayi_uygula(
+                    panel_plan,
+                    _koru,
+                    ["%04d-%02d" % (int(p["yil"]), int(p["ay"])) for p in parsed],
                 )
-                tahsil_panel_silinen.extend(_sil.get("tahsil_silinen") or [])
+                if panel_plan.get("sil_tahsil"):
+                    _sil = panel_tekrar.panel_satirlari_sil(
+                        _cal,
+                        _oku,
+                        tahsil_rows=panel_plan.get("sil_tahsil") or [],
+                        borc_rows=[],
+                        musteri_id=musteri_id,
+                        kullanici=_panel_tekrar_kullanici(),
+                        taraf="tahsil",
+                    )
+                    panel_tekrar.islem_tamamla(_cal, _sil.get("yedek_ids"))
+                    tahsil_panel_silinen.extend(_sil.get("tahsil_silinen") or [])
             month_starts = sorted({p["ay_bir"] for p in parsed})
             fatura_by_month = {}
             if month_starts:

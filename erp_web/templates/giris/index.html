@@ -17904,6 +17904,57 @@ function sozlesmeAylikGridCacheBorcluSatirlariGuncelle(satirlar) {
     });
 }
 
+function panelTekrarSnapKopya(obje) {
+    try { return JSON.parse(JSON.stringify(obje)); } catch (eSnap) { return null; }
+}
+function panelTekrarAniBaslat() {
+    return { haritalar: [], tahsilSilinen: [], zorlaEklenen: [], borcEklenen: [] };
+}
+function panelTekrarAniHarita(ani, harita, anahtar) {
+    if (!ani || !harita) return;
+    var vardi = Object.prototype.hasOwnProperty.call(harita, anahtar);
+    ani.haritalar.push({
+        harita: harita,
+        anahtar: anahtar,
+        vardi: vardi,
+        deger: vardi ? panelTekrarSnapKopya(harita[anahtar]) : null
+    });
+}
+function panelTekrarAniKumeSil(ani, listeAdi, anahtar) {
+    if (!ani || !listeAdi || anahtar == null || anahtar === '') return;
+    if (!ani[listeAdi]) ani[listeAdi] = [];
+    ani[listeAdi].push(anahtar);
+}
+function panelTekrarKumeGeri(kume, silinen, eklenen) {
+    if (!kume || !kume.add || !kume.delete) return;
+    (eklenen || []).forEach(function (k) { kume.delete(k); });
+    (silinen || []).forEach(function (k) { kume.add(k); });
+}
+function panelTekrarAniGeri(ani) {
+    if (!ani) return;
+    (ani.haritalar || []).forEach(function (parca) {
+        if (!parca || !parca.harita) return;
+        if (!parca.vardi) delete parca.harita[parca.anahtar];
+        else parca.harita[parca.anahtar] = panelTekrarSnapKopya(parca.deger);
+    });
+    panelTekrarKumeGeri(typeof sozlesmeTahsilEdilenAyAnahtarlari !== 'undefined' ? sozlesmeTahsilEdilenAyAnahtarlari : null, ani.tahsilSilinen, []);
+    panelTekrarKumeGeri(typeof sozlesmeAylikZorlaBorcluAyAnahtarlari !== 'undefined' ? sozlesmeAylikZorlaBorcluAyAnahtarlari : null, [], ani.zorlaEklenen);
+    panelTekrarKumeGeri(typeof sozlesmeAylikBorclananAyAnahtarlari !== 'undefined' ? sozlesmeAylikBorclananAyAnahtarlari : null, [], ani.borcEklenen);
+}
+function panelTekrarSatirYenile(donemYil, anahtarlar) {
+    (anahtarlar || []).forEach(function (ak) {
+        try {
+            if (typeof girisTahsilatYilAyPanelSatirYenile === 'function') girisTahsilatYilAyPanelSatirYenile(donemYil, ak);
+        } catch (eYen) {}
+        try {
+            if (typeof girisTahsilatYilAyTekAyGridSenkron === 'function') girisTahsilatYilAyTekAyGridSenkron(donemYil, ak);
+        } catch (eSen) {}
+    });
+    try { girisTahsilatYilAyKayitYaz(); } catch (eKay) {}
+    try {
+        if (typeof girisTahsilatYilAyPaneldenTumGridBoyan === 'function') girisTahsilatYilAyPaneldenTumGridBoyan();
+    } catch (eBoy) {}
+}
 function panelTekrarGonder(url, opts, deneme) {
     var temiz = {};
     var onayli = !!(opts && opts.__panelOnay);
@@ -17982,6 +18033,8 @@ function sozlesmeAylikBorclandir() {
     var detayBlok = detaySatirlar.length ? detaySatirlar.map(function (d) { return d.metin; }).join('\n') + '\n' : '';
     if (!confirm(adetOnay + ' ay borçlu (tahsilatsız) kaydedilsin mi?\n' + detayBlok + 'Toplam aylık: ' + toplamStr + ' ₺\nTahsilat paneli güncellenir; grid kırmızı görünür; ekstrede bu ayların tahsilat satırı olmaz.')) return;
 
+    var panelBorcAni = panelTekrarAniBaslat();
+
     var cikarSatirlar = [];
     var ayKeysByYil = {};
     var yilSet = {};
@@ -17996,6 +18049,7 @@ function sozlesmeAylikBorclandir() {
         var brutBorc = Math.round((parseFloat(sr.tutar_kdv_dahil) || 0) * 100) / 100;
         if (!(brutBorc > 0)) brutBorc = girisTahsilatYilAyPanelAylikOkuma(donemYil, ak);
         var d = map[ak] || girisTahsilatYilAyDetayAl(donemYil, ak);
+        panelTekrarAniHarita(panelBorcAni, map, ak);
         d.aylik_tutar = brutBorc;
         d.tahsil = 0;
         d.tahsil_aktif = false;
@@ -18014,9 +18068,11 @@ function sozlesmeAylikBorclandir() {
         try {
             var kn = (typeof sozlesmeAylikAyKeyNormalize === 'function') ? sozlesmeAylikAyKeyNormalize(ak) : ak;
             if (typeof sozlesmeTahsilEdilenAyAnahtarlari !== 'undefined' && sozlesmeTahsilEdilenAyAnahtarlari && sozlesmeTahsilEdilenAyAnahtarlari.delete) {
+                if (sozlesmeTahsilEdilenAyAnahtarlari.has && sozlesmeTahsilEdilenAyAnahtarlari.has(kn)) panelTekrarAniKumeSil(panelBorcAni, 'tahsilSilinen', kn);
                 sozlesmeTahsilEdilenAyAnahtarlari.delete(kn);
             }
             if (typeof sozlesmeAylikZorlaBorcluAyAnahtarlari !== 'undefined' && sozlesmeAylikZorlaBorcluAyAnahtarlari && sozlesmeAylikZorlaBorcluAyAnahtarlari.add) {
+                if (!(sozlesmeAylikZorlaBorcluAyAnahtarlari.has && sozlesmeAylikZorlaBorcluAyAnahtarlari.has(kn))) panelTekrarAniKumeSil(panelBorcAni, 'zorlaEklenen', kn);
                 sozlesmeAylikZorlaBorcluAyAnahtarlari.add(kn);
             }
             if (typeof sozlesmeAylikBorclananAyAnahtarlari !== 'undefined' && sozlesmeAylikBorclananAyAnahtarlari && sozlesmeAylikBorclananAyAnahtarlari.add) {
@@ -18051,11 +18107,19 @@ function sozlesmeAylikBorclandir() {
         })
     }, 2).then(function (res) {
         if (res.iptal || (res.j && res.j.iptal)) {
+            panelTekrarAniGeri(panelBorcAni);
+            Object.keys(ayKeysByYil).forEach(function (dy) {
+                panelTekrarSatirYenile(parseInt(dy, 10), ayKeysByYil[dy] || []);
+            });
             alert((res.j && res.j.mesaj) ? res.j.mesaj : 'Onaylanmadı; hiçbir satır silinmedi.');
             if (typeof doneCb === 'function') doneCb(false);
             return;
         }
         if (!res.j || !res.j.ok) {
+            panelTekrarAniGeri(panelBorcAni);
+            Object.keys(ayKeysByYil).forEach(function (dy) {
+                panelTekrarSatirYenile(parseInt(dy, 10), ayKeysByYil[dy] || []);
+            });
             alert((res.j && res.j.mesaj) ? res.j.mesaj : 'Borçlandırma kaydedilemedi.');
             return;
         }
@@ -21765,6 +21829,7 @@ function girisTahsilatYilAySecilenleriBorclandir(donemYil, ev) {
     girisTahsilatYilAyMapDomdan(donemYil);
     var keys = girisTahsilatYilAyKeysFiltered(donemYil);
     var map = girisTahsilatYilAyDetayMap(donemYil);
+    var panelBorcAni = panelTekrarAniBaslat();
     var satirlar = [];
     var ayKeys = [];
     keys.forEach(function (ak) {
@@ -21784,6 +21849,7 @@ function girisTahsilatYilAySecilenleriBorclandir(donemYil, ev) {
         var ya = girisTahsilatAyKeyToYilAy(ak);
         if (isNaN(ya.yil) || isNaN(ya.ay)) return;
         var d = map[ak] || girisTahsilatYilAyDetayAl(donemYil, ak);
+        panelTekrarAniHarita(panelBorcAni, map, ak);
         d.aylik_tutar = tutar;
         d.tahsil = 0;
         d.tahsil_aktif = false;
@@ -21814,7 +21880,10 @@ function girisTahsilatYilAySecilenleriBorclandir(donemYil, ev) {
     }
     var toplamOnay = satirlar.reduce(function (s, r) { return s + (r._toplam_goster != null ? r._toplam_goster : r.tutar_kdv_dahil); }, 0);
     var toplamStr = toplamOnay.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    if (!confirm(satirlar.length + ' ay borçlandırılsın mı?\nToplam tahsil (silinecek): ' + toplamStr + ' ₺\nFatura cari/ekstrede görünür; tahsilat kayıtları kaldırılır; grid kırmızı olur.')) return;
+    if (!confirm(satirlar.length + ' ay borçlandırılsın mı?\nToplam tahsil (silinecek): ' + toplamStr + ' ₺\nFatura cari/ekstrede görünür; tahsilat kayıtları kaldırılır; grid kırmızı olur.')) {
+        panelTekrarAniGeri(panelBorcAni);
+        return;
+    }
     girisTahsilatYilAyKayitYaz();
     try { window.__girisEkstreSonIstek = {}; } catch (_eEkBr) {}
     window.__tahsilatYilAyBorcInFlight = true;
@@ -21831,11 +21900,15 @@ function girisTahsilatYilAySecilenleriBorclandir(donemYil, ev) {
         })
     }, 2).then(function (res) {
         if (res.iptal || (res.j && res.j.iptal)) {
+            panelTekrarAniGeri(panelBorcAni);
+            panelTekrarSatirYenile(donemYil, ayKeys);
             alert((res.j && res.j.mesaj) ? res.j.mesaj : 'Onaylanmadı; hiçbir satır silinmedi.');
             if (typeof doneCb === 'function') doneCb(false);
             return;
         }
         if (!res.j || !res.j.ok) {
+            panelTekrarAniGeri(panelBorcAni);
+            panelTekrarSatirYenile(donemYil, ayKeys);
             alert((res.j && res.j.mesaj) ? res.j.mesaj : 'Borçlandırma başarısız.');
             return;
         }

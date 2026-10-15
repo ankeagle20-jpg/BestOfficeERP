@@ -3,6 +3,7 @@
 import copy
 import json
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -30,11 +31,32 @@ class Sahte:
         self.audit = []
         self.seq = 10
         self._son = None
+        self._liste = []
 
     def calistir(self, sql, params=None):
         self._son = None
         s = " ".join(str(sql or "").split())
-        if s.startswith(("SAVEPOINT", "RELEASE", "ROLLBACK", "CREATE TABLE", "SELECT setval")):
+        if s.startswith(("SAVEPOINT", "RELEASE", "ROLLBACK", "CREATE TABLE", "SELECT setval", "ALTER TABLE")):
+            return
+        if "pg_advisory_xact_lock" in s:
+            return
+        if "panel_kisa_koruma" in s:
+            simdi = datetime.now(timezone.utc)
+            self._liste = []
+            for y in self.yedek:
+                if y.get("musteri_id") != params[0] or y.get("taraf") != params[1]:
+                    continue
+                if not y.get("islem_tamam") or y.get("geri_yazildi"):
+                    continue
+                ct = y.get("created_at")
+                if ct is not None and (simdi - ct).total_seconds() > pt.KISA_KORUMA_SANIYE:
+                    continue
+                self._liste.append({"ay_iso": y.get("ay_iso")})
+            return
+        if "panel_islem_tamam" in s:
+            for y in self.yedek:
+                if y["id"] == params[0] and not y.get("geri_yazildi"):
+                    y["islem_tamam"] = True
             return
         if s.startswith("INSERT INTO panel_tekrar_yedek"):
             self.seq += 1
@@ -45,7 +67,10 @@ class Sahte:
                 "musteri_id": params[2],
                 "ay_iso": params[3],
                 "satir_json": params[4],
+                "taraf": params[5] if params and len(params) > 5 else "borc",
                 "geri_yazildi": False,
+                "islem_tamam": False,
+                "created_at": datetime.now(timezone.utc),
             }
             self.yedek.append(row)
             self._son = {"id": row["id"]}
@@ -309,7 +334,7 @@ def test_uc_onayla_yazar():
     eski = pt.panel_satirlari_sil
     pt.panel_satirlari_sil = sil
     eski_gr = {n: getattr(gr, n) for n in (
-        "fetch_one", "fetch_all", "execute", "ensure_faturalar_amount_columns",
+        "fetch_one", "fetch_all", "execute", "get_db", "ensure_faturalar_amount_columns",
         "_plan_paket_yukle", "_read_aylik_grid_cache_payload",
         "sync_musteri_panel_borclu_from_satirlar", "_invalidate_aylik_grid_payload_mem",
         "_defer_aylik_grid_cache_rebuild", "_dondurma_ay_kumesi",
@@ -343,6 +368,7 @@ def test_uc_onayla_yazar():
     gr.fetch_all = fetch_all
     gr.fetch_one = fetch_one
     gr.execute = execute
+    gr.get_db = lambda: _BosTx()
     gr.ensure_faturalar_amount_columns = lambda: None
     gr.sync_musteri_panel_borclu_from_satirlar = lambda *a, **k: {}
     gr._invalidate_aylik_grid_payload_mem = lambda *a, **k: None
@@ -432,6 +458,265 @@ def test_tahsil_uc():
             setattr(gr, n, v)
 
 
+def _BosTx():
+    class Conn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def cursor(self):
+            return self
+
+        def execute(self, sql, params=None):
+            return None
+
+        def fetchone(self):
+            return None
+
+        def fetchall(self):
+            return []
+
+    return Conn()
+
+
+def _tx_sarmala(db):
+    class Conn:
+        def __enter__(self):
+            self.snap = (
+                copy.deepcopy(db.tahsilatlar),
+                copy.deepcopy(db.faturalar),
+                copy.deepcopy(db.yedek),
+            )
+            return self
+
+        def __exit__(self, et, ev, tb):
+            if et:
+                db.tahsilatlar, db.faturalar, db.yedek = self.snap
+            return False
+
+        def cursor(self):
+            return self
+
+        def execute(self, sql, params=None):
+            db.calistir(sql, params)
+
+        def fetchone(self):
+            return db._son
+
+        def fetchall(self):
+            return list(db._liste or [])
+
+    return Conn()
+
+
+def _borc_ortam(gr, db, execute):
+    def fetch_all(sql, params=None):
+        if "panel_tekrar_oku" in sql and "tahsilatlar" in sql:
+            return list(db.tahsilatlar.values())
+        if "panel_tekrar_oku" in sql:
+            return list(db.faturalar.values())
+        return []
+
+    def fetch_one(sql, params=None):
+        if "FROM customers" in sql:
+            return {"id": MID, "name": "T"}
+        if "FROM musteri_kyc" in sql:
+            return None
+        if "WHERE fatura_no" in sql:
+            return {"id": 99}
+        if "SELECT id FROM faturalar" in sql or "tahsil_marker_var" in sql:
+            for row in db.faturalar.values():
+                if "|AYLIK_TUTAR|" in str(row.get("notlar") or ""):
+                    return {"id": row.get("id")}
+            return None
+        return None
+
+    gr.fetch_all = fetch_all
+    gr.fetch_one = fetch_one
+    gr.execute = execute
+    gr.get_db = lambda: _tx_sarmala(db)
+    gr.ensure_faturalar_amount_columns = lambda: None
+    gr.sync_musteri_panel_borclu_from_satirlar = lambda *a, **k: {}
+    gr._invalidate_aylik_grid_payload_mem = lambda *a, **k: None
+    gr._defer_aylik_grid_cache_rebuild = lambda *a, **k: None
+    gr._plan_paket_yukle = lambda mids: {int(m): {"planlar": [], "faturali": [], "belge": {}} for m in mids}
+    gr._read_aylik_grid_cache_payload = lambda mid: None
+    gr._dondurma_ay_kumesi = lambda mid: set()
+    gr._ay_has_gecerli_aylik_borc_faturasi = lambda *a, **k: False
+
+
+def test_yazim_hata_geri_alir():
+    from flask import Flask
+    from routes import giris_routes as gr
+    import fatura_belge_no
+
+    db = Sahte()
+    db.tahsilatlar[1] = _tah("grid_toplu", 1, "Mart 2026 Tahsilat H" + ISARET)
+    db.faturalar[7] = _borc(7, "Mart 2026 kira|AYLIK_TUTAR|2026-03-01|")
+    eski_no = fatura_belge_no.next_dahili_no
+    fatura_belge_no.next_dahili_no = lambda: "D-YENI"
+    eski_gr = {n: getattr(gr, n) for n in (
+        "fetch_one", "fetch_all", "execute", "get_db", "ensure_faturalar_amount_columns",
+        "_plan_paket_yukle", "_read_aylik_grid_cache_payload",
+        "sync_musteri_panel_borclu_from_satirlar", "_invalidate_aylik_grid_payload_mem",
+        "_defer_aylik_grid_cache_rebuild", "_dondurma_ay_kumesi",
+        "_ay_has_gecerli_aylik_borc_faturasi",
+    )}
+
+    def execute(sql, params=None):
+        if sql and "INSERT INTO faturalar" in sql:
+            raise RuntimeError("yazim-olum")
+
+    _borc_ortam(gr, db, execute)
+    app = Flask(__name__)
+    f = gr.api_aylik_tutarlardan_borclandir.__wrapped__
+    satir = [{"yil": 2026, "ay": 3, "tutar_kdv_dahil": 10}]
+    try:
+        with app.test_request_context("/x", method="POST", json={"musteri_id": MID, "kira_nakit": True, "onay": True, "satirlar": satir}):
+            ham = f()
+        yanit = ham[0].get_json() if isinstance(ham, tuple) else ham.get_json()
+        check("yazim hata 500", yanit.get("ok") is False and "geri alındı" in (yanit.get("mesaj") or ""), yanit.get("mesaj"))
+        check("panel borcu duruyor", 7 in db.faturalar, list(db.faturalar))
+        check("panel tahsilati duruyor", 1 in db.tahsilatlar, list(db.tahsilatlar))
+        check("yarim yedek yok", db.yedek == [], len(db.yedek))
+    finally:
+        fatura_belge_no.next_dahili_no = eski_no
+        for n, v in eski_gr.items():
+            setattr(gr, n, v)
+
+
+def test_cift_onay_yazmaz():
+    from flask import Flask
+    from routes import giris_routes as gr
+    import fatura_belge_no
+
+    db = Sahte()
+    db.tahsilatlar[1] = _tah("grid_toplu", 1, "Mart 2026 Tahsilat H" + ISARET)
+    db.faturalar[7] = _borc(7, "Mart 2026 kira|AYLIK_TUTAR|2026-03-01|")
+    sayac = {"n": 0, "insert": 0}
+    eski_no = fatura_belge_no.next_dahili_no
+
+    def yeni_no():
+        sayac["n"] += 1
+        return "D-%s" % sayac["n"]
+
+    fatura_belge_no.next_dahili_no = yeni_no
+    eski_gr = {n: getattr(gr, n) for n in (
+        "fetch_one", "fetch_all", "execute", "get_db", "ensure_faturalar_amount_columns",
+        "_plan_paket_yukle", "_read_aylik_grid_cache_payload",
+        "sync_musteri_panel_borclu_from_satirlar", "_invalidate_aylik_grid_payload_mem",
+        "_defer_aylik_grid_cache_rebuild", "_dondurma_ay_kumesi",
+        "_ay_has_gecerli_aylik_borc_faturasi",
+    )}
+
+    def execute(sql, params=None):
+        if sql and "INSERT INTO faturalar" in sql:
+            sayac["insert"] += 1
+            db.seq += 1
+            db.faturalar[db.seq] = {
+                "id": db.seq,
+                "musteri_id": MID,
+                "notlar": params[-1],
+                "ettn": "",
+                "fatura_no": params[0],
+            }
+
+    _borc_ortam(gr, db, execute)
+    app = Flask(__name__)
+    f = gr.api_aylik_tutarlardan_borclandir.__wrapped__
+    govde = {"musteri_id": MID, "kira_nakit": True, "onay": True, "satirlar": [{"yil": 2026, "ay": 3, "tutar_kdv_dahil": 10}]}
+    try:
+        with app.test_request_context("/x", method="POST", json=govde):
+            ilk = f().get_json()
+        yedek_ilk = len(db.yedek)
+        with app.test_request_context("/x", method="POST", json=govde):
+            ikinci = f().get_json()
+        check("cift ilk ok", ilk.get("ok") is True, ilk.get("mesaj"))
+        check("cift ikinci ok", ikinci.get("ok") is True, ikinci.get("mesaj"))
+        check("cift tek yazim", sayac["insert"] == 1, sayac["insert"])
+        check("cift yedek artmadi", len(db.yedek) == yedek_ilk and yedek_ilk > 0, len(db.yedek))
+        check("cift atlandi", any(a.get("neden") == "ayni_islem" for a in (ikinci.get("atlanan") or [])), ikinci.get("atlanan"))
+    finally:
+        fatura_belge_no.next_dahili_no = eski_no
+        for n, v in eski_gr.items():
+            setattr(gr, n, v)
+
+
+def test_eski_koruma_yok():
+    db = Sahte()
+    db.yedek.append({
+        "id": 1,
+        "musteri_id": MID,
+        "taraf": "borc",
+        "islem_tamam": True,
+        "geri_yazildi": False,
+        "ay_iso": "2026-03-01",
+        "created_at": datetime.now(timezone.utc) - timedelta(seconds=pt.KISA_KORUMA_SANIYE + 5),
+    })
+    aylar = pt.kisa_koruma_aylari(db.calistir, lambda: db._liste, MID, "borc")
+    check("eski koruma disi", aylar == set(), aylar)
+
+
+def test_iptal_ekrani():
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if not node:
+        check("iptal js", False, "node yok")
+        return
+    html = (ROOT / "templates" / "giris" / "index.html").read_text(encoding="utf-8")
+    bas = html.find("function panelTekrarSnapKopya")
+    son = html.find("function sozlesmeAylikBorclandir")
+    check("iptal yardimci yerinde", bas > 0 and son > bas)
+    if bas < 0 or son < bas:
+        return
+    parca = html[bas:son]
+    govde_bas = html.find("function girisTahsilatYilAySecilenleriBorclandir")
+    govde_son = html.find("function girisTahsilatYilAySecilenleriTahsilet")
+    govde = html[govde_bas:govde_son]
+    onay_yer = govde.find("if (!confirm(")
+    geri_yer = govde.find("panelTekrarAniGeri(panelBorcAni)")
+    gonder_yer = govde.find("panelTekrarGonder(")
+    check("tutar iptali isteksiz", 0 <= geri_yer < gonder_yer and geri_yer > onay_yer)
+    betik = parca + r"""
+var map = { a: { tahsil: 5, aylik_tutar: 5 } };
+var ani = panelTekrarAniBaslat();
+panelTekrarAniHarita(ani, map, 'a');
+map.a.tahsil = 0;
+map.a.__locked = true;
+panelTekrarAniHarita(ani, map, 'b');
+map.b = { tahsil: 0 };
+var kume = new Set(['a']);
+var sozlesmeTahsilEdilenAyAnahtarlari = kume;
+var sozlesmeAylikZorlaBorcluAyAnahtarlari = new Set();
+var sozlesmeAylikBorclananAyAnahtarlari = new Set();
+panelTekrarAniKumeSil(ani, 'tahsilSilinen', 'a');
+kume.delete('a');
+panelTekrarAniGeri(ani);
+if (!map.a || map.a.tahsil !== 5 || map.a.__locked) process.exit(2);
+if (Object.prototype.hasOwnProperty.call(map, 'b')) process.exit(3);
+if (!kume.has('a')) process.exit(4);
+var n = 0;
+var girisFetchAgKopmasinaKarsi = function () {
+  n += 1;
+  return Promise.resolve({
+    ok: true,
+    text: function () { return Promise.resolve(JSON.stringify({ onay_gerekli: true, mesaj: 'soru' })); }
+  });
+};
+var confirm = function () { return false; };
+panelTekrarGonder('/giris/api/aylik-tutarlardan-borclandir', { method: 'POST', body: '{}' }).then(function (res) {
+  if (n !== 1) process.exit(5);
+  if (!res || !res.iptal) process.exit(6);
+  process.exit(0);
+}).catch(function () { process.exit(7); });
+"""
+    r = subprocess.run([node, "-e", betik], capture_output=True, text=True)
+    check("iptal harita ve ikinci istek yok", r.returncode == 0, (r.stderr or r.stdout or "")[:180])
+
+
 def test_kapi_bayragi():
     import os
     from routes import giris_routes as gr
@@ -450,6 +735,10 @@ if __name__ == "__main__":
     test_uc_onaysiz()
     test_uc_onayla_yazar()
     test_tahsil_uc()
+    test_yazim_hata_geri_alir()
+    test_cift_onay_yazmaz()
+    test_eski_koruma_yok()
+    test_iptal_ekrani()
     test_kapi_bayragi()
     print("FAIL" if FAILS else "TUMU GECTI", FAILS)
     sys.exit(1 if FAILS else 0)
