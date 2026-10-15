@@ -17958,10 +17958,20 @@ function panelTekrarSatirYenile(donemYil, anahtarlar) {
 function panelTekrarGonder(url, opts, deneme) {
     var temiz = {};
     var onayli = !!(opts && opts.__panelOnay);
+    var onizlendi = !!(opts && opts.__panelOnizle);
     Object.keys(opts || {}).forEach(function (k) {
-        if (k !== '__panelOnay') temiz[k] = opts[k];
+        if (k !== '__panelOnay' && k !== '__panelOnizle') temiz[k] = opts[k];
     });
-    return girisFetchAgKopmasinaKarsi(url, temiz, deneme || 2).then(function (r) {
+    var hedef = url;
+    if (!onayli && !onizlendi) {
+        hedef = '/giris/api/aylik-tutarlardan-panel-onizle';
+        try {
+            var govdeOn = JSON.parse((opts && opts.body) || '{}');
+            govdeOn.taraf = (String(url).indexOf('tahsil-et') >= 0) ? 'tahsil' : 'borc';
+            temiz.body = JSON.stringify(govdeOn);
+        } catch (eOn) {}
+    }
+    return girisFetchAgKopmasinaKarsi(hedef, temiz, deneme || 2).then(function (r) {
         return r.text().then(function (text) {
             var j = null;
             try { j = text ? JSON.parse(text) : null; } catch (e) {
@@ -17982,6 +17992,12 @@ function panelTekrarGonder(url, opts, deneme) {
             opts2.body = JSON.stringify(govde);
             opts2.__panelOnay = true;
             return panelTekrarGonder(url, opts2, deneme);
+        }
+        if (!onayli && !onizlendi) {
+            var opts3 = {};
+            Object.keys(opts || {}).forEach(function (k) { opts3[k] = opts[k]; });
+            opts3.__panelOnizle = true;
+            return panelTekrarGonder(url, opts3, deneme);
         }
         return res;
     });

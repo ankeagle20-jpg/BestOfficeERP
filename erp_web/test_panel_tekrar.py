@@ -368,7 +368,7 @@ def test_uc_onayla_yazar():
     gr.fetch_all = fetch_all
     gr.fetch_one = fetch_one
     gr.execute = execute
-    gr.get_db = lambda: _BosTx()
+    gr.get_db = _paylasilan(_BosTx)
     gr.ensure_faturalar_amount_columns = lambda: None
     gr.sync_musteri_panel_borclu_from_satirlar = lambda *a, **k: {}
     gr._invalidate_aylik_grid_payload_mem = lambda *a, **k: None
@@ -458,6 +458,34 @@ def test_tahsil_uc():
             setattr(gr, n, v)
 
 
+def _paylasilan(fabrika):
+    """Açıkken iç içe get_db aynı bağlantıyı verir."""
+    state = {"depth": 0, "conn": None}
+
+    def ac():
+        class Kapi:
+            def __enter__(self):
+                state["depth"] += 1
+                if state["conn"] is None:
+                    state["conn"] = fabrika()
+                    state["conn"].__enter__()
+                return state["conn"]
+
+            def __exit__(self, et, ev, tb):
+                state["depth"] -= 1
+                if state["depth"] <= 0:
+                    conn = state["conn"]
+                    state["conn"] = None
+                    state["depth"] = 0
+                    if conn is not None:
+                        return conn.__exit__(et, ev, tb)
+                return False
+
+        return Kapi()
+
+    return ac
+
+
 def _BosTx():
     class Conn:
         def __enter__(self):
@@ -536,7 +564,7 @@ def _borc_ortam(gr, db, execute):
     gr.fetch_all = fetch_all
     gr.fetch_one = fetch_one
     gr.execute = execute
-    gr.get_db = lambda: _tx_sarmala(db)
+    gr.get_db = _paylasilan(lambda: _tx_sarmala(db))
     gr.ensure_faturalar_amount_columns = lambda: None
     gr.sync_musteri_panel_borclu_from_satirlar = lambda *a, **k: {}
     gr._invalidate_aylik_grid_payload_mem = lambda *a, **k: None
@@ -717,6 +745,123 @@ panelTekrarGonder('/giris/api/aylik-tutarlardan-borclandir', { method: 'POST', b
     check("iptal harita ve ikinci istek yok", r.returncode == 0, (r.stderr or r.stdout or "")[:180])
 
 
+def test_kapsam_kapali_silmez():
+    import os
+    from flask import Flask
+    from routes import giris_routes as gr
+
+    db = Sahte()
+    db.tahsilatlar[1] = _tah("grid_toplu", 1, "Mart 2026 Tahsilat H" + ISARET)
+    db.faturalar[7] = _borc(7, "Mart 2026 kira|AYLIK_TUTAR|2026-03-01|")
+    sayac = {"insert": 0, "db": 0}
+    eski = os.environ.get("DB_REQUEST_SCOPED")
+    os.environ["DB_REQUEST_SCOPED"] = "0"
+    eski_gr = {n: getattr(gr, n) for n in (
+        "fetch_one", "fetch_all", "execute", "get_db", "ensure_faturalar_amount_columns",
+        "_plan_paket_yukle", "_read_aylik_grid_cache_payload",
+        "sync_musteri_panel_borclu_from_satirlar", "_invalidate_aylik_grid_payload_mem",
+        "_defer_aylik_grid_cache_rebuild", "_dondurma_ay_kumesi",
+        "_ay_has_gecerli_aylik_borc_faturasi",
+    )}
+
+    def execute(sql, params=None):
+        if sql and "INSERT INTO faturalar" in sql:
+            sayac["insert"] += 1
+
+    def get_db():
+        sayac["db"] += 1
+        raise RuntimeError("baglanti acilmamali")
+
+    _borc_ortam(gr, db, execute)
+    gr.get_db = get_db
+    app = Flask(__name__)
+    f = gr.api_aylik_tutarlardan_borclandir.__wrapped__
+    govde = {"musteri_id": MID, "kira_nakit": True, "onay": True, "satirlar": [{"yil": 2026, "ay": 3, "tutar_kdv_dahil": 10}]}
+    try:
+        with app.test_request_context("/x", method="POST", json=govde):
+            ham = f()
+        yanit = ham[0].get_json() if isinstance(ham, tuple) else ham.get_json()
+        check("kapsam mesaj", yanit.get("ok") is False and "güvenli çalıştırılamıyor" in (yanit.get("mesaj") or ""), yanit.get("mesaj"))
+        check("kapsam satir duruyor", 7 in db.faturalar and 1 in db.tahsilatlar)
+        check("kapsam yazma yok", sayac["insert"] == 0 and db.yedek == [] and sayac["db"] == 0, sayac)
+    finally:
+        if eski is None:
+            os.environ.pop("DB_REQUEST_SCOPED", None)
+        else:
+            os.environ["DB_REQUEST_SCOPED"] = eski
+        for n, v in eski_gr.items():
+            setattr(gr, n, v)
+
+
+def test_onizle_yan_etkisiz():
+    from flask import Flask
+    from routes import giris_routes as gr
+    import fatura_belge_no
+
+    db = Sahte()
+    db.faturalar[7] = _borc(7, "Mart 2026 kira|AYLIK_TUTAR|2026-03-01|")
+    db.tahsilatlar[1] = _tah("grid_toplu", 1, "Mart 2026 Tahsilat H" + ISARET)
+    sqls = []
+    sayac = {"execute": 0, "db": 0, "no": 0}
+    eski_no = fatura_belge_no.next_dahili_no
+    fatura_belge_no.next_dahili_no = lambda: sayac.__setitem__("no", sayac["no"] + 1)
+    eski_gr = {n: getattr(gr, n) for n in (
+        "fetch_one", "fetch_all", "execute", "get_db", "ensure_faturalar_amount_columns",
+        "_dondurma_ay_kumesi", "_ay_has_gecerli_aylik_borc_faturasi",
+    )}
+
+    def kaydet(sql):
+        sqls.append(" ".join(str(sql or "").split()))
+
+    def fetch_all(sql, params=None):
+        kaydet(sql)
+        if "panel_tekrar_oku" in sql and "tahsilatlar" in sql:
+            return list(db.tahsilatlar.values())
+        if "panel_tekrar_oku" in sql:
+            return list(db.faturalar.values())
+        return []
+
+    def fetch_one(sql, params=None):
+        kaydet(sql)
+        if "FROM customers" in sql:
+            return {"id": MID}
+        return None
+
+    def execute(*_a, **_k):
+        sayac["execute"] += 1
+        raise RuntimeError("onizle yazdi")
+
+    def get_db():
+        sayac["db"] += 1
+        raise RuntimeError("onizle kilit")
+
+    gr.fetch_all = fetch_all
+    gr.fetch_one = fetch_one
+    gr.execute = execute
+    gr.get_db = get_db
+    gr.ensure_faturalar_amount_columns = lambda: (_ for _ in ()).throw(RuntimeError("onizle ddl"))
+    gr._dondurma_ay_kumesi = lambda mid: set()
+    gr._ay_has_gecerli_aylik_borc_faturasi = lambda *a, **k: False
+    app = Flask(__name__)
+    app.register_blueprint(gr.bp, url_prefix="/giris")
+    f = gr.api_aylik_tutarlardan_panel_onizle.__wrapped__
+    govde = {"musteri_id": MID, "taraf": "borc", "satirlar": [{"yil": 2026, "ay": 3, "tutar_kdv_dahil": 10}]}
+    try:
+        kod = app.test_client().get("/giris/api/aylik-tutarlardan-panel-onizle").status_code
+        check("onizle get 405", kod == 405, kod)
+        with app.test_request_context("/giris/api/aylik-tutarlardan-panel-onizle", method="POST", json=govde):
+            yanit = f().get_json()
+        birlesik = " ".join(sqls).upper()
+        yazma = any(k in birlesik for k in ("INSERT", "UPDATE", "DELETE", "PG_ADVISORY", "BELGE_NO", "NEXTVAL"))
+        check("onizle onay", yanit.get("onay_gerekli") is True and (yanit.get("panel_n") or 0) > 0, yanit.get("mesaj"))
+        check("onizle yazma yok", sayac == {"execute": 0, "db": 0, "no": 0} and not yazma, sayac)
+        check("onizle satir duruyor", 7 in db.faturalar and 1 in db.tahsilatlar and db.yedek == [])
+    finally:
+        fatura_belge_no.next_dahili_no = eski_no
+        for n, v in eski_gr.items():
+            setattr(gr, n, v)
+
+
 def test_kapi_bayragi():
     import os
     from routes import giris_routes as gr
@@ -739,6 +884,8 @@ if __name__ == "__main__":
     test_cift_onay_yazmaz()
     test_eski_koruma_yok()
     test_iptal_ekrani()
+    test_kapsam_kapali_silmez()
+    test_onizle_yan_etkisiz()
     test_kapi_bayragi()
     print("FAIL" if FAILS else "TUMU GECTI", FAILS)
     sys.exit(1 if FAILS else 0)

@@ -13892,6 +13892,43 @@ def _panel_cur_io(cur):
     return calistir, oku
 
 
+_PANEL_GUVENLI_MESAJ = "Bu işlem şu an güvenli çalıştırılamıyor."
+
+
+def _panel_kapsam_acik() -> bool:
+    """Silme yalnız istek kapsamlı tek bağlantıda. Bayrak veya bağlam yoksa kapalı."""
+    try:
+        from db import _request_scoped_db_enabled
+        from flask import g, has_app_context
+        return bool(_request_scoped_db_enabled() and has_app_context() and g is not None)
+    except Exception:
+        return False
+
+
+def _panel_ayni_baglanti(dis_conn) -> bool:
+    """İç db() aynı bağlantıyı vermiyorsa silme güvenli sayılmaz."""
+    if dis_conn is None or not _panel_kapsam_acik():
+        return False
+    try:
+        with get_db() as ic:
+            return ic is dis_conn
+    except Exception:
+        logging.getLogger(__name__).exception("panel tek baglanti")
+        return False
+
+
+def _panel_guvenli_degil_yaniti():
+    logging.getLogger(__name__).error("panel tekrar guvenli degil: silme ve yazma yapilmadi")
+    return jsonify({
+        "ok": False,
+        "mesaj": _PANEL_GUVENLI_MESAJ,
+        "tahsil_silinen": [],
+        "borc_silinen": [],
+        "olusturulan": [],
+        "atlanan": [],
+    })
+
+
 def _panel_tekrar_uygula(musteri_id, plan):
     if not plan.get("panel_n"):
         return {"tahsil_silinen": [], "borc_silinen": [], "yedek_ids": []}
@@ -13915,6 +13952,63 @@ def _panel_tekrar_onay_yaniti(plan):
         "panel_n": plan.get("panel_n") or 0,
         "diger_m": plan.get("diger_m") or 0,
         "mesaj": plan.get("mesaj_onay") or "",
+        "tahsil_silinen": [],
+        "borc_silinen": [],
+        "olusturulan": [],
+        "atlanan": [],
+    })
+
+
+@bp.route('/api/aylik-tutarlardan-panel-onizle', methods=['POST'])
+@giris_gerekli
+def api_aylik_tutarlardan_panel_onizle():
+    """Silinecek ve duracak satır sayısı. Yazma, kilit ve belge sayacı yok."""
+    try:
+        data = request.get_json(force=True, silent=True) or {}
+    except Exception:
+        data = {}
+    try:
+        musteri_id = int(data.get("musteri_id"))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "mesaj": "musteri_id gerekli."}), 400
+    if not fetch_one("SELECT id FROM customers WHERE id = %s", (musteri_id,)):
+        return jsonify({"ok": False, "mesaj": "Müşteri bulunamadı."}), 404
+    taraf = str(data.get("taraf") or "borc")
+    if taraf not in ("borc", "tahsil"):
+        taraf = "borc"
+    satirlar = data.get("satirlar")
+    if not isinstance(satirlar, list) or not satirlar:
+        return jsonify({"ok": False, "mesaj": "En az bir ay satırı gerekli."}), 400
+    try:
+        if taraf == "tahsil":
+            _aylar = []
+            for raw in satirlar:
+                if not isinstance(raw, dict):
+                    continue
+                try:
+                    yil = int(raw.get("yil"))
+                    ay = int(raw.get("ay"))
+                except (TypeError, ValueError):
+                    continue
+                if 1 <= ay <= 12 and 1990 <= yil <= 2100:
+                    _aylar.append((yil, ay))
+            haric = set()
+        else:
+            _aylar = _panel_tekrar_aylari(satirlar)
+            haric = _panel_tekrar_haric(musteri_id, _aylar)
+        _tah, _borc = _panel_tekrar_oku(musteri_id, _aylar)
+        plan = panel_tekrar.karar_ver(_aylar, _tah, _borc, haric=haric, taraf=taraf)
+    except Exception:
+        logging.getLogger(__name__).exception("panel onizle okuma")
+        return jsonify({"ok": False, "mesaj": "Panel satırları okunamadı; hiçbir şey silinmedi."}), 500
+    if plan.get("onay_gerekli"):
+        return _panel_tekrar_onay_yaniti(plan)
+    return jsonify({
+        "ok": True,
+        "onay_gerekli": False,
+        "panel_n": plan.get("panel_n") or 0,
+        "diger_m": plan.get("diger_m") or 0,
+        "mesaj": "",
         "tahsil_silinen": [],
         "borc_silinen": [],
         "olusturulan": [],
@@ -13990,6 +14084,8 @@ def api_aylik_tutarlardan_borclandir():
         return jsonify({"ok": False, "mesaj": "Panel satırları okunamadı; hiçbir şey silinmedi."}), 500
     if panel_plan.get("onay_gerekli") and not _panel_tekrar_onayli(data):
         return _panel_tekrar_onay_yaniti(panel_plan)
+    if panel_plan.get("panel_n") and not _panel_kapsam_acik():
+        return _panel_guvenli_degil_yaniti()
     # Silme ile yeni fatura aynı db() içinde kalsın. Ayrı commit, belge servisi yüzünden değil:
     # silme kendi bağlantı bloğunda bitiyor, fatura yazımı sonraki execute çağrılarındaydı.
     # İstek kapsamında iç çağrılar (belge sayacı dahil) bu blok kapanınca birlikte kaydolur.
@@ -13999,6 +14095,10 @@ def api_aylik_tutarlardan_borclandir():
         _tx = get_db()
         try:
             _conn = _tx.__enter__()
+            if not _panel_ayni_baglanti(_conn):
+                _tx.__exit__(RuntimeError, RuntimeError("tek baglanti yok"), None)
+                _tx = None
+                return _panel_guvenli_degil_yaniti()
             _cur = _conn.cursor()
             _cal, _oku = _panel_cur_io(_cur)
             panel_tekrar.kilit_al(_cal, musteri_id, "borc")
@@ -14405,6 +14505,8 @@ def api_aylik_tutarlardan_tahsil_et():
         return jsonify({"ok": False, "mesaj": "Panel satırları okunamadı; hiçbir şey silinmedi."}), 500
     if panel_plan.get("onay_gerekli") and not _panel_tekrar_onayli(data):
         return _panel_tekrar_onay_yaniti(panel_plan)
+    if panel_plan.get("panel_n") and not _panel_kapsam_acik():
+        return _panel_guvenli_degil_yaniti()
 
     def _norm_month_key(v):
         if isinstance(v, datetime):
@@ -14415,6 +14517,8 @@ def api_aylik_tutarlardan_tahsil_et():
         with get_db() as conn:
             cur = conn.cursor()
             if panel_plan.get("panel_n"):
+                if not _panel_ayni_baglanti(conn):
+                    raise RuntimeError("panel tek baglanti yok")
                 _cal, _oku = _panel_cur_io(cur)
                 panel_tekrar.kilit_al(_cal, musteri_id, "tahsil")
                 _koru = panel_tekrar.kisa_koruma_aylari(_cal, cur.fetchall, musteri_id, "tahsil")
@@ -14564,6 +14668,10 @@ def api_aylik_tutarlardan_tahsil_et():
                     }
                 )
                 yerel_tahsil_iso.add(iso)
+    except RuntimeError as e:
+        if str(e) == "panel tek baglanti yok":
+            return _panel_guvenli_degil_yaniti()
+        return jsonify({"ok": False, "mesaj": f"Tahsilat toplu kayıt hatası: {e}"}), 500
     except Exception as e:
         return jsonify({"ok": False, "mesaj": f"Tahsilat toplu kayıt hatası: {e}"}), 500
 
