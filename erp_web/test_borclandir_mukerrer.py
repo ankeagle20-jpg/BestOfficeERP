@@ -2,7 +2,8 @@
 """Grid «Borçlandır» ucu (api_aylik_tutarlardan_borclandir) mükerrer koruması. Yerel; DB ve prod yok.
 
 (a) AUTO_INV'li ay atlanır, ikinci satır oluşmaz, tahsilat silinmez, panel senkronuna girmez
-(b) AYLIK_TUTAR'lı ay eskisi gibi («zaten var» dalı: yeni satır yok, zaten_vardi=True, tahsilat silme eskisi gibi)
+(b) AYLIK_TUTAR'lı ay eskisi gibi («zaten var» dalı: yeni satır yok, zaten_vardi=True).
+    Panel satırı yokken işaretle silme sorgusu çalışmaz (Commit 3: kaynak şart).
 (c) kaydı olmayan ay normal yazılır
 (d) atlanan aylar cevapta listelenir (atlanan_aylar + mesaj); arayüz bunu gösterir, sayfa bozulmaz
 Plansız ve planlı kartta aynı davranış.
@@ -100,6 +101,8 @@ def kos(plan_var, satirlar=None, mevcut=None):
         return None
 
     def fetch_all(sql, params=None):
+        if "panel_tekrar_oku" in sql:
+            return []
         if "DELETE FROM tahsilatlar" in sql:
             silme.append(params)
             return []
@@ -159,7 +162,7 @@ def sunucu():
         ap = [x for x in j.get("olusturulan", []) if x.get("ay") == 4]
         check("%s (b): AYLIK_TUTAR'li Nisan: zaten_vardi, yeni satir YOK" % et,
               len(ap) == 1 and ap[0].get("zaten_vardi") is True and ay_say(ins, "2026-04-01") == 0, (ap, ins))
-        check("%s (b): Nisan eski dal: tahsilat silme sorgusu calisti" % et, silme_say(sil, "2026-04-01") == 1, sil)
+        check("%s (b): Nisan panel satiri yokken silme sorgusu yok" % et, silme_say(sil, "2026-04-01") == 0, sil)
         check("%s (b): Nisan atlanan_aylar'da DEGIL" % et, "2026-04" not in (j.get("atlanan_aylar") or []))
         check("%s (b): Nisan panel senkronunda" % et, any(s["ay"] == 4 for s in sen[0]), sen)
         # (c) kaydi olmayan ay
@@ -168,7 +171,7 @@ def sunucu():
               len(mayis) == 1 and float(mayis[0][5]) == brut_mart, mayis)
         check("%s (c): Mayis olusturulan (zaten_vardi=False)" % et,
               any(x.get("ay") == 5 and x.get("zaten_vardi") is not True for x in j.get("olusturulan", [])))
-        check("%s (c): Mayis tahsilat silme sorgusu eskisi gibi" % et, silme_say(sil, "2026-05-01") == 1)
+        check("%s (c): Mayis panel satiri yokken silme sorgusu yok" % et, silme_say(sil, "2026-05-01") == 0)
         check("%s: toplam yazilan satir sayisi 1 (yalniz Mayis)" % et, len(ins) == 1, ins)
         # Mart tutari plan/plansiz fark etmeksizin hic yazilmadi
         check("%s: mevcut satira dokunma yok (UPDATE / faturalar DELETE yok)" % et, not any(("UPDATE" in q.upper() or "DELETE FROM FATURALAR" in q.upper()) and "musteri_aylik_grid_cache" not in q for q in KOS_YAZMA), KOS_YAZMA)
@@ -210,7 +213,7 @@ def gecersiz_kayitlar():
             if atlanmali:
                 ok = j.get("atlanan_aylar") == ["2026-03"] and not yazildi and silme_say(sil, "2026-03-01") == 0
             else:
-                ok = j.get("atlanan_aylar") == [] and yazildi and silme_say(sil, "2026-03-01") == 1 \
+                ok = j.get("atlanan_aylar") == [] and yazildi and silme_say(sil, "2026-03-01") == 0 \
                     and "zaten borçlandırılmış" not in j.get("mesaj", "")
             check("%s: %s -> %s" % (et, ad, "atlanir" if atlanmali else "atlanmaz, yazilir"), ok, (j.get("atlanan_aylar"), ins, sil))
     check("bu uc eski ortak yardimciyi cagirmiyor (davranisi degismedi)", not ESKI_YARDIMCI_CAGRILDI, ESKI_YARDIMCI_CAGRILDI)

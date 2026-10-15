@@ -17904,6 +17904,37 @@ function sozlesmeAylikGridCacheBorcluSatirlariGuncelle(satirlar) {
     });
 }
 
+function panelTekrarGonder(url, opts, deneme) {
+    var temiz = {};
+    var onayli = !!(opts && opts.__panelOnay);
+    Object.keys(opts || {}).forEach(function (k) {
+        if (k !== '__panelOnay') temiz[k] = opts[k];
+    });
+    return girisFetchAgKopmasinaKarsi(url, temiz, deneme || 2).then(function (r) {
+        return r.text().then(function (text) {
+            var j = null;
+            try { j = text ? JSON.parse(text) : null; } catch (e) {
+                throw new Error(text ? String(text).slice(0, 300) : ('HTTP ' + r.status));
+            }
+            return { ok: r.ok, j: j };
+        });
+    }).then(function (res) {
+        if (res.j && res.j.onay_gerekli && !onayli) {
+            if (!confirm(res.j.mesaj)) {
+                return { ok: true, j: { ok: false, iptal: true, mesaj: 'Onaylanmadı; hiçbir satır silinmedi.' }, iptal: true };
+            }
+            var govde = {};
+            try { govde = JSON.parse(opts.body || '{}'); } catch (e2) { govde = {}; }
+            govde.onay = true;
+            var opts2 = {};
+            Object.keys(opts).forEach(function (k) { opts2[k] = opts[k]; });
+            opts2.body = JSON.stringify(govde);
+            opts2.__panelOnay = true;
+            return panelTekrarGonder(url, opts2, deneme);
+        }
+        return res;
+    });
+}
 function sozlesmeAylikBorclandir() {
     var mid = selectedId;
     if (!mid) {
@@ -18008,7 +18039,7 @@ function sozlesmeAylikBorclandir() {
             tutar_kdv_dahil: Math.round((parseFloat(sr.tutar_kdv_dahil) || 0) * 100) / 100
         };
     });
-    girisFetchAgKopmasinaKarsi('/giris/api/aylik-tutarlardan-borclandir', {
+    panelTekrarGonder('/giris/api/aylik-tutarlardan-borclandir', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
@@ -18018,19 +18049,21 @@ function sozlesmeAylikBorclandir() {
             satirlar: apiSatirlar,
             kira_nakit: !!(knElGr && knElGr.checked)
         })
-    }, 2).then(function (r) {
-        return r.text().then(function (text) {
-            var j = null;
-            try { j = text ? JSON.parse(text) : null; } catch (_eP) { throw new Error(text ? text.slice(0, 300) : ('HTTP ' + r.status)); }
-            return { ok: r.ok, j: j };
-        });
-    }).then(function (res) {
+    }, 2).then(function (res) {
+        if (res.iptal || (res.j && res.j.iptal)) {
+            alert((res.j && res.j.mesaj) ? res.j.mesaj : 'Onaylanmadı; hiçbir satır silinmedi.');
+            if (typeof doneCb === 'function') doneCb(false);
+            return;
+        }
         if (!res.j || !res.j.ok) {
             alert((res.j && res.j.mesaj) ? res.j.mesaj : 'Borçlandırma kaydedilemedi.');
             return;
         }
         if (res.j.atlanan_aylar && res.j.atlanan_aylar.length) {
             alert('Şu aylar zaten borçlandırılmış, atlandı: ' + res.j.atlanan_aylar.join(', '));
+        }
+        if (res.j.mesaj && (res.j.mesaj.indexOf('Başka kaynaklı') >= 0 || res.j.mesaj.indexOf('Bağlı panel') >= 0)) {
+            alert(res.j.mesaj);
         }
         (res.j.tahsil_silinen || []).forEach(function (row) {
             var k = (typeof sozlesmeAylikAyKeyFromYilAy === 'function') ? sozlesmeAylikAyKeyFromYilAy(row.yil, row.ay) : null;
@@ -18221,24 +18254,19 @@ function sozlesmeAylikTahsilEt() {
     var tahsilTimeoutId = setTimeout(function () {
         try { tahsilAbort.abort(); } catch (eAb) {}
     }, 180000);
-    girisFetchAgKopmasinaKarsi('/giris/api/aylik-tutarlardan-tahsil-et', {
+    panelTekrarGonder('/giris/api/aylik-tutarlardan-tahsil-et', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
         timeoutMs: 120000,
         signal: tahsilAbort.signal,
         body: JSON.stringify({ musteri_id: mid, satirlar: satirlar, odeme_turu: 'havale' })
-    }, 2).then(function (r) {
-        return r.text().then(function (text) {
-            var j = null;
-            try {
-                j = text ? JSON.parse(text) : null;
-            } catch (eParse) {
-                throw new Error((text && text.slice) ? text.slice(0, 300) : ('HTTP ' + r.status));
-            }
-            return { ok: r.ok, j: j };
-        });
-    }).then(function (res) {
+    }, 2).then(function (res) {
+        if (res.iptal || (res.j && res.j.iptal)) {
+            alert((res.j && res.j.mesaj) ? res.j.mesaj : 'Onaylanmadı; hiçbir satır silinmedi.');
+            if (typeof doneCb === 'function') doneCb(false);
+            return;
+        }
         if (!res.j || !res.j.ok) {
             alert((res.j && res.j.mesaj) ? res.j.mesaj : 'İşlem başarısız.');
             return;
@@ -21211,20 +21239,19 @@ function girisTahsilatYilAyDbKaydet(satirlar, donemYil, doneCb) {
         return;
     }
     window.__tahsilatYilAyDbInFlight = true;
-    girisFetchAgKopmasinaKarsi('/giris/api/aylik-tutarlardan-tahsil-et', {
+    panelTekrarGonder('/giris/api/aylik-tutarlardan-tahsil-et', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
         timeoutMs: 120000,
         body: JSON.stringify({ musteri_id: mid, satirlar: satirlar, odeme_turu: 'havale' })
-    }, 2).then(function (r) {
-        return r.text().then(function (text) {
-            var j = null;
-            try { j = text ? JSON.parse(text) : null; } catch (_eP) { throw new Error(text ? text.slice(0, 300) : ('HTTP ' + r.status)); }
-            return { ok: r.ok, j: j };
-        });
-    }).then(function (res) {
+    }, 2).then(function (res) {
         window.__tahsilatYilAyDbInFlight = false;
+        if (res.iptal || (res.j && res.j.iptal)) {
+            alert((res.j && res.j.mesaj) ? res.j.mesaj : 'Onaylanmadı; hiçbir satır silinmedi.');
+            if (typeof doneCb === 'function') doneCb(false);
+            return;
+        }
         if (!res.j || !res.j.ok) {
             alert((res.j && res.j.mesaj) ? res.j.mesaj : 'Tahsilat kaydı başarısız.');
             if (doneCb) doneCb(false);
@@ -21792,7 +21819,7 @@ function girisTahsilatYilAySecilenleriBorclandir(donemYil, ev) {
     try { window.__girisEkstreSonIstek = {}; } catch (_eEkBr) {}
     window.__tahsilatYilAyBorcInFlight = true;
     var knEl = document.getElementById('kira_nakit');
-    girisFetchAgKopmasinaKarsi('/giris/api/aylik-tutarlardan-borclandir', {
+    panelTekrarGonder('/giris/api/aylik-tutarlardan-borclandir', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
@@ -21802,13 +21829,12 @@ function girisTahsilatYilAySecilenleriBorclandir(donemYil, ev) {
             satirlar: satirlar,
             kira_nakit: !!(knEl && knEl.checked)
         })
-    }, 2).then(function (r) {
-        return r.text().then(function (text) {
-            var j = null;
-            try { j = text ? JSON.parse(text) : null; } catch (_eP) { throw new Error(text ? text.slice(0, 300) : ('HTTP ' + r.status)); }
-            return { ok: r.ok, j: j };
-        });
-    }).then(function (res) {
+    }, 2).then(function (res) {
+        if (res.iptal || (res.j && res.j.iptal)) {
+            alert((res.j && res.j.mesaj) ? res.j.mesaj : 'Onaylanmadı; hiçbir satır silinmedi.');
+            if (typeof doneCb === 'function') doneCb(false);
+            return;
+        }
         if (!res.j || !res.j.ok) {
             alert((res.j && res.j.mesaj) ? res.j.mesaj : 'Borçlandırma başarısız.');
             return;
@@ -21867,6 +21893,9 @@ function girisTahsilatYilAySecilenleriBorclandir(donemYil, ev) {
             msgBr = yeniFatura + ' yeni borç faturası';
             if (guncellenen > 0) msgBr += ', ' + guncellenen + ' ay güncellendi';
             if (silinenN > 0) msgBr += ' (' + silinenN + ' tahsilat silindi)';
+        }
+                if (res.j.mesaj && (res.j.mesaj.indexOf('Başka kaynaklı') >= 0 || res.j.mesaj.indexOf('Bağlı panel') >= 0)) {
+            alert(res.j.mesaj);
         }
         alert(msgBr + (a.length ? '\nAtlanan: ' + a.length : '') + (msgBr.indexOf('zaten borçlandırılmış') < 0 ? atlAyMetin : ''));
         function panelBorcSatirlariniKoru() {
