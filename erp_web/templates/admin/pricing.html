@@ -550,7 +550,7 @@
           if (l.key === 'total') color = '#4fc3f7; font-weight:700; font-size:1.05rem; border-top:1px solid #1e3a5f; padding-top:6px; margin-top:6px;';
           else if (l.key === 'campaign_discount') color = '#81c784; font-weight:600;';
           else if (l.key === 'subtotal') color = '#b0bec5;';
-          html += '<div style="color:' + color + '; line-height:1.5;">' + escHtml(l.text) + '</div>';
+          html += '<div style="color:' + color + '; line-height:1.5;">' + escHtml(l.text) + (l.key === 'total' ? ' · KDV dahil' : '') + '</div>';
         });
 
         html += '</div>';

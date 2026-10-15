@@ -747,7 +747,7 @@
       (tier.has_discount ? "<span class=\"tier-badge\" style=\"background:#16a34a;\">Fırsat</span>" : "") +
       "<h3>" + escapeHtml(tier.display_name) + "</h3>" +
       "<div class=\"tier-range\">" + escapeHtml(customerRange(tier)) + "</div>" +
-      "<div class=\"tier-price\">" + priceHtml + "</div>" +
+      "<div class=\"tier-price\">" + priceHtml + "<small>KDV dahil</small></div>" +
       "<ul class=\"tier-details\">" +
       "<li>Müşteri başı: " + ppcHtml + "</li>" +
       "<li>Dahil kullanıcı: <strong>" + escapeHtml(String(tier.included_users)) + "</strong></li>" +
@@ -959,7 +959,7 @@
       estimateHtml =
         "<div class=\"tier-estimate\" data-estimate-wrap>" +
         "Tahmini: <span data-estimate>" +
-        escapeHtml(formatMoney(total, currency) + suffix) +
+        escapeHtml(formatMoney(total, currency) + suffix) + " · KDV dahil" +
         "</span></div>";
     }
 
@@ -968,7 +968,7 @@
       "<h3>" + escapeHtml(tier.display_name) + "</h3>" +
       "<div class=\"tier-range\">" + escapeHtml(randevuRange(tier)) + "</div>" +
       "<div class=\"tier-price\">" + priceHtml +
-      "<small>" + escapeHtml(periodLabel) +
+      "<small>KDV dahil</small><small>" + escapeHtml(periodLabel) +
       (billingPeriod === "annual" && discount ? " (" + discount + " ay bedava)" : "") +
       "</small></div>" +
       "<ul class=\"tier-details\">" +
@@ -1064,7 +1064,7 @@
       estimateHtml =
         "<div class=\"tier-estimate\" data-estimate-wrap>" +
         "Tahmini: <span data-estimate>" +
-        escapeHtml(formatMoney(total, currency) + suffix) +
+        escapeHtml(formatMoney(total, currency) + suffix) + " · KDV dahil" +
         "</span></div>";
     }
 
@@ -1102,7 +1102,7 @@
       "<h3>" + escapeHtml(tier.display_name) + "</h3>" +
       "<div class=\"tier-range\">" + escapeHtml(partyRange(tier)) + "</div>" +
       "<div class=\"tier-price\">" + priceHtml +
-      "<small>" + escapeHtml(periodLabel) +
+      "<small>KDV dahil</small><small>" + escapeHtml(periodLabel) +
       (billingPeriod === "annual" && discount ? " (" + discount + " ay bedava)" : "") +
       "</small></div>" +
       "<ul class=\"tier-details\">" +
@@ -1343,7 +1343,7 @@
       estimateHtml =
         "<div class=\"tier-estimate\" data-estimate-wrap>" +
         "Tahmini: <span data-estimate>" +
-        escapeHtml(formatMoney(total, currency) + suffix) +
+        escapeHtml(formatMoney(total, currency) + suffix) + " · KDV dahil" +
         "</span></div>";
     }
 
@@ -1352,7 +1352,7 @@
       "<h3>" + escapeHtml(tier.display_name) + "</h3>" +
       "<div class=\"tier-range\">" + escapeHtml(personnelRange(tier)) + "</div>" +
       "<div class=\"tier-price\">" + priceHtml +
-      "<small>" + escapeHtml(periodLabel) +
+      "<small>KDV dahil</small><small>" + escapeHtml(periodLabel) +
       (billingPeriod === "annual" && discount ? " (" + discount + " ay bedava)" : "") +
       "</small></div>" +
       "<ul class=\"tier-details\">" +

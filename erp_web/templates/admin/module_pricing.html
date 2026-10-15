@@ -514,7 +514,7 @@
           else if (l.key === 'campaign_discount') color = '#81c784; font-weight:600;';
           else if (l.key.indexOf('subtotal') === 0) color = '#b0bec5;';
           else if (l.key === 'annual_savings') color = '#ffb74d;';
-          html += '<div style="color:' + color + '; line-height:1.5;">' + escHtml(l.text) + '</div>';
+          html += '<div style="color:' + color + '; line-height:1.5;">' + escHtml(l.text) + ((l.key === 'total_monthly' || l.key === 'total_annual') ? ' · KDV dahil' : '') + '</div>';
         });
 
         html += '</div>';

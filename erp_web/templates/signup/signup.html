@@ -414,7 +414,7 @@
       const min = Math.min.apply(null, data.tiers.map(t => Number(t.base_monthly || 0)));
       const cur = data.currency === "TRY" ? "₺" : (data.currency || "");
       const fmt = min.toLocaleString("tr-TR", { maximumFractionDigits: 0 });
-      pricingBox.textContent = "Başlangıç planı: " + cur + fmt + "/ay'dan başlıyor";
+      pricingBox.textContent = "Başlangıç planı: " + cur + fmt + "/ay'dan başlıyor · KDV dahil";
       pricingBox.style.display = "block";
     } catch (e) { /* opsiyonel */ }
   }
