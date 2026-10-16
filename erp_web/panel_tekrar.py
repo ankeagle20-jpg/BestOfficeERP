@@ -117,6 +117,19 @@ CREATE TABLE IF NOT EXISTS panel_tekrar_yedek (
 SQL_SUTUN_TAMAM = "ALTER TABLE panel_tekrar_yedek ADD COLUMN IF NOT EXISTS islem_tamam BOOLEAN NOT NULL DEFAULT FALSE"
 SQL_SUTUN_TARAF = "ALTER TABLE panel_tekrar_yedek ADD COLUMN IF NOT EXISTS taraf TEXT"
 
+
+def ensure_panel_tekrar_yedek(calistir) -> None:
+    """Idempotent DDL: kısa koruma SELECT ve yedek INSERT öncesi.
+
+    Route sırası: kilit_al → ensure → kisa_koruma → silme.
+    Advisory xact kilit altında tutulur (ms); IF NOT EXISTS deadlock riski düşük
+    (advisory ile ilişki kilidi çembersiz; eşzamanlı CREATE PG tarafından güvenli).
+    """
+    _calistir(calistir, SQL_TABLO)
+    _calistir(calistir, SQL_SUTUN_TAMAM)
+    _calistir(calistir, SQL_SUTUN_TARAF)
+
+
 SQL_YEDEK_EKLE = """
 INSERT INTO panel_tekrar_yedek (tablo_adi, kayit_id, musteri_id, ay_iso, satir_json, taraf)
 VALUES (%s, %s, %s, %s, %s, %s)
@@ -828,9 +841,7 @@ def islem_tamamla(calistir, yedek_ids) -> None:
 
 def panel_satirlari_sil(calistir, oku, *, tahsil_rows, borc_rows, musteri_id, kullanici, taraf="borc") -> dict:
     """Yedek + audit, sonra sil. Kaynak şartı SQL'de de durur. Kayıt zaten yoksa ikinci kez yedeklemez."""
-    _calistir(calistir, SQL_TABLO)
-    _calistir(calistir, SQL_SUTUN_TAMAM)
-    _calistir(calistir, SQL_SUTUN_TARAF)
+    ensure_panel_tekrar_yedek(calistir)
     taraf_adi = str(taraf or "borc")
     tahsil_silinen = []
     borc_silinen = []

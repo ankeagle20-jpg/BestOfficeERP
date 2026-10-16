@@ -23,6 +23,13 @@ def check(name, ok, ek=""):
         FAILS.append(name)
 
 
+class UndefinedTable(Exception):
+    """psycopg2.errors.UndefinedTable benzeri — yedek tablosu yokken SELECT."""
+
+    def __init__(self, msg='relation "panel_tekrar_yedek" does not exist'):
+        super().__init__(msg)
+
+
 class Sahte:
     def __init__(self):
         self.tahsilatlar = {}
@@ -32,15 +39,22 @@ class Sahte:
         self.seq = 10
         self._son = None
         self._liste = []
+        self.yedek_tablo = False
 
     def calistir(self, sql, params=None):
         self._son = None
         s = " ".join(str(sql or "").split())
-        if s.startswith(("SAVEPOINT", "RELEASE", "ROLLBACK", "CREATE TABLE", "SELECT setval", "ALTER TABLE")):
+        if s.startswith("CREATE TABLE"):
+            if "panel_tekrar_yedek" in s:
+                self.yedek_tablo = True
+            return
+        if s.startswith(("SAVEPOINT", "RELEASE", "ROLLBACK", "SELECT setval", "ALTER TABLE")):
             return
         if "pg_advisory_xact_lock" in s:
             return
         if "panel_kisa_koruma" in s:
+            if not self.yedek_tablo:
+                raise UndefinedTable()
             simdi = datetime.now(timezone.utc)
             self._liste = []
             for y in self.yedek:
@@ -59,6 +73,8 @@ class Sahte:
                     y["islem_tamam"] = True
             return
         if s.startswith("INSERT INTO panel_tekrar_yedek"):
+            if not self.yedek_tablo:
+                raise UndefinedTable()
             self.seq += 1
             row = {
                 "id": self.seq,
@@ -689,6 +705,7 @@ def test_cift_onay_yazmaz():
 
 def test_eski_koruma_yok():
     db = Sahte()
+    pt.ensure_panel_tekrar_yedek(db.calistir)
     db.yedek.append({
         "id": 1,
         "musteri_id": MID,
@@ -700,6 +717,80 @@ def test_eski_koruma_yok():
     })
     aylar = pt.kisa_koruma_aylari(db.calistir, lambda: db._liste, MID, "borc")
     check("eski koruma disi", aylar == set(), aylar)
+
+
+def test_kisa_koruma_tablo_yok_patlar():
+    db = Sahte()
+    check("yedek tablo baslangic kapali", db.yedek_tablo is False)
+    try:
+        pt.kisa_koruma_aylari(db.calistir, lambda: db._liste, MID, "borc")
+        check("koruma tablo yok", False, "UndefinedTable beklenirdi")
+    except UndefinedTable as e:
+        check("koruma UndefinedTable", "panel_tekrar_yedek" in str(e))
+    pt.ensure_panel_tekrar_yedek(db.calistir)
+    check("ensure sonrasi tablo", db.yedek_tablo is True)
+    aylar = pt.kisa_koruma_aylari(db.calistir, lambda: db._liste, MID, "borc")
+    check("ensure sonrasi koruma ok", aylar == set(), aylar)
+
+
+def test_route_sira_ensure():
+    """Eski sıra (koruma→ensure) patlar; yeni sıra (ensure→koruma) geçer. Borç+tahsil."""
+    sql_log = []
+
+    class SiraDb(Sahte):
+        def calistir(self, sql, params=None):
+            s = " ".join(str(sql or "").split())
+            if s.startswith("CREATE TABLE") and "panel_tekrar_yedek" in s:
+                sql_log.append("CREATE")
+            elif "panel_kisa_koruma" in s:
+                sql_log.append("KORUMA")
+            return super().calistir(sql, params)
+
+    def _eski_sira(db, taraf):
+        # bilinçli yanlış: koruma önce
+        pt.kisa_koruma_aylari(db.calistir, lambda: db._liste, MID, taraf)
+
+    def _yeni_sira(db, taraf):
+        pt.kilit_al(db.calistir, MID, taraf)
+        pt.ensure_panel_tekrar_yedek(db.calistir)
+        pt.kisa_koruma_aylari(db.calistir, lambda: db._liste, MID, taraf)
+
+    for taraf in ("borc", "tahsil"):
+        sql_log.clear()
+        db_eski = SiraDb()
+        try:
+            _eski_sira(db_eski, taraf)
+            check("eski sira %s patlamali" % taraf, False)
+        except UndefinedTable:
+            check("eski sira %s UndefinedTable" % taraf, True)
+        check("eski sira %s CREATE yok" % taraf, "CREATE" not in sql_log, sql_log)
+
+        sql_log.clear()
+        db_yeni = SiraDb()
+        _yeni_sira(db_yeni, taraf)
+        check(
+            "yeni sira %s CREATE sonra KORUMA" % taraf,
+            sql_log[:2] == ["CREATE", "KORUMA"],
+            sql_log,
+        )
+
+
+def test_silme_hata_mesaji():
+    from routes import giris_routes as gr
+
+    msg = gr._panel_tekrar_silme_hata_mesaji(UndefinedTable())
+    check(
+        "mesaj yedek tablo",
+        "Yedek tablosu hazır değil/oluşturulamadı" in msg
+        and "hiçbir değişiklik kaydedilmedi" in msg,
+        msg,
+    )
+    msg2 = gr._panel_tekrar_silme_hata_mesaji(RuntimeError("panel tahsilati silinmedi"))
+    check(
+        "mesaj baska hata",
+        "panel tahsilati silinmedi" in msg2 and "hiçbir değişiklik kaydedilmedi" in msg2,
+        msg2,
+    )
 
 
 def test_iptal_ekrani():
@@ -943,6 +1034,12 @@ def test_kapi_bayragi():
             os.environ["TUFE_BORC_TAHSIL_ENABLED"] = eski
 
 
+def test_yedek_strip_listede():
+    from tenant_provisioning import BACKUP_TABLES
+
+    check("panel_tekrar_yedek BACKUP_TABLES", "panel_tekrar_yedek" in BACKUP_TABLES)
+
+
 if __name__ == "__main__":
     test_karar()
     test_sil_ve_geri()
@@ -953,6 +1050,10 @@ if __name__ == "__main__":
     test_yazim_hata_geri_alir()
     test_cift_onay_yazmaz()
     test_eski_koruma_yok()
+    test_kisa_koruma_tablo_yok_patlar()
+    test_route_sira_ensure()
+    test_silme_hata_mesaji()
+    test_yedek_strip_listede()
     test_iptal_ekrani()
     test_kapsam_kapali_silmez()
     test_onizle_yan_etkisiz()

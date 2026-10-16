@@ -14182,6 +14182,25 @@ def _panel_tekrar_onay_eski(data) -> bool:
     return v in (True, 1, "1", "true", "on", "yes", "evet")
 
 
+def _panel_tekrar_silme_hata_mesaji(exc) -> str:
+    """Silme tx patlayınca kullanıcıya kısa gerçek neden; rollback vurgusu korunur."""
+    ad = type(exc).__name__ if exc is not None else ""
+    metin = str(exc or "").replace("\n", " ").strip()
+    metin_l = metin.lower()
+    if (
+        ad == "UndefinedTable"
+        or "undefinedtable" in ad.lower()
+        or (
+            "does not exist" in metin_l
+            and "panel_tekrar_yedek" in metin_l
+        )
+    ):
+        neden = "Yedek tablosu hazır değil/oluşturulamadı"
+    else:
+        neden = (metin[:120] if metin else "") or ad or "bilinmeyen hata"
+    return "Panel satırı silinemedi (%s); hiçbir değişiklik kaydedilmedi." % neden
+
+
 def _panel_tekrar_kullanici() -> str:
     try:
         return str(getattr(current_user, "id", "") or "")
@@ -14543,6 +14562,8 @@ def api_aylik_tutarlardan_borclandir():
             _cur = _conn.cursor()
             _cal, _oku = _panel_cur_io(_cur)
             panel_tekrar.kilit_al(_cal, musteri_id, "borc")
+            # kilit sonrası ensure: kısa koruma SELECT tablo yokken patlamasın
+            panel_tekrar.ensure_panel_tekrar_yedek(_cal)
             _koru = panel_tekrar.kisa_koruma_aylari(_cal, _cur.fetchall, musteri_id, "borc")
             panel_tekrar.korumayi_uygula(
                 panel_plan,
@@ -14567,7 +14588,7 @@ def api_aylik_tutarlardan_borclandir():
                 logging.getLogger(__name__).exception("panel tx kapatma")
             _tx = None
             logging.getLogger(__name__).exception("panel tekrar silme")
-            return jsonify({"ok": False, "mesaj": "Panel satırı silinemedi; hiçbir değişiklik kaydedilmedi."}), 500
+            return jsonify({"ok": False, "mesaj": _panel_tekrar_silme_hata_mesaji(_sil_hata)}), 500
 
     try:
         for raw in satirlar:
@@ -14967,6 +14988,7 @@ def api_aylik_tutarlardan_tahsil_et():
                     raise RuntimeError("panel tek baglanti yok")
                 _cal, _oku = _panel_cur_io(cur)
                 panel_tekrar.kilit_al(_cal, musteri_id, "tahsil")
+                panel_tekrar.ensure_panel_tekrar_yedek(_cal)
                 _koru = panel_tekrar.kisa_koruma_aylari(_cal, cur.fetchall, musteri_id, "tahsil")
                 panel_tekrar.korumayi_uygula(
                     panel_plan,
