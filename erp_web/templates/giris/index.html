@@ -18575,6 +18575,52 @@ function sozlesmeAylikBorclandir() {
     });
 }
 
+
+function girisEkstreDonemOnerisiniUygula(oner) {
+    if (!oner || !oner.bas || !oner.bit) return false;
+    var b = document.getElementById('cari_ekstre_baslangic');
+    var e = document.getElementById('cari_ekstre_bitis');
+    if (!b || !e) return false;
+    b.value = String(oner.bas).slice(0, 10);
+    e.value = String(oner.bit).slice(0, 10);
+    try { window.__girisEkstreSonIstek = {}; } catch (_eCl) {}
+    if (typeof cariEkstreYukle === 'function') {
+        try { cariEkstreYukle({ zorla: true, kullaniciAraligiKoru: true }); } catch (_eY) {}
+    }
+    return true;
+}
+function girisTahsilEtSonrasiPanelYil(yil) {
+    var yy = parseInt(yil, 10);
+    if (isNaN(yy)) return;
+    if (typeof girisTahsilatYilPanelYilSec === 'function') {
+        try { girisTahsilatYilPanelYilSec(yy); } catch (_ePy) {}
+        return;
+    }
+    var sel = document.getElementById('tahsilat_yil_select');
+    if (sel) {
+        sel.value = String(yy);
+        if (typeof girisTahsilatSatirYilSecildi === 'function') {
+            try { girisTahsilatSatirYilSecildi(); } catch (_eSy) {}
+        }
+    }
+    try {
+        window.__tahsilatSatirYilAcik = window.__tahsilatSatirYilAcik || {};
+        window.__tahsilatSatirYilAcik[String(yy)] = true;
+        if (typeof girisTahsilatYilAyPanelGuncelle === 'function') {
+            girisTahsilatYilAyPanelGuncelle(yy);
+        }
+    } catch (_eAc) {}
+}
+function girisTahsilEtSonucMesaji(j) {
+    var msg = (j && j.mesaj) ? String(j.mesaj) : '';
+    var o = (j && j.olusturulan) || [];
+    var a = (j && (j.atlanan_detay || j.atlanan)) || [];
+    if (!msg) {
+        msg = 'Oluşturulan: ' + o.length + ', atlanan: ' + a.length;
+    }
+    return msg;
+}
+
 function sozlesmeAylikTahsilEt() {
     if (window.__aylikTahsilInFlight) {
         return;
@@ -18676,7 +18722,9 @@ function sozlesmeAylikTahsilEt() {
         }, 3000);
         var o = res.j.olusturulan || [];
         var a = res.j.atlanan || [];
-        var msg = (res.j.mesaj || '') + '\nOluşturulan: ' + o.length + ', atlanan: ' + a.length;
+        var msg = (typeof girisTahsilEtSonucMesaji === 'function')
+            ? girisTahsilEtSonucMesaji(res.j)
+            : ((res.j.mesaj || '') + '\nOluşturulan: ' + o.length + ', atlanan: ' + a.length);
         o.forEach(function (row) {
             var k = sozlesmeAylikAyKeyFromYilAy(row.yil, row.ay);
             if (k) {
@@ -18689,6 +18737,17 @@ function sozlesmeAylikTahsilEt() {
         // "zaten_tahsil": tam ödenmiş aylar atlanır; kira artışı sonrası kısmi (ör. 1715/2277)
         // ise sete eklenmez — aksi halde kırmızı hücre yanlışlıkla yeşile döner.
         alert(msg);
+        if (res.j.panel_yil_onerisi != null && typeof girisTahsilEtSonrasiPanelYil === 'function') {
+            try { girisTahsilEtSonrasiPanelYil(res.j.panel_yil_onerisi); } catch (_ePy2) {}
+        }
+        var donOner = res.j.ekstre_donem_onerisi;
+        if (donOner && donOner.bas && donOner.bit) {
+            if (confirm('Ekstre dönemini ' + donOner.bas + ' – ' + donOner.bit + ' yapıp yenilemek ister misiniz?')) {
+                if (typeof girisEkstreDonemOnerisiniUygula === 'function') {
+                    girisEkstreDonemOnerisiniUygula(donOner);
+                }
+            }
+        }
         sozlesmeAylikSecimiTemizle();
         if (typeof girisTahsilatPanelOlusturulanSenkron === 'function') girisTahsilatPanelOlusturulanSenkron(o);
         var ekstreYenileFn = function () {
@@ -21662,6 +21721,21 @@ function girisTahsilatYilAyDbKaydet(satirlar, donemYil, doneCb) {
         }, 3000);
         var o = res.j.olusturulan || [];
         var a = res.j.atlanan || [];
+        var msgDb = (typeof girisTahsilEtSonucMesaji === 'function')
+            ? girisTahsilEtSonucMesaji(res.j)
+            : (res.j.mesaj || ('Oluşturulan: ' + o.length + ', atlanan: ' + a.length));
+        if (msgDb) alert(msgDb);
+        if (res.j.panel_yil_onerisi != null && typeof girisTahsilEtSonrasiPanelYil === 'function') {
+            try { girisTahsilEtSonrasiPanelYil(res.j.panel_yil_onerisi); } catch (_ePyDb) {}
+        }
+        var donOnerDb = res.j.ekstre_donem_onerisi;
+        if (donOnerDb && donOnerDb.bas && donOnerDb.bit) {
+            if (confirm('Ekstre dönemini ' + donOnerDb.bas + ' – ' + donOnerDb.bit + ' yapıp yenilemek ister misiniz?')) {
+                if (typeof girisEkstreDonemOnerisiniUygula === 'function') {
+                    girisEkstreDonemOnerisiniUygula(donOnerDb);
+                }
+            }
+        }
         var tolKay = Number(SOZLESME_TAM_ODENDI_TOLERANS) || 0.05;
         var map = girisTahsilatYilAyDetayMap(donemYil);
         satirlar.forEach(function (s) {

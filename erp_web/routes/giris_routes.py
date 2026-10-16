@@ -9605,6 +9605,24 @@ def _fatura_tutar_kdv_split(toplam_kdv_dahil: float, kira_nakit: bool, kdv_oran:
 _EKSTRE_KENDI_KAYNAK = ("manuel_makbuz", "banka_import", "odeme_linki")
 
 
+def _ekstre_tarih_sozlesme_ayindan_once_mi(ts, soz_floor_iso) -> bool:
+    """Tahsilat/eşleşme ayı sözleşme ayından katı önce mi?
+
+    Sözleşme günü (ör. 2022-12-07) ile ay başı marker (2022-12-01) gün bazlı
+    karşılaştırılmamalı: aynı ayın kira tahsilatı elenmesin. Yalnız yıl-ay.
+    """
+    if not soz_floor_iso or not ts:
+        return False
+    try:
+        ts_s = str(ts)[:10]
+        soz_s = str(soz_floor_iso)[:10]
+        ts_m = date(int(ts_s[0:4]), int(ts_s[5:7]), 1)
+        soz_m = date(int(soz_s[0:4]), int(soz_s[5:7]), 1)
+    except (TypeError, ValueError, IndexError):
+        return str(ts)[:10] < str(soz_floor_iso)[:10]
+    return ts_m < soz_m
+
+
 def _ekstre_ilk_ay_isareti(aciklama):
     """Metindeki ilk |AYLIK_TAH| veya |AYLIK_PAY| günü. Yoksa None."""
     text = str(aciklama or "")
@@ -12524,7 +12542,7 @@ def _cari_ekstre_hareketler(
         ts = str(tr.get("eslesme_tarihi") or "")[:10]
         if not ts:
             continue
-        if soz_floor_iso and ts < soz_floor_iso:
+        if _ekstre_tarih_sozlesme_ayindan_once_mi(ts, soz_floor_iso):
             continue
         try:
             v = round(float(tr.get("tutar") or 0), 2)
@@ -13156,7 +13174,7 @@ def _cari_ekstre_hareketler(
                 map_key = tarih
             if not tarih:
                 continue
-            if soz_floor_iso and tarih < soz_floor_iso:
+            if _ekstre_tarih_sozlesme_ayindan_once_mi(tarih, soz_floor_iso):
                 continue
             if has_marker and (not manuel_ekstre_tarih) and isinstance(visible_iso_set, set) and tarih not in visible_iso_set:
                 continue
@@ -14904,16 +14922,62 @@ def api_aylik_tutarlardan_tahsil_et():
         1 for x in atlanan if isinstance(x, dict) and x.get("neden") == "zaten_tahsil"
     )
     yeni_n = len(olusturulan)
+    _neden_etiket = {
+        "zaten_tahsil": "zaten tahsilatlı",
+        "panel_kopya_yok": "zaten tahsilatlı (grid_toplu)",
+        "baska_kaynak": "başka kaynak",
+        "bagli_borc": "bağlı borç",
+        "tutar_sifir": "tutar sıfır",
+        "geçersiz_tutar": "geçersiz tutar",
+        "geçersiz_yil_ay": "geçersiz yıl/ay",
+        "tarih_aralik": "tarih aralığı dışı",
+    }
+
+    def _ay_etiket(yil, ay):
+        try:
+            yi, ai = int(yil), int(ay)
+            if 1 <= ai <= 12:
+                return f"{_AY_ADLARI[ai - 1]} {yi}"
+            return f"{yi}-{ai:02d}"
+        except (TypeError, ValueError):
+            return "?"
+
+    olusan_aylar = [
+        _ay_etiket(x.get("yil"), x.get("ay"))
+        for x in olusturulan
+        if isinstance(x, dict)
+    ]
+    atlanan_detay = []
+    for x in atlanan:
+        if not isinstance(x, dict):
+            continue
+        neden = str(x.get("neden") or "diğer")
+        etiket = _neden_etiket.get(neden, neden)
+        ay_e = _ay_etiket(x.get("yil"), x.get("ay")) if x.get("yil") is not None else ""
+        atlanan_detay.append(
+            {"yil": x.get("yil"), "ay": x.get("ay"), "neden": neden, "etiket": etiket, "ay_adi": ay_e}
+        )
     if yeni_n == 0 and zaten_n > 0:
         mesaj = (
             f"{zaten_n} ay zaten tahsil edilmişti; panel ve grid güncellendi."
         )
     elif yeni_n > 0:
         mesaj = (
-            f"{yeni_n} tahsilat kaydı oluşturuldu, {len(atlanan)} satır atlandı."
+            f"{yeni_n} tahsilat kaydı oluşturuldu"
+            + ((": " + ", ".join(olusan_aylar)) if olusan_aylar else "")
+            + f", {len(atlanan)} satır atlandı."
         )
     else:
         mesaj = f"{yeni_n} tahsilat kaydı oluşturuldu, {len(atlanan)} satır atlandı."
+    if atlanan_detay:
+        parcalar = []
+        for d in atlanan_detay:
+            if d.get("ay_adi"):
+                parcalar.append(f"{d['ay_adi']} ({d['etiket']})")
+            else:
+                parcalar.append(d["etiket"])
+        if parcalar:
+            mesaj += " Atlanan: " + ", ".join(parcalar) + "."
     if tahsil_panel_silinen:
         mesaj += f" {len(tahsil_panel_silinen)} panel tahsilat kaydı silindi."
     _baska = [
@@ -14928,10 +14992,39 @@ def api_aylik_tutarlardan_tahsil_et():
     _bozuk_n = int(panel_plan.get("bozuk_tarih_n") or 0)
     if _bozuk_n:
         mesaj += " Biçimi bozuk tarihli %s satır silinmedi." % _bozuk_n
+
+    ekstre_donem_onerisi = None
+    ay_ciftleri = []
+    for x in olusturulan:
+        if not isinstance(x, dict):
+            continue
+        try:
+            ay_ciftleri.append((int(x.get("yil")), int(x.get("ay"))))
+        except (TypeError, ValueError):
+            continue
+    if ay_ciftleri:
+        y0, m0 = min(ay_ciftleri)
+        y1, m1 = max(ay_ciftleri)
+        bas_o = date(y0, m0, 1).isoformat()
+        # Ay sonu
+        if m1 == 12:
+            bit_o = date(y1, 12, 31).isoformat()
+        else:
+            bit_o = (date(y1, m1 + 1, 1) - timedelta(days=1)).isoformat()
+        ekstre_donem_onerisi = {"bas": bas_o, "bit": bit_o}
+        mesaj += (
+            f" Ekstrede görmek için dönemi şu aralığa alın: {bas_o} – {bit_o}."
+        )
+
+    panel_yil_onerisi = None
+    if ay_ciftleri:
+        panel_yil_onerisi = max(ay_ciftleri)[0]
+
     return jsonify({
         "ok": True,
         "olusturulan": olusturulan,
         "atlanan": atlanan,
+        "atlanan_detay": atlanan_detay,
         "caplanan": caplanan,
         "tahsil_silinen": tahsil_panel_silinen,
         "panel_n": panel_plan.get("panel_n") or 0,
@@ -14939,6 +15032,8 @@ def api_aylik_tutarlardan_tahsil_et():
         "uyarilar": panel_plan.get("uyarilar") or [],
         "bozuk_tarih_n": int(panel_plan.get("bozuk_tarih_n") or 0),
         "mesaj": mesaj,
+        "ekstre_donem_onerisi": ekstre_donem_onerisi,
+        "panel_yil_onerisi": panel_yil_onerisi,
         "ls_temizle": True,
         "cache_updated": True,
     })
