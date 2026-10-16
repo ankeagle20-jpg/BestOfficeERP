@@ -2857,6 +2857,52 @@ button.auto-btn.whatsapp-hizmet-filter-btn.wa-hizmet-aktif {
     color: #b9ffe8;
     border-color: rgba(0, 255, 157, 0.55);
 }
+
+/* panel-tekrar-modal-css — hotfix görünürlük */
+.panel-tekrar-modal-overlay{
+    position:fixed !important;
+    inset:0 !important;
+    left:0 !important; right:0 !important; top:0 !important; bottom:0 !important;
+    z-index:10050 !important;
+    display:flex !important;
+    align-items:center;
+    justify-content:center;
+    padding:16px;
+    box-sizing:border-box;
+    background:rgba(0,0,0,.45);
+}
+.panel-tekrar-modal-kutu{
+    background:#fff;
+    color:#111;
+    max-width:640px;
+    width:100%;
+    max-height:85vh;
+    overflow:auto;
+    border-radius:8px;
+    padding:16px 18px;
+    box-shadow:0 12px 40px rgba(0,0,0,.28);
+    font-family:Segoe UI,system-ui,sans-serif;
+    box-sizing:border-box;
+}
+.panel-tekrar-modal-kutu h3{margin:0 0 10px;font-size:1.15rem;}
+.panel-tekrar-modal-kutu h4{margin:12px 0 6px;font-size:.95rem;}
+.panel-tekrar-modal-soru{white-space:pre-wrap;background:#f8fafc;border:1px solid #e2e8f0;padding:8px;border-radius:6px;font-size:.85rem;margin:0 0 8px;}
+.panel-tekrar-modal-ozet{font-size:.9rem;line-height:1.4;margin:8px 0;}
+.panel-tekrar-modal-eski{background:#fff7ed;border:1px solid #fdba74;border-radius:6px;padding:8px 10px;}
+.panel-tekrar-modal-uyari{color:#9a3412;font-weight:600;font-size:.88rem;}
+.panel-tekrar-modal-tablo{width:100%;border-collapse:collapse;font-size:.82rem;}
+.panel-tekrar-modal-tablo th,.panel-tekrar-modal-tablo td{border-bottom:1px solid #e2e8f0;padding:4px 6px;text-align:left;}
+.panel-tekrar-modal-ul{margin:0;padding-left:18px;font-size:.85rem;}
+.panel-tekrar-modal-check{display:block;margin-top:8px;font-size:.9rem;}
+.panel-tekrar-modal-aksiyon{display:flex;justify-content:flex-end;gap:8px;margin-top:14px;position:sticky;bottom:0;background:#fff;padding-top:8px;}
+.panel-tekrar-modal-iptal,.panel-tekrar-modal-tamam{padding:8px 14px;border-radius:6px;border:1px solid #cbd5e1;cursor:pointer;font-size:.9rem;}
+.panel-tekrar-modal-tamam{background:#1d4ed8;color:#fff;border-color:#1d4ed8;}
+.panel-tekrar-modal-tamam:disabled{opacity:.55;cursor:not-allowed;}
+.panel-tekrar-modal-bos{color:#64748b;font-size:.85rem;margin:4px 0;}
+@media (max-width:520px){
+    .panel-tekrar-modal-overlay{padding:8px;}
+    .panel-tekrar-modal-kutu{max-height:92vh;padding:12px;}
+}
 </style>
 
 <div class="giris-header" id="giris-musteri-arama-panel">
@@ -18278,92 +18324,188 @@ function panelTekrarModalDegisHtml(liste) {
         return '<li>' + ay + ' — ' + String(d.neden || '?') + '</li>';
     }).join('') + '</ul>';
 }
+function panelTekrarModalMetin(opts) {
+    var j = (opts && opts.j) || {};
+    var soru = (opts && opts.soru) ? String(opts.soru) : '';
+    var parcalar = [];
+    if (soru) parcalar.push(soru);
+    if (j.mesaj) parcalar.push(String(j.mesaj));
+    if (Number(j.bozuk_tarih_n) > 0) {
+        parcalar.push('Biçimi bozuk tarihli ' + Number(j.bozuk_tarih_n) + ' satır silinmedi.');
+    }
+    var eski = j.silinecek_eski || [];
+    if (j.onay_eski_kayit_gerekli && eski.length) {
+        parcalar.push('Eski kayıt (kaynağı bilinmiyor) silinecek; onaylıyorum.');
+    }
+    return parcalar.join('\n') || 'Devam edilsin mi?';
+}
+function panelTekrarModalInlineStil(wrap) {
+    if (!wrap || !wrap.style) return;
+    wrap.style.position = 'fixed';
+    wrap.style.inset = '0';
+    wrap.style.left = '0';
+    wrap.style.right = '0';
+    wrap.style.top = '0';
+    wrap.style.bottom = '0';
+    wrap.style.zIndex = '10050';
+    wrap.style.display = 'flex';
+    wrap.style.alignItems = 'center';
+    wrap.style.justifyContent = 'center';
+    wrap.style.padding = '16px';
+    wrap.style.boxSizing = 'border-box';
+    wrap.style.background = 'rgba(0,0,0,0.45)';
+}
+function panelTekrarModalGorunurMu(wrap, tamamBtn) {
+    try {
+        if (!wrap || !tamamBtn) return false;
+        var st = window.getComputedStyle(wrap);
+        if (!st || String(st.position) !== 'fixed') return false;
+        var r = wrap.getBoundingClientRect();
+        if (!(r.width > 20 && r.height > 20)) return false;
+        var br = tamamBtn.getBoundingClientRect();
+        if (!(br.width > 4 && br.height > 4)) return false;
+        var cx = br.left + br.width / 2;
+        var cy = br.top + br.height / 2;
+        if (typeof document.elementFromPoint !== 'function') return true;
+        var el = document.elementFromPoint(cx, cy);
+        if (!el) return false;
+        return el === tamamBtn || !!(tamamBtn.contains && tamamBtn.contains(el)) || !!(wrap.contains && wrap.contains(el));
+    } catch (eG) {
+        return false;
+    }
+}
+function panelTekrarSonucGoster(j) {
+    if (!j || j.iptal) return;
+    var m = (j.mesaj != null && String(j.mesaj).trim()) ? String(j.mesaj).trim() : '';
+    if (!m) {
+        var parca = [];
+        var olu = j.olusturulan || [];
+        var sil = j.tahsil_silinen || [];
+        var atl = j.atlanan || [];
+        if (olu.length) parca.push(olu.length + ' ay oluşturuldu/güncellendi');
+        if (sil.length) parca.push(sil.length + ' tahsilat silindi');
+        if (atl.length) parca.push(atl.length + ' satır atlandı');
+        m = parca.join('; ') || 'İşlem tamamlandı.';
+    }
+    if (j.atlanan_aylar && j.atlanan_aylar.length && m.indexOf('zaten borçlandırılmış, atlandı') < 0) {
+        m += (m ? '\n' : '') + 'Şu aylar zaten borçlandırılmış, atlandı: ' + j.atlanan_aylar.join(', ');
+    }
+    try { alert(m); } catch (eA) {}
+}
 function panelTekrarModalAc(opts) {
     return new Promise(function (resolve) {
-        var mevcut = document.getElementById('panelTekrarModal');
-        if (mevcut) mevcut.remove();
+        var metin = panelTekrarModalMetin(opts);
         var j = (opts && opts.j) || {};
-        var soru = (opts && opts.soru) ? String(opts.soru) : '';
-        var grid = j.silinecek_grid || [];
         var eski = j.silinecek_eski || [];
-        var degis = j.degismeyecek || [];
         var eskiGerek = !!(j.onay_eski_kayit_gerekli && eski.length);
-        var wrap = document.createElement('div');
-        wrap.id = 'panelTekrarModal';
-        wrap.className = 'panel-tekrar-modal-overlay';
-        wrap.setAttribute('role', 'dialog');
-        wrap.setAttribute('aria-modal', 'true');
-        var eskiBlok = '';
-        if (eskiGerek) {
-            eskiBlok =
-                '<section class="panel-tekrar-modal-sec panel-tekrar-modal-eski">' +
-                '<h4>Silinecek (eski kayıt, kaynağı bilinmiyor)</h4>' +
-                '<p class="panel-tekrar-modal-uyari">Kaynağı bilinmiyor; yedek alınır, geri yazılabilir. Onaylamadan bu satırlar silinmez.</p>' +
-                panelTekrarModalListeHtml(eski, 'Yok') +
-                '<label class="panel-tekrar-modal-check"><input type="checkbox" id="panelTekrarEskiOnay" /> Eski kayıtları silmeyi onaylıyorum</label>' +
-                '</section>';
+        function confirmFallback() {
+            var ok = false;
+            try { ok = !!confirm(metin); } catch (eC) { ok = false; }
+            resolve({ ok: ok, iptal: !ok, onay_eski: !!(ok && eskiGerek), fallback: true });
         }
-        var silGridBlok =
-            '<section class="panel-tekrar-modal-sec">' +
-            '<h4>Silinecek (grid_toplu)</h4>' +
-            panelTekrarModalListeHtml(grid, 'Grid kaynaklı silinecek satır yok') +
-            '</section>';
-        var degisBlok =
-            '<section class="panel-tekrar-modal-sec">' +
-            '<h4>DEĞİŞMEYECEK aylar</h4>' +
-            panelTekrarModalDegisHtml(degis) +
-            '</section>';
-        var ozet = (j.mesaj ? String(j.mesaj) : '') || '';
-        if (!grid.length && !eski.length && !(Number(j.panel_n) > 0)) {
-            if (!ozet) ozet = 'Hiçbir tahsilat silinmeyecek; seçilen aylar borçlu kaydedilebilir.';
-        }
-        wrap.innerHTML =
-            '<div class="panel-tekrar-modal-kutu">' +
-            '<h3>Borçlandır onayı</h3>' +
-            (soru ? '<pre class="panel-tekrar-modal-soru">' + soru.replace(/</g, '&lt;') + '</pre>' : '') +
-            (ozet ? '<p class="panel-tekrar-modal-ozet">' + ozet.replace(/</g, '&lt;') + '</p>' : '') +
-            (Number(j.bozuk_tarih_n) > 0 ? '<p>Biçimi bozuk tarihli ' + Number(j.bozuk_tarih_n) + ' satır silinmedi.</p>' : '') +
-            silGridBlok + eskiBlok + degisBlok +
-            '<div class="panel-tekrar-modal-aksiyon">' +
-            '<button type="button" class="panel-tekrar-modal-iptal">İptal</button>' +
-            '<button type="button" class="panel-tekrar-modal-tamam">Tamam</button>' +
-            '</div></div>';
-        document.body.appendChild(wrap);
-        var kapandi = false;
-        var tamamBtn = wrap.querySelector('.panel-tekrar-modal-tamam');
-        function kapat(sonuc) {
-            if (kapandi) return;
-            kapandi = true;
-            document.removeEventListener('keydown', escFn, true);
-            try { wrap.remove(); } catch (eR) {}
-            resolve(sonuc);
-        }
-        function escFn(ev) {
-            if (ev && ev.key === 'Escape') {
-                ev.preventDefault();
-                kapat({ ok: false, iptal: true });
-            }
-        }
-        document.addEventListener('keydown', escFn, true);
-        wrap.addEventListener('click', function (ev) {
-            if (ev.target === wrap) kapat({ ok: false, iptal: true });
-        });
-        wrap.querySelector('.panel-tekrar-modal-iptal').addEventListener('click', function () {
-            kapat({ ok: false, iptal: true });
-        });
-        tamamBtn.addEventListener('click', function () {
-            if (tamamBtn.disabled) return;
+        try {
+            var mevcut = document.getElementById('panelTekrarModal');
+            if (mevcut) mevcut.remove();
+            var soru = (opts && opts.soru) ? String(opts.soru) : '';
+            var grid = j.silinecek_grid || [];
+            var degis = j.degismeyecek || [];
+            var wrap = document.createElement('div');
+            wrap.id = 'panelTekrarModal';
+            wrap.className = 'panel-tekrar-modal-overlay';
+            wrap.setAttribute('role', 'dialog');
+            wrap.setAttribute('aria-modal', 'true');
+            panelTekrarModalInlineStil(wrap);
+            var eskiBlok = '';
             if (eskiGerek) {
-                var cb = wrap.querySelector('#panelTekrarEskiOnay');
-                if (!cb || !cb.checked) {
-                    var uy = wrap.querySelector('.panel-tekrar-modal-uyari');
-                    if (uy) uy.style.outline = '2px solid #c0392b';
-                    return;
+                eskiBlok =
+                    '<section class="panel-tekrar-modal-sec panel-tekrar-modal-eski">' +
+                    '<h4>Silinecek (eski kayıt, kaynağı bilinmiyor)</h4>' +
+                    '<p class="panel-tekrar-modal-uyari">Kaynağı bilinmiyor; yedek alınır, geri yazılabilir. Onaylamadan bu satırlar silinmez.</p>' +
+                    panelTekrarModalListeHtml(eski, 'Yok') +
+                    '<label class="panel-tekrar-modal-check"><input type="checkbox" id="panelTekrarEskiOnay" /> Eski kayıtları silmeyi onaylıyorum</label>' +
+                    '</section>';
+            }
+            var silGridBlok =
+                '<section class="panel-tekrar-modal-sec">' +
+                '<h4>Silinecek (grid_toplu)</h4>' +
+                panelTekrarModalListeHtml(grid, 'Grid kaynaklı silinecek satır yok') +
+                '</section>';
+            var degisBlok =
+                '<section class="panel-tekrar-modal-sec">' +
+                '<h4>DEĞİŞMEYECEK aylar</h4>' +
+                panelTekrarModalDegisHtml(degis) +
+                '</section>';
+            var ozet = (j.mesaj ? String(j.mesaj) : '') || '';
+            if (!grid.length && !eski.length && !(Number(j.panel_n) > 0)) {
+                if (!ozet) ozet = 'Hiçbir tahsilat silinmeyecek; seçilen aylar borçlu kaydedilebilir.';
+            }
+            wrap.innerHTML =
+                '<div class="panel-tekrar-modal-kutu">' +
+                '<h3>Borçlandır onayı</h3>' +
+                (soru ? '<pre class="panel-tekrar-modal-soru">' + soru.replace(/</g, '&lt;') + '</pre>' : '') +
+                (ozet ? '<p class="panel-tekrar-modal-ozet">' + ozet.replace(/</g, '&lt;') + '</p>' : '') +
+                (Number(j.bozuk_tarih_n) > 0 ? '<p>Biçimi bozuk tarihli ' + Number(j.bozuk_tarih_n) + ' satır silinmedi.</p>' : '') +
+                silGridBlok + eskiBlok + degisBlok +
+                '<div class="panel-tekrar-modal-aksiyon">' +
+                '<button type="button" class="panel-tekrar-modal-iptal">İptal</button>' +
+                '<button type="button" class="panel-tekrar-modal-tamam">Tamam</button>' +
+                '</div></div>';
+            document.body.appendChild(wrap);
+            var kapandi = false;
+            var tamamBtn = wrap.querySelector('.panel-tekrar-modal-tamam');
+            var iptalBtn = wrap.querySelector('.panel-tekrar-modal-iptal');
+            function kapat(sonuc) {
+                if (kapandi) return;
+                kapandi = true;
+                document.removeEventListener('keydown', escFn, true);
+                try { wrap.remove(); } catch (eR) {}
+                resolve(sonuc);
+            }
+            function escFn(ev) {
+                if (ev && ev.key === 'Escape') {
+                    ev.preventDefault();
+                    kapat({ ok: false, iptal: true });
                 }
             }
-            tamamBtn.disabled = true;
-            kapat({ ok: true, iptal: false, onay_eski: !!eskiGerek });
-        });
+            document.addEventListener('keydown', escFn, true);
+            // Dışarı tıklama KAPATMAZ (yanlışlıkla iptal olmasın)
+            if (iptalBtn) {
+                iptalBtn.addEventListener('click', function () {
+                    kapat({ ok: false, iptal: true });
+                });
+            }
+            if (tamamBtn) {
+                tamamBtn.addEventListener('click', function () {
+                    if (tamamBtn.disabled) return;
+                    if (eskiGerek) {
+                        var cb = wrap.querySelector('#panelTekrarEskiOnay');
+                        if (!cb || !cb.checked) {
+                            var uy = wrap.querySelector('.panel-tekrar-modal-uyari');
+                            if (uy) uy.style.outline = '2px solid #c0392b';
+                            return;
+                        }
+                    }
+                    tamamBtn.disabled = true;
+                    kapat({ ok: true, iptal: false, onay_eski: !!eskiGerek });
+                });
+            }
+            var kontrol = function () {
+                if (kapandi) return;
+                if (!panelTekrarModalGorunurMu(wrap, tamamBtn)) {
+                    try { wrap.remove(); } catch (eRm) {}
+                    document.removeEventListener('keydown', escFn, true);
+                    kapandi = true;
+                    confirmFallback();
+                }
+            };
+            if (typeof requestAnimationFrame === 'function') {
+                requestAnimationFrame(function () { requestAnimationFrame(kontrol); });
+            } else {
+                setTimeout(kontrol, 0);
+            }
+        } catch (eModal) {
+            confirmFallback();
+        }
     });
 }
 function panelTekrarGonder(url, opts, deneme) {
@@ -18583,10 +18725,12 @@ function sozlesmeAylikBorclandir() {
             alert((res.j && res.j.mesaj) ? res.j.mesaj : 'Borçlandırma kaydedilemedi.');
             return;
         }
-        if (res.j.atlanan_aylar && res.j.atlanan_aylar.length) {
+        if (typeof panelTekrarSonucGoster === 'function') {
+            panelTekrarSonucGoster(res.j);
+        } else if (res.j.atlanan_aylar && res.j.atlanan_aylar.length) {
             alert('Şu aylar zaten borçlandırılmış, atlandı: ' + res.j.atlanan_aylar.join(', '));
-        }
-        if (res.j.mesaj && (res.j.mesaj.indexOf('Başka kaynaklı') >= 0 || res.j.mesaj.indexOf('Bağlı panel') >= 0)) {
+            if (res.j.mesaj) alert(res.j.mesaj);
+        } else if (res.j.mesaj) {
             alert(res.j.mesaj);
         }
         (res.j.tahsil_silinen || []).forEach(function (row) {
@@ -22586,8 +22730,8 @@ function girisTahsilatYilAySecilenleriBorclandir(donemYil, ev) {
             if (guncellenen > 0) msgBr += ', ' + guncellenen + ' ay güncellendi';
             if (silinenN > 0) msgBr += ' (' + silinenN + ' tahsilat silindi)';
         }
-                if (res.j.mesaj && (res.j.mesaj.indexOf('Başka kaynaklı') >= 0 || res.j.mesaj.indexOf('Bağlı panel') >= 0)) {
-            alert(res.j.mesaj);
+        if (res.j.mesaj && String(msgBr || '').indexOf(String(res.j.mesaj).slice(0, 24)) < 0) {
+            msgBr = (msgBr ? (msgBr + '\n') : '') + String(res.j.mesaj);
         }
         alert(msgBr + (a.length ? '\nAtlanan: ' + a.length : '') + (msgBr.indexOf('zaten borçlandırılmış') < 0 ? atlAyMetin : ''));
         function panelBorcSatirlariniKoru() {
