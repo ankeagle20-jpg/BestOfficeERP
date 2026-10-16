@@ -492,6 +492,8 @@ def _save_musteri_panel_by_iso(musteri_id: int, by_iso: dict, prune_no_db_tahsil
         return
     _ensure_tahsilat_panel_detay_table()
     ser = {}
+    # Açıkça tahsil≈0 ve kalan≈0 gönderilen aylar: eski yeşil kaydı sil (merge kenarı).
+    clear_isos: set[str] = set()
     for iso_k, prow in (by_iso or {}).items():
         if not isinstance(prow, dict):
             continue
@@ -507,6 +509,7 @@ def _save_musteri_panel_by_iso(musteri_id: int, by_iso: dict, prune_no_db_tahsil
         except (TypeError, ValueError):
             continue
         if pt <= 0.004 and pk <= 0.004:
+            clear_isos.add(iso_key)
             continue
         ser[iso_key] = {
             "aylik": pb,
@@ -515,6 +518,8 @@ def _save_musteri_panel_by_iso(musteri_id: int, by_iso: dict, prune_no_db_tahsil
             "tahsil_tarih": str(prow.get("tahsil_tarih") or "")[:10] or None,
         }
     merged = dict(_load_musteri_panel_by_iso(mid))
+    for iso_c in clear_isos:
+        merged.pop(iso_c, None)
     if prune_no_db_tahsil:
         tol_pr = float(AYLIK_GRID_TAM_ODENDI_TOLERANS)
         tahsil_map_pr = _aylik_tahsil_tutar_map(mid)
@@ -17583,34 +17588,35 @@ def api_tahsilat_panel_detay():
         by_iso_in = data.get("by_iso")
         if not isinstance(by_iso_in, dict):
             return jsonify({"ok": False, "mesaj": "by_iso gerekli."}), 400
-        # KRİTİK DÜZELTME: frontend'in gönderdiği "tahsil" değeri,
-        # o ayın SADECE bu makbuzdaki payı olabilir (kümülatif değil).
-        # Ham değeri önce DB'ye yazmak yerine, etkilenen ayları gerçek
-        # |AYLIK_PAY| toplamından (map) kanonikleştir ve yalnız bir kez yaz.
-        # Kanonikleştirme hata verirse mevcut ham-payload fallback'i korunur.
-        by_iso_kayit = by_iso_in
+        # KRİTİK: FE "tahsil" → map (|AYLIK_PAY|/|AYLIK_TAH|) ile kanonikleştir.
+        # Hata yutma YOK: başarısızsa istek reddedilir (ham yeşil yazılmaz).
+        # Her yazmada tahsil > map olan satırlar min(map, brüt)'e çekilir; map=0 → tahsil=0.
         try:
-            if isinstance(by_iso_in, dict) and by_iso_in:
-                tahsil_map = _aylik_tahsil_tutar_map(mid)
-                duzeltilen_by_iso = dict(_load_musteri_panel_by_iso(mid))
-                duzeltilen_by_iso.update(by_iso_in)
-                for iso_key in by_iso_in.keys():
-                    dogru_tahsil = round(float(tahsil_map.get(iso_key) or 0), 2)
-                    mevcut = duzeltilen_by_iso.get(iso_key) or {}
-                    mevcut_tahsil = round(float(mevcut.get("tahsil") or 0), 2)
-                    if abs(dogru_tahsil - mevcut_tahsil) > 0.01:
-                        brut = round(float(mevcut.get("aylik") or 0), 2)
-                        tah = min(dogru_tahsil, brut) if brut > 0.01 else dogru_tahsil
-                        kalan = round(max(brut - tah, 0), 2) if brut > 0.01 else 0.0
-                        duzeltilen_by_iso[iso_key] = {
-                            **mevcut,
-                            "tahsil": tah,
-                            "kalan": kalan,
-                        }
-                by_iso_kayit = duzeltilen_by_iso
+            tahsil_map = _aylik_tahsil_tutar_map(mid)
+            duzeltilen_by_iso = dict(_load_musteri_panel_by_iso(mid))
+            duzeltilen_by_iso.update(by_iso_in)
+            for iso_key in list(by_iso_in.keys()):
+                dogru_tahsil = round(float(tahsil_map.get(iso_key) or 0), 2)
+                mevcut = duzeltilen_by_iso.get(iso_key) or {}
+                brut = round(float(mevcut.get("aylik") or mevcut.get("brut") or 0), 2)
+                tah = min(dogru_tahsil, brut) if brut > 0.01 else dogru_tahsil
+                if dogru_tahsil <= 0.01:
+                    tah = 0.0
+                kalan = round(max(brut - tah, 0), 2) if brut > 0.01 else 0.0
+                duzeltilen_by_iso[iso_key] = {
+                    **mevcut,
+                    "tahsil": tah,
+                    "kalan": kalan,
+                }
+            by_iso_kayit = duzeltilen_by_iso
+            by_iso_kayit = _panel_by_iso_plan_duzelt(mid, by_iso_kayit)
         except Exception:
-            pass
-        by_iso_kayit = _panel_by_iso_plan_duzelt(mid, by_iso_kayit)
+            logging.getLogger(__name__).exception(
+                "tahsilat-panel-detay POST kanonikleştirme mid=%s", mid
+            )
+            return jsonify(
+                {"ok": False, "mesaj": "Panel kanonikleştirme başarısız; ham tahsil yazılmadı."}
+            ), 500
         _save_musteri_panel_by_iso(mid, by_iso_kayit)
         payload = _read_aylik_grid_cache_payload(mid)
         if payload is None:
@@ -17622,15 +17628,15 @@ def api_tahsilat_panel_detay():
         else:
             _upsert_aylik_grid_cache(mid)
         by_iso = _load_musteri_panel_by_iso(mid)
-        return jsonify({"ok": True, "by_iso": by_iso, "musteri_id": mid})
+        return _json_no_cache({"ok": True, "by_iso": by_iso, "musteri_id": mid})
 
     musteri_id = request.args.get("musteri_id", type=int)
     if not musteri_id:
-        return jsonify({"ok": False, "mesaj": "musteri_id gerekli."}), 400
+        return _json_no_cache({"ok": False, "mesaj": "musteri_id gerekli."}, 400)
     mid = int(musteri_id)
     by_iso = _load_musteri_panel_by_iso(mid)
     if by_iso:
-        return jsonify({"ok": True, "by_iso": by_iso, "musteri_id": mid})
+        return _json_no_cache({"ok": True, "by_iso": by_iso, "musteri_id": mid})
     payload = _read_aylik_grid_cache_payload(mid)
     if payload is None:
         try:
@@ -17674,7 +17680,7 @@ def api_tahsilat_panel_detay():
                 if changed:
                     _save_musteri_panel_by_iso(mid, merged)
                     by_iso = merged
-    return jsonify({"ok": True, "by_iso": by_iso, "musteri_id": mid})
+    return _json_no_cache({"ok": True, "by_iso": by_iso or {}, "musteri_id": mid})
 
 
 @bp.route('/api/aylik-tahsil-durum')
