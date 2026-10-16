@@ -197,9 +197,12 @@ def aylik_mutabakat(mid, ay_baslangic, ay_bitis, *, tam_ekstre: bool = True) -> 
         dondurma = set(gr._dondurma_ay_kumesi(mid) or ())
     except Exception:
         dondurma = set()
-    # Okuma waterfall (kapalıysa ham map birebir)
+    # Okuma waterfall (kapalıysa ham map birebir); G3 eşleşmemiş kova
+    eslesmemis_by_iso: dict[str, float] = {}
+    eslesmemis_toplam = 0.0
+    avans_okuma = 0.0
     try:
-        from mutabakat_okuma import brut_by_iso_from_payload, okuma_tahsil_map
+        from mutabakat_okuma import okuma_waterfall_full
 
         brut_m = {}
         for iso, a in grid_by.items():
@@ -208,7 +211,11 @@ def aylik_mutabakat(mid, ay_baslangic, ay_bitis, *, tam_ekstre: bool = True) -> 
         for iso, prow in (panel or {}).items():
             if isinstance(prow, dict) and iso not in brut_m:
                 brut_m[iso] = _f2(prow.get("aylik") or prow.get("brut"))
-        tahsil_map = okuma_tahsil_map(mid, tahsil_map_ham, brut_m, skip_ym=dondurma)
+        wf = okuma_waterfall_full(mid, tahsil_map_ham, brut_m, skip_ym=dondurma)
+        tahsil_map = dict(wf.get("dagitim") or {})
+        eslesmemis_by_iso = dict(wf.get("eslesmemis") or {})
+        eslesmemis_toplam = _f2(wf.get("eslesmemis_toplam"))
+        avans_okuma = _f2(wf.get("avans"))
     except Exception:
         tahsil_map = dict(tahsil_map_ham)
 
@@ -278,8 +285,24 @@ def aylik_mutabakat(mid, ay_baslangic, ay_bitis, *, tam_ekstre: bool = True) -> 
             "ekstre_tahsil_satir": _f2(ekstre_tahsil_satir.get(iso)),
             "borc_fatura": _f2(borc_fatura.get(iso)),
         }
+        if _f2(eslesmemis_by_iso.get(iso)) > TOL:
+            row["eslesmemis_tl"] = _f2(eslesmemis_by_iso.get(iso))
         row["uyusmazliklar"] = siniflandir(row)
         satirlar.append(row)
+    # Özet (liste + meta): eşleşmemiş kova — mid/TL/ay aralığı
+    if eslesmemis_toplam > TOL or avans_okuma > TOL:
+        aylar_es = sorted(eslesmemis_by_iso.keys())
+        satirlar.append({
+            "_meta": "eslesmemis_ozet",
+            "mid": mid,
+            "eslesmemis_toplam": eslesmemis_toplam,
+            "avans": avans_okuma,
+            "ay_aralik": (
+                "%s..%s" % (aylar_es[0][:7], aylar_es[-1][:7]) if aylar_es else "-"
+            ),
+            "ay_adet": len(aylar_es),
+            "eslesmemis_by_iso": eslesmemis_by_iso,
+        })
     return satirlar
 
 
@@ -382,6 +405,8 @@ def tarama_aktif(ay_baslangic="2025-01", ay_bitis="2026-10", top_n=10) -> dict:
         except Exception:
             continue
         for row in satirlar:
+            if row.get("_meta"):
+                continue
             uys = row.get("uyusmazliklar") or []
             if not uys:
                 continue
@@ -477,6 +502,18 @@ def main(argv=None) -> int:
             "ekstre_borc | ekstre_tah_satir | borc_fatura | uyusmazlik"
         )
         for r in satirlar:
+            if r.get("_meta") == "eslesmemis_ozet":
+                print(
+                    "ESLESMEMIS mid=%s toplam=%s avans=%s ay_aralik=%s ay_adet=%s"
+                    % (
+                        r.get("mid"),
+                        r.get("eslesmemis_toplam"),
+                        r.get("avans"),
+                        r.get("ay_aralik"),
+                        r.get("ay_adet"),
+                    )
+                )
+                continue
             uys = ",".join(u["kod"] for u in (r.get("uyusmazliklar") or [])) or "-"
             print(
                 "%s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s"

@@ -5,6 +5,10 @@ Varsayılan KAPALI:
   MUTABAKAT_OKUMA_ENABLED=0
   MUTABAKAT_OKUMA_MUSTERI_IDS=   (boş = kimse)
 
+G3 kuralı: yalnız kira>0 aylardaki aşırı yazım sonraki kira>0 aya taşınır.
+Kira=0 / dondurma / grid yok aylara düşen tutar TAŞINMAZ → eşleşmemiş kova.
+Korunum: Σ dağıtılan + Σ eşleşmemiş + avans = Σ map.
+
 Yazma yollarına (tahsilatlar, panel save, makbuz, borçlandır) dokunulmaz.
 """
 from __future__ import annotations
@@ -64,12 +68,13 @@ def waterfall_tasima(
     *,
     skip_ym: set | None = None,
 ) -> dict[str, Any]:
-    """Kronolojik tavan+taşıma.
+    """Kronolojik tavan+taşıma (G3 daraltılmış).
 
-    Her ay (kira/brüt > 0, skip değil): tahsil = min(mevcut+carry, brut);
-    fazlalık sonraki uygun aya. Ufuk sonu artan = avans.
+    - kira>0 ve skip değil: tahsil = min(ham+carry, brut); fazlalık carry.
+    - kira=0 / dondurma / skip: ham → eşleşmemiş (taşınmaz); carry bu aya girmez.
+    - Ufuk sonu carry = avans (yalnız kira>0 aşımından).
 
-    Korunum: Σ dağıtılan + avans == Σ map (yuvarlama tol içinde).
+    Korunum: Σ dağıtılan + Σ eşleşmemiş + avans == Σ map.
     """
     mp = {}
     for k, v in (map_by_iso or {}).items():
@@ -100,9 +105,9 @@ def waterfall_tasima(
         if len(s) >= 7 and s[4] == "-":
             skip.add(s[:7])
 
-    # Kronoloji: map veya brut anahtarları
     isos = sorted(set(mp) | set(br))
     dagitim: dict[str, float] = {}
+    eslesmemis_by_iso: dict[str, float] = {}
     carry = 0.0
     sum_map = round(sum(mp.values()), 2)
 
@@ -110,16 +115,83 @@ def waterfall_tasima(
         ym = iso[:7]
         brut = round(float(br.get(iso) or 0), 2)
         ham = round(float(mp.get(iso) or 0), 2)
+        if ym in skip or brut <= TOL:
+            # G3: kira=0 / dondurma — ham eşleşmemişte kalır, taşınmaz
+            if ham > TOL:
+                eslesmemis_by_iso[iso] = round(
+                    eslesmemis_by_iso.get(iso, 0.0) + ham, 2
+                )
+            # carry olduğu gibi devam (önceki kira>0 aşımı)
+            continue
+        available = round(carry + ham, 2)
+        take = round(min(available, brut), 2)
+        if take > TOL:
+            dagitim[iso] = take
+        carry = round(max(available - take, 0), 2)
+
+    avans = round(carry, 2)
+    sum_dag = round(sum(dagitim.values()), 2)
+    sum_es = round(sum(eslesmemis_by_iso.values()), 2)
+    return {
+        "dagitim": dagitim,
+        "eslesmemis": eslesmemis_by_iso,
+        "eslesmemis_toplam": sum_es,
+        "avans": avans,
+        "sum_map": sum_map,
+        "sum_dagitim": sum_dag,
+        "korunum_ok": abs(sum_dag + sum_es + avans - sum_map) <= max(TOL, 0.02),
+    }
+
+
+def waterfall_tasima_g2_legacy(
+    map_by_iso: dict | None,
+    brut_by_iso: dict | None,
+    *,
+    skip_ym: set | None = None,
+) -> dict[str, Any]:
+    """G2 davranışı (kira=0 ham'ı carry'e sokar) — yalnızca ayrıştırma/ölçüm."""
+    mp = {}
+    for k, v in (map_by_iso or {}).items():
+        iso = _norm_iso(k)
+        if not iso:
+            continue
+        try:
+            fv = round(float(v or 0), 2)
+        except (TypeError, ValueError):
+            continue
+        if fv > 0:
+            mp[iso] = round(mp.get(iso, 0.0) + fv, 2)
+    br = {}
+    for k, v in (brut_by_iso or {}).items():
+        iso = _norm_iso(k)
+        if not iso:
+            continue
+        try:
+            fv = round(float(v or 0), 2)
+        except (TypeError, ValueError):
+            continue
+        br[iso] = fv
+    skip = set()
+    for s in skip_ym or ():
+        s = str(s or "").strip()
+        if len(s) >= 7 and s[4] == "-":
+            skip.add(s[:7])
+    isos = sorted(set(mp) | set(br))
+    dagitim: dict[str, float] = {}
+    carry = 0.0
+    sum_map = round(sum(mp.values()), 2)
+    for iso in isos:
+        ym = iso[:7]
+        brut = round(float(br.get(iso) or 0), 2)
+        ham = round(float(mp.get(iso) or 0), 2)
         available = round(carry + ham, 2)
         if ym in skip or brut <= TOL:
-            # kira=0 / dondurma / sözleşme dışı: yazma yok, carry devam (+ bu ay ham)
             carry = available
             continue
         take = round(min(available, brut), 2)
         if take > TOL:
             dagitim[iso] = take
         carry = round(max(available - take, 0), 2)
-
     avans = round(carry, 2)
     sum_dag = round(sum(dagitim.values()), 2)
     return {
@@ -154,6 +226,41 @@ def okuma_tahsil_map(
         return ham
     r = waterfall_tasima(ham, brut_by_iso, skip_ym=skip_ym)
     return dict(r.get("dagitim") or {})
+
+
+def okuma_waterfall_full(
+    musteri_id: int | None,
+    map_by_iso: dict | None,
+    brut_by_iso: dict | None,
+    *,
+    skip_ym: set | None = None,
+) -> dict[str, Any]:
+    """Bayrak açıksa tam waterfall sonucu (eşleşmemiş dahil); kapalıysa ham + boş kova."""
+    ham = {}
+    for k, v in (map_by_iso or {}).items():
+        iso = _norm_iso(k)
+        if not iso:
+            continue
+        try:
+            fv = round(float(v or 0), 2)
+        except (TypeError, ValueError):
+            continue
+        if fv > 0:
+            ham[iso] = round(ham.get(iso, 0.0) + fv, 2)
+    if not mutabakat_okuma_aktif(musteri_id):
+        return {
+            "dagitim": dict(ham),
+            "eslesmemis": {},
+            "eslesmemis_toplam": 0.0,
+            "avans": 0.0,
+            "sum_map": round(sum(ham.values()), 2),
+            "sum_dagitim": round(sum(ham.values()), 2),
+            "korunum_ok": True,
+            "aktif": False,
+        }
+    r = waterfall_tasima(ham, brut_by_iso, skip_ym=skip_ym)
+    r["aktif"] = True
+    return r
 
 
 def brut_by_iso_from_payload(payload: dict | None) -> dict[str, float]:

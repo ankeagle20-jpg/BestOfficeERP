@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""G2: okuma waterfall — bayrak kapalı varsayılan, yazma yok."""
+"""G3: okuma waterfall daraltılmış — bayrak kapalı varsayılan, yazma yok."""
 from __future__ import annotations
 
 import os
@@ -44,8 +44,7 @@ def test_allowlist_bos_etkilemez():
 
 
 def test_402_cift_pay_waterfall():
-    """İki tahsilat PAY üst üste → Ağu–Kas 881, avans 0 (PG Decimal tipleriyle)."""
-    # map ham: Ağu/Eyl 1540.18, Eki 443.64 (PAY toplamı)
+    """İki tahsilat PAY üst üste → Ağu–Kas 881, avans 0 (PG Decimal)."""
     mp = {
         "2026-08-01": Decimal("1540.18"),
         "2026-09-01": Decimal("1540.18"),
@@ -65,9 +64,28 @@ def test_402_cift_pay_waterfall():
     check("eki 881", abs(_f(d.get("2026-10-01", 0)) - 881.0) < 0.02, d)
     check("kas 881", abs(_f(d.get("2026-11-01", 0)) - 881.0) < 0.02, d)
     check("avans 0", abs(_f(r["avans"]) - 0.0) < 0.02, r)
+    check("eslesmemis 0", abs(_f(r.get("eslesmemis_toplam") or 0)) < 0.02, r)
     check("korunum", r["korunum_ok"] is True, r)
-    # Ekim yeşil eşiği
-    check("ekim tam", _f(d["2026-10-01"]) >= 881.0 - 0.05)
+
+
+def test_454_sozlesme_oncesi_tasinmaz():
+    """Ödeme kira=0 (sözleşme öncesi) aylara → sonraki aylar kırmızı kalır; tutar eşleşmemişte."""
+    mp = {
+        "2025-01-01": Decimal("2000.00"),  # sözleşme öncesi / kira 0
+        "2025-02-01": Decimal("500.00"),
+    }
+    br = {
+        "2025-01-01": Decimal("0"),
+        "2025-03-01": Decimal("1000.00"),
+        "2025-04-01": Decimal("1000.00"),
+    }
+    r = mo.waterfall_tasima(mp, br)
+    d = r["dagitim"]
+    check("mart bos/kirmizi", abs(_f(d.get("2025-03-01", 0))) < 0.02, d)
+    check("nisan bos/kirmizi", abs(_f(d.get("2025-04-01", 0))) < 0.02, d)
+    check("eslesmemis 2500", abs(_f(r["eslesmemis_toplam"]) - 2500.0) < 0.02, r)
+    check("avans 0", abs(_f(r["avans"])) < 0.02, r)
+    check("korunum 454", r["korunum_ok"] is True, r)
 
 
 def test_867_kismi_waterfall_dokunmaz():
@@ -79,28 +97,41 @@ def test_867_kismi_waterfall_dokunmaz():
     check("avans 0 kismi", abs(_f(r["avans"])) < 0.02, r)
 
 
-def test_kira_sifir_atla():
-    mp = {"2026-01-01": Decimal("500"), "2026-02-01": Decimal("0"), "2026-03-01": Decimal("0")}
+def test_dondurma_ayindan_tasima_yok():
+    mp = {"2026-02-01": Decimal("800"), "2026-03-01": Decimal("0")}
+    br = {"2026-02-01": Decimal("500"), "2026-03-01": Decimal("500")}
+    r = mo.waterfall_tasima(mp, br, skip_ym={"2026-02"})
+    d = r["dagitim"]
+    # Şubat dondurma: 800 eşleşmemiş, taşınmaz → Mart boş/kırmızı
+    check("dondurma eslesmemis", abs(_f(r["eslesmemis"].get("2026-02-01", 0)) - 800) < 0.02, r)
+    check("mart tasima yok", abs(_f(d.get("2026-03-01", 0))) < 0.02, d)
+    check("korunum don", r["korunum_ok"] is True, r)
+
+
+def test_kira_sifir_eslesmemis():
+    mp = {"2026-01-01": Decimal("500")}
     br = {
-        "2026-01-01": Decimal("0"),  # kira 0 — atla, carry
+        "2026-01-01": Decimal("0"),
         "2026-02-01": Decimal("300"),
         "2026-03-01": Decimal("300"),
     }
     r = mo.waterfall_tasima(mp, br, skip_ym={"2026-02"})
     d = r["dagitim"]
     check("kira0 yazilmaz", "2026-01-01" not in d, d)
-    check("dondurma atla", "2026-02-01" not in d, d)
-    check("sonraki dolar", abs(_f(d.get("2026-03-01", 0)) - 300.0) < 0.02, d)
-    check("avans kalan", abs(_f(r["avans"]) - 200.0) < 0.02, r)
+    check("sonraki tasinmaz", abs(_f(d.get("2026-03-01", 0))) < 0.02, d)
+    check("eslesmemis 500", abs(_f(r["eslesmemis_toplam"]) - 500) < 0.02, r)
+    check("avans 0", abs(_f(r["avans"])) < 0.02, r)
     check("korunum2", r["korunum_ok"] is True, r)
 
 
-def test_avans_olusur():
+def test_avans_olusur_kira_pozitif_asim():
     mp = {"2026-01-01": Decimal("2000")}
     br = {"2026-01-01": Decimal("500"), "2026-02-01": Decimal("500")}
     r = mo.waterfall_tasima(mp, br)
     check("iki ay dolu", abs(_f(r["dagitim"]["2026-01-01"]) - 500) < 0.02)
+    check("tasima", abs(_f(r["dagitim"]["2026-02-01"]) - 500) < 0.02)
     check("avans", abs(_f(r["avans"]) - 1000) < 0.02, r)
+    check("eslesmemis yok", abs(_f(r.get("eslesmemis_toplam") or 0)) < 0.02, r)
     check("korunum3", r["korunum_ok"] is True, r)
 
 
@@ -132,9 +163,11 @@ if __name__ == "__main__":
         test_bayrak_kapali_varsayilan,
         test_allowlist_bos_etkilemez,
         test_402_cift_pay_waterfall,
+        test_454_sozlesme_oncesi_tasinmaz,
         test_867_kismi_waterfall_dokunmaz,
-        test_kira_sifir_atla,
-        test_avans_olusur,
+        test_dondurma_ayindan_tasima_yok,
+        test_kira_sifir_eslesmemis,
+        test_avans_olusur_kira_pozitif_asim,
         test_okuma_map_bayrak_kapali_birebir,
         test_okuma_map_allowlist_disi,
     ):
