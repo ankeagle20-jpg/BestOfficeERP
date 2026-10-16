@@ -30,8 +30,18 @@ def test_bayrak_kapali_ayni():
         check("bayrak varsayilan kapali", pt.eski_kaynak_enabled() is False)
         bos = _tah(None, 10, "Tem " + "|AYLIK_TAH|2025-07-01|", tahsilat_tarihi="2025-07-01")
         plan = pt.karar_ver([(2025, 7)], [bos], [], taraf="borc")
-        check("kapali bos silinmez", plan["sil_tahsil"] == [] and plan["atla_tam"].get("2025-07", {}).get("neden") == "baska_kaynak")
+        check(
+            "kapali bos silinmez",
+            plan["sil_tahsil"] == [] and plan["atla_tam"].get("2025-07", {}).get("neden") == "eski_bos_kaynak",
+            plan["atla_tam"].get("2025-07"),
+        )
         check("kapali eski liste bos", plan.get("silinecek_eski") == [])
+        check(
+            "kapali metin eski etiketsiz",
+            "Eski kayıt, kaynağı etiketsiz" in (plan.get("mesaj_onay") or "")
+            and "baska_kaynak" not in (plan.get("mesaj_onay") or ""),
+            plan.get("mesaj_onay"),
+        )
     finally:
         _flag(False)
 
@@ -149,7 +159,7 @@ def test_tahsil_yonu_etkilenmez():
         bos = _tah(None, 10, "|AYLIK_TAH|2026-03-01|", tahsilat_tarihi="2026-03-01")
         plan = pt.karar_ver([(2026, 3)], [bos], [], taraf="tahsil")
         check("tahsil eski yok", plan["sil_tahsil"] == [] and plan.get("silinecek_eski") == [])
-        check("tahsil baska kaynak", plan["atla_tam"].get(AY, {}).get("neden") == "baska_kaynak")
+        check("tahsil eski_bos (bos kaynak)", plan["atla_tam"].get(AY, {}).get("neden") == "eski_bos_kaynak")
         check("tahsil eski_enabled false in plan", plan.get("eski_kaynak_enabled") is False)
     finally:
         _flag(False)
@@ -206,8 +216,45 @@ def test_durust_mesaj():
         plan = pt.karar_ver([(2026, 3)], [panel, banka], [], taraf="borc")
         check("mesaj silinecek", "Silinecek" in (plan.get("mesaj_onay") or "") or "grid" in (plan.get("mesaj_onay") or "").lower())
         check("listeler var", isinstance(plan.get("silinecek_grid"), list) and isinstance(plan.get("degismeyecek"), list))
+        check(
+            "mesaj makbuz/banka dili",
+            "makbuz/banka/ödeme linki" in (plan.get("mesaj_onay") or ""),
+            plan.get("mesaj_onay"),
+        )
     finally:
         _flag(False)
+
+
+def test_neden_metin_ve_atlanan_mesaj():
+    check(
+        "metin eski_bos",
+        "etiketsiz" in pt.neden_kullanici_metni("eski_bos_kaynak")
+        and "yönetici ayarı" in pt.neden_kullanici_metni("eski_bos_kaynak"),
+    )
+    check(
+        "metin baska",
+        "makbuz/banka" in pt.neden_kullanici_metni("baska_kaynak"),
+    )
+    check(
+        "metin tarih",
+        "gerçek ödeme" in pt.neden_kullanici_metni("tarih_uyusmaz"),
+    )
+    check(
+        "metin cakisma",
+        "makbuz/banka kaydı var" in pt.neden_kullanici_metni("cakisma_makbuz_banka"),
+    )
+    msg = pt.atlanan_neden_mesajlari(
+        [
+            {"yil": 2025, "ay": 7, "neden": "eski_bos_kaynak"},
+            {"yil": 2025, "ay": 8, "neden": "eski_bos_kaynak"},
+            {"yil": 2025, "ay": 9, "neden": "baska_kaynak"},
+            {"yil": 2025, "ay": 10, "neden": "tarih_uyusmaz"},
+        ]
+    )
+    check("grup eski", "etiketsiz" in msg and "2025-07" in msg and "2025-08" in msg, msg)
+    check("grup baska", "makbuz/banka/ödeme linki" in msg and "2025-09" in msg, msg)
+    check("grup tarih", "gerçek ödeme" in msg and "2025-10" in msg, msg)
+    check("ham kod yok", "baska_kaynak" not in msg and "eski_bos_kaynak" not in msg, msg)
 
 
 if __name__ == "__main__":
@@ -220,5 +267,6 @@ if __name__ == "__main__":
     test_null_vs_bos_string()
     test_tarih_text_tipi()
     test_durust_mesaj()
+    test_neden_metin_ve_atlanan_mesaj()
     print("FAIL" if FAILS else "TUMU GECTI", FAILS)
     sys.exit(1 if FAILS else 0)

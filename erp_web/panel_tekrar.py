@@ -27,6 +27,35 @@ CAKISMA_KAYNAKLAR = frozenset({"manuel_makbuz", "banka_import", "odeme_linki"})
 TABLO_TAHSIL = "tahsilatlar"
 TABLO_BORC = "faturalar"
 
+# Kullanıcıya gösterilen neden metinleri (iç kod değişmez; silme kuralı aynı).
+NEDEN_METIN = {
+    "baska_kaynak": "Başka kaynaklı kayıt (makbuz/banka/ödeme linki)",
+    "eski_bos_kaynak": (
+        "Eski kayıt, kaynağı etiketsiz (27.07.2026 öncesi): değişmeyecek "
+        "— silmek için yönetici ayarı gerekir"
+    ),
+    "cakisma_makbuz_banka": "Aynı ay için makbuz/banka kaydı var: korundu",
+    "cakisma_koru": "Aynı ay için makbuz/banka kaydı var: korundu",
+    "tarih_uyusmaz": "Tarih bu aya ait değil (gerçek ödeme günü gibi): korundu",
+    "bagli_borc": "Bağlı panel borç: korundu",
+    "diger_durur": "Başka kaynaklı kayıt duruyor",
+    "ayni_islem": "Az önce işlendi (kısa koruma)",
+}
+
+
+def neden_kullanici_metni(neden) -> str:
+    key = str(neden or "").strip()
+    return NEDEN_METIN.get(key, key or "?")
+
+
+def _degis_kayit(yil, ay, neden: str) -> dict:
+    return {
+        "yil": int(yil),
+        "ay": int(ay),
+        "neden": neden,
+        "neden_metin": neden_kullanici_metni(neden),
+    }
+
 
 def eski_kaynak_enabled() -> bool:
     """Varsayılan kapalı. Açıkken yalnız taraf=borc kural A uygulanır."""
@@ -387,6 +416,56 @@ def _satir_id(row) -> int:
         return 0
 
 
+def _atla_neden_sinif(diger_rows, anahtar: str, *, bagli: bool) -> str:
+    """Silinmeyen ay için iç neden kodu. Silme kararı değişmez; yalnız sınıflandırma."""
+    if bagli:
+        return "bagli_borc"
+    rows = [r for r in (diger_rows or []) if isinstance(r, dict)]
+    if not rows:
+        return "baska_kaynak"
+    if any(str(r.get("kaynak") or "").strip() in CAKISMA_KAYNAKLAR for r in rows):
+        return "baska_kaynak"
+    if all(kaynak_bos_mu(r.get("kaynak")) for r in rows):
+        if all(
+            anahtar in _isaret_aylari(r.get("aciklama")) and not eski_panel_silinebilir_mi(r, anahtar)
+            for r in rows
+        ):
+            return "tarih_uyusmaz"
+        return "eski_bos_kaynak"
+    return "baska_kaynak"
+
+
+def atlanan_neden_mesajlari(atlanan) -> str:
+    """Sonuç mesajı: atlanan ayları neden gruplarıyla kullanıcı dilinde birleştir."""
+    gruplar = {}
+    for b in atlanan or []:
+        if not isinstance(b, dict):
+            continue
+        neden = str(b.get("neden") or "").strip()
+        if neden not in (
+            "baska_kaynak",
+            "eski_bos_kaynak",
+            "tarih_uyusmaz",
+            "cakisma_makbuz_banka",
+            "cakisma_koru",
+            "bagli_borc",
+        ):
+            continue
+        try:
+            ay_s = "%04d-%02d" % (int(b.get("yil")), int(b.get("ay")))
+        except (TypeError, ValueError):
+            continue
+        gruplar.setdefault(neden, [])
+        if ay_s not in gruplar[neden]:
+            gruplar[neden].append(ay_s)
+    if not gruplar:
+        return ""
+    parcalar = []
+    for neden, aylar in gruplar.items():
+        parcalar.append("%s: %s." % (neden_kullanici_metni(neden), ", ".join(aylar)))
+    return " ".join(parcalar)
+
+
 def _durust_mesaj(plan_parca: dict) -> str:
     """Önizleme / modal için dürüst özet. PII yok."""
     grid = plan_parca.get("silinecek_grid") or []
@@ -417,13 +496,24 @@ def _durust_mesaj(plan_parca: dict) -> str:
     else:
         parcalar.append("Hiçbir tahsilat silinmeyecek.")
     if degis:
-        nedenler = []
-        for d in degis[:12]:
-            nedenler.append(
-                "%04d-%02d (%s)" % (int(d.get("yil") or 0), int(d.get("ay") or 0), d.get("neden") or "?")
+        gruplar = {}
+        for d in degis:
+            neden = str(d.get("neden") or "?")
+            try:
+                ay_s = "%04d-%02d" % (int(d.get("yil")), int(d.get("ay")))
+            except (TypeError, ValueError):
+                continue
+            gruplar.setdefault(neden, [])
+            if ay_s not in gruplar[neden]:
+                gruplar[neden].append(ay_s)
+        parca_d = []
+        for neden, aylar in gruplar.items():
+            goster = aylar[:12]
+            ekstra = "" if len(aylar) <= 12 else " …"
+            parca_d.append(
+                "%s: %s%s" % (neden_kullanici_metni(neden), ", ".join(goster), ekstra)
             )
-        ekstra = "" if len(degis) <= 12 else " …"
-        parcalar.append("DEĞİŞMEYECEK %s ay: %s%s." % (len(degis), ", ".join(nedenler), ekstra))
+        parcalar.append("DEĞİŞMEYECEK %s ay — %s." % (len(degis), "; ".join(parca_d)))
     if not grid and not eski and not borc_n and not degis:
         parcalar.append("Seçilen aylar zaten borçlu veya dokunulacak panel satırı yok.")
     return " ".join(parcalar)
@@ -510,9 +600,8 @@ def karar_ver(aylar, tahsil_rows, borc_rows, *, haric=None, taraf="borc") -> dic
                 gorulen_diger.add(_satir_id(row))
             eski_tah = []
             uyarilar.append({"yil": yil, "ay": ay, "neden": "cakisma_koru"})
-            degismeyecek.append({
-                "yil": yil, "ay": ay, "neden": "cakisma_makbuz_banka",
-            })
+            if not any(d.get("yil") == yil and d.get("ay") == ay for d in degismeyecek):
+                degismeyecek.append(_degis_kayit(yil, ay, "cakisma_makbuz_banka"))
         silinecek_borc = []
         for row in borc_by_ay[anahtar]:
             neden = borc_bag_nedeni(row, tahsil_rows)
@@ -524,21 +613,15 @@ def karar_ver(aylar, tahsil_rows, borc_rows, *, haric=None, taraf="borc") -> dic
         if taraf != "borc":
             silinecek_borc = []
         if not panel_tah and not eski_tah and not silinecek_borc and diger:
-            if any(b["yil"] == yil and b["ay"] == ay for b in bagli):
-                neden = "bagli_borc"
-            elif diger and all(
-                kaynak_bos_mu(r.get("kaynak"))
-                and anahtar in _isaret_aylari(r.get("aciklama"))
-                and not eski_panel_silinebilir_mi(r, anahtar)
-                for r in diger
-            ):
-                neden = "tarih_uyusmaz"
-            else:
-                neden = "baska_kaynak"
+            neden = _atla_neden_sinif(
+                diger,
+                anahtar,
+                bagli=any(b["yil"] == yil and b["ay"] == ay for b in bagli),
+            )
             atla_tam[anahtar] = {"yil": yil, "ay": ay, "neden": neden}
             uyarilar.append({"yil": yil, "ay": ay, "neden": neden})
             if not any(d.get("yil") == yil and d.get("ay") == ay for d in degismeyecek):
-                degismeyecek.append({"yil": yil, "ay": ay, "neden": neden})
+                degismeyecek.append(_degis_kayit(yil, ay, neden))
             continue
         if diger:
             uyarilar.append({"yil": yil, "ay": ay, "neden": "diger_durur", "adet": len(diger)})
@@ -585,14 +668,18 @@ def karar_ver(aylar, tahsil_rows, borc_rows, *, haric=None, taraf="borc") -> dic
                 continue
             if panel_kaynak_mi(row.get("kaynak")):
                 continue
-            neden = "baska_kaynak"
+            k_str = str(row.get("kaynak") or "").strip()
             if kaynak_bos_mu(row.get("kaynak")):
                 if anahtar in _isaret_aylari(row.get("aciklama")) and not eski_panel_silinebilir_mi(row, anahtar):
                     neden = "tarih_uyusmaz"
-                elif not eski_acik:
-                    neden = "baska_kaynak"
+                else:
+                    neden = "eski_bos_kaynak"
+            elif k_str in CAKISMA_KAYNAKLAR:
+                neden = "baska_kaynak"
+            else:
+                neden = "baska_kaynak"
             if not any(d.get("yil") == yil and d.get("ay") == ay and d.get("neden") == neden for d in degismeyecek):
-                degismeyecek.append({"yil": yil, "ay": ay, "neden": neden})
+                degismeyecek.append(_degis_kayit(yil, ay, neden))
 
     panel_n = len(sil_tahsil) + len(sil_borc)
     parca = {

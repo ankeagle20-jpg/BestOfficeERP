@@ -18315,13 +18315,27 @@ function panelTekrarModalListeHtml(liste, bosMetin) {
     }).join('');
     return '<table class="panel-tekrar-modal-tablo"><thead><tr><th>Ay</th><th>Tutar</th><th>Tarih</th><th>Kaynak</th></tr></thead><tbody>' + sat + '</tbody></table>';
 }
+function panelTekrarNedenMetin(neden, hazir) {
+    if (hazir) return String(hazir);
+    var k = String(neden || '');
+    var map = {
+        baska_kaynak: 'Başka kaynaklı kayıt (makbuz/banka/ödeme linki)',
+        eski_bos_kaynak: 'Eski kayıt, kaynağı etiketsiz (27.07.2026 öncesi): değişmeyecek — silmek için yönetici ayarı gerekir',
+        cakisma_makbuz_banka: 'Aynı ay için makbuz/banka kaydı var: korundu',
+        cakisma_koru: 'Aynı ay için makbuz/banka kaydı var: korundu',
+        tarih_uyusmaz: 'Tarih bu aya ait değil (gerçek ödeme günü gibi): korundu',
+        bagli_borc: 'Bağlı panel borç: korundu'
+    };
+    return map[k] || k || '?';
+}
 function panelTekrarModalDegisHtml(liste) {
     if (!liste || !liste.length) {
         return '<p class="panel-tekrar-modal-bos">Yok</p>';
     }
     return '<ul class="panel-tekrar-modal-ul">' + liste.map(function (d) {
         var ay = (d.yil != null && d.ay != null) ? (String(d.yil) + '-' + String(d.ay).padStart(2, '0')) : '';
-        return '<li>' + ay + ' — ' + String(d.neden || '?') + '</li>';
+        var nm = panelTekrarNedenMetin(d.neden, d.neden_metin);
+        return '<li>' + ay + ' — ' + nm + '</li>';
     }).join('') + '</ul>';
 }
 function panelTekrarModalMetin(opts) {

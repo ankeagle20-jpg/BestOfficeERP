@@ -14796,13 +14796,9 @@ def api_aylik_tutarlardan_borclandir():
             mesaj += " Dondurulan aylar atlandı: " + ", ".join(dondurma_anahtar) + "."
         if diger:
             mesaj += " Şu aylar zaten borçlandırılmış, atlandı: " + ", ".join(diger) + "."
-    _baska = [
-        f"{int(b.get('yil')):04d}-{int(b.get('ay')):02d}"
-        for b in atlanan
-        if isinstance(b, dict) and b.get("neden") == "baska_kaynak"
-    ]
-    if _baska:
-        mesaj += " Başka kaynaklı satır olduğu için atlandı: " + ", ".join(_baska) + "."
+    _neden_msg = panel_tekrar.atlanan_neden_mesajlari(atlanan)
+    if _neden_msg:
+        mesaj += " " + _neden_msg
     _bagli = []
     for b in panel_plan.get("bagli") or []:
         try:
@@ -15149,8 +15145,11 @@ def api_aylik_tutarlardan_tahsil_et():
     _neden_etiket = {
         "zaten_tahsil": "zaten tahsilatlı",
         "panel_kopya_yok": "zaten tahsilatlı (grid_toplu)",
-        "baska_kaynak": "başka kaynak",
-        "bagli_borc": "bağlı borç",
+        "baska_kaynak": panel_tekrar.neden_kullanici_metni("baska_kaynak"),
+        "eski_bos_kaynak": panel_tekrar.neden_kullanici_metni("eski_bos_kaynak"),
+        "tarih_uyusmaz": panel_tekrar.neden_kullanici_metni("tarih_uyusmaz"),
+        "cakisma_makbuz_banka": panel_tekrar.neden_kullanici_metni("cakisma_makbuz_banka"),
+        "bagli_borc": panel_tekrar.neden_kullanici_metni("bagli_borc"),
         "tutar_sifir": "tutar sıfır",
         "geçersiz_tutar": "geçersiz tutar",
         "geçersiz_yil_ay": "geçersiz yıl/ay",
@@ -15204,13 +15203,9 @@ def api_aylik_tutarlardan_tahsil_et():
             mesaj += " Atlanan: " + ", ".join(parcalar) + "."
     if tahsil_panel_silinen:
         mesaj += f" {len(tahsil_panel_silinen)} panel tahsilat kaydı silindi."
-    _baska = [
-        f"{int(b.get('yil')):04d}-{int(b.get('ay')):02d}"
-        for b in atlanan
-        if isinstance(b, dict) and b.get("neden") == "baska_kaynak"
-    ]
-    if _baska:
-        mesaj += " Başka kaynaklı satır olduğu için atlandı: " + ", ".join(_baska) + "."
+    _neden_msg_t = panel_tekrar.atlanan_neden_mesajlari(atlanan)
+    if _neden_msg_t:
+        mesaj += " " + _neden_msg_t
     if panel_plan.get("diger_m") and tahsil_panel_silinen:
         mesaj += f" Başka kaynaktan {int(panel_plan.get('diger_m'))} satır duruyor."
     _bozuk_n = int(panel_plan.get("bozuk_tarih_n") or 0)

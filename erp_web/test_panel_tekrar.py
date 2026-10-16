@@ -194,7 +194,13 @@ def test_karar():
     check("3 silme yok", yabanci["sil_tahsil"] == [] and yabanci["onay_gerekli"] is False)
     isaretli = pt.karar_ver([(2026, 3)], [banka], [], taraf="borc")
     check("4 isaret panel degilse silinmez", isaretli["sil_tahsil"] == [] and isaretli["atla_tam"].get(AY, {}).get("neden") == "baska_kaynak")
-    check("4 bilinmeyen kaynak silinmez", pt.karar_ver([(2026, 3)], [bilinmeyen], [], taraf="tahsil")["sil_tahsil"] == [])
+    bil_plan = pt.karar_ver([(2026, 3)], [bilinmeyen], [], taraf="tahsil")
+    check("4 bilinmeyen kaynak silinmez", bil_plan["sil_tahsil"] == [])
+    check(
+        "4 bilinmeyen eski_bos etiketi",
+        bil_plan["atla_tam"].get(AY, {}).get("neden") == "eski_bos_kaynak",
+        bil_plan["atla_tam"].get(AY),
+    )
     borc = _borc(8, "Mart 2026 kira|AYLIK_TUTAR|2026-03-01|", ettn="ETTN-VAR")
     bag = pt.karar_ver([(2026, 3)], [], [borc], taraf="borc")
     check("5 ettn bagli borc silinmez", bag["sil_borc"] == [] and any(u.get("neden") == "bagli_borc" for u in bag["uyarilar"]))
