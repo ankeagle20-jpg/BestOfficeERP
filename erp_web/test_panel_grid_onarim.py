@@ -86,6 +86,60 @@ def test_dry_run_cli():
     check("cli dry", m.call_args.kwargs.get("dry_run") is True or m.call_args[1].get("dry_run") is True, m.call_args)
 
 
+def test_cap_402_map_ustunde_tavan():
+    """map 1540 / kira 881 → panele 881 yazılır."""
+    by = {
+        "2026-08-01": {"aylik": 881.0, "tahsil": 1540.18, "kalan": 0.0, "tahsil_tarih": "2026-09-08"},
+        "2026-09-01": {"aylik": 881.0, "tahsil": 1540.18, "kalan": 0.0, "tahsil_tarih": "2026-09-08"},
+    }
+    out = onr._cap_panel_by_iso_for_onarim(by, dondurma_aylar=set())
+    check("402 agu tavan", out["2026-08-01"]["tahsil"] == 881.0, out["2026-08-01"])
+    check("402 eyl tavan", out["2026-09-01"]["tahsil"] == 881.0, out["2026-09-01"])
+    check("402 kalan 0", out["2026-08-01"]["kalan"] == 0.0)
+
+
+def test_cap_111_panel_sifir_tahsilat_var():
+    """panel 0 iken map/tahsil brüt altındaysa doğru dolar."""
+    by = {
+        "2025-06-01": {"aylik": 2500.0, "tahsil": 0.0, "kalan": 2500.0},
+        "2025-07-01": {"aylik": 2500.0, "tahsil": 1200.5, "kalan": 1299.5},
+    }
+    # onarım panel_from_map sonrası tahsil zaten map'ten gelir
+    by2 = {
+        "2025-06-01": {"aylik": 2500.0, "tahsil": 2500.0, "kalan": 0.0},
+        "2025-07-01": {"aylik": 2500.0, "tahsil": 1200.5, "kalan": 1299.5},
+    }
+    out = onr._cap_panel_by_iso_for_onarim(by2, dondurma_aylar=set())
+    check("111 tam ay", out["2025-06-01"]["tahsil"] == 2500.0, out)
+    check("111 kismi", out["2025-07-01"]["tahsil"] == 1200.5, out)
+    check("111 kalan", out["2025-07-01"]["kalan"] == 1299.5, out)
+
+
+def test_cap_kira_sifir_yazilmaz():
+    by = {
+        "2026-01-01": {"aylik": 0.0, "tahsil": 500.0, "kalan": 0.0},
+        "2026-02-01": {"aylik": 800.0, "tahsil": 800.0, "kalan": 0.0},
+    }
+    out = onr._cap_panel_by_iso_for_onarim(by, dondurma_aylar={"2026-03"})
+    check("kira0 yok", "2026-01-01" not in out, out)
+    check("kira var", out.get("2026-02-01", {}).get("tahsil") == 800.0, out)
+    by_don = {
+        "2026-03-01": {"aylik": 800.0, "tahsil": 800.0, "kalan": 0.0},
+        "2026-04-01": {"aylik": 800.0, "tahsil": 900.0, "kalan": 0.0},
+    }
+    out2 = onr._cap_panel_by_iso_for_onarim(by_don, dondurma_aylar={"2026-03"})
+    check("dondurma yok", "2026-03-01" not in out2, out2)
+    check("dondurma sonrasi tavan", out2["2026-04-01"]["tahsil"] == 800.0, out2)
+
+
+def test_geri_cap_kullanmaz():
+    src = Path(onr.__file__).read_text(encoding="utf-8")
+    i = src.find("def geri_yukle")
+    j = src.find("\ndef main", i)
+    body = src[i:j]
+    check("geri cap yok", "_cap_panel_by_iso_for_onarim" not in body, body[:80])
+
+
 if __name__ == "__main__":
     for fn in (
         test_dry_run_varsayilan_yazmaz,
@@ -93,6 +147,10 @@ if __name__ == "__main__":
         test_geri_allow_yok,
         test_kaynak_tahsilat_dokunmaz,
         test_dry_run_cli,
+        test_cap_402_map_ustunde_tavan,
+        test_cap_111_panel_sifir_tahsilat_var,
+        test_cap_kira_sifir_yazilmaz,
+        test_geri_cap_kullanmaz,
     ):
         print("---", fn.__name__)
         fn()

@@ -29,6 +29,77 @@ def _parse_mids(s: str) -> list[int]:
     return out
 
 
+def _cap_panel_by_iso_for_onarim(
+    by_iso: dict | None,
+    *,
+    mid: int | None = None,
+    payload: dict | None = None,
+    dondurma_aylar: set | None = None,
+    tol: float = 0.05,
+) -> dict:
+    """Onarım yazımı: tahsil = min(map, brüt); kira=0 / dondurma aya yazılmaz.
+
+    --geri bu fonksiyonu kullanmaz.
+    """
+    if not isinstance(by_iso, dict) or not by_iso:
+        return {}
+    brut_payload: dict[str, float] = {}
+    if isinstance(payload, dict):
+        from datetime import date as _date
+
+        for a in payload.get("aylar") or []:
+            if not isinstance(a, dict):
+                continue
+            try:
+                iso_m = _date(int(a["yil"]), int(a["ay"]), 1).isoformat()
+                bv = round(float(a.get("brut_tutar_kdv") or a.get("tutar_kdv_dahil") or 0), 2)
+            except (TypeError, ValueError, KeyError):
+                continue
+            brut_payload[iso_m] = bv
+    don = set(dondurma_aylar or ())
+    if not don and mid is not None:
+        try:
+            from routes import giris_routes as gr
+
+            don = set(gr._dondurma_ay_kumesi(int(mid)) or ())
+        except Exception:
+            don = set()
+    out: dict = {}
+    for iso_raw, prow in by_iso.items():
+        if not isinstance(prow, dict):
+            continue
+        iso = str(iso_raw).strip()[:10]
+        if len(iso) < 7:
+            continue
+        ym = iso[:7]
+        if ym in don:
+            continue
+        try:
+            brut = round(float(prow.get("aylik") or prow.get("brut") or brut_payload.get(iso) or 0), 2)
+        except (TypeError, ValueError):
+            brut = 0.0
+        if brut <= tol:
+            # kira/brüt 0 — yazma
+            continue
+        try:
+            tah = round(float(prow.get("tahsil") or 0), 2)
+        except (TypeError, ValueError):
+            tah = 0.0
+        if tah < 0:
+            tah = 0.0
+        tah = round(min(tah, brut), 2)
+        kalan = round(max(brut - tah, 0), 2)
+        if brut > tol and tah >= brut - tol:
+            kalan = 0.0
+        out[iso] = {
+            "aylik": brut,
+            "tahsil": tah,
+            "kalan": kalan,
+            "tahsil_tarih": str(prow.get("tahsil_tarih") or "")[:10] or None,
+        }
+    return out
+
+
 def _ensure_yedek_tables():
     execute(
         """
@@ -107,6 +178,7 @@ def onar_mid(mid: int, *, dry_run: bool, etiket: str) -> dict:
             by_iso = gr._panel_by_iso_from_tahsil_map(
                 mid, payload, None, trust_grid_odenen=False
             )
+            by_iso = _cap_panel_by_iso_for_onarim(by_iso, mid=mid, payload=payload)
             out["panel_ay_sonra"] = len(by_iso or {})
             if isinstance(payload, dict) and by_iso:
                 pl2 = copy.deepcopy(payload)
@@ -127,6 +199,7 @@ def onar_mid(mid: int, *, dry_run: bool, etiket: str) -> dict:
         by_iso = gr._panel_by_iso_from_tahsil_map(
             mid, payload, None, trust_grid_odenen=False
         )
+        by_iso = _cap_panel_by_iso_for_onarim(by_iso, mid=mid, payload=payload)
         if isinstance(payload, dict) and by_iso:
             payload = copy.deepcopy(payload)
             tmap = gr._aylik_tahsil_tutar_map(mid)
