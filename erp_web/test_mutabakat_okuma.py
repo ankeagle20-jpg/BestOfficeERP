@@ -135,6 +135,65 @@ def test_avans_olusur_kira_pozitif_asim():
     check("korunum3", r["korunum_ok"] is True, r)
 
 
+def test_etiket_454_onceki_sozlesme():
+    """454-benzeri: sözleşme 2026-05-06 öncesi kira=0 aylar → önceki sözleşme dönemi."""
+    from datetime import date
+    from decimal import Decimal as D
+
+    mp = {("2025-%02d-01" % m): D("23000") for m in range(6, 13)}
+    mp["2026-01-01"] = D("23000")
+    mp["2026-02-01"] = D("23000")
+    mp["2026-03-01"] = D("23000")
+    mp["2026-04-01"] = D("23000")
+    br = {k: D("0") for k in mp}
+    br["2026-05-01"] = D("10000")
+    br["2026-06-01"] = D("10000")
+    r = mo.waterfall_tasima(mp, br)
+    check("454 eslesmemis 253k", abs(_f(r["eslesmemis_toplam"]) - 253000) < 0.02, r)
+    kovalar = mo.sinifla_eslesmemis_rapor(
+        r["eslesmemis"], date(2026, 5, 6), mid=454
+    )
+    check("454 tek kova", len(kovalar) == 1, kovalar)
+    check("454 etiket onceki", kovalar[0]["etiket"] == mo.ETIKET_ONCEKI_SOZLESME, kovalar)
+    check("454 mid", kovalar[0].get("mid") == 454, kovalar)
+    check("454 tl", abs(_f(kovalar[0]["toplam_tl"]) - 253000) < 0.02, kovalar)
+    check("454 aralik", kovalar[0]["ay_aralik"] == "2025-06..2026-04", kovalar)
+
+
+def test_etiket_896_onceki_sozlesme():
+    """896-benzeri: 2025-03…11 ödemeleri, sözleşme 2026-02-28."""
+    from datetime import date
+    from decimal import Decimal as D
+
+    mp = {("2025-%02d-01" % m): D("13000") for m in range(3, 12)}
+    br = {k: D("0") for k in mp}
+    for m in range(2, 10):
+        br["2026-%02d-01" % m] = D("1200")
+    r = mo.waterfall_tasima(mp, br)
+    check("896 es 117k", abs(_f(r["eslesmemis_toplam"]) - 117000) < 0.02, r)
+    check("896 yeni tasima yok", abs(_f(r["dagitim"].get("2026-02-01", 0))) < 0.02, r)
+    kovalar = mo.sinifla_eslesmemis_rapor(
+        r["eslesmemis"], "2026-02-28", mid=896
+    )
+    check("896 etiket", kovalar[0]["etiket"] == mo.ETIKET_ONCEKI_SOZLESME, kovalar)
+    check("896 tl", abs(_f(kovalar[0]["toplam_tl"]) - 117000) < 0.02, kovalar)
+    check("896 aralik", kovalar[0]["ay_aralik"] == "2025-03..2025-11", kovalar)
+
+
+def test_etiket_dondurma_eslesmemis_kalir():
+    """Sözleşme sonrası dondurma ayı → eşleşmemiş (önceki dönem değil)."""
+    from datetime import date
+    from decimal import Decimal as D
+
+    mp = {"2026-06-01": D("500")}
+    br = {"2026-06-01": D("0"), "2026-07-01": D("500")}
+    r = mo.waterfall_tasima(mp, br, skip_ym={"2026-06"})
+    kovalar = mo.sinifla_eslesmemis_rapor(
+        r["eslesmemis"], date(2026, 5, 1), mid=1
+    )
+    check("don etiket eslesmemis", kovalar[0]["etiket"] == mo.ETIKET_ESLESMEMIS, kovalar)
+
+
 def test_okuma_map_bayrak_kapali_birebir():
     os.environ.pop("MUTABAKAT_OKUMA_ENABLED", None)
     os.environ.pop("MUTABAKAT_OKUMA_MUSTERI_IDS", None)
@@ -142,6 +201,11 @@ def test_okuma_map_bayrak_kapali_birebir():
     br = {"2026-08-01": 881.0, "2026-09-01": 881.0}
     out = mo.okuma_tahsil_map(402, mp, br)
     check("kapali ham", abs(out.get("2026-08-01", 0) - 1540.18) < 0.02, out)
+    full = mo.okuma_waterfall_full(402, mp, br)
+    check("kapali eslesmemis bos", abs(_f(full.get("eslesmemis_toplam") or 0)) < 0.02, full)
+    check("kapali aktif false", full.get("aktif") is False, full)
+    kovalar = mo.sinifla_eslesmemis_rapor(full.get("eslesmemis"), "2026-01-01", mid=402)
+    check("kapali kova yok", kovalar == [], kovalar)
 
 
 def test_okuma_map_allowlist_disi():
@@ -168,6 +232,9 @@ if __name__ == "__main__":
         test_dondurma_ayindan_tasima_yok,
         test_kira_sifir_eslesmemis,
         test_avans_olusur_kira_pozitif_asim,
+        test_etiket_454_onceki_sozlesme,
+        test_etiket_896_onceki_sozlesme,
+        test_etiket_dondurma_eslesmemis_kalir,
         test_okuma_map_bayrak_kapali_birebir,
         test_okuma_map_allowlist_disi,
     ):

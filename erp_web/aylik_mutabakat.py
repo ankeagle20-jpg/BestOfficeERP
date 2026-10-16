@@ -289,8 +289,35 @@ def aylik_mutabakat(mid, ay_baslangic, ay_bitis, *, tam_ekstre: bool = True) -> 
             row["eslesmemis_tl"] = _f2(eslesmemis_by_iso.get(iso))
         row["uyusmazliklar"] = siniflandir(row)
         satirlar.append(row)
-    # Özet (liste + meta): eşleşmemiş kova — mid/TL/ay aralığı
-    if eslesmemis_toplam > TOL or avans_okuma > TOL:
+    # Özet: eşleşmemiş / önceki sözleşme dönemi (yalnız etiket; waterfall aynı)
+    soz_bas = None
+    try:
+        kyc = fetch_one(
+            """
+            SELECT sozlesme_tarihi FROM musteri_kyc
+            WHERE musteri_id = %s
+            ORDER BY id DESC LIMIT 1
+            """,
+            (mid,),
+        )
+        soz_bas = (kyc or {}).get("sozlesme_tarihi")
+    except Exception:
+        soz_bas = None
+    try:
+        from mutabakat_okuma import (
+            etiket_eslesmemis_ay,
+            sinifla_eslesmemis_rapor,
+        )
+
+        for row in satirlar:
+            if _f2(row.get("eslesmemis_tl")) > TOL:
+                row["eslesmemis_etiket"] = etiket_eslesmemis_ay(row.get("iso"), soz_bas)
+        kovalar = sinifla_eslesmemis_rapor(
+            eslesmemis_by_iso, soz_bas, mid=mid
+        )
+    except Exception:
+        kovalar = []
+    if eslesmemis_toplam > TOL or avans_okuma > TOL or kovalar:
         aylar_es = sorted(eslesmemis_by_iso.keys())
         satirlar.append({
             "_meta": "eslesmemis_ozet",
@@ -302,6 +329,7 @@ def aylik_mutabakat(mid, ay_baslangic, ay_bitis, *, tam_ekstre: bool = True) -> 
             ),
             "ay_adet": len(aylar_es),
             "eslesmemis_by_iso": eslesmemis_by_iso,
+            "kovalar": kovalar,
         })
     return satirlar
 
@@ -503,16 +531,35 @@ def main(argv=None) -> int:
         )
         for r in satirlar:
             if r.get("_meta") == "eslesmemis_ozet":
-                print(
-                    "ESLESMEMIS mid=%s toplam=%s avans=%s ay_aralik=%s ay_adet=%s"
-                    % (
-                        r.get("mid"),
-                        r.get("eslesmemis_toplam"),
-                        r.get("avans"),
-                        r.get("ay_aralik"),
-                        r.get("ay_adet"),
+                kovalar = r.get("kovalar") or []
+                if kovalar:
+                    for k in kovalar:
+                        print(
+                            "%s mid=%s toplam=%s ay_aralik=%s ay_adet=%s"
+                            % (
+                                str(k.get("etiket") or "eşleşmemiş").upper().replace(" ", "_"),
+                                k.get("mid", r.get("mid")),
+                                k.get("toplam_tl"),
+                                k.get("ay_aralik"),
+                                k.get("ay_adet"),
+                            )
+                        )
+                else:
+                    print(
+                        "ESLESMEMIS mid=%s toplam=%s avans=%s ay_aralik=%s ay_adet=%s"
+                        % (
+                            r.get("mid"),
+                            r.get("eslesmemis_toplam"),
+                            r.get("avans"),
+                            r.get("ay_aralik"),
+                            r.get("ay_adet"),
+                        )
                     )
-                )
+                if _f2(r.get("avans")) > TOL and kovalar:
+                    print(
+                        "AVANS mid=%s toplam=%s"
+                        % (r.get("mid"), r.get("avans"))
+                    )
                 continue
             uys = ",".join(u["kod"] for u in (r.get("uyusmazliklar") or [])) or "-"
             print(

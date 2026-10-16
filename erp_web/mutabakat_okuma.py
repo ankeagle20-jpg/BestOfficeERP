@@ -14,7 +14,7 @@ Yazma yollarına (tahsilatlar, panel save, makbuz, borçlandır) dokunulmaz.
 from __future__ import annotations
 
 import os
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
 
@@ -261,6 +261,116 @@ def okuma_waterfall_full(
     r = waterfall_tasima(ham, brut_by_iso, skip_ym=skip_ym)
     r["aktif"] = True
     return r
+
+
+ETIKET_ONCEKI_SOZLESME = "önceki sözleşme dönemi"
+ETIKET_ESLESMEMIS = "eşleşmemiş"
+
+
+def _parse_sozlesme_bas(sozlesme_baslangic) -> date | None:
+    if sozlesme_baslangic is None:
+        return None
+    if isinstance(sozlesme_baslangic, datetime):
+        return sozlesme_baslangic.date()
+    if isinstance(sozlesme_baslangic, date):
+        return sozlesme_baslangic
+    s = str(sozlesme_baslangic).strip()[:10]
+    if len(s) >= 10 and s[4] == "-" and s[7] == "-":
+        try:
+            return date(int(s[0:4]), int(s[5:7]), int(s[8:10]))
+        except ValueError:
+            return None
+    if len(s) >= 7 and s[4] == "-":
+        try:
+            return date(int(s[0:4]), int(s[5:7]), 1)
+        except ValueError:
+            return None
+    return None
+
+
+def etiket_eslesmemis_ay(iso: str, sozlesme_baslangic) -> str:
+    """Ay iso sözleşme başlangıcından önceyse önceki dönem; aksi halde eşleşmemiş."""
+    iso_n = _norm_iso(iso)
+    if not iso_n:
+        return ETIKET_ESLESMEMIS
+    bas = _parse_sozlesme_bas(sozlesme_baslangic)
+    if bas is None:
+        return ETIKET_ESLESMEMIS
+    try:
+        ay_d = date(int(iso_n[0:4]), int(iso_n[5:7]), 1)
+    except ValueError:
+        return ETIKET_ESLESMEMIS
+    if ay_d < bas:
+        return ETIKET_ONCEKI_SOZLESME
+    return ETIKET_ESLESMEMIS
+
+
+def sinifla_eslesmemis_rapor(
+    eslesmemis_by_iso: dict | None,
+    sozlesme_baslangic=None,
+    *,
+    mid: int | None = None,
+) -> list[dict[str, Any]]:
+    """Eşleşmemiş kovayı etiketlere böl (hesap değişmez; yalnız gösterim).
+
+    Dönüş: [{etiket, mid?, toplam_tl, ay_aralik, ay_adet, by_iso}, ...]
+    Boş girdi → [].
+    """
+    by_etiket: dict[str, dict[str, float]] = {}
+    for k, v in (eslesmemis_by_iso or {}).items():
+        iso = _norm_iso(k)
+        if not iso:
+            continue
+        try:
+            fv = round(float(v or 0), 2)
+        except (TypeError, ValueError):
+            continue
+        if fv <= TOL:
+            continue
+        et = etiket_eslesmemis_ay(iso, sozlesme_baslangic)
+        bucket = by_etiket.setdefault(et, {})
+        bucket[iso] = round(bucket.get(iso, 0.0) + fv, 2)
+
+    # Önceki dönem önce, sonra eşleşmemiş
+    order = (ETIKET_ONCEKI_SOZLESME, ETIKET_ESLESMEMIS)
+    out: list[dict[str, Any]] = []
+    for et in order:
+        bucket = by_etiket.get(et) or {}
+        if not bucket:
+            continue
+        aylar = sorted(bucket.keys())
+        row = {
+            "etiket": et,
+            "toplam_tl": round(sum(bucket.values()), 2),
+            "ay_aralik": "%s..%s" % (aylar[0][:7], aylar[-1][:7]),
+            "ay_adet": len(aylar),
+            "by_iso": dict(bucket),
+        }
+        if mid is not None:
+            try:
+                row["mid"] = int(mid)
+            except (TypeError, ValueError):
+                pass
+        out.append(row)
+    # beklenmeyen etiket varsa ekle
+    for et, bucket in by_etiket.items():
+        if et in order:
+            continue
+        aylar = sorted(bucket.keys())
+        row = {
+            "etiket": et,
+            "toplam_tl": round(sum(bucket.values()), 2),
+            "ay_aralik": "%s..%s" % (aylar[0][:7], aylar[-1][:7]) if aylar else "-",
+            "ay_adet": len(aylar),
+            "by_iso": dict(bucket),
+        }
+        if mid is not None:
+            try:
+                row["mid"] = int(mid)
+            except (TypeError, ValueError):
+                pass
+        out.append(row)
+    return out
 
 
 def brut_by_iso_from_payload(payload: dict | None) -> dict[str, float]:
