@@ -187,12 +187,30 @@ def aylik_mutabakat(mid, ay_baslangic, ay_bitis, *, tam_ekstre: bool = True) -> 
             continue
         grid_by[iso] = a
 
-    panel = gr._load_musteri_panel_by_iso(mid) or {}
-    tahsil_map = gr._aylik_tahsil_tutar_map(mid) or {}
+    # Panel okuma sarmalayıcı: bayrak+allowlist iken waterfall (yazmaz)
+    if hasattr(gr, "_load_musteri_panel_by_iso_okuma"):
+        panel = gr._load_musteri_panel_by_iso_okuma(mid) or {}
+    else:
+        panel = gr._load_musteri_panel_by_iso(mid) or {}
+    tahsil_map_ham = gr._aylik_tahsil_tutar_map(mid) or {}
     try:
         dondurma = set(gr._dondurma_ay_kumesi(mid) or ())
     except Exception:
         dondurma = set()
+    # Okuma waterfall (kapalıysa ham map birebir)
+    try:
+        from mutabakat_okuma import brut_by_iso_from_payload, okuma_tahsil_map
+
+        brut_m = {}
+        for iso, a in grid_by.items():
+            if isinstance(a, dict):
+                brut_m[iso] = _f2(a.get("brut_tutar_kdv") or a.get("tutar_kdv_dahil"))
+        for iso, prow in (panel or {}).items():
+            if isinstance(prow, dict) and iso not in brut_m:
+                brut_m[iso] = _f2(prow.get("aylik") or prow.get("brut"))
+        tahsil_map = okuma_tahsil_map(mid, tahsil_map_ham, brut_m, skip_ym=dondurma)
+    except Exception:
+        tahsil_map = dict(tahsil_map_ham)
 
     borc_fatura = _borc_fatura_by_iso(mid)
 
@@ -240,15 +258,16 @@ def aylik_mutabakat(mid, ay_baslangic, ay_bitis, *, tam_ekstre: bool = True) -> 
             if go_raw is None:
                 go_raw = g.get("odenen")
         go = _f2(go_raw) if go_raw is not None else None
-        mt_ham = _f2(tahsil_map.get(iso))
+        mt_ham = _f2(tahsil_map_ham.get(iso))
+        mt_okuma = _f2(tahsil_map.get(iso))  # bayrak kapalı = ham; açık = taşınmış
         durum = _grid_durum(g, dondurma, iso)
         kira = pa if pa > TOL else (gt if gt > TOL else _f2(ekstre_borc.get(iso)))
-        mt_cap = min(mt_ham, kira) if kira > TOL else mt_ham
+        mt_cap = min(mt_okuma, kira) if kira > TOL else mt_okuma
         row = {
             "iso": iso,
             "ay": iso[:7],
             "kira": kira,
-            "tahsil_map": mt_cap,  # karşılaştırma (min)
+            "tahsil_map": mt_cap,  # karşılaştırma (min veya taşınmış)
             "tahsil_map_ham": mt_ham,
             "tahsil_panel": pt,
             "grid_tutar": gt,
@@ -307,10 +326,15 @@ def siniflandir(row: dict) -> list[dict[str, Any]]:
         ekle("map_aylik_tavan", mt_ham - kira)
     elif abs(pt - mt_cap) > TOL and (pt > TOL or mt_cap > TOL):
         ekle("panel_map", pt - mt_cap)
-    if durum == "kirmizi" and mt_cap > TOL and gt > TOL:
-        ekle("grid_kirmizi_map_tahsil", mt_cap)
-    if durum == "odendi" and mt_cap <= TOL and gt > TOL:
-        ekle("grid_yesil_map_bos", gt)
+    # Kısmi ödeme tutarlı: kırmızı + 0 < map < kira → sapma değil
+    if durum == "kirmizi" and mt_cap > TOL and gt > TOL and kira > TOL:
+        if mt_cap + TOL >= kira:
+            ekle("grid_kirmizi_map_tahsil", mt_cap)
+    if durum == "odendi" and gt > TOL and kira > TOL:
+        if mt_cap <= TOL:
+            ekle("grid_yesil_map_bos", gt)
+        elif mt_cap + TOL < kira:
+            ekle("grid_yesil_map_bos", kira - mt_cap)
     if durum == "dondurma" and (pt > TOL or mt_cap > TOL or mt_ham > TOL):
         ekle("dondurma_tahsil", max(pt, mt_cap, mt_ham))
     if mt_cap > TOL and et_satir <= TOL:

@@ -86,6 +86,49 @@ def test_uyumlu_musteri():
     check("uyumlu bos", am.siniflandir(row) == [])
 
 
+def test_kismi_odeme_kirmizi_uyumlu():
+    """867 benzeri: kırmızı + map < kira → grid_kirmizi_map_tahsil YOK."""
+    row = _row(
+        tahsil_panel=964,
+        tahsil_map=964,
+        tahsil_map_ham=964,
+        kira=1094,
+        grid_tutar=1094,
+        grid_durum="kirmizi",
+        ekstre_tahsil_satir=964,
+        ekstre_borc=1094,
+        borc_fatura=1094,
+    )
+    kodlar = {u["kod"] for u in am.siniflandir(row)}
+    check("kismi kirmizi sapma yok", "grid_kirmizi_map_tahsil" not in kodlar, kodlar)
+
+
+def test_tam_odendi_kirmizi_sapma():
+    row = _row(
+        tahsil_map=1094,
+        tahsil_map_ham=1094,
+        kira=1094,
+        grid_tutar=1094,
+        grid_durum="kirmizi",
+        ekstre_tahsil_satir=1094,
+    )
+    kodlar = {u["kod"] for u in am.siniflandir(row)}
+    check("tam+kirmizi sapma", "grid_kirmizi_map_tahsil" in kodlar, kodlar)
+
+
+def test_yesil_map_eksik_sapma():
+    row = _row(
+        tahsil_map=500,
+        tahsil_map_ham=500,
+        kira=1094,
+        grid_tutar=1094,
+        grid_durum="odendi",
+        ekstre_tahsil_satir=500,
+    )
+    kodlar = {u["kod"] for u in am.siniflandir(row)}
+    check("yesil eksik sapma", "grid_yesil_map_bos" in kodlar, kodlar)
+
+
 def test_toplu_makbuz_senaryosu():
     ocak = _row(
         tahsil_panel=1094.18,
@@ -137,6 +180,10 @@ def test_yazma_yok():
             "_load_musteri_panel_by_iso",
             return_value={"2025-01-01": {"aylik": 100, "tahsil": 100, "kalan": 0}},
         ), mock.patch.object(
+            gr,
+            "_load_musteri_panel_by_iso_okuma",
+            return_value={"2025-01-01": {"aylik": 100, "tahsil": 100, "kalan": 0}},
+        ), mock.patch.object(
             gr, "_aylik_tahsil_tutar_map", return_value={"2025-01-01": 100.0}
         ), mock.patch.object(
             gr, "_dondurma_ay_kumesi", return_value=set()
@@ -170,6 +217,9 @@ if __name__ == "__main__":
         test_siniflar_sabit,
         test_her_sinif_sentetik,
         test_uyumlu_musteri,
+        test_kismi_odeme_kirmizi_uyumlu,
+        test_tam_odendi_kirmizi_sapma,
+        test_yesil_map_eksik_sapma,
         test_toplu_makbuz_senaryosu,
         test_yazma_yok,
         test_modul_kaynak_yazmaz,

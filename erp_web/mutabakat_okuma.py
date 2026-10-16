@@ -1,0 +1,227 @@
+# -*- coding: utf-8 -*-
+"""Fazlalık taşıma (waterfall) — yalnızca OKUMA katmanı.
+
+Varsayılan KAPALI:
+  MUTABAKAT_OKUMA_ENABLED=0
+  MUTABAKAT_OKUMA_MUSTERI_IDS=   (boş = kimse)
+
+Yazma yollarına (tahsilatlar, panel save, makbuz, borçlandır) dokunulmaz.
+"""
+from __future__ import annotations
+
+import os
+from datetime import date
+from typing import Any
+
+
+TOL = 0.05
+
+
+def mutabakat_okuma_enabled() -> bool:
+    return str(os.environ.get("MUTABAKAT_OKUMA_ENABLED") or "").strip() in (
+        "1",
+        "true",
+        "TRUE",
+        "yes",
+    )
+
+
+def mutabakat_okuma_allowlist() -> set[int]:
+    raw = str(os.environ.get("MUTABAKAT_OKUMA_MUSTERI_IDS") or "").strip()
+    out: set[int] = set()
+    if not raw:
+        return out
+    for p in raw.replace(";", ",").split(","):
+        p = p.strip()
+        if not p:
+            continue
+        try:
+            out.add(int(p))
+        except ValueError:
+            continue
+    return out
+
+
+def mutabakat_okuma_aktif(musteri_id: int | None) -> bool:
+    """Bayrak açık + mid allowlist'te. Allowlist boşken kimse etkilenmez."""
+    if not mutabakat_okuma_enabled():
+        return False
+    try:
+        mid = int(musteri_id or 0)
+    except (TypeError, ValueError):
+        return False
+    if mid <= 0:
+        return False
+    al = mutabakat_okuma_allowlist()
+    if not al:
+        return False
+    return mid in al
+
+
+def waterfall_tasima(
+    map_by_iso: dict | None,
+    brut_by_iso: dict | None,
+    *,
+    skip_ym: set | None = None,
+) -> dict[str, Any]:
+    """Kronolojik tavan+taşıma.
+
+    Her ay (kira/brüt > 0, skip değil): tahsil = min(mevcut+carry, brut);
+    fazlalık sonraki uygun aya. Ufuk sonu artan = avans.
+
+    Korunum: Σ dağıtılan + avans == Σ map (yuvarlama tol içinde).
+    """
+    mp = {}
+    for k, v in (map_by_iso or {}).items():
+        iso = _norm_iso(k)
+        if not iso:
+            continue
+        try:
+            fv = round(float(v or 0), 2)
+        except (TypeError, ValueError):
+            continue
+        if fv > 0:
+            mp[iso] = round(mp.get(iso, 0.0) + fv, 2)
+
+    br = {}
+    for k, v in (brut_by_iso or {}).items():
+        iso = _norm_iso(k)
+        if not iso:
+            continue
+        try:
+            fv = round(float(v or 0), 2)
+        except (TypeError, ValueError):
+            continue
+        br[iso] = fv
+
+    skip = set()
+    for s in skip_ym or ():
+        s = str(s or "").strip()
+        if len(s) >= 7 and s[4] == "-":
+            skip.add(s[:7])
+
+    # Kronoloji: map veya brut anahtarları
+    isos = sorted(set(mp) | set(br))
+    dagitim: dict[str, float] = {}
+    carry = 0.0
+    sum_map = round(sum(mp.values()), 2)
+
+    for iso in isos:
+        ym = iso[:7]
+        brut = round(float(br.get(iso) or 0), 2)
+        ham = round(float(mp.get(iso) or 0), 2)
+        available = round(carry + ham, 2)
+        if ym in skip or brut <= TOL:
+            # kira=0 / dondurma / sözleşme dışı: yazma yok, carry devam (+ bu ay ham)
+            carry = available
+            continue
+        take = round(min(available, brut), 2)
+        if take > TOL:
+            dagitim[iso] = take
+        carry = round(max(available - take, 0), 2)
+
+    avans = round(carry, 2)
+    sum_dag = round(sum(dagitim.values()), 2)
+    return {
+        "dagitim": dagitim,
+        "avans": avans,
+        "sum_map": sum_map,
+        "sum_dagitim": sum_dag,
+        "korunum_ok": abs(sum_dag + avans - sum_map) <= max(TOL, 0.02),
+    }
+
+
+def okuma_tahsil_map(
+    musteri_id: int | None,
+    map_by_iso: dict | None,
+    brut_by_iso: dict | None,
+    *,
+    skip_ym: set | None = None,
+) -> dict[str, float]:
+    """Bayrak kapalı veya allowlist dışı → ham map kopyası. Açıksa waterfall dağıtım."""
+    ham = {}
+    for k, v in (map_by_iso or {}).items():
+        iso = _norm_iso(k)
+        if not iso:
+            continue
+        try:
+            fv = round(float(v or 0), 2)
+        except (TypeError, ValueError):
+            continue
+        if fv > 0:
+            ham[iso] = round(ham.get(iso, 0.0) + fv, 2)
+    if not mutabakat_okuma_aktif(musteri_id):
+        return ham
+    r = waterfall_tasima(ham, brut_by_iso, skip_ym=skip_ym)
+    return dict(r.get("dagitim") or {})
+
+
+def brut_by_iso_from_payload(payload: dict | None) -> dict[str, float]:
+    out: dict[str, float] = {}
+    if not isinstance(payload, dict):
+        return out
+    for a in payload.get("aylar") or []:
+        if not isinstance(a, dict):
+            continue
+        try:
+            iso = date(int(a["yil"]), int(a["ay"]), 1).isoformat()
+            bv = round(float(a.get("brut_tutar_kdv") or a.get("tutar_kdv_dahil") or 0), 2)
+        except (TypeError, ValueError, KeyError):
+            continue
+        out[iso] = bv
+    return out
+
+
+def apply_waterfall_to_grid_payload_copy(
+    payload: dict | None,
+    dagitim: dict | None,
+    *,
+    tol: float = TOL,
+) -> dict | None:
+    """Bellekte odenen/tahsil_edildi güncelle — yazmaz."""
+    if not isinstance(payload, dict):
+        return payload
+    import copy
+
+    pl = copy.deepcopy(payload)
+    dag = dagitim or {}
+    for a in pl.get("aylar") or []:
+        if not isinstance(a, dict):
+            continue
+        try:
+            iso = date(int(a["yil"]), int(a["ay"]), 1).isoformat()
+            brut = round(float(a.get("brut_tutar_kdv") or a.get("tutar_kdv_dahil") or 0), 2)
+        except (TypeError, ValueError, KeyError):
+            continue
+        od = round(float(dag.get(iso) or 0), 2)
+        if brut <= tol:
+            continue
+        kalan = round(max(brut - od, 0), 2)
+        if od >= brut - tol:
+            kalan = 0.0
+            od = brut
+        a["odenen_tutar_kdv"] = od
+        a["kalan_tutar_kdv"] = kalan
+        a["tahsil_edildi"] = kalan <= tol and od > tol
+        a["kismi_tahsilat"] = od > tol and kalan > tol
+        if kalan <= tol and od > tol:
+            a["acik_aylik_borc_faturasi"] = False
+        elif od <= tol and kalan > tol:
+            a["acik_aylik_borc_faturasi"] = True
+    pl["_mutabakat_okuma_waterfall"] = True
+    return pl
+
+
+def _norm_iso(k) -> str | None:
+    s = str(k or "").strip()[:10]
+    if len(s) >= 10 and s[4] == "-" and s[7] == "-":
+        try:
+            return date(int(s[0:4]), int(s[5:7]), 1).isoformat()
+        except ValueError:
+            return None
+    if len(s) >= 7 and s[4] == "-":
+        try:
+            return date(int(s[0:4]), int(s[5:7]), 1).isoformat()
+        except ValueError:
+            return None
+    return None

@@ -440,6 +440,49 @@ def _load_musteri_panel_by_iso(musteri_id: int, tahsil_rows=None, ekstre_batch=N
     return out
 
 
+def _panel_apply_waterfall_okuma(musteri_id: int, panel_by_iso: dict | None) -> dict:
+    """Okuma katmanı: bayrak+allowlist iken panel tahsilini waterfall ile gösterir. Yazmaz."""
+    from mutabakat_okuma import mutabakat_okuma_aktif, okuma_tahsil_map
+
+    mid = int(musteri_id or 0)
+    out = dict(panel_by_iso or {})
+    if mid <= 0 or not out or not mutabakat_okuma_aktif(mid):
+        return out
+    tol = float(AYLIK_GRID_TAM_ODENDI_TOLERANS)
+    try:
+        don = set(_dondurma_ay_kumesi(mid) or ())
+    except Exception:
+        don = set()
+    brut = {iso: round(float((prow or {}).get("aylik") or 0), 2) for iso, prow in out.items()}
+    ham_map = _aylik_tahsil_tutar_map(mid) or {}
+    dag = okuma_tahsil_map(mid, ham_map, brut, skip_ym=don)
+    for iso, prow in list(out.items()):
+        if not isinstance(prow, dict):
+            continue
+        pb = round(float(prow.get("aylik") or 0), 2)
+        nt = round(float(dag.get(iso) or 0), 2)
+        if pb > tol and nt > pb + tol:
+            nt = pb
+        pk = round(max(pb - nt, 0), 2) if pb > tol else 0.0
+        if pb > tol and nt >= pb - tol:
+            pk = 0.0
+        prow["tahsil"] = nt
+        prow["kalan"] = pk
+    return out
+
+
+def _load_musteri_panel_by_iso_okuma(musteri_id: int, **kwargs) -> dict:
+    """Panel okuma (API/mutabakat): waterfall bayrağı açıksa taşınmış tahsil."""
+    raw = _load_musteri_panel_by_iso(musteri_id, **kwargs)
+    try:
+        return _panel_apply_waterfall_okuma(int(musteri_id), raw)
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "panel okuma waterfall musteri_id=%s", musteri_id
+        )
+        return raw or {}
+
+
 def _save_musteri_panel_by_iso(musteri_id: int, by_iso: dict, prune_no_db_tahsil: bool = False) -> None:
     try:
         mid = int(musteri_id)
@@ -4970,23 +5013,62 @@ def _parse_aylik_grid_cache_payload_raw(raw):
     return obj if isinstance(obj, dict) else None
 
 
+def _grid_okuma_waterfall_overlay(musteri_id: int, payload: dict | None) -> dict | None:
+    """Allowlist okuma: cache ham kalır; dönen kopyada odenen waterfall. Yazmaz."""
+    from mutabakat_okuma import (
+        apply_waterfall_to_grid_payload_copy,
+        brut_by_iso_from_payload,
+        mutabakat_okuma_aktif,
+        okuma_tahsil_map,
+    )
+
+    if not isinstance(payload, dict) or not mutabakat_okuma_aktif(musteri_id):
+        return payload
+    try:
+        don = set(_dondurma_ay_kumesi(int(musteri_id)) or ())
+    except Exception:
+        don = set()
+    brut = brut_by_iso_from_payload(payload)
+    ham = _aylik_tahsil_tutar_map(int(musteri_id)) or {}
+    dag = okuma_tahsil_map(int(musteri_id), ham, brut, skip_ym=don)
+    return apply_waterfall_to_grid_payload_copy(payload, dag)
+
+
 def _read_aylik_grid_cache_payload(musteri_id, mem_ttl: float = 12.0):
-    """musteri_aylik_grid_cache satırından payload; yoksa None (yeniden hesap çağıran karar verir)."""
+    """musteri_aylik_grid_cache satırından payload; yoksa None (yeniden hesap çağıran karar verir).
+
+    MUTABAKAT_OKUMA allowlist: ham cache/mem aynen; dönen kopyada waterfall overlay
+    (bayat cache yeşil/kırmızı yanlışlığı olmasın; yazılmaz).
+    """
     try:
         mid = int(musteri_id)
     except (TypeError, ValueError):
         return None
     now = time.time()
     hit = _aylik_grid_mem_get(mid)
+    payload = None
     if hit and (now - float(hit[0] or 0)) < mem_ttl:
-        return hit[1]
-    row = fetch_one(
-        "SELECT payload FROM musteri_aylik_grid_cache WHERE musteri_id = %s",
-        (mid,),
-    )
-    payload = _parse_aylik_grid_cache_payload_raw((row or {}).get("payload"))
-    if payload:
-        _aylik_grid_mem_set(mid, payload, now)
+        payload = hit[1]
+        # Waterfall işaretli mem dönmesin (bayrak kapanınca eski overlay kalmasın)
+        if isinstance(payload, dict) and payload.get("_mutabakat_okuma_waterfall"):
+            payload = None
+    if payload is None:
+        row = fetch_one(
+            "SELECT payload FROM musteri_aylik_grid_cache WHERE musteri_id = %s",
+            (mid,),
+        )
+        payload = _parse_aylik_grid_cache_payload_raw((row or {}).get("payload"))
+        if payload:
+            _aylik_grid_mem_set(mid, payload, now)
+    try:
+        from mutabakat_okuma import mutabakat_okuma_aktif
+
+        if payload and mutabakat_okuma_aktif(mid):
+            return _grid_okuma_waterfall_overlay(mid, payload)
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "grid okuma waterfall musteri_id=%s", mid
+        )
     return payload
 
 
@@ -5031,6 +5113,14 @@ def _read_aylik_grid_cache_payload_batch(musteri_ids, mem_ttl: float = 12.0) -> 
             if payload:
                 out[mid] = payload
                 _aylik_grid_mem_set(mid, payload, now)
+    try:
+        from mutabakat_okuma import mutabakat_okuma_aktif
+
+        for mid in list(out.keys()):
+            if mutabakat_okuma_aktif(mid):
+                out[mid] = _grid_okuma_waterfall_overlay(mid, out[mid])
+    except Exception:
+        logging.getLogger(__name__).exception("grid batch okuma waterfall")
     return out
 
 
@@ -12125,6 +12215,26 @@ def _cari_ekstre_hareketler(
         )
     except Exception:
         ekstre_tahsil_map = {}
+    # Okuma waterfall (bayrak+allowlist): ekstre dağılım alanı — yazmaz.
+    try:
+        from mutabakat_okuma import mutabakat_okuma_aktif, okuma_tahsil_map
+
+        if mutabakat_okuma_aktif(int(musteri_id)):
+            try:
+                don_e = set(_dondurma_ay_kumesi(int(musteri_id)) or ())
+            except Exception:
+                don_e = set()
+            brut_e = {
+                iso: round(float(v or 0), 2)
+                for iso, v in (remaining_fifo or {}).items()
+            }
+            ekstre_tahsil_map = okuma_tahsil_map(
+                int(musteri_id), ekstre_tahsil_map, brut_e, skip_ym=don_e
+            )
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "ekstre okuma waterfall musteri_id=%s", musteri_id
+        )
     # Plan B/C: aylık sentetik Tahsilat — yalnızca grid_toplu map'te; manuel/banka kendi satırında.
     try:
         _rows_aylik = [r for r in (tahsil_rows_ek or []) if not _ekstre_kaynak_kendi_satiri(r)]
