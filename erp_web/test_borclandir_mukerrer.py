@@ -174,7 +174,18 @@ def sunucu():
         check("%s (c): Mayis panel satiri yokken silme sorgusu yok" % et, silme_say(sil, "2026-05-01") == 0)
         check("%s: toplam yazilan satir sayisi 1 (yalniz Mayis)" % et, len(ins) == 1, ins)
         # Mart tutari plan/plansiz fark etmeksizin hic yazilmadi
-        check("%s: mevcut satira dokunma yok (UPDATE / faturalar DELETE yok)" % et, not any(("UPDATE" in q.upper() or "DELETE FROM FATURALAR" in q.upper()) and "musteri_aylik_grid_cache" not in q for q in KOS_YAZMA), KOS_YAZMA)
+        def _fatura_yan_etki(q):
+            u = q.upper()
+            # Panel/grid/reel ensure + cache yenileme bilinçli; yalnız fatura satırı yasak.
+            if "FATURALAR" not in u:
+                return False
+            return ("UPDATE" in u and "INSERT" not in u) or "DELETE FROM FATURALAR" in u
+
+        check(
+            "%s: mevcut satira dokunma yok (UPDATE / faturalar DELETE yok)" % et,
+            not any(_fatura_yan_etki(q) for q in KOS_YAZMA),
+            [q for q in KOS_YAZMA if _fatura_yan_etki(q)],
+        )
 
     # Eski davranis korunur: hicbir ay AUTO_INV'li degilse cevap anahtarlari/mesaj eskisi gibi
     j, ins, sil, sen = kos(False, satirlar=[ISTEMCI[1], ISTEMCI[2]])

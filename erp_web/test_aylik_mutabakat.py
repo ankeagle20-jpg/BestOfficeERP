@@ -24,19 +24,21 @@ def test_siniflar_sabit():
         "grid_kirmizi_map_tahsil",
         "grid_yesil_map_bos",
         "dondurma_tahsil",
+        "map_aylik_tavan",
         "ekstre_eksik_ay",
         "ekstre_sisko",
         "borc_fatura_grid",
     }
     check("sinif anahtarlari", set(am.SINIFLAR) == beklenen, am.SINIFLAR)
     check("yuksek dort", sum(1 for v in am.SINIFLAR.values() if v == "yuksek") == 4)
-    check("sunum uc", sum(1 for v in am.SINIFLAR.values() if v == "sunum") == 3)
+    check("sunum dort", sum(1 for v in am.SINIFLAR.values() if v == "sunum") == 4)
 
 
 def _row(**kw):
     base = {
         "tahsil_panel": 0,
         "tahsil_map": 0,
+        "kira": 0,
         "grid_tutar": 0,
         "grid_durum": "kirmizi",
         "ekstre_tahsil_satir": 0,
@@ -44,22 +46,31 @@ def _row(**kw):
         "borc_fatura": 0,
     }
     base.update(kw)
+    if "kira" not in kw and base.get("grid_tutar"):
+        base["kira"] = base["grid_tutar"]
     return base
 
 
 def test_her_sinif_sentetik():
     ornekler = [
-        ("panel_map", _row(tahsil_panel=100, tahsil_map=50, grid_tutar=100, grid_durum="kismi")),
-        ("grid_kirmizi_map_tahsil", _row(tahsil_map=100, grid_tutar=100, grid_durum="kirmizi")),
-        ("grid_yesil_map_bos", _row(tahsil_map=0, grid_tutar=100, grid_durum="odendi")),
+        ("panel_map", _row(tahsil_panel=100, tahsil_map=50, kira=100, grid_tutar=100, grid_durum="kismi")),
+        ("map_aylik_tavan", _row(
+            tahsil_panel=2160, tahsil_map=2160, tahsil_map_ham=2750,
+            kira=2160, grid_tutar=2160, grid_durum="odendi",
+        )),
+        ("grid_kirmizi_map_tahsil", _row(tahsil_map=100, kira=100, grid_tutar=100, grid_durum="kirmizi")),
+        ("grid_yesil_map_bos", _row(tahsil_map=0, kira=100, grid_tutar=100, grid_durum="odendi")),
         ("dondurma_tahsil", _row(tahsil_panel=80, tahsil_map=80, grid_durum="dondurma", grid_tutar=0)),
-        ("ekstre_eksik_ay", _row(tahsil_map=100, ekstre_tahsil_satir=0, grid_tutar=100, grid_durum="odendi")),
-        ("ekstre_sisko", _row(tahsil_map=100, ekstre_tahsil_satir=500, grid_tutar=100, grid_durum="odendi")),
-        ("borc_fatura_grid", _row(borc_fatura=600, ekstre_borc=1094.18, grid_tutar=1094.18, grid_durum="kirmizi")),
+        ("ekstre_eksik_ay", _row(tahsil_map=100, ekstre_tahsil_satir=0, kira=100, grid_tutar=100, grid_durum="odendi")),
+        ("ekstre_sisko", _row(tahsil_map=100, ekstre_tahsil_satir=500, kira=100, grid_tutar=100, grid_durum="odendi")),
+        ("borc_fatura_grid", _row(borc_fatura=600, ekstre_borc=1094.18, kira=1094.18, grid_tutar=1094.18, grid_durum="kirmizi")),
     ]
     for kod, row in ornekler:
         kodlar = [u["kod"] for u in am.siniflandir(row)]
         check("sinif " + kod, kod in kodlar, kodlar)
+        if kod == "map_aylik_tavan":
+            u = [x for x in am.siniflandir(row) if x["kod"] == kod][0]
+            check("tavan sunum", u["ciddiyet"] == "sunum", u)
 
 
 def test_uyumlu_musteri():

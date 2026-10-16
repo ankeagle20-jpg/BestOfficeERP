@@ -24,6 +24,7 @@ SINIFLAR = {
     "grid_kirmizi_map_tahsil": "yuksek",
     "grid_yesil_map_bos": "yuksek",
     "dondurma_tahsil": "yuksek",
+    "map_aylik_tavan": "sunum",  # eski b: map>kira, panel≈kira (görünüm doğru)
     "ekstre_eksik_ay": "sunum",
     "ekstre_sisko": "sunum",
     "borc_fatura_grid": "sunum",
@@ -239,20 +240,22 @@ def aylik_mutabakat(mid, ay_baslangic, ay_bitis, *, tam_ekstre: bool = True) -> 
             if go_raw is None:
                 go_raw = g.get("odenen")
         go = _f2(go_raw) if go_raw is not None else None
-        mt = _f2(tahsil_map.get(iso))
+        mt_ham = _f2(tahsil_map.get(iso))
         durum = _grid_durum(g, dondurma, iso)
         kira = pa if pa > TOL else (gt if gt > TOL else _f2(ekstre_borc.get(iso)))
+        mt_cap = min(mt_ham, kira) if kira > TOL else mt_ham
         row = {
             "iso": iso,
             "ay": iso[:7],
             "kira": kira,
-            "tahsil_map": mt,
+            "tahsil_map": mt_cap,  # karşılaştırma (min)
+            "tahsil_map_ham": mt_ham,
             "tahsil_panel": pt,
             "grid_tutar": gt,
             "grid_durum": durum,
             "grid_odenen_varsa": go,
             "ekstre_borc": _f2(ekstre_borc.get(iso)),
-            "ekstre_tahsil_dagitim": mt,
+            "ekstre_tahsil_dagitim": mt_cap,
             "ekstre_tahsil_satir": _f2(ekstre_tahsil_satir.get(iso)),
             "borc_fatura": _f2(borc_fatura.get(iso)),
         }
@@ -262,10 +265,25 @@ def aylik_mutabakat(mid, ay_baslangic, ay_bitis, *, tam_ekstre: bool = True) -> 
 
 
 def siniflandir(row: dict) -> list[dict[str, Any]]:
-    """Sabit kod + ciddiyet + sapma TL."""
+    """Sabit kod + ciddiyet + sapma TL.
+
+    Karşılaştırma tahsil_map = min(ham, kira). Ham aşımı sunum (map_aylik_tavan).
+    """
     out = []
     pt = _f2(row.get("tahsil_panel"))
+    mt_ham = _f2(row.get("tahsil_map_ham"))
+    if mt_ham <= TOL and "tahsil_map_ham" not in row:
+        mt_ham = _f2(row.get("tahsil_map"))
+    kira = _f2(row.get("kira") or row.get("grid_tutar") or row.get("ekstre_borc"))
     mt = _f2(row.get("tahsil_map"))
+    if kira > TOL:
+        mt_cap = min(mt_ham if mt_ham > TOL or "tahsil_map_ham" in row else mt, kira)
+    else:
+        mt_cap = mt if mt > TOL else mt_ham
+    # Satırda cap yoksa (birim test) hesapla
+    if "tahsil_map_ham" not in row and kira > TOL:
+        mt_cap = min(mt, kira)
+        mt_ham = mt
     gt = _f2(row.get("grid_tutar"))
     durum = str(row.get("grid_durum") or "")
     et_satir = _f2(row.get("ekstre_tahsil_satir"))
@@ -279,19 +297,26 @@ def siniflandir(row: dict) -> list[dict[str, Any]]:
             "sapma_tl": round(abs(float(sapma)), 2),
         })
 
-    if abs(pt - mt) > TOL and (pt > TOL or mt > TOL):
-        ekle("panel_map", pt - mt)
-    if durum == "kirmizi" and mt > TOL and gt > TOL:
-        ekle("grid_kirmizi_map_tahsil", mt)
-    if durum == "odendi" and mt <= TOL and gt > TOL:
+    # Eski b: panel≈kira/cap, ham map aşırı → sunum
+    if (
+        kira > TOL
+        and mt_ham > kira + TOL
+        and abs(pt - mt_cap) <= TOL
+        and (pt > TOL or mt_cap > TOL)
+    ):
+        ekle("map_aylik_tavan", mt_ham - kira)
+    elif abs(pt - mt_cap) > TOL and (pt > TOL or mt_cap > TOL):
+        ekle("panel_map", pt - mt_cap)
+    if durum == "kirmizi" and mt_cap > TOL and gt > TOL:
+        ekle("grid_kirmizi_map_tahsil", mt_cap)
+    if durum == "odendi" and mt_cap <= TOL and gt > TOL:
         ekle("grid_yesil_map_bos", gt)
-    if durum == "dondurma" and (pt > TOL or mt > TOL):
-        ekle("dondurma_tahsil", max(pt, mt))
-    if mt > TOL and et_satir <= TOL:
-        ekle("ekstre_eksik_ay", mt)
-    if et_satir > TOL and mt > TOL and et_satir > mt + max(100.0, TOL * 2):
-        ekle("ekstre_sisko", et_satir - mt)
-    # Fatura toplamı ile ekrandaki ekstre/grid kira farkı (sunum)
+    if durum == "dondurma" and (pt > TOL or mt_cap > TOL or mt_ham > TOL):
+        ekle("dondurma_tahsil", max(pt, mt_cap, mt_ham))
+    if mt_cap > TOL and et_satir <= TOL:
+        ekle("ekstre_eksik_ay", mt_cap)
+    if et_satir > TOL and mt_cap > TOL and et_satir > mt_cap + max(100.0, TOL * 2):
+        ekle("ekstre_sisko", et_satir - mt_cap)
     kira_ekran = eb if eb > TOL else gt
     if bf > TOL and kira_ekran > TOL and abs(bf - kira_ekran) > TOL:
         ekle("borc_fatura_grid", bf - kira_ekran)
@@ -424,17 +449,18 @@ def main(argv=None) -> int:
         print(json.dumps(satirlar, ensure_ascii=False, indent=2))
     else:
         print(
-            "ay | kira | map | panel | grid | durum | odenen | ekstre_borc | "
-            "ekstre_tah_satir | borc_fatura | uyusmazlik"
+            "ay | kira | map_cap | map_ham | panel | grid | durum | odenen | "
+            "ekstre_borc | ekstre_tah_satir | borc_fatura | uyusmazlik"
         )
         for r in satirlar:
             uys = ",".join(u["kod"] for u in (r.get("uyusmazliklar") or [])) or "-"
             print(
-                "%s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s"
+                "%s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s"
                 % (
                     r["ay"],
                     r["kira"],
                     r["tahsil_map"],
+                    r.get("tahsil_map_ham"),
                     r["tahsil_panel"],
                     r["grid_tutar"],
                     r["grid_durum"],

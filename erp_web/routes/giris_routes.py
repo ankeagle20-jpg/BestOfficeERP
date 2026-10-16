@@ -778,7 +778,20 @@ def sync_musteri_panel_from_tahsil_and_dagitim(
             }
     _save_musteri_panel_by_iso(mid, by_iso, prune_no_db_tahsil=True)
     if isinstance(payload, dict):
-        _apply_panel_by_iso_to_grid_payload(payload, by_iso)
+        # map_cap: odenen/tahsil_edildi = min(map, brut) birleşimi (understatement yok)
+        try:
+            tmap = _aylik_tahsil_tutar_map(mid)
+        except Exception:
+            tmap = {}
+        _apply_panel_by_iso_to_grid_payload(payload, by_iso, tahsil_map=tmap)
+        try:
+            payload = _aylik_grid_cache_payload_tahsil_guncelle(
+                mid, payload, panel_by_iso=by_iso
+            )
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "sync panel tahsil_guncelle musteri_id=%s", mid
+            )
         _ensure_aylik_grid_cache_table()
         execute(
             """
@@ -920,6 +933,44 @@ def apply_makbuz_dagitim_to_panel_db(
                 (mid, json.dumps(payload, ensure_ascii=False)),
             )
             _invalidate_aylik_grid_payload_mem(mid)
+    # Tam prune: makbuz ekleme kurallarına dokunmadan panel/grid'i canlı map ile hizala.
+    try:
+        if not isinstance(payload, dict):
+            payload = _read_aylik_grid_cache_payload(mid)
+        if not isinstance(payload, dict):
+            try:
+                payload = _build_aylik_grid_cache_payload(
+                    mid, tufe_map=_tufe_map_by_year_month_cached()
+                )
+            except Exception:
+                payload = None
+        fresh = _panel_by_iso_from_tahsil_map(
+            mid, payload, tahsilat_tarihi=tarih_s or None, trust_grid_odenen=False
+        )
+        if fresh:
+            _save_musteri_panel_by_iso(mid, fresh, prune_no_db_tahsil=True)
+            by_iso = fresh
+            if isinstance(payload, dict):
+                tmap = _aylik_tahsil_tutar_map(mid)
+                _apply_panel_by_iso_to_grid_payload(payload, fresh, tahsil_map=tmap)
+                payload = _aylik_grid_cache_payload_tahsil_guncelle(
+                    mid, payload, panel_by_iso=fresh
+                )
+                _ensure_aylik_grid_cache_table()
+                execute(
+                    """
+                    INSERT INTO musteri_aylik_grid_cache (musteri_id, payload, updated_at)
+                    VALUES (%s, %s, NOW())
+                    ON CONFLICT (musteri_id)
+                    DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()
+                    """,
+                    (mid, json.dumps(payload, ensure_ascii=False)),
+                )
+                _invalidate_aylik_grid_payload_mem(mid)
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "apply_makbuz_dagitim prune/resync musteri_id=%s", mid
+        )
     return by_iso
 
 
@@ -14321,21 +14372,26 @@ def api_aylik_tutarlardan_borclandir():
     else:
         satirlar_sync = satirlar
     sync_musteri_panel_borclu_from_satirlar(musteri_id, satirlar_sync)
-    _invalidate_aylik_grid_payload_mem(int(musteri_id))
+    # Invalidate yerine canlı tahsil_guncelle + cache yaz (bayat grid kalmasın).
     try:
-        execute(
-            "DELETE FROM musteri_aylik_grid_cache WHERE musteri_id=%s",
-            (int(musteri_id),)
-        )
+        _persist_grid_cache_with_panel(int(musteri_id))
     except Exception:
-        pass
+        logging.getLogger(__name__).exception(
+            "borclandir persist grid musteri_id=%s", musteri_id
+        )
+        _invalidate_aylik_grid_payload_mem(int(musteri_id))
+        try:
+            execute(
+                "DELETE FROM musteri_aylik_grid_cache WHERE musteri_id=%s",
+                (int(musteri_id),)
+            )
+        except Exception:
+            pass
+        _defer_aylik_grid_cache_rebuild(musteri_id)
     try:
         _cari_ekstre_api_cache.clear()
     except Exception:
         pass
-    # Kaydet deseni: tam grid rebuild isteği bekletmesin (çift upsert + ekstre
-    # invalidate içindeki 13 aylık tarama arka planda tek _upsert ile kapanır).
-    _defer_aylik_grid_cache_rebuild(musteri_id)
     yeni_n = sum(
         1 for x in olusturulan if isinstance(x, dict) and not x.get("zaten_vardi")
     )
