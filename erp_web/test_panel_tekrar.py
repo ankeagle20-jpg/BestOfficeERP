@@ -81,7 +81,12 @@ class Sahte:
         if s.startswith("DELETE FROM tahsilatlar"):
             rid = params[0]
             row = self.tahsilatlar.get(rid)
-            if row and str(row.get("kaynak") or "") == "grid_toplu":
+            if not row:
+                return
+            k = row.get("kaynak")
+            k_str = str(k or "").strip()
+            eski_sil = "COALESCE(kaynak, '') = ''" in s or "= ''" in s.replace(" ", "")
+            if k_str == "grid_toplu" or (eski_sil and (k is None or k_str == "")):
                 self.tahsilatlar.pop(rid, None)
                 self._son = {"id": rid, "makbuz_no": row.get("makbuz_no")}
             return
@@ -179,11 +184,11 @@ def test_karar():
     bilinmeyen = _tah(None, 5, "yok " + ISARET)
     yalniz = pt.karar_ver([(2026, 3)], [panel], [], taraf="tahsil")
     check("1 onay gerekli", yalniz["onay_gerekli"] is True and yalniz["panel_n"] == 1 and yalniz["diger_m"] == 0)
-    check("1 metin", yalniz["mesaj_onay"] == pt.onay_metni(1, 0), yalniz["mesaj_onay"])
+    check("1 metin", "Silinecek" in (yalniz["mesaj_onay"] or "") and "grid_toplu" in (yalniz["mesaj_onay"] or ""), yalniz["mesaj_onay"])
     karisik = pt.karar_ver([(2026, 3)], [panel, banka, makbuz, link], [], taraf="borc")
     check("2 yalniz panel silinir", [r["id"] for r in karisik["sil_tahsil"]] == [1], [r["id"] for r in karisik["sil_tahsil"]])
     check("2 diger sayisi 3", karisik["diger_m"] == 3 and karisik["panel_n"] == 1)
-    check("2 metin sayilari", karisik["mesaj_onay"] == pt.onay_metni(1, 3))
+    check("2 metin sayilari", "Silinecek" in (karisik["mesaj_onay"] or "") and "DEĞİŞMEYECEK" in (karisik["mesaj_onay"] or ""), karisik["mesaj_onay"])
     yabanci = pt.karar_ver([(2026, 3)], [banka, makbuz, link], [], taraf="tahsil")
     check("3 atla baska kaynak", yabanci["atla_tam"].get(AY, {}).get("neden") == "baska_kaynak")
     check("3 silme yok", yabanci["sil_tahsil"] == [] and yabanci["onay_gerekli"] is False)
@@ -305,7 +310,11 @@ def test_uc_onaysiz():
         with app.test_request_context("/x", method="POST", json={"musteri_id": MID, "kira_nakit": False, "satirlar": satir}):
             yanit = f().get_json()
         check("1 onaysiz silinmedi", yanit.get("onay_gerekli") is True and cagrildi["sil"] == 0 and yanit.get("ok") is False, yanit.get("mesaj"))
-        check("1 ekran metni", yanit.get("mesaj") == pt.onay_metni(1, 1), yanit.get("mesaj"))
+        check(
+            "1 ekran metni",
+            "Silinecek" in (yanit.get("mesaj") or "") and (yanit.get("panel_n") or 0) == 1,
+            yanit.get("mesaj"),
+        )
         check("1 tahsil_silinen bos", yanit.get("tahsil_silinen") == [])
     finally:
         pt.panel_satirlari_sil = eski
@@ -736,10 +745,11 @@ var girisFetchAgKopmasinaKarsi = function () {
   n += 1;
   return Promise.resolve({
     ok: true,
-    text: function () { return Promise.resolve(JSON.stringify({ onay_gerekli: true, mesaj: 'soru' })); }
+    text: function () { return Promise.resolve(JSON.stringify({ onay_gerekli: true, mesaj: 'soru', silinecek_grid: [], silinecek_eski: [], degismeyecek: [] })); }
   });
 };
-var confirm = function () { return false; };
+var confirm = function () { process.exit(8); return false; };
+var panelTekrarModalAc = function () { return Promise.resolve({ ok: false, iptal: true }); };
 panelTekrarGonder('/giris/api/aylik-tutarlardan-borclandir', { method: 'POST', body: '{}' }).then(function (res) {
   if (n !== 1) process.exit(5);
   if (!res || !res.iptal) process.exit(6);
@@ -748,6 +758,11 @@ panelTekrarGonder('/giris/api/aylik-tutarlardan-borclandir', { method: 'POST', b
 """
     r = subprocess.run([node, "-e", betik], capture_output=True, text=True)
     check("iptal harita ve ikinci istek yok", r.returncode == 0, (r.stderr or r.stdout or "")[:180])
+    # Modal iptal sessiz: borçlandır iptal dalında alert / Onaylanmadı yok
+    iptal_bas = govde.find("if (res.iptal || (res.j && res.j.iptal))")
+    iptal_son = govde.find("if (!res.j || !res.j.ok)", iptal_bas) if iptal_bas >= 0 else -1
+    iptal_blok = govde[iptal_bas:iptal_son] if iptal_bas >= 0 and iptal_son > iptal_bas else ""
+    check("iptal alert yok", iptal_blok and "alert(" not in iptal_blok and "Onaylanmadı" not in iptal_blok)
     betik_hata = parca + r"""
 var n = 0;
 var girisFetchAgKopmasinaKarsi = function () {
@@ -758,6 +773,7 @@ var girisFetchAgKopmasinaKarsi = function () {
   });
 };
 var confirm = function () { process.exit(8); return false; };
+var panelTekrarModalAc = function () { process.exit(8); };
 panelTekrarGonder('/giris/api/aylik-tutarlardan-borclandir', { method: 'POST', body: '{}' }).then(function (res) {
   if (n !== 1) process.exit(5);
   if (!res || !res.j || res.j.ok !== false) process.exit(6);
@@ -776,6 +792,7 @@ var girisFetchAgKopmasinaKarsi = function () {
   return Promise.reject(new Error('ag'));
 };
 var confirm = function () { process.exit(8); return false; };
+var panelTekrarModalAc = function () { process.exit(8); };
 panelTekrarGonder('/giris/api/aylik-tutarlardan-borclandir', { method: 'POST', body: '{}' }).then(function (res) {
   if (n !== 1) process.exit(5);
   if (!res || !res.j || res.j.kod !== 'panel_okuma') process.exit(6);
@@ -785,6 +802,11 @@ panelTekrarGonder('/giris/api/aylik-tutarlardan-borclandir', { method: 'POST', b
 """
     r3 = subprocess.run([node, "-e", betik_ag], capture_output=True, text=True)
     check("onizleme ag hatasi yazma yok", r3.returncode == 0, (r3.stderr or r3.stdout or "")[:180])
+    # Tahsil et hâlâ confirm kullanır (borçlandır modalı değil)
+    check(
+        "tahsil confirm korunur",
+        "tahsil-et" in parca and "confirm(" in parca and "panelTekrarModalAc" in parca,
+    )
 
 
 def test_kapsam_kapali_silmez():

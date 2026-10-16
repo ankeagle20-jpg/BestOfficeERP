@@ -14176,6 +14176,12 @@ def _panel_tekrar_onayli(data) -> bool:
     return v in (True, 1, "1", "true", "on", "yes", "evet")
 
 
+def _panel_tekrar_onay_eski(data) -> bool:
+    """Eski (kaynak boş) satır silmek için ayrı bayrak. Yoksa SİLİNMEZ."""
+    v = (data or {}).get("onay_eski_kayit")
+    return v in (True, 1, "1", "true", "on", "yes", "evet")
+
+
 def _panel_tekrar_kullanici() -> str:
     try:
         return str(getattr(current_user, "id", "") or "")
@@ -14363,19 +14369,32 @@ def _panel_tekrar_uygula(musteri_id, plan):
         )
 
 
-def _panel_tekrar_onay_yaniti(plan):
-    return jsonify({
-        "ok": False,
-        "onay_gerekli": True,
+def _panel_tekrar_plan_yanit_alanlari(plan) -> dict:
+    """Önizleme / onay yanıtına ortak dürüst liste alanları."""
+    return {
         "panel_n": plan.get("panel_n") or 0,
         "diger_m": plan.get("diger_m") or 0,
         "mesaj": plan.get("mesaj_onay") or "",
+        "silinecek_grid": plan.get("silinecek_grid") or [],
+        "silinecek_eski": plan.get("silinecek_eski") or [],
+        "degismeyecek": plan.get("degismeyecek") or [],
+        "onay_eski_kayit_gerekli": bool(plan.get("onay_eski_kayit_gerekli")),
+        "eski_kaynak_enabled": bool(plan.get("eski_kaynak_enabled")),
+        "bozuk_tarih_n": int(plan.get("bozuk_tarih_n") or 0),
+    }
+
+
+def _panel_tekrar_onay_yaniti(plan):
+    govde = {
+        "ok": False,
+        "onay_gerekli": True,
         "tahsil_silinen": [],
         "borc_silinen": [],
         "olusturulan": [],
         "atlanan": [],
-        "bozuk_tarih_n": int(plan.get("bozuk_tarih_n") or 0),
-    })
+    }
+    govde.update(_panel_tekrar_plan_yanit_alanlari(plan))
+    return jsonify(govde)
 
 
 @bp.route('/api/aylik-tutarlardan-panel-onizle', methods=['POST'])
@@ -14422,18 +14441,18 @@ def api_aylik_tutarlardan_panel_onizle():
         return _panel_okuma_hata_yaniti(exc, "panel onizle okuma")
     if plan.get("onay_gerekli"):
         return _panel_tekrar_onay_yaniti(plan)
-    return jsonify({
+    govde = {
         "ok": True,
         "onay_gerekli": False,
-        "panel_n": plan.get("panel_n") or 0,
-        "diger_m": plan.get("diger_m") or 0,
-        "mesaj": "",
         "tahsil_silinen": [],
         "borc_silinen": [],
         "olusturulan": [],
         "atlanan": [],
-        "bozuk_tarih_n": int(plan.get("bozuk_tarih_n") or 0),
-    })
+    }
+    govde.update(_panel_tekrar_plan_yanit_alanlari(plan))
+    if not govde.get("mesaj") and (govde.get("degismeyecek") or []):
+        govde["mesaj"] = plan.get("mesaj_onay") or "Hiçbir tahsilat silinmeyecek."
+    return jsonify(govde)
 
 
 @bp.route('/api/aylik-tutarlardan-borclandir', methods=['POST'])
@@ -14504,6 +14523,8 @@ def api_aylik_tutarlardan_borclandir():
         return _panel_okuma_hata_yaniti(exc, "panel tekrar okuma")
     if panel_plan.get("onay_gerekli") and not _panel_tekrar_onayli(data):
         return _panel_tekrar_onay_yaniti(panel_plan)
+    # Eski kayıt: onay_eski_kayit yoksa plan'dan çıkar (SİLMEZ). Tahsil yönü etkilenmez.
+    panel_tekrar.plan_eski_filtrele(panel_plan, _panel_tekrar_onay_eski(data))
     if panel_plan.get("panel_n") and not _panel_kapsam_acik():
         return _panel_guvenli_degil_yaniti()
     # Silme ile yeni fatura aynı db() içinde kalsın. Ayrı commit, belge servisi yüzünden değil:

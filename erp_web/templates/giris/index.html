@@ -18254,13 +18254,125 @@ function panelTekrarOnizlemeHata(res) {
     if (res.j.ok === false) return true;
     return false;
 }
+function panelTekrarModalListeHtml(liste, bosMetin) {
+    if (!liste || !liste.length) {
+        return '<p class="panel-tekrar-modal-bos">' + (bosMetin || 'Yok') + '</p>';
+    }
+    var sat = liste.map(function (r) {
+        var ay = (r.yil != null && r.ay != null) ? (String(r.yil) + '-' + String(r.ay).padStart(2, '0')) : (r.ay_iso || '');
+        var tut = (r.tutar != null && isFinite(Number(r.tutar)))
+            ? Number(r.tutar).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+            : '—';
+        var tar = r.tahsilat_tarihi ? String(r.tahsilat_tarihi) : '—';
+        var kay = r.kaynak != null ? String(r.kaynak) : '—';
+        return '<tr><td>' + ay + '</td><td>' + tut + '</td><td>' + tar + '</td><td>' + kay + '</td></tr>';
+    }).join('');
+    return '<table class="panel-tekrar-modal-tablo"><thead><tr><th>Ay</th><th>Tutar</th><th>Tarih</th><th>Kaynak</th></tr></thead><tbody>' + sat + '</tbody></table>';
+}
+function panelTekrarModalDegisHtml(liste) {
+    if (!liste || !liste.length) {
+        return '<p class="panel-tekrar-modal-bos">Yok</p>';
+    }
+    return '<ul class="panel-tekrar-modal-ul">' + liste.map(function (d) {
+        var ay = (d.yil != null && d.ay != null) ? (String(d.yil) + '-' + String(d.ay).padStart(2, '0')) : '';
+        return '<li>' + ay + ' — ' + String(d.neden || '?') + '</li>';
+    }).join('') + '</ul>';
+}
+function panelTekrarModalAc(opts) {
+    return new Promise(function (resolve) {
+        var mevcut = document.getElementById('panelTekrarModal');
+        if (mevcut) mevcut.remove();
+        var j = (opts && opts.j) || {};
+        var soru = (opts && opts.soru) ? String(opts.soru) : '';
+        var grid = j.silinecek_grid || [];
+        var eski = j.silinecek_eski || [];
+        var degis = j.degismeyecek || [];
+        var eskiGerek = !!(j.onay_eski_kayit_gerekli && eski.length);
+        var wrap = document.createElement('div');
+        wrap.id = 'panelTekrarModal';
+        wrap.className = 'panel-tekrar-modal-overlay';
+        wrap.setAttribute('role', 'dialog');
+        wrap.setAttribute('aria-modal', 'true');
+        var eskiBlok = '';
+        if (eskiGerek) {
+            eskiBlok =
+                '<section class="panel-tekrar-modal-sec panel-tekrar-modal-eski">' +
+                '<h4>Silinecek (eski kayıt, kaynağı bilinmiyor)</h4>' +
+                '<p class="panel-tekrar-modal-uyari">Kaynağı bilinmiyor; yedek alınır, geri yazılabilir. Onaylamadan bu satırlar silinmez.</p>' +
+                panelTekrarModalListeHtml(eski, 'Yok') +
+                '<label class="panel-tekrar-modal-check"><input type="checkbox" id="panelTekrarEskiOnay" /> Eski kayıtları silmeyi onaylıyorum</label>' +
+                '</section>';
+        }
+        var silGridBlok =
+            '<section class="panel-tekrar-modal-sec">' +
+            '<h4>Silinecek (grid_toplu)</h4>' +
+            panelTekrarModalListeHtml(grid, 'Grid kaynaklı silinecek satır yok') +
+            '</section>';
+        var degisBlok =
+            '<section class="panel-tekrar-modal-sec">' +
+            '<h4>DEĞİŞMEYECEK aylar</h4>' +
+            panelTekrarModalDegisHtml(degis) +
+            '</section>';
+        var ozet = (j.mesaj ? String(j.mesaj) : '') || '';
+        if (!grid.length && !eski.length && !(Number(j.panel_n) > 0)) {
+            if (!ozet) ozet = 'Hiçbir tahsilat silinmeyecek; seçilen aylar borçlu kaydedilebilir.';
+        }
+        wrap.innerHTML =
+            '<div class="panel-tekrar-modal-kutu">' +
+            '<h3>Borçlandır onayı</h3>' +
+            (soru ? '<pre class="panel-tekrar-modal-soru">' + soru.replace(/</g, '&lt;') + '</pre>' : '') +
+            (ozet ? '<p class="panel-tekrar-modal-ozet">' + ozet.replace(/</g, '&lt;') + '</p>' : '') +
+            (Number(j.bozuk_tarih_n) > 0 ? '<p>Biçimi bozuk tarihli ' + Number(j.bozuk_tarih_n) + ' satır silinmedi.</p>' : '') +
+            silGridBlok + eskiBlok + degisBlok +
+            '<div class="panel-tekrar-modal-aksiyon">' +
+            '<button type="button" class="panel-tekrar-modal-iptal">İptal</button>' +
+            '<button type="button" class="panel-tekrar-modal-tamam">Tamam</button>' +
+            '</div></div>';
+        document.body.appendChild(wrap);
+        var kapandi = false;
+        var tamamBtn = wrap.querySelector('.panel-tekrar-modal-tamam');
+        function kapat(sonuc) {
+            if (kapandi) return;
+            kapandi = true;
+            document.removeEventListener('keydown', escFn, true);
+            try { wrap.remove(); } catch (eR) {}
+            resolve(sonuc);
+        }
+        function escFn(ev) {
+            if (ev && ev.key === 'Escape') {
+                ev.preventDefault();
+                kapat({ ok: false, iptal: true });
+            }
+        }
+        document.addEventListener('keydown', escFn, true);
+        wrap.addEventListener('click', function (ev) {
+            if (ev.target === wrap) kapat({ ok: false, iptal: true });
+        });
+        wrap.querySelector('.panel-tekrar-modal-iptal').addEventListener('click', function () {
+            kapat({ ok: false, iptal: true });
+        });
+        tamamBtn.addEventListener('click', function () {
+            if (tamamBtn.disabled) return;
+            if (eskiGerek) {
+                var cb = wrap.querySelector('#panelTekrarEskiOnay');
+                if (!cb || !cb.checked) {
+                    var uy = wrap.querySelector('.panel-tekrar-modal-uyari');
+                    if (uy) uy.style.outline = '2px solid #c0392b';
+                    return;
+                }
+            }
+            tamamBtn.disabled = true;
+            kapat({ ok: true, iptal: false, onay_eski: !!eskiGerek });
+        });
+    });
+}
 function panelTekrarGonder(url, opts, deneme) {
     var temiz = {};
     var onayli = !!(opts && opts.__panelOnay);
     var onizlendi = !!(opts && opts.__panelOnizle);
     var soru = (opts && opts.__panelSoru) ? String(opts.__panelSoru) : '';
     Object.keys(opts || {}).forEach(function (k) {
-        if (k !== '__panelOnay' && k !== '__panelOnizle' && k !== '__panelSoru') temiz[k] = opts[k];
+        if (k !== '__panelOnay' && k !== '__panelOnizle' && k !== '__panelSoru' && k !== '__panelOnayEski') temiz[k] = opts[k];
     });
     var hedef = url;
     if (!onayli && !onizlendi) {
@@ -18285,26 +18397,47 @@ function panelTekrarGonder(url, opts, deneme) {
                 var kod = panelTekrarKodTemiz(res && res.j && res.j.kod);
                 return { ok: false, j: { ok: false, kod: kod, mesaj: panelTekrarOkunamadiMesaji(kod) } };
             }
-            var parcalar = [];
-            if (soru) parcalar.push(soru);
-            if (res.j && res.j.onay_gerekli && res.j.mesaj) parcalar.push(String(res.j.mesaj));
-            if (res.j && Number(res.j.bozuk_tarih_n) > 0) {
-                parcalar.push('Biçimi bozuk tarihli ' + Number(res.j.bozuk_tarih_n) + ' satır silinmedi.');
+            var tarafTahsil = String(url).indexOf('tahsil-et') >= 0;
+            // Tahsil et: eski confirm davranışı (değişmez). Borçlandır: sayfa içi modal.
+            if (tarafTahsil) {
+                var parcalarT = [];
+                if (soru) parcalarT.push(soru);
+                if (res.j && res.j.onay_gerekli && res.j.mesaj) parcalarT.push(String(res.j.mesaj));
+                if (res.j && Number(res.j.bozuk_tarih_n) > 0) {
+                    parcalarT.push('Biçimi bozuk tarihli ' + Number(res.j.bozuk_tarih_n) + ' satır silinmedi.');
+                }
+                if (parcalarT.length && !confirm(parcalarT.join('\n'))) {
+                    return { ok: true, j: { ok: false, iptal: true, mesaj: 'Onaylanmadı; hiçbir satır silinmedi.' }, iptal: true };
+                }
+                var govdeT = {};
+                try { govdeT = JSON.parse((opts && opts.body) || '{}'); } catch (e2t) { govdeT = {}; }
+                if (res.j && res.j.onay_gerekli) govdeT.onay = true;
+                var optsT = {};
+                Object.keys(opts || {}).forEach(function (k) {
+                    if (k !== '__panelSoru') optsT[k] = opts[k];
+                });
+                optsT.body = JSON.stringify(govdeT);
+                optsT.__panelOnizle = true;
+                if (res.j && res.j.onay_gerekli) optsT.__panelOnay = true;
+                return panelTekrarGonder(url, optsT, deneme);
             }
-            if (parcalar.length && !confirm(parcalar.join('\n'))) {
-                return { ok: true, j: { ok: false, iptal: true, mesaj: 'Onaylanmadı; hiçbir satır silinmedi.' }, iptal: true };
-            }
-            var govde = {};
-            try { govde = JSON.parse((opts && opts.body) || '{}'); } catch (e2) { govde = {}; }
-            if (res.j && res.j.onay_gerekli) govde.onay = true;
-            var opts2 = {};
-            Object.keys(opts || {}).forEach(function (k) {
-                if (k !== '__panelSoru') opts2[k] = opts[k];
+            return panelTekrarModalAc({ soru: soru, j: res.j || {} }).then(function (karar) {
+                if (!karar || karar.iptal || !karar.ok) {
+                    return { ok: true, j: { ok: false, iptal: true, mesaj: 'Onaylanmadı; hiçbir satır silinmedi.' }, iptal: true };
+                }
+                var govde = {};
+                try { govde = JSON.parse((opts && opts.body) || '{}'); } catch (e2) { govde = {}; }
+                if (res.j && res.j.onay_gerekli) govde.onay = true;
+                if (karar.onay_eski) govde.onay_eski_kayit = true;
+                var opts2 = {};
+                Object.keys(opts || {}).forEach(function (k) {
+                    if (k !== '__panelSoru') opts2[k] = opts[k];
+                });
+                opts2.body = JSON.stringify(govde);
+                opts2.__panelOnizle = true;
+                if (res.j && res.j.onay_gerekli) opts2.__panelOnay = true;
+                return panelTekrarGonder(url, opts2, deneme);
             });
-            opts2.body = JSON.stringify(govde);
-            opts2.__panelOnizle = true;
-            if (res.j && res.j.onay_gerekli) opts2.__panelOnay = true;
-            return panelTekrarGonder(url, opts2, deneme);
         }
         return res;
     }).catch(function (err) {
@@ -18359,7 +18492,7 @@ function sozlesmeAylikBorclandir() {
     var toplamOnay = toplamHucre > 0 ? toplamHucre : satirlar.reduce(function (s, r) { return s + r.tutar_kdv_dahil; }, 0);
     var toplamStr = toplamOnay.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     var detayBlok = detaySatirlar.length ? detaySatirlar.map(function (d) { return d.metin; }).join('\n') + '\n' : '';
-    var panelSoruBorc = adetOnay + ' ay borçlu (tahsilatsız) kaydedilsin mi?\n' + detayBlok + 'Toplam aylık: ' + toplamStr + ' ₺\nTahsilat paneli güncellenir; grid kırmızı görünür; ekstrede bu ayların tahsilat satırı olmaz.';
+    var panelSoruBorc = adetOnay + ' ay borçlu (tahsilatsız) kaydedilsin mi?\n' + detayBlok + 'Toplam aylık: ' + toplamStr + ' ₺\nTahsilat paneli güncellenir. Silinecek aylar onay penceresinde listelenir.';
     var panelBorcAni = panelTekrarAniBaslat();
 
     var cikarSatirlar = [];
@@ -18439,7 +18572,6 @@ function sozlesmeAylikBorclandir() {
             Object.keys(ayKeysByYil).forEach(function (dy) {
                 panelTekrarSatirYenile(parseInt(dy, 10), ayKeysByYil[dy] || []);
             });
-            alert((res.j && res.j.mesaj) ? res.j.mesaj : 'Onaylanmadı; hiçbir satır silinmedi.');
             if (typeof doneCb === 'function') doneCb(false);
             return;
         }
@@ -22370,7 +22502,7 @@ function girisTahsilatYilAySecilenleriBorclandir(donemYil, ev) {
     }
     var toplamOnay = satirlar.reduce(function (s, r) { return s + (r._toplam_goster != null ? r._toplam_goster : r.tutar_kdv_dahil); }, 0);
     var toplamStr = toplamOnay.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    var panelSoruSec = satirlar.length + ' ay borçlandırılsın mı?\nToplam tahsil (silinecek): ' + toplamStr + ' ₺\nFatura cari/ekstrede görünür; tahsilat kayıtları kaldırılır; grid kırmızı olur.';
+    var panelSoruSec = satirlar.length + ' ay borçlandırılsın mı?\nToplam tahsil (silinecek): ' + toplamStr + ' ₺\nFatura cari/ekstrede görünür. Silinecek tahsilatlar onay penceresinde listelenir.';
     girisTahsilatYilAyKayitYaz();
     try { window.__girisEkstreSonIstek = {}; } catch (_eEkBr) {}
     window.__tahsilatYilAyBorcInFlight = true;
@@ -22390,7 +22522,6 @@ function girisTahsilatYilAySecilenleriBorclandir(donemYil, ev) {
         if (res.iptal || (res.j && res.j.iptal)) {
             panelTekrarAniGeri(panelBorcAni);
             panelTekrarSatirYenile(donemYil, ayKeys);
-            alert((res.j && res.j.mesaj) ? res.j.mesaj : 'Onaylanmadı; hiçbir satır silinmedi.');
             if (typeof doneCb === 'function') doneCb(false);
             return;
         }

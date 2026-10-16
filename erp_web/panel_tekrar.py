@@ -2,7 +2,8 @@
 """Borçlandır / Tahsil et tekrar basışı.
 
 Yalnız panel satırı silinip yeniden yazılır.
-Banka, elle makbuz, ödeme linki ve kaynağı bilinmeyen satır silinmez.
+Banka, elle makbuz, ödeme linki ve kaynağı bilinmeyen satır silinmez
+(eski boş kaynak: yalnız PANEL_TEKRAR_ESKI_KAYNAK_ENABLED=1 ve taraf=borc + kural A).
 Açıklamadaki ay işareti tek başına silme gerekçesi değildir; kaynak şarttır.
 audit_yaz açıklama ve serbest metni attığı için geri yazım yedek tablodadır.
 """
@@ -10,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from datetime import date, datetime
 from decimal import Decimal
@@ -20,8 +22,16 @@ from plan_fatura_kilit import gib_sinyali, kayit_gecerli
 _LOG = logging.getLogger("bestofficeerp.panel_tekrar")
 
 PANEL_KAYNAK = "grid_toplu"
+ESKI_KAYNAK_ETIKET = "eski_bos"
+CAKISMA_KAYNAKLAR = frozenset({"manuel_makbuz", "banka_import", "odeme_linki"})
 TABLO_TAHSIL = "tahsilatlar"
 TABLO_BORC = "faturalar"
+
+
+def eski_kaynak_enabled() -> bool:
+    """Varsayılan kapalı. Açıkken yalnız taraf=borc kural A uygulanır."""
+    raw = str(os.environ.get("PANEL_TEKRAR_ESKI_KAYNAK_ENABLED") or "").strip().lower()
+    return raw in ("1", "true", "yes", "on", "evet")
 
 TAHSIL_KOLON = (
     "id",
@@ -113,6 +123,15 @@ WHERE id = %s
 RETURNING id, makbuz_no
 """.strip()
 
+# Eski boş kaynak: Python kapısı marker+ayın1i doğrular; SQL yalnız boş kaynak şartı.
+SQL_TAHSIL_SIL_ESKI = """
+DELETE FROM tahsilatlar
+WHERE id = %s
+  AND (musteri_id = %s OR customer_id = %s)
+  AND COALESCE(kaynak, '') = ''
+RETURNING id, makbuz_no
+""".strip()
+
 SQL_BORC_SIL = """
 DELETE FROM faturalar
 WHERE id = %s
@@ -190,6 +209,84 @@ def onay_metni(panel_n: int, diger_m: int) -> str:
         "Bu ay için panelden yapılmış %s tahsilat/borç satırı silinip yeniden yazılacak. "
         "Başka kaynaktan %s satır var, onlara dokunulmayacak."
     ) % (int(panel_n), int(diger_m))
+
+
+def kaynak_bos_mu(kaynak) -> bool:
+    """NULL ve '' boş sayılır; 'grid_toplu' vb. dolu. Tip farkı korunur (geri yazım)."""
+    if kaynak is None:
+        return True
+    return str(kaynak).strip() == ""
+
+
+def _tarih_gun_iso(val) -> str | None:
+    if isinstance(val, datetime):
+        val = val.date()
+    if isinstance(val, date):
+        return val.isoformat()
+    s = str(val or "").strip()
+    if not s:
+        return None
+    head = s[:10]
+    if not _ISO_GUN.match(head):
+        return None
+    try:
+        date.fromisoformat(head)
+    except ValueError:
+        return None
+    return head
+
+
+def eski_panel_silinebilir_mi(row, anahtar: str) -> bool:
+    """Kural A: boş kaynak + marker ayı + tahsilat_tarihi = o ayın 1'i."""
+    if not isinstance(row, dict) or not kaynak_bos_mu(row.get("kaynak")):
+        return False
+    anahtar = str(anahtar or "")[:7]
+    if len(anahtar) < 7:
+        return False
+    if anahtar not in _isaret_aylari(row.get("aciklama")):
+        return False
+    gun = _tarih_gun_iso(row.get("tahsilat_tarihi"))
+    return gun == f"{anahtar}-01"
+
+
+def panel_yedeklenebilir_mi(kaynak, *, taraf="borc", row=None, anahtar=None) -> bool:
+    if panel_kaynak_mi(kaynak):
+        return True
+    if not eski_kaynak_enabled() or str(taraf or "") != "borc":
+        return False
+    if row is None:
+        return kaynak_bos_mu(kaynak)
+    if anahtar:
+        return eski_panel_silinebilir_mi(row, anahtar)
+    for a in tahsil_aylari(row):
+        if eski_panel_silinebilir_mi(row, a):
+            return True
+    return False
+
+
+def _satir_ozet(row, anahtar: str, *, kaynak_etiket: str) -> dict:
+    yil, ay = int(anahtar[0:4]), int(anahtar[5:7])
+    try:
+        tutar = float(row.get("tutar") or 0)
+    except (TypeError, ValueError):
+        tutar = 0.0
+    gun = _tarih_gun_iso(row.get("tahsilat_tarihi")) or ""
+    ham_k = row.get("kaynak")
+    if kaynak_etiket == ESKI_KAYNAK_ETIKET:
+        goster = ESKI_KAYNAK_ETIKET
+    elif ham_k is None or str(ham_k).strip() == "":
+        goster = "(boş)"
+    else:
+        goster = str(ham_k).strip()
+    return {
+        "id": _satir_id(row),
+        "yil": yil,
+        "ay": ay,
+        "ay_iso": anahtar,
+        "tutar": tutar,
+        "tahsilat_tarihi": gun,
+        "kaynak": goster,
+    }
 
 
 def _ay_iso(yil, ay) -> str:
@@ -290,11 +387,53 @@ def _satir_id(row) -> int:
         return 0
 
 
+def _durust_mesaj(plan_parca: dict) -> str:
+    """Önizleme / modal için dürüst özet. PII yok."""
+    grid = plan_parca.get("silinecek_grid") or []
+    eski = plan_parca.get("silinecek_eski") or []
+    degis = plan_parca.get("degismeyecek") or []
+    borc_n = int(plan_parca.get("sil_borc_n") or 0)
+    parcalar = []
+    if grid or eski or borc_n:
+        n_sil_ay = len({f"{r.get('yil')}-{r.get('ay')}" for r in (grid + eski)})
+        if n_sil_ay or borc_n:
+            parcalar.append(
+                "Silinecek: %s ay tahsilat (%s grid_toplu, %s eski kayıt)%s."
+                % (
+                    n_sil_ay,
+                    len(grid),
+                    len(eski),
+                    ("; %s panel borç" % borc_n) if borc_n else "",
+                )
+            )
+        if grid or eski:
+            parcalar.append(
+                "Yalnız bu silinecek aylarda grid kırmızı görünür; ekstrede o ayların tahsilat satırı olmaz."
+            )
+        if eski:
+            parcalar.append(
+                "Eski kayıt (kaynağı bilinmiyor): yedek alınır, geri yazılabilir. Ayrı onay gerekir."
+            )
+    else:
+        parcalar.append("Hiçbir tahsilat silinmeyecek.")
+    if degis:
+        nedenler = []
+        for d in degis[:12]:
+            nedenler.append(
+                "%04d-%02d (%s)" % (int(d.get("yil") or 0), int(d.get("ay") or 0), d.get("neden") or "?")
+            )
+        ekstra = "" if len(degis) <= 12 else " …"
+        parcalar.append("DEĞİŞMEYECEK %s ay: %s%s." % (len(degis), ", ".join(nedenler), ekstra))
+    if not grid and not eski and not borc_n and not degis:
+        parcalar.append("Seçilen aylar zaten borçlu veya dokunulacak panel satırı yok.")
+    return " ".join(parcalar)
+
+
 def karar_ver(aylar, tahsil_rows, borc_rows, *, haric=None, taraf="borc") -> dict:
     """Saf karar. Yazmaz.
 
     taraf=borc: panel tahsilat ve bağlı olmayan panel borç silinebilir.
-    taraf=tahsil: yalnız panel tahsilat silinebilir.
+    taraf=tahsil: yalnız panel tahsilat (grid_toplu) silinebilir — eski kaynak yolu YOK.
     haric: dondurma / AUTO_INV gibi bu turda hiç dokunulmayan YYYY-MM.
     """
     istenen = []
@@ -310,7 +449,6 @@ def karar_ver(aylar, tahsil_rows, borc_rows, *, haric=None, taraf="borc") -> dic
             istenen.append(anahtar)
     haric_kume = set(haric or ())
     aktif = [a for a in istenen if a not in haric_kume]
-    aktif_kume = set(aktif)
 
     tahsil_by_ay = {a: [] for a in aktif}
     for row in tahsil_rows or []:
@@ -331,25 +469,50 @@ def karar_ver(aylar, tahsil_rows, borc_rows, *, haric=None, taraf="borc") -> dic
             borc_by_ay[anahtar].append(row)
 
     sil_tahsil = []
+    sil_tahsil_grid = []
+    sil_tahsil_eski = []
     sil_borc = []
+    silinecek_grid = []
+    silinecek_eski = []
+    degismeyecek = []
     gorulen_tahsil = set()
     gorulen_borc = set()
     gorulen_diger = set()
     atla_tam = {}
     bagli = []
     uyarilar = []
+    eski_acik = eski_kaynak_enabled() and str(taraf or "") == "borc"
 
     for anahtar in aktif:
         yil, ay = int(anahtar[0:4]), int(anahtar[5:7])
         panel_tah = []
+        eski_tah = []
         diger = []
+        cakisma_var = False
         for row in tahsil_by_ay[anahtar]:
             rid = _satir_id(row)
-            if panel_kaynak_mi(row.get("kaynak")):
+            k_raw = row.get("kaynak")
+            k_str = str(k_raw or "").strip()
+            if panel_kaynak_mi(k_raw):
                 panel_tah.append(row)
+            elif k_str in CAKISMA_KAYNAKLAR:
+                cakisma_var = True
+                diger.append(row)
+                gorulen_diger.add(rid)
+            elif eski_acik and eski_panel_silinebilir_mi(row, anahtar):
+                eski_tah.append(row)
             else:
                 diger.append(row)
                 gorulen_diger.add(rid)
+        if cakisma_var and eski_tah:
+            for row in eski_tah:
+                diger.append(row)
+                gorulen_diger.add(_satir_id(row))
+            eski_tah = []
+            uyarilar.append({"yil": yil, "ay": ay, "neden": "cakisma_koru"})
+            degismeyecek.append({
+                "yil": yil, "ay": ay, "neden": "cakisma_makbuz_banka",
+            })
         silinecek_borc = []
         for row in borc_by_ay[anahtar]:
             neden = borc_bag_nedeni(row, tahsil_rows)
@@ -360,19 +523,47 @@ def karar_ver(aylar, tahsil_rows, borc_rows, *, haric=None, taraf="borc") -> dic
                 silinecek_borc.append(row)
         if taraf != "borc":
             silinecek_borc = []
-        if not panel_tah and not silinecek_borc and diger:
-            neden = "bagli_borc" if any(b["yil"] == yil and b["ay"] == ay for b in bagli) else "baska_kaynak"
+        if not panel_tah and not eski_tah and not silinecek_borc and diger:
+            if any(b["yil"] == yil and b["ay"] == ay for b in bagli):
+                neden = "bagli_borc"
+            elif diger and all(
+                kaynak_bos_mu(r.get("kaynak"))
+                and anahtar in _isaret_aylari(r.get("aciklama"))
+                and not eski_panel_silinebilir_mi(r, anahtar)
+                for r in diger
+            ):
+                neden = "tarih_uyusmaz"
+            else:
+                neden = "baska_kaynak"
             atla_tam[anahtar] = {"yil": yil, "ay": ay, "neden": neden}
             uyarilar.append({"yil": yil, "ay": ay, "neden": neden})
+            if not any(d.get("yil") == yil and d.get("ay") == ay for d in degismeyecek):
+                degismeyecek.append({"yil": yil, "ay": ay, "neden": neden})
             continue
         if diger:
             uyarilar.append({"yil": yil, "ay": ay, "neden": "diger_durur", "adet": len(diger)})
+            if not panel_tah and not eski_tah:
+                pass
+            elif any(str(r.get("kaynak") or "").strip() in CAKISMA_KAYNAKLAR or kaynak_bos_mu(r.get("kaynak")) for r in diger):
+                if not any(d.get("yil") == yil and d.get("ay") == ay for d in degismeyecek):
+                    # Aynı ayda silinenler varken duran satırlar — özet için
+                    pass
         for row in panel_tah:
             rid = _satir_id(row)
             if rid in gorulen_tahsil:
                 continue
             gorulen_tahsil.add(rid)
             sil_tahsil.append(row)
+            sil_tahsil_grid.append(row)
+            silinecek_grid.append(_satir_ozet(row, anahtar, kaynak_etiket=PANEL_KAYNAK))
+        for row in eski_tah:
+            rid = _satir_id(row)
+            if rid in gorulen_tahsil:
+                continue
+            gorulen_tahsil.add(rid)
+            sil_tahsil.append(row)
+            sil_tahsil_eski.append(row)
+            silinecek_eski.append(_satir_ozet(row, anahtar, kaynak_etiket=ESKI_KAYNAK_ETIKET))
         for row in silinecek_borc:
             rid = _satir_id(row)
             if rid in gorulen_borc:
@@ -380,18 +571,74 @@ def karar_ver(aylar, tahsil_rows, borc_rows, *, haric=None, taraf="borc") -> dic
             gorulen_borc.add(rid)
             sil_borc.append(row)
 
+    # Tarihi ayın 1'i olmayan boş kaynaklılar vb. için istenen aylarda silinmeyenleri listele
+    for anahtar in aktif:
+        if anahtar in atla_tam:
+            continue
+        yil, ay = int(anahtar[0:4]), int(anahtar[5:7])
+        if any(d.get("yil") == yil and d.get("ay") == ay for d in degismeyecek):
+            continue
+        silinen_ids = {_satir_id(r) for r in sil_tahsil}
+        for row in tahsil_by_ay[anahtar]:
+            rid = _satir_id(row)
+            if rid in silinen_ids:
+                continue
+            if panel_kaynak_mi(row.get("kaynak")):
+                continue
+            neden = "baska_kaynak"
+            if kaynak_bos_mu(row.get("kaynak")):
+                if anahtar in _isaret_aylari(row.get("aciklama")) and not eski_panel_silinebilir_mi(row, anahtar):
+                    neden = "tarih_uyusmaz"
+                elif not eski_acik:
+                    neden = "baska_kaynak"
+            if not any(d.get("yil") == yil and d.get("ay") == ay and d.get("neden") == neden for d in degismeyecek):
+                degismeyecek.append({"yil": yil, "ay": ay, "neden": neden})
+
     panel_n = len(sil_tahsil) + len(sil_borc)
+    parca = {
+        "silinecek_grid": silinecek_grid,
+        "silinecek_eski": silinecek_eski,
+        "degismeyecek": degismeyecek,
+        "sil_borc_n": len(sil_borc),
+    }
+    mesaj = _durust_mesaj(parca) if (panel_n or degismeyecek) else ""
+    if panel_n and not mesaj:
+        mesaj = onay_metni(panel_n, len(gorulen_diger))
     return {
         "panel_n": panel_n,
         "diger_m": len(gorulen_diger),
-        "mesaj_onay": onay_metni(panel_n, len(gorulen_diger)) if panel_n else "",
+        "mesaj_onay": mesaj,
         "sil_tahsil": sil_tahsil,
+        "sil_tahsil_grid": sil_tahsil_grid,
+        "sil_tahsil_eski": sil_tahsil_eski,
+        "silinecek_grid": silinecek_grid,
+        "silinecek_eski": silinecek_eski,
+        "degismeyecek": degismeyecek,
         "sil_borc": sil_borc,
         "atla_tam": atla_tam,
         "bagli": bagli,
         "uyarilar": uyarilar,
         "onay_gerekli": panel_n > 0,
+        "onay_eski_kayit_gerekli": len(sil_tahsil_eski) > 0,
+        "eski_kaynak_enabled": bool(eski_acik),
     }
+
+
+def plan_eski_filtrele(plan: dict, onay_eski: bool) -> dict:
+    """onay_eski yoksa eski kaynaklıları sil listesinden çıkar (SİLMEZ)."""
+    if not isinstance(plan, dict):
+        return plan
+    if onay_eski:
+        return plan
+    eski_ids = {_satir_id(r) for r in (plan.get("sil_tahsil_eski") or [])}
+    if not eski_ids:
+        return plan
+    plan["sil_tahsil"] = [r for r in (plan.get("sil_tahsil") or []) if _satir_id(r) not in eski_ids]
+    plan["sil_tahsil_eski"] = []
+    plan["silinecek_eski"] = []
+    plan["panel_n"] = len(plan.get("sil_tahsil") or []) + len(plan.get("sil_borc") or [])
+    plan["onay_eski_kayit_gerekli"] = False
+    return plan
 
 
 def _json_satir(row: dict) -> str:
@@ -530,7 +777,12 @@ def panel_satirlari_sil(calistir, oku, *, tahsil_rows, borc_rows, musteri_id, ku
             "ay": ay or "",
         }
         if tablo == TABLO_TAHSIL:
-            ozet["kaynak"] = PANEL_KAYNAK
+            if panel_kaynak_mi(row.get("kaynak")):
+                ozet["kaynak"] = PANEL_KAYNAK
+            elif kaynak_bos_mu(row.get("kaynak")):
+                ozet["kaynak"] = ESKI_KAYNAK_ETIKET
+            else:
+                ozet["kaynak"] = str(row.get("kaynak") or "")[:40]
             if row.get("makbuz_no") not in (None, ""):
                 ozet["makbuz_no"] = str(row.get("makbuz_no"))[:40]
         elif row.get("fatura_no") not in (None, ""):
@@ -549,14 +801,20 @@ def panel_satirlari_sil(calistir, oku, *, tahsil_rows, borc_rows, musteri_id, ku
         return yedek_id
 
     for row in tahsil_rows or []:
-        if not panel_kaynak_mi(row.get("kaynak")):
+        if not panel_yedeklenebilir_mi(row.get("kaynak"), taraf=taraf_adi, row=row):
             raise RuntimeError("panel disi tahsilat yedeklenmez")
         rid = _satir_id(row)
         if not _oku_satir(oku, "SELECT id FROM tahsilatlar WHERE id = %s", (rid,)):
             continue
         aylar = tahsil_aylari(row)
         _yedekle(TABLO_TAHSIL, row, TAHSIL_KOLON, aylar[0] if aylar else "")
-        silinen = _oku_satir(oku, SQL_TAHSIL_SIL, (_satir_id(row), int(musteri_id), int(musteri_id)))
+        if panel_kaynak_mi(row.get("kaynak")):
+            sil_sql = SQL_TAHSIL_SIL
+        elif kaynak_bos_mu(row.get("kaynak")):
+            sil_sql = SQL_TAHSIL_SIL_ESKI
+        else:
+            raise RuntimeError("panel disi tahsilat yedeklenmez")
+        silinen = _oku_satir(oku, sil_sql, (_satir_id(row), int(musteri_id), int(musteri_id)))
         if not silinen:
             raise RuntimeError("panel tahsilati silinmedi")
         ay0 = tahsil_aylari(row)
