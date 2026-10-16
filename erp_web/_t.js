@@ -11055,7 +11055,8 @@ function sozlesmeAylikGridCacheBorcluSatirlariGuncelle(satirlar) {
     });
 }
 
-/** Grid borçlandır → tahsil paneli dönem yılı (takvim yılı değil; sözleşme yıldönümü). */
+/** Grid borçlandır / tahsil paneli dönem yılı (takvim yılı değil; sözleşme yıldönümü).
+ *  index.html ile aynı mantık: sozlesmelerAylikKartDonemYili. */
 function sozlesmeAylikBorcPanelDonemYil(yil, ay) {
     var basStrB = '';
     try {
