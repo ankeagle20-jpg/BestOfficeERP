@@ -29,6 +29,60 @@ def _parse_mids(s: str) -> list[int]:
     return out
 
 
+def _sync_grid_payload_after_onarim(
+    payload: dict | None,
+    by_iso: dict | None,
+    tahsil_map: dict | None,
+    *,
+    tol: float = 0.05,
+) -> None:
+    """Panel (boş olabilir) + kanonik map → grid odenen/tahsil_edildi.
+
+    Boş panelde _apply_panel_by_iso_to_grid_payload erken döner; hayalet/0.01
+    kalıntısı kalmasın diye panelde olmayan aylar da map'e çekilir.
+    """
+    if not isinstance(payload, dict):
+        return
+    from datetime import date as _date
+
+    from routes import giris_routes as gr
+
+    tmap = tahsil_map if isinstance(tahsil_map, dict) else {}
+    by = by_iso if isinstance(by_iso, dict) else {}
+    if by:
+        gr._apply_panel_by_iso_to_grid_payload(payload, by, tahsil_map=tmap)
+    for a in payload.get("aylar") or []:
+        if not isinstance(a, dict):
+            continue
+        try:
+            iso_m = _date(int(a["yil"]), int(a["ay"]), 1).isoformat()
+        except (TypeError, ValueError, KeyError):
+            continue
+        if by and iso_m in by:
+            continue
+        try:
+            brut = round(float(a.get("brut_tutar_kdv") or a.get("tutar_kdv_dahil") or 0), 2)
+            map_t = round(float(tmap.get(iso_m) or 0), 2)
+        except (TypeError, ValueError):
+            continue
+        if brut <= tol:
+            a["odenen_tutar_kdv"] = 0.0
+            a["kalan_tutar_kdv"] = 0.0
+            a["tahsil_edildi"] = False
+            a["kismi_tahsilat"] = False
+            continue
+        tah = round(min(map_t, brut), 2) if map_t > 0 else 0.0
+        if tah < 0:
+            tah = 0.0
+        kalan = round(max(brut - tah, 0), 2)
+        if tah >= brut - tol:
+            kalan = 0.0
+        a["odenen_tutar_kdv"] = tah
+        a["kalan_tutar_kdv"] = kalan
+        a["tahsil_edildi"] = brut > tol and kalan <= tol and tah > tol
+        a["kismi_tahsilat"] = tah > tol and kalan > tol
+
+
 def _cap_panel_by_iso_for_onarim(
     by_iso: dict | None,
     *,
@@ -180,10 +234,10 @@ def onar_mid(mid: int, *, dry_run: bool, etiket: str) -> dict:
             )
             by_iso = _cap_panel_by_iso_for_onarim(by_iso, mid=mid, payload=payload)
             out["panel_ay_sonra"] = len(by_iso or {})
-            if isinstance(payload, dict) and by_iso:
+            if isinstance(payload, dict):
                 pl2 = copy.deepcopy(payload)
-                tmap = gr._aylik_tahsil_tutar_map(mid)
-                gr._apply_panel_by_iso_to_grid_payload(pl2, by_iso, tahsil_map=tmap)
+                tmap = gr._aylik_tahsil_tutar_map(mid) or {}
+                _sync_grid_payload_after_onarim(pl2, by_iso or {}, tmap)
                 out["grid_ay_sonra"] = len(pl2.get("aylar") or [])
         except Exception as ex:
             out["hata"] = type(ex).__name__
@@ -200,10 +254,10 @@ def onar_mid(mid: int, *, dry_run: bool, etiket: str) -> dict:
             mid, payload, None, trust_grid_odenen=False
         )
         by_iso = _cap_panel_by_iso_for_onarim(by_iso, mid=mid, payload=payload)
-        if isinstance(payload, dict) and by_iso:
+        if isinstance(payload, dict):
             payload = copy.deepcopy(payload)
-            tmap = gr._aylik_tahsil_tutar_map(mid)
-            gr._apply_panel_by_iso_to_grid_payload(payload, by_iso, tahsil_map=tmap)
+            tmap = gr._aylik_tahsil_tutar_map(mid) or {}
+            _sync_grid_payload_after_onarim(payload, by_iso or {}, tmap)
     except Exception as ex:
         out["hata"] = type(ex).__name__
         raise

@@ -140,6 +140,104 @@ def test_geri_cap_kullanmaz():
     check("geri cap yok", "_cap_panel_by_iso_for_onarim" not in body, body[:80])
 
 
+def test_sync_bos_panel_grid_kalinti_sifir():
+    """Boş panel: brut≈0.01 / odenen kalıntısı map=0 → odenen=0, te=False."""
+    payload = {
+        "aylar": [
+            {
+                "yil": 2026,
+                "ay": 6,
+                "brut_tutar_kdv": 0.01,
+                "odenen_tutar_kdv": 0.01,
+                "kalan_tutar_kdv": 0.0,
+                "tahsil_edildi": True,
+                "kismi_tahsilat": False,
+            },
+            {
+                "yil": 2026,
+                "ay": 7,
+                "brut_tutar_kdv": 1200.0,
+                "odenen_tutar_kdv": 1200.0,
+                "kalan_tutar_kdv": 0.0,
+                "tahsil_edildi": True,
+                "kismi_tahsilat": False,
+            },
+        ]
+    }
+    onr._sync_grid_payload_after_onarim(payload, {}, {})
+    a0, a1 = payload["aylar"][0], payload["aylar"][1]
+    check("0.01 odenen sifir", a0.get("odenen_tutar_kdv") == 0.0, a0)
+    check("0.01 te false", a0.get("tahsil_edildi") is False, a0)
+    check("brut ay hayalet sifir", a1.get("odenen_tutar_kdv") == 0.0, a1)
+    check("brut ay te false", a1.get("tahsil_edildi") is False, a1)
+    check("brut ay kalan", a1.get("kalan_tutar_kdv") == 1200.0, a1)
+
+
+def test_dry_bos_panel_grid_ay_sonra_net():
+    """onar_mid dry: panel boşalsa bile grid_ay_sonra dolu (eskiden None)."""
+    os.environ.pop("ALLOW_PROD_WRITE", None)
+    grid_aylar = [
+        {
+            "yil": 2026,
+            "ay": 6,
+            "brut_tutar_kdv": 0.01,
+            "tutar_kdv_dahil": 0.01,
+            "odenen_tutar_kdv": 0.01,
+            "tahsil_edildi": True,
+        }
+    ]
+    payload = {"aylar": [dict(grid_aylar[0])], "musteri_id": 2}
+    synced = {}
+    real_sync = onr._sync_grid_payload_after_onarim
+
+    def _wrap_sync(pl, by, tmap, **kw):
+        real_sync(pl, by, tmap, **kw)
+        synced["aylar"] = json.loads(json.dumps(pl.get("aylar") or []))
+        synced["by_len"] = len(by or {})
+
+    with mock.patch.object(
+        onr,
+        "fetch_one",
+        side_effect=[
+            {
+                "by_iso": json.dumps(
+                    {"2026-06-01": {"tahsil": 1500, "aylik": 0.01, "kalan": 0}}
+                ),
+                "updated_at": None,
+            },
+            {"payload": json.dumps(payload), "updated_at": None},
+        ],
+    ), mock.patch.object(onr, "db") as mdb:
+        from routes import giris_routes as gr
+
+        with mock.patch.object(
+            gr, "_read_aylik_grid_cache_payload", return_value=payload
+        ), mock.patch.object(
+            gr, "_build_aylik_grid_cache_payload", return_value=payload
+        ), mock.patch.object(
+            gr, "_panel_by_iso_from_tahsil_map", return_value={}
+        ), mock.patch.object(
+            gr, "_aylik_tahsil_tutar_map", return_value={}
+        ), mock.patch.object(
+            onr, "_sync_grid_payload_after_onarim", side_effect=_wrap_sync
+        ):
+            r = onr.onar_mid(2, dry_run=True, etiket="t_bos")
+    check("bos panel sonra 0", r.get("panel_ay_sonra") == 0, r)
+    check("grid ay sonra net", r.get("grid_ay_sonra") == 1, r)
+    check("yazilmadi", r.get("yazildi") is False, r)
+    check("db yok", mdb.call_count == 0, mdb.call_count)
+    check("sync by bos", synced.get("by_len") == 0, synced)
+    a0 = (synced.get("aylar") or [{}])[0]
+    check("kalinti sifir", a0.get("odenen_tutar_kdv") == 0.0 and a0.get("tahsil_edildi") is False, a0)
+
+
+def test_geri_hala_cap_siz():
+    """--geri yolu değişmedi; ALLOW yokken reddeder (regresyon)."""
+    os.environ.pop("ALLOW_PROD_WRITE", None)
+    r = onr.geri_yukle(2, "onarim_dryrun_20261016T140000Z")
+    check("geri hala allow ister", r.get("ok") is False, r)
+
+
 if __name__ == "__main__":
     for fn in (
         test_dry_run_varsayilan_yazmaz,
@@ -151,6 +249,9 @@ if __name__ == "__main__":
         test_cap_111_panel_sifir_tahsilat_var,
         test_cap_kira_sifir_yazilmaz,
         test_geri_cap_kullanmaz,
+        test_sync_bos_panel_grid_kalinti_sifir,
+        test_dry_bos_panel_grid_ay_sonra_net,
+        test_geri_hala_cap_siz,
     ):
         print("---", fn.__name__)
         fn()
