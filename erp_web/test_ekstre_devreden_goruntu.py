@@ -201,85 +201,128 @@ def _net_from_rows(rows):
     return round(tb, 2), round(ta, 2), bak
 
 
+def _stmt_bakiye_direct(borc, pays, bas: str, bit: str, gr) -> float:
+    """Kendi-satır (ödeme günü) modelinde ekstre son bakiyesi.
+
+    Devreden net (= açılış) + dönem kira − dönem görüntü-tarihli ödemeler.
+    """
+    floor = "1900-01-01"
+    op = gr._ekstre_acilis_bakiyesi_fifo(borc, bas, pays, floor)
+    # bit ayının sonuna kadar aylık borç (bit ISO ay başı ise o ay dahil)
+    bit_m = bit[:8] + "01" if len(bit) >= 10 else bit
+    kira = round(
+        sum(float(v) for iso, v in borc.items() if bas <= str(iso) <= bit_m),
+        2,
+    )
+    alacak = round(
+        sum(
+            float(p["tutar"])
+            for p in pays
+            if bas <= gr._ekstre_satir_goruntu_tarihi(p) <= bit
+        ),
+        2,
+    )
+    return round(op + kira - alacak, 2)
+
+
 def test_degismezlik_property_synthetic():
-    """Devreden_bakiye + dönem net ≈ tam dönem bakiyesi (sentetik ekstre satırları)."""
+    """Devreden_bakiye(bas) + dönem net = tam dönem (epoch→bit) bakiyesi.
+
+    Kendi-satır modelinde (ödeme günü): pre-ödeme toplamı ≤ pre-kira olacak
+    şekilde üretilir → FIFO taşması olmaz, eşitlik aritmetik tutulur.
+    Kaynak karışımı + yıl sınırı + çok ay + avans + grid_toplu görüntü kuralı.
+    """
     from routes import giris_routes as gr
 
-    # Saf aritmetik: opening + (donem_borc - donem_alacak) = full_bakiye
-    # Burada _ekstre_devreden_satir_toplamlari + acilis ile doğrula.
     borc = {}
     for y, lo, hi in ((2024, 7, 12), (2025, 1, 12), (2026, 1, 6)):
         for m in range(lo, hi + 1):
             borc[f"{y}-{m:02d}-01"] = 800.0
-    rng = random.Random(42)
+    rng = random.Random(7)
+    kaynaklar = ("banka_import", "manuel_makbuz", "odeme_linki")
     pays = []
     tid = 1
-    for _ in range(25):
-        # rastgele ödeme günü 2024-08 .. 2026-05
-        d0 = date(2024, 8, 1) + timedelta(days=rng.randint(0, 640))
-        odeme = d0.isoformat()
-        # eslesme bazen önceki ay
-        es_d = d0.replace(day=1) - timedelta(days=rng.choice([0, 30, 60, 90]))
-        esl = date(es_d.year, es_d.month, 1).isoformat()
-        tut = float(rng.choice([400, 800, 1200, 1600]))
-        pays.append({
-            "id": tid,
-            "kaynak": "banka_import",
-            "fatura_id": None,
-            "tarih": odeme,
-            "eslesme_tarihi": esl,
-            "tutar": tut,
-            "tahsilat_aciklama": f"|AYLIK_TAH|{esl}| |AYLIK_PAY|{esl}={tut:.2f}|",
-        })
-        tid += 1
+    # kontrollü: her ay en fazla bir 400'lük ödeme (pre taşmasın)
+    for y, lo, hi in ((2024, 8, 12), (2025, 1, 12), (2026, 1, 5)):
+        for m in range(lo, hi + 1):
+            odeme = f"{y}-{m:02d}-15"
+            # yari: marker bir ay geri (yil siniri senaryosu)
+            if m == 1:
+                esl = f"{y - 1}-12-01"
+            else:
+                esl = f"{y}-{m - 1:02d}-01"
+            kay = kaynaklar[tid % len(kaynaklar)]
+            tut = 400.0
+            if tid % 5 == 0:
+                # cok ay: 800 = iki ay
+                tut = 800.0
+                ac = (
+                    f"|AYLIK_TAH|{esl}| |AYLIK_PAY|{esl}=400.00| "
+                    f"|AYLIK_TAH|{y}-{m:02d}-01| |AYLIK_PAY|{y}-{m:02d}-01=400.00|"
+                )
+            elif tid % 9 == 0:
+                ac = "avans"
+                esl = odeme
+            else:
+                ac = f"|AYLIK_TAH|{esl}| |AYLIK_PAY|{esl}={tut:.2f}|"
+            pays.append({
+                "id": tid,
+                "kaynak": kay,
+                "fatura_id": None,
+                "tarih": odeme,
+                "tahsilat_tarihi": odeme,
+                "eslesme_tarihi": esl,
+                "tutar": tut,
+                "tahsilat_aciklama": ac,
+            })
+            tid += 1
 
-    bit_iso = "2026-06-01"
-    full_open = gr._ekstre_acilis_bakiyesi_fifo(borc, "2099-01-01", pays, "1900-01-01")
-    # "tam dönem bakiyesi bit'te" ≈ toplam borç ≤bit − ödemeler görüntü≤bit (yaklaşık)
-    # Daha sıkı: herhangi bas için
-    # opening(bas) + sum(borc in [bas,bit]) - sum(pay goruntu in [bas,bit])
-    # == opening(bit+1day) ... for pre-only model:
-    # remaining need in months < bit_end after all pays with goruntu < bit_end
-    for _ in range(12):
-        bas_d = date(2024, 9, 1) + timedelta(days=30 * rng.randint(0, 18))
+    gt = {
+        "id": tid,
+        "kaynak": "grid_toplu",
+        "fatura_id": None,
+        "tarih": "2026-03-15",
+        "eslesme_tarihi": "2025-12-01",
+        "tutar": 800.0,
+        "tahsilat_aciklama": "|AYLIK_TAH|2025-12-01| |AYLIK_PAY|2025-12-01=800.00|",
+    }
+    check(
+        "grid_toplu_goruntu_eslesme",
+        gr._ekstre_satir_goruntu_tarihi(gt) == "2025-12-01",
+    )
+    op_gt = gr._ekstre_acilis_bakiyesi_fifo(
+        borc, "2026-01-01", [gt], "1900-01-01",
+    )
+    pre_sum = sum(v for iso, v in borc.items() if iso < "2026-01-01")
+    check("grid_toplu_acilis_etkiler", op_gt < pre_sum - 0.01, op_gt)
+
+    bit = "2026-06-15"
+    bit_m = "2026-06-01"
+    pays_kendi = list(pays)  # grid_toplu ayri
+    full = _stmt_bakiye_direct(borc, pays_kendi, "1900-01-01", bit, gr)
+    yil = _stmt_bakiye_direct(borc, pays_kendi, "2026-01-01", bit, gr)
+    check("degismezlik_yilbasi", abs(yil - full) < 0.02, (yil, full))
+
+    for _ in range(16):
+        bas_d = date(2024, 9, 1) + timedelta(days=30 * rng.randint(0, 16))
         bas = date(bas_d.year, bas_d.month, 1).isoformat()
-        if bas >= bit_iso:
+        if bas > bit_m:
             continue
-        op = gr._ekstre_acilis_bakiyesi_fifo(borc, bas, pays, "1900-01-01")
-        donem_borc = round(
-            sum(v for iso, v in borc.items() if bas <= iso <= bit_iso), 2
+        part = _stmt_bakiye_direct(borc, pays_kendi, bas, bit, gr)
+        check(
+            "degismezlik_%s" % bas,
+            abs(part - full) < 0.02,
+            (part, full),
         )
-        donem_alacak = round(
-            sum(
-                float(p["tutar"])
-                for p in pays
-                if bas <= gr._ekstre_satir_goruntu_tarihi(p) <= bit_iso
-            ),
-            2,
-        )
-        # Tam: months ≤ bit after pays with goruntu ≤ bit
-        op_end = gr._ekstre_acilis_bakiyesi_fifo(
-            borc, "2026-07-01", pays, "1900-01-01"
-        )
-        # invariant: op + donem_borc - donem_alacak_applied_to_need ≈ op_end
-        # FIFO sırası yüzünden donem_alacak ham toplamı need'i aşabilir; bu yüzden
-        # yalnızca "çift sayım yok": görüntü < bas olanlar dönem alacağında yok.
-        overlap = [
-            p for p in pays
+        in_dev = {
+            p["id"] for p in pays_kendi
             if gr._ekstre_satir_goruntu_tarihi(p) < bas
-            and gr._ekstre_satir_goruntu_tarihi(p) >= bas  # impossible
-        ]
-        check("overlap_yok_%s" % bas, len(overlap) == 0)
-        in_dev = {p["id"] for p in pays if gr._ekstre_satir_goruntu_tarihi(p) < bas}
+        }
         in_don = {
-            p["id"] for p in pays
-            if bas <= gr._ekstre_satir_goruntu_tarihi(p) <= bit_iso
+            p["id"] for p in pays_kendi
+            if bas <= gr._ekstre_satir_goruntu_tarihi(p) <= bit
         }
         check("kesisim_yok_%s" % bas, not (in_dev & in_don), in_dev & in_don)
-        # Aritmetik kapanış (FIFO ile uyumlu remaining):
-        left = round(op + donem_borc - min(donem_alacak, op + donem_borc), 2)
-        check("op_pozitif_%s" % bas, op >= -0.01, op)
-        _ = left, op_end, full_open  # dokunuldu
 
 
 def test_pasif_mid_acilis_imza():
@@ -295,6 +338,21 @@ def test_pasif_mid_acilis_imza():
     check("pasif_odeme_linki", gr._ekstre_satir_goruntu_tarihi(p) == "2025-06-01")
 
 
+def test_87_stmt_degismezlik():
+    """mid=87 kalıbı: yilbasi stmt bakiyesi = tam dönem stmt bakiyesi."""
+    from routes import giris_routes as gr
+
+    borc = _borc_87_slice()
+    pays = _pays_87_pattern()
+    bit = "2026-10-16"
+    full = _stmt_bakiye_direct(borc, pays, "1900-01-01", bit, gr)
+    yil = _stmt_bakiye_direct(borc, pays, "2026-01-01", bit, gr)
+    check("87_stmt_esit", abs(full - yil) < 0.02, (full, yil))
+    # beklenen ~ 5414.98 civarı (borc dilimine göre)
+    op = gr._ekstre_acilis_bakiyesi_fifo(borc, "2026-01-01", pays, "1900-01-01")
+    check("87_opening_3840", abs(op - 3840.0) < 0.02, op)
+
+
 if __name__ == "__main__":
     test_goruntu_tarihi_kurallari()
     test_acilis_87_yil_basi()
@@ -303,5 +361,6 @@ if __name__ == "__main__":
     test_avans_borcsuz()
     test_degismezlik_property_synthetic()
     test_pasif_mid_acilis_imza()
+    test_87_stmt_degismezlik()
     print("FAIL" if FAILS else "TUMU GECTI", FAILS)
     sys.exit(1 if FAILS else 0)
