@@ -11696,6 +11696,23 @@ def _ekstre_devreden_toplamlari(
     return round(dev_borc_r, 2), round(dev_alacak_r, 2)
 
 
+def _ekstre_satir_goruntu_tarihi(pr) -> str:
+    """Ekstre satırının ekranda görünen tarihi (Devreden ile dönem içi aynı kural).
+
+    Kendi-satır kaynak (banka_import / manuel_makbuz / odeme_linki) ve faturasız:
+    ödeme günü (tahsilat_tarihi). Diğerleri: eşleşme (fatura / ilk |AYLIK_TAH| / ödeme).
+    """
+    if not isinstance(pr, dict):
+        return ""
+    kay = str(pr.get("kaynak") or "").strip().lower()
+    fid = pr.get("fatura_id")
+    if kay in _EKSTRE_KENDI_KAYNAK and not fid:
+        return str(pr.get("tarih") or pr.get("tahsilat_tarihi") or "")[:10]
+    return str(
+        pr.get("eslesme_tarihi") or pr.get("tarih") or pr.get("tahsilat_tarihi") or ""
+    )[:10]
+
+
 def _ekstre_acilis_bakiyesi_fifo(
     full_borc_for_fifo,
     bas_iso_cmp,
@@ -11705,7 +11722,12 @@ def _ekstre_acilis_bakiyesi_fifo(
     batch_maps=None,
     manual_reel_by_year=None,
 ):
-    """Dönem başlangıcı öncesi net bakiye: FIFO ile yalnızca bas öncesi ödemeler mahsup edilir."""
+    """Dönem başlangıcı öncesi net bakiye: FIFO ile yalnızca bas öncesi ödemeler mahsup edilir.
+
+    Ödeme seçimi, dönem içi satırlarla aynı görüntü tarihine göre yapılır
+    (`_ekstre_satir_goruntu_tarihi` < bas). Marker ayı ile ödeme günü karışınca
+    alacak hem Devreden'de hem dönemde sayılmasın.
+    """
     if not isinstance(full_borc_for_fifo, dict):
         return 0.0
     month_order_all = sorted(full_borc_for_fifo.keys())
@@ -11716,18 +11738,26 @@ def _ekstre_acilis_bakiyesi_fifo(
         iso: round(float(full_borc_for_fifo.get(iso) or 0), 2)
         for iso in month_order_all
     }
+    # Dönem içi sınıflandırma ile aynı: kendi satır → general; grid_toplu/TAH → marker.
     marker_pays = []
     general_pays = []
     for pr in pays_fifo or []:
+        kay0 = str(pr.get("kaynak") or "").strip().lower()
         ac0 = str(pr.get("tahsilat_aciklama") or "")
-        if re.search(r"\|AYLIK_TAH\|\d{4}-\d{2}-\d{2}\|", ac0):
+        has_tah = bool(re.search(r"\|AYLIK_TAH\|\d{4}-\d{2}-\d{2}\|", ac0))
+        if kay0 == "grid_toplu":
+            marker_pays.append(pr)
+        elif kay0 in _EKSTRE_KENDI_KAYNAK:
+            general_pays.append(pr)
+        elif has_tah:
             marker_pays.append(pr)
         else:
             general_pays.append(pr)
 
     def _fifo_pay_alloc_open(pr, restrict_marker_months=False):
-        es = str(pr.get("eslesme_tarihi") or "")[:10]
-        if not es or es < floor_pay or es >= str(bas_iso_cmp):
+        # Görüntü tarihi < bas → Devreden; aksi halde dönem satırında kalır.
+        goruntu = _ekstre_satir_goruntu_tarihi(pr)
+        if not goruntu or goruntu < floor_pay or goruntu >= str(bas_iso_cmp):
             return
         try:
             v = round(float(pr.get("tutar") or 0), 2)
