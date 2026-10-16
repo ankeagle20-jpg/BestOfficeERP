@@ -543,9 +543,13 @@ def _panel_by_iso_from_tahsil_map(
     musteri_id: int,
     payload: dict | None,
     tahsilat_tarihi: str | None = None,
-    trust_grid_odenen: bool = True,
+    trust_grid_odenen: bool = False,
 ) -> dict:
-    """|AYLIK_PAY| tahsil haritası + grid brüt → panel by_iso (popup ile aynı kaynak)."""
+    """|AYLIK_PAY|/|AYLIK_TAH| map + grid brüt → panel by_iso.
+
+    trust_grid_odenen varsayılan False: map yokken eski grid odenen panela
+    geri yazılmaz (hayalet yeşil engeli). Eski True yolu bilinçli çağrıda kalır.
+    """
     try:
         mid = int(musteri_id)
     except (TypeError, ValueError):
@@ -579,6 +583,8 @@ def _panel_by_iso_from_tahsil_map(
             except (TypeError, ValueError):
                 brut_e = 0.0
             tah_e = round(float(tahsil_map.get(iso_k) or 0), 2)
+            if brut_e > tol and tah_e > brut_e:
+                tah_e = brut_e
             if brut_e <= tol and tah_e <= tol:
                 continue
             try:
@@ -619,8 +625,11 @@ def _panel_by_iso_from_tahsil_map(
             odenen_g = round(float(a.get("odenen_tutar_kdv") or 0), 2)
         except (TypeError, ValueError):
             odenen_g = 0.0
+        # Hayalet engeli: map=0 iken grid odenen panele taşınmaz (varsayılan).
         if trust_grid_odenen and tah <= tol and odenen_g > tol:
             tah = odenen_g
+        if brut > tol and tah > brut:
+            tah = brut
         if brut <= tol and tah <= tol:
             continue
         mk_t = round(float(marker_by_iso.get(iso_m) or 0), 2)
@@ -633,19 +642,22 @@ def _panel_by_iso_from_tahsil_map(
         if _grid_payload_marker_panel_tam_kapandi(mk_t, brut, yy_m, None, tol, pay_t=pay_tm):
             kalan = 0.0
         else:
-            try:
-                kalan_g = round(max(float(a.get("kalan_tutar_kdv") or 0), 0), 2)
-            except (TypeError, ValueError):
-                kalan_g = -1.0
             kalan_calc = round(max(brut - tah, 0), 2) if brut > tol else 0.0
             if brut > tol and tah >= brut - tol:
                 kalan = 0.0
-            else:
+            elif trust_grid_odenen:
+                # Eski yol: kısmi grid kalanını koru (bilinçli trust=True çağrıları).
+                try:
+                    kalan_g = round(max(float(a.get("kalan_tutar_kdv") or 0), 0), 2)
+                except (TypeError, ValueError):
+                    kalan_g = -1.0
                 kismi_g = bool(a.get("kismi_tahsilat")) or (tah > tol and kalan_g > tol)
                 if kismi_g and kalan_g >= 0:
                     kalan = kalan_g
                 else:
                     kalan = kalan_calc
+            else:
+                kalan = kalan_calc
         prev = existing.get(iso_m) or {}
         th = tarih_s or prev.get("tahsil_tarih") or ""
         by_iso[iso_m] = {
@@ -780,7 +792,9 @@ def sync_musteri_panel_from_tahsil_and_dagitim(
             payload = _build_aylik_grid_cache_payload(mid, tufe_map=_tufe_map_by_year_month_cached())
         except Exception:
             payload = None
-    by_iso = _panel_by_iso_from_tahsil_map(mid, payload, tahsilat_tarihi)
+    by_iso = _panel_by_iso_from_tahsil_map(
+        mid, payload, tahsilat_tarihi, trust_grid_odenen=False
+    )
     if dagitim_items:
         tol = float(AYLIK_GRID_TAM_ODENDI_TOLERANS)
         for it in dagitim_items:
@@ -9950,7 +9964,9 @@ def _aylik_grid_cache_payload_tahsil_guncelle(musteri_id, payload, panel_by_iso=
                 mid, payload, tahsil_map=tahsil_map, panel_by_iso=panel_db
             )
         else:
-            by_iso = _panel_by_iso_from_tahsil_map(mid, payload, None)
+            by_iso = _panel_by_iso_from_tahsil_map(
+                mid, payload, None, trust_grid_odenen=False
+            )
             if by_iso:
                 _save_musteri_panel_by_iso(mid, by_iso)
                 _apply_panel_by_iso_to_grid_payload(payload, by_iso, tahsil_map=tahsil_map)
@@ -17331,11 +17347,11 @@ def api_tahsilat_panel_detay():
         except Exception:
             payload = None
     if isinstance(payload, dict):
-        fresh = _panel_by_iso_from_tahsil_map(mid, payload, None)
-        grid_src = _panel_by_iso_from_grid_payload(payload)
+        # Hayalet engeli: grid odenen ile zenginleştirme YOK — yalnız map.
+        fresh = _panel_by_iso_from_tahsil_map(
+            mid, payload, None, trust_grid_odenen=False
+        )
         tol_p = float(AYLIK_GRID_TAM_ODENDI_TOLERANS)
-        for iso_g, prow_g in grid_src.items():
-            fresh[iso_g] = _panel_by_iso_pick_richer(fresh.get(iso_g), prow_g, tol_p)
         if fresh:
             if not by_iso:
                 _save_musteri_panel_by_iso(mid, fresh)
@@ -17365,17 +17381,6 @@ def api_tahsilat_panel_detay():
                 if changed:
                     _save_musteri_panel_by_iso(mid, merged)
                     by_iso = merged
-        grid_resp = _panel_by_iso_from_grid_payload(payload)
-        if grid_resp:
-            tol_r = float(AYLIK_GRID_TAM_ODENDI_TOLERANS)
-            out_r = dict(by_iso)
-            for iso_r, prow_r in grid_resp.items():
-                pt_r = round(float(prow_r.get("tahsil") or 0), 2)
-                pk_r = round(float(prow_r.get("kalan") or 0), 2)
-                if pt_r <= tol_r and pk_r <= tol_r:
-                    continue
-                out_r[iso_r] = _panel_by_iso_pick_richer(out_r.get(iso_r), prow_r, tol_r)
-            by_iso = out_r
     return jsonify({"ok": True, "by_iso": by_iso, "musteri_id": mid})
 
 
@@ -17428,7 +17433,12 @@ def api_aylik_tahsil_durum(onceden_hesaplanmis_grid=None):
         ekstre_ay_only=ekstre_ay_only,
         panel_by_iso=panel_by_iso,
     )
-    return _json_no_cache({"ok": True, "aylar": aylar})
+    # marker_aylar: gerçek |AYLIK_TAH| satırı olan aylar (hayalet yeşil ayrımı için FE).
+    marker_aylar = sorted(
+        marker_ay_only or [],
+        key=lambda s: (int(str(s).split("-")[0]), int(str(s).split("-")[1])),
+    )
+    return _json_no_cache({"ok": True, "aylar": aylar, "marker_aylar": marker_aylar})
 
 
 @bp.route('/api/cari-ekstre-b')

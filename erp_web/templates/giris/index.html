@@ -5374,6 +5374,7 @@ let sozlesmeOdenenAySayisi = 0; // tam ödenen ay sayısı
 let sozlesmeKismiOdemeVar = false; // kısmi ödenen ay var mı (sarı kutu)
 let sozlesmeKismiEksikTutar = 0; // kısmi ödenen ayda kalan borç (kutuda gösterilir)
 let sozlesmeTahsilEdilenAyAnahtarlari = new Set(); // API: YYYY-M (normalize: YYYY-M)
+let sozlesmeTahsilMarkerAyAnahtarlari = new Set(); // API marker_aylar: gercek |AYLIK_TAH| aylari
 const SOZLESME_TAM_ODENDI_TOLERANS = 0.05; // backend AYLIK_GRID_TAM_ODENDI_TOLERANS ile uyumlu
 /** Borçlandırılan aylar (|AYLIK_TUTAR| faturası) — bu oturumda kırmızı önceliği için tutulur. */
 var sozlesmeAylikBorclananAyAnahtarlari = new Set();
@@ -5454,6 +5455,11 @@ function sozlesmeTahsilSetFromJson(j) {
         return false;
     }
     sozlesmeTahsilEdilenAyAnahtarlari = new Set(j.aylar.map(function (x) { return sozlesmeAylikAyKeyNormalize(String(x)); }));
+    sozlesmeTahsilMarkerAyAnahtarlari = new Set(
+        (Array.isArray(j.marker_aylar) ? j.marker_aylar : []).map(function (x) {
+            return sozlesmeAylikAyKeyNormalize(String(x));
+        })
+    );
     try { girisTahsilSetindenDondurulanlariCikar(); } catch (_eDonSet) {}
     try { sozlesmeTahsilSetPanelBorcTemizle(); } catch (_eTbT) {}
     try { sozlesmelerAylikTahsilSetiniGorseleZorla(); } catch (_eTahsilPaint) {}
@@ -5575,6 +5581,38 @@ function sozlesmelerAyKartTiklanabilirMi(card) {
 }
 
 /** Yeni «Aylık tutarlardan tahsil» kaydı: henüz tam tahsil edilmemiş aylar. */
+function sozlesmelerAyKartHayaletYesilMi(card) {
+    /* Yesil gorunuyor ama gercek |AYLIK_TAH| satiri yok (hayalet). */
+    if (!card || !card.getAttribute('data-ay-key')) return false;
+    var keyNorm = (typeof sozlesmeAylikAyKeyNormalize === 'function')
+        ? sozlesmeAylikAyKeyNormalize(String(card.getAttribute('data-ay-key') || ''))
+        : String(card.getAttribute('data-ay-key') || '');
+    if (!keyNorm) return false;
+    if (typeof sozlesmeTahsilMarkerAyAnahtarlari !== 'undefined'
+        && sozlesmeTahsilMarkerAyAnahtarlari
+        && sozlesmeTahsilMarkerAyAnahtarlari.has
+        && sozlesmeTahsilMarkerAyAnahtarlari.has(keyNorm)) {
+        return false;
+    }
+    var yesilDom = card.classList.contains('sozlesmeler-ay-kart-odendi')
+        || card.getAttribute('data-tahsil-kapandi') === '1';
+    var yT = parseInt(card.getAttribute('data-yil') || '', 10);
+    var aT = parseInt(card.getAttribute('data-ay') || '', 10);
+    var stT = null;
+    if (!isNaN(yT) && !isNaN(aT) && typeof girisTahsilatYilAyPaneldenHucreDurum === 'function') {
+        stT = girisTahsilatYilAyPaneldenHucreDurum(yT, aT);
+    }
+    if (!stT && !isNaN(yT) && !isNaN(aT) && typeof girisTahsilatYilAyPaneldenHucreDurumCacheDen === 'function') {
+        stT = girisTahsilatYilAyPaneldenHucreDurumCacheDen(yT, aT);
+    }
+    var yesilPanel = !!(stT && stT.tip === 'yesil');
+    var inSet = (typeof sozlesmeTahsilEdilenAyAnahtarlari !== 'undefined'
+        && sozlesmeTahsilEdilenAyAnahtarlari
+        && sozlesmeTahsilEdilenAyAnahtarlari.has
+        && sozlesmeTahsilEdilenAyAnahtarlari.has(keyNorm));
+    return !!(yesilDom || yesilPanel || inSet);
+}
+
 function sozlesmelerAyKartYeniTahsilEdilebilirMi(card) {
     if (!card || !card.getAttribute('data-ay-key')) return false;
     var tol = Number(SOZLESME_TAM_ODENDI_TOLERANS) || 0.05;
@@ -5587,7 +5625,10 @@ function sozlesmelerAyKartYeniTahsilEdilebilirMi(card) {
             stT = girisTahsilatYilAyPaneldenHucreDurumCacheDen(yT, aT);
         }
         if (stT && stT.tip === 'kirmizi') return true;
-        if (stT && stT.tip === 'yesil') return false;
+        if (stT && stT.tip === 'yesil') {
+            return (typeof sozlesmelerAyKartHayaletYesilMi === 'function')
+                ? !!sozlesmelerAyKartHayaletYesilMi(card) : false;
+        }
     }
     if (sozlesmelerAyKartHucreTutar(card) <= tol) return false;
     if (card.classList.contains('sozlesmeler-ay-kart-kismi')) {
@@ -5603,9 +5644,15 @@ function sozlesmelerAyKartYeniTahsilEdilebilirMi(card) {
         && sozlesmeTahsilEdilenAyAnahtarlari
         && sozlesmeTahsilEdilenAyAnahtarlari.has
         && sozlesmeTahsilEdilenAyAnahtarlari.has(keyNorm)) {
+        if (typeof sozlesmelerAyKartHayaletYesilMi === 'function' && sozlesmelerAyKartHayaletYesilMi(card)) {
+            return true;
+        }
         return false;
     }
     if (card.getAttribute('data-tahsil-kapandi') === '1' && card.classList.contains('sozlesmeler-ay-kart-odendi')) {
+        if (typeof sozlesmelerAyKartHayaletYesilMi === 'function' && sozlesmelerAyKartHayaletYesilMi(card)) {
+            return true;
+        }
         return false;
     }
     return true;
@@ -18564,6 +18611,21 @@ function sozlesmeAylikTahsilEt() {
         if (!confirm(
             (satirlarHam.length - satirlar.length) + ' ay zaten tahsil edilmiş; yalnızca ' + satirlar.length +
             ' ay işlenecek. Devam edilsin mi?'
+        )) return;
+    }
+    var hayaletN = 0;
+    satirlar.forEach(function (sH) {
+        var ayKeyH = sozlesmeAylikAyKeyFromYilAy(sH.yil, sH.ay);
+        var cardH = (typeof _sozlesmeAyKartBul === 'function')
+            ? _sozlesmeAyKartBul(grid, ayKeyH)
+            : null;
+        if (cardH && typeof sozlesmelerAyKartHayaletYesilMi === 'function' && sozlesmelerAyKartHayaletYesilMi(cardH)) {
+            hayaletN += 1;
+        }
+    });
+    if (hayaletN > 0) {
+        if (!confirm(
+            hayaletN + ' ay yeşil görünüyor ama tahsilat kaydı yok (hayalet). Bu aylar için yeni tahsilat satırı yazılacak. Devam edilsin mi?'
         )) return;
     }
     var toplamStr = satirlar.reduce(function(s, r) { return s + r.tutar_kdv_dahil; }, 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
