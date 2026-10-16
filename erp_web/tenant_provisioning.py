@@ -36,6 +36,13 @@ SIGNUP_SELECTABLE_MODULE_KEYS: frozenset[str] = frozenset(
 )
 
 BACKUP_TABLE = "musteri_tahsilat_panel_detay_backup_20260617"
+# Operasyonel yedekler (panel onarım / eski backup): kiracı dump'ına sızmasın.
+BACKUP_TABLES = (
+    BACKUP_TABLE,
+    "musteri_tahsilat_panel_detay_yedek",
+    "musteri_aylik_grid_cache_yedek",
+    "panel_tekrar_yedek",
+)
 PLATFORM_STRIP_TABLES = (
     "tenants",
     "pricing_regions",
@@ -361,11 +368,15 @@ def transform_public_dump(src: str, schema: str) -> str:
         text,
         count=1,
     )
-    text = _strip_named_table_block(text, BACKUP_TABLE)
+    for backup_table in BACKUP_TABLES:
+        text = _strip_named_table_block(text, backup_table)
     for platform_table in PLATFORM_STRIP_TABLES:
         text = _strip_named_table_block(text, platform_table)
-    if BACKUP_TABLE in text:
-        raise TenantProvisionError("yedek tablo hâlâ dönüştürülmüş DDL içinde")
+    for backup_table in BACKUP_TABLES:
+        if backup_table in text:
+            raise TenantProvisionError(
+                "yedek tablo hâlâ dönüştürülmüş DDL içinde: " + backup_table
+            )
     for platform_table in PLATFORM_STRIP_TABLES:
         if re.search(rf"CREATE TABLE public\.{re.escape(platform_table)}\b", text):
             raise TenantProvisionError(
