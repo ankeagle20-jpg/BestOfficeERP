@@ -42,6 +42,7 @@ BACKUP_TABLES = (
     "musteri_tahsilat_panel_detay_yedek",
     "musteri_aylik_grid_cache_yedek",
     "panel_tekrar_yedek",
+    "tahsilat_marker_yedek",
 )
 PLATFORM_STRIP_TABLES = (
     "tenants",
