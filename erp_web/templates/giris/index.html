@@ -4576,7 +4576,7 @@ button.auto-btn.whatsapp-hizmet-filter-btn.wa-hizmet-aktif {
                     <button type="button" class="cari-ekstre-tab" data-tab="cari_ekstre_b" id="cari_ekstre_b_tab_btn">Cari Ekstre B</button>
                 </div>
                 <div id="cari_ekstre_panel" class="cari-ekstre-panel">
-                    <p class="cari-ekstre-aciklama">Varsayılan: cari takvim yılı (1 Ocak → içinde olunan ay sonu; pasif firmada kapanıştan bir önceki ay). İsterseniz başlangıç/bitişi genişleterek tüm dönemi yükleyebilirsiniz. Aylık kira borç ve tahsilat alacak; tahsilat satırına tıklayınca özet ve makbuz PDF açılır.</p>
+                    <p class="cari-ekstre-aciklama">Aktif: bu yılın 1 Ocak’ı — max(bugünün ayı sonu, son tahsilat/marker ayı sonu). Pasif: kapanış yılının 1 Ocak’ı — kapanış ayı sonu (dahil). Elle değiştirdiğiniz aralık korunur; önceki hareketler devreden bakiyede kalır.</p>
                     <div class="cari-ekstre-filtre">
                         <label>Başlangıç</label>
                         <input type="date" id="cari_ekstre_baslangic">
@@ -33259,6 +33259,8 @@ function girisCariEkstreAyIlkSon(yil, ay1based) {
  * Pasif: kapanış (veya sözleşme bitiş) tarihinin bir önceki takvim ayı.
  */
 function girisCariEkstreVarsayilanTarihAraligi(m) {
+    /* Ekran varsayılanı: sunucu ekstre_varsayilan_* (BE ekran kuralı) öncelikli.
+       Yedek FE: aktif=yılbaşı…max(ay sonu); pasif=kapanış yılı 1 Ocak…kapanış ayı sonu. */
     m = m || {};
     var sunucuBas = String(m.ekstre_varsayilan_bas || '').substring(0, 10);
     var sunucuBit = String(m.ekstre_varsayilan_bit || '').substring(0, 10);
@@ -33269,40 +33271,39 @@ function girisCariEkstreVarsayilanTarihAraligi(m) {
     var cy = now.getFullYear();
     var cm = now.getMonth() + 1;
     var pasif = String(m.durum || '').toLowerCase().trim() === 'pasif';
-    var bugun = cy + '-' + girisCariEkstrePad2(cm) + '-' + girisCariEkstrePad2(now.getDate());
-    var acilis = String(m.rent_start_date || m.sozlesme_baslangic || '').substring(0, 10);
-    var basYil = cy + '-01-01';
-    if (/^\d{4}-\d{2}-\d{2}$/.test(acilis) && acilis.substring(0, 4) === String(cy)) basYil = acilis;
+    var aySon = function (y, a) {
+        var sg = new Date(y, a, 0).getDate();
+        return y + '-' + girisCariEkstrePad2(a) + '-' + girisCariEkstrePad2(sg);
+    };
     if (!pasif) {
-        if (basYil > bugun) basYil = bugun;
-        return { bas: basYil, bit: bugun };
+        return { bas: cy + '-01-01', bit: aySon(cy, cm) };
     }
-    var yil;
-    var ay;
-    if (pasif) {
-        var kapStr = (m.kapanis_tarihi != null) ? String(m.kapanis_tarihi).trim().substring(0, 10) : '';
+    var kapStr = (m.kapanis_tarihi != null) ? String(m.kapanis_tarihi).trim().substring(0, 10) : '';
+    var yil, ay;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(kapStr)) {
+        yil = parseInt(kapStr.substring(0, 4), 10);
+        ay = parseInt(kapStr.substring(5, 7), 10);
+    } else {
         var bitStrP = (m.sozlesme_bitis != null) ? String(m.sozlesme_bitis).trim().substring(0, 10) : '';
-        var dk = sozlesmeAylikEfektifBitisTarihi(
-            (m.rent_start_date != null ? String(m.rent_start_date).trim().substring(0, 10) : '') ||
-            (m.sozlesme_baslangic != null ? String(m.sozlesme_baslangic).trim().substring(0, 10) : ''),
-            bitStrP,
-            {
-                durum: m.durum || '',
-                kapanis_tarihi: kapStr,
-                kapanis_sonrasi_borc_ay: m.kapanis_sonrasi_borc_ay
-            }
-        );
-        if (dk && !isNaN(dk.getTime())) {
-            var pmP = new Date(dk.getFullYear(), dk.getMonth() - 1, 1);
-            yil = pmP.getFullYear();
-            ay = pmP.getMonth() + 1;
+        if (/^\d{4}-\d{2}-\d{2}$/.test(bitStrP)) {
+            yil = parseInt(bitStrP.substring(0, 4), 10);
+            ay = parseInt(bitStrP.substring(5, 7), 10);
         } else {
-            var pm0 = new Date(cy, cm - 2, 1);
-            yil = pm0.getFullYear();
-            ay = pm0.getMonth() + 1;
+            yil = cy;
+            ay = cm;
         }
     }
-    return girisCariEkstreAyIlkSon(yil, ay);
+    return { bas: yil + '-01-01', bit: aySon(yil, ay) };
+}
+
+function girisCariEkstrePasifSonrasiUyariGoster(m) {
+    var el = document.getElementById('cari_ekstre_pasif_sonrasi_uyari');
+    if (!el) return;
+    var goster = !!(m && m.ekstre_pasif_sonrasi_uyari);
+    el.style.display = goster ? 'block' : 'none';
+    if (goster) {
+        el.textContent = 'Pasife alma sonrası kayıt var; dönemi genişletin.';
+    }
 }
 
 function girisCariEkstreVarsayilanTarihleriYaz(m) {
@@ -33311,15 +33312,19 @@ function girisCariEkstreVarsayilanTarihleriYaz(m) {
     var bBas = document.getElementById('cari_ekstre_b_baslangic');
     var bBit = document.getElementById('cari_ekstre_b_bitis');
     if (!eb || !ebit) return;
+    /* Yeni müşteri / ilk açılış: elle seçim bayrağını sıfırla, varsayılanı yaz. */
+    try { window.__cariEkstreBitisKullaniciDokundu = false; } catch (_eDokRst) {}
     var ar = girisCariEkstreVarsayilanTarihAraligi(m || {});
     eb.value = ar.bas;
     ebit.value = ar.bit;
     if (bBas) bBas.value = ar.bas;
     if (bBit) bBit.value = ar.bit;
     try { window.__cariEkstreBitisOtomatik = true; } catch (_eEkOto) {}
+    if (typeof girisCariEkstrePasifSonrasiUyariGoster === 'function') {
+        girisCariEkstrePasifSonrasiUyariGoster(m || {});
+    }
 }
 
-/** Grid tahsil API → tahsilat paneli (ekstre panel_tahsil_json ile aynı kaynak). */
 function girisTahsilatPanelOlusturulanSenkron(rows) {
     if (!rows || !rows.length) return;
     var tol = Number(SOZLESME_TAM_ODENDI_TOLERANS) || 0.05;
@@ -34123,7 +34128,7 @@ function cariEkstreFormdanGuncelleDebounced() {
             });
         }
     }
-    onFormAlan('cari_ekstre_baslangic', { inputToo: true });
+    onFormAlan('cari_ekstre_baslangic', { inputToo: true, ekstreBitisManuel: true });
     onFormAlan('cari_ekstre_bitis', {
         inputToo: true,
         ekstreBitisManuel: true

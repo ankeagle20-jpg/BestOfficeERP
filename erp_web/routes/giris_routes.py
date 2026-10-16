@@ -7062,11 +7062,16 @@ def api_musteri_detay(mid):
         out["yetkililer"] = []
 
     try:
-        ek_bas, ek_bit = _cari_ekstre_varsayilan_bas_bit(int(mid))
+        # Ekran kutuları: yeni aktif/pasif kuralı. API/Excel boş-tarih yedeği ayrı kalır.
+        ek_bas, ek_bit = _cari_ekstre_ekran_varsayilan_bas_bit(int(mid))
         out["ekstre_varsayilan_bas"] = ek_bas.isoformat()
         out["ekstre_varsayilan_bit"] = ek_bit.isoformat()
+        out["ekstre_pasif_sonrasi_uyari"] = bool(
+            _ekstre_pasif_sonrasi_kayit_var(int(mid))
+        )
     except Exception:
         logging.getLogger(__name__).exception("ekstre varsayilan tarih mid=%s", mid)
+        out["ekstre_pasif_sonrasi_uyari"] = False
     payload = {"ok": True, "musteri": out}
     try:
         if int(gens.get(int(mid)) or 0) == gen_at_start:
@@ -13601,8 +13606,201 @@ def _ekstre_son_tam_odenen_ay(musteri_id: int) -> date | None:
     return max(paid)
 
 
+def _ekstre_ay_sonu(yil: int, ay: int) -> date:
+    """Verilen yıl-ayın son takvim günü."""
+    _, son = calendar.monthrange(int(yil), int(ay))
+    return date(int(yil), int(ay), int(son))
+
+
+def _ekstre_son_tahsil_marker_ayi(musteri_id: int) -> date | None:
+    """Tahsilatlardaki en ileri |AYLIK_TAH| / |AYLIK_PAY| marker ayı (ayın 1'i).
+
+    Tam ödeme şartı yok — ekran varsayılan bitiş ufku için marker yeter.
+    """
+    mid = int(musteri_id)
+    rows = fetch_all(
+        """
+        SELECT COALESCE(t.aciklama, '') AS aciklama
+        FROM tahsilatlar t
+        WHERE (t.musteri_id = %s OR t.customer_id = %s)
+          AND COALESCE(t.tutar, 0) > 0
+          AND (
+                COALESCE(t.aciklama, '') LIKE '%%|AYLIK_TAH|%%'
+             OR COALESCE(t.aciklama, '') LIKE '%%|AYLIK_PAY|%%'
+          )
+        """,
+        (mid, mid),
+    ) or []
+    best: date | None = None
+    for r in rows:
+        ac = str((r or {}).get("aciklama") or "")
+        if "|BTUFRT|" in ac:
+            continue
+        for iso_raw in re.findall(
+            r"\|(?:AYLIK_TAH|AYLIK_PAY)\|([0-9]{4}-[0-9]{2}-[0-9]{2})",
+            ac,
+        ):
+            try:
+                dd = datetime.strptime(iso_raw[:10], "%Y-%m-%d").date()
+                ay1 = date(dd.year, dd.month, 1)
+            except ValueError:
+                continue
+            if best is None or ay1 > best:
+                best = ay1
+    return best
+
+
+def _ekstre_pasif_ay_yedek(musteri_id: int, kyc: dict | None) -> date | None:
+    """kapanis_tarihi yoksa: en son grid/kira ayı (ayın 1'i), yoksa sözleşme bitiş ayı."""
+    mid = int(musteri_id)
+    try:
+        cache = fetch_one(
+            "SELECT payload FROM musteri_aylik_grid_cache WHERE musteri_id = %s",
+            (mid,),
+        )
+        brut = _brut_by_iso_from_aylik_grid_payload((cache or {}).get("payload")) or {}
+        isos = [str(k)[:10] for k, v in brut.items() if float(v or 0) > 0.01]
+        if isos:
+            last = max(isos)
+            dd = datetime.strptime(last[:10], "%Y-%m-%d").date()
+            return date(dd.year, dd.month, 1)
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "ekstre pasif ay yedek grid mid=%s", mid
+        )
+    bit_soz = _aylik_grid_coerce_date((kyc or {}).get("sozlesme_bitis"))
+    if isinstance(bit_soz, date):
+        return date(bit_soz.year, bit_soz.month, 1)
+    return None
+
+
+def _ekstre_pasif_sonrasi_kayit_var(musteri_id: int, kyc: dict | None = None) -> bool:
+    """Pasife alma ayından sonra kira/tahsilat/hareket var mı?"""
+    mid = int(musteri_id)
+    src = kyc if isinstance(kyc, dict) else _musteri_kyc_grup_for_aylik_grid(mid)
+    if str((src or {}).get("durum") or "").strip().lower() != "pasif":
+        return False
+    kap = _aylik_grid_coerce_date((src or {}).get("kapanis_tarihi"))
+    if not isinstance(kap, date):
+        return False
+    # Pasif ay dahil varsayılan; sonrası = bir sonraki ayın 1'i
+    sinir = _add_months(date(kap.year, kap.month, 1), 1)
+    sinir_iso = sinir.isoformat()
+    try:
+        for r in _ekstre_tahsil_rows_for_musteri(mid) or []:
+            try:
+                if float((r or {}).get("tutar") or 0) <= 0:
+                    continue
+            except (TypeError, ValueError):
+                continue
+            ac = str((r or {}).get("aciklama") or "")
+            ilk = _ekstre_ilk_ay_isareti(ac)
+            if ilk and str(ilk)[:10] >= sinir_iso:
+                return True
+            tt = (r or {}).get("tahsilat_tarihi")
+            if hasattr(tt, "year"):
+                tt_iso = date(int(tt.year), int(tt.month), int(tt.day)).isoformat()
+            else:
+                tt_iso = str(tt or "")[:10]
+            if tt_iso and tt_iso >= sinir_iso:
+                return True
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "ekstre pasif sonrasi tahsil mid=%s", mid
+        )
+    try:
+        fat = fetch_one(
+            """
+            SELECT 1 AS x
+            FROM faturalar
+            WHERE musteri_id = %s
+              AND fatura_tarihi::date >= %s::date
+              AND COALESCE(toplam, tutar, 0) > 0
+            LIMIT 1
+            """,
+            (mid, sinir_iso),
+        )
+        if fat:
+            return True
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "ekstre pasif sonrasi fatura mid=%s", mid
+        )
+    try:
+        cache = fetch_one(
+            "SELECT payload FROM musteri_aylik_grid_cache WHERE musteri_id = %s",
+            (mid,),
+        )
+        brut = _brut_by_iso_from_aylik_grid_payload((cache or {}).get("payload")) or {}
+        for iso, v in brut.items():
+            if float(v or 0) <= 0.01:
+                continue
+            if str(iso)[:10] >= sinir_iso:
+                return True
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "ekstre pasif sonrasi grid mid=%s", mid
+        )
+    return False
+
+
+# Ekran ufku: marker ayı bugünden en fazla bu kadar ay ileri gidebilir.
+_EKSTRE_EKRAN_MARKER_TAVAN_AY = 12
+
+
+def _cari_ekstre_ekran_varsayilan_bas_bit(
+    musteri_id: int,
+    bugun: date | None = None,
+) -> tuple[date, date]:
+    """Yalnız ekranda açılan Cari Ekstre tarih kutularının varsayılanı.
+
+    AKTİF: bas = bu yıl 1 Ocak; bit = max(bugünün ayı sonu, son marker ayı sonu)
+            (marker tavani: bugün + 12 ay).
+    PASİF: bit = kapanış ayı sonu (dahil); bas = o yılın 1 Ocak'ı.
+           kapanış yoksa grid/sözleşme bitiş yedeği.
+    API/Excel/PDF boş-tarih yedeği (_cari_ekstre_varsayilan_bas_bit) değişmez.
+    """
+    bugun = bugun if isinstance(bugun, date) else date.today()
+    mid = int(musteri_id)
+    kyc = _musteri_kyc_grup_for_aylik_grid(mid)
+    durum = str((kyc or {}).get("durum") or "").strip().lower()
+    if durum == "pasif":
+        kap = _aylik_grid_coerce_date((kyc or {}).get("kapanis_tarihi"))
+        if isinstance(kap, date):
+            ay1 = date(kap.year, kap.month, 1)
+        else:
+            ay1 = _ekstre_pasif_ay_yedek(mid, kyc) or date(bugun.year, bugun.month, 1)
+        bit = _ekstre_ay_sonu(ay1.year, ay1.month)
+        bas = date(bit.year, 1, 1)
+        if bas > bit:
+            bas = bit
+        return bas, bit
+
+    # Aktif
+    bas = date(bugun.year, 1, 1)
+    bugun_ay_sonu = _ekstre_ay_sonu(bugun.year, bugun.month)
+    bit = bugun_ay_sonu
+    try:
+        son_m = _ekstre_son_tahsil_marker_ayi(mid)
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "ekstre ekran son marker mid=%s", mid
+        )
+        son_m = None
+    if son_m:
+        tavan = _add_months(date(bugun.year, bugun.month, 1), _EKSTRE_EKRAN_MARKER_TAVAN_AY)
+        if (son_m.year, son_m.month) > (tavan.year, tavan.month):
+            son_m = tavan
+        marker_son = _ekstre_ay_sonu(son_m.year, son_m.month)
+        if marker_son > bit:
+            bit = marker_son
+    if bas > bit:
+        bas = bit
+    return bas, bit
+
+
 def _cari_ekstre_varsayilan_bas_bit(musteri_id: int) -> tuple[date, date]:
-    """Sayfa açılışındaki ekstre aralığı.
+    """API/Excel/Ekstre-B boş tarih yedeği (ekran dışı — davranış korunur).
 
     Başlangıç: bu yıl açıldıysa sözleşme/açılış günü, değilse 1 Ocak.
     Bitiş: bugün; bugünden sonraki tam ödenmiş ay varsa o ayın sözleşme günü.
