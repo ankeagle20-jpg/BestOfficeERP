@@ -1273,6 +1273,30 @@ def api_akbank_tahsilat_gonderici_kaydet():
     return jsonify({"ok": True, "sender_key": sk})
 
 
+def _akbank_commit_items_sorted(items: list) -> list:
+    """UI sırasına güvenme: onaylı satırlar mid + ödeme tarihi artan + orijinal indeks.
+
+    Onaysız / geçersiz satırlar sonda (döngü zaten atlar). Aynı gün kararlı sıra = gelen indeks.
+    """
+    if not isinstance(items, list) or not items:
+        return []
+    indexed: list[tuple[tuple, dict]] = []
+    for i, it in enumerate(items):
+        if not isinstance(it, dict) or not it.get("onay"):
+            indexed.append(((1, 0, "", i), it if isinstance(it, dict) else {}))
+            continue
+        try:
+            mid = int(it.get("musteri_id"))
+        except (TypeError, ValueError):
+            mid = 0
+        tah = str(it.get("tahsilat_tarihi") or it.get("tarih") or "")[:10]
+        if len(tah) < 10:
+            tah = ""
+        indexed.append(((0, mid, tah, i), it))
+    indexed.sort(key=lambda row: row[0])
+    return [it for _k, it in indexed]
+
+
 @bp.route("/api/akbank-tahsilat/commit", methods=["POST"])
 @giris_gerekli
 def api_akbank_tahsilat_commit():
@@ -1280,6 +1304,8 @@ def api_akbank_tahsilat_commit():
 
     FIFO oldest-unpaid dağıtım → aciklama'ya |AYLIK_TAH| + |AYLIK_PAY| (tahsilat-ekle ile
     aynı yardımcılar); panel/grid ayrıca apply_makbuz_dagitim_to_panel_db ile güncellenir.
+    Çok satır: mid başına ödeme tarihi artan sırada; batch_onceki PAY taşır (UI newest-first
+    yığılmasını engeller). İleri tarihli onceki elenmesi (ay_fifo) bilinçli kural olarak kalır.
     """
     from services.banka_ak_import import akbank_sender_key  # lazy: boot RSS
     from routes.faturalar_routes import (
@@ -1293,6 +1319,7 @@ def api_akbank_tahsilat_commit():
     items = data.get("satirlar")
     if not isinstance(items, list) or not items:
         return jsonify({"ok": False, "mesaj": "Kaydedilecek satır yok."}), 400
+    items = _akbank_commit_items_sorted(items)
 
     _ensure_tahsilat_banka_referans_no()
     _ensure_akbank_dekont_musteri_map()
@@ -1302,7 +1329,7 @@ def api_akbank_tahsilat_commit():
     kayitlar: list[dict] = []
     # Commit sonrası panel/cache (transaction dışında, manuel makbuz ile aynı).
     panel_sync_jobs: list[tuple[int, str, list[dict]]] = []
-    # Aynı istekte henüz commit edilmemiş satırlar. Sıra, tarih + geliş.
+    # Aynı istekte henüz commit edilmemiş satırlar (mid → PAY'li onceki; tarih artan sıra).
     batch_onceki: dict[int, list[dict]] = {}
     batch_sira = 0
 
@@ -1412,10 +1439,13 @@ def api_akbank_tahsilat_commit():
                 hatalar.append(f"Ref {ref}: tahsilat kaydı dönmedi.")
                 continue
             batch_sira += 1
+            # Sonraki satırlar için PAY taşı (markersiz tutar → aynı aya yığılırdı).
             batch_onceki.setdefault(mid, []).append({
                 "tarih": tah_str,
                 "tutar": round(tutar, 2),
                 "id": 10**12 + batch_sira,
+                "aciklama": aciklama,
+                "pay": list(pay_items or []),
             })
             eklendi += 1
             kayitlar.append({

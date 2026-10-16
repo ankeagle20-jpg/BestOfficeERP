@@ -137,6 +137,9 @@ def test_cagri_metinleri():
     assert "odeme_tarihi=tah_str" in banka
     assert "ek_onceki=batch_onceki.get(mid)" in banka
     assert "_ensure_aylik_cache" not in banka
+    assert "def _akbank_commit_items_sorted" in banka
+    assert "items = _akbank_commit_items_sorted(items)" in banka
+    assert '"pay": list(pay_items or [])' in banka
     fatura = Path("routes/faturalar_routes.py").read_text(encoding="utf-8")
     dilim = fatura.split("def _auto_allocate_oldest_unpaid_months")[1].split("def _tahsil_rapor_yil_ay_coerce")[0]
     assert "musteri_aylik_grid_cache" not in dilim
@@ -157,7 +160,7 @@ def test_cagri_metinleri():
     assert "ayRefIsoList = ayRefIsoListRaw.slice()" in giris
     assert "ayRefIsoList = ayRefIsoListRaw.slice()" in soz
     assert "tekAyTutar" not in giris
-    secilen = pencere("function sozlesmeAylikTahsilEt", 3200)
+    secilen = pencere("function sozlesmeAylikTahsilEt", 12000)
     assert "aylik-tutarlardan-tahsil-et" in secilen
     assert "ayRefIsoList" not in secilen
     betik_m = Path("scripts/migrate_banka_import_aylik_markers.py").read_text(encoding="utf-8")
