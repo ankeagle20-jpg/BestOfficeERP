@@ -1,4 +1,5 @@
-
+/* _t.js: TARAYICIYA YÜKLENMEZ — sync/ayna kaynak; giris/index.html'de script src yok.
+   Canlı UI templates/giris/index.html inline script'lerinden gelir. */
 let selectedId = null;
 /** Sekme 7 müşteri listesinde ?odemeler=0 ile yüklenen forma geçince tam detay yenilensin diye işaret. */
 var girisSonMusteriDetayHafifYukleme = false;

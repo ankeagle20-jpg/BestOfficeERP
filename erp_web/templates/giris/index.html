@@ -10570,6 +10570,7 @@ function sozlesmelerAylikSessizPollPanelSenkron(cache) {
             try {
                 var tutEl = row.querySelector('.tahsilat-yil-ay-aylik');
                 if (tutEl) {
+                    /* BİLİNÇLİ TANIMSIZ: 2c0a01f / zorla-yeşil ile çelişir; bkz. test_index_typeof_tanimsiz */
                     var brutY = (typeof girisTahsilatYilAyPanelBrutGoster === 'function')
                         ? girisTahsilatYilAyPanelBrutGoster(d, donemYil)
                         : (parseFloat(d.aylik_tutar) || 0);
@@ -10581,6 +10582,7 @@ function sozlesmelerAylikSessizPollPanelSenkron(cache) {
                     var tahN = parseFloat(d.tahsil) || 0;
                     if (!isFinite(kalN) || kalN < 0) kalN = 0;
                     kalEl.value = kalN > 0 ? String(kalN) : (tahN > 0 ? '0' : '');
+                    /* BİLİNÇLİ TANIMSIZ: 2c0a01f / zorla-yeşil ile çelişir; bkz. test_index_typeof_tanimsiz */
                     if (typeof girisTahsilatYilAyPanelKalanRenkStil === 'function') {
                         var kalSt = girisTahsilatYilAyPanelKalanRenkStil(d, donemYil, ak);
                         kalEl.setAttribute(
@@ -10594,6 +10596,7 @@ function sozlesmelerAylikSessizPollPanelSenkron(cache) {
                     var tahV = parseFloat(d.tahsil) || 0;
                     var borcAcik = false;
                     try {
+                        /* BİLİNÇLİ TANIMSIZ: 2c0a01f / zorla-yeşil ile çelişir; bkz. test_index_typeof_tanimsiz */
                         if (typeof girisTahsilatYilAyPanelSatirAcikBorcMu === 'function') {
                             borcAcik = !!girisTahsilatYilAyPanelSatirAcikBorcMu(d, donemYil, ak);
                         }
@@ -10682,6 +10685,7 @@ function sozlesmelerAylikSessizPollApplyFromGrid(pack, ctx) {
     } catch (_eCo) {}
 
     try {
+        /* BİLİNÇLİ TANIMSIZ: 2c0a01f / zorla-yeşil ile çelişir; bkz. test_index_typeof_tanimsiz */
         if (typeof sozlesmeTahsilSetFromGridCache === 'function') sozlesmeTahsilSetFromGridCache(cache);
     } catch (_eTs) {}
 
@@ -20939,6 +20943,7 @@ function girisTahsilatYilAyPanelEsasKilidiUygulanmaliMi(yil, ay, hitOpt) {
         }
     } catch (_eZPe) {}
     var hit = hitOpt;
+    /* BİLİNÇLİ TANIMSIZ: 2c0a01f / zorla-yeşil ile çelişir; bkz. test_index_typeof_tanimsiz */
     if (!hit && typeof girisTahsilatYilAyPanelHucreSatirBul === 'function') {
         try { hit = girisTahsilatYilAyPanelHucreSatirBul(yNum, mNum); } catch (_eHPe) { hit = null; }
     }
@@ -20994,6 +20999,7 @@ function girisTahsilatYilAyPanelGridaKartUygula(card, yil, ay) {
     }
     if (!rh) return false;
     var keyNorm = sozlesmeAylikAyKeyNormalize(String(card.getAttribute('data-ay-key') || ''));
+    /* BİLİNÇLİ TANIMSIZ: 2c0a01f / zorla-yeşil ile çelişir; bkz. test_index_typeof_tanimsiz */
     var hitPe = (typeof girisTahsilatYilAyPanelHucreSatirBul === 'function')
         ? girisTahsilatYilAyPanelHucreSatirBul(yNum, mNum) : null;
     if (typeof girisTahsilatYilAyPanelEsasKilidiUygulanmaliMi === 'function'
