@@ -9720,6 +9720,37 @@ def _ekstre_kaynak_kendi_satiri(row) -> bool:
     return kay in _EKSTRE_KENDI_KAYNAK
 
 
+def _ekstre_ay_satir_direct_pay_filtre(uniq_tf, direct_pay_ids):
+    """
+    Direct_pay (faturasız kendi-satır) ile yazılmış tahsilat id'leri ay satırında
+    tekrar alacak üretmesin. Döner: (atla, filtrelenmiş_ids).
+    atla=True → ay satırı hiç yazılmamalı.
+    """
+    if not direct_pay_ids or not uniq_tf:
+        return False, list(uniq_tf or [])
+    ids: list[int] = []
+    for x in uniq_tf:
+        try:
+            t = int(x)
+        except (TypeError, ValueError):
+            continue
+        if t > 0:
+            ids.append(t)
+    if not ids:
+        return False, list(uniq_tf or [])
+    if all(t in direct_pay_ids for t in ids):
+        return True, []
+    keep = [x for x in uniq_tf if _ekstre_tid_safe(x) not in direct_pay_ids]
+    return False, keep
+
+
+def _ekstre_tid_safe(x) -> int:
+    try:
+        return int(x)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _is_banka_import_markersiz(row) -> bool:
     """Geriye uyum alias: aylık map harici = kendi-satır kaynakları (Plan B + manuel direct)."""
     return _ekstre_kaynak_kendi_satiri(row)
@@ -12889,6 +12920,7 @@ def _cari_ekstre_hareketler(
         for pr in fifo_general:
             _fifo_pay_alloc(pr, restrict_marker_months=False)
         # Serbest makbuzlar direkt satır (dönem dışı: açılış FIFO + Devreden'de; tekil satır ekleme)
+        direct_pay_ids: set[int] = set()
         for pr in direct_pays:
             logging.getLogger(__name__).warning(
                 "direct_pay: id=%s tutar=%s aciklama=%s",
@@ -12908,6 +12940,12 @@ def _cari_ekstre_hareketler(
             t_aciklama_raw = (pr.get("tahsilat_aciklama") or pr.get("aciklama") or "")
             t_aciklama = _tahsilat_aciklama_aylik_okunabilir(t_aciklama_raw)
             t_belge = (pr.get("belge_no") or pr.get("makbuz_no") or f"Makbuz-{pr.get('id')}")
+            try:
+                _dp_id = int(pr.get("id") or 0)
+            except (TypeError, ValueError):
+                _dp_id = 0
+            if _dp_id > 0:
+                direct_pay_ids.add(_dp_id)
             rows.append({
                 "tarih": t_tarih,
                 "aciklama": t_aciklama,
@@ -13109,6 +13147,11 @@ def _cari_ekstre_hareketler(
                     if x not in seen_tf:
                         seen_tf.add(x)
                         uniq_tf.append(x)
+            # Kendi-satır (direct_pay / faturasız): aynı tahsilat id ay satırında
+            # ikinci kez alacak yazılmasın (hayalet grid odenen + map tarih-ayı).
+            _atla_dp, uniq_tf = _ekstre_ay_satir_direct_pay_filtre(uniq_tf, direct_pay_ids)
+            if _atla_dp:
+                continue
             belge_tf = ""
             if uniq_tf:
                 belge_tf = ",".join(str(x) for x in uniq_tf[:6])
