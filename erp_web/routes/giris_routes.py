@@ -1292,7 +1292,173 @@ def sync_musteri_panel_borclu_from_satirlar(musteri_id: int, satirlar: list | No
     return by_iso
 
 
-def _persist_grid_cache_with_panel(musteri_id: int, payload: dict | None = None) -> dict | None:
+# Placeholder çöküşü koruması: taze build ≈ 0,01×ay iken sağlam cache'i ezme.
+AYLIK_GRID_PLACEHOLDER_BRUT_MAX = 0.5
+AYLIK_GRID_HEALTHY_CACHE_MIN = 1.0
+
+
+def _aylik_grid_payload_brut_stats(payload) -> tuple[float, int, int]:
+    """(tutar_toplam, ay_n, placeholder_ay_n)."""
+    s = 0.0
+    n = 0
+    ph = 0
+    if not isinstance(payload, dict):
+        return 0.0, 0, 0
+    for a in payload.get("aylar") or []:
+        if not isinstance(a, dict):
+            continue
+        try:
+            t = round(
+                float(a.get("tutar_kdv_dahil") or a.get("brut_tutar_kdv") or 0), 2
+            )
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(t):
+            continue
+        s += t
+        n += 1
+        if 0 < t < float(AYLIK_GRID_PLACEHOLDER_BRUT_MAX):
+            ph += 1
+        elif t <= 0:
+            ph += 1
+    return round(s, 2), n, ph
+
+
+def _aylik_grid_payload_is_placeholder(payload) -> bool:
+    """Yeni payload 'placeholder çöküşü' mü (≈0,01×n veya boş/sıfır aylar)."""
+    if payload is None:
+        return True
+    s, n, ph = _aylik_grid_payload_brut_stats(payload)
+    if n <= 0:
+        return True
+    # Hepsi 0 / 0,01 bandı veya toplam ≈ 0,01×ay
+    if ph >= max(1, int(n * 0.8)) and s <= n * float(AYLIK_GRID_PLACEHOLDER_BRUT_MAX) + 1.0:
+        return True
+    if s <= round(n * 0.01, 2) + 0.05:
+        return True
+    return False
+
+
+def _aylik_grid_payload_is_healthy(payload) -> bool:
+    """Mevcut cache gerçek tutar taşıyor mu (korunacak aday)."""
+    s, n, ph = _aylik_grid_payload_brut_stats(payload)
+    if n <= 0:
+        return False
+    if s <= float(AYLIK_GRID_HEALTHY_CACHE_MIN):
+        return False
+    if ph >= max(1, int(n * 0.5)):
+        return False
+    return True
+
+
+def _aylik_grid_cache_payload_from_db(musteri_id) -> dict | None:
+    """Guard için disk cache (mem/waterfall yok)."""
+    try:
+        mid = int(musteri_id)
+    except (TypeError, ValueError):
+        return None
+    try:
+        row = fetch_one(
+            "SELECT payload FROM musteri_aylik_grid_cache WHERE musteri_id = %s",
+            (mid,),
+        )
+    except Exception:
+        return None
+    return _parse_aylik_grid_cache_payload_raw((row or {}).get("payload"))
+
+
+def _aylik_grid_should_skip_placeholder_collapse(
+    musteri_id,
+    new_payload,
+    *,
+    force_placeholder_collapse: bool = False,
+    old_payload=None,
+) -> bool:
+    """True → yazma/silme yapma (skip). Hata fırlatmaz."""
+    if force_placeholder_collapse:
+        return False
+    try:
+        mid = int(musteri_id)
+    except (TypeError, ValueError):
+        return False
+    if not _aylik_grid_payload_is_placeholder(new_payload):
+        return False
+    old = old_payload
+    if old is None:
+        old = _aylik_grid_cache_payload_from_db(mid)
+    if not _aylik_grid_payload_is_healthy(old):
+        return False
+    os_, on, _oph = _aylik_grid_payload_brut_stats(old)
+    ns, nn, _nph = _aylik_grid_payload_brut_stats(new_payload)
+    try:
+        logging.getLogger(__name__).warning(
+            "aylik_grid_cache placeholder_collapse_skip mid=%s reason=%s "
+            "old_sum=%s new_sum=%s old_n=%s new_n=%s",
+            mid,
+            "new_placeholder_old_healthy",
+            os_,
+            ns,
+            on,
+            nn,
+        )
+    except Exception:
+        pass
+    return True
+
+
+def _delete_aylik_grid_cache_guarded(
+    musteri_id, *, force_placeholder_collapse: bool = False
+) -> bool:
+    """Cache DELETE; rebuild placeholder üretecekse silme.
+
+    True = silindi veya zaten yok. False = koruma skip (sağlam cache duruyor).
+    En güvenli yol: silmeden önce taze build önizle; çöküş ise DELETE yok.
+    """
+    try:
+        mid = int(musteri_id)
+    except (TypeError, ValueError):
+        return False
+    old = _aylik_grid_cache_payload_from_db(mid)
+    if old is None:
+        try:
+            execute(
+                "DELETE FROM musteri_aylik_grid_cache WHERE musteri_id=%s", (mid,)
+            )
+        except Exception:
+            pass
+        return True
+    if force_placeholder_collapse:
+        execute("DELETE FROM musteri_aylik_grid_cache WHERE musteri_id=%s", (mid,))
+        _invalidate_aylik_grid_payload_mem(mid)
+        return True
+    preview = None
+    try:
+        preview = _build_aylik_grid_cache_payload(mid)
+    except Exception:
+        preview = None
+    if _aylik_grid_should_skip_placeholder_collapse(
+        mid, preview, force_placeholder_collapse=False, old_payload=old
+    ):
+        try:
+            logging.getLogger(__name__).warning(
+                "aylik_grid_cache placeholder_collapse_skip mid=%s reason=%s",
+                mid,
+                "delete_blocked_would_collapse",
+            )
+        except Exception:
+            pass
+        return False
+    execute("DELETE FROM musteri_aylik_grid_cache WHERE musteri_id=%s", (mid,))
+    _invalidate_aylik_grid_payload_mem(mid)
+    return True
+
+
+def _persist_grid_cache_with_panel(
+    musteri_id: int,
+    payload: dict | None = None,
+    *,
+    force_placeholder_collapse: bool = False,
+) -> dict | None:
     """Önbelleği panel DB ile hizala ve diske yaz."""
     try:
         mid = int(musteri_id)
@@ -1301,8 +1467,14 @@ def _persist_grid_cache_with_panel(musteri_id: int, payload: dict | None = None)
     if payload is None:
         payload = _read_aylik_grid_cache_payload(mid)
     if payload is None:
-        return _upsert_aylik_grid_cache(mid)
+        return _upsert_aylik_grid_cache(
+            mid, force_placeholder_collapse=force_placeholder_collapse
+        )
     payload = _aylik_grid_cache_payload_tahsil_guncelle(mid, payload)
+    if _aylik_grid_should_skip_placeholder_collapse(
+        mid, payload, force_placeholder_collapse=force_placeholder_collapse
+    ):
+        return _aylik_grid_cache_payload_from_db(mid)
     _ensure_aylik_grid_cache_table()
     execute(
         """
@@ -4700,19 +4872,39 @@ def _invalidate_musteri_kyc_grid_mem(musteri_id) -> None:
         pass
 
 
-def _upsert_aylik_grid_cache(musteri_id, tufe_map=None):
+def _upsert_aylik_grid_cache(
+    musteri_id, tufe_map=None, *, force_placeholder_collapse: bool = False
+):
     # Her tam rebuild DB'deki güncel KYC'yi görsün (45 sn'lik mem yarışını kapat).
     _invalidate_musteri_kyc_grid_mem(musteri_id)
     payload = _build_aylik_grid_cache_payload(musteri_id, tufe_map=tufe_map)
     if not payload:
+        old = _aylik_grid_cache_payload_from_db(musteri_id)
+        if _aylik_grid_should_skip_placeholder_collapse(
+            musteri_id,
+            None,
+            force_placeholder_collapse=force_placeholder_collapse,
+            old_payload=old,
+        ):
+            return old
         return None
+    if _aylik_grid_should_skip_placeholder_collapse(
+        musteri_id,
+        payload,
+        force_placeholder_collapse=force_placeholder_collapse,
+    ):
+        return _aylik_grid_cache_payload_from_db(musteri_id)
     # Adım 1: rebuild sonrası FP damgası (flag/shadow açıksa) — persist paneli yazarken kalıcılaşır.
     try:
         if _aylik_grid_cache_skip_refresh_enabled() or _aylik_grid_freshness_shadow_log_enabled():
             payload = _aylik_grid_freshness_stamp(musteri_id, payload)
     except Exception:
         pass
-    return _persist_grid_cache_with_panel(musteri_id, payload)
+    return _persist_grid_cache_with_panel(
+        musteri_id,
+        payload,
+        force_placeholder_collapse=force_placeholder_collapse,
+    )
 
 
 # Kısa süreli bellek önbelleği: aynı müşteri için grid-cache + tahsil-durum arka arkaya gelince
@@ -14843,13 +15035,11 @@ def api_aylik_tutarlardan_borclandir():
         )
         _invalidate_aylik_grid_payload_mem(int(musteri_id))
         try:
-            execute(
-                "DELETE FROM musteri_aylik_grid_cache WHERE musteri_id=%s",
-                (int(musteri_id),)
-            )
+            # Sil+defer zinciri: rebuild placeholder olacaksa cache'i koru.
+            if _delete_aylik_grid_cache_guarded(int(musteri_id)):
+                _defer_aylik_grid_cache_rebuild(musteri_id)
         except Exception:
             pass
-        _defer_aylik_grid_cache_rebuild(musteri_id)
     try:
         _cari_ekstre_api_cache.clear()
     except Exception:
@@ -15225,10 +15415,8 @@ def api_aylik_tutarlardan_tahsil_et():
             pass
     try:
         _invalidate_aylik_grid_payload_mem(int(musteri_id))
-        execute(
-            "DELETE FROM musteri_aylik_grid_cache WHERE musteri_id=%s",
-            (int(musteri_id),)
-        )
+        # DELETE→FE force rebuild: çöküş riskinde silme; upsert guard ikinci katman.
+        _delete_aylik_grid_cache_guarded(int(musteri_id))
     except Exception:
         pass
     # Cache rebuild frontend isteğinde yapılacak (force=1)
@@ -16934,7 +17122,7 @@ def api_reel_donem_tutar_delete():
         _invalidate_aylik_grid_payload_mem(mid_int)
         _ensure_aylik_grid_cache_table()
         _ensure_tahsilat_panel_detay_table()
-        execute("DELETE FROM musteri_aylik_grid_cache WHERE musteri_id = %s", (mid_int,))
+        _delete_aylik_grid_cache_guarded(mid_int)
         execute(
             "DELETE FROM musteri_tahsilat_panel_detay WHERE musteri_id = %s", (mid_int,)
         )

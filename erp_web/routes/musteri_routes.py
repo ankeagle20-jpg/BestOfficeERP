@@ -2968,15 +2968,14 @@ def api_kyc_kaydet():
             try:
                 from routes.giris_routes import (
                     _defer_aylik_grid_cache_rebuild,
+                    _delete_aylik_grid_cache_guarded,
                     _ensure_aylik_grid_cache_table,
                 )
 
                 if _odemd == "manuel":
                     _ensure_aylik_grid_cache_table()
-                    execute(
-                        "DELETE FROM musteri_aylik_grid_cache WHERE musteri_id = %s",
-                        (int(musteri_id),),
-                    )
+                    # Manuel ödeme düzeni: silme yalnızca rebuild çöküşü yoksa.
+                    _delete_aylik_grid_cache_guarded(int(musteri_id))
                 else:
                     _defer_aylik_grid_cache_rebuild(int(musteri_id))
             except Exception:
