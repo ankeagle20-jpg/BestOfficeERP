@@ -772,8 +772,17 @@ def _tahsilat_by_ref_for_ham(ham: list) -> dict[str, dict]:
     """
     banka_referans_no → {tahsilat_id, makbuz_no}.
     Aynı ref için birden fazla tahsilat varsa en küçük id (ilk kayıt) alınır.
+    Anahtarlar normalize edilmiş ref (+ varyantlar aynı kayda işaret eder).
     """
-    refs = [str(r.get("banka_referans_no") or "").strip() for r in ham if r.get("banka_referans_no")]
+    from services.banka_ak_import import (
+        banka_referans_no_variants,
+        normalize_banka_referans_no,
+    )
+
+    refs: list[str] = []
+    for r in ham:
+        for v in banka_referans_no_variants(r.get("banka_referans_no")):
+            refs.append(v)
     refs_u = [x for x in dict.fromkeys(refs) if x]
     if not refs_u:
         return {}
@@ -788,18 +797,25 @@ def _tahsilat_by_ref_for_ham(ham: list) -> dict[str, dict]:
     )
     out: dict[str, dict] = {}
     for x in rows or []:
-        ref = str(x.get("banka_referans_no") or "").strip()
-        if not ref or ref in out:
+        raw_ref = str(x.get("banka_referans_no") or "").strip()
+        if not raw_ref:
             continue
         try:
             tid = int(x["id"])
         except (TypeError, ValueError, KeyError):
             continue
         mn = x.get("makbuz_no")
-        out[ref] = {
+        payload = {
             "tahsilat_id": tid,
             "makbuz_no": str(mn) if mn is not None and str(mn).strip() != "" else None,
         }
+        for key in banka_referans_no_variants(raw_ref):
+            if key and key not in out:
+                out[key] = payload
+        # ham satır normalize anahtarı
+        n = normalize_banka_referans_no(raw_ref)
+        if n and n not in out:
+            out[n] = payload
     return out
 
 
@@ -830,16 +846,20 @@ def _manual_map_for_ham(ham: list) -> dict[str, int]:
 
 
 def _ham_birlestir_dedupe(ham_parcalar: list[list]) -> list:
-    """Aynı fiş no tekrarını at (ilk kazanır)."""
+    """Aynı fiş no tekrarını at (ilk kazanır; normalize edilmiş ref)."""
+    from services.banka_ak_import import normalize_banka_referans_no
+
     seen: set[str] = set()
     out: list = []
     for ham in ham_parcalar:
         for r in ham:
-            ref = str(r.get("banka_referans_no") or "").strip()
+            ref = normalize_banka_referans_no(r.get("banka_referans_no"))
             if ref:
                 if ref in seen:
                     continue
                 seen.add(ref)
+                r = dict(r)
+                r["banka_referans_no"] = ref
             out.append(r)
     return out
 
@@ -1273,6 +1293,34 @@ def api_akbank_tahsilat_gonderici_kaydet():
     return jsonify({"ok": True, "sender_key": sk})
 
 
+def _akbank_geriye_donuk_banka_ids(cur, mid: int, tah_str: str) -> list[int]:
+    """Aynı mid'de tah_str'den daha yeni tarihli banka_import id'leri (geriye dönük şüphesi)."""
+    try:
+        cur.execute(
+            """
+            SELECT id FROM tahsilatlar
+            WHERE COALESCE(musteri_id, customer_id) = %s
+              AND COALESCE(kaynak, '') = 'banka_import'
+              AND LEFT(COALESCE(tahsilat_tarihi::text, ''), 10) > %s
+            ORDER BY id
+            """,
+            (int(mid), str(tah_str)[:10]),
+        )
+        rows = cur.fetchall() or []
+    except Exception:
+        return []
+    out: list[int] = []
+    for r in rows:
+        try:
+            if isinstance(r, dict):
+                out.append(int(r["id"]))
+            else:
+                out.append(int(r[0]))
+        except (TypeError, ValueError, KeyError, IndexError):
+            continue
+    return out
+
+
 def _akbank_commit_items_sorted(items: list) -> list:
     """UI sırasına güvenme: onaylı satırlar mid + ödeme tarihi artan + orijinal indeks.
 
@@ -1307,7 +1355,11 @@ def api_akbank_tahsilat_commit():
     Çok satır: mid başına ödeme tarihi artan sırada; batch_onceki PAY taşır (UI newest-first
     yığılmasını engeller). İleri tarihli onceki elenmesi (ay_fifo) bilinçli kural olarak kalır.
     """
-    from services.banka_ak_import import akbank_sender_key  # lazy: boot RSS
+    from services.banka_ak_import import (  # lazy: boot RSS
+        akbank_sender_key,
+        banka_referans_no_variants,
+        normalize_banka_referans_no,
+    )
     from routes.faturalar_routes import (
         _aciklama_with_aylik_markers,
         _aciklama_with_aylik_pay_tokens,
@@ -1327,11 +1379,13 @@ def api_akbank_tahsilat_commit():
     atlandi = 0
     hatalar: list[str] = []
     kayitlar: list[dict] = []
+    geriye_donuk: list[dict] = []
     # Commit sonrası panel/cache (transaction dışında, manuel makbuz ile aynı).
     panel_sync_jobs: list[tuple[int, str, list[dict]]] = []
     # Aynı istekte henüz commit edilmemiş satırlar (mid → PAY'li onceki; tarih artan sıra).
     batch_onceki: dict[int, list[dict]] = {}
     batch_sira = 0
+    _log_ak = logging.getLogger(__name__)
 
     def _aciklama_ve_aylik_dagitim(mid: int, tutar: float, ham: str, tah_str: str) -> tuple[str, list[tuple[str, float]]]:
         """Ham aciklama + ekstre FIFO → |AYLIK_TAH| + |AYLIK_PAY|."""
@@ -1357,10 +1411,11 @@ def api_akbank_tahsilat_commit():
         for it in items:
             if not it.get("onay"):
                 continue
-            ref = str(it.get("banka_referans_no") or "").strip()
+            ref = normalize_banka_referans_no(it.get("banka_referans_no"))
             if not ref:
                 atlandi += 1
                 continue
+            ref_variants = banka_referans_no_variants(ref)
             try:
                 mid = int(it.get("musteri_id"))
             except (TypeError, ValueError):
@@ -1395,8 +1450,8 @@ def api_akbank_tahsilat_commit():
             if odeme_turu not in ("havale", "banka"):
                 odeme_turu = "havale"
             cur.execute(
-                "SELECT 1 FROM tahsilatlar WHERE banka_referans_no = %s LIMIT 1",
-                (ref,),
+                "SELECT 1 FROM tahsilatlar WHERE banka_referans_no = ANY(%s) LIMIT 1",
+                (ref_variants,),
             )
             if cur.fetchone():
                 atlandi += 1
@@ -1410,6 +1465,8 @@ def api_akbank_tahsilat_commit():
                 atlandi += 1
                 hatalar.append(f"Ref {ref}: müşteri yok (id={mid}).")
                 continue
+            # Geriye dönük şüphe: mevcut daha yeni banka_import var mı? (otomatik yeniden dağıtma YOK)
+            yeni_mevcut = _akbank_geriye_donuk_banka_ids(cur, mid, tah_str)
             # FIFO oldest unpaid → aciklama'ya TAH+PAY; panel ayrıca apply ile.
             try:
                 aciklama, pay_items = _aciklama_ve_aylik_dagitim(mid, round(tutar, 2), aciklama_ham, tah_str)
@@ -1448,7 +1505,7 @@ def api_akbank_tahsilat_commit():
                 "pay": list(pay_items or []),
             })
             eklendi += 1
-            kayitlar.append({
+            kayit = {
                 "tahsilat_id": int(tid),
                 "makbuz_no": str(mn or makbuz_no),
                 "banka_referans_no": ref,
@@ -1457,7 +1514,24 @@ def api_akbank_tahsilat_commit():
                 "odeme_turu": str(odeme_out or odeme_turu),
                 "aciklama": aciklama,
                 "aylik_dagitim": dagitim_list,
-            })
+            }
+            if yeni_mevcut:
+                uyari = (
+                    "bu aktarım geçmiş tarihli; dağıtım yeniden yapılmalı, "
+                    "mid=%s yeni_id=%s daha_yeni_mevcut_ids=%s"
+                    % (mid, int(tid), yeni_mevcut[:40])
+                )
+                hatalar.append(uyari)
+                kayit["geriye_donuk"] = True
+                kayit["geriye_donuk_mevcut_ids"] = yeni_mevcut[:40]
+                geriye_donuk.append(
+                    {"mid": mid, "yeni_id": int(tid), "mevcut_ids": yeni_mevcut[:40], "tahsilat_tarihi": tah_str}
+                )
+                _log_ak.warning(
+                    "akbank_backdated_import mid=%s yeni_id=%s tah=%s mevcut_ids=%s",
+                    mid, int(tid), tah_str, yeni_mevcut[:40],
+                )
+            kayitlar.append(kayit)
             # Varsa aynı dekont/referanslı hesap hareketini tahsilata bağla (Hareketler → Makbuz).
             try:
                 cur.execute(
@@ -1471,10 +1545,10 @@ def api_akbank_tahsilat_commit():
                         END
                     WHERE referans_no IS NOT NULL
                       AND btrim(referans_no) <> ''
-                      AND btrim(referans_no) = %s
+                      AND btrim(referans_no) = ANY(%s)
                       AND tahsilat_id IS NULL
                     """,
-                    (int(tid), mid, ref),
+                    (int(tid), mid, ref_variants),
                 )
             except Exception:
                 pass
@@ -1520,6 +1594,13 @@ def api_akbank_tahsilat_commit():
         "atlandi": atlandi,
         "uyarilar": hatalar[:30],
         "kayitlar": kayitlar,
+        "geriye_donuk": geriye_donuk,
+        "geriye_donuk_uyari": (
+            "bu aktarım geçmiş tarihli; dağıtım yeniden yapılmalı, mid listesi: %s"
+            % sorted({int(x["mid"]) for x in geriye_donuk})
+            if geriye_donuk
+            else None
+        ),
     })
 
 

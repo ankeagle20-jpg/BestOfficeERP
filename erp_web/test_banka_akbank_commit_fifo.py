@@ -109,7 +109,10 @@ def test_static_source():
     check("ek_onceki duruyor", "ek_onceki=batch_onceki.get(mid)" in banka)
     check("onceki pay tasir", '"pay": list(pay_items or [])' in banka or '"pay": list(pay_items' in banka)
     check("onceki aciklama tasir", '"aciklama": aciklama' in banka)
-    check("mukerrer ref duruyor", "banka_referans_no = %s" in banka)
+    check(
+        "mukerrer ref duruyor",
+        "banka_referans_no = ANY(%s)" in banka or "banka_referans_no = %s" in banka,
+    )
     # UI dir=-1 dokunulmadi
     html = (ROOT / "templates" / "bankalar" / "akbank_tahsilat_import.html").read_text(encoding="utf-8")
     check("UI dir=-1 duruyor", 'sortState = { key: "tarih", dir: -1 }' in html)

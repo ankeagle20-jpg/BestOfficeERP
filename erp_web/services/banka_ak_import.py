@@ -110,9 +110,14 @@ def _musteri_kart_etiketi(c: dict[str, Any]) -> str:
 
 
 # Sadece çoğu şirket adında geçmeyen bağlaç / kanal kelimeleri (tic, dis, nakliyat vb. ünvanda olabilir)
+# Ay adları (fold sonrası): açıklamadaki «Eylül 2025 kira» → müşteri adı «Eylül …» yanlış soft-match olmasın.
+_AY_ADLARI_STOP = frozenset({
+    "ocak", "subat", "mart", "nisan", "mayis", "haziran",
+    "temmuz", "agustos", "eylul", "ekim", "kasim", "aralik",
+})
 _TOKEN_STOP = frozenset({
     "ve", "veya", "ile", "icin", "the", "and", "mbh", "fast", "havale", "transfer",
-})
+}) | _AY_ADLARI_STOP
 _MIN_TOKEN_LEN = 4
 _MIN_PHRASE_LEN = 3
 # İndekste daha kısa marka kelimeleri (yalnız aday kümesi; skor yine _MIN_TOKEN_LEN ile)
@@ -130,8 +135,58 @@ _GENERIC_WORD = frozenset({
 })
 
 
+def normalize_banka_referans_no(raw: object) -> str:
+    """Excel float artığı / bilimsel gösterim / boşluk → kanonik ref (örn. 329961.0 → 329961)."""
+    s = str(raw or "").strip()
+    if not s or s.lower() in ("nan", "none", "null"):
+        return ""
+    s = re.sub(r"\s+", "", s)
+    # Bilimsel / ondalık tam sayı (329961.0, 3.29961E+5)
+    try:
+        if re.fullmatch(r"[+-]?\d+([.,]\d+)?([eE][+-]?\d+)?", s):
+            f = float(s.replace(",", "."))
+            if abs(f) < 1e15 and abs(f - round(f)) < 1e-9:
+                return str(int(round(f)))
+    except (ValueError, OverflowError):
+        pass
+    m = re.fullmatch(r"(\d+)\.0+", s)
+    if m:
+        return m.group(1)
+    return s
+
+
+def banka_referans_no_variants(raw: object) -> list[str]:
+    """Mükerrer / eşleşme: normalize + geriye dönük «.0» biçimi (+ ham strip)."""
+    n = normalize_banka_referans_no(raw)
+    if not n:
+        return []
+    out: list[str] = [n]
+    if re.fullmatch(r"\d+", n):
+        alt = n + ".0"
+        if alt not in out:
+            out.append(alt)
+    o = str(raw or "").strip()
+    if o and o not in out:
+        out.append(o)
+    return out
+
+
+def _token_is_noise(t: str) -> bool:
+    """Stop / generic / yıl sayısı (2025) — indeks ve skor dışı."""
+    if not t:
+        return True
+    if t in _TOKEN_STOP or t in _GENERIC_WORD:
+        return True
+    if t.isdigit() and len(t) >= 4:
+        return True
+    return False
+
+
 def _hay_tokens_for_index(hay: str) -> set[str]:
-    return {t for t in hay.split() if len(t) >= _INDEX_TOKEN_MIN}
+    return {
+        t for t in hay.split()
+        if len(t) >= _INDEX_TOKEN_MIN and not _token_is_noise(t)
+    }
 
 
 def _metinden_indeks_tokenlari(raw: str) -> set[str]:
@@ -141,7 +196,7 @@ def _metinden_indeks_tokenlari(raw: str) -> set[str]:
         return set()
     out: set[str] = set()
     for t in full.split():
-        if len(t) < _INDEX_TOKEN_MIN or t in _TOKEN_STOP or t in _GENERIC_WORD:
+        if len(t) < _INDEX_TOKEN_MIN or _token_is_noise(t):
             continue
         out.add(t)
     return out
@@ -204,6 +259,14 @@ def build_akbank_musteri_indeks(musteriler: list[dict[str, Any]]) -> AkbankMuste
     )
 
 
+def _phrase_only_noise(full: str) -> bool:
+    """Tam ifade yalnızca ay adı / yıl / stop-word ise soft-match önerme."""
+    parts = [t for t in (full or "").split() if t]
+    if not parts:
+        return True
+    return all(_token_is_noise(t) for t in parts)
+
+
 def _alan_hazirla(raw: str) -> tuple[str, str, tuple[str, ...]] | None:
     """(görünen metin, loose, anlamlı tokenlar). Eşik _best_*_match ile aynı."""
     raw = (raw or "").strip()
@@ -212,7 +275,13 @@ def _alan_hazirla(raw: str) -> tuple[str, str, tuple[str, ...]] | None:
     full = norm_loose(raw)
     if len(full) < _MIN_PHRASE_LEN:
         return None
-    tokens = [t for t in full.split() if len(t) >= _MIN_TOKEN_LEN and t not in _TOKEN_STOP]
+    # «Eylül» / «Eylül 2025» gibi kartlar: yalnız ay/yıl → indeks + eşleşme yok
+    if _phrase_only_noise(full):
+        return None
+    tokens = [
+        t for t in full.split()
+        if len(t) >= _MIN_TOKEN_LEN and not _token_is_noise(t)
+    ]
     ng = tuple(t for t in tokens if t not in _GENERIC_WORD)
     return (raw, full, ng)
 
@@ -248,7 +317,7 @@ def _ng_eslesme(
     kisi: bool,
 ) -> tuple[int, str] | None:
     raw, full, ng = alan
-    if len(full) >= _MIN_PHRASE_LEN and full in hay:
+    if len(full) >= _MIN_PHRASE_LEN and full in hay and not _phrase_only_noise(full):
         return (len(full), raw)
     hit = [t for t in ng if t in hay_words]
     if len(hit) >= 2:
@@ -398,10 +467,15 @@ def _best_unvan_match(raw: str, hay: str, hay_words: frozenset[str]) -> tuple[in
     if not raw:
         return None
     full = norm_loose(raw)
+    if _phrase_only_noise(full):
+        return None
     if len(full) >= _MIN_PHRASE_LEN and full in hay:
         return (len(full), raw)
 
-    tokens = [t for t in full.split() if len(t) >= _MIN_TOKEN_LEN and t not in _TOKEN_STOP]
+    tokens = [
+        t for t in full.split()
+        if len(t) >= _MIN_TOKEN_LEN and not _token_is_noise(t)
+    ]
     ng = [t for t in tokens if t not in _GENERIC_WORD]
     hit = [t for t in ng if t in hay_words]
 
@@ -423,10 +497,15 @@ def _best_kisi_adi_match(raw: str, hay: str, hay_words: frozenset[str]) -> tuple
     if not raw:
         return None
     full = norm_loose(raw)
+    if _phrase_only_noise(full):
+        return None
     if len(full) >= _MIN_PHRASE_LEN and full in hay:
         return (len(full), raw)
 
-    tokens = [t for t in full.split() if len(t) >= _MIN_TOKEN_LEN and t not in _TOKEN_STOP]
+    tokens = [
+        t for t in full.split()
+        if len(t) >= _MIN_TOKEN_LEN and not _token_is_noise(t)
+    ]
     ng = [t for t in tokens if t not in _GENERIC_WORD]
     hit = [t for t in ng if t in hay_words]
 
@@ -818,7 +897,7 @@ def dataframe_hareket_satirlari(
         if ref_raw is None or (isinstance(ref_raw, float) and pd.isna(ref_raw)):
             ozet["ref_bos"] += 1
             continue
-        ref = str(ref_raw).strip()
+        ref = normalize_banka_referans_no(ref_raw)
         if not ref:
             ozet["ref_bos"] += 1
             continue
@@ -866,8 +945,13 @@ def ham_tahsilatta_olanlari_cikar(
     out: list[dict[str, Any]] = []
     cik = 0
     for r in ham_satirlar:
-        ref = str(r.get("banka_referans_no") or "").strip()
-        if ref and ref in tahsilatta_refler:
+        ref = normalize_banka_referans_no(r.get("banka_referans_no"))
+        # Geriye dönük: set hem normalize hem .0 içerebilir
+        if ref and (
+            ref in tahsilatta_refler
+            or (ref + ".0") in tahsilatta_refler
+            or any(v in tahsilatta_refler for v in banka_referans_no_variants(ref))
+        ):
             cik += 1
             continue
         out.append(r)
