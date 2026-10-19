@@ -709,7 +709,8 @@ def _onceki_tahsilat_satirlari(musteri_id: int, odeme_tarihi: str, haric_tahsila
         SELECT id,
                LEFT(tahsilat_tarihi::text, 10) AS tarih,
                ROUND(COALESCE(tutar, 0)::numeric, 2) AS tutar,
-               COALESCE(aciklama, '') AS aciklama
+               COALESCE(aciklama, '') AS aciklama,
+               COALESCE(banka_referans_no, '') AS banka_referans_no
         FROM tahsilatlar
         WHERE (musteri_id = %s OR customer_id = %s)
           AND COALESCE(tutar, 0) > 0
@@ -742,8 +743,70 @@ def _onceki_tahsilat_satirlari(musteri_id: int, odeme_tarihi: str, haric_tahsila
             "tarih": tarih,
             "tutar": r.get("tutar"),
             "aciklama": r.get("aciklama") or "",
+            "banka_referans_no": r.get("banka_referans_no") or "",
         })
     return out
+
+
+def _onceki_parmak_izi(item: dict) -> tuple:
+    """(tarih, tutar, ref) — sentetik batch id ile gerçek id eşlemesi için."""
+    if not isinstance(item, dict):
+        return ("", 0.0, "")
+    tarih = str(item.get("tarih") or "")[:10]
+    try:
+        tutar = round(float(item.get("tutar") or 0), 2)
+    except (TypeError, ValueError):
+        tutar = 0.0
+    ref = str(
+        item.get("banka_referans_no") or item.get("ref") or ""
+    ).strip()
+    return (tarih, tutar, ref)
+
+
+def _onceki_tekillestir(items) -> list:
+    """Aynı tahsilat bir kez. Önce gerçek id, sonra (tarih, tutar, ref).
+
+    Batch onceki sentetik id (büyük) kullanır; DB aynı ödemeyi gerçek id ile
+    gösterir — parmak izi ile tekilleştirilir (fb40196 çift sayım düzeltmesi).
+    """
+    out: list = []
+    seen_ids: set = set()
+    seen_fp: set = set()
+    for raw in items or []:
+        if not isinstance(raw, dict):
+            continue
+        item = dict(raw)
+        try:
+            rid = int(item.get("id"))
+        except (TypeError, ValueError):
+            rid = None
+        if rid is not None and rid <= 0:
+            rid = None
+        fp = _onceki_parmak_izi(item)
+        if rid is not None and rid in seen_ids:
+            continue
+        if fp[0] and fp in seen_fp:
+            continue
+        if rid is not None:
+            seen_ids.add(rid)
+        if fp[0]:
+            seen_fp.add(fp)
+        out.append(item)
+    return out
+
+
+def _onceki_birlestir_tekil(onceki, ek_onceki=None) -> list:
+    """DB onceki + ek_onceki; mükerrer ödeme elenir (ek'teki kopya düşer).
+
+    Sıra: önce onceki (DB), sonra ek. Aynı id veya aynı (tarih,tutar,ref)
+    ikinci kez gelmez — txn içi INSERT + batch_onceki çiftini kırar.
+    """
+    birlesik: list = []
+    if onceki:
+        birlesik.extend(list(onceki))
+    if ek_onceki:
+        birlesik.extend(list(ek_onceki))
+    return _onceki_tekillestir(birlesik)
 
 
 def _sozlesme_ay_basi(musteri_id: int):
@@ -850,8 +913,8 @@ def _auto_allocate_oldest_unpaid_months(
             return [], []
     else:
         onceki = list(onceki_tahsilatlar)
-    if ek_onceki:
-        onceki.extend(list(ek_onceki))
+    # DB onceki (txn içi INSERT dahil) + batch_onceki: id / (tarih,tutar,ref) tekil.
+    onceki = _onceki_birlestir_tekil(onceki, ek_onceki)
     pay_items = acik_ay_dagit(
         borc, total, odeme, onceki=onceki, allowlist=iso_allowlist, sozlesme_basi=sozlesme_basi,
     )

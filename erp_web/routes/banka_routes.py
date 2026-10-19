@@ -1503,6 +1503,8 @@ def api_akbank_tahsilat_commit():
                 "id": 10**12 + batch_sira,
                 "aciklama": aciklama,
                 "pay": list(pay_items or []),
+                # Tekilleştirme anahtarı (DB onceki ile eşleşsin; aynı gün/tutar ayrımı)
+                "banka_referans_no": ref,
             })
             eklendi += 1
             kayit = {
