@@ -37,6 +37,40 @@ def test_filtre_birim():
     atla, keep = gr._ekstre_ay_satir_direct_pay_filtre([1657], set())
     check("bos direct set", atla is False and keep == [1657])
 
+    # Marker ayı + boş uniq: grid/map çift sayım engeli (6008 → 2026-01..03)
+    atla, keep = gr._ekstre_ay_satir_direct_pay_filtre(
+        [],
+        {6008},
+        iso="2026-01-01",
+        direct_marker_isos={"2026-01-01", "2026-02-01", "2026-03-01"},
+    )
+    check("bos uniq + marker ay → atla", atla is True and keep == [])
+
+    atla, keep = gr._ekstre_ay_satir_direct_pay_filtre(
+        [],
+        {6008},
+        iso="2026-04-01",
+        direct_marker_isos={"2026-01-01"},
+    )
+    check("bos uniq + ilgisiz ay", atla is False and keep == [])
+
+    isos = gr._ekstre_direct_pay_marker_isos(
+        [
+            {
+                "id": 6008,
+                "tahsilat_aciklama": (
+                    "|AYLIK_TAH|2026-01-01| |AYLIK_PAY|2026-01-01=3163.00|"
+                    " |AYLIK_TAH|2026-02-01| |AYLIK_PAY|2026-02-01=4398.00|"
+                ),
+            }
+        ]
+    )
+    check(
+        "marker_isos cikar",
+        isos == {"2026-01-01", "2026-02-01"},
+        str(isos),
+    )
+
 
 def test_kaynak_guard_mevcut():
     src = Path("routes/giris_routes.py").read_text(encoding="utf-8")
@@ -46,7 +80,8 @@ def test_kaynak_guard_mevcut():
     )
     check(
         "filtre cagrisi",
-        "_ekstre_ay_satir_direct_pay_filtre(uniq_tf, direct_pay_ids)" in src,
+        "_ekstre_ay_satir_direct_pay_filtre(" in src
+        and "direct_marker_isos=direct_pay_marker_isos" in src,
     )
 
 

@@ -357,7 +357,7 @@ def _load_onceki_diger(mid: int, haric_ids: set[int], max_tarih: str, oku) -> li
 
 
 def _sync_panel_grid_after(mid: int) -> dict:
-    """Marker yazımı sonrası panel + grid'i kanonik map ile hizala."""
+    """Marker yazımı sonrası panel + grid; placeholder çöküşünde yazma (0f2bc62)."""
     import copy
 
     from panel_grid_onarim import (
@@ -368,6 +368,11 @@ def _sync_panel_grid_after(mid: int) -> dict:
 
     gr._invalidate_aylik_grid_payload_mem(mid)
     payload = gr._build_aylik_grid_cache_payload(mid)
+    old = gr._aylik_grid_cache_payload_from_db(mid)
+    if gr._aylik_grid_should_skip_placeholder_collapse(
+        mid, payload, force_placeholder_collapse=False, old_payload=old
+    ):
+        return {"skipped": True, "reason": "placeholder_collapse_guard"}
     by_iso = gr._panel_by_iso_from_tahsil_map(
         mid, payload, None, trust_grid_odenen=False
     )
@@ -376,6 +381,10 @@ def _sync_panel_grid_after(mid: int) -> dict:
         payload = copy.deepcopy(payload)
         tmap = gr._aylik_tahsil_tutar_map(mid) or {}
         _sync_grid_payload_after_onarim(payload, by_iso or {}, tmap)
+        if gr._aylik_grid_should_skip_placeholder_collapse(
+            mid, payload, force_placeholder_collapse=False, old_payload=old
+        ):
+            return {"skipped": True, "reason": "placeholder_collapse_guard_after_sync"}
     panel_json = json.dumps(by_iso or {}, ensure_ascii=False)
     grid_json = json.dumps(payload if isinstance(payload, dict) else {}, ensure_ascii=False)
     from db import db
@@ -405,6 +414,7 @@ def _sync_panel_grid_after(mid: int) -> dict:
     except Exception:
         pass
     return {
+        "skipped": False,
         "panel_ay": len(by_iso or {}),
         "grid_ay": len((payload or {}).get("aylar") or []) if isinstance(payload, dict) else 0,
     }

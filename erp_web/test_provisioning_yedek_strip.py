@@ -37,6 +37,7 @@ def test_backup_tables_listesi():
         "musteri_aylik_grid_cache_yedek",
         "panel_tekrar_yedek",
         "tahsilat_marker_yedek",
+        "tahsilat_tutar_yedek",
     ):
         check("listede " + ad, ad in BACKUP_TABLES, BACKUP_TABLES)
 
@@ -48,6 +49,7 @@ def test_transform_yedek_strip():
         "panel_tekrar_yedek",
         "musteri_tahsilat_panel_detay_backup_20260617",
         "tahsilat_marker_yedek",
+        "tahsilat_tutar_yedek",
     )
     src = "".join(_tbl(ad) for ad in yedekler)
     src += _tbl("customers")

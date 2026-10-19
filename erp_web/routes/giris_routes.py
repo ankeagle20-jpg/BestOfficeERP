@@ -9912,13 +9912,51 @@ def _ekstre_kaynak_kendi_satiri(row) -> bool:
     return kay in _EKSTRE_KENDI_KAYNAK
 
 
-def _ekstre_ay_satir_direct_pay_filtre(uniq_tf, direct_pay_ids):
+def _ekstre_direct_pay_marker_isos(direct_pays) -> set:
+    """Direct_pay satırlarının TAH/PAY marker ayları (YYYY-MM-01)."""
+    out: set = set()
+    for pr in direct_pays or []:
+        if not isinstance(pr, dict):
+            continue
+        ac = str(pr.get("tahsilat_aciklama") or pr.get("aciklama") or "")
+        for iso_raw in re.findall(
+            r"\|AYLIK_TAH\|([0-9]{4}-[0-9]{2}-[0-9]{2})\|", ac
+        ):
+            try:
+                dd = datetime.strptime(iso_raw[:10], "%Y-%m-%d").date()
+                out.add(date(dd.year, dd.month, 1).isoformat())
+            except ValueError:
+                continue
+        for iso_raw, _t in re.findall(
+            r"\|AYLIK_PAY\|([0-9]{4}-[0-9]{2}-[0-9]{2})=([0-9]+(?:\.[0-9]+)?)\|",
+            ac,
+        ):
+            try:
+                dd = datetime.strptime(iso_raw[:10], "%Y-%m-%d").date()
+                out.add(date(dd.year, dd.month, 1).isoformat())
+            except ValueError:
+                continue
+    return out
+
+
+def _ekstre_ay_satir_direct_pay_filtre(
+    uniq_tf, direct_pay_ids, *, iso=None, direct_marker_isos=None
+):
     """
     Direct_pay (faturasız kendi-satır) ile yazılmış tahsilat id'leri ay satırında
     tekrar alacak üretmesin. Döner: (atla, filtrelenmiş_ids).
     atla=True → ay satırı hiç yazılmamalı.
+
+    uniq_tf boş + ay direct_pay marker aylarındaysa: grid/map alacağı da atlanır
+    (manuel_makbuz + PAY taşınmış aylar + ödeme günü satırı çift sayılmasın).
     """
-    if not direct_pay_ids or not uniq_tf:
+    marker_isos = direct_marker_isos or set()
+    iso_k = str(iso or "")[:10]
+    if not uniq_tf:
+        if direct_pay_ids and iso_k and iso_k in marker_isos:
+            return True, []
+        return False, []
+    if not direct_pay_ids:
         return False, list(uniq_tf or [])
     ids: list[int] = []
     for x in uniq_tf:
@@ -9929,6 +9967,8 @@ def _ekstre_ay_satir_direct_pay_filtre(uniq_tf, direct_pay_ids):
         if t > 0:
             ids.append(t)
     if not ids:
+        if iso_k and iso_k in marker_isos:
+            return True, []
         return False, list(uniq_tf or [])
     if all(t in direct_pay_ids for t in ids):
         return True, []
@@ -13113,6 +13153,7 @@ def _cari_ekstre_hareketler(
             _fifo_pay_alloc(pr, restrict_marker_months=False)
         # Serbest makbuzlar direkt satır (dönem dışı: açılış FIFO + Devreden'de; tekil satır ekleme)
         direct_pay_ids: set[int] = set()
+        direct_pays_yazilan: list = []
         for pr in direct_pays:
             logging.getLogger(__name__).warning(
                 "direct_pay: id=%s tutar=%s aciklama=%s",
@@ -13138,6 +13179,7 @@ def _cari_ekstre_hareketler(
                 _dp_id = 0
             if _dp_id > 0:
                 direct_pay_ids.add(_dp_id)
+            direct_pays_yazilan.append(pr)
             rows.append({
                 "tarih": t_tarih,
                 "aciklama": t_aciklama,
@@ -13148,6 +13190,7 @@ def _cari_ekstre_hareketler(
                 "bakiye": None,
                 "tahsilat_ids": [pr.get("id")],
             })
+        direct_pay_marker_isos = _ekstre_direct_pay_marker_isos(direct_pays_yazilan)
         acilis_fifo = _ekstre_acilis_bakiyesi_fifo(
             full_borc_for_fifo,
             dev_cutoff_iso,
@@ -13341,7 +13384,13 @@ def _cari_ekstre_hareketler(
                         uniq_tf.append(x)
             # Kendi-satır (direct_pay / faturasız): aynı tahsilat id ay satırında
             # ikinci kez alacak yazılmasın (hayalet grid odenen + map tarih-ayı).
-            _atla_dp, uniq_tf = _ekstre_ay_satir_direct_pay_filtre(uniq_tf, direct_pay_ids)
+            # Marker ayları + boş uniq_tf: grid/map alacağı da atlanır.
+            _atla_dp, uniq_tf = _ekstre_ay_satir_direct_pay_filtre(
+                uniq_tf,
+                direct_pay_ids,
+                iso=iso,
+                direct_marker_isos=direct_pay_marker_isos,
+            )
             if _atla_dp:
                 continue
             belge_tf = ""
