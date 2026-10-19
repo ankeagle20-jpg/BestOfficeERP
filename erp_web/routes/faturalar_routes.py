@@ -748,8 +748,12 @@ def _onceki_tahsilat_satirlari(musteri_id: int, odeme_tarihi: str, haric_tahsila
     return out
 
 
+# Batch onceki sentetik id tabanı (banka_routes: 10**12 + sira).
+_ONCEKI_SENTETIK_ID_MIN = 10**12
+
+
 def _onceki_parmak_izi(item: dict) -> tuple:
-    """(tarih, tutar, ref) — sentetik batch id ile gerçek id eşlemesi için."""
+    """(tarih, tutar, ref) — yalnız dolu ref ile DB↔batch eşlemesi için."""
     if not isinstance(item, dict):
         return ("", 0.0, "")
     tarih = str(item.get("tarih") or "")[:10]
@@ -763,50 +767,104 @@ def _onceki_parmak_izi(item: dict) -> tuple:
     return (tarih, tutar, ref)
 
 
-def _onceki_tekillestir(items) -> list:
-    """Aynı tahsilat bir kez. Önce gerçek id, sonra (tarih, tutar, ref).
+def _onceki_rid(item: dict):
+    try:
+        rid = int(item.get("id"))
+    except (TypeError, ValueError):
+        return None
+    if rid <= 0:
+        return None
+    return rid
 
-    Batch onceki sentetik id (büyük) kullanır; DB aynı ödemeyi gerçek id ile
-    gösterir — parmak izi ile tekilleştirilir (fb40196 çift sayım düzeltmesi).
+
+def _onceki_tekillestir(items) -> list:
+    """Tek liste içinde mükerrerleri ele.
+
+    Gerçek DB id (< 10**12): yalnız id. Sentetik/id'siz: dolu ref parmak izi;
+    ref boşsa her öğe ayrı sıradır (aynı gün/tutar iki ödeme birleşmez).
     """
     out: list = []
     seen_ids: set = set()
-    seen_fp: set = set()
+    seen_fp_ref: set = set()
     for raw in items or []:
         if not isinstance(raw, dict):
             continue
         item = dict(raw)
-        try:
-            rid = int(item.get("id"))
-        except (TypeError, ValueError):
-            rid = None
-        if rid is not None and rid <= 0:
-            rid = None
+        rid = _onceki_rid(item)
         fp = _onceki_parmak_izi(item)
-        if rid is not None and rid in seen_ids:
-            continue
-        if fp[0] and fp in seen_fp:
+        _, _, ref = fp
+        gercek = rid is not None and rid < _ONCEKI_SENTETIK_ID_MIN
+        if gercek:
+            if rid in seen_ids:
+                continue
+            seen_ids.add(rid)
+            if ref:
+                seen_fp_ref.add(fp)
+            out.append(item)
             continue
         if rid is not None:
+            if rid in seen_ids:
+                continue
             seen_ids.add(rid)
-        if fp[0]:
-            seen_fp.add(fp)
+        if ref:
+            if fp in seen_fp_ref:
+                continue
+            seen_fp_ref.add(fp)
+        # ref boş sentetik/id'siz: düşürme (sıra ile ayrı ödeme)
         out.append(item)
     return out
 
 
 def _onceki_birlestir_tekil(onceki, ek_onceki=None) -> list:
-    """DB onceki + ek_onceki; mükerrer ödeme elenir (ek'teki kopya düşer).
+    """DB onceki + ek_onceki; txn içi INSERT + batch_onceki çiftini kırar.
 
-    Sıra: önce onceki (DB), sonra ek. Aynı id veya aynı (tarih,tutar,ref)
-    ikinci kez gelmez — txn içi INSERT + batch_onceki çiftini kırar.
+    - Gerçek id'li satırlar yalnız id ile (aynı gün/tutar/ref'siz iki ödeme kalır).
+    - ek_onceki kopyası: dolu ref → (tarih,tutar,ref); ref boş → aynı
+      (tarih,tutar) için DB'deki eşleşmemiş bir slot tüketilir (sıra).
     """
-    birlesik: list = []
-    if onceki:
-        birlesik.extend(list(onceki))
-    if ek_onceki:
-        birlesik.extend(list(ek_onceki))
-    return _onceki_tekillestir(birlesik)
+    from collections import Counter
+
+    base = _onceki_tekillestir(list(onceki or []))
+    seen_ids = set()
+    seen_fp_ref: set = set()
+    empty_slots: Counter = Counter()
+    out: list = []
+    for item in base:
+        rid = _onceki_rid(item)
+        fp = _onceki_parmak_izi(item)
+        tarih, tutar, ref = fp
+        if rid is not None:
+            seen_ids.add(rid)
+        if ref:
+            seen_fp_ref.add(fp)
+        else:
+            empty_slots[(tarih, tutar)] += 1
+        out.append(item)
+
+    for raw in list(ek_onceki or []):
+        if not isinstance(raw, dict):
+            continue
+        item = dict(raw)
+        rid = _onceki_rid(item)
+        fp = _onceki_parmak_izi(item)
+        tarih, tutar, ref = fp
+        if rid is not None and rid in seen_ids:
+            continue
+        if ref:
+            if fp in seen_fp_ref:
+                continue
+            seen_fp_ref.add(fp)
+        else:
+            # Ref boş: DB'de aynı (tarih,tutar) için henüz eşleşmemiş slot varsa
+            # bu ek satırı o ödemenin batch kopyasıdır — düş. Slot yoksa ayrı ödeme.
+            key = (tarih, tutar)
+            if empty_slots[key] > 0:
+                empty_slots[key] -= 1
+                continue
+        if rid is not None:
+            seen_ids.add(rid)
+        out.append(item)
+    return out
 
 
 def _sozlesme_ay_basi(musteri_id: int):

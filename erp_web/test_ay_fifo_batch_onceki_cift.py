@@ -255,6 +255,42 @@ def test_idempotent_ayni_id_iki_kez():
     check("idempotent fp n=1", len(out2) == 1, out2)
 
 
+def test_ayni_gun_ayni_tutar_iki_odeme_korunur():
+    """Aynı mid/gün/tutar; ref'siz veya farklı ref → İKİ ayrı ödeme sayılır."""
+    borc = {
+        "2025-07-01": 100.0,
+        "2025-08-01": 100.0,
+        "2025-09-01": 100.0,
+        "2025-10-01": 100.0,
+    }
+    # 1) İki gerçek DB id, ref boş, aynı gün/tutar
+    db_a = {"id": 101, "tarih": "2025-11-01", "tutar": 100.0, "aciklama": "|AYLIK_PAY|2025-07-01=100.00|", "banka_referans_no": ""}
+    db_b = {"id": 102, "tarih": "2025-11-01", "tutar": 100.0, "aciklama": "|AYLIK_PAY|2025-08-01=100.00|", "banka_referans_no": ""}
+    m1 = _onceki_tekillestir([db_a, db_b])
+    check("refsiz iki db id n=2", len(m1) == 2, [x.get("id") for x in m1])
+    # 2) Farklı ref, aynı gün/tutar — batch sim (txn: DB görür + batch)
+    sim = _sim_batch_allocate(
+        [("2025-11-01", 100.0, "REF-A"), ("2025-11-01", 100.0, "REF-B")],
+        borc,
+    )
+    check("farkli ref ilk→Tem", dict(sim[0][2]) == {"2025-07-01": 100.0}, sim[0][2])
+    check("farkli ref iki→Agu", dict(sim[1][2]) == {"2025-08-01": 100.0}, sim[1][2])
+    # 3) Ref'siz iki batch satırı — ikisi de sayılsın (sıra ile)
+    sim2 = _sim_batch_allocate(
+        [("2025-11-01", 100.0, ""), ("2025-11-01", 100.0, "")],
+        borc,
+        with_ref=False,
+    )
+    check("refsiz batch ilk→Tem", dict(sim2[0][2]) == {"2025-07-01": 100.0}, sim2[0][2])
+    check("refsiz batch iki→Agu", dict(sim2[1][2]) == {"2025-08-01": 100.0}, sim2[1][2])
+    # 4) Aynı ödeme DB id + batch sentetik aynı ref → tek
+    merged = _onceki_birlestir_tekil(
+        [{"id": 200, "tarih": "2025-11-01", "tutar": 100.0, "banka_referans_no": "SAME"}],
+        [{"id": 10**12 + 9, "tarih": "2025-11-01", "tutar": 100.0, "banka_referans_no": "SAME"}],
+    )
+    check("ayni ref db+batch n=1", len(merged) == 1 and merged[0]["id"] == 200, merged)
+
+
 if __name__ == "__main__":
     test_tek_onceki_dogru_fifo()
     test_cift_onceki_tekillestir_duzeltir()
@@ -264,5 +300,6 @@ if __name__ == "__main__":
     test_cok_satir_karisik_mid()
     test_tek_satir_degismedi()
     test_idempotent_ayni_id_iki_kez()
+    test_ayni_gun_ayni_tutar_iki_odeme_korunur()
     print("FAIL" if FAILS else "TUMU GECTI", FAILS)
     sys.exit(1 if FAILS else 0)
