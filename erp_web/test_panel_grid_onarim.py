@@ -238,6 +238,335 @@ def test_geri_hala_cap_siz():
     check("geri hala allow ister", r.get("ok") is False, r)
 
 
+def test_brut_cokus_yasak_326():
+    """Cache dolu → build 0.01: çöküş ayları yakalanır."""
+    once = {
+        "aylar": [
+            {"yil": 2026, "ay": 3, "tutar_kdv_dahil": 848.58, "brut_tutar_kdv": 848.58},
+            {"yil": 2024, "ay": 1, "tutar_kdv_dahil": 420.0, "brut_tutar_kdv": 420.0},
+        ]
+    }
+    build = {
+        "aylar": [
+            {"yil": 2026, "ay": 3, "tutar_kdv_dahil": 0.01, "brut_tutar_kdv": 0.01},
+            {"yil": 2024, "ay": 1, "tutar_kdv_dahil": 0.01, "brut_tutar_kdv": 0.01},
+        ]
+    }
+    bad = onr._brut_cokus_yasak(once, build)
+    check("326 cokus 2 ay", set(bad) == {"2026-03", "2024-01"}, bad)
+
+
+def test_326_apply_brut_cokus_yazmaz():
+    """Apply: plan brüt çöküşü → yazmaz, net hata."""
+    os.environ["ALLOW_PROD_WRITE"] = "1"
+    once_pl = {
+        "aylar": [
+            {
+                "yil": 2026,
+                "ay": 3,
+                "tutar_kdv_dahil": 848.58,
+                "brut_tutar_kdv": 848.58,
+                "odenen_tutar_kdv": 848.58,
+            }
+        ]
+    }
+    bad_pl = {
+        "aylar": [
+            {
+                "yil": 2026,
+                "ay": 3,
+                "tutar_kdv_dahil": 0.01,
+                "brut_tutar_kdv": 0.01,
+                "odenen_tutar_kdv": 0.0,
+            }
+        ]
+    }
+    fake_plan = {
+        "mid": 326,
+        "kaynak": "build",
+        "panel_once": {"by_iso": "{}", "updated_at": None},
+        "grid_once": {"payload": json.dumps(once_pl), "updated_at": None},
+        "panel_once_by": {},
+        "payload_once": once_pl,
+        "by_iso": {},
+        "payload": bad_pl,
+        "degisiklikler": [{"ay": "2026-03", "alan": "grid_brut", "eski": 848.58, "yeni": 0.01}],
+        "fingerprint": "x",
+        "kira_once": 848.58,
+        "kira_sonra": 0.0,
+        "brut_cokus_aylar": ["2026-03"],
+    }
+    with mock.patch.object(onr, "_onarim_hesapla", return_value=fake_plan), mock.patch.object(
+        onr, "db"
+    ) as mdb:
+        r = onr.onar_mid(326, dry_run=False, etiket="t326")
+    os.environ.pop("ALLOW_PROD_WRITE", None)
+    check("326 yazilmadi", r.get("yazildi") is False, r)
+    check("326 ok false", r.get("ok") is False, r)
+    check("326 mesaj", "hiçbir değişiklik kaydedilmedi" in str(r.get("mesaj") or ""), r)
+    check("326 db yok", mdb.call_count == 0, mdb.call_count)
+
+
+def test_plan_uyusmazligi_yazmaz():
+    """İkinci hesap fingerprint farklı → yazmadan iptal."""
+    os.environ["ALLOW_PROD_WRITE"] = "1"
+    pl = {
+        "aylar": [
+            {
+                "yil": 2025,
+                "ay": 1,
+                "tutar_kdv_dahil": 100.0,
+                "brut_tutar_kdv": 100.0,
+                "odenen_tutar_kdv": 100.0,
+            }
+        ]
+    }
+    by = {"2025-01-01": {"aylik": 100.0, "tahsil": 100.0, "kalan": 0.0}}
+    base = {
+        "mid": 148,
+        "kaynak": "cache",
+        "panel_once": {"by_iso": json.dumps(by), "updated_at": None},
+        "grid_once": {"payload": json.dumps(pl), "updated_at": None},
+        "panel_once_by": by,
+        "payload_once": pl,
+        "by_iso": by,
+        "payload": pl,
+        "degisiklikler": [],
+        "fingerprint": "fp-a",
+        "kira_once": 100.0,
+        "kira_sonra": 100.0,
+        "brut_cokus_aylar": [],
+    }
+    alt = dict(base)
+    alt["fingerprint"] = "fp-b"
+    with mock.patch.object(
+        onr, "_onarim_hesapla", side_effect=[base, alt]
+    ), mock.patch.object(onr, "db") as mdb:
+        r = onr.onar_mid(148, dry_run=False, etiket="tplan")
+    os.environ.pop("ALLOW_PROD_WRITE", None)
+    check("plan yazilmadi", r.get("yazildi") is False, r)
+    check("plan neden", r.get("neden") == "plan_uyusmuyor", r)
+    check("plan db yok", mdb.call_count == 0, mdb.call_count)
+
+
+def test_normal_apply_yazar_audit():
+    """148 kalıbı: brüt korunur, apply yazar + audit."""
+    os.environ["ALLOW_PROD_WRITE"] = "1"
+    pl = {
+        "aylar": [
+            {
+                "yil": 2025,
+                "ay": 6,
+                "tutar_kdv_dahil": 1200.0,
+                "brut_tutar_kdv": 1200.0,
+                "odenen_tutar_kdv": 0.0,
+                "kalan_tutar_kdv": 1200.0,
+                "tahsil_edildi": False,
+            }
+        ]
+    }
+    by = {"2025-06-01": {"aylik": 1200.0, "tahsil": 500.0, "kalan": 700.0}}
+    pl2 = json.loads(json.dumps(pl))
+    pl2["aylar"][0]["odenen_tutar_kdv"] = 500.0
+    pl2["aylar"][0]["kalan_tutar_kdv"] = 700.0
+    pl2["aylar"][0]["kismi_tahsilat"] = True
+    fp = onr._plan_fingerprint(by, pl2)
+    plan = {
+        "mid": 148,
+        "kaynak": "cache",
+        "panel_once": {"by_iso": "{}", "updated_at": None},
+        "grid_once": {"payload": json.dumps(pl), "updated_at": None},
+        "panel_once_by": {},
+        "payload_once": pl,
+        "by_iso": by,
+        "payload": pl2,
+        "degisiklikler": [{"ay": "2025-06", "alan": "grid_odenen", "eski": 0, "yeni": 500}],
+        "fingerprint": fp,
+        "kira_once": 1200.0,
+        "kira_sonra": 1200.0,
+        "brut_cokus_aylar": [],
+    }
+
+    class _Cur:
+        def __init__(self):
+            self.ops = []
+            self._payload = json.dumps(pl2)
+
+        def execute(self, sql, params=None):
+            self.ops.append(str(sql)[:80])
+            self._last = (sql, params)
+
+        def fetchone(self):
+            if "musteri_aylik_grid_cache" in str(self._last[0]) and "SELECT" in str(self._last[0]).upper():
+                return (self._payload,)
+            return None
+
+    class _CM:
+        def __enter__(self):
+            self.cur = _Cur()
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def cursor(self):
+            return self.cur
+
+    audits = []
+    cm = _CM()
+    with mock.patch.object(onr, "_onarim_hesapla", return_value=plan), mock.patch.object(
+        onr, "db", return_value=cm
+    ), mock.patch.object(onr, "_ensure_yedek_tables"), mock.patch.object(
+        onr, "_ekstre_borc_toplam", return_value=5000.0
+    ), mock.patch(
+        "audit_log.audit_yaz", side_effect=lambda *a, **k: audits.append(k) or True
+    ):
+        from routes import giris_routes as gr
+
+        with mock.patch.object(gr, "_invalidate_aylik_grid_payload_mem"):
+            r = onr.onar_mid(148, dry_run=False, etiket="t148")
+    os.environ.pop("ALLOW_PROD_WRITE", None)
+    check("normal yazildi", r.get("yazildi") is True, r)
+    check("normal ok", r.get("ok") is True, r)
+    check("audit cagrildi", len(audits) >= 1, audits)
+    if audits:
+        check("audit olay", audits[0].get("olay") == "panel_grid_onarim", audits[0])
+
+
+def test_kira_txn_rollback():
+    """Txn içinde kira düşerse yazıldı=False (rollback yolu)."""
+    os.environ["ALLOW_PROD_WRITE"] = "1"
+    pl = {
+        "aylar": [
+            {
+                "yil": 2025,
+                "ay": 1,
+                "tutar_kdv_dahil": 100.0,
+                "brut_tutar_kdv": 100.0,
+                "odenen_tutar_kdv": 50.0,
+            }
+        ]
+    }
+    by = {"2025-01-01": {"aylik": 100.0, "tahsil": 50.0, "kalan": 50.0}}
+    fp = onr._plan_fingerprint(by, pl)
+    plan = {
+        "mid": 119,
+        "kaynak": "cache",
+        "panel_once": {"by_iso": json.dumps(by), "updated_at": None},
+        "grid_once": {"payload": json.dumps(pl), "updated_at": None},
+        "panel_once_by": by,
+        "payload_once": pl,
+        "by_iso": by,
+        "payload": pl,
+        "degisiklikler": [],
+        "fingerprint": fp,
+        "kira_once": 100.0,
+        "kira_sonra": 100.0,
+        "brut_cokus_aylar": [],
+    }
+    bad_written = json.dumps(
+        {
+            "aylar": [
+                {
+                    "yil": 2025,
+                    "ay": 1,
+                    "tutar_kdv_dahil": 0.01,
+                    "brut_tutar_kdv": 0.01,
+                    "odenen_tutar_kdv": 0,
+                }
+            ]
+        }
+    )
+
+    class _Cur:
+        def execute(self, sql, params=None):
+            self._sql = sql
+
+        def fetchone(self):
+            return (bad_written,)
+
+    class _CM:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def cursor(self):
+            return _Cur()
+
+    with mock.patch.object(onr, "_onarim_hesapla", return_value=plan), mock.patch.object(
+        onr, "db", return_value=_CM()
+    ), mock.patch.object(onr, "_ensure_yedek_tables"), mock.patch.object(
+        onr, "_ekstre_borc_toplam", return_value=100.0
+    ):
+        r = onr.onar_mid(119, dry_run=False, etiket="t119")
+    os.environ.pop("ALLOW_PROD_WRITE", None)
+    check("kira rollback yazilmaz", r.get("yazildi") is False, r)
+    check("kira rollback mesaj", "kaydedilmedi" in str(r.get("mesaj") or ""), r)
+
+
+def test_tek_yol_cache_oncelik():
+    """Dry ve hesap: cache varken build çağrılmaz (invalidate yok)."""
+    os.environ.pop("ALLOW_PROD_WRITE", None)
+    cache_pl = {
+        "aylar": [
+            {
+                "yil": 2025,
+                "ay": 1,
+                "tutar_kdv_dahil": 500.0,
+                "brut_tutar_kdv": 500.0,
+                "odenen_tutar_kdv": 0,
+            }
+        ]
+    }
+    builds = []
+    with mock.patch.object(
+        onr,
+        "fetch_one",
+        side_effect=[
+            {"by_iso": "{}", "updated_at": None},
+            {"payload": json.dumps(cache_pl), "updated_at": None},
+        ],
+    ):
+        from routes import giris_routes as gr
+
+        with mock.patch.object(
+            gr, "_read_aylik_grid_cache_payload", return_value=cache_pl
+        ), mock.patch.object(
+            gr,
+            "_build_aylik_grid_cache_payload",
+            side_effect=lambda *a, **k: builds.append(1) or cache_pl,
+        ), mock.patch.object(
+            gr, "_panel_by_iso_from_tahsil_map", return_value={}
+        ), mock.patch.object(
+            gr, "_aylik_tahsil_tutar_map", return_value={}
+        ), mock.patch.object(
+            gr, "_dondurma_ay_kumesi", return_value=set()
+        ):
+            plan = onr._onarim_hesapla(2, gr=gr)
+    check("kaynak cache", plan.get("kaynak") == "cache", plan)
+    check("build cagrilmaz", len(builds) == 0, builds)
+
+
+def test_idempotent_fingerprint():
+    pl = {
+        "aylar": [
+            {
+                "yil": 2025,
+                "ay": 1,
+                "tutar_kdv_dahil": 10.0,
+                "brut_tutar_kdv": 10.0,
+                "odenen_tutar_kdv": 10.0,
+            }
+        ]
+    }
+    by = {"2025-01-01": {"tahsil": 10.0, "aylik": 10.0, "kalan": 0}}
+    a = onr._plan_fingerprint(by, pl)
+    b = onr._plan_fingerprint(by, pl)
+    check("idempotent fp", a == b, a)
+
+
 if __name__ == "__main__":
     for fn in (
         test_dry_run_varsayilan_yazmaz,
@@ -252,6 +581,13 @@ if __name__ == "__main__":
         test_sync_bos_panel_grid_kalinti_sifir,
         test_dry_bos_panel_grid_ay_sonra_net,
         test_geri_hala_cap_siz,
+        test_brut_cokus_yasak_326,
+        test_326_apply_brut_cokus_yazmaz,
+        test_plan_uyusmazligi_yazmaz,
+        test_normal_apply_yazar_audit,
+        test_kira_txn_rollback,
+        test_tek_yol_cache_oncelik,
+        test_idempotent_fingerprint,
     ):
         print("---", fn.__name__)
         fn()

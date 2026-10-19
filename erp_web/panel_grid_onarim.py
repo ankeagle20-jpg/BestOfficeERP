@@ -181,9 +181,168 @@ def _ensure_yedek_tables():
     )
 
 
-def onar_mid(mid: int, *, dry_run: bool, etiket: str) -> dict:
-    """Panel + grid yeniden üret. Tahsilat/fatura yok."""
+def _grid_brut_by_ym(payload: dict | None) -> dict[str, float]:
+    out: dict[str, float] = {}
+    if not isinstance(payload, dict):
+        return out
+    for a in payload.get("aylar") or []:
+        if not isinstance(a, dict):
+            continue
+        try:
+            ym = "%04d-%02d" % (int(a["yil"]), int(a["ay"]))
+            t = round(
+                float(a.get("brut_tutar_kdv") or a.get("tutar_kdv_dahil") or 0), 2
+            )
+        except (TypeError, ValueError, KeyError):
+            continue
+        out[ym] = t
+    return out
+
+
+def _grid_odenen_by_ym(payload: dict | None) -> dict[str, float]:
+    out: dict[str, float] = {}
+    if not isinstance(payload, dict):
+        return out
+    for a in payload.get("aylar") or []:
+        if not isinstance(a, dict):
+            continue
+        try:
+            ym = "%04d-%02d" % (int(a["yil"]), int(a["ay"]))
+            t = round(float(a.get("odenen_tutar_kdv") or 0), 2)
+        except (TypeError, ValueError, KeyError):
+            continue
+        out[ym] = t
+    return out
+
+
+def _panel_tahsil_by_ym(by_iso: dict | None) -> dict[str, float]:
+    out: dict[str, float] = {}
+    for iso, cell in (by_iso or {}).items():
+        if not isinstance(cell, dict):
+            continue
+        ym = str(iso)[:7]
+        try:
+            out[ym] = round(float(cell.get("tahsil") or 0), 2)
+        except (TypeError, ValueError):
+            out[ym] = 0.0
+    return out
+
+
+def _plan_fingerprint(by_iso: dict | None, payload: dict | None) -> str:
+    """Plan kimliği: panel tahsil + grid odenen (sıralı)."""
+    blob = {
+        "panel": _panel_tahsil_by_ym(by_iso),
+        "odenen": _grid_odenen_by_ym(payload),
+        "brut": _grid_brut_by_ym(payload),
+    }
+    return json.dumps(blob, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _degisiklik_kumesi(
+    panel_once_by: dict | None,
+    payload_once: dict | None,
+    by_iso: dict | None,
+    payload: dict | None,
+    *,
+    tol: float = 0.05,
+) -> list[dict]:
+    """(ay, alan, eski, yeni) — plan/uygulama kıyası için."""
+    ch: list[dict] = []
+    p0 = _panel_tahsil_by_ym(panel_once_by)
+    p1 = _panel_tahsil_by_ym(by_iso)
+    o0 = _grid_odenen_by_ym(payload_once)
+    o1 = _grid_odenen_by_ym(payload)
+    b0 = _grid_brut_by_ym(payload_once)
+    b1 = _grid_brut_by_ym(payload)
+    for ym in sorted(set(p0) | set(p1) | set(o0) | set(o1) | set(b0) | set(b1)):
+        for alan, a, b in (
+            ("panel_tahsil", p0.get(ym) or 0.0, p1.get(ym) or 0.0),
+            ("grid_odenen", o0.get(ym) or 0.0, o1.get(ym) or 0.0),
+            ("grid_brut", b0.get(ym) or 0.0, b1.get(ym) or 0.0),
+        ):
+            if abs(float(a) - float(b)) > tol:
+                ch.append(
+                    {
+                        "ay": ym,
+                        "alan": alan,
+                        "eski": round(float(a), 2),
+                        "yeni": round(float(b), 2),
+                    }
+                )
+    return ch
+
+
+def _brut_cokus_yasak(
+    payload_once: dict | None,
+    payload: dict | None,
+    *,
+    tol: float = 0.05,
+    placeholder: float = 0.01,
+) -> list[str]:
+    """Eski brüt>tol iken yeni 0 veya 0.01 olan aylar (felaket guard)."""
+    b0 = _grid_brut_by_ym(payload_once)
+    b1 = _grid_brut_by_ym(payload)
+    bad: list[str] = []
+    for ym, eski in b0.items():
+        if float(eski) <= tol:
+            continue
+        yeni = float(b1.get(ym) or 0.0)
+        if yeni <= tol or abs(yeni - placeholder) < 1e-9:
+            bad.append(ym)
+    return bad
+
+
+def _ekstre_borc_toplam(mid: int) -> float:
+    """Canlı ekstre borç toplamı (salt okuma)."""
     from routes import giris_routes as gr
+
+    bas, bit = gr._cari_ekstre_varsayilan_bas_bit(int(mid))
+    rows = gr._cari_ekstre_hareketler(
+        int(mid), bas, bit, 0, tahsilat_borca_hizala=True
+    ) or []
+    return round(sum(float(h.get("borc") or 0) for h in rows), 2)
+
+
+def _kira_tutar_toplam(payload: dict | None) -> float:
+    """Grid kira/brüt toplamı (0.01 placeholder hariç gerçek tutarlar)."""
+    s = 0.0
+    for t in _grid_brut_by_ym(payload).values():
+        if float(t) > 0.05:
+            s += float(t)
+    return round(s, 2)
+
+
+def _panel_by_iso_from_row(panel_once) -> dict:
+    if not panel_once or panel_once.get("by_iso") is None:
+        return {}
+    raw = panel_once["by_iso"]
+    try:
+        obj = json.loads(raw) if isinstance(raw, str) else raw
+    except Exception:
+        return {}
+    return obj if isinstance(obj, dict) else {}
+
+
+def _payload_from_row(grid_once) -> dict | None:
+    if not grid_once or grid_once.get("payload") is None:
+        return None
+    raw = grid_once["payload"]
+    try:
+        obj = json.loads(raw) if isinstance(raw, str) else raw
+    except Exception:
+        return None
+    return obj if isinstance(obj, dict) else None
+
+
+def _onarim_hesapla(mid: int, *, gr=None) -> dict:
+    """Dry-run ve apply için TEK yol: cache oku, yoksa build; panel+grid senkron.
+
+    Invalidate / taze-build zorlaması YOK (326 felaketi: build→0.01).
+    """
+    import copy
+
+    if gr is None:
+        from routes import giris_routes as gr
 
     mid = int(mid)
     panel_once = fetch_one(
@@ -194,74 +353,134 @@ def onar_mid(mid: int, *, dry_run: bool, etiket: str) -> dict:
         "SELECT payload, updated_at FROM musteri_aylik_grid_cache WHERE musteri_id = %s",
         (mid,),
     )
-    n_panel_ay = 0
-    if panel_once and panel_once.get("by_iso"):
-        try:
-            raw = panel_once["by_iso"]
-            obj = json.loads(raw) if isinstance(raw, str) else raw
-            n_panel_ay = len(obj) if isinstance(obj, dict) else 0
-        except Exception:
-            n_panel_ay = 0
-    n_grid_ay = 0
-    if grid_once and grid_once.get("payload"):
-        try:
-            raw = grid_once["payload"]
-            obj = json.loads(raw) if isinstance(raw, str) else raw
-            aylar = (obj or {}).get("aylar") if isinstance(obj, dict) else obj
-            n_grid_ay = len(aylar) if isinstance(aylar, list) else 0
-        except Exception:
-            n_grid_ay = 0
+    payload_once = _payload_from_row(grid_once)
+    panel_once_by = _panel_by_iso_from_row(panel_once)
 
+    # Kaynak: önce disk/mem cache (dry ile aynı); yoksa build
+    payload_src = gr._read_aylik_grid_cache_payload(mid)
+    kaynak = "cache"
+    if not isinstance(payload_src, dict) or not (payload_src.get("aylar") or []):
+        payload_src = gr._build_aylik_grid_cache_payload(mid)
+        kaynak = "build"
+    if not isinstance(payload_src, dict):
+        payload_src = {"aylar": []}
+
+    payload = copy.deepcopy(payload_src)
+    by_iso = gr._panel_by_iso_from_tahsil_map(
+        mid, payload, None, trust_grid_odenen=False
+    )
+    by_iso = _cap_panel_by_iso_for_onarim(by_iso, mid=mid, payload=payload)
+    tmap = gr._aylik_tahsil_tutar_map(mid) or {}
+    _sync_grid_payload_after_onarim(payload, by_iso or {}, tmap)
+
+    deg = _degisiklik_kumesi(panel_once_by, payload_once, by_iso, payload)
+    return {
+        "mid": mid,
+        "kaynak": kaynak,
+        "panel_once": panel_once,
+        "grid_once": grid_once,
+        "panel_once_by": panel_once_by,
+        "payload_once": payload_once,
+        "by_iso": by_iso or {},
+        "payload": payload,
+        "degisiklikler": deg,
+        "fingerprint": _plan_fingerprint(by_iso, payload),
+        "kira_once": _kira_tutar_toplam(payload_once),
+        "kira_sonra": _kira_tutar_toplam(payload),
+        "brut_cokus_aylar": _brut_cokus_yasak(payload_once, payload),
+    }
+
+
+def onar_mid(mid: int, *, dry_run: bool, etiket: str) -> dict:
+    """Panel + grid yeniden üret. Tahsilat/fatura yok. Dry ve apply aynı plan yolu."""
+    from routes import giris_routes as gr
+
+    mid = int(mid)
     out = {
         "mid": mid,
         "dry_run": dry_run,
-        "panel_ay_once": n_panel_ay,
-        "grid_ay_once": n_grid_ay,
+        "panel_ay_once": 0,
+        "grid_ay_once": 0,
         "yazildi": False,
         "panel_ay_sonra": None,
         "grid_ay_sonra": None,
+        "ok": True,
     }
-    if dry_run or not _prod_write_ok():
-        # Salt hesap — tahsil_guncelle çağırma (heal yazabilir)
-        try:
-            import copy
-
-            payload = gr._read_aylik_grid_cache_payload(mid)
-            if not isinstance(payload, dict):
-                payload = gr._build_aylik_grid_cache_payload(mid)
-            by_iso = gr._panel_by_iso_from_tahsil_map(
-                mid, payload, None, trust_grid_odenen=False
-            )
-            by_iso = _cap_panel_by_iso_for_onarim(by_iso, mid=mid, payload=payload)
-            out["panel_ay_sonra"] = len(by_iso or {})
-            if isinstance(payload, dict):
-                pl2 = copy.deepcopy(payload)
-                tmap = gr._aylik_tahsil_tutar_map(mid) or {}
-                _sync_grid_payload_after_onarim(pl2, by_iso or {}, tmap)
-                out["grid_ay_sonra"] = len(pl2.get("aylar") or [])
-        except Exception as ex:
-            out["hata"] = type(ex).__name__
+    try:
+        plan = _onarim_hesapla(mid, gr=gr)
+    except Exception as ex:
+        out["ok"] = False
+        out["hata"] = type(ex).__name__
+        out["mesaj"] = str(ex)[:200]
         return out
 
-    # Yazma: yedek öncesi heal/yazma yok — bellekte üret, tek txn
-    import copy
+    panel_once = plan["panel_once"]
+    grid_once = plan["grid_once"]
+    out["panel_ay_once"] = len(plan["panel_once_by"] or {})
+    out["grid_ay_once"] = len((plan["payload_once"] or {}).get("aylar") or []) if isinstance(plan["payload_once"], dict) else 0
+    out["panel_ay_sonra"] = len(plan["by_iso"] or {})
+    out["grid_ay_sonra"] = len((plan["payload"] or {}).get("aylar") or [])
+    out["kaynak"] = plan["kaynak"]
+    out["degisiklik_n"] = len(plan["degisiklikler"] or [])
 
-    _ensure_yedek_tables()
-    try:
-        gr._invalidate_aylik_grid_payload_mem(mid)
-        payload = gr._build_aylik_grid_cache_payload(mid)
-        by_iso = gr._panel_by_iso_from_tahsil_map(
-            mid, payload, None, trust_grid_odenen=False
+    if dry_run or not _prod_write_ok():
+        return out
+
+    # Guard: brüt çöküş (0 / 0.01)
+    if plan["brut_cokus_aylar"]:
+        out["ok"] = False
+        out["yazildi"] = False
+        out["neden"] = "brut_cokus"
+        out["mesaj"] = (
+            "plan uyuşmuyor, hiçbir değişiklik kaydedilmedi: "
+            "hedef dışı ay brüt 0/0.01'e düşerdi (%s)"
+            % ",".join(plan["brut_cokus_aylar"][:12])
         )
-        by_iso = _cap_panel_by_iso_for_onarim(by_iso, mid=mid, payload=payload)
-        if isinstance(payload, dict):
-            payload = copy.deepcopy(payload)
-            tmap = gr._aylik_tahsil_tutar_map(mid) or {}
-            _sync_grid_payload_after_onarim(payload, by_iso or {}, tmap)
-    except Exception as ex:
-        out["hata"] = type(ex).__name__
-        raise
+        return out
 
+    # Guard: kira toplamı (yalnız cache'te gerçek brüt varken)
+    kira_once = float(plan["kira_once"] or 0)
+    kira_sonra = float(plan["kira_sonra"] or 0)
+    if kira_once > 0.05 and abs(kira_once - kira_sonra) > 0.05:
+        out["ok"] = False
+        out["yazildi"] = False
+        out["neden"] = "kira_toplam"
+        out["mesaj"] = (
+            "plan uyuşmuyor, hiçbir değişiklik kaydedilmedi: "
+            "kira/brüt toplamı değişirdi (%s→%s)"
+            % (kira_once, kira_sonra)
+        )
+        return out
+
+    # Planı dondur; yeniden hesap birebir olmalı
+    fp_plan = plan["fingerprint"]
+    try:
+        plan2 = _onarim_hesapla(mid, gr=gr)
+    except Exception as ex:
+        out["ok"] = False
+        out["neden"] = "plan_yeniden"
+        out["mesaj"] = "plan uyuşmuyor, hiçbir değişiklik kaydedilmedi"
+        out["hata"] = type(ex).__name__
+        return out
+    if plan2.get("fingerprint") != fp_plan:
+        out["ok"] = False
+        out["neden"] = "plan_uyusmuyor"
+        out["mesaj"] = "plan uyuşmuyor, hiçbir değişiklik kaydedilmedi"
+        return out
+    if plan2.get("brut_cokus_aylar"):
+        out["ok"] = False
+        out["neden"] = "plan_uyusmuyor"
+        out["mesaj"] = "plan uyuşmuyor, hiçbir değişiklik kaydedilmedi"
+        return out
+    k2o, k2s = float(plan2["kira_once"] or 0), float(plan2["kira_sonra"] or 0)
+    if k2o > 0.05 and abs(k2o - k2s) > 0.05:
+        out["ok"] = False
+        out["neden"] = "plan_uyusmuyor"
+        out["mesaj"] = "plan uyuşmuyor, hiçbir değişiklik kaydedilmedi"
+        return out
+
+    by_iso = plan["by_iso"]
+    payload = plan["payload"]
     panel_json = json.dumps(by_iso or {}, ensure_ascii=False)
     grid_json = json.dumps(payload if isinstance(payload, dict) else {}, ensure_ascii=False)
     p_yedek = (
@@ -275,50 +494,130 @@ def onar_mid(mid: int, *, dry_run: bool, etiket: str) -> dict:
         else (json.dumps(grid_once.get("payload"), ensure_ascii=False) if grid_once else None)
     )
 
-    with db() as conn:
-        cur = conn.cursor()
-        if panel_once and p_yedek is not None:
+    borc_once = None
+    try:
+        borc_once = _ekstre_borc_toplam(mid)
+    except Exception:
+        borc_once = None
+
+    _ensure_yedek_tables()
+    try:
+        with db() as conn:
+            cur = conn.cursor()
+
+            def _cal(sql, params=None):
+                cur.execute(sql, params)
+
+            if panel_once and p_yedek is not None:
+                cur.execute(
+                    """
+                    INSERT INTO musteri_tahsilat_panel_detay_yedek
+                        (musteri_id, by_iso, updated_at, etiket)
+                    VALUES (%s, %s, %s, %s)
+                    """,
+                    (mid, p_yedek, panel_once.get("updated_at"), etiket),
+                )
+            if grid_once and g_yedek is not None:
+                cur.execute(
+                    """
+                    INSERT INTO musteri_aylik_grid_cache_yedek
+                        (musteri_id, payload, updated_at, etiket)
+                    VALUES (%s, %s, %s, %s)
+                    """,
+                    (mid, g_yedek, grid_once.get("updated_at"), etiket),
+                )
             cur.execute(
                 """
-                INSERT INTO musteri_tahsilat_panel_detay_yedek
-                    (musteri_id, by_iso, updated_at, etiket)
-                VALUES (%s, %s, %s, %s)
+                INSERT INTO musteri_tahsilat_panel_detay (musteri_id, by_iso, updated_at)
+                VALUES (%s, %s, NOW())
+                ON CONFLICT (musteri_id)
+                DO UPDATE SET by_iso = EXCLUDED.by_iso, updated_at = NOW()
                 """,
-                (mid, p_yedek, panel_once.get("updated_at"), etiket),
+                (mid, panel_json),
             )
-        if grid_once and g_yedek is not None:
             cur.execute(
                 """
-                INSERT INTO musteri_aylik_grid_cache_yedek
-                    (musteri_id, payload, updated_at, etiket)
-                VALUES (%s, %s, %s, %s)
+                INSERT INTO musteri_aylik_grid_cache (musteri_id, payload, updated_at)
+                VALUES (%s, %s, NOW())
+                ON CONFLICT (musteri_id)
+                DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()
                 """,
-                (mid, g_yedek, grid_once.get("updated_at"), etiket),
+                (mid, grid_json),
             )
-        cur.execute(
-            """
-            INSERT INTO musteri_tahsilat_panel_detay (musteri_id, by_iso, updated_at)
-            VALUES (%s, %s, NOW())
-            ON CONFLICT (musteri_id)
-            DO UPDATE SET by_iso = EXCLUDED.by_iso, updated_at = NOW()
-            """,
-            (mid, panel_json),
-        )
-        cur.execute(
-            """
-            INSERT INTO musteri_aylik_grid_cache (musteri_id, payload, updated_at)
-            VALUES (%s, %s, NOW())
-            ON CONFLICT (musteri_id)
-            DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()
-            """,
-            (mid, grid_json),
-        )
+
+            # Aynı txn: yazılan payload brüt/kira koruması → bozulursa exception → rollback
+            cur.execute(
+                "SELECT payload FROM musteri_aylik_grid_cache WHERE musteri_id = %s",
+                (mid,),
+            )
+            row_g = cur.fetchone()
+            raw_g = None
+            if row_g is not None:
+                if isinstance(row_g, dict):
+                    raw_g = row_g.get("payload")
+                else:
+                    try:
+                        raw_g = row_g[0]
+                    except (TypeError, IndexError, KeyError):
+                        raw_g = None
+            try:
+                pl_chk = json.loads(raw_g) if isinstance(raw_g, str) else raw_g
+            except Exception:
+                pl_chk = None
+            if _brut_cokus_yasak(plan["payload_once"], pl_chk):
+                raise RuntimeError("brut_cokus_txn")
+            if kira_once > 0.05 and abs(_kira_tutar_toplam(pl_chk) - kira_once) > 0.05:
+                raise RuntimeError("kira_txn")
+            # Ekstre borç koruması: kira/brüt kaynağı değişmediyse borç satırları korunur.
+            # Ayrı conn ekstre yazılmamış txn'i görmez; kira proxy + borc_once kaydı audit'te.
+            if (
+                borc_once is not None
+                and kira_once > 0.05
+                and abs(kira_sonra - kira_once) > 0.05
+            ):
+                raise RuntimeError("ekstre_borc")
+
+            try:
+                from audit_log import audit_yaz
+
+                audit_yaz(
+                    _cal,
+                    olay="panel_grid_onarim",
+                    varlik="musteri_aylik_grid_cache",
+                    kayit_id=mid,
+                    musteri_id=mid,
+                    kullanici="panel_grid_onarim",
+                    anlik={
+                        "etiket": etiket,
+                        "kaynak": plan["kaynak"],
+                        "degisiklik_n": len(plan["degisiklikler"] or []),
+                        "kira_once": kira_once,
+                        "borc_once": borc_once,
+                    },
+                    yeni={
+                        "etiket": etiket,
+                        "panel_ay": len(by_iso or {}),
+                        "grid_ay": len((payload or {}).get("aylar") or []),
+                        "kira_sonra": kira_sonra,
+                        "fingerprint": fp_plan[:120],
+                    },
+                )
+            except Exception:
+                pass
+    except Exception as ex:
+        out["ok"] = False
+        out["yazildi"] = False
+        out["neden"] = type(ex).__name__
+        out["mesaj"] = "plan uyuşmuyor, hiçbir değişiklik kaydedilmedi"
+        out["hata"] = str(ex)[:200]
+        return out
 
     try:
         gr._invalidate_aylik_grid_payload_mem(mid)
     except Exception:
         pass
     out["yazildi"] = True
+    out["ok"] = True
     out["panel_ay_sonra"] = len(by_iso or {})
     out["grid_ay_sonra"] = len((payload or {}).get("aylar") or []) if isinstance(payload, dict) else 0
     return out
@@ -402,6 +701,8 @@ def main(argv=None) -> int:
             "panel", r["panel_ay_once"], "->", r.get("panel_ay_sonra"),
             "grid", r["grid_ay_once"], "->", r.get("grid_ay_sonra"),
             "yazildi", r.get("yazildi"),
+            "ok", r.get("ok"),
+            ("neden=" + str(r.get("neden"))) if r.get("neden") else "",
         )
     print("ozet_n", ozet["n"], "dry_run", ozet["dry_run"], "etiket", etiket)
     return 0
