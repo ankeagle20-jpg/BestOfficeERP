@@ -1,8 +1,8 @@
-from flask import Blueprint, jsonify, request, Response
+from flask import Blueprint, jsonify, render_template, request, Response
 from datetime import date, datetime
 import os
 from db import fetch_all, fetch_one, execute, _tenant_schema_for_request
-from auth import giris_gerekli
+from auth import giris_gerekli, yetki_gerekli
 
 bp = Blueprint('whatsapp', __name__, url_prefix='/whatsapp')
 
@@ -633,6 +633,118 @@ def api_servis_durum():
         return jsonify(data)
     except Exception as e:
         return jsonify({'bagli': False, 'hata': str(e), 'wa_tenant_id': _wa_tenant_id()})
+
+
+@bp.route('/saglik')
+@yetki_gerekli("muhasebe")
+def wa_saglik_sayfa():
+    """WhatsApp Sağlık ekranı (yönetici/muhasebe)."""
+    return render_template('whatsapp/saglik.html')
+
+
+def _saglik_servis_durumu():
+    """(ulasim, oturum_kodu). Oturum uyandirilmaz (durum-bak)."""
+    import requests
+    from wa_saglik import oturum_kodu_govde
+
+    try:
+        r = requests.get(
+            _wa_url('durum-bak'),
+            headers=_wa_internal_headers(),
+            timeout=(2, 4),
+        )
+    except (requests.exceptions.ConnectTimeout, requests.exceptions.ConnectionError):
+        return "baglanti_yok", None
+    except requests.exceptions.Timeout:
+        return "zaman_asimi", None
+    except Exception:
+        return "baglanti_yok", None
+    if r.status_code >= 500:
+        return "http_5xx", None
+    if r.status_code >= 400:
+        return "http_4xx", None
+    try:
+        body = r.json() if r.content else {}
+    except Exception:
+        body = {}
+    return "ok", oturum_kodu_govde(body)
+
+
+def _saglik_audit(olay: str, anlik: dict) -> None:
+    try:
+        from flask_login import current_user
+
+        from audit_log import audit_yaz
+
+        audit_yaz(
+            lambda sql, p=None: execute(sql, p) if p is not None else execute(sql),
+            olay=olay,
+            varlik="whatsapp_servis",
+            kayit_id=None,
+            musteri_id=None,
+            kullanici=str(getattr(current_user, "username", "") or ""),
+            anlik=anlik,
+        )
+    except Exception:
+        pass
+
+
+@bp.route('/api/saglik-ozet')
+@yetki_gerekli("muhasebe")
+def api_wa_saglik_ozet():
+    import wa_saglik
+
+    ulasim, oturum = _saglik_servis_durumu()
+    sayaclar = wa_saglik.saglik_sayaclari()
+    return jsonify({
+        'ok': True,
+        'kontroller': wa_saglik.kontrolleri_uret(ulasim, oturum, sayaclar),
+        'sayaclar': sayaclar,
+    })
+
+
+@bp.route('/api/saglik-uyandir', methods=['POST'])
+@yetki_gerekli("muhasebe")
+def api_wa_saglik_uyandir():
+    import requests
+
+    try:
+        r = requests.post(
+            _wa_url('uyandir'),
+            headers=_wa_internal_headers(),
+            timeout=(3, 22),
+        )
+        ok = r.status_code < 400
+        sonuc = 'ok' if ok else 'http_hata'
+    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
+        ok, sonuc = False, 'ulasilamadi'
+    except Exception:
+        ok, sonuc = False, 'hata'
+    _saglik_audit('wa_saglik_uyandir', {'sonuc': sonuc})
+    return jsonify({
+        'ok': ok,
+        'mesaj': ('Servisi uyandırma isteği gönderildi. Birkaç saniye sonra yenileyin.'
+                  if ok else 'Servise ulaşılamadı. Ofis bilgisayarı kapalı olabilir ya da tünel kopmuş.'),
+    }), 200 if ok else 502
+
+
+@bp.route('/api/saglik-tazele', methods=['POST'])
+@yetki_gerekli("muhasebe")
+def api_wa_saglik_tazele():
+    import sozlesme_whatsapp as sw
+    import wa_saglik
+
+    kayitlar = wa_saglik.bekleyen_kayitlar()
+    ozet = wa_saglik.tazele_calistir(
+        kayitlar, sw._sonuc_varsayilan, sw._satiri_tazele
+    )
+    _saglik_audit('wa_saglik_tazele', dict(ozet))
+    return jsonify({
+        'ok': True,
+        **ozet,
+        'mesaj': (f"{ozet['taranan']} kayıt sorgulandı; {ozet['guncellenen']} güncellendi, "
+                  f"{ozet['belirsiz_kalan']} hâlâ belirsiz."),
+    })
 
 
 @bp.route('/qr-ac')

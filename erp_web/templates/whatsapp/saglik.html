@@ -1,0 +1,109 @@
+{% extends "layout.html" %}
+
+{% block page_title %}WhatsApp Sağlık{% endblock %}
+
+{% block content %}
+<style>
+.ws-wrap { max-width: 980px; margin: 0 auto; }
+.ws-head { display:flex; flex-wrap:wrap; align-items:center; gap:10px; justify-content:space-between; margin-bottom:14px; }
+.ws-head h2 { margin:0; font-size:18px; }
+.ws-btn { background:#00838f; color:#fff; border:none; padding:8px 16px; border-radius:4px; cursor:pointer; font-size:13px; }
+.ws-btn:disabled { opacity:.5; cursor:not-allowed; }
+.ws-btn.secondary { background:#37474f; }
+.ws-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:12px; }
+.ws-card { border:1px solid #cfd8dc; border-left:6px solid #90a4ae; border-radius:6px; padding:12px 14px; background:#fff; }
+.ws-card.ok { border-left-color:#2e7d32; }
+.ws-card.uyari { border-left-color:#f9a825; }
+.ws-card.hata { border-left-color:#c62828; }
+.ws-card h3 { margin:0 0 6px; font-size:14px; display:flex; align-items:center; gap:8px; }
+.ws-dot { width:10px; height:10px; border-radius:50%; background:#90a4ae; display:inline-block; }
+.ws-card.ok .ws-dot { background:#2e7d32; }
+.ws-card.uyari .ws-dot { background:#f9a825; }
+.ws-card.hata .ws-dot { background:#c62828; }
+.ws-card p { margin:0; font-size:13px; color:#37474f; line-height:1.5; }
+.ws-msg { margin-top:14px; font-size:13px; padding:10px 12px; border-radius:4px; display:none; }
+.ws-msg.ok { display:block; background:#e8f5e9; border:1px solid #a5d6a7; }
+.ws-msg.err { display:block; background:#ffebee; border:1px solid #ef9a9a; }
+.ws-zaman { font-size:12px; color:#78909c; margin-top:10px; }
+</style>
+
+<div class="ws-wrap">
+  <div class="ws-head">
+    <h2>WhatsApp Sağlık</h2>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button type="button" class="ws-btn" id="btnYenile">Yenile</button>
+      <button type="button" class="ws-btn secondary" id="btnUyandir">Servisi uyandır</button>
+      <button type="button" class="ws-btn secondary" id="btnTazele">Bekleyenleri tazele</button>
+      <a class="ws-btn secondary" style="text-decoration:none;display:none;" id="btnQr" href="/whatsapp/qr-ac" target="_blank" rel="noopener">QR göster</a>
+    </div>
+  </div>
+
+  <div class="ws-grid" id="wsKartlar">
+    <div class="ws-card"><h3><span class="ws-dot"></span>Yükleniyor</h3><p>Kontrol ediliyor…</p></div>
+  </div>
+  <div class="ws-msg" id="wsMsg"></div>
+  <div class="ws-zaman" id="wsZaman"></div>
+</div>
+
+<script>
+(function () {
+  const kartlarEl = document.getElementById("wsKartlar");
+  const msgEl = document.getElementById("wsMsg");
+  const zamanEl = document.getElementById("wsZaman");
+  const btnQr = document.getElementById("btnQr");
+
+  function mesaj(metin, ok) {
+    msgEl.textContent = metin || "";
+    msgEl.className = "ws-msg " + (ok ? "ok" : "err");
+    msgEl.style.display = metin ? "block" : "none";
+  }
+
+  async function ozetYukle() {
+    kartlarEl.innerHTML = '<div class="ws-card"><h3><span class="ws-dot"></span>Yükleniyor</h3><p>Kontrol ediliyor…</p></div>';
+    try {
+      const r = await fetch("/whatsapp/api/saglik-ozet", { credentials: "same-origin" });
+      const j = await r.json();
+      if (!j || !j.ok || !Array.isArray(j.kontroller)) {
+        kartlarEl.innerHTML = '<div class="ws-card hata"><h3><span class="ws-dot"></span>Sağlık özeti</h3><p>Özet alınamadı. Sayfayı yenileyin.</p></div>';
+        return;
+      }
+      kartlarEl.innerHTML = j.kontroller.map(function (k) {
+        const sev = ["ok", "uyari", "hata"].indexOf(k.seviye) >= 0 ? k.seviye : "";
+        return '<div class="ws-card ' + sev + '"><h3><span class="ws-dot"></span>' +
+          escapeHtml(k.baslik || "") + "</h3><p>" + escapeHtml(k.aciklama || "") + "</p></div>";
+      }).join("");
+      const oturumKart = j.kontroller.find(function (k) { return k.anahtar === "oturum"; });
+      btnQr.style.display = (oturumKart && oturumKart.seviye !== "ok") ? "" : "none";
+      zamanEl.textContent = "Son yenileme: " + new Date().toLocaleTimeString("tr-TR");
+    } catch (e) {
+      kartlarEl.innerHTML = '<div class="ws-card hata"><h3><span class="ws-dot"></span>Sağlık özeti</h3><p>Özet alınamadı (bağlantı sorunu).</p></div>';
+    }
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  async function post(btn, url) {
+    btn.disabled = true;
+    try {
+      const r = await fetch(url, { method: "POST", credentials: "same-origin" });
+      const j = await r.json().catch(function () { return {}; });
+      mesaj(j.mesaj || (j.ok ? "İşlem tamam." : "İşlem başarısız."), !!j.ok);
+    } catch (e) {
+      mesaj("İstek gönderilemedi (bağlantı sorunu).", false);
+    } finally {
+      btn.disabled = false;
+      ozetYukle();
+    }
+  }
+
+  document.getElementById("btnYenile").addEventListener("click", ozetYukle);
+  document.getElementById("btnUyandir").addEventListener("click", function () { post(this, "/whatsapp/api/saglik-uyandir"); });
+  document.getElementById("btnTazele").addEventListener("click", function () { post(this, "/whatsapp/api/saglik-tazele"); });
+  ozetYukle();
+})();
+</script>
+{% endblock %}

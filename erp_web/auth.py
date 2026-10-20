@@ -69,6 +69,7 @@ class User:
                 {"id": "tufe", "label": "TÜFE", "url": "tufe.index"},
                 {"id": "personel", "label": "Personel", "url": "personel.index"},
                 {"id": "ilan_robotu", "label": "İlan Robotu", "url": "ilan_robotu.index"},
+                {"id": "whatsapp", "label": "WhatsApp Sağlık", "url": "whatsapp.wa_saglik_sayfa"},
                 {"id": "giris", "label": "Giriş", "url": "giris.index"},
                 {"id": "admin", "label": "Yönetim", "url": "admin.index"},
             ]
@@ -84,6 +85,7 @@ class User:
                 {"id": "bankalar", "label": "Bankalar", "url": "bankalar.index"},
                 {"id": "tufe", "label": "TÜFE", "url": "tufe.index"},
                 {"id": "ilan_robotu", "label": "İlan Robotu", "url": "ilan_robotu.index"},
+                {"id": "whatsapp", "label": "WhatsApp Sağlık", "url": "whatsapp.wa_saglik_sayfa"},
                 {"id": "giris", "label": "Giriş", "url": "giris.index"},
             ]
         elif self.role == "personel":

@@ -584,7 +584,7 @@ def _durum_govde(row: dict, cakisma: bool) -> dict:
     return govde
 
 
-_TAZELE = frozenset(("kuyrukta", "gonderiliyor"))
+_TAZELE = frozenset(("kuyrukta", "gonderiliyor", "belirsiz"))
 
 
 def _sonuc_varsayilan(anahtar: str) -> dict:

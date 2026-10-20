@@ -1,0 +1,156 @@
+# -*- coding: utf-8 -*-
+"""WhatsApp Sağlık: kontrol kartları (sahte yanıtlar), rol kapısı, tazeleme."""
+import os
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(ROOT))
+os.environ.pop("ALLOW_PROD_WRITE", None)
+os.environ["BESTOFFICE_HTTP_FILE_LOG"] = "0"
+
+FAILS = []
+
+
+def check(name, ok, ek=""):
+    print(("ok " if ok else "FAIL ") + name + ((" :: " + str(ek)[:220]) if (ek and not ok) else ""))
+    if not ok:
+        FAILS.append(name)
+
+
+BOŞ_SAYAC = {"bekleyen": 0, "yasli_takili": 0, "gonderildi_24s": 0, "hata_24s": 0,
+             "belirsiz_24s": 0, "son_gonderildi": None, "son_hata": "",
+             "belirsiz_toplam": 0}
+
+
+def _kart(kartlar, anahtar):
+    return next((k for k in kartlar if k.get("anahtar") == anahtar), {})
+
+
+def test_kontroller():
+    import wa_saglik as ws
+
+    k = ws.kontrolleri_uret("baglanti_yok", None, dict(BOŞ_SAYAC))
+    check("ulasim_baglanti_kirmizi", _kart(k, "servis")["seviye"] == "hata")
+    check("ulasim_baglanti_metin", "tünel" in _kart(k, "servis")["aciklama"])
+    check("ulasim_yokken_oturum_hata", _kart(k, "oturum")["seviye"] == "hata")
+
+    k = ws.kontrolleri_uret("zaman_asimi", None, dict(BOŞ_SAYAC))
+    check("ulasim_timeout_kirmizi", _kart(k, "servis")["seviye"] == "hata"
+          and "yanıt vermedi" in _kart(k, "servis")["aciklama"])
+
+    k = ws.kontrolleri_uret("http_5xx", None, dict(BOŞ_SAYAC))
+    check("ulasim_5xx_kirmizi", _kart(k, "servis")["seviye"] == "hata")
+
+    k = ws.kontrolleri_uret("ok", "qr", dict(BOŞ_SAYAC))
+    check("oturum_qr_sari", _kart(k, "oturum")["seviye"] == "uyari")
+    k = ws.kontrolleri_uret("ok", "hazir", dict(BOŞ_SAYAC))
+    check("oturum_hazir_yesil", _kart(k, "oturum")["seviye"] == "ok")
+    k = ws.kontrolleri_uret("ok", "bagli_degil", dict(BOŞ_SAYAC))
+    check("oturum_yok_sari", _kart(k, "oturum")["seviye"] == "uyari"
+          and "Chrome" in _kart(k, "oturum")["aciklama"])
+
+    s = dict(BOŞ_SAYAC, bekleyen=3, yasli_takili=2, gonderildi_24s=5, hata_24s=1,
+             belirsiz_24s=1, belirsiz_toplam=4, son_gonderildi="2026-10-20 09:12",
+             son_hata="zaman_asimi")
+    k = ws.kontrolleri_uret("ok", "hazir", s)
+    check("kuyruk_yasli_sari", _kart(k, "kuyruk")["seviye"] == "uyari")
+    check("kuyruk_dagilim_metni", "5 gönderildi" in _kart(k, "kuyruk")["aciklama"]
+          and "1 hata" in _kart(k, "kuyruk")["aciklama"])
+    check("belirsiz_sari", _kart(k, "belirsiz")["seviye"] == "uyari"
+          and "4 kaydın" in _kart(k, "belirsiz")["aciklama"])
+    check("son_hata_kartta", "zaman_asimi" in _kart(k, "son_islem")["aciklama"]
+          and "2026-10-20 09:12" in _kart(k, "son_islem")["aciklama"])
+
+    k = ws.kontrolleri_uret("ok", "hazir", dict(BOŞ_SAYAC))
+    check("sakin_durum_yesil", all(x["seviye"] == "ok" for x in k), k)
+
+
+def test_oturum_kodu():
+    import wa_saglik as ws
+
+    check("kod_hazir", ws.oturum_kodu_govde({"hazir": True, "bagli": True}) == "hazir")
+    check("kod_qr_durum", ws.oturum_kodu_govde({"durum": "qr"}) == "qr")
+    check("kod_qr_topar", ws.oturum_kodu_govde({"toparlama_durumu": "qr"}) == "qr")
+    check("kod_baglaniyor", ws.oturum_kodu_govde({"durum": "starting"}) == "baglaniyor")
+    check("kod_bagli_degil", ws.oturum_kodu_govde({"durum": "kapali"}) == "bagli_degil")
+    check("kod_bos_bilinmiyor", ws.oturum_kodu_govde({}) == "bilinmiyor")
+
+
+def test_tazele():
+    import wa_saglik as ws
+
+    kayitlar = [{"id": 1, "durum": "kuyrukta", "anahtar": "szwa:d:a"},
+                {"id": 2, "durum": "belirsiz", "anahtar": "szwa:d:b"},
+                {"id": 3, "durum": "belirsiz", "anahtar": "szwa:d:c"}]
+    cevap = {"szwa:d:a": "gonderildi", "szwa:d:b": "gonderildi", "szwa:d:c": "yok"}
+
+    def sorgu(anahtar):
+        return {"durum": cevap.get(anahtar, "yok")}
+
+    # Mevcut akistaki davranisin sade esdegeri: gonderildi/basarisiz yazilir, yok belirsiz.
+    def tazele_fn(row, anahtar, fn):
+        row = dict(row)
+        d = (fn(anahtar) or {}).get("durum")
+        if d in ("gonderildi", "basarisiz"):
+            row["durum"] = d
+        elif d == "yok":
+            row["durum"] = "belirsiz"
+        return row
+
+    oz = ws.tazele_calistir(kayitlar, sorgu, tazele_fn)
+    check("tazele_ozet", oz == {"taranan": 3, "gonderildi": 2, "basarisiz": 0,
+                                "belirsiz_kalan": 1, "degismedi": 0, "guncellenen": 2}, oz)
+
+
+ROL = {"v": "personel"}
+
+
+def _istemci():
+    from flask import Flask
+    from auth import User, login_manager
+
+    from routes import whatsapp_routes
+
+    @login_manager.user_loader
+    def _load(_uid):
+        return User(id=1, username="t", full_name="T", role=ROL["v"],
+                    aktif_mi=True, security_stamp="test-stamp")
+
+    app = Flask(__name__)
+    app.secret_key = "test"
+    login_manager.init_app(app)
+    app.register_blueprint(whatsapp_routes.bp)
+    client = app.test_client()
+    with client.session_transaction() as s:
+        s["_user_id"] = "1"
+        s["_fresh"] = True
+    return client
+
+
+def test_rol_kapisi():
+    client = _istemci()
+    ROL["v"] = "personel"
+    r = client.get("/whatsapp/api/saglik-ozet")
+    check("personel_api_403", r.status_code == 403, r.status_code)
+    ROL["v"] = "muhasebe"
+    r = client.get("/whatsapp/api/saglik-ozet")
+    govde = r.get_json(silent=True) or {}
+    check("muhasebe_api_200", r.status_code == 200 and govde.get("ok") is True,
+          (r.status_code, str(govde)[:160]))
+    anahtarlar = [k.get("anahtar") for k in govde.get("kontroller") or []]
+    check("kartlar_tam", anahtarlar == ["servis", "oturum", "kuyruk", "son_islem",
+                                        "belirsiz"], anahtarlar)
+
+
+def main():
+    test_kontroller()
+    test_oturum_kodu()
+    test_tazele()
+    test_rol_kapisi()
+    print("FAIL" if FAILS else "TUMU GECTI", FAILS)
+    return 1 if FAILS else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
