@@ -1194,7 +1194,7 @@ def _apply_panel_by_iso_to_grid_payload(payload: dict, panel_by_iso: dict, tahsi
         except (TypeError, ValueError):
             pay_ta = None
         # Kural A: |AYLIK_TAH| marker varsa brut-tah farkını yok say, kalan=0.
-        if _grid_payload_marker_panel_tam_kapandi(mk_t, brut, yy_m, None, tol, pay_t=pay_ta):
+        if _grid_payload_marker_panel_tam_kapandi(mk_t, brut, yy_m, None, tol, pay_t=pay_ta, daralt=grid_kismi_goster_aktif(payload.get("musteri_id"))):
             kalan = 0.0
             # brut_tutar_kdv / tutar_kdv_dahil'e DOKUNULMAZ - grid'in kendi
             # hesabi (TÜFE + reel overlay) korunur.
@@ -3310,7 +3310,8 @@ def _aylik_grid_apply_reel_donem_overlay_ham(
             mk_t = 0.0
             pay_t = None
         if _grid_payload_marker_panel_tam_kapandi(
-            mk_t, new_t, yy_m, manual, tol, pay_t=pay_t
+            mk_t, new_t, yy_m, manual, tol, pay_t=pay_t,
+            daralt=grid_kismi_goster_aktif(musteri_id)
         ):
             a["odenen_tutar_kdv"] = round(odenen, 2)
             a["kalan_tutar_kdv"] = 0.0
@@ -3396,7 +3397,8 @@ def _aylik_grid_apply_reel_donem_overlay_ham(
             mk_t = 0.0
             pay_t = None
         if _grid_payload_marker_panel_tam_kapandi(
-            mk_t, new_t, yy_m, manual, tol, pay_t=pay_t
+            mk_t, new_t, yy_m, manual, tol, pay_t=pay_t,
+            daralt=grid_kismi_goster_aktif(musteri_id)
         ):
             a["odenen_tutar_kdv"] = round(odenen, 2)
             a["kalan_tutar_kdv"] = 0.0
@@ -3523,7 +3525,8 @@ def _build_aylik_grid_cache_payload(musteri_id, tufe_map=None, kyc_row=None, man
             except (TypeError, ValueError):
                 pay_tb = None
             if _grid_payload_marker_panel_tam_kapandi(
-                mk_t, brut, donem_yil_b, manual_reel_by_year, tol, pay_t=pay_tb
+                mk_t, brut, donem_yil_b, manual_reel_by_year, tol, pay_t=pay_tb,
+                daralt=grid_kismi_goster_aktif(musteri_id)
             ):
                 a["odenen_tutar_kdv"] = round(mk_t, 2)
                 a["kalan_tutar_kdv"] = 0.0
@@ -10123,6 +10126,40 @@ def _reel_donem_yili_for_ay(yil, ay, artis_ay=None) -> int:
     return y - 1 if a < am else y
 
 
+def grid_kismi_goster_enabled() -> bool:
+    return str(os.environ.get("GRID_KISMI_GOSTER_ENABLED") or "").strip() in (
+        "1", "true", "TRUE", "yes",
+    )
+
+
+def grid_kismi_goster_allowlist() -> set:
+    ham = os.environ.get("GRID_KISMI_GOSTER_MUSTERI_IDS")
+    if ham is None:
+        return {867}
+    out: set = set()
+    for parca in str(ham).replace(";", " ").replace(",", " ").split():
+        try:
+            out.add(int(parca))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def grid_kismi_goster_aktif(musteri_id) -> bool:
+    # GRID_KISMI_GOSTER bayragi: yalniz allowlist'teki mid'lerde daraltma.
+    if not grid_kismi_goster_enabled():
+        return False
+    try:
+        mid = int(musteri_id or 0)
+    except (TypeError, ValueError):
+        return False
+    return mid > 0 and mid in grid_kismi_goster_allowlist()
+
+
+# Kural A daraltma esigi: TAH tutari brut - bu fark icindeyse tam kapali sayilir.
+KURAL_A_DARALTMA_ESIK_TL = 1.00
+
+
 def _grid_payload_marker_panel_tam_kapandi(
     mk_t: float,
     brut: float,
@@ -10130,6 +10167,7 @@ def _grid_payload_marker_panel_tam_kapandi(
     manual_reel_by_year: dict | None,
     tol: float,
     pay_t: float | None = None,
+    daralt: bool = False,
 ) -> bool:
     """|AYLIK_TAH| marker reel dönem tutarını (panel) karşılıyorsa grid tam ödendi say.
 
@@ -10150,6 +10188,15 @@ def _grid_payload_marker_panel_tam_kapandi(
             brut_v = 0.0
         # 0 < pay_t < (brut - tol) → kısmi; Kural A'yı uygulama.
         if pay_v > tol and brut_v > tol and pay_v < (brut_v - float(tol)):
+            return False
+    if daralt:
+        # Bayrakli kismi gosterim: TAH tutari brutun esik altindaysa
+        # tam kapali sayma; cagiran kalan = brut - odenen yazar (turuncu).
+        try:
+            brut_d = round(float(brut or 0), 2)
+        except (TypeError, ValueError):
+            brut_d = 0.0
+        if brut_d > tol and mk_t < brut_d - KURAL_A_DARALTMA_ESIK_TL:
             return False
     # |AYLIK_TAH| marker'lı tahsilat varsa
     # tutar farkına bakmadan tam ödendi say
@@ -10213,7 +10260,8 @@ def _ekstre_payload_odenen_zenginlestir(
         except (TypeError, ValueError):
             pay_tz = None
         if _grid_payload_marker_panel_tam_kapandi(
-            mk_t, brut, donem_yil_en, manual_reel_by_year, tol, pay_t=pay_tz
+            mk_t, brut, donem_yil_en, manual_reel_by_year, tol, pay_t=pay_tz,
+            daralt=grid_kismi_goster_aktif(payload.get("musteri_id"))
         ):
             a["odenen_tutar_kdv"] = round(mk_t, 2)
             a["kalan_tutar_kdv"] = 0.0
@@ -10428,6 +10476,7 @@ def _ekstre_tahsil_alacak_hucre(
         None,
         tol,
         pay_t=pay_c3,
+        daralt=grid_kismi_goster_aktif(musteri_id),
     ):
         return hedef
     return round(min(out, hedef), 2)
@@ -11984,6 +12033,7 @@ def _ekstre_acilis_bakiyesi_fifo(
     tol=0.01,
     batch_maps=None,
     manual_reel_by_year=None,
+    musteri_id=None,
 ):
     """Dönem başlangıcı öncesi net bakiye: FIFO ile yalnızca bas öncesi ödemeler mahsup edilir.
 
@@ -12087,6 +12137,7 @@ def _ekstre_acilis_bakiyesi_fifo(
                     manual_reel_by_year,
                     float(AYLIK_GRID_TAM_ODENDI_TOLERANS),
                     pay_t=pay_c2,
+                    daralt=grid_kismi_goster_aktif(musteri_id),
                 ):
                     need[iso_m] = 0.0
             return
@@ -13119,6 +13170,7 @@ def _cari_ekstre_hareketler(
                         manual_reel_pass,
                         float(AYLIK_GRID_TAM_ODENDI_TOLERANS),
                         pay_t=pay_c2,
+                        daralt=grid_kismi_goster_aktif(musteri_id),
                     ):
                         need[iso_m] = 0.0
                 return
@@ -13199,6 +13251,7 @@ def _cari_ekstre_hareketler(
             tol=tol_f,
             batch_maps=ekstre_batch_maps,
             manual_reel_by_year=manual_reel_pass,
+            musteri_id=musteri_id,
         )
         dev_borc_r, dev_alacak_r = _ekstre_devreden_satir_toplamlari(
             full_borc_for_fifo,
@@ -13277,6 +13330,7 @@ def _cari_ekstre_hareketler(
                 manual_reel_pass,
                 float(AYLIK_GRID_TAM_ODENDI_TOLERANS),
                 pay_t=pay_c1,
+                daralt=grid_kismi_goster_aktif(musteri_id),
             )
             if extra_borc_iso > tol_f:
                 # Panel yalnız normal kira tabanını bilir; ekstra fatura tahsilatını ezmesine izin verme.
