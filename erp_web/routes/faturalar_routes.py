@@ -5355,7 +5355,13 @@ def api_fatura_sil_toplu():
                 }
             )
             continue
-        execute("DELETE FROM tahsilatlar WHERE fatura_id = %s", (fid,))
+        from tahsilat_silme import tahsilatlari_sil
+
+        tahsilatlari_sil(
+            silme_yolu="fatura-toplu-sil-cascade",
+            where_sql="fatura_id = %s",
+            where_params=(fid,),
+        )
         rc = execute("DELETE FROM faturalar WHERE id = %s", (fid,))
         if rc:
             silinen.append({"id": fid, "fatura_no": row.get("fatura_no")})
@@ -10687,11 +10693,13 @@ def tahsilat_sil():
             mid = int(pre.get("mid") or 0)
         except (TypeError, ValueError):
             mid = 0
-        row = execute_returning(
-            "DELETE FROM tahsilatlar WHERE id = %s RETURNING id",
-            (tahsilat_id,),
+        from tahsilat_silme import tahsilatlari_sil
+
+        silinen = tahsilatlari_sil(
+            silme_yolu="tahsilat-sil",
+            ids=[tahsilat_id],
         )
-        if not row:
+        if not silinen:
             return jsonify({'ok': False, 'mesaj': 'Tahsilat kaydı bulunamadı.'}), 404
         if mid > 0:
             try:

@@ -15888,21 +15888,19 @@ def api_aylik_tutarlardan_tahsilden_cikar():
     atlanan = []
 
     try:
+        from tahsilat_silme import tahsilatlari_sil_cursor
+
         with get_db() as conn:
             cur = conn.cursor()
             for yil, ay in aylar:
                 iso = date(yil, ay, 1).isoformat()
                 pat = f"%|AYLIK_TAH|{iso}|%"
-                cur.execute(
-                    """
-                    DELETE FROM tahsilatlar
-                    WHERE (musteri_id = %s OR customer_id = %s)
-                      AND COALESCE(aciklama, '') LIKE %s
-                    RETURNING id, makbuz_no
-                    """,
-                    (musteri_id, musteri_id, pat),
+                rows = tahsilatlari_sil_cursor(
+                    cur,
+                    silme_yolu="tahsilden-cikar",
+                    where_sql="(musteri_id = %s OR customer_id = %s) AND COALESCE(aciklama, '') LIKE %s",
+                    where_params=(musteri_id, musteri_id, pat),
                 )
-                rows = cur.fetchall() or []
                 if rows:
                     for r in rows:
                         silinen.append(
@@ -16160,7 +16158,14 @@ def api_aylik_tutarlardan_borctan_cikar():
                         "mesaj": f"Bu ay GİB'e taşındı (yerine geçti → #{nid}). Silinemez.",
                     })
                     continue
-                cur.execute("DELETE FROM tahsilatlar WHERE fatura_id = %s", (fid,))
+                from tahsilat_silme import tahsilatlari_sil_cursor
+
+                tahsilatlari_sil_cursor(
+                    cur,
+                    silme_yolu="fatura-sil-cascade",
+                    where_sql="fatura_id = %s",
+                    where_params=(fid,),
+                )
                 cur.execute(
                     """
                     DELETE FROM faturalar
@@ -18741,15 +18746,14 @@ def api_ekstre_tahsilat_sil():
     affected_iso = (
         _iso_from_aylik_tah_marker(row_pre.get("aciklama")) if row_pre else None
     )
-    row = execute_returning(
-        """
-        DELETE FROM tahsilatlar
-        WHERE id = %s AND (musteri_id = %s OR customer_id = %s)
-        RETURNING id
-        """,
-        (tid, musteri_id, musteri_id),
+    from tahsilat_silme import tahsilatlari_sil
+
+    silinen = tahsilatlari_sil(
+        silme_yolu="ekstre-tahsilat-sil",
+        where_sql="id = %s AND (musteri_id = %s OR customer_id = %s)",
+        where_params=(tid, musteri_id, musteri_id),
     )
-    if not row:
+    if not silinen:
         return jsonify({"ok": False, "mesaj": "Tahsilat bulunamadı."}), 404
     _ekstre_invalidate_after_change(
         musteri_id, [affected_iso] if affected_iso else None
@@ -18938,15 +18942,14 @@ def api_ekstre_kayit_donustur():
                     "UPDATE banka_hareketleri SET tahsilat_id = NULL WHERE tahsilat_id = %s",
                     (kid,),
                 )
-                cur.execute(
-                    """
-                    DELETE FROM tahsilatlar
-                    WHERE id = %s AND (musteri_id = %s OR customer_id = %s)
-                    RETURNING id
-                    """,
-                    (kid, musteri_id, musteri_id),
-                )
-                if not cur.fetchone():
+                from tahsilat_silme import tahsilatlari_sil_cursor
+
+                if not tahsilatlari_sil_cursor(
+                    cur,
+                    silme_yolu="ekstre-kayit-donustur",
+                    where_sql="id = %s AND (musteri_id = %s OR customer_id = %s)",
+                    where_params=(kid, musteri_id, musteri_id),
+                ):
                     raise ValueError("Tahsilat silinemedi.")
                 cur.execute(
                     "SELECT pg_advisory_xact_lock(hashtext('tediye_makbuz_no_alloc')::bigint)"
@@ -19164,7 +19167,13 @@ def api_ekstre_fatura_sil():
             "ok": False,
             "mesaj": f"Bu kira satırı yerine geçti (bkz. fatura #{nid}). Düzenlenemez / silinemez.",
         }), 400
-    execute("DELETE FROM tahsilatlar WHERE fatura_id = %s", (fid,))
+    from tahsilat_silme import tahsilatlari_sil
+
+    tahsilatlari_sil(
+        silme_yolu="ekstre-fatura-sil-cascade",
+        where_sql="fatura_id = %s",
+        where_params=(fid,),
+    )
     execute("DELETE FROM faturalar WHERE id = %s AND musteri_id = %s", (fid, musteri_id))
     _ekstre_invalidate_after_change(musteri_id)
     return jsonify({"ok": True, "mesaj": "Borç faturası silindi."})

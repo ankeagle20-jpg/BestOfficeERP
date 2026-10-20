@@ -204,7 +204,9 @@ def api_tahsilat_delete():
             mid = int(pre.get("mid") or 0)
         except (TypeError, ValueError):
             mid = 0
-        execute("DELETE FROM tahsilatlar WHERE id = %s", (tid,))
+        from tahsilat_silme import tahsilatlari_sil
+
+        tahsilatlari_sil(silme_yolu="tahsilat-delete", ids=[tid])
         if mid > 0:
             try:
                 from .giris_routes import resync_panel_and_grid_after_tahsil_change

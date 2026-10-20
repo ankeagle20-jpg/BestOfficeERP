@@ -536,7 +536,9 @@ def api_eslestirme_iptal():
             return jsonify({"ok": False, "mesaj": "Sadece eşleşmiş hareket iptal edilebilir"}), 400
         tid = h.get("tahsilat_id")
         if tid:
-            execute("DELETE FROM tahsilatlar WHERE id = %s", (tid,))
+            from tahsilat_silme import tahsilatlari_sil
+
+            tahsilatlari_sil(silme_yolu="banka-eslestirme-iptal", ids=[tid])
         execute(
             "UPDATE banka_hareketleri SET durum = 'bekleyen', musteri_id = NULL, tahsilat_id = NULL WHERE id = %s",
             (hareket_id,),
