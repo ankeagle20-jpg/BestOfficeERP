@@ -361,6 +361,7 @@ def test_deneme_ve_poll():
         ("gonderiliyor", sw._SUREN),
         ("basarisiz", sw._BASARISIZ),
         ("belirsiz", sw._BELIRSIZ),
+        ("suresi_doldu", sw._SURESI_DOLDU),
     ):
         base_patches()
         sw._bul = lambda *_a, d=durum: {"id": 4, "durum": d}
@@ -401,6 +402,11 @@ def test_deneme_ve_poll():
     sw._bul = lambda *_a, **_k: {"id": 5, "durum": "kuyrukta"}
     govde, kod = sw.sozlesme_wa_durum(3, DENEME)
     check("poll_kuyrukta", kod == 200 and govde.get("durum") == "kuyrukta" and govde.get("mesaj") == "Kuyruğa alındı")
+    sw._bul = lambda *_a, **_k: {"id": 5, "durum": "suresi_doldu"}
+    govde, kod = sw.sozlesme_wa_durum(3, DENEME)
+    check("poll_suresi_doldu", kod == 200 and govde.get("durum") == "suresi_doldu"
+          and govde.get("mesaj") == "Süresi doldu")
+    check("etiket_suresi_doldu_metin", sw.durum_mesaji("suresi_doldu", False, "") == "Süresi doldu")
 
     base_patches()
     anahtarlar = []

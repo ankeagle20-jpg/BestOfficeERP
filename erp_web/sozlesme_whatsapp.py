@@ -36,6 +36,7 @@ _ORIGIN = "İstek reddedildi"
 _KAYITSIZ = "Bu numara WhatsApp'ta kayıtlı değil"
 _ONCEDEN = "Bu mesaj daha önce kuyruğa alındı"
 _GONDERILDI_ONCEDEN = "Bu mesaj daha önce gönderildi"
+_SURESI_DOLDU = "Süresi doldu"
 _BASARISIZ = "Gönderilemedi: kuyruk kabul etmedi"
 _EK_BUYUK = "Makbuz eki çok büyük"
 _EK_YOK = "Ek kabul edilmedi"
@@ -204,6 +205,8 @@ def durum_mesaji(durum: str, cakisma: bool, neden: str = "") -> str:
         return _GONDERILDI_ONCEDEN if cakisma else "Gönderildi"
     if kod == "belirsiz":
         return _BELIRSIZ
+    if kod == "suresi_doldu":
+        return _SURESI_DOLDU
     if kod == "basarisiz":
         return _NEDEN_METIN.get(_neden_kodu(neden)) or _BASARISIZ
     return _ONCEDEN
