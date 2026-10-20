@@ -883,6 +883,60 @@ def _sozlesme_ay_basi(musteri_id: int):
     return ay_basi((kyc or {}).get("bas"))
 
 
+def _dondurulmus_ay_isos(musteri_id) -> set:
+    """Aktif (iptal edilmemis) sozlesme_plan_dondurma aylari (YYYY-MM-01).
+
+    Tablo yoksa / hata olursa bos kume (davranis degismez). Salt okunur.
+    """
+    try:
+        mid = int(musteri_id)
+    except (TypeError, ValueError):
+        return set()
+    if mid <= 0:
+        return set()
+    try:
+        rows = fetch_all(
+            """
+            SELECT dondurulan_aylar FROM sozlesme_plan_dondurma
+            WHERE iptal_at IS NULL AND musteri_id = %s
+            """,
+            (mid,),
+        ) or []
+    except Exception:
+        return set()
+    out: set = set()
+    for r in rows:
+        ham = (r or {}).get("dondurulan_aylar")
+        if isinstance(ham, str):
+            try:
+                ham = json.loads(ham)
+            except ValueError:
+                ham = []
+        for a in ham or []:
+            s = str(a or "").strip()[:7]
+            if len(s) == 7:
+                iso = ay_basi(s + "-01")
+                if iso:
+                    out.add(iso)
+    return out
+
+
+def _borc_dondurma_filtrele(borc: dict, grid: dict, dondur_isos: set) -> dict:
+    """Dondurulmus ve grid brutu olmayan aylar dagitim borcundan duser.
+
+    Dondurma yoksa ayni sozluk doner (davranis ayni). Grid brutu > tol olan
+    ay dondurmada olsa bile korunur (hücre borcu gercektir).
+    """
+    if not dondur_isos:
+        return borc
+    out = {}
+    for iso, v in (borc or {}).items():
+        if iso in dondur_isos and float((grid or {}).get(iso) or 0) <= 0.01:
+            continue
+        out[iso] = v
+    return out
+
+
 def _gorunen_borc_satirlari(musteri_id: int) -> dict[str, float]:
     """Ekrandaki aylık borç. Hücre varsa o; yoksa reel; o da yoksa fatura yedeği."""
     grid: dict[str, float] = {}
@@ -925,6 +979,9 @@ def _gorunen_borc_satirlari(musteri_id: int) -> dict[str, float]:
     borc, yedek = gorunen_borc_biles(grid, reel, fatura, sozlesme_basi=taban)
     if yedek:
         logging.getLogger(__name__).info("ay_borc_yedek adet=%s", len(yedek))
+    # Dondurulmus (kira=0) aylar dagitim borcu olmasin: reel harita dondurmayi
+    # bilmez ve grid'de olmayan ayi tamamlar; acik_ay_dagit o ayi acik sanir.
+    borc = _borc_dondurma_filtrele(borc, grid, _dondurulmus_ay_isos(musteri_id))
     return borc
 
 
