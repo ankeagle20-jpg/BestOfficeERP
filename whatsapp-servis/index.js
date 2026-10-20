@@ -30,6 +30,21 @@ const {
   gonderimBitir,
 } = require('./kuyruk-kural');
 const { govdeAyir, jsonSinirHatasi } = require('./govde-kural');
+const {
+  MAKS_DENEME,
+  kilitAl,
+  kilitBirak,
+  pidKapatilabilir,
+  kurtarmaAkisiCalistir,
+} = require('./kurtarma-kural');
+const { execFile } = require('child_process');
+
+function execFileP(dosya, arg, opt) {
+  return new Promise((resolve, reject) => {
+    execFile(dosya, arg, opt || {}, (err, stdout) =>
+      err ? reject(err) : resolve(String(stdout || '')));
+  });
+}
 
 const WA_LOG_PATH = path.join(__dirname, 'wa-servis.log');
 
@@ -234,6 +249,7 @@ function durumPayload(session) {
     son_kontrol_ms: temel.son_kontrol_ms,
     bozuk_neden: temel.bozuk_neden,
     toparlama_durumu: temel.toparlama_durumu,
+    durum_teshis: temel.durum_teshis,
     kuyruk_uzunlugu: session.queue.length,
     kuyruk_isleniyor: session.queueBusy,
     status: session.status,
@@ -266,6 +282,9 @@ function getOrCreateSession(tenantId) {
     toparlamaDurumu: '',
     sonKontrolMs: 0,
     sonToparlamaMs: 0,
+    sonToparlamaHataSinifi: 'yok',
+    toparlamaDenemeSayisi: 0,
+    kurtarmaCalisiyor: false,
   };
   sessions.set(tenantId, session);
   return session;
@@ -460,9 +479,111 @@ function canliBag() {
   };
 }
 
+function pidYasiyor(pid) {
+  try {
+    process.kill(Number(pid), 0);
+    return true;
+  } catch (_e) {
+    return false;
+  }
+}
+
+async function chromeKomutSatiri(pid) {
+  if (process.platform !== 'win32') return '';
+  try {
+    return await execFileP(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-Command',
+       `(Get-CimInstance Win32_Process -Filter "ProcessId=${Number(pid)}").CommandLine`],
+      { timeout: 8000, windowsHide: true }
+    );
+  } catch (_e) {
+    return '';
+  }
+}
+
+/**
+ * Yalniz bu servisin kendi Chrome'unu kapatir: once puppeteer browser.close
+ * (10 sn), kalirsa PID komut satiri session-<tenant> profilini dogruladiginda
+ * yalniz o agaci sonlandirir. Kisisel/baska Chrome'a dokunulmaz.
+ */
+async function kendiChromeKapat(session) {
+  const client = session.client;
+  let pid = 0;
+  const browser = client && client.pupBrowser;
+  if (browser) {
+    try {
+      const p = typeof browser.process === 'function' ? browser.process() : null;
+      if (p && p.pid) pid = Number(p.pid);
+    } catch (_e) {}
+    try {
+      await Promise.race([
+        Promise.resolve(browser.close()).catch(() => {}),
+        new Promise((r) => setTimeout(r, 10000)),
+      ]);
+    } catch (_e) {}
+  }
+  if (pid > 0 && pidYasiyor(pid)) {
+    const cmd = await chromeKomutSatiri(pid);
+    const profilEslesir = cmd.includes('session-' + String(session.tenantId || 'default'));
+    if (pidKapatilabilir(pid, { kendiPid: process.pid, profilEslesir })) {
+      try {
+        await execFileP('taskkill.exe', ['/PID', String(pid), '/T', '/F'],
+          { timeout: 10000, windowsHide: true });
+        waLog('kurtarma_pid_kapatildi', session.tenantId);
+      } catch (_e) {}
+    } else {
+      waLog('kurtarma_pid_atlandi', session.tenantId);
+    }
+  }
+}
+
+async function oturumKurtar(session, elle = false) {
+  if (!kilitAl(session)) return { ok: false, asama: 'zaten_calisiyor' };
+  try {
+    if (elle) {
+      await kendiChromeKapat(session);
+      if (session.client) session.client = null;
+      session.ready = false;
+      session.status = 'idle';
+    }
+    const sonuc = await kurtarmaAkisiCalistir({
+      maksDeneme: MAKS_DENEME,
+      baslat: () => istemciKur(session),
+      kapat: () => kendiChromeKapat(session),
+      bekleMs: 1500,
+      durumYaz: (sinif, deneme) => {
+        session.sonToparlamaHataSinifi = sinif;
+        session.toparlamaDenemeSayisi = deneme;
+      },
+      log: (olay, detay) => waLog(olay, detay),
+    });
+    if (sonuc.ok) {
+      session.sonToparlamaHataSinifi = 'yok';
+      session.toparlamaDenemeSayisi = 0;
+      waLog('kurtarma_bitti', session.tenantId);
+      return { ok: true, asama: 'baslatildi' };
+    }
+    session.toparlamaDurumu = 'toparlama_basarisiz';
+    session.bozuk = true;
+    waLog('kurtarma_basarisiz',
+      `${session.tenantId} sinif=${sonuc.sinif} deneme=${sonuc.deneme}`);
+    return { ok: false, asama: 'toparlama_basarisiz', hata: sonuc.hata };
+  } finally {
+    kilitBirak(session);
+  }
+}
+
+async function istemciKurKurtarmali(session) {
+  if (session.kurtarmaCalisiyor) return istemciKur(session);
+  const sonuc = await oturumKurtar(session, false);
+  if (!sonuc.ok && sonuc.hata) throw sonuc.hata;
+  return session;
+}
+
 async function kurtarInit(session) {
   try {
-    await istemciKur(session);
+    await istemciKurKurtarmali(session);
   } catch (_err) {
     waLog('toparlama_hata', session.tenantId);
     return 'hata';
@@ -527,7 +648,7 @@ async function ensureClientGovde(tenantId) {
     await session.initPromise;
     return session;
   }
-  await istemciKur(session);
+  await istemciKurKurtarmali(session);
   return session;
 }
 
@@ -775,6 +896,19 @@ app.post('/t/:tenantId/uyandir', async (req, res) => {
     waLog('uyandirma_hata', err && err.message ? err.message : err);
     return res.json({ ok: false, bagli: false, hazir: false, neden: 'oturum' });
   }
+});
+
+app.post('/t/:tenantId/yeniden-baslat', async (req, res) => {
+  const tenantId = tenantParam(req, res);
+  if (!tenantId) return;
+  const session = getOrCreateSession(tenantId);
+  if (session.kurtarmaCalisiyor) {
+    return res.json({ ok: false, asama: 'zaten_calisiyor' });
+  }
+  waLog('kurtarma_tetik', tenantId);
+  // Akis arka planda calisir (1-2 dk surebilir); yanit hemen doner.
+  oturumKurtar(session, true).catch(() => {});
+  return res.json({ ok: true, asama: 'baslatildi' });
 });
 
 async function durumCanli(tenantId) {

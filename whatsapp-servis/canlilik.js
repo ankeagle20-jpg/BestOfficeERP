@@ -45,6 +45,21 @@ function toparlamaKarar(oturum, simdi, aralikMs) {
   return { basla: true, durum: "baglaniyor" };
 }
 
+function durumTeshis(oturum) {
+  if (!oturum) {
+    return {
+      son_toparlama_hatasi_sinifi: "yok",
+      toparlama_deneme_sayisi: 0,
+      kurtarma_calisiyor: false,
+    };
+  }
+  return {
+    son_toparlama_hatasi_sinifi: String(oturum.sonToparlamaHataSinifi || "yok"),
+    toparlama_deneme_sayisi: Number(oturum.toparlamaDenemeSayisi || 0),
+    kurtarma_calisiyor: oturum.kurtarmaCalisiyor === true,
+  };
+}
+
 function durumBakGovde(oturum) {
   if (!oturum) {
     return {
@@ -56,6 +71,7 @@ function durumBakGovde(oturum) {
       son_kontrol_ms: 0,
       bozuk_neden: "",
       toparlama_durumu: "",
+      durum_teshis: durumTeshis(null),
     };
   }
   const canli = oturum.canli === true;
@@ -69,6 +85,7 @@ function durumBakGovde(oturum) {
     son_kontrol_ms: Number(oturum.sonKontrolMs || 0),
     bozuk_neden: String(oturum.bozukNeden || ""),
     toparlama_durumu: String(oturum.toparlamaDurumu || ""),
+    durum_teshis: durumTeshis(oturum),
   };
 }
 
@@ -210,6 +227,7 @@ module.exports = {
   planAdim,
   toparlamaKarar,
   durumBakGovde,
+  durumTeshis,
   olcGetState,
   heartbeatAdim,
   toparlaOturum,
