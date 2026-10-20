@@ -952,6 +952,47 @@ def _iso_or_str(v):
     return str(v)
 
 
+def _import_satir_kaydet(dosya_id, banka, satirlar, *, ham_mi=False, musteriler=None):
+    """BANKA_IMPORT_DB_SATIR açıkken: satırları (öneriyle) DB'ye yazar.
+
+    Hata dosya bazında işaretlenir, çağıran akış bozulmaz. Dönüş: adet/-1.
+    """
+    import banka_import_satirlari as bis
+
+    oku = lambda sql, params=None: fetch_all(sql, params)  # noqa: E731
+    cal = lambda sql, params=None: execute(sql, params) if params is not None else execute(sql)  # noqa: E731
+    try:
+        versiyon = bis.musteri_versiyonu(oku)
+        with db() as conn:
+            cur = conn.cursor()
+            if ham_mi:
+                n = bis.parse_ve_kaydet_dosya(
+                    cur, dosya_id=int(dosya_id), banka=banka, ham=satirlar,
+                    musteriler=musteriler or _musteriler_akbank_listesi(),
+                    manual_by_key=_manual_map_for_ham(satirlar),
+                    versiyon=versiyon,
+                )
+            else:
+                n = bis.satirlari_kaydet(
+                    cur, dosya_id=int(dosya_id), banka=banka,
+                    onizlemeler=satirlar, versiyon=versiyon,
+                )
+        try:
+            bis.dosya_parse_isaretle(cal, int(dosya_id), "ok")
+        except Exception:
+            pass
+        return n
+    except Exception as e:  # noqa: BLE001
+        try:
+            bis.dosya_parse_isaretle(cal, int(dosya_id), "hata", hata=str(e))
+        except Exception:
+            pass
+        logging.getLogger(__name__).exception(
+            "banka import satir kayit dosya=%s", dosya_id
+        )
+        return -1
+
+
 @bp.route("/api/akbank-tahsilat/analyze", methods=["POST"])
 @giris_gerekli
 def api_akbank_tahsilat_analyze():
@@ -1032,6 +1073,13 @@ def api_akbank_tahsilat_analyze():
     out = _json_akbank_analyze_ham(ham, ozet, kayit)
     if zaten:
         out["dosya_zaten_kayitli"] = True
+    try:
+        import banka_import_satirlari as _bis
+
+        if _bis.db_satir_aktif():
+            _import_satir_kaydet(ins["id"], bank_type, out.get("satirlar") or [])
+    except Exception:
+        logging.getLogger(__name__).exception("banka import satir kayit (analyze)")
     return jsonify(out)
 
 
@@ -1088,6 +1136,22 @@ def api_akbank_tahsilat_upload_only():
         "yuklenme_tarihi": _iso_or_str(ins.get("yuklenme_tarihi")),
         "orijinal_filename": (ins.get("orijinal_filename") or fname or "").strip() or fname,
     }
+    try:
+        import banka_import_satirlari as _bis
+
+        if _bis.db_satir_aktif():
+            # Bayrak açıkken upload-only de parse edip satır yazar.
+            if bank_type == "TURKIYE_FINANS":
+                from services.bank_processor import standard_transactions_to_tahsilat_ham, upload_bank_excel
+                _txs = upload_bank_excel(raw, bank_type)
+                _ham_u, _ozet_u = standard_transactions_to_tahsilat_ham(_txs, yon="gelen")
+            else:
+                from services.banka_ak_import import dataframe_hareket_satirlari, read_akbank_excel
+                _df_u = read_akbank_excel(raw)
+                _ham_u, _ozet_u = dataframe_hareket_satirlari(_df_u, yon="gelen")
+            _import_satir_kaydet(ins["id"], bank_type, _ham_u, ham_mi=True)
+    except Exception:
+        logging.getLogger(__name__).exception("banka import satir kayit (upload-only)")
     return jsonify({
         "ok": True,
         "dosya_zaten_kayitli": zaten,
@@ -1212,6 +1276,27 @@ def api_akbank_tahsilat_analyze_kayitli():
         except Exception as e:
             return jsonify({"ok": False, "mesaj": f"Dosya okunamadı ({row.get('ad_gosterim')}): {e}"}), 400
         hams.append(ham)
+        # Bayrak açıkken: satırı eksik/eski dosyayı rapor öncesi hazırla
+        # (eski analiz çıktısı aynen döner; yan etki yalnız yeni tablo).
+        try:
+            import banka_import_satirlari as _bis
+
+            if _bis.db_satir_aktif():
+                _durum = _bis.satir_durumu(
+                    lambda sql, params=None: fetch_all(sql, params), fid
+                )
+                if not _durum.get("guncel"):
+                    _import_satir_kaydet(
+                        fid,
+                        eff,
+                        ham,
+                        ham_mi=True,
+                        musteriler=_musteriler_akbank_listesi(),
+                    )
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "banka import satir hazirla dosya=%s", fid
+            )
         for k in ozet_top:
             if k == "yon":
                 continue
