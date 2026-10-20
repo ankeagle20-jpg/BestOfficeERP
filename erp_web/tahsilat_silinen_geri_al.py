@@ -10,6 +10,15 @@ Kullanım:
     python tahsilat_silinen_geri_al.py --yedek-id 12
     python tahsilat_silinen_geri_al.py --tahsilat-id 6043 --apply
     python tahsilat_silinen_geri_al.py --mid 867 --apply
+
+DİKKAT — silme_yolu='ekstre-kayit-donustur' yedekleri: bu kayıtlar
+silinirken yerlerine tediye kaydı oluşturulmuştur. Geri almak eski
+tahsilatı tediyenin YANINA tekrar yaratır (çift kayıt riski). Bu yüzden
+bu yoldan gelen adaylar ayrıca --donusturulmus-onayla bayrağı ister;
+bayrak yoksa uyarı verilip durulur.
+
+Retention (yalnız belge; purge işi ayrı, yazılmadı): geri_alindi=TRUE
+yedekler 90 gün, geri alınmamışlar 12 ay saklanır.
 """
 from __future__ import annotations
 
@@ -72,6 +81,14 @@ def _ozet(rows) -> list:
     return out
 
 
+DONUSTUR_YOLU = "ekstre-kayit-donustur"
+DONUSTUR_UYARI = (
+    "silme_yolu='ekstre-kayit-donustur' kaydi: geri alma, donusturme ile "
+    "olusturulan tediyenin yanina eski tahsilati tekrar yaratir (cift kayit "
+    "riski). Devam icin --donusturulmus-onayla bayragi gerekli."
+)
+
+
 def geri_al(
     *,
     yedek_id=None,
@@ -81,6 +98,7 @@ def geri_al(
     oku=None,
     calistir=None,
     tahsilat_sutunlar=None,
+    donusturulmus_onayla: bool = False,
 ) -> dict:
     """calistir enjekte edilirse (test) ALLOW kapısı ve DB açılışı atlanır."""
     if not (yedek_id or tahsilat_id or mid):
@@ -98,6 +116,23 @@ def geri_al(
     if not rows:
         return {"ok": True, "dry_run": bool(dry_run), "aday": [], "n": 0, "neden": "yedek yok"}
     ozet = _ozet(rows)
+    donustur_ids = [
+        int(r["id"]) for r in rows if str(r.get("silme_yolu") or "") == DONUSTUR_YOLU
+    ]
+    if donustur_ids and not donusturulmus_onayla:
+        # Dönüştürülmüş kayıt: bayrak yoksa uyar + dur (dry-run'da da yazılmaz,
+        # apply'da da). Bayrakla çağrı tekrarlanmalı.
+        sonuc = {
+            "ok": bool(dry_run),
+            "dry_run": bool(dry_run),
+            "aday": ozet,
+            "n": len(rows),
+            "donusturulmus_yedek_idler": donustur_ids,
+            "uyari": DONUSTUR_UYARI,
+        }
+        if not dry_run:
+            sonuc["neden"] = "donusturulmus kayit onayi gerekli (--donusturulmus-onayla)"
+        return sonuc
     if dry_run:
         return {"ok": True, "dry_run": True, "aday": ozet, "n": len(rows)}
     if calistir is None and not _prod_write_ok():
@@ -215,6 +250,10 @@ def main(argv=None) -> int:
     p.add_argument("--mid", type=int, default=None)
     p.add_argument("--apply", action="store_true", help="yaz (ALLOW_PROD_WRITE=1 gerekir)")
     p.add_argument("--dry-run", action="store_true", default=None)
+    p.add_argument(
+        "--donusturulmus-onayla", action="store_true",
+        help="silme_yolu='ekstre-kayit-donustur' yedeklerini geri almayi onayla (cift kayit riski)",
+    )
     args = p.parse_args(argv)
     dry = not bool(args.apply)
     if args.dry_run:
@@ -224,6 +263,7 @@ def main(argv=None) -> int:
         tahsilat_id=args.tahsilat_id,
         mid=args.mid,
         dry_run=dry or not _prod_write_ok(),
+        donusturulmus_onayla=bool(args.donusturulmus_onayla),
     )
     print(json.dumps(r, ensure_ascii=False, indent=2, default=str))
     return 0 if r.get("ok") else 1

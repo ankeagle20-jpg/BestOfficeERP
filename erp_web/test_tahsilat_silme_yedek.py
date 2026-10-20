@@ -50,13 +50,21 @@ class FakeCur:
         if s.startswith("INSERT INTO tahsilat_silinen_yedek"):
             if self.db.yedek_patla:
                 raise RuntimeError("yedek yazilamadi")
-            tid, mid, yol, satir_json, silen = params
-            yid = len(self.db.yedek) + 1
-            self.db.yedek.append({
-                "id": yid, "tahsilat_id": tid, "musteri_id": mid,
-                "silme_yolu": yol, "satir_json": satir_json, "geri_alindi": False,
-            })
-            self._one = {"id": yid}
+            # Toplu (multi-row) veya tekil INSERT: params 5'lik gruplar.
+            params = tuple(params or ())
+            if len(params) % 5 != 0:
+                raise AssertionError("yedek params 5'in kati olmali: %d" % len(params))
+            donen = []
+            for i in range(0, len(params), 5):
+                tid, mid, yol, satir_json, silen = params[i:i + 5]
+                yid = len(self.db.yedek) + 1
+                self.db.yedek.append({
+                    "id": yid, "tahsilat_id": tid, "musteri_id": mid,
+                    "silme_yolu": yol, "satir_json": satir_json, "geri_alindi": False,
+                })
+                donen.append({"id": yid})
+            self._all = donen
+            self._one = donen[0] if donen else None
             return
         if s.startswith("DELETE FROM tahsilatlar"):
             ids = set(params[0])
@@ -117,6 +125,55 @@ def test_sil_where_cascade():
     )
     check("cascade 2 satir (musteri ayirmaz)", sorted(r["id"] for r in silinen) == [12, 13], silinen)
     check("cascade yedek 2", len(db.yedek) == 2)
+    check("cascade tek toplu audit", len(db.audit) == 1, db.audit)
+
+
+def _toplu_db(n):
+    db = FakeDB()
+    db.tahsilatlar = {
+        1000 + i: {"id": 1000 + i, "musteri_id": 867, "customer_id": 867,
+                   "fatura_id": 99, "tutar": 10.0, "tahsilat_tarihi": "2026-10-01",
+                   "aciklama": "", "makbuz_no": f"M-{i}", "kaynak": "grid_toplu"}
+        for i in range(n)
+    }
+    return db
+
+
+def test_toplu_statement_sayisi():
+    sayimlar = {}
+    for n in (50, 200):
+        db = _toplu_db(n)
+        silinen = ts.tahsilatlari_sil_cursor(
+            FakeCur(db), silme_yolu="toplu-fatura-sil-cascade",
+            where_sql="fatura_id = %s", where_params=(99,),
+        )
+        check(f"toplu {n} silinen tam", len(silinen) == n and not db.tahsilatlar, len(silinen))
+        check(f"toplu {n} yedek tam", len(db.yedek) == n, len(db.yedek))
+        check(f"toplu {n} tek audit", len(db.audit) == 1, len(db.audit))
+        ensure_n = sum(1 for c in db.calls if c.startswith("CREATE TABLE IF NOT EXISTS tahsilat_silinen"))
+        check(f"toplu {n} ensure 1 kez", ensure_n == 1, db.calls)
+        yedek_ins = sum(1 for c in db.calls if c.startswith("INSERT INTO tahsilat_silinen_yedek"))
+        check(f"toplu {n} tek yedek INSERT", yedek_ins == 1, db.calls)
+        sayimlar[n] = len(db.calls)
+        check(f"toplu {n} statement <= 8", len(db.calls) <= 8, db.calls)
+    check("toplu statement sayisi sabit (50=200)", sayimlar.get(50) == sayimlar.get(200), sayimlar)
+
+
+def test_toplu_yedek_patlarsa_silme_yok():
+    db = _toplu_db(50)
+    db.yedek_patla = True
+    patladi = False
+    try:
+        ts.tahsilatlari_sil_cursor(
+            FakeCur(db), silme_yolu="toplu-fatura-sil-cascade",
+            where_sql="fatura_id = %s", where_params=(99,),
+        )
+    except RuntimeError:
+        patladi = True
+    check("toplu yedek hata istisna", patladi)
+    check("toplu yedek hata hic silme yok", len(db.tahsilatlar) == 50)
+    check("toplu yedek hata DELETE calismadi",
+          not any(c.startswith("DELETE FROM tahsilatlar") for c in db.calls), db.calls)
 
 
 def test_yedek_patlarsa_silme_yok():
@@ -197,6 +254,38 @@ def test_geri_allow_kapisi():
     check("geri ALLOW yoksa yazmaz", r.get("ok") is False and "ALLOW" in str(r.get("neden")), r)
 
 
+YEDEK_DONUSTUR = [{
+    "id": 9, "tahsilat_id": 21, "musteri_id": 867, "silme_yolu": "ekstre-kayit-donustur",
+    "satir_json": json.dumps({"id": 21, "musteri_id": 867, "tutar": 300.0,
+                              "tahsilat_tarihi": "2026-10-05", "aciklama": ""}),
+    "geri_alindi": False,
+}]
+SUTUNLAR = ["id", "musteri_id", "tutar", "tahsilat_tarihi", "aciklama"]
+
+
+def test_geri_donustur_onaysiz_durur():
+    kayitlar = []
+    cal = lambda sql, params=None: kayitlar.append((" ".join(str(sql).split()), params))
+    r_dry = ga.geri_al(yedek_id=9, dry_run=True, oku=_ga_oku(YEDEK_DONUSTUR), calistir=cal,
+                       tahsilat_sutunlar=SUTUNLAR)
+    check("donustur dry uyari verir", bool(r_dry.get("uyari")) and r_dry.get("donusturulmus_yedek_idler") == [9], r_dry)
+    check("donustur dry yazma yok", not kayitlar, kayitlar)
+    r_apply = ga.geri_al(yedek_id=9, dry_run=False, oku=_ga_oku(YEDEK_DONUSTUR), calistir=cal,
+                         tahsilat_sutunlar=SUTUNLAR)
+    check("donustur onaysiz apply durur", r_apply.get("ok") is False and "donusturulmus-onayla" in str(r_apply.get("neden")), r_apply)
+    check("donustur onaysiz insert yok", not any(k[0].startswith("INSERT INTO tahsilatlar") for k in kayitlar), kayitlar)
+
+
+def test_geri_donustur_onayli_gecer():
+    kayitlar = []
+    cal = lambda sql, params=None: kayitlar.append((" ".join(str(sql).split()), params))
+    r = ga.geri_al(yedek_id=9, dry_run=False, oku=_ga_oku(YEDEK_DONUSTUR), calistir=cal,
+                   tahsilat_sutunlar=SUTUNLAR, donusturulmus_onayla=True)
+    check("donustur onayli apply ok", r.get("ok") and r.get("n") == 1, r)
+    check("donustur onayli insert var",
+          any(k[0].startswith("INSERT INTO tahsilatlar") for k in kayitlar), kayitlar)
+
+
 def test_kaynak_ve_ddl():
     v = ts.validate_ddl_pglast()
     check("pglast tablo", v.get("table") == "tahsilat_silinen_yedek" and not v.get("missing"), v)
@@ -216,12 +305,16 @@ def test_kaynak_ve_ddl():
 def main():
     test_sil_ids()
     test_sil_where_cascade()
+    test_toplu_statement_sayisi()
+    test_toplu_yedek_patlarsa_silme_yok()
     test_yedek_patlarsa_silme_yok()
     test_bos_secim()
     test_geri_dry_run()
     test_geri_cakisma_durur()
     test_geri_apply_ayni_id()
     test_geri_allow_kapisi()
+    test_geri_donustur_onaysiz_durur()
+    test_geri_donustur_onayli_gecer()
     test_kaynak_ve_ddl()
     print("FAIL" if FAILS else "TUMU GECTI", FAILS)
     return 1 if FAILS else 0

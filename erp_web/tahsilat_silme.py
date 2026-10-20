@@ -2,11 +2,18 @@
 """Tahsilat silme izi: ortak silme + yedek + geri alma alt yapısı.
 
 Tüm tahsilat silme yolları buradan geçer. Aynı transaction içinde:
-1) tahsilat_silinen_yedek tablosuna tam satır (satir_json) yedeği,
-2) tahsilatlar DELETE,
-3) audit_yaz.
+1) tahsilat_silinen_yedek tablosuna tam satır (satir_json) yedeği
+   (toplu: 500'lük parçalar hâlinde tek multi-row INSERT),
+2) tahsilatlar DELETE (tek statement),
+3) tek toplu audit kaydı (audit_yaz bir kez; kayit_id listesi anlik'ta).
 Yedek başarısızsa istisna yükselir ve silme de geri alınır (transaction).
 UI davranışı değişmez; çağıranlar eski dönüş değerlerini bu fonksiyondan alır.
+İşlem başına statement sayısı N'den bağımsız ~8'dir (ensure DDL 1,
+SELECT 1, yedek INSERT ceil(N/500), DELETE 1, audit 4).
+
+Retention (yalnız belge; purge işi AYRI, burada yazılmadı):
+geri_alindi=TRUE yedekler 90 gün, geri alınmamışlar 12 ay saklanır;
+sonrası ayrı onaylı periyodik purge ile silinir. Bkz. rapor notu.
 """
 from __future__ import annotations
 
@@ -35,6 +42,9 @@ INSERT INTO {YEDEK_TABLO} (tahsilat_id, musteri_id, silme_yolu, satir_json, sile
 VALUES (%s, %s, %s, %s, %s)
 RETURNING id
 """.strip()
+
+# Toplu yedek: tek statement'ta en çok bu kadar satır (parametre şişmesini önler).
+YEDEK_PARCA = 500
 
 
 def ensure_tahsilat_silinen_yedek(calistir) -> None:
@@ -127,13 +137,30 @@ def tahsilatlari_sil_cursor(
     if not rows:
         return []
     silen = str(kullanici or "")[:80] or None
+    yol = str(silme_yolu)[:80]
+    # Toplu yedek: N satır için tek multi-row INSERT (500'lük parçalar).
+    # Yedek patlarsa istisna yükselir, DELETE hiç çalışmaz (fail-closed).
     yedek_ids = {}
-    for r in rows:
+    for bas in range(0, len(rows), YEDEK_PARCA):
+        parca = rows[bas:bas + YEDEK_PARCA]
+        degerler = ", ".join("(%s, %s, %s, %s, %s)" for _ in parca)
+        params_t = []
+        for r in parca:
+            params_t.extend((
+                int(r["id"]), _mid_of(r) or None, yol, _satir_json(r), silen,
+            ))
         cur.execute(
-            SQL_YEDEK_EKLE,
-            (int(r["id"]), _mid_of(r) or None, str(silme_yolu)[:80], _satir_json(r), silen),
+            f"INSERT INTO {YEDEK_TABLO} "
+            "(tahsilat_id, musteri_id, silme_yolu, satir_json, silen) "
+            f"VALUES {degerler} RETURNING id",
+            tuple(params_t),
         )
-        yedek_ids[int(r["id"])] = (cur.fetchone() or {}).get("id")
+        donen = cur.fetchall() or []
+        for r, d in zip(parca, donen):
+            try:
+                yedek_ids[int(r["id"])] = (d or {}).get("id")
+            except (TypeError, ValueError, AttributeError):
+                pass
     id_list = [int(r["id"]) for r in rows]
     cur.execute("DELETE FROM tahsilatlar WHERE id = ANY(%s)", (id_list,))
     if int(cur.rowcount or 0) != len(id_list):
@@ -143,22 +170,26 @@ def tahsilatlari_sil_cursor(
     try:
         from audit_log import audit_yaz
 
-        for r in rows:
-            audit_yaz(
-                _cal,
-                olay="tahsilat_sil",
-                varlik="tahsilatlar",
-                kayit_id=int(r["id"]),
-                musteri_id=_mid_of(r) or None,
-                kullanici=str(kullanici or ""),
-                anlik={
-                    "silme_yolu": str(silme_yolu)[:40],
-                    "yedek_id": yedek_ids.get(int(r["id"])),
-                    "tutar": float(r.get("tutar") or 0),
-                },
-                yeni={},
-                eski_yaz=True,
-            )
+        # Tek toplu audit: kayit_id listesi + adet anlik'ta (satır başı değil).
+        midler = sorted({m for m in (_mid_of(r) for r in rows) if m > 0})
+        audit_yaz(
+            _cal,
+            olay="tahsilat_sil",
+            varlik="tahsilatlar",
+            kayit_id=id_list[0] if len(id_list) == 1 else None,
+            musteri_id=midler[0] if len(midler) == 1 else None,
+            kullanici=str(kullanici or ""),
+            anlik={
+                "silme_yolu": str(silme_yolu)[:40],
+                "adet": len(id_list),
+                "kayit_idler": id_list,
+                "yedek_idler": [yedek_ids.get(i) for i in id_list],
+                "musteri_idler": midler,
+                "toplam_tutar": round(sum(float(r.get("tutar") or 0) for r in rows), 2),
+            },
+            yeni={},
+            eski_yaz=True,
+        )
     except Exception:
         # audit_yaz kendi savepoint'iyle best-effort'tur; buraya düşmek
         # beklenmez. Yedek+silme esas kayıttır, audit hatası silmeyi bozmaz.
