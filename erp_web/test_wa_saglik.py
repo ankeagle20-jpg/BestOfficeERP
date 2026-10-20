@@ -377,6 +377,104 @@ def test_kalici_retry_disi():
           sahiplen[:200])
 
 
+def test_teshis_kart():
+    import wa_saglik as ws
+
+    t = ws.durum_teshis_govde({"durum_teshis": {
+        "son_toparlama_hatasi_sinifi": "already_running",
+        "toparlama_deneme_sayisi": 2, "kurtarma_calisiyor": True}})
+    check("teshis_parse", t == {"sinif": "already_running", "deneme": 2, "calisiyor": True}, t)
+    check("teshis_eski_servis_none", ws.durum_teshis_govde({"hazir": True}) is None)
+    check("teshis_govde_bozuk_none", ws.durum_teshis_govde(None) is None
+          and ws.durum_teshis_govde({"durum_teshis": "x"}) is None)
+
+    k = ws.kontrolleri_uret("ok", "bagli_degil", dict(BOŞ_SAYAC), teshis=t)
+    check("kart_dongu_mesaji", _kart(k, "oturum")["seviye"] == "hata"
+          and "Oturum takılı (Chrome kilidi)" in _kart(k, "oturum")["aciklama"]
+          and "Oturumu kurtar" in _kart(k, "oturum")["aciklama"], _kart(k, "oturum"))
+    t2 = {"sinif": "diger", "deneme": 1, "calisiyor": False}
+    k2 = ws.kontrolleri_uret("ok", "bagli_degil", dict(BOŞ_SAYAC), teshis=t2)
+    check("kart_diger_teshis_normal", "Chrome kilidi" not in _kart(k2, "oturum")["aciklama"],
+          _kart(k2, "oturum"))
+
+
+class _SahteIstisna(Exception):
+    pass
+
+
+class _SahteTimeout(_SahteIstisna):
+    pass
+
+
+class _SahteYanit:
+    def __init__(self, status_code, govde):
+        self.status_code = status_code
+        self._govde = govde
+        self.content = b"{}" if govde is not None else b""
+
+    def json(self):
+        return self._govde
+
+
+def test_kurtar_uclari():
+    import sys as _sys
+    import types as _types
+
+    gercek = _sys.modules.get("requests")
+    sahte = _types.ModuleType("requests")
+    senaryo = {"mod": "ok"}
+
+    class _Exc:
+        ConnectTimeout = type("CT", (_SahteIstisna,), {})
+        ConnectionError = type("CE", (_SahteIstisna,), {})
+        Timeout = _SahteTimeout
+
+    sahte.exceptions = _Exc
+
+    def _post(url, headers=None, timeout=None):
+        if senaryo["mod"] == "yok404":
+            return _SahteYanit(404, None)
+        if senaryo["mod"] == "zaten":
+            return _SahteYanit(200, {"ok": False, "asama": "zaten_calisiyor"})
+        if senaryo["mod"] == "yavas":
+            raise _SahteTimeout("gecikti")
+        return _SahteYanit(200, {"ok": True, "asama": "baslatildi"})
+
+    sahte.post = _post
+    _sys.modules["requests"] = sahte
+    try:
+        client = _istemci()
+        ROL["v"] = "muhasebe"
+        senaryo["mod"] = "ok"
+        r = client.post("/whatsapp/api/saglik-oturum-kurtar")
+        g = r.get_json(silent=True) or {}
+        check("kurtar_ok", r.status_code == 200 and g.get("ok") is True
+              and g.get("sonuc") == "baslatildi", (r.status_code, str(g)[:160]))
+        senaryo["mod"] = "yok404"
+        r = client.post("/whatsapp/api/saglik-oturum-kurtar")
+        g = r.get_json(silent=True) or {}
+        check("kurtar_404_mesaj", g.get("desteklenmiyor") is True
+              and "güncelleyip yeniden başlatın" in (g.get("mesaj") or ""), str(g)[:200])
+        senaryo["mod"] = "zaten"
+        r = client.post("/whatsapp/api/saglik-oturum-kurtar")
+        g = r.get_json(silent=True) or {}
+        check("kurtar_zaten", g.get("ok") is False and g.get("sonuc") == "zaten_calisiyor",
+              str(g)[:160])
+        senaryo["mod"] = "yavas"
+        r = client.post("/whatsapp/api/saglik-oturum-kurtar")
+        g = r.get_json(silent=True) or {}
+        check("kurtar_timeout", r.status_code == 504 and g.get("sonuc") == "zaman_asimi",
+              (r.status_code, str(g)[:160]))
+        ROL["v"] = "personel"
+        r = client.post("/whatsapp/api/saglik-oturum-kurtar")
+        check("kurtar_personel_403", r.status_code == 403, r.status_code)
+    finally:
+        if gercek is not None:
+            _sys.modules["requests"] = gercek
+        else:
+            _sys.modules.pop("requests", None)
+
+
 def test_rol_kapisi():
     client = _istemci()
     ROL["v"] = "personel"
@@ -407,6 +505,8 @@ def main():
     test_eski_kapat_ve_retry()
     test_belirsiz_liste_isaret()
     test_kalici_retry_disi()
+    test_teshis_kart()
+    test_kurtar_uclari()
     test_rol_kapisi()
     print("FAIL" if FAILS else "TUMU GECTI", FAILS)
     return 1 if FAILS else 0

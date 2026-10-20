@@ -35,6 +35,7 @@
       <button type="button" class="ws-btn secondary" id="btnUyandir">Servisi uyandır</button>
       <button type="button" class="ws-btn secondary" id="btnTazele">Bekleyenleri tazele</button>
       <button type="button" class="ws-btn" style="background:#c62828;" id="btnEskiKapat" disabled>Eski bekleyenleri kapat</button>
+      <button type="button" class="ws-btn" style="background:#6a1b9a;" id="btnKurtar">Oturumu kurtar (Chrome'u yeniden başlat)</button>
       <a class="ws-btn secondary" style="text-decoration:none;display:none;" id="btnQr" href="/whatsapp/qr-ac" target="_blank" rel="noopener">QR göster</a>
     </div>
   </div>
@@ -165,6 +166,10 @@
   document.getElementById("btnYenile").addEventListener("click", ozetYukle);
   document.getElementById("btnUyandir").addEventListener("click", function () { post(this, "/whatsapp/api/saglik-uyandir"); });
   document.getElementById("btnTazele").addEventListener("click", function () { post(this, "/whatsapp/api/saglik-tazele"); });
+  document.getElementById("btnKurtar").addEventListener("click", function () {
+    if (!window.confirm("Servisin WhatsApp penceresi kapatılıp yeniden açılacak, 1-2 dk sürer. Devam edilsin mi?")) return;
+    post(this, "/whatsapp/api/saglik-oturum-kurtar");
+  });
   btnEskiKapat.addEventListener("click", function () {
     const n = (sonSayaclar && sonSayaclar.kapatilabilir) || 0;
     if (n <= 0) { mesaj("Kapatılacak eski kayıt yok.", false); return; }

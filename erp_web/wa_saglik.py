@@ -31,8 +31,22 @@ def oturum_kodu_govde(body: dict) -> str:
     return "bagli_degil"
 
 
+def durum_teshis_govde(body: dict) -> dict | None:
+    """durum-bak govdesinden dongu teshisi; alan yoksa (eski servis) None."""
+    if not isinstance(body, dict):
+        return None
+    t = body.get("durum_teshis")
+    if not isinstance(t, dict):
+        return None
+    return {
+        "sinif": str(t.get("son_toparlama_hatasi_sinifi") or "yok"),
+        "deneme": int(t.get("toparlama_deneme_sayisi") or 0),
+        "calisiyor": bool(t.get("kurtarma_calisiyor")),
+    }
+
+
 def kontrolleri_uret(ulasim: str, oturum: str | None, sayaclar: dict,
-                     esik_dk: int = ESIK_TAKILI_DK) -> list[dict]:
+                     esik_dk: int = ESIK_TAKILI_DK, teshis: dict | None = None) -> list[dict]:
     """ulasim: ok | baglanti_yok | zaman_asimi | http_5xx | http_4xx."""
     s = sayaclar or {}
     kartlar: list[dict] = []
@@ -73,6 +87,13 @@ def kontrolleri_uret(ulasim: str, oturum: str | None, sayaclar: dict,
             "anahtar": "oturum", "seviye": "uyari", "baslik": "Oturum",
             "aciklama": "Oturum yok veya Chrome kapalı. Servisi uyandırıp QR'ı kontrol edin.",
         })
+
+    if teshis and teshis.get("sinif") == "already_running":
+        for kart in kartlar:
+            if kart["anahtar"] == "oturum":
+                kart["seviye"] = "hata"
+                kart["aciklama"] = ("Oturum takılı (Chrome kilidi). "
+                                    "Oturumu kurtar düğmesine basın.")
 
     bekleyen = int(s.get("bekleyen") or 0)
     yasli = int(s.get("yasli_takili") or 0)

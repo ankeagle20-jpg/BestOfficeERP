@@ -643,9 +643,9 @@ def wa_saglik_sayfa():
 
 
 def _saglik_servis_durumu():
-    """(ulasim, oturum_kodu). Oturum uyandirilmaz (durum-bak)."""
+    """(ulasim, oturum_kodu, teshis). Oturum uyandirilmaz (durum-bak)."""
     import requests
-    from wa_saglik import oturum_kodu_govde
+    from wa_saglik import durum_teshis_govde, oturum_kodu_govde
 
     try:
         r = requests.get(
@@ -654,20 +654,20 @@ def _saglik_servis_durumu():
             timeout=(2, 3),
         )
     except (requests.exceptions.ConnectTimeout, requests.exceptions.ConnectionError):
-        return "baglanti_yok", None
+        return "baglanti_yok", None, None
     except requests.exceptions.Timeout:
-        return "zaman_asimi", None
+        return "zaman_asimi", None, None
     except Exception:
-        return "baglanti_yok", None
+        return "baglanti_yok", None, None
     if r.status_code >= 500:
-        return "http_5xx", None
+        return "http_5xx", None, None
     if r.status_code >= 400:
-        return "http_4xx", None
+        return "http_4xx", None, None
     try:
         body = r.json() if r.content else {}
     except Exception:
         body = {}
-    return "ok", oturum_kodu_govde(body)
+    return "ok", oturum_kodu_govde(body), durum_teshis_govde(body)
 
 
 def _saglik_audit(olay: str, anlik: dict) -> None:
@@ -694,12 +694,13 @@ def _saglik_audit(olay: str, anlik: dict) -> None:
 def api_wa_saglik_ozet():
     import wa_saglik
 
-    ulasim, oturum = _saglik_servis_durumu()
+    ulasim, oturum, teshis = _saglik_servis_durumu()
     sayaclar = wa_saglik.saglik_sayaclari()
     return jsonify({
         'ok': True,
-        'kontroller': wa_saglik.kontrolleri_uret(ulasim, oturum, sayaclar),
+        'kontroller': wa_saglik.kontrolleri_uret(ulasim, oturum, sayaclar, teshis=teshis),
         'sayaclar': sayaclar,
+        'durum_teshis': teshis,
     })
 
 
@@ -726,6 +727,68 @@ def api_wa_saglik_uyandir():
         'mesaj': ('Servisi uyandırma isteği gönderildi. Birkaç saniye sonra yenileyin.'
                   if ok else 'Servise ulaşılamadı. Ofis bilgisayarı kapalı olabilir ya da tünel kopmuş.'),
     }), 200 if ok else 502
+
+
+@bp.route('/api/saglik-oturum-kurtar', methods=['POST'])
+@yetki_gerekli("muhasebe")
+def api_wa_saglik_oturum_kurtar():
+    """Servisin kendi Chrome'unu kapatip oturumu yeniden baslatir (dongu kurtarma)."""
+    import requests
+
+    try:
+        r = requests.post(
+            _wa_url('yeniden-baslat'),
+            headers=_wa_internal_headers(),
+            timeout=(3, 20),
+        )
+    except (requests.exceptions.ConnectTimeout, requests.exceptions.ConnectionError):
+        _saglik_audit('wa_saglik_oturum_kurtar', {'sonuc': 'ulasilamadi'})
+        return jsonify({
+            'ok': False, 'sonuc': 'ulasilamadi',
+            'mesaj': 'Servise ulaşılamadı. Ofis bilgisayarı kapalı olabilir ya da tünel kopmuş.',
+        }), 502
+    except requests.exceptions.Timeout:
+        _saglik_audit('wa_saglik_oturum_kurtar', {'sonuc': 'zaman_asimi'})
+        return jsonify({
+            'ok': False, 'sonuc': 'zaman_asimi',
+            'mesaj': 'Servis yanıt vermedi; kurtarma başlamış olabilir. Birkaç dakika sonra yenileyin.',
+        }), 504
+    except Exception:
+        _saglik_audit('wa_saglik_oturum_kurtar', {'sonuc': 'hata'})
+        return jsonify({
+            'ok': False, 'sonuc': 'hata',
+            'mesaj': 'Kurtarma isteği gönderilemedi.',
+        }), 502
+    if r.status_code == 404:
+        _saglik_audit('wa_saglik_oturum_kurtar', {'sonuc': 'desteklenmiyor'})
+        return jsonify({
+            'ok': False, 'sonuc': 'desteklenmiyor', 'desteklenmiyor': True,
+            'mesaj': ('Servis bu özelliği desteklemiyor, ofis bilgisayarında '
+                      'servisi güncelleyip yeniden başlatın.'),
+        })
+    try:
+        govde = r.json() if r.content else {}
+    except Exception:
+        govde = {}
+    if not isinstance(govde, dict):
+        govde = {}
+    asama = str(govde.get('asama') or '')
+    _saglik_audit('wa_saglik_oturum_kurtar', {'sonuc': asama or 'hata'})
+    if govde.get('ok'):
+        return jsonify({
+            'ok': True, 'sonuc': asama,
+            'mesaj': (f"Kurtarma başlatıldı (aşama: {asama}). "
+                      'Oturum 1-2 dakika içinde yeniden açılır; sonra yenileyin.'),
+        })
+    if asama == 'zaten_calisiyor':
+        return jsonify({
+            'ok': False, 'sonuc': asama,
+            'mesaj': 'Kurtarma zaten çalışıyor; bitince yenileyin.',
+        })
+    return jsonify({
+        'ok': False, 'sonuc': asama or 'hata',
+        'mesaj': 'Kurtarma başlatılamadı. Birazdan yeniden deneyin.',
+    })
 
 
 @bp.route('/api/saglik-tazele', methods=['POST'])
