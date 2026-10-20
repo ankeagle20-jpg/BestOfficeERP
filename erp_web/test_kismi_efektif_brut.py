@@ -267,6 +267,75 @@ def test_apply_planli_plan_uygular():
     check("apply planli kalan 479,84", a.get("kalan_tutar_kdv") == 479.84, a)
 
 
+def test_overlay_867_swr_zinciri():
+    # D1: GET mem-hit/DB-hit/SWR zinciri = zenginlestir -> reel overlay.
+    # Overlay, K2 kilitli planli ayda reel flat'i birakmamali.
+    eski = _yama(KISMI_BATCH, {"2026-08-01": 469.84})
+    try:
+        p = gr._build_aylik_grid_cache_payload(
+            MID, TUFE, dict(KYC), dict(REEL),
+            planlar=list(PLAN), faturali_aylar=list(FATURALI), fatura_belge=dict(BELGE),
+        )
+        rows = gr._ekstre_tahsil_rows_for_musteri(MID)
+        tmap = gr._aylik_tahsil_tutar_map(MID, tahsil_rows=rows)
+        batch = gr._ekstre_tahsil_batch_maps_from_rows(rows)
+        gr._ekstre_payload_odenen_zenginlestir(p, tmap, batch, manual_reel_by_year=dict(REEL))
+        p = gr._aylik_grid_payload_reel_overlay_from_db(MID, p)
+    finally:
+        _geri(eski)
+    a = _ay(p, 2026, 8)
+    check("overlay 867 brut plan 949,68", a.get("brut_tutar_kdv") == 949.68, a)
+    check("overlay 867 odenen 469,84", a.get("odenen_tutar_kdv") == 469.84, a)
+    check("overlay 867 kalan 479,84", a.get("kalan_tutar_kdv") == 479.84, a)
+    check("overlay 867 kismi True", a.get("kismi_tahsilat") is True and a.get("tahsil_edildi") is False, a)
+    s = _ay(p, 2026, 9)
+    check("overlay odemesiz Eylul degismez 949,68", s.get("brut_tutar_kdv") == 949.68 and s.get("kalan_tutar_kdv") == 949.68 and s.get("kismi_tahsilat") is False, s)
+
+
+def test_overlay_363_plansiz_degismez():
+    # Plansiz ay: overlay eski davranis — reel (4.398) kazanir, dokunulmaz.
+    payload = {
+        "musteri_id": 363, "artis_ay": 8,
+        "aylar": [{"yil": 2026, "ay": 8, "brut_tutar_kdv": 4398.0,
+                   "tutar_kdv_dahil": 4398.0, "odenen_tutar_kdv": 481.0,
+                   "kalan_tutar_kdv": 3917.0, "kismi_tahsilat": True}],
+    }
+    eski = _yama({"marker": {"2026-08-01": 481.0}, "pay": {"2026-08-01": 481.0}},
+                 {"2026-08-01": 481.0})
+    paket_eski = gr._plan_paket_yukle
+    manual_eski = gr._musteri_reel_donem_manual_dict_from_db
+    gr._plan_paket_yukle = lambda mids: {
+        int(m): {"planlar": [], "faturali": [], "belge": {}} for m in mids
+    }
+    gr._musteri_reel_donem_manual_dict_from_db = lambda mid: {2026: 4398.0}
+    try:
+        p = gr._aylik_grid_payload_reel_overlay_from_db(363, payload)
+    finally:
+        gr._plan_paket_yukle = paket_eski
+        gr._musteri_reel_donem_manual_dict_from_db = manual_eski
+        _geri(eski)
+    a = p["aylar"][0]
+    check("overlay 363 plansiz brut reel 4398", a.get("brut_tutar_kdv") == 4398.0, a)
+    check("overlay 363 plansiz kalan 3917", a.get("kalan_tutar_kdv") == 3917.0, a)
+
+
+def test_overlay_tam_odenmis_ve_reel_esit():
+    # Tam odenmis Eylul (marker tam): overlay tam dala dokunmaz, kalan 0.
+    batch = {"marker": {"2026-09-01": 949.68}, "pay": {}}
+    eski = _yama(batch, {"2026-09-01": 949.68})
+    try:
+        p = gr._build_aylik_grid_cache_payload(
+            MID, TUFE, dict(KYC), dict(REEL),
+            planlar=list(PLAN), faturali_aylar=list(FATURALI), fatura_belge=dict(BELGE),
+        )
+        p = gr._aylik_grid_payload_reel_overlay_from_db(MID, p)
+    finally:
+        _geri(eski)
+    s = _ay(p, 2026, 9)
+    check("overlay tam ay brut 949,68", s.get("brut_tutar_kdv") == 949.68, s)
+    check("overlay tam ay kalan 0 edildi", s.get("kalan_tutar_kdv") == 0.0 and s.get("tahsil_edildi") is True and s.get("kismi_tahsilat") is False, s)
+
+
 def test_reel_esit_plan():
     reel2 = dict(REEL)
     reel2[2026] = 949.68
@@ -305,6 +374,9 @@ def main():
     test_zenginlestir_plansiz_reel_kap()
     test_apply_plansiz_panel_ezmez()
     test_apply_planli_plan_uygular()
+    test_overlay_867_swr_zinciri()
+    test_overlay_363_plansiz_degismez()
+    test_overlay_tam_odenmis_ve_reel_esit()
     test_reel_esit_plan()
     test_bayraktan_bagimsiz()
     print("FAIL" if FAILS else "TUMU GECTI", FAILS)

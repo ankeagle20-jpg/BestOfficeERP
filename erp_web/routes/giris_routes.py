@@ -3361,6 +3361,103 @@ def _aylik_grid_apply_reel_donem_overlay_to_payload(
         _dondurma_katmani_payloada(payload, musteri_id)
     except Exception:
         logging.getLogger(__name__).exception("plan katmani (reel sonrası)")
+    # D1: K2 kilitli planlı aday ayda kısmi öncelik. Plan katmanı kilitli ayı
+    # atladığı için reel flat brüt kalırdı; _build'deki kısmi düzeltmenin
+    # aynası burada (tek merkez) uygulanır — GET/SWR dahil tüm overlay
+    # tüketicileri düzelir. Plansız ayda dokunulmaz (reel kazanır).
+    if plan_katmani and payload and isinstance(payload.get("aylar"), list) and kyc:
+        try:
+            _overlay_kismi_plan_duzelt(
+                int(musteri_id), kyc, tufe_map, payload, manual_reel_by_year
+            )
+        except Exception:
+            logging.getLogger(__name__).exception("overlay kismi plan duzelt")
+
+
+def _overlay_kismi_plan_duzelt(musteri_id, kyc, tufe_map, payload, manual_reel_by_year=None):
+    """Overlay sonrası: plan brütü olan kısmi aday ayda reel kap yerine plan.
+
+    Aday: marker/ödenen > tol ve brüt > tol olan aylar. Plan, ayın kendi K2
+    kilidi hariç zincirden alınır (_plan_brutleri_for_mid). Tam kapalı
+    (Kural A) aylara ve plansız aylara dokunulmaz.
+    """
+    tol = float(AYLIK_GRID_TAM_ODENDI_TOLERANS)
+    paket = _plan_paket_yukle([int(musteri_id)]).get(int(musteri_id)) or _PLAN_BOS
+    planlar = paket.get("planlar") or []
+    if not planlar:
+        return
+    try:
+        batch = _ekstre_tahsil_batch_maps_from_rows(
+            _ekstre_tahsil_rows_for_musteri(int(musteri_id))
+        )
+    except Exception:
+        batch = {}
+    marker_d = (batch or {}).get("marker") or {}
+    pay_d = (batch or {}).get("pay") or {}
+    adaylar = []
+    for a in payload.get("aylar") or []:
+        if not isinstance(a, dict):
+            continue
+        try:
+            iso_m1 = date(int(a.get("yil")), int(a.get("ay")), 1).isoformat()
+            brut = round(float(a.get("brut_tutar_kdv") or a.get("tutar_kdv_dahil") or 0), 2)
+            odenen = round(float(a.get("odenen_tutar_kdv") or 0), 2)
+        except (TypeError, ValueError):
+            continue
+        mk_t = round(float(marker_d.get(iso_m1) or 0), 2)
+        if brut > tol and (mk_t > tol or odenen > tol):
+            adaylar.append(iso_m1)
+    if not adaylar:
+        return
+    manual = manual_reel_by_year
+    if manual is None:
+        manual = _musteri_reel_donem_manual_dict_from_db(int(musteri_id))
+    plan_brut = _plan_brutleri_for_mid(
+        musteri_id, adaylar, kyc=kyc, tufe_map=tufe_map, reel=manual,
+        planlar=planlar, faturali_aylar=paket.get("faturali"),
+        fatura_belge=paket.get("belge"), ay_sayisi=len(payload.get("aylar") or []),
+    )
+    if not plan_brut:
+        return
+    for a in payload.get("aylar") or []:
+        if not isinstance(a, dict):
+            continue
+        try:
+            yy_m = int(a.get("yil"))
+            mm_m = int(a.get("ay"))
+            iso_m1 = date(yy_m, mm_m, 1).isoformat()
+            brut = round(float(a.get("brut_tutar_kdv") or a.get("tutar_kdv_dahil") or 0), 2)
+            odenen = round(float(a.get("odenen_tutar_kdv") or 0), 2)
+        except (TypeError, ValueError):
+            continue
+        pb = (plan_brut or {}).get(iso_m1[:7])
+        if pb is None or brut <= tol:
+            continue
+        mk_t = round(float(marker_d.get(iso_m1) or 0), 2)
+        if mk_t <= tol and odenen <= tol:
+            continue
+        _pay_raw = pay_d.get(iso_m1)
+        try:
+            pay_t = round(float(_pay_raw), 2) if _pay_raw is not None else None
+        except (TypeError, ValueError):
+            pay_t = None
+        # Tam kapalı ay: _build tam dalıyla aynı — brüte dokunma.
+        if _grid_payload_marker_panel_tam_kapandi(
+            mk_t, brut, yy_m, manual if isinstance(manual, dict) else None, tol,
+            pay_t=pay_t, daralt=grid_kismi_goster_aktif(musteri_id),
+        ):
+            continue
+        eff = _kismi_efektif_brut(brut, pb, tol)
+        if abs(eff - brut) <= tol:
+            continue
+        odenen = round(min(max(odenen, 0.0), eff), 2)
+        kalan = round(max(eff - odenen, 0), 2)
+        a["brut_tutar_kdv"] = round(eff, 2)
+        a["tutar_kdv_dahil"] = round(eff, 2)
+        a["odenen_tutar_kdv"] = odenen
+        a["kalan_tutar_kdv"] = kalan
+        a["tahsil_edildi"] = eff > tol and kalan <= tol
+        a["kismi_tahsilat"] = odenen > tol and kalan > tol
 
 
 def _aylik_grid_apply_reel_donem_overlay_ham(
