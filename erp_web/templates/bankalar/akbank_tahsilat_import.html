@@ -386,6 +386,13 @@ td.ak-td-sira {
         </div>
     </div>
 
+    <div id="akOneriUyari" class="ak-restore-banner" role="region" aria-label="Öneri güncelliği" aria-hidden="true" style="display:none;">
+        <div id="akOneriUyariText" style="flex:1;min-width:200px;line-height:1.45;"></div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+            <button type="button" class="ak-btn" id="btnYenidenEslestir">Yeniden eşleştir</button>
+        </div>
+    </div>
+
     <div id="akMsg" class="ak-msg"></div>
     <div id="akMakbuzPanel" class="ak-makbuz-panel" style="display:none;" role="region" aria-label="Makbuz PDF linkleri"></div>
     <div id="akPdfOnizleModal" class="ak-pdf-modal" style="display:none;" role="dialog" aria-modal="true" aria-label="Makbuz önizleme">
@@ -1269,8 +1276,23 @@ td.ak-td-sira {
         const btEl0 = document.getElementById("akBankType");
         analyzeBankType = (btEl0 && btEl0.value) ? btEl0.value : "AKBANK";
         showMsg(infoMsg || (allRows.length + " satır listelendi. Cariye işlenmiş fişler listede kalır (Makbuz yeşil)."), true);
+        oneriUyariGoster(data.oneri_uyari);
         render();
         loadKayitliDosyalar();
+    }
+
+    function oneriUyariGoster(uyari) {
+        const band = document.getElementById("akOneriUyari");
+        const txt = document.getElementById("akOneriUyariText");
+        if (!band || !txt) return;
+        if (uyari && uyari.guncel === false) {
+            txt.textContent = uyari.mesaj || "Öneriler güncel değil — yeniden eşleştirin.";
+            band.style.display = "";
+            band.setAttribute("aria-hidden", "false");
+        } else {
+            band.style.display = "none";
+            band.setAttribute("aria-hidden", "true");
+        }
     }
 
     async function loadKayitliDosyalar() {
@@ -1671,6 +1693,28 @@ td.ak-td-sira {
     if (btnRestoreSession) {
         btnRestoreSession.addEventListener("click", function () {
             sonOturumAnaliziniSunucudanYukle();
+        });
+    }
+    const btnYenidenEslestir = document.getElementById("btnYenidenEslestir");
+    if (btnYenidenEslestir) {
+        btnYenidenEslestir.addEventListener("click", async function () {
+            const ids = (lastSavedFileIds || []).slice();
+            if (!ids.length) { showMsg("Önce kayıtlı dosya seçin.", false); return; }
+            try {
+                const res = await fetch("/bankalar/api/akbank-tahsilat/yeniden-eslestir", {
+                    method: "POST",
+                    credentials: "same-origin",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ file_ids: ids }),
+                });
+                const j = await res.json();
+                if (!j || !j.ok) { showMsg((j && j.mesaj) || "Yeniden eşleştirme başarısız.", false); return; }
+                showMsg(j.mesaj || "Yeniden eşleştirildi.", true);
+                oneriUyariGoster({ guncel: true });
+                tabloyuYenile();
+            } catch (e) {
+                showMsg("Ağ hatası: " + e, false);
+            }
         });
     }
     const btnRestoreDismiss = document.getElementById("btnRestoreSessionDismiss");

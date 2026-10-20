@@ -132,12 +132,12 @@ def backfill(
             atlanan += 1
             continue
         try:
-            ham, banka, musteriler = parse_dosya_fn(d, oku)
+            ham, banka, musteriler, ozet = parse_dosya_fn(d, oku)
             n = bis.parse_ve_kaydet_dosya(
                 cur, dosya_id=int(d["id"]), banka=banka, ham=ham,
                 musteriler=musteriler,
                 manual_by_key=_manual_map(ham),
-                versiyon=versiyon,
+                versiyon=versiyon, ozet=ozet,
             )
             bis.dosya_parse_isaretle(_yaz, int(d["id"]), "ok")
             yazilan += 1
@@ -195,7 +195,7 @@ def _gercek_parse_dosya(dosya_row, oku):
         )
 
         txs = upload_bank_excel(raw, banka)
-        ham, _ozet = standard_transactions_to_tahsilat_ham(txs, yon="gelen")
+        ham, ozet = standard_transactions_to_tahsilat_ham(txs, yon="gelen")
     else:
         from services.banka_ak_import import (
             dataframe_hareket_satirlari,
@@ -203,8 +203,8 @@ def _gercek_parse_dosya(dosya_row, oku):
         )
 
         df = read_akbank_excel(raw)
-        ham, _ozet = dataframe_hareket_satirlari(df, yon="gelen")
-    return ham, banka, _musteriler_akbank_listesi()
+        ham, ozet = dataframe_hareket_satirlari(df, yon="gelen")
+    return ham, banka, _musteriler_akbank_listesi(), ozet
 
 
 def main(argv=None) -> int:

@@ -37,9 +37,9 @@ class FakeStore:
             return None
         if s.startswith("INSERT INTO banka_import_satirlari"):
             params = tuple(params or ())
-            ncol = 16
+            ncol = 17
             if len(params) % ncol != 0:
-                raise AssertionError("params 16'nin kati olmali")
+                raise AssertionError("params 17'nin kati olmali")
             mevcut = {(r[0], r[9]) for r in self.satirlar}
             for i in range(0, len(params), ncol):
                 v = params[i:i + ncol]
@@ -147,7 +147,7 @@ def _parse_fn(dosya_row, oku):
         "aciklama": "BILINMEYEN GONDERICI", "banka_referans_no": "111",
         "tip": "gelen", "yon": "gelen",
     }]
-    return ham, "AKBANK", FAKE_MUSTERILER
+    return ham, "AKBANK", FAKE_MUSTERILER, {"islenen": 1}
 
 
 def test_backfill_idempotent_ve_hata_izolasyonu():

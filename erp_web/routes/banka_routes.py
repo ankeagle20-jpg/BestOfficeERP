@@ -952,7 +952,7 @@ def _iso_or_str(v):
     return str(v)
 
 
-def _import_satir_kaydet(dosya_id, banka, satirlar, *, ham_mi=False, musteriler=None):
+def _import_satir_kaydet(dosya_id, banka, satirlar, *, ham_mi=False, musteriler=None, ozet=None):
     """BANKA_IMPORT_DB_SATIR açıkken: satırları (öneriyle) DB'ye yazar.
 
     Hata dosya bazında işaretlenir, çağıran akış bozulmaz. Dönüş: adet/-1.
@@ -970,12 +970,12 @@ def _import_satir_kaydet(dosya_id, banka, satirlar, *, ham_mi=False, musteriler=
                     cur, dosya_id=int(dosya_id), banka=banka, ham=satirlar,
                     musteriler=musteriler or _musteriler_akbank_listesi(),
                     manual_by_key=_manual_map_for_ham(satirlar),
-                    versiyon=versiyon,
+                    versiyon=versiyon, ozet=ozet,
                 )
             else:
                 n = bis.satirlari_kaydet(
                     cur, dosya_id=int(dosya_id), banka=banka,
-                    onizlemeler=satirlar, versiyon=versiyon,
+                    onizlemeler=satirlar, versiyon=versiyon, ozet=ozet,
                 )
         try:
             bis.dosya_parse_isaretle(cal, int(dosya_id), "ok")
@@ -1077,7 +1077,7 @@ def api_akbank_tahsilat_analyze():
         import banka_import_satirlari as _bis
 
         if _bis.db_satir_aktif():
-            _import_satir_kaydet(ins["id"], bank_type, out.get("satirlar") or [])
+            _import_satir_kaydet(ins["id"], bank_type, out.get("satirlar") or [], ozet=ozet)
     except Exception:
         logging.getLogger(__name__).exception("banka import satir kayit (analyze)")
     return jsonify(out)
@@ -1149,7 +1149,7 @@ def api_akbank_tahsilat_upload_only():
                 from services.banka_ak_import import dataframe_hareket_satirlari, read_akbank_excel
                 _df_u = read_akbank_excel(raw)
                 _ham_u, _ozet_u = dataframe_hareket_satirlari(_df_u, yon="gelen")
-            _import_satir_kaydet(ins["id"], bank_type, _ham_u, ham_mi=True)
+            _import_satir_kaydet(ins["id"], bank_type, _ham_u, ham_mi=True, ozet=_ozet_u)
     except Exception:
         logging.getLogger(__name__).exception("banka import satir kayit (upload-only)")
     return jsonify({
@@ -1260,9 +1260,27 @@ def api_akbank_tahsilat_analyze_kayitli():
     hams: list = []
     ozet_top = {"excel_satir": 0, "a_degil": 0, "ref_bos": 0, "tutar_sifir": 0, "tarih_yok": 0, "islenen": 0, "yon": yon}
     meta_list: list[dict] = []
+    _db_aktif = False
+    try:
+        import banka_import_satirlari as _bis0
+
+        _db_aktif = _bis0.db_satir_aktif()
+    except Exception:
+        _db_aktif = False
     t_oku = time.perf_counter()
     for fid in clean_ids:
         row = found[fid]
+        if _db_aktif:
+            # Satırı güncel dosya: Excel'i hiç parse etme (rapor DB'den).
+            try:
+                _durum0 = _bis0.satir_durumu(
+                    lambda sql, params=None: fetch_all(sql, params), fid
+                )
+            except Exception:
+                _durum0 = {}
+            if _durum0.get("guncel"):
+                meta_list.append({"id": row["id"], "ad_gosterim": row["ad_gosterim"]})
+                continue
         raw = _bytea_to_bytes(row.get("excel_binary"))
         eff = _effective_tahsilat_bank_type(bank_type, row.get("orijinal_filename"))
         try:
@@ -1292,6 +1310,7 @@ def api_akbank_tahsilat_analyze_kayitli():
                         ham,
                         ham_mi=True,
                         musteriler=_musteriler_akbank_listesi(),
+                        ozet=ozet,
                     )
         except Exception:
             logging.getLogger(__name__).exception(
@@ -1304,6 +1323,78 @@ def api_akbank_tahsilat_analyze_kayitli():
         meta_list.append({"id": row["id"], "ad_gosterim": row["ad_gosterim"]})
 
     oku_ms = int((time.perf_counter() - t_oku) * 1000)
+
+    # A2: bayrak açıkken rapor DB'den (satırlar yukarıda hazırlandı).
+    try:
+        import banka_import_satirlari as _bis2
+
+        if _bis2.db_satir_aktif():
+            t_db = time.perf_counter()
+            _oku = lambda sql, params=None: fetch_all(sql, params)  # noqa: E731
+            db_rows = _bis2.db_satirlarini_oku(
+                _oku, clean_ids, yon=yon if yon in ("gelen", "giden") else None
+            )
+            by_ref = _tahsilat_by_ref_for_ham(db_rows)
+            satirlar = _bis2.yanit_satirlari(db_rows, by_ref)
+            ozet_db = {"excel_satir": 0, "a_degil": 0, "ref_bos": 0,
+                       "tutar_sifir": 0, "tarih_yok": 0, "islenen": 0, "yon": yon}
+            for fid in clean_ids:
+                po = _bis2.dosya_parse_ozeti(_oku, fid)
+                if po:
+                    for k in ozet_db:
+                        if k != "yon":
+                            ozet_db[k] = ozet_db.get(k, 0) + int(po.get(k, 0) or 0)
+                else:
+                    ozet_db = dict(ozet_top)
+                    break
+            tah_adet = sum(1 for s in satirlar if s.get("tahsilatta"))
+            ozet_db["tahsilatta_gizlenen"] = tah_adet
+            ozet_db["tahsilatta_olan"] = tah_adet
+            toplam_satir = len(satirlar)
+            sayfa = data.get("sayfa")
+            boyut = data.get("sayfa_boyutu")
+            sayfalama = None
+            if sayfa is not None or boyut is not None:
+                try:
+                    syf = max(1, int(sayfa or 1))
+                    byt = max(1, min(2000, int(boyut or 200)))
+                except (TypeError, ValueError):
+                    syf, byt = 1, 200
+                satirlar = satirlar[(syf - 1) * byt: syf * byt]
+                sayfalama = {"sayfa": syf, "sayfa_boyutu": byt, "toplam": toplam_satir}
+            guncel_v = _bis2.musteri_versiyonu(_oku)
+            sakli_v = {
+                str(r.get("oneri_musteri_versiyonu") or "") for r in db_rows
+            } - {""}
+            oneri_guncel = (not sakli_v) or sakli_v == {guncel_v}
+            db_ms = int((time.perf_counter() - t_db) * 1000)
+            ozet_db["sure_ms"] = {
+                "oku": oku_ms, "eslesme": 0, "db": db_ms,
+                "toplam": int((time.perf_counter() - t0) * 1000),
+                "dosya": len(clean_ids), "satir": toplam_satir,
+            }
+            out_db = {
+                "ok": True,
+                "ozet": ozet_db,
+                "satirlar": satirlar,
+                "kayit_dosya": {"kayitli_dosyalar": meta_list},
+                "oneri_uyari": {
+                    "guncel": bool(oneri_guncel),
+                    "mesaj": None if oneri_guncel else
+                    "Öneriler güncel değil — müşteri listesi değişti. Yeniden eşleştirin.",
+                },
+            }
+            if sayfalama:
+                out_db["sayfalama"] = sayfalama
+            print(
+                "akbank analyze-db dosya=%s satir=%s db_ms=%s toplam_ms=%s"
+                % (len(clean_ids), toplam_satir, db_ms, ozet_db["sure_ms"]["toplam"]),
+                flush=True,
+            )
+            return jsonify(out_db)
+    except Exception:
+        logging.getLogger(__name__).exception("akbank analyze DB yolu; eski yola dusuluyor")
+
     ham_birlesik = _ham_birlestir_dedupe(hams)
     t_es = time.perf_counter()
     out = _json_akbank_analyze_ham(ham_birlesik, ozet_top, {"kayitli_dosyalar": meta_list})
@@ -1323,6 +1414,74 @@ def api_akbank_tahsilat_analyze_kayitli():
         flush=True,
     )
     return jsonify(out)
+
+
+@bp.route("/api/akbank-tahsilat/yeniden-eslestir", methods=["POST"])
+@giris_gerekli
+def api_akbank_tahsilat_yeniden_eslestir():
+    """Seçili dosyaların kayıtlı satırlarına öneriyi güncel müşteri
+    listesiyle yeniden yazar (Excel parse yok; satırlar DB'den)."""
+    import banka_import_satirlari as bis
+
+    if not bis.db_satir_aktif():
+        return jsonify({"ok": False, "mesaj": "DB satır modu kapalı (BANKA_IMPORT_DB_SATIR)."}), 400
+    data = request.get_json(silent=True) or {}
+    ids = data.get("file_ids")
+    if not isinstance(ids, list) or not ids:
+        return jsonify({"ok": False, "mesaj": "En az bir kayıtlı dosya seçin."}), 400
+    clean_ids = []
+    for x in ids:
+        try:
+            clean_ids.append(int(x))
+        except (TypeError, ValueError):
+            continue
+    clean_ids = list(dict.fromkeys(clean_ids))
+    if not clean_ids:
+        return jsonify({"ok": False, "mesaj": "Geçersiz dosya seçimi."}), 400
+
+    _oku = lambda sql, params=None: fetch_all(sql, params)  # noqa: E731
+    versiyon = bis.musteri_versiyonu(_oku)
+    musteriler = _musteriler_akbank_listesi()
+    yenilenen = 0
+    satir_toplam = 0
+    for fid in clean_ids:
+        db_rows = bis.db_satirlarini_oku(_oku, [fid])
+        if not db_rows:
+            continue
+        ham = [{
+            "sira": r.get("sira"),
+            "excel_index": r.get("sira"),
+            "tarih": (r.get("tarih").isoformat() if hasattr(r.get("tarih"), "isoformat")
+                      else str(r.get("tarih") or "")[:10]),
+            "saat": str(r.get("saat") or ""),
+            "tutar": round(float(r.get("tutar") or 0), 2),
+            "aciklama": str(r.get("aciklama") or ""),
+            "banka_referans_no": str(r.get("banka_referans_no") or ""),
+            "tip": str(r.get("yon") or "gelen"),
+            "yon": str(r.get("yon") or "gelen"),
+        } for r in db_rows]
+        banka = str(db_rows[0].get("banka") or "AKBANK")
+        try:
+            with db() as conn:
+                cur = conn.cursor()
+                n = bis.parse_ve_kaydet_dosya(
+                    cur, dosya_id=fid, banka=banka, ham=ham,
+                    musteriler=musteriler,
+                    manual_by_key=_manual_map_for_ham(ham),
+                    versiyon=versiyon,
+                )
+            yenilenen += 1
+            satir_toplam += n
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "yeniden eslestir dosya=%s", fid
+            )
+    return jsonify({
+        "ok": True,
+        "yenilenen_dosya": yenilenen,
+        "satir": satir_toplam,
+        "mesaj": f"{yenilenen} dosya yeniden eşleştirildi ({satir_toplam} satır).",
+    })
 
 
 @bp.route("/api/akbank-tahsilat/musteriler")

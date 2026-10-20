@@ -63,12 +63,18 @@ SQL_INDEKSLER = (
 SQL_DOSYA_PARSE_KOLONLARI = (
     f"ALTER TABLE {DOSYA_TABLO} ADD COLUMN IF NOT EXISTS parse_durumu TEXT",
     f"ALTER TABLE {DOSYA_TABLO} ADD COLUMN IF NOT EXISTS parse_hata TEXT",
+    f"ALTER TABLE {DOSYA_TABLO} ADD COLUMN IF NOT EXISTS parse_ozet TEXT",
+)
+
+SQL_SATIR_EK_KOLONLAR = (
+    f"ALTER TABLE {TABLO} ADD COLUMN IF NOT EXISTS oneri_json TEXT",
 )
 
 _SUTUNLAR = (
     "dosya_id", "banka", "yon", "tarih", "saat", "sira", "tutar", "aciklama",
     "banka_referans_no", "satir_anahtari", "oneri_musteri_id", "oneri_label",
     "oneri_status", "oneri_kaynak", "oneri_musteri_versiyonu", "parse_surumu",
+    "oneri_json",
 )
 
 
@@ -86,6 +92,8 @@ def ensure_banka_import_satirlari(calistir) -> None:
     for sql in SQL_INDEKSLER:
         calistir(sql)
     for sql in SQL_DOSYA_PARSE_KOLONLARI:
+        calistir(sql)
+    for sql in SQL_SATIR_EK_KOLONLAR:
         calistir(sql)
 
 
@@ -155,14 +163,16 @@ def _satir_degerleri(dosya_id, banka, onizleme_row, versiyon):
         str(em.get("kaynak") or "")[:24] or None,
         str(versiyon or "")[:32] or None,
         PARSE_SURUMU,
+        json.dumps(em, ensure_ascii=False) if em else None,
     )
 
 
-def satirlari_kaydet(cur, *, dosya_id, banka, onizlemeler, versiyon) -> int:
+def satirlari_kaydet(cur, *, dosya_id, banka, onizlemeler, versiyon, ozet=None) -> int:
     """Tek dosyanın satırlarını (önerileriyle) yazar; eskileri siler.
 
     Çağıranın transaction'ı içinde çalışır. Önce DELETE (dosya_id),
-    sonra toplu INSERT — tekrar çağrı idempotenttir.
+    sonra toplu INSERT — tekrar çağrı idempotenttir. ozet verilirse
+    dosyanın parse özeti (elenen sayaçları) da saklanır (rapor özeti için).
     """
     def _cal(sql, params=None):
         if params is None:
@@ -172,6 +182,11 @@ def satirlari_kaydet(cur, *, dosya_id, banka, onizlemeler, versiyon) -> int:
         return cur
 
     ensure_banka_import_satirlari(_cal)
+    if ozet is not None:
+        cur.execute(
+            f"UPDATE {DOSYA_TABLO} SET parse_ozet = %s WHERE id = %s",
+            (json.dumps(dict(ozet), ensure_ascii=False), int(dosya_id)),
+        )
     cur.execute(f"DELETE FROM {TABLO} WHERE dosya_id = %s", (int(dosya_id),))
     rows = [
         _satir_degerleri(dosya_id, banka, r, versiyon) for r in (onizlemeler or [])
@@ -215,15 +230,112 @@ def dosya_parse_isaretle(calistir, dosya_id, durum, hata=None) -> None:
 
 
 def parse_ve_kaydet_dosya(cur, *, dosya_id, banka, ham, musteriler,
-                          manual_by_key, versiyon) -> int:
+                          manual_by_key, versiyon, ozet=None) -> int:
     """Ham satırlardan öneri hesapla + kaydet (mevcut algoritma aynen)."""
     from services.banka_ak_import import onizleme_satirlari
 
     onizlemeler = onizleme_satirlari(ham, musteriler, set(), manual_by_key or {})
     return satirlari_kaydet(
         cur, dosya_id=dosya_id, banka=banka,
-        onizlemeler=onizlemeler, versiyon=versiyon,
+        onizlemeler=onizlemeler, versiyon=versiyon, ozet=ozet,
     )
+
+
+def db_satirlarini_oku(oku, dosya_ids, yon=None):
+    """Kayıtlı satırları (dosya sırasını koruyarak) sözlük listesi döndürür."""
+    ids = [int(x) for x in (dosya_ids or [])]
+    if not ids:
+        return []
+    kosul = ""
+    if yon in ("gelen", "giden"):
+        kosul = f" AND yon = '{yon}'"
+    rows = oku(
+        f"SELECT * FROM {TABLO} WHERE dosya_id = ANY(%s){kosul} "
+        "ORDER BY dosya_id, sira, id",
+        (ids,),
+    ) or []
+    sira_harita = {fid: i for i, fid in enumerate(ids)}
+    out = [dict(r) for r in rows]
+    out.sort(key=lambda r: (sira_harita.get(int(r.get("dosya_id") or 0), 99),
+                            int(r.get("sira") or 0), int(r.get("id") or 0)))
+    return out
+
+
+def yanit_satirlari(db_rows, by_ref):
+    """DB satırlarından eski analyze çıktısıyla aynı satır sözlükleri.
+
+    Dosyalar arası dedupe "ilk kazanır" (normalize ref). "Aktarıldı"
+    by_ref'ten canlı türetilir. Öneri saklı oneri_json'dan gelir.
+    """
+    from services.banka_ak_import import akbank_sender_key, normalize_banka_referans_no
+
+    gorulen = set()
+    out = []
+    for r in db_rows or []:
+        ref = normalize_banka_referans_no(r.get("banka_referans_no"))
+        if ref:
+            if ref in gorulen:
+                continue
+            gorulen.add(ref)
+        try:
+            em = json.loads(r.get("oneri_json") or "{}")
+            if not isinstance(em, dict):
+                em = {}
+        except (TypeError, ValueError):
+            em = {}
+        if not em:
+            em = {
+                "status": r.get("oneri_status") or "unknown",
+                "musteri_id": r.get("oneri_musteri_id"),
+                "musteri_label": r.get("oneri_label"),
+                "candidates": [],
+                "kaynak": r.get("oneri_kaynak") or "otomatik",
+            }
+        tarih = r.get("tarih")
+        tarih_s = tarih.isoformat() if hasattr(tarih, "isoformat") else str(tarih or "")[:10]
+        aciklama = str(r.get("aciklama") or "")
+        satir = {
+            "sira": r.get("sira"),
+            "tarih": tarih_s,
+            "saat": str(r.get("saat") or ""),
+            "tutar": round(float(r.get("tutar") or 0), 2),
+            "aciklama": aciklama,
+            "banka_referans_no": ref,
+            "tip": str(r.get("yon") or "gelen"),
+            "yon": str(r.get("yon") or "gelen"),
+            "eslestirme": em,
+            "sender_key": akbank_sender_key(aciklama),
+            "ui_status": str(r.get("oneri_status") or em.get("status") or "unknown"),
+            "musteri_id_oneri": r.get("oneri_musteri_id") or em.get("musteri_id"),
+            "musteri_label_oneri": r.get("oneri_label") or em.get("musteri_label"),
+        }
+        info = (by_ref or {}).get(ref) if ref else None
+        if info:
+            satir["tahsilatta"] = True
+            satir["tahsilat_id"] = info.get("tahsilat_id")
+            satir["makbuz_no"] = info.get("makbuz_no")
+        else:
+            satir["tahsilatta"] = False
+            satir["tahsilat_id"] = None
+            satir["makbuz_no"] = None
+        out.append(satir)
+    return out
+
+
+def dosya_parse_ozeti(oku, dosya_id):
+    rows = oku(
+        f"SELECT parse_ozet FROM {DOSYA_TABLO} WHERE id = %s", (int(dosya_id),)
+    ) or []
+    if not rows:
+        return None
+    ham = rows[0].get("parse_ozet")
+    if not ham:
+        return None
+    try:
+        v = json.loads(ham)
+        return v if isinstance(v, dict) else None
+    except (TypeError, ValueError):
+        return None
 
 
 def ozet_json() -> str:
