@@ -15718,6 +15718,108 @@ def api_aylik_tutarlardan_tahsilden_cikar():
     )
 
 
+@bp.route("/api/tahsilat-kayan/onizleme", methods=["POST"])
+@giris_gerekli
+def api_tahsilat_kayan_onizleme():
+    """Kayan yeniden dağıtım önizlemesi (dry-run; yazma yok). Bayrak kapalı → 404."""
+    from tahsilat_kayan import (
+        kayan_yeniden_dagit_aktif,
+        tahsilat_kayan_yeniden_dagit,
+    )
+
+    try:
+        data = request.get_json(force=True, silent=True) or {}
+    except Exception:
+        data = {}
+    try:
+        musteri_id = int(data.get("musteri_id"))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "mesaj": "musteri_id gerekli."}), 400
+    if not kayan_yeniden_dagit_aktif(musteri_id):
+        return jsonify({"ok": False, "mesaj": "Bu özellik bu müşteri için kapalı."}), 404
+    if not fetch_one("SELECT id FROM customers WHERE id = %s", (musteri_id,)):
+        return jsonify({"ok": False, "mesaj": "Müşteri bulunamadı."}), 404
+    etiket = str(data.get("etiket") or "").strip() or (
+        "kayan_" + datetime.now().strftime("%Y%m%d%H%M%S")
+    )
+    r = tahsilat_kayan_yeniden_dagit(
+        musteri_id, dry_run=True, etiket=etiket, tetik="buton"
+    )
+    plan = r.get("plan") or {}
+    return jsonify({
+        "ok": bool(r.get("ok")),
+        "mid": musteri_id,
+        "etiket": etiket,
+        "parmak_izi": r.get("parmak_izi") or plan.get("parmak_izi"),
+        "degisiklik_yok": bool(r.get("degisiklik_yok")),
+        "mesaj": r.get("mesaj") or plan.get("mesaj"),
+        "neden": r.get("neden"),
+        "n_degisti": plan.get("n_degisti"),
+        "kayan_n": plan.get("kayan_n"),
+        "sabit_n": plan.get("sabit_n"),
+        "odeme_toplam": plan.get("odeme_toplam"),
+        "dagitim_toplam": plan.get("dagitim_toplam"),
+        "ay_degisim": plan.get("ay_degisim") or [],
+        "bosluk_var": bool(plan.get("bosluk_eski")),
+        "bosluk_yeni_var": bool(plan.get("bosluk_yeni")),
+        "son_kismi": plan.get("son_kismi_yeni"),
+    })
+
+
+@bp.route("/api/tahsilat-kayan/uygula", methods=["POST"])
+@giris_gerekli
+def api_tahsilat_kayan_uygula():
+    """Kayan yeniden dağıtım uygula — yalnız önizleme parmak izi ile."""
+    from tahsilat_kayan import (
+        kayan_yeniden_dagit_aktif,
+        tahsilat_kayan_yeniden_dagit,
+    )
+
+    try:
+        data = request.get_json(force=True, silent=True) or {}
+    except Exception:
+        data = {}
+    try:
+        musteri_id = int(data.get("musteri_id"))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "mesaj": "musteri_id gerekli."}), 400
+    if not kayan_yeniden_dagit_aktif(musteri_id):
+        return jsonify({"ok": False, "mesaj": "Bu özellik bu müşteri için kapalı."}), 404
+    fp = str(data.get("parmak_izi") or data.get("fp") or "").strip()
+    if not fp:
+        return jsonify({
+            "ok": False,
+            "mesaj": "Önce önizleme yapın; parmak izi gerekli.",
+        }), 400
+    if not fetch_one("SELECT id FROM customers WHERE id = %s", (musteri_id,)):
+        return jsonify({"ok": False, "mesaj": "Müşteri bulunamadı."}), 404
+    etiket = str(data.get("etiket") or "").strip() or (
+        "kayan_" + datetime.now().strftime("%Y%m%d%H%M%S")
+    )
+    r = tahsilat_kayan_yeniden_dagit(
+        musteri_id,
+        dry_run=False,
+        etiket=etiket,
+        tetik="buton",
+        beklenen_fp=fp,
+        izinli_yazma=True,
+    )
+    plan = r.get("plan") or {}
+    durum = 200 if r.get("ok") else 409
+    return jsonify({
+        "ok": bool(r.get("ok")),
+        "mid": musteri_id,
+        "etiket": etiket,
+        "yazildi": bool(r.get("yazildi")),
+        "degisiklik_yok": bool(r.get("degisiklik_yok")),
+        "parmak_izi": r.get("parmak_izi") or plan.get("parmak_izi"),
+        "mesaj": r.get("mesaj") or plan.get("mesaj"),
+        "neden": r.get("neden"),
+        "n_degisti": plan.get("n_degisti"),
+        "ay_degisim": plan.get("ay_degisim") or [],
+    }), durum
+
+
 @bp.route("/api/aylik-tutarlardan-borctan-cikar", methods=["POST"])
 @giris_gerekli
 def api_aylik_tutarlardan_borctan_cikar():
