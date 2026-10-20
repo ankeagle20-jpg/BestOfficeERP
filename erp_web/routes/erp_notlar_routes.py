@@ -318,7 +318,7 @@ def _iliski_etiket(row: dict) -> str:
 
 
 _WA_ETIKET = {
-    "gonderildi": "Gönderildi",
+    "gonderildi": "Kuyruğa alındı",
     "gonderiliyor": "Gönderiliyor",
     "bekliyor": "Gönderiliyor",
     "basarisiz": "Gönderilemedi",
@@ -335,7 +335,7 @@ def _wa_durum_etiket(row: dict) -> str:
     if durum in _WA_ETIKET:
         return _WA_ETIKET[durum]
     if row.get("whatsapp_gonderildi_mi"):
-        return "Gönderildi"
+        return "Kuyruğa alındı"
     return "Gönderilmeyecek"
 
 
@@ -2076,7 +2076,7 @@ def _wa_node_gonder(nid: int, telefon: str, mesaj: str, schema: str | None, anah
             _wa_url("kuyruk-toplu-ekle"),
             json={"liste": [{"telefon": telefon, "mesaj": mesaj, "anahtar": anahtar}]},
             headers=_wa_internal_headers(),
-            timeout=(3, 12),
+            timeout=(3, 30),
         )
     except requests.exceptions.ConnectTimeout:
         return "hata", "baglanti"

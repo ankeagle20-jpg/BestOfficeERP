@@ -502,7 +502,7 @@ def _kuyruk_varsayilan(telefon: str, mesaj: str, anahtar: str, ek=None) -> dict:
             _wa_url("kuyruk-toplu-ekle"),
             json={"liste": _kuyruk_liste(telefon, mesaj, anahtar, ek)},
             headers=_wa_internal_headers(),
-            timeout=(3, 12),
+            timeout=(3, 30),
         )
     except requests.exceptions.Timeout:
         _kuyruk_log(0, "yanit_yok")

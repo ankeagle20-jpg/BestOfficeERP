@@ -582,6 +582,13 @@ def api_gonder():
             headers=_wa_internal_headers(),
             timeout=10
         )
+    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
+        # İstek servise ulaşmış olabilir; başarısız sayma, sonuç doğrulanamadı.
+        return jsonify({
+            'ok': False,
+            'durum': 'belirsiz',
+            'mesaj': "Gönderim doğrulanamadı, WhatsApp'ı kontrol edin",
+        }), 200
     except Exception as e:
         return jsonify({'ok': False, 'mesaj': f'WhatsApp servisine bağlanılamadı: {e}'}), 500
 
