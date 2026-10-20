@@ -213,22 +213,35 @@ def bekleyen_kayitlar(oku=None, limit: int = 200) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def tazele_calistir(kayitlar, sorgu_fn, tazele_fn) -> dict:
-    """Mevcut tazeleme deseni: servisten sor, kaydi guncelle, sayilari don."""
+def tazele_calistir(kayitlar, sorgu_fn, tazele_fn, azami=None, butce_sn=None) -> dict:
+    """Mevcut tazeleme deseni: servisten sor, kaydi guncelle, sayilari don.
+
+    azami/butce_sn verilirse buton istekleri sinirlanir; ozette kalan sayisi doner.
+    """
+    import time
+
+    tumu = list(kayitlar or [])
     sonuclar = []
-    for row in kayitlar or []:
+    bas = time.monotonic()
+    for row in tumu:
+        if azami is not None and len(sonuclar) >= int(azami):
+            break
+        if butce_sn is not None and sonuclar and (time.monotonic() - bas) > float(butce_sn):
+            break
         try:
             guncel = tazele_fn(row, str(row.get("anahtar") or ""), sorgu_fn)
         except Exception:
             guncel = row
         sonuclar.append(guncel if isinstance(guncel, dict) else row)
-    return tazele_ozeti(sonuclar)
+    ozet = tazele_ozeti(sonuclar)
+    ozet["kalan"] = len(tumu) - len(sonuclar)
+    return ozet
 
 
 def tazele_ozeti(sonuclar: list[dict]) -> dict:
     """Tazelenen satırların yeni durum özeti (yalnız sayılar)."""
     out = {"taranan": len(sonuclar or []), "gonderildi": 0, "basarisiz": 0,
-           "belirsiz_kalan": 0, "degismedi": 0}
+           "belirsiz_kalan": 0, "degismedi": 0, "kalan": 0}
     for r in sonuclar or []:
         d = str((r or {}).get("durum") or "")
         if d == "gonderildi":

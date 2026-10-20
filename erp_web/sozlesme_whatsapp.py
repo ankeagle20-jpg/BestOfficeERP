@@ -279,7 +279,7 @@ def _sayilar(uid: int, dk_basi: datetime, gun_basi: datetime):
 def _bul(uid: int, anahtar: str):
     return fetch_one(
         """
-        SELECT id, durum, COALESCE(neden, '') AS neden
+        SELECT id, durum, COALESCE(neden, '') AS neden, created_at
         FROM sozlesme_whatsapp_gonderim
         WHERE user_id = %s AND anahtar = %s
         """,
@@ -611,10 +611,32 @@ def _sonuc_varsayilan(anahtar: str) -> dict:
     return {"durum": str(body.get("durum") or "erisilemedi"), "kod": body.get("kod") or ""}
 
 
+_BELIRSIZ_SORGU_SAAT = 2
+
+
+def _belirsiz_sorgulanir(created_at, simdi=None) -> bool:
+    """Belirsiz kayit yalniz son 2 saatte olusmusken servise sorulur;
+    servis sonucu da 2 saat saklar, daha eskisi hep 'yok' doner."""
+    if created_at is None:
+        return True
+    try:
+        an = simdi or datetime.now(timezone.utc)
+        ca = created_at
+        if ca.tzinfo is None:
+            ca = ca.replace(tzinfo=timezone.utc)
+        return (an - ca) <= timedelta(hours=_BELIRSIZ_SORGU_SAAT)
+    except Exception:
+        return True
+
+
 def _satiri_tazele(row: dict, anahtar: str, sonuc_fn) -> dict:
     if not row or sonuc_fn is None:
         return row
     if str(row.get("durum") or "") not in _TAZELE:
+        return row
+    if str(row.get("durum") or "") == "belirsiz" and not _belirsiz_sorgulanir(
+        row.get("created_at")
+    ):
         return row
     try:
         paket = sonuc_fn(anahtar)

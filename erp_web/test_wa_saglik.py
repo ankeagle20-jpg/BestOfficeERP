@@ -100,7 +100,58 @@ def test_tazele():
 
     oz = ws.tazele_calistir(kayitlar, sorgu, tazele_fn)
     check("tazele_ozet", oz == {"taranan": 3, "gonderildi": 2, "basarisiz": 0,
-                                "belirsiz_kalan": 1, "degismedi": 0, "guncellenen": 2}, oz)
+                                "belirsiz_kalan": 1, "degismedi": 0, "guncellenen": 2,
+                                "kalan": 0}, oz)
+
+
+def test_kapi1():
+    import time as _t
+    from datetime import datetime, timedelta, timezone
+
+    import sozlesme_whatsapp as sw
+    import wa_saglik as ws
+
+    sw._durum_yaz = lambda *a, **k: None  # test: DB yazimi yok
+
+    simdi = datetime(2026, 10, 20, 12, 0, tzinfo=timezone.utc)
+    check("yas_3sa_sorma", not sw._belirsiz_sorgulanir(simdi - timedelta(hours=3), simdi))
+    check("yas_30dk_sor", sw._belirsiz_sorgulanir(simdi - timedelta(minutes=30), simdi))
+    check("yas_yoksa_sor", sw._belirsiz_sorgulanir(None))
+
+    sayac = {"n": 0}
+
+    def sorgu(_anahtar):
+        sayac["n"] += 1
+        return {"durum": "yok"}
+
+    eski_belirsiz = {"id": 1, "durum": "belirsiz", "anahtar": "szwa:d:x",
+                     "created_at": datetime.now(timezone.utc) - timedelta(hours=3)}
+    sw._satiri_tazele(eski_belirsiz, "szwa:d:x", sorgu)
+    check("yasli_belirsiz_sorgu_yok", sayac["n"] == 0, sayac)
+
+    genc_belirsiz = {"id": 2, "durum": "belirsiz", "anahtar": "szwa:d:y",
+                     "created_at": datetime.now(timezone.utc) - timedelta(minutes=30)}
+    sw._satiri_tazele(genc_belirsiz, "szwa:d:y", sorgu)
+    check("genc_belirsiz_sorgu_var", sayac["n"] == 1, sayac)
+
+    eski_kuyruk = {"id": 3, "durum": "kuyrukta", "anahtar": "szwa:d:z",
+                   "created_at": datetime.now(timezone.utc) - timedelta(hours=5)}
+    sw._satiri_tazele(eski_kuyruk, "szwa:d:z", sorgu)
+    check("kuyruk_yas_kurali_yok", sayac["n"] == 2, sayac)
+
+    def tazele_fn(row, anahtar, fn):
+        return dict(row, durum="gonderildi")
+
+    cok = [{"id": i, "durum": "kuyrukta", "anahtar": f"szwa:d:{i}"} for i in range(25)]
+    oz = ws.tazele_calistir(cok, sorgu, tazele_fn, azami=20, butce_sn=30)
+    check("buton_azami_20", oz["taranan"] == 20 and oz["kalan"] == 5, oz)
+
+    def yavas_fn(row, anahtar, fn):
+        _t.sleep(0.05)
+        return dict(row)
+
+    oz2 = ws.tazele_calistir(cok, sorgu, yavas_fn, azami=25, butce_sn=0.13)
+    check("butce_siniri", 0 < oz2["taranan"] < 25 and oz2["kalan"] > 0, oz2)
 
 
 ROL = {"v": "personel"}
@@ -147,6 +198,7 @@ def main():
     test_kontroller()
     test_oturum_kodu()
     test_tazele()
+    test_kapi1()
     test_rol_kapisi()
     print("FAIL" if FAILS else "TUMU GECTI", FAILS)
     return 1 if FAILS else 0

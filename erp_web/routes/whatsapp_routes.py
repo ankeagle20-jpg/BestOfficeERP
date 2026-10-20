@@ -651,7 +651,7 @@ def _saglik_servis_durumu():
         r = requests.get(
             _wa_url('durum-bak'),
             headers=_wa_internal_headers(),
-            timeout=(2, 4),
+            timeout=(2, 3),
         )
     except (requests.exceptions.ConnectTimeout, requests.exceptions.ConnectionError):
         return "baglanti_yok", None
@@ -736,14 +736,18 @@ def api_wa_saglik_tazele():
 
     kayitlar = wa_saglik.bekleyen_kayitlar()
     ozet = wa_saglik.tazele_calistir(
-        kayitlar, sw._sonuc_varsayilan, sw._satiri_tazele
+        kayitlar, sw._sonuc_varsayilan, sw._satiri_tazele,
+        azami=20, butce_sn=30,
     )
     _saglik_audit('wa_saglik_tazele', dict(ozet))
+    mesaj = (f"{ozet['taranan']} kayıt sorgulandı; {ozet['guncellenen']} güncellendi, "
+             f"{ozet['belirsiz_kalan']} hâlâ belirsiz.")
+    if ozet.get('kalan'):
+        mesaj += f" {ozet['kalan']} kayıt daha var; tekrar basın."
     return jsonify({
         'ok': True,
         **ozet,
-        'mesaj': (f"{ozet['taranan']} kayıt sorgulandı; {ozet['guncellenen']} güncellendi, "
-                  f"{ozet['belirsiz_kalan']} hâlâ belirsiz."),
+        'mesaj': mesaj,
     })
 
 
