@@ -330,8 +330,15 @@ def test_belirsiz_liste_isaret():
           (donen, yazilan[:1]))
 
     yazilan.clear()
+    donen = ws.belirsiz_isaretle("not", 22, "gonderilmedi", oku=_oku, yaz=_yaz)
+    check("isaret_not_gonderilmedi_kalici", donen.get("ok") is True
+          and donen["yeni_durum"] == "basarisiz_kalici"
+          and any(p and p[0] == "basarisiz_kalici" for _s, p in yazilan), (donen, yazilan[:1]))
+
+    yazilan.clear()
     donen = ws.belirsiz_isaretle("odeme", 33, "gonderilmedi", oku=_oku, yaz=_yaz)
     check("isaret_odeme", donen.get("ok") is True
+          and donen["yeni_durum"] == "basarisiz_kalici"
           and any("whatsapp_durum = %s" in s for s, _p in yazilan), (donen, yazilan[:1]))
 
     tablo_durum["not"] = [{"durum": "gonderildi"}]
@@ -344,6 +351,30 @@ def test_belirsiz_liste_isaret():
           ws.belirsiz_isaretle("bilinmeyen", 1, "gonderildi", oku=_oku, yaz=_yaz)["neden"] == "kaynak_gecersiz"
           and ws.belirsiz_isaretle("not", "x", "gonderildi", oku=_oku, yaz=_yaz)["neden"] == "id_gecersiz"
           and ws.belirsiz_isaretle("not", 1, "belki", oku=_oku, yaz=_yaz)["neden"] == "sonuc_gecersiz")
+
+
+def test_kalici_retry_disi():
+    """basarisiz_kalici dakikalik yeniden deneme secimlerine girmez (kod kaniti)."""
+    import inspect
+
+    from routes import erp_notlar_routes as en
+    import odeme_linki as ol
+
+    check("not_kapali_kalici", "basarisiz_kalici" in en._WA_KAPALI
+          and "basarisiz" not in en._WA_KAPALI, en._WA_KAPALI)
+    secim = inspect.getsource(en.gonder_whatsapp_notlari)
+    check("not_retry_yalniz_basarisiz",
+          "whatsapp_gonderim_durumu = 'basarisiz'" in secim
+          and "whatsapp_gonderim_durumu = 'basarisiz_kalici'" not in secim.replace(
+              "SET whatsapp_gonderim_durumu = 'basarisiz_kalici'", ""), secim[:160])
+    yeniden = inspect.getsource(ol.whatsapp_yeniden_dene)
+    check("odeme_retry_yalniz_basarisiz",
+          "whatsapp_durum = 'basarisiz'" in yeniden
+          and "whatsapp_durum = 'basarisiz_kalici'" not in yeniden.replace(
+              "THEN 'basarisiz_kalici'", ""), yeniden[:160])
+    sahiplen = inspect.getsource(ol.whatsapp_sahiplen)
+    check("odeme_sahiplen_kalici_disinda", "'basarisiz_kalici'" not in sahiplen,
+          sahiplen[:200])
 
 
 def test_rol_kapisi():
@@ -375,6 +406,7 @@ def main():
     test_kapi1()
     test_eski_kapat_ve_retry()
     test_belirsiz_liste_isaret()
+    test_kalici_retry_disi()
     test_rol_kapisi()
     print("FAIL" if FAILS else "TUMU GECTI", FAILS)
     return 1 if FAILS else 0

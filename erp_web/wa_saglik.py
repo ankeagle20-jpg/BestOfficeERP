@@ -317,7 +317,12 @@ def belirsiz_isaretle(kaynak, kayit_id, sonuc, oku=None, yaz=None) -> dict:
         return {"ok": False, "neden": "id_gecersiz"}
     if sonuc not in ("gonderildi", "gonderilmedi"):
         return {"ok": False, "neden": "sonuc_gecersiz"}
-    yeni = "gonderildi" if sonuc == "gonderildi" else "basarisiz"
+    # "Gonderilmedi" elle isareti: not/odeme akisinda dakikalik isler 'basarisiz'
+    # kaydi yeniden gonderir; bu yuzden kalici (yeniden denenmeyen) durum yazilir.
+    # Sozlesmede otomatik yeniden gonderim yok; mevcut 'basarisiz' korunur.
+    _gonderilmedi = {"sozlesme": "basarisiz", "not": "basarisiz_kalici",
+                     "odeme": "basarisiz_kalici"}
+    yeni = "gonderildi" if sonuc == "gonderildi" else _gonderilmedi[str(kaynak)]
     tablo, kolon, _zaman = bilgi
     oku, yaz = _oku_yaz_varsayilan(oku, yaz)
     try:

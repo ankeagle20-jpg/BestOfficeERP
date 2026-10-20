@@ -139,7 +139,12 @@
     const id = btn.getAttribute("data-id");
     const sonuc = btn.getAttribute("data-isaret");
     const yazi = sonuc === "gonderildi" ? "Gönderildi" : "Gönderilmedi";
-    if (!window.confirm((AKIS[kaynak] || kaynak) + " #" + id + " kaydı \"" + yazi + "\" olarak işaretlenecek. WhatsApp'ta kontrol ettiğinizden emin olun. Devam edilsin mi?")) return;
+    let metin = (AKIS[kaynak] || kaynak) + " #" + id + " kaydı \"" + yazi + "\" olarak işaretlenecek. WhatsApp'ta kontrol ettiğinizden emin olun.";
+    if (sonuc === "gonderilmedi" && (kaynak === "not" || kaynak === "odeme")) {
+      metin += " Bu kayıt otomatik tekrar gönderilmeyecek.";
+    }
+    metin += " Devam edilsin mi?";
+    if (!window.confirm(metin)) return;
     btn.disabled = true;
     try {
       const r = await fetch("/whatsapp/api/saglik-belirsiz-isaret", {
