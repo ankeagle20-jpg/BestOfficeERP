@@ -649,19 +649,18 @@ def _panel_by_iso_from_tahsil_map(
         else:
             _eff_uygulandi = False
             if tah > tol or mk_t > tol:
-                # Kısmi ay: efektif brüt ana yolla aynı öncelik (plan > brüt).
-                _eff_p = _kismi_efektif_brut(
-                    brut,
-                    (_plan_brutleri_for_mid(
-                        mid, [iso_m], ay_sayisi=len(payload.get("aylar") or [])
-                    ) or {}).get(iso_m[:7]),
-                    tol,
-                )
-                if _eff_p > tol and abs(_eff_p - brut) > tol:
-                    brut = _eff_p
-                    _eff_uygulandi = True
-                    if tah > brut:
-                        tah = brut
+                # Kısmi ay (daraltılmış): yalnız PLAN BRÜT VARSA plan uygulanır;
+                # plansız ayda payload brütü (reel overlay) aynen kalır.
+                _plan_p = (_plan_brutleri_for_mid(
+                    mid, [iso_m], ay_sayisi=len(payload.get("aylar") or [])
+                ) or {}).get(iso_m[:7])
+                if _plan_p is not None:
+                    _eff_p = _kismi_efektif_brut(brut, _plan_p, tol)
+                    if _eff_p > tol and abs(_eff_p - brut) > tol:
+                        brut = _eff_p
+                        _eff_uygulandi = True
+                        if tah > brut:
+                            tah = brut
             kalan_calc = round(max(brut - tah, 0), 2) if brut > tol else 0.0
             if brut > tol and tah >= brut - tol:
                 kalan = 0.0
@@ -1222,28 +1221,22 @@ def _apply_panel_by_iso_to_grid_payload(payload: dict, panel_by_iso: dict, tahsi
             continue
         kalan = round(max(brut - tah, 0), 2) if brut > tol else 0.0
         if tah > tol and kalan > tol:
-            # Kısmi ay: efektif brüt ana yolla aynı öncelik (plan > brüt);
-            # plan bulunamazsa ana-yol panel 'aylik' snapshot'ı yalnızca
-            # reel şişmesini (panel < brüt) ezer, brütü büyütmez.
+            # Kısmi ay (daraltılmış): yalnız PLAN BRÜT VARSA plan uygulanır.
+            # Plansız ayda panel 'aylik' snapshot'ı brütü EZMEZ — grid'in
+            # kendi hesabı (reel overlay) kalır, ekstreyle tutarlı olur.
             _plan_b_a = None
             if mid_pl > 0:
                 _plan_b_a = (_plan_brutleri_for_mid(
                     mid_pl, [iso_m], ay_sayisi=len(payload.get("aylar") or [])
                 ) or {}).get(iso_m[:7])
-            _eff_a = _kismi_efektif_brut(brut, _plan_b_a, tol)
-            if _plan_b_a is None and abs(_eff_a - brut) <= tol:
-                try:
-                    _panel_aylik_a = round(float(prow.get("aylik") or 0), 2)
-                except (TypeError, ValueError):
-                    _panel_aylik_a = 0.0
-                if _panel_aylik_a > tol and _panel_aylik_a < brut - tol:
-                    _eff_a = _panel_aylik_a
-            if abs(_eff_a - brut) > tol:
-                brut = _eff_a
-                tah = _effective_panel_tahsil(panel_t, map_t, brut, tol=tol)
-                a["brut_tutar_kdv"] = round(brut, 2)
-                a["tutar_kdv_dahil"] = round(brut, 2)
-                kalan = round(max(brut - tah, 0), 2)
+            if _plan_b_a is not None:
+                _eff_a = _kismi_efektif_brut(brut, _plan_b_a, tol)
+                if abs(_eff_a - brut) > tol:
+                    brut = _eff_a
+                    tah = _effective_panel_tahsil(panel_t, map_t, brut, tol=tol)
+                    a["brut_tutar_kdv"] = round(brut, 2)
+                    a["tutar_kdv_dahil"] = round(brut, 2)
+                    kalan = round(max(brut - tah, 0), 2)
         if brut > tol and tah >= brut - tol:
             kalan = 0.0
         # Kısmi düzeltme dışında brut_tutar_kdv / tutar_kdv_dahil'e
@@ -2637,12 +2630,13 @@ def _plan_katmani_payloada(
         payload["plan_uyarilar"] = uyarilar
 
 
-def _kismi_efektif_brut(brut, plan_brut, tol=None) -> float:
-    """Kısmi/ödenmiş ayda efektif brüt: ana yolla aynı öncelik.
+def _kismi_efektif_brut(brut, plan_brut, tol=None, reel_tutar=None) -> float:
+    """Kısmi/ödenmiş ayda efektif brüt (daraltılmış kural).
 
-    Plan brütü varsa plan; yoksa payload brütü (reel overlay + plan katmanı
-    zaten uygulanmış hâli). Reel dönem tutarı tek başına kap yapılmaz —
-    ödeme, ayın brütünü reel'e çevirmez.
+    Yalnız aday ay için PLAN BRÜT VARSA plan uygulanır. Plansız ayda eski
+    davranış aynen: reel dönem tutarı > tol ise reel kap, yoksa payload
+    brütü. Böylece plansız ayda grid, ekstreyle aynı reel'i gösterir
+    (grid=ekstre tutarlılığı); panel ana-yol tutarı plansız ayı ezmez.
     """
     if tol is None:
         tol = float(AYLIK_GRID_TAM_ODENDI_TOLERANS)
@@ -2653,6 +2647,13 @@ def _kismi_efektif_brut(brut, plan_brut, tol=None) -> float:
             pv = 0.0
         if math.isfinite(pv) and pv > tol:
             return pv
+    if reel_tutar is not None:
+        try:
+            rv = round(float(reel_tutar), 2)
+        except (TypeError, ValueError):
+            rv = 0.0
+        if math.isfinite(rv) and rv > tol:
+            return rv
     try:
         bv = round(float(brut or 0), 2)
     except (TypeError, ValueError):
@@ -3672,10 +3673,17 @@ def _build_aylik_grid_cache_payload(musteri_id, tufe_map=None, kyc_row=None, man
                 tt_t = round(float((batch_grid.get("tarih_ay") or {}).get(iso_m1) or 0), 2)
                 odenen = _grid_payload_ay_odenen_kdv(brut, odenen, mk_t, tm_t, te_t, tt_t, tol)
             donem_yil_b = _reel_donem_yili_for_ay(yy, mm, payload.get("artis_ay"))
-            # Kısmi dal: efektif brüt ana yolla aynı öncelik (plan > payload
-            # brütü); reel dönem tutarı kap yapılmaz (bkz. _kismi_efektif_brut).
+            # Kısmi dal (daraltılmış): plan brüt varsa plan; plansızda eski
+            # davranış — reel dönem tutarı kap (bkz. _kismi_efektif_brut).
+            _reel_kap_b = None
+            if isinstance(manual_reel_by_year, dict):
+                try:
+                    _reel_kap_b = manual_reel_by_year.get(donem_yil_b)
+                except Exception:
+                    _reel_kap_b = None
             kap_b = _kismi_efektif_brut(
-                brut, (_plan_brut_b or {}).get(iso_m1[:7] if iso_m1 else ""), tol
+                brut, (_plan_brut_b or {}).get(iso_m1[:7] if iso_m1 else ""), tol,
+                reel_tutar=_reel_kap_b,
             )
             _pay_raw_b = (batch_grid.get("pay") or {}).get(iso_m1) if iso_m1 else None
             try:
@@ -3694,8 +3702,8 @@ def _build_aylik_grid_cache_payload(musteri_id, tufe_map=None, kyc_row=None, man
             elif mk_t > tol and kap_b > tol:
                 kalan_p = round(max(kap_b - mk_t, 0), 2)
                 if abs(kap_b - round(brut, 2)) > tol:
-                    # Efektif brüt reel'den plan'a indi: brüt alanları da
-                    # efektifle aynı olsun (ekstre grid recon tutarlılığı).
+                    # Efektif brüt (plan ya da plansızda reel kap) brüt
+                    # alanlarına da yazılır (ekstre-grid tutarlılığı).
                     a["brut_tutar_kdv"] = round(kap_b, 2)
                     brut = kap_b
                 a["odenen_tutar_kdv"] = round(mk_t, 2)
@@ -10417,9 +10425,17 @@ def _ekstre_payload_odenen_zenginlestir(
         donem_yil_en = (
             _reel_donem_yili_for_ay(yy_en, a.get("ay"), payload.get("artis_ay")) if yy_en else 0
         )
-        # Kısmi dal: efektif brüt ana yolla aynı öncelik (plan > payload
-        # brütü); reel dönem tutarı kap yapılmaz (bkz. _kismi_efektif_brut).
-        kap = _kismi_efektif_brut(brut, (_plan_brut_z or {}).get(iso_m1[:7]), tol)
+        # Kısmi dal (daraltılmış): plan brüt varsa plan; plansızda eski
+        # davranış — reel dönem tutarı kap (bkz. _kismi_efektif_brut).
+        _reel_kap_z = None
+        if isinstance(manual_reel_by_year, dict):
+            try:
+                _reel_kap_z = manual_reel_by_year.get(donem_yil_en)
+            except Exception:
+                _reel_kap_z = None
+        kap = _kismi_efektif_brut(
+            brut, (_plan_brut_z or {}).get(iso_m1[:7]), tol, reel_tutar=_reel_kap_z
+        )
         odenen = _grid_payload_ay_odenen_kdv(brut, odenen, mk_t, tm_t, te_t, tt_t, tol)
         _pay_map_z = (batch_maps or {}).get("pay") or {}
         _pay_raw_z = _pay_map_z.get(iso_m1) if isinstance(_pay_map_z, dict) else None
