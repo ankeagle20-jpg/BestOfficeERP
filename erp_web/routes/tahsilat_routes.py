@@ -215,6 +215,11 @@ def api_tahsilat_delete():
                 logging.getLogger(__name__).exception(
                     "api_tahsilat_delete panel/grid resync musteri_id=%s", mid
                 )
+            try:
+                from .giris_routes import _ekstre_api_cache_temizle
+                _ekstre_api_cache_temizle()
+            except Exception:
+                logging.getLogger(__name__).exception("api_tahsilat_delete ekstre cache temizle")
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"ok": False, "mesaj": str(e)}), 400

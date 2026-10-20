@@ -9956,6 +9956,15 @@ def _aylik_tutar_fatura_id_map(musteri_id: int) -> dict[str, int]:
     }
 
 
+def _ekstre_api_cache_temizle() -> None:
+    """Ekstre API önbelleğini (300 sn TTL) boşalt.
+
+    Silme yollarından ekstre invalidate çağırmayanlar bunu çağırır;
+    sonraki ekstre isteği güncel veriden hesaplanır. Dönüşleri değiştirmez.
+    """
+    _cari_ekstre_api_cache.clear()
+
+
 def _ekstre_invalidate_after_change(
     musteri_id: int, affected_isos: list | None = None
 ) -> dict:
@@ -16295,6 +16304,7 @@ def api_aylik_tutarlardan_borctan_cikar():
         return jsonify({"ok": False, "mesaj": f"Fatura silinemedi: {e}"}), 500
 
     _upsert_aylik_grid_cache(musteri_id)
+    _ekstre_api_cache_temizle()
     return jsonify(
         {
             "ok": True,

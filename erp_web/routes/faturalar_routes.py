@@ -5367,6 +5367,12 @@ def api_fatura_sil_toplu():
             silinen.append({"id": fid, "fatura_no": row.get("fatura_no")})
         else:
             atlanan.append({"id": fid, "neden": "silinemedi"})
+    if silinen:
+        try:
+            from .giris_routes import _ekstre_api_cache_temizle
+            _ekstre_api_cache_temizle()
+        except Exception:
+            logging.getLogger(__name__).exception("toplu fatura sil ekstre cache temizle")
     msg = f"{len(silinen)} fatura silindi."
     if atlanan:
         msg += f" {len(atlanan)} kayıt atlandı (ETTN’li veya bulunamadı)."
@@ -10709,6 +10715,11 @@ def tahsilat_sil():
                 logging.getLogger(__name__).exception(
                     "tahsilat_sil panel/grid resync musteri_id=%s", mid
                 )
+            try:
+                from .giris_routes import _ekstre_api_cache_temizle
+                _ekstre_api_cache_temizle()
+            except Exception:
+                logging.getLogger(__name__).exception("tahsilat_sil ekstre cache temizle")
         return jsonify({'ok': True, 'mesaj': 'Tahsilat silindi.'})
     except Exception as e:
         return jsonify({'ok': False, 'mesaj': str(e)}), 500

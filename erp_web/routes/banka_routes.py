@@ -539,6 +539,11 @@ def api_eslestirme_iptal():
             from tahsilat_silme import tahsilatlari_sil
 
             tahsilatlari_sil(silme_yolu="banka-eslestirme-iptal", ids=[tid])
+            try:
+                from .giris_routes import _ekstre_api_cache_temizle
+                _ekstre_api_cache_temizle()
+            except Exception:
+                logging.getLogger(__name__).exception("eslestirme_iptal ekstre cache temizle")
         execute(
             "UPDATE banka_hareketleri SET durum = 'bekleyen', musteri_id = NULL, tahsilat_id = NULL WHERE id = %s",
             (hareket_id,),
