@@ -112,12 +112,34 @@ def kontrolleri_uret(ulasim: str, oturum: str | None, sayaclar: dict,
     })
 
     belirsiz = int(s.get("belirsiz_toplam") or 0)
+    if belirsiz <= 0:
+        b_metin = "Sonucu belirsiz kayıt yok."
+    else:
+        cumle = [f"{belirsiz} kaydın sonucu doğrulanamadı."]
+        sz_yeni = int(s.get("belirsiz_sozlesme_yeni") or 0)
+        sz_eski = int(s.get("belirsiz_sozlesme") or 0) - sz_yeni
+        if sz_yeni > 0:
+            cumle.append(
+                f"Sözleşme akışında {sz_yeni} yeni kayıt servisten sorgulanabilir; "
+                "Bekleyenleri tazele ile yeniden sorgulayın.")
+        if sz_eski > 0:
+            cumle.append(
+                f"Sözleşme akışında {sz_eski} eski kayıt var; servis sonucu artık "
+                "tutulmuyor, aşağıdaki listeden elle işaretleyin.")
+        not_n = int(s.get("belirsiz_not") or 0)
+        if not_n > 0:
+            cumle.append(
+                f"Not akışında {not_n} kayıt var; not akışında servis sonucu "
+                "sorgulanamıyor, WhatsApp'ta elle kontrol edip işaretleyin.")
+        odeme_n = int(s.get("belirsiz_odeme") or 0)
+        if odeme_n > 0:
+            cumle.append(
+                f"Ödeme linki akışında {odeme_n} kayıt var; servisten "
+                "doğrulanamıyor, elle kontrol edip işaretleyin.")
+        b_metin = " ".join(cumle)
     kartlar.append({
         "anahtar": "belirsiz", "seviye": "uyari" if belirsiz > 0 else "ok",
-        "baslik": "Sonucu belirsiz",
-        "aciklama": (f"{belirsiz} kaydın sonucu doğrulanamadı. "
-                     "Bekleyenleri tazele ile yeniden sorgulayın." if belirsiz > 0
-                     else "Sonucu belirsiz kayıt yok."),
+        "baslik": "Sonucu belirsiz", "aciklama": b_metin,
     })
     return kartlar
 
@@ -143,7 +165,9 @@ def saglik_sayaclari(oku=None, esik_dk: int = ESIK_TAKILI_DK) -> dict:
 
     out = {"bekleyen": 0, "yasli_takili": 0, "gonderildi_24s": 0, "hata_24s": 0,
            "belirsiz_24s": 0, "son_gonderildi": None, "son_hata": "",
-           "belirsiz_toplam": 0, "kapatilabilir": 0}
+           "belirsiz_toplam": 0, "kapatilabilir": 0,
+           "belirsiz_sozlesme": 0, "belirsiz_sozlesme_yeni": 0,
+           "belirsiz_not": 0, "belirsiz_odeme": 0}
 
     r = _satir(
         """
@@ -160,6 +184,8 @@ def saglik_sayaclari(oku=None, esik_dk: int = ESIK_TAKILI_DK) -> dict:
           COUNT(*) FILTER (WHERE durum = 'belirsiz'
                            AND created_at > NOW() - INTERVAL '24 hours') AS b24,
           COUNT(*) FILTER (WHERE durum = 'belirsiz') AS btoplam,
+          COUNT(*) FILTER (WHERE durum = 'belirsiz'
+                           AND created_at > NOW() - INTERVAL '2 hours') AS byeni,
           MAX(created_at) FILTER (WHERE durum = 'gonderildi') AS son_ok
         FROM sozlesme_whatsapp_gonderim
         """,
@@ -172,6 +198,8 @@ def saglik_sayaclari(oku=None, esik_dk: int = ESIK_TAKILI_DK) -> dict:
     out["hata_24s"] += int(r.get("h24") or 0)
     out["belirsiz_24s"] += int(r.get("b24") or 0)
     out["belirsiz_toplam"] += int(r.get("btoplam") or 0)
+    out["belirsiz_sozlesme"] += int(r.get("btoplam") or 0)
+    out["belirsiz_sozlesme_yeni"] += int(r.get("byeni") or 0)
     if r.get("son_ok"):
         out["son_gonderildi"] = str(r["son_ok"])[:16]
 
@@ -197,6 +225,16 @@ def saglik_sayaclari(oku=None, esik_dk: int = ESIK_TAKILI_DK) -> dict:
     out["bekleyen"] += int(r3.get("bekleyen") or 0)
     out["belirsiz_toplam"] += int(r3.get("btoplam") or 0)
     out["belirsiz_24s"] += int(r3.get("b24") or 0)
+    out["belirsiz_not"] += int(r3.get("btoplam") or 0)
+
+    r4 = _satir(
+        """
+        SELECT COUNT(*) AS btoplam FROM public.odeme_linkleri
+        WHERE whatsapp_durum = 'belirsiz'
+        """
+    )
+    out["belirsiz_odeme"] += int(r4.get("btoplam") or 0)
+    out["belirsiz_toplam"] += int(r4.get("btoplam") or 0)
     return out
 
 
@@ -218,6 +256,93 @@ def bekleyen_kayitlar(oku=None, limit: int = 200) -> list[dict]:
     except Exception:
         return []
     return [dict(r) for r in rows]
+
+
+_BELIRSIZ_KAYNAK = {
+    "sozlesme": ("sozlesme_whatsapp_gonderim", "durum", "created_at"),
+    "not": ("erp_notlar", "whatsapp_gonderim_durumu", "updated_at"),
+    "odeme": ("public.odeme_linkleri", "whatsapp_durum", "updated_at"),
+}
+BELIRSIZ_LIMIT = 50
+
+
+def _oku_yaz_varsayilan(oku, yaz):
+    from db import execute, fetch_all
+
+    if oku is None:
+        oku = fetch_all
+    if yaz is None:
+        def yaz(sql, params=None):
+            return execute(sql, params) if params is not None else execute(sql)
+    return oku, yaz
+
+
+def belirsiz_kayitlar(oku=None, limit: int = BELIRSIZ_LIMIT) -> list[dict]:
+    """Uc akistan belirsiz kayitlar: [{kaynak, id, zaman}] - PII yok."""
+    oku, _ = _oku_yaz_varsayilan(oku, None)
+    out = []
+    kalan = max(1, int(limit))
+    for kaynak, (tablo, kolon, zaman) in _BELIRSIZ_KAYNAK.items():
+        if kalan <= 0:
+            break
+        try:
+            rows = oku(
+                f"""
+                SELECT id, {zaman} AS zaman FROM {tablo}
+                WHERE {kolon} = 'belirsiz'
+                ORDER BY {zaman} DESC NULLS LAST, id DESC LIMIT %s
+                """,
+                (kalan,),
+            ) or []
+        except Exception:
+            rows = []
+        for r in rows:
+            out.append({"kaynak": kaynak, "id": int(r["id"]),
+                        "zaman": str(r.get("zaman") or "")[:16]})
+        kalan -= len(rows)
+    return out
+
+
+def belirsiz_isaretle(kaynak, kayit_id, sonuc, oku=None, yaz=None) -> dict:
+    """Belirsiz kaydi elle sonuc isaretler. Cift isaret durum kosuluyla engellenir.
+
+    Donus: {ok, kaynak, kayit_id, eski_durum, yeni_durum} ya da {ok:False, neden}.
+    """
+    bilgi = _BELIRSIZ_KAYNAK.get(str(kaynak or ""))
+    if not bilgi:
+        return {"ok": False, "neden": "kaynak_gecersiz"}
+    try:
+        kayit_id = int(kayit_id)
+    except (TypeError, ValueError):
+        return {"ok": False, "neden": "id_gecersiz"}
+    if sonuc not in ("gonderildi", "gonderilmedi"):
+        return {"ok": False, "neden": "sonuc_gecersiz"}
+    yeni = "gonderildi" if sonuc == "gonderildi" else "basarisiz"
+    tablo, kolon, _zaman = bilgi
+    oku, yaz = _oku_yaz_varsayilan(oku, yaz)
+    try:
+        rows = oku(f"SELECT {kolon} AS durum FROM {tablo} WHERE id = %s",
+                   (kayit_id,)) or []
+    except Exception:
+        return {"ok": False, "neden": "okunamadi"}
+    if not rows:
+        return {"ok": False, "neden": "bulunamadi"}
+    mevcut = str((rows[0] or {}).get("durum") or "")
+    if mevcut != "belirsiz":
+        return {"ok": False, "neden": "belirsiz_degil", "mevcut": mevcut}
+    setler = f"{kolon} = %s"
+    if kaynak == "not":
+        setler += (", whatsapp_gonderildi_mi = TRUE, whatsapp_gonderildi_at = NOW(), "
+                   "whatsapp_hata = NULL" if yeni == "gonderildi"
+                   else ", whatsapp_hata = 'elle_isaret'")
+    if kaynak != "sozlesme":
+        setler += ", updated_at = NOW()"
+    yaz(
+        f"UPDATE {tablo} SET {setler} WHERE id = %s AND {kolon} = 'belirsiz'",
+        (yeni, kayit_id),
+    )
+    return {"ok": True, "kaynak": str(kaynak), "kayit_id": kayit_id,
+            "eski_durum": "belirsiz", "yeni_durum": yeni}
 
 
 def eski_kapat(oku=None, yaz=None, saat: int = 2) -> dict:

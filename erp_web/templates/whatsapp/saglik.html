@@ -43,6 +43,10 @@
     <div class="ws-card"><h3><span class="ws-dot"></span>Yükleniyor</h3><p>Kontrol ediliyor…</p></div>
   </div>
   <div class="ws-msg" id="wsMsg"></div>
+  <div id="wsBelirsizKutu" style="display:none;margin-top:16px;">
+    <h3 style="font-size:14px;margin:0 0 8px;">Sonucu belirsiz kayıtlar — elle işaretleme</h3>
+    <div id="wsBelirsiz"></div>
+  </div>
   <div class="ws-zaman" id="wsZaman"></div>
 </div>
 
@@ -77,6 +81,7 @@
       }).join("");
       sonSayaclar = j.sayaclar || null;
       btnEskiKapat.disabled = !((sonSayaclar && sonSayaclar.kapatilabilir) > 0);
+      belirsizYukle();
       const oturumKart = j.kontroller.find(function (k) { return k.anahtar === "oturum"; });
       btnQr.style.display = (oturumKart && oturumKart.seviye !== "ok") ? "" : "none";
       zamanEl.textContent = "Son yenileme: " + new Date().toLocaleTimeString("tr-TR");
@@ -97,6 +102,53 @@
       const r = await fetch(url, { method: "POST", credentials: "same-origin" });
       const j = await r.json().catch(function () { return {}; });
       mesaj(j.mesaj || (j.ok ? "İşlem tamam." : "İşlem başarısız."), !!j.ok);
+    } catch (e) {
+      mesaj("İstek gönderilemedi (bağlantı sorunu).", false);
+    } finally {
+      btn.disabled = false;
+      ozetYukle();
+    }
+  }
+
+  const AKIS = { sozlesme: "Sözleşme", not: "Not", odeme: "Ödeme linki" };
+  async function belirsizYukle() {
+    const kutu = document.getElementById("wsBelirsizKutu");
+    const el = document.getElementById("wsBelirsiz");
+    try {
+      const r = await fetch("/whatsapp/api/saglik-belirsiz", { credentials: "same-origin" });
+      const j = await r.json();
+      const liste = (j && j.kayitlar) || [];
+      if (!liste.length) { kutu.style.display = "none"; el.innerHTML = ""; return; }
+      kutu.style.display = "";
+      el.innerHTML = liste.map(function (k) {
+        return '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;border:1px solid #eceff1;border-radius:4px;padding:6px 8px;margin-bottom:6px;">' +
+          "<span><b>" + escapeHtml(AKIS[k.kaynak] || k.kaynak) + "</b> #" + escapeHtml(k.id) + " · " + escapeHtml(k.zaman || "") + "</span>" +
+          '<span style="margin-left:auto;display:flex;gap:6px;">' +
+          '<button type="button" class="ws-btn" data-isaret="gonderildi" data-kaynak="' + escapeHtml(k.kaynak) + '" data-id="' + escapeHtml(k.id) + '">Gönderildi</button>' +
+          '<button type="button" class="ws-btn secondary" data-isaret="gonderilmedi" data-kaynak="' + escapeHtml(k.kaynak) + '" data-id="' + escapeHtml(k.id) + '">Gönderilmedi</button>' +
+          "</span></div>";
+      }).join("");
+      el.querySelectorAll("[data-isaret]").forEach(function (btn) {
+        btn.addEventListener("click", function () { isaretle(btn); });
+      });
+    } catch (e) { kutu.style.display = "none"; }
+  }
+
+  async function isaretle(btn) {
+    const kaynak = btn.getAttribute("data-kaynak");
+    const id = btn.getAttribute("data-id");
+    const sonuc = btn.getAttribute("data-isaret");
+    const yazi = sonuc === "gonderildi" ? "Gönderildi" : "Gönderilmedi";
+    if (!window.confirm((AKIS[kaynak] || kaynak) + " #" + id + " kaydı \"" + yazi + "\" olarak işaretlenecek. WhatsApp'ta kontrol ettiğinizden emin olun. Devam edilsin mi?")) return;
+    btn.disabled = true;
+    try {
+      const r = await fetch("/whatsapp/api/saglik-belirsiz-isaret", {
+        method: "POST", credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kaynak: kaynak, id: Number(id), sonuc: sonuc })
+      });
+      const j = await r.json().catch(function () { return {}; });
+      mesaj(j.mesaj || (j.ok ? "Kayıt işaretlendi." : "Kayıt işaretlenemedi (" + (j.hata || r.status) + ")."), !!j.ok);
     } catch (e) {
       mesaj("İstek gönderilemedi (bağlantı sorunu).", false);
     } finally {

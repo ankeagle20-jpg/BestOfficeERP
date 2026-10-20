@@ -20,7 +20,9 @@ def check(name, ok, ek=""):
 
 BOŞ_SAYAC = {"bekleyen": 0, "yasli_takili": 0, "gonderildi_24s": 0, "hata_24s": 0,
              "belirsiz_24s": 0, "son_gonderildi": None, "son_hata": "",
-             "belirsiz_toplam": 0, "kapatilabilir": 0}
+             "belirsiz_toplam": 0, "kapatilabilir": 0,
+             "belirsiz_sozlesme": 0, "belirsiz_sozlesme_yeni": 0,
+             "belirsiz_not": 0, "belirsiz_odeme": 0}
 
 
 def _kart(kartlar, anahtar):
@@ -51,14 +53,30 @@ def test_kontroller():
           and "Chrome" in _kart(k, "oturum")["aciklama"])
 
     s = dict(BOŞ_SAYAC, bekleyen=3, yasli_takili=2, gonderildi_24s=5, hata_24s=1,
-             belirsiz_24s=1, belirsiz_toplam=4, son_gonderildi="2026-10-20 09:12",
-             son_hata="zaman_asimi")
+             belirsiz_24s=1, belirsiz_toplam=4, belirsiz_not=3,
+             belirsiz_sozlesme=1, belirsiz_sozlesme_yeni=1,
+             son_gonderildi="2026-10-20 09:12", son_hata="zaman_asimi")
     k = ws.kontrolleri_uret("ok", "hazir", s)
     check("kuyruk_yasli_sari", _kart(k, "kuyruk")["seviye"] == "uyari")
     check("kuyruk_dagilim_metni", "5 gönderildi" in _kart(k, "kuyruk")["aciklama"]
           and "1 hata" in _kart(k, "kuyruk")["aciklama"])
     check("belirsiz_sari", _kart(k, "belirsiz")["seviye"] == "uyari"
           and "4 kaydın" in _kart(k, "belirsiz")["aciklama"])
+    check("belirsiz_akis_cumleleri",
+          "Not akışında 3 kayıt" in _kart(k, "belirsiz")["aciklama"]
+          and "sorgulanamıyor" in _kart(k, "belirsiz")["aciklama"]
+          and "Sözleşme akışında 1 yeni kayıt" in _kart(k, "belirsiz")["aciklama"],
+          _kart(k, "belirsiz"))
+
+    s2 = dict(BOŞ_SAYAC, belirsiz_toplam=2, belirsiz_not=2)
+    k2 = ws.kontrolleri_uret("ok", "hazir", s2)
+    check("belirsiz_tazele_cumlesi_yalniz_sorgulanabilirde",
+          "Bekleyenleri tazele" not in _kart(k2, "belirsiz")["aciklama"],
+          _kart(k2, "belirsiz"))
+    s3 = dict(BOŞ_SAYAC, belirsiz_toplam=1, belirsiz_odeme=1)
+    k3 = ws.kontrolleri_uret("ok", "hazir", s3)
+    check("belirsiz_odeme_cumlesi", "Ödeme linki akışında 1 kayıt" in _kart(k3, "belirsiz")["aciklama"],
+          _kart(k3, "belirsiz"))
     check("son_hata_kartta", "zaman_asimi" in _kart(k, "son_islem")["aciklama"]
           and "2026-10-20 09:12" in _kart(k, "son_islem")["aciklama"])
 
@@ -268,6 +286,66 @@ def test_eski_kapat_ve_retry():
           _kart(k0, "kuyruk"))
 
 
+def test_belirsiz_liste_isaret():
+    import wa_saglik as ws
+
+    def _oku(sql, params=None):
+        if "sozlesme_whatsapp_gonderim" in sql:
+            if "SELECT durum" in sql:
+                tablo_durum.setdefault("sozlesme", [{"durum": "belirsiz"}])
+                return tablo_durum["sozlesme"]
+            return [{"id": 11, "zaman": "2026-10-20 10:00:00"}]
+        if "erp_notlar" in sql:
+            if "SELECT whatsapp_gonderim_durumu" in sql:
+                return tablo_durum.setdefault("not", [{"durum": "belirsiz"}])
+            return [{"id": 22, "zaman": "2026-10-20 09:00:00"}]
+        if "odeme_linkleri" in sql:
+            if "SELECT whatsapp_durum" in sql:
+                return tablo_durum.setdefault("odeme", [{"durum": "belirsiz"}])
+            return [{"id": 33, "zaman": "2026-10-20 08:00:00"}]
+        return [{}]
+
+    tablo_durum = {}
+    liste = ws.belirsiz_kayitlar(oku=_oku)
+    check("belirsiz_liste_akislar",
+          [(k["kaynak"], k["id"]) for k in liste] == [("sozlesme", 11), ("not", 22), ("odeme", 33)]
+          and all(set(k) == {"kaynak", "id", "zaman"} for k in liste), liste)
+
+    yazilan = []
+
+    def _yaz(sql, params=None):
+        yazilan.append((sql, params))
+
+    donen = ws.belirsiz_isaretle("not", 22, "gonderildi", oku=_oku, yaz=_yaz)
+    check("isaret_not_gonderildi", donen.get("ok") is True
+          and donen["yeni_durum"] == "gonderildi" and donen["eski_durum"] == "belirsiz"
+          and any("whatsapp_gonderildi_mi = TRUE" in s and "whatsapp_gonderim_durumu = 'belirsiz'" in s
+                  for s, _p in yazilan), (donen, yazilan[:1]))
+
+    yazilan.clear()
+    donen = ws.belirsiz_isaretle("sozlesme", 11, "gonderilmedi", oku=_oku, yaz=_yaz)
+    check("isaret_sozlesme_gonderilmedi", donen.get("ok") is True
+          and donen["yeni_durum"] == "basarisiz"
+          and any("SET durum = %s" in s and "updated_at" not in s for s, _p in yazilan),
+          (donen, yazilan[:1]))
+
+    yazilan.clear()
+    donen = ws.belirsiz_isaretle("odeme", 33, "gonderilmedi", oku=_oku, yaz=_yaz)
+    check("isaret_odeme", donen.get("ok") is True
+          and any("whatsapp_durum = %s" in s for s, _p in yazilan), (donen, yazilan[:1]))
+
+    tablo_durum["not"] = [{"durum": "gonderildi"}]
+    yazilan.clear()
+    donen = ws.belirsiz_isaretle("not", 22, "gonderildi", oku=_oku, yaz=_yaz)
+    check("isaret_cift_engeli", donen.get("ok") is False
+          and donen.get("neden") == "belirsiz_degil" and not yazilan, (donen, yazilan))
+
+    check("isaret_gecersizler",
+          ws.belirsiz_isaretle("bilinmeyen", 1, "gonderildi", oku=_oku, yaz=_yaz)["neden"] == "kaynak_gecersiz"
+          and ws.belirsiz_isaretle("not", "x", "gonderildi", oku=_oku, yaz=_yaz)["neden"] == "id_gecersiz"
+          and ws.belirsiz_isaretle("not", 1, "belki", oku=_oku, yaz=_yaz)["neden"] == "sonuc_gecersiz")
+
+
 def test_rol_kapisi():
     client = _istemci()
     ROL["v"] = "personel"
@@ -275,6 +353,11 @@ def test_rol_kapisi():
     check("personel_api_403", r.status_code == 403, r.status_code)
     r = client.post("/whatsapp/api/saglik-eski-kapat")
     check("personel_kapat_403", r.status_code == 403, r.status_code)
+    r = client.post("/whatsapp/api/saglik-belirsiz-isaret",
+                    json={"kaynak": "not", "id": 1, "sonuc": "gonderildi"})
+    check("personel_isaret_403", r.status_code == 403, r.status_code)
+    r = client.get("/whatsapp/api/saglik-belirsiz")
+    check("personel_belirsiz_liste_403", r.status_code == 403, r.status_code)
     ROL["v"] = "muhasebe"
     r = client.get("/whatsapp/api/saglik-ozet")
     govde = r.get_json(silent=True) or {}
@@ -291,6 +374,7 @@ def main():
     test_tazele()
     test_kapi1()
     test_eski_kapat_ve_retry()
+    test_belirsiz_liste_isaret()
     test_rol_kapisi()
     print("FAIL" if FAILS else "TUMU GECTI", FAILS)
     return 1 if FAILS else 0

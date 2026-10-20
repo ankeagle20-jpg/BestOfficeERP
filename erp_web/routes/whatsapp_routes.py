@@ -769,6 +769,35 @@ def api_wa_saglik_eski_kapat():
     })
 
 
+@bp.route('/api/saglik-belirsiz')
+@yetki_gerekli("muhasebe")
+def api_wa_saglik_belirsiz():
+    import wa_saglik
+
+    return jsonify({'ok': True, 'kayitlar': wa_saglik.belirsiz_kayitlar()})
+
+
+@bp.route('/api/saglik-belirsiz-isaret', methods=['POST'])
+@yetki_gerekli("muhasebe")
+def api_wa_saglik_belirsiz_isaret():
+    """Belirsiz kaydi elle gonderildi/gonderilmedi isaretler (denetimli)."""
+    import wa_saglik
+
+    govde = request.get_json(silent=True) or {}
+    sonuc = wa_saglik.belirsiz_isaretle(
+        govde.get('kaynak'), govde.get('id'), govde.get('sonuc'))
+    if not sonuc.get('ok'):
+        neden = sonuc.get('neden') or 'isaretlenemedi'
+        kod = 404 if neden == 'bulunamadi' else 409 if neden == 'belirsiz_degil' else 400
+        return jsonify({'ok': False, 'hata': neden, **sonuc}), kod
+    # Denetim: id + eski/yeni durum (icerik yok; kullanici audit tarafinda).
+    _saglik_audit('wa_belirsiz_isaret', {
+        'kaynak': sonuc['kaynak'], 'kayit_id': sonuc['kayit_id'],
+        'eski_durum': sonuc['eski_durum'], 'yeni_durum': sonuc['yeni_durum'],
+    })
+    return jsonify({'ok': True, **sonuc, 'mesaj': 'Kayıt işaretlendi.'})
+
+
 @bp.route('/qr-ac')
 @giris_gerekli
 def api_qr_ac():
