@@ -322,6 +322,18 @@ def test_bayrak():
             os.environ["KAYAN_YENIDEN_DAGIT_MUSTERI_IDS"] = eski_i
 
 
+def test_durum_hafif():
+    d = tk.kayan_bosluk_durum(153, rows=_rows_153(), borc=_borc_153())
+    check("durum ok", d.get("ok") is True, d.get("neden"))
+    check("durum bosluk var", d.get("bosluk_var") is True, d.get("bosluk"))
+    check("durum kayan 20", d.get("kayan_n") == 20, d.get("kayan_n"))
+    check("durum hafif plan yok", "plans" not in d and "parmak_izi" not in d)
+    borc2 = {k: _borc_153()[k] for k in list(_borc_153())[:13]}
+    d2 = tk.kayan_bosluk_durum(153, rows=_rows_153()[:13], borc=borc2)
+    check("durum bosluksuz", d2.get("ok") is True and d2.get("bosluk_var") is False, d2)
+    check("durum bosluksuz kayan 0", d2.get("kayan_n") == 0, d2.get("kayan_n"))
+
+
 def test_placeholder_kaynagi():
     src = (ROOT / "banka_marker_onarim.py").read_text(encoding="utf-8")
     check("placeholder guard var", "_aylik_grid_should_skip_placeholder_collapse" in src)
@@ -349,6 +361,8 @@ def test_api_yetkisiz_ve_bayrak():
     c = app.test_client()
     rv = c.post("/giris/api/tahsilat-kayan/onizleme", json={"musteri_id": 153})
     check("yetkisiz 401", rv.status_code == 401, rv.status_code)
+    rv = c.post("/giris/api/tahsilat-kayan/durum", json={"musteri_id": 153})
+    check("durum yetkisiz 401", rv.status_code == 401, rv.status_code)
 
     # bayrak kapalı → __wrapped__ 404
     eski_e = os.environ.pop("KAYAN_YENIDEN_DAGIT_ENABLED", None)
@@ -360,6 +374,13 @@ def test_api_yetkisiz_ve_bayrak():
             resp = f()
             kod = resp[1] if isinstance(resp, tuple) else resp.status_code
         check("bayrak kapali 404", kod == 404, kod)
+        fd = gr.api_tahsilat_kayan_durum.__wrapped__
+        with app.test_request_context(
+            "/giris/api/tahsilat-kayan/durum", method="POST", json={"musteri_id": 153}
+        ):
+            resp = fd()
+            kod = resp[1] if isinstance(resp, tuple) else resp.status_code
+        check("durum bayrak kapali 404", kod == 404, kod)
     finally:
         if eski_e is not None:
             os.environ["KAYAN_YENIDEN_DAGIT_ENABLED"] = eski_e
@@ -367,15 +388,23 @@ def test_api_yetkisiz_ve_bayrak():
 
 def test_fe_kayan():
     html = (ROOT / "templates/giris/index.html").read_text(encoding="utf-8")
-    check("fe banner", 'id="kayanBanner"' in html and "arkada açık ay kaldı" in html)
+    check("fe banner", 'id="kayanBanner"' in html and "Arkada açık ay kaldı" in html)
     check("fe modal", 'id="kayanModal"' in html and "kayanModalGovde" in html)
     check("fe fn kontrol", "function kayanBannerKontrol" in html)
     check("fe fn onizleme", "function kayanOnizlemeAc" in html)
     check("fe fn uygula", "function kayanUygula" in html)
     check("fe 404 gizle", "r.status === 404" in html)
-    check("fe hook tahsilden", "kayanBannerKontrol(mid)" in html)
-    check("fe hook rapor", "kayanBannerKontrol(midSil)" in html)
+    check("fe hook tahsilden", "kayanBannerKontrol(mid, true)" in html)
+    check("fe hook rapor", "kayanBannerKontrol(midSil, true)" in html)
     check("fe banner gizli default", ".kayan-banner{display:none" in html)
+    check("fe durum ucu", "/giris/api/tahsilat-kayan/durum" in html)
+    check("fe kalici link", 'id="kayanLinkBtn"' in html and "kayanLinkTikla" in html)
+    check("fe link gizli default", 'id="kayanLinkBtn" style="display:none"' in html)
+    check("fe onbellek", "kayanKontrolCache" in html)
+    check("fe mid yukle fn", "function kayanMidYukleKontrol" in html)
+    check("fe grid hook", "typeof kayanMidYukleKontrol === 'function'" in html)
+    check("fe tam onizleme fn", "function kayanOnizlemeYukleVeAc" in html)
+    check("fe bosluk yok mesaji", "Yeniden dağıtılacak bir durum yok" in html)
 
 
 def test_fe_playwright():
@@ -396,13 +425,29 @@ def test_fe_playwright():
     js = html[ji:jj] if ji >= 0 else ""
     check("pw parcalar", bool(css and snippet and js))
     page_html = f"""<!doctype html><html><head><meta charset="utf-8"><style>{css}</style></head>
-<body>{snippet}
+<body><button type="button" id="kayanLinkBtn" style="display:none" onclick="kayanLinkTikla()">Ödemeleri yeniden dağıt</button>
+{snippet}
 <script>
 var selectedId = 153;
 var __fetch = [];
+var __senaryo = 'bosluk';
 window.fetch = function(url, opts) {{
-  __fetch.push(url);
-  if (String(url).indexOf('onizleme') >= 0) {{
+  var u = String(url);
+  __fetch.push(u);
+  if (u.indexOf('durum') >= 0) {{
+    if (__senaryo === 'kapali') {{
+      return Promise.resolve({{ status: 404, json: function() {{ return Promise.resolve({{ ok: false }}); }} }});
+    }}
+    if (__senaryo === 'bosluk') {{
+      return Promise.resolve({{ status: 200, json: function() {{ return Promise.resolve({{
+        ok: true, bosluk_var: true, kayan_n: 20, sabit_n: 13
+      }}); }} }});
+    }}
+    return Promise.resolve({{ status: 200, json: function() {{ return Promise.resolve({{
+      ok: true, bosluk_var: false, kayan_n: 2, sabit_n: 1
+    }}); }} }});
+  }}
+  if (u.indexOf('onizleme') >= 0) {{
     return Promise.resolve({{ status: 200, json: function() {{ return Promise.resolve({{
       ok: true, bosluk_var: true, kayan_n: 2, n_degisti: 1, parmak_izi: 'fp-test',
       etiket: 'kayan_test', odeme_toplam: 200, dagitim_toplam: 200,
@@ -413,7 +458,6 @@ window.fetch = function(url, opts) {{
   return Promise.resolve({{ status: 200, json: function() {{ return Promise.resolve({{ ok: true, mesaj: 'dagitildi' }}); }} }});
 }};
 {js}
-kayanBannerKontrol(153);
 </script></body></html>"""
     try:
         with sync_playwright() as p:
@@ -422,20 +466,51 @@ kayanBannerKontrol(153);
             except Exception:
                 browser = p.chromium.launch(headless=True, channel="chrome")
             page = browser.new_page(viewport={"width": 900, "height": 700})
+            dialogs = []
+            errors = []
+            page.on("dialog", lambda d: (dialogs.append(d.message), d.accept()))
+            page.on("pageerror", lambda e: errors.append(str(e)))
             page.set_content(page_html, wait_until="domcontentloaded")
-            page.wait_for_timeout(400)
-            vis = page.locator("#kayanBanner").is_visible()
-            check("pw banner gorunur", vis)
+            check("pw typeof", page.evaluate("typeof kayanMidYukleKontrol") == "function")
+            # 1) mid yuklenince (153-benzeri bosluk): banner + link, tek durum istegi
+            page.evaluate("kayanMidYukleKontrol()")
+            page.wait_for_timeout(300)
+            check("pw yukle banner gorunur", page.locator("#kayanBanner").is_visible())
+            check("pw yukle link gorunur", page.locator("#kayanLinkBtn").is_visible())
+            n_durum = page.evaluate("__fetch.filter(function(u){return u.indexOf('durum')>=0;}).length")
+            page.evaluate("kayanMidYukleKontrol()")
+            page.wait_for_timeout(150)
+            n_durum2 = page.evaluate("__fetch.filter(function(u){return u.indexOf('durum')>=0;}).length")
+            check("pw onbellek tek istek", n_durum == 1 and n_durum2 == 1, (n_durum, n_durum2))
+            # 2) banner Onizle -> tam onizleme -> modal
             page.locator(".kayan-onizle-btn").click()
-            page.wait_for_timeout(200)
-            modal_vis = page.locator("#kayanModal").is_visible()
-            check("pw modal gorunur", modal_vis)
+            page.wait_for_timeout(250)
+            check("pw modal gorunur", page.locator("#kayanModal").is_visible())
             txt = page.locator("#kayanModalGovde").inner_text()
             check("pw modal tablo", "2024-01" in txt and "200" in txt, txt[:120])
+            # 3) uygula -> banner gizli, onbellek temiz
             page.locator("#kayanUygulaBtn").click()
             page.wait_for_timeout(300)
-            banner_after = page.locator("#kayanBanner").is_visible()
-            check("pw uygula banner gizli", banner_after is False)
+            check("pw uygula banner gizli", page.locator("#kayanBanner").is_visible() is False)
+            check("pw uygula onbellek temiz",
+                  page.evaluate("Object.keys(kayanKontrolCache).length") == 0)
+            page.evaluate("kayanModalKapat()")
+            dialogs.clear()
+            # 4) bosluksuz mid: banner yok, link var; tiklayinca bilgi mesaji
+            page.evaluate("__senaryo = 'bosluksuz'; kayanBannerKontrol(999, true);")
+            page.wait_for_timeout(250)
+            check("pw bosluksuz banner yok", page.locator("#kayanBanner").is_visible() is False)
+            check("pw bosluksuz link var", page.locator("#kayanLinkBtn").is_visible())
+            page.locator("#kayanLinkBtn").click()
+            page.wait_for_timeout(150)
+            check("pw bosluksuz mesaj",
+                  any("Yeniden dağıtılacak bir durum yok" in d for d in dialogs), dialogs)
+            # 5) bayrak kapali (404): banner+link yok, sayfa hatasi yok
+            page.evaluate("__senaryo = 'kapali'; kayanBannerKontrol(555, true);")
+            page.wait_for_timeout(250)
+            check("pw kapali banner yok", page.locator("#kayanBanner").is_visible() is False)
+            check("pw kapali link yok", page.locator("#kayanLinkBtn").is_visible() is False)
+            check("pw sayfa hatasi yok", not errors, errors[:2])
             browser.close()
     except Exception as exc:
         msg = str(exc)
@@ -471,6 +546,7 @@ if __name__ == "__main__":
     test_ayni_gun_ayni_tutar()
     test_fp_uyusmazligi_ve_sinir()
     test_bayrak()
+    test_durum_hafif()
     test_placeholder_kaynagi()
     test_api_yetkisiz_ve_bayrak()
     test_fe_kayan()

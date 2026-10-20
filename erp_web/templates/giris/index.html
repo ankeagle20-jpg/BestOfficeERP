@@ -4295,6 +4295,7 @@ button.auto-btn.whatsapp-hizmet-filter-btn.wa-hizmet-aktif {
                         </div>
                         <button type="button" class="btn-aylik-tahsil" onclick="sozlesmeAylikTahsilEt()"><i class="fa fa-hand-holding-usd"></i> Seçilenleri tahsil et</button>
                         <button type="button" class="btn-aylik-iptal-tahsil" onclick="sozlesmeAylikTahsildenCikar()"><i class="fa fa-undo"></i> Tahsilden Çıkar</button>
+                        <button type="button" class="btn-aylik-iptal-tahsil" id="kayanLinkBtn" style="display:none" onclick="kayanLinkTikla()"><i class="fa fa-random"></i> Ödemeleri yeniden dağıt</button>
                     </div>
                 </div>
                 <div id="sozlesmeler-aylik-pane-normal" class="sozlesmeler-aylik-pane" style="display:none;">
@@ -8703,6 +8704,7 @@ function sozlesmelerAylikYilYenidenCiz() {
 
 function sozlesmelerAylikCacheRender(cacheObj, preferLiveTahsil) {
     if (window.__dondurmaMutasyonBekliyor || window.__dondurmaYenileBekliyor) return false;
+    try { if (typeof kayanMidYukleKontrol === 'function') kayanMidYukleKontrol(); } catch (_eKayanYukle) {}
     try { if (typeof girisDondurmaBilineniCacheUygula === 'function') girisDondurmaBilineniCacheUygula(cacheObj); } catch (_eDonBil) {}
     var grid = document.getElementById('sozlesmeler-aylik-grid');
     if (!grid) return false;
@@ -19137,6 +19139,51 @@ function sozlesmeAylikSecilenAySatirlari() {
 /* kayan-yeniden-dagit-js */
 var kayanAktifMid = 0;
 var kayanSonPlan = null;
+var kayanKontrolCache = {};
+var kayanDurumSon = null;
+function kayanLinkGoster() {
+    var l = document.getElementById('kayanLinkBtn');
+    if (l) l.style.display = '';
+}
+function kayanLinkGizle() {
+    var l = document.getElementById('kayanLinkBtn');
+    if (l) l.style.display = 'none';
+}
+function kayanDurumUygula(j) {
+    kayanDurumSon = j;
+    kayanLinkGoster();
+    if (j && j.bosluk_var && (j.kayan_n || 0) > 0) kayanBannerGoster();
+    else kayanBannerGizle();
+}
+function kayanMidYukleKontrol() {
+    var m = (typeof selectedId !== 'undefined' && selectedId) ? selectedId : 0;
+    if (m) kayanBannerKontrol(m);
+}
+function kayanLinkTikla() {
+    var m = parseInt(kayanAktifMid || (typeof selectedId !== 'undefined' ? selectedId : 0), 10);
+    if (!m) return;
+    var d = kayanKontrolCache[m];
+    if (d && !d.bosluk_var) { alert('Yeniden dağıtılacak bir durum yok.'); return; }
+    kayanOnizlemeYukleVeAc();
+}
+function kayanOnizlemeYukleVeAc() {
+    var m = parseInt(kayanAktifMid || (typeof selectedId !== 'undefined' ? selectedId : 0), 10);
+    if (!m) return;
+    fetch('/giris/api/tahsilat-kayan/onizleme', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ musteri_id: m })
+    }).then(function (r) {
+        if (r.status === 404) { kayanLinkGizle(); kayanBannerGizle(); return null; }
+        return r.json();
+    }).then(function (j) {
+        if (!j) return;
+        if (!j.ok) { alert(j.mesaj || 'Önizleme alınamadı.'); return; }
+        kayanSonPlan = j;
+        if (!(j.n_degisti || 0)) { alert('Yeniden dağıtılacak bir durum yok.'); kayanBannerGizle(); return; }
+        kayanOnizlemeAc();
+    }).catch(function (e) { alert('Hata: ' + (e.message || e)); });
+}
 function kayanBannerGizle() {
     var b = document.getElementById('kayanBanner');
     if (b) b.style.display = 'none';
@@ -19149,22 +19196,22 @@ function kayanTl(v) {
     var n = parseFloat(v || 0);
     return n.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
-function kayanBannerKontrol(mid) {
+function kayanBannerKontrol(mid, zorla) {
     var m = parseInt(mid || kayanAktifMid || (typeof selectedId !== 'undefined' ? selectedId : 0), 10);
-    if (!m) return;
+    if (!m) { kayanBannerGizle(); kayanLinkGizle(); return; }
     kayanAktifMid = m;
-    fetch('/giris/api/tahsilat-kayan/onizleme', {
+    if (!zorla && kayanKontrolCache[m]) { kayanDurumUygula(kayanKontrolCache[m]); return; }
+    fetch('/giris/api/tahsilat-kayan/durum', {
         method: 'POST', credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ musteri_id: m })
     }).then(function (r) {
-        if (r.status === 404) { kayanBannerGizle(); return null; }
+        if (r.status === 404) { kayanLinkGizle(); kayanBannerGizle(); return null; }
         return r.json();
     }).then(function (j) {
         if (!j || !j.ok) { kayanBannerGizle(); return; }
-        kayanSonPlan = j;
-        if (j.bosluk_var && (j.kayan_n || 0) > 0 && (j.n_degisti || 0) > 0) kayanBannerGoster();
-        else kayanBannerGizle();
+        kayanKontrolCache[m] = j;
+        kayanDurumUygula(j);
     }).catch(function () { kayanBannerGizle(); });
 }
 function kayanOnizlemeAc() {
@@ -19174,7 +19221,7 @@ function kayanOnizlemeAc() {
     ov.classList.add('acik');
     ov.setAttribute('aria-hidden', 'false');
     var j = kayanSonPlan;
-    if (!j) { govde.innerHTML = 'Önce silme sonrası kontrol gerekli.'; return; }
+    if (!j) { govde.innerHTML = 'Önizleme yükleniyor…'; kayanOnizlemeYukleVeAc(); return; }
     var satirlar = (j.ay_degisim || []).map(function (d) {
         return '<tr><td>' + String(d.ay || '').slice(0, 7) + '</td><td>' + kayanTl(d.eski) + '</td><td>' + kayanTl(d.yeni) + '</td></tr>';
     }).join('');
@@ -19201,6 +19248,8 @@ function kayanUygula() {
         if (!res.j || !res.j.ok) { alert((res.j && res.j.mesaj) || 'Uygulanamadı.'); return; }
         kayanModalKapat();
         kayanBannerGizle();
+        try { delete kayanKontrolCache[kayanAktifMid]; } catch (_eKc) {}
+        kayanDurumSon = null;
         alert(res.j.mesaj || 'Ödemeler yeniden dağıtıldı.');
         if (typeof cariEkstreYukle === 'function') cariEkstreYukle({ zorla: true, dbEsas: true });
     }).catch(function (e) {
@@ -19252,7 +19301,7 @@ function sozlesmeAylikTahsildenCikar() {
             }
         });
         alert((res.j.mesaj || '') + '\nSilinen: ' + s.length + ', kayıt yok: ' + a.length);
-        if (typeof kayanBannerKontrol === 'function') kayanBannerKontrol(mid);
+        if (typeof kayanBannerKontrol === 'function') kayanBannerKontrol(mid, true);
         sozlesmeAylikSecimiTemizle();
         if (window.__sozlesmelerAylikSonCacheObj && typeof sozlesmelerAylikOnbellekFormlaUyumlu === 'function' && sozlesmelerAylikOnbellekFormlaUyumlu(window.__sozlesmelerAylikSonCacheObj)) {
             sozlesmelerAylikCacheRender(window.__sozlesmelerAylikSonCacheObj, true);
@@ -31513,7 +31562,7 @@ function tahsilRaporSatirSil(tahsilatId, listId) {
           if (!j || !j.ok) throw new Error((j && j.mesaj) || 'Silme başarısız.');
           tahsilRaporlariYenile();
           tahsilRaporSilSonrasiAcikMusteriYenile(midSil, rowSil, listId);
-          if (typeof kayanBannerKontrol === 'function') kayanBannerKontrol(midSil);
+          if (typeof kayanBannerKontrol === 'function') kayanBannerKontrol(midSil, true);
       })
       .catch(function (e) { alert('Silme hatası: ' + (e && e.message ? e.message : e)); });
 }
@@ -34248,7 +34297,7 @@ function cariEkstreSatirSil(btn) {
         Promise.resolve(pgS).then(function () {
             if (typeof cariEkstreYukle === 'function') cariEkstreYukle({ zorla: true, dbEsas: true });
             alert(data.mesaj || 'Silindi.');
-            if (kind === 'tahsilat' && typeof kayanBannerKontrol === 'function') kayanBannerKontrol(mid);
+            if (kind === 'tahsilat' && typeof kayanBannerKontrol === 'function') kayanBannerKontrol(mid, true);
         });
     }).catch(function (e) { alert('Hata: ' + (e.message || e)); });
 }
@@ -36154,8 +36203,8 @@ async function kiraBildirgesiWhatsApp() {
 <script src="{{ url_for('static', filename='js/tahsilat-wa-durum.js', v=tahsilat_wa_js_surum) }}"></script>
 <script src="{{ url_for('static', filename='js/sozlesme-whatsapp.js', v=sozlesme_wa_js_surum) }}"></script>
 <div id="kayanBanner" class="kayan-banner" role="alert">
-  <span>Silmeden sonra arkada açık ay kaldı. Ödemeleri yeniden dağıtmak ister misiniz?</span>
-  <button type="button" class="kayan-onizle-btn" onclick="kayanOnizlemeAc()">Önizle</button>
+  <span>Arkada açık ay kaldı, ilerideki aylar kapalı görünüyor. Ödemeleri yeniden dağıtmak ister misiniz?</span>
+  <button type="button" class="kayan-onizle-btn" onclick="kayanOnizlemeYukleVeAc()">Önizle</button>
   <button type="button" onclick="kayanBannerGizle()">Kapat</button>
 </div>
 <div id="kayanModal" class="kayan-modal-overlay" aria-hidden="true">

@@ -15718,6 +15718,38 @@ def api_aylik_tutarlardan_tahsilden_cikar():
     )
 
 
+@bp.route("/api/tahsilat-kayan/durum", methods=["POST"])
+@giris_gerekli
+def api_tahsilat_kayan_durum():
+    """Hafif kayan durum (UI): yalnız boşluk var mı; tam plan yok. Bayrak kapalı → 404."""
+    from tahsilat_kayan import kayan_bosluk_durum, kayan_yeniden_dagit_aktif
+
+    try:
+        data = request.get_json(force=True, silent=True) or {}
+    except Exception:
+        data = {}
+    try:
+        musteri_id = int(data.get("musteri_id"))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "mesaj": "musteri_id gerekli."}), 400
+    if not kayan_yeniden_dagit_aktif(musteri_id):
+        return jsonify({"ok": False, "mesaj": "Bu özellik bu müşteri için kapalı."}), 404
+    if not fetch_one("SELECT id FROM customers WHERE id = %s", (musteri_id,)):
+        return jsonify({"ok": False, "mesaj": "Müşteri bulunamadı."}), 404
+    d = kayan_bosluk_durum(musteri_id)
+    durum = 200 if d.get("ok") else 409
+    return jsonify({
+        "ok": bool(d.get("ok")),
+        "mid": musteri_id,
+        "mesaj": d.get("mesaj"),
+        "neden": d.get("neden"),
+        "bosluk_var": bool(d.get("bosluk_var")),
+        "bosluk": d.get("bosluk") or [],
+        "kayan_n": d.get("kayan_n"),
+        "sabit_n": d.get("sabit_n"),
+    }), durum
+
+
 @bp.route("/api/tahsilat-kayan/onizleme", methods=["POST"])
 @giris_gerekli
 def api_tahsilat_kayan_onizleme():

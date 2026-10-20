@@ -343,6 +343,71 @@ def hesapla_plan_kayan(
     }
 
 
+def kayan_bosluk_durum(
+    mid: int,
+    *,
+    oku=None,
+    borc=None,
+    rows: list[dict] | None = None,
+    sabit_kaynak=SABIT_KAYNAK_DEFAULT,
+    kayan_kaynak=KAYAN_KAYNAK_DEFAULT,
+) -> dict:
+    """Hafif durum (UI): FIFO planı hesaplamadan yalnız boşluk var mı?
+
+    Tam plan yalnız önizleme/uygula ucunda hesaplanır. Yazma yok.
+    """
+    mid = int(mid)
+    if rows is not None:
+        tum = list(rows)
+    else:
+        if oku is None:
+            from db import fetch_all
+
+            def oku(sql, params=None):  # noqa: F811
+                return fetch_all(sql, params)
+        try:
+            tum = _load_all_rows(mid, oku)
+        except Exception as ex:
+            return {
+                "ok": False, "neden": f"okuma:{type(ex).__name__}",
+                "mesaj": "Kayıtlar okunamadı.", "mid": mid,
+            }
+    if len(tum) > MAX_TAHSILAT:
+        return {
+            "ok": False, "neden": "sinir_asildi", "mid": mid,
+            "mesaj": (
+                f"Bu müşteri için {len(tum)} tahsilat kaydı var; yeniden dağıtım "
+                f"sınırı {MAX_TAHSILAT}. İşlem yapılmadı."
+            ),
+        }
+    if borc is not None:
+        borc_map = borc if isinstance(borc, dict) else borc_haritasi(borc)
+    else:
+        from routes.faturalar_routes import _gorunen_borc_satirlari
+
+        borc_map = _gorunen_borc_satirlari(mid)
+        if not isinstance(borc_map, dict):
+            borc_map = borc_haritasi(borc_map)
+    borc_map = dict(borc_haritasi(borc_map))
+    paid = _paid_map_rows(tum)
+    gaps = bosluk_bul(borc_map, paid)
+    kayan_n = sum(
+        1
+        for r in tum
+        if sinifla(r, sabit_kaynak=sabit_kaynak, kayan_kaynak=kayan_kaynak)
+        == "kayan"
+    )
+    return {
+        "ok": True,
+        "mid": mid,
+        "bosluk_var": bool(gaps),
+        "bosluk": gaps,
+        "kayan_n": kayan_n,
+        "sabit_n": len(tum) - kayan_n,
+        "n": len(tum),
+    }
+
+
 def _load_all_rows(mid: int, oku) -> list[dict]:
     rows = oku(
         """
