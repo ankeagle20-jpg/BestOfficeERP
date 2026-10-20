@@ -3662,9 +3662,9 @@ button.auto-btn.whatsapp-hizmet-filter-btn.wa-hizmet-aktif {
                     <div class="tahsilat-makbuz-birincil">
                         <div class="tahsilat-makbuz-birincil-ust">
                             <button type="button" class="tahsilat-btn-kaydet" onclick="girisTahsilatMakbuzKaydet(); return false;"><i class="fa fa-save"></i> Kaydet</button>
-                            <button type="button" class="tahsilat-btn-makbuz-olustur" onclick="girisTahsilatMakbuzOlustur(); return false;"><i class="fa fa-receipt"></i> Makbuz oluştur</button>
+                            <button type="button" class="tahsilat-btn-makbuz-olustur" id="giris_tahsilat_makbuz_goruntule_btn" disabled title="Önce kaydedin" aria-label="Makbuzu görüntüle" onclick="tahsilatMakbuzGoruntuleAc('giris_tahsilat'); return false;"><i class="fa fa-receipt"></i> Makbuzu görüntüle</button>
                         </div>
-                        <p class="tahsilat-makbuz-birincil-hint"><strong>Makbuz oluştur:</strong> bu formdaki tutarla PDF (kayıt yok). Çoklu ayı cariye tek seferde işlemek için <strong>Sözleşmeler</strong> sekmesinde grid altındaki <strong>Seçilen aylardan tahsilat oluştur</strong> veya üstteki <strong>Seçilenleri tahsil et</strong> düğmesini kullanın. Tahsilatı bu sekmede kaydetmek için <strong>Kayıt</strong>.</p>
+                        <p class="tahsilat-makbuz-birincil-hint"><strong>Makbuzu görüntüle:</strong> kaydettiğiniz makbuzun PDF'ini açar (yeni kayıt oluşturmaz). Çoklu ayı cariye tek seferde işlemek için <strong>Sözleşmeler</strong> sekmesinde grid altındaki <strong>Seçilen aylardan tahsilat oluştur</strong> veya üstteki <strong>Seçilenleri tahsil et</strong> düğmesini kullanın. Tahsilatı bu sekmede kaydetmek için <strong>Kayıt</strong>.</p>
                     </div>
                     <div class="tahsilat-makbuz-aksiyon">
                         <button type="button" class="tahsilat-btn-iptal" onclick="girisTahsilatIptal()">İptal</button>
@@ -4519,9 +4519,9 @@ button.auto-btn.whatsapp-hizmet-filter-btn.wa-hizmet-aktif {
                             <div class="tahsilat-makbuz-birincil">
                                 <div class="tahsilat-makbuz-birincil-ust">
                                     <button type="button" class="tahsilat-btn-kaydet" onclick="sozlesmeTahsilatKaydet(); return false;"><i class="fa fa-save"></i> Kaydet</button>
-                                    <button type="button" class="tahsilat-btn-makbuz-olustur" onclick="sozlesmeTahsilatMakbuzOlustur(); return false;"><i class="fa fa-receipt"></i> Makbuz oluştur</button>
+                                    <button type="button" class="tahsilat-btn-makbuz-olustur" id="sozlesme_tahsilat_makbuz_goruntule_btn" disabled title="Önce kaydedin" aria-label="Makbuzu görüntüle" onclick="tahsilatMakbuzGoruntuleAc('sozlesme_tahsilat'); return false;"><i class="fa fa-receipt"></i> Makbuzu görüntüle</button>
                                 </div>
-                                <p class="tahsilat-makbuz-birincil-hint"><strong>Makbuz oluştur:</strong> bu formdaki tutarla PDF (kayıt yok). Çoklu ayı cariye tek seferde yazmak için yukarıdaki «Seçilen aylardan tahsilat oluştur» veya üst çubuktaki «Seçilenleri tahsil et» düğmesini kullanın.</p>
+                                <p class="tahsilat-makbuz-birincil-hint"><strong>Makbuzu görüntüle:</strong> kaydettiğiniz makbuzun PDF'ini açar (yeni kayıt oluşturmaz). Çoklu ayı cariye tek seferde yazmak için yukarıdaki «Seçilen aylardan tahsilat oluştur» veya üst çubuktaki «Seçilenleri tahsil et» düğmesini kullanın.</p>
                             </div>
                             <div class="tahsilat-makbuz-aksiyon">
                                 <button type="button" class="tahsilat-btn-iptal" onclick="sozlesmeTahsilatIptal()">İptal</button>
@@ -30705,6 +30705,40 @@ window.__girisTahsilKaydetInFlight = false;
 window.__sozlesmeTahsilKaydetInFlight = false;
 window.__girisTediyeKaydetInFlight = false;
 
+/* makbuz-goruntule-js */
+var tahsilatSonKaydedilenMakbuz = {};
+function tahsilatMakbuzGoruntuleHazirla(prefix, tahsilatId, makbuzNo, musteriId) {
+    var tid = parseInt(tahsilatId || 0, 10);
+    if (!tid) return;
+    tahsilatSonKaydedilenMakbuz[prefix] = {
+        tahsilat_id: tid,
+        makbuz_no: String(makbuzNo || ''),
+        musteri_id: String(musteriId || '')
+    };
+    var b = document.getElementById(prefix + '_makbuz_goruntule_btn');
+    if (b) {
+        b.disabled = false;
+        b.title = tahsilatSonKaydedilenMakbuz[prefix].makbuz_no
+            ? ('Makbuzu görüntüle: ' + tahsilatSonKaydedilenMakbuz[prefix].makbuz_no)
+            : 'Makbuzu görüntüle';
+    }
+}
+function tahsilatMakbuzGoruntuleSifirla(prefix) {
+    try { delete tahsilatSonKaydedilenMakbuz[prefix]; } catch (_eMgS) {}
+    var b = document.getElementById(prefix + '_makbuz_goruntule_btn');
+    if (b) { b.disabled = true; b.title = 'Önce kaydedin'; }
+}
+function tahsilatMakbuzGoruntuleAc(prefix) {
+    var k = tahsilatSonKaydedilenMakbuz[prefix];
+    if (!k || !k.tahsilat_id) { alert('Önce kaydedin.'); return; }
+    var midEl = document.getElementById(prefix + '_musteri_id');
+    if (k.musteri_id && midEl && String(midEl.value || '') !== String(k.musteri_id)) {
+        alert('Önce kaydedin.');
+        return;
+    }
+    window.open('/faturalar/tahsilat-pdf/' + k.tahsilat_id, '_blank', 'noopener');
+}
+/* /makbuz-goruntule-js */
 function tahsilatMakbuzNoSet(prefix, no) {
     var txt = document.getElementById(prefix + '_makbuz_no_text');
     var hid = document.getElementById(prefix + '_makbuz_no');
@@ -33042,6 +33076,7 @@ function girisTahsilatMakbuzKaydet() {
             // DOM seçim kalıntısı sonraki makbuzda ay_ref_iso_list sızdırmasın.
             try { sozlesmeAylikSecimiTemizle(); } catch (_eSelClrOk) {}
             if (data.makbuz_no != null) tahsilatMakbuzNoSet('giris_tahsilat', data.makbuz_no);
+            tahsilatMakbuzGoruntuleHazirla('giris_tahsilat', data.tahsilat_id, data.makbuz_no, payload.musteri_id);
             tahsilatMakbuzNoYukle('giris_tahsilat');
             if (window.tahsilatWaKayit) tahsilatWaKayit('giris', data, payload.musteri_id);
             sozlesmeAylikZorlaBorcTemizle();
@@ -33353,6 +33388,7 @@ function girisTahsilatYazdir() {
 }
 
 function girisTahsilatIptal() {
+    try { tahsilatMakbuzGoruntuleSifirla('giris_tahsilat'); } catch (_eMgI) {}
     if (window.tahsilatWaPasif) tahsilatWaPasif('giris');
     tahsilatTutarDokunduSifirla('giris_tahsilat');
     tahsilMakbuzDuzenleModuTemizle('giris_tahsilat');
@@ -33563,6 +33599,7 @@ function sozlesmeTahsilatKaydet() {
             tahsilatAylikDagitimDomUygula(data, payload);
             tahsilatAylikDagitimCacheGuncelle(data);
             if (data.makbuz_no != null) tahsilatMakbuzNoSet('sozlesme_tahsilat', data.makbuz_no);
+            tahsilatMakbuzGoruntuleHazirla('sozlesme_tahsilat', data.tahsilat_id, data.makbuz_no, payload.musteri_id);
             tahsilatMakbuzNoYukle('sozlesme_tahsilat');
             if (window.tahsilatWaKayit) tahsilatWaKayit('sozlesme', data, payload.musteri_id);
             sozlesmeAylikZorlaBorcTemizle();
@@ -33710,6 +33747,7 @@ function sozlesmeTahsilatYazdir() {
 }
 
 function sozlesmeTahsilatIptal() {
+    try { tahsilatMakbuzGoruntuleSifirla('sozlesme_tahsilat'); } catch (_eMgI) {}
     if (window.tahsilatWaPasif) tahsilatWaPasif('sozlesme');
     tahsilatTutarDokunduSifirla('sozlesme_tahsilat');
     tahsilMakbuzDuzenleModuTemizle('sozlesme_tahsilat');
