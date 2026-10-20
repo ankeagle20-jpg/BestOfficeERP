@@ -751,6 +751,24 @@ def api_wa_saglik_tazele():
     })
 
 
+@bp.route('/api/saglik-eski-kapat', methods=['POST'])
+@yetki_gerekli("muhasebe")
+def api_wa_saglik_eski_kapat():
+    """2 saatten eski kuyrukta/gonderiliyor kayitlari servise sormadan
+    'suresi_doldu' yapar; bu kayitlar WhatsApp'a gonderilmez."""
+    import wa_saglik
+
+    sonuc = wa_saglik.eski_kapat()
+    # Denetim: sayi + id listesi (icerik yok).
+    _saglik_audit('wa_saglik_eski_kapat', dict(sonuc))
+    return jsonify({
+        'ok': True,
+        **sonuc,
+        'mesaj': (f"{sonuc['adet']} eski kayıt kapatıldı; "
+                  "hiçbiri WhatsApp'a gönderilmedi."),
+    })
+
+
 @bp.route('/qr-ac')
 @giris_gerekli
 def api_qr_ac():

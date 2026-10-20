@@ -34,6 +34,7 @@
       <button type="button" class="ws-btn" id="btnYenile">Yenile</button>
       <button type="button" class="ws-btn secondary" id="btnUyandir">Servisi uyandır</button>
       <button type="button" class="ws-btn secondary" id="btnTazele">Bekleyenleri tazele</button>
+      <button type="button" class="ws-btn" style="background:#c62828;" id="btnEskiKapat" disabled>Eski bekleyenleri kapat</button>
       <a class="ws-btn secondary" style="text-decoration:none;display:none;" id="btnQr" href="/whatsapp/qr-ac" target="_blank" rel="noopener">QR göster</a>
     </div>
   </div>
@@ -51,6 +52,8 @@
   const msgEl = document.getElementById("wsMsg");
   const zamanEl = document.getElementById("wsZaman");
   const btnQr = document.getElementById("btnQr");
+  const btnEskiKapat = document.getElementById("btnEskiKapat");
+  var sonSayaclar = null;
 
   function mesaj(metin, ok) {
     msgEl.textContent = metin || "";
@@ -72,6 +75,8 @@
         return '<div class="ws-card ' + sev + '"><h3><span class="ws-dot"></span>' +
           escapeHtml(k.baslik || "") + "</h3><p>" + escapeHtml(k.aciklama || "") + "</p></div>";
       }).join("");
+      sonSayaclar = j.sayaclar || null;
+      btnEskiKapat.disabled = !((sonSayaclar && sonSayaclar.kapatilabilir) > 0);
       const oturumKart = j.kontroller.find(function (k) { return k.anahtar === "oturum"; });
       btnQr.style.display = (oturumKart && oturumKart.seviye !== "ok") ? "" : "none";
       zamanEl.textContent = "Son yenileme: " + new Date().toLocaleTimeString("tr-TR");
@@ -103,6 +108,12 @@
   document.getElementById("btnYenile").addEventListener("click", ozetYukle);
   document.getElementById("btnUyandir").addEventListener("click", function () { post(this, "/whatsapp/api/saglik-uyandir"); });
   document.getElementById("btnTazele").addEventListener("click", function () { post(this, "/whatsapp/api/saglik-tazele"); });
+  btnEskiKapat.addEventListener("click", function () {
+    const n = (sonSayaclar && sonSayaclar.kapatilabilir) || 0;
+    if (n <= 0) { mesaj("Kapatılacak eski kayıt yok.", false); return; }
+    if (!window.confirm(n + " eski bekleyen kayıt kapatılacak ve WhatsApp'a gönderilmeyecek. Devam edilsin mi?")) return;
+    post(this, "/whatsapp/api/saglik-eski-kapat");
+  });
   ozetYukle();
 })();
 </script>

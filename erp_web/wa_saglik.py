@@ -92,6 +92,10 @@ def kontrolleri_uret(ulasim: str, oturum: str | None, sayaclar: dict,
         k_seviye = "ok"
         k_metin = (f"Bekleyen kayıt yok. Son 24 saat: {g24} gönderildi, {h24} hata, "
                    f"{b24} doğrulanamadı.")
+    kapatilabilir = int(s.get("kapatilabilir") or 0)
+    if kapatilabilir > 0:
+        k_metin += (f" {kapatilabilir} eski kayıt kapatılabilir "
+                    f"(Eski bekleyenleri kapat).")
     kartlar.append({"anahtar": "kuyruk", "seviye": k_seviye, "baslik": "Kuyruk",
                     "aciklama": k_metin})
 
@@ -139,7 +143,7 @@ def saglik_sayaclari(oku=None, esik_dk: int = ESIK_TAKILI_DK) -> dict:
 
     out = {"bekleyen": 0, "yasli_takili": 0, "gonderildi_24s": 0, "hata_24s": 0,
            "belirsiz_24s": 0, "son_gonderildi": None, "son_hata": "",
-           "belirsiz_toplam": 0}
+           "belirsiz_toplam": 0, "kapatilabilir": 0}
 
     r = _satir(
         """
@@ -147,6 +151,8 @@ def saglik_sayaclari(oku=None, esik_dk: int = ESIK_TAKILI_DK) -> dict:
           COUNT(*) FILTER (WHERE durum IN ('kuyrukta','gonderiliyor')) AS bekleyen,
           COUNT(*) FILTER (WHERE durum IN ('kuyrukta','gonderiliyor')
                            AND created_at < NOW() - INTERVAL '1 minute' * %s) AS yasli,
+          COUNT(*) FILTER (WHERE durum IN ('kuyrukta','gonderiliyor')
+                           AND created_at < NOW() - INTERVAL '2 hours') AS kapatilabilir,
           COUNT(*) FILTER (WHERE durum = 'gonderildi'
                            AND created_at > NOW() - INTERVAL '24 hours') AS g24,
           COUNT(*) FILTER (WHERE durum = 'basarisiz'
@@ -161,6 +167,7 @@ def saglik_sayaclari(oku=None, esik_dk: int = ESIK_TAKILI_DK) -> dict:
     )
     out["bekleyen"] += int(r.get("bekleyen") or 0)
     out["yasli_takili"] += int(r.get("yasli") or 0)
+    out["kapatilabilir"] += int(r.get("kapatilabilir") or 0)
     out["gonderildi_24s"] += int(r.get("g24") or 0)
     out["hata_24s"] += int(r.get("h24") or 0)
     out["belirsiz_24s"] += int(r.get("b24") or 0)
@@ -202,7 +209,7 @@ def bekleyen_kayitlar(oku=None, limit: int = 200) -> list[dict]:
     try:
         rows = oku(
             """
-            SELECT id, durum, anahtar FROM sozlesme_whatsapp_gonderim
+            SELECT id, durum, anahtar, created_at FROM sozlesme_whatsapp_gonderim
             WHERE durum IN ('kuyrukta', 'gonderiliyor', 'belirsiz')
             ORDER BY created_at ASC LIMIT %s
             """,
@@ -211,6 +218,38 @@ def bekleyen_kayitlar(oku=None, limit: int = 200) -> list[dict]:
     except Exception:
         return []
     return [dict(r) for r in rows]
+
+
+def eski_kapat(oku=None, yaz=None, saat: int = 2) -> dict:
+    """2 saatten eski kuyrukta/gonderiliyor kayitlari servise sormadan
+    'suresi_doldu' yapar. Donus: {adet, kayit_idler} (icerik yok)."""
+    if oku is None or yaz is None:
+        from db import execute, fetch_all
+
+        if oku is None:
+            oku = fetch_all
+        if yaz is None:
+            def yaz(sql, params=None):
+                return execute(sql, params) if params is not None else execute(sql)
+    rows = oku(
+        """
+        SELECT id FROM sozlesme_whatsapp_gonderim
+        WHERE durum IN ('kuyrukta', 'gonderiliyor')
+          AND created_at < NOW() - INTERVAL '1 hour' * %s
+        ORDER BY id
+        """,
+        (int(saat),),
+    ) or []
+    ids = [int(r["id"]) for r in rows]
+    if ids:
+        yaz(
+            """
+            UPDATE sozlesme_whatsapp_gonderim SET durum = 'suresi_doldu'
+            WHERE id = ANY(%s) AND durum IN ('kuyrukta', 'gonderiliyor')
+            """,
+            (ids,),
+        )
+    return {"adet": len(ids), "kayit_idler": ids}
 
 
 def tazele_calistir(kayitlar, sorgu_fn, tazele_fn, azami=None, butce_sn=None) -> dict:

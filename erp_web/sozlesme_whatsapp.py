@@ -634,9 +634,10 @@ def _satiri_tazele(row: dict, anahtar: str, sonuc_fn) -> dict:
         return row
     if str(row.get("durum") or "") not in _TAZELE:
         return row
-    if str(row.get("durum") or "") == "belirsiz" and not _belirsiz_sorgulanir(
-        row.get("created_at")
-    ):
+    # Yas kurali (belirsiz + kuyrukta/gonderiliyor): 2 saatten eski kayit
+    # servise sorulmaz; servis sonucu zaten 2 saat saklanir, yasli kayit
+    # gonderildi sanilmaz - yalniz 'suresi_doldu' ile kapanabilir.
+    if not _belirsiz_sorgulanir(row.get("created_at")):
         return row
     try:
         paket = sonuc_fn(anahtar)

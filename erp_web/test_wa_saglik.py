@@ -20,7 +20,7 @@ def check(name, ok, ek=""):
 
 BOŞ_SAYAC = {"bekleyen": 0, "yasli_takili": 0, "gonderildi_24s": 0, "hata_24s": 0,
              "belirsiz_24s": 0, "son_gonderildi": None, "son_hata": "",
-             "belirsiz_toplam": 0}
+             "belirsiz_toplam": 0, "kapatilabilir": 0}
 
 
 def _kart(kartlar, anahtar):
@@ -137,7 +137,17 @@ def test_kapi1():
     eski_kuyruk = {"id": 3, "durum": "kuyrukta", "anahtar": "szwa:d:z",
                    "created_at": datetime.now(timezone.utc) - timedelta(hours=5)}
     sw._satiri_tazele(eski_kuyruk, "szwa:d:z", sorgu)
-    check("kuyruk_yas_kurali_yok", sayac["n"] == 2, sayac)
+    check("kuyruk_yasli_sorgu_yok", sayac["n"] == 1, sayac)
+
+    genc_kuyruk = {"id": 4, "durum": "kuyrukta", "anahtar": "szwa:d:w",
+                   "created_at": datetime.now(timezone.utc) - timedelta(minutes=20)}
+    sw._satiri_tazele(genc_kuyruk, "szwa:d:w", sorgu)
+    check("kuyruk_genc_sorgu_var", sayac["n"] == 2, sayac)
+
+    gonderiliyor_eski = {"id": 5, "durum": "gonderiliyor", "anahtar": "szwa:d:v",
+                         "created_at": datetime.now(timezone.utc) - timedelta(hours=3)}
+    sw._satiri_tazele(gonderiliyor_eski, "szwa:d:v", sorgu)
+    check("gonderiliyor_yasli_sorgu_yok", sayac["n"] == 2, sayac)
 
     def tazele_fn(row, anahtar, fn):
         return dict(row, durum="gonderildi")
@@ -179,11 +189,92 @@ def _istemci():
     return client
 
 
+def test_eski_kapat_ve_retry():
+    from datetime import datetime, timedelta, timezone
+
+    import sozlesme_whatsapp as sw
+    import wa_saglik as ws
+
+    # --- eski_kapat: sahte oku/yaz ile ---
+    yazilan = []
+
+    def _oku(sql, params=None):
+        check("kapat_sorgu_durumlar", "'kuyrukta', 'gonderiliyor'" in sql.replace('"', "'")
+              and "created_at <" in sql, sql[:120])
+        return [{"id": 5}, {"id": 8}]
+
+    def _yaz(sql, params=None):
+        yazilan.append((sql, params))
+
+    sonuc = ws.eski_kapat(oku=_oku, yaz=_yaz)
+    check("kapat_sayi_id", sonuc == {"adet": 2, "kayit_idler": [5, 8]}, sonuc)
+    check("kapat_update", len(yazilan) == 1 and "suresi_doldu" in yazilan[0][0]
+          and "durum IN ('kuyrukta', 'gonderiliyor')" in yazilan[0][0]
+          and yazilan[0][1] == ([5, 8],), yazilan[:1])
+
+    yazilan.clear()
+    sonuc0 = ws.eski_kapat(oku=lambda sql, params=None: [], yaz=_yaz)
+    check("kapat_bos_yazma_yok", sonuc0 == {"adet": 0, "kayit_idler": []}
+          and not yazilan, (sonuc0, yazilan))
+
+    # --- suresi_doldu retry/tazele disi ---
+    check("suresi_doldu_tazele_disi", "suresi_doldu" not in sw._TAZELE, sw._TAZELE)
+    sayac = {"n": 0}
+
+    def _sorgu(_a):
+        sayac["n"] += 1
+        return {"durum": "gonderildi"}
+
+    kayit = {"id": 9, "durum": "suresi_doldu", "anahtar": "szwa:d:k",
+             "created_at": datetime.now(timezone.utc) - timedelta(minutes=5)}
+    donen = sw._satiri_tazele(kayit, "szwa:d:k", _sorgu)
+    check("suresi_doldu_tazelenmez", sayac["n"] == 0 and donen["durum"] == "suresi_doldu",
+          (sayac, donen))
+
+    # --- saglik sayaclari SQL'i suresi_doldu'yu bekleyene saymaz ---
+    sorgular = []
+
+    def _sayac_oku(sql, params=None):
+        sorgular.append(str(sql))
+        if "COUNT(*) FILTER" in sql and "sozlesme_whatsapp_gonderim" in sql:
+            return [{"bekleyen": 4, "yasli": 3, "kapatilabilir": 3, "g24": 0,
+                     "h24": 0, "b24": 0, "btoplam": 0, "son_ok": None}]
+        return [{}]
+
+    sayaclar = ws.saglik_sayaclari(oku=_sayac_oku)
+    check("sayac_kapatilabilir", sayaclar["kapatilabilir"] == 3, sayaclar)
+    bek_sql = next((s for s in sorgular if "AS bekleyen" in s), "")
+    check("sayac_sql_bekleyen_kisitli", "suresi_doldu" not in bek_sql
+          and "IN ('kuyrukta','gonderiliyor')" in bek_sql, bek_sql[:160])
+
+    # --- bekleyen_kayitlar (tazele listesi) suresi_doldu icermez ---
+    lst_sql = []
+    kayitlar = ws.bekleyen_kayitlar(oku=lambda sql, p=None: (lst_sql.append(str(sql))
+                                                             or [{"id": 1,
+                                                                  "durum": "kuyrukta",
+                                                                  "anahtar": "szwa:d:1",
+                                                                  "created_at": None}]))
+    check("tazele_liste_sql", lst_sql and "suresi_doldu" not in lst_sql[0]
+          and "'kuyrukta', 'gonderiliyor', 'belirsiz'" in lst_sql[0]
+          and [k["id"] for k in kayitlar] == [1], lst_sql[:1])
+
+    # --- kart ipucu ---
+    s = dict(BOŞ_SAYAC, bekleyen=4, yasli_takili=3, kapatilabilir=3)
+    k = ws.kontrolleri_uret("ok", "hazir", s)
+    check("kart_ipucu", "3 eski kayıt kapatılabilir" in _kart(k, "kuyruk")["aciklama"],
+          _kart(k, "kuyruk"))
+    k0 = ws.kontrolleri_uret("ok", "hazir", dict(BOŞ_SAYAC))
+    check("kart_ipucu_sifir_yok", "kapatılabilir" not in _kart(k0, "kuyruk")["aciklama"],
+          _kart(k0, "kuyruk"))
+
+
 def test_rol_kapisi():
     client = _istemci()
     ROL["v"] = "personel"
     r = client.get("/whatsapp/api/saglik-ozet")
     check("personel_api_403", r.status_code == 403, r.status_code)
+    r = client.post("/whatsapp/api/saglik-eski-kapat")
+    check("personel_kapat_403", r.status_code == 403, r.status_code)
     ROL["v"] = "muhasebe"
     r = client.get("/whatsapp/api/saglik-ozet")
     govde = r.get_json(silent=True) or {}
@@ -199,6 +290,7 @@ def main():
     test_oturum_kodu()
     test_tazele()
     test_kapi1()
+    test_eski_kapat_ve_retry()
     test_rol_kapisi()
     print("FAIL" if FAILS else "TUMU GECTI", FAILS)
     return 1 if FAILS else 0
