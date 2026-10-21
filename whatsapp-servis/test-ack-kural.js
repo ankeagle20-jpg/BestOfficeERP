@@ -11,6 +11,8 @@ const {
   olusturEslesir,
   tekBekleyen,
   kanitBaslat,
+  fetchDogrula,
+  fetchKanit,
   ackBekle,
   yariyiGeriAl,
   gonderimBitir,
@@ -185,6 +187,53 @@ async function senaryolar() {
   assert.strictEqual(cift.dinleyen(), 0);
   assert.strictEqual(olusturEslesir(olusturOlay(mesaj(SOHBET, false), 20100), { chatId: SOHBET, bas: 20000, pencereMs: 10000 }), false);
 
+  const LID = "testlid@lid";
+  const lidClient = sahte();
+  lidClient.getContactLidAndPhone = () => [{ lid: LID, pn: SOHBET }];
+  const lidLog = [];
+  simdi = 30000;
+  const lidKanit = kanitBaslat(lidClient, SOHBET, 30000, 5000, () => simdi, (s) => lidLog.push(s));
+  await lidKanit.aliasYukle();
+  simdi = 30100;
+  lidClient.emitCreate(mesaj(LID, true));
+  const sLid = await lidKanit.bekle();
+  assert.strictEqual(sLid.durum, "gonderildi");
+  assert.strictEqual(sLid.kod, "ack_dogrulandi");
+  assert.strictEqual(lidClient.gonderim, 0);
+  assert.ok(lidLog.some((s) => s.includes("olay=message_create") && s.includes("to=lid") && s.includes("eslesme=1") && s.includes("biz=c.us")));
+  assert.ok(lidLog.some((s) => s.includes("kanit_ozet") && s.includes("eslesme=1")));
+  assert.ok(lidLog.every((s) => !s.includes(SOHBET) && !s.includes("testlid")));
+
+  const basFetch = 40000;
+  const chatVar = {
+    fetchMessages() {
+      return [{ fromMe: true, timestamp: Math.floor(basFetch / 1000), get body() { throw new Error("metin"); } }];
+    },
+  };
+  const sFetch = await fetchKanit(chatVar, basFetch, 15000, 1000);
+  assert.strictEqual(sFetch.durum, "gonderildi");
+  assert.strictEqual(sFetch.kod, "fetch_dogrulandi");
+
+  const chatBos = { fetchMessages() { return []; } };
+  const sBosFetch = await fetchKanit(chatBos, basFetch, 15000, 1000);
+  assert.strictEqual(sBosFetch.kod, "bos_donus_belirsiz");
+
+  const chatHata = { fetchMessages() { throw new Error("kopuk"); } };
+  const sHata = await fetchKanit(chatHata, basFetch, 15000, 1000);
+  assert.strictEqual(sHata.durum, "belirsiz");
+  assert.strictEqual(sHata.kod, "bos_donus_belirsiz");
+
+  const chatYavas = { fetchMessages() { return new Promise(() => {}); } };
+  const sYavas = await fetchKanit(chatYavas, basFetch, 15000, 40);
+  assert.strictEqual(sYavas.kod, "bos_donus_belirsiz");
+  assert.notStrictEqual(sYavas.kod, "gonderim_hata");
+
+  const eskiTs = Math.floor(10000 / 1000);
+  const chatEski = { fetchMessages() { return [{ fromMe: true, timestamp: eskiTs }]; } };
+  const sEski = await fetchKanit(chatEski, 100000, 15000, 1000);
+  assert.strictEqual(sEski.kod, "bos_donus_belirsiz");
+  assert.strictEqual(fetchDogrula([{ fromMe: false, timestamp: 100 }], 1000, 15000), false);
+
   const satir = logSatiri("szwa:d:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "metin", 0, "belirsiz", "bos_donus_belirsiz", 98);
   assert.ok(satir.includes("sonuc=belirsiz"));
   assert.ok(satir.includes("kod=bos_donus_belirsiz"));
@@ -194,7 +243,9 @@ async function senaryolar() {
   const indexSrc = fs.readFileSync(path.join(__dirname, "index.js"), "utf8");
   const iKanit = indexSrc.indexOf("kanitBaslat(");
   const iSend = indexSrc.indexOf("session.client.sendMessage");
-  assert.ok(iKanit > 0 && iSend > iKanit);
+  const iFetch = indexSrc.indexOf("await fetchKanit");
+  assert.ok(iKanit > 0 && iSend > iKanit && iFetch > iSend);
+  assert.strictEqual(indexSrc.includes("getChatById"), true);
   assert.strictEqual(indexSrc.includes("dogrulaniyor"), true);
   assert.strictEqual(indexSrc.includes("tekBekleyen"), true);
   assert.strictEqual((indexSrc.match(/sendMessage/g) || []).length, 3);

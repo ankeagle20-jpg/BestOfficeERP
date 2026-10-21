@@ -4,6 +4,9 @@ const PDF_LIMIT = 2 * 1024 * 1024;
 const MEDYA_TIMEOUT_MS = 75 * 1000;
 const SONUC_TTL_MS = 2 * 60 * 60 * 1000;
 const ACK_PENCERE_MS = 10000;
+const FETCH_TOLERANS_MS = 15000;
+const FETCH_TIMEOUT_MS = 4000;
+const FETCH_LIMIT = 3;
 
 function cozulmusBoyut(veri) {
   const s = String(veri || "").replace(/\s/g, "");
@@ -127,10 +130,48 @@ function olusturOlay(msg, an) {
   return { fromMe, chatId: fromMe ? sohbetKim(msg) : "", an: Number(an) || 0 };
 }
 
+function ekTur(kim) {
+  const s = String(kim || "");
+  const at = s.lastIndexOf("@");
+  if (at < 0 || at === s.length - 1) return "yok";
+  const ek = s.slice(at + 1).toLowerCase();
+  if (ek === "c.us" || ek === "lid" || ek === "g.us") return ek;
+  return "diger";
+}
+
+function kimParca(deger) {
+  if (!deger) return "";
+  if (typeof deger === "string") return deger;
+  if (typeof deger._serialized === "string") return deger._serialized;
+  return "";
+}
+
+function chatEslesir(chatId, bekleyen) {
+  if (!chatId || !bekleyen) return false;
+  if (chatId === bekleyen.chatId) return true;
+  return Boolean(bekleyen.alias && bekleyen.alias.has(chatId));
+}
+
+function kanitSatiri(olayAd, ack, fromMe, bizEk, toEk, remoteEk, eslesme, ms) {
+  const ackSayi = Number(ack);
+  const ackK = Number.isFinite(ackSayi) ? String(Math.trunc(ackSayi)) : "-";
+  const sure = Math.max(0, Math.trunc(Number(ms) || 0));
+  return (
+    "olay=" + olayAd +
+    " ack=" + ackK +
+    " fromMe=" + (fromMe ? "1" : "0") +
+    " biz=" + bizEk +
+    " to=" + toEk +
+    " remote=" + remoteEk +
+    " eslesme=" + (eslesme ? "1" : "0") +
+    " ms=" + sure
+  );
+}
+
 function ackEslesir(olay, bekleyen) {
   if (!olay || !bekleyen) return false;
   if (!olay.fromMe) return false;
-  if (!olay.chatId || olay.chatId !== bekleyen.chatId) return false;
+  if (!chatEslesir(olay.chatId, bekleyen)) return false;
   if (!(olay.ack >= 1)) return false;
   const an = olay.an;
   const bas = Number(bekleyen.bas) || 0;
@@ -152,7 +193,7 @@ function tekBekleyen(kuyruk, aktif) {
 function olusturEslesir(olay, bekleyen) {
   if (!olay || !bekleyen) return false;
   if (!olay.fromMe) return false;
-  if (!olay.chatId || olay.chatId !== bekleyen.chatId) return false;
+  if (!chatEslesir(olay.chatId, bekleyen)) return false;
   const an = olay.an;
   const bas = Number(bekleyen.bas) || 0;
   const pencere = Number(bekleyen.pencereMs) || ACK_PENCERE_MS;
@@ -161,24 +202,53 @@ function olusturEslesir(olay, bekleyen) {
   return true;
 }
 
-function kanitBaslat(client, chatId, bas, pencereMs, simdiFn) {
+function kanitBaslat(client, chatId, bas, pencereMs, simdiFn, logFn) {
   const pencere = Number(pencereMs) || ACK_PENCERE_MS;
   const simdi = typeof simdiFn === "function" ? simdiFn : () => Date.now();
-  const bekleyen = { chatId: String(chatId || ""), bas: Number(bas) || 0, pencereMs: pencere };
+  const yaz = typeof logFn === "function" ? logFn : null;
+  const bekleyen = {
+    chatId: String(chatId || ""),
+    bas: Number(bas) || 0,
+    pencereMs: pencere,
+    alias: new Set(),
+  };
+  if (bekleyen.chatId) bekleyen.alias.add(bekleyen.chatId);
   let kanitVar = false;
   let kapali = false;
+  let ozetYazildi = false;
+  let olaySayisi = 0;
   let bekleyenResolve = null;
   let zamanlayici = null;
+  const adaylar = [];
   const sonuc = () =>
     kanitVar
       ? { durum: "gonderildi", kod: "ack_dogrulandi" }
       : { durum: "belirsiz", kod: "bos_donus_belirsiz" };
-  const ackDinle = (msg, ack) => {
-    if (ackEslesir(ackOlay(msg, ack, simdi()), bekleyen)) kabul();
+  const ozet = () => {
+    if (ozetYazildi) return;
+    ozetYazildi = true;
+    if (yaz) yaz("kanit_ozet olay_sayisi=" + olaySayisi + " eslesme=" + (kanitVar ? "1" : "0"));
   };
-  const olusturDinle = (msg) => {
-    if (olusturEslesir(olusturOlay(msg, simdi()), bekleyen)) kabul();
+  const isle = (ad, msg, ack) => {
+    if (kapali) return;
+    try {
+      const an = simdi();
+      const toHam = kimParca(msg && msg.to);
+      const remoteHam = kimParca(msg && msg.id && msg.id.remote);
+      const fromMe = Boolean(msg && (msg.fromMe || (msg.id && msg.id.fromMe)));
+      const eslesme = chatEslesir(toHam, bekleyen) || chatEslesir(remoteHam, bekleyen);
+      olaySayisi += 1;
+      if (yaz) {
+        yaz(kanitSatiri(ad, ack, fromMe, ekTur(bekleyen.chatId), ekTur(toHam), ekTur(remoteHam), eslesme, an - bekleyen.bas));
+      }
+      const olay = ad === "message_ack" ? ackOlay(msg, ack, an) : olusturOlay(msg, an);
+      const oldu = ad === "message_ack" ? ackEslesir(olay, bekleyen) : olusturEslesir(olay, bekleyen);
+      if (oldu) kabul();
+      else adaylar.push({ tur: ad === "message_ack" ? "ack" : "olustur", olay });
+    } catch (_e) {}
   };
+  const ackDinle = (msg, ack) => isle("message_ack", msg, ack);
+  const olusturDinle = (msg) => isle("message_create", msg, undefined);
   const birak = () => {
     if (kapali) return;
     kapali = true;
@@ -198,9 +268,27 @@ function kanitBaslat(client, chatId, bas, pencereMs, simdiFn) {
     if (!bekleyenResolve) return;
     const coz = bekleyenResolve;
     bekleyenResolve = null;
+    ozet();
     birak();
     coz(sonuc());
   };
+  async function aliasYukle() {
+    if (!client || typeof client.getContactLidAndPhone !== "function") return;
+    let liste;
+    try {
+      liste = await client.getContactLidAndPhone([bekleyen.chatId]);
+    } catch (_e) {
+      return;
+    }
+    const satir = Array.isArray(liste) ? liste[0] : null;
+    if (!satir || typeof satir !== "object") return;
+    if (satir.lid) bekleyen.alias.add(String(satir.lid));
+    if (satir.pn) bekleyen.alias.add(String(satir.pn));
+    for (const a of adaylar) {
+      const oldu = a.tur === "ack" ? ackEslesir(a.olay, bekleyen) : olusturEslesir(a.olay, bekleyen);
+      if (oldu) kabul();
+    }
+  }
   let bagli = false;
   if (client && typeof client.on === "function") {
     client.on("message_ack", ackDinle);
@@ -209,11 +297,13 @@ function kanitBaslat(client, chatId, bas, pencereMs, simdiFn) {
   }
   function bekle() {
     if (!bagli) {
+      ozet();
       birak();
       return Promise.resolve({ durum: "belirsiz", kod: "bos_donus_belirsiz" });
     }
     if (kanitVar || kapali) {
       const hazir = sonuc();
+      ozet();
       birak();
       return Promise.resolve(hazir);
     }
@@ -225,12 +315,46 @@ function kanitBaslat(client, chatId, bas, pencereMs, simdiFn) {
         if (kapali) return;
         const coz = bekleyenResolve;
         bekleyenResolve = null;
+        ozet();
         birak();
         if (coz) coz(sonuc());
       }, kalan);
     });
   }
-  return { bekle, birak, kanit: () => kanitVar };
+  return { bekle, birak, aliasYukle, kanit: () => kanitVar };
+}
+
+function zamanMs(ts) {
+  const n = Number(ts);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  if (n < 1e12) return Math.round(n * 1000);
+  return Math.round(n);
+}
+
+function fetchDogrula(mesajlar, bas, toleransMs) {
+  const alt = (Number(bas) || 0) - (Number(toleransMs) || 0);
+  for (const m of mesajlar || []) {
+    if (!m || m.fromMe !== true) continue;
+    const ts = zamanMs(m.timestamp);
+    if (ts > 0 && ts >= alt) return true;
+  }
+  return false;
+}
+
+function fetchKanit(chat, bas, toleransMs, zamanAsimiMs) {
+  const ms = Number(zamanAsimiMs) || FETCH_TIMEOUT_MS;
+  if (!chat || typeof chat.fetchMessages !== "function") {
+    return Promise.resolve({ durum: "belirsiz", kod: "bos_donus_belirsiz" });
+  }
+  return sureli(() => chat.fetchMessages({ limit: FETCH_LIMIT }), ms).then((paket) => {
+    if (!paket || paket.zamanAsimi || paket.hata) {
+      return { durum: "belirsiz", kod: "bos_donus_belirsiz" };
+    }
+    if (fetchDogrula(paket.donus, bas, toleransMs == null ? FETCH_TOLERANS_MS : toleransMs)) {
+      return { durum: "gonderildi", kod: "fetch_dogrulandi" };
+    }
+    return { durum: "belirsiz", kod: "bos_donus_belirsiz" };
+  });
 }
 
 function ackBekle(client, chatId, bas, pencereMs, simdiFn) {
@@ -357,6 +481,8 @@ module.exports = {
   MEDYA_TIMEOUT_MS,
   SONUC_TTL_MS,
   ACK_PENCERE_MS,
+  FETCH_TOLERANS_MS,
+  FETCH_TIMEOUT_MS,
   sonucSinifla,
   ackOlay,
   ackEslesir,
@@ -364,6 +490,8 @@ module.exports = {
   olusturEslesir,
   tekBekleyen,
   kanitBaslat,
+  fetchDogrula,
+  fetchKanit,
   ackBekle,
   sureli,
   yariyiGeriAl,

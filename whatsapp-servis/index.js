@@ -24,7 +24,10 @@ const {
   MEDYA_TIMEOUT_MS,
   SONUC_TTL_MS,
   ACK_PENCERE_MS,
+  FETCH_TOLERANS_MS,
+  FETCH_TIMEOUT_MS,
   kanitBaslat,
+  fetchKanit,
   tekBekleyen,
   sonucSakla,
   sonucGetir,
@@ -353,9 +356,18 @@ async function kuyrukIsle(session) {
         } else {
           beklenir = true;
           const chatId = phone.endsWith('@c.us') ? phone : `${phone}@c.us`;
+          let chat = null;
           if (tekBekleyen(session.queue, item)) {
-            kanit = kanitBaslat(session.client, chatId, bas, ACK_PENCERE_MS);
+            kanit = kanitBaslat(session.client, chatId, bas, ACK_PENCERE_MS, null, (satir) => waLog('kanit', satir));
             item.dogrulaniyor = true;
+            try { await kanit.aliasYukle(); } catch (_e) {}
+            try {
+              if (session.client && typeof session.client.getChatById === 'function') {
+                chat = await session.client.getChatById(chatId);
+              }
+            } catch (_e) {
+              chat = null;
+            }
           }
           const paket = await sureli(
             gonderGovde(item, (icerik, opts) => {
@@ -367,7 +379,13 @@ async function kuyrukIsle(session) {
           sinif = sonucSinifla(paket.donus, paket.hata, Boolean(paket.zamanAsimi), tur === 'pdf');
           if (sinif.durum === 'ack_bekle') {
             if (!kanit) sinif = { durum: 'belirsiz', kod: 'bos_donus_belirsiz' };
-            else sinif = await kanit.bekle();
+            else {
+              sinif = await kanit.bekle();
+              if (sinif && sinif.kod === 'bos_donus_belirsiz') {
+                sinif = await fetchKanit(chat, bas, FETCH_TOLERANS_MS, FETCH_TIMEOUT_MS);
+                waLog('kanit_fetch', 'kod=' + (sinif && sinif.kod ? sinif.kod : ''));
+              }
+            }
           }
         }
       } catch (err) {
