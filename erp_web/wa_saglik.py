@@ -6,7 +6,23 @@ Sayaçlar yalnız sayı ve durum adı taşır.
 """
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
+try:
+    from zoneinfo import ZoneInfo
+
+    _IST = ZoneInfo("Europe/Istanbul")
+except Exception:
+    _IST = timezone(timedelta(hours=3))
+
 ESIK_TAKILI_DK = 30
+
+# Not/ödeme "gönderildi" = servis kuyruğuna kabul; teslim ayrı doğrulanmaz.
+KABUL_NOTU = (
+    "Not ve ödeme akışında 'gönderildi' servis kuyruğuna kabul demektir; "
+    "gerçek teslim ayrıca doğrulanmaz."
+)
+_AKIS_AD = {"sozlesme": "sözleşme", "not": "not", "odeme": "ödeme"}
 
 ULASIM_METIN = {
     "baglanti_yok": "Servise ulaşılamadı. Ofis bilgisayarı kapalı olabilir ya da tünel kopmuş.",
@@ -97,34 +113,33 @@ def kontrolleri_uret(ulasim: str, oturum: str | None, sayaclar: dict,
 
     bekleyen = int(s.get("bekleyen") or 0)
     yasli = int(s.get("yasli_takili") or 0)
-    g24 = int(s.get("gonderildi_24s") or 0)
-    h24 = int(s.get("hata_24s") or 0)
-    b24 = int(s.get("belirsiz_24s") or 0)
+    ozet24 = _yirmi_dort_metin(s)
     if yasli > 0:
         k_seviye = "uyari"
         k_metin = (f"{bekleyen} kayıt bekliyor; {yasli} kayıt {esik_dk} dakikadan uzun "
-                   f"süredir takılı. Son 24 saat: {g24} gönderildi, {h24} hata, "
-                   f"{b24} doğrulanamadı.")
+                   f"süredir takılı. {ozet24}")
     elif bekleyen > 0:
         k_seviye = "ok"
-        k_metin = (f"{bekleyen} kayıt gönderim sırasında. Son 24 saat: {g24} gönderildi, "
-                   f"{h24} hata, {b24} doğrulanamadı.")
+        k_metin = f"{bekleyen} kayıt gönderim sırasında. {ozet24}"
     else:
         k_seviye = "ok"
-        k_metin = (f"Bekleyen kayıt yok. Son 24 saat: {g24} gönderildi, {h24} hata, "
-                   f"{b24} doğrulanamadı.")
+        k_metin = f"Bekleyen kayıt yok. {ozet24}"
     kapatilabilir = int(s.get("kapatilabilir") or 0)
     if kapatilabilir > 0:
         k_metin += (f" {kapatilabilir} eski kayıt kapatılabilir "
                     f"(Eski bekleyenleri kapat).")
     kartlar.append({"anahtar": "kuyruk", "seviye": k_seviye, "baslik": "Kuyruk",
-                    "aciklama": k_metin})
+                    "aciklama": k_metin, "ipucu": KABUL_NOTU})
 
     son_ok = s.get("son_gonderildi")
+    akis = str(s.get("son_gonderildi_akis") or "").strip()
     son_hata = str(s.get("son_hata") or "").strip()
     parca = []
-    parca.append(f"Son başarılı gönderim: {son_ok}." if son_ok
-                 else "Kayıtlı başarılı gönderim zamanı yok.")
+    if son_ok:
+        ek = f" ({akis})" if akis else ""
+        parca.append(f"Son başarılı gönderim: {son_ok}{ek}.")
+    else:
+        parca.append("Kayıtlı başarılı gönderim zamanı yok.")
     if son_hata:
         parca.append(f"Son hata sınıfı: {son_hata}.")
     kartlar.append({
@@ -165,6 +180,41 @@ def kontrolleri_uret(ulasim: str, oturum: str | None, sayaclar: dict,
     return kartlar
 
 
+def _an_utc(ham):
+    """Zaman damgasını UTC'ye çevirir. Saat dilimi yoksa UTC sayılır."""
+    if ham is None or ham == "":
+        return None
+    an = ham
+    if not isinstance(an, datetime):
+        s = str(ham).strip().replace("T", " ")
+        if not s:
+            return None
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        try:
+            an = datetime.fromisoformat(s)
+        except ValueError:
+            return None
+    if an.tzinfo is None:
+        an = an.replace(tzinfo=timezone.utc)
+    return an.astimezone(timezone.utc)
+
+
+def _istanbul_etiket(an: datetime) -> str:
+    return an.astimezone(_IST).strftime("%d.%m.%Y %H:%M")
+
+
+def _yirmi_dort_metin(s: dict) -> str:
+    g24 = int(s.get("gonderildi_24s") or 0)
+    sz = int(s.get("gonderildi_24s_sozlesme") or 0)
+    nt = int(s.get("gonderildi_24s_not") or 0)
+    od = int(s.get("gonderildi_24s_odeme") or 0)
+    h24 = int(s.get("hata_24s") or 0)
+    b24 = int(s.get("belirsiz_24s") or 0)
+    return (f"Son 24 saat: {g24} gönderildi (sözleşme {sz}, not {nt}, ödeme {od}), "
+            f"{h24} hata, {b24} doğrulanamadı.")
+
+
 def _guvenli_kod(v) -> str:
     s = "".join(c for c in str(v or "").lower() if c.isalnum() or c == "_")[:32]
     return s
@@ -185,10 +235,14 @@ def saglik_sayaclari(oku=None, esik_dk: int = ESIK_TAKILI_DK) -> dict:
         return (rows or [{}])[0] or {}
 
     out = {"bekleyen": 0, "yasli_takili": 0, "gonderildi_24s": 0, "hata_24s": 0,
-           "belirsiz_24s": 0, "son_gonderildi": None, "son_hata": "",
+           "belirsiz_24s": 0, "son_gonderildi": None, "son_gonderildi_akis": "",
+           "son_hata": "",
            "belirsiz_toplam": 0, "kapatilabilir": 0,
            "belirsiz_sozlesme": 0, "belirsiz_sozlesme_yeni": 0,
-           "belirsiz_not": 0, "belirsiz_odeme": 0}
+           "belirsiz_not": 0, "belirsiz_odeme": 0,
+           "gonderildi_24s_sozlesme": 0, "gonderildi_24s_not": 0,
+           "gonderildi_24s_odeme": 0}
+    adaylar = []
 
     r = _satir(
         """
@@ -215,14 +269,17 @@ def saglik_sayaclari(oku=None, esik_dk: int = ESIK_TAKILI_DK) -> dict:
     out["bekleyen"] += int(r.get("bekleyen") or 0)
     out["yasli_takili"] += int(r.get("yasli") or 0)
     out["kapatilabilir"] += int(r.get("kapatilabilir") or 0)
-    out["gonderildi_24s"] += int(r.get("g24") or 0)
+    sz24 = int(r.get("g24") or 0)
+    out["gonderildi_24s_sozlesme"] += sz24
+    out["gonderildi_24s"] += sz24
     out["hata_24s"] += int(r.get("h24") or 0)
     out["belirsiz_24s"] += int(r.get("b24") or 0)
     out["belirsiz_toplam"] += int(r.get("btoplam") or 0)
     out["belirsiz_sozlesme"] += int(r.get("btoplam") or 0)
     out["belirsiz_sozlesme_yeni"] += int(r.get("byeni") or 0)
+    # Tamamlanma kolonu yok; created_at elle işarette değişmez.
     if r.get("son_ok"):
-        out["son_gonderildi"] = str(r["son_ok"])[:16]
+        adaylar.append(("sozlesme", r.get("son_ok")))
 
     r2 = _satir(
         """
@@ -248,6 +305,29 @@ def saglik_sayaclari(oku=None, esik_dk: int = ESIK_TAKILI_DK) -> dict:
     out["belirsiz_24s"] += int(r3.get("b24") or 0)
     out["belirsiz_not"] += int(r3.get("btoplam") or 0)
 
+    # Elle işaret whatsapp_hata='elle_isaret' yazar; sayaca ve son zamana girmez.
+    r3b = _satir(
+        """
+        SELECT
+          COUNT(*) FILTER (
+            WHERE whatsapp_gonderim_durumu = 'gonderildi'
+              AND COALESCE(whatsapp_hata, '') <> 'elle_isaret'
+              AND COALESCE(whatsapp_gonderildi_at, updated_at, created_at)
+                  > NOW() - INTERVAL '24 hours'
+          ) AS g24,
+          MAX(COALESCE(whatsapp_gonderildi_at, updated_at, created_at)) FILTER (
+            WHERE whatsapp_gonderim_durumu = 'gonderildi'
+              AND COALESCE(whatsapp_hata, '') <> 'elle_isaret'
+          ) AS son_ok
+        FROM erp_notlar
+        """
+    )
+    nt24 = int(r3b.get("g24") or 0)
+    out["gonderildi_24s_not"] += nt24
+    out["gonderildi_24s"] += nt24
+    if r3b.get("son_ok"):
+        adaylar.append(("not", r3b.get("son_ok")))
+
     r4 = _satir(
         """
         SELECT COUNT(*) AS btoplam FROM public.odeme_linkleri
@@ -256,6 +336,40 @@ def saglik_sayaclari(oku=None, esik_dk: int = ESIK_TAKILI_DK) -> dict:
     )
     out["belirsiz_odeme"] += int(r4.get("btoplam") or 0)
     out["belirsiz_toplam"] += int(r4.get("btoplam") or 0)
+
+    # Tamamlanma kolonu yok. updated_at sonraki hareketle, whatsapp_son_deneme_at
+    # deneme başıyla kayar. Kabul zamanı whatsapp_gonderildi olayıdır; elle işaret
+    # bu olayı yazmaz, bu yüzden sayaca girmez.
+    r5 = _satir(
+        """
+        SELECT
+          COUNT(DISTINCT l.id) FILTER (
+            WHERE o.created_at > NOW() - INTERVAL '24 hours'
+          ) AS g24,
+          MAX(o.created_at) AS son_ok
+        FROM public.odeme_linkleri l
+        JOIN public.odeme_link_olaylari o
+          ON o.link_id = l.id AND o.olay = 'whatsapp_gonderildi'
+        WHERE l.whatsapp_durum = 'gonderildi'
+        """
+    )
+    od24 = int(r5.get("g24") or 0)
+    out["gonderildi_24s_odeme"] += od24
+    out["gonderildi_24s"] += od24
+    if r5.get("son_ok"):
+        adaylar.append(("odeme", r5.get("son_ok")))
+
+    en_iyi = None
+    for akis, ham in adaylar:
+        an = _an_utc(ham)
+        if an is None:
+            continue
+        if en_iyi is None or an > en_iyi[0]:
+            en_iyi = (an, akis)
+    if en_iyi:
+        an, akis = en_iyi
+        out["son_gonderildi"] = _istanbul_etiket(an)
+        out["son_gonderildi_akis"] = _AKIS_AD.get(akis, akis)
     return out
 
 
@@ -358,8 +472,9 @@ def belirsiz_isaretle(kaynak, kayit_id, sonuc, oku=None, yaz=None) -> dict:
         return {"ok": False, "neden": "belirsiz_degil", "mevcut": mevcut}
     setler = f"{kolon} = %s"
     if kaynak == "not":
+        # Elle gönderildi de elle_isaret taşır; sağlık sayacı bu satırı dışlar.
         setler += (", whatsapp_gonderildi_mi = TRUE, whatsapp_gonderildi_at = NOW(), "
-                   "whatsapp_hata = NULL" if yeni == "gonderildi"
+                   "whatsapp_hata = 'elle_isaret'" if yeni == "gonderildi"
                    else ", whatsapp_hata = 'elle_isaret'")
     if kaynak != "sozlesme":
         setler += ", updated_at = NOW()"

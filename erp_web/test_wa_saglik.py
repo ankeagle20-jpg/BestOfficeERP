@@ -19,10 +19,13 @@ def check(name, ok, ek=""):
 
 
 BOŞ_SAYAC = {"bekleyen": 0, "yasli_takili": 0, "gonderildi_24s": 0, "hata_24s": 0,
-             "belirsiz_24s": 0, "son_gonderildi": None, "son_hata": "",
+             "belirsiz_24s": 0, "son_gonderildi": None, "son_gonderildi_akis": "",
+             "son_hata": "",
              "belirsiz_toplam": 0, "kapatilabilir": 0,
              "belirsiz_sozlesme": 0, "belirsiz_sozlesme_yeni": 0,
-             "belirsiz_not": 0, "belirsiz_odeme": 0}
+             "belirsiz_not": 0, "belirsiz_odeme": 0,
+             "gonderildi_24s_sozlesme": 0, "gonderildi_24s_not": 0,
+             "gonderildi_24s_odeme": 0}
 
 
 def _kart(kartlar, anahtar):
@@ -319,7 +322,9 @@ def test_belirsiz_liste_isaret():
     donen = ws.belirsiz_isaretle("not", 22, "gonderildi", oku=_oku, yaz=_yaz)
     check("isaret_not_gonderildi", donen.get("ok") is True
           and donen["yeni_durum"] == "gonderildi" and donen["eski_durum"] == "belirsiz"
-          and any("whatsapp_gonderildi_mi = TRUE" in s and "whatsapp_gonderim_durumu = 'belirsiz'" in s
+          and any("whatsapp_gonderildi_mi = TRUE" in s
+                  and "whatsapp_gonderim_durumu = 'belirsiz'" in s
+                  and "whatsapp_hata = 'elle_isaret'" in s
                   for s, _p in yazilan), (donen, yazilan[:1]))
 
     yazilan.clear()
@@ -497,12 +502,83 @@ def test_rol_kapisi():
                                         "belirsiz"], anahtarlar)
 
 
+def test_uc_akis_gonderildi():
+    """Üç akış sayımı, en yeni akış, 05:49 UTC → 08:49, elle işaret dışlanır."""
+    from datetime import datetime, timezone
+
+    import wa_saglik as ws
+
+    sorgular = []
+
+    def _oku(sql, params=None):
+        metin = str(sql)
+        sorgular.append(metin)
+        if "sozlesme_whatsapp_gonderim" in metin and "AS g24" in metin:
+            return [{"bekleyen": 0, "yasli": 0, "kapatilabilir": 0, "g24": 2,
+                     "h24": 1, "b24": 0, "btoplam": 0, "byeni": 0,
+                     "son_ok": datetime(2026, 10, 21, 3, 0, tzinfo=timezone.utc)}]
+        if "erp_notlar" in metin and "elle_isaret" in metin:
+            return [{"g24": 4,
+                     "son_ok": datetime(2026, 10, 21, 4, 30, tzinfo=timezone.utc)}]
+        if "erp_notlar" in metin:
+            # Dışlama yoksa elle işaret daha yeni görünür.
+            return [{"bekleyen": 0, "btoplam": 0, "b24": 0, "g24": 5,
+                     "son_ok": datetime(2026, 10, 21, 6, 30, tzinfo=timezone.utc)}]
+        if "odeme_link_olaylari" in metin and "whatsapp_gonderildi" in metin:
+            return [{"g24": 1,
+                     "son_ok": datetime(2026, 10, 21, 5, 49, tzinfo=timezone.utc)}]
+        if "odeme_linkleri" in metin and "whatsapp_durum = 'gonderildi'" in metin:
+            return [{"g24": 9,
+                     "son_ok": datetime(2026, 10, 21, 6, 40, tzinfo=timezone.utc)}]
+        if "odeme_linkleri" in metin:
+            return [{"btoplam": 0}]
+        return [{}]
+
+    sayac = ws.saglik_sayaclari(oku=_oku)
+    check("uc_akis_sayim",
+          sayac["gonderildi_24s_sozlesme"] == 2
+          and sayac["gonderildi_24s_not"] == 4
+          and sayac["gonderildi_24s_odeme"] == 1
+          and sayac["gonderildi_24s"] == 7, sayac)
+    check("son_en_yeni_ve_istanbul",
+          sayac["son_gonderildi"] == "21.10.2026 08:49"
+          and sayac["son_gonderildi_akis"] == "ödeme",
+          (sayac.get("son_gonderildi"), sayac.get("son_gonderildi_akis")))
+    sz_sql = next((s for s in sorgular
+                   if "sozlesme_whatsapp_gonderim" in s and "AS g24" in s), "")
+    check("sozlesme_created_at",
+          "MAX(created_at) FILTER (WHERE durum = 'gonderildi')" in sz_sql
+          and "elle_isaret" not in sz_sql, sz_sql[:200])
+    not_sql = next((s for s in sorgular if "erp_notlar" in s and "AS g24" in s), "")
+    check("not_fallback_ve_elle_dis",
+          "COALESCE(whatsapp_gonderildi_at, updated_at, created_at)" in not_sql
+          and "<> 'elle_isaret'" in not_sql, not_sql[:240])
+    od_sql = next((s for s in sorgular if "odeme_link_olaylari" in s), "")
+    check("odeme_olay_zamani_elle_dis",
+          "o.olay = 'whatsapp_gonderildi'" in od_sql
+          and "l.whatsapp_durum = 'gonderildi'" in od_sql
+          and "MAX(o.created_at)" in od_sql, od_sql[:240])
+    k = ws.kontrolleri_uret("ok", "hazir", sayac)
+    kuyruk = _kart(k, "kuyruk")
+    check("kart_dagilim",
+          "Son 24 saat: 7 gönderildi (sözleşme 2, not 4, ödeme 1)" in kuyruk.get("aciklama", ""),
+          kuyruk.get("aciklama"))
+    check("kart_kabul_notu",
+          "servis kuyruğuna kabul" in (kuyruk.get("ipucu") or "")
+          and "gerçek teslim ayrıca doğrulanmaz" in (kuyruk.get("ipucu") or ""),
+          kuyruk.get("ipucu"))
+    son = _kart(k, "son_islem").get("aciklama") or ""
+    check("kart_son_akis",
+          "Son başarılı gönderim: 21.10.2026 08:49 (ödeme)." in son, son)
+
+
 def main():
     test_kontroller()
     test_oturum_kodu()
     test_tazele()
     test_kapi1()
     test_eski_kapat_ve_retry()
+    test_uc_akis_gonderildi()
     test_belirsiz_liste_isaret()
     test_kalici_retry_disi()
     test_teshis_kart()
