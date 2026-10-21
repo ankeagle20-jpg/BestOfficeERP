@@ -653,7 +653,7 @@ def test_wa_gonder_akisi():
             and "Önceki gönderim ulaşmış olabilir, yine de gönder?" in js
             and "/giris/api/sozlesme-whatsapp/durum?deneme=" in js
             and "1500" in js
-            and "90000" in js,
+            and "180000" in js,
         )
     finally:
         en._wa_musteri, en._wa_on_dk_var, en._WA_DENEME = eski

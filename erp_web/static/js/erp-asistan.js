@@ -1699,9 +1699,13 @@
       var engel = !!(s && s.engel);
       uyari.hidden = !engel;
       uyari.textContent = engel ? (s.ipucu || "Borç hesaplanmadı") : "";
+      var ekDolu = (function () {
+        var el = document.getElementById("erp-asistan-wa-ek");
+        return !!(el && String(el.value || "").trim());
+      })();
       var secimBos = (function () {
         var secim = secimOku();
-        return !!(secim && !secim.length);
+        return !!(secim && !secim.length && !ekDolu);
       })();
       if (secimBos && !engel) {
         uyari.hidden = false;
@@ -1894,14 +1898,17 @@
       var gitti = 0;
       var hata = 0;
       var surer = 0;
+      var bel = 0;
       liste.forEach(function (n) {
         if (n.durum === "gonderildi") gitti += 1;
         else if (n.durum === "hata" || n.durum === "basarisiz") hata += 1;
         else if (n.durum === "gonderiliyor" || n.durum === "kuyrukta" || n.durum === "bekliyor") surer += 1;
+        else if (n.durum === "belirsiz") bel += 1;
       });
       if (surer) return "Gönderim sürüyor";
-      if (liste.length > 1 && gitti && hata) return gitti + "/" + liste.length + " gitti";
+      if (liste.length > 1 && gitti && (hata || bel)) return gitti + "/" + liste.length + " gitti";
       if (gitti === liste.length) return "Gönderildi";
+      if (bel && !gitti && !hata) return "Sonuç belirsiz, telefondan kontrol edin";
       if (hata) return "Gönderilemedi";
       return "Gönderim sürüyor";
     }
@@ -1923,9 +1930,21 @@
           waPollDur();
           return;
         }
-        if (Date.now() - baslangic >= 90000) {
+        if (Date.now() - baslangic >= 180000) {
           waPollDur();
-          belirsizYaz();
+          liste.forEach(function (n) {
+            if (acik(n)) {
+              n.durum = "belirsiz";
+              n.mesaj = "Sonuç belirsiz, telefondan kontrol edin";
+            }
+          });
+          sonucCiz(liste);
+          dugmeTut = true;
+          waKilit = true;
+          gonder.disabled = true;
+          onay.hidden = true;
+          if (tekrarBtn) tekrarBtn.hidden = true;
+          if (belirsizBtn) belirsizBtn.hidden = false;
           return;
         }
         liste.forEach(function (n) {
@@ -1953,9 +1972,17 @@
       if (belirsizBtn) belirsizBtn.hidden = false;
       sonuc.textContent = "Sonuç belirsiz, Tüm mesajlar/telefondan kontrol edin";
     }
+    function normTel(raw) {
+      var s = String(raw || "").replace(/\D/g, "");
+      if (s.indexOf("00") === 0) s = s.slice(2);
+      if (s.charAt(0) === "0" && s.length === 11) s = "90" + s.slice(1);
+      else if (s.length === 10 && s.charAt(0) === "5") s = "90" + s;
+      return /^[1-9]\d{10,14}$/.test(s) ? s : "";
+    }
+    var ekSira = 3;
     function secimOku() {
       var kutuN = document.getElementById("erp-asistan-wa-numaralar");
-      if (!kutuN || !kutuN.querySelector("input")) return null;
+      if (!kutuN || !kutuN.querySelector("input[type=checkbox]")) return null;
       var sec = [];
       kutuN.querySelectorAll("input:checked").forEach(function (el) {
         var n = parseInt(el.getAttribute("data-sira"), 10);
@@ -1968,7 +1995,25 @@
       var metin = String(kutu.value || "").trim();
       if (!metin) return;
       var secim = yalniz && yalniz.length ? yalniz : secimOku();
-      if (secim && !secim.length) {
+      var ekHam = null;
+      var elEk = document.getElementById("erp-asistan-wa-ek");
+      if (elEk) {
+        var hamEk = String(elEk.value || "").trim();
+        if (hamEk) {
+          if (!normTel(hamEk)) {
+            uyari.hidden = false;
+            uyari.textContent = "Telefon numarası geçersiz";
+            gonder.disabled = false;
+            return;
+          }
+          ekHam = hamEk;
+        }
+      }
+      var ekGitsin = false;
+      if (ekHam) {
+        ekGitsin = !(yalniz && yalniz.length) || yalniz.indexOf(ekSira) >= 0;
+      }
+      if (secim && !secim.length && !ekGitsin) {
         uyari.hidden = false;
         uyari.textContent = "En az bir numara seçin";
         gonder.disabled = true;
@@ -1993,6 +2038,8 @@
             tekrar_onay: !!tekrarOnay
           };
           if (secim) govde.secim = secim;
+          else if (ekGitsin) govde.secim = [];
+          if (ekGitsin) govde.ek_numara = ekHam;
           return govde;
         })())
       }).then(function (r) {
@@ -2114,6 +2161,23 @@
             lab.appendChild(document.createTextNode(n.sira + ". numara · " + n.maske));
             numKutu.appendChild(lab);
           });
+          var ekAc = document.createElement("a");
+          ekAc.href = "#";
+          ekAc.id = "erp-asistan-wa-ek-ac";
+          ekAc.textContent = "Başka numara ekle";
+          ekAc.onclick = function (ev) {
+            ev.preventDefault();
+            if (document.getElementById("erp-asistan-wa-ek")) return;
+            ekAc.hidden = true;
+            var giris = document.createElement("input");
+            giris.id = "erp-asistan-wa-ek";
+            giris.setAttribute("inputmode", "tel");
+            giris.placeholder = "Telefon";
+            giris.addEventListener("input", uyar);
+            numKutu.appendChild(giris);
+            uyar();
+          };
+          numKutu.appendChild(ekAc);
         }
         sablonlar = (j.sablonlar || []).slice();
         sablonlar.push({ anahtar: "ozel", etiket: "Özel mesaj", metin: "", borc: false, engel: false, grup: "ozel" });

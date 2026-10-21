@@ -208,7 +208,7 @@ def test_sayfa_ayrimi():
     check("yesil qr karar", "/erp-notlar/api/whatsapp-durum" in ust and "d === 'qr'" in ust and "d === 'bagli_degil'" in ust and "erpQrSayfaAc" in ust and "sozlesmeWhatsAppAc" in ust and "buton: 'ust'" in ust and "3001" not in ust and "WA_INTERNAL_TOKEN" not in ust)
     check("js_eski_yok", "WhatsApp Web açıldı" not in js)
     check("js_deneme", "denemeUret" in js and "deneme: deneme" in js)
-    check("js_poll", "/giris/api/sozlesme-whatsapp/durum?deneme=" in js and "POLL_SON = 90000" in js)
+    check("js_poll", "/giris/api/sozlesme-whatsapp/durum?deneme=" in js and "POLL_SON = 180000" in js)
     check("js_sonuc", "Kuyruğa alındı…" in js and "Gönderildi ✓" in js and "Sonuç belirsiz, telefondan kontrol edin" in js and "Gönderilemedi" in js and "Sonuç henüz yok; birkaç dakika sonra durum yenilenir" in js)
     check("js_iki_pencere", "gonderiyor = false" in js and "acik.deneme = denemeUret()" in js)
     check("eski_anahtar_yok", "metin_h[:12]" not in (ROOT / "sozlesme_whatsapp.py").read_text(encoding="utf-8"))

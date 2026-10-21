@@ -951,9 +951,8 @@ def _wa_musteri(mid: int):
     )
     if not row:
         return None
-    from odeme_linki import normalize_wa_telefon
-
-    row["telefonlar"] = _wa_telefon_listesi(row.get("phone"), row.get("phone2"))
+    tels = _wa_telefon_listesi(row.get("phone"), row.get("phone2"))
+    row["telefonlar"] = tels
     row["telefon"] = tels[0] if tels else ""
     return row
 
@@ -1006,6 +1005,38 @@ def _wa_secilen(tels, data) -> tuple[list, str]:
     if not sec:
         return [], "En az bir numara seçin"
     return [(n, tels[n - 1]) for n in sec], ""
+
+
+def _wa_ek_ham(data):
+    """None: alan yok veya boş, eski davranış. Dolu metin serbest adaydır."""
+    if not isinstance(data, dict) or "ek_numara" not in data:
+        return None
+    ham = str(data.get("ek_numara") or "").strip()
+    return ham or None
+
+
+def _wa_aday_hazirla(tels, data) -> tuple[list, str]:
+    """[(sira, tel, serbest), ...], hata. Serbest slot her zaman 3."""
+    aday, hata = _wa_secilen(tels, data)
+    ek = _wa_ek_ham(data)
+    if ek is None:
+        if hata:
+            return [], hata
+        return [(s, t, False) for s, t in aday], ""
+    if hata:
+        aday = []
+    from odeme_linki import normalize_wa_telefon
+
+    norm = normalize_wa_telefon(ek)
+    if not norm:
+        return [], "Telefon numarası geçersiz"
+    if any(t == norm for _s, t in aday):
+        if not aday:
+            return [], "En az bir numara seçin"
+        return [(s, t, False) for s, t in aday], ""
+    if len(aday) >= 3:
+        return [], "En fazla 3 alıcı"
+    return [(s, t, False) for s, t in aday] + [(3, norm, True)], ""
 
 
 def _wa_on_dk_var(mid: int, metin: str, telefon=None) -> bool:
@@ -1384,7 +1415,7 @@ def asistan_wa_gonder(uid: int, mid: int, data: dict, origin: str, host: str, go
     if not row:
         return {"ok": False, "durum": "hata", "mesaj": "Müşteri bulunamadı"}, 404
     var, _maske = _wa_var_maske(row.get("telefon"))
-    if not var:
+    if not var and _wa_ek_ham(data) is None:
         return {"ok": False, "durum": "hata", "mesaj": "Telefon yok"}, 400
     if not bool((data or {}).get("onay")):
         return {"ok": False, "durum": "hata", "mesaj": "Onay gerekli"}, 400
@@ -1410,7 +1441,7 @@ def asistan_wa_gonder(uid: int, mid: int, data: dict, origin: str, host: str, go
     deneme = deneme_gecerli((data or {}).get("deneme"))
     if not deneme:
         return {"ok": False, "durum": "hata", "mesaj": "İstek reddedildi"}, 400
-    aday, secim_hata = _wa_secilen(list(row.get("telefonlar") or []) or (
+    aday, secim_hata = _wa_aday_hazirla(list(row.get("telefonlar") or []) or (
         [str(row.get("telefon"))] if row.get("telefon") else []
     ), data)
     if secim_hata:
@@ -1418,7 +1449,7 @@ def asistan_wa_gonder(uid: int, mid: int, data: dict, origin: str, host: str, go
     tekrar_onay = bool((data or {}).get("tekrar_onay"))
     uyarilar = []
     gidecek = []
-    for sira, tel in aday:
+    for sira, tel, serbest in aday:
         if not tekrar_onay and _wa_on_dk_var(mid, metin, tel):
             uyarilar.append({
                 "sira": sira,
@@ -1429,7 +1460,7 @@ def asistan_wa_gonder(uid: int, mid: int, data: dict, origin: str, host: str, go
                 "maske": _wa_son4(tel),
             })
         else:
-            gidecek.append((sira, tel))
+            gidecek.append((sira, tel, serbest))
     if not gidecek and uyarilar:
         return {
             "ok": False,
@@ -1446,7 +1477,7 @@ def asistan_wa_gonder(uid: int, mid: int, data: dict, origin: str, host: str, go
     fn = gonder_fn or sozlesme_wa_isle
     satirlar = list(uyarilar)
     limit_mesaj = ""
-    for sira, tel in gidecek:
+    for sira, tel, serbest in gidecek:
         if limit_mesaj:
             satirlar.append({
                 "sira": sira,
@@ -1457,6 +1488,15 @@ def asistan_wa_gonder(uid: int, mid: int, data: dict, origin: str, host: str, go
                 "maske": _wa_son4(tel),
             })
             continue
+        if serbest:
+            try:
+                import sozlesme_whatsapp as _sw
+
+                _sw.serbest_numara_audit(
+                    int(uid), int(mid), tel, list(row.get("telefonlar") or [])
+                )
+            except Exception:
+                pass
         kim = deneme if sira == 1 else str(uuid.uuid5(uuid.UUID(deneme), str(sira)))
         try:
             govde, kod = fn(

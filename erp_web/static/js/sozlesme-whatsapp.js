@@ -93,9 +93,27 @@
     var n = seciliNumaralar().length;
     var btn = document.getElementById("sozlesme-wa-gonder");
     var uyari = document.getElementById("sozlesme-wa-uyari");
-    if (btn) btn.disabled = n < 1;
-    if (uyari && n < 1) uyari.textContent = "En az bir numara seçin";
+    var ek = document.getElementById("sozlesme-wa-ek");
+    var ekVar = ek && String(ek.value || "").trim();
+    if (btn) btn.disabled = n < 1 && !ekVar;
+    if (uyari && n < 1 && !ekVar) uyari.textContent = "En az bir numara seçin";
     else if (uyari && uyari.textContent === "En az bir numara seçin") uyari.textContent = "";
+  }
+
+  function ekBirlestir(liste) {
+    var ek = document.getElementById("sozlesme-wa-ek");
+    if (!ek) return "";
+    var ham = String(ek.value || "").trim();
+    if (!ham) return "";
+    var n = normTel(ham);
+    if (!n) return "Telefon numarası geçersiz";
+    var ayni = liste.some(function (o) { return normTel(o.tel) === n; });
+    if (ayni) return "";
+    if (liste.length >= 3) return "En fazla 3 alıcı";
+    var sira = 3;
+    liste.forEach(function (o) { if (o.sira >= sira) sira = o.sira + 1; });
+    liste.push({ sira: sira, tel: n, serbest: true });
+    return "";
   }
 
   function kutulariYaz(kisiler, ilkTel) {
@@ -125,6 +143,22 @@
       lab.appendChild(document.createTextNode(" " + (i + 1) + ". numara · " + maske4(ham)));
       kutu.appendChild(lab);
     });
+    var ekAc = document.createElement("a");
+    ekAc.href = "#";
+    ekAc.id = "sozlesme-wa-ek-ac";
+    ekAc.textContent = "Başka numara ekle";
+    ekAc.onclick = function (ev) {
+      ev.preventDefault();
+      if (document.getElementById("sozlesme-wa-ek")) return;
+      ekAc.hidden = true;
+      var giris = document.createElement("input");
+      giris.id = "sozlesme-wa-ek";
+      giris.setAttribute("inputmode", "tel");
+      giris.placeholder = "Telefon";
+      giris.addEventListener("input", secimDugme);
+      kutu.appendChild(giris);
+    };
+    kutu.appendChild(ekAc);
     var satir = document.getElementById("sozlesme-wa-satir");
     var sec = document.getElementById("sozlesme-wa-sec");
     if (satir) satir.hidden = true;
@@ -172,7 +206,7 @@
   var acik = null;
   var pollTimer = null;
   var POLL_MS = 1500;
-  var POLL_SON = 90000;
+  var POLL_SON = 180000;
 
   function denemeUret() {
     if (window.crypto && typeof crypto.randomUUID === "function") return crypto.randomUUID();
@@ -336,11 +370,22 @@
     var yine = document.getElementById("sozlesme-wa-yine");
     var metin = mesaj ? mesaj.value : "";
     var liste = seciliNumaralar();
+    var yeniden = false;
     if (onay && acik.satirlar) {
       var tekrar = acik.satirlar.filter(function (s) {
         return s.durum === "tekrar" || s.durum === "belirsiz";
       });
-      if (tekrar.length) liste = tekrar.map(function (s) { return { sira: s.sira, tel: s.tel }; });
+      if (tekrar.length) {
+        liste = tekrar.map(function (s) { return { sira: s.sira, tel: s.tel, serbest: !!s.serbest }; });
+        yeniden = true;
+      }
+    }
+    if (!yeniden) {
+      var ekHata = ekBirlestir(liste);
+      if (ekHata) {
+        if (uyari) uyari.textContent = ekHata;
+        return;
+      }
     }
     if (!liste.length) {
       if (uyari) uyari.textContent = "En az bir numara seçin";
@@ -372,18 +417,20 @@
       var oge = liste[i];
       i += 1;
       var deneme = denemeUret();
+      var govde = {
+        musteri_id: acik.musteriId,
+        telefon: oge.tel,
+        mesaj: metin,
+        buton: acik.buton,
+        onay: !!onay,
+        deneme: deneme
+      };
+      if (oge.serbest) govde.serbest = true;
       fetch("/giris/api/sozlesme-whatsapp/gonder", {
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          musteri_id: acik.musteriId,
-          telefon: oge.tel,
-          mesaj: metin,
-          buton: acik.buton,
-          onay: !!onay,
-          deneme: deneme
-        })
+        body: JSON.stringify(govde)
       }).then(function (r) {
         return r.json().then(function (j) { return { kod: r.status, j: j || {} }; }).catch(function () { return { kod: r.status, j: {} }; });
       }).then(function (paket) {
@@ -409,7 +456,7 @@
           if (uyari) uyari.textContent = j.mesaj || yazi;
           if (j.qr) qrDugmeGoster(true);
         }
-        satirlar.push({ sira: oge.sira, tel: oge.tel, durum: durum, mesaj: yazi, deneme: deneme });
+        satirlar.push({ sira: oge.sira, tel: oge.tel, durum: durum, mesaj: yazi, deneme: deneme, serbest: !!oge.serbest });
         durumCiz(satirlar);
         if (paket.kod === 429 || j.qr || j.geri_dus) {
           while (i < liste.length) {
@@ -420,7 +467,8 @@
               tel: kalan.tel,
               durum: "hata",
               mesaj: j.qr || j.geri_dus ? "Gönderilmedi" : yazi,
-              deneme: ""
+              deneme: "",
+              serbest: !!kalan.serbest
             });
           }
         }
@@ -444,7 +492,7 @@
       if (!aciklar.length) { pollDur(); dugmeAc(); return; }
       if (Date.now() - bas >= POLL_SON) {
         pollDur();
-        aciklar.forEach(function (s) { s.durum = "belirsiz"; s.mesaj = "Sonuç henüz yok"; });
+        aciklar.forEach(function (s) { s.durum = "belirsiz"; s.mesaj = "Sonuç belirsiz, telefondan kontrol edin"; });
         durumCiz(acik.satirlar);
         yineGoster(true);
         dugmeAc();

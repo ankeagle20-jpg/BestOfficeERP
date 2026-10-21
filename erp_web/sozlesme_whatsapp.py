@@ -165,6 +165,40 @@ def telefon_maske(norm: str) -> str:
     return "***" + d[-4:]
 
 
+def serbest_numara_audit(uid: int, mid: int, norm: str, kart, calistir=None) -> bool:
+    """Kartta olmayan serbest alıcı. Yazılanlar: kullanıcı ve son 4 hane."""
+    hedef = normalize_wa_telefon(norm)
+    if not hedef:
+        return False
+    bilinen = set()
+    for ham in kart or []:
+        n = normalize_wa_telefon(ham)
+        if n:
+            bilinen.add(n)
+    if hedef in bilinen:
+        return False
+    maske = telefon_maske(hedef)
+
+    def _yaz(sql, params=None):
+        if calistir is not None:
+            return calistir(sql, params)
+        return execute(sql, params) if params is not None else execute(sql)
+
+    from audit_log import audit_yaz
+
+    return audit_yaz(
+        _yaz,
+        olay="whatsapp_serbest_numara",
+        varlik="sozlesme_whatsapp_gonderim",
+        kayit_id=None,
+        musteri_id=int(mid),
+        kullanici=str(int(uid)),
+        anlik={"maske": maske},
+        yeni={"maske": maske},
+        eski_yaz=False,
+    )
+
+
 def ozet_hash(metin: str) -> str:
     return hashlib.sha256(str(metin or "").encode("utf-8")).hexdigest()
 
@@ -257,6 +291,19 @@ def _gun_basi(simdi: datetime) -> datetime:
 
 def _musteri(mid: int):
     return fetch_one("SELECT id FROM customers WHERE id = %s", (int(mid),))
+
+
+def _kart_telefonlari(mid: int) -> list:
+    row = fetch_one(
+        "SELECT phone, phone2 FROM customers WHERE id = %s",
+        (int(mid),),
+    ) or {}
+    out = []
+    for ham in (row.get("phone"), row.get("phone2")):
+        n = normalize_wa_telefon(ham)
+        if n and n not in out:
+            out.append(n)
+    return out
 
 
 def _sayilar(uid: int, dk_basi: datetime, gun_basi: datetime):
@@ -736,6 +783,11 @@ def sozlesme_wa_isle(
     kim = deneme_gecerli((data or {}).get("deneme"))
     if not kim:
         return {"ok": False, "mesaj": _ORIGIN}, 400
+    if bool((data or {}).get("serbest")):
+        try:
+            serbest_numara_audit(int(uid), int(mid), norm, _kart_telefonlari(mid))
+        except Exception:
+            pass
 
     ensure_tablo()
     an = simdi or datetime.now(timezone.utc)
