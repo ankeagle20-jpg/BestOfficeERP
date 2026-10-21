@@ -131,7 +131,9 @@ assert.strictEqual(gonderSecenek({ mesaj: "m" }), undefined);
 assert.strictEqual(gonderSecenek({ mesaj: "m", ek: { ad: "1.pdf" } }).sendMediaAsDocument, true);
 
 assert.strictEqual(sonucSinifla({ id: { _serialized: "MID" } }, null, false, true).durum, "gonderildi");
-assert.strictEqual(sonucSinifla({}, null, false, true).kod, "bos_donus");
+assert.strictEqual(sonucSinifla({}, null, false, true).durum, "ack_bekle");
+assert.strictEqual(sonucSinifla(null, null, false, false).durum, "basarisiz");
+assert.strictEqual(sonucSinifla(null, null, false, false).kod, "gonderim_hata");
 assert.strictEqual(sonucSinifla(null, new Error("Evaluation failed"), false, true).kod, "medya_hata");
 assert.strictEqual(sonucSinifla(null, new Error("Evaluation failed"), false, false).kod, "gonderim_hata");
 assert.strictEqual(sonucSinifla(null, new Error("Protocol error: Target closed"), false, true).kod, "oturum");

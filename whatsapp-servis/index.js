@@ -23,6 +23,9 @@ const {
   sureli,
   MEDYA_TIMEOUT_MS,
   SONUC_TTL_MS,
+  ACK_PENCERE_MS,
+  ackBekle,
+  tekBekleyen,
   sonucSakla,
   sonucGetir,
   logSatiri,
@@ -357,6 +360,18 @@ async function kuyrukIsle(session) {
             MEDYA_TIMEOUT_MS
           );
           sinif = sonucSinifla(paket.donus, paket.hata, Boolean(paket.zamanAsimi), tur === 'pdf');
+          if (sinif.durum === 'ack_bekle') {
+            item.dogrulaniyor = true;
+            try {
+              if (!tekBekleyen(session.queue, item)) {
+                sinif = { durum: 'belirsiz', kod: 'bos_donus_belirsiz' };
+              } else {
+                sinif = await ackBekle(session.client, chatId, bas, ACK_PENCERE_MS);
+              }
+            } finally {
+              item.dogrulaniyor = false;
+            }
+          }
         }
       } catch (err) {
         sinif = sonucSinifla(null, err, false, tur === 'pdf');
