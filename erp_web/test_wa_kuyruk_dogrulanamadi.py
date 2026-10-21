@@ -125,7 +125,8 @@ def test_not_akisi():
     check("etiket_fallback_kuyruk", en._wa_durum_etiket(row2) == "Kuyruğa alındı",
           en._wa_durum_etiket(row2))
     row3 = {"whatsapp_gonderilsin": True, "whatsapp_gonderim_durumu": "belirsiz"}
-    check("etiket_belirsiz_ayni", "doğrulanamadı" in en._wa_durum_etiket(row3),
+    check("etiket_belirsiz_ayni",
+          en._wa_durum_etiket(row3) == "Sonuç belirsiz, telefondan kontrol edin",
           en._wa_durum_etiket(row3))
 
 

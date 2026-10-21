@@ -561,7 +561,7 @@ def test_uc_akis_gonderildi():
     k = ws.kontrolleri_uret("ok", "hazir", sayac)
     kuyruk = _kart(k, "kuyruk")
     check("kart_dagilim",
-          "Son 24 saat: 7 gönderildi (sözleşme 2, not 4, ödeme 1)" in kuyruk.get("aciklama", ""),
+          "Son 24 saat: 7 gönderildi (sözleşme 2, not 4, ondan 0 doğrulandı, ödeme 1)" in kuyruk.get("aciklama", ""),
           kuyruk.get("aciklama"))
     check("kart_kabul_notu",
           "servis kuyruğuna kabul" in (kuyruk.get("ipucu") or "")

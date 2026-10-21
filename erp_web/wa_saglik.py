@@ -19,7 +19,8 @@ ESIK_TAKILI_DK = 30
 
 # Not/ödeme "gönderildi" = servis kuyruğuna kabul; teslim ayrı doğrulanmaz.
 KABUL_NOTU = (
-    "Not ve ödeme akışında 'gönderildi' servis kuyruğuna kabul demektir; "
+    "Not satırında kuyruğa kabul ile doğrulanan gönderim ayrı sayılır. "
+    "Ödeme akışında 'gönderildi' servis kuyruğuna kabul demektir; "
     "gerçek teslim ayrıca doğrulanmaz."
 )
 _AKIS_AD = {"sozlesme": "sözleşme", "not": "not", "odeme": "ödeme"}
@@ -204,6 +205,14 @@ def _istanbul_etiket(an: datetime) -> str:
     return an.astimezone(_IST).strftime("%d.%m.%Y %H:%M")
 
 
+def _zaman_liste(ham) -> str:
+    """Belirsiz liste saati. Dilimsiz damga UTC sayılır, ekranda Türkiye saatidir."""
+    an = _an_utc(ham)
+    if an is None:
+        return str(ham or "")[:16]
+    return _istanbul_etiket(an)
+
+
 def _yirmi_dort_metin(s: dict) -> str:
     g24 = int(s.get("gonderildi_24s") or 0)
     sz = int(s.get("gonderildi_24s_sozlesme") or 0)
@@ -211,7 +220,8 @@ def _yirmi_dort_metin(s: dict) -> str:
     od = int(s.get("gonderildi_24s_odeme") or 0)
     h24 = int(s.get("hata_24s") or 0)
     b24 = int(s.get("belirsiz_24s") or 0)
-    return (f"Son 24 saat: {g24} gönderildi (sözleşme {sz}, not {nt}, ödeme {od}), "
+    nd = int(s.get("gonderildi_24s_not_dogrulandi") or 0)
+    return (f"Son 24 saat: {g24} gönderildi (sözleşme {sz}, not {nt}, ondan {nd} doğrulandı, ödeme {od}), "
             f"{h24} hata, {b24} doğrulanamadı.")
 
 
@@ -241,7 +251,7 @@ def saglik_sayaclari(oku=None, esik_dk: int = ESIK_TAKILI_DK) -> dict:
            "belirsiz_sozlesme": 0, "belirsiz_sozlesme_yeni": 0,
            "belirsiz_not": 0, "belirsiz_odeme": 0,
            "gonderildi_24s_sozlesme": 0, "gonderildi_24s_not": 0,
-           "gonderildi_24s_odeme": 0}
+           "gonderildi_24s_not_dogrulandi": 0, "gonderildi_24s_odeme": 0}
     adaylar = []
 
     r = _satir(
@@ -318,12 +328,37 @@ def saglik_sayaclari(oku=None, esik_dk: int = ESIK_TAKILI_DK) -> dict:
           MAX(COALESCE(whatsapp_gonderildi_at, updated_at, created_at)) FILTER (
             WHERE whatsapp_gonderim_durumu = 'gonderildi'
               AND COALESCE(whatsapp_hata, '') <> 'elle_isaret'
-          ) AS son_ok
+          ) AS son_ok,
+          COUNT(*) FILTER (
+            WHERE whatsapp_gonderim_durumu = 'gonderildi'
+              AND whatsapp_sonuc_kodu = 'dogrulandi'
+              AND COALESCE(whatsapp_hata, '') <> 'elle_isaret'
+              AND COALESCE(whatsapp_gonderildi_at, updated_at, created_at)
+                  > NOW() - INTERVAL '24 hours'
+          ) AS ndog
         FROM erp_notlar
         """
     )
+    if not r3b:
+        r3b = _satir(
+            """
+            SELECT
+              COUNT(*) FILTER (
+                WHERE whatsapp_gonderim_durumu = 'gonderildi'
+                  AND COALESCE(whatsapp_hata, '') <> 'elle_isaret'
+                  AND COALESCE(whatsapp_gonderildi_at, updated_at, created_at)
+                      > NOW() - INTERVAL '24 hours'
+              ) AS g24,
+              MAX(COALESCE(whatsapp_gonderildi_at, updated_at, created_at)) FILTER (
+                WHERE whatsapp_gonderim_durumu = 'gonderildi'
+                  AND COALESCE(whatsapp_hata, '') <> 'elle_isaret'
+              ) AS son_ok
+            FROM erp_notlar
+            """
+        )
     nt24 = int(r3b.get("g24") or 0)
     out["gonderildi_24s_not"] += nt24
+    out["gonderildi_24s_not_dogrulandi"] += int(r3b.get("ndog") or 0)
     out["gonderildi_24s"] += nt24
     if r3b.get("son_ok"):
         adaylar.append(("not", r3b.get("son_ok")))
@@ -433,7 +468,7 @@ def belirsiz_kayitlar(oku=None, limit: int = BELIRSIZ_LIMIT) -> list[dict]:
             rows = []
         for r in rows:
             out.append({"kaynak": kaynak, "id": int(r["id"]),
-                        "zaman": str(r.get("zaman") or "")[:16]})
+                        "zaman": _zaman_liste(r.get("zaman"))})
         kalan -= len(rows)
     return out
 

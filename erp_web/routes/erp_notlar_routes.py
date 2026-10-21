@@ -137,6 +137,8 @@ def ensure_erp_notlar_tablolari() -> None:
         "ALTER TABLE erp_notlar ADD COLUMN IF NOT EXISTS whatsapp_gonderim_deneme INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE erp_notlar ADD COLUMN IF NOT EXISTS whatsapp_son_deneme_at TIMESTAMPTZ",
         "ALTER TABLE erp_notlar ADD COLUMN IF NOT EXISTS whatsapp_gonderildi_at TIMESTAMPTZ",
+        "ALTER TABLE erp_notlar ADD COLUMN IF NOT EXISTS whatsapp_kuyruk_anahtar TEXT",
+        "ALTER TABLE erp_notlar ADD COLUMN IF NOT EXISTS whatsapp_sonuc_kodu TEXT",
     ):
         try:
             execute(stmt)
@@ -318,31 +320,38 @@ def _iliski_etiket(row: dict) -> str:
 
 
 _WA_ETIKET = {
-    "gonderildi": "Kuyruğa alındı",
     "gonderiliyor": "Gönderiliyor",
-    "bekliyor": "Gönderiliyor",
+    "bekliyor": "Kuyruğa alındı",
+    "kuyrukta": "Kuyruğa alındı",
     "basarisiz": "Gönderilemedi",
     "basarisiz_kalici": "Gönderilemedi",
     "gonderilmeyecek": "Gönderilmeyecek",
-    "belirsiz": "Gönderim doğrulanamadı, WhatsApp'ı kontrol edin",
+    "belirsiz": "Sonuç belirsiz, telefondan kontrol edin",
 }
+_WA_KUYRUK_ETIKET = "Kuyruğa alındı"
+_WA_DOGRULANDI_ETIKET = "Gönderildi"
 
 
 def _wa_durum_etiket(row: dict) -> str:
     if not row.get("whatsapp_gonderilsin"):
         return ""
     durum = str(row.get("whatsapp_gonderim_durumu") or "").strip()
+    if durum == "gonderildi":
+        # Sonuç kodu yoksa eski kayıt: kuyruk kabul etiketi durur.
+        if str(row.get("whatsapp_sonuc_kodu") or "") == "dogrulandi":
+            return _WA_DOGRULANDI_ETIKET
+        return _WA_KUYRUK_ETIKET
     if durum in _WA_ETIKET:
         return _WA_ETIKET[durum]
     if row.get("whatsapp_gonderildi_mi"):
-        return "Kuyruğa alındı"
+        return _WA_KUYRUK_ETIKET
     return "Gönderilmeyecek"
 
 
 def _wa_uyari(row: dict) -> str:
     durum = str(row.get("whatsapp_gonderim_durumu") or "").strip()
     if durum == "belirsiz":
-        return "Gönderim doğrulanamadı, WhatsApp'ı kontrol edin"
+        return _WA_ETIKET["belirsiz"]
     hata = str(row.get("whatsapp_hata") or "").strip()
     if durum in ("basarisiz", "basarisiz_kalici") and hata == "baglanti":
         return "WhatsApp servisi şu an kapalı"
@@ -1988,6 +1997,53 @@ _WA_KAPALI = (
     "basarisiz_kalici",
     "belirsiz",
 )
+# Servis kuyruk-sonuc yalnız bu biçimi okur. not:{id}:{deneme} 400 döner.
+_SZWA_ANAHTAR = re.compile(
+    r"^szwa:d:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+)
+_WA_KUYRUKTA = frozenset(("bekliyor", "kuyrukta", "gonderiliyor"))
+_WA_BASARISIZ_KOD = frozenset(("gonderim_hata", "medya_hata", "zaman_asimi", "oturum"))
+_WA_TAZELE_LIMIT = 20
+_WA_TAZELE_BUTCE_SN = 30.0
+
+
+def _wa_anahtar_uret() -> str:
+    return "szwa:d:" + str(uuid.uuid4())
+
+
+def _wa_gonder_karar(eski_anahtar, paket, uret=None) -> tuple[str, str]:
+    """Yeni deneme anahtarı. Kuyrukta bekleyen eski anahtar ikinci mesaj açmaz.
+
+    Dönüş: ('ayni'|'bekle'|'yeni', anahtar).
+    """
+    eski = str(eski_anahtar or "").strip()
+    durum = str((paket or {}).get("durum") or "") if isinstance(paket, dict) else ""
+    if _SZWA_ANAHTAR.match(eski):
+        if durum in _WA_KUYRUKTA:
+            return "ayni", eski
+        if durum == "erisilemedi":
+            return "bekle", eski
+    return "yeni", (uret or _wa_anahtar_uret)()
+
+
+def _wa_kuyruk_yorum(paket: dict) -> str:
+    """Servis sonucu: gonderildi, belirsiz, basarisiz, birak.
+
+    'yok' ve erişilemedi olduğu gibi kalır; belirsiz sayılmaz.
+    """
+    if not isinstance(paket, dict):
+        return "birak"
+    durum = str(paket.get("durum") or "")
+    kod = str(paket.get("kod") or "")
+    if durum == "gonderildi":
+        return "gonderildi"
+    if durum == "belirsiz" or (durum == "basarisiz" and kod == "bos_donus"):
+        return "belirsiz"
+    if durum == "basarisiz" and kod in _WA_BASARISIZ_KOD:
+        return "basarisiz"
+    if durum == "basarisiz":
+        return "belirsiz"
+    return "birak"
 
 
 def _wa_otuz_doldu(created_at) -> bool:
@@ -2016,7 +2072,7 @@ def _wa_sahiplen(nid: int):
         WHERE id = %s
           AND COALESCE(whatsapp_gonderim_durumu, '') <> ALL (%s)
         RETURNING id, whatsapp_telefon, whatsapp_mesaj, not_metni,
-                  whatsapp_gonderim_deneme, created_at
+                  whatsapp_gonderim_deneme, created_at, whatsapp_kuyruk_anahtar
         """,
         (nid, list(_WA_KAPALI)),
     )
@@ -2030,6 +2086,7 @@ def _wa_gonderildi_yaz(nid: int) -> None:
             whatsapp_gonderildi_mi = TRUE,
             whatsapp_gonderildi_at = NOW(),
             whatsapp_hata = NULL,
+            whatsapp_sonuc_kodu = 'kuyruk',
             updated_at = NOW()
         WHERE id = %s AND whatsapp_gonderim_durumu = 'gonderiliyor'
         """,
@@ -2100,6 +2157,150 @@ def _wa_node_gonder(nid: int, telefon: str, mesaj: str, schema: str | None, anah
     return "ok", ""
 
 
+def _wa_sonuc_sor(anahtar: str, timeout=(2, 3)) -> dict:
+    """Kuyruk sonucu. Telefon, metin ve token yazılmaz."""
+    from routes.whatsapp_routes import _wa_internal_headers, _wa_url
+
+    try:
+        r = requests.get(
+            _wa_url("kuyruk-sonuc"),
+            params={"anahtar": str(anahtar or "")[:120]},
+            headers=_wa_internal_headers(),
+            timeout=timeout,
+        )
+    except requests.exceptions.Timeout:
+        return {"durum": "erisilemedi"}
+    except Exception:
+        return {"durum": "erisilemedi"}
+    try:
+        body = r.json() if r.content else {}
+    except Exception:
+        body = {}
+    if int(r.status_code) >= 400 or not isinstance(body, dict):
+        return {"durum": "erisilemedi"}
+    return {"durum": str(body.get("durum") or "erisilemedi"), "kod": body.get("kod") or ""}
+
+
+def _wa_anahtar_kaydet(nid: int, anahtar: str) -> None:
+    execute(
+        """
+        UPDATE erp_notlar
+        SET whatsapp_kuyruk_anahtar = %s, updated_at = NOW()
+        WHERE id = %s AND whatsapp_gonderim_durumu = 'gonderiliyor'
+        """,
+        (anahtar, nid),
+    )
+
+
+def _wa_kuyruk_bekle(nid: int) -> None:
+    """Servise ulaşılamadı; eski anahtar durur, deneme artmaz, yeniden gönderilmez."""
+    execute(
+        """
+        UPDATE erp_notlar
+        SET whatsapp_gonderim_durumu = 'basarisiz', updated_at = NOW()
+        WHERE id = %s AND whatsapp_gonderim_durumu = 'gonderiliyor'
+        """,
+        (nid,),
+    )
+
+
+def _wa_tazele_uygula(nid: int, yorum: str, deneme, created_at, kod: str) -> None:
+    if yorum == "gonderildi":
+        execute(
+            """
+            UPDATE erp_notlar
+            SET whatsapp_sonuc_kodu = 'dogrulandi', whatsapp_hata = NULL, updated_at = NOW()
+            WHERE id = %s
+              AND whatsapp_gonderim_durumu = 'gonderildi'
+              AND whatsapp_sonuc_kodu = 'kuyruk'
+            """,
+            (nid,),
+        )
+        return
+    if yorum == "belirsiz":
+        execute(
+            """
+            UPDATE erp_notlar
+            SET whatsapp_gonderim_durumu = 'belirsiz',
+                whatsapp_hata = 'yanit_yok',
+                whatsapp_sonuc_kodu = 'belirsiz',
+                updated_at = NOW()
+            WHERE id = %s
+              AND whatsapp_gonderim_durumu = 'gonderildi'
+              AND whatsapp_sonuc_kodu = 'kuyruk'
+            """,
+            (nid,),
+        )
+        return
+    if yorum != "basarisiz":
+        return
+    durum, yeni = _wa_sonraki_basarisiz(deneme, created_at)
+    execute(
+        """
+        UPDATE erp_notlar
+        SET whatsapp_gonderim_durumu = %s,
+            whatsapp_gonderim_deneme = %s,
+            whatsapp_hata = %s,
+            whatsapp_sonuc_kodu = 'basarisiz',
+            whatsapp_son_deneme_at = NOW(),
+            updated_at = NOW()
+        WHERE id = %s
+          AND whatsapp_gonderim_durumu = 'gonderildi'
+          AND whatsapp_sonuc_kodu = 'kuyruk'
+        """,
+        (durum, yeni, (kod or "gonderim_hata")[:40], nid),
+    )
+
+
+def _wa_not_sonuc_tazele(limit: int = _WA_TAZELE_LIMIT, butce_sn: float = _WA_TAZELE_BUTCE_SN,
+                         sonuc_fn=None, simdi_fn=None) -> dict:
+    """Kuyruğa kabul edilmiş notların sonucunu sorar. İstek thread'inde çağrılmaz.
+
+    'yok' kaydı belirsiz yapmaz: servis belleği dolmuş veya süreç yenilenmiş
+    olabilir; mesaj gitmiş de olabilir. Otomatik yeniden gönderim yalnız
+    basarisiz seçiminde olduğu için olduğu gibi bırakmak çift mesajı önler.
+    """
+    bas = (simdi_fn or time.monotonic)()
+    saat = simdi_fn or time.monotonic
+    rows = fetch_all(
+        """
+        SELECT id, whatsapp_kuyruk_anahtar, whatsapp_gonderim_deneme, created_at
+        FROM erp_notlar
+        WHERE whatsapp_gonderim_durumu = 'gonderildi'
+          AND whatsapp_sonuc_kodu = 'kuyruk'
+          AND whatsapp_kuyruk_anahtar IS NOT NULL
+          AND COALESCE(whatsapp_gonderildi_at, updated_at) >= NOW() - INTERVAL '2 hours'
+        ORDER BY COALESCE(whatsapp_gonderildi_at, updated_at)
+        LIMIT %s
+        """,
+        (int(limit),),
+    ) or []
+    sor = sonuc_fn or _wa_sonuc_sor
+    say = {"gonderildi": 0, "belirsiz": 0, "basarisiz": 0, "birak": 0}
+    for row in rows:
+        if saat() - bas >= butce_sn:
+            break
+        anahtar = str(row.get("whatsapp_kuyruk_anahtar") or "").strip()
+        if not _SZWA_ANAHTAR.match(anahtar):
+            say["birak"] += 1
+            continue
+        try:
+            paket = sor(anahtar)
+        except Exception:
+            say["birak"] += 1
+            continue
+        yorum = _wa_kuyruk_yorum(paket if isinstance(paket, dict) else {})
+        if yorum == "birak":
+            say["birak"] += 1
+            continue
+        _wa_tazele_uygula(
+            int(row["id"]), yorum, row.get("whatsapp_gonderim_deneme"),
+            row.get("created_at"), str((paket or {}).get("kod") or ""),
+        )
+        say[yorum] = say.get(yorum, 0) + 1
+    return say
+
+
 def _wa_numara_kayitli(telefon: str):
     """Dönüş: ('kayitli'|'yok'|'hata', neden). Telefon ve mesaj loglanmaz."""
     from routes.whatsapp_routes import _wa_internal_headers, _wa_url
@@ -2149,7 +2350,17 @@ def _wa_gonder_bir(nid: int, schema: str | None = None) -> str:
     if not mesaj:
         _wa_basarisiz_yaz(nid, 4, row.get("created_at"), "mesaj_yok")
         return "basarisiz_kalici"
-    sonuc, tur = _wa_node_gonder(nid, tel, mesaj, schema)
+    eski = str(row.get("whatsapp_kuyruk_anahtar") or "").strip()
+    paket = _wa_sonuc_sor(eski) if _SZWA_ANAHTAR.match(eski) else {}
+    karar, anahtar = _wa_gonder_karar(eski, paket)
+    if karar == "ayni":
+        _wa_gonderildi_yaz(nid)
+        return "gonderildi"
+    if karar == "bekle":
+        _wa_kuyruk_bekle(nid)
+        return "atlandi"
+    _wa_anahtar_kaydet(nid, anahtar)
+    sonuc, tur = _wa_node_gonder(nid, tel, mesaj, schema, anahtar=anahtar)
     if sonuc == "ok":
         _wa_gonderildi_yaz(nid)
         return "gonderildi"
@@ -2221,6 +2432,7 @@ def gonder_whatsapp_notlari(only_ids=None) -> dict:
     en az 2 dakika geçmiş notlar. 5. deneme veya 30 dakika sonra kalıcı.
     """
     ensure_erp_notlar_tablolari()
+    _wa_not_sonuc_tazele()
     _wa_takili_toparla(only_ids)
     params: list = []
     id_sql = ""
