@@ -2002,9 +2002,12 @@ _SZWA_ANAHTAR = re.compile(
     r"^szwa:d:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 )
 _WA_KUYRUKTA = frozenset(("bekliyor", "kuyrukta", "gonderiliyor"))
-_WA_BASARISIZ_KOD = frozenset(("gonderim_hata", "medya_hata", "zaman_asimi", "oturum"))
+# zaman_asimi yok: servis süresi dolunca mesaj gitmiş olabilir; yeniden göndermek çift mesajdır.
+_WA_BASARISIZ_KOD = frozenset(("gonderim_hata", "medya_hata", "oturum"))
 _WA_TAZELE_LIMIT = 20
 _WA_TAZELE_BUTCE_SN = 30.0
+# (bağlanma, okuma). Servis kapalıyken tek sorgu bu tavanı aşmaz.
+_WA_SONUC_TIMEOUT = (3, 3)
 
 
 def _wa_anahtar_uret() -> str:
@@ -2037,7 +2040,9 @@ def _wa_kuyruk_yorum(paket: dict) -> str:
     kod = str(paket.get("kod") or "")
     if durum == "gonderildi":
         return "gonderildi"
-    if durum == "belirsiz" or (durum == "basarisiz" and kod == "bos_donus"):
+    if durum == "belirsiz" or (
+        durum == "basarisiz" and kod in ("bos_donus", "zaman_asimi")
+    ):
         return "belirsiz"
     if durum == "basarisiz" and kod in _WA_BASARISIZ_KOD:
         return "basarisiz"
@@ -2157,7 +2162,7 @@ def _wa_node_gonder(nid: int, telefon: str, mesaj: str, schema: str | None, anah
     return "ok", ""
 
 
-def _wa_sonuc_sor(anahtar: str, timeout=(2, 3)) -> dict:
+def _wa_sonuc_sor(anahtar: str, timeout=_WA_SONUC_TIMEOUT) -> dict:
     """Kuyruk sonucu. Telefon, metin ve token yazılmaz."""
     from routes.whatsapp_routes import _wa_internal_headers, _wa_url
 
@@ -2262,19 +2267,23 @@ def _wa_not_sonuc_tazele(limit: int = _WA_TAZELE_LIMIT, butce_sn: float = _WA_TA
     """
     bas = (simdi_fn or time.monotonic)()
     saat = simdi_fn or time.monotonic
-    rows = fetch_all(
-        """
-        SELECT id, whatsapp_kuyruk_anahtar, whatsapp_gonderim_deneme, created_at
-        FROM erp_notlar
-        WHERE whatsapp_gonderim_durumu = 'gonderildi'
-          AND whatsapp_sonuc_kodu = 'kuyruk'
-          AND whatsapp_kuyruk_anahtar IS NOT NULL
-          AND COALESCE(whatsapp_gonderildi_at, updated_at) >= NOW() - INTERVAL '2 hours'
-        ORDER BY COALESCE(whatsapp_gonderildi_at, updated_at)
-        LIMIT %s
-        """,
-        (int(limit),),
-    ) or []
+    try:
+        rows = fetch_all(
+            """
+            SELECT id, whatsapp_kuyruk_anahtar, whatsapp_gonderim_deneme, created_at
+            FROM erp_notlar
+            WHERE whatsapp_gonderim_durumu = 'gonderildi'
+              AND whatsapp_sonuc_kodu = 'kuyruk'
+              AND whatsapp_kuyruk_anahtar IS NOT NULL
+              AND COALESCE(whatsapp_gonderildi_at, updated_at) >= NOW() - INTERVAL '2 hours'
+            ORDER BY COALESCE(whatsapp_gonderildi_at, updated_at)
+            LIMIT %s
+            """,
+            (int(limit),),
+        ) or []
+    except Exception as e:
+        print(f"[WARN] erp_not_whatsapp sonuc sorgu: {type(e).__name__}")
+        return {"gonderildi": 0, "belirsiz": 0, "basarisiz": 0, "birak": 0}
     sor = sonuc_fn or _wa_sonuc_sor
     say = {"gonderildi": 0, "belirsiz": 0, "basarisiz": 0, "birak": 0}
     for row in rows:
@@ -2432,7 +2441,10 @@ def gonder_whatsapp_notlari(only_ids=None) -> dict:
     en az 2 dakika geçmiş notlar. 5. deneme veya 30 dakika sonra kalıcı.
     """
     ensure_erp_notlar_tablolari()
-    _wa_not_sonuc_tazele()
+    try:
+        _wa_not_sonuc_tazele()
+    except Exception as e:
+        print(f"[WARN] erp_not_whatsapp sonuc: {type(e).__name__}")
     _wa_takili_toparla(only_ids)
     params: list = []
     id_sql = ""
