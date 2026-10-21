@@ -1522,6 +1522,7 @@
       '<button type="button" class="ea-gecmis-x" aria-label="Kapat">×</button></div>' +
       '<div class="ea-wa-govde"><div class="ea-wa-sol">' +
       '<p class="ea-wa-maske"></p>' +
+      '<div id="erp-asistan-wa-numaralar"></div>' +
       '<p id="erp-asistan-wa-durum" class="ea-wa-durum">Durum alınıyor…</p>' +
       '<p id="erp-asistan-wa-web" class="ea-wa-web"><a id="erp-asistan-wa-web-a" href="https://web.whatsapp.com/" target="_blank" rel="noopener noreferrer">Kendi WhatsApp Web\'imde aç (ofis hattı olmayabilir)</a></p>' +
       '<p id="erp-asistan-wa-web-ipucu" class="ea-wa-web-ipucu">ERP üzerinden ofis hattıyla göndermek için Giriş → WhatsApp ekranından QR\'ı ofis telefonuyla okutun.</p>' +
@@ -1698,7 +1699,15 @@
       var engel = !!(s && s.engel);
       uyari.hidden = !engel;
       uyari.textContent = engel ? (s.ipucu || "Borç hesaplanmadı") : "";
-      gonder.disabled = dugmeTut || durumEngel || engel || !String(kutu.value || "").trim();
+      var secimBos = (function () {
+        var secim = secimOku();
+        return !!(secim && !secim.length);
+      })();
+      if (secimBos && !engel) {
+        uyari.hidden = false;
+        uyari.textContent = "En az bir numara seçin";
+      }
+      gonder.disabled = dugmeTut || durumEngel || engel || secimBos || !String(kutu.value || "").trim();
       panelCiz();
     }
     function uygula(s) {
@@ -1873,10 +1882,13 @@
     function numaraSatir(n) {
       var durum = n && n.durum;
       var yazi = durum === "gonderildi" ? "Gönderildi"
-        : (durum === "gonderiliyor" || durum === "kuyrukta" || durum === "bekliyor") ? "Gönderim sürüyor"
+        : (durum === "kuyrukta" || durum === "bekliyor" || durum === "gonderiliyor") ? "Kuyruğa alındı"
+        : durum === "belirsiz" ? "Sonuç belirsiz, telefondan kontrol edin"
+        : durum === "tekrar" ? (n.mesaj || "Bu mesaj bu numaraya az önce gönderildi.")
         : (durum === "hata" || durum === "basarisiz") ? ("Gönderilemedi" + (n.mesaj ? ": " + n.mesaj : ""))
         : (n.mesaj || "Gönderilemedi");
-      return (n.sira || 1) + ". numara: " + yazi;
+      var maske = n && n.maske ? " " + n.maske : "";
+      return (n.sira || 1) + ". numara" + maske + ": " + yazi;
     }
     function listeOzet(liste) {
       var gitti = 0;
@@ -1897,7 +1909,7 @@
       if (!liste || !liste.length) return;
       var bas = listeOzet(liste);
       var detay = liste.map(numaraSatir).join(" · ");
-      sonuc.textContent = liste.length > 1 ? (bas + " — " + detay) : detay;
+      sonuc.textContent = bas + " — " + detay;
     }
     function pollBaslat(liste) {
       waPollDur();
@@ -1941,9 +1953,27 @@
       if (belirsizBtn) belirsizBtn.hidden = false;
       sonuc.textContent = "Sonuç belirsiz, Tüm mesajlar/telefondan kontrol edin";
     }
-    function gonderIstek(tekrarOnay) {
+    function secimOku() {
+      var kutuN = document.getElementById("erp-asistan-wa-numaralar");
+      if (!kutuN || !kutuN.querySelector("input")) return null;
+      var sec = [];
+      kutuN.querySelectorAll("input:checked").forEach(function (el) {
+        var n = parseInt(el.getAttribute("data-sira"), 10);
+        if (n) sec.push(n);
+      });
+      return sec;
+    }
+    var sonListe = [];
+    function gonderIstek(tekrarOnay, yalniz) {
       var metin = String(kutu.value || "").trim();
       if (!metin) return;
+      var secim = yalniz && yalniz.length ? yalniz : secimOku();
+      if (secim && !secim.length) {
+        uyari.hidden = false;
+        uyari.textContent = "En az bir numara seçin";
+        gonder.disabled = true;
+        return;
+      }
       waKilit = true;
       dugmeTut = true;
       gonder.disabled = true;
@@ -1954,13 +1984,17 @@
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mesaj: metin,
-          onay: true,
-          deneme: deneme,
-          sablon: sec.value || "ozel",
-          tekrar_onay: !!tekrarOnay
-        })
+        body: JSON.stringify((function () {
+          var govde = {
+            mesaj: metin,
+            onay: true,
+            deneme: deneme,
+            sablon: sec.value || "ozel",
+            tekrar_onay: !!tekrarOnay
+          };
+          if (secim) govde.secim = secim;
+          return govde;
+        })())
       }).then(function (r) {
         return r.json().then(function (j) { return { j: j || {} }; }).catch(function () { return { bozuk: true }; });
       }).then(function (p) {
@@ -1984,7 +2018,17 @@
           uyar();
           return;
         }
+        sonListe = liste;
         sonucCiz(liste);
+        if (liste.some(function (n) { return n.durum === "tekrar"; }) && tekrarBtn) tekrarBtn.hidden = false;
+        var bekleyen = liste.some(function (n) {
+          return n.durum === "gonderiliyor" || n.durum === "kuyrukta" || n.durum === "bekliyor";
+        });
+        if (!bekleyen && !liste.some(function (n) { return n.durum === "tekrar"; })) {
+          dugmeTut = false;
+          waKilit = false;
+          uyar();
+        }
         pollBaslat(liste);
       }).catch(function () {
         belirsizYaz();
@@ -2019,7 +2063,11 @@
     };
     if (tekrarBtn) tekrarBtn.onclick = function () {
       tekrarBtn.hidden = true;
-      gonderIstek(true);
+      var siralar = (sonListe || []).filter(function (n) { return n.durum === "tekrar" || n.durum === "belirsiz"; }).map(function (n) { return n.sira; });
+      if (siralar.length) deneme = waDeneme();
+      dugmeTut = false;
+      waKilit = false;
+      gonderIstek(true, siralar);
     };
     if (belirsizBtn) belirsizBtn.onclick = function () {
       if (belirsizBtn.getAttribute("data-sor") !== "1") {
@@ -2049,6 +2097,24 @@
         gecikenTutar = j.geciken_tutar;
         perde.querySelector("h3").textContent = j.unvan || unvan || "Müşteri";
         perde.querySelector(".ea-wa-maske").textContent = j.maske ? ("Numara " + j.maske) : "";
+        var numKutu = document.getElementById("erp-asistan-wa-numaralar");
+        if (numKutu) {
+          numKutu.innerHTML = "";
+          (j.numaralar || []).forEach(function (n) {
+            if (!n || !n.sira || !n.maske) return;
+            var lab = document.createElement("label");
+            lab.className = "ea-wa-num";
+            lab.style.cssText = "display:flex;flex-direction:row;align-items:center;gap:8px;margin:4px 0;";
+            var cb = document.createElement("input");
+            cb.type = "checkbox";
+            cb.checked = !!n.secili;
+            cb.setAttribute("data-sira", String(n.sira));
+            cb.addEventListener("change", uyar);
+            lab.appendChild(cb);
+            lab.appendChild(document.createTextNode(n.sira + ". numara · " + n.maske));
+            numKutu.appendChild(lab);
+          });
+        }
         sablonlar = (j.sablonlar || []).slice();
         sablonlar.push({ anahtar: "ozel", etiket: "Özel mesaj", metin: "", borc: false, engel: false, grup: "ozel" });
         sablonlar.forEach(function (s) {
