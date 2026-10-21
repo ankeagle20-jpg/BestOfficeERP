@@ -125,11 +125,14 @@
     if (yine) yine.style.display = goster ? "inline-block" : "none";
   }
 
+  var CIFT_UYARI = "Mesaj gitmiş olabilir, çift gönderilebilir. Telefondan kontrol ettiniz mi?";
+
   function belirsizGoster() {
     var uyari = document.getElementById("sozlesme-wa-uyari");
     var sonuc = document.getElementById("sozlesme-wa-sonuc");
     if (uyari) uyari.textContent = "Sonuç belirsiz, telefondan kontrol edin";
     if (sonuc) sonuc.textContent = "";
+    if (acik) acik.ciftSor = true;
     yineGoster(true);
     dugmeAc();
   }
@@ -138,6 +141,7 @@
     var uyari = document.getElementById("sozlesme-wa-uyari");
     var sonuc = document.getElementById("sozlesme-wa-sonuc");
     var durum = j && j.durum;
+    if (acik && durum !== "belirsiz") acik.ciftSor = false;
     if (durum === "kuyrukta" || durum === "gonderiliyor") {
       if (uyari) uyari.textContent = j.cakisma ? (j.mesaj || "") : "";
       if (sonuc) sonuc.textContent = "Kuyruğa alındı…";
@@ -304,6 +308,7 @@
         yineGoster(false);
       } else if (j.tekrar) {
         if (uyari) uyari.textContent = j.mesaj || "Bu mesaj bu numaraya az önce gönderildi.";
+        if (acik) acik.ciftSor = j.durum === "belirsiz";
         yineGoster(true);
         if (sonuc) sonuc.textContent = "";
       } else if (j.ok && (j.durum === "gonderiliyor" || j.durum === "kuyrukta")) {
@@ -375,6 +380,12 @@
     document.getElementById("sozlesme-wa-gonder").onclick = function () { gonder(false); };
     document.getElementById("sozlesme-wa-yine").onclick = function () {
       pollDur();
+      if (acik && acik.ciftSor) {
+        var uyari = document.getElementById("sozlesme-wa-uyari");
+        if (uyari) uyari.textContent = CIFT_UYARI;
+        acik.ciftSor = false;
+        return;
+      }
       if (acik) acik.deneme = denemeUret();
       gonder(true);
     };

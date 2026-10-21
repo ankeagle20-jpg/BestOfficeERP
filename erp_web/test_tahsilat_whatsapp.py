@@ -466,7 +466,8 @@ def test_sonuc_metin():
     check("metin_pdf", sw.durum_mesaji("basarisiz", False, "medya_hata") == sw._PDF_GONDERILEMEDI)
     check("metin_zaman", sw.durum_mesaji("basarisiz", False, "zaman_asimi") == sw._ZAMAN_GONDERILEMEDI)
     check("metin_oturum", sw.durum_mesaji("basarisiz", False, "oturum") == sw._OTURUM_GONDERILEMEDI)
-    check("metin_bos", sw.durum_mesaji("basarisiz", False, "bos_donus") == sw._BOS_GONDERILEMEDI)
+    check("metin_bos", sw.durum_mesaji("basarisiz", False, "bos_donus") == sw._BELIRSIZ)
+    check("metin_gonderim_hata", sw.durum_mesaji("basarisiz", False, "gonderim_hata") == sw._BOS_GONDERILEMEDI)
     check("gonderildi_yalniz", sw.durum_mesaji("gonderildi", False, "") == "Gönderildi")
 
 

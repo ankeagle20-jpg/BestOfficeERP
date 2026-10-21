@@ -57,7 +57,6 @@ _NEDEN_METIN = {
     "kuyruk_dolu": _KUYRUK_DOLU,
     "oturum_yok": _OTURUM_YOK,
     "medya_hata": _PDF_GONDERILEMEDI,
-    "bos_donus": _BOS_GONDERILEMEDI,
     "zaman_asimi": _ZAMAN_GONDERILEMEDI,
     "oturum": _OTURUM_GONDERILEMEDI,
     "gonderim_hata": _BOS_GONDERILEMEDI,
@@ -208,6 +207,8 @@ def durum_mesaji(durum: str, cakisma: bool, neden: str = "") -> str:
     if kod == "suresi_doldu":
         return _SURESI_DOLDU
     if kod == "basarisiz":
+        if _neden_kodu(neden) == "bos_donus":
+            return _BELIRSIZ
         return _NEDEN_METIN.get(_neden_kodu(neden)) or _BASARISIZ
     return _ONCEDEN
 
@@ -320,11 +321,13 @@ def _ekle(uid, mid, buton, durum, maske, tel_h, uzunluk, metin_h, anahtar):
 
 
 def _durum_yaz(rid: int, durum: str, neden: str = "") -> None:
+    # Kuyruk kabulü satırı kuyrukta yapar; sonuç yoklaması ondan sonra gelir.
+    # gonderildi / basarisiz / suresi_doldu üzerine yazılmaz.
     execute(
         """
         UPDATE sozlesme_whatsapp_gonderim
         SET durum = %s, neden = NULLIF(%s, '')
-        WHERE id = %s AND durum = 'gonderiliyor'
+        WHERE id = %s AND durum IN ('gonderiliyor', 'kuyrukta', 'belirsiz')
         """,
         (durum, _neden_kodu(neden), int(rid)),
     )
@@ -544,7 +547,10 @@ def _kuyruk_oku(status: int, body) -> dict:
     if durum == "gonderildi":
         return {"durum": "gonderildi", "neden": ""}
     if durum == "basarisiz":
-        return {"durum": "hata", "neden": _neden_kodu(oge[0].get("kod") or oge[0].get("code"))}
+        neden = _neden_kodu(oge[0].get("kod") or oge[0].get("code"))
+        if neden == "bos_donus":
+            return {"durum": "belirsiz", "neden": ""}
+        return {"durum": "hata", "neden": neden}
     if durum == "belirsiz":
         return {"durum": "belirsiz", "neden": ""}
     return {"durum": "kuyrukta", "neden": ""}
@@ -657,9 +663,19 @@ def _satiri_tazele(row: dict, anahtar: str, sonuc_fn) -> dict:
         return guncel
     if kod == "basarisiz":
         neden = _neden_kodu(paket.get("kod"))
+        if neden == "bos_donus":
+            _durum_yaz(int(row["id"]), "belirsiz", "")
+            guncel["durum"] = "belirsiz"
+            guncel["neden"] = ""
+            return guncel
         _durum_yaz(int(row["id"]), "basarisiz", neden)
         guncel["durum"] = "basarisiz"
         guncel["neden"] = neden
+        return guncel
+    if kod == "belirsiz":
+        _durum_yaz(int(row["id"]), "belirsiz", "")
+        guncel["durum"] = "belirsiz"
+        guncel["neden"] = ""
         return guncel
     if kod == "yok":
         _durum_yaz(int(row["id"]), "belirsiz", "")
