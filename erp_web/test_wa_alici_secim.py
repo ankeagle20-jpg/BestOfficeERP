@@ -171,6 +171,20 @@ def test_arayuz_kaynak():
     wa = (ROOT / "static" / "js" / "wa-alici.js").read_text(encoding="utf-8")
     layout = (ROOT / "templates" / "layout.html").read_text(encoding="utf-8")
     check("ortak_bilesen", "window.WaAlici" in wa and "1. Yetkili" in wa and "Gönderildi ✓" in wa and "Başka numara ekle" in wa)
+    css = wa.split("st.textContent =", 1)[1].split("document.head", 1)[0]
+    satir_govde = []
+    for kural in css.split("}"):
+        if "{" not in kural:
+            continue
+        secici, govde = kural.split("{", 1)
+        if secici.strip().endswith(".wa-alici-satir") or secici.strip().endswith(".wa-alici-satir:has(input:checked)"):
+            satir_govde.append(govde)
+    satir_css = "".join(satir_govde)
+    check(
+        "satir_beyaz_yok",
+        len(satir_govde) == 2 and "background:#fff" not in satir_css and "#fff" not in satir_css
+        and "background:transparent" in satir_css and "color:inherit" in satir_css,
+    )
     check("layout_v13", "js/wa-alici.js" in layout and "erp-asistan.js') }}?v=13" in layout)
     check("ekip_anlam", "Müşteri numarasına gider" in asi and "WhatsApp ile de gönder" in asi)
     check("kismi_metin", "Not kaydedildi; 2. numaraya gönderilemedi:" in asi and 'buton: "ust"' in asi and 'buton: "asistan"' not in asi)
@@ -585,6 +599,26 @@ def test_kart_pencere():
             and not s.locator(".wa-alici-satir input").nth(1).is_checked()
             and s.locator(".wa-alici-ek").count() == 1,
         )
+        def tema(n):
+            return s.locator("#sozlesme-wa-numaralar .wa-alici-satir").nth(n).evaluate(
+                """el => ({
+                  zemin: getComputedStyle(el).backgroundColor,
+                  yazi: getComputedStyle(el.querySelector('.wa-alici-no')).color,
+                  etiket: getComputedStyle(el.querySelector('.wa-alici-etiket')).color,
+                  sigar: el.scrollWidth <= el.clientWidth + 2
+                })"""
+            )
+        secili = tema(0)
+        bos = tema(1)
+        s.set_viewport_size({"width": 390, "height": 700})
+        dar = tema(0)
+        s.set_viewport_size({"width": 1280, "height": 720})
+        check(
+            "sozlesme_tema",
+            bos["zemin"] == "rgba(0, 0, 0, 0)" and "255, 255, 255" not in secili["zemin"]
+            and secili["yazi"] == "rgb(224, 247, 250)" and secili["etiket"] != secili["yazi"]
+            and dar["sigar"],
+        )
         s.click("#sozlesme-wa-gonder")
         s.wait_for_function("() => document.getElementById('sozlesme-wa-sonuc').textContent.indexOf('Gönderildi') >= 0")
         check("kart_tek", len(govdeler) == 1 and govdeler[0]["son4"] == "1111" and govdeler[0]["yol"] == "sozlesme")
@@ -638,6 +672,16 @@ def test_kart_pencere():
             and s.locator("#erp-asistan-not-alicilar .wa-alici-satir input").nth(0).is_checked()
             and not s.locator("#erp-asistan-not-alicilar .wa-alici-satir input").nth(1).is_checked()
             and "Müşteri numarasına gider" in s.locator("#erp-asistan-form").inner_text(),
+        )
+        asistan_tema = s.locator("#erp-asistan-not-alicilar .wa-alici-satir").nth(1).evaluate(
+            """el => ({
+              zemin: getComputedStyle(el).backgroundColor,
+              yazi: getComputedStyle(el.querySelector('.wa-alici-no')).color
+            })"""
+        )
+        check(
+            "asistan_tema",
+            asistan_tema["zemin"] == "rgba(0, 0, 0, 0)" and asistan_tema["yazi"] == "rgb(224, 247, 250)",
         )
         s.locator("#erp-asistan-not-alicilar .wa-alici-satir input").nth(0).uncheck()
         uyarilar = []
@@ -705,6 +749,23 @@ def test_kart_pencere():
         kismi("kismi_kapali", 200, '{"ok":true,"geri_dus":true,"mesaj":"WhatsApp servisi bağlı değil"}', "bağlı değil")
         kismi("kismi_hata", 0, "", "Gönderilemedi")
         gonder_cevap["kod"] = None
+        s.evaluate(
+            "(n) => window.WaAlici.radyo(n, function () {})",
+            ["05550001111", "05550002222"],
+        )
+        s.wait_for_selector(".wa-alici-kart .wa-alici-no")
+        radyo = s.locator(".wa-alici-kart .wa-alici-satir").nth(1).evaluate(
+            """el => ({
+              zemin: getComputedStyle(el).backgroundColor,
+              yazi: getComputedStyle(el.querySelector('.wa-alici-no')).color,
+              kabuk: getComputedStyle(el.closest('.wa-alici-kart')).backgroundColor
+            })"""
+        )
+        check(
+            "radyo_tema",
+            radyo["zemin"] == "rgba(0, 0, 0, 0)" and radyo["yazi"] == "rgb(38, 50, 56)"
+            and radyo["kabuk"] == "rgb(255, 255, 255)",
+        )
         tarayici.close()
 
 
