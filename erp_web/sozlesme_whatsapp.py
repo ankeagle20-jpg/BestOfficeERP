@@ -1065,6 +1065,11 @@ def tahsilat_wa_isle(
     norm = normalize_wa_telefon((data or {}).get("telefon"))
     if not norm:
         return {"ok": False, "mesaj": _TEL, "geri_dus": False}, 400
+    if bool((data or {}).get("serbest")):
+        try:
+            serbest_numara_audit(int(uid), kayit_mid, norm, _kart_telefonlari(kayit_mid))
+        except Exception:
+            pass
 
     ensure_tablo()
     an = simdi or datetime.now(timezone.utc)

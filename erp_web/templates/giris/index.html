@@ -35145,9 +35145,12 @@ function cariKartTahsilatAc() {
 function cariKartWhatsApp() {
     if (!cariKartVeri || !cariKartVeri.musteri) { alert('Önce bir müşteri seçip Cari Kart verisini yükleyin.'); return; }
     var num = girisTelefonuWhatsAppRakam(cariKartVeri.musteri.phone || '');
+    var ikinci = girisTelefonuWhatsAppRakam((cariKartVeri.musteri.phone2 || (document.getElementById('phone2') || {}).value || ''));
     var bakiye = (cariKartVeri.ozet.guncel_bakiye || 0).toFixed(2);
     var metin = 'Sayın ' + (cariKartVeri.musteri.name || 'Müşteri') + ',\n\nGüncel cari bakiyeniz: ' + bakiye + ' TL.\nÖdeme yapmanızı rica ederiz.\n\nBESTOFFICE';
-    bestOfficeWhatsAppWebAc(num, metin);
+    function ac(secili) { bestOfficeWhatsAppWebAc(secili || num, metin); }
+    if (window.WaAlici) window.WaAlici.radyo([num, ikinci], ac);
+    else bestOfficeWhatsAppWebAc(num, metin);
 }
 
 function cariKartSatirWhatsApp(belgeNo, tutar) {
@@ -36229,16 +36232,20 @@ async function kiraBildirgesiWhatsApp() {
     if (!blob) return;
     const payload = kiraBildirgesiPayload();
     const num = girisTelefonuWhatsAppRakam(document.getElementById('phone').value || '');
+    const ikinci = girisTelefonuWhatsAppRakam((document.getElementById('phone2') || {}).value || '');
     const metin =
         'Sayın ' + (payload.musteri_adi || 'Kiracımız') + ',\n\n' +
         'Kira bildirgemiz ekte yer almaktadır. İncelemenizi rica ederiz.\n\nİyi günler dileriz.\nBESTOFFICE';
-    bestOfficeWhatsAppWebAc(num, metin);
+    function ac(secili) { bestOfficeWhatsAppWebAc(secili || num, metin); }
+    if (window.WaAlici) window.WaAlici.radyo([num, ikinci], ac);
+    else bestOfficeWhatsAppWebAc(num, metin);
 }
 
 </script>
 <script src="{{ url_for('static', filename='js/plan_degistir.js', v=18) }}"></script>
 <script src="{{ url_for('static', filename='js/musteri_durum.js', v=1) }}"></script>
 <script src="{{ url_for('static', filename='js/tahsilat-wa-durum.js', v=tahsilat_wa_js_surum) }}"></script>
+<script src="{{ url_for('static', filename='js/wa-alici.js', v=1) }}"></script>
 <script src="{{ url_for('static', filename='js/sozlesme-whatsapp.js', v=sozlesme_wa_js_surum) }}"></script>
 <div id="kayanBanner" class="kayan-banner" role="alert">
   <span>Arkada açık ay kaldı, ilerideki aylar kapalı görünüyor. Ödemeleri yeniden dağıtmak ister misiniz?</span>

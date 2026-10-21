@@ -79,6 +79,7 @@
     var kutu = document.getElementById("sozlesme-wa-numaralar");
     var out = [];
     if (!kutu) return out;
+    if (kutu.querySelector(".wa-alici-satir") && window.WaAlici) return window.WaAlici.secilen(kutu);
     kutu.querySelectorAll("input[type=checkbox]:checked").forEach(function (el) {
       out.push({
         sira: parseInt(el.getAttribute("data-sira"), 10) || out.length + 1,
@@ -130,6 +131,29 @@
     });
     kutu.innerHTML = "";
     kutu.hidden = false;
+    if (window.WaAlici) {
+      var kartlar = [];
+      var gorulenKart = {};
+      var kaynakKart = (kisiler && kisiler.length) ? kisiler : [{ telefon: ilkTel }];
+      kaynakKart.forEach(function (k) {
+        var ham = k && k.telefon ? k.telefon : ilkTel;
+        var n = normTel(ham);
+        if (!n || gorulenKart[n] || kartlar.length >= 2) return;
+        gorulenKart[n] = 1;
+        kartlar.push({
+          ham: ham,
+          ad: String((k && k.ad) || "").trim(),
+          secili: kartlar.length === 0
+        });
+      });
+      window.WaAlici.yaz(kutu, { kartlar: kartlar, ek: true, ekId: "sozlesme-wa-ek", mod: "secim", onChange: secimDugme });
+      var satirKart = document.getElementById("sozlesme-wa-satir");
+      var secKart = document.getElementById("sozlesme-wa-sec");
+      if (satirKart) satirKart.hidden = true;
+      if (secKart) secKart.hidden = true;
+      secimDugme();
+      return;
+    }
     liste.forEach(function (ham, i) {
       var lab = document.createElement("label");
       lab.className = "sozlesme-wa-kutu";
@@ -354,12 +378,17 @@
       : s.durum === "belirsiz" ? "Sonuç belirsiz, telefondan kontrol edin"
       : s.durum === "tekrar" ? (s.mesaj || "Bu mesaj bu numaraya az önce gönderildi.")
       : ("Gönderilemedi" + (s.mesaj ? ": " + s.mesaj : ""));
-    return s.sira + ". numara " + maske4(s.tel) + ": " + yazi;
+    var gorunen = window.WaAlici ? window.WaAlici.bicim(s.tel) : maske4(s.tel);
+    return s.sira + ". numara " + gorunen + ": " + yazi;
   }
 
   function durumCiz(satirlar) {
     var sonuc = document.getElementById("sozlesme-wa-sonuc");
     if (sonuc) sonuc.textContent = (satirlar || []).map(durumSatir).join(" · ");
+    if (window.WaAlici) {
+      var kutu = document.getElementById("sozlesme-wa-numaralar");
+      (satirlar || []).forEach(function (s) { window.WaAlici.rozet(kutu, s.sira, s.durum); });
+    }
   }
 
   function gonderSecili(onay) {
@@ -520,6 +549,84 @@
     }, POLL_MS);
   }
 
+  function tahsilatEkYaz(kisiler, ilkTel) {
+    var kutu = document.getElementById("sozlesme-wa-numaralar");
+    if (!kutu || !window.WaAlici) return;
+    var bir = normTel(ilkTel);
+    var kartlar = [];
+    (kisiler || []).forEach(function (k) {
+      var n = normTel(k && k.telefon);
+      if (!n || n === bir || kartlar.length >= 1) return;
+      kartlar.push({
+        ham: k.telefon,
+        ad: String((k && k.ad) || "").trim(),
+        secili: false,
+        etiket: "2. Yetkili",
+        sira: 2
+      });
+    });
+    window.WaAlici.yaz(kutu, { kartlar: kartlar, ek: true, ekId: "sozlesme-wa-ek", mod: "secim" });
+    kutu.hidden = false;
+  }
+
+  function gonderTahsilatListe(ham, ekler, metin, onay) {
+    var liste = [{ tel: ham, sira: 1, serbest: false }].concat(ekler);
+    if (liste.length > 3) liste = liste.slice(0, 3);
+    gonderiyor = true;
+    var btn = document.getElementById("sozlesme-wa-gonder");
+    if (btn) btn.disabled = true;
+    var satirlar = [];
+    var i = 0;
+    function bitir() {
+      acik.satirlar = satirlar;
+      durumCiz(satirlar);
+      if (satirlar.some(function (s) { return s.durum === "kuyrukta" || s.durum === "gonderiliyor"; })) pollCoklu();
+      else dugmeAc();
+    }
+    function adim() {
+      if (!acik) return;
+      if (i >= liste.length) { bitir(); return; }
+      var oge = liste[i];
+      i += 1;
+      var deneme = denemeUret();
+      var govde = {
+        tahsilat_id: acik.tahsilatId,
+        musteri_id: acik.musteriId,
+        telefon: oge.tel,
+        mesaj: metin,
+        onay: !!onay,
+        deneme: deneme
+      };
+      if (oge.serbest) govde.serbest = true;
+      fetch("/giris/api/tahsilat-whatsapp/gonder", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(govde)
+      }).then(function (r) {
+        return r.json().then(function (j) { return { kod: r.status, j: j || {} }; }).catch(function () { return { kod: r.status, j: {} }; });
+      }).then(function (paket) {
+        var j = paket.j || {};
+        var durum = (j.ok && (j.durum === "gonderiliyor" || j.durum === "kuyrukta")) ? "kuyrukta"
+          : (j.durum === "gonderildi" ? "gonderildi" : (j.durum === "belirsiz" ? "belirsiz" : "hata"));
+        satirlar.push({ sira: oge.sira, tel: oge.tel, durum: durum, mesaj: j.mesaj || "", deneme: deneme, serbest: !!oge.serbest });
+        durumCiz(satirlar);
+        if (paket.kod === 429 || j.qr || j.geri_dus) {
+          while (i < liste.length) {
+            var kalan = liste[i];
+            i += 1;
+            satirlar.push({ sira: kalan.sira, tel: kalan.tel, durum: "hata", mesaj: j.mesaj || "Gönderilmedi", deneme: "", serbest: !!kalan.serbest });
+          }
+        }
+        adim();
+      }).catch(function () {
+        satirlar.push({ sira: oge.sira, tel: oge.tel, durum: "hata", mesaj: "Gönderilemedi", deneme: deneme });
+        adim();
+      });
+    }
+    adim();
+  }
+
   function gonder(onay) {
     if (gonderiyor || !acik) return;
     if (!acik.tahsilatId) {
@@ -541,6 +648,32 @@
     }
     if (!String(metin || "").trim()) {
       if (uyari) uyari.textContent = "Mesaj boş";
+      return;
+    }
+    var ekler = [];
+    if (window.WaAlici) {
+      var kutuEk = document.getElementById("sozlesme-wa-numaralar");
+      window.WaAlici.secilen(kutuEk).forEach(function (s) {
+        if (s.tel && normTel(s.tel) !== normTel(ham)) ekler.push({ tel: s.tel, sira: s.sira || 2, serbest: false });
+      });
+      var ekInp = document.getElementById("sozlesme-wa-ek");
+      if (ekInp && String(ekInp.value || "").trim()) {
+        var nEk = normTel(ekInp.value);
+        if (!nEk) {
+          if (uyari) uyari.textContent = "Telefon numarası geçersiz";
+          return;
+        }
+        if (normTel(nEk) !== normTel(ham) && !ekler.some(function (s) { return normTel(s.tel) === nEk; })) {
+          ekler.push({ tel: nEk, sira: 3, serbest: true });
+        }
+      }
+      if (1 + ekler.length > 3) {
+        if (uyari) uyari.textContent = "En fazla 3 alıcı";
+        return;
+      }
+    }
+    if (ekler.length) {
+      gonderTahsilatListe(ham, ekler, metin, onay);
       return;
     }
     if (uyari && !onay) uyari.textContent = "";
@@ -704,12 +837,13 @@
         .then(function (j) {
           if (!j || !j.ok) return;
           kisileriYaz(j.kisiler || [], opts.telefon || "", opts.ad || "");
+          if (acik && acik.tahsilatId && window.WaAlici) tahsilatEkYaz(j.kisiler || [], opts.telefon || "");
         })
         .catch(function () {});
     }
     if (acik.tahsilatId) {
       var numKutu = document.getElementById("sozlesme-wa-numaralar");
-      if (numKutu) numKutu.hidden = true;
+      if (numKutu && !window.WaAlici) numKutu.hidden = true;
       var tid = acik.tahsilatId;
       fetch("/giris/api/tahsilat-whatsapp/hazir?tahsilat_id=" + encodeURIComponent(tid), { credentials: "same-origin" })
         .then(function (r) { return r.json().then(function (j) { return j || {}; }).catch(function () { return {}; }); })

@@ -48,6 +48,16 @@ def test_liste_ve_secim():
     ham = json.dumps(secenek)
     check("maske_secili", secenek[0]["secili"] is True and secenek[1]["secili"] is False)
     check("maske_son4", secenek[0]["maske"].endswith("1111") and BIR not in ham and IKI not in ham)
+    kart = en._wa_numara_kartlari([BIR, IKI])
+    kblob = json.dumps(kart, ensure_ascii=False)
+    check(
+        "gorunen_bicim",
+        " " in kart[0]["gorunen"] and kart[0]["gorunen"].endswith("11 11")
+        and kart[1]["gorunen"].endswith("22 22") and kart[0]["secili"] is True
+        and kart[1]["secili"] is False and kart[0]["etiket"] == "1. Yetkili"
+        and kart[1]["etiket"] == "2. Yetkili" and BIR not in kblob and IKI not in kblob
+        and "telefon" not in kblob,
+    )
 
 
 def test_gonderim():
@@ -158,6 +168,24 @@ def test_arayuz_kaynak():
     check("poll_180", "POLL_SON = 180000" in soz and "90000" not in soz and "180000" in asi and "90000" not in asi)
     check("sure_satir", "Sonuç belirsiz, telefondan kontrol edin" in soz and "Sonuç belirsiz, telefondan kontrol edin" in asi)
     check("asi_uzun_metin", "Sonuç belirsiz, Tüm mesajlar/telefondan kontrol edin" in asi)
+    wa = (ROOT / "static" / "js" / "wa-alici.js").read_text(encoding="utf-8")
+    layout = (ROOT / "templates" / "layout.html").read_text(encoding="utf-8")
+    check("ortak_bilesen", "window.WaAlici" in wa and "1. Yetkili" in wa and "Gönderildi ✓" in wa and "Başka numara ekle" in wa)
+    check("layout_v13", "js/wa-alici.js" in layout and "erp-asistan.js') }}?v=13" in layout)
+    check("ekip_anlam", "Müşteri numarasına gider" in asi and "WhatsApp ile de gönder" in asi)
+    check("tahsilat_ikinci", "gonderTahsilatListe" in soz and "sozlesme-wa-tel" in soz)
+    html = (ROOT / "templates" / "giris" / "index.html").read_text(encoding="utf-8")
+
+    def govde(ad):
+        i = html.find("function " + ad)
+        j = html.find("\nfunction ", i + 10)
+        return html[i:j if j > 0 else None]
+
+    cari = govde("cariKartWhatsApp")
+    kira = govde("kiraBildirgesiWhatsApp")
+    check("cari_radyo", "WaAlici.radyo" in cari and "bestOfficeWhatsAppWebAc" in cari and "sozlesmeWhatsAppAc" not in cari)
+    check("kira_radyo", "WaAlici.radyo" in kira and "bestOfficeWhatsAppWebAc" in kira and "sozlesmeWhatsAppAc" not in kira)
+    check("giris_script", "js/wa-alici.js" in html and "function whatsappSeciliGonder" in html)
 
 
 def _gonder_kur(cagri, audit):
@@ -444,6 +472,164 @@ def test_ek_pencere():
         tarayici.close()
 
 
+def test_kart_pencere():
+    try:
+        from playwright.sync_api import sync_playwright
+    except Exception:
+        check("kart playwright", False)
+        return
+    soz_yol = str(ROOT / "static" / "js" / "sozlesme-whatsapp.js")
+    wa_yol = str(ROOT / "static" / "js" / "wa-alici.js")
+    asi_yol = str(ROOT / "static" / "js" / "erp-asistan.js")
+    govdeler = []
+    notlar = []
+
+    def hepsi(route):
+        url = route.request.url
+        if url.endswith("/wa-alici.js"):
+            route.fulfill(path=wa_yol, content_type="text/javascript")
+            return
+        if url.endswith("/sozlesme-whatsapp.js"):
+            route.fulfill(path=soz_yol, content_type="text/javascript")
+            return
+        if "/erp-asistan.js" in url:
+            route.fulfill(path=asi_yol, content_type="text/javascript")
+            return
+        if "kisiler" in url:
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body='{"ok":true,"kisiler":[{"telefon":"905550001111","ad":""},{"telefon":"905550002222","ad":""},{"telefon":"905550001111","ad":""}]}',
+            )
+            return
+        if url.endswith("/api/musteri/1"):
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body='{"ok":true,"ad":"Kart","telefon":"","alicilar":[{"sira":1,"gorunen":"0555 000 11 11","etiket":"1. Yetkili","secili":true},{"sira":2,"gorunen":"0555 000 22 22","etiket":"2. Yetkili","secili":false}]}',
+            )
+            return
+        if url.endswith("/api/meta"):
+            route.fulfill(status=200, content_type="application/json", body='{"ok":true,"kategoriler":["Genel"],"kisiler":[],"departmanlar":[]}')
+            return
+        if url.endswith("/api/olustur"):
+            try:
+                j = json.loads(route.request.post_data or "{}")
+            except Exception:
+                j = {}
+            notlar.append({"son4": str(j.get("whatsapp_telefon") or "")[-4:], "serbest": j.get("whatsapp_serbest") is True})
+            route.fulfill(status=200, content_type="application/json", body='{"ok":true}')
+            return
+        if "whatsapp-durum" in url:
+            route.fulfill(status=200, content_type="application/json", body='{"ok":true,"durum":"bagli"}')
+            return
+        if url.endswith("/gonder"):
+            try:
+                j = json.loads(route.request.post_data or "{}")
+            except Exception:
+                j = {}
+            govdeler.append({"son4": str(j.get("telefon") or "")[-4:], "serbest": j.get("serbest") is True, "yol": "tahsilat" if "tahsilat" in url else "sozlesme"})
+            route.fulfill(status=200, content_type="application/json", body='{"ok":true,"durum":"gonderildi"}')
+            return
+        if url.endswith("/asistan"):
+            route.fulfill(
+                status=200,
+                content_type="text/html",
+                body="<!doctype html><meta charset='utf-8'><script src='/wa-alici.js'></script><script src='/erp-asistan.js?v=13'></script>",
+            )
+            return
+        route.fulfill(
+            status=200,
+            content_type="text/html",
+            body="<!doctype html><meta charset='utf-8'><script src='/wa-alici.js'></script><script src='/sozlesme-whatsapp.js'></script>",
+        )
+
+    with sync_playwright() as pw:
+        tarayici = pw.chromium.launch(channel="msedge", headless=True)
+        s = tarayici.new_page()
+        s.route("**/*", hepsi)
+        s.goto("http://kart.test/sayfa")
+        s.wait_for_function("() => typeof sozlesmeWhatsAppAc === 'function' && !!window.WaAlici")
+        with s.expect_response("**/kisiler**"):
+            s.evaluate("() => sozlesmeWhatsAppAc({buton:'ust', musteriId:1, telefon:'905550001111', ad:'', mesaj:'deneme'})")
+        s.wait_for_selector(".wa-alici-no")
+        nolar = s.locator(".wa-alici-no")
+        bir = nolar.nth(0).inner_text()
+        iki = nolar.nth(1).inner_text()
+        check(
+            "kart_varsayilan",
+            nolar.count() == 2 and " " in bir and bir.endswith("11 11") and iki.endswith("22 22")
+            and "90555" not in bir and "90555" not in iki
+            and s.locator(".wa-alici-satir input").nth(0).is_checked()
+            and not s.locator(".wa-alici-satir input").nth(1).is_checked()
+            and s.locator(".wa-alici-ek").count() == 1,
+        )
+        s.click("#sozlesme-wa-gonder")
+        s.wait_for_function("() => document.getElementById('sozlesme-wa-sonuc').textContent.indexOf('Gönderildi') >= 0")
+        check("kart_tek", len(govdeler) == 1 and govdeler[0]["son4"] == "1111" and govdeler[0]["yol"] == "sozlesme")
+        govdeler.clear()
+        s.locator(".wa-alici-satir input").nth(1).check()
+        s.click("#sozlesme-wa-gonder")
+        s.wait_for_function("() => (document.getElementById('sozlesme-wa-sonuc').textContent.match(/Gönderildi/g) || []).length >= 2")
+        sonlar = sorted(g["son4"] for g in govdeler)
+        check("kart_iki", sonlar == ["1111", "2222"] and all(g["yol"] == "sozlesme" for g in govdeler))
+        s.locator(".wa-alici-satir input").nth(0).uncheck()
+        s.locator(".wa-alici-satir input").nth(1).uncheck()
+        check("kart_engel", s.locator("#sozlesme-wa-gonder").is_disabled() and "En az bir" in s.locator("#sozlesme-wa-uyari").inner_text())
+        s.click("#sozlesme-wa-kapat")
+        govdeler.clear()
+        with s.expect_response("**/kisiler**"):
+            s.evaluate("() => sozlesmeWhatsAppAc({buton:'makbuz', musteriId:1, tahsilatId:9, telefon:'905550001111', ad:'', mesaj:'deneme'})")
+        s.wait_for_selector(".wa-alici-etiket")
+        check(
+            "makbuz_tel_ve_ikinci",
+            s.locator("#sozlesme-wa-tel").is_visible()
+            and s.locator(".wa-alici-etiket").inner_text() == "2. Yetkili"
+            and not s.locator(".wa-alici-satir input").is_checked()
+            and s.locator(".wa-alici-ek").count() == 1,
+        )
+        s.click("#sozlesme-wa-gonder")
+        s.wait_for_function("() => document.getElementById('sozlesme-wa-sonuc').textContent.indexOf('Gönderildi') >= 0")
+        check("makbuz_tek", len(govdeler) == 1 and govdeler[0]["son4"] == "1111" and govdeler[0]["yol"] == "tahsilat")
+        s.locator(".wa-alici-satir input").check()
+        govdeler.clear()
+        s.click("#sozlesme-wa-gonder")
+        s.wait_for_function("() => (document.getElementById('sozlesme-wa-sonuc').textContent.match(/Gönderildi/g) || []).length >= 2")
+        sonlar = sorted(g["son4"] for g in govdeler)
+        check("makbuz_iki", sonlar == ["1111", "2222"])
+        tarayici.close()
+
+    with sync_playwright() as pw:
+        tarayici = pw.chromium.launch(channel="msedge", headless=True)
+        s = tarayici.new_page()
+        s.route("**/*", hepsi)
+        s.goto("http://kart.test/asistan")
+        s.wait_for_function("() => typeof erpAsistanNotFormAc === 'function' && !!window.WaAlici")
+        s.evaluate("() => { window.cariEkstreMusteriIdSec = function () { return 1; }; erpAsistanNotFormAc(); }")
+        s.locator("#erp-asistan-wa").check()
+        s.wait_for_selector("#erp-asistan-not-alicilar .wa-alici-no")
+        s.fill("textarea[name=not_metni]", "not")
+        gor = s.locator("#erp-asistan-not-alicilar .wa-alici-no").nth(0).inner_text()
+        etiket = s.locator("#erp-asistan-tel").evaluate("el => el.closest('label').style.display")
+        check(
+            "not_bilesen",
+            etiket == "none" and " " in gor and gor.endswith("11 11") and "90555" not in gor
+            and s.locator("#erp-asistan-not-alicilar .wa-alici-satir input").nth(0).is_checked()
+            and not s.locator("#erp-asistan-not-alicilar .wa-alici-satir input").nth(1).is_checked()
+            and "Müşteri numarasına gider" in s.locator("#erp-asistan-form").inner_text(),
+        )
+        s.locator("#erp-asistan-not-alicilar .wa-alici-satir input").nth(0).uncheck()
+        uyarilar = []
+        s.once("dialog", lambda d: (uyarilar.append(d.message), d.accept()))
+        s.locator("#erp-asistan-form-ic").evaluate("f => f.requestSubmit()")
+        check("not_engel", not notlar and any("En az bir" in m for m in uyarilar))
+        s.locator("#erp-asistan-not-alicilar .wa-alici-satir input").nth(0).check()
+        with s.expect_response("**/api/olustur"):
+            s.locator("#erp-asistan-form-ic").evaluate("f => f.requestSubmit()")
+        check("not_bir", len(notlar) == 1 and notlar[0]["son4"] == "1111" and not notlar[0]["serbest"])
+        tarayici.close()
+
+
 def main():
     test_liste_ve_secim()
     test_gonderim()
@@ -452,6 +638,7 @@ def main():
     test_audit_govde()
     test_yoklama_tazele()
     test_ek_pencere()
+    test_kart_pencere()
     print("CASE alici secim ok")
 
 

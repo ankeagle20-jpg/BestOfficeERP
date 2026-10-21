@@ -831,6 +831,7 @@
       "</div>" +
       '<label class="erp-asistan-alan"><span><input type="checkbox" id="erp-asistan-wa"> WhatsApp ile de gönder</span></label>' +
       '<div id="erp-asistan-wa-alan" style="display:none;">' +
+      '<p style="margin:4px 0;font-size:12px;color:#546e7a;">Müşteri numarasına gider. Ekip yalnızca notun kimlere görüneceğini belirler.</p>' +
       '<label class="erp-asistan-alan">Telefon<input name="whatsapp_telefon" id="erp-asistan-tel"></label>' +
       '<label class="erp-asistan-alan">Mesaj (boşsa not metni gider)<textarea name="whatsapp_mesaj" rows="2"></textarea></label>' +
       "</div>" +
@@ -856,6 +857,22 @@
         document.getElementById("erp-asistan-musteri").textContent = "Müşteri: " + (j.ad || ("#" + mid));
         var tel = document.getElementById("erp-asistan-tel");
         if (tel && !tel.value) tel.value = j.telefon || "";
+        if (window.WaAlici && j.alicilar) {
+          var telEtiket = tel && tel.closest("label");
+          if (telEtiket) telEtiket.style.display = "none";
+          if (tel) tel.value = "";
+          var kutuA = document.createElement("div");
+          kutuA.id = "erp-asistan-not-alicilar";
+          if (telEtiket && telEtiket.parentNode) telEtiket.parentNode.insertBefore(kutuA, telEtiket);
+          window.WaAlici.yaz(kutuA, {
+            kartlar: (j.alicilar || []).map(function (a) {
+              return { ham: a.gorunen, etiket: a.etiket || "", secili: !!a.secili };
+            }),
+            ek: true,
+            ekId: "erp-asistan-not-ek",
+            mod: "secim"
+          });
+        }
       })
       .catch(function () {});
     fetch("/erp-notlar/api/meta", { credentials: "same-origin" })
@@ -893,6 +910,11 @@
       for (var i = 0; i < sel.options.length; i++) {
         if (sel.options[i].selected) ids.push(parseInt(sel.options[i].value, 10));
       }
+      var secimNot = notAliciSec();
+      if (secimNot && secimNot.hata) {
+        alert(secimNot.hata);
+        return;
+      }
       var payload = {
         kategori: fd.get("kategori"),
         not_metni: fd.get("not_metni"),
@@ -904,8 +926,9 @@
         iliski_tip: "musteri",
         iliski_id: mid,
         whatsapp_gonderilsin: document.getElementById("erp-asistan-wa").checked,
-        whatsapp_telefon: fd.get("whatsapp_telefon") || "",
+        whatsapp_telefon: (secimNot && secimNot.bir) ? secimNot.bir : (fd.get("whatsapp_telefon") || ""),
         whatsapp_mesaj: fd.get("whatsapp_mesaj") || "",
+        whatsapp_serbest: !!(secimNot && secimNot.serbestBir),
       };
       postJson("/erp-notlar/api/olustur", payload).then(function (j) {
         if (!j || !j.ok) {
@@ -920,6 +943,7 @@
           kapat();
           return;
         }
+        function durumSor() {
         fetch("/erp-notlar/api/whatsapp-durum", { credentials: "same-origin" })
           .then(function (r) { return r.ok ? r.json() : null; })
           .then(function (st) {
@@ -929,8 +953,78 @@
             }
           })
           .catch(function () { kapat(); });
+        }
+        if (secimNot && secimNot.ekler && secimNot.ekler.length) {
+          notEkGonder(mid, payload.whatsapp_mesaj || payload.not_metni, secimNot.ekler, durumSor);
+          return;
+        }
+        durumSor();
       });
     };
+  }
+
+  function notAliciSec() {
+    var kutu = document.getElementById("erp-asistan-not-alicilar");
+    var wa = document.getElementById("erp-asistan-wa");
+    if (!kutu || !window.WaAlici || !wa || !wa.checked) return null;
+    var sec = window.WaAlici.secilen(kutu);
+    var ekInp = document.getElementById("erp-asistan-not-ek");
+    var ek = "";
+    if (ekInp && String(ekInp.value || "").trim()) {
+      ek = window.WaAlici.norm(ekInp.value);
+      if (!ek) return { hata: "Telefon numarası geçersiz" };
+    }
+    var liste = [];
+    sec.forEach(function (s) {
+      if (s.tel && liste.indexOf(s.tel) < 0) liste.push(s.tel);
+    });
+    if (ek && liste.indexOf(ek) < 0) liste.push(ek);
+    if (!liste.length) return { hata: "En az bir numara seçin" };
+    if (liste.length > 3) return { hata: "En fazla 3 alıcı" };
+    return {
+      bir: liste[0],
+      serbestBir: !!(ek && liste[0] === ek),
+      ekler: liste.slice(1).map(function (t) {
+        return { tel: t, serbest: t === ek, sira: t === ek ? 3 : 2 };
+      })
+    };
+  }
+
+  function notEkGonder(mid, metin, ekler, bitti) {
+    var i = 0;
+    var kutu = document.getElementById("erp-asistan-not-alicilar");
+    function adim() {
+      if (i >= ekler.length) {
+        if (bitti) bitti();
+        return;
+      }
+      var oge = ekler[i];
+      i += 1;
+      var govde = {
+        musteri_id: mid,
+        telefon: oge.tel,
+        mesaj: metin || "",
+        buton: "asistan",
+        onay: false,
+        deneme: waDeneme()
+      };
+      if (oge.serbest) govde.serbest = true;
+      fetch("/giris/api/sozlesme-whatsapp/gonder", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(govde)
+      }).then(function (r) {
+        return r.json().then(function (j) { return j || {}; }).catch(function () { return {}; });
+      }).then(function (j) {
+        if (window.WaAlici) window.WaAlici.rozet(kutu, oge.sira, (j && j.durum) || "hata");
+        adim();
+      }).catch(function () {
+        if (window.WaAlici) window.WaAlici.rozet(kutu, oge.sira, "hata");
+        adim();
+      });
+    }
+    adim();
   }
 
   function panelIskelet() {
@@ -1917,6 +2011,10 @@
       var bas = listeOzet(liste);
       var detay = liste.map(numaraSatir).join(" · ");
       sonuc.textContent = bas + " — " + detay;
+      if (window.WaAlici) {
+        var kutuR = document.getElementById("erp-asistan-wa-numaralar");
+        liste.forEach(function (n) { window.WaAlici.rozet(kutuR, n.sira, n.durum); });
+      }
     }
     function pollBaslat(liste) {
       waPollDur();
@@ -2145,7 +2243,17 @@
         perde.querySelector("h3").textContent = j.unvan || unvan || "Müşteri";
         perde.querySelector(".ea-wa-maske").textContent = j.maske ? ("Numara " + j.maske) : "";
         var numKutu = document.getElementById("erp-asistan-wa-numaralar");
-        if (numKutu) {
+        if (numKutu && window.WaAlici && (j.numaralar || []).some(function (n) { return n && n.gorunen; })) {
+          window.WaAlici.yaz(numKutu, {
+            kartlar: (j.numaralar || []).filter(function (n) { return n && n.gorunen; }).map(function (n) {
+              return { ham: n.gorunen, etiket: n.etiket || "", secili: !!n.secili };
+            }),
+            ek: true,
+            ekId: "erp-asistan-wa-ek",
+            mod: "secim",
+            onChange: uyar
+          });
+        } else if (numKutu) {
           numKutu.innerHTML = "";
           (j.numaralar || []).forEach(function (n) {
             if (!n || !n.sira || !n.maske) return;

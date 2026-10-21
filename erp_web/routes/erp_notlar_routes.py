@@ -568,17 +568,19 @@ def api_kolonlar():
 def api_musteri(mid: int):
     ensure_erp_notlar_tablolari()
     row = fetch_one(
-        "SELECT id, name, phone FROM customers WHERE id = %s",
+        "SELECT id, name, phone, phone2 FROM customers WHERE id = %s",
         (mid,),
     )
     if not row:
         return jsonify({"ok": False, "mesaj": "Müşteri bulunamadı"}), 404
+    tels = _wa_telefon_listesi(row.get("phone"), row.get("phone2"))
     return jsonify(
         {
             "ok": True,
             "id": row.get("id"),
             "ad": row.get("name") or "",
             "telefon": row.get("phone") or "",
+            "alicilar": _wa_numara_kartlari(tels),
         }
     )
 
@@ -961,6 +963,28 @@ def _wa_son4(tel: str) -> str:
     from sozlesme_whatsapp import telefon_maske
 
     return telefon_maske(tel)
+
+
+def _wa_bicim(tel: str) -> str:
+    """Ekranda görünen biçim. Günlük ve audit bu metni yazmaz."""
+    from odeme_linki import normalize_wa_telefon
+
+    n = normalize_wa_telefon(tel) or ""
+    if n.startswith("90") and len(n) == 12:
+        d = "0" + n[2:]
+        return f"{d[0:4]} {d[4:7]} {d[7:9]} {d[9:11]}"
+    if len(n) >= 11:
+        return "+" + n
+    return ""
+
+
+def _wa_numara_kartlari(tels) -> list:
+    """Seçenekler. gorunen yalnız ekran içindir; maske günlükteki biçimdir."""
+    out = _wa_numara_secenekleri(tels)
+    for kart, tel in zip(out, list(tels or [])[:2]):
+        kart["gorunen"] = _wa_bicim(tel)
+        kart["etiket"] = "1. Yetkili" if int(kart.get("sira") or 0) == 1 else "2. Yetkili"
+    return out
 
 
 def _wa_numara_secenekleri(tels) -> list:
@@ -1404,7 +1428,7 @@ def asistan_wa_onizleme(mid: int, bugun: date | None = None) -> tuple[dict, int]
         "geciken_ay": grid.get("geciken_ay"),
         "onerilen": onerilen,
         "numara_adet": len(row.get("telefonlar") or []) or (1 if row.get("telefon") else 0),
-        "numaralar": _wa_numara_secenekleri(row.get("telefonlar") or []),
+        "numaralar": _wa_numara_kartlari(row.get("telefonlar") or []),
         "sablonlar": liste,
     }, 200
 
@@ -2004,6 +2028,21 @@ def api_olustur():
     wa_mesaj = str(data.get("whatsapp_mesaj") or "").strip()
     if wa and not telefon:
         return jsonify({"ok": False, "mesaj": "WhatsApp için telefon gerekli"}), 400
+    if wa and bool(data.get("whatsapp_serbest")):
+        try:
+            from odeme_linki import normalize_wa_telefon
+            from sozlesme_whatsapp import _kart_telefonlari, serbest_numara_audit
+
+            norm_serbest = normalize_wa_telefon(telefon)
+            if norm_serbest:
+                serbest_numara_audit(
+                    int(uid),
+                    int(data.get("iliski_id") or 0),
+                    norm_serbest,
+                    _kart_telefonlari(int(data.get("iliski_id") or 0)),
+                )
+        except Exception:
+            pass
     row = execute_returning(
         """
         INSERT INTO erp_notlar (
