@@ -7,7 +7,10 @@ const {
   sonucSinifla,
   ackOlay,
   ackEslesir,
+  olusturOlay,
+  olusturEslesir,
   tekBekleyen,
+  kanitBaslat,
   ackBekle,
   yariyiGeriAl,
   gonderimBitir,
@@ -17,22 +20,29 @@ const {
 const SOHBET = "905550000000@c.us";
 
 function sahte() {
-  const din = [];
+  const din = { message_ack: [], message_create: [] };
   return {
     gonderim: 0,
     sendMessage() {
       this.gonderim += 1;
     },
     on(ad, fn) {
-      if (ad === "message_ack") din.push(fn);
+      if (!din[ad]) din[ad] = [];
+      din[ad].push(fn);
     },
     off(ad, fn) {
-      if (ad !== "message_ack") return;
-      const i = din.indexOf(fn);
-      if (i >= 0) din.splice(i, 1);
+      const a = din[ad] || [];
+      const i = a.indexOf(fn);
+      if (i >= 0) a.splice(i, 1);
     },
     emit(msg, ack) {
-      din.slice().forEach((fn) => fn(msg, ack));
+      (din.message_ack || []).slice().forEach((fn) => fn(msg, ack));
+    },
+    emitCreate(msg) {
+      (din.message_create || []).slice().forEach((fn) => fn(msg));
+    },
+    dinleyen() {
+      return (din.message_ack || []).length + (din.message_create || []).length;
     },
   };
 }
@@ -110,6 +120,71 @@ async function senaryolar() {
   assert.strictEqual(kalem._kapali, true);
   assert.strictEqual(yariyiGeriAl([], kalem).neden, "bitti");
 
+  const once = sahte();
+  simdi = 3000;
+  const erken = kanitBaslat(once, SOHBET, 3000, 5000, () => simdi);
+  simdi = 3100;
+  once.emit(mesaj(SOHBET, true), 1);
+  const sErken = await erken.bekle();
+  assert.strictEqual(sErken.kod, "ack_dogrulandi");
+  assert.strictEqual(once.gonderim, 0);
+  assert.strictEqual(once.dinleyen(), 0);
+
+  const onceC = sahte();
+  simdi = 4000;
+  const erkenC = kanitBaslat(onceC, SOHBET, 4000, 5000, () => simdi);
+  simdi = 4100;
+  onceC.emitCreate(mesaj(SOHBET, true));
+  const sErkenC = await erkenC.bekle();
+  assert.strictEqual(sErkenC.durum, "gonderildi");
+  assert.strictEqual(sErkenC.kod, "ack_dogrulandi");
+  assert.strictEqual(onceC.gonderim, 0);
+  assert.strictEqual(onceC.dinleyen(), 0);
+
+  const sonra = sahte();
+  simdi = 6000;
+  const gec = kanitBaslat(sonra, SOHBET, 6000, 5000, () => simdi);
+  const pGec = gec.bekle();
+  simdi = 6500;
+  sonra.emitCreate(mesaj(SOHBET, true));
+  const sGec = await pGec;
+  assert.strictEqual(sGec.kod, "ack_dogrulandi");
+  assert.strictEqual(sonra.gonderim, 0);
+  assert.strictEqual(sonra.dinleyen(), 0);
+
+  const bos = sahte();
+  simdi = 8000;
+  const pBos = kanitBaslat(bos, SOHBET, 8000, 40, () => simdi).bekle();
+  const sBos = await pBos;
+  assert.strictEqual(sBos.durum, "belirsiz");
+  assert.strictEqual(sBos.kod, "bos_donus_belirsiz");
+  assert.strictEqual(bos.gonderim, 0);
+  assert.strictEqual(bos.dinleyen(), 0);
+
+  const DIGER = "906660000000@c.us";
+  const cift = sahte();
+  simdi = 10000;
+  const ilk = kanitBaslat(cift, SOHBET, 10000, 5000, () => simdi);
+  simdi = 10100;
+  cift.emitCreate(mesaj(SOHBET, true));
+  const sIlk = await ilk.bekle();
+  assert.strictEqual(sIlk.kod, "ack_dogrulandi");
+  assert.strictEqual(cift.dinleyen(), 0);
+  simdi = 20000;
+  const ikinci = kanitBaslat(cift, DIGER, 20000, 40, () => simdi);
+  const pIkinci = ikinci.bekle();
+  simdi = 15000;
+  cift.emit(mesaj(DIGER, true), 2);
+  simdi = 20100;
+  cift.emitCreate(mesaj(SOHBET, true));
+  cift.emit(mesaj(DIGER, true), 0);
+  const sIkinci = await pIkinci;
+  assert.strictEqual(sIkinci.durum, "belirsiz");
+  assert.strictEqual(sIkinci.kod, "bos_donus_belirsiz");
+  assert.strictEqual(cift.gonderim, 0);
+  assert.strictEqual(cift.dinleyen(), 0);
+  assert.strictEqual(olusturEslesir(olusturOlay(mesaj(SOHBET, false), 20100), { chatId: SOHBET, bas: 20000, pencereMs: 10000 }), false);
+
   const satir = logSatiri("szwa:d:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "metin", 0, "belirsiz", "bos_donus_belirsiz", 98);
   assert.ok(satir.includes("sonuc=belirsiz"));
   assert.ok(satir.includes("kod=bos_donus_belirsiz"));
@@ -117,8 +192,11 @@ async function senaryolar() {
   assert.strictEqual(satir.includes(SOHBET), false);
 
   const indexSrc = fs.readFileSync(path.join(__dirname, "index.js"), "utf8");
-  assert.strictEqual(indexSrc.includes("ackBekle"), true);
+  const iKanit = indexSrc.indexOf("kanitBaslat(");
+  const iSend = indexSrc.indexOf("session.client.sendMessage");
+  assert.ok(iKanit > 0 && iSend > iKanit);
   assert.strictEqual(indexSrc.includes("dogrulaniyor"), true);
+  assert.strictEqual(indexSrc.includes("tekBekleyen"), true);
   assert.strictEqual((indexSrc.match(/sendMessage/g) || []).length, 3);
 }
 

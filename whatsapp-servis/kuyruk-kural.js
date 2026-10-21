@@ -101,15 +101,30 @@ function sonucSinifla(donus, hata, zamanAsimi, pdf) {
   return { durum: "gonderildi", kod: "" };
 }
 
+function sohbetKim(msg) {
+  if (!msg) return "";
+  const to = msg.to;
+  if (typeof to === "string" && to) return to;
+  if (to && typeof to._serialized === "string") return to._serialized;
+  const remote = msg.id && msg.id.remote;
+  if (typeof remote === "string" && remote) return remote;
+  if (remote && typeof remote._serialized === "string") return remote._serialized;
+  return "";
+}
+
 function ackOlay(msg, ack, an) {
   const fromMe = Boolean(msg && (msg.fromMe || (msg.id && msg.id.fromMe)));
-  let chatId = "";
-  if (fromMe && msg) {
-    const to = msg.to;
-    if (typeof to === "string") chatId = to;
-    else if (to && typeof to._serialized === "string") chatId = to._serialized;
-  }
-  return { fromMe, chatId, ack: Number(ack), an: Number(an) || 0 };
+  return {
+    fromMe,
+    chatId: fromMe ? sohbetKim(msg) : "",
+    ack: Number(ack),
+    an: Number(an) || 0,
+  };
+}
+
+function olusturOlay(msg, an) {
+  const fromMe = Boolean(msg && (msg.fromMe || (msg.id && msg.id.fromMe)));
+  return { fromMe, chatId: fromMe ? sohbetKim(msg) : "", an: Number(an) || 0 };
 }
 
 function ackEslesir(olay, bekleyen) {
@@ -134,34 +149,92 @@ function tekBekleyen(kuyruk, aktif) {
   return n <= 1;
 }
 
-function ackBekle(client, chatId, bas, pencereMs, simdiFn) {
+function olusturEslesir(olay, bekleyen) {
+  if (!olay || !bekleyen) return false;
+  if (!olay.fromMe) return false;
+  if (!olay.chatId || olay.chatId !== bekleyen.chatId) return false;
+  const an = olay.an;
+  const bas = Number(bekleyen.bas) || 0;
+  const pencere = Number(bekleyen.pencereMs) || ACK_PENCERE_MS;
+  if (!(an >= bas)) return false;
+  if (an - bas > pencere) return false;
+  return true;
+}
+
+function kanitBaslat(client, chatId, bas, pencereMs, simdiFn) {
   const pencere = Number(pencereMs) || ACK_PENCERE_MS;
   const simdi = typeof simdiFn === "function" ? simdiFn : () => Date.now();
   const bekleyen = { chatId: String(chatId || ""), bas: Number(bas) || 0, pencereMs: pencere };
-  return new Promise((resolve) => {
-    let bitti = false;
-    const bitir = (sinif) => {
-      if (bitti) return;
-      bitti = true;
-      clearTimeout(zamanlayici);
-      if (client && typeof client.off === "function") client.off("message_ack", dinle);
-      else if (client && typeof client.removeListener === "function") client.removeListener("message_ack", dinle);
-      resolve(sinif);
-    };
-    const dinle = (msg, ack) => {
-      const olay = ackOlay(msg, ack, simdi());
-      if (!ackEslesir(olay, bekleyen)) return;
-      bitir({ durum: "gonderildi", kod: "ack_dogrulandi" });
-    };
-    const zamanlayici = setTimeout(() => {
-      bitir({ durum: "belirsiz", kod: "bos_donus_belirsiz" });
-    }, pencere);
-    if (!client || typeof client.on !== "function") {
-      bitir({ durum: "belirsiz", kod: "bos_donus_belirsiz" });
-      return;
+  let kanitVar = false;
+  let kapali = false;
+  let bekleyenResolve = null;
+  let zamanlayici = null;
+  const sonuc = () =>
+    kanitVar
+      ? { durum: "gonderildi", kod: "ack_dogrulandi" }
+      : { durum: "belirsiz", kod: "bos_donus_belirsiz" };
+  const ackDinle = (msg, ack) => {
+    if (ackEslesir(ackOlay(msg, ack, simdi()), bekleyen)) kabul();
+  };
+  const olusturDinle = (msg) => {
+    if (olusturEslesir(olusturOlay(msg, simdi()), bekleyen)) kabul();
+  };
+  const birak = () => {
+    if (kapali) return;
+    kapali = true;
+    if (zamanlayici) clearTimeout(zamanlayici);
+    zamanlayici = null;
+    if (client && typeof client.off === "function") {
+      client.off("message_ack", ackDinle);
+      client.off("message_create", olusturDinle);
+    } else if (client && typeof client.removeListener === "function") {
+      client.removeListener("message_ack", ackDinle);
+      client.removeListener("message_create", olusturDinle);
     }
-    client.on("message_ack", dinle);
-  });
+  };
+  const kabul = () => {
+    if (kanitVar || kapali) return;
+    kanitVar = true;
+    if (!bekleyenResolve) return;
+    const coz = bekleyenResolve;
+    bekleyenResolve = null;
+    birak();
+    coz(sonuc());
+  };
+  let bagli = false;
+  if (client && typeof client.on === "function") {
+    client.on("message_ack", ackDinle);
+    client.on("message_create", olusturDinle);
+    bagli = true;
+  }
+  function bekle() {
+    if (!bagli) {
+      birak();
+      return Promise.resolve({ durum: "belirsiz", kod: "bos_donus_belirsiz" });
+    }
+    if (kanitVar || kapali) {
+      const hazir = sonuc();
+      birak();
+      return Promise.resolve(hazir);
+    }
+    const gecen = Math.max(0, simdi() - bekleyen.bas);
+    const kalan = Math.max(0, pencere - gecen);
+    return new Promise((resolve) => {
+      bekleyenResolve = resolve;
+      zamanlayici = setTimeout(() => {
+        if (kapali) return;
+        const coz = bekleyenResolve;
+        bekleyenResolve = null;
+        birak();
+        if (coz) coz(sonuc());
+      }, kalan);
+    });
+  }
+  return { bekle, birak, kanit: () => kanitVar };
+}
+
+function ackBekle(client, chatId, bas, pencereMs, simdiFn) {
+  return kanitBaslat(client, chatId, bas, pencereMs, simdiFn).bekle();
 }
 
 function sureli(is, ms) {
@@ -287,7 +360,10 @@ module.exports = {
   sonucSinifla,
   ackOlay,
   ackEslesir,
+  olusturOlay,
+  olusturEslesir,
   tekBekleyen,
+  kanitBaslat,
   ackBekle,
   sureli,
   yariyiGeriAl,
