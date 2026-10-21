@@ -173,6 +173,11 @@ def test_arayuz_kaynak():
     check("ortak_bilesen", "window.WaAlici" in wa and "1. Yetkili" in wa and "Gönderildi ✓" in wa and "Başka numara ekle" in wa)
     check("layout_v13", "js/wa-alici.js" in layout and "erp-asistan.js') }}?v=13" in layout)
     check("ekip_anlam", "Müşteri numarasına gider" in asi and "WhatsApp ile de gönder" in asi)
+    check("kismi_metin", "Not kaydedildi; 2. numaraya gönderilemedi:" in asi and 'buton: "ust"' in asi and 'buton: "asistan"' not in asi)
+    olustur = inspect.getsource(en.api_olustur)
+    bir = inspect.getsource(en._wa_gonder_bir)
+    check("not_geri_alinmaz", "422" not in olustur and "sozlesme_wa_isle" not in olustur and "ROLLBACK" not in olustur.upper())
+    check("not_sayaci_ayri", "sozlesme_whatsapp_gonderim" not in bir and "_wa_node_gonder" in bir and "liste" in inspect.getsource(en._wa_node_gonder))
     check("tahsilat_ikinci", "gonderTahsilatListe" in soz and "sozlesme-wa-tel" in soz)
     html = (ROOT / "templates" / "giris" / "index.html").read_text(encoding="utf-8")
 
@@ -483,6 +488,7 @@ def test_kart_pencere():
     asi_yol = str(ROOT / "static" / "js" / "erp-asistan.js")
     govdeler = []
     notlar = []
+    gonder_cevap = {"kod": None, "govde": None}
 
     def hepsi(route):
         url = route.request.url
@@ -528,7 +534,22 @@ def test_kart_pencere():
                 j = json.loads(route.request.post_data or "{}")
             except Exception:
                 j = {}
-            govdeler.append({"son4": str(j.get("telefon") or "")[-4:], "serbest": j.get("serbest") is True, "yol": "tahsilat" if "tahsilat" in url else "sozlesme"})
+            govdeler.append({
+                "son4": str(j.get("telefon") or "")[-4:],
+                "buton": j.get("buton") or "",
+                "serbest": j.get("serbest") is True,
+                "yol": "tahsilat" if "tahsilat" in url else "sozlesme",
+            })
+            if gonder_cevap["kod"] == 0:
+                route.abort()
+                return
+            if gonder_cevap["kod"]:
+                route.fulfill(
+                    status=gonder_cevap["kod"],
+                    content_type="application/json",
+                    body=gonder_cevap["govde"] or '{"ok":false,"mesaj":"Gönderilemedi"}',
+                )
+                return
             route.fulfill(status=200, content_type="application/json", body='{"ok":true,"durum":"gonderildi"}')
             return
         if url.endswith("/asistan"):
@@ -627,6 +648,63 @@ def test_kart_pencere():
         with s.expect_response("**/api/olustur"):
             s.locator("#erp-asistan-form-ic").evaluate("f => f.requestSubmit()")
         check("not_bir", len(notlar) == 1 and notlar[0]["son4"] == "1111" and not notlar[0]["serbest"])
+
+        def formu_ac():
+            s.evaluate("() => { window.cariEkstreMusteriIdSec = function () { return 1; }; erpAsistanNotFormAc(); }")
+            s.locator("#erp-asistan-wa").check()
+            s.wait_for_selector("#erp-asistan-not-alicilar .wa-alici-no")
+            s.fill("textarea[name=not_metni]", "not")
+
+        def kutular():
+            return s.locator("#erp-asistan-not-alicilar .wa-alici-satir input")
+
+        notlar.clear()
+        govdeler.clear()
+        formu_ac()
+        kutular().nth(0).uncheck()
+        kutular().nth(1).check()
+        with s.expect_response("**/api/olustur"):
+            s.locator("#erp-asistan-form-ic").evaluate("f => f.requestSubmit()")
+        s.wait_for_selector("#erp-asistan-form", state="detached")
+        check("yalniz_ikinci", len(notlar) == 1 and notlar[0]["son4"] == "2222" and govdeler == [])
+
+        notlar.clear()
+        govdeler.clear()
+        formu_ac()
+        kutular().nth(1).check()
+        with s.expect_response("**/gonder"):
+            s.locator("#erp-asistan-form-ic").evaluate("f => f.requestSubmit()")
+        s.wait_for_selector("#erp-asistan-form", state="detached")
+        check(
+            "iki_numara_birer",
+            len(notlar) == 1 and notlar[0]["son4"] == "1111"
+            and len(govdeler) == 1 and govdeler[0]["son4"] == "2222" and govdeler[0]["buton"] == "ust",
+        )
+
+        def kismi(ad, kod, govde, sebep):
+            gonder_cevap["kod"] = kod
+            gonder_cevap["govde"] = govde
+            notlar.clear()
+            govdeler.clear()
+            formu_ac()
+            kutular().nth(1).check()
+            with s.expect_event("dialog") as bilgi:
+                s.locator("#erp-asistan-form-ic").evaluate("f => f.requestSubmit()")
+            mesaj = bilgi.value.message
+            bilgi.value.accept()
+            check(
+                ad,
+                len(notlar) == 1 and notlar[0]["son4"] == "1111"
+                and len(govdeler) == 1 and govdeler[0]["son4"] == "2222"
+                and "Not kaydedildi; 2. numaraya gönderilemedi:" in mesaj
+                and sebep in mesaj and "90555" not in mesaj,
+            )
+
+        kismi("kismi_kayitsiz", 400, '{"ok":false,"mesaj":"Bu numara WhatsApp\'ta kayıtlı değil"}', "kayıtlı değil")
+        kismi("kismi_limit", 429, '{"ok":false,"mesaj":"Bu dakika içinde sizin gönderim sınırınız doldu."}', "sınır")
+        kismi("kismi_kapali", 200, '{"ok":true,"geri_dus":true,"mesaj":"WhatsApp servisi bağlı değil"}', "bağlı değil")
+        kismi("kismi_hata", 0, "", "Gönderilemedi")
+        gonder_cevap["kod"] = None
         tarayici.close()
 
 

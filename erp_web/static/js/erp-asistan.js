@@ -943,16 +943,21 @@
           kapat();
           return;
         }
-        function durumSor() {
-        fetch("/erp-notlar/api/whatsapp-durum", { credentials: "same-origin" })
-          .then(function (r) { return r.ok ? r.json() : null; })
-          .then(function (st) {
-            kapat();
-            if (st && st.ok && (st.durum === "bagli_degil" || st.durum === "baglaniyor")) {
-              alert("Not kaydedildi; WhatsApp bağlı olmadığı için mesaj henüz gitmedi.");
-            }
-          })
-          .catch(function () { kapat(); });
+        function durumSor(hatalar) {
+          fetch("/erp-notlar/api/whatsapp-durum", { credentials: "same-origin" })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (st) {
+              kapat();
+              var satirlar = [];
+              (hatalar || []).forEach(function (sebep) {
+                satirlar.push("Not kaydedildi; 2. numaraya gönderilemedi: " + (sebep || "Gönderilemedi"));
+              });
+              if (st && st.ok && (st.durum === "bagli_degil" || st.durum === "baglaniyor")) {
+                satirlar.push("Not kaydedildi; WhatsApp bağlı olmadığı için mesaj henüz gitmedi.");
+              }
+              if (satirlar.length) alert(satirlar.join("\n"));
+            })
+            .catch(function () { kapat(); });
         }
         if (secimNot && secimNot.ekler && secimNot.ekler.length) {
           notEkGonder(mid, payload.whatsapp_mesaj || payload.not_metni, secimNot.ekler, durumSor);
@@ -993,9 +998,16 @@
   function notEkGonder(mid, metin, ekler, bitti) {
     var i = 0;
     var kutu = document.getElementById("erp-asistan-not-alicilar");
+    var hatalar = [];
+    function gittiMi(paket) {
+      var j = (paket && paket.j) || {};
+      var durum = j.durum || "";
+      return paket && paket.kod < 400 && j.ok && !j.geri_dus && !j.qr && !j.tekrar
+        && (durum === "gonderiliyor" || durum === "kuyrukta" || durum === "gonderildi" || durum === "bekliyor");
+    }
     function adim() {
       if (i >= ekler.length) {
-        if (bitti) bitti();
+        if (bitti) bitti(hatalar);
         return;
       }
       var oge = ekler[i];
@@ -1004,7 +1016,7 @@
         musteri_id: mid,
         telefon: oge.tel,
         mesaj: metin || "",
-        buton: "asistan",
+        buton: "ust",
         onay: false,
         deneme: waDeneme()
       };
@@ -1015,11 +1027,14 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(govde)
       }).then(function (r) {
-        return r.json().then(function (j) { return j || {}; }).catch(function () { return {}; });
-      }).then(function (j) {
-        if (window.WaAlici) window.WaAlici.rozet(kutu, oge.sira, (j && j.durum) || "hata");
+        return r.json().then(function (j) { return { kod: r.status, j: j || {} }; }).catch(function () { return { kod: r.status, j: {} }; });
+      }).then(function (paket) {
+        var j = paket.j || {};
+        if (!gittiMi(paket)) hatalar.push(j.mesaj || "Gönderilemedi");
+        if (window.WaAlici) window.WaAlici.rozet(kutu, oge.sira, gittiMi(paket) ? (j.durum || "kuyrukta") : "hata");
         adim();
       }).catch(function () {
+        hatalar.push("Gönderilemedi");
         if (window.WaAlici) window.WaAlici.rozet(kutu, oge.sira, "hata");
         adim();
       });
