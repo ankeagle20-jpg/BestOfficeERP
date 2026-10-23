@@ -918,7 +918,7 @@ def _tahsilat_getir(tid: int):
     return fetch_one(
         """
         SELECT t.id, t.makbuz_no, t.tutar, t.odeme_turu, t.tahsilat_tarihi, t.aciklama,
-               t.created_at, t.fatura_id, t.tahsil_eden, t.cek_detay, t.havale_banka,
+               t.created_at, t.fatura_id, t.tahsil_eden, t.cek_detay, t.havale_banka, t.kaynak,
                COALESCE(t.customer_id, t.musteri_id) AS musteri_id,
                c.name AS musteri_adi
         FROM tahsilatlar t

@@ -1331,6 +1331,41 @@ def _get_cek_list(tahsilat):
         return []
 
 
+def _makbuz_satir_bol(canvas, text, font_name, font_size, max_w):
+    """Düz metni genişliğe göre böler. İşaretleme yorumlamaz."""
+    ham = " ".join(str(text or "").split())
+    if not ham or max_w <= 1:
+        return []
+    satirlar = []
+    cur = ""
+
+    def sigar(s):
+        return canvas.stringWidth(s, font_name, font_size) <= max_w
+
+    for kelime in ham.split(" "):
+        parca = kelime
+        while parca and not sigar(parca):
+            kes = 1
+            while kes < len(parca) and sigar(parca[: kes + 1]):
+                kes += 1
+            if cur:
+                satirlar.append(cur)
+                cur = ""
+            satirlar.append(parca[:kes])
+            parca = parca[kes:]
+        if not parca:
+            continue
+        aday = f"{cur} {parca}".strip() if cur else parca
+        if cur and not sigar(aday):
+            satirlar.append(cur)
+            cur = parca
+        else:
+            cur = aday
+    if cur:
+        satirlar.append(cur)
+    return satirlar
+
+
 def build_makbuz_pdf(tahsilat, musteri_adi, fatura_no=None, banka_hesaplar=None):
     """Tahsilat makbuzu (klasik form görünümü) PDF bytes döndürür."""
     from reportlab.lib.pagesizes import A4, landscape  # lazy: boot RSS — yalnızca makbuz PDF
@@ -1607,8 +1642,33 @@ def build_makbuz_pdf(tahsilat, musteri_adi, fatura_no=None, banka_hesaplar=None)
         note_y = foot_y - 8 * mm
         c.setFont(font_name, 8)
         if aciklama:
-            c.drawString(x_left, note_y, f"Açıklama: {aciklama[:90]}")
-            note_y -= 4 * mm
+            manuel = str(tahsilat.get("kaynak") or "") == "manuel_makbuz"
+            genis = x_right - x_left
+            etiket = "Açıklama: "
+            tek_satir = (not manuel) or (
+                "\n" not in aciklama
+                and "\r" not in aciklama
+                and len(aciklama) <= 90
+                and c.stringWidth(etiket + aciklama, font_name, 8) <= genis
+            )
+            if tek_satir:
+                c.drawString(x_left, note_y, f"Açıklama: {aciklama[:90]}")
+                note_y -= 4 * mm
+            else:
+                etiket_w = c.stringWidth(etiket, font_name, 8)
+                govde_w = max(genis - etiket_w, 20 * mm)
+                satirlar = []
+                for blok in aciklama.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+                    bol = _makbuz_satir_bol(c, blok, font_name, 8, govde_w)
+                    satirlar.extend(bol if bol else [""])
+                for i, satir in enumerate(satirlar):
+                    if note_y < 8 * mm:
+                        break
+                    if i == 0:
+                        c.drawString(x_left, note_y, etiket + satir)
+                    else:
+                        c.drawString(x_left + etiket_w, note_y, satir)
+                    note_y -= 4 * mm
         if fatura_no:
             from fatura_belge_no import fatura_no_gorunen
             c.drawString(x_left, note_y, f"İlgili Fatura: {fatura_no_gorunen(fatura_no)}")
@@ -11023,7 +11083,7 @@ def tahsilat_pdf(tahsilat_id):
     _ensure_tahsil_eden_column()
     row = fetch_one("""
         SELECT t.id, t.makbuz_no, t.tutar, t.odeme_turu, t.tahsilat_tarihi, t.aciklama, t.created_at, t.fatura_id,
-               t.tahsil_eden,
+               t.tahsil_eden, t.kaynak,
                t.cek_detay, t.havale_banka, c.name as musteri_adi
         FROM tahsilatlar t
         LEFT JOIN customers c ON COALESCE(t.customer_id, t.musteri_id) = c.id
@@ -11087,7 +11147,8 @@ def tahsilat_makbuz_onizle():
             "tahsil_eden": tahsil_eden,
             "created_at": datetime.now(),
             "cek_detay": cek_list,
-            "havale_banka": havale_banka
+            "havale_banka": havale_banka,
+            "kaynak": "manuel_makbuz",
         }
         banka_hesaplar = fetch_all(
             "SELECT banka_adi, hesap_adi, iban FROM banka_hesaplar WHERE COALESCE(is_active::int, 1) = 1 AND (iban IS NOT NULL AND iban != '') ORDER BY banka_adi"
