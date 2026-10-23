@@ -2,11 +2,19 @@
 const assert = require("assert");
 const {
   MAKS_DENEME,
+  SICRAMA_ESIK_MS,
+  KURTARMA_ARA_MS,
   hataSinifi,
   kilitAl,
   kilitBirak,
   pidKapatilabilir,
   kurtarmaAkisiCalistir,
+  chromeKokKaydet,
+  komutBuProfil,
+  yetimSec,
+  chromeSatiriOku,
+  sicramaKarar,
+  yetimUygula,
 } = require("./kurtarma-kural");
 const { durumBakGovde } = require("./canlilik");
 
@@ -49,6 +57,39 @@ function akisaSayacli(baslatFn) {
     log: () => {},
   };
   return { deps, sayac };
+}
+
+async function sahteYetim(oturum, liste, opt) {
+  const o = opt || {};
+  const log = [];
+  const canli = new Set(
+    (liste || []).filter((p) => p.yasiyor !== false).map((p) => p.pid)
+  );
+  const nazik = [];
+  const zorla = [];
+  const bekle = [];
+  await yetimUygula(oturum, {
+    kendiPid: 100,
+    simdi: 70000,
+    listele: async () => (o.wmi ? { wmiHata: true } : liste),
+    log: (e, d) => log.push(e + " " + d),
+    nazik: async (pids) => {
+      nazik.push.apply(nazik, pids);
+      if (o.nazikOlur) pids.forEach((p) => canli.delete(p));
+    },
+    bekle: async (ms) => {
+      bekle.push(ms);
+    },
+    yasiyor: (pid) => canli.has(pid),
+    dogrula: async (pid) =>
+      o.dogrula ? o.dogrula(pid) : { profil: true, wmiHata: false },
+    zorla: async (pids) => {
+      zorla.push.apply(zorla, pids);
+      return pids;
+    },
+    lockKontrol: async () => o.lock || { var: false, tutan: false },
+  });
+  return { log, nazik, zorla, bekle };
 }
 
 async function senaryolar() {
@@ -116,6 +157,123 @@ async function senaryolar() {
     toparlama_deneme_sayisi: 3,
     kurtarma_calisiyor: false,
   });
+
+  const servisProfil =
+    "C:\\svc\\.wwebjs_auth\\session-default\\Default";
+  const kisisel =
+    "C:\\Users\\X\\AppData\\Local\\Google\\Chrome\\User Data\\Default";
+  assert.strictEqual(komutBuProfil(servisProfil, "default"), true);
+  assert.strictEqual(komutBuProfil(kisisel, "default"), false);
+  assert.strictEqual(komutBuProfil("C:\\svc\\session-default2\\x", "default"), false);
+  assert.strictEqual(komutBuProfil("C:\\svc\\session-tenant_a\\x", "default"), false);
+  assert.strictEqual(SICRAMA_ESIK_MS, 60000);
+
+  const kayitli = { tenantId: "default", client: { pupBrowser: true }, chromeKokPid: 0 };
+  assert.strictEqual(chromeKokKaydet(kayitli, 501, 10000), true);
+  kayitli.client = null;
+  assert.strictEqual(kayitli.chromeKokPid, 501);
+  assert.strictEqual(kayitli.chromeKokMs, 10000);
+
+  const karisik = [
+    { pid: 501, ppid: 100, komut: servisProfil, yasiyor: true, ppidYasiyor: true },
+    { pid: 900, ppid: 50, komut: kisisel, yasiyor: true, ppidYasiyor: true },
+  ];
+  const secA = yetimSec(kayitli, karisik, { kendiPid: 100, simdi: 70000 });
+  assert.deepStrictEqual(secA.kapat, [501]);
+  assert.strictEqual(secA.bulundu[0].yasSn, 60);
+  assert.strictEqual(secA.bulundu[0].ebeveyn, "servis");
+  assert.strictEqual(secA.kapat.indexOf(900), -1);
+
+  const kayitsiz = { tenantId: "default", chromeKokPid: 0 };
+  const yetimler = [
+    { pid: 502, ppid: 7, komut: servisProfil, yasiyor: true, ppidYasiyor: false },
+    { pid: 900, ppid: 50, komut: kisisel, yasiyor: true, ppidYasiyor: true },
+    { pid: 503, ppid: 8, komut: servisProfil, yasiyor: true, ppidYasiyor: true },
+  ];
+  const secB = yetimSec(kayitsiz, yetimler, { kendiPid: 100, simdi: 70000 });
+  assert.deepStrictEqual(secB.kapat, [502]);
+  assert.strictEqual(secB.kapat.indexOf(900), -1);
+  assert.strictEqual(secB.kapat.indexOf(503), -1);
+
+  const secW = yetimSec(kayitsiz, { wmiHata: true }, { kendiPid: 100 });
+  assert.deepStrictEqual(secW.kapat, []);
+  assert.strictEqual(secW.atla[0].sebep, "wmi");
+
+  const yanlis = {
+    tenantId: "default",
+    chromeKokPid: 777,
+    chromeKokMs: 10000,
+  };
+  const secP = yetimSec(
+    yanlis,
+    [{ pid: 777, ppid: 100, komut: kisisel, yasiyor: true, ppidYasiyor: true }],
+    { kendiPid: 100, simdi: 70000 }
+  );
+  assert.deepStrictEqual(secP.kapat, []);
+  assert.strictEqual(secP.atla[0].sebep, "profil");
+
+  const satirlar = chromeSatiriOku("10|100|0\n11|100|1\n12|100|?\n");
+  assert.strictEqual(satirlar[0].profil, false);
+  assert.strictEqual(satirlar[1].profil, true);
+  assert.strictEqual(satirlar[2].wmiHata, true);
+  const secSatir = yetimSec(
+    { tenantId: "default", chromeKokPid: 0 },
+    satirlar.map((p) => Object.assign({ ppidYasiyor: Number(p.ppid) === 100, yasiyor: true }, p)),
+    { kendiPid: 100, simdi: 1 }
+  );
+  assert.deepStrictEqual(secSatir.kapat, [11]);
+  assert.strictEqual(secSatir.kapat.indexOf(10), -1);
+
+  const saglikli = { status: "ready", kurtarmaCalisiyor: false };
+  assert.deepStrictEqual(sicramaKarar(saglikli, 61000, true, 1), { bak: true, toparla: false });
+  assert.deepStrictEqual(sicramaKarar(saglikli, 50000, false, 1), { bak: false, toparla: false });
+  assert.strictEqual(sicramaKarar({ status: "idle" }, 61000, false, 1).toparla, true);
+  assert.strictEqual(sicramaKarar({ status: "qr" }, 61000, false, 1).toparla, false);
+  const basarisiz = {
+    status: "error",
+    toparlamaDurumu: "toparlama_basarisiz",
+    sonKurtarmaMs: 1000,
+  };
+  assert.strictEqual(sicramaKarar(basarisiz, 61000, false, 1000 + 1000).toparla, false);
+  assert.strictEqual(
+    sicramaKarar(basarisiz, 61000, false, 1000 + KURTARMA_ARA_MS).toparla,
+    true
+  );
+
+  const uyg = await sahteYetim(
+    kayitli,
+    karisik,
+    {}
+  );
+  assert.deepStrictEqual(uyg.nazik, [501]);
+  assert.deepStrictEqual(uyg.bekle, [10000]);
+  assert.deepStrictEqual(uyg.zorla, [501]);
+  assert.strictEqual(uyg.zorla.indexOf(900), -1);
+  assert.ok(uyg.log.some((s) => s.indexOf("kurtarma_yetim_bulundu n=1 yas_sn=60 ebeveyn=servis") === 0));
+  assert.ok(uyg.log.some((s) => s.indexOf("kurtarma_yetim_kapatildi n=1") === 0));
+
+  const uygB = await sahteYetim(kayitsiz, yetimler, {});
+  assert.deepStrictEqual(uygB.zorla, [502]);
+  assert.strictEqual(uygB.nazik.indexOf(900), -1);
+
+  const uygW = await sahteYetim(kayitsiz, [], { wmi: true });
+  assert.deepStrictEqual(uygW.zorla, []);
+  assert.deepStrictEqual(uygW.bekle, []);
+  assert.ok(uygW.log.some((s) => s === "kurtarma_pid_atlandi wmi"));
+
+  const uygD = await sahteYetim(kayitli, karisik, {
+    dogrula: () => ({ profil: false, wmiHata: false }),
+  });
+  assert.deepStrictEqual(uygD.zorla, []);
+  assert.ok(uygD.log.some((s) => s === "kurtarma_pid_atlandi profil"));
+  assert.ok(!uygD.log.some((s) => s.indexOf("kurtarma_yetim_kapatildi") === 0));
+
+  const uygL = await sahteYetim(kayitli, karisik, {
+    lock: { var: true, tutan: false },
+    nazikOlur: true,
+  });
+  assert.deepStrictEqual(uygL.zorla, []);
+  assert.ok(uygL.log.some((s) => s === "kurtarma_lock_kaldi tutan_yok"));
 }
 
 senaryolar()

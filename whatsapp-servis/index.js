@@ -10,7 +10,6 @@ const {
   HEARTBEAT_TIMEOUT_MS,
   durumBakGovde,
   heartbeatAdim,
-  planAdim,
   toparlaOturum,
   toparlaEsik,
   heartbeatBastir,
@@ -38,10 +37,15 @@ const {
 const { govdeAyir, jsonSinirHatasi } = require('./govde-kural');
 const {
   MAKS_DENEME,
+  SICRAMA_ESIK_MS,
   kilitAl,
   kilitBirak,
-  pidKapatilabilir,
   kurtarmaAkisiCalistir,
+  chromeKokKaydet,
+  komutBuProfil,
+  chromeSatiriOku,
+  sicramaKarar,
+  yetimUygula,
 } = require('./kurtarma-kural');
 const { execFile } = require('child_process');
 
@@ -291,6 +295,9 @@ function getOrCreateSession(tenantId) {
     sonToparlamaHataSinifi: 'yok',
     toparlamaDenemeSayisi: 0,
     kurtarmaCalisiyor: false,
+    chromeKokPid: 0,
+    chromeKokMs: 0,
+    sonKurtarmaMs: 0,
   };
   sessions.set(tenantId, session);
   return session;
@@ -521,68 +528,166 @@ function pidYasiyor(pid) {
 }
 
 async function chromeKomutSatiri(pid) {
-  if (process.platform !== 'win32') return '';
+  if (process.platform !== 'win32') return null;
+  const n = Number(pid);
+  if (!Number.isInteger(n) || n <= 0) return null;
   try {
     return await execFileP(
       'powershell.exe',
       ['-NoProfile', '-NonInteractive', '-Command',
-       `(Get-CimInstance Win32_Process -Filter "ProcessId=${Number(pid)}").CommandLine`],
+       `(Get-CimInstance Win32_Process -Filter "ProcessId=${n}").CommandLine`],
       { timeout: 8000, windowsHide: true }
     );
   } catch (_e) {
-    return '';
+    return null;
   }
 }
 
-/**
- * Yalniz bu servisin kendi Chrome'unu kapatir: once puppeteer browser.close
- * (10 sn), kalirsa PID komut satiri session-<tenant> profilini dogruladiginda
- * yalniz o agaci sonlandirir. Kisisel/baska Chrome'a dokunulmaz.
- */
-async function kendiChromeKapat(session) {
+function kokPidAl(client) {
+  try {
+    const browser = client && client.pupBrowser;
+    const p = browser && typeof browser.process === 'function' ? browser.process() : null;
+    const n = Number(p && p.pid);
+    if (!Number.isInteger(n) || n <= 0) return 0;
+    return n;
+  } catch (_e) {
+    return 0;
+  }
+}
+
+function kokKaydet(session, client) {
+  const n = kokPidAl(client);
+  if (n) chromeKokKaydet(session, n, Date.now());
+}
+
+async function chromeSurecleri(tenantId) {
+  if (process.platform !== 'win32') return [];
+  const jeton = 'session-' + String(tenantId || 'default');
+  const komut = [
+    "$j=$env:WA_PROFIL_JETON.ToLower()",
+    "Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | ForEach-Object {",
+    "$c=[string]$_.CommandLine; $bayrak='0';",
+    "if (-not $c) { $bayrak='?' }",
+    "elseif ($j) { $l=$c.ToLower(); $i=$l.IndexOf($j); if ($i -ge 0) {",
+    "$ok=$true; if ($i -gt 0 -and $l[$i-1] -match '[a-z0-9_]') { $ok=$false };",
+    "$son=$i+$j.Length; if ($son -lt $l.Length -and $l[$son] -match '[a-z0-9_]') { $ok=$false };",
+    "if ($ok) { $bayrak='1' } } };",
+    "'{0}|{1}|{2}' -f $_.ProcessId,$_.ParentProcessId,$bayrak }",
+  ].join(' ');
+  try {
+    const out = await execFileP(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-Command', komut],
+      {
+        timeout: 8000,
+        windowsHide: true,
+        env: Object.assign({}, process.env, { WA_PROFIL_JETON: jeton }),
+      }
+    );
+    return chromeSatiriOku(out);
+  } catch (_e) {
+    return { wmiHata: true };
+  }
+}
+
+async function yetimListele(session) {
+  const ham = await chromeSurecleri(session.tenantId);
+  if (ham && ham.wmiHata && !Array.isArray(ham)) return ham;
+  const liste = Array.isArray(ham) ? ham.slice() : [];
+  for (const p of liste) p.ppidYasiyor = pidYasiyor(p.ppid);
+  const kayit = Number(session.chromeKokPid);
+  if (kayit > 0 && !liste.some((p) => Number(p.pid) === kayit) && pidYasiyor(kayit)) {
+    const komut = await chromeKomutSatiri(kayit);
+    if (komut === null) liste.push({ pid: kayit, ppid: 0, wmiHata: true, yasiyor: true });
+    else liste.push({ pid: kayit, ppid: 0, komut, yasiyor: true, ppidYasiyor: false });
+  }
+  return liste;
+}
+
+async function nazikKokKapat(session, pidler) {
+  const izin = new Set((pidler || []).map((n) => Number(n)));
   const client = session.client;
-  let pid = 0;
   const browser = client && client.pupBrowser;
-  if (browser) {
+  const bpid = kokPidAl(client);
+  if (browser && (bpid === 0 || izin.has(bpid))) {
+    Promise.resolve(browser.close()).catch(() => {});
+  }
+  for (const pid of izin) {
+    if (!pidYasiyor(pid)) continue;
     try {
-      const p = typeof browser.process === 'function' ? browser.process() : null;
-      if (p && p.pid) pid = Number(p.pid);
-    } catch (_e) {}
-    try {
-      await Promise.race([
-        Promise.resolve(browser.close()).catch(() => {}),
-        new Promise((r) => setTimeout(r, 10000)),
-      ]);
+      await execFileP(
+        'powershell.exe',
+        ['-NoProfile', '-NonInteractive', '-Command',
+         `(Get-Process -Id ${pid} -ErrorAction SilentlyContinue).CloseMainWindow() | Out-Null`],
+        { timeout: 8000, windowsHide: true }
+      );
     } catch (_e) {}
   }
-  if (pid > 0 && pidYasiyor(pid)) {
-    const cmd = await chromeKomutSatiri(pid);
-    const profilEslesir = cmd.includes('session-' + String(session.tenantId || 'default'));
-    if (pidKapatilabilir(pid, { kendiPid: process.pid, profilEslesir })) {
-      try {
-        await execFileP('taskkill.exe', ['/PID', String(pid), '/T', '/F'],
-          { timeout: 10000, windowsHide: true });
-        waLog('kurtarma_pid_kapatildi', session.tenantId);
-      } catch (_e) {}
-    } else {
-      waLog('kurtarma_pid_atlandi', session.tenantId);
-    }
+}
+
+function lockYolu(tenantId) {
+  const dir = path.join(AUTH_DATA_PATH, 'session-' + String(tenantId || 'default'));
+  for (const ad of ['lockfile', 'SingletonLock']) {
+    const p = path.join(dir, ad);
+    try {
+      if (fs.existsSync(p)) return p;
+    } catch (_e) {}
   }
+  return '';
+}
+
+async function yetimTemizle(session) {
+  await yetimUygula(session, {
+    kendiPid: process.pid,
+    simdi: Date.now(),
+    listele: () => yetimListele(session),
+    log: (olay, detay) => waLog(olay, detay),
+    nazik: (pidler) => nazikKokKapat(session, pidler),
+    bekle: (ms) => new Promise((r) => setTimeout(r, ms)),
+    yasiyor: (pid) => pidYasiyor(pid),
+    dogrula: async (pid) => {
+      const komut = await chromeKomutSatiri(pid);
+      if (komut === null) return { profil: false, wmiHata: true };
+      return { profil: komutBuProfil(komut, session.tenantId), wmiHata: false };
+    },
+    zorla: async (pidler) => {
+      const oldu = [];
+      for (const pid of pidler) {
+        try {
+          await execFileP('taskkill.exe', ['/PID', String(pid), '/T', '/F'],
+            { timeout: 10000, windowsHide: true });
+          oldu.push(pid);
+        } catch (_e) {}
+      }
+      return oldu;
+    },
+    lockKontrol: async () => {
+      if (!lockYolu(session.tenantId)) return { var: false, tutan: false };
+      const tekrar = await chromeSurecleri(session.tenantId);
+      if (tekrar && tekrar.wmiHata && !Array.isArray(tekrar)) return { var: true, tutan: true };
+      const tutan = (tekrar || []).some(
+        (p) => p.profil === true && pidYasiyor(p.pid)
+      );
+      return { var: true, tutan };
+    },
+  });
 }
 
 async function oturumKurtar(session, elle = false) {
   if (!kilitAl(session)) return { ok: false, asama: 'zaten_calisiyor' };
   try {
-    if (elle) {
-      await kendiChromeKapat(session);
-      if (session.client) session.client = null;
-      session.ready = false;
-      session.status = 'idle';
+    try {
+      await yetimTemizle(session);
+    } catch (_e) {
+      waLog('kurtarma_pid_atlandi', 'wmi');
     }
+    if (session.client) session.client = null;
+    session.ready = false;
+    if (elle) session.status = 'idle';
     const sonuc = await kurtarmaAkisiCalistir({
       maksDeneme: MAKS_DENEME,
       baslat: () => istemciKur(session),
-      kapat: () => kendiChromeKapat(session),
+      kapat: () => yetimTemizle(session),
       bekleMs: 1500,
       durumYaz: (sinif, deneme) => {
         session.sonToparlamaHataSinifi = sinif;
@@ -597,6 +702,7 @@ async function oturumKurtar(session, elle = false) {
       return { ok: true, asama: 'baslatildi' };
     }
     session.toparlamaDurumu = 'toparlama_basarisiz';
+    session.sonKurtarmaMs = Date.now();
     session.bozuk = true;
     waLog('kurtarma_basarisiz',
       `${session.tenantId} sinif=${sonuc.sinif} deneme=${sonuc.deneme}`);
@@ -651,13 +757,35 @@ function heartbeatHepsi() {
   }
 }
 
+async function sicramaBak(session, gecen, simdi) {
+  if (!session) return;
+  if (session.status === 'qr' || session.status === 'starting' || session.kurtarmaCalisiyor) return;
+  let canli = false;
+  if (session.client && typeof session.client.getState === 'function') {
+    const adim = await heartbeatAdim(
+      session,
+      () => session.client.getState(),
+      simdi,
+      HEARTBEAT_TIMEOUT_MS
+    );
+    canli = Boolean(adim.kontrol && adim.sonuc && adim.sonuc.canli);
+  }
+  const karar = sicramaKarar(session, gecen, canli, simdi);
+  if (!karar.toparla) return;
+  await oturumKurtar(session, false);
+}
+
 function zamanPlan() {
   const simdi = Date.now();
-  const adim = planAdim(sonPlanMs, simdi, HEARTBEAT_MS);
+  const gecen = sonPlanMs ? simdi - sonPlanMs : 0;
   sonPlanMs = simdi;
-  if (!adim.sicrama) return;
-  waLog('saat_sicrama', String(adim.gecen));
-  heartbeatHepsi();
+  if (!(gecen > SICRAMA_ESIK_MS)) return;
+  waLog('saat_sicrama', String(gecen));
+  for (const session of sessions.values()) {
+    sicramaBak(session, gecen, simdi).catch(() => {
+      waLog('heartbeat_hata', 'hata');
+    });
+  }
 }
 
 async function ensureClient(tenantId) {
@@ -722,6 +850,7 @@ async function istemciKur(session) {
       `${tenantId} chrome ${activeChromeCount}/${WA_MAX_CONCURRENT_CHROME} webcache=remote`
     );
     await client.initialize();
+    kokKaydet(session, client);
     let socketState = '';
     try {
       socketState = await client.getState();
@@ -736,6 +865,7 @@ async function istemciKur(session) {
     await session.initPromise;
   } catch (err) {
     session.status = 'error';
+    kokKaydet(session, session.client);
     session.client = null;
     if (session.chromeHeld) {
       session.chromeHeld = false;
