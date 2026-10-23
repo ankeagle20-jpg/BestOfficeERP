@@ -1,6 +1,6 @@
 {% extends "layout.html" %}
 
-{% block page_title %}WhatsApp Sağlık{% endblock %}
+{% block page_title %}WhatsApp Sağlık — {{ wa_servis_etiket or 'Varsayılan servis' }}{% endblock %}
 
 {% block content %}
 <style>
@@ -30,7 +30,7 @@
 
 <div class="ws-wrap">
   <div class="ws-head">
-    <h2>WhatsApp Sağlık</h2>
+    <h2>WhatsApp Sağlık <span style="font-size:13px;font-weight:500;color:#546e7a;">{{ wa_servis_etiket or 'Varsayılan servis' }}</span></h2>
     <div style="display:flex;gap:8px;flex-wrap:wrap;">
       <button type="button" class="ws-btn" id="btnYenile">Yenile</button>
       <button type="button" class="ws-btn secondary" id="btnUyandir">Servisi uyandır</button>

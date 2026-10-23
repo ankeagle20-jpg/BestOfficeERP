@@ -25,6 +25,13 @@ def _wa_tenant_id():
     return 'default'
 
 
+def _wa_servis_etiket():
+    """Sağlık ekranının baktığı servis. Tek serviste sabit etiket."""
+    if _wa_tenant_id() == "default":
+        return "Varsayılan servis"
+    return "Kiracı servisi"
+
+
 def _wa_url(path_suffix):
     """Örn. path_suffix='durum' → http://…/t/{tenantId}/durum"""
     suffix = str(path_suffix or '').lstrip('/')
@@ -639,10 +646,10 @@ def api_servis_durum():
 @yetki_gerekli("muhasebe")
 def wa_saglik_sayfa():
     """WhatsApp Sağlık ekranı (yönetici/muhasebe)."""
-    return render_template('whatsapp/saglik.html')
+    return render_template('whatsapp/saglik.html', wa_servis_etiket=_wa_servis_etiket())
 
 
-def _saglik_servis_durumu():
+def _saglik_servis_durumu(timeout=(2, 3)):
     """(ulasim, oturum_kodu, teshis). Oturum uyandirilmaz (durum-bak)."""
     import requests
     from wa_saglik import durum_teshis_govde, oturum_kodu_govde
@@ -651,7 +658,7 @@ def _saglik_servis_durumu():
         r = requests.get(
             _wa_url('durum-bak'),
             headers=_wa_internal_headers(),
-            timeout=(2, 3),
+            timeout=timeout,
         )
     except (requests.exceptions.ConnectTimeout, requests.exceptions.ConnectionError):
         return "baglanti_yok", None, None
@@ -687,6 +694,37 @@ def _saglik_audit(olay: str, anlik: dict) -> None:
         )
     except Exception:
         pass
+
+
+@bp.route('/api/saglik-rozet')
+@yetki_gerekli("muhasebe")
+def api_wa_saglik_rozet():
+    """Hub rozeti. Yalnız seviye; sayfa yükünü beklemez. Ayrıntı yok."""
+    import wa_saglik
+
+    try:
+        ulasim, oturum, _teshis = _saglik_servis_durumu(timeout=(1, 2))
+    except Exception:
+        return jsonify({
+            "ok": True,
+            "seviye": "bilinmiyor",
+            "etiket": _wa_servis_etiket(),
+        })
+    yasli = 0
+    sayac_ok = True
+    try:
+        sayac = wa_saglik.saglik_sayaclari() or {}
+        yasli = int(sayac.get("yasli_takili") or 0)
+    except Exception:
+        sayac_ok = False
+    seviye = wa_saglik.rozet_seviye(ulasim, oturum, yasli)
+    if not sayac_ok and seviye == "yesil":
+        seviye = "bilinmiyor"
+    return jsonify({
+        "ok": True,
+        "seviye": seviye,
+        "etiket": _wa_servis_etiket(),
+    })
 
 
 @bp.route('/api/saglik-ozet')

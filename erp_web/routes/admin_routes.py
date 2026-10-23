@@ -35,7 +35,12 @@ def platform_admin_guard(f):
 @platform_admin_guard
 def yonetim_hub():
     """Platform yönetim hub sayfası — tüm admin panellerine merkezi erişim."""
-    return render_template("admin/yonetim.html")
+    from routes.whatsapp_routes import _wa_servis_etiket
+
+    return render_template(
+        "admin/yonetim.html",
+        wa_servis_etiket=_wa_servis_etiket(),
+    )
 
 
 @bp.route("/")

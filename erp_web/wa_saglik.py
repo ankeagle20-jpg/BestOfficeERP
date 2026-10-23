@@ -62,6 +62,17 @@ def durum_teshis_govde(body: dict) -> dict | None:
     }
 
 
+def rozet_seviye(ulasim: str, oturum: str | None, yasli_takili: int = 0) -> str:
+    """Hub rozeti: yesil | sari | kirmizi | bilinmiyor. Ayrıntı metni yok."""
+    if ulasim in ("baglanti_yok", "zaman_asimi", "http_5xx", "http_4xx"):
+        return "kirmizi"
+    if ulasim != "ok":
+        return "bilinmiyor"
+    if oturum != "hazir" or int(yasli_takili or 0) > 0:
+        return "sari"
+    return "yesil"
+
+
 def kontrolleri_uret(ulasim: str, oturum: str | None, sayaclar: dict,
                      esik_dk: int = ESIK_TAKILI_DK, teshis: dict | None = None) -> list[dict]:
     """ulasim: ok | baglanti_yok | zaman_asimi | http_5xx | http_4xx."""

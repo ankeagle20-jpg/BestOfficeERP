@@ -119,6 +119,20 @@
     align-items: center;
     gap: 5px;
   }
+  .hub-wa-rozet {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 1px 8px;
+    border-radius: 999px;
+    margin-bottom: 6px;
+    background: #263238;
+    color: #b0bec5;
+  }
+  .hub-wa-rozet.yesil { background: #1b5e20; color: #e8f5e9; }
+  .hub-wa-rozet.sari { background: #f9a825; color: #1a1a1a; }
+  .hub-wa-rozet.kirmizi { background: #c62828; color: #ffebee; }
+  .hub-wa-rozet.gri { background: #37474f; color: #cfd8dc; }
 
   .hub-quick-section {
     background: rgba(10, 25, 41, 0.6);
@@ -304,6 +318,26 @@
         <span class="hub-link-text">Panele Git <i class="fa fa-arrow-right"></i></span>
       </div>
     </a>
+
+    <a href="/whatsapp/saglik" class="hub-card" id="hub-wa-saglik">
+      <div class="hub-card-top">
+        <div class="hub-icon-box">
+          <i class="fa fa-heartbeat"></i>
+        </div>
+        <div>
+          <span class="hub-wa-rozet gri" id="wa-saglik-rozet">bilinmiyor</span>
+          <div class="hub-card-title">WhatsApp Sağlık</div>
+          <div class="hub-card-desc">
+            WhatsApp servis, oturum ve gönderim kuyruğunun durumu; oturumu kurtarma ve bekleyenleri yönetme.
+            {{ wa_servis_etiket or 'Varsayılan servis' }}
+          </div>
+        </div>
+      </div>
+      <div class="hub-card-footer">
+        <span class="hub-badge">/whatsapp/saglik</span>
+        <span class="hub-link-text">Panele Git <i class="fa fa-arrow-right"></i></span>
+      </div>
+    </a>
   </div>
 
   <!-- Hızlı İşlemler Alt Bölümü -->
@@ -317,4 +351,5 @@
     </div>
   </div>
 </div>
+<script src="{{ url_for('static', filename='js/admin-wa-rozet.js') }}?v=1"></script>
 {% endblock %}
