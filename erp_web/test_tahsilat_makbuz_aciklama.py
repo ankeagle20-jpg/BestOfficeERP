@@ -23,7 +23,7 @@ def check(name, ok):
         FAILS.append(name)
 
 
-def _pdf(aciklama, kaynak):
+def _pdf(aciklama, kaynak, kaynak_yok=False):
     import contextlib
     import io
 
@@ -42,8 +42,9 @@ def _pdf(aciklama, kaynak):
             "created_at": datetime(2026, 1, 1, 10, 0, 0),
             "odeme_turu": "nakit",
             "aciklama": aciklama,
-            "kaynak": kaynak,
         }
+        if not kaynak_yok:
+            row["kaynak"] = kaynak
         return build_makbuz_pdf(row, "Deneme")
 
 
@@ -95,6 +96,58 @@ def test_diger_kaynak():
     check("bos kaynak ayni", bos_m == bos_b)
 
 
+def _sayfa_boyar(pdf: bytes) -> bool:
+    """Üst ve alt kopya sayfaya basılıyor mu (Makbuzu görüntüle aynı PDF)."""
+    n = 0
+    for m in re.finditer(rb"stream\r?\n", pdf):
+        j = m.end()
+        end = pdf.find(b"endstream", j)
+        raw = pdf[j:end].rstrip(b"\r\n")
+        ham = raw
+        if raw.endswith(b"~>"):
+            try:
+                ham = zlib.decompress(base64.a85decode(raw[:-2], adobe=False))
+            except Exception:
+                ham = raw
+        else:
+            try:
+                ham = zlib.decompress(raw)
+            except Exception:
+                ham = raw
+        n += ham.count(b"makbuz_form Do")
+    return n >= 2
+
+
+def test_kapi_senaryo():
+    kisa = "Kira bedeli"
+    uzun = ("W" * 200) + "SONUCX"
+    isaretli = kisa + " |AYLIK_TAH|2026-03-01| |AYLIK_PAY|2026-03-01=10.00|"
+    a = _pdf(isaretli, "manuel_makbuz")
+    b = _pdf(kisa, "manuel_makbuz")
+    c_kisa = _pdf(kisa, None)
+    c_uzun = _pdf(uzun, None)
+    bos_k = _pdf(uzun, "")
+    yok = _pdf(uzun, None, kaynak_yok=True)
+    for ad, pdf, token in (
+        ("a isaretli", a, kisa),
+        ("b isaretsiz", b, kisa),
+        ("c null kisa", c_kisa, kisa),
+        ("c null uzun", c_uzun, "SONUCX"),
+        ("bos kaynak uzun", bos_k, "SONUCX"),
+    ):
+        ops = _form(pdf)
+        check(ad, token.encode() in ops and _sayfa_boyar(pdf))
+    a_ops = _form(a)
+    check("a marker yok", b"AYLIK_TAH" not in a_ops and b"AYLIK_PAY" not in a_ops)
+    check("c null uzun kayar", _tm(_form(c_uzun)) > _tm(_form(c_kisa)))
+    check("anahtar yok tek satir", b"SONUCX" not in _form(yok))
+    rota = (ROOT / "routes" / "faturalar_routes.py").read_text(encoding="utf-8")
+    i = rota.find("def tahsilat_pdf")
+    j = rota.find("\ndef ", i + 10)
+    blok = rota[i:j]
+    check("goruntule satir", "t.aciklama" in blok and "t.kaynak" in blok and "build_makbuz_pdf(row" in blok)
+
+
 def test_whatsapp_metin():
     import contextlib
     import io
@@ -116,6 +169,7 @@ def test_whatsapp_metin():
 if __name__ == "__main__":
     test_gorunum()
     test_diger_kaynak()
+    test_kapi_senaryo()
     test_whatsapp_metin()
     print("FAIL" if FAILS else "TUMU GECTI", FAILS)
     sys.exit(1 if FAILS else 0)

@@ -1331,6 +1331,20 @@ def _get_cek_list(tahsilat):
         return []
 
 
+def _makbuz_aciklama_kaydir(tahsilat) -> bool:
+    """Satır kaydır: elle makbuz ve kaynak sütunu boş eski kayıt.
+
+    Anahtar yoksa (ödeme linki önbelleği gibi) eski tek satır kalır.
+    banka_import / odeme_linki / grid_toplu adlandırılmış kaynaklar kaymaz.
+    """
+    if not isinstance(tahsilat, dict) or "kaynak" not in tahsilat:
+        return False
+    k = tahsilat.get("kaynak")
+    if k is None:
+        return True
+    return str(k).strip() in ("", "manuel_makbuz")
+
+
 def _makbuz_satir_bol(canvas, text, font_name, font_size, max_w):
     """Düz metni genişliğe göre böler. İşaretleme yorumlamaz."""
     ham = " ".join(str(text or "").split())
@@ -1642,10 +1656,10 @@ def build_makbuz_pdf(tahsilat, musteri_adi, fatura_no=None, banka_hesaplar=None)
         note_y = foot_y - 8 * mm
         c.setFont(font_name, 8)
         if aciklama:
-            manuel = str(tahsilat.get("kaynak") or "") == "manuel_makbuz"
+            kaydir = _makbuz_aciklama_kaydir(tahsilat)
             genis = x_right - x_left
             etiket = "Açıklama: "
-            tek_satir = (not manuel) or (
+            tek_satir = (not kaydir) or (
                 "\n" not in aciklama
                 and "\r" not in aciklama
                 and len(aciklama) <= 90
