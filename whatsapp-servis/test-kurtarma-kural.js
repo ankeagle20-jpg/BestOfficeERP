@@ -1,5 +1,7 @@
 /** Dongu kurtarma: sahte puppeteer/baslatma ile. Chrome ve ag yok. */
 const assert = require("assert");
+const fs = require("fs");
+const path = require("path");
 const {
   MAKS_DENEME,
   SICRAMA_ESIK_MS,
@@ -267,6 +269,10 @@ async function senaryolar() {
   assert.deepStrictEqual(uygD.zorla, []);
   assert.ok(uygD.log.some((s) => s === "kurtarma_pid_atlandi profil"));
   assert.ok(!uygD.log.some((s) => s.indexOf("kurtarma_yetim_kapatildi") === 0));
+
+  const indexSrc = fs.readFileSync(path.join(__dirname, "index.js"), "utf8");
+  assert.ok(indexSrc.includes(".join('\\n')"));
+  assert.ok(!indexSrc.includes("ToLower() Get-CimInstance"));
 
   const uygL = await sahteYetim(kayitli, karisik, {
     lock: { var: true, tutan: false },

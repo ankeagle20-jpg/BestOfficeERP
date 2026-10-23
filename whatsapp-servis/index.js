@@ -566,14 +566,22 @@ async function chromeSurecleri(tenantId) {
   const komut = [
     "$j=$env:WA_PROFIL_JETON.ToLower()",
     "Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | ForEach-Object {",
-    "$c=[string]$_.CommandLine; $bayrak='0';",
-    "if (-not $c) { $bayrak='?' }",
-    "elseif ($j) { $l=$c.ToLower(); $i=$l.IndexOf($j); if ($i -ge 0) {",
-    "$ok=$true; if ($i -gt 0 -and $l[$i-1] -match '[a-z0-9_]') { $ok=$false };",
-    "$son=$i+$j.Length; if ($son -lt $l.Length -and $l[$son] -match '[a-z0-9_]') { $ok=$false };",
-    "if ($ok) { $bayrak='1' } } };",
-    "'{0}|{1}|{2}' -f $_.ProcessId,$_.ParentProcessId,$bayrak }",
-  ].join(' ');
+    "  $bayrak='0'",
+    "  $c=[string]$_.CommandLine",
+    "  if (-not $c) { $bayrak='?' }",
+    "  elseif ($j) {",
+    "    $l=$c.ToLower(); $i=$l.IndexOf($j)",
+    "    if ($i -ge 0) {",
+    "      $ok=$true",
+    "      if ($i -gt 0 -and $l[$i-1] -match '[a-z0-9_]') { $ok=$false }",
+    "      $son=$i+$j.Length",
+    "      if ($son -lt $l.Length -and $l[$son] -match '[a-z0-9_]') { $ok=$false }",
+    "      if ($ok) { $bayrak='1' }",
+    "    }",
+    "  }",
+    "  '{0}|{1}|{2}' -f $_.ProcessId,$_.ParentProcessId,$bayrak",
+    "}",
+  ].join('\n');
   try {
     const out = await execFileP(
       'powershell.exe',
